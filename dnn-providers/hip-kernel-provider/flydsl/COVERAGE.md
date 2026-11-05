@@ -490,7 +490,7 @@ their golden tensors.
 | 13 | decode (`Sq == 1`) | **served by a decode path**: GQA-packed rows in 16-row tiles (one tile, 16 rows, on the bias objects) and split-KV, K and V with one head count (MQA, speculative steps) at `head_dim` 64/96/128/256 and every other multiple of 8 up to 512 (past 256 without a bias) |
 | — | `Dv ≠ Dqk` | **served**: **any pair** of multiples of 8 up to 256, V narrower or wider, on the prefill engine's pair tiers (kernel modification 32; every mask, the LSE, padding and packed sequences, no sink), on gfx11 and gfx12, with a bias (f32 or the query's dtype) on gfx11's pair-tier bias objects (on gfx12 §5.6's padded tiers serve a pair with a mask); un-absorbed MLA prefill (Q/K 192, V 128) on its exact objects, with a bias too; absorbed MLA (Q/K 576, V 512) on the decode objects, which tile any number of rows, so absorbed chunked prefill runs there too (no bias). The 576/512 objects are built for absorbed MLA's one KV head, but the matcher only requires K's and V's head counts to match. On gfx12, any pair up to 512 on §5.6's padded tiers too, with or without a mask |
 | 14 | additive bias | **served**: f32 or the query's dtype, broadcast over any of B, H, Sq, Skv; with every mask, the LSE output and every head dim the plain objects serve (specialized and generic tiers), on the prefill and the decode objects; with a sink at `head_dim` 64 and 128 (prefill and decode, both bias dtypes); on the MLA 192/128 prefill objects and the pair tiers (gfx11); on the generic decode tier up to 512 for one 16-row tile; not on the exact wide decode objects (576/512, 512/512) |
-| — | dropout | **served** (§5.10): on gfx11 by the RDNA prefill objects' dropout twins (`head_dim` 64/96/128/256) and the generic tiers' dropout builds (every multiple of 8 up to 256), on gfx12 by §5.6's objects (`head_dim` 64/128/256, and on the padded 96, 160 and 224 tiers every multiple of 8 up to 224, Q/K and V widths of their own up to the tier, MLA 192/128 included); bf16/f16, causal or not (and f32 on both targets, every multiple of 8 up to 256, by §5.11's objects), with or without an additive bias (f32 or the query's dtype, its keys contiguous or strided), padded or not, no sink, not packed; the decode objects decline it; on gfx12, padded with a bottom-right window or band declines (§5.10) |
+| — | dropout | **served** (§5.10): on gfx11 by the RDNA prefill objects' dropout twins (`head_dim` 64/96/128/256) and the generic tiers' dropout builds (every multiple of 8 up to 256), on gfx12 by §5.6's objects (`head_dim` 64/128/256, and on the padded 96, 160 and 224 tiers every multiple of 8 up to 224, Q/K and V widths of their own up to the tier, MLA 192/128 included); bf16/f16, causal or not (and f32 on both targets, every multiple of 8 up to 256, by §5.11's objects), with or without an additive bias (f32 or the query's dtype, its keys contiguous or strided), padded or not, packed or not (packed without a bias, §5.10 "Packed"), no sink; the decode objects decline it; on gfx12, padded with a bottom-right window or band declines (§5.10) |
 | — | attention sink | **served** at `head_dim` 64 and 128 (gpt-oss), prefill and decode, with every mask and the LSE output, with or without an additive bias (f32 or the query's dtype): one FLOAT logit per query head (cuDNN's and hipDNN's dtype, SEM-022; kernel modification 31, aiw README modification 11), rank 1 `[Hq]` or rank 4 `[1, Hq, 1, 1]`, a key with no value in each row's softmax (kernel modification 21); bit 32 of the sink stride argument names it and the logit is read as f32. A BFLOAT16 or HALF sink declines (§5.4): the objects could read one, but hipDNN's sink is FLOAT. A row no key reaches gets O = 0 and LSE = the sink (its f32 bits); with a bias, the sink and the bias share the natural-log domain, so a sink far above a row the bias holds at its lowest finite value takes the whole softmax. On gfx12, §5.6's sink objects also take either additive mask. The GPU tests check every sink case against their own reference and hipDNN's CPU reference (`CpuFpReferenceSdpa`), and `IntegrationGpuFlydslSdpaFrontend` serves a FLOAT sink with a bf16 and an fp16 query end to end through the frontend `Graph` API against the CPU reference graph executor |
 
 ### 5.4 What is still missing, and what closing it takes
@@ -536,7 +536,7 @@ objects.
 | Each engine's shard ships exactly one object per `dtype × head_dim × causal × has_bias × bias_q × head_dim_max × has_sink × has_dropout × v_mask` class, each with its engine's one signature, and the pair tiers rank below every generic tier | `TestFlydslSdpaRdnaPacks` and `TestFlydslSdpaRdnaDecodePacks`, and the shard census that runs them |
 | The accept/decline rules above, the bindings, and candidate selection | `TestFlydslSdpaRdnaGraphAccepts`, `TestFlydslSdpaRdnaGraphDeclines`, `TestFlydslSdpaRdnaBinding`, `TestFlydslSdpaRdnaKernelMatch`; padding (§5.9) `TestFlydslSdpaVarlen*` and `Padding/TestFlydslSdpaRdnaFieldDeclines` |
 | Which shipped aiw object a graph selects for the classes added after the engine landed (head dims 264-512 on the tiers up to 384 and 512; a sink with either mask at 64 and 128; a V head dim of its own on the tier of the wider), and that the top-ranked one matches the reference on gfx12 (§5.7's mask and sink rows included), beside §5's decode objects at 512/512 | `TestFlydslSdpaAiwClasses`, `TestGpuFlydslSdpaAiwClasses` |
-| Every served feature reaches an engine through the frontend's rules (`Graph::validate`, the backend's lowering and ranking) and matches hipDNN's CPU reference graph executor on the same graph: the FLOAT sinks (with a bias, packed), padding with and without `padding_mask`, packed THD with and without lengths (P3) and with `seq_len_kv` alone (SEM-028), vLLM's windows through their mapping (SEM-027, padded and packed), keys no row sees holding NaN or infinity (in K, and NaN in V before a decoder window, SEM-027), a zero and a negative scale, an f32 bias, Q/K and V head dims that differ (MLA 192/128 packed with the LSE), V heads of their own, dropout through the RNG dump and at probability 0 (SEM-015), top-left causal with more queries than keys, f32 I/O (CDNA and RDNA prefill; with an f32 bias and with per-batch lengths, at f32's own tolerance); and vLLM's paged call in cuDNN 1.24's form (ragged Q, paged K/V, both lengths) passes the frontend and is declined. Every new feature adds a case here | `IntegrationGpuFlydslSdpaFrontend`, `IntegrationGpuFlydslSdpaFrontendParity`, `IntegrationGpuFlydslSdpaFrontendFeatures`, `IntegrationGpuFlydslSdpaFrontendDeclines` (the frontend-built lane, `FlydslSdpaFrontendGraphs.hpp`), on every family |
+| Every served feature reaches an engine through the frontend's rules (`Graph::validate`, the backend's lowering and ranking) and matches hipDNN's CPU reference graph executor on the same graph: the FLOAT sinks (with a bias, packed), padding with and without `padding_mask`, packed THD with and without per-batch lengths and with `seq_len_kv` alone (SEM-028), vLLM's windows through their mapping (SEM-027, padded and packed), keys no row sees holding NaN or infinity (in K, and NaN in V before a decoder window, SEM-027), a zero and a negative scale, an f32 bias, Q/K and V head dims that differ (MLA 192/128 packed with the LSE), V heads of their own, dropout through the RNG dump and at probability 0 (SEM-015), top-left causal with more queries than keys, f32 I/O (CDNA and RDNA prefill; with an f32 bias and with per-batch lengths, at f32's own tolerance); and vLLM's paged call in cuDNN 1.24's form (ragged Q, paged K/V, both lengths) passes the frontend and is declined. Every new feature adds a case here | `IntegrationGpuFlydslSdpaFrontend`, `IntegrationGpuFlydslSdpaFrontendParity`, `IntegrationGpuFlydslSdpaFrontendFeatures`, `IntegrationGpuFlydslSdpaFrontendDeclines` (the frontend-built lane, `FlydslSdpaFrontendGraphs.hpp`), on every family |
 | The staged objects compute attention and LSE — GQA, ragged lengths, cross-attention, both causal corners, windows, bands, keyless rows, decode, `head_dim` 96, runtime and default scale, Q/K and V head dims that differ on the pair tiers (every tier's edges, padded and packed, in `Full/TestGpuFlydslSdpaRdnaFullTier`), a bias at every generic tier, bias rows and tiles at −inf and at the lowest finite value (§5.7), zero and negative scales on every engine (causal, a band, a bias, a sink, padding, packed sequences, dropout, decode across splits; against hipDNN's CPU reference too), NaN and infinity in V at every key no row sees on the prefill (and f32), decode and aiw objects (SEM-027, §5.7) — against a double-precision reference | `TestGpuFlydslSdpaRdnaDispatch`, `TestGpuFlydslSdpaAiwDispatch`, and every staged object by `TestGpuFlydslSdpaObjects` |
 
 ---
@@ -579,8 +579,8 @@ which applies §5's graph matcher and declines only what this kernel cannot comp
   not multiples of 8, or past 512, on either side (absorbed MLA's 576/512 runs on §5's decode
   objects); anything past 32-bit offsets; padded or packed,
   a bottom-right mask other than plain causal (§5.9; with dropout this is a gfx12 decline,
-  §5.10); packed with a mask, or with a dense LSE (§5.9); dropout with a sink, packing, at
-  232-248, or a pair wider than 224 (§5.10).
+  §5.10); packed with a mask, or with a dense LSE (§5.9); dropout with a sink, at 232-248,
+  or a pair wider than 224 (§5.10).
 - **Which engine runs a graph** both this and §5's prefill engine serve is autotune's
   (UHD's) to decide: measured on gfx1201, this one is faster on MLA prefill and long
   sequences, §5's on decode and sinks.
@@ -642,15 +642,18 @@ What differs, and why:
   the contract, as a NaN anywhere in the inputs is. Paged caches are not served yet; paging
   must keep reading no key no row sees.
 - **P in 16 bits.** Each family rounds P to the input dtype before the P·V product, as
-  AOTriton does; the CDNA generic and decode objects and the aiw objects truncate bf16 P (a
-  byte permute) where the RDNA and dual-wave objects round to nearest. With the max key's P
-  exactly 1 (modification 44) truncation is a bias of under one bf16 step on the rest: at
-  AOTriton's
-  `test_sm_scale_magnitude` (normal inputs, scale 1.2, `head_dim` 512) O is within
-  0.012-0.015 of an f64 reference against its bound of 0.03, as AOTriton's own 0.0139 and
-  0.0120 (`HoldsAotritonsBoundAtScale1Point2`; emulating the kernel's arithmetic, rounding P
-  to nearest changes that by under 0.003). The fused exponent with the max rounded to
-  nearest left that P at 1 − 2⁻⁸ half the time, and O a whole bf16 step off (0.03125).
+  AOTriton does, and every family rounds bf16 P to nearest. gfx950's CDNA objects use
+  `v_cvt_pk_bf16_f32` (ties to even). gfx942's and gfx90a's CDNA generic and decode objects
+  add 0x8000 and keep the high halves with `v_perm` (ties away from zero), and the aiw
+  objects do the same in `bf16_round_nonan_pack_v8`. The RDNA and dual-wave objects round to
+  nearest as well. With the max key's P exactly 1 (modification 44) the rest carry at most
+  half a bf16 step of error and a bias of at most about 2⁻²⁵ (ties away): at AOTriton's
+  `test_sm_scale_magnitude` (normal inputs, scale 1.2, `head_dim` 512) O measured
+  0.012-0.015 off an f64 reference with P truncated, against its bound of 0.03 and AOTriton's
+  own 0.0139 and 0.0120 (`HoldsAotritonsBoundAtScale1Point2`); emulating the kernel's
+  arithmetic, rounding P to nearest moves that by under 0.003. The fused exponent with the
+  max rounded to nearest left that P at 1 − 2⁻⁸ half the time, and O a whole bf16 step off
+  (0.03125).
 - **RMSNorm** (§1, §2a): y and inv_rms differ by about 1 ulp between wave32 (RDNA) and
   wave64 (CDNA) parts, from the reduction tree's shape. dgamma is bitwise repeatable on a
   device, but its summation grouping follows the device's compute-unit count, so its last
@@ -686,7 +689,7 @@ The measurements are kept outside the repository.
 | The aiw dropout twins against their plain twins and AOTriton (no object changed; gfx1201, bf16, p = 0.1) | against the plain twin 1.93–2.27× at `head_dim` 64, 1.48–1.71× at 128, 1.21–1.42× at 256. AOTriton 0.12 (PyTorch 2.13) on a gfx1201 node of the same kind: its dropout costs 1.22–1.75× its plain, but its plain is 1.4–2.4× slower than ours, and our dropout runs in 0.48–0.88× its dropout time. The extra cost is the Philox VALU work itself (the same 10-round Philox4x32 as AOTriton's; the twins' VGPRs are within 9 of their plain twins', no occupancy step) | shipped; no change: no cheap lever (overlapping the draws with the WMMA would be a scheduling change in AOTriton's kernel) |
 | Packed (THD) sequences on the aiw objects (no object changed; gfx1201, bf16, top-left causal, the LSE packed, 5 rounds) | packed at full lengths against the same problem dense: 0.998–1.003× (padded: 0.998–1.020×); at half the lengths 0.25–0.64× the dense time | -- |
 | Padded rows filled and lengths clamped on every RDNA prefill and decode object (modification 28; all 456 change, registers unchanged but one decode object's +1 SGPR) | 5 interleaved rounds (alternating order) against the objects before it: dense graphs on gfx1201 prefill median +0.15%, decode +0.27%; on gfx1101 +0.35% and +0.12%, within noise but for a single short-launch row. Padded graphs at half lengths write the padded rows they used to skip: up to +12% on a short launch, the feature's own cost | shipped |
-| Packed (THD) sequences on every RDNA prefill object (modification 29; all 360 change, VGPRs unchanged but +1 on eight gfx11 generic-tier bias objects, within the same allocation granule; the decode objects byte-identical) | 7 interleaved rounds (alternating order) against the objects before it, 51 object × shape rows, dense graphs: gfx1201 median +0.04%, every row within −1.5% to +0.7% (a 5-round chunk round had flagged the bf16 `head_dim` 96 causal object at +6.7% on a short launch; it did not repeat); gfx1101 median −0.05% (a node shared with other jobs, where byte-identical decode objects swung by up to 13%). The packed path itself: packed at full lengths against the same problem dense 0.995–1.011× on gfx1201 (0.98–1.06× on gfx1101), at half the lengths 0.24–0.43×, and packed slots at full length with per-batch lengths at half (P3) 0.25–0.45× | shipped |
+| Packed (THD) sequences on every RDNA prefill object (modification 29; all 360 change, VGPRs unchanged but +1 on eight gfx11 generic-tier bias objects, within the same allocation granule; the decode objects byte-identical) | 7 interleaved rounds (alternating order) against the objects before it, 51 object × shape rows, dense graphs: gfx1201 median +0.04%, every row within −1.5% to +0.7% (a 5-round chunk round had flagged the bf16 `head_dim` 96 causal object at +6.7% on a short launch; it did not repeat); gfx1101 median −0.05% (a node shared with other jobs, where byte-identical decode objects swung by up to 13%). The packed path itself: packed at full lengths against the same problem dense 0.995–1.011× on gfx1201 (0.98–1.06× on gfx1101), at half the lengths 0.24–0.43×, and packed slots at full length with per-batch lengths at half 0.25–0.45× | shipped |
 | The RDNA generic decode tier up to 512 (kernel modification 30; new objects only, the 568 others byte-identical) against the exact 512/512 objects at nearly the same width (bf16, bottom-right causal, one or two KV heads, 1 and 16 query rows, 4096 and 16384 keys; 5 rounds) | at `head_dim` 504: gfx1201 1.23–1.29×, gfx1101 2.6–3.2×; at 384: gfx1201 0.95–1.02×, gfx1101 1.24–1.73×. The first build (a select after each K and V load) spilled 5 VGPRs on gfx11 and took 3.0–3.6× there; reading out-of-range columns at the slice's end removed the spill and a tenth of the cost, so the spill was not the main cost. On gfx11 nothing else serves 264–504 | shipped, for coverage -- **deferred** (item 9) |
 | Padded rows filled on the aiw objects (modification 10: a fill kernel beside each main kernel, which keeps its registers; the length clamp) | 5 interleaved rounds on gfx1201 against the objects before it: dense graphs median +0.01% (37 rows, −2.7% to +0.5%). A padded graph launches the fill kernel too: +2.8% to +4% at full lengths (the mid-length launches timed), and at half lengths, which now write their padded rows, up to +24% on a short launch. The first form, the same stores inside the main kernel, cost one VGPR and on six objects a wave of occupancy (`head_dim` 128 non-causal 7–19% slower dense) and was replaced | shipped -- **deferred** (item 8) |
 | The RDNA pair tiers (kernel modification 32; new objects only, the 466 others byte-identical; bf16, B2 H32/8, 2048 tokens, 3 rounds) | each runs at its tier width's cost, so a pair pays for the wider head and the tier's rounding: on gfx1201 128/64 on the tier up to 128 takes 0.98× the exact `head_dim` 128 object's time, 96/64 1.33× the exact 96's, 200/136 on the tier up to 256 1.86× the generic tier up to 224 at 200/200 and 0.97× the 256 tier at 248/248; gfx1100 the same pattern (96/64 1.30× the exact 96, 200/136 1.67× the 224 tier). Causal halves each | shipped, for coverage -- **deferred** (item 10) |
@@ -792,8 +795,8 @@ table, the sequence extent still the longest sequence.
 |---|---|---|---|
 | Padding (both lengths, with or without `padding_mask`) | **served**, every object (the kernel's runtime varlen path, `varlen_bits` 0x0404; padded rows filled by modification 10) | **served**, every object (kernel modifications 26 and 28) | **served**, §7.8 |
 | Packed THD, compact (ragged Q/O and K/V, no lengths) | **served**, every object (the kernel's stacked varlen path, `varlen_bits` 0x0B0B) | **served** on the prefill objects (kernel modification 29); the decode objects decline | **served** on the generic prefill objects, §7.10 |
-| Packed with both lengths (cuDNN's form; each table entry a slot) | declined (below) | **served** on the prefill objects (modification 29, P3) | **served** on the generic prefill objects (P3, §7.10) |
-| Packed with `seq_len_kv` alone (PyTorch's `seqused_k`, SEM-028) | **served**, every object (`varlen_bits` 0x150B, below) | **served** on the prefill objects (P3's path, the query lengths Q's own) | **served** on the generic prefill objects (§7.10) |
+| Packed with both lengths (cuDNN's form; each table entry a slot) | declined (below) | **served** on the prefill objects (modification 29) | **served** on the generic prefill objects (§7.10) |
+| Packed with `seq_len_kv` alone (PyTorch's `seqused_k`, SEM-028) | **served**, every object (`varlen_bits` 0x150B, below) | **served** on the prefill objects (the path packed with both lengths takes, the query lengths Q's own) | **served** on the generic prefill objects (§7.10) |
 
 - **The lengths:** INT32 `[B, 1, 1, 1]`, batch stride 1, a device tensor declaring 4-byte
   alignment; not virtual, not ragged, not pass-by-value. INT64 lengths, either length alone
@@ -868,7 +871,7 @@ table, the sequence extent still the longest sequence.
   lengths and serve them all. A sink is served. The RDNA decode objects decline packed graphs
   (their merge kernel indexes O by batch), so a packed one-query-row graph runs on the prefill
   objects. CDNA serves compact packing on its generic prefill objects under the same rules,
-  and packing with both lengths too (P3, §7.10).
+  and packing with both lengths too (§7.10).
 - **RDNA prefill, packed (kernel modification 29):** bit 3 of `flags` makes the kernel read
   sequence b's token range from the two tables (the `ROW_OFF_Q` / `ROW_OFF_KV` pointers
   modification 26 appended, unread until then, so no argument moved). A batch's base is its
@@ -877,7 +880,7 @@ table, the sequence extent still the longest sequence.
   clamped to `[0, S]`. Q's loads stop at the rows the sequence owns, so none reaches the next
   sequence or past the last; the K/V slices already stop at its key count. The read sits in
   the lengths' one branch on the flags word, so a dense launch still loads nothing.
-- **Packed with both lengths (P3, `servablePackedVarlenWithLengths`), cuDNN's form**: ragged
+- **Packed with both lengths (`servablePackedVarlenWithLengths`), cuDNN's form**: ragged
   operands as above plus both length tensors, with or without `padding_mask` (as over dense
   operands). Each table entry is then a slot: sequence b's first `seq_len[b]` tokens are its
   rows and keys, clamped to `[0, slot]`; the slot's rows past the length are padded rows
@@ -889,7 +892,7 @@ table, the sequence extent still the longest sequence.
   padded row by batch, which is another sequence's under packing, and its main kernel clamps
   a length to `Max_seqlen_q`, not to the slot; both are aiw kernel changes (§5.4). On gfx12
   the RDNA prefill objects serve it.
-- **PyTorch's `seqused_k` is P3** (`torch.nn.attention.varlen.varlen_attn(..., seqused_k=)`,
+- **PyTorch's `seqused_k` is packed with both lengths** (`torch.nn.attention.varlen.varlen_attn(..., seqused_k=)`,
   AOTriton's `varlen_bits` 0x150B): Q packed through `cu_seqlens_q` with `seq_len_q[b]` its own
   token count (`cu_seqlens_q[b + 1] − cu_seqlens_q[b]`), K and V packed through `cu_seqlens_k`
   slots with `seq_len_kv[b] = seqused_k[b]`, at most the slot. That gives AOTriton's and
@@ -936,7 +939,7 @@ table, the sequence extent still the longest sequence.
   `seqused_k` with NaN in every K and V element past it, so a read of the tail turns rows NaN;
   no mask, top-left and bottom-right; one query row; more queries than used keys;
   `seqused_k = 0`; GQA; bf16 and f16. Checked against the per-sequence reference and against
-  hipDNN's CPU reference: a P3 graph with every length inside its slot is the form hipDNN's
+  hipDNN's CPU reference: a graph packed with both lengths, every length inside its slot is the form hipDNN's
   executors run as the dense padded graph (`RaggedSdpaDensify.hpp`), so both harnesses pass it
   the dense values they packed from, slot tails included. Passing the slot as the device
   length (the kernel then reads the tail) fails it, and so does an offset in O seen only by the
@@ -1020,7 +1023,7 @@ hipDNN states dropout cuDNN's way: `dropout_probability` with a seed and an offs
   name on every family (`TestGpuFlydslSdpa{Rdna,Aiw,Cdna}Dispatch.WritesTheCrossFamilyPaddedRngDump`),
   so the gfx11, gfx12 and CDNA dumps of it equal one oracle's.
 - **Packed (THD, §5.9, §7.10):** served on the same dropout objects, compact or with per-batch
-  lengths (P3; the aiw objects take compact only, and `seq_len_kv` alone, as without dropout).
+  lengths (the aiw objects take compact only, and `seq_len_kv` alone, as without dropout).
   Each sequence draws as under padding: `b` is the sequence's index in the offset tables, `i`
   and `j` are positions within the sequence (not token indices in the packed buffer), and `Sq`,
   `Skv` are the graph's declared extents (the maxima, `dims[2]`). This is AOTriton's varlen
@@ -1037,6 +1040,7 @@ hipDNN states dropout cuDNN's way: `dropout_probability` with a seed and an offs
   dropout, packing and dump gate over packed operands
   (`{PackedDropout,PackedAndDropping,PackedRngDump}/TestFlydslSdpa{Rdna,Cdna}FieldDeclines`,
   `Dropout/TestFlydslSdpa{Rdna,Cdna}GraphAccepts.Packed*`,
+  `TestFlydslSdpa{Rdna,Cdna}F32Graph*` `PackedAndDropping`,
   `TestFlydslSdpaPackedKernelMatch.DropsOnTheAiwAndRdnaPrefillDropoutObjectsOnly`,
   `TestFlydslSdpaCdnaKernelMatch.DropsPackedSequencesOnTheGenericPrefillDropoutObjectsOnly`).
   On the device, one case list on every family (`packedDropoutSpecs`,
@@ -1044,8 +1048,11 @@ hipDNN states dropout cuDNN's way: `dropout_probability` with a seed and an offs
   read off O bit for bit; mixed lengths with a query-less and a keyless sequence; GQA; no mask
   and both causal corners; the undropped LSE; the dump against the oracle at every element with
   hipDNN's keep-rate check and O against the CPU reference with the dump; a seed and offset by
-  value; one table for every operand; P3 slots; and one-signed U[0, 1) values in both dtypes
-  with O's mean signed error bounded (a P truncated to bf16 fails it). The references also run
+  value; one table for every operand; slots with per-batch lengths; and one-signed U[0, 1)
+  values in both 16-bit dtypes with O's mean signed error bounded (a P truncated to bf16 fails
+  it). The same cases but the one-signed ones run in f32 on the f32 dropout objects
+  (`packedF32DropoutSpecs`, `TestGpuFlydslSdpa{Rdna,Cdna}Dispatch.DropsF32PackedSequencesWithTheDenseMask`;
+  on gfx12 the only RDNA prefill dropout objects). The references also run
   `TestRaggedSdpaDensify.PhiloxDropoutThroughTheRewriteAppliesTheDenseDump` and
   `TestGpuRaggedSdpaDensify.PhiloxDropoutWithItsDumpMatchesCpu`, and the frontend-built lane
   `PackedDropout/IntegrationGpuFlydslSdpaFrontendParity`.
@@ -1421,8 +1428,8 @@ One SDPA-forward node, and:
 | Bias (`attn_mask`), if present: in the query's dtype or f32, declaring 16-byte alignment, rank 1–4 right-aligned to `[B, H, Sq, Skv]`, any axis broadcast (extent 1, absent, or stride 0), every stride a non-negative int32; one (batch, head) slice, `(Sq − 1) · stride_q + (Skv − 1) · stride_k + 1` elements, within 32-bit byte offsets | Added to the scaled scores, as PyTorch adds a float `attn_mask`. The vectorized bias objects -- both kernels' (the generic one's by modification 12) -- read a bias in the query's dtype whose keys are contiguous, every stride a multiple of 8 elements, the query stride at least `Skv` (or 0) and the key length a multiple of 4: rows move as 16-byte vectors and keys in runs of 4, and a run straddling the view's end could read as zero. Every other bias -- f32, broadcast along the keys, a key length or row pitch off those vectors, rows that overlap -- runs on the generic kernel's strided bias objects (`bias_kstrided`, modification 31), bucket objects at 64, 128 and 256 that read it one key at a time at a runtime key stride and element type; they read the others too, ranked below. A bias build softmaxes over `q·k · scale + bias`, as PyTorch, hipDNN's CPU reference and the RDNA kernels do (modification 28): a bias that masks whole KV tiles with −inf is served, a row it masks with −inf on every key gets O = 0 and LSE −inf, and a row masked on every key with the dtype's lowest *finite* value (f32's −FLT_MAX included: the strided objects keep their scores halved, modification 31) averages V uniformly over the keys the causal mask leaves. |
 | Attention sink, if present: one FLOAT logit per query head (SEM-022; a 16-bit sink declines), rank 1 `[Hq]` or rank 4 `[1, Hq, 1, 1]`, a device operand aligned to its element, its head stride positive (unless one head) with `(Hq − 1) × stride` 16-bit halves (two per FLOAT element) within int32, at `head_dim` 64 or 128; with any bias | Served by the generic kernel's `has_sink` objects (modification 19), with a bias by their bias builds (prefill tiers only: the decode tier packs the GQA group into rows, which addresses no per-head bias); the dual-wave kernel builds none. A sink with a bias only the strided objects read (f32, broadcast along the keys, off the 16-byte rows) runs on strided builds of those sink-and-bias tiers (`bias_kstrided`, modification 31), ranked below the vectorized ones. The sink joins against the max over the row's scores and itself, prefill and decode merge alike, so a sink far above the scores gives O ≈ 0 and LSE = the sink, as PyTorch and the RDNA kernels do (modification 29). The native passes the FLOAT sink with `sink_on` 2 (modification 36); the objects also read a 16-bit one (`sink_on` 1 and 3, modification 41), which hipDNN does not pass yet (§5.4). |
 | Padding, if present: both per-batch lengths, with or without `padding_mask` (§7.8) | Served on the generic prefill and decode objects (modification 32); the dual-wave and `kv_align` 64 objects decline it, and so do the decode objects under a top-left causal mask. |
-| Dropout, if present: a probability in [0, 1) with an INT64 device or INT64/INT32 by-value seed and offset (§7.9); above 0 without a sink, padded or not, with or without a bias the vectorized objects read | Above 0, served by the generic `has_dropout` objects (modification 33) at `head_dim` 64, 128, 256, and their bias builds; 0 is the undropped result every object computes. |
-| Packed THD, if present: compact, Q/O and K/V ragged through INT32 `[B + 1, 1, 1, 1]` token tables, the LSE packed through Q's, optionally with both per-batch lengths (P3) or `seq_len_kv` alone; without a bias or dropout (§7.10) | Served on the generic prefill objects (modification 34); the dual-wave, decode and `kv_align` 64 objects decline it. |
+| Dropout, if present: a probability in [0, 1) with an INT64 device or INT64/INT32 by-value seed and offset (§7.9); above 0 without a sink, padded or not, packed or not (packed without a bias), with or without a bias the vectorized objects read | Above 0, served by the generic `has_dropout` objects (modification 33) at `head_dim` 64, 128, 256, packed too, and their bias builds; 0 is the undropped result every object computes. |
+| Packed THD, if present: compact, Q/O and K/V ragged through INT32 `[B + 1, 1, 1, 1]` token tables, the LSE packed through Q's, optionally with both per-batch lengths or `seq_len_kv` alone; without a bias, with or without dropout (§7.10) | Served on the generic prefill objects (modification 34), with dropout on their `has_dropout` objects; the dual-wave, decode and `kv_align` 64 objects decline it. |
 | Declined outright: the dropout mask-and-scale form (the RNG dump of a dropping graph is served, §7.9), paged KV, block masks, FP8 descales, ALiBi, the split max / sum-exp stats, a non-`AUTO` implementation | The objects are built without them. |
 | Batch pitch and grid within int32 | 32-bit addressing. |
 
@@ -1973,7 +1980,7 @@ count tokens. The layout is token-major.
   virtual, by-value or misaligned tables; `seq_len_q` alone, or `padding_mask` alone, with
   packing; packing with a bias. Packing with dropout is served on the generic prefill dropout
   objects (§7.9).
-- **With per-batch lengths (P3, cuDNN's ragged operands with `seq_len`;
+- **With per-batch lengths (cuDNN's ragged operands with `seq_len`;
   `servablePackedVarlenWithLengths`, shared with the RDNA engines):** served. Both INT32
   `[B, 1, 1, 1]` lengths, with or without `padding_mask`, beside the same packing. Each table
   gives a sequence's slot. The length gives the real rows within it, clamped in the kernel to
@@ -1997,7 +2004,7 @@ count tokens. The layout is token-major.
   window and a band; GQA; f16; one table for every operand; no LSE; a bucket head dim; and
   single-token sequences. Every gate: `Packed/TestFlydslSdpaCdnaFieldDeclines`,
   `TestFlydslSdpaCdnaPackedGraph`,
-  `TestFlydslSdpaCdnaKernelMatch.RunsPackedSequencesOnlyOnTheGenericPrefillObjects`. P3 on the device:
+  `TestFlydslSdpaCdnaKernelMatch.RunsPackedSequencesOnlyOnTheGenericPrefillObjects`. With lengths on the device:
   `PacksPaddedSequencesInTheirSlots` (lengths 0, short, full, past the slot; with and without
   `padding_mask`; both corners; a sink), and `MirrorsSequsedKOnPackedKeySlots` (PyTorch's
   `seqused_k`: NaN in every slot past its length, no mask and both corners, one query row,
@@ -2047,12 +2054,12 @@ MFMA, permlane O store and DMA are 16-bit only. The plain objects, 6 per arch:
 - **Declined in f32 until objects serve them:** a sink, a `HALF` or `BFLOAT16` `mma_core_mode` (a
   reduced-precision MMA these objects do not run), and a bias in a 16-bit dtype (neither f32 nor
   the query's). Padding, packed THD, packed
-  slots with per-batch lengths (P3) and a diagonal past the keys bound as no mask (§7.2) are
+  slots with per-batch lengths and a diagonal past the keys bound as no mask (§7.2) are
   served (the generic kernel reads them in f32 as in 16 bits).
 - **Speed:** §7.5.
 - **Tested:** `TestFlydslSdpaCdnaF32Graph` (accepts and declines), `TestFlydslSdpaCdnaF32KernelMatch`,
   `TestGpuFlydslSdpaCdnaDispatch.ComputesF32*` (`ComputesF32InPaddedSlotsAndAtAnEveryKeyDiagonal`
-  for P3 and the rebound diagonal; `ComputesF32WithABiasDropoutAndAZeroScale` for the second
+  for packed slots with lengths and the rebound diagonal; `ComputesF32WithABiasDropoutAndAZeroScale` for the second
   wave: an f32 bias at a key length off 4 and AOTriton's row pitch, the keep mask bit for bit
   through the RNG dump, both, and a zero and a negative scale with and without dropout, at
   `head_dim` 64, 96, 128 and 192) and `KeepsF32DenormalInputs`, the per-object suite and the

@@ -191,6 +191,9 @@ Apache-2.0 headers (FlyDSL Project Contributors); AOTriton's repository is MIT.
    probability can pack as zero, but its row's sum `l` adds the unpacked probabilities, so
    the row stays NaN. f16 P was already rounded to nearest (`.to()`). bf16 objects only.
    Measured cost (`COVERAGE.md` section 5.8): gfx1201 geomean -0.5%, at most +2.5%.
+   `bf16_trunc_pack_v8` and `pack_bf16_pair` stay in `fmha_common_gfx1201.py`, unused by
+   the forward kernel, for parity with upstream, which keeps them for its backward kernel's
+   signed packs.
 
 Not modified, but checked: **MLA's head_dim 192 with a value head_dim of 128** builds
 and runs as upstream wrote it. On gfx1201 against an f32 reference, causal and not and

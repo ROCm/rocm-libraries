@@ -104,7 +104,7 @@ struct FrontendSdpaSpec
     /// each INT32 [B + 1, 1, 1, 1] with the tensor's token stride as its multiplier, and the LSE
     /// through Q's (token-major [T, Hq]). These are each batch's slot lengths, at most seqQ and
     /// seqKv; with seqLensQ/Kv too, those are the live rows and keys of each slot (cuDNN's
-    /// ragged + padding form, P3). Dense when empty; both or neither.
+    /// ragged + padding form). Dense when empty; both or neither.
     std::vector<int32_t> packedLensQ;
     std::vector<int32_t> packedLensKv;
     /// A value written into every K and V element no live query row sees (keys past a batch's
@@ -191,7 +191,10 @@ inline constexpr std::array<const char*, 5> FLYDSL_SDPA_ENGINES
 /// gfx1250, is not on it.
 inline std::vector<std::string> flydslSdpaArches()
 {
-    const std::string list = HIPKERNELPROVIDER_FLYDSL_SDPA_ARCHS;
+    // Through a pointer: with no FlyDSL content the macro is "", and initializing a string
+    // from that literal directly is a redundant-string-init error under clang-tidy.
+    const char* const raw = HIPKERNELPROVIDER_FLYDSL_SDPA_ARCHS;
+    const std::string list = raw;
     std::vector<std::string> arches;
     size_t begin = 0;
     while(begin < list.size())

@@ -550,6 +550,10 @@ INSTANTIATE_TEST_SUITE_P(
         // An f32 bias is the query's dtype too.
         AcceptedCase{"Bias", f32Accepted([](SdpaGraphSpec& s) { s.withBias = true; })},
         AcceptedCase{"Dropout", f32Accepted([](SdpaGraphSpec& s) { setDropout(s, 0.1F); })},
+        AcceptedCase{"PackedAndDropping", f32Accepted([](SdpaGraphSpec& s) {
+                         setDropout(s, 0.1F);
+                         setPacked(s, {128, 37}, {100, 128});
+                     })},
         AcceptedCase{"GenericHeadDim", f32Accepted([](SdpaGraphSpec& s) { s.headDim = 136; })},
         // The slices' 32-bit reach counted in f32 bytes: just inside.
         AcceptedCase{"SlicesJustInsideTwoGiB", f32Accepted([](SdpaGraphSpec& s) {
@@ -2410,8 +2414,8 @@ void expectSdpaMatchesReference(const SdpaGraphSpec& spec,
     fillNanGaps(spec, qTensor, kTensor, vTensor);
     // SEM-027: a value (NaN or infinity) at every V key no row sees, which no output may see.
     fillUnseenValues(spec, vTensor, valueHeads, dv);
-    // P3 (PyTorch's seqused_k): NaN in every slot's keys past its length, which the packed K
-    // and V below then hold; no output may see them.
+    // Packed with lengths (PyTorch's seqused_k): NaN in every slot's keys past its length,
+    // which the packed K and V below then hold; no output may see them.
     if(spec.slotTailNan)
     {
         ASSERT_TRUE(packed && padded && !spec.packedQkv);
@@ -3096,7 +3100,7 @@ void expectSdpaMatchesReference(const SdpaGraphSpec& spec,
 
     // A sink, or a scale that needs scaled scores, against hipDNN's CPU reference as well
     // (FLOAT [1, Hq, 1, 1], SEM-022): with the bias, the band and padding the graph has. And
-    // packed slots with every length inside its slot (P3, PyTorch's seqused_k), which hipDNN's
+    // packed slots with every length inside its slot (PyTorch's seqused_k), which hipDNN's
     // executors run as the dense padded graph (RaggedSdpaDensify.hpp: the slots unpacked, the
     // lengths the graph's own, a length past its slot an error): the reference then sees the
     // dense tensors this harness packed from, slot tails included. Not other packed graphs,
@@ -5763,7 +5767,7 @@ TEST(TestFlydslSdpaPackedGraph, AcceptsOneTableForQueriesAndKeysAndNoLse)
 
 TEST(TestFlydslSdpaPackedGraph, BindsTheLengthsOfPackedSequencesWithOrWithoutThePaddingMask)
 {
-    // P3, cuDNN's packed form: each table entry a slot, the lengths its rows and keys.
+    // cuDNN's packed form with lengths: each table entry a slot, the lengths its rows and keys.
     for(const bool paddingMask : {true, false})
     {
         auto spec = packedSpec();
@@ -6907,7 +6911,7 @@ TEST(TestGpuFlydslSdpaRdnaDispatch, WritesTheRngDumpItApplied)
     // The RDNA dropout objects are gfx11-generic; gfx12 drops on the aiw objects.
     if(packedArchDeviceProperties().gcnArchName.rfind("gfx11", 0) != 0)
     {
-        GTEST_SKIP() << "the RDNA dropout objects ship for gfx11 only";
+        GTEST_SKIP() << "the RDNA 16-bit dropout objects ship for gfx11 only";
     }
     struct Case
     {
@@ -7404,7 +7408,7 @@ TEST(TestGpuFlydslSdpaRdnaDispatch, DropsThroughABias)
     SKIP_IF_NO_DEVICES();
     if(packedArchDeviceProperties().gcnArchName.rfind("gfx11", 0) != 0)
     {
-        GTEST_SKIP() << "the RDNA dropout objects ship for gfx11 only";
+        GTEST_SKIP() << "the RDNA 16-bit dropout objects ship for gfx11 only";
     }
     // Dropout with a bias: the mask read off O bit for bit through an additive bias (Q zero and V the
     // identity, so each O element is one key's kept, scaled probability), with a full bias
@@ -7447,7 +7451,7 @@ TEST(TestGpuFlydslSdpaRdnaDispatch, DropsTheOraclesMaskBitForBit)
     // (COVERAGE §5.10), so a gfx12 device has nothing here to run.
     if(packedArchDeviceProperties().gcnArchName.rfind("gfx11", 0) != 0)
     {
-        GTEST_SKIP() << "the RDNA dropout objects ship for gfx11 only";
+        GTEST_SKIP() << "the RDNA 16-bit dropout objects ship for gfx11 only";
     }
     struct Case
     {
@@ -7484,7 +7488,7 @@ TEST(TestGpuFlydslSdpaRdnaDispatch, DropsWithTheUndroppedLse)
     // (COVERAGE §5.10), so a gfx12 device has nothing here to run.
     if(packedArchDeviceProperties().gcnArchName.rfind("gfx11", 0) != 0)
     {
-        GTEST_SKIP() << "the RDNA dropout objects ship for gfx11 only";
+        GTEST_SKIP() << "the RDNA 16-bit dropout objects ship for gfx11 only";
     }
     SdpaGraphSpec spec;
     spec.headDim = 128;
@@ -7509,7 +7513,7 @@ TEST(TestGpuFlydslSdpaRdnaDispatch, DropsWithASeedAndOffsetGivenByValue)
     // (COVERAGE §5.10), so a gfx12 device has nothing here to run.
     if(packedArchDeviceProperties().gcnArchName.rfind("gfx11", 0) != 0)
     {
-        GTEST_SKIP() << "the RDNA dropout objects ship for gfx11 only";
+        GTEST_SKIP() << "the RDNA 16-bit dropout objects ship for gfx11 only";
     }
     SdpaGraphSpec spec;
     spec.dataType = DataType::HALF;
@@ -7532,7 +7536,7 @@ TEST(TestGpuFlydslSdpaRdnaDispatch, DropsTheDenseMaskUnderPadding)
     SKIP_IF_NO_DEVICES();
     if(packedArchDeviceProperties().gcnArchName.rfind("gfx11", 0) != 0)
     {
-        GTEST_SKIP() << "the RDNA dropout objects ship for gfx11 only";
+        GTEST_SKIP() << "the RDNA 16-bit dropout objects ship for gfx11 only";
     }
     // The mask read off O bit for bit (Q zero, V the identity) at each twin's width, both
     // corners: a full batch, one with odd lengths and one with no queries.
@@ -7566,7 +7570,7 @@ TEST(TestGpuFlydslSdpaRdnaDispatch, DropsUnderPaddingWithTheUndroppedLse)
     SKIP_IF_NO_DEVICES();
     if(packedArchDeviceProperties().gcnArchName.rfind("gfx11", 0) != 0)
     {
-        GTEST_SKIP() << "the RDNA dropout objects ship for gfx11 only";
+        GTEST_SKIP() << "the RDNA 16-bit dropout objects ship for gfx11 only";
     }
     // GQA, a batch with no keys and one with no queries, lengths without padding_mask, in
     // both dtypes.
@@ -7594,7 +7598,7 @@ TEST(TestGpuFlydslSdpaRdnaDispatch, WritesTheRngDumpItAppliedUnderPadding)
     SKIP_IF_NO_DEVICES();
     if(packedArchDeviceProperties().gcnArchName.rfind("gfx11", 0) != 0)
     {
-        GTEST_SKIP() << "the RDNA dropout objects ship for gfx11 only";
+        GTEST_SKIP() << "the RDNA 16-bit dropout objects ship for gfx11 only";
     }
     // The dump is the oracle's mask at every element, padded rows included, and O is hipDNN's
     // CPU reference run with the dump as its mask and the graph's lengths.
@@ -7644,9 +7648,22 @@ TEST(TestGpuFlydslSdpaRdnaDispatch, DropsPackedSequencesWithTheDenseMask)
     SKIP_IF_NO_DEVICES();
     if(packedArchDeviceProperties().gcnArchName.rfind("gfx11", 0) != 0)
     {
-        GTEST_SKIP() << "the RDNA dropout objects ship for gfx11 only";
+        GTEST_SKIP() << "the RDNA 16-bit dropout objects ship for gfx11 only (gfx12 drops 16-bit "
+                        "graphs on the aiw objects; f32: DropsF32PackedSequencesWithTheDenseMask)";
     }
     expectPackedSequencesDropAsDense(RdnaFamily::PREFILL);
+}
+
+// The same packed, dropping cases in f32 (packedF32DropoutSpecs), on the exact-f32 dropout
+// objects of both targets; on gfx12 these are the RDNA prefill engine's only dropout objects.
+TEST(TestGpuFlydslSdpaRdnaDispatch, DropsF32PackedSequencesWithTheDenseMask)
+{
+    SKIP_IF_NO_DEVICES();
+    for(const auto& [name, spec] : packedF32DropoutSpecs(true))
+    {
+        SCOPED_TRACE(name);
+        expectSdpaMatchesReference<float>(spec, F32_TOLERANCE, RdnaFamily::PREFILL);
+    }
 }
 
 TEST(TestGpuFlydslSdpaRdnaDispatch, WritesTheCrossFamilyPaddedRngDump)
@@ -7654,7 +7671,7 @@ TEST(TestGpuFlydslSdpaRdnaDispatch, WritesTheCrossFamilyPaddedRngDump)
     SKIP_IF_NO_DEVICES();
     if(packedArchDeviceProperties().gcnArchName.rfind("gfx11", 0) != 0)
     {
-        GTEST_SKIP() << "the RDNA dropout objects ship for gfx11 only";
+        GTEST_SKIP() << "the RDNA 16-bit dropout objects ship for gfx11 only";
     }
     expectSdpaMatchesReference<hipdnn_data_sdk::types::half>(crossFamilyPaddedDropoutSpec(),
                                                              F16_TOLERANCE);
@@ -7665,7 +7682,7 @@ TEST(TestGpuFlydslSdpaRdnaDispatch, DropsThroughABiasUnderPadding)
     SKIP_IF_NO_DEVICES();
     if(packedArchDeviceProperties().gcnArchName.rfind("gfx11", 0) != 0)
     {
-        GTEST_SKIP() << "the RDNA dropout objects ship for gfx11 only";
+        GTEST_SKIP() << "the RDNA 16-bit dropout objects ship for gfx11 only";
     }
     // Dropout with a bias under padding: a bias in either dtype at a key length that is not a multiple of 8,
     // with NaN in every bias element past each batch's keys (never read).
@@ -8199,7 +8216,7 @@ TEST(TestGpuFlydslSdpaRdnaDispatch, PacksAGenericHeadDimWithASinkThroughOneTable
 
 TEST(TestGpuFlydslSdpaRdnaDispatch, PacksSequencesWithTrailingPaddingPerBatch)
 {
-    // P3, cuDNN's packed form: each table entry a slot, the per-batch lengths its rows and
+    // cuDNN's packed form with lengths: each table entry a slot, the per-batch lengths its rows and
     // keys. The slot's rows past the length are padded rows (O = 0, LSE = -inf), its keys past
     // the length are never read (the packed buffer holds real values there), and a length past
     // the slot is clamped to it.
@@ -8235,7 +8252,7 @@ TEST(TestGpuFlydslSdpaRdnaDispatch, PacksSequencesWithTrailingPaddingPerBatch)
 
 TEST(TestGpuFlydslSdpaRdnaDispatch, MirrorsSequsedKOnPackedKeySlots)
 {
-    // PyTorch's varlen seqused_k as a hipDNN graph (P3): Q packed through cu_seqlens_q with
+    // PyTorch's varlen seqused_k as a hipDNN graph: Q packed through cu_seqlens_q with
     // seq_len_q its own token counts, K and V packed through cu_seqlens_k slots with
     // seq_len_kv = seqused_k <= the slot. Each slot's keys past seqused_k hold NaN, so a read
     // of one turns rows NaN; a bottom-right diagonal sits at seqused_k - Sq_b; seqused_k = 0
@@ -8840,7 +8857,7 @@ TEST(TestGpuFlydslSdpaRdnaDispatch, DropsAtTheGenericTiersWidths)
     SKIP_IF_NO_DEVICES();
     if(packedArchDeviceProperties().gcnArchName.rfind("gfx11", 0) != 0)
     {
-        GTEST_SKIP() << "the RDNA dropout objects ship for gfx11 only";
+        GTEST_SKIP() << "the RDNA 16-bit dropout objects ship for gfx11 only";
     }
     for(const int64_t headDim : {48, 80, 160, 192, 224})
     {

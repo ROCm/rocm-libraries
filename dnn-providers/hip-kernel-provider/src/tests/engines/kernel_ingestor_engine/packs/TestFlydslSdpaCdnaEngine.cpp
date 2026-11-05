@@ -830,7 +830,7 @@ INSTANTIATE_TEST_SUITE_P(Packed,
 
 TEST(TestFlydslSdpaCdnaPackedGraph, BindsPackedSequencesWithPerBatchLengths)
 {
-    // P3: packed slots and the real lengths within them, with or without padding_mask; a
+    // Packed slots and the real lengths within them, with or without padding_mask; a
     // sink, every mask and no LSE too.
     using Bound = std::optional<int64_t>;
     auto spec = cdnaPackedSpec();
@@ -2472,7 +2472,7 @@ TEST(TestFlydslSdpaCdnaKernelMatch, RunsPackedSequencesOnlyOnTheGenericPrefillOb
         packed.stats = SdpaStats::NONE;
         packed.mask = c.mask;
         EXPECT_EQ(cdnaAdmits(packed, c.kernel), c.servesPacked);
-        // With per-batch lengths in the slots (P3), the same objects.
+        // With per-batch lengths in the slots, the same objects.
         setPadding(packed, {200, 100}, {150, 256});
         EXPECT_EQ(cdnaAdmits(packed, c.kernel), c.servesPacked);
     }
@@ -3409,7 +3409,7 @@ bool cdnaReadsZeroBias(const SdpaGraphSpec& spec, const KernelDefinition& kernel
     return !spec.withBias && hasBias != nullptr && *hasBias == 1;
 }
 
-/// Whether @p spec is packed with both lengths, every one inside its slot (P3, PyTorch's
+/// Whether @p spec is packed with both lengths, every one inside its slot (PyTorch's
 /// seqused_k): the form hipDNN's executors run as the dense padded graph
 /// (RaggedSdpaDensify.hpp, a length past its slot an error), so hipDNN's CPU reference checks it.
 bool cdnaDensifiable(const SdpaGraphSpec& spec)
@@ -3434,8 +3434,9 @@ bool cdnaDensifiable(const SdpaGraphSpec& spec)
 ///  - NaN in Q's first column at one query position (every batch and head), or in K's at one
 ///    key (every batch and KV head): every row that sees it must come out NaN, O and LSE, as
 ///    PyTorch's does. Separate Q and K buffers only.
-///  - P3 (PyTorch's seqused_k): NaN in every K and V element of a slot past its length, which
-///    the packed K and V then hold, so a kernel that reads one turns its rows NaN.
+///  - Packed with lengths (PyTorch's seqused_k): NaN in every K and V element of a slot past
+///    its length, which the packed K and V then hold, so a kernel that reads one turns its rows
+///    NaN.
 template <typename T>
 void writeCdnaNans(const SdpaGraphSpec& spec,
                    const std::vector<int64_t>& kStrides,
@@ -4038,7 +4039,7 @@ void expectCandidatesMatchReference(const MatchContext& context,
         = [](int32_t value, int64_t full) { return std::clamp<int64_t>(value, 0, full); };
     // Packed (TEST-LOCAL ORACLE until hipDNN's ragged reference runs here), sequence bi is the
     // same problem at its own token counts; its rows past them do not exist, so go unchecked.
-    // With per-batch lengths too (P3), a sequence's length is clamped to its slot, and the
+    // With per-batch lengths too, a sequence's length is clamped to its slot, and the
     // slot's rows past it are padded rows.
     const auto slotQ = [&](int64_t bi) {
         return packed ? static_cast<int64_t>(spec.packedSeqLensQ[static_cast<size_t>(bi)]) : s;
@@ -4054,7 +4055,7 @@ void expectCandidatesMatchReference(const MatchContext& context,
         return padded ? clampedLength(spec.seqLensKv[static_cast<size_t>(bi)], slotKv(bi))
                       : slotKv(bi);
     };
-    // Packed slots with every length inside its slot (P3): hipDNN's CPU reference checks it too
+    // Packed slots with every length inside its slot: hipDNN's CPU reference checks it too
     // (below).
     const bool densifiable = cdnaDensifiable(spec);
     // The reference's rule: query row i sees key j <= i + align + right, align 0 top-left
@@ -4411,7 +4412,7 @@ void expectCandidatesMatchReference(const MatchContext& context,
         // A sink, against hipDNN's CPU reference as well (FLOAT [1, Hq, 1, 1], SEM-022): with
         // the bias, the band and padding the graph has; a bias under padding (vendored-kernel
         // modification 37), sink or not; and a scale that needs scaled scores. And packed slots
-        // with every length inside its slot (P3, PyTorch's seqused_k), which hipDNN's executors
+        // with every length inside its slot (PyTorch's seqused_k), which hipDNN's executors
         // run as the dense padded graph (RaggedSdpaDensify.hpp: the slots unpacked, the lengths
         // the graph's own, a length past its slot an error): the reference then sees the dense
         // values this harness packed from, slot tails included. Not other packed graphs,
@@ -7141,7 +7142,7 @@ TEST(TestGpuFlydslSdpaCdnaDispatch, WritesTheCrossFamilyPaddedRngDump)
 // Packed (THD) sequences that drop (packedDropoutSpecs, the case list every family runs): each
 // sequence draws at the graph's extents and at positions within it (AOTriton's varlen
 // counters), so its mask and its dump are the dense graph's. Compact and with per-batch
-// lengths (P3); O and the undropped LSE against the per-sequence oracle, the mask read off O
+// lengths; O and the undropped LSE against the per-sequence oracle, the mask read off O
 // bit for bit, the dump against the oracle with hipDNN's keep-rate check.
 TEST(TestGpuFlydslSdpaCdnaDispatch, DropsPackedSequencesWithTheDenseMask)
 {
@@ -7149,6 +7150,16 @@ TEST(TestGpuFlydslSdpaCdnaDispatch, DropsPackedSequencesWithTheDenseMask)
     {
         SCOPED_TRACE(name);
         expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+    }
+}
+
+// The same cases in f32 (packedF32DropoutSpecs), on the f32 dropout objects (modification 35).
+TEST(TestGpuFlydslSdpaCdnaDispatch, DropsF32PackedSequencesWithTheDenseMask)
+{
+    for(const auto& [name, spec] : packedF32DropoutSpecs(true))
+    {
+        SCOPED_TRACE(name);
+        expectCdnaMatchesReference(spec, F32_TOLERANCE);
     }
 }
 
@@ -7333,6 +7344,9 @@ TEST(TestFlydslSdpaCdnaF32Graph, AcceptsWhatTheF32ObjectsServe)
     auto dropout = cdnaF32Spec();
     setDropoutWithRngDump(dropout, 0.5F);
     cases.push_back({"Dropout", dropout});
+    auto packedDropping = packed;
+    setDropoutWithRngDump(packedDropping, 0.5F);
+    cases.push_back({"PackedAndDropping", packedDropping});
     auto both = bias;
     setDropout(both, 0.5F);
     cases.push_back({"F32BiasAndDropout", both});
@@ -7629,7 +7643,7 @@ TEST(TestGpuFlydslSdpaCdnaDispatch, ServesADiagonalThatShowsEveryKeyOnTheNonCaus
 
 TEST(TestGpuFlydslSdpaCdnaDispatch, PacksPaddedSequencesInTheirSlots)
 {
-    // P3: each packed slot holds a shorter real sequence (cuDNN's ragged operands with
+    // Each packed slot holds a shorter real sequence (cuDNN's ragged operands with
     // seq_len). The slot's rows past it are padded rows, O = 0 and LSE = -inf; its keys past it
     // are never read; nothing reaches the next slot. Lengths 0, short, full, and past the slot
     // (clamped to it), with and without padding_mask, at both corners.
@@ -7647,7 +7661,7 @@ TEST(TestGpuFlydslSdpaCdnaDispatch, PacksPaddedSequencesInTheirSlots)
 
 TEST(TestGpuFlydslSdpaCdnaDispatch, MirrorsSequsedKOnPackedKeySlots)
 {
-    // PyTorch's varlen seqused_k as a hipDNN graph (P3): Q packed through cu_seqlens_q with
+    // PyTorch's varlen seqused_k as a hipDNN graph: Q packed through cu_seqlens_q with
     // seq_len_q its own token counts, K and V packed through cu_seqlens_k slots with
     // seq_len_kv = seqused_k <= the slot. Each slot's keys past seqused_k hold NaN, so a read
     // of one turns rows NaN; a bottom-right diagonal sits at seqused_k - Sq_b; seqused_k = 0
@@ -7677,7 +7691,7 @@ TEST(TestGpuFlydslSdpaCdnaDispatch, MirrorsSequsedKOnPackedKeySlots)
 TEST(TestGpuFlydslSdpaCdnaDispatch, ComputesF32InPaddedSlotsAndAtAnEveryKeyDiagonal)
 {
     // The f32 objects (modification 35) under the host-side rules that arrived beside them:
-    // packed slots with per-batch lengths (P3), and a diagonal at or past the last key bound
+    // packed slots with per-batch lengths, and a diagonal at or past the last key bound
     // as no mask, which runs on the non-causal f32 objects.
     auto slots = packedGpuSpec();
     slots.dataType = DataType::FLOAT;

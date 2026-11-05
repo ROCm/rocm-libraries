@@ -414,7 +414,7 @@ struct SdpaGraphSpec
     std::optional<int64_t> queryNanPosition;
     /// K's first column NaN at this key, every batch and KV head.
     std::optional<int64_t> keyNanPosition;
-    /// Packed with per-batch lengths (P3): every K and V element of a slot past its key length
+    /// Packed with per-batch lengths: every K and V element of a slot past its key length
     /// NaN, every head and column, so a kernel that reads a key past seq_len_kv (PyTorch's
     /// `seqused_k`) turns its rows NaN (both device harnesses).
     bool slotTailNan = false;
@@ -519,8 +519,8 @@ struct NamedSdpaSpec
 /// dropout objects). Mixed lengths with a query-less and a keyless sequence, GQA, both
 /// causal corners and none, the undropped LSE, the mask read off O bit for bit (Q zero, V the
 /// identity), the RNG dump against the oracle, a seed and offset by value, and one table for
-/// every operand. withLengths: P3 cases (per-batch lengths in packed slots), which the aiw
-/// objects decline.
+/// every operand. withLengths: cases with per-batch lengths in packed slots, which the aiw
+/// objects decline. 16-bit; packedF32DropoutSpecs() has the f32 cases.
 inline std::vector<NamedSdpaSpec> packedDropoutSpecs(bool withLengths)
 {
     using hipdnn_flatbuffers_sdk::data_objects::DataType;
@@ -596,11 +596,30 @@ inline std::vector<NamedSdpaSpec> packedDropoutSpecs(bool withLengths)
     }
     if(withLengths)
     {
-        // P3: per-batch lengths in the slots; the slot's rows past a length are padded rows.
+        // Per-batch lengths in the slots; the slot's rows past a length are padded rows.
         auto slots = crossFamilyPackedDropoutSpec();
         setPacked(slots, {40, 30, 10}, {70, 50, 70});
         setPadding(slots, {33, 30, 0}, {70, 17, 64});
         cases.push_back({"PackedSlotsWithLengths", slots});
+    }
+    return cases;
+}
+
+/// packedDropoutSpecs()'s cases in f32, which every family's exact-f32 dropout objects serve
+/// (on gfx12 the only RDNA prefill objects that drop): the same sequences, masks, tables and
+/// dumps, so a mask drawn at the wrong extents fails here too. The one-signed cases are left
+/// out: their bound is on a P rounded to 16 bits, which f32 does not do.
+inline std::vector<NamedSdpaSpec> packedF32DropoutSpecs(bool withLengths)
+{
+    std::vector<NamedSdpaSpec> cases;
+    for(auto& [name, spec] : packedDropoutSpecs(withLengths))
+    {
+        if(spec.uniformInputs)
+        {
+            continue;
+        }
+        spec.dataType = hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT;
+        cases.push_back({name + "F32", spec});
     }
     return cases;
 }
