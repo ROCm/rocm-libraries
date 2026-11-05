@@ -400,10 +400,6 @@ namespace FixedPointEmulation
         // We use QPI_N_TZ = 13 (40 significant bits) — one bit above the minimum.
         // With a TwoSum accumulator 12 (41 bits) would already be correct; the
         // extra trailing zero is a cheap safety/accuracy margin:
-        //   * Every product hi = dc*qpi_hi then carries >= 1 trailing zero, so the
-        //     running-sum error term stays exact even under a plain FastTwoSum
-        //     (whose err = hi - (new_hi - Zhi) is otherwise exact only when
-        //     |Zhi| >= |hi|) — i.e. the accumulation becomes order-independent.
         //   * Empirically it tightens the final reconstruction error
         //     |Zhi+Zlo - Z_exact|/P from ~1e-14 (NTZ=12) to ~1e-25 (NTZ=13); this
         //     summed CRT remainder is the only quantity that matters (per-

@@ -96,7 +96,8 @@ namespace FixedPointEmulation
         {
             const double old_hi = Zhi_out[idx];
             const double s_hi   = old_hi + Zhi;
-            const double err    = Zhi - (s_hi - old_hi);
+            const double bb     = s_hi - old_hi;
+            const double err    = (old_hi - (s_hi - bb)) + (Zhi - bb);
             Zhi_out[idx]        = s_hi;
             Zlo_out[idx] += err + Zlo;
         }
@@ -279,7 +280,8 @@ namespace FixedPointEmulation
             {
                 const double old_hi = Zhi_in[idx];
                 const double s_hi   = old_hi + Zhi;
-                const double err    = Zhi - (s_hi - old_hi);
+                const double bb     = s_hi - old_hi;
+                const double err    = (old_hi - (s_hi - bb)) + (Zhi - bb);
                 Zhi                 = s_hi;
                 Zlo                 = Zlo_in[idx] + err + Zlo;
             }
