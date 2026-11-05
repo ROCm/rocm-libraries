@@ -1,0 +1,121 @@
+/*******************************************************************************
+ *
+ * MIT License
+ *
+ * Copyright (c) 2026 Advanced Micro Devices, Inc.
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in all
+ * copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
+ *
+ *******************************************************************************/
+
+#include "unit_conv_solver.hpp"
+
+namespace {
+
+auto GetConvTestCases(miopenDataType_t datatype, miopenTensorLayout_t layout)
+{
+    using TestCase = miopen::unit_tests::ConvTestCase;
+
+    // Depthwise: x {N, C, D, H, W}, w {K, 1, Z, Y, X}, groups = C, K = C * multiplier.
+    return std::vector{
+        // clang-format off
+        TestCase{{1, 32, 4, 16, 16}, {32, 1, 3, 3, 3}, {1, 1, 1}, {1, 1, 1}, {1, 1, 1}, 32, datatype, layout},
+        // Channel multiplier 2, per-dimension stride, dilation, odd sizes, batch > 1.
+        TestCase{{2, 24, 9, 17, 19}, {48, 1, 3, 3, 3}, {1, 1, 1}, {1, 2, 2}, {1, 1, 2}, 24, datatype, layout},
+        TestCase{{1, 16, 6, 12, 13}, {16, 1, 5, 5, 5}, {0, 2, 2}, {1, 1, 1}, {1, 1, 1}, 16, datatype, layout},
+        // Temporal-only and spatial-only filters.
+        TestCase{{1, 8, 5, 9, 10}, {8, 1, 3, 1, 1}, {1, 0, 0}, {1, 1, 1}, {1, 1, 1}, 8, datatype, layout},
+        TestCase{{1, 64, 3, 8, 8}, {64, 1, 1, 3, 3}, {0, 1, 1}, {1, 2, 2}, {1, 1, 1}, 64, datatype, layout},
+        // clang-format on
+    };
+}
+
+auto GetAllConvTestCases(miopenDataType_t datatype)
+{
+    auto cases = GetConvTestCases(datatype, miopenTensorNCDHW);
+    for(auto&& c : GetConvTestCases(datatype, miopenTensorNDHWC))
+        cases.push_back(std::move(c));
+    return cases;
+}
+
+const auto& GetTestParams()
+{
+    static const auto params = [] {
+        auto p = miopen::unit_tests::UnitTestConvSolverParams(
+            Gpu::gfx103X | Gpu::gfx110X | Gpu::gfx115X | Gpu::gfx117X | Gpu::gfx120X);
+        return p;
+    }();
+    return params;
+}
+
+} // namespace
+
+using GPU_UnitTestConvSolverHipDirectDepthwiseFwd3d_FP32  = GPU_UnitTestConvSolverFwd_FP32;
+using GPU_UnitTestConvSolverHipDirectDepthwiseFwd3d_FP16  = GPU_UnitTestConvSolverFwd_FP16;
+using GPU_UnitTestConvSolverHipDirectDepthwiseFwd3d_BFP16 = GPU_UnitTestConvSolverFwd_BFP16;
+
+using CPU_UnitTestConvSolverHipDirectDepthwiseFwd3dDevApplicabilityFwd_NONE =
+    CPU_UnitTestConvSolverDevApplicabilityFwd_NONE;
+
+TEST_P(GPU_UnitTestConvSolverHipDirectDepthwiseFwd3d_FP32, ConvHipDirectDepthwiseFwd3d)
+{
+    this->RunTest(miopen::solver::conv::ConvHipDirectDepthwiseFwd3d{});
+};
+
+TEST_P(GPU_UnitTestConvSolverHipDirectDepthwiseFwd3d_FP16, ConvHipDirectDepthwiseFwd3d)
+{
+    this->RunTest(miopen::solver::conv::ConvHipDirectDepthwiseFwd3d{});
+};
+
+TEST_P(GPU_UnitTestConvSolverHipDirectDepthwiseFwd3d_BFP16, ConvHipDirectDepthwiseFwd3d)
+{
+    this->RunTest(miopen::solver::conv::ConvHipDirectDepthwiseFwd3d{});
+};
+
+TEST_P(CPU_UnitTestConvSolverHipDirectDepthwiseFwd3dDevApplicabilityFwd_NONE,
+       ConvHipDirectDepthwiseFwd3d)
+{
+    this->RunTest(miopen::solver::conv::ConvHipDirectDepthwiseFwd3d{});
+};
+
+// Smoke tests
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_UnitTestConvSolverHipDirectDepthwiseFwd3d_FP32,
+                         testing::Combine(testing::Values(GetTestParams()),
+                                          testing::Values(miopenConvolutionAlgoDirect),
+                                          testing::ValuesIn(GetAllConvTestCases(miopenFloat))));
+
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_UnitTestConvSolverHipDirectDepthwiseFwd3d_FP16,
+                         testing::Combine(testing::Values(GetTestParams()),
+                                          testing::Values(miopenConvolutionAlgoDirect),
+                                          testing::ValuesIn(GetAllConvTestCases(miopenHalf))));
+
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_UnitTestConvSolverHipDirectDepthwiseFwd3d_BFP16,
+                         testing::Combine(testing::Values(GetTestParams()),
+                                          testing::Values(miopenConvolutionAlgoDirect),
+                                          testing::ValuesIn(GetAllConvTestCases(miopenBFloat16))));
+
+// Device applicability test
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         CPU_UnitTestConvSolverHipDirectDepthwiseFwd3dDevApplicabilityFwd_NONE,
+                         testing::Combine(testing::Values(GetTestParams()),
+                                          testing::Values(GetConvTestCases(miopenFloat,
+                                                                           miopenTensorNCDHW)[0])));
