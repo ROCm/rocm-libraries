@@ -45,10 +45,21 @@
 typedef unsigned short u16;
 typedef unsigned int u32x4 __attribute__((ext_vector_type(4)));
 typedef float f32x8 __attribute__((ext_vector_type(8)));
-#if CT_DTYPE == 1
-typedef _Float16 frag_t __attribute__((ext_vector_type(16)));
+// WMMA operand layout, chosen by the solver from the device name (not from the __GFX11__ /
+// __GFX12__ macros). gfx11: a lane holds all 16 K values of its row / column, replicated across
+// the two half-waves. gfx12: a lane holds 8, lanes 0-15 K 0-7 and lanes 16-31 K 8-15.
+#ifndef CT_WMMA_GFX12
+#define CT_WMMA_GFX12 0
+#endif
+#if CT_WMMA_GFX12
+#define CT_FRAG_N 8
 #else
-typedef __bf16 frag_t __attribute__((ext_vector_type(16)));
+#define CT_FRAG_N 16
+#endif
+#if CT_DTYPE == 1
+typedef _Float16 frag_t __attribute__((ext_vector_type(CT_FRAG_N)));
+#else
+typedef __bf16 frag_t __attribute__((ext_vector_type(CT_FRAG_N)));
 #endif
 
 __device__ static inline u16 to_storage(float v)
@@ -66,11 +77,23 @@ __device__ static inline u16 to_storage(float v)
 
 __device__ static inline f32x8 wmma(frag_t a, frag_t b, f32x8 c)
 {
-#if CT_DTYPE == 1
+#if CT_WMMA_GFX12 && CT_DTYPE == 1
+    return __builtin_amdgcn_wmma_f32_16x16x16_f16_w32_gfx12(a, b, c);
+#elif CT_WMMA_GFX12
+    return __builtin_amdgcn_wmma_f32_16x16x16_bf16_w32_gfx12(a, b, c);
+#elif CT_DTYPE == 1
     return __builtin_amdgcn_wmma_f32_16x16x16_f16_w32(a, b, c);
 #else
     return __builtin_amdgcn_wmma_f32_16x16x16_bf16_w32(a, b, c);
 #endif
+}
+
+// First K value (channel) of a lane's fragment, and the D row of its accumulator value i.
+__device__ static inline int frag_k0(int lane) { return CT_WMMA_GFX12 ? 8 * (lane / 16) : 0; }
+
+__device__ static inline int d_row(int lane, int i)
+{
+    return CT_WMMA_GFX12 ? i + 8 * (lane / 16) : 2 * i + lane / 16;
 }
 
 // wt[r][m][co][ci] (Co_pad x Ci_pad per (r, m)) from w[ci][co][t].
@@ -198,17 +221,19 @@ extern "C" __global__ void __launch_bounds__(CT_BLOCK_SIZE)
 #pragma unroll
             for(int m = 0; m < CT_T; ++m)
             {
-                // B: column q, the 16 channels of dy[., q - m]; A: row co, the 16 channels of w.
+                // B: column q, channels of dy[., q - m]; A: row co, channels of w. A and B take the
+                // same channels per lane.
+                const int k0 = kk + frag_k0(lane);
                 frag_t b[2];
 #pragma unroll
                 for(int qb = 0; qb < 2; ++qb)
                     b[qb] = *reinterpret_cast<const frag_t*>(
-                        &xs[(16 * (2 * wq + qb) + lane % 16 + (CT_T - 1) - m) * CT_ROW + kk]);
+                        &xs[(16 * (2 * wq + qb) + lane % 16 + (CT_T - 1) - m) * CT_ROW + k0]);
 #pragma unroll
                 for(int r = 0; r < CT_S; ++r)
                 {
                     const frag_t a = *reinterpret_cast<const frag_t*>(
-                        &ws[((r * CT_T + m) * CT_CO_T + 16 * wco + lane % 16) * CT_ROW + kk]);
+                        &ws[((r * CT_T + m) * CT_CO_T + 16 * wco + lane % 16) * CT_ROW + k0]);
 #pragma unroll
                     for(int qb = 0; qb < 2; ++qb)
                         acc[r][qb] = wmma(a, b[qb], acc[r][qb]);
@@ -217,8 +242,8 @@ extern "C" __global__ void __launch_bounds__(CT_BLOCK_SIZE)
         __syncthreads();
     }
 
-    // WMMA D layout: a lane holds column lane % 16; value i is row 2 * i + lane / 16. Interleave
-    // the phases in LDS as ys[co][S * q + r].
+    // WMMA D layout: a lane holds column lane % 16; value i is row d_row(lane, i). Interleave the
+    // phases in LDS as ys[co][S * q + r].
     u16* ys = smem;
 #pragma unroll
     for(int r = 0; r < CT_S; ++r)
@@ -227,7 +252,7 @@ extern "C" __global__ void __launch_bounds__(CT_BLOCK_SIZE)
 #pragma unroll
             for(int i = 0; i < 8; ++i)
             {
-                const int co                     = 16 * wco + 2 * i + lane / 16;
+                const int co                     = 16 * wco + d_row(lane, i);
                 const int q                      = 16 * (2 * wq + qb) + lane % 16;
                 ys[co * CT_OUT_W + CT_S * q + r] = to_storage(acc[r][qb][i]);
             }
