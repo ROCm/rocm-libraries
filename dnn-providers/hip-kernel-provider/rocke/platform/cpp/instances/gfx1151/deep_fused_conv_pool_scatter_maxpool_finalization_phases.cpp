@@ -27,7 +27,7 @@
 
 #include <stddef.h>
 
-#include "rocke/arch_target.h" /* full rocke_mma_op_t struct (c_layout / c_frag_len) */
+#include "rocke/arch_target.h" /* full rocke_mma_op_t struct (dst.layout / dst.frag_len) */
 #include "rocke/helper_rocke.helpers.epilogues.h" /* full rocke_warp_grid_t struct + property fns */
 #include "rocke/instance_gfx1151_deep_fused_conv_pool.h"
 #include "rocke/instance_gfx1151_deep_fused_conv_pool_internal.h"

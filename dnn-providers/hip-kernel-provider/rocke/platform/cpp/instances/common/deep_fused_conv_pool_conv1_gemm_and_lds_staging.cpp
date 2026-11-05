@@ -131,8 +131,8 @@ static rocke_value_t* dfcp_load_smem_frag_contiguous_f16(rocke_ir_builder_t* b,
  * _stage_accumulators_to_cshuffle_lds (py 388-456)
  *
  * Publish MMA accumulators to a row-major [tile_m, tile_n] LDS tile, fully
- * op-driven via op->c_frag_len + op->c_layout()->coord + the per-warp tile
- * geometry. sync=false defers the trailing barrier so the caller can merge it
+ * op-driven via op->dst.frag_len + rocke_mma_op_dst_layout() + the per-warp
+ * tile geometry. sync=false defers the trailing barrier so the caller can merge it
  * with the disjoint W1 producer barrier.
  * ================================================================== */
 rocke_value_t* rocke_dfcp_stage_accumulators_to_cshuffle_lds(rocke_ir_builder_t* b,

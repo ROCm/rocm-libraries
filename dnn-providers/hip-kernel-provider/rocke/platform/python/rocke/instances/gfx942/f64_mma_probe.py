@@ -73,8 +73,6 @@ def build_f64_mma_probe(spec: F64MmaProbeSpec) -> KernelDef:
     output_rows = max(spec.m, 64 // spec.m)
     if (
         atom is None
-        or atom.family != "mma"
-        or atom.shape != (spec.m, spec.m, 4)
         or any(type(size) is not int for size in (*atom.shape, atom.wave_size))
         or atom.wave_size != 64
         or any(not usable(desc) for desc in (*atom.srcs, atom.dst))

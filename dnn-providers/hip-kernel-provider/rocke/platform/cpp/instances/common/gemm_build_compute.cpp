@@ -29,8 +29,8 @@
  *  One K-tile worth of MMAs across all per-warp atom positions and every K
  *  atom step inside this K-tile. On WMMA (RDNA) this delegates to the fully
  *  contract-driven _emit_wmma_phase. On MFMA (CDNA) it keeps the byte-identical
- *  arch-formula fragment load; the matmul + accumulator length are
- *  contract-driven (rocke_gemm_emit_mma / op->c_frag_len).
+ *  arch-formula fragment load; the matmul + result fragment length are
+ *  contract-driven (rocke_gemm_emit_mma / op->dst.frag_len).
  *
  *  lds_parity is split (per the internal-header convention) into a compile-time
  *  int (parity_imm) OR a runtime Value (parity_v != NULL == Python isinstance

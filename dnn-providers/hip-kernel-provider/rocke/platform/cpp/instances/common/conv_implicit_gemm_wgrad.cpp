@@ -2076,7 +2076,7 @@ static void wgrad_emit_split_k_epilogue_f32(rocke_ir_builder_t* b,
 // ---------------------------------------------------------------------------
 // Wgrad split-K WMMA epilogue
 // Mirrors Python _emit_wgrad_split_k_epilogue_wmma: the per-slot (row, col)
-// comes from the WMMA C-fragment layout (op.c_layout().coord), not from the
+// comes from the WMMA result layout (op.dst_layout().coord), not from the
 // MFMA distribution decoder, so it needs no ctx->atom.
 //   fp32      -- scalar global_atomic_add per element.
 //   fp16/bf16 -- one packed <2 x dtype> atomic per element, value in its half
@@ -2385,7 +2385,7 @@ static void wgrad_emit_direct_epilogue(rocke_ir_builder_t* b,
     }
 
     /* WMMA path: mirrors Python _emit_wgrad_direct_epilogue_wmma.
-     * op.c_layout().coord(b, lane, i) gives per-slot (row_off, col_off);
+     * op.dst_layout().coord(b, lane, i) gives per-slot (row_off, col_off);
      * dW_desc.offset(k_out=m_val, n_wg=n_val) gives the byte offset. */
     const rocke_mmaop_t* op = ctx->op;
     int mfmas_m = ctx->mfmas_m;
