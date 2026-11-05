@@ -6030,6 +6030,12 @@ _4WGQA_LOG2E = 1.4426950408889634
 _4WGQA_LEAN_HEAD_SIZES = (192, 256)
 
 
+def _clamp_to_last(b, idx, last):
+    """``min(idx, last)``: bound a Q row or K/V key of the 4-warp bodies to the last
+    valid one of its sequence, so tiles that run past the sequence stay in bounds."""
+    return b.select(b.cmp_lt(idx, last), idx, last)
+
+
 def _online_softmax_rescale(
     b, Sm, m_old, l_old, *, NKEYT, CPL, NKpv, BPL, sc, ninf, zf, bperm, dtype, exp
 ):
@@ -6179,7 +6185,7 @@ def _build_gfx942_4warp_gqa_lean(
 
     def phys_key(kv, keytile):
         key = b.add(b.mul(kv, b.const_i32(BN)), keytile)
-        key = b.select(b.cmp_lt(key, k_last), key, k_last)
+        key = _clamp_to_last(b, key, k_last)
         lblk = b.add(b.mul(sid, bt_stride_p), b.div(key, b.const_i32(BS)))
         pb = b.global_load_i32(BT, lblk)
         return b.add(b.mul(pb, b.const_i32(BS)), b.mod(key, b.const_i32(BS)))
@@ -6229,7 +6235,7 @@ def _build_gfx942_4warp_gqa_lean(
                 b.mul(b.const_i32(h), b.const_i32(K)), b.mul(ld.k_blk, b.const_i32(APL))
             )
             q_tok = b.add(b.add(qstart, wq), ld.n_in_atom)
-            q_tok = b.select(b.cmp_lt(q_tok, q_last), q_tok, q_last)
+            q_tok = _clamp_to_last(b, q_tok, q_last)
             q_off, _ = q_desc.offset(b, token=q_tok, head=qhead, dim=koff)
             q = b.global_load_vN(Q, q_off, dtype, BPL, align=BPL * 2)
             for kt in range(NKEYT):
@@ -6362,12 +6368,22 @@ def build_gfx942_4warp_gqa(
     HKV = spec.num_kv_heads
     GQAG = spec.num_queries_per_kv
     BS = spec.block_size
+    if BS & (BS - 1):
+        raise NotImplementedError(
+            f"4-warp GQA kernel needs a power-of-two block_size, got {BS}"
+        )
+    BS_LOG2 = BS.bit_length() - 1
     HD128 = HD == 128
     # Double-buffer prefetch pipeline (BN=32 LDS-staged K/V + swizzle) is D128 AND bs<=32.
     # bs64 forces BN>=64 (1 block/tile min); BN=64 double-buffer overflows 64KB LDS, so
     # bs64-D128 runs the single-buffer (D256-style) path at BN=64 (bs64 extension).
     HD128_PIPE = HD128 and BS <= 32
     BN = 32 if HD128_PIPE else 64
+    if BN % BS:
+        # A page wider than the KV tile would make BPT 0 and misplace every page.
+        raise NotImplementedError(
+            f"4-warp GQA kernel needs block_size to divide the {BN}-key tile, got {BS}"
+        )
     BPT = BN // BS
     at = MfmaAtom.bf16_32x32x8() if spec.dtype == "bf16" else MfmaAtom.f16_32x32x8()
     APL, BPL, CPL, K = at.a_per_lane, at.b_per_lane, at.c_per_lane, at.k
@@ -6475,21 +6491,6 @@ def build_gfx942_4warp_gqa(
         b.cmp_ge(qbase, qlen)
     ):  # padding q-block (AITER +num_seqs over-alloc) -> skip
         b.ret()
-    # Rows past qlen are never stored, but their Q load must stay in bounds: clamp to the
-    # sequence's last token (once, outside the KV loop that reloads Q).
-    _last_tok = b.sub(cu_q_stop, b.const_i32(1))
-    if _FOLD:
-        # m-map: M-row (wq + n_in_atom) -> (tok=m//FOLD_HEADS, head=m%FOLD_HEADS),
-        # head-fastest. Split by FOLD_HEADS (tile geometry); head BASE strides by GQAG.
-        _m = b.add(wq, ld.n_in_atom)
-        q_tok_c = b.smin(b.add(qstart, b.div(_m, b.const_i32(FOLD_HEADS))), _last_tok)
-        q_head_c = b.add(
-            b.mul(kvh, b.const_i32(GQAG)), b.mod(_m, b.const_i32(FOLD_HEADS))
-        )
-    else:
-        q_tok_c = b.smin(b.add(b.add(qstart, wq), ld.n_in_atom), _last_tok)
-        q_head_c = qhead
-
     V_lds = b.smem_alloc(
         dtype, [64, HD], name_hint="Vlds"
     )  # D128: 2x 32-key buffers (swizzled); D256: 64-key single
@@ -6525,40 +6526,57 @@ def build_gfx942_4warp_gqa(
         "query_ptr", lengths=[1 << 30, H, HD], coord_names=("token", "head", "dim")
     )
 
-    kv_desc = TensorDescriptor.naive(
-        "kv_cache",
-        lengths=[1 << 24, BS, HKV, HD],
-        coord_names=("physical_block", "token", "kv_head", "dim"),
-    ).transform(
-        indirect(
-            "logical_block",
-            into="physical_block",
-            table=BT,
-            base=b.mul(sid, bt_stride_p),
-        ),
-    )
-    kv_pos_desc = kv_desc.transform(
-        unmerge("kv_pos", into=("logical_block", "token"), dims=(1 << 24, BS))
-    )
-    kv_tile_desc = kv_desc.transform(
-        unmerge("tile_key", into=("block_in_tile", "token"), dims=(BPT, BS)),
-        embed(("tile", "block_in_tile"), into="logical_block", strides=(BPT, 1)),
-    )
-    # Keys past klen in the last tile are masked (P = 0), but 0 * NaN is NaN: clamp them to the
-    # sequence's last key so their block-table entry and cache slot are the sequence's own. Only
-    # tiles of the masked loops can reach past klen; the interior loop keeps the (tile, key in
-    # tile) address, whose key split is loop-invariant, which this VALU-bound kernel needs.
-    last_key = b.sub(klen, b.const_i32(1))
+    # Every Q row is bounded by the last token of its sequence and every K/V page by
+    # its last page: the TOKBLK-row Q block and the KV tiles otherwise read Q rows
+    # and block-table entries past the sequence when its length is not a tile
+    # multiple (decode reads 127 Q rows past a 1-token sequence, off the end of the
+    # Q tensor). Unlike the lean body this clamps the page, not the key, so the
+    # per-lane page/offset split stays out of the KV loop (a per-tile key clamp
+    # was measurably slower on the fold cohort); keys past klen read rows of the
+    # last valid page. Those keys are masked to -inf (P = 0) and clamped rows are
+    # never stored, so only the addresses change.
+    k_last_page = b.lshr(b.sub(klen, b.const_i32(1)), b.const_i32(BS_LOG2))
+    q_last = b.sub(cu_q_stop, b.const_i32(1))
+    # This lane's clamped Q row is loop-invariant, so it is computed once here
+    # rather than per KV tile (the per-tile form was measurably slower at bs64).
+    if _FOLD:
+        # m-map: M-row (wq + n_in_atom) -> (tok=m//FOLD_HEADS,
+        # head=m%FOLD_HEADS), head-fastest. Split by FOLD_HEADS (tile
+        # geometry); head BASE strides by GQAG (the GQA group).
+        _m = b.add(wq, ld.n_in_atom)
+        q_row = b.add(qstart, b.div(_m, b.const_i32(FOLD_HEADS)))
+        q_row = _clamp_to_last(b, q_row, q_last)
+        q_row_head = b.add(
+            b.mul(kvh, b.const_i32(GQAG)), b.mod(_m, b.const_i32(FOLD_HEADS))
+        )
+    else:
+        q_row = b.add(b.add(qstart, wq), ld.n_in_atom)
+        q_row = _clamp_to_last(b, q_row, q_last)
+        q_row_head = qhead
+
+    # The page clamp keeps the block-table read in bounds, but keys past klen in the
+    # last page still read its unused slots, and 0 * NaN is NaN in P @ V: tiles of the
+    # masked loops (the only ones that reach past klen) clamp the key to the
+    # sequence's last key instead, which also bounds its page.
+    k_last = b.sub(klen, b.const_i32(1))
+
+    def phys_key(kv, keytile, clamp):
+        if clamp:
+            key = _clamp_to_last(b, b.add(b.mul(kv, b.const_i32(BN)), keytile), k_last)
+            page = b.div(key, b.const_i32(BS))
+            slot = b.mod(key, b.const_i32(BS))
+        else:
+            page = b.add(b.mul(kv, b.const_i32(BPT)), b.div(keytile, b.const_i32(BS)))
+            page = b.smin(page, k_last_page)
+            slot = b.mod(keytile, b.const_i32(BS))
+        pb = b.global_load_i32(BT, b.add(b.mul(sid, bt_stride_p), page))
+        return b.add(b.mul(pb, b.const_i32(BS)), slot)
 
     def kv_elem(kv, keytile, dim, clamp):
-        if clamp:
-            pos = b.smin(b.add(b.mul(kv, b.const_i32(BN)), keytile), last_key)
-            off, _ = kv_pos_desc.offset(b, kv_pos=pos, kv_head=kvh, dim=dim)
-        else:
-            off, _ = kv_tile_desc.offset(
-                b, tile=kv, tile_key=keytile, kv_head=kvh, dim=dim
-            )
-        return off
+        pk = phys_key(kv, keytile, clamp)
+        return b.add(
+            b.mul(b.add(b.mul(pk, b.const_i32(HKV)), kvh), b.const_i32(HD)), dim
+        )
 
     sc = b.fmul(scale_p, b.const_f32(_4WGQA_LOG2E))
     ninf = b.const_f32(-1e30)
@@ -6738,7 +6756,7 @@ def build_gfx942_4warp_gqa(
             koff = b.add(
                 b.mul(b.const_i32(h), b.const_i32(K)), b.mul(ld.k_blk, b.const_i32(APL))
             )
-            q_off, _ = q_desc.offset(b, token=q_tok_c, head=q_head_c, dim=koff)
+            q_off, _ = q_desc.offset(b, token=q_row, head=q_row_head, dim=koff)
             q = b.global_load_vN(Q, q_off, dtype, BPL, align=BPL * 2)
             for kt in range(NKEYT):
                 if HD128_PIPE:

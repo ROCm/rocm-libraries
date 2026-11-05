@@ -4087,10 +4087,9 @@ def _tiled_3d_segment_lds_bytes(spec) -> int:
 
 def _tiled_3d_reduce_lds_bytes(spec) -> int:
     """The reducer stores one F32 softmax factor per segment in LDS."""
-    from rocke.core.dtypes import dtype_info
+    from .attention_split_kv_reduce import split_kv_reduce_lds_bytes
 
-    size = spec.num_segments * (dtype_info(F32.name).encoded_bits // 8)
-    return (size + 15) & ~15
+    return split_kv_reduce_lds_bytes(spec.num_segments)
 
 
 def _validate_strided_3d_lds(segment, reduce, *, arch: str) -> None:
@@ -6109,6 +6108,8 @@ def run_unified_attention_torch(
     ``NotImplementedError`` rather than returning without it. Rows with no
     visible key get ``-inf`` (and O = 0).
     """
+    if kv_layout == "strided" and problem.emit_lse:
+        raise NotImplementedError("LSE output is not implemented for strided-KV decode")
     # Caller-owned LSE output ([total_q, Hq, 1] FP32, ``problem.emit_lse``):
     # validated before any compile so a bad buffer never reaches a launch.
     validate_unified_lse(
@@ -6163,23 +6164,22 @@ def run_unified_attention_torch(
             )
         backend = implied
     # After the spec-contract checks, so a spec/problem bias mismatch is reported
-    # as such rather than as a bias-argument error.
+    # as such rather than as a bias-argument error. Bias-free paths do not need
+    # tensor metadata here; when bias is enabled, keep strict device access so a
+    # malformed non-None Q cannot bypass the same-device launch check.
+    q_device = q.device if problem.use_additive_bias and q is not None else None
     additive_bias_sq_stride = _validate_additive_bias(
         problem,
         additive_bias,
         additive_bias_batch_stride,
         additive_bias_head_stride,
         additive_bias_sq_stride,
-        None if q is None else q.device,
+        q_device,
     )
 
     if kv_layout not in ("paged", "strided"):
         raise ValueError("kv_layout must be 'paged' or 'strided'")
     if kv_layout == "strided":
-        if problem.emit_lse:
-            raise NotImplementedError(
-                "LSE output is not implemented for strided-KV decode"
-            )
         from .attention_kv_cache import StridedKvCacheLayout
 
         if _launch_arch not in ("gfx942", "gfx950"):
