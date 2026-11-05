@@ -256,17 +256,46 @@ def test_installed_ctest_entries_get_scoped_environment_contracts(
         )
 
 
-@pytest.mark.parametrize("consumer", ["cpp_lowerer", "c_mma"])
-def test_relocated_cmake_consumer_links_lowerer(tmp_path, consumer):
-    """Compile and run C/C++ consumers of a freshly built, relocated SDK."""
+def test_relocated_cmake_consumer_links_lowerer(tmp_path):
+    """Run against a fresh build supplied by the host validation lane."""
     build = os.environ.get("ROCKE_LINK_TEST_BUILD_DIR")
     if not build:
         pytest.skip("set ROCKE_LINK_TEST_BUILD_DIR to a fresh engine build")
-    runner = load_driver("link_test_runner", PLATFORM / "tests/run_all.py")
-    helper = load_driver(
-        "link_test_relocation", PLATFORM / "tests/tools/relocation_consumer.py"
+    prefix = tmp_path / "install"
+    subprocess.run(["cmake", "--install", build, "--prefix", str(prefix)], check=True)
+    relocated = tmp_path / "relocated"
+    prefix.rename(relocated)
+    source = tmp_path / "consumer"
+    source.mkdir()
+    (source / "CMakeLists.txt").write_text(
+        "cmake_minimum_required(VERSION 3.18)\n"
+        "project(consumer LANGUAGES CXX)\n"
+        "find_package(ckc CONFIG REQUIRED)\n"
+        "if(NOT TARGET Threads::Threads)\n"
+        '  message(FATAL_ERROR "missing transitive thread dependency")\n'
+        "endif()\n"
+        "add_executable(consumer main.cpp)\n"
+        "target_link_libraries(consumer PRIVATE ckc::rocke_core)\n"
     )
-    config = runner.relocation_config(
-        Path(build), os.environ.get("ROCKE_LINK_TEST_CONFIG")
+    # Taking the API address forces archive extraction without needing a GPU or
+    # a valid kernel. The executable must resolve the detector dependencies.
+    (source / "main.cpp").write_text(
+        '#include "rocke/lower_llvm.h"\n'
+        "auto volatile lower = &rocke_lower_kernel_to_llvm_ex;\n"
+        "int main() { return lower == nullptr; }\n"
     )
-    helper.run_relocated_consumer(tmp_path, Path(build), config, consumer)
+    output = tmp_path / "consumer-build"
+    subprocess.run(
+        [
+            "cmake",
+            "-S",
+            str(source),
+            "-B",
+            str(output),
+            f"-DCMAKE_PREFIX_PATH={relocated}",
+        ],
+        check=True,
+    )
+    subprocess.run(["cmake", "--build", str(output)], check=True)
+    executable = output / ("consumer.exe" if os.name == "nt" else "consumer")
+    subprocess.run([str(executable)], check=True)

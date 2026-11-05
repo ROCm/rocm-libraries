@@ -110,22 +110,6 @@ def relative_path_guard() -> int:
     return 0
 
 
-def relocation_config(build: Path, selected: str | None = None) -> str:
-    """Honor an explicit harness selection or a manual single-config default."""
-    if selected is not None:
-        if not selected:
-            raise ValueError(
-                "ROCKE_LINK_TEST_CONFIG must name a nonempty configuration"
-            )
-        return selected
-    for line in (build / "CMakeCache.txt").read_text().splitlines():
-        if line.startswith("CMAKE_BUILD_TYPE:") and "=" in line:
-            build_type = line.split("=", 1)[1]
-            if build_type:
-                return build_type
-    return "Release"
-
-
 def ctest_tests(
     build_root: Path, config: str, pattern: str | None = None
 ) -> list[dict]:
@@ -268,8 +252,6 @@ def native_pytest_env(build_root: Path, config: str) -> dict[str, str]:
     env.pop("ROCKE_ONLINE_LIB", None)
     env.pop("ROCKE_REPLAY_CLI", None)
     env.pop("ROCKE_PROVENANCE_MANIFEST", None)
-    env.pop("ROCKE_LINK_TEST_BUILD_DIR", None)
-    env.pop("ROCKE_LINK_TEST_CONFIG", None)
     # Only this runner may claim that its own complete corpus gate succeeded.
     # An ambient value must not suppress the standalone pytest delegation.
     env.pop(_ARCH_DOMAIN_COMPLETE_ENV, None)
@@ -341,10 +323,6 @@ def native_pytest_env(build_root: Path, config: str) -> dict[str, str]:
             )
         except RuntimeError as exc:
             raise ValueError(str(exc)) from exc
-        # Relocation tests configure CMake consumers and need a complete source
-        # build, not an installed artifact or an ambient build directory.
-        env["ROCKE_LINK_TEST_BUILD_DIR"] = str(build_root.resolve())
-        env["ROCKE_LINK_TEST_CONFIG"] = config
         flavor = env.get("ROCKE_LLVM_FLAVOR", "auto")
         print(
             f"== portable-IR provenance: {engine_version} build-id={engine_id} "

@@ -519,21 +519,6 @@ external test-category YAML and TheRock's tier selection determine which
 registered tests actually execute. Check the selected list in the job log or
 with CTest's verbose listing. Registration alone does not establish CI coverage.
 
-The complete developer runner also supplies its validated source build to
-`platform/tests/test_engine_linkage.py` through `ROCKE_LINK_TEST_BUILD_DIR` and
-its selected `--config` through `ROCKE_LINK_TEST_CONFIG`. The test installs and
-relocates that configuration of the SDK, then compiles and runs C++ and C99
-consumers using CMake's generated executable path. An ambient or foreign build
-or configuration is not substituted for the runner's selection. Manual runs
-may set both variables; without a configuration override, the test uses the
-build's `CMAKE_BUILD_TYPE`, or Release when that cache entry is empty or absent.
-The test remains excluded from installed platform pytest because its CMake
-configuration and installation checks need the source build tree. The
-configuration-reader and minimal-SDK relocation regressions instead live in
-`platform/tests/tools/test_run_all.py`, which installed platform CI collects.
-They use the same non-test consumer helper, but construct a tiny SDK locally
-and do not require a source checkout or an ambient engine build.
-
 **The tree/gating reality (a second axis, orthogonal to the two questions).**
 The developer pytest step collects `platform/tests`. The installed platform
 pytest entry excludes the staged library tests, which have separate CTest
