@@ -192,7 +192,6 @@ void testIndexedGeneration() {
     require(affine.loadAs<float>({0, 0, 0}) == -1.0f && affine.loadAs<float>({1, 2, 1}) == 0.0f,
             "Affine-index remainder generation mismatch.");
 
-#ifdef HOSTNUMERICS_TEST_OPENMP
     const int originalDynamic = omp_get_dynamic();
     const int originalThreadCount = omp_get_max_threads();
     omp_set_dynamic(0);
@@ -236,7 +235,6 @@ void testIndexedGeneration() {
 
     omp_set_num_threads(originalThreadCount);
     omp_set_dynamic(originalDynamic);
-#endif
 }
 
 }  // namespace hostnumerics_test

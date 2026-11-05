@@ -167,24 +167,6 @@ jobs:
           ctest --test-dir "${RUNNER_TEMP}/hostnumerics-embedded-test" \
             --no-tests=error --output-on-failure
 
-      - name: Test AMD GPU layout module without OpenMP
-        if: matrix.testing == 'ON'
-        run: |
-          cmake -S shared/hostnumerics \
-            -B "${RUNNER_TEMP}/hostnumerics-no-layout-openmp" \
-            -G Ninja \
-            -DHOSTNUMERICS_BUILD_TESTING=ON \
-            -DHOSTNUMERICS_BUILD_PYTHON=OFF \
-            -DHOSTNUMERICS_AMD_GPU_LAYOUT_ENABLE_OPENMP=OFF \
-            -DHOSTNUMERICS_ENABLE_FETCH=${{ matrix.fetch }} \
-            -DCMAKE_BUILD_TYPE=Release
-          cmake --build "${RUNNER_TEMP}/hostnumerics-no-layout-openmp" \
-            --target hostnumerics-amd-gpu-layout-tests \
-            --parallel "$(nproc)"
-          ctest --test-dir "${RUNNER_TEMP}/hostnumerics-no-layout-openmp" \
-            --tests-regex "^(PreSwizzle|hostnumerics-amd-gpu-layout-boundary)" \
-            --output-on-failure
-
   windows:
     name: Windows, MSVC, native C++
     runs-on: windows-2022
@@ -208,8 +190,6 @@ jobs:
 
       # HostNumerics uses static libraries, as in Baritone's MSVC job. Match the
       # fetched GoogleTest runtime to CMake's default shared MSVC runtime.
-      # Use serial CPU paths initially: classic MSVC OpenMP rejects unsigned
-      # loop indices used by MX generation and packing.
       # Keep this initial Windows job focused on native MSVC and CMake package
       # coverage. Linux already tests the Python bindings and installed import;
       # Windows binding builds and installed imports can follow separately.
@@ -225,8 +205,6 @@ jobs:
           -DHOSTNUMERICS_BUILD_PYTHON=OFF
           -DHOSTNUMERICS_BUILD_BLAS_BACKEND=OFF
           -DHOSTNUMERICS_BUILD_BENCHMARKS=OFF
-          -DHOSTNUMERICS_AMD_GPU_LAYOUT_ENABLE_OPENMP=OFF
-          -DCMAKE_DISABLE_FIND_PACKAGE_OpenMP=TRUE
           -DCMAKE_DISABLE_FIND_PACKAGE_Python=TRUE
           -DCMAKE_DISABLE_FIND_PACKAGE_nanobind=TRUE
 

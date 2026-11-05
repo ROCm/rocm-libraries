@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include <omp.h>
+
 #include <algorithm>
 #include <array>
 #include <bit>
@@ -18,10 +20,6 @@
 #include <vector>
 
 #include "test_support.hpp"
-
-#ifdef HOSTNUMERICS_TEST_OPENMP
-#include <omp.h>
-#endif
 
 namespace hostnumerics_test {
 
