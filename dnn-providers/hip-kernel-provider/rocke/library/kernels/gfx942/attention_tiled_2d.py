@@ -6526,15 +6526,13 @@ def build_gfx942_4warp_gqa(
         "query_ptr", lengths=[1 << 30, H, HD], coord_names=("token", "head", "dim")
     )
 
-    # Every Q row is bounded by the last token of its sequence and every K/V page by
-    # its last page: the TOKBLK-row Q block and the KV tiles otherwise read Q rows
-    # and block-table entries past the sequence when its length is not a tile
-    # multiple (decode reads 127 Q rows past a 1-token sequence, off the end of the
-    # Q tensor). Unlike the lean body this clamps the page, not the key, so the
-    # per-lane page/offset split stays out of the KV loop (a per-tile key clamp
-    # was measurably slower on the fold cohort); keys past klen read rows of the
-    # last valid page. Those keys are masked to -inf (P = 0) and clamped rows are
-    # never stored, so only the addresses change.
+    # Every Q row is bounded by the last token of its sequence: the TOKBLK-row Q block
+    # otherwise reads rows past the sequence when its length is not a tile multiple
+    # (decode reads 127 Q rows past a 1-token sequence, off the end of the Q tensor).
+    # Clamped rows are never stored. Interior KV tiles bound their block-table page by
+    # the last page, which keeps the per-lane page/offset split out of the KV loop (a
+    # per-tile key clamp was measurably slower on the fold cohort); the masked tiles,
+    # which reach past klen, clamp the key instead (below).
     k_last_page = b.lshr(b.sub(klen, b.const_i32(1)), b.const_i32(BS_LOG2))
     q_last = b.sub(cu_q_stop, b.const_i32(1))
     # This lane's clamped Q row is loop-invariant, so it is computed once here

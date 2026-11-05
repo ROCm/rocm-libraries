@@ -351,7 +351,8 @@ class TestLeanBodyBoundsReads(unittest.TestCase):
 
 class TestD128BodyBoundsReads(unittest.TestCase):
     """The same reads in the D128 body of ``build_gfx942_4warp_gqa``, which bounds
-    the block-table page rather than the key. A one-token decode sequence otherwise
+    the block-table page on interior tiles and the key on the masked tiles that reach
+    past the sequence. A one-token decode sequence otherwise
     reads 127 Q rows past its token. Covers the head-fold, plain and block-size-64
     single-buffer variants."""
 
