@@ -66,6 +66,46 @@ MIOPEN_INTERNALS_EXPORT void SaveBinary(const std::vector<char>& hsaco,
                                         const std::string& args);
 #endif
 
+#if MIOPEN_ENABLE_SQLITE_KERN_CACHE
+/// Groups the kernel binaries stored by SaveBinary into bounded SQLite transactions for as long
+/// as the object lives, instead of committing every binary on its own.
+///
+/// Callers of SaveBinary do not change: while any KernelCacheBatch is alive in the process, each
+/// SaveBinary call, from any thread, prepares its record and appends it to the pending buffer of
+/// the user kernel database, then returns. The buffer is committed in one transaction whenever it
+/// reaches the KernDb::BatchLimits bounds (record count, bytes, age), and everything still pending
+/// is committed when a batch ends. Pending binaries are visible to LoadBinary in this process
+/// immediately; other processes see them once committed. See KernDb for the failure contract.
+///
+/// Keep batches around bounded units of work (one tuning search, one precompilation pass).
+class MIOPEN_INTERNALS_EXPORT KernelCacheBatch
+{
+public:
+    KernelCacheBatch();
+    /// Ends the batch if Commit() was not called, e.g. during stack unwinding. Commit failures
+    /// are logged as errors since a destructor cannot report them.
+    ~KernelCacheBatch();
+    KernelCacheBatch(const KernelCacheBatch&)            = delete;
+    KernelCacheBatch& operator=(const KernelCacheBatch&) = delete;
+
+    /// Ends the batch and commits all pending binaries. Throws if a commit fails.
+    void Commit();
+    /// Commits pending binaries that have waited longer than the age bound. Lets a long-running
+    /// owner keep the bound while no new binaries are stored. Throws if a commit fails.
+    void FlushExpired() const;
+
+private:
+    bool active = true;
+};
+#else
+class KernelCacheBatch
+{
+public:
+    void Commit() {}
+    void FlushExpired() const {}
+};
+#endif
+
 #ifdef MIOPEN_BUILD_TESTING
 namespace testing {
 /// Reset cached paths for testing purposes

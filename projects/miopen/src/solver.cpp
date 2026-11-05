@@ -21,6 +21,7 @@
 #include <miopen/softmax/solvers.hpp>
 #include <miopen/multimarginloss/solvers.hpp>
 
+#include <miopen/binary_cache.hpp>
 #include <miopen/conv_algo_name.hpp>
 #include <miopen/db.hpp>
 #include <miopen/env.hpp>
@@ -52,6 +53,7 @@ PrecompileKernels(const Handle& h, const std::vector<KernelInfo>& kernels, bool 
 {
     CompileTimer ct;
     std::vector<Program> programs(kernels.size());
+    KernelCacheBatch kernel_cache_batch;
 
     // clang-format off
     par_for_strided(kernels.size(),
@@ -61,6 +63,7 @@ PrecompileKernels(const Handle& h, const std::vector<KernelInfo>& kernels, bool 
                         programs[i]         = h.LoadProgram(k.kernel_file, k.comp_options, "", force_attach_binary);
                     });
     // clang-format on
+    kernel_cache_batch.Commit();
     ct.Log("PrecompileKernels");
     return programs;
 }

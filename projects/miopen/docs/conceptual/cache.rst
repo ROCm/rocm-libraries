@@ -27,6 +27,33 @@ in this following situations:
    ``BUILD_DEV=ON`` when configuring CMake.
 *  At runtime, set the ``MIOPEN_DISABLE_CACHE`` environment variable to ``true``.
 
+Kernel cache writes during tuning
+====================================================
+
+Outside of tuning, MIOpen commits each newly compiled kernel to the user kernel cache in its own
+SQLite transaction. During tuning (``GenericSearch``) and during the parallel precompilation step
+of Find, MIOpen compiles many kernels in a row, so it groups their cache writes into bounded
+transactions instead:
+
+* Each compiled kernel is compressed and hashed as usual, then held in memory until its group is
+  committed. The kernel is available to the same process immediately, without recompilation.
+* A group is committed in one transaction as soon as it holds 64 kernels or 32 MiB of compressed
+  code, or its oldest kernel has waited for two seconds, and when the tuning or precompilation step
+  ends. The transaction contains only the database writes, never kernel compilation.
+* Other processes see the kernels of a group once it's committed.
+* If a commit fails, the whole group is rolled back and discarded, and the error is reported.
+  Kernels committed earlier stay in the cache, and discarded kernels are compiled again the next
+  time they're needed, as with any cache miss.
+
+Batching reduces the number of commits and the file synchronization calls that come with them,
+which matters most when the cache is on a network file system. It doesn't change the SQLite
+journal or synchronization settings, so each commit is as durable as before.
+
+You can change the limits with the ``MIOPEN_DEBUG_KERNEL_CACHE_BATCH_MAX_RECORDS``,
+``MIOPEN_DEBUG_KERNEL_CACHE_BATCH_MAX_BYTES``, and ``MIOPEN_DEBUG_KERNEL_CACHE_BATCH_MAX_AGE_MS``
+environment variables. Setting ``MIOPEN_DEBUG_KERNEL_CACHE_BATCH_MAX_RECORDS=1`` commits every
+kernel on its own.
+
 Updating MIOpen and removing the cache
 ===============================================================
 
