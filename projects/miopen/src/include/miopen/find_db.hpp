@@ -153,18 +153,31 @@ public:
     // NOLINTEND (bugprone-unchecked-optional-access)
     bool empty() const { return !content.has_value(); }
 
+    /// Callback used to restore invokers for solutions loaded from find-db.
+    /// Must return true only if invokers for the given solutions are now
+    /// registered in the handle.
+    using InvokerRebuilder = std::function<bool(const std::vector<Solution>&)>;
+
     template <class TProblemDescription>
     static std::vector<Solution> TryLoad(const Handle& handle,
                                          const TProblemDescription& problem,
                                          const std::function<FindCoreResult()>& regenerator,
                                          const std::string& path_suffix            = "",
-                                         const AnyInvokeParams* const invokeParams = nullptr)
+                                         const AnyInvokeParams* const invokeParams = nullptr,
+                                         const InvokerRebuilder& invoker_rebuilder = {})
     {
         FindDbRecord_t<TDb> record{handle, problem, path_suffix};
 
         const auto network_config = problem.MakeNetworkConfig();
 
-        if(record.in_sync && !record.Validate(handle, network_config))
+        // Invokers live only in the in-memory InvokerCache of the handle, so a
+        // find-db record written by another process (or another handle) never
+        // has them. Without a rebuilder this forces a full re-search; with one,
+        // the invokers are rebuilt from the cached solutions (kernels come from
+        // the kernel cache, tuning parameters from perf-db) without benchmarking.
+        const bool unbuilt = record.in_sync && record.Validate(handle, network_config);
+
+        if(record.in_sync && (!unbuilt || invoker_rebuilder))
         {
             auto solutions = std::vector<Solution>{};
             record.CopyTo(solutions);
@@ -189,9 +202,21 @@ public:
             }
 
             if(!solutions.empty())
-                return solutions;
-            // All cached entries filtered out: fall through and let the
-            // regenerator re-evaluate against the current workspace.
+            {
+                if(!unbuilt)
+                    return solutions;
+
+                if(invoker_rebuilder(solutions))
+                {
+                    MIOPEN_LOG_I("Find-db: rebuilt invokers from cached record, "
+                                 "skipping search.");
+                    return solutions;
+                }
+
+                MIOPEN_LOG_I("Find-db: unable to rebuild invokers from cached record.");
+            }
+            // All cached entries filtered out, or invokers could not be rebuilt:
+            // fall through and let the regenerator re-evaluate.
         }
 
         MIOPEN_LOG_I("Find-db regenerating.");
