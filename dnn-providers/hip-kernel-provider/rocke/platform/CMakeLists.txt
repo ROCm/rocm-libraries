@@ -731,13 +731,15 @@ if(ROCKE_INSTALL_TESTS)
     # host-side SDPA sequence-length and padding-mask adapters/specs, the
     # fmha_mfma free-stride ABI and layout contracts, the 2D/3D mask_type spec
     # fields, the 3D segment+reduce module's pairing, the reduce's LDS segment
-    # bound against the compiled code object, and the backward-test memo bound
-    # in tests/conftest.py.
+    # bound against the compiled code object, the backward-test memo bound
+    # in tests/conftest.py, and the gfx950 dense varlen K/V buffer bound on the
+    # emitted IR.
     # File-list style (same pattern as conv_pytest) so PYTHONPATH resolves rocke/
     # correctly from the installed tree.
     set(_ROCKE_LIBRARY_ATTENTION_CPU_TEST_RELPATHS
         "tests/library/tests/test_attention_dense_decode.py"
         "tests/library/tests/test_attention_dense_gfx950_lds.py"
+        "tests/library/tests/test_attention_dense_gfx950_varlen_kv_bound.py"
         "tests/library/tests/test_attention_scalar_cache_key.py"
         "tests/library/tests/test_attention_spec_predicate_parity.py"
         "tests/library/tests/test_attention_tiled_2d_mask_type.py"
