@@ -8,8 +8,10 @@
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <optional>
 #include <string>
+#include <utility>
 #include <variant>
 #include <vector>
 
@@ -21,6 +23,7 @@
 #include <hipdnn_test_sdk/utilities/ScratchDirectory.hpp>
 
 #include "BundleFixtureFiles.hpp"
+#include "SdpaFwdGraphTestUtils.hpp"
 #include "harness/bundle/BundleDiscovery.hpp"
 #include "harness/bundle/BundleRegistration.hpp"
 #include "harness/bundle/IntegrationTestBundle.hpp"
@@ -2510,6 +2513,473 @@ TEST_F(TestBundleDiscoveryFixture, AliasInFormatVersion1MetadataFailsTheLoad)
     const auto sweepMessage = failedLoadMessage(sweepRoot, _sweeps);
     EXPECT_NE(sweepMessage.find("aliases needs format_version 2"), std::string::npos)
         << sweepMessage;
+}
+
+// ---------------------------------------------------------------------------
+// absent_tensors: optional tensors in sweep templates
+// ---------------------------------------------------------------------------
+
+namespace
+{
+
+namespace fx = hipdnn_integration_tests::bundle::fixtures;
+namespace sdpa_utils = hipdnn_integration_tests::test_utils;
+
+constexpr int64_t SINK = sdpa_utils::K_OPTIONAL_SDPA_SINK_UID;
+constexpr int64_t V_UID = sdpa_utils::K_OPTIONAL_SDPA_V_UID;
+constexpr int64_t O_UID = sdpa_utils::K_OPTIONAL_SDPA_O_UID;
+constexpr int64_t STATS = sdpa_utils::K_OPTIONAL_SDPA_STATS_UID;
+
+// The case under test in the sweeps of the absent-tensor rules.
+constexpr const char* ABSENT_CASE_ID = "absent_case";
+
+nlohmann::json supersetGraph()
+{
+    return sdpa_utils::optionalSdpaFwdGraphJson(/*withStats=*/true, /*withSink=*/true);
+}
+
+nlohmann::json graphJsonOf(const IntegrationTestBundle& bundle)
+{
+    nlohmann::json graphJson;
+    hipdnn_flatbuffers_sdk::data_objects::to_json(
+        graphJson, *hipdnn_flatbuffers_sdk::data_objects::GetGraph(bundle.graphBuffer.data()));
+    return graphJson;
+}
+
+// The loaded case `caseId` under `root`; nullopt, with a test failure, when it does not load.
+std::optional<IntegrationTestBundle> loadSweepCase(const std::filesystem::path& root,
+                                                   const std::string& caseId,
+                                                   SweepManifestCache& sweeps)
+{
+    for(const auto& discovered : discoverBundles(root))
+    {
+        if(discovered.testName != caseId)
+        {
+            continue;
+        }
+        auto result = loadIntegrationTestBundle(discovered, sweeps);
+        if(auto* loaded = std::get_if<IntegrationTestBundle>(&result))
+        {
+            return std::move(*loaded);
+        }
+        ADD_FAILURE() << caseId << " did not load: " << toString(std::get<LoadError>(result));
+        return std::nullopt;
+    }
+    ADD_FAILURE() << "no case " << caseId << " under " << root;
+    return std::nullopt;
+}
+
+struct AbsentRuleCase
+{
+    std::string name;
+    // Changes the superset template and the sweep, whose one case marks the sink absent.
+    std::function<void(nlohmann::json& templateJson, nlohmann::json& sweepJson)> edit;
+    std::string message;
+};
+
+std::vector<AbsentRuleCase> absentRuleCases()
+{
+    const auto replaceCase = [](const std::vector<int64_t>& absentUids) {
+        return [absentUids](nlohmann::json&, nlohmann::json& sweep) {
+            sweep["cases"][0]
+                = fx::optionalTensorSweepCase(ABSENT_CASE_ID, supersetGraph(), absentUids);
+        };
+    };
+    const auto metadataField = [](const std::string& key, const nlohmann::json& value) {
+        return [key, value](nlohmann::json&, nlohmann::json& sweep) {
+            sweep["cases"][0]["metadata"][key] = value;
+        };
+    };
+    const auto caseField = [](const std::string& key, const nlohmann::json& value) {
+        return [key, value](nlohmann::json&, nlohmann::json& sweep) {
+            sweep["cases"][0][key] = value;
+        };
+    };
+
+    return {
+        {"no_metadata_block",
+         [](nlohmann::json&, nlohmann::json& sweep) { sweep["cases"][0].erase("metadata"); },
+         "absent_tensors needs case metadata with format_version 2"},
+        {"null_metadata_block",
+         caseField("metadata", nullptr),
+         "absent_tensors needs case metadata with format_version 2"},
+        {"format_version_1",
+         metadataField("format_version", 1),
+         "absent_tensors needs format_version 2"},
+        {"sweep_version_1",
+         [](nlohmann::json&, nlohmann::json& sweep) { sweep["version"] = 1; },
+         "absent_tensors needs sweep version 2, not 1"},
+        {"sweep_without_version",
+         [](nlohmann::json&, nlohmann::json& sweep) { sweep.erase("version"); },
+         "absent_tensors needs sweep version 2, not 1"},
+        {"object_in_place_of_a_list",
+         caseField("absent_tensors", nlohmann::json{{"uid", SINK}}),
+         "absent_tensors must be a non-empty array of integer tensor uids"},
+        {"empty_list",
+         caseField("absent_tensors", nlohmann::json::array()),
+         "absent_tensors must be a non-empty array of integer tensor uids"},
+        {"string_uid",
+         caseField("absent_tensors", nlohmann::json::array({"0"})),
+         "absent_tensors must be a non-empty array of integer tensor uids"},
+        {"duplicate_uid",
+         caseField("absent_tensors", nlohmann::json::array({SINK, SINK})),
+         "absent tensor 0 is named twice in absent_tensors"},
+        {"unknown_uid",
+         caseField("absent_tensors", nlohmann::json::array({9})),
+         "absent tensor 9 is not a tensor of the template"},
+        {"values_tensors_entry",
+         [](nlohmann::json&, nlohmann::json& sweep) {
+             sweep["cases"][0]["values"]["tensors"].push_back(
+                 nlohmann::json{{"uid", SINK}, {"dims", {1, 2, 1, 1}}, {"strides", {2, 1, 1, 1}}});
+         },
+         "absent tensor 0 has a values.tensors entry"},
+        {"case_value_keyed_by_uid",
+         [](nlohmann::json&, nlohmann::json& sweep) {
+             sweep["cases"][0]["values"]["alignment"] = nlohmann::json{{"0", 16}};
+         },
+         "absent tensor 0 is a key of the case value values.alignment.0"},
+        {"tensor_patches_entry",
+         caseField("tensor_patches",
+                   nlohmann::json::array({{{"uid", SINK}, {"set", {{"alignment", 8}}}}})),
+         "absent tensor 0 has a tensor_patches entry"},
+        {"inputs_entry",
+         metadataField("inputs", nlohmann::json{{"0", {{"seed", 3}}}}),
+         "absent tensor 0 has a metadata inputs entry"},
+        {"alias_view",
+         metadataField("aliases",
+                       nlohmann::json::array({{{"uid", SINK}, {"of", 1}, {"byte_offset", 0}}})),
+         "absent tensor 0 is the view of a metadata aliases entry"},
+        {"alias_owner",
+         metadataField("aliases",
+                       nlohmann::json::array({{{"uid", 2}, {"of", SINK}, {"byte_offset", 0}}})),
+         "absent tensor 0 is the owner of a metadata aliases entry"},
+        {"golden_declared",
+         caseField("golden", nlohmann::json{{"path", "golden/absent_case/tensors.dvc"}}),
+         "absent_tensors and golden data do not mix"},
+        {"virtual_tensor",
+         [](nlohmann::json& templateJson, nlohmann::json&) {
+             for(auto& tensor : templateJson["tensors"])
+             {
+                 if(tensor["uid"] == SINK)
+                 {
+                     tensor["virtual"] = true;
+                 }
+             }
+         },
+         "absent tensor 0 is virtual"},
+        {"virtual_placeholder",
+         [](nlohmann::json& templateJson, nlohmann::json&) {
+             for(auto& tensor : templateJson["tensors"])
+             {
+                 if(tensor["uid"] == SINK)
+                 {
+                     tensor["virtual"] = "${case.virtual}";
+                 }
+             }
+         },
+         "absent tensor 0 has a virtual flag that is not a literal boolean in the template"},
+        {"port_placeholder",
+         [](nlohmann::json& templateJson, nlohmann::json&) {
+             templateJson["nodes"][0]["inputs"]["sink_token_tensor_uid"] = "${case.sink_uid}";
+         },
+         "absent_tensors needs a uid or null in each node port, and "
+         "nodes[0].inputs.sink_token_tensor_uid holds \"${case.sink_uid}\""},
+        {"float_ports_of_two_nodes",
+         [](nlohmann::json& templateJson, nlohmann::json&) {
+             auto second = templateJson["nodes"][0];
+             second["name"] = "second";
+             second["inputs"]["sink_token_tensor_uid"] = 0.0;
+             templateJson["nodes"].push_back(std::move(second));
+         },
+         "absent tensor 0 is held by node ports of more than one node"},
+        {"ports_of_two_nodes",
+         [](nlohmann::json& templateJson, nlohmann::json&) {
+             auto second = templateJson["nodes"][0];
+             second["name"] = "second";
+             templateJson["nodes"].push_back(std::move(second));
+         },
+         "absent tensor 0 is held by node ports of more than one node"},
+        {"flat_uid_list",
+         [](nlohmann::json& templateJson, nlohmann::json&) {
+             templateJson["nodes"][0]["output_tensor_uids"] = nlohmann::json::array({SINK});
+         },
+         "absent tensor 0 is held by a node outside a node port, at "
+         "nodes[0].output_tensor_uids[0]"},
+        {"uid_field_outside_the_ports",
+         [](nlohmann::json& templateJson, nlohmann::json&) {
+             templateJson["nodes"][0]["attributes"]["extra_tensor_uid"] = SINK;
+         },
+         "absent tensor 0 is held by a node outside a node port, at "
+         "nodes[0].attributes.extra_tensor_uid"},
+        {"tensor_reference",
+         [](nlohmann::json& templateJson, nlohmann::json&) {
+             templateJson["tensors"][0]["ragged_offset_tensor_uid"] = SINK;
+         },
+         "absent tensor 0 is referenced at tensors[0].ragged_offset_tensor_uid"},
+        {"required_port",
+         replaceCase({V_UID}),
+         "the graph with absent tensors [3] does not build; a removed tensor fills a port the "
+         "op requires"},
+        {"last_compared_output",
+         [replaceCase](nlohmann::json& templateJson, nlohmann::json& sweep) {
+             replaceCase({STATS})(templateJson, sweep);
+             for(auto& tensor : templateJson["tensors"])
+             {
+                 if(tensor["uid"] == O_UID)
+                 {
+                     tensor["virtual"] = true;
+                 }
+             }
+         },
+         "removing [5] leaves no output to compare"},
+        {"malformed_tensor_patch",
+         caseField("tensor_patches", nlohmann::json::array({{{"uid", "zero"}}})),
+         "type must be number"},
+    };
+}
+
+// Writes the superset sweep under `root` with its one case `ABSENT_CASE_ID` marking the
+// sink absent, after `edit` changes it.
+void writeAbsentRuleSweep(const std::filesystem::path& root, const AbsentRuleCase& c)
+{
+    auto templateJson = fx::templateOfGraph(supersetGraph());
+    nlohmann::json sweep
+        = {{"version", 2},
+           {"cases",
+            nlohmann::json::array(
+                {fx::optionalTensorSweepCase(ABSENT_CASE_ID, supersetGraph(), {SINK})})}};
+    c.edit(templateJson, sweep);
+    fx::writeTemplateSweep(root / "quick" / "SdpaFwd" / "Optional",
+                           templateJson,
+                           sweep["cases"],
+                           sweep.contains("version") ? sweep["version"] : nlohmann::json());
+}
+
+} // namespace
+
+TEST_F(TestBundleDiscoveryFixture, AbsentTensorRuleViolationsFailTheLoadOfASweepCase)
+{
+    for(const auto& c : absentRuleCases())
+    {
+        SCOPED_TRACE(c.name);
+        const auto root = _tempDir / c.name;
+        writeAbsentRuleSweep(root, c);
+
+        const auto discovered = discoverBundles(root);
+        ASSERT_EQ(discovered.size(), 1u);
+        EXPECT_THROW(loadIntegrationTestBundle(discovered.front(), _sweeps), BundleMetadataError);
+
+        const auto message = failedLoadMessage(root, _sweeps);
+        EXPECT_NE(message.find(std::string("#") + ABSENT_CASE_ID), std::string::npos) << message;
+        EXPECT_NE(message.find(c.message), std::string::npos) << message;
+    }
+}
+
+TEST_F(TestBundleDiscoveryFixture, UnknownSweepVersionFailsTheLoadOfEveryCase)
+{
+    const auto graph = sdpa_utils::optionalSdpaFwdGraphJson(/*withStats=*/true, /*withSink=*/false);
+    const auto cases = nlohmann::json::array({fx::optionalTensorSweepCase("case_a", graph),
+                                              fx::optionalTensorSweepCase("case_b", graph)});
+
+    const std::vector<std::pair<std::string, nlohmann::json>> versions
+        = {{"integer_3", 3}, {"string_2", "2"}, {"null", nullptr}};
+    for(const auto& [name, version] : versions)
+    {
+        SCOPED_TRACE(name);
+        const auto root = _tempDir / name;
+        const auto sweepDir = root / "quick" / "SdpaFwd" / "Plain";
+        fx::writeTemplateSweep(sweepDir, fx::templateOfGraph(graph), cases, 2);
+        auto sweepJson = readJsonFile(sweepDir / "sweep.json");
+        sweepJson["version"] = version;
+        writeJsonFile(sweepDir / "sweep.json", sweepJson);
+
+        const auto discovered = discoverBundles(root);
+        ASSERT_EQ(discovered.size(), 2u);
+        for(const auto& bundle : discovered)
+        {
+            auto outcome = detail::classifyBundle(bundle, _sweeps);
+            ASSERT_TRUE(std::holds_alternative<detail::FailedLoad>(outcome)) << bundle.testName;
+            const auto& message = std::get<detail::FailedLoad>(outcome).message;
+            std::string expected = "#";
+            expected += bundle.testName;
+            expected += ": sweep version ";
+            expected += version.dump();
+            EXPECT_NE(message.find(expected), std::string::npos) << message;
+            EXPECT_NE(message.find("sweep.json is not 1 or 2"), std::string::npos) << message;
+        }
+    }
+}
+
+TEST_F(TestBundleDiscoveryFixture, SweepVersion2WithoutAbsentTensorsLoads)
+{
+    const auto graph = sdpa_utils::optionalSdpaFwdGraphJson(/*withStats=*/true, /*withSink=*/false);
+    fx::writeTemplateSweep(_tempDir / "quick" / "SdpaFwd" / "Plain",
+                           fx::templateOfGraph(graph),
+                           nlohmann::json::array({fx::optionalTensorSweepCase("plain", graph)}),
+                           2);
+
+    const auto bundle = loadSweepCase(_tempDir, "plain", _sweeps);
+    ASSERT_TRUE(bundle.has_value());
+    EXPECT_EQ(bundle->outputTensorUids, (std::vector<int64_t>{O_UID, STATS}));
+}
+
+// One superset template (Q, K, V, O, Stats and a sink, every tensor with placeholder dims
+// and strides) gives the same graphs as one template per tensor set.
+TEST_F(TestBundleDiscoveryFixture, AbsentTensorCasesMatchTheirOwnTemplates)
+{
+    const auto superset = supersetGraph();
+    fx::writeTemplateSweep(
+        _tempDir / "superset" / "quick" / "SdpaFwd" / "Superset",
+        fx::templateOfGraph(superset),
+        nlohmann::json::array({fx::optionalTensorSweepCase("all", superset),
+                               fx::optionalTensorSweepCase("sink_absent", superset, {SINK}),
+                               fx::optionalTensorSweepCase("stats_absent", superset, {STATS})}));
+
+    struct Expected
+    {
+        std::string caseId;
+        nlohmann::json graph;
+        int64_t absentUid;
+    };
+    const std::vector<Expected> expected = {
+        {"all", sdpa_utils::optionalSdpaFwdGraphJson(true, true), -1},
+        {"sink_absent", sdpa_utils::optionalSdpaFwdGraphJson(true, false), SINK},
+        {"stats_absent", sdpa_utils::optionalSdpaFwdGraphJson(false, true), STATS},
+    };
+
+    const auto supersetRoot = _tempDir / "superset";
+    ASSERT_EQ(discoverBundles(supersetRoot).size(), 3u);
+    for(const auto& e : expected)
+    {
+        SCOPED_TRACE(e.caseId);
+        const auto separateRoot = _tempDir / ("separate_" + e.caseId);
+        fx::writeTemplateSweep(
+            separateRoot / "quick" / "SdpaFwd" / "Separate",
+            fx::templateOfGraph(e.graph),
+            nlohmann::json::array({fx::optionalTensorSweepCase(e.caseId, e.graph)}),
+            1);
+
+        const auto fromSuperset = loadSweepCase(supersetRoot, e.caseId, _sweeps);
+        const auto fromSeparate = loadSweepCase(separateRoot, e.caseId, _sweeps);
+        ASSERT_TRUE(fromSuperset.has_value());
+        ASSERT_TRUE(fromSeparate.has_value());
+
+        EXPECT_EQ(graphJsonOf(*fromSuperset), graphJsonOf(*fromSeparate));
+        EXPECT_EQ(fromSuperset->outputTensorUids, fromSeparate->outputTensorUids);
+
+        const auto packUids = fx::hostVariantPackUids(*fromSuperset);
+        EXPECT_EQ(packUids, fx::hostVariantPackUids(*fromSeparate));
+        if(e.absentUid >= 0)
+        {
+            EXPECT_EQ(packUids.count(e.absentUid), 0u);
+            EXPECT_EQ(fromSuperset->graphWrapper().getTensorMap().count(e.absentUid), 0u);
+        }
+    }
+}
+
+TEST_F(TestBundleDiscoveryFixture, AbsentInputAndAbsentOptionalOutputLoad)
+{
+    const auto superset = supersetGraph();
+    fx::writeTemplateSweep(
+        _tempDir / "quick" / "SdpaFwd" / "Superset",
+        fx::templateOfGraph(superset),
+        nlohmann::json::array({fx::optionalTensorSweepCase("sink_absent", superset, {SINK}),
+                               fx::optionalTensorSweepCase("stats_absent", superset, {STATS})}));
+
+    const auto discovered = discoverBundles(_tempDir);
+    ASSERT_EQ(discovered.size(), 2u);
+    for(const auto& bundle : discovered)
+    {
+        EXPECT_TRUE(
+            std::holds_alternative<detail::LoadedBundle>(detail::classifyBundle(bundle, _sweeps)))
+            << bundle.testName;
+    }
+
+    const auto sinkAbsent = loadSweepCase(_tempDir, "sink_absent", _sweeps);
+    ASSERT_TRUE(sinkAbsent.has_value());
+    const auto sinkJson = graphJsonOf(*sinkAbsent);
+    EXPECT_TRUE(sinkJson["nodes"][0]["inputs"]["sink_token_tensor_uid"].is_null());
+    EXPECT_EQ(sinkAbsent->metadata.formatVersion, 2);
+    EXPECT_EQ(sinkAbsent->outputTensorUids, (std::vector<int64_t>{O_UID, STATS}));
+
+    const auto statsAbsent = loadSweepCase(_tempDir, "stats_absent", _sweeps);
+    ASSERT_TRUE(statsAbsent.has_value());
+    EXPECT_TRUE(graphJsonOf(*statsAbsent)["nodes"][0]["outputs"]["stats_tensor_uid"].is_null());
+    EXPECT_EQ(statsAbsent->outputTensorUids, (std::vector<int64_t>{O_UID}));
+}
+
+// The absent sink has no values entry, so expanding the template before pruning it asks
+// for the sink's dims; the case would then be a quiet skip, not a loaded case.
+TEST_F(TestBundleDiscoveryFixture, AbsentTensorsArePrunedBeforeTheTemplateIsExpanded)
+{
+    const auto superset = supersetGraph();
+    const auto templateJson = fx::templateOfGraph(superset);
+    const auto caseJson = fx::optionalTensorSweepCase("sink_absent", superset, {SINK});
+    const auto sweepDir = _tempDir / "quick" / "SdpaFwd" / "Superset";
+    fx::writeTemplateSweep(sweepDir, templateJson, nlohmann::json::array({caseJson}));
+
+    const auto discovered = discoverBundles(_tempDir);
+    ASSERT_EQ(discovered.size(), 1u);
+    EXPECT_TRUE(std::holds_alternative<IntegrationTestBundle>(
+        loadIntegrationTestBundle(discovered.front(), _sweeps)));
+
+    try
+    {
+        (void)detail::expandTemplateGraph(templateJson, caseJson, discovered.front());
+        ADD_FAILURE() << "expanding the unpruned template did not throw";
+    }
+    catch(const std::runtime_error& e)
+    {
+        EXPECT_STREQ(e.what(), "Missing per-tensor placeholder value");
+    }
+    EXPECT_NO_THROW((void)detail::expandTemplateGraph(
+        detail::pruneAbsentTensors(templateJson, {SINK}), caseJson, discovered.front()));
+
+    auto withoutAbsentKey = caseJson;
+    withoutAbsentKey.erase("absent_tensors");
+    fx::writeTemplateSweep(sweepDir, templateJson, nlohmann::json::array({withoutAbsentKey}));
+    SweepManifestCache freshSweeps;
+    EXPECT_TRUE(std::holds_alternative<detail::SkippedLoad>(
+        detail::classifyBundle(discoverBundles(_tempDir).front(), freshSweeps)));
+}
+
+TEST_F(TestBundleDiscoveryFixture, AbsentTensorHeldAsAFloatInAPortIsPruned)
+{
+    const auto superset = supersetGraph();
+    auto templateJson = fx::templateOfGraph(superset);
+    templateJson["nodes"][0]["inputs"]["sink_token_tensor_uid"] = 0.0;
+    fx::writeTemplateSweep(
+        _tempDir / "quick" / "SdpaFwd" / "Superset",
+        templateJson,
+        nlohmann::json::array({fx::optionalTensorSweepCase("sink_absent", superset, {SINK})}));
+
+    const auto sinkAbsent = loadSweepCase(_tempDir, "sink_absent", _sweeps);
+    ASSERT_TRUE(sinkAbsent.has_value());
+    EXPECT_TRUE(graphJsonOf(*sinkAbsent)["nodes"][0]["inputs"]["sink_token_tensor_uid"].is_null());
+}
+
+TEST(TestPruneAbsentTensors, RemovesTheTensorsAndNullsTheirPortsOnly)
+{
+    auto graph = fx::templateOfGraph(supersetGraph());
+    graph["nodes"][0]["output_tensor_uids"] = nlohmann::json::array({SINK});
+    graph["nodes"][0]["attributes"]["left_bound"] = SINK;
+
+    auto expected = graph;
+    auto keptTensors = nlohmann::json::array();
+    for(const auto& tensor : graph.at("tensors"))
+    {
+        if(tensor.at("uid") != SINK && tensor.at("uid") != STATS)
+        {
+            keptTensors.push_back(tensor);
+        }
+    }
+    expected["tensors"] = keptTensors;
+    expected["nodes"][0]["inputs"]["sink_token_tensor_uid"] = nullptr;
+    expected["nodes"][0]["outputs"]["stats_tensor_uid"] = nullptr;
+
+    EXPECT_EQ(detail::pruneAbsentTensors(graph, {SINK, STATS}), expected);
+    EXPECT_EQ(detail::pruneAbsentTensors(fx::templateOfGraph(supersetGraph()), {SINK}),
+              fx::templateOfGraph(sdpa_utils::optionalSdpaFwdGraphJson(true, false)));
 }
 
 // NOLINTEND(readability-identifier-naming)

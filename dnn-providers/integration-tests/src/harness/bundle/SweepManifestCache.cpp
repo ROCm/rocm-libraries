@@ -47,6 +47,11 @@ const nlohmann::json* SweepManifest::findCase(const std::string& caseId) const
     return it != _caseIndexById.end() ? &_json.at("cases").at(it->second) : nullptr;
 }
 
+const nlohmann::json* SweepManifest::version() const
+{
+    return _json.is_object() && _json.contains("version") ? &_json.at("version") : nullptr;
+}
+
 const SweepManifestCache::Sweep& SweepManifestCache::get(const DiscoveredBundle& discovered)
 {
     if(_sweep.has_value() && _sweepPath == discovered.jsonPath

@@ -8,6 +8,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <filesystem>
 #include <limits>
 #include <memory>
 #include <optional>
@@ -16,6 +17,7 @@
 #include <stdexcept>
 #include <string>
 #include <utility>
+#include <variant>
 #include <vector>
 
 #include <hipdnn_data_sdk/types.hpp>
@@ -25,9 +27,12 @@
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <nlohmann/json.hpp>
 
+#include "BundleFixtureFiles.hpp"
+#include "SdpaFwdGraphTestUtils.hpp"
 #include "harness/bundle/IntegrationTestBundle.hpp"
 #include "harness/input-init/FillInputs.hpp"
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
+#include <hipdnn_test_sdk/utilities/ScratchDirectory.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 #include <hipdnn_test_sdk/utilities/detail/FlatbufferTensorAttributesUtils.hpp>
 
@@ -1915,6 +1920,129 @@ TEST(TestFillInputs, FillDerivesInputsOnlyForAGraphWhoseFillReplacesInputs)
     InputFillRecipes recipes;
     EXPECT_THROW(fillInputs(sdpaBackward, inputs, {1, 2, 3}, recipes, nullptr, {{3, 2, 0}}),
                  std::invalid_argument);
+}
+
+// ── Absent tensors ──────────────────────────────────────────────────────────
+
+namespace
+{
+
+namespace fx = hipdnn_integration_tests::bundle::fixtures;
+namespace sdpa_utils = hipdnn_integration_tests::test_utils;
+
+// The loaded case `caseId` under `root`; nullopt, with a test failure, when it does not load.
+std::optional<bundle::IntegrationTestBundle> loadSweepCase(const std::filesystem::path& root,
+                                                           const std::string& caseId,
+                                                           bundle::SweepManifestCache& sweeps)
+{
+    for(const auto& discovered : bundle::discoverBundles(root))
+    {
+        if(discovered.testName != caseId)
+        {
+            continue;
+        }
+        auto result = bundle::loadIntegrationTestBundle(discovered, sweeps);
+        if(auto* loaded = std::get_if<bundle::IntegrationTestBundle>(&result))
+        {
+            return std::move(*loaded);
+        }
+        ADD_FAILURE() << caseId << " did not load";
+        return std::nullopt;
+    }
+    ADD_FAILURE() << "no case " << caseId << " under " << root;
+    return std::nullopt;
+}
+
+// Fills the inputs of `loaded` as the harness does on the host: every tensor that is not
+// virtual and not an output, with the metadata `seed` and the recipes and seeds of the
+// metadata `inputs`.
+InputTensorMap fillLoadedInputs(const bundle::IntegrationTestBundle& loaded)
+{
+    const auto wrapper = loaded.graphWrapper();
+    const std::set<int64_t> outputUids(loaded.outputTensorUids.begin(),
+                                       loaded.outputTensorUids.end());
+    InputTensorMap inputs;
+    std::vector<int64_t> leafUids;
+    for(const auto& [uid, attributes] : wrapper.getTensorMap())
+    {
+        if(attributes->virtual_() || outputUids.count(uid) != 0)
+        {
+            continue;
+        }
+        leafUids.push_back(uid);
+        inputs.emplace(uid, hipdnn_test_sdk::detail::createTensorFromAttribute(*attributes));
+    }
+    InputFillRecipes recipes;
+    if(loaded.metadata.seed.has_value())
+    {
+        recipes.setGlobalSeed(static_cast<unsigned int>(*loaded.metadata.seed));
+    }
+    if(loaded.metadata.inputs.has_value())
+    {
+        recipes.loadFromJson(*loaded.metadata.inputs);
+    }
+    const auto result = fillInputs(wrapper.getGraph(), inputs, leafUids, recipes, nullptr);
+    EXPECT_TRUE(result.filled) << result.reason;
+    return inputs;
+}
+
+} // namespace
+
+// With a seed for each input, removing the sink (the lowest uid) leaves the contents of
+// Q, K and V unchanged. Without the seeds, the stream moves and Q changes.
+TEST(TestFillInputs, AbsentTensorLeavesTheOtherSeededInputsUnchanged)
+{
+    const auto scratch = hipdnn_test_sdk::utilities::claimScratchDirectory("fill_absent_tensors");
+    const auto graph = sdpa_utils::optionalSdpaFwdGraphJson(/*withStats=*/true, /*withSink=*/true);
+    const std::vector<int64_t> sinkAbsent = {sdpa_utils::K_OPTIONAL_SDPA_SINK_UID};
+    const nlohmann::json seeds
+        = {{"1", {{"seed", 11}}}, {"2", {{"seed", 12}}}, {"3", {{"seed", 13}}}};
+
+    auto seededAll = fx::optionalTensorSweepCase("seeded_all", graph);
+    seededAll["metadata"]["inputs"] = seeds;
+    seededAll["metadata"]["inputs"]["0"] = nlohmann::json{{"seed", 10}};
+    auto seededSinkAbsent = fx::optionalTensorSweepCase("seeded_sink_absent", graph, sinkAbsent);
+    seededSinkAbsent["metadata"]["inputs"] = seeds;
+    fx::writeTemplateSweep(
+        scratch.path() / "quick" / "SdpaFwd" / "Optional",
+        fx::templateOfGraph(graph),
+        nlohmann::json::array(
+            {seededAll,
+             seededSinkAbsent,
+             fx::optionalTensorSweepCase("unseeded_all", graph),
+             fx::optionalTensorSweepCase("unseeded_sink_absent", graph, sinkAbsent)}));
+
+    bundle::SweepManifestCache sweeps;
+    const auto all = loadSweepCase(scratch.path(), "seeded_all", sweeps);
+    const auto absent = loadSweepCase(scratch.path(), "seeded_sink_absent", sweeps);
+    const auto unseededAll = loadSweepCase(scratch.path(), "unseeded_all", sweeps);
+    const auto unseededAbsent = loadSweepCase(scratch.path(), "unseeded_sink_absent", sweeps);
+    ASSERT_TRUE(all.has_value() && absent.has_value() && unseededAll.has_value()
+                && unseededAbsent.has_value());
+
+    const auto allInputs = fillLoadedInputs(*all);
+    const auto absentInputs = fillLoadedInputs(*absent);
+    ASSERT_EQ(allInputs.count(sdpa_utils::K_OPTIONAL_SDPA_SINK_UID), 1u);
+    EXPECT_EQ(absentInputs.count(sdpa_utils::K_OPTIONAL_SDPA_SINK_UID), 0u);
+    for(const int64_t uid : {sdpa_utils::K_OPTIONAL_SDPA_Q_UID,
+                             sdpa_utils::K_OPTIONAL_SDPA_K_UID,
+                             sdpa_utils::K_OPTIONAL_SDPA_V_UID})
+    {
+        ASSERT_EQ(absentInputs.count(uid), 1u) << "uid " << uid;
+        EXPECT_TRUE(sameHostBytes(*allInputs.at(uid), *absentInputs.at(uid))) << "uid " << uid;
+    }
+
+    EXPECT_EQ(fx::hostVariantPackUids(*absent),
+              (std::set<int64_t>{sdpa_utils::K_OPTIONAL_SDPA_Q_UID,
+                                 sdpa_utils::K_OPTIONAL_SDPA_K_UID,
+                                 sdpa_utils::K_OPTIONAL_SDPA_V_UID,
+                                 sdpa_utils::K_OPTIONAL_SDPA_O_UID,
+                                 sdpa_utils::K_OPTIONAL_SDPA_STATS_UID}));
+
+    const auto unseededAllInputs = fillLoadedInputs(*unseededAll);
+    const auto unseededAbsentInputs = fillLoadedInputs(*unseededAbsent);
+    EXPECT_FALSE(sameHostBytes(*unseededAllInputs.at(sdpa_utils::K_OPTIONAL_SDPA_Q_UID),
+                               *unseededAbsentInputs.at(sdpa_utils::K_OPTIONAL_SDPA_Q_UID)));
 }
 
 // NOLINTEND(readability-identifier-naming)

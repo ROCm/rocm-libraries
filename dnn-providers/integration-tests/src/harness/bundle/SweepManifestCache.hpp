@@ -33,6 +33,10 @@ public:
     // The case named `caseId`, or nullptr. Points into this manifest.
     const nlohmann::json* findCase(const std::string& caseId) const;
 
+    // The sweep-level `version` value as written, or nullptr when the key is absent.
+    // Points into this manifest.
+    const nlohmann::json* version() const;
+
 private:
     nlohmann::json _json;
     std::unordered_map<std::string, size_t> _caseIndexById;
