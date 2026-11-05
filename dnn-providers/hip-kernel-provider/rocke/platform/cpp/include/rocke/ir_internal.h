@@ -215,6 +215,16 @@ int64_t rocke_i_smem_vector_access_align(const rocke_type_t* smem_type,
                                          int64_t lanes,
                                          const rocke_type_t* elem);
 
+/* Whether `align` is a valid alignment claim, in bytes: a positive power of
+ * two (Python core/ir.py::_checked_align). */
+bool rocke_i_is_valid_align(int64_t align);
+
+/* The refusal text of an alignment claim that is not a positive power of two
+ * (Python core/ir.py::_checked_align), formatted with the op name and the
+ * claim as a long long. */
+#define ROCKE_I_ALIGN_NOT_POWER_OF_TWO_FMT \
+    "%s failed - align=%lld, expected a positive power of two"
+
 /* The `align` attribute of memory op `op`, in bytes, or 0 when the op carries
  * none (Python core/ir.py::align_attr, which returns None). Throws
  * ckc::TypeError "<op> failed - align=<kind>, expected an integer" for an

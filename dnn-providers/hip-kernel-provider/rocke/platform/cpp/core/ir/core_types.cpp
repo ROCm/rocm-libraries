@@ -360,6 +360,12 @@ int64_t rocke_i_smem_vector_access_align(const rocke_type_t* smem_type,
     return natural < row_bound ? natural : row_bound;
 }
 
+/* Mirrors the value rule of core/ir.py::_checked_align. */
+bool rocke_i_is_valid_align(int64_t align)
+{
+    return align > 0 && (align & (align - 1)) == 0;
+}
+
 /* Mirrors core/ir.py::align_attr (0 stands for its None); the refusal texts are
  * the Python engine's. */
 int64_t rocke_i_align_attr(const rocke_op_t* op)
@@ -378,12 +384,10 @@ int64_t rocke_i_align_attr(const rocke_op_t* op)
                                                rocke_attr_kind_name(attr)));
     }
     const int64_t align = attr->u.i;
-    if(align <= 0 || (align & (align - 1)) != 0)
+    if(!rocke_i_is_valid_align(align))
     {
-        throw ckc::ValueError(
-            ckc::format_error("%s failed - align=%lld, expected a positive power of two",
-                              rocke_opcode_name(op->opcode),
-                              (long long)align));
+        throw ckc::ValueError(ckc::format_error(
+            ROCKE_I_ALIGN_NOT_POWER_OF_TWO_FMT, rocke_opcode_name(op->opcode), (long long)align));
     }
     return align;
 }

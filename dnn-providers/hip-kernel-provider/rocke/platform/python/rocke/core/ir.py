@@ -1060,33 +1060,55 @@ def smem_vector_access_align(smem_type: Type, lanes: int, elem: Type) -> int:
     return min(natural, _gcd(int(lanes), innermost) * type_bytes(elem))
 
 
-def align_attr(op: Op) -> int | None:
-    """The ``align`` attribute of memory op ``op``, in bytes, or ``None`` when
-    the op carries none.
+def _checked_align(op_name: str, value: object) -> int:
+    """``value`` as the alignment claim of op ``op_name``, in bytes.
 
-    Raises ``TypeError`` for an attribute that is not an integer (``True`` and
+    Raises ``TypeError`` for a value that is not an integer (``True`` and
     ``8.0`` included) and ``ValueError`` for one that is not a positive power
     of two: converting or capping it would turn an invalid claim into a valid
-    one. The C++ engine's twin is ``rocke_i_align_attr``, which returns 0 for
-    an absent attribute.
+    one.
     """
-    if "align" not in op.attrs:
-        return None
-    value = op.attrs["align"]
     # bool is an int subclass, so operator.index alone would read True as 1.
     if isinstance(value, bool):
-        raise TypeError(f"{op.name} failed - align=bool, expected an integer")
+        raise TypeError(f"{op_name} failed - align=bool, expected an integer")
     try:
         align = operator.index(value)
     except TypeError:
         raise TypeError(
-            f"{op.name} failed - align={type(value).__name__}, expected an integer"
+            f"{op_name} failed - align={type(value).__name__}, expected an integer"
         ) from None
     if align <= 0 or align & (align - 1):
         raise ValueError(
-            f"{op.name} failed - align={align}, expected a positive power of two"
+            f"{op_name} failed - align={align}, expected a positive power of two"
         )
     return align
+
+
+def _global_vector_align(
+    op_name: str, lanes: int, elem: Type, align: object | None
+) -> int:
+    """The ``align`` global vector access builder ``op_name`` records for
+    ``lanes`` ``elem`` values: :func:`vector_access_align` when ``align`` is
+    ``None``, else ``align`` as :func:`_checked_align` accepts it. The C++
+    engine's twin is ``global_vector_align`` in ``ir/ir_mem.cpp``.
+    """
+    if align is None:
+        return vector_access_align(lanes, elem)
+    return _checked_align(op_name, align)
+
+
+def align_attr(op: Op) -> int | None:
+    """The ``align`` attribute of memory op ``op``, in bytes, or ``None`` when
+    the op carries none.
+
+    Refuses an invalid attribute as :func:`_checked_align` does (``TypeError``
+    for one that is not an integer, ``ValueError`` for one that is not a
+    positive power of two). The C++ engine's twin is ``rocke_i_align_attr``,
+    which returns 0 for an absent attribute.
+    """
+    if "align" not in op.attrs:
+        return None
+    return _checked_align(op.name, op.attrs["align"])
 
 
 def claimed_align(op: Op, lanes: int, elem: Type) -> int:
@@ -3791,9 +3813,13 @@ class IRBuilder:
         selection depends on target and alignment; 96-bit payloads do not
         require a 96-bit scalar type.
 
-        Default alignment is the payload size for power-of-two loads, and
-        element alignment for 12-byte loads. An explicit alignment is a caller
-        guarantee about the address after adding idx.
+        The default alignment is :func:`vector_access_align`: the payload
+        size when that is a power of two, else the element size (a 12-byte
+        load claims element alignment). An explicit ``align`` is a caller
+        guarantee about the address after adding idx; one that is not a
+        positive power of two is refused as by :func:`align_attr`
+        (``TypeError`` for a value that is not an integer, ``ValueError``
+        otherwise).
 
         ``temporal_hint`` states the access's temporal-locality intent.
         ``TemporalHint.STREAMING`` means the data is read once, so it should
@@ -3807,25 +3833,21 @@ class IRBuilder:
         ``TypeError``.
         """
         if dtype.name in ("f16", "bf16", "i16"):
-            elem_bytes = 2
             # n=16 (32-byte `global_load_dwordx8`) is needed for the RDNA WMMA
             # <16 x half> operand fragment; AMDGPU coalesces it when aligned.
             if n not in (2, 4, 6, 8, 16):
                 raise ValueError(f"unsupported vector width for global_load_vN: {n}")
         elif dtype.name in ("f32", "i32", "tf32"):
-            elem_bytes = 4
             if n not in (2, 3, 4, 8):
                 raise ValueError(
                     f"unsupported vector width for {dtype.name} global_load_vN: {n}"
                 )
         elif dtype.name == "f64":
-            elem_bytes = 8
             if n != 2:
                 raise ValueError(
                     f"unsupported vector width for {dtype.name} global_load_vN: {n}"
                 )
         elif dtype.name in ("fp8e4m3", "bf8e5m2", "i8"):
-            elem_bytes = 1
             if n not in (2, 4, 8, 12, 16):
                 raise ValueError(
                     f"unsupported vector width for {dtype.name} global_load_vN: {n}"
@@ -3838,9 +3860,7 @@ class IRBuilder:
         attrs = {
             "elem_type": dtype.name,
             "vec": n,
-            "align": int(
-                align or (elem_bytes if n * elem_bytes == 12 else n * elem_bytes)
-            ),
+            "align": _global_vector_align("memref.global_load_vN", n, dtype, align),
         }
         if _streaming(temporal_hint):
             attrs["nontemporal"] = True
@@ -7114,7 +7134,9 @@ class IRBuilder:
         emits: ``f16`` / ``bf16`` / ``i16`` (2-byte), ``f32`` / ``i32`` / ``tf32``
         (4-byte), ``f64`` (8-byte, N in {1, 2}), ``i8`` / ``fp8e4m3`` /
         ``bf8e5m2`` (1-byte). Lowers to
-        a single ``store <N x elem>`` with the supplied address alignment.
+        a single ``store <N x elem>`` with the supplied address alignment,
+        by default :func:`vector_access_align` (the payload size); one that is
+        not a positive power of two is refused as by :func:`align_attr`.
         Payload width and address alignment are independent; target and
         alignment determine whether the transfer uses one machine instruction.
 
@@ -7126,26 +7148,15 @@ class IRBuilder:
         """
         if n not in (1, 2, 4, 8, 16):
             raise ValueError(f"global_store_vN n must be 1, 2, 4, 8, or 16 (got {n})")
-        elem_name = (
-            value.type.elem.name
-            if isinstance(value.type, VectorType)
-            else value.type.name
-        )
-        if elem_name in ("f16", "bf16", "i16"):
-            elem_bytes = 2
-            if n == 16:
-                raise ValueError(f"global_store_vN n=16 not supported for {elem_name}")
-        elif elem_name in ("f32", "i32", "tf32"):
-            elem_bytes = 4
+        elem = element_type(value.type)
+        elem_name = elem.name
+        if elem_name in ("f16", "bf16", "i16", "f32", "i32", "tf32"):
             if n == 16:
                 raise ValueError(f"global_store_vN n=16 not supported for {elem_name}")
         elif elem_name == "f64":
-            elem_bytes = 8
             if n > 2:
                 raise ValueError(f"global_store_vN n={n} not supported for {elem_name}")
-        elif elem_name in ("i8", "fp8e4m3", "bf8e5m2"):
-            elem_bytes = 1
-        else:
+        elif elem_name not in ("i8", "fp8e4m3", "bf8e5m2"):
             raise ValueError(
                 "global_store_vN supports f16/bf16/i16/f32/i32/tf32/f64/i8/fp8e4m3/bf8e5m2, "
                 f"got {elem_name}"
@@ -7153,7 +7164,7 @@ class IRBuilder:
         attrs = {
             "elem_type": elem_name,
             "vec": n,
-            "align": int(align or (n * elem_bytes)),
+            "align": _global_vector_align("memref.global_store_vN", n, elem, align),
         }
         if _streaming(temporal_hint):
             attrs["nontemporal"] = True

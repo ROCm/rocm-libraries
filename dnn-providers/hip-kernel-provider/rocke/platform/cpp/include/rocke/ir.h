@@ -1176,6 +1176,10 @@ rocke_value_t* rocke_b_masked_global_load(rocke_ir_builder_t* b,
                                           int align);
 void rocke_b_global_store(
     rocke_ir_builder_t* b, rocke_value_t* ptr, rocke_value_t* idx, rocke_value_t* value, int align);
+/* `align` <= 0 records the natural alignment of the access: its byte width
+ * when that is a power of two, else the element width. A positive `align`
+ * that is not a power of two puts the builder in its error state
+ * (ROCKE_ERR_VALUE). The same holds for rocke_b_global_store_vN. */
 rocke_value_t* rocke_b_global_load_vN(rocke_ir_builder_t* b,
                                       rocke_value_t* ptr,
                                       rocke_value_t* idx,
