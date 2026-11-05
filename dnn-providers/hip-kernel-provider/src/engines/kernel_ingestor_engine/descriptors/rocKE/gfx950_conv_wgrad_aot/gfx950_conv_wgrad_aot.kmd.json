@@ -118,200 +118,167 @@
     {
       "name": "kernel_family",
       "type": "int",
-      "default_value": 0,
-      "builder_default": true
+      "default_value": 0
     },
     {
       "name": "direct_variant",
       "type": "string",
-      "default_value": "none",
-      "builder_default": true
+      "default_value": "none"
     },
     {
       "name": "filter_h",
       "type": "int",
-      "default_value": 0,
-      "builder_default": true
+      "default_value": 0
     },
     {
       "name": "filter_w",
       "type": "int",
-      "default_value": 0,
-      "builder_default": true
+      "default_value": 0
     },
     {
       "name": "stride_h",
       "type": "int",
-      "default_value": 0,
-      "builder_default": true
+      "default_value": 0
     },
     {
       "name": "stride_w",
       "type": "int",
-      "default_value": 0,
-      "builder_default": true
+      "default_value": 0
     },
     {
       "name": "pad_h",
       "type": "int",
-      "default_value": 0,
-      "builder_default": true
+      "default_value": 0
     },
     {
       "name": "pad_w",
       "type": "int",
-      "default_value": 0,
-      "builder_default": true
+      "default_value": 0
     },
     {
       "name": "dilation_h",
       "type": "int",
-      "default_value": 0,
-      "builder_default": true
+      "default_value": 0
     },
     {
       "name": "dilation_w",
       "type": "int",
-      "default_value": 0,
-      "builder_default": true
+      "default_value": 0
     },
     {
       "name": "cpg",
       "type": "int",
-      "default_value": 0,
-      "builder_default": true
+      "default_value": 0
     },
     {
       "name": "kpg",
       "type": "int",
-      "default_value": 0,
-      "builder_default": true
+      "default_value": 0
     },
     {
       "name": "ho_per_block",
       "type": "int",
-      "default_value": 0,
-      "builder_default": true
+      "default_value": 0
     },
     {
       "name": "mfma_k",
       "type": "int",
-      "default_value": 0,
-      "builder_default": true
+      "default_value": 0
     },
     {
       "name": "waves_c",
       "type": "int",
-      "default_value": 0,
-      "builder_default": true
+      "default_value": 0
     },
     {
       "name": "waves_k",
       "type": "int",
-      "default_value": 0,
-      "builder_default": true
+      "default_value": 0
     },
     {
       "name": "waves_q",
       "type": "int",
-      "default_value": 0,
-      "builder_default": true
+      "default_value": 0
     },
     {
       "name": "prefetch",
       "type": "int",
-      "default_value": 0,
-      "builder_default": true
+      "default_value": 0
     },
     {
       "name": "row_unroll",
       "type": "int",
-      "default_value": 0,
-      "builder_default": true
+      "default_value": 0
     },
     {
       "name": "rows_per_seg",
       "type": "int",
-      "default_value": 0,
-      "builder_default": true
+      "default_value": 0
     },
     {
       "name": "target_blocks",
       "type": "int",
-      "default_value": 0,
-      "builder_default": true
+      "default_value": 0
     },
     {
       "name": "unfold_n",
       "type": "int",
-      "default_value": 0,
-      "builder_default": true
+      "default_value": 0
     },
     {
       "name": "wave_c16",
       "type": "int",
-      "default_value": 0,
-      "builder_default": true
+      "default_value": 0
     },
     {
       "name": "wave_k16",
       "type": "int",
-      "default_value": 0,
-      "builder_default": true
+      "default_value": 0
     },
     {
       "name": "lanes_c",
       "type": "int",
-      "default_value": 0,
-      "builder_default": true
+      "default_value": 0
     },
     {
       "name": "lanes_w",
       "type": "int",
-      "default_value": 0,
-      "builder_default": true
+      "default_value": 0
     },
     {
       "name": "channels",
       "type": "int",
-      "default_value": 0,
-      "builder_default": true
+      "default_value": 0
     },
     {
       "name": "strip",
       "type": "int",
-      "default_value": 0,
-      "builder_default": true
+      "default_value": 0
     },
     {
       "name": "threads",
       "type": "int",
-      "default_value": 0,
-      "builder_default": true
+      "default_value": 0
     },
     {
       "name": "q_tiles",
       "type": "int",
-      "default_value": 0,
-      "builder_default": true
+      "default_value": 0
     },
     {
       "name": "rows_per_chunk",
       "type": "int",
-      "default_value": 0,
-      "builder_default": true
+      "default_value": 0
     },
     {
       "name": "wave_q4",
       "type": "int",
-      "default_value": 0,
-      "builder_default": true
+      "default_value": 0
     },
     {
       "name": "taps",
       "type": "int",
-      "default_value": 0,
-      "builder_default": true
+      "default_value": 0
     }
   ]
 }
