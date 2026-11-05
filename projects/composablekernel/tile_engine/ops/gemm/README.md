@@ -294,7 +294,10 @@ Option rules:
 - Every measurement is verified and runs one kernel per worker, whatever
   `--verify` and `--batch-size` say, so a failure always names one kernel.
   The host side of verification (random inputs, an fp32 numpy reference
-  GEMM) comes from the run's host cache (see below). A search makes these
+  GEMM) comes from the run's host cache (see below). Its fp8/bf8 format (OCP
+  or FNUZ) follows the run's `--arch`, as in a plain run, not the local GPU's
+  detection (`rocminfo` / `amd-smi`), which falls back to FNUZ when it fails.
+  A search makes these
   inputs its own way, with other values than a plain run's (see "Host
   verification memory"). Before a problem's
   first measure call the search prepares it: a worker that loads no kernel

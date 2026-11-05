@@ -22,11 +22,13 @@ driver's own build and measure functions, which the driver passes in as
   exactly one request; the worker also checks that the library reports the
   requested kernel (``check_identity``) and reads the problem's inputs and
   reference from the run's host cache (``host_cache.py``) instead of computing
-  them on every call. A problem's first call is preceded by its preparation:
-  a worker that only stores them in the cache, outside the call's timeout,
-  and by the host memory guard: a problem whose host data does not fit in
-  the host's memory (``host_compute_bytes``, ``host_read_bytes``) gets
-  ``host_memory`` instead of a worker that the out-of-memory killer ends.
+  them on every call; the fp8/bf8 host format follows the run's --arch
+  (``arch``), not the local GPU. A problem's first call is preceded by its
+  preparation: a worker that only stores them in the cache, outside the
+  call's timeout, and by the host memory guard: a problem whose host data
+  does not fit in the host's memory (``host_compute_bytes``,
+  ``host_read_bytes``) gets ``host_memory`` instead of a worker that the
+  out-of-memory killer ends.
   Each call writes its own CSV under ``<out>/rounds/``, next to a JSON file
   mapping its ``problem_idx`` to the request (call id, trial) and holding its
   failure records and the preparations run before it;
@@ -329,6 +331,10 @@ class GemmSearchAdapter:
         self.extra = {"check_identity": True, "search_host_data": True}
         if self.host_cache:
             self.extra["host_cache"] = self.host_cache
+        # The workers' fp8/bf8 host format follows the run's --arch, not the
+        # local GPU's detection (rocminfo / amd-smi), which can fail.
+        self.arch = {"arch": self._context["arch"]} if self._context.get("arch") else {}
+        self.extra.update(self.arch)
         by_name = {}
         for cfg in configs:
             by_name.setdefault(cfg.name, cfg)
@@ -504,7 +510,8 @@ class GemmSearchAdapter:
                 got = adaptive_search.prepare_host_data(
                     [sys.executable, str(self.worker_path)], self.base_env,
                     {k: json.dumps({"prepare": True, "host_cache": self.host_cache,
-                                    "problem": self.problems[k], "kernel_name": n})
+                                    "problem": self.problems[k], "kernel_name": n,
+                                    **self.arch})
                      for k, n in first.items()}, limits, len(self.devices),
                     needs=needs, memory=self.memory, keeps=keeps)
             self.prepared.update(got)

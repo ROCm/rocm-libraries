@@ -1272,6 +1272,8 @@ def main():
     measured = [] if args.repeat_top else None
     if measured is not None:
         hooks["measured"] = measured
+    # The workers' fp8/bf8 host format (OCP or FNUZ) follows the arch the
+    # kernels were built for, not the local GPU's detection, which can fail.
     stats = benchmark_on_devices(
         problems,
         pairs,
@@ -1281,6 +1283,7 @@ def main():
         worker_path,
         base_env,
         csv_path,
+        {"arch": arch},
         **hooks,
     )
 

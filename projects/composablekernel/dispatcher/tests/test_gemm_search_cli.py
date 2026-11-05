@@ -164,7 +164,8 @@ def test_run_without_search_is_unchanged_and_loads_no_search_module(
             monkeypatch.delitem(sys.modules, name)
     rc, _, built, calls = _main(monkeypatch, capsys, tmp_path, "--verify")
     assert rc == 0 and built
-    assert all(c["extra"] is None and c["batch_size"] == 20 for c in calls)
+    # The workers get the run's arch for the fp8/bf8 host format, as a search's do.
+    assert all(c["extra"] == {"arch": "gfx950"} and c["batch_size"] == 20 for c in calls)
     _assert_worker(calls)
     assert not [n for n in sys.modules if n.split(".")[0] in SEARCH_MODULES]
     with open(tmp_path / "out.csv", newline="") as f:
@@ -243,7 +244,7 @@ def test_search_writes_winners_the_driver_accepts(monkeypatch, capsys, tmp_path)
     assert calls and all(
         len(c["names"]) == 1 and c["verify"] and c["batch_size"] == 1
         and c["extra"] == {"check_identity": True, "search_host_data": True,
-                           "host_cache": cache} for c in calls)
+                           "host_cache": cache, "arch": "gfx950"} for c in calls)
     assert Path(cache["dir"]).name.startswith("ck_search_host_cache-")
     assert not Path(cache["dir"]).exists() and "Host cache: 0 entries" in cap.out
     _assert_worker(calls)
