@@ -5541,7 +5541,7 @@ _WMMA_FP8_TYPES = frozenset({
 def _use_native_fp8_wmma(k: int, has_wmma_v3: bool, force_scaled: bool) -> bool:
     """Port of rocisa ``MFMAInstruction::useNativeFp8WMMA``: gfx1250 K=128 FP8/BF8
     uses the dedicated ``v_wmma_*_16x16x128_{fp8,bf8}_{fp8,bf8}`` opcodes. They are
-    absent on gfx1250 (gfx1250v0), so strict/v0 builds keep scaled f8f6f4."""
+    absent on V0 (gfx1250-strict), so the strict build keeps scaled f8f6f4."""
     return has_wmma_v3 and k == 128 and not force_scaled
 
 
@@ -5717,8 +5717,8 @@ class MFMAInstruction(Instruction):
 
         # forceScaledWMMA: gfx1250 low-precision WMMA must use v_wmma_scale_*.
         # Mirror rocisa MFMAInstruction::forceScaledWMMA (mfma.hpp): gate on the
-        # rocIsa toggle (true only for gfx1250-strict / gfx1250v0), NOT the shared
-        # ISA (12,5,0) which cannot tell base gfx1250 from the strict/v0 steppings.
+        # rocIsa toggle (true only for gfx1250-strict), NOT the shared
+        # ISA (12,5,0) which cannot tell base gfx1250 from the strict stepping.
         # Read the toggle directly (no broad except): getForceScaledWMMA() returns
         # a safe False default for an uninitialized thread without throwing, so an
         # exception here means a genuinely broken binding. It must fail loudly
@@ -5819,7 +5819,7 @@ class MFMAInstruction(Instruction):
         native_fp8 = _use_native_fp8_wmma(k, has_wmma_v3, force_scaled)
         type_str = _wmma_type_convert(self.instType, m, n, k, has_wmma_v3, native_fp8)
         # forceScaledWMMA() gates only the mnemonic via the rocIsa toggle (set
-        # true only for gfx1250-strict / gfx1250v0), not the shared ISA (12,5,0).
+        # true only for gfx1250-strict), not the shared ISA (12,5,0).
         scaled = is_wmma and force_scaled and type_str in ("f8f6f4", "f4")
         # rocisa emits the ", 0, 0" scale operands and matrix_*_fmt only inside
         # the HasWMMA_f8f6f4 getArgStr branch, so both are caps-gated.
