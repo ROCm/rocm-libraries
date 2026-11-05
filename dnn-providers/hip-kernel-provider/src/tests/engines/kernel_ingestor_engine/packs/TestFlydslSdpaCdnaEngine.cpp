@@ -3580,7 +3580,8 @@ void expectCandidatesMatchReference(const MatchContext& context,
                                     const BoundTokens& bound,
                                     const std::vector<KernelDefinition>& kernels,
                                     const SdpaGraphSpec& spec,
-                                    double absoluteTolerance)
+                                    double absoluteTolerance,
+                                    int launches = 1)
 {
     // The deprecated booleans resolved as the reference does: either one alone is causal;
     // causal_mask keeps the stored alignment, and causal_mask_bottom_right is bottom-right.
@@ -4238,6 +4239,10 @@ void expectCandidatesMatchReference(const MatchContext& context,
         // A bias object run for a graph without a bias reads the zero bias the launch writes
         // at the workspace's end, past what it writes itself: the canary there must be gone.
         const bool readsZeroBias = cdnaReadsZeroBias(spec, kernel);
+        if(launches > 1 && !readsZeroBias)
+        {
+            workspace.fill(repeatLaunchFill(0));
+        }
         workspace.poisonForTheZeroBias(readsZeroBias);
         const Handle handle;
         handler.launch(handle,
@@ -4265,6 +4270,90 @@ void expectCandidatesMatchReference(const MatchContext& context,
         {
             ASSERT_NO_FATAL_FAILURE(unpackCdnaPackedOutputs<T>(
                 spec, offsetsQ, oStrides, packedODevice, packedStatsDevice, withStats, o, stats));
+        }
+        // Each further launch, on outputs and a workspace holding other bytes, gives the first
+        // launch's O and LSE bit for bit: no object adds in an order the hardware picks (each
+        // split's partial has its own slot, and the merge reads them in split order), so a
+        // difference is a race or a read of memory the launch did not write.
+        for(int launch = 1; launch < launches; ++launch)
+        {
+            // The buffers the launch writes: packed, the packed ones up to the guard, which
+            // keeps the first launch's NaN (unpackCdnaPackedOutputs checks it), and the dense
+            // ones keep the first launch's fill, which no launch writes.
+            const auto fill = repeatLaunchFill(launch);
+            if(packed)
+            {
+                const auto rows = static_cast<size_t>(offsetsQ.back() * h);
+                ASSERT_EQ(
+                    hipSuccess,
+                    hipMemset(packedODevice, fill, rows * static_cast<size_t>(dv) * sizeof(T)));
+                ASSERT_EQ(hipSuccess, hipMemset(packedStatsDevice, fill, rows * sizeof(float)));
+            }
+            else
+            {
+                ASSERT_EQ(hipSuccess, hipMemset(oDevice, fill, oCount * sizeof(T)));
+                if(withStats)
+                {
+                    ASSERT_EQ(hipSuccess, hipMemset(statsDevice, fill, statsCount * sizeof(float)));
+                }
+            }
+            if(!readsZeroBias)
+            {
+                workspace.fill(fill);
+            }
+            handler.launch(handle,
+                           *prepared,
+                           buffers.data(),
+                           static_cast<uint32_t>(buffers.size()),
+                           workspace.get());
+            ASSERT_EQ(hipSuccess, hipDeviceSynchronize());
+            std::vector<T> oAgain(oCount);
+            std::vector<float> statsAgain(statsCount);
+            ASSERT_EQ(hipSuccess,
+                      hipMemcpy(oAgain.data(), oDevice, oCount * sizeof(T), hipMemcpyDeviceToHost));
+            if(withStats)
+            {
+                ASSERT_EQ(hipSuccess,
+                          hipMemcpy(statsAgain.data(),
+                                    statsDevice,
+                                    statsCount * sizeof(float),
+                                    hipMemcpyDeviceToHost));
+            }
+            if(packed)
+            {
+                ASSERT_NO_FATAL_FAILURE(unpackCdnaPackedOutputs<T>(spec,
+                                                                   offsetsQ,
+                                                                   oStrides,
+                                                                   packedODevice,
+                                                                   packedStatsDevice,
+                                                                   withStats,
+                                                                   oAgain,
+                                                                   statsAgain));
+            }
+            const auto oDifference = bitwiseDifference(o, oAgain);
+            const auto lseDifference
+                = withStats ? bitwiseDifference(stats, statsAgain) : BitwiseDifference{};
+            // The first differing O element's (b, h, s, d), from O's strides.
+            std::array<int64_t, 4> at4{};
+            auto remainder = static_cast<int64_t>(oDifference.first);
+            std::array<size_t, 4> axes{0, 1, 2, 3};
+            std::sort(axes.begin(), axes.end(), [&oStrides](size_t x, size_t y) {
+                return oStrides[x] > oStrides[y];
+            });
+            for(const auto axis : axes)
+            {
+                at4[axis] = remainder / oStrides[axis];
+                remainder %= oStrides[axis];
+            }
+            const auto expectedAt = expectedO[static_cast<size_t>(
+                ((at4[0] * h + at4[1]) * s + at4[2]) * dv + at4[3])];
+            EXPECT_EQ(oDifference.count + lseDifference.count, 0U)
+                << "launch " << launch << " of the same inputs differs from the first in "
+                << oDifference.count << " O element(s), first at b=" << at4[0] << " h=" << at4[1]
+                << " s=" << at4[2] << " d=" << at4[3] << " ("
+                << static_cast<float>(o[oDifference.first]) << " then "
+                << static_cast<float>(oAgain[oDifference.first]) << ", reference " << expectedAt
+                << "), and in " << lseDifference.count << " LSE element(s)";
         }
         // The RNG dump: the oracle's mask bit for bit at every element, padded rows and keys
         // past a batch's length included, with hipDNN's keep-rate check; and O as hipDNN's CPU
@@ -4477,7 +4566,8 @@ void expectCandidateMatchesReference(const MatchContext& context,
 /// objects must be among those run.
 void expectCdnaMatchesReference(const SdpaGraphSpec& spec,
                                 double absoluteTolerance,
-                                const PackSymbols& family = FLYDSL_SDPA_CDNA)
+                                const PackSymbols& family = FLYDSL_SDPA_CDNA,
+                                int launches = 1)
 {
     const GraphFixture fixture(buildFlydslSdpaRdnaGraph(spec), packedArchDeviceProperties());
     const auto bound = matchesGraph(FLYDSL_SDPA_CDNA, fixture.context());
@@ -4503,19 +4593,28 @@ void expectCdnaMatchesReference(const SdpaGraphSpec& spec,
         // P is rounded to the input dtype before the second product: f16's 11-bit
         // mantissa allows about an eighth of bf16's budget.
         expectCandidatesMatchReference<hipdnn_data_sdk::types::half>(
-            fixture.context(), *bound, candidates, spec, std::min(absoluteTolerance, 4e-3));
+            fixture.context(),
+            *bound,
+            candidates,
+            spec,
+            std::min(absoluteTolerance, 4e-3),
+            launches);
     }
     else if(spec.dataType == DataType::FLOAT)
     {
         // Exact f32 products and an f32 P (vendored-kernel modification 35): the error is
         // the accumulation's and exp2's, about 1e-6 on these values.
-        expectCandidatesMatchReference<float>(
-            fixture.context(), *bound, candidates, spec, std::min(absoluteTolerance, 1e-5));
+        expectCandidatesMatchReference<float>(fixture.context(),
+                                              *bound,
+                                              candidates,
+                                              spec,
+                                              std::min(absoluteTolerance, 1e-5),
+                                              launches);
     }
     else
     {
         expectCandidatesMatchReference<Bf16>(
-            fixture.context(), *bound, candidates, spec, absoluteTolerance);
+            fixture.context(), *bound, candidates, spec, absoluteTolerance, launches);
     }
 }
 
@@ -5780,6 +5879,41 @@ TEST(TestGpuFlydslSdpaCdnaDispatch, ServesHeadDim256OnTheDualwaveKernel)
     spec.seqLenQ = 300;
     spec.seqLenKv = 900;
     expectCdnaMatchesReference(spec, BF16_TOLERANCE, FLYDSL_SDPA_CDNA_DUALWAVE);
+}
+
+/// Launches of one object on the same inputs in a determinism case: one on outputs and a
+/// workspace of each repeat fill (NaN, zero, a large finite value).
+constexpr int DETERMINISM_LAUNCHES = 3;
+
+// Every object a graph admits gives the same O and LSE, bit for bit, on every launch of the
+// same inputs, whatever its outputs and workspace held before: the generic and dual-wave
+// kernels at the model shape and at head_dim 256 in f16 under a causal mask, the split
+// decode over a long cache, whose merge reads a partial per split from the workspace, and
+// the generic objects over packed sequences.
+TEST(TestGpuFlydslSdpaCdnaDispatch, GivesTheSameBitsOnEveryLaunch)
+{
+    auto spec = cdnaSpec();
+    expectCdnaMatchesReference(
+        spec, BF16_TOLERANCE, FLYDSL_SDPA_CDNA_DUALWAVE, DETERMINISM_LAUNCHES);
+
+    spec.headDim = 256;
+    spec.dataType = DataType::HALF;
+    spec.mask = SdpaMask::TOP_LEFT_CAUSAL;
+    spec.stats = SdpaStats::LSE;
+    spec.seqLenQ = 300;
+    spec.seqLenKv = 300;
+    expectCdnaMatchesReference(
+        spec, BF16_TOLERANCE, FLYDSL_SDPA_CDNA_DUALWAVE, DETERMINISM_LAUNCHES);
+
+    spec = cdnaSpec();
+    spec.seqLenQ = 1;
+    spec.seqLenKv = 20000;
+    spec.mask = SdpaMask::BOTTOM_RIGHT_CAUSAL;
+    spec.stats = SdpaStats::LSE;
+    expectCdnaMatchesReference(spec, BF16_TOLERANCE, FLYDSL_SDPA_CDNA_DECODE, DETERMINISM_LAUNCHES);
+
+    expectCdnaMatchesReference(
+        cdnaPackedSpec(), BF16_TOLERANCE, FLYDSL_SDPA_CDNA, DETERMINISM_LAUNCHES);
 }
 
 // K in BSHD and V in BHSD: the masked objects read V through its own strides.

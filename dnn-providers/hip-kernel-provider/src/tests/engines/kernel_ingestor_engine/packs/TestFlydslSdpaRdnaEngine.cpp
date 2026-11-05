@@ -1889,6 +1889,12 @@ public:
         EXPECT_EQ(hipSuccess, hipMemcpy(_device, _host.data(), bytes(), hipMemcpyHostToDevice));
     }
 
+    /// Every byte of the device copy set to @p byte; the host copy is unchanged.
+    void fillDeviceBytes(unsigned char byte)
+    {
+        EXPECT_EQ(hipSuccess, hipMemset(_device, byte, bytes()));
+    }
+
     /// Copies the device contents back over the host values.
     void readBack()
     {
@@ -2143,7 +2149,8 @@ template <typename T>
 void expectSdpaMatchesReference(const SdpaGraphSpec& spec,
                                 double absoluteTolerance,
                                 RdnaFamily family,
-                                const KernelDefinition* forced = nullptr);
+                                const KernelDefinition* forced = nullptr,
+                                int launches = 1);
 
 template <typename T>
 void expectSdpaMatchesReference(const SdpaGraphSpec& spec,
@@ -2158,7 +2165,8 @@ template <typename T>
 void expectSdpaMatchesReference(const SdpaGraphSpec& spec,
                                 double absoluteTolerance,
                                 RdnaFamily family,
-                                const KernelDefinition* forced)
+                                const KernelDefinition* forced,
+                                int launches)
 {
     const bool decode = family == RdnaFamily::DECODE;
     // The bounds the graph builder writes for this spec, in CpuFpReferenceSdpa's terms: a
@@ -2796,6 +2804,10 @@ void expectSdpaMatchesReference(const SdpaGraphSpec& spec,
     // The zero bias, at the workspace's end, past what the launch writes itself: zeroed by the
     // launch, so the canary there must be gone.
     const bool readsZeroBias = zeroBias && forced == nullptr;
+    if(launches > 1 && !readsZeroBias)
+    {
+        workspace.fill(repeatLaunchFill(0));
+    }
     workspace.poisonForTheZeroBias(readsZeroBias);
     const Handle handle;
     handler.launch(
@@ -2804,11 +2816,14 @@ void expectSdpaMatchesReference(const SdpaGraphSpec& spec,
     EXPECT_EQ(workspace.overwrittenGuardBytes(), 0U)
         << "the launch wrote past the " << workspaceBytes << "-byte workspace it reported";
     workspace.expectTheZeroBiasAtTheEnd(readsZeroBias, flydsl_sdpa::zeroBiasBytes(spec.seqLenKv));
-    o.readBack();
-    stats.readBack();
-    expectGapsUnwritten(spec, o);
-    if(packed)
-    {
+    // O and the LSE as the launch left them; packed, unpacked into the dense tensors.
+    const auto readOutputs = [&] {
+        o.readBack();
+        stats.readBack();
+        if(!packed)
+        {
+            return;
+        }
         packedO->readBack();
         packedStats->readBack();
         for(int64_t b = 0; b < spec.batch; ++b)
@@ -2826,6 +2841,73 @@ void expectSdpaMatchesReference(const SdpaGraphSpec& spec,
                 }
             }
         }
+    };
+    readOutputs();
+    expectGapsUnwritten(spec, o);
+    // Each further launch, on outputs and a workspace holding other bytes, gives the first
+    // launch's O and LSE bit for bit: a split decode's merge reads each split's partial from
+    // its own slot in split order, so a difference is a race or a read of memory the launch
+    // did not write.
+    std::vector<double> firstO;
+    std::vector<double> firstStats;
+    const auto outputValues = [&](std::vector<double>& values, std::vector<double>& lse) {
+        values.clear();
+        lse.clear();
+        for(int64_t b = 0; b < spec.batch; ++b)
+        {
+            for(int64_t h = 0; h < spec.heads; ++h)
+            {
+                for(int64_t s = 0; s < spec.seqLenQ; ++s)
+                {
+                    for(int64_t e = 0; e < dv; ++e)
+                    {
+                        values.push_back(o.at(b, h, s, e));
+                    }
+                    lse.push_back(stats.at(b, h, s, 0));
+                }
+            }
+        }
+    };
+    if(launches > 1)
+    {
+        outputValues(firstO, firstStats);
+    }
+    for(int launch = 1; launch < launches; ++launch)
+    {
+        const auto fill = repeatLaunchFill(launch);
+        if(packed)
+        {
+            packedO->fillDeviceBytes(fill);
+            packedStats->fillDeviceBytes(fill);
+        }
+        else
+        {
+            o.fillDeviceBytes(fill);
+            stats.fillDeviceBytes(fill);
+        }
+        if(!readsZeroBias)
+        {
+            workspace.fill(fill);
+        }
+        handler.launch(handle,
+                       *prepared,
+                       buffers.data(),
+                       static_cast<uint32_t>(buffers.size()),
+                       workspace.get());
+        ASSERT_EQ(hipSuccess, hipDeviceSynchronize());
+        readOutputs();
+        std::vector<double> againO;
+        std::vector<double> againStats;
+        outputValues(againO, againStats);
+        const auto oDifference = bitwiseDifference(firstO, againO);
+        const auto lseDifference
+            = wantStats ? bitwiseDifference(firstStats, againStats) : BitwiseDifference{};
+        EXPECT_EQ(oDifference.count + lseDifference.count, 0U)
+            << "launch " << launch << " of the same inputs differs from the first in "
+            << oDifference.count << " O element(s), first at flat (b, h, s, d) index "
+            << oDifference.first << " (" << firstO[oDifference.first] << " then "
+            << againO[oDifference.first] << "), and in " << lseDifference.count
+            << " LSE element(s)";
     }
 
     const double scale
@@ -4666,6 +4748,66 @@ TEST(TestGpuFlydslSdpaRdnaDispatch, DecodesOneTokenAcrossSplits)
     spec.seqLenKv = 2100;
     spec.stats = SdpaStats::LSE;
     expectSdpaMatchesReference<hipdnn_data_sdk::types::bfloat16>(spec, BF16_TOLERANCE, true);
+}
+
+/// Launches of one object on the same inputs in a determinism case: one on outputs and a
+/// workspace of each repeat fill (NaN, zero, a large finite value).
+constexpr int DETERMINISM_LAUNCHES = 3;
+
+/// The same O and LSE, bit for bit, on every launch of one @p family object on the same
+/// inputs, whatever its outputs and workspace held before: bf16 at the default shape, f16
+/// under a causal mask with the LSE, a single-token step over a long cache, which the
+/// decode objects split (each split's partial in the workspace, merged in split order), and
+/// for the aiw objects, which read them, packed sequences.
+void expectTheSameBitsOnEveryLaunch(RdnaFamily family)
+{
+    SdpaGraphSpec spec;
+    spec.stats = SdpaStats::LSE;
+    expectSdpaMatchesReference<hipdnn_data_sdk::types::bfloat16>(
+        spec, BF16_TOLERANCE, family, nullptr, DETERMINISM_LAUNCHES);
+
+    spec.dataType = DataType::HALF;
+    spec.mask = SdpaMask::TOP_LEFT_CAUSAL;
+    spec.seqLenQ = 200;
+    spec.seqLenKv = 200;
+    expectSdpaMatchesReference<hipdnn_data_sdk::types::half>(
+        spec, F16_TOLERANCE, family, nullptr, DETERMINISM_LAUNCHES);
+
+    spec.dataType = DataType::BFLOAT16;
+    spec.mask = SdpaMask::BOTTOM_RIGHT_CAUSAL;
+    spec.heads = 8;
+    spec.kvHeads = 2;
+    spec.seqLenQ = 1;
+    spec.seqLenKv = 2100;
+    expectSdpaMatchesReference<hipdnn_data_sdk::types::bfloat16>(
+        spec, BF16_TOLERANCE, family, nullptr, DETERMINISM_LAUNCHES);
+
+    if(family == RdnaFamily::AIW)
+    {
+        SdpaGraphSpec packed;
+        packed.stats = SdpaStats::LSE;
+        setPacked(packed, {128, 37}, {100, 128});
+        expectSdpaMatchesReference<hipdnn_data_sdk::types::bfloat16>(
+            packed, BF16_TOLERANCE, family, nullptr, DETERMINISM_LAUNCHES);
+    }
+}
+
+TEST(TestGpuFlydslSdpaRdnaDispatch, GivesTheSameBitsOnEveryLaunch)
+{
+    SKIP_IF_NO_DEVICES();
+    expectTheSameBitsOnEveryLaunch(RdnaFamily::PREFILL);
+}
+
+TEST(TestGpuFlydslSdpaRdnaDispatch, DecodesTheSameBitsOnEveryLaunch)
+{
+    SKIP_IF_NO_DEVICES();
+    expectTheSameBitsOnEveryLaunch(RdnaFamily::DECODE);
+}
+
+TEST(TestGpuFlydslSdpaAiwDispatch, GivesTheSameBitsOnEveryLaunch)
+{
+    SKIP_IF_NO_DEVICES();
+    expectTheSameBitsOnEveryLaunch(RdnaFamily::AIW);
 }
 
 TEST(TestGpuFlydslSdpaRdnaDispatch, DecodesSeveralPositionsInOneSplit)
