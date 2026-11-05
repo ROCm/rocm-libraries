@@ -31,7 +31,12 @@ CK_TILE_DEVICE constexpr auto tdm_wave_linear_distr()
         bool_constant<true>{});
 }
 
-// Dense row-major LDS view (unpadded, unlike CShuffleEpilogue's LDS descriptor)
+// Dense row-major LDS view (unpadded, unlike CShuffleEpilogue's LDS descriptor).
+// The TDM LDS padding fields are documented for loads only (memory to LDS), so a TDM store takes
+// its source box from consecutive LDS rows and TDMConfig leaves them disabled here.
+// TDM clips against the global tensor extents, so this is unrelated to OOB handling.
+// CShuffleEpilogue can pad to avoid LDS bank conflicts because it reads LDS back itself
+// through its own descriptor.
 template <typename ODataType, index_t kMPerBlock, index_t kNPerBlock>
 CK_TILE_DEVICE auto tdm_row_major_lds_view(void* p)
 {
@@ -109,6 +114,7 @@ struct TdmEpilogueStaged
      * operator().
      */
     static constexpr bool SupportsSplitK = false;
+    static constexpr bool kIsTdmEpilogue = true;
 
     // rows that one M iteration covers across the block
     static constexpr index_t kRowsPerMIter = Problem::MWave * Problem::MPerXdl;
@@ -264,7 +270,12 @@ struct TdmEpilogueStaged
         }
         else if constexpr(kStaged)
         {
-            run_staged(out_dram_window, o_acc_tile, p_smem);
+            run_staged(out_dram_window,
+                       o_acc_tile,
+                       p_smem,
+                       [&](auto& stage_tile, auto& in_lds_window, auto /*stage*/) {
+                           cast_lds_tile(stage_tile, in_lds_window);
+                       });
         }
         else
         {
@@ -346,10 +357,14 @@ struct TdmEpilogueStaged
                                        typename AccEncode::Ys2RHsMinor>{});
     }
 
+    protected:
     // Staged mode of operator(); its barriers must match GetBarrierCount().
-    template <typename ODramWindow, typename OAccTile>
-    CK_TILE_DEVICE void
-    run_staged(ODramWindow& out_dram_window, const OAccTile& o_acc_tile, void* p_smem)
+    // write_stage(stage_tile, in_lds_window, stage) writes one slab of the accumulator to LDS.
+    template <typename ODramWindow, typename OAccTile, typename WriteStage>
+    CK_TILE_DEVICE void run_staged(ODramWindow& out_dram_window,
+                                   const OAccTile& o_acc_tile,
+                                   void* p_smem,
+                                   const WriteStage& write_stage)
     {
         static_assert(std::is_same_v<ELayout, tensor_layout::gemm::RowMajor>,
                       "TdmEpilogueStaged supports only row-major E");
@@ -399,7 +414,7 @@ struct TdmEpilogueStaged
             stage_tile.get_thread_buffer() = o_acc_tile.get_y_sliced_thread_data(
                 y_origin_zeros.modify(number<0>{}, number<stage.value * kMIterPerStage>{}),
                 stage_y_lengths);
-            cast_lds_tile(stage_tile, in_lds_window);
+            write_stage(stage_tile, in_lds_window, stage);
             // Every wave's part of the slab must be in LDS before any wave's TDM store reads it.
             block_sync_lds();
 
@@ -420,21 +435,46 @@ struct TdmEpilogueStaged
 template <typename Problem_>
 using TdmEpilogue = TdmEpilogueStaged<Problem_>;
 
+// Number of slab buffers that fit in the LDS the compute pipeline already allocates.
+template <typename Problem, index_t MIterPerStage>
+CK_TILE_HOST_DEVICE constexpr index_t tdm_stage_buffers_for_lds(index_t pipeline_smem_bytes)
+{
+    using Stage                   = TdmEpilogueStaged<Problem, MIterPerStage, 1>;
+    constexpr index_t stage_bytes = Stage::kStageRows * Problem::kNPerBlock *
+                                    static_cast<index_t>(sizeof(typename Problem::ODataType));
+    return min(Stage::kNumStages, max(index_t{1}, pipeline_smem_bytes / stage_bytes));
+}
+
+// TdmEpilogueStaged with as many slab buffers as fit in GemmPipeline_'s LDS.
+// Takes the pipeline type, not its GetSmemSize() value: that value differs between the host and
+// device passes, so a buffer count in the template arguments can give them different kernel names.
+template <typename Problem_, index_t MIterPerStage_, typename GemmPipeline_>
+struct TdmEpilogueStagedForPipeline
+    : public TdmEpilogueStaged<Problem_,
+                               MIterPerStage_,
+                               tdm_stage_buffers_for_lds<Problem_, MIterPerStage_>(
+                                   GemmPipeline_::GetSmemSize())>
+{
+};
+
 namespace impl {
 
-template <typename Problem, index_t MIterPerStage, index_t NumStageBuffers>
-constexpr bool is_tdm_epilogue(const TdmEpilogueStaged<Problem, MIterPerStage, NumStageBuffers>*)
+template <typename Epilogue, typename = void>
+struct is_tdm_epilogue : false_type
 {
-    return true;
-}
-constexpr bool is_tdm_epilogue(const void*) { return false; }
+};
+
+template <typename Epilogue>
+struct is_tdm_epilogue<Epilogue, std::void_t<decltype(Epilogue::kIsTdmEpilogue)>>
+    : bool_constant<Epilogue::kIsTdmEpilogue>
+{
+};
 
 } // namespace impl
 
 /// True for TdmEpilogue and for epilogues derived from it (e.g. TdmMultiDEpilogue).
 template <typename Epilogue>
-inline constexpr bool is_tdm_epilogue_v =
-    impl::is_tdm_epilogue(static_cast<const remove_cvref_t<Epilogue>*>(nullptr));
+inline constexpr bool is_tdm_epilogue_v = impl::is_tdm_epilogue<remove_cvref_t<Epilogue>>::value;
 
 template <typename ODataType,
           index_t kBlockSize,
