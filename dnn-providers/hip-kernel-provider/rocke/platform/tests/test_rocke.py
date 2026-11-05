@@ -70,6 +70,10 @@ from rocke.helpers import (
     make_gemm_manifest,
 )
 from rocke.helpers.compile import _comgr_options_for_kernel
+from rocke.tests.subprocess_launcher import (
+    rocke_python_command,
+    rocke_subprocess_env,
+)
 from kernels.common.conv_direct_grouped import (
     DirectConv4cSpec,
     DirectConv16cSpec,
@@ -2188,10 +2192,10 @@ class TestCrossEngineFlavorAutoResolution(unittest.TestCase):
         env.update(env_overrides)
         env["PYTHONPATH"] = os.pathsep.join(p for p in sys.path if p)
         out = subprocess.run(
-            [sys.executable, "-c", _FLAVOR_AUTO_PROBE],
+            rocke_python_command("-c", _FLAVOR_AUTO_PROBE),
             capture_output=True,
             text=True,
-            env=env,
+            env=rocke_subprocess_env(env),
         )
         self.assertEqual(out.returncode, 0, out.stderr)
         py_dl, cpp_dl = out.stdout.strip().splitlines()[-2:]
@@ -6975,13 +6979,17 @@ class TestLauncherBind(unittest.TestCase):
             return b"\x01\x02"
 
         class FakeRuntime:
-            def prepare_launch(self, fn, grid, block, args, *, shared_bytes, stream):
+            def prepare_launch(
+                self, fn, grid, block, args, *, shared_bytes, stream, cluster=None
+            ):
                 self.prepared = (fn, grid, block, args, shared_bytes, stream)
+                self.cluster = cluster
                 return lambda: enqueued.append(1)
 
         launcher = L.KernelLauncher.__new__(L.KernelLauncher)
         launcher._fn = "fn"
         launcher._packer = packer
+        launcher._cluster_dims = None
         rt = FakeRuntime()
         cfg = L.LaunchConfig(grid=(2, 1, 1), block=(64, 1, 1), stream=7)
         with mock.patch.object(L, "_runtime", return_value=rt):
@@ -6992,6 +7000,13 @@ class TestLauncherBind(unittest.TestCase):
         self.assertEqual(packed, [{"a": 1}])
         self.assertEqual(len(enqueued), 3)
         self.assertEqual(rt.prepared, ("fn", (2, 1, 1), (64, 1, 1), b"\x01\x02", 0, 7))
+        self.assertIsNone(rt.cluster)
+
+        # A clustered kernel keeps its cluster shape on the prepared launch.
+        launcher._cluster_dims = (1, 1, 2)
+        with mock.patch.object(L, "_runtime", return_value=rt):
+            launcher.bind({"a": 1}, config=cfg)
+        self.assertEqual(rt.cluster, (1, 1, 2))
 
 
 class TestLauncherFenceContract(unittest.TestCase):

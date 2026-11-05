@@ -9,15 +9,19 @@ architecture family without needing a GPU.
 
 Run:
   PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=python:python/test \
-    python tests/test_rocke_ci_static.py
+    python -m pytest tests/test_rocke_ci_static.py
 """
 
 from __future__ import annotations
 
 import json
 import sys
+import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
+
+import pytest
 
 # The representative-IR parity harness lives in the instances test layer; make
 # it importable from this root-level CI test (run via pytest or directly).
@@ -29,9 +33,11 @@ from rocke.benchmark.gemm.fp16_rcr_sweep import (
     expand_sweep,
 )
 from rocke.core.arch import known_arches
+from rocke.core.ir_golden import GOLDEN_FLAVORS, check_golden_flavors, load_golden
 from rocke_ir_parity_harness import (  # noqa: E402 -- after sys.path shim
     cases,
     check_golden,
+    write_golden,
 )
 
 _HERE = Path(__file__).resolve().parents[0]
@@ -44,9 +50,7 @@ _EXAMPLES = (
     else _PY_ROOT / "rocke" / "examples"
 )
 _GOLDEN = (
-    Path(__file__).resolve().parents[0]
-    / "golden"
-    / "rocke_representative_ir_sha256.json"
+    Path(__file__).resolve().parents[0] / "golden" / "rocke_representative_ir_sha256"
 )
 
 
@@ -115,23 +119,123 @@ class TestIrParityCoverage(unittest.TestCase):
         case_ids = [case["case_id"] for case in cases()]
         self.assertEqual(len(case_ids), len(set(case_ids)))
 
-    def test_ir_cases_match_golden_sha256(self):
-        """Byte-stability gate: every case's lowered-IR sha256 (and the set of
-        expected failures) must match the committed golden, for EVERY llvm
-        flavor the golden holds -- not just the one this host autodetects, or
-        the llvm23 sub-document would go unchecked below ROCm 7.13. A drift
-        here means emitted IR changed -- if intended & reviewed, re-bless with:
-          python tests/instances/rocke_ir_parity_harness.py \\
-            --write tests/golden/rocke_representative_ir_sha256.json
+    def test_nvfp4_variants_are_registered_and_lowerable(self):
+        from rocke.core.lower_llvm import lower_kernel_to_llvm
 
-        """
-        self.assertTrue(
-            _GOLDEN.exists(),
-            f"golden missing: {_GOLDEN} (bless with harness --write)",
+        registered = {case["case_id"]: case for case in cases()}
+        for dtype in ("bf16", "fp16"):
+            for k in (128, 256):
+                cid = f"gemm/gfx1250/nvfp4/{dtype}/k{k}"
+                with self.subTest(case=cid):
+                    self.assertIn(cid, registered)
+                    case = registered[cid]
+                    self.assertEqual(case["arch"], "gfx1250")
+                    self.assertEqual(case["family"], "gemm")
+                    kernel = case["build"]()
+                    self.assertEqual(len(kernel.params), 10)
+                    self.assertEqual(
+                        [param.name for param in kernel.params[-2:]],
+                        ["A_tensor_scale", "B_tensor_scale"],
+                    )
+                    for flavor in ("llvm23", "llvm24"):
+                        with self.subTest(case=cid, flavor=flavor):
+                            llvm = lower_kernel_to_llvm(
+                                kernel, arch=case["arch"], llvm_flavor=flavor
+                            )
+                            self.assertIn(
+                                "fmul float %A_tensor_scale, %B_tensor_scale", llvm
+                            )
+
+
+# The representative-IR byte-stability gate, split so each LLVM flavor is its own
+# test: lowering every case at every flavor in one test came close to the
+# per-test timeout. Together these check exactly what one all-flavor
+# check_golden call does -- the golden's flavor documents once, then every case
+# at every flavor in GOLDEN_FLAVORS (every lane rocke qualifies, not just the
+# one this host autodetects). A drift means emitted IR changed -- if intended
+# and reviewed, re-bless the changed families' shards with:
+#   python tests/instances/rocke_ir_parity_harness.py \
+#     --write tests/golden/rocke_representative_ir_sha256 --only <family>
+
+
+def test_golden_holds_every_llvm_flavor():
+    """The golden has a document (or alias) for every LLVM flavor and nothing
+    for a flavor rocke no longer qualifies."""
+    assert _GOLDEN.exists(), f"golden missing: {_GOLDEN} (bless with harness --write)"
+    errors = check_golden_flavors(_GOLDEN)
+    assert errors == [], "golden flavor set is wrong:\n  " + "\n  ".join(errors)
+
+
+@pytest.mark.parametrize("flavor", GOLDEN_FLAVORS)
+def test_ir_cases_match_golden_sha256(flavor):
+    """Every case's lowered-IR sha256 (and the set of expected failures) at
+    ``flavor`` matches the committed golden."""
+    assert _GOLDEN.exists(), f"golden missing: {_GOLDEN} (bless with harness --write)"
+    drift = check_golden(_GOLDEN, flavor)
+    assert drift == [], f"IR drift vs golden at {flavor}:\n  " + "\n  ".join(drift)
+
+
+class TestGoldenShardWriter(unittest.TestCase):
+    """``--write`` splits the golden per family; ``--only`` rewrites just those."""
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.dir = Path(tmp.name)
+
+    @staticmethod
+    def _fake_build(case_ids):
+        def build(shards=None):
+            keep = [c for c in case_ids if shards is None or c.split("/")[0] in shards]
+            return {
+                "schema": "s",
+                "aliases": {},
+                "flavors": {
+                    "llvm20": {
+                        "cases": {c: {"sha256": c} for c in keep if c != "b/fail"},
+                        "expected_failures": (
+                            {"b/fail": {"type": "E", "message": "m"}}
+                            if "b/fail" in keep
+                            else {}
+                        ),
+                    }
+                },
+            }
+
+        return build
+
+    def _write(self, case_ids, shards=None):
+        with patch("rocke_ir_parity_harness.build_golden", self._fake_build(case_ids)):
+            write_golden(self.dir, shards)
+
+    def test_one_shard_per_family(self):
+        self._write(["a/1", "a/2", "b/1", "b/fail"])
+        self.assertEqual(
+            sorted(p.name for p in self.dir.glob("*.json")), ["a.json", "b.json"]
         )
-        drift = check_golden(_GOLDEN)
-        self.assertEqual(drift, [], "IR drift vs golden:\n  " + "\n  ".join(drift))
+        b = json.loads((self.dir / "b.json").read_text())
+        self.assertEqual(set(b["flavors"]["llvm20"]["cases"]), {"b/1"})
+        self.assertEqual(set(b["flavors"]["llvm20"]["expected_failures"]), {"b/fail"})
+        self.assertNotIn("summary", b["flavors"]["llvm20"])
+        merged = load_golden(self.dir)["flavors"]["llvm20"]
+        self.assertEqual(set(merged["cases"]), {"a/1", "a/2", "b/1"})
+
+    def test_only_leaves_other_shards_untouched(self):
+        self._write(["a/1", "b/1"])
+        a_before = (self.dir / "a.json").read_text()
+        self._write(["a/1", "a/new", "b/1", "b/2"], shards={"b"})
+        self.assertEqual((self.dir / "a.json").read_text(), a_before)
+        b = json.loads((self.dir / "b.json").read_text())
+        self.assertEqual(set(b["flavors"]["llvm20"]["cases"]), {"b/1", "b/2"})
+
+    def test_removed_family_shard_deleted(self):
+        self._write(["a/1", "b/1", "c/1"])
+        self._write(["a/1", "c/1"], shards={"b"})
+        self.assertFalse((self.dir / "b.json").exists())
+        self.assertTrue((self.dir / "c.json").exists())
+        self._write(["a/1"])
+        self.assertEqual([p.name for p in self.dir.glob("*.json")], ["a.json"])
 
 
 if __name__ == "__main__":
-    unittest.main(verbosity=2)
+    raise SystemExit(pytest.main([__file__, "-v"]))
