@@ -2597,10 +2597,11 @@ TEST(TestFillInputs, DeviceFillerCountsTheAllocationOfAPaddedTensorAndFillsItsEl
         GTEST_SKIP() << "rocRAND not available. Skipping test.";
     }
 
-    // elementCount 64 * 128 = 8192 is below minElements(); the padded allocation is above it
+    // elementCount 64 * 128 = 8192 is below minElements() (16384); the padded allocation,
+    // (64 - 1) * 260 + 128 = 16508, is above it
     constexpr int64_t rows = 64;
     constexpr int64_t cols = 128;
-    constexpr int64_t ld = 256;
+    constexpr int64_t ld = 260;
     ASSERT_LT(static_cast<std::size_t>(rows * cols), DeviceInputFiller::minElements());
     const std::vector<int64_t> dims = {rows, cols};
     const std::vector<int64_t> strides = {ld, 1};
