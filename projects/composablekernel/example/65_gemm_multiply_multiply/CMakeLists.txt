@@ -25,6 +25,15 @@ if(TARGET example_moe_gemm1_xdl_fp8_gelu_tanh)
     target_compile_definitions(example_moe_gemm1_xdl_fp8_gelu_tanh PRIVATE MOE_ACTOP=4)
 endif()
 
+add_example_executable(example_moe_gemm1_xdl_bf16_padding moe_gemm_xdl_bf16_padding.cpp)
+if(TARGET example_moe_gemm1_xdl_bf16_padding)
+    target_compile_definitions(example_moe_gemm1_xdl_bf16_padding PRIVATE MOE_STAGE=1)
+endif()
+add_example_executable(example_moe_gemm2_xdl_bf16_padding moe_gemm_xdl_bf16_padding.cpp)
+if(TARGET example_moe_gemm2_xdl_bf16_padding)
+    target_compile_definitions(example_moe_gemm2_xdl_bf16_padding PRIVATE MOE_STAGE=2)
+endif()
+
 list(APPEND gpu_list gfx942 gfx950 gfx1100 gfx1101 gfx1102 gfx1103 gfx1150 gfx1151 gfx1152 gfx1153 gfx1170 gfx1171 gfx11-7-generic gfx1200 gfx1201 gfx11-generic gfx12-generic gfx1250)
 
 set(target 0)
