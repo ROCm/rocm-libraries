@@ -862,16 +862,17 @@ _supports=support,  # selector, then gemm_config_supported, then shape tiling
 The four gfx1201-only fixed tiles add shape bounds to that same data, so a
 small output or short reduction falls through to the RDNA default (priority 14),
 with the 32x32 tile (priority 20) still behind it; divisibility stays in the
-predicate:
+predicate. The band values live once, as named constants beside
+`_CDNA_MFMA_FP16` in [`gemm/fp16_rcr.py`](gemm/fp16_rcr.py), each with its reason:
 
 ```python
-# gfx1201_wmma_128x128x16, priority 10
-shapes=(ShapeRange("output_elements", min=1 << 20, max=1 << 21), ShapeRange("K", min=256))
+# gfx1201_wmma_128x128x16 (priority 10)
+shapes=_GFX1201_MEDIUM_SHAPES   # _GFX1201_MIN_OUTPUT <= M*N <= _GFX1201_MEDIUM_MAX_OUTPUT, K >= _GFX1201_MIN_K
 # gfx1201_wmma_128x64x32 (priority 11), gfx1201_wmma_64x128x32 (priority 12)
-shapes=(ShapeRange("output_elements", min=1 << 20), ShapeRange("K", min=256))
+shapes=_GFX1201_K32_SHAPES      # M*N >= _GFX1201_MIN_OUTPUT, K >= _GFX1201_MIN_K
 # gfx1201_wmma_128x128x16_large (priority 13): the same tile for large outputs
 # whose K is not a multiple of 32
-shapes=(ShapeRange("output_elements", min=(1 << 21) + 1), ShapeRange("K", min=256))
+shapes=_GFX1201_LARGE_SHAPES    # M*N > _GFX1201_MEDIUM_MAX_OUTPUT, K >= _GFX1201_MIN_K
 ```
 
 Dispatching `M=16, N=512, K=512` on `gfx950` exercises both layers at once, and

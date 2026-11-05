@@ -45,6 +45,7 @@ built on the single new **gfx12 WMMA `16×16×16` f16 atom**
 | `wmma_probe.py` | builds the gfx1201 WMMA GEMM and verifies `C = A @ B.T` with random asymmetric inputs to confirm the lane map (a PASS at multiple tile counts uniquely pins it) |
 | `matmul_nbits_verify.py` | builds + numeric-verifies the `MatMulNBits` int4 matmul; `--family large_n / skinny_n / decode_gemv`, optional `--opt` body |
 | `deep_fused_conv_pool_verify.py` | emits + verifies the experimental fused conv0(3×3)→ReLU→conv1(1×1)→ReLU→2×2 maxpool kernel (no HBM intermediates) |
+| `gemm_dispatch_case_study.md` | how the size-aware gfx1201 FP16 GEMM dispatch bands were chosen; relative results and an in-tree replay |
 
 The kernel sources these drivers build live outside this directory:
 `instances/gfx1201/wmma_gemm.py` (GEMM + lane maps),

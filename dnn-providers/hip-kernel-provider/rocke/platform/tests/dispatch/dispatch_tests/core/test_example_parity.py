@@ -50,17 +50,14 @@ NORM_SHAPE = dict(rows=4096, cols=4096)
 # the bf16 decode candidate caps M at 32, and b1024_v8 spans 8192 columns.
 GEMM_DECODE_MNK = (16, 4096, 4096)
 NORM_WIDE_SHAPE = dict(rows=4096, cols=8192)
-# The gfx1201 fp16 candidates cover medium and large output areas rather than
-# the smaller universal verification shape or the bf16 decode shape.
+# Medium and large output areas, for candidates whose declared shape ranges
+# start above the universal verification shape (e.g. size-gated GEMM tiles).
 GEMM_MEDIUM_MNK = (1024, 1024, 256)
 GEMM_LARGE_MNK = (2048, 2048, 256)
 
 
 def _gemm_reqs(arch, spec_id, dtype):
-    shapes = (GEMM_MNK, GEMM_DECODE_MNK)
-    if arch == "gfx1201" and dtype == "fp16":
-        shapes += (GEMM_MEDIUM_MNK, GEMM_LARGE_MNK)
-    for m, n, k in shapes:
+    for m, n, k in (GEMM_MNK, GEMM_DECODE_MNK, GEMM_MEDIUM_MNK, GEMM_LARGE_MNK):
         yield GemmRequest(M=m, N=n, K=k, arch=arch, dtype=dtype, spec_id=spec_id)
 
 

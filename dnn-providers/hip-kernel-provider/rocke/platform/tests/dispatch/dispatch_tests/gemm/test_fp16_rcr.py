@@ -254,6 +254,10 @@ class TestGfx1201Fp16Dispatch(unittest.TestCase):
         # every new tile divisible. Neither individual output axis is a gate.
         cases = (
             (128, 8064, self._DEFAULT),
+            # One 128x64 / 64x128 tile below the floor: the K=32 candidates'
+            # own floors, not just the 128x128 tile's, must hold here.
+            (128, 8128, self._DEFAULT),
+            (8128, 128, self._DEFAULT),
             (128, 8192, self._MEDIUM),
             (8192, 128, self._MEDIUM),
             (128, 16384, self._MEDIUM),

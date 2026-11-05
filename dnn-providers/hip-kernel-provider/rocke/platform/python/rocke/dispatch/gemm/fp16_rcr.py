@@ -295,6 +295,36 @@ def _grid(spec: UniversalGemmSpec, req: OperatorRequest) -> Tuple[int, int, int]
 # against.
 _CDNA_MFMA_FP16 = ("gfx942", "gfx950")
 
+# gfx1201 size-gated WMMA tiles. Each band fact has one home here; candidates
+# and docs refer to these names. Only gfx1201 was measured, so gfx11-generic and
+# gfx1200 keep the RDNA defaults.
+_GFX1201_WMMA_FP16 = ("gfx1201",)
+# Below this output area the 128-wide tiles leave too few workgroups to fill
+# the device, and the existing small RDNA tiles stay faster.
+_GFX1201_MIN_OUTPUT = 1 << 20
+# Up to this output area the 128x128x16 tile wins; above it the K=32 tiles do.
+_GFX1201_MEDIUM_MAX_OUTPUT = 1 << 21
+# Shorter reductions gained little from the larger tiles in the measured sweep.
+_GFX1201_MIN_K = 256
+_GFX1201_MIN_K_SHAPE = ShapeRange("K", min=_GFX1201_MIN_K)
+_GFX1201_MEDIUM_SHAPES = (
+    ShapeRange(
+        "output_elements", min=_GFX1201_MIN_OUTPUT, max=_GFX1201_MEDIUM_MAX_OUTPUT
+    ),
+    _GFX1201_MIN_K_SHAPE,
+)
+# The K=32 tiles also serve the medium band when the 128x128 tile cannot divide
+# the shape.
+_GFX1201_K32_SHAPES = (
+    ShapeRange("output_elements", min=_GFX1201_MIN_OUTPUT),
+    _GFX1201_MIN_K_SHAPE,
+)
+# Large outputs whose K is not a multiple of 32 keep the 128x128x16 tile.
+_GFX1201_LARGE_SHAPES = (
+    ShapeRange("output_elements", min=_GFX1201_MEDIUM_MAX_OUTPUT + 1),
+    _GFX1201_MIN_K_SHAPE,
+)
+
 GEMM_FP16_REGISTRY = CandidateRegistry(
     _FAMILY,
     dim_vocabulary=GEMM_DIM_VOCABULARY,
@@ -310,54 +340,39 @@ GEMM_FP16_REGISTRY.extend(
             spec_fn=_spec_cdna_cshuffle,
             arches=_CDNA_MFMA_FP16,
         ),
-        # Keep small outputs and short reductions on the existing RDNA tiles.
-        # The area gates leave enough independent workgroups before increasing
-        # per-workgroup reuse; exact tile divisibility is checked by support().
+        # Size-gated gfx1201 tiles (bands above); exact tile divisibility is
+        # checked by support(), so a shape a tile cannot divide falls through.
         _make_candidate(
             name="universal_gemm_fp16_gfx1201_wmma_128x128x16",
             spec_id="gfx1201_wmma_128x128x16",
             priority=10,
             spec_fn=_spec_gfx1201_wmma_128x128x16,
-            arches=("gfx1201",),
-            shapes=(
-                ShapeRange("output_elements", min=1 << 20, max=1 << 21),
-                ShapeRange("K", min=256),
-            ),
+            arches=_GFX1201_WMMA_FP16,
+            shapes=_GFX1201_MEDIUM_SHAPES,
         ),
         _make_candidate(
             name="universal_gemm_fp16_gfx1201_wmma_128x64x32",
             spec_id="gfx1201_wmma_128x64x32",
             priority=11,
             spec_fn=_spec_gfx1201_wmma_128x64x32,
-            arches=("gfx1201",),
-            shapes=(
-                ShapeRange("output_elements", min=1 << 20),
-                ShapeRange("K", min=256),
-            ),
+            arches=_GFX1201_WMMA_FP16,
+            shapes=_GFX1201_K32_SHAPES,
         ),
         _make_candidate(
             name="universal_gemm_fp16_gfx1201_wmma_64x128x32",
             spec_id="gfx1201_wmma_64x128x32",
             priority=12,
             spec_fn=_spec_gfx1201_wmma_64x128x32,
-            arches=("gfx1201",),
-            shapes=(
-                ShapeRange("output_elements", min=1 << 20),
-                ShapeRange("K", min=256),
-            ),
+            arches=_GFX1201_WMMA_FP16,
+            shapes=_GFX1201_K32_SHAPES,
         ),
-        # Large outputs whose K is a multiple of 16 but not 32 keep the
-        # medium tile rather than falling back to the RDNA default.
         _make_candidate(
             name="universal_gemm_fp16_gfx1201_wmma_128x128x16_large",
             spec_id="gfx1201_wmma_128x128x16_large",
             priority=13,
             spec_fn=_spec_gfx1201_wmma_128x128x16,
-            arches=("gfx1201",),
-            shapes=(
-                ShapeRange("output_elements", min=(1 << 21) + 1),
-                ShapeRange("K", min=256),
-            ),
+            arches=_GFX1201_WMMA_FP16,
+            shapes=_GFX1201_LARGE_SHAPES,
         ),
         _make_candidate(
             name="universal_gemm_fp16_rdna_wmma",
