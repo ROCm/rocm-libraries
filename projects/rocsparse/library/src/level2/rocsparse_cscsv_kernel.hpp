@@ -98,9 +98,4 @@ namespace rocsparse
     // wavefront size.
     uint32_t cscsv_num_lanes(int64_t max_nnz, uint32_t wavefront_size);
 
-    // Bytes of the solve buffer: ticket, unresolved dependencies and partial sums.
-    size_t cscsv_column_solve_buffer_size(int64_t             m,
-                                          int64_t             batch_count,
-                                          rocsparse_indextype j_type,
-                                          rocsparse_datatype  t_type);
 }

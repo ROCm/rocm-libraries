@@ -283,19 +283,24 @@ namespace rocsparse
         }
         return rocsparse_status_success;
     }
+}
 
-    static rocsparse_status cscsv_column_solve(rocsparse_handle            handle,
-                                               rocsparse_datatype          alpha_datatype,
-                                               const void*                 alpha,
-                                               int64_t                     alpha_stride,
-                                               rocsparse_const_spmat_descr A,
-                                               rocsparse_const_dnvec_descr x,
-                                               rocsparse_dnvec_descr       y,
-                                               rocsparse_cscsv_info        info,
-                                               size_t                      buffer_size_in_bytes,
-                                               void*                       buffer)
+rocsparse_status rocsparse::cscsv_solve(rocsparse_handle            handle,
+                                        rocsparse_operation         trans,
+                                        rocsparse_datatype          alpha_datatype,
+                                        const void*                 alpha,
+                                        int64_t                     alpha_stride,
+                                        rocsparse_const_spmat_descr A,
+                                        rocsparse_const_dnvec_descr x,
+                                        rocsparse_dnvec_descr       y,
+                                        rocsparse_solve_policy      solve_policy,
+                                        rocsparse_cscsv_info        info,
+                                        size_t                      buffer_size_in_bytes,
+                                        void*                       buffer)
+{
+    ROCSPARSE_ROUTINE_TRACE;
+    if(trans == rocsparse_operation_none)
     {
-        ROCSPARSE_ROUTINE_TRACE;
         hipStream_t               stream      = handle->stream;
         const rocsparse_mat_descr descr       = A->descr;
         const int64_t             batch_count = y->batch_count;
@@ -308,12 +313,13 @@ namespace rocsparse
                                                "the CSC solve requires the compute "
                                                "datatype to be the datatype of the matrix");
 
-        RETURN_WITH_MESSAGE_IF_ROCSPARSE_ERROR(
-            (buffer_size_in_bytes
-             < rocsparse::cscsv_column_solve_buffer_size(m, batch_count, J_type, A->data_type))
-                ? rocsparse_status_invalid_size
-                : rocsparse_status_success,
-            "the buffer of the CSC solve is too small");
+        size_t required_buffer_size{};
+        RETURN_IF_ROCSPARSE_ERROR(
+            rocsparse::cscsv_solve_buffer_size(handle, trans, A, x, y, &required_buffer_size));
+        RETURN_WITH_MESSAGE_IF_ROCSPARSE_ERROR((buffer_size_in_bytes < required_buffer_size)
+                                                   ? rocsparse_status_invalid_size
+                                                   : rocsparse_status_success,
+                                               "the buffer of the CSC solve is too small");
 
         const rocsparse::trm_info_t* trm_info
             = info->get(rocsparse_operation_none, descr->fill_mode);
@@ -384,16 +390,41 @@ namespace rocsparse
                          descr->diag_type));
         return rocsparse_status_success;
     }
+    _rocsparse_mat_descr   descr_csr;
+    _rocsparse_spmat_descr mat_csr;
+    rocsparse::build_csr_from_csc(*A, mat_csr, descr_csr);
 
-    static rocsparse_status cscsv_column_diagonal_solve(rocsparse_handle            handle,
-                                                        rocsparse_diagonal_modifier modifier,
-                                                        const void*                 alpha,
-                                                        rocsparse_const_spmat_descr A,
-                                                        rocsparse_const_dnvec_descr x,
-                                                        rocsparse_dnvec_descr       y,
-                                                        rocsparse_cscsv_info        info)
+    // A conjugate-transpose CSC solve becomes a non-transposed CSR solve with
+    // on-the-fly conjugation of the matrix values.
+    const bool force_conj = (trans == rocsparse_operation_conjugate_transpose);
+
+    RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrsv_solve(handle,
+                                                     rocsparse::cscsv_operation_to_csr(trans),
+                                                     alpha_datatype,
+                                                     alpha,
+                                                     alpha_stride,
+                                                     &mat_csr,
+                                                     x,
+                                                     y,
+                                                     solve_policy,
+                                                     info->get_csrsv_info(),
+                                                     buffer,
+                                                     force_conj));
+    return rocsparse_status_success;
+}
+
+rocsparse_status rocsparse::cscsv_diagonal_solve(rocsparse_handle            handle,
+                                                 rocsparse_operation         trans,
+                                                 rocsparse_diagonal_modifier modifier,
+                                                 const void*                 alpha,
+                                                 rocsparse_const_spmat_descr A,
+                                                 rocsparse_const_dnvec_descr x,
+                                                 rocsparse_dnvec_descr       y,
+                                                 rocsparse_cscsv_info        info)
+{
+    ROCSPARSE_ROUTINE_TRACE;
+    if(trans == rocsparse_operation_none)
     {
-        ROCSPARSE_ROUTINE_TRACE;
         const int64_t batch_count = y->batch_count;
 
         const rocsparse::trm_info_t* trm_info
@@ -437,106 +468,6 @@ namespace rocsparse
                                       handle->pointer_mode == rocsparse_pointer_mode_host));
         return rocsparse_status_success;
     }
-
-    static rocsparse_status cscsv_column_zero_pivot(rocsparse_handle     handle,
-                                                    rocsparse_cscsv_info info,
-                                                    rocsparse_indextype  indextype,
-                                                    void*                position)
-    {
-        ROCSPARSE_ROUTINE_TRACE;
-
-        RETURN_IF_ROCSPARSE_ERROR(
-            rocsparse::singularity_get_position_async(handle,
-                                                      1,
-                                                      info,
-                                                      info->get_singularity_numeric_exact(),
-                                                      nullptr,
-                                                      handle->pointer_mode,
-                                                      indextype,
-                                                      position));
-
-        // position lives where the handle's pointer mode says it does.
-        const hipMemcpyKind kind = (handle->pointer_mode == rocsparse_pointer_mode_host)
-                                       ? hipMemcpyHostToHost
-                                       : hipMemcpyDeviceToHost;
-
-        int64_t p = -1;
-        if(indextype == rocsparse_indextype_i32)
-        {
-            int32_t p32;
-            RETURN_IF_HIP_ERROR(
-                rocsparse_hipMemcpyAsync(&p32, position, sizeof(int32_t), kind, handle->stream));
-            RETURN_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(handle->stream));
-            p = p32;
-        }
-        else
-        {
-            RETURN_IF_HIP_ERROR(
-                rocsparse_hipMemcpyAsync(&p, position, sizeof(int64_t), kind, handle->stream));
-            RETURN_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(handle->stream));
-        }
-        return (p != -1) ? rocsparse_status_zero_pivot : rocsparse_status_success;
-    }
-}
-
-rocsparse_status rocsparse::cscsv_solve(rocsparse_handle            handle,
-                                        rocsparse_operation         trans,
-                                        rocsparse_datatype          alpha_datatype,
-                                        const void*                 alpha,
-                                        int64_t                     alpha_stride,
-                                        rocsparse_const_spmat_descr A,
-                                        rocsparse_const_dnvec_descr x,
-                                        rocsparse_dnvec_descr       y,
-                                        rocsparse_solve_policy      solve_policy,
-                                        rocsparse_cscsv_info        info,
-                                        size_t                      buffer_size_in_bytes,
-                                        void*                       buffer)
-{
-    ROCSPARSE_ROUTINE_TRACE;
-    if(trans == rocsparse_operation_none)
-    {
-        RETURN_IF_ROCSPARSE_ERROR(rocsparse::cscsv_column_solve(handle,
-                                                                alpha_datatype,
-                                                                alpha,
-                                                                alpha_stride,
-                                                                A,
-                                                                x,
-                                                                y,
-                                                                info,
-                                                                buffer_size_in_bytes,
-                                                                buffer));
-        return rocsparse_status_success;
-    }
-    RETURN_IF_ROCSPARSE_ERROR(rocsparse::cscsv_transposed_solve(handle,
-                                                                trans,
-                                                                alpha_datatype,
-                                                                alpha,
-                                                                alpha_stride,
-                                                                A,
-                                                                x,
-                                                                y,
-                                                                solve_policy,
-                                                                info->get_csrsv_info(),
-                                                                buffer));
-    return rocsparse_status_success;
-}
-
-rocsparse_status rocsparse::cscsv_diagonal_solve(rocsparse_handle            handle,
-                                                 rocsparse_operation         trans,
-                                                 rocsparse_diagonal_modifier modifier,
-                                                 const void*                 alpha,
-                                                 rocsparse_const_spmat_descr A,
-                                                 rocsparse_const_dnvec_descr x,
-                                                 rocsparse_dnvec_descr       y,
-                                                 rocsparse_cscsv_info        info)
-{
-    ROCSPARSE_ROUTINE_TRACE;
-    if(trans == rocsparse_operation_none)
-    {
-        RETURN_IF_ROCSPARSE_ERROR(
-            rocsparse::cscsv_column_diagonal_solve(handle, modifier, alpha, A, x, y, info));
-        return rocsparse_status_success;
-    }
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::diagonal_solve_csc(handle,
                                                             trans,
                                                             modifier,
@@ -569,7 +500,37 @@ rocsparse_status rocsparse::cscsv_zero_pivot(rocsparse_handle     handle,
     }
     if(info->get_csrsv_info() == nullptr)
     {
-        return rocsparse::cscsv_column_zero_pivot(handle, info, indextype, position);
+        RETURN_IF_ROCSPARSE_ERROR(
+            rocsparse::singularity_get_position_async(handle,
+                                                      1,
+                                                      info,
+                                                      info->get_singularity_numeric_exact(),
+                                                      nullptr,
+                                                      handle->pointer_mode,
+                                                      indextype,
+                                                      position));
+
+        // position lives where the handle's pointer mode says it does.
+        const hipMemcpyKind kind = (handle->pointer_mode == rocsparse_pointer_mode_host)
+                                       ? hipMemcpyHostToHost
+                                       : hipMemcpyDeviceToHost;
+
+        int64_t p = -1;
+        if(indextype == rocsparse_indextype_i32)
+        {
+            int32_t p32;
+            RETURN_IF_HIP_ERROR(
+                rocsparse_hipMemcpyAsync(&p32, position, sizeof(int32_t), kind, handle->stream));
+            RETURN_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(handle->stream));
+            p = p32;
+        }
+        else
+        {
+            RETURN_IF_HIP_ERROR(
+                rocsparse_hipMemcpyAsync(&p, position, sizeof(int64_t), kind, handle->stream));
+            RETURN_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(handle->stream));
+        }
+        return (p != -1) ? rocsparse_status_zero_pivot : rocsparse_status_success;
     }
     return rocsparse::csrsv_zero_pivot(handle, info->get_csrsv_info(), indextype, position);
 }
