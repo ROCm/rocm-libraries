@@ -185,7 +185,10 @@ one of these:
 
 - **add golden data** produced by an independent implementation (see
   [Golden data with DVC](#golden-data-with-dvc)), or
-- **add the op to a reference executor**, or
+- **add the op to a reference executor**. Then search the bundle metadata
+  (`*.meta.json`, `cases[].metadata`) for the matching `no_cpu_reference` or
+  `no_gpu_reference` flag, and try removing it for the ops and shapes the
+  executor now handles ([Disable a reference for a bundle](#disable-a-reference-for-a-bundle)), or
 - **set `enforcement_level`** in the metadata to `applicability` (the engine
   accepts the graph) or `buildable` (its plans compile), so that the bundle
   claims only what the harness can check today, or
@@ -204,6 +207,13 @@ it. The harness never uses a disabled reference as an oracle
 { "format_version": 1, "generator": "…", "reference_source": "…", "no_cpu_reference": true }
 ```
 
+- **Record why in `notes`.** Put the reason the reference is disabled (wrong
+  result, too slow, op or shape it does not support) in the `notes` metadata
+  field, so a later reader can tell whether it still applies.
+- **Remove the flag once the reference supports the bundle.** A disabled
+  reference never runs the bundle, so nothing notices when it gains the op or
+  shape. When you add an op or shape to a reference executor, search the bundle
+  metadata for the flag and try removing it.
 - **Disabling both requires golden data.** Add it first
   ([Golden data with DVC](#golden-data-with-dvc)). A bundle with both flags and
   no declared golden data fails to load. `verify_golden_bundles.py` reports it
