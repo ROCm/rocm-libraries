@@ -35,6 +35,7 @@ FORBIDDEN_SKILL_PATTERNS = (re.compile(r"\bAskUserQuestion\b"),)
 SLASH_SKILL_PATTERN = re.compile(r"(?<![\w:/.])/(?:hipdnn|pr-summary)[A-Za-z0-9_-]*")
 
 EXPECTED_SCRIPTS = {
+    "hipdnn-aiter-asm-sdpa-fwd-sync": ("aiter_fwd_sync.py",),
     "hipdnn-superbuild": ("windows_rocm_setup.py",),
     "hipdnn-superbuild-test": (
         "cmake_run.py",
@@ -64,6 +65,7 @@ REQUIRED_CLAUDE_COMMAND_FIELDS = ("argument-hint", "allowed-tools")
 # Skills registered as Claude commands; each must carry every required field.
 CLAUDE_COMMAND_SKILLS = frozenset(
     {
+        "hipdnn-aiter-asm-sdpa-fwd-sync",
         "hipdnn-deep-review",
         "hipdnn-ingestor-engine",
         "hipdnn-ingestor-impact",
