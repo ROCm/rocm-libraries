@@ -702,12 +702,14 @@ class ProblemPredicate(Properties.Predicate):
                 rv += [cls(bound["tag"], index=bound["index"], value=bound["value"])]
 
         if state.get('ReuseAcrossPersistent', 0):
-            # A stays in VGPRs for the whole persistent loop, so the kernel is only
-            # correct where every tile a workgroup visits reads the same A. K is the
-            # only dim needing a predicate for that: the entry guard handles M by
-            # comparing (M-tile, batch), A does not depend on N, and a partial
-            # M-tile is safe because row m of C depends only on row m of A and the
-            # edge store masks the rows past M.
+            # The resident operand stays in VGPRs for the whole persistent loop, so
+            # the kernel is only correct where every tile a workgroup visits reads
+            # the same one. K is the only dim needing a predicate for that: the
+            # entry guard handles M by comparing (M-tile, batch) for a resident A,
+            # and N by comparing (N-tile, batch) for a resident B; A does not depend
+            # on N nor B on M; and a partial tile is safe because row m of C depends
+            # only on row m of A, column n only on column n of B, and the edge store
+            # masks what lies past M and N.
             #
             # K is a range: the loop runs ceil(K / DepthU) resident k-tiles, a
             # partial last one included because TDM clamps it at K, so any K up to
@@ -719,16 +721,6 @@ class ProblemPredicate(Properties.Predicate):
             rv += [cls('SizeGreaterThan', index=kIdx, value=0)]
             rv += [cls('SizeLessThan', index=kIdx,
                        value=kTiles * state['DepthU'] + 1)]
-            if state['ReuseAcrossPersistent'] == 2:
-                # B resident: M and N need nothing, mirroring A. The entry guard
-                # compares the (batch, N-tile) a tile reads, after the same
-                # DefaultWGM remap the B address is built from, B does not depend
-                # on M, and a partial N-tile is safe because column n of C depends
-                # only on column n of B and the edge store masks the columns past
-                # N. Whole k-tiles only, for now. The K multiple matters even where
-                # ASEM allows a remainder -- fp4 forces ASEM to 32 -- so it is a
-                # predicate on K rather than a reject on ASEM.
-                rv += [cls('SizeMultiple', index=kIdx, value=state['DepthU'])]
 
         return rv
 

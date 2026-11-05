@@ -20,7 +20,7 @@ GlobalParameters:
   DataInitTypeBeta: 2
   PrintLevel: 2
 
-# Groups 1-13 hold A resident (ReuseAcrossPersistent 1); groups B1-B5, at the
+# Groups 1-13 hold A resident (ReuseAcrossPersistent 1); groups B1-B7, at the
 # end, hold B resident (ReuseAcrossPersistent 2) and have their own header.
 #
 # Two things to know before reading a green run here.
@@ -41,7 +41,7 @@ GlobalParameters:
 # code. Groups 1-13 are 700 rows: 678 PASSED, 22 rejected, 0 FAILED. The 22
 # rejections are the K-ceiling misses in groups 1-6; groups 7-13 should pass
 # every row. No size is dead: every one of them runs on some tile. With the
-# RAP 2 groups a full run is 1090 rows: 1064 PASSED, 26 rejected, 0 FAILED.
+# RAP 2 groups a full run is 1242 rows: 1210 PASSED, 32 rejected, 0 FAILED.
 
 BenchmarkProblems:
 
@@ -1033,7 +1033,8 @@ BenchmarkProblems:
   # MacroTile 256x64 and 512x64 mirror 64x256 and 64x512, 128x128 is its own
   # mirror.
   #
-  # Served: any M and N, edge tiles included, and whole k-tiles.
+  # Served: any M and N, edge tiles included, and any K up to the resident block;
+  # a K remainder is tail-folded into the last resident k-tile (groups B6 and B7).
   # A resident B is indexed by the N-tile and the batch, so the entry guard
   # compares both, after the same DefaultWGM remap B's address is built from, and
   # refills B through the fill copy when either changes. Group B5 holds the tile
@@ -1049,8 +1050,8 @@ BenchmarkProblems:
   # - A rejected size looks like a pass (DID_NOT_SATISFY_ASSERTS leaves clientExit
   #   at 0). Sizes are a union across the MacroTiles in a group, so each tile
   #   rejects the N that is not its MacroTile1 and the K beyond its resident block.
-  #   Check the per-size verdicts, not the exit code. These groups are 390 rows:
-  #   386 PASSED, 4 rejected (K beyond MacroTile 128x128's resident block),
+  #   Check the per-size verdicts, not the exit code. These groups are 542 rows:
+  #   532 PASSED, 10 rejected (K beyond MacroTile 128x128's resident block),
   #   0 FAILED.
   #
   # MacroTile 512x64 runs at PrefetchAcrossPersistent 0 only. With PAP 1 it fails
@@ -1515,5 +1516,133 @@ BenchmarkProblems:
           - Exact: [3072, 256, 1, 512]    # nWG1=4, 48 tiles
           - Exact: [4096, 192, 2, 1024]   # nWG1=3 and a batch boundary
           - Exact: [4096, 130, 2, 512]    # nWG1=3 with a partial last N-tile
+        - ActivationArgs:
+          - [Enum: none]
+
+  ########################################################################
+  # B6. A=F8 B=F4 (MX) -- tail folding. fp4 forces ASEM to 32, so K may stop
+  #     mid k-tile; the partial last k-tile takes a resident slot and TDM clamps
+  #     it at K. kTiles: 256x64 16, 128x128 8.
+  ########################################################################
+  -
+    - # ProblemType, TN
+      OperationType: GEMM
+      MacDataTypeA: F8
+      MacDataTypeB: F4
+      DataType: F8
+      DestDataType: s
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      Activation: False
+      SupportUserArgs: True
+      UseBias: 0
+      MXBlockA: 32
+      MXBlockB: 32
+      DataTypeMXSA: E8
+      DataTypeMXSB: E8
+
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 128, 1,  1,  8,  2,  2, 2] # MT 256x64
+          - [16, 16, 128, 1,  1,  4,  4,  2, 2] # MT 128x128
+        # Required by RAP.
+        - TileProcessingStrategy: [DataParallel]
+        - WorkAssignment: [StaticGrid]
+        - TDMInst: [3]
+        - DepthU: [256]
+        - AssertSummationElementMultiple: [32]
+        - ExpandPointerSwap: [False]
+        - PrefetchAcrossPersistent: [0,1]
+        - PrefetchGlobalRead: [2]
+        - ReuseAcrossPersistent: [0,2]
+        # Rest of the audited configuration.
+        - ScheduleIterAlg: [4]
+        - StaggerU: [0]
+        - SourceSwap: [True]
+        - InitCIterWmma: [1]
+        - WorkGroupMapping: [1]
+        - WavefrontSize: [32]
+        - UseSgprForGRO: [0]
+        - ForceDisableShadowInit: [True]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [12288, 64, 4, 32]     # the whole K is one partial k-tile
+          - Exact: [12288, 64, 4, 288]    # the second prologue load is the partial one
+          - Exact: [12288, 64, 2, 512]    # a whole number of k-tiles on a tracking kernel
+          - Exact: [12288, 64, 2, 2016]   # the partial k-tile is 128x128's last
+          - Exact: [12288, 64, 1, 4064]   # the partial k-tile is 256x64's last
+          - Exact: [4096, 192, 1, 416]    # nWG1=3, the guard refills B every few tiles
+          - Exact: [4160, 130, 2, 288]    # M edge, N edge and a batch
+        - ActivationArgs:
+          - [Enum: none]
+
+  ########################################################################
+  # B7. F8/F8 -- tail folding with discriminating batches, ASEM 32,
+  #     PrefetchGlobalRead 1 and 2. kTiles: 256x64 9, 128x128 4.
+  ########################################################################
+  -
+    - # ProblemType, TN
+      OperationType: GEMM
+      DataType: F8
+      DestDataType: s
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      Activation: False
+      SupportUserArgs: True
+      UseBias: 0
+
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 128, 1,  1,  8,  2,  2, 2] # MT 256x64
+          - [16, 16, 128, 1,  1,  4,  4,  2, 2] # MT 128x128
+        # Required by RAP.
+        - TileProcessingStrategy: [DataParallel]
+        - WorkAssignment: [StaticGrid]
+        - TDMInst: [3]
+        - DepthU: [256]
+        - AssertSummationElementMultiple: [32]
+        - ExpandPointerSwap: [False]
+        - PrefetchGlobalRead: [1,2]
+        - PrefetchAcrossPersistent: [0,1]
+        - ReuseAcrossPersistent: [0,2]
+        # Rest of the audited configuration.
+        - ScheduleIterAlg: [4]
+        - StaggerU: [0]
+        - SourceSwap: [True]
+        - InitCIterWmma: [1]
+        - WorkGroupMapping: [1]
+        - WavefrontSize: [32]
+        - UseSgprForGRO: [0]
+        - ForceDisableShadowInit: [True]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [12288, 64, 2, 288]
+          - Exact: [12288, 64, 4, 992]    # the partial k-tile is 128x128's last
+          - Exact: [12288, 64, 2, 2272]   # the partial k-tile is 256x64's last
+          - Exact: [6144, 128, 3, 480]    # batch boundaries mid-walk
+          - Exact: [4097, 129, 2, 160]    # both dims odd and partial, K below one k-tile
+          - Exact: [4096, 192, 2, 736]    # nWG1=3 and a batch boundary
         - ActivationArgs:
           - [Enum: none]
