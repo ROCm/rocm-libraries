@@ -147,6 +147,9 @@ def test_installed_ctest_entries_get_scoped_environment_contracts(
             "-DROCKE_INSTALL_TEST_GPU_REFERENCES=OFF",
             f"-DROCKE_INSTALL_PROVIDER_CTEST_SUBDIR={provider_subdir}",
             f"-DCMAKE_PROJECT_INCLUDE={project_include}",
+            # A fixed package destination, so the standalone manifest's path from
+            # bin/rocke to the installed package is known here: ../../python.
+            "-DROCKE_PYTHON_INSTALL_DIR=python",
         ],
         check=True,
         capture_output=True,
@@ -234,6 +237,11 @@ def test_installed_ctest_entries_get_scoped_environment_contracts(
             **expected_artifacts,
         }
         expected_mla_environment = {"PYTHONPATH": f"{test_ctest_rel}tests/library"}
+        # The tiling tests run from the installed package, which a provider
+        # co-locates with the manifest.
+        expected_tiling_environment = {
+            "PYTHONPATH": "." if provider_subdir else "../../python"
+        }
         if sys.platform == "linux" and rocm_path is not None:
             compiler_environment = {
                 "PATH": os.pathsep.join(
@@ -247,12 +255,16 @@ def test_installed_ctest_entries_get_scoped_environment_contracts(
             }
             expected_platform_environment.update(compiler_environment)
             expected_mla_environment.update(compiler_environment)
+            expected_tiling_environment.update(compiler_environment)
             expected_mla_environment["ROCKE_REQUIRE_COMPILER_TOOLS"] = "1"
 
         assert environment_for(tests, "rocke_pytest") == expected_platform_environment
         assert (
             environment_for(tests, "rocke_library_mla_pytest")
             == expected_mla_environment
+        )
+        assert (
+            environment_for(tests, "rocke_tiling_pytest") == expected_tiling_environment
         )
 
 

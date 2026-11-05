@@ -51,15 +51,19 @@ class AtomNumbers:
 
     @classmethod
     def from_traits(cls, traits: MmaTraits) -> "AtomNumbers":
+        """Derive the atom quantities from ``traits``. They describe one M block of A per lane; a
+        style that cannot lay out an atom holding more (``a_m_register_blocks > 1``) refuses it.
+        """
+        params = traits.layout_params
         return cls(
             m=traits.m,
             n=traits.n,
             k=traits.k,
-            k_per_lane=traits.k_ab_per_lane,
-            k_lanes=traits.k // traits.k_ab_per_lane,
-            c_patches=traits.c_m_num_access,
-            c_lane_rows=traits.m // traits.c_m_per_lane,
-            c_inner=traits.c_m_per_lane // traits.c_m_num_access,
+            k_per_lane=params.k_ab_per_lane,
+            k_lanes=traits.k // params.k_ab_per_lane,
+            c_patches=params.c_m_num_access,
+            c_lane_rows=traits.m // params.c_m_per_lane,
+            c_inner=params.c_m_per_lane // params.c_m_num_access,
             wave_size=traits.wave_size,
         )
 

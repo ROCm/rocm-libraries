@@ -10,9 +10,10 @@ and is this A/B pair sound?" before building on it), so they sit on top of the n
 carry no "machinery" import.
 
 MMA safety (:func:`mma_pair_k_aligned`, :func:`mma_operand_layout_sound`, :func:`mma_pair_compatible`): the
-MFMA/WMMA hardware multiply-accumulates by pairing A-slot-s with B-slot-s and summing over K. The sum
-is order-independent, so the K-slot ordering is FREE -- the sole CROSS-OPERAND constraint is that A and
-B share the SAME positional K-distribution. Per-operand soundness (one M per output on A, one N on B) is
+MFMA/WMMA hardware multiply-accumulates by pairing A and B positions through the instruction's canonical
+coupling (slot s with slot s for every same-format instruction) and summing over K. The sum is
+order-independent, so the K-slot ordering is FREE -- the sole CROSS-OPERAND constraint is that A and B
+hold the SAME logical K at every coupled pair of positions. Per-operand soundness (one M per output on A, one N on B) is
 the OTHER half of the sound MAC. :func:`mma_accumulator_flow_consistent` is the separate C store-coordinate
 gate (passed C == machine-derived C), NOT a sound-MAC condition. Correctness SOT: ``docs/mma_is_machinery.md``
 (the three-condition sound MAC); edge-kind SOT: ``docs/label_flow_and_transforms.md``.
@@ -31,6 +32,7 @@ from ._core import (
     _classify_maps,
     _dword_aligned,
     _free_relabel,
+    _k_coupling,
     _kdist_from_fwd,
     as_forward_map,
     name_permutation,
@@ -159,19 +161,29 @@ def mma_pair_k_aligned(
     a,
     b,
     *,
+    a_canon,
+    b_canon,
     a_free_atoms: int = 1,
     b_free_atoms: int = 1,
     k_axis: int = 1,
 ) -> Diagnostic:
-    """DIAGNOSTIC (observer): do A and B share the SAME positional K PER ATOM -- the PAIRWISE half of the
-    sound MAC (correctness SOT: ``docs/mma_is_machinery.md``, condition 3)? Accepts an encoding OR a forward
-    map ``{(lane,reg)->coord}`` for each.
+    """DIAGNOSTIC (observer): do A and B hold the SAME logical K at the positions the instruction
+    multiplies together, PER ATOM -- the PAIRWISE half of the sound MAC (correctness SOT:
+    ``docs/mma_is_machinery.md``, condition 3)? Accepts an encoding OR a forward map
+    ``{(lane,reg)->coord}`` for each operand and each canonical.
 
-    The MFMA/WMMA hardware pairs A-slot-s with B-slot-s and sums over K; the sum is order-independent, so the
+    The MFMA/WMMA hardware pairs A and B positions through the instruction's canonical coupling (slot s
+    with slot s for every same-format instruction) and sums over K; the sum is order-independent, so the
     K ORDER is FREE -- the sole cross-operand constraint is that A and B agree on which logical K sits in
-    each paired slot. (Per-operand soundness -- one M/N per output -- is the OTHER half,
+    each coupled pair of positions. (Per-operand soundness -- one M/N per output -- is the OTHER half,
     :func:`mma_operand_layout_sound`.) M/N register order is unconstrained, and K need NOT match any
     "canonical" atom order (interleaved-A x interleaved-B is valid iff their K-dists match).
+
+    ``a_canon``/``b_canon`` are the instruction's canonical A and B layouts for the same wave tile
+    (``canonical_layouts(traits, subtiles)``); they define the coupling and are required, because a
+    mixed-width ``f8f6f4`` instruction does not couple slot s with slot s: its 8-bit operand holds K in two
+    runs of 16 per lane, its 6/4-bit operand in one run of 32. B's K labels are moved into A's slot order
+    through the coupling, then compared.
 
     Comparison is PER ATOM: ``a_free_atoms``/``b_free_atoms`` are the free-dim atom counts (M-atoms for A,
     N-atoms for B) the driver walks. A rectangular wave tile (``a_free_atoms != b_free_atoms``) has
@@ -179,10 +191,11 @@ def mma_pair_k_aligned(
     operand is reduced to its per-atom K signature first (defaults of 1 = whole-fragment compare, for a
     caller with no plan/atom-counts in hand). Three-tier:
 
-    - ``ok``      -- atom K-signatures match position-for-position.
+    - ``ok``      -- atom K-signatures match at coupled positions.
     - ``warning`` -- order differs but every lane holds the SAME K set per atom: reconcilable by an
       in-register reorder (named, not performed).
-    - ``error``   -- a malformed atom tiling, a lane-count mismatch, or lanes holding different K sets.
+    - ``error``   -- a malformed atom tiling, a lane-count mismatch, an operand that is not shaped like its
+      canonical, or lanes holding different K sets.
     """
     a_sig, a_reason = _atom_k_signature(
         _kdist_from_fwd(as_forward_map(a), k_axis), a_free_atoms, "A"
@@ -198,6 +211,30 @@ def mma_pair_k_aligned(
         return Diagnostic(
             "error",
             f"A spans {len(a_sig)} lanes but B spans {len(b_sig)} -- operands not MMA-compatible",
+        )
+    coupling = _k_coupling(
+        a_canon,
+        b_canon,
+        a_free_atoms=a_free_atoms,
+        b_free_atoms=b_free_atoms,
+        k_axis=k_axis,
+    )
+    if isinstance(coupling, str):
+        return Diagnostic("error", coupling)
+    if coupling is not None:
+        b_canon_sig, _ = _atom_k_signature(
+            _kdist_from_fwd(as_forward_map(b_canon), k_axis), b_free_atoms, "B"
+        )
+        for role, sig, canon_sig in (("A", a_sig, coupling), ("B", b_sig, b_canon_sig)):
+            if [len(s) for s in sig] != [len(s) for s in canon_sig]:
+                return Diagnostic(
+                    "error",
+                    f"{role} holds {[len(s) for s in sig]} K-slots per atom per lane but its "
+                    f"canonical layout holds {[len(s) for s in canon_sig]} -- the canonical layouts "
+                    "are not this wave tile's",
+                )
+        b_sig = tuple(
+            tuple(b_sig[lane][slot] for lane, slot in row) for row in coupling
         )
     mism = [lane for lane, (ak, bk) in enumerate(zip(a_sig, b_sig)) if ak != bk]
     if not mism:
@@ -404,7 +441,8 @@ def mma_pair_compatible(
     PER ATOM (the relationship, :func:`mma_pair_k_aligned`). Observer only. ``ok`` iff the pair is a
     valid, meaningful MMA; else the first failing operand's soundness error, or the K-match diagnostic.
     The full sound MAC = per-operand soundness (conditions 1-2) + pairwise K-match (3); correctness SOT:
-    ``docs/mma_is_machinery.md``.
+    ``docs/mma_is_machinery.md``. ``a_canon``/``b_canon`` serve both halves: each operand is judged
+    against its own canonical, and the pair is K-matched through the coupling the two define.
 
     Pass ``a_free_atoms``/``b_free_atoms`` (the free-dim atom counts m_sub/n_sub) so the K-match is per
     atom -- **REQUIRED for a rectangular wave tile** (``m_sub != n_sub``), whose whole-wave K-lists differ
@@ -418,6 +456,8 @@ def mma_pair_compatible(
     return mma_pair_k_aligned(
         a_enc,
         b_enc,
+        a_canon=a_canon,
+        b_canon=b_canon,
         a_free_atoms=a_free_atoms,
         b_free_atoms=b_free_atoms,
         k_axis=k_axis,

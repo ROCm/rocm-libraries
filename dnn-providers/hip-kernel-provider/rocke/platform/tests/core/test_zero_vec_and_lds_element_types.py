@@ -1,29 +1,34 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""``zero_vec`` of f64 and i16, and LDS loads and stores of i16.
+"""``zero_vec`` of f64, i16 and u8, and LDS loads and stores of i16.
 
-``zero_vec`` is what ``fill_fragment`` builds on, so without f64 an f64 fragment could
-not be zero-filled. Lowering goes through the active engine, so a strict both-engines run
+``zero_vec`` is what ``fill_fragment`` and ``load_fragment`` build on, so without f64 an f64
+fragment could not be zero-filled, and without u8 a u8 fragment could not be built. Lowering
+goes through the active engine, so a strict both-engines run
 (``ROCKE_BACKEND=both ROCKE_CPP_STRICT=1``) also proves the two engines agree. The numeric
 test runs only on a visible GPU whose arch it names, and skips otherwise.
 """
 
 import numpy as np
 import pytest
-from rocke.core.ir import F64, I16, I64, TF32, IRBuilder, PtrType
+from rocke.core.ir import F64, I16, I64, TF32, U8, IRBuilder, PtrType
 from rocke.core.isa.backend import wired_arches
 from rocke.core.lower_llvm import lower_kernel_to_llvm
 from rocke.tests.gpu import run_on_device
 from rocke.tests.ir_validity import assert_target_accepts
 
 
-def test_zero_vec_accepts_f64_and_i16():
+def test_zero_vec_accepts_f64_i16_and_u8():
     b = IRBuilder("zero_vectors")
     b.zero_vec(I16, 4)
     b.zero_vec(F64, 2)
+    unsigned_bytes = b.zero_vec(U8, 8)
+    assert unsigned_bytes.type.name == "vec<u8x8>"
     text = lower_kernel_to_llvm(b.kernel, arch="gfx90a")
     assert "<4 x i16> zeroinitializer" in text
     assert "<2 x double> zeroinitializer" in text
+    # LLVM has no unsigned integer types: a u8 vector is an i8 vector.
+    assert "<8 x i8> zeroinitializer" in text
     assert_target_accepts(text, "gfx90a")
     with pytest.raises(ValueError, match="^zero_vec unsupported elem tf32$"):
         IRBuilder("tf32_zero").zero_vec(TF32, 4)

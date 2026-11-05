@@ -32,6 +32,7 @@ from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 from .arch import target as _arch
 from .dtypes import dtype_info
+from .storage import SCALE_ENCODINGS
 
 # ----------------------------- Types --------------------------------------
 
@@ -822,18 +823,14 @@ def _scf_for_carried_descriptor_error(op: "Op") -> Optional[str]:
 # narrow forms are the ones that keep a byte-exact last element.
 _BUFFER_ACCESS_BYTES = (1, 2, 4, 8, 16)
 
-# MMA scale encodings: whole bytes, but no value form in the IR (neither engine
-# maps them to an LLVM or HIP type), so a buffer access cannot produce or take a
-# vector of them. Their bytes move as u8.
-_SCALE_ENCODING_SCALARS = ("e8m0", "e5m3")
-
 
 def _buffer_access_bytes(op_name: str, elem: Type, count: int) -> int:
     """The bytes one buffer access of ``count`` ``elem`` elements moves, or refuse it.
 
     The element is any scalar whose width is whole bytes and that has a value
-    form (not one of :data:`_SCALE_ENCODING_SCALARS`); ``count`` is an int and
-    ``count`` elements together must make one of :data:`_BUFFER_ACCESS_BYTES`.
+    form (not one of ``core.storage.SCALE_ENCODINGS``, the MMA scale encodings,
+    whose bytes move as u8); ``count`` is an int and ``count`` elements together
+    must make one of :data:`_BUFFER_ACCESS_BYTES`.
     The C++ builder (``rocke_i_buffer_access_bytes``, whose count is a C int)
     refuses with the same texts.
     """
@@ -841,7 +838,7 @@ def _buffer_access_bytes(op_name: str, elem: Type, count: int) -> int:
         raise TypeError(
             f"{op_name}: the element type must be a scalar, got {elem.name}"
         )
-    if elem.name in _SCALE_ENCODING_SCALARS:
+    if elem.name in SCALE_ENCODINGS:
         raise TypeError(
             f"{op_name}: {elem.name} is an MMA scale encoding with no value form; "
             "move its bytes as u8"
@@ -2568,7 +2565,7 @@ class IRBuilder:
         _refuse_packed_only_value("zero_vec", elem)
         if elem == F32:
             return self.zero_vec_f32(n)
-        if elem in (F16, BF16, F64, FP8E4M3, BF8E5M2, I8, I16, I32):
+        if elem in (F16, BF16, F64, FP8E4M3, BF8E5M2, I8, U8, I16, I32):
             return self._op(
                 "arith.constant_vec",
                 result_types=[VectorType(elem, n)],
