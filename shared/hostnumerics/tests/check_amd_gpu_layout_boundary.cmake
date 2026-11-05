@@ -11,12 +11,6 @@ file(GLOB layout_headers
 if(NOT layout_headers)
     message(FATAL_ERROR "No AMD GPU layout public headers were found.")
 endif()
-set(layout_source
-    "${HOSTNUMERICS_SOURCE_DIR}/src/amd_gpu_layout/mx.cpp"
-)
-set(layout_threading
-    "${HOSTNUMERICS_SOURCE_DIR}/src/amd_gpu_layout/mx_threading.hpp"
-)
 set(component_cmake "${HOSTNUMERICS_SOURCE_DIR}/CMakeLists.txt")
 set(forbidden_layout_patterns
     "#[ \t]*include[ \t]*[<\"]hip[/<\"]"
@@ -63,45 +57,11 @@ foreach(layout_header IN LISTS layout_headers)
     endforeach()
 endforeach()
 
-if(NOT EXISTS "${layout_source}")
-    message(FATAL_ERROR
-        "AMD GPU layout implementation source is missing: ${layout_source}"
-    )
-endif()
-if(NOT EXISTS "${layout_threading}")
-    message(FATAL_ERROR
-        "AMD GPU layout private threading header is missing: ${layout_threading}"
-    )
-endif()
-file(READ "${layout_source}" layout_source_contents)
-file(READ "${layout_threading}" layout_threading_contents)
-set(layout_implementation_contents
-    "${layout_source_contents}\n${layout_threading_contents}"
-)
-if(NOT layout_implementation_contents MATCHES
-   "#[ \t]*include[ \t]*[<\"]omp\\.h[>\"]")
-    message(FATAL_ERROR
-        "OpenMP implementation is missing from the private AMD GPU layout sources."
-    )
-endif()
-if(NOT layout_implementation_contents MATCHES
-   "#[ \t]*pragma[ \t]+omp")
-    message(FATAL_ERROR
-        "OpenMP work sharing is missing from the private AMD GPU layout sources."
-    )
-endif()
-
 file(READ "${component_cmake}" component_cmake_contents)
 if(NOT component_cmake_contents MATCHES
    "add_library\\([ \t\r\n]*hostnumerics-amd-gpu-layout[ \t\r\n]+STATIC")
     message(FATAL_ERROR
         "AMD GPU layout must be a compiled STATIC component target."
-    )
-endif()
-if(NOT component_cmake_contents MATCHES
-   "target_link_libraries\\([ \t\r\n]*hostnumerics-amd-gpu-layout[ \t\r\n]+PRIVATE[ \t\r\n]+OpenMP::OpenMP_CXX")
-    message(FATAL_ERROR
-        "AMD GPU layout must keep OpenMP private to the compiled target."
     )
 endif()
 

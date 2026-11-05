@@ -50,15 +50,13 @@ add_executable(
     structured_sparsity_test.cpp
     tensor_operations_test.cpp
 )
-target_link_libraries(hostnumerics-tests PRIVATE roc::hostnumerics GTest::gtest_main)
-if(TARGET OpenMP::OpenMP_CXX)
-    target_link_libraries(hostnumerics-tests PRIVATE OpenMP::OpenMP_CXX)
-    target_compile_definitions(
-        hostnumerics-tests
-        PRIVATE
-            HOSTNUMERICS_TEST_OPENMP=1
-    )
-endif()
+target_link_libraries(
+    hostnumerics-tests
+    PRIVATE
+        roc::hostnumerics
+        GTest::gtest_main
+        OpenMP::OpenMP_CXX
+)
 add_test(NAME hostnumerics-tests COMMAND hostnumerics-tests)
 
 add_executable(hostnumerics-tutorial ../examples/tutorial.cpp)
@@ -72,13 +70,6 @@ target_link_libraries(
         roc::hostnumerics
         GTest::gtest_main
 )
-if(TARGET OpenMP::OpenMP_CXX)
-    target_link_libraries(
-        hostnumerics-generation-recipe-tests
-        PRIVATE
-            OpenMP::OpenMP_CXX
-    )
-endif()
 add_test(
     NAME hostnumerics-generation-recipe-tests
     COMMAND hostnumerics-generation-recipe-tests
@@ -222,14 +213,8 @@ target_link_libraries(
     PRIVATE
         roc::hostnumerics
         GTest::gtest_main
+        OpenMP::OpenMP_CXX
 )
-if(TARGET OpenMP::OpenMP_CXX)
-    target_link_libraries(
-        hostnumerics-mx-tests
-        PRIVATE
-            OpenMP::OpenMP_CXX
-    )
-endif()
 add_test(NAME hostnumerics-mx-tests COMMAND hostnumerics-mx-tests)
 
 add_executable(
@@ -296,7 +281,6 @@ add_test(
         "-DTEST_CXX_COMPILER=${CMAKE_CXX_COMPILER}"
         "-DTEST_MAKE_PROGRAM=${CMAKE_MAKE_PROGRAM}"
         "-DTEST_CXX_FLAGS=${CMAKE_CXX_FLAGS}"
-        "-DTEST_DISABLE_FIND_PACKAGE_OpenMP=${CMAKE_DISABLE_FIND_PACKAGE_OpenMP}"
         "-DTEST_EXE_LINKER_FLAGS=${CMAKE_EXE_LINKER_FLAGS}"
         "-DTEST_GTEST_SOURCE_DIR=${googletest_SOURCE_DIR}"
         "-DTEST_GTEST_DIR=${GTest_DIR}"
@@ -306,7 +290,6 @@ add_test(
 )
 
 if(HOSTNUMERICS_BUILD_BENCHMARKS)
-    find_package(OpenMP QUIET COMPONENTS CXX)
     add_executable(
         hostnumerics-structured-sparsity-benchmark
         structured_sparsity_benchmark.cpp
@@ -315,19 +298,8 @@ if(HOSTNUMERICS_BUILD_BENCHMARKS)
         hostnumerics-structured-sparsity-benchmark
         PRIVATE
             roc::hostnumerics
+            OpenMP::OpenMP_CXX
     )
-    if(OpenMP_CXX_FOUND)
-        target_link_libraries(
-            hostnumerics-structured-sparsity-benchmark
-            PRIVATE
-                OpenMP::OpenMP_CXX
-        )
-        target_compile_definitions(
-            hostnumerics-structured-sparsity-benchmark
-            PRIVATE
-                HOSTNUMERICS_BENCHMARK_OPENMP=1
-        )
-    endif()
 
     add_executable(
         hostnumerics-comparison-benchmark

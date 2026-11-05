@@ -3,7 +3,9 @@
 ## Build and test
 
 
-The standalone build requires CMake 3.25.2 or newer, a C++20 compiler, and Ninja.
+The standalone build requires CMake 3.25.2 or newer, a C++20 compiler with
+OpenMP, and Ninja. With MSVC, CMake 3.30 or newer is needed to select the LLVM
+OpenMP runtime.
 The Python module also needs Python 3.10 or newer with development headers and
 nanobind. The Python test suite also requires NumPy and `ml_dtypes`. From the
 repository root, the following creates a virtual environment and build directory
@@ -60,7 +62,8 @@ that adds generation, reference operations, and comparison, and links core
 transitively. The single Python `hostnumerics` package exposes both layers.
 `roc::hostnumerics-blas` adds the optional CBLAS GEMM backend, and
 `roc::hostnumerics-amd-gpu-layout` provides the independent CPU transforms for
-physical MX scale layouts. Build options and their defaults are documented next
+physical MX scale layouts. Consumers of every library except core also need
+OpenMP at link time. Build options and their defaults are documented next
 to their declarations in CMake.
 
 C++ tests use GoogleTest 1.12.1 or newer, retaining the repository's older compatibility baseline because these assertions need no newer API. Top-level test builds default to fetching 1.17.0, matching the shared superbuild, when no compatible installed package is available; set `HOSTNUMERICS_ENABLE_FETCH=OFF` to require an existing package. When a parent enables HostNumerics tests through `add_subdirectory`, fetching defaults to `OFF`: provide a compatible GoogleTest package or target, or explicitly set `HOSTNUMERICS_ENABLE_FETCH=ON`. Existing `GTest::gtest_main` targets must expose their version through the target's `VERSION` property or `GTest_VERSION`. GoogleTest is not installed or exported with HostNumerics. When configuring a package or embedded test project directly, pass `-DHOSTNUMERICS_SOURCE_DIR=/path/to/hostnumerics` so it can locate the shared test sources and CMake helper.

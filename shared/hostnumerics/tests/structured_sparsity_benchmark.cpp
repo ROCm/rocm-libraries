@@ -1,6 +1,8 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
+#include <omp.h>
+
 #include <algorithm>
 #include <chrono>
 #include <cstddef>
@@ -11,10 +13,6 @@
 #include <span>
 #include <stdexcept>
 #include <vector>
-
-#if HOSTNUMERICS_BENCHMARK_OPENMP
-#include <omp.h>
-#endif
 
 namespace {
 using Clock = std::chrono::steady_clock;
@@ -114,11 +112,7 @@ int main(int argc, char** argv) {
     const double bytes = static_cast<double>(input.size() * sizeof(float));
     const double componentBandwidth = bytes / (componentMilliseconds * 1.0e6);
     const double legacyBandwidth = bytes / (legacyMilliseconds * 1.0e6);
-#if HOSTNUMERICS_BENCHMARK_OPENMP
     const int openmpThreads = omp_get_max_threads();
-#else
-    const int openmpThreads = 1;
-#endif
     std::cout << "shape=" << rows << 'x' << columns << '\n'
               << "openmp_threads=" << openmpThreads << '\n'
               << "component_ms=" << componentMilliseconds << " input_GBps=" << componentBandwidth

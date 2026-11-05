@@ -37,9 +37,13 @@ option(HOSTNUMERICS_BUILD_BLAS_BACKEND
 option(HOSTNUMERICS_BUILD_BENCHMARKS
        "Build standalone development benchmarks; these are not installed."
        OFF)
-option(HOSTNUMERICS_AMD_GPU_LAYOUT_ENABLE_OPENMP
-       "Parallelize large CPU-side AMD GPU layout transforms with OpenMP when available."
-       ON)
+
+# The parallel loops use unsigned indices, which MSVC's default OpenMP 2.0
+# runtime rejects. CMake 3.30 or newer is needed to select the LLVM runtime.
+if(MSVC AND NOT DEFINED OpenMP_RUNTIME_MSVC)
+    set(OpenMP_RUNTIME_MSVC llvm)
+endif()
+find_package(OpenMP REQUIRED COMPONENTS CXX)
 
 # Install one public target and its component-specific export file.
 function(
@@ -166,6 +170,7 @@ target_include_directories(hostnumerics-amd-gpu-layout
     PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/src"
 )
+target_link_libraries(hostnumerics-amd-gpu-layout PRIVATE OpenMP::OpenMP_CXX)
 target_sources(hostnumerics-amd-gpu-layout
     PUBLIC
         FILE_SET HEADERS
@@ -181,20 +186,6 @@ set_target_properties(hostnumerics-amd-gpu-layout
         VERIFY_INTERFACE_HEADER_SETS ON
         VISIBILITY_INLINES_HIDDEN ON
 )
-if(HOSTNUMERICS_AMD_GPU_LAYOUT_ENABLE_OPENMP)
-    find_package(OpenMP QUIET COMPONENTS CXX)
-    if(OpenMP_CXX_FOUND)
-        target_link_libraries(
-            hostnumerics-amd-gpu-layout
-            PRIVATE
-                OpenMP::OpenMP_CXX
-        )
-        set_property(
-            TARGET hostnumerics-amd-gpu-layout
-            PROPERTY HOSTNUMERICS_USES_OPENMP ON
-        )
-    endif()
-endif()
 
 target_compile_features(hostnumerics PUBLIC cxx_std_20)
 target_include_directories(hostnumerics
@@ -207,15 +198,9 @@ target_include_directories(hostnumerics
 target_link_libraries(hostnumerics
     PUBLIC
         roc::hostnumerics-core
+    PRIVATE
+        OpenMP::OpenMP_CXX
 )
-find_package(OpenMP QUIET COMPONENTS CXX)
-if(OpenMP_CXX_FOUND)
-    target_link_libraries(hostnumerics PRIVATE OpenMP::OpenMP_CXX)
-    set_property(
-        TARGET hostnumerics
-        PROPERTY HOSTNUMERICS_USES_OPENMP ON
-    )
-endif()
 
 target_sources(hostnumerics
     PUBLIC
@@ -273,10 +258,8 @@ function(hostnumerics_enable_blas_backend)
             roc::hostnumerics
         PRIVATE
             CBLAS::CBLAS
+            OpenMP::OpenMP_CXX
     )
-    if(TARGET OpenMP::OpenMP_CXX)
-        target_link_libraries(hostnumerics-blas PRIVATE OpenMP::OpenMP_CXX)
-    endif()
     target_sources(hostnumerics-blas
         PUBLIC
             FILE_SET HEADERS
@@ -326,7 +309,6 @@ if(HOSTNUMERICS_BUILD_TESTING)
             "-DTEST_CXX_COMPILER=${CMAKE_CXX_COMPILER}"
             "-DTEST_MAKE_PROGRAM=${CMAKE_MAKE_PROGRAM}"
             "-DTEST_CXX_FLAGS=${CMAKE_CXX_FLAGS}"
-            "-DTEST_DISABLE_FIND_PACKAGE_OpenMP=${CMAKE_DISABLE_FIND_PACKAGE_OpenMP}"
             "-DTEST_EXE_LINKER_FLAGS=${CMAKE_EXE_LINKER_FLAGS}"
             "-DTEST_GTEST_SOURCE_DIR=${HOSTNUMERICS_TEST_GTEST_SOURCE_DIR}"
             "-DTEST_GTEST_DIR=${GTest_DIR}"
@@ -413,25 +395,6 @@ function(hostnumerics_finalize_package)
     set(HOSTNUMERICS_PACKAGE_HAS_BLAS OFF)
     if(TARGET hostnumerics-blas)
         set(HOSTNUMERICS_PACKAGE_HAS_BLAS ON)
-    endif()
-    set(HOSTNUMERICS_PACKAGE_OPERATIONS_HAS_OPENMP OFF)
-    get_target_property(
-        _hostnumerics_uses_openmp
-        hostnumerics
-        HOSTNUMERICS_USES_OPENMP
-    )
-    if(_hostnumerics_uses_openmp)
-        set(HOSTNUMERICS_PACKAGE_OPERATIONS_HAS_OPENMP ON)
-    endif()
-
-    set(HOSTNUMERICS_PACKAGE_AMD_GPU_LAYOUT_HAS_OPENMP OFF)
-    get_target_property(
-        _hostnumerics_amd_gpu_layout_uses_openmp
-        hostnumerics-amd-gpu-layout
-        HOSTNUMERICS_USES_OPENMP
-    )
-    if(_hostnumerics_amd_gpu_layout_uses_openmp)
-        set(HOSTNUMERICS_PACKAGE_AMD_GPU_LAYOUT_HAS_OPENMP ON)
     endif()
 
     foreach(generic_target

@@ -49,10 +49,6 @@ if(TEST_GTEST_SOURCE_DIR)
 elseif(TEST_GTEST_DIR)
     list(APPEND _configure_cache_arguments "-DGTest_DIR=${TEST_GTEST_DIR}")
 endif()
-# Preserve a serial-only toolchain in nested producers and consumers.
-if(TEST_DISABLE_FIND_PACKAGE_OpenMP)
-    list(APPEND _configure_cache_arguments "-DCMAKE_DISABLE_FIND_PACKAGE_OpenMP=TRUE")
-endif()
 if(DEFINED TEST_CXX_FLAGS)
     list(
         APPEND
@@ -342,24 +338,15 @@ if(_blas_target_files)
     )
 endif()
 
-file(
-    GLOB_RECURSE
-    _operations_target_files
-    "${_full_install_dir}/*HostNumericsOperationsTargets.cmake"
-)
-if(_operations_target_files)
-    list(GET _operations_target_files 0 _operations_target_file)
-    file(READ "${_operations_target_file}" _operations_targets)
-    if(_operations_targets MATCHES "OpenMP::OpenMP_CXX")
-        _expect_component_failure(
-            "${_full_install_dir}"
-            missing-operations-openmp-dependency
-            Operations
-            "the installed Operations target requires OpenMP::OpenMP_CXX"
-            -DCMAKE_DISABLE_FIND_PACKAGE_OpenMP=TRUE
-        )
-    endif()
-endif()
+foreach(_openmp_component Operations AMDGPULayout)
+    _expect_component_failure(
+        "${_full_install_dir}"
+        "missing-openmp-dependency-${_openmp_component}"
+        "${_openmp_component}"
+        "the ${_openmp_component} component requires OpenMP::OpenMP_CXX"
+        -DCMAKE_DISABLE_FIND_PACKAGE_OpenMP=TRUE
+    )
+endforeach()
 
 _expect_component_failure(
     "${_full_install_dir}"
