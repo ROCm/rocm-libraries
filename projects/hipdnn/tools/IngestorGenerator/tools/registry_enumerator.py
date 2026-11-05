@@ -12,12 +12,13 @@ class; ``pin`` selects exactly one candidate, and each cell of the ``cells`` cro
 product (first group outermost) is a request whose ``select_spec``/``sweep_space``
 specs become kernels. ``pin`` may also be a list of such selectors: the first
 candidate gives every cell its default spec and must admit every cell, and each
-later one adds its ``sweep_space`` specs to the cells it admits. ``space: slice`` keeps the specs differing from the cell's
-default only in ``free_fields``. ``space: full`` keeps those matching the default
-in ``reduction.fields.feature``, projects varying ``performance`` knobs into the
-spec, KMD, metadata, bindings and name, and holds any other varying field at the
-registry default (with a WARN unless ``ignored``). The default spec carries
-``default: true``.
+later one adds its ``sweep_space`` specs to the cells it admits. A kernel's
+``provenance`` names the first pin that supplied its spec. ``space: slice`` keeps
+the specs differing from the cell's default only in ``free_fields``.
+``space: full`` keeps those matching the default in ``reduction.fields.feature``,
+projects varying ``performance`` knobs into the spec, KMD, metadata, bindings and
+name, and holds any other varying field at the registry default (with a WARN
+unless ``ignored``). The default spec carries ``default: true``.
 
 One pack may draw kernels from more than one registry candidate: ``enumerate.also`` lists
 further sections, each with its own ``pin``, ``fixed``, ``cells``, ``free_fields``,
@@ -392,9 +393,10 @@ class Registry:
             if key not in decl:
                 raise EnumerationError(f"the manifest's {where} lacks '{key}'.")
         self.decl = decl
-        #: ``(cell_key, kernel spec)`` -> the registry's ``tuning_id`` for it, filled
-        #: by `space`. Absent for a spec the registry hands back unwrapped.
-        self.tuning_ids: dict = {}
+        #: ``(cell_key, kernel spec)`` -> ``(pin, tuning_id)`` of the pin that supplied
+        #: it, filled by `space`. ``tuning_id`` is None for a spec the registry hands
+        #: back unwrapped.
+        self.origins: dict = {}
         self.space_kind = decl.get("space", "slice")
         if self.space_kind not in ("slice", "full"):
             raise EnumerationError(
@@ -569,8 +571,12 @@ class Registry:
     def space(self, cell: dict) -> tuple:
         """``(select_spec spec, sweep specs)`` for one cell, both unwrapped: the first
         pinned candidate's, then the sweep specs of every later pinned candidate that
-        admits the cell, each spec once."""
-        base, specs = self._candidate_space(cell, self.pin, self.candidate)
+        admits the cell, each spec once. Each spec is traced to the first pin that
+        supplied it."""
+        key = self.cell_key(cell)
+        base, specs, ids = self._candidate_space(cell, self.pin, self.candidate)
+        for spec in (base, *specs):
+            self.origins.setdefault((key, spec), (self.pin, ids.get(spec)))
         for pin, candidate in self.extra_pins:
             request = self.request(cell, pin)
             try:
@@ -581,11 +587,15 @@ class Registry:
                     f"({type(exc).__name__}): {exc}"
                 ) from exc
             if ok:
-                _, more = self._candidate_space(cell, pin, candidate)
-                specs += [s for s in more if s not in specs]
+                _, more, ids = self._candidate_space(cell, pin, candidate)
+                added = [s for s in more if s not in specs]
+                for spec in added:
+                    self.origins.setdefault((key, spec), (pin, ids.get(spec)))
+                specs += added
         return base, specs
 
     def _candidate_space(self, cell: dict, pin: dict, candidate) -> tuple:
+        """``(base, specs, {spec: tuning_id})`` for one pinned candidate."""
         request = self.request(cell, pin)
         try:
             ok, why = candidate.admits(request)
@@ -615,26 +625,26 @@ class Registry:
                 f"the registry routes cell {_show(cell)} without a kernel_spec; the "
                 f"pinned candidate must resolve to a kernel."
             )
-        key = self.cell_key(cell)
         if any(
             getattr(item, "reduce_spec", None) is not None
             for item in (base_wrapped, *wrapped)
         ):
             self.pairs_reduce = True
+        ids: dict = {}
         for item in (base_wrapped, *wrapped):
             tuning_id = getattr(item, "tuning_id", None)
             if tuning_id:
-                self.tuning_ids.setdefault((key, _unwrap(item)), str(tuning_id))
-        return base, specs
+                ids.setdefault(_unwrap(item), str(tuning_id))
+        return base, specs, ids
 
     def provenance(self, cell: dict, spec) -> dict:
-        """The pin's ``spec_id`` and, when the registry names the kernel, its
-        ``tuning_id``: what lets a shipped descriptor be traced back to the
-        registry entry that produced it. Informational; never compared."""
+        """The supplying pin's ``spec_id`` and, when the registry names the kernel,
+        that pin's ``tuning_id`` for it: what lets a shipped descriptor be traced back
+        to the registry entry that produced it. Informational; never compared."""
+        pin, tuning_id = self.origins.get((self.cell_key(cell), spec), (self.pin, None))
         out = {}
-        if self.pin.get("spec_id"):
-            out["rocke_spec_id"] = str(self.pin["spec_id"])
-        tuning_id = self.tuning_ids.get((self.cell_key(cell), spec))
+        if pin.get("spec_id"):
+            out["rocke_spec_id"] = str(pin["spec_id"])
         if tuning_id and tuning_id != "auto":
             out["rocke_tuning_id"] = tuning_id
         return out

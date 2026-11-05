@@ -128,6 +128,47 @@ def test_a_pin_list_adds_each_later_candidates_specs_to_the_cells_it_admits(prob
     assert listed.space(cell) == single.space(cell)
 
 
+@dataclasses.dataclass(frozen=True)
+class _Tuned:
+    """A registry spec wrapped with its tuning id, as rocKE's dispatcher hands back."""
+
+    kernel_spec: object
+    tuning_id: str
+
+
+def test_a_pin_lists_kernels_trace_to_the_pin_that_supplied_them(probe):
+    """A spec only a later pin sweeps carries that pin's spec_id and tuning id; a
+    spec both pins sweep stays the first pin's."""
+    probe.manifest["enumerate"]["pin"] = [
+        {"algorithm": "probe", "spec_id": "grid"},
+        {"algorithm": "persist", "spec_id": "a"},
+    ]
+    registry = re_.Registry(probe.manifest)
+    first, later = registry.candidate, registry.extra_pins[0][1]
+    sweep = synth.ProbeCandidate.sweep_space
+    added = dataclasses.replace(
+        first.select_spec(registry.request(registry.cells()[0])), tile_n=256
+    )
+    # Both pins sweep the probe specs; only the later one adds tile_n 256.
+    first.sweep_space = lambda r: [
+        _Tuned(s, f"grid@{s.tile_n}") for s in sweep(first, r)
+    ]
+    later.sweep_space = lambda r: [
+        _Tuned(s, f"a@{s.tile_n}") for s in [*sweep(later, r), added]
+    ]
+
+    kernels = re_.build_config(probe.manifest, registry)["packs"][0]["kernels"]
+    provenance = {k["name"]: k["provenance"] for k in kernels}
+    assert provenance["probe.bf16_d64_h8_c0_tn32"] == {
+        "rocke_spec_id": "grid",
+        "rocke_tuning_id": "grid@32",
+    }
+    assert provenance["probe.bf16_d64_h8_c0_tn256"] == {
+        "rocke_spec_id": "a",
+        "rocke_tuning_id": "a@256",
+    }
+
+
 def test_each_pin_of_a_list_must_match_one_candidate(probe, capsys):
     probe.manifest["enumerate"]["pin"] = [
         {"algorithm": "probe", "spec_id": "grid"},

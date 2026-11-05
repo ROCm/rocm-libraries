@@ -82,7 +82,7 @@ def score_rows():
     persist_base = {}
     for index, cell in enumerate(cells):
         if cell["hdim_q"] == 128:
-            base, _ = registry._candidate_space(cell, *persist[0])
+            base, _, _ = registry._candidate_space(cell, *persist[0])
             persist_base[index] = base
 
     def cell_index(cell):
