@@ -553,10 +553,27 @@ if(ROCKE_INSTALL_TESTS)
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
            "set_tests_properties(rocke_python_import_smoke PROPERTIES LABELS \"ckc;python;quick\")\n")
 
+    set(_rocke_barrier_parity_entries "")
+    if(TARGET rocke_optimization_barrier_emit)
+      rocke_cxx_test_installed_name(_rocke_installed_name
+                                  rocke_optimization_barrier_emit)
+      string(APPEND _rocke_barrier_parity_entries
+             "add_test(rocke_optimization_barrier_hip_pair python "
+             "\"${ROCKE_TEST_CTEST_REL}tests/core/"
+             "test_optimization_barrier_cli.py\" --native "
+             "\"${ROCKE_CXX_TEST_CTEST_REL}${_rocke_installed_name}${CMAKE_EXECUTABLE_SUFFIX}\" "
+             "--launcher \"${_ROCKE_INSTALLED_PYTHONPATH}/rocke/tests/"
+             "subprocess_launcher.py\" --emitter "
+             "\"${ROCKE_TEST_CTEST_REL}tests/instances/parity/"
+             "optimization_barrier_emit.py\" --count 17)\n"
+             "set_tests_properties(rocke_optimization_barrier_hip_pair "
+             "PROPERTIES LABELS \"ckc;python;host;quick\" TIMEOUT 120)\n")
+    endif()
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
            "add_test(rocke_golden_static python \"${ROCKE_TEST_CTEST_REL}rocke_installed_golden_test.py\")\n")
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
-           "set_tests_properties(rocke_golden_static PROPERTIES LABELS \"ckc;python;golden;host;quick\")\n")
+           "set_tests_properties(rocke_golden_static PROPERTIES LABELS \"ckc;python;golden;host;quick\")\n"
+           "${_rocke_barrier_parity_entries}")
 
     # Compiler tool locations for Python entries that compile and disassemble
     # kernels: hipcc in ROCm's bin/, llvm-objdump and llvm-readelf in its
@@ -665,6 +682,9 @@ if(ROCKE_INSTALL_TESTS)
         "tests/library/tests/test_conv_aot_grid_limits.py"
         "tests/library/tests/test_dgrad_stem_wmma.py"
         "tests/library/tests/test_fwd_small_wmma.py"
+        "tests/library/tests/test_direct_dw_fwd_wmma.py"
+        "tests/library/tests/test_direct_fwd_gstream_wmma.py"
+        "tests/library/tests/test_direct_fwd_tapouter_wmma.py"
         "tests/library/tests/test_direct_dgrad_wmma.py"
         "tests/library/tests/test_direct_fwd_wmma.py"
         "tests/library/tests/test_conv_fwd_split_k.py"
@@ -682,6 +702,7 @@ if(ROCKE_INSTALL_TESTS)
         "tests/library/tests/test_library_layering.py"
         "tests/library/tests/test_aot_launch_zeroing.py"
         "tests/library/tests/test_batched_timing.py"
+        "tests/library/tests/test_conv_fill.py"
         "tests/library/tests/test_capability_keys.py"
         "tests/library/tests/test_module_cache.py"
         "tests/library/tests/test_run_conv_shards.py")
@@ -727,6 +748,7 @@ if(ROCKE_INSTALL_TESTS)
         "tests/library/tests/test_attention_tiled_3d_reduce_lds.py"
         "tests/library/tests/test_attention_unified_masked_tile_ir.py"
         "tests/library/tests/test_attention_unified_2d_lse_ir.py"
+        "tests/library/tests/test_d256_gfx942_fast_routing.py"
         "tests/library/tests/test_sdpa_seqlen.py"
         "tests/library/tests/test_sdpa_padding_mask.py"
         "tests/library/tests/test_fmha_mfma_free_stride.py"
@@ -968,6 +990,9 @@ if(ROCKE_INSTALL_TESTS)
         "tests/library/tests/test_conv_dgrad_4c.py"
         "tests/library/tests/test_conv_dgrad_fused_weights.py"
         "tests/library/tests/test_direct_mfma_dgrad_correctness.py"
+        "tests/library/tests/test_direct_dw_fwd_wmma.py"
+        "tests/library/tests/test_direct_fwd_gstream_wmma.py"
+        "tests/library/tests/test_direct_fwd_tapouter_wmma.py"
         "tests/library/tests/test_conv_winograd_fwd_gpu.py"
         "tests/library/tests/test_conv_winograd_fwd_rt_gpu.py"
         "tests/library/tests/test_conv_winograd_gemm_wmma.py"
@@ -985,6 +1010,7 @@ if(ROCKE_INSTALL_TESTS)
         "tests/library/tests/test_kda_decode_gfx950_numeric.py"
         "tests/library/tests/test_gfx1250_attention.py"
         "tests/library/tests/test_gfx942_gqa_head_fold_numeric.py"
+        "tests/library/tests/test_gfx942_4wgqa_bounds_numeric.py"
         "tests/library/tests/test_attention_gfx942_kv_pages.py"
         "tests/library/tests/test_attention_tiled_3d_kv_lds_swizzle.py"
         "tests/library/tests/test_attention_tiled_3d_running_max.py"
