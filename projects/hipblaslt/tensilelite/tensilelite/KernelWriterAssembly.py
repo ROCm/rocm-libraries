@@ -17659,12 +17659,22 @@ class KernelWriterAssembly(KernelWriter):
          and (kernel["GlobalSplitU"] > 1 or kernel["GlobalSplitU"] == -1):
         continue
       betaModule = Module("Beta_%u"%betaIdx)
+      # TDMStore: the single edge block of a beta=0, direct, non-atomic store to D (not a GSU or
+      # StreamK partial-tile store) is generated like the NonEdge block (widest vector width,
+      # no per-element mask) and stores through LDS with tensor_store_from_lds, whose
+      # tensor_dim bounds the tile to D.
+      tdmStoreBlock = kernel["TDMStore"] and edge and not beta and not atomic \
+        and kernel["_GlobalAccumulation"] in (None, "PartialsBuffer")
+      blockVectorWidths, blockElements = vectorWidths, elements
+      if tdmStoreBlock:
+        vwIdx = vectorWidths.index(max(vectorWidths))
+        blockVectorWidths, blockElements = vectorWidths[vwIdx:vwIdx + 1], elements[vwIdx:vwIdx + 1]
 
       for fdIdx in reversed(range(len(factorDims))):
         factorDim = factorDims[fdIdx]
         # Create StoreVectorWidth branches
         generatedVectorWidths = set()
-        for vectorWidth, element in zip(reversed(vectorWidths), reversed(elements)):
+        for vectorWidth, element in zip(reversed(blockVectorWidths), reversed(blockElements)):
           # Avoid duplicated vectorWidth
           if vectorWidth not in generatedVectorWidths:
             generatedVectorWidths.add(vectorWidth)
@@ -17717,22 +17727,11 @@ class KernelWriterAssembly(KernelWriter):
                 posLabel = self.labels.getNameInc("ThenDeferredReturnDir")
                 edgeModule.add(SLongBranch(endLabel, tmpPair, tmpOff, posLabel, comment="jump to end"))
           else:
-            # TDMStore: every beta=0 edge block of a direct, non-atomic store to D (not a GSU or
-            # StreamK partial-tile store) is generated like the NonEdge block (widest vector width,
-            # no per-element mask) and stores through LDS with tensor_store_from_lds, whose
-            # tensor_dim bounds the tile to D.
-            tdmStoreBlock = kernel["TDMStore"] and edge and not beta and not atomic \
-              and kernel["_GlobalAccumulation"] in (None, "PartialsBuffer")
-            if tdmStoreBlock:
-              batchVectorWidth = max(vectorWidths)
-              batchElement = elements[vectorWidths.index(batchVectorWidth)]
-              tdmStoreLdsBase = self.vgprPool.checkOut(1, "tdmStoreLdsBase")
-            else:
-              batchVectorWidth, batchElement, tdmStoreLdsBase = vectorWidth, element, None
+            tdmStoreLdsBase = self.vgprPool.checkOut(1, "tdmStoreLdsBase") if tdmStoreBlock else None
             currentInstLength, activationTypeStr = \
             self.globalWriteElementBatch(kernel, tPA, tPB, activation,
                                           applyAlpha, beta, edge and not tdmStoreBlock, atomic,
-                                          batchVectorWidth, batchElement, activationLabelList,
+                                          vectorWidth, element, activationLabelList,
                                           tmpVgpr, cvtVgprStruct, activationSetPCStruct, activationEnumStrList,
                                           actPCMaxTempSgpr, isInsertActFunctionCallAddrCalc, toActModuleList,
                                           edgeModule, writeLabels[beta][factorDim][vectorWidth][globalWriteMode]["Then"], endLabel,
@@ -17745,11 +17744,11 @@ class KernelWriterAssembly(KernelWriter):
           # Edge conditions and branches
           if edge == True:
             # Else label
-            elseLabelPos = 0 if vectorWidth == min(vectorWidths) else -1
+            elseLabelPos = 0 if vectorWidth == min(blockVectorWidths) else -1
             edgeModule.add(writeLabels[beta][factorDim][vectorWidth][globalWriteMode]["Else"], pos=elseLabelPos)
             currentInstLength += 1
             # This check is dedicated to adaptive kernel
-            if kernel["AdaptiveGemm"] == 1 and vectorWidth != min(vectorWidths):
+            if kernel["AdaptiveGemm"] == 1 and vectorWidth != min(blockVectorWidths):
               # If module, checking Size0 % vectorWidth > 0
               isLongBranch = True if currentInstLength >= self.states.asmCaps["ShortBranchMaxLength"] else False
               with self.allocTmpSgpr(4, tag="generateBetaModules_tmpSgprInfo2") as tmpSgprInfo:
@@ -17757,7 +17756,7 @@ class KernelWriterAssembly(KernelWriter):
                   writeLabels[beta][factorDim][vectorWidth][globalWriteMode]["Else"], vectorWidth, isLongBranch=isLongBranch), pos=0)
                 currentInstLength += countInstruction(checkIsEdge)
             # Longest vectorWidth should have non edge module
-            if vectorWidth == max(vectorWidths):
+            if vectorWidth == max(blockVectorWidths):
               # NonEdgeEnd label
               edgeModule.add(writeLabels[beta][factorDim][vectorWidth][globalWriteMode]["NonEdgeEnd"], pos=0)
               currentInstLength += 1
