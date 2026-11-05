@@ -35,11 +35,10 @@ class FactoriseError(RuntimeError):
     """The input could not be factorised without changing what it generates."""
 
 
-def _flatten(config: dict) -> list:
-    """Every kernel with its pack defaults already merged in, in the loader's
-    own merge order so the effective spec's key order is the descriptor's. A
+def _flatten(pack: dict) -> list:
+    """Every kernel of ``pack`` with its pack defaults already merged in, in the
+    loader's own merge order so the effective spec's key order is the descriptor's. A
     knob the defaults do not mention stays absent, preserving the tri-state."""
-    pack = config["packs"][0]
     # `axes`/`kernel_template` expand to kernels this tool never sees, so it would
     # either crash on a missing `kernels` key or silently drop the expansion.
     unhandled = sorted({"axes", "kernel_template"} & set(pack))
@@ -420,14 +419,11 @@ def _build_group(group: list, template: str, ordinals, tags: list, knob_fields: 
     return out
 
 
-def factorise(config: dict, knob_fields: list, vocabulary: dict) -> dict:
-    """The compact equivalent of `config`. Round-trip is checked by the caller."""
-    if len(config.get("packs") or []) != 1:
-        raise FactoriseError(
-            "this tool factorises a single-pack variant set; a multi-pack config "
-            "would need per-pack grouping, which no shipped set uses."
-        )
-    entries = _flatten(config)
+def factorise_pack(pack: dict, knob_fields: list, vocabulary: dict) -> dict:
+    """The compact equivalent of one expanded ``pack``, which keeps its header:
+    ``name``, ``arch``, ``discriminator`` and, for a slotted engine, ``slot``.
+    Round-trip is checked by the caller."""
+    entries = _flatten(pack)
     if not entries:
         raise FactoriseError("the pack declares no kernels.")
 
@@ -458,9 +454,9 @@ def factorise(config: dict, knob_fields: list, vocabulary: dict) -> dict:
                 built["vocabulary"] = spellings
         groups.append(built)
 
-    pack = config["packs"][0]
-    out = {k: v for k, v in config.items() if k != "packs"}
     compact_pack = {"name": pack["name"]}
+    if pack.get("slot"):
+        compact_pack["slot"] = pack["slot"]
     if pack.get("arch"):
         compact_pack["arch"] = list(pack["arch"])
     if pack.get("discriminator"):
@@ -468,7 +464,20 @@ def factorise(config: dict, knob_fields: list, vocabulary: dict) -> dict:
     if default_source:
         compact_pack["kernel_defaults"] = default_source
     compact_pack["variants"] = groups
-    out["packs"] = [compact_pack]
+    return compact_pack
+
+
+def factorise(config: dict, knob_fields: list, vocabulary: dict) -> dict:
+    """The compact equivalent of the single-pack `config`; a multi-pack config is
+    refused, and a caller with one factorises each pack with `factorise_pack`.
+    Round-trip is checked by the caller."""
+    if len(config.get("packs") or []) != 1:
+        raise FactoriseError(
+            "this tool factorises a single-pack variant set; a multi-pack config "
+            "would need per-pack grouping, which no shipped set uses."
+        )
+    out = {k: v for k, v in config.items() if k != "packs"}
+    out["packs"] = [factorise_pack(config["packs"][0], knob_fields, vocabulary)]
     return out
 
 
@@ -590,8 +599,16 @@ def _round_trip(original: dict, compact: dict) -> None:
             f"round trip lost or altered the 'reduction' block: "
             f"{reloaded.reduction!r} != {expected.reduction!r}."
         )
-    got = reloaded.packs[0].kernels
-    want = expected.packs[0].kernels
+    if reloaded.slots != expected.slots:
+        raise FactoriseError(
+            "round trip lost or altered the engine's 'slots' declaration."
+        )
+    if [(p.name, p.slot, p.arch, p.discriminator) for p in reloaded.packs] != [
+        (p.name, p.slot, p.arch, p.discriminator) for p in expected.packs
+    ]:
+        raise FactoriseError("round trip lost or altered a pack's header.")
+    got = [k for pack in reloaded.packs for k in pack.kernels]
+    want = [k for pack in expected.packs for k in pack.kernels]
     if len(got) != len(want):
         raise FactoriseError(
             f"round trip produced {len(got)} kernels, not {len(want)}."
