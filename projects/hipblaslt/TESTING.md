@@ -248,7 +248,7 @@ sits at the opposite, much weaker end.
 #### C++ library and clients (weak, and structurally blocked)
 
 Most of the host-only tests that exist are compiled into `hipblaslt-test` alongside the GPU tests,
-in [`clients/tests/src/`](clients/tests/src/). The last two rows are in
+in [`clients/tests/src/`](clients/tests/src/). The last three rows are in
 [`clients/tests/unit/`](clients/tests/unit/), described after the table:
 
 | File | Suites | What it covers |
@@ -263,6 +263,7 @@ in [`clients/tests/src/`](clients/tests/src/). The last two rows are in
 | `cotenant_gtest.cpp` | `CotenantOptions`, `CotenantLds`, `CotenantScoped` | In-process cotenant helper (Linux only): option validation and LDS-reservation sizing (host-only), plus `Scoped` start/stop and argument-error cases that need a GPU and skip without one |
 | `unit/parser_gtest.cpp` | `HostUnitInitParser`, `HostUnitActivationParser`, `HostUnitBiasSourceParser` | The client's string parsers for initialization, activation and bias source, with round-trips through their `*_to_string` helpers |
 | `unit/scaling_format_gtest.cpp` | `HostUnitScalingFormat` | Scaling-format helpers, including the two independent paddings in scale-buffer sizing |
+| `unit/yaml_conversion_gtest.cpp` | `HostUnitYamlConversionDeathTest` | `--yaml` conversion through `hipblaslt_gentest.py`: the client exits with failure on malformed input and accepts a valid empty test list. Needs Python with PyYAML |
 
 The sources in `clients/tests/unit/` also build a second, CPU-only client, `hipblaslt-test-hostunit`
 ([PR #9733](https://github.com/ROCm/rocm-libraries/pull/9733)), so they can run on a machine with no
