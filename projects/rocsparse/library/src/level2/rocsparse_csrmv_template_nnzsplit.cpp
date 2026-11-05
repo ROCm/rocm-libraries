@@ -36,9 +36,18 @@
 #include "csrmv_device_nnzsplit.h"
 #include "rocsparse_primitives.hpp"
 
-#define LAUNCH_CSRMV_ANALYSIS(BLOCKSIZE, NNZ_PER_THREAD) \
-    csrmv_analysis_nnzsplit<BLOCKSIZE, NNZ_PER_THREAD>(  \
-        handle, trans, m, n, nnz, descr, csr_val, csr_row_ptr, csr_col_ind, csrmv_info);
+#define LAUNCH_CSRMV_ANALYSIS(BLOCKSIZE, NNZ_PER_THREAD)            \
+    csrmv_analysis_nnzsplit<BLOCKSIZE, NNZ_PER_THREAD>(handle,      \
+                                                       trans,       \
+                                                       m,           \
+                                                       n,           \
+                                                       nnz,         \
+                                                       descr,       \
+                                                       csr_val,     \
+                                                       csr_row_ptr, \
+                                                       csr_col_ind, \
+                                                       csrmv_info,  \
+                                                       use_starting_block_ids);
 
 #define LAUNCH_CSRMV(BLOCKSIZE, NNZ_PER_THREAD)                               \
     uint32_t NNZ_PER_BLOCK  = NNZ_PER_THREAD * BLOCKSIZE;                     \
@@ -361,15 +370,13 @@ rocsparse_status csrmv_analysis_nnzsplit(rocsparse_handle          handle,
                                          const A*                  csr_val,
                                          const I*                  csr_row_ptr,
                                          const J*                  csr_col_ind,
-                                         rocsparse_csrmv_info      csrmv_info)
+                                         rocsparse_csrmv_info      csrmv_info,
+                                         bool                      use_starting_block_ids)
 {
     ROCSPARSE_ROUTINE_TRACE;
 
     // Stream
     hipStream_t stream = handle->stream;
-
-    const bool use_starting_block_ids
-        = csrmv_info == nullptr ? false : csrmv_info->nnzsplit.get_use_starting_block_ids();
 
     uint32_t NNZ_PER_BLOCK  = NNZ_PER_THREAD * BLOCKSIZE;
     uint32_t requiredBlocks = (nnz + NNZ_PER_BLOCK - 1) / NNZ_PER_BLOCK;
@@ -451,7 +458,8 @@ rocsparse_status
                                                          const A*                  csr_val,
                                                          const I*                  csr_row_ptr,
                                                          const J*                  csr_col_ind,
-                                                         rocsparse_csrmv_info*     p_csrmv_info)
+                                                         rocsparse_csrmv_info*     p_csrmv_info,
+                                                         bool use_starting_block_ids)
 {
     ROCSPARSE_ROUTINE_TRACE;
 
@@ -715,7 +723,8 @@ rocsparse_status rocsparse::csrmv_nnzsplit_template_dispatch(rocsparse_handle   
         const ATYPE*              csr_val,                                          \
         const ITYPE*              csr_row_ptr,                                      \
         const JTYPE*              csr_col_ind,                                      \
-        rocsparse_csrmv_info*     p_csrmv_info);
+        rocsparse_csrmv_info*     p_csrmv_info,                                     \
+        bool                      use_starting_block_ids);
 
 // Uniform precision
 INSTANTIATE(int32_t, int32_t, _Float16);

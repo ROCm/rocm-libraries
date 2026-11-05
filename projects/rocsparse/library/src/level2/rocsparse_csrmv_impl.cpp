@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -81,7 +81,8 @@ rocsparse_status rocsparse::csrmv_analysis_template(rocsparse_handle          ha
                                                     const void*               csr_val_,
                                                     const void*               csr_row_ptr_,
                                                     const void*               csr_col_ind_,
-                                                    rocsparse_csrmv_info*     p_csrmv_info)
+                                                    rocsparse_csrmv_info*     p_csrmv_info,
+                                                    bool use_starting_block_ids)
 {
     ROCSPARSE_ROUTINE_TRACE;
 
@@ -126,8 +127,18 @@ rocsparse_status rocsparse::csrmv_analysis_template(rocsparse_handle          ha
 
     case rocsparse::csrmv_alg_nnzsplit:
     {
-        RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrmv_analysis_nnzsplit_template_dispatch(
-            handle, trans, m, n, nnz, descr, csr_val, csr_row_ptr, csr_col_ind, p_csrmv_info));
+        RETURN_IF_ROCSPARSE_ERROR(
+            rocsparse::csrmv_analysis_nnzsplit_template_dispatch(handle,
+                                                                 trans,
+                                                                 m,
+                                                                 n,
+                                                                 nnz,
+                                                                 descr,
+                                                                 csr_val,
+                                                                 csr_row_ptr,
+                                                                 csr_col_ind,
+                                                                 p_csrmv_info,
+                                                                 use_starting_block_ids));
         return rocsparse_status_success;
     }
 
@@ -693,7 +704,8 @@ static rocsparse_status rocsparse_csrmv_impl(rocsparse_handle          handle,
         const void*,                                                       \
         const void*,                                                       \
         const void*,                                                       \
-        rocsparse_csrmv_info*);                                            \
+        rocsparse_csrmv_info*,                                             \
+        bool);                                                             \
     template rocsparse_status rocsparse::csrmv_template<T, I, J, T, T, T>( \
         rocsparse_handle,                                                  \
         rocsparse_operation,                                               \
@@ -762,7 +774,8 @@ INSTANTIATE(rocsparse_double_complex, int64_t, int64_t);
         const void*,                                                       \
         const void*,                                                       \
         const void*,                                                       \
-        rocsparse_csrmv_info*)
+        rocsparse_csrmv_info*,                                             \
+        bool)
 
 INSTANTIATE_MIXED_ANALYSIS(int32_t, int32_t, int8_t);
 INSTANTIATE_MIXED_ANALYSIS(int64_t, int32_t, int8_t);
