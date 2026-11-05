@@ -1062,6 +1062,7 @@ class Solution:
         # but it describes the in-device MX scale layout the kernel expects, which
         # the host (DataInitialization) needs to know to pick an upload layout.
         # Plumb it onto problemType so the host can read it post-solution-pick.
+        # The values are TensileLite::MXScaleFormat (include/Tensile/MXScaleFormat.hpp).
         rv.problemType.mxScaleFormat = {"NoSwizzle": 0,
                                         "HostPreSwizzle": 1,
                                         "InMemorySwizzle": 2}.get(d.get("MXScaleFormat", "NoSwizzle"), 0)

@@ -747,8 +747,7 @@ rocblaslt_status
         if(status != rocblaslt_status_success)
             return status;
 
-        // Ask for extra candidates: some may not fit the bound problems, and with MX some
-        // expect the other scale layout.
+        // Ask for extra candidates: some may not fit the bound problems.
         const int candidateCount = isMX(desc) ? std::max(4 * requestedAlgoCount, 32)
                                               : std::max(requestedAlgoCount, 8);
         std::vector<rocblaslt_matmul_heuristic_result> candidates;
@@ -779,8 +778,6 @@ rocblaslt_status
             if(*returnAlgoCount >= requestedAlgoCount)
                 break;
             size_t ws = 0;
-            if(!scaleFormatMatches(handle, desc, candidate.algo))
-                continue;
             if(rocblaslt_is_algo_supported_cpp(handle,
                                                rocblaslt::RocGemmType::ROCBLASLT_GROUPED_GEMM,
                                                boundData,

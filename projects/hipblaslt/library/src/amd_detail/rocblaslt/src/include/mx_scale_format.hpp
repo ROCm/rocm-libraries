@@ -5,25 +5,17 @@
 
 #include "../../include/rocblaslt-types.h"
 
+#include <Tensile/MXScaleFormat.hpp>
+
 #include <algorithm>
 #include <cstddef>
-
-// A TensileLite kernel's MX scale layout, as serialized in
-// problemType.mxScaleFormat. Only HostPreSwizzle reads scales the host has
-// already swizzled. The others read the scale tensor as the caller packs it.
-enum class rocblaslt_mx_scale_layout : int
-{
-    NoSwizzle       = 0,
-    HostPreSwizzle  = 1,
-    InMemorySwizzle = 2,
-};
 
 // What a problem's A and B scale modes require of a kernel's MX scale layout.
 enum class rocblaslt_mx_scale_need
 {
     Any, // no MX scales
-    Natural, // packed MX scales: any layout but HostPreSwizzle
-    PreSwizzled, // Block_32_UE8M0_32_8_EXT: HostPreSwizzle only
+    Natural, // packed MX scales: NoSwizzle or InMemorySwizzle
+    PreSwizzled, // Block_32_UE8M0_32_8_EXT: HostPreSwizzle
     Conflict, // packed on one side, pre-swizzled on the other: no layout
 };
 
@@ -67,16 +59,16 @@ inline rocblaslt_mx_scale_need
 
 inline bool rocblaslt_mx_scale_layout_ok(rocblaslt_mx_scale_need need, int kernelLayout)
 {
-    const bool preSwizzled
-        = kernelLayout == static_cast<int>(rocblaslt_mx_scale_layout::HostPreSwizzle);
+    using Layout = TensileLite::MXScaleFormat;
     switch(need)
     {
     case rocblaslt_mx_scale_need::Any:
         return true;
     case rocblaslt_mx_scale_need::Natural:
-        return !preSwizzled;
+        return kernelLayout == static_cast<int>(Layout::NoSwizzle)
+               || kernelLayout == static_cast<int>(Layout::InMemorySwizzle);
     case rocblaslt_mx_scale_need::PreSwizzled:
-        return preSwizzled;
+        return kernelLayout == static_cast<int>(Layout::HostPreSwizzle);
     case rocblaslt_mx_scale_need::Conflict:
         return false;
     }
@@ -88,7 +80,7 @@ inline const char* rocblaslt_mx_scale_mismatch_message(rocblaslt_mx_scale_need n
     switch(need)
     {
     case rocblaslt_mx_scale_need::Natural:
-        return "packed MX scales cannot use a HostPreSwizzle kernel";
+        return "packed MX scales need a NoSwizzle or InMemorySwizzle kernel";
     case rocblaslt_mx_scale_need::PreSwizzled:
         return "Block_32_UE8M0_32_8_EXT scales need a HostPreSwizzle kernel";
     case rocblaslt_mx_scale_need::Conflict:
@@ -98,13 +90,18 @@ inline const char* rocblaslt_mx_scale_mismatch_message(rocblaslt_mx_scale_need n
     }
 }
 
-// search(n) returns the top n candidates in rank order. Candidates that drop()
-// refuses are removed, and the search is widened by that many until requested
-// candidates remain or the search returns fewer than it was asked for.
-template <typename Search, typename Drop>
-auto rocblaslt_find_top_kept(Search&& search, int requested, Drop&& drop)
+// search(n) returns the top n candidates in rank order, and drop() refuses
+// candidates. While fewer than requested survive and the search returned all
+// it was asked for, the request grows by the number dropped from that result,
+// so it doubles when every candidate is dropped: a search that keeps nothing
+// costs about log2(library size) calls. Before widening, anyKept() says
+// whether any candidate of the problem type would survive; if none would, the
+// search stops there. Returns at most requested candidates, in rank order.
+template <typename Search, typename Drop, typename AnyKept>
+auto rocblaslt_find_top_kept(Search&& search, int requested, Drop&& drop, AnyKept&& anyKept)
 {
     auto kept = search(requested);
+    bool checkedAny = false;
     for(int request = requested;;)
     {
         size_t const found = kept.size();
@@ -113,8 +110,16 @@ auto rocblaslt_find_top_kept(Search&& search, int requested, Drop&& drop)
         if(dropped == 0 || kept.size() >= static_cast<size_t>(requested)
            || found < static_cast<size_t>(request))
             break;
+        if(!checkedAny)
+        {
+            checkedAny = true;
+            if(!anyKept())
+                break;
+        }
         request += static_cast<int>(dropped);
         kept = search(request);
     }
+    if(kept.size() > static_cast<size_t>(requested))
+        kept.resize(requested);
     return kept;
 }
