@@ -65,10 +65,11 @@ for _lib_root in (_HERE / "library", _HERE.parents[1] / "library"):
         break
 
 # rocke.tests.ir_validity compiles lowered IR with the platform's IR-validity
-# tool, found in tools/ in a checkout. An install has no tools/ tree: it stages
-# a copy of the tool and the modules it imports under tests/arch_domain, so point
-# the helper there unless the caller already chose a directory. The probe keys on
-# the directory, so an install that lost the tool fails rather than skips.
+# tool, found through rocke.assets.platform_tools_dir() (tools/ in a checkout).
+# An install has no tools/ tree: it stages a copy of the tool and the modules it
+# imports under tests/arch_domain, so point the locator there unless the caller
+# already chose a directory. The probe keys on the directory, so an install that
+# lost the tool fails rather than skips.
 _STAGED_TOOLS = _HERE / "arch_domain"
 if _STAGED_TOOLS.is_dir():
     os.environ.setdefault("ROCKE_PLATFORM_TOOLS_DIR", str(_STAGED_TOOLS))

@@ -32,7 +32,6 @@ import subprocess
 import sys
 import tempfile
 from functools import cache
-from os import environ
 from pathlib import Path
 from types import ModuleType
 from typing import Literal
@@ -40,7 +39,7 @@ from typing import Literal
 import pytest
 
 from rocke.analysis.isa import _extract_mnemonic, _instruction_lines
-from rocke.assets import platform_root
+from rocke.assets import platform_tools_dir
 
 Verdict = Literal["accepted", "rejected", "cannot_judge"]
 
@@ -56,29 +55,24 @@ _TOOL_FILE = "check_ir_validity.py"
 
 
 def _validity_tool() -> ModuleType | None:
-    """The IR-validity tool module, or None when the platform tools are not
-    shipped alongside this package (e.g. an installed wheel).
+    """The IR-validity tool module from :func:`rocke.assets.platform_tools_dir`,
+    or None when there is no such directory (the platform tools are not shipped
+    alongside this package, e.g. an installed wheel).
 
-    The tools are ``tools/`` in a source checkout. ``ROCKE_PLATFORM_TOOLS_DIR``
-    overrides that: the installed test payload stages a copy of the tool and the
-    modules it imports under ``tests/arch_domain``, and the test tree's
-    ``conftest.py`` points the variable there. An override that holds no tool
-    raises ``FileNotFoundError``, so a wrong path fails instead of skipping every
-    test that compiles.
+    A tools directory that exists but holds no tool raises
+    ``FileNotFoundError``, so an override pointing at the wrong directory fails
+    instead of skipping every test that compiles.
     """
-    override = environ.get("ROCKE_PLATFORM_TOOLS_DIR")
-    if override:
-        tools = Path(override).resolve()
-        if not (tools / _TOOL_FILE).is_file():
-            raise FileNotFoundError(
-                f"ROCKE_PLATFORM_TOOLS_DIR={override!r} holds no {_TOOL_FILE} "
-                f"(resolved to {tools}); point it at a directory that does, or unset it"
-            )
-    else:
-        tools = platform_root().resolve() / "tools"
-        if not (tools / _TOOL_FILE).is_file():
-            return None
-    return _load_tool(tools / _TOOL_FILE)
+    tools = platform_tools_dir().resolve()
+    tool_path = tools / _TOOL_FILE
+    if tool_path.is_file():
+        return _load_tool(tool_path)
+    if tools.is_dir():
+        raise FileNotFoundError(
+            f"the platform tools directory {tools} holds no {_TOOL_FILE}; point "
+            "ROCKE_PLATFORM_TOOLS_DIR at a directory that does, or unset it"
+        )
+    return None
 
 
 @cache
