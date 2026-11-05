@@ -672,7 +672,7 @@ TEST(TestGfx942AttentionDenseGraphMatch, DeclinesARaggedOperand)
 TEST(TestGfx942AttentionDenseGraphMatch, DeclinesAWindowThatLeavesQueryRowsNoKey)
 {
     // Row q sees keys (q - W, q]; once seqlen_q - seqlen_kv >= W the last rows see none,
-    // and the kernel has no empty-row path. One key short of that is served. 4096/512 is
+    // and only the kernel's LSE path zeroes them. One key short of that is served. 4096/512 is
     // also supports_attention_dense's per-block refusal at 256/64 (the last block's window
     // starts at key tile 58 of 8): on every tile-divisible shape, which kernel match
     // checks first, a block-level failure is a row-level one, so the block guard is

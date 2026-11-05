@@ -1,3 +1,31 @@
+# Packaged-dialect (`variants`) config for the hipkernel:Gfx942AttentionDense catalog: a
+# reduced snapshot of configs/gfx942_attention_dense.engine.yaml's full enumeration
+# (tools/registry_enumerator.py, 1,500 kernels).
+#
+# Snapshot: tools/variant_reduce.py over an autotune sweep of all 1,500 kernels on MI300X
+# (gfx942, 304 CUs), two timed rounds over the 814 non-windowed served graphs and 153
+# stats graphs, eps 0.01: 224 kernels, 144 of them floor kernels (tile divisibility and
+# declared defaults; window cells are floor-only) and 80 measured wins. The swept install
+# was built at cde4c65f980; its 1,500 kernels lower to the same LLVM IR as at 645da438945.
+# A change to the manifest's space or to the kernel body needs a new sweep and reduction,
+# not an edit here.
+#
+# To regenerate the descriptors after a new reduction, from the IngestorGenerator root:
+#     .venv/bin/python tools/registry_enumerator.py \
+#         --manifest configs/gfx942_attention_dense.engine.yaml --out <full.yaml> --strict
+#     # variant_reduce.py --selection <full.yaml> ... --out configs/gfx942_attention_dense.yaml
+#     .venv/bin/python generate.py --config configs/gfx942_attention_dense.yaml \
+#         --output-dir <scratch> --ids-from <live bundle> --strict
+# Copy the scratch KMD over the live one and the scratch KDP into the live artifacts/
+# (a reduction drops kernels, so the KDP is replaced, not spliced), then `dvc add
+# artifacts` there and `dvc push -r ingestor <bundle>/artifacts.dvc`. Copy the generated
+# tests/TestGfx942AttentionDensePacks.cpp over the live census test and rerun
+# src/integration_tests/kernel_ingestor_engine/gen_gfx942_attention_dense_knob_classes.py.
+# tests/test_registry_regeneration.py gates this file against the manifest (g3 as a
+# subset). The generated packs/Gfx942AttentionDenseNative.cpp and
+# tests/TestGfx942AttentionDenseMatchers.cpp are stubs; the provider's copies are
+# hand-maintained.
+#
 dialect: packaged
 authored_subpath: rocKE/gfx942_attention_dense
 engine:

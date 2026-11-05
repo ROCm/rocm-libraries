@@ -370,8 +370,8 @@ TEST_P(TestAttentionDenseMatch, DeclinesEveryOtherComputeDataType)
 
 // =============================================================================
 // kv_segments. A split-KV build launches kv_segments times the grid plus a combine the
-// dispatch does not make, so only a single segment is served. Neither KMD declares the
-// field, so a record without it is a single-segment build.
+// dispatch does not make, so only a single segment is served. gfx942's KMD declares the
+// field (default 1); gfx950's does not, so a record without it is a single-segment build.
 // =============================================================================
 
 TEST_P(TestAttentionDenseMatch, ServesOnlyASingleKvSegment)

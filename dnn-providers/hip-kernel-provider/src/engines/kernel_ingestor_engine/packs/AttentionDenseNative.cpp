@@ -185,8 +185,9 @@ AttentionDenseProblem problemFor(const data_objects::TensorAttributes& q,
 
 /// Whether a top-left causal window of @p slidingWindow keys leaves the last query rows no
 /// key: row q sees (q - W, q], and q - W + 1 >= seqlen_kv once seqlen_q - seqlen_kv >= W.
-/// The kernel has no empty-row path (every score of such a row is the mask value, so it
-/// averages V over the tiles it visits). A zero window (no window) leaves none.
+/// Only the kernel's LSE path zeroes such rows; otherwise every score of such a row is the
+/// mask value, so it averages V over the tiles it visits. A zero window (no window) leaves
+/// none.
 bool windowLeavesRowsWithoutKeys(int64_t seqLenQ, int64_t seqLenKv, int64_t slidingWindow)
 {
     return slidingWindow > 0 && seqLenQ - seqLenKv >= slidingWindow;
@@ -350,8 +351,8 @@ std::optional<AttentionDenseMask> maskFor(const data_objects::SdpaAttributes& at
             HIPDNN_PLUGIN_LOG_INFO(declined(arch, "mask")
                                    << "left_bound " << band.leftBound << ", right_bound "
                                    << band.rightBound
-                                   << " is not a causal window; not yet supported by this "
-                                      "pack, which serves windows with right_bound 0 only");
+                                   << " is not a causal window; the gfx942 and gfx950 kernels "
+                                      "implement right_bound 0 windows only");
             return std::nullopt;
         }
         if(bottomRight && !sameLengths)
@@ -464,12 +465,12 @@ std::optional<int64_t> statsFor(const MatchContext& context,
 } // namespace
 
 /**
- * Each decline of a graph with an SDPA-forward node logs its cause at INFO (see sdpa_graph::DeclinedBy);
- * any other graph declines silently. The message is built inside the logging macro, so
- * with INFO off a decline costs the check and nothing more. Both arches run the same
- * checks in the same order, so a graph with several problems reports the same first
- * cause on either, except that a stats output is a decline only on an arch that does
- * not serve stats (gfx950), which reports it where gfx942 binds it.
+ * Each decline of a graph with an SDPA-forward node logs its cause at INFO (see
+ * sdpa_graph::DeclinedBy); any other graph declines silently. The message is built inside
+ * the logging macro, so with INFO off a decline costs the check and nothing more. Both
+ * arches run the same checks in the same order, so a graph with several problems reports
+ * the same first cause on either, except that a stats output is a decline only on an arch
+ * that does not serve stats (gfx950), which reports it where gfx942 binds it.
  */
 std::optional<BoundTokens> graphMatches(const MatchContext& context, const AttentionDenseArch& arch)
 {
@@ -652,7 +653,7 @@ std::optional<BoundTokens> graphMatches(const MatchContext& context, const Atten
     {
         HIPDNN_PLUGIN_LOG_INFO(declined(arch, "varlen")
                                << "variable sequence lengths (seq_len_q/seq_len_kv tensors) are "
-                                  "not yet supported by this pack");
+                                  "not implemented in the kernel");
         return std::nullopt;
     }
     // Dropout.
@@ -670,8 +671,8 @@ std::optional<BoundTokens> graphMatches(const MatchContext& context, const Atten
        || attributes.max_seq_len_kv().has_value())
     {
         HIPDNN_PLUGIN_LOG_INFO(declined(arch, "paged_kv")
-                               << "paged K/V (page tables or max_seq_len_kv) is not yet "
-                                  "supported by this pack");
+                               << "paged K/V (page tables or max_seq_len_kv) is not "
+                                  "implemented in the kernel");
         return std::nullopt;
     }
     // Block-sparse, and attention SINKS.
@@ -1536,7 +1537,8 @@ void requireServedSavedMask(const SavedLaunchInputs& inputs,
                                         "leaves the last query rows no key over seqlen_q "
                                             + std::to_string(problem.seqLenQ) + " and seqlen_kv "
                                             + std::to_string(problem.seqLenKv)
-                                            + "; the kernel has no empty-row path");
+                                            + "; not yet supported by this pack (only the "
+                                              "kernel's LSE path zeroes such rows)");
     }
 }
 
