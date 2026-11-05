@@ -232,6 +232,8 @@ def test_installed_ctest_entries_get_scoped_environment_contracts(
         # The flag must track the header install in both directions: dropping
         # it while the headers ship would turn a missing copy back into a
         # silent skip, and passing it without them would fail every run.
+        # This checkout always has the headers; the test below configures a
+        # tree without them.
         install_script = (build / "cmake_install.cmake").read_text()
         hkp_headers_installed = "Gfx950AttentionUnified3DGeometry.hpp" in install_script
         assert (
@@ -270,6 +272,58 @@ def test_installed_ctest_entries_get_scoped_environment_contracts(
             environment_for(tests, "rocke_library_mla_pytest")
             == expected_mla_environment
         )
+
+
+@pytest.mark.skipif(
+    shutil.which("cmake") is None,
+    reason="CMake required",
+)
+def test_installed_attention_cpu_entry_omits_header_flag_without_pack_headers(
+    tmp_path,
+):
+    """A platform configured where the provider's pack headers are absent (a rocKE
+    tree without hip-kernel-provider's src/) installs no header copy, so the
+    attention CPU entry must not pass --rocke-require-hkp-pack-headers: with it,
+    every installed run of that entry would fail on the missing copy."""
+    rocke = tmp_path / "rocke"
+    rocke.mkdir()
+    # CMake resolves a symlinked source dir to its real path, which would find
+    # the headers again; the platform dir itself must be a real copy.
+    shutil.copytree(
+        PLATFORM,
+        rocke / "platform",
+        ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
+    )
+    for sibling in ("library", "tools"):
+        try:
+            (rocke / sibling).symlink_to(PLATFORM.parent / sibling)
+        except OSError:
+            pytest.skip("symlinks unavailable")
+    build = tmp_path / "build"
+    subprocess.run(
+        [
+            "cmake",
+            "-S",
+            str(rocke / "platform"),
+            "-B",
+            str(build),
+            "-DBUILD_TESTING=ON",
+            "-DROCKE_INSTALL_TEST_GPU_REFERENCES=OFF",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    install_script = (build / "cmake_install.cmake").read_text()
+    assert "Gfx950AttentionUnified3DGeometry.hpp" not in install_script
+    entries = (build / "CTestTestfile.cmake.install").read_text()
+    attention_cpu = next(
+        line
+        for line in entries.splitlines()
+        if line.startswith("add_test(rocke_library_attention_cpu_pytest ")
+    )
+    assert "test_attention_tiled_3d_reduce_lds.py" in attention_cpu
+    assert "--rocke-require-hkp-pack-headers" not in attention_cpu
 
 
 def test_relocated_cmake_consumer_links_lowerer(tmp_path):
