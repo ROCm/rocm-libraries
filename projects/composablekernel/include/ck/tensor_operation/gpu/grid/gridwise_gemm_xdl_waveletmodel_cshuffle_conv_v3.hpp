@@ -200,6 +200,8 @@ struct GridwiseGemm_xdl_waveletmodel_cshuffle_conv_v3
 
     static constexpr auto BlockSize       = TileMathThreadGroupSize;
     static constexpr auto LaunchBlockSize = TileLoadThreadGroupSize + TileMathThreadGroupSize;
+    static constexpr bool PinLdsRegsA     = true;
+    static constexpr bool PinLdsRegsB     = true;
 
     // DirectLoad is not supported, wavelet model requires LDS as the sync boundary
     static constexpr bool DirectLoadEnabled = false;
@@ -1324,7 +1326,9 @@ struct GridwiseGemm_xdl_waveletmodel_cshuffle_conv_v3
                 true,
                 true,
                 UseLdsTransposeA,
-                UseLdsTransposeB>{};
+                UseLdsTransposeB,
+                PinLdsRegsA,
+                PinLdsRegsB>{};
 
             auto c_thread_buf = blockwise_gemm.GetCThreadBuffer();
 

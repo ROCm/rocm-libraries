@@ -517,7 +517,9 @@ template <index_t BlockSize,
           bool DirectLoad       = false,
           bool TransposeC       = false,
           bool UseLdsTransposeA = false,
-          bool UseLdsTransposeB = false>
+          bool UseLdsTransposeB = false,
+          bool PinLdsRegsA      = true,
+          bool PinLdsRegsB      = true>
 struct BlockwiseGemmXdlops_k0mk1_k0nk1_m0n0m1n1m2m3m4n2_loop_knm_v1
     : BlockwiseGemmXdlops_k0mk1_k0nk1_m0n0m1n1m2m3m4n2_v1<BlockSize,
                                                           FloatA,
@@ -805,6 +807,58 @@ struct BlockwiseGemmXdlops_k0mk1_k0nk1_m0n0m1n1m2m3m4n2_loop_knm_v1
     static constexpr auto b_block_desc_n0_n1_n2_k =
         MakeBBlockDescriptor_N0_N1_N2_K(get_device_arch());
 
+    // PinLdsRegsA / PinLdsRegsB select which operand's registers are kept live (costs VGPRs:
+    // A keeps MRepeat extra slices, B keeps one).
+    // Emits no instruction: makes the A (resp. B) register slice [m0|n0, k] of the thread buffer
+    // an input of an opaque asm statement so that its live range extends to this point.
+    template <typename M0, typename K, typename ABuf>
+    __device__ static void keep_alive_a(M0, K, ABuf& a_thread_buf)
+    {
+        if constexpr(!PinLdsRegsA)
+            return;
+        keep_alive_slice<KPack, ElementDataTypeA, xdlops_gemm.K1PerXdlops, VectorSizeA, A_K1>(
+            a_thread_buf, a_thread_desc_, Number<M0::value>{}, Number<K::value>{});
+    }
+
+    template <typename N0, typename K, typename BBuf>
+    __device__ static void keep_alive_b(N0, K, BBuf& b_thread_buf)
+    {
+        if constexpr(!PinLdsRegsB)
+            return;
+        keep_alive_slice<KPack, ElementDataTypeB, xdlops_gemm.K1PerXdlops, VectorSizeB, B_K1>(
+            b_thread_buf, b_thread_desc_, Number<N0::value>{}, Number<K::value>{});
+    }
+
+    template <index_t KPack_,
+              typename T,
+              index_t K1PerXdlops,
+              index_t VectorSize,
+              index_t K1,
+              typename Buf,
+              typename Desc,
+              typename MN,
+              typename K>
+    __device__ static void keep_alive_slice(Buf& buf, const Desc&, MN, K)
+    {
+        vector_type<T, KPack_> vec;
+        auto loader = thread_buf_to_vec_loader<
+            decltype(vec),
+            Buf,
+            Desc,
+            T,
+            MN,
+            Number<0>,
+            Number<0>,
+            K,
+            index_expression::Div<index_expression::Ik, Number<K1>>,
+            index_expression::Mod<index_expression::Div<index_expression::Ik, Number<VectorSize>>,
+                                  Number<K1 / VectorSize>>,
+            index_expression::Mod<index_expression::Ik, Number<VectorSize>>>{vec, buf};
+        static_for<0, KPack_, 1>{}([&](auto i) { loader(i); });
+        using input_type = typename vector_type<T, K1PerXdlops>::type;
+        asm volatile("; keep live" ::"v"(vec.template AsType<input_type>()[Number<0>{}]));
+    }
+
     template <typename ABlockBuffer,
               typename BBlockBuffer,
               typename CThreadBuffer,
@@ -842,6 +896,25 @@ struct BlockwiseGemmXdlops_k0mk1_k0nk1_m0n0m1n1m2m3m4n2_loop_knm_v1
                                        make_tuple(m0, I0, I0, k, I0, I0, I0),
                                        a_thread_buf);
                 });
+            }
+
+            // Keep the A/B registers consumed by the previous step alive until the loads of
+            // this step have been issued. Without this the register allocator reuses the
+            // registers read by the previous WMMAs as destination of the new ds_loads,
+            // creating WMMA -> ds_load register dependencies (WAR hazards).
+            // The empty asm statements emit no instruction, they only extend live ranges.
+            if constexpr(PinLdsRegsA || PinLdsRegsB)
+            {
+                if constexpr(n0 > 0)
+                {
+                    keep_alive_b(Number<n0 - 1>{}, k, b_thread_buf);
+                }
+                else if constexpr(k > 0)
+                {
+                    keep_alive_b(Number<NRepeat - 1>{}, Number<k - 1>{}, b_thread_buf);
+                    static_for<0, MRepeat, 1>{}(
+                        [&](auto m0) { keep_alive_a(m0, Number<k - 1>{}, a_thread_buf); });
+                }
             }
 
             wait_dscnt();
@@ -1000,6 +1073,29 @@ struct BlockwiseGemmXdlops_k0mk1_k0nk1_m0n0m1n1m2m3m4n2_loop_knm_v1
             {
                 constexpr index_t n_offset = IsLastMN ? 0 : n0 + NInner;
                 preload_b(Number<n_offset>{}, Number<k_offset>{});
+            }
+
+            // Keep the A/B registers consumed by the previous step alive until the preloads
+            // above have been issued, so the new ds_loads cannot reuse the registers read by
+            // the previous WMMAs (see non-barrier Run). Emits no instructions.
+            if constexpr(PinLdsRegsA || PinLdsRegsB)
+            {
+                constexpr index_t MSteps = MRepeat / MInner;
+                constexpr index_t NSteps = NRepeat / NInner;
+                constexpr index_t cur = (k * NSteps + knm[Number<1>{}]) * MSteps + knm[Number<2>{}];
+                if constexpr(cur > 0)
+                {
+                    constexpr index_t prev    = cur - 1;
+                    constexpr index_t prev_m0 = (prev % MSteps) * MInner;
+                    constexpr index_t prev_n0 = ((prev / MSteps) % NSteps) * NInner;
+                    constexpr index_t prev_k  = prev / (MSteps * NSteps);
+                    static_for<0, MInner, 1>{}([&](auto m1) {
+                        keep_alive_a(Number<prev_m0 + m1>{}, Number<prev_k>{}, a_thread_buf);
+                    });
+                    static_for<0, NInner, 1>{}([&](auto n1) {
+                        keep_alive_b(Number<prev_n0 + n1>{}, Number<prev_k>{}, b_thread_buf);
+                    });
+                }
             }
 
             __builtin_amdgcn_sched_barrier(0);
