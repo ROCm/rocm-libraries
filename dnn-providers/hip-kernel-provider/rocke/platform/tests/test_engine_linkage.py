@@ -220,9 +220,14 @@ def test_installed_ctest_entries_get_scoped_environment_contracts(
         assert environment_for(tests, "rocke_library_sdpa_pytest") == {
             "PYTHONPATH": f"{test_ctest_rel}tests/library"
         }
-        if "--rocke-require-hipdnn-assets" in sdpa["command"]:
-            install_script = (build / "cmake_install.cmake").read_text()
-            assert "attention_sdpa_fwd.graph.json" in install_script
+        install_script = (build / "cmake_install.cmake").read_text()
+        # Both directions, like the header flag below: the flag without the copy
+        # fails every run, the copy without the flag skips silently.
+        hipdnn_assets_installed = "attention_sdpa_fwd.graph.json" in install_script
+        assert (
+            "--rocke-require-hipdnn-assets" in sdpa["command"]
+        ) == hipdnn_assets_installed
+        if hipdnn_assets_installed:
             assert "/tests/library/tests/sdpa/hipdnn" in install_script
         attention_cpu = next(
             test
@@ -234,7 +239,6 @@ def test_installed_ctest_entries_get_scoped_environment_contracts(
         # silent skip, and passing it without them would fail every run.
         # This checkout always has the headers; the test below configures a
         # tree without them.
-        install_script = (build / "cmake_install.cmake").read_text()
         hkp_headers_installed = "Gfx950AttentionUnified3DGeometry.hpp" in install_script
         assert (
             "--rocke-require-hkp-pack-headers" in attention_cpu["command"]

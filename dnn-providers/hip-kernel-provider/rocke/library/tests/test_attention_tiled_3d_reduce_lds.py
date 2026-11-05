@@ -49,6 +49,19 @@ def _packs_dir(config) -> Path:
     pytest.skip(reason)
 
 
+def test_installed_pack_headers_imply_require_flag(request):
+    """An installed tree that carries the header copy must run with
+    ``--rocke-require-hkp-pack-headers``: without it, a later broken copy would skip
+    these cases instead of failing. ``platform/tests/test_engine_linkage.py`` checks
+    the CMake wiring both ways, but no CI lane runs that file; this is the in-lane
+    half. A source checkout has no copy, so it skips."""
+    if not _PACKS_DIRS[0].is_dir():
+        pytest.skip("not an installed tree: no hkp_packs/ header copy")
+    assert request.config.getoption(
+        "--rocke-require-hkp-pack-headers"
+    ), f"{_PACKS_DIRS[0]} is installed but --rocke-require-hkp-pack-headers was not given"
+
+
 def _reduce(num_segments: int):
     from kernels import (
         UnifiedAttentionReduceTiledSpec,

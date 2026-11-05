@@ -32,6 +32,11 @@ SKIP_REASON = (
 )
 
 
+def installed_copy_present() -> bool:
+    """Whether this is an installed tree carrying the hipDNN copy (``hipdnn/``)."""
+    return _INSTALLED.is_dir()
+
+
 def repo_root() -> Path | None:
     """The monorepo root holding ``projects/hipdnn``, or ``None`` outside a checkout."""
     for parent in library_root().resolve().parents:
