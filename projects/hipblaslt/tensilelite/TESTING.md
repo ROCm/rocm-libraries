@@ -52,6 +52,12 @@ question that this section returns to below. It matters more than the headline c
 | How to run | `cd tensilelite && tox -e unit` (skips the client build), or `tox -e rocisa` for the extension only |
 | Coverage | `tox -e coverage-unit` measures; `tox -e coverage-gate` enforces the floors against what it wrote |
 
+**Arch gating.** Unit tests: `@pytest.mark.gpu` (any GPU) or `@pytest.mark.gpu("gfx950")`; the
+[conftest](tensilelite/Tests/unit/conftest.py) skips what HIP's device can't run (`TENSILE_GPU_TARGET`
+overrides; `gfx1250` covers `gfx1250-strict`, not the reverse; nearest mark wins). No arch/hip `skipif`
+or in-body skip; `test_gpu_marker_guard.py` enforces it. Non-gate code uses `gpu_is(...)`.
+`Tests/common` configs use `skip-gfxNNNN`.
+
 **Worker pools are not exercised here.** The unit suite pins `CpuThreads` to 1 (a session fixture in
 [`Tests/unit/conftest.py`](tensilelite/Tests/unit/conftest.py)), so its `ParallelMap` and `ParallelMap2`
 calls run in the test process and nothing is pickled or sent to a worker. The real pool path is

@@ -26,8 +26,6 @@ import pytest
 import numpy as np
 
 from gpu_test_helpers import (
-    HAS_GFX950,
-    GFX_TARGET,
     TileConfig,
     WAVESIZE, NUM_THREADS, NUM_WAVES,
     AB_B8,
@@ -38,6 +36,7 @@ from gpu_test_helpers import (
     alloc_export_vgprs,
     requires_gpu,
 )
+from tensilelite.Tests.gpu_detection import detect_gpu_target, gpu_is
 
 BPE = 1  # fp8: 1 byte per element
 
@@ -321,8 +320,8 @@ if __name__ == "__main__":
     parser.add_argument("--config", type=int, default=None, help="Config index (default: all)")
     args = parser.parse_args()
 
-    if not HAS_GFX950:
-        print(f"GPU tests require gfx950, found {GFX_TARGET} — cannot run GPU test")
+    if not gpu_is("gfx950"):
+        print(f"GPU tests require gfx950, found {detect_gpu_target()} — cannot run GPU test")
         sys.exit(1)
 
     wave_list   = list(range(NUM_WAVES)) if args.wave == "all" else [int(args.wave)]

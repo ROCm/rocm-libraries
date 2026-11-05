@@ -20,55 +20,17 @@ import pytest
 
 # The coverage tox env runs `pytest -m unit tensilelite/Tests/unit`; without this
 # explicit declaration the file is silently deselected and reports 0% coverage.
-# GPU-requiring tests within this file are individually skip-gated via
-# @pytest.mark.skipif, so the unit marker is safe here.
+# GPU tests carry `gpu`, so the unit marker is safe here.
 pytestmark = pytest.mark.unit
 
 # ── HIP availability and helpers (test-layer only) ─────────────────────────────
-from occupancy_hip_testutil import HIP_AVAILABLE, _hip, _hip_check
+from occupancy_hip_testutil import _hip, _hip_check
 
 # ── rocisa / TensileLite imports ────────────────────────────────────────────────
 from rocisa import rocIsa
 from tensilelite.Common.Architectures import gfxToIsa
 from tensilelite.KernelWriterAssembly import KernelWriterAssembly
 
-
-# ── GPU detection ───────────────────────────────────────────────────────────────
-
-def _detect_gpu() -> str | None:
-    """The architecture of the device these tests will actually use, or None.
-
-    Asked of HIP, which is what the tests then drive. rocm_agent_enumerator
-    reports what the machine contains rather than what this process can open, so
-    on a host whose /dev/kfd is render-group-only it clears the skip gate and
-    the test dies in hipInit; it also truncates a stepping, calling a
-    gfx1250-strict device gfx1250.
-    """
-    override = os.environ.get("TENSILE_GPU_TARGET")
-    if override:
-        return override
-    if not HIP_AVAILABLE:
-        return None
-    try:
-        if int(_hip_check(_hip.hipGetDeviceCount())) == 0:
-            return None
-        try:
-            # hip-python 10 (a wrapper over rocm-bindings) returns the struct.
-            props = _hip_check(_hip.hipGetDeviceProperties(0))
-        except TypeError:
-            # Earlier releases fill a caller-owned struct instead.
-            props = _hip.hipDeviceProp_t()
-            _hip_check(_hip.hipGetDeviceProperties(props, 0))
-    except RuntimeError:
-        return None
-    name = props.gcnArchName
-    if isinstance(name, bytes):
-        name = name.decode()
-    # gcnArchName carries target features; the cases name a bare architecture.
-    return name.split(":")[0] or None
-
-
-GFX_TARGET: str | None = _detect_gpu()
 
 # ── rocisa helpers ──────────────────────────────────────────────────────────────
 
@@ -263,7 +225,7 @@ def tensile_occ_to_hip_blocks(cu_occupancy: int, num_threads: int,
 
 # ── Test parametrization ────────────────────────────────────────────────────────
 #
-# Each entry: (required_gfx, num_vgprs, lds_bytes, num_threads, label)
+# Each entry: (required_gfx, num_vgprs, lds_bytes, num_threads, label), marked gpu(required_gfx).
 # VGPRs are multiples of 8 so TensileLite's 8-dword alignment and HIP's 4-dword granule agree.
 # _MIN_LDS=256 avoids getLdsLimitedOccupancy divide-by-zero (represents no LDS constraint).
 
@@ -274,23 +236,23 @@ OCCUPANCY_CASES = [
     pytest.param(
         "gfx950", 8, _MIN_LDS, 256,
         "gfx950 low-VGPR 256t → occupancy was over-reported as 10, now fixed to 8",
-        id="gfx950-low-vgpr-256t",
+        id="gfx950-low-vgpr-256t", marks=pytest.mark.gpu("gfx950"),
     ),
     pytest.param(
         "gfx950", 8, _MIN_LDS, 512,
         "gfx950 low-VGPR 512t → maxOcc per SIMD = 4",
-        id="gfx950-low-vgpr-512t",
+        id="gfx950-low-vgpr-512t", marks=pytest.mark.gpu("gfx950"),
     ),
     # ── gfx950 VGPR-limited cases ──────────────────────────────────────────────
     pytest.param(
         "gfx950", 128, _MIN_LDS, 256,
         "gfx950 128-VGPR 256t → VGPR-limited, occupancy=4",
-        id="gfx950-128-vgpr-256t",
+        id="gfx950-128-vgpr-256t", marks=pytest.mark.gpu("gfx950"),
     ),
     pytest.param(
         "gfx950", 256, _MIN_LDS, 256,
         "gfx950 256-VGPR 256t → VGPR-limited, occupancy=2",
-        id="gfx950-256-vgpr-256t",
+        id="gfx950-256-vgpr-256t", marks=pytest.mark.gpu("gfx950"),
     ),
     # ── gfx950 LDS-limited case ────────────────────────────────────────────────
     # LDS per CU = 163840 B, 163840//65536 = 2 blocks
@@ -298,28 +260,26 @@ OCCUPANCY_CASES = [
     pytest.param(
         "gfx950", 8, 65536, 256,
         "gfx950 low-VGPR large-LDS 256t → LDS-limited, occupancy=2",
-        id="gfx950-low-vgpr-lds-limited-256t",
+        id="gfx950-low-vgpr-lds-limited-256t", marks=pytest.mark.gpu("gfx950"),
     ),
     # ── gfx908 baseline (MaxWavesPerSimd=10, was already correct) ─────────────
     pytest.param(
         "gfx908", 8, _MIN_LDS, 256,
         "gfx908 low-VGPR 256t → occupancy=10 (was always correct)",
-        id="gfx908-low-vgpr-256t",
+        id="gfx908-low-vgpr-256t", marks=pytest.mark.gpu("gfx908"),
     ),
     # ── gfx942 (ArchAccUnifiedRegs, MaxWavesPerSimd=8, same family as gfx950) ─
     pytest.param(
         "gfx942", 8, _MIN_LDS, 256,
         "gfx942 low-VGPR 256t → occupancy=8",
-        id="gfx942-low-vgpr-256t",
+        id="gfx942-low-vgpr-256t", marks=pytest.mark.gpu("gfx942"),
     ),
 ]
 
 
 # ── Main test ───────────────────────────────────────────────────────────────────
 
-@pytest.mark.gpu
-@pytest.mark.skipif(not HIP_AVAILABLE, reason="hip-python not installed")
-@pytest.mark.skipif(GFX_TARGET is None, reason="No GPU detected")
+# No function-level `gpu`: it would shadow the per-case marks.
 @pytest.mark.parametrize(
     "required_gfx,num_vgprs,lds_bytes,num_threads,description",
     OCCUPANCY_CASES,
@@ -328,11 +288,6 @@ def test_hip_occupancy_matches_tensile(
     required_gfx, num_vgprs, lds_bytes, num_threads, description, tmp_path
 ):
     """HIP ground-truth: assemble a minimal kernel, query HIP, assert equality with tensilelite."""
-    if GFX_TARGET != required_gfx:
-        pytest.skip(
-            f"Test requires {required_gfx}, detected {GFX_TARGET}"
-        )
-
     # ── 1. TensileLite prediction ─────────────────────────────────────────────
     ri = _init_rocisa(required_gfx)
     kw = _make_writer(ri, required_gfx)
@@ -393,9 +348,7 @@ def test_hip_occupancy_matches_tensile(
 
 # ── Regression: gfx950 old behavior would have returned 10 ─────────────────────
 
-@pytest.mark.gpu
-@pytest.mark.skipif(not HIP_AVAILABLE, reason="hip-python not installed")
-@pytest.mark.skipif(GFX_TARGET != "gfx950", reason="Requires gfx950 GPU")
+@pytest.mark.gpu("gfx950")
 def test_gfx950_occupancy_not_overcounted(tmp_path):
     """
     Explicit regression test: TensileLite must NOT return CUOccupancy > 8 for gfx950.

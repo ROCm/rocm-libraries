@@ -55,8 +55,6 @@ import tempfile
 import pytest
 from types import SimpleNamespace
 from gpu_test_helpers import (
-    HAS_GFX950,
-    GFX_TARGET,
     TileConfig,
     LOAD_WIDTH, WAVESIZE, NUM_THREADS, NUM_WAVES,
     AB_B8,
@@ -65,6 +63,7 @@ from gpu_test_helpers import (
     compute_expected_subtile,
     print_offset_grid,
 )
+from tensilelite.Tests.gpu_detection import detect_gpu_target, gpu_is
 
 # FP8 constants
 BPE = 1        # fp8: 1 byte per element (shadows gpu_test_helpers.BPE=2)
@@ -160,8 +159,7 @@ TILE_CONFIGS_FP8 = [
 
 # `gpu` routes this host-arch roundtrip to the unit lane's native-rocisa pass;
 # stinkytofu only emits gfx1250 ISA and cannot assemble for the host arch.
-@pytest.mark.gpu
-@pytest.mark.skipif(not HAS_GFX950, reason=f"GPU tests require gfx950, found {GFX_TARGET}")
+@pytest.mark.gpu("gfx950")
 class TestGraTileAssignmentFP8GPU:
 
     @pytest.fixture(params=TILE_CONFIGS_FP8, ids=lambda c: c.label)
@@ -263,7 +261,7 @@ if __name__ == "__main__":
                     print(line)
             print("--- end ---\n")
 
-            if HAS_GFX950:
+            if gpu_is("gfx950"):
                 for tc, tileInfo, stride in [("A", tileInfoA, cfg.stride_a),
                                               ("B", tileInfoB, cfg.stride_b)]:
                     for idx, reg in enumerate(tileInfo.sharedVgprGROffset):
@@ -309,4 +307,4 @@ if __name__ == "__main__":
                             print(f"  {tc} subtile s{reg} (regId={regId}): "
                                   f"{results[0]} (expected {expected}) {status}")
             else:
-                print(f"GPU tests require gfx950, found {GFX_TARGET} — assembly only")
+                print(f"GPU tests require gfx950, found {detect_gpu_target()} — assembly only")
