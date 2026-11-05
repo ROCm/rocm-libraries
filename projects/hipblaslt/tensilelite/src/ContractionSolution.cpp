@@ -2991,7 +2991,7 @@ namespace TensileLite
                                inputs.fusedA2APeers,
                                inputs.fusedA2ACounter,
                                inputs.fusedA2AMyRank,
-                               problem.fusedA2AWorld(),
+                               problem.world(),
                                inputs.fusedA2ADrain,
                                static_cast<uint32_t>(problem.fusedA2AExtent()));
 
@@ -3291,6 +3291,37 @@ namespace TensileLite
         bool         sparseB = problemType.sparse == 2;
         auto const&  descriptorA = sparseA ? problem.compressed() : problem.a();
         auto const&  descriptorB = sparseB ? problem.compressed() : problem.b();
+
+        // StrideScaleA0/B0 is the row stride of the scale buffer the caller
+        // actually passes. mxsa()/mxsb() describe gfx950's padded layout, so a
+        // caller whose buffer is packed takes the stride from the unpadded
+        // shape. With K=96 and a block of 32, a packed row holds 3 scales and
+        // the stride is 3, while the padded descriptor says 8.
+        //
+        // customKernelMXScaleAIsPacked()/BIsPacked() name that caller, one
+        // operand at a time. hipBLASLt sets it for every MX format except the
+        // pre-swizzled Block_32_UE8M0_32_8_EXT, whose buffer is the padded
+        // gfx950 layout. The TensileLite benchmark client leaves it false when
+        // it allocated the padded buffer. In both cases the descriptor stride
+        // is already the one the kernel must use.
+        // StrideScaleA1/B1, the batch stride, follows the same rule. No shipped
+        // rocRoller kernel reads it, and those kernels run a single batch.
+        auto scaleStrideFor = [&](TensorDescriptor const& scaleDesc,
+                                  TensorDescriptor const& dataDesc,
+                                  bool                    packed,
+                                  size_t                  boundIdx,
+                                  size_t                  mxBlock,
+                                  size_t                  idx) -> size_t {
+            if(!packed)
+                return scaleDesc.strides()[idx];
+            std::vector<size_t> sizes = dataDesc.sizes();
+            if(mxBlock && boundIdx < sizes.size())
+                sizes[boundIdx] = CeilDivide(sizes[boundIdx], mxBlock);
+            size_t stride = 1;
+            for(size_t i = 0; i < idx && i < sizes.size(); i++)
+                stride *= sizes[i];
+            return stride;
+        };
         void const*  aAddress = sparseA ? inputs.compressed : inputs.a;
         void const*  bAddress = sparseB ? inputs.compressed : inputs.b;
 
@@ -3433,27 +3464,53 @@ namespace TensileLite
                     break;
                 case CustomArgSemantic::StrideScaleA0:
                 {
-                    size_t scaleStride = problem.mxsa().strides()[descriptorStrideAB];
+                    size_t scaleStride = scaleStrideFor(problem.mxsa(),
+                                                        problem.a(),
+                                                        problem.customKernelMXScaleAIsPacked(),
+                                                        problem.boundIndices()[0].a,
+                                                        problem.mxBlockA(),
+                                                        descriptorStrideAB);
                     rv.args.appendCustomType("StrideScaleA0", scaleStride, arg.type);
                     break;
                 }
                 case CustomArgSemantic::StrideScaleA1:
                 {
-                    size_t batchStride = usesDataParallelArgsV1 ? problem.mxsa().strides()[descriptorStrideAB + 1]
-                        : preSwizzledScaleBatchStride(problem.mxsa(), "StrideScaleA1");
+                    size_t batchStride = problem.customKernelMXScaleAIsPacked()
+                        ? scaleStrideFor(problem.mxsa(),
+                                         problem.a(),
+                                         true,
+                                         problem.boundIndices()[0].a,
+                                         problem.mxBlockA(),
+                                         descriptorStrideAB + 1)
+                        : (usesDataParallelArgsV1
+                               ? problem.mxsa().strides()[descriptorStrideAB + 1]
+                               : preSwizzledScaleBatchStride(problem.mxsa(), "StrideScaleA1"));
                     rv.args.appendCustomType("StrideScaleA1", batchStride, arg.type);
                     break;
                 }
                 case CustomArgSemantic::StrideScaleB0:
                 {
-                    size_t scaleStride = problem.mxsb().strides()[descriptorStrideAB];
+                    size_t scaleStride = scaleStrideFor(problem.mxsb(),
+                                                        problem.b(),
+                                                        problem.customKernelMXScaleBIsPacked(),
+                                                        problem.boundIndices()[0].b,
+                                                        problem.mxBlockB(),
+                                                        descriptorStrideAB);
                     rv.args.appendCustomType("StrideScaleB0", scaleStride, arg.type);
                     break;
                 }
                 case CustomArgSemantic::StrideScaleB1:
                 {
-                    size_t batchStride = usesDataParallelArgsV1 ? problem.mxsb().strides()[descriptorStrideAB + 1]
-                        : preSwizzledScaleBatchStride(problem.mxsb(), "StrideScaleB1");
+                    size_t batchStride = problem.customKernelMXScaleBIsPacked()
+                        ? scaleStrideFor(problem.mxsb(),
+                                         problem.b(),
+                                         true,
+                                         problem.boundIndices()[0].b,
+                                         problem.mxBlockB(),
+                                         descriptorStrideAB + 1)
+                        : (usesDataParallelArgsV1
+                               ? problem.mxsb().strides()[descriptorStrideAB + 1]
+                               : preSwizzledScaleBatchStride(problem.mxsb(), "StrideScaleB1"));
                     rv.args.appendCustomType("StrideScaleB1", batchStride, arg.type);
                     break;
                 }
@@ -3886,7 +3943,7 @@ namespace TensileLite
                                        inputs.fusedA2APeers,
                                        inputs.fusedA2ACounter,
                                        inputs.fusedA2AMyRank,
-                                       problem.fusedA2AWorld(),
+                                       problem.world(),
                                        inputs.fusedA2ADrain,
                                        static_cast<uint32_t>(problem.fusedA2AExtent()));
                     break;
@@ -7214,7 +7271,7 @@ namespace TensileLite
             return detail;
         };
 
-        if(handwrittenCustomKernel())
+        if(handwrittenCustomKernel() && !customKernel.uniformSummationOrder)
             return refuse("CustomKernel",
                           "custom kernel " + customKernel.name
                               + " is not supported under uniform summation order");
@@ -7387,12 +7444,9 @@ namespace TensileLite
         // see handwrittenCustomKernel(). Those are frozen assembly and may bake
         // a literal stagger into the loop, which no host-side clamp can undo.
         //
-        // Defense in depth rather than a live path: the CustomKernel clause at
-        // the top of this function already refuses every handwritten custom
-        // kernel outright, so this cannot fire today. It is kept, like the
-        // ResolvedStaggerU check above, so that relaxing that clause to admit
-        // individually vetted custom kernels cannot silently admit one whose
-        // stagger is compiled in.
+        // The CustomKernel clause at the top of this function admits only the
+        // handwritten kernels that declare customKernel.uniformSummationOrder;
+        // this still refuses one of those whose stagger is compiled in.
         if(handwrittenCustomKernel() && sizeMapping.staggerU != 0)
             return refuse("CompiledInStaggerU",
                           "this kernel has a compiled-in StaggerU="

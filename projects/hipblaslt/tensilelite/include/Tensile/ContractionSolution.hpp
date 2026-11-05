@@ -265,6 +265,10 @@ namespace TensileLite
         // rely on sizeMapping for workspace/Stream-K decisions, so several code
         // paths must treat them like the legacy non-custom case.
         bool generated = false;
+        // Declared by a hand-written kernel that reduces every row of D in the
+        // same order, so identical rows of A give bitwise-identical rows of D.
+        // Uniform summation order refuses hand-written kernels without it.
+        bool uniformSummationOrder = false;
     };
   
     // Elements in one slot of the GSU (MBSK) reduction buffer. Usage there is
