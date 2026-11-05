@@ -32,7 +32,7 @@ namespace
         }
     };
 
-    TEST(HostUnitBenchmarkReporting, FatalReportReturnsFromCaller)
+    TEST(HostUnitBenchmarkReporting, smoke_FatalReportReturnsFromCaller)
     {
         CaptureClientStream capture(hipblaslt_cerr);
         int                 evaluations = 0;
@@ -48,7 +48,7 @@ namespace
         EXPECT_EQ(output, "failure 1\n");
     }
 
-    TEST(HostUnitBenchmarkReporting, SkipReturnsFromCaller)
+    TEST(HostUnitBenchmarkReporting, smoke_SkipReturnsFromCaller)
     {
         CaptureClientStream capture(hipblaslt_cout);
         bool                continued = false;
@@ -61,7 +61,7 @@ namespace
         EXPECT_EQ(output, "unsupported case\n");
     }
 
-    TEST(HostUnitBenchmarkReporting, NonfatalReportContinues)
+    TEST(HostUnitBenchmarkReporting, smoke_NonfatalReportContinues)
     {
         CaptureClientStream capture(hipblaslt_cerr);
         bool                continued = false;
