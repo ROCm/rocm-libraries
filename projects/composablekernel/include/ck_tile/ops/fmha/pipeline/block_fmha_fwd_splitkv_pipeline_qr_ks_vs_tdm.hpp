@@ -6,7 +6,6 @@
 #include "ck_tile/core.hpp"
 #include "ck_tile/ops/fmha/block/block_attention_bias_enum.hpp"
 #include "ck_tile/ops/fmha/block/block_attention_quant_scale_enum.hpp"
-#include "ck_tile/ops/fmha/block/cast_tile_mx.hpp"
 #include "ck_tile/ops/fmha/pipeline/block_fmha_pipeline_qr_ks_vs_tdm_policy.hpp"
 #include "ck_tile/ops/reduce/block/block_reduce.hpp"
 
@@ -15,18 +14,10 @@ namespace ck_tile {
 // This pipeline is qkv all located in LDS, targeting gfx1250
 template <typename Problem_, typename Policy_ = BlockFmhaPipelineQRKSVSTdmDefaultPolicy>
 
-// Split-kv copy of BlockFmhaPipelineQRKSVSTdm's single-V / double-K path.
-//
-// Source of truth: block_fmha_pipeline_qr_ks_vs_tdm.hpp. The loop skeleton, the
-// K ping-pong and the progressive K reload below are a verbatim copy of
-// run_single_v_double_k_lds_buffer there -- keep them in sync by hand. Only
-// three things differ:
-//   1. the entry point takes the split-kv calling convention (page block
-//      navigators, variant hooks, num_splits / i_split, one LDS arena pointer),
-//   2. the tile range is this split's slice of the key sequence,
-//   3. the sink logit is folded in exactly once, by the first split with work.
-// The double-V path is not carried over: split-kv problems hardwire
-// kUseDoubleKVLdsBuffer to false, which selects the single-V arena layout.
+// One V buffer and two K buffers in the LDS arena: split-kv problems hardwire
+// kUseDoubleKVLdsBuffer to false, which selects the single-V layout.
+// The sink logit is folded in exactly once, by the first split with work.
+// fp8/bf8 is not supported here.
 struct BlockFmhaFwdSplitKVPipelineQRKSVSTdm
 {
     static constexpr bool kUsesLdsArena = true;
@@ -69,7 +60,6 @@ struct BlockFmhaFwdSplitKVPipelineQRKSVSTdm
     static constexpr index_t kQKHeaddim    = BlockFmhaShape::kQKHeaddim;
     static constexpr index_t kSubQKHeaddim = BlockFmhaShape::kSubQKHeaddim;
     static constexpr index_t kNWarp        = BlockFmhaShape::Gemm0BlockWarps::at(I1);
-    static constexpr index_t kNXdl         = BlockFmhaShape::Gemm0WarpTile::at(I1);
 
     // 512 is the last head dim this pipeline can stage: its arena needs a whole
     // 320 KiB of LDS, i.e. one workgroup per CU. See QrTdmLdsArenaLayout's
@@ -88,17 +78,12 @@ struct BlockFmhaFwdSplitKVPipelineQRKSVSTdm
     static constexpr bool kHasDropout       = Problem::kHasDropout;
     static constexpr auto BiasEnum          = Problem::BiasEnum;
     static constexpr auto QScaleEnum        = Problem::QScaleEnum;
-    static constexpr bool kBlockScale = QScaleEnum == BlockAttentionQuantScaleEnum::BLOCKSCALE;
-    static constexpr bool kQuantized  = QScaleEnum == BlockAttentionQuantScaleEnum::PERTENSOR ||
-                                       QScaleEnum == BlockAttentionQuantScaleEnum::PERHEAD ||
-                                       kBlockScale;
-    static constexpr bool kVScaleOnOacc = kQuantized && !kBlockScale;
-    static constexpr bool kStoreLSE     = Problem::kStoreLSE;
-    static constexpr bool kHasSink      = Problem::kHasSink;
-    static constexpr bool kIsPagedKV    = Problem::kIsPagedKV;
+    static constexpr bool kStoreLSE         = Problem::kStoreLSE;
+    static constexpr bool kHasSink          = Problem::kHasSink;
+    static constexpr bool kIsPagedKV        = Problem::kIsPagedKV;
     // Paged walks start on a page-friendly boundary that can precede the split,
     // so the head erase below is needed there whatever the split bounds look
-    // like. Everywhere else this follows the problem, as qr_ks_vs does.
+    // like. Everywhere else this follows the problem.
     static constexpr bool kHasUnevenSplits = kIsPagedKV || Problem::kHasUnevenSplits;
 
     // FmhaFwdSplitKVKernel has no name-based fallback (unlike fmha_fwd_kernel.hpp),
@@ -113,77 +98,6 @@ struct BlockFmhaFwdSplitKVPipelineQRKSVSTdm
     // is harmless. Gated on kN0 == 64 for the reload's static_asserts.
     static constexpr bool kProgressiveDsLoadK = (kN0 == 64);
 
-    static constexpr bool kHwGemm1Scale = is_any_of<VDataType, fp8_t, bf8_t>::value &&
-                                          BlockFmhaShape::Gemm1WarpTile::at(number<2>{}) == 128;
-
-    static constexpr bool kDeferSink = kHwGemm1Scale && kHasSink;
-    // MergeSink has no i_split test, so every split with work would add
-    // exp(sink) again. Fail to compile rather than be silently wrong.
-    static_assert(!kDeferSink, "qr_tdm split-kv does not implement the deferred sink path");
-
-    static constexpr index_t kScaleBytes        = 4;
-    static constexpr index_t kGemm1KPerByte     = kK1 / kScaleBytes;
-    static constexpr index_t kPScaleGranularity = kGemm1KPerByte;
-    static constexpr index_t kGemm0KVPerNIter   = kNXdl * kNWarp;
-    static constexpr index_t kGemm0NIters       = kN0 / kGemm0KVPerNIter;
-
-    static constexpr index_t kKVScaleAlign =
-        kHwGemm1Scale ? (kGemm1KPerByte < kGemm0KVPerNIter ? kGemm0KVPerNIter : kGemm1KPerByte)
-                      : kN0;
-    static_assert(!kHwGemm1Scale || (kKVScaleAlign % kGemm1KPerByte == 0 &&
-                                     kKVScaleAlign % kGemm0KVPerNIter == 0),
-                  "qr_tdm pipeline: the two KV scale resolutions must nest");
-
-    // Neutral scale operand. A zeroed one is *not* neutral: E8M0 0x00 decodes
-    // to 2^-127.
-    CK_TILE_HOST_DEVICE static int32_t e8m0_one()
-    {
-        Packed4Scale_E8M0 packed(1.0f, 1.0f, 1.0f, 1.0f);
-        return static_cast<int32_t>(packed.data());
-    }
-
-    // From an SGPR the hardware reads only bits[7:0] of the scale operand and
-    // broadcasts them, silently dropping the other three bytes - hence the VGPR pin.
-    CK_TILE_DEVICE static int32_t pin_to_vgpr(int32_t v)
-    {
-        asm volatile("" : "+v"(v));
-        return v;
-    }
-
-    CK_TILE_DEVICE static int32_t pack_v_scale(const float* v_descale_ptr,
-                                               index_t kv_base,
-                                               index_t kv_last,
-                                               index_t block_scale_size_kv)
-    {
-        Packed4Scale_E8M0 packed;
-        packed.data() = 0;
-        static_for<0, kScaleBytes, 1>{}([&](auto i) {
-            // Sub-blocks past the end of the sequence still load, so clamp the index.
-            const index_t kv = min(kv_base + i * kGemm1KPerByte, kv_last);
-            const float v_descale =
-                cast_pointer_to_constant_address_space(v_descale_ptr)[kv / block_scale_size_kv];
-            packed.pack_scale(e8m0_t(v_descale), i);
-            // e8m0 keeps only the exponent, so a v_descale that is not a power of two is
-            // changed here, silently. Validate it outside this loop: keeping the operands
-            // live for the check below measured 331 -> 367 VGPR, one wave, reporting aside.
-            // if(bit_cast<uint32_t>(packed.unpack_to_float(i)) != bit_cast<uint32_t>(v_descale))
-        });
-        return pin_to_vgpr(static_cast<int32_t>(packed.data()));
-    }
-
-    template <typename Gemm1>
-    CK_TILE_DEVICE static auto make_gemm1_scale([[maybe_unused]] int32_t scale)
-    {
-        if constexpr(kHwGemm1Scale)
-        {
-            return [scale](auto, auto) { return scale; };
-        }
-        else
-        {
-            return typename remove_cvref_t<Gemm1>::no_scale{};
-        }
-    }
-
     // Every softmax site here calls exp2 directly; there is no exp() path to fall back to.
     static_assert(CK_TILE_FMHA_FWD_FAST_EXP2,
                   "qr_tdm pipeline: FAST_EXP2=0 has no code path here - log2(e) is never folded "
@@ -196,26 +110,14 @@ struct BlockFmhaFwdSplitKVPipelineQRKSVSTdm
                   "qr_tdm split-kv folds scale_s into the capped score, so logits soft cap and "
                   "bias cannot share the same instance");
 
-    // Bias and sink are now supported (mirrors baseline qr_ks_vs logic).
-    // Dropout requires kernel dispatch interface expansion (dropout object +
-    // randval window) and is deferred to a follow-up task.
+    // Dropout would need the kernel to hand over a dropout object and a randval window.
     static_assert(!kHasDropout, "qr_tdm pipeline does not yet support dropout");
 
-    static_assert(QScaleEnum == BlockAttentionQuantScaleEnum::NO_SCALE ||
-                      QScaleEnum == BlockAttentionQuantScaleEnum::PERTENSOR ||
-                      QScaleEnum == BlockAttentionQuantScaleEnum::PERHEAD ||
-                      QScaleEnum == BlockAttentionQuantScaleEnum::BLOCKSCALE,
-                  "qr_tdm pipeline: unsupported quantization granularity");
+    static_assert(QScaleEnum == BlockAttentionQuantScaleEnum::NO_SCALE,
+                  "qr_tdm split-kv has no quantized path");
 
-    static_assert(!kBlockScale || kHwGemm1Scale,
-                  "qr_tdm pipeline: BLOCKSCALE requires the scaled MMA in gemm1");
-
-    // Only the scaled MMA applies the dynamic P exponent; without it O is off by 2^k.
-    static_assert(!kQuantized || kHwGemm1Scale,
-                  "qr_tdm pipeline: a quantized run needs the scaled MMA in gemm1");
-
-    static_assert(!kHwGemm1Scale || kK1 == BlockFmhaShape::Gemm1WarpTile::at(number<2>{}),
-                  "qr_tdm pipeline: the scaled gemm1 assumes kK1 is one warp-GEMM K step");
+    static_assert(!is_any_of<VDataType, fp8_t, bf8_t>::value,
+                  "qr_tdm split-kv does not support fp8/bf8");
 
     // last dimension vector length used to create tensor view(and decide buffer_load vector length)
     // ... together with tensor distribution. tensor dist should able to overwrite this
@@ -297,67 +199,11 @@ struct BlockFmhaFwdSplitKVPipelineQRKSVSTdm
         return Layout::kArenaBytes;
     }
 
-    // gemm_1 consumes q(P), but l accumulates the unrounded P. Rescaling the numerator by
-    // l/sum(q(P)) makes O a weighted mean over exactly the weights gemm_1 used, so a common
-    // multiplicative P-rounding error cancels instead of surviving as a gain on the row.
-    // l itself is left alone: it is the mathematical row sum that LSE reports.
-    template <typename RowTile, typename OutputTile>
-    CK_TILE_DEVICE static void
-    CorrectQuantizedMass(const RowTile& l, const RowTile& l_quant, OutputTile& o_acc)
-    {
-        if constexpr(kQuantized)
-        {
-            constexpr auto spans = OutputTile::get_distributed_spans();
-            sweep_tile_span(spans[I0], [&](auto idx0) {
-                constexpr auto i      = make_tuple(idx0);
-                const auto correction = l_quant[i] == 0.f ? 0.f : l[i] / l_quant[i];
-                sweep_tile_span(spans[I1],
-                                [&](auto idx1) { o_acc(make_tuple(idx0, idx1)) *= correction; });
-            });
-        }
-    }
-
-    // The learned sink has no V, so it only ever contributes to the denominator. Pre-seeding
-    // m with it lets it own the max frame, which pushes every real P down the fp8 grid and
-    // biases the whole row. Merging it here instead -- one extra max-frame step on the final
-    // (m,l,O), algebraically the same as appending a score whose value vector is zero -- keeps
-    // the frame set by the real scores.
-    template <typename RowTile, typename OutputTile>
-    CK_TILE_DEVICE static void
-    MergeSink(RowTile& m, RowTile& l, OutputTile& o_acc, float sink_v, float scale_s)
-    {
-        if constexpr(kDeferSink)
-        {
-            if(__builtin_isinf_sign(sink_v) >= 0)
-            {
-                // Note this has no i_split test, which is why kDeferSink is
-                // asserted off above. The bias paths carry scale_s inside m, the
-                // plain path applies it when the exponent is evaluated.
-                constexpr bool kScaledMax = BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS ||
-                                            BiasEnum == BlockAttentionBiasEnum::ALIBI ||
-                                            kHasLogitsSoftCap;
-                const float sink_m = kScaledMax ? sink_v * scale_s * C_LOG2E : sink_v * C_LOG2E;
-                const float exponent_scale = kScaledMax ? 1.0f : scale_s;
-
-                constexpr auto spans = OutputTile::get_distributed_spans();
-                sweep_tile_span(spans[I0], [&](auto idx0) {
-                    constexpr auto i      = make_tuple(idx0);
-                    const auto merged_m   = max(m[i], sink_m);
-                    const auto correction = exp2((m[i] - merged_m) * exponent_scale);
-                    l(i) = l[i] * correction + exp2((sink_m - merged_m) * exponent_scale);
-                    m(i) = merged_m;
-                    sweep_tile_span(
-                        spans[I1], [&](auto idx1) { o_acc(make_tuple(idx0, idx1)) *= correction; });
-                });
-            }
-        }
-    }
-
     // Re-pack gemm_0 C into gemm_1 A: C is M-outer (MIter,KIter), A is K-outer.
     // Lanes already align (NWarp==1), so this is an in-thread block reorder;
     // identity when MIterPerWarp==1.
     template <typename Gemm1, typename PComputeTensor>
-    CK_TILE_DEVICE static auto MakePForGemm1(PComputeTensor& p_compute, int32_t& p_scale)
+    CK_TILE_DEVICE static auto MakePForGemm1(const PComputeTensor& p_compute)
     {
         constexpr index_t kPMI = Gemm1::MIterPerWarp;
         constexpr index_t kPKI = kN0 / Gemm1::WarpGemm::kK;
@@ -365,35 +211,17 @@ struct BlockFmhaFwdSplitKVPipelineQRKSVSTdm
         auto p_tile = make_static_distributed_tensor<PDataType>(
             Policy::template MakePRegTileDistribution<Problem>());
 
-        if constexpr(kQuantized)
-        {
-            static_assert(kPMI * kPKI == 1,
-                          "qr_tdm pipeline: the dynamic P scale needs the (MIter,KIter) repack "
-                          "to be the identity");
-            using WG          = typename Gemm1::WarpGemm;
-            const auto packed = cast_tile_mx_wmma<kPScaleGranularity,
-                                                  WG::WarpGemmAttribute::Impl::kAMLane,
-                                                  WG::WarpGemmAttribute::Impl::kABKLane,
-                                                  true>(p_tile, p_compute);
-            static_assert(packed.size() == 1);
-            p_scale = packed[I0];
-        }
-        else
-        {
-            const auto p_src        = cast_tile<PDataType>(p_compute);
-            constexpr index_t kPBuf = decltype(p_src)::get_thread_buffer_size();
-            constexpr index_t kPSub = kPBuf / (kPMI * kPKI);
-            using p_bulk_t          = array<PDataType, kPSub>;
-            static_for<0, kPMI, 1>{}([&](auto mi) {
-                static_for<0, kPKI, 1>{}([&](auto ki) {
-                    p_tile.get_thread_buffer().template set_as<p_bulk_t>(
-                        number<ki * kPMI + mi>{},
-                        p_src.get_thread_buffer().template get_as<p_bulk_t>(
-                            number<mi * kPKI + ki>{}));
-                });
+        const auto p_src        = cast_tile<PDataType>(p_compute);
+        constexpr index_t kPBuf = decltype(p_src)::get_thread_buffer_size();
+        constexpr index_t kPSub = kPBuf / (kPMI * kPKI);
+        using p_bulk_t          = array<PDataType, kPSub>;
+        static_for<0, kPMI, 1>{}([&](auto mi) {
+            static_for<0, kPKI, 1>{}([&](auto ki) {
+                p_tile.get_thread_buffer().template set_as<p_bulk_t>(
+                    number<ki * kPMI + mi>{},
+                    p_src.get_thread_buffer().template get_as<p_bulk_t>(number<mi * kPKI + ki>{}));
             });
-            p_scale = e8m0_one();
-        }
+        });
         return p_tile;
     }
 
@@ -433,11 +261,7 @@ struct BlockFmhaFwdSplitKVPipelineQRKSVSTdm
         const BlockIndices& block_indices,
         index_t kv_l2p_offset,
         void* smem_arena,
-        float sink_v,
-        const float* k_descale_ptr,
-        const float* v_descale_ptr,
-        index_t block_scale_size_kv,
-        float v_descale) const
+        float sink_v) const
     {
         using Layout = typename Policy::template LdsArenaLayout<Problem>;
         auto* smem_ptrq =
@@ -488,15 +312,8 @@ struct BlockFmhaFwdSplitKVPipelineQRKSVSTdm
         // init M, L (sink-aware: when sink_v is finite, pre-seed m/l)
         auto m = MLBlockTileType{};
         auto l = MLBlockTileType{};
-        // Row sum of the quantized P actually handed to gemm_1; unused unless kQuantized.
-        auto l_quant = MLBlockTileType{};
-        if constexpr(kQuantized)
-            clear_tile(l_quant);
 
         clear_tile(o_acc);
-        // kDeferSink folds to false at compile time for every non-deferred instance; the
-        // else branch below must stay reachable in both cases, so this is one runtime if.
-        //
         // Split-kv: the sink logit has to be counted exactly once across all the
         // splits, so only the first split that has work seeds m/l with it. That is
         // not always split 0 -- an earlier split can come out empty under a mask --
@@ -512,9 +329,7 @@ struct BlockFmhaFwdSplitKVPipelineQRKSVSTdm
                 else
                     set_tile(m, sink_v * C_LOG2E);
 #else
-                // Unreachable: FAST_EXP2 is asserted above. Kept in step with
-                // block_fmha_fwd_splitkv_pipeline_qr_ks_vs, where #12229 showed
-                // the non-FAST_EXP2 seed also owes scale_s.
+                // Unreachable: FAST_EXP2 is asserted above. This seed owes scale_s too.
                 set_tile(m, sink_v * scale_s);
 #endif
                 set_tile(l, SMPLComputeDataType{1.0f});
@@ -525,7 +340,7 @@ struct BlockFmhaFwdSplitKVPipelineQRKSVSTdm
                 clear_tile(l);
             }
         };
-        init_ml(!kDeferSink && __builtin_isinf_sign(sink_v) >= 0 && i_split == 0);
+        init_ml(__builtin_isinf_sign(sink_v) >= 0 && i_split == 0);
 
         const auto q_origin = q_dram_block_window_tmp.get_window_origin();
 
@@ -558,10 +373,10 @@ struct BlockFmhaFwdSplitKVPipelineQRKSVSTdm
         // check early exit if no work to do
         if constexpr(FmhaMask::IsMasking || kPadSeqLenK || kHasUnevenSplits)
         {
-            // Sink loops are deliberately not counted, matching qr_ks_vs: a split with
-            // no ordinary KV work exits through the closed form below, which decides
-            // sink ownership. Looping over sink tiles instead gives -inf LSE when the
-            // rows are fully masked (SplitKvSinkDroppedSink).
+            // Sink loops are deliberately not counted: a split with no ordinary KV
+            // work exits through the closed form below, which decides sink ownership.
+            // Looping over sink tiles instead gives -inf LSE when the rows are fully
+            // masked (SplitKvSinkDroppedSink).
             const index_t logical_num_total_loop =
                 integer_divide_ceil(logical_seqlen_k_end - logical_seqlen_k_start, kN0);
             if(logical_num_total_loop <= 0)
@@ -606,12 +421,11 @@ struct BlockFmhaFwdSplitKVPipelineQRKSVSTdm
 
         // Reaching here means this split has work. It owns the sink logit when
         // the split before it was empty, which the seeding above could not know.
-        // Mirrors block_fmha_fwd_splitkv_pipeline_qr_ks_vs.
         if(i_split > 0)
         {
             auto [prev_start, prev_end] = mask.GetTileRangeAlongX(
                 q_origin.at(I0), number<kM0>{}, number<kN0>{}, num_splits, i_split - 1);
-            init_ml(!kDeferSink && __builtin_isinf_sign(sink_v) >= 0 && prev_start >= prev_end);
+            init_ml(__builtin_isinf_sign(sink_v) >= 0 && prev_start >= prev_end);
         }
 
         // ---------------------------------------------------------------------
@@ -692,7 +506,7 @@ struct BlockFmhaFwdSplitKVPipelineQRKSVSTdm
 
         // Bias tile window (ELEMENTWISE_BIAS or ALIBI -- null window for NO_BIAS).
         // Bias is indexed logically, so outside the sink range the origin has to
-        // come back out of the physical frame; mirrors qr_ks_vs.
+        // come back out of the physical frame.
         const auto bias_origin      = bias_dram_block_window_tmp.get_window_origin();
         const index_t bias_n_offset = [&]() {
             if constexpr(kHasSink)
@@ -848,17 +662,11 @@ struct BlockFmhaFwdSplitKVPipelineQRKSVSTdm
         auto kv_iteration = [&](auto i_parity) {
             constexpr index_t kCurBuf  = decltype(i_parity)::value;
             constexpr index_t kNextBuf = 1 - kCurBuf;
-            // Sink-aware: in the sink phase tiles start at kv_load_start, in the normal
-            // phase at aligned_physical_seqlen_k_start. k_origin below and the descale index
-            // (k_descale in the kBlockScale sweep, v_descale in pack_v_scale) address the
-            // same tile, so they share this one expression -- a sink-blind index here
-            // trails the loaded column after the sink phase.
-            [[maybe_unused]] const index_t kv_tile_start =
+            // Tile origin: kv_load_start in the sink phase, the aligned split start after it.
+            const index_t kv_tile_start =
                 (num_sink_loop > i_total_loops)
                     ? kv_load_start + i_total_loops * kN0
                     : aligned_physical_seqlen_k_start + (i_total_loops - num_sink_loop) * kN0;
-            // the tile range rounds its end up to kN0, so bound the scale index by seqlen_k
-            [[maybe_unused]] const index_t kv_last = mask.GetXTotal() - 1;
 
             // This barrier covers both reuses below: V is single-buffered (the
             // previous iteration's gemm1 must be done reading it) and buffer
@@ -906,8 +714,7 @@ struct BlockFmhaFwdSplitKVPipelineQRKSVSTdm
             {
                 // Reload k_tile in place, in groups of four ds_loads dropped
                 // into the WMMA sweep right after the fragments they overwrite
-                // died. Same traversal as the double-buffer path; it needs the
-                // whole K tile in LDS, which this path now also stages.
+                // died. Needs the whole K tile in LDS, which this path stages.
                 static_assert(std::is_same_v<Policy, BlockFmhaPipelineQRKSVSTdmDefaultPolicy>);
                 using Gemm0  = remove_cvref_t<decltype(gemm_0)>;
                 using Window = remove_cvref_t<decltype(k_lds_read_window)>;
@@ -962,29 +769,7 @@ struct BlockFmhaFwdSplitKVPipelineQRKSVSTdm
             if constexpr(1 < k0_loops)
                 move_tile_window(k_lds_read_window, {0, -kK0 * (k0_loops - 1)});
 
-            if constexpr(kBlockScale)
-            {
-                // Without the barrier the scheduler sinks gemm1's WMMAs into this
-                // sweep; the longer live ranges cost a wave per SIMD.
-                __builtin_amdgcn_sched_barrier(0);
-                constexpr auto ks_spans = decltype(s_acc)::get_distributed_spans();
-                static_assert(remove_cvref_t<decltype(ks_spans[number<1>{}])>::Impl::at(0) ==
-                                  kGemm0NIters,
-                              "qr_tdm pipeline: s_acc's N span must lead with gemm0's warp N "
-                              "iteration");
-                sweep_tile_span(ks_spans[number<1>{}], [&](auto idx1) {
-                    constexpr index_t n_iter = idx1.impl_.at(number<0>{});
-                    const index_t kv      = min(kv_tile_start + n_iter * kGemm0KVPerNIter, kv_last);
-                    const float k_descale = cast_pointer_to_constant_address_space(
-                        k_descale_ptr)[kv / block_scale_size_kv];
-                    sweep_tile_span(ks_spans[number<0>{}], [&](auto idx0) {
-                        constexpr auto i_j_idx = make_tuple(idx0, idx1);
-                        s_acc(i_j_idx) *= k_descale;
-                    });
-                });
-            }
-
-            // STAGE 2: scale_s, add bias (mirrors baseline qr_ks_vs line 715-776)
+            // STAGE 2: scale_s, add bias
             if constexpr(BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS)
             {
                 // Pre-scale s_acc by scale_s before adding bias
@@ -1178,18 +963,7 @@ struct BlockFmhaFwdSplitKVPipelineQRKSVSTdm
 
             block_tile_reduce_sync(rowsum_p, f_sum, bool_constant<false>{});
 
-            int32_t p_scale = 0;
-            auto p_tile     = MakePForGemm1<decltype(gemm_1)>(p_compute, p_scale);
-
-            // MakePForGemm1 leaves p_compute holding the dequantized values gemm_1 will
-            // multiply, so reducing it here gives sum(q(P)) over the same groups.
-            auto rowsum_p_quant = rowsum_p;
-            if constexpr(kQuantized)
-            {
-                rowsum_p_quant = block_tile_reduce<SMPLComputeDataType>(
-                    p_compute, sequence<1>{}, f_sum, SMPLComputeDataType{0});
-                block_tile_reduce_sync(rowsum_p_quant, f_sum, bool_constant<false>{});
-            }
+            auto p_tile = MakePForGemm1<decltype(gemm_1)>(p_compute);
 
             // l{j}, Oacc{j}
             constexpr auto o_spans = decltype(o_acc)::get_distributed_spans();
@@ -1215,8 +989,6 @@ struct BlockFmhaFwdSplitKVPipelineQRKSVSTdm
                     }
                 }();
                 l(i_idx) = tmp * l[i_idx] + rowsum_p[i_idx];
-                if constexpr(kQuantized)
-                    l_quant(i_idx) = tmp * l_quant[i_idx] + rowsum_p_quant[i_idx];
                 sweep_tile_span(o_spans[I1], [&](auto idx1) {
                     constexpr auto i_j_idx = make_tuple(idx0, idx1);
 
@@ -1231,21 +1003,6 @@ struct BlockFmhaFwdSplitKVPipelineQRKSVSTdm
 
             auto v_tile = load_tile_transpose(v_lds_read_window);
 
-            const auto p_scale_arg = make_gemm1_scale<decltype(gemm_1)>(p_scale);
-
-            auto v_scale = [&](auto i_k1) {
-                if constexpr(kBlockScale)
-                {
-                    return make_gemm1_scale<decltype(gemm_1)>(pack_v_scale(
-                        v_descale_ptr, kv_tile_start + i_k1 * kK1, kv_last, block_scale_size_kv));
-                }
-                else
-                {
-                    ignore = i_k1;
-                    return make_gemm1_scale<decltype(gemm_1)>(e8m0_one());
-                }
-            };
-
             if constexpr(1 < k1_loops)
             {
                 static_for<0, k1_loops - 1, 1>{}([&](auto i_k1) {
@@ -1253,9 +1010,7 @@ struct BlockFmhaFwdSplitKVPipelineQRKSVSTdm
                            get_slice_tile(p_tile,
                                           sequence<0, i_k1 * kK1>{},
                                           sequence<kM0, (i_k1 + 1) * kK1>{}),
-                           v_tile,
-                           p_scale_arg,
-                           v_scale(i_k1));
+                           v_tile);
 
                     // loop over along the [V]alue Sequence length
                     move_tile_window(v_lds_read_window, {kK1, 0});
@@ -1269,9 +1024,7 @@ struct BlockFmhaFwdSplitKVPipelineQRKSVSTdm
                    get_slice_tile(p_tile,
                                   sequence<0, (k1_loops - 1) * kK1>{},
                                   sequence<kM0, k1_loops * kK1>{}),
-                   v_tile,
-                   p_scale_arg,
-                   v_scale(number<k1_loops - 1>{}));
+                   v_tile);
         };
 
         // Unrolled by two so that each half addresses its K LDS buffer with a
@@ -1290,11 +1043,8 @@ struct BlockFmhaFwdSplitKVPipelineQRKSVSTdm
 
         // The last iteration issued a K prefetch that nothing consumes; drain it
         // before leaving, so the LDS region this pipeline was handed is not
-        // still a TDM destination once the caller reuses it. The double-buffer
-        // path below ends the same way.
+        // still a TDM destination once the caller reuses it.
         s_wait_tensorcnt_barrier<0>();
-        CorrectQuantizedMass(l, l_quant, o_acc);
-        MergeSink(m, l, o_acc, sink_v, scale_s);
 
         if constexpr(kStoreLSE)
         {
@@ -1339,10 +1089,6 @@ struct BlockFmhaFwdSplitKVPipelineQRKSVSTdm
                 else
                     return 1 / l[i_idx];
             }();
-            if constexpr(kVScaleOnOacc)
-            {
-                tmp *= v_descale;
-            }
             sweep_tile_span(o_spans[I1], [&](auto idx1) {
                 constexpr auto i_j_idx = make_tuple(idx0, idx1);
                 o_acc(i_j_idx) *= tmp;
@@ -1352,10 +1098,9 @@ struct BlockFmhaFwdSplitKVPipelineQRKSVSTdm
         return o_acc;
     }
 
-    // Split-kv entry point, same signature as
-    // BlockFmhaFwdSplitKVPipelineQRKSVS::operator() so the kernel needs no
-    // TDM-specific call site. run_single_v_double_k_lds_buffer slices the LDS
-    // arena itself.
+    // Split-kv entry point. The parameter list matches the non-fp8 operator() of
+    // BlockFmhaFwdSplitKVPipelineQRKSVS, so the kernel calls both pipelines
+    // through the same expression.
     template <typename QDramBlockWindowTmp,
               typename KDramBlockWindowLengths,
               typename KPageBlockNavigator,
@@ -1386,8 +1131,6 @@ struct BlockFmhaFwdSplitKVPipelineQRKSVSTdm
                void* smem_ptr,
                float sink_v) const
     {
-        static_assert(!kQuantized, "qr_tdm split-kv does not implement quantization");
-
         // The navigators are forwarded as-is: the callee builds its K/V windows
         // through them, so a page turn and a plain window step are the same call.
         return run_single_v_double_k_lds_buffer(q_dram_block_window_tmp,
@@ -1407,11 +1150,7 @@ struct BlockFmhaFwdSplitKVPipelineQRKSVSTdm
                                                 block_indices,
                                                 kv_l2p_offset,
                                                 smem_ptr,
-                                                sink_v,
-                                                nullptr,
-                                                nullptr,
-                                                1,
-                                                1.0f);
+                                                sink_v);
     }
 };
 
