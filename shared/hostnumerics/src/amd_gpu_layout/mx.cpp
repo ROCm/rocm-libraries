@@ -6,9 +6,11 @@
 #include <stdexcept>
 
 #include "detail/checked_arithmetic.hpp"
+#include "parallel_chunks.hpp"
 
 namespace roc::hostnumerics::amd_gpu_layout {
 namespace {
+using detail::parallelForChunks;
 using ::roc::hostnumerics::detail::checkedAdd;
 using ::roc::hostnumerics::detail::checkedMultiply;
 
@@ -48,27 +50,31 @@ size_t physicalByteCountFor(std::array<size_t, 2> naturalShape, size_t blockSize
 // scales are ordered [columnLane, rowLane, columnHalf, rowHalf], rowHalf fastest.
 void copyGfx950Scales(const std::byte* natural, std::byte* physical, size_t rows, size_t columns) {
     const size_t columnTiles = roundUp(columns, 8) / 8;
-    for (size_t row = 0; row < rows; ++row) {
-        const size_t rowTile = row / 32;
-        const size_t rowHalf = row / 16 % 2;
-        const size_t rowLane = row % 16;
-        for (size_t column = 0; column < columns; ++column) {
-            const size_t tile = rowTile * columnTiles + column / 8;
-            const size_t columnHalf = column / 4 % 2;
-            const size_t columnLane = column % 4;
-            const size_t destination =
-                (((tile * 4 + columnLane) * 16 + rowLane) * 2 + columnHalf) * 2 + rowHalf;
-            physical[destination] = natural[row * columns + column];
+    parallelForChunks(rows, rows * columns, [&](size_t begin, size_t end) noexcept {
+        for (size_t row = begin; row < end; ++row) {
+            const size_t rowTile = row / 32;
+            const size_t rowHalf = row / 16 % 2;
+            const size_t rowLane = row % 16;
+            for (size_t column = 0; column < columns; ++column) {
+                const size_t tile = rowTile * columnTiles + column / 8;
+                const size_t columnHalf = column / 4 % 2;
+                const size_t columnLane = column % 4;
+                const size_t destination =
+                    (((tile * 4 + columnLane) * 16 + rowLane) * 2 + columnHalf) * 2 + rowHalf;
+                physical[destination] = natural[row * columns + column];
+            }
         }
-    }
+    });
 }
 
 void copyGfx1250Scales(const std::byte* natural, std::byte* physical, size_t slow, size_t fast,
                        size_t tileSize) {
-    for (size_t slowIndex = 0; slowIndex < slow; ++slowIndex)
-        for (size_t fastIndex = 0; fastIndex < fast; ++fastIndex)
-            physical[(fastIndex / tileSize * slow + slowIndex) * tileSize + fastIndex % tileSize] =
-                natural[slowIndex * fast + fastIndex];
+    parallelForChunks(slow, slow * fast, [&](size_t begin, size_t end) noexcept {
+        for (size_t slowIndex = begin; slowIndex < end; ++slowIndex)
+            for (size_t fastIndex = 0; fastIndex < fast; ++fastIndex)
+                physical[(fastIndex / tileSize * slow + slowIndex) * tileSize +
+                         fastIndex % tileSize] = natural[slowIndex * fast + fastIndex];
+    });
 }
 }  // namespace
 

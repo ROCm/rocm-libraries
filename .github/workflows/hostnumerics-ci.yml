@@ -210,7 +210,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install --yes clang-18 libclang-rt-18-dev ninja-build
+          sudo apt-get install --yes clang-18 libclang-rt-18-dev libomp-18-dev ninja-build
 
       - name: Install Python dependencies
         run: python -m pip install nanobind==3.0.1 numpy
@@ -270,7 +270,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install --yes clang-18 clang-tidy-18 ninja-build
+          sudo apt-get install --yes clang-18 clang-tidy-18 libomp-18-dev ninja-build
 
       - name: Install Python dependencies
         run: python -m pip install nanobind==3.0.1 numpy

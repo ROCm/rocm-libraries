@@ -8,6 +8,7 @@
 #include <stdexcept>
 
 #include "detail/checked_arithmetic.hpp"
+#include "parallel_chunks.hpp"
 
 namespace roc::hostnumerics::amd_gpu_layout::detail {
 namespace {
@@ -139,16 +140,18 @@ void copyOperandBytes(const std::byte* operand, std::byte* output, size_t elemen
         stride *= sizes[dimension];
     }
 
-    for (size_t source = 0; source < elementCount; ++source) {
-        size_t remaining = source;
-        size_t destination = 0;
-        for (size_t dimension = 0; dimension < sizes.size(); ++dimension) {
-            destination += remaining % sizes[dimension] * physicalStrides[dimension];
-            remaining /= sizes[dimension];
+    parallelForChunks(elementCount, elementCount, [&](size_t begin, size_t end) noexcept {
+        for (size_t source = begin; source < end; ++source) {
+            size_t remaining = source;
+            size_t destination = 0;
+            for (size_t dimension = 0; dimension < sizes.size(); ++dimension) {
+                destination += remaining % sizes[dimension] * physicalStrides[dimension];
+                remaining /= sizes[dimension];
+            }
+            std::memcpy(output + destination * elementSize, operand + source * elementSize,
+                        elementSize);
         }
-        std::memcpy(output + destination * elementSize, operand + source * elementSize,
-                    elementSize);
-    }
+    });
 }
 
 }  // namespace roc::hostnumerics::amd_gpu_layout::detail

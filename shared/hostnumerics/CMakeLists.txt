@@ -13,6 +13,9 @@ option(HOSTNUMERICS_BUILD_TESTING "Build HostNumerics tests." ${PROJECT_IS_TOP_L
 option(HOSTNUMERICS_BUILD_PYTHON "Build the HostNumerics Python module."
        ${PROJECT_IS_TOP_LEVEL})
 
+# HostNumerics parallelizes CPU work with OpenMP and has no serial-only build.
+find_package(OpenMP REQUIRED COMPONENTS CXX)
+
 configure_file(
     "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/hostnumerics/version.hpp.in"
     "${CMAKE_CURRENT_BINARY_DIR}/include/roc/hostnumerics/version.hpp"
@@ -47,8 +50,7 @@ add_library(roc::hostnumerics ALIAS hostnumerics)
 target_link_libraries(hostnumerics INTERFACE roc::hostnumerics-core)
 
 # CPU conversions to the physical storage layouts that AMD GPU kernels read.
-# They need only the standard library, so this target does not link the other
-# HostNumerics targets.
+# They do not depend on the other HostNumerics targets.
 add_library(hostnumerics-amd-gpu-layout STATIC
     src/amd_gpu_layout/mx.cpp
     src/amd_gpu_layout/operand.cpp
@@ -58,6 +60,7 @@ target_compile_features(hostnumerics-amd-gpu-layout PUBLIC cxx_std_20)
 target_include_directories(hostnumerics-amd-gpu-layout
     PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src"
 )
+target_link_libraries(hostnumerics-amd-gpu-layout PRIVATE OpenMP::OpenMP_CXX)
 target_sources(hostnumerics-amd-gpu-layout
     PUBLIC
         FILE_SET HEADERS
