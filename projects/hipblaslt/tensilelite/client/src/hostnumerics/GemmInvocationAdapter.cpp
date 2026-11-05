@@ -602,52 +602,40 @@ namespace TensileLite::Client::hostnumerics
             if(globalOrder.size() != outputShape.rank())
                 return failure(TranslationFailureCode::InvalidDescriptor,
                                "Tensor index order rank does not match shape rank.");
-            try
+            size_t selectedCount;
+            if constexpr(std::is_same_v<Indices, roc::hostnumerics::IndexRange>)
             {
-                size_t selectedCount;
-                if constexpr(std::is_same_v<Indices, roc::hostnumerics::IndexRange>)
-                {
-                    if(indices.stop() > *logicalCount)
-                        throw std::runtime_error(
-                            "Index range stop exceeds the logical element count.");
-                    selectedCount = indices.count();
-                }
-                else
-                {
-                    if(!indices.empty() && *indices.rbegin() >= *logicalCount)
-                        throw std::runtime_error("Explicit index exceeds logical element count.");
-                    selectedCount = indices.size();
-                }
-                selectAllOutputs = requiresCompleteD || selectedCount == *logicalCount;
+                if(indices.stop() > *logicalCount)
+                    return failure(TranslationFailureCode::InvalidDescriptor,
+                                   "Index range stop exceeds the logical element count.");
+                selectedCount = indices.count();
             }
-            catch(const std::runtime_error& error)
+            else
             {
-                return failure(TranslationFailureCode::InvalidDescriptor, error.what());
+                if(!indices.empty() && *indices.rbegin() >= *logicalCount)
+                    return failure(TranslationFailureCode::InvalidDescriptor,
+                                   "Explicit index exceeds logical element count.");
+                selectedCount = indices.size();
             }
+            selectAllOutputs = requiresCompleteD || selectedCount == *logicalCount;
             selectedByBatch.clear();
             if(!selectAllOutputs)
             {
                 selectedByBatch.resize(batches);
                 std::optional<TranslationFailure> selectionFailure;
-                try
-                {
-                    outputShape.forEachCoordinate(
-                        indices, globalOrder, [&](size_t, std::span<const size_t> coordinate) {
-                            const size_t selectedBatch = coordinate[batchD];
-                            const size_t row           = coordinate[indexMD];
-                            const size_t column        = coordinate[indexND];
-                            if(selectedBatch >= selectedByBatch.size())
-                                selectionFailure = failure(
-                                    TranslationFailureCode::InvalidDescriptor,
-                                    "Selected output batch exceeds the contraction batch count.");
-                            else
-                                selectedByBatch[selectedBatch].insert(row * n + column);
-                        });
-                }
-                catch(const std::runtime_error& error)
-                {
-                    return failure(TranslationFailureCode::InvalidDescriptor, error.what());
-                }
+                // The order rank and every index were validated above.
+                outputShape.forEachCoordinate(
+                    indices, globalOrder, [&](size_t, std::span<const size_t> coordinate) {
+                        const size_t selectedBatch = coordinate[batchD];
+                        const size_t row           = coordinate[indexMD];
+                        const size_t column        = coordinate[indexND];
+                        if(selectedBatch >= selectedByBatch.size())
+                            selectionFailure = failure(
+                                TranslationFailureCode::InvalidDescriptor,
+                                "Selected output batch exceeds the contraction batch count.");
+                        else
+                            selectedByBatch[selectedBatch].insert(row * n + column);
+                    });
                 if(selectionFailure)
                     return selectionFailure;
             }
