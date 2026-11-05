@@ -148,14 +148,17 @@ def _apply_binary(op: str, a: int, b: int) -> int:
     )
 
 
+def _is_exact_int(number: float) -> bool:
+    """Whether ``number`` is an integer that a double holds exactly: within
+    +/-``EXACT_INT_MAX``, and with no fraction when it is a float."""
+    whole = not isinstance(number, float) or number.is_integer()
+    return whole and abs(number) <= EXACT_INT_MAX
+
+
 def _number(node: float) -> int:
-    if isinstance(node, float):
-        if not node.is_integer() or abs(node) > EXACT_INT_MAX:
-            raise IntExprError(_NOT_EXACT_INT)
-        return int(node)
-    if abs(node) > EXACT_INT_MAX:
+    if not _is_exact_int(node):
         raise IntExprError(_NOT_EXACT_INT)
-    return node
+    return int(node)
 
 
 def eval_intexpr(
@@ -347,11 +350,7 @@ def relation_error(tree: Any) -> str | None:
     if isinstance(tree, bool):
         return "a relation is an int, a param leaf, or add / sub / mul / div of two relations"
     if isinstance(tree, (int, float)):
-        if isinstance(tree, float) and not tree.is_integer():
-            return _NOT_EXACT_INT
-        if abs(tree) > EXACT_INT_MAX:
-            return _NOT_EXACT_INT
-        return None
+        return None if _is_exact_int(tree) else _NOT_EXACT_INT
     if isinstance(tree, dict) and len(tree) == 1:
         ((key, value),) = tree.items()
         if key == "param":
