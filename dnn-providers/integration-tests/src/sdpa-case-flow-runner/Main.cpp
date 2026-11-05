@@ -69,6 +69,7 @@
 #include "harness/ReferenceCapabilityError.hpp"
 #include "harness/bundle/OutputComparison.hpp"
 #include "harness/bundle/RngDumpHandoff.hpp"
+#include "harness/bundle/VariantPackBuilder.hpp"
 #include "harness/gpu-graph-executor/GpuReferenceGraphExecutor.hpp"
 #include "harness/input-init/FillInputs.hpp"
 #include "harness/input-init/InputFillRecipes.hpp"
@@ -1602,6 +1603,32 @@ std::map<int64_t, int64_t> startOffsetsByUid(const sdpa_case_flow::BuiltCase& bu
     return byUid;
 }
 
+// The variant pack of a bundle from the harness builder: the bundle's outputs are the tensors
+// of `outputUids`, and every other tensor is an input.
+it::VariantPack
+    variantPackOf(Bundle& bundle,
+                  const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper& wrapper,
+                  const std::vector<int64_t>& outputUids,
+                  bool useDevice)
+{
+    it::bundle::TensorMap inputs;
+    it::bundle::OutputTensors outputs;
+    const std::set<int64_t> outputSet(outputUids.begin(), outputUids.end());
+    for(const auto& [uid, tensor] : bundle.tensors)
+    {
+        if(outputSet.count(uid) != 0)
+        {
+            outputs.emplace(uid, tensor);
+        }
+        else
+        {
+            inputs.emplace(uid, tensor);
+        }
+    }
+    return it::bundle::detail::buildVariantPack(
+        inputs, outputs, wrapper.getTensorMap(), outputUids, useDevice);
+}
+
 // A copy of `source` that shares its input tensors and owns fresh, sentinel-filled outputs.
 Bundle withFreshOutputs(Bundle& source,
                         const std::map<int64_t, TensorPtr>& attrs,
@@ -1862,7 +1889,7 @@ std::string runCase(size_t index,
                 }
                 else
                 {
-                    auto variantPack = engineBundle.toDeviceVariantPack();
+                    auto variantPack = variantPackOf(engineBundle, wrapper, outputUids, true);
                     const ShiftedStarts shifted(
                         engineBundle.tensors, startOffsetsByUid(built, attrs), variantPack);
                     syncDevice();
@@ -1989,7 +2016,7 @@ std::string runCase(size_t index,
                 else
                 {
                     handOffRngDump(gpuBundle);
-                    auto variantPack = gpuBundle.toDeviceVariantPack();
+                    auto variantPack = variantPackOf(gpuBundle, wrapper, outputUids, true);
                     // The GPU reference reads and writes at the shifted data starts too, so the
                     // reference comparison checks the shifted copies.
                     const ShiftedStarts shifted(
@@ -2040,7 +2067,7 @@ std::string runCase(size_t index,
                 else
                 {
                     handOffRngDump(cpuBundle);
-                    auto variantPack = cpuBundle.toHostVariantPack();
+                    auto variantPack = variantPackOf(cpuBundle, wrapper, outputUids, false);
                     stageStart = Clock::now();
                     ctx.cpuRef.execute(blob.data(), blob.size(), variantPack);
                     line.num("t_cpu_ref_us", microsSince(stageStart));
