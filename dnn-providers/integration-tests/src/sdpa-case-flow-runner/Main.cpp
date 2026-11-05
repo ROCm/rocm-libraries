@@ -2626,17 +2626,21 @@ ExportResult prepareCase(const CaseInput& input,
             const auto wrapper
                 = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper::fromSerializedBlob(
                     blob.data(), blob.size());
-            const std::vector<int64_t> outputUids(graphTensors.outputs.begin(),
-                                                  graphTensors.outputs.end());
-            for(const auto& entry : rowStatisticLiveRows(wrapper, graphTensors.attrs, outputUids))
+            // Serialising assigns a uid to each output the frontend created without one, so the
+            // tensors are collected again to match the serialised graph.
+            const auto serialisedTensors = collectGraphTensors(graph);
+            const std::vector<int64_t> outputUids(serialisedTensors.outputs.begin(),
+                                                  serialisedTensors.outputs.end());
+            for(const auto& entry :
+                rowStatisticLiveRows(wrapper, serialisedTensors.attrs, outputUids))
             {
                 const auto jsonUid = [&](int64_t uid) {
-                    return jsonUidNamed(graphTensors.attrs.at(uid)->get_name());
+                    return jsonUidNamed(serialisedTensors.attrs.at(uid)->get_name());
                 };
                 if(entry.lengthsUid.has_value()
                    && !liveLengthsUsable(built,
-                                         graphTensors.attrs.at(*entry.lengthsUid)->get_name(),
-                                         graphTensors.attrs.at(entry.uid)->get_dim()))
+                                         serialisedTensors.attrs.at(*entry.lengthsUid)->get_name(),
+                                         serialisedTensors.attrs.at(entry.uid)->get_dim()))
                 {
                     continue;
                 }
