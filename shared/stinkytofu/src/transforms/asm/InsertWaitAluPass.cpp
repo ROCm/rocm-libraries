@@ -242,14 +242,6 @@ std::optional<WaitEventType> classifyEvent(const StinkyInstruction& inst) {
     return std::nullopt;
 }
 
-// VOP3PX2 / VOP3PX3 are software-only encodings of a back-to-back VOP3P pair
-// (LD_SCALE + WMMA). Hardware decodes each as two separate VOP3P sub-issues,
-// both bumping VA_VDST, so software must count 2.
-inline bool hasMatrixScalePair(const StinkyInstruction& inst) {
-    auto mc = inst.getHwInstDesc()->microcode;
-    return mc == MicrocodeFormat::MC_VOP3PX2 || mc == MicrocodeFormat::MC_VOP3PX3;
-}
-
 // Walk `regs`, skipping non-VGPR ones, and invoke fn(vgprIdx, half) for each
 // VGPR. halfFn maps an operand's position (VGPR-only) to its True16 half
 // selector, so fn may act at half-word (LOW/HIGH) granularity. Callers pass a
@@ -538,6 +530,7 @@ class WaitcntBrackets {
 
         if (ct == CT_VA_VDST) {
             VaPipe pipe = vaPipeOfEvent(ev);
+            // Hardware decodes a scale pair as two VOP3P sub-issues, both bumping VA_VDST.
             unsigned inc = hasMatrixScalePair(inst) ? 2u : 1u;
             vaPipeUB[pipe] += inc;
             vaUB += inc;

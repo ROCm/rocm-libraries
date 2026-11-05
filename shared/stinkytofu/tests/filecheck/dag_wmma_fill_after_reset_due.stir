@@ -1,4 +1,4 @@
-# RUN: %stinkytofu-opt --arch gfx1250 %s --StinkyBuildImplicitDependencyPass --StinkyDAGSchedulerPass --wmma-queue-depth=8 --wmma-queue-cover-cycles=16 --ds-spread --print-output
+# RUN: %stinkytofu-opt --arch gfx1250 %s --StinkyBuildImplicitDependencyPass --StinkyDAGSchedulerPass --wmma-queue-cover-cycles=16 --ds-spread --print-output
 #
 # The ds_loads after the first s_barrier_wait feed the second barrier pair, which is planned 3
 # WMMAs later: their stage is due as soon as it opens (DsSpreadPacer::due). The queue fill after

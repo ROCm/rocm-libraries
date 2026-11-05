@@ -409,6 +409,10 @@ class CDNA5ReadyQueue : public ReadyQueue {
     // Owned by the library, one object per arch, so this reference is stable too.
     const HWModel& hw_;
 
+    // WMMAs the pipe buffers in this region: the scale depth when it holds a v_wmma_scale* pair.
+    // Set by onInitRegion.
+    int regionWmmaQueueDepth_ = hw_.matrix.wmmaQueueDepth;
+
     // Throttle tensor issues vs other work.
     int globalReadCounter = 0;
     int globalReadPerWMMA = config_.globalReadPerWmma;
@@ -464,20 +468,16 @@ class CDNA5ReadyQueue : public ReadyQueue {
         const int cfg = getPassContext().getPassFeatureConfig().dagFeatures.tensorLoadWmmaSpace;
         return cfg > 0 ? cfg : config_.tensorLoadWmmaSpace;
     }
-    // WMMA issue queue (see PassFeatureConfig::DagFeatures::wmmaQueueDepth). Depth 1 is the
-    // single-window model: a WMMA waits for the previous one to finish.
-    // The queue model runs only with depth > 1 and a cover > 0; otherwise the depth is 1.
+    // WMMA issue queue: the region's HWModel::Matrix depth (regionWmmaQueueDepth_). Depth 1 is
+    // the single-window model: a WMMA waits for the previous one to finish.
+    // The queue model runs only with a cover (wmmaQueueCoverCycles) other than 0; otherwise the
+    // depth is 1.
     int wmmaQueueDepth() const {
         const auto& f = getPassContext().getPassFeatureConfig().dagFeatures;
-        return f.wmmaQueueCoverCycles != 0 ? std::max(1, f.wmmaQueueDepth) : 1;
+        return f.wmmaQueueCoverCycles != 0 ? std::max(1, regionWmmaQueueDepth_) : 1;
     }
     bool wmmaQueueOn() const {
         return wmmaQueueDepth() > 1;
-    }
-    // Fill the WMMA queue after it is reset (see wmmaQueueFillPending_).
-    bool fillQueueAfterResetOn() const {
-        return wmmaQueueOn() &&
-               getPassContext().getPassFeatureConfig().dagFeatures.wmmaFillAfterReset;
     }
     // The refill line: cycles of queued WMMA work needed before a non-WMMA pick may issue.
     // Automatic (the option below 0): one WMMA short of a full queue, sized by the next WMMA's
@@ -2731,7 +2731,7 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
             // lets the queued WMMAs finish: take the WMMA queue as empty.
             if (isBarrierWait(*barrier->inst)) {
                 resetActiveWindow();
-                wmmaQueueFillPending_ = fillQueueAfterResetOn();
+                wmmaQueueFillPending_ = wmmaQueueOn();
             }
             // This barrier may be opening a ds stage whose batches were counted from its planned
             // window. It can issue later than that (a predecessor was held, an SCC chain, an open
@@ -2969,6 +2969,13 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
                                    IRList::iterator blockBegin, const RegionDependencies& deps) {
     regionDag_ = &deps.dag;
     carryQueuedWar();
+    regionWmmaQueueDepth_ = hw_.matrix.wmmaQueueDepth;
+    for (const auto& n : deps.dag.nodes) {
+        if (isMatrixInstruction(*n.inst) && hasMatrixScalePair(*n.inst)) {
+            regionWmmaQueueDepth_ = hw_.matrix.scaleWmmaQueueDepth;
+            break;
+        }
+    }
     wmmaIssuedCountThisRegion_ = 0;
     wmmaRefilling_ = false;
     wmmaRefillLeft_ = 0;
@@ -3067,7 +3074,7 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
 
     // The queue starts empty at the loop header's first WMMA region and in a region cut by a
     // barrier wait: fill it first. The loop-head deferral wins over the fill.
-    if (fillQueueAfterResetOn() && hasWMMAInRegion_) {
+    if (wmmaQueueOn() && hasWMMAInRegion_) {
         const bool headerStart =
             headerFillPending_ && loop && loop->headerBB == blockBegin->getParent();
         bool afterWait = false;
