@@ -21,6 +21,7 @@
     "gqa_pack",
     "block_threads",
     "block_kv",
-    "block_m"
+    "block_m",
+    "block_q"
   ]
 }
