@@ -51,8 +51,10 @@
 #include <unordered_map>
 
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_AI_FDEEP_USE_SINGLE_THREAD_PREDICT)
-// Disable the precomputed config-tower embedding table and force the fdeep config encoder
-// (default: use the table when a {arch}_{solver}_kernel_config_embeddings.bin is present).
+// Disable the precomputed config-tower embedding table. With no table, config encoding has no
+// source (the fdeep config encoder is not shipped), so EncodeKernelConfigs throws and selection
+// falls back to the non-AI heuristic. Default: use the table when a
+// {arch}_{solver}_kernel_config_embeddings.bin is present.
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_AI_DISABLE_PRECOMPUTED_CONFIG_EMB)
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_ENABLE_LGBM_SELECTOR)
 // Bypass TunaNet and the KTN / two-tower kernel-tuning models, keeping only the LGBM
@@ -1802,10 +1804,13 @@ const ConfigEmbeddingTable& GetConfigEmbeddingTable(const std::string& arch,
         get(num_rows);
         get(key_dtype);
         get(emb_dtype);
-        // v2 appends a 32-char lowercase-hex md5 of the config-encoder model the table was
-        // generated from. A table whose embedded hash does not match the installed encoder is
-        // ignored (fail closed to the fdeep path) rather than dotting embeddings from a different
-        // training run. v1 (no hash) is still accepted for backward compatibility.
+        // v2/v3 append a 32-char lowercase-hex md5 of the config-encoder model the table was
+        // generated from. A table whose embedded hash does not match an installed encoder is
+        // ignored (fail closed -> non-AI heuristic) rather than scoring with embeddings from a
+        // different training run. The config encoder is normally NOT shipped, so this guard only
+        // fires in dev trees that still carry it; binding the hash to a shipped artifact (metadata)
+        // so it also fails closed in production is a generator-side (MIOpenFF) follow-up. v1 (no
+        // hash) is still accepted for backward compatibility.
         std::string table_enc_md5;
         if(version == 2 || version == 3)
         {
@@ -1849,10 +1854,11 @@ const ConfigEmbeddingTable& GetConfigEmbeddingTable(const std::string& arch,
             }
             if(!enc_bytes.empty() && miopen::md5(enc_bytes) != table_enc_md5)
             {
-                MIOPEN_LOG_W("Config embedding table "
-                             << path
-                             << " does not match the installed config encoder (md5 mismatch); "
-                                "ignoring table, using fdeep fallback");
+                MIOPEN_LOG_W(
+                    "Config embedding table "
+                    << path
+                    << " does not match the installed config encoder (md5 mismatch); "
+                       "ignoring table; config encoding falls back to the non-AI heuristic");
                 header_ok = false;
             }
         }
@@ -1885,7 +1891,7 @@ const ConfigEmbeddingTable& GetConfigEmbeddingTable(const std::string& arch,
             table.present = (read_rows == num_rows);
             // v3: read the trailing kernel-id block (num_rows length-prefixed strings) and pair
             // each non-empty kernel_id with its row embedding. A truncated/corrupt block only
-            // disables the lazy-applicability vocab; the rows map (fdeep fast path) stays usable.
+            // disables the lazy-applicability vocab; the rows map (table fast path) stays usable.
             if(table.present && has_vocab)
             {
                 table.vocab.reserve(num_rows);
@@ -1916,14 +1922,15 @@ const ConfigEmbeddingTable& GetConfigEmbeddingTable(const std::string& arch,
                         "Config embedding table "
                         << path
                         << " has a truncated kernel-id block; disabling lazy-applicability "
-                           "vocab (fdeep fast path still available)");
+                           "vocab (table fast path still available)");
                     table.vocab.clear();
                 }
             }
             if(!table.present)
             {
                 MIOPEN_LOG_W("Config embedding table at " << path << " is truncated/corrupt; "
-                                                          << "falling back to the fdeep encoder");
+                                                          << "config encoding falls back to the "
+                                                             "non-AI heuristic");
                 table.rows.clear();
             }
             else
