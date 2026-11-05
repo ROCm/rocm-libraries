@@ -308,8 +308,12 @@ repos:
       # rocKE advisory static analysis (all rocke Python): types, metrics, dead
       # code. NON-BLOCKING -- the wrapper always exits 0; `verbose` prints its
       # report. System hooks never install dependencies during a push; missing
-      # tools are advisory too, but the hooks need `python` on PATH. CI does not
-      # run these pre-push hooks.
+      # tools are advisory too, and so is a missing Python: pre-commit itself fails
+      # a hook whose program is absent, before the wrapper could skip anything, so
+      # the entry is a small bash snippet. It runs the first of `python`, `python3`
+      # that works and is Python 3.10+, and skips (exit 0) when there is none. It
+      # needs bash on PATH, as the pre-push script that pre-commit installs does.
+      # CI does not run these pre-push hooks.
       # Enable locally with:
       #   pre-commit install --hook-type pre-push --install-hooks
       # This also runs the repo's other hooks at push time (none sets a stage).
@@ -319,7 +323,17 @@ repos:
       # Reading the reports: rocke/docs/static-analysis.md.
       - id: rocke-pyright
         name: rocKE advisory - pyright type check (non-blocking)
-        entry: python dnn-providers/hip-kernel-provider/rocke/tools/advisory_checks.py pyright
+        entry: &rocke_advisory_entry |-
+          bash -c '
+          for py in python python3; do
+            if "$py" -c "import sys; sys.exit(sys.version_info < (3, 10))" >/dev/null 2>&1; then
+              exec "$py" dnn-providers/hip-kernel-provider/rocke/tools/advisory_checks.py "$@"
+            fi
+          done
+          echo "rocKE advisory ($1): no Python 3.10+ on PATH; skipped."
+          exit 0
+          ' --
+        args: [pyright]
         language: system
         files: &rocke_py '^dnn-providers/hip-kernel-provider/rocke/.*\.py$'
         stages: [pre-push]
@@ -327,7 +341,8 @@ repos:
         verbose: true
       - id: rocke-radon
         name: rocKE advisory - radon metrics (non-blocking)
-        entry: python dnn-providers/hip-kernel-provider/rocke/tools/advisory_checks.py radon
+        entry: *rocke_advisory_entry
+        args: [radon]
         language: system
         files: *rocke_py
         stages: [pre-push]
@@ -335,7 +350,8 @@ repos:
         verbose: true
       - id: rocke-vulture
         name: rocKE advisory - vulture dead code (non-blocking)
-        entry: python dnn-providers/hip-kernel-provider/rocke/tools/advisory_checks.py vulture
+        entry: *rocke_advisory_entry
+        args: [vulture]
         language: system
         files: *rocke_py
         stages: [pre-push]

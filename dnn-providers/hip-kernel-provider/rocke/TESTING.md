@@ -535,7 +535,8 @@ their `pytest.ini`, `pyrightconfig.json`, the root hook config, or that workflow
 changes. It installs pytest, pre-commit, Pyright, radon, and vulture into a
 private virtual environment (so the pre-commit that runs the PR gate is
 untouched) to exercise the wrapper, including file listing from git and
-non-blocking failure handling. `--noconftest` isolates
+non-blocking failure handling, and the root hook entry's skip when no usable
+Python is on `PATH`. `--noconftest` isolates
 these standalone tooling tests from kernel/GPU fixture setup. Test failures fail
 that CI job; this does not run the advisory hooks on PR code or enforce analyzer
 findings. The local pre-push hooks remain optional and non-blocking. These tests
