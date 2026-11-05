@@ -62,8 +62,16 @@ def test_conv_data_spec_translation():
     for dt in ("fp16", "bf16", "fp32"):
         assert ks.conv_data_spec(dt) == ConvDataSpec(dtype_a=dt, dtype_b=dt, dtype_d=dt)
         assert ks.conv_data_spec(dt).mma_dtype is None
-    with pytest.raises(ValueError):
-        ks.conv_data_spec("tf32", "fp32", "fp32")
+    # Only the canonical triple translates: a TF32 output spelling (or any
+    # non-fp32 output) is refused, not rewritten to fp32.
+    for bad in (
+        ("tf32", "fp32", "fp32"),
+        ("tf32", "tf32", "tf32"),
+        ("tf32", "tf32", "fp16"),
+        ("fp32", "fp32", "tf32"),
+    ):
+        with pytest.raises(ValueError, match="tf32 identity"):
+            ks.conv_data_spec(*bad)
 
 
 def test_tf32_signature_uses_storage_pointers():
@@ -402,10 +410,14 @@ def test_verify_tol_table():
     assert big._verify_tol("fp32", "gfx950") == 1e-3
     # gfx950 emulates TF32 (bf16x3), gfx942 encodes XF32 natively.
     assert big._verify_tol("tf32", "gfx950") == 1e-4
-    assert big._verify_tol("tf32", "gfx942") == 1e-3
+    assert big._verify_tol("tf32", "gfx942") == 2**-8
     # The atom decides when it is known.
     assert big._verify_tol("tf32", "gfx942", "mfma_f32_32x32x16_xf32") == 1e-4
-    assert big._verify_tol("tf32", "gfx950", "mfma_f32_16x16x8_xf32") == 1e-3
+    assert big._verify_tol("tf32", "gfx950", "mfma_f32_16x16x8_xf32") == 2**-8
+    # One truncation bound for both sweeps.
+    from benchmarks.common.direct_kernel_sweep import DIRECT_VERIFY_TOL
+
+    assert big.VERIFY_TOL["tf32_native"] == DIRECT_VERIFY_TOL["tf32_native"]
 
 
 def test_rank_results_never_ranks_a_failed_kernel():
@@ -442,17 +454,44 @@ def test_conv_reference_pins_ieee_and_restores():
     torch = pytest.importorskip("torch")
     from builders.common.conv_reference import ieee_fp32
 
-    conv = getattr(torch.backends.cudnn, "conv", None)
-    if conv is not None and hasattr(conv, "fp32_precision"):
-        before = conv.fp32_precision
+    # Every conv backend with the per-operator API: the GPU one and oneDNN,
+    # which serves the CPU references.
+    convs = [
+        c
+        for c in (
+            getattr(torch.backends.cudnn, "conv", None),
+            getattr(getattr(torch.backends, "mkldnn", None), "conv", None),
+        )
+        if c is not None and hasattr(c, "fp32_precision")
+    ]
+    if convs:
+        before = [c.fp32_precision for c in convs]
         with ieee_fp32():
-            assert conv.fp32_precision == "ieee"
-        assert conv.fp32_precision == before
+            assert [c.fp32_precision for c in convs] == ["ieee"] * len(convs)
+        assert [c.fp32_precision for c in convs] == before
     else:
         before = torch.backends.cudnn.allow_tf32
         with ieee_fp32():
             assert torch.backends.cudnn.allow_tf32 is False
         assert torch.backends.cudnn.allow_tf32 == before
+
+
+def test_conv_reference_legacy_torch_uses_allow_tf32(monkeypatch):
+    """A torch without the per-operator API (< 2.9) gets the legacy flag only:
+    the helper must not touch an attribute that version lacks."""
+    torch = pytest.importorskip("torch")
+    from builders.common import conv_reference
+
+    class _Cudnn:
+        allow_tf32 = True
+
+    class _Backends:
+        cudnn = _Cudnn()
+
+    monkeypatch.setattr(conv_reference.torch, "backends", _Backends())
+    with conv_reference.ieee_fp32():
+        assert _Backends.cudnn.allow_tf32 is False
+    assert _Backends.cudnn.allow_tf32 is True
 
 
 def _problem(is_3d=False):

@@ -442,21 +442,24 @@ def conv_data_spec(dtype_a: str, dtype_b: Optional[str] = None, dtype_d=None):
 
     The one translation between the two layers: ``"tf32"`` operands become
     fp32 storage with ``mma_dtype="tf32"``; every other dtype passes through,
-    so the spec of an existing identity is exactly what it was.
+    so the spec of an existing identity is exactly what it was. A TF32 triple
+    must be :data:`TF32_TRIPLE` exactly: TF32 is an operand mode, so the output
+    is spelled ``fp32`` and any other spelling is refused, not rewritten.
     """
     from kernels.common._conv_implicit_gemm_common import ConvDataSpec
 
     if dtype_b is None and dtype_d is None:
         dtype_a, dtype_b, dtype_d = dtype_triple(dtype_a)
-    if "tf32" in (dtype_a, dtype_b):
-        if (dtype_a, dtype_b) != ("tf32", "tf32"):
+    if "tf32" in (dtype_a, dtype_b, dtype_d):
+        if (dtype_a, dtype_b, dtype_d) != TF32_TRIPLE:
             raise ValueError(
-                f"tf32 needs both A and B as tf32, got {dtype_a}/{dtype_b}"
+                f"a tf32 identity is {'/'.join(TF32_TRIPLE)}, got "
+                f"{dtype_a}/{dtype_b}/{dtype_d}"
             )
         return ConvDataSpec(
             dtype_a="fp32",
             dtype_b="fp32",
-            dtype_d=storage_dtype(dtype_d),
+            dtype_d="fp32",
             mma_dtype="tf32",
         )
     return ConvDataSpec(dtype_a=dtype_a, dtype_b=dtype_b, dtype_d=dtype_d)

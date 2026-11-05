@@ -13,6 +13,7 @@ kernel for a dtype is skipped rather than crashing the enumeration. No GPU.
 from __future__ import annotations
 
 import json
+import struct
 
 import pytest
 
@@ -315,11 +316,49 @@ def test_tf32_emulation_by_arch():
         # single bf16 pass (~2e-3) must fail.
         ("tf32", "gfx950", 1e-4),
         # Native XF32 truncates the operands to a 10-bit mantissa.
-        ("tf32", "gfx942", 1e-3),
+        ("tf32", "gfx942", 2**-8),
     ],
 )
 def test_verify_tolerance(dtype, arch, tol):
     assert dks.direct_verify_tol(dtype, arch) == tol
+
+
+def test_native_tf32_bound_clears_operand_truncation():
+    """A correct native XF32 result against the IEEE reference must pass.
+
+    Four same-sign products of 0x3f001fff: truncation to a 10-bit mantissa
+    gives exactly 1.0, the reference about 1.00195, a 2^-9 loss that 1e-3
+    rejected. The bound must also stay well below a wrong answer's error.
+    """
+    x = struct.unpack("<f", struct.pack("<I", 0x3F001FFF))[0]
+    x_tf32 = struct.unpack("<f", struct.pack("<I", 0x3F001FFF & 0xFFFFE000))[0]
+    ref = 4 * x * x
+    out = 4 * x_tf32 * x_tf32
+    rel_err = abs(out - ref) / max(abs(ref), 1.0)
+    assert out == 1.0
+    assert rel_err > 1e-3
+    tol = dks.direct_verify_tol("tf32", "gfx942")
+    assert rel_err < tol
+    assert tol < dks.direct_verify_tol("fp16", "gfx942") / 10
+
+
+@pytest.mark.parametrize("dtype", ["fp32", "tf32"])
+def test_batch_split_counts_fp32_storage_bytes(dtype):
+    """The LDS-halo batch split sizes each launch by the stored bytes: an
+    fp32 / tf32 image is twice an fp16 one, so the same batch needs more
+    launches, and a chunk's buffer views advance by 4-byte elements."""
+    from kernels.common.conv_direct_nongrouped import _OOB_BASE
+
+    shape = dict(N=16, H=768, W=768, groups=1, cpg=256, kpg=256, KH=3, KW=3, PAD=1)
+    half = DirectConvProblem(**shape, dtype="fp16")
+    full = DirectConvProblem(**shape, dtype=dtype)
+    assert dks._image_bytes(full) == tuple(2 * n for n in dks._image_bytes(half))
+    chunks_half = dks._batch_chunks(half)
+    chunks_full = dks._batch_chunks(full)
+    assert sum(chunks_full) == full.N
+    assert len(chunks_full) > len(chunks_half)
+    in_img, out_img = dks._image_bytes(full)
+    assert max(chunks_full) * max(in_img, out_img) <= _OOB_BASE
 
 
 # ---------------------------------------------------------------------------

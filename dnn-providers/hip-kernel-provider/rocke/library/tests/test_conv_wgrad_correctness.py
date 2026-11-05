@@ -2840,35 +2840,6 @@ def _tf32_spec(problem, atom, **kw):
     return WgradConvSpec(**base)
 
 
-class _ieee_fp32:
-    """Pin torch's fp32 convolutions to IEEE for the reference, then restore."""
-
-    _KNOBS = (
-        ("cudnn", "allow_tf32", False),
-        ("cudnn.conv", "fp32_precision", "ieee"),
-        ("mkldnn.conv", "fp32_precision", "ieee"),
-    )
-
-    def __enter__(self):
-        import torch
-
-        self._saved = []
-        for path, attr, value in self._KNOBS:
-            obj = torch.backends
-            for part in path.split("."):
-                obj = getattr(obj, part, None)
-            if obj is None or not hasattr(obj, attr):
-                continue
-            self._saved.append((obj, attr, getattr(obj, attr)))
-            setattr(obj, attr, value)
-        return self
-
-    def __exit__(self, *exc):
-        for obj, attr, value in reversed(self._saved):
-            setattr(obj, attr, value)
-        return False
-
-
 def _tf32_truncate(t):
     """What gfx942's xf32 MFMA reads of an fp32 value: the low 13 bits dropped."""
     import torch
@@ -2880,7 +2851,9 @@ def _wgrad_reference_nd(X, dY, p):
     """fp32 dW (KYXC / KZYXC) from channel-last X / dY, 2-D or 3-D, IEEE."""
     import torch
 
-    with _ieee_fp32():
+    from builders.common.conv_reference import ieee_fp32
+
+    with ieee_fp32():
         if p.is_3d:
             w = torch.nn.grad.conv3d_weight(
                 X.permute(0, 4, 1, 2, 3).contiguous(),

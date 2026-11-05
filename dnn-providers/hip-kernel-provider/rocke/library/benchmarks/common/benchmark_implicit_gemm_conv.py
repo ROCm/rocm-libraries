@@ -557,16 +557,18 @@ def _wgrad_exact_tile_combos(
 
 # Verify bounds on the peak-normalised error max|out-ref| / max(max|ref|, 1).
 # TF32 has two rows because the two arches run it differently: gfx942 encodes
-# XF32 natively (A/B truncated to a 10-bit mantissa, ~7e-4 expected), gfx950
-# emulates it with three bf16 MFMAs over the full fp32 payload (~4e-6
-# expected). 1e-4 on the emulated path still fails a dropped cross term or a
-# single bf16 pass (~2e-3); 1e-3 is the tightest bound truncation clears.
+# XF32 natively (A/B truncated to a 10-bit mantissa, ~8e-4 on uniform(-1, 1)
+# data), gfx950 emulates it with three bf16 MFMAs over the full fp32 payload
+# (~4e-6 expected). 1e-4 on the emulated path still fails a dropped cross term
+# or a single bf16 pass (~2e-3). Truncation loses up to 2^-9 of every product
+# and same-sign products keep that loss in the sum, so the native bound is
+# twice that, 2^-8 (see direct_kernel_sweep.DIRECT_VERIFY_TOL).
 VERIFY_TOL = {
     "fp16": 5e-2,
     "bf16": 5e-2,
     "fp32": 1e-3,
     "tf32_emulated": 1e-4,
-    "tf32_native": 1e-3,
+    "tf32_native": 2**-8,
 }
 
 

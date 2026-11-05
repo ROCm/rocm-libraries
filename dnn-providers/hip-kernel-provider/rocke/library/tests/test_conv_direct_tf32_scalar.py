@@ -104,6 +104,19 @@ def _scalar_cases(dtype: str) -> List[Tuple[str, object, Callable, Callable, str
                 "fwd",
             )
         )
+    # The rotated-filter dgrad form of the tiled kernel (stride 1).
+    for i, p in enumerate([_dw(dtype=dtype), _dw(dtype=dtype, KH=5, KW=5, PAD=2)]):
+        out.append(
+            (
+                f"dw_tiled_dgrad{i}",
+                cdg.DirectDepthwiseTiledSpec(
+                    problem=p, name=f"t32_dwtd{i}", dgrad=True
+                ),
+                cdg.build_direct_depthwise_tiled,
+                cdg.is_valid_depthwise_tiled_spec,
+                "dgrad",
+            )
+        )
     for i, p in enumerate([_dw(), _dw(stride=2, H=13, W=11)]):
         out.append(
             (
@@ -233,6 +246,29 @@ class TestScalarBuild(unittest.TestCase):
             cdg.DirectDepthwiseDgradSpec(problem=_dw(dtype="tf32")).kernel_name(),
             "direct_depthwise_dgrad_N2H14W14_g64_c1k1_bw8_bw1wv_f32",
         )
+
+    def test_channel_packing_is_16bit_only(self):
+        """``cpl > 1`` packs 16-bit channel pairs: fp32 / tf32 are refused
+        with a reason, fp16 / bf16 still pack."""
+        specs = (
+            (cdg.DirectDepthwiseSpec, cdg.is_valid_depthwise_spec, {}),
+            (cdg.DirectDepthwiseTiledSpec, cdg.is_valid_depthwise_tiled_spec, {}),
+            (
+                cdg.DirectDepthwiseDgradStreamSpec,
+                cdg.is_valid_depthwise_dgrad_stream_spec,
+                {},
+            ),
+        )
+        for cls, valid, kw in specs:
+            for dtype in ("fp32", "tf32", "fp16", "bf16"):
+                with self.subTest(spec=cls.__name__, dtype=dtype):
+                    spec = cls(problem=_dw(dtype=dtype), cpl=2, **kw)
+                    ok, why = valid(spec, arch="gfx950")
+                    if dtype in ("fp32", "tf32"):
+                        self.assertFalse(ok)
+                        self.assertIn("cpl=1", why)
+                    else:
+                        self.assertTrue(ok, why)
 
     def test_rejections(self):
         """Unknown dtypes are rejected with a reason naming the dtype."""
@@ -444,8 +480,14 @@ _GPU_SKIP = (
 @unittest.skipIf(bool(_GPU_SKIP), _GPU_SKIP)
 class TestGpuCorrectness(unittest.TestCase):
     def setUp(self):
-        torch.backends.cudnn.allow_tf32 = False
-        torch.backends.cuda.matmul.allow_tf32 = False
+        import contextlib
+
+        from builders.common.conv_reference import ieee_fp32
+
+        # IEEE fp32 references for the whole test, restored afterwards.
+        pin = contextlib.ExitStack()
+        pin.enter_context(ieee_fp32())
+        self.addCleanup(pin.close)
         torch.manual_seed(0)
 
     def test_scalar_variants(self):

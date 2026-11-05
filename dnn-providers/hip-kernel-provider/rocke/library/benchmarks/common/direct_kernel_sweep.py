@@ -137,14 +137,17 @@ from kernels.conv.direct_variants import (  # noqa: F401 (make_spec, validate_sp
 # it differently: gfx942 encodes XF32 natively (operands truncated to a 10-bit
 # mantissa), gfx950 emulates it with three bf16 MFMAs over the full fp32
 # payload, about as accurate as fp32. 1e-4 on the emulated path still fails a
-# dropped cross term or a single bf16 pass. The scalar-FMA kernels run a tf32
-# problem in fp32 and clear either bound.
+# dropped cross term or a single bf16 pass. Truncating both operands loses up
+# to 2^-9 of every product, and same-sign products keep that loss in the sum
+# (four products of 0x3f001fff: 1.0 against 1.00195), so the native bound is
+# twice that, 2^-8; uniform(-1, 1) data lands near 8e-4. The scalar-FMA
+# kernels run a tf32 problem in fp32 and clear either bound.
 DIRECT_VERIFY_TOL = {
     "fp16": 5e-2,
     "bf16": 5e-2,
     "fp32": 1e-4,
     "tf32_emulated": 1e-4,
-    "tf32_native": 1e-3,
+    "tf32_native": 2**-8,
 }
 
 
@@ -497,6 +500,17 @@ def _conv_step(identity, hsaco_path, meta, spec, problem, direction, buffers):
     )
 
 
+def _image_bytes(problem) -> Tuple[int, int]:
+    """Bytes of one image of ``problem``'s activation and of its output, in
+    the storage type (fp32 for an fp32 or tf32 problem)."""
+    from kernels.common.conv_direct_grouped import _elem_bytes
+
+    eb = _elem_bytes(getattr(problem, "dtype", DIRECT_DTYPE))
+    in_img = eb * problem.H * problem.W * problem.total_c
+    out_img = eb * problem.Ho * problem.Wo * problem.total_k
+    return in_img, out_img
+
+
 def _batch_chunks(problem) -> Optional[List[int]]:
     """Images per launch for a forward problem the LDS-halo kernels can only
     run in pieces, or None when one launch serves it.
@@ -509,8 +523,7 @@ def _batch_chunks(problem) -> Optional[List[int]]:
     """
     from kernels.common.conv_direct_nongrouped import _OOB_BASE
 
-    in_img = 2 * problem.H * problem.W * problem.total_c
-    out_img = 2 * problem.Ho * problem.Wo * problem.total_k
+    in_img, out_img = _image_bytes(problem)
     per_launch = _OOB_BASE // max(in_img, out_img)
     if problem.N <= per_launch or per_launch < 1:
         return None
@@ -716,8 +729,7 @@ def _batch_split_plan(
     )
     if knobs["tile_w"] not in widths:
         return None, f"tile_w={knobs['tile_w']} does not fit Wo={problem.Wo}"
-    in_img = 2 * problem.H * problem.W * problem.total_c
-    out_img = 2 * problem.Ho * problem.Wo * problem.total_k
+    in_img, out_img = _image_bytes(problem)
     steps = []
     n0 = 0
     for n in chunks:

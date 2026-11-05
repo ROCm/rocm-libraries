@@ -2025,15 +2025,9 @@ class TestConvDgradTf32(unittest.TestCase):
         W = _tf32_reference_inputs(W, ARCH)
         # Pin the reference to IEEE fp32: torch 2.10 defaults convolutions to
         # TF32 where the backend has it.
-        prev = (
-            torch.backends.cudnn.allow_tf32,
-            torch.backends.cudnn.conv.fp32_precision,
-            torch.backends.fp32_precision,
-        )
-        torch.backends.cudnn.allow_tf32 = False
-        torch.backends.cudnn.conv.fp32_precision = "ieee"
-        torch.backends.fp32_precision = "ieee"
-        try:
+        from builders.common.conv_reference import ieee_fp32
+
+        with ieee_fp32():
             ref = torch.nn.grad.conv2d_input(
                 (p.N, p.C, p.Hi, p.Wi),
                 W.permute(0, 3, 1, 2),
@@ -2042,12 +2036,6 @@ class TestConvDgradTf32(unittest.TestCase):
                 padding=1,
                 groups=groups,
             ).permute(0, 2, 3, 1)
-        finally:
-            (
-                torch.backends.cudnn.allow_tf32,
-                torch.backends.cudnn.conv.fp32_precision,
-                torch.backends.fp32_precision,
-            ) = prev
         self.assertEqual(tuple(got.shape), tuple(ref.shape))
         self.assertFalse(torch.isnan(got).any(), "dX contains NaN")
         rel = (got - ref).abs().max().item() / ref.abs().max().item()

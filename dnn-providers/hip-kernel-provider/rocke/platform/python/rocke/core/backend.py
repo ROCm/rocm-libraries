@@ -1932,21 +1932,24 @@ def lower_conv_implicit_gemm(
     # one: ``cpp`` lowers through Python (a loud, recorded fallback, as for any
     # kernel the engine cannot serve) and ``both``, which never falls back,
     # reports the known gap instead of comparing two different kernels.
+    # ``python`` never needs the engine, so it returns before the import.
     data = getattr(spec, "data", None)
     if getattr(data, "mma_dtype", None) is not None:
+        chosen = resolve_backend(backend)
+        if chosen == BACKEND_PYTHON:
+            ll, ir = py_fn(want_ir)
+            return GemmLowerResult(BACKEND_PYTHON, ll, ir)
         reason = (
             f"the C++ conv_implicit_gemm builder has no mma_dtype="
             f"{data.mma_dtype!r} path"
         )
-        chosen = resolve_backend(backend)
         if chosen == BACKEND_CPP:
             if _cpp_strict():
                 raise BackendError(reason)
             _record_fallback(_name_of(spec), reason)
             ll, ir = py_fn(want_ir)
             return GemmLowerResult(BACKEND_PYTHON, ll, ir)
-        if chosen != BACKEND_PYTHON:
-            raise BackendCoverageGap(reason)
+        raise BackendCoverageGap(reason)
 
     eng = _import_engine()
     sd = conv_implicit_gemm_spec_to_dict(spec)
