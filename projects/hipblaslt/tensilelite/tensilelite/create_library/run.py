@@ -1659,7 +1659,7 @@ def _buildGroupsSeparately(groups: List[List[str]], requestedJobs: int) -> None:
 
 
 @profile
-def run():
+def main():
     start = timer()
     print1("")
     print1(HR)

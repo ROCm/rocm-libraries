@@ -68,11 +68,6 @@ from toolchain_test_helpers import (
 
 pytestmark = pytest.mark.unit
 
-# `tensilelite.create_library` re-exports its `run` function, which shadows the
-# `run` submodule as a package attribute. `from tensilelite.create_library import run`
-# and `import tensilelite.create_library.run as ...` therefore bind the function, not
-# the module, so the tests below load the module through importlib.
-
 # The `codegen_harness` helper (shared by the characterization codegen suites)
 # lives in a sibling directory that is not on sys.path for this test root, so the
 # codegen test adds it lazily inside `_emit` below.
@@ -1591,7 +1586,7 @@ def _logicFileName(architectureName, scheduleName, tag=""):
 
 
 def _run_createlibrary(monkeypatch, tmp_path, arch, logicFiles=(), buildGfx1250v0=False):
-    """Drives ``TensileCreateLibrary.run()`` for one requested architecture with
+    """Drives ``create_library.run.main()`` for one requested architecture with
     every expensive step stubbed. ``logicFiles`` writes minimal logic files
     (arch name, schedule name) into the logic dir; the real glob and filter run,
     so the selection observed is the production wiring's.
@@ -1603,7 +1598,7 @@ def _run_createlibrary(monkeypatch, tmp_path, arch, logicFiles=(), buildGfx1250v
     """
     from unittest.mock import MagicMock
 
-    RunModule = importlib.import_module("tensilelite.create_library.run")
+    import tensilelite.create_library.run as RunModule
 
     logic_dir = tmp_path / "logic"
     logic_dir.mkdir()
@@ -1697,7 +1692,7 @@ def _run_createlibrary(monkeypatch, tmp_path, arch, logicFiles=(), buildGfx1250v
     )
 
     try:
-        RunModule.run()
+        RunModule.main()
     except _Stop:
         pass
 
@@ -1965,7 +1960,7 @@ def _generateLogicData(monkeypatch, *architectureNames):
     from unittest.mock import MagicMock
 
     import tensilelite.LibraryIO as LibraryIO
-    RunModule = importlib.import_module("tensilelite.create_library.run")
+    import tensilelite.create_library.run as RunModule
 
     libraries = {}
     parsed = []
@@ -2294,7 +2289,7 @@ def test_a_fanned_out_child_leaves_its_siblings_scratch_alone(monkeypatch, tmp_p
     """The whole reason the children are marked: a sibling group is assembling
     into the same parent right now, and kernel basenames come from the ISA, so
     taking the parent would delete files a live build is still writing."""
-    Run = importlib.import_module("tensilelite.create_library.run")
+    from tensilelite.create_library import run as Run
 
     mine, sibling = _scratch_tree(tmp_path, [GFX1250_STRICT])
     monkeypatch.setenv(Run._GROUP_BUILD_ENV, "1")
@@ -2309,7 +2304,7 @@ def test_a_fanned_out_child_leaves_its_siblings_scratch_alone(monkeypatch, tmp_p
 def test_the_last_child_out_takes_the_shared_parent(monkeypatch, tmp_path):
     """Left behind by every child that is not last, the parent would otherwise
     survive every fan-out as an empty directory in the output tree."""
-    Run = importlib.import_module("tensilelite.create_library.run")
+    from tensilelite.create_library import run as Run
 
     mine, sibling = _scratch_tree(tmp_path, [GFX1250_STRICT])
     shutil.rmtree(sibling)
@@ -2561,7 +2556,7 @@ def _spawnedCommands(monkeypatch, groups, argv=PARENT_ARGV, requestedJobs=-1):
     ``requestedJobs`` is the parsed ``CpuThreads``; -1 is its default, meaning
     "every CPU".
     """
-    Run = importlib.import_module("tensilelite.create_library.run")
+    from tensilelite.create_library import run as Run
 
     spawned = []
 
@@ -2678,7 +2673,7 @@ def test_children_are_told_they_share_a_scratch_parent(monkeypatch):
     child may take only its own subdirectory, because a sibling is writing into
     the same parent. Every other run reclaims the whole tree, so the children
     have to be marked or a fan-out would delete a live sibling's scratch."""
-    Run = importlib.import_module("tensilelite.create_library.run")
+    from tensilelite.create_library import run as Run
 
     spawned = _spawnedCommands(monkeypatch, [[GFX1250], [GFX1250_STRICT]])
 
@@ -2689,7 +2684,7 @@ def test_children_are_told_they_share_a_scratch_parent(monkeypatch):
 def test_a_failed_group_is_not_swallowed(monkeypatch):
     """A group that fails while the other succeeds has to fail the run: a zero
     exit here lets the build be stamped with one stepping's library missing."""
-    Run = importlib.import_module("tensilelite.create_library.run")
+    from tensilelite.create_library import run as Run
 
     class _Proc:
         def __init__(self, rc):
@@ -2739,7 +2734,7 @@ def test_windows_caps_the_thread_count_it_shares_out(monkeypatch):
     """The count is split among the groups, so it has to start from what this
     process could actually wait on. The Windows scheduler bounds that at 61
     handles, which CPUThreadCount already respects."""
-    Run = importlib.import_module("tensilelite.create_library.run")
+    from tensilelite.create_library import run as Run
 
     monkeypatch.setattr(Run.os, "name", "nt")
     monkeypatch.setattr(Run.os, "cpu_count", lambda: 128)
@@ -2751,7 +2746,7 @@ def test_a_child_still_running_is_stopped_when_a_spawn_fails(monkeypatch):
     """A spawn can fail for reasons that have nothing to do with the build (fork
     under memory pressure). The groups already started would otherwise keep
     writing into the output directory after the parent has given up."""
-    Run = importlib.import_module("tensilelite.create_library.run")
+    from tensilelite.create_library import run as Run
 
     terminated = []
 
@@ -2816,7 +2811,7 @@ def _run_createlibrary_to_writes(
     """
     from unittest.mock import MagicMock
 
-    RunModule = importlib.import_module("tensilelite.create_library.run")
+    import tensilelite.create_library.run as RunModule
 
     logic_dir = tmp_path / "logic"
     logic_dir.mkdir(exist_ok=True)
@@ -2899,7 +2894,7 @@ def _run_createlibrary_to_writes(
     monkeypatch.setattr(RunModule, "state", lambda x: x)
     monkeypatch.setattr(RunModule.LibraryIO, "write", _capture_write)
 
-    RunModule.run()
+    RunModule.main()
     return captured
 
 
@@ -2962,7 +2957,7 @@ def test_strict_build_hands_its_own_name_to_the_code_object_builders(
     command line verbatim and reads it back off the bundler's targets."""
     from unittest.mock import MagicMock
 
-    RunModule = importlib.import_module("tensilelite.create_library.run")
+    import tensilelite.create_library.run as RunModule
 
     seen = {}
     srcSignature = inspect.signature(RunModule.buildSourceCodeObjectFiles)
@@ -3071,7 +3066,7 @@ def test_a_fanned_out_build_clears_only_its_own_scratch(
     """End to end, through run() rather than the cleanup alone: this is the case
     where a sibling process is writing into the same parent, and a build that
     reclaimed the parent would delete the other stepping's kernels mid-build."""
-    Run = importlib.import_module("tensilelite.create_library.run")
+    from tensilelite.create_library import run as Run
 
     sibling = Run.buildTmpRoot(tmp_path / "out") / "OUT"
     sibling.mkdir(parents=True)
@@ -3707,7 +3702,7 @@ def test_gfx1250v0_parses_strict_logic_under_the_gfx1250_name(
 ):
     from unittest.mock import MagicMock
 
-    RunModule = importlib.import_module("tensilelite.create_library.run")
+    import tensilelite.create_library.run as RunModule
     from tensilelite import LibraryIO
     from tensilelite.SolutionStructs.Problem import ProblemType
 

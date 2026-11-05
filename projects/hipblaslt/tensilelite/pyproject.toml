@@ -92,7 +92,7 @@ dependencies = [
 
 [project.scripts]
 Tensile = "tensilelite.tensilelite:main"
-TensileCreateLibrary = "tensilelite.create_library:run"
+TensileCreateLibrary = "tensilelite.create_library:main"
 TensileVerifyStinkyElfText = "tensilelite.verify_stinky_comment_vs_elf_text:main"
 TensileGetPath = "tensilelite:PrintTensileRoot"
 TensileBenchmarkCluster = "tensilelite.benchmark_cluster:main"

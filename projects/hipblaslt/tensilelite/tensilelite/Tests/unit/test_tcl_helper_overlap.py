@@ -2,13 +2,12 @@
 # SPDX-License-Identifier: MIT
 """Unit tests for compiling the helper kernels (Kernels.cpp) while
 TensileCreateLibrary generates the assembly kernels."""
-import importlib
 import threading
 from unittest.mock import MagicMock
 
 import pytest
 
-Run = importlib.import_module("tensilelite.create_library.run")
+import tensilelite.create_library.run as Run
 
 pytestmark = pytest.mark.unit
 
