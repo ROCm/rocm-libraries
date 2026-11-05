@@ -32,6 +32,8 @@
 #include "rocsparse_singularity.hpp"
 #include "rocsparse_utility.hpp"
 
+#if defined(ROCSPARSE_WITH_SPTRSV_CSC)
+
 #include "cscsv_device.h"
 
 #include <map>
@@ -285,6 +287,8 @@ namespace rocsparse
     }
 }
 
+#endif
+
 rocsparse_status rocsparse::cscsv_solve(rocsparse_handle            handle,
                                         rocsparse_operation         trans,
                                         rocsparse_datatype          alpha_datatype,
@@ -299,6 +303,7 @@ rocsparse_status rocsparse::cscsv_solve(rocsparse_handle            handle,
                                         void*                       buffer)
 {
     ROCSPARSE_ROUTINE_TRACE;
+#if defined(ROCSPARSE_WITH_SPTRSV_CSC)
     if(trans == rocsparse_operation_none)
     {
         hipStream_t               stream      = handle->stream;
@@ -390,6 +395,7 @@ rocsparse_status rocsparse::cscsv_solve(rocsparse_handle            handle,
                          descr->diag_type));
         return rocsparse_status_success;
     }
+#endif
     _rocsparse_mat_descr   descr_csr;
     _rocsparse_spmat_descr mat_csr;
     rocsparse::build_csr_from_csc(*A, mat_csr, descr_csr);
@@ -423,6 +429,7 @@ rocsparse_status rocsparse::cscsv_diagonal_solve(rocsparse_handle            han
                                                  rocsparse_cscsv_info        info)
 {
     ROCSPARSE_ROUTINE_TRACE;
+#if defined(ROCSPARSE_WITH_SPTRSV_CSC)
     if(trans == rocsparse_operation_none)
     {
         const int64_t batch_count = y->batch_count;
@@ -468,6 +475,7 @@ rocsparse_status rocsparse::cscsv_diagonal_solve(rocsparse_handle            han
                                       handle->pointer_mode == rocsparse_pointer_mode_host));
         return rocsparse_status_success;
     }
+#endif
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::diagonal_solve_csc(handle,
                                                             trans,
                                                             modifier,
@@ -498,6 +506,7 @@ rocsparse_status rocsparse::cscsv_zero_pivot(rocsparse_handle     handle,
     {
         return rocsparse::csrsv_zero_pivot(handle, nullptr, indextype, position);
     }
+#if defined(ROCSPARSE_WITH_SPTRSV_CSC)
     if(info->get_csrsv_info() == nullptr)
     {
         RETURN_IF_ROCSPARSE_ERROR(
@@ -532,5 +541,6 @@ rocsparse_status rocsparse::cscsv_zero_pivot(rocsparse_handle     handle,
         }
         return (p != -1) ? rocsparse_status_zero_pivot : rocsparse_status_success;
     }
+#endif
     return rocsparse::csrsv_zero_pivot(handle, info->get_csrsv_info(), indextype, position);
 }

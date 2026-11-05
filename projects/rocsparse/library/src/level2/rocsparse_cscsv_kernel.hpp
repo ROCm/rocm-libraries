@@ -26,6 +26,7 @@
 
 #include "rocsparse_handle.hpp"
 
+#if defined(ROCSPARSE_WITH_SPTRSV_CSC)
 namespace rocsparse
 {
     static constexpr uint32_t s_cscsv_blocksize          = 256;
@@ -99,3 +100,4 @@ namespace rocsparse
     uint32_t cscsv_num_lanes(int64_t max_nnz, uint32_t wavefront_size);
 
 }
+#endif
