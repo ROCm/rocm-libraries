@@ -97,11 +97,13 @@ extern "C" {
  *    at its end, which changes its size; rocke_direct_conv_problem_total_c /
  *    _total_k return long long (they returned int), which changes their
  *    signature.
- * 9: rocke_gemm_trait_spec_t gained the gfx1250 TDM and K-loop fields (tdm,
- *    tdm_depth, ab_load_elem_bytes and its _set flag, split_barrier,
- *    tdm_alternate_issuers, tdm_early_refill), which changes its size and the
- *    layout of every GEMM spec that embeds it. */
-#define ROCKE_ABI_VERSION 9
+ * 9: rocke_block_scale_gemm_spec_t lost per_input_row at its end, which
+ *    changes its size.
+ * 10: rocke_gemm_trait_spec_t gained the gfx1250 TDM and K-loop fields (tdm,
+ *     tdm_depth, ab_load_elem_bytes and its _set flag, split_barrier,
+ *     tdm_alternate_issuers, tdm_early_refill), which changes its size and the
+ *     layout of every GEMM spec that embeds it. */
+#define ROCKE_ABI_VERSION 10
 
 /* Wire ABI: the CBOR recipe/bundle/guard vocabulary this engine understands.
  * 2: list-tagged ("l") kernel attrs such as cluster_dims; level-1 engines drop them.
