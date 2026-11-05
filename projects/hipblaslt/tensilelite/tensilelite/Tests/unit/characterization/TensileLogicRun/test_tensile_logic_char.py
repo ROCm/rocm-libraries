@@ -71,4 +71,4 @@ def test_progress_loop_stops(capsys):
 # ---------------------------------------------------------------------------
 def test_create_library_main_import():
     mod = importlib.import_module("tensilelite.create_library.__main__")
-    assert hasattr(mod, "run")
+    assert hasattr(mod, "main")

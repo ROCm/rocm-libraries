@@ -41,4 +41,4 @@ except ImportError:
 # Main
 ################################################################################
 if __name__ == "__main__":
-    create_library.run()
+    create_library.main()

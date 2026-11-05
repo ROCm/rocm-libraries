@@ -1,7 +1,6 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-import importlib
 from copy import deepcopy
 from types import SimpleNamespace
 
@@ -155,7 +154,7 @@ def test_wgmxcc_names_follow_codegen_categories():
 
 
 def test_distinct_compile_keys_cannot_share_an_artifact(monkeypatch):
-    run = importlib.import_module("tensilelite.create_library.run")
+    import tensilelite.create_library.run as run
 
     kernels = [_kernel(), _kernel()]
     kernels[1]["ISA"] = (9, 4, 2)

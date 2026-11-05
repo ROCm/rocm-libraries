@@ -2,7 +2,6 @@
 # SPDX-License-Identifier: MIT
 
 import copy
-import importlib
 from unittest.mock import MagicMock
 
 import pytest
@@ -51,7 +50,7 @@ def test_disabled_build_drops_fused_logic_and_reports_it(
     still passed as a successful build.
     """
     import tensilelite.LibraryIO as LibraryIO
-    RunModule = importlib.import_module("tensilelite.create_library.run")
+    import tensilelite.create_library.run as RunModule
 
     parsed = [
         LibraryIO.LibraryLogic(
