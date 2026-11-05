@@ -78,6 +78,7 @@ public:
     void                                       clear_bsrilu0_info();
     void                                       clear_bsric0_info();
     void                                       clear_ellsv_info();
+    void                                       clear_cscsv_info();
 
     rocsparse_bsric0_info  get_bsric0_info();
     rocsparse::trm_info_t* get_bsric0_info(rocsparse_operation operation,
@@ -142,6 +143,7 @@ public:
                                           rocsparse_fill_mode    fill_mode,
                                           rocsparse::trm_info_t* trm_info);
 
+    rocsparse_cscsv_info   get_cscsv_info();
     rocsparse_ellsv_info   get_ellsv_info();
     rocsparse::trm_info_t* get_ellsv_info(rocsparse_operation operation,
                                           rocsparse_fill_mode fill_mode);

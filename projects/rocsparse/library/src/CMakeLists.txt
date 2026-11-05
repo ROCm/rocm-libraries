@@ -139,6 +139,9 @@ set(rocsparse_source
   src/level2/rocsparse_sellmv_impl.cpp
   src/level2/rocsparse_sellmv.cpp
   #
+  src/level2/rocsparse_cscsv_analysis.cpp
+  src/level2/rocsparse_cscsv_buffer_size.cpp
+  src/level2/rocsparse_cscsv_solve.cpp
   src/level2/rocsparse_csrsv.cpp
   src/level2/rocsparse_csrsv_buffer_size.cpp
   src/level2/rocsparse_xcsrsv_buffer_size.cpp
