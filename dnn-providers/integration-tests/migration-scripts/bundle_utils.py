@@ -12,6 +12,7 @@ template expansion, and case-id derivation logic.
 import copy
 import hashlib
 import json
+import math
 from collections import defaultdict
 from pathlib import Path, PurePosixPath
 
@@ -636,6 +637,371 @@ def _resolve(path, case_values, tensor_uid):
 def canon(obj):
     """Canonical JSON string for comparison."""
     return json.dumps(obj, sort_keys=True, separators=(",", ":"))
+
+
+# --------------------------------------------------------------------------
+# Sweep cases: tensor patches and absent tensors (mirror the C++ sweep loader)
+# --------------------------------------------------------------------------
+
+# Sweep case key: the template tensor uids the case's graph does not have.
+ABSENT_TENSORS_KEY = "absent_tensors"
+
+# Sweep case key: per-tensor field edits applied after placeholder expansion.
+TENSOR_PATCHES_KEY = "tensor_patches"
+
+# Sweep version that a sweep with a case with absent tensors must declare.
+ABSENT_TENSORS_SWEEP_VERSION = 2
+
+# Case metadata format_version that a case with absent tensors must declare.
+ABSENT_TENSORS_FORMAT_VERSION = 2
+
+_INT64_BOUND = 2**63
+
+
+def is_node_port_key(key) -> bool:
+    """True for a key that ends in ``_tensor_uid``: a node port under inputs or outputs."""
+    return isinstance(key, str) and key.endswith("_tensor_uid")
+
+
+def uid_of(value):
+    """The uid a JSON value holds: an int, or a float with an integral value; else None."""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if (
+        isinstance(value, float)
+        and math.isfinite(value)
+        and value == math.trunc(value)
+        and -_INT64_BOUND <= value < _INT64_BOUND
+    ):
+        return int(value)
+    return None
+
+
+def prune_absent_tensors(graph: dict, uids) -> dict:
+    """Copy of ``graph`` without the tensors in ``uids``; node ports that hold one become null.
+
+    Nothing else changes and no uid is renumbered (``pruneAbsentTensors`` in the
+    C++ loader).
+    """
+    absent = set(uids)
+    out = copy.deepcopy(graph)
+    if isinstance(out.get("tensors"), list):
+        out["tensors"] = [
+            t
+            for t in out["tensors"]
+            if not (isinstance(t, dict) and "uid" in t and uid_of(t["uid"]) in absent)
+        ]
+    if isinstance(out.get("nodes"), list):
+        for node in out["nodes"]:
+            if not isinstance(node, dict):
+                continue
+            for side in ("inputs", "outputs"):
+                ports = node.get(side)
+                if not isinstance(ports, dict):
+                    continue
+                for key, value in ports.items():
+                    if is_node_port_key(key) and uid_of(value) in absent:
+                        ports[key] = None
+    return out
+
+
+def _uid_references(value, uid, under_uid_key, path, found):
+    """Append the path of each value below ``value`` that holds ``uid`` under a ``*uid*`` key."""
+    if isinstance(value, dict):
+        for k, v in value.items():
+            _uid_references(v, uid, "uid" in k, f"{path}.{k}", found)
+    elif isinstance(value, list):
+        for i, v in enumerate(value):
+            _uid_references(v, uid, under_uid_key, f"{path}[{i}]", found)
+    elif under_uid_key and uid_of(value) == uid:
+        found.append(path)
+
+
+def _node_uid_use(template: dict, uid):
+    """(indices of nodes that hold ``uid`` in a node port, paths of every other node use)."""
+    port_nodes, other = set(), []
+    nodes = template.get("nodes")
+    if not isinstance(nodes, list):
+        return port_nodes, other
+    for index, node in enumerate(nodes):
+        node_path = f"nodes[{index}]"
+        if not isinstance(node, dict):
+            _uid_references(node, uid, False, node_path, other)
+            continue
+        for field, value in node.items():
+            field_path = f"{node_path}.{field}"
+            if field not in ("inputs", "outputs") or not isinstance(value, dict):
+                _uid_references(value, uid, "uid" in field, field_path, other)
+                continue
+            for port, held in value.items():
+                if is_node_port_key(port) and uid_of(held) == uid:
+                    port_nodes.add(index)
+                    continue
+                _uid_references(held, uid, "uid" in port, f"{field_path}.{port}", other)
+    return port_nodes, other
+
+
+def _other_uid_references(template: dict, uid) -> list:
+    """Paths outside the nodes that refer to ``uid``, other than a tensor's own ``uid`` key."""
+    found = []
+    for field, value in template.items():
+        if field == "nodes":
+            continue
+        if field != "tensors" or not isinstance(value, list):
+            _uid_references(value, uid, "uid" in field, field, found)
+            continue
+        for index, tensor in enumerate(value):
+            path = f"tensors[{index}]"
+            if not isinstance(tensor, dict):
+                _uid_references(tensor, uid, False, path, found)
+                continue
+            for key, held in tensor.items():
+                if key != "uid":
+                    _uid_references(held, uid, "uid" in key, f"{path}.{key}", found)
+    return found
+
+
+def absent_tensor_problems(template: dict, uids) -> list:
+    """Why the C++ loader refuses these template uids as absent tensors; empty when it accepts.
+
+    These are the template rules of ``prepareAbsentTensors``: each uid is a tensor
+    of the template and not virtual; every node port of the template holds a uid
+    or null; a node port of one node at most holds the uid, and nothing else
+    refers to it.
+    """
+    uids = list(uids)
+    problems = []
+    tensors = (
+        template.get("tensors") if isinstance(template.get("tensors"), list) else []
+    )
+    nodes = template.get("nodes") if isinstance(template.get("nodes"), list) else []
+    by_uid = {
+        uid_of(t.get("uid")): t
+        for t in tensors
+        if isinstance(t, dict) and uid_of(t.get("uid")) is not None
+    }
+    if len(set(uids)) != len(uids):
+        problems.append("a uid is named twice")
+    for uid in uids:
+        tensor = by_uid.get(uid)
+        if tensor is None:
+            problems.append(f"{uid} is not a tensor of the template")
+        elif "virtual" in tensor and tensor["virtual"] is not False:
+            problems.append(f"{uid} is virtual or has a virtual flag that is not false")
+    for index, node in enumerate(nodes):
+        for side in ("inputs", "outputs"):
+            ports = node.get(side) if isinstance(node, dict) else None
+            if not isinstance(ports, dict):
+                continue
+            for key, value in ports.items():
+                if (
+                    is_node_port_key(key)
+                    and value is not None
+                    and uid_of(value) is None
+                ):
+                    problems.append(
+                        f"nodes[{index}].{side}.{key} holds {json.dumps(value)},"
+                        " not a uid or null"
+                    )
+    for uid in uids:
+        port_nodes, other = _node_uid_use(template, uid)
+        if len(port_nodes) > 1:
+            problems.append(f"{uid} is held by node ports of more than one node")
+        if other:
+            problems.append(
+                f"{uid} is held by a node outside a node port, at {other[0]}"
+            )
+        refs = _other_uid_references(template, uid)
+        if refs:
+            problems.append(f"{uid} is referenced at {refs[0]}")
+    return problems
+
+
+def apply_tensor_patches(graph: dict, case: dict):
+    """Apply a sweep case's ``tensor_patches`` to an expanded graph, as the C++ loader does.
+
+    ``set`` upserts fields, then ``remove`` erases fields, of the tensor with the
+    patch uid. Raises ValueError for a patch without an integer uid or with a uid
+    that no tensor holds.
+    """
+    patches = case.get(TENSOR_PATCHES_KEY)
+    tensors = graph.get("tensors")
+    if not isinstance(patches, list) or not isinstance(tensors, list):
+        return
+    for patch in patches:
+        uid = patch.get("uid") if isinstance(patch, dict) else None
+        if isinstance(uid, bool) or not isinstance(uid, int):
+            raise ValueError("tensor_patch entry is missing an integer uid")
+        target = next(
+            (t for t in tensors if isinstance(t, dict) and t.get("uid") == uid), None
+        )
+        if target is None:
+            raise ValueError(f"tensor_patch uid {uid} not found in expanded graph")
+        if isinstance(patch.get("set"), dict):
+            target.update(patch["set"])
+        if isinstance(patch.get("remove"), list):
+            for key in patch["remove"]:
+                if isinstance(key, str):
+                    target.pop(key, None)
+
+
+def expand_case(template: dict, case: dict) -> dict:
+    """The graph a sweep case describes, built in the C++ loader's order.
+
+    The absent tensors leave a copy of the template first, then the placeholders
+    expand, then the tensor patches apply.
+    """
+    absent = case.get(ABSENT_TENSORS_KEY)
+    base = prune_absent_tensors(template, absent) if absent else template
+    graph = expand(base, case.get("values", {}))
+    apply_tensor_patches(graph, case)
+    return graph
+
+
+def uid_map_onto(graph: dict, template: dict):
+    """{graph uid: template uid} matched by tensor name, or None.
+
+    None when a tensor name of either side is not unique, or a tensor of the graph
+    has no tensor of the same name in the template.
+    """
+    g_names = [t.get("name") for t in graph.get("tensors", []) if "uid" in t]
+    t_names = [t.get("name") for t in template.get("tensors", []) if "uid" in t]
+    if len(set(g_names)) != len(g_names) or len(set(t_names)) != len(t_names):
+        return None
+    t_uid = {t.get("name"): t["uid"] for t in template.get("tensors", []) if "uid" in t}
+    out = {}
+    for t in graph.get("tensors", []):
+        if "uid" not in t:
+            continue
+        if t.get("name") not in t_uid:
+            return None
+        out[t["uid"]] = t_uid[t.get("name")]
+    return out
+
+
+def absent_by_name(case: dict, template: dict) -> list:
+    """Sorted names of the template tensors that a sweep case marks absent."""
+    absent = set(case.get(ABSENT_TENSORS_KEY) or [])
+    return sorted(
+        t.get("name", "")
+        for t in template.get("tensors", [])
+        if "uid" in t and t["uid"] in absent
+    )
+
+
+def absent_case_problems(sweep: dict, template: dict, case: dict) -> list:
+    """Why the C++ loader refuses a sweep case with absent tensors; empty when it accepts.
+
+    These are the absent-tensor rules of ``prepareAbsentTensors`` and
+    ``checkCaseDoesNotNameAbsentTensors`` (format_version, sweep version, the list,
+    the names of absent uids, golden data) and the template rules of
+    :func:`absent_tensor_problems`. The metadata parse itself is not checked. A
+    case without ``absent_tensors`` has none.
+    """
+    if ABSENT_TENSORS_KEY not in case:
+        return []
+    absent = case[ABSENT_TENSORS_KEY]
+    meta = case.get("metadata")
+    if not isinstance(meta, dict):
+        return ["absent_tensors needs case metadata with format_version 2"]
+    problems = []
+    fv = meta.get("format_version", 1)
+    if (
+        isinstance(fv, bool)
+        or not isinstance(fv, int)
+        or fv < ABSENT_TENSORS_FORMAT_VERSION
+    ):
+        problems.append("absent_tensors needs format_version 2")
+    version = sweep.get("version", 1)
+    if type(version) is not int or version != ABSENT_TENSORS_SWEEP_VERSION:
+        problems.append(
+            f"absent_tensors needs sweep version 2, not {sweep.get('version', 1)}"
+        )
+    if (
+        not isinstance(absent, list)
+        or not absent
+        or any(isinstance(u, bool) or not isinstance(u, int) for u in absent)
+    ):
+        return problems + ["absent_tensors must be a non-empty array of integer uids"]
+    problems += absent_tensor_problems(template, absent)
+    absent_set = set(absent)
+    values = case.get("values", {})
+    if isinstance(values, dict):
+        tensors = values.get("tensors", [])
+        if not isinstance(tensors, list):
+            problems.append("values.tensors must be an array")
+            tensors = []
+        for entry in tensors:
+            if isinstance(entry, dict) and uid_of(entry.get("uid")) in absent_set:
+                problems.append(f"{entry['uid']} has a values.tensors entry")
+        for field, value in values.items():
+            if field != "tensors" and isinstance(value, dict):
+                for uid in absent:
+                    if str(uid) in value:
+                        problems.append(
+                            f"{uid} is a key of the case value values.{field}"
+                        )
+    for patch in case.get(TENSOR_PATCHES_KEY) or []:
+        if isinstance(patch, dict) and uid_of(patch.get("uid")) in absent_set:
+            problems.append(f"{patch['uid']} has a tensor_patches entry")
+    for key in meta.get("inputs") or {}:
+        try:
+            uid = int(key)
+        except (TypeError, ValueError):
+            continue
+        if uid in absent_set:
+            problems.append(f"{key} has a metadata inputs entry")
+    for key, fields in (
+        ("aliases", ("uid", "of")),
+        ("start_offsets", ("uid",)),
+        ("live_rows", ("uid", "lengths", "like")),
+    ):
+        for entry in meta.get(key) or []:
+            for f in fields:
+                if isinstance(entry, dict) and uid_of(entry.get(f)) in absent_set:
+                    problems.append(f"{entry[f]} is named by a metadata {key} entry")
+    if case.get("golden") is not None:
+        problems.append("absent_tensors and golden data do not mix")
+    return problems
+
+
+def metadata_uid_names(meta: dict, graph: dict) -> dict:
+    """Every tensor uid that case metadata names, given as the tensor name.
+
+    Covers the ``inputs`` keys and the uid fields of ``aliases`` (``uid``, ``of``),
+    ``start_offsets`` (``uid``) and ``live_rows`` (``uid``, ``lengths``, ``like``).
+    A uid that names no tensor of ``graph`` is given as ``<uid N>``.
+    """
+    names = name_by_uid(graph)
+
+    def name(u):
+        uid = uid_of(u)
+        if uid is None:
+            try:
+                uid = int(u)
+            except (TypeError, ValueError):
+                return f"<not a uid {u!r}>"
+        return names.get(uid, f"<uid {uid}>")
+
+    out = {}
+    if isinstance(meta.get("inputs"), dict):
+        out["inputs"] = sorted(name(k) for k in meta["inputs"])
+    for key, fields in (
+        ("aliases", ("uid", "of")),
+        ("start_offsets", ("uid",)),
+        ("live_rows", ("uid", "lengths", "like")),
+    ):
+        entries = meta.get(key)
+        if not isinstance(entries, list):
+            continue
+        out[key] = [
+            {f: name(e[f]) for f in fields if f in e}
+            for e in entries
+            if isinstance(e, dict)
+        ]
+    return out
 
 
 # --------------------------------------------------------------------------

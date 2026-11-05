@@ -3233,6 +3233,456 @@ def test_default_mode_sweep_bytes_unchanged():
         print("  PASS: default_mode_sweep_bytes_unchanged")
 
 
+# --------------------------------------------------------------------------
+# Remove patches and superset templates with absent tensors
+# --------------------------------------------------------------------------
+
+_SUPERSET_FLAGS = _GROUPED_FLAGS + ("--superset-templates",)
+
+
+def _optional_graph(sink=True, stats=True, bias=False, seq=4, virtual_stats=False):
+    """A one-node graph with optional ports.
+
+    Inputs q, k, v and, when asked, a sink and a bias; outputs o and, when asked,
+    stats. An unused optional port holds null. The uids follow creation order,
+    which differs from sorted-name order.
+    """
+    names = ["q", "k", "v", "o"]
+    names += ["sink"] if sink else []
+    names += ["bias"] if bias else []
+    names += ["stats"] if stats else []
+    uid = {name: i for i, name in enumerate(names)}
+    node = {
+        "type": "OptAttributes",
+        "name": "opt",
+        "attributes": {"causal": False},
+        "inputs": {
+            "q_tensor_uid": uid["q"],
+            "k_tensor_uid": uid["k"],
+            "v_tensor_uid": uid["v"],
+            "sink_tensor_uid": uid.get("sink"),
+            "bias_tensor_uid": uid.get("bias"),
+        },
+        "outputs": {"o_tensor_uid": uid["o"], "stats_tensor_uid": uid.get("stats")},
+    }
+    tensors = []
+    for name in names:
+        dims = [1, 2, seq, 1] if name in ("sink", "stats") else [1, 2, seq, 8]
+        strides = [2 * seq * dims[3], seq * dims[3], dims[3], 1]
+        tensors.append(
+            {
+                "uid": uid[name],
+                "name": name,
+                "dims": dims,
+                "strides": strides,
+                "data_type": "float",
+                "virtual": virtual_stats and name == "stats",
+                "alignment": 16,
+                "is_runtime_pass_by_value": False,
+            }
+        )
+    return {
+        "nodes": [node],
+        "tensors": tensors,
+        "io_data_type": "float",
+        "compute_data_type": "float",
+        "intermediate_data_type": "float",
+        "name": "",
+    }
+
+
+def _optional_sidecar(graph, base_seed):
+    """A sidecar with a per-input seed for each input tensor of the graph."""
+    inputs = {
+        str(t["uid"]): {"seed": base_seed + i}
+        for i, t in enumerate(graph["tensors"])
+        if t["name"] not in ("o", "stats")
+    }
+    return {"format_version": 1, "seed": base_seed, "inputs": inputs}
+
+
+def _import_optional(tmp, bundle_dir, name, graph, sidecar, *flags):
+    graph_path = _capture(tmp / "capture", name, graph, sidecar)
+    return _import_capture(graph_path, bundle_dir, *flags)
+
+
+def _sweep_and_template(bundle_dir, rel):
+    sweep = _load_sweep(bundle_dir, rel)
+    with open(bundle_dir / rel / "graph.template.json") as f:
+        return sweep, json.load(f)
+
+
+def _assert_absent_case_loads(sweep, template, case):
+    """The case-side rules the C++ loader checks for a case with absent tensors."""
+    from bundle_utils import absent_case_problems, absent_tensor_problems
+
+    assert absent_case_problems(sweep, template, case) == [], case
+
+    absent = case["absent_tensors"]
+    assert sweep["version"] == 2, sweep["version"]
+    assert case["metadata"]["format_version"] == 2, case["metadata"]
+    assert not absent_tensor_problems(template, absent), absent
+    assert not {e["uid"] for e in case["values"].get("tensors", [])} & set(absent)
+    for field, value in case["values"].items():
+        if field != "tensors" and isinstance(value, dict):
+            assert not {str(u) for u in absent} & set(value), (field, value)
+    assert not {int(u) for u in case["metadata"].get("inputs", {})} & set(absent)
+    assert "golden" not in case and "tensor_patches" not in case, case
+
+
+def test_import_remove_patch_round_trip():
+    """A field the case's tensor lacks becomes a remove patch; a placeholder field does not."""
+    from bundle_utils import canon, canonical_uid_map_by_name, expand_case, remap_graph
+
+    sys.path.insert(0, str(SCRIPT_DIR.parent / "scripts"))
+    from support_matrix_units import apply_tensor_patches, expand_template_graph
+
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        bundle_dir = tmp / "bundles"
+        bundle_dir.mkdir()
+        g1 = _make_graph("Relu", [0, 1], [2, 3, 4, 5], [60, 20, 5, 1], "float")
+        for t in g1["tensors"]:
+            t["is_runtime_pass_by_value"] = False
+        g2 = _make_graph("Relu", [0, 1], [4, 6, 8, 10], [480, 80, 10, 1], "float")
+        g2["tensors"][0]["is_runtime_pass_by_value"] = False
+        assert _import(tmp, "g1", g1, bundle_dir).returncode == 0
+        r = _import(tmp, "g2", g2, bundle_dir)
+        assert r.returncode == 0 and "appended" in r.stderr, r.stderr
+        (rel,) = _sweep_dirs(bundle_dir)
+        sweep, template = _sweep_and_template(bundle_dir, rel)
+        first, second = sweep["cases"]
+        assert "tensor_patches" not in first, first
+        uid_map = canonical_uid_map_by_name(g2)
+        assert second["tensor_patches"] == [
+            {"uid": uid_map[1], "remove": ["is_runtime_pass_by_value"]}
+        ], second
+        want = canon(remap_graph(g2, uid_map))
+        assert canon(expand_case(template, second)) == want
+        mirrored = expand_template_graph(template, second)
+        apply_tensor_patches(mirrored, second)
+        assert canon(mirrored) == want, "the loader mirror disagrees"
+        r = _import(tmp, "g2again", g2, bundle_dir)
+        assert r.returncode == 0 and "DUPLICATE" in r.stderr, r.stderr
+
+        grouped_dir = tmp / "grouped"
+        grouped_dir.mkdir()
+        g3 = _grouped_graph(scale=0.5)
+        g4 = _grouped_graph(scale=0.5, dims=[1, 2, 3, 4])
+        del g4["tensors"][1]["alignment"]
+        r = _import(tmp, "g3", g3, grouped_dir, *_GROUPED_FLAGS)
+        assert r.returncode == 0, r.stderr
+        before = _inventory(grouped_dir)
+        r = _import(tmp, "g4", g4, grouped_dir, *_GROUPED_FLAGS, check=False)
+        _assert_refused(r, grouped_dir, before, "after extraction")
+        print("  PASS: import_remove_patch_round_trip")
+
+
+def test_superset_import_nested_cases():
+    """Cases whose tensor sets nest share one version 2 sweep and re-expand to their graphs."""
+    from bundle_utils import (
+        absent_by_name,
+        canon,
+        expand_case,
+        inputs_by_name,
+        remap_graph,
+        uid_map_onto,
+    )
+
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        bundle_dir = tmp / "bundles"
+        bundle_dir.mkdir()
+        graphs = [
+            ("full", _optional_graph(), []),
+            ("no_sink", _optional_graph(sink=False, seq=8), ["sink"]),
+            ("no_stats", _optional_graph(stats=False, seq=16), ["stats"]),
+        ]
+        sidecars = {}
+        for i, (name, graph, _) in enumerate(graphs):
+            sidecars[name] = _optional_sidecar(graph, 100 * (i + 1))
+            r = _import_optional(
+                tmp,
+                bundle_dir,
+                name,
+                graph,
+                sidecars[name],
+                *_SUPERSET_FLAGS,
+                "--topology",
+                "Opt",
+                "--case-id",
+                name,
+                "--strict",
+            )
+            assert r.returncode == 0, r.stderr
+            if i == 0:
+                assert _load_sweep(bundle_dir, "quick/GroupedOp/Opt")["version"] == 1
+        assert _sweep_dirs(bundle_dir) == ["quick/GroupedOp/Opt"]
+        sweep, template = _sweep_and_template(bundle_dir, "quick/GroupedOp/Opt")
+        assert sweep["version"] == 2, sweep
+        cases = {c["id"]: c for c in sweep["cases"]}
+        assert "absent_tensors" not in cases["full"], cases["full"]
+        assert cases["full"]["metadata"]["format_version"] == 1
+        for name, graph, absent_names in graphs:
+            case = cases[name]
+            assert absent_by_name(case, template) == absent_names, case
+            if absent_names:
+                _assert_absent_case_loads(sweep, template, case)
+            want = remap_graph(graph, uid_map_onto(graph, template))
+            assert canon(expand_case(template, case)) == canon(want), name
+            assert inputs_by_name(case["metadata"], template) == inputs_by_name(
+                sidecars[name], graph
+            ), name
+
+        before = _inventory(bundle_dir)
+        r = _import_optional(
+            tmp,
+            bundle_dir,
+            "no_sink_again",
+            graphs[1][1],
+            sidecars["no_sink"],
+            *_SUPERSET_FLAGS,
+        )
+        assert r.returncode == 0 and "DUPLICATE" in r.stderr, r.stderr
+        assert _inventory(bundle_dir) == before
+        print("  PASS: superset_import_nested_cases")
+
+
+def test_superset_import_needs_a_containing_template():
+    """A graph joins only a template that holds every tensor of it, by the loader's rules."""
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+
+        def tree(name, first, second, flags=_SUPERSET_FLAGS):
+            bundle_dir = tmp / name
+            bundle_dir.mkdir()
+            for i, graph in enumerate((first, second)):
+                r = _import(tmp, f"{name}{i}", graph, bundle_dir, *flags)
+                assert r.returncode == 0, r.stderr
+            return bundle_dir, r.stderr
+
+        bundle_dir, err = tree(
+            "other", _optional_graph(), _optional_graph(stats=False, bias=True)
+        )
+        assert len(_sweep_dirs(bundle_dir)) == 2 and "missed merge" not in err, err
+        for rel in _sweep_dirs(bundle_dir):
+            sweep = _load_sweep(bundle_dir, rel)
+            assert sweep["version"] == 1, sweep
+            assert not any("absent_tensors" in c for c in sweep["cases"]), sweep
+
+        bundle_dir, _ = tree(
+            "virtual", _optional_graph(virtual_stats=True), _optional_graph(stats=False)
+        )
+        assert len(_sweep_dirs(bundle_dir)) == 2, "a virtual tensor was made absent"
+
+        topo_dir = tmp / "topology"
+        topo_dir.mkdir()
+        for name, graph, topo in (
+            ("full", _optional_graph(), "Full"),
+            ("own", _optional_graph(sink=False), "Own"),
+            ("joins", _optional_graph(stats=False, seq=8), "Full"),
+            ("own_twin", _optional_graph(sink=False, seq=16), "Full"),
+        ):
+            r = _import(
+                tmp, f"t_{name}", graph, topo_dir, *_SUPERSET_FLAGS, "--topology", topo
+            )
+            assert r.returncode == 0, r.stderr
+            if name == "own":
+                assert "NOTE: the graph also fits" in r.stderr, r.stderr
+        assert _sweep_dirs(topo_dir) == ["quick/GroupedOp/Full", "quick/GroupedOp/Own"]
+        assert [
+            len(_load_sweep(topo_dir, rel)["cases"]) for rel in _sweep_dirs(topo_dir)
+        ] == [3, 1]
+
+        bundle_dir, _ = tree(
+            "unmarked",
+            _optional_graph(),
+            _optional_graph(sink=False),
+            flags=_GROUPED_FLAGS,
+        )
+        assert len(_sweep_dirs(bundle_dir)) == 2, "joined without --superset-templates"
+        print("  PASS: superset_import_needs_a_containing_template")
+
+
+def test_superset_import_order_of_smaller_cases():
+    """After the largest case, any order of the smaller cases gives the same template and cases."""
+    import itertools
+
+    smaller = [
+        ("no_sink", _optional_graph(sink=False, seq=8)),
+        ("no_stats", _optional_graph(stats=False, seq=16)),
+        ("neither", _optional_graph(sink=False, stats=False, seq=32)),
+    ]
+    results = []
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        for n, order in enumerate(itertools.permutations(smaller)):
+            bundle_dir = tmp / f"bundles{n}"
+            bundle_dir.mkdir()
+            for name, graph in (("full", _optional_graph()),) + order:
+                r = _import(
+                    tmp,
+                    f"{n}_{name}",
+                    graph,
+                    bundle_dir,
+                    *_SUPERSET_FLAGS,
+                    "--topology",
+                    "Opt",
+                    "--case-id",
+                    name,
+                    "--strict",
+                )
+                assert r.returncode == 0, r.stderr
+            rel = "quick/GroupedOp/Opt"
+            sweep = _load_sweep(bundle_dir, rel)
+            template = (bundle_dir / rel / "graph.template.json").read_bytes()
+            cases = {c["id"]: json.dumps(c, sort_keys=True) for c in sweep["cases"]}
+            results.append((template, cases, sweep["version"]))
+    assert len(results) == 6 and all(r == results[0] for r in results), "orders differ"
+    print("  PASS: superset_import_order_of_smaller_cases")
+
+
+def test_superset_import_reports_missed_merge():
+    """A larger case after a smaller one starts a superset and leaves the smaller sweep unchanged."""
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        bundle_dir = tmp / "bundles"
+        bundle_dir.mkdir()
+        r = _import(
+            tmp, "small", _optional_graph(sink=False), bundle_dir, *_SUPERSET_FLAGS
+        )
+        assert r.returncode == 0, r.stderr
+        (small_rel,) = _sweep_dirs(bundle_dir)
+        before = {
+            k: v
+            for k, v in _inventory(bundle_dir).items()
+            if Path(k).as_posix().startswith(small_rel)
+        }
+        r = _import(tmp, "large", _optional_graph(), bundle_dir, *_SUPERSET_FLAGS)
+        assert r.returncode == 0 and "created new bundle" in r.stderr, r.stderr
+        assert "missed merge" in r.stderr, r.stderr
+        assert str(bundle_dir / small_rel / "sweep.json") in r.stderr, r.stderr
+        after = _inventory(bundle_dir)
+        assert all(after[k] == v for k, v in before.items()), "smaller sweep changed"
+        assert len(_sweep_dirs(bundle_dir)) == 2
+        print("  PASS: superset_import_reports_missed_merge")
+
+
+def test_absent_case_problems_mirror_the_loader():
+    """absent_case_problems names each case rule of the C++ loader that a case breaks."""
+    from bundle_utils import absent_case_problems
+
+    template = {
+        "nodes": [
+            {
+                "type": "OptAttributes",
+                "inputs": {"q_tensor_uid": 0, "sink_tensor_uid": 1},
+                "outputs": {"o_tensor_uid": 2},
+            }
+        ],
+        "tensors": [
+            {"uid": 0, "name": "q", "virtual": False},
+            {"uid": 1, "name": "sink", "virtual": False},
+            {"uid": 2, "name": "o", "virtual": False},
+        ],
+    }
+    sweep = {"version": 2}
+    good = {
+        "id": "c",
+        "absent_tensors": [1],
+        "values": {"tensors": [{"uid": 0}, {"uid": 2}], "alignment": {"0": 16}},
+        "metadata": {"format_version": 2, "inputs": {"0": {"seed": 1}}},
+    }
+    assert absent_case_problems(sweep, template, good) == []
+    assert absent_case_problems(sweep, template, {"id": "full", "values": {}}) == []
+
+    def broken(**changes):
+        case = json.loads(json.dumps(good))
+        for key, value in changes.items():
+            case[key] = value
+        return absent_case_problems(sweep, template, case)
+
+    assert broken(absent_tensors=[]), "an empty list loads"
+    assert broken(absent_tensors=[1, 1]), "a repeated uid loads"
+    assert broken(absent_tensors=[7]), "a uid the template lacks loads"
+    assert broken(absent_tensors=[0]), "a uid held by two ports loads"
+    assert broken(values={"tensors": [{"uid": 1}]}), "a values.tensors entry loads"
+    assert broken(values={"alignment": {"1": 16}}), "a values.alignment key loads"
+    assert broken(tensor_patches=[{"uid": 1, "remove": ["x"]}])
+    assert broken(metadata={"format_version": 2, "inputs": {"1": {"seed": 3}}})
+    assert broken(metadata={"format_version": 2, "aliases": [{"uid": 0, "of": 1}]})
+    assert broken(metadata={"format_version": 1}), "format_version 1 loads"
+    assert broken(metadata=None), "no metadata loads"
+    assert broken(golden={"path": "g"}), "golden data loads"
+    assert absent_case_problems({"version": 1}, template, good), "sweep version 1 loads"
+    print("  PASS: absent_case_problems_mirror_the_loader")
+
+
+def test_import_refuses_metadata_uid_moves():
+    """A metadata uid that a uid remap would attach to another tensor fails the import."""
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        bundle_dir = tmp / "bundles"
+        bundle_dir.mkdir()
+        from bundle_utils import remap_graph
+
+        graph = _optional_graph(sink=False, stats=False)
+        graph = remap_graph(graph, {t["uid"]: t["uid"] + 10 for t in graph["tensors"]})
+        sidecar = {"format_version": 1, "seed": 1, "inputs": {"2": {"seed": 5}}}
+        before = _inventory(bundle_dir)
+        r = _import_optional(tmp, bundle_dir, "moved", graph, sidecar, *_GROUPED_FLAGS)
+        assert r.returncode == 1 and "moves a metadata uid" in r.stderr, r.stderr
+        assert _inventory(bundle_dir) == before
+
+        full = _optional_graph()
+        part = _optional_graph(stats=False, seq=8)
+        for g in (full, part):
+            for t in g["tensors"]:
+                if t["name"] == "stats":
+                    t["name"] = "z_stats"
+        assert _import(tmp, "full", full, bundle_dir, *_SUPERSET_FLAGS).returncode == 0
+        absent_uid = len(part["tensors"])
+        sidecar = {"format_version": 2, "inputs": {str(absent_uid): {"seed": 5}}}
+        before = _inventory(bundle_dir)
+        r = _import_optional(tmp, bundle_dir, "part", part, sidecar, *_SUPERSET_FLAGS)
+        assert r.returncode == 1 and "names absent tensors" in r.stderr, r.stderr
+        assert _inventory(bundle_dir) == before
+        print("  PASS: import_refuses_metadata_uid_moves")
+
+
+def test_superset_index_of_a_sweep_with_only_absent_cases():
+    """A sweep whose every case has absent tensors still stands for its whole template."""
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        bundle_dir = tmp / "bundles"
+        bundle_dir.mkdir()
+        for name, graph in (
+            ("full", _optional_graph()),
+            ("no_sink", _optional_graph(sink=False, seq=8)),
+        ):
+            r = _import(
+                tmp, name, graph, bundle_dir, *_SUPERSET_FLAGS, "--case-id", name
+            )
+            assert r.returncode == 0, r.stderr
+        (rel,) = _sweep_dirs(bundle_dir)
+        sweep = _load_sweep(bundle_dir, rel)
+        sweep["cases"] = [c for c in sweep["cases"] if c["id"] != "full"]
+        (bundle_dir / rel / "sweep.json").write_text(json.dumps(sweep, indent=2) + "\n")
+        for name, graph in (
+            ("no_sink_2", _optional_graph(sink=False, seq=16)),
+            ("full_2", _optional_graph(seq=16)),
+        ):
+            r = _import(
+                tmp, name, graph, bundle_dir, *_SUPERSET_FLAGS, "--case-id", name
+            )
+            assert r.returncode == 0 and "appended" in r.stderr, r.stderr
+        assert _sweep_dirs(bundle_dir) == [rel]
+        cases = {c["id"]: c for c in _load_sweep(bundle_dir, rel)["cases"]}
+        assert "absent_tensors" in cases["no_sink_2"], cases["no_sink_2"]
+        assert "absent_tensors" not in cases["full_2"], cases["full_2"]
+        print("  PASS: superset_index_of_a_sweep_with_only_absent_cases")
+
+
 def main() -> int:
     verbose = "-v" in sys.argv
     failures = 0
@@ -3290,6 +3740,14 @@ def main() -> int:
         test_retier_keeps_sweep_format,
         test_retier_refuses_mixed_sweep_formats,
         test_default_mode_sweep_bytes_unchanged,
+        test_import_remove_patch_round_trip,
+        test_superset_import_nested_cases,
+        test_superset_import_needs_a_containing_template,
+        test_superset_import_order_of_smaller_cases,
+        test_superset_import_reports_missed_merge,
+        test_absent_case_problems_mirror_the_loader,
+        test_import_refuses_metadata_uid_moves,
+        test_superset_index_of_a_sweep_with_only_absent_cases,
     ]
 
     for t in tests:

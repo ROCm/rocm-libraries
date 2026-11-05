@@ -141,7 +141,10 @@ python3 migration-scripts/import_graph.py \
     --bundle-dir integration-test-bundles/
 ```
 
-Dedup-aware placement. Default: skip exact duplicates. Metadata and the tier
+Dedup-aware placement. Default: skip exact duplicates. A case whose tensor
+lacks a field that the template's tensor has, where the template field is not a
+`${case.*}` placeholder, gets a `tensor_patches` entry that removes the field.
+Metadata and the tier
 come from the graph's `.meta.json` sidecar; an unusable sidecar fails the
 import. `--strict` (CI mode) also exits non-zero on a duplicate or on a
 `--seed`/`--meta`/`--tier` value that contradicts the sidecar. `--force`
@@ -172,6 +175,7 @@ python3 migration-scripts/import_graph.py \
 | `--skeleton-value-form` | The skeleton hash also records the value form of each tensor: a baked `value`, its `value_type`, and `is_runtime_pass_by_value`. Different forms never share a sweep. A new template replaces each baked `value` with `${case.value}`. |
 | `--only-op-dir` | Match only sweeps under `<bundle-dir>/<tier>/<op-dir>/`. A case never goes into another tier or another operation folder. |
 | `--require-marked-sweep` | Match only sweeps whose `import_mode` equals the `import_mode` of this run. The `format` key is not compared. |
+| `--superset-templates` | A graph that is the template of a sweep without some of its tensors joins that sweep (see below). |
 | `--case-id ID` | Use this case id. The import fails if the sweep already has it. |
 | `--sweep-format {pretty,compact}` | File layout of a new `sweep.json`. Grouped mode writes `compact` unless you give `--sweep-format pretty`. Use it only with another grouped-import flag. |
 
@@ -196,6 +200,34 @@ A run with only `--op-dir`, `--topology` or `--case-id` writes
 `retier_bundles.py` keeps the `import_mode` object of a sweep and writes the
 sweep in its layout. It refuses to put cases from sweeps with different
 `grouping` values, or with different layouts, into one sweep.
+
+#### Superset templates (`--superset-templates`)
+
+With this flag, a graph with no sweep of its own skeleton can join a sweep
+whose template holds every tensor of the graph, matched by tensor name, and
+some more. The template without those tensors must have the graph's skeleton,
+and the C++ loader must accept them as absent tensors (see [Optional tensors](../docs/file-formats.md#optional-tensors--absent_tensors)
+in the file-formats document). The smallest such template wins
+(ties: the sorted tensor names, then the path), and a template in the `--tier`
+wins over one in another tier. With `--topology`, only the sweep in that folder
+can take the graph. When it cannot, the graph starts a new sweep there if the
+folder is empty (the import prints a `NOTE` naming the other templates that
+fit), and the import fails if the folder holds another sweep or a sweep in
+another folder has the graph's own skeleton. The case gets:
+
+- `absent_tensors`: the template uids of the tensors the graph lacks;
+- the template's uids for its own tensors, in the graph and in the metadata
+  `inputs`; the import fails if this moves an `inputs`, `aliases`,
+  `start_offsets` or `live_rows` uid to another tensor, or names an absent tensor;
+- `format_version: 2` in its metadata; the sweep gets `version: 2`.
+
+The round-trip check prunes the absent tensors from the template first, then
+expands the placeholders, then applies `tensor_patches`, as the C++ loader
+does. A checked-in template is never rewritten: a new graph that holds the
+template of another sweep starts its own sweep, and, without `--topology`, the
+import prints `NOTE: missed merge` naming the other sweep. To get one sweep for a set of
+graphs, import the graph with the most tensors first. When the chosen template
+cannot reproduce the graph, the import fails; it does not try another template.
 
 ## Searching and Running Bundles
 
