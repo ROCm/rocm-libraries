@@ -14,9 +14,6 @@ import os
 
 import pytest
 
-from tensilelite.Common.Architectures import SUPPORTED_ISA
-from tensilelite.Common.Capabilities import makeIsaInfoMap
-from tensilelite.Toolchain.Validators import validateToolchain
 import tensilelite.LibraryIO as LibraryIO
 
 _DATA = os.path.join(os.path.dirname(__file__), "..", "_codegen", "data")
@@ -25,16 +22,6 @@ _LOGIC_FILES = {
     "gfx942_HSS": os.path.join(_DATA, "gfx942", "HSS_BH_Bias.yaml"),
     "gfx942_BBS": os.path.join(_DATA, "gfx942", "BBS_BH_Bias_Act.yaml"),
 }
-
-
-@pytest.fixture(scope="session")
-def _cxx():
-    return validateToolchain("amdclang++")
-
-
-@pytest.fixture(scope="session")
-def isa_info_map(_cxx):
-    return makeIsaInfoMap(SUPPORTED_ISA, _cxx)
 
 
 @pytest.fixture(scope="session")
