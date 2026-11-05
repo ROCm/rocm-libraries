@@ -361,6 +361,49 @@ class StreamK(TileProcessingStrategy):
     def staticPartition(self):
         return StaticPartition("PersistentIteration", "PersistentIterationEnd", "skGrid", "PersistentWorkGroupIndex")
 
+    def _contiguousQueueItem(self, writer, kernel, sWorkItemIdx):
+        """Renumber a popped work item so each per-XCD queue owns a contiguous
+        range of tiles, as the static WGMXCC remap does. Used by
+        DynamicWorkQueue and by the dynamic sub-mode of Hybrid.
+
+        Queue q pops i = cnt * numQueues + q; the tile decode reads the bijection
+        c = q * floor(T / numQueues) + min(q, T % numQueues) + cnt on [0, T)
+        (T = TotalItems). The pop, validity check and counter wrap keep i.
+        Emitted only for WorkGroupMappingXCC == -1; taken only when the static
+        remap would be the same (runtime WGMXCC == numQueues, chunk <= 1),
+        TotalItems <= the grid and there are no split tiles.
+        """
+        module = Module("StreamK contiguousQueueItem")
+        partition = self.queuePartition()
+        numQueues, mask, log2Queues, _ = Component.WorkAssignment.find(writer).queueConstants(writer, kernel)
+        if numQueues < 2 or kernel["WorkGroupMappingXCC"] != -1:
+            return module
+        skDone = Label(writer.labels.getNameInc("SK_ContiguousItemDone"), "")
+        sQ = writer.sgprPool.checkOut(1, "contiguousQ")
+        sTmp = writer.sgprPool.checkOut(1, "contiguousTmp")
+        # With more than one round or split tiles, the static remap walks
+        # tiles round by round, which the interleaved order already follows.
+        module.add(SCmpGtU32(src0=sgpr(partition.total_items), src1=sgpr(partition.grid), comment="more items than workgroups?"))
+        module.add(SCBranchSCC1(labelName=skDone.getLabelName(), comment="yes: keep the interleaved order"))
+        module.add(SCmpEQU32(src0=sgpr(self.splitTilesSgpr), src1=0, comment="whole tiles?"))
+        module.add(SCBranchSCC0(labelName=skDone.getLabelName(), comment="no: keep the interleaved order"))
+        # WGM bits: chunk [21:14], WGMXCC [13:10]. Mask chunk bit 0 so chunk 0 and 1 both match.
+        module.add(SAndB32(dst=sgpr(sTmp), src0=sgpr("WGM"), src1=hex(0x3FBC00), comment="WGMXCC, chunk > 1 bits"))
+        module.add(SCmpEQU32(src0=sgpr(sTmp), src1=hex(numQueues << 10), comment="static uses the contiguous remap?"))
+        module.add(SCBranchSCC0(labelName=skDone.getLabelName(), comment="no: keep the interleaved order"))
+        module.add(SAndB32(dst=sgpr(sQ), src0=sgpr(sWorkItemIdx), src1=hex(mask), comment="q = item % numQueues"))
+        module.add(SLShiftRightB32(dst=sgpr(sWorkItemIdx), src=sgpr(sWorkItemIdx), shiftHex=log2Queues, comment="cnt = item / numQueues"))
+        module.add(SLShiftRightB32(dst=sgpr(sTmp), src=sgpr(partition.total_items), shiftHex=log2Queues, comment="floor(T / numQueues)"))
+        module.add(SMulI32(dst=sgpr(sTmp), src0=sgpr(sQ), src1=sgpr(sTmp), comment="q * floor(T / numQueues)"))
+        module.add(SAddU32(dst=sgpr(sWorkItemIdx), src0=sgpr(sWorkItemIdx), src1=sgpr(sTmp), comment="cnt + q * floor(T / numQueues)"))
+        module.add(SAndB32(dst=sgpr(sTmp), src0=sgpr(partition.total_items), src1=hex(mask), comment="T % numQueues"))
+        module.add(SMinU32(dst=sgpr(sTmp), src0=sgpr(sTmp), src1=sgpr(sQ), comment="min(q, T % numQueues)"))
+        module.add(SAddU32(dst=sgpr(sWorkItemIdx), src0=sgpr(sWorkItemIdx), src1=sgpr(sTmp), comment="contiguous item of queue q"))
+        module.add(skDone)
+        for r in (sTmp, sQ):
+            writer.sgprPool.checkIn(r)
+        return module
+
     def persistentTileRegisters(self, kernel):
         peer = ["StreamKClusterPeer"] if isStreamKSpatialCluster(kernel) else []
         return list(self.tileWork(kernel).completion_identity) + ["StreamKLocalStart", "StreamKLocalEnd"] + peer
@@ -2263,6 +2306,10 @@ class StreamK(TileProcessingStrategy):
 
         return module
 
+    # Sgpr holding the number of split tiles on the dynamic path; set by the
+    # strategies that have one.
+    splitTilesSgpr = None
+
     def fixupStep(self, writer, kernel, vectorWidths, elements, edges, tmpVgpr, cvtVgprStruct, sPartialIdx):
         module = Module("StreamK Common fixupStep")
 
@@ -3350,6 +3397,8 @@ class StreamKTwoTileDPFirst(StreamK):
         return module
 
 class StreamKDynamic(StreamK):
+    splitTilesSgpr = "skTiles"
+
     def queuePartition(self):
         return QueuePartition("skGrid", "TotalItems", "AddressFlags", "StreamKTileIdx", "StreamKStickyEmpty")
 
@@ -3365,6 +3414,8 @@ class StreamKDynamic(StreamK):
         skFullTile = Label("SK_FullTile", "")
         skPartialTile = Label("SK_PartialTile", "")
         skDone = Label("SK_Done", "")
+
+        module.add(self._contiguousQueueItem(writer, kernel, sWorkItemIdx))
 
         # Check if work item is a full tile. The full-tile work-item count
         # spans all batches (as TotalItems does), so it must use the
@@ -3467,6 +3518,8 @@ class StreamKDynamic(StreamK):
         skFullTile = Label(writer.labels.getNameInc("SK_PAP_FullTile"), "")
         skPartialTile = Label(writer.labels.getNameInc("SK_PAP_PartialTile"), "")
         skDone = Label(writer.labels.getNameInc("SK_PAP_Done"), "")
+
+        module.add(self._contiguousQueueItem(writer, kernel, sWorkItemIdx))
 
         # Full-tile work-item count spans all batches (as TotalItems does).
         sFullTile = writer.sgprPool.checkOut(1, "papFullTile")
@@ -3708,6 +3761,8 @@ class StreamKDynamic(StreamK):
 
 
 class StreamKHybrid(StreamK):
+    splitTilesSgpr = "SKTiles"
+
     def queuePartition(self):
         return QueuePartition("SKGrid", "TotalItems", "AddressFlags", "StreamKTileIdx", "StreamKStickyEmpty", unique_labels=True)
 
@@ -3901,6 +3956,8 @@ class StreamKHybrid(StreamK):
         short-circuit are intentionally excluded (handled by the callers).
         """
         module = Module("StreamK Hybrid computeNextTileIdentity")
+
+        module.add(self._contiguousQueueItem(writer, kernel, sWorkItemIdx))
 
         skFullTile    = Label(writer.labels.getNameInc("SK_FullTile"), "")
         skPartialTile = Label(writer.labels.getNameInc("SK_PartialTile"), "")
