@@ -6,9 +6,7 @@
 #include <gtest/gtest.h>
 #include <hipblaslt/hostnumerics/HipblasltDataInitialization.hpp>
 #include <numeric>
-#ifdef _OPENMP
 #include <omp.h>
-#endif
 
 namespace hn     = roc::hostnumerics;
 namespace client = hipblaslt::hostnumerics;
@@ -129,14 +127,10 @@ TEST(HostUnitMafInitialization, SeedBatchTraversalAndThreadIndependence)
 {
     hn::Tensor batches(hn::ScalarType::Float64,
                        hn::Layout(hn::Shape{8192, 2, 2}, {1, 8192, 16384}, 0));
-#ifdef _OPENMP
-    const int previous = omp_get_max_threads();
+    const int  previous = omp_get_max_threads();
     omp_set_num_threads(1);
-#endif
     client::maf::fill(batches, client::maf::Mode::Maf2, 0);
-#ifdef _OPENMP
     omp_set_num_threads(8);
-#endif
     hn::Tensor separate(hn::ScalarType::Float64, hn::Layout(hn::Shape{8192, 2}, {2, 1}, 0));
     client::initializeMatrix(separate,
                              client::MatrixRole::A,
@@ -147,9 +141,7 @@ TEST(HostUnitMafInitialization, SeedBatchTraversalAndThreadIndependence)
                              false,
                              {},
                              1);
-#ifdef _OPENMP
     omp_set_num_threads(previous);
-#endif
     for(size_t j = 0; j < 2; ++j)
         for(size_t i = 0; i < 8192; ++i)
             EXPECT_EQ(separate.loadAs<double>({i, j}), batches.loadAs<double>({i, j, 1}));

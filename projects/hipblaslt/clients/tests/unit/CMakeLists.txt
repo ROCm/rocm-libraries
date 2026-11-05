@@ -21,8 +21,7 @@ set(HIPBLASLT_HOST_UNIT_TEST_SOURCES
 target_sources(hipblaslt-test PRIVATE ${HIPBLASLT_HOST_UNIT_TEST_SOURCES})
 
 # hip::device (not hip::host) is required for compilation as HIP; see
-# "Why hip::device" in README.md. This target does not use OpenMP directly, so
-# it is not linked here.
+# "Why hip::device" in README.md.
 add_executable(hipblaslt-test-hostunit ${HIPBLASLT_HOST_UNIT_TEST_SOURCES})
 
 # YAML conversion finds its script and template next to the executable.
@@ -41,6 +40,7 @@ target_link_libraries(hipblaslt-test-hostunit
         roc::tensilelite-host
         GTest::gtest
         GTest::gtest_main
+        OpenMP::OpenMP_CXX
 )
 
 target_compile_definitions(hipblaslt-test-hostunit PRIVATE GOOGLE_TEST)
