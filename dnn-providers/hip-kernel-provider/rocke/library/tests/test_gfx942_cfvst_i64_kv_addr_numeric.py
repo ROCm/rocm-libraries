@@ -68,8 +68,9 @@ def _gpu_ready() -> bool:
         return False
     if not torch.cuda.is_available():
         return False
-    name = torch.cuda.get_device_name(0).lower()
-    if not ("mi300" in name or "gfx942" in name):
+    from rocke.runtime.hip_module import get_device_arch
+
+    if get_device_arch() != "gfx942":
         return False
     free, _ = torch.cuda.mem_get_info()
     return free >= _GPU_BYTES_NEEDED
