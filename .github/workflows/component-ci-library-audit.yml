@@ -1,0 +1,74 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
+name: "Component CI: Library Audit"
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  linux:
+    name: Linux
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          # Full history is required so --changed-since can diff the base.
+          fetch-depth: 0
+          # Logic YAML is the corpus under test. library_audit is the checker
+          # and its unit tests. Common supplies TensileLite's solution defaults;
+          # cone mode also checks out sibling files such as ExecutionPolicy.py.
+          sparse-checkout: |
+            projects/hipblaslt/library/src/amd_detail/rocblaslt/src/Tensile/Logic
+            projects/hipblaslt/utilities/library_audit
+            projects/hipblaslt/tensilelite/tensilelite/Common
+          sparse-checkout-cone-mode: true
+
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.12"
+
+      - name: Install Python dependencies
+        run: python -m pip install --upgrade pip pyyaml pytest
+
+      - name: Run library audit unit tests
+        working-directory: projects/hipblaslt/utilities/library_audit
+        run: python -m pytest tests -q
+
+      - name: Audit changed logic libraries
+        run: |
+          set -euo pipefail
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            git fetch origin "${{ github.base_ref }}"
+            BASE="${{ github.event.pull_request.base.sha }}"
+          elif [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            git fetch origin develop
+            BASE="origin/develop"
+          else
+            BASE="${{ github.event.before }}"
+            if [[ -z "${BASE}" || "${BASE}" =~ ^0+$ ]]; then
+              BASE="HEAD^"
+            fi
+          fi
+          python3 projects/hipblaslt/utilities/library_audit/audit_hipblaslt_libraries.py \
+            --hipblaslt-path projects/hipblaslt \
+            --changed-since "${BASE}" \
+            --report-dir "${{ github.workspace }}/hipblaslt-logic-audit-reports" \
+            --no-cache \
+            --workers 16
+
+      - name: Upload audit reports
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: hipblaslt-logic-library-audit
+          path: hipblaslt-logic-audit-reports/audit.txt
+          if-no-files-found: ignore
