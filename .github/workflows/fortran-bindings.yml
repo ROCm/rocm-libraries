@@ -18,6 +18,11 @@ on:
         description: Generator library names, space-separated (e.g. "hipfft hipfftw")
         required: true
         type: string
+      deps:
+        description: Generator libraries whose modules the binding uses (rocsolver uses rocblas); generated for compiling only
+        required: false
+        type: string
+        default: ''
     secrets:
       # Only the schedule/workflow_dispatch path uses them, to open the PR.
       APP_ID:
@@ -86,6 +91,7 @@ jobs:
           ROCM_FORTRAN_STRICT: 1
           PROJECT: ${{ inputs.project }}
           LIBS: ${{ inputs.libs }}
+          DEPS: ${{ inputs.deps }}
         run: |
           # --overwrite copies the modules into bindings/fortran/<project>/, which
           # must exist; without it this is a pure header check.
@@ -95,7 +101,9 @@ jobs:
           else
             echo "::notice::No committed binding in bindings/fortran/${PROJECT}/ yet: header check only."
           fi
-          # shellcheck disable=SC2086 # LIBS is a space-separated list
+          # shellcheck disable=SC2086 # LIBS/DEPS are space-separated lists
+          if [ -n "${DEPS}" ]; then generator/gen.sh ${DEPS}; fi
+          # shellcheck disable=SC2086
           generator/gen.sh "${overwrite[@]}" ${LIBS}
 
       - name: Compile the binding with gfortran
