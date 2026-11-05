@@ -172,10 +172,6 @@ _CLUSTER_SIGNAL_ASM = (
     "s_barrier_signal -3"
 )
 _CLUSTER_WAIT_ASM = "s_barrier_wait -3"
-# $0 = this wave's SE/AID id word; bits 18:16 are the XCC.
-_AID_ID_ASM = "s_sendmsg_rtn_b32 $0, sendmsg(MSG_RTN_GET_SE_AID_ID)\ns_wait_kmcnt 0"
-_CLUSTERS_PER_AID_GROUP = 8
-_XCCS_PER_AID = 4
 
 
 def _is_pow2(value: int) -> bool:
@@ -234,7 +230,6 @@ class MxGemmSpec:
     a_scale_lds_pad: LdsPad | None = None
     b_scale_lds_pad: LdsPad | None = None
     init_c_peel: bool = True
-    cluster_order: str = "hw"
     local_prefetch: int = 1
     half_plr: str = "b"
     half_b_order: str = "ahead"
@@ -470,7 +465,6 @@ class MxGemmSpec:
             *parts,
             flags={
                 "noinitc": not self.init_c_peel,
-                "aid": self.cluster_order == "aid",
                 "lp0": self.local_prefetch == 0,
                 "hplrnone": self.half_plr == "none",
                 "hblate": self.half_b_late,
@@ -720,8 +714,6 @@ def validate(spec: MxGemmSpec, arch: str = "gfx1250") -> str | None:
         return "half_b_order must be 'ahead' or 'late'"
     if spec.half_b_order == "late" and not spec.half_b:
         return "half_b_order 'late' needs half_plr 'b'"
-    if spec.cluster_order not in ("hw", "aid"):
-        return "cluster_order must be 'hw' or 'aid'"
     if not 0 <= spec.signal_wmmas <= spec.signal_limit:
         return f"cluster_signal_wmmas must be in 0..{spec.signal_limit}"
     if spec.gl2_prefetch_distance != 0 and not 2 <= spec.gl2_prefetch_distance <= 8:
@@ -866,39 +858,6 @@ class _Kernel:
         return b.select(
             b.cmp_lt(k, self.params["K"]), k, b.sub(self.params["K"], self.tile_k_v)
         )
-
-
-def _aid_remapped_blocks(k: _Kernel, block_x, block_y):
-    """ClusterAIDMapping: renumber clusters so the clusters on one AID's XCCs
-    cover one contiguous half of the grid. Grids that are not whole clusters
-    in groups of eight keep the hardware order."""
-    b, ops, spec = k.b, k.ops, k.spec
-    gx, gy, _ = mx_gemm_grid(spec)
-    cx, cy, _ = spec.cluster_dim
-    clusters_x, clusters_y = gx // cx, gy // cy
-    if clusters_x * clusters_y % _CLUSTERS_PER_AID_GROUP:
-        return block_x, block_y
-    cluster = ops.add(ops.div(block_x, cx), ops.mul(ops.div(block_y, cy), clusters_x))
-    aid_word = b.inline_asm(_AID_ID_ASM, "=s", result_type=I32)
-    xcc = ops.mod(ops.div(aid_word, 1 << 16), _CLUSTERS_PER_AID_GROUP)
-    slot = ops.add(
-        ops.add(
-            ops.mul(ops.div(xcc, _XCCS_PER_AID), clusters_x * clusters_y // 2),
-            ops.mul(ops.div(cluster, _CLUSTERS_PER_AID_GROUP), _XCCS_PER_AID),
-        ),
-        ops.mod(xcc, _XCCS_PER_AID),
-    )
-    split_rows = clusters_y % 2 == 0 and (
-        clusters_x % 2 == 1 or gx * spec.tile_n <= gy * spec.tile_m
-    )
-    if split_rows:
-        new_x, new_y = ops.mod(slot, clusters_x), ops.div(slot, clusters_x)
-    else:
-        new_x, new_y = ops.div(slot, clusters_y), ops.mod(slot, clusters_y)
-    return (
-        ops.add(ops.mul(new_x, cx), ops.mod(block_x, cx)),
-        ops.add(ops.mul(new_y, cy), ops.mod(block_y, cy)),
-    )
 
 
 class RowMaps:
@@ -2108,8 +2067,6 @@ def build_mx_gemm(spec: MxGemmSpec, *, arch: str = "gfx1250") -> KernelDef:
     k.wave_m = ops.div(k.wave, spec.warp_n)
 
     block_x, block_y = b.block_id_x(), b.block_id_y()
-    if spec.cluster_order == "aid":
-        block_x, block_y = _aid_remapped_blocks(k, block_x, block_y)
     k.block_m = ops.mul(block_y, spec.tile_m)
     k.block_n = ops.mul(block_x, spec.tile_n)
     if spec.has_cluster:

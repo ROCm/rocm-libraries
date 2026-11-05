@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import itertools
 import re
 import shutil
@@ -131,7 +132,7 @@ class MxGemmSpecTest(unittest.TestCase):
 
     def test_validator_accepts_tuning_space_and_rejects_bad_specs(self):
         self.assertIsNone(validate(_spec()))
-        self.assertIsNone(validate(_spec(*_BENCH, cluster_order="aid")))
+        self.assertIsNone(validate(_spec(*_BENCH)))
         self.assertIsNone(validate(_spec(cluster_dim=(1, 1, 1), out_dtype="bf16")))
         self.assertIsNone(validate(_spec(half_plr="none", local_prefetch=0)))
         self.assertEqual(len(list(_valid_geometries())), 87)
@@ -496,12 +497,16 @@ class MxGemmLayoutTest(unittest.TestCase):
 class MxGemmIrTest(unittest.TestCase):
     def test_benchmark_config_matches_step6_14(self):
         """Gate 1: the benchmark problem matches Step 6.14's LLVM IR and
-        compile options, apart from the cluster signal. Step 6.14 signals
-        from wave 0 and publishes the reads at the cluster wait. This kernel
-        drains every wave's LDS reads before the signal and has no second
-        publish."""
-        old = variant_spec("step6_14_mxfp4_gemm", *_BENCH, **YAML_TILE)
-        new = _spec(*_BENCH, cluster_order="aid")
+        compile options, apart from the cluster signal and the cluster
+        order. Step 6.14 signals from wave 0 and publishes the reads at the
+        cluster wait. This kernel drains every wave's LDS reads before the
+        signal and has no second publish. It keeps the hardware cluster order,
+        so Step 6.14 is built without its AID remap."""
+        old = dataclasses.replace(
+            variant_spec("step6_14_mxfp4_gemm", *_BENCH, **YAML_TILE),
+            cluster_aid_remap=False,
+        )
+        new = _spec(*_BENCH)
         old_kernel = build_mxfp4_tdm_gemm(old, arch="gfx1250")
         new_kernel = build_mx_gemm(new)
         old_llvm = _lower_kernel_to_llvm_python(
@@ -551,7 +556,6 @@ class MxGemmIrTest(unittest.TestCase):
             wave_group=(4, 1),
             half_plr="none",
             cluster_dim=(1, 2, 1),
-            cluster_order="aid",
             mma="16x16",
         )
         self.assertIsNone(validate(narrow))
@@ -1015,7 +1019,7 @@ class MxGemmHostBuildTest(unittest.TestCase):
         from rocke.helpers.compile import compile_kernel
 
         for spec in (
-            _spec(*_BENCH, cluster_order="aid"),
+            _spec(*_BENCH),
             _spec(tile_m=128, tile_n=256, tile_k=256, wave_group=(4, 1)),
             _spec(cluster_dim=(1, 1, 1), half_plr="none", out_dtype="fp16"),
             _spec(1024, 1024, 2048 + 384, tile_m=128, tile_n=128),
@@ -1033,7 +1037,6 @@ class MxGemmHostBuildTest(unittest.TestCase):
                 wave_group=(4, 1),
                 half_plr="none",
                 cluster_dim=(1, 2, 1),
-                cluster_order="aid",
                 mma="16x16",
             ),
             _spec(
@@ -1059,7 +1062,6 @@ class MxGemmHostBuildTest(unittest.TestCase):
             ),
             # hipBLASLt's MXFP8 MAF and MAB tunings.
             _spec8(*_BENCH, local_prefetch=0, half_plr="none"),
-            _spec8(*_BENCH, local_prefetch=0, half_plr="none", cluster_order="aid"),
             _spec8(*_BENCH, half_b_order="late"),
             _spec(*_BENCH, half_b_order="late"),
             _spec8(
@@ -1122,7 +1124,7 @@ class MxGemmDeviceTest(unittest.TestCase):
                 _spec8(a_dtype=a_dtype, b_dtype=b_dtype, **fields)
                 for a_dtype, b_dtype in _PAIRS_8BIT
                 for fields in (
-                    {"tile_m": 128, "cluster_order": "aid"},
+                    {"tile_m": 128},
                     {"tile_m": 128, "tile_k": 128, "half_plr": "none"},
                     {"local_prefetch": 0, "half_plr": "none"},
                     {"half_b_order": "late"},
@@ -1138,7 +1140,7 @@ class MxGemmDeviceTest(unittest.TestCase):
             ]
             + [
                 _spec8(1000, 1000, 2048 + 96, tile_m=128, tile_n=128, b_dtype="bf8"),
-                _spec8(tile_m=128, out_dtype="bf16", cluster_order="aid"),
+                _spec8(tile_m=128, out_dtype="bf16"),
             ]
         ):
             with self.subTest(spec.kernel_name()):

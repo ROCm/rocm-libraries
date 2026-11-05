@@ -560,7 +560,6 @@ _AXES = {
     "gl2_prefetch_distance": ("gl2_prefetch_distance", int, "4"),
     "cluster_signal_wmmas": ("cluster_signal_wmmas", _optional_int, "derived"),
     "init_c_peel": ("init_c_peel", _bool, "1"),
-    "cluster_order": ("cluster_order", str, "hw"),
     "local_prefetch": ("local_prefetch", int, "1"),
     "half_plr": ("half_plr", str, "b"),
     "half_b_order": ("half_b_order", str, "ahead"),
