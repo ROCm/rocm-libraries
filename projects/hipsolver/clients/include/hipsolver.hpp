@@ -2446,7 +2446,7 @@ inline hipsolverStatus_t hipsolver_geev(testAPI_t               API,
 }
 /********************************************************/
 
-/******************** GEQRF ********************/
+/******************** GELS ********************/
 // normal and strided_batched
 inline hipsolverStatus_t hipsolver_gels_bufferSize(testAPI_t         API,
                                                    hipsolverHandle_t handle,
