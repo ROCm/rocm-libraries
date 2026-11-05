@@ -147,5 +147,16 @@ class Truncation(Selection):
 
     def op(self, pop: Population, n_parents: int) -> Population:
         pop = pop.sort()
-        pop = pop[:int(pop.size * self.elite_ratio)]
+        # Ensure at least 1 member in the elite pool to avoid empty selection
+        pool_size = max(1, int(pop.size * self.elite_ratio))
+        pop = pop[:pool_size]
+
+        # When replacement=False, ensure pool is large enough for sampling
+        if not self.replace and pool_size < n_parents:
+            raise ValueError(
+                f"Truncation elite pool ({pool_size} members) is smaller than "
+                f"n_parents ({n_parents}) with replacement=False. "
+                f"Increase elite_ratio (currently {self.elite_ratio}) or enable replacement."
+            )
+
         return np.random.choice(pop, n_parents, replace=self.replace)
