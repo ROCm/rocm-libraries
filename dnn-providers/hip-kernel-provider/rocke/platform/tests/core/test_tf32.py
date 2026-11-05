@@ -30,9 +30,10 @@ from rocke.core.lower_llvm import LLVM_FLAVORS, _lower_kernel_to_llvm_python
 from rocke.core.verify import verify, verify_or_raise
 from rocke.examples.gfx942.tf32_numerics import rne_bits
 from rocke.tests.engines import (
+    ENGINES,
     assert_both_engines_reject,
-    assert_both_engines_reject_hip,
-    available_engines,
+    assert_engine_rejects,
+    assert_engine_rejects_hip,
 )
 from rocke.instances.gfx942.tf32_mma_probe import (
     PREPARATIONS,
@@ -581,6 +582,7 @@ def test_global_vector_store(n, align, dtype):
         assert native.lower_serialized_ir(ir, arch="gfx950", flavor=flavor) == ll
 
 
+@pytest.mark.parametrize("engine", ENGINES)
 @pytest.mark.parametrize(
     ("align", "error_type", "refusal"),
     [
@@ -592,9 +594,12 @@ def test_global_vector_store(n, align, dtype):
         (24.0, TypeError, "align=float, expected an integer"),
     ],
 )
-def test_global_vector_store_rejects_invalid_alignment(align, error_type, refusal):
-    """Every lowerer refuses the same ``align`` values with the same text, and
-    never reads a bool or a float as an integer alignment."""
+def test_global_vector_store_rejects_invalid_alignment(
+    engine, align, error_type, refusal
+):
+    """Every lowerer of each engine refuses the same ``align`` values with the
+    same text and status, and never reads a bool or a float as an integer
+    alignment."""
     b = IRBuilder("invalid_store_alignment")
     p = b.param("p", PtrType(TF32, "global"))
     zero = b.const_i32(0)
@@ -605,17 +610,18 @@ def test_global_vector_store_rejects_invalid_alignment(align, error_type, refusa
     b.ret()
     kernel = parse(serialize(b.kernel))
     message = f"memref.global_store_vN failed - {refusal}"
-    with pytest.raises(error_type, match=f"^{re.escape(message)}$"):
-        lower_kernel_to_hip(kernel, arch="gfx950")
+    assert_engine_rejects_hip(
+        kernel, "gfx950", engine=engine, error_type=error_type, message=message
+    )
     for flavor in LLVM_FLAVORS:
-        with pytest.raises(error_type, match=f"^{re.escape(message)}$"):
-            _lower_kernel_to_llvm_python(kernel, arch="gfx950", llvm_flavor=flavor)
-    if "cpp" in available_engines():
-        assert_both_engines_reject_hip(kernel, "gfx950", error_type, message)
-        for flavor in LLVM_FLAVORS:
-            assert_both_engines_reject(
-                kernel, "gfx950", error_type, message, llvm_flavor=flavor
-            )
+        assert_engine_rejects(
+            kernel,
+            "gfx950",
+            engine=engine,
+            error_type=error_type,
+            message=message,
+            llvm_flavor=flavor,
+        )
 
 
 @pytest.mark.parametrize("m", [16, 32])

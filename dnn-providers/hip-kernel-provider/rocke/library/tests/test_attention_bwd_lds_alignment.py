@@ -16,9 +16,8 @@ from __future__ import annotations
 import re
 
 import pytest
-from rocke.core.ir_serialize import serialize
 from rocke.core.lower_llvm import LLVM_FLAVOR_LLVM20
-from rocke.core.lower_llvm import _lower_kernel_to_llvm_python as lower
+from rocke.tests.engines import ENGINES, lower_with_engine
 
 from kernels.common.attention_bwd import (
     AttnBwdSpec,
@@ -47,23 +46,16 @@ def _slices_kernel(arch):
     return build_attn_bwd_main(spec, arch=arch)
 
 
+@pytest.mark.parametrize("engine", ENGINES)
 @pytest.mark.parametrize("arch", _ARCHS)
-def test_slices_sink_lds_claims_fit_the_pool(arch):
-    ll = lower(_slices_kernel(arch), arch=arch, llvm_flavor=LLVM_FLAVOR_LLVM20)
+def test_slices_sink_lds_claims_fit_the_pool(arch, engine):
+    """Every LDS claim fits the pool alignment, and the ``<8 x float>`` loads
+    claim exactly it; the C++ engine's IR is also byte-identical."""
+    ll = lower_with_engine(
+        _slices_kernel(arch), arch, engine=engine, llvm_flavor=LLVM_FLAVOR_LLVM20
+    )
     (pool_align,) = (int(a) for a in _POOL_ALIGN_RE.findall(ll))
     claims = [int(a) for a in _LDS_ALIGN_RE.findall(ll)]
     assert claims and max(claims) <= pool_align
     wide = _WIDE_LOAD_RE.findall(ll)
     assert wide and set(wide) == {str(pool_align)}
-
-
-@pytest.mark.parametrize("arch", _ARCHS)
-def test_slices_sink_both_engines_emit_the_same_ir(arch):
-    from rocke.core.backend import BackendError, _lower_via_cpp_engine
-
-    kernel = _slices_kernel(arch)
-    try:
-        cpp = _lower_via_cpp_engine(serialize(kernel), arch, LLVM_FLAVOR_LLVM20)
-    except BackendError as e:
-        pytest.skip(f"C++ engine not importable: {str(e)[:200]}")
-    assert cpp == lower(kernel, arch=arch, llvm_flavor=LLVM_FLAVOR_LLVM20)

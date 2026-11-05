@@ -151,8 +151,13 @@ def _assert_native_rejects(
     with pytest.raises(RuntimeError) as native_error:
         lower()
     text = str(native_error.value)
-    suffix = f"(status {status}): {message}" if status is not None else f": {message}"
-    assert text.endswith(suffix), text
+    assert text.endswith(_native_refusal_suffix(message, status)), text
+
+
+def _native_refusal_suffix(message: str, status: int | None) -> str:
+    """How the binding's refusal text ends: ``"(status N): " + message``, or
+    ``": " + message`` when ``status`` is not compared."""
+    return f"(status {status}): {message}" if status is not None else f": {message}"
 
 
 def _python_llvm(kernel: KernelDef, arch: str, llvm_flavor: str | None) -> str:
@@ -321,6 +326,7 @@ def assert_backend_lane_rejects(
     lane: str,
     kernel: KernelDef,
     arch: str,
+    *,
     error_type: type[Exception],
     message: str,
     llvm_flavor: str,
@@ -340,12 +346,14 @@ def assert_backend_lane_rejects(
     engine's: exactly ``error_type`` (not a subclass) with exactly ``message``.
     The two fallback lanes must also have fallen back for the expected reason:
     ``cpp-permissive`` after the C++ engine refused with ``message``,
-    ``installed-fallback`` after the binding failed to import. ``llvm_flavor``
-    is required because the ``cpp`` lanes cannot resolve a flavor without a
-    compiler.
+    ``installed-fallback`` after the binding failed to import. ``error_type``
+    must be one the C++ status map covers, as for :func:`assert_engine_rejects`;
+    that is checked in every lane. ``llvm_flavor`` is required because the
+    ``cpp`` lanes cannot resolve a flavor without a compiler.
     """
     if lane not in _LANE_ENVIRONMENT:
         raise ValueError(f"lane={lane!r}, expected one of {BACKEND_LANES}")
+    status = _native_status(error_type)
     backend, strict = _LANE_ENVIRONMENT[lane]
     for variable, value in (("ROCKE_BACKEND", backend), ("ROCKE_CPP_STRICT", strict)):
         if value is None:
@@ -363,9 +371,10 @@ def assert_backend_lane_rejects(
         lower_kernel_to_llvm(kernel, arch=arch, llvm_flavor=llvm_flavor)
     fallbacks = [reason for _, reason in cpp_fallbacks()[fallbacks_before:]]
     if lane == "cpp-strict":
-        suffix = f"(status {_native_status(error_type)}): {message}"
         assert type(refusal.value) is RuntimeError, repr(refusal.value)
-        assert str(refusal.value).endswith(suffix), str(refusal.value)
+        assert str(refusal.value).endswith(
+            _native_refusal_suffix(message, status)
+        ), str(refusal.value)
     else:
         assert type(refusal.value) is error_type, repr(refusal.value)
         assert str(refusal.value) == message
