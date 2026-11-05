@@ -146,6 +146,7 @@ CONCERN_LANES = {
     "SIBLING",
     "ARCH",
     "PERF",
+    "SEMANTICS",
 }
 # Prefixes of every agent that writes a report. PROVISIONAL_ID matches `<prefix><k>-p<n>`
 # and the invalid follow-up form `<prefix><k>-f<j>-p<n>`.

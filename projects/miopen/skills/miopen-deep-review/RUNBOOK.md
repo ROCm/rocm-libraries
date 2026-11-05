@@ -161,6 +161,7 @@ its trigger holds, else mark it `N/A`; when unsure, run it.
 | `DRIFT` | [drift](lanes/drift.md) | The change merged onto the target's current tip: conflicts, broken target-side contracts, tests on the merge | `drift.txt` says `Trigger: yes` |
 | `SIBLING` | [sibling](lanes/sibling.md) | Whether the change reached every counterpart that shares its contract (fwd/bwd/wrw, 2D/3D, backends, data types, test twins) | A solver, kernel, primitive or test file with counterparts changes |
 | `ARCH` | [arch](lanes/arch.md) | Architecture gates, lists and data for gfx targets, and whether a test executed on each targeted arch | An arch or device-name gate, a `GPU_TARGETS` or arch list, a kernel or database named by arch, or a new arch changes |
+| `SEMANTICS` | [semantics](lanes/semantics.md) | What the changed entry points do for a user, read without the diff or any other lane's report: values converted or rounded, results that depend on an internal threshold, documentation against code | A non-documentation file under `projects/miopen/src/`, `include/` or `driver/` changes |
 | `PERF` | [perf](lanes/perf.md) | Performance evidence against risk; files approval requests, never runs GPU work | Solver selection, applicability, kernels, perf-config spaces, heuristics, find modes, find or perf data, workspace reporting or per-call host work changes |
 | `RUN` | [build-validate](lanes/build-validate.md) | Building the head and running the relevant tests | Always |
 
@@ -247,7 +248,8 @@ Inputs:    under $EVIDENCE/r<N>/: PIN.md; facts.md; pr/body.md or intent.md; CON
            Scout: area, slug, changed paths, prior area file or none. SYNTH: orient/*.md.
            Verifier: finding IDs and report paths. WRITER: LEDGER.md, verify/, PIN.md,
            pr/pr.json (title), CONTEXT.md, lanes/*.md (M-rule lines, RUN execution counts,
-           ROCK not-run items). `RUN`, `ROCK`, `AUTH`: the **Options and guards** and
+           ROCK not-run items). `SEMANTICS`: `pr/body.md` and `packets/SEMANTICS.md` only (no `facts.md`, no other lane's
+           report, no ledger). `RUN`, `ROCK`, `AUTH`: the **Options and guards** and
            **Consumers** sections of `CONTEXT.md` and the area files. Follow-up: the lane report
            path plus the approved request, decision or Handoff.
 Output:    <exact file>; scratch $SCRATCH/<ID>/; first provisional ID <LANE>-p<n> (a follow-up
