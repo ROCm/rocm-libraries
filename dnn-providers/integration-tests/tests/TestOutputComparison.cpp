@@ -26,6 +26,7 @@
 
 #include "BundleFixtureFiles.hpp"
 #include "harness/bundle/IntegrationTestBundle.hpp"
+#include "harness/bundle/LiveRows.hpp"
 #include "harness/bundle/OutputComparison.hpp"
 
 using hipdnn_integration_tests::ValidationSite;
@@ -47,6 +48,8 @@ constexpr int64_t K_UID_B = 4; // unnamed
 // Not wired to a node: it exists so a test can ask what an integer output does when a
 // 'tensors' glob is wide enough to select RMS for it.
 constexpr int64_t K_UID_INT = 6; // named "counts", INT32
+// Not wired to a node: a dense [B, H, S, 1] row statistic for the live-row tests.
+constexpr int64_t K_UID_STATS = 7; // named "stats"
 
 // The batchnorm graph the other bundle tests use, with uid 5 given a name so both
 // label paths are reachable: uid 5 reports its name, uid 4 falls back to its uid.
@@ -68,7 +71,9 @@ const std::string K_GRAPH
       R"({"name": "y_out", "uid": 5, "strides": [60, 20, 5, 1], "dims": [2, 3, 4, 5], )"
       R"("data_type": "float", "virtual": false}, )"
       R"({"name": "counts", "uid": 6, "strides": [3, 1, 1, 1], "dims": [1, 3, 1, 1], )"
-      R"("data_type": "int32", "virtual": false}], "io_data_type": "float", )"
+      R"("data_type": "int32", "virtual": false}, )"
+      R"({"name": "stats", "uid": 7, "strides": [12, 4, 1, 1], "dims": [2, 3, 4, 1], )"
+      R"("data_type": "float", "virtual": false}], "io_data_type": "float", )"
       R"("compute_data_type": "float", "intermediate_data_type": "float", "name": ""})";
 // Built the same way the bundle loader builds one, so these tests walk a real
 // flatbuffer graph rather than a hand-rolled attribute map.
@@ -205,6 +210,79 @@ std::shared_ptr<hipdnn_data_sdk::utilities::ITensor>
         }
     }
     return tensor;
+}
+
+// A dense [2, 3, 4, 1] float tensor with `strides`. Every position holds NaN except the
+// live rows s < lengths[b], which hold 10*b + h + s.
+std::shared_ptr<hipdnn_data_sdk::utilities::ITensor>
+    liveRowStats(const std::vector<int64_t>& strides, const std::vector<int64_t>& lengths)
+{
+    auto tensor = std::make_shared<hipdnn_data_sdk::utilities::Tensor<float>>(
+        std::vector<int64_t>{2, 3, 4, 1}, strides);
+    tensor->fillWithValue(K_NAN);
+    for(int64_t b = 0; b < 2; ++b)
+    {
+        for(int64_t h = 0; h < 3; ++h)
+        {
+            for(int64_t s = 0; s < lengths[static_cast<size_t>(b)]; ++s)
+            {
+                tensor->setHostValue(static_cast<float>(10 * b + h + s), b, h, s, 0);
+            }
+        }
+    }
+    return tensor;
+}
+
+const std::vector<int64_t> K_STATS_STRIDES = {12, 4, 1, 1};
+// Token-major: the head index changes fastest.
+const std::vector<int64_t> K_STATS_TOKEN_MAJOR_STRIDES = {12, 1, 3, 1};
+
+std::vector<hipdnn_integration_tests::bundle::TensorMismatch>
+    compareStats(const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper& wrapper,
+                 const std::shared_ptr<hipdnn_data_sdk::utilities::ITensor>& expected,
+                 const std::shared_ptr<hipdnn_data_sdk::utilities::ITensor>& actual,
+                 const hipdnn_integration_tests::bundle::LiveRowMap& liveRows,
+                 ValidationSite site = ValidationSite::HOST,
+                 std::optional<ValidationSite> liveRowSite = std::nullopt)
+{
+    OutputTensors actualOutputs;
+    actualOutputs[K_UID_STATS] = actual;
+    return compareOutputs(
+        wrapper,
+        {K_UID_STATS},
+        actualOutputs,
+        [&](int64_t) -> hipdnn_data_sdk::utilities::ITensor& { return *expected; },
+        [](const std::string&, auto) { return exact(); },
+        site,
+        "Bundle: b",
+        liveRows,
+        liveRowSite);
+}
+
+// liveRowStats with `pastValue` in place of NaN at every position past the lengths.
+std::shared_ptr<hipdnn_data_sdk::utilities::ITensor>
+    liveRowStatsPast(const std::vector<int64_t>& lengths, float pastValue)
+{
+    auto tensor = liveRowStats(K_STATS_STRIDES, lengths);
+    hipdnn_data_sdk::utilities::TensorView<float> view(*tensor);
+    for(int64_t b = 0; b < 2; ++b)
+    {
+        for(int64_t h = 0; h < 3; ++h)
+        {
+            for(int64_t s = lengths[static_cast<size_t>(b)]; s < 4; ++s)
+            {
+                view.getHostValue({b, h, s, 0}) = pastValue;
+            }
+        }
+    }
+    return tensor;
+}
+
+hipdnn_integration_tests::bundle::LiveRowMap statsLiveRows(std::vector<int64_t> lengths)
+{
+    hipdnn_integration_tests::bundle::LiveRowMap map;
+    map[K_UID_STATS] = hipdnn_integration_tests::bundle::LiveRows{2, std::move(lengths)};
+    return map;
 }
 
 } // namespace
@@ -1077,6 +1155,399 @@ TEST(TestOutputComparison, RaggedOutputOnDeviceIsReportedNotThrown)
     EXPECT_EQ(mismatch->uid, K_UID_A);
     EXPECT_NE(mismatch->report.find("y_out"), std::string::npos);
     EXPECT_NE(mismatch->report.find("--validator cpu"), std::string::npos);
+}
+
+// A dense row statistic whose rows past each batch's live length are NaN in both
+// references compares only its live rows when the bundle declares them.
+TEST(TestOutputComparison, LiveRowsSkipPositionsPastEachBatchLength)
+{
+    const auto buffer = makeGraphBuffer();
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper wrapper{buffer.data(),
+                                                                             buffer.size()};
+    const std::vector<int64_t> lengths = {1, 0};
+
+    auto expected = liveRowStats(K_STATS_STRIDES, lengths);
+    auto actual = liveRowStats(K_STATS_STRIDES, lengths);
+
+    EXPECT_TRUE(compareStats(wrapper, expected, actual, statsLiveRows(lengths)).empty());
+    EXPECT_EQ(compareStats(wrapper, expected, actual, {}).size(), 1u)
+        << "without live rows the NaN positions fail the dense comparison";
+}
+
+TEST(TestOutputComparison, LiveRowMismatchStillFails)
+{
+    const auto buffer = makeGraphBuffer();
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper wrapper{buffer.data(),
+                                                                             buffer.size()};
+    const std::vector<int64_t> lengths = {1, 0};
+
+    auto expected = liveRowStats(K_STATS_STRIDES, lengths);
+    auto actual = liveRowStats(K_STATS_STRIDES, lengths);
+    hipdnn_data_sdk::utilities::TensorView<float>(*actual).getHostValue({0, 1, 0, 0}) = 99.0f;
+
+    const auto mismatches = compareStats(wrapper, expected, actual, statsLiveRows(lengths));
+    ASSERT_EQ(mismatches.size(), 1u);
+    EXPECT_EQ(mismatches[0].uid, K_UID_STATS);
+    EXPECT_NE(mismatches[0].report.find("stats"), std::string::npos);
+}
+
+// A value past the live length may differ: it is not compared.
+TEST(TestOutputComparison, LiveRowPositionPastTheLengthIsNotCompared)
+{
+    const auto buffer = makeGraphBuffer();
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper wrapper{buffer.data(),
+                                                                             buffer.size()};
+    const std::vector<int64_t> lengths = {1, 0};
+
+    auto expected = liveRowStats(K_STATS_STRIDES, lengths);
+    auto actual = liveRowStats(K_STATS_STRIDES, lengths);
+    hipdnn_data_sdk::utilities::TensorView<float>(*actual).getHostValue({0, 1, 2, 0}) = 99.0f;
+    hipdnn_data_sdk::utilities::TensorView<float>(*actual).getHostValue({1, 0, 0, 0}) = -K_INF;
+
+    EXPECT_TRUE(compareStats(wrapper, expected, actual, statsLiveRows(lengths)).empty());
+}
+
+// With every length 0 no element is compared, and the comparison fails rather than
+// passing with nothing checked.
+TEST(TestOutputComparison, LiveRowAllZeroLengthsFailsBecauseNoElementIsCompared)
+{
+    const auto buffer = makeGraphBuffer();
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper wrapper{buffer.data(),
+                                                                             buffer.size()};
+    const std::vector<int64_t> lengths = {0, 0};
+
+    auto expected = liveRowStats(K_STATS_STRIDES, lengths);
+    auto actual = liveRowStats(K_STATS_STRIDES, lengths);
+
+    EXPECT_EQ(compareStats(wrapper, expected, actual, statsLiveRows(lengths)).size(), 1u);
+}
+
+TEST(TestOutputComparison, LiveRowTokenMajorStridesCompare)
+{
+    const auto buffer = makeGraphBuffer();
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper wrapper{buffer.data(),
+                                                                             buffer.size()};
+    const std::vector<int64_t> lengths = {3, 2};
+
+    auto expected = liveRowStats(K_STATS_TOKEN_MAJOR_STRIDES, lengths);
+    auto same = liveRowStats(K_STATS_TOKEN_MAJOR_STRIDES, lengths);
+    auto different = liveRowStats(K_STATS_TOKEN_MAJOR_STRIDES, lengths);
+    hipdnn_data_sdk::utilities::TensorView<float>(*different).getHostValue({1, 2, 1, 0}) = 99.0f;
+
+    EXPECT_TRUE(compareStats(wrapper, expected, same, statsLiveRows(lengths)).empty());
+    EXPECT_EQ(compareStats(wrapper, expected, same, {}).size(), 1u);
+    EXPECT_EQ(compareStats(wrapper, expected, different, statsLiveRows(lengths)).size(), 1u);
+}
+
+TEST(TestOutputComparison, LiveRowOutputOnDeviceIsReportedNotThrown)
+{
+    const auto buffer = makeGraphBuffer();
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper wrapper{buffer.data(),
+                                                                             buffer.size()};
+    const std::vector<int64_t> lengths = {1, 0};
+
+    auto expected = liveRowStats(K_STATS_STRIDES, lengths);
+    auto actual = liveRowStats(K_STATS_STRIDES, lengths);
+
+    std::vector<hipdnn_integration_tests::bundle::TensorMismatch> mismatches;
+    ASSERT_NO_THROW(mismatches = compareStats(
+                        wrapper, expected, actual, statsLiveRows(lengths), ValidationSite::DEVICE));
+
+    ASSERT_EQ(mismatches.size(), 1u);
+    EXPECT_EQ(mismatches[0].uid, K_UID_STATS);
+    EXPECT_NE(mismatches[0].report.find("stats"), std::string::npos);
+    EXPECT_NE(mismatches[0].report.find("--validator cpu"), std::string::npos);
+}
+
+TEST(TestOutputComparison, LiveRowEntryThatDoesNotFitTheOutputThrows)
+{
+    const auto buffer = makeGraphBuffer();
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper wrapper{buffer.data(),
+                                                                             buffer.size()};
+    auto expected = liveRowStats(K_STATS_STRIDES, {1, 0});
+    auto actual = liveRowStats(K_STATS_STRIDES, {1, 0});
+
+    EXPECT_THROW(compareStats(wrapper, expected, actual, statsLiveRows({1})),
+                 std::invalid_argument);
+    EXPECT_THROW(compareStats(wrapper, expected, actual, statsLiveRows({1, 5})),
+                 std::invalid_argument);
+    EXPECT_THROW(compareStats(wrapper, expected, actual, statsLiveRows({-1, 0})),
+                 std::invalid_argument);
+}
+
+// Values that are not NaN past the lengths: only the lengths keep them out of the
+// comparison. Full lengths compare them, and no map compares them too.
+TEST(TestOutputComparison, LiveRowValuesPastTheLengthThatAreNotNaNAreNotCompared)
+{
+    const auto buffer = makeGraphBuffer();
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper wrapper{buffer.data(),
+                                                                             buffer.size()};
+    const std::vector<int64_t> lengths = {1, 0};
+
+    struct PastValues
+    {
+        const char* name;
+        float expected;
+        float actual;
+    };
+    for(const auto& past : {PastValues{"inf_against_finite", -K_INF, 7.0f},
+                            PastValues{"inf_against_inf", -K_INF, -K_INF},
+                            PastValues{"finite_against_finite", 5.0f, 6.0f}})
+    {
+        SCOPED_TRACE(past.name);
+        const auto expected = liveRowStatsPast(lengths, past.expected);
+        const auto actual = liveRowStatsPast(lengths, past.actual);
+
+        EXPECT_TRUE(compareStats(wrapper, expected, actual, statsLiveRows(lengths)).empty());
+        EXPECT_EQ(compareStats(wrapper, expected, actual, {}).size(), 1u);
+        EXPECT_EQ(compareStats(wrapper, expected, actual, statsLiveRows({4, 4})).size(), 1u);
+    }
+}
+
+// The two sides may have different strides: the views report the same layout.
+TEST(TestOutputComparison, LiveRowSidesWithDifferentStridesCompare)
+{
+    const auto buffer = makeGraphBuffer();
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper wrapper{buffer.data(),
+                                                                             buffer.size()};
+    const std::vector<int64_t> lengths = {3, 2};
+
+    const auto expected = liveRowStats(K_STATS_STRIDES, lengths);
+    const auto same = liveRowStats(K_STATS_TOKEN_MAJOR_STRIDES, lengths);
+    const auto different = liveRowStats(K_STATS_TOKEN_MAJOR_STRIDES, lengths);
+    hipdnn_data_sdk::utilities::TensorView<float>(*different).getHostValue({0, 2, 2, 0}) = 99.0f;
+
+    EXPECT_TRUE(compareStats(wrapper, expected, same, statsLiveRows(lengths)).empty());
+    EXPECT_EQ(compareStats(wrapper, expected, different, statsLiveRows(lengths)).size(), 1u);
+}
+
+// A run that compares the other outputs on the device can still compare a live-row
+// output on the host.
+TEST(TestOutputComparison, LiveRowSiteOverridesTheDeviceSite)
+{
+    const auto buffer = makeGraphBuffer();
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper wrapper{buffer.data(),
+                                                                             buffer.size()};
+    const std::vector<int64_t> lengths = {1, 0};
+
+    const auto expected = liveRowStats(K_STATS_STRIDES, lengths);
+    const auto same = liveRowStats(K_STATS_STRIDES, lengths);
+    const auto different = liveRowStats(K_STATS_STRIDES, lengths);
+    hipdnn_data_sdk::utilities::TensorView<float>(*different).getHostValue({0, 1, 0, 0}) = 99.0f;
+
+    EXPECT_TRUE(compareStats(wrapper,
+                             expected,
+                             same,
+                             statsLiveRows(lengths),
+                             ValidationSite::DEVICE,
+                             ValidationSite::HOST)
+                    .empty());
+    EXPECT_EQ(compareStats(wrapper,
+                           expected,
+                           different,
+                           statsLiveRows(lengths),
+                           ValidationSite::DEVICE,
+                           ValidationSite::HOST)
+                  .size(),
+              1u);
+    const auto refused = compareStats(wrapper,
+                                      expected,
+                                      same,
+                                      statsLiveRows(lengths),
+                                      ValidationSite::HOST,
+                                      ValidationSite::DEVICE);
+    ASSERT_EQ(refused.size(), 1u);
+    EXPECT_NE(refused[0].report.find("NOT COMPARABLE ON DEVICE"), std::string::npos);
+}
+
+// An output whose values are on the device is read back to the host before the live-row
+// view reads it. The host copy holds zeros, so a stale read fails the live rows.
+TEST(TestGpuOutputComparison, LiveRowDeviceResidentOutputComparesOnTheHost)
+{
+    SKIP_IF_NO_DEVICES();
+    const auto buffer = makeGraphBuffer();
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper wrapper{buffer.data(),
+                                                                             buffer.size()};
+    const std::vector<int64_t> lengths = {1, 0};
+
+    const auto expected = liveRowStats(K_STATS_STRIDES, lengths);
+    const auto source = liveRowStats(K_STATS_STRIDES, lengths);
+    const std::shared_ptr<hipdnn_data_sdk::utilities::ITensor> actual
+        = std::make_shared<hipdnn_data_sdk::utilities::Tensor<float>>(
+            std::vector<int64_t>{2, 3, 4, 1}, K_STATS_STRIDES);
+    actual->fillTensorWithValue(0.0f);
+    ASSERT_EQ(hipMemcpy(actual->rawDeviceData(),
+                        source->rawHostData(),
+                        source->elementSpace() * sizeof(float),
+                        hipMemcpyHostToDevice),
+              hipSuccess);
+    actual->markDeviceModified();
+
+    EXPECT_TRUE(compareStats(wrapper,
+                             expected,
+                             actual,
+                             statsLiveRows(lengths),
+                             ValidationSite::DEVICE,
+                             ValidationSite::HOST)
+                    .empty());
+}
+
+TEST(TestOutputComparison, LiveRowViewRejectsATypeThatIsNotFloatingPoint)
+{
+    hipdnn_data_sdk::utilities::Tensor<int32_t> tensor(std::vector<int64_t>{2, 3, 4, 1});
+    EXPECT_THROW(hipdnn_integration_tests::bundle::detail::makeLiveRowView(
+                     tensor,
+                     hipdnn_flatbuffers_sdk::data_objects::DataType::INT32,
+                     hipdnn_integration_tests::bundle::LiveRows{2, {1, 0}}),
+                 std::invalid_argument);
+}
+
+// ---------------------------------------------------------------------------
+// resolveLiveRows: reads the lengths of a run, or takes them from a ragged tensor.
+// ---------------------------------------------------------------------------
+
+namespace
+{
+
+std::shared_ptr<hipdnn_data_sdk::utilities::ITensor>
+    int32Lengths(const std::vector<int32_t>& values)
+{
+    auto tensor = std::make_shared<hipdnn_data_sdk::utilities::Tensor<int32_t>>(
+        std::vector<int64_t>{static_cast<int64_t>(values.size()), 1, 1, 1});
+    for(size_t i = 0; i < values.size(); ++i)
+    {
+        tensor->setHostValue(values[i], static_cast<int64_t>(i), 0, 0, 0);
+    }
+    return tensor;
+}
+
+hipdnn_integration_tests::OutputLiveRows statsByLengths(int64_t lengthsUid)
+{
+    hipdnn_integration_tests::OutputLiveRows entry;
+    entry.uid = K_UID_STATS;
+    entry.axis = 2;
+    entry.lengthsUid = lengthsUid;
+    return entry;
+}
+
+} // namespace
+
+TEST(TestOutputComparison, LiveRowResolveReadsTheLengthsTensor)
+{
+    const auto buffer = makeGraphBuffer();
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper wrapper{buffer.data(),
+                                                                             buffer.size()};
+    auto lengths = int32Lengths({4, 0});
+
+    const auto map = hipdnn_integration_tests::bundle::resolveLiveRows(
+        {statsByLengths(20)}, wrapper, [&](int64_t uid) {
+            return uid == 20 ? lengths.get() : nullptr;
+        });
+
+    ASSERT_EQ(map.count(K_UID_STATS), 1u);
+    EXPECT_EQ(map.at(K_UID_STATS).axis, 2);
+    EXPECT_EQ(map.at(K_UID_STATS).lengths, (std::vector<int64_t>{4, 0}));
+}
+
+TEST(TestOutputComparison, LiveRowResolveReadsAnInt64LengthsTensor)
+{
+    const auto buffer = makeGraphBuffer();
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper wrapper{buffer.data(),
+                                                                             buffer.size()};
+    const auto lengths = std::make_shared<hipdnn_data_sdk::utilities::Tensor<int64_t>>(
+        std::vector<int64_t>{2, 1, 1, 1});
+    lengths->setHostValue(int64_t{3}, 0, 0, 0, 0);
+    lengths->setHostValue(int64_t{1}, 1, 0, 0, 0);
+
+    const auto map = hipdnn_integration_tests::bundle::resolveLiveRows(
+        {statsByLengths(20)}, wrapper, [&](int64_t) { return lengths.get(); });
+
+    EXPECT_EQ(map.at(K_UID_STATS).lengths, (std::vector<int64_t>{3, 1}));
+}
+
+// The axis is checked as a 64-bit value: 2^32 + 2 does not pass as axis 2.
+TEST(TestOutputComparison, LiveRowResolveRejectsAnAxisPastTheRank)
+{
+    const auto buffer = makeGraphBuffer();
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper wrapper{buffer.data(),
+                                                                             buffer.size()};
+    const auto lengths = int32Lengths({1, 0});
+    auto entry = statsByLengths(20);
+    entry.axis = (int64_t{1} << 32) + 2;
+
+    try
+    {
+        hipdnn_integration_tests::bundle::resolveLiveRows(
+            {entry}, wrapper, [&](int64_t) { return lengths.get(); });
+        ADD_FAILURE() << "an axis past the rank resolved";
+    }
+    catch(const std::runtime_error& e)
+    {
+        EXPECT_NE(std::string(e.what()).find("axis 4294967298 is not in the range 1 to 3"),
+                  std::string::npos)
+            << e.what();
+    }
+}
+
+TEST(TestOutputComparison, LiveRowResolveTakesTheLayoutOfALikeTensor)
+{
+    const auto buffer = makeGraphBuffer();
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper wrapper{buffer.data(),
+                                                                             buffer.size()};
+    auto ragged = raggedFloatTensor(0.0f);
+    hipdnn_integration_tests::OutputLiveRows entry;
+    entry.uid = K_UID_STATS;
+    entry.likeUid = 21;
+
+    const auto map = hipdnn_integration_tests::bundle::resolveLiveRows(
+        {entry}, wrapper, [&](int64_t uid) { return uid == 21 ? ragged.get() : nullptr; });
+
+    ASSERT_EQ(map.count(K_UID_STATS), 1u);
+    EXPECT_EQ(map.at(K_UID_STATS).axis, hipdnn_data_sdk::utilities::SDPA_SEQ_AXIS);
+    EXPECT_EQ(map.at(K_UID_STATS).lengths, (std::vector<int64_t>{2, 3}));
+}
+
+TEST(TestOutputComparison, LiveRowResolveRejectsALengthOutsideTheExtent)
+{
+    const auto buffer = makeGraphBuffer();
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper wrapper{buffer.data(),
+                                                                             buffer.size()};
+    for(const auto& values : {std::vector<int32_t>{5, 0}, std::vector<int32_t>{0, -1}})
+    {
+        auto lengths = int32Lengths(values);
+        try
+        {
+            hipdnn_integration_tests::bundle::resolveLiveRows(
+                {statsByLengths(20)}, wrapper, [&](int64_t) { return lengths.get(); });
+            ADD_FAILURE() << "a length outside 0 to 4 resolved";
+        }
+        catch(const std::runtime_error& e)
+        {
+            EXPECT_NE(std::string(e.what()).find("not in the range 0 to 4"), std::string::npos)
+                << e.what();
+        }
+    }
+}
+
+TEST(TestOutputComparison, LiveRowResolveRejectsATensorWithNoData)
+{
+    const auto buffer = makeGraphBuffer();
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper wrapper{buffer.data(),
+                                                                             buffer.size()};
+    const auto noTensor = [](int64_t) -> hipdnn_data_sdk::utilities::ITensor* { return nullptr; };
+
+    EXPECT_THROW(
+        hipdnn_integration_tests::bundle::resolveLiveRows({statsByLengths(20)}, wrapper, noTensor),
+        std::runtime_error);
+
+    auto dense = liveRowStats(K_STATS_STRIDES, {1, 0});
+    hipdnn_integration_tests::OutputLiveRows entry;
+    entry.uid = K_UID_STATS;
+    entry.likeUid = 21;
+    EXPECT_THROW(hipdnn_integration_tests::bundle::resolveLiveRows(
+                     {entry}, wrapper, [&](int64_t) { return dense.get(); }),
+                 std::runtime_error)
+        << "a like tensor that is not ragged has no live lengths";
 }
 
 // NOLINTEND(readability-identifier-naming)

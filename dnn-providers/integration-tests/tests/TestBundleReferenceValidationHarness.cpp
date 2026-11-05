@@ -12,8 +12,10 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <stdexcept>
@@ -505,6 +507,121 @@ TEST_F(TestBundleReferenceValidationHarness, RaggedSdpaOutputsTakeTheirLengthsFr
 
     EXPECT_FALSE(testing_support::anyFailed(results)) << testing_support::allMessages(results);
     EXPECT_FALSE(testing_support::anySkipped(results));
+}
+
+// ---- live_rows -------------------------------------------------------------
+
+namespace
+{
+
+constexpr float K_NAN = std::numeric_limits<float>::quiet_NaN();
+constexpr float K_NEGATIVE_INF = -std::numeric_limits<float>::infinity();
+
+// A reference that writes `value` to every element of y, including the rows past the
+// live lengths.
+void referenceWrites(::testing::NiceMock<MockReferenceGraphExecutor>& executor, float value)
+{
+    ON_CALL(executor, execute(::testing::_, ::testing::_, ::testing::_))
+        .WillByDefault([value](void*, size_t, const VariantPack& variantPack) {
+            auto* ptr = static_cast<float*>(variantPack.at(fixtures::K_OUTPUT_UID));
+            std::fill(ptr, ptr + fixtures::K_OUTPUT_ELEMS, value);
+        });
+}
+
+} // namespace
+
+TEST_F(TestBundleReferenceValidationHarness, LiveRowGoldenNaNPastTheLengthsIsNotCompared)
+{
+    referenceWrites(_gpuExecutor, fixtures::K_OUTPUT_VALUE);
+
+    BundleReferenceValidationHarness harness(
+        ReferenceExecutorType::GPU, /*requiresDevice=*/false, executors());
+    harness.setBundle(fixtures::writeLiveRowBundle(_tempDir, "live_rows", {1, 0}, K_NAN),
+                      _tempDir / "live_rows",
+                      std::nullopt);
+
+    ::testing::TestPartResultArray results;
+    drive(harness, &results);
+
+    EXPECT_FALSE(testing_support::anyFailed(results)) << testing_support::allMessages(results);
+    EXPECT_FALSE(testing_support::anySkipped(results));
+}
+
+// Golden y holds -inf past the lengths and the reference writes a finite value there:
+// only the lengths keep those positions out of the comparison.
+TEST_F(TestBundleReferenceValidationHarness, LiveRowGoldenInfPastTheLengthsIsNotCompared)
+{
+    referenceWrites(_gpuExecutor, fixtures::K_OUTPUT_VALUE);
+
+    BundleReferenceValidationHarness harness(
+        ReferenceExecutorType::GPU, /*requiresDevice=*/false, executors());
+    harness.setBundle(
+        fixtures::writeLiveRowBundle(_tempDir, "live_rows_inf", {1, 0}, K_NEGATIVE_INF),
+        _tempDir / "live_rows_inf",
+        std::nullopt);
+
+    ::testing::TestPartResultArray results;
+    drive(harness, &results);
+
+    EXPECT_FALSE(testing_support::anyFailed(results)) << testing_support::allMessages(results);
+    EXPECT_FALSE(testing_support::anySkipped(results));
+}
+
+TEST_F(TestBundleReferenceValidationHarness, LiveRowGoldenInfWithoutLiveRowsFails)
+{
+    referenceWrites(_gpuExecutor, fixtures::K_OUTPUT_VALUE);
+
+    BundleReferenceValidationHarness harness(
+        ReferenceExecutorType::GPU, /*requiresDevice=*/false, executors());
+    harness.setBundle(fixtures::writeLiveRowBundle(
+                          _tempDir, "no_live_rows", {1, 0}, K_NEGATIVE_INF, /*withLiveRows=*/false),
+                      _tempDir / "no_live_rows",
+                      std::nullopt);
+
+    ::testing::TestPartResultArray results;
+    drive(harness, &results);
+
+    EXPECT_TRUE(testing_support::anyFailed(results));
+}
+
+TEST_F(TestBundleReferenceValidationHarness, LiveRowDriftInALiveRowFails)
+{
+    referenceWrites(_gpuExecutor, fixtures::K_OUTPUT_VALUE + 100.0f);
+
+    BundleReferenceValidationHarness harness(
+        ReferenceExecutorType::GPU, /*requiresDevice=*/false, executors());
+    harness.setBundle(fixtures::writeLiveRowBundle(_tempDir, "live_drift", {1, 0}, K_NAN),
+                      _tempDir / "live_drift",
+                      std::nullopt);
+
+    ::testing::TestPartResultArray results;
+    drive(harness, &results);
+
+    ASSERT_TRUE(testing_support::anyFailed(results));
+    const auto messages = testing_support::allMessages(results);
+    EXPECT_NE(messages.find("UID " + std::to_string(fixtures::K_OUTPUT_UID)), std::string::npos)
+        << messages;
+}
+
+TEST_F(TestBundleReferenceValidationHarness, LiveRowLengthPastTheExtentFailsTheValidation)
+{
+    referenceWrites(_gpuExecutor, fixtures::K_OUTPUT_VALUE);
+
+    BundleReferenceValidationHarness harness(
+        ReferenceExecutorType::GPU, /*requiresDevice=*/false, executors());
+    harness.setBundle(fixtures::writeLiveRowBundle(_tempDir, "live_too_long", {5, 0}, K_NAN),
+                      _tempDir / "live_too_long",
+                      std::nullopt);
+
+    ::testing::TestPartResultArray results;
+    drive(harness, &results);
+
+    ASSERT_TRUE(testing_support::anyFailed(results));
+    EXPECT_FALSE(testing_support::anySkipped(results));
+    const auto messages = testing_support::allMessages(results);
+    EXPECT_NE(messages.find("live_rows cannot be applied"), std::string::npos) << messages;
+    EXPECT_NE(messages.find("length 5 of batch 0 is not in the range 0 to 4"), std::string::npos)
+        << messages;
 }
 
 // NOLINTEND(readability-identifier-naming)

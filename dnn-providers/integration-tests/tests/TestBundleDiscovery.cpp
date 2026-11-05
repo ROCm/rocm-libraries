@@ -2708,6 +2708,273 @@ TEST_F(TestBundleDiscoveryFixture, StartOffsetInFormatVersion1MetadataFailsTheLo
     EXPECT_NE(message.find("start_offsets needs format_version 2"), std::string::npos) << message;
 }
 
+// ---------------------------------------------------------------------------
+// live_rows: the load-time rules
+// ---------------------------------------------------------------------------
+
+namespace
+{
+
+nlohmann::json liveRowMetadata(const std::string& liveRows,
+                               const std::string& aliases = std::string())
+{
+    auto metadata
+        = nlohmann::json{{"format_version", 2}, {"live_rows", nlohmann::json::parse(liveRows)}};
+    if(!aliases.empty())
+    {
+        metadata["aliases"] = nlohmann::json::parse(aliases);
+    }
+    return metadata;
+}
+
+struct LiveRowRuleCase
+{
+    std::string name;
+    std::string liveRows;
+    std::string aliases;
+    std::string patches;
+    std::string message;
+};
+
+// Lengths for the two batches of y=5, in uid 1.
+constexpr const char* K_INT32_LENGTHS_IN_UID_1
+    = R"({"uid": 1, "set": {"data_type": "int32", "dims": [2, 1, 1, 1], "strides": [1, 1, 1, 1]}})";
+
+// Each case breaks one rule on the graph of createMinimalBundle() or of a sweep case of
+// createTemplateSweep(): x=0 [2,3,4,5]; uids 1-4 [1,3,1,1]; y=5 [2,3,4,5] is the output.
+std::vector<LiveRowRuleCase> liveRowRuleCases()
+{
+    const std::string byLengths = R"([{"uid": 5, "axis": 2, "lengths": 1}])";
+    const std::string lengthsPatch = std::string("[") + K_INT32_LENGTHS_IN_UID_1 + "]";
+    return {
+        {"output_not_in_graph",
+         R"([{"uid": 9, "like": 0}])",
+         "",
+         "[]",
+         "live rows of output 9: the output is not a tensor of the graph"},
+        {"not_an_output",
+         R"([{"uid": 0, "axis": 2, "lengths": 1}])",
+         "",
+         lengthsPatch,
+         "live rows of output 0: the tensor is not a compared output"},
+        {"ragged_output",
+         byLengths,
+         "",
+         std::string(R"([{"uid": 5, "set": {"ragged_offset_tensor_uid": 4}}, )")
+             + K_INT32_LENGTHS_IN_UID_1 + "]",
+         "live rows of output 5: the output is ragged"},
+        {"integer_output",
+         byLengths,
+         "",
+         std::string(R"([{"uid": 5, "set": {"data_type": "int32"}}, )") + K_INT32_LENGTHS_IN_UID_1
+             + "]",
+         "live rows of output 5: the output has the data type INT32, which is not a "
+         "floating-point type"},
+        {"axis_zero",
+         R"([{"uid": 5, "axis": 0, "lengths": 1}])",
+         "",
+         lengthsPatch,
+         "live rows of output 5: axis 0 is not in the range 1 to 3"},
+        {"axis_past_the_rank",
+         R"([{"uid": 5, "axis": 4, "lengths": 1}])",
+         "",
+         lengthsPatch,
+         "live rows of output 5: axis 4 is not in the range 1 to 3"},
+        {"lengths_not_in_graph",
+         R"([{"uid": 5, "axis": 2, "lengths": 9}])",
+         "",
+         "[]",
+         "live rows of output 5: lengths tensor 9 is not a tensor of the graph"},
+        {"lengths_is_an_output",
+         R"([{"uid": 5, "axis": 2, "lengths": 5}])",
+         "",
+         "[]",
+         "live rows of output 5: lengths tensor 5 is not a graph input"},
+        {"lengths_virtual",
+         byLengths,
+         "",
+         R"([{"uid": 1, "set": {"virtual": true}}])",
+         "live rows of output 5: lengths tensor 1 is not a graph input"},
+        {"lengths_runtime_pass_by_value",
+         byLengths,
+         "",
+         R"([{"uid": 1, "set": {"is_runtime_pass_by_value": true}}])",
+         "live rows of output 5: lengths tensor 1 is passed by value at run time"},
+        {"lengths_alias_view",
+         byLengths,
+         R"([{"uid": 1, "of": 2, "byte_offset": 0}])",
+         lengthsPatch,
+         "live rows of output 5: lengths tensor 1 is alias view 1 of owner 2"},
+        {"lengths_float",
+         byLengths,
+         "",
+         R"([{"uid": 1, "set": {"dims": [2, 1, 1, 1], "strides": [1, 1, 1, 1]}}])",
+         "live rows of output 5: lengths tensor 1 has the data type FLOAT, not INT32 or INT64"},
+        {"lengths_count_differs_from_the_batches",
+         byLengths,
+         "",
+         R"([{"uid": 1, "set": {"data_type": "int64"}}])",
+         "live rows of output 5: lengths tensor 1 has 3 elements; the output has 2 batches"},
+        {"like_not_in_graph",
+         R"([{"uid": 5, "like": 9}])",
+         "",
+         "[]",
+         "live rows of output 5: like tensor 9 is not a tensor of the graph"},
+        {"like_virtual",
+         R"([{"uid": 5, "like": 0}])",
+         "",
+         R"([{"uid": 0, "set": {"ragged_offset_tensor_uid": 4, "virtual": true}}])",
+         "live rows of output 5: like tensor 0 is virtual"},
+        {"like_not_ragged",
+         R"([{"uid": 5, "like": 0}])",
+         "",
+         "[]",
+         "live rows of output 5: like tensor 0 is not ragged"},
+        {"like_batches_differ",
+         R"([{"uid": 5, "like": 0}])",
+         "",
+         R"([{"uid": 0, "set": {"ragged_offset_tensor_uid": 4, "dims": [3, 3, 4, 5]}}])",
+         "live rows of output 5: like tensor 0 does not have the same dims[0] as the output"},
+    };
+}
+
+} // namespace
+
+TEST_F(TestBundleDiscoveryFixture, LiveRowRuleViolationsFailTheLoadOfABundle)
+{
+    for(const auto& c : liveRowRuleCases())
+    {
+        SCOPED_TRACE(c.name);
+        const auto root = _tempDir / ("direct_" + c.name);
+        const auto dir = root / "op" / "rows";
+        createMinimalBundle(dir, "rows");
+        auto graph = readJsonFile(dir / "rows.json");
+        setTensorFields(graph, nlohmann::json::parse(c.patches));
+        writeJsonFile(dir / "rows.json", graph);
+        writeJsonFile(dir / "rows.meta.json", liveRowMetadata(c.liveRows, c.aliases));
+
+        EXPECT_THROW(loadIntegrationTestBundle(dir / "rows.json"), BundleMetadataError);
+        const auto message = failedLoadMessage(root, _sweeps);
+        EXPECT_NE(message.find(c.message), std::string::npos) << message;
+    }
+}
+
+TEST_F(TestBundleDiscoveryFixture, LiveRowRuleViolationsFailTheLoadOfASweepCase)
+{
+    for(const auto& c : liveRowRuleCases())
+    {
+        SCOPED_TRACE(c.name);
+        const auto root = _tempDir / ("sweep_" + c.name);
+        const auto sweepDir = root / "quick" / "BatchnormFwdInference" / "Inference";
+        createTemplateSweep(sweepDir,
+                            {{"rows_fp32_nchw",
+                              "float",
+                              {2, 3, 4, 5},
+                              {60, 20, 5, 1},
+                              {1, 3, 1, 1},
+                              {3, 1, 1, 1},
+                              false, // includeGolden
+                              false, // goldenHasPath
+                              true}}); // includeMetadata
+        auto sweepJson = readJsonFile(sweepDir / "sweep.json");
+        auto& caseJson = sweepJson["cases"][0];
+        caseJson["metadata"] = liveRowMetadata(c.liveRows, c.aliases);
+        caseJson["tensor_patches"] = nlohmann::json::parse(c.patches);
+        writeJsonFile(sweepDir / "sweep.json", sweepJson);
+
+        const auto message = failedLoadMessage(root, _sweeps);
+        EXPECT_NE(message.find(c.message), std::string::npos) << message;
+    }
+}
+
+TEST_F(TestBundleDiscoveryFixture, ValidLiveRowsLoadInABundleAndASweepCase)
+{
+    using hipdnn_integration_tests::OutputLiveRows;
+    const std::string liveRows = R"([{"uid": 5, "axis": 2, "lengths": 1}])";
+    const auto patches = nlohmann::json::parse(std::string("[") + K_INT32_LENGTHS_IN_UID_1 + "]");
+    const std::vector<OutputLiveRows> expected = {{5, 2, 1, std::nullopt}};
+
+    const auto dir = _tempDir / "op" / "rows";
+    createMinimalBundle(dir, "rows");
+    auto graph = readJsonFile(dir / "rows.json");
+    setTensorFields(graph, patches);
+    writeJsonFile(dir / "rows.json", graph);
+    writeJsonFile(dir / "rows.meta.json", liveRowMetadata(liveRows));
+    const auto direct = loadIntegrationTestBundle(dir / "rows.json");
+    ASSERT_TRUE(std::holds_alternative<IntegrationTestBundle>(direct));
+    EXPECT_EQ(std::get<IntegrationTestBundle>(direct).metadata.liveRows, expected);
+
+    const auto sweepDir = _tempDir / "quick" / "BatchnormFwdInference" / "Inference";
+    createTemplateSweep(sweepDir,
+                        {{"rows_fp32_nchw",
+                          "float",
+                          {2, 3, 4, 5},
+                          {60, 20, 5, 1},
+                          {1, 3, 1, 1},
+                          {3, 1, 1, 1},
+                          false, // includeGolden
+                          false, // goldenHasPath
+                          true}}); // includeMetadata
+    auto sweepJson = readJsonFile(sweepDir / "sweep.json");
+    sweepJson["cases"][0]["metadata"] = liveRowMetadata(liveRows);
+    sweepJson["cases"][0]["tensor_patches"] = patches;
+    writeJsonFile(sweepDir / "sweep.json", sweepJson);
+
+    const auto discovered = discoverBundles(_tempDir);
+    const auto* sweepCase = findByTest(discovered, "rows_fp32_nchw");
+    ASSERT_NE(sweepCase, nullptr);
+    const auto sweep = loadIntegrationTestBundle(*sweepCase, _sweeps);
+    ASSERT_TRUE(std::holds_alternative<IntegrationTestBundle>(sweep));
+    EXPECT_EQ(std::get<IntegrationTestBundle>(sweep).metadata.liveRows, expected);
+}
+
+TEST_F(TestBundleDiscoveryFixture, ValidLiveRowsLikeARaggedTensorLoad)
+{
+    using hipdnn_integration_tests::OutputLiveRows;
+    const auto dir = _tempDir / "op" / "rows";
+    createMinimalBundle(dir, "rows");
+    auto graph = readJsonFile(dir / "rows.json");
+    setTensorFields(
+        graph, nlohmann::json::parse(R"([{"uid": 0, "set": {"ragged_offset_tensor_uid": 4}}])"));
+    writeJsonFile(dir / "rows.json", graph);
+    writeJsonFile(dir / "rows.meta.json", liveRowMetadata(R"([{"uid": 5, "like": 0}])"));
+
+    const auto direct = loadIntegrationTestBundle(dir / "rows.json");
+    ASSERT_TRUE(std::holds_alternative<IntegrationTestBundle>(direct));
+    EXPECT_EQ(std::get<IntegrationTestBundle>(direct).metadata.liveRows,
+              (std::vector<OutputLiveRows>{{5, std::nullopt, std::nullopt, 0}}));
+}
+
+// Live rows change only the comparison, so a bundle with golden data keeps it.
+TEST_F(TestBundleDiscoveryFixture, LiveRowsInABundleWithGoldenDataLoad)
+{
+    const auto dir = _tempDir / "op" / "rows";
+    createLoadableBundle(dir, "rows");
+    auto graph = readJsonFile(dir / "rows.json");
+    setTensorFields(graph,
+                    nlohmann::json::parse(std::string("[") + K_INT32_LENGTHS_IN_UID_1 + "]"));
+    writeJsonFile(dir / "rows.json", graph);
+    writeJsonFile(dir / "rows.meta.json",
+                  liveRowMetadata(R"([{"uid": 5, "axis": 2, "lengths": 1}])"));
+    std::ofstream(dir / "rows.tensors.dvc") << "outs:\n";
+
+    const auto direct = loadIntegrationTestBundle(dir / "rows.json");
+    ASSERT_TRUE(std::holds_alternative<IntegrationTestBundle>(direct));
+    EXPECT_EQ(std::get<IntegrationTestBundle>(direct).metadata.liveRows.size(), 1u);
+}
+
+TEST_F(TestBundleDiscoveryFixture, LiveRowsInFormatVersion1MetadataFailTheLoad)
+{
+    const auto dir = _tempDir / "op" / "rows";
+    createMinimalBundle(dir, "rows");
+    writeJsonFile(
+        dir / "rows.meta.json",
+        nlohmann::json{{"format_version", 1},
+                       {"live_rows", nlohmann::json::parse(R"([{"uid": 5, "like": 0}])")}});
+    const auto message = failedLoadMessage(_tempDir, _sweeps);
+    EXPECT_NE(message.find("live_rows needs format_version 2"), std::string::npos) << message;
+}
+
 TEST_F(TestBundleDiscoveryFixture, AliasInFormatVersion1MetadataFailsTheLoad)
 {
     const auto v1Aliases = nlohmann::json{
@@ -2884,6 +3151,16 @@ std::vector<AbsentRuleCase> absentRuleCases()
          metadataField("start_offsets",
                        nlohmann::json::array({{{"uid", SINK}, {"start_offset", 16}}})),
          "absent tensor 0 has a metadata start_offsets entry"},
+        {"live_rows_output",
+         metadataField("live_rows", nlohmann::json::array({{{"uid", SINK}, {"like", O_UID}}})),
+         "absent tensor 0 is named by a metadata live_rows entry"},
+        {"live_rows_lengths",
+         metadataField("live_rows",
+                       nlohmann::json::array({{{"uid", STATS}, {"axis", 2}, {"lengths", SINK}}})),
+         "absent tensor 0 is named by a metadata live_rows entry"},
+        {"live_rows_like",
+         metadataField("live_rows", nlohmann::json::array({{{"uid", STATS}, {"like", SINK}}})),
+         "absent tensor 0 is named by a metadata live_rows entry"},
         {"golden_declared",
          caseField("golden", nlohmann::json{{"path", "golden/absent_case/tensors.dvc"}}),
          "absent_tensors and golden data do not mix"},

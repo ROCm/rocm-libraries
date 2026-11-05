@@ -36,6 +36,17 @@ struct TensorMismatch
     std::string report; ///< formatted header plus per-element diff, ready to print
 };
 
+/// The live rows of one dense output. A position whose index on `axis` is at least
+/// `lengths[index[0]]` holds no defined value and is not compared.
+struct LiveRows
+{
+    int axis = 1;
+    std::vector<int64_t> lengths;
+};
+
+/// Live rows keyed by output uid.
+using LiveRowMap = std::unordered_map<int64_t, LiveRows>;
+
 /// Where the expected values for one output uid come from — golden data on the
 /// bundle, or a reference executor's own output buffers.
 using ExpectedTensorLookup = std::function<hipdnn_data_sdk::utilities::ITensor&(int64_t uid)>;
@@ -122,6 +133,11 @@ std::optional<TensorMismatch>
 ///
 /// `toleranceFor` resolves how each output is compared, so the caller owns the TOML
 /// override and this stays free of TestConfig.
+///
+/// An output in `liveRows` is compared at `liveRowSite` (or at `site` when it is not set)
+/// through a host view of each side that skips the positions past each batch's live
+/// length. A live-row output at the device site is reported as not comparable. Throws
+/// std::invalid_argument when an entry does not fit its output.
 std::vector<TensorMismatch>
     compareOutputs(const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper& wrapper,
                    const std::vector<int64_t>& outputUids,
@@ -129,7 +145,9 @@ std::vector<TensorMismatch>
                    const ExpectedTensorLookup& expectedFor,
                    const ToleranceLookup& toleranceFor,
                    ValidationSite site,
-                   const std::string& contextLine);
+                   const std::string& contextLine,
+                   const LiveRowMap& liveRows = {},
+                   std::optional<ValidationSite> liveRowSite = std::nullopt);
 
 /// The tensor's name, or "uid=N" when the graph did not give it one.
 ///
