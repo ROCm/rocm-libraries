@@ -63,7 +63,7 @@ struct GridwiseReduction_xy_to_x_direct_threadwise
                                int origReduceLen,
                                compType alpha,
                                const srcDataType* const __restrict__ p_src_global,
-                               dstDataType beta,
+                               compType beta,
                                dstDataType* const __restrict__ p_dst_global,
                                const int* const __restrict__ ws_indices_global,
                                int* const __restrict__ indices_global);
@@ -74,7 +74,7 @@ struct GridwiseReduction_xy_to_x_direct_threadwise
                                   int origReduceLen,
                                   compType alpha,
                                   const srcDataType* const __restrict__ p_src_global,
-                                  dstDataType beta,
+                                  compType beta,
                                   dstDataType* const __restrict__ p_dst_global,
                                   const int* const __restrict__ ws_indices_global,
                                   int* const __restrict__ indices_global)
@@ -170,7 +170,9 @@ struct GridwiseReduction_xy_to_x_direct_threadwise
             threadwise_dst_load.Run(
                 dst1dDesc, dst_global_buf, ReducedDataDesc, make_tuple(I0), priorDstValue_buf);
 
-            dstValue_buf(I0) += priorDstValue_buf[I0] * beta;
+            accuValue_buf(I0) += type_convert<compType>{}(priorDstValue_buf[I0]) * beta;
+
+            dstValue_buf(I0) = type_convert<dstDataType>{}(accuValue_buf[I0]);
         }
 
         auto threadwise_dst_store =
@@ -197,7 +199,7 @@ struct GridwiseReduction_xy_to_x_direct_threadwise
                                   int origReduceLen,
                                   compType alpha,
                                   const srcDataType* const __restrict__ p_src_global,
-                                  dstDataType beta,
+                                  compType beta,
                                   dstDataType* const __restrict__ p_dst_global,
                                   const int* const __restrict__ ws_indices_global,
                                   int* const __restrict__ indices_global)
@@ -298,7 +300,9 @@ struct GridwiseReduction_xy_to_x_direct_threadwise
             threadwise_dst_load.Run(
                 dst1dDesc, dst_global_val_buf, ReducedDataDesc, make_tuple(I0), priorDstValue_buf);
 
-            dstValue_buf(I0) += priorDstValue_buf[I0] * beta;
+            accuValue_buf(I0) += type_convert<compType>{}(priorDstValue_buf[I0]) * beta;
+
+            dstValue_buf(I0) = type_convert<dstDataType>{}(accuValue_buf[I0]);
         }
 
         auto threadwise_dst_val_store =
@@ -341,7 +345,7 @@ struct GridwiseReduction_xy_to_x_direct_threadwise
                                   int origReduceLen,
                                   compType alpha,
                                   const srcDataType* const __restrict__ ws_values_global,
-                                  dstDataType beta,
+                                  compType beta,
                                   dstDataType* const __restrict__ p_dst_global,
                                   const int* const __restrict__ ws_indices_global,
                                   int* const __restrict__ indices_global)
@@ -461,7 +465,9 @@ struct GridwiseReduction_xy_to_x_direct_threadwise
             threadwise_dst_load.Run(
                 dst1dDesc, dst_global_val_buf, ReducedDataDesc, make_tuple(I0), priorDstValue_buf);
 
-            dstValue_buf(I0) += priorDstValue_buf[I0] * beta;
+            accuValue_buf(I0) += type_convert<compType>{}(priorDstValue_buf[I0]) * beta;
+
+            dstValue_buf(I0) = type_convert<dstDataType>{}(accuValue_buf[I0]);
         }
 
         auto threadwise_dst_val_store =

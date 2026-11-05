@@ -676,6 +676,76 @@ std::vector<MultiBlockCase> AlphaConversionInt8Indices()
     return cases;
 }
 
+// beta is converted to the compute type as well, and the blend with the prior output is done in
+// the compute type; the result is rounded to the output type once. Unlike alpha, beta is also
+// applied by the second pass of a multi-block reduction, whose output type differs from the
+// compute type: the shapes add the three second-pass classes (2, 20 and 512 partials).
+const std::vector<const Shape*> betaShapes = [] {
+    auto shapes = alphaShapes;
+    shapes.push_back(&warp2Partial);
+    shapes.push_back(&block2All);
+    return shapes;
+}();
+const std::vector<const Shape*> betaIndicesShapes = [] {
+    auto shapes = singlePassShapes;
+    shapes.push_back(&thread2Partial);
+    shapes.push_back(&warp2Partial);
+    shapes.push_back(&block2All);
+    return shapes;
+}();
+
+// FP16 output: 12 + 1000 * 1.0004 is 1012.4 in FP32 and rounds to 1012.5 in FP16; with beta
+// rounded to FP16 first (1.0) the result would be 1012.
+std::vector<MultiBlockCase> BetaConversionFp16()
+{
+    std::vector<MultiBlockCase> cases;
+    for(const auto* s : betaShapes)
+    {
+        cases.push_back(MakeCase(
+            "BetaFp16", miopenHalf, miopenFloat, MIOPEN_REDUCE_TENSOR_AVG, *s, Pattern::Const12));
+        cases.back().beta        = 1.0004f;
+        cases.back().outputInit  = 1000.0f;
+        cases.back().exactOutput = true;
+    }
+    return cases;
+}
+
+// 0.5 * 100 + 0.5 * 10 is 55; a beta converted to INT8 first would be 0 and the result 50
+std::vector<MultiBlockCase> BetaConversionInt8()
+{
+    std::vector<MultiBlockCase> cases;
+    for(const auto* s : betaShapes)
+    {
+        cases.push_back(MakeCase(
+            "BetaInt8", miopenInt8, miopenFloat, MIOPEN_REDUCE_TENSOR_AVG, *s, Pattern::Const100));
+        cases.back().alpha      = 0.5f;
+        cases.back().beta       = 0.5f;
+        cases.back().outputInit = 10.0f;
+    }
+    return cases;
+}
+
+// the same blend for MAX with flattened indices (the maximum is 100), in the first-call kernels
+// with indices and in the second pass over the indices
+std::vector<MultiBlockCase> BetaConversionInt8Indices()
+{
+    std::vector<MultiBlockCase> cases;
+    for(const auto* s : betaIndicesShapes)
+    {
+        cases.push_back(MakeCase("BetaInt8MaxIdx",
+                                 miopenInt8,
+                                 miopenFloat,
+                                 MIOPEN_REDUCE_TENSOR_MAX,
+                                 *s,
+                                 Pattern::ExtremeIndices,
+                                 MIOPEN_REDUCE_TENSOR_FLATTENED_INDICES));
+        cases.back().alpha      = 0.5f;
+        cases.back().beta       = 0.5f;
+        cases.back().outputInit = 10.0f;
+    }
+    return cases;
+}
+
 std::vector<MultiBlockCase> Fp32Standard()
 {
     return {
@@ -836,6 +906,8 @@ INSTANTIATE_TEST_SUITE_P(Standard,
                              cases.insert(cases.end(), nan.begin(), nan.end());
                              const auto alpha = AlphaConversionFp16();
                              cases.insert(cases.end(), alpha.begin(), alpha.end());
+                             const auto beta = BetaConversionFp16();
+                             cases.insert(cases.end(), beta.begin(), beta.end());
                              return cases;
                          }()),
                          MIOPEN_REDUCE_MULTIBLOCK_NAME);
@@ -851,6 +923,10 @@ INSTANTIATE_TEST_SUITE_P(Standard,
                              cases.insert(cases.end(), alpha.begin(), alpha.end());
                              const auto idx = AlphaConversionInt8Indices();
                              cases.insert(cases.end(), idx.begin(), idx.end());
+                             const auto beta = BetaConversionInt8();
+                             cases.insert(cases.end(), beta.begin(), beta.end());
+                             const auto betaIdx = BetaConversionInt8Indices();
+                             cases.insert(cases.end(), betaIdx.begin(), betaIdx.end());
                              return cases;
                          }()),
                          MIOPEN_REDUCE_MULTIBLOCK_NAME);
