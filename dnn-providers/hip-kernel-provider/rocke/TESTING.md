@@ -741,6 +741,12 @@ The current installed compiler-tool contract is:
 | Linux without `ROCM_PATH` | no | no |
 | Windows | no Unix-derived paths | no inferred requirement |
 
+`rocke_pytest`, `rocke_library_mla_pytest` and `rocke_library_attention_cpu_pytest`
+take the compiler paths; only `rocke_library_mla_pytest` takes the requirement.
+The attention CPU entry needs the paths for the reduce-LDS comgr cases in
+`test_attention_tiled_3d_reduce_lds.py`, which otherwise skip on a missing
+`llvm-objdump`.
+
 The table describes values added by the generated manifest. CTest still passes
 through its parent process environment, so a caller that explicitly exports
 `ROCKE_REQUIRE_COMPILER_TOOLS=1` opts into strict checks independently of this
@@ -764,7 +770,8 @@ python -m pytest \
 
 The test reads the standalone and provider-layout generated manifests through
 CTest, rejects duplicate variable names, and compares the complete environments
-of `rocke_pytest` and `rocke_library_mla_pytest` with and without a synthetic
+of `rocke_pytest`, `rocke_library_mla_pytest` and
+`rocke_library_attention_cpu_pytest` with and without a synthetic
 `ROCM_PATH`. Keep the expectations independently constructed rather than reusing
 the production CMake lists; otherwise production and test can repeat the same
 mistake.

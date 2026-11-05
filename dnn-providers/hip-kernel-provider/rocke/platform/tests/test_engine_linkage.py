@@ -252,6 +252,9 @@ def test_installed_ctest_entries_get_scoped_environment_contracts(
             **expected_artifacts,
         }
         expected_mla_environment = {"PYTHONPATH": f"{test_ctest_rel}tests/library"}
+        expected_attention_cpu_environment = {
+            "PYTHONPATH": f"{test_ctest_rel}tests/library"
+        }
         if sys.platform == "linux" and rocm_path is not None:
             compiler_environment = {
                 "PATH": os.pathsep.join(
@@ -266,11 +269,17 @@ def test_installed_ctest_entries_get_scoped_environment_contracts(
             expected_platform_environment.update(compiler_environment)
             expected_mla_environment.update(compiler_environment)
             expected_mla_environment["ROCKE_REQUIRE_COMPILER_TOOLS"] = "1"
+            # Tool discovery only: the reduce-LDS comgr cases need llvm-objdump.
+            expected_attention_cpu_environment.update(compiler_environment)
 
         assert environment_for(tests, "rocke_pytest") == expected_platform_environment
         assert (
             environment_for(tests, "rocke_library_mla_pytest")
             == expected_mla_environment
+        )
+        assert (
+            environment_for(tests, "rocke_library_attention_cpu_pytest")
+            == expected_attention_cpu_environment
         )
 
 
