@@ -610,7 +610,14 @@ std::vector<MultiBlockCase> NanPropagationStandard()
 // alpha is converted to the compute type in every reduction, in a single pass or in several
 // blocks: the same data reduced over 512 elements (one pass) and over 2048 elements (blocks) gives
 // the same result. An alpha converted to the input type first would change the one-pass result.
+// One single-pass shape per kernel class (one block per output, 1024 or fewer elements; the limits
+// are 256 for a warp and warpSize for a thread, 64 or 32): 512 elements run on a block, 128 on a
+// warp and 16 on a thread, on both wave sizes.
 const Shape singlePass512{"SinglePass512", {2, 512}, {1}};
+const Shape singlePass128{"SinglePass128", {2, 128}, {1}};
+const Shape singlePass16{"SinglePass16", {2, 16}, {1}};
+const std::vector<const Shape*> alphaShapes = {
+    &singlePass512, &singlePass128, &singlePass16, &thread2Partial};
 
 // 1000 * 1.0004 is 1000.4 in FP32 and rounds to 1000.5 in FP16; with alpha rounded to FP16 first
 // (1.0) the result would be 1000
@@ -620,7 +627,7 @@ std::vector<MultiBlockCase> AlphaConversionFp16()
     constexpr auto fl = miopenFloat;
 
     std::vector<MultiBlockCase> cases;
-    for(const auto* s : {&singlePass512, &thread2Partial})
+    for(const auto* s : alphaShapes)
     {
         cases.push_back(
             MakeCase("AlphaFp16", hf, fl, MIOPEN_REDUCE_TENSOR_AVG, *s, Pattern::Const1000));
@@ -637,10 +644,29 @@ std::vector<MultiBlockCase> AlphaConversionInt8()
     constexpr auto fl = miopenFloat;
 
     std::vector<MultiBlockCase> cases;
-    for(const auto* s : {&singlePass512, &thread2Partial})
+    for(const auto* s : alphaShapes)
     {
         cases.push_back(
             MakeCase("AlphaInt8", i8, fl, MIOPEN_REDUCE_TENSOR_AVG, *s, Pattern::Const100));
+        cases.back().alpha = 0.5f;
+    }
+    return cases;
+}
+
+// MIN/MAX/AMAX with flattened indices run another instance of the single-pass kernels: the
+// maximum is 100 and alpha 0.5 gives 50
+std::vector<MultiBlockCase> AlphaConversionInt8Indices()
+{
+    std::vector<MultiBlockCase> cases;
+    for(const auto* s : {&singlePass512, &singlePass128, &singlePass16})
+    {
+        cases.push_back(MakeCase("AlphaInt8MaxIdx",
+                                 miopenInt8,
+                                 miopenFloat,
+                                 MIOPEN_REDUCE_TENSOR_MAX,
+                                 *s,
+                                 Pattern::ExtremeIndices,
+                                 MIOPEN_REDUCE_TENSOR_FLATTENED_INDICES));
         cases.back().alpha = 0.5f;
     }
     return cases;
@@ -819,6 +845,8 @@ INSTANTIATE_TEST_SUITE_P(Standard,
                              auto cases       = Int8Standard();
                              const auto alpha = AlphaConversionInt8();
                              cases.insert(cases.end(), alpha.begin(), alpha.end());
+                             const auto idx = AlphaConversionInt8Indices();
+                             cases.insert(cases.end(), idx.begin(), idx.end());
                              return cases;
                          }()),
                          MIOPEN_REDUCE_MULTIBLOCK_NAME);
