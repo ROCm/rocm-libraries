@@ -20,7 +20,12 @@ foreach(arch IN LISTS archs)
         set(extop_xnack_args --xnack)
     endif()
     set(WAVEFRONT "-mwavefrontsize64")
-    if(arch MATCHES "^gfx1[12][0-9][0-9](-[a-z0-9]+)*$")
+    # gfx9xx is wave64; every RDNA part (gfx101x/gfx103x/gfx11xx/gfx12xx) is
+    # wave32, so the ext-op kernels have to be assembled for wave32 there. The
+    # old pattern stopped at gfx11xx and assembled gfx1030 as wave64, while the
+    # generator still emitted wave32 kernel metadata -- the two disagreed and
+    # the layernorm/amax kernels produced wrong numbers on gfx1030.
+    if(arch MATCHES "^gfx1[0-2][0-9][0-9](-[a-z0-9]+)*$")
         set(WAVEFRONT "-mno-wavefrontsize64")
     endif()
     # Enable true16 on all gfx11*/gfx12* (NoSDWA). "SHELL:" keeps the flag group
@@ -76,6 +81,12 @@ foreach(arch IN LISTS archs)
         COMMAND ${CMAKE_COMMAND} -E env ROCISA_BACKEND=rocisa ${HIPBLASLT_PYTHON_COMMAND} "${ops_dir}/AMaxGenerator.py" -o "${CMAKE_CURRENT_BINARY_DIR}/A_S_H_256_4_${arch}.s" -t S -d H -w 256 -c 4 --arch ${arch} --toolchain ${CMAKE_CXX_COMPILER} ${extop_xnack_args}
         COMMENT "Creating Layer Norm, Softmax and Amax Assembly for ${arch}"
         DEPENDS ${HIPBLASLT_PYTHON_DEPS}
+            # The generators decide the wavefront size of the kernels, so an edit
+            # to them has to re-trigger the assembly. Without this the stale .s
+            # files survive and the kernels keep the old wavefront.
+            "${ops_dir}/LayerNormGenerator.py"
+            "${ops_dir}/SoftmaxGenerator.py"
+            "${ops_dir}/AMaxGenerator.py"
     )
 
     set(output_code_object_file "${CMAKE_CURRENT_BINARY_DIR}/extop_${arch}.co")

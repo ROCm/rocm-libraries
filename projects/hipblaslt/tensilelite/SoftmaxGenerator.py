@@ -478,7 +478,17 @@ class SoftmaxKernelGenerator:
                     module.add(ri.VCmpLtU32(VCC(), vgpr(reduction_col_reg_idx), sgpr(n_reg_idx)))
                     module.add(self.SAndBX(EXEC(), sgpr(cmp_res_reg_idx, self.laneSGPRCount), VCC()))
                     module.add(ri.VAddU32(vgpr(r_reg_idx), hex(cmp_byte_rel_offset), vgpr(l_reg_idx)))
-                    module.add(self.lds_sum(l_reg_idx, r_reg_idx))
+                    module.add(self.lds_sum(l_reg_idx, r_reg_idx, sync=False))
+                # The barrier has to be reached by every wave of the workgroup,
+                # but the scope above narrows the active lanes to the ones
+                # that own a column of this tree level, and that set shrinks
+                # as the level gets deeper (4 waves, then 2, then 1).  s_barrier
+                # counts waves, so a barrier that only some waves reach lets the
+                # count reach the wave count at the wrong point, and the next
+                # level reads a slot nobody has written yet.  Waiting outside
+                # the scope keeps the arrivals balanced.
+                module.add(ri.SWaitCnt(dscnt=0))
+                module.add(ri.SBarrier())
 
             self.vgpr_pool.checkIn(reduction_col_reg_idx)
 
@@ -519,7 +529,11 @@ class SoftmaxKernelGenerator:
                     module.add(ri.VCmpLtU32(VCC(), vgpr(reduction_col_reg_idx), sgpr(n_reg_idx)))
                     module.add(self.SAndBX(EXEC(), sgpr(cmp_res_reg_idx, self.laneSGPRCount), VCC()))
                     module.add(ri.VAddU32(vgpr(r_reg_idx), hex(cmp_byte_rel_offset), vgpr(l_reg_idx)))
-                    module.add(self.lds_max(l_reg_idx, r_reg_idx))
+                    module.add(self.lds_max(l_reg_idx, r_reg_idx, sync=False))
+                # See reduction_sum: the barrier has to be reached by every
+                # wave, so it must sit outside the narrowing exec scope.
+                module.add(ri.SWaitCnt(dscnt=0))
+                module.add(ri.SBarrier())
 
             self.vgpr_pool.checkIn(reduction_col_reg_idx)
 
@@ -612,6 +626,13 @@ class SoftmaxKernelGenerator:
                 mod.add(self.reduction_max(n_reg_idx))
                 max_addr_mod, max_reg_idx = self.max_elem()
                 mod.add(max_addr_mod)
+                # The row max is read from the same LDS slot that the exp
+                # values are written to (column 0 of the row), and that write
+                # happens with no barrier in between.  Another wave can run
+                # ahead and overwrite the slot before this wave has read it,
+                # and the lane then subtracts the exp value instead of the
+                # max.  The barrier separates the read from the write.
+                mod.add(ri.SBarrier())
                 mod.add(self.sub_max(data_reg_idx, max_reg_idx))
                 self.vgpr_pool.checkIn(max_reg_idx)
 
@@ -751,7 +772,11 @@ if __name__ == '__main__':
         assignGlobalParameters({}, isaInfoMap)
 
     _global_ti.init(isa, toolchain_path, False)
-    waveFrontSize = 32 if isa[0] in [11, 12] else 64
+    # gfx9xx is wave64; every RDNA part (gfx101x/gfx103x/gfx11xx/gfx12xx) is
+    # wave32. This mirrors rocisa's "HasWave32" capability (ISA major 10/11/12);
+    # the old test stopped at 11 and left gfx1030 on the wave64 path, which
+    # assembles 64-wide code for a wave32-only part.
+    waveFrontSize = 32 if isa[0] >= 10 else 64
     _global_ti.setKernel(isa, waveFrontSize)
     softmax = SoftmaxKernelGenerator(DataType('S'), n, m, 256, waveFrontSize, arch, isa)
     kernel_body = softmax.softmax_kernel_body()

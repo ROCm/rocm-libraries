@@ -64,6 +64,8 @@ class ComputeStoreVgprsVALU(ComputeStoreVgprs):
         if kernel["BufferStore"]:
             writer.vgprs.cinRowPtr  = writer.vgprPool.checkOut(1, "cinRowPtr")
             writer.vgprs.coutRowPtrD = writer.vgprPool.checkOut(1, "coutRowPtrD")
+            if kernel["ProblemType"]["UseE"]:
+                writer.vgprs.coutRowPtrE = writer.vgprPool.checkOut(1, "coutRowPtrE")
 
         with writer.allocTmpSgpr(3, tag="ComputeStoreVgprsVALU_tmpSgprInfo") as tmpSgprInfo:
             tmpS0 = tmpSgprInfo.idx
@@ -100,6 +102,11 @@ class ComputeStoreVgprsVALU(ComputeStoreVgprs):
                 module.add(VMulLOU32(dst=vgpr(writer.vgprs.cinRowPtr), src0=vgpr(tid1), src1=sgpr(strideC1), comment="rowStart vgpr"))
                 strideD1 = "StrideD%s" % (writer.states.indexChars[packedC1[0]])
                 module.add(VMulLOU32(dst=vgpr(writer.vgprs.coutRowPtrD), src0=vgpr(tid1), src1=sgpr(strideD1), comment="rowStart vgpr"))
+                if kernel["ProblemType"]["UseE"] and ((kernel["GlobalSplitU"] == 1 or kernel["GlobalSplitU"] == -1) or isPersistent(kernel)):
+                    # The E row pointer holds the raw tile row index; the stride
+                    # is folded in later, where the E offset is updated. Do it
+                    # here, before the code below overwrites tid1 with coord1.
+                    module.add(VMovB32(dst=vgpr(writer.vgprs.coutRowPtrE), src=vgpr(tid1), comment=" save offset 1 for E"))
                 module.addSpaceLine()
 
             # Compute coord0 and coord1

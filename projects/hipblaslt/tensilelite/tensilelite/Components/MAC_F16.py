@@ -23,7 +23,9 @@
 ################################################################################
 
 from rocisa.code import Module
+from rocisa.container import vgpr, VOP3PModifiers
 from rocisa.enum import DataTypeEnum
+from rocisa.instruction import VFmaF16, VFmaPKF16, VMacF16
 from ..Common.DataType import DataType
 from ..Component import Component, MAC
 
@@ -39,7 +41,7 @@ class MAC_F16_Plain(MAC):
                               "MacDataTypeB": DataType(DataTypeEnum.Half),
                               "HighPrecisionAccumulate": False}}
 
-    def __call__(self, writer, m, innerUnroll):
+    def __call__(self, writer, tPA, tPB, m, innerUnroll):
         kernel = writer.states.kernel
 
         module = Module("MAC_F16_Plain")
@@ -67,13 +69,17 @@ class MAC_F16_Plain(MAC):
                             vars["blockB"] = blockB
                             vars["iui"] = iui
 
-                            cStr = "v[vgprValuC+{blockA}+{blockB}*{ThreadTile0}+0]".format_map(vars)
-                            aStr = "v[vgprValuA_X{m}_I{iui}+{blockA}]".format_map(vars)
-                            bStr = "v[vgprValuB_X{m}_I{iui}+{blockB}]".format_map(vars)
-                            module.addInst("v_mac_f16", cStr, aStr, bStr, "")
-                            module.add(priority(writer, 1, "Raise priority while processing macs"))
+                            cStr = vgpr("ValuC+{blockA}+{blockB}*{ThreadTile0}+0".format_map(vars))
+                            aStr = vgpr("ValuA_X{m}_I{iui}+{blockA}".format_map(vars))
+                            bStr = vgpr("ValuB_X{m}_I{iui}+{blockB}".format_map(vars))
+                            module.add(VMacF16(dst=cStr, src0=aStr, src1=bStr))
+                            prio = priority(writer, 1, "Raise priority while processing macs")
+                            if prio:
+                                module.add(prio)
 
-        module.add(priority(writer, 0, "Reset priority after macs"))
+        prio = priority(writer, 0, "Reset priority after macs")
+        if prio:
+            module.add(prio)
         return module
 
 
@@ -85,7 +91,7 @@ class FMA_F16_NonPacked(MAC):
                               "MacDataTypeB": DataType(DataTypeEnum.Half),
                               "HighPrecisionAccumulate": False}}
 
-    def __call__(self, writer, m, innerUnroll):
+    def __call__(self, writer, tPA, tPB, m, innerUnroll):
         kernel = writer.states.kernel
 
         module = Module("FMA_F16_NonPacked")
@@ -111,23 +117,29 @@ class FMA_F16_NonPacked(MAC):
                     vars["blockB"] = blockB
                     vars["iui"] = iui
 
-                    cIdxExpr0 = "{blockA} + {blockB}*{ThreadTile0} + 0".format_map(vars)
-                    cStr0 = "v[vgprValuC + {}]".format(eval(cIdxExpr0))
+                    aStr = "ValuA_X{m}_I{iui}+{blockA}".format_map(vars)
+                    bStr = "ValuB_X{m}_I{iui}+{blockB}".format_map(vars)
 
-                    # /2 b/c of 2 f16's per 32-bit vgpr
-                    cIdxExpr1 = "{blockA} + {blockB}*{ThreadTile0} + {Half_ThreadTile0}".format_map(vars)
-                    cStr1 = "v[vgprValuC + {}]".format(eval(cIdxExpr1))
+                    cIdx0 = blockA + blockB * kernel["ThreadTile0"]
+                    cIdx1 = cIdx0 + kernel["ThreadTile0"] // 2
+                    cStr0 = "ValuC+%d" % cIdx0
+                    cStr1 = "ValuC+%d" % cIdx1
 
-                    aStr = "v[vgprValuA_X{m}_I{iui} + {blockA}]".format_map(vars)
-                    bStr = "v[vgprValuB_X{m}_I{iui} + {blockB}]".format_map(vars)
+                    module.add(VFmaF16(dst=vgpr(cStr0), src0=vgpr(aStr), src1=vgpr(bStr), src2=vgpr(cStr0), \
+                                        vop3=VOP3PModifiers(op_sel=[0,0,0,0]), comment="ValuC[%u] iui=%u" % (cIdx0, vars["iui"])))
+                    prio = priority(writer, 1, "Raise priority while processing macs")
+                    if prio:
+                        module.add(prio)
+                    module.add(VFmaF16(dst=vgpr(cStr1), src0=vgpr(aStr), src1=vgpr(bStr), src2=vgpr(cStr1), \
+                                        vop3=VOP3PModifiers(op_sel=[0,1,0,0]), comment="ValuC[%u] iui=%u" % (cIdx1, vars["iui"])))
+                    module.add(VFmaF16(dst=vgpr(cStr0), src0=vgpr(aStr), src1=vgpr(bStr), src2=vgpr(cStr0), \
+                                        vop3=VOP3PModifiers(op_sel=[1,0,1,1]), comment="ValuC[%u] iui=%u" % (cIdx0, vars["iui"])))
+                    module.add(VFmaF16(dst=vgpr(cStr1), src0=vgpr(aStr), src1=vgpr(bStr), src2=vgpr(cStr1), \
+                                        vop3=VOP3PModifiers(op_sel=[1,1,1,1]), comment="ValuC[%u] iui=%u" % (cIdx1, vars["iui"])))
 
-                    module.addInst("v_fma_f16", cStr0, aStr, bStr, cStr0, "op_sel:[0,0,0,0]", cIdxExpr0)
-                    module.add(priority(writer, 1, "Raise priority while processing macs"))
-                    module.addInst("v_fma_f16", cStr1, aStr, bStr, cStr1, "op_sel:[0,1,0,0]", cIdxExpr1)
-                    module.addInst("v_fma_f16", cStr0, aStr, bStr, cStr0, "op_sel:[1,0,1,1]", cIdxExpr0)
-                    module.addInst("v_fma_f16", cStr1, aStr, bStr, cStr1, "op_sel:[1,1,1,1]", cIdxExpr1)
-
-        module.add(priority(writer, 0, "Reset priority after macs"))
+        prio = priority(writer, 0, "Reset priority after macs")
+        if prio:
+            module.add(prio)
         return module
 
 class FMA_F16_Packed(MAC):
@@ -137,7 +149,7 @@ class FMA_F16_Packed(MAC):
                               "MacDataTypeB": DataType(DataTypeEnum.Half),
                               "HighPrecisionAccumulate": False}}
 
-    def __call__(self, writer, m, innerUnroll):
+    def __call__(self, writer, tPA, tPB, m, innerUnroll):
         kernel = writer.states.kernel
 
         module = Module("FMA_F16_Packed")
@@ -163,23 +175,27 @@ class FMA_F16_Packed(MAC):
                     vars["blockB"] = blockB
                     vars["iui"] = iui
 
-                    cIdxExpr = "{blockA} + {blockB}*{ThreadTile0} + 0".format_map(vars)
+                    cIdx0 = blockA + blockB * kernel["ThreadTile0"]
+                    cIdx1 = cIdx0 + kernel["ThreadTile0"] // 2
+
+                    aStr = "ValuA_X{m}_I{iui}+{blockA}".format_map(vars)
+                    bStr = "ValuB_X{m}_I{iui}+{blockB}".format_map(vars)
 
                     # /2 b/c of 2 f16's per 32-bit vgpr
-                    cStr = "v[vgprValuC + {}]".format(eval(cIdxExpr))
+                    module.add(VFmaPKF16(dst=vgpr("ValuC+%d" % cIdx0), src0=vgpr(aStr), src1=vgpr(bStr), \
+                                            src2=vgpr("ValuC+%d" % cIdx0), \
+                                            vop3=VOP3PModifiers(op_sel=[0,0,0], op_sel_hi=[1,0,1]), \
+                                            comment="ValuC[%u] iui=%u" % (cIdx0, vars["iui"])))
+                    prio = priority(writer, 1, "Raise priority while processing macs")
+                    if prio:
+                        module.add(prio)
 
-                    aStr = "v[vgprValuA_X{m}_I{iui} + {blockA}]".format_map(vars)
-                    bStr = "v[vgprValuB_X{m}_I{iui} + {blockB}]".format_map(vars)
+                    module.add(VFmaPKF16(dst=vgpr("ValuC+%d" % cIdx1), src0=vgpr(aStr), src1=vgpr(bStr), \
+                                            src2=vgpr("ValuC+%d" % cIdx1), \
+                                            vop3=VOP3PModifiers(op_sel=[0,1,0], op_sel_hi=[1,1,1]), \
+                                            comment="ValuC[%u] iui=%u" % (cIdx1, vars["iui"])))
 
-                    module.addInst("v_pk_fma_f16", cStr, aStr, bStr, cStr, "op_sel:[0,0,0]", "op_sel_hi:[1,0,1]", cIdxExpr)
-                    module.add(priority(writer, 1, "Raise priority while processing macs"))
-
-                    cIdxExpr = "{blockA} + {blockB}*{ThreadTile0} + {Half_ThreadTile0}".format_map(vars)
-                    cIdxVal  = eval(vars["cIdxExpr"])
-
-                    cStr = "v[vgprValuC + {cIdxExpr}]".format_map(vars)
-
-                    module.addInst("v_pk_fma_f16", cStr, aStr, bStr, cStr, "op_sel:[0,1,0]", "op_sel_hi:[1,1,1]", cIdxExpr)
-
-        module.add(priority(writer, 0, "Reset priority after macs"))
+        prio = priority(writer, 0, "Reset priority after macs")
+        if prio:
+            module.add(prio)
         return module
