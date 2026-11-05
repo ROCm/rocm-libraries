@@ -231,3 +231,39 @@ Tests:
   matrix_type: [rocsparse_matrix_type_general]
   formatA: [rocsparse_format_csc]
   filename: [Chevron4]
+
+# CSC without transpose: the CSC solve uses atomic additions, so it is not bitwise reproducible.
+- name: sptrsv_csc
+  category: pre_checkin
+  function: sptrsv_csc
+  indextype: *i32i32_i64i32_i64i64
+  precision: *single_double_precisions_complex_real
+  M_N: *M_N_range_checkin
+  alpha_alphai: *alpha_range_checkin
+  transA: [rocsparse_operation_none]
+  diag: *all_rocsparse_diag_type
+  uplo: *all_rocsparse_fill_mode
+  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  apol: *all_rocsparse_analysis_policy
+  skip_reproducibility: true
+  matrix: [rocsparse_matrix_random]
+  matrix_type: [rocsparse_matrix_type_general]
+  formatA: [rocsparse_format_csc]
+
+- name: sptrsv_csc_file
+  category: nightly
+  function: sptrsv_csc
+  indextype: *i64i32
+  precision: *single_double_precisions_complex
+  M: 1
+  N: 1
+  alpha_alphai: *alpha_range_nightly
+  transA: [rocsparse_operation_none]
+  diag: [rocsparse_diag_type_non_unit]
+  uplo: [rocsparse_fill_mode_lower, rocsparse_fill_mode_upper]
+  baseA: [rocsparse_index_base_zero]
+  skip_reproducibility: true
+  matrix: [rocsparse_matrix_file_rocalution]
+  matrix_type: [rocsparse_matrix_type_general]
+  formatA: [rocsparse_format_csc]
+  filename: [Chevron4]
