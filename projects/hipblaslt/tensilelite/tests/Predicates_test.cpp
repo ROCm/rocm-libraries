@@ -128,6 +128,44 @@ TEST(Predicates, WorkgroupMappingXCCCheck_FallbackTreatsXCCAs1)
     EXPECT_TRUE((*pred)(problem)) << "With fallback status, effective XCC=1 so 38 % 1 == 0";
 }
 
+// Deserialization (default ctor, then value) and evaluations that never read the CU count
+// (XCC=-1, cu-fallback with an explicit XCCG) need no device.
+TEST(Predicates, WorkgroupMappingXCCCheck_ConstructsWithoutADevice)
+{
+    using namespace TensileLite;
+    Predicates::Contraction::WorkgroupMappingXCCCheck deserialized;
+    deserialized.value = {-1, -1};
+    Predicates::Contraction::WorkgroupMappingXCCCheck explicitXCCG(std::array<int, 2>{4, 8});
+
+    auto problem = ContractionProblemGemm::GEMM(false, false, 1024, 1024, 1024, 1024, 1024, 1024,
+                                                 1.0, false, 1);
+    EXPECT_TRUE(deserialized(problem)) << "XCC=-1 should pass without a device query";
+    problem.setParams().setFallbackStatus(true);
+    EXPECT_TRUE(explicitXCCG(problem)) << "cu-fallback with XCCG=8 should pass without a device";
+}
+
+// On a GPU, the first use queries the current device.
+TEST(Predicates, WorkgroupMappingXCCCheck_QueriesTheCurrentDeviceOnFirstUse)
+{
+    using namespace TensileLite;
+    int deviceCount = 0;
+    if(hipGetDeviceCount(&deviceCount) != hipSuccess || deviceCount < 1)
+        GTEST_SKIP() << "needs a HIP device";
+
+    int device = 0;
+    ASSERT_EQ(hipGetDevice(&device), hipSuccess);
+    hipDeviceProp_t prop;
+    ASSERT_EQ(hipGetDeviceProperties(&prop, device), hipSuccess);
+    int physicalCUs = 0;
+    ASSERT_EQ(hipDeviceGetAttribute(
+                  &physicalCUs, hipDeviceAttributePhysicalMultiProcessorCount, device),
+              hipSuccess);
+
+    Predicates::Contraction::WorkgroupMappingXCCCheck pred(std::array<int, 2>{1, -1});
+    EXPECT_EQ(pred.cuCount(), size_t(physicalCUs));
+    EXPECT_EQ(pred.processor(), AMDGPU::toProcessor(prop.gcnArchName));
+}
+
 // ----------------------------------------------------------------------------
 // BufferStoreOffsetLimitCheck bounds the byte range a kernel's output stores
 // can reach, so that solution selection never offers a shape the kernel would
