@@ -43,6 +43,9 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+sys.path.insert(
+    1, str(pathlib.Path(__file__).resolve().parent.parent / "migration-scripts")
+)
 
 from bundle_discovery import (  # noqa: E402
     SWEEP_MANIFEST_NAME,
@@ -56,6 +59,11 @@ from bundle_discovery import (  # noqa: E402
     sidecar_for_graph,
     single_graph_expected_rejection,
     sweep_case_expected_rejection,
+)
+from bundle_utils import (  # noqa: E402
+    ABSENT_TENSORS_KEY,
+    absent_case_problems,
+    prune_absent_tensors,
 )
 from support_claim_schema import (  # noqa: E402
     validate_single_graph_schema,
@@ -207,6 +215,20 @@ def load_sweep_cases(sweep_path: pathlib.Path, errors: list[str] | None):
     if error is not None:
         report_error(errors, f"{sweep_path}: {error}")
     return cases
+
+
+def sweep_version_problem(sweep: dict) -> str | None:
+    """Mirror checkSweepVersion(): why the sweep ``version`` fails, or None.
+
+    An absent ``version`` is 1; only the integer 1 or 2 is accepted. Any other
+    value fails every case of the sweep at load.
+    """
+    if "version" not in sweep:
+        return None
+    version = sweep["version"]
+    if _is_uid(version) and version in (1, 2):
+        return None
+    return f"sweep version {json.dumps(version)} is not 1 or 2"
 
 
 # --------------------------------------------------------------------------
@@ -790,9 +812,20 @@ def collect_sweep_units(
     support_path = sweep_dir / SWEEP_SUPPORT_NAME
     claims = load_sidecar(support_path, validate_sweep_schema, errors)
 
+    sweep_path = sweep_dir / SWEEP_MANIFEST_NAME
     template = read_json_object(sweep_dir / SWEEP_TEMPLATE_NAME, errors)
-    cases = load_sweep_cases(sweep_dir / SWEEP_MANIFEST_NAME, errors)
+    cases = load_sweep_cases(sweep_path, errors)
     if template is None or cases is None:
+        return []
+    # read_sweep_cases() accepted the manifest, so it is a JSON object.
+    sweep, _ = load_json(sweep_path)
+    version_problem = sweep_version_problem(sweep)
+    if version_problem is not None:
+        report_error(
+            errors,
+            f"{sweep_path}: {version_problem}; the harness fails every case of "
+            "the sweep at load",
+        )
         return []
 
     place = place_of(sweep_dir.relative_to(root), sweep_dir, errors)
@@ -828,14 +861,25 @@ def collect_sweep_units(
             continue
         # The order of loadIntegrationTestBundle(), so the first defect
         # reported is the one the harness trips on.
+        case_template = template
+        if ABSENT_TENSORS_KEY in case:
+            problems = absent_case_problems(sweep, template, case)
+            if problems:
+                report_error(
+                    errors,
+                    f"{sweep_path}: case '{case_id}': {problems[0]}; "
+                    "the harness fails it at load",
+                )
+                continue
+            case_template = prune_absent_tensors(template, case[ABSENT_TENSORS_KEY])
         try:
-            graph = expand_template_graph(template, case)
+            graph = expand_template_graph(case_template, case)
             check_sweep_golden(case)
             apply_tensor_patches(graph, case)
         except SweepCaseError as error:
             report_error(
                 errors,
-                f"{sweep_dir / SWEEP_MANIFEST_NAME}: case '{case_id}': {error}; "
+                f"{sweep_path}: case '{case_id}': {error}; "
                 "the harness skips it, so it never runs",
             )
             continue

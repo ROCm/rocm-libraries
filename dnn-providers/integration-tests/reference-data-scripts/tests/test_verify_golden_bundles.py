@@ -1657,6 +1657,120 @@ class TestVerifyGoldenBundlesCli(unittest.TestCase):
             self.assertEqual(completed.returncode, 1)
             self.assertIn("missing graph.template.json", completed.stderr)
 
+    def write_superset_sweep_bundle(
+        self, root: Path, absent_case: dict[str, object], version: int = 2
+    ) -> Path:
+        """A template with an optional sink tensor 2, one case that has it and one
+        that marks it absent."""
+        template_path, sweep_path = self.write_sweep_bundle(
+            root, Path("quick/TestOp/Topology"), []
+        )
+        template = json.loads(template_path.read_text())
+        template["nodes"][0]["inputs"]["sink_tensor_uid"] = 2
+        template["tensors"].append(
+            {
+                "uid": 2,
+                "name": "${case.sink_name}",
+                "dims": "${case.dims}",
+                "strides": "${case.strides}",
+                "data_type": "${case.data_type}",
+                "virtual": False,
+            }
+        )
+        template_path.write_text(json.dumps(template))
+        full = self.sweep_case(
+            "with_sink",
+            tensor_uids=(0, 1, 2),
+            values_overrides={"sink_name": "sink"},
+            golden_path=None,
+        )
+        sweep_path.write_text(
+            json.dumps({"version": version, "cases": [full, absent_case]})
+        )
+        return sweep_path
+
+    def absent_sink_case(self, **overrides: object) -> dict[str, object]:
+        case = self.sweep_case(
+            "no_sink",
+            tensor_uids=(0, 1),
+            metadata={
+                "format_version": 2,
+                "generator": "manual",
+                "reference_source": "manual",
+            },
+            golden_path=None,
+        )
+        case["absent_tensors"] = [2]
+        case.update(overrides)
+        return case
+
+    def test_sweep_case_with_absent_tensor_needs_no_values_for_it(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            self.write_superset_sweep_bundle(root, self.absent_sink_case())
+
+            completed = self.run_verifier(root)
+
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+            self.assertIn("0 error(s), 0 warning(s)", completed.stderr)
+
+    def test_sweep_case_with_absent_tensor_the_loader_refuses_fails(self) -> None:
+        for version, overrides, message in (
+            (1, {}, "absent_tensors needs sweep version 2, not 1"),
+            (2, {"absent_tensors": [7]}, "7 is not a tensor of the template"),
+            (
+                2,
+                {"golden": {"path": "golden/no_sink/tensors.dvc"}},
+                "absent_tensors and golden data do not mix",
+            ),
+        ):
+            with self.subTest(message=message), TemporaryDirectory() as tmpdir:
+                root = Path(tmpdir)
+                self.write_superset_sweep_bundle(
+                    root, self.absent_sink_case(**overrides), version
+                )
+
+                completed = self.run_verifier(root)
+
+                self.assertEqual(completed.returncode, 1)
+                self.assertIn(
+                    f"case 'no_sink' absent_tensors: {message}", completed.stderr
+                )
+
+    def test_sweep_values_entry_for_an_absent_tensor_is_one_error(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            case = self.absent_sink_case()
+            case["values"]["tensors"].append({"uid": 2})
+            self.write_superset_sweep_bundle(root, case)
+
+            completed = self.run_verifier(root)
+
+            self.assertEqual(completed.returncode, 1)
+            self.assertIn(
+                "case 'no_sink' absent_tensors: 2 has a values.tensors entry",
+                completed.stderr,
+            )
+            self.assertIn("1 error(s), 0 warning(s)", completed.stderr)
+
+    def test_sweep_version_must_be_1_or_2(self) -> None:
+        for version, returncode in ((1, 0), (2, 0), (3, 1), (0, 1), (2.0, 1)):
+            with self.subTest(version=version), TemporaryDirectory() as tmpdir:
+                root = Path(tmpdir)
+                _, sweep_path = self.write_sweep_bundle(
+                    root, Path("quick/TestOp/Topology"), []
+                )
+                case = self.sweep_case("small_fp32", golden_path=None)
+                sweep_path.write_text(json.dumps({"version": version, "cases": [case]}))
+
+                completed = self.run_verifier(root)
+
+                self.assertEqual(completed.returncode, returncode, completed.stderr)
+                if returncode:
+                    self.assertIn(
+                        "version is required and must be 1 or 2", completed.stderr
+                    )
+
     def test_sweep_case_over_2mib_fails(self) -> None:
         with TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
