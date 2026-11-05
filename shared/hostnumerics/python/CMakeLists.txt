@@ -21,7 +21,7 @@ endif()
 
 nanobind_add_module(hostnumerics-python NB_STATIC
     src/bindings.cpp src/permutation_bindings.cpp src/shape_bindings.cpp src/layout_bindings.cpp
-    src/index_range_bindings.cpp)
+    src/index_range_bindings.cpp src/scalar_storage_bindings.cpp)
 target_link_libraries(hostnumerics-python PRIVATE roc::hostnumerics)
 set_target_properties(hostnumerics-python
     PROPERTIES
