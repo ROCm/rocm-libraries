@@ -114,6 +114,11 @@ def render() -> str:
         "// clang-format off",
         "",
     ]
+    # Bind the manifest's rocKE before policy_rows imports it, so both halves of the
+    # table come from the same tree whatever is first on sys.path.
+    enumerator.bind_provider(
+        enumerator.load_manifest(str(MANIFEST)).get("provider_root")
+    )
     policies = policy_rows()
     scores = score_rows()
 
