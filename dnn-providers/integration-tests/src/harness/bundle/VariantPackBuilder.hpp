@@ -30,20 +30,20 @@ public:
     using std::runtime_error::runtime_error;
 };
 
-/// Assembles the uid -> buffer map an executor is handed for one bundle.
-///
-/// Shared by both harnesses: the engine harness builds one to run the engine, the
-/// reference harness builds one to run a reference. Its own translation unit so the
-/// golden-data binary can link one pure function without dragging in the engine
-/// harness.
-///
-/// Inputs that are also outputs are skipped -- the output allocation owns that uid.
-/// `useDevice` selects host or device pointers; a runtime-pass-by-value input is
-/// always passed by value regardless.
-///
-/// Each view in `aliases` gets its owner's pointer, advanced by the alias's byte
-/// offset. Throws std::invalid_argument when an owner has no entry, or when a view
-/// already has one as an input or an output.
+// Assembles the uid -> buffer map an executor is handed for one bundle.
+//
+// Shared by both harnesses: the engine harness builds one to run the engine, the
+// reference harness builds one to run a reference. Its own translation unit so the
+// golden-data binary can link one pure function without dragging in the engine
+// harness.
+//
+// Inputs that are also outputs are skipped -- the output allocation owns that uid.
+// `useDevice` selects host or device pointers; a runtime-pass-by-value input is
+// always passed by value regardless.
+//
+// Each view in `aliases` gets its owner's pointer, advanced by the alias's byte
+// offset. Throws std::invalid_argument when an owner has no entry, or when a view
+// already has one as an input or an output.
 VariantPack buildVariantPack(
     TensorMap& inputs,
     OutputTensors& outputs,
