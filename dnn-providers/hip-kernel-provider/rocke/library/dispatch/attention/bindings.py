@@ -608,6 +608,8 @@ class _RdnaView:
     alibi: bool
     qq_bias: bool
     bias: Optional[str]  # None | "f32" | "q"
+    dense_q: bool = False  # paged prefill: batch-strided Q / O / LSE, no cu_seqlens_q
+    seqused_q: bool = False  # packed prefill: live query rows from seqused_q
 
 
 def _rdna_view(spec) -> _RdnaView:
@@ -641,6 +643,8 @@ def _rdna_view(spec) -> _RdnaView:
         alibi=spec.use_alibi,
         qq_bias=spec.use_qq_bias,
         bias=spec.bias,
+        dense_q=spec.dense_q,
+        seqused_q=spec.seqused_q,
     )
 
 
@@ -854,9 +858,10 @@ def _rdna_validate_and_collect(
         raise ValueError(
             "RDNA WMMA FP8 KV storage is OCP fp8e4m3 (not FNUZ); got fp8_fnuz for k"
         )
+    q_rank = 4 if layout == "dense" or view.dense_q else 3
     for name, tensor, rank in (
-        ("q", q, 4 if layout == "dense" else 3),
-        ("out", out, 4 if layout == "dense" else 3),
+        ("q", q, q_rank),
+        ("out", out, q_rank),
         ("k", k, 3 if layout == "ragged" else 4),
         ("v", v, 3 if layout == "ragged" else 4),
     ):
@@ -1001,31 +1006,50 @@ def _rdna_validate_and_collect(
             ("out", out, 2),
         ):
             _check_storage(tensor, name, itemsize)
+        batch = int(request.batch)
+        heads = int(request.nhead_q)
+        # A dense Q / O is [B, Sq, Hq, D] with batch strides; a packed one is
+        # [total_q, Hq, D] addressed through cu_seqlens_q.
+        lead = (batch,) if view.dense_q else ()
+        token_axis, head_axis = len(lead), len(lead) + 1
+        if view.dense_q:
+            if _shape(q, "q")[:2] != (batch, int(request.seqlen_q)):
+                raise ValueError(
+                    f"dense_q needs q [B, Sq, Hq, D] with B={batch} and "
+                    f"Sq={int(request.seqlen_q)}, got {_shape(q, 'q')}"
+                )
+            values["stride_q_batch"] = _fits_i32(q.stride(0), "stride_q_batch")
+            values["stride_o_batch"] = _fits_i32(out.stride(0), "stride_o_batch")
         values.update(
             {
-                "stride_q_token": _fits_i32(q.stride(0), "stride_q_token"),
-                "stride_q_head": _fits_i32(q.stride(1), "stride_q_head"),
-                "stride_o_token": _fits_i32(out.stride(0), "stride_o_token"),
-                "stride_o_head": _fits_i32(out.stride(1), "stride_o_head"),
+                "stride_q_token": _fits_i32(q.stride(token_axis), "stride_q_token"),
+                "stride_q_head": _fits_i32(q.stride(head_axis), "stride_q_head"),
+                "stride_o_token": _fits_i32(out.stride(token_axis), "stride_o_token"),
+                "stride_o_head": _fits_i32(out.stride(head_axis), "stride_o_head"),
             }
         )
         if bool(request.emit_lse):
             lse_shape = _shape(lse, "lse")
-            total_q = _shape(q, "q")[0]
-            heads = int(request.nhead_q)
+            rows = _shape(q, "q")[token_axis]
             if _dtype_kind(lse, "lse") != "fp32":
                 raise ValueError("lse dtype must be FP32")
-            if lse_shape == (heads, total_q):
-                lse_head_axis, lse_token_axis = 0, 1
-            elif lse_shape in ((total_q, heads), (total_q, heads, 1)):
-                lse_token_axis, lse_head_axis = 0, 1
+            if lse_shape == lead + (heads, rows):
+                lse_head_axis, lse_token_axis = len(lead), len(lead) + 1
+            elif lse_shape in (lead + (rows, heads), lead + (rows, heads, 1)):
+                lse_token_axis, lse_head_axis = len(lead), len(lead) + 1
             else:
-                raise ValueError(
-                    "lse must be packed [H,total_q], [total_q,H], or "
-                    f"[total_q,H,1], got {lse_shape}"
+                forms = (
+                    "[B,H,Sq], [B,Sq,H], or [B,Sq,H,1]"
+                    if view.dense_q
+                    else "packed [H,total_q], [total_q,H], or [total_q,H,1]"
                 )
+                raise ValueError(f"lse must be {forms}, got {lse_shape}")
             _check_storage(lse, "lse", 4)
             _check_byte_extent_i32(lse, "lse", 4)
+            if view.dense_q:
+                values["stride_lse_batch"] = _fits_i32(
+                    lse.stride(0), "stride_lse_batch"
+                )
             values["stride_lse_token"] = _fits_i32(
                 lse.stride(lse_token_axis), "stride_lse_token"
             )
@@ -1033,16 +1057,28 @@ def _rdna_validate_and_collect(
                 lse.stride(lse_head_axis), "stride_lse_head"
             )
 
-        cu_seqlens_q = tensors.get("cu_seqlens_q")
-        if cu_seqlens_q is None:
-            raise ValueError(f"{layout} layout requires tensors['cu_seqlens_q']")
-        batch = int(request.batch)
-        if _dtype_kind(cu_seqlens_q, "cu_seqlens_q") != "int32":
-            raise ValueError("cu_seqlens_q dtype must be int32")
-        if _shape(cu_seqlens_q, "cu_seqlens_q") != (batch + 1,):
-            raise ValueError(f"cu_seqlens_q must have shape [{batch + 1}]")
-        _check_last_dim_contiguous(cu_seqlens_q, "cu_seqlens_q")
-        values["cu_seqlens_q"] = cu_seqlens_q
+        if not view.dense_q:
+            cu_seqlens_q = tensors.get("cu_seqlens_q")
+            if cu_seqlens_q is None:
+                raise ValueError(f"{layout} layout requires tensors['cu_seqlens_q']")
+            if _dtype_kind(cu_seqlens_q, "cu_seqlens_q") != "int32":
+                raise ValueError("cu_seqlens_q dtype must be int32")
+            if _shape(cu_seqlens_q, "cu_seqlens_q") != (batch + 1,):
+                raise ValueError(f"cu_seqlens_q must have shape [{batch + 1}]")
+            _check_last_dim_contiguous(cu_seqlens_q, "cu_seqlens_q")
+            values["cu_seqlens_q"] = cu_seqlens_q
+        if view.seqused_q:
+            # Live query rows per sequence; the kernel writes rows past them
+            # as padding (O = 0, LSE = -inf).
+            seqused_q = tensors.get("seqused_q")
+            if seqused_q is None:
+                raise ValueError("seqused_q objects require tensors['seqused_q']")
+            if _dtype_kind(seqused_q, "seqused_q") != "int32":
+                raise ValueError("seqused_q dtype must be int32")
+            if _shape(seqused_q, "seqused_q") != (batch,):
+                raise ValueError(f"seqused_q must have shape [{batch}]")
+            _check_last_dim_contiguous(seqused_q, "seqused_q")
+            values["seqused_q"] = seqused_q
 
         if layout == "ragged":
             cu_seqlens_k = tensors.get("cu_seqlens_k")
@@ -1092,6 +1128,8 @@ def _rdna_validate_and_collect(
                 {
                     "seqused_k": seqused_k,
                     "block_table": block_table,
+                    # One table maps both caches' pages.
+                    "block_table_v": block_table,
                     "block_table_stride": row_stride,
                     "stride_k_block": _fits_i32(k.stride(0), "stride_k_block"),
                     "stride_v_block": _fits_i32(v.stride(0), "stride_v_block"),

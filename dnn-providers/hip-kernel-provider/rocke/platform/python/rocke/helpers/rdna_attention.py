@@ -234,6 +234,7 @@ def rdna_attention_fwd_body(
     k_scale: Optional[Value] = None,
     v_scale: Optional[Value] = None,
     block_table: Optional[Value] = None,
+    block_table_v: Optional[Value] = None,
     table_row: Optional[Value] = None,
     stride_k_block: Optional[Value] = None,
     stride_v_block: Optional[Value] = None,
@@ -271,10 +272,13 @@ def rdna_attention_fwd_body(
     ``k_scale`` / ``v_scale`` and rounded to the Q dtype on the way to LDS.
     Paged K / V (``cfg.page_block_size``): ``k_rsrc`` / ``v_rsrc`` cover the
     whole cache at this head; key ``t`` lives at element ``block_table[
-    table_row + t / page] * stride_{k,v}_block + (t % page) * stride_{k,v}``
-    (``k_bytes`` / ``v_bytes`` unused). The table's values are caller data: a
-    page id outside ``[0, num_blocks)`` (the caches' page count) is not
-    addressed -- its keys read as zero K / V rows, like rows past the sequence.
+    table_row + t / page] * stride_k_block + (t % page) * stride_k`` of the K
+    cache and at element ``block_table_v[table_row + t / page] *
+    stride_v_block + (t % page) * stride_v`` of the V cache (the two tables
+    share the row stride and may be one table; ``k_bytes`` / ``v_bytes``
+    unused). The tables' values are caller data: a page id outside ``[0,
+    num_blocks)`` (the caches' page count) is not addressed -- its keys read
+    as zero K (or V) rows, like rows past the sequence.
     """
     cfg.validate()
     bf16 = cfg.dtype == "bf16"
@@ -313,7 +317,14 @@ def rdna_attention_fwd_body(
             (
                 "paged",
                 paged,
-                (block_table, table_row, stride_k_block, stride_v_block, num_blocks),
+                (
+                    block_table,
+                    block_table_v,
+                    table_row,
+                    stride_k_block,
+                    stride_v_block,
+                    num_blocks,
+                ),
             ),
             ("dense K/V", not paged, (k_bytes, v_bytes)),
         )
@@ -500,41 +511,48 @@ def rdna_attention_fwd_body(
         tok0 = b.mul(t, ci(BN))
         rem = b.select(valid, b.sub(seqlen_k, tok0), c0)  # live rows of the tile
         if not row_paged:
-            # The whole tile sits in one page: one lookup per tile.
+            # The whole tile sits in one page of each cache: one lookup per
+            # table and tile.
             blk = b.select(valid, b.lshr(tok0, ci(lps)), c0)
-            phys = b.global_load_i32(block_table, b.add(table_row, blk))
-            rem = b.select(page_ok(phys), rem, c0)
+            idx = b.add(table_row, blk)
+            phys_k = b.global_load_i32(block_table, idx)
+            phys_v = b.global_load_i32(block_table_v, idx)
+            rem_k = b.select(page_ok(phys_k), rem, c0)
+            rem_v = b.select(page_ok(phys_v), rem, c0)
             in_page = b.land(tok0, ci(ps - 1))
-            tk = kv_byte(b.add(b.mul(phys, stride_k_block), b.mul(in_page, stride_k)))
-            tv = kv_byte(b.add(b.mul(phys, stride_v_block), b.mul(in_page, stride_v)))
+            tk = kv_byte(b.add(b.mul(phys_k, stride_k_block), b.mul(in_page, stride_k)))
+            tv = kv_byte(b.add(b.mul(phys_v, stride_v_block), b.mul(in_page, stride_v)))
 
-            def at_tile(o, r, tile_off):
-                return b.select(b.cmp_lt(r, rem), b.add(o, tile_off), oob)
+            def at_tile(o, r, tile_off, live):
+                return b.select(b.cmp_lt(r, live), b.add(o, tile_off), oob)
 
-            kr = [load_kv(k_rsrc, at_tile(o, r, tk)) for o, r in zip(k_goff, k_rows)]
+            kr = [
+                load_kv(k_rsrc, at_tile(o, r, tk, rem_k))
+                for o, r in zip(k_goff, k_rows)
+            ]
             vr = [
-                [load_kv(v_rsrc, at_tile(o, r, tv)) for o, r in zip(offs, rows)]
+                [load_kv(v_rsrc, at_tile(o, r, tv, rem_v)) for o, r in zip(offs, rows)]
                 for offs, rows in zip(v_goff, v_rows)
             ]
             return kr, vr
 
-        def at_row(o, r, stride_blk, stride_tok):
+        def at_row(table, o, r, stride_blk, stride_tok):
             tok = b.add(tok0, r)
             ok = b.cmp_lt(r, rem)
             blk = b.select(ok, b.lshr(tok, ci(lps)), c0)
-            phys = b.global_load_i32(block_table, b.add(table_row, blk))
+            phys = b.global_load_i32(table, b.add(table_row, blk))
             ok = b.land(ok, page_ok(phys))
             in_page = b.land(tok, ci(ps - 1))
             row = b.add(b.mul(phys, stride_blk), b.mul(in_page, stride_tok))
             return b.select(ok, b.add(o, kv_byte(row)), oob)
 
         kr = [
-            load_kv(k_rsrc, at_row(o, r, stride_k_block, stride_k))
+            load_kv(k_rsrc, at_row(block_table, o, r, stride_k_block, stride_k))
             for o, r in zip(k_goff, k_rows)
         ]
         vr = [
             [
-                load_kv(v_rsrc, at_row(o, r, stride_v_block, stride_v))
+                load_kv(v_rsrc, at_row(block_table_v, o, r, stride_v_block, stride_v))
                 for o, r in zip(offs, rows)
             ]
             for offs, rows in zip(v_goff, v_rows)
