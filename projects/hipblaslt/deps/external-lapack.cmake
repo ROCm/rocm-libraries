@@ -25,6 +25,15 @@ include( ExternalProject )
 # set( lapack_cmake_args -DCMAKE_INSTALL_PREFIX=<INSTALL_DIR>/package )
 set( PREFIX_LAPACK ${CMAKE_INSTALL_PREFIX} CACHE PATH "Location where lapack should install, defaults to /usr/local" )
 set( lapack_cmake_args -DCMAKE_INSTALL_PREFIX=${PREFIX_LAPACK} -DBUILD_SHARED_LIBS=OFF )
+# LAPACK 3.9.1 declares CMake 3.2 compatibility, which CMake 4 no longer supports.
+# Its whole-project try_compile() checks also declare 3.2. CMP0137=NEW lets
+# them receive the override listed in CMAKE_TRY_COMPILE_PLATFORM_VARIABLES;
+# without it, those checks still fail to configure.
+list( APPEND lapack_cmake_args
+  -DCMAKE_POLICY_VERSION_MINIMUM=3.5
+  -DCMAKE_POLICY_DEFAULT_CMP0137=NEW
+  -DCMAKE_TRY_COMPILE_PLATFORM_VARIABLES=CMAKE_POLICY_VERSION_MINIMUM
+)
 append_cmake_cli_arguments( lapack_cmake_args lapack_cmake_args )
 
 set( lapack_git_repository "https://github.com/Reference-LAPACK/lapack-release" CACHE STRING "URL to download lapack from" )

@@ -934,5 +934,4 @@ def _install_system_deps(
             f"{fortran_opt}"
             f" {ROOT_PATH}/deps"
         )
-        c.run(f"make -j{os.cpu_count()}")
-        c.run("make install")
+        c.run(f"cmake --build . --target install-deps --parallel {os.cpu_count()}")
