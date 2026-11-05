@@ -458,7 +458,7 @@ void runConvBwdExecutorVsCpu(const std::vector<int64_t>& dyDims,
     cpuVariantPack[W_UID] = cpuW.rawHostData();
     cpuVariantPack[DX_UID] = cpuDx.rawHostData();
 
-    CpuReferenceGraphExecutor cpuExecutor;
+    CpuReferenceGraphExecutorAdapter cpuExecutor;
     cpuExecutor.execute(graphBuilder.GetBufferPointer(), graphBuilder.GetSize(), cpuVariantPack);
 
     // Compare GPU executor output against CPU executor output
@@ -560,7 +560,7 @@ void runConvWrwExecutorVsCpu(const std::vector<int64_t>& xDims,
     cpuVariantPack[DY_UID] = cpuDy.rawHostData();
     cpuVariantPack[DW_UID] = cpuDw.rawHostData();
 
-    CpuReferenceGraphExecutor cpuExecutor;
+    CpuReferenceGraphExecutorAdapter cpuExecutor;
     cpuExecutor.execute(graphBuilder.GetBufferPointer(), graphBuilder.GetSize(), cpuVariantPack);
 
     // Compare GPU executor output against CPU executor output
