@@ -187,9 +187,9 @@ Pre-commit hooks automatically run code quality checks before you commit changes
 
 ### Setting Up Pre-commit
 
-1. Install pre-commit:
+1. Install pre-commit (version 3.2.0 or newer; an older one rejects the config file with `Expected one of ... but got: 'pre-push'`):
 ```bash
-pip install pre-commit
+pip install -U pre-commit
 ```
 
 2. Install the git hooks:
