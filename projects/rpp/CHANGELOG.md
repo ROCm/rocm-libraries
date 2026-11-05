@@ -19,6 +19,7 @@ Full documentation for RPP is available at [https://rocm.docs.amd.com/projects/r
 
 - Corrected `rppt_log` to return `RPP_ERROR_INVALID_SRC_DATATYPE` instead of the misleading `RPP_ERROR_INVALID_DST_DATATYPE` for unsupported source datatypes.
 - Fixed error propagation through the HIP kernel dispatcher: kernel launch failures now return `RPP_ERROR_HIP_LAUNCH` instead of `RPP_SUCCESS`, which previously masked launch errors as pixel mismatches on GPUs with no matching kernel binary.
+- Image tensor ops whose destination must have the same channel count as the source now return `RPP_ERROR_INVALID_DST_CHANNELS` when `srcDescPtr->c != dstDescPtr->c`. Previously a 3-to-1 call wrote past the end of the destination and a 1-to-3 call returned `RPP_SUCCESS` with two destination channels left unwritten. `rppt_coarse_dropout` now reports this mismatch as `RPP_ERROR_INVALID_DST_CHANNELS` instead of `RPP_ERROR_INVALID_ARGUMENTS`. The destination channel restriction documented for `rppt_color_to_greyscale` is corrected to `c = 1`.
 
 ## RPP 3.2.0 ROCm 10.1.0
 
