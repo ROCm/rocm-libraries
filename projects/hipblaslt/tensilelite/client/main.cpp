@@ -644,8 +644,7 @@ namespace TensileLite
 #if !(TENSILELITE_CLIENT_ENABLE_ROCPROFSDK)
             if(args["rocprof-counter"].as<std::vector<std::string>>().size())
             {
-                throw std::runtime_error("rocprof-counter is provided but client is not built with "
-                                         "-DTENSILELITE_CLIENT_ENABLE_ROCPROFSDK.");
+                throw std::runtime_error("rocprof-counter is provided but client is not built with -DTENSILELITE_CLIENT_ENABLE_ROCPROFSDK.");
             }
 #endif
             fix_data_types(args);
@@ -690,7 +689,8 @@ namespace TensileLite
 
             Elf64_Ehdr eh{};
             f.read(reinterpret_cast<char*>(&eh), sizeof(eh));
-            if(!f || std::memcmp(eh.e_ident, ELFMAG, SELFMAG) != 0
+            if(!f
+               || std::memcmp(eh.e_ident, ELFMAG, SELFMAG) != 0
                || eh.e_ident[EI_CLASS] != ELFCLASS64)
                 return 0;
 
@@ -710,7 +710,9 @@ namespace TensileLite
                     symSh = &sh;
                     break;
                 }
-            if(!symSh || symSh->sh_link >= shdrs.size() || symSh->sh_size == 0
+            if(!symSh
+               || symSh->sh_link >= shdrs.size()
+               || symSh->sh_size == 0
                || symSh->sh_size % sizeof(Elf64_Sym) != 0)
                 return 0;
 
@@ -760,7 +762,9 @@ namespace TensileLite
             std::uintmax_t minSize = std::numeric_limits<std::uintmax_t>::max();
             for(auto end : gwEndAddrs)
             {
-                auto it = std::upper_bound(kernelStarts.begin(), kernelStarts.end(), end);
+                auto it = std::upper_bound(kernelStarts.begin(),
+                                           kernelStarts.end(),
+                                           end);
                 if(it == kernelStarts.begin())
                     continue;
                 std::uint64_t start = *(it - 1);
@@ -771,8 +775,9 @@ namespace TensileLite
                     minSize = sz;
             }
 
-            return (minSize == std::numeric_limits<std::uintmax_t>::max()) ? std::uintmax_t{0}
-                                                                           : minSize;
+            return (minSize == std::numeric_limits<std::uintmax_t>::max())
+                       ? std::uintmax_t{0}
+                       : minSize;
         }
 #endif // defined(__linux__)
 
@@ -946,7 +951,8 @@ try
             });
             std::cout << "Loaded " << icacheRotateCopies
                       << " extra rotation copies of each --code-object for I-cache test"
-                      << " (total = " << (icacheRotateCopies + 1) << " modules)" << std::endl;
+                      << " (total = " << (icacheRotateCopies + 1) << " modules)"
+                      << std::endl;
         }
     }
 #if TENSILELITE_CLIENT_ENABLE_ROCPROFSDK
@@ -964,11 +970,11 @@ try
         });
     }
 
-    bool        gpuTimer        = args["use-gpu-timer"].as<bool>();
-    bool        runKernels      = !args["selection-only"].as<bool>();
-    bool        exitOnError     = args["exit-on-error"].as<bool>();
-    bool        groupedGemm     = args["grouped-gemm"].as<bool>();
-    const auto& icacheFlushArgs = args["icache-flush-args"].as<std::vector<bool>>();
+    bool        gpuTimer         = args["use-gpu-timer"].as<bool>();
+    bool        runKernels       = !args["selection-only"].as<bool>();
+    bool        exitOnError      = args["exit-on-error"].as<bool>();
+    bool        groupedGemm      = args["grouped-gemm"].as<bool>();
+    const auto& icacheFlushArgs  = args["icache-flush-args"].as<std::vector<bool>>();
 
     float skip_slow_solution_ratio = args["skip-slow-solution-ratio"].as<float>();
     if(skip_slow_solution_ratio > 1.0 || skip_slow_solution_ratio < 0.0)
@@ -993,7 +999,7 @@ try
         solutionIterator = SolutionIterator::Default(library, hardware, args);
     }
 
-    MetaRunListener                 listeners;
+    MetaRunListener listeners;
     std::shared_ptr<BenchmarkTimer> benchmarkTimer;
     float                           flushTimeMs{};
 
@@ -1006,8 +1012,8 @@ try
 
         if(runKernels)
         {
-            bool hasIcacheFlush = std::any_of(
-                begin(icacheFlushArgs), end(icacheFlushArgs), [](auto i) { return i; });
+            bool hasIcacheFlush
+                = std::any_of(begin(icacheFlushArgs), end(icacheFlushArgs), [](auto i) { return i; });
             flushTimeMs
                 = hasIcacheFlush ? estimate_flush_kernel_time(device0->stream, gpuTimer) : 0.f;
             // Before ReferenceValidator: postSolution runs listeners in
@@ -1019,7 +1025,7 @@ try
             listeners.addListener(benchmarkTimer);
             listeners.addListener(std::make_shared<HardwareMonitorListener>(args));
 #if TENSILELITE_CLIENT_ENABLE_ROCPROFSDK
-            if(!args["rocprof-counter"].as<std::vector<std::string>>().empty())
+            if (!args["rocprof-counter"].as<std::vector<std::string>>().empty())
                 listeners.addListener(Profiler::Default(args));
 #endif
         }
@@ -1041,8 +1047,7 @@ try
         {
             std::string filename = args["log-file"].as<std::string>();
             auto        logFile  = std::make_shared<std::ofstream>(
-                filename.c_str(),
-                args["log-file-append"].as<bool>() ? std::ios::app : std::ios::out);
+                filename.c_str(), args["log-file-append"].as<bool>() ? std::ios::app : std::ios::out);
 
             reporters->addReporter(LogReporter::Default(args, logFile, LogLevel::Normal));
         }
@@ -1133,7 +1138,8 @@ try
                     int icacheArg = args["icache-rotate-copies"].as<int>();
                     if(icacheArg == -1 && device0->adapter->numRotationModules() == 1)
                     {
-                        auto const& filenames = args["code-object"].as<std::vector<std::string>>();
+                        auto const& filenames
+                            = args["code-object"].as<std::vector<std::string>>();
 
                         // Term 1: align with data rotation cycle.
                         int extrasFromDataInit = static_cast<int>(device0->inputArr.size()) - 1;
@@ -1155,12 +1161,12 @@ try
                         if(rotateSizeKB < 0)
                             rotateSizeKB = 0;
                         std::uintmax_t kCacheBudgetBytes = std::uintmax_t(rotateSizeKB) * 2 * 1024;
-                        int            extrasFromCache   = 0;
+                        int extrasFromCache = 0;
                         if(K == 0)
                         {
                             std::cerr << "[icache-rotate] warning: no label_GW_End "
-                                      << "found in any --code-object; cache-based "
-                                      << "term contributes 0" << std::endl;
+                                    << "found in any --code-object; cache-based "
+                                    << "term contributes 0" << std::endl;
                         }
                         else if(kCacheBudgetBytes > K)
                         {
@@ -1184,15 +1190,20 @@ try
                             });
                         }
 #if defined(__linux__)
-                        std::cout << "[icache-rotate] auto extras = max(" << extrasFromDataInit
-                                  << " from inputArr.size()-1, " << extrasFromCache << " from "
-                                  << kCacheBudgetBytes << "/" << K << ") = " << extras
-                                  << " (total = " << (extras + 1) << " modules)" << std::endl;
+                        std::cout << "[icache-rotate] auto extras = max("
+                                  << extrasFromDataInit << " from inputArr.size()-1, "
+                                  << extrasFromCache << " from "
+                                  << kCacheBudgetBytes << "/" << K << ") = "
+                                  << extras
+                                  << " (total = " << (extras + 1) << " modules)"
+                                  << std::endl;
 #else
-                        std::cout << "[icache-rotate] auto extras = max(" << extrasFromDataInit
-                                  << " from inputArr.size()-1, " << extrasFromCache
-                                  << " from --icache-rotate-size) = " << extras
-                                  << " (total = " << (extras + 1) << " modules)" << std::endl;
+                        std::cout << "[icache-rotate] auto extras = max("
+                                  << extrasFromDataInit << " from inputArr.size()-1, "
+                                  << extrasFromCache << " from --icache-rotate-size) = "
+                                  << extras
+                                  << " (total = " << (extras + 1) << " modules)"
+                                  << std::endl;
 #endif
                     }
                 }
@@ -1249,8 +1260,11 @@ try
                                             auto&                ctx = *active[d];
                                             ScopedDevice         device(ctx.deviceId);
                                             ContractionInputs    scratch;
-                                            ProblemInputs const* inputs
-                                                = rankInputs(scratch, *problem, active, d, k);
+                                            ProblemInputs const* inputs = rankInputs(scratch,
+                                                                                     *problem,
+                                                                                     active,
+                                                                                     d,
+                                                                                     k);
                                             kernels[k][d]
                                                 = useUserArgs
                                                       ? solution->solveTensileGPU(*problem,
@@ -1454,8 +1468,8 @@ try
     {
         auto flushStart = TimingClock::now();
         flushTimingBuffer();
-        auto flushMs
-            = std::chrono::duration<double, std::milli>(TimingClock::now() - flushStart).count();
+        auto flushMs = std::chrono::duration<double, std::milli>(
+            TimingClock::now() - flushStart).count();
         std::clog << "TIMING:flush_timing_buffer:" << flushMs << "\n";
     }
 
