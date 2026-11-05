@@ -438,7 +438,7 @@ def cell_groups(raw) -> list:
 def check_value_map_cells(groups: list, value_map) -> None:
     """Each ``ground_truth.value_map`` field that is also a cell field maps exactly
     the values its cells declare (an enum cell by its member name), so no declared
-    value is unmapped and no key is dead."""
+    value is unmapped and no key is dead. ``groups`` are every section's cell groups."""
     if not isinstance(value_map, dict):
         return
     declared: dict = {}
@@ -518,9 +518,22 @@ class Registry:
             )
         self.groups = self._parse_groups(decl["cells"])
         self.cell_fields = [f for fields, _ in self.groups for f in fields]
-        check_value_map_cells(
-            self.groups, (manifest.get("ground_truth") or {}).get("value_map")
-        )
+        if primary:
+            # Over every section's cells: a section may list a feature value the others
+            # do not (a feature built at one geometry only). A section without cells is
+            # refused when it is built below.
+            check_value_map_cells(
+                [
+                    *self.groups,
+                    *(
+                        group
+                        for extra in decl.get("also") or []
+                        if isinstance(extra, dict) and "cells" in extra
+                        for group in self._parse_groups(extra["cells"])
+                    ),
+                ],
+                (manifest.get("ground_truth") or {}).get("value_map"),
+            )
         for name in itertools.chain(self.pin, self.fixed, self.cell_fields):
             if name not in self.request_fields:
                 raise EnumerationError(
