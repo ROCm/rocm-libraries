@@ -105,7 +105,11 @@ def reference(problem, direction, A, B, ref: str):
     import torch.nn.functional as F
 
     p = problem
-    if (p.sD, p.sH, p.sW) != (1, 1, 1) or (p.dD, p.dH, p.dW) != (1, 1, 1) or p.groups != 1:
+    if (
+        (p.sD, p.sH, p.sW) != (1, 1, 1)
+        or (p.dD, p.dH, p.dW) != (1, 1, 1)
+        or p.groups != 1
+    ):
         raise ValueError("reference: stride 1, dilation 1, groups 1 only")
     dt = torch.float64 if ref == "fp64" else torch.float32
     dev = "cuda"
@@ -115,7 +119,9 @@ def reference(problem, direction, A, B, ref: str):
     # chunk the outer spatial depth so one tap operand stays ~64M elements
     if direction == "wgrad":
         dY = A.to(dev)
-        Xp = F.pad(B.to(dev), (0, 0, pads[2], pads[2], pads[1], pads[1], pads[0], pads[0]))
+        Xp = F.pad(
+            B.to(dev), (0, 0, pads[2], pads[2], pads[1], pads[1], pads[0], pads[0])
+        )
         out = torch.zeros(p.K, Z, Y, X, p.C, dtype=dt, device=dev)
         plane = p.N * Ho * Wo * max(p.C, p.K)
         dc = max(1, (64 << 20) // plane)
@@ -125,11 +131,17 @@ def reference(problem, direction, A, B, ref: str):
             for z in range(Z):
                 for y in range(Y):
                     for x in range(X):
-                        xs = Xp[:, d0 + z:d1 + z, y:y + Ho, x:x + Wo, :].to(dt).reshape(-1, p.C)
+                        xs = (
+                            Xp[:, d0 + z : d1 + z, y : y + Ho, x : x + Wo, :]
+                            .to(dt)
+                            .reshape(-1, p.C)
+                        )
                         out[:, z, y, x, :] += a @ xs
         return out
     if direction == "fwd":
-        Xp = F.pad(A.to(dev), (0, 0, pads[2], pads[2], pads[1], pads[1], pads[0], pads[0]))
+        Xp = F.pad(
+            A.to(dev), (0, 0, pads[2], pads[2], pads[1], pads[1], pads[0], pads[0])
+        )
         W = B.to(dev).to(dt)  # K Z Y X C
         out = torch.zeros(p.N, Do, Ho, Wo, p.K, dtype=dt, device=dev)
         plane = p.N * Ho * Wo * max(p.C, p.K)
@@ -140,7 +152,11 @@ def reference(problem, direction, A, B, ref: str):
             for z in range(Z):
                 for y in range(Y):
                     for x in range(X):
-                        xs = Xp[:, d0 + z:d1 + z, y:y + Ho, x:x + Wo, :].to(dt).reshape(-1, p.C)
+                        xs = (
+                            Xp[:, d0 + z : d1 + z, y : y + Ho, x : x + Wo, :]
+                            .to(dt)
+                            .reshape(-1, p.C)
+                        )
                         acc += xs @ W[:, z, y, x, :].t()
             out[:, d0:d1] = acc.reshape(p.N, d1 - d0, Ho, Wo, p.K)
         return out
@@ -161,7 +177,11 @@ def reference(problem, direction, A, B, ref: str):
             for y in range(Y):
                 for x in range(X):
                     oz, oy, ox = Z - 1 - z, Y - 1 - y, X - 1 - x
-                    ys = dYp[:, d0 + oz:d1 + oz, oy:oy + Hi, ox:ox + Wi, :].to(dt).reshape(-1, p.K)
+                    ys = (
+                        dYp[:, d0 + oz : d1 + oz, oy : oy + Hi, ox : ox + Wi, :]
+                        .to(dt)
+                        .reshape(-1, p.K)
+                    )
                     acc += ys @ W[:, z, y, x, :]
         out[:, d0:d1] = acc.reshape(p.N, d1 - d0, Hi, Wi, p.C)
     return out
@@ -176,7 +196,9 @@ def accuracy(out_t, ref_t, torch_dt):
         return {
             "max_rel": float(d.max() / r.max()),
             "mean_rel": float(d.mean() / r.mean()),
-            "l2_rel": float(torch.linalg.vector_norm(o - ref_t) / torch.linalg.vector_norm(ref_t)),
+            "l2_rel": float(
+                torch.linalg.vector_norm(o - ref_t) / torch.linalg.vector_norm(ref_t)
+            ),
         }
 
     o = out_t.to("cuda").to(ref_t.dtype)
@@ -207,35 +229,53 @@ def max_ulp(a, b) -> int:
 
 
 def main(argv=None) -> int:
-    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     ap.add_argument("--cache", required=True, help="AOT kernel cache directory")
     ap.add_argument("--arch", default="gfx942")
     src = ap.add_mutually_exclusive_group(required=True)
     src.add_argument("--miopen-cmd")
-    src.add_argument("--miopen-file", help="case file; --line picks the line (1-based, default 1)")
+    src.add_argument(
+        "--miopen-file", help="case file; --line picks the line (1-based, default 1)"
+    )
     ap.add_argument("--line", type=int, default=1)
-    ap.add_argument("--kernel", required=True, help="kernel label [@split_k=<d>[/full<t>]]")
+    ap.add_argument(
+        "--kernel", required=True, help="kernel label [@split_k=<d>[/full<t>]]"
+    )
     ap.add_argument("--runs", type=int, default=20)
-    ap.add_argument("--batch", type=int, default=4, help="launches queued back to back per readback")
+    ap.add_argument(
+        "--batch", type=int, default=4, help="launches queued back to back per readback"
+    )
     ap.add_argument("--no-det", action="store_true", help="skip the determinism runs")
-    ap.add_argument("--acc", action="store_true", help="accuracy vs the fp64/fp32 reference")
+    ap.add_argument(
+        "--acc", action="store_true", help="accuracy vs the fp64/fp32 reference"
+    )
     ap.add_argument("--ref", default="fp64", choices=["fp64", "fp32"])
     ap.add_argument("--data", default="train", choices=["train", "uniform"])
     ap.add_argument("--seed", type=int, default=1234)
-    ap.add_argument("--save", help="write the first output + its sha256 here (torch.save)")
-    ap.add_argument("--against", help="compare the first output with a --save file (another GPU)")
+    ap.add_argument(
+        "--save", help="write the first output + its sha256 here (torch.save)"
+    )
+    ap.add_argument(
+        "--against", help="compare the first output with a --save file (another GPU)"
+    )
     args = ap.parse_args(argv)
 
     import torch
 
     from benchmarks.common import benchmark_implicit_gemm_conv as big
+
     try:
         from benchmarks.common.det_classify import classify
-    except ImportError:  # run from another worktree that lacks it: use the copy beside this file
+    except (
+        ImportError
+    ):  # run from another worktree that lacks it: use the copy beside this file
         import importlib.util
 
         _spec = importlib.util.spec_from_file_location(
-            "_det_classify", Path(__file__).with_name("det_classify.py"))
+            "_det_classify", Path(__file__).with_name("det_classify.py")
+        )
         _mod = importlib.util.module_from_spec(_spec)
         _spec.loader.exec_module(_mod)
         classify = _mod.classify
@@ -246,7 +286,11 @@ def main(argv=None) -> int:
     from rocke.runtime.launcher import KernelLauncher, LaunchConfig
 
     if args.miopen_file:
-        lines = [l for l in Path(args.miopen_file).read_text().splitlines() if l.strip().startswith("MIOpenDriver") or "MIOpenDriver" in l]
+        lines = [
+            l
+            for l in Path(args.miopen_file).read_text().splitlines()
+            if l.strip().startswith("MIOpenDriver") or "MIOpenDriver" in l
+        ]
         cmd = lines[args.line - 1]
     else:
         cmd = args.miopen_cmd
@@ -255,16 +299,25 @@ def main(argv=None) -> int:
     if direction is None:
         print(f"error: -F {forw}: one direction per check (1/2/4)", file=sys.stderr)
         return 2
-    torch_dt = {"fp16": torch.float16, "bf16": torch.bfloat16, "fp32": torch.float32}[dtype]
+    torch_dt = {"fp16": torch.float16, "bf16": torch.bfloat16, "fp32": torch.float32}[
+        dtype
+    ]
     label, split_k = _parse_launch(args.kernel)
 
     cache = KernelCache(Path(args.cache), args.arch)
     run_problem = big._launch_problem(direction, problem)
     batch_chunks = big._batch_chunks(direction, run_problem, dtype)
     fit_problem = dc_replace(run_problem, N=batch_chunks[0][1])
-    hits = [c for c in cache.compatible(fit_problem, direction=direction) if c[0].label() == label]
+    hits = [
+        c
+        for c in cache.compatible(fit_problem, direction=direction)
+        if c[0].label() == label
+    ]
     if not hits:
-        print(f"error: {label} not in {args.cache} (or cannot run this case)", file=sys.stderr)
+        print(
+            f"error: {label} not in {args.cache} (or cannot run this case)",
+            file=sys.stderr,
+        )
         return 2
     ident, hsaco_path, meta = hits[0]
     det_cls, det_why = classify(direction, ident, split_k)
@@ -291,17 +344,33 @@ def main(argv=None) -> int:
 
     def bind(d_dev, live):
         bound = big._cached_bind_batch(
-            batch_chunks, direction, run_problem, ident, meta, rt, launcher, dtype,
-            split_k, (A_dev, B_dev, d_dev), sizes, args.arch, stage2, KernelLauncher,
-            LaunchConfig, live,
+            batch_chunks,
+            direction,
+            run_problem,
+            ident,
+            meta,
+            rt,
+            launcher,
+            dtype,
+            split_k,
+            (A_dev, B_dev, d_dev),
+            sizes,
+            args.arch,
+            stage2,
+            KernelLauncher,
+            LaunchConfig,
+            live,
         )
         if bound is None:
             raise SystemExit(2)
         return bound
 
     result = {
-        "kernel": args.kernel.strip(), "case": problem.short(), "direction": direction,
-        "classified_deterministic": det_cls, "classify_reason": det_why,
+        "kernel": args.kernel.strip(),
+        "case": problem.short(),
+        "direction": direction,
+        "classified_deterministic": det_cls,
+        "classify_reason": det_why,
         "gpu": __import__("os").environ.get("HIP_VISIBLE_DEVICES", ""),
         "data": args.data,
     }
@@ -332,24 +401,49 @@ def main(argv=None) -> int:
                 n_diff += 1
                 worst_ulp = max(worst_ulp, max_ulp(o, outs_first))
                 f0 = outs_first.float()
-                worst_rel = max(worst_rel, float((o.float() - f0).abs().max() / f0.abs().max().clamp(min=1e-30)))
+                worst_rel = max(
+                    worst_rel,
+                    float(
+                        (o.float() - f0).abs().max() / f0.abs().max().clamp(min=1e-30)
+                    ),
+                )
             rt.free(d)
             n_done += 1
         big._free_extras(rt, live)
-    sha = hashlib.sha256(outs_first.contiguous().view(torch.uint8).numpy().tobytes()).hexdigest()
-    result.update({
-        "runs": n_done, "identical": n_diff == 0, "n_differing_runs": n_diff,
-        "max_ulp": worst_ulp, "max_rel_diff": worst_rel, "sha256": sha, "det_seconds": round(time.time() - t0, 2),
-    })
+    sha = hashlib.sha256(
+        outs_first.contiguous().view(torch.uint8).numpy().tobytes()
+    ).hexdigest()
+    result.update(
+        {
+            "runs": n_done,
+            "identical": n_diff == 0,
+            "n_differing_runs": n_diff,
+            "max_ulp": worst_ulp,
+            "max_rel_diff": worst_rel,
+            "sha256": sha,
+            "det_seconds": round(time.time() - t0, 2),
+        }
+    )
     if args.save:
-        torch.save({"out": outs_first, "sha256": sha, "kernel": args.kernel, "case": problem.short()}, args.save)
+        torch.save(
+            {
+                "out": outs_first,
+                "sha256": sha,
+                "kernel": args.kernel,
+                "case": problem.short(),
+            },
+            args.save,
+        )
     if args.against:
         other = torch.load(args.against)
         same = torch.equal(other["out"].view(torch.uint8), outs_first.view(torch.uint8))
-        result.update({
-            "against": args.against, "against_identical": same,
-            "against_max_ulp": 0 if same else max_ulp(other["out"], outs_first),
-        })
+        result.update(
+            {
+                "against": args.against,
+                "against_identical": same,
+                "against_max_ulp": 0 if same else max_ulp(other["out"], outs_first),
+            }
+        )
     if args.acc:
         ref_t = reference(problem, direction, A_t, B_t, args.ref)
         result["acc"] = accuracy(outs_first, ref_t, torch_dt)

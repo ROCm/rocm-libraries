@@ -14,18 +14,33 @@ PIN_TABLE = cp.PIN_TABLE_DIR / "gfx942_unet3d_bf16.json"
 
 
 def _cmd(F=1, C=64, K=64, D=256, H=128, W=128, pd=1, p=1):
-    return (f"MIOpenDriver convbfp16 -n 1 -c {C} --in_d {D} -H {H} -W {W} -k {K} --fil_d 3 -y 3 -x 3 "
-            f"--pad_d {pd} -p {p} -q {p} --conv_stride_d 1 -u 1 -v 1 --dilation_d 1 -l 1 -j 1 --spatial_dim 3 "
-            f"--in_layout NDHWC --fil_layout NDHWC --out_layout NDHWC -m conv -g 1 -F {F} -t 1 -V 0")
+    return (
+        f"MIOpenDriver convbfp16 -n 1 -c {C} --in_d {D} -H {H} -W {W} -k {K} --fil_d 3 -y 3 -x 3 "
+        f"--pad_d {pd} -p {p} -q {p} --conv_stride_d 1 -u 1 -v 1 --dilation_d 1 -l 1 -j 1 --spatial_dim 3 "
+        f"--in_layout NDHWC --fil_layout NDHWC --out_layout NDHWC -m conv -g 1 -F {F} -t 1 -V 0"
+    )
 
 
 def _pin_rows():
     return json.loads(PIN_TABLE.read_text())["modes"]["deterministic"]["cases"]
 
 
-ZSPEC = {"stage": "lds16", "op_dtype": "f16", "fill_il": True, "waves": 8, "nsplit": False, "z_tile": 4,
-         "n_tile": 32, "nfast": True, "pkrtz": True, "epi_vec": True, "yf16": True, "xcd": 6, "bps": 1,
-         "bps_halo": 1}
+ZSPEC = {
+    "stage": "lds16",
+    "op_dtype": "f16",
+    "fill_il": True,
+    "waves": 8,
+    "nsplit": False,
+    "z_tile": 4,
+    "n_tile": 32,
+    "nfast": True,
+    "pkrtz": True,
+    "epi_vec": True,
+    "yf16": True,
+    "xcd": 6,
+    "bps": 1,
+    "bps_halo": 1,
+}
 BSPEC = dict(ZSPEC, nsplit=True, z_tile=2, n_tile=64)
 
 
@@ -33,22 +48,51 @@ def _table(extra=None):
     rows = _pin_rows()
     cases = {
         # s1 forward (pad 1,1,1): pad copy + the halo-form pin of fwd_s1
-        "fwd_s1_pad1": {"cmd": _cmd(), "calls": 2, "route": "padcopy_halo", "kernel": rows["fwd_s1"]["kernel"]},
+        "fwd_s1_pad1": {
+            "cmd": _cmd(),
+            "calls": 2,
+            "route": "padcopy_halo",
+            "kernel": rows["fwd_s1"]["kernel"],
+        },
         # s1 forward, pad (0,1,1): D+2 input
-        "fwd_s1_pad011": {"cmd": _cmd(D=258, pd=0), "route": "padcopy_halo", "kernel": rows["fwd_s1"]["kernel"]},
-        "dgrad_s1_pad1": {"cmd": _cmd(F=2), "route": "direct", "kernel": rows["dgrad_s1_pad1"]["kernel"]},
-        "wgrad_s1_pad1": {"cmd": _cmd(F=4), "route": "direct", "kernel": rows["wgrad_s1_pad1"]["kernel"]},
+        "fwd_s1_pad011": {
+            "cmd": _cmd(D=258, pd=0),
+            "route": "padcopy_halo",
+            "kernel": rows["fwd_s1"]["kernel"],
+        },
+        "dgrad_s1_pad1": {
+            "cmd": _cmd(F=2),
+            "route": "direct",
+            "kernel": rows["dgrad_s1_pad1"]["kernel"],
+        },
+        "wgrad_s1_pad1": {
+            "cmd": _cmd(F=4),
+            "route": "direct",
+            "kernel": rows["wgrad_s1_pad1"]["kernel"],
+        },
         # s3 (130x66x66 halo form; 128x64x64 padded), C 256 K 128
-        "fwd_s3_pad1": {"cmd": _cmd(C=256, K=128, D=128, H=64, W=64), "route": "winograd",
-                        "winograd": {"spec": dict(ZSPEC, variant="yx"), "wtv": 4}},
-        "dgrad_s3_pad011": {"cmd": _cmd(F=2, C=256, K=128, D=130, H=64, W=64, pd=0), "route": "winograd",
-                            "winograd": {"spec": dict(BSPEC, bps_halo_z=2), "wtv": 3}},
-        "fwd_s8_pad1": {"cmd": _cmd(C=1024, K=512, D=32, H=16, W=16), "route": "winograd",
-                        "winograd": {"spec": dict(ZSPEC, ksplit=4), "wtv": 4}},
+        "fwd_s3_pad1": {
+            "cmd": _cmd(C=256, K=128, D=128, H=64, W=64),
+            "route": "winograd",
+            "winograd": {"spec": dict(ZSPEC, variant="yx"), "wtv": 4},
+        },
+        "dgrad_s3_pad011": {
+            "cmd": _cmd(F=2, C=256, K=128, D=130, H=64, W=64, pd=0),
+            "route": "winograd",
+            "winograd": {"spec": dict(BSPEC, bps_halo_z=2), "wtv": 3},
+        },
+        "fwd_s8_pad1": {
+            "cmd": _cmd(C=1024, K=512, D=32, H=16, W=16),
+            "route": "winograd",
+            "winograd": {"spec": dict(ZSPEC, ksplit=4), "wtv": 4},
+        },
     }
     cases.update(extra or {})
-    return {"arch": "gfx942", "llvm_flavor": "llvm22",
-            "modes": {"deterministic": {"deterministic": True, "cases": cases}}}
+    return {
+        "arch": "gfx942",
+        "llvm_flavor": "llvm22",
+        "modes": {"deterministic": {"deterministic": True, "cases": cases}},
+    }
 
 
 def _routes(extra=None, tmp_path=None):
@@ -67,7 +111,12 @@ def _req(case, routes):
 
 def test_loader_modes(tmp_path):
     r = _load(tmp_path, _table())
-    assert (r.mode, r.arch, r.llvm_flavor, len(r)) == ("deterministic", "gfx942", "llvm22", 7)
+    assert (r.mode, r.arch, r.llvm_flavor, len(r)) == (
+        "deterministic",
+        "gfx942",
+        "llvm22",
+        7,
+    )
     doc = _table()
     doc["modes"]["fastest"] = doc["modes"]["deterministic"]
     with pytest.raises(ValueError, match="name one"):
@@ -79,17 +128,55 @@ def test_loader_modes(tmp_path):
         _load(tmp_path, {"cases": {}})
 
 
-@pytest.mark.parametrize("row, msg", [
-    ({"cmd": _cmd(C=8), "route": "magic"}, "route"),
-    ({"cmd": _cmd(C=8), "route": "winograd"}, "winograd.spec"),
-    ({"cmd": _cmd(C=8, F=4), "route": "winograd", "winograd": {"spec": ZSPEC}}, "fwd / dgrad"),
-    ({"cmd": _cmd(C=8), "route": "winograd", "winograd": {"spec": dict(ZSPEC, C=8)}}, "derived"),
-    ({"cmd": _cmd(C=8), "route": "winograd", "winograd": {"spec": dict(ZSPEC, variant="x")}}, "variant"),
-    ({"cmd": _cmd(C=8), "route": "winograd", "kernel": "k", "winograd": {"spec": ZSPEC}}, "no pinned"),
-    ({"cmd": _cmd(C=8, F=2), "route": "padcopy_halo", "kernel": "k"}, "serves fwd"),
-    ({"cmd": _cmd(C=8, pd=0, p=0), "route": "padcopy_halo", "kernel": "k"}, "padded problem"),
-    ({"cmd": _cmd(C=8).replace("-n 1", "-n 2"), "route": "padcopy_halo", "kernel": "k"}, "N=1"),
-])
+@pytest.mark.parametrize(
+    "row, msg",
+    [
+        ({"cmd": _cmd(C=8), "route": "magic"}, "route"),
+        ({"cmd": _cmd(C=8), "route": "winograd"}, "winograd.spec"),
+        (
+            {"cmd": _cmd(C=8, F=4), "route": "winograd", "winograd": {"spec": ZSPEC}},
+            "fwd / dgrad",
+        ),
+        (
+            {
+                "cmd": _cmd(C=8),
+                "route": "winograd",
+                "winograd": {"spec": dict(ZSPEC, C=8)},
+            },
+            "derived",
+        ),
+        (
+            {
+                "cmd": _cmd(C=8),
+                "route": "winograd",
+                "winograd": {"spec": dict(ZSPEC, variant="x")},
+            },
+            "variant",
+        ),
+        (
+            {
+                "cmd": _cmd(C=8),
+                "route": "winograd",
+                "kernel": "k",
+                "winograd": {"spec": ZSPEC},
+            },
+            "no pinned",
+        ),
+        ({"cmd": _cmd(C=8, F=2), "route": "padcopy_halo", "kernel": "k"}, "serves fwd"),
+        (
+            {"cmd": _cmd(C=8, pd=0, p=0), "route": "padcopy_halo", "kernel": "k"},
+            "padded problem",
+        ),
+        (
+            {
+                "cmd": _cmd(C=8).replace("-n 1", "-n 2"),
+                "route": "padcopy_halo",
+                "kernel": "k",
+            },
+            "N=1",
+        ),
+    ],
+)
 def test_bad_rows_refused(row, msg):
     with pytest.raises(ValueError, match=msg):
         _routes({"bad": row})
@@ -125,9 +212,14 @@ def test_halo_request():
 
 def test_direct_route():
     r = _routes()
-    for case, row in (("dgrad_s1_pad1", "dgrad_s1_pad1"), ("wgrad_s1_pad1", "wgrad_s1_pad1")):
+    for case, row in (
+        ("dgrad_s1_pad1", "dgrad_s1_pad1"),
+        ("wgrad_s1_pad1", "wgrad_s1_pad1"),
+    ):
         plan = cr.dispatch_conv_route(_req(case, r), r)
-        assert plan.route == "direct" and plan.workspaces == () and plan.pad_copy is None
+        assert (
+            plan.route == "direct" and plan.workspaces == () and plan.pad_copy is None
+        )
         assert plan.kernel_label == _pin_rows()[row]["kernel"]
         assert [s.kind for s in plan.steps] == ["pinned"]
         assert plan.steps[0].arg_map == {"A": "x", "B": "w", "D": "y"}
@@ -141,40 +233,84 @@ def test_padcopy_halo_route():
         assert plan.kernel_label == _pin_rows()["fwd_s1"]["kernel"]
         kp = plan.kernel_problem
         assert (kp.Di, kp.Hi, kp.Wi, kp.pD, kp.pH, kp.pW) == (258, 130, 130, 0, 0, 0)
-        assert plan.pad_copy.halo == halo and plan.pad_copy.out_shape == (258, 130, 130, 64)
-        assert [(w.name, w.nbytes, w.zero_once) for w in plan.workspaces] == [("Xp", 258 * 130 * 130 * 64 * 2, True)]
+        assert plan.pad_copy.halo == halo and plan.pad_copy.out_shape == (
+            258,
+            130,
+            130,
+            64,
+        )
+        assert [(w.name, w.nbytes, w.zero_once) for w in plan.workspaces] == [
+            ("Xp", 258 * 130 * 130 * 64 * 2, True)
+        ]
         k, p = plan.steps
         assert (k.kind, p.kind) == ("kernel", "pinned")
-        assert k.arg_map == {"X": "x", "Xp": "Xp"} and p.arg_map == {"A": "Xp", "B": "w", "D": "y"}
+        assert k.arg_map == {"X": "x", "Xp": "Xp"} and p.arg_map == {
+            "A": "Xp",
+            "B": "w",
+            "D": "y",
+        }
         kd = k.build("gfx942")
-        assert kd.name.startswith("pad_copy_D") and [a["name"] for a in k.signature] == ["X", "Xp"]
-        assert k.grid[0] * 256 * plan.pad_copy.unroll * 8 >= plan.pad_copy.D * 128 * 128 * 64
+        assert kd.name.startswith("pad_copy_D") and [
+            a["name"] for a in k.signature
+        ] == ["X", "Xp"]
+        assert (
+            k.grid[0] * 256 * plan.pad_copy.unroll * 8
+            >= plan.pad_copy.D * 128 * 128 * 64
+        )
 
 
 def test_winograd_routes():
     r = _routes()
     plan = cr.dispatch_conv_route(_req("fwd_s3_pad1", r), r)
-    assert plan.route == "winograd" and plan.kernel is None and plan.winograd.kind == "yx"
-    assert plan.winograd.wtv == 4 and plan.winograd.direction == "fwd" and plan.winograd.prescale == "bps"
+    assert (
+        plan.route == "winograd" and plan.kernel is None and plan.winograd.kind == "yx"
+    )
+    assert (
+        plan.winograd.wtv == 4
+        and plan.winograd.direction == "fwd"
+        and plan.winograd.prescale == "bps"
+    )
     assert [s.kind for s in plan.steps] == ["kernel", "kernel"]
     names = [s.build("gfx942").name for s in plan.steps]
-    assert names[1].startswith("conv3d_winoyx_D130H66W66C256K128") and "_h1_wt4_am" in names[0]
+    assert (
+        names[1].startswith("conv3d_winoyx_D130H66W66C256K128")
+        and "_h1_wt4_am" in names[0]
+    )
     ws = {w.name: w for w in plan.workspaces}
-    assert set(ws) == {"X8", "U", "E"} and ws["X8"].zero_once and ws["X8"].nbytes == 130 * 66 * 66 * 256 * 2
+    assert (
+        set(ws) == {"X8", "U", "E"}
+        and ws["X8"].zero_once
+        and ws["X8"].nbytes == 130 * 66 * 66 * 256 * 2
+    )
     assert plan.steps[1].arg_map == {"X": "X8", "U": "U", "Y": "y", "E": "E"}
     # dgrad, pad (0,1,1): relayout halo z 2, y/x 1; forward filter flipped in the aux kernel
     plan = cr.dispatch_conv_route(_req("dgrad_s3_pad011", r), r)
     names = [s.build("gfx942").name for s in plan.steps]
-    assert "_flip" in names[0] and names[1].startswith("conv3d_winoyx_D132H66W66C128K256")
+    assert "_flip" in names[0] and names[1].startswith(
+        "conv3d_winoyx_D132H66W66C128K256"
+    )
     # split-K: f32 partials + the ordered reduction into y
     plan = cr.dispatch_conv_route(_req("fwd_s8_pad1", r), r)
-    assert len(plan.steps) == 3 and plan.steps[1].arg_map["Y"] == "P" and plan.steps[2].arg_map == {"P": "P", "Y": "y"}
+    assert (
+        len(plan.steps) == 3
+        and plan.steps[1].arg_map["Y"] == "P"
+        and plan.steps[2].arg_map == {"P": "P", "Y": "y"}
+    )
     assert {w.name for w in plan.workspaces} == {"X8", "U", "E", "P"}
 
 
 def test_winograd_halo_mismatch_refused():
-    r = _routes({"bad": {"cmd": _cmd(F=2, C=256, K=128, D=130, H=64, W=64, pd=0, p=1).replace("-k 128", "-k 64"),
-                         "route": "winograd", "winograd": {"spec": BSPEC, "wtv": 3}}})
+    r = _routes(
+        {
+            "bad": {
+                "cmd": _cmd(F=2, C=256, K=128, D=130, H=64, W=64, pd=0, p=1).replace(
+                    "-k 128", "-k 64"
+                ),
+                "route": "winograd",
+                "winograd": {"spec": BSPEC, "wtv": 3},
+            }
+        }
+    )
     with pytest.raises(ValueError, match="relayout halo"):
         cr.dispatch_conv_route(_req("bad", r), r)
 
@@ -182,13 +318,18 @@ def test_winograd_halo_mismatch_refused():
 def test_kernel_from_pins():
     pins = cp.load_conv_pins(PIN_TABLE, "deterministic")
     rows = _table()["modes"]["deterministic"]["cases"]
-    rows = {k: {kk: vv for kk, vv in v.items() if kk != "kernel"} for k, v in rows.items()}
+    rows = {
+        k: {kk: vv for kk, vv in v.items() if kk != "kernel"} for k, v in rows.items()
+    }
     r = cr.routes_from_mapping({"cases": rows})
     # padcopy_halo: the halo problem's pin; direct: the padded problem's pin
     plan = cr.dispatch_conv_route(_req("fwd_s1_pad1", r), r, pins)
     assert plan.kernel_label.split()[0] == pins.lookup(plan.kernel_request).instance
     plan = cr.dispatch_conv_route(_req("dgrad_s1_pad1", r), r, pins)
-    assert plan.kernel_label.split()[0] == _pin_rows()["dgrad_s1_pad1"]["kernel"].split()[0]
+    assert (
+        plan.kernel_label.split()[0]
+        == _pin_rows()["dgrad_s1_pad1"]["kernel"].split()[0]
+    )
     with pytest.raises(ValueError, match="names no kernel"):
         cr.dispatch_conv_route(_req("dgrad_s1_pad1", r), r)
 
@@ -201,7 +342,10 @@ def test_production_routes_then_pins():
     # not routed, pinned: a direct plan of the pin (here the halo-form problem)
     hreq = cr.halo_request(_req("fwd_s1_pad1", r))
     plan = cr.dispatch_conv_production(hreq, r, pins)
-    assert plan.route == "direct" and plan.kernel_label.split()[0] == pins.lookup(hreq).instance
+    assert (
+        plan.route == "direct"
+        and plan.kernel_label.split()[0] == pins.lookup(hreq).instance
+    )
     assert plan.steps[0].kind == "pinned" and plan.calls == pins.lookup(hreq).calls
     with pytest.raises(ValueError, match="neither"):
         cr.dispatch_conv_production(dataclasses.replace(hreq, C=8), r, pins)
@@ -212,11 +356,15 @@ def test_production_routes_then_pins():
 def test_default_dispatch_unchanged():
     from dispatch import grouped_convolution as gc
 
-    before = {d: [c.name for c in gc._REGISTRIES[d].candidates()] for d in ("fwd", "dgrad")}
+    before = {
+        d: [c.name for c in gc._REGISTRIES[d].candidates()] for d in ("fwd", "dgrad")
+    }
     r = _routes()
     for case in r.by_case():
         cr.dispatch_conv_route(_req(case, r), r)
-    after = {d: [c.name for c in gc._REGISTRIES[d].candidates()] for d in ("fwd", "dgrad")}
+    after = {
+        d: [c.name for c in gc._REGISTRIES[d].candidates()] for d in ("fwd", "dgrad")
+    }
     assert before == after
 
 
@@ -257,7 +405,10 @@ def test_shipped_route_kernels_are_the_pin_picks():
     pins = cp.load_conv_pins(PIN_TABLE, "deterministic")
     for mode, m in doc["modes"].items():
         r = cr.load_conv_routes(SHIPPED["gfx942_unet3d_bf16"], mode)
-        bare = {k: {f: v for f, v in row.items() if f != "kernel"} for k, row in m["cases"].items()}
+        bare = {
+            k: {f: v for f, v in row.items() if f != "kernel"}
+            for k, row in m["cases"].items()
+        }
         rb = cr.routes_from_mapping(dict(m, cases=bare), source="bare")
         for case in r.by_case():
             p1 = cr.dispatch_conv_route(_req(case, r), r)

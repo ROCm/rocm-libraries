@@ -23,7 +23,20 @@ _ARCH = "gfx942"
 
 def _problem(**kw):
     base = dict(
-        N=1, Di=10, Hi=10, Wi=10, C=256, K=128, Z=3, Y=3, X=3, sD=1, pD=0, dD=1, pH=0, pW=0
+        N=1,
+        Di=10,
+        Hi=10,
+        Wi=10,
+        C=256,
+        K=128,
+        Z=3,
+        Y=3,
+        X=3,
+        sD=1,
+        pD=0,
+        dD=1,
+        pH=0,
+        pW=0,
     )
     base.update(kw)
     return ConvProblem(**base)
@@ -33,12 +46,25 @@ def _pp(problem=None, **kw):
     base = dict(
         problem=problem if problem is not None else _problem(),
         data=ConvDataSpec(dtype_a="bf16", dtype_b="bf16", dtype_d="bf16"),
-        tile_m=256, tile_n=128, tile_k=64, warp_m=4, warp_n=2,
-        warp_tile_m=16, warp_tile_n=16, warp_tile_k=16,
-        pipeline="mem", epilogue="cshuffle", lds_k_outer=False,
-        tap_outer_k=True, tapk_prefetch=1, b_kpack=4,
-        lds_xor=True, lds_k_pad=0, vector_size_a=8,
-        tapk_pingpong=4, tapk_pp_sched=2,
+        tile_m=256,
+        tile_n=128,
+        tile_k=64,
+        warp_m=4,
+        warp_n=2,
+        warp_tile_m=16,
+        warp_tile_n=16,
+        warp_tile_k=16,
+        pipeline="mem",
+        epilogue="cshuffle",
+        lds_k_outer=False,
+        tap_outer_k=True,
+        tapk_prefetch=1,
+        b_kpack=4,
+        lds_xor=True,
+        lds_k_pad=0,
+        vector_size_a=8,
+        tapk_pingpong=4,
+        tapk_pp_sched=2,
     )
     base.update(kw)
     return DgradConvSpec(**base)
@@ -48,11 +74,26 @@ def _xh(problem=None, **kw):
     base = dict(
         problem=problem if problem is not None else _problem(),
         data=ConvDataSpec(dtype_a="bf16", dtype_b="bf16", dtype_d="bf16"),
-        tile_m=256, tile_n=64, tile_k=32, warp_m=4, warp_n=1,
-        warp_tile_m=32, warp_tile_n=32, warp_tile_k=8,
-        pipeline="mem", epilogue="cshuffle", lds_k_outer=False,
-        tap_outer_k=True, tapk_prefetch=3, tapk_xhalo=True, xhalo_exact=True,
-        b_kpack=4, lds_xor=True, lds_k_pad=0, xh_a_k4=True, xh_order=6,
+        tile_m=256,
+        tile_n=64,
+        tile_k=32,
+        warp_m=4,
+        warp_n=1,
+        warp_tile_m=32,
+        warp_tile_n=32,
+        warp_tile_k=8,
+        pipeline="mem",
+        epilogue="cshuffle",
+        lds_k_outer=False,
+        tap_outer_k=True,
+        tapk_prefetch=3,
+        tapk_xhalo=True,
+        xhalo_exact=True,
+        b_kpack=4,
+        lds_xor=True,
+        lds_k_pad=0,
+        xh_a_k4=True,
+        xh_order=6,
         cshuffle_m_chunks=2,
     )
     base.update(kw)
@@ -75,20 +116,66 @@ class TestTapkPpKnobs(unittest.TestCase):
             (_pp(tapk_pp_xhalo=2), "_ppx2"),
             (_pp(tapk_pp_xhalo=3, tapk_pp_epi=2), "_ppx3"),
             (_pp(tapk_pp_xhalo=4, tapk_pp_epi=2), "_ppx4"),
-            (_pp(tapk_pp_xhalo=4, tile_m=512, tile_k=32, tapk_pp_epi=2, cshuffle_m_chunks=2), "_ppx4"),
+            (
+                _pp(
+                    tapk_pp_xhalo=4,
+                    tile_m=512,
+                    tile_k=32,
+                    tapk_pp_epi=2,
+                    cshuffle_m_chunks=2,
+                ),
+                "_ppx4",
+            ),
             (_pp(tapk_ztrim=1), "_zt1"),
             (_pp(tapk_pp_bslab=1), "_pbs1"),
-            (_pp(tapk_pp_bslab=2, tile_m=256, tile_n=256, tile_k=32, cshuffle_m_chunks=2), "_pbs2"),
-            (_pp(tapk_pp_bslab=3, tile_m=256, tile_n=256, tile_k=32, cshuffle_m_chunks=2), "_pbs3"),
-            (_pp(tapk_pp_bslab=1, tile_m=224, tile_n=256, tile_k=32, warp_m=2, warp_n=4,
-                 cshuffle_m_chunks=7), "_pbs1"),
+            (
+                _pp(
+                    tapk_pp_bslab=2,
+                    tile_m=256,
+                    tile_n=256,
+                    tile_k=32,
+                    cshuffle_m_chunks=2,
+                ),
+                "_pbs2",
+            ),
+            (
+                _pp(
+                    tapk_pp_bslab=3,
+                    tile_m=256,
+                    tile_n=256,
+                    tile_k=32,
+                    cshuffle_m_chunks=2,
+                ),
+                "_pbs3",
+            ),
+            (
+                _pp(
+                    tapk_pp_bslab=1,
+                    tile_m=224,
+                    tile_n=256,
+                    tile_k=32,
+                    warp_m=2,
+                    warp_n=4,
+                    cshuffle_m_chunks=7,
+                ),
+                "_pbs1",
+            ),
             (_pp(tapk_pp_xhalo=1, tapk_ztrim=1), "_zt1"),
             (_xh(xh_fast_a=1), "_xfa1"),
             (_xh(xh_fast_a=2, xh_epi=1), "_xfa2"),
             (_xh(xh_epi=1), "_xep1"),
             (_xh(xh_epi=2, xh_fast_a=1), "_xep2"),
             (_xh(xh_persist=2, xh_epi=1, xh_fast_a=1), "_xhp2"),
-            (_xh(xh_epi=1, xh_fast_a=1, warp_tile_m=16, warp_tile_n=16, warp_tile_k=16), "_xep1"),
+            (
+                _xh(
+                    xh_epi=1,
+                    xh_fast_a=1,
+                    warp_tile_m=16,
+                    warp_tile_n=16,
+                    warp_tile_k=16,
+                ),
+                "_xep1",
+            ),
         ]
         for s, tag in cases:
             with self.subTest(tag=tag):
@@ -98,7 +185,9 @@ class TestTapkPpKnobs(unittest.TestCase):
                 build_implicit_gemm_conv_dgrad(s, arch=_ARCH)
 
     def test_partial_dy_tile(self):
-        kw = dict(tile_m=224, tile_n=256, tile_k=32, warp_m=2, warp_n=4, cshuffle_m_chunks=7)
+        kw = dict(
+            tile_m=224, tile_n=256, tile_k=32, warp_m=2, warp_n=4, cshuffle_m_chunks=7
+        )
         s = _pp(**kw)
         self.assertTrue(pp_a_partial(s))
         ok, why = is_valid_dgrad_spec(s, _ARCH)
@@ -152,13 +241,29 @@ class TestTapkPpIdentity(unittest.TestCase):
             (cfg["tapk_pp_persist"], cfg["tapk_pp_xhalo"], cfg["tapk_ztrim"]), (1, 1, 1)
         )
         base = KernelIdentity(
-            arch=_ARCH, direction="dgrad", algorithm="implicit_gemm",
-            dtype_a="bf16", dtype_b="bf16", dtype_d="bf16",
-            tile_m=256, tile_n=128, tile_k=64, warp_m=4, warp_n=2,
-            warp_tile_m=16, warp_tile_n=16, warp_tile_k=16,
-            pipeline="mem", epilogue="cshuffle", wave_size=64,
-            vector_size_a=8, vector_size_b=8, vector_size_c=8,
-            tap_outer_k=True, tapk_prefetch=1, b_kpack=4,
+            arch=_ARCH,
+            direction="dgrad",
+            algorithm="implicit_gemm",
+            dtype_a="bf16",
+            dtype_b="bf16",
+            dtype_d="bf16",
+            tile_m=256,
+            tile_n=128,
+            tile_k=64,
+            warp_m=4,
+            warp_n=2,
+            warp_tile_m=16,
+            warp_tile_n=16,
+            warp_tile_k=16,
+            pipeline="mem",
+            epilogue="cshuffle",
+            wave_size=64,
+            vector_size_a=8,
+            vector_size_b=8,
+            vector_size_c=8,
+            tap_outer_k=True,
+            tapk_prefetch=1,
+            b_kpack=4,
         )
         for field, tag in (
             ("tapk_pp_persist", "ppp1"),

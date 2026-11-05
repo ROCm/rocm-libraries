@@ -68,7 +68,13 @@ def _record_pixels(sg, problem) -> List[int]:
 
 
 def pp_box_det_pack(
-    sub_gemms, problem, *, tile_m: int, tile_n: int, pp_box_order: int, slot_bytes: int = 4,
+    sub_gemms,
+    problem,
+    *,
+    tile_m: int,
+    tile_n: int,
+    pp_box_order: int,
+    slot_bytes: int = 4,
     pix_map=None,
 ) -> Tuple[List[int], dict]:
     """The i32 words of a ``pp_box_det`` launch's sub-GEMM buffer up to the
@@ -96,14 +102,16 @@ def pp_box_det_pack(
             # through the full dX)
             pix = [pix_map(q) for q in pix]
         for m in range(nm):
-            r = pix[m * tile_m:(m + 1) * tile_m]
+            r = pix[m * tile_m : (m + 1) * tile_m]
             for n in range(nn):
                 if pp_box_order & 1:
                     slot0, step = sg.block_start + (n * S) * nm + m, nm
                 else:
                     slot0, step = sg.block_start + (m * nn + n) * S, 1
                 _S = S
-                if os.environ.get("ROCKE_PBD_DEBUG_S"):  # timing experiments only: wrong dX
+                if os.environ.get(
+                    "ROCKE_PBD_DEBUG_S"
+                ):  # timing experiments only: wrong dX
                     _S = min(S, int(os.environ["ROCKE_PBD_DEBUG_S"]))
                 entries.append([slot0, _S, step, len(rows), n * tile_n, len(r), 0, 0])
                 rows.extend(r + [r[0]] * (tile_m - len(r)))
@@ -123,8 +131,13 @@ def pp_box_det_pack(
     if (cnt_word + blocks) * 4 >= 0x7FFFFFF0:
         raise ValueError("pp_box_det: workspace past the 2 GiB buffer range")
     return buf, dict(
-        ws_word=ws_word, ws_words=ws_words, tab_word=tab_word, cnt_word=cnt_word,
-        n_tiles=len(entries), blocks=blocks, total_words=cnt_word + blocks,
+        ws_word=ws_word,
+        ws_words=ws_words,
+        tab_word=tab_word,
+        cnt_word=cnt_word,
+        n_tiles=len(entries),
+        blocks=blocks,
+        total_words=cnt_word + blocks,
     )
 
 
@@ -158,26 +171,47 @@ class DgradBoxDetReduceSpec:
 
     @property
     def block_size(self) -> int:
-        return self.wave_size if self.wave_wg else self.warp_m * self.warp_n * self.wave_size
+        return (
+            self.wave_size
+            if self.wave_wg
+            else self.warp_m * self.warp_n * self.wave_size
+        )
 
     def kernel_name(self) -> str:
         return kernel_name_join(
-            self.name, f"t{self.tile_m}x{self.tile_n}", f"w{self.warp_m}x{self.warp_n}",
-            f"v{self.store_vec}", f"mch{self.m_chunks}", f"ms{self.msplit}", f"u{self.unroll}", "wwg" if self.wave_wg else "", "sb2" if self.slot_bytes == 2 else "",
-            f"la{self.load_aux}" if self.load_aux else "", "pp" if self.pix_pre else "", self.dtype_d,
+            self.name,
+            f"t{self.tile_m}x{self.tile_n}",
+            f"w{self.warp_m}x{self.warp_n}",
+            f"v{self.store_vec}",
+            f"mch{self.m_chunks}",
+            f"ms{self.msplit}",
+            f"u{self.unroll}",
+            "wwg" if self.wave_wg else "",
+            "sb2" if self.slot_bytes == 2 else "",
+            f"la{self.load_aux}" if self.load_aux else "",
+            "pp" if self.pix_pre else "",
+            self.dtype_d,
         )
 
 
-def build_dgrad_box_det_reduce(spec: DgradBoxDetReduceSpec, *, arch: str = "gfx942") -> KernelDef:  # noqa: ARG001
+def build_dgrad_box_det_reduce(
+    spec: DgradBoxDetReduceSpec, *, arch: str = "gfx942"
+) -> KernelDef:  # noqa: ARG001
     """Stage 2 of ``pp_box_det``: one workgroup per split tile (grid x =
     ``n_tiles``), the stage-1 warp grid; see the module docstring."""
     from rocke.helpers.io import io_ir_type
 
     b = IRBuilder(spec.kernel_name())
     b.kernel.attrs["max_workgroup_size"] = spec.block_size
-    ws_ptr = b.param("ws", PtrType(I32, "global"), noalias=True, readonly=True, align=16)
+    ws_ptr = b.param(
+        "ws", PtrType(I32, "global"), noalias=True, readonly=True, align=16
+    )
     dx_ptr = b.param(
-        "dx", PtrType(io_ir_type(spec.dtype_d), "global"), noalias=True, writeonly=True, align=16
+        "dx",
+        PtrType(io_ir_type(spec.dtype_d), "global"),
+        noalias=True,
+        writeonly=True,
+        align=16,
     )
     tab_word = b.param("tab_word", I32)
     ws_word = b.param("ws_word", I32)
@@ -186,8 +220,13 @@ def build_dgrad_box_det_reduce(spec: DgradBoxDetReduceSpec, *, arch: str = "gfx9
 
     atom = mfma_atom("bf16", 16, 16, 16)
     full = WarpGrid.from_atom(
-        atom, tile_m=spec.tile_m, tile_n=spec.tile_n, tile_k=16,
-        warp_m=spec.warp_m, warp_n=spec.warp_n, wave_size=spec.wave_size,
+        atom,
+        tile_m=spec.tile_m,
+        tile_n=spec.tile_n,
+        tile_k=16,
+        warp_m=spec.warp_m,
+        warp_n=spec.warp_n,
+        wave_size=spec.wave_size,
     )
     mfm, mfn = full.mfmas_per_warp_m, full.mfmas_per_warp_n
     if mfm % spec.msplit:
@@ -195,13 +234,23 @@ def build_dgrad_box_det_reduce(spec: DgradBoxDetReduceSpec, *, arch: str = "gfx9
     g = mfm // spec.msplit
     if spec.wave_wg:
         grid = WarpGrid.from_atom(
-            atom, tile_m=g * 16, tile_n=mfn * 16, tile_k=16,
-            warp_m=1, warp_n=1, wave_size=spec.wave_size,
+            atom,
+            tile_m=g * 16,
+            tile_n=mfn * 16,
+            tile_k=16,
+            warp_m=1,
+            warp_n=1,
+            wave_size=spec.wave_size,
         ).bind(b, block_m_axis="y", block_n_axis="x")
     else:
         grid = WarpGrid.from_atom(
-            atom, tile_m=spec.tile_m // spec.msplit, tile_n=spec.tile_n, tile_k=16,
-            warp_m=spec.warp_m, warp_n=spec.warp_n, wave_size=spec.wave_size,
+            atom,
+            tile_m=spec.tile_m // spec.msplit,
+            tile_n=spec.tile_n,
+            tile_k=16,
+            warp_m=spec.warp_m,
+            warp_n=spec.warp_n,
+            wave_size=spec.wave_size,
         ).bind(b, block_m_axis="y", block_n_axis="x")
     tid, lane = grid.tid, grid.lane
     c0 = b.const_i32(0)
@@ -241,14 +290,16 @@ def build_dgrad_box_det_reduce(spec: DgradBoxDetReduceSpec, *, arch: str = "gfx9
         pre = []
         for e_ in range(nvec):
             row = b.div(
-                b.add(b.const_i32(e_ * grid.block_size), tid), b.const_i32(grid.tile_n // sv)
+                b.add(b.const_i32(e_ * grid.block_size), tid),
+                b.const_i32(grid.tile_n // sv),
             )
             pre.append(row)  # mapped to pixels below, once _row exists
     if spec.wave_wg:
         wm = b.div(wave, b.const_i32(spec.warp_n))
         wn = b.sub(wave, b.mul(wm, b.const_i32(spec.warp_n)))
         grid = dc_replace(
-            grid, block_m_off=c0,
+            grid,
+            block_m_off=c0,
             block_n_off=b.add(n_off, b.mul(wn, b.const_i32(mfn * 16))),
         )
         row0 = b.add(b.mul(wm, b.const_i32(mfm * 16)), b.mul(q, b.const_i32(g * 16)))
@@ -266,7 +317,8 @@ def build_dgrad_box_det_reduce(spec: DgradBoxDetReduceSpec, *, arch: str = "gfx9
             return m_val
         wm = b_.div(m_val, c_g16)
         return b_.add(
-            b_.add(b_.mul(wm, b_.const_i32(mfm * 16)), q_off), b_.sub(m_val, b_.mul(wm, c_g16))
+            b_.add(b_.mul(wm, b_.const_i32(mfm * 16)), q_off),
+            b_.sub(m_val, b_.mul(wm, c_g16)),
         )
 
     pre_pix = None
@@ -295,24 +347,43 @@ def build_dgrad_box_det_reduce(spec: DgradBoxDetReduceSpec, *, arch: str = "gfx9
                 base = b.select(b.cmp_lt(su, S), base, c_oob)
             if eb == 2:
                 raw = [
-                    b.buffer_load_vN(ws.rsrc, b.add(base, b.const_i32(j * acc_stride)), c0, BF16, 4, aux=spec.load_aux)
+                    b.buffer_load_vN(
+                        ws.rsrc,
+                        b.add(base, b.const_i32(j * acc_stride)),
+                        c0,
+                        BF16,
+                        4,
+                        aux=spec.load_aux,
+                    )
                     for j in range(len(accs_s))
                 ]
-                parts.append([
-                    b.vec_pack([b.cast_to_f32(b.vec_extract(v, i)) for i in range(4)], F32)
-                    for v in raw
-                ])
+                parts.append(
+                    [
+                        b.vec_pack(
+                            [b.cast_to_f32(b.vec_extract(v, i)) for i in range(4)], F32
+                        )
+                        for v in raw
+                    ]
+                )
             else:
-                parts.append([
-                    b.buffer_load_vN(ws.rsrc, b.add(base, b.const_i32(j * acc_stride)), c0, F32, 4, aux=spec.load_aux)
-                    for j in range(len(accs_s))
-                ])
+                parts.append(
+                    [
+                        b.buffer_load_vN(
+                            ws.rsrc,
+                            b.add(base, b.const_i32(j * acc_stride)),
+                            c0,
+                            F32,
+                            4,
+                            aux=spec.load_aux,
+                        )
+                        for j in range(len(accs_s))
+                    ]
+                )
         new = list(accs_s)
         for u in range(U):
             new = [b.fadd(a, pv) for a, pv in zip(new, parts[u])]
         b.scf_yield(*new)
     accs = list(red.results)
-
 
     def dx_addr(b_: IRBuilder, m_val, n_val):
         if pre_pix:
@@ -327,7 +398,9 @@ def build_dgrad_box_det_reduce(spec: DgradBoxDetReduceSpec, *, arch: str = "gfx9
         atom=atom, grid=grid, max_store_vec=spec.store_vec, out_dtype=spec.dtype_d
     )
     epi = dc_replace(epi, war_barriers=1, m_chunks=spec.m_chunks)
-    bound_m = m_valid if (spec.msplit == 1 and not spec.wave_wg) else b.const_i32(spec.tile_m)
+    bound_m = (
+        m_valid if (spec.msplit == 1 and not spec.wave_wg) else b.const_i32(spec.tile_m)
+    )
     epi.store(b, accs=accs, addr_fn=dx_addr, d_rsrc=dx.rsrc, bounds=(bound_m, c_C))
     return b.kernel
 

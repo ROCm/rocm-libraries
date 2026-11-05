@@ -49,13 +49,17 @@ def emit_m_band_order(b, mt, *, num_m_tiles, plane, tile_m, m_band: int):
     t_whole = b.add(b.mul(b.div(r, c_mb), R), b.add(b.mul(band, c_mb), b.mod(r, c_mb)))
     # the narrow last band: L - in_whole = row * w_last + i
     l2 = b.sub(mt, in_whole)
-    t_last = b.add(b.mul(b.div(l2, w_last), R), b.add(b.mul(nb, c_mb), b.mod(l2, w_last)))
+    t_last = b.add(
+        b.mul(b.div(l2, w_last), R), b.add(b.mul(nb, c_mb), b.mod(l2, w_last))
+    )
     t = b.select(b.cmp_lt(mt, in_whole), t_whole, t_last)
     ok = b.land(b.cmp_lt(mt, full), b.cmp_lt(c0, rows))
     return b.select(ok, t, mt)
 
 
-def python_m_band_order(mt: int, *, num_m_tiles: int, plane: int, tile_m: int, m_band: int) -> int:
+def python_m_band_order(
+    mt: int, *, num_m_tiles: int, plane: int, tile_m: int, m_band: int
+) -> int:
     """Pure-Python model of :func:`emit_m_band_order`."""
     R = max((plane + tile_m // 2) // tile_m, 1)
     rows = num_m_tiles // R

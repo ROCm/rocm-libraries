@@ -11,16 +11,28 @@ import subprocess
 import sys
 from pathlib import Path
 
-SCRIPT = Path(__file__).resolve().parents[1] / "benchmarks" / "common" / "derive_conv_pins.py"
+SCRIPT = (
+    Path(__file__).resolve().parents[1]
+    / "benchmarks"
+    / "common"
+    / "derive_conv_pins.py"
+)
 CMD = "MIOpenDriver convbfp16 -n 1 -c 64 -H 8 -W 8 -k 64 -y 3 -x 3 -F 1"
 
 
 def _run_dir(tmp: Path, name: str, winner: str, finalists: dict) -> Path:
     d = tmp / name
     d.mkdir()
-    row = {"implicit_kernel": winner, "implicit_ms": finalists[winner], "miopen_cmd": CMD}
+    row = {
+        "implicit_kernel": winner,
+        "implicit_ms": finalists[winner],
+        "miopen_cmd": CMD,
+    }
     (d / "fwd_s1.jsonl").write_text(json.dumps(row) + "\n")
-    lines = [f"  [ {i}/9]  100.0 TFLOPS  {ms:8.3f} ms  {lab}" for i, (lab, ms) in enumerate(finalists.items(), 1)]
+    lines = [
+        f"  [ {i}/9]  100.0 TFLOPS  {ms:8.3f} ms  {lab}"
+        for i, (lab, ms) in enumerate(finalists.items(), 1)
+    ]
     lines.append("  [ 1/9] probe    0.100 ms  probe-only-label")
     (d / "fwd_s1.jsonl.log").write_text("\n".join(lines) + "\n")
     return d
@@ -28,7 +40,10 @@ def _run_dir(tmp: Path, name: str, winner: str, finalists: dict) -> Path:
 
 def _derive(tmp: Path, *dirs, extra=()):
     out = tmp / "pins.json"
-    subprocess.run([sys.executable, str(SCRIPT), "--out", str(out), *extra, *map(str, dirs)], check=True)
+    subprocess.run(
+        [sys.executable, str(SCRIPT), "--out", str(out), *extra, *map(str, dirs)],
+        check=True,
+    )
     return json.loads(out.read_text())["cases"]
 
 

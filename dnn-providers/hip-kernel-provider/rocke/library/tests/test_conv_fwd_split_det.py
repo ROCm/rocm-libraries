@@ -17,8 +17,14 @@ import pytest
 
 from tests.test_conv_fwd_3d_kloop_knobs import _SKIP, _TOL, _problem
 
-_PP5 = dict(uniform_k_decode=True, reg_prefetch=1, lds_xor=True, lds_kpack_read=True,
-            rpf_pingpong=5, vmem_interleave=4)
+_PP5 = dict(
+    uniform_k_decode=True,
+    reg_prefetch=1,
+    lds_xor=True,
+    lds_kpack_read=True,
+    rpf_pingpong=5,
+    vmem_interleave=4,
+)
 _T256 = (256, 128, 64, 4, 2, 16)
 
 
@@ -27,11 +33,21 @@ def _spec(problem, tile, **knobs):
 
     tm, tn, tk, wm, wn, wt = tile
     return ImplicitGemmConvSpec(
-        problem=problem, name="test_fwd_split_det",
+        problem=problem,
+        name="test_fwd_split_det",
         data=ConvDataSpec(dtype_a="bf16", dtype_b="bf16", dtype_d="bf16"),
-        tile_m=tm, tile_n=tn, tile_k=tk, warp_m=wm, warp_n=wn, warp_tile_m=wt,
-        warp_tile_n=wt, warp_tile_k=16, pipeline="mem", epilogue="cshuffle",
-        groups=problem.groups, **knobs,
+        tile_m=tm,
+        tile_n=tn,
+        tile_k=tk,
+        warp_m=wm,
+        warp_n=wn,
+        warp_tile_m=wt,
+        warp_tile_n=wt,
+        warp_tile_k=16,
+        pipeline="mem",
+        epilogue="cshuffle",
+        groups=problem.groups,
+        **knobs,
     )
 
 
@@ -64,9 +80,11 @@ def _run_det(problem, *, degree, tile, launches=4, full_tiles=None, **knobs):
     spec = _spec(problem, tile, **knobs)
     art = compile_kernel(build_implicit_gemm_conv(spec, arch=arch), arch=arch)
     launcher = KernelLauncher(
-        hsaco=art.hsaco, kernel_name=art.kernel_name,
-        signature=conv_args_signature("bf16", is_3d=True, split_k=True,
-                                      split_tail=spec.split_tail, split_det=True),
+        hsaco=art.hsaco,
+        kernel_name=art.kernel_name,
+        signature=conv_args_signature(
+            "bf16", is_3d=True, split_k=True, split_tail=spec.split_tail, split_det=True
+        ),
     )
     p = problem
     torch.manual_seed(0)
@@ -81,9 +99,21 @@ def _run_det(problem, *, degree, tile, launches=4, full_tiles=None, **knobs):
         slabs = fwd_split_det_slabs(tiles, degree)
         pb = 4 * args.gemm_m * p.K * slabs
     else:
-        pb = 4 * tm * tn * max(1, fwd_split_det_slots(
-            tiles, max(1, p.groups), degree, split_tail=spec.split_tail,
-            full_tiles=full_tiles or 0))
+        pb = (
+            4
+            * tm
+            * tn
+            * max(
+                1,
+                fwd_split_det_slots(
+                    tiles,
+                    max(1, p.groups),
+                    degree,
+                    split_tail=spec.split_tail,
+                    full_tiles=full_tiles or 0,
+                ),
+            )
+        )
     rt = Runtime()
     ptrs = [rt.alloc(t.nbytes) for t in (A, B, D)]
     ws = rt.alloc(fb + pb)
@@ -93,27 +123,56 @@ def _run_det(problem, *, degree, tile, launches=4, full_tiles=None, **knobs):
         rt.memcpy_h2d(ptrs[1], _u8(B), B.nbytes)
         rt.memset(ws, 0, fb + pb)
         values = args.to_launch_values(
-            *ptrs, A.nbytes, B.nbytes, D.nbytes, split_k=degree, sk_flags=ws,
-            sk_partials=int(ws) + fb, full_tiles=full_tiles if spec.split_tail else None,
+            *ptrs,
+            A.nbytes,
+            B.nbytes,
+            D.nbytes,
+            split_k=degree,
+            sk_flags=ws,
+            sk_partials=int(ws) + fb,
+            full_tiles=full_tiles if spec.split_tail else None,
         )
         fold = None
         if spec.split_det == 3:
             fspec = WgradReduceSpec(
                 problem=ConvProblem(N=1, Hi=1, Wi=1, C=p.K, K=args.gemm_m, Y=1, X=1),
-                dtype_d="bf16", ws_replicas=slabs, vec=4,
+                dtype_d="bf16",
+                ws_replicas=slabs,
+                vec=4,
             )
             fart = compile_kernel(build_conv_wgrad_workspace_reduce(fspec), arch=arch)
-            fold = (KernelLauncher(hsaco=fart.hsaco, kernel_name=fart.kernel_name,
-                                   signature=wgrad_reduce_signature(fspec)),
-                    {"ws_ptr": int(ws) + fb, "dw_ptr": ptrs[2], "wg_M": fspec.wg_M,
-                     "wg_N": fspec.wg_N, "ws_bytes": pb, "dw_bytes": D.nbytes, "groups": 1},
-                    LaunchConfig(grid=wgrad_reduce_grid(fspec), block=(fspec.block_size, 1, 1),
-                                 fence=True))
+            fold = (
+                KernelLauncher(
+                    hsaco=fart.hsaco,
+                    kernel_name=fart.kernel_name,
+                    signature=wgrad_reduce_signature(fspec),
+                ),
+                {
+                    "ws_ptr": int(ws) + fb,
+                    "dw_ptr": ptrs[2],
+                    "wg_M": fspec.wg_M,
+                    "wg_N": fspec.wg_N,
+                    "ws_bytes": pb,
+                    "dw_bytes": D.nbytes,
+                    "groups": 1,
+                },
+                LaunchConfig(
+                    grid=wgrad_reduce_grid(fspec),
+                    block=(fspec.block_size, 1, 1),
+                    fence=True,
+                ),
+            )
         gx, gy, gz = args.grid()
         for _ in range(launches):
             rt.memset(ptrs[2], 0x7F, D.nbytes)  # garbage
-            launcher(values, config=LaunchConfig(grid=(gx, gy, gz * degree),
-                                                 block=(spec.block_size, 1, 1), fence=True))
+            launcher(
+                values,
+                config=LaunchConfig(
+                    grid=(gx, gy, gz * degree),
+                    block=(spec.block_size, 1, 1),
+                    fence=True,
+                ),
+            )
             if fold is not None:
                 fold[0](fold[1], config=fold[2])
             out = torch.empty_like(D)
@@ -135,13 +194,29 @@ class TestFwdSplitDet(unittest.TestCase):
         for mode in (1, 2):
             for degree in (2, 3, 5):
                 with self.subTest(mode=mode, degree=degree):
-                    err, same = _run_det(p, degree=degree, tile=_T256, **_PP5, uk_nopad=True,
-                                         split_k=2, split_det=mode)
+                    err, same = _run_det(
+                        p,
+                        degree=degree,
+                        tile=_T256,
+                        **_PP5,
+                        uk_nopad=True,
+                        split_k=2,
+                        split_det=mode,
+                    )
                     self.assertLess(err, _TOL)
                     self.assertTrue(same)
             with self.subTest(mode=mode, split_tail=True):
-                err, same = _run_det(p, degree=3, tile=_T256, full_tiles=2, **_PP5,
-                                     uk_nopad=True, split_k=2, split_tail=True, split_det=mode)
+                err, same = _run_det(
+                    p,
+                    degree=3,
+                    tile=_T256,
+                    full_tiles=2,
+                    **_PP5,
+                    uk_nopad=True,
+                    split_k=2,
+                    split_tail=True,
+                    split_det=mode,
+                )
                 self.assertLess(err, _TOL)
                 self.assertTrue(same)
 
@@ -149,8 +224,15 @@ class TestFwdSplitDet(unittest.TestCase):
         p = _problem(C=128, K=128, Hi=18, Wi=18, Di=6, pH=0, pW=0, pD=0)
         for degree in (2, 3, 5):
             with self.subTest(degree=degree):
-                err, same = _run_det(p, degree=degree, tile=_T256, **_PP5, uk_nopad=True,
-                                     split_k=2, split_det=3)
+                err, same = _run_det(
+                    p,
+                    degree=degree,
+                    tile=_T256,
+                    **_PP5,
+                    uk_nopad=True,
+                    split_k=2,
+                    split_det=3,
+                )
                 self.assertLess(err, _TOL)
                 self.assertTrue(same)
 
@@ -162,17 +244,23 @@ class TestFwdSplitDetSpec(unittest.TestCase):
     def test_rejections(self):
         from kernels.common.conv_implicit_gemm import fwd_split_k_conflict
 
-        for kw in (dict(split_k=2, split_det=1), dict(split_k=2, split_det=2),
-                   dict(split_k=2, split_det=3), dict(split_k=2, split_det=2, split_tail=True),
-                   dict(split_k=2, split_det=3, split_hybrid=16)):
+        for kw in (
+            dict(split_k=2, split_det=1),
+            dict(split_k=2, split_det=2),
+            dict(split_k=2, split_det=3),
+            dict(split_k=2, split_det=2, split_tail=True),
+            dict(split_k=2, split_det=3, split_hybrid=16),
+        ):
             with self.subTest(**kw):
                 self.assertEqual(fwd_split_k_conflict(self._s(**kw)), "")
-        for kw in (dict(split_det=2),                              # needs split_k
-                   dict(split_k=2, split_det=4),
-                   dict(split_k=2, split_det=3, split_tail=True),
-                   dict(split_k=2, split_det=2, split_streamk=True),
-                   dict(split_k=2, split_det=2, split_zero_first=True),
-                   dict(split_k=2, split_det=2, split_flag_store=True)):
+        for kw in (
+            dict(split_det=2),  # needs split_k
+            dict(split_k=2, split_det=4),
+            dict(split_k=2, split_det=3, split_tail=True),
+            dict(split_k=2, split_det=2, split_streamk=True),
+            dict(split_k=2, split_det=2, split_zero_first=True),
+            dict(split_k=2, split_det=2, split_flag_store=True),
+        ):
             with self.subTest(**kw):
                 self.assertNotEqual(fwd_split_k_conflict(self._s(**kw)), "")
 
@@ -184,9 +272,11 @@ class TestFwdSplitDetSpec(unittest.TestCase):
         self.assertNotIn("sdet", self._s(split_k=2).kernel_name())
         names = [n for n, _ in conv_arg_names(is_3d=True, split_k=True, split_det=True)]
         self.assertEqual(names[-4:], ["ks", "ks_count", "sk_flags", "sk_partials"])
-        base = ("fwd-implicit_gemm-bf16-3d-t256x128x64-w4x2-a16x16x16-v8x8x8-mem-cshuffle-grp-"
-                "sk2-ukd-rpf1-lxor-tapf-nopad-vmi5-kprd-pp5-ppbd-sapl-skx6-psf3-fbse-wave64-"
-                "gfx942-llvm22")
+        base = (
+            "fwd-implicit_gemm-bf16-3d-t256x128x64-w4x2-a16x16x16-v8x8x8-mem-cshuffle-grp-"
+            "sk2-ukd-rpf1-lxor-tapf-nopad-vmi5-kprd-pp5-ppbd-sapl-skx6-psf3-fbse-wave64-"
+            "gfx942-llvm22"
+        )
         det = base.replace("-wave64-", "-sdet3-wave64-")
         i0, i3 = KernelIdentity.from_label(base), KernelIdentity.from_label(det)
         self.assertEqual((i0.split_det, i3.split_det), (0, 3))

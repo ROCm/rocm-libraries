@@ -32,7 +32,13 @@ from dispatch.conv_pins import _SPLIT_RE, parse_miopen_cmd
 _KEEP = ("cmd", "calls", "kernel", "sessions")
 
 
-def build_table(arch: str, modes: dict, det_mode: str | None, comment: str = "", llvm_flavor: str = "llvm22") -> dict:
+def build_table(
+    arch: str,
+    modes: dict,
+    det_mode: str | None,
+    comment: str = "",
+    llvm_flavor: str = "llvm22",
+) -> dict:
     out = {"arch": arch, "llvm_flavor": llvm_flavor, "comment": comment, "modes": {}}
     for mode, path in modes.items():
         doc = json.load(open(path))
@@ -44,15 +50,21 @@ def build_table(arch: str, modes: dict, det_mode: str | None, comment: str = "",
             if ident.label() != inst:
                 raise SystemExit(f"{mode}/{case}: label does not round-trip: {inst}")
             if ident.arch != arch:
-                raise SystemExit(f"{mode}/{case}: {ident.arch} kernel in a {arch} table")
+                raise SystemExit(
+                    f"{mode}/{case}: {ident.arch} kernel in a {arch} table"
+                )
             direction, _, _ = parse_miopen_cmd(row["cmd"])
             if direction != ident.direction:
-                raise SystemExit(f"{mode}/{case}: {ident.direction} kernel pinned to a {direction} problem")
+                raise SystemExit(
+                    f"{mode}/{case}: {ident.direction} kernel pinned to a {direction} problem"
+                )
             m = _SPLIT_RE.search(label)
             sk = int(m.group(1)) if m else None
             det = is_deterministic(direction, ident, sk, "f32")
             if det_mode == mode and not det:
-                raise SystemExit(f"{mode}/{case}: {label} is not deterministic ({classify(direction, ident, sk)[1]})")
+                raise SystemExit(
+                    f"{mode}/{case}: {label} is not deterministic ({classify(direction, ident, sk)[1]})"
+                )
             cases[case] = {k: row[k] for k in _KEEP if k in row}
             cases[case]["deterministic"] = det
         out["modes"][mode] = {"deterministic": mode == det_mode, "cases": cases}
@@ -60,17 +72,24 @@ def build_table(arch: str, modes: dict, det_mode: str | None, comment: str = "",
 
 
 def main(argv=None) -> int:
-    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     ap.add_argument("--out", required=True)
     ap.add_argument("--arch", required=True)
     ap.add_argument("--llvm-flavor", default="llvm22")
     ap.add_argument("--mode", action="append", required=True, metavar="NAME=PINS")
-    ap.add_argument("--deterministic-mode", default="deterministic",
-                    help="the mode whose every launch must be deterministic ('' = none)")
+    ap.add_argument(
+        "--deterministic-mode",
+        default="deterministic",
+        help="the mode whose every launch must be deterministic ('' = none)",
+    )
     ap.add_argument("--comment", default="")
     a = ap.parse_args(argv)
     modes = dict(m.split("=", 1) for m in a.mode)
-    table = build_table(a.arch, modes, a.deterministic_mode or None, a.comment, a.llvm_flavor)
+    table = build_table(
+        a.arch, modes, a.deterministic_mode or None, a.comment, a.llvm_flavor
+    )
     with open(a.out, "w") as f:
         json.dump(table, f, indent=1, sort_keys=False)
         f.write("\n")

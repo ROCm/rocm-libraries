@@ -79,15 +79,20 @@ class TestWgradLdsBswz(unittest.TestCase):
             dict(lds_kpack=1),
             dict(lds_bswz=2),
         ):
-            ok, _ = is_valid_wgrad_spec(_spec(**{**dict(lds_bswz=1), **bad}), arch="gfx942")
+            ok, _ = is_valid_wgrad_spec(
+                _spec(**{**dict(lds_bswz=1), **bad}), arch="gfx942"
+            )
             self.assertFalse(ok, bad)
 
     def test_lowers_and_drops_the_b_pad(self):
-        from kernels.common.conv_implicit_gemm_wgrad import build_implicit_gemm_conv_wgrad
+        from kernels.common.conv_implicit_gemm_wgrad import (
+            build_implicit_gemm_conv_wgrad,
+        )
         from rocke.core.lower_llvm import lower_kernel_to_llvm
 
         ll = lower_kernel_to_llvm(
-            build_implicit_gemm_conv_wgrad(_spec(lds_bswz=1), arch="gfx942"), arch="gfx942"
+            build_implicit_gemm_conv_wgrad(_spec(lds_bswz=1), arch="gfx942"),
+            arch="gfx942",
         )
         ll0 = lower_kernel_to_llvm(
             build_implicit_gemm_conv_wgrad(_spec(), arch="gfx942"), arch="gfx942"
@@ -127,13 +132,23 @@ class TestWgradKpLine(unittest.TestCase):
 
         ok, why = is_valid_wgrad_spec(_spec(kp_line=8), arch="gfx942")
         self.assertTrue(ok, why)
-        for bad in (dict(kp_line=4), dict(lds_kpack=1), dict(prefetch_regs=0, lds_kpack=1)):
-            ok, _ = is_valid_wgrad_spec(_spec(**{**dict(kp_line=8), **bad}), arch="gfx942")
+        for bad in (
+            dict(kp_line=4),
+            dict(lds_kpack=1),
+            dict(prefetch_regs=0, lds_kpack=1),
+        ):
+            ok, _ = is_valid_wgrad_spec(
+                _spec(**{**dict(kp_line=8), **bad}), arch="gfx942"
+            )
             self.assertFalse(ok, bad)
 
     def test_decode_is_a_bijection_with_whole_lines(self):
         # Mirror of CoalescedTileLoader._chunk_row_col for kp_line.
-        for rows, cols, kp, threads in ((256, 32, 2, 256), (64, 32, 2, 128), (256, 16, 2, 256)):
+        for rows, cols, kp, threads in (
+            (256, 32, 2, 256),
+            (64, 32, 2, 128),
+            (256, 16, 2, 256),
+        ):
             vec, line = 8, 8
             cgl = 64 // line
             nb = (cols // kp) // cgl
@@ -154,14 +169,18 @@ class TestWgradKpLine(unittest.TestCase):
     def test_lowers_with_the_same_memory_ops(self):
         import re
 
-        from kernels.common.conv_implicit_gemm_wgrad import build_implicit_gemm_conv_wgrad
+        from kernels.common.conv_implicit_gemm_wgrad import (
+            build_implicit_gemm_conv_wgrad,
+        )
         from rocke.core.lower_llvm import lower_kernel_to_llvm
 
         def count(spec):
             ll = lower_kernel_to_llvm(
                 build_implicit_gemm_conv_wgrad(spec, arch="gfx942"), arch="gfx942"
             )
-            return len(re.findall(r"buffer\.load", ll)), len(re.findall(r"addrspace\(3\)", ll))
+            return len(re.findall(r"buffer\.load", ll)), len(
+                re.findall(r"addrspace\(3\)", ll)
+            )
 
         base = _spec(warp_n=2, tile_n=128)
         self.assertEqual(count(base)[0], count(replace(base, kp_line=8))[0])

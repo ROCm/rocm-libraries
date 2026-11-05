@@ -182,7 +182,9 @@ def build_conv_wgrad_workspace_reduce(
     if spec.rezero and spec.vec <= 1:
         raise ValueError("WgradReduceSpec.rezero needs vec > 1")
     if spec.rezero and spec.ws_bf16:
-        raise ValueError("WgradReduceSpec.rezero stores f32 zeros; not with ws_bf16 scratch")
+        raise ValueError(
+            "WgradReduceSpec.rezero stores f32 zeros; not with ws_bf16 scratch"
+        )
     ws_ptr = (
         b.param("ws_ptr", PtrType(F32, "global"), noalias=True, align=16)
         if spec.rezero
@@ -232,7 +234,9 @@ def build_conv_wgrad_workspace_reduce(
     c_n = b.add(b.mul(blk_n, b.const_i32(tile_n)), t_n)
 
     if spec.vec > 1:
-        _emit_vec_fold(b, spec, ws_ptr, dw_ptr, wg_M_param, wg_N_param, c_m, c_n, grp_id)
+        _emit_vec_fold(
+            b, spec, ws_ptr, dw_ptr, wg_M_param, wg_N_param, c_m, c_n, grp_id
+        )
         return b.kernel
 
     # OOB guard — threads outside [0, wg_M) x [0, wg_N) do nothing.
@@ -295,7 +299,9 @@ def _emit_vec_fold(b, spec, ws_ptr, dw_ptr, wg_M_param, wg_N_param, c_m, c_n, gr
         ws_base = (
             dw_off
             if reps == 1
-            else b.add(b.mul(b.mul(grp_id, b.const_i32(reps)), grp_stride), elem_in_slab)
+            else b.add(
+                b.mul(b.mul(grp_id, b.const_i32(reps)), grp_stride), elem_in_slab
+            )
         )
         if spec.ws_bf16:
             from rocke.core.ir import BF16
@@ -303,7 +309,11 @@ def _emit_vec_fold(b, spec, ws_ptr, dw_ptr, wg_M_param, wg_N_param, c_m, c_n, gr
             parts = [
                 b.global_load_vN(
                     ws_ptr,
-                    ws_base if r == 0 else b.add(ws_base, b.mul(b.const_i32(r), grp_stride)),
+                    (
+                        ws_base
+                        if r == 0
+                        else b.add(ws_base, b.mul(b.const_i32(r), grp_stride))
+                    ),
                     BF16,
                     v,
                 )
@@ -311,12 +321,19 @@ def _emit_vec_fold(b, spec, ws_ptr, dw_ptr, wg_M_param, wg_N_param, c_m, c_n, gr
             ]
             tot = [b.cast_to_f32(b.vec_extract(parts[0], i)) for i in range(v)]
             for pv in parts[1:]:
-                tot = [b.fadd(t, b.cast_to_f32(b.vec_extract(pv, i))) for i, t in enumerate(tot)]
+                tot = [
+                    b.fadd(t, b.cast_to_f32(b.vec_extract(pv, i)))
+                    for i, t in enumerate(tot)
+                ]
         else:
             parts = [
                 b.global_load_vN(
                     ws_ptr,
-                    ws_base if r == 0 else b.add(ws_base, b.mul(b.const_i32(r), grp_stride)),
+                    (
+                        ws_base
+                        if r == 0
+                        else b.add(ws_base, b.mul(b.const_i32(r), grp_stride))
+                    ),
                     F32,
                     v,
                 )
@@ -328,12 +345,18 @@ def _emit_vec_fold(b, spec, ws_ptr, dw_ptr, wg_M_param, wg_N_param, c_m, c_n, gr
         if spec.rezero:
             z = b.zero_vec_f32(v)
             for r in range(reps):
-                off = ws_base if r == 0 else b.add(ws_base, b.mul(b.const_i32(r), grp_stride))
+                off = (
+                    ws_base
+                    if r == 0
+                    else b.add(ws_base, b.mul(b.const_i32(r), grp_stride))
+                )
                 b.global_store_vN(ws_ptr, off, z, v)
         if spec.dtype_d in ("fp32", "f32"):
             b.global_store_vN(dw_ptr, dw_off, b.vec_pack(tot, F32), v)
         else:
-            b.global_store_vN(dw_ptr, dw_off, pack_f32_to(b, tot, dtype=spec.dtype_d), v)
+            b.global_store_vN(
+                dw_ptr, dw_off, pack_f32_to(b, tot, dtype=spec.dtype_d), v
+            )
 
 
 def _emit_loop_fold(b, spec, ws_ptr, dw_ptr, wg_M_param, wg_N_param, tid):
@@ -361,7 +384,9 @@ def _emit_loop_fold(b, spec, ws_ptr, dw_ptr, wg_M_param, wg_N_param, tid):
     t_m = b.div(e_v, b.const_i32(spec.tile_n))
     t_n = b.mod(e_v, b.const_i32(spec.tile_n))
     c_m = b.add(b.mul(b.block_id_y(), b.const_i32(spec.tile_m)), t_m)
-    c_n = b.mul(b.add(b.mul(b.block_id_x(), b.const_i32(spec.tile_n)), t_n), b.const_i32(v))
+    c_n = b.mul(
+        b.add(b.mul(b.block_id_x(), b.const_i32(spec.tile_n)), t_n), b.const_i32(v)
+    )
     in_bounds = b.land(b.cmp_lt(c_m, wg_M_param), b.cmp_lt(c_n, wg_N_param))
     slab = b.mul(wg_M_param, wg_N_param)
     elem = b.add(b.mul(c_m, wg_N_param), c_n)
@@ -377,7 +402,9 @@ def _emit_loop_fold(b, spec, ws_ptr, dw_ptr, wg_M_param, wg_N_param, tid):
         def load(off):
             pv = b.global_load_vN(ws_ptr, off, BF16, v)
             return [b.cast_to_f32(b.vec_extract(pv, i)) for i in range(v)]
+
     else:
+
         def load(off):
             pv = b.global_load_vN(ws_ptr, off, F32, v)
             return [b.vec_extract(pv, i) for i in range(v)]
@@ -387,8 +414,11 @@ def _emit_loop_fold(b, spec, ws_ptr, dw_ptr, wg_M_param, wg_N_param, tid):
         stride_it = b.mul(slab, b.const_i32(step_slabs))
         init = b.zero_vec_f32(v)
         loop = b.scf_for_iter(
-            b.const_i32(0), b.const_i32(n_main), b.const_i32(1),
-            [("fold_acc", init)], iv_name="fold_it",
+            b.const_i32(0),
+            b.const_i32(n_main),
+            b.const_i32(1),
+            [("fold_acc", init)],
+            iv_name="fold_it",
         )
         with loop as (it, (acc_v,)):
             off0 = b.add(base, b.mul(it, stride_it))
@@ -414,19 +444,29 @@ def _emit_loop_fold(b, spec, ws_ptr, dw_ptr, wg_M_param, wg_N_param, tid):
             else:
                 ok = b.cmp_lt(p_v, b.const_i32(R - r_first)) if P > 1 else None
                 # clamp the slab to the last one for the groups past R
-                off_c = off if ok is None else b.select(ok, off, b.add(elem_safe, b.mul(slab, b.const_i32(R - 1))))
+                off_c = (
+                    off
+                    if ok is None
+                    else b.select(
+                        ok, off, b.add(elem_safe, b.mul(slab, b.const_i32(R - 1)))
+                    )
+                )
                 vals = load(off_c)
                 if ok is not None:
                     vals = [b.select(ok, x, zero) for x in vals]
             acc = vals if acc is None else [b.fadd(t, x) for t, x in zip(acc, vals)]
     if P > 1:
         sm = b.smem_alloc_f32([P, TE * v], name_hint="fold_part")
-        b.smem_store_vN_f32(sm, [p_v, b.mul(e_v, b.const_i32(v))], b.vec_pack(acc, F32), v)
+        b.smem_store_vN_f32(
+            sm, [p_v, b.mul(e_v, b.const_i32(v))], b.vec_pack(acc, F32), v
+        )
         b.sync()
         with b.scf_if(b.land(in_bounds, b.cmp_eq(p_v, b.const_i32(0)))):
             tot = None
             for q in range(P):
-                pv = b.smem_load_vN_f32(sm, b.const_i32(q), b.mul(e_v, b.const_i32(v)), n=v)
+                pv = b.smem_load_vN_f32(
+                    sm, b.const_i32(q), b.mul(e_v, b.const_i32(v)), n=v
+                )
                 xs = [b.vec_extract(pv, i) for i in range(v)]
                 tot = xs if tot is None else [b.fadd(t, x) for t, x in zip(tot, xs)]
             _fold_store(b, spec, dw_ptr, elem, tot, v, pack_f32_to)

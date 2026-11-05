@@ -620,26 +620,84 @@ class KernelIdentity:
             del fields["tapk_ztrim"]
         if not fields["tapk_pp_bslab"]:
             del fields["tapk_pp_bslab"]
-        for name in ("xh_a_k4", "xh_order", "xh_defer", "xh_fast_a", "xh_epi", "xh_persist"):
+        for name in (
+            "xh_a_k4",
+            "xh_order",
+            "xh_defer",
+            "xh_fast_a",
+            "xh_epi",
+            "xh_persist",
+        ):
             if not fields[name]:
                 del fields[name]
         if not fields["split_addr_k_decode"]:
             del fields["split_addr_k_decode"]
         for name in (
-            "lds_ahead", "defer_mfma", "vmem_interleave", "split_tail", "uk_nopad",
+            "lds_ahead",
+            "defer_mfma",
+            "vmem_interleave",
+            "split_tail",
+            "uk_nopad",
             "defer_mfma_per_write",
-            "lds_kpack_read", "uk_chunk_group", "rpf_lds_barrier", "rpf_fetch_late",
-            "uk_xhalo", "xh_dpp", "rpf_setprio", "rpf_pingpong", "pp_pre_mfma", "xh_wait_smem", "pp_b_double", "lds_xor_rowkey",
-            "split_atomic_agent", "split_atomic_pairs", "split_xcd_remap",
-            "split_streamk", "split_flag_store", "xh_subtile", "split_atomic_fast",
-            "epi_store_fast", "split_zero_first", "pp_fetch_deep",
-            "pp_split_fetch", "fb_skip_empty", "pp_end_guard",
-            "epi_lds_barriers", "split_hybrid", "sched_strategy", "split_tail_compact", "split_det",
-            "epi_quad_xpose", "no_agpr", "m_band", "xh_stride_m", "fxh_dma", "xh_yring", "xh_pad", "xh_dlds", "xh_epi_lin", "xh_tap_rsrc", "xh_dx_wmask",
+            "lds_kpack_read",
+            "uk_chunk_group",
+            "rpf_lds_barrier",
+            "rpf_fetch_late",
+            "uk_xhalo",
+            "xh_dpp",
+            "rpf_setprio",
+            "rpf_pingpong",
+            "pp_pre_mfma",
+            "xh_wait_smem",
+            "pp_b_double",
+            "lds_xor_rowkey",
+            "split_atomic_agent",
+            "split_atomic_pairs",
+            "split_xcd_remap",
+            "split_streamk",
+            "split_flag_store",
+            "xh_subtile",
+            "split_atomic_fast",
+            "epi_store_fast",
+            "split_zero_first",
+            "pp_fetch_deep",
+            "pp_split_fetch",
+            "fb_skip_empty",
+            "pp_end_guard",
+            "epi_lds_barriers",
+            "split_hybrid",
+            "sched_strategy",
+            "split_tail_compact",
+            "split_det",
+            "epi_quad_xpose",
+            "no_agpr",
+            "m_band",
+            "xh_stride_m",
+            "fxh_dma",
+            "xh_yring",
+            "xh_pad",
+            "xh_dlds",
+            "xh_epi_lin",
+            "xh_tap_rsrc",
+            "xh_dx_wmask",
         ):
             if not fields[name]:
                 del fields[name]
-        for name in ("dy_halo", "dy_halo_setprio", "dy_halo_kouter_pad", "halo_max_wo", "pp_streamk", "pp_sk_mode", "pp_zskip", "pp_boxes", "pp_box_cus", "pp_box_order", "pp_box_det", "dx_interior", "dx_interior_axes"):
+        for name in (
+            "dy_halo",
+            "dy_halo_setprio",
+            "dy_halo_kouter_pad",
+            "halo_max_wo",
+            "pp_streamk",
+            "pp_sk_mode",
+            "pp_zskip",
+            "pp_boxes",
+            "pp_box_cus",
+            "pp_box_order",
+            "pp_box_det",
+            "dx_interior",
+            "dx_interior_axes",
+        ):
             if not fields[name]:
                 del fields[name]
         if not fields["split_k_cluster"]:
@@ -729,7 +787,8 @@ def dgrad_sub_gemms(identity: KernelIdentity, problem: object) -> list:
             cus=getattr(identity, "pp_box_cus", 0),
             interior=(
                 (int(getattr(identity, "dx_interior_axes", 0) or 0) or 7)
-                if getattr(identity, "dx_interior", 0) else 0
+                if getattr(identity, "dx_interior", 0)
+                else 0
             ),
         )
     if identity.patch:
@@ -1012,7 +1071,10 @@ def identity_supports_problem(
         if zy % xr:
             return False, f"xwin_rows={xr} must divide the filter rows Z*Y={zy}"
         if int(getattr(problem, "X", 0)) != xw:
-            return False, f"xwin bakes filter width {xw} (problem X={getattr(problem, 'X', None)})"
+            return (
+                False,
+                f"xwin bakes filter width {xw} (problem X={getattr(problem, 'X', None)})",
+            )
         if int(getattr(problem, "sW", 1)) != 1 or int(getattr(problem, "dW", 1)) != 1:
             return False, "xwin serves stride-1, dilation-1 W only"
         if int(getattr(problem, "groups", 1)) != 1:
@@ -1022,11 +1084,17 @@ def identity_supports_problem(
         mr = max(1, getattr(identity, "xwin_mrow", 1) or 1)
         if mr > 1:
             if int(getattr(problem, "Wo", 0)) * mr != identity.tile_k:
-                return False, f"xwin_mrow={mr} needs Wo == tile_k / {mr} (Wo={getattr(problem, 'Wo', None)})"
+                return (
+                    False,
+                    f"xwin_mrow={mr} needs Wo == tile_k / {mr} (Wo={getattr(problem, 'Wo', None)})",
+                )
             if int(getattr(problem, "Ho", 0)) % mr:
                 return False, f"xwin_mrow={mr} needs Ho % {mr} == 0"
         elif int(getattr(problem, "Wo", 0)) % max(1, identity.tile_k):
-            return False, f"xwin needs Wo % tile_k == 0 (Wo={getattr(problem, 'Wo', None)})"
+            return (
+                False,
+                f"xwin needs Wo % tile_k == 0 (Wo={getattr(problem, 'Wo', None)})",
+            )
 
     # uk_nopad drops the per-tap bounds checks: unpadded problems only.
     if (
@@ -1063,9 +1131,13 @@ def identity_supports_problem(
         and identity.tile_m
     ):
         if identity.direction == "fwd":
-            _plane = int(getattr(problem, "Ho", 0) or 0) * int(getattr(problem, "Wo", 0) or 0)
+            _plane = int(getattr(problem, "Ho", 0) or 0) * int(
+                getattr(problem, "Wo", 0) or 0
+            )
         else:
-            _plane = int(getattr(problem, "Hi", 0) or 0) * int(getattr(problem, "Wi", 0) or 0)
+            _plane = int(getattr(problem, "Hi", 0) or 0) * int(
+                getattr(problem, "Wi", 0) or 0
+            )
         _R = max(1, (_plane + identity.tile_m // 2) // identity.tile_m)
         if _plane and _R <= identity.m_band:
             return False, (
@@ -1154,13 +1226,18 @@ def identity_supports_problem(
         and getattr(identity, "xh_dx_wmask", False)
         and not getattr(identity, "dx_interior", 0)
     ):
-        from kernels.common.conv_dgrad_interior import dx_interior_launch_conflict, wmask_view
+        from kernels.common.conv_dgrad_interior import (
+            dx_interior_launch_conflict,
+            wmask_view,
+        )
 
         why = dx_interior_launch_conflict(identity, problem)
         if why:
             return False, why
         return identity_supports_problem(
-            dataclasses.replace(identity, xh_dx_wmask=False), wmask_view(problem)[0], llvm_flavor
+            dataclasses.replace(identity, xh_dx_wmask=False),
+            wmask_view(problem)[0],
+            llvm_flavor,
         )
 
     # dx_interior: the launch runs the interior view problem (see
@@ -1244,11 +1321,16 @@ def identity_supports_problem(
             # xh_tap_rsrc marks an out-of-range dY row with offset bit 30 (in
             # elements): dY (bounded by the padded input extents) < 2^30.
             def _e(a, p_):
-                return int(getattr(problem, a, 1) or 1) + 2 * int(getattr(problem, p_, 0) or 0)
+                return int(getattr(problem, a, 1) or 1) + 2 * int(
+                    getattr(problem, p_, 0) or 0
+                )
 
             dy_bound = (
-                int(getattr(problem, "N", 1) or 1) * _e("Di", "pD") * _e("Hi", "pH")
-                * _e("Wi", "pW") * int(getattr(problem, "K", 1) or 1)
+                int(getattr(problem, "N", 1) or 1)
+                * _e("Di", "pD")
+                * _e("Hi", "pH")
+                * _e("Wi", "pW")
+                * int(getattr(problem, "K", 1) or 1)
             )
             if dy_bound >= (1 << 30):
                 return False, "xh_tap_rsrc serves dY below 2^30 elements"
@@ -1300,8 +1382,10 @@ def identity_supports_problem(
         _m = int(problem.N) * int(problem.Hi) * int(problem.Wi)
         if getattr(problem, "is_3d", False):
             _m *= int(problem.Di)
-        _taps = int(problem.Y) * int(problem.X) * (
-            int(problem.Z) if getattr(problem, "is_3d", False) else 1
+        _taps = (
+            int(problem.Y)
+            * int(problem.X)
+            * (int(problem.Z) if getattr(problem, "is_3d", False) else 1)
         )
         _ti = (
             -(-_m // identity.tile_m)

@@ -95,7 +95,11 @@ def wmask_view(p):
     hd, hh, hw = halo_widths(p)
     v = dc_replace(p, Wi=int(p.Wi) + 2 * hw, pW=0)
     s = _full_strides(p)
-    vals = {"p_dX_stride_n": s["n"], "p_dX_stride_hi": s["hi"], "p_dX_stride_wi": s["wi"]}
+    vals = {
+        "p_dX_stride_n": s["n"],
+        "p_dX_stride_hi": s["hi"],
+        "p_dX_stride_wi": s["wi"],
+    }
     if p.is_3d:
         vals["p_dX_stride_di"] = s["di"]
     return v, -hw * s["wi"], vals
@@ -110,7 +114,12 @@ def launch_view(identity, p):
         keep_w = dx_interior_keeps_w(identity)
         ax = dx_interior_axes(identity)
         off, vals = interior_view_dx(p, keep_w, ax)
-        return interior_view_problem(p, keep_w, ax), off, vals, view_pixel_map(p, keep_w, ax)
+        return (
+            interior_view_problem(p, keep_w, ax),
+            off,
+            vals,
+            view_pixel_map(p, keep_w, ax),
+        )
     if getattr(identity, "xh_dx_wmask", False):
         v, off, vals = wmask_view(p)
         return v, off, vals, None
@@ -202,11 +211,17 @@ def _full_strides(p) -> Dict[str, int]:
     return {"n": sn, "di": sd, "hi": sh, "wi": sw}
 
 
-def interior_view_dx(p, keep_w: bool, axes: int = DXA_ALL) -> Tuple[int, Dict[str, int]]:
+def interior_view_dx(
+    p, keep_w: bool, axes: int = DXA_ALL
+) -> Tuple[int, Dict[str, int]]:
     """``(element offset of the view's origin in dX, dX stride kernargs)``."""
     hd, hh, hw = halo_widths(p, axes)
     s = _full_strides(p)
-    off = hd * s["di"] * (1 if p.is_3d else 0) + hh * s["hi"] + (0 if keep_w else hw) * s["wi"]
+    off = (
+        hd * s["di"] * (1 if p.is_3d else 0)
+        + hh * s["hi"]
+        + (0 if keep_w else hw) * s["wi"]
+    )
     vals = {
         "p_dX_stride_n": s["n"],
         "p_dX_stride_hi": s["hi"],
@@ -250,9 +265,9 @@ def interior_mask_np(p, axes: int = DXA_ALL):
     shape = (p.N, p.Di, p.Hi, p.Wi) if p.is_3d else (p.N, p.Hi, p.Wi)
     m = np.zeros(shape, dtype=bool)
     if p.is_3d:
-        m[:, hd:p.Di - hd, hh:p.Hi - hh, hw:p.Wi - hw] = True
+        m[:, hd : p.Di - hd, hh : p.Hi - hh, hw : p.Wi - hw] = True
     else:
-        m[:, hh:p.Hi - hh, hw:p.Wi - hw] = True
+        m[:, hh : p.Hi - hh, hw : p.Wi - hw] = True
     return m
 
 
@@ -267,9 +282,9 @@ def written_mask_np(p, keep_w: bool, axes: int = DXA_ALL):
     shape = (p.N, p.Di, p.Hi, p.Wi) if p.is_3d else (p.N, p.Hi, p.Wi)
     m = np.zeros(shape, dtype=bool)
     if p.is_3d:
-        m[:, hd:p.Di - hd, hh:p.Hi - hh, :] = True
+        m[:, hd : p.Di - hd, hh : p.Hi - hh, :] = True
     else:
-        m[:, hh:p.Hi - hh, :] = True
+        m[:, hh : p.Hi - hh, :] = True
     return m
 
 
@@ -301,9 +316,28 @@ class DgradHaloZeroSpec:
 def build_dgrad_halo_zero(spec: DgradHaloZeroSpec) -> KernelDef:
     b = IRBuilder(spec.kernel_name())
     b.kernel.attrs["max_workgroup_size"] = spec.block
-    dx_ptr = b.param("dx", PtrType(I32, "global"), noalias=True, writeonly=True, align=16)
+    dx_ptr = b.param(
+        "dx", PtrType(I32, "global"), noalias=True, writeonly=True, align=16
+    )
     dx_bytes = b.param("dx_bytes", I32)
-    names = ("Di", "Do", "Hi", "Ho", "ru", "hd", "hh", "e", "L1", "L2", "L3", "n1", "n2", "u1", "u2", "u3")
+    names = (
+        "Di",
+        "Do",
+        "Hi",
+        "Ho",
+        "ru",
+        "hd",
+        "hh",
+        "e",
+        "L1",
+        "L2",
+        "L3",
+        "n1",
+        "n2",
+        "u1",
+        "u2",
+        "u3",
+    )
     k = {n: b.param(n, I32) for n in names}
     c0, c1 = b.const_i32(0), b.const_i32(1)
     blk = b.block_id_x()
@@ -343,13 +377,16 @@ def build_dgrad_halo_zero(spec: DgradHaloZeroSpec) -> KernelDef:
         n = b.div(nd, k["Do"])
         d = b.sub(nd, b.mul(n, k["Do"]))
         row = b.add(
-            b.mul(b.add(b.mul(n, k["Di"]), b.add(d, k["hd"])), k["Hi"]), b.add(h, k["hh"])
+            b.mul(b.add(b.mul(n, k["Di"]), b.add(d, k["hd"])), k["Hi"]),
+            b.add(h, k["hh"]),
         )
         return b.add(b.add(b.mul(row, k["ru"]), b.mul(side, b.sub(k["ru"], k["e"]))), o)
 
     in2 = b.cmp_ge(blk, k["n1"])
     in3 = b.cmp_ge(blk, k["n2"])
-    sec_blk = b.select(in3, b.sub(blk, k["n2"]), b.select(in2, b.sub(blk, k["n1"]), blk))
+    sec_blk = b.select(
+        in3, b.sub(blk, k["n2"]), b.select(in2, b.sub(blk, k["n1"]), blk)
+    )
     t = b.add(b.mul(sec_blk, cb), tid)
     cnt = b.select(in3, k["u3"], b.select(in2, k["u2"], k["u1"]))
     # Each section's decode under its own uniform branch (their divisors may
@@ -379,7 +416,24 @@ def build_dgrad_halo_zero(spec: DgradHaloZeroSpec) -> KernelDef:
 
 def dgrad_halo_zero_signature(spec: DgradHaloZeroSpec) -> list:
     sb = SignatureBuilder().ptr("dx", "i32").scalar("dx_bytes", "i32")
-    for n in ("Di", "Do", "Hi", "Ho", "ru", "hd", "hh", "e", "L1", "L2", "L3", "n1", "n2", "u1", "u2", "u3"):
+    for n in (
+        "Di",
+        "Do",
+        "Hi",
+        "Ho",
+        "ru",
+        "hd",
+        "hh",
+        "e",
+        "L1",
+        "L2",
+        "L3",
+        "n1",
+        "n2",
+        "u1",
+        "u2",
+        "u3",
+    ):
         sb = sb.scalar(n, "i32")
     return sb.build()
 
@@ -399,12 +453,31 @@ def halo_zero_units(p, elem_bytes: int, axes: int = DXA_ALL) -> Dict[str, int]:
     Ho = Hi - 2 * hh
     e = hw * pu
     L1, L2, L3 = 2 * hd * Hi * ru, 2 * hh * ru, 2 * e
-    return dict(Di=Di, Do=Do, Hi=Hi, Ho=Ho, ru=ru, hd=hd, hh=hh, e=e, L1=L1, L2=L2, L3=L3,
-                u1=N * L1, u2=N * Do * L2, u3=N * Do * Ho * L3)
+    return dict(
+        Di=Di,
+        Do=Do,
+        Hi=Hi,
+        Ho=Ho,
+        ru=ru,
+        hd=hd,
+        hh=hh,
+        e=e,
+        L1=L1,
+        L2=L2,
+        L3=L3,
+        u1=N * L1,
+        u2=N * Do * L2,
+        u3=N * Do * Ho * L3,
+    )
 
 
 def halo_zero_launch(
-    p, elem_bytes: int, dx_ptr: int, dx_bytes: int, spec: DgradHaloZeroSpec, axes: int = DXA_ALL
+    p,
+    elem_bytes: int,
+    dx_ptr: int,
+    dx_bytes: int,
+    spec: DgradHaloZeroSpec,
+    axes: int = DXA_ALL,
 ):
     """``(values, grid, block)`` of the shell zero-fill of the full dX at ``dx_ptr``."""
     u = halo_zero_units(p, elem_bytes, axes)

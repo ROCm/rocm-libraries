@@ -780,13 +780,20 @@ class ConvArgs:
             split_tail=full_tiles is not None,
             # A fwd split_flag_store binary: passing sk_flags selects its ABI.
             # ... or a wgrad two-stage ws_fuse binary (its tile counters).
-            split_flags=sk_flags is not None and sk_partials is None and (
+            split_flags=sk_flags is not None
+            and sk_partials is None
+            and (
                 self.direction == "fwd"
-                or (self.direction == "wgrad" and ws_ptr is not None and streamk is None)
+                or (
+                    self.direction == "wgrad" and ws_ptr is not None and streamk is None
+                )
             ),
             # A fwd split_det binary: passing sk_partials selects its ABI.
-            **({"split_det": True}
-               if self.direction == "fwd" and sk_partials is not None else {}),
+            **(
+                {"split_det": True}
+                if self.direction == "fwd" and sk_partials is not None
+                else {}
+            ),
         )
         names = [n for n, _ in abi]
         values: Dict[str, int] = dict(

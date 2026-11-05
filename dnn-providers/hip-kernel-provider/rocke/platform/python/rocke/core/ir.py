@@ -3788,7 +3788,9 @@ class IRBuilder:
         if ordering not in ("monotonic", "acquire", "release", "acq_rel", "seq_cst"):
             raise ValueError(f"unknown ordering {ordering!r}")
         if syncscope is not None and scope:
-            raise ValueError("global_atomic_add_pk_bf16: give syncscope or scope, not both")
+            raise ValueError(
+                "global_atomic_add_pk_bf16: give syncscope or scope, not both"
+            )
         if not isinstance(value.type, VectorType):
             raise ValueError(
                 f"global_atomic_add_pk_bf16 expects <2 x bf16> input, "
@@ -3928,8 +3930,11 @@ class IRBuilder:
         self._op(
             "memref.global_flag_wait_eq",
             [ptr, idx, expect],
-            attrs={"scope": scope} if ordering == "acquire"
-            else {"scope": scope, "ordering": ordering},
+            attrs=(
+                {"scope": scope}
+                if ordering == "acquire"
+                else {"scope": scope, "ordering": ordering}
+            ),
         )
 
     def fp16_zero(self) -> Value:
@@ -7091,7 +7096,12 @@ class IRBuilder:
         ).result
 
     def buffer_load_vN(
-        self, rsrc: Value, voffset: Value, soffset: Value, dtype: "Type", n: int,
+        self,
+        rsrc: Value,
+        voffset: Value,
+        soffset: Value,
+        dtype: "Type",
+        n: int,
         aux: int = 0,
     ) -> Value:
         """Dtype-generic vectorised `raw_ptr_buffer_load` of N elements.
@@ -7324,7 +7334,12 @@ class IRBuilder:
         )
 
     def buffer_store_vN_f32(
-        self, rsrc: Value, voffset: Value, soffset: Value, value: Value, n: int,
+        self,
+        rsrc: Value,
+        voffset: Value,
+        soffset: Value,
+        value: Value,
+        n: int,
         aux: int = 0,
     ) -> None:
         """Vectorised f32 buffer store. n in {1, 2, 4}; each f32 = 1 dword.

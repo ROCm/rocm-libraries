@@ -392,14 +392,18 @@ def conv_arg_names(
             # ImplicitGemmConvSpec.split_det: the per-tile counters and the
             # f32 partial-tile slots.
             if not split_k or split_flags:
-                raise ValueError("split_det extends the fwd split-K ABI only (no split_flags)")
+                raise ValueError(
+                    "split_det extends the fwd split-K ABI only (no split_flags)"
+                )
             out += [("sk_flags", "i32*"), ("sk_partials", "f32*")]
         return out
     if split_det:
         raise ValueError("split_det is a fwd-only variant")
     if direction == "wgrad":
         return _wgrad_arg_names(
-            is_3d=is_3d, two_stage=two_stage, streamk=streamk,
+            is_3d=is_3d,
+            two_stage=two_stage,
+            streamk=streamk,
             **({"ws_flags": True} if split_flags else {}),
         )
     if direction == "dgrad":

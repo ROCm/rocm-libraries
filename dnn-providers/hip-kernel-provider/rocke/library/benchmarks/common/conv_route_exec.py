@@ -52,8 +52,11 @@ def pinned_launch(plan, cache, B):
         raise LookupError(f"{plan.case}: {spec.name} is not in the cache")
     blob, meta = entry
     dtype = str(plan.request.dtype)
-    launcher = KernelLauncher(hsaco=blob, kernel_name=meta["kernel_name"],
-                              signature=B._signature_for_identity(ident, dtype))
+    launcher = KernelLauncher(
+        hsaco=blob,
+        kernel_name=meta["kernel_name"],
+        signature=B._signature_for_identity(ident, dtype),
+    )
     return ident, meta, launcher, split_k
 
 
@@ -66,8 +69,22 @@ class RouteBinding:
     between bindings of one case (a replay binds one call per buffer set; the
     workspaces are scratch, reused call after call)."""
 
-    def __init__(self, plan, cache, rt, arch, ptrs, sizes, *, stage2_kernels=None, cfg_cls=None,
-                 workspaces=None, live_extras=None, B=None, alloc=None):
+    def __init__(
+        self,
+        plan,
+        cache,
+        rt,
+        arch,
+        ptrs,
+        sizes,
+        *,
+        stage2_kernels=None,
+        cfg_cls=None,
+        workspaces=None,
+        live_extras=None,
+        B=None,
+        alloc=None,
+    ):
         from rocke.runtime.launcher import KernelLauncher, LaunchConfig
 
         if B is None:
@@ -81,7 +98,9 @@ class RouteBinding:
         self._keep = []
         for w in plan.workspaces:
             if w.name not in ws:
-                if alloc is not None:  # caller's allocator: alloc(nbytes) -> (ptr, keepalive)
+                if (
+                    alloc is not None
+                ):  # caller's allocator: alloc(nbytes) -> (ptr, keepalive)
                     p, keep = alloc(w.nbytes)
                     self._keep.append(keep)
                 else:
@@ -93,8 +112,12 @@ class RouteBinding:
                 ws[w.name] = p
         self.workspaces = ws
         bufs = {"x": self.ptrs[0], "w": self.ptrs[1], "y": self.ptrs[2], **ws}
-        nbytes = {"x": self.sizes[0], "w": self.sizes[1], "y": self.sizes[2],
-                  **{w.name: w.nbytes for w in plan.workspaces}}
+        nbytes = {
+            "x": self.sizes[0],
+            "w": self.sizes[1],
+            "y": self.sizes[2],
+            **{w.name: w.nbytes for w in plan.workspaces},
+        }
         runs = []
         for step in plan.steps:
             am = step.arg_map
@@ -110,19 +133,41 @@ class RouteBinding:
                 _L.LaunchConfig = cfg_cls
                 try:
                     bound = B._cached_bind_batch(
-                        chunks, plan.direction, kp, ident, meta, rt, launcher, str(plan.request.dtype),
-                        split_k, op, osz, arch, stage2_kernels if stage2_kernels is not None else {},
-                        KernelLauncher, cfg_cls, self.live_extras)
+                        chunks,
+                        plan.direction,
+                        kp,
+                        ident,
+                        meta,
+                        rt,
+                        launcher,
+                        str(plan.request.dtype),
+                        split_k,
+                        op,
+                        osz,
+                        arch,
+                        stage2_kernels if stage2_kernels is not None else {},
+                        KernelLauncher,
+                        cfg_cls,
+                        self.live_extras,
+                    )
                 finally:
                     _L.LaunchConfig = saved
                 if bound is None:
-                    raise ValueError(f"{plan.case}: {plan.kernel_label} cannot launch {kp}")
+                    raise ValueError(
+                        f"{plan.case}: {plan.kernel_label} cannot launch {kp}"
+                    )
                 runs.append(bound[0])
             else:
                 hsaco, name = compiled_step(step, arch)
-                kl = KernelLauncher(hsaco=hsaco, kernel_name=name, signature=list(step.signature))
-                runs.append(kl.bind({p: bufs[b] for p, b in step.args},
-                                    config=cfg_cls(grid=tuple(step.grid), block=tuple(step.block))))
+                kl = KernelLauncher(
+                    hsaco=hsaco, kernel_name=name, signature=list(step.signature)
+                )
+                runs.append(
+                    kl.bind(
+                        {p: bufs[b] for p, b in step.args},
+                        config=cfg_cls(grid=tuple(step.grid), block=tuple(step.block)),
+                    )
+                )
         self.runs = tuple(runs)
         if len(runs) == 1:
             self.run = runs[0]

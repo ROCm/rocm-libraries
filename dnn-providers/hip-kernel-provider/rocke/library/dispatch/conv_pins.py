@@ -78,32 +78,84 @@ _DTYPES = {"convbfp16": "bf16", "convfp16": "fp16", "conv": "fp32", "convfp32": 
 
 # MIOpenDriver flag -> problem field (long and short forms).
 _FLAGS = {
-    "-n": "N", "--batchsize": "N",
-    "-c": "C", "--in_channels": "C",
-    "-k": "K", "--out_channels": "K",
-    "--in_d": "Di", "-H": "Hi", "--in_h": "Hi", "-W": "Wi", "--in_w": "Wi",
-    "--fil_d": "Z", "-y": "Y", "--fil_h": "Y", "-x": "X", "--fil_w": "X",
-    "--pad_d": "pad_d", "-p": "pad_h", "--pad_h": "pad_h", "-q": "pad_w", "--pad_w": "pad_w",
-    "--conv_stride_d": "stride_d", "-u": "stride_h", "--conv_stride_h": "stride_h",
-    "-v": "stride_w", "--conv_stride_w": "stride_w",
-    "--dilation_d": "dilation_d", "-l": "dilation_h", "--dilation_h": "dilation_h",
-    "-j": "dilation_w", "--dilation_w": "dilation_w",
-    "-g": "G", "--group_count": "G",
-    "-F": "forw", "--forw": "forw",
+    "-n": "N",
+    "--batchsize": "N",
+    "-c": "C",
+    "--in_channels": "C",
+    "-k": "K",
+    "--out_channels": "K",
+    "--in_d": "Di",
+    "-H": "Hi",
+    "--in_h": "Hi",
+    "-W": "Wi",
+    "--in_w": "Wi",
+    "--fil_d": "Z",
+    "-y": "Y",
+    "--fil_h": "Y",
+    "-x": "X",
+    "--fil_w": "X",
+    "--pad_d": "pad_d",
+    "-p": "pad_h",
+    "--pad_h": "pad_h",
+    "-q": "pad_w",
+    "--pad_w": "pad_w",
+    "--conv_stride_d": "stride_d",
+    "-u": "stride_h",
+    "--conv_stride_h": "stride_h",
+    "-v": "stride_w",
+    "--conv_stride_w": "stride_w",
+    "--dilation_d": "dilation_d",
+    "-l": "dilation_h",
+    "--dilation_h": "dilation_h",
+    "-j": "dilation_w",
+    "--dilation_w": "dilation_w",
+    "-g": "G",
+    "--group_count": "G",
+    "-F": "forw",
+    "--forw": "forw",
 }
 _DEFAULTS = {
-    "N": 1, "G": 1, "stride_h": 1, "stride_w": 1, "pad_h": 0, "pad_w": 0,
-    "dilation_h": 1, "dilation_w": 1,
+    "N": 1,
+    "G": 1,
+    "stride_h": 1,
+    "stride_w": 1,
+    "pad_h": 0,
+    "pad_w": 0,
+    "dilation_h": 1,
+    "dilation_w": 1,
 }
 _KEY_FIELDS = (
-    "N", "C", "K", "Hi", "Wi", "Y", "X", "G", "stride_h", "stride_w", "pad_h", "pad_w",
-    "dilation_h", "dilation_w", "Di", "Z", "stride_d", "pad_d", "dilation_d",
+    "N",
+    "C",
+    "K",
+    "Hi",
+    "Wi",
+    "Y",
+    "X",
+    "G",
+    "stride_h",
+    "stride_w",
+    "pad_h",
+    "pad_w",
+    "dilation_h",
+    "dilation_w",
+    "Di",
+    "Z",
+    "stride_d",
+    "pad_d",
+    "dilation_d",
 )
 
 
 def _norm_dtype(dtype: str) -> str:
     d = str(dtype).lower()
-    return {"bfloat16": "bf16", "float16": "fp16", "half": "fp16", "float32": "fp32", "float": "fp32"}.get(d, d)
+    return {
+        "bfloat16": "bf16",
+        "float16": "fp16",
+        "half": "fp16",
+        "float32": "fp32",
+        "float": "fp32",
+    }.get(d, d)
 
 
 def parse_miopen_cmd(cmd: str) -> tuple[str, str, tuple]:
@@ -122,10 +174,18 @@ def parse_miopen_cmd(cmd: str) -> tuple[str, str, tuple]:
             vals[name] = int(toks[i + 1])
             i += 2
         else:
-            i += 2 if toks[i].startswith("-") and i + 1 < len(toks) and not toks[i + 1].startswith("-") else 1
+            i += (
+                2
+                if toks[i].startswith("-")
+                and i + 1 < len(toks)
+                and not toks[i + 1].startswith("-")
+                else 1
+            )
     forw = vals.pop("forw", 1)
     if forw not in _DIRECTIONS:
-        raise ValueError(f"{cmd!r}: -F {forw} is not one direction (1 fwd, 2 dgrad, 4 wgrad)")
+        raise ValueError(
+            f"{cmd!r}: -F {forw} is not one direction (1 fwd, 2 dgrad, 4 wgrad)"
+        )
     if "Di" in vals:
         for f, d in (("Z", 1), ("stride_d", 1), ("pad_d", 0), ("dilation_d", 1)):
             vals.setdefault(f, d)
@@ -139,7 +199,11 @@ def request_key(req) -> tuple[str, str, tuple]:
         if vals[f] is None:
             vals[f] = d
     vals = {f: (int(v) if v is not None else None) for f, v in vals.items()}
-    return str(req.direction).lower(), _norm_dtype(req.dtype), tuple(vals[f] for f in _KEY_FIELDS)
+    return (
+        str(req.direction).lower(),
+        _norm_dtype(req.dtype),
+        tuple(vals[f] for f in _KEY_FIELDS),
+    )
 
 
 @dataclass(frozen=True)
@@ -206,7 +270,9 @@ def pins_from_mapping(data: Mapping, source: str = "") -> ConvPins:
         m = _SPLIT_RE.search(label)
         key = parse_miopen_cmd(row["cmd"])
         if key in out.pins and out.pins[key].instance != instance:
-            raise ValueError(f"{source}: cases {out.pins[key].case} and {case} pin one problem to two kernels")
+            raise ValueError(
+                f"{source}: cases {out.pins[key].case} and {case} pin one problem to two kernels"
+            )
         out.pins[key] = ConvPin(
             case=case,
             instance=instance,
@@ -315,19 +381,40 @@ def pinned_kernel_signature(identity, dtype: str | None = None) -> tuple[dict, .
 
     dt = dtype or identity.dtype_a
     if identity.direction == "wgrad":
-        flags = {"split_flags": True} if (getattr(identity, "ws_fuse", 0) or getattr(identity, "ws_tree", 0)) else {}
-        return tuple(conv_args_signature(
-            dt, direction="wgrad", is_3d=identity.is_3d, two_stage=identity.two_stage,
-            streamk=identity.streamk_reduction if identity.streamk != "off" else None, **flags))
+        flags = (
+            {"split_flags": True}
+            if (getattr(identity, "ws_fuse", 0) or getattr(identity, "ws_tree", 0))
+            else {}
+        )
+        return tuple(
+            conv_args_signature(
+                dt,
+                direction="wgrad",
+                is_3d=identity.is_3d,
+                two_stage=identity.two_stage,
+                streamk=(
+                    identity.streamk_reduction if identity.streamk != "off" else None
+                ),
+                **flags,
+            )
+        )
     if identity.direction == "dgrad":
         return tuple(conv_args_signature(dt, direction="dgrad", is_3d=identity.is_3d))
     extra = {"split_det": True} if getattr(identity, "split_det", False) else {}
-    return tuple(conv_args_signature(
-        dt, is_3d=identity.is_3d, two_stage=identity.two_stage,
-        split_k=identity.split_k > 1 and not identity.two_stage,
-        split_tail=bool(getattr(identity, "split_tail", False)),
-        split_flags=bool(getattr(identity, "split_flag_store", False) or getattr(identity, "split_zero_first", False)),
-        **extra))
+    return tuple(
+        conv_args_signature(
+            dt,
+            is_3d=identity.is_3d,
+            two_stage=identity.two_stage,
+            split_k=identity.split_k > 1 and not identity.two_stage,
+            split_tail=bool(getattr(identity, "split_tail", False)),
+            split_flags=bool(
+                getattr(identity, "split_flag_store", False)
+                or getattr(identity, "split_zero_first", False)
+            ),
+            **extra,
+        )
+    )
 
 
 def _nominal_grid(spec: ConvPinnedSpec, req) -> tuple[int, int, int]:
@@ -344,7 +431,11 @@ def _nominal_grid(spec: ConvPinnedSpec, req) -> tuple[int, int, int]:
     sk = int(spec.launch_params().get("split_k", 1) or 1)
     if ident.direction == "wgrad":
         gx, gy, _ = ConvArgs.from_problem(
-            p, direction="wgrad", tile_m=ident.tile_m, tile_n=ident.tile_n, tile_k=ident.tile_k
+            p,
+            direction="wgrad",
+            tile_m=ident.tile_m,
+            tile_n=ident.tile_n,
+            tile_k=ident.tile_k,
         ).grid()
         return gx, gy, max(1, p.groups) * sk
     gx, gy, gz = ConvArgs.from_problem(
@@ -402,7 +493,9 @@ def pinned_conv_candidate(pins: ConvPins, direction: str):
         p = _conv_problem(req)
         if p is None:
             return None, "not a valid convolution shape"
-        ok, why = identity_supports_problem(spec.identity, p, getattr(req, "llvm_flavor", None))
+        ok, why = identity_supports_problem(
+            spec.identity, p, getattr(req, "llvm_flavor", None)
+        )
         if not ok:
             return None, f"{name}: pinned {pin.instance} cannot run it: {why}"
         return spec, "ok"
@@ -422,8 +515,12 @@ def pinned_conv_candidate(pins: ConvPins, direction: str):
 
     def build(spec: ConvPinnedSpec, arch: str):
         if arch != spec.identity.arch:
-            raise ValueError(f"{spec.name} is a {spec.identity.arch} instance, not {arch}")
-        return kernel_for_job(job_for_identity(spec.identity), arch, spec.identity.dtype_a)[0]
+            raise ValueError(
+                f"{spec.name} is a {spec.identity.arch} instance, not {arch}"
+            )
+        return kernel_for_job(
+            job_for_identity(spec.identity), arch, spec.identity.dtype_a
+        )[0]
 
     dtypes = tuple(sorted({key[1] for key in pins.pins})) or ("bf16", "fp16")
     candidate = KernelCandidate(
@@ -434,7 +531,9 @@ def pinned_conv_candidate(pins: ConvPins, direction: str):
         abi_version=PINNED_ABI_VERSION,
         # After every listed instance and the Winograd forward; opt-in anyway.
         priority=2_000_000,
-        capability=Capability(arches=(pins.arch,) if pins.arch else (), dtypes=dtypes, layouts=("NHWC",)),
+        capability=Capability(
+            arches=(pins.arch,) if pins.arch else (), dtypes=dtypes, layouts=("NHWC",)
+        ),
         _supports=support,
         select_spec=select,
         signature=lambda spec: pinned_kernel_signature(spec.identity),

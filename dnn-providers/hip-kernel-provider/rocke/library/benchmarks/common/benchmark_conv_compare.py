@@ -688,21 +688,49 @@ def main() -> int:
         help="implicit-GEMM only, opt-in: re-time the best N finalists in "
         "interleaved staged rounds and rank by their median",
     )
-    rank_grp.add_argument("--fast-rank-recheck-rounds", type=int, default=None,
-                          dest="fast_rank_recheck_rounds", metavar="R")
-    rank_grp.add_argument("--fast-rank-recheck-iters", type=int, default=None,
-                          dest="fast_rank_recheck_iters", metavar="K")
-    rank_grp.add_argument("--fast-rank-recheck-window", type=float, default=None,
-                          dest="fast_rank_recheck_window", metavar="F")
-    rank_grp.add_argument("--fast-rank-reprobe", type=int, default=None,
-                          dest="fast_rank_reprobe", metavar="K",
-                          help="implicit-GEMM only, opt-in: re-probe the best K in reverse order (min of two)")
-    rank_grp.add_argument("--fast-rank-reprobe-staged", action="store_true",
-                          dest="fast_rank_reprobe_staged",
-                          help="implicit-GEMM only: the re-probe uses staged samples")
-    rank_grp.add_argument("--fast-rank-interleave", type=int, default=None,
-                          dest="fast_rank_interleave", metavar="R",
-                          help="implicit-GEMM only, opt-in: time the finalists in R interleaved staged rounds")
+    rank_grp.add_argument(
+        "--fast-rank-recheck-rounds",
+        type=int,
+        default=None,
+        dest="fast_rank_recheck_rounds",
+        metavar="R",
+    )
+    rank_grp.add_argument(
+        "--fast-rank-recheck-iters",
+        type=int,
+        default=None,
+        dest="fast_rank_recheck_iters",
+        metavar="K",
+    )
+    rank_grp.add_argument(
+        "--fast-rank-recheck-window",
+        type=float,
+        default=None,
+        dest="fast_rank_recheck_window",
+        metavar="F",
+    )
+    rank_grp.add_argument(
+        "--fast-rank-reprobe",
+        type=int,
+        default=None,
+        dest="fast_rank_reprobe",
+        metavar="K",
+        help="implicit-GEMM only, opt-in: re-probe the best K in reverse order (min of two)",
+    )
+    rank_grp.add_argument(
+        "--fast-rank-reprobe-staged",
+        action="store_true",
+        dest="fast_rank_reprobe_staged",
+        help="implicit-GEMM only: the re-probe uses staged samples",
+    )
+    rank_grp.add_argument(
+        "--fast-rank-interleave",
+        type=int,
+        default=None,
+        dest="fast_rank_interleave",
+        metavar="R",
+        help="implicit-GEMM only, opt-in: time the finalists in R interleaved staged rounds",
+    )
     rank_grp.add_argument(
         "--pins",
         default=None,

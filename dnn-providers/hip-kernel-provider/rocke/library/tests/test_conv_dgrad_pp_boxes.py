@@ -31,12 +31,24 @@ def _spec(problem=None, **kw):
     base = dict(
         problem=problem if problem is not None else _p3(),
         data=ConvDataSpec(dtype_a="bf16", dtype_b="bf16", dtype_d="bf16"),
-        tile_m=128, tile_n=256, tile_k=64, warp_m=2, warp_n=4,
-        warp_tile_m=16, warp_tile_n=16, warp_tile_k=16,
-        pipeline="mem", epilogue="cshuffle", lds_k_outer=False,
-        tap_outer_k=True, tapk_prefetch=1, b_kpack=4,
-        lds_xor=True, lds_k_pad=0,
-        tapk_pingpong=4, tapk_pp_sched=2,
+        tile_m=128,
+        tile_n=256,
+        tile_k=64,
+        warp_m=2,
+        warp_n=4,
+        warp_tile_m=16,
+        warp_tile_n=16,
+        warp_tile_k=16,
+        pipeline="mem",
+        epilogue="cshuffle",
+        lds_k_outer=False,
+        tap_outer_k=True,
+        tapk_prefetch=1,
+        b_kpack=4,
+        lds_xor=True,
+        lds_k_pad=0,
+        tapk_pingpong=4,
+        tapk_pp_sched=2,
     )
     base.update(kw)
     return DgradConvSpec(**base)
@@ -51,10 +63,20 @@ class TestBoxDecomposition(unittest.TestCase):
         sgs = pp_box_sub_gemms(p, tile_m, tile_n, nclass, tile_k=64, max_split=split)
         seen = set()
         for sg in sgs:
-            ds, db, zb, zs = sg.a_embed_h_coeff, sg.a_embed_w_coeff, sg.b_y_stride, sg.gemm_k_padded
+            ds, db, zb, zs = (
+                sg.a_embed_h_coeff,
+                sg.a_embed_w_coeff,
+                sg.b_y_stride,
+                sg.gemm_k_padded,
+            )
             hb, hs = sg.h_tilde_slice_begin, sg.h_tilde_slice
             wb, ws = sg.w_tilde_slice_begin, sg.w_tilde_slice
-            yb, ys, xb, xs = sg.b_y_offset, sg.y_dot_slice, sg.b_x_offset, sg.x_dot_slice
+            yb, ys, xb, xs = (
+                sg.b_y_offset,
+                sg.y_dot_slice,
+                sg.b_x_offset,
+                sg.x_dot_slice,
+            )
             self.assertEqual(sg.gemm_m, p.N * ds * hs * ws)
             self.assertEqual(
                 sg.block_end - sg.block_start,
@@ -67,13 +89,16 @@ class TestBoxDecomposition(unittest.TestCase):
                         seen.add((d, h, w))
                         # every tap the pixel can use is inside the box's sub-filter
                         self.assertTrue(
-                            _valid_taps(d, p.Di, p.Do, p.pD, p.Z) <= set(range(zb, zb + zs))
+                            _valid_taps(d, p.Di, p.Do, p.pD, p.Z)
+                            <= set(range(zb, zb + zs))
                         )
                         self.assertTrue(
-                            _valid_taps(h, p.Hi, p.Ho, p.pH, p.Y) <= set(range(yb, yb + ys))
+                            _valid_taps(h, p.Hi, p.Ho, p.pH, p.Y)
+                            <= set(range(yb, yb + ys))
                         )
                         self.assertTrue(
-                            _valid_taps(w, p.Wi, p.Wo, p.pW, p.X) <= set(range(xb, xb + xs))
+                            _valid_taps(w, p.Wi, p.Wo, p.pW, p.X)
+                            <= set(range(xb, xb + xs))
                         )
         self.assertEqual(len(seen), p.Di * p.Hi * p.Wi)
         starts = [sg.block_start for sg in sgs]
@@ -116,16 +141,27 @@ class TestPixelLists(unittest.TestCase):
                 math.ceil(len(rows) / tile_m) * math.ceil(p.C / tile_n) * sg.b_x_stride,
             )
             zb, zs = sg.b_y_stride, sg.gemm_k_padded
-            yb, ys, xb, xs = sg.b_y_offset, sg.y_dot_slice, sg.b_x_offset, sg.x_dot_slice
+            yb, ys, xb, xs = (
+                sg.b_y_offset,
+                sg.y_dot_slice,
+                sg.b_x_offset,
+                sg.x_dot_slice,
+            )
             for pix in rows:
                 self.assertNotIn(pix, seen)
                 seen.add(pix)
                 nd, r = divmod(pix, hw)
                 h, w = divmod(r, p.Wi)
                 d = nd % p.Di
-                self.assertTrue(_valid_taps(d, p.Di, p.Do, p.pD, p.Z) <= set(range(zb, zb + zs)))
-                self.assertTrue(_valid_taps(h, p.Hi, p.Ho, p.pH, p.Y) <= set(range(yb, yb + ys)))
-                self.assertTrue(_valid_taps(w, p.Wi, p.Wo, p.pW, p.X) <= set(range(xb, xb + xs)))
+                self.assertTrue(
+                    _valid_taps(d, p.Di, p.Do, p.pD, p.Z) <= set(range(zb, zb + zs))
+                )
+                self.assertTrue(
+                    _valid_taps(h, p.Hi, p.Ho, p.pH, p.Y) <= set(range(yb, yb + ys))
+                )
+                self.assertTrue(
+                    _valid_taps(w, p.Wi, p.Wo, p.pW, p.X) <= set(range(xb, xb + xs))
+                )
         self.assertEqual(seen, set(range(p.N * p.Di * hw)))
         return sgs
 
@@ -148,7 +184,10 @@ class TestPixelLists(unittest.TestCase):
         sg = part[0]
         self.assertEqual(sg.gemm_k_padded * sg.y_dot_slice * sg.x_dot_slice, 3)
         work = lambda q: sum(  # noqa: E731
-            math.ceil(sg.gemm_m / 128) * sg.gemm_k_padded * sg.y_dot_slice * sg.x_dot_slice
+            math.ceil(sg.gemm_m / 128)
+            * sg.gemm_k_padded
+            * sg.y_dot_slice
+            * sg.x_dot_slice
             for sg in q
         )
         old = pp_box_sub_gemms(_p3(C=1024, K=1024), 128, 256, 7, tile_k=64, max_split=8)
@@ -187,10 +226,22 @@ class TestSmallGridSpecs(unittest.TestCase):
             (dict(pp_boxes=5), "pbx"),
             (dict(pp_boxes=3, split_k=8, pp_zskip=True), "pbx"),
             (dict(pp_boxes=5, tapk_pp_epi=2), "pbx"),
-            (dict(pp_boxes=3, split_k=8, tile_m=256, tile_k=32, cshuffle_m_chunks=2), "pbx"),
+            (
+                dict(pp_boxes=3, split_k=8, tile_m=256, tile_k=32, cshuffle_m_chunks=2),
+                "pbx",
+            ),
             (dict(pp_boxes=113, split_k=8, pp_box_order=1), "pbo1"),
             (dict(pp_boxes=113, split_k=8, pp_box_order=1, tapk_pp_sched=7), "pps7"),
-            (dict(pp_boxes=5, pp_box_order=2, xcd_remap=6, pp_zskip=True, tapk_pp_epi=2), "pbo2"),
+            (
+                dict(
+                    pp_boxes=5,
+                    pp_box_order=2,
+                    xcd_remap=6,
+                    pp_zskip=True,
+                    tapk_pp_epi=2,
+                ),
+                "pbo2",
+            ),
             (dict(pp_boxes=5, split_k=8, pp_box_order=3, xcd_remap=6), "pbo3"),
             (dict(pp_boxes=7), "pbl"),
             (dict(pp_boxes=7, split_k=8, pp_box_order=1, tapk_pp_sched=7), "pbl"),
@@ -198,10 +249,25 @@ class TestSmallGridSpecs(unittest.TestCase):
             (dict(pp_boxes=77, split_k=8, pp_box_order=1, tapk_pp_sched=7), "pbl"),
             (dict(tapk_pp_sched=7), "pps7"),
             # lane-contiguous pair atomics on the box / pixel-list split store
-            (dict(pp_boxes=113, split_k=8, pp_box_order=1, split_atomic_pairs=True), "sapl"),
-            (dict(pp_boxes=77, split_k=8, pp_box_order=1, split_atomic_pairs=True), "sapl"),
-            (dict(pp_boxes=7, split_k=8, tile_m=256, tile_k=32, cshuffle_m_chunks=2,
-                  split_atomic_pairs=True), "sapl"),
+            (
+                dict(pp_boxes=113, split_k=8, pp_box_order=1, split_atomic_pairs=True),
+                "sapl",
+            ),
+            (
+                dict(pp_boxes=77, split_k=8, pp_box_order=1, split_atomic_pairs=True),
+                "sapl",
+            ),
+            (
+                dict(
+                    pp_boxes=7,
+                    split_k=8,
+                    tile_m=256,
+                    tile_k=32,
+                    cshuffle_m_chunks=2,
+                    split_atomic_pairs=True,
+                ),
+                "sapl",
+            ),
         ):
             with self.subTest(**kw):
                 s = _spec(**kw)
@@ -211,7 +277,11 @@ class TestSmallGridSpecs(unittest.TestCase):
                 build_implicit_gemm_conv_dgrad(s, arch=_ARCH)
 
     def test_box_classes_share_a_binary_name(self):
-        names = {_spec(pp_boxes=n, pp_box_cus=c).kernel_name() for n in (3, 5, 33) for c in (0, 456)}
+        names = {
+            _spec(pp_boxes=n, pp_box_cus=c).kernel_name()
+            for n in (3, 5, 33)
+            for c in (0, 456)
+        }
         self.assertEqual(len(names), 1)
 
     def test_rejected(self):
@@ -242,15 +312,39 @@ class TestIdentity(unittest.TestCase):
         from kernels.conv.kernel_identity import KernelIdentity
 
         base = dict(
-            arch=_ARCH, direction="dgrad", algorithm="implicit_gemm",
-            dtype_a="bf16", dtype_b="bf16", dtype_d="bf16",
-            tile_m=128, tile_n=256, tile_k=64, warp_m=2, warp_n=4,
-            warp_tile_m=16, warp_tile_n=16, warp_tile_k=16,
-            pipeline="mem", epilogue="cshuffle", wave_size=64,
-            vector_size_a=8, vector_size_b=8, vector_size_c=8,
-            lds_k_outer=False, grouped=True, is_3d=True,
-            stride_h=1, stride_w=1, dilation_h=1, dilation_w=1, max_sub_gemms=1024,
-            tap_outer_k=True, tapk_prefetch=1, b_kpack=4, tapk_pingpong=4, tapk_pp_sched=2,
+            arch=_ARCH,
+            direction="dgrad",
+            algorithm="implicit_gemm",
+            dtype_a="bf16",
+            dtype_b="bf16",
+            dtype_d="bf16",
+            tile_m=128,
+            tile_n=256,
+            tile_k=64,
+            warp_m=2,
+            warp_n=4,
+            warp_tile_m=16,
+            warp_tile_n=16,
+            warp_tile_k=16,
+            pipeline="mem",
+            epilogue="cshuffle",
+            wave_size=64,
+            vector_size_a=8,
+            vector_size_b=8,
+            vector_size_c=8,
+            lds_k_outer=False,
+            grouped=True,
+            is_3d=True,
+            stride_h=1,
+            stride_w=1,
+            dilation_h=1,
+            dilation_w=1,
+            max_sub_gemms=1024,
+            tap_outer_k=True,
+            tapk_prefetch=1,
+            b_kpack=4,
+            tapk_pingpong=4,
+            tapk_pp_sched=2,
         )
         base.update(kw)
         return KernelIdentity(**base)
@@ -270,19 +364,57 @@ class TestIdentity(unittest.TestCase):
                 self.assertEqual(type(on).from_label(on.label()), on)
 
     def test_box_records_and_support(self):
-        from kernels.conv.kernel_identity import dgrad_sub_gemms, identity_supports_problem
+        from kernels.conv.kernel_identity import (
+            dgrad_sub_gemms,
+            identity_supports_problem,
+        )
 
         ident = self._ident(split_k=8, pp_boxes=3)
         p = _p3(C=1024, K=1024)
         self.assertEqual(len(dgrad_sub_gemms(ident, p)), 9)
         self.assertTrue(identity_supports_problem(ident, p)[0])
-        self.assertFalse(identity_supports_problem(ident, ConvProblem(
-            N=1, Di=10, Hi=10, Wi=10, C=256, K=128, Z=3, Y=3, X=3, sD=1, pD=0, dD=1, groups=2
-        ))[0])
+        self.assertFalse(
+            identity_supports_problem(
+                ident,
+                ConvProblem(
+                    N=1,
+                    Di=10,
+                    Hi=10,
+                    Wi=10,
+                    C=256,
+                    K=128,
+                    Z=3,
+                    Y=3,
+                    X=3,
+                    sD=1,
+                    pD=0,
+                    dD=1,
+                    groups=2,
+                ),
+            )[0]
+        )
         # padded (production-form) problems decompose too
-        self.assertTrue(identity_supports_problem(ident, ConvProblem(
-            N=1, Di=10, Hi=10, Wi=10, C=256, K=128, Z=3, Y=3, X=3, sD=1, pD=0, dD=1, pH=1, pW=1
-        ))[0])
+        self.assertTrue(
+            identity_supports_problem(
+                ident,
+                ConvProblem(
+                    N=1,
+                    Di=10,
+                    Hi=10,
+                    Wi=10,
+                    C=256,
+                    K=128,
+                    Z=3,
+                    Y=3,
+                    X=3,
+                    sD=1,
+                    pD=0,
+                    dD=1,
+                    pH=1,
+                    pW=1,
+                ),
+            )[0]
+        )
 
 
 if __name__ == "__main__":

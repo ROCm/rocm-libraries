@@ -81,8 +81,19 @@ __all__ = [
 ]
 
 # Main-kernel configurations (benchmark_winograd3d --spec bodies, "variant":"yx" implied)
-SPEC_B = dict(stage="lds16", op_dtype="f16", fill_il=True, waves=8, nsplit=True, z_tile=2,
-              n_tile=64, nfast=True, pkrtz=True, epi_vec=True, yf16=True)
+SPEC_B = dict(
+    stage="lds16",
+    op_dtype="f16",
+    fill_il=True,
+    waves=8,
+    nsplit=True,
+    z_tile=2,
+    n_tile=64,
+    nfast=True,
+    pkrtz=True,
+    epi_vec=True,
+    yf16=True,
+)
 SPEC_Z = dict(SPEC_B, nsplit=False, z_tile=4, n_tile=32, xcd=6)
 
 # Decision tables (gfx942, bf16, deterministic): same-session A/B of each Winograd candidate
@@ -101,106 +112,430 @@ SPEC_Z = dict(SPEC_B, nsplit=False, z_tile=4, n_tile=32, xcd=6)
 TUNED_MARGIN = 0.02
 
 TUNED: Dict[Tuple[str, int, int, int, int, int], dict] = {
-    ('dgrad', 258, 130, 130, 64, 64): {'baselines': ('direct',), 'dropin_nops': ('B+lin+xcd6', ()), 'dropin': ('B+lin+xcd6', ()), 'chained_nops': ('B+lin+xcd6', ()), 'chained': ('B+lin+xcd6', ())},
-    ('dgrad', 258, 130, 130, 128, 64): {'baselines': ('direct',), 'dropin_nops': ('B+lin+xcd6', ()), 'dropin': ('B+lin+xcd6', ()), 'chained_nops': ('B+lin+xcd6', ()), 'chained': ('B+lin+xcd6', ())},
-    ('dgrad', 130, 66, 66, 256, 128): {'baselines': ('direct',), 'dropin_nops': ('B+lin+xcd6', ()), 'dropin': ('B+lin+xcd6', ()), 'chained_nops': ('B+lin+xcd6', ()), 'chained': ('B+lin+xcd6', ())},
-    ('dgrad', 130, 66, 66, 128, 128): {'baselines': ('direct',), 'dropin_nops': ('B+lin+xcd6', ()), 'dropin': ('B+lin+xcd6', ()), 'chained_nops': ('B+lin+xcd6', ('direct',)), 'chained': ('B+lin+xcd6', ('direct',))},
-    ('dgrad', 66, 34, 34, 512, 256): {'baselines': ('direct',), 'dropin_nops': ('B+lin+xcd6', ()), 'dropin': ('B+lin+xcd6', ()), 'chained_nops': ('B+lin+xcd6', ()), 'chained': ('B+lin+xcd6', ())},
-    ('dgrad', 66, 34, 34, 256, 256): {'baselines': ('direct',), 'dropin_nops': ('B+lin+xcd6', ('direct',)), 'dropin': ('B+lin+xcd6', ('direct',)), 'chained_nops': ('B+lin+xcd6', ('direct',)), 'chained': ('B+lin+xcd6', ('direct',))},
-    ('dgrad', 34, 18, 18, 512, 512): {'baselines': ('direct',), 'dropin_nops': ('B+lin+xcd6', ()), 'dropin': ('B+lin+xcd6', ()), 'chained_nops': ('B+lin+xcd6', ()), 'chained': ('B+lin+xcd6', ())},
-    ('dgrad', 34, 18, 18, 1024, 512): {'baselines': ('direct',), 'dropin_nops': ('B+lin+xcd6', ()), 'dropin': ('B+lin+xcd6', ()), 'chained_nops': ('B+lin+xcd6', ()), 'chained': ('B+lin+xcd6', ())},
-    ('dgrad', 130, 66, 66, 64, 128): {'baselines': ('direct',), 'dropin_nops': ('B+lin+xcd6', ()), 'dropin': ('B+lin+xcd6', ()), 'chained_nops': ('B+lin+xcd6', ('direct',)), 'chained': ('B+lin+xcd6', ('direct',))},
-    ('fwd', 258, 130, 130, 64, 64): {'baselines': ('direct',), 'dropin_nops': ('Z', ()), 'dropin': ('Z', ()), 'chained_nops': ('Z', ()), 'chained': ('Z', ())},
-    ('fwd', 258, 130, 130, 128, 64): {'baselines': ('direct',), 'dropin_nops': ('Z', ()), 'dropin': ('Z', ()), 'chained_nops': ('Z', ('direct',)), 'chained': ('Z', ('direct',))},
-    ('fwd', 130, 66, 66, 256, 128): {'baselines': ('direct',), 'dropin_nops': ('Z', ()), 'dropin': ('Z', ()), 'chained_nops': ('Z', ('direct',)), 'chained': ('Z', ('direct',))},
-    ('fwd', 130, 66, 66, 128, 128): {'baselines': ('direct',), 'dropin_nops': ('Z', ()), 'dropin': ('Z', ()), 'chained_nops': ('Z', ('direct',)), 'chained': ('Z', ('direct',))},
-    ('fwd', 66, 34, 34, 512, 256): {'baselines': ('direct',), 'dropin_nops': ('Z', ('direct',)), 'dropin': ('Z', ('direct',)), 'chained_nops': ('Z', ('direct',)), 'chained': ('Z', ('direct',))},
-    ('fwd', 66, 34, 34, 256, 256): {'baselines': ('direct',), 'dropin_nops': ('Z', ('direct',)), 'dropin': ('Z', ('direct',)), 'chained_nops': ('Z', ('direct',)), 'chained': ('Z', ())},
-    ('fwd', 34, 18, 18, 512, 512): {'baselines': ('direct',), 'dropin_nops': ('Z+ks4', ()), 'chained_nops': ('Z+ks4', ()), 'dropin': ('Z+ks4', ()), 'chained': ('Z+ks4', ())},
-    ('fwd', 34, 18, 18, 1024, 512): {'baselines': ('direct',), 'dropin_nops': ('Z+ks4', ()), 'chained_nops': ('Z+ks4', ('direct',)), 'dropin': ('Z+ks4', ()), 'chained': ('Z+ks4', ('direct',))},
-    ('fwd', 130, 66, 66, 64, 128): {'baselines': ('direct',), 'dropin_nops': ('B+xcd6', ()), 'dropin': ('B+xcd6', ()), 'chained_nops': ('B+xcd6', ()), 'chained': ('B+xcd6', ())},
+    ("dgrad", 258, 130, 130, 64, 64): {
+        "baselines": ("direct",),
+        "dropin_nops": ("B+lin+xcd6", ()),
+        "dropin": ("B+lin+xcd6", ()),
+        "chained_nops": ("B+lin+xcd6", ()),
+        "chained": ("B+lin+xcd6", ()),
+    },
+    ("dgrad", 258, 130, 130, 128, 64): {
+        "baselines": ("direct",),
+        "dropin_nops": ("B+lin+xcd6", ()),
+        "dropin": ("B+lin+xcd6", ()),
+        "chained_nops": ("B+lin+xcd6", ()),
+        "chained": ("B+lin+xcd6", ()),
+    },
+    ("dgrad", 130, 66, 66, 256, 128): {
+        "baselines": ("direct",),
+        "dropin_nops": ("B+lin+xcd6", ()),
+        "dropin": ("B+lin+xcd6", ()),
+        "chained_nops": ("B+lin+xcd6", ()),
+        "chained": ("B+lin+xcd6", ()),
+    },
+    ("dgrad", 130, 66, 66, 128, 128): {
+        "baselines": ("direct",),
+        "dropin_nops": ("B+lin+xcd6", ()),
+        "dropin": ("B+lin+xcd6", ()),
+        "chained_nops": ("B+lin+xcd6", ("direct",)),
+        "chained": ("B+lin+xcd6", ("direct",)),
+    },
+    ("dgrad", 66, 34, 34, 512, 256): {
+        "baselines": ("direct",),
+        "dropin_nops": ("B+lin+xcd6", ()),
+        "dropin": ("B+lin+xcd6", ()),
+        "chained_nops": ("B+lin+xcd6", ()),
+        "chained": ("B+lin+xcd6", ()),
+    },
+    ("dgrad", 66, 34, 34, 256, 256): {
+        "baselines": ("direct",),
+        "dropin_nops": ("B+lin+xcd6", ("direct",)),
+        "dropin": ("B+lin+xcd6", ("direct",)),
+        "chained_nops": ("B+lin+xcd6", ("direct",)),
+        "chained": ("B+lin+xcd6", ("direct",)),
+    },
+    ("dgrad", 34, 18, 18, 512, 512): {
+        "baselines": ("direct",),
+        "dropin_nops": ("B+lin+xcd6", ()),
+        "dropin": ("B+lin+xcd6", ()),
+        "chained_nops": ("B+lin+xcd6", ()),
+        "chained": ("B+lin+xcd6", ()),
+    },
+    ("dgrad", 34, 18, 18, 1024, 512): {
+        "baselines": ("direct",),
+        "dropin_nops": ("B+lin+xcd6", ()),
+        "dropin": ("B+lin+xcd6", ()),
+        "chained_nops": ("B+lin+xcd6", ()),
+        "chained": ("B+lin+xcd6", ()),
+    },
+    ("dgrad", 130, 66, 66, 64, 128): {
+        "baselines": ("direct",),
+        "dropin_nops": ("B+lin+xcd6", ()),
+        "dropin": ("B+lin+xcd6", ()),
+        "chained_nops": ("B+lin+xcd6", ("direct",)),
+        "chained": ("B+lin+xcd6", ("direct",)),
+    },
+    ("fwd", 258, 130, 130, 64, 64): {
+        "baselines": ("direct",),
+        "dropin_nops": ("Z", ()),
+        "dropin": ("Z", ()),
+        "chained_nops": ("Z", ()),
+        "chained": ("Z", ()),
+    },
+    ("fwd", 258, 130, 130, 128, 64): {
+        "baselines": ("direct",),
+        "dropin_nops": ("Z", ()),
+        "dropin": ("Z", ()),
+        "chained_nops": ("Z", ("direct",)),
+        "chained": ("Z", ("direct",)),
+    },
+    ("fwd", 130, 66, 66, 256, 128): {
+        "baselines": ("direct",),
+        "dropin_nops": ("Z", ()),
+        "dropin": ("Z", ()),
+        "chained_nops": ("Z", ("direct",)),
+        "chained": ("Z", ("direct",)),
+    },
+    ("fwd", 130, 66, 66, 128, 128): {
+        "baselines": ("direct",),
+        "dropin_nops": ("Z", ()),
+        "dropin": ("Z", ()),
+        "chained_nops": ("Z", ("direct",)),
+        "chained": ("Z", ("direct",)),
+    },
+    ("fwd", 66, 34, 34, 512, 256): {
+        "baselines": ("direct",),
+        "dropin_nops": ("Z", ("direct",)),
+        "dropin": ("Z", ("direct",)),
+        "chained_nops": ("Z", ("direct",)),
+        "chained": ("Z", ("direct",)),
+    },
+    ("fwd", 66, 34, 34, 256, 256): {
+        "baselines": ("direct",),
+        "dropin_nops": ("Z", ("direct",)),
+        "dropin": ("Z", ("direct",)),
+        "chained_nops": ("Z", ("direct",)),
+        "chained": ("Z", ()),
+    },
+    ("fwd", 34, 18, 18, 512, 512): {
+        "baselines": ("direct",),
+        "dropin_nops": ("Z+ks4", ()),
+        "chained_nops": ("Z+ks4", ()),
+        "dropin": ("Z+ks4", ()),
+        "chained": ("Z+ks4", ()),
+    },
+    ("fwd", 34, 18, 18, 1024, 512): {
+        "baselines": ("direct",),
+        "dropin_nops": ("Z+ks4", ()),
+        "chained_nops": ("Z+ks4", ("direct",)),
+        "dropin": ("Z+ks4", ()),
+        "chained": ("Z+ks4", ("direct",)),
+    },
+    ("fwd", 130, 66, 66, 64, 128): {
+        "baselines": ("direct",),
+        "dropin_nops": ("B+xcd6", ()),
+        "dropin": ("B+xcd6", ()),
+        "chained_nops": ("B+xcd6", ()),
+        "chained": ("B+xcd6", ()),
+    },
 }
 TUNED_PAD1: Dict[Tuple[str, int, int, int, int, int], dict] = {
-    ('dgrad', 256, 128, 128, 64, 64): {'baselines': ('direct',), 'dropin': ('B+xcd6', ())},
-    ('dgrad', 256, 128, 128, 128, 64): {'baselines': ('direct',), 'dropin': ('B+xcd6', ())},
-    ('dgrad', 128, 64, 64, 256, 128): {'baselines': ('direct',), 'dropin': ('B+xcd6', ('direct',))},
-    ('dgrad', 128, 64, 64, 128, 128): {'baselines': ('direct',), 'dropin': ('B+xcd6', ('direct',))},
-    ('dgrad', 64, 32, 32, 512, 256): {'baselines': ('direct',), 'dropin': ('B+xcd6', ('direct',))},
-    ('dgrad', 64, 32, 32, 256, 256): {'baselines': ('direct',), 'dropin': ('B+xcd6', ('direct',))},
-    ('dgrad', 32, 16, 16, 512, 512): {'baselines': ('direct',), 'dropin': ('Z+ks4', ())},
-    ('dgrad', 32, 16, 16, 1024, 512): {'baselines': ('direct',), 'dropin': ('B+xcd6', ('direct',))},
-    ('dgrad', 128, 64, 64, 64, 128): {'baselines': ('direct',), 'dropin': ('B+xcd6', ('direct',))},
-    ('fwd', 256, 128, 128, 64, 64): {'baselines': ('direct', 'pad_copy_torch', 'pad_copy'), 'dropin': ('Z', ('direct', 'pad_copy_torch'))},
-    ('fwd', 256, 128, 128, 128, 64): {'baselines': ('direct', 'pad_copy_torch', 'pad_copy'), 'dropin': ('Z', ('direct', 'pad_copy_torch'))},
-    ('fwd', 128, 64, 64, 256, 128): {'baselines': ('direct', 'pad_copy_torch', 'pad_copy'), 'dropin': ('Z', ('direct', 'pad_copy_torch', 'pad_copy'))},
-    ('fwd', 128, 64, 64, 128, 128): {'baselines': ('direct', 'pad_copy_torch', 'pad_copy'), 'dropin': ('Z', ('direct', 'pad_copy_torch', 'pad_copy'))},
-    ('fwd', 64, 32, 32, 512, 256): {'baselines': ('direct', 'pad_copy_torch', 'pad_copy'), 'dropin': ('Z', ('direct', 'pad_copy_torch', 'pad_copy'))},
-    ('fwd', 64, 32, 32, 256, 256): {'baselines': ('direct', 'pad_copy_torch', 'pad_copy'), 'dropin': ('Z', ('direct', 'pad_copy_torch', 'pad_copy'))},
-    ('fwd', 32, 16, 16, 512, 512): {'baselines': ('direct', 'pad_copy_torch', 'pad_copy'), 'dropin': ('Z+ks4', ('direct',))},
-    ('fwd', 32, 16, 16, 1024, 512): {'baselines': ('direct', 'pad_copy_torch', 'pad_copy'), 'dropin': ('Z+ks4', ('direct',))},
-    ('fwd', 128, 64, 64, 64, 128): {'baselines': ('direct', 'pad_copy_torch', 'pad_copy'), 'dropin': ('Z', ('direct', 'pad_copy_torch'))},
+    ("dgrad", 256, 128, 128, 64, 64): {
+        "baselines": ("direct",),
+        "dropin": ("B+xcd6", ()),
+    },
+    ("dgrad", 256, 128, 128, 128, 64): {
+        "baselines": ("direct",),
+        "dropin": ("B+xcd6", ()),
+    },
+    ("dgrad", 128, 64, 64, 256, 128): {
+        "baselines": ("direct",),
+        "dropin": ("B+xcd6", ("direct",)),
+    },
+    ("dgrad", 128, 64, 64, 128, 128): {
+        "baselines": ("direct",),
+        "dropin": ("B+xcd6", ("direct",)),
+    },
+    ("dgrad", 64, 32, 32, 512, 256): {
+        "baselines": ("direct",),
+        "dropin": ("B+xcd6", ("direct",)),
+    },
+    ("dgrad", 64, 32, 32, 256, 256): {
+        "baselines": ("direct",),
+        "dropin": ("B+xcd6", ("direct",)),
+    },
+    ("dgrad", 32, 16, 16, 512, 512): {
+        "baselines": ("direct",),
+        "dropin": ("Z+ks4", ()),
+    },
+    ("dgrad", 32, 16, 16, 1024, 512): {
+        "baselines": ("direct",),
+        "dropin": ("B+xcd6", ("direct",)),
+    },
+    ("dgrad", 128, 64, 64, 64, 128): {
+        "baselines": ("direct",),
+        "dropin": ("B+xcd6", ("direct",)),
+    },
+    ("fwd", 256, 128, 128, 64, 64): {
+        "baselines": ("direct", "pad_copy_torch", "pad_copy"),
+        "dropin": ("Z", ("direct", "pad_copy_torch")),
+    },
+    ("fwd", 256, 128, 128, 128, 64): {
+        "baselines": ("direct", "pad_copy_torch", "pad_copy"),
+        "dropin": ("Z", ("direct", "pad_copy_torch")),
+    },
+    ("fwd", 128, 64, 64, 256, 128): {
+        "baselines": ("direct", "pad_copy_torch", "pad_copy"),
+        "dropin": ("Z", ("direct", "pad_copy_torch", "pad_copy")),
+    },
+    ("fwd", 128, 64, 64, 128, 128): {
+        "baselines": ("direct", "pad_copy_torch", "pad_copy"),
+        "dropin": ("Z", ("direct", "pad_copy_torch", "pad_copy")),
+    },
+    ("fwd", 64, 32, 32, 512, 256): {
+        "baselines": ("direct", "pad_copy_torch", "pad_copy"),
+        "dropin": ("Z", ("direct", "pad_copy_torch", "pad_copy")),
+    },
+    ("fwd", 64, 32, 32, 256, 256): {
+        "baselines": ("direct", "pad_copy_torch", "pad_copy"),
+        "dropin": ("Z", ("direct", "pad_copy_torch", "pad_copy")),
+    },
+    ("fwd", 32, 16, 16, 512, 512): {
+        "baselines": ("direct", "pad_copy_torch", "pad_copy"),
+        "dropin": ("Z+ks4", ("direct",)),
+    },
+    ("fwd", 32, 16, 16, 1024, 512): {
+        "baselines": ("direct", "pad_copy_torch", "pad_copy"),
+        "dropin": ("Z+ks4", ("direct",)),
+    },
+    ("fwd", 128, 64, 64, 64, 128): {
+        "baselines": ("direct", "pad_copy_torch", "pad_copy"),
+        "dropin": ("Z", ("direct", "pad_copy_torch")),
+    },
 }
 TUNED_PAD011: Dict[Tuple[str, int, int, int, int, int], dict] = {
-    ('dgrad', 258, 128, 128, 64, 64): {'baselines': ('direct',), 'dropin': ('B+xcd6', ())},
-    ('dgrad', 258, 128, 128, 128, 64): {'baselines': ('direct',), 'dropin': ('B+xcd6', ())},
-    ('dgrad', 130, 64, 64, 256, 128): {'baselines': ('direct',), 'dropin': ('B+xcd6', ('direct',))},
-    ('dgrad', 130, 64, 64, 128, 128): {'baselines': ('direct',), 'dropin': ('B+xcd6', ('direct',))},
-    ('dgrad', 66, 32, 32, 512, 256): {'baselines': ('direct',), 'dropin': ('B+xcd6', ('direct',))},
-    ('dgrad', 66, 32, 32, 256, 256): {'baselines': ('direct',), 'dropin': ('B+xcd6', ('direct',))},
-    ('dgrad', 34, 16, 16, 512, 512): {'baselines': ('direct',), 'dropin': ('B+xcd6+ks4', ())},
-    ('dgrad', 34, 16, 16, 1024, 512): {'baselines': ('direct',), 'dropin': ('B+xcd6', ('direct',))},
-    ('dgrad', 130, 64, 64, 64, 128): {'baselines': ('direct',), 'dropin': ('B+xcd6', ('direct',))},
-    ('fwd', 258, 128, 128, 64, 64): {'baselines': ('direct', 'pad_copy_torch', 'pad_copy'), 'dropin': ('Z', ('direct', 'pad_copy_torch'))},
-    ('fwd', 258, 128, 128, 128, 64): {'baselines': ('direct', 'pad_copy_torch', 'pad_copy'), 'dropin': ('Z', ('direct', 'pad_copy_torch'))},
-    ('fwd', 130, 64, 64, 256, 128): {'baselines': ('direct', 'pad_copy_torch', 'pad_copy'), 'dropin': ('Z', ('direct', 'pad_copy_torch', 'pad_copy'))},
-    ('fwd', 130, 64, 64, 128, 128): {'baselines': ('direct', 'pad_copy_torch', 'pad_copy'), 'dropin': ('Z', ('direct', 'pad_copy_torch', 'pad_copy'))},
-    ('fwd', 66, 32, 32, 512, 256): {'baselines': ('direct', 'pad_copy_torch', 'pad_copy'), 'dropin': ('Z', ('direct', 'pad_copy_torch', 'pad_copy'))},
-    ('fwd', 66, 32, 32, 256, 256): {'baselines': ('direct', 'pad_copy_torch', 'pad_copy'), 'dropin': ('Z', ('direct', 'pad_copy_torch', 'pad_copy'))},
-    ('fwd', 34, 16, 16, 512, 512): {'baselines': ('direct', 'pad_copy_torch', 'pad_copy'), 'dropin': ('Z+ks4', ('direct',))},
-    ('fwd', 34, 16, 16, 1024, 512): {'baselines': ('direct', 'pad_copy_torch', 'pad_copy'), 'dropin': ('Z+ks4', ('direct', 'pad_copy_torch'))},
-    ('fwd', 130, 64, 64, 64, 128): {'baselines': ('direct', 'pad_copy_torch', 'pad_copy'), 'dropin': ('Z', ('direct', 'pad_copy_torch'))},
+    ("dgrad", 258, 128, 128, 64, 64): {
+        "baselines": ("direct",),
+        "dropin": ("B+xcd6", ()),
+    },
+    ("dgrad", 258, 128, 128, 128, 64): {
+        "baselines": ("direct",),
+        "dropin": ("B+xcd6", ()),
+    },
+    ("dgrad", 130, 64, 64, 256, 128): {
+        "baselines": ("direct",),
+        "dropin": ("B+xcd6", ("direct",)),
+    },
+    ("dgrad", 130, 64, 64, 128, 128): {
+        "baselines": ("direct",),
+        "dropin": ("B+xcd6", ("direct",)),
+    },
+    ("dgrad", 66, 32, 32, 512, 256): {
+        "baselines": ("direct",),
+        "dropin": ("B+xcd6", ("direct",)),
+    },
+    ("dgrad", 66, 32, 32, 256, 256): {
+        "baselines": ("direct",),
+        "dropin": ("B+xcd6", ("direct",)),
+    },
+    ("dgrad", 34, 16, 16, 512, 512): {
+        "baselines": ("direct",),
+        "dropin": ("B+xcd6+ks4", ()),
+    },
+    ("dgrad", 34, 16, 16, 1024, 512): {
+        "baselines": ("direct",),
+        "dropin": ("B+xcd6", ("direct",)),
+    },
+    ("dgrad", 130, 64, 64, 64, 128): {
+        "baselines": ("direct",),
+        "dropin": ("B+xcd6", ("direct",)),
+    },
+    ("fwd", 258, 128, 128, 64, 64): {
+        "baselines": ("direct", "pad_copy_torch", "pad_copy"),
+        "dropin": ("Z", ("direct", "pad_copy_torch")),
+    },
+    ("fwd", 258, 128, 128, 128, 64): {
+        "baselines": ("direct", "pad_copy_torch", "pad_copy"),
+        "dropin": ("Z", ("direct", "pad_copy_torch")),
+    },
+    ("fwd", 130, 64, 64, 256, 128): {
+        "baselines": ("direct", "pad_copy_torch", "pad_copy"),
+        "dropin": ("Z", ("direct", "pad_copy_torch", "pad_copy")),
+    },
+    ("fwd", 130, 64, 64, 128, 128): {
+        "baselines": ("direct", "pad_copy_torch", "pad_copy"),
+        "dropin": ("Z", ("direct", "pad_copy_torch", "pad_copy")),
+    },
+    ("fwd", 66, 32, 32, 512, 256): {
+        "baselines": ("direct", "pad_copy_torch", "pad_copy"),
+        "dropin": ("Z", ("direct", "pad_copy_torch", "pad_copy")),
+    },
+    ("fwd", 66, 32, 32, 256, 256): {
+        "baselines": ("direct", "pad_copy_torch", "pad_copy"),
+        "dropin": ("Z", ("direct", "pad_copy_torch", "pad_copy")),
+    },
+    ("fwd", 34, 16, 16, 512, 512): {
+        "baselines": ("direct", "pad_copy_torch", "pad_copy"),
+        "dropin": ("Z+ks4", ("direct",)),
+    },
+    ("fwd", 34, 16, 16, 1024, 512): {
+        "baselines": ("direct", "pad_copy_torch", "pad_copy"),
+        "dropin": ("Z+ks4", ("direct", "pad_copy_torch")),
+    },
+    ("fwd", 130, 64, 64, 64, 128): {
+        "baselines": ("direct", "pad_copy_torch", "pad_copy"),
+        "dropin": ("Z", ("direct", "pad_copy_torch")),
+    },
 }
 
 # xpf variants of the padded drop-in calls (see above).
 TUNED_PAD1_XPF: Dict[Tuple[str, int, int, int, int, int], dict] = {
-    ('dgrad', 256, 128, 128, 64, 64): {'baselines': ('direct',), 'dropin': ('B+xcd6', ())},
-    ('dgrad', 256, 128, 128, 128, 64): {'baselines': ('direct',), 'dropin': ('B+xcd6', ())},
-    ('dgrad', 128, 64, 64, 256, 128): {'baselines': ('direct',), 'dropin': ('B+xcd6', ('direct',))},
-    ('dgrad', 128, 64, 64, 128, 128): {'baselines': ('direct',), 'dropin': ('B+xcd6', ('direct',))},
-    ('dgrad', 64, 32, 32, 512, 256): {'baselines': ('direct',), 'dropin': ('B+xcd6', ('direct',))},
-    ('dgrad', 64, 32, 32, 256, 256): {'baselines': ('direct',), 'dropin': ('B+xcd6', ('direct',))},
-    ('dgrad', 32, 16, 16, 512, 512): {'baselines': ('direct',), 'dropin': ('Z+ks4', ('direct',))},
-    ('dgrad', 32, 16, 16, 1024, 512): {'baselines': ('direct',), 'dropin': ('B+xcd6', ('direct',))},
-    ('dgrad', 128, 64, 64, 64, 128): {'baselines': ('direct',), 'dropin': ('B+xcd6', ('direct',))},
-    ('fwd', 256, 128, 128, 64, 64): {'baselines': ('direct', 'pad_copy'), 'dropin': ('B+xcd6', ())},
-    ('fwd', 256, 128, 128, 128, 64): {'baselines': ('direct', 'pad_copy'), 'dropin': ('B+xcd6', ('direct', 'pad_copy'))},
-    ('fwd', 128, 64, 64, 256, 128): {'baselines': ('direct', 'pad_copy'), 'dropin': ('Z', ('direct', 'pad_copy'))},
-    ('fwd', 128, 64, 64, 128, 128): {'baselines': ('direct', 'pad_copy'), 'dropin': ('Z', ('direct', 'pad_copy'))},
-    ('fwd', 64, 32, 32, 512, 256): {'baselines': ('direct', 'pad_copy'), 'dropin': ('Z', ('direct', 'pad_copy'))},
-    ('fwd', 64, 32, 32, 256, 256): {'baselines': ('direct', 'pad_copy'), 'dropin': ('Z', ('direct', 'pad_copy'))},
-    ('fwd', 32, 16, 16, 512, 512): {'baselines': ('direct', 'pad_copy'), 'dropin': ('Z+ks4', ())},
-    ('fwd', 32, 16, 16, 1024, 512): {'baselines': ('direct', 'pad_copy'), 'dropin': ('Z+ks4', ('direct', 'pad_copy'))},
-    ('fwd', 128, 64, 64, 64, 128): {'baselines': ('direct', 'pad_copy'), 'dropin': ('B+xcd6', ('direct', 'pad_copy'))},
+    ("dgrad", 256, 128, 128, 64, 64): {
+        "baselines": ("direct",),
+        "dropin": ("B+xcd6", ()),
+    },
+    ("dgrad", 256, 128, 128, 128, 64): {
+        "baselines": ("direct",),
+        "dropin": ("B+xcd6", ()),
+    },
+    ("dgrad", 128, 64, 64, 256, 128): {
+        "baselines": ("direct",),
+        "dropin": ("B+xcd6", ("direct",)),
+    },
+    ("dgrad", 128, 64, 64, 128, 128): {
+        "baselines": ("direct",),
+        "dropin": ("B+xcd6", ("direct",)),
+    },
+    ("dgrad", 64, 32, 32, 512, 256): {
+        "baselines": ("direct",),
+        "dropin": ("B+xcd6", ("direct",)),
+    },
+    ("dgrad", 64, 32, 32, 256, 256): {
+        "baselines": ("direct",),
+        "dropin": ("B+xcd6", ("direct",)),
+    },
+    ("dgrad", 32, 16, 16, 512, 512): {
+        "baselines": ("direct",),
+        "dropin": ("Z+ks4", ("direct",)),
+    },
+    ("dgrad", 32, 16, 16, 1024, 512): {
+        "baselines": ("direct",),
+        "dropin": ("B+xcd6", ("direct",)),
+    },
+    ("dgrad", 128, 64, 64, 64, 128): {
+        "baselines": ("direct",),
+        "dropin": ("B+xcd6", ("direct",)),
+    },
+    ("fwd", 256, 128, 128, 64, 64): {
+        "baselines": ("direct", "pad_copy"),
+        "dropin": ("B+xcd6", ()),
+    },
+    ("fwd", 256, 128, 128, 128, 64): {
+        "baselines": ("direct", "pad_copy"),
+        "dropin": ("B+xcd6", ("direct", "pad_copy")),
+    },
+    ("fwd", 128, 64, 64, 256, 128): {
+        "baselines": ("direct", "pad_copy"),
+        "dropin": ("Z", ("direct", "pad_copy")),
+    },
+    ("fwd", 128, 64, 64, 128, 128): {
+        "baselines": ("direct", "pad_copy"),
+        "dropin": ("Z", ("direct", "pad_copy")),
+    },
+    ("fwd", 64, 32, 32, 512, 256): {
+        "baselines": ("direct", "pad_copy"),
+        "dropin": ("Z", ("direct", "pad_copy")),
+    },
+    ("fwd", 64, 32, 32, 256, 256): {
+        "baselines": ("direct", "pad_copy"),
+        "dropin": ("Z", ("direct", "pad_copy")),
+    },
+    ("fwd", 32, 16, 16, 512, 512): {
+        "baselines": ("direct", "pad_copy"),
+        "dropin": ("Z+ks4", ()),
+    },
+    ("fwd", 32, 16, 16, 1024, 512): {
+        "baselines": ("direct", "pad_copy"),
+        "dropin": ("Z+ks4", ("direct", "pad_copy")),
+    },
+    ("fwd", 128, 64, 64, 64, 128): {
+        "baselines": ("direct", "pad_copy"),
+        "dropin": ("B+xcd6", ("direct", "pad_copy")),
+    },
 }
 TUNED_PAD011_XPF: Dict[Tuple[str, int, int, int, int, int], dict] = {
-    ('dgrad', 34, 16, 16, 512, 512): {'baselines': ('direct',), 'dropin': ('B+xcd6+ks4', ())},
-    ('dgrad', 258, 128, 128, 64, 64): {'baselines': ('direct',), 'dropin': ('B+xcd6', ())},
-    ('dgrad', 258, 128, 128, 128, 64): {'baselines': ('direct',), 'dropin': ('B+xcd6', ())},
-    ('dgrad', 130, 64, 64, 256, 128): {'baselines': ('direct',), 'dropin': ('B+xcd6', ('direct',))},
-    ('dgrad', 130, 64, 64, 128, 128): {'baselines': ('direct',), 'dropin': ('B+xcd6', ('direct',))},
-    ('dgrad', 66, 32, 32, 512, 256): {'baselines': ('direct',), 'dropin': ('B+xcd6', ('direct',))},
-    ('dgrad', 66, 32, 32, 256, 256): {'baselines': ('direct',), 'dropin': ('B+xcd6', ('direct',))},
-    ('dgrad', 34, 16, 16, 1024, 512): {'baselines': ('direct',), 'dropin': ('B+xcd6', ('direct',))},
-    ('dgrad', 130, 64, 64, 64, 128): {'baselines': ('direct',), 'dropin': ('B+xcd6', ('direct',))},
-    ('fwd', 258, 128, 128, 64, 64): {'baselines': ('direct', 'pad_copy'), 'dropin': ('Z', ())},
-    ('fwd', 258, 128, 128, 128, 64): {'baselines': ('direct', 'pad_copy'), 'dropin': ('B+xcd6', ('direct', 'pad_copy'))},
-    ('fwd', 130, 64, 64, 256, 128): {'baselines': ('direct', 'pad_copy'), 'dropin': ('Z', ('direct', 'pad_copy'))},
-    ('fwd', 130, 64, 64, 128, 128): {'baselines': ('direct', 'pad_copy'), 'dropin': ('Z', ('direct', 'pad_copy'))},
-    ('fwd', 66, 32, 32, 512, 256): {'baselines': ('direct', 'pad_copy'), 'dropin': ('Z', ('direct', 'pad_copy'))},
-    ('fwd', 66, 32, 32, 256, 256): {'baselines': ('direct', 'pad_copy'), 'dropin': ('Z', ('direct', 'pad_copy'))},
-    ('fwd', 34, 16, 16, 512, 512): {'baselines': ('direct', 'pad_copy'), 'dropin': ('Z+ks4', ())},
-    ('fwd', 34, 16, 16, 1024, 512): {'baselines': ('direct', 'pad_copy'), 'dropin': ('Z+ks4', ('direct', 'pad_copy'))},
-    ('fwd', 130, 64, 64, 64, 128): {'baselines': ('direct', 'pad_copy'), 'dropin': ('B+xcd6', ('direct', 'pad_copy'))},
+    ("dgrad", 34, 16, 16, 512, 512): {
+        "baselines": ("direct",),
+        "dropin": ("B+xcd6+ks4", ()),
+    },
+    ("dgrad", 258, 128, 128, 64, 64): {
+        "baselines": ("direct",),
+        "dropin": ("B+xcd6", ()),
+    },
+    ("dgrad", 258, 128, 128, 128, 64): {
+        "baselines": ("direct",),
+        "dropin": ("B+xcd6", ()),
+    },
+    ("dgrad", 130, 64, 64, 256, 128): {
+        "baselines": ("direct",),
+        "dropin": ("B+xcd6", ("direct",)),
+    },
+    ("dgrad", 130, 64, 64, 128, 128): {
+        "baselines": ("direct",),
+        "dropin": ("B+xcd6", ("direct",)),
+    },
+    ("dgrad", 66, 32, 32, 512, 256): {
+        "baselines": ("direct",),
+        "dropin": ("B+xcd6", ("direct",)),
+    },
+    ("dgrad", 66, 32, 32, 256, 256): {
+        "baselines": ("direct",),
+        "dropin": ("B+xcd6", ("direct",)),
+    },
+    ("dgrad", 34, 16, 16, 1024, 512): {
+        "baselines": ("direct",),
+        "dropin": ("B+xcd6", ("direct",)),
+    },
+    ("dgrad", 130, 64, 64, 64, 128): {
+        "baselines": ("direct",),
+        "dropin": ("B+xcd6", ("direct",)),
+    },
+    ("fwd", 258, 128, 128, 64, 64): {
+        "baselines": ("direct", "pad_copy"),
+        "dropin": ("Z", ()),
+    },
+    ("fwd", 258, 128, 128, 128, 64): {
+        "baselines": ("direct", "pad_copy"),
+        "dropin": ("B+xcd6", ("direct", "pad_copy")),
+    },
+    ("fwd", 130, 64, 64, 256, 128): {
+        "baselines": ("direct", "pad_copy"),
+        "dropin": ("Z", ("direct", "pad_copy")),
+    },
+    ("fwd", 130, 64, 64, 128, 128): {
+        "baselines": ("direct", "pad_copy"),
+        "dropin": ("Z", ("direct", "pad_copy")),
+    },
+    ("fwd", 66, 32, 32, 512, 256): {
+        "baselines": ("direct", "pad_copy"),
+        "dropin": ("Z", ("direct", "pad_copy")),
+    },
+    ("fwd", 66, 32, 32, 256, 256): {
+        "baselines": ("direct", "pad_copy"),
+        "dropin": ("Z", ("direct", "pad_copy")),
+    },
+    ("fwd", 34, 16, 16, 512, 512): {
+        "baselines": ("direct", "pad_copy"),
+        "dropin": ("Z+ks4", ()),
+    },
+    ("fwd", 34, 16, 16, 1024, 512): {
+        "baselines": ("direct", "pad_copy"),
+        "dropin": ("Z+ks4", ("direct", "pad_copy")),
+    },
+    ("fwd", 130, 64, 64, 64, 128): {
+        "baselines": ("direct", "pad_copy"),
+        "dropin": ("B+xcd6", ("direct", "pad_copy")),
+    },
 }
 
 _ERR_CLASS = {"yx_f2": 1.50e-3, "yx_f42": 2.0e-3}  # mean rel error, training-like data
@@ -265,8 +600,14 @@ class Winograd3dPlan:
         s = self.spec_dict
         cfg = "B" if s.get("nsplit") else "Z"
         extra = [k for k in ("lin", "ksplit", "bps", "yc8h", "xpf") if s.get(k)]
-        return f"yx:F(2x2,3x3)+z:{cfg}" + ("+" + "+".join(
-            f"{k}{s[k] if not isinstance(s[k], bool) else ''}" for k in extra) if extra else "")
+        return f"yx:F(2x2,3x3)+z:{cfg}" + (
+            "+"
+            + "+".join(
+                f"{k}{s[k] if not isinstance(s[k], bool) else ''}" for k in extra
+            )
+            if extra
+            else ""
+        )
 
 
 _PADS = {(0, 0, 0): 0, (1, 1, 1): 1, (0, 1, 1): 2}
@@ -300,8 +641,9 @@ def _winograd_problem(p: ConvProblem, direction: str) -> Tuple[int, int, int, in
     return p.Do + 2 * hz, p.Ho + 2 * h, p.Wo + 2 * h, p.K, p.C
 
 
-def winograd3d_ineligible_reason(p: ConvProblem, direction: str, dtype: str = "bf16"
-                                 ) -> Optional[str]:
+def winograd3d_ineligible_reason(
+    p: ConvProblem, direction: str, dtype: str = "bf16"
+) -> Optional[str]:
     """Why no yx plan applies at all (None if some may)."""
     if direction not in ("fwd", "dgrad"):
         return f"direction {direction!r} (fwd / dgrad only; wgrad has no Winograd plan)"
@@ -318,8 +660,10 @@ def winograd3d_ineligible_reason(p: ConvProblem, direction: str, dtype: str = "b
     if (p.sD, p.sH, p.sW) != (1, 1, 1) or (p.dD, p.dH, p.dW) != (1, 1, 1):
         return "stride / dilation != 1"
     if _pad(p) < 0:
-        return (f"padding {(p.pD, p.pH, p.pW)} (the kernels run the valid / halo form, or "
-                "pad (1,1,1) / (0,1,1) through the drop-in relayout)")
+        return (
+            f"padding {(p.pD, p.pH, p.pW)} (the kernels run the valid / halo form, or "
+            "pad (1,1,1) / (0,1,1) through the drop-in relayout)"
+        )
     if p.C % 8 or p.K % 32 or (direction == "dgrad" and (p.K % 8 or p.C % 32)):
         return "channels: C % 8 and K % 32 (of the conv the kernel runs)"
     return None
@@ -328,15 +672,27 @@ def winograd3d_ineligible_reason(p: ConvProblem, direction: str, dtype: str = "b
 def _specs(direction: str, mode: str, pad: int = 0):
     """Candidate (name, spec extras, wtv) per direction."""
     if direction == "dgrad" and pad == 0:
-        return [("B+lin+xcd6", dict(SPEC_B, lin=True, xcd=6), 3),
-                ("Z+lin", dict(SPEC_Z, lin=True), 3)]
-    return [("Z", dict(SPEC_Z), 4), ("B", dict(SPEC_B), 4), ("B+xcd6", dict(SPEC_B, xcd=6), 3),
-            ("Z+ks4", dict(SPEC_Z, ksplit=4), 4), ("B+ks4", dict(SPEC_B, ksplit=4), 4),
-            ("B+xcd6+ks4", dict(SPEC_B, xcd=6, ksplit=4), 3)]
+        return [
+            ("B+lin+xcd6", dict(SPEC_B, lin=True, xcd=6), 3),
+            ("Z+lin", dict(SPEC_Z, lin=True), 3),
+        ]
+    return [
+        ("Z", dict(SPEC_Z), 4),
+        ("B", dict(SPEC_B), 4),
+        ("B+xcd6", dict(SPEC_B, xcd=6), 3),
+        ("Z+ks4", dict(SPEC_Z, ksplit=4), 4),
+        ("B+ks4", dict(SPEC_B, ksplit=4), 4),
+        ("B+xcd6+ks4", dict(SPEC_B, xcd=6, ksplit=4), 3),
+    ]
 
 
-def winograd3d_candidates(p: ConvProblem, direction: str, mode: str = "dropin",
-                          prescale: str = "bps", xpf: bool = False):
+def winograd3d_candidates(
+    p: ConvProblem,
+    direction: str,
+    mode: str = "dropin",
+    prescale: str = "bps",
+    xpf: bool = False,
+):
     """Valid yx specs (WinogradYxSpec) for the problem, with their names and wtv
     (``xpf``: the unrolled-prefetch main loop where valid)."""
     from kernels.common import conv_winograd3d as cw
@@ -399,16 +755,27 @@ def _est(p: ConvProblem, direction: str, mode: str, spec, cm: Winograd3dCostMode
         t_dir /= cm.pad_direct_eff_fwd
     if mode == "dropin":
         hz, h = _relayout_halos(p, direction)
-        x_bytes = (spec.Di - 2 * hz) * (spec.Hi - 2 * h) * (spec.Wi - 2 * h) * spec.C * 2
+        x_bytes = (
+            (spec.Di - 2 * hz) * (spec.Hi - 2 * h) * (spec.Wi - 2 * h) * spec.C * 2
+        )
         t_w += 2 * x_bytes / (cm.copy_tbs * 1e9) + cm.launch_ms
     return t_dir, t_w
 
 
-def select_winograd3d(problem: ConvProblem, direction: str = "fwd", *, mode: str = "dropin",
-                      dtype: str = "bf16", prescale: str = "auto", range_safe: bool = False,
-                      margin: float = 0.02, cost: Optional[Winograd3dCostModel] = None,
-                      use_measured: bool = True, direct_pad_copy: bool = False,
-                      xpf: bool = False) -> Winograd3dPlan:
+def select_winograd3d(
+    problem: ConvProblem,
+    direction: str = "fwd",
+    *,
+    mode: str = "dropin",
+    dtype: str = "bf16",
+    prescale: str = "auto",
+    range_safe: bool = False,
+    margin: float = 0.02,
+    cost: Optional[Winograd3dCostModel] = None,
+    use_measured: bool = True,
+    direct_pad_copy: bool = False,
+    xpf: bool = False,
+) -> Winograd3dPlan:
     """The yx Winograd plan for ``problem`` or ``kind="direct"`` with the reason.
 
     Problems with a decision table entry (``use_measured``) take its decision (taken at
@@ -430,24 +797,38 @@ def select_winograd3d(problem: ConvProblem, direction: str = "fwd", *, mode: str
     if why:
         return Winograd3dPlan("direct", mode=mode, direction=direction, reason=why)
     if _pad(problem) > 0 and mode != "dropin":
-        return Winograd3dPlan("direct", mode=mode, direction=direction,
-                              reason="padded: drop-in only (chained = the halo form)")
+        return Winograd3dPlan(
+            "direct",
+            mode=mode,
+            direction=direction,
+            reason="padded: drop-in only (chained = the halo form)",
+        )
     if prescale == "auto":
         prescale = "none" if range_safe else "bps"
     if prescale == "none" and not range_safe:
-        return Winograd3dPlan("direct", mode=mode, direction=direction,
-                              reason="f16 operands without prescale need range_safe=True")
+        return Winograd3dPlan(
+            "direct",
+            mode=mode,
+            direction=direction,
+            reason="f16 operands without prescale need range_safe=True",
+        )
     cands = winograd3d_candidates(problem, direction, mode, prescale, xpf=xpf)
     if not cands:
-        return Winograd3dPlan("direct", mode=mode, direction=direction,
-                              reason="no valid yx tiling (e.g. < 32 2-D tiles per plane)")
+        return Winograd3dPlan(
+            "direct",
+            mode=mode,
+            direction=direction,
+            reason="no valid yx tiling (e.g. < 32 2-D tiles per plane)",
+        )
     key = (direction,) + ((problem.Di, problem.Hi, problem.Wi, problem.C, problem.K))
     table = {0: TUNED, 1: TUNED_PAD1, 2: TUNED_PAD011}.get(_pad(problem), {})
     if xpf:
         tx = {1: TUNED_PAD1_XPF, 2: TUNED_PAD011_XPF}.get(_pad(problem), {})
         if key in tx:
             table = tx
-            direct_pad_copy = True  # its "direct" baseline is already the best direct route
+            direct_pad_copy = (
+                True  # its "direct" baseline is already the best direct route
+            )
     tuned = table.get(key) if use_measured else None
     mkey = mode + ("" if prescale == "bps" else "_nops")
     if tuned is not None and mkey in tuned:
@@ -455,21 +836,37 @@ def select_winograd3d(problem: ConvProblem, direction: str = "fwd", *, mode: str
         # padded FWD: the direct alternative may copy X into a zero-haloed buffer and run the
         # halo-form kernel (torch strided pad copy, or the rocKE pad copy kernel
         # build_pad_copy, which runs at copy bandwidth)
-        need = [b for b in tuned["baselines"]
-                if b == "direct" or (direct_pad_copy and b.startswith("pad_copy"))]
+        need = [
+            b
+            for b in tuned["baselines"]
+            if b == "direct" or (direct_pad_copy and b.startswith("pad_copy"))
+        ]
         pick = [c for c in cands if c[0] == name] or cands[:1]
         name, spec, wtv = pick[0]
         alts = tuple((k, v[0]) for k, v in tuned.items() if k != "baselines")
         lost = [b for b in need if b not in beats]
         if not lost:
-            return Winograd3dPlan("yx", tuple(sorted(_spec_fields(spec).items())), wtv, mode,
-                                  direction, prescale, source="tuned",
-                                  err_class=_ERR_CLASS["yx_f2"],
-                                  reason=f"{name}: tuned, beats {', '.join(need)} "
-                                         f"by {TUNED_MARGIN}", alternatives=alts)
-        return Winograd3dPlan("direct", mode=mode, direction=direction, source="tuned",
-                              reason=f"tuned {name} does not beat {', '.join(lost)} "
-                                     f"by {TUNED_MARGIN}", alternatives=alts)
+            return Winograd3dPlan(
+                "yx",
+                tuple(sorted(_spec_fields(spec).items())),
+                wtv,
+                mode,
+                direction,
+                prescale,
+                source="tuned",
+                err_class=_ERR_CLASS["yx_f2"],
+                reason=f"{name}: tuned, beats {', '.join(need)} " f"by {TUNED_MARGIN}",
+                alternatives=alts,
+            )
+        return Winograd3dPlan(
+            "direct",
+            mode=mode,
+            direction=direction,
+            source="tuned",
+            reason=f"tuned {name} does not beat {', '.join(lost)} "
+            f"by {TUNED_MARGIN}",
+            alternatives=alts,
+        )
     best = None
     for name, spec, wtv in cands:
         t_dir, t_w = _est(problem, direction, mode, spec, cm)
@@ -477,12 +874,28 @@ def select_winograd3d(problem: ConvProblem, direction: str = "fwd", *, mode: str
             best = (name, t_w, t_dir, spec, wtv)
     name, t_w, t_dir, spec, wtv = best
     if t_w < t_dir * (1.0 - margin):
-        return Winograd3dPlan("yx", tuple(sorted(_spec_fields(spec).items())), wtv, mode,
-                              direction, prescale, t_w, t_dir, "model", _ERR_CLASS["yx_f2"],
-                              f"{name}: est {t_w:.3f} vs direct {t_dir:.3f} ms")
-    return Winograd3dPlan("direct", mode=mode, direction=direction, est_ms=t_w,
-                          est_ms_direct=t_dir, source="model",
-                          reason=f"est {name} {t_w:.3f} ms >= direct {t_dir:.3f} ms x (1 - {margin})")
+        return Winograd3dPlan(
+            "yx",
+            tuple(sorted(_spec_fields(spec).items())),
+            wtv,
+            mode,
+            direction,
+            prescale,
+            t_w,
+            t_dir,
+            "model",
+            _ERR_CLASS["yx_f2"],
+            f"{name}: est {t_w:.3f} vs direct {t_dir:.3f} ms",
+        )
+    return Winograd3dPlan(
+        "direct",
+        mode=mode,
+        direction=direction,
+        est_ms=t_w,
+        est_ms_direct=t_dir,
+        source="model",
+        reason=f"est {name} {t_w:.3f} ms >= direct {t_dir:.3f} ms x (1 - {margin})",
+    )
 
 
 def _spec_fields(spec) -> dict:
@@ -501,43 +914,91 @@ def _spec_fields(spec) -> dict:
 
 # The ten 3x3x3 convs of a 3-D UNet (halo form, N=1): cell -> (Di, Hi, Wi, C, K).
 UNET3D_SHAPES = {
-    1: (258, 130, 130, 64, 64), 2: (258, 130, 130, 128, 64), 3: (130, 66, 66, 256, 128),
-    4: (130, 66, 66, 128, 128), 5: (66, 34, 34, 512, 256), 6: (66, 34, 34, 256, 256),
-    7: (34, 18, 18, 512, 512), 8: (34, 18, 18, 1024, 512), 9: (130, 66, 66, 64, 128),
+    1: (258, 130, 130, 64, 64),
+    2: (258, 130, 130, 128, 64),
+    3: (130, 66, 66, 256, 128),
+    4: (130, 66, 66, 128, 128),
+    5: (66, 34, 34, 512, 256),
+    6: (66, 34, 34, 256, 256),
+    7: (34, 18, 18, 512, 512),
+    8: (34, 18, 18, 1024, 512),
+    9: (130, 66, 66, 64, 128),
     10: (18, 10, 10, 1024, 1024),
 }
 
 
 def unet3d_plans(mode: str = "dropin", form: str = "halo", **kw):
     """{(direction, cell): Winograd3dPlan} for the UNET3D_SHAPES convs (FWD and BWD-data);
-    ``form="adapter"``: the production pad-(1,1,1) problems (input 2 smaller per dim)."""
+    ``form="adapter"``: the production pad-(1,1,1) problems (input 2 smaller per dim).
+    """
     out = {}
     pd, ph = {"halo": (0, 0), "adapter": (1, 1), "adapter011": (0, 1)}[form]
     for sid, (D, H, W, C, K) in UNET3D_SHAPES.items():
-        p = ConvProblem(N=1, Hi=H - 2 * ph, Wi=W - 2 * ph, C=C, K=K, Y=3, X=3, Di=D - 2 * pd,
-                        Z=3, sD=1, pD=pd, dD=1, pH=ph, pW=ph)
+        p = ConvProblem(
+            N=1,
+            Hi=H - 2 * ph,
+            Wi=W - 2 * ph,
+            C=C,
+            K=K,
+            Y=3,
+            X=3,
+            Di=D - 2 * pd,
+            Z=3,
+            sD=1,
+            pD=pd,
+            dD=1,
+            pH=ph,
+            pW=ph,
+        )
         for d in ("fwd", "dgrad"):
             out[(d, sid)] = select_winograd3d(p, d, mode=mode, **kw)
     return out
 
 
-if __name__ == "__main__":  # python -m kernels.common.conv_winograd3d_select [dropin|chained] [--range-safe]
+if (
+    __name__ == "__main__"
+):  # python -m kernels.common.conv_winograd3d_select [dropin|chained] [--range-safe]
     # [--adapter | --adapter011] [--pad-copy] [--xpf]
     import json
     import sys
 
-    md = sys.argv[1] if len(sys.argv) > 1 and not sys.argv[1].startswith("-") else "dropin"
+    md = (
+        sys.argv[1]
+        if len(sys.argv) > 1 and not sys.argv[1].startswith("-")
+        else "dropin"
+    )
     rs = "--range-safe" in sys.argv
-    fm = ("adapter011" if "--adapter011" in sys.argv else
-          "adapter" if "--adapter" in sys.argv else "halo")
+    fm = (
+        "adapter011"
+        if "--adapter011" in sys.argv
+        else "adapter" if "--adapter" in sys.argv else "halo"
+    )
     pcp = "--pad-copy" in sys.argv
     xkw = {"xpf": True} if "--xpf" in sys.argv else {}
-    for (d, sid), pl in unet3d_plans(md, form=fm, range_safe=rs, direct_pad_copy=pcp,
-                                       **xkw).items():
-        print(json.dumps({"dir": d, "cell": sid, "mode": md, "form": fm, "kind": pl.kind,
-                          "label": pl.label,
-                          "est_ms": round(pl.est_ms, 4) if pl.est_ms != float("inf") else None,
-                          "direct_ms": round(pl.est_ms_direct, 4)
-                          if pl.est_ms_direct != float("inf") else None,
-                          "source": pl.source, "wtv": pl.wtv, "spec": pl.spec_dict,
-                          "reason": pl.reason}))
+    for (d, sid), pl in unet3d_plans(
+        md, form=fm, range_safe=rs, direct_pad_copy=pcp, **xkw
+    ).items():
+        print(
+            json.dumps(
+                {
+                    "dir": d,
+                    "cell": sid,
+                    "mode": md,
+                    "form": fm,
+                    "kind": pl.kind,
+                    "label": pl.label,
+                    "est_ms": (
+                        round(pl.est_ms, 4) if pl.est_ms != float("inf") else None
+                    ),
+                    "direct_ms": (
+                        round(pl.est_ms_direct, 4)
+                        if pl.est_ms_direct != float("inf")
+                        else None
+                    ),
+                    "source": pl.source,
+                    "wtv": pl.wtv,
+                    "spec": pl.spec_dict,
+                    "reason": pl.reason,
+                }
+            )
+        )

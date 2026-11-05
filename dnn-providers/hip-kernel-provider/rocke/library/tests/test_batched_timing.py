@@ -380,7 +380,8 @@ def test_reprobe_staged_replaces_probe_and_keeps_pool_only(monkeypatch):
     dev.install(monkeypatch)
     probe = {0: 1.0, 1: 1.1, 2: 1.2, 3: 2.0, 4: 3.0, 5: 3.1}
     monkeypatch.setattr(
-        batched_timing, "time_batch",
+        batched_timing,
+        "time_batch",
         lambda runs, **kw: [probe[run()] for run in runs],
     )
     res = _rank(dev, 6, finalists=2, reprobe=4, reprobe_staged=True)

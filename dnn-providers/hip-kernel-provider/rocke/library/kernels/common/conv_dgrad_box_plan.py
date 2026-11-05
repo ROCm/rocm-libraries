@@ -41,7 +41,9 @@ from typing import Dict, List, Sequence, Tuple
 Box = Tuple[int, int, int, int, int, int]  # (zlo, zhi, ylo, yhi, xlo, xhi)
 
 
-def _axis_ranges(n_in: int, n_out: int, pad: int, filt: int, dil: int = 1) -> List[Tuple[int, int]]:
+def _axis_ranges(
+    n_in: int, n_out: int, pad: int, filt: int, dil: int = 1
+) -> List[Tuple[int, int]]:
     """Filter offsets [lo, hi] each input coordinate can use (stride 1)."""
     out = []
     for h in range(n_in):
@@ -79,15 +81,24 @@ def box_taps(b: Box) -> int:
 
 
 def _contains(big: Box, c: Box) -> bool:
-    return all(big[2 * i] <= c[2 * i] and c[2 * i + 1] <= big[2 * i + 1] for i in range(3))
+    return all(
+        big[2 * i] <= c[2 * i] and c[2 * i + 1] <= big[2 * i + 1] for i in range(3)
+    )
 
 
 def _ceil_div(a: int, b: int) -> int:
     return -(-a // b)
 
 
-def _solve_milp(counts: Dict[Box, int], boxes: Sequence[Box], cost: Dict[Box, int], taps_k: Dict[Box, int],
-                tile_m: int, n_tiles: int, budget: int):
+def _solve_milp(
+    counts: Dict[Box, int],
+    boxes: Sequence[Box],
+    cost: Dict[Box, int],
+    taps_k: Dict[Box, int],
+    tile_m: int,
+    n_tiles: int,
+    budget: int,
+):
     """Assign the class pixels to boxes containing them: minimise the MFMA K tiles
     (sum of tiles * K tiles of the box) with the launch's workgroups (sum of tiles *
     split * N tiles) within ``budget``. A small MILP (scipy's HiGHS); None if
@@ -99,7 +110,12 @@ def _solve_milp(counts: Dict[Box, int], boxes: Sequence[Box], cost: Dict[Box, in
         return None
     classes = sorted(counts)
     boxes = sorted(boxes)
-    pairs = [(ci, bi) for ci, c in enumerate(classes) for bi, b in enumerate(boxes) if _contains(b, c)]
+    pairs = [
+        (ci, bi)
+        for ci, c in enumerate(classes)
+        for bi, b in enumerate(boxes)
+        if _contains(b, c)
+    ]
     nx, nb = len(pairs), len(boxes)
     obj = np.concatenate([np.zeros(nx), np.array([float(taps_k[b]) for b in boxes])])
     A = np.zeros((len(classes) + nb + 1, nx + nb))
@@ -115,11 +131,15 @@ def _solve_milp(counts: Dict[Box, int], boxes: Sequence[Box], cost: Dict[Box, in
         lo[len(classes) + bi] = -np.inf
         A[-1, nx + bi] = cost[b] * n_tiles
     lo[-1], hi[-1] = 0, budget
-    res = milp(obj, constraints=LinearConstraint(A, lo, hi), integrality=np.ones(nx + nb),
-               bounds=Bounds(0, np.inf),
-               # Deterministic work limits only (a time limit would make the plan
-               # depend on the machine's load): a node budget and a relative MIP gap.
-               options={"node_limit": 4000, "mip_rel_gap": 2e-3})
+    res = milp(
+        obj,
+        constraints=LinearConstraint(A, lo, hi),
+        integrality=np.ones(nx + nb),
+        bounds=Bounds(0, np.inf),
+        # Deterministic work limits only (a time limit would make the plan
+        # depend on the machine's load): a node budget and a relative MIP gap.
+        options={"node_limit": 4000, "mip_rel_gap": 2e-3},
+    )
     if res.x is None:
         return None
     x = np.round(res.x).astype(int)
@@ -128,18 +148,35 @@ def _solve_milp(counts: Dict[Box, int], boxes: Sequence[Box], cost: Dict[Box, in
         t = int(x[nx + bi])
         if not t:
             continue
-        members = [(classes[ci], int(x[k])) for k, (ci, bb) in enumerate(pairs) if bb == bi and x[k]]
+        members = [
+            (classes[ci], int(x[k]))
+            for k, (ci, bb) in enumerate(pairs)
+            if bb == bi and x[k]
+        ]
         plan.append((b, t, members))
     return plan
 
 
 def _hull(a: Box, c: Box) -> Box:
-    return (min(a[0], c[0]), max(a[1], c[1]), min(a[2], c[2]), max(a[3], c[3]),
-            min(a[4], c[4]), max(a[5], c[5]))
+    return (
+        min(a[0], c[0]),
+        max(a[1], c[1]),
+        min(a[2], c[2]),
+        max(a[3], c[3]),
+        min(a[4], c[4]),
+        max(a[5], c[5]),
+    )
 
 
-def _solve_greedy(counts: Dict[Box, int], boxes: Sequence[Box], cost: Dict[Box, int], taps_k: Dict[Box, int],
-                  tile_m: int, n_tiles: int, budget: int):
+def _solve_greedy(
+    counts: Dict[Box, int],
+    boxes: Sequence[Box],
+    cost: Dict[Box, int],
+    taps_k: Dict[Box, int],
+    tile_m: int,
+    n_tiles: int,
+    budget: int,
+):
     """Pure-Python twin of :func:`_solve_milp` (same result format): every class
     starts in its own exact box; then (A) the spare rows of a box's last tile take
     the partial-tile rows of boxes it contains (a whole tile less, nothing more),
@@ -206,7 +243,7 @@ def _solve_greedy(counts: Dict[Box, int], boxes: Sequence[Box], cost: Dict[Box, 
         part = sorted(g for g in groups if rows(g) % tile_m)
         for i, g1 in enumerate(part):
             r1 = rows(g1) % tile_m
-            for g2 in part[i + 1:]:
+            for g2 in part[i + 1 :]:
                 r2 = rows(g2) % tile_m
                 U = _hull(g1, g2)
                 if U not in allowed:
@@ -222,8 +259,14 @@ def _solve_greedy(counts: Dict[Box, int], boxes: Sequence[Box], cost: Dict[Box, 
                 t1 = _ceil_div(rows(g1) - r1, tile_m) if U != g1 else 0
                 t2 = _ceil_div(rows(g2) - r2, tile_m) if U != g2 else 0
                 tu = _ceil_div(ru, tile_m)
-                dw = (t1 - old[g1]) * cost[g1] + (t2 - old[g2]) * cost[g2] + tu * cost[U]
-                ds = (t1 - old[g1]) * taps_k[g1] + (t2 - old[g2]) * taps_k[g2] + tu * taps_k[U]
+                dw = (
+                    (t1 - old[g1]) * cost[g1] + (t2 - old[g2]) * cost[g2] + tu * cost[U]
+                )
+                ds = (
+                    (t1 - old[g1]) * taps_k[g1]
+                    + (t2 - old[g2]) * taps_k[g2]
+                    + tu * taps_k[U]
+                )
                 if old_u is not None:
                     dw -= old_u * cost[U]
                     ds -= old_u * taps_k[U]
@@ -288,7 +331,9 @@ def _plan_cached(key) -> Tuple:
     need = max(taps_k[c] for c in classes)  # the longest class must fit max_split
     full = [b for b in boxes if all(_contains(b, c) for c in classes)]
     # Candidate slice lengths: those at which some box's slices are exact.
-    cands = sorted({_ceil_div(taps_k[b], k) for b in boxes for k in range(1, max_split + 1)})
+    cands = sorted(
+        {_ceil_div(taps_k[b], k) for b in boxes for k in range(1, max_split + 1)}
+    )
     cands = [t for t in cands if t >= _ceil_div(need, max_split)]
     # A problem whose unsplit tiles alone exceed the budget (big grids) runs
     # several rounds anyway: the budget grows by whole rounds until a plan fits.
@@ -337,15 +382,25 @@ def records_makespan(sub_gemms, kpg: int, tile_k: int, cus: int) -> Tuple[int, i
     return mk, tot
 
 
-def plan_boxes(p, tile_m: int, tile_n: int, tile_k: int, max_split: int, cus: int, round_cus: int = 228,
-               interior: int = 0):
+def plan_boxes(
+    p,
+    tile_m: int,
+    tile_n: int,
+    tile_k: int,
+    max_split: int,
+    cus: int,
+    round_cus: int = 228,
+    interior: int = 0,
+):
     """``(T, [(box, tiles, split, [pixel rows])])`` of the ``pp_boxes`` 8 plan, or None.
     ``interior``: as :func:`pixel_classes` (dx_interior: the shell gets no row)."""
     cl = pixel_classes(p, interior)
     counts = tuple(sorted((c, len(v)) for c, v in cl.items()))
     kpt = _ceil_div(p.kpg, tile_k)
     n_tiles = _ceil_div(p.cpg, tile_n)
-    res = _plan_cached((counts, tile_m, n_tiles, kpt, max(1, max_split), cus, round_cus))
+    res = _plan_cached(
+        (counts, tile_m, n_tiles, kpt, max(1, max_split), cus, round_cus)
+    )
     if res is None:
         return None
     T, plan = res

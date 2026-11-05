@@ -166,7 +166,9 @@ class TestWgradXwin(unittest.TestCase):
         self.assertNotIn("xwin", off.label())
 
     def test_lowers_with_window_and_alignbyte(self):
-        from kernels.common.conv_implicit_gemm_wgrad import build_implicit_gemm_conv_wgrad
+        from kernels.common.conv_implicit_gemm_wgrad import (
+            build_implicit_gemm_conv_wgrad,
+        )
         from rocke.core.lower_llvm import lower_kernel_to_llvm
 
         ll = lower_kernel_to_llvm(
@@ -224,12 +226,16 @@ class TestWgradXwinGroupsPingPong(unittest.TestCase):
         self.assertEqual(xwin_window_stride(32, 3, 1), xwin_window_stride(32, 3))
         ok, why = is_valid_wgrad_spec(_spec(xwin=3, xwin_mrow=2), arch="gfx942")
         self.assertTrue(ok, why)
-        self.assertFalse(is_valid_wgrad_spec(_spec(xwin=3, xwin_mrow=3), arch="gfx942")[0])
+        self.assertFalse(
+            is_valid_wgrad_spec(_spec(xwin=3, xwin_mrow=3), arch="gfx942")[0]
+        )
         ident = _ident(xwin_mrow=2)
         self.assertIn("-xmr2-", ident.label())
         self.assertTrue(identity_supports_problem(ident, _problem(Wi=18, Hi=18))[0])
         self.assertFalse(identity_supports_problem(ident, _problem(Wi=34))[0])  # Wo 32
-        self.assertFalse(identity_supports_problem(ident, _problem(Wi=18, Hi=17))[0])  # Ho 15
+        self.assertFalse(
+            identity_supports_problem(ident, _problem(Wi=18, Hi=17))[0]
+        )  # Ho 15
 
     def test_label_round_trip(self):
         from kernels.conv.kernel_identity import KernelIdentity
@@ -270,11 +276,15 @@ class TestWgradXwinGroupsPingPong(unittest.TestCase):
         self.assertIn("<4 x float>", ll)
 
     def test_lowers_pingpong(self):
-        from kernels.common.conv_implicit_gemm_wgrad import build_implicit_gemm_conv_wgrad
+        from kernels.common.conv_implicit_gemm_wgrad import (
+            build_implicit_gemm_conv_wgrad,
+        )
         from rocke.core.lower_llvm import lower_kernel_to_llvm
 
         spec = _spec(xwin=3, xwin_groups=4, xwin_pp=8, waves_per_eu=2)
-        ll = lower_kernel_to_llvm(build_implicit_gemm_conv_wgrad(spec, arch="gfx942"), arch="gfx942")
+        ll = lower_kernel_to_llvm(
+            build_implicit_gemm_conv_wgrad(spec, arch="gfx942"), arch="gfx942"
+        )
         # four groups' A + window tiles
         self.assertIn(f"[{4 * (64 * 36 + 72 * 36) * 2} x i8]", ll)
         self.assertIn("s.setprio", ll)

@@ -32,7 +32,11 @@ class TestFwd3dLdsKnobs(unittest.TestCase):
 
     def test_lds_knobs_reg_prefetch(self):
         base = dict(uniform_k_decode=True, reg_prefetch=1, lds_xor=True)
-        for tile in ((64, 64, 32, 2, 2, 16), (64, 64, 64, 2, 2, 16), (64, 64, 64, 2, 2, 32)):
+        for tile in (
+            (64, 64, 32, 2, 2, 16),
+            (64, 64, 64, 2, 2, 16),
+            (64, 64, 64, 2, 2, 32),
+        ):
             for knobs in (
                 dict(lds_kpack_read=True),
                 dict(lds_kpack_read=True, rpf_lds_barrier=True),
@@ -46,7 +50,9 @@ class TestFwd3dLdsKnobs(unittest.TestCase):
                 with self.subTest(tile=tile, **knobs):
                     # C=128: 4 (tile_k 32) / 2 (tile_k 64) chunks per tap.
                     self._check(_problem(C=128), tile=tile, **base, **knobs)
-                    self._check(_problem(C=256, pH=0, pW=0, pD=0), tile=tile, **base, **knobs)
+                    self._check(
+                        _problem(C=256, pH=0, pW=0, pD=0), tile=tile, **base, **knobs
+                    )
 
 
 @pytest.mark.gpu
@@ -85,16 +91,30 @@ class TestFwd3dXHalo(unittest.TestCase):
                 dict(uk_xhalo=12),
                 dict(uk_xhalo=20, lds_kpack_read=True, rpf_lds_barrier=True),
                 dict(uk_xhalo=20, uk_tap_fast=True, lds_ahead=True),
-                dict(uk_xhalo=20, uk_tap_fast=True, uk_chunk_group=2, lds_kpack_read=True),
+                dict(
+                    uk_xhalo=20, uk_tap_fast=True, uk_chunk_group=2, lds_kpack_read=True
+                ),
                 dict(uk_xhalo=20, xh_dpp=True),
                 dict(uk_xhalo=20, xh_dpp=True, lds_kpack_read=True, lds_ahead=True),
                 dict(uk_xhalo=20, defer_mfma=1, lds_kpack_read=True, lds_ahead=True),
                 dict(uk_xhalo=20, rpf_setprio=1, rpf_lds_barrier=True),
-                dict(uk_xhalo=20, defer_mfma=2, rpf_setprio=1, lds_kpack_read=True,
-                     uk_tap_fast=True, uk_chunk_group=2),
+                dict(
+                    uk_xhalo=20,
+                    defer_mfma=2,
+                    rpf_setprio=1,
+                    lds_kpack_read=True,
+                    uk_tap_fast=True,
+                    uk_chunk_group=2,
+                ),
                 # partial waits (xws), interleaved loads, row-keyed swizzle.
-                dict(uk_xhalo=20, defer_mfma=2, lds_kpack_read=True, xh_wait_smem=True,
-                     vmem_interleave=2, lds_xor_rowkey=True),
+                dict(
+                    uk_xhalo=20,
+                    defer_mfma=2,
+                    lds_kpack_read=True,
+                    xh_wait_smem=True,
+                    vmem_interleave=2,
+                    lds_xor_rowkey=True,
+                ),
             ):
                 if knobs.get("lds_xor_rowkey") and tile[2] != 32:
                     continue
@@ -128,13 +148,21 @@ class TestFwd3dQuadXposeEpilogue(unittest.TestCase):
         tile = (64, 64, 32, 2, 2, 16)
         for mode in (1, 2, 3, 4):
             for knobs in (
-                dict(uk_xhalo=20, lds_kpack_read=True, xh_wait_smem=True, defer_mfma=2,
-                     vmem_interleave=2, lds_xor_rowkey=True),
+                dict(
+                    uk_xhalo=20,
+                    lds_kpack_read=True,
+                    xh_wait_smem=True,
+                    defer_mfma=2,
+                    vmem_interleave=2,
+                    lds_xor_rowkey=True,
+                ),
                 dict(lds_kpack_read=True),
             ):
                 for i, prob in enumerate(probs):
                     with self.subTest(mode=mode, prob=i, **knobs):
-                        self._check(prob, tile=tile, epi_quad_xpose=mode, **base, **knobs)
+                        self._check(
+                            prob, tile=tile, epi_quad_xpose=mode, **base, **knobs
+                        )
 
 
 @pytest.mark.gpu
@@ -147,22 +175,39 @@ class TestFwd3dXStrideM(unittest.TestCase):
     the tile, and the 4-fragment (64-row) waves of the production tile."""
 
     def test_xh_stride_m(self):
-        base = dict(uniform_k_decode=True, reg_prefetch=1, lds_xor=True, xh_stride_m=True)
+        base = dict(
+            uniform_k_decode=True, reg_prefetch=1, lds_xor=True, xh_stride_m=True
+        )
         nopad = dict(pH=0, pW=0, pD=0)
         probs = [
-            _problem(C=64, Hi=10, Wi=10, Di=6, **nopad),           # Wo 8
-            _problem(C=64, K=72, Hi=14, Wi=14, Di=5, **nopad),     # Wo 12, tiles straddle planes
-            _problem(C=64, Hi=8, Wi=11, Di=5, **nopad),            # Wo 9: fallback
-            _problem(C=128, K=40, Hi=7, Wi=9, Di=5),               # padded: fallback
+            _problem(C=64, Hi=10, Wi=10, Di=6, **nopad),  # Wo 8
+            _problem(
+                C=64, K=72, Hi=14, Wi=14, Di=5, **nopad
+            ),  # Wo 12, tiles straddle planes
+            _problem(C=64, Hi=8, Wi=11, Di=5, **nopad),  # Wo 9: fallback
+            _problem(C=128, K=40, Hi=7, Wi=9, Di=5),  # padded: fallback
             _problem(C=256, K=128, groups=2, Hi=10, Wi=10, Di=6, **nopad),
-            _problem(N=2, C=64, Hi=7, Wi=10, Di=5, **nopad),       # Wo 8, planes/images straddled
+            _problem(
+                N=2, C=64, Hi=7, Wi=10, Di=5, **nopad
+            ),  # Wo 8, planes/images straddled
         ]
-        xk = dict(lds_kpack_read=True, xh_wait_smem=True, defer_mfma=2,
-                  vmem_interleave=2, lds_xor_rowkey=True)
+        xk = dict(
+            lds_kpack_read=True,
+            xh_wait_smem=True,
+            defer_mfma=2,
+            vmem_interleave=2,
+            lds_xor_rowkey=True,
+        )
         for tile, xh in (((64, 64, 32, 2, 2, 16), 20), ((256, 64, 32, 4, 1, 16), 8)):
             for knobs in (
                 dict(uk_xhalo=xh, epi_quad_xpose=4, **xk),
-                dict(uk_xhalo=xh, epi_quad_xpose=4, lds_ahead=True, uk_tap_fast=True, **xk),
+                dict(
+                    uk_xhalo=xh,
+                    epi_quad_xpose=4,
+                    lds_ahead=True,
+                    uk_tap_fast=True,
+                    **xk,
+                ),
                 dict(uk_xhalo=xh, epi_quad_xpose=3, lds_kpack_read=True),
                 dict(uk_xhalo=xh, epi_quad_xpose=4),
             ):
@@ -191,14 +236,23 @@ class TestFwd3dMBand(unittest.TestCase):
         tile = (64, 64, 32, 2, 2, 16)
         for mb in (2, 4):
             for knobs in (
-                dict(uk_xhalo=20, lds_kpack_read=True, xh_wait_smem=True, defer_mfma=2,
-                     vmem_interleave=2, lds_xor_rowkey=True, epi_quad_xpose=4),
+                dict(
+                    uk_xhalo=20,
+                    lds_kpack_read=True,
+                    xh_wait_smem=True,
+                    defer_mfma=2,
+                    vmem_interleave=2,
+                    lds_xor_rowkey=True,
+                    epi_quad_xpose=4,
+                ),
                 dict(lds_kpack_read=True),
             ):
                 for i, prob in enumerate(probs):
                     with self.subTest(mb=mb, prob=i, **knobs):
                         err = _run(prob, tile=tile, m_band=mb, **base, **knobs)
-                        self.assertLess(err, _TOL, f"mb={mb} {knobs}: rel err {err:.3e}")
+                        self.assertLess(
+                            err, _TOL, f"mb={mb} {knobs}: rel err {err:.3e}"
+                        )
 
 
 class TestFwdLdsKnobSpec(unittest.TestCase):
@@ -208,9 +262,19 @@ class TestFwdLdsKnobSpec(unittest.TestCase):
         from kernels.common.conv_implicit_gemm import ImplicitGemmConvSpec
 
         base = dict(
-            problem=_problem(C=128), tile_m=64, tile_n=64, tile_k=32, warp_m=2,
-            warp_n=2, warp_tile_m=16, warp_tile_n=16, warp_tile_k=16,
-            pipeline="compv4", uniform_k_decode=True, reg_prefetch=1, lds_xor=True,
+            problem=_problem(C=128),
+            tile_m=64,
+            tile_n=64,
+            tile_k=32,
+            warp_m=2,
+            warp_n=2,
+            warp_tile_m=16,
+            warp_tile_n=16,
+            warp_tile_k=16,
+            pipeline="compv4",
+            uniform_k_decode=True,
+            reg_prefetch=1,
+            lds_xor=True,
         )
         base.update(kw)
         return ImplicitGemmConvSpec(**base)
@@ -218,8 +282,13 @@ class TestFwdLdsKnobSpec(unittest.TestCase):
     def test_rejections(self):
         from kernels.common.conv_implicit_gemm import _fwd_kloop_conflict
 
-        ok = self._spec(lds_kpack_read=True, rpf_lds_barrier=True, rpf_fetch_late=True,
-                        uk_tap_fast=True, uk_chunk_group=2)
+        ok = self._spec(
+            lds_kpack_read=True,
+            rpf_lds_barrier=True,
+            rpf_fetch_late=True,
+            uk_tap_fast=True,
+            uk_chunk_group=2,
+        )
         self.assertEqual(_fwd_kloop_conflict(ok), "")
         for kw in (
             dict(uk_chunk_group=2),  # needs uk_tap_fast
@@ -236,14 +305,25 @@ class TestFwdLdsKnobSpec(unittest.TestCase):
     def test_quad_xpose_rules(self):
         from kernels.common.conv_implicit_gemm import _fwd_kloop_conflict
 
-        self.assertEqual(_fwd_kloop_conflict(self._spec(epilogue="cshuffle", epi_quad_xpose=3)), "")
-        self.assertIn("eqx3", self._spec(epilogue="cshuffle", epi_quad_xpose=3).kernel_name())
+        self.assertEqual(
+            _fwd_kloop_conflict(self._spec(epilogue="cshuffle", epi_quad_xpose=3)), ""
+        )
+        self.assertIn(
+            "eqx3", self._spec(epilogue="cshuffle", epi_quad_xpose=3).kernel_name()
+        )
         for kw in (
             dict(epilogue="default", epi_quad_xpose=1),  # replaces the cshuffle store
             dict(epilogue="cshuffle", epi_quad_xpose=1, split_k=2),
-            dict(epilogue="cshuffle", epi_quad_xpose=1, warp_tile_m=32, warp_tile_n=32,
-                 warp_tile_k=8),  # 16x16 atom only
-            dict(epilogue="cshuffle", epi_quad_xpose=3, tile_n=32, warp_n=2),  # odd N atoms
+            dict(
+                epilogue="cshuffle",
+                epi_quad_xpose=1,
+                warp_tile_m=32,
+                warp_tile_n=32,
+                warp_tile_k=8,
+            ),  # 16x16 atom only
+            dict(
+                epilogue="cshuffle", epi_quad_xpose=3, tile_n=32, warp_n=2
+            ),  # odd N atoms
             dict(epilogue="cshuffle", epi_quad_xpose=5),
         ):
             with self.subTest(**kw):
@@ -251,8 +331,13 @@ class TestFwdLdsKnobSpec(unittest.TestCase):
 
     def test_names(self):
         a = self._spec()
-        b = self._spec(lds_kpack_read=True, rpf_lds_barrier=True, rpf_fetch_late=True,
-                       uk_tap_fast=True, uk_chunk_group=2)
+        b = self._spec(
+            lds_kpack_read=True,
+            rpf_lds_barrier=True,
+            rpf_fetch_late=True,
+            uk_tap_fast=True,
+            uk_chunk_group=2,
+        )
         for tag in ("kprd", "lbar", "flate", "_cg"):
             self.assertNotIn(tag, a.kernel_name())
         for tag in ("_tapf", "_cg2", "_kprd", "_lbar", "_flate"):
@@ -261,8 +346,10 @@ class TestFwdLdsKnobSpec(unittest.TestCase):
     def test_label_roundtrip(self):
         from kernels.conv import kernel_label as kl
 
-        lab = ("fwd-implicit_gemm-bf16-3d-t256x64x32-w4x1-a16x16x16-v8x8x1-compv3-default-grp-"
-               "xcd6-ukd-rpf1-lxor-tapf-kprd-cg2-lbar-flate-wave64-gfx942-llvm22")
+        lab = (
+            "fwd-implicit_gemm-bf16-3d-t256x64x32-w4x1-a16x16x16-v8x8x1-compv3-default-grp-"
+            "xcd6-ukd-rpf1-lxor-tapf-kprd-cg2-lbar-flate-wave64-gfx942-llvm22"
+        )
         i = kl.decode(lab)
         self.assertTrue(i.lds_kpack_read and i.rpf_lds_barrier and i.rpf_fetch_late)
         self.assertEqual(i.uk_chunk_group, 2)
@@ -275,10 +362,16 @@ class TestFwdLdsKnobSpec(unittest.TestCase):
         self.assertEqual(_fwd_kloop_conflict(self._spec(uk_xhalo=8, defer_mfma=1)), "")
         self.assertEqual(_fwd_kloop_conflict(self._spec(uk_xhalo=8, rpf_setprio=1)), "")
         # the x-halo loop places its loads with vmem_interleave too.
-        self.assertEqual(_fwd_kloop_conflict(self._spec(uk_xhalo=8, vmem_interleave=2)), "")
-        self.assertEqual(_fwd_kloop_conflict(self._spec(uk_xhalo=8, xh_wait_smem=True)), "")
+        self.assertEqual(
+            _fwd_kloop_conflict(self._spec(uk_xhalo=8, vmem_interleave=2)), ""
+        )
+        self.assertEqual(
+            _fwd_kloop_conflict(self._spec(uk_xhalo=8, xh_wait_smem=True)), ""
+        )
         # opt-fwds: setprio also wraps the rpf1 loop's deferred MFMA phase.
-        self.assertEqual(_fwd_kloop_conflict(self._spec(rpf_setprio=1, defer_mfma=1)), "")
+        self.assertEqual(
+            _fwd_kloop_conflict(self._spec(rpf_setprio=1, defer_mfma=1)), ""
+        )
         for kw in (
             dict(xh_dpp=True),  # needs uk_xhalo
             dict(uk_xhalo=6),
@@ -293,9 +386,13 @@ class TestFwdLdsKnobSpec(unittest.TestCase):
     def test_kloop_scope(self):
         from kernels.conv import aot_jobs
 
-        kl = dict(uniform_k_decode=True, reg_prefetch=1, lds_xor=True, uk_xhalo=8, xcd_remap=6)
+        kl = dict(
+            uniform_k_decode=True, reg_prefetch=1, lds_xor=True, uk_xhalo=8, xcd_remap=6
+        )
         plain = dict(uniform_k_decode=True, reg_prefetch=1, lds_xor=True)
-        with mock.patch.dict(os.environ, {"ROCKE_AOT_FWD_KLOOP_SCOPE": "256x64x32w4x1a16,128x128x64"}):
+        with mock.patch.dict(
+            os.environ, {"ROCKE_AOT_FWD_KLOOP_SCOPE": "256x64x32w4x1a16,128x128x64"}
+        ):
             self.assertTrue(aot_jobs._fwd_kloop_in_scope(kl, 256, 64, 32, 4, 1, 16))
             self.assertFalse(aot_jobs._fwd_kloop_in_scope(kl, 256, 64, 32, 2, 2, 16))
             self.assertTrue(aot_jobs._fwd_kloop_in_scope(kl, 128, 128, 64, 2, 2, 32))
@@ -306,20 +403,46 @@ class TestFwdLdsKnobSpec(unittest.TestCase):
     def test_aot_env_axes(self):
         from kernels.conv import aot_jobs
 
-        off = {k: "" for k in ("ROCKE_AOT_FWD_SCHED", "ROCKE_AOT_FWD_CG", "ROCKE_AOT_FWD_KPRD",
-                               "ROCKE_AOT_FWD_LBAR", "ROCKE_AOT_FWD_FLATE", "ROCKE_AOT_FWD_LXOR",
-                               "ROCKE_AOT_FWD_XHALO", "ROCKE_AOT_FWD_XDPP", "ROCKE_AOT_FWD_WPE",
-                               "ROCKE_AOT_FWD_KLOOP_XCD")}
-        base = [dict(uniform_k_decode=True, reg_prefetch=1, lds_xor=True, uk_tap_fast=True)]
+        off = {
+            k: ""
+            for k in (
+                "ROCKE_AOT_FWD_SCHED",
+                "ROCKE_AOT_FWD_CG",
+                "ROCKE_AOT_FWD_KPRD",
+                "ROCKE_AOT_FWD_LBAR",
+                "ROCKE_AOT_FWD_FLATE",
+                "ROCKE_AOT_FWD_LXOR",
+                "ROCKE_AOT_FWD_XHALO",
+                "ROCKE_AOT_FWD_XDPP",
+                "ROCKE_AOT_FWD_WPE",
+                "ROCKE_AOT_FWD_KLOOP_XCD",
+            )
+        }
+        base = [
+            dict(uniform_k_decode=True, reg_prefetch=1, lds_xor=True, uk_tap_fast=True)
+        ]
         with mock.patch.dict(os.environ, off):
             self.assertEqual(aot_jobs._fwd_sched_k_loops(list(base)), base)
-        on = dict(off, ROCKE_AOT_FWD_CG="2", ROCKE_AOT_FWD_KPRD="1", ROCKE_AOT_FWD_LBAR="1",
-                  ROCKE_AOT_FWD_FLATE="1")
+        on = dict(
+            off,
+            ROCKE_AOT_FWD_CG="2",
+            ROCKE_AOT_FWD_KPRD="1",
+            ROCKE_AOT_FWD_LBAR="1",
+            ROCKE_AOT_FWD_FLATE="1",
+        )
         with mock.patch.dict(os.environ, on):
             out = aot_jobs._fwd_sched_k_loops(list(base))
             self.assertEqual(len(out), 16)  # x2 cg, x2 lbar, x2 flate, x2 kprd
-            self.assertIn(dict(base[0], uk_chunk_group=2, rpf_lds_barrier=True,
-                               rpf_fetch_late=True, lds_kpack_read=True), out)
+            self.assertIn(
+                dict(
+                    base[0],
+                    uk_chunk_group=2,
+                    rpf_lds_barrier=True,
+                    rpf_fetch_late=True,
+                    lds_kpack_read=True,
+                ),
+                out,
+            )
 
 
 if __name__ == "__main__":

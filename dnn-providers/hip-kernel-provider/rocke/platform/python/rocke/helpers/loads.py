@@ -357,7 +357,9 @@ class CoalescedTileLoader:
         if self.row_kpack != 1:
             kp = self.row_kpack
             if self.vector_axis != "row" or self.load_vec <= 1:
-                raise ValueError("row_kpack > 1 needs vector_axis='row' and load_vec > 1")
+                raise ValueError(
+                    "row_kpack > 1 needs vector_axis='row' and load_vec > 1"
+                )
             if self.col_xor is not None:
                 raise ValueError("row_kpack > 1 does not support col_xor")
             if kp not in (2, 4, 8) or self.tile_cols % kp:
@@ -385,13 +387,21 @@ class CoalescedTileLoader:
         return (chunks // block_size) % kpack == 0
 
     def _chunk_row_col(
-        self, b: IRBuilder, e: int, tid: Value, *, c_threads: Value, c_span: Value,
+        self,
+        b: IRBuilder,
+        e: int,
+        tid: Value,
+        *,
+        c_threads: Value,
+        c_span: Value,
         c_load_vec: Value,
     ) -> Tuple[Value, Value]:
         """Tile-local ``(row, col)`` of per-thread chunk ``e``."""
         if self.row_kpack == 1:
             vec_idx = b.add(b.mul(b.const_i32(e), c_threads), tid)
-            return self._decode_row_col(b, vec_idx, c_span=c_span, c_load_vec=c_load_vec)
+            return self._decode_row_col(
+                b, vec_idx, c_span=c_span, c_load_vec=c_load_vec
+            )
         kp = self.row_kpack
         g, j = divmod(e, kp)
         unit = b.add(b.mul(b.const_i32(g), c_threads), tid)

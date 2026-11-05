@@ -25,8 +25,12 @@ class TestMBandOrder(unittest.TestCase):
         ]
         for T, plane, tm, mb in cases:
             with self.subTest(T=T, plane=plane, tile_m=tm, mb=mb):
-                got = [python_m_band_order(i, num_m_tiles=T, plane=plane, tile_m=tm, m_band=mb)
-                       for i in range(T)]
+                got = [
+                    python_m_band_order(
+                        i, num_m_tiles=T, plane=plane, tile_m=tm, m_band=mb
+                    )
+                    for i in range(T)
+                ]
                 self.assertEqual(sorted(got), list(range(T)))
 
     def test_whole_planes(self):
@@ -36,26 +40,46 @@ class TestMBandOrder(unittest.TestCase):
                 band, r = divmod(L, 256 * mb)
                 want = (r // mb) * 64 + band * mb + r % mb
                 self.assertEqual(
-                    python_m_band_order(L, num_m_tiles=16384, plane=16384, tile_m=256, m_band=mb),
+                    python_m_band_order(
+                        L, num_m_tiles=16384, plane=16384, tile_m=256, m_band=mb
+                    ),
                     want,
                 )
 
 
 class TestMBandSpec(unittest.TestCase):
     def test_fwd_rules(self):
-        from kernels.common.conv_implicit_gemm import ImplicitGemmConvSpec, _fwd_kloop_conflict
+        from kernels.common.conv_implicit_gemm import (
+            ImplicitGemmConvSpec,
+            _fwd_kloop_conflict,
+        )
         from tests.test_conv_fwd_3d_kloop_knobs import _problem
 
         base = dict(
-            problem=_problem(C=128), tile_m=64, tile_n=64, tile_k=32, warp_m=2,
-            warp_n=2, warp_tile_m=16, warp_tile_n=16, warp_tile_k=16,
-            pipeline="compv4", uniform_k_decode=True, reg_prefetch=1, lds_xor=True,
+            problem=_problem(C=128),
+            tile_m=64,
+            tile_n=64,
+            tile_k=32,
+            warp_m=2,
+            warp_n=2,
+            warp_tile_m=16,
+            warp_tile_n=16,
+            warp_tile_k=16,
+            pipeline="compv4",
+            uniform_k_decode=True,
+            reg_prefetch=1,
+            lds_xor=True,
         )
         ok = ImplicitGemmConvSpec(**base, xcd_remap=6, m_band=16)
         self.assertEqual(_fwd_kloop_conflict(ok), "")
         self.assertIn("mb16", ok.kernel_name())
-        self.assertNotIn("mb", ImplicitGemmConvSpec(**base, xcd_remap=6).kernel_name().split("xcd6")[1])
-        self.assertNotEqual(_fwd_kloop_conflict(ImplicitGemmConvSpec(**base, m_band=16)), "")
+        self.assertNotIn(
+            "mb",
+            ImplicitGemmConvSpec(**base, xcd_remap=6).kernel_name().split("xcd6")[1],
+        )
+        self.assertNotEqual(
+            _fwd_kloop_conflict(ImplicitGemmConvSpec(**base, m_band=16)), ""
+        )
 
     def test_dgrad_rules(self):
         from kernels.common.conv_implicit_gemm_dgrad import (

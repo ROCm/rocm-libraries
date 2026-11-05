@@ -18,7 +18,9 @@ pytest.importorskip("scipy")
 
 
 def _p3(D=18, H=10, W=10, C=1024, K=1024):
-    return ConvProblem(N=1, Di=D, Hi=H, Wi=W, C=C, K=K, Z=3, Y=3, X=3, sD=1, pD=0, dD=1, pH=0, pW=0)
+    return ConvProblem(
+        N=1, Di=D, Hi=H, Wi=W, C=C, K=K, Z=3, Y=3, X=3, sD=1, pD=0, dD=1, pH=0, pW=0
+    )
 
 
 def _need(c, n_out, filt):
@@ -45,7 +47,9 @@ def _blocks_makespan(p, sgs, tile_k, cus=228):
 
 class TestPlannedBoxes(unittest.TestCase):
     def _check(self, p, tile_m, tile_n, tile_k, split, cus):
-        sgs = pp_box_sub_gemms(p, tile_m, tile_n, 8, tile_k=tile_k, max_split=split, cus=cus)
+        sgs = pp_box_sub_gemms(
+            p, tile_m, tile_n, 8, tile_k=tile_k, max_split=split, cus=cus
+        )
         seen = []
         nt = -(-p.cpg // tile_n)
         start = 0
@@ -54,12 +58,18 @@ class TestPlannedBoxes(unittest.TestCase):
             self.assertEqual(sg.gemm_m, len(sg.row_list))
             self.assertEqual(sg.block_start, start)
             self.assertEqual(
-                sg.block_end - sg.block_start, -(-sg.gemm_m // tile_m) * nt * sg.b_x_stride
+                sg.block_end - sg.block_start,
+                -(-sg.gemm_m // tile_m) * nt * sg.b_x_stride,
             )
             self.assertLessEqual(sg.b_x_stride, split)
             start = sg.block_end
             zlo, zs = sg.b_y_stride, sg.gemm_k_padded
-            ylo, ys, xlo, xs = sg.b_y_offset, sg.y_dot_slice, sg.b_x_offset, sg.x_dot_slice
+            ylo, ys, xlo, xs = (
+                sg.b_y_offset,
+                sg.y_dot_slice,
+                sg.b_x_offset,
+                sg.x_dot_slice,
+            )
             for pix in sg.row_list:
                 d, r = divmod(pix, p.Hi * p.Wi)
                 h, w = divmod(r, p.Wi)
@@ -98,11 +108,26 @@ class TestPlannedBoxes(unittest.TestCase):
         spec = DgradConvSpec(
             problem=_p3(C=256, K=128),
             data=ConvDataSpec(dtype_a="bf16", dtype_b="bf16", dtype_d="bf16"),
-            tile_m=128, tile_n=256, tile_k=64, warp_m=2, warp_n=4,
-            warp_tile_m=16, warp_tile_n=16, warp_tile_k=16,
-            pipeline="mem", epilogue="cshuffle", lds_k_outer=False,
-            tap_outer_k=True, tapk_prefetch=1, b_kpack=4, lds_xor=True, lds_k_pad=0,
-            tapk_pingpong=4, tapk_pp_sched=2, pp_boxes=8, split_k=8,
+            tile_m=128,
+            tile_n=256,
+            tile_k=64,
+            warp_m=2,
+            warp_n=4,
+            warp_tile_m=16,
+            warp_tile_n=16,
+            warp_tile_k=16,
+            pipeline="mem",
+            epilogue="cshuffle",
+            lds_k_outer=False,
+            tap_outer_k=True,
+            tapk_prefetch=1,
+            b_kpack=4,
+            lds_xor=True,
+            lds_k_pad=0,
+            tapk_pingpong=4,
+            tapk_pp_sched=2,
+            pp_boxes=8,
+            split_k=8,
         )
         ok, why = is_valid_dgrad_spec(spec, "gfx942")
         self.assertTrue(ok, why)
@@ -119,7 +144,10 @@ class TestGreedySolver(unittest.TestCase):
         try:
             P._SOLVER = "greedy"
             P._plan_cached.cache_clear()
-            for p, tm, tk, ms, cus in ((_p3(), 128, 64, 8, 228), (_p3(D=34, H=18, W=18, C=512, K=512), 256, 32, 3, 456)):
+            for p, tm, tk, ms, cus in (
+                (_p3(), 128, 64, 8, 228),
+                (_p3(D=34, H=18, W=18, C=512, K=512), 256, 32, 3, 456),
+            ):
                 T, plan = P.plan_boxes(p, tm, 256, tk, ms, cus)
                 cl = P.pixel_classes(p)
                 owner = {pix: c for c, v in cl.items() for pix in v}

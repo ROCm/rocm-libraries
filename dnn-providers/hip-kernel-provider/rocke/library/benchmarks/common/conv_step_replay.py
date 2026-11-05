@@ -102,8 +102,17 @@ class ClockSampler:
     def _one(self):
         try:
             out = subprocess.run(
-                ["/opt/rocm/bin/amd-smi", "metric", "-g", str(self.gpu), "--clock", "--power"],
-                capture_output=True, text=True, timeout=5,
+                [
+                    "/opt/rocm/bin/amd-smi",
+                    "metric",
+                    "-g",
+                    str(self.gpu),
+                    "--clock",
+                    "--power",
+                ],
+                capture_output=True,
+                text=True,
+                timeout=5,
             ).stdout
         except Exception:  # noqa: BLE001
             return None
@@ -146,7 +155,11 @@ class ClockSampler:
             self._t.join()
 
     def summary(self, t0=None, t1=None):
-        xs = [s for s in self.samples if (t0 is None or s[0] >= t0) and (t1 is None or s[0] <= t1)]
+        xs = [
+            s
+            for s in self.samples
+            if (t0 is None or s[0] >= t0) and (t1 is None or s[0] <= t1)
+        ]
         if not xs:
             return None
         clk = [s[1] for s in xs]
@@ -163,7 +176,20 @@ class ClockSampler:
 class Case:
     """One (direction, shape) with its pinned kernel bound on its own buffers."""
 
-    def __init__(self, key, pin, cache, arch, B, rt, host_bits, stage2_kernels, args, share_from=None, stream=0):
+    def __init__(
+        self,
+        key,
+        pin,
+        cache,
+        arch,
+        B,
+        rt,
+        host_bits,
+        stage2_kernels,
+        args,
+        share_from=None,
+        stream=0,
+    ):
         from benchmarks.common.kernel_cache import KernelIdentity
         from kernels.conv.kernel_label import strip_launch_suffix
         from rocke.runtime.launcher import KernelLauncher, LaunchConfig
@@ -201,7 +227,11 @@ class Case:
         nhwc = (p.N, p.Di, p.Hi, p.Wi, p.C)
         nhwk = (p.N, p.Do, p.Ho, p.Wo, p.K)
         krsc = (p.K, p.Z, p.Y, p.X, p.cpg)
-        shapes = {"fwd": (nhwc, krsc, nhwk), "dgrad": (nhwk, krsc, nhwc), "wgrad": (nhwk, nhwc, krsc)}[direction]
+        shapes = {
+            "fwd": (nhwc, krsc, nhwk),
+            "dgrad": (nhwk, krsc, nhwc),
+            "wgrad": (nhwk, nhwc, krsc),
+        }[direction]
         elem = 2
         sizes = []
         for s in shapes:
@@ -211,8 +241,12 @@ class Case:
             sizes.append(n * elem)
         self.sizes = tuple(sizes)
         self.bufs = []
-        if share_from is not None and any(a > b for a, b in zip(sizes, getattr(share_from, "sizes", sizes))):
-            raise SystemExit(f"{key}: operands larger than the shared buffers (another problem form: --form-variant)")
+        if share_from is not None and any(
+            a > b for a, b in zip(sizes, getattr(share_from, "sizes", sizes))
+        ):
+            raise SystemExit(
+                f"{key}: operands larger than the shared buffers (another problem form: --form-variant)"
+            )
         n_sets = self.calls if not args.share else 1
         self.ptr_sets = list(share_from.ptr_sets) if share_from is not None else []
         for _ in range(0 if share_from is not None else n_sets):
@@ -220,7 +254,17 @@ class Case:
             self.bufs += list(ptrs)
             for ptr, nb in zip(ptrs[:2], sizes[:2]):
                 n = nb // 2
-                rt.memcpy_h2d(ptr, host_bits.ctypes.data_as(__import__("ctypes").POINTER(__import__("ctypes").c_uint8)).contents if False else _u8(host_bits, n * 2), n * 2)
+                rt.memcpy_h2d(
+                    ptr,
+                    (
+                        host_bits.ctypes.data_as(
+                            __import__("ctypes").POINTER(__import__("ctypes").c_uint8)
+                        ).contents
+                        if False
+                        else _u8(host_bits, n * 2)
+                    ),
+                    n * 2,
+                )
             rt.memset(ptrs[2], 0, sizes[2])
             self.ptr_sets.append(ptrs)
         self.live_extras = []
@@ -240,10 +284,25 @@ class Case:
             from benchmarks.common.conv_route_exec import RouteBinding
 
             # One set of route workspaces per case (scratch, reused call after call).
-            self.route_ws = share_from.route_ws if share_from is not None and hasattr(share_from, "route_ws") else {}
+            self.route_ws = (
+                share_from.route_ws
+                if share_from is not None and hasattr(share_from, "route_ws")
+                else {}
+            )
             self.route_bindings = [
-                RouteBinding(route_plan, cache, rt, arch, ptrs, self.sizes, stage2_kernels=stage2_kernels,
-                             cfg_cls=cfg_cls, workspaces=self.route_ws, live_extras=self.live_extras, B=B)
+                RouteBinding(
+                    route_plan,
+                    cache,
+                    rt,
+                    arch,
+                    ptrs,
+                    self.sizes,
+                    stage2_kernels=stage2_kernels,
+                    cfg_cls=cfg_cls,
+                    workspaces=self.route_ws,
+                    live_extras=self.live_extras,
+                    B=B,
+                )
                 for ptrs in self.ptr_sets
             ]
             self.runs = [rb.run for rb in self.route_bindings]
@@ -259,8 +318,22 @@ class Case:
                 _L.LaunchConfig = cfg_cls
             try:
                 bound = B._cached_bind_batch(
-                    chunks, direction, run_problem, ident, meta, rt, launcher, dtype, split_k,
-                    ptrs, self.sizes, arch, stage2_kernels, KernelLauncher, cfg_cls, self.live_extras,
+                    chunks,
+                    direction,
+                    run_problem,
+                    ident,
+                    meta,
+                    rt,
+                    launcher,
+                    dtype,
+                    split_k,
+                    ptrs,
+                    self.sizes,
+                    arch,
+                    stage2_kernels,
+                    KernelLauncher,
+                    cfg_cls,
+                    self.live_extras,
                 )
             finally:
                 if stream:
@@ -288,7 +361,11 @@ def load_pins_cases(path: str, arch: str) -> dict:
         if mode:
             raise SystemExit(f"{file}: not a pin table (no modes); drop #{mode}")
         return doc["cases"]
-    from dispatch.conv_pins import dispatch_conv_pinned, load_conv_pins, request_from_miopen_cmd
+    from dispatch.conv_pins import (
+        dispatch_conv_pinned,
+        load_conv_pins,
+        request_from_miopen_cmd,
+    )
 
     table = load_conv_pins(file, mode or None)
     out = {}
@@ -307,9 +384,14 @@ def load_pins_cases(path: str, arch: str) -> dict:
         lp = res.spec.launch_params()
         label = res.spec.name
         if "split_k" in lp:
-            label += f" @split_k={lp['split_k']}" + (f"/full{lp['tail_full']}" if "tail_full" in lp else "")
+            label += f" @split_k={lp['split_k']}" + (
+                f"/full{lp['tail_full']}" if "tail_full" in lp else ""
+            )
         out[k] = dict(row, kernel=label)
-    print(f"[replay] {path}: {len(out)} cases resolved by dispatch_conv_pinned ({table.mode})", flush=True)
+    print(
+        f"[replay] {path}: {len(out)} cases resolved by dispatch_conv_pinned ({table.mode})",
+        flush=True,
+    )
     return out
 
 
@@ -321,7 +403,12 @@ def load_route_cases(path: str, arch: str, pins_path: str | None = None) -> dict
     pins (no ``route_plan``); the others carry the plan. ``pins_path``
     (``PIN_TABLE#MODE``) serves rows that name no kernel."""
     from dispatch.conv_pins import load_conv_pins
-    from dispatch.conv_routes import ROUTE_DIRECT, dispatch_conv_route, load_conv_routes, request_for_route
+    from dispatch.conv_routes import (
+        ROUTE_DIRECT,
+        dispatch_conv_route,
+        load_conv_routes,
+        request_for_route,
+    )
 
     file, _, mode = path.partition("#")
     mode, _, form = mode.partition("@")
@@ -346,12 +433,16 @@ def load_route_cases(path: str, arch: str, pins_path: str | None = None) -> dict
         if plan.route == ROUTE_DIRECT:
             row["kernel"] = plan.kernel_label
         else:
-            row["kernel"] = f"route:{plan.route} " + (plan.kernel_label or plan.launches[1])
+            row["kernel"] = f"route:{plan.route} " + (
+                plan.kernel_label or plan.launches[1]
+            )
             row["route_plan"] = plan
         out[case] = row
     n = sum(1 for v in out.values() if "route_plan" in v)
-    print(f"[replay] {path}: {len(out)} cases resolved by dispatch_conv_route ({routes.mode}; {n} non-direct)",
-          flush=True)
+    print(
+        f"[replay] {path}: {len(out)} cases resolved by dispatch_conv_route ({routes.mode}; {n} non-direct)",
+        flush=True,
+    )
     return out
 
 
@@ -369,69 +460,166 @@ def _u8(host_bits, nbytes):
 
 
 def main(argv=None) -> int:
-    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--pins", default=None, help="pins file, or PIN_TABLE#MODE (resolved through dispatch)")
-    ap.add_argument("--routes", default=None, metavar="ROUTE_TABLE#MODE[@FORM]",
-                    help="replay the production routes of a route table (dispatch/conv_routes.py) instead of "
-                         "--pins; with --pins too, rows without a kernel take the pin table's")
-    ap.add_argument("--routes-variant", action="append", default=[], metavar="NAME:ROUTE_TABLE#MODE[@FORM]",
-                    help="a variant that runs a route table's routes (buffers shared with the base)")
-    ap.add_argument("--form-variant", action="append", default=[], metavar="NAME:PINS",
-                    help="a variant that replays the same step in another problem form (e.g. the halo form "
-                         "PIN_TABLE#MODE beside a padded base): its own commands and its own buffers")
+    ap = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    ap.add_argument(
+        "--pins",
+        default=None,
+        help="pins file, or PIN_TABLE#MODE (resolved through dispatch)",
+    )
+    ap.add_argument(
+        "--routes",
+        default=None,
+        metavar="ROUTE_TABLE#MODE[@FORM]",
+        help="replay the production routes of a route table (dispatch/conv_routes.py) instead of "
+        "--pins; with --pins too, rows without a kernel take the pin table's",
+    )
+    ap.add_argument(
+        "--routes-variant",
+        action="append",
+        default=[],
+        metavar="NAME:ROUTE_TABLE#MODE[@FORM]",
+        help="a variant that runs a route table's routes (buffers shared with the base)",
+    )
+    ap.add_argument(
+        "--form-variant",
+        action="append",
+        default=[],
+        metavar="NAME:PINS",
+        help="a variant that replays the same step in another problem form (e.g. the halo form "
+        "PIN_TABLE#MODE beside a padded base): its own commands and its own buffers",
+    )
     ap.add_argument("--cache", required=True)
     ap.add_argument("--arch", default="gfx942")
-    ap.add_argument("--mode", action="append", choices=["staged", "parts", "b2b", "step", "ab", "stepsel", "energy"])
-    ap.add_argument("--cases", default=None, help="comma list of case keys (default: all pinned)")
+    ap.add_argument(
+        "--mode",
+        action="append",
+        choices=["staged", "parts", "b2b", "step", "ab", "stepsel", "energy"],
+    )
+    ap.add_argument(
+        "--cases", default=None, help="comma list of case keys (default: all pinned)"
+    )
     ap.add_argument("--warmup", type=int, default=3)
     ap.add_argument("--iters", type=int, default=10)
-    ap.add_argument("--rounds", type=int, default=1, help="staged/parts: interleaved rounds over the cases")
-    ap.add_argument("--ab-order", choices=["rotate", "balanced"], default="rotate",
-                    help="ab: variant visiting order per round -- rotations (each variant keeps its predecessor) or a "
-                         "Williams design (every variant follows every other one equally often; use rounds that are "
-                         "a multiple of the variant count, twice it when odd)")
+    ap.add_argument(
+        "--rounds",
+        type=int,
+        default=1,
+        help="staged/parts: interleaved rounds over the cases",
+    )
+    ap.add_argument(
+        "--ab-order",
+        choices=["rotate", "balanced"],
+        default="rotate",
+        help="ab: variant visiting order per round -- rotations (each variant keeps its predecessor) or a "
+        "Williams design (every variant follows every other one equally often; use rounds that are "
+        "a multiple of the variant count, twice it when odd)",
+    )
     ap.add_argument("--steps", type=int, default=20)
     ap.add_argument("--warmup-steps", type=int, default=3)
-    ap.add_argument("--step-reps", type=int, default=1, help="step mode: repetitions (each its own drain)")
-    ap.add_argument("--per-call", action="store_true", help="step mode: an event between consecutive calls")
-    ap.add_argument("--share", action="store_true", help="one buffer set per case (default: one per call)")
+    ap.add_argument(
+        "--step-reps",
+        type=int,
+        default=1,
+        help="step mode: repetitions (each its own drain)",
+    )
+    ap.add_argument(
+        "--per-call",
+        action="store_true",
+        help="step mode: an event between consecutive calls",
+    )
+    ap.add_argument(
+        "--share",
+        action="store_true",
+        help="one buffer set per case (default: one per call)",
+    )
     ap.add_argument("--no-clock", action="store_true")
-    ap.add_argument("--variant", action="append", default=[], metavar="NAME:K=V[,K=V]",
-                    help="also bind every case with these env vars set (e.g. HIP_FORCE_DEV_KERNARG=1); "
-                         "'ab' and 'step' modes then time base and variants interleaved")
-    ap.add_argument("--pins-variant", action="append", default=[], metavar="NAME:PINS",
-                    help="a variant that runs other pins (selection judging); buffers are shared")
-    ap.add_argument("--sched", type=int, default=-1,
-                    help="hipSetDeviceFlags(value) before the HIP context: 1 spin, 2 yield, 4 blocking sync "
-                         "(default: leave HIP's default, a spin-wait that keeps a CPU core of the socket busy)")
-    ap.add_argument("--energy-s", type=float, default=0.6, help="energy mode: seconds of back-to-back calls per visit")
-    ap.add_argument("--energy-out", default=None, metavar="PINS",
-                    help="energy mode: write pins choosing each case's lowest-energy candidate here")
-    ap.add_argument("--streams-variant", action="store_true",
-                    help="step mode: add variant '2stream': fwd and the dgrad chain on one non-blocking stream, every "
-                         "wgrad on a second one (waiting only for its dY), joined at the end of the step")
-    ap.add_argument("--streams-shapes", default=None,
-                    help="with --streams-variant: only these shapes' wgrads go to the second stream (e.g. 7,8,10)")
-    ap.add_argument("--stepsel-out", default=None, metavar="PINS",
-                    help="stepsel mode: write the pins it selects here")
-    ap.add_argument("--stepsel-margin", type=float, default=0.0,
-                    help="stepsel: switch from the pin only if the in-step median is this fraction lower")
-    ap.add_argument("--zero-variants", action="store_true",
-                    help="step mode: add variants 'arena' (every zeroing memset of the step replaced by ONE memset of "
-                         "their total bytes into one arena at the start of the step -- what a caller that hands "
-                         "pre-zeroed outputs / workspace from one zeroed arena would pay, cf. zero_grad) and "
-                         "'nomem' (the zeroing skipped: the lower bound). Timing only: outputs are not zeroed.")
-    ap.add_argument("--tied-variant", action="store_true",
-                    help="add variant 'tied': each layer's calls share their tensors as training does -- dgrad reads "
-                         "the forward's W, wgrad reads dgrad's dY and the forward's X (default: every case has its own "
-                         "buffers, so the backward pair never finds dY in MALL / L2)")
-    ap.add_argument("--tied-all", action="store_true",
-                    help="with --tied-variant: also add '<name>_tied' for every pins / routes / form variant (its "
-                         "own kernels or routes, its calls' tensors shared as in 'tied')")
-    ap.add_argument("--graph-variant", action="store_true",
-                    help="step mode: add 'stream' (the step on one non-blocking stream) and 'graph' (that step "
-                         "captured once into a hipGraph and replayed with one hipGraphLaunch per step: no host "
-                         "launch cost at all)")
+    ap.add_argument(
+        "--variant",
+        action="append",
+        default=[],
+        metavar="NAME:K=V[,K=V]",
+        help="also bind every case with these env vars set (e.g. HIP_FORCE_DEV_KERNARG=1); "
+        "'ab' and 'step' modes then time base and variants interleaved",
+    )
+    ap.add_argument(
+        "--pins-variant",
+        action="append",
+        default=[],
+        metavar="NAME:PINS",
+        help="a variant that runs other pins (selection judging); buffers are shared",
+    )
+    ap.add_argument(
+        "--sched",
+        type=int,
+        default=-1,
+        help="hipSetDeviceFlags(value) before the HIP context: 1 spin, 2 yield, 4 blocking sync "
+        "(default: leave HIP's default, a spin-wait that keeps a CPU core of the socket busy)",
+    )
+    ap.add_argument(
+        "--energy-s",
+        type=float,
+        default=0.6,
+        help="energy mode: seconds of back-to-back calls per visit",
+    )
+    ap.add_argument(
+        "--energy-out",
+        default=None,
+        metavar="PINS",
+        help="energy mode: write pins choosing each case's lowest-energy candidate here",
+    )
+    ap.add_argument(
+        "--streams-variant",
+        action="store_true",
+        help="step mode: add variant '2stream': fwd and the dgrad chain on one non-blocking stream, every "
+        "wgrad on a second one (waiting only for its dY), joined at the end of the step",
+    )
+    ap.add_argument(
+        "--streams-shapes",
+        default=None,
+        help="with --streams-variant: only these shapes' wgrads go to the second stream (e.g. 7,8,10)",
+    )
+    ap.add_argument(
+        "--stepsel-out",
+        default=None,
+        metavar="PINS",
+        help="stepsel mode: write the pins it selects here",
+    )
+    ap.add_argument(
+        "--stepsel-margin",
+        type=float,
+        default=0.0,
+        help="stepsel: switch from the pin only if the in-step median is this fraction lower",
+    )
+    ap.add_argument(
+        "--zero-variants",
+        action="store_true",
+        help="step mode: add variants 'arena' (every zeroing memset of the step replaced by ONE memset of "
+        "their total bytes into one arena at the start of the step -- what a caller that hands "
+        "pre-zeroed outputs / workspace from one zeroed arena would pay, cf. zero_grad) and "
+        "'nomem' (the zeroing skipped: the lower bound). Timing only: outputs are not zeroed.",
+    )
+    ap.add_argument(
+        "--tied-variant",
+        action="store_true",
+        help="add variant 'tied': each layer's calls share their tensors as training does -- dgrad reads "
+        "the forward's W, wgrad reads dgrad's dY and the forward's X (default: every case has its own "
+        "buffers, so the backward pair never finds dY in MALL / L2)",
+    )
+    ap.add_argument(
+        "--tied-all",
+        action="store_true",
+        help="with --tied-variant: also add '<name>_tied' for every pins / routes / form variant (its "
+        "own kernels or routes, its calls' tensors shared as in 'tied')",
+    )
+    ap.add_argument(
+        "--graph-variant",
+        action="store_true",
+        help="step mode: add 'stream' (the step on one non-blocking stream) and 'graph' (that step "
+        "captured once into a hipGraph and replayed with one hipGraphLaunch per step: no host "
+        "launch cost at all)",
+    )
     ap.add_argument("--json", default=None, help="append a result row here")
     ap.add_argument("--tag", default="")
     args = ap.parse_args(argv)
@@ -478,7 +666,9 @@ def main(argv=None) -> int:
     rt = Runtime()
     cache = KernelCache(Path(args.cache), args.arch)
     max_bytes = 0
-    for k, row in [(k, pins[k]) for k in need] + [(k, fp[k]) for fp in form_pins.values() for k in need if k in fp]:
+    for k, row in [(k, pins[k]) for k in need] + [
+        (k, fp[k]) for fp in form_pins.values() for k in need if k in fp
+    ]:
         problem, _, _ = B.parse_miopen_cmd(row["cmd"])
         p = problem
         # every operand the host data is copied into: activations and the filter
@@ -502,7 +692,18 @@ def main(argv=None) -> int:
         os.environ.update(env)
         try:
             variants[name] = {
-                k: Case(k, pins[k], cache, args.arch, B, rt, host_bits, stage2, args, share_from=cases[k])
+                k: Case(
+                    k,
+                    pins[k],
+                    cache,
+                    args.arch,
+                    B,
+                    rt,
+                    host_bits,
+                    stage2,
+                    args,
+                    share_from=cases[k],
+                )
                 for k in sorted(need)
             }
         finally:
@@ -515,22 +716,44 @@ def main(argv=None) -> int:
         name, _, path = spec.partition(":")
         vp = load_pins_cases(path, args.arch)
         variants[name] = {
-            k: Case(k, _with_pick(pins[k], vp[k]) if k in vp else pins[k], cache, args.arch, B, rt,
-                    host_bits, stage2, args, share_from=cases[k])
+            k: Case(
+                k,
+                _with_pick(pins[k], vp[k]) if k in vp else pins[k],
+                cache,
+                args.arch,
+                B,
+                rt,
+                host_bits,
+                stage2,
+                args,
+                share_from=cases[k],
+            )
             for k in sorted(need)
         }
     for name, vp in form_pins.items():
         missing = sorted(k for k in need if k not in vp)
         if missing:
             raise SystemExit(f"form variant {name}: no pins for {missing}")
-        variants[name] = {k: Case(k, vp[k], cache, args.arch, B, rt, host_bits, stage2, args) for k in sorted(need)}
+        variants[name] = {
+            k: Case(k, vp[k], cache, args.arch, B, rt, host_bits, stage2, args)
+            for k in sorted(need)
+        }
     for spec in args.routes_variant:
         name, _, path = spec.partition(":")
         vp = load_route_cases(path, args.arch)
         variants[name] = {
-            k: Case(k, _with_pick(pins[k], vp[k]) if k in vp else pins[k], cache, args.arch, B, rt, host_bits,
-                    stage2, args,
-                    share_from=cases[k])
+            k: Case(
+                k,
+                _with_pick(pins[k], vp[k]) if k in vp else pins[k],
+                cache,
+                args.arch,
+                B,
+                rt,
+                host_bits,
+                stage2,
+                args,
+                share_from=cases[k],
+            )
             for k in sorted(need)
         }
     if args.tied_variant:
@@ -547,16 +770,40 @@ def main(argv=None) -> int:
                     if d == "dgrad" and f is not None:
                         own = (own[0], f.ptr_sets[i % len(f.ptr_sets)][1], own[2])
                     elif d == "wgrad":
-                        dy = g.ptr_sets[i % len(g.ptr_sets)][0] if g is not None else own[0]
-                        x = f.ptr_sets[i % len(f.ptr_sets)][0] if f is not None else own[1]
+                        dy = (
+                            g.ptr_sets[i % len(g.ptr_sets)][0]
+                            if g is not None
+                            else own[0]
+                        )
+                        x = (
+                            f.ptr_sets[i % len(f.ptr_sets)][0]
+                            if f is not None
+                            else own[1]
+                        )
                         own = (dy, x, own[2])
                     sets.append(own)
-                tied[k] = Case(k, vc[k].pin, cache, args.arch, B, rt, None, stage2, args,
-                               share_from=SimpleNamespace(ptr_sets=sets))
+                tied[k] = Case(
+                    k,
+                    vc[k].pin,
+                    cache,
+                    args.arch,
+                    B,
+                    rt,
+                    None,
+                    stage2,
+                    args,
+                    share_from=SimpleNamespace(ptr_sets=sets),
+                )
             return tied
 
-        env_names = {v.partition(":")[0] for v in args.variant}  # env variants: bound under their env only
-        others = [n for n in variants if n != "base" and n not in env_names] if args.tied_all else []
+        env_names = {
+            v.partition(":")[0] for v in args.variant
+        }  # env variants: bound under their env only
+        others = (
+            [n for n in variants if n != "base" and n not in env_names]
+            if args.tied_all
+            else []
+        )
         variants["tied"] = _tied(cases)
         for n in others:
             variants[f"{n}_tied"] = _tied(variants[n])
@@ -570,11 +817,17 @@ def main(argv=None) -> int:
         streams = []
         for _ in range(2):
             h = ctypes.c_void_p(0)
-            rc = _hip.hipStreamCreateWithFlags(ctypes.byref(h), ctypes.c_uint(1))  # hipStreamNonBlocking
+            rc = _hip.hipStreamCreateWithFlags(
+                ctypes.byref(h), ctypes.c_uint(1)
+            )  # hipStreamNonBlocking
             if rc:
                 raise SystemExit(f"hipStreamCreateWithFlags -> {rc}")
             streams.append(int(h.value))
-        _s1 = {int(x) for x in args.streams_shapes.split(",")} if args.streams_shapes else None
+        _s1 = (
+            {int(x) for x in args.streams_shapes.split(",")}
+            if args.streams_shapes
+            else None
+        )
 
         def _on_s1(k):
             return _s1 is None or int(k.split("_s")[1]) in _s1
@@ -582,8 +835,21 @@ def main(argv=None) -> int:
         _wait = _hip.hipStreamWaitEvent
         _wait.argtypes = [ctypes.c_void_p, _hm._HipEventHandle, ctypes.c_uint]
         variants["2stream"] = {
-            k: Case(k, pins[k], cache, args.arch, B, rt, None, stage2, args, share_from=cases[k],
-                    stream=streams[1] if k.startswith("wgrad") and _on_s1(k) else streams[0])
+            k: Case(
+                k,
+                pins[k],
+                cache,
+                args.arch,
+                B,
+                rt,
+                None,
+                stage2,
+                args,
+                share_from=cases[k],
+                stream=(
+                    streams[1] if k.startswith("wgrad") and _on_s1(k) else streams[0]
+                ),
+            )
             for k in sorted(need)
         }
     gstream = None
@@ -594,22 +860,48 @@ def main(argv=None) -> int:
 
         _hipg = _hm._resolve_hip()
         h = ctypes.c_void_p(0)
-        rc = _hipg.hipStreamCreateWithFlags(ctypes.byref(h), ctypes.c_uint(1))  # hipStreamNonBlocking
+        rc = _hipg.hipStreamCreateWithFlags(
+            ctypes.byref(h), ctypes.c_uint(1)
+        )  # hipStreamNonBlocking
         if rc:
             raise SystemExit(f"hipStreamCreateWithFlags -> {rc}")
         gstream = int(h.value)
-        gcases = {k: Case(k, pins[k], cache, args.arch, B, rt, None, stage2, args, share_from=cases[k], stream=gstream)
-                  for k in sorted(need)}
+        gcases = {
+            k: Case(
+                k,
+                pins[k],
+                cache,
+                args.arch,
+                B,
+                rt,
+                None,
+                stage2,
+                args,
+                share_from=cases[k],
+                stream=gstream,
+            )
+            for k in sorted(need)
+        }
         variants["stream"] = gcases
         variants["graph"] = gcases
     del host_bits
     rt.sync()
-    print(f"[replay] bound {len(cases)} cases x {len(variants)} variant(s) in {time.time() - t0:.1f} s", flush=True)
+    print(
+        f"[replay] bound {len(cases)} cases x {len(variants)} variant(s) in {time.time() - t0:.1f} s",
+        flush=True,
+    )
     gpu = os.environ.get("HIP_VISIBLE_DEVICES", "0").split(",")[0]
     sampler = None if args.no_clock else ClockSampler(gpu)
     if sampler:
         sampler.start()
-    out = {"sched": args.sched, "tag": args.tag, "pins": args.pins, "cache": args.cache, "gpu": gpu, "time": time.strftime("%H:%M:%S")}
+    out = {
+        "sched": args.sched,
+        "tag": args.tag,
+        "pins": args.pins,
+        "cache": args.cache,
+        "gpu": gpu,
+        "time": time.strftime("%H:%M:%S"),
+    }
 
     if "b2b" in modes:
         from rocke.runtime.launcher import time_launches
@@ -618,20 +910,30 @@ def main(argv=None) -> int:
         for r in range(args.rounds):
             for k in keys:
                 c = cases[k]
-                b2b[k].append(time_launches(c.run, warmup=args.warmup, iters=args.iters * 3))
-        print(f"\n[replay] back-to-back same call (mean of {args.iters * 3}), median over rounds")
+                b2b[k].append(
+                    time_launches(c.run, warmup=args.warmup, iters=args.iters * 3)
+                )
+        print(
+            f"\n[replay] back-to-back same call (mean of {args.iters * 3}), median over rounds"
+        )
         out["b2b"] = {}
         for k in keys:
             ms = statistics.median(b2b[k])
             out["b2b"][k] = round(ms, 4)
             ref = cases[k].ref_ms
-            print(f"  {k:10s} {ms:8.4f} ms" + (f"  ref {ref:.4f} ({(ms / ref - 1) * 100:+.1f}%)" if ref else ""), flush=True)
+            print(
+                f"  {k:10s} {ms:8.4f} ms"
+                + (f"  ref {ref:.4f} ({(ms / ref - 1) * 100:+.1f}%)" if ref else ""),
+                flush=True,
+            )
 
     if "ab" in modes:
         from benchmarks.common.batched_timing import time_interleaved_staged
 
         names = list(variants)
-        print(f"\n[replay] ab: staged medians, variants interleaved per case ({args.rounds} x {args.iters})")
+        print(
+            f"\n[replay] ab: staged medians, variants interleaved per case ({args.rounds} x {args.iters})"
+        )
         print("  " + " " * 11 + "".join(f"{n:>12s}" for n in names))
         out["ab"] = {}
         tot = {n: 0.0 for n in names}
@@ -641,7 +943,10 @@ def main(argv=None) -> int:
             # one timing per distinct (label, env) callable; identical pins of a
             # pins-variant reuse the base timing
             t = time_interleaved_staged(
-                [variants[n][k].run for n in names], rounds=args.rounds, iters=args.iters, warmup=args.warmup,
+                [variants[n][k].run for n in names],
+                rounds=args.rounds,
+                iters=args.iters,
+                warmup=args.warmup,
                 order=args.ab_order,
             )
             out["ab"][k] = {n: (round(x, 4) if x else None) for n, x in zip(names, t)}
@@ -653,13 +958,24 @@ def main(argv=None) -> int:
             line = f"  {k:10s}" + "".join(f"{x:12.4f}" for x in t)
             line += "  " + " ".join(f"{(x / t[0] - 1) * 100:+.1f}%" for x in t[1:])
             if len(set(labels)) > 1:
-                line += "  [" + " ".join("=" if lb == labels[0] else "*" for lb in labels[1:]) + "]"
+                line += (
+                    "  ["
+                    + " ".join("=" if lb == labels[0] else "*" for lb in labels[1:])
+                    + "]"
+                )
             print(line, flush=True)
-        print("  calls-weighted sum: " + "  ".join(f"{n} {v:.3f}" for n, v in tot.items()))
+        print(
+            "  calls-weighted sum: " + "  ".join(f"{n} {v:.3f}" for n, v in tot.items())
+        )
         out["ab_sum"] = {n: round(v, 4) for n, v in tot.items()}
-        out["ab_dir"] = {n: {d_: round(v, 4) for d_, v in dd.items()} for n, dd in tot_dir.items()}
+        out["ab_dir"] = {
+            n: {d_: round(v, 4) for d_, v in dd.items()} for n, dd in tot_dir.items()
+        }
         for n, dd in tot_dir.items():
-            print(f"  {n:12s} per direction: " + "  ".join(f"{d_} {v:.3f}" for d_, v in sorted(dd.items())))
+            print(
+                f"  {n:12s} per direction: "
+                + "  ".join(f"{d_} {v:.3f}" for d_, v in sorted(dd.items()))
+            )
 
     if "energy" in modes:
         # Energy per call of each case's candidates (pins[k]["alts"], pin first):
@@ -678,13 +994,26 @@ def main(argv=None) -> int:
             return e["energy_accumulator"] * e["counter_resolution"] * 1e-6
 
         res_e = {}
-        print(f"\n[replay] energy: J/call and ms/call back to back ({args.rounds} rounds x {args.energy_s} s per candidate)")
+        print(
+            f"\n[replay] energy: J/call and ms/call back to back ({args.rounds} rounds x {args.energy_s} s per candidate)"
+        )
         for k in keys:
             labs = pins[k].get("alts") or [pins[k]["kernel"]]
             if labs[0] != pins[k]["kernel"]:
                 labs = [pins[k]["kernel"]] + [x for x in labs if x != pins[k]["kernel"]]
             cs = [cases[k]] + [
-                Case(k, dict(pins[k], kernel=lab), cache, args.arch, B, rt, None, stage2, args, share_from=cases[k])
+                Case(
+                    k,
+                    dict(pins[k], kernel=lab),
+                    cache,
+                    args.arch,
+                    B,
+                    rt,
+                    None,
+                    stage2,
+                    args,
+                    share_from=cases[k],
+                )
                 for lab in labs[1:]
             ]
             jj = [[] for _ in cs]
@@ -715,18 +1044,36 @@ def main(argv=None) -> int:
             je = [statistics.median(x) for x in jj]
             te = [statistics.median(x) for x in tt]
             best = min(range(len(cs)), key=lambda i: je[i])
-            res_e[k] = {"labels": [c.label for c in cs], "j": [round(x, 5) for x in je], "ms": [round(x, 4) for x in te], "pick": cs[best].label}
+            res_e[k] = {
+                "labels": [c.label for c in cs],
+                "j": [round(x, 5) for x in je],
+                "ms": [round(x, 4) for x in te],
+                "pick": cs[best].label,
+            }
             print(
-                f"  {k:10s} " + "  ".join(
-                    f"{te[i]:.4f}ms/{je[i] * 1e3:.1f}mJ{'*' if i == best else ''}" for i in range(len(cs))
-                ) + (f"  -> alt {best} ({(je[best] / je[0] - 1) * 100:+.1f}% J)" if best else ""),
+                f"  {k:10s} "
+                + "  ".join(
+                    f"{te[i]:.4f}ms/{je[i] * 1e3:.1f}mJ{'*' if i == best else ''}"
+                    for i in range(len(cs))
+                )
+                + (
+                    f"  -> alt {best} ({(je[best] / je[0] - 1) * 100:+.1f}% J)"
+                    if best
+                    else ""
+                ),
                 flush=True,
             )
             for c in cs[1:]:
                 B._free_extras(rt, c.live_extras)
         out["energy"] = res_e
         if args.energy_out:
-            newp = {"source": f"energy {args.pins}", "cases": {k: dict(v, kernel=res_e[k]["pick"]) if k in res_e else v for k, v in pins.items()}}
+            newp = {
+                "source": f"energy {args.pins}",
+                "cases": {
+                    k: dict(v, kernel=res_e[k]["pick"]) if k in res_e else v
+                    for k, v in pins.items()
+                },
+            }
             json.dump(newp, open(args.energy_out, "w"), indent=1)
 
     if "stepsel" in modes:
@@ -748,7 +1095,18 @@ def main(argv=None) -> int:
             if labs[0] != pins[k]["kernel"]:
                 labs = [pins[k]["kernel"]] + [x for x in labs if x != pins[k]["kernel"]]
             alt[k] = [cases[k]] + [
-                Case(k, dict(pins[k], kernel=lab), cache, args.arch, B, rt, None, stage2, args, share_from=cases[k])
+                Case(
+                    k,
+                    dict(pins[k], kernel=lab),
+                    cache,
+                    args.arch,
+                    B,
+                    rt,
+                    None,
+                    stage2,
+                    args,
+                    share_from=cases[k],
+                )
                 for lab in labs[1:]
             ]
         off = {k: j for j, k in enumerate(sorted(alt))}
@@ -770,7 +1128,9 @@ def main(argv=None) -> int:
             e.destroy()
         synchronize_and_release()
         sel = {}
-        print(f"\n[replay] stepsel: in-step medians per candidate ({n_steps} steps, candidates rotate per step)")
+        print(
+            f"\n[replay] stepsel: in-step medians per candidate ({n_steps} steps, candidates rotate per step)"
+        )
         for k in sorted(alt):
             med = [statistics.median(t) if t else float("inf") for t in times[k]]
             best = min(range(len(med)), key=lambda c: med[c])
@@ -779,15 +1139,34 @@ def main(argv=None) -> int:
             sel[k] = alt[k][best].label
             print(
                 f"  {k:10s} pin {med[0]:.4f}  "
-                + " ".join(f"{m:.4f}{'*' if c == best else ''}" for c, m in enumerate(med[1:], 1))
-                + (f"  -> alt {best} ({(med[best] / med[0] - 1) * 100:+.1f}%)" if best else ""),
+                + " ".join(
+                    f"{m:.4f}{'*' if c == best else ''}"
+                    for c, m in enumerate(med[1:], 1)
+                )
+                + (
+                    f"  -> alt {best} ({(med[best] / med[0] - 1) * 100:+.1f}%)"
+                    if best
+                    else ""
+                ),
                 flush=True,
             )
-        out["stepsel"] = {k: {"labels": [c.label for c in alt[k]],
-                              "med": [round(statistics.median(t), 4) if t else None for t in times[k]],
-                              "pick": sel[k]} for k in alt}
+        out["stepsel"] = {
+            k: {
+                "labels": [c.label for c in alt[k]],
+                "med": [
+                    round(statistics.median(t), 4) if t else None for t in times[k]
+                ],
+                "pick": sel[k],
+            }
+            for k in alt
+        }
         if args.stepsel_out:
-            newp = {"source": f"stepsel {args.pins}", "cases": {k: dict(v, kernel=sel.get(k, v["kernel"])) for k, v in pins.items()}}
+            newp = {
+                "source": f"stepsel {args.pins}",
+                "cases": {
+                    k: dict(v, kernel=sel.get(k, v["kernel"])) for k, v in pins.items()
+                },
+            }
             json.dump(newp, open(args.stepsel_out, "w"), indent=1)
             print(f"[replay] selected pins -> {args.stepsel_out}", flush=True)
 
@@ -811,15 +1190,28 @@ def main(argv=None) -> int:
         res = {}
         if "staged" in modes:
             ts = time_interleaved_staged(
-                [cases[k].run for k in keys], rounds=args.rounds, iters=args.iters, warmup=args.warmup
+                [cases[k].run for k in keys],
+                rounds=args.rounds,
+                iters=args.iters,
+                warmup=args.warmup,
             )
-            print(f"\n[replay] staged per call: median of {args.rounds} interleaved rounds x {args.iters} samples")
+            print(
+                f"\n[replay] staged per call: median of {args.rounds} interleaved rounds x {args.iters} samples"
+            )
             for k, ms in zip(keys, ts):
                 ref = cases[k].ref_ms
                 res[k] = {"ms": round(ms, 4), "ref_ms": ref}
-                print(f"  {k:10s} {ms:8.4f} ms" + (f"  ref {ref:.4f} ({(ms / ref - 1) * 100:+.1f}%)" if ref else ""), flush=True)
+                print(
+                    f"  {k:10s} {ms:8.4f} ms"
+                    + (
+                        f"  ref {ref:.4f} ({(ms / ref - 1) * 100:+.1f}%)" if ref else ""
+                    ),
+                    flush=True,
+                )
         if "parts" in modes:
-            print(f"\n[replay] parts: whole call / memsets skipped / memsets alone (interleaved, {args.rounds} x {args.iters})")
+            print(
+                f"\n[replay] parts: whole call / memsets skipped / memsets alone (interleaved, {args.rounds} x {args.iters})"
+            )
             for k in keys:
                 c = cases[k]
                 log = []
@@ -840,10 +1232,17 @@ def main(argv=None) -> int:
                         _real_memset(*a_)
 
                 fns = [c.run, nomem] + ([memonly] if log else [])
-                t = time_interleaved_staged(fns, rounds=args.rounds, iters=args.iters, warmup=args.warmup)
+                t = time_interleaved_staged(
+                    fns, rounds=args.rounds, iters=args.iters, warmup=args.warmup
+                )
                 me = t[2] if log else 0.0
                 row = res.setdefault(k, {})
-                row.update(whole_ms=round(t[0], 4), nomemset_ms=round(t[1], 4), memset_ms=round(me, 4), n_memsets=len(log))
+                row.update(
+                    whole_ms=round(t[0], 4),
+                    nomemset_ms=round(t[1], 4),
+                    memset_ms=round(me, 4),
+                    n_memsets=len(log),
+                )
                 print(
                     f"  {k:10s} whole {t[0]:8.4f}  no-memset {t[1]:8.4f} ({(t[1] - t[0]) * 1e3:+6.1f} us)"
                     f"  memsets alone {me * 1e3:5.1f} us ({len(log)})",
@@ -883,8 +1282,11 @@ def main(argv=None) -> int:
             zero["n"] = len(zero["log"])
             zero["log"] = None
             zero["arena"] = rt.alloc(max(zero["arena_bytes"], 256))
-            print(f"[replay] zero variants: {zero['n']} memsets per step, {zero['arena_bytes'] / 2**20:.1f} MiB "
-                  f"-> arena: one memset per step", flush=True)
+            print(
+                f"[replay] zero variants: {zero['n']} memsets per step, {zero['arena_bytes'] / 2**20:.1f} MiB "
+                f"-> arena: one memset per step",
+                flush=True,
+            )
             variants["arena"] = cases
             variants["nomem"] = cases
         gexec = None
@@ -892,9 +1294,17 @@ def main(argv=None) -> int:
             from rocke.runtime.launcher import no_fence as _nf
 
             _hipg.hipStreamBeginCapture.argtypes = [ctypes.c_void_p, ctypes.c_int]
-            _hipg.hipStreamEndCapture.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_void_p)]
-            _hipg.hipGraphInstantiate.argtypes = [ctypes.POINTER(ctypes.c_void_p), ctypes.c_void_p,
-                                                  ctypes.c_void_p, ctypes.c_void_p, ctypes.c_size_t]
+            _hipg.hipStreamEndCapture.argtypes = [
+                ctypes.c_void_p,
+                ctypes.POINTER(ctypes.c_void_p),
+            ]
+            _hipg.hipGraphInstantiate.argtypes = [
+                ctypes.POINTER(ctypes.c_void_p),
+                ctypes.c_void_p,
+                ctypes.c_void_p,
+                ctypes.c_void_p,
+                ctypes.c_size_t,
+            ]
             _hipg.hipGraphLaunch.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
             rt.sync()
             with _nf():
@@ -904,7 +1314,9 @@ def main(argv=None) -> int:
                 for k, i in calls:
                     variants["graph"][k].run(i)
                 g = ctypes.c_void_p(0)
-                rc = _hipg.hipStreamEndCapture(ctypes.c_void_p(gstream), ctypes.byref(g))
+                rc = _hipg.hipStreamEndCapture(
+                    ctypes.c_void_p(gstream), ctypes.byref(g)
+                )
                 if rc:
                     raise SystemExit(f"hipStreamEndCapture -> {rc}")
             ge = ctypes.c_void_p(0)
@@ -914,7 +1326,10 @@ def main(argv=None) -> int:
             gexec = ge
             n_nodes = ctypes.c_size_t(0)
             _hipg.hipGraphGetNodes(g, None, ctypes.byref(n_nodes))
-            print(f"[replay] graph variant: one step captured, {n_nodes.value} nodes", flush=True)
+            print(
+                f"[replay] graph variant: one step captured, {n_nodes.value} nodes",
+                flush=True,
+            )
             # Same outputs as the eager step: run each, read every output buffer, compare (bf16 -> f32).
             import numpy as _np
 
@@ -925,7 +1340,12 @@ def main(argv=None) -> int:
                         nb = cases[k].sizes[2]
                         buf = (ctypes.c_uint8 * nb)()
                         rt.memcpy_d2h(buf, ps[2], nb)
-                        a = _np.frombuffer(bytes(buf), dtype=_np.uint16).astype(_np.uint32) << 16
+                        a = (
+                            _np.frombuffer(bytes(buf), dtype=_np.uint16).astype(
+                                _np.uint32
+                            )
+                            << 16
+                        )
                         res[(k, ps[2])] = a.view(_np.float32).copy()
                 return res
 
@@ -934,7 +1354,7 @@ def main(argv=None) -> int:
             rt.sync()
             eager = _outs()
             # poison outputs so a graph that writes nothing cannot pass
-            for (k, ptr) in eager:
+            for k, ptr in eager:
                 rt.memset(ptr, 0x7F, cases[k].sizes[2])
             _hipg.hipGraphLaunch(gexec, ctypes.c_void_p(gstream))
             rt.sync()
@@ -944,28 +1364,42 @@ def main(argv=None) -> int:
                 b = gout[key_]
                 den = float(_np.max(_np.abs(a))) or 1.0
                 worst = max(worst, float(_np.max(_np.abs(a - b))) / den)
-            print(f"[replay] graph check: {len(eager)} outputs, max |eager - graph| / max|eager| = {worst:.3e} "
-                  f"({'PASS' if worst < 1e-2 else 'FAIL'})", flush=True)
+            print(
+                f"[replay] graph check: {len(eager)} outputs, max |eager - graph| / max|eager| = {worst:.3e} "
+                f"({'PASS' if worst < 1e-2 else 'FAIL'})",
+                flush=True,
+            )
         reps = []
         for rep in range(args.step_reps):
             _vl = list(variants.items())
             _sh = rep % len(_vl)
-            for vname, vcases in _vl[_sh:] + _vl[:_sh]:  # rotated per rep: no fixed position in a rep
+            for vname, vcases in (
+                _vl[_sh:] + _vl[:_sh]
+            ):  # rotated per rep: no fixed position in a rep
                 rt.sync()
                 n_ev = args.steps + 1
                 step_ev = [rt.event() for _ in range(n_ev)]
                 call_ev = (
-                    [[rt.event() for _ in range(len(calls) + 1)] for _ in range(args.steps)]
+                    [
+                        [rt.event() for _ in range(len(calls) + 1)]
+                        for _ in range(args.steps)
+                    ]
                     if args.per_call
                     else None
                 )
                 two = vname == "2stream"
-                s0 = streams[0] if two else (gstream if vname in ("stream", "graph") else 0)
+                s0 = (
+                    streams[0]
+                    if two
+                    else (gstream if vname in ("stream", "graph") else 0)
+                )
                 if two:
                     dep = [rt.event() for _ in range(len(calls))]
                     join = rt.event()
 
-                zmode = vname if vname in ("arena", "nomem") and zero is not None else None
+                zmode = (
+                    vname if vname in ("arena", "nomem") and zero is not None else None
+                )
                 if zero is not None:
                     zero["on"] = zmode is None
 
@@ -1014,26 +1448,35 @@ def main(argv=None) -> int:
                     for e in dep + [join]:
                         e.destroy()
                 synchronize_and_release()
-                step_ms = [step_ev[i].elapsed_to(step_ev[i + 1]) for i in range(args.steps)]
+                step_ms = [
+                    step_ev[i].elapsed_to(step_ev[i + 1]) for i in range(args.steps)
+                ]
                 row = {
                     "step_ms_median": round(statistics.median(step_ms), 4),
                     "step_ms_mean": round(statistics.mean(step_ms), 4),
                     "step_ms_min": round(min(step_ms), 4),
                     "steps": [round(x, 4) for x in step_ms],
-                    "tflops_eff": round(flops_step / (statistics.median(step_ms) * 1e9), 1),
+                    "tflops_eff": round(
+                        flops_step / (statistics.median(step_ms) * 1e9), 1
+                    ),
                 }
                 if call_ev and not two and vname != "graph":
                     per_key = {}
                     for st in range(args.steps):
                         for j, (k, i) in enumerate(calls):
-                            per_key.setdefault(k, []).append(call_ev[st][j].elapsed_to(call_ev[st][j + 1]))
+                            per_key.setdefault(k, []).append(
+                                call_ev[st][j].elapsed_to(call_ev[st][j + 1])
+                            )
                     row["per_case_ms"] = {
-                        k: round(statistics.median(v), 4) for k, v in sorted(per_key.items())
+                        k: round(statistics.median(v), 4)
+                        for k, v in sorted(per_key.items())
                     }
                     dirs = {}
                     for k, v in per_key.items():
                         d = k.split("_")[0]
-                        dirs[d] = dirs.get(d, 0.0) + statistics.median(v) * cases[k].calls
+                        dirs[d] = (
+                            dirs.get(d, 0.0) + statistics.median(v) * cases[k].calls
+                        )
                     row["per_dir_ms"] = {d: round(v, 3) for d, v in dirs.items()}
                     for e in sum(call_ev, []):
                         e.destroy()
@@ -1049,10 +1492,20 @@ def main(argv=None) -> int:
                     flush=True,
                 )
                 if call_ev and "per_dir_ms" in row:
-                    print("  per dir (sum of per-case medians x calls): " + json.dumps(row["per_dir_ms"]))
+                    print(
+                        "  per dir (sum of per-case medians x calls): "
+                        + json.dumps(row["per_dir_ms"])
+                    )
                     for k, v in row["per_case_ms"].items():
                         ref = cases[k].ref_ms
-                        print(f"    {k:10s} {v:8.4f}" + (f"  (staged ref {ref:.4f}, {(v / ref - 1) * 100:+.1f}%)" if ref else ""))
+                        print(
+                            f"    {k:10s} {v:8.4f}"
+                            + (
+                                f"  (staged ref {ref:.4f}, {(v / ref - 1) * 100:+.1f}%)"
+                                if ref
+                                else ""
+                            )
+                        )
         out["step"] = reps
         if zero is not None:
             rt.memset_async = _real_ms
@@ -1062,7 +1515,9 @@ def main(argv=None) -> int:
             print("\n[replay] step summary (median over reps of the per-rep medians):")
             for vname in variants:
                 xs = [r["step_ms_median"] for r in reps if r["variant"] == vname]
-                print(f"  {vname:12s} {statistics.median(xs):8.3f} ms  reps {' '.join(f'{x:.3f}' for x in xs)}")
+                print(
+                    f"  {vname:12s} {statistics.median(xs):8.3f} ms  reps {' '.join(f'{x:.3f}' for x in xs)}"
+                )
 
     if sampler:
         sampler.stop()

@@ -38,8 +38,15 @@ from typing import Optional
 class Winograd3dDropin:
     """Built kernels + workspaces of one drop-in yx Winograd call (see the module doc)."""
 
-    def __init__(self, problem, direction: str, plan, *, arch: str = "gfx942",
-                 device: str = "cuda"):
+    def __init__(
+        self,
+        problem,
+        direction: str,
+        plan,
+        *,
+        arch: str = "gfx942",
+        device: str = "cuda",
+    ):
         import torch
 
         from kernels.common import conv_winograd3d as cw
@@ -79,62 +86,114 @@ class Winograd3dDropin:
         halo = h if hz == h else (hz, h, h)
         odt = "f16" if spec.op_dtype == "f16" else "bf16"
         wtv = plan.wtv or 1
-        wt3 = wtv in (3, 4) and odt == "f16" and spec.stage == "lds16" and not spec.b16 \
+        wt3 = (
+            wtv in (3, 4)
+            and odt == "f16"
+            and spec.stage == "lds16"
+            and not spec.b16
             and not spec.bc
+        )
         dgrad = direction == "dgrad"
         if self.ndhwc:
             if wt3:
-                ka = cw.build_yx_weight_transform_v3(K, C, flip=dgrad, swz=wtv == 4, my=spec.my)
+                ka = cw.build_yx_weight_transform_v3(
+                    K, C, flip=dgrad, swz=wtv == 4, my=spec.my
+                )
                 ga = cw.yx_weight_transform_v3_grid(K, C)
             else:
-                ka = cw.build_yx_weight_transform(K, C, out_dtype=odt,
-                                                  fold=spec.stage in ("reg", "wlds"),
-                                                  u16=spec.b16, uc=spec.bc, flip=dgrad)
+                ka = cw.build_yx_weight_transform(
+                    K,
+                    C,
+                    out_dtype=odt,
+                    fold=spec.stage in ("reg", "wlds"),
+                    u16=spec.b16,
+                    uc=spec.bc,
+                    flip=dgrad,
+                )
                 ga = cw.yx_weight_transform_grid(K, C)
             sga = SignatureBuilder().ptr("W", "bf16").ptr("U", odt)
             self._caux = LaunchConfig(grid=ga, block=(256, 1, 1))
         else:
-            ka = cw.build_yx_aux(*self.src, K, out_dtype=odt,
-                                 fold=spec.stage in ("reg", "wlds"), rev=spec.xrev, halo=halo,
-                                 flip=dgrad, wtv=(wtv if wt3 else 1), amax=self.bps == 1,
-                                 my=spec.my)
-            sga = (SignatureBuilder().ptr("X", "bf16").ptr("X8", "bf16").ptr("W", "bf16")
-                   .ptr("U", odt))
+            ka = cw.build_yx_aux(
+                *self.src,
+                K,
+                out_dtype=odt,
+                fold=spec.stage in ("reg", "wlds"),
+                rev=spec.xrev,
+                halo=halo,
+                flip=dgrad,
+                wtv=(wtv if wt3 else 1),
+                amax=self.bps == 1,
+                my=spec.my,
+            )
+            sga = (
+                SignatureBuilder()
+                .ptr("X", "bf16")
+                .ptr("X8", "bf16")
+                .ptr("W", "bf16")
+                .ptr("U", odt)
+            )
             if self.bps == 1:
                 sga = sga.ptr("E", "i32")
-            self._caux = LaunchConfig(grid=cw.yx_aux_grid(*self.src, K,
-                                                          wtv=(wtv if wt3 else 1)),
-                                      block=(256, 1, 1))
-        self._aux = KernelLauncher(hsaco=compile_kernel(ka, arch=arch).hsaco,
-                                   kernel_name=ka.name, signature=sga.build())
+            self._caux = LaunchConfig(
+                grid=cw.yx_aux_grid(*self.src, K, wtv=(wtv if wt3 else 1)),
+                block=(256, 1, 1),
+            )
+        self._aux = KernelLauncher(
+            hsaco=compile_kernel(ka, arch=arch).hsaco,
+            kernel_name=ka.name,
+            signature=sga.build(),
+        )
         km = cw.build_winograd_yx(spec)
         self.ks = spec.ksplit
-        sgm = (SignatureBuilder().ptr("X", "bf16").ptr("U", odt)
-               .ptr("Y", "f32" if self.ks > 1 else "bf16"))
+        sgm = (
+            SignatureBuilder()
+            .ptr("X", "bf16")
+            .ptr("U", odt)
+            .ptr("Y", "f32" if self.ks > 1 else "bf16")
+        )
         if self.bps in (1, 2):
             sgm = sgm.ptr("E", "i32")
-        self._main = KernelLauncher(hsaco=compile_kernel(km, arch=arch).hsaco,
-                                    kernel_name=km.name, signature=sgm.build())
-        self._cmain = LaunchConfig(grid=cw.winograd_yx_grid(spec), block=(spec.block_size, 1, 1))
+        self._main = KernelLauncher(
+            hsaco=compile_kernel(km, arch=arch).hsaco,
+            kernel_name=km.name,
+            signature=sgm.build(),
+        )
+        self._cmain = LaunchConfig(
+            grid=cw.winograd_yx_grid(spec), block=(spec.block_size, 1, 1)
+        )
         self.kernel_names = [ka.name, km.name]
         nel = spec.Do * spec.Ho * spec.Wo * K
         if self.ks > 1:
             kr = cw.build_ks_reduce(nel, self.ks)
             self._red = KernelLauncher(
-                hsaco=compile_kernel(kr, arch=arch).hsaco, kernel_name=kr.name,
-                signature=SignatureBuilder().ptr("P", "f32").ptr("Y", "bf16").build())
+                hsaco=compile_kernel(kr, arch=arch).hsaco,
+                kernel_name=kr.name,
+                signature=SignatureBuilder().ptr("P", "f32").ptr("Y", "bf16").build(),
+            )
             self._cred = LaunchConfig(grid=cw.ks_reduce_grid(nel), block=(256, 1, 1))
             self.kernel_names.append(kr.name)
         # workspaces: c8 input with a zero halo (zeroed once; the relayout writes the interior),
         # transformed weights, amax map, split-K partials
-        self.X8 = (None if self.ndhwc else
-                   torch.zeros(C // 8, Di, Hi, Wi, 8, device=device, dtype=torch.bfloat16))
+        self.X8 = (
+            None
+            if self.ndhwc
+            else torch.zeros(C // 8, Di, Hi, Wi, 8, device=device, dtype=torch.bfloat16)
+        )
         udt = torch.float16 if odt == "f16" else torch.bfloat16
         self.U = torch.empty(3 * spec.nbp * 4 * C * K, device=device, dtype=udt)
-        self.E = (torch.zeros(cw.x_to_c8_lds_grid(*self.src)[0], device=device,
-                              dtype=torch.int32) if self.bps == 1 else None)
-        self.P = (torch.empty(self.ks * nel, device=device, dtype=torch.float32)
-                  if self.ks > 1 else None)
+        self.E = (
+            torch.zeros(
+                cw.x_to_c8_lds_grid(*self.src)[0], device=device, dtype=torch.int32
+            )
+            if self.bps == 1
+            else None
+        )
+        self.P = (
+            torch.empty(self.ks * nel, device=device, dtype=torch.float32)
+            if self.ks > 1
+            else None
+        )
 
     def __call__(self, x, w, y: Optional[object] = None):
         """x: [D, H, W, C] (or [1, D, H, W, C]) bf16 -- X for FWD, dY for BWD-data; w: the
@@ -143,15 +202,23 @@ class Winograd3dDropin:
         import torch
 
         x = x.reshape(self.src) if x.dim() == 5 else x
-        if tuple(x.shape) != self.src or x.dtype != torch.bfloat16 or not x.is_contiguous():
-            raise ValueError(f"x: contiguous bf16 {self.src}, got {tuple(x.shape)} {x.dtype}")
+        if (
+            tuple(x.shape) != self.src
+            or x.dtype != torch.bfloat16
+            or not x.is_contiguous()
+        ):
+            raise ValueError(
+                f"x: contiguous bf16 {self.src}, got {tuple(x.shape)} {x.dtype}"
+            )
         if y is None:
             y = torch.empty(self.out, device=x.device, dtype=torch.bfloat16)
         ea = {"E": self.E} if self.bps == 1 else {}
         if self.ndhwc:
             self._aux({"W": w, "U": self.U}, config=self._caux)
         else:
-            self._aux({"X": x, "X8": self.X8, "W": w, "U": self.U, **ea}, config=self._caux)
+            self._aux(
+                {"X": x, "X8": self.X8, "W": w, "U": self.U, **ea}, config=self._caux
+            )
         xin = x if self.ndhwc else self.X8
         if self.ks > 1:
             self._main({"X": xin, "U": self.U, "Y": self.P, **ea}, config=self._cmain)

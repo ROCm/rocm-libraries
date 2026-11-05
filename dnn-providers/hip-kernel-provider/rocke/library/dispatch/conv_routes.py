@@ -137,7 +137,9 @@ def route_from_row(case: str, row: Mapping, source: str = "") -> ConvRoute:
     """A :class:`ConvRoute` from one decoded table row (validated)."""
     route = str(row.get("route", ROUTE_DIRECT)).strip().lower()
     if route not in ROUTES:
-        raise ValueError(f"{source}: case {case}: route {route!r} (one of {', '.join(ROUTES)})")
+        raise ValueError(
+            f"{source}: case {case}: route {route!r} (one of {', '.join(ROUTES)})"
+        )
     cmd = str(row["cmd"])
     direction, _dtype, key = parse_miopen_cmd(cmd)
     kernel = row.get("kernel")
@@ -146,26 +148,42 @@ def route_from_row(case: str, row: Mapping, source: str = "") -> ConvRoute:
     if route == ROUTE_WINOGRAD:
         w = row.get("winograd")
         if not isinstance(w, Mapping) or not isinstance(w.get("spec"), Mapping):
-            raise ValueError(f"{source}: case {case}: a winograd route needs winograd.spec")
+            raise ValueError(
+                f"{source}: case {case}: a winograd route needs winograd.spec"
+            )
         if direction not in ("fwd", "dgrad"):
-            raise ValueError(f"{source}: case {case}: winograd serves fwd / dgrad, not {direction}")
+            raise ValueError(
+                f"{source}: case {case}: winograd serves fwd / dgrad, not {direction}"
+            )
         bad = sorted(set(w["spec"]) & set(_WINO_DERIVED) - {"variant"})
         if bad:
-            raise ValueError(f"{source}: case {case}: winograd.spec carries derived fields {bad}")
+            raise ValueError(
+                f"{source}: case {case}: winograd.spec carries derived fields {bad}"
+            )
         if w["spec"].get("variant", "yx") != "yx":
             raise ValueError(f"{source}: case {case}: winograd.spec variant must be yx")
-        spec = tuple(sorted((k, _hashable(v)) for k, v in w["spec"].items() if k != "variant"))
+        spec = tuple(
+            sorted((k, _hashable(v)) for k, v in w["spec"].items() if k != "variant")
+        )
         wtv = int(w.get("wtv", 1))
         if kernel:
-            raise ValueError(f"{source}: case {case}: a winograd route names no pinned kernel")
+            raise ValueError(
+                f"{source}: case {case}: a winograd route names no pinned kernel"
+            )
     elif route == ROUTE_PADCOPY_HALO:
         if direction != "fwd":
-            raise ValueError(f"{source}: case {case}: padcopy_halo serves fwd, not {direction}")
+            raise ValueError(
+                f"{source}: case {case}: padcopy_halo serves fwd, not {direction}"
+            )
         names = dict(zip(_KEY_FIELDS, key))
         if not any(names[p] for p in ("pad_d", "pad_h", "pad_w")):
-            raise ValueError(f"{source}: case {case}: padcopy_halo needs a padded problem")
+            raise ValueError(
+                f"{source}: case {case}: padcopy_halo needs a padded problem"
+            )
         if names["N"] != 1 or names["Di"] is None:
-            raise ValueError(f"{source}: case {case}: padcopy_halo copies one 3-D image (N=1)")
+            raise ValueError(
+                f"{source}: case {case}: padcopy_halo copies one 3-D image (N=1)"
+            )
     return ConvRoute(
         case=case,
         route=route,
@@ -185,7 +203,9 @@ def routes_from_mapping(data: Mapping, source: str = "") -> ConvRoutes:
         r = route_from_row(case, row, source)
         key = parse_miopen_cmd(r.cmd)
         if key in out.routes:
-            raise ValueError(f"{source}: cases {out.routes[key].case} and {case} route one problem")
+            raise ValueError(
+                f"{source}: cases {out.routes[key].case} and {case} route one problem"
+            )
         out.routes[key] = r
     return out
 
@@ -199,7 +219,9 @@ def load_conv_routes(path, mode: str | None = None) -> ConvRoutes:
         raise ValueError(f"{p}: not a route table (no modes)")
     if mode is None:
         if len(modes) != 1:
-            raise ValueError(f"{p}: route table with modes {', '.join(modes)}: name one")
+            raise ValueError(
+                f"{p}: route table with modes {', '.join(modes)}: name one"
+            )
         mode = modes[0]
     if mode not in modes:
         raise ValueError(f"{p}: no mode {mode!r} (modes: {', '.join(modes)})")
@@ -243,8 +265,9 @@ class PadCopySpec:
         """The pad-copy ``KernelDef`` (``arch``-independent IR)."""
         from kernels.common import conv_winograd3d as cw
 
-        return cw.build_pad_copy(self.D, self.H, self.W, self.C, halo=tuple(self.halo),
-                                 unroll=self.unroll)
+        return cw.build_pad_copy(
+            self.D, self.H, self.W, self.C, halo=tuple(self.halo), unroll=self.unroll
+        )
 
     def grid(self) -> tuple:
         from kernels.common import conv_winograd3d as cw
@@ -332,7 +355,11 @@ class ConvRoutePlan:
         """ConvProblem the pinned kernel runs (the halo problem for padcopy_halo)."""
         from .grouped_convolution import _conv_problem
 
-        return _conv_problem(self.kernel_request) if self.kernel_request is not None else None
+        return (
+            _conv_problem(self.kernel_request)
+            if self.kernel_request is not None
+            else None
+        )
 
     @property
     def launches(self) -> tuple:
@@ -354,7 +381,9 @@ class ConvRoutePlan:
         lp = self.kernel.spec.launch_params()
         s = self.kernel.spec.name
         if "split_k" in lp:
-            s += f" @split_k={lp['split_k']}" + (f"/full{lp['tail_full']}" if "tail_full" in lp else "")
+            s += f" @split_k={lp['split_k']}" + (
+                f"/full{lp['tail_full']}" if "tail_full" in lp else ""
+            )
         return s
 
     def describe(self) -> str:
@@ -381,8 +410,11 @@ def _pin_dispatch(routes: ConvRoutes, req, label: str, case: str):
     pins = routes._pinsets.get(key)
     if pins is None:
         m = _SPLIT_RE.search(label)
-        pins = ConvPins(source=f"{routes.source}:{case}", arch=routes.arch or str(req.arch),
-                        mode=routes.mode or "routes")
+        pins = ConvPins(
+            source=f"{routes.source}:{case}",
+            arch=routes.arch or str(req.arch),
+            mode=routes.mode or "routes",
+        )
         pins.pins[key[0]] = ConvPin(
             case=case,
             instance=label.split()[0],
@@ -408,7 +440,9 @@ def winograd_route_plan(route: ConvRoute, problem, direction: str):
 
     why = sel.winograd3d_ineligible_reason(problem, direction)
     if why:
-        raise ValueError(f"{route.case}: winograd route on an ineligible problem: {why}")
+        raise ValueError(
+            f"{route.case}: winograd route on an ineligible problem: {why}"
+        )
     spec_kw = route.spec_dict
     Di, Hi, Wi, C, K = sel._winograd_problem(problem, direction)
     spec = cw.WinogradYxSpec(Di=Di, Hi=Hi, Wi=Wi, C=C, K=K, **spec_kw)
@@ -419,12 +453,23 @@ def winograd_route_plan(route: ConvRoute, problem, direction: str):
     if spec.bps not in (0, 1) or spec.oscale or spec.yc8h:
         raise ValueError(f"{route.case}: drop-in needs bps 0 / 1, no oscale / yc8h")
     if spec.bps == 1 and (spec.bps_halo != h or cw._bps_hz(spec) != hz):
-        raise ValueError(f"{route.case}: bps halo ({spec.bps_halo}, z {cw._bps_hz(spec)}) is not the "
-                         f"relayout halo ({h}, z {hz})")
-    return sel.Winograd3dPlan(
-        "yx", tuple(sorted(spec_kw.items())), route.wtv, "dropin", direction,
-        "bps" if spec.bps else "none", source="route table", reason=route.case,
-    ), spec
+        raise ValueError(
+            f"{route.case}: bps halo ({spec.bps_halo}, z {cw._bps_hz(spec)}) is not the "
+            f"relayout halo ({h}, z {hz})"
+        )
+    return (
+        sel.Winograd3dPlan(
+            "yx",
+            tuple(sorted(spec_kw.items())),
+            route.wtv,
+            "dropin",
+            direction,
+            "bps" if spec.bps else "none",
+            source="route table",
+            reason=route.case,
+        ),
+        spec,
+    )
 
 
 def winograd_workspaces(problem, direction: str, spec) -> tuple:
@@ -434,12 +479,18 @@ def winograd_workspaces(problem, direction: str, spec) -> tuple:
 
     hz, h = sel._relayout_halos(problem, direction)
     src = (spec.Di - 2 * hz, spec.Hi - 2 * h, spec.Wi - 2 * h, spec.C)
-    out = [RouteWorkspace("X8", spec.C * spec.Di * spec.Hi * spec.Wi * 2, zero_once=True),
-           RouteWorkspace("U", 3 * spec.nbp * 4 * spec.C * spec.K * 2)]
+    out = [
+        RouteWorkspace("X8", spec.C * spec.Di * spec.Hi * spec.Wi * 2, zero_once=True),
+        RouteWorkspace("U", 3 * spec.nbp * 4 * spec.C * spec.K * 2),
+    ]
     if spec.bps == 1:
-        out.append(RouteWorkspace("E", cw.x_to_c8_lds_grid(*src)[0] * 4, zero_once=True))
+        out.append(
+            RouteWorkspace("E", cw.x_to_c8_lds_grid(*src)[0] * 4, zero_once=True)
+        )
     if spec.ksplit > 1:
-        out.append(RouteWorkspace("P", spec.ksplit * spec.Do * spec.Ho * spec.Wo * spec.K * 4))
+        out.append(
+            RouteWorkspace("P", spec.ksplit * spec.Do * spec.Ho * spec.Wo * spec.K * 4)
+        )
     return tuple(out)
 
 
@@ -459,40 +510,86 @@ def winograd_steps(plan, problem, direction: str) -> tuple:
     halo = h if hz == h else (hz, h, h)
     odt = "f16" if spec.op_dtype == "f16" else "bf16"
     wtv = plan.wtv or 1
-    wt3 = wtv in (3, 4) and odt == "f16" and spec.stage == "lds16" and not spec.b16 and not spec.bc
+    wt3 = (
+        wtv in (3, 4)
+        and odt == "f16"
+        and spec.stage == "lds16"
+        and not spec.b16
+        and not spec.bc
+    )
     wv = wtv if wt3 else 1
     bps1 = spec.bps == 1
     ks = spec.ksplit
 
     def aux(arch: str = "gfx942"):
-        return cw.build_yx_aux(*src, K, out_dtype=odt, fold=spec.stage in ("reg", "wlds"), rev=spec.xrev,
-                               halo=halo, flip=direction == "dgrad", wtv=wv, amax=bps1, my=spec.my)
+        return cw.build_yx_aux(
+            *src,
+            K,
+            out_dtype=odt,
+            fold=spec.stage in ("reg", "wlds"),
+            rev=spec.xrev,
+            halo=halo,
+            flip=direction == "dgrad",
+            wtv=wv,
+            amax=bps1,
+            my=spec.my,
+        )
 
-    sga = SignatureBuilder().ptr("X", "bf16").ptr("X8", "bf16").ptr("W", "bf16").ptr("U", odt)
-    sgm = SignatureBuilder().ptr("X", "bf16").ptr("U", odt).ptr("Y", "f32" if ks > 1 else "bf16")
+    sga = (
+        SignatureBuilder()
+        .ptr("X", "bf16")
+        .ptr("X8", "bf16")
+        .ptr("W", "bf16")
+        .ptr("U", odt)
+    )
+    sgm = (
+        SignatureBuilder()
+        .ptr("X", "bf16")
+        .ptr("U", odt)
+        .ptr("Y", "f32" if ks > 1 else "bf16")
+    )
     ea = ()
     if bps1:
         sga, sgm, ea = sga.ptr("E", "i32"), sgm.ptr("E", "i32"), (("E", "E"),)
     steps = [
-        RouteStep("winograd aux (relayout + weight transform)", "kernel",
-                  (("X", "x"), ("X8", "X8"), ("W", "w"), ("U", "U")) + ea, build=aux,
-                  signature=tuple(sga.build()), grid=cw.yx_aux_grid(*src, K, wtv=wv)),
-        RouteStep(f"winograd main {spec.name}", "kernel",
-                  (("X", "X8"), ("U", "U"), ("Y", "P" if ks > 1 else "y")) + ea,
-                  build=lambda arch="gfx942": cw.build_winograd_yx(spec), signature=tuple(sgm.build()),
-                  grid=cw.winograd_yx_grid(spec), block=(spec.block_size, 1, 1)),
+        RouteStep(
+            "winograd aux (relayout + weight transform)",
+            "kernel",
+            (("X", "x"), ("X8", "X8"), ("W", "w"), ("U", "U")) + ea,
+            build=aux,
+            signature=tuple(sga.build()),
+            grid=cw.yx_aux_grid(*src, K, wtv=wv),
+        ),
+        RouteStep(
+            f"winograd main {spec.name}",
+            "kernel",
+            (("X", "X8"), ("U", "U"), ("Y", "P" if ks > 1 else "y")) + ea,
+            build=lambda arch="gfx942": cw.build_winograd_yx(spec),
+            signature=tuple(sgm.build()),
+            grid=cw.winograd_yx_grid(spec),
+            block=(spec.block_size, 1, 1),
+        ),
     ]
     if ks > 1:
         nel = spec.Do * spec.Ho * spec.Wo * K
-        steps.append(RouteStep(
-            f"split-K reduce ({ks})", "kernel", (("P", "P"), ("Y", "y")),
-            build=lambda arch="gfx942": cw.build_ks_reduce(nel, ks),
-            signature=tuple(SignatureBuilder().ptr("P", "f32").ptr("Y", "bf16").build()),
-            grid=cw.ks_reduce_grid(nel)))
+        steps.append(
+            RouteStep(
+                f"split-K reduce ({ks})",
+                "kernel",
+                (("P", "P"), ("Y", "y")),
+                build=lambda arch="gfx942": cw.build_ks_reduce(nel, ks),
+                signature=tuple(
+                    SignatureBuilder().ptr("P", "f32").ptr("Y", "bf16").build()
+                ),
+                grid=cw.ks_reduce_grid(nel),
+            )
+        )
     return tuple(steps)
 
 
-def dispatch_conv_route(req, routes: ConvRoutes, pins: ConvPins | None = None) -> ConvRoutePlan:
+def dispatch_conv_route(
+    req, routes: ConvRoutes, pins: ConvPins | None = None
+) -> ConvRoutePlan:
     """The production route of ``req`` (a ``ConvGroupedRequest``, any direction).
 
     Raises ``ValueError`` when the table does not route the problem or the
@@ -508,36 +605,71 @@ def dispatch_conv_route(req, routes: ConvRoutes, pins: ConvPins | None = None) -
     if problem is None:
         raise ValueError("not a valid convolution shape")
     direction = str(req.direction).lower()
-    base = dict(case=route.case, route=route.route, request=req, problem=problem, calls=route.calls)
+    base = dict(
+        case=route.case,
+        route=route.route,
+        request=req,
+        problem=problem,
+        calls=route.calls,
+    )
     if route.route == ROUTE_DIRECT:
         label = route.kernel or _pins_label(pins, req)
         if not label:
-            raise ValueError(f"{route.case}: direct route names no kernel and the pins have none")
+            raise ValueError(
+                f"{route.case}: direct route names no kernel and the pins have none"
+            )
         res = _pin_dispatch(routes, req, label, route.case)
-        step = RouteStep(f"pinned {res.spec.name}", "pinned", (("A", "x"), ("B", "w"), ("D", "y")))
+        step = RouteStep(
+            f"pinned {res.spec.name}", "pinned", (("A", "x"), ("B", "w"), ("D", "y"))
+        )
         return ConvRoutePlan(**base, kernel=res, kernel_request=req, steps=(step,))
     if route.route == ROUTE_PADCOPY_HALO:
         hreq = halo_request(req)
         label = route.kernel or _pins_label(pins, hreq)
         if not label:
-            raise ValueError(f"{route.case}: padcopy_halo route names no kernel and the pins have none "
-                             "for the halo problem")
+            raise ValueError(
+                f"{route.case}: padcopy_halo route names no kernel and the pins have none "
+                "for the halo problem"
+            )
         res = _pin_dispatch(routes, hreq, label, route.case)
         p = problem
         pc = PadCopySpec(D=p.Di, H=p.Hi, W=p.Wi, C=p.C, halo=(p.pD, p.pH, p.pW))
-        steps = (RouteStep(f"pad_copy halo {pc.halo}", "kernel", (("X", "x"), ("Xp", "Xp")),
-                           build=pc.build, signature=pc.signature(), grid=pc.grid(), block=pc.block),
-                 RouteStep(f"pinned {res.spec.name} (halo form)", "pinned",
-                           (("A", "Xp"), ("B", "w"), ("D", "y"))))
-        return ConvRoutePlan(**base, kernel=res, kernel_request=hreq, pad_copy=pc,
-                             workspaces=(RouteWorkspace("Xp", pc.out_bytes, zero_once=True),),
-                             steps=steps)
+        steps = (
+            RouteStep(
+                f"pad_copy halo {pc.halo}",
+                "kernel",
+                (("X", "x"), ("Xp", "Xp")),
+                build=pc.build,
+                signature=pc.signature(),
+                grid=pc.grid(),
+                block=pc.block,
+            ),
+            RouteStep(
+                f"pinned {res.spec.name} (halo form)",
+                "pinned",
+                (("A", "Xp"), ("B", "w"), ("D", "y")),
+            ),
+        )
+        return ConvRoutePlan(
+            **base,
+            kernel=res,
+            kernel_request=hreq,
+            pad_copy=pc,
+            workspaces=(RouteWorkspace("Xp", pc.out_bytes, zero_once=True),),
+            steps=steps,
+        )
     plan, spec = winograd_route_plan(route, problem, direction)
-    return ConvRoutePlan(**base, winograd=plan, workspaces=winograd_workspaces(problem, direction, spec),
-                         steps=winograd_steps(plan, problem, direction))
+    return ConvRoutePlan(
+        **base,
+        winograd=plan,
+        workspaces=winograd_workspaces(problem, direction, spec),
+        steps=winograd_steps(plan, problem, direction),
+    )
 
 
-def dispatch_conv_production(req, routes: ConvRoutes | None = None, pins: ConvPins | None = None) -> ConvRoutePlan:
+def dispatch_conv_production(
+    req, routes: ConvRoutes | None = None, pins: ConvPins | None = None
+) -> ConvRoutePlan:
     """One call's plan from the opt-in tables, routes first: the route of
     ``req`` when ``routes`` routes it, else a ``direct`` plan of its pin in
     ``pins``. Raises ``ValueError`` when neither table covers the problem (the
@@ -548,9 +680,19 @@ def dispatch_conv_production(req, routes: ConvRoutes | None = None, pins: ConvPi
         from .grouped_convolution import _conv_problem
 
         res = dispatch_conv_pinned(req, pins)
-        step = RouteStep(f"pinned {res.spec.name}", "pinned", (("A", "x"), ("B", "w"), ("D", "y")))
-        return ConvRoutePlan(case=res.spec.case, route=ROUTE_DIRECT, request=req, problem=_conv_problem(req),
-                             kernel=res, kernel_request=req, steps=(step,), calls=pins.lookup(req).calls)
+        step = RouteStep(
+            f"pinned {res.spec.name}", "pinned", (("A", "x"), ("B", "w"), ("D", "y"))
+        )
+        return ConvRoutePlan(
+            case=res.spec.case,
+            route=ROUTE_DIRECT,
+            request=req,
+            problem=_conv_problem(req),
+            kernel=res,
+            kernel_request=req,
+            steps=(step,),
+            calls=pins.lookup(req).calls,
+        )
     raise ValueError("neither the route table nor the pin table covers this problem")
 
 

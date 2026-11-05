@@ -87,7 +87,10 @@ def classify(direction: str, ident, split_k: Optional[int] = None) -> Tuple[bool
         if _any(ident, WGRAD_DET_SPLIT_FIELDS):
             reps = int(getattr(ident, "ws_replicas", 0) or 0)
             if split_k is not None and reps and int(split_k) > reps:
-                return False, f"ws_store needs split_k <= ws_replicas ({split_k} > {reps})"
+                return (
+                    False,
+                    f"ws_store needs split_k <= ws_replicas ({split_k} > {reps})",
+                )
             return True, "two-stage ws_store: one slab per slice, ordered fold"
         return False, "two-stage f32 atomics into shared slabs"
     if direction == "fwd":

@@ -74,10 +74,14 @@ def test_deterministic_mode_pins_deterministic_launches(path, mode):
 def test_other_problems_and_arches_are_refused():
     path = TABLES["gfx942_unet3d_bf16"]
     pins = cp.load_conv_pins(path, "deterministic")
-    row = next(iter(json.loads(path.read_text())["modes"]["deterministic"]["cases"].values()))
+    row = next(
+        iter(json.loads(path.read_text())["modes"]["deterministic"]["cases"].values())
+    )
     req = cp.request_from_miopen_cmd(row["cmd"], "gfx942")
     with pytest.raises(ValueError):
-        cp.dispatch_conv_pinned(dataclasses.replace(req, C=req.C * 3, Hi=req.Hi + 3), pins)
+        cp.dispatch_conv_pinned(
+            dataclasses.replace(req, C=req.C * 3, Hi=req.Hi + 3), pins
+        )
     with pytest.raises(ValueError):
         cp.dispatch_conv_pinned(dataclasses.replace(req, arch="gfx950"), pins)
     with pytest.raises(ValueError):
@@ -102,13 +106,17 @@ def test_registered_table_is_opt_in_in_the_grouped_dispatcher():
     for case in ("fwd_s3", "dgrad_s10"):
         req = cp.request_from_miopen_cmd(cases[case]["cmd"], "gfx942")
         with pytest.raises(ValueError):
-            gc.dispatch_conv_grouped(req)  # auto: no gfx942 instance list, pinned is opt-in
+            gc.dispatch_conv_grouped(
+                req
+            )  # auto: no gfx942 instance list, pinned is opt-in
         res = gc.dispatch_conv_grouped(dataclasses.replace(req, algorithm="pinned"))
         assert res.spec.name == cases[case]["kernel"].split()[0]
     # gfx950 auto routing is unchanged: the pinned candidate never admits it.
     for direction in ("fwd", "dgrad"):
         assert all(
-            c.opt_in for c in gc.conv_grouped_candidates(direction) if c.algorithm == "pinned"
+            c.opt_in
+            for c in gc.conv_grouped_candidates(direction)
+            if c.algorithm == "pinned"
         )
 
 
@@ -120,7 +128,9 @@ def test_signature_is_the_run_from_cache_one():
     for mode in doc["modes"]:
         pins = cp.load_conv_pins(path, mode)
         for row in doc["modes"][mode]["cases"].values():
-            res = cp.dispatch_conv_pinned(cp.request_from_miopen_cmd(row["cmd"], "gfx942"), pins)
+            res = cp.dispatch_conv_pinned(
+                cp.request_from_miopen_cmd(row["cmd"], "gfx942"), pins
+            )
             want = tuple(_signature_for_identity(res.spec.identity, res.spec.dtype))
             assert res.signature == want
 
@@ -131,7 +141,10 @@ def test_a_pinned_instance_builds_its_kernel_ir(case):
     doc = json.loads(path.read_text())
     pins = cp.load_conv_pins(path, "deterministic")
     res = cp.dispatch_conv_pinned(
-        cp.request_from_miopen_cmd(doc["modes"]["deterministic"]["cases"][case]["cmd"], "gfx942"), pins
+        cp.request_from_miopen_cmd(
+            doc["modes"]["deterministic"]["cases"][case]["cmd"], "gfx942"
+        ),
+        pins,
     )
     try:
         kernel = res.build()
@@ -160,7 +173,9 @@ def test_step_replay_resolves_a_table_through_dispatch():
                 forms.setdefault(suffix, {})[base] = v["kernel"]
         assert "" in forms and "pad1" in forms
         for form, want in forms.items():
-            cases = load_pins_cases(f"{path}#{mode}" + (f"@{form}" if form else ""), doc["arch"])
+            cases = load_pins_cases(
+                f"{path}#{mode}" + (f"@{form}" if form else ""), doc["arch"]
+            )
             assert {k: v["kernel"] for k, v in cases.items()} == want
             # Padded forms: pad 1 on H and W; the pad1 form also pads D.
             if form:

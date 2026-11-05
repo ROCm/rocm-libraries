@@ -28,12 +28,24 @@ def _spec(problem=None, **kw):
     base = dict(
         problem=problem if problem is not None else _problem(),
         data=ConvDataSpec(dtype_a="bf16", dtype_b="bf16", dtype_d="bf16"),
-        tile_m=128, tile_n=256, tile_k=64, warp_m=2, warp_n=4,
-        warp_tile_m=16, warp_tile_n=16, warp_tile_k=16,
-        pipeline="mem", epilogue="cshuffle", lds_k_outer=False,
-        tap_outer_k=True, tapk_prefetch=1, b_kpack=4,
-        lds_xor=True, lds_k_pad=0,
-        tapk_pingpong=4, tapk_pp_sched=2,
+        tile_m=128,
+        tile_n=256,
+        tile_k=64,
+        warp_m=2,
+        warp_n=4,
+        warp_tile_m=16,
+        warp_tile_n=16,
+        warp_tile_k=16,
+        pipeline="mem",
+        epilogue="cshuffle",
+        lds_k_outer=False,
+        tap_outer_k=True,
+        tapk_prefetch=1,
+        b_kpack=4,
+        lds_xor=True,
+        lds_k_pad=0,
+        tapk_pingpong=4,
+        tapk_pp_sched=2,
     )
     base.update(kw)
     return DgradConvSpec(**base)
@@ -46,7 +58,19 @@ class TestPingpongSpec(unittest.TestCase):
         self.assertNotIn("pps", s.kernel_name())
 
     def test_valid_and_named(self):
-        for bpp, pps in ((1, 0), (2, 0), (3, 0), (3, 2), (4, 1), (4, 2), (4, 3), (4, 4), (4, 5), (4, 6), (5, 2)):
+        for bpp, pps in (
+            (1, 0),
+            (2, 0),
+            (3, 0),
+            (3, 2),
+            (4, 1),
+            (4, 2),
+            (4, 3),
+            (4, 4),
+            (4, 5),
+            (4, 6),
+            (5, 2),
+        ):
             with self.subTest(bpp=bpp, pps=pps):
                 s = _spec(tapk_pingpong=bpp, tapk_pp_sched=pps)
                 ok, why = is_valid_dgrad_spec(s, _ARCH)
@@ -68,8 +92,15 @@ class TestPingpongSpec(unittest.TestCase):
         build_implicit_gemm_conv_dgrad(_spec(split_k=3), arch=_ARCH)
         ok, why = is_valid_dgrad_spec(_spec(tapk_pp_epi=1, cshuffle_m_chunks=2), _ARCH)
         self.assertTrue(ok, why)
-        build_implicit_gemm_conv_dgrad(_spec(tapk_pp_epi=1, cshuffle_m_chunks=2), arch=_ARCH)
-        for kw in (dict(), dict(tile_m=256, tile_n=256, tile_k=32, cshuffle_m_chunks=4, tapk_pp_sched=5)):
+        build_implicit_gemm_conv_dgrad(
+            _spec(tapk_pp_epi=1, cshuffle_m_chunks=2), arch=_ARCH
+        )
+        for kw in (
+            dict(),
+            dict(
+                tile_m=256, tile_n=256, tile_k=32, cshuffle_m_chunks=4, tapk_pp_sched=5
+            ),
+        ):
             s = _spec(tapk_pp_epi=2, **kw)
             ok, why = is_valid_dgrad_spec(s, _ARCH)
             self.assertTrue(ok, why)
@@ -78,10 +109,10 @@ class TestPingpongSpec(unittest.TestCase):
 
     def test_rejected(self):
         cases = (
-            dict(tapk_xhalo=True),               # x-halo loop
-            dict(warp_m=2, warp_n=2),            # 4 waves
-            dict(tapk_pp_sched=0),               # bpp4 needs the two-ahead loop
-            dict(problem=_problem(Y=5, X=5)),    # tap mask: <= 3 per axis
+            dict(tapk_xhalo=True),  # x-halo loop
+            dict(warp_m=2, warp_n=2),  # 4 waves
+            dict(tapk_pp_sched=0),  # bpp4 needs the two-ahead loop
+            dict(problem=_problem(Y=5, X=5)),  # tap mask: <= 3 per axis
             dict(tapk_pingpong=6),
             dict(tapk_pingpong=3, b_kpack=0),
             dict(tapk_pp_epi=1, epilogue="default"),
@@ -102,15 +133,37 @@ class TestPingpongIdentity(unittest.TestCase):
         from benchmarks.common.kernel_cache import KernelIdentity
 
         base = dict(
-            arch=_ARCH, direction="dgrad", algorithm="implicit_gemm",
-            dtype_a="bf16", dtype_b="bf16", dtype_d="bf16",
-            tile_m=128, tile_n=256, tile_k=64, warp_m=2, warp_n=4,
-            warp_tile_m=16, warp_tile_n=16, warp_tile_k=16,
-            pipeline="mem", epilogue="cshuffle", wave_size=64,
-            vector_size_a=8, vector_size_b=8, vector_size_c=8,
-            lds_k_outer=False, grouped=True, is_3d=True,
-            stride_h=1, stride_w=1, dilation_h=1, dilation_w=1, max_sub_gemms=1024,
-            tap_outer_k=True, tapk_prefetch=1, b_kpack=4,
+            arch=_ARCH,
+            direction="dgrad",
+            algorithm="implicit_gemm",
+            dtype_a="bf16",
+            dtype_b="bf16",
+            dtype_d="bf16",
+            tile_m=128,
+            tile_n=256,
+            tile_k=64,
+            warp_m=2,
+            warp_n=4,
+            warp_tile_m=16,
+            warp_tile_n=16,
+            warp_tile_k=16,
+            pipeline="mem",
+            epilogue="cshuffle",
+            wave_size=64,
+            vector_size_a=8,
+            vector_size_b=8,
+            vector_size_c=8,
+            lds_k_outer=False,
+            grouped=True,
+            is_3d=True,
+            stride_h=1,
+            stride_w=1,
+            dilation_h=1,
+            dilation_w=1,
+            max_sub_gemms=1024,
+            tap_outer_k=True,
+            tapk_prefetch=1,
+            b_kpack=4,
         )
         base.update(kw)
         return KernelIdentity(**base)
@@ -127,9 +180,24 @@ class TestPingpongIdentity(unittest.TestCase):
         from kernels.conv.kernel_identity import identity_supports_problem
 
         ident = self._ident(tapk_pingpong=4, tapk_pp_sched=2)
-        p3 = ConvProblem(N=1, Di=10, Hi=10, Wi=10, C=256, K=128, Z=3, Y=3, X=3, sD=1, pD=0, dD=1)
+        p3 = ConvProblem(
+            N=1, Di=10, Hi=10, Wi=10, C=256, K=128, Z=3, Y=3, X=3, sD=1, pD=0, dD=1
+        )
         p5 = ConvProblem(
-            N=1, Di=10, Hi=10, Wi=10, C=256, K=128, Z=5, Y=5, X=5, sD=1, pD=2, dD=1, pH=2, pW=2
+            N=1,
+            Di=10,
+            Hi=10,
+            Wi=10,
+            C=256,
+            K=128,
+            Z=5,
+            Y=5,
+            X=5,
+            sD=1,
+            pD=2,
+            dD=1,
+            pH=2,
+            pW=2,
         )
         self.assertTrue(identity_supports_problem(ident, p3)[0])
         self.assertFalse(identity_supports_problem(ident, p5)[0])

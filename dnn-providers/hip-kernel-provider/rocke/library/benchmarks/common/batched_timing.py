@@ -429,7 +429,9 @@ def time_interleaved_staged(
                 continue
             try:
                 samples[i].extend(
-                    time_launches_staged(runs[i], warmup=warmup, iters=iters, stream=stream)
+                    time_launches_staged(
+                        runs[i], warmup=warmup, iters=iters, stream=stream
+                    )
                 )
             except (StallTimeout, HipError, RuntimeError) as e:
                 print(f"  [interleaved] candidate {i}: {e}; not ranked", flush=True)
@@ -565,7 +567,11 @@ def rank(
                     continue
                 runs.append(run)
                 live.append(i)
-                if chunk_bytes and held_bytes is not None and held_bytes() > chunk_bytes:
+                if (
+                    chunk_bytes
+                    and held_bytes is not None
+                    and held_bytes() > chunk_bytes
+                ):
                     break
             if not runs:
                 continue
@@ -578,7 +584,11 @@ def rank(
                 )
             else:
                 times = time_batch(
-                    runs, warmup=probe_warmup, iters=probe_iters, stream=stream, chunk=chunk
+                    runs,
+                    warmup=probe_warmup,
+                    iters=probe_iters,
+                    stream=stream,
+                    chunk=chunk,
                 )
             for i, run, ms in zip(live, runs, times):
                 if ms is None:
@@ -662,7 +672,15 @@ def rank(
         else:
             results[i].ms = ms
     if recheck and timing == "staged":
-        _recheck(results, kept, recheck, recheck_rounds, recheck_iters, recheck_window, stream)
+        _recheck(
+            results,
+            kept,
+            recheck,
+            recheck_rounds,
+            recheck_iters,
+            recheck_window,
+            stream,
+        )
     return results
 
 

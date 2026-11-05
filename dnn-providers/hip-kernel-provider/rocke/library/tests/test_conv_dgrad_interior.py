@@ -41,7 +41,9 @@ def _dgrad_np(dy, w, p):
                         for wo in range(Wo):
                             wi = wo + x - p.pW
                             if 0 <= wi < p.Wi:
-                                dx[:, di, hi, wi, :] += dy[:, do, ho, wo, :] @ w[:, z, y, x, :]
+                                dx[:, di, hi, wi, :] += (
+                                    dy[:, do, ho, wo, :] @ w[:, z, y, x, :]
+                                )
     return dx
 
 
@@ -67,9 +69,17 @@ class ViewProblem(unittest.TestCase):
                 n, r = divmod(pix, v.Di * v.Hi * v.Wi)
                 d, r = divmod(r, v.Hi * v.Wi)
                 h, x = divmod(r, v.Wi)
-                e = off + n * st["p_dX_stride_n"] + d * st["p_dX_stride_di"] + h * st["p_dX_stride_hi"] + x * st["p_dX_stride_wi"]
+                e = (
+                    off
+                    + n * st["p_dX_stride_n"]
+                    + d * st["p_dX_stride_di"]
+                    + h * st["p_dX_stride_hi"]
+                    + x * st["p_dX_stride_wi"]
+                )
                 self.assertEqual(e, f(pix) * p.C)
-                np.testing.assert_allclose(flat[e:e + p.C], sub[n, d, h, x], rtol=1e-12, atol=1e-12)
+                np.testing.assert_allclose(
+                    flat[e : e + p.C], sub[n, d, h, x], rtol=1e-12, atol=1e-12
+                )
 
     def test_masks(self):
         p = _halo()
@@ -100,22 +110,32 @@ class Identity(unittest.TestCase):
         from kernels.conv.kernel_label import decode
 
         base = decode(self.LAB)
-        halo = ConvProblem(N=1, Hi=10, Wi=10, C=1024, K=1024, Y=3, X=3, Di=18, Z=3, sD=1, pD=0, dD=1)
+        halo = ConvProblem(
+            N=1, Hi=10, Wi=10, C=1024, K=1024, Y=3, X=3, Di=18, Z=3, sD=1, pD=0, dD=1
+        )
         same = dataclasses.replace(halo, pH=1, pW=1, pD=1)
         t = dataclasses.replace(base, dx_interior=1)
         self.assertTrue(identity_supports_problem(t, halo)[0])
         self.assertFalse(identity_supports_problem(t, same)[0])  # not halo form
-        self.assertFalse(identity_supports_problem(dataclasses.replace(t, dx_interior=3), halo)[0])
-        self.assertFalse(identity_supports_problem(dataclasses.replace(t, pp_box_det=0), halo)[0])
+        self.assertFalse(
+            identity_supports_problem(dataclasses.replace(t, dx_interior=3), halo)[0]
+        )
+        self.assertFalse(
+            identity_supports_problem(dataclasses.replace(t, pp_box_det=0), halo)[0]
+        )
 
 
 class ZeroFill(unittest.TestCase):
     def test_builds(self):
         k = build_dgrad_halo_zero(DgradHaloZeroSpec())
         self.assertTrue(k is not None)
-        v, grid, block = halo_zero_launch(_halo(C=8), 2, 0, 1 << 20, DgradHaloZeroSpec())
+        v, grid, block = halo_zero_launch(
+            _halo(C=8), 2, 0, 1 << 20, DgradHaloZeroSpec()
+        )
         self.assertEqual(block, (256, 1, 1))
-        self.assertEqual(v["u1"] + v["u2"] + v["u3"], int((~interior_mask_np(_halo(C=8))).sum()))
+        self.assertEqual(
+            v["u1"] + v["u2"] + v["u3"], int((~interior_mask_np(_halo(C=8))).sum())
+        )
 
     def test_sections_cover_the_shell(self):
         """The kernel's per-thread decode (emulated) hits every shell unit once."""
@@ -131,7 +151,11 @@ class ZeroFill(unittest.TestCase):
                 g, r = divmod(t, u["L2"])
                 side, o = divmod(r, u["hh"] * u["ru"])
                 n, d = divmod(g, u["Do"])
-                got.append((n * u["Di"] + d + u["hd"]) * plane + side * (u["Hi"] - u["hh"]) * u["ru"] + o)
+                got.append(
+                    (n * u["Di"] + d + u["hd"]) * plane
+                    + side * (u["Hi"] - u["hh"]) * u["ru"]
+                    + o
+                )
             for t in range(u["u3"]):
                 g, r = divmod(t, u["L3"])
                 side, o = divmod(r, u["e"])
@@ -149,15 +173,21 @@ class PpBoxInterior(unittest.TestCase):
         from kernels.common.conv_dgrad_box_det import _record_pixels
         from kernels.common.conv_implicit_gemm_dgrad import pp_box_sub_gemms
 
-        p = ConvProblem(N=1, Hi=10, Wi=12, C=64, K=64, Y=3, X=3, Di=9, Z=3, sD=1, pD=0, dD=1)
+        p = ConvProblem(
+            N=1, Hi=10, Wi=12, C=64, K=64, Y=3, X=3, Di=9, Z=3, sD=1, pD=0, dD=1
+        )
         want = set(np.flatnonzero(interior_mask_np(p).reshape(-1)).tolist())
         for nclass in (3, 5, 7, 77, 8, 555):
             for split in (1, 4):
-                sgs = pp_box_sub_gemms(p, 64, 64, nclass, tile_k=32, max_split=split, cus=64, interior=True)
+                sgs = pp_box_sub_gemms(
+                    p, 64, 64, nclass, tile_k=32, max_split=split, cus=64, interior=True
+                )
                 got = [q for sg in sgs for q in _record_pixels(sg, p)]
                 self.assertEqual(len(got), len(want), nclass)
                 self.assertEqual(set(got), want, nclass)
-                full = pp_box_sub_gemms(p, 64, 64, nclass, tile_k=32, max_split=split, cus=64)
+                full = pp_box_sub_gemms(
+                    p, 64, 64, nclass, tile_k=32, max_split=split, cus=64
+                )
                 self.assertEqual(sum(sg.gemm_m for sg in full), p.Di * p.Hi * p.Wi)
 
 
@@ -176,14 +206,24 @@ class XhWmask(unittest.TestCase):
         xwm = dataclasses.replace(base, xh_dx_wmask=True)
         self.assertIn("-xwm-", xwm.label())
         self.assertEqual(decode(xwm.label()), xwm)
-        halo = ConvProblem(N=1, Hi=130, Wi=130, C=64, K=64, Y=3, X=3, Di=258, Z=3, sD=1, pD=0, dD=1)
+        halo = ConvProblem(
+            N=1, Hi=130, Wi=130, C=64, K=64, Y=3, X=3, Di=258, Z=3, sD=1, pD=0, dD=1
+        )
         pad1 = dataclasses.replace(halo, Di=256, Hi=128, Wi=128, pD=1, pH=1, pW=1)
         self.assertTrue(identity_supports_problem(base, halo)[0])
         self.assertFalse(identity_supports_problem(base, pad1)[0])  # pW == 1
-        self.assertFalse(identity_supports_problem(xwm, halo)[0])  # would skip the w columns
-        self.assertTrue(identity_supports_problem(xwm, pad1)[0])  # W-extended view (Wi 130: xyr130)
+        self.assertFalse(
+            identity_supports_problem(xwm, halo)[0]
+        )  # would skip the w columns
+        self.assertTrue(
+            identity_supports_problem(xwm, pad1)[0]
+        )  # W-extended view (Wi 130: xyr130)
         for v in (1, 2):
-            self.assertTrue(identity_supports_problem(dataclasses.replace(xwm, dx_interior=v), halo)[0])
+            self.assertTrue(
+                identity_supports_problem(
+                    dataclasses.replace(xwm, dx_interior=v), halo
+                )[0]
+            )
 
 
 class Axes(unittest.TestCase):
@@ -204,13 +244,17 @@ class Axes(unittest.TestCase):
             sub = _dgrad_np(dy, w, v).reshape(-1, p.C)
             f = view_pixel_map(p, keep_w, 3)
             for pix in range(sub.shape[0]):
-                np.testing.assert_allclose(full[f(pix) * p.C:(f(pix) + 1) * p.C], sub[pix], atol=1e-12)
+                np.testing.assert_allclose(
+                    full[f(pix) * p.C : (f(pix) + 1) * p.C], sub[pix], atol=1e-12
+                )
         want = set(np.flatnonzero(interior_mask_np(p, 3).reshape(-1)).tolist())
         self.assertEqual(len(want), p.Di * p.Ho * p.Wo)
         p = _halo(D=9, H=10, W=12, C=64, K=64)
         want = set(np.flatnonzero(interior_mask_np(p, 3).reshape(-1)).tolist())
         for nclass in (5, 7, 77, 8):
-            sgs = pp_box_sub_gemms(p, 64, 64, nclass, tile_k=32, max_split=4, cus=64, interior=3)
+            sgs = pp_box_sub_gemms(
+                p, 64, 64, nclass, tile_k=32, max_split=4, cus=64, interior=3
+            )
             got = [q for sg in sgs for q in _record_pixels(sg, p)]
             self.assertEqual(sorted(got), sorted(want), nclass)
 
@@ -219,7 +263,9 @@ class Axes(unittest.TestCase):
         u = halo_zero_units(p, 2, 3)
         self.assertEqual(u["u1"], 0)
         self.assertEqual(u["Do"], p.Di)
-        self.assertEqual(u["u1"] + u["u2"] + u["u3"], int((~interior_mask_np(p, 3)).sum()) * 2)
+        self.assertEqual(
+            u["u1"] + u["u2"] + u["u3"], int((~interior_mask_np(p, 3)).sum()) * 2
+        )
 
     def test_identity(self):
         from kernels.conv.kernel_identity import identity_supports_problem
@@ -228,12 +274,20 @@ class Axes(unittest.TestCase):
         t = dataclasses.replace(decode(Identity.LAB), dx_interior=1, dx_interior_axes=3)
         self.assertIn("-dxa3-", t.label())
         self.assertEqual(decode(t.label()), t)
-        halo = ConvProblem(N=1, Hi=10, Wi=10, C=1024, K=1024, Y=3, X=3, Di=18, Z=3, sD=1, pD=0, dD=1)
+        halo = ConvProblem(
+            N=1, Hi=10, Wi=10, C=1024, K=1024, Y=3, X=3, Di=18, Z=3, sD=1, pD=0, dD=1
+        )
         self.assertTrue(identity_supports_problem(t, halo)[0])
         # D at pad 1 (not halo form there) is fine when D is not skipped
-        self.assertTrue(identity_supports_problem(t, dataclasses.replace(halo, Di=16, pD=1))[0])
-        x = dataclasses.replace(decode(XhWmask.XH), xh_dx_wmask=True, dx_interior=1, dx_interior_axes=6)
-        hx = ConvProblem(N=1, Hi=130, Wi=130, C=64, K=64, Y=3, X=3, Di=258, Z=3, sD=1, pD=0, dD=1)
+        self.assertTrue(
+            identity_supports_problem(t, dataclasses.replace(halo, Di=16, pD=1))[0]
+        )
+        x = dataclasses.replace(
+            decode(XhWmask.XH), xh_dx_wmask=True, dx_interior=1, dx_interior_axes=6
+        )
+        hx = ConvProblem(
+            N=1, Hi=130, Wi=130, C=64, K=64, Y=3, X=3, Di=258, Z=3, sD=1, pD=0, dD=1
+        )
         self.assertFalse(identity_supports_problem(x, hx)[0])
 
 

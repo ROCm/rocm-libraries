@@ -874,6 +874,8 @@ def test_rdna_parts_size_the_wgrad_split_by_their_own_cus(arch, cus):
     assert d.split_k == WGRAD_ASSUMED_WAVES_PER_CU * cus
     # One die: a grouped launch needs no XCD snap.
     assert _ARCH_NUM_XCDS[arch] == 1
+
+
 def test_fwd_wave_filling_split_ks():
     from kernels.common.conv_split_k import fwd_wave_filling_split_ks
 

@@ -413,6 +413,7 @@ CACHE_GROUPED: Tuple[bool, ...] = (True,)
 # is built by default; ROCKE_AOT_SPATIAL=3d (or 2d,3d) adds the 3-D grid.
 import os as _os
 import re as _re
+
 CACHE_SPATIAL_3D: Tuple[bool, ...] = tuple(
     {"2d": False, "3d": True}[v.strip()]
     for v in _os.environ.get("ROCKE_AOT_SPATIAL", "2d").split(",")
@@ -440,6 +441,8 @@ CACHE_DGRAD_XHALO_TPF: Tuple[int, ...] = tuple(
 CACHE_DGRAD_B_KPACK: Tuple[int, ...] = tuple(
     int(v) for v in _os.environ.get("ROCKE_AOT_DGRAD_BKP", "0").split(",") if v.strip()
 )
+
+
 # Knob sets of the x-halo dgrad binaries (tapk_xhalo), each built per x-halo
 # variant it applies to: ROCKE_AOT_DGRAD_XHK is a ";"-separated list of
 # ","-separated key=value sets over ilv (DgradConvSpec.tapk_ilv), lda
@@ -452,7 +455,37 @@ CACHE_DGRAD_B_KPACK: Tuple[int, ...] = tuple(
 # "@<regex>" gives its set its own scope (see ROCKE_AOT_DGRAD_XHK_SCOPE). An
 # empty set is the plain binary; unset = that alone.
 def _parse_dgrad_xh_knobs(text: str) -> Tuple[Tuple[Tuple[str, int], ...], ...]:
-    keys = {"ilv", "xhx", "xcd", "kpad", "mch", "sk", "lda", "wpe", "lsb", "sp", "lxor", "bw", "bpad", "ak4", "xo", "xdf", "xfa", "xep", "xhp", "mb", "xsm", "nag", "xdl", "xel", "elb", "xtr", "xyr", "zt", "xwm"}
+    keys = {
+        "ilv",
+        "xhx",
+        "xcd",
+        "kpad",
+        "mch",
+        "sk",
+        "lda",
+        "wpe",
+        "lsb",
+        "sp",
+        "lxor",
+        "bw",
+        "bpad",
+        "ak4",
+        "xo",
+        "xdf",
+        "xfa",
+        "xep",
+        "xhp",
+        "mb",
+        "xsm",
+        "nag",
+        "xdl",
+        "xel",
+        "elb",
+        "xtr",
+        "xyr",
+        "zt",
+        "xwm",
+    }
     out = []
     for part in text.split(";"):
         kv = []
@@ -580,8 +613,32 @@ def _dgrad_xh_knob_cfg(knobs, *, tpf: int, grouped: bool, epilogue: str):
 # an "@<regex>" scope on the plain binary's label (unscoped sets are
 # ignored, so the plain grid never grows by accident). Unset = none.
 def _parse_dgrad_pp_knobs(text: str):
-    keys = {"bpp", "pps", "ppe", "ppp", "ppx", "zt", "pbs", "xcd", "kpad", "lxor", "mch", "wpe", "sk", "sapl", "mb",
-            "psk", "pskm", "pzs", "pbx", "pbc", "pbo", "pbd", "xel", "elb"}
+    keys = {
+        "bpp",
+        "pps",
+        "ppe",
+        "ppp",
+        "ppx",
+        "zt",
+        "pbs",
+        "xcd",
+        "kpad",
+        "lxor",
+        "mch",
+        "wpe",
+        "sk",
+        "sapl",
+        "mb",
+        "psk",
+        "pskm",
+        "pzs",
+        "pbx",
+        "pbc",
+        "pbo",
+        "pbd",
+        "xel",
+        "elb",
+    }
     out = []
     for part in text.split(";"):
         kv = []
@@ -613,7 +670,11 @@ def _dgrad_pbx8_twins(sets):
     out = list(sets)
     # ROCKE_AOT_DGRAD_PBX8_PBC=456,684,912: each pbx=8 twin also at those CU
     # budgets (pbc; the planner may pick multi-round plans there).
-    pbcs = [int(t) for t in _os.environ.get("ROCKE_AOT_DGRAD_PBX8_PBC", "").split(",") if t.strip()]
+    pbcs = [
+        int(t)
+        for t in _os.environ.get("ROCKE_AOT_DGRAD_PBX8_PBC", "").split(",")
+        if t.strip()
+    ]
     for kv in sets:
         d = dict(kv)
         if d.get("pbx") in (7, 77) and not d.get("pzs"):
@@ -652,14 +713,18 @@ def _dxi_applies(ident) -> bool:
         return False
     if ident.pp_streamk or ident.tapk_pp_persist == 2:
         return False
-    return not CACHE_DGRAD_DXI_SCOPE or bool(_re.search(CACHE_DGRAD_DXI_SCOPE, ident.label()))
+    return not CACHE_DGRAD_DXI_SCOPE or bool(
+        _re.search(CACHE_DGRAD_DXI_SCOPE, ident.label())
+    )
 
 
 # Extra dgrad tile extents (e.g. "512") built ONLY as ROCKE_AOT_DGRAD_PPK
 # variants of the plain tpf1 tap-outer binary (no base binary, no other loop):
 # ROCKE_AOT_DGRAD_PP_TILE_MN. Unset = none.
 CACHE_DGRAD_PP_EXTRA_TILE_MN: Tuple[int, ...] = tuple(
-    int(v) for v in _os.environ.get("ROCKE_AOT_DGRAD_PP_TILE_MN", "").split(",") if v.strip()
+    int(v)
+    for v in _os.environ.get("ROCKE_AOT_DGRAD_PP_TILE_MN", "").split(",")
+    if v.strip()
 )
 
 
@@ -958,9 +1023,13 @@ _WGRAD_BSWZ_WPE = int(_os.environ.get("ROCKE_AOT_WGRAD_BSWZ_WPE", "0") or 0)
 # cap for 2-3 waves/SIMD).
 _WGRAD_XWIN = int(_os.environ.get("ROCKE_AOT_WGRAD_XWIN", "0") or 0)
 _WGRAD_XWIN_TK = int(_os.environ.get("ROCKE_AOT_WGRAD_XWIN_TK", "0") or 0)
-_WGRAD_XWIN_N384_MIN_M = int(_os.environ.get("ROCKE_AOT_WGRAD_XWIN_N384_MIN_M", "0") or 0)
+_WGRAD_XWIN_N384_MIN_M = int(
+    _os.environ.get("ROCKE_AOT_WGRAD_XWIN_N384_MIN_M", "0") or 0
+)
 _WGRAD_XWIN_WPE: Tuple[int, ...] = tuple(
-    int(v) for v in (_os.environ.get("ROCKE_AOT_WGRAD_XWIN_WPE", "") or "").split(",") if v
+    int(v)
+    for v in (_os.environ.get("ROCKE_AOT_WGRAD_XWIN_WPE", "") or "").split(",")
+    if v
 )
 _WGRAD_XWIN_WPE_MAX_M = int(_os.environ.get("ROCKE_AOT_WGRAD_XWIN_WPE_MAX_M", "0") or 0)
 # ROCKE_AOT_WGRAD_XWIN_M=<m>[,<m>...]: only these tile_m;
@@ -969,7 +1038,9 @@ _WGRAD_XWIN_WPE_MAX_M = int(_os.environ.get("ROCKE_AOT_WGRAD_XWIN_WPE_MAX_M", "0
 # ROCKE_AOT_WGRAD_XWIN_N384_WT=<w>: the tile_n=384 twins only with
 # warp_tile_m == w (32: the 16x16 ones spill at 256 rows).
 _WGRAD_XWIN_M: Tuple[int, ...] = tuple(
-    int(v) for v in (_os.environ.get("ROCKE_AOT_WGRAD_XWIN_M", "") or "").split(",") if v
+    int(v)
+    for v in (_os.environ.get("ROCKE_AOT_WGRAD_XWIN_M", "") or "").split(",")
+    if v
 )
 _WGRAD_XWIN_N384_WT = int(_os.environ.get("ROCKE_AOT_WGRAD_XWIN_N384_WT", "0") or 0)
 _WGRAD_XWIN_CB = int(_os.environ.get("ROCKE_AOT_WGRAD_XWIN_CB", "0") or 0)
@@ -980,7 +1051,9 @@ _WGRAD_XWIN_CB = int(_os.environ.get("ROCKE_AOT_WGRAD_XWIN_CB", "0") or 0)
 # dW-sized f32 slabs -- what the medium shapes (dW of 0.4-3.5 M elements at
 # split 6-48) pay outside Stage 1. Default unset: no extra jobs.
 _WGRAD_XWIN_WSR: Tuple[int, ...] = tuple(
-    int(v) for v in (_os.environ.get("ROCKE_AOT_WGRAD_XWIN_WSR", "") or "").split(",") if v
+    int(v)
+    for v in (_os.environ.get("ROCKE_AOT_WGRAD_XWIN_WSR", "") or "").split(",")
+    if v
 )
 _WGRAD_XWIN_WSR_MIN_M = int(_os.environ.get("ROCKE_AOT_WGRAD_XWIN_WSR_MIN_M", "0") or 0)
 # ROCKE_AOT_WGRAD_XWIN_TK2=<k> with ROCKE_AOT_WGRAD_XWIN_TK2_MIN_M=<m> and
@@ -996,9 +1069,13 @@ _WGRAD_XWIN_TK2_WSR = int(_os.environ.get("ROCKE_AOT_WGRAD_XWIN_TK2_WSR", "0") o
 # twins with tile_m >= m, only of their waves_per_eu copies, with
 # ws_replicas=r. Unset: no jobs.
 _WGRAD_XWIN_MROW: Tuple[int, ...] = tuple(
-    int(v) for v in (_os.environ.get("ROCKE_AOT_WGRAD_XWIN_MROW", "") or "").split(",") if v
+    int(v)
+    for v in (_os.environ.get("ROCKE_AOT_WGRAD_XWIN_MROW", "") or "").split(",")
+    if v
 )
-_WGRAD_XWIN_MROW_MIN_M = int(_os.environ.get("ROCKE_AOT_WGRAD_XWIN_MROW_MIN_M", "0") or 0)
+_WGRAD_XWIN_MROW_MIN_M = int(
+    _os.environ.get("ROCKE_AOT_WGRAD_XWIN_MROW_MIN_M", "0") or 0
+)
 _WGRAD_XWIN_MROW_WSR = int(_os.environ.get("ROCKE_AOT_WGRAD_XWIN_MROW_WSR", "0") or 0)
 # ROCKE_AOT_WGRAD_XWIN_PP=<n>[,<n>...]: also an 8-wave block ping-pong copy
 # (xwin_groups=8/waves, xwin_pp=<n>, waves_per_eu=2) of the 2-wave 64-row
@@ -1007,7 +1084,9 @@ _WGRAD_XWIN_MROW_WSR = int(_os.environ.get("ROCKE_AOT_WGRAD_XWIN_MROW_WSR", "0")
 # multiples of xwin_groups (4 / 2 / 1).
 # Unset: no jobs.
 _WGRAD_XWIN_PP: Tuple[int, ...] = tuple(
-    int(v) for v in (_os.environ.get("ROCKE_AOT_WGRAD_XWIN_PP", "") or "").split(",") if v
+    int(v)
+    for v in (_os.environ.get("ROCKE_AOT_WGRAD_XWIN_PP", "") or "").split(",")
+    if v
 )
 # ROCKE_AOT_WGRAD_WSF=1: also a ws_fuse=1 copy (split-K reduction in the
 # Stage 1 epilogue: no scratch clear, no Stage 2) of every ws_replicas=1
@@ -1020,22 +1099,30 @@ _WGRAD_MB_PP: Tuple[int, ...] = tuple(
 # ROCKE_AOT_WGRAD_XWIN_BQ=<v>[,<v>...]: xwin_bq=<v> twins (X window
 # staged in quads, b64 transposed stores) of the xwin ping-pong copies.
 _WGRAD_XWIN_BQ: Tuple[int, ...] = tuple(
-    int(v) for v in (_os.environ.get("ROCKE_AOT_WGRAD_XWIN_BQ", "") or "").split(",") if v
+    int(v)
+    for v in (_os.environ.get("ROCKE_AOT_WGRAD_XWIN_BQ", "") or "").split(",")
+    if v
 )
 # ROCKE_AOT_WGRAD_XWIN_PPS=<v>[,...]: xwin_pps=<v> twins (ping-pong
 # schedule variants) of the xwin ping-pong copies.
 _WGRAD_XWIN_PPS: Tuple[int, ...] = tuple(
-    int(v) for v in (_os.environ.get("ROCKE_AOT_WGRAD_XWIN_PPS", "") or "").split(",") if v
+    int(v)
+    for v in (_os.environ.get("ROCKE_AOT_WGRAD_XWIN_PPS", "") or "").split(",")
+    if v
 )
 # ROCKE_AOT_WGRAD_XWIN_ROT=1: xwin_rot=1 twins (plane-rotated slice
 # order) of the xwin ping-pong copies (and of their BQ/AQ/PPS twins).
 _WGRAD_XWIN_ROT: Tuple[int, ...] = tuple(
-    int(v) for v in (_os.environ.get("ROCKE_AOT_WGRAD_XWIN_ROT", "") or "").split(",") if v
+    int(v)
+    for v in (_os.environ.get("ROCKE_AOT_WGRAD_XWIN_ROT", "") or "").split(",")
+    if v
 )
 # ROCKE_AOT_WGRAD_XWIN_KORD=1: xwin_kord=1 twins (row-fastest K order)
 # of the xwin ping-pong copies (and of their BQ/AQ/PPS/ROT twins).
 _WGRAD_XWIN_KORD: Tuple[int, ...] = tuple(
-    int(v) for v in (_os.environ.get("ROCKE_AOT_WGRAD_XWIN_KORD", "") or "").split(",") if v
+    int(v)
+    for v in (_os.environ.get("ROCKE_AOT_WGRAD_XWIN_KORD", "") or "").split(",")
+    if v
 )
 # ROCKE_AOT_WGRAD_XWIN_TWIN_MAX_M=<m>: the BQ/AQ/PPS/ROT/KORD twins only
 # for xwin ping-pong copies with tile_m <= m (default: all).
@@ -1043,13 +1130,17 @@ _WGRAD_XWIN_TWIN_MAX_M = int(_os.environ.get("ROCKE_AOT_WGRAD_XWIN_TWIN_MAX_M", 
 # ROCKE_AOT_WGRAD_XWIN_AQ=1: xwin_aq=1 twins (leader-only dY stores) of
 # the xwin_gn=2 ping-pong copies (and of their xwin_bq twins).
 _WGRAD_XWIN_AQ: Tuple[int, ...] = tuple(
-    int(v) for v in (_os.environ.get("ROCKE_AOT_WGRAD_XWIN_AQ", "") or "").split(",") if v
+    int(v)
+    for v in (_os.environ.get("ROCKE_AOT_WGRAD_XWIN_AQ", "") or "").split(",")
+    if v
 )
 # ROCKE_AOT_WGRAD_XWIN_KBAND=<n>[,<n>...]: also an xwin_kband=<n> copy (K
 # order banded by n output rows: a split-K slice runs one band through the
 # depth planes) of the multi-group ping-pong xwin copies (ROCKE_AOT_WGRAD_XWIN_PP).
 _WGRAD_XWIN_KBAND: Tuple[int, ...] = tuple(
-    int(v) for v in (_os.environ.get("ROCKE_AOT_WGRAD_XWIN_KBAND", "") or "").split(",") if v
+    int(v)
+    for v in (_os.environ.get("ROCKE_AOT_WGRAD_XWIN_KBAND", "") or "").split(",")
+    if v
 )
 
 
@@ -1065,18 +1156,24 @@ _WGRAD_WSS_TILE_K = int(_os.environ.get("ROCKE_AOT_WGRAD_WSS_TILE_K", "0") or 0)
 
 def _wgrad_wsf_twins(variants: tuple, tile_k: int = 0) -> tuple:
     base = tuple(
-        v for v in variants
-        if v.get("ws_replicas") == 1 and v.get("xwin_groups", 1) == 1
-        and not v.get("ws_fuse") and not v.get("ws_store")
+        v
+        for v in variants
+        if v.get("ws_replicas") == 1
+        and v.get("xwin_groups", 1) == 1
+        and not v.get("ws_fuse")
+        and not v.get("ws_store")
     )
     out = ()
     if _WGRAD_WSF:
         out = out + tuple(dict(v, ws_fuse=_WGRAD_WSF) for v in base)
     out = out + tuple(
-        dict(v, ws_store=1, ws_replicas=r) for r in _WGRAD_WSS for v in base
+        dict(v, ws_store=1, ws_replicas=r)
+        for r in _WGRAD_WSS
+        for v in base
         if not _WGRAD_WSS_TILE_K or v.get("tile_k", tile_k) == _WGRAD_WSS_TILE_K
     )
     return out
+
 
 # ---- wgrad stream-K axis (opt-in) -------------------------------------------
 # Stream-K (WgradConvSpec.streamk) bakes its launch mode and its partial-sum
@@ -1123,9 +1220,10 @@ _MAX_ACC_REGS = CACHE_MAX_ACC_REGS
 # ROCKE_AOT_VECS (e.g. "8") narrows the vector widths a scoped cache builds:
 # --run-from-cache only offers the widest widths a problem admits unless
 # --all-vector-sizes, so a cache for known shapes needs no narrower ones.
-_VECS = tuple(
-    int(v) for v in _os.environ.get("ROCKE_AOT_VECS", "").split(",") if v.strip()
-) or CACHE_VECS
+_VECS = (
+    tuple(int(v) for v in _os.environ.get("ROCKE_AOT_VECS", "").split(",") if v.strip())
+    or CACHE_VECS
+)
 _PIPELINES = CACHE_PIPELINES
 _EPILOGUES = CACHE_EPILOGUES
 _GROUPED = CACHE_GROUPED
@@ -1203,7 +1301,10 @@ def _grid_axes(direction: Optional[str]) -> Tuple[Tuple[int, ...], Tuple[int, ..
     explicit geometry list already holds.
     """
     if direction == "dgrad" and CACHE_DGRAD_PP_EXTRA_TILE_MN:
-        return tuple(sorted(set(_TILE_MN) | set(CACHE_DGRAD_PP_EXTRA_TILE_MN))), _WARP_MN
+        return (
+            tuple(sorted(set(_TILE_MN) | set(CACHE_DGRAD_PP_EXTRA_TILE_MN))),
+            _WARP_MN,
+        )
     if direction != "wgrad":
         return _TILE_MN, _WARP_MN
     return (
@@ -1401,10 +1502,22 @@ def _fwd_k_loops(pipeline: str, arch: Optional[str] = None) -> List[dict]:
 # compv3/compv4 would only rebuild it) and only on the geometries of
 # ROCKE_AOT_FWD_PP_SCOPE ("<M>x<N>x<K>[w<wm>x<wn>][a<atom>],...", required).
 _FWD_PP_RE = re.compile(r"^p([1-5])(?:m(\d+))?(?:s([0-3]))?(?:v(\d))?(?:w(\d))?(b)?$")
-_FWD_PP_PLAIN_OFF = ("lds_ahead", "defer_mfma", "vmem_interleave", "rpf_fetch_late",
-                     "rpf_lds_barrier", "a_direct", "uk_xhalo", "uk_chunk_group",
-                     "lds_kpack_read", "uk_nopad", "rpf_setprio", "waves_per_eu",
-                     "defer_mfma_per_write", "xh_dpp")
+_FWD_PP_PLAIN_OFF = (
+    "lds_ahead",
+    "defer_mfma",
+    "vmem_interleave",
+    "rpf_fetch_late",
+    "rpf_lds_barrier",
+    "a_direct",
+    "uk_xhalo",
+    "uk_chunk_group",
+    "lds_kpack_read",
+    "uk_nopad",
+    "rpf_setprio",
+    "waves_per_eu",
+    "defer_mfma_per_write",
+    "xh_dpp",
+)
 
 
 def _fwd_pp_variants() -> Tuple[dict, ...]:
@@ -1415,7 +1528,9 @@ def _fwd_pp_variants() -> Tuple[dict, ...]:
             continue
         m = _FWD_PP_RE.match(tok)
         if m is None:
-            raise ValueError(f"ROCKE_AOT_FWD_PP: {tok!r} is not p<1-5>[m<n>][s<0-3>][v<n>][w<n>][b]")
+            raise ValueError(
+                f"ROCKE_AOT_FWD_PP: {tok!r} is not p<1-5>[m<n>][s<0-3>][v<n>][w<n>][b]"
+            )
         v = dict(rpf_pingpong=int(m.group(1)), lds_kpack_read=True, uk_nopad=True)
         if m.group(2) and int(m.group(2)):
             v["pp_pre_mfma"] = int(m.group(2))
@@ -1445,10 +1560,14 @@ def _fwd_pp_scope() -> List[Tuple[int, ...]]:
     return out
 
 
-def _fwd_pp_geometry_in_scope(tm: int, tn: int, tk: int, wm: int, wn: int, wt: int) -> bool:
+def _fwd_pp_geometry_in_scope(
+    tm: int, tn: int, tk: int, wm: int, wn: int, wt: int
+) -> bool:
     for m_, n_, k_, wm_, wn_, a_ in _fwd_pp_scope():
-        if (m_, n_, k_) == (tm, tn, tk) and (not wm_ or (wm_, wn_) == (wm, wn)) and (
-            not a_ or a_ == wt
+        if (
+            (m_, n_, k_) == (tm, tn, tk)
+            and (not wm_ or (wm_, wn_) == (wm, wn))
+            and (not a_ or a_ == wt)
         ):
             return True
     return False
@@ -1461,8 +1580,11 @@ def _fwd_pingpong_k_loops(k_loops: List[dict], pipeline: str) -> List[dict]:
         return []
     out = []
     for kl in k_loops:
-        if not (kl.get("uniform_k_decode") and kl.get("reg_prefetch") == 1
-                and kl.get("lds_xor")) or any(kl.get(k) for k in _FWD_PP_PLAIN_OFF):
+        if not (
+            kl.get("uniform_k_decode")
+            and kl.get("reg_prefetch") == 1
+            and kl.get("lds_xor")
+        ) or any(kl.get(k) for k in _FWD_PP_PLAIN_OFF):
             continue
         for v in variants:
             d = dict(kl, **v)
@@ -1472,48 +1594,84 @@ def _fwd_pingpong_k_loops(k_loops: List[dict], pipeline: str) -> List[dict]:
     # staged in m-chunks (cshuffle_m_chunks; built only where the C tile
     # does not fit the LDS, see _fwd_kloop_in_scope), with the row-keyed
     # swizzle when ROCKE_AOT_FWD_PP_MCH_LXRK=1.
-    _mch = [int(t) for t in _os.environ.get("ROCKE_AOT_FWD_PP_MCH", "").split(",") if t.strip()]
+    _mch = [
+        int(t)
+        for t in _os.environ.get("ROCKE_AOT_FWD_PP_MCH", "").split(",")
+        if t.strip()
+    ]
     _mx = _os.environ.get("ROCKE_AOT_FWD_PP_MCH_LXRK", "0") not in ("", "0")
     out = out + [
         dict(d, cshuffle_m_chunks=m, **({"lds_xor_rowkey": True} if _mx else {}))
-        for m in _mch for d in out if not d.get("pp_b_double")
+        for m in _mch
+        for d in out
+        if not d.get("pp_b_double")
     ]
     # ROCKE_AOT_FWD_ESF=1: the ping-pong loops also with the constant-step
     # in-bounds cshuffle store (epi_store_fast).
     if _os.environ.get("ROCKE_AOT_FWD_ESF", "0") not in ("", "0"):
-        out = out + [dict(d, epi_store_fast=True) for d in out if not d.get("cshuffle_m_chunks")]
+        out = out + [
+            dict(d, epi_store_fast=True) for d in out if not d.get("cshuffle_m_chunks")
+        ]
     # ROCKE_AOT_FWD_PP_CG=2[,4]: the tap-fastest ping-pong loops also with the
     # channel chunks grouped (uk_chunk_group; split binaries need uk_nopad).
-    for g in (int(t) for t in _os.environ.get("ROCKE_AOT_FWD_PP_CG", "").split(",") if t.strip()):
+    for g in (
+        int(t)
+        for t in _os.environ.get("ROCKE_AOT_FWD_PP_CG", "").split(",")
+        if t.strip()
+    ):
         out = out + [
-            dict(d, uk_chunk_group=g) for d in out
-            if d.get("uk_tap_fast") and not d.get("uk_chunk_group") and not d.get("uk_xhalo")
+            dict(d, uk_chunk_group=g)
+            for d in out
+            if d.get("uk_tap_fast")
+            and not d.get("uk_chunk_group")
+            and not d.get("uk_xhalo")
         ]
     # ROCKE_AOT_FWD_PSF=3[,4]: the pp5 loops also with their global reads
     # split between [mem A] and [compute B] (pp_split_fetch).
-    for n in (int(t) for t in _os.environ.get("ROCKE_AOT_FWD_PSF", "").split(",") if t.strip()):
+    for n in (
+        int(t) for t in _os.environ.get("ROCKE_AOT_FWD_PSF", "").split(",") if t.strip()
+    ):
         out = out + [
             dict(d, pp_split_fetch=n)
             for d in out
-            if d.get("rpf_pingpong") == 5 and not d.get("uk_xhalo") and not d.get("pp_split_fetch")
+            if d.get("rpf_pingpong") == 5
+            and not d.get("uk_xhalo")
+            and not d.get("pp_split_fetch")
         ]
     # ROCKE_AOT_FWD_FBSE=1: the variants the two axes above add
     # (pp_split_fetch / uk_chunk_group) skip the empty fallback loop's
     # prologue (fb_skip_empty).
     if _os.environ.get("ROCKE_AOT_FWD_FBSE", "0") not in ("", "0"):
-        out = [dict(d, fb_skip_empty=True)
-               if d.get("pp_split_fetch") or d.get("uk_chunk_group") else d for d in out]
+        out = [
+            (
+                dict(d, fb_skip_empty=True)
+                if d.get("pp_split_fetch") or d.get("uk_chunk_group")
+                else d
+            )
+            for d in out
+        ]
     # ROCKE_AOT_FWD_ELB=1: ... and LDS-only epilogue barriers (epi_lds_barriers).
     if _os.environ.get("ROCKE_AOT_FWD_ELB", "0") not in ("", "0"):
-        out = [dict(d, epi_lds_barriers=True)
-               if d.get("pp_split_fetch") or d.get("uk_chunk_group") else d for d in out]
+        out = [
+            (
+                dict(d, epi_lds_barriers=True)
+                if d.get("pp_split_fetch") or d.get("uk_chunk_group")
+                else d
+            )
+            for d in out
+        ]
     # ROCKE_AOT_FWD_XSUB=32[,..]: the pp5 loops (no pp_b_double) also as the
     # x-halo sub-tile ping-pong (xh_subtile) staging tile_m + n pixels.
-    for n in (int(t) for t in _os.environ.get("ROCKE_AOT_FWD_XSUB", "").split(",") if t.strip()):
+    for n in (
+        int(t)
+        for t in _os.environ.get("ROCKE_AOT_FWD_XSUB", "").split(",")
+        if t.strip()
+    ):
         out = out + [
             dict(d, uk_xhalo=n, uk_nopad=False, xh_subtile=True)
             for d in out
-            if d.get("rpf_pingpong") == 5 and not d.get("pp_b_double")
+            if d.get("rpf_pingpong") == 5
+            and not d.get("pp_b_double")
             and not d.get("uk_xhalo")
         ]
     return out
@@ -1568,10 +1726,25 @@ def _fwd_sched_variants() -> Tuple[dict, ...]:
 # "256x64x32w4x1a16") a K loop carrying any of them is only built on those
 # geometries, and with ROCKE_AOT_FWD_KLOOP_XCD="6" only in those tile orders, so a
 # cache can carry them on chosen geometries without multiplying the whole grid.
-_FWD_KLOOP_KNOBS = ("uk_xhalo", "lds_kpack_read", "uk_chunk_group", "rpf_lds_barrier",
-                 "rpf_fetch_late", "xh_dpp", "waves_per_eu", "rpf_setprio", "xh_wait_smem",
-                 "lds_xor_rowkey", "epi_quad_xpose", "no_agpr", "m_band", "xh_stride_m",
-                 "fxh_dma", "xh_yring", "xh_pad")
+_FWD_KLOOP_KNOBS = (
+    "uk_xhalo",
+    "lds_kpack_read",
+    "uk_chunk_group",
+    "rpf_lds_barrier",
+    "rpf_fetch_late",
+    "xh_dpp",
+    "waves_per_eu",
+    "rpf_setprio",
+    "xh_wait_smem",
+    "lds_xor_rowkey",
+    "epi_quad_xpose",
+    "no_agpr",
+    "m_band",
+    "xh_stride_m",
+    "fxh_dma",
+    "xh_yring",
+    "xh_pad",
+)
 _FWD_KLOOP_SCOPE_RE = re.compile(r"^(\d+)x(\d+)x(\d+)(?:w(\d+)x(\d+))?(?:a(\d+))?$")
 
 
@@ -1592,11 +1765,17 @@ def _fwd_kloop_scope() -> Optional[List[Tuple[int, ...]]]:
 # the scheduling knobs (ROCKE_AOT_FWD_SCHED) and uk_nopad. (ukd split-K and
 # split_tail are confined by _fwd_job_variants on the same scope.)
 _FWD_SCOPED_KNOBS = _FWD_KLOOP_KNOBS + (
-    "lds_ahead", "defer_mfma", "vmem_interleave", "uk_nopad", "defer_mfma_per_write",
+    "lds_ahead",
+    "defer_mfma",
+    "vmem_interleave",
+    "uk_nopad",
+    "defer_mfma_per_write",
 )
 
 
-def _fwd_kloop_in_scope(kloop: dict, tm: int, tn: int, tk: int, wm: int, wn: int, wt: int) -> bool:
+def _fwd_kloop_in_scope(
+    kloop: dict, tm: int, tn: int, tk: int, wm: int, wn: int, wt: int
+) -> bool:
     if kloop.get("cshuffle_m_chunks", 1) > 1 and tm * tn * 2 <= 65536:
         # (ROCKE_AOT_FWD_PP_MCH) m-chunks only where the bf16 C tile does not
         # fit the LDS.
@@ -1609,14 +1788,18 @@ def _fwd_kloop_in_scope(kloop: dict, tm: int, tn: int, tk: int, wm: int, wn: int
     return _fwd_kloop_geometry_in_scope(tm, tn, tk, wm, wn, wt)
 
 
-def _fwd_kloop_geometry_in_scope(tm: int, tn: int, tk: int, wm: int, wn: int, wt: int) -> bool:
+def _fwd_kloop_geometry_in_scope(
+    tm: int, tn: int, tk: int, wm: int, wn: int, wt: int
+) -> bool:
     """Whether a geometry is in ROCKE_AOT_FWD_KLOOP_SCOPE (unset: every one)."""
     scope = _fwd_kloop_scope()
     if scope is None:
         return True
     for m_, n_, k_, wm_, wn_, a_ in scope:
-        if (m_, n_, k_) == (tm, tn, tk) and (not wm_ or (wm_, wn_) == (wm, wn)) and (
-            not a_ or a_ == wt
+        if (
+            (m_, n_, k_) == (tm, tn, tk)
+            and (not wm_ or (wm_, wn_) == (wm, wn))
+            and (not a_ or a_ == wt)
         ):
             return True
     return False
@@ -1625,6 +1808,7 @@ def _fwd_kloop_geometry_in_scope(tm: int, tn: int, tk: int, wm: int, wn: int, wt
 def _fwd_sched_k_loops(k_loops: List[dict]) -> List[dict]:
     """``k_loops`` plus the opt-in lds_xor and scheduling variants (see
     :func:`_fwd_sched_variants`)."""
+
     def pfr_single(kl: dict) -> bool:
         return bool(kl.get("prefetch_regs")) and not kl.get("unroll_k")
 
@@ -1639,31 +1823,46 @@ def _fwd_sched_k_loops(k_loops: List[dict]) -> List[dict]:
         ]
     # ROCKE_AOT_FWD_CG=2[,4]: the tap-fastest loops with the channel chunks
     # grouped (uk_chunk_group).
-    for g in (int(t) for t in _os.environ.get("ROCKE_AOT_FWD_CG", "").split(",") if t.strip()):
+    for g in (
+        int(t) for t in _os.environ.get("ROCKE_AOT_FWD_CG", "").split(",") if t.strip()
+    ):
         k_loops = k_loops + [
-            dict(kl, uk_chunk_group=g) for kl in k_loops
+            dict(kl, uk_chunk_group=g)
+            for kl in k_loops
             if kl.get("uk_tap_fast") and not kl.get("uk_chunk_group")
         ]
     # ROCKE_AOT_FWD_LBAR=1: LDS-only barriers (rpf_lds_barrier) on the
     # reg_prefetch=1 loops.
     if _os.environ.get("ROCKE_AOT_FWD_LBAR", "0") not in ("", "0"):
         k_loops = k_loops + [
-            dict(kl, rpf_lds_barrier=True) for kl in k_loops if kl.get("reg_prefetch") == 1
+            dict(kl, rpf_lds_barrier=True)
+            for kl in k_loops
+            if kl.get("reg_prefetch") == 1
         ]
     # ROCKE_AOT_FWD_FLATE=1: the next tile's global reads behind the first LDS
     # fragment reads (rpf_fetch_late) on the reg_prefetch=1 loops.
     if _os.environ.get("ROCKE_AOT_FWD_FLATE", "0") not in ("", "0"):
         k_loops = k_loops + [
-            dict(kl, rpf_fetch_late=True) for kl in k_loops if kl.get("reg_prefetch") == 1
+            dict(kl, rpf_fetch_late=True)
+            for kl in k_loops
+            if kl.get("reg_prefetch") == 1
         ]
     # ROCKE_AOT_FWD_XHALO=4[,8]: the x-halo input reuse (uk_xhalo = the
     # staged range's rows past tile_m) on the 3-D lds_xor uniform_k_decode +
     # reg_prefetch=1 loops.
-    for xh in (int(t) for t in _os.environ.get("ROCKE_AOT_FWD_XHALO", "").split(",") if t.strip()):
+    for xh in (
+        int(t)
+        for t in _os.environ.get("ROCKE_AOT_FWD_XHALO", "").split(",")
+        if t.strip()
+    ):
         k_loops = k_loops + [
-            dict(kl, uk_xhalo=xh) for kl in k_loops
-            if kl.get("lds_xor") and kl.get("uniform_k_decode") and kl.get("reg_prefetch") == 1
-            and not kl.get("a_direct") and not kl.get("uk_xhalo")
+            dict(kl, uk_xhalo=xh)
+            for kl in k_loops
+            if kl.get("lds_xor")
+            and kl.get("uniform_k_decode")
+            and kl.get("reg_prefetch") == 1
+            and not kl.get("a_direct")
+            and not kl.get("uk_xhalo")
             and not kl.get("rpf_fetch_late")
         ]
     # ROCKE_AOT_FWD_XWS=1: every x-halo loop with the scalar loads retired
@@ -1671,9 +1870,13 @@ def _fwd_sched_k_loops(k_loops: List[dict]) -> List[dict]:
     # ROCKE_AOT_FWD_XWS=only: in place of the loops without it.
     _xws = _os.environ.get("ROCKE_AOT_FWD_XWS", "0")
     if _xws == "only":
-        k_loops = [dict(kl, xh_wait_smem=True) if kl.get("uk_xhalo") else kl for kl in k_loops]
+        k_loops = [
+            dict(kl, xh_wait_smem=True) if kl.get("uk_xhalo") else kl for kl in k_loops
+        ]
     elif _xws not in ("", "0"):
-        k_loops = k_loops + [dict(kl, xh_wait_smem=True) for kl in k_loops if kl.get("uk_xhalo")]
+        k_loops = k_loops + [
+            dict(kl, xh_wait_smem=True) for kl in k_loops if kl.get("uk_xhalo")
+        ]
     # ROCKE_AOT_FWD_EQX=<n>[n][,...]: the x-halo loops also with the register-only
     # epi_quad_xpose=<n> store, a trailing "n" adding no_agpr (accumulators in
     # arch VGPRs) (=only:...: in place of the cshuffle store); jobs the store
@@ -1682,44 +1885,71 @@ def _fwd_sched_k_loops(k_loops: List[dict]) -> List[dict]:
     if _eqx:
         _only = _eqx.startswith("only:")
         _toks = [t.strip() for t in _eqx.split(":")[-1].split(",") if t.strip()]
-        _vs = [dict(epi_quad_xpose=int(t.rstrip("n")), **({"no_agpr": True} if t.endswith("n") else {}))
-               for t in _toks]
+        _vs = [
+            dict(
+                epi_quad_xpose=int(t.rstrip("n")),
+                **({"no_agpr": True} if t.endswith("n") else {}),
+            )
+            for t in _toks
+        ]
         _xh = [dict(kl, **v) for kl in k_loops if kl.get("uk_xhalo") for v in _vs]
-        k_loops = ([kl for kl in k_loops if not kl.get("uk_xhalo")] if _only else k_loops) + _xh
+        k_loops = (
+            [kl for kl in k_loops if not kl.get("uk_xhalo")] if _only else k_loops
+        ) + _xh
     # ROCKE_AOT_FWD_MB=<n>[,...]: those register-store (epi_quad_xpose) x-halo
     # loops also with the output-plane band tile order m_band=<n> (needs
     # xcd_remap; the jobs without it are rejected).
-    for _mb in (int(t) for t in _os.environ.get("ROCKE_AOT_FWD_MB", "").split(",") if t.strip()):
+    for _mb in (
+        int(t) for t in _os.environ.get("ROCKE_AOT_FWD_MB", "").split(",") if t.strip()
+    ):
         k_loops = k_loops + [
-            dict(kl, m_band=_mb) for kl in k_loops
+            dict(kl, m_band=_mb)
+            for kl in k_loops
             if kl.get("uk_xhalo") and kl.get("epi_quad_xpose") and not kl.get("m_band")
         ]
     # ROCKE_AOT_FWD_XSM=1: those register-store (epi_quad_xpose 3/4) x-halo
     # loops also with M-strided wave rows (xh_stride_m).
     if _os.environ.get("ROCKE_AOT_FWD_XSM", "").strip() == "1":
         k_loops = k_loops + [
-            dict(kl, xh_stride_m=True) for kl in k_loops
-            if kl.get("uk_xhalo") and kl.get("epi_quad_xpose") in (3, 4)
-            and not kl.get("xh_dpp") and not kl.get("xh_stride_m")
+            dict(kl, xh_stride_m=True)
+            for kl in k_loops
+            if kl.get("uk_xhalo")
+            and kl.get("epi_quad_xpose") in (3, 4)
+            and not kl.get("xh_dpp")
+            and not kl.get("xh_stride_m")
         ]
     # ROCKE_AOT_FWD_XH_VMI=2[,4]: those (xh_wait_smem) x-halo loops also with
     # the next tile's global reads spread over the first tap's MFMAs
     # (vmem_interleave, any pipeline).
-    for vi in (int(t) for t in _os.environ.get("ROCKE_AOT_FWD_XH_VMI", "").split(",") if t.strip()):
+    for vi in (
+        int(t)
+        for t in _os.environ.get("ROCKE_AOT_FWD_XH_VMI", "").split(",")
+        if t.strip()
+    ):
         k_loops = k_loops + [
-            dict(kl, vmem_interleave=vi) for kl in k_loops
+            dict(kl, vmem_interleave=vi)
+            for kl in k_loops
             if kl.get("xh_wait_smem") and not kl.get("vmem_interleave")
         ]
     # ROCKE_AOT_FWD_XDPP=1: the x-halo loops with DPP-shifted A fragments
     # (xh_dpp).
     if _os.environ.get("ROCKE_AOT_FWD_XDPP", "0") not in ("", "0"):
-        k_loops = k_loops + [dict(kl, xh_dpp=True) for kl in k_loops if kl.get("uk_xhalo")]
+        k_loops = k_loops + [
+            dict(kl, xh_dpp=True) for kl in k_loops if kl.get("uk_xhalo")
+        ]
     # ROCKE_AOT_FWD_PRIO=1[,2]: s_setprio over the load issue + MFMA phase of
     # the reg_prefetch=1 loops (rpf_setprio).
-    for pr in (int(t) for t in _os.environ.get("ROCKE_AOT_FWD_PRIO", "").split(",") if t.strip()):
+    for pr in (
+        int(t)
+        for t in _os.environ.get("ROCKE_AOT_FWD_PRIO", "").split(",")
+        if t.strip()
+    ):
         k_loops = k_loops + [
-            dict(kl, rpf_setprio=pr) for kl in k_loops
-            if kl.get("reg_prefetch") == 1 and not kl.get("rpf_setprio") and not kl.get("a_direct")
+            dict(kl, rpf_setprio=pr)
+            for kl in k_loops
+            if kl.get("reg_prefetch") == 1
+            and not kl.get("rpf_setprio")
+            and not kl.get("a_direct")
         ]
     # ROCKE_AOT_FWD_KPRD=1: k-packed 16-byte LDS fragment reads
     # (lds_kpack_read) on every lds_xor uniform_k_decode / reg_prefetch loop.
@@ -1735,26 +1965,39 @@ def _fwd_sched_k_loops(k_loops: List[dict]) -> List[dict]:
     # row-keyed LDS swizzle (lds_xor_rowkey; the x-halo geometries are tile_k 32).
     _lxrk = _os.environ.get("ROCKE_AOT_FWD_LXRK", "0")
     if _lxrk not in ("", "0"):
-        _xk = [dict(kl, lds_xor_rowkey=True) for kl in k_loops
-               if kl.get("uk_xhalo") and kl.get("lds_kpack_read")]
+        _xk = [
+            dict(kl, lds_xor_rowkey=True)
+            for kl in k_loops
+            if kl.get("uk_xhalo") and kl.get("lds_kpack_read")
+        ]
         if _lxrk == "only":
-            k_loops = [kl for kl in k_loops
-                       if not (kl.get("uk_xhalo") and kl.get("lds_kpack_read"))]
+            k_loops = [
+                kl
+                for kl in k_loops
+                if not (kl.get("uk_xhalo") and kl.get("lds_kpack_read"))
+            ]
         k_loops = k_loops + _xk
     # ROCKE_AOT_FWD_WPE=3[,4]: the reg_prefetch=1 lds_xor loops with an
     # occupancy target (waves_per_eu), e.g. to hold a 126-VGPR 8-wave tile
     # at 4 waves/SIMD once k-packed reads add registers.
-    for w in (int(t) for t in _os.environ.get("ROCKE_AOT_FWD_WPE", "").split(",") if t.strip()):
+    for w in (
+        int(t) for t in _os.environ.get("ROCKE_AOT_FWD_WPE", "").split(",") if t.strip()
+    ):
         k_loops = k_loops + [
-            dict(kl, waves_per_eu=w) for kl in k_loops
-            if kl.get("reg_prefetch") == 1 and kl.get("lds_xor") and not kl.get("waves_per_eu")
+            dict(kl, waves_per_eu=w)
+            for kl in k_loops
+            if kl.get("reg_prefetch") == 1
+            and kl.get("lds_xor")
+            and not kl.get("waves_per_eu")
         ]
     xcds = _os.environ.get("ROCKE_AOT_FWD_KLOOP_XCD", "").strip()
     if xcds:
         keep = {int(t) for t in xcds.split(",") if t.strip()}
         k_loops = [
-            kl for kl in k_loops
-            if not any(kl.get(k) for k in _FWD_KLOOP_KNOBS) or kl.get("xcd_remap", 0) in keep
+            kl
+            for kl in k_loops
+            if not any(kl.get(k) for k in _FWD_KLOOP_KNOBS)
+            or kl.get("xcd_remap", 0) in keep
         ]
     sched = _fwd_sched_variants()
     if not sched:
@@ -1774,21 +2017,29 @@ def _fwd_sched_k_loops(k_loops: List[dict]) -> List[dict]:
             extra.append(dict(kl, **v))
     # ROCKE_AOT_FWD_DPW=1[,3]: the defer_mfma loops also with that many MFMAs
     # per deferred ds_write (defer_mfma_per_write; rpf1, not x-halo).
-    for dpw in (int(t) for t in _os.environ.get("ROCKE_AOT_FWD_DPW", "").split(",") if t.strip()):
+    for dpw in (
+        int(t) for t in _os.environ.get("ROCKE_AOT_FWD_DPW", "").split(",") if t.strip()
+    ):
         extra = extra + [
             dict(kl, defer_mfma_per_write=dpw)
             for kl in extra
-            if kl.get("defer_mfma") and kl.get("reg_prefetch") == 1
-            and not kl.get("uk_xhalo") and not kl.get("defer_mfma_per_write")
+            if kl.get("defer_mfma")
+            and kl.get("reg_prefetch") == 1
+            and not kl.get("uk_xhalo")
+            and not kl.get("defer_mfma_per_write")
         ]
-    return _fwd_xpd_k_loops(_fwd_xyr_k_loops(_fwd_fxd_k_loops(_fwd_nopad_k_loops(k_loops + extra))))
+    return _fwd_xpd_k_loops(
+        _fwd_xyr_k_loops(_fwd_fxd_k_loops(_fwd_nopad_k_loops(k_loops + extra)))
+    )
 
 
 def _fwd_fxd_k_loops(k_loops: List[dict]) -> List[dict]:
     """``ROCKE_AOT_FWD_FXD=<n>[,...]``: every xh_stride_m k-packed x-halo loop
     also with direct-to-LDS staging ``fxh_dma=<n>`` (its own schedule: no
     defer_mfma / vmem_interleave twins). Adds variants only."""
-    vals = [int(t) for t in _os.environ.get("ROCKE_AOT_FWD_FXD", "").split(",") if t.strip()]
+    vals = [
+        int(t) for t in _os.environ.get("ROCKE_AOT_FWD_FXD", "").split(",") if t.strip()
+    ]
     if not vals:
         return k_loops
     seen = {tuple(sorted(kl.items())) for kl in k_loops}
@@ -1796,10 +2047,17 @@ def _fwd_fxd_k_loops(k_loops: List[dict]) -> List[dict]:
     for kl in k_loops:
         # Scoped to the x-halo variants' knob set (xh_wait_smem, row-keyed
         # lds_xor, eqx4); lds_ahead / uk_nopad twins would build identical loops.
-        if not (kl.get("uk_xhalo") and kl.get("xh_stride_m") and kl.get("lds_kpack_read")
-                and kl.get("xh_wait_smem") and kl.get("lds_xor_rowkey")
-                and kl.get("epi_quad_xpose") == 4 and not kl.get("lds_ahead")
-                and not kl.get("uk_nopad") and not kl.get("fxh_dma")):
+        if not (
+            kl.get("uk_xhalo")
+            and kl.get("xh_stride_m")
+            and kl.get("lds_kpack_read")
+            and kl.get("xh_wait_smem")
+            and kl.get("lds_xor_rowkey")
+            and kl.get("epi_quad_xpose") == 4
+            and not kl.get("lds_ahead")
+            and not kl.get("uk_nopad")
+            and not kl.get("fxh_dma")
+        ):
             continue
         for v in vals:
             nk = dict(kl, fxh_dma=v, defer_mfma=0, vmem_interleave=0)
@@ -1814,7 +2072,9 @@ def _fwd_xyr_k_loops(k_loops: List[dict]) -> List[dict]:
     """``ROCKE_AOT_FWD_XYR=<n>[,...]``: every wave-private fxd x-halo loop
     (fxh_dma >= 1000) also as the tapf input-row ring ``xh_yring=<n>``
     (uk_tap_fast, no chunk groups). Adds variants only."""
-    vals = [int(t) for t in _os.environ.get("ROCKE_AOT_FWD_XYR", "").split(",") if t.strip()]
+    vals = [
+        int(t) for t in _os.environ.get("ROCKE_AOT_FWD_XYR", "").split(",") if t.strip()
+    ]
     if not vals:
         return k_loops
     seen = {tuple(sorted(kl.items())) for kl in k_loops}
@@ -2070,9 +2330,12 @@ def _fwd_job_variants(
     return out
 
 
-_FWD_SAA_TOKENS = {"a": dict(split_atomic_agent=True), "p": dict(split_atomic_pairs=True),
-                   "ap": dict(split_atomic_agent=True, split_atomic_pairs=True),
-                   "pf": dict(split_atomic_pairs=True, split_atomic_fast=True)}
+_FWD_SAA_TOKENS = {
+    "a": dict(split_atomic_agent=True),
+    "p": dict(split_atomic_pairs=True),
+    "ap": dict(split_atomic_agent=True, split_atomic_pairs=True),
+    "pf": dict(split_atomic_pairs=True, split_atomic_fast=True),
+}
 
 
 def _fwd_split_atomic_variants(kloop: dict, variant: tuple) -> Tuple[dict, ...]:
@@ -2093,7 +2356,9 @@ def _fwd_split_atomic_variants(kloop: dict, variant: tuple) -> Tuple[dict, ...]:
             if not tok:
                 continue
             if tok not in _FWD_SAA_TOKENS:
-                raise ValueError(f"ROCKE_AOT_FWD_SAA: {tok!r} is not one of a, p, ap, pf")
+                raise ValueError(
+                    f"ROCKE_AOT_FWD_SAA: {tok!r} is not one of a, p, ap, pf"
+                )
             if _FWD_SAA_TOKENS[tok] not in out:
                 out.append(_FWD_SAA_TOKENS[tok])
         # ROCKE_AOT_FWD_SFS=1: each also with the flag-ordered split store
@@ -2102,20 +2367,34 @@ def _fwd_split_atomic_variants(kloop: dict, variant: tuple) -> Tuple[dict, ...]:
             out = out + [dict(v, split_flag_store=True) for v in out]
         # ROCKE_AOT_FWD_SZF=1: each also zeroing its own D tile (split_zero_first).
         if _os.environ.get("ROCKE_AOT_FWD_SZF", "0") not in ("", "0"):
-            out = out + [dict(v, split_zero_first=True) for v in out
-                         if not v.get("split_flag_store")]
+            out = out + [
+                dict(v, split_zero_first=True)
+                for v in out
+                if not v.get("split_flag_store")
+            ]
         flat = not variant[2] and not kloop.get("xcd_remap")
         # ROCKE_AOT_FWD_FSK=1: each also as a stream-K binary (split_streamk).
         fsk = _os.environ.get("ROCKE_AOT_FWD_FSK", "0") not in ("", "0")
-        skx = [int(t) for t in _os.environ.get("ROCKE_AOT_FWD_SKX", "").split(",") if t.strip()]
+        skx = [
+            int(t)
+            for t in _os.environ.get("ROCKE_AOT_FWD_SKX", "").split(",")
+            if t.strip()
+        ]
         base = list(out)
-        base = [v for v in base
-                if not v.get("split_flag_store") and not v.get("split_zero_first")]
+        base = [
+            v
+            for v in base
+            if not v.get("split_flag_store") and not v.get("split_zero_first")
+        ]
         if fsk and flat:
             out = out + [dict(v, split_streamk=True) for v in base]
         # ROCKE_AOT_FWD_SHY=24[,32,..]: each also as a split_hybrid binary
         # (aligned slices + whole-tile remainders on the stream-K grid).
-        shy = [int(t) for t in _os.environ.get("ROCKE_AOT_FWD_SHY", "").split(",") if t.strip()]
+        shy = [
+            int(t)
+            for t in _os.environ.get("ROCKE_AOT_FWD_SHY", "").split(",")
+            if t.strip()
+        ]
         if shy and flat:
             out = out + [dict(v, split_hybrid=e) for e in shy for v in base]
         if skx and flat:
@@ -2123,16 +2402,31 @@ def _fwd_split_atomic_variants(kloop: dict, variant: tuple) -> Tuple[dict, ...]:
         # ROCKE_AOT_FWD_SHY_SKX=1: the split_hybrid binaries also with that
         # slice-major XCD remap (an XCD runs whole aligned slices of every
         # tile, so it reads only its slices' weights: less fabric traffic on fwd s7).
-        if shy and skx and flat and _os.environ.get("ROCKE_AOT_FWD_SHY_SKX", "0") not in ("", "0"):
-            out = out + [dict(v, split_hybrid=e, split_xcd_remap=n)
-                         for e in shy for n in skx for v in base]
+        if (
+            shy
+            and skx
+            and flat
+            and _os.environ.get("ROCKE_AOT_FWD_SHY_SKX", "0") not in ("", "0")
+        ):
+            out = out + [
+                dict(v, split_hybrid=e, split_xcd_remap=n)
+                for e in shy
+                for n in skx
+                for v in base
+            ]
         # ROCKE_AOT_FWD_SDET=2[,1]: each (but the flag-store / zero-first /
         # stream-K ones) also as the deterministic split-K binary of that mode
         # (split_det: owner-ordered f32 partial fold, no atomics into D). ADD.
-        for m in (int(t) for t in _os.environ.get("ROCKE_AOT_FWD_SDET", "").split(",") if t.strip()):
+        for m in (
+            int(t)
+            for t in _os.environ.get("ROCKE_AOT_FWD_SDET", "").split(",")
+            if t.strip()
+        ):
             out = out + [
-                dict(v, split_det=m) for v in out
-                if not v.get("split_flag_store") and not v.get("split_zero_first")
+                dict(v, split_det=m)
+                for v in out
+                if not v.get("split_flag_store")
+                and not v.get("split_zero_first")
                 and not v.get("split_streamk")
             ]
     return tuple(out)
@@ -2352,7 +2646,9 @@ def _fwd_jobs(
             ):
                 if narrowed and epilogue == "default" and not kloop.get("lds_xor"):
                     continue
-                if not _fwd_kloop_in_scope(kloop, tile_m, tile_n, tile_k, warp_m, warp_n, wt):
+                if not _fwd_kloop_in_scope(
+                    kloop, tile_m, tile_n, tile_k, warp_m, warp_n, wt
+                ):
                     continue
                 grouped = caps["grouped"]
                 cfg = dict(
@@ -2896,7 +3192,9 @@ def _wgrad_jobs(
                         )
                     # The per-arch K-loop variants of the plain synchronous
                     # loop (CACHE_WGRAD_KLOOP_VARIANTS), next to it.
-                    kcfgs += [dict(kcfg, **v) for v in _wgrad_kloop_variants(arch, kcfg)]
+                    kcfgs += [
+                        dict(kcfg, **v) for v in _wgrad_kloop_variants(arch, kcfg)
+                    ]
                     for kc in kcfgs:
                         yield BuildJob(
                             identity=KernelIdentity(
@@ -3064,6 +3362,8 @@ def _wgrad_prefetch_global_regs(arch: str, cfg: dict) -> bool:
     ) and _wgrad_prefetch_global_regs_stage(
         cfg["epilogue"], cfg.get("split_k", 1), cfg.get("two_stage", False)
     )
+
+
 # ROCKE_AOT_WGRAD_EQX=1 with ROCKE_AOT_WGRAD_EQX_MIN_MN=<n>: also an
 # epi_quad_xpose=1 copy (quad-transposed 8-byte dW stores) of the unsplit
 # default-epilogue 16x16x16 jobs and their K-loop variants with
@@ -3082,7 +3382,11 @@ _WGRAD_PPP_WSB = int(_os.environ.get("ROCKE_AOT_WGRAD_PPP_WSB", "0") or 0)
 # the k-packed global reads: 8 lanes per 128-byte line) of the plain_pp copies
 # (after the ws_store twins, so those get one too).
 _WGRAD_PPP_KPL = int(_os.environ.get("ROCKE_AOT_WGRAD_PPP_KPL", "0") or 0)
-_WGRAD_PPP = tuple(int(x) for x in (_os.environ.get("ROCKE_AOT_WGRAD_PPP", "") or "").split(",") if x.strip() and int(x))
+_WGRAD_PPP = tuple(
+    int(x)
+    for x in (_os.environ.get("ROCKE_AOT_WGRAD_PPP", "") or "").split(",")
+    if x.strip() and int(x)
+)
 _WGRAD_PPP_MIN_MN = int(_os.environ.get("ROCKE_AOT_WGRAD_PPP_MIN_MN", "0") or 0)
 _WGRAD_EQX = int(_os.environ.get("ROCKE_AOT_WGRAD_EQX", "0") or 0)
 # ROCKE_AOT_WGRAD_ESF=1 with ROCKE_AOT_WGRAD_ESF_MIN_MN=<n>: also an
@@ -3105,17 +3409,24 @@ _WGRAD_EQX_MIN_MN = int(_os.environ.get("ROCKE_AOT_WGRAD_EQX_MIN_MN", "0") or 0)
 # ws_gred / ws_store are not made. Unset: no jobs.
 _WGRAD_DET_WSS = int(_os.environ.get("ROCKE_AOT_WGRAD_DET_WSS", "0") or 0)
 _WGRAD_DET_WSS_MODE: Tuple[int, ...] = tuple(
-    int(v) for v in (_os.environ.get("ROCKE_AOT_WGRAD_DET_WSS_MODE", "1") or "1").split(",") if v
+    int(v)
+    for v in (_os.environ.get("ROCKE_AOT_WGRAD_DET_WSS_MODE", "1") or "1").split(",")
+    if v
 )
 _WGRAD_DET_WSS_TILES: Tuple[str, ...] = tuple(
-    v.strip() for v in (_os.environ.get("ROCKE_AOT_WGRAD_DET_WSS_TILES", "") or "").split(",") if v.strip()
+    v.strip()
+    for v in (_os.environ.get("ROCKE_AOT_WGRAD_DET_WSS_TILES", "") or "").split(",")
+    if v.strip()
 )
 
 
 def _wgrad_det_wss_twins(cfg: dict, variants: tuple) -> tuple:
     if not _WGRAD_DET_WSS or not cfg.get("two_stage"):
         return ()
-    if _WGRAD_DET_WSS_TILES and f"{cfg.get('tile_m')}x{cfg.get('tile_n')}" not in _WGRAD_DET_WSS_TILES:
+    if (
+        _WGRAD_DET_WSS_TILES
+        and f"{cfg.get('tile_m')}x{cfg.get('tile_n')}" not in _WGRAD_DET_WSS_TILES
+    ):
         return ()
     out, seen = [], set()
     for v in variants:
@@ -3151,8 +3462,11 @@ def _wgrad_kloop_variants_core(arch: str, cfg: dict) -> Tuple[dict, ...]:
             dict(v, plain_pp=pp)
             for pp in _WGRAD_PPP
             for v in variants
-            if v.get("prefetch_regs") == 1 and not v.get("xwin") and not v.get("pfr_sched")
-            and not v.get("lds_bswz") and not v.get("waves_per_eu")
+            if v.get("prefetch_regs") == 1
+            and not v.get("xwin")
+            and not v.get("pfr_sched")
+            and not v.get("lds_bswz")
+            and not v.get("waves_per_eu")
         )
         _pp0 = _pp
         if _WGRAD_PPP_WSS and cfg.get("two_stage"):
@@ -3164,7 +3478,9 @@ def _wgrad_kloop_variants_core(arch: str, cfg: dict) -> Tuple[dict, ...]:
             # k-packed loader has no line-major form, so the twins would be the
             # same binaries under a kpl8 label. Two-stage and ws_store copies
             # are kept: a kpl8 wss2 twin is among the shipped kernels)
-            _pp = _pp + tuple(dict(v, kp_line=_WGRAD_PPP_KPL) for v in _pp if not v.get("kp_line"))
+            _pp = _pp + tuple(
+                dict(v, kp_line=_WGRAD_PPP_KPL) for v in _pp if not v.get("kp_line")
+            )
         variants = variants + _pp
     if (
         _WGRAD_EQX
@@ -3175,8 +3491,14 @@ def _wgrad_kloop_variants_core(arch: str, cfg: dict) -> Tuple[dict, ...]:
         and cfg.get("warp_tile_k") == 16
         and cfg.get("tile_m", 0) * cfg.get("tile_n", 0) >= _WGRAD_EQX_MIN_MN
     ):
-        variants = variants + ({"epi_quad_xpose": _WGRAD_EQX},) + tuple(
-            dict(v, epi_quad_xpose=_WGRAD_EQX) for v in variants if not v.get("xwin")
+        variants = (
+            variants
+            + ({"epi_quad_xpose": _WGRAD_EQX},)
+            + tuple(
+                dict(v, epi_quad_xpose=_WGRAD_EQX)
+                for v in variants
+                if not v.get("xwin")
+            )
         )
     if (
         _WGRAD_ESF
@@ -3188,7 +3510,8 @@ def _wgrad_kloop_variants_core(arch: str, cfg: dict) -> Tuple[dict, ...]:
         and cfg.get("tile_m", 0) * cfg.get("tile_n", 0) >= _WGRAD_ESF_MIN_MN
     ):
         variants = variants + tuple(
-            dict(v, epi_store_fast=True) for v in variants
+            dict(v, epi_store_fast=True)
+            for v in variants
             if v.get("plain_pp") and not v.get("xwin") and not v.get("epi_quad_xpose")
         )
     return variants
@@ -3234,8 +3557,10 @@ def _wgrad_kloop_variants_base(arch: str, cfg: dict) -> Tuple[dict, ...]:
         and cfg.get("tile_m", 0) >= _WGRAD_M64_MIN_M
         and (not _WGRAD_M64_SPLIT_ONLY or cfg.get("split_k", 1) > 1)
     )
-    if _WGRAD_KPL and _n_ok and (
-        not _WGRAD_KPL_MAX_M or cfg.get("tile_m", 0) <= _WGRAD_KPL_MAX_M
+    if (
+        _WGRAD_KPL
+        and _n_ok
+        and (not _WGRAD_KPL_MAX_M or cfg.get("tile_m", 0) <= _WGRAD_KPL_MAX_M)
     ):
         split = cfg.get("split_k", 1) > 1
         variants = variants + tuple(
@@ -3245,8 +3570,10 @@ def _wgrad_kloop_variants_base(arch: str, cfg: dict) -> Tuple[dict, ...]:
             and v.get("lds_kpack", 1) > 1
             and (_WGRAD_XCD <= 1 or not split or v.get("xcd_remap"))
         )
-    if _WGRAD_BSWZ and _n_ok and (
-        not _WGRAD_BSWZ_MAX_M or cfg.get("tile_m", 0) <= _WGRAD_BSWZ_MAX_M
+    if (
+        _WGRAD_BSWZ
+        and _n_ok
+        and (not _WGRAD_BSWZ_MAX_M or cfg.get("tile_m", 0) <= _WGRAD_BSWZ_MAX_M)
     ):
         split = cfg.get("split_k", 1) > 1
         bswz = tuple(
@@ -3283,8 +3610,7 @@ def _wgrad_kloop_variants_base(arch: str, cfg: dict) -> Tuple[dict, ...]:
             and _WGRAD_XWIN_N384_MIN_M
             and cfg.get("tile_m", 0) >= _WGRAD_XWIN_N384_MIN_M
             and (
-                not _WGRAD_XWIN_N384_WT
-                or cfg.get("warp_tile_m") == _WGRAD_XWIN_N384_WT
+                not _WGRAD_XWIN_N384_WT or cfg.get("warp_tile_m") == _WGRAD_XWIN_N384_WT
             )
         ):
             over = {"tile_n": 384}
@@ -3313,22 +3639,26 @@ def _wgrad_kloop_variants_base(arch: str, cfg: dict) -> Tuple[dict, ...]:
                 return variants
             # The m_band axis covers only these plain xwin variants (the ones
             # built and checked), not the PP/MROW/WSR twins added below.
-            mb = _wgrad_m_band_variants(cfg, xw)[len(xw):]
+            mb = _wgrad_m_band_variants(cfg, xw)[len(xw) :]
             _nw = cfg.get("warp_m", 0) * cfg.get("warp_n", 0)
             if (
                 _WGRAD_XWIN_PP
                 and (
                     (cfg.get("tile_m") == 64 and cfg.get("warp_m") == 1 and _nw == 2)
                     or (cfg.get("tile_m") == 128 and _nw == 4)
-                    or (cfg.get("tile_m") == 256 and cfg.get("warp_m") == 4 and _nw == 8)
+                    or (
+                        cfg.get("tile_m") == 256 and cfg.get("warp_m") == 4 and _nw == 8
+                    )
                 )
                 and cfg.get("warp_tile_m") == 16
                 and cfg.get("pipeline") == "mem"
             ):
                 _pp = tuple(
-                    dict(v, xwin_groups=8 // _nw, xwin_pp=n, waves_per_eu=2)
-                    if _nw < 8
-                    else dict(v, xwin_pp=n, waves_per_eu=2)
+                    (
+                        dict(v, xwin_groups=8 // _nw, xwin_pp=n, waves_per_eu=2)
+                        if _nw < 8
+                        else dict(v, xwin_pp=n, waves_per_eu=2)
+                    )
                     for n in _WGRAD_XWIN_PP
                     for v in xw
                     if not v.get("pfr_sched") and not v.get("waves_per_eu")
@@ -3354,9 +3684,14 @@ def _wgrad_kloop_variants_base(arch: str, cfg: dict) -> Tuple[dict, ...]:
                     dict(v, m_band=m)
                     for m in _WGRAD_MB_PP
                     for v in _pp
-                    if v.get("xwin_gn") and not v.get("m_band") and not v.get("xwin_kband")
+                    if v.get("xwin_gn")
+                    and not v.get("m_band")
+                    and not v.get("xwin_kband")
                 )
-                _twin_ok = not _WGRAD_XWIN_TWIN_MAX_M or cfg.get("tile_m", 0) <= _WGRAD_XWIN_TWIN_MAX_M
+                _twin_ok = (
+                    not _WGRAD_XWIN_TWIN_MAX_M
+                    or cfg.get("tile_m", 0) <= _WGRAD_XWIN_TWIN_MAX_M
+                )
                 _pp = _pp + tuple(
                     dict(v, xwin_bq=q)
                     for q in _WGRAD_XWIN_BQ
@@ -3367,7 +3702,10 @@ def _wgrad_kloop_variants_base(arch: str, cfg: dict) -> Tuple[dict, ...]:
                     dict(v, xwin_aq=q)
                     for q in _WGRAD_XWIN_AQ
                     for v in _pp
-                    if _twin_ok and v.get("xwin_gn") == 2 and not v.get("m_band") and not v.get("xwin_kband")
+                    if _twin_ok
+                    and v.get("xwin_gn") == 2
+                    and not v.get("m_band")
+                    and not v.get("xwin_kband")
                 )
                 _pp = _pp + tuple(
                     dict(v, xwin_pps=q)
@@ -3390,13 +3728,21 @@ def _wgrad_kloop_variants_base(arch: str, cfg: dict) -> Tuple[dict, ...]:
                 xw = xw + _pp
             if _WGRAD_XWIN_MROW and cfg.get("tile_m", 0) >= _WGRAD_XWIN_MROW_MIN_M:
                 mrow = tuple(
-                    dict(v, xwin_mrow=n, **(
-                        {"ws_replicas": _WGRAD_XWIN_MROW_WSR} if _WGRAD_XWIN_MROW_WSR else {}
-                    ))
+                    dict(
+                        v,
+                        xwin_mrow=n,
+                        **(
+                            {"ws_replicas": _WGRAD_XWIN_MROW_WSR}
+                            if _WGRAD_XWIN_MROW_WSR
+                            else {}
+                        ),
+                    )
                     for n in _WGRAD_XWIN_MROW
                     for v in xw
-                    if v.get("waves_per_eu") and not v.get("xwin_pp")
-                    and cfg.get("tile_k", 0) % n == 0 and (cfg.get("tile_k", 0) // n) % 4 == 0
+                    if v.get("waves_per_eu")
+                    and not v.get("xwin_pp")
+                    and cfg.get("tile_k", 0) % n == 0
+                    and (cfg.get("tile_k", 0) // n) % 4 == 0
                 )
             else:
                 mrow = ()
@@ -3407,14 +3753,20 @@ def _wgrad_kloop_variants_base(arch: str, cfg: dict) -> Tuple[dict, ...]:
                     if r != cfg.get("ws_replicas")
                     for v in xw
                 )
-            variants = variants + xw + mrow + mb + _wgrad_wsf_twins(xw, cfg.get("tile_k", 0))
+            variants = (
+                variants + xw + mrow + mb + _wgrad_wsf_twins(xw, cfg.get("tile_k", 0))
+            )
     return variants
 
 
 def _wgrad_m_band_variants(cfg: dict, variants: tuple) -> tuple:
     """ROCKE_AOT_WGRAD_MB=<n>[,...]: the split-K xwin variants with xcd_remap
     also with the split-K slice band order m_band=<n> (WgradConvSpec.m_band)."""
-    _wmb = [int(t) for t in _os.environ.get("ROCKE_AOT_WGRAD_MB", "").split(",") if t.strip()]
+    _wmb = [
+        int(t)
+        for t in _os.environ.get("ROCKE_AOT_WGRAD_MB", "").split(",")
+        if t.strip()
+    ]
     if _wmb and cfg.get("split_k", 1) > 1:
         variants = variants + tuple(
             dict(v, m_band=m)
@@ -3569,14 +3921,20 @@ def _dgrad_jobs(
                         cfg["b_kpack"] = bkp
                     else:
                         cfg.pop("b_kpack", None)
-                knob_sets = (((),) if not (tapk and isinstance(tpf, tuple)) else CACHE_DGRAD_XHALO_KNOBS)
+                knob_sets = (
+                    ((),)
+                    if not (tapk and isinstance(tpf, tuple))
+                    else CACHE_DGRAD_XHALO_KNOBS
+                )
                 knob_cfgs = [
                     (kc, dict(k).get("@", CACHE_DGRAD_XHALO_KNOB_SCOPE))
                     for kc, k in (
                         (
                             _dgrad_xh_knob_cfg(
-                                k, tpf=tpf[1] if isinstance(tpf, tuple) else tpf,
-                                grouped=grouped, epilogue=epilogue,
+                                k,
+                                tpf=tpf[1] if isinstance(tpf, tuple) else tpf,
+                                grouped=grouped,
+                                epilogue=epilogue,
                             ),
                             k,
                         )
@@ -3627,7 +3985,11 @@ def _dgrad_jobs(
                                     k: KernelIdentity.__dataclass_fields__[k].default
                                     for k in kcfg
                                 },
-                                **({"filter_w": filt.get("filter_w", 0)} if _ppx else {}),
+                                **(
+                                    {"filter_w": filt.get("filter_w", 0)}
+                                    if _ppx
+                                    else {}
+                                ),
                             }
                         ).label()
                         if not _re.search(kscope, base_label):
@@ -3641,11 +4003,15 @@ def _dgrad_jobs(
                     # dx_interior twins (ROCKE_AOT_DGRAD_DXI): the same
                     # binary under a launch-time identity field.
                     if CACHE_DGRAD_DXI and _dxi_applies(ident):
-                        for _v, _a in itertools.product(CACHE_DGRAD_DXI, CACHE_DGRAD_DXA):
+                        for _v, _a in itertools.product(
+                            CACHE_DGRAD_DXI, CACHE_DGRAD_DXA
+                        ):
                             if _a and ident.xh_dx_wmask and not _a & 1:
                                 continue
                             yield BuildJob(
-                                identity=_dc_replace(ident, dx_interior=_v, dx_interior_axes=_a),
+                                identity=_dc_replace(
+                                    ident, dx_interior=_v, dx_interior_axes=_a
+                                ),
                                 direction="dgrad",
                                 spec_kwargs=jcfg,
                                 caps={**job_caps, "xhalo": True} if _ppx else job_caps,
@@ -4036,8 +4402,10 @@ def count_jobs(
                 lean = geo[7] == "default" and 1 not in _VECS
                 g6 = geo[:6]
                 total += (len(_VECS) if lean else vecs) * sum(
-                    sum(len(_fwd_split_atomic_variants(kl, v))
-                        for v in _fwd_job_variants(kl, g6, geo[7], caps, wave_size))
+                    sum(
+                        len(_fwd_split_atomic_variants(kl, v))
+                        for v in _fwd_job_variants(kl, g6, geo[7], caps, wave_size)
+                    )
                     for kl in _fwd_k_loops(pipeline, target.gfx)
                     if (not lean or kl.get("lds_xor")) and _fwd_kloop_in_scope(kl, *g6)
                     for caps in _layout_caps()
@@ -4079,12 +4447,14 @@ def count_jobs(
             elif direction == "dgrad":
                 total += vecs * sum(
                     (
-                        len(CACHE_DGRAD_TAPK_PREFETCH)
-                        + len(CACHE_DGRAD_XHALO_TPF) * len(CACHE_DGRAD_XHALO_KNOBS)
+                        (
+                            len(CACHE_DGRAD_TAPK_PREFETCH)
+                            + len(CACHE_DGRAD_XHALO_TPF) * len(CACHE_DGRAD_XHALO_KNOBS)
+                        )
+                        * len(CACHE_DGRAD_B_KPACK)
+                        if t
+                        else 1
                     )
-                    * len(CACHE_DGRAD_B_KPACK)
-                    if t
-                    else 1
                     for caps in _dgrad_caps()
                     for t in _dgrad_tap_outer_variants(caps, wave_size, pipeline)
                 )

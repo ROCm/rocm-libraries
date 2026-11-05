@@ -67,7 +67,13 @@ def _run(problem, *, degree=1, tile=(64, 64, 32, 2, 2, 32), full_tiles=None, **k
     arch = get_device_arch().split(":")[0]
     tm, tn, tk, wm, wn, wt = tile
     atom = ArchTarget.from_gfx(arch).mma.select_largest_k(
-        family="mma", a_dtype="bf16", b_dtype="bf16", c_dtype="fp32", m=wt, n=wt, k_max=tk
+        family="mma",
+        a_dtype="bf16",
+        b_dtype="bf16",
+        c_dtype="fp32",
+        m=wt,
+        n=wt,
+        k_max=tk,
     )
     tag = "".join(f"_{k}{int(v)}" for k, v in sorted(knobs.items()))
     spec = ImplicitGemmConvSpec(
@@ -127,7 +133,11 @@ def _run(problem, *, degree=1, tile=(64, 64, 32, 2, 2, 32), full_tiles=None, **k
             if D.nbytes > off:
                 rt.memset(ptrs[2] + off, 0, D.nbytes - off)
         values = args.to_launch_values(
-            *ptrs, A.nbytes, B.nbytes, D.nbytes, split_k=degree if split else 1,
+            *ptrs,
+            A.nbytes,
+            B.nbytes,
+            D.nbytes,
+            split_k=degree if split else 1,
             full_tiles=full_tiles if spec.split_tail else None,
         )
         gx, gy, gz = args.grid()
@@ -151,7 +161,9 @@ def _run(problem, *, degree=1, tile=(64, 64, 32, 2, 2, 32), full_tiles=None, **k
 def _problem(**kw):
     from kernels.common._conv_implicit_gemm_common import ConvProblem
 
-    base = dict(N=1, Hi=6, Wi=5, C=64, K=64, Y=3, X=3, pH=1, pW=1, Di=5, Z=3, sD=1, pD=1, dD=1)
+    base = dict(
+        N=1, Hi=6, Wi=5, C=64, K=64, Y=3, X=3, pH=1, pW=1, Di=5, Z=3, sD=1, pD=1, dD=1
+    )
     base.update(kw)
     return ConvProblem(**base)
 
@@ -200,7 +212,10 @@ class TestFwd3dKLoopKnobs(unittest.TestCase):
             with self.subTest(degree=degree):
                 self._check(_problem(), split_k=2, degree=degree)
                 self._check(
-                    _problem(), split_k=2, degree=degree, prefetch_regs=True,
+                    _problem(),
+                    split_k=2,
+                    degree=degree,
+                    prefetch_regs=True,
                     split_addr_k_decode=True,
                 )
 
@@ -220,10 +235,23 @@ class TestFwd3dKLoopKnobs(unittest.TestCase):
             dict(lds_ahead=True, defer_mfma=1, vmem_interleave=4, lds_xor=True),
             dict(reg_prefetch=2, lds_xor=True, lds_ahead=True, vmem_interleave=2),
             dict(lds_ahead=True, defer_mfma=1, rpf_setprio=1),
-            dict(lds_ahead=True, defer_mfma=3, vmem_interleave=4, lds_xor=True,
-                 lds_kpack_read=True, uk_nopad=False, defer_mfma_per_write=1),
-            dict(lds_ahead=True, defer_mfma=4, vmem_interleave=2, lds_xor=True,
-                 lds_kpack_read=True, defer_mfma_per_write=3),
+            dict(
+                lds_ahead=True,
+                defer_mfma=3,
+                vmem_interleave=4,
+                lds_xor=True,
+                lds_kpack_read=True,
+                uk_nopad=False,
+                defer_mfma_per_write=1,
+            ),
+            dict(
+                lds_ahead=True,
+                defer_mfma=4,
+                vmem_interleave=2,
+                lds_xor=True,
+                lds_kpack_read=True,
+                defer_mfma_per_write=3,
+            ),
             dict(reg_prefetch=2, lds_ahead=True, rpf_setprio=2),
         ):
             with self.subTest(**knobs):
@@ -242,8 +270,13 @@ class TestFwd3dKLoopKnobs(unittest.TestCase):
             with self.subTest(**knobs):
                 self._check(_problem(), tile=tile, prefetch_regs=True, **knobs)
                 self._check(
-                    _problem(), tile=tile, prefetch_regs=True,
-                    split_addr_k_decode=True, split_k=2, degree=3, **knobs,
+                    _problem(),
+                    tile=tile,
+                    prefetch_regs=True,
+                    split_addr_k_decode=True,
+                    split_k=2,
+                    degree=3,
+                    **knobs,
                 )
 
     def test_split_k_uniform_k_decode(self):
@@ -259,13 +292,30 @@ class TestFwd3dKLoopKnobs(unittest.TestCase):
             ):
                 with self.subTest(degree=degree, **knobs):
                     self._check(
-                        _problem(), tile=tile, uniform_k_decode=True,
-                        reg_prefetch=1, split_k=2, degree=degree, **knobs,
+                        _problem(),
+                        tile=tile,
+                        uniform_k_decode=True,
+                        reg_prefetch=1,
+                        split_k=2,
+                        degree=degree,
+                        **knobs,
                     )
-        self._check(_problem(C=96), tile=tile, uniform_k_decode=True,
-                    reg_prefetch=1, split_k=2, degree=3)
-        self._check(_problem(C=64, K=64, groups=2), tile=tile,
-                    uniform_k_decode=True, reg_prefetch=1, split_k=2, degree=3)
+        self._check(
+            _problem(C=96),
+            tile=tile,
+            uniform_k_decode=True,
+            reg_prefetch=1,
+            split_k=2,
+            degree=3,
+        )
+        self._check(
+            _problem(C=64, K=64, groups=2),
+            tile=tile,
+            uniform_k_decode=True,
+            reg_prefetch=1,
+            split_k=2,
+            degree=3,
+        )
 
     def test_uk_nopad(self):
         # Unpadded (halo-form) problems without the per-tap bounds checks,
@@ -282,8 +332,14 @@ class TestFwd3dKLoopKnobs(unittest.TestCase):
                 dict(split_k=2, degree=3),
             ):
                 with self.subTest(prob=(prob.Hi, prob.Wi, prob.Di), **knobs):
-                    self._check(prob, tile=tile, uniform_k_decode=True,
-                                reg_prefetch=1, uk_nopad=True, **knobs)
+                    self._check(
+                        prob,
+                        tile=tile,
+                        uniform_k_decode=True,
+                        reg_prefetch=1,
+                        uk_nopad=True,
+                        **knobs,
+                    )
 
     def test_split_tail(self):
         # split_tail: the first full_tiles tiles (launch order) run whole and
@@ -295,20 +351,45 @@ class TestFwd3dKLoopKnobs(unittest.TestCase):
         big = _problem(Hi=12, Wi=10, Di=10, pH=1, pW=1, pD=1, K=128)
         for full in (0, 12, 24, 36, 38):
             with self.subTest(big=True, full=full):
-                self._check(big, tile=tile, split_k=2, degree=3, split_tail=True,
-                            full_tiles=full, uniform_k_decode=True, reg_prefetch=1,
-                            xcd_remap=6, lds_xor=True, lds_ahead=True,
-                            defer_mfma=1, vmem_interleave=4)
+                self._check(
+                    big,
+                    tile=tile,
+                    split_k=2,
+                    degree=3,
+                    split_tail=True,
+                    full_tiles=full,
+                    uniform_k_decode=True,
+                    reg_prefetch=1,
+                    xcd_remap=6,
+                    lds_xor=True,
+                    lds_ahead=True,
+                    defer_mfma=1,
+                    vmem_interleave=4,
+                )
         for full in (0, 1, 2, 3):
             for knobs in (
                 dict(uniform_k_decode=True, reg_prefetch=1),
-                dict(uniform_k_decode=True, reg_prefetch=1, xcd_remap=6,
-                     lds_xor=True, lds_ahead=True, defer_mfma=1, vmem_interleave=4),
+                dict(
+                    uniform_k_decode=True,
+                    reg_prefetch=1,
+                    xcd_remap=6,
+                    lds_xor=True,
+                    lds_ahead=True,
+                    defer_mfma=1,
+                    vmem_interleave=4,
+                ),
                 dict(prefetch_regs=True),
             ):
                 with self.subTest(full=full, **knobs):
-                    self._check(prob, tile=tile, split_k=2, degree=3,
-                                split_tail=True, full_tiles=full, **knobs)
+                    self._check(
+                        prob,
+                        tile=tile,
+                        split_k=2,
+                        degree=3,
+                        split_tail=True,
+                        full_tiles=full,
+                        **knobs,
+                    )
 
 
 class TestFwdKLoopScheduleSpec(unittest.TestCase):
@@ -318,8 +399,15 @@ class TestFwdKLoopScheduleSpec(unittest.TestCase):
         from kernels.common.conv_implicit_gemm import ImplicitGemmConvSpec
 
         base = dict(
-            problem=_problem(), tile_m=64, tile_n=64, tile_k=64, warp_m=2,
-            warp_n=2, warp_tile_m=32, warp_tile_n=32, warp_tile_k=8,
+            problem=_problem(),
+            tile_m=64,
+            tile_n=64,
+            tile_k=64,
+            warp_m=2,
+            warp_n=2,
+            warp_tile_m=32,
+            warp_tile_n=32,
+            warp_tile_k=8,
             pipeline="compv4",
         )
         base.update(kw)
@@ -328,26 +416,42 @@ class TestFwdKLoopScheduleSpec(unittest.TestCase):
     def test_rejections(self):
         from kernels.common.conv_implicit_gemm import _fwd_kloop_conflict
 
-        ok = self._spec(uniform_k_decode=True, reg_prefetch=1, lds_ahead=True,
-                        defer_mfma=1, vmem_interleave=2)
+        ok = self._spec(
+            uniform_k_decode=True,
+            reg_prefetch=1,
+            lds_ahead=True,
+            defer_mfma=1,
+            vmem_interleave=2,
+        )
         self.assertEqual(_fwd_kloop_conflict(ok), "")
         for kw in (
             dict(lds_ahead=True),  # plain loop
             dict(uniform_k_decode=True, reg_prefetch=1, defer_mfma=8),
             dict(prefetch_regs=True, defer_mfma=1),
-            dict(uniform_k_decode=True, reg_prefetch=1, vmem_interleave=2,
-                 pipeline="mem"),
+            dict(
+                uniform_k_decode=True, reg_prefetch=1, vmem_interleave=2, pipeline="mem"
+            ),
             dict(prefetch_regs=True, unroll_k=True, vmem_interleave=2),
-            dict(uniform_k_decode=True, reg_prefetch=1, uk_tap_fast=True,
-                 uk_chunk_group=2, split_k=2),
+            dict(
+                uniform_k_decode=True,
+                reg_prefetch=1,
+                uk_tap_fast=True,
+                uk_chunk_group=2,
+                split_k=2,
+            ),
         ):
             with self.subTest(**kw):
                 self.assertNotEqual(_fwd_kloop_conflict(self._spec(**kw)), "")
 
     def test_default_name_unchanged(self):
         a = self._spec(uniform_k_decode=True, reg_prefetch=1)
-        b = self._spec(uniform_k_decode=True, reg_prefetch=1, lds_ahead=True,
-                       defer_mfma=1, vmem_interleave=4)
+        b = self._spec(
+            uniform_k_decode=True,
+            reg_prefetch=1,
+            lds_ahead=True,
+            defer_mfma=1,
+            vmem_interleave=4,
+        )
         self.assertNotIn("lah", a.kernel_name())
         self.assertTrue(b.kernel_name().endswith("_lah_dfr1_vmi4"), b.kernel_name())
 
@@ -357,11 +461,15 @@ class TestFwdKLoopScheduleSpec(unittest.TestCase):
 
         from kernels.conv import aot_jobs
 
-        with mock.patch.dict(os.environ, {"ROCKE_AOT_FWD_SCHED": "a1d1v2, a1d0v0,a1d1v2"}):
+        with mock.patch.dict(
+            os.environ, {"ROCKE_AOT_FWD_SCHED": "a1d1v2, a1d0v0,a1d1v2"}
+        ):
             self.assertEqual(
                 aot_jobs._fwd_sched_variants(),
-                ({"lds_ahead": True, "defer_mfma": 1, "vmem_interleave": 2},
-                 {"lds_ahead": True}),
+                (
+                    {"lds_ahead": True, "defer_mfma": 1, "vmem_interleave": 2},
+                    {"lds_ahead": True},
+                ),
             )
         with mock.patch.dict(os.environ, {"ROCKE_AOT_FWD_SCHED": "x1"}):
             with self.assertRaises(ValueError):
@@ -372,16 +480,38 @@ class TestFwdKLoopScheduleSpec(unittest.TestCase):
     def test_uk_nopad_serves_unpadded_problems_only(self):
         from dataclasses import replace
 
-        from kernels.conv.kernel_identity import KernelIdentity, identity_supports_problem
+        from kernels.conv.kernel_identity import (
+            KernelIdentity,
+            identity_supports_problem,
+        )
 
         ident = KernelIdentity(
-            arch="gfx942", direction="fwd", algorithm="implicit_gemm",
-            llvm_flavor="llvm22", dtype_a="bf16", dtype_b="bf16", dtype_d="bf16",
-            grouped=True, is_3d=True, tile_m=64, tile_n=64, tile_k=64, warp_m=2,
-            warp_n=2, warp_tile_m=32, warp_tile_n=32, warp_tile_k=8,
-            pipeline="compv4", epilogue="cshuffle", uniform_k_decode=True,
-            reg_prefetch=1, uk_nopad=True, wave_size=64, vector_size_a=8,
-            vector_size_b=8, vector_size_c=8,
+            arch="gfx942",
+            direction="fwd",
+            algorithm="implicit_gemm",
+            llvm_flavor="llvm22",
+            dtype_a="bf16",
+            dtype_b="bf16",
+            dtype_d="bf16",
+            grouped=True,
+            is_3d=True,
+            tile_m=64,
+            tile_n=64,
+            tile_k=64,
+            warp_m=2,
+            warp_n=2,
+            warp_tile_m=32,
+            warp_tile_n=32,
+            warp_tile_k=8,
+            pipeline="compv4",
+            epilogue="cshuffle",
+            uniform_k_decode=True,
+            reg_prefetch=1,
+            uk_nopad=True,
+            wave_size=64,
+            vector_size_a=8,
+            vector_size_b=8,
+            vector_size_c=8,
         )
         unpadded = _problem(Hi=8, Wi=7, Di=7, pH=0, pW=0, pD=0)
         self.assertTrue(identity_supports_problem(ident, unpadded)[0])
@@ -408,12 +538,15 @@ class TestFwdKLoopScheduleSpec(unittest.TestCase):
         with mock.patch.dict(os.environ, env):
             ins = aot_jobs._fwd_job_variants(ukd, geo_in, "cshuffle", caps)
             out = aot_jobs._fwd_job_variants(ukd, geo_out, "cshuffle", caps)
-            self.assertEqual(ins, [(1, False, False), (2, False, False), (2, False, True)])
+            self.assertEqual(
+                ins, [(1, False, False), (2, False, False), (2, False, True)]
+            )
             self.assertEqual(out, [(1, False, False)])
             sched = dict(ukd, lds_ahead=True, uk_nopad=True)
             self.assertTrue(aot_jobs._fwd_kloop_in_scope(sched, *geo_in))
             self.assertFalse(aot_jobs._fwd_kloop_in_scope(sched, *geo_out))
             self.assertTrue(aot_jobs._fwd_kloop_in_scope(ukd, *geo_out))
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

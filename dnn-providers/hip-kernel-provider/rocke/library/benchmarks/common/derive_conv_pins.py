@@ -19,7 +19,9 @@ import statistics
 import sys
 
 SHAPE_CALLS = {1: 2, 2: 1, 3: 1, 4: 2, 5: 1, 6: 2, 7: 2, 8: 1, 9: 1, 10: 2}
-FIN_RE = re.compile(r"^\s+\[\s*\d+/\d+\]\s+([\d.]+) TFLOPS\s+([\d.]+) ms\s+(\S.*\S)\s*$")
+FIN_RE = re.compile(
+    r"^\s+\[\s*\d+/\d+\]\s+([\d.]+) TFLOPS\s+([\d.]+) ms\s+(\S.*\S)\s*$"
+)
 
 
 def read_run(d):
@@ -29,7 +31,9 @@ def read_run(d):
         if not m:
             continue
         key = f"{m.group(1)}_s{m.group(2)}"
-        rows = [json.loads(line) for line in open(os.path.join(d, name)) if line.strip()]
+        rows = [
+            json.loads(line) for line in open(os.path.join(d, name)) if line.strip()
+        ]
         if not rows:
             continue
         row = rows[-1]
@@ -50,13 +54,19 @@ def read_run(d):
 
 
 def main():
-    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     ap.add_argument("runs", nargs="+")
     ap.add_argument("--out", required=True)
     ap.add_argument("--min-runs", type=int, default=0)
-    ap.add_argument("--alts", type=int, default=0,
-                    help="also list up to N alternative launches per case (the best finalists by median, "
-                         "within --alts-window of the pin) as 'alts' -- the candidates of an in-step selection")
+    ap.add_argument(
+        "--alts",
+        type=int,
+        default=0,
+        help="also list up to N alternative launches per case (the best finalists by median, "
+        "within --alts-window of the pin) as 'alts' -- the candidates of an in-step selection",
+    )
     ap.add_argument("--alts-window", type=float, default=0.03)
     a = ap.parse_args()
     runs = [read_run(d) for d in a.runs]
@@ -83,8 +93,13 @@ def main():
                 best = (lab, med, len(v))
         if best is None:
             best = (have[0]["kernel"], have[0]["ms"], 1)
-        cases[key] = dict(base, kernel=best[0], ms=round(best[1], 4), n_runs=best[2],
-                          winners=[h["kernel"] for h in have])
+        cases[key] = dict(
+            base,
+            kernel=best[0],
+            ms=round(best[1], 4),
+            n_runs=best[2],
+            winners=[h["kernel"] for h in have],
+        )
     if a.alts:
         for key, pin in cases.items():
             pool = {}
@@ -95,8 +110,10 @@ def main():
             ranked = sorted(pool, key=lambda lab: statistics.median(pool[lab]))
             best = statistics.median(pool[ranked[0]]) if ranked else None
             alts = [pin["kernel"]] + [
-                lab for lab in ranked
-                if lab != pin["kernel"] and statistics.median(pool[lab]) <= best * (1 + a.alts_window)
+                lab
+                for lab in ranked
+                if lab != pin["kernel"]
+                and statistics.median(pool[lab]) <= best * (1 + a.alts_window)
             ]
             pin["alts"] = alts[: a.alts]
     json.dump({"source": a.runs, "cases": cases}, open(a.out, "w"), indent=1)
