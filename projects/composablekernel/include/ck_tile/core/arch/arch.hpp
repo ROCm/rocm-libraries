@@ -115,7 +115,7 @@ enum struct amdgcn_target_id
     GFX1150         = 0x1150,
     GFX1151         = 0x1151,
     GFX1152         = 0x1152,
-    GFX1251        = 0x1251,
+    GFX1251         = 0x1251,
     GFX1153         = 0x1153,
     GFX11_GENERIC   = 0x11FF,
     GFX1170         = 0x1170,
