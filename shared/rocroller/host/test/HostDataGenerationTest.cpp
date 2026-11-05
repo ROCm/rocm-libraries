@@ -428,9 +428,8 @@ namespace
 
 int main()
 {
-    // Random byte sequences intentionally differ from the legacy mt19937/OpenMP
-    // generator. The migration contract is stable indexed seeds, modes, bounds,
-    // layouts, packed encodings, and natural scale order.
+    // These tests check indexed seeds, modes, bounds, layouts, packed encodings
+    // and natural scale order, not particular random byte sequences.
     testScalarTypeMappings();
     testLayoutAndSeedOffsets();
     testAllInitializationModes();

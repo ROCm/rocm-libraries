@@ -9,9 +9,7 @@
 #include <limits>
 #include <stdexcept>
 
-// Returns the per-term accumulation error bound for the compute type. Former
-// GFX11 input/output-specific allowances were removed after native GFX1151
-// tests passed with compute-type epsilon.
+// Returns the per-term accumulation error bound for the compute type.
 inline double sum_error_tolerance_for_compute_type(hipDataType computeType)
 {
     switch(computeType)

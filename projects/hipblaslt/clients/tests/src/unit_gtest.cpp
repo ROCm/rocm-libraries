@@ -1,8 +1,8 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-// Preserve the comparison regressions from the former unit.hpp API through
-// the tensor-based matmul validator. These tests do not require a GPU.
+// Comparison regressions for the tensor-based matmul validator. These tests do
+// not require a GPU.
 
 #include <gtest/gtest.h>
 #include <hipblaslt/hostnumerics/MatmulValidation.hpp>
