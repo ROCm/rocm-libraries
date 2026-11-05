@@ -2157,6 +2157,48 @@ TEST(TestCpuReferencePointwiseComputeType, UnaryIdentityUsesComputeType)
     EXPECT_EQ(output.getHostValue(0, 0, 0, 0), 2048.0f);
 }
 
+TEST(TestCpuReferencePointwiseComputeType, UnaryAbsAndNegUseComputeType)
+{
+    Tensor<float> input({1, 1, 1, 1});
+    Tensor<float> output({1, 1, 1, 1});
+    input.setHostValue(-2049.0f, 0, 0, 0, 0);
+    input.markHostModified();
+
+    CpuReferencePointwiseImpl<float, float, float>::pointwiseCompute(
+        PointwiseMode::ABS, output, input);
+    EXPECT_EQ(output.getHostValue(0, 0, 0, 0), 2049.0f);
+    CpuReferencePointwiseImpl<float, half, float>::pointwiseCompute(
+        PointwiseMode::ABS, output, input);
+    EXPECT_EQ(output.getHostValue(0, 0, 0, 0), 2048.0f);
+
+    CpuReferencePointwiseImpl<float, float, float>::pointwiseCompute(
+        PointwiseMode::NEG, output, input);
+    EXPECT_EQ(output.getHostValue(0, 0, 0, 0), 2049.0f);
+    CpuReferencePointwiseImpl<float, half, float>::pointwiseCompute(
+        PointwiseMode::NEG, output, input);
+    EXPECT_EQ(output.getHostValue(0, 0, 0, 0), 2048.0f);
+}
+
+TEST(TestCpuReferencePointwiseComputeType, BinaryAddUsesDoubleCompute)
+{
+    Tensor<double> in0({1, 1, 1, 1});
+    Tensor<double> in1({1, 1, 1, 1});
+    Tensor<double> output({1, 1, 1, 1});
+    in0.setHostValue(1.0, 0, 0, 0, 0);
+    in0.markHostModified();
+    in1.setHostValue(1e-12, 0, 0, 0, 0);
+    in1.markHostModified();
+
+    CpuReferencePointwiseImpl<double, double, double, double>::pointwiseCompute(
+        PointwiseMode::ADD, output, in0, in1);
+    EXPECT_EQ(output.getHostValue(0, 0, 0, 0), 1.0 + 1e-12);
+
+    // 1 + 1e-12 is lost in float compute
+    CpuReferencePointwiseImpl<double, float, double, double>::pointwiseCompute(
+        PointwiseMode::ADD, output, in0, in1);
+    EXPECT_EQ(output.getHostValue(0, 0, 0, 0), 1.0);
+}
+
 // --- Ternary operation tests ---
 
 TEST(TestCpuReferencePointwiseTernary, BinarySelectInput0BroadcastMismatchThrows)
