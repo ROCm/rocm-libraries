@@ -165,13 +165,11 @@ _CLUSTER_BARRIER_ASM = (
     "s_barrier_signal -3\n"
     "s_barrier_wait -3"
 )
-_CLUSTER_SIGNAL_ASM = (
-    "s_barrier_signal_isfirst -1\n"
-    "s_barrier_wait -1\n"
-    "s_cbranch_scc0 1\n"
-    "s_barrier_signal -3"
-)
 _CLUSTER_WAIT_ASM = "s_barrier_wait -3"
+# Wave 0 alone signals, with no LDS drain. $0 is the wave index.
+_CLUSTER_SIGNAL_WAVE0_ASM = (
+    "s_cmp_eq_u32 $0, 0\n" "s_cbranch_scc0 1\n" "s_barrier_signal -3"
+)
 
 
 def _is_pow2(value: int) -> bool:
@@ -207,8 +205,8 @@ class MxGemmSpec:
 
     ``*_lds_pad`` override the derived padding of one operand (``None``:
     derived, ``LdsPad()``: none). ``cluster_signal_wmmas`` defaults
-    (``None``) to 6, clamped to the tile. The cluster signal is drained:
-    every wave waits for its LDS reads, then one signals the cluster.
+    (``None``) to 6, clamped to the tile. Wave 0 alone signals the cluster,
+    without draining LDS reads; the cluster wait publishes them.
     ``half_b_order`` places the half-B reads of the next K-step (see
     :class:`TileCompute`).
     """
@@ -367,11 +365,6 @@ class MxGemmSpec:
         if self.cluster_signal_wmmas is not None:
             return self.cluster_signal_wmmas
         return min(_DEFAULT_SIGNAL_WMMAS, self.signal_limit)
-
-    @property
-    def signal_form(self) -> str | None:
-        """``"drained"`` with a cluster, else ``None``."""
-        return "drained" if self.has_cluster else None
 
     @property
     def fp8_convert_width(self) -> int:
@@ -1683,8 +1676,7 @@ class Pipeline:
 
         def signal() -> None:
             k.fence()
-            b.s_waitcnt(lgkmcnt=0)
-            b.inline_asm(_CLUSTER_SIGNAL_ASM, "~{scc},~{memory}")
+            b.inline_asm(_CLUSTER_SIGNAL_WAVE0_ASM, "s,~{scc},~{memory}", [k.wave])
             k.fence()
 
         def refill() -> None:
@@ -1701,6 +1693,11 @@ class Pipeline:
             k.fence()
             if spec.has_cluster:
                 b.inline_asm(_CLUSTER_WAIT_ASM, "~{memory}")
+            # No wave drained its reads of this buffer before the signal;
+            # the workgroup barrier publishes them here.
+            pending = min(spec.late_pending_reads, _DSCNT_MAX)
+            b.inline_asm(f"s_wait_dscnt {pending}", "~{memory}")
+            b.s_barrier_bare()
             self.tdm.issue(k.clamp_k(ops.v(ops.add(k0, two_tiles))), parity)
             k.fence()
 
