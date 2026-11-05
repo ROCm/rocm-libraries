@@ -720,12 +720,14 @@ class ProblemPredicate(Properties.Predicate):
             rv += [cls('SizeLessThan', index=kIdx,
                        value=kTiles * state['DepthU'] + 1)]
             if state['ReuseAcrossPersistent'] == 2:
-                # B resident, first cut, as RAP started out for A: one N-tile, so
-                # every tile reads the same B and the guard only has the batch to
-                # watch; whole M-tiles; and whole k-tiles. The K multiple matters
-                # even where ASEM allows a remainder -- fp4 forces ASEM to 32 -- so
-                # it is a predicate on K rather than a reject on ASEM.
-                rv += [cls('SizeEqual', index=1, value=state['MacroTile1'])]
+                # B resident: whole N-tiles, whole M-tiles and whole k-tiles. Any
+                # number of N-tiles: the entry guard compares the (batch, N-tile)
+                # a tile reads, after the same DefaultWGM remap the B address is
+                # built from, and sends a tile that changed either through the fill
+                # copy. The K multiple matters even where ASEM allows a remainder --
+                # fp4 forces ASEM to 32 -- so it is a predicate on K rather than a
+                # reject on ASEM.
+                rv += [cls('SizeMultiple', index=1, value=state['MacroTile1'])]
                 rv += [cls('SizeMultiple', index=0, value=state['MacroTile0'])]
                 rv += [cls('SizeMultiple', index=kIdx, value=state['DepthU'])]
 
