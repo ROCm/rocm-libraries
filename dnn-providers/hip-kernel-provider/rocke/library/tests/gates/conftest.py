@@ -71,6 +71,13 @@ def _gate_invoked(session) -> bool:
     ) or any(Path(item.path).name in _GATE_FILES for item in session.items)
 
 
+def _is_direct_gate_path(argument: str) -> bool:
+    """Whether an argument selects exactly one complete explicit gate file."""
+    if "::" in argument:
+        return False
+    return argument.replace("\\", "/").rsplit("/", 1)[-1] in _GATE_FILES
+
+
 def _selection_requested(config) -> bool:
     arguments = list(map(str, config.invocation_params.args))
     option = config.option
@@ -92,11 +99,10 @@ def _selection_requested(config) -> bool:
             "deselect",
         )
     )
-    return (
-        configured
-        or _selection_is_partial(arguments)
-        or any("::" in argument for argument in arguments)
-    )
+    selection_arguments = [
+        argument for argument in arguments if not _is_direct_gate_path(argument)
+    ]
+    return configured or _selection_is_partial(selection_arguments)
 
 
 def pytest_collection_finish(session) -> None:

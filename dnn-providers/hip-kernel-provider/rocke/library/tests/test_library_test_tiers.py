@@ -60,6 +60,25 @@ def test_gate_selection_arguments_are_partial(arguments):
     assert not _selection_is_partial(["-q", "-n", "4", "--durations=10"])
 
 
+@pytest.mark.parametrize("gate", tuple(_EXPECTED_GATES))
+@pytest.mark.parametrize("windows_path", (False, True))
+def test_direct_gate_file_is_not_treated_as_partial_selection(gate, windows_path):
+    path = str(_EXPECTED_GATES[gate])
+    if windows_path:
+        path = path.replace("/", "\\")
+    complete = SimpleNamespace(
+        invocation_params=SimpleNamespace(args=(path, "-v", "-rs", "--timeout=60")),
+        option=SimpleNamespace(),
+    )
+    selected_node = SimpleNamespace(
+        invocation_params=SimpleNamespace(args=(f"{path}::test_one_row",)),
+        option=SimpleNamespace(),
+    )
+
+    assert not gate_config._selection_requested(complete)
+    assert gate_config._selection_requested(selected_node)
+
+
 @pytest.mark.parametrize(
     "arguments", [["--noconftest"], ["--confcutdir", "tests"], ["--confcutdir=tests"]]
 )
