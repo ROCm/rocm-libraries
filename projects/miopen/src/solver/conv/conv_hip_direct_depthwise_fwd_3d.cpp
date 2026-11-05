@@ -55,10 +55,27 @@ constexpr std::size_t kMaxWindow       = 21;
 // HSA grid limit in work-items (1D grid).
 constexpr std::size_t kMaxGridX = 0x7fffffff;
 
-// Output columns per thread: a wider tile reuses more of each input row; on gfx1151 it was
-// 1.05x to 1.26x faster for 5-wide filters and 1.1x to 1.3x slower for 3-wide ones.
+// Output depths per thread. Two depths share their input planes, which cuts DRAM reads; on gfx1151
+// it was about 1.1x faster for NCDHW 5x5x5 and neutral for 3x3x3, but slower for bf16 NDHWC. It
+// needs depth stride and dilation 1, and holds two filter slices, so it is limited to 5x5 slices.
+constexpr std::size_t kMaxFilterTaps2dTd2 = 25;
+
+std::size_t TileD(const miopen::conv::ProblemDescription& problem)
+{
+    return !problem.IsLayoutNHWC() && problem.GetKernelStrideD() == 1 &&
+                   problem.GetDilationD() == 1 &&
+                   problem.GetWeightsHeight() * problem.GetWeightsWidth() <= kMaxFilterTaps2dTd2
+               ? 2
+               : 1;
+}
+
+// Output columns per thread: a wider tile reuses more of each input row. On gfx1151 it was
+// 1.05x to 1.26x faster for 5-wide filters and 1.1x to 1.3x slower for 3-wide ones, except with
+// two output depths in fp32, where the narrower tile was faster.
 std::size_t TileW(const miopen::conv::ProblemDescription& problem)
 {
+    if(TileD(problem) == 2 && problem.IsFp32())
+        return 4;
     return problem.GetWeightsWidth() >= 5 ? 8 : 4;
 }
 
@@ -77,7 +94,9 @@ std::size_t WindowH(const miopen::conv::ProblemDescription& problem)
 std::size_t WorkItems(const miopen::conv::ProblemDescription& problem)
 {
     const std::size_t tile_w = TileW(problem);
-    return problem.GetBatchSize() * problem.GetOutChannels() * problem.GetOutDepth() *
+    const std::size_t tile_d = TileD(problem);
+    return problem.GetBatchSize() * problem.GetOutChannels() *
+           ((problem.GetOutDepth() + tile_d - 1) / tile_d) *
            ((problem.GetOutHeight() + kTileH - 1) / kTileH) *
            ((problem.GetOutWidth() + tile_w - 1) / tile_w);
 }
@@ -162,7 +181,8 @@ ConvHipDirectDepthwiseFwd3d::GetSolution(const ExecutionContext&,
         " -DDW_SW=" + std::to_string(problem.GetKernelStrideW()) +
         " -DDW_DH=" + std::to_string(problem.GetDilationH()) +
         " -DDW_DW=" + std::to_string(problem.GetDilationW()) +
-        " -DDW_TH=" + std::to_string(kTileH) + " -DDW_TW=" + std::to_string(TileW(problem));
+        " -DDW_TD=" + std::to_string(TileD(problem)) + " -DDW_TH=" + std::to_string(kTileH) +
+        " -DDW_TW=" + std::to_string(TileW(problem));
     result.construction_params.push_back(kernel);
 
     const int n   = static_cast<int>(problem.GetBatchSize());
@@ -181,7 +201,8 @@ ConvHipDirectDepthwiseFwd3d::GetSolution(const ExecutionContext&,
     const int dd  = problem.GetDilationD();
 
     // The grid above and these arguments both come from the problem; the binary itself only
-    // depends on the compile options (data type, layout, filter, H / W stride and dilation).
+    // depends on the compile options (data type, layout, filter, H / W stride and dilation,
+    // output tile).
     result.invoker_factory = [=](const std::vector<Kernel>& kernels) {
         const auto kern = kernels[0];
         return [=](const Handle& handle, const AnyInvokeParams& primitive_parameters) {

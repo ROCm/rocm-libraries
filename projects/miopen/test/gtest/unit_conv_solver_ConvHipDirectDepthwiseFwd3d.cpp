@@ -42,6 +42,8 @@ auto GetConvTestCases(miopenDataType_t datatype, miopenTensorLayout_t layout)
         // Temporal-only and spatial-only filters.
         TestCase{{1, 8, 5, 9, 10}, {8, 1, 3, 1, 1}, {1, 0, 0}, {1, 1, 1}, {1, 1, 1}, 8, datatype, layout},
         TestCase{{1, 64, 3, 8, 8}, {64, 1, 1, 3, 3}, {0, 1, 1}, {1, 2, 2}, {1, 1, 1}, 64, datatype, layout},
+        // Depth stride 2 and depth dilation 2 (one output depth per thread).
+        TestCase{{1, 16, 11, 10, 11}, {16, 1, 3, 3, 3}, {1, 1, 1}, {2, 1, 1}, {2, 1, 1}, 16, datatype, layout},
         // Largest filter rows the solver takes (7x7), with a dilated H.
         TestCase{{1, 8, 4, 21, 23}, {8, 1, 2, 7, 7}, {1, 3, 3}, {1, 1, 1}, {1, 2, 1}, 8, datatype, layout},
         // clang-format on
