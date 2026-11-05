@@ -38,8 +38,12 @@ builder `build_attention_dense`). Engine: `hipkernel:Gfx950AttentionDense`.
 - Changing the KDP changes its md5. Update the `.dvc` pointer in the same commit.
 - **No trained heuristic.** The UED binds `sort_kernel_catalog: {default: <native UHD>}`
   only -- no per-arch lists, no `predict_engine`, and no installed `heuristics/<ued-id>/`
-  subtree -- so ranking is the native `score` symbol (baseline 256/64 first, then
-  ascending tile). The UHD retain/retrain/drop choice a regeneration forces (see the
+  subtree -- so ranking is the native `score` symbol. That symbol reads the problem:
+  `preferredTile()` picks a tile from head size, mask and `seqlen_q`, and candidates are
+  ranked by closeness to it, with the historical ascending `(block_m, block_n)` order as
+  the tie-break. It is no longer a fixed 256/64-first order. See
+  `rocke/library/builders/gfx950/attention/prefill/TILE_HEURISTIC.md`.
+  The UHD retain/retrain/drop choice a regeneration forces (see the
   `hipdnn-ingestor-engine` RUNBOOK, "Trained heuristics survive regeneration only by
   intent") is therefore a no-op here: there is no model to invalidate. Record that again
   if a model is ever promoted for this engine.

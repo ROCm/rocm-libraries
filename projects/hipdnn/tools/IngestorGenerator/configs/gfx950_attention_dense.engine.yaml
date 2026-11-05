@@ -47,9 +47,11 @@ kmd_fields:
 - name: seqlen_kv
   type: int
   default_value: 512
-# Tile metadata, also public engine knobs. A record omitting either field
-# completes to the 256/64 baseline tile through these defaults; with no tile
-# knob set, cold selection prefers the applicable 256/64 candidate.
+# Tile metadata, also public engine knobs. A record omitting either field still
+# completes to 256/64 through these defaults, which is only a completion rule.
+# It is no longer what cold selection picks: preferredTile() in
+# Gfx950AttentionDenseNative.cpp reads head size, mask and seqlen_q, so the
+# no-knob winner varies by shape.
 - name: block_m
   type: int
   default_value: 256
