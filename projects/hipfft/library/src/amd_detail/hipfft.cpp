@@ -2219,6 +2219,11 @@ try
     if(!plan)
         return HIPFFT_INVALID_PLAN;
 
+    // JIT callback settings are consumed at plan init and cannot be changed afterwards
+    if(plan->initialized()
+       && (plan->load_callback.jit_enabled() || plan->store_callback.jit_enabled()))
+        return HIPFFT_INVALID_PLAN;
+
     switch(cbtype)
     {
     case HIPFFT_CB_LD_COMPLEX:
