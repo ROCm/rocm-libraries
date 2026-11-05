@@ -4101,6 +4101,38 @@ void case_gfx1250_wmma_requires_llvm22()
 
     const std::string ir = lower_one("wmma_llvm22", build, "gfx1250", ROCKE_LLVM_FLAVOR_LLVM22);
     EXPECT_IR(ir, "declare <8 x float> @llvm.amdgcn.wmma.f32.16x16x32.f16.v8f32.v16f16(");
+
+    /* The FP8 K=64 handler refuses on its own gate. */
+    const auto build_fp8 = [](rocke_ir_builder_t* b) {
+        rocke_value_t* matrix = global_ptr_param(b, "matrix", rocke_i32());
+        rocke_value_t* accum = global_ptr_param(b, "accum", rocke_f32());
+        rocke_value_t* lane = rocke_b_thread_id_x(b);
+        rocke_value_t* frag = rocke_b_global_load_vN(b, matrix, lane, rocke_i32(), 8, 0);
+        rocke_value_t* c = rocke_b_global_load_vN(b, accum, lane, rocke_f32(), 8, 0);
+        const rocke_arch_target_t* target = rocke_arch_target_from_gfx("gfx1250");
+        const rocke_mma_op_t* atom = rocke_mma_catalog_op_for_shape(
+            &target->mma, "wmma", "fp8", "fp8", "fp32", 16, 16, 64, nullptr);
+        if(!atom)
+        {
+            fail("gfx1250 fp8 K64 WMMA atom must resolve", __LINE__);
+            return;
+        }
+        rocke_value_t* d = rocke_b_mma(b, atom->op_id, frag, frag, c, nullptr, 0);
+        rocke_b_global_store(b, accum, lane, rocke_b_vec_extract(b, d, 0), 1);
+    };
+
+    std::string err_fp8;
+    const rocke_status_t st_fp8 = lower_expect_error(
+        "wmma_fp8_llvm20", build_fp8, "gfx1250", ROCKE_LLVM_FLAVOR_LLVM20, &err_fp8);
+    if(st_fp8 != ROCKE_ERR_NOTIMPL)
+        fail("llvm20 must refuse the gfx1250 fp8 WMMA with ROCKE_ERR_NOTIMPL", __LINE__);
+    if(err_fp8.find("intrinsic 'wmma.gfx1250.f32.16x16x64.fp8.fp8' requires llvm22, got llvm20")
+       == std::string::npos)
+        fail("llvm20 fp8 refusal text must match the Python engine", __LINE__);
+
+    const std::string ir_fp8
+        = lower_one("wmma_fp8_llvm22", build_fp8, "gfx1250", ROCKE_LLVM_FLAVOR_LLVM22);
+    EXPECT_IR(ir_fp8, "declare <8 x float> @llvm.amdgcn.wmma.f32.16x16x64.fp8.fp8.v8f32.v8i32(");
 }
 
 /* ---- opcode table alignment ---- */

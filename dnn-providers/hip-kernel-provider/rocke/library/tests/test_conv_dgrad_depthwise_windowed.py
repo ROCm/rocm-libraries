@@ -494,7 +494,14 @@ class TestWmmaSpec(unittest.TestCase):
             self.assertIn(part, spec.kernel_name())
 
     def test_lowers_to_wmma_with_lds_staging(self):
-        from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
+        from rocke.core.llvm_profile import _supports_gfx1250_wmma
+        from rocke.core.lower_llvm import (
+            _lower_kernel_to_llvm_python,
+            _resolve_llvm_flavor,
+        )
+
+        if not _supports_gfx1250_wmma(_resolve_llvm_flavor()):
+            self.skipTest("the selected LLVM flavor lacks the gfx1250 WMMA intrinsics")
 
         for dtype, ab in (("bf16", "bf16"), ("fp16", "f16")):
             spec = self._wmma(_problem(2, 7, 9, 16, 5, 5, 2, dtype), block_waves=2)

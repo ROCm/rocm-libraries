@@ -418,6 +418,27 @@ def _build_f16_wmma():
     return b.kernel
 
 
+def _build_fp8_wmma():
+    b = IRBuilder("gfx1250_fp8_wmma")
+    matrix = b.param("matrix", PtrType(I32, "global"), readonly=True)
+    accum = b.param("accum", PtrType(F32, "global"))
+    lane = b.thread_id_x()
+    fragment = b.global_load_vN(matrix, lane, I32, 8)
+    c = b.global_load_vN(accum, lane, F32, 8)
+    atom = ArchTarget.from_gfx("gfx1250").mma.op_for_shape(
+        family="wmma",
+        a_dtype="fp8",
+        b_dtype="fp8",
+        c_dtype="fp32",
+        m=16,
+        n=16,
+        k=64,
+    )
+    d = b.mma(atom, fragment, fragment, c)
+    b.global_store(accum, lane, b.vec_extract(d, 0))
+    return b.kernel
+
+
 class IntrinsicDeclaredOnFlavorTest(unittest.TestCase):
     """A demand for a key the flavor cannot declare is refused, not emitted."""
 
@@ -436,6 +457,20 @@ class IntrinsicDeclaredOnFlavorTest(unittest.TestCase):
                 self.assertIn(
                     "declare <8 x float> @llvm.amdgcn.wmma.f32.16x16x32.f16", ir
                 )
+
+    def test_the_fp8_wmma_requires_llvm22(self):
+        kernel = _build_fp8_wmma()
+        with self.assertRaisesRegex(
+            NotImplementedError,
+            "intrinsic 'wmma.gfx1250.f32.16x16x64.fp8.fp8' requires llvm22, got llvm20",
+        ):
+            _lower_kernel_to_llvm_python(kernel, arch="gfx1250", llvm_flavor="llvm20")
+        for flavor in ("llvm22", "llvm23", "llvm24"):
+            with self.subTest(flavor=flavor):
+                ir = _lower_kernel_to_llvm_python(
+                    kernel, arch="gfx1250", llvm_flavor=flavor
+                )
+                self.assertIn("@llvm.amdgcn.wmma.f32.16x16x64.fp8.fp8", ir)
 
     def test_a_key_in_no_table_is_a_defect(self):
         lowerer = _Lowerer(IRBuilder("k").kernel, arch="gfx1250", llvm_flavor="llvm23")
