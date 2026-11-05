@@ -54,7 +54,7 @@ void setRaggedLayout(ValidatorArgs& args,
     args.seqAxis = layout.seqAxis;
     args.seqStride = static_cast<long long>(layout.seqStride);
     args.totalElements = std::accumulate(
-        dims.begin(), dims.end(), static_cast<long long>(1), std::multiplies<long long>());
+        dims.begin(), dims.end(), static_cast<long long>(1), std::multiplies<>());
 }
 
 } // namespace detail
