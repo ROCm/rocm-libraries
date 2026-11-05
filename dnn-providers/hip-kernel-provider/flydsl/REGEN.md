@@ -303,7 +303,7 @@ rows follow: dQ `{dq, tailzero}`, gfx11 dB-storing dQ `{dq, dbias_reduce, tailze
 
 A tail-zero object has no pin. Its provenance is the generator: each object is built twice in fresh processes and the two
 builds must be byte-identical, the kernarg layout must be `PARAMS`, and on gfx950 the R-MIR scan must not be red; the gfx950
-resource row is recorded in the companion entry. The pin steps of `Plans/sdpa-bwd-regen-F.md` §1 (reference rows, pin
+resource row is recorded in the companion entry. The pin steps above (reference rows, pin
 exceptions) apply to every other object and are skipped for tail-zero rows. To build the six objects alone, for inspection:
 
 ```bash
