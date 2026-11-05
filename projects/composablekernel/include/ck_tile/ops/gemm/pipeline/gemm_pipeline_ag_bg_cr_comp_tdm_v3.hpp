@@ -93,6 +93,12 @@ struct GemmPipelineAgBgCrCompTDMV3 : public GemmPipelineAgBgCrCompTDMV1<Problem,
         (Policy::DataCachePrefetchA != DataCachePrefetchKind::None ||
          Policy::DataCachePrefetchB != DataCachePrefetchKind::None);
 
+    /// MX split-K with a split-K-capable epilogue (CShuffle): this pipeline clips every TDM load
+    /// to its split's K range and loads the scales of that range, so MxGemmKernel lets it run
+    /// k_batch > 1 (see MxGemmKernel::IsSupportedArgument). Pipelines without this member keep
+    /// the TDM split-K rejection.
+    static constexpr bool kSupportsMxTdmSplitK = true;
+
     template <GemmPipelineScheduler Scheduler>
     struct PipelineImpl : public PipelineImplBase
     {

@@ -276,6 +276,19 @@ struct MxGemmKernel
     using MxGemmPipeline   = remove_cvref_t<GemmPipeline_>;
     using EpiloguePipeline = remove_cvref_t<EpiloguePipeline_>;
 
+    template <typename T>
+    using mx_tdm_split_k_t = decltype(T::kSupportsMxTdmSplitK);
+
+    /// Whether this TDM pipeline runs MX split-K correctly with a split-K-capable epilogue: only
+    /// a pipeline that declares kSupportsMxTdmSplitK (comp_tdm_v3). The others keep the TDM
+    /// split-K rejection whatever the epilogue.
+    static constexpr bool kPipelineSupportsMxTdmSplitK = []() {
+        if constexpr(is_detected<mx_tdm_split_k_t, MxGemmPipeline>{})
+            return static_cast<bool>(MxGemmPipeline::kSupportsMxTdmSplitK);
+        else
+            return false;
+    }();
+
     using BaseKernel::PersistentKernel;
     using typename BaseKernel::AsLayout;
     using typename BaseKernel::BsLayout;
@@ -501,11 +514,15 @@ struct MxGemmKernel
             // UniversalGemmKernel::IsSupportedArgument skips its shape checks for TDM pipelines.
             // The device check comes last so that the argument checks also run on a host without
             // a gfx125 device.
-            // The TDM split-K rejection is about the TDM epilogue, which overwrites C. With a
-            // split-K-capable epilogue (CShuffle, checked above as kSplitKAtomicAddSupported) each
-            // split adds into C atomically and its TDM loads are clipped to its own K range, so
-            // k_batch > 1 is checked here only with a TDM epilogue, as in UniversalGemmKernel.
-            const index_t tdm_k_batch = is_tdm_epilogue_v<EpiloguePipeline> ? kargs.k_batch : 1;
+            // The TDM split-K rejection guards the TDM epilogue, which overwrites C, and the TDM
+            // pipelines whose loads are not clipped to a split's K range. A pipeline that
+            // declares kSupportsMxTdmSplitK (comp_tdm_v3) with a split-K-capable epilogue
+            // (CShuffle, checked above as kSplitKAtomicAddSupported) adds each split into C
+            // atomically, so k_batch > 1 is not rejected here for it.
+            const index_t tdm_k_batch =
+                (is_tdm_epilogue_v<EpiloguePipeline> || !kPipelineSupportsMxTdmSplitK)
+                    ? kargs.k_batch
+                    : 1;
             if(!BaseKernel::IsTdmArgumentSupported("MX GEMM",
                                                    tdm_k_batch,
                                                    kargs.K,
