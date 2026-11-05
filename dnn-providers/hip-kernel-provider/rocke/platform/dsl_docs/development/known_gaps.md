@@ -241,9 +241,9 @@ What is still Python-only is *asking* for LSE: the request side.
 |---|---|
 | `emit_lse` on the unified problem, the `_reject_lse` support gate, and the gfx942 4-warp cohort exclusion (`library/kernels/common/attention_unified.py`: `_gfx942_4warp_eligible` is false under LSE, so the D256 bf16 and D128 sliding-window cohorts take the default 2D builder) | `rocke_unified_attn_problem_t`; the C selectors have no support gates yet, and `d256_gfx942_fast` (`attention_unified_selectors.cpp`) has no LSE clause. No C selector sets `emit_lse`, so a C-selected spec is always LSE-off and C output is unaffected |
 
-Additive bias + LSE on the gfx950 tiled 2D kernel is built by both engines
-(the four bias params precede `lse_ptr`) and is pinned by a bias + LSE config
-in `gfx950_attention_tiled_2d_emit`.
+Additive bias + LSE on the gfx942 and gfx950 tiled 2D kernels is built by both
+engines (the four bias params precede `lse_ptr`) and is pinned by a bias + LSE
+config in `gfx942_attention_tiled_2d_emit` and `gfx950_attention_tiled_2d_emit`.
 
 **Why deferred:** the C entry points take selector output, and no C caller
 requests LSE today; the Python host and dispatcher are the only request path.

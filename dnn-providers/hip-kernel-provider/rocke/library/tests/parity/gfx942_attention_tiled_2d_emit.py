@@ -294,13 +294,8 @@ _CONFIGS = {
         use_q_major_grid=True,
         emit_lse=True,
     ),
-    # idx18: additive bias on gfx942; both engines reject it (BOTH_REJECTED).
-    # The gfx942 Python spec has no use_additive_bias field at all, so this
-    # raises TypeError at construction. The C twin's spec_validate() rejects
-    # it too, but nothing in the provider tree calls that function on the
-    # real build path (rocke_build_unified_attention_2d_tiled_scalar ->
-    # rocke_gfx942_attn2d_build_ctx_init); the reject this config pins lives
-    # in the ctx-init itself.
+    # idx18-25: additive bias. idx18: on the narrow 16x16 path with sinks and a
+    # sliding window (MHA).
     18: dict(
         head_size=64,
         block_size=32,
@@ -312,14 +307,117 @@ _CONFIGS = {
         has_softcap=False,
         use_additive_bias=True,
     ),
+    # idx19: the narrow 16x16 path (GQA, mw16).
+    19: dict(
+        head_size=128,
+        block_size=16,
+        num_query_heads=16,
+        num_kv_heads=4,
+        dtype="bf16",
+        use_sinks=False,
+        sliding_window=0,
+        has_softcap=False,
+        use_additive_bias=True,
+        num_seqs=3,
+        num_warps=2,
+        tile_size=32,
+    ),
+    # idx20: the narrow path with two M atoms per warp (mw32).
+    20: dict(
+        head_size=64,
+        block_size=32,
+        num_query_heads=32,
+        num_kv_heads=8,
+        dtype="fp16",
+        use_sinks=False,
+        sliding_window=0,
+        has_softcap=False,
+        use_additive_bias=True,
+        num_warps=4,
+        block_m_per_warp=32,
+        tile_size=64,
+    ),
+    # idx21: composed with ALiBi, QQ bias, softcap, sinks and a sliding window (the ALiBi
+    # slope replaces the hoisted query head).
+    21: dict(
+        head_size=64,
+        block_size=32,
+        num_query_heads=32,
+        num_kv_heads=8,
+        dtype="fp16",
+        use_sinks=True,
+        sliding_window=512,
+        has_softcap=True,
+        use_alibi=True,
+        use_qq_bias=True,
+        use_additive_bias=True,
+    ),
+    # idx22: D256 on the narrow path.
+    22: dict(
+        head_size=256,
+        block_size=16,
+        num_query_heads=8,
+        num_kv_heads=8,
+        dtype="bf16",
+        use_sinks=False,
+        sliding_window=0,
+        has_softcap=False,
+        use_additive_bias=True,
+    ),
+    # idx23, 24: additive bias with paths that do not emit it (32x32x8, register-PV); both
+    # engines reject these (BOTH_REJECTED).
+    23: dict(
+        head_size=128,
+        block_size=32,
+        num_query_heads=8,
+        num_kv_heads=1,
+        dtype="bf16",
+        use_sinks=False,
+        sliding_window=0,
+        has_softcap=False,
+        use_additive_bias=True,
+        num_warps=2,
+        block_m_per_warp=32,
+        tile_size=32,
+        use_mfma_32x32x8=True,
+        use_transposed_qk_32x32=True,
+    ),
+    24: dict(
+        head_size=64,
+        block_size=32,
+        num_query_heads=32,
+        num_kv_heads=8,
+        dtype="bf16",
+        use_sinks=False,
+        sliding_window=0,
+        has_softcap=False,
+        use_additive_bias=True,
+        use_register_pv=True,
+    ),
+    # idx25: the narrow path with the LSE output (the bias params come before
+    # lse_ptr).
+    25: dict(
+        head_size=128,
+        block_size=16,
+        num_query_heads=16,
+        num_kv_heads=4,
+        dtype="bf16",
+        use_sinks=False,
+        sliding_window=0,
+        has_softcap=False,
+        use_additive_bias=True,
+        num_warps=2,
+        tile_size=32,
+        emit_lse=True,
+    ),
 }
 
 # Configs both engines must reject, with the reason each one pins: run_diff
 # requires the regex in both engines' stderr (BOTH_REJECTED alone accepts any
 # reason, a typo included).
 _EXPECTED_REJECTIONS = {
-    # The Python gfx942 spec has no bias field, so Python fails on the keyword.
-    18: r"unexpected keyword argument 'use_additive_bias'|does not emit additive bias",
+    23: r"use_additive_bias on gfx942 supports only the narrow 16x16 path",
+    24: r"use_additive_bias on gfx942 supports only the narrow 16x16 path",
 }
 
 

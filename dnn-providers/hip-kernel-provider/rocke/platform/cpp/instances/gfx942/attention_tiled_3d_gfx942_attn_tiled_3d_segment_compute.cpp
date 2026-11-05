@@ -444,6 +444,18 @@ void rocke_gfx942_attention_tiled_3d_emit_softmax_loop(
                         b, ctx->qq_bias_ptr, qq_idx, qq_ok, rocke_b_const_f32(b, 0.0), f32, 4);
                     s_scaled = rocke_b_fadd(b, s_scaled, rocke_b_fmul(b, qq_v, ctx->rcp_ln2));
                 }
+                if(cfg->USE_ADDITIVE_BIAS)
+                {
+                    s_scaled = rocke_add_additive_bias(b,
+                                                       s_scaled,
+                                                       &ctx->additive_bias,
+                                                       ctx->seq_idx,
+                                                       ctx->row_qh,
+                                                       ctx->row_qp,
+                                                       col_abs,
+                                                       m_ok,
+                                                       ctx->rcp_ln2);
+                }
                 masked[n * 4 + reg] = rocke_b_select(b, m_ok, s_scaled, ctx->neg_inf);
             }
         }

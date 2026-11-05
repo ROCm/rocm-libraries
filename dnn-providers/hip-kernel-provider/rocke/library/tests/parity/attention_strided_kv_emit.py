@@ -14,11 +14,7 @@ from _emit_common import run_emit
 # requires the regex in both engines' stderr (BOTH_REJECTED alone accepts any
 # reason, a typo included).
 _EXPECTED_REJECTIONS = {
-    # The gfx942 spec has no bias field, so Python fails on the keyword.
-    14: (
-        r"unexpected keyword argument 'use_additive_bias'"
-        r"|use_additive_bias is not implemented on gfx942"
-    ),
+    14: r"strided KV does not support use_additive_bias",
     15: r"strided KV does not support use_additive_bias",
 }
 
@@ -48,8 +44,6 @@ def spec_for_index(idx):
         num_seqs=3,
         kv_layout="strided" if idx < 6 or swizzle or bias else "paged",
         use_kv_lds_swizzle=swizzle,
-        # The gfx942 spec has no use_additive_bias field; passing it is the
-        # rejection there.
         **({"use_additive_bias": True} if bias else {}),
     )
     return spec, arch

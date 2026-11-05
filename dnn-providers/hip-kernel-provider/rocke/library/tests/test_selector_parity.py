@@ -766,7 +766,8 @@ class TestKvAddrLimit(unittest.TestCase):
     )
     _NO_KV_ADDRESS_FLAGS = frozenset(
         {
-            # Masking, bias and softmax state.
+            # Masking, bias and softmax state. The additive bias has its own
+            # i32 element index, bounded by the runner, not by the K/V address.
             "use_sinks",
             "use_alibi",
             "use_qq_bias",
