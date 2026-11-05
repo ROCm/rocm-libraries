@@ -1,4 +1,5 @@
 // SPDX-FileCopyrightText: Copyright (c) 2008-2024, NVIDIA Corporation
+// SPDX-FileCopyrightText: Modifications Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
 // SPDX-FileCopyrightText: Copyright (c) 2013, Filipe RNC Maia
 // SPDX-License-Identifier: Apache-2.0
 
