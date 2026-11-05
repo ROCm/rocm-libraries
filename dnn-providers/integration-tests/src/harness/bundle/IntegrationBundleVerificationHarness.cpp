@@ -28,6 +28,7 @@
 
 #include "harness/ReferenceCapabilityError.hpp"
 #include "harness/TomlGuards.hpp"
+#include "harness/bundle/LiveRows.hpp"
 #include "harness/bundle/LoadedEngine.hpp"
 #include "harness/bundle/LoadedEngineTable.hpp"
 #include "harness/bundle/SupportClaimReport.hpp"
@@ -1265,14 +1266,37 @@ VerificationOutcome
             return comparisonOutcome(false, verifier);
         }
     }
-    const auto mismatches
-        = bundle::compareOutputs(wrapper,
-                                 bundle::comparedOutputUids(_bundle->outputTensorUids, dump),
-                                 engineOutputs,
-                                 expectedFor,
-                                 toleranceFor,
-                                 resolveValidationSite(_deps.policy.validator, site),
-                                 "Bundle: " + _bundlePath.string() + inputFillNote());
+    LiveRowMap liveRows;
+    try
+    {
+        liveRows = resolveLiveRows(_bundle->metadata.liveRows, wrapper, [&](int64_t uid) {
+            const auto input = _inputs.find(uid);
+            if(input != _inputs.end())
+            {
+                return input->second.get();
+            }
+            const auto output = engineOutputs.find(uid);
+            return output != engineOutputs.end() ? output->second.get() : nullptr;
+        });
+    }
+    catch(const std::exception& e)
+    {
+        return VerificationOutcome::failed(VerificationDepth::EXECUTED,
+                                           FailureOrigin::HARNESS,
+                                           std::string("metadata live_rows cannot be applied: ")
+                                               + e.what() + " (" + _bundlePath.string() + ")");
+    }
+
+    const auto mismatches = bundle::compareOutputs(
+        wrapper,
+        bundle::comparedOutputUids(_bundle->outputTensorUids, dump),
+        engineOutputs,
+        expectedFor,
+        toleranceFor,
+        resolveValidationSite(_deps.policy.validator, site),
+        "Bundle: " + _bundlePath.string() + inputFillNote(),
+        liveRows,
+        resolveValidationSite(_deps.policy.validator, ValidationSite::HOST));
 
     // Reported one per tensor so each diff lands next to the tensor it describes;
     // the outcome carries no message because of it.

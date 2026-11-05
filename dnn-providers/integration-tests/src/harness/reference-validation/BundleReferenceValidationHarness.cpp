@@ -13,6 +13,7 @@
 #include "harness/IReferenceExecutors.hpp"
 #include "harness/ReferenceCapabilityError.hpp"
 #include "harness/TestConfig.hpp"
+#include "harness/bundle/LiveRows.hpp"
 #include "harness/bundle/OutputComparison.hpp"
 #include "harness/bundle/VariantPackBuilder.hpp"
 #include "harness/reference-validation/ReferenceOpCoverage.hpp"
@@ -241,6 +242,26 @@ void BundleReferenceValidationHarness::TestBody()
                                     + std::string(referenceLabel(_referenceType))
                                     + "): " + _bundlePath.string();
 
+    LiveRowMap liveRows;
+    try
+    {
+        liveRows = resolveLiveRows(_bundle->metadata.liveRows, wrapper, [&](int64_t uid) {
+            const auto tensor = _tensors.find(uid);
+            if(tensor != _tensors.end())
+            {
+                return tensor->second.get();
+            }
+            const auto output = referenceOutputs.find(uid);
+            return output != referenceOutputs.end() ? output->second.get() : nullptr;
+        });
+    }
+    catch(const std::exception& e)
+    {
+        ADD_FAILURE() << "metadata live_rows cannot be applied: " << e.what()
+                      << "\n  bundle: " << _bundlePath;
+        return;
+    }
+
     // Golden data is loaded on the host, so by default the comparison runs there
     // whichever reference produced the output being judged; --validator can move it.
     for(const auto& mismatch :
@@ -250,7 +271,9 @@ void BundleReferenceValidationHarness::TestBody()
                                goldenFor,
                                toleranceFor,
                                resolveValidationSite(_validator, ValidationSite::HOST),
-                               contextLine))
+                               contextLine,
+                               liveRows,
+                               resolveValidationSite(_validator, ValidationSite::HOST)))
     {
         ADD_FAILURE() << mismatch.report;
     }
