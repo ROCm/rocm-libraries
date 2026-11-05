@@ -1355,6 +1355,9 @@ namespace
 
     TEST(FastCheckDevice_pre_checkin, memory_shortfall_reclaims_idle_buffers)
     {
+#if HIPBLASLT_TEST_ASAN_BUILD
+        GTEST_SKIP() << "ASAN quarantine delays freeing GPU memory.";
+#endif
         // Hold one live allocation while returning another to the client pool. The latter
         // is reusable capacity, so it must not make an otherwise fitting case skip.
         auto live = memory_pool<d_memory>::Get(4096);

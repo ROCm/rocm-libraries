@@ -692,7 +692,7 @@ class ProblemPredicate(Properties.Predicate):
             rv += [cls('SwizzleTensorB', value=state['ProblemType']['SwizzleTensorB'])]
 
         if state['ProblemType']['FusedGemmA2A']:
-            rv += [cls('FusedA2ATileDivisible', value=state['MacroTile0'])]
+            rv += [cls('GemmA2AShape', value=state['MacroTile0'])]
 
         # Exact-size custom kernels record the M/N/K window they won. Without
         # it, a multi-solution lookup also accepts the neighboring tile.
@@ -740,7 +740,8 @@ class CustomKernel:
                  'workspaceType',
                  'workspaceSizePerElemC',
                  'workspaceSizePerElemBias',
-                 'generated']
+                 'generated',
+                 'uniformSummationOrder']
 
     @classmethod
     def FromOriginalState(cls, d):
@@ -752,7 +753,8 @@ class CustomKernel:
                    workspaceType=d.get('workspaceType', 'None'),
                    workspaceSizePerElemC=d.get('workspaceSizePerElemC', 0),
                    workspaceSizePerElemBias=d.get('workspaceSizePerElemBias', 0),
-                   generated=d.get('generated', False))
+                   generated=d.get('generated', False),
+                   uniformSummationOrder=d.get('uniformSummationOrder', False))
 
     def __init__(self, **kwargs):
         for (key, value) in list(kwargs.items()):

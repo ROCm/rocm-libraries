@@ -56,6 +56,7 @@ set(ROCSPARSE_UNIT_TEST_SOURCES
 set(ROCSPARSE_UNIT_TEST_LIB_SOURCES
   ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/common/rocsparse_indextype_utils.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/common/rocsparse_datatype_utils.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/level2/rocsparse_csrmv_adaptive_analysis.cpp
 )
 
 add_executable(rocsparse-unit-test
@@ -288,6 +289,12 @@ set(ROCSPARSE_UNIT_TEST_DEVICE_SOURCES
   # with sibling unit-test branches that append after rocsparse_unit_test_main.
   # Drives public entry points, linking roc::rocsparse; no compile-in TUs.
   unit_test_host_level2.cpp
+  # --- ELL triangular solve / sliced-ELL SpMV [ROCM-33114] ------------------
+  # Distinct anchor (right after the level-2 host tests) so this leaf does not
+  # conflict with sibling unit-test branches. Drives rocsparse_sptrsv on
+  # rocsparse_format_ell and rocsparse_v2_spmv on rocsparse_format_sell
+  # through the public generic descriptor API; no compile-in TUs.
+  unit_test_internal_level2_ell_sell.cpp
   # --- csr2ell strided-batched grid.y clamp regression [AISPARSE-683] -------
   # Distinct anchor at the end of the list so this leaf does not conflict with
   # sibling branches appending elsewhere. Needs the defining library TU in
@@ -313,7 +320,13 @@ set(ROCSPARSE_UNIT_TEST_DEVICE_SOURCES
   # the sibling unit-test branches above. Drives public entry points plus
   # rocsparse::convert_array, whose TU is already compiled in below.
   unit_test_internal_conversion_grid_clamp.cpp
+  # Default CSR SpMV algorithm selection (adaptive vs nnz-split).
+  unit_test_internal_level2_csrmv_default_dispatch.cpp
 )
+
+if(BUILD_WITH_SPSORT)
+  list(APPEND ROCSPARSE_UNIT_TEST_DEVICE_SOURCES unit_test_host_conversion_spsort.cpp)
+endif()
 
 # Host building-block library translation units under test by the
 # unit_test_internal_hostblocks_*.cpp files. Compiled into the device (GPU) test binary
@@ -381,6 +394,7 @@ set(ROCSPARSE_UNIT_TEST_DEVICE_LIB_SOURCES
   ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/common/rocsparse_indextype_utils.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/level2/rocsparse_bsrmv_info.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/level2/rocsparse_csritsv_info.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/level2/rocsparse_csrmv_alg.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/level2/rocsparse_csrmv_info.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/extra/rocsparse_spgeam.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/extra/rocsparse_csrgeam.cpp

@@ -18,6 +18,7 @@ Covers:
 
 from __future__ import annotations
 
+import re
 import unittest
 from dataclasses import replace
 from itertools import islice
@@ -619,15 +620,32 @@ class TestDenseSlidingWindowWiring(unittest.TestCase):
         self.assertIn("swa128", kname)
         self.assertIn("persist", kname)
 
-    def test_sliding_window_with_ragged_shape_rejected_at_dispatch(self):
-        """Ragged + sliding_window is rejected by the spec validator, so no
-        dense variant admits the request."""
+    def test_sliding_window_with_partial_tile_rejected_at_dispatch(self):
+        """A partial-tile length plus sliding_window is rejected by the spec
+        validator, so no dense variant admits the request. The graph is not
+        ragged, so the reason names the length, the tile and the window."""
         req = _gfx950_dense_req(seqlen_q=500, seqlen_k=500, sliding_window=128)
         with self.assertRaises(ValueError) as cm:
             _spec(req)
-        err_msg = str(cm.exception).lower()
-        self.assertIn("ragged", err_msg)
+        err_msg = str(cm.exception)
+        # The spec never gets built, so read the tile out of the refusal. The
+        # sliding-window tile can be 128 rows, so assert it is a registered tile
+        # that really leaves a partial block rather than naming one value.
+        tile = re.search(
+            r"seqlen_q 500 is not a multiple of block_m (\d+); "
+            r"seqlen_kv 500 is not a multiple of block_n (\d+)",
+            err_msg,
+        )
+        self.assertIsNotNone(tile, err_msg)
+        block_m, block_n = int(tile.group(1)), int(tile.group(2))
+        self.assertIn(
+            (block_m, block_n),
+            {(g["block_m"], g["block_n"]) for g in DENSE_TILE_GEOMETRIES.values()},
+        )
+        self.assertNotEqual(500 % block_m, 0)
+        self.assertNotEqual(500 % block_n, 0)
         self.assertIn("sliding_window", err_msg)
+        self.assertNotIn("ragged", err_msg)
 
     def test_sliding_window_without_ragged_accepted(self):
         spec = _spec(

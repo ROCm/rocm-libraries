@@ -145,7 +145,8 @@ rocke_kernel_def_t* rocke_build_direct_conv_dgrad(rocke_ir_builder_t* b,
     const int WAVE = spec->wave_size;
     const int THREADS = BLOCK_WAVES * WAVE;
     const int BLOCK_CH = BLOCK_WAVES * WAVE;
-    const int total_k = p->groups * p->kpg;
+    /* rocke_direct_conv_dgrad_is_valid_spec bounds the total to i32. */
+    const int total_k = (int)rocke_direct_conv_problem_total_k(p);
     const int c_stride = p->stride;
     /* AOT: Ho/Wo and the channel counts are kernargs -- see
      * conv_abi.conv_direct_arg_names(). Only the filter extents,

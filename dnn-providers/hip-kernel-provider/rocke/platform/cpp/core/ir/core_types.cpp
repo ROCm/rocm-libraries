@@ -20,6 +20,8 @@
 #include <stdio.h>
 #include <string.h>
 
+#include <vector>
+
 #include "rocke/arena.h"
 #include "rocke/dtypes.h"
 #include "rocke/dtypes_internal.h"
@@ -868,10 +870,80 @@ bool rocke_attr_get_bool(const rocke_attr_map_t* m, const char* key, bool dflt)
 
 bool rocke_scheduler_strategy_is_valid(const char* strategy)
 {
-    return strategy == NULL || strcmp(strategy, "max-ilp") == 0
-           || strcmp(strategy, "max-memory-clause") == 0 || strcmp(strategy, "iterative-ilp") == 0
-           || strcmp(strategy, "iterative-minreg") == 0
-           || strcmp(strategy, "iterative-maxocc") == 0;
+    if(strategy == NULL)
+        return true;
+    /* One of the ", "-separated names of ROCKE_SCHEDULER_STRATEGY_CHOICES. */
+    const size_t n = strlen(strategy);
+    const char* name = ROCKE_SCHEDULER_STRATEGY_CHOICES;
+    for(;;)
+    {
+        const char* sep = strstr(name, ", ");
+        const size_t len = sep != NULL ? (size_t)(sep - name) : strlen(name);
+        if(n > 0 && len == n && strncmp(name, strategy, n) == 0)
+            return true;
+        if(sep == NULL)
+            return false;
+        name = sep + 2;
+    }
+}
+
+size_t rocke_py_str_repr(const char* s, char* out, size_t cap)
+{
+    const char quote = (strchr(s, '\'') != NULL && strchr(s, '"') == NULL) ? '"' : '\'';
+    size_t pos = 0;
+    auto put = [&](char ch) {
+        if(out != NULL && pos + 1 < cap)
+            out[pos] = ch;
+        ++pos;
+    };
+    put(quote);
+    for(const unsigned char* p = (const unsigned char*)s; *p != '\0'; ++p)
+    {
+        const unsigned char ch = *p;
+        if(ch == (unsigned char)quote || ch == '\\')
+        {
+            put('\\');
+            put((char)ch);
+        }
+        else if(ch == '\t' || ch == '\n' || ch == '\r')
+        {
+            put('\\');
+            put(ch == '\t' ? 't' : ch == '\n' ? 'n' : 'r');
+        }
+        else if(ch < 0x20 || ch == 0x7f)
+        {
+            static const char hex[] = "0123456789abcdef";
+            put('\\');
+            put('x');
+            put(hex[ch >> 4]);
+            put(hex[ch & 0xf]);
+        }
+        else
+        {
+            put((char)ch);
+        }
+    }
+    put(quote);
+    if(out != NULL && cap > 0)
+        out[pos < cap ? pos : cap - 1] = '\0';
+    return pos;
+}
+
+bool rocke_scheduler_strategy_reason(const char* strategy, char* reason, size_t reason_cap)
+{
+    if(rocke_scheduler_strategy_is_valid(strategy))
+        return false;
+    if(reason != NULL && reason_cap > 0)
+    {
+        std::vector<char> name(rocke_py_str_repr(strategy, NULL, 0) + 1);
+        rocke_py_str_repr(strategy, name.data(), name.size());
+        snprintf(reason,
+                 reason_cap,
+                 "unsupported scheduler_strategy %s; expected one "
+                 "of: " ROCKE_SCHEDULER_STRATEGY_CHOICES ", or None",
+                 name.data());
+    }
+    return true;
 }
 
 /* ============================ OPCODE TABLE ============================== */

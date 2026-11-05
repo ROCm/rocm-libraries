@@ -57,7 +57,7 @@ from .Components.CustomSchedule import customMainLoopSchedule
 from .Components.ClusterLoad import ClusterLoadTDM
 from .Components.Subtile.Kernel import *
 from .Components.Subtile.SubtileLdsLayout import applyLdsLayout
-from .Components.DecouplePGR import decouplePGRBlocks, decoupledSingleBuffered, dcpLdsSide
+from .Components.DecouplePGR import decouplePGRBlocks, decoupledSingleBuffered, dcpLdsSide, dcpLateFillIncrements
 from .Components.DecouplePGR import tdmWaveIssueOrder, decoupledThickGateRelaxation, dcpThickGateFromTokenPasses, dcpThickGateUncoveredSites, dcpIsFillLabel, DCP_TENSORCNT_RE, DCP_THICK_GATE_TEXT, DCP_THICK_GATE_TOKENS
 from .Components.TDMFuse import tdmWavePartition
 from .SolutionStructs import Solution, isPackedIndex
@@ -68,6 +68,7 @@ from .Common import printWarning, roundUp, print2, DebugConfig, DataDirection, \
   INDEX_CHARS, IsaVersion, log2, clusterEnabled, \
   swizzleGeometry, isMxf4SubtilePath
 from .Common.GlobalParameters import globalParameters
+from .Common.ScaleAlphaVec import scaleAlphaSupportsDeviceScalar, scaleAlphaVectorMode
 from .Common.Architectures import ARCH_CAP_OVERRIDES
 from .Common.MxScaleLayout import mxFreePhase, mxFreeTile, splatFirst
 from .Common.ValidParameters import resolveSwInstructionPrefetch, \
@@ -377,6 +378,10 @@ class StateValues:
   # Pending deferred check-in of the abs-prefetch base triple: set in _initKernel, freed at
   # label_MultiGemmEnd in KernelWriterAssembly. -1 = nothing pending / already freed.
   swPrefetchAbsBaseSgprPendingCheckIn: int = -1
+  # Base pair for the scheduled device-alpha value load. gfx125x XNACK replay
+  # can reread an outstanding scalar load's base SGPRs, so the pair remains
+  # reserved until the shared prologue wait at label_MultiGemmEnd.
+  deviceScalarAlphaPtrSgpr: int          = -1
   nonPostLoopSgpr: List[str]             = field(init=False)
   userArgsInfo: UserArgumentsInfo        = field(default_factory=UserArgumentsInfo)
   numSgprToLoad: int                     = 0 # For kernel args
@@ -909,7 +914,8 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
           self._emitTdmWaveParitySCC(mod, kernel, tmp.idx, "check wave parity")
 
     late = Module("TDM decoupled late fill %s" % singleTc)
-    pinThinFence = (self.tdmFusePaired(kernel)
+    incNames = dcpLateFillIncrements(kernel, singleTc)
+    pinThinFence = (incNames is not None
                     and self.states.dcpTokenGate)
     if pinThinFence:
       late.add(SSchedulingFence(comment="pin all local reads before %s-thin WAR fence" % singleTc))
@@ -918,18 +924,17 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
     if pinThinFence:
       late.add(SSchedulingFence(comment="pin %s-thin refill after whole-WG WAR fence" % singleTc))
 
-    if self.tdmFusePaired(kernel):
-      # Move the single-buffered descriptor set and its increment together.
+    if incNames is not None:
+      # Move the single-buffered descriptor set and its increments together.
       singleFill = self.codes.globalReadA if singleTc == "A" else self.codes.globalReadB
-      singleIncName = "globalReadIncrement%s" % singleTc
       kept = []
       for item in src.items():
-        if item is singleFill or getattr(item, "name", None) == singleIncName:
+        if item is singleFill or getattr(item, "name", None) in incNames:
           late.add(item)
         else:
           kept.append(item)
       thick = Module("TDM decoupled early fill set %s" % doubleTc)
-      thick.setItems(kept)
+      thick.setItems(self._dcpHalfPlrMasks(kernel, singleFill, late.findNamedItem("globalReadIncrementA")) + kept)
       # Keep the thick fill inside the InitCIterWmma clone region.
       thick.add(Label(self.labels.getNameInc("DcpEarlyFill%sEnd" % doubleTc), ""))
       src.setItems([thick])
@@ -954,6 +959,26 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
     self.codes.unrollLoopHeader = early
 
     self.codes.perIterGlobalRead[lateIter].add(late)
+
+  def _dcpHalfPlrMasks(self, kernel, fill, inc):
+    """HalfPLR's last-trip masks, taken out of a set that moves late.
+
+    A's fill header zeroes every set's TDM enable word and A's increment module zeroes the
+    increments; the double-buffered fill and increment that stay early must follow both.
+    """
+    if not kernel["HalfPLR"]:
+      return []
+    masks = []
+    if fill.header.itemsSize():
+      mask = Module("HalfPLR last-trip TDM disable")
+      mask.setItems(fill.header.items())
+      fill.header.setItems([])
+      masks.append(mask)
+    incMask = inc.findNamedItem("graIncrementMask") if inc is not None else None
+    if incMask is not None:
+      inc.setItems([item for item in inc.items() if item is not incMask])
+      masks.append(incMask)
+    return masks
 
   def _dcpTokenSide(self, tc):
     return dcpLdsSide(tc)
@@ -3088,11 +3113,12 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       # does not need parity-based increment selection.
       if tdmA and tdmB and kernel["NumWaves"] > 1 and not kernel["UseSubtileImpl"]:
         module.add(self.initTDMDescriptorWaveSeparated(kernel, tensorParametersA, tensorParametersB))
-        if kernel["ProblemType"]["MXBlockA"] and kernel["ProblemType"]["MXBlockB"]:
-          module.add(self.initTDMDescriptorWaveSeparated(kernel, tensorParametersA["MX"], tensorParametersB["MX"]))
+        # The scale pair passes None for a scale the problem does not carry.
+        if kernel["ProblemType"]["MXBlockA"] or kernel["ProblemType"]["MXBlockB"]:
+          module.add(self.initTDMDescriptorWaveSeparated(kernel, tensorParametersA.get("MX"), tensorParametersB.get("MX")))
         module.add(self.tdmGlobalOffsetWaveSeparated(kernel, tensorParametersA, tensorParametersB))
-        if kernel["ProblemType"]["MXBlockA"] and kernel["ProblemType"]["MXBlockB"]:
-          module.add(self.tdmGlobalOffsetWaveSeparated(kernel, tensorParametersA["MX"], tensorParametersB["MX"]))
+        if kernel["ProblemType"]["MXBlockA"] or kernel["ProblemType"]["MXBlockB"]:
+          module.add(self.tdmGlobalOffsetWaveSeparated(kernel, tensorParametersA.get("MX"), tensorParametersB.get("MX")))
         tdmInited = True
 
       # Tile offset assignment A(MXSA)
@@ -3349,13 +3375,13 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       if tdmA and tdmB and kernel["NumWaves"] > 1:
         module.add(self.tdmSetupIncrementWaveSeparated(kernel, tensorParametersA, tensorParametersB))
 
-        if kernel["ProblemType"]["MXBlockA"] and kernel["ProblemType"]["MXBlockB"]:
-          module.add(self.tdmSetupIncrementWaveSeparated(kernel, tensorParametersA["MX"], tensorParametersB["MX"]))
+        if kernel["ProblemType"]["MXBlockA"] or kernel["ProblemType"]["MXBlockB"]:
+          module.add(self.tdmSetupIncrementWaveSeparated(kernel, tensorParametersA.get("MX"), tensorParametersB.get("MX")))
 
         if isPersistent(kernel):
           module.add(self.tdmApplyTileKOffsetWaveSeparated(kernel, tensorParametersA, tensorParametersB))
-          if kernel["ProblemType"]["MXBlockA"] and kernel["ProblemType"]["MXBlockB"]:
-            module.add(self.tdmApplyTileKOffsetWaveSeparated(kernel, tensorParametersA["MX"], tensorParametersB["MX"]))
+          if kernel["ProblemType"]["MXBlockA"] or kernel["ProblemType"]["MXBlockB"]:
+            module.add(self.tdmApplyTileKOffsetWaveSeparated(kernel, tensorParametersA.get("MX"), tensorParametersB.get("MX")))
 
         if not self.states.staggerUCode:
           module.add(self.releaseGlobalReadIncsSgprsAfterTdmWaveSep(kernel))
@@ -4278,8 +4304,11 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
             if "MX" in tensorParametersB:
               pointerLWCode.addComment1("local write swap offsets mxsb")
               #TODO: TDM refactor
-              if kernel["enableTDMA"] and kernel["enableTDMB"] and kernel["NumWaves"] == 1:
-                pointerLWCode.add(self.tdmSwapLdsOffset(kernel, tensorParametersB["MX"]))
+              if kernel["enableTDMA"] and kernel["enableTDMB"]:
+                # On more waves MXSB's set swaps with its owner, unless that owner is a dead MXSA.
+                swap = self.tdmSwapLdsOffset(kernel, tensorParametersB["MX"])
+                if kernel["NumWaves"] == 1 or swap.items():
+                  pointerLWCode.add(swap)
               elif not kernel["enableTDMB"] and not kernel["NoLdsWriteCode"]:
                 pointerLWCode.add(self.localWriteSwapOffsets(kernel, expand, tensorParametersB["MX"]))
             if kernel["enableTDMB"]:
@@ -5226,8 +5255,12 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
               pointerLWCode.add(self.localWriteSwapOffsets(kernel, expand, tensorParametersA["MX"]))
           # Swap offsets B(MXSB)
           if kernel["ProblemType"]["MXBlockB"]:
-            if kernel["enableTDMA"] and kernel["enableTDMB"] and kernel["NumWaves"] == 1:
-              pointerLWCode.addComment1("local write swap offsets mxsb")
+            if kernel["enableTDMA"] and kernel["enableTDMB"]:
+              # On more waves MXSB's set swaps with its owner, unless that owner is a dead MXSA.
+              swap = self.tdmSwapLdsOffset(kernel, tensorParametersB["MX"])
+              if kernel["NumWaves"] == 1 or swap.items():
+                pointerLWCode.addComment1("local write swap offsets mxsb")
+                pointerLWCode.add(swap)
             elif not kernel["enableTDMB"]:
               pointerLWCode.add(self.localWriteSwapOffsets(kernel, expand, tensorParametersB["MX"]))
           if kernel["enableTDMB"]:
@@ -5412,12 +5445,16 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
   # GSU bit-mask helper (introduced for AdaptiveGemmNTAB)
   ##############################################################################
   def gsuMaskHex(self, kernel):
-    # GSU bit width depends on InternalArgsSupport.version:
+    # GSU bit width depends on InternalArgsSupport.version/capabilities:
     #   v <  3: GSU is bits 0..13 (mask 0x3FFF)
     #   v >= 3: GSU narrowed to bits 0..11 (mask 0x0FFF) so bits 12/13
     #           can carry NTA / NTB for AdaptiveGemmNTAB.
+    #   UseScaleAlphaVec scalar capability: GSU is further narrowed to bits 0..10
+    #           (mask 0x07FF), reserving bit 11 for scalar/vector selection.
     isp = kernel.get("InternalSupportParams", {})
     version = isp.get("KernArgsVersion", 0) if isp else 0
+    if scaleAlphaSupportsDeviceScalar(kernel["ProblemType"]["UseScaleAlphaVec"]):
+      return hex(0x07FF)
     return hex(0x0FFF) if version >= 3 else hex(0x3FFF)
 
   ##############################################################################
@@ -6006,8 +6043,11 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       # Swap local ptrs B(MXSB)
       if "MX" in tensorParametersB:
         module.addComment1("local write swap mxsb")
-        if kernel["enableTDMA"] and kernel["enableTDMB"] and kernel["NumWaves"] == 1:
-          module.add(self.tdmSwapLdsOffset(kernel, tensorParametersB["MX"]))
+        if kernel["enableTDMA"] and kernel["enableTDMB"]:
+          # On more waves MXSB's set swaps with its owner, unless that owner is a dead MXSA.
+          swap = self.tdmSwapLdsOffset(kernel, tensorParametersB["MX"])
+          if kernel["NumWaves"] == 1 or swap.items():
+            module.add(swap)
         elif not kernel["enableTDMB"]:
           module.add(self.localWriteSwapOffsets(kernel, expand, tensorParametersB["MX"]))
 
@@ -6402,8 +6442,9 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       # AdaptiveGemmNTAB: dispatch is decided host-side and forwarded via
       # internalArg0 bits 12 (NTA) and 13 (NTB). Host clears those bits when
       # the chosen NT value would be 0, and only sets them after compressing
-      # GSU into bits 0..11. Requires InternalArgsSupport.version >= 3, which
-      # codegen guarantees by bumping KernArgsVersion when AdaptiveGemmNTAB!=0.
+      # GSU into bits 0..11 (or 0..10 when bit 11 is reserved for device
+      # scalar alpha). Requires InternalArgsSupport.version >= 3, which codegen
+      # guarantees by bumping KernArgsVersion when AdaptiveGemmNTAB!=0.
       originalNta = tensorParametersA["NonTemporal"]
       originalNtb = tensorParametersB["NonTemporal"]
 
@@ -6862,6 +6903,10 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
             else:
               module.add(self.resetTDMDescriptorForTailWaveSeparated(kernel, tensorParameters1st["MX"], \
                                                                      tensorParameters2nd["MX"]))
+          elif kernel["ProblemType"]["MXBlockA"] or kernel["ProblemType"]["MXBlockB"]:
+            # PrefetchAcrossPersistent rejects a lone scale; the pair passes None for the absent one.
+            module.add(self.resetTDMDescriptorForTailWaveSeparated(kernel, tensorParameters1st.get("MX"), \
+                                                                   tensorParameters2nd.get("MX")))
         else:
           module.add(self.resetTDMDescriptorForTail(kernel, tensorParameters1st))
           module.add(self.resetTDMDescriptorForTail(kernel, tensorParameters2nd))
@@ -10139,9 +10184,12 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       #   own descriptors and never reads GlobalReadIncs, so holding the SGPR there
       #   only costs registers that MX kernels, which Solution forces onto subtile
       #   on gfx950, cannot spare.
+      # - A and B do not ride separate wave-separated TDM descriptor sets: those
+      #   read GlobalReadIncsA/B as SGPR operands (every-wave and shared-set
+      #   increments, the paired selects, the StreamK K-offset, the HalfPLR mask)
       mxSwizzledScale = kernel.get("MXScaleFormat", "NoSwizzle") in ("InMemorySwizzle", "HostPreSwizzle") \
                         and not kernel["UseSubtileImpl"]
-      if isPersistent(kernel) and (not self.states.staggerUCode):
+      if isPersistent(kernel) and (not self.states.staggerUCode) and not self.tdmSeparateABDescriptors(kernel):
         if kernel["ProblemType"]["TLUA"] == False:
           if self.states.a.numSgprGlobalReadIncs == 1:
             # use const GR Inc
@@ -10197,7 +10245,9 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
     # since the General Batched GEMM will also use this value like
     # Grouped GEMM but has to piggy back on Strided Batched GEMM logic.
     #if kernel["ProblemType"]["SupportUserArgs"]:
-    self.defineSgpr("ArgType", 1)  # 0: normal, 1: hbm, 2: user args, 3: general batched; bits 8+ = TDM wave id
+    # 0: normal, 1: hbm, 2: user args, 3: general batched;
+    # bit 8 = TDM wave-parity, bit 9 = device scalar alpha.
+    self.defineSgpr("ArgType", 1)
 
     # To avoid corrupting tmp sgprs that may be used around the assert,
     # reserve some sgprs to save/restore the execmask
@@ -10294,7 +10344,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
     if kernel["ProblemType"]["FusedGemmA2A"]:
       self.defineSgpr("FusedTotalWGs", 1)
       # Counter-block base, loaded once in the prologue. Every region is reached
-      # from it by immediate offset (client/src/FusedA2ARunner.cpp).
+      # from it by immediate offset (client/src/DeviceContext.cpp).
       # Aligned to 2 because S_ATOMIC_INC takes SBASE as an SGPR pair with the low
       # address bit omitted from the encoding.
       self.defineSgpr("FusedCounterPtr", 2, 2)
@@ -10940,7 +10990,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
         storeSgprLoad += self.states.rpga
         self.states.numStoreSgprNames.append("AddressScaleAlphaVec")
         self.states.numStoreSgprNameSizes.append(self.states.rpga)
-        self.states.FactorDim = max(self.states.FactorDim, kernel["ProblemType"]["UseScaleAlphaVec"])
+        self.states.FactorDim = max(self.states.FactorDim, scaleAlphaVectorMode(kernel["ProblemType"]["UseScaleAlphaVec"]))
         if self.states.FactorDim == 3:
           enableFactorDim = True
     if self.states.useBias != DataDirection.NONE:
@@ -12265,7 +12315,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
 
     # -- FactorDim -------------------------------------------------------------
     enableFactorDim = False
-    if kernel["ProblemType"]["UseScaleAlphaVec"] == 3:
+    if scaleAlphaVectorMode(kernel["ProblemType"]["UseScaleAlphaVec"]) == 3:
       enableFactorDim = True
     if self.states.needBiasType and kernel["ProblemType"]["UseBias"] == 3:
       enableFactorDim = True
@@ -12514,14 +12564,15 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
   def cmpNamedArgTypeEq(self, module, value, comment=""):
     """Compare the named ArgType domain (low 8 bits) to *value*.
 
-    Bits 8+ of sgpr ArgType are a TDM wave-id side channel on wave-separated
-    stagger kernels. Masking every named value test keeps == 2 / == 3 dispatch
-    correct independent of whether pack has run yet (persistent graWorkGroup
-    is emitted before pack but runs after pack on tile N+1).
+    Bits above the low byte of sgpr ArgType are internal side channels: bit 8
+    is TDM wave parity and bit 9 is device scalar alpha. Masking every named
+    value test keeps == 2 / == 3 dispatch correct independent of those flags
+    (persistent graWorkGroup is emitted before parity packing but runs after it
+    on tile N+1).
     """
     with self.allocTmpSgpr(1, tag="cmpNamedArgTypeEq") as tmp:
       module.add(SAndB32(dst=sgpr(tmp.idx), src0=sgpr("ArgType"), src1=hex(0xFF),
-                         comment="mask ArgType domain (bits 8+ = TDM wave id)"))
+                         comment="mask ArgType domain (bits 8+ are internal flags)"))
       module.add(SCmpEQU32(src0=sgpr(tmp.idx), src1=value, comment=comment))
 
   def tdmSetupIncrementWaveSeparated(self, kernel, tPA, tPB) -> Module:

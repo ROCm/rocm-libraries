@@ -131,6 +131,13 @@ namespace TensileLite
                    || mode == InitMode::TrigAbsSin || mode == InitMode::TrigAbsCos;
         }
 
+        static bool IsRandomLike(InitMode const& mode)
+        {
+            return mode == InitMode::Random || mode == InitMode::RandomNarrow
+                   || mode == InitMode::RandomNegPosLimited
+                   || mode == InitMode::UniformLowPrecision;
+        }
+
         std::string ToString(InitMode mode);
 
         std::ostream& operator<<(std::ostream& stream, InitMode const& mode);

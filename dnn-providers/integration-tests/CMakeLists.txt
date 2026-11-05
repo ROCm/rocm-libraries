@@ -234,6 +234,18 @@ if(Python3_FOUND)
                          PROPERTIES SKIP_RETURN_CODE 77)
     set(HIPDNN_IT_GOLDEN_SDPA_FWD_PAGED_GENERATOR_TEST
         hipdnn_golden_sdpa_fwd_paged_generator_python_tests)
+    # The SdpaBackward bundles and their engine TOML rows are generated from the
+    # test plan; this pytest suite fails when they drift from the generator.
+    add_test(
+        NAME hipdnn_sdpa_bwd_bundle_generator_python_tests
+        COMMAND ${Python3_EXECUTABLE} -m pytest -q -p no:cacheprovider
+                ${CMAKE_CURRENT_SOURCE_DIR}/reference-data-scripts/tests/test_generate_sdpa_bwd_bundles.py
+    )
+    set_tests_properties(
+        hipdnn_sdpa_bwd_bundle_generator_python_tests
+        PROPERTIES ENVIRONMENT "PYTEST_DISABLE_PLUGIN_AUTOLOAD=1"
+    )
+    set(HIPDNN_IT_SDPA_BWD_GENERATOR_TEST hipdnn_sdpa_bwd_bundle_generator_python_tests)
 endif()
 
 # Install integration test bundles so installed tests can find them at
@@ -370,6 +382,9 @@ if(EXISTS "${HIPDNN_IT_GTEST_CATEGORIES_YAML}"
     if(HIPDNN_IT_GOLDEN_SDPA_FWD_PAGED_GENERATOR_TEST)
         _apply_provider_ctest_category_labels(${HIPDNN_IT_GOLDEN_SDPA_FWD_PAGED_GENERATOR_TEST})
     endif()
+    if(HIPDNN_IT_SDPA_BWD_GENERATOR_TEST)
+        _apply_provider_ctest_category_labels(${HIPDNN_IT_SDPA_BWD_GENERATOR_TEST})
+    endif()
 else()
     message(STATUS "hipdnn-integration-tests: shared/ctest or test_categories.yaml not found, using legacy CTest labels")
 endif()
@@ -441,11 +456,18 @@ if(HIPDNN_IT_YAML_CATEGORIZATION_ENABLED)
     # from-scratch GPU reference implementation, and our own golden data directly),
     # so the ASAN-only MIOpen-cache-clear fixture miopen-provider/hipblaslt-provider
     # wire up does not apply here.
+    # hipdnn_gpu_ref_tests has its own tier file: its quick tier is fp32-only
+    # (see test_categories_gpu_ref.yaml).
+    set(HIPDNN_IT_GPU_REF_CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/test_categories_gpu_ref.yaml")
     foreach(_it_target hipdnn_integration_tests_unit_tests hipdnn_gpu_ref_tests
                        hipdnn_golden_data_tests)
+        set(_it_yaml "${HIPDNN_IT_GTEST_CATEGORIES_YAML}")
+        if(_it_target STREQUAL "hipdnn_gpu_ref_tests")
+            set(_it_yaml "${HIPDNN_IT_GPU_REF_CATEGORIES_YAML}")
+        endif()
         apply_test_category_labels(
             ${_it_target}
-            "${HIPDNN_IT_GTEST_CATEGORIES_YAML}"
+            "${_it_yaml}"
             "${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_BINDIR}"
             "${HIPDNN_IT_CTEST_INSTALL_FILE}"
             ENVIRONMENT ${TEST_ENVIRONMENT}

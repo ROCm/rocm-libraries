@@ -458,13 +458,22 @@ def build_ued(config: IngestorConfig, ids: dict) -> dict:
         "graph_match": {"native": config.graph_match_symbol},
         "metadata": ids["kmd"],
     }
+    bindings = config.engine.heuristics
     if config.engine.has_heuristic:
         # RFC 0019 §3.1: the loader rejects a bare top-level `heuristic` pointer.
-        ued["sort_kernel_catalog"] = {"default": ids["uhd"]}
+        # Arch entries follow `default`, where `uhd_gen promote` inserts them.
+        ued["sort_kernel_catalog"] = {
+            "default": ids["uhd"],
+            **bindings.get("sort_kernel_catalog", {}),
+        }
     if config.engine.knobs:
         ued["knobs"] = list(config.engine.knobs)
     if config.engine.behavior_notes:
         ued["behavior_notes"] = list(config.engine.behavior_notes)
+    # `promote` appends a new role at the end of the document.
+    for role, arches in bindings.items():
+        if role != "sort_kernel_catalog":
+            ued[role] = dict(arches)
     return ued
 
 
@@ -835,8 +844,14 @@ def build_kdp(
     pack: PackSpec,
     ids: dict,
     seen_metadata: dict | None = None,
+    generated_from: dict | None = None,
 ) -> dict:
     """One pack's KDP.
+
+    ``generated_from`` (see `codegen.provenance`) is stamped as
+    ``provenance.generated_from`` when given. It names the inputs a generation
+    came from and changes with every commit, so it is opt-in: a render without
+    it stays a pure function of the config.
 
     ``seen_metadata`` carries de-duplication state across the packs of one
     engine; pass the same dict to every ``build_kdp`` call for a config.
@@ -935,6 +950,8 @@ def build_kdp(
             "metadata": metadata,
             "priority": kernel.priority,
         }
+        if kernel.provenance:
+            entry["provenance"] = dict(kernel.provenance)
         # hkp_pack validates the kernel's own arch for hsaco and rejects a
         # wildcard, so the inherited pack arch is stated on the descriptor.
         if kernel.kernel_source.kind == KERNEL_SOURCE_KIND_HSACO:
@@ -992,6 +1009,8 @@ def build_kdp(
     }
     if slot is not None:
         kdp["slot"] = slot.name
+    if generated_from:
+        kdp["provenance"]["generated_from"] = dict(generated_from)
     if pack.arch:
         kdp["arch"] = list(pack.arch)
     elif config.is_packaged:
@@ -1003,7 +1022,10 @@ def build_kdp(
 
 
 def build_kdp_documents(
-    config: IngestorConfig, ids: dict, seed: dict | None = None
+    config: IngestorConfig,
+    ids: dict,
+    seed: dict | None = None,
+    generated_from: dict | None = None,
 ) -> list:
     """Every pack's KDP, ``[(pack, document), ...]``, de-duplicated engine-wide
     (per slot for a slotted engine). The single de-duplication scope; see
@@ -1012,12 +1034,18 @@ def build_kdp_documents(
     ``seed`` pre-fills the de-duplication state with the kernels of sibling
     bundles of the same engine (see `resolve_ids`); it is copied, not mutated.
     Siblings are single-pack and unslotted, so the seed lands in the unslotted
-    scope."""
+    scope. ``generated_from`` is stamped on every KDP (see `build_kdp`)."""
     seen_by_scope: dict = {"": copy.deepcopy(seed)} if seed else {}
     return [
         (
             pack,
-            build_kdp(config, pack, ids, seen_by_scope.setdefault(pack.slot, {})),
+            build_kdp(
+                config,
+                pack,
+                ids,
+                seen_by_scope.setdefault(pack.slot, {}),
+                generated_from,
+            ),
         )
         for pack in config.packs
     ]
@@ -1109,8 +1137,11 @@ def resolve_ids(
     *,
     fresh: bool = False,
     also_from: Path | None = None,
+    generated_from: dict | None = None,
 ) -> IdResolution:
     """Find this bundle's previous version, assign every id, and build the KDPs.
+
+    ``generated_from`` is stamped on every KDP built here (see `build_kdp`).
 
     ``ids_from`` is the previous version of this bundle and is strict: any
     problem reading it raises. Without it, ``output_dir / config.descriptor_dir``
@@ -1145,7 +1176,7 @@ def resolve_ids(
                 "to reuse them"
             )
         ids = mint_ids(config)
-        kdp_documents = build_kdp_documents(config, ids)
+        kdp_documents = build_kdp_documents(config, ids, generated_from=generated_from)
         report = _report(config, ids, kdp_documents, None, None, None, None)
         return IdResolution(
             ids=ids,
@@ -1374,7 +1405,7 @@ def resolve_ids(
                     f"through completion and through specialization_contract.kmd_id."
                 )
 
-    kdp_documents = build_kdp_documents(config, ids, seed)
+    kdp_documents = build_kdp_documents(config, ids, seed, generated_from)
     report = _report(
         config,
         ids,

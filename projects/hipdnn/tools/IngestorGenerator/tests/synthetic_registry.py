@@ -105,12 +105,46 @@ class ProbeCandidate:
         ]
 
 
+@dataclasses.dataclass(frozen=True)
+class ProbeReduceSpec:
+    dtype: str
+    tile_m: int
+
+
+@dataclasses.dataclass(frozen=True)
+class ProbeTuning:
+    """A dispatcher-owned wrapper pairing a kernel with the reduce kernel launched
+    after it, as the attention split-KV tuning spec does."""
+
+    kernel_spec: ProbeSpec
+    reduce_spec: ProbeReduceSpec
+
+
+class SplitProbeCandidate(ProbeCandidate):
+    """Hands back each spec wrapped with its paired reduce."""
+
+    def select_spec(self, request: ProbeRequest):
+        return self._wrap(super().select_spec(request))
+
+    def sweep_space(self, request: ProbeRequest):
+        base = ProbeCandidate.select_spec(self, request)
+        return [
+            self._wrap(dataclasses.replace(base, tile_n=tile_n))
+            for tile_n in (64, 32, 128)
+        ]
+
+    @staticmethod
+    def _wrap(spec: ProbeSpec) -> ProbeTuning:
+        return ProbeTuning(spec, ProbeReduceSpec(spec.dtype, spec.tile_m))
+
+
 def probe_candidates():
     """``persist`` is shared by two candidates, so pinning it alone is ambiguous."""
     return [
         ProbeCandidate("probe_grid", "probe", "grid"),
         ProbeCandidate("probe_persist_a", "persist", "a"),
         ProbeCandidate("probe_persist_b", "persist", "b"),
+        SplitProbeCandidate("probe_split", "split", "s"),
     ]
 
 

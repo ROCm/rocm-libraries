@@ -107,7 +107,7 @@ bool PoolingForwardNd::IsApplicable(const ExecutionContext& context,
              && problem.SaveIndex() == true);
 }
 
-ConvSolution PoolingForwardNd::GetSolution(const ExecutionContext&,
+ConvSolution PoolingForwardNd::GetSolution(const ExecutionContext& context,
                                            const miopen::pooling::ProblemDescription& problem,
                                            const PerformanceConfigPoolingNdForward& config) const
 {
@@ -175,7 +175,8 @@ ConvSolution PoolingForwardNd::GetSolution(const ExecutionContext&,
             };
         }
 
-        build_params << GetDataTypeKBP(problem.GetXDesc().GetType());
+        build_params << GetDataTypeKBP(problem.GetXDesc().GetType(),
+                                       context.GetStream().GetDeviceName());
 
         kernel.comp_options = build_params.GenerateFor(kbp::HIP{});
 

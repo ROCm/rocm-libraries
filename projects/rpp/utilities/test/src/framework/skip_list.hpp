@@ -45,6 +45,9 @@ inline constexpr const char* kSkipList[] = {
     // ---- not reproducible: the result changes from run to run -------------------
     "Image_Effects/SpatterTest.*",
 
+    // ---- backend not implemented yet --------------------------------------------
+    "Image_DataExchange/BayerToRgbTest.Correctness/HIP_*",
+
     // ---- known kernel defects ---------------------------------------------------
     "Image_Color/ColorCastTest.Correctness/*",
     "Image_Color/ColorJitterTest.Correctness/HOST_*_PLN1_*_b0_c0_h0_s1",

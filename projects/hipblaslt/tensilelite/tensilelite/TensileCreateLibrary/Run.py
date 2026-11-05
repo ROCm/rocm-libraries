@@ -96,6 +96,16 @@ from ..Utilities.Decorators.Timing import timing
 from .ParseArguments import parseArguments
 
 
+def _parseLogicFileForLibrary(*args) -> LibraryIO.LibraryLogic:
+    """parseLibraryLogicFile() minus the fields TensileCreateLibrary discards.
+
+    Worker results are pickled back to this process, and the dropped solution
+    list and raw exact logic are about 40% of that volume.
+    """
+    logic = LibraryIO.LibraryLogic._make(LibraryIO.parseLibraryLogicFile(*args))
+    return logic._replace(solutions=None, exactLogic=None)
+
+
 def libraryRoot(outputPath: Union[str, Path]) -> Path:
     """The library/ root directory under outputPath.
 
@@ -1403,7 +1413,7 @@ def generateLogicDataAndSolutions(logicFiles, args, assembler: Assembler, isaInf
     # phase (5x) if left running. See deferCyclicGC.
     with deferCyclicGC():
         parsedLibraries = ParallelMap2(
-            LibraryIO.parseLibraryLogicFile, fIter, "Loading Logics...", return_as="generator"
+            _parseLogicFileForLibrary, fIter, "Loading Logics...", return_as="generator"
         )
         for library in parsedLibraries:
             _, architectureName, problemType, _, _, newLibrary, typeMismatches = library
@@ -1626,7 +1636,7 @@ def _buildGroupsSeparately(groups: List[List[str]], requestedJobs: int) -> None:
             procs.append((
                 group,
                 subprocess.Popen(
-                    [sys.executable, "-m", "Tensile.TensileCreateLibrary"]
+                    [sys.executable, "-m", "tensilelite.TensileCreateLibrary"]
                     + _argvForArchitectures(argv, group, groupJobs),
                     env=env,
                 ),

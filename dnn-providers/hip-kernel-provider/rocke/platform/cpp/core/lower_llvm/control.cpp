@@ -1374,16 +1374,12 @@ static void _op_tile_s_buffer_prefetch_data(rocke_lower_t* L, const rocke_op_t* 
 
 static void _op_tile_global_prefetch(rocke_lower_t* L, const rocke_op_t* op)
 {
-    const char* ty;
     int64_t cp;
     if(!rocke_ll_live(L))
         return;
     rocke_ll_require_llvm23_target_fact(L, "global_prefetch", ROCKE_LL_FACT_GLOBAL_PREFETCH);
     ll_expect_operands(L, op, "global_prefetch", 1);
-    ty = rocke_ll_value_ptr_type(L, op->operands[0]);
-    if(strcmp(ty, "ptr addrspace(1)") != 0)
-        rocke_ll_fail(
-            L, ROCKE_ERR_VALUE, "global_prefetch ptr must be a global pointer, got %s", ty);
+    rocke_ll_require_global_header_ptr(L, "global_prefetch", op->operands[0], "ptr");
     cp = ll_check_cachepolicy(L, op, "global_prefetch");
     rocke_ll_need(L, "global.prefetch");
     rocke_ll_emitf(L,
@@ -1394,15 +1390,12 @@ static void _op_tile_global_prefetch(rocke_lower_t* L, const rocke_op_t* op)
 
 static void _op_tile_flat_prefetch(rocke_lower_t* L, const rocke_op_t* op)
 {
-    const char* ty;
     int64_t cp;
     if(!rocke_ll_live(L))
         return;
     rocke_ll_require_llvm23_target_fact(L, "flat_prefetch", ROCKE_LL_FACT_GLOBAL_PREFETCH);
     ll_expect_operands(L, op, "flat_prefetch", 1);
-    ty = rocke_ll_value_ptr_type(L, op->operands[0]);
-    if(strcmp(ty, "ptr") != 0)
-        rocke_ll_fail(L, ROCKE_ERR_VALUE, "flat_prefetch ptr must be a flat pointer, got %s", ty);
+    rocke_ll_require_header_ptr(L, "flat_prefetch", op->operands[0], "ptr", "flat", "ptr");
     cp = ll_check_cachepolicy(L, op, "flat_prefetch");
     rocke_ll_need(L, "flat.prefetch");
     rocke_ll_emitf(L,
