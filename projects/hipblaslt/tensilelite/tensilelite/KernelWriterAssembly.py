@@ -17717,12 +17717,12 @@ class KernelWriterAssembly(KernelWriter):
                 posLabel = self.labels.getNameInc("ThenDeferredReturnDir")
                 edgeModule.add(SLongBranch(endLabel, tmpPair, tmpOff, posLabel, comment="jump to end"))
           else:
-            # TDMStore: the beta=0 narrowest edge block of a direct, non-atomic store to D (not a
-            # GSU or StreamK partial-tile store) is generated like the NonEdge block (widest vector
-            # width, no per-element mask) and stores through LDS with tensor_store_from_lds, whose
+            # TDMStore: every beta=0 edge block of a direct, non-atomic store to D (not a GSU or
+            # StreamK partial-tile store) is generated like the NonEdge block (widest vector width,
+            # no per-element mask) and stores through LDS with tensor_store_from_lds, whose
             # tensor_dim bounds the tile to D.
             tdmStoreBlock = kernel["TDMStore"] and edge and not beta and not atomic \
-              and kernel["_GlobalAccumulation"] in (None, "PartialsBuffer") and vectorWidth == min(vectorWidths)
+              and kernel["_GlobalAccumulation"] in (None, "PartialsBuffer")
             if tdmStoreBlock:
               batchVectorWidth = max(vectorWidths)
               batchElement = elements[vectorWidths.index(batchVectorWidth)]

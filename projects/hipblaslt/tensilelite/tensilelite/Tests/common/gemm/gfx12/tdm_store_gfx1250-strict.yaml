@@ -26,11 +26,12 @@ GlobalParameters:
 
 BenchmarkProblems:
   ########################################
-  # TDMStore stores the beta=0 epilogue's narrowest edge block with
-  # tensor_store_from_lds. With AdaptiveGemm only odd M reaches that block;
-  # without it every M-edge workgroup does. The other sizes check that the
-  # remaining store blocks are unchanged. The last size has a leading
-  # dimension larger than M, so BoundsCheck also checks the gap between columns.
+  # TDMStore stores every edge block of the beta=0 epilogue with
+  # tensor_store_from_lds; the NonEdge block keeps buffer_store. The sizes have
+  # M-edge workgroups with M % 8 odd, 6, 4 and 0 (one per AdaptiveGemm edge
+  # block), N-edge-only workgroups and only NonEdge workgroups. The last size
+  # has NonEdge, M-edge, N-edge and corner workgroups and a leading dimension
+  # larger than M, so BoundsCheck also checks the gap between columns.
   # DataInitTypeBeta is global, so the beta != 0 epilogue is checked in
   # tdm_store_beta_gfx1250.yaml.
   ########################################
@@ -160,7 +161,7 @@ BenchmarkProblems:
           - Exact: [1023, 256, 1, 128]
   ########################################
   # Non-atomic StreamK=3. Every tile, whole or completed by the fixup, is
-  # stored through the same edge blocks: the problems have NonEdge, odd-M edge,
+  # stored through the same edge blocks: the problems have NonEdge, M-edge,
   # N-edge and corner tiles in two batches, and a leading dimension larger than
   # M. On 256 CUs, K=256 gives one whole tile per workgroup; with K=1600 each
   # workgroup's iterations span two tiles and every tile is completed by the fixup.

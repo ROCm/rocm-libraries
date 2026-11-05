@@ -1241,9 +1241,8 @@ validParameters = { # we need to make sure this matches develop
     # wave issues the deferrable one. Handled by the StinkyTofu TDMLoadWaveSyncPass;
     # gfx1250 / ScheduleIterAlg=4 path only, off by default.
     "TDMLoadWaveSync": [False, True],
-    # Store D through LDS with tensor_store_from_lds in the beta=0 epilogue's narrowest
-    # store-vector-width edge block (the odd-M block under AdaptiveGemm); every other
-    # store block keeps buffer_store. gfx1250 only.
+    # Store D through LDS with tensor_store_from_lds in every edge store block of the beta=0
+    # epilogue; the NonEdge block keeps buffer_store. gfx1250 only.
     # 0: Disable
     # 1: Enable
     "TDMStore": [0, 1],
