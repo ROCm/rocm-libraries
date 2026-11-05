@@ -18,6 +18,7 @@
 #include "rocke/arena.h" /* rocke_arena_printf (reason strings)                */
 #include "rocke/helper_rocke.core.arch.h" /* rocke_archtarget_* (ArchTarget)   */
 #include "rocke/helper_rocke.helpers.mfma_gemm_inner.h" /* validate_arch_and_block_size */
+#include "rocke/helper_rocke.helpers.spec.h" /* rocke_align_up                 */
 #include "rocke/lower_llvm.h" /* ROCKE_SMEM_POOL_ALIGN                    */
 
 /* Longest reject breakdown the shipped megas produce is ~110 chars (five/six
@@ -35,13 +36,6 @@ long rocke_mega_lds_alloc_nbytes(const rocke_mega_lds_alloc_t* alloc)
     return (long)alloc->elem_bytes * (long)alloc->elem_count;
 }
 
-/* Python _round_up_to_pool_align: `offset` rounded up to the next multiple
- * of ROCKE_SMEM_POOL_ALIGN. */
-static long rocke_mega_lds_round_up_to_pool_align(long offset)
-{
-    return (offset + ROCKE_SMEM_POOL_ALIGN - 1) & ~(long)(ROCKE_SMEM_POOL_ALIGN - 1);
-}
-
 long rocke_mega_lds_pool_bytes(const rocke_mega_lds_alloc_t* allocs, size_t num_allocs)
 {
     long end = 0;
@@ -53,9 +47,10 @@ long rocke_mega_lds_pool_bytes(const rocke_mega_lds_alloc_t* allocs, size_t num_
     }
     for(i = 0; i < num_allocs; ++i)
     {
-        end = rocke_mega_lds_round_up_to_pool_align(end) + rocke_mega_lds_alloc_nbytes(&allocs[i]);
+        end = (long)rocke_align_up(end, ROCKE_SMEM_POOL_ALIGN)
+              + rocke_mega_lds_alloc_nbytes(&allocs[i]);
     }
-    return rocke_mega_lds_round_up_to_pool_align(end);
+    return (long)rocke_align_up(end, ROCKE_SMEM_POOL_ALIGN);
 }
 
 bool rocke_validate_mega_lds_budget(rocke_ir_builder_t* b,
