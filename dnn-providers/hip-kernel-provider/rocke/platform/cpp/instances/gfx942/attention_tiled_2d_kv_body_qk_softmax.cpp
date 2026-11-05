@@ -711,9 +711,14 @@ void rocke_gfx942_attn2d_emit_kv_body(rocke_gfx942_attn2d_build_ctx_t* ctx)
         for(int r = 0; r < SOFTMAX_STATE_SLOTS; ++r)
         {
             m_new[r] = st_m_new;
-            /* The yield rebuilds the raw max from l and st_m_new, so st_m_raw
-             * does not stay live through the body. */
-            m_carry_new[r] = st_m_new;
+            /* gfx942 (Python gfx942/attention_tiled_2d.py): the yield rebuilds
+             * the raw max from l and st_m_new, so st_m_raw does not stay live
+             * through the body. gfx950 fastkv_regp shares this body but its
+             * Python (gfx950/attention_tiled_2d.py) carries st_m_raw. */
+            if(strcmp(ctx->arch, "gfx942") == 0)
+                m_carry_new[r] = st_m_new;
+            else
+                m_carry_out[r] = st_m_raw;
             l_local[r] = st_l_sum;
         }
 
