@@ -77,6 +77,16 @@
 #include "SolutionIterator.hpp"
 #include "TestData.hpp"
 
+// GCC defines __SANITIZE_THREAD__ under ThreadSanitizer; clang only reports it
+// through __has_feature.
+#if defined(__SANITIZE_THREAD__)
+#define TENSILELITE_TSAN 1
+#elif defined(__has_feature)
+#if __has_feature(thread_sanitizer)
+#define TENSILELITE_TSAN 1
+#endif
+#endif
+
 namespace fs = std::filesystem;
 
 using namespace TensileLite;
@@ -776,6 +786,14 @@ namespace
         }
     };
 
+    // ThreadSanitizer's pthread_once interceptor does not reset the once flag
+    // when the callable throws, so the call_once retry these tests make would
+    // block forever under it. Without TSan the flag is reset and the call runs
+    // again.
+    constexpr const char* kTsanRetrySkip
+        = "TSan's pthread_once does not reset the once flag when the callable throws, "
+          "so the retry would block forever";
+
     // Throws from beforeLibraryRegistered() on the first load only.
     struct ThrowOncePlaceholder : Holder
     {
@@ -807,6 +825,9 @@ namespace
     {
         std::vector<int> shardIndices;
         bool             singleTree = false;
+        // Writes the legacy fixture unchanged instead of converting it to the
+        // indexed layout, so the shard carries its solutions in a map.
+        bool eagerShard = false;
 
         fs::path masterPath() const
         {
@@ -845,7 +866,9 @@ namespace
             for(auto const& entry : legacyMaster->solutions)
                 shardIndices.push_back(entry.first);
 
-            writeFile(tmpDir / (std::string(kShardPrefix) + ".dat.zlib"), deflateBytes(indexed));
+            const std::vector<uint8_t> shard
+                = eagerShard ? std::vector<uint8_t>(bytes.begin(), bytes.end()) : indexed;
+            writeFile(tmpDir / (std::string(kShardPrefix) + ".dat.zlib"), deflateBytes(shard));
             writeLazyMaster(masterPath(), kShardPrefix);
             // One range starting at 0, so every index routes to this shard.
             writeMappingFile(tmpDir
@@ -1281,6 +1304,9 @@ TEST_F(PlaceholderIndexedShardTest, ConcurrentColdLookupsBlockUntilLoadCompletes
 // load registers is the one its tree resolves through.
 TEST_F(PlaceholderIndexedShardTest, FailedLoadRegistersNothingAndRetryIsConsistent)
 {
+#ifdef TENSILELITE_TSAN
+    GTEST_SKIP() << kTsanRetrySkip;
+#endif
     singleTree = true;
     if(!layOutLibrary())
         GTEST_SKIP() << "legacy fixture unavailable or stale; see configs/SolutionLibraries/readme";
@@ -1298,12 +1324,122 @@ TEST_F(PlaceholderIndexedShardTest, FailedLoadRegistersNothingAndRetryIsConsiste
     EXPECT_EQ(cold.library, nullptr);
     EXPECT_TRUE(fresh.loadedFiles.empty()) << "the failed load recorded its file";
     EXPECT_TRUE(fresh.solutionSources.empty()) << "the failed load registered its cache";
-    EXPECT_TRUE(fresh.solutions.empty()) << "the failed load registered solutions";
 
     auto solution = cold.getSolutionByIndex(problem, device, index);
     ASSERT_NE(solution, nullptr);
     EXPECT_EQ(cold.attempts.load(), 2);
     EXPECT_EQ(fresh.loadedFiles.count(kShardPrefix), 1u);
+    ASSERT_EQ(fresh.solutionSources.size(), 1u);
+    EXPECT_EQ(fresh.solutionSources.at(kShardPrefix)->get(index), solution)
+        << "the registered cache is not the one the loaded tree resolves through";
+}
+
+// An eager (non-indexed) shard brings its solutions in a map that the load
+// merges into the master's. A load that throws must leave none of them there.
+TEST_F(PlaceholderIndexedShardTest, FailedLoadOfEagerShardRegistersNoSolutions)
+{
+#ifdef TENSILELITE_TSAN
+    GTEST_SKIP() << kTsanRetrySkip;
+#endif
+    eagerShard = true;
+    if(!layOutLibrary())
+        GTEST_SKIP() << "legacy fixture unavailable or stale; see configs/SolutionLibraries/readme";
+    const std::string codeObject = std::string(kShardPrefix) + ".co";
+
+    Master               fresh;
+    ThrowOncePlaceholder cold;
+    wirePlaceholder(cold, fresh, tmpDir);
+
+    EXPECT_THROW(cold.loadPlaceholderLibrary(), std::runtime_error);
+    EXPECT_EQ(cold.library, nullptr);
+    EXPECT_TRUE(fresh.loadedFiles.empty()) << "the failed load recorded its file";
+    EXPECT_TRUE(fresh.solutions.empty()) << "the failed load registered solutions";
+
+    ASSERT_NE(cold.loadPlaceholderLibrary(), nullptr);
+    EXPECT_EQ(cold.attempts.load(), 2);
+    EXPECT_EQ(fresh.loadedFiles.count(kShardPrefix), 1u);
+    ASSERT_EQ(fresh.solutions.size(), shardIndices.size());
+    for(auto const& entry : fresh.solutions)
+        EXPECT_EQ(entry.second->codeObjectFilename.load(), codeObject) << "index " << entry.first;
+}
+
+// The master loaded the shard first and left its tree in indexLoadedLibraries.
+// A placeholder load that throws must leave that hand-off in place, so the
+// retry adopts the master's tree instead of publishing a second one.
+TEST_F(PlaceholderIndexedShardTest, FailedAdoptLeavesHandOffForRetry)
+{
+#ifdef TENSILELITE_TSAN
+    GTEST_SKIP() << kTsanRetrySkip;
+#endif
+    singleTree = true;
+    if(!layOutLibrary())
+        GTEST_SKIP() << "legacy fixture unavailable or stale; see configs/SolutionLibraries/readme";
+
+    auto lib = LoadLibraryFile<ContractionProblemGemm, ContractionSolution>(masterPath().string());
+    ASSERT_NE(lib, nullptr);
+    auto* master = dynamic_cast<Master*>(lib.get());
+    ASSERT_NE(master, nullptr);
+    ASSERT_TRUE(master->initLibraryMapping(masterPath().string()));
+
+    const int    index  = shardIndices.front();
+    const AMDGPU device = TensileLite::testing::makeDevice(
+        TensileLite::testing::_MI350_CHIP_ID, TensileLite::testing::_SPX_CU, "mi350spx");
+    const auto problem = TensileLite::testing::dummyProblem();
+
+    ASSERT_NE(master->resolveSolutionByIndex(index), nullptr);
+    ASSERT_EQ(master->indexLoadedLibraries.count(kShardPrefix), 1u);
+    ASSERT_EQ(master->solutionSources.size(), 1u);
+    const auto masterTree  = master->indexLoadedLibraries.at(kShardPrefix);
+    const auto masterCache = master->solutionSources.begin()->second;
+
+    ThrowOncePlaceholder cold;
+    wirePlaceholder(cold, *master, tmpDir);
+
+    EXPECT_THROW(cold.getSolutionByIndex(problem, device, index), std::runtime_error);
+    EXPECT_EQ(cold.library, nullptr);
+    EXPECT_EQ(master->indexLoadedLibraries.count(kShardPrefix), 1u)
+        << "the failed load took the hand-off entry";
+
+    auto solution = cold.getSolutionByIndex(problem, device, index);
+    ASSERT_NE(solution, nullptr);
+    EXPECT_EQ(cold.attempts.load(), 2);
+    EXPECT_EQ(cold.library, masterTree) << "the retry did not adopt the master's tree";
+    EXPECT_EQ(master->indexLoadedLibraries.count(kShardPrefix), 0u);
+    ASSERT_EQ(master->solutionSources.size(), 1u);
+    EXPECT_EQ(master->solutionSources.begin()->second, masterCache);
+    EXPECT_EQ(solution, master->resolveSolutionByIndex(index))
+        << "the placeholder and the master returned different objects for one index";
+}
+
+// The file is already recorded but nothing was handed off, so the shard keeps
+// its own tree and publishes its own cache. A load that throws must not
+// publish that cache, or the retry's tree would resolve through a different one.
+TEST_F(PlaceholderIndexedShardTest, FailedLoadOfRecordedFileRegistersNoCache)
+{
+#ifdef TENSILELITE_TSAN
+    GTEST_SKIP() << kTsanRetrySkip;
+#endif
+    singleTree = true;
+    if(!layOutLibrary())
+        GTEST_SKIP() << "legacy fixture unavailable or stale; see configs/SolutionLibraries/readme";
+
+    const int    index  = *std::min_element(shardIndices.begin(), shardIndices.end());
+    const AMDGPU device = TensileLite::testing::makeDevice(
+        TensileLite::testing::_MI350_CHIP_ID, TensileLite::testing::_SPX_CU, "mi350spx");
+    const auto problem = TensileLite::testing::dummyProblem();
+
+    Master fresh;
+    fresh.loadedFiles.insert(kShardPrefix);
+    ThrowOncePlaceholder cold;
+    wirePlaceholder(cold, fresh, tmpDir);
+
+    EXPECT_THROW(cold.getSolutionByIndex(problem, device, index), std::runtime_error);
+    EXPECT_EQ(cold.library, nullptr);
+    EXPECT_TRUE(fresh.solutionSources.empty()) << "the failed load registered its cache";
+
+    auto solution = cold.getSolutionByIndex(problem, device, index);
+    ASSERT_NE(solution, nullptr);
+    EXPECT_EQ(cold.attempts.load(), 2);
     ASSERT_EQ(fresh.solutionSources.size(), 1u);
     EXPECT_EQ(fresh.solutionSources.at(kShardPrefix)->get(index), solution)
         << "the registered cache is not the one the loaded tree resolves through";

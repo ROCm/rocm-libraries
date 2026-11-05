@@ -265,8 +265,9 @@ namespace TensileLite
    *
    * May return `nullptr` if no such object exists.
    *
-   * Returns at most `numSolutions` solutions. Fewer than `numSolutions` means
-   * the library has nothing more for this problem.
+   * Fewer than `numSolutions` solutions means the library has nothing more for
+   * this problem. A library may return more than `numSolutions`: CachingLibrary
+   * returns its whole cached list once it holds at least that many.
    */
         virtual SolutionVector<MySolution> findTopSolutions(MyProblem const& problem,
                                                             Hardware const&  hardware,

@@ -306,6 +306,8 @@ namespace TensileLite
 
             std::atomic<int> value{-1};
         };
+        static_assert(sizeof(LazyFlag) == sizeof(int) && alignof(LazyFlag) == alignof(int),
+                      "LazyFlag must keep the size and alignment of the int it replaced");
         mutable LazyFlag isStandardCUs;
         std::string deviceName;
 
