@@ -288,6 +288,7 @@ struct TDMCopyKernel
             auto output_block_window       = make_output_block_window(output_tensor_view, oM, oN);
 
             TDMConfig tdm_config;
+            // Workgroups 0 and 1 of the cluster: this kernel expects a 2x1x1 cluster launch.
             tdm_config.workgroup_mask = TDMWorkgroupMask::checked(3);
 
             load_tile_tdm(tdm_config, lds_block_window, input_block_window);

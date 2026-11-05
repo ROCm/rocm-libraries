@@ -110,6 +110,12 @@ class TDMBasicTypedTest : public ::testing::Test
     static constexpr index_t cluster_dim_y = 1;
     static constexpr index_t cluster_dim_z = 1;
 
+    void SetUp() override
+    {
+        if(!is_gfx125_supported())
+            GTEST_SKIP() << "TDM requires a gfx125 device";
+    }
+
     private:
     // Helper functions
     static std::vector<index_t> get_tensor_dims(const TDMTestParams& params, bool is_cluster_test)

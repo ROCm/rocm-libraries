@@ -21,4 +21,12 @@ if(GPU_TARGETS MATCHES "gfx125")
    # the gfx125 GPU targets only.
    add_gtest_executable(test_tdm_cluster_launch_guard tdm_cluster_launch_guard.cpp)
    ck_tile_restrict_archs(test_tdm_cluster_launch_guard "^gfx125")
+
+   # Reads, in a plain and in a cluster launch, the cluster number that TDMWorkgroupMask::checked
+   # tests. The cluster case calls the cluster overload of make_kernel, which is declared only when
+   # compiling for gfx125, so build for the gfx125 GPU targets only. Hardware only: it is not
+   # labelled SMOKE_TEST, so check runs it and smoke does not.
+   add_gtest_executable(test_tdm_hw_cluster_id tdm_hw_cluster_id.cpp)
+   ck_tile_restrict_archs(test_tdm_hw_cluster_id "^gfx125")
+   set_tests_properties(test_tdm_hw_cluster_id PROPERTIES LABELS "")
 endif()

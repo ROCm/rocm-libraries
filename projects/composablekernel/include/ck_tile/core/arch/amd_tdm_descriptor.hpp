@@ -34,27 +34,64 @@ struct TDMIterationConfig
     uint16_t iterate_count{0};
 };
 
-// Workgroups of the cluster that receive a TDM transfer. Multicast needs a cluster dispatch, so
-// checked() traps on a non-zero mask when the calling wave is not in one: its cluster id,
-// IB_STS2[9:6], is 0 outside a cluster dispatch.
+/**
+ * @brief Hardware number of the calling wave's workgroup cluster, read from IB_STS2[9:6].
+ *
+ * Non-zero in every wave of a dispatch whose clusters have more than one workgroup, and 0 in
+ * every wave of a dispatch without clusters. A kernel without __cluster_dims__ launched with a
+ * 1x1x1 cluster, as by the cluster overload of make_kernel with dim3(1, 1, 1), is dispatched
+ * without clusters and reads 0. This is not the cluster's position in the grid that
+ * get_cluster_id_* returns, which is 0 for the first cluster of a cluster dispatch. Returns 0
+ * without reading the register on targets without TDM.
+ */
+[[nodiscard]] CK_TILE_DEVICE uint32_t get_hw_cluster_id()
+{
+#if CK_TILE_ENABLE_TDM_FEATURE
+    // s_getreg operand: hwreg id [5:0] | bit offset [10:6] | (bit count - 1) [15:11].
+    // IB_STS2 is hwreg 28; this reads bits [9:6] and disassembles as
+    // hwreg(HW_REG_IB_STS2, 6, 4).
+    constexpr uint32_t hwreg_ib_sts2_cluster = 28 | (6 << 6) | ((4 - 1) << 11);
+    return __builtin_amdgcn_s_getreg(hwreg_ib_sts2_cluster);
+#else
+    return 0;
+#endif
+}
+
+/**
+ * @brief Workgroups of the cluster that receive a TDM transfer.
+ *
+ * Bit i selects workgroup i of the cluster, numbered x fastest, then y (see
+ * GemmPipelineAgBgCrCompTDMDefaultPolicy::GetTDMWorkgroupMask). Multicast needs a cluster of more
+ * than one workgroup, so a non-zero mask can only be made through checked(), which traps when the
+ * calling wave is not in one. The default mask is 0: no multicast.
+ */
 class TDMWorkgroupMask
 {
     public:
     CK_TILE_HOST_DEVICE constexpr TDMWorkgroupMask() = default;
 
-    CK_TILE_DEVICE static TDMWorkgroupMask checked(uint16_t mask)
+    /**
+     * @brief Makes a mask, checking that the calling wave may multicast with it.
+     *
+     * @param mask Bit i selects workgroup i of the cluster; 0 for no multicast.
+     * @return A TDMWorkgroupMask holding @p mask.
+     *
+     * @note Traps when @p mask is non-zero and the calling wave is not in a cluster of more than
+     * one workgroup (get_hw_cluster_id() returns 0). The check costs an s_getreg, so make each
+     * mask once where the TDM configs are built, not per transfer.
+     */
+    [[nodiscard]] CK_TILE_DEVICE static TDMWorkgroupMask checked(uint16_t mask)
     {
 #if CK_TILE_ENABLE_TDM_FEATURE
-        // s_getreg operand: hwreg id [5:0] | bit offset [10:6] | (bit count - 1) [15:11].
-        // IB_STS2 is hwreg 28; this reads bits [9:6] and disassembles as
-        // hwreg(HW_REG_IB_STS2, 6, 4).
-        constexpr uint32_t hwreg_ib_sts2_cluster_id = 28 | (6 << 6) | ((4 - 1) << 11);
-        if(mask != 0 && __builtin_amdgcn_s_getreg(hwreg_ib_sts2_cluster_id) == 0)
+        // A kernel that multicasts must be launched with clusters of more than one workgroup:
+        // the cluster overload of make_kernel with a cluster_dim product above 1.
+        if(mask != 0 && get_hw_cluster_id() == 0)
             __builtin_trap();
 #endif
         return TDMWorkgroupMask{mask};
     }
 
+    /// @brief The mask, as written to the TDM descriptor.
     CK_TILE_HOST_DEVICE constexpr uint16_t value() const { return m_mask; }
 
     private:
@@ -65,7 +102,8 @@ class TDMWorkgroupMask
 
 // Protects the check in checked(): a public constructor or conversion from an integer would let a
 // non-zero mask skip it.
-static_assert(!std::is_constructible_v<TDMWorkgroupMask, uint16_t>,
+static_assert(!std::is_constructible_v<TDMWorkgroupMask, uint16_t> &&
+                  !std::is_convertible_v<uint16_t, TDMWorkgroupMask>,
               "Only TDMWorkgroupMask::checked may make a TDMWorkgroupMask from an integer");
 
 // context switch is not supported on gfx1250
