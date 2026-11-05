@@ -1,4 +1,4 @@
-# RUN: %stinkytofu-opt --arch gfx1250 %s --StinkyBuildImplicitDependencyPass --StinkyDAGSchedulerPass --wmma-queue-depth=8 --wmma-queue-cover-cycles=16 --ds-spread --no-wmma-fill-after-reset --print-output
+# RUN: %stinkytofu-opt --arch gfx1250 %s --StinkyBuildImplicitDependencyPass --StinkyDAGSchedulerPass --wmma-queue-cover-cycles=16 --ds-spread --no-wmma-fill-after-reset --print-output
 #
 # Without WmmaFillAfterReset the queue refill lets a ready ds_load in right after the first WMMA
 # following s_barrier_wait (compare dag_wmma_fill_after_reset.stir).

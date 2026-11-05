@@ -1,4 +1,4 @@
-# RUN: %stinkytofu-opt --arch gfx1250 %s --StinkyBuildImplicitDependencyPass --StinkyDAGSchedulerPass --wmma-queue-depth=8 --wmma-queue-cover-cycles=16 --ds-spread --print-output
+# RUN: %stinkytofu-opt --arch gfx1250 %s --StinkyBuildImplicitDependencyPass --StinkyDAGSchedulerPass --wmma-queue-cover-cycles=16 --ds-spread --print-output
 #
 # s_barrier_wait resets the WMMA queue. The WMMAs after it are held ahead of the ready ds_loads
 # (WmmaFillAfterReset, on by default) until the queue is full, even though the DsSpread pacer
