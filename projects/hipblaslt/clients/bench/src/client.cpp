@@ -30,9 +30,11 @@
 #include "hipblaslt_data.hpp"
 #include "hipblaslt_datatype2string.hpp"
 #include "hipblaslt_parse_data.hpp"
+#include "matmul_result.hpp"
 #include "utility.hpp"
 #include <algorithm>
 #include <cctype>
+#include <cstddef>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -48,24 +50,16 @@
 using namespace roc; // For emulated program_options
 using namespace std::literals; // For std::string literals of form "str"s
 
-struct perf_matmul : hipblaslt_test_valid
-{
-    void operator()(const Arguments& arg)
-    {
-        if(strcmp(arg.function, "matmul"))
-            throw std::invalid_argument("Invalid combination --function "s + arg.function
-                                        + " --a_type "s + hip_datatype_to_string(arg.a_type));
-
-        testing_matmul(arg);
-    }
-};
-
 int run_bench_test(Arguments&         arg,
                    const std::string& filter,
                    bool               any_stride,
                    hipDeviceProp_t&   props,
-                   bool               yaml = false)
+                   bool               yaml        = false,
+                   std::size_t        case_number = 0,
+                   bool*              executed    = nullptr)
 {
+    if(executed)
+        *executed = false;
     hipblaslt_cout << std::setiosflags(std::ios::fixed)
                    << std::setprecision(7); // Set precision to 7 digits
 
@@ -203,16 +197,43 @@ int run_bench_test(Arguments&         arg,
         }
     }
 
-    perf_matmul{}(arg);
-    return 0;
+    if(executed)
+        *executed = true;
+    hipblaslt_cout << "[hipblaslt-case-v1] BEGIN " << case_number << " " << arg.solution_index
+                   << " " << arg.M[0] << " " << arg.N[0] << " " << arg.batch_count << " "
+                   << arg.K[0] << std::endl;
+    MatmulResult result;
+    if(strcmp(arg.function, "matmul"))
+        throw std::invalid_argument("Invalid combination --function "s + arg.function
+                                    + " --a_type "s + hip_datatype_to_string(arg.a_type));
+    testing_matmul(arg, result);
+    hipblaslt_cout << "[hipblaslt-case-v1] END " << case_number << " " << arg.solution_index << " "
+                   << result.status() << std::endl;
+    return !result.completed ? 2 : (result.failed() ? 1 : 0);
 }
 
-int hipblaslt_bench_datafile(const std::string& filter, bool any_stride, hipDeviceProp_t& props)
+int hipblaslt_bench_datafile(const std::string& filter,
+                             bool               any_stride,
+                             hipDeviceProp_t&   props,
+                             bool               continue_on_failure)
 {
-    int ret = 0;
+    int         ret      = 0;
+    std::size_t cases    = 0;
+    std::size_t failures = 0;
     for(Arguments arg : HipBlasLt_TestData())
-        ret |= run_bench_test(arg, filter, any_stride, props, true);
+    {
+        bool      executed = false;
+        const int status   = run_bench_test(arg, filter, any_stride, props, true, cases, &executed);
+        if(!executed)
+            continue;
+        ++cases;
+        ret |= status;
+        failures += status != 0;
+        if(status && (!continue_on_failure || status != 1))
+            break;
+    }
     test_cleanup::cleanup();
+    hipblaslt_cout << "[hipblaslt-case-v1] DONE " << cases << " " << failures << std::endl;
     return ret;
 }
 
@@ -309,9 +330,10 @@ try
     int         device_id;
     int         flags             = 0;
     bool        datafile          = hipblaslt_parse_data(argc, argv);
-    bool        log_function_name = false;
-    bool        any_stride        = false;
-    bool        dump_matrix       = false;
+    bool        log_function_name   = false;
+    bool        any_stride          = false;
+    bool        dump_matrix         = false;
+    bool        continue_on_failure = false;
 
     int         api_method      = 0;
     std::string api_method_str  = "";
@@ -456,6 +478,9 @@ try
          "Options: rand_int, trig_float, hpl(floating), special, zero, norm_dist, uniform_01, integer_exact, "
          "fp16_accumulator_probe")
 
+        ("host_side_fill_kernel",
+         "Initialize matrix data on the host and copy it to the device. Applies to all YAML/data records.")
+
         ("transA",
          value<char>(&arg.transA)->default_value('N'),
          "N = no transpose, T = transpose, C = conjugate transpose")
@@ -509,7 +534,7 @@ try
 
         ("iters,i",
          value<int32_t>(&arg.iters)->default_value(tuningEnv? 1000 : 10),
-         "Iterations to run inside timing loop")
+         "Iterations to run inside timing loop (0 disables fixed-count timing)")
 
         ("cold_iters,j",
          value<int32_t>(&arg.cold_iters)->default_value(tuningEnv? 1000 : 2),
@@ -577,6 +602,10 @@ try
         ("algo_method",
          value<std::string>(&algo_method_str)->default_value("heuristic"),
          "Use different algorithm search API. Options: heuristic, all, index.")
+
+        ("continue-on-failure",
+         bool_switch(&continue_on_failure),
+         "Continue data-file cases after a numerical failure; return failure if any case fails.")
 
         ("solution_index",
          value<int32_t>(&arg.solution_index)->default_value(-1),
@@ -856,6 +885,12 @@ try
     if(!hipblaslt_timing_allowed_with_adaptive_sm_count())
         return EXIT_FAILURE;
 
+    if(vm.count("host_side_fill_kernel"))
+    {
+        set_host_side_fill_kernel_state(true);
+        hipblaslt_cout << "info: --host_side_fill_kernel enabled" << std::endl;
+    }
+
     if(api_method_str.compare("c") == 0)
     {
         api_method = 0;
@@ -1078,7 +1113,8 @@ try
         perf_monitor->setDeviceId(device_id);
 
     if(datafile)
-        return verification_exit(hipblaslt_bench_datafile(filter, any_stride, props));
+        return verification_exit(
+            hipblaslt_bench_datafile(filter, any_stride, props, continue_on_failure));
 
     // single bench run
 

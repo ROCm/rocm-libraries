@@ -6,12 +6,14 @@
 // dual-target build, the HostUnit/smoke_ naming, and the X-macro tripwire
 // pattern used below.
 
+#include "hipblaslt_arguments.hpp"
 #include "hipblaslt_datatype2string.hpp"
 
 #include <gtest/gtest.h>
 
 #include <algorithm>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
@@ -306,4 +308,28 @@ TEST(HostUnitBiasSourceParser, smoke_EveryEnumeratorIsRegistered)
 TEST(HostUnitBiasSourceParser, smoke_UnknownStringMapsToZeroSentinel)
 {
     EXPECT_EQ(static_cast<int>(string_to_hipblaslt_bias_source("not_a_bias_source")), 0);
+}
+
+TEST(HostUnitComputeInputType, smoke_AllowsOnlyAOverride)
+{
+    Arguments arg{};
+    arg.init();
+    arg.compute_type        = HIPBLAS_COMPUTE_32F;
+    arg.compute_input_typeA = HIP_R_16F;
+    arg.compute_input_typeB = HIPBLASLT_DATATYPE_INVALID;
+
+    const auto [typeA, typeB] = derive_unset_compute_input_type(arg);
+    EXPECT_EQ(typeA, HIP_R_16F);
+    EXPECT_EQ(typeB, HIP_R_32F);
+}
+
+TEST(HostUnitComputeInputType, smoke_RejectsInvalidBOnlyOverride)
+{
+    Arguments arg{};
+    arg.init();
+    arg.compute_type        = HIPBLAS_COMPUTE_32F;
+    arg.compute_input_typeA = HIPBLASLT_DATATYPE_INVALID;
+    arg.compute_input_typeB = HIP_R_8I;
+
+    EXPECT_THROW(derive_unset_compute_input_type(arg), std::invalid_argument);
 }

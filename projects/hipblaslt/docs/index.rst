@@ -42,6 +42,7 @@ The hipBLASLt public repository is located at `<https://github.com/ROCm/rocm-lib
     * :doc:`Use Stream-K with hipBLASLt <./how-to/how-to-use-streamk>`
     * :doc:`Detect NaN in GEMM output <./how-to/how-to-detect-nan>`
     * :doc:`Use general batched GEMM <./how-to/how-to-general-batched-gemm>`
+    * :doc:`Validate bench cases <./how-to/bench-case-results>`
 
   .. grid-item-card:: Examples
 
