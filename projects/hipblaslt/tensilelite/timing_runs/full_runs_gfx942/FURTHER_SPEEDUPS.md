@@ -96,10 +96,50 @@ is slow today, the evidence, the options, an estimated saving in CI terms, and t
   `hip_initialization` 168, `process_exit` 55, `library_loading` 17, `data_init_setup` 15,
   `code_object_loading` 13, `main_teardown_locals` 11, `process_startup` 9) = 56% of the run total.
   `DEFERRED.md` #5 also records a first-call cost per process in `cpu_data_init`.
-- **Options:** run all steps of a config in one client process (one library and problem list per
-  config), or a persistent client per xdist worker. Needs a design check: whether the client can
-  take several problem types/libraries in one invocation.
-- **Estimated saving:** ~210 s of run wall after A1 (~340 s before). **Risk:** medium-high.
+- **Can the client be reused today? No.** One client process serves exactly one job: one solution
+  library (`--library-file`, a single value), its code objects and one problem set. `main()` reads
+  its arguments once and builds the problem factory, data initialization, listeners and reporters
+  for that job (`client/main.cpp:812`, `:864`, `:967`, `:997`). Several `--config-file` arguments are
+  merged into one option set, not run as separate jobs (`main.cpp:643-653`), and Tensile's run script
+  starts the client once per config file (`ClientWriter.py:441-442`).
+- **What reuse would take:**
+  1. A batch mode in the client: a list of jobs per process, with `main()`'s body moved into a
+     per-job function and per-job state reset between jobs (code-object modules, caches, listeners,
+     results file).
+  2. Tensile launching once per config with all of its steps. In the run stage (`--use-cache`) every
+     step's library already exists, so this works if a config's steps do not depend on earlier
+     steps' results (believed true in the test flow; not verified).
+  3. Or, larger: a persistent client per xdist worker receiving jobs over a pipe.
+- **What reuse saves, and what it does not** (per launch / summed over 441 launches):
+
+  | Cost | Per launch | Summed | Removed by reuse? |
+  |---|---:|---:|---|
+  | `hip_initialization` | 381 ms | 168 s | yes |
+  | `process_exit` | 124 ms | 55 s | yes |
+  | `process_startup` | 19 ms | 9 s | yes |
+  | `main_teardown_locals` | 26 ms | 11 s | partly |
+  | `listener_setup` (hardware monitor) | 407 ms | 179 s | yes, but A1 removes it more simply |
+  | `library_loading` | 39 ms | 17 s | no (per job) |
+  | `code_object_loading` | 30 ms | 13 s | no (per job) |
+  | `data_init_setup` | 34 ms | 15 s | no (per job) |
+
+  After A1, reuse removes ~0.5 s per launch, ~230 s summed, mostly HIP initialization.
+- **What reuse costs:** isolation. A GPU memory fault or hung kernel in one step would take down
+  every later step in that process (today each step is its own process), and state left over by one
+  job (buffers, cached pointer arrays, loaded modules) can affect the next.
+- **Interaction with the GPU lock (A6b):** both target the same fixed per-launch cost.
+  Shrinking the lock keeps the start-up work but lets the 4 workers overlap it with another
+  client's GPU phase (saves wall, not CPU) and can also overlap the CPU reference and comparison.
+  Reuse removes the start-up work (saves CPU and wall) but does nothing for the CPU phases inside
+  the lock. Reuse also needs the narrower lock: a client living across several steps cannot be
+  wrapped by today's process-level lock without holding the GPU for the whole config, so the lock
+  has to move into the client first. Once the lock is narrowed, the start-up cost is already
+  overlapped, and reuse's remaining CI gain is at most ~230 s / 4 ≈ 60 s of run wall; it matters
+  more for serial (per-config) and multi-GPU runs.
+- **Estimated saving (CI):** ~210 s of run wall if done instead of A6b (after A1); ~60 s at most
+  if done after A6b. **Risk:** medium-high.
+- **Recommendation:** do A1, then A6b option 1 (lock inside the client, after start-up), measure;
+  consider reuse only if the remaining HIP initialization cost still matters.
 
 ### A5. Client process exit
 
@@ -154,12 +194,17 @@ is slow today, the evidence, the options, an estimated saving in CI terms, and t
 - **Constraints:** 4 clients each run `OMP_NUM_THREADS=25` CPU work on the same 25 cores, so
   overlapping CPU phases will contend; split the thread count among clients or keep the CPU-heavy
   phases short. Any client crash must release the lock (`flock` is released on process exit).
+- **Device memory:** with the lock taken after start-up, up to 4 clients hold their allocated
+  buffers on the GPU at once. Fine for MI300X; check configs with large buffers.
+- **Relation to client reuse (A4):** the narrower lock is the smaller first step and a prerequisite
+  for reuse (see A4).
 - **Estimated saving:** not measured. Option 1 alone removes ~1 s per launch from the serialized
   region (~440 s of the ~720 s), which could cut the run wall substantially once overlapped across 4
   workers; the realistic gain depends on CPU contention. **Risk:** medium (client and harness
-  change; timing-sensitive configs must keep exclusivity). **First step:** confirm the lock's
-  original purpose, then prototype option 1 on one multi-step config (e.g. `gemm/fp16_tn`) with
-  `-n 4` and compare run-stage wall.
+  change; timing-sensitive configs must keep exclusivity). **Before building:** confirm why the
+  lock was added (benchmark timing interference, device memory, Stream-K sharing) and whether a
+  config's benchmark steps are independent in the run stage; then prototype option 1 on one
+  multi-step config (e.g. `gemm/fp16_tn`) with `-n 4` and compare run-stage wall.
 
 ### A7. Result validation
 
@@ -396,14 +441,14 @@ per-config timing harness pays them per config (~4 s × 123).
 |---|---|---|---:|---|
 | 1 | A1 hardware monitor only when timed | run | ~40 s (CI runner) / ~165 s (this host) | low |
 | 2 | B1 constant pool size and thread-limit env | build | ~25-50 s | low-medium |
-| 3 | A4 one client process per config | run | ~210 s | medium-high |
+| 3 | A6b lock inside the client (after start-up), then narrow to GPU phases | run | potentially large; not measured | medium |
 | 4 | B2 early candidate rejection (profile `dtv` first) | build | ~10-20 s | medium |
 | 5 | B4 / B5 name caching, assemble in codegen workers | build | ~20-30 s | low-medium |
 | 6 | A7 validation | run | ~15-50 s | low-medium |
 | 7 | B7 longest-first, shared core budget | build | ~30-40 s | medium |
 | 8 | B8 skip packing in combined mode | build | ~5 s | low |
 | 9 | A6 concurrent clients | run | 30-50% of run (unmeasured) | high |
-| 9b | A6b shrink the GPU lock to the GPU phases (start with lock-after-init) | run | potentially large; not measured | medium |
+| 9b | A4 client reuse (batch mode), only if HIP init still matters after A6b | run | ≤ ~60 s after A6b (~210 s without it) | medium-high |
 | 10 | C1-C3 start-up caching | both | a few s per stage | low |
 | 11 | B9 CMS `[0, 1]` forks (gfx950/gfx12) | build + run | not measured; up to half of those steps | low |
 | — | E1 `sys.path` insertions | hygiene | none | low |
