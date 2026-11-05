@@ -44,15 +44,42 @@ namespace conv {
 namespace {
 
 // Must match MIOpenConvDepthwise3dFwdHip.cpp.
-constexpr std::size_t kTileW     = 4;
 constexpr std::size_t kBlockSize = 256;
+constexpr std::size_t kTileH     = 4;
+// The filter, H / W strides and dilations are compile-time constants and the input windows live
+// in registers; these bounds keep the per-thread register footprint (output tile, filter rows,
+// input window) small enough not to spill. A 7x7 filter with stride 2 (21-wide window) compiles
+// without spills for gfx1010 through gfx1201; a 32-wide window (7x7, dilation 4) spills.
+constexpr std::size_t kMaxFilterTaps2d = 49;
+constexpr std::size_t kMaxWindow       = 21;
 // HSA grid limit in work-items (1D grid).
 constexpr std::size_t kMaxGridX = 0x7fffffff;
 
+// Output columns per thread: a wider tile reuses more of each input row; on gfx1151 it was
+// 1.05x to 1.26x faster for 5-wide filters and 1.1x to 1.3x slower for 3-wide ones.
+std::size_t TileW(const miopen::conv::ProblemDescription& problem)
+{
+    return problem.GetWeightsWidth() >= 5 ? 8 : 4;
+}
+
+std::size_t WindowW(const miopen::conv::ProblemDescription& problem)
+{
+    return (TileW(problem) - 1) * problem.GetKernelStrideW() +
+           (problem.GetWeightsWidth() - 1) * problem.GetDilationW() + 1;
+}
+
+std::size_t WindowH(const miopen::conv::ProblemDescription& problem)
+{
+    return (kTileH - 1) * problem.GetKernelStrideH() +
+           (problem.GetWeightsHeight() - 1) * problem.GetDilationH() + 1;
+}
+
 std::size_t WorkItems(const miopen::conv::ProblemDescription& problem)
 {
+    const std::size_t tile_w = TileW(problem);
     return problem.GetBatchSize() * problem.GetOutChannels() * problem.GetOutDepth() *
-           problem.GetOutHeight() * ((problem.GetOutWidth() + kTileW - 1) / kTileW);
+           ((problem.GetOutHeight() + kTileH - 1) / kTileH) *
+           ((problem.GetOutWidth() + tile_w - 1) / tile_w);
 }
 
 } // namespace
@@ -103,6 +130,11 @@ bool ConvHipDirectDepthwiseFwd3d::IsApplicable(
     if(groups < 2 || groups != c || k % c != 0)
         return false;
 
+    if(problem.GetWeightsHeight() * problem.GetWeightsWidth() > kMaxFilterTaps2d)
+        return false;
+    if(WindowW(problem) > kMaxWindow || WindowH(problem) > kMaxWindow)
+        return false;
+
     return ((WorkItems(problem) + kBlockSize - 1) / kBlockSize) * kBlockSize <= kMaxGridX;
 }
 
@@ -122,7 +154,15 @@ ConvHipDirectDepthwiseFwd3d::GetSolution(const ExecutionContext&,
     kernel.g_wk = {((WorkItems(problem) + kBlockSize - 1) / kBlockSize) * kBlockSize, 1, 1};
 
     kernel.comp_options =
-        " -DDW_DTYPE=" + std::to_string(dtype) + " -DDW_NDHWC=" + std::to_string(ndhwc);
+        " -DDW_DTYPE=" + std::to_string(dtype) + " -DDW_NDHWC=" + std::to_string(ndhwc) +
+        " -DDW_KZ=" + std::to_string(problem.GetWeightsDepth()) +
+        " -DDW_KY=" + std::to_string(problem.GetWeightsHeight()) +
+        " -DDW_KX=" + std::to_string(problem.GetWeightsWidth()) +
+        " -DDW_SH=" + std::to_string(problem.GetKernelStrideH()) +
+        " -DDW_SW=" + std::to_string(problem.GetKernelStrideW()) +
+        " -DDW_DH=" + std::to_string(problem.GetDilationH()) +
+        " -DDW_DW=" + std::to_string(problem.GetDilationW()) +
+        " -DDW_TH=" + std::to_string(kTileH) + " -DDW_TW=" + std::to_string(TileW(problem));
     result.construction_params.push_back(kernel);
 
     const int n   = static_cast<int>(problem.GetBatchSize());
@@ -131,24 +171,17 @@ ConvHipDirectDepthwiseFwd3d::GetSolution(const ExecutionContext&,
     const int hi  = static_cast<int>(problem.GetInHeight());
     const int wi  = static_cast<int>(problem.GetInWidth());
     const int k   = static_cast<int>(problem.GetOutChannels());
-    const int z   = static_cast<int>(problem.GetWeightsDepth());
-    const int y   = static_cast<int>(problem.GetWeightsHeight());
-    const int x   = static_cast<int>(problem.GetWeightsWidth());
     const int d_o = static_cast<int>(problem.GetOutDepth());
     const int ho  = static_cast<int>(problem.GetOutHeight());
     const int wo  = static_cast<int>(problem.GetOutWidth());
     const int sd  = problem.GetKernelStrideD();
-    const int sh  = problem.GetKernelStrideH();
-    const int sw  = problem.GetKernelStrideW();
     const int pd  = problem.GetPadD();
     const int ph  = problem.GetPadH();
     const int pw  = problem.GetPadW();
     const int dd  = problem.GetDilationD();
-    const int dh  = problem.GetDilationH();
-    const int dw  = problem.GetDilationW();
 
     // The grid above and these arguments both come from the problem; the binary itself only
-    // depends on the compile options (data type, layout).
+    // depends on the compile options (data type, layout, filter, H / W stride and dilation).
     result.invoker_factory = [=](const std::vector<Kernel>& kernels) {
         const auto kern = kernels[0];
         return [=](const Handle& handle, const AnyInvokeParams& primitive_parameters) {
@@ -163,21 +196,14 @@ ConvHipDirectDepthwiseFwd3d::GetSolution(const ExecutionContext&,
                              hi,
                              wi,
                              k,
-                             z,
-                             y,
-                             x,
                              d_o,
                              ho,
                              wo,
                              sd,
-                             sh,
-                             sw,
                              pd,
                              ph,
                              pw,
-                             dd,
-                             dh,
-                             dw);
+                             dd);
         };
     };
     result.solver_id = SolverDbId();
