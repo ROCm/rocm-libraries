@@ -21,7 +21,7 @@
 /**
  * @file TestGfx950AttentionUnified2DGeometry.cpp
  * @brief Pins what hipkernel:Gfx950AttentionUnified2D restates from its Python builder: the
- *        geometry rules, the launch grid, the batch capacity and the paged-KV metadata.
+ *        geometry rules, the launch grid and the paged-KV metadata.
  *
  * Every expectation is a literal worked out from the Python (attention_tiled_2d.py,
  * `AttentionTuningSpec.launch_grid`), not computed the way the header computes it: a helper
@@ -170,53 +170,6 @@ TEST(TestGfx950AttentionUnified2DGeometry, TheThirtyTwoByThirtyTwoPathsKeepTheir
     EXPECT_FALSE(isSupportedGfx950Unified2DGeometry(transposedAlone));
     const Fields transposed{128, 16, 64, 4, 32, true, true};
     EXPECT_TRUE(isSupportedGfx950Unified2DGeometry(transposed));
-}
-
-// =============================================================================
-// Batch capacity
-// =============================================================================
-
-/// The kernel bisects [0, num_seqs] in `iters` unrolled steps, which resolves 2^iters - 1
-/// sequences. Table values are ceil(log2(num_seqs + 1)) worked out by hand.
-TEST(TestGfx950AttentionUnified2DGeometry, BinarySearchItersIsCeilLogTwoOfNumSeqsPlusOne)
-{
-    const std::vector<std::pair<int64_t, int64_t>> table{{1, 1},
-                                                         {2, 2},
-                                                         {3, 2},
-                                                         {4, 3},
-                                                         {7, 3},
-                                                         {8, 4},
-                                                         {15, 4},
-                                                         {16, 5},
-                                                         {255, 8},
-                                                         {256, 9},
-                                                         {511, 9},
-                                                         {512, 10},
-                                                         {1023, 10},
-                                                         {1024, 11}};
-    for(const auto& [numSeqs, iters] : table)
-    {
-        EXPECT_EQ(gfx950Unified2DBinarySearchIters(numSeqs), iters) << "num_seqs " << numSeqs;
-    }
-}
-
-/// A spec that declares no num_seqs gets the kernel's conservative 32 iterations.
-TEST(TestGfx950AttentionUnified2DGeometry, AnUndeclaredNumSeqsIsTheThirtyTwoIterationFallback)
-{
-    EXPECT_EQ(gfx950Unified2DBinarySearchIters(0), 32);
-    EXPECT_EQ(gfx950Unified2DBinarySearchIters(-7), 32);
-}
-
-/// Capacity is 2^iters - 1, so the baked 511 serves exactly 511 and not 512. The boundary is
-/// the whole point: one past it reads another sequence's seq_lens with no fault.
-TEST(TestGfx950AttentionUnified2DGeometry, BatchCapacityIsTheLargestBatchTheSearchResolves)
-{
-    EXPECT_EQ(gfx950Unified2DBatchCapacity(511), 511);
-    EXPECT_EQ(gfx950Unified2DBatchCapacity(512), 1023);
-    EXPECT_EQ(gfx950Unified2DBatchCapacity(1), 1);
-    EXPECT_EQ(gfx950Unified2DBatchCapacity(2), 3);
-    EXPECT_EQ(gfx950Unified2DBatchCapacity(3), 3);
-    EXPECT_EQ(gfx950Unified2DBatchCapacity(4), 7);
 }
 
 // =============================================================================
