@@ -14,8 +14,8 @@
 // stage and shared by all phases, and the phases are interleaved in LDS before the store.
 //
 // MIOpenConvTranspose1dWmmaHipWeights first arranges the weights as wt[r][m][co][ci] in the
-// workspace (zero for t = r + S * m >= K and for channels past Co / Ci), so a lane's 16 K values
-// (channels) are contiguous.
+// workspace (zero for t = r + S * m >= K and for channels past Co / Ci), so the 16 K values
+// (channels) of a WMMA operand are contiguous. A stage covers CT_CI_T channels (16 or 32).
 
 #ifndef MIOPEN_HIP_RUNTIME_COMPILE
 #include <hip/hip_runtime.h>
@@ -34,9 +34,11 @@
 #define CT_T ((CT_K + CT_S - 1) / CT_S) // taps per phase
 #define CT_CO_T 64                      // output channels per block
 #define CT_Q_T 64                       // q per block (S * CT_Q_T outputs per channel)
-#define CT_CI_T 16                      // input channels per stage (one WMMA K step)
-#define CT_XW (CT_Q_T + CT_T - 1)       // dy window per block
-#define CT_ROW (CT_CI_T + 8)            // LDS row: 16 channels + padding against bank conflicts
+#ifndef CT_CI_T
+#define CT_CI_T 32 // input channels per stage, a multiple of 16 (one WMMA K step each)
+#endif
+#define CT_XW (CT_Q_T + CT_T - 1) // dy window per block
+#define CT_ROW (CT_CI_T + 8)      // LDS row: CT_CI_T channels + padding against bank conflicts
 #define CT_OUT_W (CT_S * CT_Q_T)
 #define CT_BLOCK_SIZE 256
 
@@ -192,24 +194,26 @@ extern "C" __global__ void __launch_bounds__(CT_BLOCK_SIZE)
         if(ci0 + CT_CI_T < Ci_pad)
             fetch(ci0 + CT_CI_T);
 #pragma unroll
-        for(int m = 0; m < CT_T; ++m)
-        {
-            // B: column q, the 16 channels of dy[., q - m]; A: row co, the 16 channels of w.
-            frag_t b[2];
+        for(int kk = 0; kk < CT_CI_T; kk += 16)
 #pragma unroll
-            for(int qb = 0; qb < 2; ++qb)
-                b[qb] = *reinterpret_cast<const frag_t*>(
-                    &xs[(16 * (2 * wq + qb) + lane % 16 + (CT_T - 1) - m) * CT_ROW]);
-#pragma unroll
-            for(int r = 0; r < CT_S; ++r)
+            for(int m = 0; m < CT_T; ++m)
             {
-                const frag_t a = *reinterpret_cast<const frag_t*>(
-                    &ws[((r * CT_T + m) * CT_CO_T + 16 * wco + lane % 16) * CT_ROW]);
+                // B: column q, the 16 channels of dy[., q - m]; A: row co, the 16 channels of w.
+                frag_t b[2];
 #pragma unroll
                 for(int qb = 0; qb < 2; ++qb)
-                    acc[r][qb] = wmma(a, b[qb], acc[r][qb]);
+                    b[qb] = *reinterpret_cast<const frag_t*>(
+                        &xs[(16 * (2 * wq + qb) + lane % 16 + (CT_T - 1) - m) * CT_ROW + kk]);
+#pragma unroll
+                for(int r = 0; r < CT_S; ++r)
+                {
+                    const frag_t a = *reinterpret_cast<const frag_t*>(
+                        &ws[((r * CT_T + m) * CT_CO_T + 16 * wco + lane % 16) * CT_ROW + kk]);
+#pragma unroll
+                    for(int qb = 0; qb < 2; ++qb)
+                        acc[r][qb] = wmma(a, b[qb], acc[r][qb]);
+                }
             }
-        }
         __syncthreads();
     }
 
