@@ -3652,10 +3652,9 @@ class Solution(collections.abc.Mapping):
         return
 
     if state["CompactLoopStore"]:
-      state["CompactLoopStore"] = False
       if not isaInfoMap[isa].asmCaps["HasMovRelsD2B32"]:
-        reject(state, printRejectionReason, "This arch does not support CompactLoopStore (no v_movrelsd_2_b32)")
-        return
+        state["CompactLoopStore"] = False
+        print("WARNING: This arch does not support CompactLoopStore (no v_movrelsd_2_b32) CompactLoopStore->false")
       # The CLS store reads acc VGPRs through M0-relative v_movrelsd_2_b32 and turns
       # the per-batch row advance into a delayed primer chain; both are defined only
       # by the MFMA acc->arch mapping, so there is nothing to compact on a VALU
