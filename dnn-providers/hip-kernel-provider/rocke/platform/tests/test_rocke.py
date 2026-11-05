@@ -70,6 +70,10 @@ from rocke.helpers import (
     make_gemm_manifest,
 )
 from rocke.helpers.compile import _comgr_options_for_kernel
+from rocke.tests.subprocess_launcher import (
+    rocke_python_command,
+    rocke_subprocess_env,
+)
 from kernels.common.conv_direct_grouped import (
     DirectConv4cSpec,
     DirectConv16cSpec,
@@ -2188,10 +2192,10 @@ class TestCrossEngineFlavorAutoResolution(unittest.TestCase):
         env.update(env_overrides)
         env["PYTHONPATH"] = os.pathsep.join(p for p in sys.path if p)
         out = subprocess.run(
-            [sys.executable, "-c", _FLAVOR_AUTO_PROBE],
+            rocke_python_command("-c", _FLAVOR_AUTO_PROBE),
             capture_output=True,
             text=True,
-            env=env,
+            env=rocke_subprocess_env(env),
         )
         self.assertEqual(out.returncode, 0, out.stderr)
         py_dl, cpp_dl = out.stdout.strip().splitlines()[-2:]
@@ -4684,12 +4688,12 @@ class TestNewTargetIntrinsics(unittest.TestCase):
         b.av_load_b128(p)
         # Permissive C++ mode falls back even when the native engine rejects IR.
         error_type = (
-            RuntimeError if resolve_backend() == "cpp" and _cpp_strict() else ValueError
+            RuntimeError if resolve_backend() == "cpp" and _cpp_strict() else TypeError
         )
         with self.assertRaisesRegex(
             error_type,
             r"av_load_b128: pointer operand is ptr addrspace\(3\), "
-            r"but the intrinsic accepts only ptr, ptr addrspace\(1\)",
+            r"but the op accepts only ptr, ptr addrspace\(1\)",
         ):
             lower_kernel_to_llvm(b.kernel, arch="gfx950")
 
@@ -4789,12 +4793,12 @@ class TestNewTargetIntrinsics(unittest.TestCase):
         p = b.param("p", PtrType(I32, "lds"), align=4)
         b.s_prefetch_inst(p, b.const_i32(64))
         error_type = (
-            RuntimeError if resolve_backend() == "cpp" and _cpp_strict() else ValueError
+            RuntimeError if resolve_backend() == "cpp" and _cpp_strict() else TypeError
         )
         with self.assertRaisesRegex(
             error_type,
             r"s_prefetch_inst: pointer operand is ptr addrspace\(3\), "
-            r"but the intrinsic accepts only ptr, ptr addrspace\(1\), ptr addrspace\(4\)",
+            r"but the op accepts only ptr, ptr addrspace\(1\), ptr addrspace\(4\)",
         ):
             lower_kernel_to_llvm(b.kernel, arch="gfx950")
 
@@ -4903,7 +4907,7 @@ def test_lds_rejection_without_cpp_binding(monkeypatch, strict, op):
         error_type, message = BackendError, "rocke_engine.*not importable"
     else:
         error_type, message = (
-            ValueError,
+            TypeError,
             rf"{op}: pointer operand is ptr addrspace\(3\)",
         )
     with pytest.raises(error_type, match=message):

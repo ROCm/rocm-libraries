@@ -1500,6 +1500,56 @@ rocblaslt_status rocblaslt_matrix_layout_get_attribute(rocblaslt_matrix_layout  
                 }
                 memcpy(buf, &matLayout->batch_stride, sizeof(int64_t));
                 break;
+            case ROCBLASLT_MATRIX_LAYOUT_TYPE:
+                if(sizeWritten)
+                    *sizeWritten = sizeof(uint32_t);
+                if(sizeInBytes < sizeof(uint32_t))
+                {
+                    log_error(__func__, "invalid buf size", sizeInBytes);
+                    return rocblaslt_status_invalid_value;
+                }
+                memcpy(buf, &matLayout->type, sizeof(uint32_t));
+                break;
+            case ROCBLASLT_MATRIX_LAYOUT_ORDER:
+                if(sizeWritten)
+                    *sizeWritten = sizeof(int32_t);
+                if(sizeInBytes < sizeof(int32_t))
+                {
+                    log_error(__func__, "invalid buf size", sizeInBytes);
+                    return rocblaslt_status_invalid_value;
+                }
+                memcpy(buf, &matLayout->order, sizeof(int32_t));
+                break;
+            case ROCBLASLT_MATRIX_LAYOUT_ROWS:
+                if(sizeWritten)
+                    *sizeWritten = sizeof(uint64_t);
+                if(sizeInBytes < sizeof(uint64_t))
+                {
+                    log_error(__func__, "invalid buf size", sizeInBytes);
+                    return rocblaslt_status_invalid_value;
+                }
+                memcpy(buf, &matLayout->m, sizeof(uint64_t));
+                break;
+            case ROCBLASLT_MATRIX_LAYOUT_COLS:
+                if(sizeWritten)
+                    *sizeWritten = sizeof(uint64_t);
+                if(sizeInBytes < sizeof(uint64_t))
+                {
+                    log_error(__func__, "invalid buf size", sizeInBytes);
+                    return rocblaslt_status_invalid_value;
+                }
+                memcpy(buf, &matLayout->n, sizeof(uint64_t));
+                break;
+            case ROCBLASLT_MATRIX_LAYOUT_LD:
+                if(sizeWritten)
+                    *sizeWritten = sizeof(int64_t);
+                if(sizeInBytes < sizeof(int64_t))
+                {
+                    log_error(__func__, "invalid buf size", sizeInBytes);
+                    return rocblaslt_status_invalid_value;
+                }
+                memcpy(buf, &matLayout->ld, sizeof(int64_t));
+                break;
             case ROCBLASLT_MATRIX_LAYOUT_BATCH_MODE:
                 if(sizeWritten)
                     *sizeWritten = sizeof(int32_t);       
@@ -3179,15 +3229,17 @@ rocblaslt_status
                                       pref->max_workspace_bytes);
         }
 
-        // The top Tensile result reports enough workspace for a StreamK hybrid
-        // re-grid under a later adaptive hint. A tuning-file result, the other
-        // results and AlgoCheck report the plain size.
+        // Tag the top Tensile result with the hint it was ranked for so a launch
+        // under a different adaptive hint can re-select, and give it enough
+        // workspace for a re-grid or a re-selection. A tuning-file result is not
+        // tagged; the other results and AlgoCheck report the plain size.
         if(prob.adaptive_sm_count && !override_success && *returnAlgoCount > 0
            && heuristicResultsArray[0].state == rocblaslt_status_success
            && *(int*)heuristicResultsArray[0].algo.data >= 0)
         {
             using namespace rocblaslt::adaptive_sm;
-            auto& r0         = heuristicResultsArray[0];
+            auto& r0 = heuristicResultsArray[0];
+            tagAlgo(r0.algo.data, uint32_t(prob.sm_count_target));
             r0.workspaceSize = std::min(pref->max_workspace_bytes,
                                         std::max(r0.workspaceSize, c_adaptiveWorkspace));
         }
@@ -3933,4 +3985,12 @@ extern "C" HIPBLASLT_EXPORT bool hipblaslt_adaptive_sm_launch_lock_for_test(
     // This thread no longer holds the lock, so try_lock is well defined.
     *heldAfter = h->adaptive_sm->lockedForTest(slot);
     return true;
+}
+
+// Test support: adaptive re-selections memoised for a matmul desc.
+extern "C" HIPBLASLT_EXPORT size_t hipblaslt_adaptive_reselections_for_test(void* matmulDesc)
+{
+    return matmulDesc
+               ? adaptiveReselectionCount(static_cast<rocblaslt_matmul_desc>(matmulDesc)->m_data)
+               : 0;
 }

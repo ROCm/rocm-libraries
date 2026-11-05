@@ -18,6 +18,7 @@ Covers:
 
 from __future__ import annotations
 
+import re
 import unittest
 from dataclasses import replace
 from itertools import islice
@@ -619,15 +620,32 @@ class TestDenseSlidingWindowWiring(unittest.TestCase):
         self.assertIn("swa128", kname)
         self.assertIn("persist", kname)
 
-    def test_sliding_window_with_ragged_shape_rejected_at_dispatch(self):
-        """Ragged + sliding_window is rejected by the spec validator, so no
-        dense variant admits the request."""
+    def test_sliding_window_with_partial_tile_rejected_at_dispatch(self):
+        """A partial-tile length plus sliding_window is rejected by the spec
+        validator, so no dense variant admits the request. The graph is not
+        ragged, so the reason names the length, the tile and the window."""
         req = _gfx950_dense_req(seqlen_q=500, seqlen_k=500, sliding_window=128)
         with self.assertRaises(ValueError) as cm:
             _spec(req)
-        err_msg = str(cm.exception).lower()
-        self.assertIn("ragged", err_msg)
+        err_msg = str(cm.exception)
+        # The spec never gets built, so read the tile out of the refusal. The
+        # sliding-window tile can be 128 rows, so assert it is a registered tile
+        # that really leaves a partial block rather than naming one value.
+        tile = re.search(
+            r"seqlen_q 500 is not a multiple of block_m (\d+); "
+            r"seqlen_kv 500 is not a multiple of block_n (\d+)",
+            err_msg,
+        )
+        self.assertIsNotNone(tile, err_msg)
+        block_m, block_n = int(tile.group(1)), int(tile.group(2))
+        self.assertIn(
+            (block_m, block_n),
+            {(g["block_m"], g["block_n"]) for g in DENSE_TILE_GEOMETRIES.values()},
+        )
+        self.assertNotEqual(500 % block_m, 0)
+        self.assertNotEqual(500 % block_n, 0)
         self.assertIn("sliding_window", err_msg)
+        self.assertNotIn("ragged", err_msg)
 
     def test_sliding_window_without_ragged_accepted(self):
         spec = _spec(
@@ -635,6 +653,27 @@ class TestDenseSlidingWindowWiring(unittest.TestCase):
         )
         self.assertFalse(spec.ragged)
         self.assertEqual(spec.sliding_window, 256)
+
+    def test_sliding_window_default_geometry(self):
+        """A window takes the 128-row tile and two persistent CTAs per CU on
+        every candidate unless the 256-row grid already holds 8 CTAs per CU;
+        without a window the shared tile stays."""
+        d128 = dict(hdim_q=128, hdim_v=128, nhead_q=32, nhead_k=8)
+        for spec_id in (_GRID, _PERSIST, _WIDE):
+            with self.subTest(spec_id=spec_id):
+                window = _spec(_gfx950_dense_req(sliding_window=4096, **d128), spec_id)
+                self.assertEqual((window.block_m, window.block_n), (128, 64))
+                self.assertEqual(window.num_persistent, 512)
+                full = _spec(_gfx950_dense_req(**d128), spec_id)
+                self.assertEqual((full.block_m, full.num_persistent), (256, 256))
+                # 256-row grid: 64 query blocks x 32 heads x 2 >= 8 CTAs per CU.
+                big = _spec(
+                    _gfx950_dense_req(
+                        sliding_window=4096, seqlen_q=16384, seqlen_k=16384, **d128
+                    ),
+                    spec_id,
+                )
+                self.assertEqual((big.block_m, big.num_persistent), (256, 256))
 
 
 class TestDenseCapabilitySlidingWindow(unittest.TestCase):
@@ -1147,6 +1186,23 @@ class TestGfx950DenseCandidates(unittest.TestCase):
         )
         self.assertTrue(_spec(req, _GRID).ragged)
         self.assertFalse(_spec(req, _GRID, block_m=128).ragged)
+
+    def test_wide_dma_default_tile_halves_when_under_filled(self):
+        """The wide-DMA default takes 128 rows while the 256-row work count is at
+        most the persistent CTA count; the other bodies keep 256 rows."""
+        d128 = {"hdim_q": 128, "hdim_v": 128, "nhead_k": 4, "batch": 1}
+        for seqlen, nhead_q, wide_bm in (
+            (512, 32, 128),  # 64 work items
+            (2048, 32, 128),  # 256 work items
+            (2048, 40, 256),  # 320 work items
+        ):
+            req = _gfx950_dense_req(
+                **d128, nhead_q=nhead_q, seqlen_q=seqlen, seqlen_k=seqlen
+            )
+            with self.subTest(seqlen=seqlen, nhead_q=nhead_q):
+                self.assertEqual(_spec(req, _WIDE).block_m, wide_bm)
+                for spec_id in (_GRID, _QBMINOR, _PERSIST):
+                    self.assertEqual(_spec(req, spec_id).block_m, 256)
 
     def test_wide_dma_starts_at_a_non_ragged_tile(self):
         """Wide DMA has no ragged path: where 256x64 is ragged its default is

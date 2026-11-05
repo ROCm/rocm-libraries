@@ -147,6 +147,7 @@ endif()
 # MPI tests
 if(SUPPORT_MPI)
   list(APPEND ROCALUTION_TEST_SOURCES
+    test_global_amg.cpp
     test_global_matrix.cpp
 # test_global_stencil.cpp
     test_global_vector.cpp
@@ -170,6 +171,21 @@ target_include_directories(rocalution-test PRIVATE $<BUILD_INTERFACE:${CMAKE_CUR
 
 # Link rocALUTION library
 target_link_libraries(rocalution-test PRIVATE roc::rocalution)
+
+# The OpenMP state checks in test_backend.cpp and test_local_vector.cpp need the OpenMP
+# runtime of the library. Only these sources are compiled with OpenMP: the pragma in
+# gen_3d_laplacian() (utility.hpp) is not thread-safe, and neither source instantiates it.
+# An OpenMP toolchain is not enough: TheRock's Linux library is built without OpenMP, and
+# compiling the test with it then observes the test's own ICVs.
+if(SUPPORT_OMP AND TARGET OpenMP::OpenMP_CXX)
+  separate_arguments(ROCALUTION_TEST_OMP_FLAGS NATIVE_COMMAND "${OpenMP_CXX_FLAGS}")
+  get_target_property(ROCALUTION_TEST_OMP_LIBS OpenMP::OpenMP_CXX INTERFACE_LINK_LIBRARIES)
+  set_source_files_properties(test_backend.cpp test_local_vector.cpp
+    PROPERTIES COMPILE_OPTIONS "${ROCALUTION_TEST_OMP_FLAGS}")
+  if(ROCALUTION_TEST_OMP_LIBS)
+    target_link_libraries(rocalution-test PRIVATE ${ROCALUTION_TEST_OMP_LIBS})
+  endif()
+endif()
 
 if(NOT TARGET rocalution)
   set_target_properties(rocalution-test PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/staging")
@@ -275,6 +291,41 @@ else()
   message(STATUS "rocALUTION: No test_categories.yaml (CTest categories not used)")
   add_test(rocalution-test rocalution-test)
 endif()
+
+# Multi-rank tests skip themselves unless they are started on exactly 2 ranks
+if(SUPPORT_MPI AND MPIEXEC_EXECUTABLE)
+  set(ROCALUTION_MPI_NP2_FILTER "--gtest_filter=global_amg/*:global_matrix/*")
+  set(ROCALUTION_MPI_NP2_LABELS "standard;pr;comprehensive;nightly;full;weekly")
+  set(ROCALUTION_MPI_NP2_TIMEOUT 1800)
+
+  add_test(NAME rocalution-test-mpi-np2
+           COMMAND ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} 2 ${MPIEXEC_PREFLAGS}
+                   $<TARGET_FILE:rocalution-test> ${MPIEXEC_POSTFLAGS}
+                   ${ROCALUTION_MPI_NP2_FILTER})
+  set_tests_properties(rocalution-test-mpi-np2 PROPERTIES
+    LABELS "${ROCALUTION_MPI_NP2_LABELS}"
+    TIMEOUT ${ROCALUTION_MPI_NP2_TIMEOUT}
+    PROCESSORS 2
+  )
+
+  # apply_test_category_labels() only writes its own suites to the install-time file. Paths
+  # there are relative to bin/rocalution/, where the file is installed.
+  if(ROCALUTION_CTEST_INSTALL_FILE)
+    set(ROCALUTION_MPI_NP2_INSTALL_COMMAND "")
+    foreach(arg IN ITEMS ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} 2 ${MPIEXEC_PREFLAGS}
+                         ../rocalution-test ${MPIEXEC_POSTFLAGS} ${ROCALUTION_MPI_NP2_FILTER})
+      string(APPEND ROCALUTION_MPI_NP2_INSTALL_COMMAND " [[${arg}]]")
+    endforeach()
+
+    file(APPEND "${ROCALUTION_CTEST_INSTALL_FILE}"
+      "add_test(rocalution-test-mpi-np2${ROCALUTION_MPI_NP2_INSTALL_COMMAND})\n"
+      "set_tests_properties(rocalution-test-mpi-np2 PROPERTIES LABELS \"${ROCALUTION_MPI_NP2_LABELS}\" TIMEOUT ${ROCALUTION_MPI_NP2_TIMEOUT} PROCESSORS 2)\n"
+    )
+  endif()
+endif()
+
+# clients/unittests appends the unit-test binaries to this file
+set(ROCALUTION_CTEST_INSTALL_FILE "${ROCALUTION_CTEST_INSTALL_FILE}" PARENT_SCOPE)
 
 # Install CTestTestfile.cmake to bin/rocalution/ for TheRock
 if(ROCALUTION_CTEST_INSTALL_FILE)

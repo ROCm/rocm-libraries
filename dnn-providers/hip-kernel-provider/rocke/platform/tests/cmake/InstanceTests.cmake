@@ -24,6 +24,28 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/instances/tiled_attention_2d_reentrancy.c
                rocke_tiled_attention_2d_reentrancy)
 endif()
 
+# The C tiled-attention entries refuse bad head counts, and fastKV register-P
+# on gfx942, with the Python reason text (host only, no GPU).
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/instances/tiled_attention_entry_guards.cpp")
+  add_executable(rocke_tiled_attention_entry_guards
+                 instances/tiled_attention_entry_guards.cpp)
+  target_link_libraries(rocke_tiled_attention_entry_guards PRIVATE rocke_core)
+  if(UNIX)
+    target_link_libraries(rocke_tiled_attention_entry_guards PRIVATE m)
+  endif()
+  add_test(NAME rocke_tiled_attention_entry_guards
+           COMMAND rocke_tiled_attention_entry_guards)
+  set_tests_properties(rocke_tiled_attention_entry_guards
+                       PROPERTIES LABELS "ckc;unit;host")
+  rocke_cxx_test_installed_name(_rocke_installed_name rocke_tiled_attention_entry_guards)
+  set_target_properties(rocke_tiled_attention_entry_guards
+                        PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
+  install(TARGETS rocke_tiled_attention_entry_guards
+          RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
+  set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS
+               rocke_tiled_attention_entry_guards)
+endif()
+
 # The three scalar-attention _lower_to_llvm wrappers take no target, so they
 # lower for a fixed one while the lowerer itself rejects a NULL arch. Nothing
 # else calls them, so this is the only thing that notices when they stop
@@ -71,6 +93,26 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/instances/moe_fused_mega_spec_guards.cpp"
           RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
   set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS
                rocke_moe_fused_mega_spec_guards)
+endif()
+
+# Depthwise dgrad entries the byte-identity gate cannot see: the lowering's
+# failure path when the kernel name overflows, the pad_w < -1 refusals and
+# the per-axis padding in the tiled dgrad kernel name.
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/instances/conv_direct_dw_dgrad_host.cpp")
+  add_executable(rocke_conv_direct_dw_dgrad_host instances/conv_direct_dw_dgrad_host.cpp)
+  target_link_libraries(rocke_conv_direct_dw_dgrad_host PRIVATE rocke_core)
+  if(UNIX)
+    target_link_libraries(rocke_conv_direct_dw_dgrad_host PRIVATE m)
+  endif()
+  add_test(NAME rocke_conv_direct_dw_dgrad_host COMMAND rocke_conv_direct_dw_dgrad_host)
+  set_tests_properties(rocke_conv_direct_dw_dgrad_host PROPERTIES LABELS "ckc;unit;host")
+  rocke_cxx_test_installed_name(_rocke_installed_name rocke_conv_direct_dw_dgrad_host)
+  set_target_properties(rocke_conv_direct_dw_dgrad_host
+                        PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
+  install(TARGETS rocke_conv_direct_dw_dgrad_host
+          RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
+  set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS
+               rocke_conv_direct_dw_dgrad_host)
 endif()
 
 # Host-side stream-K partition math: the launch grid it sizes is invisible to
