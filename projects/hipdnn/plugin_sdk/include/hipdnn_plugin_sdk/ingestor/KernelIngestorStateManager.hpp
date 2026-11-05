@@ -2394,7 +2394,7 @@ private:
         }
 
         shadowByArchTier(catalog, context);
-        applyCandidateFilters(context, catalog);
+        applyCandidateFilters(context, bound, catalog);
 
         HIPDNN_PLUGIN_LOG_INFO(
             _logPrefix << (_slotted ? "slot '" + slot.name + "' catalog" : "catalog")
@@ -2473,7 +2473,9 @@ private:
     /// have all been matched (after shadowByArchTier), so a set sharded across packs is
     /// refined whole; what stays keeps its order. The filters and their packs were resolved
     /// when the shared state was built.
-    void applyCandidateFilters(const MatchContext& context, Catalog& catalog) const
+    void applyCandidateFilters(const MatchContext& context,
+                               const BoundTokens& bound,
+                               Catalog& catalog) const
     {
         if(catalog.entries.empty())
         {
@@ -2497,7 +2499,7 @@ private:
                 continue;
             }
 
-            const auto kept = resolved.filter(context, catalog.bound, candidates);
+            const auto kept = resolved.filter(context, bound, candidates);
             if(kept.size() != candidates.size())
             {
                 throw std::runtime_error("the candidate filter of " + resolved.description

@@ -1042,6 +1042,38 @@ std::unique_ptr<KernelIngestorStateManager<TestHandle>> makeThreeKernelWorkspace
         "test.graph");
 }
 
+/// Same three kernels and priorities as makeThreeKernelWorkspaceStateManager() -- so
+/// rank() still puts kernel_64 front, tied at 1.0 by ScopedConstantScore and broken by
+/// priority -- but declared in the opposite order. measuredCatalog()'s `filtered` follows
+/// declaration order, so this is the one case that tells "ranked" from "declared" apart.
+std::unique_ptr<KernelIngestorStateManager<TestHandle>>
+    makeThreeKernelWorkspaceStateManagerReverseDeclared()
+{
+    MetadataSchema schema;
+    schema.id = SCHEMA_ID;
+    schema.name = "test schema";
+    schema.fields = {{BLOCK_SIZE, MetadataType::INT, MetadataValue{int64_t{64}}},
+                     {DTYPE, MetadataType::STRING, std::nullopt}};
+
+    KernelDescriptorPack pack;
+    pack.id = PACK_ID;
+    pack.name = "test pack";
+    pack.engineId = ENGINE_ID;
+    pack.dispatchId = DISPATCH_ID;
+    pack.kernels = {makeKernel(testId(0x72), "kernel_256", 256, "FLOAT", /*priority=*/0),
+                    makeKernel(testId(0x71), "kernel_128", 128, "FLOAT", /*priority=*/0),
+                    makeKernel(testId(0x70), "kernel_64", 64, "FLOAT", /*priority=*/10)};
+
+    ensureNoopDispatchRegistered<TestHandle>("test.dispatch");
+    return std::make_unique<KernelIngestorStateManager<TestHandle>>(
+        std::move(schema),
+        std::vector<MatchDescriptor>{},
+        std::vector<DispatchDescriptor>{{DISPATCH_ID, "test dispatch", "test.dispatch"}},
+        std::vector<KernelDescriptorPack>{std::move(pack)},
+        std::make_shared<NativeKernelHeuristic>(CONSTANT_SCORE_SYMBOL),
+        "test.graph");
+}
+
 /// KnobFilterContext narrows its stored plan to GenericPlan, which the benchmarking-on
 /// case cannot: buildPlan() hands it a BenchmarkPlan. This one keeps the IPlan.
 struct BenchmarkContext
@@ -3265,6 +3297,71 @@ TEST_F(TestIngestorGenericPlanBuilderShortlistLimit,
     EXPECT_EQ((*blockSize)->value.AsIntValue()->value, static_cast<int64_t>(servedWorkspace))
         << "predictConfiguration must name the same kernel buildPlan actually served "
            "under the limit";
+}
+
+/// Same scenario as PredictConfigurationAgreesWithBuildPlanUnderTheLimit, but with the
+/// packs' kernels declared in the opposite order. rank() still puts kernel_64 front (its
+/// priority wins the tie), so buildPlan's shortlist is unchanged -- but measuredCatalog()'s
+/// `filtered` now starts in declaration order [kernel_256, kernel_128], which does not
+/// cover the set buildPlan actually shortlists unless predictConfiguration ranks before
+/// truncating.
+TEST_F(TestIngestorGenericPlanBuilderShortlistLimit,
+       PredictConfigurationAgreesWithBuildPlanUnderTheLimitRegardlessOfDeclarationOrder)
+{
+    using hipdnn_flatbuffers_sdk::data_objects::EnginePredictionT;
+    using hipdnn_flatbuffers_sdk::data_objects::PredictionStatus;
+
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const ScopedConstantScore constantScore;
+    const WorkspaceEqualsBlockSizeHandler handler;
+    const ScopedDispatchRegistration<TestHandle> dispatch("test.dispatch", handler);
+    const auto manager = makeThreeKernelWorkspaceStateManagerReverseDeclared();
+    const auto engine = makeEngineWithKnobs({BLOCK_SIZE});
+    const TestDeviceResolver resolver;
+    const BenchmarkPlanBuilder builder(
+        engine, *manager, resolver, makeWorkspaceKeyedTimer({{64, 1.0}, {128, 2.0}, {256, 3.0}}));
+
+    flatbuffers::FlatBufferBuilder fbb;
+    const auto benchmarkConfig
+        = makeIntKnobEngineConfig(fbb, hipdnn_plugin_sdk::BENCHMARKING_KNOB_NAME, 1);
+    const TestGraph graph(makeGraphId(0xF5));
+    const TestHandle handle;
+
+    setLimit("2");
+    KnobFilterSettings settings;
+    builder.initializeExecutionSettings(handle, graph, benchmarkConfig, settings);
+    BenchmarkContext sampling;
+    sampling.setExecutionSettings(settings);
+    builder.buildPlan(handle, graph, benchmarkConfig, sampling);
+    std::vector<std::byte> workspace(sampling.plan().getWorkspaceSize(handle));
+    sampling.plan().execute(handle, nullptr, 0U, workspace.data());
+
+    BenchmarkContext served;
+    served.setExecutionSettings(settings);
+    builder.buildPlan(handle, graph, benchmarkConfig, served);
+    const auto servedWorkspace = served.plan().getWorkspaceSize(handle);
+    ASSERT_NE(servedWorkspace, 256U) << "the shortlist excludes kernel_256 under this limit";
+
+    hipdnn_flatbuffers_sdk::data_objects::EngineConfigT timeMetric;
+    timeMetric.ranking_metric = "time";
+    flatbuffers::FlatBufferBuilder predictFbb;
+    predictFbb.Finish(
+        hipdnn_flatbuffers_sdk::data_objects::EngineConfig::Pack(predictFbb, &timeMetric));
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper predictConfig(
+        predictFbb.GetBufferPointer(), predictFbb.GetSize());
+    EnginePredictionT prediction;
+    builder.predictConfiguration(handle, graph, predictConfig, prediction);
+    ASSERT_EQ(prediction.status, PredictionStatus::AVAILABLE) << prediction.reason;
+    ASSERT_NE(prediction.engine_config, nullptr);
+    const auto blockSize
+        = std::find_if(prediction.engine_config->knobs.begin(),
+                       prediction.engine_config->knobs.end(),
+                       [](const auto& setting) { return setting->knob_id == BLOCK_SIZE; });
+    ASSERT_NE(blockSize, prediction.engine_config->knobs.end());
+    ASSERT_NE((*blockSize)->value.AsIntValue(), nullptr);
+    EXPECT_EQ((*blockSize)->value.AsIntValue()->value, static_cast<int64_t>(servedWorkspace))
+        << "predictConfiguration must name the same kernel buildPlan actually served under "
+           "the limit, even when declaration order does not already match rank order";
 }
 
 } // namespace

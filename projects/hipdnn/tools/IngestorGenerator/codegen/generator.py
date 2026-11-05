@@ -252,8 +252,21 @@ def mint_ids(
     ids["kernel_match"] = take(engine.kernel_match_umd["id"] if engine else None)
     if config.engine.has_heuristic:
         # engine.uhd's first entry is always the native fallback this config
-        # regenerates; a trailing promoted-model id is untouched here.
+        # regenerates; any trailing entries are promoted-model ids a human
+        # applied from a packet, not newly minted. They are carried through
+        # unchanged (ids[("uhd_promoted", i)]) rather than dropped, since
+        # nothing here can regenerate a trained ranker.
         ids["uhd"] = take(engine.uhd[0]["id"] if engine and engine.uhd else None)
+        for index, promoted_doc in enumerate(
+            engine.uhd[1:] if engine and engine.uhd else ()
+        ):
+            promoted_id = promoted_doc["id"]
+            assert promoted_id not in claimed, (
+                f"promoted UHD id {promoted_id!r} collides with another "
+                "descriptor's id"
+            )
+            claimed.add(promoted_id)
+            ids[("uhd_promoted", index)] = promoted_id
     if not config.is_slotted:
         ids["udd"] = take(engine.udd["id"] if engine and engine.udd else None)
 
@@ -462,7 +475,17 @@ def build_ued(config: IngestorConfig, ids: dict) -> dict:
     }
     if config.engine.has_heuristic:
         # RFC 0019 §3.1: the loader rejects a bare top-level `heuristic` pointer.
-        ued["sort_kernel_catalog"] = {"default": ids["uhd"]}
+        # A promoted model's id, carried through from the prior bundle, rides
+        # after the native fallback (prior_ids.py's EngineDocs.uhd ordering);
+        # regenerating must not silently switch the engine back to the fallback.
+        promoted = [
+            ids[k]
+            for k in sorted(
+                k for k in ids if isinstance(k, tuple) and k[0] == "uhd_promoted"
+            )
+        ]
+        default = [ids["uhd"], *promoted] if promoted else ids["uhd"]
+        ued["sort_kernel_catalog"] = {"default": default}
     if config.engine.knobs:
         ued["knobs"] = list(config.engine.knobs)
     if config.engine.behavior_notes:

@@ -2028,6 +2028,53 @@ class TestStableIds:
             "differs from its git blob and its DVC object"
         )
 
+    def test_regenerating_keeps_a_promoted_ranker_appended_after_the_fallback(
+        self, generator, scale_add_config, tmp_path
+    ):
+        """uhd_gen's promote step appends a trained ranker's id after the native
+        fallback in ``sort_kernel_catalog.default`` (a one- or two-element list,
+        see ``prior_ids.py``'s ``EngineDocs.uhd``). Nothing in this generator can
+        regenerate a trained ranker, so a round trip over an unchanged config must
+        carry the promoted id through rather than collapse back to the fallback
+        alone."""
+        assert scale_add_config.engine.has_heuristic
+        shipped_root = tmp_path / "shipped"
+        generator.render(scale_add_config, shipped_root)
+        directory = shipped_root / scale_add_config.descriptor_dir
+
+        (ued_path,) = directory.glob("*.ued.json")
+        ued = json.loads(ued_path.read_text(encoding="utf-8"))
+        fallback_id = ued["sort_kernel_catalog"]["default"]
+        assert isinstance(fallback_id, str), "only one ranker before promotion"
+
+        promoted_id = str(uuid.uuid4())
+        promoted_doc = {
+            "version": "1.0",
+            "id": promoted_id,
+            "name": "promoted ranker",
+            "adapter": "native",
+            "objective": "max",
+            "native": {"symbol": "hipkernel.scale_add.promoted_score"},
+        }
+        (directory / f"{promoted_id}.uhd.json").write_text(
+            json.dumps(promoted_doc, indent=2) + "\n", encoding="utf-8"
+        )
+        ued["sort_kernel_catalog"]["default"] = [fallback_id, promoted_id]
+        ued_path.write_text(json.dumps(ued, indent=2) + "\n", encoding="utf-8")
+
+        regenerated_root = tmp_path / "regenerated"
+        render_resolved(
+            generator, scale_add_config, regenerated_root, ids_from=directory
+        )
+        (regenerated_ued_path,) = (
+            regenerated_root / scale_add_config.descriptor_dir
+        ).glob("*.ued.json")
+        regenerated_ued = json.loads(regenerated_ued_path.read_text(encoding="utf-8"))
+        assert regenerated_ued["sort_kernel_catalog"]["default"] == [
+            fallback_id,
+            promoted_id,
+        ], "regenerating must not drop the promoted model back to the fallback"
+
     def test_adding_a_kernel_changes_only_the_added_kernels_id(
         self, generator, scale_add_config, tmp_path
     ):
