@@ -301,6 +301,24 @@ def test_invalid_seq_len_is_refused(key, given, extent, match):
         _lengths(given, key, _Plain(), 2, extent)
 
 
+def test_non_integer_seq_len_is_refused_not_truncated():
+    given = np.array([1.5, 1.0], dtype=np.float32)
+    with pytest.raises(ValueError, match="integer dtype"):
+        _lengths(given, "seq_len_q", _Plain(), 2, 4)
+
+
+@pytest.mark.parametrize(
+    "module",
+    ["bind_shared", "bind_unified", "bind_dense", "hipdnn", "common"],
+)
+def test_sdpa_module_all_names_resolve(module):
+    import importlib
+
+    mod = importlib.import_module(f"dispatch.sdpa.{module}")
+    assert [n for n in mod.__all__ if not hasattr(mod, n)] == []
+    assert len(mod.__all__) == len(set(mod.__all__))
+
+
 def test_valid_seq_len_and_defaults():
     assert _lengths([1, 3], "seq_len_q", _Plain(), 2, 4) == [1, 3]
     assert _lengths(None, "seq_len_q", _Plain(), 2, 4) == [4, 4]

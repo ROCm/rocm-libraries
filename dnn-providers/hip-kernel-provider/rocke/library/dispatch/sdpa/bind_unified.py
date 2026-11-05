@@ -50,7 +50,6 @@ from .bind_shared import (
     asked_band,
     band_text,
     declined_table,
-    host_ints,
     keeps_asked_keys,
     to_attention_request,
     value_rejects,
@@ -241,13 +240,15 @@ def sdpa_unified_candidates(req: SdpaRequest) -> tuple[str, ...]:
 # --- binding -------------------------------------------------------------------
 
 
-def _host_lengths(req_tensor, tensors, key: str) -> list[int] | None:
-    return None if req_tensor is None else host_ints(tensors[key])
+def _host_lengths(req_tensor, tensors, key: str):
+    """The caller's ``seq_len_*`` as a host array, dtype kept so
+    ``validate_lengths`` can refuse a non-integer tensor."""
+    if req_tensor is None:
+        return None
+    return tensors[key].detach().reshape(-1).cpu().numpy()
 
 
-def _lengths(
-    given: list[int] | None, key: str, operand: Operand, batch: int, extent: int
-):
+def _lengths(given, key: str, operand: Operand, batch: int, extent: int):
     """Per-batch lengths: the host ``seq_len_*`` values ``given`` (``None`` when
     the request has none), else ragged, else the extent.
 
