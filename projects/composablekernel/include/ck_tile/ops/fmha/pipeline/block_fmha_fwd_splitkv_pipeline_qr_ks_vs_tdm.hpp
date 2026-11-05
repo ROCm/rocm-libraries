@@ -321,17 +321,12 @@ struct BlockFmhaFwdSplitKVPipelineQRKSVSTdm
         const auto init_ml = [&](bool take_sink) {
             if(take_sink)
             {
-#if CK_TILE_FMHA_FWD_FAST_EXP2
                 if constexpr(BiasEnum == BlockAttentionBiasEnum::ALIBI ||
                              BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS ||
                              kHasLogitsSoftCap)
                     set_tile(m, sink_v * scale_s * C_LOG2E);
                 else
                     set_tile(m, sink_v * C_LOG2E);
-#else
-                // Unreachable: FAST_EXP2 is asserted above. This seed owes scale_s too.
-                set_tile(m, sink_v * scale_s);
-#endif
                 set_tile(l, SMPLComputeDataType{1.0f});
             }
             else
@@ -777,11 +772,7 @@ struct BlockFmhaFwdSplitKVPipelineQRKSVSTdm
                 const auto bias_tile = load_tile(bias_dram_window);
                 tile_elementwise_inout(
                     [](auto& x, const auto& y) {
-#if !CK_TILE_FMHA_FWD_FAST_EXP2
-                        x += type_convert<SaccDataType>(y);
-#else
                         x += log2e_v<SaccDataType> * type_convert<SaccDataType>(y);
-#endif
                     },
                     s_acc,
                     bias_tile);
