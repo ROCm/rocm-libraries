@@ -114,6 +114,14 @@ context_t::context_t(const problem_t& problem, const hardware_t& hardware, const
 
   // Workgroup mapping
   wgm = predict_workgroup_mapping(problem, hardware, config, grid_m, grid_n, splitting_factor);
+  // hipBLASLt applies the predicted WGM only to persistent kernels built with WGM 0
+  // (ContractionSolution::calculateAutoWGM); other kernels launch with their own WGM,
+  // or ceil(sqrt(CUs / XCDs)) when built with 0. Model the WGM the kernel actually runs with.
+  if (config.stream_k == 0)
+    wgm.wgm = config.workgroup_mapping != 0
+                  ? config.workgroup_mapping
+                  : static_cast<int32_t>(std::ceil(
+                        std::sqrt(static_cast<double>(hardware.N_CU) / hardware.NUM_XCD)));
 
   // Debug flag (cached to avoid repeated singleton lookups)
   debug = runtime_options::get().debug_enabled;
