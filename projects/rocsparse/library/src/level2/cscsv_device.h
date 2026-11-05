@@ -46,7 +46,7 @@ namespace rocsparse
         return v;
     }
 
-    // One group of NUM_LANES lanes per column: diagonal entry, dependency counts, longest column.
+    // One group of NUM_LANES lanes per column: diagonal entry and dependency counts.
     template <uint32_t BLOCKSIZE, uint32_t NUM_LANES, typename I, typename J>
     ROCSPARSE_KERNEL(BLOCKSIZE)
     void cscsv_analysis_kernel(J m,
@@ -54,7 +54,6 @@ namespace rocsparse
                                const J* __restrict__ csc_row_ind,
                                I* __restrict__ csc_diag_ind,
                                J* __restrict__ dependency_count,
-                               I* __restrict__ max_nnz,
                                J* __restrict__ zero_pivot,
                                rocsparse_index_base idx_base,
                                rocsparse_diag_type  diag_type,
@@ -64,14 +63,10 @@ namespace rocsparse
         const uint32_t wid = hipThreadIdx_x / NUM_LANES;
         const J        col = hipBlockIdx_x * (BLOCKSIZE / NUM_LANES) + wid;
 
-        __shared__ I shared_nnz[BLOCKSIZE / NUM_LANES];
-
-        I nnz = 0;
         if(col < m)
         {
             const I col_begin = csc_col_ptr[col] - idx_base;
             const I col_end   = csc_col_ptr[col + 1] - idx_base;
-            nnz               = col_end - col_begin;
 
             int has_diag = 0;
             for(I k = col_begin + lid; k < col_end; k += NUM_LANES)
@@ -94,19 +89,49 @@ namespace rocsparse
                 rocsparse::atomic_min(zero_pivot, col + idx_base);
             }
         }
+    }
 
-        // One atomic per block, a per-column atomic on the same address serializes the kernel.
-        if(lid == 0)
+    // Longest column without atomics, as in doti: each block reduces a grid-stride range of
+    // columns into workspace[hipBlockIdx_x], then a single block reduces the partial results.
+    template <uint32_t BLOCKSIZE, typename I>
+    ROCSPARSE_KERNEL(BLOCKSIZE)
+    void cscsv_max_nnz_part1(int64_t m,
+                             const I* __restrict__ csc_col_ptr,
+                             I* __restrict__ workspace)
+    {
+        __shared__ I shared[BLOCKSIZE];
+
+        I nnz = 0;
+        for(int64_t col = static_cast<int64_t>(hipBlockIdx_x) * BLOCKSIZE + hipThreadIdx_x; col < m;
+            col += static_cast<int64_t>(hipGridDim_x) * BLOCKSIZE)
         {
-            shared_nnz[wid] = nnz;
+            nnz = rocsparse::max(nnz, static_cast<I>(csc_col_ptr[col + 1] - csc_col_ptr[col]));
         }
+        shared[hipThreadIdx_x] = nnz;
         __syncthreads();
 
-        rocsparse::blockreduce_max<BLOCKSIZE / NUM_LANES>(hipThreadIdx_x, shared_nnz);
+        rocsparse::blockreduce_max<BLOCKSIZE>(hipThreadIdx_x, shared);
 
         if(hipThreadIdx_x == 0)
         {
-            rocsparse::atomic_max(max_nnz, shared_nnz[0]);
+            workspace[hipBlockIdx_x] = shared[0];
+        }
+    }
+
+    template <uint32_t BLOCKSIZE, typename I>
+    ROCSPARSE_KERNEL(BLOCKSIZE)
+    void cscsv_max_nnz_part2(I* __restrict__ workspace)
+    {
+        __shared__ I shared[BLOCKSIZE];
+
+        shared[hipThreadIdx_x] = workspace[hipThreadIdx_x];
+        __syncthreads();
+
+        rocsparse::blockreduce_max<BLOCKSIZE>(hipThreadIdx_x, shared);
+
+        if(hipThreadIdx_x == 0)
+        {
+            workspace[0] = shared[0];
         }
     }
 

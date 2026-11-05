@@ -36,11 +36,6 @@ uint32_t rocsparse::cscsv_num_lanes(int64_t max_nnz, uint32_t wavefront_size)
     return num_lanes;
 }
 
-size_t rocsparse::cscsv_column_analysis_buffer_size()
-{
-    return rocsparse::align_size(sizeof(int64_t));
-}
-
 size_t rocsparse::cscsv_column_solve_buffer_size(int64_t             m,
                                                  int64_t             batch_count,
                                                  rocsparse_indextype j_type,
@@ -59,7 +54,7 @@ rocsparse_status rocsparse::cscsv_analysis_buffer_size(rocsparse_handle         
     ROCSPARSE_ROUTINE_TRACE;
     if(trans == rocsparse_operation_none)
     {
-        buffer_size[0] = rocsparse::cscsv_column_analysis_buffer_size();
+        buffer_size[0] = 0;
         return rocsparse_status_success;
     }
     RETURN_IF_ROCSPARSE_ERROR(

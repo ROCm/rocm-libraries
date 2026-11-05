@@ -44,7 +44,6 @@ namespace rocsparse
                                                   const void*          csc_row_ind,
                                                   void*                csc_diag_ind,
                                                   void*                dependency_count,
-                                                  void*                max_nnz,
                                                   void*                zero_pivot,
                                                   rocsparse_index_base idx_base,
                                                   rocsparse_diag_type  diag_type,
@@ -61,13 +60,41 @@ namespace rocsparse
             reinterpret_cast<const J*>(csc_row_ind),
             reinterpret_cast<I*>(csc_diag_ind),
             reinterpret_cast<J*>(dependency_count),
-            reinterpret_cast<I*>(max_nnz),
             reinterpret_cast<J*>(zero_pivot),
             idx_base,
             diag_type,
             fill_mode);
         return rocsparse_status_success;
     }
+
+    template <uint32_t BLOCKSIZE, typename I>
+    static rocsparse_status cscsv_max_nnz_launch(rocsparse_handle handle,
+                                                 int64_t          m,
+                                                 const void*      csc_col_ptr,
+                                                 void*            workspace)
+    {
+        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::cscsv_max_nnz_part1<BLOCKSIZE, I>),
+                                           dim3(BLOCKSIZE),
+                                           dim3(BLOCKSIZE),
+                                           0,
+                                           handle->stream,
+                                           m,
+                                           reinterpret_cast<const I*>(csc_col_ptr),
+                                           reinterpret_cast<I*>(workspace));
+        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::cscsv_max_nnz_part2<BLOCKSIZE, I>),
+                                           dim3(1),
+                                           dim3(BLOCKSIZE),
+                                           0,
+                                           handle->stream,
+                                           reinterpret_cast<I*>(workspace));
+        return rocsparse_status_success;
+    }
+
+    static const std::map<rocsparse_indextype, rocsparse::cscsv_max_nnz_launch_t>
+        s_cscsv_max_nnz_dispatch{
+            {{rocsparse_indextype_i32, cscsv_max_nnz_launch<rocsparse::s_cscsv_blocksize, int32_t>},
+             {rocsparse_indextype_i64,
+              cscsv_max_nnz_launch<rocsparse::s_cscsv_blocksize, int64_t>}}};
 
     using cscsv_analysis_tpl_t = std::tuple<rocsparse_indextype, rocsparse_indextype>;
 
@@ -108,24 +135,33 @@ rocsparse_status rocsparse::cscsv_analysis_launch_find(rocsparse::cscsv_analysis
     return rocsparse_status_success;
 }
 
+rocsparse_status rocsparse::cscsv_max_nnz_launch_find(rocsparse::cscsv_max_nnz_launch_t* launch,
+                                                      rocsparse_indextype                i_type)
+{
+    const auto& it = rocsparse::s_cscsv_max_nnz_dispatch.find(i_type);
+    if(it == rocsparse::s_cscsv_max_nnz_dispatch.end())
+    {
+        // LCOV_EXCL_START
+        std::stringstream sstr;
+        sstr << "invalid index type configuration: i_type: "
+             << rocsparse::enum_utils::to_string(i_type);
+        RETURN_WITH_MESSAGE_IF_ROCSPARSE_ERROR(rocsparse_status_internal_error, sstr.str().c_str());
+        // LCOV_EXCL_STOP
+    }
+    launch[0] = it->second;
+    return rocsparse_status_success;
+}
+
 namespace rocsparse
 {
     static rocsparse_status cscsv_column_analysis(rocsparse_handle            handle,
                                                   rocsparse_const_spmat_descr A,
-                                                  rocsparse_cscsv_info        info,
-                                                  size_t                      buffer_size_in_bytes,
-                                                  void*                       buffer)
+                                                  rocsparse_cscsv_info        info)
     {
         ROCSPARSE_ROUTINE_TRACE;
         hipStream_t               stream = handle->stream;
         const rocsparse_mat_descr descr  = A->descr;
         const int64_t             m      = A->cols;
-
-        RETURN_WITH_MESSAGE_IF_ROCSPARSE_ERROR(
-            (buffer_size_in_bytes < rocsparse::cscsv_column_analysis_buffer_size())
-                ? rocsparse_status_invalid_size
-                : rocsparse_status_success,
-            "the buffer of the CSC analysis is too small");
 
         // Column pointers and row indices
         const rocsparse_indextype I_type   = A->col_type;
@@ -142,9 +178,6 @@ namespace rocsparse
         trm_info->set_col_ind(A->const_row_data);
         trm_info->set_offset_indextype(I_type);
         trm_info->set_index_indextype(J_type);
-
-        void* d_max_nnz = buffer;
-        RETURN_IF_HIP_ERROR(rocsparse_hipMemsetAsync(d_max_nnz, 0, sizeof(int64_t), stream));
 
         RETURN_IF_HIP_ERROR(
             rocsparse_hipMallocAsync(trm_info->get_ref_diag_ind(), sizeof_I * m, stream));
@@ -174,16 +207,23 @@ namespace rocsparse
                                              A->const_row_data,
                                              trm_info->get_diag_ind(),
                                              *dependency_count,
-                                             d_max_nnz,
                                              zero_pivot,
                                              descr->base,
                                              descr->diag_type,
                                              descr->fill_mode));
         }
 
+        // The longest column is reduced in the handle workspace, so the analysis needs no user buffer.
         int64_t max_nnz = 0; // important to set it to zero since sizeof_I might be int32_t.
-        RETURN_IF_HIP_ERROR(
-            rocsparse_hipMemcpyAsync(&max_nnz, d_max_nnz, sizeof_I, hipMemcpyDeviceToHost, stream));
+        if(m > 0)
+        {
+            rocsparse::cscsv_max_nnz_launch_t max_nnz_launch;
+            RETURN_IF_ROCSPARSE_ERROR(
+                rocsparse::cscsv_max_nnz_launch_find(&max_nnz_launch, I_type));
+            RETURN_IF_ROCSPARSE_ERROR(max_nnz_launch(handle, m, A->const_col_data, handle->buffer));
+            RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(
+                &max_nnz, handle->buffer, sizeof_I, hipMemcpyDeviceToHost, stream));
+        }
         RETURN_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(stream));
         trm_info->set_max_nnz(max_nnz);
 
@@ -205,8 +245,7 @@ rocsparse_status rocsparse::cscsv_analysis(rocsparse_handle            handle,
     if(trans == rocsparse_operation_none)
     {
         // The CSC analysis is not shared through the matrix info.
-        RETURN_IF_ROCSPARSE_ERROR(
-            rocsparse::cscsv_column_analysis(handle, A, info, buffer_size_in_bytes, buffer));
+        RETURN_IF_ROCSPARSE_ERROR(rocsparse::cscsv_column_analysis(handle, A, info));
         return rocsparse_status_success;
     }
 
