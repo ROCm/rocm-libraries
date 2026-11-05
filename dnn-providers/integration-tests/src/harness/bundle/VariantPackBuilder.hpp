@@ -13,6 +13,7 @@
 #include "harness/VariantPack.hpp"
 #include "harness/bundle/IntegrationTestBundle.hpp"
 #include "harness/bundle/OutputComparison.hpp"
+#include "harness/input-init/TensorAliases.hpp"
 
 namespace hipdnn_integration_tests::bundle::detail
 {
@@ -36,6 +37,10 @@ public:
 /// Inputs that are also outputs are skipped -- the output allocation owns that uid.
 /// `useDevice` selects host or device pointers; a runtime-pass-by-value input is
 /// always passed by value regardless.
+///
+/// Each view in `aliases` gets its owner's pointer, advanced by the alias's byte
+/// offset. Throws std::invalid_argument when an owner has no entry, or when a view
+/// already has one as an input or an output.
 VariantPack buildVariantPack(
     TensorMap& inputs,
     OutputTensors& outputs,
@@ -43,7 +48,8 @@ VariantPack buildVariantPack(
                              const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
         tensorAttributes,
     const std::vector<int64_t>& outputTensorUids,
-    bool useDevice);
+    bool useDevice,
+    const std::vector<TensorAlias>& aliases = {});
 
 /// The output buffers one bundle is run into, each prefilled with the sentinel
 /// value so a tensor nobody wrote is visibly untouched rather than plausibly zero.

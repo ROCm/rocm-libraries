@@ -842,6 +842,15 @@ std::optional<VerificationOutcome> IntegrationBundleVerificationHarness::prepare
         return fillBundleInputs();
     }
 
+    if(!_bundle->metadata.aliases.empty())
+    {
+        return VerificationOutcome::failed(VerificationDepth::NOT_REACHED,
+                                           FailureOrigin::HARNESS,
+                                           "aliases cannot be used with tensor data read from "
+                                           "blobs, which store each tensor apart ("
+                                               + _bundlePath.string() + ")");
+    }
+
     // Tensors read from blobs are unpacked, but the engine reads sub-byte operands
     // packed, and only fillBundleInputs() builds the packed set.
     const auto wrapper = _bundle->graphWrapper();
@@ -889,6 +898,14 @@ std::optional<VerificationOutcome> IntegrationBundleVerificationHarness::fillBun
     const std::set<int64_t> outputUids(_bundle->outputTensorUids.begin(),
                                        _bundle->outputTensorUids.end());
 
+    // A view has no tensor of its own: the variant pack points it into its owner.
+    const auto& aliases = _bundle->metadata.aliases;
+    std::set<int64_t> viewUids;
+    for(const auto& alias : aliases)
+    {
+        viewUids.insert(alias.uid);
+    }
+
     InputTensorMap inputs;
     std::vector<int64_t> leafInputUids;
     bool anySubByte = false;
@@ -898,9 +915,12 @@ std::optional<VerificationOutcome> IntegrationBundleVerificationHarness::fillBun
         {
             continue;
         }
-        inputs[uid] = hipdnn_test_sdk::detail::createTensorFromAttribute(*attrs);
         leafInputUids.push_back(uid);
         anySubByte = anySubByte || hipdnn_test_sdk::detail::isSubByteDataType(attrs->data_type());
+        if(viewUids.count(uid) == 0)
+        {
+            inputs[uid] = hipdnn_test_sdk::detail::createTensorFromAttribute(*attrs);
+        }
     }
 
     // Sub-byte graphs fill twice, once unpacked and once packed, and the two sets must
@@ -925,25 +945,41 @@ std::optional<VerificationOutcome> IntegrationBundleVerificationHarness::fillBun
         return unverifiable(result.reason);
     };
 
+    const auto fillSet
+        = [&](InputTensorMap& tensors, FillResult& result) -> std::optional<VerificationOutcome> {
+        try
+        {
+            result = hipdnn_integration_tests::fillInputs(
+                wrapper.getGraph(), tensors, leafInputUids, _inputFillRecipes, device, aliases);
+        }
+        catch(const DeviceInputError& e)
+        {
+            // The device failed, not the graph, so this is a failure and not an
+            // "unverifiable" skip that would let the run go green.
+            return VerificationOutcome::failed(
+                VerificationDepth::NOT_REACHED,
+                FailureOrigin::HARNESS,
+                std::string(e.what()) + " (" + _bundlePath.string()
+                    + "); set HIPDNN_TEST_HOST_INPUT_FILL=1 to fill on the host");
+        }
+        catch(const std::exception& e)
+        {
+            return VerificationOutcome::failed(VerificationDepth::NOT_REACHED,
+                                               FailureOrigin::HARNESS,
+                                               std::string("input fill failed: ") + e.what() + " ("
+                                                   + _bundlePath.string() + ")");
+        }
+        if(!result.filled)
+        {
+            return fillFailure(result);
+        }
+        return std::nullopt;
+    };
+
     FillResult fillResult;
-    try
+    if(auto failure = fillSet(inputs, fillResult))
     {
-        fillResult = hipdnn_integration_tests::fillInputs(
-            wrapper.getGraph(), inputs, leafInputUids, _inputFillRecipes, device);
-    }
-    catch(const DeviceInputError& e)
-    {
-        // The device failed, not the graph, so this is a failure and not an
-        // "unverifiable" skip that would let the run go green.
-        return VerificationOutcome::failed(VerificationDepth::NOT_REACHED,
-                                           FailureOrigin::HARNESS,
-                                           std::string(e.what()) + " (" + _bundlePath.string()
-                                               + "); set HIPDNN_TEST_HOST_INPUT_FILL=1 to fill on "
-                                                 "the host");
-    }
-    if(!fillResult.filled)
-    {
-        return fillFailure(fillResult);
+        return failure;
     }
     _deviceFilledInputs = fillResult.deviceFilled;
 
@@ -952,15 +988,17 @@ std::optional<VerificationOutcome> IntegrationBundleVerificationHarness::fillBun
         InputTensorMap packed;
         for(const int64_t uid : leafInputUids)
         {
-            packed[uid] = hipdnn_test_sdk::detail::createTensorFromAttribute(
-                *tensorAttrMap.at(uid), /*packSubByteElements=*/true);
+            if(viewUids.count(uid) == 0)
+            {
+                packed[uid] = hipdnn_test_sdk::detail::createTensorFromAttribute(
+                    *tensorAttrMap.at(uid), /*packSubByteElements=*/true);
+            }
         }
 
-        auto packedFill = hipdnn_integration_tests::fillInputs(
-            wrapper.getGraph(), packed, leafInputUids, _inputFillRecipes, device);
-        if(!packedFill.filled)
+        FillResult packedFill;
+        if(auto failure = fillSet(packed, packedFill))
         {
-            return fillFailure(packedFill);
+            return failure;
         }
         _packedInputs = std::move(packed);
     }
@@ -987,8 +1025,19 @@ std::unordered_map<int64_t, void*>
 {
     const auto wrapper = _bundle->graphWrapper();
     TensorMap& inputs = (useDevice && !_packedInputs.empty()) ? _packedInputs : _inputs;
-    return detail::buildVariantPack(
-        inputs, outputs, wrapper.getTensorMap(), _bundle->outputTensorUids, useDevice);
+    try
+    {
+        return detail::buildVariantPack(inputs,
+                                        outputs,
+                                        wrapper.getTensorMap(),
+                                        _bundle->outputTensorUids,
+                                        useDevice,
+                                        _bundle->metadata.aliases);
+    }
+    catch(const std::invalid_argument& e)
+    {
+        throw std::invalid_argument(std::string(e.what()) + " (" + _bundlePath.string() + ")");
+    }
 }
 
 IntegrationBundleVerificationHarness::EngineRunResult
@@ -1062,7 +1111,16 @@ IntegrationBundleVerificationHarness::RefRunResult
         {
             bundle::copyRngDump(*engineOutputs.at(dump->uid), *refOutputs.at(dump->uid));
         }
-        auto variantPack = buildVariantPack(refOutputs, useDevice);
+        VariantPack variantPack;
+        try
+        {
+            variantPack = buildVariantPack(refOutputs, useDevice);
+        }
+        catch(const std::invalid_argument& e)
+        {
+            // The variant pack is the harness's, so a fault in it is never the reference's.
+            return {RefStatus::HARNESS_ERROR, e.what()};
+        }
         executor.execute(_bundle->graphBuffer.data(), _bundle->graphBuffer.size(), variantPack);
     }
     catch(const ReferenceCapabilityError& e)

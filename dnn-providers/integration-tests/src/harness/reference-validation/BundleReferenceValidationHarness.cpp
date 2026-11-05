@@ -130,6 +130,13 @@ void BundleReferenceValidationHarness::TestBody()
         return;
     }
 
+    if(!_bundle->metadata.aliases.empty())
+    {
+        FAIL() << "aliases cannot be used with golden tensor data, which stores each tensor "
+                  "apart\n  bundle: "
+               << _bundlePath;
+    }
+
     // Read here, after the known-gap check above, so a bundle that never runs never
     // reads its blobs, and the tensors are freed with this test rather than held by the
     // shared bundle for the rest of the run.

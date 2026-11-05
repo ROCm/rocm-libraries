@@ -3,6 +3,7 @@
 
 #include "harness/bundle/VariantPackBuilder.hpp"
 
+#include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <limits>
@@ -141,7 +142,8 @@ VariantPack buildVariantPack(
                              const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
         tensorAttributes,
     const std::vector<int64_t>& outputTensorUids,
-    bool useDevice)
+    bool useDevice,
+    const std::vector<TensorAlias>& aliases)
 {
     VariantPack variantPack;
     const std::set<int64_t> outputUids(outputTensorUids.begin(), outputTensorUids.end());
@@ -158,6 +160,23 @@ VariantPack buildVariantPack(
             = attrIt != tensorAttributes.end() && attrIt->second->is_runtime_pass_by_value();
         variantPack[uid] = hipdnn_test_sdk::utilities::selectVariantPackPointer(
             *tensor, useDevice, isRuntimePassByValue);
+    }
+
+    for(const auto& alias : aliases)
+    {
+        const std::string what = "buildVariantPack: alias view " + std::to_string(alias.uid)
+                                 + " of owner " + std::to_string(alias.ofUid);
+        const auto owner = variantPack.find(alias.ofUid);
+        if(owner == variantPack.end())
+        {
+            throw std::invalid_argument(what + ": the owner has no input buffer");
+        }
+        if(variantPack.count(alias.uid) != 0 || outputs.count(alias.uid) != 0)
+        {
+            throw std::invalid_argument(what + ": the view already has a buffer of its own");
+        }
+        void* const ownerPointer = owner->second;
+        variantPack[alias.uid] = static_cast<std::byte*>(ownerPointer) + alias.byteOffset;
     }
 
     for(auto& [uid, tensor] : outputs)

@@ -23,6 +23,7 @@
 #include <nlohmann/json.hpp>
 
 #include "harness/input-init/InputFillRecipes.hpp"
+#include "harness/input-init/TensorAliases.hpp"
 
 namespace hipdnn_integration_tests
 {
@@ -61,6 +62,8 @@ struct BundleMetadata
     std::optional<int64_t> seed;
     std::optional<int64_t> minimumVramMb;
     std::optional<std::unordered_map<int64_t, nlohmann::json>> inputs;
+    /// Inputs that read the memory of another input and have no allocation of their own.
+    std::vector<TensorAlias> aliases;
     EnforcementLevel enforcementLevel = EnforcementLevel::FULL;
 
     /// The bundle opts out of the CPU / GPU reference executor as an oracle. A
@@ -89,8 +92,9 @@ inline bool excludedFromSupportClaims(const BundleMetadata& metadata)
 /// missing/invalid/unsupported `format_version`, an invalid `enforcement_level`,
 /// a non-boolean `no_cpu_reference` / `no_gpu_reference` / `expected_rejection`,
 /// an `archs` value that is not a non-empty array of base arch names,
-/// a non-numeric `inputs` key, an `inputs` entry that is not a valid fill spec, a
-/// feature that needs a higher `format_version`, a flag combination that contradicts
+/// a non-numeric `inputs` key, an `inputs` entry that is not a valid fill spec, an
+/// `aliases` value that parseTensorAliases() rejects, a view whose `inputs` entry sets a
+/// fill kind, a feature that needs a higher `format_version`, a flag combination that contradicts
 /// the bundle's golden data, or (for a .meta.json file) unreadable or not valid JSON.
 /// An authoring error, never a "metadata not recorded" case, so it must not degrade
 /// to defaults.
@@ -132,9 +136,15 @@ inline bool usesArchList(const nlohmann::json& metadata)
     return metadata.contains("archs");
 }
 
-inline constexpr std::array<FormatVersion2Feature, 2> K_FORMAT_VERSION_2_FEATURES = {{
+inline bool usesAliases(const nlohmann::json& metadata)
+{
+    return metadata.contains("aliases");
+}
+
+inline constexpr std::array<FormatVersion2Feature, 3> K_FORMAT_VERSION_2_FEATURES = {{
     {"kind values", &usesValuesFillKind},
     {"archs", &usesArchList},
+    {"aliases", &usesAliases},
 }};
 
 } // namespace bundle_metadata_detail
@@ -147,7 +157,8 @@ inline constexpr std::array<FormatVersion2Feature, 2> K_FORMAT_VERSION_2_FEATURE
 /// `enforcement_level`, has a reference/rejection flag that is not a boolean, has an
 /// `archs` value that is not a non-empty array of base arch names, has an
 /// `inputs` key that is not a tensor UID or an `inputs` entry that is not a valid fill
-/// spec, or uses a version-2 feature in version 1 metadata.
+/// spec, has an `aliases` value that parseTensorAliases() rejects or a view whose
+/// `inputs` entry sets a fill kind, or uses a version-2 feature in version 1 metadata.
 /// `source` names the origin (file path or sweep case) in
 /// the error message.
 inline BundleMetadata parseBundleMetadataJson(const nlohmann::json& json,
@@ -318,6 +329,37 @@ inline BundleMetadata parseBundleMetadataJson(const nlohmann::json& json,
             inputMap[uid] = val;
         }
         meta.inputs = std::move(inputMap);
+    }
+
+    // Version-1 metadata with `aliases` fails the version check below, whatever the value.
+    if(json.contains("aliases") && meta.formatVersion >= 2)
+    {
+        try
+        {
+            meta.aliases = parseTensorAliases(json.at("aliases"));
+        }
+        catch(const std::invalid_argument& e)
+        {
+            throw BundleMetadataError(where + ": " + e.what());
+        }
+    }
+
+    // A seed-only entry for a view is allowed and has no effect.
+    for(const auto& alias : meta.aliases)
+    {
+        if(!meta.inputs.has_value())
+        {
+            break;
+        }
+        const auto entry = meta.inputs->find(alias.uid);
+        if(entry != meta.inputs->end() && entry->second.contains("kind"))
+        {
+            std::string message = where;
+            message.append(": ")
+                .append(tensor_alias_detail::describe(alias))
+                .append(": the view's inputs entry sets a fill kind, and a view is never filled");
+            throw BundleMetadataError(message);
+        }
     }
 
     if(meta.formatVersion < 2)
