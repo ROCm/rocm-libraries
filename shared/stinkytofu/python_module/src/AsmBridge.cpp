@@ -140,7 +140,7 @@ bool isSupportedTypedInstruction(const std::string& mnemonic) {
         "v_mul_f32", "v_mul_hi_u32", "v_mul_i32_i24", "v_mul_lo_u32",
         "v_mul_u32_u24", "v_nop", "v_permlane16_swap_b32", "v_permlanex16_b32",
         "v_pk_add_f32", "v_pk_mul_f32", "v_rcp_f32", "v_rcp_iflag_f32", "v_readfirstlane_b32",
-        "v_readlane_b32", "v_sub_nc_i32", "v_sub_u32", "v_subrev_nc_u32",
+        "v_readlane_b32", "v_sub_f32", "v_sub_nc_i32", "v_sub_u32", "v_subrev_nc_u32",
         "v_swap_b32", "v_wmma_f32_16x16x32_bf16", "v_writelane_b32",
         // Structural records selected by the target lowering.
         "s_branch", "s_cbranch_execnz", "s_cbranch_execz", "s_cbranch_scc0",
