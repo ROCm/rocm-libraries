@@ -64,6 +64,9 @@ gemm/
 - `user_provided_config.json` — scratch space for custom sweeps.
 - `example_problems.json` — example M/N/K problem set (used when `--problems`
   is omitted).
+- `search_config_gfx1250_tdm.json`, `search_config_gfx1250_tdm_no_pc.json`,
+  `search_settings_gfx1250_tdm.json` - the gfx1250 TDM search space and example
+  search settings, see [gfx1250 / MI450](#gfx1250--mi450-tdm-pipelines).
 
 > The JSON used by **nightly** tests is intended to drop into the same
 > `configs/` directory and be selected with a positional config — no driver
@@ -613,6 +616,88 @@ Troubleshooting: for `no_winner` or `partial`, read `unresolved` in
 memory (see "Host verification memory"). If nearly every candidate gets
 built, the problems are choosing different kernels: lower `new_builds_per_run`
 or keep the default `shared` seed policy.
+
+#### gfx1250 / MI450: TDM pipelines
+
+`configs/search_config_gfx1250_tdm.json` is gemm_universal's gfx1250 default
+config (`gemm_universal/configs/default_config_gfx1250.json`) with its pipeline
+list cut to the bridged TDM/async pipelines: `comp_async` (`rcr` only, fully
+padded, persistent or not), `comp_tdm`, `comp_tdm_v2` and `comp_tdm_pc` (`tdm`
+epilogue, unpadded), tile_k 64 to 256, warp tile 16x16; the bridge drops what
+it does not support. In the default config these pipelines are 2.7-3.2% of the
+`rcr` space, so a search there rarely tries them. Kernels per layout, each
+paired with every problem of `example_problems.json` (5 aligned problems):
+
+| Config | dtype | `rcr` | `rrr` | `crr` | `ccr` |
+|---|---|---|---|---|---|
+| `search_config_gfx1250_tdm.json` | fp16, bf16 | 1207 | 595 | 583 | 595 |
+| | fp8, bf8 | 1618 | 1234 | 1234 | 1234 |
+| `search_config_gfx1250_tdm_no_pc.json` | fp16, bf16 | 1071 | 459 | 459 | 459 |
+| | fp8, bf8 | 1248 | 864 | 864 | 864 |
+
+By pipeline, fp16 `rcr`: `comp_async` 612, `comp_tdm` 306, `comp_tdm_v2` 153,
+`comp_tdm_pc` 136; fp8 `rcr`: 384, 576, 288, 370. The candidates of a problem
+depend on its shape: fp16 `rcr` 245760x352x3595 (odd K) pairs with 595 kernels,
+no `comp_async`, and a misaligned problem pairs with fixed-vector-width
+variants of its own, so a mixed problem set has more distinct kernels than
+any one problem (fp16 `rcr` over 4 mixed problems: 1819 against 1207 per
+problem). Check your problems with `--list-pairs`.
+
+```bash
+RUN="configs/search_config_gfx1250_tdm.json --variant gemm_universal \
+    --arch gfx1250 --dtype bf16 --layout rcr --problems problems.json"
+python gemm_full_benchmark.py $RUN --devices 0, --workers 16 \
+    --search-config configs/search_settings_gfx1250_tdm.json \
+    --search-output-dir runs/gfx1250-bf16-rcr-001
+```
+
+`configs/search_settings_gfx1250_tdm.json`: `tpe`, `shared`, 100 trials per
+problem, `warm_start.cover` `"pipeline"` (each pipeline is tried on each
+problem before the strategy's own picks), `new_builds_per_run` 1200 (sized
+for about 8 problems, as in the gfx950 example, whose runs built about 356;
+scale it with your problem count) and `build_timeout_s` 300. The 300 s is a
+placeholder: gfx1250 TDM compile times are not measured yet. Calibrate it
+before ranking runs: build about 20 kernels per pipeline in a plain run with
+`--build-timeout 1200`, then set `build_timeout_s` to 1.6x the slowest one that
+built, the rule used for gfx950 above. `build_timeout_s` applies to every
+kernel, the fixed-vector-width variants of misaligned problems too: if your
+problems include misaligned ones, include one in the calibration run so that
+it builds those variants, or leave `build_timeout_s` out (the build
+function's own limits then apply to them). There is no heuristic warm start on
+gfx1250 (the models are gfx950 only); an earlier run's `winners.json` can be
+the `pairs_file` next to `cover`.
+
+`trials_per_problem` 100 is not exhaustive (the TDM config has 459 to 1618
+candidates per problem). The exhaustive reference for a search is a plain run
+of the same config and problems with `--verify`, or `--pairs` with a
+`--list-pairs` file to split it into one problem per run; it builds and
+measures every pair.
+
+Node caveats:
+
+- Pass `--arch gfx1250` and `--devices N,`: without them the driver detects
+  the arch with `rocminfo` and the devices with `amd-smi` or `rocm-smi`, and
+  when `rocminfo` fails the driver stops. The fp8/bf8 host format of the
+  workers (OCP on gfx1250) follows `--arch` in a search and in a plain run.
+- Rank kernels only on production-representative hardware. A run under
+  emulation or binary translation can report false timeouts and wrong
+  results, which a search records as `timeout` or `numeric_fail` and learns
+  from.
+- With the ROCm 10.2 compiler, `comp_tdm_pc` kernels can hang in their named
+  barriers, and each such trial costs a full `--kernel-timeout`. On that
+  toolchain use `configs/search_config_gfx1250_tdm_no_pc.json` for the search
+  and for the reference run; other toolchains keep the full config.
+- A run cannot be resumed: an interrupted run confirms nothing. On a host that
+  may hang or reboot, run one problem per run (its own problems file and
+  `--search-output-dir`) and copy each output directory off the node when it
+  ends.
+- Not covered: `comp_tdm_v3` (no dispatcher bridge yet; once it has one, add
+  it to the pipeline list of both `search_config_gfx1250_tdm*.json` files and
+  to `TDM` in `dispatcher/tests/test_gemm_search_cli.py`, whose test keeps
+  both files equal to the default config except for that list),
+  `preshuffle_tdm` (the
+  `gemm_preshuffle` variant; a search takes `gemm_universal` only), and the MX,
+  Stream-K, batched, grouped and quant TDM kernels.
 
 ### Multi-GPU parallelism
 
