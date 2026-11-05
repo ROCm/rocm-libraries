@@ -184,6 +184,24 @@ def _tdmSparseMetadataKOffset(writer, kernel):
                      src1=sgpr(lo + 1), comment="Apply metadata K-offset high word and address carry"))
   return mod
 
+def _tailPacksTwoElementsPerLoad(kernel, tP):
+  """Return whether the tail global read packs two 16-bit elements per load."""
+  # Must match the numElementsPerLoad == 2 selection in globalReadDo.
+  tc = tP["tensorChar"]
+  macDataType = kernel["ProblemType"]["MacDataType%s"%tc]
+  dataType = kernel["ProblemType"]["DataType%s"%tc]
+  if not kernel["ConvertAfterDS"] and tP["glvw"] < 8 * macDataType.numRegisters():
+    dataType = macDataType
+  isLds = kernel["DirectToLds%s"%tc] and not kernel["NonDTLTailLoop%s"%tc]
+  return (dataType.isHalf() or dataType.isBFloat16()) and not kernel["enableGLTr%s"%tc] \
+    and tP["glvw"] > 1 and kernel["AssertSummationElementMultiple"] % 2 == 0 and not isLds
+
+def _fp8D16UsesHighWord(isCvtHighBits, inTailLoop, tailPacksPairs):
+  """Return the source word for an FP8 pair loaded into a d16 VGPR."""
+  # A packed tail read writes each pair to the low word of its own VGPR; other
+  # reads alternate d16/d16_hi destinations.
+  return isCvtHighBits and not (inTailLoop and tailPacksPairs)
+
 from math import ceil, floor, log, prod
 from contextlib import contextmanager
 from copy import deepcopy
@@ -5492,6 +5510,9 @@ class KernelWriterAssembly(KernelWriter):
             #
             # Key: numLine/numElems <= MT (compile-time), so the multiply stays in 32 bits.
             mt_units    = mt  # roundUp(MT/swizzleSize0), compile-time
+            # "+DepthU" (one K step) for the data A/B path and the legacy
+            # MX-swizzled scale path.  The dual-period MXFP8 scale path overrides
+            # this below with full-tile (numLine+1)*span coverage (see comment there).
             extra_bytes = swizzleBlockSize * (kernel["DepthU"] // swizzleSize1)
 
             for i in range(0, numDim):
@@ -5510,7 +5531,22 @@ class KernelWriterAssembly(KernelWriter):
                 module.add(SSubU32(dst=sgpr(stmp+0), src0=sgpr(stmp+0), src1=1, comment="numLine = min - 1 (0-based index)"))
                 module.addModuleAsFlatItems(self.s_mul_u64_u32(sgpr(stmp+0), sgpr(stmp+1), sgpr(stmp+0), \
                           strideF, comment="numLine * stride"))
-                if isMxSwizzledScaleLayout:
+                if isMxSwizzledScaleLayout and kernel.get("_DualPeriodMXFP8"):
+                  # Dual-period MXFP8 only.  Full-tile coverage (numLine+1)*span
+                  # rather than numLine*span + extra_bytes.  The scale GR base
+                  # advances one full ScaleGroupSpan over the K-loop (sum of
+                  # per-epoch +inc == K == one span) while emitScaleGRPtrUpdate
+                  # shrinks Srd+2 by that same inc each epoch.  Starting one
+                  # swizzle-group high (strideF == span of headroom) means the
+                  # shrink never clamps a real top-group read yet tightens to
+                  # exactly the tile end by the last real epoch, so the trailing
+                  # phantom PGR prefetch (base one span past tile start on the final
+                  # M/N-tile) is bounds-clamped to 0 instead of reading past the
+                  # scale allocation and page-faulting at deep K.
+                  module.add(SAddU32(dst=sgpr("Srd%s+2"%tc), src0=sgpr(stmp+0), src1=strideF, comment="(numLine+1)*span buffer_load limit for %s"%tc))
+                elif isMxSwizzledScaleLayout:
+                  # Legacy swizzled-scale limit (e.g. MXFP4, non-dual-period):
+                  # numLine*span + one DepthU K-step.  Unchanged from before.
                   module.add(SAddU32(dst=sgpr("Srd%s+2"%tc), src0=sgpr(stmp+0), src1=extra_bytes, comment="buffer_load limit for %s"%tc))
                 elif isPreShuffledAB:
                   # numLine is measured in 16-row blocks.  Convert the logical
@@ -14646,10 +14682,12 @@ class KernelWriterAssembly(KernelWriter):
                       self.vgprPool.checkIn(vgprTmp)
                 elif newBlockWidth == 0.5:
                   vgprTmp = self.vgprPool.checkOutAligned(2, 2, tag="localWriteDo_vgprTmp9")
-                  src_sel = SelectBit.WORD_1 if isCvtHighBits else SelectBit.WORD_0
+                  useHighWord = _fp8D16UsesHighWord(
+                      isCvtHighBits, self.states.inTailLoop, _tailPacksTwoElementsPerLoad(kernel, tP))
+                  src_sel = SelectBit.WORD_1 if useHighWord else SelectBit.WORD_0
                   modNum = max(1, int(newBlockWidth / blockWidth))
                   if self.states.asmCaps["Hascvtf16_fp8_sf32"]:
-                    sel  = [1,0,0,0] if isCvtHighBits else [0,0,0,0]
+                    sel  = [1,0,0,0] if useHighWord else [0,0,0,0]
                     localWriteCVTCode.add(VCvtScalePkFP8toF16(dst=vgpr(destVgprPrefix + "+%u"%(g2lIdx)), src=vgpr(destVgprPrefix + "+%u"%(g2lIdx)), scale=0x3f800000,\
                                                           vop3=VOP3PModifiers(op_sel=sel), comment="D convert fp8 to f16"))
                   else:
@@ -17350,7 +17388,11 @@ class KernelWriterAssembly(KernelWriter):
       self.vgprPool.checkIn(tmpV0)
 
       nElements = kernel["MacroTile0"]*kernel["MatrixInstN"]//kernel["MIWaveGroup"][0]//self.states.kernel["WavefrontSize"]
-      rpe = self.states.bpeCexternal / self.states.bpr
+      # Accumulation workspace stores may use wider elements than the final output.
+      bpe = self.states.bpeCexternal
+      if kernel["_GlobalAccumulation"]:
+        bpe = max(bpe, self.states.bpeCinternal)
+      rpe = bpe / self.states.bpr
       rpv = rpe * gwvw
       self.vgprs.storeRemapAS = []
       for i in range(0, nElements, gwvw):
