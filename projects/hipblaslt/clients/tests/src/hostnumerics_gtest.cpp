@@ -593,7 +593,7 @@ TEST(HostNumericsTolerancePolicy, Gfx11ScalesComputeTypeEpsilon)
                      64.0 * std::numeric_limits<float>::epsilon());
     EXPECT_DOUBLE_EQ(bfloat16_output_rounding_tolerance_coefficient(), 0x1p-8);
     EXPECT_THROW(sum_error_tolerance_for_compute_type(HIP_R_8I), std::runtime_error);
-    EXPECT_THROW(norm_tolerance(roc::hostnumerics::ScalarType::Count), std::runtime_error);
+    EXPECT_FALSE(norm_tolerance(roc::hostnumerics::ScalarType::Count));
 }
 
 TEST(HostNumericsDataInitializationBridge, CounterBasedGenerationIsRepeatable)

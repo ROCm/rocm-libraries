@@ -327,27 +327,20 @@ namespace hipblaslt::hostnumerics
                                          : outputIndex;
                     }
                 }
-                double limit = 0.0;
-                try
-                {
-                    limit = norm_tolerance(validationCase.outputs.front().first.type(),
-                                           options.computeType,
-                                           options.inputTypeA,
-                                           options.inputTypeB);
-                }
-                catch(const std::runtime_error&)
-                {
-                }
-                using Kind = MatmulOutputCheckFailure::Kind;
-                if(!(limit > 0.0))
+                const auto limit = norm_tolerance(validationCase.outputs.front().first.type(),
+                                                  options.computeType,
+                                                  options.inputTypeA,
+                                                  options.inputTypeB);
+                using Kind       = MatmulOutputCheckFailure::Kind;
+                if(!limit)
                     summary.outputCheckFailures.push_back(
                         {.kind = Kind::NormUnavailable, .gemm = caseIndex});
-                else if(!(worstError < limit))
+                else if(!(worstError < *limit))
                     summary.outputCheckFailures.push_back({.kind  = Kind::Norm,
                                                            .gemm  = caseIndex,
                                                            .batch = worstBatch,
                                                            .error = worstError,
-                                                           .limit = limit});
+                                                           .limit = *limit});
             }
 
             if(options.searchAllClose)
