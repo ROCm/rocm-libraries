@@ -31,8 +31,9 @@ from rocke.core.ir_serialize import serialize
 from rocke.tests.engines import (
     HipRefusal,
     hip_outcomes_of_both_engines,
-    ir_lower_cli_hip_outcome,
+    ir_lower_cli_hip_outcomes,
     lower_hip_with_both_engines,
+    native_hip_outcomes,
 )
 
 
@@ -71,16 +72,28 @@ def test_waitcnt_is_refused_where_the_target_has_split_wait_counters(op):
     )
 
 
-@pytest.mark.parametrize(("gfx", "lowers"), [("gfx942", True), ("gfx1250", False)])
-def test_ir_lower_cli_reports_what_the_binding_reports(gfx, lowers):
+def test_ir_lower_cli_reports_what_the_binding_reports():
     """The installed test tree runs the C++ HIP lowering through
-    rocke_ir_lower_cli, other lanes through the binding: both report the same
-    source, and the same refusal. Runs where both are present."""
+    rocke_ir_lower_cli, other lanes through the binding: for the same kernels,
+    in one batch, both report the same source and the same refusals, in order.
+    Runs where both are present."""
     pytest.importorskip("rocke_engine")
-    ir_text = serialize(_waitcnt_kernel("s_waitcnt").kernel)
-    _, via_binding = hip_outcomes_of_both_engines(ir_text, gfx)
-    assert ir_lower_cli_hip_outcome(ir_text, gfx) == via_binding
-    assert isinstance(via_binding, HipRefusal) != lowers
+    waitcnt = serialize(_waitcnt_kernel("s_waitcnt").kernel)
+    no_template = serialize(_inline_asm_kernel(template=None).kernel)
+    kernels = [
+        (waitcnt, "gfx942"),
+        (waitcnt, "gfx1250"),
+        (no_template, "gfx942"),
+        (waitcnt, "gfx950"),
+    ]
+    via_program = ir_lower_cli_hip_outcomes(kernels)
+    assert via_program == native_hip_outcomes(kernels)
+    assert [isinstance(outcome, HipRefusal) for outcome in via_program] == [
+        False,
+        True,
+        True,
+        False,
+    ]
 
 
 @pytest.mark.parametrize("op", ["s_waitcnt", "sync_lds_only"])

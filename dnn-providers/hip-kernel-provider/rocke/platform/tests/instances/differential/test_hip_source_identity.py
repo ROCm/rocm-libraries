@@ -29,9 +29,12 @@ built -- the installed test tree -- through the ``rocke_ir_lower_cli`` program
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 import tempfile
+from collections.abc import Iterator
+from concurrent.futures import Future, ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
@@ -39,7 +42,8 @@ import pytest
 from rocke.tests.engines import (
     REFUSAL_ERROR_TYPES,
     HipRefusal,
-    hip_outcomes_of_both_engines,
+    native_hip_outcomes,
+    python_hip_outcome,
     skip_without_native_hip_lowering,
 )
 
@@ -65,6 +69,11 @@ _REFUSAL_TYPE_NAMES = frozenset(
 )
 
 FAMILIES = run_diff.find_families(python_only=True)
+
+# Emitter runs started ahead of the tests that read them. Each is a subprocess,
+# so threads overlap them with the in-process Python lowering of earlier
+# families; a few at a time leaves that lowering a core.
+PREFETCHED_EMITTER_RUNS = min(4, os.cpu_count() or 1)
 
 
 def _emitter_runs(
@@ -250,14 +259,45 @@ def test_only_builder_refusals_and_the_end_of_the_list_pass(tmp_path: Path) -> N
     ]
 
 
+@pytest.fixture(scope="module")
+def target_ir_runs(
+    request: pytest.FixtureRequest,
+) -> Iterator[dict[str, Future[list[tuple[int, str, run_diff.Emission]]]]]:
+    """Each selected family's target-ir emitter run, started in the order the
+    session runs the family tests, so a test waits only for its own family.
+    Started only where the C++ lowering can run; runs not yet started when
+    the module ends are cancelled. Not meant for pytest-xdist, whose workers
+    would each start every selected family."""
+    skip_without_native_hip_lowering()
+    source_dirs = dict(FAMILIES)
+    selected = [
+        item.callspec.params["name"]
+        for item in request.session.items
+        if getattr(item, "function", None) is test_both_engines_emit_the_same_hip_source
+    ]
+    pool = ThreadPoolExecutor(max_workers=PREFETCHED_EMITTER_RUNS)
+    try:
+        yield {
+            name: pool.submit(
+                _emitter_runs,
+                name,
+                source_dirs[name],
+                "target-ir",
+                list(range(run_diff.config_limit(name))),
+            )
+            for name in selected
+        }
+    finally:
+        pool.shutdown(wait=False, cancel_futures=True)
+
+
 @pytest.mark.parametrize(
     ("name", "src_dir"), FAMILIES, ids=[name for name, _ in FAMILIES]
 )
-def test_both_engines_emit_the_same_hip_source(name: str, src_dir: Path) -> None:
-    skip_without_native_hip_lowering()
-    runs = _emitter_runs(
-        name, src_dir, "target-ir", list(range(run_diff.config_limit(name)))
-    )
+def test_both_engines_emit_the_same_hip_source(
+    name: str, src_dir: Path, target_ir_runs
+) -> None:
+    runs = target_ir_runs[name].result()
     if name in NO_KERNEL_FAMILIES:
         assert runs and all(
             run_diff.mode_unsupported(emission) for _, _, emission in runs
@@ -275,16 +315,18 @@ def test_both_engines_emit_the_same_hip_source(name: str, src_dir: Path) -> None
         "refusing them:\n" + "\n".join(failures[:20])
     )
 
-    compared = 0
+    kernels = [
+        (f"{name} config {index} kernel {block} ({arch})", ir, arch)
+        for index, text, _ in runs
+        for block, (arch, ir) in enumerate(_kernels(text))
+    ]
+    native_outcomes = native_hip_outcomes([(ir, arch) for _, ir, arch in kernels])
     disagreements = []
-    for index, text, _ in runs:
-        for block, (arch, ir) in enumerate(_kernels(text)):
-            where = f"{name} config {index} kernel {block} ({arch})"
-            python_outcome, native_outcome = hip_outcomes_of_both_engines(ir, arch)
-            compared += 1
-            difference = _disagreement(python_outcome, native_outcome)
-            if difference is not None:
-                disagreements.append(f"{where}: {difference}")
+    for (where, ir, arch), native_outcome in zip(kernels, native_outcomes):
+        difference = _disagreement(python_hip_outcome(ir, arch), native_outcome)
+        if difference is not None:
+            disagreements.append(f"{where}: {difference}")
+    compared = len(kernels)
     assert compared, f"{name}: the emitter built no kernel in any config"
     assert not disagreements, (
         f"{len(disagreements)} of {compared} {name} kernels lower to different "
