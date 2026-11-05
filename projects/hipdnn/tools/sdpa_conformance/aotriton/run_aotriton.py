@@ -5,8 +5,8 @@
 """Run AOTriton's SDPA suite against hipDNN and record one CSV row per case.
 
     run_aotriton.py [--suite default|forward] [--release N] [--shard I/N] [--fake always-decline]
-                    [--layout-mode MODE] [--fwd-no-stats] [--all-engines] [--pairs] [--kernel-ids]
-                    [--exhaustive] [--packed-gpu]
+                    [--layout-mode MODE] [--fwd-no-stats] [--packed-gpu] [--kernel-ids]
+                    [--all-engines [--pairs]] [--exhaustive]
                     [--out DIR | --arch ARCH --run NAME]
                     [--workers N] [--resume] [--nodeids-file PATH] [--hang-timeout S] [--lock-dir DIR]
                     [--hipdnn-prefix DIR] [-- PYTEST...]
@@ -51,15 +51,21 @@ cases it must run) and ``pass.json`` (kind, direction, pins):
   (``HIPDNN_FWD_ENGINE=reference``); with ``--pairs`` the pair passes then cover those cases with
   the backward engines the discovery pass recorded.
 
-``--pairs`` is off by default: each pass pins one direction, so a failure names the engine of that
-direction. ``--kernel-ids`` fills the ``fwd_kernel`` / ``bwd_kernel`` columns by exporting
+``--pairs`` needs ``--all-engines`` (refused otherwise) and is off by default: each pass pins one
+direction, so a failure names the engine of that direction. ``reconcile.py --engines <out>`` folds
+the passes into ``engines.csv``. ``--all-engines`` and ``--exhaustive`` compose with ``--suite``,
+``--shard``, ``--release`` and ``--workers``; ``--fwd-no-stats`` composes with them for the forward
+sweep only. Both refuse ``--fake`` and pre-set ``HIPDNN_FWD_ENGINE`` / ``HIPDNN_BWD_ENGINE``.
+
+``--kernel-ids`` fills the ``fwd_kernel`` / ``bwd_kernel`` columns by exporting
 ``HIPDNN_SDPA_KERNEL_LOG=1`` to every pass, which makes the plugin install ``hipdnn_sdpa``'s backend
 log callback. That callback raises the backend log level to INFO and forces ingestor applicability
 inline, so it changes how the product runs; it is off by default and the kernel columns stay empty.
 ``--exhaustive`` implies it, because candidate honoring compares kernel ids.
 
 ``--exhaustive`` pins kernels inside an engine (``--all-engines`` pins engines; the flags compose, and
-both together are the EXTREME run). Pass 1 records, per case and engine, the candidate count
+both together are the EXTREME run). It needs an executable ``<prefix>/bin/hipdnn_bench`` and refuses
+to start without one. Pass 1 records, per case and engine, the candidate count
 ``hipdnn_bench enumerate`` lists (``fwd_candidate`` / ``bwd_candidate``: a JSON object ``{engine:
 count | reason the engine cannot enumerate}``). Under ``<out>/cand/``:
 
@@ -77,10 +83,6 @@ A case whose worker died in pass 1 has no counts and gets no candidate pass. The
 ``HIPDNN_SDPA_PREFIX`` (the ``--hipdnn-prefix``, where ``bin/hipdnn_bench`` lives) to every pass and
 ``HIPDNN_SDPA_EXHAUSTIVE`` to pass 1 only; it refuses ``--fake`` and pre-set candidate variables.
 
-``reconcile.py --engines <out>`` folds the passes into ``engines.csv``. The option composes with
-``--suite``, ``--shard``, ``--release``, ``--workers`` and ``--fwd-no-stats`` (forward sweep
-only); it refuses ``--fake`` and pre-set ``HIPDNN_FWD_ENGINE`` / ``HIPDNN_BWD_ENGINE``.
-
 Every pass exports ``HIPDNN_SDPA_PASS_SLUG`` and a per-pass in-flight directory
 (``HIPDNN_SDPA_INFLIGHT_DIR``, node-local: default a fresh temporary directory) where
 ``hipdnn_sdpa`` leaves a marker per worker; the plugin turns a worker death into a ``crash`` row
@@ -95,12 +97,25 @@ full repro directory. ``--hang-timeout S`` (default 1800; 0 disables) starts
 ``--resume`` accepts a non-empty ``--out``: per pass directory it runs only the node ids of the
 pass (pass 1: the shard's collection) that have no row, from a node-id file and without
 ``--shard``. A ``crash`` row is a row, so a crashed case is never run again.
-Every link records the pass-planning flags in ``<out>/run-options.json`` (``all_engines``,
-``pairs``, ``exhaustive``), which ``completion.py`` reads to know which passes the shard calls for.
+A fresh start records its options in ``<out>/run-options.json``: ``schema`` (1), ``hipdnn_prefix``,
+``all_engines``, ``pairs``, ``exhaustive``, ``kernel_ids``, ``layout_mode``, ``fwd_no_stats``,
+``suite``, ``release``, ``shard`` and ``packed_gpu``; ``completion.py`` reads it to know which
+passes the shard calls for. A resumed link must repeat them: ``--resume`` exits 2 and prints each
+differing key as recorded vs requested when any key but ``schema`` and ``hipdnn_prefix`` differs
+(the file keeps the first link's values). A shard without the file (written before the runner
+recorded its options; read so such shards still resume) is compared on ``all_engines``, ``pairs``
+and ``exhaustive`` against ``--all-engines`` without the others, and the full file is then written.
 
 Every pytest process checks that the ``libhipdnn_backend`` mapped into it is the one under
-``--hipdnn-prefix`` (default ``$ROCM_PATH``, which dnn-benchmarking's ``setup_env.py``
-activation sets); the runner refuses to start without a prefix.
+``--hipdnn-prefix`` (default ``$ROCM_PATH``); the runner refuses to start without a prefix. A ROCm
+torch next to a hipDNN install of another prefix maps the wrong library: see README.md,
+"Mixed ROCm torch and hipDNN prefixes".
+
+Exit status: 0 when every pytest run exited 0, else the status of the first pytest run that did
+not (run order; pytest's 1 means failed cases); 2 when collection fails, ``--fwd-no-stats`` meets a
+case outside ``test_forward.py``, ``--resume`` is refused, or the arguments are invalid (``--pairs``
+without ``--all-engines``); 1 for the other refusals (no prefix, no ``hipdnn_bench``, existing rows
+without ``--resume``, ``--fake`` or a pre-set pin).
 """
 
 import argparse
@@ -121,16 +136,17 @@ import conformance_contract as contract
 import reconcile
 
 DEFAULT_RESULTS = Path.cwd() / "sdpa_conformance_results"
-FWD_NO_STATS_ENV = "HIPDNN_SDPA_CONFORMANCE_FWD_NO_STATS"
-FWD_NO_STATS_TESTS = "test_forward.py"
-ENGINE_ENV = {"fwd": "HIPDNN_FWD_ENGINE", "bwd": "HIPDNN_BWD_ENGINE"}
 WATCHDOG_MODULE = "pytest_gpu_lease.watchdog"
 LOCK_NAME = "gpu.lock"
 CAPTURE_DIR = "capture"
-PIN_ENV = (*ENGINE_ENV.values(), *contract.CANDIDATE_ENV.values())
+PIN_ENV = (*contract.ENGINE_ENV.values(), *contract.CANDIDATE_ENV.values())
 RUN_OPTIONS_NAME = "run-options.json"
-# A shard written before the runner recorded its options ran --all-engines without --pairs or
-# --exhaustive.
+RUN_OPTIONS_SCHEMA = 1
+# Keys of run-options.json that ``--resume`` does not compare: the schema, and the prefix, which
+# may be mounted elsewhere on another node.
+UNCHECKED_OPTIONS = ("schema", "hipdnn_prefix")
+# A shard written before the runner recorded its options (no run-options.json) ran --all-engines
+# without --pairs or --exhaustive; read so that such a shard still resumes and reaches completion.py.
 LEGACY_RUN_OPTIONS = {"all_engines": True, "pairs": False, "exhaustive": False}
 
 
@@ -153,7 +169,7 @@ def parse_args(argv):
     parser.add_argument(
         "--fwd-no-stats",
         action="store_true",
-        help=f"run the forward without Stats; only valid for {FWD_NO_STATS_TESTS}",
+        help=f"run the forward without Stats; only valid for {contract.FORWARD_TESTS}",
     )
     parser.add_argument(
         "--all-engines",
@@ -164,7 +180,7 @@ def parse_args(argv):
         "--pairs",
         action="store_true",
         help="with --all-engines, also run the forward x backward pair passes (off: one direction "
-        "per pass)",
+        "per pass); refused without --all-engines",
     )
     parser.add_argument(
         "--kernel-ids",
@@ -216,7 +232,10 @@ def parse_args(argv):
     parser.add_argument(
         "pytest_args", nargs="*", help="passed to every pytest invocation"
     )
-    return parser.parse_args(argv)
+    args = parser.parse_args(argv)
+    if args.pairs and not args.all_engines:
+        parser.error("--pairs needs --all-engines")
+    return args
 
 
 def detect_gpus():
@@ -243,7 +262,7 @@ def passes(args):
     target = (
         layout.FLASH_TESTS
         if args.suite == "default"
-        else layout.FLASH_TESTS / "test_forward.py"
+        else layout.FLASH_TESTS / contract.FORWARD_TESTS
     )
     result = [("suite", [str(target)])]
     if args.packed_gpu:
@@ -360,13 +379,15 @@ def pair_rel(fwd, bwd):
     return Path("pair") / f"{engine_slug(fwd)}__{engine_slug(bwd)}"
 
 
-class CandidatePass(NamedTuple):
-    rel: Path  # under cand/
-    kind: str
+class PlannedPass(NamedTuple):
+    root: str  # under <out>: reconcile.ENGINES_DIR or contract.CANDIDATES_DIR
+    rel: Path  # under root
+    kind: str  # contract.PASS_*
     direction: str
     pins: dict
     cases: object  # node ids; {nodeid: message} for a not-enumerable pass
     note: str
+    not_enumerable: bool = False  # no pytest run: one ``not-enumerable`` row per case
 
 
 def candidate_passes(rows, pairs):
@@ -374,41 +395,49 @@ def candidate_passes(rows, pairs):
     ``pairs`` (``--all-engines --pairs``) the EXTREME pair passes follow. A ``not-enumerable`` pass runs no
     pytest and carries ``{nodeid: message}`` as its cases.
     """
+    root = contract.CANDIDATES_DIR
     for (direction, engine), (counts, messages) in sorted(candidate_work(rows).items()):
         rel = Path(direction) / engine_slug(engine)
-        pin = {ENGINE_ENV[direction]: engine}
+        pin = {contract.ENGINE_ENV[direction]: engine}
         note = f"candidates {direction} {engine}"
         for k in range(max(counts.values(), default=0)):
-            yield CandidatePass(
+            yield PlannedPass(
+                root,
                 rel / str(k),
-                "candidate",
+                contract.PASS_CANDIDATE,
                 direction,
                 {**pin, contract.CANDIDATE_ENV[direction]: str(k)},
                 [n for n, count in counts.items() if count > k],
                 f"{note} #{k}",
             )
         if messages:
-            yield CandidatePass(
+            yield PlannedPass(
+                root,
                 rel / contract.NOT_ENUMERABLE,
-                contract.NOT_ENUMERABLE,
+                contract.PASS_CANDIDATE,
                 direction,
                 pin,
                 messages,
                 note,
+                not_enumerable=True,
             )
     if not pairs:
         return
     for (fwd, bwd), (counts, messages) in sorted(candidate_pair_work(rows).items()):
         rel = pair_rel(fwd, bwd)
-        pin = {ENGINE_ENV["fwd"]: fwd, ENGINE_ENV["bwd"]: bwd}
+        pin = {
+            contract.ENGINE_ENV["fwd"]: fwd,
+            contract.ENGINE_ENV["bwd"]: bwd,
+        }
         note = f"candidates pair {fwd} x {bwd}"
         for i in range(max((c[0] for c in counts.values()), default=0)):
             for j in range(max((c[1] for c in counts.values()), default=0)):
                 chosen = [n for n, c in counts.items() if c[0] > i and c[1] > j]
                 if chosen:
-                    yield CandidatePass(
+                    yield PlannedPass(
+                        root,
                         rel / f"{i}x{j}",
-                        "candidate-pair",
+                        contract.PASS_CANDIDATE_PAIR,
                         "bwd",
                         {
                             **pin,
@@ -419,29 +448,136 @@ def candidate_passes(rows, pairs):
                         f"{note} #{i}x{j}",
                     )
         if messages:
-            yield CandidatePass(
+            yield PlannedPass(
+                root,
                 rel / contract.NOT_ENUMERABLE,
-                contract.NOT_ENUMERABLE,
+                contract.PASS_CANDIDATE,
                 "bwd",
                 pin,
                 messages,
                 note,
+                not_enumerable=True,
             )
 
 
+def _sweep_passes(work):
+    for (direction, engine), nodeids in sorted(work.items()):
+        yield PlannedPass(
+            reconcile.ENGINES_DIR,
+            Path(direction) / engine_slug(engine),
+            contract.PASS_SWEEP,
+            direction,
+            {contract.ENGINE_ENV[direction]: engine},
+            nodeids,
+            f"{direction} {engine}",
+        )
+
+
+def _pair_passes(work):
+    for (fwd, bwd), nodeids in sorted(work.items()):
+        yield PlannedPass(
+            reconcile.ENGINES_DIR,
+            pair_rel(fwd, bwd),
+            contract.PASS_PAIR,
+            "bwd",
+            {contract.ENGINE_ENV["fwd"]: fwd, contract.ENGINE_ENV["bwd"]: bwd},
+            nodeids,
+            f"pair {fwd} x {bwd}",
+        )
+
+
+def planned_passes(out, rows, options):
+    """Every pass beyond pass 1 that ``options`` (``run_options``) call for, in run order, from the
+    pass-1 ``rows``: with ``all_engines`` the pinned sweeps, the pair passes (``pairs``) and the
+    reference-forward passes of ``forward_failed``; with ``exhaustive`` the ``candidate_passes``.
+
+    A generator that reads the results of earlier passes only when it reaches the passes that
+    depend on them (``forward_failed`` after the sweeps and pairs, the discovery rows after the
+    discovery pass). The runner runs each pass before asking for the next; ``completion.py``
+    iterates it over what is on disk.
+    """
+    if options["all_engines"]:
+        yield from _sweep_passes(engine_work(rows))
+        if options["pairs"]:
+            yield from _pair_passes(pair_work(rows))
+        failed = forward_failed(out)
+        if failed:
+            engines = Path(out) / reconcile.ENGINES_DIR / "refwd"
+            reference = {contract.ENGINE_ENV["fwd"]: contract.REFERENCE_PIN}
+            yield PlannedPass(
+                reconcile.ENGINES_DIR,
+                Path("refwd") / "discovery",
+                contract.PASS_DISCOVERY,
+                "bwd",
+                reference,
+                failed,
+                "refwd discovery",
+            )
+            discovery = reconcile.read_rows(engines / "discovery" / reconcile.CSV_NAME)
+            for (_, engine), nodeids in sorted(engine_work(discovery).items()):
+                yield PlannedPass(
+                    reconcile.ENGINES_DIR,
+                    Path("refwd") / engine_slug(engine),
+                    contract.PASS_REFWD,
+                    "bwd",
+                    {**reference, contract.ENGINE_ENV["bwd"]: engine},
+                    nodeids,
+                    f"refwd bwd {engine}",
+                )
+            if options["pairs"]:
+                lists = {r["nodeid"]: r["bwd_engines"] for r in discovery}
+                yield from _pair_passes(pair_work(rows, lists))
+    if options["exhaustive"]:
+        yield from candidate_passes(rows, options["pairs"])
+
+
 def run_options(out):
-    """The pass-planning flags the shard's links ran with, as ``main`` records them in
-    ``<out>/run-options.json``: ``all_engines``, ``pairs`` (only together with it) and ``exhaustive``.
+    """The pass-planning flags of the shard's links as ``main`` records them in
+    ``<out>/run-options.json`` (``all_engines``, ``pairs``, ``exhaustive`` and the other keys of
+    ``requested_options``); a shard without the file reads as ``LEGACY_RUN_OPTIONS``.
     """
     path = Path(out) / RUN_OPTIONS_NAME
     return json.loads(path.read_text()) if path.exists() else dict(LEGACY_RUN_OPTIONS)
+
+
+def requested_options(args):
+    """What ``main`` writes to ``run-options.json`` for ``args``."""
+    return {
+        "schema": RUN_OPTIONS_SCHEMA,
+        "hipdnn_prefix": str(args.hipdnn_prefix),
+        "all_engines": args.all_engines,
+        "pairs": args.pairs,
+        "exhaustive": args.exhaustive,
+        "kernel_ids": args.kernel_ids,
+        "layout_mode": args.layout_mode,
+        "fwd_no_stats": args.fwd_no_stats,
+        "suite": args.suite,
+        "release": args.release,
+        "shard": args.shard,
+        "packed_gpu": args.packed_gpu,
+    }
+
+
+def option_differences(recorded, requested):
+    """``"<key>: recorded <v>, requested <v>"`` per compared key of ``recorded`` whose value
+    differs in ``requested``; keys the record lacks (a legacy shard, an older file) are not compared.
+    """
+    return [
+        f"{key}: recorded {recorded[key]!r}, requested {requested[key]!r}"
+        for key in requested
+        if key in recorded
+        and key not in UNCHECKED_OPTIONS
+        and recorded[key] != requested[key]
+    ]
 
 
 def forward_failed(out):
     """Node ids of backward cases whose forward failed or crashed in pass 1, a pinned or a pair pass."""
     out = Path(out)
     dirs = [out] + [
-        d for d, meta in reconcile.pass_dirs(out) if meta["kind"] in ("sweep", "pair")
+        d
+        for d, meta in reconcile.pass_dirs(out)
+        if meta["kind"] in (contract.PASS_SWEEP, contract.PASS_PAIR)
     ]
     failed = {
         row["nodeid"]
@@ -626,105 +762,29 @@ class Runner:
                 selection, capture_dir, slug, pins, listing, len(chosen), capture=True
             )
 
-    def extra_pass(self, rel, kind, direction, pins, nodeids, note, root=None):
-        """A pass under ``<root>/<rel>`` (``all-engines`` unless ``root``): its metadata and full
-        listing, then its missing cases."""
-        pass_dir = self.out / (root or reconcile.ENGINES_DIR) / rel
+    def run_planned(self, p):
+        """One ``PlannedPass``: its metadata and full listing, then its missing cases; a
+        not-enumerable pass runs no pytest and gets a message row per case."""
+        pass_dir = self.out / p.root / p.rel
         pass_dir.mkdir(parents=True, exist_ok=True)
-        meta = {"kind": kind, "direction": direction}
-        for d, name in ENGINE_ENV.items():
-            meta[f"pin_{d}"] = pins.get(name, "")
-            meta[f"{d}_candidate"] = pins.get(contract.CANDIDATE_ENV[d], "")
-        (pass_dir / reconcile.PASS_META_NAME).write_text(json.dumps(meta) + "\n")
-        listing_file(pass_dir / reconcile.NODEIDS_NAME, nodeids)
-        slug = reconcile.pass_slug(self.out, pass_dir)
-        self.run_pass(pass_dir, slug, pins, nodeids, f"all-engines {note}")
-
-    def sweeps(self, work):
-        for (direction, engine), nodeids in sorted(work.items()):
-            self.extra_pass(
-                Path(direction) / engine_slug(engine),
-                "sweep",
-                direction,
-                {ENGINE_ENV[direction]: engine},
-                nodeids,
-                f"{direction} {engine}",
-            )
-
-    def pairs(self, work):
-        for (fwd, bwd), nodeids in sorted(work.items()):
-            self.extra_pass(
-                pair_rel(fwd, bwd),
-                "pair",
-                "bwd",
-                {ENGINE_ENV["fwd"]: fwd, ENGINE_ENV["bwd"]: bwd},
-                nodeids,
-                f"pair {fwd} x {bwd}",
-            )
-
-    def not_enumerable(self, p):
-        """A ``not-enumerable`` pass under ``cand/``: its metadata and the message rows."""
-        pass_dir = self.out / contract.CANDIDATES_DIR / p.rel
-        pass_dir.mkdir(parents=True, exist_ok=True)
-        meta = {"kind": "candidate", "direction": p.direction}
-        for d, name in ENGINE_ENV.items():
+        meta = {"kind": p.kind, "direction": p.direction}
+        for d, name in contract.ENGINE_ENV.items():
             meta[f"pin_{d}"] = p.pins.get(name, "")
-            meta[f"{d}_candidate"] = ""
+            meta[f"{d}_candidate"] = p.pins.get(contract.CANDIDATE_ENV[d], "")
         (pass_dir / reconcile.PASS_META_NAME).write_text(json.dumps(meta) + "\n")
         listing_file(pass_dir / reconcile.NODEIDS_NAME, list(p.cases))
-        _not_enumerable_rows(pass_dir, p.cases)
-        print(f"{p.note}: {len(p.cases)} not enumerable", flush=True)
-
-    def exhaustive(self):
-        """Candidate passes from pass 1's counts; with ``--all-engines --pairs`` the pair passes too."""
-        rows = reconcile.read_rows(self.out / reconcile.CSV_NAME)
-        for p in candidate_passes(rows, self.args.all_engines and self.args.pairs):
-            if p.kind == contract.NOT_ENUMERABLE:
-                self.not_enumerable(p)
-            else:
-                self.extra_pass(
-                    p.rel,
-                    p.kind,
-                    p.direction,
-                    p.pins,
-                    p.cases,
-                    p.note,
-                    root=contract.CANDIDATES_DIR,
-                )
-
-    def all_engines(self):
-        """Pinned sweeps, pair passes (``--pairs``), then the reference-forward passes for failed forwards."""
-        rows = reconcile.read_rows(self.out / reconcile.CSV_NAME)
-        self.sweeps(engine_work(rows))
-        if self.args.pairs:
-            self.pairs(pair_work(rows))
-        failed = forward_failed(self.out)
-        if not failed:
+        if p.not_enumerable:
+            _not_enumerable_rows(pass_dir, p.cases)
+            print(f"{p.note}: {len(p.cases)} not enumerable", flush=True)
             return
-        reference = {ENGINE_ENV["fwd"]: contract.REFERENCE_PIN}
-        self.extra_pass(
-            Path("refwd") / "discovery",
-            "discovery",
-            "bwd",
-            reference,
-            failed,
-            "refwd discovery",
-        )
-        discovery_dir = self.out / reconcile.ENGINES_DIR / "refwd" / "discovery"
-        discovery = reconcile.read_rows(discovery_dir / reconcile.CSV_NAME)
-        for (_, engine), nodeids in sorted(engine_work(discovery).items()):
-            self.extra_pass(
-                Path("refwd") / engine_slug(engine),
-                "refwd",
-                "bwd",
-                {**reference, ENGINE_ENV["bwd"]: engine},
-                nodeids,
-                f"refwd bwd {engine}",
-            )
-        if self.args.pairs:
-            self.pairs(
-                pair_work(rows, {r["nodeid"]: r["bwd_engines"] for r in discovery})
-            )
+        slug = reconcile.pass_slug(self.out, pass_dir)
+        self.run_pass(pass_dir, slug, p.pins, p.cases, f"all-engines {p.note}")
+
+    def run_planned_passes(self, options):
+        """Every pass beyond pass 1 that ``options`` call for (see ``planned_passes``)."""
+        rows = reconcile.read_rows(self.out / reconcile.CSV_NAME)
+        for p in planned_passes(self.out, rows, options):
+            self.run_planned(p)
 
 
 def _not_enumerable_rows(pass_dir, messages):
@@ -760,10 +820,17 @@ def main(argv=None):
             "no hipDNN prefix: activate the setup_env.py venv (it sets ROCM_PATH) or pass "
             "--hipdnn-prefix; every run checks that this prefix's libhipdnn_backend is loaded"
         )
+    if args.exhaustive:
+        bench = Path(args.hipdnn_prefix) / contract.BENCH_RELATIVE
+        if not (bench.is_file() and os.access(bench, os.X_OK)):
+            raise SystemExit(
+                f"--exhaustive needs {bench} to be an executable file: it lists the candidates "
+                "of each engine"
+            )
     if args.fwd_no_stats and (args.suite != "forward" or args.packed_gpu):
         raise SystemExit(
             f"--fwd-no-stats needs --suite forward and no --packed-gpu: the backward tests "
-            f"consume the forward's Stats, so only {FWD_NO_STATS_TESTS} is valid"
+            f"consume the forward's Stats, so only {contract.FORWARD_TESTS} is valid"
         )
     gpus, arch = (0, None)
     if args.workers is None or not (args.out or (args.arch and args.run)):
@@ -778,22 +845,29 @@ def main(argv=None):
         raise SystemExit(
             f"{results} already has rows; use a fresh --out per run and shard, or --resume"
         )
-    (out / RUN_OPTIONS_NAME).write_text(
-        json.dumps(
-            {
-                "all_engines": args.all_engines,
-                "pairs": args.all_engines and args.pairs,
-                "exhaustive": args.exhaustive,
-            }
-        )
-        + "\n"
-    )
+    options = requested_options(args)
+    options_path = out / RUN_OPTIONS_NAME
+    if args.resume and (
+        options_path.exists() or results.exists() and results.stat().st_size
+    ):
+        differing = option_differences(run_options(out), options)
+        if differing:
+            print(
+                f"--resume refused: {out} was started with other options "
+                f"({options_path if options_path.exists() else 'no ' + RUN_OPTIONS_NAME}):\n  "
+                + "\n  ".join(differing)
+                + "\nresume with the options of the first link, or use a fresh --out",
+                file=sys.stderr,
+            )
+            return 2
+    if not (args.resume and options_path.exists()):
+        options_path.write_text(json.dumps(options) + "\n")
     env = layout.clean_env(release=args.release)
-    env.pop(FWD_NO_STATS_ENV, None)
-    env[layout.LAYOUT_MODE_ENV] = args.layout_mode
+    env.pop(contract.FWD_NO_STATS_ENV, None)
+    env[contract.LAYOUT_MODE_ENV] = args.layout_mode
     print(f"layout mode: {args.layout_mode}", flush=True)
     if args.fwd_no_stats:
-        env[FWD_NO_STATS_ENV] = "1"
+        env[contract.FWD_NO_STATS_ENV] = "1"
         print("forward mode: no Stats", flush=True)
     env[contract.PREFIX_ENV] = str(args.hipdnn_prefix)
     env.pop(contract.EXHAUSTIVE_ENV, None)
@@ -831,12 +905,12 @@ def main(argv=None):
             {
                 i.split("::")[0]
                 for i in ids
-                if Path(i.split("::")[0]).name != FWD_NO_STATS_TESTS
+                if Path(i.split("::")[0]).name != contract.FORWARD_TESTS
             }
         )
         if args.fwd_no_stats and foreign:
             print(
-                f"--fwd-no-stats is only valid for {FWD_NO_STATS_TESTS}; pass '{label}' "
+                f"--fwd-no-stats is only valid for {contract.FORWARD_TESTS}; pass '{label}' "
                 f"also collected: {', '.join(foreign)}"
             )
             return 2
@@ -864,10 +938,7 @@ def main(argv=None):
                 shard=True,
             )
     runner.capture_crashes(out, reconcile.MAIN_PASS, None)
-    if args.all_engines:
-        runner.all_engines()
-    if args.exhaustive:
-        runner.exhaustive()
+    runner.run_planned_passes(options)
     return runner.status
 
 

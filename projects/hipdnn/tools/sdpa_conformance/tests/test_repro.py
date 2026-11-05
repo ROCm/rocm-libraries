@@ -22,7 +22,7 @@ GRAPH = {"fwd": '{"direction": "fwd"}', "bwd": '{"direction": "bwd"}'}
 ENGINE = "hipkernel:flydsl_sdpa_cdna"
 
 
-def record(prob, kernel="", ranked=("ENG_A", ENGINE), engine=ENGINE):
+def record(prob, kernel="", ranked=("ENG_A", ENGINE), engine=ENGINE, candidate=None):
     return _runtime._Call(
         prob.direction,
         engine,
@@ -30,6 +30,7 @@ def record(prob, kernel="", ranked=("ENG_A", ENGINE), engine=ENGINE):
         ranked,
         GRAPH[prob.direction],
         _repro.problem_meta(prob),
+        candidate,
         prob.tensors,
     )
 
@@ -149,6 +150,11 @@ FAKE_FRONTEND = textwrap.dedent(
         FALLBACK = "fallback"
 
 
+    class KnobSetting:
+        def __init__(self, name, value):
+            self.name, self.value = name, value
+
+
     class Handle:
         def __init__(self, stream=0):
             pass
@@ -170,9 +176,12 @@ FAKE_FRONTEND = textwrap.dedent(
         def get_engine_configs(self, modes, handle):
             return [_Config(7, os.environ["FAKE_ENGINE"])]
 
-        def create_execution_plan_ext(self, engine_id):
+        def create_execution_plan_ext(self, engine_id, knob_settings=None):
             with open(os.environ["FAKE_LOG"], "a") as log:
                 log.write(f"{self.direction} {engine_id}\\n")
+            with open(os.environ["FAKE_KNOBS"], "a") as log:
+                knobs = None if knob_settings is None else [[k.name, k.value] for k in knob_settings]
+                log.write(json.dumps([self.direction, knobs]) + "\\n")
             return _Ok()
 
         def check_support(self):
@@ -219,6 +228,7 @@ def fake_frontend(tmp_path, monkeypatch):
     monkeypatch.setenv("PYTHONPATH", str(fakes))
     monkeypatch.setenv("FAKE_ENGINE", ENGINE)
     monkeypatch.setenv("FAKE_LOG", str(tmp_path / "pins.log"))
+    monkeypatch.setenv("FAKE_KNOBS", str(tmp_path / "knobs.log"))
     monkeypatch.delenv("FAKE_CRASH", raising=False)
     return tmp_path
 
@@ -273,11 +283,12 @@ def test_replay_pins_the_engine_and_reports_the_error_against_saved_and_referenc
     results = repro_of_attention(fake_frontend / "repro", {"fwd": 0.25, "bwd": 0.5})
     torch.save(results, fake_frontend / "results.pt")
     monkeypatch.setenv("FAKE_RESULTS", str(fake_frontend / "results.pt"))
-    assert (
-        sys.modules.get("hipdnn_frontend") is None
-    )  # the child, not this process, imports it
+    # A session that already imported the real frontend (the graph tests) must not matter: only
+    # the child process imports it here.
+    monkeypatch.delitem(sys.modules, "hipdnn_frontend", raising=False)
     status = replay.main([str(fake_frontend / "repro"), "--device", "cpu"])
     shown = capsys.readouterr().out
+    assert "hipdnn_frontend" not in sys.modules
     assert status == 0, shown
     found = errors(shown)
     assert found[("o", "saved hipDNN")] == pytest.approx(
@@ -324,6 +335,67 @@ def test_a_capture_directory_replays_without_a_saved_output(
     shown = capsys.readouterr().out
     assert "o: no saved hipDNN output" in shown
     assert errors(shown)[("o", "reference")] == pytest.approx(0.125, abs=1e-4)
+
+
+def test_replay_rebuilds_the_pinned_candidate_not_the_engine_default(
+    fake_frontend, monkeypatch, capsys, replay
+):
+    q, k, v, o, stats, *_ = attention_case()
+    prob = _problem.forward_problem(q, k, v, o, stats, 0.5, None, None, None, None)
+    candidate = {"index": 1, "id": "k-b", "knobs": {"block": 128, "mode": "fast"}}
+    directory = fake_frontend / "repro"
+    _repro.save_repro(directory, {"fwd": record(prob, candidate=candidate)})
+    meta = json.loads((directory / "meta.json").read_text())
+    assert meta["calls"]["fwd"]["candidate"] == candidate
+    torch.save(
+        {"fwd": {prob.uids()["o"]: o, prob.uids()["stats"]: stats}},
+        fake_frontend / "results.pt",
+    )
+    monkeypatch.setenv("FAKE_RESULTS", str(fake_frontend / "results.pt"))
+    assert replay.main([str(directory), "--device", "cpu"]) == 0
+    knobs = [
+        json.loads(line)
+        for line in (fake_frontend / "knobs.log").read_text().splitlines()
+    ]
+    assert knobs == [["fwd", [["block", 128], ["mode", "fast"]]]]
+
+
+def test_a_repro_without_a_candidate_builds_the_engine_default(
+    fake_frontend, monkeypatch, replay
+):
+    repro_of_attention(fake_frontend / "repro", {"fwd": 0, "bwd": 0})
+    monkeypatch.setenv("FAKE_CRASH", "1")
+    replay.main([str(fake_frontend / "repro"), "--device", "cpu"])
+    knobs = [
+        json.loads(line)
+        for line in (fake_frontend / "knobs.log").read_text().splitlines()
+    ]
+    assert knobs == [["fwd", None]]
+
+
+def test_a_capture_records_the_candidate_index_before_it_is_resolved(
+    tmp_path, monkeypatch
+):
+    q, k, v, o, stats, *_ = attention_case()
+    prob = _problem.forward_problem(q, k, v, o, stats, 0.5, None, None, None, None)
+    monkeypatch.setenv(contract.REPRO_CAPTURE_ENV, str(tmp_path))
+    monkeypatch.setenv(contract.PASS_SLUG_ENV, "p")
+    _repro.capture(prob, GRAPH["fwd"], ENGINE, {"index": 2})
+    (case,) = tmp_path.iterdir()
+    meta = json.loads((case / "meta.json").read_text())
+    assert meta["calls"]["fwd"]["candidate"] == {"index": 2}
+    assert meta["schema"] == 1
+
+
+def test_a_record_without_a_graph_writes_no_graph_file(tmp_path):
+    prob = varlen_forward("padded")
+    bare = record(prob)
+    bare = _runtime._Call(
+        bare.direction, bare.engine, bare.kernel, bare.ranked, "", bare.problem_meta,
+        None, prob.tensors,
+    )  # fmt: skip
+    _repro.save_repro(tmp_path, {"fwd": bare})
+    assert not (tmp_path / "fwd.graph.json").exists()
 
 
 @pytest.mark.gpu

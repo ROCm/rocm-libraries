@@ -69,11 +69,11 @@ def _record(direction, kind, detail):
 
 
 def _fwd_no_stats():
-    return bool(os.environ.get("HIPDNN_SDPA_CONFORMANCE_FWD_NO_STATS"))
+    return bool(os.environ.get(contract.FWD_NO_STATS_ENV))
 
 
 def _engine(direction):
-    return os.environ.get(f"HIPDNN_{direction.upper()}_ENGINE") or None
+    return os.environ.get(contract.ENGINE_ENV[direction]) or None
 
 
 # --------------------------------------------------------------------------- mapping

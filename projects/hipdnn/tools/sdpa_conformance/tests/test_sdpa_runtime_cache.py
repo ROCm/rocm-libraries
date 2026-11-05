@@ -140,9 +140,12 @@ def test_pinned_plan_declines_when_another_engine_serves(fake_graph):
 
 
 def test_pinned_plan_that_is_honored_builds(fake_graph):
-    fake_graph(None)  # serves what was pinned
-    plan = _runtime._build_plan(_Prob(torch.empty(1), "k"), "ENG_B", object())
+    graph = fake_graph(None)  # serves what was pinned
+    # ENG_A is not first in the fake's config list: building the first applicable engine
+    # instead of the pinned one would pin id 2.
+    plan = _runtime._build_plan(_Prob(torch.empty(1), "k"), "ENG_A", object())
     assert (plan.engine, plan.ranked) == ("plan", ())
+    assert graph.pinned == 1
 
 
 # ----------------------------------------------------------------- run(): marker, hooks, LRU
@@ -153,7 +156,7 @@ SELECTED_LINE = f"ingestor: engine 'flydsl_sdpa_cdna' selected kernel {KERNEL} a
 
 
 def nodeid():
-    return os.environ["PYTEST_CURRENT_TEST"].rsplit(" (", 1)[0]
+    return contract.current_nodeid()
 
 
 def fwd_problem(scale=0.5, o=None):
@@ -217,7 +220,7 @@ class _RunGraph(_FakeGraph):
     def execute(self, handle, variant_pack, workspace):
         self.watch("execute")
         self.executed += 1
-        return _Ok()
+        return _Bad() if self.fail_at == "execute" else _Ok()
 
 
 class _Bad:
@@ -638,3 +641,139 @@ def test_calls_count_no_candidates_unless_exhaustive_is_set(rt, monkeypatch):
     monkeypatch.setattr(_candidates, "_run", fake)
     _runtime.run(fwd_problem(), None)
     assert _runtime.last_call("fwd").candidates == {} and fake.calls == []
+
+
+def test_a_pinned_candidate_is_recorded_on_the_call_and_in_its_repro(
+    rt, monkeypatch, tmp_path
+):
+    pin_candidate(monkeypatch, "fwd", "ENG_A", 1, three_candidates())
+    _runtime.run(fwd_problem(), "ENG_A")
+    call = _runtime.last_call("fwd")
+    candidate = {"index": 1, "id": KERNEL, "knobs": {"block": 128}}
+    assert call.candidate == candidate
+    hipdnn_sdpa.save_repro(tmp_path, {"fwd": call})
+    meta = json.loads((tmp_path / "meta.json").read_text())
+    assert meta["calls"]["fwd"]["candidate"] == candidate
+    assert meta["schema"] == 1
+
+
+def test_an_unpinned_call_records_no_candidate(rt):
+    _runtime.run(fwd_problem(), None)
+    assert _runtime.last_call("fwd").candidate is None
+
+
+def test_a_capture_names_the_pinned_candidate_index(rt, capture_root, monkeypatch):
+    pin_candidate(monkeypatch, "fwd", "ENG_A", 2, three_candidates())
+    with pytest.raises(EngineDeclined):  # entry 2 is not what the fake builds
+        _runtime.run(fwd_problem(), "ENG_A")
+    meta = json.loads((capture_root / "meta.json").read_text())
+    assert meta["calls"]["fwd"]["candidate"] == {"index": 2}
+
+
+# ------------------------------------------------- failures other than a decline carry the call
+
+
+def failing_call(error):
+    return getattr(error.value, contract.CALL_ERROR_ATTR)
+
+
+def test_an_execute_failure_carries_the_failing_call(rt):
+    rt.fail_at = "execute"
+    with pytest.raises(RuntimeError, match="execute failed: refused") as error:
+        _runtime.run(fwd_problem(), None)
+    call = failing_call(error)
+    assert isinstance(call, contract.CallRecord)
+    assert (call.direction, call.engine, call.kernel, call.ranked) == (
+        "fwd",
+        ENGINE,
+        KERNEL,
+        ("ENG_A", "ENG_B"),
+    )
+    assert call.graph_json == '{"graph": "fake"}'
+    assert {"q", "k", "v"} <= set(call.tensors)
+    assert _runtime.last_call("fwd") is None
+
+
+def test_an_error_during_the_build_carries_the_call_with_the_pinned_candidate(
+    rt, monkeypatch
+):
+    pin_candidate(monkeypatch, "fwd", "ENG_A", 1, three_candidates())
+
+    def boom(point):
+        if point == "check_support":
+            raise RuntimeError("backend exploded")
+
+    rt.hooks.append(boom)
+    with pytest.raises(RuntimeError, match="backend exploded") as error:
+        _runtime.run(fwd_problem(), "ENG_A")
+    call = failing_call(error)
+    assert (call.direction, call.engine, call.graph_json) == (
+        "fwd",
+        "ENG_A",
+        '{"graph": "fake"}',
+    )
+    assert call.candidate == {"index": 1, "id": KERNEL, "knobs": {"block": 128}}
+
+
+def test_an_error_before_the_graph_exists_carries_none(rt, monkeypatch):
+    def broken(prob):
+        raise RuntimeError("bindings blew up")
+
+    monkeypatch.setattr(_runtime._graph, "build", broken)
+    with pytest.raises(RuntimeError) as error:
+        _runtime.run(fwd_problem(), None)
+    assert failing_call(error) is None
+
+
+def test_a_decline_carries_no_call(rt):
+    rt.fail_at = "check_support"
+    with pytest.raises(EngineDeclined) as declined:
+        _runtime.run(fwd_problem(), None)
+    assert not hasattr(declined.value, contract.CALL_ERROR_ATTR)
+
+
+# ------------------------------------------------- errors surface instead of an empty value
+
+
+def test_a_ranking_failure_declines_with_its_message_not_an_empty_ranking(
+    rt, monkeypatch
+):
+    def fail(self, modes):
+        raise RuntimeError("no ranking today")
+
+    monkeypatch.setattr(_RunGraph, "get_ranked_engine_ids", fail)
+    with pytest.raises(EngineDeclined) as declined:
+        _runtime.run(fwd_problem(), None)
+    assert declined.value.reason == "rank_engines: no ranking today"
+
+
+def test_a_graph_that_cannot_serialize_declines_instead_of_recording_an_empty_graph(
+    rt, monkeypatch
+):
+    def fail(self):
+        raise RuntimeError("no json")
+
+    monkeypatch.setattr(_RunGraph, "to_json", fail)
+    with pytest.raises(EngineDeclined) as declined:
+        _runtime.run(fwd_problem(), None)
+    assert declined.value.reason == "to_json: no json"
+    assert rt.graphs[0].executed == 0
+
+
+def test_a_pinned_candidate_whose_build_logged_no_selection_declines_naming_the_log(
+    rt, monkeypatch
+):
+    pin_candidate(monkeypatch, "fwd", "ENG_A", 1, three_candidates())
+
+    class Silent(_RunGraph):
+        def build_plans(self):
+            return _Ok()  # the kernel log is not installed: no selection line
+
+    monkeypatch.setattr(
+        _runtime._graph, "build", lambda prob: (Silent(lambda p: None), prob.uids())
+    )
+    with pytest.raises(EngineDeclined) as declined:
+        _runtime.run(fwd_problem(), "ENG_A")
+    reason = declined.value.reason
+    assert reason.startswith(contract.CANDIDATE_NOT_HONORED)
+    assert contract.KERNEL_LOG_ENV in reason and "kernel" in reason

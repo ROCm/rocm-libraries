@@ -61,10 +61,9 @@ _FORWARDED_KNOBS = (
     "FOR_RELEASE",
     "SMALL_VRAM",
     "AOTRITON_REF_DEVICE_OPTION",
-    "HIPDNN_FWD_ENGINE",
-    "HIPDNN_BWD_ENGINE",
+    *contract.ENGINE_ENV.values(),
     *contract.CANDIDATE_ENV.values(),
-    "HIPDNN_SDPA_CONFORMANCE_FWD_NO_STATS",
+    contract.FWD_NO_STATS_ENV,
 )
 _REASON_LIMIT = 400
 
@@ -79,10 +78,13 @@ def record(direction, kind, detail=""):
     """Append one hipDNN call outcome for the running case; thread-safe.
 
     ``direction`` is ``'fwd'`` or ``'bwd'``; ``kind`` is ``'hipdnn'`` (``detail`` the engine),
-    ``'ref'`` (the reference forward ran; ``detail`` the decline reason), ``'declined'`` or
-    ``'engines'`` (``detail`` the ``;``-joined ranked engine names of the preceding ``'hipdnn'``
-    call), ``'kernel'`` (the kernel id of that call) or ``'candidates'`` (the exhaustive pass-1
-    ``{engine: count | message}`` JSON of that call); the fold ignores the last three. A ``'ref'`` entry replaces the ``'declined'`` entry of the call it falls back from.
+    ``'error'`` (the call raised something other than a decline; ``detail`` the engine, '' when
+    it failed before its graph was built), ``'ref'`` (the reference forward ran; ``detail`` the
+    decline reason), ``'declined'`` or ``'engines'`` (``detail`` the ``;``-joined ranked engine
+    names of the preceding ``'hipdnn'``/``'error'`` call), ``'kernel'`` (the kernel id of that
+    call) or ``'candidates'`` (the exhaustive pass-1 ``{engine: count | message}`` JSON of that
+    call); the fold ignores the last three. A ``'ref'`` entry replaces the ``'declined'`` entry
+    of the call it falls back from.
     """
     with _LOCK:
         entries = _RECORDS.setdefault(_CURRENT, [])
@@ -97,8 +99,8 @@ def record(direction, kind, detail=""):
 def _fold(entries):
     """Per direction: ``None`` (never called) or ``(kind, detail)``.
 
-    A direction is hipDNN only if every call ran hipDNN; ``ref`` if any call ran the reference;
-    ``declined`` if any call declined (declined wins).
+    A direction is hipDNN only if every call ran hipDNN; ``error`` if any call raised (wins);
+    ``declined`` if any call declined, else ``ref`` if any call ran the reference.
     """
     folded = {}
     for direction in ("fwd", "bwd"):
@@ -110,7 +112,7 @@ def _fold(entries):
         if not calls:
             folded[direction] = None
             continue
-        for kind in ("declined", "ref"):
+        for kind in ("error", "declined", "ref"):
             hit = next((c for c in calls if c[0] == kind), None)
             if hit:
                 folded[direction] = hit
@@ -121,9 +123,9 @@ def _fold(entries):
 
 
 def _engine_list(entries, folded, direction):
-    """``;``-joined ranked engines of ``direction``'s first call that has a list; '' unless hipDNN served it."""
+    """``;``-joined ranked engines of ``direction``'s first call that has a list; '' unless hipDNN ran it."""
     state = folded[direction]
-    if state is None or state[0] != "hipdnn":
+    if state is None or state[0] not in ("hipdnn", "error"):
         return ""
     return next(
         (e for d, k, e in entries if (d, k) == (direction, "engines") and e), ""
@@ -157,11 +159,19 @@ def _candidate_text(entries, direction):
 _FORWARD_COMPARISON = re.compile(r"\bForward pass\b")
 
 
-def _fail_side(nodeid, excinfo, folded):
-    """``fwd`` when the failing assertion is the vendored forward comparison, the case is a forward
-    case, or the backward never ran; else ``bwd``."""
-    if reconcile.direction_of(nodeid) == "fwd" or folded["bwd"] is None:
+def _fail_side(nodeid, excinfo, folded, marker=None):
+    """The direction a failure is charged to: the direction whose call raised (kind ``error``);
+    for a backward case whose backward was never recorded, the in-flight marker's direction when
+    one was written for the case; else ``fwd`` when the failing assertion is the vendored forward
+    comparison, the case is a forward case, or the backward never ran; else ``bwd``."""
+    for direction in ("fwd", "bwd"):
+        if folded[direction] and folded[direction][0] == "error":
+            return direction
+    if reconcile.direction_of(nodeid) == "fwd":
         return "fwd"
+    if folded["bwd"] is None:
+        direction = (marker or {}).get("direction")
+        return direction if direction in ("fwd", "bwd") else "fwd"
     text = excinfo.exconly() if excinfo else ""
     return "fwd" if _FORWARD_COMPARISON.search(text) else "bwd"
 
@@ -259,7 +269,7 @@ def _make_row(item, call, report):
     declined = []
     if fwd and fwd[0] == "declined":
         declined.append(f"fwd {fwd[1]}")
-    elif fwd and fwd[0] == "ref" and not (bwd and bwd[0] == "hipdnn"):
+    elif fwd and fwd[0] == "ref" and not (bwd and bwd[0] in ("hipdnn", "error")):
         declined.append(f"fwd {fwd[1]}")
     if bwd and bwd[0] == "declined":
         declined.append(f"bwd {bwd[1]}")
@@ -298,7 +308,7 @@ def _make_row(item, call, report):
         row["outcome"] = "pass" if report.passed else "fail"
         if fwd and fwd[0] == "ref":
             row["mode"] = "ref-fwd"
-        elif (fwd and fwd[0] == "hipdnn") or (bwd and bwd[0] == "hipdnn"):
+        elif any(s and s[0] in ("hipdnn", "error") for s in (fwd, bwd)):
             row["mode"] = "hipdnn"
         elif report.passed:
             row["outcome"] = (
@@ -316,12 +326,17 @@ def _make_row(item, call, report):
 
 
 def _describe_failure(item, call, row, folded):
-    """Fill ``fail_side``, ``stage`` and ``repro`` of a ``fail`` row."""
-    row["fail_side"] = _fail_side(item.nodeid, call.excinfo, folded)
+    """Fill ``fail_side``, ``stage`` and ``repro`` of a ``fail`` row. A repro that cannot be saved
+    leaves ``repro`` empty and the error in ``reason``; it never fails the report."""
     path = _inflight_marker_path(os.environ.get("PYTEST_XDIST_WORKER"))
     marker = _read_marker(path, item.nodeid) if path else None
+    row["fail_side"] = _fail_side(item.nodeid, call.excinfo, folded, marker)
     row["stage"] = marker["stage"] if marker else ""
-    row["repro"] = _save_repro(item, row)
+    try:
+        row["repro"] = _save_repro(item, row)
+    except Exception as exc:
+        row["repro"] = ""
+        row["reason"] += f"; repro not saved: {_one_line(repr(exc))}"
 
 
 # ---------------------------------------------------------------------------- hooks
@@ -394,8 +409,8 @@ def _mapped_backends(maps_path="/proc/self/maps"):
 def backend_problem(mapped, prefix):
     """Why the loaded hipDNN backend is not ``prefix``'s, or None when it is.
 
-    ``mapped`` lists the mapped ``libhipdnn_backend`` paths; ``prefix`` is where
-    dnn-benchmarking's ``setup_env.py`` installed hipDNN (``ROCM_PATH``).
+    ``mapped`` lists the mapped ``libhipdnn_backend`` paths; ``prefix`` is where hipDNN is
+    installed (``ROCM_PATH``).
     """
     if len(mapped) != 1:
         return f"expected one mapped libhipdnn_backend, found {len(mapped)}: {mapped}"
@@ -408,10 +423,11 @@ def backend_problem(mapped, prefix):
 def _bind_backend_first(prefix):
     """Load hipDNN before any test module imports torch, then verify which backend bound.
 
-    dnn-benchmarking's recipe (``docs/troubleshooting.md``, "Mixed ROCm torch and hipDNN
-    prefixes"): the ROCm devel wheel ships an older ``libhipdnn_backend.so`` beside the one
-    ``setup_env.py`` builds, ``$ROCM_PATH/lib`` comes first on ``LD_LIBRARY_PATH``, importing
-    ``hipdnn_frontend`` first gives it the first bind, and ``/proc/self/maps`` is the proof.
+    The ROCm devel wheel ships an older ``libhipdnn_backend.so`` beside the one hipDNN's own
+    install builds, ``$ROCM_PATH/lib`` comes first on ``LD_LIBRARY_PATH``, importing
+    ``hipdnn_frontend`` first gives it the first bind, and ``/proc/self/maps`` is the proof; see
+    README.md, "Mixed ROCm torch and hipDNN prefixes". The imported frontend must also carry
+    every binding ``hipdnn_sdpa`` calls (``hipdnn_sdpa.missing_bindings()``).
     Returns the mapped backend path; None when no prefix is given (CPU-only test runs).
     """
     if not prefix:
@@ -422,6 +438,14 @@ def _bind_backend_first(prefix):
         raise pytest.UsageError(
             f"--hipdnn-prefix given but hipdnn_frontend: {exc}"
         ) from None
+    import hipdnn_sdpa
+
+    missing = hipdnn_sdpa.missing_bindings()
+    if missing:
+        raise pytest.UsageError(
+            f"the hipdnn_frontend at --hipdnn-prefix lacks bindings hipdnn_sdpa calls: "
+            f"{', '.join(missing)}"
+        )
     mapped = _mapped_backends()
     problem = backend_problem(mapped, prefix)
     if problem:
@@ -484,6 +508,16 @@ def _save_repro(item, row):
     return f"{contract.REPRO_DIR}/{case}"
 
 
+def _record_call(direction, call):
+    """Record a call's ranked engines, kernel id and candidate counts (``call`` may be None)."""
+    record(direction, "engines", ";".join(call.ranked) if call else "")
+    if call and call.kernel:
+        record(direction, "kernel", call.kernel)
+    candidates = getattr(call, "candidates", None)
+    if candidates:
+        record(direction, "candidates", json.dumps(candidates))
+
+
 def _install_wrappers(fake):
     """Wrap ``hipdnn_sdpa.sdpa_fwd`` / ``sdpa_bwd`` so every call lands in the mode record.
 
@@ -504,14 +538,15 @@ def _install_wrappers(fake):
             except declined_type as declined:
                 record(direction, "declined", declined.reason)
                 raise
+            except Exception as exc:
+                call = getattr(exc, contract.CALL_ERROR_ATTR, None)
+                record(direction, "error", call.engine if call else "")
+                _record_call(direction, call)
+                _remember_call(direction, call, args, kwargs)
+                raise
             record(direction, "hipdnn", engine)
             call = hipdnn_sdpa.last_call(direction)
-            record(direction, "engines", ";".join(call.ranked) if call else "")
-            if call and call.kernel:
-                record(direction, "kernel", call.kernel)
-            candidates = getattr(call, "candidates", None)
-            if candidates:
-                record(direction, "candidates", json.dumps(candidates))
+            _record_call(direction, call)
             _remember_call(direction, call, args, kwargs)
             return engine
 
@@ -538,10 +573,10 @@ _FLIP_ARG = 9  # position of `storage_flip` in `_do_test_op_bwd`'s `args`
 
 def layout_mode():
     """The layout mode the environment names; ``pytorch`` when unset."""
-    mode = os.environ.get(layout.LAYOUT_MODE_ENV) or layout.DEFAULT_LAYOUT_MODE
+    mode = os.environ.get(contract.LAYOUT_MODE_ENV) or layout.DEFAULT_LAYOUT_MODE
     if mode not in layout.LAYOUT_MODES:
         raise pytest.UsageError(
-            f"{layout.LAYOUT_MODE_ENV}={mode!r}: expected one of {', '.join(layout.LAYOUT_MODES)}"
+            f"{contract.LAYOUT_MODE_ENV}={mode!r}: expected one of {', '.join(layout.LAYOUT_MODES)}"
         )
     return mode
 
@@ -737,12 +772,16 @@ class _CsvController:
 
 
 def _install_kernel_log():
-    """Register ``hipdnn_sdpa``'s kernel-id log callback in a process that runs cases."""
+    """Register ``hipdnn_sdpa``'s kernel-id log callback in a process that runs cases; a backend
+    that cannot log kernel ids is a usage error, never silent empty kernel columns."""
     import sys
 
     module = sys.modules.get("hipdnn_sdpa")
-    if hasattr(module, "install_kernel_log"):
-        module.install_kernel_log()
+    if hasattr(module, "install_kernel_log") and not module.install_kernel_log():
+        raise pytest.UsageError(
+            f"{contract.KERNEL_LOG_ENV}=1 but the hipDNN backend lacks the user-log exports "
+            "the kernel-id log needs"
+        )
 
 
 def pytest_configure(config):

@@ -9,7 +9,8 @@ Three tiers:
   * **Graph tests** (``test_sdpa_graph.py``): need the built ``hipdnn_frontend``
     bindings (SDPA enabled, ragged-offset bindings) but no handle and no device;
     they skip cleanly when the bindings are absent.
-  * **GPU tests** (marked ``gpu``): execute on a device. CTest selects ``-m 'not gpu'``.
+  * **GPU tests** (marked ``gpu``): execute on a device. Run the others by hand with ``-m 'not gpu'``; no CTest
+    entry runs this directory.
 """
 
 import sys

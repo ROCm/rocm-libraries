@@ -10,6 +10,7 @@ import pytest
 import torch
 
 import aotriton_layout as layout
+import conformance_contract as contract
 import hipdnn_aotriton_plugin as plugin
 
 B, H, SQ, SK, D = 2, 3, 16, 24, 8
@@ -252,18 +253,18 @@ def test_aotriton_mode_passes_the_storage_flip_through_untouched(vendored, flip)
 
 
 def test_unknown_layout_mode_is_a_usage_error(monkeypatch):
-    monkeypatch.setenv(layout.LAYOUT_MODE_ENV, "bshd")
+    monkeypatch.setenv(contract.LAYOUT_MODE_ENV, "bshd")
     with pytest.raises(pytest.UsageError, match="bshd"):
         plugin.layout_mode()
 
 
 def test_layout_mode_defaults_to_pytorch(monkeypatch):
-    monkeypatch.delenv(layout.LAYOUT_MODE_ENV, raising=False)
+    monkeypatch.delenv(contract.LAYOUT_MODE_ENV, raising=False)
     assert plugin.layout_mode() == "pytorch"
 
 
 def test_the_mode_is_in_the_report_header(pytester, monkeypatch):
-    monkeypatch.setenv(layout.LAYOUT_MODE_ENV, "efficient")
+    monkeypatch.setenv(contract.LAYOUT_MODE_ENV, "efficient")
     pytester.makepyfile("def test_x():\n    pass\n")
     result = pytester.runpytest("-p", "hipdnn_aotriton_plugin")
     result.assert_outcomes(passed=1)
@@ -271,8 +272,8 @@ def test_the_mode_is_in_the_report_header(pytester, monkeypatch):
 
 
 def test_a_bad_mode_aborts_at_configure(pytester, monkeypatch):
-    monkeypatch.setenv(layout.LAYOUT_MODE_ENV, "nope")
+    monkeypatch.setenv(contract.LAYOUT_MODE_ENV, "nope")
     pytester.makepyfile("def test_x():\n    pass\n")
     result = pytester.runpytest("-p", "hipdnn_aotriton_plugin")
     assert result.ret == pytest.ExitCode.USAGE_ERROR
-    result.stderr.fnmatch_lines([f"*{layout.LAYOUT_MODE_ENV}*"])
+    result.stderr.fnmatch_lines([f"*{contract.LAYOUT_MODE_ENV}*"])

@@ -27,7 +27,9 @@ unpinned build of a problem count every ranked engine's candidates into ``last_c
 
 There is no native fallback: any ``build_operation_graph`` / engine selection /
 ``check_support`` / ``build_plans`` failure raises :class:`EngineDeclined` with
-hipDNN's message verbatim after a ``<stage>: `` prefix (``adapter:`` for pre-graph declines). An ``execute`` failure raises ``RuntimeError``.
+hipDNN's message verbatim after a ``<stage>: `` prefix (``adapter:`` for pre-graph declines). An ``execute`` failure raises ``RuntimeError``. Any exception other than
+:class:`EngineDeclined` leaves ``run`` with ``CALL_ERROR_ATTR`` set to the failing call's record
+(``None`` before the graph exists); a pinned candidate is part of the record (``CallRecord.candidate``).
 
 Bindings used: ``Handle(stream)`` ``handle_bindings.cpp:193``; ``Graph``
 ``build_operation_graph`` ``graph_bindings.cpp:173``, ``create_execution_plans`` ``:182``,
@@ -90,7 +92,7 @@ class _Plan:
         ranked,
         kernel="",
         graph_json="",
-        candidate="",
+        candidate=None,
     ):
         self.graph = graph
         self.uids = uids
@@ -100,9 +102,8 @@ class _Plan:
         self.ranked = ranked
         self.kernel = kernel  # ingestor kernel id the build logged; "" when none
         self.graph_json = graph_json
-        self.candidate = (
-            candidate  # kernel id the pinned candidate must build; "" when none
-        )
+        # the pinned candidate as {"index", "id", "knobs"}; None when none is pinned
+        self.candidate = candidate
         self.candidates = (
             {}
         )  # exhaustive pass 1: ranked engine -> candidate count | message
@@ -147,26 +148,27 @@ def last_call(direction: str):
     return getattr(_LAST, "calls", {}).get(direction)
 
 
-def _ranked_names(graph, modes, handle) -> tuple:
-    """Names of the applicable engines in heuristic rank order; empty when hipDNN cannot say."""
+def _ranked_names(direction, graph, modes, handle) -> tuple:
+    """Names of the applicable engines in heuristic rank order.
+
+    A ranking failure declines with hipDNN's message: an empty ranking would read as "no engine
+    applies" and hide the cause.
+    """
     try:
         names = {
             c.engine_id: c.engine_name for c in graph.get_engine_configs(modes, handle)
         }
         return tuple(names.get(i, str(i)) for i in graph.get_ranked_engine_ids(modes))
-    except RuntimeError:
-        return ()
+    except RuntimeError as exc:
+        raise _decline(direction, f"rank_engines: {exc}") from None
 
 
-def _nodeid() -> str:
-    return os.environ.get("PYTEST_CURRENT_TEST", "").rsplit(" (", 1)[0]
-
-
-def _graph_json(graph) -> str:
+def _graph_json(direction, graph) -> str:
+    """The graph's JSON; a graph that cannot serialize declines, so no record holds ``""``."""
     try:
         return graph.to_json()
-    except RuntimeError:
-        return ""
+    except RuntimeError as exc:
+        raise _decline(direction, f"to_json: {exc}") from None
 
 
 def _enter_case(nodeid: str) -> None:
@@ -189,8 +191,8 @@ def _write_marker(stage, direction, engine, kernel, graph_json) -> None:
         "direction": direction,
         "stage": stage,
         "engine": engine,
-        "pin_fwd": os.environ.get("HIPDNN_FWD_ENGINE", ""),
-        "pin_bwd": os.environ.get("HIPDNN_BWD_ENGINE", ""),
+        "pin_fwd": os.environ.get(contract.ENGINE_ENV["fwd"], ""),
+        "pin_bwd": os.environ.get(contract.ENGINE_ENV["bwd"], ""),
         "fwd_engines": list(_CASE["fwd"]),
         "bwd_engines": list(_CASE["bwd"]),
         "kernel": kernel,
@@ -218,13 +220,20 @@ def _pinned_candidate(direction: str) -> int | None:
     return int(raw) if raw else None
 
 
+def _candidate_pin(direction: str) -> dict | None:
+    """``{"index": k}`` for a pinned candidate, else ``None``."""
+    index = _pinned_candidate(direction)
+    return None if index is None else {"index": index}
+
+
 def _same_kernel(requested: str, built: str) -> bool:
     """Whether the kernel the backend logged is the candidate's; a slotted engine's
     ``prep=<id>|dkdv=<id>|dq=<id>`` compares by slot, not by order."""
     return sorted(requested.split("|")) == sorted(built.split("|"))
 
 
-def _resolve_candidate(direction, engine, index, graph_json):
+def _resolve_candidate(direction, engine, index, graph_json) -> dict:
+    """``{"index", "id", "knobs"}`` of the engine's ``index``-th candidate."""
     found = (
         _candidates.list(graph_json, engine)
         if graph_json
@@ -237,7 +246,8 @@ def _resolve_candidate(direction, engine, index, graph_json):
             direction,
             f"candidate_out_of_range: candidate {index} requested, {engine} lists {len(found)}",
         )
-    return found[index]
+    chosen = found[index]
+    return {"index": index, "id": chosen.id, "knobs": dict(chosen.knobs)}
 
 
 def _count_candidates(ranked, graph_json) -> dict:
@@ -259,14 +269,15 @@ def _select(
     engine: str | None,
     handle,
     graph_json="",
-    candidate: int | None = None,
+    candidate: dict | None = None,
     picked: list | None = None,
 ) -> tuple:
     """Pick, check and build a plan on a graph hipDNN has already finalized.
 
-    ``candidate`` builds the engine's ``candidate``-th kernel (``hipdnn_bench enumerate`` order);
-    the :class:`~._candidates.Candidate` is appended to ``picked``.
-    Returns ``(plan name, workspace size, ranked engine names)``.
+    ``candidate`` builds one kernel of the engine: ``{"index": k}`` resolves the ``k``-th entry of
+    ``hipdnn_bench enumerate`` (``HIPDNN_SDPA_PREFIX``), a dict that also holds ``"knobs"`` (a
+    saved candidate) is built as given. The resolved ``{"index", "id", "knobs"}`` is appended to
+    ``picked``. Returns ``(plan name, workspace size, ranked engine names)``.
     """
     hipdnn = _graph.frontend()
     modes = [hipdnn.HeuristicMode.FALLBACK]
@@ -275,9 +286,9 @@ def _select(
         if candidate is not None:
             raise _decline(
                 direction,
-                f"{contract.CANDIDATE_NOT_HONORED}: candidate {candidate} is pinned without an engine",
+                f"{contract.CANDIDATE_NOT_HONORED}: candidate {candidate['index']} is pinned without an engine",
             )
-        ranked = _ranked_names(graph, modes, handle)
+        ranked = _ranked_names(direction, graph, modes, handle)
         _note_ranked(direction, engine, ranked, graph_json)
         err = graph.create_execution_plans(modes)
         if err.is_bad():
@@ -298,10 +309,18 @@ def _select(
         if candidate is None:
             err = graph.create_execution_plan_ext(by_name[engine])
         else:
-            chosen = _resolve_candidate(direction, engine, candidate, graph_json)
-            picked.append(chosen)
+            chosen = (
+                candidate
+                if "knobs" in candidate
+                else _resolve_candidate(
+                    direction, engine, candidate["index"], graph_json
+                )
+            )
+            if picked is not None:
+                picked.append(chosen)
             err = graph.create_execution_plan_ext(
-                by_name[engine], [hipdnn.KnobSetting(n, v) for n, v in chosen.knobs]
+                by_name[engine],
+                [hipdnn.KnobSetting(n, v) for n, v in chosen["knobs"].items()],
             )
         if err.is_bad():
             raise _decline(direction, f"create_execution_plan_ext: {err.get_message()}")
@@ -330,26 +349,61 @@ def _select(
     return graph.get_plan_name(handle), graph.get_workspace_size(), ranked
 
 
+def _call(prob: Problem, engine: str, graph_json: str, plan=None, candidate=None):
+    """The record of ``prob``'s call on ``plan`` (``None`` while it is still being built)."""
+    return _Call(
+        direction=prob.direction,
+        engine=plan.engine if plan is not None else engine,
+        kernel=plan.kernel if plan is not None else "",
+        ranked=plan.ranked if plan is not None else (),
+        graph_json=graph_json,
+        problem_meta=_repro.problem_meta(prob),
+        candidate=plan.candidate if plan is not None else candidate,
+        tensors=prob.tensors,
+        candidates=plan.candidates if plan is not None else {},
+    )
+
+
+def _tag(exc: BaseException, record) -> None:
+    """Attach the failing call (or ``None``) to ``exc`` for the plugin (``CALL_ERROR_ATTR``)."""
+    setattr(exc, contract.CALL_ERROR_ATTR, record)
+
+
 def _build_plan(prob: Problem, engine: str | None, handle) -> _Plan:
     direction = prob.direction
     graph, uids = _graph.build(prob)
-    graph_json = _graph_json(graph)
-    _repro.capture(prob, graph_json, engine)
-
-    err = graph.build_operation_graph(handle)
-    if err.is_bad():
-        raise _decline(direction, f"build_operation_graph: {err.get_message()}")
-
+    graph_json = ""
     picked = []
-    name, workspace_size, ranked = _select(
-        graph,
-        direction,
-        engine,
-        handle,
-        graph_json,
-        _pinned_candidate(direction),
-        picked,
-    )
+    try:
+        graph_json = _graph_json(direction, graph)
+        _repro.capture(prob, graph_json, engine, _candidate_pin(direction))
+
+        err = graph.build_operation_graph(handle)
+        if err.is_bad():
+            raise _decline(direction, f"build_operation_graph: {err.get_message()}")
+
+        name, workspace_size, ranked = _select(
+            graph,
+            direction,
+            engine,
+            handle,
+            graph_json,
+            _candidate_pin(direction),
+            picked,
+        )
+    except EngineDeclined:
+        raise
+    except Exception as exc:
+        _tag(
+            exc,
+            _call(
+                prob,
+                engine or "",
+                graph_json,
+                candidate=picked[0] if picked else _candidate_pin(direction),
+            ),
+        )
+        raise
     return _Plan(
         graph,
         uids,
@@ -357,7 +411,7 @@ def _build_plan(prob: Problem, engine: str | None, handle) -> _Plan:
         workspace_size,
         ranked,
         graph_json=graph_json,
-        candidate=picked[0].id if picked else "",
+        candidate=picked[0] if picked else None,
     )
 
 
@@ -381,13 +435,28 @@ def _maybe_crash(direction: str, engine: str) -> None:
 
 
 def run(prob: Problem, engine: str | None) -> str:
-    """Execute ``prob`` in place on the current stream; returns the engine name used."""
+    """Execute ``prob`` in place on the current stream; returns the engine name used.
+
+    An exception other than :class:`EngineDeclined` leaves with ``CALL_ERROR_ATTR`` set to the
+    failing call's record (``None`` when it failed before the graph was built).
+    """
+    try:
+        return _run(prob, engine)
+    except EngineDeclined:
+        raise
+    except Exception as exc:
+        if not hasattr(exc, contract.CALL_ERROR_ATTR):
+            _tag(exc, None)
+        raise
+
+
+def _run(prob: Problem, engine: str | None) -> str:
     device = next(iter(prob.tensors.values())).device
     direction = prob.direction
     with _LOCK:
         calls = _LAST.__dict__.setdefault("calls", {})
         calls.pop(direction, None)
-        _enter_case(_nodeid())
+        _enter_case(contract.current_nodeid())
         handle = _handle(device)
         key = (prob.key, engine, device.index, _pinned_candidate(direction))
         plan = _PLANS.get(key)
@@ -398,58 +467,72 @@ def run(prob: Problem, engine: str | None) -> str:
             "",
             plan.graph_json if isinstance(plan, _Plan) else "",
         )
-        if plan is None:
+        fresh = plan is None
+        if fresh:
             try:
                 with _kernel_log.capture() as built:
                     plan = _build_plan(prob, engine, handle)
                 plan.kernel = built.kernel(plan.engine)
-                if plan.candidate and not _same_kernel(plan.candidate, plan.kernel):
-                    raise _decline(
-                        direction,
-                        f"{contract.CANDIDATE_NOT_HONORED}: requested kernel {plan.candidate}, "
-                        f"built {plan.kernel or 'none'}",
-                    )
+                if plan.candidate is not None:
+                    if not built.selected():
+                        raise _decline(
+                            direction,
+                            f"{contract.CANDIDATE_NOT_HONORED}: the build logged no kernel selection; "
+                            f"set {contract.KERNEL_LOG_ENV}=1 so the backend's kernel log is read",
+                        )
+                    if not _same_kernel(plan.candidate["id"], plan.kernel):
+                        raise _decline(
+                            direction,
+                            f"{contract.CANDIDATE_NOT_HONORED}: requested kernel {plan.candidate['id']}, "
+                            f"built {plan.kernel or 'none'}",
+                        )
             except EngineDeclined as declined:
                 _cache_put(key, (declined.direction, declined.reason))
                 raise
-            if engine is None and os.environ.get(contract.EXHAUSTIVE_ENV):
-                plan.candidates = _count_candidates(plan.ranked, plan.graph_json)
-            _cache_put(key, plan)
         else:
             _PLANS[key] = _PLANS.pop(key)  # most recently used
             if isinstance(plan, tuple):
                 raise EngineDeclined(*plan)
-            if engine is None:
-                _CASE[direction] = plan.ranked
-            _repro.capture(prob, plan.graph_json, engine)
 
-        workspace = (
-            torch.empty(plan.workspace_size, dtype=torch.uint8, device=device)
-            if plan.workspace_size > 0
-            else None
-        )
-        variant_pack = {
-            plan.uids[role]: t.data_ptr() for role, t in prob.tensors.items()
-        }
-        _write_marker(
-            contract.STAGE_EXECUTE, direction, plan.engine, plan.kernel, plan.graph_json
-        )
-        _maybe_crash(direction, plan.engine)
-        err = plan.graph.execute(
-            handle, variant_pack, workspace.data_ptr() if workspace is not None else 0
-        )
-        if err.is_bad():
-            raise RuntimeError(
-                f"hipDNN {direction} execute failed: {err.get_message()}"
+        try:
+            if fresh:
+                if engine is None and os.environ.get(contract.EXHAUSTIVE_ENV):
+                    plan.candidates = _count_candidates(plan.ranked, plan.graph_json)
+                _cache_put(key, plan)
+            else:
+                if engine is None:
+                    _CASE[direction] = plan.ranked
+                _repro.capture(prob, plan.graph_json, engine, plan.candidate)
+
+            workspace = (
+                torch.empty(plan.workspace_size, dtype=torch.uint8, device=device)
+                if plan.workspace_size > 0
+                else None
             )
-        calls[direction] = _Call(
-            direction,
-            plan.engine,
-            plan.kernel,
-            plan.ranked,
-            plan.graph_json,
-            _repro.problem_meta(prob),
-            prob.tensors,
-            plan.candidates,
-        )
+            variant_pack = {
+                plan.uids[role]: t.data_ptr() for role, t in prob.tensors.items()
+            }
+            _write_marker(
+                contract.STAGE_EXECUTE,
+                direction,
+                plan.engine,
+                plan.kernel,
+                plan.graph_json,
+            )
+            _maybe_crash(direction, plan.engine)
+            err = plan.graph.execute(
+                handle,
+                variant_pack,
+                workspace.data_ptr() if workspace is not None else 0,
+            )
+            if err.is_bad():
+                raise RuntimeError(
+                    f"hipDNN {direction} execute failed: {err.get_message()}"
+                )
+        except EngineDeclined:
+            raise
+        except Exception as exc:
+            _tag(exc, _call(prob, engine or "", plan.graph_json, plan))
+            raise
+        calls[direction] = _call(prob, engine or "", plan.graph_json, plan)
         return plan.engine

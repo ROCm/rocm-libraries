@@ -5,7 +5,8 @@
 
 Layout (``conformance_contract`` names the files)::
 
-    meta.json        node id, pass, pins, directions, per-direction engine, kernel, scale, mask,
+    meta.json        schema, node id, pass, pins, directions, per-direction engine, kernel, pinned
+                     candidate (``{index, id, knobs}``; ``{index}`` alone in a capture), scale, mask,
                      dropout p, varlen maxima, role -> uid and slot layout, per-tensor layout
     fwd.graph.json   the forward graph (``Graph.to_json()``), when a forward is part of the repro
     bwd.graph.json   the backward graph
@@ -29,8 +30,8 @@ import os
 import conformance_contract as contract
 import torch
 
-_OUTPUT_ROLES = {"fwd": ("o", "stats"), "bwd": ("dq", "dk", "dv", "dbias")}
 _DIRECTIONS = ("fwd", "bwd")
+META_SCHEMA = 1
 
 # The capture state of the case being run in this process: records and tensors accumulate over
 # its forward and backward calls and the directory is rewritten from them.
@@ -63,10 +64,6 @@ def problem_meta(prob) -> dict:
     }
 
 
-def _nodeid() -> str:
-    return os.environ.get("PYTEST_CURRENT_TEST", "").rsplit(" (", 1)[0]
-
-
 def _atomic(path: str, write) -> None:
     tmp = f"{path}.tmp"
     write(tmp)
@@ -80,7 +77,7 @@ def _compact(tensor: torch.Tensor) -> torch.Tensor:
 
 def _write(directory: str, records: dict, tensors: dict, with_outputs: bool) -> None:
     directions = [d for d in _DIRECTIONS if d in records]
-    out_roles = _OUTPUT_ROLES[directions[-1]]
+    out_roles = contract.OUTPUT_ROLES[directions[-1]]
     os.makedirs(directory, exist_ok=True)
 
     def save(name, roles):
@@ -90,30 +87,34 @@ def _write(directory: str, records: dict, tensors: dict, with_outputs: bool) -> 
         )
 
     inputs = [r for r in tensors if r not in out_roles]
-    save("tensors.pt", inputs)
+    save(contract.REPRO_TENSORS, inputs)
     outputs = [r for r in tensors if r in out_roles]
     if with_outputs and outputs:
-        save("outputs.pt", outputs)
+        save(contract.REPRO_OUTPUTS, outputs)
 
     for direction in directions:
+        if not records[direction].graph_json:
+            continue  # an empty file would only fail the replay later, with a worse message
         _atomic(
-            os.path.join(directory, f"{direction}.graph.json"),
+            os.path.join(directory, contract.repro_graph_name(direction)),
             lambda tmp, d=direction: open(tmp, "w").write(records[d].graph_json),
         )
 
     meta = {
-        "nodeid": _nodeid(),
+        "schema": META_SCHEMA,
+        "nodeid": contract.current_nodeid(),
         "pass": os.environ.get(contract.PASS_SLUG_ENV, ""),
-        "pin_fwd": os.environ.get("HIPDNN_FWD_ENGINE", ""),
-        "pin_bwd": os.environ.get("HIPDNN_BWD_ENGINE", ""),
+        "pin_fwd": os.environ.get(contract.ENGINE_ENV["fwd"], ""),
+        "pin_bwd": os.environ.get(contract.ENGINE_ENV["bwd"], ""),
         "directions": directions,
-        "image": os.environ.get("HIPDNN_SDPA_IMAGE", ""),
-        "shas": os.environ.get("HIPDNN_SDPA_SHAS", ""),
+        "image": os.environ.get(contract.IMAGE_ENV, ""),
+        "shas": os.environ.get(contract.SHAS_ENV, ""),
         "calls": {
             d: {
                 "engine": records[d].engine,
                 "kernel": records[d].kernel,
                 "ranked": list(records[d].ranked),
+                "candidate": records[d].candidate,
                 **records[d].problem_meta,
             }
             for d in directions
@@ -128,7 +129,7 @@ def _write(directory: str, records: dict, tensors: dict, with_outputs: bool) -> 
         },
     }
     _atomic(
-        os.path.join(directory, "meta.json"),
+        os.path.join(directory, contract.REPRO_META),
         lambda tmp: json.dump(meta, open(tmp, "w"), indent=1),
     )
 
@@ -152,17 +153,30 @@ def save_repro(directory, direction_records, tensors_by_role=None) -> None:
     _write(str(directory), records, tensors, with_outputs=True)
 
 
-def capture(prob, graph_json: str, engine: str | None) -> None:
-    """Save this call's inputs and graph under ``HIPDNN_SDPA_REPRO_CAPTURE``; off when unset."""
+def capture(
+    prob, graph_json: str, engine: str | None, candidate: dict | None = None
+) -> None:
+    """Save this call's inputs and graph under ``HIPDNN_SDPA_REPRO_CAPTURE``; off when unset.
+
+    ``candidate`` is the pinned candidate, ``{"index": k}`` until the build resolves it.
+    """
     root = os.environ.get(contract.REPRO_CAPTURE_ENV)
     if not root:
         return
-    case = contract.repro_case(_nodeid(), os.environ.get(contract.PASS_SLUG_ENV, ""))
+    case = contract.repro_case(
+        contract.current_nodeid(), os.environ.get(contract.PASS_SLUG_ENV, "")
+    )
     if _CAPTURED.get("case") != case:
         _CAPTURED.clear()
         _CAPTURED.update(case=case, records={}, tensors={})
     _CAPTURED["records"][prob.direction] = contract.CallRecord(
-        prob.direction, engine or "", "", (), graph_json, problem_meta(prob)
+        prob.direction,
+        engine or "",
+        "",
+        (),
+        graph_json,
+        problem_meta(prob),
+        candidate,
     )
     _CAPTURED["tensors"].update(prob.tensors)
     _write(

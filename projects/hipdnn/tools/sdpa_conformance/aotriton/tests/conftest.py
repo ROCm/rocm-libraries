@@ -23,7 +23,7 @@ for entry in (AOTRITON_DIR, AOTRITON_DIR / "shim"):
     if str(entry) not in sys.path:
         sys.path.insert(0, str(entry))
 
-from conformance_contract import CallRecord  # noqa: E402
+from conformance_contract import CALL_ERROR_ATTR, CallRecord  # noqa: E402
 
 pytest_plugins = ["pytester"]
 
@@ -87,6 +87,10 @@ def fake_sdpa(monkeypatch):
     `CallRecord` that `last_call(direction)` returns on the calling thread after a successful call
     (None after a decline). `.log_installs` counts `install_kernel_log()` calls; `.repros` lists the
     `(dir, directions, roles)` of every `save_repro` call, which also writes `<dir>/saved.json`.
+    `.errors` (direction -> message) makes a direction raise `RuntimeError` carrying the failing
+    call's record as `sdpa_call` (None for a direction in `.unbuilt`, a failure before the graph);
+    `.missing` is what `missing_bindings()` returns; `.log_ok` is what `install_kernel_log()` returns;
+    `.save_repro_error`, when set, is raised by `save_repro`.
     """
     module = types.ModuleType("hipdnn_sdpa")
     module.EngineDeclined, module.Mask, module.Varlen, module.Dropout = (
@@ -101,6 +105,11 @@ def fake_sdpa(monkeypatch):
     module.engine_lists = {}
     module.kernels = {}
     module.candidates = {}
+    module.errors = {}
+    module.unbuilt = set()
+    module.missing = []
+    module.log_ok = True
+    module.save_repro_error = None
     module.log_installs = 0
     module.repros = []
     module.CallRecord = CallRecord
@@ -109,27 +118,43 @@ def fake_sdpa(monkeypatch):
     def last_call(direction):
         return getattr(last, direction, None)
 
-    def finish(direction, engine):
-        setattr(
-            last,
+    def call_record(direction, engine):
+        return _FakeCall(
             direction,
-            _FakeCall(
-                direction,
-                engine,
-                module.kernels.get(direction, ""),
-                tuple(module.engine_lists.get(direction, ())),
-                "{}",
-                {},
-                dict(module.candidates.get(direction, {})),
-            ),
+            engine,
+            module.kernels.get(direction, ""),
+            tuple(module.engine_lists.get(direction, ())),
+            "{}",
+            {},
+            None,
+            dict(module.candidates.get(direction, {})),
         )
+
+    def finish(direction, engine):
+        setattr(last, direction, call_record(direction, engine))
         return engine
+
+    def fail_if_asked(direction):
+        if direction in module.errors:
+            exc = RuntimeError(module.errors[direction])
+            built = direction not in module.unbuilt
+            setattr(
+                exc,
+                CALL_ERROR_ATTR,
+                call_record(direction, f"fake_{direction}") if built else None,
+            )
+            raise exc
 
     def install_kernel_log():
         module.log_installs += 1
-        return True
+        return module.log_ok
+
+    def missing_bindings():
+        return list(module.missing)
 
     def save_repro(dir, direction_records, tensors_by_role):
+        if module.save_repro_error:
+            raise module.save_repro_error
         module.repros.append((dir, sorted(direction_records), sorted(tensors_by_role)))
         dir.mkdir(parents=True, exist_ok=True)
         (dir / "saved.json").write_text(
@@ -142,7 +167,7 @@ def fake_sdpa(monkeypatch):
         )
 
     module.last_call, module.install_kernel_log = last_call, install_kernel_log
-    module.save_repro = save_repro
+    module.save_repro, module.missing_bindings = save_repro, missing_bindings
 
     def sdpa_fwd(
         q,
@@ -179,6 +204,7 @@ def fake_sdpa(monkeypatch):
         last.fwd = None
         if "fwd" in module.decline:
             raise EngineDeclined("fwd", module.decline["fwd"])
+        fail_if_asked("fwd")
         o.fill_(1.0)
         if stats is not None:
             stats.fill_(2.0)
@@ -229,6 +255,7 @@ def fake_sdpa(monkeypatch):
         last.bwd = None
         if "bwd" in module.decline:
             raise EngineDeclined("bwd", module.decline["bwd"])
+        fail_if_asked("bwd")
         return finish("bwd", "fake_bwd")
 
     module.sdpa_fwd, module.sdpa_bwd = sdpa_fwd, sdpa_bwd

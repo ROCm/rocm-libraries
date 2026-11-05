@@ -3,8 +3,28 @@
 
 """Names and formats shared by the runner, the plugin, the shim and ``hipdnn_sdpa``.
 
-Every on-disk file and environment variable that crosses a process or module boundary in an
-``--all-engines`` run is named here, so the writer and every reader agree on one spelling.
+Every on-disk file and environment variable that crosses a process or module boundary in a run is
+named here, so the writer and every reader agree on one spelling.
+
+Engine pins and run modes
+    ``HIPDNN_FWD_ENGINE`` / ``HIPDNN_BWD_ENGINE`` (``ENGINE_ENV``) pin a direction's engine;
+    ``HIPDNN_FWD_ENGINE=reference`` (``REFERENCE_PIN``) runs the reference forward without asking
+    hipDNN. ``FWD_NO_STATS_ENV`` runs the forward without Stats and ``LAYOUT_MODE_ENV`` names the
+    layout mode; the runner sets both for every pass. ``IMAGE_ENV`` and ``SHAS_ENV`` are set by the
+    job that launches the runner (the container image and the source SHAs it built) and are copied
+    into each repro's ``meta.json``; the tool never sets them.
+
+Pass kinds
+    ``pass.json`` ``kind`` of an ``--all-engines`` or ``--exhaustive`` pass: ``PASS_SWEEP`` (one
+    direction pinned), ``PASS_PAIR`` (both pinned), ``PASS_DISCOVERY`` and ``PASS_REFWD`` (backward
+    on the reference forward, unpinned and pinned), ``PASS_CANDIDATE`` and ``PASS_CANDIDATE_PAIR``.
+
+Call errors
+    A ``hipdnn_sdpa`` call that fails with anything other than ``EngineDeclined`` (a build or
+    execute error) re-raises with attribute ``sdpa_call`` (``CALL_ERROR_ATTR``) set to the failing
+    call's :class:`CallRecord`, or ``None`` when it failed before its graph was built. The plugin
+    records that direction as kind ``error`` with the engine as detail, so the row names the
+    direction that failed and its repro holds the failing call.
 
 In-flight marker
     ``$HIPDNN_SDPA_INFLIGHT_DIR/<pass-slug>/<worker>.json``, where ``<worker>`` is
@@ -40,10 +60,11 @@ Candidates
 
 Repro directories
     ``<out>/repro/<case>/`` with ``case = repro_case(nodeid, pass_slug)``, holding
-    ``meta.json``, ``fwd.graph.json``, ``bwd.graph.json``, ``tensors.pt`` and, for a failure,
-    ``outputs.pt``. ``HIPDNN_SDPA_REPRO_CAPTURE`` names the repro root; when set, ``hipdnn_sdpa``
-    captures a call's inputs, graph and problem scalars before building its plan, so a crash in
-    build or execute still leaves a replayable directory.
+    ``meta.json``, ``<direction>.graph.json`` (``repro_graph_name``), ``tensors.pt`` and, for a
+    failure, ``outputs.pt`` (the ``OUTPUT_ROLES`` of the last direction). ``HIPDNN_SDPA_REPRO_CAPTURE``
+    names the repro root; when set, ``hipdnn_sdpa`` captures a call's inputs, graph and problem
+    scalars before building its plan, so a crash in build or execute still leaves a replayable
+    directory.
 
 Inventory
     ``<out>/engine-inventory.txt``: one engine name per line, as ``hipdnn_list_engines`` prints
@@ -52,6 +73,25 @@ Inventory
 
 import dataclasses
 import hashlib
+import os
+
+ENGINE_ENV = {"fwd": "HIPDNN_FWD_ENGINE", "bwd": "HIPDNN_BWD_ENGINE"}
+FWD_NO_STATS_ENV = "HIPDNN_SDPA_CONFORMANCE_FWD_NO_STATS"
+LAYOUT_MODE_ENV = "HIPDNN_SDPA_CONFORMANCE_LAYOUT_MODE"
+IMAGE_ENV = "HIPDNN_SDPA_IMAGE"
+SHAS_ENV = "HIPDNN_SDPA_SHAS"
+
+# The vendored forward test file: its cases are forward cases, every other case is a backward case.
+FORWARD_TESTS = "test_forward.py"
+
+PASS_SWEEP = "sweep"
+PASS_PAIR = "pair"
+PASS_DISCOVERY = "discovery"
+PASS_REFWD = "refwd"
+PASS_CANDIDATE = "candidate"
+PASS_CANDIDATE_PAIR = "candidate-pair"
+
+CALL_ERROR_ATTR = "sdpa_call"
 
 # Value of HIPDNN_FWD_ENGINE that runs the reference forward without asking hipDNN.
 REFERENCE_PIN = "reference"
@@ -97,13 +137,11 @@ MARKER_FIELDS = (
 )
 
 REPRO_DIR = "repro"
-REPRO_FILES = (
-    "meta.json",
-    "fwd.graph.json",
-    "bwd.graph.json",
-    "tensors.pt",
-    "outputs.pt",
-)
+REPRO_META = "meta.json"
+REPRO_TENSORS = "tensors.pt"
+REPRO_OUTPUTS = "outputs.pt"
+# Output tensor roles per direction; a repro's outputs.pt holds those of its last direction.
+OUTPUT_ROLES = {"fwd": ("o", "stats"), "bwd": ("dq", "dk", "dv", "dbias")}
 REPRO_MAX_PER_KEY = 3  # per (engine, test function)
 REPRO_MAX_BYTES = 2 << 30  # per shard
 
@@ -125,7 +163,9 @@ class CallRecord:
     ``kernel`` is the ingestor kernel id (``prep=<id>|dkdv=<id>|dq=<id>`` for a slotted engine);
     empty for engines that report none. ``ranked`` is the applicable engines in heuristic rank
     order, empty for a pinned call. ``problem_meta`` holds the scalars a replay needs (scale,
-    mask, dropout probability, varlen maxima) and the role-to-uid map.
+    mask, dropout probability, varlen maxima) and the role-to-uid map. ``candidate`` is the pinned
+    candidate as ``{"index": k, "id": ..., "knobs": ...}`` (an entry of ``hipdnn_bench
+    enumerate`` plus its index), ``None`` when the call pinned no candidate.
     """
 
     direction: str
@@ -134,11 +174,22 @@ class CallRecord:
     ranked: tuple
     graph_json: str
     problem_meta: dict
+    candidate: dict = None
 
 
 def marker_name(worker):
     """File name of a worker's in-flight marker inside the pass's in-flight directory."""
     return f"{worker or 'main'}.json"
+
+
+def repro_graph_name(direction):
+    """File name of a direction's graph JSON inside a repro directory."""
+    return f"{direction}.graph.json"
+
+
+def current_nodeid():
+    """Node id of the test pytest is running in this process ('' outside a test)."""
+    return os.environ.get("PYTEST_CURRENT_TEST", "").rsplit(" (", 1)[0]
 
 
 def repro_case(nodeid, pass_slug):

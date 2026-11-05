@@ -5,27 +5,27 @@
 """Offline reconciliation of a conformance run (login-node tool, needs no GPU or torch).
 
     reconcile.py <run-dir> [--out reconciled.csv]
+    reconcile.py <run-dir> --report [--shards-file FILE] [--baseline FILE] [--out reconciled.csv]
     reconcile.py <run-dir> --engines <out>
 
 ``<run-dir>`` holds one ``<suite>-<k>of<N>/`` directory per shard (``default-3of16``, ``forward-1of4``;
 ``shard-<k>of<N>`` too), each with ``collected.txt`` (every
-node id the shard collected) and ``results.csv`` (one row per finished case). The union over all
-shards gets one row per node id: rows as recorded, and ``not-run`` for every collected id without
+node id the shard collected) and ``results.csv`` (one row per finished case). A run directory holds
+each node id once: the union keeps the first row of an id recorded by two shard directories (``--report``
+lists such ids under ``== duplicate node ids``). The union gets one row per node id: rows as recorded,
+and ``not-run`` for every collected id without
 a row (killed job, exhausted walltime). A truncated trailing row (no newline, or the wrong number
-of fields) is dropped, so its case becomes ``not-run`` too. CSVs written before the
-``fwd_engines`` / ``bwd_engines`` columns existed read with those fields empty.
+of fields) is dropped, so its case becomes ``not-run`` too. A ``results.csv`` written by an earlier
+version (before the ``fwd_engines`` / ``bwd_engines`` columns, the kernel/side/repro columns or the
+candidate columns) still reads, with the missing fields empty.
 
 ``--report`` reads the whole run: shard accounting (``--shards-file`` lists the expected shards,
 ``<suite> <k> <N>`` per line, so a shard that left no directory shows as missing), outcome totals, per-
 pass and per-(direction, engine) counts over every shard, the engines no case passed with their first decline
 reasons, every ``fail`` / ``crash`` with engine, side, stage and repro path, and with ``--baseline FILE``
-(one failing node id per line) the failing node ids new to this run and the ones that no longer fail.
-
-``--engines <out>`` also reads the candidate passes of ``run_aotriton.py --exhaustive`` under
-``<out>/cand/`` (``candidate`` and ``candidate-pair`` passes; ``engines.csv`` gains
-``fwd_candidate``, ``bwd_candidate``; a case an engine cannot enumerate is a ``not-enumerable``
-row with the message). ``results.csv`` gains the same two columns after ``repro``; older CSVs read
-them empty.
+(one failing node id per line) the failing node ids new to this run and the baseline ids that no longer
+fail here (outcome ``pass``, ``declined``, ``native-skip`` or ``no-hipdnn``); a baseline id whose case
+did not run, or is not in the run, is listed apart as not confirmed fixed.
 
 ``--engines <out>`` takes one shard's output directory of a ``run_aotriton.py --all-engines`` run
 and writes ``<out>/engines.csv`` (``nodeid,direction,engine,source,outcome,reason,pin_fwd,pin_bwd,
@@ -34,10 +34,18 @@ kernel,stage,fwd_candidate,bwd_candidate``): per case the engine that served it 
 pass directory under ``<out>/all-engines/`` (``pinned``, ``pair``, ``refwd``, ``discovery``), and a
 ``not-run`` row for every node id a pass listed (``nodeids.txt``, ``collected.txt`` for pass 1) but
 never recorded. ``capture/`` directories are never read. A pinned row whose served engine is not
-the pinned one is recorded as ``declined`` and never counts as that engine's pass. The command
+the pinned one is recorded as ``declined`` and never counts as that engine's pass; a ``fail`` row
+whose failing side served its pinned engine stays a ``fail`` against that side, and only a side that
+ran is compared with its pin. A state ``error:<engine>`` (a hipDNN call that raised) names the engine
+like ``hipdnn:<engine>``. The command
 prints outcome counts per direction and engine, per pass expected against recorded, and every
 engine of ``<out>/engine-inventory.txt`` with its counts (zeros included) and, for an engine no case
 reached, its first decline reasons from ``<out>/declines/``.
+
+``--engines <out>`` also reads the candidate passes of ``run_aotriton.py --exhaustive`` under
+``<out>/cand/`` (``candidate`` and ``candidate-pair`` passes; ``engines.csv`` gains
+``fwd_candidate``, ``bwd_candidate``; a case an engine cannot enumerate is a ``not-enumerable``
+row with the message). ``results.csv`` gains the same two columns after ``repro``.
 """
 
 import argparse
@@ -75,7 +83,6 @@ CSV_NAME = "results.csv"
 COLLECTED_NAME = "collected.txt"
 ENGINES_CSV_NAME = "engines.csv"
 ENGINES_DIR = "all-engines"
-CANDIDATES_DIR = contract.CANDIDATES_DIR
 ENGINE_NAME_FILE = (
     "engine.txt"  # the pinned engine's name, beside a sweep's results.csv
 )
@@ -97,12 +104,13 @@ DECLINES_DIR = "declines"  # the job stages the workers' decline files here
 MAIN_PASS = "main"
 HEURISTIC = "heuristic"
 SHARD_DIR = re.compile(r"^([a-z]+)-(\d+)of(\d+)$")
-FORWARD_TESTS = "test_forward.py"
 
 
 def direction_of(nodeid):
     """``'fwd'`` for a ``test_forward.py`` case, else ``'bwd'``: the direction an engine sweep covers."""
-    return "fwd" if Path(nodeid.split("::")[0]).name == FORWARD_TESTS else "bwd"
+    return (
+        "fwd" if Path(nodeid.split("::")[0]).name == contract.FORWARD_TESTS else "bwd"
+    )
 
 
 def format_row(row):
@@ -117,9 +125,9 @@ def format_row(row):
 def read_rows(path):
     """Rows of one shard's CSV; a malformed trailing line is dropped, any other raises.
 
-    A CSV from before the engine-list columns (six fields), before the kernel/side/repro
-    columns (eight fields) or before the candidate columns (thirteen fields) reads with the
-    missing fields empty.
+    Reads the ``results.csv`` of run directories written by earlier versions of ``run_aotriton.py``
+    (six fields: before the engine-list columns; eight: before the kernel/side/repro columns;
+    thirteen: before the candidate columns), so those runs still reconcile; missing fields read empty.
     """
     known = {
         len(LEGACY_FIELDS),
@@ -182,8 +190,7 @@ def shard_dirs(run_dir):
 
 
 def read_shards_file(path):
-    """Shard directory names of a ``<suite> <k> <N>`` file (the ``submit_chains.sh`` format;
-    ``#`` comments and blank lines are skipped)."""
+    """Shard directory names of a ``<suite> <k> <N>`` file (``#`` comments and blank lines are skipped)."""
     names = []
     for line in Path(path).read_text().splitlines():
         fields = line.split()
@@ -193,9 +200,10 @@ def read_shards_file(path):
     return names
 
 
-def reconcile(run_dir):
-    """Union of every shard's rows plus ``not-run`` rows; returns a list of row dicts."""
-    seen, rows, collected = set(), [], []
+def _union(run_dir):
+    """``(rows, duplicates)``: the rows of :func:`reconcile` and ``{node id: [shard directory names]}``
+    of every id recorded by more than one shard directory (the first row wins)."""
+    seen, rows, collected, where = set(), [], [], {}
     shards = shard_dirs(run_dir)
     if not shards:
         raise FileNotFoundError(
@@ -203,6 +211,9 @@ def reconcile(run_dir):
         )
     for shard in shards:
         for row in read_rows(shard / CSV_NAME):
+            owners = where.setdefault(row["nodeid"], [])
+            if shard.name not in owners:
+                owners.append(shard.name)
             if row["nodeid"] not in seen:
                 seen.add(row["nodeid"])
                 rows.append(row)
@@ -220,7 +231,16 @@ def reconcile(run_dir):
                     "reason": "no row recorded",
                 }
             )
-    return rows
+    return rows, {n: dirs for n, dirs in where.items() if len(dirs) > 1}
+
+
+def reconcile(run_dir):
+    """Union of every shard's rows plus ``not-run`` rows; returns a list of row dicts.
+
+    A run directory holds each node id once; an id recorded by two shard directories keeps its first
+    row (shards in :func:`shard_dirs` order). ``run_report`` lists those ids.
+    """
+    return _union(run_dir)[0]
 
 
 def summarize(rows, failing=True):
@@ -251,9 +271,10 @@ def summarize(rows, failing=True):
 
 
 def served_engines(state):
-    """Engine names in a ``fwd`` / ``bwd`` state text (``hipdnn:a+b``); empty for any other state."""
+    """Engine names in a ``fwd`` / ``bwd`` state text (``hipdnn:a+b``, or ``error:a`` for a hipDNN call
+    that raised); empty for any other state."""
     kind, _, detail = state.partition(":")
-    return set(detail.split("+")) - {""} if kind == "hipdnn" else set()
+    return set(detail.split("+")) - {""} if kind in ("hipdnn", "error") else set()
 
 
 def pass_slug(out, pass_dir):
@@ -272,8 +293,9 @@ def pass_dirs(out):
     ``capture/`` directories never.
 
     A pass directory holds ``pass.json`` (``kind`` sweep|pair|refwd|discovery|candidate|
-    candidate-pair, ``direction``, ``pin_fwd``, ``pin_bwd``, ``fwd_candidate``, ``bwd_candidate``). A directory with only ``engine.txt`` (a sweep of a run before
-    ``pass.json``) reads as a sweep pinning that engine in the direction named by its parent.
+    candidate-pair, ``direction``, ``pin_fwd``, ``pin_bwd``, ``fwd_candidate``, ``bwd_candidate``).
+    A directory with only ``engine.txt`` (a sweep written before ``pass.json`` existed, still on disk
+    in older run directories) reads as a sweep pinning that engine in the direction named by its parent.
     """
     root = Path(out) / ENGINES_DIR
     found = {}
@@ -281,11 +303,11 @@ def pass_dirs(out):
         d = engine_file.parent
         direction = d.parent.name
         found[d] = {
-            "kind": "sweep",
+            "kind": contract.PASS_SWEEP,
             "direction": direction,
             f"pin_{direction}": engine_file.read_text().strip(),
         }
-    for top in (root, Path(out) / CANDIDATES_DIR):
+    for top in (root, Path(out) / contract.CANDIDATES_DIR):
         for meta_file in top.glob(f"**/{PASS_META_NAME}"):
             found[meta_file.parent] = json.loads(meta_file.read_text())
     return sorted(found.items())
@@ -306,9 +328,11 @@ def _passes(out):
         yield d, meta, listing(d / NODEIDS_NAME)
 
 
-_SOURCE = {"sweep": "pinned"}  # every other kind is its own source
-_PINNED_KINDS = ("sweep", "candidate")  # one direction pinned; the other unpinned
-_PAIR_KINDS = ("pair", "candidate-pair")  # backward cases, both directions pinned
+_SOURCE = {contract.PASS_SWEEP: "pinned"}  # every other kind is its own source
+# one direction pinned; the other unpinned
+_PINNED_KINDS = (contract.PASS_SWEEP, contract.PASS_CANDIDATE)
+# backward cases, both directions pinned
+_PAIR_KINDS = (contract.PASS_PAIR, contract.PASS_CANDIDATE_PAIR)
 
 
 def _pass_engine_rows(d, meta, expected):
@@ -336,8 +360,12 @@ def _pass_engine_rows(d, meta, expected):
             }
         )
 
-    def mismatch(row, wanted):
-        """``wanted`` is ``{direction: engine}``; the declined reason when a served engine differs."""
+    def mismatch(row, wanted, only_ran=False):
+        """``wanted`` is ``{direction: engine}``; the declined reason when a served engine differs.
+        With ``only_ran`` a direction whose state is empty (it never ran) is not compared, unless
+        none ran."""
+        if only_ran:
+            wanted = {d: e for d, e in wanted.items() if row[d]} or wanted
         wrong = [
             f"served {'+'.join(sorted(served_engines(row[d]))) or 'no engine'}, not the pinned {e}"
             for d, e in wanted.items()
@@ -356,7 +384,7 @@ def _pass_engine_rows(d, meta, expected):
             direction = crashed or failed or direction_of(nodeid)
             for engine in sorted(served_engines(row[direction])):
                 add(nodeid, direction, engine, outcome, reason, row)
-        elif kind == "discovery":
+        elif kind == contract.PASS_DISCOVERY:
             for engine in sorted(served_engines(row["bwd"])):
                 add(nodeid, "bwd", engine, outcome, reason, row)
         elif kind in _PINNED_KINDS:
@@ -375,7 +403,7 @@ def _pass_engine_rows(d, meta, expected):
             if kind in _PAIR_KINDS:
                 wanted["fwd"] = pin["fwd"]
             if outcome in ("pass", "fail"):
-                wrong = mismatch(row, wanted)
+                wrong = mismatch(row, wanted, only_ran=outcome == "fail")
                 if wrong:
                     outcome, reason = "declined", wrong
             side = crashed or failed or "bwd"
@@ -389,7 +417,7 @@ def _pass_engine_rows(d, meta, expected):
         if nodeid not in recorded:
             engine = (
                 pin[direction]
-                if kind in _PINNED_KINDS + _PAIR_KINDS + ("refwd",)
+                if kind in _PINNED_KINDS + _PAIR_KINDS + (contract.PASS_REFWD,)
                 else ""
             )
             add(
@@ -416,14 +444,16 @@ def _count_label(r):
     if r["source"] in ("heuristic", "pinned"):
         return f"{r['direction']} {engine}"
     label = f"{r['source']} {r['direction']} {engine}"
-    if r["source"] == "candidate":
+    if r["source"] == contract.PASS_CANDIDATE:
         return f"{label} #{r[r['direction'] + '_candidate'] or '-'}"
-    if r["source"] == "candidate-pair":
+    if r["source"] == contract.PASS_CANDIDATE_PAIR:
         return (
             f"{label} (fwd {r['pin_fwd']} #{r['fwd_candidate'] or '-'}, "
             f"bwd {r['pin_bwd']} #{r['bwd_candidate'] or '-'})"
         )
-    return label + (f" (fwd {r['pin_fwd']})" if r["source"] == "pair" else "")
+    return label + (
+        f" (fwd {r['pin_fwd']})" if r["source"] == contract.PASS_PAIR else ""
+    )
 
 
 def _tally(rows, counts):
@@ -473,7 +503,7 @@ def pass_name(out, d):
     out = Path(out)
     if d == out:
         return MAIN_PASS
-    base = out if d.is_relative_to(out / CANDIDATES_DIR) else out / ENGINES_DIR
+    base = out if d.is_relative_to(out / contract.CANDIDATES_DIR) else out / ENGINES_DIR
     return d.relative_to(base).as_posix()
 
 
@@ -625,7 +655,7 @@ def run_report(run_dir, expected=(), baseline=None):
     no case passed, every failure, and with ``baseline`` (a file of failing node ids) the diff.
     """
     shards = {d.name: d for d in shard_dirs(run_dir)}
-    rows = reconcile(run_dir)
+    rows, duplicates = _union(run_dir)
     names = list(dict.fromkeys([*expected, *shards]))
     passes, counts, by_engine, failures = (
         {},
@@ -643,6 +673,8 @@ def run_report(run_dir, expected=(), baseline=None):
         _engine_outcomes(engines, by_engine)
         failures += [{"shard": name, **f} for f in failure_rows(shard)]
     lines = ["== shards"] + [_shard_accounting(n, shards.get(n)) for n in names]
+    lines += ["", "== duplicate node ids"]
+    lines += [f"{n}: {', '.join(dirs)}" for n, dirs in duplicates.items()] or ["none"]
     lines += ["", "== outcomes", summarize(rows, failing=False)]
     lines += ["", "== passes (all shards)"] + [
         _accounting_line(n, *t) for n, t in passes.items()
@@ -684,6 +716,9 @@ def run_report(run_dir, expected=(), baseline=None):
     return "\n".join(lines)
 
 
+_FIXED_OUTCOMES = ("pass", "declined", "native-skip", "no-hipdnn")
+
+
 def _baseline_diff(baseline, rows, failures):
     known = {
         ln.strip()
@@ -693,7 +728,8 @@ def _baseline_diff(baseline, rows, failures):
     here = {f["nodeid"]: f for f in failures}
     outcome = {r["nodeid"]: r["outcome"] for r in rows}
     new = sorted(here.keys() - known)
-    fixed = sorted(known - here.keys())
+    fixed = sorted(n for n in known - here.keys() if outcome.get(n) in _FIXED_OUTCOMES)
+    unconfirmed = sorted(known - here.keys() - set(fixed))
     lines = [
         f"baseline {len(known)} ids, failing here {len(here)}, still failing {len(known & here.keys())}",
         f"new failures (not in baseline): {len(new)}",
@@ -702,8 +738,11 @@ def _baseline_diff(baseline, rows, failures):
             for n in new
         ],
         "",
-        f"no longer failing (in baseline, not failing here): {len(fixed)}",
-        *[f"  {n}: {outcome.get(n, 'not in this run')}" for n in fixed],
+        f"no longer failing (in baseline, outcome {'/'.join(_FIXED_OUTCOMES)} here): {len(fixed)}",
+        *[f"  {n}: {outcome[n]}" for n in fixed],
+        "",
+        f"not confirmed fixed (in baseline, no failure row here, case did not run or is not in this run): {len(unconfirmed)}",
+        *[f"  {n}: {outcome.get(n, 'not in this run')}" for n in unconfirmed],
     ]
     return "\n".join(lines)
 

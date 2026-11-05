@@ -21,6 +21,7 @@ from conformance_contract import (
     TEST_CRASH_ENV,
     TEST_CRASH_EXIT_CODE,
     CallRecord,
+    current_nodeid,
     marker_name,
     parse_test_crash,
     repro_case,
@@ -36,10 +37,6 @@ class EngineDeclined(Exception):
 _last = threading.local()
 
 
-def _nodeid():
-    return os.environ["PYTEST_CURRENT_TEST"].rsplit(" ", 1)[0]
-
-
 def _marker(direction, stage, engine, ranked):
     root = os.environ.get(INFLIGHT_DIR_ENV)
     if not root:
@@ -51,7 +48,7 @@ def _marker(direction, stage, engine, ranked):
     )
     os.makedirs(os.path.dirname(path), exist_ok=True)
     fields = dict(
-        nodeid=_nodeid(),
+        nodeid=current_nodeid(),
         direction=direction,
         stage=stage,
         engine=engine,
@@ -72,12 +69,13 @@ def _capture(direction, engine):
     root = os.environ.get(REPRO_CAPTURE_ENV)
     if root:
         case = os.path.join(
-            root, repro_case(_nodeid(), os.environ.get(PASS_SLUG_ENV, "main"))
+            root, repro_case(current_nodeid(), os.environ.get(PASS_SLUG_ENV, "main"))
         )
         os.makedirs(case, exist_ok=True)
         with open(os.path.join(case, "meta.json"), "w") as f:
             json.dump(
-                {"nodeid": _nodeid(), "direction": direction, "engine": engine}, f
+                {"nodeid": current_nodeid(), "direction": direction, "engine": engine},
+                f,
             )
 
 
@@ -130,6 +128,10 @@ def last_call(direction):
 
 def install_kernel_log():
     return True
+
+
+def missing_bindings():
+    return []
 
 
 def save_repro(dir, direction_records, tensors_by_role):

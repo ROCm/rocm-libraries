@@ -310,3 +310,38 @@ def test_decline_happens_before_hipdnn_is_touched(monkeypatch, entry):
                 varlen=case.varlen,
             )
     assert exc.value.direction == entry
+
+
+@pytest.mark.parametrize(
+    ("last_token", "declined"), [(2**21 - 1, False), (2**21, True)]
+)
+def test_a_ragged_offset_past_int32_is_declined_not_wrapped(last_token, declined):
+    """Token stride 1024 (8 heads x 128): offset ``last_token * 1024`` must fit the INT32 tensor."""
+    heads, feat = 8, 128
+    tokens = last_token + 1
+    # meta tensors: the layout is under test, not the 4 GiB of data
+    base = torch.empty(tokens, heads, feat, device="meta")
+    view = base.permute(1, 0, 2).unsqueeze(0)  # [1, H, T, D], token stride H * D
+    stats = torch.empty(tokens, heads, device="meta").permute(1, 0)[None, :, :, None]
+    pos = torch.tensor([0, last_token], dtype=torch.int32)
+    lens = torch.tensor([last_token], dtype=torch.int32)
+    varlen = Varlen(lens, lens.clone(), pos, pos.clone(), last_token, last_token)
+
+    def build():
+        return forward_problem(
+            view, view, view, view, stats, 0.5, None, None, None, varlen
+        )
+
+    if not declined:
+        prob = build()
+        offsets = prob.tensors["ragged_offset_q_1024"]
+        assert offsets.dtype == torch.int32
+        assert offsets.flatten().tolist() == [0, last_token * 1024]
+        return
+    with pytest.raises(EngineDeclined) as error:
+        build()
+    assert error.value.direction == "fwd"
+    assert error.value.reason.startswith("adapter: ragged offset")
+    assert (
+        str(last_token * 1024) in error.value.reason and "INT32" in error.value.reason
+    )

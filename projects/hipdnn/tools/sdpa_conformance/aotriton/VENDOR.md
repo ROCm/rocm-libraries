@@ -21,7 +21,13 @@ collection counts are a manual `sync.py --check` (about 5 minutes), and runs com
 
 `aotriton_flash.py` is **replaced**: `vendor/` must not contain it, so the shim on `PYTHONPATH`
 cannot be shadowed. `shim/pyaotriton/` stubs the remaining `pyaotriton` imports. Vendored files are
-never edited; `adiffs/`, `performance_*`, `triton_*` and `pytest2entry.py` are present but unused.
+never edited; `adiffs/`, `performance_*`, `triton_*`, `pytest2entry.py` and `test_varlen_translation.cc` (C++,
+not a pytest module) are present but unused.
+
+`aotriton/.gitattributes` marks `vendor/**` as `-text`, so a checkout keeps the committed LF bytes
+and `sync.py --check` hashes the same bytes on every platform (it hashes working-tree bytes; a
+CRLF conversion makes it report `sha256 differs`). The rule lives outside `vendor/` because
+`sync.py --source` replaces that directory.
 
 ## Collection counts
 
@@ -38,7 +44,9 @@ never edited; `adiffs/`, `performance_*`, `triton_*` and `pytest2entry.py` are p
 ## Refresh
 
 1. Check out AOTriton at the new commit (sparse: `modules/flash/tests`, `python/pytest-gpu-lease`, `LICENSE`).
-2. `python aotriton/sync.py --source <checkout>` copies the files, rewrites `vendor.lock.json`
-   (pin, hashes, counts; about 5 minutes).
+2. `python aotriton/sync.py --source <checkout>` refuses a checkout with uncommitted changes under the
+   vendored paths, copies the files into a temporary directory, swaps it in as `vendor/` and rewrites
+   `vendor.lock.json` (pin, hashes, counts; about 5 minutes). If the counting fails, the previous
+   `vendor/` and lock stay.
 3. Update the pin and counts above, then diff `shim/aotriton_flash.py` against the new upstream
    `aotriton_flash.py` for signature changes and rerun `aotriton/tests`.

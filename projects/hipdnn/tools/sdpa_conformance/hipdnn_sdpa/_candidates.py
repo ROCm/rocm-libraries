@@ -21,8 +21,10 @@ enumeration`` (``EngineQueries.hpp:422-425``; ASM and every other non-ingestor e
 ``Ambiguous enrolled knob tuple ...`` error of a catalog whose candidates share their knobs
 (``GenericPlanBuilder.hpp:738-752``).
 
-:func:`list` pages until ``next_offset`` is null and caches per (problem, engine): the result, a
-:class:`NotEnumerable` included, is returned as it was first read. The subprocess call is
+:func:`list` pages until ``next_offset`` is null and caches per (problem, engine), least recently used out
+after :data:`CACHE_LIMIT` entries: the result, a :class:`NotEnumerable` included, is returned as it was
+first read. A ``hipdnn_bench`` that dies on a signal, exits without a message or times out raises
+``RuntimeError`` and is not cached; only the engine's own refusal is a :class:`NotEnumerable`. The subprocess call is
 :data:`_run`, replaced by tests.
 """
 
@@ -39,9 +41,10 @@ import conformance_contract as contract
 
 PAGE_LIMIT = 10000  # the largest page --limit accepts
 _FAILED = "Candidate enumeration failed: "
-_CACHE: dict = (
-    {}
-)  # (sha1 of the graph JSON, engine) -> list of Candidate | NotEnumerable
+CACHE_LIMIT = 64
+# (sha1 of the graph JSON, engine) -> list of Candidate | NotEnumerable, least recently used first
+_CACHE: dict = {}
+_BENCH_TIMEOUT = 600  # seconds for one ``enumerate`` page
 _run = subprocess.run
 
 
@@ -86,6 +89,7 @@ def _bench_command(graph_path: str, engine: str, offset: int) -> tuple:
 
 
 def _failure(done) -> NotEnumerable:
+    """The engine's own refusal (exit 1 with a message); anything else is a crash, see ``_read``."""
     text = (done.stderr or "").strip()
     if _FAILED in text:
         text = text.split(_FAILED, 1)[1].strip()
@@ -99,11 +103,23 @@ def _read(graph_json: str, engine: str):
         with open(graph_path, "w") as out:
             out.write(graph_json)
         while offset is not None:
-            done = _run(
-                _bench_command(graph_path, engine, offset),
-                capture_output=True,
-                text=True,
-            )
+            command = _bench_command(graph_path, engine, offset)
+            try:
+                done = _run(
+                    command, capture_output=True, text=True, timeout=_BENCH_TIMEOUT
+                )
+            except subprocess.TimeoutExpired:
+                raise RuntimeError(
+                    f"{command[0]} enumerate timed out after {_BENCH_TIMEOUT} s"
+                ) from None
+            except OSError as exc:
+                return NotEnumerable(f"cannot run {command[0]}: {exc}")
+            if done.returncode < 0 or (
+                done.returncode != 0 and not (done.stderr or "").strip()
+            ):
+                raise RuntimeError(
+                    f"{command[0]} enumerate died (status {done.returncode}) with no message"
+                )
             if done.returncode != 0:
                 return _failure(done)
             try:
@@ -123,6 +139,10 @@ def list(graph_json: str, engine: str):
     :class:`Candidate`, or a :class:`NotEnumerable` carrying the reason. Cached per
     (problem, engine)."""
     key = (hashlib.sha1(graph_json.encode()).hexdigest(), engine)
-    if key not in _CACHE:
-        _CACHE[key] = _read(graph_json, engine)
-    return _CACHE[key]
+    if key in _CACHE:
+        _CACHE[key] = _CACHE.pop(key)  # most recently used
+        return _CACHE[key]
+    found = _CACHE[key] = _read(graph_json, engine)
+    while len(_CACHE) > CACHE_LIMIT:
+        del _CACHE[next(iter(_CACHE))]
+    return found
