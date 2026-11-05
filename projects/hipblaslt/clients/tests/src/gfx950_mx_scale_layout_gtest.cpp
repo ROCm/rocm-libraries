@@ -49,8 +49,10 @@ namespace
 
     bool archIsGfx950()
     {
+        int             device = 0;
         hipDeviceProp_t prop{};
-        if(hipGetDeviceProperties(&prop, 0) != hipSuccess)
+        if(hipGetDevice(&device) != hipSuccess
+           || hipGetDeviceProperties(&prop, device) != hipSuccess)
             return false;
         return std::string(prop.gcnArchName).find("gfx950") != std::string::npos;
     }
