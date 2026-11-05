@@ -17,12 +17,14 @@ from rocke.examples.gfx1250.gemm.mx_gemm_bench import (
     SPARSE_ALPHA,
     SPARSE_STEPS,
     check_inputs,
+    decode_table,
     device_inputs,
     loop_scratch_ops,
     reference,
     run_case,
     sparse_inputs,
     sparse_steps,
+    timed_inputs,
     verify_block,
 )
 from rocke.examples.gfx1250.gemm.mxfp4_tdm_gemm import YAML_TILE
@@ -60,11 +62,22 @@ def _llvm(spec: MxGemmSpec) -> str:
     )
 
 
-def _valid_geometries(mma: str = "32x16"):
+def _valid_geometries(mma: str = "32x16", **fields):
     for tm, tn, tk, wg in itertools.product(TILE_MN, TILE_MN, TILE_K, WAVE_GROUPS):
-        spec = _spec(tile_m=tm, tile_n=tn, tile_k=tk, wave_group=wg, mma=mma)
+        spec = _spec(tile_m=tm, tile_n=tn, tile_k=tk, wave_group=wg, mma=mma, **fields)
         if validate(spec) is None:
             yield spec
+
+
+# (a_dtype, b_dtype) of the 8-bit types and their WMMA matrix formats.
+_PAIRS_8BIT = (("fp8", "fp8"), ("bf8", "bf8"), ("fp8", "bf8"), ("bf8", "fp8"))
+_FORMATS = {"fp8": 0, "bf8": 1, "fp4": 4}
+
+
+def _spec8(*problem, a_dtype="fp8", b_dtype="fp8", **fields) -> MxGemmSpec:
+    """An 8-bit spec: the 16x16 atom and tile_k 256 unless given."""
+    fields = {"mma": "16x16", "tile_k": 256, **fields}
+    return _spec(*problem, a_dtype=a_dtype, b_dtype=b_dtype, **fields)
 
 
 def _landing(
@@ -122,6 +135,40 @@ class MxGemmSpecTest(unittest.TestCase):
             problem = bad_problems.get(label, _SMOKE)
             with self.subTest(label):
                 self.assertIsNotNone(validate(_spec(*problem, **fields)))
+
+    def test_8bit_types_validate_their_atom_tile_k_and_reads(self):
+        """FP8/BF8 take the 16x16 atom and tile_k 128/256, never mix with
+        FP4, and keep the local_prefetch 1 wait in the s_wait_dscnt range;
+        local_prefetch 0 waits for 0 and has no read limit."""
+        for a_dtype, b_dtype in _PAIRS_8BIT:
+            fields = {"a_dtype": a_dtype, "b_dtype": b_dtype}
+            with self.subTest(a_dtype=a_dtype, b_dtype=b_dtype):
+                self.assertEqual(len(list(_valid_geometries("16x16", **fields))), 56)
+                self.assertIsNone(validate(_spec8(tile_m=128, **fields)))
+                self.assertIsNone(validate(_spec8(tile_k=128, tile_m=128, **fields)))
+                bad = {
+                    "32x16": ({"mma": "32x16"}, "mma must be one of"),
+                    "tile_k 512": ({"tile_k": 512}, "tile_k must be in"),
+                    "dscnt": ({}, "s_wait_dscnt range of local_prefetch 1"),
+                }
+                for label, (extra, reason) in bad.items():
+                    got = validate(_spec8(**fields, **extra)) or ""
+                    self.assertIn(reason, got, label)
+                direct = _spec8(local_prefetch=0, half_plr="none", **fields)
+                self.assertGreater(direct.reads_per_step, 63)
+                self.assertIsNone(validate(direct))
+        for a_dtype, b_dtype in (("fp4", "fp8"), ("bf8", "fp4")):
+            reason = validate(_spec8(a_dtype=a_dtype, b_dtype=b_dtype, tile_m=128))
+            self.assertIn("same width", reason or "")
+        self.assertIn("a_dtype and b_dtype must be in", validate(_spec(a_dtype="fp6")))
+
+    def test_kernel_name_carries_the_dtype_tag(self):
+        self.assertIn("t_mxfp4_M1024", _spec().kernel_name())
+        for (a_dtype, b_dtype), tag in zip(
+            _PAIRS_8BIT, ("mxfp8", "mxbf8", "mxfp8bf8", "mxbf8fp8")
+        ):
+            name = _spec8(a_dtype=a_dtype, b_dtype=b_dtype).kernel_name()
+            self.assertTrue(name.startswith(f"t_{tag}_M1024"), name)
 
     def test_i64_offsets_past_2_31(self):
         """A and B bytes and D elements past 2^31 switch that operand to i64
@@ -296,6 +343,16 @@ class MxGemmLayoutTest(unittest.TestCase):
         specs = (
             list(_valid_geometries())
             + list(_valid_geometries("16x16"))
+            + list(_valid_geometries("16x16", a_dtype="fp8", b_dtype="fp8"))
+            + list(
+                _valid_geometries(
+                    "16x16",
+                    a_dtype="bf8",
+                    b_dtype="fp8",
+                    local_prefetch=0,
+                    half_plr="none",
+                )
+            )
             + [
                 _spec(a_lds_pad=LdsPad(), b_lds_pad=LdsPad()),
                 _spec(a_lds_pad=LdsPad(32, 2048), b_scale_lds_pad=LdsPad()),
@@ -363,6 +420,36 @@ class MxGemmLayoutTest(unittest.TestCase):
                 self.assertGreaterEqual(used[0][0], 0)
                 self.assertLess(used[-1][1], layout.buffer_bytes)
 
+    def test_lane_chunks_match_the_scaled_matrix_layout(self):
+        """Each lane's K chunk reads (``chunk_offsets`` plus 16 B per lane
+        half, within a K-step's ``step_bytes``) hold exactly the K elements
+        that ``scaled_matrix_layout`` assigns its fragment slots."""
+        for spec, offsets in (
+            (_spec(), (0, 32)),
+            (_spec(mma="16x16"), (0, 32)),
+            (_spec8(), (0, 32, 64, 96)),
+            (_spec8(a_dtype="bf8", b_dtype="bf8"), (0, 32, 64, 96)),
+        ):
+            layout = spec.fragment_layout
+            with self.subTest(spec.kernel_name()):
+                self.assertEqual(spec.chunk_offsets, offsets)
+                self.assertEqual(layout.chunk_bytes, 16)
+                self.assertEqual(spec.step_bytes, 128 * spec.elem_bits // 8)
+                per_byte = spec.k_per_byte
+                for lane, slot in itertools.product(
+                    range(32), range(layout.fragment.count)
+                ):
+                    row, k_index = layout.coord(lane, slot)
+                    chunk, element = divmod(slot, layout.chunk_elements)
+                    byte = (
+                        lane // 16 * layout.chunk_bytes
+                        + spec.chunk_offsets[chunk]
+                        + element // per_byte
+                    )
+                    self.assertEqual(row, lane % 16)
+                    self.assertEqual(k_index // per_byte, byte)
+                    self.assertLess(byte, spec.step_bytes)
+
 
 class MxGemmIrTest(unittest.TestCase):
     def test_benchmark_config_matches_step6_14(self):
@@ -429,6 +516,48 @@ class MxGemmIrTest(unittest.TestCase):
         self.assertIn('"s_wait_dscnt 12"', llvm)
         self.assertRegex(llvm, r"\bstore i8 [^\n]*addrspace\(1\)")
         self.assertNotRegex(llvm, r"\bstore <[^\n]*addrspace\(1\)")
+
+    def test_8bit_atoms(self):
+        """FP8/BF8 issue only the 16x16x128 f8f6f4 WMMA with each operand's
+        format (FP8 0, BF8 1) and 16 live words, as many as the FP4 16x16
+        kernel of the same geometry (k_steps * rm * rn per tile), and wait
+        for four reads per fragment row."""
+        wmma_16 = "@llvm.amdgcn.wmma.scale.f32.16x16x128.f8f6f4.v8f32.v16i32.v16i32"
+        lds_read = r"load <4 x i32>, ptr addrspace\(3\)"
+        geometry = {"tile_m": 128, "tile_n": 128, "tile_k": 256}
+        fp4_spec = _spec(mma="16x16", **geometry)
+        fp4_llvm = _llvm(fp4_spec)
+        fp4 = re.findall(_WMMA, fp4_llvm)
+        # Every read is 16 B at rm = rn = 4; count the K-step read groups.
+        groups, rest = divmod(
+            len(re.findall(lds_read, fp4_llvm)), fp4_spec.reads_per_step
+        )
+        self.assertEqual(rest, 0)
+        for a_dtype, b_dtype in _PAIRS_8BIT:
+            spec = _spec8(a_dtype=a_dtype, b_dtype=b_dtype, **geometry)
+            rm, rn = spec.wave_repeat_m, spec.wave_repeat_n
+            with self.subTest(a_dtype=a_dtype, b_dtype=b_dtype):
+                self.assertEqual(
+                    spec.atom.op_id,
+                    f"wmma_gfx1250_f32_16x16x128_{a_dtype}_{b_dtype}"
+                    "_scale_e8m0_e8m0_k32",
+                )
+                self.assertEqual(
+                    spec.reads_per_step,
+                    spec.a_scale_reads + spec.b_scale_reads + 4 * (rm + rn),
+                )
+                llvm = _llvm(spec)
+                calls = re.findall(_WMMA + r"[^\n]*", llvm)
+                self.assertEqual(len(calls), len(fp4))
+                self.assertEqual(len(calls) % (spec.k_steps * rm * rn), 0)
+                fa, fb = _FORMATS[a_dtype], _FORMATS[b_dtype]
+                for call in calls:
+                    self.assertIn(f"<8 x float> {wmma_16}(i32 {fa}, <16 x i32> %", call)
+                    self.assertIn(f", i32 {fb}, <16 x i32> %", call)
+                self.assertIn(f'"s_wait_dscnt {spec.reads_per_step}"', llvm)
+                self.assertEqual(
+                    len(re.findall(lds_read, llvm)), groups * spec.reads_per_step
+                )
 
     def test_partial_n_tile_walks_only_the_rows_left(self):
         """B data is in TDM iterate mode (8 rows a walk). With a partial N
@@ -689,10 +818,21 @@ class MxGemmSparseCheckTest(unittest.TestCase):
     def _values(self, spec, data):
         """Float64 A and B with their scales applied."""
         _, _, a_scale, b_scale, _, a_codes, b_codes = data
-        e2m1 = _E2M1.astype(np.float64)
-        x = e2m1[a_codes] * np.repeat(decode_e8m0(a_scale), spec.block_k, axis=1)
-        y = e2m1[b_codes] * np.repeat(decode_e8m0(b_scale).T, spec.block_k, axis=1)
+        a_values = decode_table(spec.a_dtype).astype(np.float64)
+        b_values = decode_table(spec.b_dtype).astype(np.float64)
+        x = a_values[a_codes] * np.repeat(decode_e8m0(a_scale), spec.block_k, axis=1)
+        y = b_values[b_codes] * np.repeat(decode_e8m0(b_scale).T, spec.block_k, axis=1)
         return x, y
+
+    @staticmethod
+    def _specs(**fields):
+        """The FP4 spec of these tests and its 8-bit counterparts."""
+        problem = (64, 48, 2048 + 96)
+        yield _spec(*problem, tile_m=128, tile_n=128, **fields)
+        for a_dtype, b_dtype in _PAIRS_8BIT:
+            yield _spec8(
+                *problem, a_dtype=a_dtype, b_dtype=b_dtype, tile_m=128, **fields
+            )
 
     def test_steps_hold_the_k_edges_and_tile_boundaries(self):
         spec = _spec(64, 48, 2048 + 96, tile_m=128, tile_n=128)
@@ -714,21 +854,76 @@ class MxGemmSparseCheckTest(unittest.TestCase):
             set(np.unique(data[2])) | set(np.unique(data[3])), {125, 126, 127, 128}
         )
 
+    def test_8bit_inputs_are_narrow_and_zero_elsewhere(self):
+        """8-bit sparse values are +-[2^-1, 1.875] in steps of 2^-4 with
+        E8M0 2^-1..2^0, and the exact check is FP4's 0 / +1 re-encoded."""
+        for spec in list(self._specs())[1:]:
+            data = sparse_inputs(spec)
+            active = np.zeros(spec.K, dtype=bool)
+            for step in sparse_steps(spec):
+                active[step * 128 : (step + 1) * 128] = True
+            with self.subTest(spec.kernel_name()):
+                for codes, dtype, device in (
+                    (data[5], spec.a_dtype, data[0]),
+                    (data[6], spec.b_dtype, data[1]),
+                ):
+                    self.assertIs(device.dtype, np.dtype(np.uint8))
+                    self.assertEqual(device.shape, codes.shape)
+                    values = np.abs(decode_table(dtype)[codes[:, active]])
+                    self.assertGreaterEqual(values.min(), 0.5)
+                    self.assertLessEqual(values.max(), 1.875)
+                    self.assertFalse((values * 16 % 1).any())
+                    self.assertFalse(codes[:, ~active].any())
+                scales = set(np.unique(data[2])) | set(np.unique(data[3]))
+                self.assertEqual(scales, {126, 127})
+                fp4 = check_inputs(_spec(spec.M, spec.N, spec.K))
+                exact = check_inputs(spec)
+                for index, dtype in ((5, spec.a_dtype), (6, spec.b_dtype)):
+                    self.assertTrue(
+                        np.array_equal(
+                            decode_table(dtype)[exact[index]], _E2M1[fp4[index]]
+                        )
+                    )
+                self.assertTrue(np.array_equal(exact[0], exact[5]))
+
+    def test_decode_tables_and_timed_inputs(self):
+        fp8, bf8 = decode_table("fp8"), decode_table("bf8")
+        self.assertEqual((fp8[0x38], bf8[0x3C], fp8[0xC0], bf8[0xC0]), (1, 1, -2, -2))
+        self.assertTrue(np.isnan(fp8[0x7F]) and np.isinf(bf8[0x7C]))
+        for a_dtype, b_dtype in _PAIRS_8BIT:
+            spec = _spec8(256, 128, 512, a_dtype=a_dtype, b_dtype=b_dtype)
+            a, b, a_scale, b_scale = timed_inputs(spec)
+            with self.subTest(a_dtype=a_dtype, b_dtype=b_dtype):
+                self.assertEqual((a.shape, b.shape), ((256, 512), (128, 512)))
+                self.assertEqual((a_scale.shape, b_scale.shape), ((256, 16), (16, 128)))
+                for codes, dtype in ((a, a_dtype), (b, b_dtype)):
+                    values = decode_table(dtype)[codes]
+                    self.assertTrue(np.isfinite(values).all())
+                    self.assertLess(np.abs(values).max(), 2)
+
     def test_fp32_sums_are_exact_in_any_order(self):
         self.assertLess(SPARSE_STEPS * 128 * 144 * 2**6, 2**24)
-        spec = _spec(64, 48, 2048 + 96, tile_m=128, tile_n=128)
-        x, y = self._values(spec, sparse_inputs(spec))
-        exact = x @ y.T
-        for order in (1, -1):
-            total = np.zeros(exact.shape, dtype=np.float32)
-            for j in range(spec.K)[::order]:
-                total += np.outer(x[:, j], y[:, j]).astype(np.float32)
-            with self.subTest(order=order):
-                self.assertTrue(np.array_equal(total, exact))
+        self.assertLess(SPARSE_STEPS * 128 * 1.875**2 * 2**10, 2**24)
+        for spec in self._specs():
+            x, y = self._values(spec, sparse_inputs(spec))
+            exact = x @ y.T
+            for order in (1, -1):
+                total = np.zeros(exact.shape, dtype=np.float32)
+                for j in range(spec.K)[::order]:
+                    total += np.outer(x[:, j], y[:, j]).astype(np.float32)
+                with self.subTest(spec.kernel_name(), order=order):
+                    self.assertTrue(np.array_equal(total, exact))
 
     def test_reference_is_the_exact_result_rounded(self):
-        for out_dtype, beta in itertools.product(OUT_DTYPES, (0.0, 0.5)):
-            spec = _spec(64, 48, 2048 + 96, tile_m=128, tile_n=128, out_dtype=out_dtype)
+        for spec, beta in itertools.product(
+            (
+                spec
+                for out_dtype in OUT_DTYPES
+                for spec in self._specs(out_dtype=out_dtype)
+            ),
+            (0.0, 0.5),
+        ):
+            out_dtype = spec.out_dtype
             data = sparse_inputs(spec)
             x, y = self._values(spec, data)
             alpha = np.float32(SPARSE_ALPHA)
@@ -738,7 +933,7 @@ class MxGemmSparseCheckTest(unittest.TestCase):
             if out_dtype == "fp8e4m3":
                 value = np.clip(value, -448, 448)
             expected = value.astype(reference(spec, data, alpha=alpha, beta=beta).dtype)
-            with self.subTest(out_dtype=out_dtype, beta=beta):
+            with self.subTest(spec.kernel_name(), beta=beta):
                 got = reference(spec, data, alpha=alpha, beta=beta)
                 self.assertEqual(got.tobytes(), expected.tobytes())
 
@@ -807,6 +1002,21 @@ class MxGemmHostBuildTest(unittest.TestCase):
                 half_plr="none",
                 cluster_dim=(1, 2, 1),
             ),
+            # hipBLASLt's MXFP8 MAF and MAB tunings.
+            _spec8(*_BENCH, local_prefetch=0, half_plr="none"),
+            _spec8(*_BENCH, local_prefetch=0, half_plr="none", cluster_order="aid"),
+            _spec8(
+                65536,
+                16,
+                32768,
+                tile_m=256,
+                tile_n=16,
+                wave_group=(4, 1),
+                half_plr="none",
+                cluster_dim=(1, 1, 1),
+            ),
+            _spec8(*_BENCH, tile_m=128, a_dtype="bf8", b_dtype="bf8"),
+            _spec8(1000, 1000, 2048 + 96, tile_m=128, tile_n=128, b_dtype="bf8"),
         ):
             with self.subTest(spec.kernel_name()):
                 artifact = compile_kernel(
@@ -848,6 +1058,27 @@ class MxGemmDeviceTest(unittest.TestCase):
                 _spec(half_plr="none", local_prefetch=0),
                 _spec(cluster_signal="drained"),
                 _spec(init_c_peel=False),
+            ]
+            + list(_valid_geometries("16x16", a_dtype="fp8", b_dtype="fp8"))
+            + [
+                _spec8(a_dtype=a_dtype, b_dtype=b_dtype, **fields)
+                for a_dtype, b_dtype in _PAIRS_8BIT
+                for fields in (
+                    {"tile_m": 128, "cluster_order": "aid"},
+                    {"tile_m": 128, "tile_k": 128, "half_plr": "none"},
+                    {"local_prefetch": 0, "half_plr": "none"},
+                    {
+                        "tile_m": 256,
+                        "tile_n": 16,
+                        "wave_group": (4, 1),
+                        "half_plr": "none",
+                        "cluster_dim": (1, 2, 1),
+                    },
+                )
+            ]
+            + [
+                _spec8(1000, 1000, 2048 + 96, tile_m=128, tile_n=128, b_dtype="bf8"),
+                _spec8(tile_m=128, out_dtype="bf16", cluster_order="aid"),
             ]
         ):
             with self.subTest(spec.kernel_name()):

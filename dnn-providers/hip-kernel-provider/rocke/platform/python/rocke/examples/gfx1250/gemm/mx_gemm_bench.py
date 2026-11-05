@@ -3,12 +3,13 @@
 """Check, time and host-build the gfx1250 MX GEMM (``mx_gemm``).
 
 Every configuration is the cartesian product of the ``--tile``,
-``--wave-group``, ``--cluster`` and tuning options (each takes a comma
-list). For each one: compile, report code-object resources (VGPR, SGPR,
-spills, scratch, LDS) and the WMMA count, require bit-exact output at ``beta = 0``
-and ``beta = 0.5`` on two input sets (``--check-data``: FP4 0 / +1 over all
-of K, and all E2M1 values in a few K-steps), then time the ``beta = 0`` path,
-on hipBLASLt's MAF benchmark data by default (``--timing-inputs``), as
+``--wave-group``, ``--cluster``, ``--a-dtype`` / ``--b-dtype`` (``fp4``,
+``fp8``, ``bf8``) and tuning options (each takes a comma list). For each
+one: compile, report code-object resources (VGPR, SGPR, spills, scratch,
+LDS) and the WMMA count, require bit-exact output at ``beta = 0`` and
+``beta = 0.5`` on two input sets (``--check-data``: 0 / +1 over all of K,
+and many A/B values in a few K-steps), then time the ``beta = 0`` path, on
+hipBLASLt's MAF benchmark data by default (``--timing-inputs``), as
 ``mxfp4_tdm_gemm_variants_bench`` does (batched enqueues and the median of
 event-timed launches). ``--base`` also times the Step 6.14 kernel of
 ``mxfp4_tdm_gemm`` on the same problem before and after the configurations,
@@ -24,6 +25,7 @@ from __future__ import annotations
 import argparse
 import csv
 import ctypes
+import functools
 import itertools
 import re
 import statistics
@@ -59,16 +61,27 @@ from .mxfp4_tdm_gemm_variants_bench import _resources, tensile_timing_inputs
 BASE_VARIANT = "step6_14_mxfp4_gemm"
 YAML_PROBLEM = (4096, 4096, 65536)
 SMOKE_PROBLEM = (1024, 1024, 2048)
+# hipBLASLt's MXFP8 benchmark problems (mxf8_tn_maf.yaml, mxf8_tn_mab.yaml).
+PROBLEMS = {
+    "smoke": SMOKE_PROBLEM,
+    "yaml": YAML_PROBLEM,
+    "maf": (4096, 4096, 65536),
+    "mab": (65536, 16, 32768),
+}
 _FP8_MAX = 448.0
 _E2M1 = np.array(
     [0, 0.5, 1, 1.5, 2, 3, 4, 6, -0.0, -0.5, -1, -1.5, -2, -3, -4, -6],
     dtype=np.float32,
 )
+# Mantissa bits of the 8-bit A/B types (E4M3, E5M2).
+_MANTISSA_BITS = {"fp8": 3, "bf8": 2}
 _WMMA_K = 128
 CHECK_DATA = ("exact", "sparse")
-# 128-K steps that hold data in the sparse check. Products are multiples of
-# 2^-6 (E2M1 0.5, E8M0 2^-2) up to 144 (6 * 6 * 2 * 2), so every FP32
-# partial sum is exact while SPARSE_STEPS * 128 * 144 * 2^6 < 2^24.
+# 128-K steps that hold data in the sparse check. FP4 products are multiples
+# of 2^-6 (E2M1 0.5, E8M0 2^-2) up to 144 (6 * 6 * 2 * 2); 8-bit ones are
+# multiples of 2^-10 (2^-4 values, E8M0 2^-1) up to 3.52 (1.875^2). Every
+# FP32 partial sum is exact while SPARSE_STEPS * 128 * max / multiple < 2^24
+# (FP4 12 * 128 * 144 * 2^6, 8-bit 12 * 128 * 3.52 * 2^10).
 SPARSE_STEPS = 12
 SPARSE_ALPHA = 2.0**-6
 
@@ -100,11 +113,39 @@ def _out_numpy_dtype(out_dtype: str):
     }[out_dtype]
 
 
+def _fp8_type(dtype: str):
+    import ml_dtypes
+
+    return {"fp8": ml_dtypes.float8_e4m3fn, "bf8": ml_dtypes.float8_e5m2}[dtype]
+
+
+@functools.cache
+def decode_table(dtype: str) -> np.ndarray:
+    """FP32 value of every A/B code of ``dtype`` (``fp4``, ``fp8``, ``bf8``)."""
+    if dtype == "fp4":
+        return _E2M1
+    return np.arange(256, dtype=np.uint8).view(_fp8_type(dtype)).astype(np.float32)
+
+
+def _fp8_codes(values: np.ndarray, dtype: str) -> np.ndarray:
+    """Codes of exactly representable ``values``."""
+    return values.astype(_fp8_type(dtype)).view(np.uint8)
+
+
+def _device_operand(codes: np.ndarray, dtype: str) -> np.ndarray:
+    """Row-major ``[rows][K]`` codes as the kernel reads them."""
+    return pack_fp4_codes(codes) if dtype == "fp4" else np.ascontiguousarray(codes)
+
+
 def check_inputs(spec: MxGemmSpec, *, signed: bool = False):
-    """Exactly representable inputs (FP4 0 and +1, or +-1 with ``signed``)
-    and C in ``spec.out_dtype``, in ``make_inputs``' canonical layout."""
+    """Exactly representable inputs (0 and +1, or +-1 with ``signed``) and C
+    in ``spec.out_dtype``, in ``make_inputs``' canonical layout."""
     inputs = list(make_inputs(spec, signed=signed))
     inputs[4] = inputs[4].astype(np.float32).astype(_out_numpy_dtype(spec.out_dtype))
+    for index, dtype in enumerate((spec.a_dtype, spec.b_dtype)):
+        if dtype != "fp4":
+            codes = _fp8_codes(_E2M1[inputs[5 + index]], dtype)
+            inputs[index], inputs[5 + index] = codes, codes
     return tuple(inputs)
 
 
@@ -123,11 +164,24 @@ def sparse_steps(spec: MxGemmSpec) -> np.ndarray:
     return np.union1d(chosen, rng.choice(rest, size=extra, replace=False))
 
 
+def _sparse_codes(rng, shape, dtype: str) -> np.ndarray:
+    """FP4: all 16 E2M1 codes. 8-bit: +-(1 + m / 2^mantissa_bits) * 2^e
+    with e in {-1, 0}, every mantissa: multiples of 2^-4 up to 1.875."""
+    if dtype == "fp4":
+        return rng.integers(0, 16, shape, dtype=np.uint8)
+    bits = _MANTISSA_BITS[dtype]
+    mantissa = rng.integers(0, 1 << bits, shape).astype(np.float32)
+    values = (1 + mantissa / (1 << bits)) * np.exp2(rng.integers(-1, 1, shape))
+    values *= rng.choice(np.array([-1.0, 1.0], dtype=np.float32), shape)
+    return _fp8_codes(values.astype(np.float32), dtype)
+
+
 def sparse_inputs(spec: MxGemmSpec):
-    """Random codes of all 16 E2M1 values and E8M0 scales 2^-2..2^1 in the
-    ``sparse_steps`` K-steps, zero elsewhere; C uniform in [-2, 2]. The FP32
-    sums are exact in any order, so the check stays bit-exact at any K.
-    ``make_inputs``' layout: packed A, B, scales, C, then the codes."""
+    """Random codes (``_sparse_codes``) and E8M0 scales (FP4 2^-2..2^1,
+    8-bit 2^-1..2^0) in the ``sparse_steps`` K-steps, zero elsewhere; C
+    uniform in [-2, 2]. The FP32 sums are exact in any order, so the check
+    stays bit-exact at any K. ``make_inputs``' layout: A and B as the kernel
+    reads them, scales, C, then the codes."""
     rng = np.random.default_rng(0x5BA6)
     k_index = np.concatenate(
         [
@@ -136,21 +190,42 @@ def sparse_inputs(spec: MxGemmSpec):
         ]
     )
     codes = []
-    for rows in (spec.M, spec.N):
+    for rows, dtype in ((spec.M, spec.a_dtype), (spec.N, spec.b_dtype)):
         full = np.zeros((rows, spec.K), dtype=np.uint8)
-        full[:, k_index] = rng.integers(0, 16, (rows, len(k_index)), dtype=np.uint8)
+        full[:, k_index] = _sparse_codes(rng, (rows, len(k_index)), dtype)
         codes.append(full)
     groups = spec.K // spec.block_k
-    a_scale = rng.integers(125, 129, (spec.M, groups), dtype=np.uint8)
-    b_scale = rng.integers(125, 129, (groups, spec.N), dtype=np.uint8)
+    low, high = (125, 129) if spec.a_dtype == "fp4" else (126, 128)
+    a_scale = rng.integers(low, high, (spec.M, groups), dtype=np.uint8)
+    b_scale = rng.integers(low, high, (groups, spec.N), dtype=np.uint8)
     c = rng.uniform(-2.0, 2.0, (spec.M, spec.N)).astype(np.float32)
     return (
-        pack_fp4_codes(codes[0]),
-        pack_fp4_codes(codes[1]),
+        _device_operand(codes[0], spec.a_dtype),
+        _device_operand(codes[1], spec.b_dtype),
         a_scale,
         b_scale,
         c.astype(_out_numpy_dtype(spec.out_dtype)),
         *codes,
+    )
+
+
+def timed_inputs(spec: MxGemmSpec, seed: int = 0x32F4):
+    """A, B and scales of the timed launches: FP4 as the Tensile client's
+    YAML run (``tensile_timing_inputs``); 8-bit random finite codes below 2
+    in magnitude (exponent MSB clear) with E8M0 scales in the same range."""
+    if spec.a_dtype == "fp4":
+        return tensile_timing_inputs(spec, seed)
+    rng = np.random.default_rng(seed)
+    operands = []
+    for rows in (spec.M, spec.N):
+        codes = rng.integers(0, 256, (rows, spec.K), dtype=np.uint8)
+        np.bitwise_and(codes, 0xBF, out=codes)
+        operands.append(codes)
+    groups = spec.K // spec.block_k
+    return (
+        *operands,
+        rng.integers(124, 131, (spec.M, groups), dtype=np.uint8),
+        rng.integers(124, 131, (groups, spec.N), dtype=np.uint8),
     )
 
 
@@ -189,14 +264,15 @@ def reference(
         b_codes, b_scale, c = b_codes[cols], b_scale[:, cols], c[:, cols]
     sa = decode_e8m0(a_scale).astype(np.float32)
     sb = decode_e8m0(b_scale).astype(np.float32)
+    a_values, b_values = decode_table(spec.a_dtype), decode_table(spec.b_dtype)
     out = np.zeros((a_codes.shape[0], b_codes.shape[0]), dtype=np.float32)
     for group in range(spec.K // spec.block_k):
         begin, end = group * spec.block_k, (group + 1) * spec.block_k
         a_group = a_codes[:, begin:end]
         if not a_group.any():
             continue
-        out += (_E2M1[a_group] * sa[:, group, None]) @ (
-            _E2M1[b_codes[:, begin:end]] * sb[group, :, None]
+        out += (a_values[a_group] * sa[:, group, None]) @ (
+            b_values[b_codes[:, begin:end]] * sb[group, :, None]
         ).T
     out = np.float32(alpha) * out + np.float32(beta) * c.astype(np.float32)
     if spec.out_dtype == "fp8e4m3":
@@ -400,7 +476,7 @@ def _run(spec, artifact, grid, cluster, *, args, runtime, timing_inputs: bool):
             return "PASS", None, None
         timed = launcher.arguments(m, n, k, alpha, 0.0)
         if timing_inputs:
-            timing = device_inputs((*tensile_timing_inputs(spec), inputs[4]))
+            timing = device_inputs((*timed_inputs(spec), inputs[4]))
             for index, array in enumerate(timing[:4]):
                 launcher.upload(index, array)
             timed = launcher.arguments(m, n, k, 1.0, 0.0)
@@ -493,6 +569,8 @@ _AXES = {
     "local_prefetch": ("local_prefetch", int, "1"),
     "half_plr": ("half_plr", str, "b"),
     "mma": ("mma", str, "32x16"),
+    "a_dtype": ("a_dtype", str, "fp4"),
+    "b_dtype": ("b_dtype", str, "fp4"),
     "a_lds_pad": ("a_lds_pad", _pad, "derived"),
     "b_lds_pad": ("b_lds_pad", _pad, "derived"),
     "a_scale_lds_pad": ("a_scale_lds_pad", _pad, "derived"),
@@ -516,8 +594,9 @@ def configurations(args, m: int, n: int, k: int):
                 fields[fieldname] = value
             if text != _AXES[option][2]:
                 label.append(f"{option}={text}")
+        name = "mxfp4_gemm" if fields["a_dtype"] == "fp4" else "mx_gemm"
         yield "|".join(label) or "(defaults)", MxGemmSpec(
-            name="mxfp4_gemm", M=m, N=n, K=k, **fields
+            name=name, M=m, N=n, K=k, **fields
         )
 
 
@@ -534,7 +613,13 @@ def _fmt(value) -> str:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--shape", choices=("smoke", "yaml"), default="smoke")
+    parser.add_argument(
+        "--shape",
+        choices=tuple(PROBLEMS),
+        default="smoke",
+        help="smoke 1024x1024x2048; yaml and maf 4096x4096x65536; "
+        "mab 65536x16x32768 (hipBLASLt's MXFP8 MAB)",
+    )
     parser.add_argument("--m", type=int, default=None)
     parser.add_argument("--n", type=int, default=None)
     parser.add_argument("--k", type=int, default=None)
@@ -550,9 +635,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--check-data",
         default=",".join(CHECK_DATA),
-        help="comma list: exact (FP4 0 / +1 over all of K), sparse (all E2M1 "
-        f"values, E8M0 2^-2..2^1, in up to {SPARSE_STEPS} 128-K steps); both "
-        "bit-exact",
+        help="comma list: exact (0 / +1 over all of K), sparse (all E2M1 "
+        "values or 8-bit values in [2^-1, 1.875], with small E8M0 scales, in "
+        f"up to {SPARSE_STEPS} 128-K steps); both bit-exact",
     )
     parser.add_argument(
         "--verify",
@@ -574,7 +659,8 @@ def main(argv: list[str] | None = None) -> int:
         "--timing-inputs",
         choices=("tensile", "check"),
         default="tensile",
-        help="data of the timed launches (see mxfp4_tdm_gemm_variants_bench)",
+        help="data of the timed launches: tensile (FP4 as in "
+        "mxfp4_tdm_gemm_variants_bench, 8-bit random) or check",
     )
     parser.add_argument("--check-only", action="store_true", help="check, do not time")
     parser.add_argument(
@@ -583,8 +669,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--out", type=Path, default=None)
     parser.add_argument("--emit-dir", type=Path, default=None)
     args = parser.parse_args(argv)
-    m, n, k = YAML_PROBLEM if args.shape == "yaml" else SMOKE_PROBLEM
+    m, n, k = PROBLEMS[args.shape]
     m, n, k = args.m or m, args.n or n, args.k or k
+    if args.base and {args.a_dtype, args.b_dtype} != {"fp4"}:
+        parser.error(f"--base times the FP4 {BASE_VARIANT}; use it with FP4 only")
     args.verify = args.verify or ("full" if args.shape == "smoke" else "sampled")
     args.check_betas = [float(x) for x in args.check_betas.split(",") if x.strip()]
     args.check_data = [x.strip() for x in args.check_data.split(",") if x.strip()]
