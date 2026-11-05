@@ -44,9 +44,8 @@ inline std::string LayoutFailure::message() const {
         case LayoutError::CoordinateOutOfRange:
             return "Tensor coordinate " + std::to_string(value) + " in dimension " +
                    std::to_string(dimension) + " is outside [0, " + std::to_string(limit) + ").";
-        default:
-            return "Unknown LayoutError failure.";
     }
+    return "Unknown LayoutError failure.";
 }
 }  // namespace detail
 
