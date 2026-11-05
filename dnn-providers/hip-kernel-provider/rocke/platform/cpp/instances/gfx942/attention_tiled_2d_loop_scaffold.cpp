@@ -90,7 +90,6 @@ void rocke_gfx942_attn2d_emit_loop_bounds_and_inits(rocke_gfx942_attn2d_build_ct
     const int BLOCK_M = ctx->BLOCK_M;
     const int NQK = ctx->NQK;
     const int SLIDING_WINDOW = ctx->SLIDING_WINDOW;
-    const int NUM_QH = ctx->NUM_QH;
     const int SOFTMAX_STATE_SLOTS = ctx->SOFTMAX_STATE_SLOTS;
 
     /* ---- max_seq_prefix_len (1982-1984) ---- */
@@ -173,9 +172,24 @@ void rocke_gfx942_attn2d_emit_loop_bounds_and_inits(rocke_gfx942_attn2d_build_ct
     rocke_value_t* m_inits[ROCKE_GFX942_ATTN2D_MAX_REGS_PER_LANE];
     rocke_value_t* l_inits[ROCKE_GFX942_ATTN2D_MAX_REGS_PER_LANE];
 
-    if(ctx->USE_SINKS)
+    if(ctx->USE_SINKS && ctx->USE_MFMA_32X32 && ctx->TRANSPOSED_QK_32X32
+       && ctx->TRANSPOSED_SCALAR_STATE)
     {
-        /* Narrow gfx942 path (the transposed-scalar 32x32 branch is gfx950). */
+        /* Transposed-scalar-state branch, reached by the gfx950 fastKV
+         * register-P twin: one state slot whose row is wave_row_base +
+         * lane_col32. */
+        rocke_value_t* row = rocke_b_add(B, ctx->wave_row_base, ctx->lane_col32_v);
+        rocke_value_t* qh_mul = rocke_b_mul(B, ctx->kv_head_idx, rocke_b_const_i32(B, NQK));
+        rocke_value_t* qh_mod = rocke_b_mod(B, row, rocke_b_const_i32(B, NQK));
+        rocke_value_t* qh = rocke_b_add(B, qh_mul, qh_mod);
+        rocke_value_t* qh_in = rocke_b_cmp_lt(B, qh, ctx->num_qh_p);
+        rocke_value_t* sink_h = rocke_b_global_load(B, ctx->sinks, qh, ctx->dtype, 2);
+        rocke_value_t* sink_f = rocke_b_fmul(B, rocke_b_cast_to_f32(B, sink_h), rcp_ln2);
+        m_inits[0] = rocke_b_select(B, qh_in, sink_f, neg_inf);
+    }
+    else if(ctx->USE_SINKS)
+    {
+        /* Narrow gfx942 path. */
         for(int r = 0; r < SOFTMAX_STATE_SLOTS; ++r)
         {
             rocke_value_t* row = rocke_b_add(B, ctx->wave_row_base, sc_state_row(ctx, lane_rg, r));
@@ -184,7 +198,7 @@ void rocke_gfx942_attn2d_emit_loop_bounds_and_inits(rocke_gfx942_attn2d_build_ct
             rocke_value_t* qh_mul = rocke_b_mul(B, ctx->kv_head_idx, rocke_b_const_i32(B, NQK));
             rocke_value_t* qh_mod = rocke_b_mod(B, row, rocke_b_const_i32(B, NQK));
             rocke_value_t* qh = rocke_b_add(B, qh_mul, qh_mod);
-            rocke_value_t* qh_in = rocke_b_cmp_lt(B, qh, rocke_b_const_i32(B, NUM_QH));
+            rocke_value_t* qh_in = rocke_b_cmp_lt(B, qh, ctx->num_qh_p);
             rocke_value_t* sink_h = rocke_b_global_load(B, ctx->sinks, qh, ctx->dtype, 2);
             rocke_value_t* sink_f = rocke_b_fmul(B, rocke_b_cast_to_f32(B, sink_h), rcp_ln2);
             m_inits[r] = rocke_b_select(B, qh_in, sink_f, neg_inf);
