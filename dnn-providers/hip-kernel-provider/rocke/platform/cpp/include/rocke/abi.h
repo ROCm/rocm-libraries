@@ -97,10 +97,12 @@ extern "C" {
  *    at its end, which changes its size; rocke_direct_conv_problem_total_c /
  *    _total_k return long long (they returned int), which changes their
  *    signature.
- * 9: indexed matrix sources, independent destination, and source-owned scales
- *    replace the flat MMA fields and role enum. Indexed queries supplement the
- *    result-aware A/B/C queries; native consumers must rebuild. */
-#define ROCKE_ABI_VERSION 9
+ * 9: rocke_block_scale_gemm_spec_t lost per_input_row at its end, which
+ *    changes its size.
+ * 10: indexed matrix sources, independent destination, and source-owned scales
+ *     replace the flat MMA fields and role enum. Indexed queries supplement the
+ *     result-aware A/B/C queries; native consumers must rebuild. */
+#define ROCKE_ABI_VERSION 10
 
 /* Wire ABI: the CBOR recipe/bundle/guard vocabulary this engine understands.
  * 2: list-tagged ("l") kernel attrs such as cluster_dims; level-1 engines drop them.

@@ -112,13 +112,15 @@ class TestBinaryAbiRefusal(unittest.TestCase):
         """Equal old tags cannot license the combined matrix/convolution layout."""
         from rocke.portable_ir.src import online
 
-        with (
-            patch.object(online, "_check_source_freshness"),
-            patch.object(online, "_bind") as bind,
-        ):
-            with self.assertRaisesRegex(RuntimeError, "binary ABI v8"):
-                online._adopt(_StubLibrary(8), "/stub/librocke.so")
-            bind.assert_not_called()
+        for reports in (8, 9):
+            with (
+                self.subTest(reports=reports),
+                patch.object(online, "_check_source_freshness"),
+                patch.object(online, "_bind") as bind,
+            ):
+                with self.assertRaisesRegex(RuntimeError, f"binary ABI v{reports}"):
+                    online._adopt(_StubLibrary(reports), "/stub/librocke.so")
+                bind.assert_not_called()
 
     def test_pre_indexed_mma_library_is_refused(self):
         """ABI 5 lacks the indexed MMA layout even with buffer-capable views."""
