@@ -13,8 +13,11 @@ model, rewrites promote's binding, or ``--check`` refuses a tree that ships one.
 
 from __future__ import annotations
 
+import copy
 import json
+import os
 import sys
+import uuid
 from pathlib import Path
 
 import pytest
@@ -147,3 +150,50 @@ def test_two_models_on_a_single_model_role_are_refused(tmp_path: Path) -> None:
     _install(tmp_path, "predict_applicable_kernels", "gfx950", "second", metric=None)
     with pytest.raises(gen_descriptors.HkpPackError, match="which binds one"):
         gen_descriptors.installed_models(tmp_path, UED_ID)
+
+
+def _promote():
+    """uhd_gen's promote module, so a binding is checked against promote rather than a copy
+    of its rules. Skips without uhd_gen's requirements, as uhd_gen's suites do, unless the
+    build requires them (HIPDNN_REQUIRE_UHD_GEN_TESTS)."""
+    sys.path.insert(0, str(FLYDSL.parents[2] / "projects" / "hipdnn" / "tools"))
+    if os.environ.get("HIPDNN_REQUIRE_UHD_GEN_TESTS"):
+        from uhd_gen import promote
+
+        return promote
+    return pytest.importorskip("uhd_gen.promote")
+
+
+@pytest.mark.parametrize(
+    ("role", "arch", "metric"),
+    [
+        ("predict_engine", "gfx950", "tflops"),  # a new key
+        ("predict_engine", "default", "tflops"),  # replaces the estimate slot
+        ("sort_kernel_catalog", "gfx942", "tflops"),  # a new key
+        (
+            "sort_kernel_catalog",
+            "default",
+            "tflops",
+        ),  # joins the metric-less native ranker
+        ("sort_kernel_catalog", "default", None),  # replaces the native ranker
+        ("predict_applicable_kernels", "gfx950", None),  # single-valued: the runtime
+        # reads it with requireId, so a list would drop the whole engine
+    ],
+)
+def test_a_binding_is_what_promote_writes(
+    tmp_path: Path, role: str, arch: str, metric: str | None
+) -> None:
+    promote = _promote()
+    before = _ued(tmp_path)
+    # promote reads the metric of every UHD a key already binds from its installed file.
+    installed_ids = {}
+    for name, doc in gen_descriptors.OpDescriptors(OP, FIELDS).documents().items():
+        if name.endswith(".uhd.json"):
+            path = tmp_path / name
+            path.write_text(json.dumps(doc), encoding="utf-8")
+            installed_ids[doc["id"]] = path
+    model = str(uuid.uuid4())
+    installed_ids[model] = _install(tmp_path, role, arch, model, metric=metric)
+    holder = copy.deepcopy(before)
+    written, _ = promote._rebind(holder, role, arch, model, metric, installed_ids)
+    assert _ued(tmp_path)[role][arch] == written
