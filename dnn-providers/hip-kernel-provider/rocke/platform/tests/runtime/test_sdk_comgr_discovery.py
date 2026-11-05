@@ -144,9 +144,48 @@ def test_required_compiler_query_preserves_sdk_load_failure(
 @pytest.mark.parametrize("suffix", ["", "_nonce"])
 @pytest.mark.parametrize("windows", [False, True])
 @pytest.mark.parametrize("relative_site", [False, True])
-@pytest.mark.parametrize("decoy_present", [False, True])
-def test_metadata_site_preserves_symlink_parent_traversal(
-    sdk_site, tmp_path, monkeypatch, suffix, windows, relative_site, decoy_present
+@pytest.mark.parametrize("hip", [False, True])
+def test_metadata_payload_preserves_parent_path_spelling(
+    tmp_path, monkeypatch, suffix, windows, relative_site, hip
+):
+    monkeypatch.chdir(tmp_path)
+    site = os.path.join("alias", "..", "site-packages")
+    if not relative_site:
+        site = os.path.join(str(tmp_path), site)
+    if hip:
+        relative = "bin/amdhip64_7.dll" if windows else "lib/libamdhip64.so.7"
+    else:
+        relative = "bin/amd_comgr0702.dll" if windows else "lib/libamd_comgr.so.3"
+    entry = f"_rocm_sdk_core{suffix}/{relative}"
+    distribution = SimpleNamespace(
+        files=[entry],
+        locate_file=lambda path: os.path.join(site, *str(path).split("/")),
+    )
+    monkeypatch.setattr(_sdk_comgr, "_distribution", lambda: distribution)
+    expected = os.path.join(
+        str(tmp_path), "alias", "..", "site-packages", *entry.split("/")
+    )
+    seen = []
+    monkeypatch.setattr(
+        _sdk_comgr.os.path,
+        "isfile",
+        lambda path: seen.append(path) or path == expected,
+    )
+    query = _sdk_comgr.hip_candidates if hip else _sdk_comgr.candidates
+    assert query(windows=windows) == [expected]
+    assert seen == [expected]
+
+
+def _check_metadata_parent_site(
+    sdk_site,
+    tmp_path,
+    monkeypatch,
+    suffix,
+    windows,
+    relative_site,
+    decoy_present,
+    *,
+    symlink,
 ):
     deployment = tmp_path / "deployment"
     site = deployment / "physical/site-packages"
@@ -164,21 +203,25 @@ def test_metadata_site_preserves_symlink_parent_traversal(
     )
     child = site.parent / "child"
     child.mkdir()
-    alias = deployment / "alias"
-    try:
-        alias.symlink_to(child, target_is_directory=True)
-    except OSError as error:
-        pytest.skip(f"directory symlink unavailable: {error}")
+    alias = child
+    if symlink:
+        alias = deployment / "alias"
+        try:
+            alias.symlink_to(child, target_is_directory=True)
+        except OSError as error:
+            pytest.skip(f"directory symlink unavailable: {error}")
     decoy = deployment / "site-packages" / core.name / relative
     if decoy_present:
         decoy.parent.mkdir(parents=True)
         decoy.touch()
     monkeypatch.chdir(tmp_path)
-    spelling = (
-        os.path.join("deployment", "alias", "..", "site-packages")
-        if relative_site
-        else os.path.join(str(alias), "..", "site-packages")
-    )
+    spelling = os.path.join(str(alias), "..", "site-packages")
+    if relative_site:
+        spelling = (
+            os.path.relpath(alias, tmp_path)
+            + os.sep
+            + os.path.join("..", "site-packages")
+        )
     monkeypatch.syspath_prepend(spelling)
     monkeypatch.setattr(rc, "_IS_WINDOWS", windows)
     raw = _sdk_comgr._distribution().locate_file(f"{core.name}/{relative}")
@@ -189,6 +232,46 @@ def test_metadata_site_preserves_symlink_parent_traversal(
     assert _sdk_comgr.release_for_path(str(library)) == (7, 9)
     if decoy_present:
         assert _sdk_comgr.release_for_path(str(decoy)) is None
+    assert all(name not in sys.modules for name in ("torch", "rocm_sdk", core.name))
+
+
+@pytest.mark.parametrize("suffix", ["", "_nonce"])
+@pytest.mark.parametrize("windows", [False, True])
+@pytest.mark.parametrize("relative_site", [False, True])
+@pytest.mark.parametrize("decoy_present", [False, True])
+def test_metadata_site_preserves_ordinary_parent_traversal(
+    sdk_site, tmp_path, monkeypatch, suffix, windows, relative_site, decoy_present
+):
+    _check_metadata_parent_site(
+        sdk_site,
+        tmp_path,
+        monkeypatch,
+        suffix,
+        windows,
+        relative_site,
+        decoy_present,
+        symlink=False,
+    )
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX symlink/parent traversal semantics")
+@pytest.mark.parametrize("suffix", ["", "_nonce"])
+@pytest.mark.parametrize("windows", [False, True])
+@pytest.mark.parametrize("relative_site", [False, True])
+@pytest.mark.parametrize("decoy_present", [False, True])
+def test_metadata_site_preserves_symlink_parent_traversal(
+    sdk_site, tmp_path, monkeypatch, suffix, windows, relative_site, decoy_present
+):
+    _check_metadata_parent_site(
+        sdk_site,
+        tmp_path,
+        monkeypatch,
+        suffix,
+        windows,
+        relative_site,
+        decoy_present,
+        symlink=True,
+    )
 
 
 def test_record_rejects_unowned_names(sdk_site):

@@ -519,10 +519,13 @@ external test-category YAML and TheRock's tier selection determine which
 registered tests actually execute. Check the selected list in the job log or
 with CTest's verbose listing. Registration alone does not establish CI coverage.
 The hipDNN source superbuild CI also runs build-tree CTest. With provider tests
-enabled, `rocke_compiler_discovery_source` runs three pytest files covering
+enabled, `rocke_compiler_discovery_source` runs four pytest files covering
 owner-forwarded native lowering and the source CTest compiler default, the Python
-compiler session, and Windows loaded-module inventory. Source-only configure
-checks run against the freshly built archive. The source arch-domain CTest also
+compiler session, Windows loaded-module inventory, and SDK metadata paths and
+ownership. Unicode DLL admission runs on Windows after fixture compilation in a
+separate build directory. Metadata spelling and ordinary parent traversal are
+cross-platform; physical symlink-parent traversal asserts POSIX semantics only
+on POSIX hosts. Source-only configure checks run against the freshly built archive. The source arch-domain CTest also
 receives the build compiler default while preserving caller override precedence
 and querying its own Python owner; native lowering never discovers a compiler.
 

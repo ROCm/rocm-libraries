@@ -19,7 +19,8 @@ if(BUILD_TESTING)
       COMMAND ${_ROCKE_TEST_LAUNCH} "${Python3_EXECUTABLE}" -m pytest
               "${CMAKE_CURRENT_SOURCE_DIR}/test_compiler_detection_native.py"
               "${CMAKE_CURRENT_SOURCE_DIR}/runtime/test_compiler_session.py"
-              "${CMAKE_CURRENT_SOURCE_DIR}/runtime/test_loaded_compilers_windows.py" -q)
+              "${CMAKE_CURRENT_SOURCE_DIR}/runtime/test_loaded_compilers_windows.py"
+              "${CMAKE_CURRENT_SOURCE_DIR}/runtime/test_sdk_comgr_discovery.py" -q)
     set_tests_properties(rocke_compiler_discovery_source PROPERTIES
       LABELS "ckc;python;host;quick;standard;comprehensive;full"
       TIMEOUT 600

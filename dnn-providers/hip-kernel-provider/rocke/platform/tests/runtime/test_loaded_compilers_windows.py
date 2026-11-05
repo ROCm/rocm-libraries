@@ -79,6 +79,96 @@ def test_windows_inventory_uses_forwarded_symbol_owner(
         )
 
 
+def _build_fixture_dll(compiler, build_dir, destination, major, *, trip=False):
+    """Compile with relative ASCII arguments, then deploy for Unicode loading."""
+    build_dir.mkdir(parents=True, exist_ok=True)
+    output = build_dir / destination.name
+    source = output.with_suffix(".cpp")
+    text = (
+        "#include <windows.h>\n#include <stddef.h>\n"
+        'extern "C" __declspec(dllexport) void amd_comgr_get_version(size_t*a,size_t*b){*a=3;*b=4;}\n'
+        'extern "C" __declspec(dllexport) int amd_comgr_do_action(int a,void*b,void*c,void*d){return 0;}\n'
+        f'extern "C" __declspec(dllexport) void LLVMGetVersion(unsigned*a,unsigned*b,unsigned*c){{*a={major};*b=0;*c=1;}}\n'
+    )
+    if trip:
+        text += 'BOOL WINAPI DllMain(HMODULE,DWORD reason,LPVOID){if(reason==DLL_PROCESS_ATTACH&&GetModuleHandleW(L"compiler.dll"))ExitProcess(86);return TRUE;}\n'
+    source.write_text(text, encoding="utf-8")
+    command = [compiler, "-shared", source.name, "-o", output.name]
+    result = subprocess.run(
+        command,
+        cwd=build_dir,
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    if result.returncode:
+        raise RuntimeError(
+            f"DLL fixture compiler {compiler!r} returned return code {result.returncode}; "
+            f"command={command!r}; working directory={str(build_dir)!r}; "
+            f"stdout={result.stdout!r}; stderr={result.stderr!r}"
+        )
+    if not output.is_file() or not output.stat().st_size:
+        raise RuntimeError(f"DLL fixture compiler produced no usable output: {output}")
+    shutil.copy2(output, destination)
+
+
+def test_windows_fixture_compiles_before_unicode_deployment(tmp_path, monkeypatch):
+    build_dir = tmp_path / "build"
+    deployment = tmp_path / "Jos\u00e9-\u4f8b"
+    deployment.mkdir()
+    destination = deployment / "compiler.dll"
+    binary = b"fixture DLL bytes"
+    calls = []
+
+    def compile_fixture(command, **kwargs):
+        calls.append((command, kwargs))
+        assert command[1:] == ["-shared", "compiler.cpp", "-o", "compiler.dll"]
+        assert kwargs["cwd"] == build_dir
+        assert all(argument.isascii() for argument in command)
+        source = (build_dir / "compiler.cpp").read_text()
+        assert "*a=23" in source
+        assert "ExitProcess(86)" in source
+        assert not destination.exists()
+        (build_dir / "compiler.dll").write_bytes(binary)
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    monkeypatch.setattr(subprocess, "run", compile_fixture)
+    _build_fixture_dll("fixture-clang", build_dir, destination, 23, trip=True)
+    assert len(calls) == 1
+    assert destination.read_bytes() == binary
+
+
+def test_windows_fixture_build_failure_is_not_skipped(tmp_path, monkeypatch):
+    destination = tmp_path / "compiler.dll"
+    monkeypatch.setattr(
+        subprocess,
+        "run",
+        lambda command, **kwargs: subprocess.CompletedProcess(command, 1, "", ""),
+    )
+    with pytest.raises(RuntimeError, match="fixture-clang.*return code 1") as error:
+        _build_fixture_dll("fixture-clang", tmp_path / "build", destination, 23)
+    assert "working directory" in str(error.value)
+    assert not destination.exists()
+
+
+@pytest.mark.parametrize("empty_output", [False, True])
+def test_windows_fixture_requires_a_usable_build_product(
+    tmp_path, monkeypatch, empty_output
+):
+    build_dir = tmp_path / "build"
+    destination = tmp_path / "compiler.dll"
+
+    def no_product(command, **kwargs):
+        if empty_output:
+            (build_dir / "compiler.dll").touch()
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    monkeypatch.setattr(subprocess, "run", no_product)
+    with pytest.raises(RuntimeError, match="produced no usable output"):
+        _build_fixture_dll("fixture-clang", build_dir, destination, 23)
+    assert not destination.exists()
+
+
 @pytest.mark.skipif(sys.platform != "win32", reason="actual Windows DLL load execution")
 @pytest.mark.parametrize("mode", ["match", "mismatch", "explicit"])
 def test_windows_renamed_preload_version_admission(tmp_path, mode):
@@ -93,26 +183,11 @@ def test_windows_renamed_preload_version_admission(tmp_path, mode):
     bin.mkdir(parents=True)
     candidate = bin / "amd_comgr0702.dll"
 
-    def build(path, major, trip=False):
-        source = path.with_suffix(".cpp")
-        text = (
-            "#include <windows.h>\n#include <stddef.h>\n"
-            'extern "C" __declspec(dllexport) void amd_comgr_get_version(size_t*a,size_t*b){*a=3;*b=4;}\n'
-            'extern "C" __declspec(dllexport) int amd_comgr_do_action(int a,void*b,void*c,void*d){return 0;}\n'
-            f'extern "C" __declspec(dllexport) void LLVMGetVersion(unsigned*a,unsigned*b,unsigned*c){{*a={major};*b=0;*c=1;}}\n'
-        )
-        if trip:
-            text += 'BOOL WINAPI DllMain(HMODULE,DWORD reason,LPVOID){if(reason==DLL_PROCESS_ATTACH&&GetModuleHandleW(L"compiler.dll"))ExitProcess(86);return TRUE;}\n'
-        source.write_text(text)
-        subprocess.run(
-            [compiler, "-shared", str(source), "-o", str(path)],
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-
-    build(foreign, 23)
-    build(candidate, 20 if mode == "mismatch" else 23, True)
+    build_dir = tmp_path / "build"
+    _build_fixture_dll(compiler, build_dir, foreign, 23)
+    _build_fixture_dll(
+        compiler, build_dir, candidate, 20 if mode == "mismatch" else 23, trip=True
+    )
     dist = site / "rocm_sdk_core-7.9.0rc1.dist-info"
     dist.mkdir()
     (dist / "METADATA").write_text("Name: rocm-sdk-core\nVersion: 7.9.0rc1\n")

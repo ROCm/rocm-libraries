@@ -250,7 +250,22 @@ def test_source_native_ctest_uses_effective_build_comgr(tmp_path, selection):
             text=True,
         ).stdout
     )["tests"]
-    assert any(test["name"] == "rocke_compiler_discovery_source" for test in inventory)
+    source_test = next(
+        test for test in inventory if test["name"] == "rocke_compiler_discovery_source"
+    )
+    for module in (
+        "test_compiler_detection_native.py",
+        "runtime/test_compiler_session.py",
+        "runtime/test_loaded_compilers_windows.py",
+        "runtime/test_sdk_comgr_discovery.py",
+    ):
+        assert (
+            sum(
+                Path(argument) == PLATFORM / "tests" / module
+                for argument in source_test["command"]
+            )
+            == 1
+        )
     arch_test = next(
         test
         for test in inventory
