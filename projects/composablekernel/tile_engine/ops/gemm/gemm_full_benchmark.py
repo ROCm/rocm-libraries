@@ -223,7 +223,9 @@ class _Workers:
 
     def __init__(self):
         self.lock = threading.Lock()
+        self.idle = threading.Condition(self.lock)  # no device thread active
         self.procs = set()
+        self.active = 0  # device threads running device_thread
         self.cancelled = False
 
     def start(self, *args, **kwargs):
@@ -240,14 +242,28 @@ class _Workers:
             self.procs.discard(proc)
 
     def run(self, devices, device_thread):
-        """Run ``device_thread(device_id)`` per device and wait for them."""
-        threads = [
-            threading.Thread(target=device_thread, args=(d,), daemon=True)
-            for d in devices
-        ]
-        for t in threads:
-            t.start()
+        """Run ``device_thread(device_id)`` per device and wait for them. On
+        an interrupt, also one while the threads start, every device thread
+        that got going has returned before it propagates; one whose start the
+        interrupt cut short, or that never started, runs nothing."""
+
+        def guarded(device_id):
+            with self.lock:
+                if self.cancelled:
+                    return
+                self.active += 1
+            try:
+                device_thread(device_id)
+            finally:
+                with self.lock:
+                    self.active -= 1
+                    self.idle.notify_all()
+
+        threads = []
         try:
+            for d in devices:
+                threads.append(threading.Thread(target=guarded, args=(d,), daemon=True))
+                threads[-1].start()
             for t in threads:
                 t.join()
         except BaseException:
@@ -258,8 +274,7 @@ class _Workers:
                         proc.kill()
                     except OSError:
                         pass
-            for t in threads:
-                t.join()
+                self.idle.wait_for(lambda: self.active == 0)
             raise
 
 

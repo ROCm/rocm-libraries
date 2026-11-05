@@ -435,6 +435,58 @@ def test_interrupt_stops_and_reaps_the_measurement_workers(tmp_path):
     assert (tmp_path / "rows.csv").read_text().splitlines() == [",".join(drv.CSV_FIELDS)]
 
 
+def test_interrupt_while_the_device_threads_start_stops_the_started_ones():
+    # An interrupt between two thread starts: the thread already started has
+    # its worker killed and reaped and is joined, and no worker starts after.
+    workers, procs, started = drv._Workers(), [], threading.Event()
+
+    def device_thread(device_id):
+        proc = workers.start([sys.executable, "-c", "import time; time.sleep(600)"])
+        procs.append(proc)
+        started.set()
+        proc.communicate()
+        workers.done(proc)
+
+    def devices():
+        yield "0"
+        assert started.wait(30)
+        raise KeyboardInterrupt
+
+    with pytest.raises(KeyboardInterrupt):
+        workers.run(devices(), device_thread)
+    assert len(procs) == 1 and procs[0].returncode is not None
+    assert workers.start([sys.executable, "-c", ""]) is None
+
+
+def test_interrupt_inside_a_thread_start_still_stops_that_thread(monkeypatch):
+    # The interrupt arrives inside Thread.start(), after the thread is
+    # running: that thread's worker is killed and reaped, and it has returned
+    # before the interrupt propagates. The second device never runs.
+    workers, procs, started = drv._Workers(), [], threading.Event()
+
+    def device_thread(device_id):
+        proc = workers.start([sys.executable, "-c", "import time; time.sleep(600)"])
+        if proc is None:
+            return
+        procs.append(proc)
+        started.set()
+        proc.communicate()
+        workers.done(proc)
+
+    real = threading.Thread.start
+
+    def start(self):
+        real(self)
+        assert started.wait(30)
+        raise KeyboardInterrupt  # before start() returns
+
+    monkeypatch.setattr(threading.Thread, "start", start)
+    with pytest.raises(KeyboardInterrupt):
+        workers.run(["0", "1"], device_thread)
+    assert len(procs) == 1 and procs[0].returncode is not None
+    assert workers.active == 0 and workers.cancelled
+
+
 # ----------------------------------------------------------------- main()
 
 
