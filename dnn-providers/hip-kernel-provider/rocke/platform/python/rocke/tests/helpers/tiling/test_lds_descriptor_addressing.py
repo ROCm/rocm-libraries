@@ -609,18 +609,6 @@ def test_migrated_demos_keep_their_lds_access_widths(label: str) -> None:
 # ---- GPU (gfx90a) ------------------------------------------------------------------------------------
 
 
-def _gfx90a_present() -> bool:
-    try:
-        from rocke.runtime.hip_module import get_device_arch
-
-        return get_device_arch(0) == "gfx90a"
-    except Exception:  # noqa: BLE001
-        # Any HIP or driver failure means there is no usable GPU here.
-        return False
-
-
-_needs_gfx90a = pytest.mark.skipif(not _gfx90a_present(), reason="needs a gfx90a GPU")
-
 _NP = {"f16": np.float16, "f32": np.float32, "i8": np.int8}
 _IR = {"f16": F16, "f32": F32, "i8": I8}
 
@@ -702,7 +690,7 @@ def _round_up(n: int, m: int) -> int:
     return -(-n // m) * m
 
 
-@_needs_gfx90a
+@pytest.mark.usefixtures("gfx90a_gpu")
 @pytest.mark.parametrize("dtype", ["f16", "f32"])
 @pytest.mark.parametrize(
     "case",
@@ -743,7 +731,7 @@ def test_lds_round_trip_places_elements_by_strides(dtype: str, case: str) -> Non
     np.testing.assert_array_equal(raw[r * lds_strides[0] + c * lds_strides[1]], data)
 
 
-@_needs_gfx90a
+@pytest.mark.usefixtures("gfx90a_gpu")
 def test_swizzled_i8_round_trip_with_16_element_runs() -> None:
     # i8 rows of 64, stored with 16-element runs and read back one element per register down the
     # columns, both through the built-in swizzle: the read side agrees with the store side only if
@@ -774,7 +762,7 @@ def test_swizzled_i8_round_trip_with_16_element_runs() -> None:
     np.testing.assert_array_equal(raw[r * cols + (c ^ ((r & 7) << 3))], data)
 
 
-@_needs_gfx90a
+@pytest.mark.usefixtures("gfx90a_gpu")
 @pytest.mark.parametrize("dtype", ["f16", "f32"])
 def test_lds_round_trip_rank_3_stages(dtype: str) -> None:
     # Two stages of a (free, K) = (32, 16) tile, staged [stage][K][free]: the LDS descriptor is
@@ -819,7 +807,7 @@ def test_lds_round_trip_rank_3_stages(dtype: str) -> None:
     np.testing.assert_array_equal(raw_h[s * k * free + f + kk * free], data)
 
 
-@_needs_gfx90a
+@pytest.mark.usefixtures("gfx90a_gpu")
 def test_interleaved_accumulator_lds_round_trip() -> None:
     # The interleaved accumulator of a 64 x 64 x 32 f16 tile holds M positions 0, 4, 8 and 12 in
     # four consecutive registers. It is loaded from a row-major global tensor, stored into an
@@ -904,7 +892,7 @@ def _convention_gemm(wave):
     return b.kernel, signature, grid, (mma.wave_size, 1, 1), (m_len, n_len, k_len)
 
 
-@_needs_gfx90a
+@pytest.mark.usefixtures("gfx90a_gpu")
 @pytest.mark.parametrize("wave", [(16, 16, 16), (32, 32, 16), (16, 32, 32)])
 def test_gemm_with_b_staged_n_contiguous_is_bit_exact(wave) -> None:
     kernel, signature, grid, block, (m_len, n_len, k_len) = _convention_gemm(wave)

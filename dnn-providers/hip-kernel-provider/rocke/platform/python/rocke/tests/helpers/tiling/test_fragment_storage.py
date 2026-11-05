@@ -668,19 +668,6 @@ def test_the_lds_bank_model_refuses_packed_data() -> None:
 # ---- GPU (gfx90a) ---------------------------------------------------------------------------------------
 
 
-def _gfx90a_present() -> bool:
-    try:
-        from rocke.runtime.hip_module import get_device_arch
-
-        return get_device_arch(0) == "gfx90a"
-    except Exception:  # noqa: BLE001
-        # Any HIP or driver failure means there is no usable GPU here.
-        return False
-
-
-_needs_gfx90a = pytest.mark.skipif(not _gfx90a_present(), reason="needs a gfx90a GPU")
-
-
 def _run(
     kernel, signature, inputs: dict, outputs: dict, scalars: dict | None = None
 ) -> None:
@@ -749,7 +736,7 @@ def _tf32_round_trip_kernel():
     return b.kernel, signature, (rows, cols)
 
 
-@_needs_gfx90a
+@pytest.mark.usefixtures("gfx90a_gpu")
 def test_tf32_payload_round_trips_through_lds() -> None:
     # A tf32 tile is loaded from global memory with 4-element runs, stored into an LDS buffer that
     # holds it transposed, read back with runs along the other axis and stored to OUT. tf32 has no
@@ -837,7 +824,7 @@ def _packed_round_trip_kernel(name, dtype, bits):
     return b.kernel, signature, a_desc, words
 
 
-@_needs_gfx90a
+@pytest.mark.usefixtures("gfx90a_gpu")
 def test_a_u8_tile_round_trips_through_lds() -> None:
     # Every byte value, the high bit included, must come back unchanged through global memory and
     # LDS: a u8 fragment is a byte vector, never sign-extended.
@@ -848,7 +835,7 @@ def test_a_u8_tile_round_trips_through_lds() -> None:
     np.testing.assert_array_equal(out, data)
 
 
-@_needs_gfx90a
+@pytest.mark.usefixtures("gfx90a_gpu")
 @pytest.mark.parametrize("name,dtype,bits", _PACKED, ids=[p[0] for p in _PACKED])
 def test_packed_operand_tile_round_trips(name, dtype, bits) -> None:
     # An A-operand tile (16 x 128, K contiguous) in gfx950's canonical f8f6f4 layout is loaded from a
@@ -884,7 +871,7 @@ def test_storage_word_kernels_lower_identically_in_both_engines(name) -> None:
     lower_with_both_engines(kernel, "gfx90a")
 
 
-@_needs_gfx90a
+@pytest.mark.usefixtures("gfx90a_gpu")
 @pytest.mark.parametrize(
     "runtime_bound", [False, True], ids=["compile_time", "runtime"]
 )
@@ -1033,7 +1020,7 @@ _TRANSFORMED = [
 ]
 
 
-@_needs_gfx90a
+@pytest.mark.usefixtures("gfx90a_gpu")
 @pytest.mark.parametrize(
     "name,dtype,carrier", _TRANSFORMED, ids=[t[0] for t in _TRANSFORMED]
 )
