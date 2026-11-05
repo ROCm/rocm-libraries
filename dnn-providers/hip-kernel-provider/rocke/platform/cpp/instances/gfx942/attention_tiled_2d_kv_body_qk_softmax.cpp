@@ -425,11 +425,14 @@ void rocke_gfx942_attn2d_emit_kv_body(rocke_gfx942_attn2d_build_ctx_t* ctx)
     rocke_value_t* alpha_regs[ROCKE_GFX942_ATTN2D_MAX_REGS_PER_LANE];
     rocke_value_t* new_l_vals[ROCKE_GFX942_ATTN2D_MAX_REGS_PER_LANE];
     rocke_value_t* m_carry_out[ROCKE_GFX942_ATTN2D_MAX_REGS_PER_LANE];
+    /* Clamped max for a NULL m_carry_out slot, rebuilt at the yield. */
+    rocke_value_t* m_carry_new[ROCKE_GFX942_ATTN2D_MAX_REGS_PER_LANE];
     for(int _i = 0; _i < ROCKE_GFX942_ATTN2D_MAX_REGS_PER_LANE; ++_i)
     {
         alpha_regs[_i] = NULL;
         new_l_vals[_i] = NULL;
         m_carry_out[_i] = NULL;
+        m_carry_new[_i] = NULL;
     }
 
     /* PT32 register groups for the transposed register-P PV (Python PT32_groups,
@@ -708,7 +711,9 @@ void rocke_gfx942_attn2d_emit_kv_body(rocke_gfx942_attn2d_build_ctx_t* ctx)
         for(int r = 0; r < SOFTMAX_STATE_SLOTS; ++r)
         {
             m_new[r] = st_m_new;
-            m_carry_out[r] = st_m_raw;
+            /* The yield rebuilds the raw max from l and st_m_new, so st_m_raw
+             * does not stay live through the body. */
+            m_carry_new[r] = st_m_new;
             l_local[r] = st_l_sum;
         }
 
@@ -1283,6 +1288,9 @@ void rocke_gfx942_attn2d_emit_kv_body(rocke_gfx942_attn2d_build_ctx_t* ctx)
         pv_in.alpha_count = SOFTMAX_STATE_SLOTS;
         pv_in.new_l_vals = new_l_vals;
         pv_in.m_carry = m_carry_out;
+        pv_in.m_new = m_carry_new;
+        pv_in.zero_f = zero_f;
+        pv_in.neg_inf = neg_inf;
         if(ctx->REGISTER_PV)
         {
             pv_in.p_regs_f32 = p_regs_f32_buf;

@@ -4662,7 +4662,9 @@ def build_unified_attention_2d_tiled(
                 # full ``l_new = alpha * l_old + l_sum`` updates are applied
                 # by that shared downstream block, not here.
                 m_new = [st_m_new for _ in range(SOFTMAX_STATE_SLOTS)]
-                m_carry = [st_m_raw for _ in range(SOFTMAX_STATE_SLOTS)]
+                # The raw max is rebuilt at the yield from l and st_m_new, so
+                # st_m_raw does not stay live through the body.
+                m_carry = None
                 l_local = [st_l_sum for _ in range(SOFTMAX_STATE_SLOTS)]
                 # In the transposed orientation we already have masked /
                 # scaled / softcapped scores in ``st_scores`` and softmax
@@ -5539,6 +5541,14 @@ def build_unified_attention_2d_tiled(
         # P and alpha. Carrying the clamped 0 instead pins m at 0 when a row's
         # first tile is fully masked (sliding window), and exp2(s - 0) then
         # underflows P for very negative scores so the row's O collapses.
+        if m_carry is None:
+            # The raw max is -inf exactly while the row has seen no key, which
+            # is when l is 0 (a seen key adds P = 1 at the max). Testing l
+            # rather than st_ok keeps LLVM from folding the raw max back in.
+            m_carry = [
+                b.select(b.fcmp("oeq", new_l_vals[r], zero_f), neg_inf, m_new[r])
+                for r in range(SOFTMAX_STATE_SLOTS)
+            ]
         yields = []
         for r in range(SOFTMAX_STATE_SLOTS):
             yields.append(m_carry[r])

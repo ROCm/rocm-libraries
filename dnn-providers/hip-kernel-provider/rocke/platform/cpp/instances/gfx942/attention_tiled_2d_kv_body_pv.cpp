@@ -705,9 +705,21 @@ void rocke_gfx942_attn2d_emit_pv_bucket(rocke_gfx942_attn2d_build_ctx_t* ctx,
         const int S = ctx->SOFTMAX_STATE_SLOTS;
         rocke_value_t* yields[ROCKE_GFX942_ATTN2D_MAX_ITER_ARGS];
         int y = 0;
+        /* A NULL carry is rebuilt as new_l == 0 ? -inf : m_new: the raw max is
+         * -inf exactly while the row has seen no key (Python's m_carry None). */
+        rocke_value_t* m_carry[ROCKE_GFX942_ATTN2D_MAX_REGS_PER_LANE];
         for(int r = 0; r < S; ++r)
         {
-            yields[y++] = in->m_carry[r];
+            m_carry[r] = in->m_carry[r];
+            if(m_carry[r] == NULL)
+            {
+                rocke_value_t* no_key = rocke_b_fcmp(B, "oeq", in->new_l_vals[r], in->zero_f);
+                m_carry[r] = rocke_b_select(B, no_key, in->neg_inf, in->m_new[r]);
+            }
+        }
+        for(int r = 0; r < S; ++r)
+        {
+            yields[y++] = m_carry[r];
             yields[y++] = in->new_l_vals[r];
         }
         for(int n = 0; n < ACC_N_TILES; ++n)

@@ -597,6 +597,11 @@ typedef struct rocke_gfx942_attn2d_pv_inputs
     int alpha_count;
     rocke_value_t* const* new_l_vals; /* SOFTMAX_STATE_SLOTS                       */
     rocke_value_t* const* m_carry; /* SOFTMAX_STATE_SLOTS: unclamped running max */
+    /* NULL m_carry[r]: the yield rebuilds the raw max as new_l == 0 ? -inf :
+     * m_new[r] (the transposed path), so the raw max does not stay live. */
+    rocke_value_t* const* m_new; /* SOFTMAX_STATE_SLOTS: clamped running max */
+    rocke_value_t* zero_f;
+    rocke_value_t* neg_inf;
     /* PT32 register groups: pt32[g] is the flat [p_tile*RPL + reg] array for
      * group g; group 0 = current tile, group 1 = GROUPED_KV2 second tile. */
     rocke_value_t* const* pt32_g0;
