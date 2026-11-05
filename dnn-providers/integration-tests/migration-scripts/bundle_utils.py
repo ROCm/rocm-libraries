@@ -222,17 +222,34 @@ def canonical_uid_map_by_name(graph: dict) -> dict:
 
 
 def remap_meta_inputs(meta: dict, m: dict) -> dict:
-    """Deep copy of metadata with ``inputs`` fill-spec keys remapped via ``m``.
+    """Deep copy of metadata with every tensor UID remapped via ``m``.
 
-    ``inputs`` is keyed by stringified tensor UID, so it must be remapped in
-    lockstep with the graph whenever UIDs are canonicalized — otherwise a
-    tensor's fill spec (range/kind/seed) would end up attached to the wrong
-    tensor after remapping.
+    ``inputs`` is keyed by stringified tensor UID, and each ``aliases`` entry
+    (``uid``, ``of``), ``start_offsets`` entry (``uid``) and ``live_rows`` entry
+    (``uid``, ``lengths``, ``like``) names tensors by UID, so they must be
+    remapped in lockstep with the graph whenever UIDs are canonicalized —
+    otherwise a tensor's fill spec, alias, start offset or live rows would end up
+    attached to the wrong tensor after remapping. Entries that are not
+    integer UIDs are left as they are; the harness rejects them at load.
     """
     out = copy.deepcopy(meta)
     inputs = out.get("inputs")
     if isinstance(inputs, dict):
         out["inputs"] = {str(m.get(int(k), int(k))): v for k, v in inputs.items()}
+    for section, keys in (
+        ("aliases", ("uid", "of")),
+        ("start_offsets", ("uid",)),
+        ("live_rows", ("uid", "lengths", "like")),
+    ):
+        entries = out.get(section)
+        if not isinstance(entries, list):
+            continue
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+            for key in keys:
+                if isinstance(entry.get(key), int) and not isinstance(entry[key], bool):
+                    entry[key] = m.get(entry[key], entry[key])
     return out
 
 
@@ -254,6 +271,27 @@ def inputs_by_name(meta: dict, graph: dict) -> dict:
             continue
         out[nm.get(uid, k)] = v
     return out
+
+
+def aliases_by_name(meta: dict, graph: dict) -> list:
+    """Metadata ``aliases`` with tensor names in place of UIDs, sorted by view name.
+
+    Each entry becomes ``{"view": <name>, "of": <name>, "byte_offset": <bytes>}``,
+    so the aliases of a captured graph and of its placed bundle can be compared
+    however their UIDs were assigned (see :func:`inputs_by_name`). A UID that
+    names no tensor of ``graph`` stays as it is.
+    """
+    nm = name_by_uid(graph)
+    out = [
+        {
+            "view": nm.get(a.get("uid"), a.get("uid")),
+            "of": nm.get(a.get("of"), a.get("of")),
+            "byte_offset": a.get("byte_offset"),
+        }
+        for a in meta.get("aliases", [])
+        if isinstance(a, dict)
+    ]
+    return sorted(out, key=lambda a: str(a["view"]))
 
 
 # --------------------------------------------------------------------------
