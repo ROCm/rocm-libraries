@@ -1670,7 +1670,7 @@ class TestVerifyGoldenBundlesCli(unittest.TestCase):
         template["tensors"].append(
             {
                 "uid": 2,
-                "name": "${case.sink_name}",
+                "name": "sink",
                 "dims": "${case.dims}",
                 "strides": "${case.strides}",
                 "data_type": "${case.data_type}",
@@ -1681,7 +1681,6 @@ class TestVerifyGoldenBundlesCli(unittest.TestCase):
         full = self.sweep_case(
             "with_sink",
             tensor_uids=(0, 1, 2),
-            values_overrides={"sink_name": "sink"},
             golden_path=None,
         )
         sweep_path.write_text(
