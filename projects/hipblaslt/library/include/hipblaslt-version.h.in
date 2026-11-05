@@ -28,7 +28,8 @@
  * \brief hipblaslt-version.h provides the configured version and settings
  */
 
-#pragma once
+#ifndef _HIPBLASLT_VERSION_H_
+#define _HIPBLASLT_VERSION_H_
 
 /* clang-format off */
 #define HIPBLASLT_VERSION_MAJOR     @hipblaslt_VERSION_MAJOR@
@@ -36,3 +37,5 @@
 #define HIPBLASLT_VERSION_PATCH     @hipblaslt_VERSION_PATCH@
 #define HIPBLASLT_VERSION_TWEAK     @hipblaslt_VERSION_TWEAK@
 /* clang-format on */
+
+#endif /* _HIPBLASLT_VERSION_H_ */
