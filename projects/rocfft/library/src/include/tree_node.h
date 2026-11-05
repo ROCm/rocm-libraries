@@ -32,6 +32,7 @@
 #include <string>
 #include <vector>
 
+#include "../../../shared/arithmetic.h"
 #include "../../../shared/device_properties.h"
 #include "../../../shared/gpubuf.h"
 #include "../../../shared/hip_object_wrapper.h"
@@ -234,28 +235,21 @@ struct rocfft_location_t
 // workspaces or communications.
 class InternalTempBuffer
 {
-public:
-    InternalTempBuffer(rocfft_location_t _location)
+    // only TempBufferRegistry::emplace makes these, so that every one is registered
+    friend class TempBufferRegistry;
+
+    InternalTempBuffer(rocfft_location_t _location, size_t _size_bytes)
         : location(_location)
+        // Round size up to nearest multiple of 16 bytes, to ensure
+        // that buffers placed back to back are not misaligned.
+        , size_bytes(DivRoundingUp<size_t>(_size_bytes, 16) * 16)
     {
     }
+
+public:
     InternalTempBuffer(const InternalTempBuffer&) = delete;
     InternalTempBuffer& operator=(const InternalTempBuffer&) = delete;
     ~InternalTempBuffer()                                    = default;
-
-    void ensure_size_bytes(size_t in)
-    {
-        if(in > size_bytes)
-        {
-            size_bytes = in;
-            // Round size up to nearest multiple of 16 bytes, to
-            // ensure that if we satisfy two temp buffer requests
-            // with a single allocation, neither one will be
-            // unexpectedly misaligned.
-            auto remainder = size_bytes % 16;
-            size_bytes += remainder ? 16 - remainder : 0;
-        }
-    }
 
     size_t get_size_bytes() const
     {
@@ -267,9 +261,21 @@ public:
         return location;
     }
 
+    size_t get_offset_bytes() const
+    {
+        return offset_bytes;
+    }
+
+    void set_offset_bytes(size_t in)
+    {
+        offset_bytes = in;
+    }
+
 private:
     rocfft_location_t location;
-    size_t            size_bytes = 0;
+    const size_t      size_bytes;
+    // offset in the device's work buffer
+    size_t offset_bytes = 0;
 };
 
 // Class representing a buffer in a multi-plan item.
@@ -410,6 +416,49 @@ private:
     size_t                              idx       = 0;
     int                                 comm_rank = -1;
     std::shared_ptr<InternalTempBuffer> temp_ptr;
+};
+
+// A plan's temp buffers, and the only way to create one.
+class TempBufferRegistry
+{
+public:
+    BufferPtr emplace(const rocfft_location_t& location, size_t size_bytes)
+    {
+        // make_shared can't reach the private constructor
+        std::shared_ptr<InternalTempBuffer> buf(new InternalTempBuffer(location, size_bytes));
+        buffers.push_back(buf);
+        return BufferPtr::temp(buf);
+    }
+
+    size_t size() const
+    {
+        return buffers.size();
+    }
+
+    // drop the buffers created after the first n
+    void truncate(size_t n)
+    {
+        if(n < buffers.size())
+            buffers.resize(n);
+    }
+
+    void clear()
+    {
+        buffers.clear();
+    }
+
+    auto begin() const
+    {
+        return buffers.begin();
+    }
+
+    auto end() const
+    {
+        return buffers.end();
+    }
+
+private:
+    std::vector<std::shared_ptr<InternalTempBuffer>> buffers;
 };
 
 // The mininal tree node data needed to decide the scheme
@@ -2122,12 +2171,12 @@ struct ExecPlan : public MultiPlanItem
 
     bool WritesToBuffer(const BufferPtr& ptr) const override
     {
-        return ptr == outputPtr;
+        return ptr == outputPtr || (workPtr && ptr == workPtr);
     }
 
     bool ReadsFromBuffer(const BufferPtr& ptr) const override
     {
-        return ptr == inputPtr;
+        return ptr == inputPtr || (workPtr && ptr == workPtr);
     }
 
     bool ExecutesOnRank(int comm_rank) const override
