@@ -334,15 +334,28 @@ def _spec_json(spec):
     return json.dumps(spec, sort_keys=True, default=str)
 
 
+def _non_string_fields(ks) -> bool:
+    """Whether a launch's `source`, `builder` or `target` is not a string: it cannot be built,
+    and as part of a family key it would fail the child (an unhashable list or object).
+    """
+    return not all(
+        isinstance(ks.get(k, "native"), str) for k in ("source", "builder", "target")
+    )
+
+
+_NON_STRING = "has a `source`, `builder` or `target` that is not a string"
+
+
 def _ukd_variants(d, arches, kdp, origin):
     """(variants, reason) of one descriptor dict, as hkp_pack enumerates it. A single
     `kernel_source` is one variant named by the descriptor (none when it lacks source and
     builder, e.g. a hip kernel). A `sources` UKD groups its launches by (source, builder,
     spec, target); each group is one variant, named by the descriptor when there is one group,
     else `<name>@<launch>[+<launch>...]` with the launch names sorted. A `sources` UKD whose
-    launches all share one other packer kind (hip, hsaco) has no rocKE build and gives none,
-    as a single hip launch does. REASON, set when the descriptor cannot be read (a field that is
-    not of its JSON type included), is for `not_inspected` and the variants are then empty.
+    launches all share one other packer kind (hip, hsaco, kpack, embedded_source) has no rocKE
+    build and gives none, as a single hip launch does. The name is the descriptor's `name`, else
+    its `id`. REASON, set when the descriptor cannot be read (a field that is not of its JSON
+    type included), is for `not_inspected` and the variants are then empty.
     """
     has_ks, has_sources = "kernel_source" in d, "sources" in d
     name = d.get("name") or d.get("id") or "?"
@@ -353,7 +366,11 @@ def _ukd_variants(d, arches, kdp, origin):
         if not isinstance(entries, dict) or not entries:
             return [], f"{name}: `sources` is not a non-empty object"
         kinds = {
-            ks.get("kind") if isinstance(ks, dict) and _is_str(ks.get("kind")) else None
+            (
+                ks.get("kind")
+                if isinstance(ks, dict) and isinstance(ks.get("kind"), str)
+                else None
+            )
             for ks in entries.values()
         }
         if len(kinds) == 1 and kinds & _OTHER_KINDS:
@@ -372,13 +389,8 @@ def _ukd_variants(d, arches, kdp, origin):
                     [],
                     f"{name}: sources entry `{launch}` lacks `source` or `builder`",
                 )
-            if not all(
-                _is_str(ks.get(k, "native")) for k in ("source", "builder", "target")
-            ):
-                return (
-                    [],
-                    f"{name}: sources entry `{launch}` has a `source`, `builder` or `target` that is not a string",
-                )
+            if _non_string_fields(ks):
+                return [], f"{name}: sources entry `{launch}` {_NON_STRING}"
             key = (
                 ks["source"],
                 ks["builder"],
@@ -386,28 +398,33 @@ def _ukd_variants(d, arches, kdp, origin):
                 ks.get("target", "native"),
             )
             groups.setdefault(key, (ks, []))[1].append(launch)
-        out = []
-        for ks, launches in groups.values():
-            vname = name if len(groups) == 1 else f"{name}@{'+'.join(sorted(launches))}"
-            out.append(_variant(vname, arches, ks, kdp, origin))
-        return out, None
-    ks = d.get("kernel_source")
-    if ks is None:
-        return [], None
-    if not isinstance(ks, dict):
-        return [], f"{name}: `kernel_source` is not an object"
-    if not (ks.get("source") and ks.get("builder")):
-        return [], None
-    if not all(_is_str(ks.get(k, "native")) for k in ("source", "builder", "target")):
-        return (
-            [],
-            f"{name}: `kernel_source` has a `source`, `builder` or `target` that is not a string",
+        named = [
+            (ks, sorted(launches) if len(groups) > 1 else None)
+            for ks, launches in groups.values()
+        ]
+    else:
+        ks = d.get("kernel_source")
+        if ks is None:
+            return [], None
+        if not isinstance(ks, dict):
+            return [], f"{name}: `kernel_source` is not an object"
+        if not (ks.get("source") and ks.get("builder")):
+            return [], None
+        if _non_string_fields(ks):
+            return [], f"{name}: `kernel_source` {_NON_STRING}"
+        named = [(ks, None)]
+    if not isinstance(name, str):
+        return [], f"{name}: the descriptor `name` is not a string"
+    return [
+        _variant(
+            f"{name}@{'+'.join(launches)}" if launches else name,
+            arches,
+            ks,
+            kdp,
+            origin,
         )
-    return [_variant(d["name"], arches, ks, kdp, origin)], None
-
-
-def _is_str(value) -> bool:
-    return isinstance(value, str)
+        for ks, launches in named
+    ], None
 
 
 def _variant(name, arches, ks, kdp, origin):

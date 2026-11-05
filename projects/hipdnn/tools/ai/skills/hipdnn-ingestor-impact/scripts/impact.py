@@ -2785,9 +2785,11 @@ def binds_elsewhere(
     """Whether the class `name` that `path` (parsed as `module`) reads is another than
     `defining`'s. When the name resolves to a repository class, followed through package
     `__init__` re-exports (`from rocke.dispatch.tuning import X` reaches the module defining X),
-    that class decides. Otherwise the file binds it elsewhere when it imports it from another
-    module (an external package included) or defines a def or class of that name anywhere,
-    nested ones included. Its `.member` reads are then not of `defining`'s class."""
+    that class decides. Otherwise the file binds it elsewhere when it imports it from outside the
+    repository or defines a def or class of that name anywhere, nested ones included. An import
+    from a repository module whose chain does not resolve (`X = waves.X`, a lazy export) may
+    still be `defining`'s class, so it is not elsewhere. Its `.member` reads are then not of
+    `defining`'s class."""
     if path == defining:
         return False
     found = resolve_class(tree, known, path, name)
@@ -2798,7 +2800,9 @@ def binds_elsewhere(
     ]
     if any(imp is not None and in_module(defining, stem) for stem, imp in imports):
         return False
-    return bool(imports) or any(
+    if any(not any(in_module(p, stem) for p in known) for stem, _ in imports):
+        return True
+    return any(
         isinstance(n, (*DEFINITION_FUNCS, ast.ClassDef)) and n.name == name
         for n in ast.walk(module)
     )

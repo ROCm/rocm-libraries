@@ -1811,16 +1811,23 @@ def test_merged_view_does_not_fold_when_the_target_moved_what_the_change_imports
     assert all(r["merged_only"] for r in rows_of(data, status="changed"))
 
 
+@pytest.mark.parametrize(
+    "export",
+    ["from .waves import Space\n", "from . import waves\n\nSpace = waves.Space\n"],
+    ids=["re-export", "unresolved-alias"],
+)
 def test_member_removed_from_a_class_read_through_its_package_is_mismatch(
-    mod, capsys, tmp_path
+    mod, capsys, tmp_path, export
 ):
     # catches: a reader importing the class from its package (`from hkp_pack.tuning import
     # Space`, re-exported by the package __init__) taken for another module's class, so the
-    # removal of a member it still reads is not a break
+    # removal of a member it still reads is not a break; also when the package's export is
+    # one the resolver cannot follow (`Space = waves.Space`), which is still a repository
+    # import and so not proof of another class
     pkg = HKP_PACK + "tuning/"
     cls = "class Space:\n    def keep(self):\n        return 0\n\n    def probe_knob(self):\n        return 1\n"
     reader = "from hkp_pack.tuning import Space\n\n\ndef f():\n    return Space().probe_knob()\n"
-    files = {pkg + "__init__.py": "from .waves import Space\n", pkg + "waves.py": cls,
+    files = {pkg + "__init__.py": export, pkg + "waves.py": cls,
              HKP_PACK + "user.py": reader}  # fmt: skip
     repo, base = make_repo(tmp_path, files)
     head = commit(

@@ -1164,15 +1164,40 @@ def test_ukd_with_both_kernel_source_and_sources_is_not_inspected(emit, tmp_path
     assert [s["reason"].split(":")[0] for s in skipped] == ["both"]
 
 
+@pytest.mark.parametrize(
+    "ukd",
+    [{"name": "hip", "kernel_source": {"kind": "hip", "file": "k.hip"}},
+     {"name": "plain"}, {"name": "nulled", "kernel_source": None}],
+    ids=["hip", "no-kernel-source", "null-kernel-source"],
+)  # fmt: skip
 def test_single_kernel_source_without_source_and_builder_is_still_skipped_silently(
-    emit, tmp_path
+    emit, tmp_path, ukd
 ):
-    variants, skipped = discover(
-        emit,
-        tmp_path,
-        [{"name": "hip", "kernel_source": {"kind": "hip", "file": "k.hip"}}],
-    )
+    variants, skipped = discover(emit, tmp_path, [ukd])
     assert variants == [] and skipped == []
+
+
+@pytest.mark.parametrize(
+    "ukd",
+    [{"name": ["bad"], "kernel_source": KS}, {"name": {"bad": 1}, "sources": {"a": KS}}],
+    ids=["single-list-name", "sources-object-name"],
+)  # fmt: skip
+def test_descriptor_whose_name_is_not_a_string_is_not_inspected(emit, tmp_path, ukd):
+    # catches: a list or object `name` passing the launch checks and failing the child, where
+    # it keys the specs by variant name (unhashable), instead of being listed
+    variants, skipped = discover(
+        emit, tmp_path, [ukd, {"name": "ok", "kernel_source": KS}]
+    )
+    assert [v["name"] for v in variants] == ["ok"]
+    assert len(skipped) == 1
+    assert skipped[0]["reason"].endswith("the descriptor `name` is not a string")
+
+
+def test_single_kernel_source_without_a_name_is_named_by_its_id(emit, tmp_path):
+    # catches: a nameless descriptor failing discovery (KeyError) where a `sources` UKD of the
+    # same shape is named by its id
+    variants, skipped = discover(emit, tmp_path, [{"id": "u1", "kernel_source": KS}])
+    assert [v["name"] for v in variants] == ["u1"] and skipped == []
 
 
 @pytest.mark.parametrize(
@@ -1193,7 +1218,7 @@ def test_malformed_single_kernel_source_is_not_inspected(emit, tmp_path, kernel_
     assert [s["reason"].split(":")[0] for s in skipped] == ["bad"]
 
 
-@pytest.mark.parametrize("kind", ["hip", "hsaco"])
+@pytest.mark.parametrize("kind", ["hip", "hsaco", "kpack", "embedded_source"])
 def test_multi_launch_ukd_of_another_kind_is_skipped_like_a_single_launch(
     emit, tmp_path, kind
 ):
