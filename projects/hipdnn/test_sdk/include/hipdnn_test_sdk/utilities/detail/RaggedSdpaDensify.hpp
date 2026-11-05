@@ -73,6 +73,11 @@ namespace ragged_densify_detail
 
 inline size_t elementSizeOf(hipdnn_flatbuffers_sdk::data_objects::DataType type)
 {
+    // datatypeToNativeVariant has no INT64 case; offset tables may be INT64.
+    if(type == hipdnn_flatbuffers_sdk::data_objects::DataType::INT64)
+    {
+        return sizeof(int64_t);
+    }
     return std::visit([](auto value) { return sizeof(value); },
                       hipdnn_test_sdk::utilities::datatypeToNativeVariant(type));
 }
@@ -220,6 +225,12 @@ std::optional<DenseSdpaFromRagged> densify(hipdnn_flatbuffers_sdk::data_objects:
 
     // A seq_len tensor is INT32 [B, 1, 1, 1], with B the batch of Q; its values are read as INT32
     // and its batch stride is only meaningful on that shape.
+    // Q and K are read as [B, H, S, D] below, ragged or not.
+    if(tensors.at(attrs.q_tensor_uid)->dims.size() != 4
+       || tensors.at(attrs.k_tensor_uid)->dims.size() != 4)
+    {
+        return std::nullopt;
+    }
     const auto& qDims = tensors.at(attrs.q_tensor_uid)->dims;
     for(const auto& seqLenUid : {attrs.seq_len_q_tensor_uid, attrs.seq_len_kv_tensor_uid})
     {

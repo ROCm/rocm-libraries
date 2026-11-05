@@ -2225,6 +2225,64 @@ class TestVerifyGoldenBundlesCli(unittest.TestCase):
             verify_golden_bundles.extract_ragged_length_uids([node]), {1: 100}
         )
 
+    CONFLICTING_SEQ_LEN_INPUTS = {
+        "q_tensor_uid": 0,
+        "k_tensor_uid": 0,
+        "seq_len_q_tensor_uid": 20,
+        "seq_len_kv_tensor_uid": 21,
+    }
+
+    def test_graph_bundle_with_conflicting_seq_len_binding_reports_error(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            graph_path = self.write_sdpa_ragged_bundle(
+                Path(tmpdir), elements=14, offsets=(0, 4, 8), lengths=(2, 3)
+            )
+            graph = json.loads(graph_path.read_text())
+            graph["nodes"][0]["inputs"] = dict(self.CONFLICTING_SEQ_LEN_INPUTS)
+            graph_path.write_text(json.dumps(graph))
+
+            result = verify_golden_bundles.VerificationResult()
+            verify_golden_bundles.validate_graph_bundle(
+                graph_path, result, "Smoke", False
+            )
+
+            messages = [d.message for d in result.diagnostics if d.severity == "error"]
+            self.assertEqual(len(messages), 1, messages)
+            self.assertIn("invalid ragged seq_len binding", messages[0])
+            self.assertIn("two seq_len tensors", messages[0])
+
+    def test_sweep_bundle_with_conflicting_seq_len_binding_reports_error(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            bundle_dir = Path(tmpdir) / "Smoke" / "Sdpa" / "Ragged"
+            bundle_dir.mkdir(parents=True)
+            template_path = bundle_dir / "graph.template.json"
+            template_path.write_text(
+                json.dumps(
+                    {
+                        "nodes": [
+                            {
+                                "type": "SdpaAttributes",
+                                "inputs": dict(self.CONFLICTING_SEQ_LEN_INPUTS),
+                                "outputs": {"o_tensor_uid": 1},
+                            }
+                        ],
+                        "tensors": [{"uid": 0}],
+                    }
+                )
+            )
+            sweep_path = bundle_dir / "sweep.json"
+            sweep_path.write_text(json.dumps({"version": 1, "cases": []}))
+
+            result = verify_golden_bundles.VerificationResult()
+            verify_golden_bundles.validate_sweep_bundle(
+                template_path, sweep_path, result, "Smoke", False
+            )
+
+            messages = [d.message for d in result.diagnostics if d.severity == "error"]
+            self.assertEqual(len(messages), 1, messages)
+            self.assertIn("invalid ragged seq_len binding", messages[0])
+            self.assertIn("two seq_len tensors", messages[0])
+
     def test_ragged_layout_violations_name_the_violated_rule(self) -> None:
         cases = (
             ("overlap rule", {"offsets": (0, 4, 8), "lengths": (3, 3)}),

@@ -822,14 +822,18 @@ TEST(TestRaggedSdpaDensify, OffsetTableOffTheBatchAxisIsDeclined)
 // read past its own table; the graph is declined instead.
 TEST(TestRaggedSdpaDensify, RaggedRoleWithAnotherBatchIsDeclined)
 {
-    const auto graph = editGraph(raggedGraph(false, true), [](GraphT& g) {
-        for(const int64_t uid : {static_cast<int64_t>(K), static_cast<int64_t>(V)})
-        {
-            tensorOf(g, uid).dims[0] = B - 1;
-        }
-        tensorOf(g, KV_OFFSETS).dims = {B, 1, 1, 1};
-    });
-    EXPECT_FALSE(densifies(graph));
+    // K/V get `batch` and a KV offset table sized for it, so only the batch differs from Q's.
+    for(const int64_t batch : {B - 1, B + 1})
+    {
+        const auto graph = editGraph(raggedGraph(false, true), [&](GraphT& g) {
+            for(const int64_t uid : {static_cast<int64_t>(K), static_cast<int64_t>(V)})
+            {
+                tensorOf(g, uid).dims[0] = batch;
+            }
+            tensorOf(g, KV_OFFSETS).dims = {batch + 1, 1, 1, 1};
+        });
+        EXPECT_FALSE(densifies(graph)) << "K/V batch " << batch;
+    }
 }
 
 TEST(TestRaggedSdpaDensify, SeqLenOffTheBatchAxisIsDeclined)
@@ -853,20 +857,95 @@ TEST(TestRaggedSdpaDensify, SeqLenOffTheBatchAxisIsDeclined)
     }
 }
 
-// The rewrite reads seq_len values as INT32, so any other element type is declined.
+// The rewrite reads seq_len values as INT32, so any other element type is declined, whichever
+// of seq_len_q and seq_len_kv carries it.
 TEST(TestRaggedSdpaDensify, NonInt32SeqLenIsDeclined)
 {
-    const auto make = [](DataType type) {
+    const auto make = [](int64_t typed, DataType type) {
         return editGraph(raggedGraph(false, true), [&](GraphT& g) {
             addSeqLens(g);
-            tensorOf(g, SEQ_Q).data_type = type;
+            tensorOf(g, typed).data_type = type;
             auto* attrs = g.nodes.front()->attributes.AsSdpaAttributes();
             attrs->seq_len_q_tensor_uid = SEQ_Q;
             attrs->seq_len_kv_tensor_uid = SEQ_KV;
         });
     };
-    EXPECT_FALSE(densifies(make(DataType::INT64)));
-    EXPECT_TRUE(densifies(make(DataType::INT32)));
+    for(const int64_t uid : {static_cast<int64_t>(SEQ_Q), static_cast<int64_t>(SEQ_KV)})
+    {
+        EXPECT_FALSE(densifies(make(uid, DataType::INT64))) << "uid " << uid;
+        EXPECT_TRUE(densifies(make(uid, DataType::INT32))) << "uid " << uid;
+    }
+}
+
+// A non-ragged Q or K of rank below 4 is declined, not read past its dims. The ragged side is
+// the other of Q and K; seq_len tensors cover the dense one.
+TEST(TestRaggedSdpaDensify, NonRaggedQOrKBelowRankFourIsDeclined)
+{
+    const auto make = [](bool denseQ, bool lowRank) {
+        return editGraph(raggedGraph(false, false), [&](GraphT& g) {
+            addSeqLens(g);
+            auto* attrs = g.nodes.front()->attributes.AsSdpaAttributes();
+            attrs->seq_len_q_tensor_uid = SEQ_Q;
+            attrs->seq_len_kv_tensor_uid = SEQ_KV;
+            const std::vector<int64_t> group
+                = denseQ ? std::vector<int64_t>{Q, O, STATS} : std::vector<int64_t>{K, V};
+            for(const int64_t uid : group)
+            {
+                auto& t = tensorOf(g, uid);
+                t.ragged_offset_tensor_uid.reset();
+                t.ragged_offset_multiplier = 1;
+                if(uid == STATS)
+                {
+                    t.strides = {H * SQ, SQ, 1, 1};
+                }
+                else
+                {
+                    t.strides = (uid == K || uid == V) ? denseStrides(SKV) : denseStrides(SQ);
+                }
+            }
+            if(lowRank)
+            {
+                auto& t = tensorOf(g, denseQ ? static_cast<int64_t>(Q) : static_cast<int64_t>(K));
+                t.dims = {B, denseQ ? SQ : SKV};
+                t.strides = {t.dims[1], 1};
+            }
+        });
+    };
+    for(const bool denseQ : {true, false})
+    {
+        EXPECT_TRUE(densifies(make(denseQ, false))) << "dense Q " << denseQ;
+        EXPECT_FALSE(densifies(make(denseQ, true))) << "dense Q " << denseQ;
+    }
+}
+
+// An INT64 offset table densifies to the same graph and lengths as an INT32 one.
+TEST(TestRaggedSdpaDensify, Int64OffsetTablesMatchInt32)
+{
+    const auto int64Graph = editGraph(raggedGraph(false, true), [](GraphT& g) {
+        tensorOf(g, Q_OFFSETS).data_type = DataType::INT64;
+        tensorOf(g, KV_OFFSETS).data_type = DataType::INT64;
+    });
+    const auto int32Graph = raggedGraph(false, true);
+    const auto dense32
+        = hipdnn_test_sdk::detail::densifyRaggedSdpaGraph(int32Graph.data(), int32Graph.size());
+    const auto dense64
+        = hipdnn_test_sdk::detail::densifyRaggedSdpaGraph(int64Graph.data(), int64Graph.size());
+    ASSERT_TRUE(dense32.has_value());
+    ASSERT_TRUE(dense64.has_value());
+    EXPECT_EQ(dense64->graph, dense32->graph);
+    ASSERT_EQ(dense64->primaries.size(), dense32->primaries.size());
+    for(size_t i = 0; i < dense64->primaries.size(); ++i)
+    {
+        EXPECT_EQ(dense32->primaries[i].offsetElementSize, sizeof(int32_t));
+        EXPECT_EQ(dense64->primaries[i].offsetElementSize, sizeof(int64_t));
+    }
+
+    // The same table values, read at either width, give the same element offsets.
+    const std::vector<int64_t> tokens64(Q_TOKENS.begin(), Q_TOKENS.end());
+    const auto& primary32 = dense32->primaries.front();
+    const auto& primary64 = dense64->primaries.front();
+    EXPECT_EQ(hipdnn_test_sdk::detail::raggedElementOffsets(primary64, tokens64.data(), B),
+              hipdnn_test_sdk::detail::raggedElementOffsets(primary32, Q_TOKENS.data(), B));
 }
 
 // A ragged_offset tensor another attribute still names stays in the dense graph.

@@ -1232,6 +1232,18 @@ TEST(TestRaggedLayoutRows, RowOffsetsZeroLengthBatchesKeepGapDetection)
                 ::testing::ThrowsMessage<std::logic_error>(::testing::HasSubstr("batch 0")));
 }
 
+// A gap is reported against the last live batch before it, and a layout whose batches are all
+// empty starts at the first stored origin.
+TEST(TestRaggedLayoutRows, RowOffsetsNamesLastLiveBatchAndStartsAllEmptyAtFirstOrigin)
+{
+    const RaggedIterationInfo laterGap{{0, 4, 9}, {2, 2, 1}, SDPA_SEQ_AXIS, 2};
+    EXPECT_THAT([&] { laterGap.rowOffsets(); },
+                ::testing::ThrowsMessage<std::logic_error>(::testing::HasSubstr("batch 1")));
+
+    const RaggedIterationInfo allEmpty{{5, 9}, {0, 0}, SDPA_SEQ_AXIS, 2};
+    EXPECT_EQ(allEmpty.rowOffsets(), (std::vector<int64_t>{5, 5, 5}));
+}
+
 // A zero-batch layout has no batches to end: the table is empty, not {origins.back() + ...}.
 TEST(TestRaggedLayoutRows, RowOffsetsOfZeroBatchLayoutIsEmpty)
 {

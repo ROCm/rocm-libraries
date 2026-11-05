@@ -195,8 +195,8 @@ batch when `seq_len_q/kv` are set).
 - **Status:** Aligned.
 - **cuDNN:** natural log, fp32, `[B, H, Sq, 1]`.
 - **Other use cases:** FlashInfer uses log2. vLLM uses packed `[Hq, T]` for varlen.
-- **hipDNN today:** natural log, fp32, `[B, H, Sq, 1]` dense. The ragged GPU reference also accepts a ragged LSE
-  with its own offsets and lengths.
+- **hipDNN today:** natural log, fp32, `[B, H, Sq, 1]` dense. The ragged CPU and GPU references accept a ragged
+  LSE with its own offsets and lengths.
 - **Contract:** cuDNN. A ragged LSE follows the ragged-offset model.
 
 ### SEM-012: Softmax probability precision in the reference

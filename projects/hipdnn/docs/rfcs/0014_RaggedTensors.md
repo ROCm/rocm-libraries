@@ -477,11 +477,15 @@ These apply to both `RaggedTensor<T>` and
      length in sequence rows; item 4), `seqAxis` is the
      caller-provided sequence axis, and `seqStride` is
      `strides()[seqAxis]`; `origins` and `lengths` are authoritative.
-     The accessor `rowOffsets()` returns `{origins[0], …,
-     origins[B-1], origins[B-1] + lengths[B-1] * seqStride}`, the
-     offset table of a packed, in-order layout with no gaps. Batches
-     with `lengths[b] == 0` are skipped by the contiguity check (their
-     entry equals the running end), and the accessor throws
+     The accessor `rowOffsets()` returns the `B + 1` offset table of
+     a packed, in-order layout with no gaps: each non-empty batch
+     contributes `origins[b]` and advances the running end by
+     `lengths[b] * seqStride`, and the final entry is the end of the
+     last live row. Batches with `lengths[b] == 0` own no rows: they
+     are skipped by the contiguity check and their entry is the running
+     end of the preceding batches (for leading empty batches, the origin
+     of the first non-empty batch), whatever their stored origin. The
+     accessor throws
      `std::logic_error` naming the non-empty batch `a` that precedes
      the break, when the next non-empty batch's origin is not
      `origins[a] + lengths[a] * seqStride`, i.e. when the non-empty
@@ -509,11 +513,12 @@ These apply to both `RaggedTensor<T>` and
    an origin `origin_b` (element units) and a length `len_b` (sequence
    rows):
 
-   - **With a length tensor** (`seq_len`, `[B]`, INT32 or INT64):
+   - **With a length tensor** (`seq_len`, `[B, 1, 1, 1]`, INT32 or INT64):
      `origin_b = ragged_offset[b] * multiplier` and
      `len_b = seq_len[b]`. Origins may be in any order.
-     `ragged_offset` still holds `B + 1` values and `ragged_offset[B]`
-     is read with the table, but it is neither used nor validated:
+     `ragged_offset` keeps shape `[B + 1, 1, 1, 1]`. `ragged_offset[B]`
+     is read with the table (the shape is checked), but it is neither
+     used nor validated:
      origins come from entries `0..B-1` and lengths from `seq_len`.
    - **Without one:** offsets are monotonic,
      `origin_b = ragged_offset[b] * multiplier` and
@@ -740,7 +745,7 @@ public:
                      std::shared_ptr<ITensor> raggedOffset,
                      std::optional<size_t>    physicalElementCount,
                      int64_t                  raggedOffsetMultiplier = 1,
-                     const std::shared_ptr<ITensor>& raggedLength = nullptr); // seq_len [B]; §4.5 item 4
+                     const std::shared_ptr<ITensor>& raggedLength = nullptr); // seq_len [B, 1, 1, 1]; §4.5 item 4
 
     const std::vector<int64_t>& dims() const override;        // paddedDims
     const std::vector<int64_t>& strides() const override;     // strides
@@ -787,7 +792,7 @@ public:
                  std::shared_ptr<ITensor> raggedOffset,
                  std::optional<size_t>    physicalElementCount = std::nullopt,
                  int64_t                  raggedOffsetMultiplier = 1,
-                 const std::shared_ptr<ITensor>& raggedLength = nullptr);   // seq_len [B]; §4.5 item 4
+                 const std::shared_ptr<ITensor>& raggedLength = nullptr);   // seq_len [B, 1, 1, 1]; §4.5 item 4
 
     // ITensor / TensorBase<T> overrides:
     //   dims()         -> paddedDims                    (dims()[seqAxis] == S_max)
@@ -944,7 +949,7 @@ public:
         std::shared_ptr<ITensor> raggedOffset,
         std::optional<size_t>    physicalElementCount = std::nullopt,
         int64_t                  raggedOffsetMultiplier = 1,
-        const std::shared_ptr<ITensor>& raggedLength = nullptr);   // seq_len [B]; §4.5 item 4
+        const std::shared_ptr<ITensor>& raggedLength = nullptr);   // seq_len [B, 1, 1, 1]; §4.5 item 4
 
     // Same overrides as RaggedTensor, inherited from
     // RaggedTensorBase<T>:
@@ -1050,7 +1055,9 @@ scope for this RFC.
 > runs the dense plan and packs the outputs back. The rewrite accepts
 > `INT32` and `INT64` offsets, serves ragged `Max` and `Sum_exp` and
 > ragged Q over non-ragged paged K/V, and declines a `ragged_offset` on
-> a paged K/V container. No op other than SDPA consumes ragged tensors
+> a paged K/V container. A length tensor of the graph (`seq_len_q` /
+> `seq_len_kv`) must be `INT32` `[B, 1, 1, 1]`; the rewrite declines any
+> other `seq_len` type. No op other than SDPA consumes ragged tensors
 > yet. The §4.11 pre-supplied input bundle is not implemented.
 > The bundle harness loads ragged inputs from golden blobs instead.
 > The sketches below show the intended shape.
@@ -1501,7 +1508,8 @@ validator would only skip over this one value.
    `Sum_exp` (bound by `seq_len_q`, like Stats). It declines a
    `ragged_offset` on a paged K/V container.
 10. **INT64 offsets.** The SDPA gate declines INT64 `ragged_offset`
-    (the dense rewrite accepts it).
+    (the dense rewrite accepts it). The dense rewrite accepts only an
+    `INT32` `seq_len` and declines an `INT64` one.
 11. **The forward golden generator authors only bshd ragged
     tensors, without Stats.** `generate_sdpa_fwd_golden.py` rejects
     head-major, shifted-origin and padded-THD ragged bundles, and
