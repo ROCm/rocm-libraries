@@ -146,8 +146,7 @@ rocblaslt_status rocblaslt_matmul_impl(const rocblaslt_handle       handle,
     //   • alpha/beta are host (non-device-pointer) scalars
     //   • Arithmetic intensity exceeds the threshold (compute-bound region),
     //     unless the EAGER strategy is selected
-    // Invalid emulation env-var values return invalid_value instead of
-    // silently falling back to the native path.
+    // Invalid emulation environment variables are ignored.
     //
     // On success the emulated result is returned directly; the native path
     // is used as fall-back when emulation returns non-success.
