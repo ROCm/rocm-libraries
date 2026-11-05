@@ -140,13 +140,22 @@ def run_cache(settings, log=print):
     ``HostCacheSettings``), removed on exit with one ``log`` line; None when
     ``max_total_gib`` is 0. A filesystem already under ``MIN_FREE_FRACTION``
     free can store no entry: the run then starts with a warning line. On NFS
-    it starts with a note to use a local filesystem."""
+    it starts with a note to use a local filesystem. A cache that cannot be
+    created (``dir`` read-only, say) is None, with a warning line: the cache
+    is optional."""
     if settings.max_total_gib == 0:
         yield None
         return
     total = settings.max_total_gib
-    cache = HostCache(settings.dir, int(settings.max_entry_gib * GIB),
-                      None if total is None else int(total * GIB))
+    try:
+        cache = HostCache(settings.dir, int(settings.max_entry_gib * GIB),
+                          None if total is None else int(total * GIB))
+    except OSError as e:
+        log(f"  Host cache: WARNING: cannot create it under "
+            f"{settings.dir or tempfile.gettempdir()} ({e.strerror or e}); the run "
+            "goes on without it")
+        yield None
+        return
     try:
         disk = shutil.disk_usage(cache.dir)
         if disk.free <= MIN_FREE_FRACTION * disk.total:

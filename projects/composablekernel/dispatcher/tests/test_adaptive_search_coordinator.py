@@ -2164,6 +2164,25 @@ def test_call_allowance_is_never_below_the_ops_allowance(record, calls, want):
     assert AS.prepare_limit_s(365) == 10 * 365 + 60
 
 
+@pytest.mark.skipif(not hasattr(os, "geteuid") or os.geteuid() == 0,
+                    reason="needs a directory this user cannot write")
+def test_a_host_cache_that_cannot_be_created_is_left_out(tmp_path):
+    # An existing host_cache.dir the run cannot write: one warning line and
+    # no cache (it is optional), instead of a traceback before the search.
+    ro = tmp_path / "ro"
+    ro.mkdir()
+    ro.chmod(0o555)
+    lines = []
+    try:
+        with HC.run_cache(AS.HostCacheSettings(str(ro), 1.0, 1.0), lines.append) as cache:
+            assert cache is None
+    finally:
+        ro.chmod(0o755)
+    assert len(lines) == 1, lines
+    assert lines[0].startswith(f"  Host cache: WARNING: cannot create it under {ro} (")
+    assert lines[0].endswith("; the run goes on without it") and list(ro.iterdir()) == []
+
+
 def test_host_cache_dir_is_removed_on_exit_and_interrupt(tmp_path, monkeypatch):
     monkeypatch.setattr(HC, "fs_type", lambda p: "")  # no NFS note, wherever tmp is
     lines = []
