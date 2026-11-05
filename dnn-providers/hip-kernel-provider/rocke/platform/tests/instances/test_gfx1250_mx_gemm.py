@@ -123,6 +123,8 @@ class MxGemmSpecTest(unittest.TestCase):
             "short K": {"tile_k": 512, "wave_group": (2, 2)},
             "grid": {"cluster_dim": (8, 1, 1)},
             "half_plr": {"local_prefetch": 0},
+            "half_b_order": {"half_b_order": "early"},
+            "late needs half B": {"half_b_order": "late", "half_plr": "none"},
             "signal range": {"cluster_signal_wmmas": 17},
             "signal form": {"cluster_signal": "early"},
             "out dtype": {"out_dtype": "fp32"},
@@ -139,19 +141,31 @@ class MxGemmSpecTest(unittest.TestCase):
                 self.assertIsNotNone(validate(_spec(*problem, **fields)))
 
     def test_8bit_types_validate_their_atom_tile_k_and_reads(self):
-        """FP8/BF8 take the 16x16 atom and tile_k 128/256, never mix with
-        FP4, and keep the local_prefetch 1 wait in the s_wait_dscnt range;
-        local_prefetch 0 waits for 0 and has no read limit."""
+        """FP8/BF8 take the 16x16 atom and tile_k 128/256 and never mix with
+        FP4. The 256x256 tile's 68 reads per K-step pass the s_wait_dscnt
+        range: its local_prefetch 1 waits clamp to 63 with half_b_order
+        "ahead" and stay below it with "late". local_prefetch 0 waits for 0."""
         for a_dtype, b_dtype in _PAIRS_8BIT:
             fields = {"a_dtype": a_dtype, "b_dtype": b_dtype}
             with self.subTest(a_dtype=a_dtype, b_dtype=b_dtype):
-                self.assertEqual(len(list(_valid_geometries("16x16", **fields))), 56)
+                self.assertEqual(len(list(_valid_geometries("16x16", **fields))), 68)
                 self.assertIsNone(validate(_spec8(tile_m=128, **fields)))
                 self.assertIsNone(validate(_spec8(tile_k=128, tile_m=128, **fields)))
+                wide = _spec8(**fields)
+                self.assertEqual(wide.reads_per_step, 68)
+                self.assertIsNone(validate(wide))
+                waits = {
+                    int(n) for n in re.findall(r'"s_wait_dscnt (\d+)"', _llvm(wide))
+                }
+                self.assertIn(63, waits)
+                self.assertLessEqual(max(waits), 63)
+                late = _spec8(half_b_order="late", **fields)
+                self.assertEqual(late.dscnt_waits, (16, 36))
+                self.assertEqual(late.late_pending_reads, 36)
+                self.assertIsNone(validate(late))
                 bad = {
                     "32x16": ({"mma": "32x16"}, "mma must be one of"),
                     "tile_k 512": ({"tile_k": 512}, "tile_k must be in"),
-                    "dscnt": ({}, "s_wait_dscnt range of local_prefetch 1"),
                 }
                 for label, (extra, reason) in bad.items():
                     got = validate(_spec8(**fields, **extra)) or ""
@@ -171,6 +185,8 @@ class MxGemmSpecTest(unittest.TestCase):
         ):
             name = _spec8(a_dtype=a_dtype, b_dtype=b_dtype).kernel_name()
             self.assertTrue(name.startswith(f"t_{tag}_M1024"), name)
+        self.assertNotIn("hblate", _spec().kernel_name())
+        self.assertIn("_hblate", _spec(half_b_order="late").kernel_name())
 
     def test_i64_offsets_past_2_31(self):
         """A and B bytes and D elements past 2^31 switch that operand to i64
@@ -738,6 +754,18 @@ class MxGemmIrTest(unittest.TestCase):
         no_cluster = _llvm(_spec(cluster_dim=(1, 1, 1)))
         self.assertNotIn("s_barrier_signal -3", no_cluster)
         self.assertEqual(no_cluster.count('"s_wait_dscnt 35"'), 4 * (4 * 2 + 1))
+        # half_b_order "late": per K-step a wait leaving B's second half (8
+        # reads) and one leaving the next scales and A (19); the late wait
+        # also leaves the next tile's scales and A.
+        late = _llvm(_spec(half_b_order="late"))
+        self.assertNotIn('"s_wait_dscnt 35"', late)
+        self.assertEqual(late.count('"s_wait_dscnt 8"'), 4 * 4)
+        self.assertEqual(late.count('"s_wait_dscnt 19"'), 4 * (4 + 1))
+        self.assertEqual(len(re.findall(_WMMA, late)), len(re.findall(_WMMA, default)))
+        lds_read = r"load <\d+ x i32>, ptr addrspace\(3\)"
+        self.assertEqual(
+            len(re.findall(lds_read, late)), len(re.findall(lds_read, default))
+        )
         no_prefetch = _llvm(_spec(gl2_prefetch_distance=0))
         self.assertNotIn("global.prefetch", no_prefetch)
         # Six prefetches (tiles 2 and 3 up front, one per emitted tile) over
@@ -1007,6 +1035,9 @@ class MxGemmHostBuildTest(unittest.TestCase):
             # hipBLASLt's MXFP8 MAF and MAB tunings.
             _spec8(*_BENCH, local_prefetch=0, half_plr="none"),
             _spec8(*_BENCH, local_prefetch=0, half_plr="none", cluster_order="aid"),
+            _spec8(*_BENCH, half_b_order="late"),
+            _spec8(*_BENCH, half_b_order="late", cluster_signal="wave0"),
+            _spec(*_BENCH, half_b_order="late"),
             _spec8(
                 65536,
                 16,
@@ -1060,6 +1091,9 @@ class MxGemmDeviceTest(unittest.TestCase):
                 _spec(half_plr="none", local_prefetch=0),
                 _spec(cluster_signal="drained"),
                 _spec(init_c_peel=False),
+                _spec(half_b_order="late"),
+                _spec(half_b_order="late", cluster_signal="drained"),
+                _spec(tile_k=128, half_b_order="late"),
             ]
             + list(_valid_geometries("16x16", a_dtype="fp8", b_dtype="fp8"))
             + [
@@ -1069,6 +1103,9 @@ class MxGemmDeviceTest(unittest.TestCase):
                     {"tile_m": 128, "cluster_order": "aid"},
                     {"tile_m": 128, "tile_k": 128, "half_plr": "none"},
                     {"local_prefetch": 0, "half_plr": "none"},
+                    {"half_b_order": "late"},
+                    {"half_b_order": "late", "cluster_signal": "wave0"},
+                    {"tile_k": 128, "half_b_order": "late"},
                     {
                         "tile_m": 256,
                         "tile_n": 16,

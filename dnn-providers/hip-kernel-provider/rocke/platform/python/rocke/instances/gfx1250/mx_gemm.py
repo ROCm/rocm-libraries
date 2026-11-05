@@ -145,7 +145,8 @@ _B_SCALE_REGION_ALIGN = 512
 _TDM_PAD_PERIOD_MAX = 1024
 _TDM_PAD_MAX_BYTES = 128 * 4
 _LDS_PAD_STEP_BYTES = 8
-# s_wait_dscnt immediates are 6 bits on gfx1250.
+# s_wait_dscnt immediates are 6 bits on gfx1250. A larger count is clamped
+# to it, as rocisa's MaxDscnt: the wait only gets stricter.
 _DSCNT_MAX = 63
 # Global offsets are i32: A and B in bytes, C and D in elements.
 _I32_SPAN = 1 << 31
@@ -218,6 +219,8 @@ class MxGemmSpec:
     derived, ``LdsPad()``: none). ``cluster_signal_wmmas`` and
     ``cluster_signal`` default (``None``) to 6, clamped to the tile, and to
     ``"wave0"`` at the 256x256x512 tile, ``"drained"`` otherwise.
+    ``half_b_order`` places the half-B reads of the next K-step (see
+    :class:`TileCompute`).
     """
 
     name: str
@@ -241,6 +244,7 @@ class MxGemmSpec:
     cluster_order: str = "hw"
     local_prefetch: int = 1
     half_plr: str = "b"
+    half_b_order: str = "ahead"
     mma: str = "32x16"
     a_dtype: str = "fp4"
     b_dtype: str = "fp4"
@@ -410,6 +414,38 @@ class MxGemmSpec:
         )
 
     @property
+    def half_b_late(self) -> bool:
+        return self.half_b and self.half_b_order == "late"
+
+    @property
+    def b_half_reads(self) -> int:
+        """LDS reads of half of one K-step's B fragments."""
+        return self.fragment_layout.chunks_per_lane * (self.wave_repeat_n // 2)
+
+    @property
+    def head_reads(self) -> int:
+        """LDS reads of one K-step's scales and A rows."""
+        return self.reads_per_step - 2 * self.b_half_reads
+
+    @property
+    def dscnt_waits(self) -> tuple[int, ...]:
+        """The K-loop's ``s_wait_dscnt`` counts before clamping: the reads
+        issued after the ones each wait needs (per half with half-B)."""
+        if not self.local_prefetch:
+            return (0,)
+        if self.half_b_late:
+            return (self.b_half_reads, self.head_reads)
+        return (self.reads_per_step,)
+
+    @property
+    def late_pending_reads(self) -> int:
+        """Reads of the other buffer that may stay in flight at the cluster
+        late wait, which must drain this buffer's."""
+        if not self.local_prefetch:
+            return 0
+        return self.head_reads if self.half_b_late else self.reads_per_step
+
+    @property
     def lds_layout(self) -> MxGemmLdsLayout:
         return mx_gemm_lds_layout(self)
 
@@ -451,6 +487,7 @@ class MxGemmSpec:
                 "aid": self.cluster_order == "aid",
                 "lp0": self.local_prefetch == 0,
                 "hplrnone": self.half_plr == "none",
+                "hblate": self.half_b_late,
                 "mma16": self.mma == "16x16",
             },
         )
@@ -693,6 +730,10 @@ def validate(spec: MxGemmSpec, arch: str = "gfx1250") -> str | None:
         return "half_plr must be 'b' or 'none'"
     if spec.half_plr == "b" and (spec.local_prefetch != 1 or rn % 2):
         return "half_plr 'b' needs local_prefetch 1 and an even wave_repeat_n"
+    if spec.half_b_order not in ("ahead", "late"):
+        return "half_b_order must be 'ahead' or 'late'"
+    if spec.half_b_order == "late" and not spec.half_b:
+        return "half_b_order 'late' needs half_plr 'b'"
     if spec.cluster_order not in ("hw", "aid"):
         return "cluster_order must be 'hw' or 'aid'"
     if spec.cluster_signal not in (None, "wave0", "drained"):
@@ -736,12 +777,6 @@ def validate(spec: MxGemmSpec, arch: str = "gfx1250") -> str | None:
             and pad.block_bytes % row_bytes
         ):
             return f"{name} LDS pad block must be whole {row_bytes} B rows"
-    # local_prefetch 1 waits for all but the next K-step's reads; 0 waits for 0.
-    if spec.local_prefetch and spec.reads_per_step > _DSCNT_MAX:
-        return (
-            f"{spec.reads_per_step} LDS reads per K-step exceed the s_wait_dscnt "
-            "range of local_prefetch 1"
-        )
     target = ArchTarget.from_gfx("gfx1250")
     accumulators = rm * rn * atom.c_frag_len
     if accumulators > target.limits.vgprs:
@@ -1373,9 +1408,15 @@ class TileCompute:
 
     ``local_prefetch`` 1: K-step s+1 is read during K-step s; the last K-step
     reads the next tile's K-step 0 from the other buffer (``head``). With
-    ``half_plr`` ``"b"`` B is read in halves, the second after the first
-    half's WMMAs: three B half-sets live, two waits per K-step, B-outer
-    WMMAs. Each wait leaves exactly one K-step of reads in flight.
+    ``half_plr`` ``"b"`` B is read in halves, two waits per K-step, B-outer
+    WMMAs; ``half_b_order`` places K-step s+1's reads:
+
+    - ``"ahead"``: all before the first wait but B's second half, which
+      follows the first half's WMMAs. Three B half-sets live; each wait
+      leaves one K-step of reads in flight.
+    - ``"late"``: wait, scales and A, half 0's WMMAs; wait, B half 0, half
+      1's WMMAs; B half 1. Two B half-sets live; the waits leave B's second
+      half, then the next scales and A, in flight.
     """
 
     def __init__(self, k: _Kernel, reader: LdsReader):
@@ -1396,7 +1437,7 @@ class TileCompute:
         return mma
 
     def _wait(self, count: int) -> None:
-        self.k.b.inline_asm(f"s_wait_dscnt {count}", "~{memory}")
+        self.k.b.inline_asm(f"s_wait_dscnt {min(count, _DSCNT_MAX)}", "~{memory}")
 
     def head_parts(self) -> list[int]:
         spec = self.k.spec
@@ -1451,6 +1492,10 @@ class TileCompute:
         steps = self.k.spec.k_steps if steps is None else steps
         if self.k.spec.local_prefetch == 0:
             return self._run_direct(parity, accumulators, seed_zero, hooks, steps)
+        if self.k.spec.half_b_late:
+            return self._run_half_b_late(
+                parity, accumulators, head, next_parity, seed_zero, hooks, steps
+            )
         if self.k.spec.half_b:
             return self._run_half_b(
                 parity, accumulators, head, next_parity, seed_zero, hooks, steps
@@ -1521,6 +1566,58 @@ class TileCompute:
             if not last:
                 b_halves = [next_first, next_second]
         return out, (*head, [next_first, next_second])
+
+    def _run_half_b_late(
+        self, parity, accumulators, head, next_parity, seed_zero, hooks, steps
+    ):
+        k, reader = self.k, self.reader
+        spec = k.spec
+        rm_count, half = spec.wave_repeat_m, spec.wave_repeat_n // 2
+        buffer = k.buffer_base(parity)
+        out = list(accumulators)
+        mma = self._mma_fn(out, seed_zero)
+        *head, b_halves = head
+        next_buffer = k.buffer_base(next_parity)
+        waits = spec.dscnt_waits
+        for step in range(steps):
+            a_frags, a_scales, b_scales = head
+            last = step + 1 == steps
+            source = (next_buffer, 0) if last else (buffer, step + 1)
+            next_first = None
+            for which in (0, 1):
+                if which == 1 and last:
+                    self._signal_before_late(hooks, steps)
+                    hooks.late_refill()
+                signal_here = (
+                    hooks.signal is not None and which == 1 and step + 2 == steps
+                )
+                self._wait(waits[which])
+                if which == 0:
+                    if last:
+                        hooks.refill()
+                    head = reader.head(*source)
+                else:
+                    next_first = reader.b_group(*source, 0, half)
+                issued = 0
+                for j in range(half):
+                    for rm in range(rm_count):
+                        rn = which * half + j
+                        if signal_here and issued == spec.signal_wmmas:
+                            hooks.signal()
+                        issued += 1
+                        mma(
+                            rm,
+                            rn,
+                            a_frags[rm],
+                            b_halves[which][j],
+                            a_scales[rm],
+                            b_scales[rn],
+                            step == 0,
+                        )
+                if signal_here and issued == spec.signal_wmmas:
+                    hooks.signal()
+            b_halves = [next_first, reader.b_group(*source, half, half)]
+        return out, (*head, b_halves)
 
     def _run_full(
         self, parity, accumulators, head, next_parity, seed_zero, hooks, steps
@@ -1668,7 +1765,7 @@ class Pipeline:
             if form != "drained":
                 # No wave drained its reads of this buffer before the signal;
                 # the workgroup barrier publishes them here.
-                pending = spec.reads_per_step if spec.local_prefetch else 0
+                pending = min(spec.late_pending_reads, _DSCNT_MAX)
                 b.inline_asm(f"s_wait_dscnt {pending}", "~{memory}")
                 b.s_barrier_bare()
             self.tdm.issue(k.clamp_k(ops.v(ops.add(k0, two_tiles))), parity)
