@@ -598,10 +598,18 @@ tail of the worker's stderr when the preparation failed) or skipped
 (`<problem>: skipped, host_memory: ...`, see "Host verification memory"). A
 build or preparation that waits for another search run on the host prints
 `[search] waiting for ...` first, and a run that cannot open the host lock
-prints one `[search] NOTE: cannot open the host lock ...` line. A host cache
-whose filesystem is already under 10% free (see "Host cache space") prints a
-`Host cache: WARNING` line before the first round, and one on NFS a `Host
-cache: NOTE` line.
+prints one `[search] NOTE: cannot open the host lock ...` line. Search runs
+of one checkout also build one at a time: the build writes each kernel's
+header, `.o` and `.so` to paths from its name alone (no arch), so a run holds
+the build lock (`ck_search_build.lock` in the dispatcher's `build/`) from a
+round's build until its libraries are copied into the run's `artifacts/`
+(`[search] NOTE: cannot open the build lock ...` when it cannot). A plain
+driver run does not take it: do not run one in the same checkout as a search.
+A host cache whose filesystem is already under 10% free (see "Host cache
+space") prints a `Host cache: WARNING` line before the first round, and one
+on NFS a `Host cache: NOTE` line; a `host_cache.dir` the run cannot create
+its cache in prints `Host cache: WARNING: cannot create it ...` and the run
+goes on without the cache.
 
 Troubleshooting: for `no_winner` or `partial`, read `unresolved` in
 `summary.json` and the failing calls in `trials.jsonl`; a problem stopped by

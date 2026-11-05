@@ -1661,13 +1661,14 @@ HOST_LOCK, HOST_LOCK_DIR = "ck_search_host.lock", None
 _NO_HOST_LOCK = set()  # lock files this process reported it cannot open
 
 
-def _open_host_lock(path) -> int:
-    """A read-only descriptor of the lock file ``path``, created (mode 0666,
-    so other users' runs can open it) when missing. An existing file is
-    opened without O_CREAT: where fs.protected_regular is set (the default on
-    most Linux hosts), O_CREAT on another user's file in a sticky directory
-    such as /tmp is refused even though the file exists."""
-    for flags in (os.O_RDONLY, os.O_RDONLY | os.O_CREAT | os.O_EXCL, os.O_RDONLY):
+def _open_host_lock(path, access: int = os.O_RDONLY) -> int:
+    """A descriptor (``access``: read-only, or O_RDWR for an exclusive lock on
+    NFS, which needs a writable file) of the lock file ``path``, created
+    (mode 0666, so other users' runs can open it) when missing. An existing
+    file is opened without O_CREAT: where fs.protected_regular is set (the
+    default on most Linux hosts), O_CREAT on another user's file in a sticky
+    directory such as /tmp is refused even though the file exists."""
+    for flags in (access, access | os.O_CREAT | os.O_EXCL, access):
         try:
             fd = os.open(path, flags, 0o666)
         except (FileNotFoundError, FileExistsError) as e:  # missing, or created meanwhile
@@ -1681,25 +1682,26 @@ def _open_host_lock(path) -> int:
 
 
 @contextlib.contextmanager
-def host_lock(exclusive: bool, log=None, what: str = ""):
-    """Hold HOST_LOCK: ``exclusive`` for preparations, shared for builds.
+def file_lock(path, exclusive: bool, log=None, what: str = "", unlocked: str = "",
+              name: str = "lock", access: int = os.O_RDONLY):
+    """Hold an flock on the lock file ``path`` (the ``name`` in log lines,
+    opened with ``access``, see ``_open_host_lock``): ``exclusive``, or shared.
     One ``log`` line when it has to wait for another run (``what`` it waits
     for). Without fcntl it does not lock; with a lock file it cannot open it
-    does not either, and logs that once per process."""
-    path = os.path.join(HOST_LOCK_DIR or tempfile.gettempdir(), HOST_LOCK)
+    does not either, and logs that once per process (``unlocked``: what is
+    then not kept apart)."""
     try:
         import fcntl
 
-        fd = _open_host_lock(path)
+        fd = _open_host_lock(path, access)
     except ImportError:
         yield
         return
     except OSError as e:
         if log is not None and path not in _NO_HOST_LOCK:
             _NO_HOST_LOCK.add(path)
-            log(f"  [search] NOTE: cannot open the host lock {path} ({e.strerror or e}); "
-                "this run's builds and preparations are not kept apart from other "
-                "search runs'")
+            log(f"  [search] NOTE: cannot open the {name} {path} ({e.strerror or e}); "
+                f"{unlocked}")
         yield
         return
     try:
@@ -1708,11 +1710,21 @@ def host_lock(exclusive: bool, log=None, what: str = ""):
             fcntl.flock(fd, mode | fcntl.LOCK_NB)
         except OSError:
             if log is not None:
-                log(f"  [search] waiting for {what or 'another search run on this host'}")
+                log(f"  [search] waiting for {what}")
             fcntl.flock(fd, mode)
         yield
     finally:
         os.close(fd)
+
+
+@contextlib.contextmanager
+def host_lock(exclusive: bool, log=None, what: str = ""):
+    """Hold HOST_LOCK: ``exclusive`` for preparations, shared for builds."""
+    with file_lock(os.path.join(HOST_LOCK_DIR or tempfile.gettempdir(), HOST_LOCK),
+                   exclusive, log, what or "another search run on this host",
+                   "this run's builds and preparations are not kept apart from "
+                   "other search runs'", "host lock"):
+        yield
 
 
 def prepare_limit_s(allowance_s) -> int:

@@ -64,7 +64,7 @@ from gemm_utils import (  # noqa: E402
     expand_sweep,
     setup_multiple_gemm_dispatchers,
 )
-from ctypes_utils import listed_warp_tiles  # noqa: E402
+from ctypes_utils import get_build_dir, listed_warp_tiles  # noqa: E402
 from gemm_vector_fallback import VectorFallback, add_vector_fallback_arg  # noqa: E402
 from smi_utils import detect_gpu_ids  # noqa: E402
 
@@ -1217,6 +1217,7 @@ def main():
             problem_key=problem_key,
             load_pairs=load_pair_list,
             build_reason=build_failure_summary,
+            build_dir=get_build_dir(),
         )
         context = {
             "arch": arch,

@@ -414,6 +414,47 @@ def test_candidates_are_the_eligible_kernels_with_scalar_records(tmp_path, monke
     json.dumps(ctx, allow_nan=False)
 
 
+def test_runs_of_one_checkout_build_and_store_one_at_a_time(tmp_path, monkeypatch):
+    # Two runs of one checkout, for different targets, build kernel A at
+    # once. The build writes A's library to one path from its name alone
+    # (no arch); under the build lock each run stores its own library.
+    shared = tmp_path / "examples"
+    shared.mkdir()
+    building = threading.Event()
+
+    def build_for(arch):
+        def build(cfgs, verbose=True, max_workers=None, *, errors=None,
+                  build_timeout=None):
+            libs = []
+            for c in cfgs:
+                lib = shared / f"lib{c.name}.so"
+                lib.write_text(arch)
+                building.set()
+                time.sleep(0.5)  # where the other run's build would land
+                libs.append(lib)
+            return libs
+        return build
+
+    ads = {}
+    for arch in ("gfx950", "gfx1250"):
+        (tmp_path / arch).mkdir()
+        ads[arch] = _adapter(tmp_path / arch, build_for(arch))
+        ads[arch].hooks = replace(ads[arch].hooks, build_dir=tmp_path / "build")
+    stored = {}
+
+    def run(arch):
+        stored[arch] = Path(ads[arch].build_missing([ads[arch].cands[A]])[A].path)
+
+    first = threading.Thread(target=run, args=("gfx950",))
+    first.start()
+    assert building.wait(30)
+    run("gfx1250")
+    first.join()
+    assert {arch: p.read_text() for arch, p in stored.items()} == {
+        "gfx950": "gfx950", "gfx1250": "gfx1250"}
+    assert (tmp_path / "build" / GS.BUILD_LOCK).exists()
+
+
 @pytest.mark.parametrize("timeout, used", [(None, 180), (900, 900)])
 def test_build_gets_the_driver_options_and_reports_one_line(
     tmp_path, monkeypatch, timeout, used

@@ -43,10 +43,12 @@ is in ``adaptive_search``.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import csv
 import functools
 import json
 import math
+import os
 import re
 import sys
 from collections import defaultdict
@@ -129,6 +131,8 @@ BUILD_ERROR_CHARS = 8000  # per failed kernel in rounds/NNNN-build.json
 # native kernel never builds and every fixed-width one ends sooner.
 # ``build_timeout_s`` replaces it, for every kernel.
 SEARCH_BUILD_TIMEOUT_S = 180
+# The lock file, in DriverHooks.build_dir, of a build until its libraries are stored.
+BUILD_LOCK = "ck_search_build.lock"
 
 
 # Host seconds per A or B element of a verified call (generating, encoding and
@@ -196,6 +200,9 @@ class DriverHooks:
     problem_key: Callable  # problem dict -> "MxNxK"
     load_pairs: Callable  # load_pair_list, reads warm_start.pairs_file
     build_reason: Callable  # build_failure_summary: build error -> one line
+    # The directory of build's outputs, shared by every run of a checkout
+    # (ctypes_utils.get_build_dir()); None: builds are not locked.
+    build_dir: Optional[Path] = None
 
 
 def check_search_options(args) -> SearchSettings:
@@ -426,7 +433,28 @@ class GemmSearchAdapter:
         fixed = any(any(c.original_config.vector_sizes) for c in cands)
         return self.build_timeout or (None if fixed else SEARCH_BUILD_TIMEOUT_S)
 
+    def _build_outputs_lock(self):
+        """An exclusive lock on the build's outputs, held from a build until
+        its libraries are in the store. The build writes each kernel's header,
+        .o and .so to paths from its name alone (no arch), shared by every run
+        of this checkout: two runs building a kernel at once would otherwise
+        overwrite, and could store, each other's files."""
+        d = self.hooks.build_dir
+        if d is None:
+            return contextlib.nullcontext()
+        with contextlib.suppress(OSError):
+            Path(d).mkdir(parents=True, exist_ok=True)
+        return adaptive_search.file_lock(
+            Path(d) / BUILD_LOCK, True, _log,
+            "another search run's build in this checkout",
+            "this run's builds are not kept apart from other search runs' in "
+            "this checkout", "build lock", os.O_RDWR)
+
     def build_missing(self, cands: Sequence[Candidate]) -> Dict[str, BuildResult]:
+        with self._build_outputs_lock():
+            return self._build_and_store(cands)
+
+    def _build_and_store(self, cands: Sequence[Candidate]) -> Dict[str, BuildResult]:
         errors: Dict[str, str] = {}
         limit = self._build_timeout_for(cands)
         with adaptive_search.host_lock(False, _log,
