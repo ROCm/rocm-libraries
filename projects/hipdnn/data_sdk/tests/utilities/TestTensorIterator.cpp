@@ -489,8 +489,9 @@ TEST(TestTypeErasedIteratorRagged, UsesRaggedCompositeIndex)
     EXPECT_EQ(count, 20);
 }
 
-// The iterator walks the live rows `s < lengths[b]` of each batch from its origin: with a
-// padded THD block (block 8 > S_max) bound by seq_len, rows past the length are never visited.
+// The iterator walks the live rows `s < lengths[b]` of each batch from its origin: with seq_len
+// bound, the origin is offsets[b] (offsets[b + 1] is not read) and rows past the length are never
+// visited.
 TEST(TestTypeErasedIteratorRagged, IteratesLiveRowsFromEachOrigin)
 {
     const std::vector<int64_t> dims = {2, 1, 4, 2};

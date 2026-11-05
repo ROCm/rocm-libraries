@@ -1075,6 +1075,35 @@ TEST_F(TestBundleDiscoveryFixture, LoadRaggedSdpaBundleWithBlobSizedToOffsetBIsR
     }
 }
 
+// Without seq_len, a block longer than S_max is capped, so offsets written with the multiplier
+// applied twice still build a layout. The blob, sized to the element space of the intended
+// layout, no longer matches the element space of the one those offsets describe: rejected.
+TEST_F(TestBundleDiscoveryFixture, LoadRaggedSdpaBundleWithDoubledOffsetsIsRejected)
+{
+    auto layout = fixtures::raggedSdpaHeadTokenStatsCase();
+    ASSERT_TRUE(layout.seqLen.empty());
+    ASSERT_EQ(layout.qkvo.offsets, (std::vector<int32_t>{0, 16, 40}));
+    for(auto& offset : layout.qkvo.offsets)
+    {
+        offset *= 2;
+    }
+
+    const auto dir = _tempDir / "op" / "doubled";
+    fixtures::writeRaggedSdpaCase(dir, layout);
+    auto result = loadIntegrationTestBundle(dir / (layout.name + ".json"));
+    ASSERT_TRUE(std::holds_alternative<IntegrationTestBundle>(result));
+
+    try
+    {
+        std::get<IntegrationTestBundle>(result).loadTensors();
+        FAIL() << "offsets written with a doubled multiplier must not load";
+    }
+    catch(const std::exception& e)
+    {
+        EXPECT_NE(std::string(e.what()).find("elementSpace"), std::string::npos) << e.what();
+    }
+}
+
 TEST_F(TestBundleDiscoveryFixture, LoadRaggedBundleWithInvalidOffsetsFailsOnlyWhenTheTensorsAreRead)
 {
     auto dir = _tempDir / "op" / "badragged";

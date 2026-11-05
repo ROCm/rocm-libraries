@@ -4,8 +4,10 @@
 #pragma once
 
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -248,6 +250,29 @@ inline std::vector<uint8_t> raggedQPagedKvGraph(bool sink, bool raggedKv = false
     flatbuffers::FlatBufferBuilder builder;
     builder.Finish(Graph::Pack(builder, &graph));
     return {builder.GetBufferPointer(), builder.GetBufferPointer() + builder.GetSize()};
+}
+
+// `buffer` with `edit` applied to its unpacked graph, serialized again.
+inline std::vector<uint8_t> editGraph(const std::vector<uint8_t>& buffer,
+                                      const std::function<void(GraphT&)>& edit)
+{
+    auto graph = UnPackGraph(buffer.data());
+    edit(*graph);
+    flatbuffers::FlatBufferBuilder builder;
+    builder.Finish(Graph::Pack(builder, graph.get()));
+    return {builder.GetBufferPointer(), builder.GetBufferPointer() + builder.GetSize()};
+}
+
+inline TensorAttributesT& tensorOf(GraphT& graph, int64_t uid)
+{
+    for(auto& t : graph.tensors)
+    {
+        if(t->uid == uid)
+        {
+            return *t;
+        }
+    }
+    throw std::runtime_error("no tensor " + std::to_string(uid));
 }
 
 // Random values for exactly `tokens` packed tokens of `width` elements each.

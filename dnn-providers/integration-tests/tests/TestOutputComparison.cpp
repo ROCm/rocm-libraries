@@ -168,7 +168,6 @@ std::shared_ptr<hipdnn_data_sdk::utilities::ITensor> raggedFloatTensor(float val
 // `perturb` adds 1 to the value at one coordinate.
 std::shared_ptr<hipdnn_data_sdk::utilities::ITensor>
     raggedLogicalTensor(const hipdnn_integration_tests::bundle::fixtures::RaggedLayout& layout,
-                        const std::vector<int32_t>& seqLen,
                         bool perturb = false)
 {
     using hipdnn_data_sdk::utilities::Tensor;
@@ -188,8 +187,7 @@ std::shared_ptr<hipdnn_data_sdk::utilities::ITensor>
         hipdnn_data_sdk::utilities::SDPA_SEQ_AXIS,
         int32Aux(layout.offsets),
         std::nullopt,
-        layout.offsetMultiplier,
-        seqLen.empty() ? nullptr : int32Aux(seqLen));
+        layout.offsetMultiplier);
     tensor->fillWithValue(-1.0f);
 
     const auto info = tensor->raggedIterationInfo();
@@ -1011,9 +1009,9 @@ TEST(TestOutputComparison, RaggedStatsCompareWithinEachStorageLayout)
     for(const auto& layout : {fixtures::raggedSdpaHeadTokenStatsCase().stats,
                               fixtures::raggedSdpaTokenHeadStatsCase().stats})
     {
-        auto expected = raggedLogicalTensor(layout, {});
-        auto same = raggedLogicalTensor(layout, {});
-        auto different = raggedLogicalTensor(layout, {}, /*perturb=*/true);
+        auto expected = raggedLogicalTensor(layout);
+        auto same = raggedLogicalTensor(layout);
+        auto different = raggedLogicalTensor(layout, /*perturb=*/true);
 
         EXPECT_FALSE(
             compareTensor(K_UID_A, attrs, *expected, *same, exact(), ValidationSite::HOST, "b")
@@ -1023,8 +1021,8 @@ TEST(TestOutputComparison, RaggedStatsCompareWithinEachStorageLayout)
                 .has_value());
     }
 
-    auto headToken = raggedLogicalTensor(fixtures::raggedSdpaHeadTokenStatsCase().stats, {});
-    auto tokenHead = raggedLogicalTensor(fixtures::raggedSdpaTokenHeadStatsCase().stats, {});
+    auto headToken = raggedLogicalTensor(fixtures::raggedSdpaHeadTokenStatsCase().stats);
+    auto tokenHead = raggedLogicalTensor(fixtures::raggedSdpaTokenHeadStatsCase().stats);
     const auto mismatch
         = compareTensor(K_UID_A, attrs, *headToken, *tokenHead, exact(), ValidationSite::HOST, "b");
     ASSERT_TRUE(mismatch.has_value());
@@ -1043,9 +1041,9 @@ TEST(TestOutputComparison, RaggedHeadMajorOutputCompares)
 
     const auto layout = fixtures::raggedSdpaHeadMajorCase().qkvo;
 
-    auto expected = raggedLogicalTensor(layout, {});
-    auto same = raggedLogicalTensor(layout, {});
-    auto different = raggedLogicalTensor(layout, {}, /*perturb=*/true);
+    auto expected = raggedLogicalTensor(layout);
+    auto same = raggedLogicalTensor(layout);
+    auto different = raggedLogicalTensor(layout, /*perturb=*/true);
 
     EXPECT_FALSE(compareTensor(K_UID_A, attrs, *expected, *same, exact(), ValidationSite::HOST, "b")
                      .has_value());

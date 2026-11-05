@@ -1,5 +1,5 @@
 /* **************************************************************************
- * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -49,6 +49,7 @@ namespace detail
         return T{scalar.real(), -scalar.imag()};
     }
 
+    // norm-squared: scalar*scalar
     template <typename T, std::enable_if_t<!rocblas_is_complex<T>, int> = 1>
     inline auto norm(const T& scalar)
     {

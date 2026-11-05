@@ -892,7 +892,8 @@ def write_sweep_golden(sweep_bundle_dir, case_id, graph_json, meta_json, tensors
 #
 # A ragged tensor keeps logical dims [B, H, S_max, D] and its own INT32 [B+1, 1, 1, 1]
 # offset tensor. Batch b starts at element offset[b] * ragged_offset_multiplier (its
-# origin) and holds seq_len[b] token rows; offset[B] is not read. Strides are ordinary:
+# origin) and holds seq_len[b] token rows; offset[B] is read with the table but neither
+# used nor validated (origins come from entries 0..B-1, lengths from seq_len). Strides are ordinary:
 # token-major (token stride H*D, or --ragged-token-stride) or head-major (token stride
 # D, head stride = head pitch rows * D). The file holds exactly the elements the
 # sequences address (elementSpace): up to the last row of the furthest sequence,
@@ -1533,6 +1534,17 @@ def generate_bundles(
         errors.append(
             "--stats-layout ht needs Stats to be ragged (--ragged-sides q or qkv)"
         )
+    if not ragged:
+        for flag, given in (
+            ("--ragged-blocks", ragged_blocks),
+            ("--ragged-origins", ragged_origins),
+            ("--ragged-head-major", ragged_head_major),
+            ("--ragged-head-pitch", ragged_head_pitch),
+            ("--ragged-token-stride", ragged_token_stride),
+            ("--ragged-units", ragged_units != "elements"),
+        ):
+            if given:
+                errors.append(f"{flag} requires --ragged-sides")
     if ragged:
         if not padded:
             errors.append("--ragged-sides requires --seq-lens-q and --seq-lens-kv")

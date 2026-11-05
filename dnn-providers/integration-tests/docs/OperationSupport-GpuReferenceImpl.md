@@ -168,7 +168,7 @@ Design, the full feature table for both references, and how they are tested:
 
 The ragged plan requires RFC-0014 tensors with logical `[B, H, S, D]` dims, an `INT32` `ragged_offset`
 aux on every primary, and strides the ragged container accepts: token-major, head-major, a padded token
-stride, and shifted or non-monotonic origins with `seq_len`. The container rejects layouts that alias.
+stride, and shifted or non-monotonic origins with `seq_len`. The container rejects layouts that alias. Applicability sees only graph attributes, not offset values: layouts that depend on the values are rejected when the tensor is built (bundle load), or with `std::invalid_argument` at execute for callers passing raw pointers.
 Per-batch lengths come from `seq_len_q/kv` when bound (both or neither; a `padding_mask` only with
 both), else from the `ragged_offset` blocks clamped to `S_max`. A node is keyed as ragged when any of
 its Q/K/V/O tensors has a `ragged_offset`. The ragged plan needs all four to be ragged, and the dense
@@ -183,8 +183,7 @@ through the host): the packed tensors are unpacked into dense padded ones with t
 per-batch lengths (`seq_len` when supplied, else the offset blocks) as `seq_len_q/kv`, the dense plan runs,
 and the outputs are packed back. They therefore support everything the dense forward column and the SDPA
 Backward row list. The rewrite serves `Max` and `Sum_exp` (bound by `seq_len_q`), `INT64` offsets and
-ragged Q over non-ragged paged K/V; it declines a `ragged_offset` on a paged K/V container. Divergences
-from cuDNN: [KNOWN_DIVERGENCES.md](../../../projects/hipdnn/docs/KNOWN_DIVERGENCES.md).
+ragged Q over non-ragged paged K/V; it declines a `ragged_offset` on a paged K/V container.
 
 ## Validators
 

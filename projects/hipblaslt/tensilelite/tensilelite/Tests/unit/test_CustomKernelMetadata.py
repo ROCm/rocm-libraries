@@ -107,6 +107,34 @@ def test_validate_external_requires_full_custom_kernel_fields(tmp_path):
     assert "CustomKernel.grid" in msg
 
 
+@pytest.mark.parametrize("value,ok", [("true", True), ("false", True), ("yes_please", False), ("1", False)])
+def test_validate_uniform_summation_order_must_be_bool(tmp_path, value, ok):
+    """hipBLASLt reads CustomKernel.uniformSummationOrder as a bool, so anything
+    else would silently leave the kernel refused under uniform summation order."""
+    write_kernel(tmp_path / "external.s", f"""\
+          Source:
+            Origin: test
+          Version: 1.0.0
+          Features: {{}}
+          InternalSupportParams:
+            KernArgsVersion: 0
+          ProblemType: {{}}
+          MatrixInstruction: [16, 16, 16, 1]
+          CustomKernel:
+            args: []
+            macrotile: [16, 16, 16]
+            threads: [64, 1, 1]
+            grid: [ComputeUnits, One, One]
+            uniformSummationOrder: {value}
+        """)
+
+    valid, msg = validateCustomKernelMetadata("external", str(tmp_path))
+
+    assert valid is ok, msg
+    if not ok:
+        assert "CustomKernel.uniformSummationOrder" in msg
+
+
 def test_validate_tensile_kernel_only_needs_kern_args_version(tmp_path):
     """TensileLite-generated kernels carry only InternalSupportParams.KernArgsVersion;
     ProblemType and tuning state come from the consuming logic file or test YAML."""
@@ -1457,6 +1485,9 @@ def _check_skinny_tn_config(name, dataType, sizeEqual, sizeLessThan=None, sizeGr
     assert ck["grid"] == ["ComputeUnits", "One", "One"]
     assert ck["threads"] == [64, 16, 1]
     assert [a["semantic"] for a in ck["args"]] == _SKINNY_TN_ARGS
+    # Each wave reduces whole rows, every row with the same lanes, loop and
+    # reduction, so hipBLASLt can run these under uniform summation order.
+    assert ck["uniformSummationOrder"] is True
 
 
 @pytest.mark.parametrize(

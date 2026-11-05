@@ -40,8 +40,8 @@ struct RaggedOffsetMultipliers
 //   v = [B, Hv, Skv, Dv]   o = [B, H,  Sq,  Dv]
 // raggedOffsetQ/K/V/O are INT32 [B+1, 1, 1, 1] offset tables (entry b at b * strides()[0]), scaled to elements by
 // `offsetMultipliers`: batch b starts at element offset[b]. Its length is seqLenQ[b] (Q, O, LSE)
-// or seqLenKv[b] (K, V) when those INT32 [B] tensors are given (element b at b * strides()[0]),
-// else
+// or seqLenKv[b] (K, V) when those INT32 [B, 1, 1, 1] tensors are given (element b at
+// b * strides()[0]), else
 // min((offset[b+1] - offset[b]) / strides[2], S_max). Each layout must satisfy the Data SDK
 // ragged container rules (raggedFootprint). O and the LSE must have Q's per-batch lengths and V
 // K's.
@@ -110,7 +110,7 @@ public:
             {
                 return std::nullopt;
             }
-            if(seqLen->dims() != std::vector<int64_t>{batch, 1, 1, 1})
+            if(!hipdnn_data_sdk::utilities::detail::isBatchAxisVector(seqLen->dims(), batch))
             {
                 throw std::invalid_argument(who + ": " + name + " must have shape [B, 1, 1, 1]");
             }
@@ -351,10 +351,10 @@ private:
         // RFC-0014: ragged_offset is INT32 [B+1, 1, 1, 1].
         for(const auto& d : raggedOffsetDims)
         {
-            if(d.size() != 4 || d[0] != qDims[0] + 1 || d[1] != 1 || d[2] != 1 || d[3] != 1)
+            if(!hipdnn_data_sdk::utilities::detail::isBatchAxisVector(d, qDims[0] + 1))
             {
-                throw std::invalid_argument(
-                    "GpuFpReferenceSdpaRagged: raggedOffsetQ/K/V/O must be rank-4 [B+1, 1, 1, 1]");
+                throw std::invalid_argument("GpuFpReferenceSdpaRagged: raggedOffsetQ/K/V/O must "
+                                            "have shape [B + 1, 1, 1, 1]");
             }
         }
 

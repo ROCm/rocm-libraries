@@ -15,6 +15,7 @@
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_test_sdk/utilities/RaggedLayoutTestSupport.hpp>
+#include <hipdnn_test_sdk/utilities/RaggedSdpaDensifyTestGraphs.hpp>
 #include <hipdnn_test_sdk/utilities/RaggedSdpaGraphTestUtils.hpp>
 #include <hipdnn_test_sdk/utilities/RaggedSdpaTestUtils.hpp>
 #include <hipdnn_test_sdk/utilities/detail/RaggedSdpaFwdSupport.hpp>
@@ -24,6 +25,7 @@ using namespace hipdnn_test_sdk::detail;
 using namespace hipdnn_flatbuffers_sdk::data_objects;
 using hipdnn_data_sdk::utilities::generateStrides;
 using hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper;
+using hipdnn_test_sdk::utilities::ragged_densify_test::tensorOf;
 
 namespace
 {
@@ -116,7 +118,7 @@ constexpr int64_t SEQ_LEN_KV_UID = 31;
 const std::vector<int64_t> ROLE_UIDS = {Q_UID, K_UID, V_UID, O_UID, STATS_UID};
 
 // A fully ragged bf16 graph with a ragged Stats. `edit` changes it before serialization.
-flatbuffers::DetachedBuffer makeStatsGraph(const std::function<void(GraphT&)>& edit = {})
+std::vector<uint8_t> makeStatsGraph(const std::function<void(GraphT&)>& edit = {})
 {
     RaggedSdpaFwdGraphOptions options;
     options.statsUid = STATS_UID;
@@ -135,26 +137,9 @@ flatbuffers::DetachedBuffer makeStatsGraph(const std::function<void(GraphT&)>& e
                                                 DIMS,
                                                 DataType::BFLOAT16,
                                                 options);
-    auto graphT = std::unique_ptr<GraphT>(GetGraph(graph.GetBufferPointer())->UnPack());
-    if(edit)
-    {
-        edit(*graphT);
-    }
-    flatbuffers::FlatBufferBuilder builder;
-    builder.Finish(CreateGraph(builder, graphT.get()));
-    return builder.Release();
-}
-
-TensorAttributesT& tensorOf(GraphT& graph, int64_t uid)
-{
-    for(auto& tensor : graph.tensors)
-    {
-        if(tensor->uid == uid)
-        {
-            return *tensor;
-        }
-    }
-    throw std::runtime_error("no tensor " + std::to_string(uid));
+    const std::vector<uint8_t> bytes(graph.GetBufferPointer(),
+                                     graph.GetBufferPointer() + graph.GetSize());
+    return edit ? ragged_densify_test::editGraph(bytes, edit) : bytes;
 }
 
 // Adds INT32 [batch, 1, 1, 1] seq_len_q/kv tensors and binds the node to them.
@@ -174,7 +159,7 @@ void addSeqLens(GraphT& graph, int64_t batch)
     attrs->seq_len_kv_tensor_uid = SEQ_LEN_KV_UID;
 }
 
-bool nodeAccepted(const flatbuffers::DetachedBuffer& graph)
+bool nodeAccepted(const std::vector<uint8_t>& graph)
 {
     const GraphWrapper graphWrapper(graph.data(), graph.size());
     return isSupportedRaggedSdpaFwdNode(sdpaAttributes(graphWrapper), graphWrapper.getTensorMap());
