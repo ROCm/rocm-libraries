@@ -89,6 +89,7 @@ BenchmarkProblems:
         - MatrixInstruction:
           - [16, 16, 128, 1,  1,  8, 8,  2, 2]   # MT256x256 — block-scheduled
           - [16, 16, 128, 1,  1,  4, 4,  2, 2]   # MT128x128 — PLSIN, not block-scheduled
+        - DPPStoreFold: [True]   # opt in to the DPP store-coalesce fold (singular decider)
         - DepthU: [256]
         - AssertSummationElementMultiple: [32]
         - PrefetchGlobalRead: [2]
@@ -194,6 +195,7 @@ BenchmarkProblems:
         - MatrixInstruction:
           - [16, 16, 128, 1,  1,  8, 8,  2, 2]   # MT256x256 — block-scheduled, with epilogue
           - [16, 16, 128, 1,  1,  4, 4,  2, 2]   # MT128x128 — PLSIN, not block-scheduled
+        - DPPStoreFold: [True]   # opt in to the DPP store-coalesce fold (singular decider)
         - DepthU: [256]
         - AssertSummationElementMultiple: [32]
         - PrefetchGlobalRead: [2]

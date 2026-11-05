@@ -366,75 +366,65 @@ def test_paired_store_repack_is_scoped():
     )
 
 
-def test_coalesce_size_gate_is_emitted_on_the_plain_path():
-    """The DPP store-coalesce is size-gated at runtime.
+def test_fold_fires_unconditionally_with_no_runtime_size_gate():
+    """``DPPStoreFold`` is the singular decider for the coalesce.
 
-    The coalesce is always compiled into an eligible MXF4->bf16 subtile kernel; the
-    plain post-loop store then chooses coalesce-vs-plain at runtime on problem size.
-    So the in-scope kernel must carry all three parts of that gate -- the size
-    predicate (computed once per batch in ``_emitSubtileGuards``), at least one gate
-    branch at a plain-path coalesce site, and the coalesced stores themselves -- while
-    the fp32 control, which is outside the subtile-coalesce path, carries none of them.
-
-    This pins the fix for the earlier dispatch that called notLocalSplitUGlobalWrite
-    twice: that corrupted the register pool and dropped epilogue kernels; the gate now
-    lives inside a single store build.
+    When the solution parameter is set (and the structural preconditions hold) the
+    coalesce fires on the eligible MXF4->bf16 subtile kernel *unconditionally* -- there
+    is no runtime M,N size gate. The earlier design precomputed a
+    ``subtileCoalesceSizeOkSgpr`` predicate in ``_emitSubtileGuards`` and branched on it
+    at each coalesce site; that is gone. So the in-scope kernel carries the coalesced
+    stores and no ``coalesce size gate`` text, while the fp32 control, outside
+    ``isMxf4SubtilePath``, carries neither.
     """
     in_scope = "\n".join(src for _b, src, _e in _emit(_IN_SCOPE))
     control = "\n".join(src for _b, src, _e in _emit(_CONTROL))
 
-    assert re.search(r"coalesce size gate: sizeOk", in_scope), (
-        "the size predicate is not computed for the coalesce-eligible kernel"
-    )
-    assert re.search(r"coalesce size gate: M,N below threshold", in_scope), (
-        "no runtime size-gate branch at the plain-path coalesce site"
-    )
     assert re.search(r"quad_perm:\[0,0,2,2\]", in_scope), (
-        "the coalesced store is not emitted"
+        "the coalesced store is not emitted for the fold-enabled kernel"
+    )
+    assert "coalesce size gate" not in in_scope, (
+        "a runtime size gate is still emitted; DPPStoreFold should be the sole decider"
     )
 
-    assert "coalesce size gate" not in control, (
-        "fp32 control is outside the coalesce path but carries the size gate"
-    )
     assert not re.search(r"quad_perm:\[0,0,2,2\]", control), (
         "fp32 control is outside the coalesce path but carries a coalesced store"
     )
-
-
-def test_coalesce_size_gate_shares_one_predicate_across_sites():
-    """The gate is one shared compare feeding cheap per-site branches, not a per-store
-    comparison.
-
-    The whole point of computing the predicate in ``_emitSubtileGuards`` is that the M,N
-    threshold is evaluated a handful of times (once per batch) and then only *branched*
-    on at each coalesce site. If a refactor pushed the comparison back down to the store
-    site, the compute count would rise to meet the branch count -- which is exactly the
-    per-pair shape this design avoids. So assert strictly more branches than computes.
-    """
-    in_scope = "\n".join(src for _b, src, _e in _emit(_IN_SCOPE))
-    computes = len(re.findall(r"coalesce size gate: sizeOk = 1 iff", in_scope))
-    branches = len(re.findall(r"coalesce size gate: M,N below threshold", in_scope))
-    assert computes >= 1, "the size predicate is never computed"
-    assert branches > computes, (
-        f"expected one shared predicate feeding many per-site branches, got "
-        f"{computes} computes / {branches} branches"
+    assert "coalesce size gate" not in control, (
+        "fp32 control is outside the coalesce path but carries the size gate"
     )
 
 
-def test_coalesce_is_admitted_only_at_the_proven_wavetile():
-    """The coalesce is compiled in only for the MIWaveTile[0]==8 geometry it is validated for.
+def test_no_runtime_size_gate_predicate_is_emitted():
+    """The old design precomputed an ``M,N > threshold`` predicate once per batch and
+    branched on it at each coalesce site. ``DPPStoreFold`` removes that entirely: there
+    is no size-gate compute and no size-gate branch anywhere in the emitted corpus.
+    """
+    in_scope = "\n".join(src for _b, src, _e in _emit(_IN_SCOPE))
+    assert in_scope.count("coalesce size gate") == 0, (
+        "a runtime size-gate predicate/branch is still emitted under DPPStoreFold"
+    )
 
-    The emitted corpus carries MT256x256 (MIWT8, eligible) and MT128x128 (MIWT4, not eligible).
-    The coalesced store must appear in the former and be wholly absent from the latter -- the
-    compile-time admission gate (``isSubtileCoalesce``) at work. Matches the coalesce-only store
+
+def test_fold_is_admitted_across_the_broadened_wavetile_floor():
+    """The admission floor is ``MIWaveTile[0] >= 4`` (two M-adjacent pairs to coalesce),
+    broadened from the earlier MIWT8-only gate.
+
+    So both MT256x256 (MIWT8) and MT128x128 (MIWT4) coalesce when ``DPPStoreFold`` is
+    set, while the out-of-scope fp32 control coalesces at neither -- the
+    ``isMxf4SubtilePath`` structural gate still holds. Matches the coalesce-only store
     comment rather than a bare ``quad_perm`` (the MX scale path emits unrelated lane swaps).
     """
     tiles = _by_macro_tile(_emit(_IN_SCOPE))
+    control = _by_macro_tile(_emit(_CONTROL))
     assert "all-lanes coalesced store" in tiles["MT256x256"], (
         "MIWT8 MT256x256 is coalesce-eligible but has no coalesced store"
     )
-    assert "all-lanes coalesced store" not in tiles["MT128x128"], (
-        "MIWT4 MT128x128 is not coalesce-eligible but carries a coalesced store"
+    assert "all-lanes coalesced store" in tiles["MT128x128"], (
+        "MIWT4 MT128x128 is within the broadened floor but has no coalesced store"
+    )
+    assert "all-lanes coalesced store" not in control["MT256x256"], (
+        "fp32 control is outside isMxf4SubtilePath but carries a coalesced store"
     )
 
 
@@ -458,18 +448,22 @@ def test_coalesced_store_emits_the_full_dpp_blend_pattern():
     )
 
 
-def test_uncoalesced_fallback_arms_are_emitted():
-    """The guarded and size-gated paths fall back to un-coalesced paired stores.
+def test_uncoalesced_fallback_arm_is_the_partial_m_edge_guard_only():
+    """The plain arm keeps exactly one runtime branch over the coalesce: the partial-M
+    edge guard (``SubtileMGuard``).
 
-    On the plain path the coalesce is guarded: the boundary arm branches to an un-coalesced
-    paired-store fallback when not all M-blocks are valid OR the problem is below the size
-    threshold, and the interior peel has an analogous small-size arm. Both the coalesced store
-    and its un-coalesced fallbacks must therefore coexist in the eligible kernel.
+    When not all four M-blocks of a pair-of-pairs are in bounds the boundary arm falls
+    back to an un-coalesced paired store, because the cross-lane DPP needs full EXEC.
+    So the coalesced store and its ``subtile_coalesce_fallback`` arm coexist. The interior
+    peel, by contrast, coalesces unconditionally -- the old ``subtile_interior_coalesce_small``
+    size arm is gone, since ``DPPStoreFold`` is the only decider.
     """
     in_scope = "\n".join(src for _b, src, _e in _emit(_IN_SCOPE))
     assert "all-lanes coalesced store" in in_scope, "coalesced store missing"
-    assert "subtile_coalesce_fallback" in in_scope, "boundary un-coalesced fallback arm missing"
-    assert "subtile_interior_coalesce_small" in in_scope, "interior-peel small-size fallback arm missing"
+    assert "subtile_coalesce_fallback" in in_scope, "partial-M edge-guard fallback arm missing"
+    assert "subtile_interior_coalesce_small" not in in_scope, (
+        "the interior-peel size-gate fallback should be gone under DPPStoreFold"
+    )
     assert "buffer_store_dwordx4" in in_scope, "the fallback emits no paired store"
 
 

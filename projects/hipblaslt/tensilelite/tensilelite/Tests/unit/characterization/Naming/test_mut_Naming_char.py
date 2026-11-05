@@ -212,6 +212,20 @@ def test_tdmfuse_is_named_only_when_nonzero(make_state):
     assert len(set(names.values())) == 4
 
 
+def test_dpp_store_fold_is_named_only_when_true(make_state):
+    # DPPStoreFold uses the same conditional-token pattern as TDMFuse: the default
+    # (False) is the arrangement every shipped kernel already has, so it carries no
+    # token (names unchanged); only the opt-in prints DPPSF.
+    names = {
+        value: N.getKernelNameMin(make_state(DPPStoreFold=value), splitGSU=False)
+        for value in (False, True)
+    }
+
+    assert "DPPSF" not in names[False]
+    assert "DPPSF1" in names[True]
+    assert names[False] != names[True]
+
+
 def test_register_allocation_is_named_only_off_the_default(make_state):
     names = {
         value: N.getKernelNameMin(
