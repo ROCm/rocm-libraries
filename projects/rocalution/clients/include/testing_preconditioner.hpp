@@ -31,6 +31,16 @@
 
 using namespace rocalution;
 
+// Relative bound on the difference between two applications of the same
+// preconditioner on the host and the accelerator. The backends sum in a different
+// order, and the triangular solves and the iterative preconditioners amplify the
+// rounding differences, so the bound is far above the machine epsilon.
+template <typename T>
+static T host_accelerator_tolerance()
+{
+    return std::is_same<T, float>::value ? static_cast<T>(1e-4) : static_cast<T>(1e-10);
+}
+
 template <typename T>
 static void getLaplacianTestMatrix(Arguments argus, LocalMatrix<T>& matrix)
 {
@@ -331,17 +341,14 @@ void testing_preconditioner_all(Arguments argus)
     b.MoveToAccelerator();
     e.MoveToAccelerator();
 
-    if(precond != "ILUT" && precond != "IC")
-    {
-        e.Ones();
-        matrix.Apply(e, &b);
-        p->Solve(b, &x_acc);
+    e.Ones();
+    matrix.Apply(e, &b);
+    p->Solve(b, &x_acc);
 
-        // Compute error L2 norm
-        e.ScaleAdd(-1.0, x_acc);
-        T error_acc = e.Norm();
-        std::cout << "error_acc =" << error_acc << std::endl;
-    }
+    // Compute error L2 norm
+    e.ScaleAdd(-1.0, x_acc);
+    T error_acc = e.Norm();
+    std::cout << "error_acc =" << error_acc << std::endl;
 
     ls.MoveToHost();
     p->MoveToHost();
@@ -359,11 +366,15 @@ void testing_preconditioner_all(Arguments argus)
     T error_host = e.Norm();
     std::cout << "error_host = " << error_host << std::endl;
 
-    if(precond != "ILUT" && precond != "IC")
+    x_host.ScaleAdd(-1.0, x_acc);
+    T diff = x_host.Norm();
+    std::cout << "diff = " << diff << std::endl;
+
+    // VariablePreconditioner switches to its next preconditioner on every solve
+    if(precond != "VariablePreconditioner")
     {
-        x_host.ScaleAdd(-1.0, x_acc);
-        T diff = x_host.Norm();
-        std::cout << "diff = " << diff << std::endl;
+        EXPECT_LE(diff, host_accelerator_tolerance<T>() * x_acc.Norm())
+            << precond << ": the host and accelerator solutions differ";
     }
 
     ls.Clear();
@@ -427,22 +438,174 @@ void testing_itilu0_convergence_history(Arguments argus)
         EXPECT_GT(history[niter], 0.0);
     }
 
-    // rocSPARSE rejects the history query for the in-place algorithm when residual norms are
-    // not computed; the factorization must still succeed and report an empty history
-    for(ItILU0Algorithm alg : {ItILU0Algorithm::Default, ItILU0Algorithm::AsyncInPlace})
+    LocalVector<T> b;
+    LocalVector<T> x;
+    b.Allocate("b", matrix.GetN());
+    x.Allocate("x", matrix.GetN());
+    b.MoveToAccelerator();
+    x.MoveToAccelerator();
+    b.Ones();
+
+    // Without a norm option, the stopping criteria and the history have to use the residual
+    // norm. Otherwise rocSPARSE stops after the first sweep, which leaves the factors at zero.
+    const int options_without_norm[]
+        = {ItILU0Option::StoppingCriteria,
+           ItILU0Option::StoppingCriteria | ItILU0Option::ConvergenceHistory,
+           ItILU0Option::ConvergenceHistory};
+
+    for(int option_without_norm : options_without_norm)
     {
-        SCOPED_TRACE(testing::Message() << "ItILU0Algorithm " << alg << " without residual");
+        for(ItILU0Algorithm alg : {ItILU0Algorithm::Default,
+                                   ItILU0Algorithm::AsyncInPlace,
+                                   ItILU0Algorithm::AsyncSplit,
+                                   ItILU0Algorithm::SyncSplit})
+        {
+            SCOPED_TRACE(testing::Message()
+                         << "ItILU0Algorithm " << alg << ", options " << option_without_norm);
 
-        ItILU0<LocalMatrix<T>, LocalVector<T>, T> p;
-        p.SetAlgorithm(alg);
-        p.SetOptions(ItILU0Option::StoppingCriteria | ItILU0Option::ConvergenceHistory);
-        p.SetMaxIter(maxiter);
-        p.SetTolerance(1e-6);
-        p.SetOperator(matrix);
-        p.Build();
+            ItILU0<LocalMatrix<T>, LocalVector<T>, T> p;
+            p.SetAlgorithm(alg);
+            p.SetOptions(option_without_norm);
+            p.SetMaxIter(maxiter);
+            p.SetTolerance(1e-6);
+            p.SetOperator(matrix);
+            p.Build();
 
-        int niter = -1;
-        p.GetConvergenceHistory(&niter);
-        EXPECT_EQ(niter, 0);
+            int           niter   = 0;
+            const double* history = p.GetConvergenceHistory(&niter);
+
+            ASSERT_GT(niter, 1);
+            ASSERT_LE(niter, maxiter);
+
+            if((option_without_norm & ItILU0Option::ConvergenceHistory) > 0)
+            {
+                ASSERT_NE(history, nullptr);
+
+                for(int i = niter; i < 2 * niter; ++i)
+                {
+                    EXPECT_TRUE(std::isfinite(history[i])) << "history[" << i << "]";
+                    EXPECT_GE(history[i], 0.0) << "history[" << i << "]";
+                }
+
+                EXPECT_GT(history[niter], 0.0);
+            }
+
+            // Zero factors make the preconditioner the identity
+            x.Zeros();
+            p.Solve(b, &x);
+            x.ScaleAdd(static_cast<T>(-1), b);
+            EXPECT_GT(x.Norm(), 0.1 * b.Norm());
+        }
     }
+}
+
+template <typename T>
+void testing_preconditioner_repeated_move(const std::string& name, TriSolverAlg alg)
+{
+    Arguments argus;
+    argus.size = 7;
+
+    LocalMatrix<T> matrix;
+    getLaplacianTestMatrix<T>(argus, matrix);
+
+    Solver<LocalMatrix<T>, LocalVector<T>, T>* s = NULL;
+
+    if(name == "GS")
+    {
+        s = new GS<LocalMatrix<T>, LocalVector<T>, T>;
+    }
+    else if(name == "SGS")
+    {
+        s = new SGS<LocalMatrix<T>, LocalVector<T>, T>;
+    }
+    else if(name == "ILU")
+    {
+        s = new ILU<LocalMatrix<T>, LocalVector<T>, T>;
+    }
+    else if(name == "ILUT")
+    {
+        s = new ILUT<LocalMatrix<T>, LocalVector<T>, T>;
+    }
+    else if(name == "IC")
+    {
+        s = new IC<LocalMatrix<T>, LocalVector<T>, T>;
+    }
+    else if(name == "ItILU0")
+    {
+        ItILU0<LocalMatrix<T>, LocalVector<T>, T>* p
+            = new ItILU0<LocalMatrix<T>, LocalVector<T>, T>;
+        p->SetAlgorithm(ItILU0Algorithm::Default);
+        p->SetMaxIter(10);
+        p->SetTolerance(1e-6);
+        s = p;
+    }
+    else if(name == "LU")
+    {
+        s = new LU<LocalMatrix<T>, LocalVector<T>, T>;
+    }
+    else
+    {
+        FAIL() << "Unknown solver: " << name;
+    }
+
+    // The iterative triangular solves start from the previous solution, so they
+    // have to converge for the solutions to agree. They run a fixed number of
+    // iterations, more than the 49 rows: with a tolerance, the host ItLUSolve gives
+    // the U solve only the iterations that the L solve needed, which is a known bug
+    // in unit_test_local_matrix.cpp.
+    SolverDescr descr;
+    descr.SetTriSolverAlg(alg);
+    descr.SetIterativeSolverMaxIteration(200);
+    descr.DisableIterativeSolverTolerance();
+
+    s->SetSolverDescriptor(descr);
+    s->SetOperator(matrix);
+    s->Build();
+
+    LocalVector<T> e, b, x, x_ref;
+
+    e.Allocate("e", matrix.GetN());
+    b.Allocate("b", matrix.GetM());
+    x.Allocate("x", matrix.GetN());
+    x_ref.Allocate("x_ref", matrix.GetN());
+
+    e.Ones();
+    matrix.Apply(e, &b);
+
+    // The reference is the solve on the host before any move
+    x_ref.Zeros();
+    s->Solve(b, &x_ref);
+    EXPECT_GT(x_ref.Norm(), static_cast<T>(0)) << name << " before any move";
+
+    const T tol = host_accelerator_tolerance<T>();
+
+    auto expect_reference = [&](const std::string& when) {
+        x.Zeros();
+        s->Solve(b, &x);
+
+        LocalVector<T> diff;
+        diff.Allocate("diff", x_ref.GetSize());
+        diff.CopyFrom(x);
+        diff.ScaleAdd(static_cast<T>(-1), x_ref);
+        EXPECT_LE(diff.Norm(), tol * x_ref.Norm()) << name << " " << when;
+    };
+
+    s->MoveToAccelerator();
+    b.MoveToAccelerator();
+    x.MoveToAccelerator();
+    expect_reference("after moving to the accelerator");
+
+    s->MoveToAccelerator();
+    expect_reference("after moving to the accelerator a second time");
+
+    s->MoveToHost();
+    b.MoveToHost();
+    x.MoveToHost();
+    expect_reference("after moving to the host");
+
+    s->MoveToHost();
+    expect_reference("after moving to the host a second time");
+
+    s->Clear();
+    delete s;
 }

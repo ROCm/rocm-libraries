@@ -1153,6 +1153,19 @@ static void _op_tile_s_barrier_wait(rocke_lower_t* L, const rocke_op_t* op)
     rocke_ll_emitf(L, "  call void @llvm.amdgcn.s.barrier.wait(i16 %lld)", (long long)barrier_type);
 }
 
+static const char* ll_named_barrier_pointer(rocke_lower_t* L, const char* local, int* addrspace)
+{
+    if(!rocke_ll_profile_has(L->flavor, ROCKE_LL_CAP_NAMED_BARRIER_AS15))
+    {
+        *addrspace = 3;
+        return local;
+    }
+    const char* cast = rocke_ll_fresh(L, "barrier.as15");
+    rocke_ll_emitf(L, "  %s = addrspacecast ptr addrspace(3) %s to ptr addrspace(15)", cast, local);
+    *addrspace = 15;
+    return cast;
+}
+
 static void ll_named_barrier_count(rocke_lower_t* L,
                                    const rocke_op_t* op,
                                    const char* short_name,
@@ -1167,10 +1180,13 @@ static void ll_named_barrier_count(rocke_lower_t* L,
         rocke_ll_fail(L, ROCKE_ERR_VALUE, "%s member_count must be i32", short_name);
     rocke_ll_require_llvm23_target_fact(L, short_name, ROCKE_LL_FACT_GFX12_CDNA_FAMILY);
     const char* ptr = ll_named_barrier_ptr(L, short_name, barrier);
+    int addrspace = 3;
+    ptr = ll_named_barrier_pointer(L, ptr, &addrspace);
     rocke_ll_need(L, intrinsic);
     rocke_ll_emitf(L,
-                   "  call void @llvm.amdgcn.%s(ptr addrspace(3) %s, i32 %s)",
+                   "  call void @llvm.amdgcn.%s(ptr addrspace(%d) %s, i32 %s)",
                    intrinsic,
+                   addrspace,
                    ptr,
                    rocke_ll_operand(L, count));
 }
@@ -1194,8 +1210,11 @@ static void ll_named_barrier_one(rocke_lower_t* L,
         rocke_ll_fail(L, ROCKE_ERR_VALUE, "%s expects one barrier pointer", short_name);
     rocke_ll_require_llvm23_target_fact(L, short_name, ROCKE_LL_FACT_GFX12_CDNA_FAMILY);
     const char* ptr = ll_named_barrier_ptr(L, short_name, op->operands[0]);
+    int addrspace = 3;
+    ptr = ll_named_barrier_pointer(L, ptr, &addrspace);
     rocke_ll_need(L, intrinsic);
-    rocke_ll_emitf(L, "  call void @llvm.amdgcn.%s(ptr addrspace(3) %s)", intrinsic, ptr);
+    rocke_ll_emitf(
+        L, "  call void @llvm.amdgcn.%s(ptr addrspace(%d) %s)", intrinsic, addrspace, ptr);
 }
 
 static void _op_tile_s_barrier_join(rocke_lower_t* L, const rocke_op_t* op)
@@ -1355,16 +1374,12 @@ static void _op_tile_s_buffer_prefetch_data(rocke_lower_t* L, const rocke_op_t* 
 
 static void _op_tile_global_prefetch(rocke_lower_t* L, const rocke_op_t* op)
 {
-    const char* ty;
     int64_t cp;
     if(!rocke_ll_live(L))
         return;
     rocke_ll_require_llvm23_target_fact(L, "global_prefetch", ROCKE_LL_FACT_GLOBAL_PREFETCH);
     ll_expect_operands(L, op, "global_prefetch", 1);
-    ty = rocke_ll_value_ptr_type(L, op->operands[0]);
-    if(strcmp(ty, "ptr addrspace(1)") != 0)
-        rocke_ll_fail(
-            L, ROCKE_ERR_VALUE, "global_prefetch ptr must be a global pointer, got %s", ty);
+    rocke_ll_require_global_header_ptr(L, "global_prefetch", op->operands[0], "ptr");
     cp = ll_check_cachepolicy(L, op, "global_prefetch");
     rocke_ll_need(L, "global.prefetch");
     rocke_ll_emitf(L,
@@ -1375,15 +1390,12 @@ static void _op_tile_global_prefetch(rocke_lower_t* L, const rocke_op_t* op)
 
 static void _op_tile_flat_prefetch(rocke_lower_t* L, const rocke_op_t* op)
 {
-    const char* ty;
     int64_t cp;
     if(!rocke_ll_live(L))
         return;
     rocke_ll_require_llvm23_target_fact(L, "flat_prefetch", ROCKE_LL_FACT_GLOBAL_PREFETCH);
     ll_expect_operands(L, op, "flat_prefetch", 1);
-    ty = rocke_ll_value_ptr_type(L, op->operands[0]);
-    if(strcmp(ty, "ptr") != 0)
-        rocke_ll_fail(L, ROCKE_ERR_VALUE, "flat_prefetch ptr must be a flat pointer, got %s", ty);
+    rocke_ll_require_header_ptr(L, "flat_prefetch", op->operands[0], "ptr", "flat", "ptr");
     cp = ll_check_cachepolicy(L, op, "flat_prefetch");
     rocke_ll_need(L, "flat.prefetch");
     rocke_ll_emitf(L,

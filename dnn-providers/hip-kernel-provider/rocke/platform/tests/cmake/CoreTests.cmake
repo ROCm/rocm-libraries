@@ -37,6 +37,44 @@ if(BUILD_TESTING)
             "CTest is not registered")
   endif()
 
+  # The binding consumes Python-built IR; this binary exercises the independent
+  # C builder as well, including compiler-dependent argument evaluation order.
+  set_source_files_properties(instances/parity/optimization_barrier_emit.c
+                              PROPERTIES LANGUAGE CXX)
+  add_executable(rocke_optimization_barrier_emit
+                 instances/parity/optimization_barrier_emit.c)
+  target_link_libraries(rocke_optimization_barrier_emit PRIVATE rocke_core)
+  # The supported CMake minimum predates language flags for a .c file.
+  if(MSVC OR CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
+    target_compile_options(rocke_optimization_barrier_emit PRIVATE /TP)
+  else()
+    target_compile_options(rocke_optimization_barrier_emit PRIVATE -x c++)
+  endif()
+  rocke_cxx_test_installed_name(_rocke_installed_name
+                              rocke_optimization_barrier_emit)
+  set_target_properties(rocke_optimization_barrier_emit
+                        PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
+  install(TARGETS rocke_optimization_barrier_emit
+          RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
+  if(Python3_Interpreter_FOUND)
+    set(_rocke_core_tests "${CMAKE_CURRENT_SOURCE_DIR}/core")
+    set(_rocke_python_root "${CMAKE_CURRENT_SOURCE_DIR}/../python")
+    set(_rocke_parity_dir
+        "${CMAKE_CURRENT_SOURCE_DIR}/instances/parity")
+    add_test(
+      NAME rocke_optimization_barrier_hip_pair
+      COMMAND "${Python3_EXECUTABLE}"
+              "${_rocke_core_tests}/test_optimization_barrier_cli.py"
+              --native "$<TARGET_FILE:rocke_optimization_barrier_emit>"
+              --launcher
+              "${_rocke_python_root}/rocke/tests/subprocess_launcher.py"
+              --emitter
+              "${_rocke_parity_dir}/optimization_barrier_emit.py"
+              --count 17)
+    set_tests_properties(rocke_optimization_barrier_hip_pair
+                         PROPERTIES LABELS "ckc;python;host;quick" TIMEOUT 120)
+  endif()
+
   add_executable(rocke_optimization_barrier core/test_optimization_barrier.cpp)
   target_link_libraries(rocke_optimization_barrier PRIVATE rocke_core)
   add_test(NAME rocke_optimization_barrier COMMAND rocke_optimization_barrier)
@@ -129,6 +167,16 @@ if(BUILD_TESTING)
   set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS
                rocke_arch_target_identity)
 
+  # The C++ copy of arch_specs.json's generic targets, compared with the file.
+  # It reads the file from the source tree, so it runs from the build tree
+  # only and is not installed.
+  add_executable(rocke_arch_data_mirror core/arch_data_mirror.cpp)
+  target_link_libraries(rocke_arch_data_mirror PRIVATE rocke_core)
+  add_test(NAME rocke_arch_data_mirror
+           COMMAND rocke_arch_data_mirror
+                   "${CMAKE_CURRENT_SOURCE_DIR}/../python/rocke/core/arch/data")
+  set_tests_properties(rocke_arch_data_mirror PROPERTIES LABELS "ckc;unit;host")
+
   # ck.dsl.ir/v1 serializer round-trip + verifier test. Proves
   # lower(parse(serialize(k))) == lower(k) byte-for-byte, serialization
   # idempotence, and a clean verifier pass for the buildable GEMM configs.
@@ -200,6 +248,25 @@ if(BUILD_TESTING)
             RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
     set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS
                  rocke_qk_scale_spec_validate)
+  endif()
+
+  # The buffer address space of the C++ tensor view: the Python error kind and
+  # message for each refused call (tests/core/test_tensor_view_buffer_errors.py
+  # pins the Python side).
+  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/core/test_tensor_view_buffer_errors.cpp")
+    add_executable(rocke_tensor_view_buffer_errors core/test_tensor_view_buffer_errors.cpp)
+    target_link_libraries(rocke_tensor_view_buffer_errors PRIVATE rocke_core)
+    add_test(NAME rocke_tensor_view_buffer_errors
+             COMMAND rocke_tensor_view_buffer_errors)
+    set_tests_properties(rocke_tensor_view_buffer_errors
+                         PROPERTIES LABELS "ckc;unit;host")
+    rocke_cxx_test_installed_name(_rocke_installed_name rocke_tensor_view_buffer_errors)
+    set_target_properties(rocke_tensor_view_buffer_errors
+                          PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
+    install(TARGETS rocke_tensor_view_buffer_errors
+            RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
+    set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS
+                 rocke_tensor_view_buffer_errors)
   endif()
 
   # temporal_hint (rocke_mem_opts_t) on global_load_vN/global_store_vN and the
@@ -280,6 +347,22 @@ if(BUILD_TESTING)
             RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
     set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS
                  rocke_barrier_fence)
+  endif()
+
+  # MfmaAtom.lane_to_output: every lane and slot against atoms.py's layouts.
+  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/core/test_mfma_atom_lane_to_output.cpp")
+    add_executable(rocke_mfma_atom_lane_to_output core/test_mfma_atom_lane_to_output.cpp)
+    target_link_libraries(rocke_mfma_atom_lane_to_output PRIVATE rocke_core)
+    add_test(NAME rocke_mfma_atom_lane_to_output COMMAND rocke_mfma_atom_lane_to_output)
+    set_tests_properties(rocke_mfma_atom_lane_to_output
+                         PROPERTIES LABELS "ckc;unit;host")
+    rocke_cxx_test_installed_name(_rocke_installed_name rocke_mfma_atom_lane_to_output)
+    set_target_properties(rocke_mfma_atom_lane_to_output
+                          PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
+    install(TARGETS rocke_mfma_atom_lane_to_output
+            RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
+    set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS
+                 rocke_mfma_atom_lane_to_output)
   endif()
 
   # BF16x3 expansion of the emulated XF32 atoms, lowered from serialized IR.
@@ -378,6 +461,180 @@ if(BUILD_TESTING)
             RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
     set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS
                  rocke_flavor_datalayout_ssot)
+  endif()
+
+  # Holds both C++ backend registries to one row per target with facts of its own.
+  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/core/isa_backend_targets.cpp")
+    add_executable(rocke_isa_backend_targets core/isa_backend_targets.cpp)
+    target_link_libraries(rocke_isa_backend_targets PRIVATE rocke_core)
+    add_test(NAME rocke_isa_backend_targets
+             COMMAND rocke_isa_backend_targets)
+    set_tests_properties(rocke_isa_backend_targets
+                         PROPERTIES LABELS "ckc;unit;host")
+    rocke_cxx_test_installed_name(_rocke_installed_name rocke_isa_backend_targets)
+    set_target_properties(rocke_isa_backend_targets
+                          PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
+    install(TARGETS rocke_isa_backend_targets
+            RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
+    set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS
+                 rocke_isa_backend_targets)
+  endif()
+
+  # Holds the intrinsic declaration chain (per declaration ABI generation) to its rule.
+  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/core/flavor_decl_chain.cpp")
+    add_executable(rocke_flavor_decl_chain core/flavor_decl_chain.cpp)
+    target_link_libraries(rocke_flavor_decl_chain PRIVATE rocke_core)
+    add_test(NAME rocke_flavor_decl_chain
+             COMMAND rocke_flavor_decl_chain)
+    set_tests_properties(rocke_flavor_decl_chain
+                         PROPERTIES LABELS "ckc;unit;host")
+    rocke_cxx_test_installed_name(_rocke_installed_name rocke_flavor_decl_chain)
+    set_target_properties(rocke_flavor_decl_chain
+                          PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
+    install(TARGETS rocke_flavor_decl_chain
+            RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
+    set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS
+                 rocke_flavor_decl_chain)
+  endif()
+
+  # Matrix intrinsic calls described as data: forms, schema and declarations.
+  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/core/matrix_call_lowering.cpp")
+    add_executable(rocke_matrix_call_lowering core/matrix_call_lowering.cpp)
+    target_link_libraries(rocke_matrix_call_lowering PRIVATE rocke_core)
+    add_test(NAME rocke_matrix_call_lowering
+             COMMAND rocke_matrix_call_lowering)
+    set_tests_properties(rocke_matrix_call_lowering
+                         PROPERTIES LABELS "ckc;unit;host")
+    rocke_cxx_test_installed_name(_rocke_installed_name rocke_matrix_call_lowering)
+    set_target_properties(rocke_matrix_call_lowering
+                          PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
+    install(TARGETS rocke_matrix_call_lowering
+            RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
+    set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS
+                 rocke_matrix_call_lowering)
+  endif()
+
+  # The CDNA MFMA catalog rows and lane maps beyond f16 / bf16 / fp8 / bf8.
+  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/core/cdna_mfma_ops.cpp")
+    add_executable(rocke_cdna_mfma_ops core/cdna_mfma_ops.cpp)
+    target_link_libraries(rocke_cdna_mfma_ops PRIVATE rocke_core)
+    add_test(NAME rocke_cdna_mfma_ops
+             COMMAND rocke_cdna_mfma_ops)
+    set_tests_properties(rocke_cdna_mfma_ops
+                         PROPERTIES LABELS "ckc;unit;host")
+    rocke_cxx_test_installed_name(_rocke_installed_name rocke_cdna_mfma_ops)
+    set_target_properties(rocke_cdna_mfma_ops
+                          PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
+    install(TARGETS rocke_cdna_mfma_ops
+            RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
+    set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS
+                 rocke_cdna_mfma_ops)
+  endif()
+
+  # The gfx12 WMMA catalog rows and lane maps beyond f16 / bf16 -> f32.
+  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/core/gfx12_wmma_ops.cpp")
+    add_executable(rocke_gfx12_wmma_ops core/gfx12_wmma_ops.cpp)
+    target_link_libraries(rocke_gfx12_wmma_ops PRIVATE rocke_core)
+    add_test(NAME rocke_gfx12_wmma_ops
+             COMMAND rocke_gfx12_wmma_ops)
+    set_tests_properties(rocke_gfx12_wmma_ops
+                         PROPERTIES LABELS "ckc;unit;host")
+    rocke_cxx_test_installed_name(_rocke_installed_name rocke_gfx12_wmma_ops)
+    set_target_properties(rocke_gfx12_wmma_ops
+                          PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
+    install(TARGETS rocke_gfx12_wmma_ops
+            RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
+    set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS
+                 rocke_gfx12_wmma_ops)
+  endif()
+
+  # The gfx11 WMMA catalog rows and lane maps with a 16-bit result.
+  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/core/gfx11_wmma_ops.cpp")
+    add_executable(rocke_gfx11_wmma_ops core/gfx11_wmma_ops.cpp)
+    target_link_libraries(rocke_gfx11_wmma_ops PRIVATE rocke_core)
+    add_test(NAME rocke_gfx11_wmma_ops
+             COMMAND rocke_gfx11_wmma_ops)
+    set_tests_properties(rocke_gfx11_wmma_ops
+                         PROPERTIES LABELS "ckc;unit;host")
+    rocke_cxx_test_installed_name(_rocke_installed_name rocke_gfx11_wmma_ops)
+    set_target_properties(rocke_gfx11_wmma_ops
+                          PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
+    install(TARGETS rocke_gfx11_wmma_ops
+            RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
+    set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS
+                 rocke_gfx11_wmma_ops)
+  endif()
+
+  # The gfx1250 WMMA catalog rows with a 16-bit or integer result and the
+  # f32 16x16x4 lane maps.
+  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/core/gfx1250_wmma_ops.cpp")
+    add_executable(rocke_gfx1250_wmma_ops core/gfx1250_wmma_ops.cpp)
+    target_link_libraries(rocke_gfx1250_wmma_ops PRIVATE rocke_core)
+    add_test(NAME rocke_gfx1250_wmma_ops
+             COMMAND rocke_gfx1250_wmma_ops)
+    set_tests_properties(rocke_gfx1250_wmma_ops
+                         PROPERTIES LABELS "ckc;unit;host")
+    rocke_cxx_test_installed_name(_rocke_installed_name rocke_gfx1250_wmma_ops)
+    set_target_properties(rocke_gfx1250_wmma_ops
+                          PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
+    install(TARGETS rocke_gfx1250_wmma_ops
+            RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
+    set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS
+                 rocke_gfx1250_wmma_ops)
+  endif()
+
+  # The gfx1250 f8f6f4 16x16x128 and f4 32x16x128 WMMA catalog rows, calls and
+  # lane maps, and the f8f6f4 operand layout.
+  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/core/gfx1250_f8f6f4_wmma_ops.cpp")
+    add_executable(rocke_gfx1250_f8f6f4_wmma_ops core/gfx1250_f8f6f4_wmma_ops.cpp)
+    target_link_libraries(rocke_gfx1250_f8f6f4_wmma_ops PRIVATE rocke_core)
+    add_test(NAME rocke_gfx1250_f8f6f4_wmma_ops
+             COMMAND rocke_gfx1250_f8f6f4_wmma_ops)
+    set_tests_properties(rocke_gfx1250_f8f6f4_wmma_ops
+                         PROPERTIES LABELS "ckc;unit;host")
+    rocke_cxx_test_installed_name(_rocke_installed_name rocke_gfx1250_f8f6f4_wmma_ops)
+    set_target_properties(rocke_gfx1250_f8f6f4_wmma_ops
+                          PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
+    install(TARGETS rocke_gfx1250_f8f6f4_wmma_ops
+            RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
+    set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS
+                 rocke_gfx1250_f8f6f4_wmma_ops)
+  endif()
+
+  # The gfx950 f8f6f4 16x16x128 and 32x32x64 MFMA catalog rows, calls and lane
+  # maps.
+  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/core/gfx950_f8f6f4_mfma_ops.cpp")
+    add_executable(rocke_gfx950_f8f6f4_mfma_ops core/gfx950_f8f6f4_mfma_ops.cpp)
+    target_link_libraries(rocke_gfx950_f8f6f4_mfma_ops PRIVATE rocke_core)
+    add_test(NAME rocke_gfx950_f8f6f4_mfma_ops
+             COMMAND rocke_gfx950_f8f6f4_mfma_ops)
+    set_tests_properties(rocke_gfx950_f8f6f4_mfma_ops
+                         PROPERTIES LABELS "ckc;unit;host")
+    rocke_cxx_test_installed_name(_rocke_installed_name rocke_gfx950_f8f6f4_mfma_ops)
+    set_target_properties(rocke_gfx950_f8f6f4_mfma_ops
+                          PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
+    install(TARGETS rocke_gfx950_f8f6f4_mfma_ops
+            RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
+    set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS
+                 rocke_gfx950_f8f6f4_mfma_ops)
+  endif()
+
+  # The MMA result dtype where it differs from the accumulator: catalog rows,
+  # queries and the tile.mma result type.
+  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/core/mma_result_dtype.cpp")
+    add_executable(rocke_mma_result_dtype core/mma_result_dtype.cpp)
+    target_link_libraries(rocke_mma_result_dtype PRIVATE rocke_core)
+    add_test(NAME rocke_mma_result_dtype
+             COMMAND rocke_mma_result_dtype)
+    set_tests_properties(rocke_mma_result_dtype
+                         PROPERTIES LABELS "ckc;unit;host")
+    rocke_cxx_test_installed_name(_rocke_installed_name rocke_mma_result_dtype)
+    set_target_properties(rocke_mma_result_dtype
+                          PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
+    install(TARGETS rocke_mma_result_dtype
+            RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
+    set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS
+                 rocke_mma_result_dtype)
   endif()
 
   # Host unit test for the IR-layer MMA frag-length / accumulator-dtype tables
