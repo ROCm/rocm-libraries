@@ -603,7 +603,11 @@ def test_g6_catches_a_renamed_field_and_a_declined_spec(manifest, registry_confi
         for pack in registry_config["packs"]
         for k in pack["kernels"]
     )
-    key = manifest["pack"] if manifest["pack"] in _PREDICATE_DECLINES else manifest["builder"]
+    key = (
+        manifest["pack"]
+        if manifest["pack"] in _PREDICATE_DECLINES
+        else manifest["builder"]
+    )
     assert key in _PREDICATE_DECLINES, (
         f"add a predicate-declined spec for {manifest['builder']} to "
         f"_PREDICATE_DECLINES"
