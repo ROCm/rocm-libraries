@@ -6317,7 +6317,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       module.add(self.closeSumAtLeastUnroll(kernel, tensorParametersA, tensorParametersB, prefetch=True, isOptNLL=False, isNGLL=False))
 
     if kernel["PrefetchGL2"]:
-      skipGL2Label = Label("Skip_GL2", "")
+      skipGL2Label = Label(self.rapLabel("Skip_GL2"), "")
       loopCounter = self.loopCounter(kernel, self.states.unrollIdx)
       module.add(SCmpLeU32(src0=loopCounter, src1=hex(kernel["PrefetchGlobalRead"]), \
         comment="counterL<=PGR"))

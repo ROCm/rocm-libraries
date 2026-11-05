@@ -701,10 +701,13 @@ def _mxsaRegs(line):
             for buf, offset in _MXSA_REG.findall(line)]
 
 
-@pytest.mark.parametrize("mxBlockFree", [1, 128], ids=["1d", "2d"])
-def test_rap_splats_each_resident_mx128_scale_before_it_is_read(
-    _gp_gfx1250, gfx1250_iim, assembler, mxBlockFree
-):
+# The rest of rap_gfx1250.yaml's audited configuration: without it the MT64x256
+# tile runs out of SGPRs.
+_AUDITED = dict(UseSgprForGRO=0, InitCIterWmma=1, ForceDisableShadowInit=True)
+
+
+def _kernelSource(sol, assembler):
+    """The kernel's assembly source; raises if the kernel fails to generate."""
     import shutil
     import rocisa
     from tensilelite.Common.Types import DebugConfig
@@ -712,14 +715,6 @@ def test_rap_splats_each_resident_mx128_scale_before_it_is_read(
     from tensilelite.TensileCreateLibrary.Run import generateKernelObjectsFromSolutions
     from tensilelite.Tests.rocisa_test_state import preserve_rocisa_kernel_state
 
-    # MXBlock [128] or [128, 128] in a config, as ProblemType parses it.
-    scales = dict(MXBlockA=128, MXBlockB=128, MXBlockFreeA=mxBlockFree, MXBlockFreeB=mxBlockFree)
-    # The rest of rap_gfx1250.yaml's audited configuration: without it the tile
-    # runs out of SGPRs whatever its scales.
-    audited = dict(UseSgprForGRO=0, InitCIterWmma=1, ForceDisableShadowInit=True)
-    sol = Solution(_make_params(gfx1250_iim, ProblemType=dict(_MX_PROBLEM_TYPE, **scales), **audited),
-                   False, False, False, assembler, gfx1250_iim)
-    assert sol.get("Valid") is True
     with preserve_rocisa_kernel_state():
         (kernel,) = generateKernelObjectsFromSolutions([sol])
         ri = rocisa.rocIsa.getInstance()
@@ -729,8 +724,20 @@ def test_rap_splats_each_resident_mx128_scale_before_it_is_read(
         kernel["BaseName"] = getKernelFileBase(False, kernel)
         kwa = KernelWriterAssembly(assembler, DebugConfig())
         kwa.setRocIsa(ri.getData(), ri.getOutputOptions())
-        # Raises if the resident block overflows the register pool.
-        source = kwa._getKernelSource(kernel)
+        return kwa._getKernelSource(kernel)
+
+
+@pytest.mark.parametrize("mxBlockFree", [1, 128], ids=["1d", "2d"])
+def test_rap_splats_each_resident_mx128_scale_before_it_is_read(
+    _gp_gfx1250, gfx1250_iim, assembler, mxBlockFree
+):
+    # MXBlock [128] or [128, 128] in a config, as ProblemType parses it.
+    scales = dict(MXBlockA=128, MXBlockB=128, MXBlockFreeA=mxBlockFree, MXBlockFreeB=mxBlockFree)
+    sol = Solution(_make_params(gfx1250_iim, ProblemType=dict(_MX_PROBLEM_TYPE, **scales), **_AUDITED),
+                   False, False, False, assembler, gfx1250_iim)
+    assert sol.get("Valid") is True
+    # Raises if the resident block overflows the register pool.
+    source = _kernelSource(sol, assembler)
 
     fill, reuse = source.split("label_RAP_IterN:", 1)
     reuse = reuse.split("label_RAP_StoreJoin:", 1)[0]
@@ -750,6 +757,26 @@ def test_rap_splats_each_resident_mx128_scale_before_it_is_read(
     reuseLines = [line.strip() for line in reuse.splitlines() if _mxsaRegs(line)]
     assert reuseLines and all(line.startswith("v_wmma") for line in reuseLines), \
         "the reuse copy reloads or re-splats a resident scale"
+
+
+# ---------------------------------------------------------------------------
+# Parameters off rap_gfx1250.yaml's audited configuration, which a tuning run
+# reaches. RAP emits the compute section twice, so a label built there from a
+# literal is defined twice unless rapLabel suffixes it, and the CFG builder
+# aborts the whole process on a duplicate rather than failing the kernel.
+# ---------------------------------------------------------------------------
+def _labels(source):
+    return re.findall(r"^(label_\w+):", source, re.M)
+
+
+@pytest.mark.parametrize("prefetchGL2", [1, 2])
+def test_rap_kernel_generates_with_the_gl2_prefetch(_gp_gfx1250, gfx1250_iim, assembler, prefetchGL2):
+    sol = Solution(_make_params(gfx1250_iim, PrefetchGL2=prefetchGL2, **_AUDITED),
+                   False, False, False, assembler, gfx1250_iim)
+    assert sol.get("Valid") is True
+    labels = _labels(_kernelSource(sol, assembler))
+    assert {"label_Skip_GL2", "label_Skip_GL2_RAPIterN"} <= set(labels)
+    assert len(labels) == len(set(labels))
 
 
 # ---------------------------------------------------------------------------
