@@ -1931,7 +1931,7 @@ void testing_matmul_with_bias(const Arguments&                                  
 
                 // gfx950 consumes [MN, K blocks] for either operand orientation.
                 const auto scalesForDevice
-                    = scalePlan.layout
+                    = scalePlan.layout()
                                   == roc::hostnumerics::amd_gpu_layout::MxScaleStorageLayout::Gfx950
                               && blockColumns > 1
                           ? generated.scales.copyWithPermutedDimensions({1, 0})

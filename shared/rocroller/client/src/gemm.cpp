@@ -387,7 +387,7 @@ namespace rocRoller::Client::GEMMClient
                 if(problemParams.types.scaleSkipPermlane
                    == rocRoller::ScaleSkipPermlaneMode::PreSwizzleScaleGFX950)
                 {
-                    const auto scalePlan = roc::hostnumerics::amd_gpu_layout::planMxScaleStorage(
+                    const auto scalePlan = roc::hostnumerics::amd_gpu_layout::MxScaleStoragePlan(
                         {descScaleA.sizes()[1], descScaleA.sizes()[0]},
                         scaleBlockSize,
                         roc::hostnumerics::amd_gpu_layout::MxScaleStorageLayout::Gfx950);
@@ -456,7 +456,7 @@ namespace rocRoller::Client::GEMMClient
                 if(problemParams.types.scaleSkipPermlane
                    == rocRoller::ScaleSkipPermlaneMode::PreSwizzleScaleGFX950)
                 {
-                    const auto scalePlan = roc::hostnumerics::amd_gpu_layout::planMxScaleStorage(
+                    const auto scalePlan = roc::hostnumerics::amd_gpu_layout::MxScaleStoragePlan(
                         {descScaleB.sizes()[1], descScaleB.sizes()[0]},
                         scaleBlockSize,
                         roc::hostnumerics::amd_gpu_layout::MxScaleStorageLayout::Gfx950);

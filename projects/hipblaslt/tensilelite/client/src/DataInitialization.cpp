@@ -2039,7 +2039,7 @@ namespace TensileLite
                                   ? canonicalScales.copyWithPermutedDimensions({1, 0})
                                   : canonicalScales;
                         const auto scalePlan
-                            = roc::hostnumerics::amd_gpu_layout::planMxScaleStorage(
+                            = roc::hostnumerics::amd_gpu_layout::MxScaleStoragePlan(
                                 {scalesForDevice.shape()[0], scalesForDevice.shape()[1]},
                                 mxBlock,
                                 swizzleLayout);
