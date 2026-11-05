@@ -616,7 +616,8 @@ TEST_F(TestGfx1151WmmaAttentionPacks, DeclaresTheConfiguredSdkVersion)
 
 TEST_F(TestGfx1151WmmaAttentionPacks, ExposesTheConfiguredKnobs)
 {
-    ASSERT_EQ(_set->engine.knobs.size(), 0U);
+    const std::vector<std::string> expected{"head_size", "head_size_v", "block_m"};
+    EXPECT_EQ(_set->engine.knobs, expected);
 }
 
 /// The engine ships a ranking model, so its score symbol must be REGISTERED, not merely

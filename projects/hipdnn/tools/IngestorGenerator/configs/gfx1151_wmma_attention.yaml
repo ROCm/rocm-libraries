@@ -28,7 +28,12 @@ engine:
   # 1.2.0: graphs with a runtime pass-by-value scale tensor require it. The
   # native matcher declines override-shape graphs (1.1.0).
   sdk_version: 1.2.0
-  knobs: []
+  # The prefill matcher admits every object of the graph's dtype and bias whose
+  # buckets cover the graph's widths, so one graph can admit several objects. The
+  # catalog lists them only if each has a distinct knob tuple (GenericPlanBuilder
+  # enumerateCandidates): the (head_size, head_size_v) bucket pair tells them apart,
+  # and block_m (64 or 128 for the wide-Q gfx11 and gfx12 objects) pins the tile.
+  knobs: [head_size, head_size_v, block_m]
   heuristic: native
 
 kmd_fields:
