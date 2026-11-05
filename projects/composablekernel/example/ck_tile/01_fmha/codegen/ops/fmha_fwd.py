@@ -1578,8 +1578,10 @@ GFX125_QR_TDM_BM0_CROSSOVER_MAX_SEQLEN_Q = {
 # divided by batch. Logical member lengths still come from their sequence metadata.
 GFX125_D192_N128_MIN_AVERAGE_K = 512
 
-# d128 fp16/bf16 queries that qr_tdm_pingpong takes from qr_tdm_sched (from 128 rows)
-# and qr_tdm (below). qr_tdm_pingpong relies on several resident blocks to overlap
+# d64/d128 fp16/bf16 queries that qr_tdm_pingpong takes from qr_tdm_sched (from 128
+# rows) and qr_tdm (below), except long-key d128 dense and d64 masked grids (see
+# GFX125_QR_TDM_PINGPONG_*_MAX_SEQLEN_K); the d64 range follows the d128 one.
+# qr_tdm_pingpong relies on several resident blocks to overlap
 # softmax with the gemms, while qr_tdm_sched and qr_tdm's double K/V buffer prefetch
 # a tile ahead. Measured on gfx1250, pingpong wins below 640 rows once there are at
 # least 2 (batch, head) pairs per num_cus (HIP's multiProcessorCount, 256 there);
@@ -1590,6 +1592,85 @@ GFX125_QR_TDM_PINGPONG_RANGE = (
     "a.max_seqlen_q < 640"
     " && a.batch * a.nhead_q >= 2 * static_cast<ck_tile::index_t>(num_cus)"
 )
+
+
+# Head dims qr_tdm_pingpong serves (fp16/bf16).
+GFX125_QR_TDM_PINGPONG_HDIMS = ((64, 64), (128, 128))
+
+# Inside its range qr_tdm_pingpong runs 64-row tiles for short keys and 128-row tiles
+# (once there are 128 query rows to fill one) from this K length on, or for dense grids
+# from 512 query rows on: the 64-row tile keeps more blocks resident, the 128-row one
+# halves the K/V LDS reads per row. Measured on gfx1250: with 128 query rows d64 64-row
+# wins up to 772 keys and 128-row from 1859; with 512 query rows and 512 keys the
+# 128-row tile wins dense (d64 +8%, d128 +6%) and the 64-row one masked (d64 +7%, d128
+# +4%); with 1024 keys the 128-row tile wins both.
+GFX125_QR_TDM_PINGPONG_M128_MIN_SEQLEN_K = 1024
+GFX125_QR_TDM_PINGPONG_M128_DENSE_MIN_SEQLEN_Q = 512
+
+# From 128 query rows on, these grids are left to qr_tdm_sched even inside the pingpong
+# range once the keys reach the given length (measured on gfx1250): d128 dense, where
+# the gemms are compute bound and qr_tdm_sched's single-block schedule stays ahead
+# (pingpong +1% at 512 x 1024 keys, -3% at 2048, -5% at 5252), and d64 masked (pingpong
+# +6% at 128 x 930 keys, -3% at 1544 and 1859; sliding windows stay). Below 128 rows
+# pingpong keeps them.
+GFX125_QR_TDM_PINGPONG_D128_DENSE_MAX_SEQLEN_K = 1536
+GFX125_QR_TDM_PINGPONG_D64_MASKED_MAX_SEQLEN_K = 1280
+
+
+def _gfx125_seqlen_k_at_least(value):
+    """Per-sequence K length >= value. Batch mode passes one K length; group mode passes
+    the total packed K, so its average is compared. Logical length pointers mean physical
+    padding may inflate the total, so those launches never count as long."""
+    return (
+        f"a.seqlen_k >= {value}LL * (t.is_group_mode ? a.batch : 1)"
+        " && a.seqlen_k_ptr == nullptr && a.cu_seqlen_k_ptr == nullptr"
+    )
+
+
+def _gfx125_qr_tdm_pingpong_hdim_mask_limit(hdim, mask):
+    """Extra condition on qr_tdm_pingpong for (hdim, mask), or None."""
+    dense = mask in ("no", "s_no")
+    if hdim == 128 and dense:
+        limit = GFX125_QR_TDM_PINGPONG_D128_DENSE_MAX_SEQLEN_K
+    elif hdim == 64 and not dense:
+        limit = GFX125_QR_TDM_PINGPONG_D64_MASKED_MAX_SEQLEN_K
+    else:
+        return None
+    # d64 masked: only causal grids; a sliding window keeps a block's keys short.
+    window = "" if dense else " && a.window_size_left < 0"
+    return f"!(a.max_seqlen_q >= 128{window} && {_gfx125_seqlen_k_at_least(limit)})"
+
+
+def _gfx125_qr_tdm_pingpong_takes(hdim, mask):
+    """Condition under which qr_tdm_pingpong serves a (hdim, mask) query."""
+    limit = _gfx125_qr_tdm_pingpong_hdim_mask_limit(hdim, mask)
+    if limit is None:
+        return GFX125_QR_TDM_PINGPONG_RANGE
+    return f"({GFX125_QR_TDM_PINGPONG_RANGE}) && {limit}"
+
+
+def _gfx125_qr_tdm_pingpong_tiles(hdim):
+    """qr_tdm_pingpong's 16-, 64- and 128-row tiles for (hdim, hdim). The 64-row tile
+    takes every query below 128 rows, so qr_tdm's 64-row tile cannot shadow the 128-row
+    pingpong tile behind it."""
+    # A sliding window bounds the keys a block visits by the window, not by seqlen_k.
+    min_k = GFX125_QR_TDM_PINGPONG_M128_MIN_SEQLEN_K
+    m128 = (
+        "a.max_seqlen_q >= 128 && "
+        f"(((a.window_size_left < 0 || a.window_size_left >= {min_k})"
+        f" && {_gfx125_seqlen_k_at_least(min_k)})"
+        " || (t.mask_type == mask_enum::no_mask && a.max_seqlen_q >= "
+        f"{GFX125_QR_TDM_PINGPONG_M128_DENSE_MIN_SEQLEN_Q}))"
+    )
+    rng = GFX125_QR_TDM_PINGPONG_RANGE
+    #                                         bm0, bn0, bk0,  bn1, bk1, bk0max
+    return (
+        # Up to 16 rows the 64-row tile would idle 3/4 of its M rows, so this one
+        # spends its four warps on N instead.
+        FmhaFwdTileSize( 16,  64,  32, hdim,  32,  hdim,  1, 4, 1,  1, 4, 1,  16, 16, 32,  16, 16, 32,  -1, CppConstraint(f"a.max_seqlen_q <= 16 && {rng}"), "qr_tdm_pingpong"),
+        FmhaFwdTileSize( 64,  64,  32, hdim,  32,  hdim,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1, CppConstraint(f"{rng} && !({m128})"), "qr_tdm_pingpong"),
+        FmhaFwdTileSize(128,  64,  32, hdim,  32,  hdim,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1, CppConstraint(rng), "qr_tdm_pingpong"),
+    )  # fmt: skip
 
 
 def _gfx125_qr_tdm_crossover_constraint(hdim):
@@ -1776,19 +1857,24 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
             # not fit their LDS arena. _validate_qr_tdm_bm0_crossover_pairs enforces
             # that any non-final tile keeps a constraint so a bm0=64 entry can never
             # silently shadow its bm0=128 fallback in dispatch order.
+            pp_tiles = {
+                h: _gfx125_qr_tdm_pingpong_tiles(h)
+                for h, _ in GFX125_QR_TDM_PINGPONG_HDIMS
+            }
             result = _validate_qr_tdm_bm0_crossover_pairs({
                 #                             bm0, bn0, bk0, bn1, bk1,
                 ( 32,  32) : [FmhaFwdTileSize( 64,  64,  32,  32,  32,   64,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1, _gfx125_qr_tdm_crossover_constraint(( 32,  32))),
                               FmhaFwdTileSize(128,  64,  32,  32,  32,   64,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1)],
-                ( 64,  64) : [FmhaFwdTileSize( 64,  64,  32,  64,  32,   64,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1, _gfx125_qr_tdm_crossover_constraint(( 64,  64))),
+                # qr_tdm_pingpong's tiles sit next to the qr_tdm ones of the same bm0.
+                ( 64,  64) : [pp_tiles[64][0], pp_tiles[64][1],
+                              FmhaFwdTileSize( 64,  64,  32,  64,  32,   64,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1, _gfx125_qr_tdm_crossover_constraint(( 64,  64))),
+                              pp_tiles[64][2],
                               FmhaFwdTileSize(128,  64,  32,  64,  32,   64,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1)],
                 ( 96,  96) : [FmhaFwdTileSize( 64,  64,  32,  96,  32,   96,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1, _gfx125_qr_tdm_crossover_constraint(( 96,  96))),
                               FmhaFwdTileSize(128,  64,  32,  96,  32,   96,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1)],
-                # qr_tdm_pingpong's tiles. Up to 16 rows the 64-row tile would idle 3/4 of
-                # its M rows, so this one spends its four warps on N instead.
-                (128, 128) : [FmhaFwdTileSize( 16,  64,  32, 128,  32,  128,  1, 4, 1,  1, 4, 1,  16, 16, 32,  16, 16, 32,  -1, CppConstraint(f"a.max_seqlen_q <= 16 && {GFX125_QR_TDM_PINGPONG_RANGE}"), "qr_tdm_pingpong"),
-                              FmhaFwdTileSize( 64,  64,  32, 128,  32,  128,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1, CppConstraint(GFX125_QR_TDM_PINGPONG_RANGE), "qr_tdm_pingpong"),
+                (128, 128) : [pp_tiles[128][0], pp_tiles[128][1],
                               FmhaFwdTileSize( 64,  64,  32, 128,  32,  128,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1, CppConstraint(m64_d128_constraint)),
+                              pp_tiles[128][2],
                               FmhaFwdTileSize(128,  64,  32, 128,  32,  128,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1)],
                 (160, 160) : [FmhaFwdTileSize( 64,  64,  32, 160,  32,  160,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1, _gfx125_qr_tdm_crossover_constraint((160, 160))),
                               FmhaFwdTileSize(128,  64,  32, 160,  32,  160,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1)],
@@ -1810,11 +1896,8 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
                 # length pointers indicate that physical padding may inflate
                 # the total, so those cases keep N64.
                 d192_n128_constraint = CppConstraint(
-                    f"a.seqlen_k >= {GFX125_D192_N128_MIN_AVERAGE_K}LL * "
-                    "(t.is_group_mode ? a.batch : 1)"
-                    " && a.seqlen_k_ptr == nullptr"
-                    " && a.cu_seqlen_k_ptr == nullptr"
-                    " && get_num_blocks(128) <= num_cus"
+                    _gfx125_seqlen_k_at_least(GFX125_D192_N128_MIN_AVERAGE_K)
+                    + " && get_num_blocks(128) <= num_cus"
                     " && (t.mask_type == mask_enum::no_mask ||"
                     " ((t.mask_type == mask_enum::mask_top_left ||"
                     " t.mask_type == mask_enum::mask_bottom_right)"
@@ -1907,34 +1990,43 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
                     pipelines.append(FmhaFwdPipeline("qr_tdm", "row", "f", "f", "t", "t", logits, bias, lse, "f", qscale, mask, "f", "f", sink, F_constraint=mask_constraint, F_use_double_kv_lds_buffer=tdm_double_kv, F_progressive_ds_load_k=tdm_prog_k))  # fmt: skip
                     pipelines.append(FmhaFwdPipeline("qr_tdm", "row", "t", "t", "f", "f", logits, bias, lse, "f", qscale, mask, "f", "f", sink, F_constraint=mask_constraint, F_use_double_kv_lds_buffer=tdm_double_kv, F_progressive_ds_load_k=tdm_prog_k))  # fmt: skip
                     pipelines.append(FmhaFwdPipeline("qr_tdm", "row", "t", "t", "t", "t", logits, bias, lse, "f", qscale, mask, "f", "f", sink, F_constraint=mask_constraint, F_use_double_kv_lds_buffer=tdm_double_kv, F_progressive_ds_load_k=tdm_prog_k))  # fmt: skip
-                    if (hdim, hdim_v) == (128, 128):
-                        pipelines.append(FmhaFwdPipeline("qr_tdm_pingpong", "row", "f", "f", "f", "f", logits, bias, lse, "f", qscale, mask, "f", "f", sink, F_constraint=mask_constraint))  # fmt: skip
-                        pipelines.append(FmhaFwdPipeline("qr_tdm_pingpong", "row", "f", "f", "t", "t", logits, bias, lse, "f", qscale, mask, "f", "f", sink, F_constraint=mask_constraint))  # fmt: skip
-                        pipelines.append(FmhaFwdPipeline("qr_tdm_pingpong", "row", "t", "t", "f", "f", logits, bias, lse, "f", qscale, mask, "f", "f", sink, F_constraint=mask_constraint))  # fmt: skip
-                        pipelines.append(FmhaFwdPipeline("qr_tdm_pingpong", "row", "t", "t", "t", "t", logits, bias, lse, "f", qscale, mask, "f", "f", sink, F_constraint=mask_constraint))  # fmt: skip
+                    if (hdim, hdim_v) in GFX125_QR_TDM_PINGPONG_HDIMS:
+                        pp_limit = _gfx125_qr_tdm_pingpong_hdim_mask_limit(hdim, mask)
+                        pp_constraint = (
+                            mask_constraint
+                            if pp_limit is None
+                            else mask_constraint & CppConstraint(pp_limit)
+                        )
+                        pipelines.append(FmhaFwdPipeline("qr_tdm_pingpong", "row", "f", "f", "f", "f", logits, bias, lse, "f", qscale, mask, "f", "f", sink, F_constraint=pp_constraint))  # fmt: skip
+                        pipelines.append(FmhaFwdPipeline("qr_tdm_pingpong", "row", "f", "f", "t", "t", logits, bias, lse, "f", qscale, mask, "f", "f", sink, F_constraint=pp_constraint))  # fmt: skip
+                        pipelines.append(FmhaFwdPipeline("qr_tdm_pingpong", "row", "t", "t", "f", "f", logits, bias, lse, "f", qscale, mask, "f", "f", sink, F_constraint=pp_constraint))  # fmt: skip
+                        pipelines.append(FmhaFwdPipeline("qr_tdm_pingpong", "row", "t", "t", "t", "t", logits, bias, lse, "f", qscale, mask, "f", "f", sink, F_constraint=pp_constraint))  # fmt: skip
 
             if (hdim, hdim_v) in cls._QR_TDM_SCHED_TILES:
                 # Finite virtual-sink logits retain the existing qr_tdm fallback.
-                sched_seqlen_q = "a.max_seqlen_q >= 128"
-                if (hdim, hdim_v) == (128, 128):
-                    sched_seqlen_q += f" && !({GFX125_QR_TDM_PINGPONG_RANGE})"
-                sched_constraint = CppConstraint(
-                    f"a.hdim_q == {hdim} && "
-                    f"a.hdim_v == {hdim_v} && a.sink_ptr == nullptr && "
-                    f"{sched_seqlen_q} && "
-                    f"t.hdim_q == {hdim} && t.hdim_v == {hdim_v}"
-                )
-                if hdim == 128:
-                    # O layouts the async O store (kUseAsyncLdsOStore) cannot address use qr_tdm.
-                    sched_constraint &= CppConstraint(
-                        "reinterpret_cast<uintptr_t>(a.o_ptr) % 16 == 0 && a.stride_o >= 0 && "
-                        "a.stride_o % 8 == 0 && a.nhead_stride_o % 8 == 0 && "
-                        "(t.is_group_mode || a.batch_stride_o % 8 == 0) && "
-                        "127 * static_cast<uint64_t>(a.stride_o) * 2 + 256 <= (uint64_t{1} << 32)"
-                    )
                 for mask, lse in itertools.product(
                     get_mask_map(mask_impl).keys(), ["t", "f"]
                 ):
+                    # The queries qr_tdm_pingpong serves are left to it.
+                    sched_seqlen_q = "a.max_seqlen_q >= 128"
+                    if (hdim, hdim_v) in GFX125_QR_TDM_PINGPONG_HDIMS:
+                        sched_seqlen_q += (
+                            f" && !({_gfx125_qr_tdm_pingpong_takes(hdim, mask)})"
+                        )
+                    sched_constraint = CppConstraint(
+                        f"a.hdim_q == {hdim} && "
+                        f"a.hdim_v == {hdim_v} && a.sink_ptr == nullptr && "
+                        f"{sched_seqlen_q} && "
+                        f"t.hdim_q == {hdim} && t.hdim_v == {hdim_v}"
+                    )
+                    if hdim == 128:
+                        # O layouts the async O store (kUseAsyncLdsOStore) cannot address use qr_tdm.
+                        sched_constraint &= CppConstraint(
+                            "reinterpret_cast<uintptr_t>(a.o_ptr) % 16 == 0 && a.stride_o >= 0 && "
+                            "a.stride_o % 8 == 0 && a.nhead_stride_o % 8 == 0 && "
+                            "(t.is_group_mode || a.batch_stride_o % 8 == 0) && "
+                            "127 * static_cast<uint64_t>(a.stride_o) * 2 + 256 <= (uint64_t{1} << 32)"
+                        )
                     head_pad = "f" if hdim == 64 else "t"
                     pipelines.append(FmhaFwdPipeline("qr_tdm_sched", "row", "f", "f", head_pad, head_pad, "f", "no", lse, "f", qscale, mask, "f", "f", "f", F_constraint=sched_constraint))  # fmt: skip
                     pipelines.append(FmhaFwdPipeline("qr_tdm_sched", "row", "t", "t", head_pad, head_pad, "f", "no", lse, "f", qscale, mask, "f", "f", "f", F_constraint=sched_constraint))  # fmt: skip

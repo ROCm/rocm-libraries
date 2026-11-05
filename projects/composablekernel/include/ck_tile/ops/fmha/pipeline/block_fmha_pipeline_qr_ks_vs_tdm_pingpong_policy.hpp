@@ -19,6 +19,16 @@ inline constexpr bool is_qr_tdm_pingpong_qkv_v =
      std::is_same_v<typename Problem::KDataType, half_t> &&
      std::is_same_v<typename Problem::VDataType, half_t>);
 
+// V gets a second LDS buffer (V_{i+1} is issued a whole trip ahead of its PV gemm) where
+// measured on gfx1250 to pay off: the 128-row tiles, whose occupancy is VGPR bound so the
+// extra LDS is free, and the d64 masked 64-row tile, whose earlier V outweighs one fewer
+// resident block. The d128 64-row tiles and the 16-row short-query tile keep one V buffer.
+template <typename Problem>
+inline constexpr bool is_qr_tdm_pingpong_double_v_v =
+    Problem::BlockFmhaShape::kM0 >= 128 ||
+    (Problem::BlockFmhaShape::kM0 >= 64 && Problem::BlockFmhaShape::kSubQKHeaddim <= 64 &&
+     Problem::FmhaMask::IsMasking);
+
 // One pad per row, expressed as a row stride: the layout the TDM writer produces with a
 // padding interval of one row, with affine reader address math (no merge/unmerge div/mod).
 template <typename DataType, index_t Rows, index_t Cols, typename PaddingConfig>
@@ -77,9 +87,12 @@ struct QrTdmPingPongPadding<Problem, true>
 
 // [K buffer 0][K buffer 1][S][V, aliased by Q]. Q is read once before the main loop and
 // V's first write follows the loop-head barrier, so Q sits on V and K's first transfer can
-// be issued right behind Q's. S only takes space with the gemm_0 warps on N. d128
-// fp16/bf16, padded: K0=0, K1=17408, Q/V0=34816, end=53248 (warps on M, M=64); the
-// 16-row short-query tile: S=34800, Q/V0=39168, end=57600.
+// be issued right behind Q's. With a second V buffer the layout is
+// [K0][K1][S][V0][V1, aliased by Q]: V0 is issued right behind K's first transfer, and V1's
+// first write follows the first loop-head barrier. S only takes space with the gemm_0
+// warps on N. d128 fp16/bf16, padded, warps on M: single V, M=64: K0=0, K1=17408,
+// Q/V0=34816, end=53248; double V, M=64: V0=34816, Q/V1=53248, end=71680; double V,
+// M=128: end=88064. The 16-row short-query tile: S=34800, Q/V0=39168, end=57600.
 template <typename Problem, typename QPadding, typename KPadding, typename VPadding>
 struct QrTdmPingPongLdsArenaLayout
 {
@@ -122,18 +135,24 @@ struct QrTdmPingPongLdsArenaLayout
     static constexpr index_t kSOffset = integer_least_multiple(kK1Offset + kKBytes, kSAlignment);
     static constexpr index_t kV0Offset =
         integer_least_multiple(kSOffset + kSBytes, kRegionAlignment);
-    static constexpr index_t kQOffset = kV0Offset;
+    static constexpr bool kDoubleV = is_qr_tdm_pingpong_double_v_v<Problem>;
+    static constexpr index_t kV1Offset =
+        kDoubleV ? integer_least_multiple(kV0Offset + kVBytes, kRegionAlignment) : kV0Offset;
+    static constexpr index_t kQOffset = kV1Offset;
     static constexpr index_t kArenaBytes =
-        integer_least_multiple(max(kQOffset + kQBytes, kV0Offset + kVBytes), kArenaAlignment);
+        integer_least_multiple(max(kQOffset + kQBytes, kV1Offset + kVBytes), kArenaAlignment);
 
     static_assert(!KPadding::kEnabled || (kK1Offset - kK0Offset) % KPadding::kIntervalBytes == 0);
-    static_assert(kArenaBytes <= 128 * 1024);
+    // at least two resident blocks per WGP: the main loop relies on another block's
+    // gemms to cover its softmax
+    static_assert(kArenaBytes <= 160 * 1024);
 };
 
 } // namespace detail
 
-// qr_tdm_pingpong: the qr_tdm policy with a single V buffer, whole-tile K staged in two
-// buffers, and Q on V (see QrTdmPingPongLdsArenaLayout).
+// qr_tdm_pingpong: the qr_tdm policy with whole-tile K staged in two buffers, one or two
+// V buffers (is_qr_tdm_pingpong_double_v_v), and Q on the last V buffer (see
+// QrTdmPingPongLdsArenaLayout).
 struct BlockFmhaPipelineQRKSVSTdmPingPongPolicy : BlockFmhaPipelineQRKSVSTdmDefaultPolicy
 {
     template <typename Problem>

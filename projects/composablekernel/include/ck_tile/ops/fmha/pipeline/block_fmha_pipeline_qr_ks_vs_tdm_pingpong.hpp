@@ -10,9 +10,10 @@
 
 namespace ck_tile {
 
-// qr_tdm with a single V LDS buffer and a whole-tile K ping/pong, for gfx1250 fp16/bf16:
-// trip i reads K buffer (i & 1) while the TDM fills the other with tile i + 1, and V
-// streams through one buffer under the QK gemm. It shares qr_tdm's problem, gemms and
+// qr_tdm with a whole-tile K ping/pong, for gfx1250 fp16/bf16: trip i reads K buffer
+// (i & 1) while the TDM fills the other with tile i + 1. V streams through one buffer
+// under the QK gemm, or, where is_qr_tdm_pingpong_double_v_v holds, through two with
+// V_{i+1} issued a whole trip ahead. It shares qr_tdm's problem, gemms and
 // register layouts; only the LDS layout (see BlockFmhaPipelineQRKSVSTdmPingPongPolicy)
 // and the main loop differ.
 template <typename Problem_, typename Policy_ = BlockFmhaPipelineQRKSVSTdmPingPongPolicy>
@@ -64,6 +65,18 @@ struct BlockFmhaPipelineQRKSVSTdmPingPong : BlockFmhaPipelineQRKSVSTdm<Problem_,
                   "qr_tdm_pingpong: fp16/bf16 Q/K/V without quantization scales");
     static_assert(!Problem::kUseDoubleKVLdsBuffer && !Problem::kProgressiveDsLoadK,
                   "qr_tdm_pingpong has its own K/V buffering");
+
+    static constexpr bool kDoubleV = detail::is_qr_tdm_pingpong_double_v_v<Problem>;
+
+    // B-operand read-ahead of the main-loop gemms, in WMMAs. Where the waves of a SIMD
+    // cannot cover each other's LDS read latency, the reads run three B fragments ahead:
+    // the d128 128-row tile, capped at three waves per SIMD by its O accumulator
+    // (gfx1250, d128 x 5252 keys: +8%), and the masked 128-row tiles, whose per-tile mask
+    // work stretches the trip (d64 causal x 1859 keys: +6%). The other tiles keep one
+    // fragment: deeper read-ahead costs them VGPRs they need for occupancy.
+    static constexpr index_t kReadAheadWmma =
+        BlockFmhaShape::kM0 >= 128 && (kSubQKHeaddim >= 128 || FmhaMask::IsMasking) ? 6 : 2;
+
     static_assert(kSubQKHeaddim == kQKHeaddim, "qr_tdm_pingpong stages whole K rows");
 
     // P is summed on the matrix unit when one gemm_1 warp tile of columns spans a row,
@@ -155,6 +168,33 @@ struct BlockFmhaPipelineQRKSVSTdmPingPong : BlockFmhaPipelineQRKSVSTdm<Problem_,
     // functions: the main loop below keeps only its own TDM scheduling and softmax
     // rescaling. qr_tdm keeps its inline copies; moving its bodies onto calls computes
     // the same values but changes register allocation of its kernels at the VGPR limit.
+
+    // Scheduling groups that issue the WMMAs' B-operand reads kAheadWmma WMMAs ahead: a
+    // prelude of kAheadWmma WMMAs' reads, then one WMMA and the reads of the WMMA
+    // kAheadWmma later, alternating. A B fragment takes two ds reads and is shared by the
+    // warp's MIterPerWarp WMMAs (one K iteration per warp gemm). kLeadingWmma WMMAs
+    // without reads of their own (the matrix-unit row sum) that share the scheduling
+    // region go first.
+    template <index_t kMIterPerWarp,
+              index_t kNumWmma,
+              index_t kLeadingWmma = 0,
+              index_t kAheadWmma   = 2>
+    CK_TILE_DEVICE static void SchedReadsAheadOfWmma()
+    {
+        static_assert(kMIterPerWarp == 1 || kMIterPerWarp == 2,
+                      "read groups are sized for one or two MIters per B fragment");
+        static_assert(kNumWmma >= 2);
+        constexpr index_t kReadsPerWmma = 2 / kMIterPerWarp;
+        constexpr index_t kAhead        = kAheadWmma < kNumWmma ? kAheadWmma : kNumWmma;
+        if constexpr(kLeadingWmma > 0)
+            __builtin_amdgcn_sched_group_barrier(0x008, kLeadingWmma, 0);       // WMMA
+        __builtin_amdgcn_sched_group_barrier(0x100, kAhead * kReadsPerWmma, 0); // DS read
+        static_for<0, kNumWmma - kAhead, 1>{}([&](auto) {
+            __builtin_amdgcn_sched_group_barrier(0x008, 1, 0);             // WMMA
+            __builtin_amdgcn_sched_group_barrier(0x100, kReadsPerWmma, 0); // DS read
+        });
+        __builtin_amdgcn_sched_group_barrier(0x008, kAhead, 0); // WMMA
+    }
 
     template <typename PaddingConfig>
     CK_TILE_DEVICE static TDMConfig MakeTdmConfig()
@@ -313,6 +353,9 @@ struct BlockFmhaPipelineQRKSVSTdmPingPong : BlockFmhaPipelineQRKSVSTdm<Problem_,
                     const auto col = k_start + tile_idx.at(I1);
                     if constexpr(kHasSink)
                         return mask.IsOutOfSinkBound(row, col);
+                    else if constexpr(std::is_same_v<FmhaMask,
+                                                     SimplifiedGenericAttentionMask<true>>)
+                        return mask.IsOutOfBoundUnsigned(row, col); // one compare per score
                     else
                         return mask.IsOutOfBound(row, col);
                 });
@@ -558,9 +601,12 @@ struct BlockFmhaPipelineQRKSVSTdmPingPong : BlockFmhaPipelineQRKSVSTdm<Problem_,
                              Policy::template MakeVDramTileDistribution<Problem>());
 
         // written by the TDM, read back with ds_load_tr through the same row-major descriptor
+        VDataType* const v_smem_buf0 =
+            reinterpret_cast<VDataType*>(static_cast<char*>(smem_arena) + Layout::kV0Offset);
+        [[maybe_unused]] VDataType* const v_smem_buf1 =
+            reinterpret_cast<VDataType*>(static_cast<char*>(smem_arena) + Layout::kV1Offset);
         auto v_lds_view = make_tensor_view<address_space_enum::lds>(
-            reinterpret_cast<VDataType*>(static_cast<char*>(smem_arena) + Layout::kV0Offset),
-            Policy::template MakeVLdsBlockDescriptor<Problem>());
+            v_smem_buf0, Policy::template MakeVLdsBlockDescriptor<Problem>());
         auto v_lds_write_window = make_tile_window(
             v_lds_view, Policy::template MakeVLdsBlockDescriptor<Problem>().get_lengths(), {0, 0});
 
@@ -570,13 +616,21 @@ struct BlockFmhaPipelineQRKSVSTdmPingPong : BlockFmhaPipelineQRKSVSTdm<Problem_,
                              {0, 0},
                              Policy::template MakeVRegTileDistribution<Problem>());
 
-        // retire Q only; K, issued after it, stays in flight
-        s_wait_tensorcnt_barrier<1>();
-        auto q_tile = load_tile(q_lds_read_window);
-
         const index_t num_total_loop =
             integer_divide_ceil(physical_seqlen_k_end - physical_seqlen_k_start, kN0) +
             num_sink_loop;
+
+        // retire Q only; K (and V_0), issued after it, stay in flight
+        if constexpr(kDoubleV)
+        {
+            // V0 does not overlap Q, which sits on V1
+            load_tile_tdm(tdm_config_v, v_lds_write_window, v_dram_window);
+            move_tile_window(v_dram_window, {kN0, 0});
+            s_wait_tensorcnt_barrier<2>();
+        }
+        else
+            s_wait_tensorcnt_barrier<1>();
+        auto q_tile = load_tile(q_lds_read_window);
 
         index_t i_total_loops      = 0;
         constexpr index_t k0_loops = kQKHeaddim / kK0;
@@ -595,11 +649,51 @@ struct BlockFmhaPipelineQRKSVSTdmPingPong : BlockFmhaPipelineQRKSVSTdm<Problem_,
             // One barrier for two hazards: the V transfer below overwrites what
             // the last trip's gemm_1 (or, on the first trip, the Q load) read,
             // and gemm_0 needs this trip's K. The only TDM in flight here is
-            // K_i, so the count is <0>; dscnt 0 also retires the Q reads.
+            // K_i (and, with double V, V_i), so the count is <0>; dscnt 0 also
+            // retires the Q reads.
             s_wait_tensorcnt_barrier<0, 0>();
 
-            load_tile_tdm(tdm_config_v, v_lds_write_window, v_dram_window);
-            move_tile_window(v_dram_window, {kN0, 0});
+            const bool has_next_tile = i_total_loops + 1 < num_total_loop;
+            if constexpr(kDoubleV)
+            {
+                // V_{i+1} goes into the buffer the last trip's gemm_1 read. V runs a
+                // tile ahead, so it takes the sink->normal jump one trip early.
+                if constexpr(kHasSink)
+                {
+                    if(i_total_loops == num_sink_loop - 1)
+                        move_tile_window(v_dram_window,
+                                         {physical_seqlen_k_start - sink_seq_end, 0});
+                }
+                if(has_next_tile)
+                {
+                    v_lds_write_window.set_bottom_tensor_view_data_ptr(k_buf_is_even ? v_smem_buf1
+                                                                                     : v_smem_buf0);
+                    load_tile_tdm(tdm_config_v, v_lds_write_window, v_dram_window);
+                    move_tile_window(v_dram_window, {kN0, 0});
+                }
+                v_lds_read_window.set_bottom_tensor_view_data_ptr(k_buf_is_even ? v_smem_buf0
+                                                                                : v_smem_buf1);
+            }
+            else
+            {
+                load_tile_tdm(tdm_config_v, v_lds_write_window, v_dram_window);
+                move_tile_window(v_dram_window, {kN0, 0});
+            }
+
+            // Next K, into the buffer the last trip's gemm_0 read: the barrier above
+            // retired those reads, so it goes out with V, a whole trip ahead of its
+            // gemm_0. The last trip has no next tile and issues nothing.
+            if constexpr(kHasSink)
+            {
+                if(i_total_loops == num_sink_loop - 1)
+                    move_tile_window(k_dram_window, {physical_seqlen_k_start - sink_seq_end, 0});
+            }
+            move_tile_window(k_dram_window, {kN0, 0});
+            if(has_next_tile)
+            {
+                k_lds_write_window.set_bottom_tensor_view_data_ptr(k_write_ptr);
+                load_tile_tdm(tdm_config_k, k_lds_write_window, k_dram_window);
+            }
 
             // STAGE 1, QK gemm
             clear_tile(s_acc); // initialize C
@@ -634,13 +728,14 @@ struct BlockFmhaPipelineQRKSVSTdmPingPong : BlockFmhaPipelineQRKSVSTdm<Problem_,
                                   sequence<kM0, k0_loops * kK0>{}),
                    k_tile);
 
-            // Two K reads per WMMA keep an LDS read in flight without a deep
-            // register buffer; left alone the scheduler waits on dscnt before
-            // every WMMA.
-            static_for<0, k0_loops, 1>{}([&](auto) {
-                __builtin_amdgcn_sched_group_barrier(0x100, 2, 0); // DS read
-                __builtin_amdgcn_sched_group_barrier(0x008, 1, 0); // WMMA
-            });
+            // Software-pipeline the K reads ahead of their consumer (kReadAheadWmma);
+            // left alone the scheduler waits on dscnt before every WMMA.
+            using Gemm0T = remove_cvref_t<decltype(gemm_0)>;
+            static_assert(Gemm0T::WarpGemm::kK == kK0, "one K iteration per QK warp gemm");
+            SchedReadsAheadOfWmma<Gemm0T::MIterPerWarp,
+                                  Gemm0T::MIterPerWarp * Gemm0T::NIterPerWarp * k0_loops,
+                                  0,
+                                  kReadAheadWmma>();
 
             // Sink-aware: in the sink phase tiles start at 0, in the normal phase at
             // physical_seqlen_k_start.
@@ -660,27 +755,20 @@ struct BlockFmhaPipelineQRKSVSTdmPingPong : BlockFmhaPipelineQRKSVSTdm<Problem_,
                        physical_seqlen_k_end);
 
             // Sink->normal window jump: at the boundary between sink region
-            // and normal region, jump K/V/bias dram windows forward.
+            // and normal region, jump the V (single V) and bias dram windows forward;
+            // K jumped with its issue at the loop head.
             if constexpr(kHasSink)
             {
                 if(i_total_loops == num_sink_loop - 1)
                 {
-                    move_tile_window(k_dram_window, {physical_seqlen_k_start - sink_seq_end, 0});
-                    move_tile_window(v_dram_window, {physical_seqlen_k_start - sink_seq_end, 0});
+                    if constexpr(!kDoubleV)
+                        move_tile_window(v_dram_window,
+                                         {physical_seqlen_k_start - sink_seq_end, 0});
                     move_tile_window(bias_dram_window, {0, physical_seqlen_k_start - sink_seq_end});
                 }
             }
 
-            // move K and bias tile windows after current status checked
-            // prefetch next-tile along [K]ey sequence length dimension
-            move_tile_window(k_dram_window, {kN0, 0});
             move_tile_window(bias_dram_window, {0, kN0});
-
-            // Next K, into the buffer nobody reads this trip, so no barrier.
-            // Issued on the last trip too: the wait before gemm_1 counts on it
-            // being behind V on the counter.
-            k_lds_write_window.set_bottom_tensor_view_data_ptr(k_write_ptr);
-            load_tile_tdm(tdm_config_k, k_lds_write_window, k_dram_window);
 
             // S{j}. With the gemm_0 warps on N each warp holds a column slice, so S goes
             // through LDS into the row-complete layout gemm_1's A operand takes.
@@ -823,8 +911,15 @@ struct BlockFmhaPipelineQRKSVSTdmPingPong : BlockFmhaPipelineQRKSVSTdm<Problem_,
             }
 
             // In flight: V, then the next K. <1> retires V and leaves K running
-            // under the PV gemm.
-            s_wait_tensorcnt_barrier<1>();
+            // under the PV gemm; on the last trip only V is in flight. With double
+            // V, V_i already landed before the loop-head barrier.
+            if constexpr(!kDoubleV)
+            {
+                if(has_next_tile)
+                    s_wait_tensorcnt_barrier<1>();
+                else
+                    s_wait_tensorcnt_barrier<0>();
+            }
 
             auto v_tile = load_tile_transpose(v_lds_read_window);
 
@@ -851,17 +946,22 @@ struct BlockFmhaPipelineQRKSVSTdmPingPong : BlockFmhaPipelineQRKSVSTdm<Problem_,
                                   sequence<kM0, k1_loops * kK1>{}),
                    v_tile);
 
-            // two V reads per WMMA, as for K above
+            // V reads run ahead as for K above. Without the wait before gemm_1
+            // (double V) the row-sum WMMAs share its scheduling region; placing them
+            // first measured faster for d64 dense grids only (gfx1250: +4% at 128 x 1859
+            // keys, -1..5% on d64 masked and d128 grids), so the others leave them free.
             using Gemm1T = remove_cvref_t<decltype(gemm_1)>;
-            static_for<0, Gemm1T::MIterPerWarp * Gemm1T::NIterPerWarp * k1_loops, 1>{}([&](auto) {
-                __builtin_amdgcn_sched_group_barrier(0x100, 2, 0); // DS read
-                __builtin_amdgcn_sched_group_barrier(0x008, 1, 0); // WMMA
-            });
+            static_assert(Gemm1T::WarpGemm::kK == kK1, "one K iteration per PV warp gemm");
+            constexpr index_t kRowSumWmma =
+                kDoubleV && kRowSumOnMatrixUnit && !FmhaMask::IsMasking && kSubQKHeaddim <= 64
+                    ? k1_loops * Gemm1T::MIterPerWarp
+                    : 0;
+            SchedReadsAheadOfWmma<Gemm1T::MIterPerWarp,
+                                  Gemm1T::MIterPerWarp * Gemm1T::NIterPerWarp * k1_loops,
+                                  kRowSumWmma,
+                                  kReadAheadWmma>();
 
         } while(++i_total_loops < num_total_loop);
-
-        // retire the K tile issued past the last one consumed
-        s_wait_tensorcnt<0>();
 
         if constexpr(kStoreLSE)
         {
