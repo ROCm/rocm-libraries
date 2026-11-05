@@ -136,19 +136,11 @@ namespace hipblaslt_bench
         hipblaslt::hostnumerics::initializeMatrix(hostA,
                                                   hipblaslt::hostnumerics::MatrixRole::A,
                                                   hipblaslt_initialization::hpl,
-                                                  uint64_t(env.rank) * 2 + 1,
-                                                  false,
-                                                  std::nullopt,
-                                                  false,
-                                                  {});
+                                                  uint64_t(env.rank) * 2 + 1);
         hipblaslt::hostnumerics::initializeMatrix(hostB,
                                                   hipblaslt::hostnumerics::MatrixRole::B,
                                                   hipblaslt_initialization::hpl,
-                                                  uint64_t(env.rank) * 2 + 2,
-                                                  false,
-                                                  std::nullopt,
-                                                  false,
-                                                  {});
+                                                  uint64_t(env.rank) * 2 + 2);
 
         CHECK_HIP_RC(hipMemcpy(res.dA,
                                hostA.rawEncodedBackingStorage().data(),
