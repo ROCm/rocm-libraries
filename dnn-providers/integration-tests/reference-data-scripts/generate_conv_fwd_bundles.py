@@ -579,8 +579,8 @@ class Builder:
     def sids(self, r, candidates=P.S_IDS):
         return [s for s in candidates if P.shape_S(s, r, self.level) is not None]
 
-    def lids(self, r):
-        return [s for s in P.S_IDS if P.shape_L(s, r) is not None]
+    def lids(self, r, candidates=P.S_IDS):
+        return [s for s in candidates if P.shape_L(s, r) is not None]
 
 
 def rules(lv):
@@ -634,7 +634,7 @@ def rules(lv):
             rounds = 2 if topo in P.HAS_ACT_PLACEHOLDERS else 1
             for rd in range(rounds):
                 for r in P.RANKS:
-                    sids = b.sids(r)
+                    sids = b.sids(r, P.S_CROSSED)
                     for j, pair in enumerate(P.PAIRS):
                         k = j + 3 * rd + 2 * ti + r + 4
                         act = (
@@ -699,12 +699,12 @@ def rules(lv):
         n = 0
         for topo in ("act", "bias_act"):
             for r in (1, 2, 3, 4):
-                for s in b.sids(r):
+                for s in b.sids(r, P.S_CROSSED):
                     for pair in P.PAIRS:
                         add(fuse(b.S(s, r, pair), topo, act=acts[n % len(acts)]))
                         n += 1
             for r in P.RANKS:
-                for i, s in enumerate(b.lids(r)):
+                for i, s in enumerate(b.lids(r, P.S_CROSSED)):
                     add(
                         fuse(
                             b.Ls(s, r, P.PAIRS[(i + r) % 6]),
@@ -721,7 +721,7 @@ def rules(lv):
             ("scale_bias_act", "add_relu", "bias_add_relu", "act_add")
         ):
             for r in P.RANKS:
-                sids = b.sids(r)
+                sids = b.sids(r, P.S_CROSSED)
                 for j, pair in enumerate(P.PAIRS):
                     add(
                         fuse(b.S(sids[(j * 3 + ti + r + 7) % len(sids)], r, pair), topo)
@@ -754,7 +754,7 @@ def rules(lv):
         extra = list(P.EXTRA_TYPES)
         mixed = list(P.MIXED_TYPES)
         for r in (1, 2, 3, 4):
-            for i, s in enumerate(b.sids(r)):
+            for i, s in enumerate(b.sids(r, P.S_CROSSED)):
 
                 def base(off=0):
                     return b.S(s, r, P.PAIRS[(i + off) % 6])
@@ -778,16 +778,16 @@ def rules(lv):
         # every activation x every S / L shape, act topology
         for ai, name in enumerate(acts):
             for r in P.RANKS:
-                for i, s in enumerate(b.sids(r)):
+                for i, s in enumerate(b.sids(r, P.S_CROSSED)):
                     add(fuse(b.S(s, r, P.PAIRS[(i + ai) % 6]), "act", act=name))
-                for i, s in enumerate(b.lids(r)):
+                for i, s in enumerate(b.lids(r, P.S_CROSSED)):
                     add(fuse(b.Ls(s, r, P.PAIRS[(i + ai) % 6]), "act", act=name))
         # the other topologies, each over every S shape once
         for ti, topo in enumerate(
             ("scale_bias_act", "add_relu", "bias_add_relu", "act_add")
         ):
             for r in P.RANKS:
-                for i, s in enumerate(b.sids(r)):
+                for i, s in enumerate(b.sids(r, P.S_CROSSED)):
                     add(fuse(b.S(s, r, P.PAIRS[(i + ti) % 6]), topo))
         for rid, e in P.R_SHAPES.items():
             if e["level"] == "full":

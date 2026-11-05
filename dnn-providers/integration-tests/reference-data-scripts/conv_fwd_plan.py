@@ -426,8 +426,30 @@ S_IDS = (
     "S44",
     "S45",
     "S46",
+    "S47",
+    "S48",
+    "S49",
+    "S50",
+    "S51",
+    "S52",
+    "S53",
+    "S54",
+    "S55",
+    "S56",
+    "S57",
+    "S58",
+    "S59",
+    "S60",
+    "S61",
+    "S62",
 )
 S_QUICK = ("S1", "S2", "S3", "S4", "S5", "S6", "S7", "S8", "S9")
+# Classes defined in 2D only (plan section 3.1).
+_S_2D_ONLY = tuple(f"S{i}" for i in range(47, 63))
+# S shapes the fused topologies and the feature probes rotate over. S47-S62 run in
+# plain convolution only, so they stay out of these rotations; that also keeps the
+# ids of every case generated before they were added.
+S_CROSSED = S_IDS[: S_IDS.index("S46") + 1]
 
 # Bases. 'rect' = rectangular input (S6); 'odd' = odd input (S14); 'big' = S16 input.
 _S_LADDER = {
@@ -630,6 +652,71 @@ def _feature(sid, r, b):
         kw.update(f=tuple(i + 2 for i in ins), pre=1, post=1)
     elif sid == "S46":  # F8 stride 4 with filter 3
         kw.update(s=4)
+    # S47-S62: 2D depthwise, grouped and non-square-image classes that S1-S46 and
+    # the corpus miss (plan section 3.1). Each keeps the class's defining channel
+    # count, stride, dilation or padding at L size and only grows the image and,
+    # where C is not the feature, C and K.
+    elif r != 2 and sid in _S_2D_ONLY:
+        return None
+    elif sid == "S47":  # depthwise, odd C below 16, 7x7
+        kw.update(c=5, k=5, g=5, f=7, pre=3, post=3, ins=(9, 9) if small else ins)
+    elif sid == "S48":  # depthwise, odd C, odd image, 3x3
+        kw.update(c=7, k=7, g=7, ins=(13, 13) if small else b["odd"])
+    elif sid == "S49":  # depthwise stride 2, odd C, odd image
+        kw.update(c=5, k=5, g=5, s=2, ins=(17, 17) if small else b["odd"])
+    elif sid == "S50":  # depthwise at C >= 64 on a tall non-square image (row loop)
+        cc = 64 if small else c
+        kw.update(c=cc, k=cc, g=cc, ins=(70, 40) if small else (112, 56))
+    elif sid == "S51":  # depthwise stride 2, non-square image, even height
+        cc = 96 if small else c
+        kw.update(c=cc, k=cc, g=cc, s=2, ins=(16, 18) if small else (56, 60))
+    elif sid == "S52":  # depthwise stride 2, odd image, C >= 64
+        cc = 96 if small else c
+        kw.update(c=cc, k=cc, g=cc, s=2, ins=(17, 17) if small else b["odd"])
+    elif sid == "S53":  # depthwise, dilated
+        cc = 32 if small else c
+        kw.update(
+            c=cc, k=cc, g=cc, d=2, pre=2, post=2, ins=(15, 15) if small else b["odd"]
+        )
+    elif sid == "S54":  # depthwise, unequal strides
+        cc = 32 if small else c
+        kw.update(c=cc, k=cc, g=cc, s=(1, 2))
+    elif sid == "S55":  # depthwise, no padding
+        cc = 32 if small else c
+        kw.update(c=cc, k=cc, g=cc, pre=0, post=0)
+    elif sid == "S56":  # depthwise, padding larger than "same"
+        cc = 32 if small else c
+        kw.update(c=cc, k=cc, g=cc, pre=2, post=2)
+    elif sid == "S57":  # depthwise filter above 7x7 with C < 64
+        kw.update(
+            c=5, k=5, g=5, f=17, pre=8, post=8, ins=(56, 24) if small else (112, 48)
+        )
+    elif sid == "S58":  # grouped (not depthwise), dilated, stride 1
+        kw.update(
+            g=2, k=c, f=5, d=2, pre=4, post=4, ins=(15, 15) if small else b["odd"]
+        )
+    elif sid == "S59":  # non-square filter, unequal stride, non-square image
+        kw.update(
+            c=32 if small else c,
+            k=64 if small else k,
+            f=(3, 5),
+            s=(1, 2),
+            pre=(1, 2),
+            post=(1, 2),
+            ins=(11, 17) if small else (55, 57),
+        )
+    elif sid == "S60":  # dense, strided, non-square odd image
+        kw.update(
+            c=32 if small else c,
+            k=64 if small else k,
+            s=2,
+            ins=(17, 19) if small else (55, 57),
+        )
+    elif sid == "S61":  # dense, dilated, non-square image
+        cc = 32 if small else c
+        kw.update(c=cc, k=cc, d=2, pre=2, post=2, ins=(15, 17) if small else (55, 57))
+    elif sid == "S62":  # depthwise multiplier 2, odd C, batch 3
+        kw.update(n=3, c=5, k=10, g=5, ins=(12, 12) if small else ins)
     else:
         raise KeyError(sid)
     return kw
@@ -823,7 +910,7 @@ ACCUM_SHAPES = {
 # cases that remain keep their ids, seeds and claims. T8-T11 remove products that
 # no engine executed on the measured architectures (gfx942 and gfx90a, see plan
 # section 4.5); activations that an engine executes are never trimmed. T12 keeps
-# the geometry classes S24-S46 to plain convolution in nightly and full: an
+# the geometry classes S24-S62 to plain convolution in nightly and full: an
 # epilogue or a tensor feature does not depend on the geometry class (T1, T4).
 # Each trim names the trigger that brings its product back.
 # --------------------------------------------------------------------------
@@ -831,15 +918,16 @@ ACCUM_SHAPES = {
 # Activations at least one engine executed in the act topology (plan section 4.5).
 EXECUTED_ACTS = ("relu", "relu6", "relu_clamp", "sigmoid", "tanh")
 UNEXECUTED_TOPOLOGIES = ("scale_bias_act", "add_relu", "bias_add_relu", "act_add")
-# Geometry classes added from the corpus analysis (plan section 3.1), and their L forms.
-GEOMETRY_CLASS_SHAPES = tuple(f"{p}{i}" for p in "SL" for i in range(24, 47))
+# Geometry classes added from the corpus analysis and the engine review (plan
+# section 3.1), and their L forms.
+GEOMETRY_CLASS_SHAPES = tuple(f"{p}{i}" for p in "SL" for i in range(24, 63))
 
 TRIMS = {
     "T8": "full: act x every S and L shape for activations no engine executes",
     "T9": "comprehensive and full: plain repeats of the four fused topologies no engine executes",
     "T10": "comprehensive and full: fp16 and bf16 bias_act, except one case per activation x core cell",
     "T11": "full: F13, F19 and F35 paired with every S shape",
-    "T12": "comprehensive and full: geometry classes S24-S46 crossed with fused topologies or features",
+    "T12": "comprehensive and full: geometry classes S24-S62 crossed with fused topologies or features",
 }
 
 
