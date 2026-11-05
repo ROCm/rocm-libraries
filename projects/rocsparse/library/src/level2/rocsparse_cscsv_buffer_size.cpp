@@ -26,6 +26,7 @@
 #include "rocsparse_cscsv_kernel.hpp"
 #include "rocsparse_utility.hpp"
 
+#if defined(ROCSPARSE_WITH_SPTRSV_CSC)
 uint32_t rocsparse::cscsv_num_lanes(int64_t max_nnz, uint32_t wavefront_size)
 {
     uint32_t num_lanes = 2;
@@ -35,6 +36,7 @@ uint32_t rocsparse::cscsv_num_lanes(int64_t max_nnz, uint32_t wavefront_size)
     }
     return num_lanes;
 }
+#endif
 
 rocsparse_status rocsparse::cscsv_analysis_buffer_size(rocsparse_handle            handle,
                                                        rocsparse_operation         trans,
@@ -42,11 +44,13 @@ rocsparse_status rocsparse::cscsv_analysis_buffer_size(rocsparse_handle         
                                                        size_t*                     buffer_size)
 {
     ROCSPARSE_ROUTINE_TRACE;
+#if defined(ROCSPARSE_WITH_SPTRSV_CSC)
     if(trans == rocsparse_operation_none)
     {
         buffer_size[0] = 0;
         return rocsparse_status_success;
     }
+#endif
     _rocsparse_mat_descr   descr_csr;
     _rocsparse_spmat_descr mat_csr;
     rocsparse::build_csr_from_csc(*A, mat_csr, descr_csr);
@@ -64,6 +68,7 @@ rocsparse_status rocsparse::cscsv_solve_buffer_size(rocsparse_handle            
                                                     size_t*                     buffer_size)
 {
     ROCSPARSE_ROUTINE_TRACE;
+#if defined(ROCSPARSE_WITH_SPTRSV_CSC)
     if(trans == rocsparse_operation_none)
     {
         // Ticket, remaining dependencies and partial sums of each batch instance.
@@ -75,6 +80,7 @@ rocsparse_status rocsparse::cscsv_solve_buffer_size(rocsparse_handle            
               + rocsparse::align_size(rocsparse::datatype_sizeof(A->data_type) * m * batch_count);
         return rocsparse_status_success;
     }
+#endif
     _rocsparse_mat_descr   descr_csr;
     _rocsparse_spmat_descr mat_csr;
     rocsparse::build_csr_from_csc(*A, mat_csr, descr_csr);
