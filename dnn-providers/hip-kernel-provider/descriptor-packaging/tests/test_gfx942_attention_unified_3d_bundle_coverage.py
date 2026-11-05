@@ -14,35 +14,30 @@ each one. Only cases support.json claims for the engine on gfx942
 count: the sweeps are shared, and another engine's cases are not this catalog's to serve.
 """
 
-import json
-from pathlib import Path
-
 import pytest
+
+from bundle_coverage import (
+    SWEEPS,
+    catalog_path,
+    claimed_case_ids,
+    claimed_cases,
+    load_catalog,
+)
 
 pytestmark = pytest.mark.quick
 
-REPO = Path(__file__).resolve().parents[4]
-CATALOG = (
-    REPO
-    / "dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/descriptors"
-    / "rocKE/gfx942_attention_unified_3d/artifacts/gfx942_attention_unified3d.kdp.json"
+ARCH = "gfx942"
+CATALOG = catalog_path(
+    "gfx942_attention_unified_3d", "gfx942_attention_unified3d.kdp.json"
 )
 ENGINE = "hipkernel:Gfx942AttentionUnified3d"
-SWEEPS = [
-    REPO
-    / "dnn-providers/integration-tests/integration-test-bundles"
-    / tier
-    / "SdpaFwd/Default"
-    for tier in ("quick", "standard")
-]
 
 # The graph's io_data_type as the catalog's KMD dtype field spells it.
 KMD_DTYPE = {"half": "FP16", "bfloat16": "BF16"}
 
 
-def catalog_cells(kdp_path):
+def catalog_cells(kdp):
     """(dtype, head_size, Hq / Hkv) of every kernel the descriptor packs with no window."""
-    kdp = json.loads(kdp_path.read_text(encoding="utf-8"))
     cells = set()
     for kernel in kdp["kernelDescriptors"]:
         meta = kernel["metadata"]
@@ -52,30 +47,10 @@ def catalog_cells(kdp_path):
     return cells
 
 
-def claimed_case_ids(sweep_dir):
-    """Ids of the cases support.json claims for ENGINE on gfx942."""
-    support = json.loads((sweep_dir / "support.json").read_text(encoding="utf-8"))
-    claimed = set()
-    for claim in support["claims"].get(ENGINE, []):
-        if "gfx942" in claim["support"]:
-            claimed.update(claim["cases"])
-    return claimed
-
-
 def claimed_cells(sweep_dir):
     """{case id: (dtype, head_size, Hq // Hkv)} of every claimed case, from Q and K dims."""
-    template = json.loads(
-        (sweep_dir / "graph.template.json").read_text(encoding="utf-8")
-    )
-    uid = {tensor["name"]: tensor["uid"] for tensor in template["tensors"]}
-    sweep = json.loads((sweep_dir / "sweep.json").read_text(encoding="utf-8"))
-    claimed = claimed_case_ids(sweep_dir)
     cells = {}
-    for case in sweep["cases"]:
-        if case["id"] not in claimed:
-            continue
-        dims = {tensor["uid"]: tensor["dims"] for tensor in case["values"]["tensors"]}
-        q, k = dims[uid["Q"]], dims[uid["K"]]
+    for case, q, k in claimed_cases(sweep_dir, ENGINE, ARCH):
         # Every kernel is a decode kernel; the engine declines seqlen_q > 1 before any
         # cell is compared, so such a claim breaks whatever the catalog holds.
         assert q[2] == 1, f"{sweep_dir}: claimed case {case['id']} has seqlen_q {q[2]}"
@@ -89,19 +64,13 @@ def claimed_cells(sweep_dir):
         )
         cells[case["id"]] = (dtype, q[3], q[1] // k[1])
     # A claim naming no sweep case would otherwise drop out of the comparison unseen.
-    missing = claimed - cells.keys()
+    missing = claimed_case_ids(sweep_dir, ENGINE, ARCH) - cells.keys()
     assert not missing, f"{sweep_dir}: claims name no sweep case: {sorted(missing)}"
     return cells
 
 
 def test_every_claimed_case_has_a_shipped_kernel():
-    # The KDP is a DVC output (descriptors/README.md), so a checkout without a
-    # `dvc pull` has no catalog to compare.
-    if not CATALOG.exists():
-        pytest.skip(
-            f"gfx942 catalog not pulled; run: dvc pull -r ingestor {CATALOG.parent}.dvc"
-        )
-    catalog = catalog_cells(CATALOG)
+    catalog = catalog_cells(load_catalog(CATALOG, ARCH))
     # An unreadable or emptied catalog would otherwise pass as "nothing missing".
     assert catalog, f"no kernels read from {CATALOG}"
     for sweep_dir in SWEEPS:

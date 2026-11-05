@@ -19,9 +19,9 @@ partials into the workspace and `reduce` combines them. Both launches share one 
 - GQA ratio (`num_queries_per_kv`): 1, 2, 4, 8, 16; any head counts with that ratio.
 - block_size: 16, 32, 64. tile_size_override follows from (head_size, block_size): 16, 32, 64.
 - num_segments: 2 to 128 (16 values), varying per cell.
-- K/V cache policy: `stream` in every variant. rocKE's own rule picks `all` below 256 MiB
-  of K/V; a cold-memory A/B on MI300X found it never worth a second copy (AICK-2892), so
-  the manifest pins `stream` (`enumerate.spec_overrides`).
+- K/V cache policy: `stream` in every variant, pinned by the manifest's
+  `enumerate.spec_overrides`; the reason is in the header comment of
+  `projects/hipdnn/tools/IngestorGenerator/configs/gfx942_attention_unified_3d.engine.yaml`.
 - Fixed in every variant: strided (dense) KV, decode grid, no sliding window, no sinks,
   softcap, ALiBi or QQ bias.
 - `num_seqs` is recorded as 32 in every spec but is IR-neutral: the decode grid's code

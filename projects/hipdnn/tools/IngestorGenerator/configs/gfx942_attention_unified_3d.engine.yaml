@@ -256,7 +256,7 @@ enumerate:
   # Neither num_seqs (= batch) nor the head counts are baked into the segment or
   # reduce kernel, proven by rocKE's test_num_seqs_is_ir_neutral_on_the_decode_grid
   # and test_head_counts_are_ir_neutral_at_a_fixed_gqa_ratio
-  # (rocke/library/tests/test_attention_tiled_3d_module.py); every kernel carries
+  # (rocke/library/tests/test_attention_tiled_3d_module_gfx942.py); every kernel carries
   # the default's values (num_seqs 32, the default's head pair). The launch passes
   # the graph's batch and head counts.
   neutral_fields: [num_seqs, num_query_heads, num_kv_heads]

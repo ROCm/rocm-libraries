@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <initializer_list>
 #include <optional>
@@ -42,9 +43,6 @@ namespace hip_kernel_provider::kernel_ingestor_engine
 /// Lanes of one CDNA wave64 CTA: both kernels launch one wave
 /// (`_get_3d_pipeline`: `wave_size = 64`, `seg_waves = 1` off gfx1250).
 inline constexpr int64_t GFX942_UNIFIED_3D_WAVE_LANES = 64;
-
-/// Workspace region alignment, in bytes.
-inline constexpr int64_t GFX942_UNIFIED_3D_WORKSPACE_ALIGNMENT = 256;
 
 /// The fixed CU count the D128 decode pre-bump clamp targets, whatever the live count
 /// (`kernels/common/attention_unified.py::_PRE_BUMP_CUS`).
@@ -283,24 +281,17 @@ struct Gfx942AttentionUnified3dWorkspace
     int64_t totalBytes = 0;
 };
 
-inline int64_t gfx942AlignWorkspace(int64_t bytes)
-{
-    return (bytes + GFX942_UNIFIED_3D_WORKSPACE_ALIGNMENT - 1)
-           / GFX942_UNIFIED_3D_WORKSPACE_ALIGNMENT * GFX942_UNIFIED_3D_WORKSPACE_ALIGNMENT;
-}
-
 /**
  * @brief One workspace buffer holding everything the two kernels read or write that the
  *        graph does not provide.
  *
- * The f32 split-KV scratch restates
- * `kernels/common/attention_unified.py::_attention_3d_workspace_specs`:
- * `segm_output[total_q, Hq, nseg, D]`, `segm_max[total_q, Hq, nseg]`,
- * `segm_expsum[total_q, Hq, nseg]`. The strided entry of `run_unified_attention_torch`
- * also takes caller-owned device metadata the engine must materialize: `seqused_k`, a
- * contiguous int32 `[B]` of KV lengths, and `cu_seqlens_q`, a contiguous int32 `[B+1]`
- * of query offsets `[0, 1, ..., B]`. Each region starts on a 256-byte boundary; the
- * total is rounded up to one too.
+ * The f32 split-KV scratch comes first, laid out by unifiedAttentionSegmentScratchLayout()
+ * (the layout gfx950 3D uses after its identity metadata). The strided entry of
+ * `run_unified_attention_torch` also takes caller-owned device metadata the engine must
+ * materialize, placed after the scratch: `seqused_k`, a contiguous int32 `[B]` of KV
+ * lengths, and `cu_seqlens_q`, a contiguous int32 `[B+1]` of query offsets
+ * `[0, 1, ..., B]`. Each region starts on a 256-byte boundary; the total is rounded up to
+ * one too.
  */
 inline Gfx942AttentionUnified3dWorkspace gfx942AttentionUnified3dWorkspace(int64_t batch,
                                                                            int64_t hq,
@@ -313,16 +304,23 @@ inline Gfx942AttentionUnified3dWorkspace gfx942AttentionUnified3dWorkspace(int64
             HIPDNN_PLUGIN_STATUS_BAD_PARAM,
             "gfx942 unified 3d: workspace needs positive batch, heads, segments, head size");
     }
-    constexpr int64_t F32_BYTES = 4;
-    constexpr int64_t I32_BYTES = 4;
-    const int64_t rows = batch * hq * numSegments; // total_q == batch
+    constexpr std::size_t I32_BYTES = sizeof(int32_t);
+    const auto rows = static_cast<std::size_t>(batch * hq * numSegments); // total_q == batch
+    const auto scratch
+        = unifiedAttentionSegmentScratchLayout(0, rows, static_cast<std::size_t>(headSize));
+    const std::size_t cuSeqlensQ
+        = scratch.endOffset
+          + detail::alignWorkspaceSection(static_cast<std::size_t>(batch) * I32_BYTES);
+    const std::size_t totalBytes
+        = cuSeqlensQ
+          + detail::alignWorkspaceSection(static_cast<std::size_t>(batch + 1) * I32_BYTES);
     Gfx942AttentionUnified3dWorkspace w;
-    w.segmOutput = 0;
-    w.segmMax = gfx942AlignWorkspace(w.segmOutput + rows * headSize * F32_BYTES);
-    w.segmExpsum = gfx942AlignWorkspace(w.segmMax + rows * F32_BYTES);
-    w.sequsedK = gfx942AlignWorkspace(w.segmExpsum + rows * F32_BYTES);
-    w.cuSeqlensQ = gfx942AlignWorkspace(w.sequsedK + batch * I32_BYTES);
-    w.totalBytes = gfx942AlignWorkspace(w.cuSeqlensQ + (batch + 1) * I32_BYTES);
+    w.segmOutput = static_cast<int64_t>(scratch.segmOutputOffset);
+    w.segmMax = static_cast<int64_t>(scratch.segmMaxOffset);
+    w.segmExpsum = static_cast<int64_t>(scratch.segmExpsumOffset);
+    w.sequsedK = static_cast<int64_t>(scratch.endOffset);
+    w.cuSeqlensQ = static_cast<int64_t>(cuSeqlensQ);
+    w.totalBytes = static_cast<int64_t>(totalBytes);
     return w;
 }
 

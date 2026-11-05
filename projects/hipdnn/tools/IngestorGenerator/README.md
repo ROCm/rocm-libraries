@@ -1000,7 +1000,8 @@ enumerate:
   # cell_keyed_by: [num_queries_per_kv]  # optional: spec attributes of the pick that key a merged cell
   also:                           # optional: more sections in the same pack, each its own
     - pin: {...}                  #   pin/fixed/cells/free_fields/spec_fields/max_kernels;
-      space: full                 #   candidates/request/sweep_level/space inherited unless set
+      space: full                 #   candidates/request/sweep_level/space inherited unless set;
+                                  #   selector_fields/cell_keyed_by inherited, a different list exits 2
 launches:                         # optional: copied onto every kernel's kernel_source
   segment: {}                     #   a KernelModule builder's primary kernel
   reduce: {role: reduce}          #   and each companion, by role
@@ -1057,13 +1058,13 @@ is a cell, so many cells name the same kernel and `--out` fails on duplicate nam
   differing only there are one kernel. The manifest author owns that claim: a field is
   neutral only if a test proves it IR-neutral. `num_seqs` on the gfx942 split-KV decode
   grid is proven by rocKE's `test_num_seqs_is_ir_neutral_on_the_decode_grid`
-  (`dnn-providers/hip-kernel-provider/rocke/library/tests/test_attention_tiled_3d_module.py`).
+  (`dnn-providers/hip-kernel-provider/rocke/library/tests/test_attention_tiled_3d_module_gfx942.py`).
   A neutral field must be a spec field and must not be a `feature` or `performance` field.
 - `spec_overrides` maps spec fields to one value every spec takes, applied first, before
   `neutral_fields` and the merge. It is a deliberate departure from the candidate's own
   pick, for a field that changes the kernel but whose other values the catalog chooses not
-  to ship: the gfx942 split-KV decode pins `kv_cache_policy: stream`, which a cold-memory
-  A/B found never slower than `all` (AICK-2892). The spec's own validation decides whether
+  to ship: the gfx942 split-KV decode pins `kv_cache_policy: stream` (why: the header of
+  `configs/gfx942_attention_unified_3d.engine.yaml`). The spec's own validation decides whether
   the value builds; a value it refuses exits 2 naming the request. An overridden field must
   be a spec field, and must not be a `feature`, `performance` or neutral field. The g3
   regeneration gate compares the shipped catalog against the overridden picks.
