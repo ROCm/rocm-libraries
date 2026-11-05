@@ -139,6 +139,7 @@ test_categories:
       - "rocke_differential_golden_ll"
       - "rocke_differential_golden_canonical"
       - "rocke_oracle_free_pytest"
+      # Not registered on Windows (see rocke/platform/CMakeLists.txt).
       - "rocke_hip_source_identity"
       - "rocke_library_conv_pytest"
       - "rocke_library_conv_ir_pytest"
@@ -239,6 +240,7 @@ test_categories:
       - "rocke_differential_golden_ll"
       - "rocke_differential_golden_canonical"
       - "rocke_oracle_free_pytest"
+      # Not registered on Windows (see rocke/platform/CMakeLists.txt).
       - "rocke_hip_source_identity"
       - "rocke_library_conv_pytest"
       - "rocke_library_conv_fwd_aot_packaging_pytest"
