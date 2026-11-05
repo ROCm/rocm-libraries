@@ -506,14 +506,9 @@ struct StreamKKernel
                     index_t tile_local_cta_idx = amd_wave_read_first_lane(
                         kargs.tile_partitioner.get_tile_local_cta_index(tile_iter_start, cta_idx));
 
-                    // At each level, a workgroup whose tile-local index is a multiple of
-                    // 2 * stride adds the partial of its partner (cta_idx + stride), if the
-                    // partner works on this tile. As in Linear, the epilogue and the partial
-                    // store stay outside the loop, so the accumulator is not live across them
-                    // on the loop's back edge (that spilled 16-wave comp_tdm_v3 tiles).
-                    for(index_t stride = amd_wave_read_first_lane(1);
-                        tile_local_cta_idx % (stride << 1) == 0;
-                        stride <<= 1)
+                    index_t stride = amd_wave_read_first_lane(1);
+
+                    for(;; stride <<= 1)
                     {
                         const index_t partner_cta_idx = amd_wave_read_first_lane(cta_idx + stride);
                         const index_t partner_start_iter = amd_wave_read_first_lane(
@@ -521,30 +516,46 @@ struct StreamKKernel
                         bool partner_in_tile =
                             amd_wave_read_first_lane(partner_start_iter < tile_iter_end);
 
-                        if(!partner_in_tile)
+                        // If the partner of the workgroup who started the tile is not in this tile,
+                        // then the work for this tile is done and results can be stored in the C
+                        // tensor.
+                        if(tile_started && !partner_in_tile)
                         {
+                            auto c_block_window = UniversalGemmKernel::template MakeCBlockWindows<
+                                TilePartitioner::MemoryOperation>(c_ptr, kargs, i_m, i_n);
+                            EpiloguePipeline{}(
+                                c_block_window, accum_block_tile, ds_block_window, smem_ptr_0);
                             break;
                         }
 
-                        sk_ops.WaitStorePartialDone(kargs, partner_cta_idx);
-                        using BlockType = remove_cvref_t<decltype(c_block_tile)>;
-                        sk_ops.AddBlockTile(
-                            accum_block_tile,
-                            sk_ops.template LoadPartial<typename BlockType::DataType>(
-                                kargs, partner_cta_idx, c_block_tile.get_tile_distribution()));
-                    }
-
-                    if(tile_started)
-                    {
-                        auto c_block_window = UniversalGemmKernel::template MakeCBlockWindows<
-                            TilePartitioner::MemoryOperation>(c_ptr, kargs, i_m, i_n);
-                        EpiloguePipeline{}(
-                            c_block_window, accum_block_tile, ds_block_window, smem_ptr_0);
-                    }
-                    else
-                    {
-                        sk_ops.StorePartial(kargs, cta_idx, accum_block_tile);
-                        sk_ops.SignalStorePartialDone(kargs, cta_idx);
+                        // It's this workgroup's turn to read from partials.
+                        if(tile_local_cta_idx % (stride << 1) == 0)
+                        {
+                            // If this workgroup's partner is in the tile then it can read from
+                            // partials and accumulate results.
+                            if(partner_in_tile)
+                            {
+                                sk_ops.WaitStorePartialDone(kargs, partner_cta_idx);
+                                using BlockType = remove_cvref_t<decltype(c_block_tile)>;
+                                sk_ops.AddBlockTile(
+                                    accum_block_tile,
+                                    sk_ops.template LoadPartial<typename BlockType::DataType>(
+                                        kargs,
+                                        partner_cta_idx,
+                                        c_block_tile.get_tile_distribution()));
+                            }
+                        }
+                        // Otherwise, it's this workgroup's turn to write to partials. All
+                        // workgroups, except the workgroup who starts the tile, will write to
+                        // partials.
+                        else
+                        {
+                            sk_ops.StorePartial(kargs, cta_idx, accum_block_tile);
+                            sk_ops.SignalStorePartialDone(kargs, cta_idx);
+                            // Once the workgroup writes to partials, it has no more work to do for
+                            // this tile.
+                            break;
+                        }
                     }
                 }
             }
