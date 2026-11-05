@@ -19,7 +19,6 @@
 #include "detail/generation_primitives.hpp"
 #include "detail/index_iteration.hpp"
 #include "detail/tensor_storage.hpp"
-#include "detail/threading.hpp"
 
 namespace roc::hostnumerics::detail {
 namespace {

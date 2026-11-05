@@ -434,10 +434,10 @@ GemmExecutionInfo runBlocked(const GemmInvocation& problem, Tensor* selectedOutp
         const size_t blockedWork = detail::saturatedProduct(outputElementsCovered, reductionWork);
         constexpr size_t minimumSelectedWorkPerThread = 16'384;
         const size_t selectedThreads = static_cast<size_t>(
-            detail::operationThreadCount(selectedWork, minimumSelectedWorkPerThread, 8));
+            detail::operationThreadCount(selectedWork, minimumSelectedWorkPerThread));
         const size_t blockedThreads =
             std::min(selectedPlan->blocks.size(),
-                     static_cast<size_t>(detail::operationThreadCount(blockedWork, 1'000'000, 8)));
+                     static_cast<size_t>(detail::operationThreadCount(blockedWork, 1'000'000)));
         constexpr long double blockedThroughputAdvantage = 20.0L;
         const long double selectedCost =
             static_cast<long double>(selectedWork) / static_cast<long double>(selectedThreads);

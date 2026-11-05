@@ -28,13 +28,13 @@ detail::StructuredSparsityWorkCounts applyStructuredSparsityInvocation(
     const size_t chunkCount =
         completeRange && independentOutputs
             ? std::min(plan.lineCount,
-                       static_cast<size_t>(detail::operationThreadCount(work, 500'000, 8)))
+                       static_cast<size_t>(detail::operationThreadCount(work, 500'000)))
             : 1;
     if (chunkCount > 1) {
         std::vector<detail::StructuredSparsityWorkCounts> partialRuns(chunkCount);
         detail::forEachParallelIndex(chunkCount, work, true, 1, [&](size_t chunk) {
-            const size_t chunkFirst = plan.lineCount * chunk / chunkCount;
-            const size_t chunkEnd = plan.lineCount * (chunk + 1) / chunkCount;
+            const auto [chunkFirst, chunkEnd] =
+                detail::evenlyPartitionedRange(plan.lineCount, chunkCount, chunk);
             partialRuns[chunk] = applyStructuredSparsityInvocation(
                 problem, {.firstSlice = chunkFirst, .sliceCount = chunkEnd - chunkFirst});
         });

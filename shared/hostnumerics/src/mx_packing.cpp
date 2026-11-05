@@ -10,20 +10,15 @@
 namespace roc::hostnumerics::detail {
 std::vector<std::byte> packRawValues(std::span<const uint8_t> rawValues, uint16_t bitsPerValue,
                                      int threadCount) {
-    (void)threadCount;
     const size_t totalBits = checkedMultiply(rawValues.size(), static_cast<size_t>(bitsPerValue),
                                              "MX packed storage size overflow.");
     std::vector<std::byte> storage(ceilDivide(totalBits, size_t{8}), std::byte{0});
     if (bitsPerValue == 8) {
-#ifdef _OPENMP
 #pragma omp parallel for schedule(static) num_threads(threadCount)
-#endif
         for (size_t index = 0; index < rawValues.size(); ++index)
             storage[index] = static_cast<std::byte>(rawValues[index]);
     } else if (bitsPerValue == 4) {
-#ifdef _OPENMP
 #pragma omp parallel for schedule(static) num_threads(threadCount)
-#endif
         for (size_t byteIndex = 0; byteIndex < storage.size(); ++byteIndex) {
             const size_t firstIndex = byteIndex * 2;
             const uint8_t first = rawValues[firstIndex] & 0x0fU;
@@ -33,9 +28,7 @@ std::vector<std::byte> packRawValues(std::span<const uint8_t> rawValues, uint16_
         }
     } else if (bitsPerValue == 6) {
         const size_t groups = (rawValues.size() + 3U) / 4U;
-#ifdef _OPENMP
 #pragma omp parallel for schedule(static) num_threads(threadCount)
-#endif
         for (size_t group = 0; group < groups; ++group) {
             const size_t firstIndex = group * 4U;
             uint32_t word = 0;

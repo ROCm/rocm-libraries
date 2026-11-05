@@ -7,7 +7,6 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
-#include <exception>
 #include <limits>
 #include <optional>
 #include <roc/hostnumerics/mx.hpp>
@@ -192,10 +191,34 @@ double generatedValue(const detail::PreparedNumericalGenerator& generator, const
     return generator(indices, shape, logicalIndex);
 }
 
-size_t generationRecipeIndex(const MxGenerationInvocation& problem, size_t row, size_t column) {
-    const auto order = detail::axesOf(problem.data.recipe().indexOrder(problem.shape.rank()));
-    return !order.empty() && order.front() == 1 ? row + column * problem.shape.dimensions()[0]
-                                                : column + row * problem.shape.dimensions()[1];
+// Maps a coordinate to the logical index of the recipe's index order.
+class RecipeIndexing {
+   public:
+    explicit RecipeIndexing(const MxGenerationInvocation& problem)
+        : m_rows(problem.shape.dimensions()[0]),
+          m_columns(problem.shape.dimensions()[1]),
+          m_rowFastest(problem.data.recipe().indexOrder(2).entries()[0] == 1) {}
+
+    size_t operator()(size_t row, size_t column) const noexcept {
+        return m_rowFastest ? row + column * m_rows : column + row * m_columns;
+    }
+
+   private:
+    size_t m_rows;
+    size_t m_columns;
+    bool m_rowFastest;
+};
+
+// Calls function(first, pastLast) on contiguous ranges of scale indices, using
+// up to `threadCount` threads.
+template <typename Function>
+void forEachScaleRange(size_t scaleCount, int threadCount, Function&& function) {
+    const size_t partitionCount = std::min(scaleCount, static_cast<size_t>(threadCount));
+    detail::forEachParallelIndex(partitionCount, partitionCount, true, 1, [&](size_t partition) {
+        const auto [first, pastLast] =
+            detail::evenlyPartitionedRange(scaleCount, partitionCount, partition);
+        function(first, pastLast);
+    });
 }
 
 std::vector<double> decodedDataValues(ScalarType dataType) {
@@ -236,7 +259,6 @@ void generateUnbounded(const MxGenerationInvocation& problem, const ScaleBlockin
                        std::vector<uint8_t>& dataRawValues, std::vector<uint8_t>& scaleRawValues,
                        std::vector<uint32_t>& scaleIndexValues, std::vector<float>& referenceValues,
                        int threadCount) {
-    (void)threadCount;
     const std::vector<double> dataValues = decodedDataValues(problem.dataType);
     const std::optional<uint8_t> fixedScale = explicitScaleRaw(problem);
     const std::vector<ScaleCandidate> scaleCandidates =
@@ -246,44 +268,44 @@ void generateUnbounded(const MxGenerationInvocation& problem, const ScaleBlockin
     const size_t leadingDimension = problem.physicalLeadingDimension();
     const detail::PreparedRawGenerator generator =
         detail::prepareRawGenerator(problem.data.recipe(), problem.dataType, problem.shape);
+    const RecipeIndexing recipeIndexing(problem);
+    const uint16_t dataBits = scalarTypeInfo(problem.dataType).storageBits;
+    const uint8_t dataMask = static_cast<uint8_t>((uint16_t{1} << dataBits) - 1U);
 
-#ifdef _OPENMP
-#pragma omp parallel for schedule(static) num_threads(threadCount)
-#endif
-    for (size_t scaleIndex = 0; scaleIndex < blocking.scaleCount; ++scaleIndex) {
-        const auto [block, freeCoordinate] = blocking.blockAndFreeCoordinate(scaleIndex);
-        const uint8_t scaleRaw =
-            fixedScale
-                ? *fixedScale
-                : scaleCandidates[detail::counterRandom(problem.data.recipe().seed(),
-                                                        unboundedScaleRandomDomain, scaleIndex) %
-                                  scaleCandidates.size()]
-                      .raw;
-        scaleRawValues[scaleIndex] = scaleRaw;
-        const double scaleValue = scaleValueForRaw(problem.scaleType, scaleRaw);
+    forEachScaleRange(blocking.scaleCount, threadCount, [&](size_t first, size_t pastLast) {
+        for (size_t scaleIndex = first; scaleIndex < pastLast; ++scaleIndex) {
+            const auto [block, freeCoordinate] = blocking.blockAndFreeCoordinate(scaleIndex);
+            const uint8_t scaleRaw =
+                fixedScale ? *fixedScale
+                           : scaleCandidates[detail::counterRandom(problem.data.recipe().seed(),
+                                                                   unboundedScaleRandomDomain,
+                                                                   scaleIndex) %
+                                             scaleCandidates.size()]
+                                 .raw;
+            scaleRawValues[scaleIndex] = scaleRaw;
+            const double scaleValue = scaleValueForRaw(problem.scaleType, scaleRaw);
 
-        for (size_t offset = 0; offset < blocking.blockElementCount(block); ++offset) {
-            const auto [row, column] = blocking.dataCoordinates(block, freeCoordinate, offset);
-            const std::array<size_t, 2> indices{row, column};
-            const size_t recipeIndex = generationRecipeIndex(problem, row, column);
-            const size_t logicalIndex = row + column * rows;
-            const size_t physicalIndex = row + column * leadingDimension;
-            const uint16_t dataBits = scalarTypeInfo(problem.dataType).storageBits;
-            const uint8_t dataMask = static_cast<uint8_t>((uint16_t{1} << dataBits) - 1U);
-            const uint8_t dataRaw =
-                static_cast<uint8_t>(generator(indices, problem.shape, recipeIndex)) & dataMask;
-            dataRawValues[physicalIndex] = dataRaw;
-            scaleIndexValues[logicalIndex] = static_cast<uint32_t>(scaleIndex);
-            referenceValues[logicalIndex] = static_cast<float>(dataValues[dataRaw] * scaleValue);
+            for (size_t offset = 0; offset < blocking.blockElementCount(block); ++offset) {
+                const auto [row, column] = blocking.dataCoordinates(block, freeCoordinate, offset);
+                const std::array<size_t, 2> indices{row, column};
+                const size_t recipeIndex = recipeIndexing(row, column);
+                const size_t logicalIndex = row + column * rows;
+                const size_t physicalIndex = row + column * leadingDimension;
+                const uint8_t dataRaw =
+                    static_cast<uint8_t>(generator(indices, problem.shape, recipeIndex)) & dataMask;
+                dataRawValues[physicalIndex] = dataRaw;
+                scaleIndexValues[logicalIndex] = static_cast<uint32_t>(scaleIndex);
+                referenceValues[logicalIndex] =
+                    static_cast<float>(dataValues[dataRaw] * scaleValue);
+            }
         }
-    }
+    });
 }
 
 void generateQuantized(const MxGenerationInvocation& problem, const ScaleBlocking& blocking,
                        std::vector<uint8_t>& dataRawValues, std::vector<uint8_t>& scaleRawValues,
                        std::vector<uint32_t>& scaleIndexValues, std::vector<float>& referenceValues,
                        int threadCount) {
-    (void)threadCount;
     const size_t rows = problem.shape.dimensions()[0];
     const size_t leadingDimension = problem.physicalLeadingDimension();
 
@@ -295,6 +317,7 @@ void generateQuantized(const MxGenerationInvocation& problem, const ScaleBlockin
     const double maximumDataValue = detail::typeMaximum(problem.dataType);
     const detail::PreparedNumericalGenerator generator =
         detail::prepareNumericalGenerator(problem.data.recipe(), problem.dataType, problem.shape);
+    const RecipeIndexing recipeIndexing(problem);
 
     auto generateRange = [&](size_t firstScaleIndex, size_t endScaleIndex) {
         std::vector<double> blockValues(
@@ -310,7 +333,7 @@ void generateQuantized(const MxGenerationInvocation& problem, const ScaleBlockin
                 for (size_t offset = 0; offset < blockElementCount; ++offset) {
                     const auto [row, column] =
                         blocking.dataCoordinates(block, freeCoordinate, offset);
-                    const size_t recipeIndex = generationRecipeIndex(problem, row, column);
+                    const size_t recipeIndex = recipeIndexing(row, column);
                     const double value =
                         generatedValue(generator, problem.shape, row, column, recipeIndex);
                     blockValues[offset] = value;
@@ -346,7 +369,7 @@ void generateQuantized(const MxGenerationInvocation& problem, const ScaleBlockin
                 const size_t physicalIndex = row + column * leadingDimension;
                 double sourceValue;
                 if (fixedScale || problem.scale == MxScaleGenerationMode::RandomFinite) {
-                    const size_t recipeIndex = generationRecipeIndex(problem, row, column);
+                    const size_t recipeIndex = recipeIndexing(row, column);
                     sourceValue =
                         generatedValue(generator, problem.shape, row, column, recipeIndex);
                 } else {
@@ -368,34 +391,7 @@ void generateQuantized(const MxGenerationInvocation& problem, const ScaleBlockin
         }
     };
 
-    if (threadCount == 1) {
-        generateRange(0, blocking.scaleCount);
-        return;
-    }
-
-#ifdef _OPENMP
-    std::exception_ptr error;
-#pragma omp parallel num_threads(threadCount)
-    {
-        try {
-            const size_t threadIndex = static_cast<size_t>(omp_get_thread_num());
-            const size_t actualThreadCount = static_cast<size_t>(omp_get_num_threads());
-            const size_t baseCount = blocking.scaleCount / actualThreadCount;
-            const size_t remainder = blocking.scaleCount % actualThreadCount;
-            const size_t first = threadIndex * baseCount + std::min(threadIndex, remainder);
-            const size_t count = baseCount + static_cast<size_t>(threadIndex < remainder);
-            generateRange(first, first + count);
-        } catch (...) {
-#pragma omp critical(hostnumerics_mx_generation_error)
-            {
-                if (!error) error = std::current_exception();
-            }
-        }
-    }
-    if (error) std::rethrow_exception(error);
-#else
-    generateRange(0, blocking.scaleCount);
-#endif
+    forEachScaleRange(blocking.scaleCount, threadCount, generateRange);
 }
 
 void validateInvocation(const MxGenerationInvocation& problem) {
@@ -446,7 +442,7 @@ MxTensor generateMx(Shape shape, MxDataGeneration generation, const MxGeneration
     std::vector<uint32_t> scaleIndexValues(logicalElementCount, 0);
     std::vector<float> referenceValues(logicalElementCount, 0.0f);
     const int threadCount =
-        detail::operationThreadCount(std::max(logicalElementCount, physicalElementCount), 4096, 8);
+        detail::operationThreadCount(std::max(logicalElementCount, physicalElementCount), 4096);
 
     if (problem.data.quantization() == MxDataQuantization::PreserveGeneratedEncoding)
         generateUnbounded(problem, blocking, dataRawValues, scaleRawValues, scaleIndexValues,

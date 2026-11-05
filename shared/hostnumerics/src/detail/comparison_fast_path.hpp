@@ -158,8 +158,8 @@ ComparisonReport compareAllCloseOnlyKnown(const Tensor& observed, const Tensor& 
             const size_t selectedTotal = options.indicesCount;
             if (selectedTotal == 0) return result;
             constexpr size_t minimumElementsPerThread = 500'000;
-            const size_t partitionCount = static_cast<size_t>(
-                operationThreadCount(selectedTotal, minimumElementsPerThread, 8));
+            const size_t partitionCount =
+                static_cast<size_t>(operationThreadCount(selectedTotal, minimumElementsPerThread));
             result.mismatches = transformReduceParallelIndices(
                 partitionCount, selectedTotal, true, minimumElementsPerThread, size_t{0},
                 [&](size_t partition) {
