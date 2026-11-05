@@ -73,6 +73,7 @@ jobs:
               "components": ["hipBLASLt", "hipSPARSELt"]
             }
           }'
+          # Timeouts are set to ~1.5x observed runtimes.
           timeouts='{
             "gfx942": {
               "hipblaslt": {
