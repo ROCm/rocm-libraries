@@ -685,7 +685,7 @@ ROCFFT_EXPORT rocfft_status rocfft_execution_info_set_stream(rocfft_execution_in
  *  that have fields specified on the plan description:
  *  ::rocfft_execute returns ::rocfft_status_invalid_arg_value in that
  *  case.  The specified arrays must remain valid until either the execution
- *  info is destroyed or callbacks are cleared from the plan.
+ *  info is destroyed or callbacks are cleared from it.
  *
  *  The provided function pointers replace any previously-specified
  *  load callback for this execution info handle.
@@ -757,7 +757,7 @@ ROCFFT_EXPORT rocfft_status rocfft_execution_info_set_load_callback_data(rocfft_
  *  that have fields specified on the plan description:
  *  ::rocfft_execute returns ::rocfft_status_invalid_arg_value in that
  *  case.  The specified arrays must remain valid until either the execution
- *  info is destroyed or callbacks are cleared from the plan.
+ *  info is destroyed or callbacks are cleared from it.
  *
  *  The provided function pointers replace any previously-specified
  *  store callback for this execution info handle.
