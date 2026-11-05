@@ -72,6 +72,7 @@ def supports_split_kv_reduce(spec, *, arch: str) -> Tuple[bool, str]:
     """
     from rocke.core.arch.target import ArchTarget
 
+    from ._fmha_common import check_head_counts
     from .attention_arch import validate_tiled_attention_arch
 
     arch_ok, arch_reason = validate_tiled_attention_arch(arch)
@@ -88,16 +89,9 @@ def supports_split_kv_reduce(spec, *, arch: str) -> Tuple[bool, str]:
             "tiled reduce kernel needs head_size divisible by "
             f"{_REDUCE_THREADS} (got {spec.head_size})",
         )
-    if (
-        spec.num_kv_heads < 1
-        or spec.num_query_heads < 1
-        or spec.num_query_heads % spec.num_kv_heads != 0
-    ):
-        return (
-            False,
-            "tiled reduce kernel needs a positive num_query_heads divisible by "
-            f"num_kv_heads (got {spec.num_query_heads} / {spec.num_kv_heads})",
-        )
+    ok, reason = check_head_counts(spec.num_query_heads, spec.num_kv_heads)
+    if not ok:
+        return False, f"tiled reduce kernel: {reason}"
     # ``arch`` passed validate_tiled_attention_arch, so it has a catalog row.
     target = ArchTarget.from_gfx(arch)
     lds_bytes = split_kv_reduce_lds_bytes(spec.num_segments)
