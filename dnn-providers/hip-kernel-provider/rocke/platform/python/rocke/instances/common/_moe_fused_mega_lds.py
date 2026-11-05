@@ -42,6 +42,7 @@ from __future__ import annotations
 from typing import NamedTuple, Sequence, Tuple
 
 from ...core.lower_llvm import SMEM_POOL_ALIGN
+from ...helpers.spec import align_up
 
 
 __all__ = [
@@ -81,13 +82,8 @@ def mega_lds_pool_bytes(allocs: Sequence[LdsAlloc]) -> int:
     """
     end = 0
     for alloc in allocs:
-        end = _round_up_to_pool_align(end) + alloc.nbytes
-    return _round_up_to_pool_align(end)
-
-
-def _round_up_to_pool_align(offset: int) -> int:
-    """``offset`` rounded up to the next multiple of ``SMEM_POOL_ALIGN``."""
-    return (offset + SMEM_POOL_ALIGN - 1) & ~(SMEM_POOL_ALIGN - 1)
+        end = align_up(end, SMEM_POOL_ALIGN) + alloc.nbytes
+    return align_up(end, SMEM_POOL_ALIGN)
 
 
 def validate_mega_lds_budget(allocs: Sequence[LdsAlloc], arch: str) -> Tuple[bool, str]:
