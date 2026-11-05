@@ -143,8 +143,7 @@ TEST(TestGpuFpReferenceBlockScale, QuantizeNonLastAxisWithPermutedStridesMatches
         {
             for(int64_t column = 0; column < dims[2]; ++column)
             {
-                const auto value
-                    = static_cast<float>(batch * 20 + channel * 5 + column - 12);
+                const auto value = static_cast<float>(batch * 20 + channel * 5 + column - 12);
                 cpuX.setHostValue(value, batch, channel, column);
                 gpuX.setHostValue(value, batch, channel, column);
             }
