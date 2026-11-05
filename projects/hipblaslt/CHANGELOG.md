@@ -53,6 +53,7 @@ Full documentation for hipBLASLt is available at [rocm.docs.amd.com/projects/hip
 
 ### Resolved issues
 
+* Fixed hipBLASLt never selecting the gfx950 wave-split-K skinny GEMM kernels (vLLM wvSplitK and rocBLAS wvSpltK) under uniform summation order, which is on by default: it refused every handwritten custom kernel in that mode. A handwritten kernel that reduces every row of D in the same order now declares `uniformSummationOrder: true` in the `CustomKernel` block of its `custom.config`, and these kernels do.
 * Fixed rocisa macro expansion ignoring conditions after `&&`, which could omit required final-loop LDS waits in gfx950 kernels using custom main-loop scheduling.
 * Fixed premature LDS reads when handwritten gfx950 BF16 and FP16 TN kernels skip the second global prefetch at `K=64`.
 * Fixed `hipblaslt-bench` using C's batch stride for D and computing its CPU reference with the wrong layout when C and D have different leading dimensions or batch strides.
