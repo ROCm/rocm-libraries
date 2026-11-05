@@ -1161,6 +1161,12 @@ constexpr int64_t DIRECT_WINDOWED_MFMA_CH = 8;
 /// is_valid_depthwise_dgrad_win_spec and dw_win_fwd_problem in conv_direct_grouped.py on
 /// the runtime problem (square filter, stride 1 or 2, no dilation, cpg = kpg = 1 or a
 /// multiple of 8 up to 64, block_h a multiple of the stride), then
+///
+/// At cpg == 1 (pure depthwise) every wave still owns DIRECT_WINDOWED_MFMA_CH one-hot
+/// lanes, but only its first lane is masked against the problem's group count; a group
+/// count not a multiple of it leaves phantom lanes reading real weight memory out of
+/// range and corrupting real channels through the MFMA's off-diagonal terms, so this also
+/// requires problem.groups a multiple of DIRECT_WINDOWED_MFMA_CH there.
 /// direct_launch_geometry's grid over the transposed stride-1 problem:
 ///   (ceil(stride * Wo / (32 / w_fold)), ceil(C / (8 * block_waves)),
 ///    ceil(N / w_fold) * ceil(stride * Ho / block_h))
@@ -1179,7 +1185,13 @@ inline std::optional<LaunchGeometry> windowedDirectLaunch(const Problem& problem
        || problem.c / problem.groups != instance.cpg || problem.k / problem.groups != instance.kpg
        || (grouped ? instance.cpg != instance.kpg || instance.cpg % DIRECT_WINDOWED_MFMA_CH != 0
                          || instance.cpg > 64
-                   : instance.cpg != 1 || instance.kpg != 1)
+                   // Each wave still owns DIRECT_WINDOWED_MFMA_CH one-hot MFMA lanes even
+                   // at cpg == 1: only the wave's first lane is masked against problem.groups
+                   // (conv_direct_grouped.py), so a group count that is not a multiple of it
+                   // leaves phantom lanes issuing in-range weight reads past the real
+                   // channels and writing into the real channels' store slots.
+                   : instance.cpg != 1 || instance.kpg != 1
+                         || problem.groups % DIRECT_WINDOWED_MFMA_CH != 0)
        || instance.blockH < 1 || instance.blockWaves < 1
        || instance.blockWaves > DIRECT_MAX_BLOCK_WAVES
        || (instance.wFold != 1 && instance.wFold != 2 && instance.wFold != 4)

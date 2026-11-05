@@ -1,19 +1,19 @@
 {
   "version": "1.0",
-  "id": "047dc307-073e-4cf8-ad2f-19b07bd0c3b7",
+  "id": "bd641843-92c9-4260-bf40-3678144672e5",
   "name": "hipkernel:gfx950_conv_fwd_aot_seed_fp16_split",
   "matchers": [
-    "85798d77-7342-4ade-8d08-fcf116e15d7f"
+    "33125b0b-cf29-4165-ad2f-ca15df51ba2e"
   ],
-  "engine": "d4fe4a62-cba5-4fa9-997f-b60692ddb374",
-  "dispatch": "0f4c982e-b671-4fdf-b3a0-91933c47e6a1",
+  "engine": "fd1feb00-c31d-416f-84d2-4eb215d483dd",
+  "dispatch": "838c0915-5fe7-46f6-972a-70b199ff82d0",
   "provenance": {
     "specialization_contract": {
       "schema_version": 1,
       "consumers": [
         {
-          "engine_id": "d4fe4a62-cba5-4fa9-997f-b60692ddb374",
-          "kmd_id": "813567e5-0733-40a7-b5f1-cc941f7300af",
+          "engine_id": "fd1feb00-c31d-416f-84d2-4eb215d483dd",
+          "kmd_id": "f644fa14-5614-4c3f-8820-c0b3b8880b03",
           "metadata_fields": [
             "dtype",
             "tile_m",
@@ -67,7 +67,9 @@
             "iglp",
             "waves_per_eu",
             "group_merge",
-            "split_c"
+            "split_c",
+            "prefetch_rows",
+            "w_fold"
           ],
           "matcher_only_fields": [],
           "bindings": {
@@ -229,6 +231,12 @@
             },
             "split_c": {
               "field": "split_c"
+            },
+            "prefetch_rows": {
+              "field": "prefetch_rows"
+            },
+            "w_fold": {
+              "field": "w_fold"
             }
           },
           "vocabulary": {}

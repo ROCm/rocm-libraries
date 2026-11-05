@@ -435,7 +435,7 @@ TEST_F(TestGfx950ConvFwdAotSeedPacks, DeclaresTheConfiguredSdkVersion)
 
 TEST_F(TestGfx950ConvFwdAotSeedPacks, ExposesTheConfiguredKnobs)
 {
-    ASSERT_EQ(_set->engine.knobs.size(), 38U);
+    ASSERT_EQ(_set->engine.knobs.size(), 40U);
     EXPECT_NE(std::find(_set->engine.knobs.begin(), _set->engine.knobs.end(), "kernel_family"),
               _set->engine.knobs.end());
     EXPECT_NE(std::find(_set->engine.knobs.begin(), _set->engine.knobs.end(), "direct_variant"),
@@ -511,6 +511,10 @@ TEST_F(TestGfx950ConvFwdAotSeedPacks, ExposesTheConfiguredKnobs)
     EXPECT_NE(std::find(_set->engine.knobs.begin(), _set->engine.knobs.end(), "group_merge"),
               _set->engine.knobs.end());
     EXPECT_NE(std::find(_set->engine.knobs.begin(), _set->engine.knobs.end(), "split_c"),
+              _set->engine.knobs.end());
+    EXPECT_NE(std::find(_set->engine.knobs.begin(), _set->engine.knobs.end(), "prefetch_rows"),
+              _set->engine.knobs.end());
+    EXPECT_NE(std::find(_set->engine.knobs.begin(), _set->engine.knobs.end(), "w_fold"),
               _set->engine.knobs.end());
 }
 

@@ -1,6 +1,6 @@
 {
   "version": "1.0",
-  "id": "813567e5-0733-40a7-b5f1-cc941f7300af",
+  "id": "f644fa14-5614-4c3f-8820-c0b3b8880b03",
   "name": "Gfx950ConvFwdAotSeed variant fields",
   "fields": [
     {
@@ -245,6 +245,16 @@
       "name": "split_c",
       "type": "int",
       "default_value": 1
+    },
+    {
+      "name": "prefetch_rows",
+      "type": "int",
+      "default_value": 0
+    },
+    {
+      "name": "w_fold",
+      "type": "int",
+      "default_value": 0
     }
   ]
 }
