@@ -170,6 +170,23 @@ def test_invalid_seq_len_is_refused_before_launch(key, values, match):
         sdpa_unified_bind(req, tensors)
 
 
+def test_float_seq_len_is_refused_not_truncated():
+    # [1.5, 1.0] truncates to the valid [1, 1]; the binding must refuse the
+    # float32 tensor instead of launching on the truncated lengths.
+    req = replace(
+        make_request(d=64, s_q=1, s_kv=16),
+        padding_mask=True,
+        seq_len_q=packed((2, 1, 1, 1), "int32"),
+        seq_len_kv=packed((2, 1, 1, 1), "int32"),
+    )
+    assert sdpa_unified_admits(req)[0]
+    tensors = {n: _dense(req, n) for n in ("q", "k", "v", "o")}
+    tensors["seq_len_q"] = torch.tensor([1.5, 1.0], dtype=torch.float32)
+    tensors["seq_len_kv"] = torch.tensor([16, 16], dtype=torch.int32)
+    with pytest.raises(ValueError, match="seq_len_q: lengths must be an integer dtype"):
+        sdpa_unified_bind(req, tensors)
+
+
 def _ragged_request():
     def ragged(t):
         return replace(
