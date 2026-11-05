@@ -18,6 +18,7 @@ Documentation for Composable Kernel available at [https://rocm.docs.amd.com/proj
 * Added FP6 (E2M3) operands to the CK Tile microscaling (MX) GEMM TDM pipelines on gfx1250, for row-major A, column-major B, a 16x16x128 warp tile, and 32-element E8M0 scale blocks, with fp16 or bf16 output.
 * Added K tails to the CK Tile microscaling (MX) GEMM TDM pipelines on gfx1250: they accept any K that is a whole number of storage elements.
 * Added CK Tile GEMM Stream-K support, including in the CK Tile dispatcher, for the gfx1250 TDM pipelines (comp_tdm and comp_tdm_v2): the CShuffle epilogue for atomic, linear, and tree reduction (the contiguous C dimension must be a multiple of the block tile), the TDM epilogue for linear and tree reduction, and persistent or non-persistent data-parallel tiles.
+* Added CK Tile GEMM Stream-K support for the gfx1250 `comp_tdm_v3` (`GemmPipelineAgBgCrCompTDMV3`) pipeline across 4-wave and 16-wave configurations, 16-bit (`bf16`, `fp16`) and 8-bit (`fp8`, `bf8`) inputs, all four A/B layouts, atomic, linear, and tree reduction, persistent and non-persistent data-parallel tiles, CShuffle and TDM epilogues, and unaligned M, N, and K dimensions.
 
 ### Changed
 

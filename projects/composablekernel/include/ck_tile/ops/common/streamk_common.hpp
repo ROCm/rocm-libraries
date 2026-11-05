@@ -195,6 +195,40 @@ struct StreamKReductionOps
                       "WaitStorePartialDone not implemented for this architecture.");
     }
 
+    template <typename OAccTile, typename PartialWindow>
+    struct PartialTileLoader
+    {
+        PartialWindow window;
+        typename remove_cvref_t<OAccTile>::StaticTileDistribution c_block_tile_dist;
+
+        CK_TILE_DEVICE operator OAccTile() const
+        {
+            using DataType     = typename remove_cvref_t<OAccTile>::DataType;
+            auto partials_tile = load_tile(window);
+            return make_static_distributed_tensor<DataType>(c_block_tile_dist,
+                                                            partials_tile.get_thread_buffer());
+        }
+    };
+
+    template <typename OAccTile, typename PartialWindow>
+    CK_TILE_DEVICE void AddBlockTile(OAccTile& in_out_block_tile,
+                                     const PartialTileLoader<OAccTile, PartialWindow>& loader) const
+    {
+        using DataType                = typename remove_cvref_t<OAccTile>::DataType;
+        auto accum_with_partials_dist = make_static_distributed_tensor<DataType>(
+            MakePartialsDistribution(), in_out_block_tile.get_thread_buffer());
+        index_t elem_cnt = 0;
+        loader.window.load(
+            accum_with_partials_dist, make_tuple(loader.window), [&](auto& dst, const auto& src) {
+                dst += src;
+                if(++elem_cnt % 32 == 0)
+                {
+                    __builtin_amdgcn_sched_barrier(0);
+                }
+            });
+        in_out_block_tile.get_thread_buffer() = accum_with_partials_dist.get_thread_buffer();
+    }
+
     /**
      * @brief Adds the values of a block tile to an output block tile.
      * @param in_out_block_tile The output block tile to which values are added.
@@ -206,13 +240,10 @@ struct StreamKReductionOps
     CK_TILE_DEVICE void AddBlockTile(OAccTile& in_out_block_tile,
                                      const OAccTile& in_block_tile) const
     {
-        using BlockType        = remove_cvref_t<decltype(in_out_block_tile)>;
-        constexpr auto o_spans = BlockType::get_distributed_spans();
-        sweep_tile_span(o_spans[number<0>{}], [&](auto idx0) {
-            sweep_tile_span(o_spans[number<1>{}], [&](auto idx1) {
-                constexpr auto idx     = make_tuple(idx0, idx1);
-                in_out_block_tile(idx) = in_out_block_tile[idx] + in_block_tile[idx];
-            });
+        using BlockType                  = remove_cvref_t<decltype(in_out_block_tile)>;
+        constexpr index_t thread_buf_len = BlockType::get_thread_buffer_size();
+        static_for<0, thread_buf_len, 1>{}([&](auto i) {
+            in_out_block_tile.get_thread_buffer().at(i) += in_block_tile.get_thread_buffer().at(i);
         });
     }
 
@@ -257,15 +288,9 @@ struct StreamKReductionOps
             {0, 0},
             MakePartialsDistribution());
 
-        auto partials_tile = load_tile(partial_tile_window);
-
-        // Since the partials distribution is not the same as the C block distribution, we must
-        // describe the contents in the partials tile with the C block distribution.
-        // Note: The data assigned to threads does not change between distributions.
-        auto partials_tile_with_c_distr = make_static_distributed_tensor<DataType>(
-            c_block_tile_dist, partials_tile.get_thread_buffer());
-
-        return partials_tile_with_c_distr;
+        using OAccTile = static_distributed_tensor<DataType, remove_cvref_t<OAccTileDist>>;
+        return PartialTileLoader<OAccTile, decltype(partial_tile_window)>{partial_tile_window,
+                                                                          c_block_tile_dist};
     }
 
     /**
@@ -290,11 +315,15 @@ struct StreamKReductionOps
     CK_TILE_DEVICE static constexpr auto MakePartialsDistribution()
     {
         // Create the encoding to describe waves within a block
+        using WarpGemmImpl       = typename WarpGemm::WarpGemmAttribute::Impl;
         constexpr index_t m_warp = BlockGemmShape::BlockWarps::at(number<0>{});
         constexpr index_t n_warp = BlockGemmShape::BlockWarps::at(number<1>{});
 
-        constexpr index_t m_iter_per_warp = TilePartitioner::MPerBlock / (m_warp * WarpGemm::kM);
-        constexpr index_t n_iter_per_warp = TilePartitioner::NPerBlock / (n_warp * WarpGemm::kN);
+        constexpr index_t warp_inst_m = WarpGemm::kM / WarpGemmImpl::kAMBlock;
+        constexpr index_t warp_inst_n = WarpGemm::kN / WarpGemmImpl::kBNBlock;
+
+        constexpr index_t m_iter_per_warp = TilePartitioner::MPerBlock / (m_warp * warp_inst_m);
+        constexpr index_t n_iter_per_warp = TilePartitioner::NPerBlock / (n_warp * warp_inst_n);
 
         constexpr auto partials_outer_dstr_encoding = tile_distribution_encoding<
             sequence<>,
@@ -306,8 +335,8 @@ struct StreamKReductionOps
 
         // Create the encoding to describe threads within a wave
         constexpr index_t vector_size         = GetVectorSizePartials();
-        constexpr index_t m_warp_repeat       = WarpGemm::WarpGemmAttribute::Impl::kCM0PerLane;
-        constexpr index_t warp_tile_n_threads = WarpGemm::kN / vector_size;
+        constexpr index_t m_warp_repeat       = WarpGemmImpl::kCM0PerLane;
+        constexpr index_t warp_tile_n_threads = warp_inst_n / vector_size;
         constexpr index_t warp_tile_m_threads = get_warp_size() / warp_tile_n_threads;
 
         // This inner encoding ensures that contiguous threads perform vectorized writes along the
