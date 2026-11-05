@@ -989,10 +989,9 @@ namespace
 #endif
                     if(!TestPath(tensileLibraryPath))
                     {
-                        // A missing library is not fatal: rocBLAS may be built for a generic
-                        // target such as amdgcnspirv, or Tensile skipped this architecture.
+                        // A missing library is fatal unless Tensile skipped this architecture.
                         if(rocblas_internal_tensile_arch_skipped(processor)
-                           || rocblas_internal_tensile_arch_skipped(catalog_key))
+                           || rocblas_internal_tensile_arch_skipped(strict_catalog))
                         {
                             rocblas_internal_ostream msg;
                             print_if_verbose(msg << "Tensile skipped for GPU architecture '"
@@ -1005,7 +1004,7 @@ namespace
                         }
 
                         rocblas_internal_ostream msg;
-                        msg << "rocBLAS warning: Cannot read " << tensileLibraryPath << ": "
+                        msg << "\nrocBLAS error: Cannot read " << tensileLibraryPath << ": "
                             << strerror(errno);
 #if ROCBLAS_TENSILE_SEPARATE_ARCH
                         msg << " for GPU arch : " << processor;
@@ -1025,12 +1024,14 @@ namespace
                                 msg << "\n  " << file_name.path().string();
                         }
 #endif
-                        msg << "\nTensile unavailable for GPU architecture '" << processor
-                            << "'; GEMM will use hipBLASLt or source kernels.";
-                        print_tensile_init_warning(msg, processor);
-
-                        std::lock_guard<std::mutex> lock(m_libraryMapMutex);
-                        return m_libraryMap[processor];
+                        // msg << "\nTensile unavailable for GPU architecture '" << processor
+                        //     << "'; GEMM will use hipBLASLt or source kernels.";
+                        // print_tensile_init_warning(msg, processor);
+                        //
+                        // std::lock_guard<std::mutex> lock(m_libraryMapMutex);
+                        // return m_libraryMap[processor];
+                        rocblas_cerr << msg.str() << std::endl;
+                        rocblas_abort();
                     }
                 }
             }
