@@ -625,15 +625,14 @@ if(ROCKE_INSTALL_TESTS)
 
     # Both engines lower every parity kernel to the same HIP source. The wheel
     # has no rocke_engine binding, so the C++ lowering runs through the
-    # installed rocke_ir_lower_cli. One family's emitter run is the per-test item
-    # (the slowest takes about 25 s on a developer host); the whole gate takes
-    # about 3 minutes there.
+    # installed rocke_ir_lower_cli. The whole gate takes about a minute on a
+    # developer host; one family, the per-test item, a few seconds.
     if(TARGET rocke_ir_lower_cli)
       rocke_cxx_test_installed_name(_rocke_installed_name rocke_ir_lower_cli)
       string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
              "add_test(rocke_hip_source_identity python -m pytest \"${ROCKE_TEST_CTEST_REL}tests/instances/differential/test_hip_source_identity.py\" -v -rs --timeout=120)\n")
       string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
-             "set_tests_properties(rocke_hip_source_identity PROPERTIES LABELS \"ckc;python;host;quick\" ENVIRONMENT \"PYTHONPATH=${_ROCKE_INSTALLED_PYTHONPATH};ROCKE_IR_LOWER_CLI=${ROCKE_CXX_TEST_CTEST_REL}${_rocke_installed_name}${CMAKE_EXECUTABLE_SUFFIX}\" TIMEOUT 900)\n")
+             "set_tests_properties(rocke_hip_source_identity PROPERTIES LABELS \"ckc;python;host;quick\" ENVIRONMENT \"PYTHONPATH=${_ROCKE_INSTALLED_PYTHONPATH};ROCKE_IR_LOWER_CLI=${ROCKE_CXX_TEST_CTEST_REL}${_rocke_installed_name}${CMAKE_EXECUTABLE_SUFFIX}\" TIMEOUT 300)\n")
     endif()
 
     if(ROCKE_INSTALL_PLATFORM_PYTEST)
