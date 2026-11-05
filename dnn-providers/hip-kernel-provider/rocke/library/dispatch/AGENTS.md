@@ -41,6 +41,9 @@ params). Correctness rests entirely on the key.
 |---|---|---|---|---|
 | 3 | `attention_gfx942_dense` | gfx942 | `gfx942_dense.py` | bf16/fp16 D64/D128 dense prefill; grid and persistence are knobs (`spec_id=gfx942_dense`, opt-in) |
 | 3 | `attention_gfx942_dense_qbminor` | gfx942 | `gfx942_dense.py` | same body on the hipDNN ingestor's grid: non-persistent, `qb_minor` order, one KV segment, all fixed (`spec_id=gfx942_dense_qbminor`, opt-in) |
+| 3 | `attention_gfx942_dense_persist_aot` | gfx942 | `gfx942_dense.py` | same body on the ingestor's D128 persistent grid: 304 CTAs, an explicit (never `auto`) `persist_decode`, one KV segment; the other knobs swept (`spec_id=gfx942_dense_persist_aot`, opt-in) |
+| 3 | `attention_gfx942_dense_btminor_aot` | gfx942 | `gfx942_dense.py` | same body on the ingestor's non-persistent `bt_hkv_minor` grid, one KV segment; default spec only (`spec_id=gfx942_dense_btminor_aot`, opt-in) |
+| 3 | `attention_gfx942_dense_hqswz_aot` | gfx942 | `gfx942_dense.py` | same body on the ingestor's non-persistent `hq_minor_swz` grid, one KV segment; default spec only (`spec_id=gfx942_dense_hqswz_aot`, opt-in) |
 | 3 | `attention_gfx950_dense_grid` | gfx950 | `gfx950_dense.py` | dense grid body (`algorithm=attention_dense_grid`, `spec_id=gfx950_dense_grid`, opt-in) |
 | 3 | `attention_gfx950_dense_qbminor` | gfx950 | `gfx950_dense.py` | dense grid body at the `qb_minor` order the hipDNN ingestor launches (`algorithm=attention_dense_grid`, `spec_id=gfx950_dense_qbminor`, opt-in) |
 | 3 | `attention_gfx950_dense_persist` | gfx950 | `gfx950_dense.py` | dense persistent body (`algorithm=attention_dense_persist`, opt-in) |
@@ -94,7 +97,8 @@ an invalid point. This is deliberately separate from the heuristic production
 builders.
 
 Four candidate families are **opt-in only** and never win under `algorithm="auto"`:
-`attention_gfx942_dense` and `attention_gfx942_dense_qbminor`, the four `attention_gfx950_dense_*` candidates, and
+`attention_gfx942_dense`, `attention_gfx942_dense_qbminor` and the three
+`attention_gfx942_dense_*_aot` candidates, the four `attention_gfx950_dense_*` candidates, and
 `attention_gfx1250_wmma`, plus every priority-30 unified tuning candidate.
 Registering a kernel makes it reachable; making it an
 arch's default is a separate decision that wants benchmark evidence, so none
@@ -112,7 +116,8 @@ pins a spec on `AttentionRequest`:
 1. `algorithm` + `spec_id` name the candidate; an opt-in candidate admits a
    request only when **both** match. The algorithm values name the kernel
    body: `attention_dense` for gfx942 dense (persistence is a knob of
-   `gfx942_dense`; `gfx942_dense_qbminor` fixes the hipDNN ingestor's grid),
+   `gfx942_dense`; `gfx942_dense_qbminor` and the `*_aot` candidates each fix
+   one hipDNN ingestor grid),
    `attention_dense_grid` and `attention_dense_persist` for the two gfx950
    dense bodies (wide DMA is a candidate of the persistent one),
    `unified_tuning` for every unified tuning geometry, `wmma_attention_fwd`
@@ -190,7 +195,10 @@ gfx942 dense uses the same walk over `_GFX942_DENSE_AXES`
 is a knob alongside `block_m` and `block_n`, and the persistent-only knobs
 are pruned per spec. `gfx942_dense_qbminor` scopes `persistent`,
 `nonpersist_decode` and `kv_segments` out, so every spec it offers keeps the
-grid kind the hipDNN kernel ingestor launches. Its knobs include the K and V row pads, the D64 K group
+grid kind the hipDNN kernel ingestor launches. The `*_aot` candidates do the same
+for the ingestor's other grids: `gfx942_dense_persist_aot` also scopes
+`num_persistent` out, and the two non-persistent ones offer only their default
+spec. The gfx942 dense knobs include the K and V row pads, the D64 K group
 pad, conflict-free V store (`use_cfvst`) and its swizzle, K LDS buffering
 (`lds_num_buffers`), V register prefetch (`v_reg_prefetch`), the persistent
 and non-persistent block orders, exp2, `iglp` / `iglp_mode`, the PV fence
