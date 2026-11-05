@@ -476,7 +476,9 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
             INSTALL_DESTINATION "${_hkp_gfx942_shard_dest}"
             INSTALL_STAGING_KEY hkp_census_gfx942
             TEST_CONFIG    ${_gfx942_attention_dense_config}
-            GTEST_FILTER   "quick_SdpaFwd_Default.*:standard_SdpaFwd_Default.*:comprehensive_SdpaFwd_Default.*:full_SdpaFwd_Default.*"
+            # The shared Default sweeps, and the dense BSHD stats (LSE) bundles: no other
+            # SdpaFwd bundle binds a stats output this engine serves.
+            GTEST_FILTER   "quick_SdpaFwd_Default.*:standard_SdpaFwd_Default.*:comprehensive_SdpaFwd_Default.*:full_SdpaFwd_Default.*:*_SdpaFwd_bshd_*_stats_*"
             ENVIRONMENT    ${TEST_ENVIRONMENT}
             ENVIRONMENT_MODIFICATION ${TEST_ENVIRONMENT_MODIFICATION}
             ${_gfx942_attention_dense_category_args}
