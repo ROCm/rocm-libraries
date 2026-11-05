@@ -18,10 +18,13 @@
 
 #include <gtest/gtest.h>
 
+#include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
+#include <hipdnn_plugin_sdk/PluginVersionConstants.hpp>
 #include <hipdnn_plugin_sdk/ingestor/Descriptors.hpp>
 
 #include "engines/kernel_ingestor_engine/packs/FlydslSdpaBwdNativeShared.hpp"
 #include "engines/kernel_ingestor_engine/packs/FlydslSdpaBwdNoSerialization.hpp"
+#include "engines/kernel_ingestor_engine/packs/FlydslSdpaBwdSchemaGate.hpp"
 #include "engines/kernel_ingestor_engine/packs/IngestorPackTestSupport.hpp"
 
 /**
@@ -278,6 +281,40 @@ TEST(TestFlydslSdpaBwdPacks, EveryKernelDeclaresTheMergedSignature)
         }
     }
     EXPECT_EQ(kernels, MERGED_ROWS);
+}
+
+// The ingestor declines a graph whose schema floor is above the engine's `sdk_version` before
+// the matcher runs. The matcher serves ragged tensors, non-default alignment and ragged offset
+// multipliers, so the engine declares the schema that introduced the last of them: an SDK that
+// raises the multiplier floor again fails here until the matcher has been reviewed for it.
+TEST(TestFlydslSdpaBwdPacks, DeclaresASchemaAtLeastTheRaggedOffsetMultiplierFloor)
+{
+    const auto& set = loadedSet(ENGINE_NAME);
+    const auto& floor
+        = hipdnn_plugin_sdk::computeMinimumEnginePluginApiVersion(false, false, false, false, true);
+    EXPECT_FALSE(set.engine.sdkVersion < floor) << set.engine.sdkVersion.str();
+}
+
+// Graphs stamped as the backend stamps them reach the matcher through GenericPlanBuilder, and
+// the matcher's verdicts hold there: ragged tensors with and without a multiplier and an
+// aligned operand are served; a misaligned operand, ragged stats beside a dense Q, a ragged
+// bias and a multiplier below 1 are declined by the matcher, not by the schema gate.
+TEST(TestFlydslSdpaBwdPacks, ServesStampedRaggedGraphsAndDeclinesTheFieldsTheMatcherRejects)
+{
+    const auto& set = loadedSet(ENGINE_NAME);
+    const auto failures = schema_gate::failures(
+        set, hipdnn_data_sdk::utilities::getEnv("HIPDNN_TEST_EXPECTED_ARCH"));
+    std::string report;
+    for(const auto& failure : failures)
+    {
+        report += "\n  " + failure;
+    }
+    EXPECT_TRUE(failures.empty()) << report;
+    // The cases only matter if they can see the gate: an engine of the schema these engines
+    // shipped with declines the same graph.
+    const auto invisible = schema_gate::gateIsInvisible(
+        set, hipdnn_data_sdk::utilities::getEnv("HIPDNN_TEST_EXPECTED_ARCH"));
+    EXPECT_FALSE(invisible.has_value()) << invisible.value_or("");
 }
 
 // Pins that neither engine advertises or performs plan saving. Remove or invert when RFC 0021

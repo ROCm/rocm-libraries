@@ -107,10 +107,16 @@ SDPA_OPS = (
     "sdpa_cdna_dualwave",
     "sdpa_cdna_decode",
     "sdpa_aiw",
-    "sdpa_bwd_merged",
 )
 PASS_BY_VALUE_OPS: tuple[str, ...] = ("rmsnorm",) + SDPA_OPS
 PASS_BY_VALUE_SDK_VERSION = "1.2.0"
+# The backward engines' matcher reads ragged tensors (1.3.0), non-default tensor alignment
+# (1.3.0) and ragged offset multipliers (1.4.0) straight from the graph, and the ingestor
+# declines a graph whose schema floor is above the engine's before any matcher runs, so both
+# backward engines declare the schema that introduced the last of them
+# (PluginVersionConstants.hpp, K_RAGGED_OFFSET_MULTIPLIER_MIN_VERSION).
+SDPA_BWD_SDK_VERSION = "1.4.0"
+SDPA_BWD_OPS = ("sdpa_bwd_merged",)
 
 # The slotted descriptor formats (RFC 0021 section 9): UED and KDP are 1.1 only when
 # slotted; every other document stays at DESCRIPTOR_VERSION.
@@ -577,7 +583,9 @@ class OpDescriptors:
         # graph whose schema floor is above it. Runtime pass-by-value scalars (1.2.0) are
         # read by the engines whose scale or epsilon may be one; the rest stay at the
         # baseline.
-        if self.op in PASS_BY_VALUE_OPS:
+        if self.op in SDPA_BWD_OPS:
+            ued["sdk_version"] = SDPA_BWD_SDK_VERSION
+        elif self.op in PASS_BY_VALUE_OPS:
             ued["sdk_version"] = PASS_BY_VALUE_SDK_VERSION
         kmd_fields = []
         for name, type_token in self.fields.items():
@@ -891,8 +899,9 @@ class SplitEngine:
                 "version": SLOTTED_VERSION,
                 "id": _uuid(f"ued/{SPLIT_ENGINE}"),
                 "name": f"hipkernel:{self.stem}",
-                # Pass-by-value scalars (softmax scale, dropout seed and offset).
-                "sdk_version": PASS_BY_VALUE_SDK_VERSION,
+                # Pass-by-value scalars (softmax scale, dropout seed and offset), ragged
+                # tensors, non-default alignment and ragged offset multipliers.
+                "sdk_version": SDPA_BWD_SDK_VERSION,
                 "graph_match": {"native": f"{self.symbols}.graph_match"},
                 "shared_workspace": SPLIT_SHARED_WORKSPACE,
                 "slots": [

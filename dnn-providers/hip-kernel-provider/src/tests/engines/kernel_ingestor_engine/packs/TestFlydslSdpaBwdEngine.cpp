@@ -1534,7 +1534,7 @@ TEST(TestFlydslSdpaBwdMergedKernarg, Dropout)
                   Golden()
                       .set("philox_seed_ptr", ptrOf(sdpa_bwd_uid::SEED))
                       .set("philox_offset1", ptrOf(sdpa_bwd_uid::OFFSET))
-                      .set("idropout_p", int32_t{-1288490175})
+                      .set("idropout_p", int32_t{-1288490240})
                       .set("dropout_scale", 1.25F)
                       .set("rt_flags", int32_t{2}));
     EXPECT_FALSE(dump.seedUploaded);
@@ -1940,15 +1940,18 @@ TEST(TestFlydslSdpaBwdMergedSeed, APassByValueSeedIsWrittenAsFourWords)
     };
     using Words = std::vector<uint32_t>;
     EXPECT_EQ(bakedWords(DataType::INT32, int32_t{7}, int32_t{9}), (Words{7, 0, 9, 0}));
-    // A negative int32 is zero-extended: its unsigned bit pattern, then a zero high word.
+    // A negative int32 is sign-extended, as the forward engine does: its bit pattern, then an
+    // all-ones high word.
     EXPECT_EQ(bakedWords(DataType::INT32, int32_t{-3}, int32_t{-1}),
-              (Words{0xFFFFFFFDU, 0, 0xFFFFFFFFU, 0}));
+              (Words{0xFFFFFFFDU, 0xFFFFFFFFU, 0xFFFFFFFFU, 0xFFFFFFFFU}));
+    EXPECT_EQ(bakedWords(DataType::INT32, int32_t{-2147483647 - 1}, int32_t{7}),
+              (Words{0x80000000U, 0xFFFFFFFFU, 7, 0}));
     EXPECT_EQ(bakedWords(DataType::INT64, int64_t{0x100000005LL}, int64_t{-2}),
               (Words{5, 1, 0xFFFFFFFEU, 0xFFFFFFFFU}));
 }
 
 // ---------------------------------------------------------------------------
-// dropout_threshold: the C++ port against philox.py
+// dropout threshold and scale: the f32 form AOTriton and the forward engine use
 // ---------------------------------------------------------------------------
 
 struct ThresholdCase
@@ -1958,33 +1961,33 @@ struct ThresholdCase
     double scale;
 };
 
-// The Python values, computed from a FlyDSL environment with
+// AOTriton's `((p - 0.5) * 0xFFFFFFFF).to(tl.int32)` and `1.0 / (1 - p)` as its kernels
+// evaluate them, in f32 with p rounded to f32 first (a graph carries p as a float):
 //
-//   cd dnn-providers/hip-kernel-provider/flydsl/kernels_src
 //   python -c '
 //   import struct
-//   from kernels.attention_bwd_cdna.philox import dropout_threshold
 //   f32 = lambda x: struct.unpack("f", struct.pack("f", x))[0]
 //   for p in (1e-7, 1e-3, 0.1, 0.2, 0.25, 0.3, 0.4999, 0.5, 0.7, 0.9, 0.999, 0.99999994):
-//       q = f32(p)
-//       print(p, dropout_threshold(q), repr(f32(1.0 / (1.0 - q))))'
+//       q = f32(p); s = f32(f32(q - 0.5) * 4294967296.0)
+//       print(p, int(s), repr(f32(1.0 / f32(1.0 - q))))'
 //
-// A graph carries p as a float, so each is rounded to f32 first; the scale is 1 / (1 - p)
-// in double, rounded once to f32.
-const std::vector<ThresholdCase> THRESHOLDS{{1e-7F, -2147483218, 1.0000001192092896},
-                                            {1e-3F, -2143188680, 1.001001000404358},
-                                            {0.1F, -1717986911, 1.1111111640930176},
-                                            {0.2F, -1288490175, 1.25},
-                                            {0.25F, -1073741823, 1.3333333730697632},
-                                            {0.3F, -858993407, 1.4285714626312256},
-                                            {0.4999F, -429439, 1.9996001720428467},
+// Every operation is a single f32 operation, so evaluating it in double and rounding after
+// each step gives the same value. Python's philox.dropout_threshold computes the threshold in
+// double and differs by up to 2^7 (0.1: -1717986911).
+const std::vector<ThresholdCase> THRESHOLDS{{1e-7F, -2147483264, 1.0000001192092896},
+                                            {1e-3F, -2143188736, 1.001001000404358},
+                                            {0.1F, -1717986944, 1.1111111640930176},
+                                            {0.2F, -1288490240, 1.25},
+                                            {0.25F, -1073741824, 1.3333333730697632},
+                                            {0.3F, -858993408, 1.4285714626312256},
+                                            {0.4999F, -429440, 1.9996000528335571},
                                             {0.5F, 0, 2.0},
-                                            {0.7F, 858993407, 3.3333332538604736},
-                                            {0.9F, 1717986815, 9.999998092651367},
-                                            {0.999F, 2143188735, 1000.0128784179688},
-                                            {0.99999994F, 2147483391, 16777216.0}};
+                                            {0.7F, 858993408, 3.3333332538604736},
+                                            {0.9F, 1717986816, 9.999998092651367},
+                                            {0.999F, 2143188736, 1000.0128784179688},
+                                            {0.99999994F, 2147483392, 16777216.0}};
 
-TEST(TestFlydslSdpaBwdMergedDropout, ThresholdAndScaleEqualThePythonValues)
+TEST(TestFlydslSdpaBwdMergedDropout, ThresholdAndScaleAreAOTritonsF32Form)
 {
     for(const auto& test : THRESHOLDS)
     {

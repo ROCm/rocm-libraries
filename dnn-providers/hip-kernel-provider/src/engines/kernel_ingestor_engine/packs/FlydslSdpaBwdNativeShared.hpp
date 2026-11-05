@@ -107,14 +107,30 @@ inline int32_t toInt32(int64_t value, const char* what)
 // Launch values
 // ---------------------------------------------------------------------------
 
-/// The drop threshold of probability @p p: a uniform u32 read as i32 is kept when above
-/// `(p - 0.5) * 2^32`. A port of `philox.dropout_threshold`, which truncates toward zero
-/// and clamps to int32; the same value AOTriton computes.
-inline int32_t dropoutThreshold(double p)
+/// The drop threshold of probability @p p: a uniform u32 read as i32 is kept when above it.
+/// AOTriton's `((dropout_p - 0.5) * 0xFFFFFFFF).to(tl.int32)` as its kernel evaluates it, in
+/// f32 (where the constant rounds to 2^32) and truncated toward zero; PyTorch-ROCm and the
+/// forward SDPA engine's keep mask apply the same value. Clamped to int32, which no p in
+/// [0, 1) leaves. Python's host `philox.dropout_threshold` computes it in double and differs
+/// by up to 2^7.
+inline int32_t dropoutThreshold(float p)
 {
-    const auto threshold = static_cast<int64_t>((p - 0.5) * 4294967295.0);
-    return static_cast<int32_t>(std::clamp<int64_t>(
-        threshold, std::numeric_limits<int32_t>::min(), std::numeric_limits<int32_t>::max()));
+    const float scaled = (p - 0.5F) * 4294967296.0F;
+    if(!(scaled < 2147483648.0F))
+    {
+        return std::numeric_limits<int32_t>::max();
+    }
+    if(!(scaled > -2147483648.0F))
+    {
+        return std::numeric_limits<int32_t>::min();
+    }
+    return static_cast<int32_t>(scaled);
+}
+
+/// The scale a kept probability takes: AOTriton's `1.0 / (1 - dropout_p)`, in f32.
+inline float dropoutScale(float p)
+{
+    return 1.0F / (1.0F - p);
 }
 
 /// The kernel's window bounds: `column j is kept for row i iff i - left <= j <= i + right`.
@@ -437,13 +453,15 @@ struct SeedBinding
 };
 
 /// A pass-by-value integer as the low and high words of its 64-bit extension. A 32-bit value
-/// is zero-extended, so a negative int32 seed is its unsigned bit pattern.
+/// is sign-extended, as the forward SDPA engine does: a negative int32 seed has an all-ones
+/// high word.
 inline std::array<uint32_t, 2> wordsOf(const hipdnn_plugin_sdk::ScalarValue& value,
                                        const char* what)
 {
     if(const auto* narrow = std::get_if<int32_t>(&value))
     {
-        return {static_cast<uint32_t>(*narrow), 0U};
+        const auto bits = static_cast<uint64_t>(static_cast<int64_t>(*narrow));
+        return {static_cast<uint32_t>(bits), static_cast<uint32_t>(bits >> 32)};
     }
     if(const auto* wide = std::get_if<int64_t>(&value))
     {

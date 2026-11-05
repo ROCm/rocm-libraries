@@ -594,9 +594,8 @@ MergedPlan planFor(const MatchContext& context, const KernelDefinition& kernel)
     plan.window = native::windowFor(problem);
     if(problem.dropoutP > 0.0F)
     {
-        const auto p = static_cast<double>(problem.dropoutP);
-        plan.dropoutThreshold = native::dropoutThreshold(p);
-        plan.dropoutScale = static_cast<float>(1.0 / (1.0 - p));
+        plan.dropoutThreshold = native::dropoutThreshold(problem.dropoutP);
+        plan.dropoutScale = native::dropoutScale(problem.dropoutP);
     }
     const bool paddedHead = problem.headDimQk != row->tile || problem.headDimV != row->tile;
     plan.runtimeFlags

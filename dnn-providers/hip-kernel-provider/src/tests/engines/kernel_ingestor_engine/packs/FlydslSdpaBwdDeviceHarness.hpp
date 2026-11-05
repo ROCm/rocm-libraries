@@ -532,16 +532,14 @@ inline bool keeps(const BwdCase& c, int64_t batchIndex, int64_t head, int64_t ro
         = static_cast<uint64_t>(c.offset + (plane * c.seqQ + row) * rowBlocks + column / 4);
     const auto block = philox4x32(static_cast<uint64_t>(c.seed), offset);
     const auto draw = static_cast<int32_t>(block[static_cast<size_t>(column % 4)]);
-    const double threshold = (static_cast<double>(c.dropout) - 0.5) * 4294967295.0;
-    const auto clamped = static_cast<int32_t>(std::clamp(threshold, -2147483648.0, 2147483647.0));
-    return draw > clamped;
+    // AOTriton's threshold, in f32 and truncated (no p in (0, 1) leaves the int32 range).
+    const float threshold = (c.dropout - 0.5F) * 4294967296.0F;
+    return draw > static_cast<int32_t>(threshold);
 }
 
 inline double dropoutScale(const BwdCase& c)
 {
-    return c.dropout > 0.0F ? static_cast<double>(
-                                  static_cast<float>(1.0 / (1.0 - static_cast<double>(c.dropout))))
-                            : 1.0;
+    return c.dropout > 0.0F ? static_cast<double>(1.0F / (1.0F - c.dropout)) : 1.0;
 }
 
 /// Every operand the reference and the device share, as the device will read it, in dense

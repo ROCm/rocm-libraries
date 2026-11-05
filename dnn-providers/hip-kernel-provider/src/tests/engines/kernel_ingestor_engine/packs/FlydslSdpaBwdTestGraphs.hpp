@@ -150,6 +150,10 @@ struct SdpaBwdGraph
     SdpaBwdNodeKind nodeKind = SdpaBwdNodeKind::BACKWARD;
     uint32_t nodeCount = 1;
     bool overrideShape = false;
+    /// The graph's `min_required_engine_api_version` as the backend stamps it; unset, as the
+    /// hand-built graphs of the matcher tests are, the graph reads as the 1.0.0 baseline and
+    /// passes any engine's schema gate.
+    std::optional<hipdnn_flatbuffers_sdk::data_objects::EngineApiVersion> minRequiredEngineApi;
 
     /// The tensor named "q", "k", "v", "o", "do", "stats", "dq", "dk", "dv", or one an add*
     /// helper named.
@@ -612,15 +616,17 @@ inline flatbuffers::FlatBufferBuilder buildSdpaBwdGraph(const SdpaBwdSpec& spec)
             builder, "sdpa_bwd", graph.computeType, attributesType, attributes));
     }
 
-    const auto graphOffset = data_objects::CreateGraphDirect(builder,
-                                                             "sdpa_bwd_test",
-                                                             data_objects::DataType::FLOAT,
-                                                             data_objects::DataType::FLOAT,
-                                                             spec.dtype,
-                                                             &tensors,
-                                                             &nodes,
-                                                             flatbuffers::nullopt,
-                                                             graph.overrideShape);
+    const auto graphOffset = data_objects::CreateGraphDirect(
+        builder,
+        "sdpa_bwd_test",
+        data_objects::DataType::FLOAT,
+        data_objects::DataType::FLOAT,
+        spec.dtype,
+        &tensors,
+        &nodes,
+        flatbuffers::nullopt,
+        graph.overrideShape,
+        graph.minRequiredEngineApi ? &*graph.minRequiredEngineApi : nullptr);
     builder.Finish(graphOffset);
     return builder;
 }

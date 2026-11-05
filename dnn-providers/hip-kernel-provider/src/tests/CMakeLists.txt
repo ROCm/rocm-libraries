@@ -419,6 +419,8 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
                 IsOnePackWithAGraphMatchAndOneKernelScopedMatcher
                 ShipsEveryMergedRowOnce
                 EveryKernelDeclaresTheMergedSignature
+                DeclaresASchemaAtLeastTheRaggedOffsetMultiplierFloor
+                ServesStampedRaggedGraphsAndDeclinesTheFieldsTheMatcherRejects
                 RefusesPlanSerialization
         )
     endif()
@@ -446,6 +448,8 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
                 EveryKernelDeclaresItsSlotsSignature
                 EveryVerdictRowIsServedOrDeclinedAsTheTableSays
                 EveryServedRowsSlotCatalogsHaveUniqueEnrolledKnobTuples
+                DeclaresASchemaAtLeastTheRaggedOffsetMultiplierFloor
+                ServesStampedRaggedGraphsAndDeclinesTheFieldsTheMatcherRejects
                 RefusesPlanSerialization
         )
     endif()

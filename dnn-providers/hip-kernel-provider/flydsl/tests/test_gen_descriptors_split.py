@@ -189,7 +189,7 @@ def test_the_engine_is_one_ued_and_each_slot_is_its_op() -> None:
 def test_the_ued_is_slotted_1_1_and_carries_no_engine_wide_selection() -> None:
     ued = _ued(_split())
     assert ued["version"] == "1.1"
-    assert ued["sdk_version"] == "1.2.0"
+    assert ued["sdk_version"] == "1.4.0"
     assert ued["shared_workspace"] == "ws.bytes"
     assert ued["graph_match"] == {
         "native": "hipkernel.flydsl_sdpa_bwd_split.graph_match"
@@ -483,7 +483,10 @@ def test_a_dq_row_with_only_a_tailzero_companion_is_dq_then_tailzero_on_the_plai
     pack = folders[Path("sdpa_bwd_dq") / ARCH]
     assert sorted(pack) == ["flydsl_sdpa_bwd_dq.kdp.json"]
     plain = pack["flydsl_sdpa_bwd_dq.kdp.json"]
-    assert plain["dispatch"] == folders[Path("sdpa_bwd_dq")]["flydsl_sdpa_bwd_dq.udd.json"]["id"]
+    assert (
+        plain["dispatch"]
+        == folders[Path("sdpa_bwd_dq")]["flydsl_sdpa_bwd_dq.udd.json"]["id"]
+    )
     (tailed,) = [k for k in plain["kernelDescriptors"] if "sources" in k]
     assert list(tailed["sources"]) == ["dq", "tailzero"]
     assert tailed["sources"]["tailzero"]["file"] == "tz.hsaco"
@@ -494,9 +497,7 @@ def test_a_dq_row_with_only_a_tailzero_companion_is_dq_then_tailzero_on_the_plai
 def test_a_merged_row_launches_merged_then_tailzero_across_folders() -> None:
     row = _entry("sdpa_bwd_merged", "sdpa_bwd_merged_a", gqa_pack=0, block_q=-1)
     crossing = _tailzero(ARCH, file="../../sdpa_bwd_dq/gfx950/tz.hsaco")
-    folders = gd.build_documents(
-        [_with_companions(row, {"tailzero": crossing})], ARCH
-    )
+    folders = gd.build_documents([_with_companions(row, {"tailzero": crossing})], ARCH)
     (kernel,) = folders[Path("sdpa_bwd_merged") / ARCH][
         "flydsl_sdpa_bwd_merged.kdp.json"
     ]["kernelDescriptors"]

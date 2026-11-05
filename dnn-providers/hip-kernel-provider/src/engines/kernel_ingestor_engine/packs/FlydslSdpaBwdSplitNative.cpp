@@ -71,8 +71,8 @@
  * kernels' per-batch lengths. The engine adds what only it knows: a workspace whose regions
  * cannot be proven to fit is declined (SP-WS). Which slot rows serve a graph is the kernel
  * match of each slot, over the fields the slot's KMD carries: the launch grid follows the
- * row's `grid`, and a 16-bit bias outside the LDS staging contract (BI-8) declines the dq
- * rows that stage the bias. The graph match publishes the shared workspace as bound tokens
+ * row's `grid`, and a 16-bit bias outside the LDS staging contract (BI-8) keeps only the dq
+ * rows whose `bias_stage` is "none". The graph match publishes the shared workspace as bound tokens
  * (`ws.*`); the handlers read them at prepare() and check them against the layout they
  * recompute.
  *
@@ -156,8 +156,10 @@ constexpr std::string_view BLOCK_KV_FIELD = "block_kv";
 constexpr std::string_view BLOCK_M_FIELD = "block_m";
 /// How the object's launch grid maps the problem onto x, y and z; see gridOf.
 constexpr std::string_view GRID_FIELD = "grid";
-/// dq: "none" loads the bias directly; any other value stages the 16-bit bias through LDS
-/// (see native::stagesBias).
+/// dq: "none" is the one spelling the engine reads as a row that loads the bias directly; any
+/// other value ("auto", which may resolve to staging, or "direct") is treated as staging the
+/// 16-bit bias through LDS (see native::stagesBias). The gfx11 rows spell "none"; the gfx950
+/// 16-bit bias rows spell "auto" or "direct".
 constexpr std::string_view BIAS_STAGE_FIELD = "bias_stage";
 constexpr std::string_view BIAS_STAGE_NONE = "none";
 
@@ -174,8 +176,8 @@ constexpr std::string_view HEAD_DIM_QK_TOKEN = "flydsl_sdpa_bwd_split.head_dim_q
 constexpr std::string_view HEAD_DIM_V_TOKEN = "flydsl_sdpa_bwd_split.head_dim_v";
 constexpr std::string_view DROPOUT_TOKEN = "flydsl_sdpa_bwd_split.dropout";
 constexpr std::string_view DBIAS_TOKEN = "flydsl_sdpa_bwd_split.dbias";
-/// 1 for a 16-bit bias graph outside the LDS staging contract (BI-8): no row that stages the
-/// bias serves it.
+/// 1 for a 16-bit bias graph outside the LDS staging contract (BI-8): only a dq row whose
+/// bias_stage is "none" serves it.
 constexpr std::string_view BIAS_UNSTAGED_TOKEN = "flydsl_sdpa_bwd_split.bias_unstaged";
 constexpr std::string_view GQA_PACK_TOKEN = "flydsl_sdpa_bwd_split.gqa_pack";
 constexpr std::string_view BATCH_TOKEN = "flydsl_sdpa_bwd_split.batch";
@@ -432,18 +434,21 @@ std::optional<BoundTokens> flydslSdpaBwdSplitGraphMatches(const MatchContext& co
         logDecline("data_type", "the matcher served a dtype this engine has no spelling for");
         return std::nullopt;
     }
-    // BI-8: a 16-bit dQ object that stages the bias through LDS needs the layout the staging
-    // contract describes; kernel_match declines those rows (`bias_stage` other than "none")
-    // for a graph outside it. fp32 dQ objects load the bias directly.
+    // BI-8: a 16-bit bias outside the LDS staging contract is served only by a dq row whose
+    // `bias_stage` is "none" (kernel_match drops every other row of the slot). A device whose
+    // rows spell no "none" (every gfx950 row) leaves the dq slot without an applicable kernel,
+    // and the ingestor then declines the graph. fp32 dQ objects load the bias directly.
     const bool biasUnstaged = problem.biasUid != bwd::NO_UID && problem.elementBytes == 2
                               && !native::stagesBias(problem);
     if(biasUnstaged)
     {
-        HIPDNN_PLUGIN_LOG_INFO(ENGINE_NAME
-                               << " [BI-8]: the bias layout is outside the LDS staging contract "
-                                  "(16-byte base, strides multiples of 16 bytes, last row padded "
-                                  "to a whole 16-byte chunk); only dq rows that load the bias "
-                                  "directly can serve it");
+        HIPDNN_PLUGIN_LOG_INFO(
+            ENGINE_NAME
+            << " [BI-8]: the 16-bit bias layout is outside the LDS staging contract (16-byte "
+               "base, strides multiples of 16 bytes, last row padded to a whole 16-byte chunk); "
+               "only dq rows whose bias_stage is 'none' can serve it. The graph is declined "
+               "[BI-8] unless the device has such a row: the gfx950 dq rows spell 'auto' or "
+               "'direct', so there the dq slot has no applicable kernel");
     }
 
     // SP-WS: every region of the shared workspace and the dBias scratch is sized by checked
@@ -874,7 +879,7 @@ bool flydslSdpaBwdSplitKernelMatches(const MatchContext& /*context*/,
     }
     if constexpr(SLOT == Slot::DQ)
     {
-        // A row that stages the bias (BI-8) cannot serve a layout outside the staging contract.
+        // BI-8: a layout outside the staging contract is served by "none" rows only.
         if(facts->biasUnstaged && row->biasStage != BIAS_STAGE_NONE)
         {
             return false;
@@ -1017,9 +1022,8 @@ SplitPlan planFor(Slot slot,
     plan.window = native::windowFor(problem);
     if(problem.dropoutP > 0.0F)
     {
-        const auto p = static_cast<double>(problem.dropoutP);
-        plan.dropoutThreshold = native::dropoutThreshold(p);
-        plan.dropoutScale = static_cast<float>(1.0 / (1.0 - p));
+        plan.dropoutThreshold = native::dropoutThreshold(problem.dropoutP);
+        plan.dropoutScale = native::dropoutScale(problem.dropoutP);
     }
     const bool paddedHead = problem.headDimQk != row->tile || problem.headDimV != row->tile;
     plan.runtimeFlags
