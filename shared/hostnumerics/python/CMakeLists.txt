@@ -32,6 +32,7 @@ nanobind_add_module(
     src/gemm_bindings.cpp
     src/mx_bindings.cpp
     src/operation_bindings.cpp
+    src/operation_enum_bindings.cpp
     src/tensor_bindings.cpp
 )
 target_link_libraries(
