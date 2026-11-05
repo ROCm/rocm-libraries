@@ -141,28 +141,30 @@ rtol = 0.01
 
 # conv-fwd test plan run on gfx942 (docs/test-plans/convolution-fwd.md): graphs that the
 # MIOpen plugin accepts but then fails or computes wrongly. They are probes (a typed
-# rejection or a correct accept is the pass criterion), so each is skipped with its
-# observed failure until the plugin declines or fixes it. Remove an entry when its
-# defect is fixed; the case then runs and reports unclaimed_support.
+# rejection or a correct accept is the pass criterion), so each is quarantined here
+# until its defect is fixed. Each entry names the MIOpen ticket and the provider ticket
+# (epic ALMIOPEN-3008). Temporary: remove the entry when either ticket lands (the
+# provider fix makes the plugin decline the graph; the MIOpen fix makes it correct); the
+# cases then run and report unclaimed_support. gfx90a and gfx950 carry no such skips.
 [[test_skips]]
 archs   = ["gfx942"]
 filters = ["*_ConvolutionFwdPointwise_Variant4.*"]
-reason  = "conv -> add(residual) -> relu is accepted for fp32 and the output is wrong (every case, up to 100% of elements); the plugin should decline the residual add"
+reason  = "conv -> add(residual) -> relu is accepted as a bias fusion and fp32 output is wrong (up to 56% of elements); tracked in ALMIOPEN-3009 (MIOpen) and ALMIOPEN-3014 (provider)"
 
 [[test_skips]]
 archs   = ["gfx942"]
 filters = ["*_ConvolutionFwd_Default.*_F20_*"]
-reason  = "mixed-precision conv (x, w, y or compute types differ) is accepted but fails at execute (miopenStatusBadParm), has no reference, or faults the device (hipErrorIllegalAddress, 3D fp32 x fp16 w)"
+reason  = "mixed-precision conv (x, w, y or compute types differ) is accepted but fails at execute (miopenStatusBadParm), has no reference, or faults the device (hipErrorIllegalAddress, 3D fp32 x fp16 w); tracked in ALMIOPEN-3010 (MIOpen) and ALMIOPEN-3015 (provider)"
 
 [[test_skips]]
 archs   = ["gfx942"]
 filters = ["*_ConvolutionFwd_Default.*_F15_*"]
-reason  = "conv with mixed x, w and y layouts is accepted and the output is wrong or non-finite for the cases that execute"
+reason  = "conv with mixed x, w and y layouts is accepted; MIOpen output disagrees with the GPU and CPU references for the cases that execute; tracked in ALMIOPEN-3012 (MIOpen) and ALMIOPEN-3017 (provider)"
 
 [[test_skips]]
 archs   = ["gfx942"]
 filters = ["*_ConvolutionFwdPointwise_Variant2.*_F25type_*"]
-reason  = "conv -> bias -> relu with a bias data type different from the io type is accepted and the output is garbage (differences up to 5.8e4)"
+reason  = "conv -> bias -> relu with a bias data type different from the io type is accepted and the output is garbage (differences up to 5.8e4); tracked in ALMIOPEN-3011 (MIOpen) and ALMIOPEN-3016 (provider)"
 
 [[test_skips]]
 archs   = ["gfx942"]
@@ -181,4 +183,4 @@ filters = [
     "*_ConvolutionFwd_Default.S8_F16chan_3d_i16x16x16_n2c32k64g4_f3x3x3_fp32_cf",
     "*_ConvolutionFwd_Default.S9_F16plane_3d_i16x16x16_n8c16k32_f1x1x1_fp32_cl",
 ]
-reason  = "conv on non-packed strides (padded rows, channel or plane stride) is accepted and the output is wrong for these cases (grouped, depthwise and 3D shapes)"
+reason  = "conv on non-packed strides (padded rows, channel or plane stride) is accepted; MIOpen output disagrees with the GPU and CPU references for these cases (grouped, depthwise and 3D shapes); tracked in ALMIOPEN-3013 (MIOpen) and ALMIOPEN-3018 (provider)"
