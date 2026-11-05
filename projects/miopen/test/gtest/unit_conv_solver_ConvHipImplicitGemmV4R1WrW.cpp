@@ -54,7 +54,7 @@ miopen::unit_tests::UnitTestConvSolverParams GetTestParams()
     p.SetConvAttrFp16Alt(0);
     /// The large FP32 tolerance reflects FP32 accumulation order over K = N * Ho * Wo = 193600
     /// with zero-mean random data, not a solver defect: the solver was verified to be exact on
-    /// integer data (ALMIOPEN-3158).
+    /// integer data.
     p.SetTolerance(Gpu::gfx908, miopenFloat, 40.0f);
     p.SetTolerance(Gpu::gfx90A, miopenFloat, 40.0f);
     p.SetTolerance(Gpu::gfx103X, miopenFloat, 40.0f);
