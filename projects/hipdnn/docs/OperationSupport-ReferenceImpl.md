@@ -49,9 +49,9 @@ The following table lists all operations currently supported in the CPU Referenc
 | SDPA Backward | FP16, BFP16, FP32 | Op-defined | CPU Reference | See [SDPA Restrictions](#sdpa-restrictions) |
 | BlockScale Quantize | FP32, FP16, BFP16 in; FP8, FP6, FP4 out | Op-defined | CPU Reference | See [Block-Scale Quantization](#block-scale-quantization) |
 | BlockScale Dequantize | FP8, FP6, FP4 in; FP32, FP16, BFP16 out | Op-defined | CPU Reference | See [Block-Scale Quantization](#block-scale-quantization) |
-| Pointwise Unary | FP16, BFP16, FP32 | All | CPU Reference | `LOGICAL_NOT` is BOOLEAN only; `GEN_INDEX` outputs INT32 |
-| Pointwise Binary | FP16, BFP16, FP32 | All | CPU Reference | `CMP_*` outputs BOOLEAN and also accepts INT32 inputs; `LOGICAL_AND`/`LOGICAL_OR` are BOOLEAN only |
-| Pointwise Ternary | FP16, BFP16, FP32 | All | CPU Reference | BINARY_SELECT with BOOLEAN mask; also accepts INT32 data inputs |
+| Pointwise Unary | FP16, BFP16, FP32, FP64, INT32, FP8 | All | CPU Reference | `LOGICAL_NOT` is BOOLEAN only; `GEN_INDEX` outputs INT32 |
+| Pointwise Binary | FP16, BFP16, FP32, FP64, INT32, FP8 | All | CPU Reference | `CMP_*` outputs BOOLEAN and also accepts INT32 inputs; `LOGICAL_AND`/`LOGICAL_OR` are BOOLEAN only |
+| Pointwise Ternary | FP16, BFP16, FP32, FP64, INT32, BOOLEAN, FP8 | All | CPU Reference | BINARY_SELECT with BOOLEAN mask |
 
 ## Implementation Details
 
@@ -130,6 +130,24 @@ range for its pointwise axis attribute.
 
 Scalar attributes (`relu_*`, `swish_beta`, `elu_alpha`, `softplus_beta`) that a mode does not use are
 ignored, as in cuDNN.
+
+A pointwise node is declined, rather than failing at execution, when an input does not broadcast to
+the output shape.
+
+Input operands may be scalars: a baked compile-time constant, a runtime scalar with a default, or a
+pure runtime scalar read from the variant pack. A scalar is treated as a one-element tensor that
+broadcasts to the output shape.
+
+Beyond FP16, BFP16 and FP32, the reference registers FP64, INT32, BOOLEAN and the FP8 formats
+`FP8_E4M3` and `FP8_E5M2`:
+
+- FP64 supports every implemented mode and computes in FP64.
+- INT32 computes in FP32, so integer values above 2^24 lose exactness. It supports the arithmetic,
+  comparison and selection modes that are meaningful for integers; the transcendental modes are
+  declined.
+- BOOLEAN supports `BINARY_SELECT` and the logical modes.
+- FP8 inputs compute in FP32 and produce an output in the input's FP8 format or FP32.
+- `CMP_GT` also accepts inputs of different floating-point types (FP16, BFP16, FP32 and FP64).
 
 ## Operation Restrictions
 

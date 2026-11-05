@@ -97,7 +97,7 @@ inline std::unique_ptr<hipdnn_data_sdk::utilities::TensorBase<T>>
         auto staged
             = std::make_unique<hipdnn_data_sdk::utilities::Tensor<T>>(std::vector<int64_t>{1});
         staged->fillWithValue(
-            static_cast<T>(hipdnn_flatbuffers_sdk::utilities::resolveScalarFromVariantPack<float>(
+            static_cast<T>(hipdnn_flatbuffers_sdk::utilities::resolveScalarFromVariantPack<double>(
                 operand, variantPack, "Pointwise scalar operand")));
         return staged;
     }
