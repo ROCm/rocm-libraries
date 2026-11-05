@@ -1,4 +1,5 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025, NVIDIA Corporation. All rights reserved.
+// SPDX-FileCopyrightText: Modifications Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 /*! \file advance.h
