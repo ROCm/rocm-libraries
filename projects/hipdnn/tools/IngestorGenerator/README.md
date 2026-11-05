@@ -1073,7 +1073,8 @@ is byte-identical to a generator without slots (`tests/test_slots.py` pins it ag
 `variant_reduce.py` reduces a slotted selection per slot. A slot's rankings are the `v:3` slot
 records of the sweep's winner shards, keyed by graph, device and slot; its floor, coverage,
 noise floor and ε use that slot's kernels and the `reduction.fields` its own `kmd_fields`
-declare. Its `v:3` program lines are read and ignored. A slot's cells lead with the pack, so
+declare. Its `v:3` program lines are validated against the selection's slots (exit 2 in
+an unslotted sweep, or for a pick naming an unknown slot) and never ranked. A slot's cells lead with the pack, so
 a slot's packs (its discriminators) are floored apart. Pass `--kdp` once per pack; each KDP
 pairs with the pack whose kernel names it holds.
 

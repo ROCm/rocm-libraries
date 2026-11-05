@@ -876,10 +876,11 @@ def _correctness_verdict(record: dict) -> str:
     return "failed"
 
 
-def _rankings_and_correctness(attempts, kdps, variants, arm, slotted):
+def _rankings_and_correctness(attempts, kdps, variants, arm, slots):
     """``(rounds, correctness, duplicates, empty)``: ``rounds`` is ``{slot: {round:
     {key: Ranking}}}`` and the counts are ``{slot: n}``, for the ``variants`` of
-    `build_variants`; ``correctness`` covers every slot."""
+    `build_variants`; ``correctness`` covers every slot. ``slots`` are the slot names of a
+    slotted selection, None for an unslotted one."""
     by_id = {
         (str(kdp["id"]).lower(), str(kdp["dispatch"]).lower(), str(d["id"]).lower()): d[
             "name"
@@ -887,7 +888,6 @@ def _rankings_and_correctness(attempts, kdps, variants, arm, slotted):
         for kdp in kdps
         for d in kdp["kernelDescriptors"]
     }
-    slots = list(variants) if slotted else None
 
     def entries_of(raw, where, slot):
         out = []
@@ -1045,10 +1045,10 @@ def analyse_slots(selection, kdp_paths, sweep_dir, arm=None, budget=None) -> lis
         arm = arms[0]
     elif arm not in arms:
         raise ReduceError(f"--arm {arm} ran no timing phase; arms: {arms}")
-    slotted = config.is_slotted
-    _require_complete_arm(sweep_dir, attempts, arm, list(variants) if slotted else None)
+    slots = list(variants) if config.is_slotted else None
+    _require_complete_arm(sweep_dir, attempts, arm, slots)
     rounds, correctness, duplicates, empty = _rankings_and_correctness(
-        attempts, kdps, variants, arm, slotted
+        attempts, kdps, variants, arm, slots
     )
     missing_pairs = _missing_pairs(attempts, arm)
     if budget is None:
@@ -1166,7 +1166,7 @@ def write_selection(selection, names, out) -> int:
                     entry["default"] = True
                 kernels.append(entry)
             expanded_pack = {"name": pack_raw["name"]}
-            for key in ("slot", "arch", "discriminator"):
+            for key in factorise_config.PACK_HEADER_KEYS:
                 if pack_raw.get(key):
                     expanded_pack[key] = pack_raw[key]
             expanded_pack["kernels"] = kernels

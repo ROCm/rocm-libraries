@@ -68,6 +68,12 @@ def identity(name):
     return variant_reduce.graph_identity(graph, "fixture")
 
 
+def _attempt_dir(root, kind, number, retry=1):
+    """``(attempt, shard dir)`` of one phase attempt of the sweep under ``root``."""
+    attempt = root / "sweep" / "attempts" / f"{kind}__c__full__r{number}-{retry:04d}"
+    return attempt, attempt / "winners" / "ingestor-winners" / "1.0.0" / "e" / "gfx950"
+
+
 def build(
     tmp_path, edit=None, reduction=True, rounds=(GRAPHS,), checked=None, kernels=KERNELS
 ):
@@ -112,8 +118,7 @@ def build(
     for kind, number, graphs in phases:
         # hipDNN mints a fresh Graph.id per finalization, so every round's id differs.
         graph_id = uuid.uuid4().bytes
-        attempt = tmp_path / "sweep" / "attempts" / f"{kind}__c__full__r{number}-0001"
-        shard = attempt / "winners" / "ingestor-winners" / "1.0.0" / "e" / "gfx950"
+        attempt, shard = _attempt_dir(tmp_path, kind, number)
         shard.mkdir(parents=True)
         phase = {"kind": kind, "corpus": "c", "arm": "full", "round": number}
         ledger = [{"correctness": {"passed": True}}]
@@ -134,8 +139,7 @@ def build(
             lines.append(json.dumps(line))
         (shard / "winners.jsonl").write_text("\n".join(lines) + "\n")
     summary = {"expected_phases": [phase for phase, _ in written]}
-    (tmp_path / "sweep" / "summary.json").parent.mkdir(parents=True, exist_ok=True)
-    (tmp_path / "sweep" / "summary.json").write_text(json.dumps(summary))
+    _summary(tmp_path).write_text(json.dumps(summary))
     files = "selection.yaml installed.kdp.json sweep reduced.yaml report.md".split()
     flags = ("--selection", "--kdp", "--sweep-output", "--out", "--report")
     return [a for flag, f in zip(flags, files) for a in (flag, str(tmp_path / f))]
@@ -373,7 +377,7 @@ def test_another_arms_record_does_not_satisfy_this_arms_phase(tmp_path):
     args = build(tmp_path)
     attempts = tmp_path / "sweep" / "attempts"
     other = attempts / "timing__c__other__r2-0001"
-    shutil.copytree(attempts / "timing__c__full__r1-0001", other)
+    shutil.copytree(_attempt_dir(tmp_path, "timing", 1)[0], other)
     record = json.loads((other / "phase.json").read_text())
     record["phase"].update(arm="other", round=2)
     (other / "phase.json").write_text(json.dumps(record))
@@ -447,9 +451,7 @@ def test_a_zero_time_entry_is_a_ranking(tmp_path):
 )
 def test_correctness_attempt_verdicts(tmp_path, capsys, ledger, gates, verdict):
     args = build(tmp_path, checked=("fp32", 128, 4))
-    phase = (
-        tmp_path / "sweep" / "attempts" / "correctness__c__full__r1-0001" / "phase.json"
-    )
+    phase = _attempt_dir(tmp_path, "correctness", 1)[0] / "phase.json"
     record = json.loads(phase.read_text())
     entries = [
         {"correctness": correctness, "reference": {"usable": usable}}
@@ -469,9 +471,9 @@ def test_correctness_attempt_verdicts(tmp_path, capsys, ledger, gates, verdict):
     assert "; numerics checked |" not in report
 
 
-def _fail_timing_round_two(tmp_path):
-    args = build(tmp_path, rounds=(GRAPHS, GRAPHS))
-    phase = tmp_path / "sweep" / "attempts" / "timing__c__full__r2-0001" / "phase.json"
+def _fail_timing_round_two(tmp_path, args):
+    """Mark round 2's timing phase of the sweep under ``tmp_path`` failed."""
+    phase = _attempt_dir(tmp_path, "timing", 2)[0] / "phase.json"
     record = json.loads(phase.read_text())
     phase.write_text(json.dumps(dict(record, status="failed")))
     return args
@@ -480,7 +482,7 @@ def _fail_timing_round_two(tmp_path):
 def test_a_failed_timing_round_stops_the_reduction(tmp_path, capsys):
     """The noise floor is measured over fewer rounds than were swept, so the
     reduction is not one to adopt: the report is written, `--out` is not."""
-    args = _fail_timing_round_two(tmp_path)
+    args = _fail_timing_round_two(tmp_path, build(tmp_path, rounds=(GRAPHS, GRAPHS)))
     assert variant_reduce.main(args) == 3
     captured = capsys.readouterr()
     assert "timing phases missing for (round, corpus) [(2, 'c')]" in captured.out
@@ -512,12 +514,12 @@ def test_a_sweep_with_no_timing_phase_exits_2(tmp_path, capsys):
 def _retried_round_one(tmp_path, first, second):
     """Round 1's timing phase attempted twice; the later attempt has status `second`."""
     args = build(tmp_path)
-    attempts = tmp_path / "sweep" / "attempts"
     shutil.copytree(
-        attempts / "timing__c__full__r1-0001", attempts / "timing__c__full__r1-0002"
+        _attempt_dir(tmp_path, "timing", 1)[0],
+        _attempt_dir(tmp_path, "timing", 1, retry=2)[0],
     )
-    for suffix, status, started in (("1", first, "01"), ("2", second, "02")):
-        path = attempts / f"timing__c__full__r1-000{suffix}" / "phase.json"
+    for retry, status, started in ((1, first, "01"), (2, second, "02")):
+        path = _attempt_dir(tmp_path, "timing", 1, retry)[0] / "phase.json"
         record = json.loads(path.read_text())
         record.update(status=status, session={"started_at": f"2026-01-{started}"})
         path.write_text(json.dumps(record))
@@ -816,8 +818,7 @@ def _slotted_sweep(
         phases.append(("correctness", 1, checked))
     for kind, number, round_graphs in phases:
         graph_id = uuid.uuid4().bytes
-        attempt = tmp_path / "sweep" / "attempts" / f"{kind}__c__full__r{number}-0001"
-        shard = attempt / "winners" / "ingestor-winners" / "1.0.0" / "e" / "gfx950"
+        attempt, shard = _attempt_dir(tmp_path, kind, number)
         shard.mkdir(parents=True)
         phase = {"kind": kind, "corpus": "c", "arm": "full", "round": number}
         record = {"status": "success", "phase": phase, "ledger": []}
@@ -856,9 +857,7 @@ def _slotted_sweep(
         if kind == "timing":
             lines += [json.dumps({"v": 3, **base, **extra}) for extra in extra_lines]
         (shard / "winners.jsonl").write_text("\n".join(lines) + "\n")
-    (tmp_path / "sweep" / "summary.json").write_text(
-        json.dumps({"expected_phases": written})
-    )
+    _summary(tmp_path).write_text(json.dumps({"expected_phases": written}))
     argv = ["--selection", str(selection)]
     for path in kdp_paths:
         argv += ["--kdp", str(path)]
@@ -972,6 +971,20 @@ def test_the_budget_bounds_each_pack_not_the_slot(tmp_path, generator, capsys):
     assert "slot dq: floor + coverage exceed budget: 2 instances > 1" in err
     assert "slot dkdv" not in err and "slot prep" not in err
     assert "WARNING" not in err
+    assert "- budget 1 instances per pack per arch;" in (
+        (tmp_path / "report.md").read_text()
+    )
+
+
+def test_a_failed_slotted_timing_round_stops_the_reduction(tmp_path, generator, capsys):
+    argv = _slotted_sweep(tmp_path, generator, graphs=(SLOT_GRAPHS, SLOT_GRAPHS))
+    _fail_timing_round_two(tmp_path, argv)
+    assert variant_reduce.main(argv) == 3
+    assert "FAIL:" in capsys.readouterr().err
+    assert not (tmp_path / "reduced.yaml").exists()
+    report = (tmp_path / "report.md").read_text().splitlines()
+    assert "- missing (round, corpus): [(2, 'c')]" in report
+    assert "output: not written" in report[2]
 
 
 def test_a_slot_with_no_winners_in_a_timing_phase_is_an_incomplete_sweep(
@@ -1141,6 +1154,33 @@ def _shard(tmp_path, *docs):
             "bad time_ms",
         ),
         ({"v": 4, "slot": "s"}, r"line format v=4, expected one of \[2, 3\]"),
+        (
+            {"v": 2, "program": [{"slot": "s", "kernel_id": "k"}], "time_ms": 1.0},
+            r"\['program', 'time_ms'\] not in WinnerCacheFile.hpp",
+        ),
+        (
+            {"v": 3, "program": [{"slot": "", "kernel_id": "k"}], "time_ms": 1.0},
+            "slot and kernel_id must be non-empty strings",
+        ),
+        (
+            {"v": 3, "program": [{"slot": "s", "kernel_id": ""}], "time_ms": 1.0},
+            "slot and kernel_id must be non-empty strings",
+        ),
+        (
+            {
+                "v": 3,
+                "slot": "s",
+                "entries": [
+                    {
+                        "kernel_id": "k",
+                        "pack_id": "p",
+                        "dispatch_id": "d",
+                        "time_ms": -1.0,
+                    }
+                ],
+            },
+            "entries.0.: bad time_ms",
+        ),
     ],
     ids=[
         "v2-with-a-slot",
@@ -1151,6 +1191,10 @@ def _shard(tmp_path, *docs):
         "pick-without-kernel",
         "negative-program-time",
         "unknown-version",
+        "v2-with-a-program",
+        "pick-with-an-empty-slot",
+        "pick-with-an-empty-kernel",
+        "negative-entry-time",
     ],
 )
 def test_a_malformed_slotted_line_is_refused(tmp_path, doc, message):
@@ -1239,7 +1283,8 @@ def test_a_program_line_in_an_unslotted_sweep_is_refused(tmp_path, capsys):
 def test_a_program_pick_naming_a_slot_the_selection_lacks_is_refused(
     tmp_path, generator, capsys
 ):
-    pick = {"program": [{"slot": "nope", "kernel_id": "k"}], "time_ms": 1.0}
+    picks = [{"slot": "prep", "kernel_id": "k"}, {"slot": "nope", "kernel_id": "k"}]
+    pick = {"program": picks, "time_ms": 1.0}
     argv = _slotted_sweep(tmp_path, generator, extra_lines=[pick])
     assert variant_reduce.main(argv) == 2
     assert "a program line names slot 'nope'" in capsys.readouterr().err

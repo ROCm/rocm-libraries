@@ -20,6 +20,7 @@ the policy's answer under `resolved`.
 from __future__ import annotations
 
 import argparse
+import copy
 import re
 import sys
 from collections import OrderedDict
@@ -29,6 +30,10 @@ from pathlib import Path
 #: spec field. Binding a slot to a field that merely happens to match on this
 #: input is how a template silently renders the wrong thing on the next one.
 _NAME_BINDABLE_SUFFIX = "md_"
+
+
+#: The pack keys, after ``name``, that a pack carries into the compact form, in order.
+PACK_HEADER_KEYS = ("slot", "arch", "discriminator")
 
 
 class FactoriseError(RuntimeError):
@@ -455,12 +460,9 @@ def factorise_pack(pack: dict, knob_fields: list, vocabulary: dict) -> dict:
         groups.append(built)
 
     compact_pack = {"name": pack["name"]}
-    if pack.get("slot"):
-        compact_pack["slot"] = pack["slot"]
-    if pack.get("arch"):
-        compact_pack["arch"] = list(pack["arch"])
-    if pack.get("discriminator"):
-        compact_pack["discriminator"] = pack["discriminator"]
+    for key in PACK_HEADER_KEYS:
+        if pack.get(key):
+            compact_pack[key] = copy.copy(pack[key])
     if default_source:
         compact_pack["kernel_defaults"] = default_source
     compact_pack["variants"] = groups
@@ -603,9 +605,9 @@ def _round_trip(original: dict, compact: dict) -> None:
         raise FactoriseError(
             "round trip lost or altered the engine's 'slots' declaration."
         )
-    if [(p.name, p.slot, p.arch, p.discriminator) for p in reloaded.packs] != [
-        (p.name, p.slot, p.arch, p.discriminator) for p in expected.packs
-    ]:
+    if [
+        (p.name, *(getattr(p, k) for k in PACK_HEADER_KEYS)) for p in reloaded.packs
+    ] != [(p.name, *(getattr(p, k) for k in PACK_HEADER_KEYS)) for p in expected.packs]:
         raise FactoriseError("round trip lost or altered a pack's header.")
     got = [k for pack in reloaded.packs for k in pack.kernels]
     want = [k for pack in expected.packs for k in pack.kernels]
