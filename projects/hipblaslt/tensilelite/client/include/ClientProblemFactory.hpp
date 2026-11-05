@@ -83,7 +83,6 @@ namespace TensileLite
             std::string m_useScaleAB;
             bool        m_useScaleCD       = false;
             int         m_useScaleAlphaVec = 0;
-            bool        m_useSynchronizer  = false;
             bool        m_useE             = false;
             bool        m_useGradient      = false;
             bool        m_useGateResidual  = false;

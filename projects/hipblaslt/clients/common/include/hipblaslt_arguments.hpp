@@ -213,6 +213,7 @@ struct Arguments
     bool    scaleD;
     bool    scaleE;
     bool    scaleAlpha_vector;
+    bool    device_scalar_alpha;
     bool    amaxScaleA;
     bool    amaxScaleB;
     bool    amaxD;

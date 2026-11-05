@@ -403,6 +403,56 @@ TEST(ReferenceBlockedBackend, DelegatesDenseRuntimeGemm)
     EXPECT_EQ(d, (std::vector<float>{49, 71, 65, 95}));
 }
 
+TEST(ReferenceDeviceScalarAlpha, OverridesInlineZero)
+{
+    auto problem = makePackedProblem(
+        rocisa::DataType::Float, rocisa::DataType::Float, rocisa::DataType::Float, 1, 1, 2);
+    problem.setUseScaleAlphaVec(1);
+    problem.setParams().setDeviceScalarAlpha(true);
+
+    for(const auto backend : {automaticExecution, requireBlockedExecution})
+    {
+        std::vector<float> a           = {1.0f, 2.0f};
+        std::vector<float> b           = {3.0f, 4.0f};
+        std::vector<float> c           = {0.0f};
+        std::vector<float> d           = {0.0f};
+        float              deviceAlpha = 2.0f;
+        ContractionInputs  inputs(a.data(), b.data(), c.data(), d.data(), 0.0f, 0.0f);
+        inputs.scaleAlphaVec = &deviceAlpha;
+
+        executeReferenceGemm(problem, inputs, /*elementsToValidate=*/-1, backend);
+        EXPECT_EQ(d[0], 22.0f);
+    }
+}
+
+TEST(ReferenceDeviceScalarAlpha, ZeroSkipsProductReduction)
+{
+    auto problem = makePackedProblem(
+        rocisa::DataType::Float, rocisa::DataType::Float, rocisa::DataType::Float, 1, 1, 2);
+    problem.setUseScaleAlphaVec(1);
+    problem.setParams().setDeviceScalarAlpha(true);
+
+    for(const auto backend : {automaticExecution, requireBlockedExecution})
+    {
+        // NaN operands must not reach D, and absent operands must not be read.
+        const float        nan         = std::numeric_limits<float>::quiet_NaN();
+        std::vector<float> a           = {nan, nan};
+        std::vector<float> b           = {1.0f, 1.0f};
+        std::vector<float> c           = {7.0f};
+        std::vector<float> d           = {nan};
+        float              deviceAlpha = 0.0f;
+        ContractionInputs  withNaN(a.data(), b.data(), c.data(), d.data(), 2.0f, 3.0f);
+        withNaN.scaleAlphaVec = &deviceAlpha;
+        executeReferenceGemm(problem, withNaN, /*elementsToValidate=*/-1, backend);
+        EXPECT_EQ(d[0], 21.0f);
+
+        ContractionInputs withoutOperands(nullptr, nullptr, c.data(), d.data(), 2.0f, 4.0f);
+        withoutOperands.scaleAlphaVec = &deviceAlpha;
+        executeReferenceGemm(problem, withoutOperands, /*elementsToValidate=*/-1, backend);
+        EXPECT_EQ(d[0], 28.0f);
+    }
+}
+
 TEST(ReferenceBlockedBackend, SupportsAffineLayoutsAndMixedRealStorage)
 {
     const size_t M = 2;

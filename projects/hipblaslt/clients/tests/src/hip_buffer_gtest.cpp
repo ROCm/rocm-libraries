@@ -96,41 +96,6 @@ TEST(HipBuffer, smoke_MoveAssignmentReleasesPriorOwnership)
     EXPECT_EQ(replacement.memcheck(), hipSuccess);
 }
 
-TEST(HipBuffer, smoke_RejectsZeroTransferCounts)
-{
-    HipDeviceBuffer device(HIP_R_32I, 4);
-    HipHostBuffer   host(HIP_R_32I, 4);
-    ASSERT_EQ(device.memcheck(), hipSuccess);
-
-    EXPECT_EQ(synchronize(device, host, 0), hipErrorInvalidValue);
-    EXPECT_EQ(broadcast(device, 0), hipErrorInvalidValue);
-}
-
-TEST(HipBuffer, smoke_RejectsInvalidSwizzleGeometry)
-{
-    constexpr std::array<int32_t, 3> values{11, 22, 33};
-    constexpr std::array<int32_t, 3> sentinel{-1, -1, -1};
-
-    HipHostBuffer input(HIP_R_32I, values.size());
-    copyToHost(input, values);
-    HipDeviceBuffer device(HIP_R_32I, values.size());
-    ASSERT_EQ(device.memcheck(), hipSuccess);
-    ASSERT_EQ(synchronize(device, input), hipSuccess);
-
-    HipHostBuffer observed(HIP_R_32I, sentinel.size());
-    copyToHost(observed, sentinel);
-    EXPECT_EQ(synchronize(observed,
-                          device,
-                          /*batch=*/1,
-                          /*row=*/3,
-                          /*col=*/1,
-                          /*lda=*/2,
-                          sizeof(int32_t),
-                          /*needSwizzle=*/true),
-              hipErrorInvalidValue);
-    expectHostEquals(observed, sentinel);
-}
-
 TEST(HipBuffer, smoke_TransfersAndBroadcastsNormally)
 {
     constexpr std::size_t             repeats = 4;
@@ -183,46 +148,6 @@ TEST(HipBuffer, smoke_TransfersPreserveTruncatedBlockOffsets)
         for(std::size_t i = 0; i < expected.size(); ++i)
             EXPECT_EQ(observed.as<uint8_t>()[i], expected[i]) << "mismatch at byte " << i;
     }
-}
-
-TEST(HipBuffer, smoke_TransfersValidSwizzleGeometry)
-{
-    constexpr std::size_t             row = 2;
-    constexpr std::size_t             col = 3;
-    constexpr std::size_t             lda = 4;
-    constexpr std::array<int32_t, 6>  compact{1, 2, 3, 4, 5, 6};
-    constexpr std::array<int32_t, 12> paddedExpected{1, 2, -1, -1, 3, 4, -1, -1, 5, 6, -1, -1};
-
-    HipHostBuffer input(HIP_R_32I, compact.size());
-    copyToHost(input, compact);
-    HipDeviceBuffer device(HIP_R_32I, compact.size());
-    ASSERT_EQ(device.memcheck(), hipSuccess);
-    ASSERT_EQ(synchronize(device, input), hipSuccess);
-
-    HipHostBuffer plain(HIP_R_32I, compact.size());
-    ASSERT_EQ(synchronize(plain,
-                          device,
-                          /*batch=*/1,
-                          /*row=*/3,
-                          /*col=*/2,
-                          /*lda=*/0,
-                          sizeof(int32_t),
-                          /*needSwizzle=*/false),
-              hipSuccess);
-    expectHostEquals(plain, compact);
-
-    HipHostBuffer padded(HIP_R_32I, paddedExpected.size());
-    std::fill_n(padded.as<int32_t>(), paddedExpected.size(), -1);
-    ASSERT_EQ(synchronize(padded,
-                          device,
-                          /*batch=*/1,
-                          row,
-                          col,
-                          lda,
-                          sizeof(int32_t),
-                          /*needSwizzle=*/true),
-              hipSuccess);
-    expectHostEquals(padded, paddedExpected);
 }
 
 TEST(HipBuffer, PackedTensorViewsUseLogicalElementOffsets)

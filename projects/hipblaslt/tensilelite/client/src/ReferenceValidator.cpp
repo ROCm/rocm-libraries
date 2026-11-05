@@ -35,11 +35,13 @@
 #include <TensileLite/Client/hostnumerics/Reference.hpp>
 
 #include <Tensile/DataTypes.hpp>
-#include <Tensile/FusedA2AKernArg.hpp>
 #include <Tensile/hip/HipUtils.hpp>
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
+#include <cstring>
+#include <iostream>
 #include <limits>
 #include <sstream>
 
@@ -47,9 +49,7 @@ namespace TensileLite
 {
     namespace Client
     {
-        ReferenceValidator::ReferenceValidator(po::variables_map const&                    args,
-                                               std::vector<std::shared_ptr<DeviceContext>> devices)
-            : m_devices(std::move(devices))
+        ReferenceValidator::ReferenceValidator(po::variables_map const& args)
         {
             m_elementsToValidate = args["num-elements-to-validate"].as<int>();
             m_printValids        = args["print-valids"].as<bool>();
@@ -100,7 +100,7 @@ namespace TensileLite
         {
             m_outputSelections.clear();
             m_freivaldsPlans.clear();
-            m_freivaldsPlans.resize(m_devices.size());
+            m_freivaldsPlans.resize(m_devices->size());
             if(m_enabled)
             {
                 m_problem = problem;
@@ -153,8 +153,8 @@ namespace TensileLite
                 {
                     ScopedTimer timer("cpu_data_init");
                     m_referenceInputs.clear();
-                    forEachDevice(m_devices, [&](DeviceContext& device) {
-                        m_referenceInputs.push_back(device.dataInit->prepareCPUInputs(problem));
+                    forEachDevice(*m_devices, [&](DeviceContext& ctx) {
+                        m_referenceInputs.push_back(ctx.dataInit->prepareCPUInputs(problem));
                     });
                 }
 
@@ -168,7 +168,7 @@ namespace TensileLite
                         referenceSelections.front()
                             = roc::hostnumerics::IndexRange::all(gemm->d().totalLogicalElements());
                     }
-                    for(size_t card = 0; card < m_devices.size(); ++card)
+                    for(size_t card = 0; card < m_devices->size(); ++card)
                     {
                         if(m_freivalds)
                             prepareFreivalds(card);
@@ -204,10 +204,10 @@ namespace TensileLite
                 // inputs for this solution (solution-dependent HostPreSwizzle).
                 // Otherwise the preProblem reference is unchanged, so reuse it
                 // instead of paying a full dense reference GEMM per solution.
-                for(size_t card = 0; card < m_devices.size(); ++card)
+                for(size_t card = 0; card < m_devices->size(); ++card)
                 {
-                    if(!m_devices[card]->dataInit->referenceNeedsPerSolutionRecompute(*gemm,
-                                                                                      solution))
+                    if(!(*m_devices)[card]->dataInit->referenceNeedsPerSolutionRecompute(*gemm,
+                                                                                         solution))
                         continue;
                     ScopedTimer timer(m_freivalds ? "freivalds_prepare_per_solution"
                                                   : "cpu_reference_gemm_per_solution");
@@ -289,7 +289,7 @@ namespace TensileLite
         {
             using namespace roc::hostnumerics;
             const auto&     plans       = m_freivaldsPlans.at(card);
-            const auto      boundsCheck = m_devices.at(card)->dataInit->getCurBoundsCheck();
+            const auto      boundsCheck = m_devices->at(card)->dataInit->getCurBoundsCheck();
             int             device      = 0;
             hipDeviceProp_t properties{};
             HIP_CHECK_EXC(hipGetDevice(&device));
@@ -306,7 +306,7 @@ namespace TensileLite
                 {
                     const auto& [plan, layout] = plans[gemm][batch];
                     auto observation           = hipblaslt::client::observeFreivalds(
-                        plan.copyRequest(), data, layout, m_devices.at(card)->stream);
+                        plan.copyRequest(), data, layout, m_devices->at(card)->stream);
                     const auto options = hipblaslt::client::freivaldsCheckOptions(
                         properties.major,
                         plan,
@@ -396,7 +396,7 @@ namespace TensileLite
                                        reference.grouped[j],
                                        result.grouped[j],
                                        m_outputSelections.at(j),
-                                       m_devices.at(card)->dataInit->getCurBoundsCheck());
+                                       m_devices->at(card)->dataInit->getCurBoundsCheck());
                     }
                 }
                 else if(auto problem = dynamic_cast<ContractionProblemGemm*>(m_problem))
@@ -408,7 +408,7 @@ namespace TensileLite
                                   reference,
                                   result,
                                   m_outputSelections.front(),
-                                  m_devices.at(card)->dataInit->getCurBoundsCheck());
+                                  m_devices->at(card)->dataInit->getCurBoundsCheck());
                 }
                 else
                 {
@@ -435,7 +435,7 @@ namespace TensileLite
                                                   TimingEvents const&        stopEvents)
         {
             // Fused A2A validates here; others only when validate-after-enqueues is on.
-            if(m_enabled && (m_validateAfterEnqueues || m_devices.size() > 1))
+            if(m_enabled && (m_validateAfterEnqueues || m_devices->size() > 1))
             {
                 validateSlots(slots);
                 m_validatedSolution = true;
@@ -445,79 +445,59 @@ namespace TensileLite
 
         void ReferenceValidator::validateSlots(std::vector<size_t> const& slots)
         {
-            for(size_t d = 0; d < m_devices.size(); d++)
+            for(size_t d = 0; d < m_devices->size(); d++)
             {
-                ScopedDevice device(m_devices[d]->deviceId);
+                ScopedDevice device((*m_devices)[d]->deviceId);
                 for(size_t slot : slots)
                 {
-                    auto const& inputs = m_devices[d]->inputArr[slot];
+                    auto const& inputs = (*m_devices)[d]->inputArr[slot];
                     validateSolution(d, inputs);
-                    if(m_fusedA2A && m_elementsToValidate != 0
-                       && !recvMatches(d, dynamic_cast<ContractionInputs const&>(*inputs)))
+                    if(m_fusedA2A && m_elementsToValidate != 0)
                     {
-                        m_errorInSolution = true;
-                        m_error           = true;
+                        auto const& problem
+                            = dynamic_cast<ContractionProblemGemm const&>(*m_problem);
+                        auto const&  result = dynamic_cast<ContractionInputs const&>(*inputs);
+                        const size_t recv   = ContractionProblemGemm::TENSOR::A2A_BUF;
+                        auto const&  tensor = problem.tensors()[recv];
+                        checkResults(
+                            tensor,
+                            m_referenceRecvs[d].data(),
+                            result.a2aBuf,
+                            result.maxElements[recv],
+                            result.gpu,
+                            roc::hostnumerics::IndexRange::all(tensor.totalLogicalElements()),
+                            -1.0,
+                            (*m_devices)[d]->dataInit->getCurBoundsCheck());
                     }
                 }
             }
         }
 
-        bool ReferenceValidator::recvMatches(size_t dst, ContractionInputs const& inputs)
+        void ReferenceValidator::referenceRecvs(ContractionProblemGemm const& problem)
         {
-            using namespace roc::hostnumerics;
-            auto const&  problem      = dynamic_cast<ContractionProblemGemm const&>(*m_problem);
-            const size_t world        = m_devices.size();
-            const size_t columns      = problem.freeSizeB(0);
-            const size_t shard        = static_cast<size_t>(problem.fusedA2AExtent()) / world;
-            const auto&  descriptor   = problem.d();
-            const auto   rowStride    = descriptor.strides()[problem.freeIndices()[0].d];
-            const auto   columnStride = descriptor.strides()[problem.freeIndices()[1].d];
+            const size_t W        = m_referenceInputs.size();
+            const size_t N        = problem.freeSizeB(0);
+            const size_t nShard   = (size_t)problem.fusedA2AExtent() / W;
+            auto const&  dDesc    = problem.d();
+            const size_t elem     = dDesc.elementBytes();
+            const size_t dMStride = dDesc.strides()[problem.freeIndices()[0].d];
+            const size_t dNStride = dDesc.strides()[problem.freeIndices()[1].d];
 
-            auto host = std::make_shared<std::vector<BFloat16>>(world * columns * shard);
-            HIP_CHECK_EXC(hipMemcpy(host->data(),
-                                    inputs.fusedA2APeers[dst][FUSED_A2A_SLOT_RECV_PTR],
-                                    host->size() * sizeof(BFloat16),
-                                    hipMemcpyDeviceToHost));
-            auto options = validationComparisonOptions(rocisa::DataType::BFloat16, -1);
-            options.computeElementwiseStatistics = false;
-            options.computeFrobenius             = false;
-            size_t mismatches                    = 0;
-            for(size_t src = 0; src < world; ++src)
+            // Slot src of rank dst holds features [dst*nShard, (dst+1)*nShard) of rank src's
+            // golden D, [token, feature].
+            m_referenceRecvs.assign(W, std::vector<uint8_t>(W * N * nShard * elem));
+            for(size_t src = 0; src < W; src++)
             {
-                // Each source sends this destination's feature shard for every token.
-                auto const& golden
-                    = dynamic_cast<ContractionInputs const&>(*m_referenceInputs[src]);
-                const auto expected = Tensor::shareExternalMutableBackingStorage(
-                    ScalarType::BFloat16,
-                    Layout(
-                        Shape{shard, columns},
-                        {static_cast<ptrdiff_t>(rowStride), static_cast<ptrdiff_t>(columnStride)},
-                        static_cast<ptrdiff_t>(dst * shard * rowStride)),
-                    m_referenceInputs[src],
-                    std::span(static_cast<std::byte*>(golden.d), descriptor.totalAllocatedBytes()));
-                const auto observed = Tensor::shareExternalMutableBackingStorage(
-                    ScalarType::BFloat16,
-                    Layout(Shape{shard, columns},
-                           {1, static_cast<ptrdiff_t>(shard)},
-                           static_cast<ptrdiff_t>(src * columns * shard)),
-                    host,
-                    std::as_writable_bytes(std::span(*host)));
-                options.maxReportedMismatches = mismatches < 5 ? 5 - mismatches : 0;
-                const auto report             = compare(observed,
-                                            expected,
-                                            options,
-                                            IndexRange::all(expected.elementCount()),
-                                            roc::hostnumerics::Permutation{1, 0});
-                for(const auto& sample : report.reportedMismatches)
-                    std::cerr << "[fused-a2a] RECV MISMATCH card=" << dst << " src=" << src
-                              << " t=" << sample.coordinates[1] << " f=" << sample.coordinates[0]
-                              << " got=" << sample.observed << " want=" << sample.expected << "\n";
-                mismatches += report.mismatches;
+                auto const* goldenD = static_cast<uint8_t const*>(
+                    dynamic_cast<ContractionInputs const&>(*m_referenceInputs[src]).d);
+                for(size_t dst = 0; dst < W; dst++)
+                    for(size_t t = 0; t < N; t++)
+                        for(size_t f = 0; f < nShard; f++)
+                            std::memcpy(
+                                m_referenceRecvs[dst].data() + ((src * N + t) * nShard + f) * elem,
+                                goldenD + ((dst * nShard + f) * dMStride + t * dNStride) * elem,
+                                elem);
             }
-            if(mismatches)
-                std::cerr << "[fused-a2a] RECV card " << dst << ": " << mismatches
-                          << " mismatches\n";
-            return mismatches == 0;
         }
 
         bool ReferenceValidator::checkResults(TensorDescriptor const&              tensor,

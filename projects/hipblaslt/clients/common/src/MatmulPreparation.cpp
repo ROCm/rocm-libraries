@@ -318,7 +318,8 @@ namespace hipblaslt::client
                 = arguments.unit_check || arguments.norm_check || arguments.allclose_check
                       ? problem.d.allocationElements
                       : 0;
-            preparedProblem.scaleAlphaElements = arguments.scaleAlpha_vector ? problem.m : 0;
+            preparedProblem.scaleAlphaElements
+                = arguments.scaleAlpha_vector ? problem.m : (arguments.device_scalar_alpha ? 1 : 0);
 
             if(problem.batchMode == HIPBLASLT_BATCH_MODE_STRIDED)
             {
