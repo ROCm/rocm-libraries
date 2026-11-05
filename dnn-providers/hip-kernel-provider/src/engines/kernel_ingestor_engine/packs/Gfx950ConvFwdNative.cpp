@@ -5,7 +5,6 @@
 
 #include <algorithm>
 #include <array>
-#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <initializer_list>
@@ -49,10 +48,6 @@ namespace conv = gfx950_conv_fwd;
 namespace
 {
 
-constexpr std::string_view GRAPH_MATCHER_SYMBOL = "hipkernel.gfx950_conv_fwd.graph_match";
-constexpr std::string_view KERNEL_MATCHER_SYMBOL = "hipkernel.gfx950_conv_fwd.kernel_match";
-constexpr std::string_view SCORE_SYMBOL = "hipkernel.gfx950_conv_fwd.score";
-constexpr std::string_view DISPATCH_SYMBOL = "hipkernel.gfx950_conv_fwd.dispatch";
 constexpr std::string_view X_TOKEN = "gfx950_conv_fwd.x.uid";
 constexpr std::string_view W_TOKEN = "gfx950_conv_fwd.w.uid";
 constexpr std::string_view Y_TOKEN = "gfx950_conv_fwd.y.uid";
@@ -168,6 +163,19 @@ bool hasSpatialRankTwo(const flatbuffers::Vector<int64_t>* values)
     return values != nullptr && values->size() == 2;
 }
 
+/// Whether @p output is packed NHWK with @p matched's inferred convolution dimensions.
+/// hipDNN's frontend infers a sole, non-virtual graph output's dims/strides during
+/// Graph::build()'s validate() pass, strictly before engine matching, so this already
+/// holds by match time -- matchProblem relies on it to decline a graph whose output
+/// isn't NHWK instead of matching it and failing later in prepare().
+bool outputMatches(const data_objects::TensorAttributes* output, const MatchedProblem& matched)
+{
+    return hasPackedNhwcStrides(output) && output->dims()->Get(0) == matched.problem.n
+           && output->dims()->Get(1) == matched.problem.k
+           && output->dims()->Get(2) == matched.geometry.ho
+           && output->dims()->Get(3) == matched.geometry.wo;
+}
+
 /// The match of @p problem: its whole geometry, or, for a batch rocKE runs in pieces
 /// (conv::nongroupedBatchChunks) whose tensors pass the i32 launch ABI, its largest
 /// chunk's, which only a batch-split launch reads.
@@ -236,8 +244,6 @@ std::optional<MatchedProblem> matchProblem(const MatchContext& context)
     {
         return std::nullopt;
     }
-    // Output dims/strides may not yet be inferred. Validate them in prepare(), before
-    // loading any code or computing device addresses; they do not define this problem.
     const auto* xDims = x->dims();
     const auto* wDims = w->dims();
     // hipDNN carries no groups attribute: a filter holding C / groups channels encodes it.
@@ -271,7 +277,12 @@ std::optional<MatchedProblem> matchProblem(const MatchContext& context)
     // but no packaged pointwise binary is grouped (the adapter refuses to build one) and
     // conv::implicitGemmServes gives a grouped graph only grouped binaries, which index
     // through their descriptors.
-    return matchedOf(binding, problem, x->data_type());
+    auto matched = matchedOf(binding, problem, x->data_type());
+    if(!matched || !outputMatches(y, *matched))
+    {
+        return std::nullopt;
+    }
+    return matched;
 }
 
 /// PROBLEM_TOKEN's value: the binding, the problem in conv::Problem's field order, then
@@ -358,50 +369,6 @@ const std::string* stringMetadata(const KernelDefinition& kernel, const char* fi
     return it == kernel.metadata.end() ? nullptr : std::get_if<std::string>(&it->second);
 }
 
-/// The implicit-GEMM tuning fields; a direct kernel holds 0 in each.
-constexpr std::array<const char*, 8> GEMM_TUNING_FIELDS{
-    "tile_m", "tile_n", "tile_k", "warp_m", "warp_n", "warp_tile_m", "warp_tile_n", "warp_tile_k"};
-
-/// The problem a packaged kernel was compiled for, from its metadata. rocKE's AOT kernels
-/// take the problem as kernel arguments, so this no longer has to equal the graph; it
-/// records which build-time capabilities the binary has (see conv::implicitGemmCapabilities
-/// and conv::directServes).
-std::optional<conv::Problem> buildProblem(const KernelDefinition& kernel)
-{
-    std::array<int64_t, 14> values{};
-    const std::array<const char*, 14> fields{
-        "N", "C", "K", "Hi", "Wi", "Y", "X", "sH", "sW", "pH", "pW", "dH", "dW", "groups"};
-    for(size_t i = 0; i < fields.size(); ++i)
-    {
-        const auto value = intMetadata(kernel, fields[i]);
-        if(!value)
-        {
-            return std::nullopt;
-        }
-        values[i] = *value;
-    }
-    const conv::Problem problem{values[0],
-                                values[1],
-                                values[2],
-                                values[3],
-                                values[4],
-                                values[5],
-                                values[6],
-                                values[7],
-                                values[8],
-                                values[9],
-                                values[10],
-                                values[11],
-                                values[12],
-                                values[13]};
-    // A malformed build problem says nothing reliable about the binary's capabilities.
-    if(!conv::deriveGeometry(problem))
-    {
-        return std::nullopt;
-    }
-    return problem;
-}
-
 /// Whether @p kernel's implicit-GEMM pipeline has the launch this pack computes. These
 /// pipelines all launch warp_m * warp_n * 64 threads over an (N-tiles, M-tiles, groups)
 /// grid with static LDS; "wavelet" appends load waves and is not accepted.
@@ -411,235 +378,6 @@ bool hasReviewedPipeline(const KernelDefinition& kernel)
     return pipelineName != nullptr
            && (*pipelineName == "mem" || *pipelineName == "compv3" || *pipelineName == "compv4"
                || *pipelineName == "basic");
-}
-
-std::optional<ConvLaunch> implicitGemmLaunch(const MatchedProblem& matched,
-                                             const KernelDefinition& kernel,
-                                             const conv::Problem& build)
-{
-    // What stays reviewed here is the launch contract and the binary's capabilities.
-    const auto& p = matched.problem;
-    if(!hasReviewedPipeline(kernel))
-    {
-        return std::nullopt;
-    }
-    // rocKE builds the default epilogue only with scalar stores, which its default
-    // vector width gives only for an odd build K / groups; any other descriptor is
-    // malformed. A scalar store then serves every graph's K / groups.
-    const bool cshuffle = metadataEquals(kernel, "epilogue", std::string("cshuffle"));
-    if(!cshuffle
-       && (!metadataEquals(kernel, "epilogue", std::string("default"))
-           || (build.k / build.groups) % 2 == 0))
-    {
-        return std::nullopt;
-    }
-
-    std::array<int64_t, GEMM_TUNING_FIELDS.size()> tuning{};
-    for(size_t i = 0; i < GEMM_TUNING_FIELDS.size(); ++i)
-    {
-        const auto value = intMetadata(kernel, GEMM_TUNING_FIELDS[i]);
-        if(!value || *value <= 0)
-        {
-            return std::nullopt;
-        }
-        tuning[i] = *value;
-    }
-    const auto capabilities = conv::implicitGemmCapabilities(
-        build, tuning[0], tuning[1], tuning[2], tuning[3], tuning[4], cshuffle);
-    if(!capabilities || !conv::implicitGemmServes(*capabilities, p))
-    {
-        return std::nullopt;
-    }
-    const auto launch
-        = conv::launchGeometry(p, matched.geometry, tuning[0], tuning[1], tuning[3], tuning[4], 64);
-    // The kernel decodes its workgroup id against tile counts passed at launch, so they
-    // come from the same tile the grid did.
-    const auto kernargs
-        = launch ? conv::implicitGemmKernargs(p, matched.geometry, *launch) : std::nullopt;
-    if(!kernargs)
-    {
-        return std::nullopt;
-    }
-    return ConvLaunch{*launch, *kernargs};
-}
-
-/// Mirrors _direct_serves in rocke/library/builders/common/convolution_forward.py and the
-/// padding rule of rocKE's direct validators: see conv::directInstanceLaunch. Everything
-/// the guard declines stays on implicit GEMM.
-std::optional<ConvLaunch> directLaunch(const MatchedProblem& matched,
-                                       const KernelDefinition& kernel,
-                                       const conv::Problem& build,
-                                       conv::DirectVariant variant,
-                                       int64_t blockW,
-                                       int64_t blockWaves)
-{
-    // The implicit-GEMM fields a direct kernel does not read hold exact placeholders, so
-    // a forced tile_k of 64 or 128 never selects one and no descriptor is ambiguous.
-    for(const auto* field : GEMM_TUNING_FIELDS)
-    {
-        if(!metadataEquals(kernel, field, int64_t{0}))
-        {
-            return std::nullopt;
-        }
-    }
-    // The exact-shape engine packages the std and spatial kernels only.
-    if(!metadataEquals(kernel, "pipeline", std::string("none"))
-       || !metadataEquals(kernel, "epilogue", std::string("none"))
-       || (variant != conv::DirectVariant::STD && variant != conv::DirectVariant::SPATIAL))
-    {
-        return std::nullopt;
-    }
-    const auto launch = conv::directInstanceLaunch(
-        matched.problem,
-        matched.geometry,
-        {conv::directCapabilities(build), variant, blockW, blockWaves});
-    if(!launch)
-    {
-        return std::nullopt;
-    }
-    return ConvLaunch{*launch, conv::directKernargs(matched.problem, matched.geometry)};
-}
-
-/// The launch when @p kernel is packaged code that computes this graph under a launch
-/// contract this pack reviewed; std::nullopt otherwise. rocKE's AOT kernels take the
-/// problem as kernel arguments, so a kernel serves every graph its build-time
-/// capabilities admit, not only the shape it was compiled for.
-std::optional<ConvLaunch> kernelFits(const MatchedProblem& matched, const KernelDefinition& kernel)
-{
-    // This engine launches once per graph, so only a problem whose tensors fit its ABI.
-    if(kernel.source.kind != KernelSourceKind::KPACK || !matched.wholeGeometry)
-    {
-        return std::nullopt;
-    }
-    const auto build = buildProblem(kernel);
-    const std::string dtype = matched.dtype == data_objects::DataType::HALF ? "fp16" : "bf16";
-    if(!build || !metadataEquals(kernel, "dtype", dtype)
-       || !metadataEquals(kernel, "layout", std::string("NHWC"))
-       || !metadataEquals(kernel, "wave_size", int64_t{64}))
-    {
-        return std::nullopt;
-    }
-
-    // Both value sets are closed: an unknown family or variant is a kernel this build
-    // cannot launch, never one to guess at. The descriptor loader completes omitted
-    // fields with their KMD defaults, so a missing field is malformed metadata.
-    const auto familyValue = intMetadata(kernel, "kernel_family");
-    const auto family = familyValue ? conv::parseKernelFamily(*familyValue) : std::nullopt;
-    const auto* variantName = stringMetadata(kernel, "direct_variant");
-    const auto variant
-        = variantName == nullptr ? std::nullopt : conv::parseDirectVariant(*variantName);
-    const auto blockW = intMetadata(kernel, "block_w");
-    const auto blockWaves = intMetadata(kernel, "block_waves");
-    if(!family || !variant || !blockW || !blockWaves)
-    {
-        return std::nullopt;
-    }
-    if(*family == conv::KernelFamily::IMPLICIT_GEMM)
-    {
-        // The direct fields stay at their KMD defaults, so no descriptor carries a
-        // direct arm that this branch would silently launch as implicit GEMM.
-        if(*variant != conv::DirectVariant::NONE || *blockW != 0 || *blockWaves != 0)
-        {
-            return std::nullopt;
-        }
-        return implicitGemmLaunch(matched, kernel, *build);
-    }
-    return directLaunch(matched, kernel, *build, *variant, *blockW, *blockWaves);
-}
-
-bool kernelMatches(const MatchContext& context,
-                   const BoundTokens& /*bound*/,
-                   const KernelDefinition& kernel)
-{
-    const auto matched = matchProblem(context);
-    return matched && kernelFits(*matched, kernel).has_value();
-}
-
-/// Whether @p kernel is gfx950_conv_fwd_direct_spec_for_request's choice with no
-/// overrides for the group count it was built for (see conv::isDefaultDirectArm).
-bool isDefaultDirectArm(const KernelDefinition& kernel)
-{
-    const auto groups = intMetadata(kernel, "groups");
-    const auto* variantName = stringMetadata(kernel, "direct_variant");
-    const auto variant
-        = variantName == nullptr ? std::nullopt : conv::parseDirectVariant(*variantName);
-    const auto blockW = intMetadata(kernel, "block_w");
-    const auto blockWaves = intMetadata(kernel, "block_waves");
-    return groups && variant && blockW && blockWaves
-           && conv::isDefaultDirectArm(*groups, *variant, *blockW, *blockWaves);
-}
-
-/// How well @p kernel's build-time specialization suits @p matched, in [0, 0.85): the
-/// kernel compiled for exactly this graph (rocKE's dispatcher pick for it) first, then the
-/// specialized code paths the graph can use (the pointwise GEMM, the ungrouped path), then
-/// wider load and store widths. Below one step of score()'s family and tile levels.
-double specializationBonus(const MatchedProblem& matched, const KernelDefinition& kernel)
-{
-    const auto build = buildProblem(kernel);
-    if(!build)
-    {
-        return 0.0;
-    }
-    const auto& p = matched.problem;
-    const bool exact = build->n == p.n && build->c == p.c && build->k == p.k && build->hi == p.hi
-                       && build->wi == p.wi && build->y == p.y && build->x == p.x
-                       && build->strideH == p.strideH && build->strideW == p.strideW
-                       && build->padH == p.padH && build->padW == p.padW
-                       && build->dilationH == p.dilationH && build->dilationW == p.dilationW
-                       && build->groups == p.groups;
-    double bonus = exact ? 0.5 : 0.0;
-    if(metadataEquals(
-           kernel, "kernel_family", static_cast<int64_t>(conv::KernelFamily::IMPLICIT_GEMM)))
-    {
-        const auto tile = [&](const char* field) { return intMetadata(kernel, field).value_or(0); };
-        const auto capabilities = conv::implicitGemmCapabilities(
-            *build,
-            tile("tile_m"),
-            tile("tile_n"),
-            tile("tile_k"),
-            tile("warp_m"),
-            tile("warp_n"),
-            metadataEquals(kernel, "epilogue", std::string("cshuffle")));
-        if(capabilities)
-        {
-            bonus += capabilities->pointwise ? 0.1 : 0.0;
-            bonus += !capabilities->grouped && p.groups == 1 ? 0.1 : 0.0;
-            bonus += 0.02 * std::log2(static_cast<double>(capabilities->loadWidth))
-                     + 0.02 * std::log2(static_cast<double>(capabilities->storeWidth));
-        }
-    }
-    return bonus;
-}
-
-double
-    score(const MatchContext& context, const BoundTokens& /*bound*/, const KernelDefinition& kernel)
-{
-    // Deterministic fallback only. BenchmarkPlan replaces this order with measurements
-    // across both families when benchmarking is enabled. A direct depthwise kernel ranks
-    // first where one fits, its default arm highest. Next is the gfx950 dispatcher's own
-    // implicit-GEMM tile, so an unbenchmarked run without a direct kernel serves what
-    // rocKE would; its tile_k=128 sibling follows. Every kernel the matcher admits computes
-    // the graph, and specializationBonus orders those that share a level.
-    const auto matched = matchProblem(context);
-    const auto bonus = matched ? specializationBonus(*matched, kernel) : 0.0;
-    if(metadataEquals(
-           kernel, "kernel_family", static_cast<int64_t>(conv::KernelFamily::DIRECT_DEPTHWISE)))
-    {
-        return (isDefaultDirectArm(kernel) ? 4.0 : 3.0) + bonus;
-    }
-    const bool dispatcherTile = metadataEquals(kernel, "tile_m", int64_t{64})
-                                && metadataEquals(kernel, "tile_n", int64_t{64})
-                                && metadataEquals(kernel, "warp_m", int64_t{2})
-                                && metadataEquals(kernel, "warp_n", int64_t{2})
-                                && metadataEquals(kernel, "warp_tile_m", int64_t{32})
-                                && metadataEquals(kernel, "warp_tile_n", int64_t{32})
-                                && metadataEquals(kernel, "warp_tile_k", int64_t{16})
-                                && metadataEquals(kernel, "pipeline", std::string("mem"));
-    if(!dispatcherTile)
-    {
-        return bonus;
-    }
-    return (metadataEquals(kernel, "tile_k", int64_t{64}) ? 2.0 : 1.0) + bonus;
 }
 
 // ---- hipkernel:Gfx950ConvFwdAot: shape-generic AOT instances ----
@@ -942,9 +680,9 @@ std::optional<conv::DirectInstance> aotDirectInstance(const KernelDefinition& ke
 
 /// The instance @p kernel describes, when its metadata is a complete instance of either
 /// family with a launch contract this pack reviewed. kernel_family is read first, so
-/// neither family's checks run on the other's placeholders. As in kernelFits, both value
-/// sets are closed and a missing field (the loader completes them from the KMD defaults)
-/// is malformed metadata.
+/// neither family's checks run on the other's placeholders. Both value sets are closed
+/// and a missing field (the loader completes them from the KMD defaults) is malformed
+/// metadata.
 std::optional<AotKernel> aotInstance(const KernelDefinition& kernel)
 {
     // A multi-launch (split-C) kernel ships its code in `sources`, one entry per launch.
@@ -1142,8 +880,8 @@ double
     aotScore(const MatchContext& context, const BoundTokens& bound, const KernelDefinition& kernel)
 {
     // Deterministic fallback only. Only kernels the kernel matcher admitted are scored,
-    // so a refusal here is a contract violation, ranked last (-1). As in score(), a
-    // depthwise direct instance (std, spatial, tiled, col) ranks above every
+    // so a refusal here is a contract violation, ranked last (-1). A depthwise direct
+    // instance (std, spatial, tiled, col) ranks above every
     // implicit-GEMM one (conv::aotInstanceScore stays in [0, 2)), the default direct arm
     // first: implicit GEMM leaves most lanes idle on one channel per group. An instance
     // carries no build group count, so the default arm is the one for the graph's.
@@ -1232,8 +970,7 @@ std::vector<bool> aotCandidateFilter(const MatchContext& context,
     return keep;
 }
 
-/// How one engine of this pack admits a kernel for a matched graph and launches it:
-/// kernelFits for hipkernel:Gfx950ConvFwd, aotKernelFits for hipkernel:Gfx950ConvFwdAot.
+/// How this pack admits a kernel for a matched graph and launches it (aotKernelFits).
 using KernelFits = std::optional<ConvLaunch> (*)(const MatchedProblem&, const KernelDefinition&);
 
 void requireBindings(const BoundTokens& bound, const Binding& binding)
@@ -1248,13 +985,13 @@ void requireBindings(const BoundTokens& bound, const Binding& binding)
     }
 }
 
+/// Defense-in-depth: matchProblem already declines a graph whose output isn't NHWK, so
+/// this never throws for a kernel reached through this pack's own matchers. It stays as
+/// prepare()'s own invariant check regardless.
 void requireOutput(const MatchContext& context, const MatchedProblem& matched)
 {
     const auto* output = findTensor(context, matched.binding.y);
-    if(!hasPackedNhwcStrides(output) || output->dims()->Get(0) != matched.problem.n
-       || output->dims()->Get(1) != matched.problem.k
-       || output->dims()->Get(2) != matched.geometry.ho
-       || output->dims()->Get(3) != matched.geometry.wo)
+    if(!outputMatches(output, matched))
     {
         throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_BAD_PARAM,
@@ -1662,15 +1399,6 @@ private:
     std::set<std::string> _launchNames;
 };
 
-const ConvFwdDispatchHandler& dispatchHandler()
-{
-    // The registries retain non-owning pointers; both dependencies live for the
-    // process, including across provider handle destruction and recreation.
-    static const compilation::KpackKernelLoader s_loader(gfx950ConvFwdKpackModuleCache());
-    static const ConvFwdDispatchHandler s_handler(s_loader, &kernelFits);
-    return s_handler;
-}
-
 const compilation::KpackKernelLoader& aotKpackLoader()
 {
     static const compilation::KpackKernelLoader s_loader(gfx950ConvFwdAotKpackModuleCache());
@@ -1693,25 +1421,6 @@ const ConvFwdDispatchHandler& aotSplitCDispatchHandler()
 
 } // namespace
 
-compilation::KpackModuleCache& gfx950ConvFwdKpackModuleCache()
-{
-    static compilation::KpackModuleCache s_moduleCache;
-    return s_moduleCache;
-}
-
-void registerGfx950ConvFwdSymbols(SymbolScope<Handle>& scope)
-{
-    scope.add(std::string(GRAPH_MATCHER_SYMBOL), &graphMatches);
-    scope.add(std::string(KERNEL_MATCHER_SYMBOL), &kernelMatches);
-    scope.add(std::string(SCORE_SYMBOL), &score);
-    scope.add(std::string(DISPATCH_SYMBOL), &dispatchHandler());
-}
-
-void resetGfx950ConvFwdModuleCache()
-{
-    gfx950ConvFwdKpackModuleCache().clear();
-}
-
 compilation::KpackModuleCache& gfx950ConvFwdAotKpackModuleCache()
 {
     static compilation::KpackModuleCache s_moduleCache;
@@ -1720,7 +1429,6 @@ compilation::KpackModuleCache& gfx950ConvFwdAotKpackModuleCache()
 
 void registerGfx950ConvFwdAotSymbols(SymbolScope<Handle>& scope)
 {
-    // Both engines read the graph the same way; only the kernels they admit differ.
     scope.add(std::string(AOT_GRAPH_MATCHER_SYMBOL), &graphMatches);
     scope.add(std::string(AOT_KERNEL_MATCHER_SYMBOL), &aotKernelMatches);
     scope.add(std::string(AOT_KERNEL_MATCHER_SYMBOL), &aotCandidateFilter);

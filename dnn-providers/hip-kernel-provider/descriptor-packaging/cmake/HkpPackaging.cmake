@@ -1487,16 +1487,6 @@ function(_hkp_root_ships_for_gfx950 out_var root engine)
 endfunction()
 
 # ---------------------------------------------------------------------------
-# hkp_gfx950_conv_fwd_available(<out>)
-#   TRUE when this configuration actually ships the gfx950 forward-convolution bundle,
-#   hipkernel:Gfx950ConvFwd, from the `product` root; see _hkp_root_ships_for_gfx950().
-# ---------------------------------------------------------------------------
-function(hkp_gfx950_conv_fwd_available out_var)
-    _hkp_root_ships_for_gfx950(_ships product "hipkernel:Gfx950ConvFwd")
-    set(${out_var} "${_ships}" PARENT_SCOPE)
-endfunction()
-
-# ---------------------------------------------------------------------------
 # hkp_gfx950_conv_fwd_aot_available(<out>)
 #   The same predicate for the shape-generic AOT-instance engine,
 #   hipkernel:Gfx950ConvFwdAot, which ships its own bundle.

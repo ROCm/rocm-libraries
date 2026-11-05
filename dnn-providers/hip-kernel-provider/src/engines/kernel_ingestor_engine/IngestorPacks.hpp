@@ -108,10 +108,6 @@ void registerGfx950AttentionUnified3DSymbols(
     hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
 void resetGfx950AttentionUnified3DModuleCache();
 
-/// @see packs/Gfx950ConvFwdNative.cpp
-void registerGfx950ConvFwdSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
-void resetGfx950ConvFwdModuleCache();
-
 /// @see packs/Gfx950ConvFwdNative.cpp (hipkernel:Gfx950ConvFwdAot)
 void registerGfx950ConvFwdAotSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
 void resetGfx950ConvFwdAotModuleCache();

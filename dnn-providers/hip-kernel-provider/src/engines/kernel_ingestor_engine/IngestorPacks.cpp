@@ -50,7 +50,6 @@ const std::vector<IngestorPack>& ingestorPacks()
         {GFX950_ATTENTION_UNIFIED_3D_ENGINE_NAME,
          &registerGfx950AttentionUnified3DSymbols,
          &resetGfx950AttentionUnified3DModuleCache},
-        {"hipkernel:Gfx950ConvFwd", &registerGfx950ConvFwdSymbols, &resetGfx950ConvFwdModuleCache},
         {"hipkernel:Gfx950ConvFwdAot",
          &registerGfx950ConvFwdAotSymbols,
          &resetGfx950ConvFwdAotModuleCache},

@@ -4,10 +4,11 @@
 """Packaging adapter for the gfx950 implicit-GEMM forward convolution.
 
 The descriptor spec is flat, while the original builder takes nested problem
-and data specs plus optional fusion callbacks. This adapter resolves the
-exact-shape engine's fixed defaults (:data:`EXACT_SHAPE_DEFAULTS`) before
-packaging and calls the original builder without callbacks.
-It does not change the kernel body or introduce a runtime Python dependency.
+and data specs plus optional fusion callbacks. :class:`Gfx950ConvFwdSpec`
+holds one packaged kernel's build problem and resolved tuning; the
+shape-generic AOT-instance packaging below (:class:`Gfx950ConvFwdAotSpec`)
+builds against it without callbacks. Neither changes the kernel body or
+introduces a runtime Python dependency.
 
 The initial contract is 2D cross-correlation, dense NHWC input, KYXC filter,
 NHWK output, uniform fp16/bf16, and fp32 accumulation. Padding is symmetric.
@@ -23,10 +24,10 @@ B_bytes:i32, D_bytes:i32)`` followed by the problem block of
 ``kernels.common.conv_abi`` (extents, strides, magic divisors and tile counts as
 i32 kernel arguments). A packaged kernel is built for one problem, but it
 computes every problem its build-time capabilities admit, and the native pack
-matches it to all of them. :func:`gfx950_conv_fwd_capabilities` reports what a
-binary keeps from its build problem (grouped and pointwise code paths, load and
-store widths; for the direct kernels the filter, stride and padding) and
-:func:`gfx950_conv_fwd_serves` decides a
+matches it to all of them. :func:`gfx950_conv_fwd_aot_capabilities` reports
+what a binary keeps from its build problem (grouped and pointwise code paths,
+load and store widths; for the direct kernels the filter, stride and padding)
+and :func:`gfx950_conv_fwd_aot_serves` decides a
 runtime problem against it. :meth:`Gfx950ConvFwdSpec.launch_signature` and
 :meth:`Gfx950ConvFwdSpec.launch_values` give the launch through rocKE's own
 ``ConvArgs``; the native pack mirrors them.
@@ -53,7 +54,7 @@ import hashlib
 import json
 import math
 from collections.abc import Sequence
-from dataclasses import asdict, dataclass, fields, replace
+from dataclasses import asdict, dataclass, replace
 
 from dispatch.grouped_convolution import (
     ConvGroupedRequest,
@@ -82,7 +83,6 @@ from kernels.conv.direct_variants import (
     validate_direct_spec,
 )
 from kernels.conv.kernel_identity import KernelIdentity
-from rocke.core.arch import ArchTarget
 from rocke.core.ir import KernelDef
 from rocke.core.lower_llvm import LLVM_FLAVORS
 
@@ -128,50 +128,16 @@ _FAMILY_DEFAULTS = {
     "block_w": 0,
     "block_waves": 0,
 }
-#: Default direct arm when the caller names none (see
-#: :func:`gfx950_conv_fwd_direct_spec_for_request`).
-DEFAULT_DIRECT_BLOCK_W = 4
-DEFAULT_DIRECT_BLOCK_WAVES = 1
-#: The implicit-GEMM tuning every exact-shape request resolves to (see
-#: :func:`gfx950_conv_fwd_spec_for_request`). It is the gfx950 forward
-#: candidate rocKE's grouped-convolution dispatcher resolved when the
-#: exact-shape catalog was first packaged. rocKE's dispatcher now selects among
-#: registered AOT instances (``hipkernel:Gfx950ConvFwdAot`` packages those), so
-#: the exact-shape engine keeps this configuration itself: its shipped kernels
-#: and symbols stay what they were. The epilogue is not fixed; see
-#: :func:`exact_shape_epilogue`.
-EXACT_SHAPE_DEFAULTS = {
-    "tile_m": 64,
-    "tile_n": 64,
-    "tile_k": 64,
-    "warp_m": 2,
-    "warp_n": 2,
-    "warp_tile_m": 32,
-    "warp_tile_n": 32,
-    "warp_tile_k": 16,
-    "pipeline": "mem",
-}
-
-
-def exact_shape_epilogue(C: int, K: int, dtype: str) -> str:
-    """The exact-shape engine's epilogue for a request: ``cshuffle`` where the
-    store width rocKE's builder picks for ``(C, K)`` is wider than one element,
-    else the scalar ``default`` one. The full channel counts are used, as when
-    the catalog was first packaged."""
-    _, _, store = _conv.ImplicitGemmConvSpec.default_vector_sizes(C, K, dtype)
-    return "cshuffle" if store > 1 else "default"
 
 
 @dataclass(frozen=True)
 class Gfx950ConvFwdSpec:
     """Serializable problem and resolved tuning values for one packaged kernel.
 
-    Use :func:`gfx950_conv_fwd_spec_for_request` to obtain the exact-shape
-    engine's defaults (:data:`EXACT_SHAPE_DEFAULTS`), or :func:`gfx950_conv_fwd_direct_spec_for_request` for a
-    direct depthwise kernel. Direct construction is useful for descriptor
-    hydration; :func:`supports_gfx950_conv_fwd` and the builder validate it
-    before emission. The geometry is the build problem; the kernel takes the
-    runtime problem as AOT arguments (see :func:`gfx950_conv_fwd_serves`).
+    Direct construction is useful for descriptor hydration; the AOT-instance
+    packaging and validators below use it for the build problem, while the
+    kernel takes the runtime problem as AOT arguments (see
+    :func:`gfx950_conv_fwd_aot_serves`).
 
     The trailing family fields default to the implicit-GEMM family, so a spec
     serialized before they existed hydrates and hashes unchanged.
@@ -530,139 +496,6 @@ def _direct_valid(spec: Gfx950ConvFwdSpec, arch: str) -> tuple[bool, str]:
         return False, str(exc)
 
 
-def supports_gfx950_conv_fwd(
-    spec: Gfx950ConvFwdSpec, *, arch: str = _ARCH
-) -> tuple[bool, str]:
-    """Check the integration contract, then rocKE's real problem/arch predicate."""
-    if arch != _ARCH:
-        return False, f"this adapter requires arch={_ARCH}, got {arch!r}"
-    if not isinstance(spec, Gfx950ConvFwdSpec):
-        return False, "expected Gfx950ConvFwdSpec"
-    error = _problem_error(spec)
-    if error:
-        return False, error
-    if type(spec.kernel_family) is not int or spec.kernel_family not in (
-        KERNEL_FAMILY_IMPLICIT_GEMM,
-        KERNEL_FAMILY_DIRECT_DEPTHWISE,
-    ):
-        return False, (
-            f"kernel_family must be {KERNEL_FAMILY_IMPLICIT_GEMM} (implicit GEMM) or "
-            f"{KERNEL_FAMILY_DIRECT_DEPTHWISE} (direct depthwise), "
-            f"got {spec.kernel_family!r}"
-        )
-    if spec.is_direct:
-        error = _direct_error(spec)
-        if error:
-            return False, error
-        return _direct_valid(spec, arch)
-    for name, default in _FAMILY_DEFAULTS.items():
-        if getattr(spec, name) != default or type(getattr(spec, name)) is not type(
-            default
-        ):
-            return False, (
-                f"an implicit-GEMM spec must leave {name} at {default!r}, "
-                f"got {getattr(spec, name)!r}"
-            )
-    for name in (
-        "tile_m",
-        "tile_n",
-        "tile_k",
-        "warp_m",
-        "warp_n",
-        "warp_tile_m",
-        "warp_tile_n",
-        "warp_tile_k",
-        "wave_size",
-    ):
-        value = getattr(spec, name)
-        if type(value) is not int or not 0 < value <= _INT32_MAX:
-            return False, f"{name} must be a positive signed 32-bit integer"
-    # Every pipeline here launches warp_m * warp_n * wave_size threads over the same
-    # (N-tiles, M-tiles, groups) grid with static LDS, which is the launch the native
-    # pack computes. "wavelet" appends load waves to the block and is WMMA-only anyway.
-    if spec.pipeline not in _PACKAGED_PIPELINES:
-        return False, (
-            f"the packaged forward contract supports pipelines {_PACKAGED_PIPELINES}, "
-            f"got {spec.pipeline!r}"
-        )
-    if spec.epilogue not in ("default", "cshuffle"):
-        return False, "epilogue must be 'default' or 'cshuffle'"
-    # ConvArgs refuses this at launch; refuse it before a kernel is built instead.
-    if spec.Y * spec.X * (spec.C // spec.groups) >= MUL24_REDUCTION_LIMIT:
-        return False, (
-            "the reduction extent Y*X*C/groups must stay below 2**23 for the "
-            "kernel's 24-bit address products"
-        )
-    try:
-        instance = spec.to_instance_spec()
-        instance.validate()
-        return _conv.is_valid_spec_for_problem(instance, instance.problem, arch=arch)
-    except (TypeError, ValueError, ZeroDivisionError) as exc:
-        return False, str(exc)
-
-
-def gfx950_conv_fwd_spec_for_request(
-    request: ConvGroupedRequest, *, tile_k: int | None = None
-) -> Gfx950ConvFwdSpec:
-    """Resolve the exact-shape engine's defaults and optionally override tile_k.
-
-    The tuning is :data:`EXACT_SHAPE_DEFAULTS` with the arch's wave size and
-    the epilogue of :func:`exact_shape_epilogue`; rocKE's builder validators
-    then decide (:func:`supports_gfx950_conv_fwd`). The request interface also
-    describes 3D/backward convolution. Those requests, and grouped pointwise,
-    are rejected here as integration gaps, even when a rocKE dispatcher
-    instance can serve them. Grouped 2D forward (``G > 1``, including
-    depthwise) is accepted.
-    """
-    base = _base_spec_for_request(request)
-    spec = replace(
-        base,
-        **EXACT_SHAPE_DEFAULTS,
-        wave_size=ArchTarget.from_gfx(request.arch).wave_size,
-        epilogue=exact_shape_epilogue(base.C, base.K, base.dtype),
-    )
-    if tile_k is not None:
-        spec = replace(spec, tile_k=tile_k)
-    ok, reason = supports_gfx950_conv_fwd(spec, arch=request.arch)
-    if not ok:
-        raise ValueError(reason)
-    return spec
-
-
-def gfx950_conv_fwd_direct_spec_for_request(
-    request: ConvGroupedRequest,
-    *,
-    block_w: int | None = None,
-    block_waves: int | None = None,
-) -> Gfx950ConvFwdSpec:
-    """A direct depthwise spec for ``request``; the engine picks the arm itself.
-
-    ``block_w`` selects the variant: ``None`` applies the default policy,
-    ``0`` selects the spatial kernel (which derives its own block width) and a
-    positive value selects the standard kernel with that many output columns
-    per block. The default policy is the spatial kernel when ``G < 64``,
-    otherwise the standard kernel with ``block_w=4``; ``block_waves`` defaults
-    to 1. Block widths of 8 and above hit a load-scheduling cliff on the
-    standard kernel, so the default stays below it. Raises ``ValueError`` when
-    the request is outside the guarded direct contract.
-    """
-    base = _base_spec_for_request(request)
-    if block_w is None:
-        block_w = 0 if base.groups < _DIRECT_WAVE_SIZE else DEFAULT_DIRECT_BLOCK_W
-    spec = replace(
-        base,
-        **_DIRECT_PLACEHOLDERS,
-        kernel_family=KERNEL_FAMILY_DIRECT_DEPTHWISE,
-        direct_variant=DIRECT_VARIANT_SPATIAL if block_w == 0 else DIRECT_VARIANT_STD,
-        block_w=block_w,
-        block_waves=DEFAULT_DIRECT_BLOCK_WAVES if block_waves is None else block_waves,
-    )
-    ok, reason = supports_gfx950_conv_fwd(spec, arch=request.arch)
-    if not ok:
-        raise ValueError(reason)
-    return spec
-
-
 def _base_spec_for_request(
     request: ConvGroupedRequest, *, decline_grouped_pointwise: bool = True
 ) -> Gfx950ConvFwdSpec:
@@ -708,24 +541,6 @@ def _base_spec_for_request(
     return base
 
 
-def build_gfx950_conv_fwd(spec: Gfx950ConvFwdSpec, *, arch: str = _ARCH) -> KernelDef:
-    """The typed ``(spec, *, arch)`` entry point consumed by hkp_pack.
-
-    Dispatches on ``kernel_family``. Direct kernels must be lowered with rocKE's
-    Python backend (hkp_pack pins it): the C++ lowering is superlinear in the
-    unrolled kernel size.
-    """
-    ok, reason = supports_gfx950_conv_fwd(spec, arch=arch)
-    if not ok:
-        raise ValueError(f"invalid packaged forward convolution: {reason}")
-    if spec.is_direct:
-        instance = spec.to_direct_spec()
-        if spec.direct_variant == DIRECT_VARIANT_SPATIAL:
-            return _direct.build_direct_depthwise_spatial(instance, arch=arch)
-        return _direct.build_direct_depthwise(instance, arch=arch)
-    return _conv.build_implicit_gemm_conv(spec.to_instance_spec(), arch=arch)
-
-
 # ---------------------------------------------------------------------------
 # What a packaged binary computes at runtime
 # ---------------------------------------------------------------------------
@@ -751,66 +566,6 @@ class Gfx950ConvFwdCapabilities:
     pad_hw: tuple[int, int] = (0, 0)
 
 
-def _is_pointwise(spec: Gfx950ConvFwdSpec) -> bool:
-    return spec.Y == spec.X == 1 and spec.sH == spec.sW == 1 and spec.pH == spec.pW == 0
-
-
-def gfx950_conv_fwd_capabilities(spec: Gfx950ConvFwdSpec) -> Gfx950ConvFwdCapabilities:
-    """The build-time capabilities of the binary ``spec`` describes.
-
-    The widths are the ones rocKE's builder resolves for the build problem
-    (``_sync_load_vecs`` and ``default_vector_sizes``), so they are exactly what
-    the binary bakes in. The native pack's ``conv::implicitGemmCapabilities``
-    recomputes them from the same metadata.
-    """
-    if spec.is_direct:
-        return Gfx950ConvFwdCapabilities(
-            filter_hw=(spec.Y, spec.X),
-            stride_hw=(spec.sH, spec.sW),
-            pad_hw=(spec.pH, spec.pW),
-        )
-    instance = spec.to_instance_spec()
-    load_width, _ = _conv._sync_load_vecs(instance)
-    store_width = 1
-    if spec.epilogue == "cshuffle":
-        _, _, store_width = _conv.ImplicitGemmConvSpec.default_vector_sizes(
-            spec.C // spec.groups, spec.K // spec.groups, spec.dtype
-        )
-    return Gfx950ConvFwdCapabilities(
-        load_width=load_width,
-        store_width=store_width,
-        pointwise=_is_pointwise(spec),
-        grouped=spec.groups > 1,
-    )
-
-
-def gfx950_conv_fwd_serves(
-    spec: Gfx950ConvFwdSpec, problem: Gfx950ConvFwdSpec
-) -> tuple[bool, str]:
-    """Whether the binary ``spec`` describes computes ``problem``.
-
-    ``problem`` is read for its problem fields only. Implicit GEMM mirrors the
-    forward subset of rocKE's ``KernelCache.supports_problem``: the load width
-    divides C/groups, the store width K/groups, a grouped problem needs the
-    grouped code path (which computes groups == 1 too), and the pointwise GEMM
-    serves only pointwise problems. Direct depthwise needs the build's filter,
-    stride and padding, and the runtime problem must pass the direct guard. Both families then need a grid
-    and kernel arguments that fit.
-    """
-    error = _problem_error(problem, decline_grouped_pointwise=False)
-    if error:
-        return False, error
-    if problem.dtype != spec.dtype:
-        return False, f"dtype {problem.dtype} != kernel dtype {spec.dtype}"
-    caps = gfx950_conv_fwd_capabilities(spec)
-    if spec.is_direct:
-        runtime = replace(
-            spec, **{f.name: getattr(problem, f.name) for f in fields(_ProblemFields)}
-        )
-        return _direct_serves(caps, runtime)
-    return _implicit_gemm_serves(caps, problem, spec.tile_m, spec.tile_n)
-
-
 def _direct_serves(
     caps: Gfx950ConvFwdCapabilities, runtime: Gfx950ConvFwdSpec
 ) -> tuple[bool, str]:
@@ -819,7 +574,7 @@ def _direct_serves(
     checks. It must pass the direct guard and have the compiled filter, stride and
     padding (the guard already pins dilation to 1).
 
-    Shared by :func:`gfx950_conv_fwd_serves` and :func:`gfx950_conv_fwd_aot_serves`.
+    Used by :func:`gfx950_conv_fwd_aot_serves`.
     """
     error = _direct_error(runtime)
     if error:
@@ -835,57 +590,6 @@ def _direct_serves(
                 f"direct kernel compiled for {label} {baked}, problem has {actual}",
             )
     return True, "ok"
-
-
-def _implicit_gemm_serves(
-    caps: Gfx950ConvFwdCapabilities,
-    problem: Gfx950ConvFwdSpec,
-    tile_m: int,
-    tile_n: int,
-) -> tuple[bool, str]:
-    """Whether an implicit-GEMM binary with ``caps`` and this tile computes
-    ``problem``, which already passed the problem checks.
-
-    Shared by :func:`gfx950_conv_fwd_serves` and :func:`gfx950_conv_fwd_aot_serves`.
-    """
-    cpg = problem.C // problem.groups
-    kpg = problem.K // problem.groups
-    if problem.groups > 1 and not caps.grouped:
-        return False, "kernel is ungrouped, problem is grouped"
-    if caps.pointwise and not _is_pointwise(problem):
-        return False, "kernel is the pointwise GEMM, problem is not pointwise"
-    if cpg % caps.load_width:
-        return False, f"cpg={cpg} not divisible by the load width {caps.load_width}"
-    if kpg % caps.store_width:
-        return False, f"kpg={kpg} not divisible by the store width {caps.store_width}"
-    if problem.Y * problem.X * cpg >= MUL24_REDUCTION_LIMIT:
-        return False, "the reduction extent Y*X*C/groups must stay below 2**23"
-    args = ConvArgs.from_problem(problem.to_problem(), tile_m=tile_m, tile_n=tile_n)
-    for axis, extent in zip("xyz", args.grid()):
-        if extent > _MAX_GRID_DIM:
-            return False, f"grid {axis} = {extent} exceeds {_MAX_GRID_DIM}"
-    return True, "ok"
-
-
-@dataclass(frozen=True)
-class _ProblemFields:
-    """The problem half of Gfx950ConvFwdSpec, for moving a runtime problem onto a
-    kernel's tuning."""
-
-    N: int
-    Hi: int
-    Wi: int
-    C: int
-    K: int
-    Y: int
-    X: int
-    sH: int
-    sW: int
-    pH: int
-    pW: int
-    dH: int
-    dW: int
-    groups: int
 
 
 # ---------------------------------------------------------------------------
@@ -2069,7 +1773,7 @@ def gfx950_conv_fwd_aot_spec_for_identity(
 def gfx950_conv_fwd_aot_capabilities(
     spec: Gfx950ConvFwdAotSpec,
 ) -> Gfx950ConvFwdCapabilities:
-    """What instance ``spec`` bakes in, as :func:`gfx950_conv_fwd_capabilities` reports it.
+    """What instance ``spec`` bakes in, as a :class:`Gfx950ConvFwdCapabilities`.
 
     The widths are the identity's own, not derived from a build problem. A and B
     both run along C/groups, so both divide it exactly when their lcm does. The

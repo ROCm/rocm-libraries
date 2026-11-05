@@ -3,8 +3,7 @@
 rocKE's AOT convolution kernels take the problem as kernel arguments. One compiled
 binary therefore serves every problem its build-time capabilities admit.
 `hipkernel:Gfx950ConvFwdAot` packages such binaries as **instances** and matches them
-to a graph by capability, not by exact shape. It ships next to the exact-shape engine
-`hipkernel:Gfx950ConvFwd`, which it does not change.
+to a graph by capability, not by exact shape.
 
 ## What an instance is
 

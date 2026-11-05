@@ -94,18 +94,17 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
         )
     endif()
     # The packaged convolution suites follow the same rule as the knobs suite above, one
-    # define per engine: the exact-shape engine and the AOT-instance engine are separate
-    # product bundles. The AOT seed is test content of this build's own integration root,
-    # so its gate is arch-aware instead.
-    hkp_product_offers_engine(_hkp_conv_fwd_bundle "hipkernel:Gfx950ConvFwd")
+    # define per engine: the AOT-instance engine is its own product bundle. The AOT seed
+    # is test content of this build's own integration root, so its gate is arch-aware
+    # instead.
     hkp_product_offers_engine(_hkp_conv_fwd_aot_bundle "hipkernel:Gfx950ConvFwdAot")
     hkp_gfx950_conv_fwd_aot_seed_available(_hkp_conv_fwd_aot_seed_bundle)
-    if(_hkp_conv_fwd_bundle OR _hkp_conv_fwd_aot_bundle OR _hkp_conv_fwd_aot_seed_bundle)
+    if(_hkp_conv_fwd_aot_bundle OR _hkp_conv_fwd_aot_seed_bundle)
         target_sources(hip_kernel_provider_integration_tests PRIVATE
             kernel_ingestor_engine/IntegrationGpuGfx950ConvFwd.cpp
         )
     endif()
-    foreach(_hkp_conv_suite IN ITEMS conv_fwd conv_fwd_aot conv_fwd_aot_seed)
+    foreach(_hkp_conv_suite IN ITEMS conv_fwd_aot conv_fwd_aot_seed)
         if(_hkp_${_hkp_conv_suite}_bundle)
             string(TOUPPER "HKP_TEST_GFX950_${_hkp_conv_suite}" _hkp_conv_define)
             target_compile_definitions(hip_kernel_provider_integration_tests
@@ -273,30 +272,6 @@ foreach(_gfx950_engine IN ITEMS
         )
     endif()
 endforeach()
-
-# Gated on the same predicate shape as the dense-attention target above: ENGINE_NAME pins
-# this target, so a build whose `product` root does not ship hipkernel:Gfx950ConvFwd for
-# gfx950 must not register it. Routed into the gfx950 census shard for the same reason.
-set(_hkp_gfx950_conv_fwd FALSE)
-if(HIPDNN_ENABLE_KERNEL_INGESTOR)
-    hkp_gfx950_conv_fwd_available(_hkp_gfx950_conv_fwd)
-endif()
-if(HIPDNN_ENABLE_KERNEL_INGESTOR
-   AND HIPKERNELPROVIDER_ENABLE_ROCKE
-   AND _hkp_gfx950_conv_fwd
-   AND TARGET hipdnn_integration_tests AND COMMAND add_external_integration_test_target)
-    hkp_reserve_census_shard(_hkp_gfx950_shard_dest gfx950)
-    add_external_integration_test_target(
-        TARGET_NAME hip_kernel_provider_gfx950_conv_fwd_external_integration_tests
-        PLUGIN_TARGET hip_kernel_provider
-        ENGINE_NAME "hipkernel:Gfx950ConvFwd"
-        INSTALL_SUBDIR hip_kernel_provider
-        INSTALL_DESTINATION "${_hkp_gfx950_shard_dest}"
-        INSTALL_STAGING_KEY hkp_census_gfx950
-        REFERENCE_EXECUTOR gpu
-        GTEST_FILTER "quick_Gfx950ConvFwd*:standard_Gfx950ConvFwd*"
-    )
-endif()
 
 if(ENABLE_ASM_SDPA_ENGINE AND HIPDNN_ENABLE_SDPA
    AND TARGET hipdnn_integration_tests AND COMMAND add_external_integration_test_target)

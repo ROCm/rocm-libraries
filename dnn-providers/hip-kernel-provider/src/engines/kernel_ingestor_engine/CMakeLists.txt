@@ -14,7 +14,7 @@ target_sources(hip_kernel_provider_impl PRIVATE
     # Pointwise and Conv descriptors are test fixtures under test_descriptors/; a Pointwise
     # bundle also sits in descriptor-packaging/examples/descriptors, where the superbuild CI
     # lane points the production source root. Gfx950AttentionDense, Gfx950AttentionUnified2D,
-    # Gfx950AttentionUnified3D and Gfx950ConvFwd ship from descriptors/.
+    # Gfx950AttentionUnified3D and Gfx950ConvFwdAot ship from descriptors/.
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/PointwiseNative.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/ConvNative.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/Gfx950AttentionDenseNative.cpp
