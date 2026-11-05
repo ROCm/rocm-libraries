@@ -54,6 +54,12 @@ l0_axis_fates:
   index_tensor_dtype:
     int32: {folded_into: null, explained_by: F-INDEX-TENSORS-INT32,
             why: "a fixed model setting: the frontend takes only INT32 length tensors and page tables"}
+  dropout_scale_storage:
+    by_value: {folded_into: null, explained_by: CH-FIXED-STORAGE-ROUTE, why: "storage route held fixed; follow-up"}
+    device_memory: {folded_into: null, explained_by: CH-FIXED-STORAGE-ROUTE, why: "storage route held fixed; follow-up"}
+  descale_storage:
+    by_value: {folded_into: null, explained_by: CH-FIXED-STORAGE-ROUTE, why: "storage route held fixed; follow-up"}
+    device_memory: {folded_into: null, explained_by: CH-FIXED-STORAGE-ROUTE, why: "storage route held fixed; follow-up"}
 
 # Layer 0 values (that L1/L2 keep) of an axis the model carries, with no image in any model row.
 # The entries below are model values that CH-FUZZER-HINTS removes from every row.
@@ -70,10 +76,10 @@ l0_values_not_in_model:
 
 # Layer 2 values (meaningful, and the frontend states them) that a policy rule removes from the model:
 # hipDNN should refuse them, so they are rejection-suite cases, not numerical ones. Every entry names a
-# rules.yaml rule of kind policy. Policy rules that remove only combinations (P-NO-HEAD-DIM-BROADCAST: a
-# zero stride that lands on the head dim) or nothing at all (P-NO-OUTPUT-BROADCAST: covered by
-# D-OUTPUT-SELF-ALIAS, which Layer 1 also holds) remove no single value, so they need no entry. Negative
-# strides are removed at Layer 2 by F-NO-NEGATIVE-STRIDE (a frontend rule that is not enforced yet).
+# rules.yaml rule of kind policy. Policy rules that remove only combinations, or nothing at all
+# (P-NO-OUTPUT-BROADCAST: covered by D-OUTPUT-SELF-ALIAS, which Layer 1 also holds), remove no single
+# value, so they need no entry. Negative strides are removed at Layer 2 by F-NO-NEGATIVE-STRIDE (a
+# frontend rule that is not enforced yet).
 l0_values_refused_by_policy: {}
 
 # Rules whose Layer 1 form and rules.yaml form name different axes. Read by people, not by chain_check.py.

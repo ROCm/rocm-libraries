@@ -53,6 +53,7 @@
 #include <hipdnn_frontend/Graph.hpp>
 #include <hipdnn_frontend/PluginPaths.hpp>
 #include <hipdnn_frontend/autotune/AutotuneTypes.hpp>
+#include <hipdnn_test_sdk/utilities/RaggedLengthUids.hpp>
 #include <hipdnn_test_sdk/utilities/SdkFrontendTypeConversions.hpp>
 #include <hipdnn_test_sdk/utilities/TensorDiff.hpp>
 #include <hipdnn_test_sdk/utilities/TestTolerances.hpp>
@@ -60,6 +61,7 @@
 #include <nlohmann/json.hpp>
 
 #include "CaseGraph.hpp"
+#include "RaggedCompareView.hpp"
 #include "RunnerSourceHash.hpp"
 #include "harness/CpuReferenceGraphExecutorAdapter.hpp"
 #include "harness/PlanWorkspace.hpp"
@@ -1333,13 +1335,49 @@ std::set<int64_t>
     return uids;
 }
 
+// How a ragged output reads its rows: its offset tensor, the offset multiplier, and the seq_len
+// tensor of its side (none when the graph has no length tensors).
+struct RaggedBinding
+{
+    int64_t offsetUid = 0;
+    int64_t multiplier = 1;
+    std::optional<int64_t> lengthUid;
+};
+
+std::map<int64_t, RaggedBinding> raggedOutputBindings(const fbd::Graph& graph,
+                                                      const std::map<int64_t, TensorPtr>& attrs,
+                                                      const std::set<int64_t>& outputUids)
+{
+    const auto lengthUids = hipdnn_test_sdk::utilities::raggedLengthUids(graph);
+    std::map<int64_t, RaggedBinding> bindings;
+    for(const auto uid : outputUids)
+    {
+        const auto offset = attrs.at(uid)->get_ragged_offset();
+        if(offset == nullptr)
+        {
+            continue;
+        }
+        RaggedBinding binding;
+        binding.offsetUid = offset->get_uid();
+        binding.multiplier = attrs.at(uid)->get_ragged_offset_multiplier();
+        if(const auto it = lengthUids.find(uid); it != lengthUids.end())
+        {
+            binding.lengthUid = it->second;
+        }
+        bindings.emplace(uid, binding);
+    }
+    return bindings;
+}
+
 // The matching-infinities validator has no device implementation, so stats outputs are
-// compared on the host whatever `site` is.
+// compared on the host whatever `site` is. A ragged output is compared through a ragged view on
+// the host: rows past each sequence's live tokens are not compared, as in the bundle harness.
 Comparison compareBundles(const std::string& against,
                           const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper& wrapper,
                           const std::vector<int64_t>& outputUids,
                           const std::map<int64_t, TensorPtr>& attrs,
-                          it::bundle::OutputTensors& actual,
+                          const std::map<int64_t, RaggedBinding>& ragged,
+                          it::bundle::OutputTensors& actualDense,
                           Bundle& expected,
                           it::ValidationSite site,
                           bool refRule = false)
@@ -1349,20 +1387,25 @@ Comparison compareBundles(const std::string& against,
     result.refRule = refRule;
     const auto statsUids = sdpaStatsUids(wrapper);
     std::set<std::string> statsLabels;
-    std::vector<int64_t> statsOutputs;
+    std::vector<int64_t> hostOutputs;
     std::vector<int64_t> otherOutputs;
     for(const auto uid : outputUids)
     {
         if(statsUids.count(uid) != 0)
         {
             statsLabels.insert(it::bundle::tensorLabel(uid, attrs.at(uid)->get_name()));
-            statsOutputs.push_back(uid);
+        }
+        if(statsUids.count(uid) != 0 || ragged.count(uid) != 0)
+        {
+            hostOutputs.push_back(uid);
         }
         else
         {
             otherOutputs.push_back(uid);
         }
     }
+    it::bundle::OutputTensors actual = actualDense;
+    std::map<int64_t, std::shared_ptr<hipdnn_data_sdk::utilities::ITensor>> expectedViews;
     const auto toleranceFor = [&statsLabels](const std::string& label, fbd::DataType type) {
         const float t = sdpaTolerance(type);
         return statsLabels.count(label) != 0
@@ -1370,25 +1413,44 @@ Comparison compareBundles(const std::string& against,
                    : it::bundle::ComparisonTolerance::allClose(t, t);
     };
     const auto expectedFor = [&](int64_t uid) -> hipdnn_data_sdk::utilities::ITensor& {
-        return *expected.tensors.at(uid);
+        const auto view = expectedViews.find(uid);
+        return view != expectedViews.end() ? *view->second : *expected.tensors.at(uid);
     };
     const auto compareAll = [&]() {
         auto mismatches = it::bundle::compareOutputs(
             wrapper, otherOutputs, actual, expectedFor, toleranceFor, site, against);
-        auto statsMismatches = it::bundle::compareOutputs(wrapper,
-                                                          statsOutputs,
-                                                          actual,
-                                                          expectedFor,
-                                                          toleranceFor,
-                                                          it::ValidationSite::HOST,
-                                                          against);
+        auto hostMismatches = it::bundle::compareOutputs(wrapper,
+                                                         hostOutputs,
+                                                         actual,
+                                                         expectedFor,
+                                                         toleranceFor,
+                                                         it::ValidationSite::HOST,
+                                                         against);
         mismatches.insert(mismatches.end(),
-                          std::make_move_iterator(statsMismatches.begin()),
-                          std::make_move_iterator(statsMismatches.end()));
+                          std::make_move_iterator(hostMismatches.begin()),
+                          std::make_move_iterator(hostMismatches.end()));
         return mismatches;
     };
     try
     {
+        for(const auto& [uid, binding] : ragged)
+        {
+            if(std::find(outputUids.begin(), outputUids.end(), uid) == outputUids.end())
+            {
+                continue;
+            }
+            const auto type
+                = hipdnn_test_sdk::utilities::frontendToSdkDataType(attrs.at(uid)->get_data_type());
+            const auto offsets = expected.tensors.at(binding.offsetUid);
+            const auto lengths = binding.lengthUid.has_value()
+                                     ? expected.tensors.at(*binding.lengthUid)
+                                     : std::shared_ptr<hipdnn_data_sdk::utilities::ITensor>();
+            expectedViews[uid] = sdpa_case_flow::raggedView(
+                *expected.tensors.at(uid), type, offsets, binding.multiplier, lengths);
+            actual[uid] = sdpa_case_flow::raggedView(
+                *actualDense.at(uid), type, offsets, binding.multiplier, lengths);
+        }
+
         auto start = Clock::now();
         auto mismatches = compareAll();
         syncDevice();
@@ -1413,7 +1475,7 @@ Comparison compareBundles(const std::string& against,
                 = hipdnn_test_sdk::utilities::frontendToSdkDataType(attr->get_data_type());
             result.diffs.emplace_back(
                 it::bundle::tensorLabel(uid, attr->get_name()),
-                diffTensors(type, *expected.tensors.at(uid), *actual.at(uid), sdpaTolerance(type)));
+                diffTensors(type, expectedFor(uid), *actual.at(uid), sdpaTolerance(type)));
         }
         result.tDiffUs = microsSince(start);
 
@@ -1428,7 +1490,7 @@ Comparison compareBundles(const std::string& against,
                 const auto type
                     = hipdnn_test_sdk::utilities::frontendToSdkDataType(attr->get_data_type());
                 const auto label = it::bundle::tensorLabel(uid, attr->get_name());
-                auto stats = elementStats(type, *expected.tensors.at(uid), *actual.at(uid));
+                auto stats = elementStats(type, expectedFor(uid), *actual.at(uid));
                 if(isFp8(type))
                 {
                     if(!stats.available || stats.overOneUlp != 0
@@ -1516,6 +1578,96 @@ void markOutputsHostModified(Bundle& bundle, const std::vector<int64_t>& outputU
     {
         bundle.tensors.at(uid)->markHostModified();
     }
+}
+
+// Device copies of the tensors whose data starts past an aligned allocation start. The engine
+// reads and writes the copies; copyOutputsBack returns the engine's outputs to the bundle.
+class ShiftedStarts
+{
+public:
+    ShiftedStarts(Bundle& bundle,
+                  const std::map<int64_t, int64_t>& offsetBytes,
+                  std::unordered_map<int64_t, void*>& variantPack)
+    {
+        for(const auto& [uid, offset] : offsetBytes)
+        {
+            auto& tensor = *bundle.tensors.at(uid);
+            Copy copy;
+            copy.uid = uid;
+            copy.bytes = tensor.elementSpace() * tensor.elementSize();
+            copy.original = variantPack.at(uid);
+            if(hipMalloc(&copy.base, copy.bytes + static_cast<size_t>(offset)) != hipSuccess)
+            {
+                throw std::runtime_error("hipMalloc failed for a shifted data start");
+            }
+            _copies.push_back(copy);
+            void* shifted = static_cast<char*>(copy.base) + offset;
+            if(hipMemcpy(shifted, copy.original, copy.bytes, hipMemcpyDeviceToDevice) != hipSuccess)
+            {
+                throw std::runtime_error("hipMemcpy failed for a shifted data start");
+            }
+            _copies.back().shifted = shifted;
+            variantPack[uid] = shifted;
+        }
+    }
+
+    ShiftedStarts(const ShiftedStarts&) = delete;
+    ShiftedStarts& operator=(const ShiftedStarts&) = delete;
+
+    ~ShiftedStarts()
+    {
+        for(const auto& copy : _copies)
+        {
+            static_cast<void>(hipFree(copy.base));
+        }
+    }
+
+    void copyOutputsBack(const std::vector<int64_t>& outputUids) const
+    {
+        for(const auto& copy : _copies)
+        {
+            if(std::find(outputUids.begin(), outputUids.end(), copy.uid) == outputUids.end())
+            {
+                continue;
+            }
+            if(hipMemcpy(copy.original, copy.shifted, copy.bytes, hipMemcpyDeviceToDevice)
+               != hipSuccess)
+            {
+                throw std::runtime_error("hipMemcpy failed for a shifted output");
+            }
+        }
+    }
+
+private:
+    struct Copy
+    {
+        int64_t uid = 0;
+        size_t bytes = 0;
+        void* original = nullptr;
+        void* base = nullptr;
+        void* shifted = nullptr;
+    };
+    std::vector<Copy> _copies;
+};
+
+// The uid of each tensor that the built case starts past an aligned allocation start.
+std::map<int64_t, int64_t> startOffsetsByUid(const sdpa_case_flow::BuiltCase& built,
+                                             const std::map<int64_t, TensorPtr>& attrs)
+{
+    std::map<int64_t, int64_t> byUid;
+    for(const auto& [tensorName, offset] : built.startOffsets)
+    {
+        const std::string& name = tensorName;
+        const auto it = std::find_if(attrs.begin(), attrs.end(), [&name](const auto& entry) {
+            return entry.second->get_name() == name;
+        });
+        if(it == attrs.end())
+        {
+            throw std::runtime_error("start offset for '" + name + "', which no graph tensor has");
+        }
+        byUid[it->first] = offset;
+    }
+    return byUid;
 }
 
 // A copy of `source` that shares its input tensors and owns fresh, sentinel-filled outputs.
@@ -1621,6 +1773,14 @@ std::string runCase(size_t index,
         return finish("error", "realise", e.what());
     }
     line.str("realised", built.realised);
+    {
+        JsonLine starts;
+        for(const auto& [name, offset] : built.startOffsets)
+        {
+            starts.integer(name, offset);
+        }
+        line.raw("start_offsets", starts.done());
+    }
     auto& graph = *built.graph;
 
     std::string graphOutcome;
@@ -1771,10 +1931,13 @@ std::string runCase(size_t index,
                 else
                 {
                     auto variantPack = engineBundle.toDeviceVariantPack();
+                    const ShiftedStarts shifted(
+                        engineBundle, startOffsetsByUid(built, attrs), variantPack);
                     syncDevice();
                     stageStart = Clock::now();
                     const auto executed = graph.execute(ctx.handle, variantPack, workspace->get());
                     syncDevice();
+                    shifted.copyOutputsBack(outputUids);
                     line.num("t_engine_first_us", microsSince(stageStart));
                     if(!executed.is_good())
                     {
@@ -1796,6 +1959,7 @@ std::string runCase(size_t index,
                         const auto tuned = graph.autotune(
                             ctx.handle, variantPack, workspace->get(), config, {}, &results);
                         syncDevice();
+                        shifted.copyOutputsBack(outputUids);
                         line.num("t_engine_benchmark_wall_us", microsSince(stageStart));
                         bool found = false;
                         for(const auto& r : results)
@@ -1871,7 +2035,14 @@ std::string runCase(size_t index,
             }
         };
         const auto comparedUids = it::bundle::comparedOutputUids(outputUids, rngDump);
+        const auto raggedOutputs = raggedOutputBindings(*fbGraph, attrs, graphTensors.outputs);
 
+        // A reference that refuses a ragged layout (std::invalid_argument) cannot check the case;
+        // that is not a reference error. The message stays in the record.
+        const bool hasRaggedTensor = std::any_of(attrs.begin(), attrs.end(), [](const auto& entry) {
+            return entry.second->get_ragged_offset() != nullptr
+                   && entry.second->get_name().rfind("page_table", 0) != 0;
+        });
         Bundle gpuBundle = withFreshOutputs(engineBundle, attrs, outputUids);
         std::string gpuStatus = "not-run";
         if(!ctx.opts.noGpuRef)
@@ -1903,6 +2074,11 @@ std::string runCase(size_t index,
             catch(const it::ReferenceCapabilityError& e)
             {
                 gpuStatus = "declined";
+                line.str("gpu_ref_message", e.what());
+            }
+            catch(const std::invalid_argument& e)
+            {
+                gpuStatus = hasRaggedTensor ? "cannot-check" : "error";
                 line.str("gpu_ref_message", e.what());
             }
             catch(const std::exception& e)
@@ -1940,6 +2116,11 @@ std::string runCase(size_t index,
                 cpuStatus = "declined";
                 line.str("cpu_ref_message", e.what());
             }
+            catch(const std::invalid_argument& e)
+            {
+                cpuStatus = hasRaggedTensor ? "cannot-check" : "error";
+                line.str("cpu_ref_message", e.what());
+            }
             catch(const std::exception& e)
             {
                 cpuStatus = "error";
@@ -1959,6 +2140,7 @@ std::string runCase(size_t index,
                                            wrapper,
                                            comparedUids,
                                            attrs,
+                                           raggedOutputs,
                                            engineBundle.tensors,
                                            reference,
                                            site)
@@ -1983,6 +2165,7 @@ std::string runCase(size_t index,
                                           wrapper,
                                           comparedUids,
                                           attrs,
+                                          raggedOutputs,
                                           gpuBundle.tensors,
                                           cpuBundle,
                                           it::ValidationSite::HOST,
@@ -2098,6 +2281,12 @@ ExportResult prepareCase(const CaseInput& input,
         auto built = sdpa_case_flow::buildCaseGraph(input.row, input.overrides, caseContext);
         auto& graph = *built.graph;
         graph.set_name(EXPORT_GRAPH_NAME);
+        // A bundle holds the declared alignment only; the shifted data start stays in the runner.
+        for(const auto& [name, offset] : built.startOffsets)
+        {
+            result.inputsNote += (result.inputsNote.empty() ? "" : "; ") + name + " data start "
+                                 + std::to_string(offset) + " bytes past alignment: not carried";
+        }
 
         result.stage = "contents";
         std::vector<std::string> notExpressible;
@@ -2171,7 +2360,7 @@ ExportResult prepareCase(const CaseInput& input,
             const auto found = jsonNames.find(uid);
             if(found == jsonNames.end() || found->second != graphTensors.attrs.at(uid)->get_name())
             {
-                return fail("content-not-expressible",
+                return fail("export-error",
                             "input uid " + std::to_string(uid) + " ("
                                 + graphTensors.attrs.at(uid)->get_name()
                                 + ") is not a tensor of that name in the graph JSON");
@@ -2205,7 +2394,7 @@ ExportResult prepareCase(const CaseInput& input,
         const bool frontendStage = result.stage == "validate" || result.stage == "serialise";
         const std::string outcome = result.stage == "realise" ? "realise-error"
                                     : frontendStage           ? "frontend-rejected"
-                                                              : "content-not-expressible";
+                                                              : "export-error";
         return fail(outcome, std::string("exception: ") + e.what());
     }
     catch(...)

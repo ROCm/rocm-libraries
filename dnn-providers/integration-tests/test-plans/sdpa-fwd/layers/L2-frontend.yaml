@@ -193,23 +193,21 @@ rules:
 
   - id: F-RAGGED-OFFSETS-ARE-LENGTHS
     kind: frontend
-    reason: "hipDNN's ragged form gives each ragged tensor B + 1 non-decreasing boundaries; sequence b holds [offset[b], offset[b + 1]). Under that form a sequence stored before a sequence of lower index, or two sequences that share memory, cannot be stated. When the offsets are the only lengths, a slot is its sequence, so a slot longer than its sequence (gapped, independent_starts) cannot be stated either."
+    reason: "Without length tensors the ragged offsets are boundaries and lengths: sequence b holds [offset[b], offset[b + 1]) and the offsets do not decrease. So a slot longer than its sequence (gapped, independent_starts) or a sequence stored before a sequence of lower index (out_of_order) cannot be stated. With length tensors the offsets are start positions only: any order can be stated, and the length tensors give the lengths."
     forbid_any:
-      - {ragged_offsets: [out_of_order, overlapping]}
-      - {ragged_offsets: [gapped, independent_starts], sequence_lengths: [uniform]}
-      - {ragged_offsets: [gapped, independent_starts], length_form: [start_position_differences]}
+      - {ragged_offsets: [gapped, independent_starts, out_of_order], sequence_lengths: [uniform]}
+      - {ragged_offsets: [gapped, independent_starts, out_of_order], length_form: [start_position_differences]}
     cites:
       - "frontend-surface.yaml axes.ragged_offsets — TA:508; DH:243-262 (checks the offset tensor's own properties only)"
-      - "rocm-libraries @ 91a40bdfd4c projects/hipdnn/docs/rfcs/0014_RaggedTensors.md:153-155 (offsets start at 0 and do not decrease)"
+      - "rocm-libraries @ 2fcf1e30202 projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/RaggedTensor.hpp:101-128 (with length tensors the lengths come from them; without them each length is offset[b + 1] - offset[b], and a decrease is refused)"
     why_frontend: >-
-      Layer 1 keeps out_of_order (sequences stored in another order). hipDNN's ragged form defines
-      the offsets as B + 1 non-decreasing boundaries, so a decreasing list states negative lengths,
-      not out-of-order starts, and one sequence ends where the next starts. out_of_order with
-      lengths from seq_len becomes stateable when PR #15080 merges. A gapped or independent slot is stated with the per-sequence length
-      tensors (cuDNN's ragged + padding form); without them the offsets are the lengths.
+      Without length tensors a decreasing list states a negative length, not an out-of-order start,
+      and one sequence ends where the next starts. With the per-sequence length tensors (cuDNN's
+      ragged + padding form) the offsets are start positions: a gapped, independent or out-of-order
+      layout is stated. Overlapping sequences are Layer 1 (D-RAGGED-NO-OVERLAP).
     evidence: read in code
     debatable: true
-    debatable_reason: "The frontend accepts any offset contents (DH:243-262); the boundary form is the API's stated definition, and the references enforce it. cuDNN's form, start positions with lengths from the length tensors, can state out-of-order and overlapping input sequences. Keeping out_of_order out of the model is a user decision (2026-11-03). The rule does not apply the start-at-0 clause of the same text: leading_gap and independent_starts (offset[0] > 0) stay values."
+    debatable_reason: "The frontend accepts any offset contents (DH:243-262). The boundary form without length tensors is hipDNN's ragged definition; the references read the offsets that way when no length tensors are given and as start positions when they are. cuDNN's form is the same: start positions with lengths from the length tensors. leading_gap (offset[0] > 0) needs no length tensors and is not removed here."
 
   - id: F-PAGE-TABLE-WIDTH-FOLLOWS-MAXLEN
     kind: frontend
@@ -363,7 +361,7 @@ expressibility:
     - {axis: head_dim_v, lost: [zero], rule: F-EXTENT-NONZERO}
     - {axis: alibi_slopes, lost: [other_positive, zero, negative], rule: F-ALIBI-NO-SLOPES}
     - {axis: scale_source, lost: [default], rule: F-SCALE-NO-DEFAULT-SOURCE}
-    - {axis: ragged_offsets, lost: "out_of_order and overlapping; gapped and independent_starts when the offsets are the only lengths", rule: F-RAGGED-OFFSETS-ARE-LENGTHS}
+    - {axis: ragged_offsets, lost: "gapped, independent_starts and out_of_order when the offsets are the only lengths", rule: F-RAGGED-OFFSETS-ARE-LENGTHS}
     - {axis: sink_dtype, lost: [fp16, bf16, fp8_e4m3, fp8_e4m3_fnuz, fp8_e5m2, fp8_e5m2_fnuz], rule: F-SINK-FLOAT-ONLY}
     - {axis: length_form, lost: [cumulative_lengths], rule: F-NO-CU-SEQ-LEN}
     - {axis: block_mask_granularity, lost: [per_element], rule: F-BLOCK-MASK-TILE-128}
@@ -389,7 +387,7 @@ expressibility:
     - {axis: amax_v, rule: F-NO-AMAX-QKV}
   how_stated:  # one line per non-obvious mapping; all read in code unless marked inferred
     batch_packing: "padded: plain dims; ragged: set_ragged_offset on Q/K/V/O (C++ only, TA:508)"
-    ragged_offsets: "contents of the offset tensor (data): B + 1 boundaries, length = offset[b + 1] − offset[b] (RaggedTokenBoundaries.hpp:67-71,89-94); DH:243-262 checks only the tensor's own properties"
+    ragged_offsets: "contents of the offset tensor (data): offset[b] is the start of sequence b; without length tensors length = offset[b + 1] − offset[b], with them the length tensors give the lengths (RaggedTensor.hpp:101-128 @ 2fcf1e30202); DH:243-262 checks only the tensor's own properties"
     sequence_lengths: "variable: padding_mask = true + seq_len_q/kv tensors (SA:354,364,602)"
     per_seq_len_q: "contents of seq_len_q (data)"
     per_seq_len_kv: "contents of seq_len_kv (data)"
@@ -435,6 +433,9 @@ expressibility:
     ragged_offset_sharing: "shared_per_side: the same offset tensor passed to set_ragged_offset of each tensor of the side; the descriptor builder finds the tensor already lowered (DescriptorHelpers.hpp:268, createOrFindTensorDesc)."
     ragged_offset_dtype: "the offset tensor's data type; DescriptorHelpers.hpp:243-275 checks that it is not virtual and not ragged, not its format."
     o_packing: "own_starts: O's own offset tensor with other contents; padded: no set_ragged_offset on O."
+    v_packing: "own_starts: V's own offset tensor with other contents; padded: no set_ragged_offset on V."
+    dropout_scale_storage: "by_value: a dropout-scale tensor with a pass-by-value value; device_memory: a dropout-scale tensor in device memory (set_dropout_scale, SdpaAttributes.hpp:407-416 @ 2fcf1e30202; TensorAttributes.hpp:106 set_is_pass_by_value)."
+    descale_storage: "by_value: a one-element factor tensor with a pass-by-value value; device_memory: the same tensor in device memory (SA:454-511; TensorAttributes.hpp:106 @ 2fcf1e30202 set_is_pass_by_value)."
     length_form: "per_sequence_lengths: seq_len_q / seq_len_kv; start_position_differences: the ragged offsets without length tensors; cumulative_lengths: no setter (F-NO-CU-SEQ-LEN)."
     block_mask_granularity: "tile: the block-mask tensor of 128 x 128 tiles (FBS:49-51); no setter for another tile size."
     block_mask_dtype: "the block-mask tensor's data type (set_data_type); the node does not check it (SdpaFwdNode.hpp:34-252)."

@@ -65,7 +65,7 @@ rejection_probes:
   - entry: MV-04
     what: "Output strides that send two elements to one address"
     basis: D-OUTPUT-SELF-ALIAS
-    also_basis: "P-NO-OUTPUT-BROADCAST (policy, ALMIOPEN-3114) for MV-04a and MV-04c"
+    also_basis: "P-NO-OUTPUT-BROADCAST (policy, ALMIOPEN-3155) for MV-04a and MV-04c"
     why: "set_stride takes any int64 values; only the count is checked (TA:438,627-630)."
     probes:
       - {id: MV-04a, start_from: shared, changes: {strides_o: zero_broadcast}, level: graph, needs_execution: false, expect: refused at validate or build}
@@ -116,7 +116,7 @@ rejection_probes:
     what: "Overlapping ragged offsets"
     basis: D-RAGGED-NO-OVERLAP
     why: "Offsets are tensor contents; DH:243-262 checks only the offset tensor's own properties."
-    moot: "hipDNN's ragged offsets are B + 1 non-decreasing boundaries, so overlapping sequences cannot be stated and the model has no value overlapping (F-RAGGED-OFFSETS-ARE-LENGTHS). The probe belongs to the rejection suite; its request is kept in api_overrides."
+    moot: "The model has no value overlapping: Layer 1 removes it (D-RAGGED-NO-OVERLAP), and both references refuse overlapping sequences at execute (RaggedTensor.hpp:208-219). The probe belongs to the rejection suite; its request is kept in api_overrides."
     probes:
       - {id: MV-10a, start_from: shared, changes: {batch_packing: ragged, ragged_offsets: contiguous}, api_overrides: "replace the ragged offsets with start_i = i (sequences longer than 1 overlap)", level: execute, needs_execution: true, expect: refused at execute}
 
@@ -217,16 +217,6 @@ rejection_probes:
       - {id: MV-22d, start_from: shared, changes: {strides_v: negative}, level: graph, needs_execution: false, expect: refused at validate}
       - {id: MV-22e, start_from: shared, changes: {strides_o: negative}, level: graph, needs_execution: false, expect: refused at validate}
       - {id: MV-22f, start_from: shared, changes: {stats_output: requested, dtype_stats: fp32, dim_order_stats: bhsd, alignment_stats: wide_aligned, strides_stats: negative}, level: graph, needs_execution: false, expect: refused at validate}
-
-  - entry: MV-23
-    what: "A zero stride on the head dim of Q, K or V (policy: should be refused)"
-    basis: P-NO-HEAD-DIM-BROADCAST
-    ticket: ALMIOPEN-3114
-    why: "set_stride takes any int64 values (TA:438,627-630); with B, H and S all 1 the builder puts the zero stride on D. A zero stride on O, Stats, Max or Sum_exp (P-NO-OUTPUT-BROADCAST) is probed by MV-04a and MV-04c."
-    probes:
-      - {id: MV-23a, start_from: shared, changes: {batch_size: one, q_heads: one, seq_q: one, seq_kv: one, seq_q_vs_seq_kv: equal, strides_q: zero_broadcast}, level: graph, needs_execution: false, expect: refused at validate}
-      - {id: MV-23b, start_from: shared, changes: {batch_size: one, q_heads: one, seq_q: one, seq_kv: one, seq_q_vs_seq_kv: equal, strides_k: zero_broadcast}, level: graph, needs_execution: false, expect: refused at validate}
-      - {id: MV-23c, start_from: shared, changes: {batch_size: one, q_heads: one, seq_q: one, seq_kv: one, seq_q_vs_seq_kv: equal, strides_v: zero_broadcast}, level: graph, needs_execution: false, expect: refused at validate}
 
 path_variants:
 

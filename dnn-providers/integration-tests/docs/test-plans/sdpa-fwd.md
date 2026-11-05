@@ -313,11 +313,9 @@ Example of a `forbid`:
 With one key, a window cannot cover "some but not all" keys, so these rows
 are removed.
 
-The frontend rule `F-NO-NEGATIVE-STRIDE` removes negative strides, and the
-policy rule `P-NO-HEAD-DIM-BROADCAST` removes a zero stride on the head
-dimension of Q, K or V. Both name ticket ALMIOPEN-3114, which asks hipDNN to
-refuse these requests. The requests come back as rejection probes MV-22 and
-MV-23.
+The frontend rule `F-NO-NEGATIVE-STRIDE` removes negative strides. It names
+ticket ALMIOPEN-3114, which asks hipDNN to refuse these requests. The requests
+come back as rejection probe MV-22.
 
 ## 6. Generating the cases
 
@@ -505,31 +503,46 @@ A **bundle** is a graph test in `integration-test-bundles/`. A **sweep** is a
 
 ### 9.1 Which rows a bundle can express
 
-A bundle holds a graph and, for each case, a few fixed values. It cannot hold
-exact tensor contents. So a row that needs exact contents cannot be a bundle
-yet. It stays in the generated CSV, and the selection step
-(`scripts/sdpa_case_flow_poc/bundles/select_rows.py`) skips it for the reasons below. A row can have several reasons.
+A bundle holds a graph and, for each case, a few fixed values. Some tensor
+contents are also bundle contents: dense page tables, `seq_len` values, block
+masks, descale lists, a caller's dropout mask, and dropout seeds and offsets
+held in device memory. Other exact contents cannot be in a bundle. So a row that
+needs them cannot be a bundle yet. It stays in the generated CSV, and the
+selection step (`scripts/sdpa_case_flow_poc/bundles/select_rows.py`) skips it for
+the reasons below.
 
-| Reason | Why a bundle cannot express it | Rows |
+The first four reasons say that a bundle cannot express the row. The last two
+are extra exclusions: the row could be a bundle, but the selection step leaves it
+out. The Rows column counts every row that has the reason. A row can have several
+reasons, so the counts overlap and do not add up to the number of excluded rows.
+
+| Reason | Why the row is not a bundle | Rows |
 |---|---|---|
-| `page_table_contents` | A packed page table carries a ragged offset, and the harness does not verify ragged graphs. Dense page tables are bundle contents. | 1,702 |
-| `ragged_offsets` | Ragged offsets are tensor contents. | 1,082 |
-| `tensor_overlap` | Two tensors that share memory need control of the pointers, which a bundle does not have. | 540 |
-| `arch_dtype` | The number format depends on the GPU (for example fp8 E4M3 becomes E4M3 FNUZ on gfx942), and one graph has one format. | 323 |
-| `zero_stride_needs_pr14709` | A zero stride on an input needs a data-SDK change (PR #14709). These rows are left out of this bundle set. Adding them is planned as a follow-up change. Only the selection step removes these rows. | 182 (6 otherwise expressible) |
-| `dropout_without_rng_dump` | Random dropout without an `rng_dump` output has no oracle: the references check random dropout only through the dumped mask. | 44 (8 otherwise expressible) |
+| `ragged_offsets` | Ragged offsets are tensor contents. | 3,585 |
+| `tensor_overlap` | Two tensors that share memory need control of the pointers, which a bundle does not have. | 1,310 |
+| `arch_dtype` | The number format depends on the GPU (for example fp8 E4M3 becomes E4M3 FNUZ on gfx942), and one graph has one format. | 399 |
+| `page_table_contents` | A packed page table carries a ragged offset, and the harness does not verify ragged graphs. Dense page tables are bundle contents. | 166 |
+| `zero_stride_needs_pr14709` | A zero stride on an input needs a data-SDK change (PR #14709). These rows are left out of this bundle set. Adding them is planned as a follow-up change. Only the selection step removes these rows. | 1,142 (874 otherwise expressible) |
+| `dropout_without_rng_dump` | Random dropout without an `rng_dump` output has no oracle: the references check random dropout only through the dumped mask. | 66 (14 otherwise expressible) |
 
-9,883 rows became bundles. 6,846 rows are excluded. The selection step never
-changes the model or the generated rows. It only filters. To bring a row back, change
-the filter and regenerate the bundles.
+These are the rows that the selection step chooses from the current
+`levels.csv`, which has 22,909 rows. 17,205 rows become bundles and 5,704 rows
+are excluded. Of the excluded rows, 4,820 have at least one of the first four
+reasons. The other 884 could be bundles but have an extra reason: 870 have only
+a zero stride, 10 have only dropout without `rng_dump`, and 4 have both. The
+"otherwise expressible" counts in the table, 874 and 14, include those 4 rows
+twice. The bundle set in the tree is regenerated from this selection later.
+
+The selection step never changes the model or the generated rows. It only
+filters. To bring a row back, change the filter and regenerate the bundles.
 
 | Tier | All rows | Bundle rows | Sweeps | Largest sweep | Summed `est_seconds` of the bundle rows, gfx942 / gfx950 |
 |---|---|---|---|---|---|
-| quick | 1,330 | 749 | 23 | 286 | 20.0 / 19.7 |
-| standard | 6,782 | 4,152 | 102 | 1,358 | 232.3 / 165.2 |
-| comprehensive | 3,080 | 1,582 | 59 | 639 | 564.6 / 498.7 |
-| full | 5,537 | 3,400 | 109 | 971 | 2,304.7 / 1,684.0 |
-| total | 16,729 | 9,883 | 293 | | |
+| quick | 1,610 | 1,234 | 90 | 313 | 42.6 / 33.0 |
+| standard | 9,405 | 7,301 | 253 | 1,836 | 394.9 / 294.2 |
+| comprehensive | 4,534 | 3,375 | 208 | 806 | 1,269.9 / 903.9 |
+| full | 7,360 | 5,295 | 265 | 1,264 | 2,436.5 / 1,743.4 |
+| total | 22,909 | 17,205 | 816 | | |
 
 ### 9.2 How a graph is made from a row
 
@@ -747,8 +760,10 @@ these defects need no skip.
   `support.json` file beside a sweep. It says that an engine supports a case on
   a given GPU ([Support Matrix](../support-matrix.md)). Claims come in a later
   change.
-- 6,846 rows are not bundles, mostly because they need exact tensor contents.
-  They are rows of the generated CSV, but no bundle holds them.
+- 5,704 rows are not bundles. 4,820 of them need contents or settings a bundle
+  cannot express (§ 9.1), mostly ragged offsets and tensors that share memory.
+  The other 884 have a zero stride or random dropout without `rng_dump`. They
+  are rows of the generated CSV, but no bundle holds them.
 - The rejection probes and the API-path variants in `injections.yaml` are not
   bundles. They belong to a rejection suite.
 - The sizes override cannot set the page size or the window bounds, so the

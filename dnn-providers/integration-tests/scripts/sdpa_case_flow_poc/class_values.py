@@ -14,7 +14,7 @@ from pathlib import Path
 
 from .model import Model, ModelError, load_yaml
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 FILE_NAME = "class-to-value.json"
 INVERSE_SQRT_HEAD_DIM = "1/sqrt(head_dim_qk)"
 INVERSE_SQRT_HEAD_DIM_TOKEN = "inverse_sqrt_head_dim_qk"
@@ -30,6 +30,7 @@ OFFSET_LAYOUTS = (
     "full_slots",
     "prefix_sum_after_gap",
     "slot_end_aligned",
+    "reversed_slots",
 )
 # Tables the case builder reads by value id; each must still name every value of its axis.
 COVER_ONLY_TABLES = (
@@ -37,6 +38,7 @@ COVER_ONLY_TABLES = (
     "ragged_offset_form",
     "ragged_offset_dtype",
     "o_packing",
+    "v_packing",
     "block_mask_granularity",
     "block_mask_dtype",
     "sink_values",
@@ -211,6 +213,35 @@ def build(model: Model, model_dir: Path) -> dict:
         _covers(t, model, axis, axis)
         size[axis] = {k: _integer(t[k], f"{axis}.{k}") for k in model.values[axis]}
 
+    head_table = _entry(table, "head_counts", "class_to_value")
+    sharings = sorted(
+        set(model.values["k_head_sharing"]) | set(model.values["v_head_sharing"])
+    )
+    head_counts = {}
+    for sharing in sharings:
+        where = f"head_counts.{sharing}"
+        by_class = _entry(
+            _entry(head_table, sharing, "head_counts"), "by_q_heads", where
+        )
+        if not isinstance(by_class, dict) or not by_class:
+            raise ModelError(
+                f"class_to_value: {where}.by_q_heads is not a non-empty map"
+            )
+        for k in by_class:
+            if k not in model.values["q_heads"]:
+                raise ModelError(
+                    f"class_to_value: {where}.by_q_heads has unknown q_heads class {k}"
+                )
+        head_counts[sharing] = {
+            k: _integer(v, f"{where}.by_q_heads.{k}") for k, v in by_class.items()
+        }
+    where = "head_counts.gqa.k_and_v_differ"
+    differ = _entry(_entry(head_table, "gqa", "head_counts"), "k_and_v_differ", where)
+    k_and_v_differ = {
+        key: _integer(_entry(differ, key, where), f"{where}.{key}")
+        for key in ("H_k", "H_v")
+    }
+
     seq_table = _entry(table, "seq_lengths", "class_to_value")
     if not isinstance(seq_table, list):
         raise ModelError("class_to_value: seq_lengths is not a list")
@@ -251,6 +282,20 @@ def build(model: Model, model_dir: Path) -> dict:
     dim_order = {
         k: _dim_order(do[k], f"dim_order.{k}") for k in model.values["dim_order_q"]
     }
+
+    al = _entry(table, "alignment", "class_to_value")
+    _covers(al, model, "alignment_q", "alignment")
+    alignment = {}
+    for k in model.values["alignment_q"]:
+        where = f"alignment.{k}"
+        alignment[k] = {}
+        for key in ("start_offset", "declared_alignment"):
+            v = _entry(al[k], key, where)
+            if v != "element_size":
+                v = _integer(v, f"{where}.{key}")
+                if v < 0:
+                    raise ModelError(f"class_to_value: {where}.{key} is negative")
+            alignment[k][key] = v
 
     sv = _entry(table, "scale_value", "class_to_value")
     _covers(sv, model, "scale_value", "scale_value")
@@ -577,10 +622,12 @@ def build(model: Model, model_dir: Path) -> dict:
         "selection": "scale_value lists representatives, primary first; a case uses the primary",
         "batch_size": size["batch_size"],
         "q_heads": size["q_heads"],
+        "head_counts": {"by_q_heads": head_counts, "k_and_v_differ": k_and_v_differ},
         "seq_lengths": seq,
         "head_dim": head_dim,
         "dtype_differs": {"by_dtype_q": by_q, "by_arch": by_arch},
         "dim_order": dim_order,
+        "alignment": alignment,
         "scale_value": scale,
         "dropout_probability": dropout_p,
         "dropout_seed_offset": seed_offset,

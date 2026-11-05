@@ -17,7 +17,7 @@ Exclusion reasons:
                       AK-DESCALE-WITH-FP8 that forbid a present Q, K or V descale. Levels that ignore
                       the answer-key rules admit such rows, and no reference can check them.
   not_selected:tier, not_selected:min_sweep_size         the selection parameters
-  frontend_rejects, realise_error, content_not_expressible, export_missing
+  frontend_rejects, realise_error, content_not_expressible, export_error, export_missing
                       outcomes of a runner export, when --export-outcomes is given
 
 With the default parameters, and an input whose SHA-256 equals the one in
@@ -53,28 +53,28 @@ DESCALE_AXES = ("descale_q", "descale_k", "descale_v")
 
 # Counts for the CSV named by levels.csv.sha256, with the default parameters.
 EXPECTED = {
-    "rows": 22495,
+    "rows": 22909,
     "content_reasons": {
-        "ragged_offsets": 2883,
-        "page_table_contents": 190,
-        "tensor_overlap": 1254,
-        "arch_dtype": 411,
+        "ragged_offsets": 3585,
+        "page_table_contents": 166,
+        "tensor_overlap": 1310,
+        "arch_dtype": 399,
     },
     "extra_of_expressible": {
-        "zero_stride_needs_pr14709": 854,
-        "dropout_without_rng_dump": 10,
+        "zero_stride_needs_pr14709": 874,
+        "dropout_without_rng_dump": 14,
     },
     "per_tier": {
         # rows, bundle rows, strict sweeps, alignment-split sweeps, largest, 1-case, then the summed
         # est_seconds on gfx942 and gfx950 of the expressible rows before the extra exclusions
-        "quick": (1690, 1273, 89, 153, 316, 26, 44.0, 34.1),
-        "standard": (9130, 7410, 254, 473, 1826, 19, 425.0, 316.5),
-        "comprehensive": (4438, 3451, 208, 364, 790, 66, 1351.8, 961.9),
-        "full": (7237, 5355, 266, 485, 1243, 66, 2598.3, 1859.0),
+        "quick": (1610, 1234, 90, 154, 313, 31, 42.6, 33.0),
+        "standard": (9405, 7301, 253, 468, 1836, 18, 418.5, 311.7),
+        "comprehensive": (4534, 3375, 208, 356, 806, 65, 1328.1, 945.2),
+        "full": (7360, 5295, 265, 482, 1264, 61, 2564.9, 1835.2),
     },
-    "bundle_rows": 17489,
-    "sweeps": 817,
-    "sweeps_alignment_split": 1475,
+    "bundle_rows": 17205,
+    "sweeps": 816,
+    "sweeps_alignment_split": 1460,
 }
 
 
@@ -295,6 +295,7 @@ EXPORT_REASON = {
     "frontend-rejected": "frontend_rejects",
     "realise-error": "realise_error",
     "content-not-expressible": "content_not_expressible",
+    "export-error": "export_error",
 }
 
 

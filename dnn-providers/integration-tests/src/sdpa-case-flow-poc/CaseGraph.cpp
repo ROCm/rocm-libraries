@@ -213,30 +213,18 @@ std::pair<int64_t, int64_t> sequenceLengths(const Row& row,
          + " is not in the class-to-value table");
 }
 
-int64_t headsFor(const std::string& axis, const std::string& sharing, int64_t qHeads)
+int64_t headsFor(const std::string& axis,
+                 const std::string& sharing,
+                 const std::string& qHeadsClass,
+                 const ClassValues& values)
 {
-    if(sharing == "mha")
+    const auto& byQHeads = classValue(values.headCounts, axis, sharing);
+    const auto it = byQHeads.find(qHeadsClass);
+    if(it == byQHeads.end())
     {
-        return qHeads;
+        fail(axis + "=" + sharing + " has no head count for q_heads=" + qHeadsClass);
     }
-    if(sharing == "gqa")
-    {
-        if(qHeads < 8)
-        {
-            fail(axis + "=gqa needs at least 8 query heads; the case has "
-                 + std::to_string(qHeads));
-        }
-        return qHeads / 4;
-    }
-    if(sharing == "mqa")
-    {
-        return 1;
-    }
-    if(sharing == "non_divisor")
-    {
-        return qHeads == 8 ? 3 : 2;
-    }
-    unknownValue(axis, sharing);
+    return it->second;
 }
 
 Dims packedStrides(const Dims& dims)
@@ -251,12 +239,16 @@ Dims packedStrides(const Dims& dims)
     return strides;
 }
 
-// Logical dims are always [B, H, S, D]; `physical` lists them outermost first. A view
+// Logical dims are always [B, H, S, D]; `order` lists them outermost first. A view
 // (`inherited`) takes its owner's strides, one per dim, and has no order of its own.
+// A ragged tensor stores tokens, not batches: the batch leaves the order and the sequence axis
+// holds all B x S token slots. So `bhsd` becomes [H, B x S, D], and an order with S outside B
+// becomes [B x S, H, D]. Its batch stride is one slot of S tokens; it only sizes the buffer.
 Dims stridesFor(const Dims& dims,
-                const std::vector<size_t>& physical,
+                const std::vector<size_t>& order,
                 const std::string& strideAxis,
                 const std::string& strideClass,
+                bool ragged,
                 const Dims* ownerStrides = nullptr)
 {
     if(strideClass == "inherited")
@@ -269,7 +261,19 @@ Dims stridesFor(const Dims& dims,
         return *ownerStrides;
     }
 
+    std::vector<size_t> physical;
+    for(const size_t dim : order)
+    {
+        if(!ragged || dim != 0)
+        {
+            physical.push_back(dim);
+        }
+    }
     Dims extents = dims;
+    if(ragged)
+    {
+        extents[2] = dims[0] * dims[2];
+    }
     if(strideClass == "non_contiguous_view")
     {
         extents[1] *= 2;
@@ -282,11 +286,16 @@ Dims stridesFor(const Dims& dims,
         const size_t dim = physical[i];
         strides[dim] = running;
         int64_t extent = extents[dim];
-        if(strideClass == "padded" && i == physical.size() - 1)
+        // `padded` adds 16 head-dim slots, wherever D sits in the order.
+        if(strideClass == "padded" && dim == 3)
         {
             extent += 16;
         }
         running *= extent;
+    }
+    if(ragged)
+    {
+        strides[0] = dims[2] * strides[2];
     }
 
     if(strideClass == "packed" || strideClass == "padded")
@@ -300,7 +309,8 @@ Dims stridesFor(const Dims& dims,
     }
     if(strideClass == "head_dim_strided")
     {
-        // D and every dimension outside it get twice their packed stride.
+        // D and every dimension outside it get twice their packed stride. The batch of a ragged
+        // tensor counts as outside D.
         for(const size_t dim : physical)
         {
             strides[dim] *= 2;
@@ -308,6 +318,10 @@ Dims stridesFor(const Dims& dims,
             {
                 break;
             }
+        }
+        if(ragged)
+        {
+            strides[0] *= 2;
         }
         return strides;
     }
@@ -349,30 +363,25 @@ Dims stridesFor(const Dims& dims,
     unknownValue(strideAxis, strideClass);
 }
 
-void applyAlignment(TensorAttributes& tensor,
-                    const std::string& axis,
-                    const std::string& alignment,
-                    DataType type)
+// Sets the declared alignment and returns how many bytes the data start sits past an aligned
+// allocation start.
+int64_t applyAlignment(TensorAttributes& tensor,
+                       const std::string& axis,
+                       const std::string& alignment,
+                       DataType type,
+                       const ClassValues& values)
 {
-    if(alignment == "wide_aligned")
+    const auto& entry = classValue(values.alignment, axis, alignment);
+    const auto bytes
+        = [&](const std::optional<int64_t>& value) { return value.value_or(elementBytes(type)); };
+    const int64_t startOffset = bytes(entry.startOffset);
+    const int64_t declared = bytes(entry.declaredAlignment);
+    if(alignment == "sub_element" && elementBytes(type) == 1)
     {
-        return;
+        fail(axis + "=sub_element is impossible for a 1-byte format");
     }
-    if(alignment == "element_aligned")
-    {
-        tensor.set_alignment(elementBytes(type));
-        return;
-    }
-    if(alignment == "sub_element")
-    {
-        if(elementBytes(type) == 1)
-        {
-            fail(axis + "=sub_element is impossible for a 1-byte format");
-        }
-        tensor.set_alignment(1);
-        return;
-    }
-    unknownValue(axis, alignment);
+    tensor.set_alignment(declared);
+    return startOffset;
 }
 
 int64_t ceilDiv(int64_t a, int64_t b)
@@ -695,7 +704,7 @@ public:
         applyDimOverrides();
         addStructuralContents();
 
-        return {graph, realisedText(), _contents};
+        return {graph, realisedText(), _contents, _startOffsets};
     }
 
 private:
@@ -725,6 +734,7 @@ private:
     std::map<std::string, TensorPtr> _named;
     std::vector<std::string> _notes;
     std::map<std::string, Contents> _contents;
+    std::map<std::string, int64_t> _startOffsets;
     int64_t _nextUid = 1;
 
     // Value classes of tensor contents that the builder does not write: every row must hold the
@@ -819,12 +829,13 @@ private:
         const auto& kSharing = valueOf(_row, "k_head_sharing");
         const auto& vSharing = valueOf(_row, "v_head_sharing");
         const auto& kvRelation = valueOf(_row, "k_heads_vs_v_heads");
-        _hk = headsFor("k_head_sharing", kSharing, _hq);
-        _hv = headsFor("v_head_sharing", vSharing, _hq);
+        const auto& qHeadsClass = valueOf(_row, "q_heads");
+        _hk = headsFor("k_head_sharing", kSharing, qHeadsClass, _values);
+        _hv = headsFor("v_head_sharing", vSharing, qHeadsClass, _values);
         if(kSharing == "gqa" && vSharing == "gqa" && kvRelation == "differ")
         {
-            _hk = 2;
-            _hv = 4;
+            _hk = _values.differK;
+            _hv = _values.differV;
         }
         if(kvRelation == "equal" && _hk != _hv)
         {
@@ -931,16 +942,56 @@ private:
                 fail(orderAxis + "=" + order + " with " + strideAxis + "=" + strideClass
                      + ": a view inherits both its order and its strides");
             }
-            const Dims owner = viewOwner(suffix, dims)->get_stride();
-            return stridesFor(dims, {}, strideAxis, strideClass, &owner);
+            const auto owner = viewOwner(suffix, dims);
+            if(storedRagged(suffix) && dims.at(2) > owner->get_dim().at(2))
+            {
+                fail(strideAxis
+                     + "=inherited: a ragged view with longer sequences than its owner "
+                       "reads past the owner's buffer");
+            }
+            const Dims ownerStrides = owner->get_stride();
+            return stridesFor(dims, {}, strideAxis, strideClass, false, &ownerStrides);
         }
-        return stridesFor(
-            dims, classValue(_values.dimOrder, orderAxis, order), strideAxis, strideClass);
+        return stridesFor(dims,
+                          classValue(_values.dimOrder, orderAxis, order),
+                          strideAxis,
+                          strideClass,
+                          storedRagged(suffix));
+    }
+
+    // True when the tensor of this layout suffix carries a ragged offset over token slots. A
+    // paged K or V keeps its page-pool layout.
+    bool storedRagged(const std::string& suffix) const
+    {
+        if(suffix == "q")
+        {
+            return raggedTensor("Q");
+        }
+        if(suffix == "k")
+        {
+            return raggedTensor("K") && !pagedSide("K");
+        }
+        if(suffix == "v")
+        {
+            return raggedV() && !pagedSide("V");
+        }
+        if(suffix == "o")
+        {
+            return raggedO();
+        }
+        if(suffix == "stats")
+        {
+            return raggedTensor("Q")
+                   && classValue(
+                       _values.raggedStats, "stats_packing", valueOf(_row, "stats_packing"));
+        }
+        fail("no layout suffix '" + suffix + "'");
     }
 
     // The input a view reads through (class_to_value tensor_overlap.inputs_overlap): V reads
-    // through K, K through Q. A view with a dimension larger than its owner's does not fit inside
-    // the owner; the note `<view>_view_exceeds_owner` marks it.
+    // through K when head_dim_v <= head_dim_qk, else K reads through Q. A view with a dimension
+    // larger than its owner's does not fit inside the owner; the note `<view>_view_exceeds_owner`
+    // marks it.
     TensorPtr viewOwner(const std::string& suffix, const Dims& dims)
     {
         const auto& overlap = valueOf(_row, "tensor_overlap");
@@ -960,6 +1011,13 @@ private:
             fail("strides_" + suffix + "=inherited: its owner " + ownerSuffix
                  + " is a view as well");
         }
+        const bool vInsideK = _dv <= _dqk;
+        if((suffix == "v") != vInsideK)
+        {
+            fail("strides_" + suffix + "=inherited at head_dim_qk " + std::to_string(_dqk)
+                 + ", head_dim_v " + std::to_string(_dv) + ": the view is "
+                 + (vInsideK ? "V inside K" : "K inside Q"));
+        }
         _notes.push_back(suffix + "_view_of=" + ownerSuffix);
         const auto& ownerDims = owner->get_dim();
         for(size_t i = 0; i < dims.size() && i < ownerDims.size(); ++i)
@@ -973,6 +1031,18 @@ private:
         return owner;
     }
 
+    // Start offsets are keyed by the tensor's own name; the SDPA node names O and Stats.
+    void alignTensor(TensorAttributes& tensor, const std::string& suffix, DataType type)
+    {
+        const std::string axis = "alignment_" + suffix;
+        const int64_t offset = applyAlignment(tensor, axis, valueOf(_row, axis), type, _values);
+        if(offset != 0)
+        {
+            _startOffsets[tensor.get_name()] = offset;
+            _notes.push_back(suffix + "_start_offset=" + std::to_string(offset));
+        }
+    }
+
     TensorPtr layoutTensor(const std::string& name,
                            const std::string& suffix,
                            const Dims& dims,
@@ -980,7 +1050,7 @@ private:
     {
         auto tensor = newTensor(name);
         tensor->set_dim(dims).set_stride(layoutStrides(dims, suffix)).set_data_type(type);
-        applyAlignment(*tensor, "alignment_" + suffix, valueOf(_row, "alignment_" + suffix), type);
+        alignTensor(*tensor, suffix, type);
         return tensor;
     }
 
@@ -992,19 +1062,20 @@ private:
         if(pagedAny())
         {
             const auto table = pagedTable();
-            // A dense side beside a paged one spans the declared maximum key length.
+            // A dense side beside a paged one spans the declared maximum key length. A paged
+            // pool holds one page for every slot of every sequence's table.
             kDims[2] = table.declaredMaxSeqLenKv;
             vDims[2] = table.declaredMaxSeqLenKv;
             if(pagedSide("K"))
             {
-                const int64_t pool = _b * ceilDiv(_skv, table.pageSizeK);
+                const int64_t pool = _b * table.widthK;
                 kDims = {pool, _hk, table.pageSizeK, _dqk};
                 _notes.push_back("k_page_pool=" + std::to_string(pool) + "x"
                                  + std::to_string(table.pageSizeK));
             }
             if(pagedSide("V"))
             {
-                const int64_t pool = _b * ceilDiv(_skv, table.pageSizeV);
+                const int64_t pool = _b * table.widthV;
                 vDims = {pool, _hv, table.pageSizeV, _dv};
                 _notes.push_back("v_page_pool=" + std::to_string(pool) + "x"
                                  + std::to_string(table.pageSizeV));
@@ -1019,7 +1090,7 @@ private:
         for(const auto& [letter, tensor] :
             std::vector<std::pair<std::string, TensorPtr>>{{"Q", _q}, {"K", _k}, {"V", _v}})
         {
-            if(raggedTensor(letter))
+            if(letter == "V" ? raggedV() : raggedTensor(letter))
             {
                 attachRaggedOffset(*tensor, letter);
                 ragged += letter;
@@ -1044,6 +1115,10 @@ private:
         if(raggedTensor("O") && oPacking() != "as_q")
         {
             _notes.push_back("o_packing=" + oPacking());
+        }
+        if(raggedTensor("V") && vPacking() != "as_k")
+        {
+            _notes.push_back("v_packing=" + vPacking());
         }
     }
 
@@ -1099,6 +1174,26 @@ private:
     bool raggedO() const
     {
         return raggedTensor("O") && oPacking() != "padded";
+    }
+
+    std::string vPacking() const
+    {
+        const auto id = childValueOr("v_packing", "as_k");
+        if(id != "as_k" && id != "own_starts" && id != "padded")
+        {
+            unknownValue("v_packing", id);
+        }
+        if(id == "own_starts" && sharedTokenOffsets())
+        {
+            fail("v_packing=own_starts needs V's own offset tensor; ragged_offset_form is "
+                 "shared_tokens");
+        }
+        return id;
+    }
+
+    bool raggedV() const
+    {
+        return raggedTensor("V") && vPacking() != "padded";
     }
 
     // Per-tensor element offsets: one offset tensor per ragged tensor. Token offsets: one offset
@@ -1840,7 +1935,13 @@ private:
         else if(maxId == "larger")
         {
             const int64_t tableKeys = table.pagesPerSequence * pageSize;
-            table.declaredMaxSeqLenKv = tableKeys > _skv ? tableKeys : 2 * _skv;
+            if(tableKeys <= _skv)
+            {
+                fail("max_seq_len_kv=larger needs a page table that spans more than S_kv keys; "
+                     "page_count="
+                     + countId + " spans " + std::to_string(tableKeys));
+            }
+            table.declaredMaxSeqLenKv = tableKeys;
         }
         else if(maxId == "smaller")
         {
@@ -2045,7 +2146,7 @@ private:
     {
         const Dims oDims = {_b, _hq, _sq, _dv};
         o->set_output(true).set_data_type(_fo).set_dim(oDims).set_stride(layoutStrides(oDims, "o"));
-        applyAlignment(*o, "alignment_o", valueOf(_row, "alignment_o"), _fo);
+        alignTensor(*o, "o", _fo);
         if(raggedO())
         {
             attachRaggedOffset(*o, "O");
@@ -2069,7 +2170,7 @@ private:
         const Dims dims = {_b, _hq, _sq, 1};
         stats->set_output(true).set_data_type(type).set_dim(dims).set_stride(
             layoutStrides(dims, "stats"));
-        applyAlignment(*stats, "alignment_stats", valueOf(_row, "alignment_stats"), type);
+        alignTensor(*stats, "stats", type);
         if(classValue(_values.raggedStats, "stats_packing", valueOf(_row, "stats_packing")))
         {
             if(!raggedTensor("Q"))
@@ -2167,12 +2268,14 @@ private:
     }
 
     // The offset layout of a ragged tensor: the row's ragged_offsets value, or for O with
-    // o_packing own_starts, full slots beside a Q packed end to end and end to end otherwise.
+    // o_packing own_starts (V with v_packing own_starts), full slots beside a Q (K) packed end to
+    // end and end to end otherwise.
     OffsetLayout offsetLayoutOf(const std::string& tensorName) const
     {
         const auto& offsetsId = valueOf(_row, "ragged_offsets");
         const auto layout = classValue(_values.raggedOffsets, "ragged_offsets", offsetsId);
-        if(tensorName == "o" && oPacking() == "own_starts")
+        if((tensorName == "o" && oPacking() == "own_starts")
+           || (tensorName == "v" && vPacking() == "own_starts"))
         {
             return layout == OffsetLayout::PREFIX_SUM ? OffsetLayout::FULL_SLOTS
                                                       : OffsetLayout::PREFIX_SUM;
@@ -2238,6 +2341,10 @@ private:
                 {
                     tokens.push_back(b < _b ? (b + 1) * stored - lengths[static_cast<size_t>(b)]
                                             : b * stored);
+                }
+                else if(layout == OffsetLayout::REVERSED_SLOTS)
+                {
+                    tokens.push_back(b < _b ? (_b - 1 - b) * stored : b * stored);
                 }
                 else
                 {
@@ -2662,7 +2769,8 @@ OffsetLayout offsetLayoutAt(const Json& value, const std::string& where)
         = {{"prefix_sum_of_lengths", OffsetLayout::PREFIX_SUM},
            {"full_slots", OffsetLayout::FULL_SLOTS},
            {"prefix_sum_after_gap", OffsetLayout::PREFIX_SUM_AFTER_GAP},
-           {"slot_end_aligned", OffsetLayout::SLOT_END_ALIGNED}};
+           {"slot_end_aligned", OffsetLayout::SLOT_END_ALIGNED},
+           {"reversed_slots", OffsetLayout::REVERSED_SLOTS}};
     const auto name = stringAt(member(value, "offsets", where), where + ".offsets");
     const auto it = LAYOUTS.find(name);
     if(it == LAYOUTS.end())
@@ -2713,7 +2821,7 @@ bool raggedStatsAt(const Json& value, const std::string& where)
 
 ClassValues parseClassValuesJson(const Json& root)
 {
-    constexpr int64_t SCHEMA_VERSION = 3;
+    constexpr int64_t SCHEMA_VERSION = 4;
     if(integerAt(member(root, "schema_version", "the file"), "schema_version") != SCHEMA_VERSION)
     {
         badFile("schema_version is not " + std::to_string(SCHEMA_VERSION));
@@ -2722,8 +2830,47 @@ ClassValues parseClassValuesJson(const Json& root)
     ClassValues values;
     values.batchSize = tableAt(root, "batch_size", integerAt);
     values.qHeads = tableAt(root, "q_heads", integerAt);
+    const auto& headCounts = member(root, "head_counts", "the file");
+    values.headCounts
+        = tableAt(headCounts, "by_q_heads", [](const Json& value, const std::string& where) {
+              if(!value.is_object() || value.empty())
+              {
+                  badFile(where + " is not a non-empty object");
+              }
+              std::map<std::string, int64_t> counts;
+              for(auto it = value.begin(); it != value.end(); ++it)
+              {
+                  counts[it.key()] = integerAt(it.value(), where + "." + it.key());
+                  if(counts[it.key()] < 1)
+                  {
+                      badFile(where + "." + it.key() + " is not a positive head count");
+                  }
+              }
+              return counts;
+          });
+    const auto& headsDiffer = member(headCounts, "k_and_v_differ", "head_counts");
+    values.differK = integerAt(member(headsDiffer, "H_k", "head_counts.k_and_v_differ"),
+                               "head_counts.k_and_v_differ.H_k");
+    values.differV = integerAt(member(headsDiffer, "H_v", "head_counts.k_and_v_differ"),
+                               "head_counts.k_and_v_differ.H_v");
     values.headDim = tableAt(root, "head_dim", integerAt);
     values.dimOrder = tableAt(root, "dim_order", dimOrderAt);
+    values.alignment = tableAt(root, "alignment", [](const Json& value, const std::string& where) {
+        const auto bytes = [&](const char* key) -> std::optional<int64_t> {
+            const auto& field = member(value, key, where);
+            if(field.is_string() && field.get<std::string>() == "element_size")
+            {
+                return std::nullopt;
+            }
+            const auto n = integerAt(field, where + "." + key);
+            if(n < 0)
+            {
+                badFile(where + "." + key + " is negative");
+            }
+            return n;
+        };
+        return AlignmentEntry{bytes("start_offset"), bytes("declared_alignment")};
+    });
     values.scaleValue = tableAt(root, "scale_value", scaleRepresentativesAt);
     values.dropoutProbability = tableAt(root, "dropout_probability", numberAt);
     values.dropoutMaskScale = tableAt(root, "dropout_mask_scale", numberAt);
@@ -2883,6 +3030,7 @@ const std::vector<std::string>& modelAxisIds()
         "ragged_offset_form",
         "ragged_offset_dtype",
         "o_packing",
+        "v_packing",
         "sequence_lengths",
         "per_seq_len_q",
         "per_seq_len_kv",
@@ -3062,6 +3210,8 @@ std::string sharedBaseValue(const std::string& axis)
         {"runtime_shape_override", "disabled"},
         {"special_values", "none"},
         {"value_magnitude", "ordinary"},
+        {"sink_values", "ordinary"},
+        {"scale_factor_values", "ordinary"},
     };
     const auto it = BASE.find(axis);
     return it == BASE.end() ? std::string("-") : it->second;

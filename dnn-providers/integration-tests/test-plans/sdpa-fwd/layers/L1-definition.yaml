@@ -118,7 +118,7 @@ rules:
   - id: D-RAGGED-NO-OVERLAP
     kind: definition
     basis: meaning
-    reason: "Two sequences of an output cannot share memory: two results would be written to one place. hipDNN's ragged form also refuses input sequences that share memory: its offsets must not decrease (rocm-libraries @ 91a40bdfd4c projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/RaggedTensor.hpp:271-307)."
+    reason: "Two sequences of an output cannot share memory: two results would be written to one place. hipDNN's ragged form also refuses input sequences that share memory (rocm-libraries @ 2fcf1e30202 projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/RaggedTensor.hpp:208-219)."
     note: "The input half rests on hipDNN's ragged format, not on the definition of attention (user decision 2026-11-04)."
     forbid: {ragged_offsets: [overlapping]}
     source: "axis doc § 10 'Ragged offsets' ('every valid list of starting points')"
@@ -342,6 +342,13 @@ rules:
     basis: consistency
     reason: "One list of start positions shared by Q and O gives O Q's starts, so O cannot start its sequences elsewhere."
     forbid: {o_packing: [own_starts], ragged_offset_sharing: [shared_per_side]}
+    source: "axis doc § 10 'Ragged offsets'"
+
+  - id: D-REL-V-OWN-STARTS-NOT-SHARED
+    kind: definition
+    basis: consistency
+    reason: "One list of start positions shared by K and V gives V K's starts, so V cannot start its sequences elsewhere."
+    forbid: {v_packing: [own_starts], ragged_offset_sharing: [shared_per_side]}
     source: "axis doc § 10 'Ragged offsets'"
 
   - id: D-INPUTS-OVERLAP-VIEW-DTYPE
