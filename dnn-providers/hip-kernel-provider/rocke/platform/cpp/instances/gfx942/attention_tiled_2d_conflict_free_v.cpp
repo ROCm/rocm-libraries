@@ -258,8 +258,7 @@ static rocke_value_t* rocke__cfvst_v_page_off(rocke_gfx942_attn2d_build_ctx_t* c
     rocke_value_t* tok = (ctx->N_BLOCKS_PER_TILE > 1)
                              ? rocke_b_mod(b, t_row, rocke_b_const_i32(b, ctx->BS))
                              : t_row;
-    rocke_value_t* tok_b
-        = rocke_b_mul(b, tok, rocke_b_const_i32(b, ctx->NUM_KV * ctx->HD * ctx->KV_BYTES));
+    rocke_value_t* tok_b = rocke_b_mul(b, tok, ctx->kv_stride_tok_b_v);
     rocke_value_t* tok_head_b = rocke_b_add(b, tok_b, tile->kv_head_b);
     rocke_value_t* dim_b = rocke_b_mul(b, d, rocke_b_const_i32(b, ctx->KV_BYTES));
     return rocke_b_add(b, tok_head_b, dim_b);
