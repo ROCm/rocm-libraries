@@ -19,19 +19,13 @@
 
 #include <gtest/gtest.h>
 
-#include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
-#include <hipdnn_flatbuffers_sdk/data_objects/sdpa_attributes_generated.h>
-#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_flatbuffers_sdk/utilities/Uuid.hpp>
-#include <hipdnn_plugin_sdk/ingestor/DeviceProperties.hpp>
 #include <hipdnn_plugin_sdk/ingestor/KernelDefinition.hpp>
-#include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
 #include <hipdnn_plugin_sdk/ingestor/NativeHooks.hpp>
-#include <hipdnn_test_sdk/utilities/LogRecorder.hpp>
 
-#include "engines/kernel_ingestor_engine/IngestorPacks.hpp"
-#include "engines/kernel_ingestor_engine/KernelIngestorEngine.hpp"
 #include "engines/kernel_ingestor_engine/packs/Gfx942AttentionDenseGeometry.hpp"
+#include "tests/engines/kernel_ingestor_engine/packs/AttentionDenseTestArch.hpp"
+#include "tests/engines/kernel_ingestor_engine/packs/AttentionDenseTestGraphs.hpp"
 
 /**
  * @file TestGfx942AttentionDenseMatchers.cpp
@@ -55,300 +49,42 @@ namespace hip_kernel_provider::kernel_ingestor_engine::testing
 namespace
 {
 
-namespace data_objects = hipdnn_flatbuffers_sdk::data_objects;
-using hipdnn_plugin_sdk::ingestor::BoundTokens;
-using hipdnn_plugin_sdk::ingestor::DeviceProperties;
-using hipdnn_plugin_sdk::ingestor::KernelDefinition;
-using hipdnn_plugin_sdk::ingestor::MatchContext;
+using namespace attention_dense_graphs;
 using hipdnn_plugin_sdk::ingestor::tryGetBoundInt;
 
-constexpr std::string_view GRAPH_MATCHER_SYMBOL = "hipkernel.gfx942_attention_dense.graph_match";
-constexpr std::string_view KERNEL_MATCHER_SYMBOL = "hipkernel.gfx942_attention_dense.kernel_match";
 constexpr std::string_view SCORE_SYMBOL = "hipkernel.gfx942_attention_dense.score";
 constexpr std::string_view CAUSAL_TOKEN = "gfx942_attention_dense.causal";
 constexpr std::string_view SLIDING_WINDOW_TOKEN = "gfx942_attention_dense.sliding_window";
 constexpr std::string_view STATS_TOKEN = "gfx942_attention_dense.stats.uid";
-constexpr std::string_view GFX950_GRAPH_MATCHER_SYMBOL
-    = "hipkernel.gfx950_attention_dense.graph_match";
-
-constexpr int64_t Q_UID = 1;
-constexpr int64_t K_UID = 2;
-constexpr int64_t V_UID = 3;
-constexpr int64_t O_UID = 4;
-constexpr int64_t STATS_UID = 5;
-constexpr int64_t EXTRA_UID = 99;
 
 /// The stats uid of a graph that binds no stats output.
 constexpr int64_t NO_STATS = -1;
 
-constexpr float SCALE = 0.08838834764831843F;
-
-DeviceProperties testDeviceProperties()
-{
-    DeviceProperties properties;
-    properties.gcnArchName = "gfx942";
-    properties.warpSize = 64;
-    return properties;
-}
-
-/// BSHD strides for (B, H, S, D) LOGICAL dims -- token-major, head varying fastest.
-std::vector<int64_t> bshdStrides(int64_t heads, int64_t sequence, int64_t headSize)
-{
-    return {sequence * heads * headSize, headSize, heads * headSize, 1};
-}
-
-std::vector<int64_t> bhsdStrides(int64_t heads, int64_t sequence, int64_t headSize)
-{
-    return {heads * sequence * headSize, sequence * headSize, headSize, 1};
-}
-
-/// The stats tensor a graph carries.
-struct StatsTensorSpec
-{
-    int64_t uid = STATS_UID;
-    /// Empty: [B, Hq, Sq, 1], the tensor the kernel writes.
-    std::vector<int64_t> dims;
-    /// Empty: packed row-major over the dims, the frontend's default.
-    std::vector<int64_t> strides;
-    data_objects::DataType dataType = data_objects::DataType::FLOAT;
-    bool isVirtual = false;
-};
-
 /// Base graph: bf16, D128, B=2, Hq=32, Hkv=8, Sq=Skv=1024, top-left causal.
-struct GraphSpec
-{
-    int64_t batch = 2;
-    int64_t numQueryHeads = 32;
-    int64_t numKvHeads = 8;
-    int64_t seqLenQ = 1024;
-    int64_t seqLenKv = 1024;
-    int64_t headSize = 128;
-    data_objects::DataType dataType = data_objects::DataType::BFLOAT16;
-    bool bhsdQuery = false;
-
-    std::optional<int64_t> leftBound = -1;
-    std::optional<int64_t> rightBound = 0;
-    data_objects::DiagonalAlignment alignment = data_objects::DiagonalAlignment::TOP_LEFT;
-
-    std::optional<float> attnScaleValue = SCALE;
-    std::optional<int64_t> sinkTokenUid;
-    std::optional<int64_t> statsUid;
-    std::optional<bool> generateStats;
-    std::optional<StatsTensorSpec> statsTensor;
-    std::optional<int64_t> maxUid;
-    std::optional<int64_t> sumExpUid;
-    std::optional<int64_t> rngDumpUid;
-    std::optional<int64_t> attnMaskUid;
-    std::optional<int64_t> seqLenQUid;
-    // The one operand that names a ragged offset tensor (packed sequences).
-    std::optional<int64_t> raggedUid;
-};
-
-flatbuffers::FlatBufferBuilder buildSdpaGraph(const GraphSpec& spec)
-{
-    flatbuffers::FlatBufferBuilder builder;
-
-    const std::vector<int64_t> qDims{spec.batch, spec.numQueryHeads, spec.seqLenQ, spec.headSize};
-    const std::vector<int64_t> kvDims{spec.batch, spec.numKvHeads, spec.seqLenKv, spec.headSize};
-    const auto qStrides = spec.bhsdQuery
-                              ? bhsdStrides(spec.numQueryHeads, spec.seqLenQ, spec.headSize)
-                              : bshdStrides(spec.numQueryHeads, spec.seqLenQ, spec.headSize);
-    const auto oStrides = bshdStrides(spec.numQueryHeads, spec.seqLenQ, spec.headSize);
-    const auto kvStrides = bshdStrides(spec.numKvHeads, spec.seqLenKv, spec.headSize);
-
-    const auto operand
-        = [&](int64_t uid, const std::vector<int64_t>& strides, const std::vector<int64_t>& dims) {
-              return data_objects::CreateTensorAttributesDirect(
-                  builder,
-                  uid,
-                  nullptr,
-                  spec.dataType,
-                  &strides,
-                  &dims,
-                  false,
-                  data_objects::TensorValue::NONE,
-                  0,
-                  false,
-                  spec.raggedUid == uid ? ::flatbuffers::Optional<int64_t>(EXTRA_UID)
-                                        : ::flatbuffers::Optional<int64_t>());
-          };
-    std::vector<flatbuffers::Offset<data_objects::TensorAttributes>> tensors{
-        operand(Q_UID, qStrides, qDims),
-        operand(K_UID, kvStrides, kvDims),
-        operand(V_UID, kvStrides, kvDims),
-        operand(O_UID, oStrides, qDims),
-    };
-    if(spec.statsTensor.has_value())
-    {
-        const auto& stats = *spec.statsTensor;
-        const std::vector<int64_t> dims
-            = stats.dims.empty()
-                  ? std::vector<int64_t>{spec.batch, spec.numQueryHeads, spec.seqLenQ, 1}
-                  : stats.dims;
-        std::vector<int64_t> strides = stats.strides;
-        if(strides.empty())
-        {
-            strides.assign(dims.size(), 1);
-            for(std::size_t axis = dims.size() - 1; axis > 0; --axis)
-            {
-                strides[axis - 1] = strides[axis] * dims[axis];
-            }
-        }
-        tensors.push_back(data_objects::CreateTensorAttributesDirect(
-            builder, stats.uid, nullptr, stats.dataType, &strides, &dims, stats.isVirtual));
-    }
-
-    data_objects::SdpaAttributesBuilder attributesBuilder(builder);
-    attributesBuilder.add_q_tensor_uid(Q_UID);
-    attributesBuilder.add_k_tensor_uid(K_UID);
-    attributesBuilder.add_v_tensor_uid(V_UID);
-    attributesBuilder.add_o_tensor_uid(O_UID);
-    if(spec.leftBound.has_value())
-    {
-        attributesBuilder.add_left_bound(*spec.leftBound);
-    }
-    if(spec.rightBound.has_value())
-    {
-        attributesBuilder.add_right_bound(*spec.rightBound);
-    }
-    attributesBuilder.add_diagonal_alignment(spec.alignment);
-    attributesBuilder.add_causal_mask(false);
-    attributesBuilder.add_causal_mask_bottom_right(false);
-    if(spec.attnScaleValue.has_value())
-    {
-        attributesBuilder.add_attn_scale_value(*spec.attnScaleValue);
-    }
-    if(spec.sinkTokenUid.has_value())
-    {
-        attributesBuilder.add_sink_token_tensor_uid(*spec.sinkTokenUid);
-    }
-    if(spec.statsUid.has_value())
-    {
-        attributesBuilder.add_stats_tensor_uid(*spec.statsUid);
-    }
-    if(spec.generateStats.has_value())
-    {
-        attributesBuilder.add_generate_stats(*spec.generateStats);
-    }
-    if(spec.maxUid.has_value())
-    {
-        attributesBuilder.add_max_tensor_uid(*spec.maxUid);
-    }
-    if(spec.sumExpUid.has_value())
-    {
-        attributesBuilder.add_sum_exp_tensor_uid(*spec.sumExpUid);
-    }
-    if(spec.rngDumpUid.has_value())
-    {
-        attributesBuilder.add_rng_dump_tensor_uid(*spec.rngDumpUid);
-    }
-    if(spec.attnMaskUid.has_value())
-    {
-        attributesBuilder.add_attn_mask_tensor_uid(*spec.attnMaskUid);
-    }
-    if(spec.seqLenQUid.has_value())
-    {
-        attributesBuilder.add_seq_len_q_tensor_uid(*spec.seqLenQUid);
-    }
-    attributesBuilder.add_alibi_mask(false);
-    attributesBuilder.add_padding_mask(false);
-    attributesBuilder.add_mma_core_mode(data_objects::DataType::UNSET);
-    attributesBuilder.add_implementation(data_objects::AttentionImplementation::AUTO);
-    const auto attributes = attributesBuilder.Finish();
-
-    const std::vector<flatbuffers::Offset<data_objects::Node>> nodes{
-        data_objects::CreateNodeDirect(builder,
-                                       "sdpa",
-                                       data_objects::DataType::FLOAT,
-                                       data_objects::NodeAttributes::SdpaAttributes,
-                                       attributes.Union())};
-
-    auto name = builder.CreateString("gfx942_attention_dense_test");
-    auto tensorsVector = builder.CreateVector(tensors);
-    auto nodesVector = builder.CreateVector(nodes);
-    data_objects::GraphBuilder graphBuilder(builder);
-    graphBuilder.add_name(name);
-    graphBuilder.add_tensors(tensorsVector);
-    graphBuilder.add_nodes(nodesVector);
-    builder.Finish(graphBuilder.Finish());
-    return builder;
-}
-
-/// A graph wrapped with the context the matchers take; holds the buffer alive.
-class Graph
-{
-public:
-    /// @p multiProcessorCount is the device's CU count the score reads (0: unresolved).
-    explicit Graph(const GraphSpec& spec, int multiProcessorCount = 0)
-        : _builder(buildSdpaGraph(spec))
-        , _graph(_builder.GetBufferPointer(), _builder.GetSize())
-        , _properties(testDeviceProperties())
-        , _context{_graph, 0, _properties}
-    {
-        _properties.multiProcessorCount = multiProcessorCount;
-        registerNativeIngestorSymbols();
-    }
-
-    const MatchContext& context() const
-    {
-        return _context;
-    }
-
-private:
-    flatbuffers::FlatBufferBuilder _builder;
-    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper _graph;
-    DeviceProperties _properties;
-    MatchContext _context;
-};
-
-std::optional<BoundTokens> matchGraph(const GraphSpec& spec,
-                                      std::string_view matcherSymbol = GRAPH_MATCHER_SYMBOL)
-{
-    const Graph graph(spec);
-    return hipdnn_plugin_sdk::ingestor::GraphMatchRegistry::resolve(std::string(matcherSymbol))(
-        graph.context());
-}
-
-/// The base graph with the stats output the frontend builds: a stats uid, generate_stats
-/// true, and a packed [B, Hq, Sq, 1] FLOAT tensor.
-GraphSpec statsGraph()
+GraphSpec baseGraph()
 {
     GraphSpec spec;
-    spec.statsUid = STATS_UID;
-    spec.generateStats = true;
-    spec.statsTensor = StatsTensorSpec{};
+    spec.numQueryHeads = 32;
+    spec.numKvHeads = 8;
+    spec.seqLenQ = 1024;
+    spec.seqLenKv = 1024;
     return spec;
 }
 
-/// The cause key and the text after it, of the decline an engine logged at INFO.
-struct LoggedDecline
+/// The base graph with the stats output the frontend builds.
+GraphSpec statsGraph()
 {
-    std::string cause;
-    std::string detail;
-};
+    return withStats(baseGraph());
+}
 
-/// The decline @p engineName's graph match logged for @p spec, or an empty cause when it
-/// logged none.
-LoggedDecline loggedDecline(const GraphSpec& spec,
-                            std::string_view matcherSymbol = GRAPH_MATCHER_SYMBOL,
-                            std::string_view engineName = GFX942_ATTENTION_DENSE_ENGINE_NAME)
+std::optional<BoundTokens> matchGraph(const GraphSpec& spec)
 {
-    const std::string marker = std::string(engineName) + " declined the graph [";
-    const auto recorder
-        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
-    EXPECT_FALSE(matchGraph(spec, matcherSymbol).has_value());
-    for(const auto& log : recorder.getRecordedLogs())
-    {
-        const auto at = log.message.find(marker);
-        const auto causeEnd
-            = at == std::string::npos ? at : log.message.find(']', at + marker.size());
-        if(log.severity == HIPDNN_SEV_INFO && causeEnd != std::string::npos)
-        {
-            return {log.message.substr(at + marker.size(), causeEnd - at - marker.size()),
-                    log.message.substr(causeEnd + 1)};
-        }
-    }
-    return {};
+    return attention_dense_graphs::matchGraph(GFX942_ATTENTION_DENSE, spec);
+}
+
+LoggedDecline loggedDecline(const GraphSpec& spec)
+{
+    return attention_dense_graphs::loggedDecline(GFX942_ATTENTION_DENSE, spec);
 }
 
 /// The fields this engine's KMD declares, as a completed record carries them. The head
@@ -418,19 +154,9 @@ KernelDefinition makeKernel(const KernelSpec& spec)
     return kernel;
 }
 
-/// graph_match then kernel_match, as a catalog build runs them.
 bool matches(const GraphSpec& graphSpec, const KernelDefinition& kernel)
 {
-    const Graph graph(graphSpec);
-    const auto bound = hipdnn_plugin_sdk::ingestor::GraphMatchRegistry::resolve(
-        std::string(GRAPH_MATCHER_SYMBOL))(graph.context());
-    EXPECT_TRUE(bound.has_value()) << "graph_match declined the graph before kernel_match ran";
-    if(!bound.has_value())
-    {
-        return false;
-    }
-    return hipdnn_plugin_sdk::ingestor::KernelMatcherRegistry::resolve(
-        std::string(KERNEL_MATCHER_SYMBOL))(graph.context(), *bound, kernel);
+    return matchesKernel(GFX942_ATTENTION_DENSE, graphSpec, kernel);
 }
 
 bool matches(const GraphSpec& graphSpec, const KernelSpec& kernelSpec)
@@ -438,13 +164,13 @@ bool matches(const GraphSpec& graphSpec, const KernelSpec& kernelSpec)
     return matches(graphSpec, makeKernel(kernelSpec));
 }
 
+/// @p multiProcessorCount is the device's CU count the score reads (0: unresolved).
 double scoreOf(const KernelSpec& kernelSpec,
                int multiProcessorCount = 0,
-               const GraphSpec& graphSpec = GraphSpec{})
+               const GraphSpec& graphSpec = baseGraph())
 {
-    const Graph graph(graphSpec, multiProcessorCount);
-    const auto bound = hipdnn_plugin_sdk::ingestor::GraphMatchRegistry::resolve(
-        std::string(GRAPH_MATCHER_SYMBOL))(graph.context());
+    const Graph graph(GFX942_ATTENTION_DENSE, graphSpec, multiProcessorCount);
+    const auto bound = graph.match();
     EXPECT_TRUE(bound.has_value());
     return hipdnn_plugin_sdk::ingestor::ScoreRegistry::resolve(std::string(SCORE_SYMBOL))(
         graph.context(), bound.value_or(BoundTokens{}), makeKernel(kernelSpec));
@@ -452,7 +178,7 @@ double scoreOf(const KernelSpec& kernelSpec,
 
 GraphSpec windowGraph(int64_t leftBound)
 {
-    GraphSpec spec;
+    auto spec = baseGraph();
     spec.leftBound = leftBound;
     spec.rightBound = 0;
     return spec;
@@ -549,7 +275,7 @@ KernelSpec gridKernel(const std::string& order)
 /// A causal graph with @p heads query heads over @p kvHeads.
 GraphSpec headsGraph(int64_t heads, int64_t kvHeads)
 {
-    GraphSpec spec;
+    auto spec = baseGraph();
     spec.numQueryHeads = heads;
     spec.numKvHeads = kvHeads;
     return spec;
@@ -563,7 +289,7 @@ GraphSpec headsGraph(int64_t heads, int64_t kvHeads)
 
 TEST(TestGfx942AttentionDenseGraphMatch, BindsTopLeftCausalAsCausalWithNoWindow)
 {
-    const auto bound = matchGraph(GraphSpec{});
+    const auto bound = matchGraph(baseGraph());
     ASSERT_TRUE(bound.has_value());
     EXPECT_EQ(tryGetBoundInt(*bound, CAUSAL_TOKEN), 1);
     EXPECT_EQ(tryGetBoundInt(*bound, SLIDING_WINDOW_TOKEN), 0);
@@ -571,7 +297,7 @@ TEST(TestGfx942AttentionDenseGraphMatch, BindsTopLeftCausalAsCausalWithNoWindow)
 
 TEST(TestGfx942AttentionDenseGraphMatch, BindsNoMaskAsNonCausal)
 {
-    GraphSpec spec;
+    auto spec = baseGraph();
     spec.leftBound = -1;
     spec.rightBound = -1;
     const auto bound = matchGraph(spec);
@@ -582,7 +308,7 @@ TEST(TestGfx942AttentionDenseGraphMatch, BindsNoMaskAsNonCausal)
 
 TEST(TestGfx942AttentionDenseGraphMatch, ServesNonSquareFullAttention)
 {
-    GraphSpec spec;
+    auto spec = baseGraph();
     spec.leftBound = -1;
     spec.rightBound = -1;
     spec.seqLenQ = 512;
@@ -605,7 +331,7 @@ TEST(TestGfx942AttentionDenseGraphMatch, BindsACausalWindowAsLeftBoundKeys)
 
 TEST(TestGfx942AttentionDenseGraphMatch, ServesABottomRightCausalMaskOnlyAtEqualLengths)
 {
-    GraphSpec spec;
+    auto spec = baseGraph();
     spec.alignment = data_objects::DiagonalAlignment::BOTTOM_RIGHT;
     EXPECT_TRUE(matchGraph(spec).has_value());
     spec.seqLenQ = 512;
@@ -634,17 +360,17 @@ TEST(TestGfx942AttentionDenseGraphMatch, DeclinesEveryBandThatIsNotCausal)
 {
     // A lookahead, a non-causal left-only window and a two-sided band: the kernel
     // computes keys up to the diagonal only.
-    GraphSpec lookahead;
+    auto lookahead = baseGraph();
     lookahead.leftBound = -1;
     lookahead.rightBound = 16;
     EXPECT_FALSE(matchGraph(lookahead).has_value());
 
-    GraphSpec leftOnly;
+    auto leftOnly = baseGraph();
     leftOnly.leftBound = 128;
     leftOnly.rightBound = -1;
     EXPECT_FALSE(matchGraph(leftOnly).has_value());
 
-    GraphSpec twoSided;
+    auto twoSided = baseGraph();
     twoSided.leftBound = 128;
     twoSided.rightBound = 8;
     EXPECT_FALSE(matchGraph(twoSided).has_value());
@@ -663,7 +389,7 @@ TEST(TestGfx942AttentionDenseGraphMatch, DeclinesARaggedOperand)
     for(const int64_t uid : {Q_UID, K_UID, V_UID, O_UID})
     {
         SCOPED_TRACE(uid);
-        GraphSpec spec;
+        auto spec = baseGraph();
         spec.raggedUid = uid;
         EXPECT_FALSE(matchGraph(spec).has_value());
     }
@@ -690,7 +416,7 @@ TEST(TestGfx942AttentionDenseGraphMatch, DeclinesAWindowThatLeavesQueryRowsNoKey
         EXPECT_EQ(matchGraph(spec).has_value(), served);
 
         // Without a window every row keeps key 0.
-        GraphSpec causal;
+        auto causal = baseGraph();
         causal.seqLenQ = seqLenQ;
         causal.seqLenKv = seqLenKv;
         EXPECT_TRUE(matchGraph(causal).has_value());
@@ -699,19 +425,19 @@ TEST(TestGfx942AttentionDenseGraphMatch, DeclinesAWindowThatLeavesQueryRowsNoKey
 
 TEST(TestGfx942AttentionDenseGraphMatch, DeclinesSinksADanglingStatsUidMaskTensorAndVarlen)
 {
-    GraphSpec sinks;
+    auto sinks = baseGraph();
     sinks.sinkTokenUid = EXTRA_UID;
     EXPECT_FALSE(matchGraph(sinks).has_value());
 
-    GraphSpec stats;
+    auto stats = baseGraph();
     stats.statsUid = EXTRA_UID;
     EXPECT_FALSE(matchGraph(stats).has_value());
 
-    GraphSpec attnMask;
+    auto attnMask = baseGraph();
     attnMask.attnMaskUid = EXTRA_UID;
     EXPECT_FALSE(matchGraph(attnMask).has_value());
 
-    GraphSpec varlen;
+    auto varlen = baseGraph();
     varlen.seqLenQUid = EXTRA_UID;
     EXPECT_FALSE(matchGraph(varlen).has_value());
 }
@@ -783,19 +509,19 @@ TEST(TestGfx942AttentionDenseGraphMatch, DeclinesAStatsTensorTheKernelDoesNotWri
     struct Case
     {
         const char* name;
-        StatsTensorSpec tensor;
+        TensorSpec tensor;
     };
-    StatsTensorSpec bshdOrdered;
+    TensorSpec bshdOrdered;
     bshdOrdered.strides = {int64_t{1024} * 32, 1, 32, 1};
-    StatsTensorSpec rank3;
+    TensorSpec rank3;
     rank3.dims = {2, 32, 1024};
-    StatsTensorSpec kvHeads;
+    TensorSpec kvHeads;
     kvHeads.dims = {2, 8, 1024, 1};
-    StatsTensorSpec wideRow;
+    TensorSpec wideRow;
     wideRow.dims = {2, 32, 1024, 2};
-    StatsTensorSpec paddedBatch;
+    TensorSpec paddedBatch;
     paddedBatch.strides = {int64_t{32} * 1024 + 64, 1024, 1, 1};
-    StatsTensorSpec virtualStats;
+    TensorSpec virtualStats;
     virtualStats.isVirtual = true;
     for(const auto& testCase : {Case{"BSHD-ordered strides", bshdOrdered},
                                 Case{"rank 3", rank3},
@@ -850,15 +576,15 @@ TEST(TestGfx942AttentionDenseGraphMatch, DeclinesTheRowStatsOutputs)
     for(const bool withStats : {true, false})
     {
         SCOPED_TRACE(withStats ? "with stats" : "without stats");
-        auto max = withStats ? statsGraph() : GraphSpec{};
+        auto max = withStats ? statsGraph() : baseGraph();
         max.maxUid = EXTRA_UID;
         EXPECT_EQ(loggedDecline(max).cause, "stats_rowstats");
 
-        auto sumExp = withStats ? statsGraph() : GraphSpec{};
+        auto sumExp = withStats ? statsGraph() : baseGraph();
         sumExp.sumExpUid = EXTRA_UID;
         EXPECT_EQ(loggedDecline(sumExp).cause, "stats_rowstats");
 
-        auto rngDump = withStats ? statsGraph() : GraphSpec{};
+        auto rngDump = withStats ? statsGraph() : baseGraph();
         rngDump.rngDumpUid = EXTRA_UID;
         EXPECT_EQ(loggedDecline(rngDump).cause, "stats_rowstats");
     }
@@ -882,48 +608,47 @@ TEST(TestGfx942AttentionDenseGraphMatch, KeepsDecliningAWindowThatLeavesRowsNoKe
 // one 'stats' cause, while gfx942 binds the same graph.
 TEST(TestGfx942AttentionDenseGraphMatch, LeavesTheGfx950TwinDecliningEveryStatsOutput)
 {
-    ASSERT_TRUE(matchGraph(GraphSpec{}, GFX950_GRAPH_MATCHER_SYMBOL).has_value())
+    ASSERT_TRUE(matchGraph(GFX950_ATTENTION_DENSE, baseGraph()).has_value())
         << "gfx950 must serve the base graph, or the declines below prove nothing";
     ASSERT_TRUE(matchGraph(statsGraph()).has_value());
 
-    auto flagOnly = GraphSpec{};
+    auto flagOnly = baseGraph();
     flagOnly.generateStats = true;
     auto uidOnly = statsGraph();
     uidOnly.generateStats.reset();
-    auto max = GraphSpec{};
+    auto max = baseGraph();
     max.maxUid = EXTRA_UID;
     for(const auto& spec : {statsGraph(), uidOnly, flagOnly, max})
     {
-        const auto decline
-            = loggedDecline(spec, GFX950_GRAPH_MATCHER_SYMBOL, GFX950_ATTENTION_DENSE_ENGINE_NAME);
+        const auto decline = loggedDecline(GFX950_ATTENTION_DENSE, spec);
         EXPECT_EQ(decline.cause, "stats");
         EXPECT_EQ(decline.detail,
                   ": softmax statistics outputs (stats, max, sum_exp, rng_dump or "
                   "generate_stats) are not supported");
     }
 
-    auto disabled = GraphSpec{};
+    auto disabled = baseGraph();
     disabled.generateStats = false;
-    const auto bound = matchGraph(disabled, GFX950_GRAPH_MATCHER_SYMBOL);
+    const auto bound = matchGraph(GFX950_ATTENTION_DENSE, disabled);
     ASSERT_TRUE(bound.has_value());
     EXPECT_EQ(bound->count("gfx950_attention_dense.stats.uid"), 0U);
 }
 
 TEST(TestGfx942AttentionDenseGraphMatch, DeclinesAnUnsupportedOperandOrLayout)
 {
-    GraphSpec headSize;
+    auto headSize = baseGraph();
     headSize.headSize = 96;
     EXPECT_FALSE(matchGraph(headSize).has_value());
 
-    GraphSpec fp32;
+    auto fp32 = baseGraph();
     fp32.dataType = data_objects::DataType::FLOAT;
     EXPECT_FALSE(matchGraph(fp32).has_value());
 
-    GraphSpec bhsd;
-    bhsd.bhsdQuery = true;
+    auto bhsd = baseGraph();
+    bhsd.operand(Q_UID).layout = StrideLayout::BHSD;
     EXPECT_FALSE(matchGraph(bhsd).has_value());
 
-    GraphSpec gqa;
+    auto gqa = baseGraph();
     gqa.numQueryHeads = 12;
     gqa.numKvHeads = 8;
     EXPECT_FALSE(matchGraph(gqa).has_value());
@@ -934,7 +659,7 @@ TEST(TestGfx942AttentionDenseGraphMatch, ServesAnyFiniteScaleAndDeclinesTheRest)
     // The body scales before the row max, so a negative or large scale is well defined.
     for(const float scale : {-0.5F, 0.0F, 64.0F})
     {
-        GraphSpec spec;
+        auto spec = baseGraph();
         spec.attnScaleValue = scale;
         EXPECT_TRUE(matchGraph(spec).has_value()) << scale;
     }
@@ -942,7 +667,7 @@ TEST(TestGfx942AttentionDenseGraphMatch, ServesAnyFiniteScaleAndDeclinesTheRest)
                              std::numeric_limits<float>::infinity(),
                              -std::numeric_limits<float>::infinity()})
     {
-        GraphSpec spec;
+        auto spec = baseGraph();
         spec.attnScaleValue = scale;
         EXPECT_FALSE(matchGraph(spec).has_value()) << scale;
     }
@@ -960,7 +685,7 @@ TEST(TestGfx942AttentionDenseKernelMatch, ServesEveryHeadCountFromOneCandidate)
                                  std::pair<int64_t, int64_t>{128, 1},
                                  std::pair<int64_t, int64_t>{40, 40}})
     {
-        GraphSpec spec;
+        auto spec = baseGraph();
         spec.numQueryHeads = hq;
         spec.numKvHeads = hkv;
         EXPECT_TRUE(matches(spec, KernelSpec{})) << hq << "/" << hkv;
@@ -971,15 +696,15 @@ TEST(TestGfx942AttentionDenseKernelMatch, RefusesADifferentDtypeHeadSizeOrMask)
 {
     KernelSpec fp16;
     fp16.dtype = "FP16";
-    EXPECT_FALSE(matches(GraphSpec{}, fp16));
+    EXPECT_FALSE(matches(baseGraph(), fp16));
 
     KernelSpec d64;
     d64.headSize = 64;
-    EXPECT_FALSE(matches(GraphSpec{}, d64));
+    EXPECT_FALSE(matches(baseGraph(), d64));
 
     KernelSpec full;
     full.causal = 0;
-    EXPECT_FALSE(matches(GraphSpec{}, full));
+    EXPECT_FALSE(matches(baseGraph(), full));
 }
 
 TEST(TestGfx942AttentionDenseKernelMatch, ServesAWindowOnlyFromTheCandidateBuiltForIt)
@@ -992,14 +717,14 @@ TEST(TestGfx942AttentionDenseKernelMatch, ServesAWindowOnlyFromTheCandidateBuilt
     EXPECT_TRUE(matches(windowGraph(128), w128));
     EXPECT_FALSE(matches(windowGraph(128), w512));
     EXPECT_FALSE(matches(windowGraph(128), KernelSpec{}));
-    EXPECT_FALSE(matches(GraphSpec{}, w128));
+    EXPECT_FALSE(matches(baseGraph(), w128));
     // left_bound 129 asks for 129 keys, which no block_n-aligned build carries.
     EXPECT_FALSE(matches(windowGraph(129), w128));
 }
 
 TEST(TestGfx942AttentionDenseKernelMatch, DivisibilityIsAgainstTheCandidatesOwnTile)
 {
-    GraphSpec spec;
+    auto spec = baseGraph();
     spec.seqLenQ = 384;
     spec.seqLenKv = 384;
     KernelSpec bm128;
@@ -1019,12 +744,12 @@ TEST(TestGfx942AttentionDenseKernelMatch, RefusesARaggedOrUnlaunchableCandidate)
 {
     KernelSpec ragged;
     ragged.ragged = 1;
-    EXPECT_FALSE(matches(GraphSpec{}, ragged));
+    EXPECT_FALSE(matches(baseGraph(), ragged));
 
     KernelSpec badTile;
     badTile.blockM = 64;
     badTile.blockN = 128;
-    EXPECT_FALSE(matches(GraphSpec{}, badTile));
+    EXPECT_FALSE(matches(baseGraph(), badTile));
 }
 
 // LSE is baked at compile time: an emit_lse candidate takes the trailing lse_ptr and
@@ -1036,8 +761,8 @@ TEST(TestGfx942AttentionDenseKernelMatch, ServesAStatsGraphOnlyFromAnLseCandidat
 
     EXPECT_TRUE(matches(statsGraph(), lse));
     EXPECT_FALSE(matches(statsGraph(), KernelSpec{}));
-    EXPECT_TRUE(matches(GraphSpec{}, KernelSpec{}));
-    EXPECT_FALSE(matches(GraphSpec{}, lse));
+    EXPECT_TRUE(matches(baseGraph(), KernelSpec{}));
+    EXPECT_FALSE(matches(baseGraph(), lse));
 
     // A uid with generate_stats unset is a stats graph too.
     auto uidOnly = statsGraph();
@@ -1059,7 +784,7 @@ TEST(TestGfx942AttentionDenseKernelMatch, RefusesACandidateWithoutAValidEmitLse)
     KernelSpec negative;
     negative.emitLse = -1;
 
-    for(const auto& graph : {GraphSpec{}, statsGraph()})
+    for(const auto& graph : {baseGraph(), statsGraph()})
     {
         EXPECT_FALSE(matches(graph, absent));
         EXPECT_FALSE(matches(graph, mistyped));
@@ -1073,11 +798,11 @@ TEST(TestGfx942AttentionDenseKernelMatch, ServesEveryGridWhereItsDecodeIsLegal)
 {
     for(const char* order : {"qb_minor", "bt_hkv_minor", "hq_minor_swz"})
     {
-        EXPECT_TRUE(matches(GraphSpec{}, gridKernel(order))) << order;
+        EXPECT_TRUE(matches(baseGraph(), gridKernel(order))) << order;
     }
     for(const char* decode : {"qb_major", "hkv_major", "bt_hkv_minor", "hq_minor_swz"})
     {
-        EXPECT_TRUE(matches(GraphSpec{}, persistentKernel(decode))) << decode;
+        EXPECT_TRUE(matches(baseGraph(), persistentKernel(decode))) << decode;
     }
 }
 
@@ -1147,12 +872,12 @@ TEST(TestGfx942AttentionDenseKernelMatch, RefusesACandidateWithoutAGridItLaunche
 
     for(const auto& kernel : malformed)
     {
-        EXPECT_FALSE(matches(GraphSpec{}, kernel));
+        EXPECT_FALSE(matches(baseGraph(), kernel));
     }
     // persist_decode and num_persistent are read only on the persistent grid.
     auto gridWithAuto = gridKernel("bt_hkv_minor");
     gridWithAuto.numPersistent = 0;
-    EXPECT_TRUE(matches(GraphSpec{}, gridWithAuto));
+    EXPECT_TRUE(matches(baseGraph(), gridWithAuto));
 }
 
 // =============================================================================
@@ -1181,7 +906,7 @@ TEST(TestGfx942AttentionDenseScore, PersistentLeadsOnlyWhereItsCtasFillTheDevice
     d64.headSize = 64;
     KernelSpec d64Grid;
     d64Grid.headSize = 64;
-    GraphSpec d64Graph;
+    auto d64Graph = baseGraph();
     d64Graph.headSize = 64;
     EXPECT_GT(scoreOf(d64Grid, 304, d64Graph), scoreOf(d64, 304, d64Graph));
     for(const int64_t window : {int64_t{128}, int64_t{256}})
@@ -1257,7 +982,7 @@ TEST(TestGfx942AttentionDenseScore, ThePinnedDecodeLeadsThePersistentArms)
                   scoreOf(persistentKernel(other), 304))
             << other;
     }
-    auto unmasked = GraphSpec{};
+    auto unmasked = baseGraph();
     unmasked.leftBound.reset();
     unmasked.rightBound.reset();
     for(const char* other : {"bt_hkv_minor", "hkv_major", "hq_minor_swz"})
@@ -1368,7 +1093,7 @@ TEST(TestGfx942AttentionDenseScore, EveryBodyLeverPlacesItsPolicyArmFirst)
         }
     }
     // The K-group pad, last, at D64 where it is a real lever: 8 first, then 0, 16, 24, 32.
-    GraphSpec d64Graph;
+    auto d64Graph = baseGraph();
     d64Graph.headSize = 64;
     KernelSpec d64;
     d64.headSize = 64;
@@ -1407,7 +1132,7 @@ TEST(TestGfx942AttentionDenseScore, AMalformedBodyLeverScoresZero)
     }
     auto missing = makeKernel(KernelSpec{});
     missing.metadata.erase("use_exp2_fast");
-    const Graph graph(GraphSpec{});
+    const Graph graph(GFX942_ATTENTION_DENSE, baseGraph());
     EXPECT_EQ(hipdnn_plugin_sdk::ingestor::ScoreRegistry::resolve(std::string(SCORE_SYMBOL))(
                   graph.context(), BoundTokens{}, missing),
               0.0);
@@ -1423,7 +1148,7 @@ TEST(TestGfx942AttentionDenseScore, ThePolicyArmLeadsEveryCellOfTheFullEnumerati
         = hipdnn_plugin_sdk::ingestor::ScoreRegistry::resolve(std::string(SCORE_SYMBOL));
     for(const int cus : {304, 228})
     {
-        const Graph graph(GraphSpec{}, cus);
+        const Graph graph(GFX942_ATTENTION_DENSE, baseGraph(), cus);
         std::map<int, std::vector<std::pair<double, const ScoreGolden*>>> cells;
         for(const auto& golden : SCORE_GOLDENS)
         {

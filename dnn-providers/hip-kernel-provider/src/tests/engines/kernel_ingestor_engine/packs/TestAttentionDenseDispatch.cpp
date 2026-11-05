@@ -5,9 +5,6 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <cstring>
-#include <exception>
-#include <memory>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -15,21 +12,14 @@
 
 #include <gtest/gtest.h>
 
-#include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
-#include <hipdnn_flatbuffers_sdk/data_objects/sdpa_attributes_generated.h>
-#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
-#include <hipdnn_flatbuffers_sdk/utilities/Uuid.hpp>
+#include <hipdnn_flatbuffers_sdk/data_objects/data_types_generated.h>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_plugin_sdk/ingestor/Descriptors.hpp>
-#include <hipdnn_plugin_sdk/ingestor/DeviceProperties.hpp>
-#include <hipdnn_plugin_sdk/ingestor/IKernelDispatchHandler.hpp>
 #include <hipdnn_plugin_sdk/ingestor/KernelDefinition.hpp>
 #include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
-#include <hipdnn_plugin_sdk/ingestor/NativeHooks.hpp>
 
-#include "core/Handle.hpp"
-#include "engines/kernel_ingestor_engine/KernelIngestorEngine.hpp"
-#include "engines/kernel_ingestor_engine/packs/AttentionDenseTestArch.hpp"
+#include "tests/engines/kernel_ingestor_engine/packs/AttentionDenseTestArch.hpp"
+#include "tests/engines/kernel_ingestor_engine/packs/AttentionDenseTestGraphs.hpp"
 
 /**
  * @file TestAttentionDenseDispatch.cpp
@@ -57,13 +47,19 @@ namespace
 {
 
 namespace data_objects = hipdnn_flatbuffers_sdk::data_objects;
+using attention_dense_graphs::dispatchHandler;
+using attention_dense_graphs::Graph;
+using attention_dense_graphs::GraphSpec;
+using attention_dense_graphs::ieee754Bits;
+using attention_dense_graphs::kpackKernel;
+using attention_dense_graphs::prepareFailure;
+using attention_dense_graphs::pythonAbi;
+using attention_dense_graphs::pythonLseAbi;
+using attention_dense_graphs::TensorSpec;
+using attention_dense_graphs::withStats;
 using hipdnn_plugin_sdk::ingestor::BoundTokens;
-using hipdnn_plugin_sdk::ingestor::DeviceProperties;
-using hipdnn_plugin_sdk::ingestor::IKernelDispatchHandler;
-using hipdnn_plugin_sdk::ingestor::KernelArgument;
 using hipdnn_plugin_sdk::ingestor::KernelDefinition;
 using hipdnn_plugin_sdk::ingestor::KernelSourceKind;
-using hipdnn_plugin_sdk::ingestor::MatchContext;
 using hipdnn_plugin_sdk::ingestor::tryGetBoundInt;
 
 // ---------------------------------------------------------------------------
@@ -139,177 +135,49 @@ constexpr int64_t HEADS = 4;
 constexpr int64_t SEQ = 512;
 constexpr int64_t HEAD_SIZE = 128;
 
-/// BSHD strides for (B, H, S, D) logical dims -- token-major, head varying fastest.
-std::vector<int64_t> bshdStrides()
+/// The graph every case binds: the default shape at Sq = Skv = 512 under the uids above,
+/// top-left causal. It only has to be one the engine matches, so the tokens it binds can be
+/// read; the applicability rules are the matcher suites' subject.
+GraphSpec servedGraph(float scale = 0.125F)
 {
-    return {SEQ * HEADS * HEAD_SIZE, HEAD_SIZE, HEADS * HEAD_SIZE, 1};
+    GraphSpec spec;
+    spec.uids = {Q_UID, K_UID, V_UID, O_UID};
+    spec.seqLenQ = SEQ;
+    spec.seqLenKv = SEQ;
+    spec.attnScaleValue = scale;
+    return spec;
 }
 
-/// BHSD strides for the same dims: head-major. Agrees with BSHD on the batch axis and
-/// on the element axis, and disagrees on the two in between, which is the whole class of
-/// layout the kernel cannot read.
-std::vector<int64_t> bhsdStrides()
+/// @p spec with the tensors no node names that a tampered token can point at: a BHSD one of
+/// the operands' dims and, where @p arch binds stats, a token-major FLOAT [B, H, S, 1] one.
+GraphSpec withUnnamedTensors(const AttentionDenseTestArch& arch, GraphSpec spec)
 {
-    return {HEADS * SEQ * HEAD_SIZE, SEQ * HEAD_SIZE, HEAD_SIZE, 1};
+    TensorSpec bhsd;
+    bhsd.uid = BHSD_UID;
+    bhsd.dims = {BATCH, HEADS, SEQ, HEAD_SIZE};
+    bhsd.strides = attention_dense_graphs::bhsdStrides(HEADS, SEQ, HEAD_SIZE);
+    bhsd.dataType = data_objects::DataType::BFLOAT16;
+    spec.unnamedTensors.push_back(bhsd);
+    if(arch.bindsStats)
+    {
+        TensorSpec tokenMajor;
+        tokenMajor.uid = TOKEN_MAJOR_STATS_UID;
+        tokenMajor.dims = {BATCH, HEADS, SEQ, 1};
+        tokenMajor.strides = {SEQ * HEADS, 1, HEADS, 1};
+        spec.unnamedTensors.push_back(tokenMajor);
+    }
+    return spec;
 }
-
-flatbuffers::Offset<data_objects::TensorAttributes>
-    addTensor(flatbuffers::FlatBufferBuilder& builder,
-              int64_t uid,
-              const std::vector<int64_t>& strides,
-              const std::vector<int64_t>& dims,
-              data_objects::DataType dataType = data_objects::DataType::BFLOAT16)
-{
-    return data_objects::CreateTensorAttributesDirect(
-        builder, uid, nullptr, dataType, &strides, &dims, false);
-}
-
-/// Whether the graph binds a stats output.
-enum class Stats
-{
-    NONE,
-    /// stats uid STATS_UID and generate_stats true, the frontend's spelling.
-    BOUND
-};
-
-enum class Mask
-{
-    /// right_bound 0 with TOP_LEFT alignment: the causal corner, causal token 1.
-    TOP_LEFT_CAUSAL,
-    /// right_bound left unset: an unmasked graph, causal token 0.
-    UNMASKED
-};
-
-/// The graph only has to be one the engine matches, so the tokens it binds can be read;
-/// the applicability rules are the per-arch matcher suites' subject.
-flatbuffers::FlatBufferBuilder buildGraph(
-    const AttentionDenseTestArch& arch, float scale, Mask mask, bool withBhsdTensor, Stats stats)
-{
-    flatbuffers::FlatBufferBuilder builder;
-
-    const std::vector<int64_t> dims{BATCH, HEADS, SEQ, HEAD_SIZE};
-    const std::vector<int64_t> strides = bshdStrides();
-    const std::vector<int64_t> wrongStrides = bhsdStrides();
-    const std::vector<int64_t> statsDims{BATCH, HEADS, SEQ, 1};
-    const std::vector<int64_t> statsStrides{HEADS * SEQ, SEQ, 1, 1};
-    const std::vector<int64_t> tokenMajorStatsStrides{SEQ * HEADS, 1, HEADS, 1};
-
-    std::vector<flatbuffers::Offset<data_objects::TensorAttributes>> tensors;
-    for(const int64_t uid : {Q_UID, K_UID, V_UID, O_UID})
-    {
-        tensors.push_back(addTensor(builder, uid, strides, dims));
-    }
-    if(withBhsdTensor)
-    {
-        tensors.push_back(addTensor(builder, BHSD_UID, wrongStrides, dims));
-        if(arch.bindsStats)
-        {
-            tensors.push_back(addTensor(builder,
-                                        TOKEN_MAJOR_STATS_UID,
-                                        tokenMajorStatsStrides,
-                                        statsDims,
-                                        data_objects::DataType::FLOAT));
-        }
-    }
-    if(stats == Stats::BOUND)
-    {
-        tensors.push_back(
-            addTensor(builder, STATS_UID, statsStrides, statsDims, data_objects::DataType::FLOAT));
-    }
-
-    data_objects::SdpaAttributesBuilder attributesBuilder(builder);
-    attributesBuilder.add_q_tensor_uid(Q_UID);
-    attributesBuilder.add_k_tensor_uid(K_UID);
-    attributesBuilder.add_v_tensor_uid(V_UID);
-    attributesBuilder.add_o_tensor_uid(O_UID);
-    attributesBuilder.add_left_bound(-1);
-    if(mask == Mask::TOP_LEFT_CAUSAL)
-    {
-        attributesBuilder.add_right_bound(0);
-    }
-    attributesBuilder.add_diagonal_alignment(data_objects::DiagonalAlignment::TOP_LEFT);
-    attributesBuilder.add_causal_mask(false);
-    attributesBuilder.add_causal_mask_bottom_right(false);
-    attributesBuilder.add_attn_scale_value(scale);
-    if(stats == Stats::BOUND)
-    {
-        attributesBuilder.add_stats_tensor_uid(STATS_UID);
-        attributesBuilder.add_generate_stats(true);
-    }
-    attributesBuilder.add_alibi_mask(false);
-    attributesBuilder.add_padding_mask(false);
-    attributesBuilder.add_mma_core_mode(data_objects::DataType::UNSET);
-    attributesBuilder.add_implementation(data_objects::AttentionImplementation::AUTO);
-    const auto attributes = attributesBuilder.Finish();
-
-    std::vector<flatbuffers::Offset<data_objects::Node>> nodes;
-    nodes.push_back(data_objects::CreateNodeDirect(builder,
-                                                   "sdpa",
-                                                   data_objects::DataType::FLOAT,
-                                                   data_objects::NodeAttributes::SdpaAttributes,
-                                                   attributes.Union()));
-
-    auto name = builder.CreateString(std::string(arch.tokenPrefix) + "_dispatch");
-    auto tensorsVector = builder.CreateVector(tensors);
-    auto nodesVector = builder.CreateVector(nodes);
-
-    data_objects::GraphBuilder graphBuilder(builder);
-    graphBuilder.add_name(name);
-    graphBuilder.add_tensors(tensorsVector);
-    graphBuilder.add_nodes(nodesVector);
-    builder.Finish(graphBuilder.Finish());
-    return builder;
-}
-
-/// Keeps a built graph alive for as long as a case reads it, and hands out the
-/// MatchContext @p arch's engine sees. The context holds references into this object, so
-/// it must outlive every use.
-class AttentionGraph
-{
-public:
-    explicit AttentionGraph(const AttentionDenseTestArch& arch,
-                            float scale = 0.125F,
-                            Mask mask = Mask::TOP_LEFT_CAUSAL,
-                            bool withBhsdTensor = false,
-                            Stats stats = Stats::NONE)
-        : _arch(&arch)
-        , _builder(buildGraph(arch, scale, mask, withBhsdTensor, stats))
-        , _graph(_builder.GetBufferPointer(), _builder.GetSize())
-    {
-        _properties.gcnArchName = std::string(arch.gcnArchName);
-        _properties.warpSize = 64;
-    }
-
-    const AttentionDenseTestArch& arch() const
-    {
-        return *_arch;
-    }
-
-    MatchContext context() const
-    {
-        return MatchContext{_graph, 0, _properties};
-    }
-
-private:
-    const AttentionDenseTestArch* _arch;
-    flatbuffers::FlatBufferBuilder _builder;
-    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper _graph;
-    DeviceProperties _properties;
-};
 
 // ---------------------------------------------------------------------------
-// The two registry seams
+// The graph match seam
 // ---------------------------------------------------------------------------
 
 /// Runs the pack's graph match over @p graph. An empty result means the engine declined,
 /// which no case here expects -- every graph built above is one it serves.
-BoundTokens bindingsFor(const AttentionGraph& graph)
+BoundTokens bindingsFor(const Graph& graph)
 {
-    registerNativeIngestorSymbols();
-
-    const auto matcher = hipdnn_plugin_sdk::ingestor::GraphMatchRegistry::resolve(
-        std::string(graph.arch().graphMatchSymbol));
-    auto bound = matcher(graph.context());
+    auto bound = graph.match();
     EXPECT_TRUE(bound.has_value()) << "graph_match declined the fixture graph, so there are no "
                                       "tokens to read and no bindings to hand prepare()";
     if(!bound.has_value())
@@ -317,13 +185,6 @@ BoundTokens bindingsFor(const AttentionGraph& graph)
         return {};
     }
     return *bound;
-}
-
-const IKernelDispatchHandler<Handle>* dispatchHandler(const AttentionDenseTestArch& arch)
-{
-    registerNativeIngestorSymbols();
-    return hipdnn_plugin_sdk::ingestor::DispatchRegistry<Handle>::resolve(
-        std::string(arch.dispatchSymbol));
 }
 
 /// The integer @p token carries. The sentinel is deliberately not zero: zero is a real
@@ -336,104 +197,23 @@ int64_t tokenValue(const BoundTokens& bound, const std::string& token)
     return tryGetBoundInt(bound, token).value_or(NOT_BOUND);
 }
 
-/// @p value's IEEE-754 storage, the way BoundTokens must carry a float.
-///
-/// Used only where a bit pattern is impractical to write as a literal: a helper that
-/// repeats what the pack does would assert only that the two agree.
-int64_t ieee754Bits(float value)
-{
-    int32_t bits = 0;
-    static_assert(sizeof(bits) == sizeof(value), "float must be 32-bit to round-trip");
-    std::memcpy(&bits, &value, sizeof(value));
-    return static_cast<int64_t>(bits);
-}
-
 // ---------------------------------------------------------------------------
 // A descriptor prepare() can be driven with
 // ---------------------------------------------------------------------------
 
-/// The ABI the rocKE builder declares, named as hkp_pack records it, so the signature
-/// comparison agrees and the failure below is the archive's rather than a mismatch;
-/// TestAttentionDenseSignature.cpp owns that comparison. A gfx942 emit_lse kernel takes
-/// lse_ptr last.
-std::vector<KernelArgument> recordedSignature(bool writesLse = false)
-{
-    constexpr uint32_t POINTER_BYTES = 8;
-    constexpr uint32_t SCALAR_BYTES = 4;
-
-    std::vector<KernelArgument> signature{
-        KernelArgument{"global_buffer", POINTER_BYTES, 0, "q_ptr"},
-        KernelArgument{"global_buffer", POINTER_BYTES, 0, "k_ptr"},
-        KernelArgument{"global_buffer", POINTER_BYTES, 0, "v_ptr"},
-        KernelArgument{"global_buffer", POINTER_BYTES, 0, "o_ptr"},
-        KernelArgument{"by_value", SCALAR_BYTES, 0, "scale"},
-        KernelArgument{"by_value", SCALAR_BYTES, 0, "batch"},
-        KernelArgument{"by_value", SCALAR_BYTES, 0, "seqlen_q"},
-        KernelArgument{"by_value", SCALAR_BYTES, 0, "seqlen_kv"},
-        KernelArgument{"by_value", SCALAR_BYTES, 0, "num_query_heads"},
-        KernelArgument{"by_value", SCALAR_BYTES, 0, "num_kv_heads"}};
-    if(writesLse)
-    {
-        signature.push_back(KernelArgument{"global_buffer", POINTER_BYTES, 0, "lse_ptr"});
-    }
-    return signature;
-}
-
-/// A KPACK descriptor for @p arch's engine naming an archive that is not there, carrying
-/// the completed metadata prepare() reads: head_size and the (block_m, block_n) tile.
-///
-/// That absence is the point: every check prepare() performs BEFORE the loader runs is
-/// reached, and when they all pass the loader reports the missing file. No device, no
-/// compile, no launch.
+/// A KPACK descriptor for @p arch's engine at the (@p blockM, @p blockN) tile, recording the
+/// ABI the rocKE builder declares so the signature comparison agrees and a failure is the
+/// archive's rather than a mismatch; TestAttentionDenseSignature.cpp owns that comparison.
+/// A gfx942 emit_lse kernel takes lse_ptr last.
 KernelDefinition makeKernel(const AttentionDenseTestArch& arch,
                             int64_t blockM = 256,
                             int64_t blockN = 64,
                             bool writesLse = false)
 {
-    KernelDefinition kernel;
-    kernel.kernelId
-        = hipdnn_flatbuffers_sdk::utilities::parseUuid("00000000-0000-4000-8000-0000000051b1");
-    kernel.packId
-        = hipdnn_flatbuffers_sdk::utilities::parseUuid("00000000-0000-4000-8000-0000000051b2");
-    kernel.dispatchId
-        = hipdnn_flatbuffers_sdk::utilities::parseUuid("00000000-0000-4000-8000-0000000051b3");
-    kernel.name = std::string(arch.kernelName);
-    kernel.source.kind = KernelSourceKind::KPACK;
-    kernel.source.library = "there-is-no-archive-here.kpack";
-    kernel.source.tocKey = "toc#0";
-    kernel.source.symbol = "attention_dense";
-    kernel.source.signature = recordedSignature(writesLse);
-    kernel.originDirectory = "/nonexistent";
-    kernel.treeRoot = "/nonexistent";
-    kernel.metadata = completedAttentionDenseMetadata(arch, HEAD_SIZE, blockM, blockN);
-    return kernel;
+    return kpackKernel(arch, writesLse ? pythonLseAbi() : pythonAbi(), blockM, blockN);
 }
 
-/// The message prepare() throws for @p bound and @p kernel, or empty if it returned a
-/// prepared dispatch -- which it cannot, since the archive is absent.
-std::string prepareFailure(const AttentionGraph& graph,
-                           const BoundTokens& bound,
-                           const KernelDefinition& kernel)
-{
-    const auto* handler = dispatchHandler(graph.arch());
-    EXPECT_NE(handler, nullptr);
-    if(handler == nullptr)
-    {
-        return {};
-    }
-
-    try
-    {
-        handler->prepare(graph.context(), bound, kernel);
-    }
-    catch(const std::exception& error)
-    {
-        return error.what();
-    }
-    return {};
-}
-
-std::string prepareFailure(const AttentionGraph& graph, const BoundTokens& bound)
+std::string prepareFailure(const Graph& graph, const BoundTokens& bound)
 {
     return prepareFailure(graph, bound, makeKernel(graph.arch()));
 }
@@ -515,7 +295,7 @@ TEST_P(TestAttentionDenseDispatch, DispatchSymbolResolves)
 /// answer to be used. This is the only place the zero is pinned.
 TEST_P(TestAttentionDenseDispatch, WorkspaceBytesIsAlwaysZero)
 {
-    const AttentionGraph graph(arch());
+    const Graph graph(arch(), servedGraph());
     const auto bound = bindingsFor(graph);
     const auto* handler = dispatchHandler(arch());
     ASSERT_NE(handler, nullptr);
@@ -533,7 +313,7 @@ TEST_P(TestAttentionDenseDispatch, WorkspaceBytesIsAlwaysZero)
 /// uids are mutually distinct, so any permutation of the four fails this.
 TEST_P(TestAttentionDenseDispatch, BindsEachOperandUidToItsOwnToken)
 {
-    const AttentionGraph graph(arch());
+    const Graph graph(arch(), servedGraph());
     const auto bound = bindingsFor(graph);
 
     EXPECT_EQ(tokenValue(bound, tokenName(arch(), Q_TOKEN)), Q_UID);
@@ -558,18 +338,18 @@ TEST_P(TestAttentionDenseDispatch, BindsTheSoftmaxScaleAsItsIeeeBitPattern)
     // 0.1875 = 1.5 * 2^-3. Sign 0, biased exponent 124 (0x7C), mantissa 0x400000.
     // Chosen with a non-zero mantissa: a power of two alone would not catch an encoding
     // that dropped the fraction field.
-    const AttentionGraph fraction(arch(), 0.1875F);
+    const Graph fraction(arch(), servedGraph(0.1875F));
     EXPECT_EQ(tokenValue(bindingsFor(fraction), scaleBits), 0x3E400000);
 
     // 0.125 = 1.0 * 2^-3. Same exponent, zero mantissa -- the neighbouring encoding, so
     // the two together pin the exponent and the fraction independently.
-    const AttentionGraph power(arch(), 0.125F);
+    const Graph power(arch(), servedGraph(0.125F));
     EXPECT_EQ(tokenValue(bindingsFor(power), scaleBits), 0x3E000000);
 
     // The scale a D128 graph actually carries, 1/sqrt(128). Its pattern is impractical to
     // write by hand, so this case only adds that a realistic value survives the trip.
     constexpr float REALISTIC_SCALE = 0.08838834764831843F;
-    const AttentionGraph realistic(arch(), REALISTIC_SCALE);
+    const Graph realistic(arch(), servedGraph(REALISTIC_SCALE));
     EXPECT_EQ(tokenValue(bindingsFor(realistic), scaleBits), ieee754Bits(REALISTIC_SCALE));
 }
 
@@ -583,12 +363,14 @@ TEST_P(TestAttentionDenseDispatch, BindsTheDerivedMaskAndAZeroSlidingWindow)
     const std::string causalToken = tokenName(arch(), CAUSAL_TOKEN);
     const std::string windowToken = tokenName(arch(), SLIDING_WINDOW_TOKEN);
 
-    const AttentionGraph causal(arch(), 0.125F, Mask::TOP_LEFT_CAUSAL);
+    const Graph causal(arch(), servedGraph());
     const auto causalBound = bindingsFor(causal);
     EXPECT_EQ(tokenValue(causalBound, causalToken), 1);
     EXPECT_EQ(tokenValue(causalBound, windowToken), 0);
 
-    const AttentionGraph unmasked(arch(), 0.125F, Mask::UNMASKED);
+    auto unmaskedSpec = servedGraph();
+    unmaskedSpec.rightBound.reset();
+    const Graph unmasked(arch(), unmaskedSpec);
     const auto unmaskedBound = bindingsFor(unmasked);
     EXPECT_EQ(tokenValue(unmaskedBound, causalToken), 0);
     EXPECT_EQ(tokenValue(unmaskedBound, windowToken), 0);
@@ -605,7 +387,7 @@ TEST_P(TestAttentionDenseDispatch, BindsTheDerivedMaskAndAZeroSlidingWindow)
 /// which means the bindings were read and the output tensor was accepted first.
 TEST_P(TestAttentionDenseDispatch, ReachesTheLoaderOnceTheBindingsAndOutputAreGood)
 {
-    const AttentionGraph graph(arch());
+    const Graph graph(arch(), servedGraph());
     const std::string failure = prepareFailure(graph, bindingsFor(graph));
 
     ASSERT_FALSE(failure.empty()) << "the archive named by the fixture does not exist, so "
@@ -620,7 +402,7 @@ TEST_P(TestAttentionDenseDispatch, ReachesTheLoaderOnceTheBindingsAndOutputAreGo
 /// to whatever buffer the caller happened to label zero, and a scale of positive zero.
 TEST_P(TestAttentionDenseDispatch, RefusesToPrepareWithoutTheMatcherSBindings)
 {
-    const AttentionGraph graph(arch());
+    const Graph graph(arch(), servedGraph());
     const auto* handler = dispatchHandler(arch());
     ASSERT_NE(handler, nullptr);
 
@@ -636,7 +418,7 @@ TEST_P(TestAttentionDenseDispatch, RefusesToPrepareWithoutTheMatcherSBindings)
 /// the loader instead. Naming the token is what distinguishes the two.
 TEST_P(TestAttentionDenseDispatch, RefusesToPrepareWhenAnyOneBoundTokenIsMissing)
 {
-    const AttentionGraph graph(arch());
+    const Graph graph(arch(), servedGraph());
     const auto bound = bindingsFor(graph);
     const auto tokens = allTokens(arch());
     ASSERT_EQ(bound.size(), tokens.size())
@@ -661,7 +443,7 @@ TEST_P(TestAttentionDenseDispatch, RefusesToPrepareWhenAnyOneBoundTokenIsMissing
 /// tensor's dims, so a dropped null test is a dereference of nothing.
 TEST_P(TestAttentionDenseDispatch, RefusesToPrepareWhenTheOutputTokenNamesNoTensor)
 {
-    const AttentionGraph graph(arch());
+    const Graph graph(arch(), servedGraph());
     auto tampered = bindingsFor(graph);
     tampered[tokenName(arch(), O_TOKEN)] = ABSENT_UID;
 
@@ -679,7 +461,7 @@ TEST_P(TestAttentionDenseDispatch, RefusesToPrepareWhenTheOutputTokenNamesNoTens
 /// drives the defence-in-depth check in prepare() directly, which nothing else reaches.
 TEST_P(TestAttentionDenseDispatch, RefusesToPrepareWhenTheOutputTokenNamesANonBshdTensor)
 {
-    const AttentionGraph graph(arch(), 0.125F, Mask::TOP_LEFT_CAUSAL, /*withBhsdTensor=*/true);
+    const Graph graph(arch(), withUnnamedTensors(arch(), servedGraph()));
     auto tampered = bindingsFor(graph);
     tampered[tokenName(arch(), O_TOKEN)] = BHSD_UID;
 
@@ -692,7 +474,7 @@ TEST_P(TestAttentionDenseDispatch, RefusesToPrepareWhenTheOutputTokenNamesANonBs
 /// what stops a legal alternative.
 TEST_P(TestAttentionDenseDispatch, ReachesTheLoaderForEveryBuildableTile)
 {
-    const AttentionGraph graph(arch());
+    const Graph graph(arch(), servedGraph());
     const auto bound = bindingsFor(graph);
     for(const auto& [blockM, blockN] : GetParam()->buildableTiles)
     {
@@ -710,7 +492,7 @@ TEST_P(TestAttentionDenseDispatch, ReachesTheLoaderForEveryBuildableTile)
 /// tile launches this binary with another binary's geometry.
 TEST_P(TestAttentionDenseDispatch, RefusesToPrepareACandidateWithoutASupportedTile)
 {
-    const AttentionGraph graph(arch());
+    const Graph graph(arch(), servedGraph());
     const auto bound = bindingsFor(graph);
 
     std::vector<KernelDefinition> malformed;
@@ -741,7 +523,7 @@ TEST_P(TestAttentionDenseDispatch, RefusesToPrepareACandidateWithoutASupportedTi
 /// compiled from source is refused before anything is built, and the refusal names its kind.
 TEST_P(TestAttentionDenseDispatch, RefusesToPrepareACandidateThatIsNotKpack)
 {
-    const AttentionGraph graph(arch());
+    const Graph graph(arch(), servedGraph());
     auto kernel = makeKernel(arch());
     kernel.source.kind = KernelSourceKind::EMBEDDED_SOURCE;
     kernel.source.sourceFile = "kernels/AttentionDense.cpp";
@@ -770,12 +552,11 @@ INSTANTIATE_TEST_SUITE_P(,
 TEST(TestGfx942AttentionDenseDispatch, BindsTheStatsOutputOrNoStats)
 {
     const std::string statsToken = tokenName(GFX942_ATTENTION_DENSE, STATS_TOKEN);
-    EXPECT_EQ(tokenValue(bindingsFor(AttentionGraph(GFX942_ATTENTION_DENSE)), statsToken),
-              NO_STATS);
+    const Graph withoutStats(GFX942_ATTENTION_DENSE, servedGraph());
+    EXPECT_EQ(tokenValue(bindingsFor(withoutStats), statsToken), NO_STATS);
 
-    const AttentionGraph withStats(
-        GFX942_ATTENTION_DENSE, 0.125F, Mask::TOP_LEFT_CAUSAL, false, Stats::BOUND);
-    EXPECT_EQ(tokenValue(bindingsFor(withStats), statsToken), STATS_UID);
+    const Graph bindsStats(GFX942_ATTENTION_DENSE, withStats(servedGraph(), STATS_UID));
+    EXPECT_EQ(tokenValue(bindingsFor(bindsStats), statsToken), STATS_UID);
 }
 
 /// A graph that binds stats prepares the 11-argument form: an emit_lse candidate's
@@ -785,18 +566,18 @@ TEST(TestGfx942AttentionDenseDispatch, BindsTheStatsOutputOrNoStats)
 TEST(TestGfx942AttentionDenseDispatch, PreparesTheLseFormExactlyForAGraphThatBindsStats)
 {
     const auto& arch = GFX942_ATTENTION_DENSE;
-    const AttentionGraph withStats(arch, 0.125F, Mask::TOP_LEFT_CAUSAL, false, Stats::BOUND);
-    const auto statsBound = bindingsFor(withStats);
+    const Graph bindsStats(arch, withStats(servedGraph(), STATS_UID));
+    const auto statsBound = bindingsFor(bindsStats);
 
     const std::string lseFailure
-        = prepareFailure(withStats, statsBound, makeKernel(arch, 256, 64, /*writesLse=*/true));
+        = prepareFailure(bindsStats, statsBound, makeKernel(arch, 256, 64, /*writesLse=*/true));
     ASSERT_FALSE(lseFailure.empty()) << "prepare() cannot succeed without the archive";
     EXPECT_NE(lseFailure.find("does not exist"), std::string::npos) << lseFailure;
 
-    const std::string plainFailure = prepareFailure(withStats, statsBound, makeKernel(arch));
+    const std::string plainFailure = prepareFailure(bindsStats, statsBound, makeKernel(arch));
     EXPECT_NE(plainFailure.find(SIGNATURE_MARKER), std::string::npos) << plainFailure;
 
-    const AttentionGraph withoutStats(arch);
+    const Graph withoutStats(arch, servedGraph());
     const std::string extraFailure = prepareFailure(
         withoutStats, bindingsFor(withoutStats), makeKernel(arch, 256, 64, /*writesLse=*/true));
     EXPECT_NE(extraFailure.find(SIGNATURE_MARKER), std::string::npos) << extraFailure;
@@ -808,7 +589,7 @@ TEST(TestGfx942AttentionDenseDispatch, PreparesTheLseFormExactlyForAGraphThatBin
 TEST(TestGfx942AttentionDenseDispatch, RefusesToPrepareWhenTheStatsTokenNamesATensorItCannotWrite)
 {
     const auto& arch = GFX942_ATTENTION_DENSE;
-    const AttentionGraph graph(arch, 0.125F, Mask::TOP_LEFT_CAUSAL, /*withBhsdTensor=*/true);
+    const Graph graph(arch, withUnnamedTensors(arch, servedGraph()));
     for(const int64_t uid : {ABSENT_UID, TOKEN_MAJOR_STATS_UID, Q_UID})
     {
         SCOPED_TRACE(uid);

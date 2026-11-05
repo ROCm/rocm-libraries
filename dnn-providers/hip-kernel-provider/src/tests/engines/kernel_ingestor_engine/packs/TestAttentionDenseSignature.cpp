@@ -5,29 +5,17 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <exception>
-#include <memory>
 #include <string>
-#include <string_view>
 #include <utility>
 #include <vector>
 
 #include <gtest/gtest.h>
 
-#include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
-#include <hipdnn_flatbuffers_sdk/data_objects/sdpa_attributes_generated.h>
-#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
-#include <hipdnn_flatbuffers_sdk/utilities/Uuid.hpp>
 #include <hipdnn_plugin_sdk/ingestor/Descriptors.hpp>
-#include <hipdnn_plugin_sdk/ingestor/DeviceProperties.hpp>
-#include <hipdnn_plugin_sdk/ingestor/IKernelDispatchHandler.hpp>
 #include <hipdnn_plugin_sdk/ingestor/KernelDefinition.hpp>
-#include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
-#include <hipdnn_plugin_sdk/ingestor/NativeHooks.hpp>
 
-#include "core/Handle.hpp"
-#include "engines/kernel_ingestor_engine/KernelIngestorEngine.hpp"
-#include "engines/kernel_ingestor_engine/packs/AttentionDenseTestArch.hpp"
+#include "tests/engines/kernel_ingestor_engine/packs/AttentionDenseTestArch.hpp"
+#include "tests/engines/kernel_ingestor_engine/packs/AttentionDenseTestGraphs.hpp"
 
 /**
  * @file TestAttentionDenseSignature.cpp
@@ -70,49 +58,19 @@ namespace hip_kernel_provider::kernel_ingestor_engine::testing
 namespace
 {
 
-namespace data_objects = hipdnn_flatbuffers_sdk::data_objects;
-using hipdnn_plugin_sdk::ingestor::DeviceProperties;
-using hipdnn_plugin_sdk::ingestor::KernelArgument;
-using hipdnn_plugin_sdk::ingestor::KernelDefinition;
-using hipdnn_plugin_sdk::ingestor::KernelSourceKind;
-using hipdnn_plugin_sdk::ingestor::MatchContext;
+using namespace attention_dense_graphs;
 
 // ---------------------------------------------------------------------------
-// The ABI, as the Python declares it
+// The ABI, as the Python declares it. pythonAbi() and pythonLseAbi() are
+// AttentionDenseTestGraphs.hpp's, shared with the dispatch suite; the forms below derive
+// from them.
 // ---------------------------------------------------------------------------
-
-/// `.value_kind` a device pointer parameter carries in the AMDGPU metadata note.
-constexpr const char* BUFFER_KIND = "global_buffer";
-
-/// `.value_kind` a scalar parameter carries.
-constexpr const char* BY_VALUE_KIND = "by_value";
-
-/// Bytes one `ptr<dtype, global>` occupies in the kernarg segment: a 64-bit address,
-/// whatever the element type is.
-constexpr uint32_t POINTER_BYTES = 8;
-
-constexpr uint32_t SCALAR_BYTES = 4;
 
 constexpr std::size_t SCALE_INDEX = 4;
 
 constexpr std::size_t LAST_INDEX = 9;
 
 constexpr std::size_t LSE_INDEX = 10;
-
-/// The argument list attention_dense_signature declares, under the names it gives them.
-std::vector<KernelArgument> pythonAbi()
-{
-    return {KernelArgument{BUFFER_KIND, POINTER_BYTES, 0, "q_ptr"},
-            KernelArgument{BUFFER_KIND, POINTER_BYTES, 0, "k_ptr"},
-            KernelArgument{BUFFER_KIND, POINTER_BYTES, 0, "v_ptr"},
-            KernelArgument{BUFFER_KIND, POINTER_BYTES, 0, "o_ptr"},
-            KernelArgument{BY_VALUE_KIND, SCALAR_BYTES, 0, "scale"},
-            KernelArgument{BY_VALUE_KIND, SCALAR_BYTES, 0, "batch"},
-            KernelArgument{BY_VALUE_KIND, SCALAR_BYTES, 0, "seqlen_q"},
-            KernelArgument{BY_VALUE_KIND, SCALAR_BYTES, 0, "seqlen_kv"},
-            KernelArgument{BY_VALUE_KIND, SCALAR_BYTES, 0, "num_query_heads"},
-            KernelArgument{BY_VALUE_KIND, SCALAR_BYTES, 0, "num_kv_heads"}};
-}
 
 /// The divisors of each gfx942 persistent decode, in kernarg order
 /// (PersistDecode.fastdiv_divisors).
@@ -163,14 +121,6 @@ std::vector<KernelArgument> bakedPersistentAbi()
     return signature;
 }
 
-/// The emit_lse form: the same ten arguments, then lse_ptr, the FP32 stats output.
-std::vector<KernelArgument> pythonLseAbi()
-{
-    auto signature = pythonAbi();
-    signature.push_back(KernelArgument{BUFFER_KIND, POINTER_BYTES, 0, "lse_ptr"});
-    return signature;
-}
-
 std::vector<KernelArgument> withArgument(std::size_t index, const KernelArgument& argument)
 {
     auto signature = pythonAbi();
@@ -186,28 +136,8 @@ std::vector<KernelArgument> withLseArgument(std::size_t index, const KernelArgum
 }
 
 // ---------------------------------------------------------------------------
-// A graph the engine serves
+// The seam
 // ---------------------------------------------------------------------------
-
-constexpr int64_t Q_UID = 1;
-constexpr int64_t K_UID = 2;
-constexpr int64_t V_UID = 3;
-constexpr int64_t O_UID = 4;
-constexpr int64_t STATS_UID = 5;
-
-/// The shape is not what these cases are about -- any graph the engine accepts would do,
-/// and the per-arch matcher suites own the applicability rules.
-constexpr int64_t BATCH = 2;
-constexpr int64_t HEADS = 4;
-constexpr int64_t SEQ = 256;
-constexpr int64_t HEAD_SIZE = 128;
-constexpr float SCALE = 0.08838834764831843F;
-
-/// BSHD strides for (B, H, S, D) logical dims -- token-major, head varying fastest.
-std::vector<int64_t> bshdStrides()
-{
-    return {SEQ * HEADS * HEAD_SIZE, HEAD_SIZE, HEADS * HEAD_SIZE, 1};
-}
 
 /// Whether the graph binds a stats output, which selects the form prepare() checks.
 enum class Stats
@@ -216,109 +146,18 @@ enum class Stats
     BOUND
 };
 
-flatbuffers::FlatBufferBuilder buildAcceptedSdpaGraph(const AttentionDenseTestArch& arch,
-                                                      Stats stats)
-{
-    flatbuffers::FlatBufferBuilder builder;
-
-    const std::vector<int64_t> dims{BATCH, HEADS, SEQ, HEAD_SIZE};
-    const std::vector<int64_t> strides = bshdStrides();
-    const std::vector<int64_t> statsDims{BATCH, HEADS, SEQ, 1};
-    const std::vector<int64_t> statsStrides{HEADS * SEQ, SEQ, 1, 1};
-
-    std::vector<flatbuffers::Offset<data_objects::TensorAttributes>> tensors;
-    for(const int64_t uid : {Q_UID, K_UID, V_UID, O_UID})
-    {
-        tensors.push_back(data_objects::CreateTensorAttributesDirect(
-            builder, uid, nullptr, data_objects::DataType::BFLOAT16, &strides, &dims, false));
-    }
-    if(stats == Stats::BOUND)
-    {
-        tensors.push_back(data_objects::CreateTensorAttributesDirect(builder,
-                                                                     STATS_UID,
-                                                                     nullptr,
-                                                                     data_objects::DataType::FLOAT,
-                                                                     &statsStrides,
-                                                                     &statsDims,
-                                                                     false));
-    }
-
-    data_objects::SdpaAttributesBuilder attributesBuilder(builder);
-    attributesBuilder.add_q_tensor_uid(Q_UID);
-    attributesBuilder.add_k_tensor_uid(K_UID);
-    attributesBuilder.add_v_tensor_uid(V_UID);
-    attributesBuilder.add_o_tensor_uid(O_UID);
-    attributesBuilder.add_left_bound(-1);
-    attributesBuilder.add_right_bound(0);
-    attributesBuilder.add_diagonal_alignment(data_objects::DiagonalAlignment::TOP_LEFT);
-    attributesBuilder.add_causal_mask(false);
-    attributesBuilder.add_causal_mask_bottom_right(false);
-    attributesBuilder.add_attn_scale_value(SCALE);
-    if(stats == Stats::BOUND)
-    {
-        attributesBuilder.add_stats_tensor_uid(STATS_UID);
-        attributesBuilder.add_generate_stats(true);
-    }
-    attributesBuilder.add_alibi_mask(false);
-    attributesBuilder.add_padding_mask(false);
-    attributesBuilder.add_mma_core_mode(data_objects::DataType::UNSET);
-    attributesBuilder.add_implementation(data_objects::AttentionImplementation::AUTO);
-    const auto attributes = attributesBuilder.Finish();
-
-    std::vector<flatbuffers::Offset<data_objects::Node>> nodes;
-    nodes.push_back(data_objects::CreateNodeDirect(builder,
-                                                   "sdpa",
-                                                   data_objects::DataType::FLOAT,
-                                                   data_objects::NodeAttributes::SdpaAttributes,
-                                                   attributes.Union()));
-
-    auto name = builder.CreateString(std::string(arch.tokenPrefix) + "_signature");
-    auto tensorsVector = builder.CreateVector(tensors);
-    auto nodesVector = builder.CreateVector(nodes);
-
-    data_objects::GraphBuilder graphBuilder(builder);
-    graphBuilder.add_name(name);
-    graphBuilder.add_tensors(tensorsVector);
-    graphBuilder.add_nodes(nodesVector);
-    builder.Finish(graphBuilder.Finish());
-    return builder;
-}
-
-// ---------------------------------------------------------------------------
-// The seam
-// ---------------------------------------------------------------------------
-
 /// The fragment only the signature refusal carries. Kept short: the rest of that message
 /// renders both argument lists and is not stable enough to match on.
 constexpr const char* MISMATCH_MARKER = "is packaged with arguments";
 
-/// A KPACK descriptor for @p arch's engine whose recorded argument list is @p recorded.
-///
-/// The archive it names is not there, which is the point: the containment and link checks
-/// pass, the signature comparison runs, and only if it agrees does the loader get as far
-/// as reporting the absence. The metadata is the completed baseline tile prepare() reads
-/// before the comparison; the tile is not what these cases are about, and
-/// TestAttentionDenseDispatch.cpp owns its refusal.
+/// A KPACK descriptor for @p arch's engine whose recorded argument list is @p recorded, at
+/// the completed baseline tile prepare() reads before the comparison; the tile is not what
+/// these cases are about, and TestAttentionDenseDispatch.cpp owns its refusal.
 KernelDefinition makeKernel(const AttentionDenseTestArch& arch,
                             const std::vector<KernelArgument>& recorded,
                             const std::string& persistDecode = "")
 {
-    KernelDefinition kernel;
-    kernel.kernelId
-        = hipdnn_flatbuffers_sdk::utilities::parseUuid("00000000-0000-4000-8000-0000000051a1");
-    kernel.packId
-        = hipdnn_flatbuffers_sdk::utilities::parseUuid("00000000-0000-4000-8000-0000000051a2");
-    kernel.dispatchId
-        = hipdnn_flatbuffers_sdk::utilities::parseUuid("00000000-0000-4000-8000-0000000051a3");
-    kernel.name = std::string(arch.kernelName);
-    kernel.source.kind = KernelSourceKind::KPACK;
-    kernel.source.library = "there-is-no-archive-here.kpack";
-    kernel.source.tocKey = "toc#0";
-    kernel.source.symbol = "attention_dense";
-    kernel.source.signature = recorded;
-    kernel.originDirectory = "/nonexistent";
-    kernel.treeRoot = "/nonexistent";
-    kernel.metadata = completedAttentionDenseMetadata(arch, HEAD_SIZE, 256, 64);
+    auto kernel = kpackKernel(arch, recorded);
     // A gfx942 persistent candidate at @p persistDecode, 304 CTAs.
     if(!persistDecode.empty())
     {
@@ -328,52 +167,24 @@ KernelDefinition makeKernel(const AttentionDenseTestArch& arch,
     return kernel;
 }
 
-/// Runs @p arch's prepare() over a descriptor recording @p recorded, for a graph that
-/// binds @p stats, and returns the message of whatever it throws. Empty means it returned
-/// a prepared dispatch, which no case expects.
+/// Runs @p arch's prepare() over a descriptor recording @p recorded, for the default graph
+/// (any graph the engine accepts would do) binding @p stats, and returns the message of
+/// whatever it throws. Empty means it returned a prepared dispatch, which no case expects.
 std::string prepareFailure(const AttentionDenseTestArch& arch,
                            const std::vector<KernelArgument>& recorded,
                            Stats stats = Stats::NONE,
                            const std::string& persistDecode = "")
 {
-    registerNativeIngestorSymbols();
-
-    auto builder = buildAcceptedSdpaGraph(arch, stats);
-    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
-        builder.GetBufferPointer(), builder.GetSize());
-
-    DeviceProperties properties;
-    properties.gcnArchName = std::string(arch.gcnArchName);
-    properties.warpSize = 64;
-    const MatchContext context{graph, 0, properties};
-
-    const auto matcher = hipdnn_plugin_sdk::ingestor::GraphMatchRegistry::resolve(
-        std::string(arch.graphMatchSymbol));
-    const auto bound = matcher(context);
+    const Graph graph(arch, stats == Stats::BOUND ? withStats(GraphSpec{}) : GraphSpec{});
+    const auto bound = graph.match();
     EXPECT_TRUE(bound.has_value()) << "graph_match declined the fixture graph, so prepare() "
                                       "never ran and no case below means anything";
     if(!bound.has_value())
     {
         return {};
     }
-
-    const auto* handler = hipdnn_plugin_sdk::ingestor::DispatchRegistry<Handle>::resolve(
-        std::string(arch.dispatchSymbol));
-    EXPECT_NE(handler, nullptr);
-    if(handler == nullptr)
-    {
-        return {};
-    }
-
-    try
-    {
-        handler->prepare(context, *bound, makeKernel(arch, recorded, persistDecode));
-    }
-    catch(const std::exception& error)
-    {
-        return error.what();
-    }
-    return {};
+    return attention_dense_graphs::prepareFailure(
+        graph, *bound, makeKernel(arch, recorded, persistDecode));
 }
 
 /// Asserts @p arch's pack refuses @p recorded on signature grounds rather than on any of
