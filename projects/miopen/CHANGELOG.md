@@ -73,8 +73,9 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
   [`src/hipconv/CHANGELOG.md`](src/hipconv/CHANGELOG.md) for the full list.
 * [Conv] Added `ConvHipImplicitGemmWmmaBwdData1d`, a backward-data 1D convolution solver (the
   forward of a `ConvTranspose1d`, groups = 1) as an implicit GEMM on WMMA (`gfx110X`, `gfx115X`,
-  `gfx120X`) for fp16 and bf16. It needs no col2im; on gfx1151 and gfx1201 it is up to 3.4x and 3.2x
-  faster than `GemmBwdRest` on the long, narrow upsampling layers of audio decoders.
+  `gfx120X`) for fp16 and bf16. It needs no col2im; on the long, narrow upsampling layers of audio
+  decoders it is up to 3.4x (gfx1151) and 3.2x (gfx1201) faster than the solver Find picked before
+  (`GemmBwdRest` or the grouped CK solver).
 
 ### Changed
 * [Conv] Enabled the 2D and 3D grouped forward CK xdlops solvers in deterministic mode. Forward
