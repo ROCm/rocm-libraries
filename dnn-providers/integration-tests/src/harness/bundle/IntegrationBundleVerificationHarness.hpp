@@ -36,6 +36,7 @@
 #include "harness/bundle/SupportClaimReport.hpp"
 #include "harness/bundle/SupportClaims.hpp"
 #include "harness/bundle/SupportObservationLog.hpp"
+#include "harness/bundle/VariantPackBuilder.hpp"
 #include "harness/bundle/VerificationOutcome.hpp"
 #include "harness/input-init/InputFillRecipes.hpp"
 
@@ -555,7 +556,15 @@ private:
     std::optional<VerificationOutcome> fillBundleInputs();
 
     OutputTensors allocateSentinelOutputs(bool onDevice) const;
+    // The input set that a variant pack reads: the packed set for a device pack of a
+    // sub-byte graph, otherwise the unpacked set.
+    TensorMap& variantPackInputs(bool useDevice);
     std::unordered_map<int64_t, void*> buildVariantPack(OutputTensors& outputs, bool useDevice);
+    // Moves the engine's pointers of the bundle's start_offsets tensors. Errors name the
+    // bundle.
+    detail::StartOffsetStaging stageStartOffsets(std::unordered_map<int64_t, void*>& variantPack,
+                                                 OutputTensors& outputs,
+                                                 bool useDevice);
     EngineRunResult runEngine(GraphSession& session);
     VerificationOutcome engineDidNotRun(const EngineRunResult& run) const;
 

@@ -8,6 +8,7 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -19,6 +20,7 @@
 #include <string>
 #include <vector>
 
+#include <hip/hip_runtime.h>
 #include <hipdnn_data_sdk/types.hpp>
 #include <hipdnn_data_sdk/utilities/PackedElementTraits.hpp>
 #include <hipdnn_data_sdk/utilities/PackedSubByteTensor.hpp>
@@ -34,6 +36,7 @@
 #include "BundleFixtureFiles.hpp"
 #include "HarnessTestSupport.hpp"
 #include "RaggedGraphTestUtils.hpp"
+#include "harness/Benchmark.hpp"
 #include "harness/bundle/IntegrationBundleVerificationHarness.hpp"
 #include "harness/bundle/IntegrationTestBundle.hpp"
 #include "harness/bundle/VariantPackBuilder.hpp"
@@ -1219,6 +1222,477 @@ TEST_F(TestGoldenHarnessFixture, AliasWithGoldenBlobsFailsTheHarness)
     EXPECT_NE(testing_support::allMessages(results).find("aliases cannot be used with tensor data"),
               std::string::npos)
         << testing_support::allMessages(results);
+}
+
+// ---- start_offsets ---------------------------------------------------------
+
+namespace
+{
+
+constexpr int64_t K_SHIFTED_INPUT_OFFSET = 2;
+constexpr int64_t K_SHIFTED_OUTPUT_OFFSET = 3;
+constexpr std::size_t K_ALIAS_OUTPUT_ELEMS = 6;
+constexpr std::size_t K_ALIAS_OWNER_BYTES = 6 * sizeof(float);
+constexpr std::size_t K_ALIAS_VIEW_BYTES = 3 * sizeof(float);
+
+// Bytes from the last address aligned to K_START_OFFSET_BASE_ALIGNMENT to `pointer`.
+int64_t bytesPastAlignment(const void* pointer)
+{
+    return static_cast<int64_t>(reinterpret_cast<std::uintptr_t>(pointer)
+                                % static_cast<std::uintptr_t>(K_START_OFFSET_BASE_ALIGNMENT));
+}
+
+// Writes `count` copies of `value` from `pointer` on. The pointer need not be aligned
+// for a float.
+void writeFloats(void* pointer, std::size_t count, float value)
+{
+    for(std::size_t i = 0; i < count; ++i)
+    {
+        std::memcpy(static_cast<std::byte*>(pointer) + (i * sizeof(float)), &value, sizeof(value));
+    }
+}
+
+std::vector<std::byte> copyBytes(const void* pointer, std::size_t bytes)
+{
+    std::vector<std::byte> copy(bytes);
+    std::memcpy(copy.data(), pointer, bytes);
+    return copy;
+}
+
+std::size_t byteCount(const hipdnn_data_sdk::utilities::ITensor& tensor)
+{
+    return tensor.elementSpace() * tensor.elementSize();
+}
+
+float floatAt(hipdnn_data_sdk::utilities::ITensor& tensor, std::size_t index)
+{
+    float value = 0.0f;
+    std::memcpy(&value,
+                static_cast<const std::byte*>(tensor.rawHostData()) + (index * sizeof(float)),
+                sizeof(value));
+    return value;
+}
+
+// The aliased conv bundle with the owner and the output moved.
+std::shared_ptr<IntegrationTestBundle> makeShiftedConvBundle(std::vector<TensorAlias> aliases = {})
+{
+    auto bundle = makeAliasedConvBundle(std::move(aliases));
+    bundle->metadata.startOffsets = {{K_ALIAS_OWNER_UID, K_SHIFTED_INPUT_OFFSET},
+                                     {K_ALIAS_OUTPUT_UID, K_SHIFTED_OUTPUT_OFFSET}};
+    return bundle;
+}
+
+// The golden batchnorm bundle with x (uid 0) and the output moved.
+void shiftGoldenBundle(IntegrationTestBundle& bundle)
+{
+    bundle.metadata.formatVersion = 2;
+    bundle.metadata.startOffsets
+        = {{0, K_SHIFTED_INPUT_OFFSET}, {fixtures::K_OUTPUT_UID, K_SHIFTED_OUTPUT_OFFSET}};
+}
+
+// The mocked engine writes `value` into every element of the golden bundle's output and
+// records the offsets past alignment of x (uid 0) and of the output.
+void engineWritesThroughAnyPointer(testing_support::HarnessMocks& mocks,
+                                   float value,
+                                   std::vector<int64_t>& engineOffsets)
+{
+    ON_CALL(mocks.engineRunner, execute(::testing::_, ::testing::_, ::testing::_))
+        .WillByDefault([value, &engineOffsets](GraphSession&,
+                                               const std::optional<LoadedEngine>&,
+                                               VariantPack& variantPack) {
+            engineOffsets.push_back(bytesPastAlignment(variantPack.at(0)));
+            engineOffsets.push_back(bytesPastAlignment(variantPack.at(fixtures::K_OUTPUT_UID)));
+            writeFloats(variantPack.at(fixtures::K_OUTPUT_UID), fixtures::K_OUTPUT_ELEMS, value);
+            return EngineOpResult::succeeded();
+        });
+}
+
+} // namespace
+
+// The engine reads a moved copy of each input in start_offsets and writes a moved output
+// that reaches the comparison; the reference gets the tensors themselves.
+TEST_F(TestGoldenHarnessFixture, StartOffsetEngineGetsMovedCopiesAndTheReferenceGetsTheTensors)
+{
+    testing_support::HarnessMocks mocks;
+    IntegrationBundleVerificationHarness harness(
+        mocks.dependencies(testing_support::hostPolicy(VerificationMode::CPU)));
+    harness.setBundle(makeShiftedConvBundle(), "unit-test-bundle");
+
+    const auto ownerData
+        = [&harness] { return harness.inputs().at(K_ALIAS_OWNER_UID)->rawHostData(); };
+    std::vector<int64_t> engineOffsets;
+    bool engineOwnerIsTheTensor = true;
+    bool engineOwnerBytesMatch = false;
+    bool referenceOwnerIsTheTensor = false;
+    int64_t referenceOutputOffset = -1;
+    constexpr float K_VALUE = 2.5f;
+    ON_CALL(mocks.engineRunner, execute(::testing::_, ::testing::_, ::testing::_))
+        .WillByDefault([&](GraphSession&, const std::optional<LoadedEngine>&, VariantPack& pack) {
+            engineOffsets.push_back(bytesPastAlignment(pack.at(K_ALIAS_OWNER_UID)));
+            engineOffsets.push_back(bytesPastAlignment(pack.at(K_ALIAS_OUTPUT_UID)));
+            engineOwnerIsTheTensor = pack.at(K_ALIAS_OWNER_UID) == ownerData();
+            engineOwnerBytesMatch = copyBytes(pack.at(K_ALIAS_OWNER_UID), K_ALIAS_OWNER_BYTES)
+                                    == copyBytes(ownerData(), K_ALIAS_OWNER_BYTES);
+            writeFloats(pack.at(K_ALIAS_OUTPUT_UID), K_ALIAS_OUTPUT_ELEMS, K_VALUE);
+            return EngineOpResult::succeeded();
+        });
+    ON_CALL(mocks.cpuReference, execute(::testing::_, ::testing::_, ::testing::_))
+        .WillByDefault([&](void*, std::size_t, const VariantPack& pack) {
+            referenceOwnerIsTheTensor = pack.at(K_ALIAS_OWNER_UID) == ownerData();
+            referenceOutputOffset = bytesPastAlignment(pack.at(K_ALIAS_OUTPUT_UID));
+            writeFloats(pack.at(K_ALIAS_OUTPUT_UID), K_ALIAS_OUTPUT_ELEMS, K_VALUE);
+        });
+
+    ::testing::TestPartResultArray results;
+    testing_support::driveHarness(harness, &results);
+
+    EXPECT_FALSE(testing_support::anyFailed(results)) << testing_support::allMessages(results);
+    EXPECT_EQ(engineOffsets,
+              (std::vector<int64_t>{K_SHIFTED_INPUT_OFFSET, K_SHIFTED_OUTPUT_OFFSET}));
+    EXPECT_FALSE(engineOwnerIsTheTensor);
+    EXPECT_TRUE(engineOwnerBytesMatch);
+    EXPECT_TRUE(referenceOwnerIsTheTensor);
+    // A host float buffer is at least 4-byte aligned, so only a moved copy has offset 3.
+    EXPECT_NE(referenceOutputOffset, K_SHIFTED_OUTPUT_OFFSET);
+    EXPECT_NE(referenceOutputOffset, -1);
+}
+
+// A view of a moved owner points into the owner's moved copy for the engine, and into
+// the owner itself for the reference.
+TEST_F(TestGoldenHarnessFixture, StartOffsetViewOfAMovedOwnerMovesWithItForTheEngineOnly)
+{
+    testing_support::HarnessMocks mocks;
+    IntegrationBundleVerificationHarness harness(
+        mocks.dependencies(testing_support::hostPolicy(VerificationMode::CPU)));
+    harness.setBundle(makeShiftedConvBundle(viewOfOwnersSecondRow()), "unit-test-bundle");
+
+    const auto ownersSecondRow = [&harness] {
+        return advanced(harness.inputs().at(K_ALIAS_OWNER_UID)->rawHostData(), K_ALIAS_BYTE_OFFSET);
+    };
+    int64_t engineOwnerOffset = -1;
+    bool engineViewFollowsTheOwner = false;
+    bool engineViewBytesMatch = false;
+    bool referenceViewIsInTheTensor = false;
+    ON_CALL(mocks.engineRunner, execute(::testing::_, ::testing::_, ::testing::_))
+        .WillByDefault([&](GraphSession&, const std::optional<LoadedEngine>&, VariantPack& pack) {
+            engineOwnerOffset = bytesPastAlignment(pack.at(K_ALIAS_OWNER_UID));
+            engineViewFollowsTheOwner
+                = pack.at(K_ALIAS_VIEW_UID)
+                  == advanced(pack.at(K_ALIAS_OWNER_UID), K_ALIAS_BYTE_OFFSET);
+            engineViewBytesMatch = copyBytes(pack.at(K_ALIAS_VIEW_UID), K_ALIAS_VIEW_BYTES)
+                                   == copyBytes(ownersSecondRow(), K_ALIAS_VIEW_BYTES);
+            return EngineOpResult::succeeded();
+        });
+    ON_CALL(mocks.cpuReference, execute(::testing::_, ::testing::_, ::testing::_))
+        .WillByDefault([&](void*, std::size_t, const VariantPack& pack) {
+            referenceViewIsInTheTensor = pack.at(K_ALIAS_VIEW_UID) == ownersSecondRow();
+        });
+
+    ::testing::TestPartResultArray results;
+    testing_support::driveHarness(harness, &results);
+
+    EXPECT_EQ(engineOwnerOffset, K_SHIFTED_INPUT_OFFSET);
+    EXPECT_TRUE(engineViewFollowsTheOwner);
+    EXPECT_TRUE(engineViewBytesMatch);
+    EXPECT_TRUE(referenceViewIsInTheTensor);
+}
+
+TEST_F(TestGoldenHarnessFixture, StartOffsetOutputThatMatchesTheGoldenDataPasses)
+{
+    testing_support::HarnessMocks mocks;
+    std::vector<int64_t> engineOffsets;
+    engineWritesThroughAnyPointer(mocks, fixtures::K_OUTPUT_VALUE, engineOffsets);
+    auto bundle = loadRunnableBundle("shifted_match");
+    shiftGoldenBundle(*bundle);
+
+    ::testing::TestPartResultArray results;
+    runCapturing(mocks, bundle, &results);
+
+    EXPECT_FALSE(testing_support::anyFailed(results)) << testing_support::allMessages(results);
+    EXPECT_FALSE(testing_support::anySkipped(results));
+    EXPECT_EQ(engineOffsets,
+              (std::vector<int64_t>{K_SHIFTED_INPUT_OFFSET, K_SHIFTED_OUTPUT_OFFSET}));
+}
+
+TEST_F(TestGoldenHarnessFixture, StartOffsetOutputThatDiffersFromTheGoldenDataFails)
+{
+    testing_support::HarnessMocks mocks;
+    std::vector<int64_t> engineOffsets;
+    engineWritesThroughAnyPointer(mocks, fixtures::K_OUTPUT_VALUE + 100.0f, engineOffsets);
+    auto bundle = loadRunnableBundle("shifted_mismatch");
+    shiftGoldenBundle(*bundle);
+
+    ::testing::TestPartResultArray results;
+    runCapturing(mocks, bundle, &results);
+
+    EXPECT_TRUE(testing_support::anyFailed(results));
+    EXPECT_FALSE(testing_support::anySkipped(results));
+}
+
+TEST_F(TestGoldenHarnessFixture, StartOffsetBenchmarkGetsTheEnginePointers)
+{
+    testing_support::HarnessMocks mocks;
+    std::vector<int64_t> engineOffsets;
+    engineWritesThroughAnyPointer(mocks, fixtures::K_OUTPUT_VALUE, engineOffsets);
+    std::vector<int64_t> benchmarkOffsets;
+    ON_CALL(mocks.engineRunner, benchmark(::testing::_, ::testing::_, ::testing::_))
+        .WillByDefault(
+            [&benchmarkOffsets](GraphSession&, VariantPack& pack, const BenchmarkSettings&) {
+                benchmarkOffsets.push_back(bytesPastAlignment(pack.at(0)));
+                benchmarkOffsets.push_back(bytesPastAlignment(pack.at(fixtures::K_OUTPUT_UID)));
+                hipdnn_frontend::AutotuneResult result;
+                result.engineName = "TEST_ENGINE";
+                result.succeeded = true;
+                return result;
+            });
+
+    auto policy = testing_support::hostPolicy(VerificationMode::AUTO);
+    policy.benchmark = BenchmarkSettings{};
+    IntegrationBundleVerificationHarness harness(mocks.dependencies(policy));
+    auto bundle = loadRunnableBundle("shifted_benchmark");
+    shiftGoldenBundle(*bundle);
+    harness.setBundle(bundle, "unit-test-bundle");
+
+    ::testing::TestPartResultArray results;
+    testing_support::driveHarness(harness, &results);
+
+    EXPECT_EQ(benchmarkOffsets,
+              (std::vector<int64_t>{K_SHIFTED_INPUT_OFFSET, K_SHIFTED_OUTPUT_OFFSET}));
+}
+
+// A staging fault happens before the engine runs, so it fails the run in the harness and
+// names the bundle. A view has no buffer of its own to move.
+TEST_F(TestGoldenHarnessFixture, StartOffsetStagingErrorFailsTheHarnessNotTheEngine)
+{
+    testing_support::HarnessMocks mocks;
+    EXPECT_CALL(mocks.engineRunner, execute(::testing::_, ::testing::_, ::testing::_)).Times(0);
+    std::vector<std::string> unverifiable;
+    testing_support::captureUnverifiable(mocks.reporter, unverifiable);
+
+    // An accepted claim for the engine under test makes the run publish a verdict whose
+    // detail names the failure origin.
+    const std::string engineName = "ENGINE_UNDER_TEST";
+    SupportResult accepted;
+    accepted.verdict = SupportVerdict::CLAIM_ACCEPTED;
+    accepted.bundlePath = "shifted-bundle";
+    accepted.engineName = engineName;
+    accepted.arch = "gfx942";
+    accepted.platform = "linux";
+    ON_CALL(mocks.claimObserver,
+            observe(::testing::_, ::testing::_, ::testing::_, ::testing::_, ::testing::_))
+        .WillByDefault(::testing::Return(SupportObservation{SidecarState::CHECKED, {accepted}}));
+    std::vector<SupportResult> verdicts;
+    testing_support::captureVerdicts(mocks.reporter, verdicts);
+
+    const auto sidecar = _tempDir / "shifted-bundle.support.json";
+    std::ofstream(sidecar) << R"({"version": 1, "claims": {}})";
+    SupportClaimLocator locator;
+    locator.sidecarPath = sidecar;
+    locator.diagnosticPath = "shifted-bundle";
+
+    auto bundle = makeAliasedConvBundle(viewOfOwnersSecondRow());
+    bundle->metadata.startOffsets = {{K_ALIAS_VIEW_UID, K_SHIFTED_INPUT_OFFSET}};
+    IntegrationBundleVerificationHarness harness(
+        mocks.dependencies(testing_support::hostPolicy(VerificationMode::CPU)),
+        LoadedEngine{11, engineName});
+    harness.setBundle(bundle, "shifted-bundle", locator);
+
+    ::testing::TestPartResultArray results;
+    testing_support::driveHarness(harness, &results);
+
+    EXPECT_TRUE(testing_support::anyFailed(results));
+    EXPECT_FALSE(testing_support::anySkipped(results));
+    EXPECT_TRUE(unverifiable.empty());
+    const auto messages = testing_support::allMessages(results);
+    EXPECT_NE(messages.find("start offset of tensor 2: the tensor has no buffer of its own"),
+              std::string::npos)
+        << messages;
+    EXPECT_NE(messages.find("shifted-bundle"), std::string::npos) << messages;
+
+    ASSERT_EQ(verdicts.size(), 1u);
+    EXPECT_EQ(verdicts.front().reachedDepth, VerificationDepth::NOT_REACHED);
+    const std::string origin
+        = std::string("failed outside the engine (") + toString(FailureOrigin::HARNESS) + ")";
+    EXPECT_NE(verdicts.front().detail.find(origin), std::string::npos) << verdicts.front().detail;
+}
+
+// The output's moved copy starts as the sentinel, so an element the engine does not write
+// keeps the sentinel after the copy back.
+TEST(TestBundleVerificationHarness, StartOffsetOutputKeepsTheSentinelWhereTheEngineDoesNotWrite)
+{
+    const auto bundle = makeAliasedConvBundle({});
+    const auto wrapper = bundle->graphWrapper();
+    auto inputs = makeAliasOwnerInputs(*bundle);
+    auto outputs = detail::allocateSentinelOutputs(
+        wrapper.getTensorMap(), bundle->outputTensorUids, TensorMap{}, {}, /*onDevice=*/false);
+    auto variantPack = detail::buildVariantPack(inputs,
+                                                outputs,
+                                                wrapper.getTensorMap(),
+                                                bundle->outputTensorUids,
+                                                /*useDevice=*/false);
+
+    detail::StartOffsetStaging staging(variantPack,
+                                       inputs,
+                                       outputs,
+                                       {{K_ALIAS_OUTPUT_UID, K_SHIFTED_OUTPUT_OFFSET}},
+                                       {},
+                                       /*useDevice=*/false);
+    ASSERT_EQ(bytesPastAlignment(variantPack.at(K_ALIAS_OUTPUT_UID)), K_SHIFTED_OUTPUT_OFFSET);
+    writeFloats(variantPack.at(K_ALIAS_OUTPUT_UID), 1, 7.0f);
+
+    auto& output = *outputs.at(K_ALIAS_OUTPUT_UID);
+    EXPECT_TRUE(std::isnan(floatAt(output, 0)));
+    EXPECT_EQ(staging.waitForEngine(), hipSuccess);
+    staging.copyOutputsBack();
+    detail::markOutputsModified(outputs, /*device=*/false);
+
+    EXPECT_EQ(floatAt(output, 0), 7.0f);
+    for(std::size_t i = 1; i < K_ALIAS_OUTPUT_ELEMS; ++i)
+    {
+        EXPECT_TRUE(std::isnan(floatAt(output, i))) << "element " << i;
+    }
+}
+
+// A second entry would read the first moved copy, so its copy back would miss the tensor.
+TEST(TestBundleVerificationHarness, StartOffsetStagingThrowsForAUidListedTwice)
+{
+    const auto bundle = makeAliasedConvBundle({});
+    const auto wrapper = bundle->graphWrapper();
+    auto inputs = makeAliasOwnerInputs(*bundle);
+    auto outputs = detail::allocateSentinelOutputs(
+        wrapper.getTensorMap(), bundle->outputTensorUids, TensorMap{}, {}, /*onDevice=*/false);
+    auto variantPack = detail::buildVariantPack(inputs,
+                                                outputs,
+                                                wrapper.getTensorMap(),
+                                                bundle->outputTensorUids,
+                                                /*useDevice=*/false);
+
+    const auto stageTwice = [&] {
+        const detail::StartOffsetStaging staging(
+            variantPack,
+            inputs,
+            outputs,
+            {{K_ALIAS_OUTPUT_UID, K_SHIFTED_OUTPUT_OFFSET}, {K_ALIAS_OUTPUT_UID, 1}},
+            {},
+            /*useDevice=*/false);
+    };
+    EXPECT_THROW(stageTwice(), std::invalid_argument);
+}
+
+TEST(TestBundleVerificationHarness, StartOffsetStagingThrowsForATensorWithoutABuffer)
+{
+    const auto bundle = makeAliasedConvBundle(viewOfOwnersSecondRow());
+    const auto wrapper = bundle->graphWrapper();
+    auto inputs = makeAliasOwnerInputs(*bundle);
+    OutputTensors outputs;
+    auto variantPack = detail::buildVariantPack(inputs,
+                                                outputs,
+                                                wrapper.getTensorMap(),
+                                                bundle->outputTensorUids,
+                                                /*useDevice=*/false,
+                                                bundle->metadata.aliases);
+
+    const auto stage = [&](int64_t uid) {
+        const detail::StartOffsetStaging staging(variantPack,
+                                                 inputs,
+                                                 outputs,
+                                                 {{uid, K_SHIFTED_INPUT_OFFSET}},
+                                                 bundle->metadata.aliases,
+                                                 /*useDevice=*/false);
+    };
+    EXPECT_THROW(stage(K_ALIAS_VIEW_UID), std::invalid_argument);
+    EXPECT_THROW(stage(99), std::invalid_argument);
+}
+
+// The device copies start the offset past a 256-byte aligned address and hold the
+// tensor's bytes; the output's copy goes back into the output, around the sentinel.
+TEST(TestBundleVerificationHarness, StartOffsetStagingPlacesTheDeviceCopyPastAnAlignedAddress)
+{
+    SKIP_IF_NO_DEVICES();
+    const auto bundle = makeAliasedConvBundle(viewOfOwnersSecondRow());
+    const auto wrapper = bundle->graphWrapper();
+    auto inputs = makeAliasOwnerInputs(*bundle);
+    auto outputs = detail::allocateSentinelOutputs(
+        wrapper.getTensorMap(), bundle->outputTensorUids, TensorMap{}, {}, /*onDevice=*/true);
+    auto variantPack = detail::buildVariantPack(inputs,
+                                                outputs,
+                                                wrapper.getTensorMap(),
+                                                bundle->outputTensorUids,
+                                                /*useDevice=*/true,
+                                                bundle->metadata.aliases);
+    auto& owner = *inputs.at(K_ALIAS_OWNER_UID);
+    void* const ownerDevice = owner.rawDeviceData();
+
+    detail::StartOffsetStaging staging(variantPack,
+                                       inputs,
+                                       outputs,
+                                       {{K_ALIAS_OWNER_UID, K_SHIFTED_INPUT_OFFSET},
+                                        {K_ALIAS_OUTPUT_UID, K_SHIFTED_OUTPUT_OFFSET}},
+                                       bundle->metadata.aliases,
+                                       /*useDevice=*/true);
+
+    void* const ownerCopy = variantPack.at(K_ALIAS_OWNER_UID);
+    void* const outputCopy = variantPack.at(K_ALIAS_OUTPUT_UID);
+    EXPECT_NE(ownerCopy, ownerDevice);
+    EXPECT_EQ(bytesPastAlignment(ownerCopy), K_SHIFTED_INPUT_OFFSET);
+    EXPECT_EQ(bytesPastAlignment(outputCopy), K_SHIFTED_OUTPUT_OFFSET);
+    EXPECT_EQ(variantPack.at(K_ALIAS_VIEW_UID), advanced(ownerCopy, K_ALIAS_BYTE_OFFSET));
+
+    std::vector<std::byte> ownerCopyBytes(byteCount(owner));
+    ASSERT_EQ(
+        hipMemcpy(ownerCopyBytes.data(), ownerCopy, ownerCopyBytes.size(), hipMemcpyDeviceToHost),
+        hipSuccess);
+    EXPECT_EQ(ownerCopyBytes, copyBytes(owner.rawHostData(), byteCount(owner)));
+
+    const float written = 7.0f;
+    ASSERT_EQ(hipMemcpy(outputCopy, &written, sizeof(written), hipMemcpyHostToDevice), hipSuccess);
+    ASSERT_EQ(staging.waitForEngine(), hipSuccess);
+    staging.copyOutputsBack();
+    detail::markOutputsModified(outputs, /*device=*/true);
+
+    auto& output = *outputs.at(K_ALIAS_OUTPUT_UID);
+    EXPECT_EQ(floatAt(output, 0), written);
+    for(std::size_t i = 1; i < K_ALIAS_OUTPUT_ELEMS; ++i)
+    {
+        EXPECT_TRUE(std::isnan(floatAt(output, i))) << "element " << i;
+    }
+}
+
+// The whole engine run under a device placement: the engine gets the moved device
+// copies, and its output reaches the golden comparison.
+TEST_F(TestGoldenHarnessFixture, StartOffsetEngineRunOnTheDeviceReachesTheComparison)
+{
+    SKIP_IF_NO_DEVICES();
+    testing_support::HarnessMocks mocks;
+    std::vector<int64_t> engineOffsets;
+    ON_CALL(mocks.engineRunner, execute(::testing::_, ::testing::_, ::testing::_))
+        .WillByDefault(
+            [&engineOffsets](GraphSession&, const std::optional<LoadedEngine>&, VariantPack& pack) {
+                engineOffsets.push_back(bytesPastAlignment(pack.at(0)));
+                engineOffsets.push_back(bytesPastAlignment(pack.at(fixtures::K_OUTPUT_UID)));
+                const std::vector<float> output(fixtures::K_OUTPUT_ELEMS, fixtures::K_OUTPUT_VALUE);
+                const auto status = hipMemcpy(pack.at(fixtures::K_OUTPUT_UID),
+                                              output.data(),
+                                              output.size() * sizeof(float),
+                                              hipMemcpyHostToDevice);
+                return status == hipSuccess ? EngineOpResult::succeeded()
+                                            : EngineOpResult::failed(hipGetErrorString(status));
+            });
+
+    auto policy = testing_support::hostPolicy(VerificationMode::AUTO);
+    policy.placement = TensorPlacement::DEVICE;
+    IntegrationBundleVerificationHarness harness(mocks.dependencies(policy));
+    auto bundle = loadRunnableBundle("shifted_device");
+    shiftGoldenBundle(*bundle);
+    harness.setBundle(bundle, "unit-test-bundle");
+
+    ::testing::TestPartResultArray results;
+    testing_support::driveHarness(harness, &results);
+
+    EXPECT_FALSE(testing_support::anyFailed(results)) << testing_support::allMessages(results);
+    EXPECT_FALSE(testing_support::anySkipped(results)) << testing_support::allMessages(results);
+    EXPECT_EQ(engineOffsets,
+              (std::vector<int64_t>{K_SHIFTED_INPUT_OFFSET, K_SHIFTED_OUTPUT_OFFSET}));
 }
 
 // NOLINTEND(readability-identifier-naming)

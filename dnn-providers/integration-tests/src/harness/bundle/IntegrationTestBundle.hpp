@@ -843,6 +843,79 @@ inline void checkAliasRules(const hipdnn_integration_tests::BundleMetadata& meta
     }
 }
 
+// The rules that tie a bundle's `start_offsets` to its graph. Each tensor is a graph
+// tensor that holds its own data: not virtual, not passed by value at run time, not a
+// constant, not the view of an alias and not of a sub-byte type. A tensor that declares
+// an alignment greater than 0 must have a start_offset that is a multiple of it. Throws
+// BundleMetadataError naming `where`, the tensor and the rule.
+inline void
+    checkStartOffsetRules(const hipdnn_integration_tests::BundleMetadata& metadata,
+                          const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper& graph,
+                          const std::string& where)
+{
+    using hipdnn_integration_tests::BundleMetadataError;
+    using hipdnn_integration_tests::bundle_metadata_detail::describeStartOffset;
+
+    if(metadata.startOffsets.empty())
+    {
+        return;
+    }
+    const auto& tensors = graph.getTensorMap();
+    const auto error = [&](int64_t uid, const std::string& rule) {
+        std::string message = where;
+        message.append(": ").append(describeStartOffset(uid)).append(": ").append(rule);
+        return message;
+    };
+
+    for(const auto& entry : metadata.startOffsets)
+    {
+        const auto it = tensors.find(entry.uid);
+        if(it == tensors.end() || it->second == nullptr)
+        {
+            throw BundleMetadataError(error(entry.uid, "the tensor is not a tensor of the graph"));
+        }
+        const auto& tensor = *it->second;
+        if(tensor.virtual_())
+        {
+            throw BundleMetadataError(error(entry.uid, "the tensor is virtual"));
+        }
+        if(tensor.is_runtime_pass_by_value())
+        {
+            throw BundleMetadataError(
+                error(entry.uid, "the tensor is passed by value at run time"));
+        }
+        if(tensor.value_type() != hipdnn_flatbuffers_sdk::data_objects::TensorValue::NONE)
+        {
+            throw BundleMetadataError(error(entry.uid, "the tensor has a constant value"));
+        }
+        for(const auto& alias : metadata.aliases)
+        {
+            if(alias.uid == entry.uid)
+            {
+                throw BundleMetadataError(
+                    error(entry.uid,
+                          "the tensor is "
+                              + hipdnn_integration_tests::tensor_alias_detail::describe(alias)
+                              + "; a view moves with its owner"));
+            }
+        }
+        if(hipdnn_integration_tests::tensor_alias_detail::isSubByte(tensor.data_type()))
+        {
+            throw BundleMetadataError(error(entry.uid,
+                                            std::string("the tensor has the sub-byte data type ")
+                                                + EnumNameDataType(tensor.data_type())));
+        }
+        const int64_t alignment = tensor.alignment();
+        if(alignment > 0 && entry.startOffset % alignment != 0)
+        {
+            throw BundleMetadataError(error(entry.uid,
+                                            "start_offset " + std::to_string(entry.startOffset)
+                                                + " is not a multiple of the tensor's alignment "
+                                                + std::to_string(alignment)));
+        }
+    }
+}
+
 // Runs `step` and rethrows any exception that is not a BundleMetadataError as a
 // BundleMetadataError that names `where`.
 template <typename Step>
@@ -1207,7 +1280,8 @@ struct AbsentTensorCase
 
 // The rules that tie a case's names to its absent tensors. A case names an absent tensor
 // in none of: values.tensors, a key of another case value (`${case.<field>.<uid>}`),
-// tensor_patches, the metadata `inputs`, the metadata `aliases`.
+// tensor_patches, the metadata `inputs`, the metadata `aliases`, the metadata
+// `start_offsets`.
 inline void
     checkCaseDoesNotNameAbsentTensors(const nlohmann::json& caseJson,
                                       const hipdnn_integration_tests::BundleMetadata& metadata,
@@ -1289,6 +1363,15 @@ inline void
         {
             throw BundleMetadataError(absentTensorMessage(
                 where, alias.ofUid, "is the owner of a metadata aliases entry"));
+        }
+    }
+
+    for(const auto& entry : metadata.startOffsets)
+    {
+        if(absent.count(entry.uid) != 0)
+        {
+            throw BundleMetadataError(
+                absentTensorMessage(where, entry.uid, "has a metadata start_offsets entry"));
         }
     }
 }
@@ -1494,6 +1577,7 @@ inline LoadResult loadIntegrationTestBundle(const std::filesystem::path& jsonPat
     detail::checkGoldenDeclarationRules(bundle.metadata, goldenDeclared, jsonPath.string());
 
     detail::describeTensorBlobs(bundle, *graphJson, blobPathForUid);
+    detail::checkStartOffsetRules(bundle.metadata, bundle.graphWrapper(), jsonPath.string());
     // One blob is enough: a bundle that leaves out the view's blob still stores its
     // other tensors apart.
     detail::checkAliasRules(
@@ -1649,6 +1733,7 @@ inline LoadResult loadIntegrationTestBundle(const DiscoveredBundle& discovered,
         };
         detail::describeTensorBlobs(bundle, expandedGraph, blobPathForUid);
     }
+    detail::checkStartOffsetRules(bundle.metadata, bundle.graphWrapper(), where);
     detail::checkAliasRules(bundle.metadata,
                             bundle.graphWrapper(),
                             bundle.outputTensorUids,
