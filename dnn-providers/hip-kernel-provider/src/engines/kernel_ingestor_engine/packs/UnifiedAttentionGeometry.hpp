@@ -16,8 +16,8 @@
 /**
  * @file UnifiedAttentionGeometry.hpp
  * @brief The arch-neutral half of the unified-attention (vLLM `unified_attention`) packs:
- *        launch grid, batch capacity and the identity paged-KV metadata a contiguous K/V
- *        graph is served with, parameterized by the target's UnifiedAttentionArchTraits.
+ *        launch grid and the identity paged-KV metadata a contiguous K/V graph is served
+ *        with, parameterized by the target's UnifiedAttentionArchTraits.
  *
  * rocKE builds the unified-attention kernels per architecture, but the host contract around
  * them is shared: the kernel reads a paged K/V cache through `block_tables`, per-sequence
@@ -95,41 +95,6 @@ inline bool isSupportedUnifiedAttentionBlockSize(const UnifiedAttentionArchTrait
     return detail::isOneOf(traits.blockSizes, blockSize);
 }
 
-/**
- * @brief Binary-search trip count a kernel was compiled with for a baked `num_seqs`.
- *
- * `binary_search_seq_idx_iters`: `max(1, ceil(log2(num_seqs + 1)))`, and 32 for a spec that
- * declares no `num_seqs`. The same on every architecture.
- */
-inline int64_t unifiedAttentionBinarySearchIters(int64_t numSeqs)
-{
-    constexpr int64_t UNSPECIALIZED_ITERS = 32;
-    if(numSeqs <= 0)
-    {
-        return UNSPECIALIZED_ITERS;
-    }
-    int64_t iters = 1;
-    // Smallest iters with 2^iters >= numSeqs + 1; bounded by the shift width anyway.
-    while(iters < UNSPECIALIZED_ITERS && (int64_t{1} << iters) < numSeqs + 1)
-    {
-        ++iters;
-    }
-    return iters;
-}
-
-/**
- * @brief The most sequences one launch of a kernel baked with @p numSeqs can address.
- *
- * The kernel bisects `[0, num_seqs_runtime]` in a fixed number of iterations (an unrolled
- * scf.for), which resolves at most `2^iters - 1` sequences. A larger batch leaves the search
- * unfinished: the last blocks read the wrong sequence's lengths and the launch still
- * succeeds. 511 -> 9 iterations -> 511.
- */
-inline int64_t unifiedAttentionBatchCapacity(int64_t numSeqs)
-{
-    return (int64_t{1} << unifiedAttentionBinarySearchIters(numSeqs)) - 1;
-}
-
 /// The grid and block a candidate must launch with.
 struct UnifiedAttentionLaunchGeometry
 {
@@ -158,7 +123,7 @@ struct UnifiedAttentionLaunchGeometry
  *             = (qblocks, num_kv_heads, 1)      q-major (traits.qMajorGrid)
  *
  * and `launch_block`, `(waveLanes * num_warps, 1, 1)`. `total_q` is `batch * seqLenQ` and
- * `num_seqs` the RUNTIME batch, not the baked capacity.
+ * `num_seqs` the runtime batch.
  *
  * Throws instead of returning a degenerate grid: an empty launch returns cleanly having
  * written nothing, and prepare() is the last place a named failure is cheap.

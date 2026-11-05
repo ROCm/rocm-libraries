@@ -356,9 +356,8 @@ static void rocke__build_paged_kv_desc(rocke_gfx942_attention_tiled_3d_build_ctx
         rocke_value_t* strides[4] = {ctx->kv_stride_blk_b, ctx->kv_stride_tok_b, NULL, NULL};
         const int static_strides[4] = {1, 1, CFG.kv_stride_h_b, CFG.KV_BYTES};
         const char* coords[4] = {"physical_block", "token", "kv_head", "dim"};
-        ctx->kv_base_desc = &rocke_tensor_descriptor_naive_dynamic_mixed(
-                                 B, "paged_kv_bytes", coords, 4, strides, static_strides)
-                                 ->base;
+        ctx->kv_base_desc = rocke_tensor_descriptor_naive_dynamic_mixed(
+            B, "paged_kv_bytes", coords, 4, strides, static_strides);
     }
 
     /* Transform chain (lines 576-602). */
@@ -484,27 +483,24 @@ void rocke_gfx942_attention_tiled_3d_emit_prologue(rocke_gfx942_attention_tiled_
             = {rocke_b_mul(B, ctx->num_qh_p, rocke_b_const_i32(B, NUM_SEG)), NULL, NULL};
         const int static_strides[3] = {1, NUM_SEG, 1};
         const char* ml_coords[3] = {"token", "head", "seg"};
-        ctx->ml_desc = &rocke_tensor_descriptor_naive_dynamic_mixed(
-                            B, "segm_ml", ml_coords, 3, strides, static_strides)
-                            ->base;
+        ctx->ml_desc = rocke_tensor_descriptor_naive_dynamic_mixed(
+            B, "segm_ml", ml_coords, 3, strides, static_strides);
     }
     {
         rocke_value_t* strides[4]
             = {rocke_b_mul(B, ctx->num_qh_p, rocke_b_const_i32(B, NUM_SEG * HD)), NULL, NULL, NULL};
         const int static_strides[4] = {1, NUM_SEG * HD, HD, 1};
         const char* sa_coords[4] = {"token", "head", "seg", "dim"};
-        ctx->seg_acc_desc = &rocke_tensor_descriptor_naive_dynamic_mixed(
-                                 B, "segm_output", sa_coords, 4, strides, static_strides)
-                                 ->base;
+        ctx->seg_acc_desc = rocke_tensor_descriptor_naive_dynamic_mixed(
+            B, "segm_output", sa_coords, 4, strides, static_strides);
     }
     {
         rocke_value_t* strides[3]
             = {rocke_b_mul(B, ctx->num_qh_p, rocke_b_const_i32(B, HD)), NULL, NULL};
         const int static_strides[3] = {1, HD, 1};
         const char* q_coords[3] = {"token", "head", "dim"};
-        ctx->q_desc = &rocke_tensor_descriptor_naive_dynamic_mixed(
-                           B, "Q", q_coords, 3, strides, static_strides)
-                           ->base;
+        ctx->q_desc = rocke_tensor_descriptor_naive_dynamic_mixed(
+            B, "Q", q_coords, 3, strides, static_strides);
     }
 
     /* seg_start_tile_pos = seg_idx*tps*T (line 375) */

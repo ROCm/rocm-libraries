@@ -1926,56 +1926,13 @@ rocke_dynamic_tensor_descriptor_t*
                                           int n_coords,
                                           rocke_value_t* const* strides)
 {
-    rocke_dynamic_tensor_descriptor_t* ddesc;
-    int i;
-    /* Fake lengths (all 0) — never used for offset computation in dynamic path */
-    int fake_lengths[8];
-
-    if(!rocke_i_live(b) || n_coords < 1 || n_coords > 8)
-    {
-        return NULL;
-    }
-    ddesc = (rocke_dynamic_tensor_descriptor_t*)rocke_arena_calloc(
-        &b->arena, sizeof(rocke_dynamic_tensor_descriptor_t));
-    if(ddesc == NULL)
-    {
-        return NULL;
-    }
-
-    for(i = 0; i < n_coords; ++i)
-    {
-        fake_lengths[i] = 0;
-    }
-
-    /* Build the static base using fake lengths (never used for dynamic offset). */
-    {
-        /* Use row-major int strides of all-1 as placeholder. */
-        int fake_strides[8];
-        for(i = 0; i < n_coords; ++i)
-        {
-            fake_strides[i] = 1;
-        }
-        /* We construct the base descriptor fields directly. */
-        rocke_tensor_descriptor_t* base = rocke_tensor_descriptor_naive(
-            b, name, fake_lengths, n_coords, fake_strides, coord_names, n_coords);
-        if(base == NULL)
-        {
-            return NULL;
-        }
-        ddesc->base = *base;
-    }
-
-    /* Override with runtime strides. */
-    ddesc->n_dynamic = n_coords;
-    for(i = 0; i < n_coords; ++i)
-    {
-        ddesc->dynamic_strides[i] = strides[i];
-    }
-    ddesc->base.is_dynamic = 1;
-    return ddesc;
+    /* All-Value create(): a NULL stride takes the static rule's 1. The base is
+     * the first field, so the cast recovers the dynamic descriptor. */
+    return (rocke_dynamic_tensor_descriptor_t*)rocke_tensor_descriptor_naive_dynamic_mixed(
+        b, name, coord_names, n_coords, strides, NULL);
 }
 
-rocke_dynamic_tensor_descriptor_t*
+rocke_tensor_descriptor_t*
     rocke_tensor_descriptor_naive_dynamic_mixed(rocke_ir_builder_t* b,
                                                 const char* name,
                                                 const char* const* coord_names,
@@ -1989,21 +1946,30 @@ rocke_dynamic_tensor_descriptor_t*
     int base_strides[8];
     int i;
 
-    if(!rocke_i_live(b) || n_coords < 1 || n_coords > 8)
+    if(!rocke_i_live(b))
     {
+        return NULL;
+    }
+    if(n_coords < 1 || n_coords > 8)
+    {
+        rocke_i_set_err(b,
+                        ROCKE_ERR_VALUE,
+                        "DynamicTensorDescriptor.create: %d coords (expected 1..8)",
+                        n_coords);
         return NULL;
     }
     ddesc = (rocke_dynamic_tensor_descriptor_t*)rocke_arena_calloc(
         &b->arena, sizeof(rocke_dynamic_tensor_descriptor_t));
     if(ddesc == NULL)
     {
+        rocke_i_set_err(b, ROCKE_ERR_OOM, "DynamicTensorDescriptor.create: OOM");
         return NULL;
     }
     /* Python create(): base_lengths all 0, base_strides the int stride or 1. */
     for(i = 0; i < n_coords; ++i)
     {
         fake_lengths[i] = 0;
-        base_strides[i] = strides[i] != NULL ? 1 : static_strides[i];
+        base_strides[i] = (strides[i] != NULL || static_strides == NULL) ? 1 : static_strides[i];
     }
     base = rocke_tensor_descriptor_naive(
         b, name, fake_lengths, n_coords, base_strides, coord_names, n_coords);
@@ -2018,7 +1984,7 @@ rocke_dynamic_tensor_descriptor_t*
         ddesc->dynamic_strides[i] = strides[i];
     }
     ddesc->base.is_dynamic = 1;
-    return ddesc;
+    return &ddesc->base;
 }
 
 bool rocke_dynamic_tensor_descriptor_offset(rocke_ir_builder_t* b,
