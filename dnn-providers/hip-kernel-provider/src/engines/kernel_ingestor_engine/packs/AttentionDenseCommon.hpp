@@ -11,7 +11,6 @@
 #include <string>
 #include <string_view>
 
-#include <hipdnn_flatbuffers_sdk/data_objects/data_types_generated.h>
 #include <hipdnn_plugin_sdk/ingestor/Descriptors.hpp>
 #include <hipdnn_plugin_sdk/ingestor/IKernelDispatchHandler.hpp>
 #include <hipdnn_plugin_sdk/ingestor/KernelDefinition.hpp>
@@ -19,6 +18,7 @@
 #include <hipdnn_plugin_sdk/ingestor/SavedDispatch.hpp>
 
 #include "engines/kernel_ingestor_engine/packs/AttentionDensePersistent.hpp"
+#include "engines/kernel_ingestor_engine/packs/SdpaGraphMatch.hpp"
 
 /**
  * @file AttentionDenseCommon.hpp
@@ -68,17 +68,9 @@ struct AttentionDenseBinding
     int64_t stats = ATTENTION_DENSE_NO_STATS;
 };
 
-/// The graph facts the matcher and prepare() both need, derived once from the tensors.
-struct AttentionDenseProblem
-{
-    int64_t batch = 0;
-    int64_t seqLenQ = 0;
-    int64_t seqLenKv = 0;
-    int64_t numQueryHeads = 0;
-    int64_t numKvHeads = 0;
-    int64_t headSize = 0;
-    data_objects::DataType dataType = data_objects::DataType::UNSET;
-};
+/// The graph facts the matcher and prepare() both need, derived once from the tensors by
+/// sdpa_graph::problemFor().
+using AttentionDenseProblem = sdpa_graph::SdpaShape;
 
 /// Everything a dense-attention launch is computed from.
 struct AttentionDenseLaunchInputs

@@ -89,12 +89,14 @@ constexpr std::string_view KV_SEGMENTS_FIELD = "kv_segments";
 
 // The graph-reading helpers every single-node SDPA-forward pack shares.
 using sdpa_graph::BATCH_AXIS;
+using sdpa_graph::computesInFloat;
 using sdpa_graph::describeOperand;
 using sdpa_graph::findTensor;
 using sdpa_graph::hasBshdStrides;
 using sdpa_graph::hasSdpaForwardNode;
 using sdpa_graph::HEAD_AXIS;
 using sdpa_graph::HEAD_SIZE_AXIS;
+using sdpa_graph::problemFor;
 using sdpa_graph::SDPA_RANK;
 using sdpa_graph::sdpaNode;
 using sdpa_graph::SEQ_AXIS;
@@ -166,21 +168,6 @@ std::optional<std::string> supportedDataTypeName(data_objects::DataType dataType
         return std::string("FP16");
     }
     return std::nullopt;
-}
-
-/// The graph's shape, read from Q and K. Callers must have validated both operands.
-AttentionDenseProblem problemFor(const data_objects::TensorAttributes& q,
-                                 const data_objects::TensorAttributes& k)
-{
-    AttentionDenseProblem problem;
-    problem.batch = q.dims()->Get(BATCH_AXIS);
-    problem.numQueryHeads = q.dims()->Get(HEAD_AXIS);
-    problem.seqLenQ = q.dims()->Get(SEQ_AXIS);
-    problem.headSize = q.dims()->Get(HEAD_SIZE_AXIS);
-    problem.numKvHeads = k.dims()->Get(HEAD_AXIS);
-    problem.seqLenKv = k.dims()->Get(SEQ_AXIS);
-    problem.dataType = q.data_type();
-    return problem;
 }
 
 /// Whether a top-left causal window of @p slidingWindow keys leaves the last query rows no
@@ -750,17 +737,12 @@ std::optional<BoundTokens> graphMatches(const MatchContext& context, const Atten
                                << " is not supported; the kernel runs HALF or BFLOAT16 MFMA");
         return std::nullopt;
     }
-    // The kernel accumulates and keeps the softmax statistics in FLOAT: at least the
-    // precision FLOAT, HALF or BFLOAT16 asks for, and UNSET leaves it to the provider.
-    // DOUBLE asks for more, and an integer or FP8 compute type for another computation.
-    // The FlyDSL SDPA packs' computesInFloat rule.
-    const auto computeType = context.graph.getNodeWrapper(0).computeDataType();
-    if(computeType != data_objects::DataType::UNSET && computeType != data_objects::DataType::FLOAT
-       && computeType != data_objects::DataType::HALF
-       && computeType != data_objects::DataType::BFLOAT16)
+    // The kernel accumulates and keeps the softmax statistics in FLOAT.
+    if(!computesInFloat(context))
     {
         HIPDNN_PLUGIN_LOG_INFO(declined(arch, "compute_data_type")
-                               << "compute data type " << computeType
+                               << "compute data type "
+                               << context.graph.getNodeWrapper(0).computeDataType()
                                << " is not supported; the kernel accumulates in FLOAT");
         return std::nullopt;
     }
