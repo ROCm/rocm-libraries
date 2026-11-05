@@ -33,7 +33,8 @@ struct Arguments;
 // for each of the norm and allclose checks, plus one per solution whose post_bench_verify_iters
 // relaunches differed from the first launch (however many gemms or relaunches differed). With
 // verify_strict set, verification_exit_code turns a run that would exit 0 into exit code 2 when
-// any check failed.
+// any check failed. apply_to enables these checks for every case when verify_strict
+// is set, even if a case disables them; strict verification is a run-wide requirement.
 //
 // post_bench_verify_iters is the number of untimed relaunches of each solution after timing
 // (0 turns them off); every relaunch must give the same D, bit for bit, as the first launch.
