@@ -3683,6 +3683,36 @@ def test_superset_index_of_a_sweep_with_only_absent_cases():
         print("  PASS: superset_index_of_a_sweep_with_only_absent_cases")
 
 
+def test_superset_import_keeps_aliases_by_name():
+    """A superset join keeps a case's aliases, inputs and seeds attached to the same tensors."""
+    from bundle_utils import aliases_by_name, inputs_by_name
+
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        bundle_dir = tmp / "bundles"
+        bundle_dir.mkdir()
+        full = _optional_graph()
+        assert _import(tmp, "full", full, bundle_dir, *_SUPERSET_FLAGS).returncode == 0
+        part = _optional_graph(sink=False, seq=8)
+        uid = {t["name"]: t["uid"] for t in part["tensors"]}
+        sidecar = _optional_sidecar(part, 500)
+        sidecar["format_version"] = 2
+        sidecar["aliases"] = [{"uid": uid["v"], "of": uid["k"], "byte_offset": 0}]
+        r = _import_optional(tmp, bundle_dir, "part", part, sidecar, *_SUPERSET_FLAGS)
+        assert r.returncode == 0 and "appended" in r.stderr, r.stderr
+        (rel,) = _sweep_dirs(bundle_dir)
+        sweep, template = _sweep_and_template(bundle_dir, rel)
+        case = next(c for c in sweep["cases"] if c.get("absent_tensors"))
+        _assert_absent_case_loads(sweep, template, case)
+        assert aliases_by_name(case["metadata"], template) == aliases_by_name(
+            sidecar, part
+        ), case["metadata"]
+        assert inputs_by_name(case["metadata"], template) == inputs_by_name(
+            sidecar, part
+        ), case["metadata"]
+        print("  PASS: superset_import_keeps_aliases_by_name")
+
+
 def main() -> int:
     verbose = "-v" in sys.argv
     failures = 0
@@ -3748,6 +3778,7 @@ def main() -> int:
         test_absent_case_problems_mirror_the_loader,
         test_import_refuses_metadata_uid_moves,
         test_superset_index_of_a_sweep_with_only_absent_cases,
+        test_superset_import_keeps_aliases_by_name,
     ]
 
     for t in tests:
