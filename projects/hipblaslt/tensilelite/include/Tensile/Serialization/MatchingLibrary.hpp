@@ -81,6 +81,11 @@ namespace TensileLite
                     };
                     std::sort(table.table.begin(), table.table.end(), comp);
 
+                    // The filter lacksKey() asks before its search, made once
+                    // per table here rather than on a first lookup.
+                    if constexpr(std::is_same<Distance, Matching::Equality<Key>>{})
+                        table.buildKeyFilter();
+
                     if constexpr(std::is_same<Distance, Matching::GridBasedDistance<Key>>{})
                     {
                         // TENSILE_GRIDBASED_KDTREE can only add: it turns the index on for

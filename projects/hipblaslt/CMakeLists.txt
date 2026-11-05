@@ -69,6 +69,7 @@ option(HIPBLASLT_ENABLE_COVERAGE "Build coverage support." OFF)
 option(HIPBLASLT_ENABLE_THEROCK "Build hipBLASLt for TheRock." OFF)
 option(HIPBLASLT_VALIDATE_INSTALL "Run post-install per-base layout / .dat integrity checks on the install tree." OFF)
 option(HIPBLASLT_ENABLE_GEMM_A2A_FUSION "Build experimental fused GEMM + all-to-all support." OFF)
+option(HIPBLASLT_ENABLE_TILEWRIGHT "Build TensileLite with the tilewright kernel recommender and ship its models (used when TENSILE_USE_TILEWRIGHT=1)." ON)
 
 if(HIPBLASLT_ENABLE_GEMM_A2A_FUSION AND NOT HIPBLASLT_ENABLE_HOST)
     message(FATAL_ERROR "HIPBLASLT_ENABLE_GEMM_A2A_FUSION requires HIPBLASLT_ENABLE_HOST=ON")
@@ -357,6 +358,21 @@ if(HIPBLASLT_ENABLE_MXDATAGENERATOR)
         endblock()
     else()
         find_package(mxDataGenerator CONFIG REQUIRED)
+    endif()
+endif()
+
+if(HIPBLASLT_ENABLE_TILEWRIGHT AND TENSILELITE_ENABLE_HOST AND NOT TARGET roc::tilewright)
+    cmake_path(SET _hipblaslt_tilewright_dir NORMALIZE "${CMAKE_CURRENT_SOURCE_DIR}/../../shared/tilewright")
+    if(EXISTS "${_hipblaslt_tilewright_dir}/CMakeLists.txt")
+        block(SCOPE_FOR VARIABLES)
+            set(TILEWRIGHT_ENABLE_INSTALL OFF)
+            set(TILEWRIGHT_BUILD_TESTING OFF)
+            set(TILEWRIGHT_ENABLE_PYTHON OFF)
+            set(BUILD_TESTING OFF)
+            add_subdirectory("${_hipblaslt_tilewright_dir}" "${CMAKE_CURRENT_BINARY_DIR}/tilewright" EXCLUDE_FROM_ALL)
+        endblock()
+    else()
+        message(STATUS "hipBLASLt: ${_hipblaslt_tilewright_dir} not found; building TensileLite without tilewright")
     endif()
 endif()
 
@@ -664,6 +680,79 @@ if(HIPBLASLT_ENABLE_DEVICE OR HIPBLASLT_ENABLE_ROCROLLER)
         # lib/, separate from executables (no extension) in bin/.
         set(HIPBLASLT_TENSILE_LIBRARY_DIR "\${CPACK_PACKAGING_INSTALL_PREFIX}${CMAKE_INSTALL_LIBDIR}/hipblaslt" CACHE PATH "path to tensile library")
     endif()
+    # The tilewright models of a library subtree ship in
+    # shared/tilewright/weights/<arch>/<subtree>/, where <arch> is the
+    # logic the subtree is built from: the subtree itself, or
+    # gfx1250-strict for gfx1250v0. TensileLite looks a model, and the
+    # blocklist and guards of a library stem, up in the directory the library
+    # logic was loaded from, so each library subtree gets its own copy. The
+    # logic of an architecture's CU-count directories (<arch>/<arch>_<N>cu,
+    # such as gfx1250_96cu) builds into the architecture's library subtree,
+    # so the models of their weights directories install into it as well:
+    # its tilewright_index holds the rows of each of them, and a library stem
+    # that two of them list fails the build.
+    get_property(_tw_linked GLOBAL PROPERTY TENSILELITE_HAS_TILEWRIGHT)
+    if(_tw_linked AND TARGET tensilelite-device-libraries)
+        cmake_path(SET _tw_weights_root NORMALIZE "${CMAKE_CURRENT_SOURCE_DIR}/../../shared/tilewright/weights")
+        set(_tw_subtrees)
+        foreach(_arch IN LISTS GPU_TARGETS)
+            string(REGEX REPLACE ":.*$" "" _tw_sub "${_arch}")
+            list(APPEND _tw_subtrees "${_tw_sub}")
+        endforeach()
+        if(HIPBLASLT_BUILD_GFX1250V0 AND "gfx1250" IN_LIST _tw_subtrees)
+            list(APPEND _tw_subtrees gfx1250v0)
+        endif()
+        list(REMOVE_DUPLICATES _tw_subtrees)
+
+        # A model deployed for a subtree that had no index re-runs CMake.
+        file(GLOB _tw_indexes CONFIGURE_DEPENDS "${_tw_weights_root}/*/*/tilewright_index")
+        # The weights directories whose models each library subtree
+        # installs, the subtree's own first.
+        set(_tw_installed)
+        foreach(_tw_index IN LISTS _tw_indexes)
+            cmake_path(GET _tw_index PARENT_PATH _tw_src)
+            cmake_path(GET _tw_src FILENAME _sub)
+            cmake_path(GET _tw_src PARENT_PATH _tw_dir)
+            cmake_path(GET _tw_dir FILENAME _tw_arch)
+            # The libraries of an architecture's other logic directories
+            # (gfx950_id75a3, ...) load into its subtree too; their models
+            # are rows of the subtree's own index.
+            if(_sub MATCHES "^${_tw_arch}_[0-9]+cu$")
+                set(_sub "${_tw_arch}")
+                set(_tw_own FALSE)
+            elseif(_sub STREQUAL _tw_arch OR "${_tw_arch}/${_sub}" STREQUAL "gfx1250-strict/gfx1250v0")
+                set(_tw_own TRUE)
+            else()
+                message(WARNING "${_tw_src} is the weights directory of no library subtree; "
+                                "its models are not installed")
+                continue()
+            endif()
+            if(NOT _sub IN_LIST _tw_subtrees)
+                continue()
+            endif()
+            list(APPEND _tw_installed "${_sub}")
+            if(_tw_own)
+                list(PREPEND _tw_sources_${_sub} "${_tw_src}")
+            else()
+                list(APPEND _tw_sources_${_sub} "${_tw_src}")
+            endif()
+        endforeach()
+        list(REMOVE_DUPLICATES _tw_installed)
+        set(_tw_commands)
+        foreach(_sub IN LISTS _tw_installed)
+            set(_tw_dst "${HIPBLASLT_TENSILE_LIBPATH}/library/${_sub}")
+            string(JOIN "|" _tw_srcs ${_tw_sources_${_sub}})
+            list(APPEND _tw_commands
+                COMMAND ${CMAKE_COMMAND} -E make_directory "${_tw_dst}"
+                COMMAND ${CMAKE_COMMAND} "-DWEIGHTS_DIRS=${_tw_srcs}" "-DLIBRARY_DIR=${_tw_dst}"
+                        -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/tilewright_install_models.cmake")
+        endforeach()
+        add_custom_target(hipblaslt-tilewright-models ALL ${_tw_commands}
+            COMMENT "Copying tilewright models into ${HIPBLASLT_TENSILE_LIBPATH}/library"
+            VERBATIM)
+        add_dependencies(hipblaslt-tilewright-models tensilelite-device-libraries)
+    endif()
+
     rocm_install(
         DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/Tensile/library"
         DESTINATION ${HIPBLASLT_TENSILE_LIBRARY_DIR}

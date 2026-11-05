@@ -123,6 +123,7 @@
 /shared/rocroller/                                  @ROCm/rocroller-developers
 /shared/tensile/                                    @ROCm/tensile-reviewers
 /shared/stinkytofu/                                 @ROCm/stinkytofu-reviewers
+/shared/tilewright/                                 @ROCm/origami-reviewers
 /projects/hipthreads/                               @ROCm/hipthreads-reviewers
 
 # Next CMake-specific ownership

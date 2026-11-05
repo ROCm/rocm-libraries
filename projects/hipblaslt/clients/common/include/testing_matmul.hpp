@@ -4705,7 +4705,14 @@ void testing_matmul_with_bias(const Arguments& arg,
         tuningVec.push_back(hipblaslt_ext::GemmTuning());
     }
 
-    if(arg.algo_method == 2)
+    std::vector<int> listedIndices;
+    for(int32_t i = 0; i < HIPBLASLT_MAX_SOLUTION_INDEX_LIST && arg.solution_index_list[i] != -1;
+        i++)
+    {
+        listedIndices.push_back(arg.solution_index_list[i]);
+    }
+
+    if(listedIndices.empty() && arg.algo_method == 2)
     {
         heuristicResult.clear();
         heuristicTuningIndex.clear();
@@ -5078,20 +5085,37 @@ void testing_matmul_with_bias(const Arguments& arg,
             verifyMixedValidityContract();
         }
     }
-    else if(arg.algo_method == 1)
+    else if(!listedIndices.empty() || arg.algo_method == 1)
     {
         std::vector<hipblasLtMatmulHeuristicResult_t> tmpAlgo;
-        EXPECT_HIPBLAS_STATUS(hipblaslt_ext::getAllAlgos(handle,
-                                                         gemmType,
-                                                         transA,
-                                                         transB,
-                                                         arg.a_type,
-                                                         arg.b_type,
-                                                         arg.c_type,
-                                                         arg.d_type,
-                                                         arg.compute_type,
-                                                         tmpAlgo),
-                              HIPBLAS_STATUS_SUCCESS);
+        if(!listedIndices.empty())
+        {
+            // Indices the library does not hold are dropped; the others keep
+            // their list order.
+            if(hipblaslt_ext::getAlgosFromIndex(handle, listedIndices, tmpAlgo)
+               != HIPBLAS_STATUS_SUCCESS)
+            {
+                hipblaslt_cerr << "solution_index_list: " << listedIndices.size() - tmpAlgo.size()
+                               << " of " << listedIndices.size() << " solution indices not found"
+                               << std::endl;
+            }
+        }
+        else
+        {
+            EXPECT_HIPBLAS_STATUS(hipblaslt_ext::getAllAlgos(handle,
+                                                             gemmType,
+                                                             transA,
+                                                             transB,
+                                                             arg.a_type,
+                                                             arg.b_type,
+                                                             arg.c_type,
+                                                             arg.d_type,
+                                                             arg.compute_type,
+                                                             tmpAlgo),
+                                  HIPBLAS_STATUS_SUCCESS);
+        }
+        const int32_t requestLimit
+            = listedIndices.empty() ? requestAlgoCount : std::numeric_limits<int32_t>::max();
         returnedAlgoCount = tmpAlgo.size();
         heuristicResult.clear();
         heuristicTuningIndex.clear();
@@ -5156,7 +5180,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                     }
                     CHECK_RETURNED_WORKSPACE_SIZE(workspace_size, max_workspace_size);
                     requestCount += addRequest;
-                    if(requestCount >= requestAlgoCount)
+                    if(requestCount >= requestLimit)
                     {
                         break;
                     }
@@ -5194,7 +5218,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                     }
                     CHECK_RETURNED_WORKSPACE_SIZE(workspace_size, max_workspace_size);
                     requestCount += addRequest;
-                    if(requestCount >= requestAlgoCount)
+                    if(requestCount >= requestLimit)
                     {
                         break;
                     }
@@ -5267,7 +5291,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                 }
                 CHECK_RETURNED_WORKSPACE_SIZE(workspace_size, max_workspace_size);
                 requestCount += addRequest;
-                if(requestCount >= requestAlgoCount)
+                if(requestCount >= requestLimit)
                 {
                     break;
                 }
@@ -6671,6 +6695,7 @@ void testing_matmul_with_bias(const Arguments& arg,
         hipblaslt_bench::SearchConfig searchCfg;
         searchCfg.cold_calls      = number_cold_calls;
         searchCfg.skip_slow_ratio = arg.skip_slow_solution_ratio;
+        searchCfg.screen_prepass  = arg.skip_screen_prepass;
         searchCfg.flush_grid      = gpu_block3;
 
         std::shared_ptr<EfficiencyMonitor>        perf_monitor;
@@ -6710,7 +6735,9 @@ void testing_matmul_with_bias(const Arguments& arg,
             hipblaslt_cout << std::setprecision(2) << "Skip solution: " << sol
                            << " (best warm-up = " << best_warm_time / number_cold_calls
                            << " us , warm-up = " << warm_time / number_cold_calls
-                           << " us, skip ratio = " << arg.skip_slow_solution_ratio << ")"
+                           << " us, skip ratio = " << arg.skip_slow_solution_ratio
+                           << ", solution index = "
+                           << hipblaslt_ext::getIndexFromAlgo(heuristicResult[sol].algo) << ")"
                            << std::endl;
             cotenant.reset();
         };

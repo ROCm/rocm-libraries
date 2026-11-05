@@ -1,0 +1,81 @@
+{
+ "rule": "tdm_th_v1",
+ "about": "Solution names and the TDMInst their sizeMapping gives (null: none) -> the TDMInst of the solution and its canonical name; error: the solution is refused. Bit 0 of TDMInst is operand A, bit 1 operand B; the _THA<v>_ / _THB<v>_ token of a loaded operand reads 0, every other token as written.",
+ "cases": [
+  {
+   "name": "Cijk_Alik_Bljk_BBS_BH_MT128x128x32_MI16x16x1_NTA0_NTB0_TDMI3_TDMIM0_THn1_THA1_THB1_THD0_THMXSA0_WGM8",
+   "tdm_inst_parameter": null,
+   "tdm_inst": 3,
+   "canonical_name": "Cijk_Alik_Bljk_BBS_BH_MT128x128x32_MI16x16x1_NTA0_NTB0_TDMI3_TDMIM0_THn1_THA0_THB0_THD0_THMXSA0_WGM8"
+  },
+  {
+   "name": "Cijk_Alik_Bljk_BBS_BH_MT128x128x32_MI16x16x1_NTA0_NTB0_TDMI1_TDMIM0_THn1_THA3_THB1_THD0_WGM8",
+   "tdm_inst_parameter": null,
+   "tdm_inst": 1,
+   "canonical_name": "Cijk_Alik_Bljk_BBS_BH_MT128x128x32_MI16x16x1_NTA0_NTB0_TDMI1_TDMIM0_THn1_THA0_THB1_THD0_WGM8"
+  },
+  {
+   "name": "Cijk_Alik_Bljk_BBS_BH_MT128x128x32_MI16x16x1_NTA0_NTB0_TDMI2_TDMIM0_THn1_THA3_THB1_THD0_WGM8",
+   "tdm_inst_parameter": null,
+   "tdm_inst": 2,
+   "canonical_name": "Cijk_Alik_Bljk_BBS_BH_MT128x128x32_MI16x16x1_NTA0_NTB0_TDMI2_TDMIM0_THn1_THA3_THB0_THD0_WGM8"
+  },
+  {
+   "name": "Cijk_Alik_Bljk_BBS_BH_MT128x128x32_MI16x16x1_NTA0_NTB0_TDMI0_TDMIM0_THn1_THA1_THB3_THD0_WGM8",
+   "tdm_inst_parameter": null,
+   "tdm_inst": 0,
+   "canonical_name": "Cijk_Alik_Bljk_BBS_BH_MT128x128x32_MI16x16x1_NTA0_NTB0_TDMI0_TDMIM0_THn1_THA1_THB3_THD0_WGM8"
+  },
+  {
+   "name": "Cijk_Alik_Bljk_BBS_BH_MT128x128x32_MI16x16x1_NTA4_NTB0_THA1_THB0_WGM8",
+   "tdm_inst_parameter": null,
+   "tdm_inst": 0,
+   "canonical_name": "Cijk_Alik_Bljk_BBS_BH_MT128x128x32_MI16x16x1_NTA4_NTB0_THA1_THB0_WGM8"
+  },
+  {
+   "name": "Cijk_Alik_Bljk_F8BS_MX_MT256x256x128_MI16x16x1_NTA4_NTB2_TDMI3_TDMIM3_THAn1_THB5_THD1_THMXSA1_THMXSB1_WGM8",
+   "tdm_inst_parameter": null,
+   "tdm_inst": 3,
+   "canonical_name": "Cijk_Alik_Bljk_F8BS_MX_MT256x256x128_MI16x16x1_NTA4_NTB2_TDMI3_TDMIM3_THA0_THB0_THD1_THMXSA1_THMXSB1_WGM8"
+  },
+  {
+   "name": "Cijk_Alik_Bljk_BBS_BH_MT64x64x64_MI16x16x1_TDMIM3_THA1_THB1_WGM8",
+   "tdm_inst_parameter": null,
+   "tdm_inst": 0,
+   "canonical_name": "Cijk_Alik_Bljk_BBS_BH_MT64x64x64_MI16x16x1_TDMIM3_THA1_THB1_WGM8"
+  },
+  {
+   "name": "Cijk_Alik_Bljk_BBS_BH_MT64x64x64_MI16x16x1_THA1_THB1_TDMI3",
+   "tdm_inst_parameter": null,
+   "tdm_inst": 3,
+   "canonical_name": "Cijk_Alik_Bljk_BBS_BH_MT64x64x64_MI16x16x1_THA0_THB0_TDMI3"
+  },
+  {
+   "name": "Cijk_Alik_Bljk_BBS_BH_MT64x64x64_MI16x16x1_THA2_THB6_WGM8",
+   "tdm_inst_parameter": 3,
+   "tdm_inst": 3,
+   "canonical_name": "Cijk_Alik_Bljk_BBS_BH_MT64x64x64_MI16x16x1_THA0_THB0_WGM8"
+  },
+  {
+   "name": "Cijk_Alik_Bljk_BBS_BH_MT64x64x64_MI16x16x1_TDMI3_THA2_THB6_WGM8",
+   "tdm_inst_parameter": 3,
+   "tdm_inst": 3,
+   "canonical_name": "Cijk_Alik_Bljk_BBS_BH_MT64x64x64_MI16x16x1_TDMI3_THA0_THB0_WGM8"
+  },
+  {
+   "name": "Cijk_Alik_Bljk_BBS_BH_MT64x64x64_MI16x16x1_TDMI3_THA2_THB6_WGM8",
+   "tdm_inst_parameter": 1,
+   "error": true
+  },
+  {
+   "name": "Cijk_Alik_Bljk_BBS_BH_MT64x64x64_MI16x16x1_TDMI3_THA2_TDMI1_WGM8",
+   "tdm_inst_parameter": null,
+   "error": true
+  },
+  {
+   "name": "Cijk_Alik_Bljk_BBS_BH_MT64x64x64_MI16x16x1_TDMI4_THA2_WGM8",
+   "tdm_inst_parameter": null,
+   "error": true
+  }
+ ]
+}

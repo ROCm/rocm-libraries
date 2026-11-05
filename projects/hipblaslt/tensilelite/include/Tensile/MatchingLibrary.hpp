@@ -175,6 +175,25 @@ namespace TensileLite
             return lastFindTopRetAll;
         }
 
+        virtual RouteYield routeYield(unsigned) const override
+        {
+            return table && table->exactKeysOnly() ? RouteYield::ExactKeys : RouteYield::Some;
+        }
+
+        /// Whether the table returns only exact key matches and holds none for
+        /// the problem; never while findTopSolutions or the key would print.
+        /// Reads the problem's key before any predicate above has accepted the
+        /// problem (MatchingTable::lacksKey states what that requires).
+        virtual bool returnsNothing(MyProblem const& problem, unsigned) const override
+        {
+            if(!table || !table->exactKeysOnly())
+                return false;
+            Debug const& settings = Debug::Instance();
+            if(settings.printLibraryLogicIndex() || settings.printPropertyEvaluation())
+                return false;
+            return table->lacksKey(problem);
+        }
+
         virtual SolutionVector<MySolution>
             findTopSolutionsGroupedGemm(std::vector<MyProblem> const& problems,
                                         Hardware const&               hardware,
