@@ -404,7 +404,14 @@ class Registry:
     """One manifest's view of the registry: its candidate, request class and cells."""
 
     #: What an ``enumerate.also`` section takes from ``enumerate`` unless it sets its own.
-    _INHERITED = ("candidates", "request", "sweep_level", "space")
+    _INHERITED = (
+        "candidates",
+        "request",
+        "sweep_level",
+        "space",
+        "selector_fields",
+        "cell_keyed_by",
+    )
 
     def __init__(self, manifest: dict, decl: dict | None = None):
         primary = decl is None
@@ -529,7 +536,8 @@ class Registry:
                         raise EnumerationError(
                             f"enumerate.also[{index}] sets {key} "
                             f"{getattr(section, key)}, not {getattr(self, key)}: every "
-                            f"section keys a shape's cell the same way."
+                            f"section keys a shape's cell the same way (omit {key} "
+                            f"to inherit it)."
                         )
                 self.also.append(section)
 

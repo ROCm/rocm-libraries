@@ -20,6 +20,7 @@
 #include <hipdnn_plugin_sdk/ingestor/KernelDefinition.hpp>
 
 #include "IngestorPackTestSupport.hpp"
+#include "UnifiedAttentionTestGraphs.hpp"
 
 /**
  * @file Gfx942AttentionUnified3dTestGraphs.hpp
@@ -67,17 +68,10 @@ inline std::vector<int64_t> decodeQoStrides(int64_t heads, int64_t headSize)
     return {heads * headSize, headSize, heads * headSize, 1};
 }
 
-/// BHSD `[B, Hkv, Skv, D]`.
-inline std::vector<int64_t> bhsdStrides(int64_t heads, int64_t seq, int64_t headSize)
-{
-    return {heads * seq * headSize, seq * headSize, headSize, 1};
-}
-
-/// BSHD storage of the logical `[B, Hkv, Skv, D]` view.
-inline std::vector<int64_t> bshdStrides(int64_t heads, int64_t seq, int64_t headSize)
-{
-    return {seq * heads * headSize, headSize, heads * headSize, 1};
-}
+/// BHSD `[B, Hkv, Skv, D]` and BSHD storage of the same logical view.
+using unified_attention::bhsdStrides;
+using unified_attention::bshdStrides;
+using unified_attention::idEndingIn;
 
 /// The mask spellings the admission table uses, as hipDNN bounds.
 enum class Mask
@@ -261,15 +255,6 @@ struct KernelSpec
     int64_t numSegments = 16;
     unsigned idByte = 0xa1;
 };
-
-inline hipdnn_plugin_sdk::ingestor::DescriptorId idEndingIn(unsigned lastByte)
-{
-    constexpr const char* HEX = "0123456789abcdef";
-    std::string text = "00000000-0000-4000-8000-0000000000";
-    text.push_back(HEX[(lastByte >> 4U) & 0xFU]);
-    text.push_back(HEX[lastByte & 0xFU]);
-    return hipdnn_flatbuffers_sdk::utilities::parseUuid(text);
-}
 
 inline int64_t resolvedTile(int64_t headSize, int64_t blockSize)
 {

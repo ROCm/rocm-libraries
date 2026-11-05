@@ -768,15 +768,22 @@ if(ROCKE_INSTALL_TESTS)
            "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
            "  TIMEOUT 180)\n")
 
-    # Tiled attention cache-key contract (no GPU). Its invariant sweep compares
-    # key equality with build equality across every selector threshold for each
-    # tiled arch, so each sweep case runs for tens of seconds: it gets its own
-    # entry and budget rather than the 30 s per-test limit of the list above.
+    # Tiled attention cache-key contract (no GPU), as on #15024: the quick checks
+    # keep the 30 s per-test limit; the invariant sweep compares key equality with
+    # build equality across every selector threshold for each tiled arch, so each
+    # sweep case runs for tens of seconds and gets its own standard-tier entry below.
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
-           "add_test(rocke_library_attention_cache_key_pytest python -m pytest \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_attention_tiled_cache_key.py\" -v -rs --timeout=240)\n")
+           "add_test(rocke_library_attention_cache_key_pytest python -m pytest \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_attention_tiled_cache_key.py\" -k \"not test_key_matches_build_identity\" -v -rs --timeout=30)\n")
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
            "set_tests_properties(rocke_library_attention_cache_key_pytest PROPERTIES\n"
            "  LABELS \"ckc\\;python\\;attention\\;host\\;quick\"\n"
+           "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
+           "  TIMEOUT 180)\n")
+    string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+           "add_test(rocke_library_attention_cache_key_sweep_pytest python -m pytest \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_attention_tiled_cache_key.py\" -k test_key_matches_build_identity -v -rs --timeout=240)\n")
+    string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+           "set_tests_properties(rocke_library_attention_cache_key_sweep_pytest PROPERTIES\n"
+           "  LABELS \"ckc\\;python\\;attention\\;host\\;standard\"\n"
            "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
            "  TIMEOUT 900)\n")
 

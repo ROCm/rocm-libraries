@@ -619,6 +619,22 @@ def test_spec_overrides_pin_a_varying_field_so_its_combos_merge(split):
     assert [s["num_segments"] for s in cell] == [1, 4, 8]
 
 
+def test_a_spec_override_the_spec_refuses_is_exit_2_naming_the_request(
+    split, tmp_path, capsys
+):
+    """The spec's own validation decides whether an override builds."""
+    manifest = _dedup(split, neutral=())
+    manifest["enumerate"]["spec_overrides"] = {"num_seqs": 0}
+    path = synth.write_manifest(tmp_path / "m.engine.yaml", manifest)
+    out = tmp_path / "c.yaml"
+    assert re_.main(["--manifest", str(path), "--out", str(out)]) == 2
+    err = capsys.readouterr().err
+    assert "spec_overrides {'num_seqs': 0} does not build for request" in err, err
+    assert "{hdim: 64, batch: 1" in err, err
+    assert "num_seqs must be >= 1" in err, err
+    assert not out.exists()
+
+
 def _override_and_neutral(m):
     m["enumerate"]["spec_overrides"] = {"num_seqs": 4}
 
@@ -948,6 +964,41 @@ def test_an_also_section_may_not_repeat_a_kernel_name(probe):
 def test_an_also_section_must_cross_the_same_cell_fields(probe):
     manifest = _with_also(probe, cells=[{"fields": ["hdim"], "values": [[128]]}])
     assert _run_probe(probe, manifest) == 2
+
+
+def _split_also(split, **overrides) -> dict:
+    """``split`` merged on its selector fields, plus a section over hdim 256."""
+    manifest = _dedup(split)
+    cells = copy.deepcopy(manifest["enumerate"]["cells"])
+    cells[0]["values"] = [256]
+    manifest["enumerate"]["also"] = [
+        {
+            "pin": manifest["enumerate"]["pin"],
+            "fixed": manifest["enumerate"]["fixed"],
+            "cells": cells,
+            "neutral_fields": ["num_seqs"],
+            **overrides,
+        }
+    ]
+    return manifest
+
+
+def test_an_also_section_inherits_selector_fields_and_cell_keyed_by(split):
+    """Omitted keying keys come from ``enumerate``, so the section merges too."""
+    kernels = _kernels(_split_also(split))
+    extra = [k for k in kernels if k["metadata"]["hdim"] == 256]
+    assert [k["kernel_source"]["spec"]["num_segments"] for k in extra] == [1, 4, 8]
+    restated = _split_also(split, selector_fields=["batch", "seqlen"], cell_keyed_by=[])
+    assert _kernels(restated) == kernels
+
+
+@pytest.mark.parametrize(
+    "key, value",
+    [("selector_fields", ["batch"]), ("cell_keyed_by", ["num_segments"])],
+)
+def test_an_also_section_with_different_keying_is_refused(split, key, value):
+    with pytest.raises(re_.EnumerationError, match=rf"enumerate.also\[0\] sets {key}"):
+        _kernels(_split_also(split, **{key: value}))
 
 
 def _full(manifest: dict) -> dict:

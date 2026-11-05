@@ -213,6 +213,10 @@ class SplitProbeSpec:
     num_segments: int
     num_seqs: int
 
+    def __post_init__(self):
+        if self.num_seqs < 1:
+            raise ValueError(f"num_seqs must be >= 1, got {self.num_seqs}")
+
 
 def split_rule(batch: int, seqlen: int) -> int:
     """Long keys split, fewer the more sequences already fill the device."""
