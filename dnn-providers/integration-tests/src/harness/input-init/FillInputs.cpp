@@ -671,10 +671,68 @@ FillResult fillOnHost(ITensor& tensor, const FillRecipe& recipe, unsigned int se
 
 // ── Fill dispatch ───────────────────────────────────────────────────────────
 
+// The byte a host fill sets every byte of a non-packed input's allocation to before it writes the
+// logical elements, so a gap holds a NaN (an integer's all-ones pattern for an integer type) and
+// not whatever malloc returned. An engine that reads a gap then produces a visibly wrong output
+// on every run instead of an intermittent one; the reference never reads a gap, so only the
+// engine can show it.
+//
+// 0xFF is a NaN of float, double, half, bfloat16, the OCP fp8 formats and e8m0. The FNUZ fp8
+// formats have the single NaN 0x80, and 0xFF is a finite value there, so they get 0x80. Integers
+// get 0xFF. No byte is poisoned for bool, and none for the bit-packed sub-byte types, whose
+// allocation is a bit stream rather than an array of elements.
+std::optional<std::uint8_t>
+    gapPoisonByteFor(hipdnn_flatbuffers_sdk::data_objects::DataType dataType)
+{
+    using hipdnn_flatbuffers_sdk::data_objects::DataType;
+    switch(dataType)
+    {
+    case DataType::FP8_E4M3_FNUZ:
+    case DataType::FP8_E5M2_FNUZ:
+        return std::uint8_t{0x80};
+    case DataType::FLOAT:
+    case DataType::HALF:
+    case DataType::BFLOAT16:
+    case DataType::DOUBLE:
+    case DataType::FP8_E4M3:
+    case DataType::FP8_E5M2:
+    case DataType::FP8_E8M0:
+    case DataType::UINT8:
+    case DataType::INT32:
+    case DataType::INT8:
+    case DataType::INT64:
+        return std::uint8_t{0xFF};
+    case DataType::FP4_E2M1:
+    case DataType::FP6_E2M3:
+    case DataType::FP6_E3M2:
+    case DataType::INT4:
+    case DataType::BOOLEAN:
+    case DataType::UNSET:
+    default:
+        return std::nullopt;
+    }
+}
+
+// Sets every byte of `tensor`'s host allocation to `poison` when the tensor is not packed, that
+// is, when its allocation holds gap elements beside the logical ones. A packed tensor has no gap,
+// and its elements are all written anyway.
+void poisonGaps(ITensor& tensor, std::optional<std::uint8_t> poison)
+{
+    if(!poison.has_value() || tensor.elementSpace() == tensor.elementCount())
+    {
+        return;
+    }
+    std::memset(tensor.rawHostData(), *poison, tensor.elementSpace() * tensor.elementSize());
+    tensor.markHostModified();
+}
+
+// A tensor a host fill writes is poisoned first (poisonGaps). The device fill is not: it draws
+// over the whole allocation, so it leaves no gap to poison.
 FillResult fill(hipdnn_data_sdk::utilities::ITensor& tensor,
                 const FillRecipe& recipe,
                 unsigned int seed,
-                DeviceInputFiller* device)
+                DeviceInputFiller* device,
+                std::optional<std::uint8_t> gapPoison)
 {
     switch(recipe.kind)
     {
@@ -683,9 +741,11 @@ FillResult fill(hipdnn_data_sdk::utilities::ITensor& tensor,
         {
             return FillResult::ok(/*deviceFilled=*/1);
         }
+        poisonGaps(tensor, gapPoison);
         tensor.fillTensorWithRandomValues(recipe.lo, recipe.hi, seed);
         return FillResult::ok();
     case FillRecipe::Kind::FIXED:
+        poisonGaps(tensor, gapPoison);
         tensor.fillTensorWithValue(recipe.value);
         return FillResult::ok();
     // On the device when the filler takes the tensor, else from the host generators, which
@@ -699,6 +759,7 @@ FillResult fill(hipdnn_data_sdk::utilities::ITensor& tensor,
         {
             return FillResult::ok(/*deviceFilled=*/1);
         }
+        poisonGaps(tensor, gapPoison);
         return fillOnHost(tensor, recipe, seed);
     default:
         return FillResult::unsupported("unknown FillRecipe kind");
@@ -1337,7 +1398,10 @@ FillResult fillInputs(const hipdnn_flatbuffers_sdk::data_objects::Graph& graph,
     {
         const unsigned int seed
             = recipes.resolveSeed(uid).value_or(static_cast<unsigned int>(rng()));
-        auto fillResult = fill(*inputs.at(uid), recipes.fill(uid), seed, device);
+        const auto dataType = dataTypes.find(uid);
+        const auto gapPoison = dataType != dataTypes.end() ? gapPoisonByteFor(dataType->second)
+                                                           : std::optional<std::uint8_t>{};
+        auto fillResult = fill(*inputs.at(uid), recipes.fill(uid), seed, device, gapPoison);
         if(!fillResult.filled)
         {
             return FillResult::unsupported("uid " + std::to_string(uid) + ": " + fillResult.reason);

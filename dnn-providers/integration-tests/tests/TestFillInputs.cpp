@@ -2300,10 +2300,28 @@ namespace
 
 // A tensor whose rows are padded (the leading stride is wider than the row) has gap elements
 // between the end of a row and the start of the next. They belong to no element: an input fill
-// must write every element, in the order the packed tensor of the same dims gets them, and
-// leave every gap byte as it was.
+// must write every element, in the order the packed tensor of the same dims gets them, and set
+// every gap byte to the poison byte of the element type: a NaN for the floating types, all ones
+// for the integers.
 
-constexpr unsigned char kGapPoison = 0xA5;
+// What the allocation holds before the fill. It is neither poison nor the byte a zero fill
+// writes, so a gap that still holds it was left alone.
+constexpr unsigned char kJunkByte = 0xA5;
+
+// The poison byte for element type T: 0x80, the single NaN, for the FNUZ fp8 formats; 0xFF for
+// every other type this test pads.
+template <typename T>
+constexpr unsigned char gapPoisonByte()
+{
+    if constexpr(std::is_same_v<T, types::fp8_e4m3_fnuz> || std::is_same_v<T, types::fp8_e5m2_fnuz>)
+    {
+        return 0x80;
+    }
+    else
+    {
+        return 0xFF;
+    }
+}
 
 template <typename T>
 struct PaddedFill
@@ -2315,7 +2333,7 @@ struct PaddedFill
 };
 
 // Fills one rows x cols input of element type T whose leading stride is `ld`, after setting every
-// byte of its allocation to kGapPoison.
+// byte of its allocation to kJunkByte.
 template <typename T>
 PaddedFill<T>
     fillPadded(const FillRecipe& recipe, unsigned int seed, int64_t rows, int64_t cols, int64_t ld)
@@ -2329,7 +2347,7 @@ PaddedFill<T>
 
     PaddedFill<T> out;
     out.elementSpace = inputs.at(1)->elementSpace();
-    std::memset(inputs.at(1)->rawHostData(), kGapPoison, out.elementSpace * sizeof(T));
+    std::memset(inputs.at(1)->rawHostData(), kJunkByte, out.elementSpace * sizeof(T));
     inputs.at(1)->markHostModified();
 
     InputFillRecipes recipes;
@@ -2396,21 +2414,28 @@ void expectPaddedFillMatchesPackedFill(const FillRecipe& recipe, int64_t pad)
     // Every element holds what the packed tensor of the same dims gets from the same seed.
     EXPECT_TRUE(sameBytes(padded.elements, packed.values));
 
-    // No gap element was written.
+    // Every gap byte holds the poison, whatever the tensor held before the fill, and a gap
+    // element of a floating type reads back as a NaN.
     const auto gaps = gapOffsets(padded.elementSpace, rows, cols, ld);
     EXPECT_EQ(gaps.size(), static_cast<std::size_t>((rows - 1) * pad));
     for(const std::size_t gap : gaps)
     {
         for(std::size_t b = 0; b < sizeof(T); ++b)
         {
-            ASSERT_EQ(padded.bytes[gap * sizeof(T) + b], kGapPoison)
+            ASSERT_EQ(padded.bytes[gap * sizeof(T) + b], gapPoisonByte<T>())
                 << "gap element " << gap << " byte " << b;
+        }
+        if constexpr(!std::is_integral_v<T>)
+        {
+            T element;
+            std::memcpy(&element, &padded.bytes[gap * sizeof(T)], sizeof(T));
+            ASSERT_TRUE(std::isnan(asDouble(element))) << "gap element " << gap;
         }
     }
 }
 
 template <typename T>
-void expectEveryKindLeavesTheGapsAlone()
+void expectEveryKindPoisonsTheGaps()
 {
     const std::vector<FillRecipe> recipes = {
         FillRecipe::free(-1.0f, 1.0f),
@@ -2432,16 +2457,115 @@ void expectEveryKindLeavesTheGapsAlone()
     }
 }
 
+// The kinds every element type has a host generator for.
+template <typename T>
+void expectBasicKindsPoisonTheGaps(const std::vector<FillRecipe>& recipes
+                                   = {FillRecipe::free(-1.0f, 1.0f),
+                                      FillRecipe::fixed(0.5f),
+                                      FillRecipe::zeros()})
+{
+    SCOPED_TRACE(EnumNameDataType(dataTypeOf<T>()));
+    for(const int64_t pad : {0, 1, 7})
+    {
+        for(const auto& recipe : recipes)
+        {
+            expectPaddedFillMatchesPackedFill<T>(recipe, pad);
+        }
+    }
+}
+
 } // namespace
 
 // Bug caught: a fill that walks the allocation linearly instead of the logical elements (the
 // packed tensor's order), which on a padded tensor would write the gap bytes and shift every
-// element after the first row, or one that stops at elementCount and leaves the last rows unfilled.
-TEST(TestFillInputs, HostFillOfAPaddedTensorWritesEveryElementAndNoGapByteForEveryKind)
+// element after the first row, or one that stops at elementCount and leaves the last rows unfilled;
+// and a host fill that leaves the gap bytes as they were, which are uninitialised memory for a
+// real input, so an engine that reads a gap is wrong on some runs and right on others.
+TEST(TestFillInputs, HostFillOfAPaddedTensorWritesEveryElementAndPoisonsEveryGapByteForEveryKind)
 {
-    expectEveryKindLeavesTheGapsAlone<float>();
-    expectEveryKindLeavesTheGapsAlone<hipdnn_data_sdk::types::half>();
-    expectEveryKindLeavesTheGapsAlone<hipdnn_data_sdk::types::bfloat16>();
+    expectEveryKindPoisonsTheGaps<float>();
+    expectEveryKindPoisonsTheGaps<hipdnn_data_sdk::types::half>();
+    expectEveryKindPoisonsTheGaps<hipdnn_data_sdk::types::bfloat16>();
+}
+
+// Bug caught: a poison byte that is a finite value for a type whose only NaN is another byte
+// (0xFF is -240 / -57344 in the FNUZ fp8 formats, whose NaN is 0x80), a family left unpoisoned,
+// and a poison that disturbs the integer or fp8 element values. The kinds are the ones every
+// element type has a host generator for.
+TEST(TestFillInputs, HostFillOfAPaddedTensorPoisonsTheGapsOfEveryElementTypeFamily)
+{
+    expectBasicKindsPoisonTheGaps<double>();
+    expectBasicKindsPoisonTheGaps<hipdnn_data_sdk::types::fp8_e4m3>();
+    expectBasicKindsPoisonTheGaps<hipdnn_data_sdk::types::fp8_e5m2>();
+    expectBasicKindsPoisonTheGaps<hipdnn_data_sdk::types::fp8_e4m3_fnuz>();
+    expectBasicKindsPoisonTheGaps<hipdnn_data_sdk::types::fp8_e5m2_fnuz>();
+    // e8m0 holds powers of two only: no zero, nothing below 2^-127.
+    expectBasicKindsPoisonTheGaps<hipdnn_data_sdk::types::fp8_e8m0>(
+        {FillRecipe::free(0.5f, 2.0f), FillRecipe::fixed(1.0f)});
+    expectBasicKindsPoisonTheGaps<std::int8_t>();
+    expectBasicKindsPoisonTheGaps<std::uint8_t>();
+    expectBasicKindsPoisonTheGaps<std::int32_t>();
+    expectBasicKindsPoisonTheGaps<std::int64_t>();
+}
+
+// Bug caught: poisoning a bool tensor, whose every byte pattern but 0 and 1 is an invalid bool.
+TEST(TestFillInputs, HostFillOfAPaddedBoolTensorLeavesTheGapBytesAlone)
+{
+    constexpr int64_t rows = 5;
+    constexpr int64_t cols = 6;
+    constexpr int64_t ld = 9;
+    const auto filled = fillPadded<bool>(FillRecipe::zeros(), 7, rows, cols, ld);
+    ASSERT_TRUE(filled.result.filled) << filled.result.reason;
+    const auto gaps = gapOffsets(filled.elementSpace, rows, cols, ld);
+    ASSERT_EQ(gaps.size(), static_cast<std::size_t>((rows - 1) * (ld - cols)));
+    for(const std::size_t gap : gaps)
+    {
+        ASSERT_EQ(filled.bytes[gap], kJunkByte) << "gap element " << gap;
+    }
+}
+
+// Bug caught: a poison that changes what the fill writes into the logical elements, or that
+// consumes a draw, which would make every padded input differ from its packed twin and break
+// replays of recorded cases. Two inputs share one rng stream here, so a draw consumed by the
+// padded one would shift the values of the one after it.
+TEST(TestFillInputs, PoisonedPaddedInputsHoldTheValuesOfThePackedFillAndSharedStreamIsUnshifted)
+{
+    constexpr int64_t rows = 6;
+    constexpr int64_t cols = 10;
+    constexpr int64_t ld = 13;
+    const std::vector<int64_t> dims = {rows, cols};
+
+    const auto fillTwo = [&](int64_t firstLd) {
+        const std::vector<int64_t> firstStrides = {firstLd, 1};
+        const auto gr = buildMatmulGraph(DataType::FLOAT, dims, firstStrides);
+        InputTensorMap inputs;
+        inputs[1] = std::make_shared<hipdnn_data_sdk::utilities::Tensor<float>>(dims, firstStrides);
+        inputs[2] = std::make_shared<hipdnn_data_sdk::utilities::Tensor<float>>(dims);
+        InputFillRecipes recipes;
+        recipes.set(1, FillRecipe::free(-1.0f, 1.0f));
+        recipes.set(2, FillRecipe::free(-1.0f, 1.0f));
+        recipes.setGlobalSeed(11);
+        const std::vector<int64_t> ownedUids = {1, 2};
+        const auto result = fillInputs(*gr.graph, inputs, ownedUids, recipes, nullptr);
+        EXPECT_TRUE(result.filled) << result.reason;
+
+        const auto* firstData = static_cast<const float*>(inputs.at(1)->rawHostData());
+        std::vector<float> first;
+        for(int64_t r = 0; r < rows; ++r)
+        {
+            for(int64_t c = 0; c < cols; ++c)
+            {
+                first.push_back(firstData[r * firstLd + c]);
+            }
+        }
+        const auto* second = static_cast<const float*>(inputs.at(2)->rawHostData());
+        return std::make_pair(first, std::vector<float>(second, second + rows * cols));
+    };
+
+    const auto packed = fillTwo(cols);
+    const auto padded = fillTwo(ld);
+    EXPECT_TRUE(sameBytes(padded.first, packed.first));
+    EXPECT_TRUE(sameBytes(padded.second, packed.second));
 }
 
 // Bug caught: the planted non-finite share being counted over elementSpace, which would plant
