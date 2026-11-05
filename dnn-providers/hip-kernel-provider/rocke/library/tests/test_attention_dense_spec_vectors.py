@@ -273,9 +273,31 @@ _CASES: tuple[dict, ...] = (
     dict(seqlen_q=131072, seqlen_kv=64, num_query_heads=128, num_kv_heads=1),
     dict(batch=1953125),
     dict(batch=2147483647, seqlen_kv=1048576, num_kv_heads=8),
+    # A ragged Q is bounded in BYTES, so it rejects at half the element count the
+    # element-addressed paths take. Q/O is 1310720000 elements (under the limit) and
+    # 2621440000 B (over), and K/V is an order of magnitude under, so only the ragged
+    # Q/O byte bound can fire.
+    dict(
+        ragged=True,
+        batch=8,
+        seqlen_q=40000,
+        seqlen_kv=40000,
+        num_query_heads=32,
+        num_kv_heads=8,
+    ),
     # ---- valid specs: every kernel-name token ----
     {},
     dict(seqlen_q=65536, seqlen_kv=65536, num_query_heads=127, num_kv_heads=127),
+    # The accepting side of the ragged byte bound: Q/O is 2113929216 B, just under.
+    # Pairs with the reject above so tightening the bound further cannot go unnoticed.
+    dict(
+        ragged=True,
+        batch=64,
+        seqlen_q=16128,
+        seqlen_kv=16128,
+        num_query_heads=8,
+        num_kv_heads=8,
+    ),
     dict(causal=False, dtype="fp16", lazy_rescale=False),
     dict(head_size=64, lds_k_group_pad=0, block_m=128),
     dict(head_size=64, block_n=32, lds_k_group_pad=16),
