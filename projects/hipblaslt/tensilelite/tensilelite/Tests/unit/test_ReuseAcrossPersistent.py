@@ -395,15 +395,15 @@ _MX_F8 = {"MXBlockA": 32, "MXBlockB": 32, "DataTypeMXSA": "E8", "DataTypeMXSB": 
 
 @pytest.mark.parametrize("problemType", [{}, _MX_F8, {**_MX_F8, "MacDataTypeB": "F4"}],
                          ids=["f8", "mx_f8", "mx_f8_f4"])
-def test_rap_b_starts_with_one_n_tile_whole_m_tiles_and_whole_k_tiles(
+def test_rap_b_serves_whole_n_tiles_whole_m_tiles_and_whole_k_tiles(
     _gp_gfx1250, gfx1250_iim, assembler, capsys, problemType
 ):
-    """RAP 2 holds B, and its first cut serves what RAP 1 first served for A.
+    """RAP 2 holds B over whole N-tiles, whole M-tiles and whole k-tiles.
 
-    One N-tile, so every tile reads the same B and the entry guard only ever sees
-    the batch change; whole M-tiles; whole k-tiles. K's multiple is a predicate,
-    not a reject on ASEM: fp4 forces ASEM to 32, which a reject would turn into
-    refusing every F8 x F4 kernel.
+    Any number of N-tiles: the entry guard compares (batch, N-tile) and refills B
+    when either changes, so N is a multiple of MacroTile1 rather than equal to it.
+    K's multiple is a predicate, not a reject on ASEM: fp4 forces ASEM to 32,
+    which a reject would turn into refusing every F8 x F4 kernel.
     """
     import tensilelite.Contractions as C
 
@@ -419,12 +419,13 @@ def test_rap_b_starts_with_one_n_tile_whole_m_tiles_and_whole_k_tiles(
     rapPreds = {(p.index, p.tag, p.value) for p in preds if p.index in (0, 1, kIdx)}
     depthU, kTiles = sol["DepthU"], sol["_RAPNumResidentKTiles"]
     assert rapPreds >= {
-        (1, "SizeEqual", 64),
+        (1, "SizeMultiple", 64),
         (0, "SizeMultiple", 256),
         (kIdx, "SizeMultiple", depthU),
         (kIdx, "SizeGreaterThan", 0),
         (kIdx, "SizeLessThan", kTiles * depthU + 1),
     }
+    assert not any(p.index == 1 and p.tag == "SizeEqual" for p in preds), "N is not pinned to one N-tile"
 
 
 @pytest.mark.parametrize(
