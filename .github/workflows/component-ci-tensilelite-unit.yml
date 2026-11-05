@@ -7,10 +7,9 @@ name: "Component CI: TensileLite unit"
 # these tests off the TheRock multi-arch GPU runner (where the host-only `quick`
 # tier ran on a real gfx942 GPU it never used), freeing GPU capacity.
 #
-# Distinct from the `TensileLite coverage` lane, which only MEASURES coverage;
-# this lane answers "do the unit tests pass" and fails the PR when they don't.
-# GPU-bound unit cases (skipif on gfx1250/gfx950) skip here and stay covered by
-# the GPU tiers on TheRock CI — this lane is host-only by design.
+# Runs the tests not marked `gpu` under xdist; `gpu` tests stay on TheRock's GPU
+# tiers. The `TensileLite coverage` lane also gates on these tests today but is
+# meant to retire after the characterization conversion; this is the lasting gate.
 #
 # rocisa's own suite is covered by component-ci-rocisa.yml; this lane runs only
 # tensilelite/Tests/unit to avoid duplicating it.
@@ -47,9 +46,9 @@ jobs:
         shell: bash
         run: pip install tox
 
-      # `tox -e unit` installs rocisa from source (compiler env below) and runs
-      # `pytest {posargs}`; scope it to tensilelite/Tests/unit and exclude the `gpu`
-      # marker so only host-only unit tests run (matches the quick/standard tier).
+      # `tox -e unit-host` builds rocisa (compiler env below) and runs the tests not
+      # marked `gpu`. worksteal spreads the long characterization/_codegen tests
+      # (pytest-xdist 3.2+, required in tox.ini).
       #
       # PATH must include the ROCm toolchain bin dirs: setup-rocm sets ROCM_PATH
       # but not PATH, and some tests resolve the assembler via
@@ -67,4 +66,6 @@ jobs:
           LD_LIBRARY_PATH: ${{ env.ROCM_PATH }}/lib:${{ env.LD_LIBRARY_PATH }}
         run: |
           export PATH="${ROCM_PATH}/bin:${ROCM_PATH}/lib/llvm/bin:${PATH}"
-          tox -e unit -- tensilelite/Tests/unit -m "not gpu"
+          # At most 8 workers.
+          workers=$(nproc); [ "$workers" -gt 8 ] && workers=8
+          tox -e unit-host -- -n "$workers" --dist=worksteal tensilelite/Tests/unit

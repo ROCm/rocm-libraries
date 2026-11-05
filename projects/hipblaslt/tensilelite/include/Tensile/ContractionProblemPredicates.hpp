@@ -41,7 +41,10 @@
 #include <cmath>
 #include <cstddef>
 #include <limits>
+#include <mutex>
 #include <sstream>
+#include <stdexcept>
+#include <unordered_map>
 #include <vector>
 
 #include <tensilelitehost/export.h>
@@ -3116,16 +3119,46 @@ namespace TensileLite
                 {
                 }
 
-                // Query the device at eval time (always on a GPU). Keeping it out of the
-                // ctor lets solutions deserialize GPU-free. The processor is stored before the
-                // count, so a reader that sees a non-zero count also sees the processor.
+                struct DeviceInfo
+                {
+                    size_t            cuCount;
+                    AMDGPU::Processor processor;
+                };
+
+                // The current device's CU count and processor, queried once per device
+                // for all instances.
+                static DeviceInfo currentDeviceInfo()
+                {
+                    int deviceId = 0;
+                    if(hipGetDevice(&deviceId) != hipSuccess)
+                        throw std::runtime_error("WorkgroupMappingXCCCheck: no current HIP device");
+
+                    static std::mutex                          mutex;
+                    static std::unordered_map<int, DeviceInfo> infos;
+                    std::lock_guard<std::mutex>                lock(mutex);
+                    auto                                       it = infos.find(deviceId);
+                    if(it == infos.end())
+                    {
+                        auto          pHardware = hip::GetDevice(deviceId);
+                        AMDGPU const* pAMDGPU   = dynamic_cast<AMDGPU const*>(pHardware.get());
+                        if(pAMDGPU == nullptr)
+                            throw std::runtime_error(
+                                "WorkgroupMappingXCCCheck: the current device is not an AMDGPU");
+                        it = infos.emplace(deviceId,
+                                           DeviceInfo{size_t(pAMDGPU->computeUnitCount), pAMDGPU->processor})
+                                 .first;
+                    }
+                    return it->second;
+                }
+
+                // Queried at the first evaluation (always on a GPU), not in the ctor, so
+                // solutions deserialize GPU-free. The processor is stored before the count,
+                // so a reader that sees a non-zero count also sees the processor.
                 void queryDevice() const
                 {
-                    auto pHardware = hip::GetCurrentDevice();
-                    assert(pHardware != nullptr);
-                    AMDGPU const* pAMDGPU = dynamic_cast<AMDGPU const*>(pHardware.get());
-                    processorCache.store(pAMDGPU->processor, std::memory_order_relaxed);
-                    cuCountCache.store(pAMDGPU->computeUnitCount, std::memory_order_release);
+                    DeviceInfo info = currentDeviceInfo();
+                    processorCache.store(info.processor, std::memory_order_relaxed);
+                    cuCountCache.store(info.cuCount, std::memory_order_release);
                 }
 
                 size_t cuCount() const
