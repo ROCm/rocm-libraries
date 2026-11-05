@@ -31,9 +31,23 @@ constexpr int kOutPerLane    = 2;
 // IsDynamic() promises.
 constexpr int kRowChunk = 8;
 
-// Filters wider than this hold too many taps and window columns in registers to
-// stay ahead of the grouped implicit-GEMM path.
+// Filter extent of the general case, together with kMaxWindowRegs below.
 constexpr int kMaxFilterExtent = 7;
+
+// Two shapes go past it. Both were checked by compiling the kernel for gfx1100,
+// gfx1151 and gfx1201 in fp32, fp16 and bf16 at their bounds: none uses scratch.
+//
+// Undilated filters up to 9x9 at a horizontal stride of at most 4; the largest,
+// 9x9 at stride 4, needs 237 VGPRs. Their window exceeds kMaxWindowRegs, which
+// therefore does not apply to them.
+constexpr int kMaxFilterExtentUndilated = 9;
+constexpr int kMaxStrideWUndilated      = 4;
+
+// 1xK filters, which keep a single window row live, up to a dilated width of 31
+// (K = 31 at dilation 1, the depthwise conv1d of Conformer blocks), with the
+// window still bounded by kMaxWindowRegs; the largest checked, 1x31 at stride 60,
+// needs 229 VGPRs.
+constexpr int kMaxDilatedWidth1xK = 31;
 
 // The grouped implicit-GEMM tile only becomes degenerate once the group count is
 // large; below that the existing path still wins.
@@ -100,19 +114,27 @@ bool ConvDirectDepthwiseFwd2D::IsApplicable(const ExecutionContext& ctx,
     if(g < kMinChannels || problem.GetInChannels() != g || problem.GetOutChannels() != g)
         return false;
 
-    const auto filter_h = static_cast<int>(problem.GetWeightsHeight());
-    const auto filter_w = static_cast<int>(problem.GetWeightsWidth());
-    if(filter_h > kMaxFilterExtent || filter_w > kMaxFilterExtent)
-        return false;
+    const auto filter_h   = static_cast<int>(problem.GetWeightsHeight());
+    const auto filter_w   = static_cast<int>(problem.GetWeightsWidth());
+    const auto stride_w   = static_cast<int>(problem.GetKernelStrideW());
+    const auto dilation_h = static_cast<int>(problem.GetDilationH());
+    const auto dilation_w = static_cast<int>(problem.GetDilationW());
 
-    // Dilation and horizontal stride widen the per-lane register window without
-    // touching the filter extent, so bound the window itself.
-    if(WindowRegs(filter_h,
-                  filter_w,
-                  static_cast<int>(problem.GetKernelStrideW()),
-                  static_cast<int>(problem.GetDilationH()),
-                  static_cast<int>(problem.GetDilationW())) > kMaxWindowRegs)
-        return false;
+    const bool undilated_up_to_9 =
+        dilation_h == 1 && dilation_w == 1 && filter_h <= kMaxFilterExtentUndilated &&
+        filter_w <= kMaxFilterExtentUndilated && stride_w <= kMaxStrideWUndilated;
+    if(!undilated_up_to_9)
+    {
+        const bool wide_1xk =
+            filter_h == 1 && (filter_w - 1) * dilation_w + 1 <= kMaxDilatedWidth1xK;
+        if(!wide_1xk && (filter_h > kMaxFilterExtent || filter_w > kMaxFilterExtent))
+            return false;
+
+        // Dilation and horizontal stride widen the per-lane register window without
+        // touching the filter extent, so bound the window itself.
+        if(WindowRegs(filter_h, filter_w, stride_w, dilation_h, dilation_w) > kMaxWindowRegs)
+            return false;
+    }
 
     // No constraint tying stride to dilation: when the vertical stride is not a
     // whole number of dilation steps no row survives the slide, and the kernel
