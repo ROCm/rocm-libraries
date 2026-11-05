@@ -34,7 +34,9 @@ namespace stinkytofu {
 // `start` is the opening barrier's planned window. noteOpen() moves it to where that barrier
 // actually issued, when that is later and the stage has not issued a load yet, and recounts the
 // batches over the remaining span. The end stays, so the last load is still due at the barrier it
-// feeds. A stage whose loads name different opening barriers keeps its plan.
+// feeds. A stage whose loads name different opening barriers keeps its plan. noteHeldUntil() does
+// the same for every such stage when all ds_loads were held (the WMMA queue fill), and due() says
+// a stage has reached its end with loads left.
 class DsSpreadPacer {
    public:
     struct Load {
@@ -166,20 +168,29 @@ class DsSpreadPacer {
         return std::max(0, evenLine(st, idx) - st.issued);
     }
 
+    // Whether the ds_load's stage has reached its end with loads left: the last ones are due now.
+    bool due(unsigned nodeId, int wmmaIssued) const {
+        auto it = stageOf_.find(nodeId);
+        if (!active_ || it == stageOf_.end() || wmmaIssued >= wmmaTotal_) return false;
+        const Stage& st = stages_[it->second];
+        return st.issued < st.total && wmmaIssued >= st.end;
+    }
+
     // The barrier `openerId` issued with `wmmaIssued` WMMAs of the region issued so far. A stage
     // it opens, and that has not issued a load yet, takes this as its start and recounts its
     // batches up to the same end. On time, or after a load has already been paced, this is a no-op.
     void noteOpen(unsigned openerId, int wmmaIssued) {
         if (!active_) return;
-        for (Stage& st : stages_) {
-            if (st.opener != openerId || st.issued != 0 || wmmaIssued <= st.start) continue;
-            st.start = wmmaIssued;
-            if (st.end < st.start) st.end = st.start;
-            st.batches = std::max(1, (st.end - st.start + batch_ - 1) / batch_);
-            st.batchIdx = -1;
-            st.inBatch = 0;
-            st.allow = 0;
-        }
+        for (Stage& st : stages_)
+            if (st.opener == openerId) restartLate(st, wmmaIssued);
+    }
+
+    // Every ds_load was held until `wmmaIssued` WMMAs of the region had issued (the queue fill
+    // after a reset). An open stage that has not issued a load yet starts there, as for a late
+    // opener (noteOpen).
+    void noteHeldUntil(int wmmaIssued) {
+        if (!active_) return;
+        for (Stage& st : stages_) restartLate(st, wmmaIssued);
     }
 
     // A ds_load issued with `wmmaIssued` WMMAs of the region issued so far.
@@ -238,6 +249,18 @@ class DsSpreadPacer {
     // counts `batches` the same way).
     int batchOf(const Stage& st, int wmmaIssued) const {
         return std::max(0, wmmaIssued - st.start) / batch_;
+    }
+
+    // A stage that has not issued a load yet and could only start at `wmmaIssued`, past its planned
+    // start, starts there and recounts its batches up to the same end.
+    void restartLate(Stage& st, int wmmaIssued) {
+        if (st.issued != 0 || wmmaIssued <= st.start) return;
+        st.start = wmmaIssued;
+        if (st.end < st.start) st.end = st.start;
+        st.batches = std::max(1, (st.end - st.start + batch_ - 1) / batch_);
+        st.batchIdx = -1;
+        st.inBatch = 0;
+        st.allow = 0;
     }
 
     int maxPerBatch_ = 0;

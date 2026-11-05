@@ -188,6 +188,7 @@ bool buildGfx1250Pipeline(ModulePassManager& mpm, StinkyAsmModule& module, const
                 passFeatureConfig.dagFeatures.wmmaBatchSize =
                     std::max(1, moduleOptions.WmmaBatchSize);
                 passFeatureConfig.dagFeatures.wmmaRefillToCycles = moduleOptions.WmmaRefillToCycles;
+                passFeatureConfig.dagFeatures.wmmaFillAfterReset = moduleOptions.WmmaFillAfterReset;
                 passFeatureConfig.dagFeatures.globalReadQueueDepth =
                     moduleOptions.GlobalReadQueueDepth;
                 passFeatureConfig.dagFeatures.globalReadDrainLatency =

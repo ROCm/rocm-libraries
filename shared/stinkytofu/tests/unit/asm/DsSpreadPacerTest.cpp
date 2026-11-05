@@ -467,6 +467,60 @@ TEST(DsSpreadPacer, AnOpenerPastThePlannedEndReleasesTheStage) {
     EXPECT_EQ(issueBatch(p, 24, pending), 8);
 }
 
+// 16 loads over [8, 40): the fill after a queue reset held every load until WMMA 16. The stage
+// counts its batches from there, as for a late opener: 6 batches, 3 then 3, and not behind.
+TEST(DsSpreadPacer, AStageHeldByTheQueueFillStartsWhereTheFillEnded) {
+    Loads v;
+    add(v, 16, 0, 8, 40);
+    DsSpreadPacer p;
+    p.plan(v, 64, 4, 2);
+    p.noteHeldUntil(16);
+    auto pending = ids(v);
+    EXPECT_EQ(p.behind(pending.front(), 16), 0);
+    EXPECT_EQ(issueBatch(p, 16, pending), 3);
+    EXPECT_EQ(issueBatch(p, 20, pending), 3);
+}
+
+TEST(DsSpreadPacer, TheQueueFillLeavesAStageThatIssuedOrHasNotOpened) {
+    // [8, 40) issued a load on the plan and keeps its batches (behind at 16: its share of 2, no
+    // catch-up). [24, 40) opens after the fill ended and keeps its 4 batches of 2; moved to 16 it
+    // would have 6 and take 1 at 24.
+    Loads v;
+    add(v, 16, 0, 8, 40);
+    add(v, 8, 100, 24, 40);
+    DsSpreadPacer p;
+    p.plan(v, 64, 4, 0);
+    std::deque<unsigned> early{0}, rest, late;
+    for (unsigned id = 1; id < 16; ++id) rest.push_back(id);
+    for (unsigned id = 100; id < 108; ++id) late.push_back(id);
+    EXPECT_EQ(issueBatch(p, 8, early), 1);
+    p.noteHeldUntil(16);
+    EXPECT_EQ(issueBatch(p, 16, rest), 2);
+    EXPECT_EQ(issueBatch(p, 24, late), 2);
+}
+
+TEST(DsSpreadPacer, AStageIsDueAtItsEndWithLoadsLeft) {
+    Loads v;
+    add(v, 2, 0, 8, 20);
+    DsSpreadPacer p;
+    p.plan(v, 64, 4, 0);
+    EXPECT_FALSE(p.due(0, 19));
+    EXPECT_TRUE(p.due(0, 20));
+    auto pending = ids(v);
+    EXPECT_EQ(issueBatch(p, 20, pending), 2);
+    EXPECT_FALSE(p.due(0, 20)) << "every load of the stage has issued";
+}
+
+TEST(DsSpreadPacer, TheRegionEndIsNeverDue) {
+    // A stage closed by the region end has no barrier to make: nothing is held there.
+    Loads v;
+    add(v, 2, 0);
+    DsSpreadPacer p;
+    p.plan(v, 32, 4, 0);
+    EXPECT_FALSE(p.due(0, 31));
+    EXPECT_FALSE(p.due(0, 32));
+}
+
 TEST(DsSpreadPacer, TheRateLimitedWarningNamesTheStageTheRateAndTheShortfall) {
     DsSpreadPacer::RateLimited r{0, 43, 60, 45};
     EXPECT_EQ(DsSpreadPacer::rateLimitedMessage(r, 6),

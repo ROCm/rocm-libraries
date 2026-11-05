@@ -2672,6 +2672,56 @@ TEST_F(DAGSchedulerPassTest, WmmaRefill_ReadyDsLoadWithoutAWaitIssuesBeforeTheQu
     EXPECT_EQ(shape, "WdddddddWdWWWWWW");
 }
 
+// The loop header's first WMMA region starts with an empty queue: the WMMAs go ahead of the
+// ready ds_loads until wmmaQueueDepth are outstanding. Off, the first ds_load follows the first
+// WMMA, as in a region that is not a queue reset (the test above).
+TEST_F(DAGSchedulerPassTest, WmmaFillAfterReset_LoopHeaderFillsTheQueueFirst) {
+    std::string shapes[2];
+    for (int v = 0; v < 2; ++v) {
+        SetUp();
+        bb->addSuccessor(bb);
+        for (int i = 0; i < 8; i++) createMovableDsLoad(200 + i * 4, 80, i + 1);
+        for (int i = 0; i < 8; i++) createWmmaF32_16x16x16_bf16(8 * i, 100 + 8 * i);
+        PassContext ctx;
+        ctx.setGemmTileConfig(config);
+        PassFeatureConfig pfc;
+        pfc.loopConfig.unrollGemm = true;
+        pfc.dagFeatures.dsReadQueueDepth = 16;
+        pfc.dagFeatures.wmmaQueueDepth = 4;
+        pfc.dagFeatures.wmmaQueueCoverCycles = 16;
+        pfc.dagFeatures.wmmaFillAfterReset = v == 1;
+        ctx.setPassFeatureConfig(pfc);
+        pass->run(*func, ctx, am);
+        shapes[v] = wdShape(mnemonicSequence(*bb));
+    }
+    EXPECT_EQ(shapes[0].substr(0, 2), "Wd") << shapes[0];
+    EXPECT_EQ(shapes[1].substr(0, 5), "WWWWd") << shapes[1];
+}
+
+// A ready tensor_load is placed at the Prefetch level, above the queue fill: it is not held
+// behind the fill's WMMAs.
+TEST_F(DAGSchedulerPassTest, WmmaFillAfterReset_TensorLoadIsNotHeld) {
+    bb->addSuccessor(bb);
+    createMovableTensorLoad(bb, /*s0=*/0, /*s1=*/4, /*ldsToken=*/9);
+    for (int i = 0; i < 8; i++) createMovableDsLoad(200 + i * 4, 80, i + 1);
+    for (int i = 0; i < 8; i++) createWmmaF32_16x16x16_bf16(8 * i, 100 + 8 * i);
+    PassContext ctx;
+    ctx.setGemmTileConfig(config);
+    PassFeatureConfig pfc;
+    pfc.loopConfig.unrollGemm = true;
+    pfc.dagFeatures.distributeGlobalRead = true;
+    pfc.dagFeatures.dsReadQueueDepth = 16;
+    pfc.dagFeatures.wmmaQueueDepth = 4;
+    pfc.dagFeatures.wmmaQueueCoverCycles = 16;
+    ctx.setPassFeatureConfig(pfc);
+    pass->run(*func, ctx, am);
+    const std::vector<std::string> seq = mnemonicSequence(*bb);
+    const std::string shape = wdShape(seq);
+    const auto tensor = std::find(seq.begin(), seq.end(), "tensor_load_to_lds") - seq.begin();
+    EXPECT_LT(static_cast<size_t>(tensor), shape.find('d')) << shape;
+    EXPECT_EQ(std::count(shape.begin(), shape.begin() + shape.find('d'), 'W'), 4) << shape;
+}
+
 // Refill modes: a refill only hides a stall, so it runs while the next ds_load would wait (here
 // for a credit: a ds queue of 2). Fixed issues wmmaBatchSize WMMAs per refill, Dynamic up to the
 // refill target in cycles; a refill that finds the queue still low starts again.

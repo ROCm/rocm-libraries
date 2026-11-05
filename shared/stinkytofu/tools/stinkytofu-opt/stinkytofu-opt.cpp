@@ -203,6 +203,7 @@ std::vector<RequestedPass> parsePassNames(int argc, char** argv, int startIdx) {
                 arg.starts_with("--wmma-queue-cover-cycles=") ||
                 arg.starts_with("--wmma-refill-mode=") || arg.starts_with("--wmma-batch-size=") ||
                 arg == "--ds-spread" || arg == "--no-ds-spread" ||
+                arg == "--wmma-fill-after-reset" || arg == "--no-wmma-fill-after-reset" ||
                 arg.starts_with("--barrier-half-slack=") ||
                 arg.starts_with("--wmma-barrier-cover-cycles=") ||
                 arg.starts_with("--ds-catch-up-pace=") || arg.starts_with("--ds-batch-wmmas=") ||
@@ -616,6 +617,10 @@ int main(int argc, char** argv) {
             passFeatureConfig.dagFeatures.dsSpread = true;
         } else if (a == "--no-ds-spread") {
             passFeatureConfig.dagFeatures.dsSpread = false;
+        } else if (a == "--wmma-fill-after-reset") {
+            passFeatureConfig.dagFeatures.wmmaFillAfterReset = true;
+        } else if (a == "--no-wmma-fill-after-reset") {
+            passFeatureConfig.dagFeatures.wmmaFillAfterReset = false;
         } else if (a.starts_with("--ds-batch-wmmas=")) {
             passFeatureConfig.dagFeatures.dsBatchWmmas =
                 std::stoi(a.substr(std::string("--ds-batch-wmmas=").size()));
