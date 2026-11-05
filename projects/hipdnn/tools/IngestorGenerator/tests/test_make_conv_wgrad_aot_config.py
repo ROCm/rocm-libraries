@@ -108,6 +108,36 @@ def test_every_two_stage_instance_has_its_stage2_in_the_catalog(specs):
             assert (fields["dtype"], fields["ws_replicas"]) in shipped
 
 
+def test_the_ued_knobs_tell_apart_every_pair_that_can_serve_one_problem(specs):
+    """hipdnn_bench enrolls each candidate by its UED knob tuple and refuses a graph
+    whose candidates share one. Implicit GEMM is shape-generic, so any two instances of
+    a dtype may serve one problem; two direct ones only when their compiled capability
+    agrees."""
+    capabilities = (
+        "filter_h",
+        "filter_w",
+        "stride_h",
+        "stride_w",
+        "pad_h",
+        "pad_w",
+        "dilation_h",
+        "dilation_w",
+        "cpg",
+        "kpg",
+    )
+    seen = {}
+    for spec in specs:
+        if spec.is_helper:
+            continue
+        key = (
+            spec.dtype,
+            tuple(getattr(spec, c) for c in capabilities) if spec.is_direct else (),
+            tuple(getattr(spec, k) for k in tool.engine_knobs()),
+        )
+        assert key not in seen, (seen.get(key), spec.instance_id)
+        seen[key] = spec.instance_id
+
+
 def test_every_direct_instance_has_its_cast_in_the_catalog(specs):
     """The cast a direct instance launches on a 16-bit dW (the one-slab Stage 2) is
     shipped beside it, keyed as the native pack looks it up (dtype and ws_replicas)."""

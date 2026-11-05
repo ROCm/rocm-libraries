@@ -284,6 +284,10 @@ def engine_knobs() -> tuple:
         "lds_layout",
         "group_merge",
         "ws_replicas",
+        # 1 or 2: whether an implicit-GEMM binary carries the atomic-accumulate
+        # epilogue at all (its launch degree is resolved per problem). Twins that
+        # differ only here serve the same problems.
+        "split_k",
         "prefetch_addr",
     )
     return fixed + tuple(_direct_knob_fields())

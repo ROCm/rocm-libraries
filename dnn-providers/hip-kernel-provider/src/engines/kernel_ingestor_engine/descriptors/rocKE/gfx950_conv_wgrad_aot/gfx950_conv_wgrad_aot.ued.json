@@ -36,6 +36,7 @@
     "lds_layout",
     "group_merge",
     "ws_replicas",
+    "split_k",
     "prefetch_addr",
     "ho_per_block",
     "mfma_k",
