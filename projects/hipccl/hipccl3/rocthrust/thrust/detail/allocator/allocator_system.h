@@ -1,4 +1,5 @@
 // SPDX-FileCopyrightText: Copyright (c) 2008-2018, NVIDIA Corporation. All rights reserved.
+// SPDX-FileCopyrightText: Modifications Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 // allocator_traits::rebind_alloc and allocator::rebind_traits are from libc++,
