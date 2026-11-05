@@ -512,7 +512,8 @@ jobs:
             | sed -E 's/ \([0-9]+ ms( total)?\)//g' \
             | awk -F, -v OFS=, "$HW_SCRUB" | tee "$OUT/hipblaslt_streamk.log" || rc=$?
           python3 "$GITHUB_WORKSPACE/.github/scripts/gfx1250_streamk_coverage.py" \
-            gtest "$OUT/hipblaslt_streamk.log" "$OUT/hipblaslt_streamk.json" || rc=1
+            gtest "$OUT/hipblaslt_streamk.log" "$OUT/hipblaslt_streamk.json" \
+            --availability "$GITHUB_WORKSPACE/.github/scripts/gfx1250_streamk_availability.json" || rc=1
           exit "$rc"
 
       - name: Run TensileLite common tests (fresh client)
@@ -546,7 +547,7 @@ jobs:
           # Per-test timeout: decouple_pgr_tdm_fuse_gfx1250.yaml's sweep (#12825) runs past 600 s.
           rc=0
           tox -v -e py3 -- tensilelite/Tests -m common "${K_ARG[@]}" \
-            --timeout=1200 -n 4 -rfxX 2>&1 \
+            --timeout=1200 -n 4 -rfxXs 2>&1 \
             | sed -E -e 's/ in [0-9]+(\.[0-9]+)?s\b//g' -e 's/ \([0-9]+:[0-9]{2}:[0-9]{2}\)//g' \
                 -e 's/ \([0-9][^()]* seconds\)//g' -e 's/ \([0-9]+(\.[0-9]+)? secs elapsed\)//g' \
                 -e 's/(End -|_Final) [0-9]+(\.[0-9]+)?s\b/\1/g' -e 's/ done \([0-9]+(\.[0-9]+)?s\)/ done/g' \
@@ -564,7 +565,8 @@ jobs:
           python3 .github/scripts/gfx1250_streamk_coverage.py tensilelite \
             projects/hipblaslt/tensilelite/python_tests.xml \
             tensilelite_test_results/common_test.json \
-            --mirrors projects/hipblaslt/tensilelite/tensilelite/Tests/common/streamk/gfx1250-strict
+            --mirrors projects/hipblaslt/tensilelite/tensilelite/Tests/common/streamk/gfx1250-strict \
+            --availability .github/scripts/gfx1250_streamk_availability.json
 
       - name: Upload test results
         id: upload
