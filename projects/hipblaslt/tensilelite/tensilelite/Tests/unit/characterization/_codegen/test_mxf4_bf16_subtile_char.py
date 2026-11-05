@@ -366,6 +366,113 @@ def test_paired_store_repack_is_scoped():
     )
 
 
+def test_coalesce_size_gate_is_emitted_on_the_plain_path():
+    """The DPP store-coalesce is size-gated at runtime.
+
+    The coalesce is always compiled into an eligible MXF4->bf16 subtile kernel; the
+    plain post-loop store then chooses coalesce-vs-plain at runtime on problem size.
+    So the in-scope kernel must carry all three parts of that gate -- the size
+    predicate (computed once per batch in ``_emitSubtileGuards``), at least one gate
+    branch at a plain-path coalesce site, and the coalesced stores themselves -- while
+    the fp32 control, which is outside the subtile-coalesce path, carries none of them.
+
+    This pins the fix for the earlier dispatch that called notLocalSplitUGlobalWrite
+    twice: that corrupted the register pool and dropped epilogue kernels; the gate now
+    lives inside a single store build.
+    """
+    in_scope = "\n".join(src for _b, src, _e in _emit(_IN_SCOPE))
+    control = "\n".join(src for _b, src, _e in _emit(_CONTROL))
+
+    assert re.search(r"coalesce size gate: sizeOk", in_scope), (
+        "the size predicate is not computed for the coalesce-eligible kernel"
+    )
+    assert re.search(r"coalesce size gate: M,N below threshold", in_scope), (
+        "no runtime size-gate branch at the plain-path coalesce site"
+    )
+    assert re.search(r"quad_perm:\[0,0,2,2\]", in_scope), (
+        "the coalesced store is not emitted"
+    )
+
+    assert "coalesce size gate" not in control, (
+        "fp32 control is outside the coalesce path but carries the size gate"
+    )
+    assert not re.search(r"quad_perm:\[0,0,2,2\]", control), (
+        "fp32 control is outside the coalesce path but carries a coalesced store"
+    )
+
+
+def test_coalesce_size_gate_shares_one_predicate_across_sites():
+    """The gate is one shared compare feeding cheap per-site branches, not a per-store
+    comparison.
+
+    The whole point of computing the predicate in ``_emitSubtileGuards`` is that the M,N
+    threshold is evaluated a handful of times (once per batch) and then only *branched*
+    on at each coalesce site. If a refactor pushed the comparison back down to the store
+    site, the compute count would rise to meet the branch count -- which is exactly the
+    per-pair shape this design avoids. So assert strictly more branches than computes.
+    """
+    in_scope = "\n".join(src for _b, src, _e in _emit(_IN_SCOPE))
+    computes = len(re.findall(r"coalesce size gate: sizeOk = 1 iff", in_scope))
+    branches = len(re.findall(r"coalesce size gate: M,N below threshold", in_scope))
+    assert computes >= 1, "the size predicate is never computed"
+    assert branches > computes, (
+        f"expected one shared predicate feeding many per-site branches, got "
+        f"{computes} computes / {branches} branches"
+    )
+
+
+def test_coalesce_is_admitted_only_at_the_proven_wavetile():
+    """The coalesce is compiled in only for the MIWaveTile[0]==8 geometry it is validated for.
+
+    The emitted corpus carries MT256x256 (MIWT8, eligible) and MT128x128 (MIWT4, not eligible).
+    The coalesced store must appear in the former and be wholly absent from the latter -- the
+    compile-time admission gate (``isSubtileCoalesce``) at work. Matches the coalesce-only store
+    comment rather than a bare ``quad_perm`` (the MX scale path emits unrelated lane swaps).
+    """
+    tiles = _by_macro_tile(_emit(_IN_SCOPE))
+    assert "all-lanes coalesced store" in tiles["MT256x256"], (
+        "MIWT8 MT256x256 is coalesce-eligible but has no coalesced store"
+    )
+    assert "all-lanes coalesced store" not in tiles["MT128x128"], (
+        "MIWT4 MT128x128 is not coalesce-eligible but carries a coalesced store"
+    )
+
+
+def test_coalesced_store_emits_the_full_dpp_blend_pattern():
+    """Structural (not numerical) lock on the coalesced store's byte pattern.
+
+    The coalesce replaces four half-filled paired stores with two all-lanes stores, each
+    assembled by a quad_perm DPP blend of batchA (even lanes) and batchB (odd lanes, selected by
+    a 0xaaaaaaaa v_cndmask mask). This pins that whole shape so a refactor of the blend math is
+    caught at codegen time. It does NOT prove the result is numerically correct -- that needs a
+    GPU ``hipblaslt-bench --verify`` (norm_error=0), the load-bearing gate for this cross-lane
+    DPP path.
+    """
+    in_scope = "\n".join(src for _b, src, _e in _emit(_IN_SCOPE))
+    assert re.search(r"quad_perm:\[0,0,2,2\]", in_scope), "even-column coalesced store missing"
+    assert re.search(r"quad_perm:\[1,1,3,3\]", in_scope), "odd-column coalesced store missing"
+    assert re.search(r"0x[aA]{8}", in_scope), "odd-lane (0xaaaaaaaa) blend mask missing"
+    assert "v_cndmask_b32" in in_scope, "the even/odd data blend (v_cndmask) is missing"
+    assert in_scope.count("all-lanes coalesced store") >= 2, (
+        "expected two all-lanes coalesced stores per coalesce site"
+    )
+
+
+def test_uncoalesced_fallback_arms_are_emitted():
+    """The guarded and size-gated paths fall back to un-coalesced paired stores.
+
+    On the plain path the coalesce is guarded: the boundary arm branches to an un-coalesced
+    paired-store fallback when not all M-blocks are valid OR the problem is below the size
+    threshold, and the interior peel has an analogous small-size arm. Both the coalesced store
+    and its un-coalesced fallbacks must therefore coexist in the eligible kernel.
+    """
+    in_scope = "\n".join(src for _b, src, _e in _emit(_IN_SCOPE))
+    assert "all-lanes coalesced store" in in_scope, "coalesced store missing"
+    assert "subtile_coalesce_fallback" in in_scope, "boundary un-coalesced fallback arm missing"
+    assert "subtile_interior_coalesce_small" in in_scope, "interior-peel small-size fallback arm missing"
+    assert "buffer_store_dwordx4" in in_scope, "the fallback emits no paired store"
+
+
 def test_preloop_wait_is_partial_and_drains_the_first_batch():
     """The pre-loop waits on half its loads, and on exactly the right half.
 
