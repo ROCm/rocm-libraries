@@ -543,7 +543,7 @@ def test_attribution_holds_across_devices(tmp_path, monkeypatch):
         return prob["M"] + 1.0 + [A, B, C].index(name)
 
     def run_batch(device_id, unit, args, worker_path, base_env, extra=None,
-                  failures=None):
+                  failures=None, workers=None):
         prob_idx, prob, batch = unit
         rows, n_fail = [], 0
         for _, cfg, _ in batch:
@@ -1031,7 +1031,7 @@ def test_confirmation_runs_each_problem_on_one_device(tmp_path, monkeypatch):
     ran = []
 
     def run_batch(device_id, unit, args, worker_path, base_env, extra=None,
-                  failures=None):
+                  failures=None, workers=None):
         prob_idx, prob, batch = unit
         ran.append((device_id, prob["M"]))
         return [{"kernel": cfg.name, "problem_idx": prob_idx, **prob,
