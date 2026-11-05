@@ -96,6 +96,16 @@ from ..Utilities.Decorators.Timing import timing
 from .ParseArguments import parseArguments
 
 
+def _parseLogicFileForLibrary(*args) -> LibraryIO.LibraryLogic:
+    """parseLibraryLogicFile() minus the fields TensileCreateLibrary discards.
+
+    Worker results are pickled back to this process, and the dropped solution
+    list and raw exact logic are about 40% of that volume.
+    """
+    logic = LibraryIO.LibraryLogic._make(LibraryIO.parseLibraryLogicFile(*args))
+    return logic._replace(solutions=None, exactLogic=None)
+
+
 def libraryRoot(outputPath: Union[str, Path]) -> Path:
     """The library/ root directory under outputPath.
 
@@ -217,7 +227,9 @@ def tensileLibraryFile(outputPath: Union[str, Path], arch: str, library_format: 
 
 class KernelCodeGenResult(NamedTuple):
     err: int
-    src: Union[str, bytes]
+    # src and header are None in the results writeSolutionsAndKernelsTCL's
+    # workers return: each worker writes its own source to disk.
+    src: Optional[Union[str, bytes]]
     header: Optional[str]
     name: str
     targetObjFilename: str
@@ -1063,14 +1075,14 @@ def writeSolutionsAndKernelsTCL(
     outOptions = rocisa.rocIsa.getInstance().getOutputOptions()
     outOptions.outputNoComment = disableAsmComments
 
-    memcompress = len(uniqueAsmKernels) > 10000
+    # No in-memory compression of the source: it is written to disk in the
+    # worker that generated it and never returned to the parent.
     unaryProcessKernelSource = functools.partial(
         processKernelSource,
         kernelWriterAssembly,
         rocisa.rocIsa.getInstance().getData(),
         outOptions,
         splitGSU,
-        compress = memcompress,
     )
 
     unaryWriteAssembly = functools.partial(writeAssembly, assemblyTmpPath)
@@ -1079,7 +1091,9 @@ def writeSolutionsAndKernelsTCL(
             processed_kernel = unaryProcessKernelSource(kernel)
             written_kernel = unaryWriteAssembly(processed_kernel)
             assembled_kernel = assemble(written_kernel)
-            return processed_kernel
+            # The source is on disk (and assembled) by now; don't ship it back
+            # to the parent, which only needs the post-codegen kernel info.
+            return processed_kernel._replace(src=None, header=None)
         return composed_function
 
     unaryProcessNative = functools.partial(
@@ -1088,7 +1102,6 @@ def writeSolutionsAndKernelsTCL(
         str(asmToolchain.assembler.path),
         disableAsmComments,
         splitGSU,
-        compress=memcompress,
     )
 
     # The basename has to stay "Kernels": the emitted code object is named from
@@ -1400,7 +1413,7 @@ def generateLogicDataAndSolutions(logicFiles, args, assembler: Assembler, isaInf
     # phase (5x) if left running. See deferCyclicGC.
     with deferCyclicGC():
         parsedLibraries = ParallelMap2(
-            LibraryIO.parseLibraryLogicFile, fIter, "Loading Logics...", return_as="generator"
+            _parseLogicFileForLibrary, fIter, "Loading Logics...", return_as="generator"
         )
         for library in parsedLibraries:
             _, architectureName, problemType, _, _, newLibrary, typeMismatches = library
@@ -1623,7 +1636,7 @@ def _buildGroupsSeparately(groups: List[List[str]], requestedJobs: int) -> None:
             procs.append((
                 group,
                 subprocess.Popen(
-                    [sys.executable, "-m", "Tensile.TensileCreateLibrary"]
+                    [sys.executable, "-m", "tensilelite.TensileCreateLibrary"]
                     + _argvForArchitectures(argv, group, groupJobs),
                     env=env,
                 ),
