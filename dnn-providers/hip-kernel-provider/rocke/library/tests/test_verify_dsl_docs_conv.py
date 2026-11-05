@@ -125,7 +125,14 @@ class TestVerifyDslDocsConv(unittest.TestCase):
 
     def test_implicit_gemm_conv_compiles(self) -> None:
         # The static build alone proves the IR + LLVM + comgr path; nothing is
-        # allocated or launched.
+        # allocated or launched. A host without comgr (the CPU lane allows one)
+        # skips here; with comgr loaded, a compile error fails the test.
+        from rocke.runtime import comgr
+
+        try:
+            comgr.supported_isas()
+        except comgr.ComgrError as exc:
+            self.skipTest(f"comgr unavailable: {exc}")
         art = compile_kernel(build_implicit_gemm_conv(_conv_spec()))
         self.assertGreater(art.hsaco_bytes, 0)
 

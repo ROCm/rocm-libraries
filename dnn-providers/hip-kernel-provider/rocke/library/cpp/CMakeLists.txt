@@ -15,8 +15,11 @@
 # rocke_core (and, with ROCKE_BUILD_PYBIND, rocke_engine) exist, so it inherits
 # the engine's -Werror set, sanitizers and clang-tidy opt-out. The dependency
 # is one way: these targets link rocke_core; the engine never links them.
-# The archive is never installed (library/ ships no product artifact); the
-# pybind module installs beside rocke_engine, as that module does.
+# The archive and its headers install into the engine's ckc package, so the
+# conv C API that used to ship in rocke_core still ships: the headers keep their
+# rocke/ include path, and the symbols come from ckc::rocke_library, which links
+# ckc::rocke_core. The pybind module installs beside rocke_engine, as that
+# module does.
 
 file(GLOB_RECURSE ROCKE_LIBRARY_CORE_SOURCES CONFIGURE_DEPENDS
      "${CMAKE_CURRENT_SOURCE_DIR}/instances/*.cpp")
@@ -26,14 +29,22 @@ endif()
 
 add_library(rocke_library_core STATIC ${ROCKE_LIBRARY_CORE_SOURCES})
 target_include_directories(rocke_library_core PUBLIC
-                           "${CMAKE_CURRENT_SOURCE_DIR}/include")
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
 target_link_libraries(rocke_library_core PUBLIC rocke_core)
 # Beside librocke_core.a, where run_diff.py looks for it by default. PIC because
 # the pybind module below links it into a shared object.
 set_target_properties(rocke_library_core PROPERTIES
   OUTPUT_NAME rocke_library
+  EXPORT_NAME rocke_library
   ARCHIVE_OUTPUT_DIRECTORY "$<TARGET_FILE_DIR:rocke_core>"
   POSITION_INDEPENDENT_CODE ON)
+# Same export set as rocke_core (platform/CMakeLists.txt writes ckcTargets).
+install(TARGETS rocke_library_core
+        EXPORT ckcTargets
+        ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR})
+install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/include/"
+        DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
 
 # A family header must not shadow an engine header of the same name: both
 # trees resolve through the rocke/ prefix.

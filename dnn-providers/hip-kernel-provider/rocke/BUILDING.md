@@ -141,3 +141,7 @@ not part of any wheel. See `platform/BUILD.md`. The same configure also builds
 the library families' C++ mirrors (`library/cpp/` → `librocke_library.a`, beside
 `librocke_core.a`) and, with `ROCKE_BUILD_PYBIND=ON`, their `rocke_library_engine`
 binding beside `rocke_engine`; `-DROCKE_BUILD_LIBRARY_CPP=OFF` skips them.
+`cmake --install` puts the library archive and headers into the same `ckc`
+package: a C/C++ consumer of a library family (e.g. the conv API in
+`rocke/instance_conv_*.h`) links `ckc::rocke_library`, which brings
+`ckc::rocke_core` with it.

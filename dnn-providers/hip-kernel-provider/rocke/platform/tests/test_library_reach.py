@@ -27,7 +27,15 @@ import ast
 from collections import Counter
 from pathlib import Path
 
+import pytest
+
 PLATFORM = Path(__file__).resolve().parents[1]
+# The counts are of the source tree. An installed test tree has no python/,
+# cpp/ or dsl_docs/, and stages the library under tests/library, so the audit
+# would read the library's own imports as platform ones.
+_IS_SOURCE_CHECKOUT = (PLATFORM / "python" / "rocke").is_dir() and (
+    PLATFORM / "cpp"
+).is_dir()
 ROOTS = ("python", "tests", "tools", "dsl_docs", "cpp")
 LIBRARY_PACKAGES = frozenset({"kernels", "builders", "dispatch", "benchmarks"})
 
@@ -82,6 +90,10 @@ def _current() -> Counter:
     return found
 
 
+@pytest.mark.skipif(
+    not _IS_SOURCE_CHECKOUT,
+    reason="audits the platform sources, which an installed test layout omits",
+)
 def test_platform_library_imports_only_shrink():
     found = _current()
     problems = []

@@ -494,19 +494,17 @@ output element.
 Source: `instances/common/pooling.py`.
 
 ```python
+PoolOp = Literal["max", "avg", "sum"]   # Pooling2DSpec.op takes the string
+
+
 @dataclass(frozen=True)
 class PoolingProblem:
-    N: int; Hi: int; Wi: int; C: int
+    N: int; H: int; W: int; C: int   # NHWC input
     Y: int; X: int        # pool window
     sH: int = 1; sW: int = 1
     pH: int = 0; pW: int = 0
     dH: int = 1; dW: int = 1
-
-
-class PoolOp(Enum):
-    MAX = "max"
-    SUM = "sum"
-    AVG = "avg"
+    # Ho / Wo / total_out are derived properties.
 ```
 
 Algorithm:
