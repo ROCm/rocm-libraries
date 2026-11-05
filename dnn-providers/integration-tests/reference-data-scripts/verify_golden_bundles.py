@@ -13,6 +13,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "migration-scripts"))
+from bundle_utils import ABSENT_TENSORS_KEY, absent_case_problems  # noqa: E402
+
 ALLOWED_TIERS = {"quick", "standard", "comprehensive", "full"}
 BUNDLE_SIZE_WARNING_BYTES = 1024 * 1024
 BUNDLE_SIZE_ERROR_BYTES = 2 * 1024 * 1024
@@ -1449,6 +1452,7 @@ def resolve_case_tensor_specs(
     sweep_path: Path,
     case_label: str,
     result: VerificationResult,
+    absent_uids: set[int] = frozenset(),
 ) -> dict[int, dict[str, object]]:
     if not isinstance(case_tensors, list):
         result.error(
@@ -1488,6 +1492,9 @@ def resolve_case_tensor_specs(
             )
             continue
 
+        if uid in absent_uids:
+            continue
+
         required_fields = tensor_placeholder_fields.get(uid, set())
         spec: dict[str, object] = dict(literal_tensor_specs.get(uid, {}))
         for field_name in TEMPLATE_TENSOR_FIELDS + OPTIONAL_TEMPLATE_TENSOR_FIELDS:
@@ -1509,7 +1516,7 @@ def resolve_case_tensor_specs(
 
         case_tensor_specs[uid] = spec
 
-    missing_uids = template_tensor_uids - set(case_tensor_specs)
+    missing_uids = template_tensor_uids - absent_uids - set(case_tensor_specs)
     if missing_uids:
         result.error(
             sweep_path,
@@ -1615,10 +1622,17 @@ def validate_sweep_case(
     stats_tensor_uids: set[int] | None = None,
     tensor_scoped_fields: set[tuple[int, str]] | None = None,
     length_uids: dict[int, int] | None = None,
+    absent_uids: set[int] = frozenset(),
 ) -> None:
     if not isinstance(case, dict):
         result.error(sweep_path, f"case {index} is not an object")
         return
+
+    # An absent tensor leaves the template before placeholder expansion, so
+    # its placeholders need no values.
+    tensor_scoped_fields = {
+        (uid, f) for uid, f in tensor_scoped_fields or () if uid not in absent_uids
+    }
 
     case_id = case.get("id")
     if not isinstance(case_id, str) or not case_id:
@@ -1656,7 +1670,7 @@ def validate_sweep_case(
         for tensor in values["tensors"]:
             if isinstance(tensor, dict) and is_integer(tensor.get("uid")):
                 raw_case_tensors.setdefault(tensor["uid"], tensor)
-    for uid, field_name in sorted(tensor_scoped_fields or ()):
+    for uid, field_name in sorted(tensor_scoped_fields):
         token = first_path_token(field_name)
         if token not in values and token not in raw_case_tensors.get(uid, {}):
             result.error(
@@ -1665,7 +1679,7 @@ def validate_sweep_case(
                 uid,
             )
     used_keys = {first_path_token(f) for f in scalar_fields} | {
-        first_path_token(f) for _, f in tensor_scoped_fields or ()
+        first_path_token(f) for _, f in tensor_scoped_fields
     }
     for key in values:
         if key in ("tensors", "attributes"):
@@ -1704,6 +1718,7 @@ def validate_sweep_case(
         sweep_path,
         case_label,
         result,
+        absent_uids,
     )
     validated_specs = validate_case_tensor_shapes(
         case_tensor_specs, sweep_path, case_label, result
@@ -1863,8 +1878,8 @@ def validate_sweep_bundle(
         tensor_scoped_fields.update((tensor["uid"], f) for f in fields)
 
     version = sweep.get("version")
-    if not is_integer(version) or version < 1:
-        result.error(sweep_path, "version is required and must be a positive integer")
+    if not is_integer(version) or version not in (1, 2):
+        result.error(sweep_path, "version is required and must be 1 or 2")
 
     cases = sweep.get("cases")
     if not isinstance(cases, list) or not cases:
@@ -1875,6 +1890,19 @@ def validate_sweep_bundle(
     seen_case_ids: set[str] = set()
 
     for index, case in enumerate(cases):
+        absent_uids: set[int] = set()
+        if isinstance(case, dict) and ABSENT_TENSORS_KEY in case:
+            case_id = case.get("id")
+            case_label = (
+                case_id if isinstance(case_id, str) and case_id else f"#{index}"
+            )
+            for problem in absent_case_problems(sweep, template, case):
+                result.error(
+                    sweep_path, f"case '{case_label}' absent_tensors: {problem}"
+                )
+            absent = case[ABSENT_TENSORS_KEY]
+            if isinstance(absent, list):
+                absent_uids = {uid for uid in absent if is_integer(uid)}
         validate_sweep_case(
             case,
             index,
@@ -1893,6 +1921,7 @@ def validate_sweep_bundle(
             stats_tensor_uids,
             tensor_scoped_fields,
             length_uids,
+            absent_uids,
         )
 
 
