@@ -647,6 +647,48 @@ class TestDenseSlidingWindowWiring(unittest.TestCase):
         self.assertIn("sliding_window", err_msg)
         self.assertNotIn("ragged", err_msg)
 
+    def test_partial_tile_refusal_names_the_refused_specs_tile(self):
+        """The refusal names the lengths and the tile of the spec it rejects, so
+        a helper that always names one registered pair fails here: the expected
+        text differs per spec in the tile and in which length is partial."""
+        cases = (
+            # The sliding-window default is the 128-row tile and both lengths miss it.
+            (
+                dict(seqlen_q=500, seqlen_k=500),
+                {},
+                "seqlen_q 500 is not a multiple of block_m 128; "
+                "seqlen_kv 500 is not a multiple of block_n 64",
+            ),
+            # Only the key length is partial.
+            (
+                dict(seqlen_q=640, seqlen_k=672),
+                {},
+                "seqlen_kv 672 is not a multiple of block_n 64",
+            ),
+            # 640 is whole at 128 rows, so the 256-row knob is what is refused.
+            (
+                dict(seqlen_q=640, seqlen_k=640),
+                {"block_m": 256},
+                "seqlen_q 640 is not a multiple of block_m 256",
+            ),
+            # 576 is whole at 64 columns, so the 128-column knob is what is refused.
+            (
+                dict(seqlen_q=640, seqlen_k=576),
+                {"block_n": 128},
+                "seqlen_kv 576 is not a multiple of block_n 128",
+            ),
+        )
+        for spec_id in (_GRID, _PERSIST):
+            for lengths, knobs, reason in cases:
+                with self.subTest(spec_id=spec_id, lengths=lengths, knobs=knobs):
+                    req = _gfx950_dense_req(sliding_window=128, **lengths)
+                    with self.assertRaises(ValueError) as cm:
+                        _spec(req, spec_id, **knobs)
+                    self.assertIn(
+                        f"sliding_window needs whole tiles: {reason} (the partial-tile",
+                        str(cm.exception),
+                    )
+
     def test_sliding_window_without_ragged_accepted(self):
         spec = _spec(
             _gfx950_dense_req(seqlen_q=2048, seqlen_k=2048, sliding_window=256)
