@@ -196,6 +196,55 @@ INSTANTIATE_TEST_SUITE_P(
     testing::Values(
         X_UID, DY_UID, DX_UID, SCALE_UID, DSCALE_UID, DBIAS_UID, MEAN_UID, INV_VARIANCE_UID));
 
+TEST_P(TestGpuBatchnormBwdPlanRequiredTensor, RaggedTensorIsNotApplicable)
+{
+    auto builder = createValidBatchnormBwdGraph({48, 16, 4, 1}, {2, 3, 4, 4});
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper denseGraph(
+        builder.GetBufferPointer(), builder.GetSize());
+    ASSERT_TRUE(FloatPlanBuilder().isApplicable(denseGraph.getNode(0), denseGraph.getTensorMap()));
+
+    auto graph = UnPackGraph(builder.GetBufferPointer());
+    for(auto& tensor : graph->tensors)
+    {
+        if(tensor->uid == GetParam())
+        {
+            tensor->ragged_offset_tensor_uid = X_UID;
+        }
+    }
+    builder.Clear();
+    builder.Finish(Graph::Pack(builder, graph.get()));
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper raggedGraph(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    EXPECT_FALSE(
+        FloatPlanBuilder().isApplicable(raggedGraph.getNode(0), raggedGraph.getTensorMap()));
+}
+
+TEST_P(TestGpuBatchnormBwdPlanRequiredTensor, RuntimePassByValueTensorIsNotApplicable)
+{
+    auto builder = createValidBatchnormBwdGraph({48, 16, 4, 1}, {2, 3, 4, 4});
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper deviceGraph(
+        builder.GetBufferPointer(), builder.GetSize());
+    ASSERT_TRUE(
+        FloatPlanBuilder().isApplicable(deviceGraph.getNode(0), deviceGraph.getTensorMap()));
+
+    auto graph = UnPackGraph(builder.GetBufferPointer());
+    for(auto& tensor : graph->tensors)
+    {
+        if(tensor->uid == GetParam())
+        {
+            tensor->is_runtime_pass_by_value = true;
+        }
+    }
+    builder.Clear();
+    builder.Finish(Graph::Pack(builder, graph.get()));
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper passByValueGraph(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    EXPECT_FALSE(FloatPlanBuilder().isApplicable(passByValueGraph.getNode(0),
+                                                 passByValueGraph.getTensorMap()));
+}
+
 TEST_P(TestGpuBatchnormBwdPlanRequiredTensor, MissingTensorThrowsOnBuild)
 {
     auto builder = createValidBatchnormBwdGraph({48, 16, 4, 1},
@@ -252,6 +301,42 @@ TEST(TestGpuBatchnormBwdPlanBuilder, OptionalStatisticsTypeMismatchIsNotApplicab
         builder.GetBufferPointer(), builder.GetSize());
     EXPECT_FALSE(FloatPlanBuilder().isApplicable(graph.getNode(0), graph.getTensorMap()));
 }
+
+class TestGpuBatchnormBwdPlanSavedStatistic : public testing::TestWithParam<int64_t>
+{
+};
+
+TEST_P(TestGpuBatchnormBwdPlanSavedStatistic, IncompleteSavedStatisticsAreNotApplicable)
+{
+    auto builder = createValidBatchnormBwdGraph({48, 16, 4, 1}, {2, 3, 4, 4});
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper completeGraph(
+        builder.GetBufferPointer(), builder.GetSize());
+    ASSERT_TRUE(
+        FloatPlanBuilder().isApplicable(completeGraph.getNode(0), completeGraph.getTensorMap()));
+
+    auto graph = UnPackGraph(builder.GetBufferPointer());
+    auto* attributes = graph->nodes[0]->attributes.AsBatchnormBackwardAttributes();
+    ASSERT_NE(attributes, nullptr);
+    if(GetParam() == MEAN_UID)
+    {
+        attributes->mean_tensor_uid = flatbuffers::nullopt;
+    }
+    else
+    {
+        attributes->inv_variance_tensor_uid = flatbuffers::nullopt;
+    }
+    builder.Clear();
+    builder.Finish(Graph::Pack(builder, graph.get()));
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper incompleteGraph(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    EXPECT_FALSE(FloatPlanBuilder().isApplicable(incompleteGraph.getNode(0),
+                                                 incompleteGraph.getTensorMap()));
+}
+
+INSTANTIATE_TEST_SUITE_P(BothStatistics,
+                         TestGpuBatchnormBwdPlanSavedStatistic,
+                         testing::Values(MEAN_UID, INV_VARIANCE_UID));
 
 TEST(TestGpuBatchnormBwdPlanBuilder, ComputeTypeMismatchIsNotApplicable)
 {
