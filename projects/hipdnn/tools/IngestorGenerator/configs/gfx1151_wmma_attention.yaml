@@ -38,6 +38,11 @@ engine:
   # arch and the bucket pair here, so it is not enrolled.
   knobs: [head_size, head_size_v]
   heuristic: native
+  heuristics:
+    predict_engine:
+      gfx1151: [7d0b7a91-f44b-4b9d-82bc-6dabdb1e2c3e]
+      gfx1100: [876ede73-3898-4499-9702-02aaad4637be]
+      gfx1201: [86d7b10e-260a-4a23-ad7f-5e4c726796c8]
 
 kmd_fields:
 - name: dtype
