@@ -195,33 +195,39 @@ struct StreamKReductionOps
                       "WaitStorePartialDone not implemented for this architecture.");
     }
 
+    /**
+     * @brief A partial tile in the workspace, returned by LoadPartial and read by AddBlockTile.
+     * @note The partials distribution and the C block distribution assign the same data to each
+     * thread, so a thread buffer read with one is valid under the other.
+     */
     template <typename OAccTile, typename PartialWindow>
     struct PartialTileLoader
     {
         PartialWindow window;
-        typename remove_cvref_t<OAccTile>::StaticTileDistribution c_block_tile_dist;
-
-        CK_TILE_DEVICE operator OAccTile() const
-        {
-            using DataType     = typename remove_cvref_t<OAccTile>::DataType;
-            auto partials_tile = load_tile(window);
-            return make_static_distributed_tensor<DataType>(c_block_tile_dist,
-                                                            partials_tile.get_thread_buffer());
-        }
     };
 
+    /**
+     * @brief Adds a partial tile from the workspace to an output block tile.
+     * @param in_out_block_tile The output block tile to which values are added.
+     * @param loader The partial tile, as returned by LoadPartial.
+     * @note The adds are fused into the loads, and a scheduling barrier every
+     * partial_adds_per_group elements keeps the compiler from issuing all loads first. Otherwise
+     * the loaded tile and the output tile are live at once, which spills on 16-wave tiles that
+     * already use most of the VGPRs (256x256 on gfx1250).
+     */
     template <typename OAccTile, typename PartialWindow>
     CK_TILE_DEVICE void AddBlockTile(OAccTile& in_out_block_tile,
                                      const PartialTileLoader<OAccTile, PartialWindow>& loader) const
     {
-        using DataType                = typename remove_cvref_t<OAccTile>::DataType;
-        auto accum_with_partials_dist = make_static_distributed_tensor<DataType>(
+        constexpr index_t partial_adds_per_group = 32;
+        using DataType                           = typename remove_cvref_t<OAccTile>::DataType;
+        auto accum_with_partials_dist            = make_static_distributed_tensor<DataType>(
             MakePartialsDistribution(), in_out_block_tile.get_thread_buffer());
         index_t elem_cnt = 0;
         loader.window.load(
             accum_with_partials_dist, make_tuple(loader.window), [&](auto& dst, const auto& src) {
                 dst += src;
-                if(++elem_cnt % 32 == 0)
+                if(++elem_cnt % partial_adds_per_group == 0)
                 {
                     __builtin_amdgcn_sched_barrier(0);
                 }
@@ -240,10 +246,13 @@ struct StreamKReductionOps
     CK_TILE_DEVICE void AddBlockTile(OAccTile& in_out_block_tile,
                                      const OAccTile& in_block_tile) const
     {
-        using BlockType                  = remove_cvref_t<decltype(in_out_block_tile)>;
-        constexpr index_t thread_buf_len = BlockType::get_thread_buffer_size();
-        static_for<0, thread_buf_len, 1>{}([&](auto i) {
-            in_out_block_tile.get_thread_buffer().at(i) += in_block_tile.get_thread_buffer().at(i);
+        using BlockType        = remove_cvref_t<decltype(in_out_block_tile)>;
+        constexpr auto o_spans = BlockType::get_distributed_spans();
+        sweep_tile_span(o_spans[number<0>{}], [&](auto idx0) {
+            sweep_tile_span(o_spans[number<1>{}], [&](auto idx1) {
+                constexpr auto idx     = make_tuple(idx0, idx1);
+                in_out_block_tile(idx) = in_out_block_tile[idx] + in_block_tile[idx];
+            });
         });
     }
 
@@ -251,15 +260,13 @@ struct StreamKReductionOps
      * @brief Loads a partial block tile from the workspace buffer.
      * @param kargs Kernel arguments, including the workspace pointer.
      * @param cta_idx The index of the thread block (CTA).
-     * @param c_block_tile_dist The tile distribution for the block.
-     * @return The loaded partial block tile.
-     * @note This function calculates the buffer pointer and uses the tile distribution for
-     * loading the partial block tile.
+     * @param c_block_tile_dist The tile distribution of the C block tile (only its type is used).
+     * @return A PartialTileLoader for the partial block tile; AddBlockTile performs the load.
      */
     template <typename DataType, typename OAccTileDist>
     CK_TILE_DEVICE auto LoadPartial(const KernelArgs_& kargs,
                                     index_t cta_idx,
-                                    const OAccTileDist& c_block_tile_dist) const
+                                    [[maybe_unused]] const OAccTileDist& c_block_tile_dist) const
     {
         const auto c_block_tile_buffer_size =
             TilePartitioner::MPerBlock * TilePartitioner::NPerBlock * sizeof(DataType);
@@ -289,8 +296,7 @@ struct StreamKReductionOps
             MakePartialsDistribution());
 
         using OAccTile = static_distributed_tensor<DataType, remove_cvref_t<OAccTileDist>>;
-        return PartialTileLoader<OAccTile, decltype(partial_tile_window)>{partial_tile_window,
-                                                                          c_block_tile_dist};
+        return PartialTileLoader<OAccTile, decltype(partial_tile_window)>{partial_tile_window};
     }
 
     /**

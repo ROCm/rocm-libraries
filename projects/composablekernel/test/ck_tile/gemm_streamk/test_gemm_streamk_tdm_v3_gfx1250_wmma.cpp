@@ -434,7 +434,7 @@ TEST(StreamKTdmV3EdgeCases, TailNumLoopPaths)
     run_streamk_tdm_v3_case<Config>(128, 128, 512, 0, 0, 0, 2u);
 }
 
-// Unaligned M, N, and K with PadM=true, PadN=true, PadK=true (as in PR #15005)
+// Unaligned M, N, and K with PadM=true, PadN=true, PadK=true
 // under 1-CTA, 2-CTA, and multi-CTA Stream-K splits across all four A/B layouts,
 // 4-wave and 16-wave configs, 16-bit and 8-bit inputs, and CShuffle/TDM epilogues.
 TEST(StreamKTdmV3EdgeCases, PaddedUnalignedMNKAllLayouts)

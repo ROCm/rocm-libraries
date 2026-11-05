@@ -506,6 +506,11 @@ struct StreamKKernel
                     index_t tile_local_cta_idx = amd_wave_read_first_lane(
                         kargs.tile_partitioner.get_tile_local_cta_index(tile_iter_start, cta_idx));
 
+                    // At each level, a workgroup whose tile-local index is a multiple of
+                    // 2 * stride adds the partial of its partner (cta_idx + stride), if the
+                    // partner works on this tile. As in Linear, the epilogue and the partial
+                    // store stay outside the loop, so the accumulator is not live across them
+                    // on the loop's back edge (that spilled 16-wave comp_tdm_v3 tiles).
                     for(index_t stride = amd_wave_read_first_lane(1);
                         tile_local_cta_idx % (stride << 1) == 0;
                         stride <<= 1)
