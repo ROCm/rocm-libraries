@@ -54,6 +54,7 @@ endif()
 # .h.in must be set (or unset) prior to the configure_file() calls.
 set(ROCSPARSE_WITH_TRSM_REFACTORING ${BUILD_WITH_TRSM_REFACTORING})
 set(ROCSPARSE_WITH_SPSORT ${BUILD_WITH_SPSORT})
+set(ROCSPARSE_WITH_SPTRSV_CSC ${BUILD_WITH_SPTRSV_CSC})
 
 configure_file("${CMAKE_CURRENT_SOURCE_DIR}/include/rocsparse-version.h.in"
                "${PROJECT_BINARY_DIR}/include/rocsparse/rocsparse-version.h"
