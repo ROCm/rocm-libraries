@@ -16,19 +16,28 @@
 
 namespace roc::hostnumerics {
 namespace {
-template <typename Function>
-void forEachLinearIndex(const Tensor& tensor, std::span<const size_t> linearIndices,
-                        const Permutation& indexOrder, Function&& function) {
-    const detail::IndexIteration iteration(tensor.shape(), indexOrder);
-    const size_t count = iteration.count();
-    for (size_t index : linearIndices)
-        if (index >= count)
-            throw std::runtime_error("Tensor copy index exceeds the logical element count.");
-    std::vector<size_t> indices(tensor.shape().rank(), 0);
-    for (const size_t linearIndex : linearIndices) {
-        iteration.coordinates(linearIndex, indices);
-        function(std::span<const size_t>(indices));
+// Indices is an IndexRange or a std::set of flat indices.
+template <typename Indices>
+void copySelectedElementsToEncodedStorage(const Tensor& source, std::span<std::byte> destination,
+                                          const Indices& indices, const Permutation& order) {
+    const size_t required = storageBytesForLayout(source.type(), source.layout());
+    if (destination.size() < required)
+        throw std::runtime_error("Tensor copy destination storage is too small.");
+    if (detail::byteRangesOverlap(source.rawEncodedBackingStorage(), destination)) {
+        const Tensor staged(source.type(), source.layout());
+        copySelectedElementsToEncodedStorage(source, staged.rawEncodedBackingStorage(), indices,
+                                             order);
+        copySelectedElementsToEncodedStorage(staged, destination, indices, order);
+        return;
     }
+
+    const uint16_t bits = scalarTypeInfo(source.type()).storageBits;
+    source.shape().forEachCoordinate(indices, order, [&](std::span<const size_t> coordinates) {
+        const uint64_t offset = detail::preparedBitOffset(
+            source.type(), detail::preparedElementOffset(source.layout(), coordinates));
+        detail::preparedCopyBitRange(source.rawEncodedBackingStorage(), offset, destination, offset,
+                                     bits);
+    });
 }
 }  // namespace
 
@@ -92,18 +101,12 @@ Tensor Tensor::allocateUninitialized(ScalarType type, Shape shape) {
 
 Tensor Tensor::copyEncodedBackingStorage(ScalarType type, Layout layout,
                                          std::span<const std::byte> storage) {
-    const size_t required = storageBytesForLayout(type, layout);
-    if (storage.size() < required)
-        throw std::runtime_error("Encoded Tensor storage is too small for its layout.");
     return Tensor(type, std::move(layout),
                   storageFromVector(std::vector<std::byte>(storage.begin(), storage.end())));
 }
 
 Tensor Tensor::takeOwnershipOfEncodedBackingStorage(ScalarType type, Layout layout,
                                                     std::vector<std::byte> storage) {
-    const size_t required = storageBytesForLayout(type, layout);
-    if (storage.size() < required)
-        throw std::runtime_error("Encoded Tensor storage is too small for its layout.");
     return Tensor(type, std::move(layout), storageFromVector(std::move(storage)));
 }
 
@@ -145,42 +148,13 @@ void Tensor::copyLogicalElementsToEncodedStorage(std::span<std::byte> destinatio
 void Tensor::copySelectedElementsToEncodedStorage(std::span<std::byte> destination,
                                                   const IndexRange& indices,
                                                   const Permutation& order) const {
-    const size_t required = storageBytesForLayout(m_type, m_layout);
-    if (destination.size() < required)
-        throw std::runtime_error("Tensor copy destination storage is too small.");
-    if (detail::byteRangesOverlap(rawEncodedBackingStorage(), destination)) {
-        Tensor staged(m_type, m_layout);
-        copySelectedElementsToEncodedStorage(staged.rawEncodedBackingStorage(), indices, order);
-        staged.copySelectedElementsToEncodedStorage(destination, indices, order);
-        return;
-    }
-
-    const uint16_t bits = scalarTypeInfo(m_type).storageBits;
-    shape().forEachCoordinate(indices, order, [&](size_t, std::span<const size_t> indices) {
-        const uint64_t offset =
-            detail::preparedBitOffset(m_type, detail::preparedElementOffset(layout(), indices));
-        detail::preparedCopyBitRange(rawEncodedBackingStorage(), offset, destination, offset, bits);
-    });
+    ::roc::hostnumerics::copySelectedElementsToEncodedStorage(*this, destination, indices, order);
 }
+
 void Tensor::copySelectedElementsToEncodedStorage(std::span<std::byte> destination,
                                                   const std::set<size_t>& indices,
                                                   const Permutation& order) const {
-    const size_t required = storageBytesForLayout(m_type, m_layout);
-    if (destination.size() < required)
-        throw std::runtime_error("Tensor copy destination storage is too small.");
-    if (detail::byteRangesOverlap(rawEncodedBackingStorage(), destination)) {
-        Tensor staged(m_type, m_layout);
-        copySelectedElementsToEncodedStorage(staged.rawEncodedBackingStorage(), indices, order);
-        staged.copySelectedElementsToEncodedStorage(destination, indices, order);
-        return;
-    }
-
-    const uint16_t bits = scalarTypeInfo(m_type).storageBits;
-    shape().forEachCoordinate(indices, order, [&](size_t, std::span<const size_t> indices) {
-        const uint64_t offset =
-            detail::preparedBitOffset(m_type, detail::preparedElementOffset(layout(), indices));
-        detail::preparedCopyBitRange(rawEncodedBackingStorage(), offset, destination, offset, bits);
-    });
+    ::roc::hostnumerics::copySelectedElementsToEncodedStorage(*this, destination, indices, order);
 }
 
 Tensor Tensor::copySelectedElements(std::span<const size_t> linearIndices,
@@ -189,7 +163,7 @@ Tensor Tensor::copySelectedElements(std::span<const size_t> linearIndices,
     const uint16_t bits = scalarTypeInfo(m_type).storageBits;
     // The result layout has already validated that all offsets fit ptrdiff_t.
     size_t destinationIndex = 0;
-    forEachLinearIndex(*this, linearIndices, indexOrder, [&](std::span<const size_t> indices) {
+    shape().forEachCoordinate(linearIndices, indexOrder, [&](std::span<const size_t> indices) {
         detail::preparedCopyBitRange(
             rawEncodedBackingStorage(),
             detail::preparedBitOffset(m_type, detail::preparedElementOffset(layout(), indices)),
