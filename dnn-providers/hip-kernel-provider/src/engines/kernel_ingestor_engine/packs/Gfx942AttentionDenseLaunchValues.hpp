@@ -65,8 +65,8 @@ using Gfx942AttentionDenseLaunchInputs = AttentionDenseLaunchInputs;
 /// them as 32-bit integers. The head counts and `head_size` must be in [1, INT32_MAX].
 /// `block_m` must be one gfx942 builds: a positive multiple of 32 within a 1024-thread CTA
 /// (block_n is not saved, so the full tile rule cannot be re-run). `scale` must convert to
-/// a float and back without change; any finite scale is served. `data_type` must be a type
-/// the kernel is built for, and `stride_layout` must be `bshd`. `causal` must be 0 or 1,
+/// a float and back without change, within [2^-64, 2^4]. `data_type` must be a type the
+/// kernel is built for, and `stride_layout` must be `bshd`. `causal` must be 0 or 1,
 /// and `sliding_window` non-negative, 0 unless `causal` is 1, and not so narrow that the
 /// last query rows see no key (seqlen_q - seqlen_kv >= sliding_window). As the graph and
 /// kernel match require, `num_query_heads` must be a multiple of `num_kv_heads`,

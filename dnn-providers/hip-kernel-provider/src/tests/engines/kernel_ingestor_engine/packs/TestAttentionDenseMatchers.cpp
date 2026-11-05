@@ -5,6 +5,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <string>
 #include <utility>
 #include <vector>
@@ -139,6 +140,46 @@ TEST_P(TestAttentionDenseMatch, DeclinesEveryOtherComputeDataType)
         const auto decline = loggedDecline(arch(), spec);
         EXPECT_EQ(decline.cause, "compute_data_type") << decline.detail;
         EXPECT_NE(decline.detail.find("accumulates in FLOAT"), std::string::npos) << decline.detail;
+    }
+}
+
+// =============================================================================
+// The softmax scale. Both arches serve [2^-64, 2^4], bounds included; each arch's
+// isSupportedAttentionScale says why. Every other scale declines under 'scale' with the
+// range in its reason.
+// =============================================================================
+
+TEST_P(TestAttentionDenseMatch, ServesOnlyTheSupportedScaleRange)
+{
+    for(const float scale : {0x1p-64F, 0x1p4F})
+    {
+        auto spec = baseGraph();
+        spec.attnScaleValue = scale;
+        EXPECT_TRUE(matchGraph(arch(), spec).has_value()) << "scale " << scale;
+    }
+
+    // The float just past each bound first, then zero, negatives, far-off scales, NaN and
+    // the infinities.
+    for(const float scale : {0x1.fffffep-65F,
+                             0x1.000002p4F,
+                             0.0F,
+                             -0.0F,
+                             -0.5F,
+                             1e-30F,
+                             0x1p-65F,
+                             0x1p5F,
+                             1e30F,
+                             std::numeric_limits<float>::quiet_NaN(),
+                             std::numeric_limits<float>::infinity(),
+                             -std::numeric_limits<float>::infinity()})
+    {
+        SCOPED_TRACE(scale);
+        auto spec = baseGraph();
+        spec.attnScaleValue = scale;
+        const auto decline = loggedDecline(arch(), spec);
+        EXPECT_EQ(decline.cause, "scale") << decline.detail;
+        EXPECT_NE(decline.detail.find("is outside the supported [2^-64, 2^4]"), std::string::npos)
+            << decline.detail;
     }
 }
 

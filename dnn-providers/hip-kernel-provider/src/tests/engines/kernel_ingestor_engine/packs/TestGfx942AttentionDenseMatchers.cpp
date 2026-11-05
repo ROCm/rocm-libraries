@@ -7,7 +7,6 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
-#include <limits>
 #include <map>
 #include <optional>
 #include <set>
@@ -652,25 +651,6 @@ TEST(TestGfx942AttentionDenseGraphMatch, DeclinesAnUnsupportedOperandOrLayout)
     gqa.numQueryHeads = 12;
     gqa.numKvHeads = 8;
     EXPECT_FALSE(matchGraph(gqa).has_value());
-}
-
-TEST(TestGfx942AttentionDenseGraphMatch, ServesAnyFiniteScaleAndDeclinesTheRest)
-{
-    // The body scales before the row max, so a negative or large scale is well defined.
-    for(const float scale : {-0.5F, 0.0F, 64.0F})
-    {
-        auto spec = baseGraph();
-        spec.attnScaleValue = scale;
-        EXPECT_TRUE(matchGraph(spec).has_value()) << scale;
-    }
-    for(const float scale : {std::numeric_limits<float>::quiet_NaN(),
-                             std::numeric_limits<float>::infinity(),
-                             -std::numeric_limits<float>::infinity()})
-    {
-        auto spec = baseGraph();
-        spec.attnScaleValue = scale;
-        EXPECT_FALSE(matchGraph(spec).has_value()) << scale;
-    }
 }
 
 // =============================================================================

@@ -239,6 +239,43 @@ void expectCommonReadRefusals(TReader read,
     expectReadRefusal(read, unversioned, "names no launch-value contract");
 }
 
+// The scales a dense reader restores: the [2^-64, 2^4] its graph match serves, bounds
+// included, and nothing else. A float scale outside it is refused with the match's reason;
+// NaN and the infinities are refused before that, as no float launch argument holds them.
+template <typename TReader>
+void expectDenseScaleRangeRestores(TReader read, const SavedLaunchInputs& valid)
+{
+    for(const float scale : {0x1p-64F, 0x1p4F})
+    {
+        SCOPED_TRACE(scale);
+        SavedLaunchInputs bound = valid;
+        bound.values["scale"] = static_cast<double>(scale);
+        EXPECT_EQ(read(bound).binding.scale, scale);
+    }
+
+    // The float just past each bound first, then zero, a negative and far-off scales.
+    for(const float scale :
+        {0x1.fffffep-65F, 0x1.000002p4F, 0.0F, -1.0F, 0x1p-65F, 0x1p5F, 0x1p-100F, 1e30F})
+    {
+        SCOPED_TRACE(scale);
+        SavedLaunchInputs outside = valid;
+        outside.values["scale"] = static_cast<double>(scale);
+        expectReadRefusal(read, outside, "launch value 'scale'");
+        expectReadRefusal(read, outside, "is outside the supported [2^-64, 2^4]");
+    }
+
+    for(const double scale : {std::numeric_limits<double>::quiet_NaN(),
+                              std::numeric_limits<double>::infinity(),
+                              -std::numeric_limits<double>::infinity()})
+    {
+        SCOPED_TRACE(scale);
+        SavedLaunchInputs notFinite = valid;
+        notFinite.values["scale"] = scale;
+        expectReadRefusal(read, notFinite, "launch value 'scale'");
+        expectReadRefusal(read, notFinite, "must be a finite double");
+    }
+}
+
 TEST(TestPackLaunchValues, PointwiseInputsRoundTripThroughTheirValues)
 {
     const auto expected = pointwiseInputs();
@@ -392,25 +429,8 @@ TEST(TestPackLaunchValues, Gfx950AttentionDenseRefusesAScaleOfAnotherType)
 
 TEST(TestPackLaunchValues, Gfx950AttentionDenseRefusesAScaleOutsideTheSupportedRange)
 {
-    const auto valid = savedGfx950AttentionDense();
-
-    for(const double scale : {0x1p-65, 0x1p5, 0.0, -1.0})
-    {
-        SCOPED_TRACE(scale);
-        SavedLaunchInputs outside = valid;
-        outside.values["scale"] = scale;
-        expectReadRefusal(&readGfx950AttentionDenseLaunchInputs, outside, "launch value 'scale'");
-        expectReadRefusal(
-            &readGfx950AttentionDenseLaunchInputs, outside, "outside the supported [2^-64, 2^4]");
-    }
-
-    for(const float scale : {0x1p-64F, 0x1p4F})
-    {
-        SCOPED_TRACE(scale);
-        SavedLaunchInputs bound = valid;
-        bound.values["scale"] = static_cast<double>(scale);
-        EXPECT_EQ(readGfx950AttentionDenseLaunchInputs(bound).binding.scale, scale);
-    }
+    expectDenseScaleRangeRestores(&readGfx950AttentionDenseLaunchInputs,
+                                  savedGfx950AttentionDense());
 }
 
 TEST(TestPackLaunchValues, Gfx950AttentionDenseRefusesAStringValueOfAnotherType)
@@ -440,10 +460,10 @@ TEST(TestPackLaunchValues, Gfx950AttentionDenseRefusesAStringValueOfAnotherType)
 // gfx942 dense attention
 //
 // One contract, v1, with gfx950's value set plus stats.uid. Its reader holds the restore to
-// what the gfx942 graph and kernel match bind: any finite scale, a block_m gfx942 builds,
-// causal 0 or 1, a causal window that leaves no query row without a key, grouped heads,
-// head_size 64 or 128, operands within 32-bit offsets, seqlen_q a multiple of block_m,
-// and a stats uid that is -1 (none) or non-negative.
+// what the gfx942 graph and kernel match bind: a scale in [2^-64, 2^4], a block_m gfx942
+// builds, causal 0 or 1, a causal window that leaves no query row without a key, grouped
+// heads, head_size 64 or 128, operands within 32-bit offsets, seqlen_q a multiple of
+// block_m, and a stats uid that is -1 (none) or non-negative.
 // ---------------------------------------------------------------------------
 
 // A shape the gfx942 match serves, with distinct values. seqlen_q 1536 is a multiple of
@@ -758,31 +778,11 @@ TEST(TestPackLaunchValues, Gfx942AttentionDenseRefusesMalformedValues)
         &readGfx942AttentionDenseLaunchInputs, otherLayout, "launch value 'stride_layout'");
 }
 
-// The gfx942 body scales the scores before the row max, so every finite scale the graph
-// match binds restores; NaN and the infinities never reach a float launch argument.
-TEST(TestPackLaunchValues, Gfx942AttentionDenseRestoresAnyFiniteScale)
+// gfx942 serves gfx950's scale range, so a saved scale outside it is refused alike.
+TEST(TestPackLaunchValues, Gfx942AttentionDenseRefusesAScaleOutsideTheSupportedRange)
 {
-    const auto valid = savedGfx942AttentionDense();
-
-    for(const float scale : {1e30F, 0x1p-100F, 0x1p5F, 0.0F, -1.0F})
-    {
-        SCOPED_TRACE(scale);
-        SavedLaunchInputs finite = valid;
-        finite.values["scale"] = static_cast<double>(scale);
-        EXPECT_EQ(readGfx942AttentionDenseLaunchInputs(finite).binding.scale, scale);
-    }
-
-    for(const double scale : {std::numeric_limits<double>::quiet_NaN(),
-                              std::numeric_limits<double>::infinity(),
-                              -std::numeric_limits<double>::infinity()})
-    {
-        SCOPED_TRACE(scale);
-        SavedLaunchInputs notFinite = valid;
-        notFinite.values["scale"] = scale;
-        expectReadRefusal(&readGfx942AttentionDenseLaunchInputs, notFinite, "launch value 'scale'");
-        expectReadRefusal(
-            &readGfx942AttentionDenseLaunchInputs, notFinite, "must be a finite double");
-    }
+    expectDenseScaleRangeRestores(&readGfx942AttentionDenseLaunchInputs,
+                                  savedGfx942AttentionDense());
 }
 
 // block_m is a positive multiple of 32 within a 1024-thread CTA. block_n is not saved, so
