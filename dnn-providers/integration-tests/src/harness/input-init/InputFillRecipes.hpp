@@ -13,6 +13,7 @@
 #include <stdexcept>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -191,6 +192,7 @@ public:
     InputFillRecipes& set(int64_t uid, FillRecipe f)
     {
         _fills[uid] = std::move(f);
+        _setUids.insert(uid);
         return *this;
     }
 
@@ -246,6 +248,12 @@ public:
         auto resolved = _fills;
         resolved.insert(_typeFills.begin(), _typeFills.end());
         return resolved;
+    }
+
+    // Whether set() wrote this uid's recipe, as opposed to a default or nothing.
+    bool isSet(int64_t uid) const
+    {
+        return _setUids.count(uid) != 0;
     }
 
     FillRecipe fill(int64_t uid) const
@@ -351,6 +359,7 @@ private:
     std::unordered_map<int64_t, FillRecipe> _fills;
     std::unordered_map<int64_t, FillRecipe> _typeFills;
     std::unordered_map<int64_t, unsigned int> _seeds;
+    std::unordered_set<int64_t> _setUids;
     unsigned int _globalSeed = K_DEFAULT_GLOBAL_SEED;
 
     static const char* kindToString(FillRecipe::Kind k)

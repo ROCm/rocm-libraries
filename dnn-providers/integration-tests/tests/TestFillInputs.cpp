@@ -23,7 +23,9 @@
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
+#include <nlohmann/json.hpp>
 
+#include "harness/bundle/IntegrationTestBundle.hpp"
 #include "harness/input-init/FillInputs.hpp"
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
@@ -1668,6 +1670,251 @@ TEST(TestFillInputs, ValuesFillLeavesOtherTensorsRandomContentsUnchanged)
                   0)
             << "uid " << uid;
     }
+}
+
+// ── Aliases ─────────────────────────────────────────────────────────────────
+
+namespace
+{
+
+// One SDPA backward node: q=1, k=2, v=3, o=4, do=5, stats=6 in; dq=7, dk=8, dv=9 out.
+nlohmann::json sdpaBackwardGraphJson()
+{
+    const auto tensor = [](int64_t uid, bool stats) {
+        return nlohmann::json{
+            {"name", ""},
+            {"uid", uid},
+            {"dims", stats ? std::vector<int64_t>{1, 1, 2, 1} : std::vector<int64_t>{1, 1, 2, 4}},
+            {"strides",
+             stats ? std::vector<int64_t>{2, 2, 1, 1} : std::vector<int64_t>{8, 8, 4, 1}},
+            {"data_type", "float"},
+            {"virtual", false}};
+    };
+    auto tensors = nlohmann::json::array();
+    for(int64_t uid = 1; uid <= 9; ++uid)
+    {
+        tensors.push_back(tensor(uid, uid == 6));
+    }
+    auto graph = nlohmann::json::parse(R"({
+        "name": "sdpa_backward", "compute_data_type": "float", "io_data_type": "float",
+        "intermediate_data_type": "float",
+        "nodes": [{
+            "name": "sdpa_backward", "type": "SdpaBackwardAttributes",
+            "compute_data_type": "float",
+            "inputs": {
+                "q_tensor_uid": 1, "k_tensor_uid": 2, "v_tensor_uid": 3, "o_tensor_uid": 4,
+                "do_tensor_uid": 5, "stats_tensor_uid": 6, "scale_tensor_uid": null,
+                "attn_mask_tensor_uid": null, "seq_len_q_tensor_uid": null,
+                "seq_len_kv_tensor_uid": null, "seed_tensor_uid": null,
+                "offset_tensor_uid": null, "dropout_mask_tensor_uid": null,
+                "dropout_scale_tensor_uid": null, "dropout_scale_inv_tensor_uid": null},
+            "outputs": {
+                "dq_tensor_uid": 7, "dk_tensor_uid": 8, "dv_tensor_uid": 9,
+                "dbias_tensor_uid": null},
+            "parameters": {
+                "alibi_mask": false, "padding_mask": false, "causal_mask": false,
+                "causal_mask_bottom_right": false, "dropout_probability": null,
+                "attn_scale_value": null, "left_bound": null, "right_bound": null,
+                "diagonal_alignment": "TOP_LEFT"}}]
+    })");
+    graph["tensors"] = std::move(tensors);
+    return graph;
+}
+
+bool sameHostBytes(hipdnn_data_sdk::utilities::ITensor& a, hipdnn_data_sdk::utilities::ITensor& b)
+{
+    return a.elementSpace() == b.elementSpace() && a.elementSize() == b.elementSize()
+           && std::memcmp(a.rawHostData(), b.rawHostData(), a.elementSpace() * a.elementSize())
+                  == 0;
+}
+
+// w (uid 2) of buildConvBiasGraph() as a view of x (uid 1).
+const std::vector<TensorAlias> kWViewOfX = {{2, 1, 0}};
+
+} // namespace
+
+TEST(TestFillInputs, AliasViewIsNotFilledAndNeedsNoTensor)
+{
+    const auto gr = buildConvBiasGraph();
+    const auto leafUids = gr.leafInputUids({5});
+    auto inputs = makeTensors({1, 4});
+    InputFillRecipes recipes;
+
+    const auto result = fillInputs(*gr.graph, inputs, leafUids, recipes, nullptr, kWViewOfX);
+    ASSERT_TRUE(result.filled) << result.reason;
+    EXPECT_EQ(inputs.count(2), 0u);
+    EXPECT_EQ(inputs.size(), 2u);
+}
+
+// The view keeps its place in the seed sequence, so the owner and every other input
+// hold what they hold without the alias.
+TEST(TestFillInputs, AliasLeavesEveryOtherTensorsContentsUnchanged)
+{
+    const auto gr = buildConvBiasGraph();
+    const auto leafUids = gr.leafInputUids({5});
+    ASSERT_EQ(leafUids.size(), 3u);
+
+    auto plainInputs = makeTensors(leafUids);
+    InputFillRecipes plainRecipes;
+    ASSERT_TRUE(fillInputs(*gr.graph, plainInputs, leafUids, plainRecipes, nullptr).filled);
+
+    auto aliasedInputs = makeTensors({1, 4});
+    InputFillRecipes aliasedRecipes;
+    const auto result
+        = fillInputs(*gr.graph, aliasedInputs, leafUids, aliasedRecipes, nullptr, kWViewOfX);
+    ASSERT_TRUE(result.filled) << result.reason;
+
+    for(const int64_t uid : {1, 4})
+    {
+        EXPECT_TRUE(sameHostBytes(*plainInputs.at(uid), *aliasedInputs.at(uid))) << "uid " << uid;
+    }
+}
+
+// Two views of one owner: the owner is filled once, as without the aliases, whatever the
+// order of the alias entries.
+TEST(TestFillInputs, AliasOwnerWithTwoViewsIsFilledOnce)
+{
+    const auto gr = buildConvBiasGraph();
+    const auto leafUids = gr.leafInputUids({5});
+
+    auto plainInputs = makeTensors(leafUids);
+    InputFillRecipes plainRecipes;
+    ASSERT_TRUE(fillInputs(*gr.graph, plainInputs, leafUids, plainRecipes, nullptr).filled);
+
+    for(const auto& aliases : {std::vector<TensorAlias>{{2, 1, 0}, {4, 1, 0}},
+                               std::vector<TensorAlias>{{4, 1, 0}, {2, 1, 0}}})
+    {
+        SCOPED_TRACE("first view " + std::to_string(aliases.front().uid));
+        auto inputs = makeTensors({1});
+        InputFillRecipes recipes;
+        const auto result = fillInputs(*gr.graph, inputs, leafUids, recipes, nullptr, aliases);
+        ASSERT_TRUE(result.filled) << result.reason;
+        EXPECT_EQ(inputs.size(), 1u);
+        EXPECT_TRUE(sameHostBytes(*plainInputs.at(1), *inputs.at(1)));
+    }
+}
+
+// A seed-only metadata entry for a view sets no recipe, so the fill stays valid, and the
+// view's seed changes no other tensor.
+TEST(TestFillInputs, AliasViewWithASeedOnlyEntryChangesNothing)
+{
+    const auto gr = buildConvBiasGraph();
+    const auto leafUids = gr.leafInputUids({5});
+
+    auto expectedInputs = makeTensors({1, 4});
+    InputFillRecipes expectedRecipes;
+    ASSERT_TRUE(fillInputs(*gr.graph, expectedInputs, leafUids, expectedRecipes, nullptr, kWViewOfX)
+                    .filled);
+
+    auto inputs = makeTensors({1, 4});
+    InputFillRecipes recipes;
+    recipes.loadFromJson({{2, nlohmann::json{{"seed", 7u}}}});
+    const auto result = fillInputs(*gr.graph, inputs, leafUids, recipes, nullptr, kWViewOfX);
+    ASSERT_TRUE(result.filled) << result.reason;
+    for(const int64_t uid : {1, 4})
+    {
+        EXPECT_TRUE(sameHostBytes(*expectedInputs.at(uid), *inputs.at(uid))) << "uid " << uid;
+    }
+}
+
+// Strides {4, 1} on dims {2, 3} leave element 3 of the allocation outside the tensor.
+TEST(TestFillInputs, AliasOwnerGapsHoldZeros)
+{
+    const auto gr = buildConvBiasGraph();
+    const auto leafUids = gr.leafInputUids({5});
+    const std::vector<int64_t> gapStrides = {4, 1};
+
+    InputTensorMap inputs = makeTensors({4});
+    inputs[1] = std::make_shared<hipdnn_data_sdk::utilities::Tensor<float>>(kDims, gapStrides);
+    auto& owner = *inputs.at(1);
+    ASSERT_EQ(owner.elementSpace(), 7u);
+    std::memset(owner.rawHostData(), 0xFF, owner.elementSpace() * owner.elementSize());
+
+    InputFillRecipes recipes;
+    const auto result = fillInputs(*gr.graph, inputs, leafUids, recipes, nullptr, kWViewOfX);
+    ASSERT_TRUE(result.filled) << result.reason;
+
+    const auto* data = static_cast<const float*>(owner.rawHostData());
+    EXPECT_EQ(data[3], 0.0f);
+    for(const std::size_t i : {0u, 1u, 2u, 4u, 5u, 6u})
+    {
+        EXPECT_GE(data[i], -1.0f) << "element " << i;
+        EXPECT_LE(data[i], 1.0f) << "element " << i;
+    }
+}
+
+// x is large enough for the device fill, and is an owner, so it is filled on the host;
+// w is not an owner and still goes to the device.
+TEST(TestFillInputs, AliasOwnerIsFilledOnTheHostWithADeviceFiller)
+{
+    SKIP_IF_NO_DEVICES();
+    if(!DeviceInputFiller::isSupported())
+    {
+        GTEST_SKIP() << "rocRAND not available. Skipping test.";
+    }
+
+    const auto graph = buildMixedSizeConvBiasGraph();
+    const std::vector<int64_t> leafUids = {1, 2, 4};
+    const std::vector<TensorAlias> biasViewOfX = {{4, 1, 0}};
+
+    auto hostInputs = makeTensorsFromGraph(graph, {1, 2});
+    InputFillRecipes hostRecipes;
+    ASSERT_TRUE(
+        fillInputs(*graph.graph, hostInputs, leafUids, hostRecipes, nullptr, biasViewOfX).filled);
+
+    auto deviceInputs = makeTensorsFromGraph(graph, {1, 2});
+    InputFillRecipes deviceRecipes;
+    DeviceInputFiller device;
+    const auto result
+        = fillInputs(*graph.graph, deviceInputs, leafUids, deviceRecipes, &device, biasViewOfX);
+    ASSERT_TRUE(result.filled) << result.reason;
+    EXPECT_EQ(result.deviceFilled, 1u);
+
+    const auto& x = typedTensor<float>(deviceInputs, 1);
+    EXPECT_NE(x.memory().location(), hipdnn_data_sdk::utilities::MemoryLocation::DEVICE);
+    EXPECT_TRUE(sameHostBytes(*hostInputs.at(1), *deviceInputs.at(1)));
+}
+
+TEST(TestFillInputs, AliasViewWithASetRecipeIsInvalid)
+{
+    const auto gr = buildConvBiasGraph();
+    const auto leafUids = gr.leafInputUids({5});
+    auto inputs = makeTensors({1, 4});
+    InputFillRecipes recipes;
+    recipes.set(2, FillRecipe::fixed(1.0f));
+
+    const auto result = fillInputs(*gr.graph, inputs, leafUids, recipes, nullptr, kWViewOfX);
+    EXPECT_FALSE(result.filled);
+    EXPECT_EQ(result.status, FillResult::Status::INVALID);
+    EXPECT_NE(result.reason.find("uid 2"), std::string::npos) << result.reason;
+}
+
+TEST(TestFillInputs, AliasOwnerWithoutATensorThrows)
+{
+    const auto gr = buildConvBiasGraph();
+    const auto leafUids = gr.leafInputUids({5});
+    auto inputs = makeTensors({1, 4});
+    InputFillRecipes recipes;
+    const std::vector<TensorAlias> ownerIsAnOutput = {{2, 5, 0}};
+
+    EXPECT_THROW(fillInputs(*gr.graph, inputs, leafUids, recipes, nullptr, ownerIsAnOutput),
+                 std::invalid_argument);
+}
+
+TEST(TestFillInputs, FillDerivesInputsOnlyForAGraphWhoseFillReplacesInputs)
+{
+    flatbuffers::DetachedBuffer buffer;
+    ASSERT_TRUE(bundle::detail::buildGraphBuffer(sdpaBackwardGraphJson(), buffer));
+    const auto& sdpaBackward = *GetGraph(buffer.data());
+    EXPECT_TRUE(fillDerivesInputs(sdpaBackward));
+
+    const auto convBias = buildConvBiasGraph();
+    EXPECT_FALSE(fillDerivesInputs(*convBias.graph));
+
+    InputTensorMap inputs;
+    InputFillRecipes recipes;
+    EXPECT_THROW(fillInputs(sdpaBackward, inputs, {1, 2, 3}, recipes, nullptr, {{3, 2, 0}}),
+                 std::invalid_argument);
 }
 
 // NOLINTEND(readability-identifier-naming)

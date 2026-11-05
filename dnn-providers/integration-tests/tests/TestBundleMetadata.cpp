@@ -22,6 +22,9 @@ using hipdnn_integration_tests::EnforcementLevel;
 using hipdnn_integration_tests::loadBundleMetadata;
 using hipdnn_integration_tests::metaJsonPath;
 using hipdnn_integration_tests::parseBundleMetadataJson;
+using hipdnn_integration_tests::parseTensorAliases;
+using hipdnn_integration_tests::TensorAlias;
+using hipdnn_integration_tests::toJson;
 using hipdnn_test_sdk::utilities::claimScratchDirectory;
 using hipdnn_test_sdk::utilities::isMetaJsonFile;
 
@@ -932,6 +935,119 @@ TEST(TestLoadBundleMetadata, UnknownFillKindInAFileThrows)
 TEST(TestLoadBundleMetadata, NonBooleanFlagFromAFileThrows)
 {
     const TempBundle bundle(R"({"format_version": 1, "no_gpu_reference": "yes"})");
+    EXPECT_THROW(loadBundleMetadata(bundle.bundleJsonPath()), BundleMetadataError);
+}
+
+// ---------------------------------------------------------------------------
+// aliases
+// ---------------------------------------------------------------------------
+
+TEST(TestParseBundleMetadataJson, AliasesParseInFormatVersion2)
+{
+    const auto meta = parseBundleMetadataJson(nlohmann::json::parse(
+        R"({"format_version": 2, "aliases": [{"uid": 3, "of": 2, "byte_offset": 0},
+                                              {"uid": 5, "of": 2, "byte_offset": 16}]})"));
+    ASSERT_EQ(meta.aliases.size(), 2u);
+    EXPECT_EQ(meta.aliases[0], (TensorAlias{3, 2, 0}));
+    EXPECT_EQ(meta.aliases[1], (TensorAlias{5, 2, 16}));
+}
+
+TEST(TestParseBundleMetadataJson, AliasesAbsentLeavesTheListEmpty)
+{
+    const auto meta = parseBundleMetadataJson(nlohmann::json::parse(R"({"format_version": 2})"));
+    EXPECT_TRUE(meta.aliases.empty());
+}
+
+TEST(TestParseBundleMetadataJson, AliasesRoundTripThroughJson)
+{
+    const std::vector<TensorAlias> aliases = {{3, 2, 0}, {5, 2, 16}};
+    EXPECT_EQ(parseTensorAliases(toJson(aliases)), aliases);
+}
+
+TEST(TestParseBundleMetadataJson, ThrowsOnAliasesInFormatVersion1)
+{
+    const auto error = metadataError(
+        R"({"format_version": 1, "aliases": [{"uid": 3, "of": 2, "byte_offset": 0}]})");
+    EXPECT_NE(error.find("case_0: aliases needs format_version 2"), std::string::npos) << error;
+}
+
+// The version check wins over any problem in the value.
+TEST(TestParseBundleMetadataJson, ThrowsOnMalformedAliasesInFormatVersion1)
+{
+    for(const auto* aliases : {"[]", "3", R"([{"uid": 3}])"})
+    {
+        SCOPED_TRACE(aliases);
+        const auto error
+            = metadataError(std::string(R"({"format_version": 1, "aliases": )") + aliases + "}");
+        EXPECT_NE(error.find("case_0: aliases needs format_version 2"), std::string::npos) << error;
+    }
+}
+
+TEST(TestParseBundleMetadataJson, ThrowsOnMalformedAliases)
+{
+    struct Case
+    {
+        const char* aliases;
+        const char* rule;
+    };
+    const std::vector<Case> cases = {
+        {R"({"uid": 3, "of": 2, "byte_offset": 0})", "aliases is not an array"},
+        {"[]", "aliases is empty"},
+        {"[3]", "aliases[0] is not an object"},
+        {R"([{"uid": 3, "of": 2}])", R"(aliases[0] (view 3, owner 2) lacks "byte_offset")"},
+        {R"([{"uid": 3, "byte_offset": 0}])", R"(aliases[0] (view 3) lacks "of")"},
+        {R"([{"of": 2, "byte_offset": 0}])", R"(aliases[0] (owner 2) lacks "uid")"},
+        {R"([{"uid": "3", "of": 2, "byte_offset": 0}])",
+         R"(aliases[0] (owner 2): "uid" is not a 64-bit signed integer)"},
+        {R"([{"uid": 3, "of": 2.5, "byte_offset": 0}])",
+         R"(aliases[0] (view 3): "of" is not a 64-bit signed integer)"},
+        {R"([{"uid": 3, "of": 2, "byte_offset": 9223372036854775808}])",
+         R"(aliases[0] (view 3, owner 2): "byte_offset" is not a 64-bit signed integer)"},
+        {R"([{"uid": 3, "of": 2, "byte_offset": 0, "stride": 1}])",
+         R"(aliases[0] (view 3, owner 2) has unknown key "stride")"},
+        {R"([{"uid": 3, "of": 2, "byte_offset": -4}])",
+         "alias view 3 of owner 2: byte_offset -4 is negative"},
+        {R"([{"uid": 3, "of": 3, "byte_offset": 0}])",
+         "alias view 3 of owner 3: the view and the owner are one tensor"},
+        {R"([{"uid": 3, "of": 2, "byte_offset": 0}, {"uid": 3, "of": 1, "byte_offset": 0}])",
+         "alias view 3 of owner 1: the view appears in more than one entry"},
+        {R"([{"uid": 3, "of": 2, "byte_offset": 0}, {"uid": 4, "of": 3, "byte_offset": 0}])",
+         "alias view 3 of owner 2: the view is also the owner of view 4"},
+    };
+    for(const auto& c : cases)
+    {
+        SCOPED_TRACE(c.aliases);
+        const auto error
+            = metadataError(std::string(R"({"format_version": 2, "aliases": )") + c.aliases + "}");
+        EXPECT_NE(error.find(std::string("case_0: ") + c.rule), std::string::npos) << error;
+    }
+}
+
+TEST(TestParseBundleMetadataJson, ThrowsOnAFillKindForAView)
+{
+    const auto error = metadataError(
+        R"({"format_version": 2, "aliases": [{"uid": 3, "of": 2, "byte_offset": 0}],
+            "inputs": {"3": {"kind": "fixed", "value": 1}}})");
+    EXPECT_NE(
+        error.find("case_0: alias view 3 of owner 2: the view's inputs entry sets a fill kind"),
+        std::string::npos)
+        << error;
+}
+
+TEST(TestParseBundleMetadataJson, SeedOnlyInputForAViewLoads)
+{
+    const auto meta = parseBundleMetadataJson(nlohmann::json::parse(
+        R"({"format_version": 2, "aliases": [{"uid": 3, "of": 2, "byte_offset": 0}],
+            "inputs": {"3": {"seed": 7}, "2": {"kind": "fixed", "value": 1}}})"));
+    ASSERT_EQ(meta.aliases.size(), 1u);
+    ASSERT_TRUE(meta.inputs.has_value());
+    EXPECT_EQ(meta.inputs->at(3).at("seed").get<int>(), 7);
+}
+
+TEST(TestLoadBundleMetadata, AliasesInAVersion1FileThrows)
+{
+    const TempBundle bundle(
+        R"({"format_version": 1, "aliases": [{"uid": 3, "of": 2, "byte_offset": 0}]})");
     EXPECT_THROW(loadBundleMetadata(bundle.bundleJsonPath()), BundleMetadataError);
 }
 

@@ -8,6 +8,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <limits>
 #include <optional>
 #include <random>
@@ -15,6 +16,7 @@
 #include <string>
 #include <type_traits>
 #include <unordered_map>
+#include <unordered_set>
 #include <variant>
 #include <vector>
 
@@ -420,6 +422,14 @@ void setSdpaBackwardInitDefaults(const hipdnn_flatbuffers_sdk::data_objects::Nod
     recipes.setDefault(a->stats_tensor_uid(), FillRecipe::free(0.0f, 1.0f));
 }
 
+// The SDPA backward attributes of a node whose O and stats inputs fillInputs() derives
+// from its Q, K and V after the fill; null for every other node.
+const hipdnn_flatbuffers_sdk::data_objects::SdpaBackwardAttributes*
+    derivesInputsAfterFill(const hipdnn_flatbuffers_sdk::data_objects::Node& node)
+{
+    return node.attributes_as_SdpaBackwardAttributes();
+}
+
 // ── Dispatch ─────────────────────────────────────────────────────────────────
 
 bool applyDefaultFills(const hipdnn_flatbuffers_sdk::data_objects::Node& node,
@@ -689,12 +699,57 @@ FillRecipe defaultFillFor(hipdnn_flatbuffers_sdk::data_objects::DataType dataTyp
     }
 }
 
+bool fillDerivesInputs(const hipdnn_flatbuffers_sdk::data_objects::Graph& graph)
+{
+    if(graph.nodes() == nullptr)
+    {
+        return false;
+    }
+    for(const auto* node : *graph.nodes())
+    {
+        if(derivesInputsAfterFill(*node) != nullptr)
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
 FillResult fillInputs(const hipdnn_flatbuffers_sdk::data_objects::Graph& graph,
                       InputTensorMap& inputs,
                       const std::vector<int64_t>& ownedUids,
                       InputFillRecipes& recipes,
-                      DeviceInputFiller* device)
+                      DeviceInputFiller* device,
+                      const std::vector<TensorAlias>& aliases)
 {
+    std::unordered_set<int64_t> viewUids;
+    std::unordered_set<int64_t> ownerUids;
+    if(!aliases.empty())
+    {
+        if(fillDerivesInputs(graph))
+        {
+            throw std::invalid_argument("fillInputs: aliases need every input of a graph whose "
+                                        "fill derives inputs from other inputs");
+        }
+        const std::unordered_set<int64_t> owned(ownedUids.begin(), ownedUids.end());
+        for(const auto& alias : aliases)
+        {
+            if(owned.count(alias.ofUid) == 0 || inputs.count(alias.ofUid) == 0)
+            {
+                throw std::invalid_argument("fillInputs: " + tensor_alias_detail::describe(alias)
+                                            + ": the owner has no input tensor to fill");
+            }
+            if(recipes.isSet(alias.uid))
+            {
+                return FillResult::invalid(
+                    "uid " + std::to_string(alias.uid) + ": a fill recipe is set on a view of uid "
+                    + std::to_string(alias.ofUid) + ", and a view is never filled");
+            }
+            viewUids.insert(alias.uid);
+            ownerUids.insert(alias.ofUid);
+        }
+    }
+
     // Dtype defaults sit below test and per-op recipes. Only those that differ
     // from the generic FREE[-1, 1] are recorded, so meta.inputs stays unchanged
     // for float graphs and names the range for narrow formats. Registered
@@ -740,13 +795,30 @@ FillResult fillInputs(const hipdnn_flatbuffers_sdk::data_objects::Graph& graph,
     {
         const unsigned int seed
             = recipes.resolveSeed(uid).value_or(static_cast<unsigned int>(rng()));
+        if(viewUids.count(uid) != 0)
+        {
+            continue;
+        }
+
+        // Views can read the gaps between an owner's elements, so the gaps hold zeros.
+        // The owner is filled on the host, where the zeros are written.
+        auto& tensor = *inputs.at(uid);
+        const bool isOwner = ownerUids.count(uid) != 0;
+        if(isOwner)
+        {
+            std::memset(tensor.rawHostData(), 0, tensor.elementSpace() * tensor.elementSize());
+        }
         const auto dataType = dataTypes.find(uid);
         auto fillResult
-            = fill(*inputs.at(uid),
+            = fill(tensor,
                    recipes.fill(uid),
                    seed,
-                   device,
+                   isOwner ? nullptr : device,
                    dataType != dataTypes.end() ? std::optional(dataType->second) : std::nullopt);
+        if(isOwner)
+        {
+            tensor.markHostModified();
+        }
         if(!fillResult.filled)
         {
             auto reason = "uid " + std::to_string(uid) + ": " + fillResult.reason;
@@ -769,7 +841,7 @@ FillResult fillInputs(const hipdnn_flatbuffers_sdk::data_objects::Graph& graph,
     for(flatbuffers::uoffset_t i = 0; i < graph.nodes()->size(); ++i)
     {
         const auto& node = *graph.nodes()->Get(i);
-        const auto* sdpaBackward = node.attributes_as_SdpaBackwardAttributes();
+        const auto* sdpaBackward = derivesInputsAfterFill(node);
         if(sdpaBackward == nullptr)
         {
             continue;

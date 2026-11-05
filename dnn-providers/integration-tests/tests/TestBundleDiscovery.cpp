@@ -2079,4 +2079,437 @@ TEST_F(TestBundleDiscoveryFixture, ClassifySweepCaseReturnsFailedLoadForArchsInF
     EXPECT_EQ(*archs, std::vector<std::string>{"gfx942"});
 }
 
+// ---------------------------------------------------------------------------
+// aliases: the load-time rules
+// ---------------------------------------------------------------------------
+
+namespace
+{
+
+nlohmann::json readJsonFile(const std::filesystem::path& path)
+{
+    std::ifstream in(path);
+    return nlohmann::json::parse(in);
+}
+
+void writeJsonFile(const std::filesystem::path& path, const nlohmann::json& json)
+{
+    std::ofstream(path) << json.dump(2);
+}
+
+// Sets the fields of each patch ([{"uid": u, "set": {...}}]) on that tensor of `graph`.
+void setTensorFields(nlohmann::json& graph, const nlohmann::json& patches)
+{
+    for(const auto& patch : patches)
+    {
+        for(auto& tensor : graph.at("tensors"))
+        {
+            if(tensor.at("uid") != patch.at("uid"))
+            {
+                continue;
+            }
+            for(const auto& item : patch.at("set").items())
+            {
+                tensor[item.key()] = item.value();
+            }
+        }
+    }
+}
+
+nlohmann::json aliasMetadata(const nlohmann::json& aliases)
+{
+    return nlohmann::json{{"format_version", 2}, {"aliases", aliases}};
+}
+
+// The FailedLoad message of the one bundle under `root`; an empty string, with a
+// test failure, for any other outcome.
+std::string failedLoadMessage(const std::filesystem::path& root, SweepManifestCache& sweeps)
+{
+    const auto discovered = discoverBundles(root);
+    if(discovered.size() != 1)
+    {
+        ADD_FAILURE() << "expected one bundle under " << root << ", found " << discovered.size();
+        return {};
+    }
+    auto outcome = detail::classifyBundle(discovered.front(), sweeps);
+    if(!std::holds_alternative<detail::FailedLoad>(outcome))
+    {
+        ADD_FAILURE() << "expected a FailedLoad for " << root;
+        return {};
+    }
+    return std::get<detail::FailedLoad>(outcome).message;
+}
+
+// One SDPA backward node: q=1, k=2, v=3, o=4, do=5, stats=6 in; dq=7, dk=8, dv=9 out.
+nlohmann::json sdpaBackwardGraphJson()
+{
+    const auto tensor = [](int64_t uid, bool stats) {
+        return nlohmann::json{
+            {"name", ""},
+            {"uid", uid},
+            {"dims", stats ? std::vector<int64_t>{1, 1, 2, 1} : std::vector<int64_t>{1, 1, 2, 4}},
+            {"strides",
+             stats ? std::vector<int64_t>{2, 2, 1, 1} : std::vector<int64_t>{8, 8, 4, 1}},
+            {"data_type", "float"},
+            {"virtual", false}};
+    };
+    auto tensors = nlohmann::json::array();
+    for(int64_t uid = 1; uid <= 9; ++uid)
+    {
+        tensors.push_back(tensor(uid, uid == 6));
+    }
+    auto graph = nlohmann::json::parse(R"({
+        "name": "sdpa_backward", "compute_data_type": "float", "io_data_type": "float",
+        "intermediate_data_type": "float",
+        "nodes": [{
+            "name": "sdpa_backward", "type": "SdpaBackwardAttributes",
+            "compute_data_type": "float",
+            "inputs": {
+                "q_tensor_uid": 1, "k_tensor_uid": 2, "v_tensor_uid": 3, "o_tensor_uid": 4,
+                "do_tensor_uid": 5, "stats_tensor_uid": 6, "scale_tensor_uid": null,
+                "attn_mask_tensor_uid": null, "seq_len_q_tensor_uid": null,
+                "seq_len_kv_tensor_uid": null, "seed_tensor_uid": null,
+                "offset_tensor_uid": null, "dropout_mask_tensor_uid": null,
+                "dropout_scale_tensor_uid": null, "dropout_scale_inv_tensor_uid": null},
+            "outputs": {
+                "dq_tensor_uid": 7, "dk_tensor_uid": 8, "dv_tensor_uid": 9,
+                "dbias_tensor_uid": null},
+            "parameters": {
+                "alibi_mask": false, "padding_mask": false, "causal_mask": false,
+                "causal_mask_bottom_right": false, "dropout_probability": null,
+                "attn_scale_value": null, "left_bound": null, "right_bound": null,
+                "diagonal_alignment": "TOP_LEFT"}}]
+    })");
+    graph["tensors"] = std::move(tensors);
+    return graph;
+}
+
+struct AliasRuleCase
+{
+    std::string name;
+    std::string aliases;
+    std::string patches;
+    std::string message;
+};
+
+// Each case breaks one rule on the graph of createMinimalBundle() or of a sweep case of
+// createTemplateSweep(): x=0 [2,3,4,5]; uids 1-4 [1,3,1,1] with strides [3,1,1,1];
+// y=5 is the output.
+std::vector<AliasRuleCase> aliasRuleCases()
+{
+    const std::string view3Of2 = R"([{"uid": 3, "of": 2, "byte_offset": 0}])";
+    return {
+        {"view_not_in_graph",
+         R"([{"uid": 9, "of": 2, "byte_offset": 0}])",
+         "[]",
+         "alias view 9 of owner 2: the view is not a tensor of the graph"},
+        {"owner_not_in_graph",
+         R"([{"uid": 3, "of": 9, "byte_offset": 0}])",
+         "[]",
+         "alias view 3 of owner 9: the owner is not a tensor of the graph"},
+        {"view_virtual",
+         view3Of2,
+         R"([{"uid": 3, "set": {"virtual": true}}])",
+         "alias view 3 of owner 2: the view is virtual"},
+        {"view_output",
+         R"([{"uid": 5, "of": 2, "byte_offset": 0}])",
+         "[]",
+         "alias view 5 of owner 2: the view is an output"},
+        {"owner_output",
+         R"([{"uid": 3, "of": 5, "byte_offset": 0}])",
+         "[]",
+         "alias view 3 of owner 5: the owner is an output"},
+        {"view_runtime_pass_by_value",
+         view3Of2,
+         R"([{"uid": 3, "set": {"is_runtime_pass_by_value": true}}])",
+         "alias view 3 of owner 2: the view is passed by value at run time"},
+        {"owner_ragged",
+         view3Of2,
+         R"([{"uid": 2, "set": {"ragged_offset_tensor_uid": 4}}])",
+         "alias view 3 of owner 2: the owner is ragged"},
+        {"sub_byte",
+         view3Of2,
+         R"([{"uid": 2, "set": {"data_type": "fp4_e2m1"}},
+             {"uid": 3, "set": {"data_type": "fp4_e2m1"}}])",
+         "alias view 3 of owner 2: the view has the sub-byte data type FP4_E2M1"},
+        {"data_types_differ",
+         view3Of2,
+         R"([{"uid": 3, "set": {"data_type": "half"}}])",
+         "alias view 3 of owner 2: the view's data type HALF differs from the owner's data type "
+         "FLOAT"},
+        {"offset_not_a_multiple",
+         R"([{"uid": 3, "of": 2, "byte_offset": 2}])",
+         "[]",
+         "alias view 3 of owner 2: byte_offset 2 is not a multiple of the view's element size 4"},
+        {"view_negative_stride",
+         view3Of2,
+         R"([{"uid": 3, "set": {"strides": [3, -1, 1, 1]}}])",
+         "alias view 3 of owner 2: the view has a negative stride"},
+        {"owner_negative_stride",
+         view3Of2,
+         R"([{"uid": 2, "set": {"strides": [3, -1, 1, 1]}}])",
+         "alias view 3 of owner 2: the owner has a negative stride"},
+        {"owner_zero_dim",
+         view3Of2,
+         R"([{"uid": 2, "set": {"dims": [1, 0, 1, 1]}}])",
+         "alias view 3 of owner 2: the owner has a zero dim"},
+        {"owner_size_overflow",
+         view3Of2,
+         R"([{"uid": 2, "set": {"strides": [3, 4611686018427387904, 1, 1]}}])",
+         "alias view 3 of owner 2: the owner's size does not fit in a 64-bit byte count"},
+        {"offset_breaks_alignment",
+         R"([{"uid": 3, "of": 2, "byte_offset": 4}])",
+         "[]",
+         "alias view 3 of owner 2: byte_offset 4 is not a multiple of the view's alignment 16"},
+        {"owner_alignment_below_the_views",
+         view3Of2,
+         R"([{"uid": 3, "set": {"alignment": 32}}])",
+         "alias view 3 of owner 2: the owner's alignment 16 is not a multiple of the view's "
+         "alignment 32"},
+        {"view_constant_value",
+         view3Of2,
+         R"([{"uid": 3, "set": {"value_type": "Float32Value", "value": 1.0}}])",
+         "alias view 3 of owner 2: the view has a constant value"},
+        {"owner_negative_dim",
+         view3Of2,
+         R"([{"uid": 2, "set": {"dims": [1, -3, 1, 1]}}])",
+         "alias view 3 of owner 2: the owner has a negative dim"},
+        {"view_reach_overflow",
+         view3Of2,
+         R"([{"uid": 3, "set": {"strides": [3, 4611686018427387904, 1, 1]}}])",
+         "alias view 3 of owner 2: the view's reach does not fit in a 64-bit byte count"},
+        {"zero_dim_view_offset_past_owner",
+         R"([{"uid": 3, "of": 2, "byte_offset": 16}])",
+         R"([{"uid": 3, "set": {"dims": [1, 0, 1, 1]}}])",
+         "alias view 3 of owner 2: byte_offset 16 is past the end of the owner's 12-byte "
+         "allocation"},
+        {"out_of_bounds",
+         R"([{"uid": 3, "of": 2, "byte_offset": 16}])",
+         "[]",
+         "alias view 3 of owner 2: the view reaches byte 28, past the end of the owner's "
+         "12-byte allocation"},
+    };
+}
+
+} // namespace
+
+TEST_F(TestBundleDiscoveryFixture, AliasRuleViolationsFailTheLoadOfABundle)
+{
+    for(const auto& c : aliasRuleCases())
+    {
+        SCOPED_TRACE(c.name);
+        const auto root = _tempDir / ("direct_" + c.name);
+        const auto dir = root / "op" / "aliased";
+        createMinimalBundle(dir, "aliased");
+        auto graph = readJsonFile(dir / "aliased.json");
+        setTensorFields(graph, nlohmann::json::parse(c.patches));
+        writeJsonFile(dir / "aliased.json", graph);
+        writeJsonFile(dir / "aliased.meta.json", aliasMetadata(nlohmann::json::parse(c.aliases)));
+
+        EXPECT_THROW(loadIntegrationTestBundle(dir / "aliased.json"), BundleMetadataError);
+        const auto message = failedLoadMessage(root, _sweeps);
+        EXPECT_NE(message.find(c.message), std::string::npos) << message;
+    }
+}
+
+TEST_F(TestBundleDiscoveryFixture, AliasRuleViolationsFailTheLoadOfASweepCase)
+{
+    for(const auto& c : aliasRuleCases())
+    {
+        SCOPED_TRACE(c.name);
+        const auto root = _tempDir / ("sweep_" + c.name);
+        const auto sweepDir = root / "quick" / "BatchnormFwdInference" / "Inference";
+        createTemplateSweep(sweepDir,
+                            {{"aliased_fp32_nchw",
+                              "float",
+                              {2, 3, 4, 5},
+                              {60, 20, 5, 1},
+                              {1, 3, 1, 1},
+                              {3, 1, 1, 1},
+                              false, // includeGolden
+                              false, // goldenHasPath
+                              true}}); // includeMetadata
+        auto sweepJson = readJsonFile(sweepDir / "sweep.json");
+        auto& caseJson = sweepJson["cases"][0];
+        caseJson["metadata"] = aliasMetadata(nlohmann::json::parse(c.aliases));
+        caseJson["tensor_patches"] = nlohmann::json::parse(c.patches);
+        writeJsonFile(sweepDir / "sweep.json", sweepJson);
+
+        const auto message = failedLoadMessage(root, _sweeps);
+        EXPECT_NE(message.find(c.message), std::string::npos) << message;
+    }
+}
+
+TEST_F(TestBundleDiscoveryFixture, ValidAliasLoadsInABundleAndASweepCase)
+{
+    const auto dir = _tempDir / "op" / "aliased";
+    createMinimalBundle(dir, "aliased");
+    writeJsonFile(
+        dir / "aliased.meta.json",
+        aliasMetadata(nlohmann::json::parse(R"([{"uid": 3, "of": 2, "byte_offset": 0}])")));
+    const auto direct = loadIntegrationTestBundle(dir / "aliased.json");
+    ASSERT_TRUE(std::holds_alternative<IntegrationTestBundle>(direct));
+    const auto& directAliases = std::get<IntegrationTestBundle>(direct).metadata.aliases;
+    ASSERT_EQ(directAliases.size(), 1u);
+    EXPECT_EQ(directAliases.front(), (hipdnn_integration_tests::TensorAlias{3, 2, 0}));
+
+    const auto sweepDir = _tempDir / "quick" / "BatchnormFwdInference" / "Inference";
+    createTemplateSweep(sweepDir,
+                        {{"aliased_fp32_nchw",
+                          "float",
+                          {2, 3, 4, 5},
+                          {60, 20, 5, 1},
+                          {1, 3, 1, 1},
+                          {3, 1, 1, 1},
+                          false, // includeGolden
+                          false, // goldenHasPath
+                          true}}); // includeMetadata
+    auto sweepJson = readJsonFile(sweepDir / "sweep.json");
+    sweepJson["cases"][0]["metadata"]
+        = aliasMetadata(nlohmann::json::parse(R"([{"uid": 4, "of": 1, "byte_offset": 4}])"));
+    // A view with a zero dim reaches no bytes; its offset stays inside the owner and
+    // follows the view's alignment.
+    sweepJson["cases"][0]["tensor_patches"]
+        = nlohmann::json::parse(R"([{"uid": 4, "set": {"dims": [1, 0, 1, 1], "alignment": 4}}])");
+    writeJsonFile(sweepDir / "sweep.json", sweepJson);
+
+    const auto discovered = discoverBundles(_tempDir);
+    const auto* sweepCase = findByTest(discovered, "aliased_fp32_nchw");
+    ASSERT_NE(sweepCase, nullptr);
+    const auto sweep = loadIntegrationTestBundle(*sweepCase, _sweeps);
+    ASSERT_TRUE(std::holds_alternative<IntegrationTestBundle>(sweep));
+    EXPECT_EQ(std::get<IntegrationTestBundle>(sweep).metadata.aliases.front(),
+              (hipdnn_integration_tests::TensorAlias{4, 1, 4}));
+}
+
+TEST_F(TestBundleDiscoveryFixture, AliasInABundleWithGoldenDataFailsTheLoad)
+{
+    const std::string rule
+        = "alias view 3 of owner 2: the bundle has golden data or tensor blobs, which store "
+          "each tensor apart";
+
+    const auto directRoot = _tempDir / "direct";
+    const auto dir = directRoot / "op" / "aliased";
+    createMinimalBundle(dir, "aliased");
+    writeJsonFile(
+        dir / "aliased.meta.json",
+        aliasMetadata(nlohmann::json::parse(R"([{"uid": 3, "of": 2, "byte_offset": 0}])")));
+    std::ofstream(dir / "aliased.tensors.dvc") << "outs:\n";
+    const auto directMessage = failedLoadMessage(directRoot, _sweeps);
+    EXPECT_NE(directMessage.find(rule), std::string::npos) << directMessage;
+
+    const auto sweepRoot = _tempDir / "sweep";
+    const auto sweepDir = sweepRoot / "quick" / "BatchnormFwdInference" / "Inference";
+    createTemplateSweep(
+        sweepDir,
+        {{"aliased_fp32_nchw", "float", {2, 3, 4, 5}, {60, 20, 5, 1}, {1, 3, 1, 1}, {3, 1, 1, 1}}});
+    auto sweepJson = readJsonFile(sweepDir / "sweep.json");
+    sweepJson["cases"][0]["metadata"]
+        = aliasMetadata(nlohmann::json::parse(R"([{"uid": 3, "of": 2, "byte_offset": 0}])"));
+    writeJsonFile(sweepDir / "sweep.json", sweepJson);
+    const auto sweepMessage = failedLoadMessage(sweepRoot, _sweeps);
+    EXPECT_NE(sweepMessage.find(rule), std::string::npos) << sweepMessage;
+}
+
+// The input fill of an SDPA backward node replaces O and stats with the forward of Q, K
+// and V, and reads each of them as its own tensor.
+TEST_F(TestBundleDiscoveryFixture, AliasInAGraphWhoseFillDerivesInputsFailsTheLoad)
+{
+    const std::string rule = "alias view 3 of owner 2: the graph's input fill derives some inputs "
+                             "from other inputs";
+    const auto aliases
+        = aliasMetadata(nlohmann::json::parse(R"([{"uid": 3, "of": 2, "byte_offset": 0}])"));
+
+    const auto directRoot = _tempDir / "direct";
+    const auto dir = directRoot / "op" / "aliased";
+    std::filesystem::create_directories(dir);
+    writeJsonFile(dir / "aliased.json", sdpaBackwardGraphJson());
+    writeJsonFile(dir / "aliased.meta.json", aliases);
+    const auto directMessage = failedLoadMessage(directRoot, _sweeps);
+    EXPECT_NE(directMessage.find(rule), std::string::npos) << directMessage;
+
+    const auto sweepRoot = _tempDir / "sweep";
+    const auto sweepDir = sweepRoot / "quick" / "SdpaBackward" / "Aliased";
+    std::filesystem::create_directories(sweepDir);
+    writeJsonFile(sweepDir / "graph.template.json", sdpaBackwardGraphJson());
+    writeJsonFile(
+        sweepDir / "sweep.json",
+        nlohmann::json{{"version", 1},
+                       {"cases",
+                        nlohmann::json::array({nlohmann::json{{"id", "aliased"},
+                                                              {"values", nlohmann::json::object()},
+                                                              {"metadata", aliases}}})}});
+    const auto sweepMessage = failedLoadMessage(sweepRoot, _sweeps);
+    EXPECT_NE(sweepMessage.find(rule), std::string::npos) << sweepMessage;
+}
+
+// Input blobs without golden outputs make a reference-verified bundle, which still
+// reads each input from its own blob.
+TEST_F(TestBundleDiscoveryFixture, AliasInABundleWithInputBlobsFailsTheLoad)
+{
+    const auto dir = _tempDir / "op" / "aliased";
+    createLoadableBundle(dir, "aliased");
+    std::filesystem::remove(dir / "aliased.tensor5.bin");
+    writeJsonFile(
+        dir / "aliased.meta.json",
+        aliasMetadata(nlohmann::json::parse(R"([{"uid": 3, "of": 2, "byte_offset": 0}])")));
+
+    const auto message = failedLoadMessage(_tempDir, _sweeps);
+    EXPECT_NE(message.find("alias view 3 of owner 2: the bundle has golden data or tensor blobs"),
+              std::string::npos)
+        << message;
+}
+
+// The view has no blob, so not every input has one, but the other blobs still store
+// each tensor apart.
+TEST_F(TestBundleDiscoveryFixture, AliasInABundleWithSomeInputBlobsFailsTheLoad)
+{
+    const auto dir = _tempDir / "op" / "aliased";
+    createLoadableBundle(dir, "aliased");
+    std::filesystem::remove(dir / "aliased.tensor3.bin");
+    std::filesystem::remove(dir / "aliased.tensor5.bin");
+    writeJsonFile(
+        dir / "aliased.meta.json",
+        aliasMetadata(nlohmann::json::parse(R"([{"uid": 3, "of": 2, "byte_offset": 0}])")));
+
+    const auto message = failedLoadMessage(_tempDir, _sweeps);
+    EXPECT_NE(message.find("alias view 3 of owner 2: the bundle has golden data or tensor blobs"),
+              std::string::npos)
+        << message;
+}
+
+TEST_F(TestBundleDiscoveryFixture, AliasInFormatVersion1MetadataFailsTheLoad)
+{
+    const auto v1Aliases = nlohmann::json{
+        {"format_version", 1},
+        {"aliases", nlohmann::json::parse(R"([{"uid": 3, "of": 2, "byte_offset": 0}])")}};
+
+    const auto directRoot = _tempDir / "direct";
+    const auto dir = directRoot / "op" / "aliased";
+    createMinimalBundle(dir, "aliased");
+    writeJsonFile(dir / "aliased.meta.json", v1Aliases);
+    const auto directMessage = failedLoadMessage(directRoot, _sweeps);
+    EXPECT_NE(directMessage.find("aliases needs format_version 2"), std::string::npos)
+        << directMessage;
+
+    const auto sweepRoot = _tempDir / "sweep";
+    const auto sweepDir = sweepRoot / "quick" / "BatchnormFwdInference" / "Inference";
+    createTemplateSweep(sweepDir,
+                        {{"aliased_fp32_nchw",
+                          "float",
+                          {2, 3, 4, 5},
+                          {60, 20, 5, 1},
+                          {1, 3, 1, 1},
+                          {3, 1, 1, 1},
+                          false, // includeGolden
+                          false, // goldenHasPath
+                          true}}); // includeMetadata
+    auto sweepJson = readJsonFile(sweepDir / "sweep.json");
+    sweepJson["cases"][0]["metadata"] = v1Aliases;
+    writeJsonFile(sweepDir / "sweep.json", sweepJson);
+    const auto sweepMessage = failedLoadMessage(sweepRoot, _sweeps);
+    EXPECT_NE(sweepMessage.find("aliases needs format_version 2"), std::string::npos)
+        << sweepMessage;
+}
+
 // NOLINTEND(readability-identifier-naming)

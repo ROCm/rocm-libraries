@@ -10,6 +10,8 @@
 #include <memory>
 #include <optional>
 #include <set>
+#include <stdexcept>
+#include <string>
 #include <string_view>
 #include <unordered_map>
 #include <unordered_set>
@@ -27,6 +29,8 @@
 
 #include "harness/bundle/BundleDiscovery.hpp"
 #include "harness/bundle/SweepManifestCache.hpp"
+#include "harness/input-init/FillInputs.hpp"
+#include "harness/input-init/TensorAliases.hpp"
 
 namespace hipdnn_integration_tests::bundle
 {
@@ -218,6 +222,19 @@ inline bool blobsPresentFor(const std::vector<int64_t>& uids, BlobPathFn&& blobP
         }
     }
     return true;
+}
+
+template <typename BlobPathFn>
+inline bool anyBlobPresentFor(const std::vector<int64_t>& uids, BlobPathFn&& blobPathForUid)
+{
+    for(const int64_t uid : uids)
+    {
+        if(std::filesystem::exists(blobPathForUid(uid)))
+        {
+            return true;
+        }
+    }
+    return false;
 }
 
 inline std::vector<int64_t> allTensorUids(const nlohmann::json& graphJson)
@@ -789,6 +806,41 @@ inline void checkGoldenDeclarationRules(const hipdnn_integration_tests::BundleMe
     }
 }
 
+// The rules that tie a bundle's `aliases` to its graph: checkTensorAliases() against the
+// graph's tensors and its input fill, and no tensor data on disk (golden data declared
+// or input blobs present), because blobs store each tensor apart. `where` names the
+// bundle or sweep case in the thrown message.
+inline void checkAliasRules(const hipdnn_integration_tests::BundleMetadata& metadata,
+                            const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper& graph,
+                            const std::vector<int64_t>& outputTensorUids,
+                            bool tensorDataOnDisk,
+                            const std::string& where)
+{
+    if(metadata.aliases.empty())
+    {
+        return;
+    }
+    try
+    {
+        hipdnn_integration_tests::checkTensorAliases(
+            metadata.aliases,
+            graph.getTensorMap(),
+            outputTensorUids,
+            hipdnn_integration_tests::fillDerivesInputs(graph.getGraph()));
+    }
+    catch(const std::invalid_argument& e)
+    {
+        throw hipdnn_integration_tests::BundleMetadataError(where + ": " + e.what());
+    }
+    if(tensorDataOnDisk)
+    {
+        throw hipdnn_integration_tests::BundleMetadataError(
+            where + ": "
+            + hipdnn_integration_tests::tensor_alias_detail::describe(metadata.aliases.front())
+            + ": the bundle has golden data or tensor blobs, which store each tensor apart");
+    }
+}
+
 } // namespace detail
 
 // Load a direct bundle from its graph .json path, classifying the outcome.
@@ -805,6 +857,7 @@ inline void checkGoldenDeclarationRules(const hipdnn_integration_tests::BundleMe
 //   * metadata present but malformed       -> throws BundleMetadataError
 //   * metadata flags that contradict the golden data it declares (both references
 //     off with none, expected_rejection with some) -> throws BundleMetadataError
+//   * aliases that the graph or the tensor data on disk rule out -> throws BundleMetadataError
 //   * valid graph, input blobs absent      -> bundle with blobs == nullopt
 //   * inputs present, outputs absent       -> bundle verified against reference
 //   * inputs and outputs present           -> bundle verified against golden data
@@ -876,6 +929,15 @@ inline LoadResult loadIntegrationTestBundle(const std::filesystem::path& jsonPat
     detail::checkGoldenDeclarationRules(bundle.metadata, goldenDeclared, jsonPath.string());
 
     detail::describeTensorBlobs(bundle, *graphJson, blobPathForUid);
+    // One blob is enough: a bundle that leaves out the view's blob still stores its
+    // other tensors apart.
+    detail::checkAliasRules(
+        bundle.metadata,
+        bundle.graphWrapper(),
+        bundle.outputTensorUids,
+        goldenDeclared
+            || detail::anyBlobPresentFor(detail::allTensorUids(*graphJson), blobPathForUid),
+        jsonPath.string());
 
     return bundle;
 }
@@ -971,9 +1033,9 @@ inline LoadResult loadIntegrationTestBundle(const DiscoveredBundle& discovered,
     bundle.metadata = hipdnn_integration_tests::parseBundleMetadataJson(
         caseJson->at("metadata"), discovered.diagnosticPath().string());
 
-    detail::checkGoldenDeclarationRules(bundle.metadata,
-                                        goldenOutputsPresent || goldenDirectory.has_value(),
-                                        discovered.diagnosticPath().string());
+    const bool goldenDeclared = goldenOutputsPresent || goldenDirectory.has_value();
+    detail::checkGoldenDeclarationRules(
+        bundle.metadata, goldenDeclared, discovered.diagnosticPath().string());
 
     if(goldenDirectory.has_value())
     {
@@ -982,6 +1044,11 @@ inline LoadResult loadIntegrationTestBundle(const DiscoveredBundle& discovered,
         };
         detail::describeTensorBlobs(bundle, expandedGraph, blobPathForUid);
     }
+    detail::checkAliasRules(bundle.metadata,
+                            bundle.graphWrapper(),
+                            bundle.outputTensorUids,
+                            goldenDeclared || bundle.blobs.has_value(),
+                            discovered.diagnosticPath().string());
 
     return bundle;
 }
