@@ -37,6 +37,27 @@ plan's workspace (`packs/Gfx950AttentionUnified2DGeometry.hpp`).
 - Fixed in every variant: no sliding window, no sinks, no ALiBi, no softcap, no fp8, 32-bit K/V
   addressing (K/V larger than 0x7FFF0000 bytes is declined).
 
+## Trained ranker
+
+On gfx950 the catalog is ranked by trained `sort_kernel_catalog` models, one per metric
+(`tflops`, `time`), bound in the UED's role map as `"gfx950": [<tflops id>, <time id>]` beside
+the native scorer (`default`, the baseline geometry first (4 warps x 16 rows, T64)), which still ranks every other arch. The models
+are under `heuristics/800f4c70-d2e0-4a34-ab93-08fb527e2d82/sort_kernel_catalog/gfx950/<metric>/`: `heuristic.uhd.json` in
+git, `model.bin` in DVC (`model.bin.dvc`). Only the cells that ship more than one variant give
+a model a choice; elsewhere a graph matches one kernel and the model and the native scorer
+agree.
+
+- Trained on 810 SDPA graphs over the 21 multi-variant cells (D64/D128 cells shipping two or three tile geometries), each kernel timed on MI355X
+  (`hipdnn_corpus_gen`, `hipdnn_bench`, `uhd_gen`; the `hipdnn-uhd` skill).
+- Validated on 97 held-out graphs: held-out geomean regret 1.0010 vs native 1.0178; no graph more than 5% slower than native (worst 1.002x); top-1 97.9% vs 84.5%. Stage V on MI355X (`validate_l2.py`, `decide.py
+  l2 --baseline native`): the runtime reads each model, no winner record decides, and the
+  regret gate passes.
+- The engine config records the bound ids and the fingerprint of the catalog they were trained
+  on (`engine.trained_rankers`). `tests/test_trained_rankers.py` in the IngestorGenerator fails
+  when the shipped KDP no longer matches: any kernel added, removed, renamed or changed needs a
+  retrain (the skill's `generate.md`), then the new ids and
+  `tools/catalog_fingerprint.py <this bundle>/artifacts/<pack>.kdp.json` in both configs.
+
 ## Files
 
 | File | In | Notes |
