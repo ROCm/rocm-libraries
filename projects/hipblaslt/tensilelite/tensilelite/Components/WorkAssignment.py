@@ -853,6 +853,15 @@ class StaticGrid(WorkAssignment):
         per phase; and with batches, fewer than two tiles per phase in each batch,
         since every phase walks every batch and pays a refill in each.
 
+        A resident B uses the same walk with the N-tile's period. Inside each block
+        a WGM > 1 remap makes, the N-tile is the tile index mod the block width
+        W = min(WGM, NumWorkGroups1), so the period is W and every phase keeps one
+        N-tile per block, visiting blocks in order. Without the remap the N-tile
+        is constant over runs of NumWorkGroups0 tiles, which the plain stride
+        already walks in order, and a negative WGM or a short last block gives no
+        period, so those keep the plain stride. B needs no sparse rule: the plain
+        stride changes its N-tile at every tile once grid is not a multiple of W.
+
         The walk holds two sgprs for the whole kernel: RAPPhasePlan, L above c' in
         16 bits each, and RAPPhaseStart, the first tile of the current phase. This
         plan is derived at kernel start, with every persistent register and the
@@ -862,12 +871,7 @@ class StaticGrid(WorkAssignment):
         """
         from .WorkGroupMappingAlgos import decodeWGM
         module = Module("StaticGrid RAP phase walk")
-        if "A" not in writer.rapResidentTcs(kernel):
-            # The period above is the M-tile's. A resident B follows the N-tile,
-            # whose period is not derived yet, so it keeps the plain grid stride.
-            module.add(SMovB32(dst=sgpr("RAPPhasePlan"), src=hex(1 << 16), comment="RAP: one phase, the plain grid stride"))
-            module.add(SMovB32(dst=sgpr("RAPPhaseStart"), src=sgpr(partition.cursor), comment="RAP: the first tile starts the first phase"))
-            return module
+        holdsA = "A" in writer.rapResidentTcs(kernel)
         grid, bound = partition.grid, partition.bound
         nwg0, nwg1 = "NumWorkGroups0", "NumWorkGroups1"
         plain = Label(writer.labels.getNameInc("RAPPhasePlain"), "")
@@ -879,7 +883,7 @@ class StaticGrid(WorkAssignment):
             wgm, gcd, q, rem = tmp.idx, tmp.idx + 1, tmp.idx + 2, tmp.idx + 3
             negative = wgm
             period, coeff = "RAPPhaseStart", "RAPPhasePlan"
-            r, s = "RAPResidentMTile", "RAPResidentBatch"
+            r, s = writer.rapResidentTileSgpr(kernel), "RAPResidentBatch"
             vtmp = writer.vgprPool.checkOut(2, "RAPPhaseDivide")
             tmpVgprRes = ContinuousRegister(idx=vtmp, size=2)
 
@@ -887,32 +891,49 @@ class StaticGrid(WorkAssignment):
                 module.add(scalarUInt32DivideAndRemainder(qReg=qReg, dReg=dReg, divReg=divReg, rReg=rReg,
                     tmpVgprRes=tmpVgprRes, wavewidth=kernel["WavefrontSize"], doRemainder=doRemainder, comment=comment))
 
-            module.add(SCmpEQU32(src0=sgpr(nwg0), src1=1, comment="one M-tile: every tile reads the same A"))
-            module.add(SCBranchSCC1(labelName=plain.getLabelName()))
-            module.add(SMovB32(dst=sgpr(period), src=sgpr(nwg0), comment="RAP: M-tile period without a remap"))
-            positive = Label(writer.labels.getNameInc("RAPPhaseWGMPositive"), "")
-            noRemap = Label(writer.labels.getNameInc("RAPPhaseNoRemap"), "")
-            module.add(decodeWGM(kernel, wgm, "WGM"))
-            module.add(SCmpGtI32(src0=sgpr(wgm), src1=1, comment="WGM > 1: blocks of N-tiles"))
-            module.add(SCBranchSCC1(labelName=positive.getLabelName()))
-            module.add(SCmpGeI32(src0=sgpr(wgm), src1=-1, comment="WGM in [-1, 1]: no remap"))
-            module.add(SCBranchSCC1(labelName=noRemap.getLabelName()))
-            module.add(SAbsI32(dst=sgpr(wgm), src=sgpr(wgm), comment="WGM < -1: blocks of |WGM| M-tiles"))
-            module.add(SMinU32(dst=sgpr(wgm), src0=sgpr(wgm), src1=sgpr(nwg0), comment="a block taller than M is one block of M"))
-            divide(q, nwg0, wgm, rem, True, "NumWorkGroups0 % block height")
-            module.add(SCmpEQU32(src0=sgpr(rem), src1=0, comment="a short last block of M-tiles: no period derived"))
-            module.add(SCBranchSCC0(labelName=plain.getLabelName()))
-            module.add(SMulI32(dst=sgpr(period), src0=sgpr(period), src1=sgpr(wgm), comment="period = NumWorkGroups0 * block height"))
-            module.add(SMovB32(dst=sgpr(negative), src=1, comment="phases not in M-tile order"))
-            module.add(SBranch(labelName=periodKnown.getLabelName()))
-            module.add(positive)
-            module.add(SMinU32(dst=sgpr(wgm), src0=sgpr(wgm), src1=sgpr(nwg1), comment="a block wider than N is one block of N"))
-            module.add(SMulI32(dst=sgpr(period), src0=sgpr(period), src1=sgpr(wgm), comment="period = NumWorkGroups0 * block width"))
-            module.add(noRemap)
-            module.add(SMovB32(dst=sgpr(negative), src=0))
-            module.add(periodKnown)
-            module.add(SCmpGtU32(src0=sgpr(period), src1=hex(0xFFFFFF), comment="past the 24-bit divides"))
-            module.add(SCBranchSCC1(labelName=plain.getLabelName()))
+            if not holdsA:
+                # B's N-tile only repeats inside the blocks a WGM > 1 remap makes:
+                # there it is the tile index mod the block width W, in N-tile
+                # order, so the period is W and a phase keeps one N-tile per
+                # block. Without the remap the N-tile is constant over runs of
+                # NumWorkGroups0 tiles, which the plain stride already walks in
+                # order; a negative WGM has no such period. A short last block
+                # repeats with a different period, so it keeps the plain stride.
+                module.add(decodeWGM(kernel, wgm, "WGM"))
+                module.add(SCmpGtI32(src0=sgpr(wgm), src1=1, comment="WGM > 1: blocks of N-tiles"))
+                module.add(SCBranchSCC0(labelName=plain.getLabelName(), comment="no N-tile period without them"))
+                module.add(SMinU32(dst=sgpr(wgm), src0=sgpr(wgm), src1=sgpr(nwg1), comment="a block wider than N is one block of N"))
+                divide(q, nwg1, wgm, rem, True, "NumWorkGroups1 % block width")
+                module.add(SCmpEQU32(src0=sgpr(rem), src1=0, comment="a short last block of N-tiles: no period derived"))
+                module.add(SCBranchSCC0(labelName=plain.getLabelName()))
+                module.add(SMovB32(dst=sgpr(period), src=sgpr(wgm), comment="RAP: N-tile period = block width"))
+            else:
+                module.add(SCmpEQU32(src0=sgpr(nwg0), src1=1, comment="one M-tile: every tile reads the same A"))
+                module.add(SCBranchSCC1(labelName=plain.getLabelName()))
+                module.add(SMovB32(dst=sgpr(period), src=sgpr(nwg0), comment="RAP: M-tile period without a remap"))
+                positive = Label(writer.labels.getNameInc("RAPPhaseWGMPositive"), "")
+                noRemap = Label(writer.labels.getNameInc("RAPPhaseNoRemap"), "")
+                module.add(decodeWGM(kernel, wgm, "WGM"))
+                module.add(SCmpGtI32(src0=sgpr(wgm), src1=1, comment="WGM > 1: blocks of N-tiles"))
+                module.add(SCBranchSCC1(labelName=positive.getLabelName()))
+                module.add(SCmpGeI32(src0=sgpr(wgm), src1=-1, comment="WGM in [-1, 1]: no remap"))
+                module.add(SCBranchSCC1(labelName=noRemap.getLabelName()))
+                module.add(SAbsI32(dst=sgpr(wgm), src=sgpr(wgm), comment="WGM < -1: blocks of |WGM| M-tiles"))
+                module.add(SMinU32(dst=sgpr(wgm), src0=sgpr(wgm), src1=sgpr(nwg0), comment="a block taller than M is one block of M"))
+                divide(q, nwg0, wgm, rem, True, "NumWorkGroups0 % block height")
+                module.add(SCmpEQU32(src0=sgpr(rem), src1=0, comment="a short last block of M-tiles: no period derived"))
+                module.add(SCBranchSCC0(labelName=plain.getLabelName()))
+                module.add(SMulI32(dst=sgpr(period), src0=sgpr(period), src1=sgpr(wgm), comment="period = NumWorkGroups0 * block height"))
+                module.add(SMovB32(dst=sgpr(negative), src=1, comment="phases not in M-tile order"))
+                module.add(SBranch(labelName=periodKnown.getLabelName()))
+                module.add(positive)
+                module.add(SMinU32(dst=sgpr(wgm), src0=sgpr(wgm), src1=sgpr(nwg1), comment="a block wider than N is one block of N"))
+                module.add(SMulI32(dst=sgpr(period), src0=sgpr(period), src1=sgpr(wgm), comment="period = NumWorkGroups0 * block width"))
+                module.add(noRemap)
+                module.add(SMovB32(dst=sgpr(negative), src=0))
+                module.add(periodKnown)
+                module.add(SCmpGtU32(src0=sgpr(period), src1=hex(0xFFFFFF), comment="past the 24-bit divides"))
+                module.add(SCBranchSCC1(labelName=plain.getLabelName()))
 
             # Extended Euclid on (grid, period): gcd, and coeff with coeff*grid == gcd (mod period).
             module.add(SMovB32(dst=sgpr(gcd), src=sgpr(grid)))
@@ -931,28 +952,33 @@ class StaticGrid(WorkAssignment):
             module.add(SMovB32(dst=sgpr(s), src=sgpr(q)))
             module.add(SBranch(labelName=gcdLoop.getLabelName()))
             module.add(gcdDone)
-            module.add(SCmpEQU32(src0=sgpr(gcd), src1=sgpr(period), comment="grid a multiple of the period: the plain stride keeps the M-tile"))
+            module.add(SCmpEQU32(src0=sgpr(gcd), src1=sgpr(period), comment="grid a multiple of the period: the plain stride keeps the %s-tile" % ("M" if holdsA else "N")))
             module.add(SCBranchSCC1(labelName=plain.getLabelName()))
 
             phases = r
             divide(phases, period, gcd, rem, False, "phases = period / gcd")
             module.add(SCmpGtU32(src0=sgpr(phases), src1=hex(0xFFFF), comment="the plan keeps phases in 16 bits"))
             module.add(SCBranchSCC1(labelName=plain.getLabelName()))
-            # Sparse phases: with batches, count tiles per workgroup in one batch.
-            module.add(SMulI32(dst=sgpr(s), src0=sgpr(nwg0), src1=sgpr(nwg1), comment="tiles per batch"))
-            module.add(SCmpGtU32(src0=sgpr(bound), src1=sgpr(s), comment="more than one batch?"))
-            module.add(SCSelectB32(dst=sgpr(negative), src0=1, src1=sgpr(negative), comment="batches or a negative WGM: two tiles per phase"))
-            module.add(SCSelectB32(dst=sgpr(gcd), src0=sgpr(s), src1=sgpr(bound)))
-            module.add(SAddU32(dst=sgpr(gcd), src0=sgpr(gcd), src1=sgpr(grid)))
-            module.add(SSubU32(dst=sgpr(gcd), src0=sgpr(gcd), src1=1))
-            divide(q, gcd, grid, rem, False, "tiles per workgroup, rounded up")
-            module.add(SAddU32(dst=sgpr(s), src0=sgpr(phases), src1=sgpr(phases)))
-            module.add(SAddU32(dst=sgpr(gcd), src0=sgpr(q), src1=sgpr(q)))
-            module.add(SCmpEQU32(src0=sgpr(negative), src1=0))
-            module.add(SCSelectB32(dst=sgpr(s), src0=sgpr(phases), src1=sgpr(s)))
-            module.add(SCSelectB32(dst=sgpr(gcd), src0=sgpr(gcd), src1=sgpr(q)))
-            module.add(SCmpGtU32(src0=sgpr(s), src1=sgpr(gcd), comment="phases too sparse to pay"))
-            module.add(SCBranchSCC1(labelName=plain.getLabelName()))
+            # B needs no sparse rule: with the plain stride its N-tile changes at
+            # every tile once grid is not a multiple of W, and a scan of
+            # NumWorkGroups0/1, batches, grids and WGMs found the phased walk
+            # never refilling more often.
+            if holdsA:
+                # Sparse phases: with batches, count tiles per workgroup in one batch.
+                module.add(SMulI32(dst=sgpr(s), src0=sgpr(nwg0), src1=sgpr(nwg1), comment="tiles per batch"))
+                module.add(SCmpGtU32(src0=sgpr(bound), src1=sgpr(s), comment="more than one batch?"))
+                module.add(SCSelectB32(dst=sgpr(negative), src0=1, src1=sgpr(negative), comment="batches or a negative WGM: two tiles per phase"))
+                module.add(SCSelectB32(dst=sgpr(gcd), src0=sgpr(s), src1=sgpr(bound)))
+                module.add(SAddU32(dst=sgpr(gcd), src0=sgpr(gcd), src1=sgpr(grid)))
+                module.add(SSubU32(dst=sgpr(gcd), src0=sgpr(gcd), src1=1))
+                divide(q, gcd, grid, rem, False, "tiles per workgroup, rounded up")
+                module.add(SAddU32(dst=sgpr(s), src0=sgpr(phases), src1=sgpr(phases)))
+                module.add(SAddU32(dst=sgpr(gcd), src0=sgpr(q), src1=sgpr(q)))
+                module.add(SCmpEQU32(src0=sgpr(negative), src1=0))
+                module.add(SCSelectB32(dst=sgpr(s), src0=sgpr(phases), src1=sgpr(s)))
+                module.add(SCSelectB32(dst=sgpr(gcd), src0=sgpr(gcd), src1=sgpr(q)))
+                module.add(SCmpGtU32(src0=sgpr(s), src1=sgpr(gcd), comment="phases too sparse to pay"))
+                module.add(SCBranchSCC1(labelName=plain.getLabelName()))
             # |coeff| <= phases / 2, so one add brings it into [0, phases).
             module.add(SAddU32(dst=sgpr(gcd), src0=sgpr(coeff), src1=sgpr(phases)))
             module.add(SCmpLtI32(src0=sgpr(coeff), src1=0))
