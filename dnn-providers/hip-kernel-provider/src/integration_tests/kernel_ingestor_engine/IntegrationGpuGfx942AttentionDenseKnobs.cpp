@@ -9,18 +9,15 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
-#include <filesystem>
 #include <iostream>
 #include <iterator>
 #include <memory>
 #include <optional>
 #include <ostream>
 #include <set>
-#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <tuple>
-#include <type_traits>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -28,22 +25,15 @@
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
 
-#include <hip_kernel_provider_common/HipDeviceUtils.hpp>
 #include <hipdnn_backend.h>
-#include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_frontend/Graph.hpp>
-#include <hipdnn_frontend/attributes/SdpaAttributes.hpp>
-#include <hipdnn_frontend/attributes/TensorAttributes.hpp>
 #include <hipdnn_frontend/knob/Knob.hpp>
-#include <hipdnn_frontend/knob/KnobConstraint.hpp>
 #include <hipdnn_frontend/knob/KnobSetting.hpp>
-#include <hipdnn_plugin_sdk/ingestor/DescriptorLoader.hpp>
 #include <hipdnn_plugin_sdk/ingestor/Descriptors.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_test_sdk/utilities/LogRecorder.hpp>
 #include <hipdnn_test_sdk/utilities/ReferenceValidationInterface.hpp>
-#include <hipdnn_test_sdk/utilities/ScopedTestCacheDir.hpp>
 #include <hipdnn_test_sdk/utilities/TestTolerances.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
@@ -58,20 +48,21 @@ using namespace hip_kernel_provider::test_utilities;
 /**
  * @file IntegrationGpuGfx942AttentionDenseKnobs.cpp
  * @brief hipkernel:Gfx942AttentionDense end to end through the frontend on a gfx942
- *        device: a forced block_m/block_n selects exactly the policy-arm kernel of that
- *        tile, that kernel launches with its own geometry and computes what the CPU
- *        reference computes, and a knob pair no kernel has is refused before any plan.
+ *        device: a forced tile, grid and levers select exactly one kernel, that kernel
+ *        launches with its own geometry and computes what the CPU reference computes, and a
+ *        knob pair no kernel has is refused before any plan.
  *
  * The case table is generated so it runs every (head size, dtype, mask, window, LSE, tile)
  * class the catalog compiles, at a shape the tile divides; a coverage case asserts the
  * table and the installed catalog agree. An LSE row binds the frontend's stats output
  * (generate_stats, a packed [B, Hq, Sq, 1] FLOAT tensor), selects the class's emit_lse
  * twin, and grades the LSE against the CPU reference at the default FLOAT SDPA
- * tolerance, printing its largest error as `LSE_ERROR <case> max_abs=.. max_rel=..`. Head counts vary across rows because the body
- * reads them at runtime. Window rows run Sq = Skv = 2W, so the window really excludes
- * keys, and spell the graph's left_bound as W (the reference keeps left_bound keys,
- * diagonal included). Hand-written rows add cold selection, B > 1, Sq != Skv, both alignments, the
- * deprecated causal flag and the default and a non-default scale.
+ * tolerance, printing its largest error as `LSE_ERROR <case> max_abs=.. max_rel=..`. Head
+ * counts vary across rows because the body reads them at runtime. Window rows run
+ * Sq = Skv = 2W, so the window really excludes keys, and spell the graph's left_bound as W
+ * (the reference keeps left_bound keys, diagonal included). Hand-written rows add cold
+ * selection, B > 1, Sq != Skv, both alignments, the deprecated causal flag and the default
+ * and a non-default scale.
  *
  * Each row also names the launch grid it forces: the one-CTA-per-block grid at a block
  * order (qb_minor, bt_hkv_minor, hq_minor_swz) or the persistent grid at a decode, forced
@@ -82,11 +73,11 @@ using namespace hip_kernel_provider::test_utilities;
  * a narrow window, and 304 CTAs a multiple of its CU count). A graph with Hq = 12 is never
  * offered an hq_minor_swz kernel, which would drop and repeat work items there.
  *
- * Each expected kernel id is resolved at run time from the production descriptors: the
- * one kernel of the class and grid whose lds_row_pad, pv_priority, lds_num_buffers,
- * v_reg_prefetch, causal_diag_split, o_store_width, pv_loop_order, use_cfvst,
- * use_exp2_fast and lds_k_group_pad are the policy arms, which the engine's score ranks
- * first among the arms sharing a tile and grid.
+ * Each forced row pins the body levers (lds_row_pad, pv_priority, lds_num_buffers,
+ * v_reg_prefetch, causal_diag_split, o_store_width, pv_loop_order, use_cfvst, use_exp2_fast,
+ * lds_k_group_pad) of its class's KNOB_CLASSES row, and its expected kernel id is resolved at
+ * run time from the production descriptors: the one kernel of the class and grid carrying
+ * those levers.
  *
  * A saved plan of one case, and of its LSE twin, is loaded with a new handle in both save
  * forms and must compute the original graph's CPU reference without selecting a kernel
@@ -98,9 +89,7 @@ namespace hip_kernel_provider::kernel_ingestor_engine::integration
 namespace
 {
 
-constexpr const char* ENGINE_NAME = "hipkernel:Gfx942AttentionDense";
-
-constexpr const char* SERVED_ARCH = "gfx942";
+constexpr ServedEngine ENGINE{"hipkernel:Gfx942AttentionDense", "gfx942"};
 
 constexpr const char* BLOCK_M_KNOB = "block_m";
 constexpr const char* BLOCK_N_KNOB = "block_n";
@@ -112,34 +101,6 @@ constexpr const char* PERSIST_DECODE_KNOB = "persist_decode";
 /// past which the engine's cold score prefers it at D128.
 constexpr int64_t NUM_PERSISTENT = 304;
 constexpr int64_t NARROW_WINDOW = 256;
-
-/// The policy arms of the two knobs the engine does not expose (the score's first rank).
-constexpr int64_t POLICY_LDS_ROW_PAD = 8;
-constexpr int64_t POLICY_PV_PRIORITY = 0;
-
-/// The policy arms of the body levers no case forces: no diagonal split, the 4-element O
-/// store, the d_major PV loop and the default K-group pad. use_cfvst and use_exp2_fast
-/// resolve per dtype, head size and grid (rocKE's _use_cfvst / _use_exp2_fast).
-constexpr int64_t POLICY_CAUSAL_DIAG_SPLIT = 0;
-constexpr int64_t POLICY_O_STORE_WIDTH = 4;
-constexpr const char* POLICY_PV_LOOP_ORDER = "d_major";
-constexpr int64_t POLICY_LDS_K_GROUP_PAD = 8;
-constexpr int64_t CFVST_HEAD_SIZE = 128;
-
-int64_t policyUseCfvst(int64_t headSize)
-{
-    return headSize == CFVST_HEAD_SIZE ? 1 : 0;
-}
-
-int64_t policyUseExp2Fast(bool bf16, int64_t headSize, bool persistent)
-{
-    return bf16 && headSize == CFVST_HEAD_SIZE && !persistent ? 0 : 1;
-}
-
-/// The heuristic path's selection line (GenericPlanBuilder::buildPlan), which names the
-/// kernel id as the kdp spells it: lowercase, hyphenated.
-constexpr const char* SELECTED_KERNEL_MARKER = "' selected kernel ";
-constexpr size_t KERNEL_ID_LENGTH = 36;
 
 // The knob case that the save and load cases build. Every launch value it saves is one a
 // swap or a dropped value would show: batch 2, seqlen_q 1024 against seqlen_kv 1536, 4
@@ -160,42 +121,8 @@ constexpr const char* SAVE_LOAD_PERSISTENT_LSE_CASE = "Persist_Gqa40x8WNotAMulti
 /// The suffix of an LSE row's name.
 constexpr const char* LSE_SUFFIX = "_Lse";
 
-constexpr int64_t Q_UID = 1;
-constexpr int64_t K_UID = 2;
-constexpr int64_t V_UID = 3;
-constexpr int64_t O_UID = 4;
-constexpr int64_t STATS_UID = 5;
-
-/// Every spelling of the masks the engine serves.
-enum class Mask
-{
-    NO_MASK,
-    BOUNDS_TOP_LEFT,
-    BOUNDS_BOTTOM_RIGHT,
-    CAUSAL_MASK_FLAG,
-    /// left_bound W, right_bound 0: a causal window of W keys.
-    WINDOW_TOP_LEFT,
-    WINDOW_BOTTOM_RIGHT
-};
-
-struct GraphShape
-{
-    DataType dataType;
-    int64_t headSize;
-    int64_t queryHeads;
-    int64_t kvHeads;
-    Mask mask;
-    /// The window in keys for the WINDOW_* masks; 0 otherwise.
-    int64_t window;
-    int64_t batch;
-    int64_t seqQ;
-    int64_t seqKv;
-    /// Leaves attn_scale_value unset, so the engine must apply 1.0 (no scaling).
-    bool omitScale = false;
-    std::optional<float> scaleOverride = std::nullopt;
-    /// Binds the stats (LSE) output, so the emit_lse twin serves the graph.
-    bool withStats = false;
-};
+using Mask = SdpaMask;
+using GraphShape = SdpaShape;
 
 struct Tile
 {
@@ -278,7 +205,7 @@ GraphShape makeShape(DataType dataType,
                      int64_t seqQ,
                      int64_t seqKv)
 {
-    return {dataType, headSize, queryHeads, kvHeads, mask, window, batch, seqQ, seqKv};
+    return {dataType, headSize, queryHeads, kvHeads, mask, batch, seqQ, seqKv, window};
 }
 
 std::string tileName(const Tile& tile)
@@ -543,127 +470,6 @@ std::vector<UnsatisfiableCase> unsatisfiableCases()
     };
 }
 
-/// BSHD: token-major, head varying fastest. The kernel bakes this layout.
-std::vector<int64_t> bshdStrides(int64_t heads, int64_t seq, int64_t headSize)
-{
-    return {seq * heads * headSize, headSize, heads * headSize, 1};
-}
-
-std::shared_ptr<TensorAttributes> makeBshdTensor(int64_t uid,
-                                                 const std::string& name,
-                                                 DataType dataType,
-                                                 int64_t batch,
-                                                 int64_t heads,
-                                                 int64_t seq,
-                                                 int64_t headSize)
-{
-    auto tensor = std::make_shared<TensorAttributes>();
-    tensor->set_uid(uid)
-        .set_name(name)
-        .set_dim({batch, heads, seq, headSize})
-        .set_stride(bshdStrides(heads, seq, headSize))
-        .set_data_type(dataType);
-    return tensor;
-}
-
-struct SdpaGraph
-{
-    std::shared_ptr<Graph> graph;
-    std::shared_ptr<TensorAttributes> output;
-    /// The stats (LSE) output, or nullptr for a graph that binds none.
-    std::shared_ptr<TensorAttributes> stats;
-};
-
-/// A single SDPA-forward node with BSHD Q/K/V/O. O is laid out explicitly: the frontend's
-/// default for an unset output is packed BHSD, which the engine declines. A shape with
-/// stats binds the stats output as the frontend does, FLOAT [B, Hq, Sq, 1], packed.
-SdpaGraph buildSdpaGraph(const std::string& name, const GraphShape& shape)
-{
-    auto graph = std::make_shared<Graph>();
-    graph->set_name(name)
-        .set_io_data_type(shape.dataType)
-        .set_intermediate_data_type(DataType::FLOAT)
-        .set_compute_data_type(DataType::FLOAT);
-
-    auto q = makeBshdTensor(
-        Q_UID, "Q", shape.dataType, shape.batch, shape.queryHeads, shape.seqQ, shape.headSize);
-    auto k = makeBshdTensor(
-        K_UID, "K", shape.dataType, shape.batch, shape.kvHeads, shape.seqKv, shape.headSize);
-    auto v = makeBshdTensor(
-        V_UID, "V", shape.dataType, shape.batch, shape.kvHeads, shape.seqKv, shape.headSize);
-
-    SdpaAttributes attributes;
-    attributes.set_name(name);
-    if(!shape.omitScale)
-    {
-        attributes.set_attn_scale(
-            shape.scaleOverride.value_or(1.0f / std::sqrt(static_cast<float>(shape.headSize))));
-    }
-    switch(shape.mask)
-    {
-    case Mask::NO_MASK:
-        break;
-    case Mask::BOUNDS_TOP_LEFT:
-        attributes.set_diagonal_band_right_bound(0);
-        attributes.set_diagonal_alignment(DiagonalAlignment::TOP_LEFT);
-        break;
-    case Mask::BOUNDS_BOTTOM_RIGHT:
-        attributes.set_diagonal_band_right_bound(0);
-        attributes.set_diagonal_alignment(DiagonalAlignment::BOTTOM_RIGHT);
-        break;
-    case Mask::CAUSAL_MASK_FLAG:
-        attributes.causal_mask = true;
-        break;
-    case Mask::WINDOW_TOP_LEFT:
-        attributes.set_diagonal_band_left_bound(shape.window);
-        attributes.set_diagonal_band_right_bound(0);
-        attributes.set_diagonal_alignment(DiagonalAlignment::TOP_LEFT);
-        break;
-    case Mask::WINDOW_BOTTOM_RIGHT:
-        attributes.set_diagonal_band_left_bound(shape.window);
-        attributes.set_diagonal_band_right_bound(0);
-        attributes.set_diagonal_alignment(DiagonalAlignment::BOTTOM_RIGHT);
-        break;
-    default:
-        throw std::invalid_argument("buildSdpaGraph: unhandled Mask value");
-    }
-    if(shape.withStats)
-    {
-        attributes.set_generate_stats(true);
-    }
-
-    auto outputs = graph->sdpa(q, k, v, attributes);
-    auto o = outputs[0];
-    o->set_uid(O_UID)
-        .set_name("O")
-        .set_output(true)
-        .set_data_type(shape.dataType)
-        .set_dim({shape.batch, shape.queryHeads, shape.seqQ, shape.headSize})
-        .set_stride(bshdStrides(shape.queryHeads, shape.seqQ, shape.headSize));
-
-    auto stats = outputs[1];
-    if(stats != nullptr)
-    {
-        stats->set_uid(STATS_UID)
-            .set_name("Stats")
-            .set_output(true)
-            .set_data_type(DataType::FLOAT)
-            .set_dim({shape.batch, shape.queryHeads, shape.seqQ, 1})
-            .set_stride({shape.queryHeads * shape.seqQ, shape.seqQ, 1, 1});
-    }
-    return {graph, o, stats};
-}
-
-/// The forward SDPA tolerance every SdpaFwd bundle of this engine is graded at
-/// (config/hipkernel_Gfx942AttentionDense.toml names no override).
-float sdpaForwardTolerance(DataType dataType)
-{
-    return dataType == DataType::HALF
-               ? hipdnn_test_sdk::utilities::sdpa::getToleranceFwd<hipdnn_data_sdk::types::half>()
-               : hipdnn_test_sdk::utilities::sdpa::getToleranceFwd<
-                     hipdnn_data_sdk::types::bfloat16>();
-}
-
 /// The FLOAT SDPA forward tolerance every stats output is graded at (the bundles' default;
 /// config/hipkernel_Gfx942AttentionDense.toml names no override).
 constexpr float LSE_TOLERANCE = hipdnn_test_sdk::utilities::sdpa::getToleranceFwd<float>();
@@ -742,155 +548,37 @@ std::vector<KnobSetting> knobSettingsFor(const Tile& tile,
     return settings;
 }
 
-/// A kernel metadata field and the value a case expects it to carry.
-using MetadataKey = std::vector<std::pair<std::string, hipdnn_plugin_sdk::ingestor::MetadataValue>>;
-
-std::string describeKey(const MetadataKey& key)
-{
-    std::string text;
-    for(const auto& [field, value] : key)
-    {
-        text += (text.empty() ? "" : " ") + field + "=";
-        std::visit(
-            [&text](const auto& alternative) {
-                using Alternative = std::decay_t<decltype(alternative)>;
-                if constexpr(std::is_same_v<Alternative, std::string>)
-                {
-                    text += alternative;
-                }
-                else if constexpr(std::is_arithmetic_v<Alternative>)
-                {
-                    text += std::to_string(alternative);
-                }
-            },
-            value);
-    }
-    return text;
-}
-
-/// The production descriptors HIPDNN_DESCRIPTOR_RUNTIME_DIR names, loaded once.
-const hipdnn_plugin_sdk::ingestor::DescriptorCatalog& runtimeCatalog()
-{
-    static const auto s_catalog = hipdnn_plugin_sdk::ingestor::loadDescriptorCatalog(
-        std::filesystem::path(hipdnn_data_sdk::utilities::getEnv("HIPDNN_DESCRIPTOR_RUNTIME_DIR")));
-    return s_catalog;
-}
-
-/// Calls @p visit for every kernel runtimeCatalog() serves this engine with on SERVED_ARCH.
-template <typename Visit>
-void forEachServedKernel(Visit&& visit)
-{
-    const auto& catalog = runtimeCatalog();
-    for(const auto& entry : catalog.packs)
-    {
-        const auto& pack = entry.second;
-        const auto& arch = pack.descriptor.arch;
-        const auto engine = catalog.engines.find(pack.descriptor.engineId);
-        if(pack.conflicted || engine == catalog.engines.end()
-           || engine->second.descriptor.name != ENGINE_NAME
-           || std::find(arch.begin(), arch.end(), SERVED_ARCH) == arch.end())
-        {
-            continue;
-        }
-        for(const auto& kernel : pack.descriptor.kernels)
-        {
-            visit(kernel);
-        }
-    }
-}
-
-std::string catalogDtypeName(DataType dataType)
-{
-    return dataType == DataType::HALF ? "FP16" : "BF16";
-}
-
-int64_t catalogCausal(Mask mask)
-{
-    return mask == Mask::NO_MASK ? 0 : 1;
-}
-
-/// The id of the one rank-zero kernel this engine's gfx942 packs carry for @p shape's
-/// semantic fields and @p tile, as the selection line spells it.
+/// The id of the one kernel this engine's gfx942 packs carry for @p shape's semantic fields,
+/// @p tile, @p grid and @p levers, as the selection line spells it, or nullopt (with a
+/// recorded failure) when that is not exactly one.
 std::optional<std::string> expectedKernelId(const GraphShape& shape,
                                             const Tile& tile,
                                             const Grid& grid,
-                                            const std::optional<Levers>& levers = std::nullopt)
+                                            const Levers& levers)
 {
-    if(hipdnn_data_sdk::utilities::getEnv("HIPDNN_DESCRIPTOR_RUNTIME_DIR").empty())
-    {
-        ADD_FAILURE() << "HIPDNN_DESCRIPTOR_RUNTIME_DIR is not set, so there are no production "
-                         "descriptors to read the expected kernel id from";
-        return std::nullopt;
-    }
-
-    MetadataKey key{
-        {"dtype", catalogDtypeName(shape.dataType)},
+    const detail::MetadataKey key{
+        {"dtype", detail::catalogDtypeName(shape.dataType)},
         {"head_size", shape.headSize},
-        {"causal", catalogCausal(shape.mask)},
+        {"causal", detail::catalogCausal(shape.mask)},
         {"ragged", int64_t{0}},
         {"sliding_window", shape.window},
         {"block_m", tile.blockM},
         {"block_n", tile.blockN},
-        {"lds_row_pad", POLICY_LDS_ROW_PAD},
-        {"pv_priority", POLICY_PV_PRIORITY},
+        {"lds_row_pad", levers.ldsRowPad},
+        {"pv_priority", levers.pvPriority},
         {"emit_lse", int64_t{shape.withStats ? 1 : 0}},
         {"persistent", int64_t{grid.persistent ? 1 : 0}},
         {grid.persistent ? "persist_decode" : "nonpersist_decode", grid.order},
-        {"lds_num_buffers", int64_t{1}},
-        {"v_reg_prefetch", int64_t{0}},
-        {"causal_diag_split", POLICY_CAUSAL_DIAG_SPLIT},
-        {"o_store_width", POLICY_O_STORE_WIDTH},
-        {"pv_loop_order", std::string(POLICY_PV_LOOP_ORDER)},
-        {"lds_k_group_pad", POLICY_LDS_K_GROUP_PAD},
-        {"use_cfvst", policyUseCfvst(shape.headSize)},
-        {"use_exp2_fast",
-         policyUseExp2Fast(shape.dataType != DataType::HALF, shape.headSize, grid.persistent)},
+        {"lds_num_buffers", levers.ldsNumBuffers},
+        {"v_reg_prefetch", levers.vRegPrefetch},
+        {"causal_diag_split", levers.causalDiagSplit},
+        {"o_store_width", levers.oStoreWidth},
+        {"pv_loop_order", std::string(levers.pvLoopOrder)},
+        {"lds_k_group_pad", levers.ldsKGroupPad},
+        {"use_cfvst", levers.useCfvst},
+        {"use_exp2_fast", levers.useExp2Fast},
     };
-    if(levers.has_value())
-    {
-        const auto set = [&key](std::string_view field,
-                                const hipdnn_plugin_sdk::ingestor::MetadataValue& value) {
-            for(auto& entry : key)
-            {
-                if(entry.first == field)
-                {
-                    entry.second = value;
-                }
-            }
-        };
-        set("lds_row_pad", levers->ldsRowPad);
-        set("pv_priority", levers->pvPriority);
-        set("lds_num_buffers", levers->ldsNumBuffers);
-        set("v_reg_prefetch", levers->vRegPrefetch);
-        set("causal_diag_split", levers->causalDiagSplit);
-        set("o_store_width", levers->oStoreWidth);
-        set("pv_loop_order", std::string(levers->pvLoopOrder));
-        set("use_cfvst", levers->useCfvst);
-        set("use_exp2_fast", levers->useExp2Fast);
-        set("lds_k_group_pad", levers->ldsKGroupPad);
-    }
-
-    std::vector<std::string> ids;
-    forEachServedKernel([&key, &ids](const hipdnn_plugin_sdk::ingestor::KernelDescriptor& kernel) {
-        const bool carriesKey = std::all_of(key.begin(), key.end(), [&kernel](const auto& field) {
-            const auto value = kernel.metadata.find(field.first);
-            return value != kernel.metadata.end() && value->second == field.second;
-        });
-        if(carriesKey)
-        {
-            ids.push_back(hipdnn_plugin_sdk::ingestor::toString(kernel.id));
-        }
-    });
-
-    if(ids.size() != 1)
-    {
-        ADD_FAILURE() << ids.size() << " " << ENGINE_NAME << " kernel(s) for " << SERVED_ARCH
-                      << " carry " << describeKey(key) << " under HIPDNN_DESCRIPTOR_RUNTIME_DIR='"
-                      << hipdnn_data_sdk::utilities::getEnv("HIPDNN_DESCRIPTOR_RUNTIME_DIR")
-                      << "'; exactly one must";
-        return std::nullopt;
-    }
-    return ids.front();
+    return detail::onlyServedKernelCarrying(ENGINE, key);
 }
 
 /// Whether the served kernel with id @p kernelId carries @p shape's semantic fields, @p tile
@@ -900,10 +588,10 @@ bool selectedIsOfClass(const std::string& kernelId,
                        const Tile& tile,
                        const Grid& grid)
 {
-    const MetadataKey key{
-        {"dtype", catalogDtypeName(shape.dataType)},
+    const detail::MetadataKey key{
+        {"dtype", detail::catalogDtypeName(shape.dataType)},
         {"head_size", shape.headSize},
-        {"causal", catalogCausal(shape.mask)},
+        {"causal", detail::catalogCausal(shape.mask)},
         {"sliding_window", shape.window},
         {"emit_lse", int64_t{shape.withStats ? 1 : 0}},
         {"block_m", tile.blockM},
@@ -913,21 +601,20 @@ bool selectedIsOfClass(const std::string& kernelId,
     };
     bool found = false;
     bool matches = false;
-    forEachServedKernel([&](const hipdnn_plugin_sdk::ingestor::KernelDescriptor& kernel) {
-        if(hipdnn_plugin_sdk::ingestor::toString(kernel.id) != kernelId)
-        {
-            return;
-        }
-        found = true;
-        matches = std::all_of(key.begin(), key.end(), [&kernel](const auto& field) {
-            const auto value = kernel.metadata.find(field.first);
-            return value != kernel.metadata.end() && value->second == field.second;
-        });
-    });
+    detail::forEachServedKernel(ENGINE,
+                                [&](const hipdnn_plugin_sdk::ingestor::KernelDescriptor& kernel) {
+                                    if(hipdnn_plugin_sdk::ingestor::toString(kernel.id) != kernelId)
+                                    {
+                                        return;
+                                    }
+                                    found = true;
+                                    matches = detail::carriesKey(kernel, key);
+                                });
     EXPECT_TRUE(found) << "no served kernel has id " << kernelId;
     if(found && !matches)
     {
-        ADD_FAILURE() << "kernel " << kernelId << " is not of the class " << describeKey(key);
+        ADD_FAILURE() << "kernel " << kernelId << " is not of the class "
+                      << detail::describeKey(key);
     }
     return found && matches;
 }
@@ -935,8 +622,8 @@ bool selectedIsOfClass(const std::string& kernelId,
 int64_t ordinalOf(const std::string& field, const std::string& value)
 {
     std::set<std::string> values;
-    forEachServedKernel(
-        [&field, &values](const hipdnn_plugin_sdk::ingestor::KernelDescriptor& kernel) {
+    detail::forEachServedKernel(
+        ENGINE, [&field, &values](const hipdnn_plugin_sdk::ingestor::KernelDescriptor& kernel) {
             const auto found = kernel.metadata.find(field);
             if(found != kernel.metadata.end())
             {
@@ -947,7 +634,7 @@ int64_t ordinalOf(const std::string& field, const std::string& value)
             }
         });
     const auto at = values.find(value);
-    EXPECT_NE(at, values.end()) << "no " << ENGINE_NAME << " kernel carries " << field << "="
+    EXPECT_NE(at, values.end()) << "no " << ENGINE.name << " kernel carries " << field << "="
                                 << value;
     return static_cast<int64_t>(std::distance(values.begin(), at));
 }
@@ -985,129 +672,16 @@ Grid coldGrid(const GraphShape& shape)
     return persistentGrid(balanced ? "bt_hkv_minor" : "qb_major");
 }
 
-/// The kernel id the plugin's selection line names, or nullopt when no plan was built.
-std::optional<std::string>
-    selectedKernelId(const hipdnn_test_sdk::utilities::IsolatedLogRecorder& recorder)
-{
-    const std::string marker = std::string("engine '") + ENGINE_NAME + SELECTED_KERNEL_MARKER;
-    for(const auto& log : recorder.getRecordedLogs())
-    {
-        const auto at = log.message.find(marker);
-        if(at != std::string::npos)
-        {
-            return log.message.substr(at + marker.size(), KERNEL_ID_LENGTH);
-        }
-    }
-    return std::nullopt;
-}
-
-/// Prints `KNOB_SELECTED <case> <kernelId>` when the case ends, however it ends.
-class SelectedKernelReport
-{
-public:
-    SelectedKernelReport(std::string caseName, const ScopedPluginLogCapture& capture)
-        : _caseName(std::move(caseName))
-        , _capture(capture)
-    {
-    }
-
-    ~SelectedKernelReport()
-    {
-        std::cout << "KNOB_SELECTED " << _caseName << " "
-                  << selectedKernelId(_capture.recorder()).value_or("none") << '\n';
-    }
-
-    SelectedKernelReport(const SelectedKernelReport&) = delete;
-    SelectedKernelReport& operator=(const SelectedKernelReport&) = delete;
-    SelectedKernelReport(SelectedKernelReport&&) = delete;
-    SelectedKernelReport& operator=(SelectedKernelReport&&) = delete;
-
-private:
-    std::string _caseName;
-    const ScopedPluginLogCapture& _capture;
-};
-
-bool advertises(const std::vector<Knob>& knobs, const std::string& knobId, int64_t value)
-{
-    const auto knob = std::find_if(knobs.begin(), knobs.end(), [&](const Knob& candidate) {
-        return candidate.knobId() == knobId;
-    });
-    if(knob == knobs.end())
-    {
-        return false;
-    }
-    const auto* constraint = dynamic_cast<const IntConstraint*>(knob->constraint());
-    return constraint != nullptr && constraint->getValidValues().count(value) > 0;
-}
-
 } // namespace
 
-/// Runs only on the architecture the engine ships for.
 template <typename TestCaseType>
-class IntegrationGpuGfx942AttentionDenseBase
-    : public IntegrationGraphVerificationHarness<float, TestCaseType>
+class IntegrationGpuGfx942AttentionDenseBase : public ServedEngineHarness<TestCaseType>
 {
 protected:
-    using Harness = IntegrationGraphVerificationHarness<float, TestCaseType>;
-
-    void SetUp() override
+    IntegrationGpuGfx942AttentionDenseBase()
+        : ServedEngineHarness<TestCaseType>(ENGINE, "gfx942-dense-knobs-case")
     {
-        Harness::SetUp();
-        if(this->IsSkipped() || this->HasFatalFailure())
-        {
-            return;
-        }
-
-        const auto arch = hip_kernel_provider_common::getDeviceString(this->_stream);
-        if(arch != SERVED_ARCH)
-        {
-            GTEST_SKIP() << ENGINE_NAME << " ships for " << SERVED_ARCH << " only; this device is "
-                         << arch;
-        }
     }
-
-    /// Offsets the seed by UID so Q, K and V carry different data.
-    void initializeBundle(const Graph& /*graph*/,
-                          hipdnn_test_sdk::utilities::GraphTensorBundle& bundle,
-                          unsigned int seed) override
-    {
-        for(auto& tensorPair : bundle.tensors)
-        {
-            bundle.randomizeTensor(tensorPair.first,
-                                   Harness::DEFAULT_MIN,
-                                   Harness::DEFAULT_MAX,
-                                   seed + static_cast<unsigned int>(tensorPair.first));
-        }
-    }
-
-    static int64_t engineId()
-    {
-        return hipdnn_data_sdk::utilities::engineNameToId(ENGINE_NAME);
-    }
-
-    void buildOperationGraphTheEngineOffersToServe(Graph& graph)
-    {
-        auto result = graph.build_operation_graph(this->_handle);
-        ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-
-        std::vector<int64_t> rankedEngineIds;
-        result = graph.get_ranked_engine_ids(rankedEngineIds);
-        const bool offered
-            = result.code == ErrorCode::OK
-              && std::find(rankedEngineIds.begin(), rankedEngineIds.end(), engineId())
-                     != rankedEngineIds.end();
-        ASSERT_TRUE(offered) << ENGINE_NAME << " did not offer to serve this graph on "
-                             << SERVED_ARCH << " (" << result.err_msg
-                             << "). Its packed descriptors load through "
-                             << "HIPDNN_DESCRIPTOR_RUNTIME_DIR='"
-                             << hipdnn_data_sdk::utilities::getEnv("HIPDNN_DESCRIPTOR_RUNTIME_DIR")
-                             << "'; this configuration must pack the production descriptors for "
-                             << SERVED_ARCH << ".";
-    }
-
-    /// A cache root private to ONE test case, so no other case's winner record is reused.
-    hipdnn_test_sdk::utilities::ScopedTestCacheDir _cacheDir{
-        "gfx942-dense-knobs-case", hipdnn_test_sdk::utilities::ScopedTestCacheDir::Scope::TEST};
 };
 
 using IntegrationGpuGfx942AttentionDenseKnobs = IntegrationGpuGfx942AttentionDenseBase<KnobCase>;
@@ -1120,7 +694,7 @@ using IntegrationGpuGfx942AttentionDenseSwzLegality
 
 /// Every row runs one compiled kernel, and what the compiler specializes on is the head
 /// size, dtype, causal flag, window, LSE and tile. The table must run every such class the
-/// catalog carries at its policy arms, and nothing the catalog lacks.
+/// catalog carries, and nothing the catalog lacks.
 TEST_F(IntegrationGpuGfx942AttentionDenseKnobCoverage, CoversEveryCatalogKernelClass)
 {
     ASSERT_FALSE(hipdnn_data_sdk::utilities::getEnv("HIPDNN_DESCRIPTOR_RUNTIME_DIR").empty())
@@ -1145,8 +719,8 @@ TEST_F(IntegrationGpuGfx942AttentionDenseKnobCoverage, CoversEveryCatalogKernelC
             continue;
         }
         tableClasses.emplace(knobCase.shape.headSize,
-                             catalogDtypeName(knobCase.shape.dataType),
-                             catalogCausal(knobCase.shape.mask),
+                             detail::catalogDtypeName(knobCase.shape.dataType),
+                             detail::catalogCausal(knobCase.shape.mask),
                              knobCase.shape.window,
                              int64_t{knobCase.shape.withStats ? 1 : 0},
                              knobCase.tile.blockM,
@@ -1156,49 +730,52 @@ TEST_F(IntegrationGpuGfx942AttentionDenseKnobCoverage, CoversEveryCatalogKernelC
     }
 
     std::set<KernelClass> catalogClasses;
-    forEachServedKernel([&catalogClasses](
-                            const hipdnn_plugin_sdk::ingestor::KernelDescriptor& kernel) {
-        const auto intField = [&kernel](const char* field) -> const int64_t* {
-            const auto value = kernel.metadata.find(field);
-            return value == kernel.metadata.end() ? nullptr : std::get_if<int64_t>(&value->second);
-        };
-        const auto dtype = kernel.metadata.find("dtype");
-        const auto* dtypeName
-            = dtype == kernel.metadata.end() ? nullptr : std::get_if<std::string>(&dtype->second);
-        const auto* headSize = intField("head_size");
-        const auto* causal = intField("causal");
-        const auto* window = intField("sliding_window");
-        const auto* emitLse = intField("emit_lse");
-        const auto* blockM = intField("block_m");
-        const auto* blockN = intField("block_n");
-        const auto* persistent = intField("persistent");
-        const auto stringField = [&kernel](const char* field) -> const std::string* {
-            const auto value = kernel.metadata.find(field);
-            return value == kernel.metadata.end() ? nullptr
-                                                  : std::get_if<std::string>(&value->second);
-        };
-        const auto* order = persistent != nullptr && *persistent == 1
-                                ? stringField("persist_decode")
-                                : stringField("nonpersist_decode");
-        if(dtypeName == nullptr || headSize == nullptr || causal == nullptr || window == nullptr
-           || emitLse == nullptr || blockM == nullptr || blockN == nullptr || persistent == nullptr
-           || order == nullptr)
-        {
-            ADD_FAILURE() << "kernel " << hipdnn_plugin_sdk::ingestor::toString(kernel.id)
-                          << " carries no string dtype and grid decode, and integer head_size, "
-                             "causal, sliding_window, emit_lse, block_m, block_n and persistent";
-            return;
-        }
-        catalogClasses.emplace(*headSize,
-                               *dtypeName,
-                               *causal,
-                               *window,
-                               *emitLse,
-                               *blockM,
-                               *blockN,
-                               *persistent,
-                               *order);
-    });
+    detail::forEachServedKernel(
+        ENGINE, [&catalogClasses](const hipdnn_plugin_sdk::ingestor::KernelDescriptor& kernel) {
+            const auto intField = [&kernel](const char* field) -> const int64_t* {
+                const auto value = kernel.metadata.find(field);
+                return value == kernel.metadata.end() ? nullptr
+                                                      : std::get_if<int64_t>(&value->second);
+            };
+            const auto dtype = kernel.metadata.find("dtype");
+            const auto* dtypeName = dtype == kernel.metadata.end()
+                                        ? nullptr
+                                        : std::get_if<std::string>(&dtype->second);
+            const auto* headSize = intField("head_size");
+            const auto* causal = intField("causal");
+            const auto* window = intField("sliding_window");
+            const auto* emitLse = intField("emit_lse");
+            const auto* blockM = intField("block_m");
+            const auto* blockN = intField("block_n");
+            const auto* persistent = intField("persistent");
+            const auto stringField = [&kernel](const char* field) -> const std::string* {
+                const auto value = kernel.metadata.find(field);
+                return value == kernel.metadata.end() ? nullptr
+                                                      : std::get_if<std::string>(&value->second);
+            };
+            const auto* order = persistent != nullptr && *persistent == 1
+                                    ? stringField("persist_decode")
+                                    : stringField("nonpersist_decode");
+            if(dtypeName == nullptr || headSize == nullptr || causal == nullptr || window == nullptr
+               || emitLse == nullptr || blockM == nullptr || blockN == nullptr
+               || persistent == nullptr || order == nullptr)
+            {
+                ADD_FAILURE()
+                    << "kernel " << hipdnn_plugin_sdk::ingestor::toString(kernel.id)
+                    << " carries no string dtype and grid decode, and integer head_size, "
+                       "causal, sliding_window, emit_lse, block_m, block_n and persistent";
+                return;
+            }
+            catalogClasses.emplace(*headSize,
+                                   *dtypeName,
+                                   *causal,
+                                   *window,
+                                   *emitLse,
+                                   *blockM,
+                                   *blockN,
+                                   *persistent,
+                                   *order);
+        });
 
     const auto onlyIn = [](const std::set<KernelClass>& from, const std::set<KernelClass>& other) {
         std::string text;
@@ -1243,10 +820,10 @@ TEST_P(IntegrationGpuGfx942AttentionDenseKnobs, SelectsTheExpectedKernelAndMatch
     const auto& testCase = GetParam();
 
     const ScopedPluginLogCapture capture(this);
-    const SelectedKernelReport report(testCase.name, capture);
+    const detail::SelectedKernelReport report(ENGINE, testCase.name, capture);
     const auto& recorder = capture.recorder();
 
-    auto sdpa = buildSdpaGraph(testCase.name, testCase.shape);
+    auto sdpa = detail::buildSdpaGraph(testCase.name, testCase.shape);
     ASSERT_NO_FATAL_FAILURE(buildOperationGraphTheEngineOffersToServe(*sdpa.graph));
 
     const auto settings = testCase.forced
@@ -1262,9 +839,9 @@ TEST_P(IntegrationGpuGfx942AttentionDenseKnobs, SelectsTheExpectedKernelAndMatch
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg << "\nCaptured logs:\n"
                                           << recorder.getRecordedLogsAsString();
 
-    const auto selected = selectedKernelId(recorder);
+    const auto selected = detail::selectedKernelId(ENGINE, recorder);
     ASSERT_TRUE(selected.has_value())
-        << "no selection line from " << ENGINE_NAME << ". Captured logs:\n"
+        << "no selection line from " << ENGINE.name << ". Captured logs:\n"
         << recorder.getRecordedLogsAsString();
 
     const auto grid = testCase.forced ? testCase.grid : coldGrid(testCase.shape);
@@ -1272,8 +849,10 @@ TEST_P(IntegrationGpuGfx942AttentionDenseKnobs, SelectsTheExpectedKernelAndMatch
     if(testCase.forced)
     {
         // Tile, grid and levers pinned: exactly one kernel.
+        ASSERT_TRUE(testCase.levers.has_value())
+            << "no KNOB_CLASSES row is of this forced case's class, so nothing pins its levers";
         const auto expectedId
-            = expectedKernelId(testCase.shape, testCase.tile, grid, testCase.levers);
+            = expectedKernelId(testCase.shape, testCase.tile, grid, *testCase.levers);
         ASSERT_TRUE(expectedId.has_value());
         EXPECT_EQ(*selected, *expectedId) << "Captured logs:\n"
                                           << recorder.getRecordedLogsAsString();
@@ -1290,13 +869,13 @@ TEST_P(IntegrationGpuGfx942AttentionDenseKnobs, SelectsTheExpectedKernelAndMatch
 
     // Rank 0: the selected kernel heads the ranking, rather than being reached past a
     // kernel that failed to load.
-    const auto selectionLine = std::string(SELECTED_KERNEL_MARKER) + headId + " at rank 0";
+    const auto selectionLine = std::string(detail::SELECTED_KERNEL_LOG) + headId + " at rank 0";
     EXPECT_TRUE(recorder.hasLogContaining(selectionLine))
         << "expected '" << selectionLine << "'. Captured logs:\n"
         << recorder.getRecordedLogsAsString();
 
     GraphVerificationContext context(*sdpa.graph);
-    const float tolerance = sdpaForwardTolerance(testCase.shape.dataType);
+    const float tolerance = detail::sdpaForwardTolerance(testCase.shape.dataType);
     registerValidator(context, sdpa.output, tolerance, tolerance);
     ASSERT_EQ(sdpa.stats != nullptr, testCase.shape.withStats);
     if(sdpa.stats != nullptr)
@@ -1316,16 +895,16 @@ TEST_P(IntegrationGpuGfx942AttentionDenseKnobFilter, RefusesAKnobPairNoKernelCar
     const ScopedPluginLogCapture capture(this);
     const auto& recorder = capture.recorder();
 
-    auto sdpa = buildSdpaGraph(testCase.name, testCase.shape);
+    auto sdpa = detail::buildSdpaGraph(testCase.name, testCase.shape);
     ASSERT_NO_FATAL_FAILURE(buildOperationGraphTheEngineOffersToServe(*sdpa.graph));
 
     std::vector<Knob> knobs;
     auto result = sdpa.graph->get_knobs_for_engine(engineId(), knobs);
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-    ASSERT_TRUE(advertises(knobs, BLOCK_M_KNOB, testCase.forcedTile.blockM))
+    ASSERT_TRUE(detail::advertises(knobs, BLOCK_M_KNOB, testCase.forcedTile.blockM))
         << BLOCK_M_KNOB << "=" << testCase.forcedTile.blockM
         << " is not advertised for this graph, so the frontend refuses it before the plugin";
-    ASSERT_TRUE(advertises(knobs, BLOCK_N_KNOB, testCase.forcedTile.blockN))
+    ASSERT_TRUE(detail::advertises(knobs, BLOCK_N_KNOB, testCase.forcedTile.blockN))
         << BLOCK_N_KNOB << "=" << testCase.forcedTile.blockN
         << " is not advertised for this graph, so the frontend refuses it before the plugin";
 
@@ -1334,7 +913,7 @@ TEST_P(IntegrationGpuGfx942AttentionDenseKnobFilter, RefusesAKnobPairNoKernelCar
     EXPECT_EQ(result.code, ErrorCode::HIPDNN_BACKEND_ERROR) << result.err_msg;
 
     const std::string refusal
-        = std::string("engine '") + ENGINE_NAME + "' has no kernel satisfying";
+        = std::string("engine '") + ENGINE.name + "' has no kernel satisfying";
     EXPECT_NE(result.err_msg.find(refusal), std::string::npos)
         << "expected '" << refusal << "' in: " << result.err_msg;
 
@@ -1345,14 +924,16 @@ TEST_P(IntegrationGpuGfx942AttentionDenseKnobFilter, RefusesAKnobPairNoKernelCar
     EXPECT_NE(sdpa.graph->get_execution_plan_engine_id(planEngineId).code, ErrorCode::OK)
         << "a plan backed by engine " << planEngineId << " exists";
 
-    EXPECT_FALSE(selectedKernelId(recorder).has_value()) << "Captured logs:\n"
-                                                         << recorder.getRecordedLogsAsString();
+    EXPECT_FALSE(detail::selectedKernelId(ENGINE, recorder).has_value())
+        << "Captured logs:\n"
+        << recorder.getRecordedLogsAsString();
 }
 
 /// hq_minor_swz at Hq = 12 drops and repeats work items, so the engine never offers its
 /// kernels to such a graph: neither grid's hq_minor_swz ordinal is advertised (while a
-/// graph with Hq = 16 is offered both; fp16 D128 causal ships both swz arms), and the graph forced to the persistent grid at the
-/// swz kernels' tile is served by the bt_hkv_minor arm and matches the CPU reference.
+/// graph with Hq = 16 is offered both; fp16 D128 causal ships both swz arms), and the graph
+/// forced to the persistent grid at the swz kernels' tile is served by the bt_hkv_minor arm
+/// and matches the CPU reference.
 TEST_F(IntegrationGpuGfx942AttentionDenseSwzLegality, NeverOffersAnHqMinorSwzKernelAtHq12)
 {
     const auto twelve
@@ -1363,20 +944,20 @@ TEST_F(IntegrationGpuGfx942AttentionDenseSwzLegality, NeverOffersAnHqMinorSwzKer
     const int64_t persistentSwz = ordinalOf(PERSIST_DECODE_KNOB, "hq_minor_swz");
     for(const auto& [shape, offered] : {std::pair{sixteen, true}, std::pair{twelve, false}})
     {
-        auto sdpa = buildSdpaGraph("SwzLegality", shape);
+        auto sdpa = detail::buildSdpaGraph("SwzLegality", shape);
         ASSERT_NO_FATAL_FAILURE(buildOperationGraphTheEngineOffersToServe(*sdpa.graph));
         std::vector<Knob> knobs;
         const auto result = sdpa.graph->get_knobs_for_engine(engineId(), knobs);
         ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-        EXPECT_EQ(advertises(knobs, NONPERSIST_DECODE_KNOB, gridSwz), offered)
+        EXPECT_EQ(detail::advertises(knobs, NONPERSIST_DECODE_KNOB, gridSwz), offered)
             << "Hq " << shape.queryHeads;
-        EXPECT_EQ(advertises(knobs, PERSIST_DECODE_KNOB, persistentSwz), offered)
+        EXPECT_EQ(detail::advertises(knobs, PERSIST_DECODE_KNOB, persistentSwz), offered)
             << "Hq " << shape.queryHeads;
     }
 
     const ScopedPluginLogCapture capture(this);
     const auto& recorder = capture.recorder();
-    auto sdpa = buildSdpaGraph("SwzLegalityHq12", twelve);
+    auto sdpa = detail::buildSdpaGraph("SwzLegalityHq12", twelve);
     ASSERT_NO_FATAL_FAILURE(buildOperationGraphTheEngineOffersToServe(*sdpa.graph));
     std::vector<KnobSetting> settings;
     settings.emplace_back(BLOCK_M_KNOB, int64_t{256});
@@ -1389,14 +970,14 @@ TEST_F(IntegrationGpuGfx942AttentionDenseSwzLegality, NeverOffersAnHqMinorSwzKer
     result = sdpa.graph->build_plans();
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 
-    const auto selected = selectedKernelId(recorder);
+    const auto selected = detail::selectedKernelId(ENGINE, recorder);
     ASSERT_TRUE(selected.has_value());
     EXPECT_TRUE(selectedIsOfClass(*selected, twelve, Tile{256, 64}, persistentGrid("bt_hkv_minor")))
         << "Captured logs:\n"
         << recorder.getRecordedLogsAsString();
 
     GraphVerificationContext context(*sdpa.graph);
-    const float tolerance = sdpaForwardTolerance(twelve.dataType);
+    const float tolerance = detail::sdpaForwardTolerance(twelve.dataType);
     registerValidator(context, sdpa.output, tolerance, tolerance);
     verifyBuiltGraph(context, /*seed=*/0);
 }
@@ -1420,7 +1001,7 @@ protected:
         ASSERT_TRUE(found->forced);
         const KnobCase& knobCase = *found;
 
-        auto sdpa = buildSdpaGraph(knobCase.name, knobCase.shape);
+        auto sdpa = detail::buildSdpaGraph(knobCase.name, knobCase.shape);
         {
             const ScopedPluginLogCapture capture(this);
             ASSERT_NO_FATAL_FAILURE(this->buildOperationGraphTheEngineOffersToServe(*sdpa.graph));
@@ -1456,7 +1037,7 @@ protected:
         VerificationRun run;
         {
             GraphVerificationContext context(*sdpa.graph);
-            const float tolerance = sdpaForwardTolerance(knobCase.shape.dataType);
+            const float tolerance = detail::sdpaForwardTolerance(knobCase.shape.dataType);
             ASSERT_NO_FATAL_FAILURE(
                 this->registerValidator(context, sdpa.output, tolerance, tolerance));
             ASSERT_EQ(sdpa.stats != nullptr, knobCase.shape.withStats);
