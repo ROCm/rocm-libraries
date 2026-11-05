@@ -1014,9 +1014,11 @@ class LogicalScheduler:
         )
         if not candidate:
             self._scaleShadowPlan = []
+            self._lateScalePrefetch = []
             return self._scaleShadowPlan
 
-        from .InstructionScheduler import selectScaleShadowPlan
+        from .InstructionScheduler import (
+            selectLateScalePrefetch, selectScaleShadowPlan)
 
         firstPartitionMfmas = (
             (first['A'][1] - first['A'][0])
@@ -1041,6 +1043,10 @@ class LogicalScheduler:
         assert plan and len(plan["entry"]) == expectedReads, \
             "supported scale-shadow topology did not cover C0 P0 scales"
         self._scaleShadowPlan = plan
+        self._lateScalePrefetch = selectLateScalePrefetch(
+            plan.get("deferred", []),
+            getattr(self, "_lateScaleExtra", {}),
+            plan.get("writeFloor", {}))
         return plan
 
     @staticmethod
@@ -1051,10 +1057,18 @@ class LogicalScheduler:
             "Seed ScaleA/ScaleB reads needed by C0 partition zero")
         for entry in plan:
             read = copy.deepcopy(entry["readTemplate"])
-            read.comment = (
-                "preloop seed for C0 entry scale; "
-                f"{entry['tensor']} canonical=v{entry['canonicalVgpr']}"
-            )
+            staged = entry.get("extraVgpr")
+            if staged is None:
+                read.comment = (
+                    "preloop seed for C0 entry scale; "
+                    f"{entry['tensor']} canonical=v{entry['canonicalVgpr']}"
+                )
+            else:
+                read.comment = (
+                    "preloop seed for staged next-epoch scale; "
+                    f"{entry['tensor']} staged=v{staged} "
+                    f"canonical=v{entry['canonicalVgpr']}"
+                )
             module.add(read)
         return module
 
@@ -5001,7 +5015,11 @@ class LogicalScheduler:
         from .InstructionScheduler import (
             appendC1ScaleShadowReads,
             dropEntryScaleReads,
+            guardExitOverwriteReread,
+            insertPrefetchedScaleCopies,
             instructionSchedule,
+            placeLateScalePrefetchSpills,
+            restoreCanonicalScaleReads,
             relaxWaitGrForOutstandingStores,
             spillC0ScaleRefreshes,
             _MIN_MFMA_GAP_DS_READ_TO_WAIT_DEFAULT,
@@ -5048,6 +5066,9 @@ class LogicalScheduler:
                 {
                     entry["canonicalVgpr"]
                     for entry in self._scaleShadowPlan["entry"]
+                } | {
+                    entry["canonicalVgpr"]
+                    for entry in getattr(self, "_lateScalePrefetch", [])
                 })
             write_floor = self._scaleShadowPlan.get("writeFloor", {})
         for pi, partition_emitted in enumerate(emitted_3d):
@@ -5171,6 +5192,35 @@ class LogicalScheduler:
                 assert spillC0ScaleRefreshes(
                     self._mainloopC0Schedule, leftovers, c1Mfmas), \
                     "scale shadowing could not spill C1 tail refreshes"
+            prefetch = getattr(self, "_lateScalePrefetch", [])
+            if prefetch:
+                # A scale with no legal staging shadow keeps the C0 read
+                # that was dropped for the prefetch. The kernel still builds.
+                staged = appendC1ScaleShadowReads(
+                    module, prefetch, finalPartitionMfmas,
+                    ignoreSourceWar=True)
+                if staged is None:
+                    restoreCanonicalScaleReads(
+                        self._mainloopC0Schedule, prefetch)
+                else:
+                    stagedLeft, _c1Mfmas = staged
+                    stageable = list(prefetch)
+                    if stagedLeft:
+                        unspilled = placeLateScalePrefetchSpills(
+                            self._mainloopC0Schedule, stagedLeft)
+                        if unspilled:
+                            restoreCanonicalScaleReads(
+                                self._mainloopC0Schedule, unspilled)
+                            skipped = {
+                                entry["canonicalVgpr"] for entry in unspilled}
+                            stageable = [
+                                entry for entry in stageable
+                                if entry["canonicalVgpr"] not in skipped]
+                    uncopied = insertPrefetchedScaleCopies(
+                        self._mainloopC0Schedule, stageable)
+                    if uncopied:
+                        restoreCanonicalScaleReads(
+                            self._mainloopC0Schedule, uncopied)
         if self._scaleShadowPlan and label == "NGLL_C0":
             # C0 leaves the current scale epoch in the entry VGPRs. NGLL
             # still consumes that epoch. NLL is the next epoch, and its
@@ -5210,6 +5260,9 @@ class LogicalScheduler:
         module = insertClusterBarrier(module, writer, kernel)
         if label == "MAINLOOP_C0":
             self._mainloopC0Schedule = module
+        if label.startswith("NGLL") or label.startswith("NLL"):
+            module = guardExitOverwriteReread(
+                module, getattr(self, "_earlyOverwriteVgprs", ()))
         return module
 
     def _emit_pgr2_tail_lw_align(self, kernel):
@@ -6782,6 +6835,10 @@ class LogicalScheduler:
             # entries all reach their first scaled MFMA with initialized data.
             self._insertScaleShadowSeed(
                 preloop, self._scaleShadowPlan["entry"])
+            if getattr(self, "_lateScalePrefetch", None):
+                self._insertScaleShadowSeed(
+                    preloop, self._lateScalePrefetch)
+        self._preloopSchedule = preloop
         module.add(preloop)
         return module
 
@@ -6812,24 +6869,20 @@ class LogicalScheduler:
             from rocisa.container import mgpr
             from rocisa.instruction import SMovB32 as _SMovB32
             from rocisa.instruction import STtraceData as _STtraceData
+        bodies = []
+        setups = []
+        branches = []
         for ui in range(uf):
-            if emitTraceMarker:
-                # Mainloop iteration marker for SQTT / trace decoder: write
-                # LoopCounterL into M0 then emit it via s_ttracedata. Decoder
-                # only uses low 8 bits, so M0 wrap past 256 is fine.
-                module.add(_SMovB32(dst=mgpr(0), src=sgpr("LoopCounterL"),
-                                    comment="trace: M0 = LoopCounterL"))
-                module.add(_STtraceData(comment="trace: emit M0 to SQTT"))
-            loopBody = self._emitLoop(writer, kernel, f"MAINLOOP_C{ui}",
-                                      self._emitted_per_unroll[ui])
+            bodies.append(self._emitLoop(writer, kernel, f"MAINLOOP_C{ui}",
+                                         self._emitted_per_unroll[ui]))
             # dec + compare that produce the SCC the loop-control branch reads.
-            setupInsts = [
+            setups.append([
                 SSubU32(dst=sgpr("LoopCounterL"),
                         src0=sgpr("LoopCounterL"), src1=1,
                         comment=f"dec counterL (copy {ui})"),
                 SCmpEQU32(src0=sgpr("LoopCounterL"), src1=exitValue,
                           comment=f"counterL == {exitValue}? (copy {ui} exit)"),
-            ]
+            ])
             if ui < uf - 1:
                 if plsin:
                     branch = writer.longBranchScc1(
@@ -6843,7 +6896,28 @@ class LogicalScheduler:
                 branch = SCBranchSCC0(
                     labelName=loopBegin.getLabelName(),
                     comment="restart mainloop")
-            _emitBodySetupBranch(module, loopBody, setupInsts, branch, hoist=isGfx1250)
+            branches.append(branch)
+        # Both copies exist, so a mustPrecede read whose VGPRs are free can
+        # move into the other copy's tail. The preloop covers the first C0.
+        from .InstructionScheduler import (
+            relocatePartitionZeroOverwriteReads,
+            _MIN_MFMA_GAP_DS_READ_TO_WAIT_DEFAULT,
+            _MIN_MFMA_GAP_DS_READ_TO_WAIT_GFX1250,
+        )
+        sourceGap = (_MIN_MFMA_GAP_DS_READ_TO_WAIT_GFX1250
+                     if isGfx1250 else _MIN_MFMA_GAP_DS_READ_TO_WAIT_DEFAULT)
+        self._earlyOverwriteVgprs = relocatePartitionZeroOverwriteReads(
+            bodies, getattr(self, "_preloopSchedule", None), sourceGap)
+        for ui in range(uf):
+            if emitTraceMarker:
+                # Mainloop iteration marker for SQTT / trace decoder: write
+                # LoopCounterL into M0 then emit it via s_ttracedata. Decoder
+                # only uses low 8 bits, so M0 wrap past 256 is fine.
+                module.add(_SMovB32(dst=mgpr(0), src=sgpr("LoopCounterL"),
+                                    comment="trace: M0 = LoopCounterL"))
+                module.add(_STtraceData(comment="trace: emit M0 to SQTT"))
+            _emitBodySetupBranch(
+                module, bodies[ui], setups[ui], branches[ui], hoist=isGfx1250)
         return module
 
     def emitMainAndExitLoops(self, writer, kernel, tensorParametersA=None, tensorParametersB=None):
@@ -6869,6 +6943,11 @@ class LogicalScheduler:
 
         assert self._emitter is not None, \
             "populate_instructions() must be called first"
+
+        from .InstructionScheduler import clearPartitionZeroOverwriteMarks
+        clearPartitionZeroOverwriteMarks()
+        self._earlyOverwriteVgprs = ()
+        self._preloopSchedule = None
 
         module = Module("MainAndExitLoops")
         uf = self.unroll_factor
@@ -7061,6 +7140,7 @@ class LogicalScheduler:
                                        comment="skip other exit paths"))
 
         module.add(endLabel)
+        clearPartitionZeroOverwriteMarks()
 
         return module
 
@@ -7140,6 +7220,72 @@ class LogicalScheduler:
                 totals.append(_total_for(self._tail_own_peaks))
         return max(totals)
 
+    def _late_scale_groups(self):
+        """Scale groups whose first consumer is outside partition zero.
+
+        Partition zero's groups are refreshed in place. The rest are still
+        sources of the last C1 MFMAs, so the next epoch needs its own VGPR.
+        """
+        cfg = self.config
+        if not cfg.dualPeriodScale or not cfg.hasScale:
+            return []
+        if cfg.numPartitions < 2:
+            return []
+        first = self._partition_tile_range(0)
+        if first['A'][0] != 0 or first['B'][0] != 0:
+            return []
+        groups = []
+        for tensor, gran, num_tiles, side in (
+                ('SA', cfg.lrSA, cfg.numMFMATilesM, 'A'),
+                ('SB', cfg.lrSB, cfg.numMFMATilesN, 'B')):
+            if gran is None:
+                continue
+            start, end = first[side]
+            covered = set(range(start, end, gran.mn))
+            for group in range(0, num_tiles, gran.mn):
+                if group not in covered:
+                    groups.append((tensor, group))
+        return groups
+
+    def _canonical_scale_vgpr(self, tensor, group):
+        tiles = self.vgprTilesSA if tensor == 'SA' else self.vgprTilesSB
+        for partition in self._partitions:
+            for slot in partition:
+                for lr in slot.lrs:
+                    if lr.tensor != tensor:
+                        continue
+                    for tile_map in lr.vgpr_tile_map:
+                        if group not in tile_map:
+                            continue
+                        return next(iter(tiles[tile_map[group]]))
+        return None
+
+    def _alloc_late_scale_prefetch(self, writer):
+        """Check out staging VGPRs for late scales when occupancy holds.
+
+        The checkout is the pool's next register, not a hardcoded index in
+        the accumulator pad. It is taken only when the padded count stays
+        in the same 8-register block the accumulators already start on.
+        """
+        from .InstructionScheduler import scale_prefetch_fits
+
+        self._lateScaleExtra = {}
+        self._lateScaleExtraTiles = []
+        self._lateScalePrefetch = []
+        pairs = []
+        for tensor, group in self._late_scale_groups():
+            canonical = self._canonical_scale_vgpr(tensor, group)
+            if canonical is None:
+                self._lateScaleExtra = {}
+                return
+            pairs.append(canonical)
+        if not scale_prefetch_fits(writer.vgprPool.size(), len(pairs)):
+            return
+        for canonical in pairs:
+            tile = _checkout_tile(writer.vgprPool, 1, "lateScalePrefetch")
+            self._lateScaleExtraTiles.append(tile)
+            self._lateScaleExtra[canonical] = next(iter(tile))
+
     def allocVgprTiles(self, writer, tileInfoA, tileInfoB,
                        scaleTileInfoA=None, scaleTileInfoB=None):
         """Allocate physical VGPR tiles based on assign_vgpr_tiles() peaks.
@@ -7178,6 +7324,8 @@ class LogicalScheduler:
             self.vgprTilesSA = []
             self.vgprTilesSB = []
 
+        self._alloc_late_scale_prefetch(writer)
+
         # Stash tile-info so _realloc_tail_tiles_flat can reallocate the
         # tail's flat tile set without the caller plumbing them in again.
         self._alloc_tile_info = {
@@ -7200,6 +7348,10 @@ class LogicalScheduler:
         _dealloc_tiles(self.vgprTilesB,  self._tail_freed_tile_ids['B'])
         _dealloc_tiles(self.vgprTilesSA, self._tail_freed_tile_ids['SA'])
         _dealloc_tiles(self.vgprTilesSB, self._tail_freed_tile_ids['SB'])
+        for tile in getattr(self, "_lateScaleExtraTiles", []):
+            _checkin_tile(tile)
+        self._lateScaleExtraTiles = []
+        self._lateScaleExtra = {}
         self.vgprTilesA = []
         self.vgprTilesB = []
         self.vgprTilesSA = []

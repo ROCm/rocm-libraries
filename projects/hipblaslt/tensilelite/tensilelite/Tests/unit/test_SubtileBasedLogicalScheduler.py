@@ -5161,6 +5161,122 @@ class TestPartitionZeroIssueOrder:
         assert payload_order == [1]
         assert [inst.comment for _, inst in payload] == ["A later"]
 
+    def test_overwrite_reads_move_to_the_previous_k_when_vgprs_are_free(self):
+        """A mustPrecede ds_read leaves the prefix once its dest is dead.
+
+        The previous copy has to have flipped the LDS pointer, and four
+        MFMAs have to have issued after the last reader. The first copy
+        is also seeded after the preloop barrier. A dest that is still
+        live stays in front of the entry wait.
+        """
+        from rocisa.code import Module
+        from rocisa.container import DSModifiers, vgpr
+        from rocisa.enum import InstType
+        from rocisa.instruction import (
+            DSLoadB128, MXMFMAInstruction, SBarrier, SWaitCnt, VXorB32)
+        from tensilelite.Components.Subtile.InstructionScheduler import (
+            _p0OverwriteReadIds,
+            clearPartitionZeroOverwriteMarks,
+            guardExitOverwriteReread,
+            relocatePartitionZeroOverwriteReads,
+        )
+
+        def mfma(start, comment):
+            return MXMFMAInstruction(
+                instType=InstType.INST_F32, accType=InstType.INST_F32,
+                variant=[16, 16, 128], acc=vgpr(0, 4),
+                a=vgpr(start, 8), b=vgpr(84, 8),
+                mxsa=vgpr(17), mxsb=vgpr(18), comment=comment)
+
+        def other_read(comment):
+            return DSLoadB128(
+                dst=vgpr(20, 4), src=vgpr(7),
+                ds=DSModifiers(offset=0), comment=comment)
+
+        def overwrite(dst, comment):
+            return DSLoadB128(
+                dst=vgpr(dst, 4), src=vgpr(2 if dst == 52 else 4),
+                ds=DSModifiers(offset=8192), comment=comment)
+
+        def tail():
+            body = [
+                VXorB32(dst=vgpr(2), src0=vgpr(2), src1=vgpr(3), comment="swap A"),
+                VXorB32(dst=vgpr(4), src0=vgpr(4), src1=vgpr(5), comment="swap A high"),
+                mfma(52, "last use"),
+            ]
+            for index in range(4):
+                body.append(mfma(60, f"gap {index}"))
+            body.append(other_read("pack 0"))
+            body.append(other_read("pack 1"))
+            body.append(mfma(60, "cover 0"))
+            body.append(other_read("pack 2"))
+            body.append(other_read("pack 3"))
+            body.append(mfma(60, "cover 1"))
+            return body
+
+        def marked_prefix(tag):
+            low = overwrite(52, f"{tag} low")
+            high = overwrite(56, f"{tag} high")
+            _p0OverwriteReadIds.add(id(low))
+            _p0OverwriteReadIds.add(id(high))
+            return [low, high, SWaitCnt(kmcnt=0, comment=f"{tag} wait"), mfma(20, f"{tag} mfma")]
+
+        clearPartitionZeroOverwriteMarks()
+        c0 = Module("C0")
+        for inst in marked_prefix("c0") + tail():
+            c0.add(inst)
+        c1 = Module("C1")
+        for inst in marked_prefix("c1") + tail():
+            c1.add(inst)
+        preloop = Module("PRELOOP")
+        preloop.add(SBarrier(comment="Barrier"))
+        preloop.add(other_read("preloop A0"))
+
+        moved = relocatePartitionZeroOverwriteReads([c0, c1], preloop, gap=4)
+        assert moved == set(range(52, 60))
+
+        def comments(module):
+            return [getattr(inst, "comment", "") for inst in module.flatitems()]
+
+        c0_comments = comments(c0)
+        c1_comments = comments(c1)
+        assert c0_comments[0] == "c0 wait"
+        assert c1_comments[0] == "c1 wait"
+        assert "c1 low; issued in the previous K iteration" in c0_comments
+        assert "c0 high; issued in the previous K iteration" in c1_comments
+        assert c0_comments.index("c1 low; issued in the previous K iteration") > c0_comments.index("gap 3")
+        assert c0_comments.index("c1 low; issued in the previous K iteration") > c0_comments.index("swap A high")
+        pre_comments = comments(preloop)
+        assert pre_comments[:3] == [
+            "Barrier", "c0 low; issued in the preloop", "c0 high; issued in the preloop"]
+
+        exit_path = Module("NGLL")
+        exit_path.add(overwrite(52, "ngll low"))
+        exit_path.add(overwrite(56, "ngll high"))
+        exit_path.add(mfma(20, "ngll mfma"))
+        guardExitOverwriteReread(exit_path, moved)
+        assert comments(exit_path)[0] == (
+            "retire the prior-iteration overwrite read before re-reading it")
+
+        clearPartitionZeroOverwriteMarks()
+        live = Module("LIVE")
+        held = overwrite(52, "still live")
+        _p0OverwriteReadIds.add(id(held))
+        live.add(held)
+        live.add(SWaitCnt(kmcnt=0, comment="live wait"))
+        live.add(mfma(20, "live mfma"))
+        # The previous copy still reads v[52:55] and has only one MFMA after that.
+        still = Module("STILL")
+        still.add(VXorB32(dst=vgpr(2), src0=vgpr(2), src1=vgpr(3), comment="swap late"))
+        still.add(mfma(52, "holds the vgpr"))
+        still.add(mfma(60, "only one later"))
+        fresh = Module("PRELOOP2")
+        fresh.add(SBarrier(comment="Barrier"))
+        stayed = relocatePartitionZeroOverwriteReads([live, still], fresh, gap=4)
+        assert stayed == set()
+        assert comments(live)[0] == "still live"
+        assert comments(fresh) == ["Barrier"]
+
     def test_reads_across_a_wait_require_the_mxfp8_exception(self):
         from rocisa.instruction import SWaitCnt
         from tensilelite.Components.Subtile.InstructionScheduler import (
@@ -5518,3 +5634,130 @@ class TestPartitionZeroIssueOrder:
         assert located["mid-a"] == width + 3
         assert located["mid-b"] == width + 4
         assert located["stop"] == 2 * width
+
+
+class TestLateScalePrefetch:
+    """Staging VGPRs for scales that partition zero does not consume."""
+
+    def test_prefetch_stays_inside_the_rounded_block(self):
+        from tensilelite.Components.Subtile.InstructionScheduler import (
+            scale_prefetch_fits)
+        assert scale_prefetch_fits(249, 4)
+        assert scale_prefetch_fits(250, 6)
+        assert scale_prefetch_fits(252, 4)
+        assert not scale_prefetch_fits(253, 4)
+        assert not scale_prefetch_fits(256, 1)
+        assert not scale_prefetch_fits(249, 0)
+
+    def test_prefetch_plan_retargets_the_staging_register(self):
+        from rocisa.container import DSModifiers, vgpr
+        from rocisa.instruction import DSLoadB32
+        from tensilelite.Components.Subtile.InstructionScheduler import (
+            selectLateScalePrefetch)
+
+        template = DSLoadB32(
+            dst=vgpr(19), src=vgpr(1), ds=DSModifiers(offset=512),
+            comment="SA MT=n tile=4 K=0")
+        deferred = [{
+            "canonicalVgpr": 19,
+            "tensor": "SA",
+            "readTemplate": template,
+            "firstC0Mfma": 16,
+            "lastC1Mfma": 63,
+        }]
+        plan = selectLateScalePrefetch(deferred, {19: 252}, {19: 4})
+        assert len(plan) == 1
+        assert plan[0]["extraVgpr"] == 252
+        assert plan[0]["readTemplate"].dst.regIdx == 252
+        assert plan[0]["canonicalRead"].dst.regIdx == 19
+        assert template.dst.regIdx == 19
+        assert plan[0]["minShadow"] == 4
+        early = dict(deferred[0])
+        early["firstC0Mfma"] = 4
+        assert selectLateScalePrefetch(
+            [early], {19: 252}, {19: 4}) == []
+        assert selectLateScalePrefetch(deferred, {}, {19: 4}) == []
+
+    def test_copy_waits_for_the_source_window(self):
+        from rocisa.code import Module
+        from rocisa.container import vgpr
+        from rocisa.enum import InstType
+        from rocisa.instruction import MXMFMAInstruction, SWaitCnt, VMovB32
+        from tensilelite.Components.Subtile.InstructionScheduler import (
+            insertPrefetchedScaleCopies)
+
+        def mfma():
+            return MXMFMAInstruction(
+                instType=InstType.INST_F32, accType=InstType.INST_F32,
+                variant=[16, 16, 128], acc=vgpr(0, 4), a=vgpr(4), b=vgpr(5),
+                mxsa=vgpr(19), mxsb=vgpr(151), comment="scaled")
+
+        schedule = Module("C0")
+        schedule.add(SWaitCnt(
+            dscnt=0, comment="Wait for current-cell LR before p0 MFMA"))
+        for _ in range(20):
+            schedule.add(mfma())
+            schedule.add(VMovB32(dst=vgpr(1), src=vgpr(2), comment="keep"))
+        assert insertPrefetchedScaleCopies(schedule, [{
+            "canonicalVgpr": 19,
+            "extraVgpr": 252,
+            "tensor": "SA",
+            "firstC0Mfma": 16,
+            "minShadow": 4,
+        }]) == []
+        items = list(schedule.flatitems())
+        copy_at = next(
+            index for index, inst in enumerate(items)
+            if isinstance(inst, VMovB32)
+            and getattr(inst, "comment", "").startswith("copy prefetched"))
+        issued = sum(
+            isinstance(inst, MXMFMAInstruction) for inst in items[:copy_at])
+        assert issued == 5
+        assert any(
+            isinstance(inst, MXMFMAInstruction)
+            and inst.mxsa.regIdx == 19
+            for inst in items[copy_at:])
+
+    def test_empty_window_keeps_the_c0_read(self):
+        from rocisa.code import Module
+        from rocisa.container import DSModifiers, vgpr
+        from rocisa.enum import InstType
+        from rocisa.instruction import DSLoadB32, MXMFMAInstruction, SWaitCnt
+        from tensilelite.Components.Subtile.InstructionScheduler import (
+            insertPrefetchedScaleCopies, restoreCanonicalScaleReads)
+
+        def mfma():
+            return MXMFMAInstruction(
+                instType=InstType.INST_F32, accType=InstType.INST_F32,
+                variant=[16, 16, 128], acc=vgpr(0, 4), a=vgpr(4), b=vgpr(5),
+                mxsa=vgpr(19), mxsb=vgpr(151), comment="scaled")
+
+        schedule = Module("C0")
+        schedule.add(SWaitCnt(
+            dscnt=0, comment="Wait for current-cell LR before p0 MFMA"))
+        for _ in range(8):
+            schedule.add(mfma())
+        move = {
+            "canonicalVgpr": 19,
+            "extraVgpr": 252,
+            "tensor": "SA",
+            "firstC0Mfma": 8,
+            "minShadow": 4,
+            "canonicalRead": DSLoadB32(
+                dst=vgpr(19), src=vgpr(1), ds=DSModifiers(offset=512),
+                comment="SA MT=n tile=4 K=0"),
+        }
+        assert insertPrefetchedScaleCopies(schedule, [move]) == [move]
+        assert not any(
+            getattr(inst, "comment", "").startswith("copy prefetched")
+            for inst in schedule.flatitems())
+        restoreCanonicalScaleReads(schedule, [move])
+        items = list(schedule.flatitems())
+        read_at = next(
+            index for index, inst in enumerate(items)
+            if isinstance(inst, DSLoadB32))
+        wait_at = next(
+            index for index, inst in enumerate(items)
+            if isinstance(inst, SWaitCnt) and getattr(inst, "dscnt", -1) == 0)
+        assert read_at < wait_at
+        assert "keep C0 scale read" in items[read_at].comment
