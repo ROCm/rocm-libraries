@@ -44,6 +44,7 @@ from codegen_common import (
     preshuffle_pipeline_reject_reason,
     packed_b_pipeline_reject_reason,
     is_true,
+    streamk_trait_reject_reason,
     gemm_lockstep_vector_bytes,
     gemm_default_epilogue_vector_size,
     gemm_vector_size_suffix,
@@ -1425,8 +1426,10 @@ using CLayout = {ns_name}::CLayout;
     def _tdm_epilogue_code(self, config: KernelConfig) -> str:
         """TdmEpilogue over the CShuffle problem (gfx1250 TDM pipelines only).
 
-        Only the plain, preshuffle and batched GEMM variants can host it:
-        TdmEpilogue has no D tensors and ignores the split-K memory operation.
+        Only the plain, preshuffle, batched and Stream-K GEMM variants can host it:
+        TdmEpilogue has no D tensors and ignores the split-K memory operation
+        (Stream-K pairs it with linear/tree reduction only, see
+        streamk_trait_reject_reason).
         """
         if config.trait.pipeline not in TDM_PIPELINES:
             raise ValueError(
@@ -1436,7 +1439,11 @@ using CLayout = {ns_name}::CLayout;
         if config.variant == GemmVariant.BATCHED:
             transpose_c = "UniversalGemmProblem::TransposeC"
             num_wave_groups = "1"
-        elif config.variant in (GemmVariant.STANDARD, GemmVariant.PRESHUFFLE):
+        elif config.variant in (
+            GemmVariant.STANDARD,
+            GemmVariant.PRESHUFFLE,
+            GemmVariant.STREAM_K,
+        ):
             transpose_c = "TransposeC"
             num_wave_groups = "NumWaveGroups"
         else:
@@ -1881,14 +1888,22 @@ class UnifiedGemmCodegen:
                 configs.append(KernelConfig(tile=tile, trait=trait, variant=variant))
 
             elif variant == GemmVariant.STREAM_K:
-                # Stream-K reuses the standard trait space but requires the cshuffle
-                # epilogue (the only epilogue the stream-K kernel supports). Each
-                # reduction strategy (atomic/linear/tree) is a distinct compiled
-                # kernel, so we expand one config per requested strategy.
-                if trait.epilogue == "cshuffle":
-                    streamk_cfg = self.config.get("streamk_config", {})
-                    strategies = streamk_cfg.get("reduction_strategy", ["atomic"])
-                    for reduction_strategy in strategies:
+                # Stream-K reuses the standard trait space. Each reduction strategy
+                # (atomic/linear/tree) is a distinct compiled kernel, so we expand one
+                # config per requested strategy the trait supports (the epilogue
+                # rules depend on it, see streamk_trait_reject_reason).
+                streamk_cfg = self.config.get("streamk_config", {})
+                strategies = streamk_cfg.get("reduction_strategy", ["atomic"])
+                for reduction_strategy in strategies:
+                    reason = streamk_trait_reject_reason(
+                        trait.pipeline,
+                        trait.epilogue,
+                        reduction_strategy,
+                        pads=(bool(trait.pad_m), bool(trait.pad_n), bool(trait.pad_k)),
+                    )
+                    if reason:
+                        log.debug(f"Rejected stream_k {trait.pipeline}: {reason}")
+                    else:
                         configs.append(
                             KernelConfig(
                                 tile=tile,
@@ -2107,13 +2122,19 @@ class UnifiedGemmCodegen:
             dtype_b=self.datatype,
             layout=self.layout,
             variant_supported=variant
-            in (GemmVariant.STANDARD, GemmVariant.BATCHED, GemmVariant.PRESHUFFLE),
+            in (
+                GemmVariant.STANDARD,
+                GemmVariant.BATCHED,
+                GemmVariant.PRESHUFFLE,
+                GemmVariant.STREAM_K,
+            ),
             variant_name=variant.value,
             persistent=bool(trait.persistent),
             pads=(bool(trait.pad_m), bool(trait.pad_n), bool(trait.pad_k)),
             batched=variant == GemmVariant.BATCHED,
             tile_mn=(tile.tile_m, tile.tile_n),
             warp_k=tile.warp_k,
+            streamk=variant == GemmVariant.STREAM_K,
         )
 
     def _is_tile_arch_valid(
