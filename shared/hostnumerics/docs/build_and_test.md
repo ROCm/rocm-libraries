@@ -3,7 +3,8 @@
 ## Requirements
 
 The standalone build requires CMake 3.25.2 or newer and a C++20 compiler. The
-commands below use Ninja. The Python module requires Python 3.10 or newer with
+AMD GPU layout library and its headers need only C++17 and the standard
+library. The commands below use Ninja. The Python module requires Python 3.10 or newer with
 development headers and nanobind; CI uses nanobind 3.0.1. The Python test suite
 also requires NumPy. C++ tests require
 GoogleTest 1.12.1 or newer. See [test dependencies](#test-dependencies) for
@@ -40,6 +41,11 @@ when a parent includes HostNumerics with `add_subdirectory`. For a multi-config
 generator such as Ninja Multi-Config, select the same configuration with
 `--config Release` when building or installing and `-C Release` with CTest.
 
+`HOSTNUMERICS_AMD_GPU_LAYOUT_ENABLE_OPENMP` (default `ON`) parallelizes large
+AMD GPU layout conversions with OpenMP when CMake finds it. Results do not
+depend on this option. OpenMP stays private to the compiled library; consumers
+link its runtime but do not compile with OpenMP flags.
+
 ## Test dependencies
 
 When no compatible installed GoogleTest package or existing target is
@@ -70,16 +76,28 @@ find_package(HostNumerics CONFIG REQUIRED)
 target_link_libraries(my_target PRIVATE roc::hostnumerics)
 ```
 
-The installed package exports `roc::hostnumerics-core` and
-`roc::hostnumerics`. Both are currently `INTERFACE` libraries exposing the
-header-only core APIs. The operations target
-links core transitively. Their intended responsibilities as implementation
-lands are:
+The installed package exports `roc::hostnumerics-core`, `roc::hostnumerics`
+and `roc::hostnumerics-amd-gpu-layout`. The first two are currently `INTERFACE`
+libraries exposing the header-only core APIs, and the operations target links
+core transitively. Their responsibilities, as implementation lands, are:
 
 | Target | Responsibility |
 | --- | --- |
 | `roc::hostnumerics-core` | Scalar types and conversions, plus shape, layout, and tensor storage. |
 | `roc::hostnumerics` | Input generation, reference operations, and numerical comparison. |
+| `roc::hostnumerics-amd-gpu-layout` | CPU conversions of MX scales and operands to the physical storage orders AMD GPU kernels read. |
+
+The AMD GPU layout target is a static library that does not depend on the other
+targets. Request it with the `AMDGPULayout` component:
+
+```cmake
+find_package(HostNumerics CONFIG REQUIRED COMPONENTS AMDGPULayout)
+target_link_libraries(my_target PRIVATE roc::hostnumerics-amd-gpu-layout)
+```
+
+The core and operations targets are always loaded, and `Core` and `Operations`
+are accepted as component names. If the installed library was built with
+OpenMP, the `AMDGPULayout` component also requires CMake to find OpenMP for C++.
 
 The Python package installs under the prefix's library directory in
 `python<major>.<minor>/site-packages`. Add that directory to `PYTHONPATH` to
