@@ -1151,7 +1151,8 @@ TEST(TestPointwisePlanBuilder, PlanConstructionUnaryExp)
     auto builtPlan = patient.buildNodePlan(graphWrap, graphWrap.getNode(0));
 
     const bool result
-        = dynamic_cast<PointwisePlan<float, float, float, float>*>(builtPlan.get()) != nullptr;
+        = dynamic_cast<PointwisePlan<float, float, float, float, float>*>(builtPlan.get())
+          != nullptr;
     EXPECT_TRUE(result);
 }
 
@@ -1187,7 +1188,8 @@ TEST(TestPointwisePlanBuilder, PlanConstructionBinaryDiv)
     auto builtPlan = patient.buildNodePlan(graphWrap, graphWrap.getNode(0));
 
     const bool result
-        = dynamic_cast<PointwisePlan<float, float, float, float>*>(builtPlan.get()) != nullptr;
+        = dynamic_cast<PointwisePlan<float, float, float, float, float>*>(builtPlan.get())
+          != nullptr;
     EXPECT_TRUE(result);
 }
 
@@ -1261,7 +1263,8 @@ TEST(TestPointwisePlanBuilder, PlanConstructionGenIndex)
     auto builtPlan = patient.buildNodePlan(graphWrap, graphWrap.getNode(0));
 
     const bool result
-        = dynamic_cast<PointwisePlan<float, float, float, int32_t>*>(builtPlan.get()) != nullptr;
+        = dynamic_cast<PointwisePlan<float, float, float, int32_t, float>*>(builtPlan.get())
+          != nullptr;
     EXPECT_TRUE(result);
 }
 
@@ -2593,6 +2596,28 @@ TEST(TestPointwisePlanBuilder, MissingPlanBuilderIsNotApplicable)
     EXPECT_THROW(registry.getPlanBuilder(unregistered), CpuReferenceNotApplicableError);
 }
 
+TEST(TestPointwisePlanBuilder, ExecuteDeclinesUnregisteredDataTypeTuple)
+{
+    // INT32 with HALF compute has no registered plan builder
+    auto [graph, tensorBundle, variantPack]
+        = buildPointwiseUnaryGraph({1, 1, 1, 1},
+                                   {1, 1, 1, 1},
+                                   DataType::INT32,
+                                   DataType::HALF,
+                                   DataType::INT32,
+                                   hipdnn_frontend::PointwiseMode::ABS,
+                                   1,
+                                   TensorLayout::NCHW);
+
+    auto [serializedGraph, serErr] = graph->to_binary();
+    ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
+
+    CpuReferenceGraphExecutor executor;
+    EXPECT_FALSE(executor.isApplicable(serializedGraph.data(), serializedGraph.size()));
+    EXPECT_THROW(executor.execute(serializedGraph.data(), serializedGraph.size(), variantPack),
+                 CpuReferenceNotApplicableError);
+}
+
 TEST(TestPointwisePlanBuilder, ScalarOperandTypes)
 {
     const std::vector<int64_t> dims = {1, 2, 2, 2};
@@ -2680,6 +2705,187 @@ TEST(TestPointwisePlanBuilder, ScalarOperandTypes)
         EXPECT_EQ(outData.getHostValue(0, c, h, w), 10.0f - ((xValue + 2.0f) * 4.0f))
             << "element " << i;
     }
+}
+
+TEST(TestPointwisePlanBuilder, DeclinesNonBroadcastableFirstAndThirdInputs)
+{
+    for(const bool editThirdInput : {false, true})
+    {
+        auto [graph, tensorBundle, variantPack]
+            = buildPointwiseTernaryGraph({1, 3, 2, 2},
+                                         {1, 3, 2, 2},
+                                         {1, 3, 2, 2},
+                                         {1, 3, 2, 2},
+                                         DataType::FLOAT,
+                                         DataType::FLOAT,
+                                         DataType::BOOLEAN,
+                                         DataType::FLOAT,
+                                         DataType::FLOAT,
+                                         hipdnn_frontend::PointwiseMode::BINARY_SELECT);
+
+        auto [serializedGraph, serErr] = graph->to_binary();
+        ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
+
+        // The frontend rejects non-broadcastable shapes, so edit the serialized graph instead
+        auto graphT = std::unique_ptr<GraphT>(GetGraph(serializedGraph.data())->UnPack());
+        const GraphWrapper original(serializedGraph.data(), serializedGraph.size());
+        const auto& originalAttributes
+            = original.getNodeWrapper(0).attributesAs<PointwiseAttributes>();
+        const auto editedUid = editThirdInput ? originalAttributes.in_2_tensor_uid().value()
+                                              : originalAttributes.in_0_tensor_uid();
+        for(auto& tensor : graphT->tensors)
+        {
+            if(tensor->uid == editedUid)
+            {
+                tensor->dims = {1, 3, 5, 2};
+            }
+        }
+        flatbuffers::FlatBufferBuilder builder;
+        builder.Finish(CreateGraph(builder, graphT.get()));
+        auto badGraph = builder.Release();
+
+        CpuReferenceGraphExecutor executor;
+        EXPECT_FALSE(executor.isApplicable(badGraph.data(), badGraph.size()));
+        EXPECT_THROW(executor.execute(badGraph.data(), badGraph.size(), variantPack),
+                     CpuReferenceNotApplicableError);
+    }
+}
+
+TEST(TestPointwisePlanBuilder, ScalarOperandsOfUnaryAndTernaryNodes)
+{
+    const std::vector<int64_t> dims = {1, 1, 1, 4};
+    const auto strides = hipdnn_data_sdk::utilities::generateStrides(dims);
+
+    auto graph = std::make_shared<hipdnn_frontend::graph::Graph>();
+    graph->set_io_data_type(hipdnn_frontend::DataType::FLOAT)
+        .set_compute_data_type(hipdnn_frontend::DataType::FLOAT)
+        .set_intermediate_data_type(hipdnn_frontend::DataType::FLOAT);
+
+    auto maskAttr = hipdnn_frontend::graph::makeTensorAttributes(
+        "mask", hipdnn_frontend::DataType::BOOLEAN, dims, strides);
+    maskAttr.set_uid(1);
+    auto mask = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(std::move(maskAttr));
+
+    // The unary node reads a baked scalar, and the ternary node selects between a runtime scalar
+    // with a default and the unary result
+    auto absInput = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(-3.0f);
+    auto selectOnTrue = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(
+        5.0f, hipdnn_frontend::graph::ScalarType::RUNTIME_PARAM);
+    absInput->set_uid(2);
+    selectOnTrue->set_uid(3);
+
+    hipdnn_frontend::graph::PointwiseAttributes absAttrs;
+    absAttrs.set_mode(hipdnn_frontend::PointwiseMode::ABS);
+    hipdnn_frontend::graph::PointwiseAttributes selectAttrs;
+    selectAttrs.set_mode(hipdnn_frontend::PointwiseMode::BINARY_SELECT);
+
+    auto absOut = graph->pointwise(absInput, absAttrs);
+    absOut->set_uid(4)
+        .set_data_type(hipdnn_frontend::DataType::FLOAT)
+        .set_dim(dims)
+        .set_stride(strides);
+    auto selectOut = graph->pointwise(selectOnTrue, absOut, mask, selectAttrs);
+    selectOut->set_uid(5)
+        .set_data_type(hipdnn_frontend::DataType::FLOAT)
+        .set_dim(dims)
+        .set_stride(strides)
+        .set_output(true);
+
+    auto validateResult = graph->validate();
+    ASSERT_TRUE(validateResult.is_good()) << validateResult.get_message();
+    auto [serializedGraph, serErr] = graph->to_binary();
+    ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
+
+    Tensor<bool> maskData(dims);
+    for(int64_t i = 0; i < 4; ++i)
+    {
+        maskData.setHostValue(i % 2 == 0, 0, 0, 0, i);
+    }
+    maskData.markHostModified();
+    Tensor<float> selectData(dims);
+    // The baked and defaulted scalars have no entry in the variant pack
+    const std::unordered_map<int64_t, void*> variantPack
+        = {{1, maskData.rawHostData()}, {5, selectData.rawHostData()}};
+
+    CpuReferenceGraphExecutor executor;
+    ASSERT_TRUE(executor.isApplicable(serializedGraph.data(), serializedGraph.size()));
+    executor.execute(serializedGraph.data(), serializedGraph.size(), variantPack);
+
+    // Selected scalar 5 where the mask is true, otherwise abs(-3)
+    for(int64_t i = 0; i < 4; ++i)
+    {
+        EXPECT_EQ(selectData.getHostValue(0, 0, 0, i), i % 2 == 0 ? 5.0f : 3.0f) << "element " << i;
+    }
+}
+
+TEST(TestPointwisePlanBuilder, DoubleAndInt32ScalarOperands)
+{
+    const std::vector<int64_t> dims = {1, 1, 1, 2};
+    const auto strides = hipdnn_data_sdk::utilities::generateStrides(dims);
+
+    // FP64 scalar: 1 + 1e-12 is not representable in float
+    auto doubleGraph = std::make_shared<hipdnn_frontend::graph::Graph>();
+    doubleGraph->set_io_data_type(hipdnn_frontend::DataType::DOUBLE)
+        .set_compute_data_type(hipdnn_frontend::DataType::DOUBLE)
+        .set_intermediate_data_type(hipdnn_frontend::DataType::DOUBLE);
+    auto doubleAttr = hipdnn_frontend::graph::makeTensorAttributes(
+        "x", hipdnn_frontend::DataType::DOUBLE, dims, strides);
+    doubleAttr.set_uid(1);
+    auto doubleX
+        = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(std::move(doubleAttr));
+    auto doubleScalar = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(1e-12);
+    doubleScalar->set_uid(2);
+    hipdnn_frontend::graph::PointwiseAttributes addAttrs;
+    addAttrs.set_mode(hipdnn_frontend::PointwiseMode::ADD);
+    auto doubleOut = doubleGraph->pointwise(doubleX, doubleScalar, addAttrs);
+    doubleOut->set_uid(3)
+        .set_data_type(hipdnn_frontend::DataType::DOUBLE)
+        .set_dim(dims)
+        .set_stride(strides)
+        .set_output(true);
+    ASSERT_TRUE(doubleGraph->validate().is_good());
+    auto [doubleSerialized, doubleErr] = doubleGraph->to_binary();
+    ASSERT_TRUE(doubleErr.is_good()) << doubleErr.get_message();
+
+    Tensor<double> doubleXData(dims);
+    doubleXData.fillWithValue(1.0);
+    Tensor<double> doubleOutData(dims);
+    const std::unordered_map<int64_t, void*> doublePack
+        = {{1, doubleXData.rawHostData()}, {3, doubleOutData.rawHostData()}};
+    CpuReferenceGraphExecutor executor;
+    ASSERT_TRUE(executor.isApplicable(doubleSerialized.data(), doubleSerialized.size()));
+    executor.execute(doubleSerialized.data(), doubleSerialized.size(), doublePack);
+    EXPECT_EQ(doubleOutData.getHostValue(0, 0, 0, 1), 1.0 + 1e-12);
+
+    // INT32 scalar
+    auto intGraph = std::make_shared<hipdnn_frontend::graph::Graph>();
+    intGraph->set_io_data_type(hipdnn_frontend::DataType::INT32)
+        .set_compute_data_type(hipdnn_frontend::DataType::FLOAT)
+        .set_intermediate_data_type(hipdnn_frontend::DataType::INT32);
+    auto intAttr = hipdnn_frontend::graph::makeTensorAttributes(
+        "x", hipdnn_frontend::DataType::INT32, dims, strides);
+    intAttr.set_uid(1);
+    auto intX = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(std::move(intAttr));
+    auto intScalar = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(int32_t{40});
+    intScalar->set_uid(2);
+    auto intOut = intGraph->pointwise(intX, intScalar, addAttrs);
+    intOut->set_uid(3)
+        .set_data_type(hipdnn_frontend::DataType::INT32)
+        .set_dim(dims)
+        .set_stride(strides)
+        .set_output(true);
+    ASSERT_TRUE(intGraph->validate().is_good());
+    auto [intSerialized, intErr] = intGraph->to_binary();
+    ASSERT_TRUE(intErr.is_good()) << intErr.get_message();
+
+    Tensor<int32_t> intXData(dims);
+    intXData.fillWithValue(2);
+    Tensor<int32_t> intOutData(dims);
+    const std::unordered_map<int64_t, void*> intPack
+        = {{1, intXData.rawHostData()}, {3, intOutData.rawHostData()}};
+    ASSERT_TRUE(executor.isApplicable(intSerialized.data(), intSerialized.size()));
+    executor.execute(intSerialized.data(), intSerialized.size(), intPack);
+    EXPECT_EQ(intOutData.getHostValue(0, 0, 0, 1), 42);
 }
 
 TEST(TestPointwisePlanDataTypes, DoubleAddKeepsDoublePrecision)
@@ -2903,9 +3109,9 @@ constexpr int64_t TEST_ELEMENT_COUNT = 4;
 template <typename T>
 T fromTestValue(double value)
 {
-    if constexpr(std::is_same_v<T, double>)
+    if constexpr(std::is_same_v<T, double> || std::is_integral_v<T>)
     {
-        return value;
+        return static_cast<T>(value);
     }
     else
     {
@@ -2916,9 +3122,9 @@ T fromTestValue(double value)
 template <typename T>
 double toTestValue(T value)
 {
-    if constexpr(std::is_same_v<T, double>)
+    if constexpr(std::is_same_v<T, double> || std::is_integral_v<T>)
     {
-        return value;
+        return static_cast<double>(value);
     }
     else
     {
@@ -3116,6 +3322,17 @@ TEST(TestPointwisePlanDataTypes, Int32Operations)
     EXPECT_EQ((runBinary<I, I, F, DataType::BOOLEAN>(PointwiseMode::CMP_GT, a, b)),
               (std::vector<double>{0, 0, 0, 1}));
     EXPECT_EQ((runSelect<I, F>(a, b)), (std::vector<double>{-5, -1, 3, 4}));
+}
+
+TEST(TestPointwisePlanDataTypes, Int32ComputesInFloatPrecision)
+{
+    constexpr auto I = DataType::INT32;
+    constexpr auto F = DataType::FLOAT;
+
+    // 2^24 + 1 is not representable in float, the compute type of INT32 nodes
+    EXPECT_EQ((runBinary<I, I, F, I>(
+                  hipdnn_frontend::PointwiseMode::ADD, {16777216, 1, 2, 3}, {1, 1, 1, 1})),
+              (std::vector<double>{16777216, 2, 3, 4}));
 }
 
 TEST(TestPointwisePlanDataTypes, Fp8Operations)
