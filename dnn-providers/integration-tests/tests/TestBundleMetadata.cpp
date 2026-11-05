@@ -5,6 +5,7 @@
 
 #include <filesystem>
 #include <fstream>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -21,6 +22,7 @@ using hipdnn_integration_tests::checkVramRequirement;
 using hipdnn_integration_tests::EnforcementLevel;
 using hipdnn_integration_tests::loadBundleMetadata;
 using hipdnn_integration_tests::metaJsonPath;
+using hipdnn_integration_tests::OutputLiveRows;
 using hipdnn_integration_tests::parseBundleMetadataJson;
 using hipdnn_integration_tests::parseTensorAliases;
 using hipdnn_integration_tests::TensorAlias;
@@ -1147,6 +1149,97 @@ TEST(TestLoadBundleMetadata, StartOffsetsInAVersion2FileLoad)
     const auto meta = loadBundleMetadata(bundle.bundleJsonPath());
     ASSERT_TRUE(meta.has_value());
     EXPECT_EQ(meta->startOffsets, (std::vector<TensorStartOffset>{{3, 1}}));
+}
+
+// ---------------------------------------------------------------------------
+// live_rows
+// ---------------------------------------------------------------------------
+
+TEST(TestParseBundleMetadataJson, LiveRowsParseInFormatVersion2)
+{
+    const auto meta = parseBundleMetadataJson(nlohmann::json::parse(
+        R"({"format_version": 2, "live_rows": [{"uid": 9, "axis": 2, "lengths": 14},
+                                                {"uid": 10, "like": 1}]})"));
+    ASSERT_EQ(meta.liveRows.size(), 2u);
+    EXPECT_EQ(meta.liveRows[0], (OutputLiveRows{9, 2, 14, std::nullopt}));
+    EXPECT_EQ(meta.liveRows[1], (OutputLiveRows{10, std::nullopt, std::nullopt, 1}));
+}
+
+TEST(TestParseBundleMetadataJson, LiveRowsAbsentLeavesTheListEmpty)
+{
+    const auto meta = parseBundleMetadataJson(nlohmann::json::parse(R"({"format_version": 2})"));
+    EXPECT_TRUE(meta.liveRows.empty());
+}
+
+// The version check wins over any problem in the value.
+TEST(TestParseBundleMetadataJson, ThrowsOnLiveRowsInFormatVersion1)
+{
+    for(const auto* liveRows :
+        {R"([{"uid": 9, "axis": 2, "lengths": 14}])", "[]", "3", R"([{"uid": 9}])"})
+    {
+        SCOPED_TRACE(liveRows);
+        const auto error
+            = metadataError(std::string(R"({"format_version": 1, "live_rows": )") + liveRows + "}");
+        EXPECT_NE(error.find("case_0: live_rows needs format_version 2"), std::string::npos)
+            << error;
+    }
+}
+
+TEST(TestParseBundleMetadataJson, ThrowsOnMalformedLiveRows)
+{
+    struct Case
+    {
+        const char* liveRows;
+        const char* rule;
+    };
+    const std::vector<Case> cases = {
+        {R"({"uid": 9, "like": 1})", "live_rows is not an array"},
+        {"[]", "live_rows is empty"},
+        {"[9]", "live_rows[0] is not an object"},
+        {R"([{"axis": 2, "lengths": 14}])", R"(live_rows[0] lacks "uid")"},
+        {R"([{"uid": "9", "like": 1}])", R"(live_rows[0]: "uid" is not a 64-bit signed integer)"},
+        {R"([{"uid": 9, "axis": 2.0, "lengths": 14}])",
+         R"(live_rows[0] (output 9): "axis" is not a 64-bit signed integer)"},
+        {R"([{"uid": 9, "axis": 2, "lengths": "14"}])",
+         R"(live_rows[0] (output 9): "lengths" is not a 64-bit signed integer)"},
+        {R"([{"uid": 9, "like": true}])",
+         R"(live_rows[0] (output 9): "like" is not a 64-bit signed integer)"},
+        {R"([{"uid": 9, "like": 1, "seq_axis": 2}])",
+         R"(live_rows[0] (output 9) has unknown key "seq_axis")"},
+        {R"([{"uid": 9}])", R"(live_rows[0] (output 9) needs exactly one of "lengths" and "like")"},
+        {R"([{"uid": 9, "axis": 2}])",
+         R"(live_rows[0] (output 9) needs exactly one of "lengths" and "like")"},
+        {R"([{"uid": 9, "axis": 2, "lengths": 14, "like": 1}])",
+         R"(live_rows[0] (output 9) needs exactly one of "lengths" and "like")"},
+        {R"([{"uid": 9, "lengths": 14}])",
+         R"(live_rows[0] (output 9) has "lengths" and lacks "axis")"},
+        {R"([{"uid": 9, "axis": 2, "like": 1}])",
+         R"(live_rows[0] (output 9) has "like" and "axis")"},
+        {R"([{"uid": 9, "like": 1}, {"uid": 9, "axis": 2, "lengths": 14}])",
+         "live rows of output 9: the output appears in more than one entry"},
+    };
+    for(const auto& c : cases)
+    {
+        SCOPED_TRACE(c.liveRows);
+        const auto error = metadataError(std::string(R"({"format_version": 2, "live_rows": )")
+                                         + c.liveRows + "}");
+        EXPECT_NE(error.find(std::string("case_0: ") + c.rule), std::string::npos) << error;
+    }
+}
+
+TEST(TestLoadBundleMetadata, LiveRowsInAVersion1FileThrows)
+{
+    const TempBundle bundle(R"({"format_version": 1, "live_rows": [{"uid": 9, "like": 1}]})");
+    EXPECT_THROW(loadBundleMetadata(bundle.bundleJsonPath()), BundleMetadataError);
+}
+
+TEST(TestLoadBundleMetadata, LiveRowsInAVersion2FileLoad)
+{
+    const TempBundle bundle(
+        R"({"format_version": 2, "live_rows": [{"uid": 9, "axis": 1, "lengths": 3}]})");
+    const auto meta = loadBundleMetadata(bundle.bundleJsonPath());
+    ASSERT_TRUE(meta.has_value());
+    EXPECT_EQ(meta->liveRows, (std::vector<OutputLiveRows>{{9, 1, 3, std::nullopt}}));
 }
 
 // NOLINTEND(readability-identifier-naming)

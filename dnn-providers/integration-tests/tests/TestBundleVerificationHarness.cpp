@@ -1695,4 +1695,235 @@ TEST_F(TestGoldenHarnessFixture, StartOffsetEngineRunOnTheDeviceReachesTheCompar
               (std::vector<int64_t>{K_SHIFTED_INPUT_OFFSET, K_SHIFTED_OUTPUT_OFFSET}));
 }
 
+// ---- live_rows -------------------------------------------------------------
+
+namespace
+{
+
+constexpr float K_NAN = std::numeric_limits<float>::quiet_NaN();
+constexpr float K_NEGATIVE_INF = -std::numeric_limits<float>::infinity();
+
+// Writes y as the live-row bundle with lengths {1, 0} expects: K_OUTPUT_VALUE in the
+// live rows (batch 0, s = 0) and `pastValue` everywhere else.
+std::vector<float> liveRowOutput(float pastValue)
+{
+    std::vector<float> values(fixtures::K_OUTPUT_ELEMS, pastValue);
+    for(std::size_t h = 0; h < 3; ++h)
+    {
+        for(std::size_t d = 0; d < 5; ++d)
+        {
+            values[h * 20 + d] = fixtures::K_OUTPUT_VALUE;
+        }
+    }
+    return values;
+}
+
+void writeHostOutput(void* pointer, const std::vector<float>& values)
+{
+    std::memcpy(pointer, values.data(), values.size() * sizeof(float));
+}
+
+} // namespace
+
+TEST_F(TestGoldenHarnessFixture, LiveRowGoldenNaNPastTheLengthsIsNotCompared)
+{
+    testing_support::HarnessMocks mocks;
+    testing_support::engineWrites(
+        mocks.engineRunner, &fixtures::writeOutput, fixtures::K_OUTPUT_VALUE);
+
+    ::testing::TestPartResultArray results;
+    runCapturing(
+        mocks, fixtures::writeLiveRowBundle(_tempDir, "live_rows", {1, 0}, K_NAN), &results);
+
+    EXPECT_FALSE(testing_support::anyFailed(results)) << testing_support::allMessages(results);
+    EXPECT_FALSE(testing_support::anySkipped(results));
+}
+
+// Golden y holds -inf past the lengths and the engine writes a finite value there: only
+// the lengths keep those positions out of the comparison.
+TEST_F(TestGoldenHarnessFixture, LiveRowGoldenInfPastTheLengthsIsNotCompared)
+{
+    testing_support::HarnessMocks mocks;
+    testing_support::engineWrites(
+        mocks.engineRunner, &fixtures::writeOutput, fixtures::K_OUTPUT_VALUE);
+
+    ::testing::TestPartResultArray results;
+    runCapturing(mocks,
+                 fixtures::writeLiveRowBundle(_tempDir, "live_rows_inf", {1, 0}, K_NEGATIVE_INF),
+                 &results);
+
+    EXPECT_FALSE(testing_support::anyFailed(results)) << testing_support::allMessages(results);
+    EXPECT_FALSE(testing_support::anySkipped(results));
+}
+
+TEST_F(TestGoldenHarnessFixture, LiveRowGoldenInfWithoutLiveRowsFails)
+{
+    testing_support::HarnessMocks mocks;
+    testing_support::engineWrites(
+        mocks.engineRunner, &fixtures::writeOutput, fixtures::K_OUTPUT_VALUE);
+
+    ::testing::TestPartResultArray results;
+    runCapturing(mocks,
+                 fixtures::writeLiveRowBundle(
+                     _tempDir, "no_live_rows", {1, 0}, K_NEGATIVE_INF, /*withLiveRows=*/false),
+                 &results);
+
+    EXPECT_TRUE(testing_support::anyFailed(results));
+    EXPECT_FALSE(testing_support::anySkipped(results));
+}
+
+TEST_F(TestGoldenHarnessFixture, LiveRowMismatchInALiveRowFails)
+{
+    testing_support::HarnessMocks mocks;
+    testing_support::engineWrites(
+        mocks.engineRunner, &fixtures::writeOutput, fixtures::K_OUTPUT_VALUE + 100.0f);
+
+    ::testing::TestPartResultArray results;
+    runCapturing(
+        mocks, fixtures::writeLiveRowBundle(_tempDir, "live_mismatch", {1, 0}, K_NAN), &results);
+
+    EXPECT_TRUE(testing_support::anyFailed(results));
+    EXPECT_FALSE(testing_support::anySkipped(results));
+}
+
+// A length past the output's extent is an error in the bundle's data: the harness fails
+// the test with the HARNESS origin and does not skip the rows or the comparison.
+TEST_F(TestGoldenHarnessFixture, LiveRowLengthPastTheExtentFailsTheHarness)
+{
+    testing_support::HarnessMocks mocks;
+    testing_support::engineWrites(
+        mocks.engineRunner, &fixtures::writeOutput, fixtures::K_OUTPUT_VALUE);
+
+    const std::string engineName = "ENGINE_UNDER_TEST";
+    SupportResult accepted;
+    accepted.verdict = SupportVerdict::CLAIM_ACCEPTED;
+    accepted.bundlePath = "live-rows-bundle";
+    accepted.engineName = engineName;
+    accepted.arch = "gfx942";
+    accepted.platform = "linux";
+    ON_CALL(mocks.claimObserver,
+            observe(::testing::_, ::testing::_, ::testing::_, ::testing::_, ::testing::_))
+        .WillByDefault(::testing::Return(SupportObservation{SidecarState::CHECKED, {accepted}}));
+    std::vector<SupportResult> verdicts;
+    testing_support::captureVerdicts(mocks.reporter, verdicts);
+
+    const auto sidecar = _tempDir / "live-rows-bundle.support.json";
+    std::ofstream(sidecar) << R"({"version": 1, "claims": {}})";
+    SupportClaimLocator locator;
+    locator.sidecarPath = sidecar;
+    locator.diagnosticPath = "live-rows-bundle";
+
+    IntegrationBundleVerificationHarness harness(
+        mocks.dependencies(testing_support::hostPolicy(VerificationMode::AUTO)),
+        LoadedEngine{11, engineName});
+    harness.setBundle(fixtures::writeLiveRowBundle(_tempDir, "live_too_long", {5, 0}, K_NAN),
+                      "live-rows-bundle",
+                      locator);
+
+    ::testing::TestPartResultArray results;
+    testing_support::driveHarness(harness, &results);
+
+    ASSERT_TRUE(testing_support::anyFailed(results));
+    EXPECT_FALSE(testing_support::anySkipped(results));
+    const auto messages = testing_support::allMessages(results);
+    EXPECT_NE(messages.find("live_rows cannot be applied"), std::string::npos) << messages;
+    EXPECT_NE(messages.find("length 5 of batch 0 is not in the range 0 to 4"), std::string::npos)
+        << messages;
+
+    ASSERT_EQ(verdicts.size(), 1u);
+    const std::string origin
+        = std::string("failed outside the engine (") + toString(FailureOrigin::HARNESS) + ")";
+    EXPECT_NE(verdicts.front().detail.find(origin), std::string::npos) << verdicts.front().detail;
+}
+
+// The CPU reference's output is the expected side: it holds -inf past the lengths, and
+// the INT64 lengths tensor keeps those positions out of the comparison.
+TEST_F(TestGoldenHarnessFixture, LiveRowReferenceOutputIsComparedOnlyInTheLiveRows)
+{
+    testing_support::HarnessMocks mocks;
+    testing_support::engineWrites(
+        mocks.engineRunner, &fixtures::writeOutput, fixtures::K_OUTPUT_VALUE);
+    ON_CALL(mocks.cpuReference, execute(::testing::_, ::testing::_, ::testing::_))
+        .WillByDefault([](void*, std::size_t, const VariantPack& variantPack) {
+            writeHostOutput(variantPack.at(fixtures::K_OUTPUT_UID), liveRowOutput(K_NEGATIVE_INF));
+        });
+
+    IntegrationBundleVerificationHarness harness(
+        mocks.dependencies(testing_support::hostPolicy(VerificationMode::CPU)));
+    harness.setBundle(fixtures::writeLiveRowBundle(_tempDir,
+                                                   "live_rows_reference",
+                                                   {1, 0},
+                                                   K_NAN,
+                                                   /*withLiveRows=*/true,
+                                                   /*int64Lengths=*/true),
+                      "unit-test-bundle");
+
+    ::testing::TestPartResultArray results;
+    testing_support::driveHarness(harness, &results);
+
+    EXPECT_FALSE(testing_support::anyFailed(results)) << testing_support::allMessages(results);
+    EXPECT_FALSE(testing_support::anySkipped(results));
+}
+
+// A GPU reference leaves its output on the device. Under the default validator a
+// live-row output is copied to the host and compared there; under --validator gpu it is
+// reported as not comparable.
+TEST_F(TestGoldenHarnessFixture, LiveRowGpuReferenceOutputOnTheDeviceIsComparedOnTheHost)
+{
+    SKIP_IF_NO_DEVICES();
+    for(const auto validator : {ValidatorDevice::AUTO, ValidatorDevice::GPU})
+    {
+        SCOPED_TRACE(validator == ValidatorDevice::AUTO ? "auto" : "gpu");
+        testing_support::HarnessMocks mocks;
+        const auto copyToDevice = [](void* device, const std::vector<float>& values) {
+            return hipMemcpy(
+                device, values.data(), values.size() * sizeof(float), hipMemcpyHostToDevice);
+        };
+        ON_CALL(mocks.engineRunner, execute(::testing::_, ::testing::_, ::testing::_))
+            .WillByDefault([&copyToDevice](GraphSession&,
+                                           const std::optional<LoadedEngine>&,
+                                           VariantPack& pack) {
+                const auto status = copyToDevice(pack.at(fixtures::K_OUTPUT_UID),
+                                                 liveRowOutput(fixtures::K_OUTPUT_VALUE));
+                return status == hipSuccess ? EngineOpResult::succeeded()
+                                            : EngineOpResult::failed(hipGetErrorString(status));
+            });
+        ON_CALL(mocks.gpuReference, requiresDeviceMemory()).WillByDefault(::testing::Return(true));
+        ON_CALL(mocks.gpuReference, execute(::testing::_, ::testing::_, ::testing::_))
+            .WillByDefault([&copyToDevice](void*, std::size_t, const VariantPack& pack) {
+                ASSERT_EQ(copyToDevice(pack.at(fixtures::K_OUTPUT_UID), liveRowOutput(K_NAN)),
+                          hipSuccess);
+            });
+
+        auto policy = testing_support::hostPolicy(VerificationMode::GPU);
+        policy.placement = TensorPlacement::DEVICE;
+        policy.validator = validator;
+        IntegrationBundleVerificationHarness harness(mocks.dependencies(policy));
+        harness.setBundle(fixtures::writeLiveRowBundle(_tempDir,
+                                                       validator == ValidatorDevice::AUTO
+                                                           ? "live_rows_auto"
+                                                           : "live_rows_gpu",
+                                                       {1, 0},
+                                                       K_NAN),
+                          "unit-test-bundle");
+
+        ::testing::TestPartResultArray results;
+        testing_support::driveHarness(harness, &results);
+
+        const auto messages = testing_support::allMessages(results);
+        if(validator == ValidatorDevice::AUTO)
+        {
+            EXPECT_FALSE(testing_support::anyFailed(results)) << messages;
+        }
+        else
+        {
+            EXPECT_TRUE(testing_support::anyFailed(results));
+            EXPECT_NE(messages.find("Output with live rows NOT COMPARABLE ON DEVICE"),
+                      std::string::npos)
+                << messages;
+        }
+        EXPECT_FALSE(testing_support::anySkipped(results)) << messages;
+    }
+}
+
 // NOLINTEND(readability-identifier-naming)

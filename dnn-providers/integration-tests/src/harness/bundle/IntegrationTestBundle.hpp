@@ -916,6 +916,171 @@ inline void
     }
 }
 
+// The rules that tie a bundle's `live_rows` to its graph. Each output is a compared
+// output of a floating-point type that is not ragged. A `lengths` entry has an axis from
+// 1 to the output's rank minus 1, and names a graph input of type INT32 or INT64 that
+// holds its own data and has one element per batch of the output. A `like` entry names
+// a ragged graph tensor that is not virtual and has as many batches as the output.
+// Throws BundleMetadataError naming `where`, the output and the rule.
+inline void
+    checkLiveRowRules(const hipdnn_integration_tests::BundleMetadata& metadata,
+                      const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper& graph,
+                      const std::vector<int64_t>& outputTensorUids,
+                      const std::string& where)
+{
+    using hipdnn_flatbuffers_sdk::data_objects::DataType;
+    using hipdnn_integration_tests::BundleMetadataError;
+    using hipdnn_integration_tests::bundle_metadata_detail::describeLiveRows;
+
+    if(metadata.liveRows.empty())
+    {
+        return;
+    }
+    const auto& tensors = graph.getTensorMap();
+    const std::unordered_set<int64_t> outputs(outputTensorUids.begin(), outputTensorUids.end());
+    const auto error = [&](int64_t uid, const std::string& rule) {
+        std::string message = where;
+        message.append(": ").append(describeLiveRows(uid)).append(": ").append(rule);
+        return message;
+    };
+    const auto find = [&](int64_t uid) {
+        const auto it = tensors.find(uid);
+        return it == tensors.end() ? nullptr : it->second;
+    };
+    const auto dimsOf = [](const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& tensor) {
+        std::vector<int64_t> dims;
+        if(tensor.dims() != nullptr)
+        {
+            dims.assign(tensor.dims()->begin(), tensor.dims()->end());
+        }
+        return dims;
+    };
+    const auto isFloatingPoint = [](DataType type) {
+        return type == DataType::FLOAT || type == DataType::HALF || type == DataType::BFLOAT16
+               || type == DataType::DOUBLE || type == DataType::FP8_E4M3
+               || type == DataType::FP8_E5M2 || type == DataType::FP8_E4M3_FNUZ
+               || type == DataType::FP8_E5M2_FNUZ;
+    };
+
+    for(const auto& entry : metadata.liveRows)
+    {
+        const auto* output = find(entry.uid);
+        if(output == nullptr)
+        {
+            throw BundleMetadataError(error(entry.uid, "the output is not a tensor of the graph"));
+        }
+        if(output->virtual_() || outputs.count(entry.uid) == 0)
+        {
+            throw BundleMetadataError(error(entry.uid, "the tensor is not a compared output"));
+        }
+        if(output->ragged_offset_tensor_uid().has_value())
+        {
+            throw BundleMetadataError(
+                error(entry.uid, "the output is ragged; a ragged output has its own live rows"));
+        }
+        if(!isFloatingPoint(output->data_type()))
+        {
+            throw BundleMetadataError(error(entry.uid,
+                                            std::string("the output has the data type ")
+                                                + EnumNameDataType(output->data_type())
+                                                + ", which is not a floating-point type"));
+        }
+        const auto outputDims = dimsOf(*output);
+        if(outputDims.empty())
+        {
+            throw BundleMetadataError(error(entry.uid, "the output has no dims"));
+        }
+
+        if(entry.likeUid.has_value())
+        {
+            const int64_t likeUid = *entry.likeUid;
+            const auto* like = find(likeUid);
+            if(like == nullptr)
+            {
+                throw BundleMetadataError(error(entry.uid,
+                                                "like tensor " + std::to_string(likeUid)
+                                                    + " is not a tensor of the graph"));
+            }
+            if(like->virtual_())
+            {
+                throw BundleMetadataError(
+                    error(entry.uid, "like tensor " + std::to_string(likeUid) + " is virtual"));
+            }
+            if(!like->ragged_offset_tensor_uid().has_value())
+            {
+                throw BundleMetadataError(
+                    error(entry.uid, "like tensor " + std::to_string(likeUid) + " is not ragged"));
+            }
+            const auto likeDims = dimsOf(*like);
+            if(likeDims.empty() || likeDims[0] != outputDims[0])
+            {
+                throw BundleMetadataError(
+                    error(entry.uid,
+                          "like tensor " + std::to_string(likeUid)
+                              + " does not have the same dims[0] as the output"));
+            }
+            continue;
+        }
+
+        const int64_t axis = entry.axis.value_or(0);
+        const auto rank = static_cast<int64_t>(outputDims.size());
+        if(axis < 1 || axis >= rank)
+        {
+            throw BundleMetadataError(error(entry.uid,
+                                            "axis " + std::to_string(axis)
+                                                + " is not in the range 1 to "
+                                                + std::to_string(rank - 1)));
+        }
+        const int64_t lengthsUid = entry.lengthsUid.value_or(0);
+        const std::string lengthsName = "lengths tensor " + std::to_string(lengthsUid);
+        const auto* lengths = find(lengthsUid);
+        if(lengths == nullptr)
+        {
+            throw BundleMetadataError(
+                error(entry.uid, lengthsName + " is not a tensor of the graph"));
+        }
+        if(lengths->virtual_() || outputs.count(lengthsUid) != 0)
+        {
+            throw BundleMetadataError(error(
+                entry.uid, lengthsName + " is not a graph input (it is virtual or an output)"));
+        }
+        if(lengths->is_runtime_pass_by_value())
+        {
+            throw BundleMetadataError(
+                error(entry.uid, lengthsName + " is passed by value at run time"));
+        }
+        for(const auto& alias : metadata.aliases)
+        {
+            if(alias.uid == lengthsUid)
+            {
+                throw BundleMetadataError(
+                    error(entry.uid,
+                          lengthsName + " is "
+                              + hipdnn_integration_tests::tensor_alias_detail::describe(alias)));
+            }
+        }
+        if(lengths->data_type() != DataType::INT32 && lengths->data_type() != DataType::INT64)
+        {
+            throw BundleMetadataError(error(entry.uid,
+                                            lengthsName + " has the data type "
+                                                + EnumNameDataType(lengths->data_type())
+                                                + ", not INT32 or INT64"));
+        }
+        int64_t elementCount = 1;
+        for(const int64_t dim : dimsOf(*lengths))
+        {
+            elementCount *= dim;
+        }
+        if(elementCount != outputDims[0])
+        {
+            throw BundleMetadataError(error(
+                entry.uid,
+                lengthsName + " has " + std::to_string(elementCount) + " elements; the output has "
+                    + std::to_string(outputDims[0]) + " batches (dims[0])"));
+        }
+    }
+}
+
 // Runs `step` and rethrows any exception that is not a BundleMetadataError as a
 // BundleMetadataError that names `where`.
 template <typename Step>
@@ -1281,7 +1446,7 @@ struct AbsentTensorCase
 // The rules that tie a case's names to its absent tensors. A case names an absent tensor
 // in none of: values.tensors, a key of another case value (`${case.<field>.<uid>}`),
 // tensor_patches, the metadata `inputs`, the metadata `aliases`, the metadata
-// `start_offsets`.
+// `start_offsets`, the metadata `live_rows`.
 inline void
     checkCaseDoesNotNameAbsentTensors(const nlohmann::json& caseJson,
                                       const hipdnn_integration_tests::BundleMetadata& metadata,
@@ -1372,6 +1537,18 @@ inline void
         {
             throw BundleMetadataError(
                 absentTensorMessage(where, entry.uid, "has a metadata start_offsets entry"));
+        }
+    }
+
+    for(const auto& entry : metadata.liveRows)
+    {
+        for(const auto& uid : {std::optional<int64_t>(entry.uid), entry.lengthsUid, entry.likeUid})
+        {
+            if(uid.has_value() && absent.count(*uid) != 0)
+            {
+                throw BundleMetadataError(
+                    absentTensorMessage(where, *uid, "is named by a metadata live_rows entry"));
+            }
         }
     }
 }
@@ -1578,6 +1755,8 @@ inline LoadResult loadIntegrationTestBundle(const std::filesystem::path& jsonPat
 
     detail::describeTensorBlobs(bundle, *graphJson, blobPathForUid);
     detail::checkStartOffsetRules(bundle.metadata, bundle.graphWrapper(), jsonPath.string());
+    detail::checkLiveRowRules(
+        bundle.metadata, bundle.graphWrapper(), bundle.outputTensorUids, jsonPath.string());
     // One blob is enough: a bundle that leaves out the view's blob still stores its
     // other tensors apart.
     detail::checkAliasRules(
@@ -1734,6 +1913,8 @@ inline LoadResult loadIntegrationTestBundle(const DiscoveredBundle& discovered,
         detail::describeTensorBlobs(bundle, expandedGraph, blobPathForUid);
     }
     detail::checkStartOffsetRules(bundle.metadata, bundle.graphWrapper(), where);
+    detail::checkLiveRowRules(
+        bundle.metadata, bundle.graphWrapper(), bundle.outputTensorUids, where);
     detail::checkAliasRules(bundle.metadata,
                             bundle.graphWrapper(),
                             bundle.outputTensorUids,

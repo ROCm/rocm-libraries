@@ -498,6 +498,79 @@ inline std::shared_ptr<IntegrationTestBundle> loadBundle(const std::filesystem::
     return loadWrittenBundle(dir, name);
 }
 
+/// Writes and loads the golden bundle with mean (uid 1) as a [2,1,1,1] lengths tensor
+/// holding `lengths` (INT32, or INT64 with `int64Lengths`). Golden y holds K_OUTPUT_VALUE
+/// in the live rows (index s < lengths[b] on axis 2) and `pastValue` past them. With
+/// `withLiveRows` the metadata declares those live rows.
+inline std::shared_ptr<IntegrationTestBundle>
+    writeLiveRowBundle(const std::filesystem::path& parentDir,
+                       const std::string& name,
+                       const std::vector<int64_t>& lengths,
+                       float pastValue,
+                       bool withLiveRows = true,
+                       bool int64Lengths = false)
+{
+    const auto dir = parentDir / name;
+    writeBundleFiles(dir, name, /*includeGoldenOutput=*/true);
+    const auto basePath = (dir / name).string();
+
+    std::ifstream graphFile(dir / (name + ".json"));
+    auto graph = nlohmann::json::parse(graphFile);
+    graphFile.close();
+    for(auto& tensor : graph.at("tensors"))
+    {
+        if(tensor.at("uid") == 1)
+        {
+            tensor["data_type"] = int64Lengths ? "int64" : "int32";
+            tensor["dims"] = {2, 1, 1, 1};
+            tensor["strides"] = {1, 1, 1, 1};
+        }
+    }
+    std::ofstream(dir / (name + ".json")) << graph.dump();
+
+    std::ofstream lengthsFile(basePath + ".tensor1.bin", std::ios::binary);
+    for(const int64_t length : lengths)
+    {
+        if(int64Lengths)
+        {
+            lengthsFile.write(reinterpret_cast<const char*>(&length), sizeof(length));
+        }
+        else
+        {
+            const auto narrow = static_cast<int32_t>(length);
+            lengthsFile.write(reinterpret_cast<const char*>(&narrow), sizeof(narrow));
+        }
+    }
+    lengthsFile.close();
+
+    std::vector<float> golden(K_OUTPUT_ELEMS, pastValue);
+    for(int64_t b = 0; b < 2; ++b)
+    {
+        for(int64_t h = 0; h < 3; ++h)
+        {
+            for(int64_t s = 0; s < 4 && s < lengths[static_cast<size_t>(b)]; ++s)
+            {
+                for(int64_t d = 0; d < 5; ++d)
+                {
+                    golden[static_cast<size_t>(b * 60 + h * 20 + s * 5 + d)] = K_OUTPUT_VALUE;
+                }
+            }
+        }
+    }
+    std::ofstream(basePath + ".tensor5.bin", std::ios::binary)
+        .write(reinterpret_cast<const char*>(golden.data()),
+               static_cast<std::streamsize>(golden.size() * sizeof(float)));
+
+    if(withLiveRows)
+    {
+        const auto metadata = nlohmann::json::parse(
+            R"({"format_version": 2, "operation": "BatchnormInference",
+                "live_rows": [{"uid": 5, "axis": 2, "lengths": 1}]})");
+        std::ofstream(dir / (name + ".meta.json")) << metadata.dump();
+    }
+    return loadWrittenBundle(dir, name);
+}
+
 /// Fills the bundle's single output uid in `variantPack` with `value`.
 inline void writeOutput(VariantPack& variantPack, float value)
 {

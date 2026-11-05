@@ -13,6 +13,8 @@
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_test_sdk/utilities/SdkFrontendTypeConversions.hpp>
 
+#include "harness/bundle/LiveRows.hpp"
+
 namespace hipdnn_integration_tests::bundle
 {
 
@@ -80,6 +82,19 @@ std::string raggedNotSupportedOnDevice(const std::string& label)
           << "  Ragged outputs are compared on the host only, and this comparison runs on\n"
              "  the device, where the reference left its output.\n"
              "  Rerun with --validator cpu to compare it on the host.\n";
+    return error.str();
+}
+
+// The report for an output with live rows whose comparison was asked to run on the
+// device. The live-row view reads host memory, and no device validator skips rows.
+std::string liveRowsNotSupportedOnDevice(const std::string& label)
+{
+    std::ostringstream error;
+    error << "\nOutput with live rows NOT COMPARABLE ON DEVICE\n"
+          << "  Tensor: " << label << "\n"
+          << "  The metadata live_rows of this output are applied on the host only, and this\n"
+             "  run asks for the comparison on the device.\n"
+             "  Rerun with --validator cpu or --validator auto to compare it on the host.\n";
     return error.str();
 }
 
@@ -256,7 +271,9 @@ std::vector<TensorMismatch>
                    const ExpectedTensorLookup& expectedFor,
                    const ToleranceLookup& toleranceFor,
                    ValidationSite site,
-                   const std::string& contextLine)
+                   const std::string& contextLine,
+                   const LiveRowMap& liveRows,
+                   std::optional<ValidationSite> liveRowSite)
 {
     const auto& tensorAttrMap = wrapper.getTensorMap();
 
@@ -264,13 +281,33 @@ std::vector<TensorMismatch>
     for(const int64_t uid : outputUids)
     {
         const auto* attrs = tensorAttrMap.at(uid);
-        auto mismatch = compareTensor(uid,
-                                      *attrs,
-                                      expectedFor(uid),
-                                      *actual.at(uid),
-                                      toleranceFor(tensorLabel(uid, *attrs), attrs->data_type()),
-                                      site,
-                                      contextLine);
+        const auto tolerance = toleranceFor(tensorLabel(uid, *attrs), attrs->data_type());
+        std::optional<TensorMismatch> mismatch;
+        const auto live = liveRows.find(uid);
+        if(live == liveRows.end())
+        {
+            mismatch = compareTensor(
+                uid, *attrs, expectedFor(uid), *actual.at(uid), tolerance, site, contextLine);
+        }
+        else if(liveRowSite.value_or(site) == ValidationSite::DEVICE)
+        {
+            const auto label = tensorLabel(uid, *attrs);
+            mismatch = TensorMismatch{uid, label, liveRowsNotSupportedOnDevice(label)};
+        }
+        else
+        {
+            const auto expectedView
+                = detail::makeLiveRowView(expectedFor(uid), attrs->data_type(), live->second);
+            const auto actualView
+                = detail::makeLiveRowView(*actual.at(uid), attrs->data_type(), live->second);
+            mismatch = compareTensor(uid,
+                                     *attrs,
+                                     *expectedView,
+                                     *actualView,
+                                     tolerance,
+                                     ValidationSite::HOST,
+                                     contextLine);
+        }
         if(mismatch.has_value())
         {
             mismatches.push_back(*std::move(mismatch));

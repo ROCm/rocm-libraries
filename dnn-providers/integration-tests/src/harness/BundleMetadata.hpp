@@ -42,6 +42,24 @@ struct TensorStartOffset
     }
 };
 
+// A dense output whose positions past a live length per batch hold no defined value.
+// A position is past the live length when its index on the axis is at least the length
+// of its batch (index 0). Either `lengthsUid` and `axis` are set, or `likeUid` is set:
+// a ragged tensor whose live lengths and sequence axis apply.
+struct OutputLiveRows
+{
+    int64_t uid = 0;
+    std::optional<int64_t> axis;
+    std::optional<int64_t> lengthsUid;
+    std::optional<int64_t> likeUid;
+
+    bool operator==(const OutputLiveRows& other) const
+    {
+        return uid == other.uid && axis == other.axis && lengthsUid == other.lengthsUid
+               && likeUid == other.likeUid;
+    }
+};
+
 // The alignment of the address that a start offset counts from. A start offset is
 // greater than 0 and less than this value.
 inline constexpr int64_t K_START_OFFSET_BASE_ALIGNMENT = 256;
@@ -84,6 +102,8 @@ struct BundleMetadata
     std::vector<TensorAlias> aliases;
     /// Tensors whose data starts past an aligned address in the engine's variant pack.
     std::vector<TensorStartOffset> startOffsets;
+    /// Dense outputs whose positions past a live length are not compared.
+    std::vector<OutputLiveRows> liveRows;
     EnforcementLevel enforcementLevel = EnforcementLevel::FULL;
 
     /// The bundle opts out of the CPU / GPU reference executor as an oracle. A
@@ -114,8 +134,8 @@ inline bool excludedFromSupportClaims(const BundleMetadata& metadata)
 /// an `archs` value that is not a non-empty array of base arch names,
 /// a non-numeric `inputs` key, an `inputs` entry that is not a valid fill spec, an
 /// `aliases` value that parseTensorAliases() rejects, a view whose `inputs` entry sets a
-/// fill kind, a malformed `start_offsets` value, a feature that needs a higher
-/// `format_version`, a flag combination that contradicts the bundle's golden data, or
+/// fill kind, a malformed `start_offsets` or `live_rows` value, a feature that needs a
+/// higher `format_version`, a flag combination that contradicts the bundle's golden data, or
 /// (for a .meta.json file) unreadable or not valid JSON.
 /// An authoring error, never a "metadata not recorded" case, so it must not degrade
 /// to defaults.
@@ -167,11 +187,17 @@ inline bool usesStartOffsets(const nlohmann::json& metadata)
     return metadata.contains("start_offsets");
 }
 
-inline constexpr std::array<FormatVersion2Feature, 4> K_FORMAT_VERSION_2_FEATURES = {{
+inline bool usesLiveRows(const nlohmann::json& metadata)
+{
+    return metadata.contains("live_rows");
+}
+
+inline constexpr std::array<FormatVersion2Feature, 5> K_FORMAT_VERSION_2_FEATURES = {{
     {"kind values", &usesValuesFillKind},
     {"archs", &usesArchList},
     {"aliases", &usesAliases},
     {"start_offsets", &usesStartOffsets},
+    {"live_rows", &usesLiveRows},
 }};
 
 inline std::string describeStartOffset(int64_t uid)
@@ -258,6 +284,105 @@ inline std::vector<TensorStartOffset> parseStartOffsets(const nlohmann::json& js
     return startOffsets;
 }
 
+inline std::string describeLiveRows(int64_t uid)
+{
+    return "live rows of output " + std::to_string(uid);
+}
+
+inline OutputLiveRows parseLiveRowsEntry(const nlohmann::json& entry, std::size_t index)
+{
+    std::string where = "live_rows[" + std::to_string(index) + "]";
+    if(!entry.is_object())
+    {
+        throw std::invalid_argument(where + " is not an object");
+    }
+    const auto uid
+        = entry.contains("uid") ? tensor_alias_detail::integerValue(entry.at("uid")) : std::nullopt;
+    if(uid.has_value())
+    {
+        where += " (output " + std::to_string(*uid) + ")";
+    }
+
+    for(const auto& item : entry.items())
+    {
+        const auto& key = item.key();
+        if(key != "uid" && key != "axis" && key != "lengths" && key != "like")
+        {
+            std::string message = where;
+            message.append(" has unknown key \"").append(key).append("\"");
+            throw std::invalid_argument(message);
+        }
+    }
+
+    const auto readInteger = [&](const char* key) -> std::optional<int64_t> {
+        if(!entry.contains(key))
+        {
+            return std::nullopt;
+        }
+        const auto value = tensor_alias_detail::integerValue(entry.at(key));
+        if(!value.has_value())
+        {
+            throw std::invalid_argument(where + ": \"" + key + "\" is not a 64-bit signed integer");
+        }
+        return value;
+    };
+
+    const auto parsedUid = readInteger("uid");
+    if(!parsedUid.has_value())
+    {
+        throw std::invalid_argument(where + R"( lacks "uid")");
+    }
+    OutputLiveRows parsed;
+    parsed.uid = *parsedUid;
+    parsed.axis = readInteger("axis");
+    parsed.lengthsUid = readInteger("lengths");
+    parsed.likeUid = readInteger("like");
+
+    if(parsed.lengthsUid.has_value() == parsed.likeUid.has_value())
+    {
+        throw std::invalid_argument(where + R"( needs exactly one of "lengths" and "like")");
+    }
+    if(parsed.lengthsUid.has_value() && !parsed.axis.has_value())
+    {
+        throw std::invalid_argument(where + R"( has "lengths" and lacks "axis")");
+    }
+    if(parsed.likeUid.has_value() && parsed.axis.has_value())
+    {
+        throw std::invalid_argument(
+            where + R"( has "like" and "axis"; the axis comes from the ragged tensor)");
+    }
+    return parsed;
+}
+
+// Parses metadata `live_rows`. Throws std::invalid_argument when the value is not a
+// non-empty array of objects with an integer "uid" and either integer "axis" and
+// "lengths" or an integer "like", when an entry has another key, or when a uid appears
+// twice.
+inline std::vector<OutputLiveRows> parseLiveRows(const nlohmann::json& json)
+{
+    if(!json.is_array())
+    {
+        throw std::invalid_argument("live_rows is not an array");
+    }
+    if(json.empty())
+    {
+        throw std::invalid_argument("live_rows is empty");
+    }
+    std::vector<OutputLiveRows> liveRows;
+    std::unordered_set<int64_t> uids;
+    for(std::size_t i = 0; i < json.size(); ++i)
+    {
+        const auto parsed = parseLiveRowsEntry(json[i], i);
+        if(!uids.insert(parsed.uid).second)
+        {
+            throw std::invalid_argument(describeLiveRows(parsed.uid)
+                                        + ": the output appears in more than one entry");
+        }
+        liveRows.push_back(parsed);
+    }
+    return liveRows;
+}
+
 } // namespace bundle_metadata_detail
 
 // ---------------------------------------------------------------------------
@@ -269,8 +394,8 @@ inline std::vector<TensorStartOffset> parseStartOffsets(const nlohmann::json& js
 /// `archs` value that is not a non-empty array of base arch names, has an
 /// `inputs` key that is not a tensor UID or an `inputs` entry that is not a valid fill
 /// spec, has an `aliases` value that parseTensorAliases() rejects or a view whose
-/// `inputs` entry sets a fill kind, has a malformed `start_offsets` value, or uses a
-/// version-2 feature in version 1 metadata.
+/// `inputs` entry sets a fill kind, has a malformed `start_offsets` or `live_rows` value,
+/// or uses a version-2 feature in version 1 metadata.
 /// `source` names the origin (file path or sweep case) in
 /// the error message.
 inline BundleMetadata parseBundleMetadataJson(const nlohmann::json& json,
@@ -463,6 +588,19 @@ inline BundleMetadata parseBundleMetadataJson(const nlohmann::json& json,
         try
         {
             meta.startOffsets = bundle_metadata_detail::parseStartOffsets(json.at("start_offsets"));
+        }
+        catch(const std::invalid_argument& e)
+        {
+            throw BundleMetadataError(where + ": " + e.what());
+        }
+    }
+
+    // Version-1 metadata with `live_rows` fails the version check below, whatever the value.
+    if(json.contains("live_rows") && meta.formatVersion >= 2)
+    {
+        try
+        {
+            meta.liveRows = bundle_metadata_detail::parseLiveRows(json.at("live_rows"));
         }
         catch(const std::invalid_argument& e)
         {
