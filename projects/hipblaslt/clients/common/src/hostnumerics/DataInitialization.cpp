@@ -483,6 +483,11 @@ namespace hipblaslt::hostnumerics
                     throw std::runtime_error(
                         "hipBLASLt NaN initialization requires an ordinary floating type.");
                 return nanRecipe(type, ComplexGenerationPolicy::RealOnly, seed);
+            case hipblaslt_initialization::maf2_0:
+            case hipblaslt_initialization::maf2_0_unit_scale:
+            case hipblaslt_initialization::maf1_0:
+                throw std::runtime_error(
+                    "MAF initialization fills tensors directly and has no generation recipe.");
             }
             throw std::runtime_error("Unsupported hipBLASLt host matrix initialization mode.");
         }
@@ -698,6 +703,11 @@ namespace hipblaslt::hostnumerics
         case hipblaslt_initialization::norm_dist_one_special:
             throw std::runtime_error(
                 "Requested hipBLASLt initialization requires matrix role and layout information.");
+        case hipblaslt_initialization::maf2_0:
+        case hipblaslt_initialization::maf2_0_unit_scale:
+        case hipblaslt_initialization::maf1_0:
+            throw std::runtime_error(
+                "MAF initialization fills tensors directly and has no generation recipe.");
         }
         throw std::runtime_error("Unsupported hipBLASLt tensor initialization mode.");
     }
