@@ -58,6 +58,14 @@ overrides; `gfx1250` covers `gfx1250-strict`, not the reverse; nearest mark wins
 or in-body skip; `test_gpu_marker_guard.py` enforces it. Non-gate code uses `gpu_is(...)`.
 `Tests/common` configs use `skip-gfxNNNN`.
 
+**Worker pools are not exercised here.** The unit suite pins `CpuThreads` to 1 (a session fixture in
+[`Tests/unit/conftest.py`](tensilelite/Tests/unit/conftest.py)), so its `ParallelMap` and `ParallelMap2`
+calls run in the test process and nothing is pickled or sent to a worker. The real pool path is
+covered by the device-library builds (`TensileCreateLibrary` with the default `CpuThreads` of -1), by
+the subprocess-based `Tests/common/test_config.py` runs, and by one small test in
+[`characterization/Parallel`](tensilelite/Tests/unit/characterization/Parallel/test_parallel_char.py)
+that runs both helpers with `CpuThreads=2`.
+
 A significant part of that suite is a **characterization suite** under
 [`tensilelite/Tests/unit/characterization/`](tensilelite/Tests/unit/characterization/), established in
 [PR #7989](https://github.com/ROCm/rocm-libraries/pull/7989) and grown considerably since. It now
