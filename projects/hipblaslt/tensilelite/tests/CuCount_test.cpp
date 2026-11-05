@@ -446,12 +446,12 @@ namespace
             assert(pAMDGPU != nullptr);
             // The same helper generateSingleCall() packs from, so this mirror
             // cannot drift from the arithmetic it claims to reproduce.
-            const StreamKStaticSplit split
-                = streamKStaticSplit(pack.tiles,
-                                     pack.itersPerTile,
-                                     pack.grid,
-                                     pAMDGPU->skFullTiles,
-                                     solution.sizeMapping.isPersistentDataParallel());
+            const StreamK::Static::Split split
+                = StreamK::Static::computeSplit(pack.tiles,
+                                                pack.itersPerTile,
+                                                pack.grid,
+                                                pAMDGPU->skFullTiles,
+                                                solution.sizeMapping.isPersistentDataParallel());
             pack.skTiles      = split.skTiles;
             pack.skItersPerWG = split.skItersPerWG;
         }
@@ -747,7 +747,7 @@ TEST(StreamK5WorkspaceRegressionTest, StaticModeWorkspaceIsPartialTilesOnly)
     if(tiles % grid == 0)
         GTEST_SKIP() << "No partial tiles for this config";
 
-    // The other half of the reserve-or-not rule (streamKStraddlesTiles in
+    // The other half of the reserve-or-not rule (StreamK::straddlesTiles in
     // ContractionSolution.cpp): a workgroup has to be able to stop part-way
     // through a tile. Asserted rather than skipped, so a later change to K or
     // depthU cannot quietly put this case back in the whole-tile regime, where
@@ -848,46 +848,12 @@ TEST(Sk3Sk5OffPartition512Test, NativeSk3MatchesSk5OffHostPack)
 // slice of an 8-XCD gfx942) is likewise rejected. The host excludes such a
 // solution from selection (streamKDynamicQueueSupported wired into
 // softwarePredicate) and warns once instead of silently degrading. The
-// production predicates live in a .cpp anonymous namespace, so -- like
-// computeStreamKHostPack above -- this test mirrors them over a hip::HipAMDGPU
-// mock (6 -> reject, 4 -> reject, 8 -> allow, unknown -> allow). Not run on
-// real MI300A silicon.
+// XCD gate (StreamK::Dynamic::queueUnsupported) is called directly over a
+// hip::HipAMDGPU mock (6 -> reject, 4 -> reject, 8 -> allow, unknown -> allow).
+// Not run on real MI300A silicon.
 // ===========================================================================
 namespace
 {
-    // Mirror of the anonymous-namespace helper in ContractionSolution.cpp
-    // (streamKBakedQueueCount): the baked per-XCD queue count comes from
-    // origami's per-arch XCD count. Kept in lockstep with the production code.
-    inline size_t streamKBakedQueueCountRef(Hardware const& hardware)
-    {
-        auto const* hipAMDGPU = dynamic_cast<hip::HipAMDGPU const*>(&hardware);
-        if(hipAMDGPU == nullptr || hipAMDGPU->analyticalHardware == nullptr)
-            return 0;
-        try
-        {
-            return origami::hardware_t::get_default_num_xcds(hipAMDGPU->analyticalHardware->arch);
-        }
-        catch(std::exception const&)
-        {
-            return 0;
-        }
-    }
-
-    // Byte-for-byte mirror of the anonymous-namespace numeric predicate in
-    // ContractionSolution.cpp (streamKDynamicQueueUnsupported). Kept in lockstep
-    // with the production code; if that predicate changes, update this too.
-    // Unknown hardware (not a HipAMDGPU, no analytical hardware, or no baked
-    // per-XCD queue count) is treated as UNSUPPORTED (returns true).
-    inline bool streamKDynamicQueueUnsupportedRef(Hardware const& hardware)
-    {
-        auto const* hipAMDGPU = dynamic_cast<hip::HipAMDGPU const*>(&hardware);
-        if(hipAMDGPU == nullptr || hipAMDGPU->analyticalHardware == nullptr)
-            return true;
-        size_t baked  = streamKBakedQueueCountRef(hardware);
-        size_t numXCD = hipAMDGPU->analyticalHardware->NUM_XCD;
-        return baked == 0 || numXCD == 0 || (numXCD & (numXCD - 1)) != 0 || numXCD != baked;
-    }
-
     // Mirror of ContractionSolution::streamKDynamicQueueSupported(). Returns
     // true when the solution is SELECTABLE, false when it must be EXCLUDED
     // (dynamic-queue / work-stealing on a non-power-of-two XCD device). streamK
@@ -899,7 +865,7 @@ namespace
     {
         if(streamK != 4 && streamK != 5)
             return true;
-        if(!streamKDynamicQueueUnsupportedRef(hardware))
+        if(!StreamK::Dynamic::queueUnsupported(hardware))
             return true;
         const bool dynamicQueue = (streamK == 4) || (streamK == 5 && effectiveDynamic);
         return !dynamicQueue; // dynamic-queue on non-pow2 XCD -> excluded
@@ -968,7 +934,7 @@ TEST(StreamKDynamicQueueXcdGateTest, RejectsMi300aSixXcd)
 {
     hip::HipAMDGPU  mi300a = makeGfx942DeviceWithXcd(6);
     Hardware const& hw     = mi300a;
-    EXPECT_TRUE(streamKDynamicQueueUnsupportedRef(hw))
+    EXPECT_TRUE(StreamK::Dynamic::queueUnsupported(hw))
         << "MI300A (NUM_XCD=6, not a power of two) must flag the dynamic-queue "
            "work-stealing path as unsupported";
 }
@@ -977,7 +943,7 @@ TEST(StreamKDynamicQueueXcdGateTest, AllowsMi300xEightXcd)
 {
     hip::HipAMDGPU  mi300x = makeGfx942DeviceWithXcd(8);
     Hardware const& hw     = mi300x;
-    EXPECT_FALSE(streamKDynamicQueueUnsupportedRef(hw))
+    EXPECT_FALSE(StreamK::Dynamic::queueUnsupported(hw))
         << "MI300X (NUM_XCD=8, power of two) must keep the dynamic-queue path";
 }
 
@@ -988,9 +954,9 @@ TEST(StreamKDynamicQueueXcdGateTest, RejectsGfx942FourXcdPowerOfTwoButMismatched
     // (8) and the fixed Q=8 masking would mis-map queues. Must be rejected.
     hip::HipAMDGPU  gfx942Cpx = makeGfx942DeviceWithXcd(4);
     Hardware const& hw        = gfx942Cpx;
-    EXPECT_EQ(streamKBakedQueueCountRef(hw), 8u)
+    EXPECT_EQ(StreamK::Dynamic::bakedQueueCount(hw), 8u)
         << "gfx942 must bake origami's per-arch XCD count (8)";
-    EXPECT_TRUE(streamKDynamicQueueUnsupportedRef(hw))
+    EXPECT_TRUE(StreamK::Dynamic::queueUnsupported(hw))
         << "gfx942 with NUM_XCD=4 (power of two but != baked 8) must be rejected";
 }
 
@@ -999,7 +965,7 @@ TEST(StreamKDynamicQueueXcdGateTest, AllowsGfx950EightXcd)
     // gfx950 (local MI355X) analytical hardware advertises 8 XCDs.
     hip::HipAMDGPU  gfx950 = makeHipDeviceWithAnalytical(makeGfx950AnalyticalHardware());
     Hardware const& hw     = gfx950;
-    EXPECT_FALSE(streamKDynamicQueueUnsupportedRef(hw))
+    EXPECT_FALSE(StreamK::Dynamic::queueUnsupported(hw))
         << "gfx950 (NUM_XCD=8) must keep the dynamic-queue work-stealing path";
 }
 
@@ -1016,7 +982,7 @@ TEST(StreamKDynamicQueueXcdGateTest, MissingAnalyticalHardwareIsUnsupported)
     noAnalytical.deviceName    = "test-gfx942-no-analytical";
     Hardware const& hwNoAnalyt = noAnalytical;
     ASSERT_EQ(noAnalytical.analyticalHardware, nullptr);
-    EXPECT_TRUE(streamKDynamicQueueUnsupportedRef(hwNoAnalyt))
+    EXPECT_TRUE(StreamK::Dynamic::queueUnsupported(hwNoAnalyt))
         << "Missing analyticalHardware (unknown NUM_XCD) must be treated as unsupported";
     // And the selection predicate must therefore EXCLUDE the dynamic-queue
     // solution (SK4) while keeping non-dynamic-queue solutions selectable.

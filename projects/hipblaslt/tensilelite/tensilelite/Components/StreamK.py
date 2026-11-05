@@ -59,7 +59,7 @@ from copy import deepcopy
 # distributes the leftover in units of skKGranularity instead of single
 # iterations, which keeps every workgroup start on an epoch boundary. The host
 # packs SKItersPerWG already rounded down to a multiple of the same quantum
-# (streamKStaticSplit in ContractionSolution.cpp), so the leftover is a whole
+# (StreamK::Static::computeSplit in ContractionSolution.cpp), so the leftover is a whole
 # number of epochs and the closed-form inverses in the fixup path stay valid.
 #
 # This is a no-op (granularity 1) for every non-dual-period kernel.
@@ -120,7 +120,7 @@ def skPaddedItersPerTile(module, kernel, dst, src,
     starts on an epoch boundary: the last boundary before the padded end is
     paddedIters-g, which is below the real count.
 
-    Mirrors ContractionSolution::skPaddedItersPerTile() on the host. Returns
+    Mirrors StreamK::paddedItersPerTile() on the host. Returns
     the register holding the count: `src` itself when one epoch is one
     iteration, so a kernel without scale reuse emits what it emitted before.
     """
