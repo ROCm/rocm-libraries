@@ -2008,7 +2008,10 @@ class Fuzz:
                     kill_tree(proc)
                     result.returncode = proc.returncode
                     break
-                time.sleep(POLL_SECONDS)
+                try:
+                    proc.wait(POLL_SECONDS)  # returns the moment the binary exits
+                except subprocess.TimeoutExpired:
+                    pass
         drain()
         return result
 
