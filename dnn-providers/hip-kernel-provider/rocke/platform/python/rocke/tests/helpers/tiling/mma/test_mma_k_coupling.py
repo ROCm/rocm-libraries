@@ -9,11 +9,13 @@ same-format instruction that is slot s with slot s. A mixed-width ``f8f6f4`` ins
 and B slot for slot rejects the correct canonical pair and accepts a wrong one. The K check reads the
 coupling off the two canonical layouts, which every caller must pass.
 
-Every kernel is lowered by both engines, which must emit the same IR
-(``rocke.tests.engines.lower_with_both_engines``). Where the host clang targets the arch, the module
-is also compiled and linked. Where the current GPU is a gfx950, the driven fp8 x fp4 tile also runs on random K-dependent operands
-and must equal an independent numpy product exactly; on any other GPU, or none, it skips. The gfx1250
-tile with two M blocks per lane is skipped everywhere until it has run on gfx1250 hardware.
+Every kernel is lowered by each engine (``rocke.tests.engines.lower_with_engine`` over
+``ENGINES``), and the C++ engine must emit the Python engine's IR; where the ``rocke_engine``
+binding is not built, only the C++ cases skip. Where the host clang targets the arch, a separate
+test compiles and links each driven tile once. Where the current GPU is a gfx950, the driven
+fp8 x fp4 tile also runs on random K-dependent operands and must equal an independent numpy product
+exactly; on any other GPU, or none, it skips. The gfx1250 tile with two M blocks per lane is skipped
+everywhere until it has run on gfx1250 hardware.
 """
 
 from __future__ import annotations
@@ -45,10 +47,11 @@ from rocke.helpers.tiling.transforms import (
     mma_pair_k_aligned,
 )
 from rocke.helpers.tiling.visualization import layout_render as lr
-from rocke.tests.engines import lower_with_both_engines
+from rocke.tests.engines import ENGINES, lower_with_engine
 from rocke.tests.gpu import run_on_device
+from rocke.tests.ir_validity import assert_kernel_target_accepts
 
-from .test_mma_issue import _calls, _compile_or_skip
+from .test_mma_issue import _calls
 
 _CATALOG = load_mma_traits()
 _FP8_FP4 = "mfma_f32_16x16x128_f8f6f4_fp8e4m3_fp4e2m1"
@@ -238,7 +241,13 @@ def _fp8_fp4_mma() -> TileMma:
     return TileMma((16, 16, 128), a=FP8E4M3, b=FP4E2M1, c=F32, target="gfx950")
 
 
-def test_driven_fp8_by_fp4_tile_issues_and_compiles() -> None:
+def _two_m_blocks_mma() -> TileMma:
+    """A 64x32x256 tile of the gfx1250 f4 instruction whose lanes hold two M blocks of A."""
+    return TileMma((64, 32, 256), target="gfx1250", atom_override=_F4_TWO_M_BLOCKS)
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+def test_driven_fp8_by_fp4_tile_issues_one_instruction(engine) -> None:
     # The canonical fragments pass the K check. A reaches the instruction as 32 fp8 elements, B as
     # its 4 packed words; core widens each to the intrinsic's 8-word operand.
     mma = _fp8_fp4_mma()
@@ -247,22 +256,32 @@ def test_driven_fp8_by_fp4_tile_issues_and_compiles() -> None:
     (op,) = [op for op in kernel.body.ops if op.name == "tile.mma"]
     assert op.operands[0].type == VectorType(FP8E4M3, 32)
     assert op.operands[1].type == VectorType(I32, 4)
-    ir = lower_with_both_engines(kernel, "gfx950")
+    ir = lower_with_engine(kernel, "gfx950", engine=engine)
     assert len(_calls(ir, mma.traits.llvm_intrinsic)) == 1
-    _compile_or_skip(kernel, "gfx950")
 
 
-def test_driven_tile_of_an_instruction_with_two_m_blocks_per_lane_issues_every_atom() -> (
-    None
-):
+@pytest.mark.parametrize("engine", ENGINES)
+def test_driven_tile_of_an_instruction_with_two_m_blocks_per_lane_issues_every_atom(
+    engine,
+) -> None:
     # Two atoms along each of M, N and K: every A atom is one contiguous register block holding both
     # of a lane's M rows, so the driver slices and issues all eight.
-    mma = TileMma((64, 32, 256), target="gfx1250", atom_override=_F4_TWO_M_BLOCKS)
+    mma = _two_m_blocks_mma()
     assert mma.plan.subtiles == (2, 2, 2)
     kernel = _wave_tile(mma)
-    ir = lower_with_both_engines(kernel, "gfx1250")
+    ir = lower_with_engine(kernel, "gfx1250", engine=engine)
     assert len(_calls(ir, mma.traits.llvm_intrinsic)) == 8
-    _compile_or_skip(kernel, "gfx1250")
+
+
+@pytest.mark.parametrize(
+    "make_mma,target",
+    [
+        pytest.param(_fp8_fp4_mma, "gfx950", id="fp8-by-fp4"),
+        pytest.param(_two_m_blocks_mma, "gfx1250", id="two-m-blocks-per-lane"),
+    ],
+)
+def test_driven_tile_compiles(make_mma, target) -> None:
+    assert_kernel_target_accepts(_wave_tile(make_mma()), target)
 
 
 def _fp8e4m3_codes(rng, shape) -> np.ndarray:
@@ -315,8 +334,7 @@ def test_driven_fp8_by_fp4_tile_computes_the_product() -> None:
 def test_driven_tile_with_two_m_blocks_per_lane_computes_the_product() -> None:
     # Both of a lane's M blocks of A must meet the same B registers, on every one of the eight atoms.
     # Skipped until it has run on gfx1250 hardware; then it runs where the current GPU is a gfx1250.
-    mma = TileMma((64, 32, 256), target="gfx1250", atom_override=_F4_TWO_M_BLOCKS)
-    _run_k_coupled_tile(mma, a_fp8=False, target="gfx1250")
+    _run_k_coupled_tile(_two_m_blocks_mma(), a_fp8=False, target="gfx1250")
 
 
 def test_soundness_gate_accepts_a_recorded_fp8_by_fp4_pipeline() -> None:

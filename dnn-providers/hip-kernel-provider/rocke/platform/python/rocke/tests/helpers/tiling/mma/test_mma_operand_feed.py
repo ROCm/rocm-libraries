@@ -10,9 +10,10 @@ the vector type the instruction's A or B dtype takes. A TF32 instruction also re
 dropping their low mantissa bits, so an F32 tensor feeds it with no conversion. A u8 operand is sliced
 as the i8 registers of the same bits and handed over as u8.
 
-Every kernel is lowered by both engines, which must emit the same IR
-(``rocke.tests.engines.lower_with_both_engines``). Where the host clang targets the arch, the module
-is also compiled and linked (compile-verified, never run).
+Every kernel is lowered by each engine (``rocke.tests.engines.lower_with_engine`` over
+``ENGINES``), and the C++ engine must emit the Python engine's IR; where the ``rocke_engine``
+binding is not built, only the C++ cases skip. Where the host clang targets the arch, a separate
+test compiles and links each tile's module once (compile-verified, never run).
 """
 
 from __future__ import annotations
@@ -41,9 +42,10 @@ from rocke.helpers.tiling import (
     store_fragment,
 )
 from rocke.helpers.tiling.mma import TileMma, Tiling
-from rocke.tests.engines import lower_with_both_engines
+from rocke.tests.engines import ENGINES, lower_with_engine
+from rocke.tests.ir_validity import assert_kernel_target_accepts
 
-from .test_mma_issue import _calls, _compile_or_skip
+from .test_mma_issue import _calls
 
 
 def _wave_tile_kernel(mma: TileMma, tensor_dtype, pointer_dtype):
@@ -86,25 +88,36 @@ _XF32_TILES = [
 ]
 
 
+# The tensors an xf32 tile reads: F32 fragments feed the instruction directly, TF32 ones are
+# reinterpreted from their i32 registers.
+_XF32_TENSOR_DTYPES = [
+    pytest.param(F32, id="from-f32-tensors"),
+    pytest.param(TF32, id="from-tf32-tensors"),
+]
+
+
+@pytest.mark.parametrize("engine", ENGINES)
 @pytest.mark.parametrize("shape,atom,calls", _XF32_TILES)
-@pytest.mark.parametrize(
-    "tensor_dtype",
-    [
-        pytest.param(F32, id="from-f32-tensors"),
-        pytest.param(TF32, id="from-tf32-tensors"),
-    ],
-)
+@pytest.mark.parametrize("tensor_dtype", _XF32_TENSOR_DTYPES)
 def test_tf32_tile_issues_one_xf32_mfma_per_atom(
-    shape, atom, calls, tensor_dtype
+    shape, atom, calls, tensor_dtype, engine
 ) -> None:
     # F32 fragments feed the TF32 instruction directly (it truncates); TF32 fragments, held as i32,
     # are reinterpreted as tf32. Either way every atom is one xf32 MFMA.
     mma = _tf32_mma(shape, atom)
     kernel, fa = _wave_tile_kernel(mma, tensor_dtype, tensor_dtype)
     assert fa.dtype == tensor_dtype
-    ir = lower_with_both_engines(kernel, "gfx942")
+    ir = lower_with_engine(kernel, "gfx942", engine=engine)
     assert len(_calls(ir, mma.traits.llvm_intrinsic)) == calls
-    _compile_or_skip(kernel, "gfx942")
+
+
+@pytest.mark.parametrize(
+    "shape,atom", [pytest.param(*tile.values[:2], id=tile.id) for tile in _XF32_TILES]
+)
+@pytest.mark.parametrize("tensor_dtype", _XF32_TENSOR_DTYPES)
+def test_tf32_tile_compiles(shape, atom, tensor_dtype) -> None:
+    kernel, _ = _wave_tile_kernel(_tf32_mma(shape, atom), tensor_dtype, tensor_dtype)
+    assert_kernel_target_accepts(kernel, "gfx942")
 
 
 def test_tf32_tile_refuses_an_f16_fragment() -> None:
@@ -147,10 +160,9 @@ def _extract_indices(kernel, vector) -> list[int]:
     ]
 
 
-def test_packed_tile_feeds_each_instruction_its_own_words() -> None:
-    # 256 fp4 K elements over two 16x16x128 instructions: each lane's A fragment is 64 elements in 8
-    # words, and the instructions take words [0, 4) and [4, 8), whole, with no repacking.
-    mma = TileMma(
+def _packed_fp4_mma() -> TileMma:
+    """An fp4 16x16x256 wave tile: two gfx950 16x16x128 instructions along K."""
+    return TileMma(
         (16, 16, 256),
         a=FP4E2M1,
         b=FP4E2M1,
@@ -158,15 +170,33 @@ def test_packed_tile_feeds_each_instruction_its_own_words() -> None:
         target="gfx950",
         tiling=Tiling(atom_shape=(16, 16, 128)),
     )
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+def test_packed_tile_feeds_each_instruction_its_own_words(engine) -> None:
+    # 256 fp4 K elements over two 16x16x128 instructions: each lane's A fragment is 64 elements in 8
+    # words, and the instructions take words [0, 4) and [4, 8), whole, with no repacking.
+    mma = _packed_fp4_mma()
     kernel, fa = _wave_tile_kernel(mma, FP4E2M1, I8)
     assert fa.storage_type == VectorType(I32, 8)
     assert _extract_indices(kernel, fa.value) == list(range(8))
     mma_ops = [op for op in kernel.body.ops if op.name == "tile.mma"]
     assert len(mma_ops) == 2
     assert all(op.operands[0].type == VectorType(I32, 4) for op in mma_ops)
-    ir = lower_with_both_engines(kernel, "gfx950")
+    ir = lower_with_engine(kernel, "gfx950", engine=engine)
     assert len(_calls(ir, mma.traits.llvm_intrinsic)) == 2
-    _compile_or_skip(kernel, "gfx950")
+
+
+def test_packed_tile_compiles() -> None:
+    kernel, _ = _wave_tile_kernel(_packed_fp4_mma(), FP4E2M1, I8)
+    assert_kernel_target_accepts(kernel, "gfx950")
+
+
+def _unsigned_mma(shape) -> TileMma:
+    """A u8 x i8 wave tile of ``shape`` on the gfx1250 16x16x64 integer instruction."""
+    return TileMma(
+        shape, a=U8, b=I8, target="gfx1250", atom_override="wmma_i32_16x16x64_iu8"
+    )
 
 
 def _unsigned_tile_kernel(mma: TileMma):
@@ -206,17 +236,24 @@ _UNSIGNED_TILES = [
 ]
 
 
+@pytest.mark.parametrize("engine", ENGINES)
 @pytest.mark.parametrize("shape,calls", _UNSIGNED_TILES)
-def test_unsigned_tile_of_several_instructions_issues_each_one(shape, calls) -> None:
+def test_unsigned_tile_of_several_instructions_issues_each_one(
+    shape, calls, engine
+) -> None:
     # Every instruction takes a u8 A operand sliced from the u8 fragment.
-    mma = TileMma(
-        shape, a=U8, b=I8, target="gfx1250", atom_override="wmma_i32_16x16x64_iu8"
-    )
+    mma = _unsigned_mma(shape)
     kernel = _unsigned_tile_kernel(mma)
     mma_ops = [op for op in kernel.body.ops if op.name == "tile.mma"]
     assert len(mma_ops) == calls
     assert all(op.operands[0].type == VectorType(U8, 32) for op in mma_ops)
     assert all(op.operands[1].type == VectorType(I8, 32) for op in mma_ops)
-    ir = lower_with_both_engines(kernel, "gfx1250")
+    ir = lower_with_engine(kernel, "gfx1250", engine=engine)
     assert len(_calls(ir, mma.traits.llvm_intrinsic)) == calls
-    _compile_or_skip(kernel, "gfx1250")
+
+
+@pytest.mark.parametrize(
+    "shape", [pytest.param(tile.values[0], id=tile.id) for tile in _UNSIGNED_TILES]
+)
+def test_unsigned_tile_compiles(shape) -> None:
+    assert_kernel_target_accepts(_unsigned_tile_kernel(_unsigned_mma(shape)), "gfx1250")
