@@ -365,10 +365,12 @@ def test_pyright_non_json_failure_is_advisory(adv, monkeypatch, capsys):
     assert "error(s)" not in out
 
 
-@pytest.mark.parametrize("tool", ["pyright", "radon", "vulture"])
-def test_system_hook_with_cold_cache_and_missing_tools(
-    adv, require_git, tmp_path, tool
-):
+def _hook_repo(tmp_path, tool):
+    """A scratch repository with the wrapper and the repo's own ``rocke-<tool>`` hook.
+
+    The hook definition comes from the repository's ``.pre-commit-config.yaml``, so
+    these tests run what a contributor would run. Returns ``(repo, hook)``.
+    """
     pytest.importorskip("pre_commit")
     import yaml
 
@@ -383,8 +385,6 @@ def test_system_hook_with_cold_cache_and_missing_tools(
         for h in repo["hooks"]
         if h["id"] == f"rocke-{tool}"
     )
-    assert hook["language"] == "system"
-    assert not hook.get("additional_dependencies")
     repo = tmp_path / "repo"
     repo.mkdir()
     script = Path("dnn-providers/hip-kernel-provider/rocke/tools/advisory_checks.py")
@@ -394,20 +394,14 @@ def test_system_hook_with_cold_cache_and_missing_tools(
         yaml.safe_dump({"repos": [{"repo": "local", "hooks": [hook]}]}),
         encoding="utf-8",
     )
-    subprocess.run(["git", "init", str(repo)], check=True, capture_output=True)
-    subprocess.run(["git", "add", "."], cwd=repo, check=True, capture_output=True)
-    empty_env = tmp_path / "empty-env"
-    venv.EnvBuilder(with_pip=False).create(empty_env)
-    bin_dir = empty_env / ("Scripts" if os.name == "nt" else "bin")
-    env = {
-        **os.environ,
-        "PATH": str(bin_dir) + os.pathsep + os.environ["PATH"],
-        "VIRTUAL_ENV": str(empty_env),
-        "PRE_COMMIT_HOME": str(tmp_path / "cold-cache"),
-        "PIP_NO_INDEX": "1",
-        "PYTHONPATH": "",
-        "PYTHONNOUSERSITE": "1",
-    }
+    _git(repo, "init", "-q")
+    _git(repo, "add", ".")
+    return repo, hook
+
+
+def _run_hook(repo, hook, env):
+    """Run the hook the way ``git push`` would; returns ``(exit code, output)``."""
+    env = {k: v for k, v in env.items() if k != "SKIP"}  # pre-commit's skip list
     proc = subprocess.run(
         [
             sys.executable,
@@ -425,11 +419,96 @@ def test_system_hook_with_cold_cache_and_missing_tools(
         text=True,
         timeout=60,
     )
-    out = proc.stdout + proc.stderr
-    assert proc.returncode == 0, out
+    return proc.returncode, proc.stdout + proc.stderr
+
+
+@pytest.mark.parametrize("tool", ["pyright", "radon", "vulture"])
+def test_system_hook_with_cold_cache_and_missing_tools(
+    adv, require_git, tmp_path, tool
+):
+    repo, hook = _hook_repo(tmp_path, tool)
+    assert hook["language"] == "system"
+    assert not hook.get("additional_dependencies")
+    empty_env = tmp_path / "empty-env"
+    venv.EnvBuilder(with_pip=False).create(empty_env)
+    bin_dir = empty_env / ("Scripts" if os.name == "nt" else "bin")
+    env = {
+        **os.environ,
+        "PATH": str(bin_dir) + os.pathsep + os.environ["PATH"],
+        "VIRTUAL_ENV": str(empty_env),
+        "PRE_COMMIT_HOME": str(tmp_path / "cold-cache"),
+        "PIP_NO_INDEX": "1",
+        "PYTHONPATH": "",
+        "PYTHONNOUSERSITE": "1",
+    }
+    returncode, out = _run_hook(repo, hook, env)
+    assert returncode == 0, out
     assert "[advisory, non-blocking]" in out
     assert "not installed" in out or "No module named pyright" in out
     assert "Installing environment" not in out
+
+
+@pytest.mark.parametrize("tool", ["pyright", "radon", "vulture"])
+@pytest.mark.parametrize(
+    ("programs", "ran"),
+    [
+        pytest.param({}, False, id="no-python"),
+        pytest.param({"python3": "real"}, True, id="python3-only"),
+        # What the Windows Store stub does: `python` exists, but only fails.
+        pytest.param({"python": "#!/bin/sh\nexit 9\n"}, False, id="unusable-python"),
+        # The probe checks the version, not just that the program starts.
+        pytest.param({"python": "old"}, False, id="old-python"),
+        # "The first that works": a bad `python` must not hide a good `python3`.
+        pytest.param(
+            {"python": "#!/bin/sh\nexit 9\n", "python3": "real"},
+            True,
+            id="unusable-python-then-python3",
+        ),
+    ],
+)
+def test_hook_runs_a_usable_python_or_skips_but_never_fails(
+    adv, require_git, tmp_path, tool, programs, ran
+):
+    # pre-commit fails a system hook whose program is absent, before the wrapper
+    # could skip anything; the hook entry is a bash snippet that does the skipping.
+    if os.name == "nt" or shutil.which("bash") is None:
+        pytest.skip("builds a PATH of symlinks and needs bash")
+    repo, hook = _hook_repo(tmp_path, tool)
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    for needed in ("bash", "git"):
+        (bin_dir / needed).symlink_to(shutil.which(needed))
+    for name, body in programs.items():
+        program = bin_dir / name
+        if body == "real":
+            # A working Python with no analyzers: an empty virtual environment, as in
+            # the cold-cache test. A symlink to the base interpreter would see whatever
+            # is installed system-wide.
+            empty_env = tmp_path / "empty-env"
+            venv.EnvBuilder(with_pip=False).create(empty_env)
+            body = f'#!/bin/sh\nexec "{empty_env / "bin" / "python"}" "$@"\n'
+        elif body == "old":
+            # Reports itself as Python 3.9; only the version probe ever runs it.
+            fake = "import sys; sys.version_info = (3, 9, 0, 'final', 0)"
+            body = f'#!/bin/sh\nexec "{sys.executable}" -c "{fake}\n$2"\n'
+        program.write_text(body, encoding="utf-8")
+        program.chmod(0o755)
+    env = {
+        **os.environ,
+        "PATH": str(bin_dir),
+        "PRE_COMMIT_HOME": str(tmp_path / "cold-cache"),
+        "PYTHONPATH": "",
+        "PYTHONNOUSERSITE": "1",
+    }
+    env.pop("VIRTUAL_ENV", None)
+    returncode, out = _run_hook(repo, hook, env)
+    assert returncode == 0, out
+    if ran:
+        assert f"[advisory, non-blocking] {tool} on" in out
+    else:
+        assert f"rocKE advisory ({tool}): no Python 3.10+ on PATH; skipped." in out
+        assert "[advisory, non-blocking]" not in out
+        assert "not found" not in out  # the probe's own errors stay hidden
 
 
 @pytest.mark.parametrize(

@@ -24,16 +24,19 @@ pre-commit install --hook-type pre-push --install-hooks
 
 Three things to know before you do:
 
-- The three rocke hooks use `python` from `PATH` (Python 3.10 or newer) and never
-  install anything. Missing or broken analyzers print a message and do not fail
-  the hook. A missing `python` does fail it: pre-commit reports
-  ``Executable `python` not found`` and the push stops. Many Linux installs have
-  only `python3` until a virtual environment is active, so check with
-  `python --version` in the shell you push from.
+- The three rocke hooks use the first of `python` and `python3` on `PATH` that is
+  Python 3.10 or newer, and never install anything. Missing or broken analyzers
+  print a message and do not fail the hook, and neither does a missing Python: the
+  hook prints "skipped". The hook is a small bash snippet (pre-commit alone would
+  fail the push on a missing program), so it needs `bash` on `PATH`; the pre-push
+  script that `pre-commit install` writes needs it too. On Windows that means Git
+  for Windows' `bash`, not the WSL launcher; the tests do not cover Windows. Many
+  Linux installs have only `python3` until a virtual environment is active, and
+  the analyzers usually live in that environment, so activate it before you push
+  to get the reports.
 - The config sets no default stages, so this also runs the repo's other hooks
   (black, the whitespace fixers, bandit and so on) on the pushed files at push
-  time, and those *can* fail a push. The three rocke checks cannot, apart from
-  the missing-`python` case above.
+  time, and those *can* fail a push. The three rocke checks cannot.
 - Those other hooks need their repositories downloaded. `--install-hooks` does
   that now, so a network problem shows up as a failed install. Without it the
   first push does the download, and a push with no network access fails.
