@@ -188,8 +188,11 @@ rocsparse_status rocsparse::cscsv_analysis(rocsparse_handle            handle,
         RETURN_IF_HIP_ERROR(
             rocsparse_hipMallocAsync(trm_info->get_ref_diag_ind(), sizeof_I * m, stream));
         void** dependency_count = info->get_ref_dependency_count(descr->fill_mode);
-        RETURN_IF_HIP_ERROR(rocsparse_hipFreeAsync(*dependency_count, stream));
-        *dependency_count = nullptr;
+        if(*dependency_count != nullptr)
+        {
+            RETURN_IF_HIP_ERROR(rocsparse_hipFreeAsync(*dependency_count, stream));
+            *dependency_count = nullptr;
+        }
         RETURN_IF_HIP_ERROR(rocsparse_hipMallocAsync(dependency_count, sizeof_J * m, stream));
         RETURN_IF_ROCSPARSE_ERROR(info->create_zero_pivot_async(J_type, stream));
 
@@ -233,6 +236,8 @@ rocsparse_status rocsparse::cscsv_analysis(rocsparse_handle            handle,
         RETURN_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(stream));
         trm_info->set_max_nnz(max_nnz);
 
+        // Replaces the previous analysis of this fill mode, if any.
+        delete info->get(rocsparse_operation_none, descr->fill_mode);
         info->set(rocsparse_operation_none, descr->fill_mode, trm_info.release());
         return rocsparse_status_success;
     }

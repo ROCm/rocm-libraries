@@ -50,6 +50,11 @@ public:
 
     ~_rocsparse_cscsv_info()
     {
+        if(this->m_dependency_count[0] != nullptr || this->m_dependency_count[1] != nullptr)
+        {
+            // hipFree does not wait for pending work on hipMallocAsync memory since HIP 7.0.
+            WARNING_IF_HIP_ERROR(rocsparse_hipDeviceSynchronize());
+        }
         for(auto& p : this->m_dependency_count)
         {
             WARNING_IF_HIP_ERROR(rocsparse_hipFree(p));
@@ -69,7 +74,11 @@ public:
             {
                 const size_t size
                     = rocsparse::indextype_sizeof(trm->get_index_indextype()) * trm->get_m();
-                WARNING_IF_HIP_ERROR(rocsparse_hipFree(this->m_dependency_count[f]));
+                if(this->m_dependency_count[f] != nullptr)
+                {
+                    WARNING_IF_HIP_ERROR(rocsparse_hipDeviceSynchronize());
+                    WARNING_IF_HIP_ERROR(rocsparse_hipFree(this->m_dependency_count[f]));
+                }
                 THROW_IF_HIP_ERROR(rocsparse_hipMalloc(&this->m_dependency_count[f], size));
                 THROW_IF_HIP_ERROR(rocsparse_hipMemcpy(this->m_dependency_count[f],
                                                        that->m_dependency_count[f],
