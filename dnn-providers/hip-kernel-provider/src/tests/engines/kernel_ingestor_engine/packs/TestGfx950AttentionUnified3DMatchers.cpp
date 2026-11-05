@@ -229,14 +229,19 @@ TEST(TestGfx950AttentionUnified3DMatchers, DeclinesACacheBeyondThirtyTwoBitAddre
     EXPECT_FALSE(matchGraph(over).has_value());
 }
 
-/// This copy of Unified2D's catch-all feature decline: no ALiBi, no padding mask, an
+/// This copy of Unified2D's catch-all feature decline: no ALiBi (under every mask; this
+/// catalog ships no ALiBi kernels and Unified2D serves ALiBi decode), no padding mask, an
 /// allow-listed mma_core_mode, and AUTO-only execution hints.
 TEST(TestGfx950AttentionUnified3DMatchers, DeclinesAlibiPaddingMmaCoreModeAndImplementationHints)
 {
     std::vector<DeclineCase> cases;
-    GraphSpec alibi;
-    alibi.alibiMask = true;
-    cases.push_back({"alibi_mask", alibi});
+    for(const int64_t mask : {NO_MASK, TOP_LEFT_CAUSAL, BOTTOM_RIGHT_CAUSAL})
+    {
+        GraphSpec alibi;
+        setMask(alibi, mask);
+        alibi.alibiMask = true;
+        cases.push_back({"alibi_mask, mask " + std::to_string(mask), alibi});
+    }
     GraphSpec padding;
     padding.paddingMask = true;
     cases.push_back({"padding_mask", padding});
