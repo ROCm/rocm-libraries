@@ -41,7 +41,7 @@ GlobalParameters:
 # code. Groups 1-13 are 700 rows: 678 PASSED, 22 rejected, 0 FAILED. The 22
 # rejections are the K-ceiling misses in groups 1-6; groups 7-13 should pass
 # every row. No size is dead: every one of them runs on some tile. With the
-# RAP 2 groups a full run is 1022 rows: 984 PASSED, 38 rejected, 0 FAILED.
+# RAP 2 groups a full run is 1090 rows: 1064 PASSED, 26 rejected, 0 FAILED.
 
 BenchmarkProblems:
 
@@ -1033,11 +1033,14 @@ BenchmarkProblems:
   # MacroTile 256x64 and 512x64 mirror 64x256 and 64x512, 128x128 is its own
   # mirror.
   #
-  # Served: whole N-tiles (any number of them), whole M-tiles and whole k-tiles.
+  # Served: any M and N, edge tiles included, and whole k-tiles.
   # A resident B is indexed by the N-tile and the batch, so the entry guard
   # compares both, after the same DefaultWGM remap B's address is built from, and
   # refills B through the fill copy when either changes. Group B5 holds the tile
-  # count fixed and varies only NumWorkGroups1, across runtime WGMs.
+  # count fixed and varies only NumWorkGroups1, across runtime WGMs. A partial
+  # N-tile leaves the resident B block holding stale columns past N for the whole
+  # walk; they only reach C columns the edge store masks, which the N-edge sizes
+  # test at their worst (2 valid columns of 64).
   #
   # Both warnings at the top of this file hold here too:
   # - MX says nothing about batch handling: every batch gets byte-identical MX
@@ -1046,9 +1049,9 @@ BenchmarkProblems:
   # - A rejected size looks like a pass (DID_NOT_SATISFY_ASSERTS leaves clientExit
   #   at 0). Sizes are a union across the MacroTiles in a group, so each tile
   #   rejects the N that is not its MacroTile1 and the K beyond its resident block.
-  #   Check the per-size verdicts, not the exit code. These groups are 322 rows:
-  #   306 PASSED, 16 rejected (every rejection is an N that MacroTile 128x128
-  #   does not divide), 0 FAILED.
+  #   Check the per-size verdicts, not the exit code. These groups are 390 rows:
+  #   386 PASSED, 4 rejected (K beyond MacroTile 128x128's resident block),
+  #   0 FAILED.
   #
   # MacroTile 512x64 runs at PrefetchAcrossPersistent 0 only. With PAP 1 it fails
   # on develop without any RAP (RAP 0, batch 1 included), the mirror of the PAP
@@ -1253,6 +1256,12 @@ BenchmarkProblems:
           # NumWorkGroups0 tiles, so a workgroup's walk crosses them.
           - Exact: [4096, 192, 1, 512]    # nWG1=3, 48 tiles
           - Exact: [6144, 128, 2, 1024]   # nWG1=2 and a batch boundary
+          # Edges. Even M and N only: these kernels assert Free0/1ElementMultiple
+          # 2, ordinary edge machinery; odd sizes are group B3's.
+          - Exact: [12288, 130, 1, 512]   # last N-tile holds 2 of 64 columns
+          - Exact: [12288, 190, 1, 512]   # last N-tile holds 62 of 64
+          - Exact: [4160, 64, 1, 512]     # last M-tile holds 64 of 256 rows
+          - Exact: [4160, 130, 2, 512]    # M edge, N edge and a batch
         - ActivationArgs:
           - [Enum: none]
 
@@ -1316,6 +1325,8 @@ BenchmarkProblems:
           - Exact: [6144, 128, 3, 512]
           - Exact: [6144, 192, 2, 512]    # nWG1=3 with a batch boundary
           - Exact: [12288, 128, 2, 1024]  # nWG1=1 for 128x128, 2 for 256x64
+          - Exact: [4097, 129, 2, 512]    # both dims odd and partial, and a batch
+          - Exact: [6145, 66, 1, 768]     # 1 valid row and 2 valid columns at the edges
         - ActivationArgs:
           - [Enum: none]
 
@@ -1503,5 +1514,6 @@ BenchmarkProblems:
           - Exact: [4096, 192, 1, 512]    # nWG1=3, 48 tiles
           - Exact: [3072, 256, 1, 512]    # nWG1=4, 48 tiles
           - Exact: [4096, 192, 2, 1024]   # nWG1=3 and a batch boundary
+          - Exact: [4096, 130, 2, 512]    # nWG1=3 with a partial last N-tile
         - ActivationArgs:
           - [Enum: none]
