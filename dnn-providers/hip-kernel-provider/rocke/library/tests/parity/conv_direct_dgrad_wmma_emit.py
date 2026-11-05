@@ -43,6 +43,12 @@
 #  29  rejected by both engines: pack_groups 3 does not divide 4 groups
 #  30  rejected by both engines: wave_epilogue without whole rows per wave
 #  31  rejected by both engines: a 0x3 filter (no taps), prefetch
+#  32  bf16, stride 2 pack_groups 2 (cpg = kpg = 16, 4 groups), 1x4 waves, 2x2 tiles
+#  33  fp16, stride 2 pack_groups 4 (cpg = kpg = 8, 8 groups), 1x8 waves, 8-wide tiles
+#  34  bf16, stride 2 pack_groups 8 (cpg = kpg = 4, 16 groups), 2x4 waves, 2 images
+#  35  fp16, stride 2 pack_groups 2, 1x4 waves, 2x4 tiles, prefetch + iterative-ilp
+#  36  bf16, stride 2 pack_groups 4, 1x2 waves, 2x4 tiles
+#  37  fp16, stride 2 pack_groups 8, 1x4 waves, 2x3 tiles
 from dataclasses import replace
 
 from _emit_common import run_emit
@@ -434,6 +440,76 @@ def _spec(idx: int):
                 problem=replace(_p(), KH=0),
                 prefetch=True,
                 sched="iterative-ilp",
+            ),
+            "gfx1250",
+        ),
+        32: (
+            S(
+                problem=_p(stride=2, groups=4, cpg=16, kpg=16),
+                waves_c=1,
+                waves_p=4,
+                tiles_c=2,
+                tiles_p=2,
+                pack_groups=2,
+            ),
+            "gfx1250",
+        ),
+        33: (
+            S(
+                problem=_p(dtype="fp16", stride=2, groups=8, cpg=8, kpg=8),
+                waves_c=1,
+                waves_p=8,
+                tiles_c=2,
+                tiles_p=4,
+                tile_w=8,
+                pack_groups=4,
+            ),
+            "gfx1250",
+        ),
+        34: (
+            S(
+                problem=_p(stride=2, groups=16, cpg=4, kpg=4),
+                waves_c=2,
+                waves_p=4,
+                tiles_c=1,
+                tiles_p=4,
+                tile_n=2,
+                pack_groups=8,
+            ),
+            "gfx1250",
+        ),
+        35: (
+            S(
+                problem=_p(dtype="fp16", stride=2, groups=4, cpg=16, kpg=16),
+                waves_c=1,
+                waves_p=4,
+                tiles_c=2,
+                tiles_p=4,
+                prefetch=True,
+                sched="iterative-ilp",
+                pack_groups=2,
+            ),
+            "gfx1250",
+        ),
+        36: (
+            S(
+                problem=_p(stride=2, groups=8, cpg=8, kpg=8),
+                waves_c=1,
+                waves_p=2,
+                tiles_c=2,
+                tiles_p=4,
+                pack_groups=4,
+            ),
+            "gfx1250",
+        ),
+        37: (
+            S(
+                problem=_p(dtype="fp16", stride=2, groups=16, cpg=4, kpg=4),
+                waves_c=1,
+                waves_p=4,
+                tiles_c=2,
+                tiles_p=3,
+                pack_groups=8,
             ),
             "gfx1250",
         ),
