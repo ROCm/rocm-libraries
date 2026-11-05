@@ -349,6 +349,22 @@ if(BUILD_TESTING)
                  rocke_barrier_fence)
   endif()
 
+  # MfmaAtom.lane_to_output: every lane and slot against atoms.py's layouts.
+  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/core/test_mfma_atom_lane_to_output.cpp")
+    add_executable(rocke_mfma_atom_lane_to_output core/test_mfma_atom_lane_to_output.cpp)
+    target_link_libraries(rocke_mfma_atom_lane_to_output PRIVATE rocke_core)
+    add_test(NAME rocke_mfma_atom_lane_to_output COMMAND rocke_mfma_atom_lane_to_output)
+    set_tests_properties(rocke_mfma_atom_lane_to_output
+                         PROPERTIES LABELS "ckc;unit;host")
+    rocke_cxx_test_installed_name(_rocke_installed_name rocke_mfma_atom_lane_to_output)
+    set_target_properties(rocke_mfma_atom_lane_to_output
+                          PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
+    install(TARGETS rocke_mfma_atom_lane_to_output
+            RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
+    set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS
+                 rocke_mfma_atom_lane_to_output)
+  endif()
+
   # BF16x3 expansion of the emulated XF32 atoms, lowered from serialized IR.
   if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/core/test_xf32_bf16x3_lowering.cpp")
     add_executable(rocke_xf32_bf16x3_lowering core/test_xf32_bf16x3_lowering.cpp)
