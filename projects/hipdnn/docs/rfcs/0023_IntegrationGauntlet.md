@@ -155,7 +155,7 @@ dnn-providers/integration-tests/gauntlet/
     Matmul.Align.space.json         probe-only: one fixed graph, alignment and placement only
     SdpaFwd.Flash2.space.json       probe-only: one fixed fp16 graph for HIP_FLASH2
     Matmul.Stride, SdpaFwd.AsmStride, SdpaFwd.Gfx950DenseStride   padded-stride probes (§11.3)
-    SdpaFwd.AsmProbe, SdpaBackward.AsmProbe, SdpaFwd.Gfx950DenseProbe, SdpaFwd.Flash2Probe,
+    SdpaFwd.AsmProbe, SdpaBackward.AsmProbe, SdpaFwd.Gfx950DenseProbe, SdpaFwd.Gfx1151DecodeProbe, SdpaFwd.Gfx1151Probe, SdpaFwd.Flash2Probe,
     Layernorm.MlopsProbe, LayernormBackward.MlopsProbe, RMSNorm.MlopsProbe,
     Batchnorm.MlopsProbe, BatchnormBackward.MlopsProbe, Matmul.Probe   rejection probes (§8)
 ```
@@ -457,6 +457,8 @@ padded-stride probes of §11.3.
 | `SdpaFwd/AsmProbe` | ASM_SDPA forward | Dropout, ALiBi, padding, sequence-length mode, additive mask, paging, sink, block mask, fp8 scales on a bf16 graph, statistics, a device scale tensor, mixed Q/K/V/O dtypes, fp16/fp32, odd dimensions, overflow |
 | `SdpaBackward/AsmProbe` | ASM_SDPA backward | The backward attribute set, statistics dtype and rank, mixed dtypes, grouped-query heads, head sizes the registry lacks, odd dimensions, overflow. gfx942 only: every case is `DECLINED` at the device gate on gfx950 |
 | `SdpaFwd/Gfx950DenseProbe` | gfx950 dense attention pack | Attributes the kernel cannot apply, mixed dtypes, head sizes and head counts the catalog does not ship, odd dimensions, scale limits, overflow |
+| `SdpaFwd/Gfx1151DecodeProbe` | gfx1151 RDNA WMMA decode engine | Graphs the dispatcher routes to prefill, head sizes outside the decode buckets, attributes the engine binds no operand for, mixed dtypes, bias, statistics and alignment gates, stride gates, bounds past int32, overflow. Authored on a gfx1151 device but not run yet |
+| `SdpaFwd/Gfx1151Probe` | gfx1151 RDNA WMMA prefill engine | Graphs the dispatcher routes to decode (short queries, few query CTAs, long keys a mask reduces to few visible keys), head sizes that are not a multiple of 8 or above 256, attributes the engine binds no operand for, mixed dtypes, bias, statistics and alignment gates, stride gates, scale gates, bounds past int32, overflow. Authored on a gfx1151 device but not run yet |
 | `SdpaFwd/Flash2Probe` | HIP_FLASH2 | Attribute declines, mixed dtypes, odd dimensions, 32-bit dimension limits. gfx942 only; not run on a device in this work |
 | `Layernorm/MlopsProbe`, `LayernormBackward/MlopsProbe`, `RMSNorm/MlopsProbe` | HIP_MLOPS | Mixed dtypes of scale, bias, statistics and output, an io dtype outside float/half/bfloat16, an inconsistent `normalized_dim_count`, ranks 2, 3 and 6, declared alignment 1 and 2, odd sizes, overflow |
 | `Batchnorm/MlopsProbe`, `BatchnormBackward/MlopsProbe` | HIP_MLOPS | Non-float scale, bias and statistics, io dtypes outside float/half/bfloat16, `y`, `dy` or `dx` in another dtype than `x`, half running statistics, declared alignment 1 and 2, odd sizes, overflow |

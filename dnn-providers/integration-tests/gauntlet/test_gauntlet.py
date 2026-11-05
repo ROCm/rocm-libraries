@@ -560,6 +560,8 @@ def test_spaces_ship_with_the_tool_not_in_the_bundle_root():
         "SdpaFwd/FlydslCdnaProbe",
         "SdpaFwd/FlydslDecodeProbe",
         "SdpaFwd/FlydslDualwaveProbe",
+        "SdpaFwd/Gfx1151DecodeProbe",
+        "SdpaFwd/Gfx1151Probe",
         "SdpaFwd/Gfx950DenseProbe",
     ]
     for sp in SPACES:
