@@ -585,20 +585,23 @@ tanh; `bias_act` executed only in fp32; `scale_bias_act`, `bias_add_relu` and
 `act_add` never executed; and F13, F19 and F35 never executed. gfx90a declined
 every fused graph.
 
-**The current set.** All 4,206 cases, serial, at this plan's tip, with the
+**The current set.** All 4,398 cases, serial, at this plan's tip, with the
 MIOpen plugin:
 
 | Architecture | OK | Skipped | Failed | Crashed | Wall time |
 |---|---|---|---|---|---|
-| gfx942 (MI325X) | 2,537 | 1,667 | 2 | 0 | 10.5 min |
-| gfx90a (MI250) | 1,930 | 2,184 | 89 | 3 | 16 min |
+| gfx942 (MI325X) | 2,729 | 1,669 | 0 | 0 | 7.3 min |
+| gfx90a (MI250) | 2,121 | 2,184 | 90 | 3 | 16.7 min |
 
-No claim case fails on either architecture; every failure is a probe. The two
-gfx942 failures are non-packed-stride 3D cases (S13b, S14) that are wrong on
-both architectures, the defect behind the existing non-packed-stride skips; they
-joined that skip list. The new fp32 shapes passed inside the tolerance class
-their accumulation length gives them. Claims are harvested from these runs:
-2,086 on gfx942 and 1,501 on gfx90a.
+No claim case fails on either architecture; every failure is a probe, in the
+defect classes the engine TOML skips on gfx942 (mixed data types, mixed layouts,
+non-packed strides; epic ALMIOPEN-3008). Two non-packed-stride 3D cases (S13b, S14) that turned wrong at N 2
+joined the gfx942 non-packed-stride skip list. MIOpen executes all 192 cases of
+S47–S62 and L47–L62 on both architectures and every one passes; the S59 fp32
+case needed the fp32 tolerance class of accumulation lengths up to 1,152 (one
+element off by 2.5e-5 at the default 1e-5 on gfx90a). The new fp32 shapes pass
+inside the tolerance class their accumulation length gives them. Claims are
+harvested from these runs: 2,278 on gfx942 and 1,693 on gfx90a.
 
 ---
 
