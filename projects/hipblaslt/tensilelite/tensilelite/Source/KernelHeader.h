@@ -27,48 +27,11 @@
 #ifndef KERNEL_HEADER
 #define KERNEL_HEADER
 
-#if Tensile_RUNTIME_LANGUAGE_OCL
-#include <string>
-#else
-
 #include "TensileTypes.h"
 #include <hip/hip_runtime.h>
 
 #include "ReductionTemplate.h"
 #include "memory_gfx.h"
-
-
-__device__ inline int GenDot4(int a, int b, int c)
-{
-#if(__hcc_workweek__ >= 19092) || __HIP_CLANG_ONLY__
-    union
-    {
-        int32_t i;
-        char4   z;
-    } va, vb;
-#else
-    typedef struct
-    {
-        int c0 : 8, c1 : 8, c2 : 8, c3 : 8;
-    } C4I8;
-    union
-    {
-        int32_t i;
-        C4I8    z;
-    } va, vb;
-#endif
-    va.i = a;
-    vb.i = b;
-
-#if(__hcc_workweek__ >= 19092) || __HIP_CLANG_ONLY__
-    return amd_mixed_dot(va.z, vb.z, c, true);
-}
-#else
-    return c + (vb.z.c3 * va.z.c3 + vb.z.c2 * va.z.c2 + vb.z.c1 * va.z.c1 + vb.z.c0 * va.z.c0);
-}
-#endif
-
-#endif // HIP
 
 typedef _Float16 tensile_half2 __attribute__((ext_vector_type(2)));
 typedef _Float16 tensile_half;

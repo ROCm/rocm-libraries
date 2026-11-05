@@ -28,13 +28,10 @@
 
 #include <cinttypes>
 #include <cmath>
+#include <cstring>
 #include <iostream>
 
 #include <tensilelitehost/export.h>
-
-#ifndef __BYTE_ORDER__
-#define __BYTE_ORDER__ __ORDER_LITTLE_ENDIAN__
-#endif
 
 #define BFLOAT16_Q_NAN_VALUE 0xFFC1
 
@@ -102,45 +99,12 @@ namespace TensileLite
     private:
         static const int16_t BFLOAT16_ZERO_VALUE = 0x00;
 
-        // zero extend lower 16 bits of bfloat16 to convert to IEEE float
         static float bfloat16_to_float(const BFloat16 v)
         {
-            union
-            {
-                float    fp32 = 0;
-                uint16_t q[2];
-            };
-
-#if __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
-            q[0] = v.data;
-#else
-            q[1]      = v.data;
-#endif
+            const uint32_t bits = uint32_t(v.data) << 16;
+            float          fp32;
+            std::memcpy(&fp32, &bits, sizeof(fp32));
             return fp32;
-        }
-
-        // truncate lower 16 bits of IEEE float to convert to bfloat16
-        static BFloat16 float_to_bfloat16_truncate(const float v)
-        {
-            BFloat16 bf16;
-            if(std::isnan(v))
-            {
-                bf16.data = BFLOAT16_Q_NAN_VALUE;
-                return bf16;
-            }
-            union
-            {
-                float    fp32;
-                uint16_t p[2];
-            };
-            fp32 = v;
-
-#if __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
-            bf16.data = p[0];
-#else
-            bf16.data = p[1];
-#endif
-            return bf16;
         }
 
         static BFloat16 float_to_bfloat16(const float v)
@@ -327,4 +291,3 @@ namespace std
         return std::to_string(static_cast<float>(a));
     }
 } // namespace std
-

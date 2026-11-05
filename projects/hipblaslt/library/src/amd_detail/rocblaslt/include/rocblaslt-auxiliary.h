@@ -38,9 +38,7 @@
 
 #include <hip/hip_runtime.h>
 
-#ifdef __cplusplus
 extern "C" {
-#endif
 
 /*! \ingroup aux_module
  *  \brief Create a rocblaslt handle
@@ -417,7 +415,6 @@ rocblaslt_status
                                         int                               requestedAlgoCount,
                                         rocblaslt_matmul_heuristic_result heuristicResultsArray[],
                                         int*                              returnAlgoCount);
-#ifdef __cplusplus
 }
 
 void rocblaslt_init_gemmData(rocblaslt_handle       handle,
@@ -513,4 +510,3 @@ std::optional<std::filesystem::path>
                                          = std::nullopt);
 
 void rocblaslt_log_error(const char* func, const char* var, const char* msg);
-#endif

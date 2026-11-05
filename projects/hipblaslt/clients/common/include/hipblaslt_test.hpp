@@ -42,6 +42,7 @@
 #endif
 
 #include "argument_model.hpp"
+#include "client_reporting.hpp"
 #include "hipblaslt_arguments.hpp"
 #include "test_cleanup.hpp"
 #include <algorithm>
@@ -267,58 +268,48 @@ void catch_signals_and_exceptions_as_failures(std::function<void()> test, bool s
 #define CATCH_SIGNALS_AND_EXCEPTIONS_AS_FAILURES(test) \
     catch_signals_and_exceptions_as_failures([&] { test; }, true)
 
-// Function to catch signals and exceptions as failures
 void launch_test_on_threads(std::function<void()> test,
                             size_t                numThreads,
-                            size_t                numStreams,
+                            size_t                numRepeats,
                             size_t                numDevices);
 
-// Macro to call catch_signals_and_exceptions_as_failures() with a lambda expression
-#define LAUNCH_TEST_ON_THREADS(test, threads, streams, devices) \
-    launch_test_on_threads([&] { test; }, threads, streams, devices)
+void launch_test_repeatedly(std::function<void()> test, size_t numRepeats, size_t numDevices);
 
-// Function to catch signals and exceptions as failures
-void launch_test_on_streams(std::function<void()> test, size_t numStreams, size_t numDevices);
-
-// Macro to call catch_signals_and_exceptions_as_failures() with a lambda expression
-#define LAUNCH_TEST_ON_STREAMS(test, streams, devices) \
-    launch_test_on_streams([&] { test; }, streams, devices)
-
-// Macro to run test across threads
-#define RUN_TEST_ON_THREADS_STREAMS(test)                                                    \
-    do                                                                                       \
-    {                                                                                        \
-        const auto& arg          = GetParam();                                               \
-        size_t      threads      = arg.threads;                                              \
-        size_t      streams      = arg.streams;                                              \
-        size_t      devices      = arg.devices;                                              \
-        int         availDevices = 0;                                                        \
-        bool        HMM          = arg.HMM;                                                  \
-        CHECK_HIP_ERROR(hipGetDeviceCount(&availDevices));                                   \
-        if(devices > availDevices)                                                           \
-        {                                                                                    \
-            SUCCEED() << TOO_MANY_DEVICES_STRING;                                            \
-            return;                                                                          \
-        }                                                                                    \
-        else if(HMM)                                                                         \
-        {                                                                                    \
-            for(int i = 0; i < devices; i++)                                                 \
-            {                                                                                \
-                int flag = 0;                                                                \
-                CHECK_HIP_ERROR(hipDeviceGetAttribute(                                       \
+// The legacy streams argument repeats each test; tests manage their own HIP streams.
+#define RUN_TEST_ON_THREADS_STREAMS(test)                                              \
+    do                                                                                 \
+    {                                                                                  \
+        const auto& arg          = GetParam();                                         \
+        size_t      threads      = arg.threads;                                        \
+        size_t      repeats      = arg.streams;                                        \
+        size_t      devices      = arg.devices;                                        \
+        int         availDevices = 0;                                                  \
+        bool        HMM          = arg.HMM;                                            \
+        CHECK_HIP_ERROR(hipGetDeviceCount(&availDevices));                             \
+        if(devices > availDevices)                                                     \
+        {                                                                              \
+            SUCCEED() << TOO_MANY_DEVICES_STRING;                                      \
+            return;                                                                    \
+        }                                                                              \
+        else if(HMM)                                                                   \
+        {                                                                              \
+            for(int i = 0; i < devices; i++)                                           \
+            {                                                                          \
+                int flag = 0;                                                          \
+                CHECK_HIP_ERROR(hipDeviceGetAttribute(                                 \
                     &flag, hipDeviceAttribute_t(hipDeviceAttributeManagedMemory), i)); \
-                if(!flag)                                                                    \
-                {                                                                            \
-                    SUCCEED() << HMM_NOT_SUPPORTED;                                          \
-                    return;                                                                  \
-                }                                                                            \
-            }                                                                                \
-        }                                                                                    \
-        g_stream_pool.reset(devices, streams);                                               \
-        if(threads)                                                                          \
-            LAUNCH_TEST_ON_THREADS(test, threads, streams, devices);                         \
-        else                                                                                 \
-            LAUNCH_TEST_ON_STREAMS(test, streams, devices);                                  \
+                if(!flag)                                                              \
+                {                                                                      \
+                    SUCCEED() << HMM_NOT_SUPPORTED;                                    \
+                    return;                                                            \
+                }                                                                      \
+            }                                                                          \
+        }                                                                              \
+        auto run_test = [&] { test; };                                                 \
+        if(threads)                                                                    \
+            launch_test_on_threads(run_test, threads, repeats, devices);               \
+        else                                                                           \
+            launch_test_repeatedly(run_test, repeats, devices);                        \
     } while(0)
 
 // Thread worker class
@@ -338,30 +329,7 @@ public:
     void submit(std::function<void()> func, std::promise<void> promise);
 };
 
-class stream_pool
-{
-    std::vector<std::vector<hipStream_t>> m_streams;
-
-public:
-    stream_pool() = default;
-
-    void reset(size_t numDevices = 0, size_t numStreams = 0);
-
-    ~stream_pool()
-    {
-        reset();
-    }
-
-    auto& operator[](size_t deviceId)
-    {
-        return m_streams.at(deviceId);
-    }
-};
-
-extern stream_pool g_stream_pool;
 extern thread_pool g_thread_pool;
-
-extern thread_local std::unique_ptr<std::function<void(hipblasLtHandle_t)>> t_set_stream_callback;
 
 /* ============================================================================================ */
 /*! \brief  Normalized test name to conform to Google Tests */

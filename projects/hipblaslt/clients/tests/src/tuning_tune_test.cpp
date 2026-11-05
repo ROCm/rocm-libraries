@@ -14,6 +14,7 @@
 // process, so each test starts by calling hipblaslt_tuning_reset_for_test().
 // Without it, only the first mode set in the binary would ever take effect.
 
+#include "client_process.hpp"
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
 #include <hipblaslt/hipblaslt-ext.hpp>
@@ -35,12 +36,6 @@
 #include <thread>
 #include <utility>
 #include <vector>
-
-#ifdef WIN32
-#include <process.h>
-#else
-#include <unistd.h>
-#endif
 
 extern "C" void   hipblaslt_tuning_reset_for_test();
 extern "C" int    hipblaslt_tuning_last_launch_for_test();
@@ -80,17 +75,6 @@ extern "C" size_t hipblaslt_tuning_candidates_for_test(void*  handle,
                                                        size_t workspaceBytes,
                                                        int*   indexes,
                                                        size_t count);
-
-#ifdef WIN32
-static int setenv(const char* name, const char* value, int overwrite)
-{
-    return _putenv_s(name, value);
-}
-static int unsetenv(const char* name)
-{
-    return _putenv_s(name, "");
-}
-#endif
 
 namespace
 {
@@ -137,11 +121,7 @@ namespace
     std::string tempCachePath(const char* stem)
     {
         std::ostringstream oss;
-#ifdef WIN32
-        const auto pid = _getpid();
-#else
-        const auto pid = getpid();
-#endif
+        const auto         pid = hipblaslt_clients::processId();
         oss << ::testing::TempDir() << "hipblaslt_" << stem << "_" << static_cast<long long>(pid)
             << ".tuning";
         return oss.str();
@@ -150,36 +130,36 @@ namespace
     void enterMode(const char* mode, const std::string& path)
     {
         if(mode)
-            setenv("HIPBLASLT_TUNING_MODE", mode, 1);
+            hipblaslt_clients::setEnv("HIPBLASLT_TUNING_MODE", mode, 1);
         else
-            unsetenv("HIPBLASLT_TUNING_MODE");
+            hipblaslt_clients::unsetEnv("HIPBLASLT_TUNING_MODE");
 
         if(path.empty())
-            unsetenv("HIPBLASLT_TUNING_CACHE_PATH");
+            hipblaslt_clients::unsetEnv("HIPBLASLT_TUNING_CACHE_PATH");
         else
-            setenv("HIPBLASLT_TUNING_CACHE_PATH", path.c_str(), 1);
+            hipblaslt_clients::setEnv("HIPBLASLT_TUNING_CACHE_PATH", path.c_str(), 1);
 
         // These tests check the cache mechanism, not tuning quality, so keep the
         // search small. The shipping defaults measure every kernel over 2000
         // launches apiece, which costs minutes across the suite for no extra
         // coverage here.
-        setenv("HIPBLASLT_TUNING_ALL_KERNELS", "0", 1);
-        setenv("HIPBLASLT_TUNING_MAX_CANDIDATES", "16", 1);
-        setenv("HIPBLASLT_TUNING_COLD_ITERS", "2", 1);
-        setenv("HIPBLASLT_TUNING_HOT_ITERS", "5", 1);
-        setenv("HIPBLASLT_TUNING_BUDGET_MS_PER_SHAPE", "0", 1);
-        setenv("HIPBLASLT_TUNING_SCRATCH_MAX_BYTES", "1073741824", 1);
+        hipblaslt_clients::setEnv("HIPBLASLT_TUNING_ALL_KERNELS", "0", 1);
+        hipblaslt_clients::setEnv("HIPBLASLT_TUNING_MAX_CANDIDATES", "16", 1);
+        hipblaslt_clients::setEnv("HIPBLASLT_TUNING_COLD_ITERS", "2", 1);
+        hipblaslt_clients::setEnv("HIPBLASLT_TUNING_HOT_ITERS", "5", 1);
+        hipblaslt_clients::setEnv("HIPBLASLT_TUNING_BUDGET_MS_PER_SHAPE", "0", 1);
+        hipblaslt_clients::setEnv("HIPBLASLT_TUNING_SCRATCH_MAX_BYTES", "1073741824", 1);
 
         // Left at the shipping default so the flush path is exercised, but the
         // per-device calibration burst is the dominant cost at these tiny
         // iteration counts, so it is measured once and reused across tests.
-        setenv("HIPBLASLT_TUNING_FLUSH_ICACHE", "1", 1);
+        hipblaslt_clients::setEnv("HIPBLASLT_TUNING_FLUSH_ICACHE", "1", 1);
 
         // Large enough to rotate over several blocks rather than collapsing to
         // one, so the seeding and per-block pointer arithmetic are exercised;
         // the launch counts above bound the rotation at five blocks. Still far
         // below the 512 MiB default.
-        setenv("HIPBLASLT_TUNING_ROTATING_MB", "160", 1);
+        hipblaslt_clients::setEnv("HIPBLASLT_TUNING_ROTATING_MB", "160", 1);
 
         hipblaslt_tuning_reset_for_test();
     }
@@ -1388,7 +1368,7 @@ namespace
                 GTEST_SKIP() << "No GPU available";
 
             // A user's legacy override must not leak into a cache-mode test.
-            unsetenv("HIPBLASLT_TUNING_OVERRIDE_FILE");
+            hipblaslt_clients::unsetEnv("HIPBLASLT_TUNING_OVERRIDE_FILE");
             m_path = tempCachePath(::testing::UnitTest::GetInstance()->current_test_info()->name());
             std::remove(m_path.c_str());
         }
@@ -1399,9 +1379,9 @@ namespace
             for(const auto& [name, value] : m_savedEnv)
             {
                 if(value)
-                    setenv(name.c_str(), value->c_str(), 1);
+                    hipblaslt_clients::setEnv(name.c_str(), value->c_str(), 1);
                 else
-                    unsetenv(name.c_str());
+                    hipblaslt_clients::unsetEnv(name.c_str());
             }
             hipblaslt_tuning_reset_for_test();
         }
@@ -1419,12 +1399,12 @@ namespace
         void enterModeForLogging(const char* mode, const std::string& path)
         {
             enterMode(mode, path);
-            setenv("HIPBLASLT_TUNING_ALL_KERNELS", "0", 1);
-            setenv("HIPBLASLT_TUNING_MAX_CANDIDATES", "2", 1);
-            setenv("HIPBLASLT_TUNING_COLD_ITERS", "0", 1);
-            setenv("HIPBLASLT_TUNING_HOT_ITERS", "1", 1);
-            setenv("HIPBLASLT_TUNING_FLUSH_ICACHE", "0", 1);
-            setenv("HIPBLASLT_TUNING_ROTATING_MB", "0", 1);
+            hipblaslt_clients::setEnv("HIPBLASLT_TUNING_ALL_KERNELS", "0", 1);
+            hipblaslt_clients::setEnv("HIPBLASLT_TUNING_MAX_CANDIDATES", "2", 1);
+            hipblaslt_clients::setEnv("HIPBLASLT_TUNING_COLD_ITERS", "0", 1);
+            hipblaslt_clients::setEnv("HIPBLASLT_TUNING_HOT_ITERS", "1", 1);
+            hipblaslt_clients::setEnv("HIPBLASLT_TUNING_FLUSH_ICACHE", "0", 1);
+            hipblaslt_clients::setEnv("HIPBLASLT_TUNING_ROTATING_MB", "0", 1);
             hipblaslt_tuning_reset_for_test();
         }
 
@@ -1487,10 +1467,10 @@ namespace
     TEST_F(TuningTune_pre_checkin, ExhaustiveEnumerationWritesEntry)
     {
         enterMode("tune", m_path);
-        setenv("HIPBLASLT_TUNING_ALL_KERNELS", "1", 1);
-        setenv("HIPBLASLT_TUNING_COLD_ITERS", "0", 1);
-        setenv("HIPBLASLT_TUNING_HOT_ITERS", "1", 1);
-        setenv("HIPBLASLT_TUNING_ROTATING_MB", "0", 1);
+        hipblaslt_clients::setEnv("HIPBLASLT_TUNING_ALL_KERNELS", "1", 1);
+        hipblaslt_clients::setEnv("HIPBLASLT_TUNING_COLD_ITERS", "0", 1);
+        hipblaslt_clients::setEnv("HIPBLASLT_TUNING_HOT_ITERS", "1", 1);
+        hipblaslt_clients::setEnv("HIPBLASLT_TUNING_ROTATING_MB", "0", 1);
         hipblaslt_tuning_reset_for_test();
 
         ASSERT_TRUE(runGemm(64, 64, 64));
@@ -1509,7 +1489,8 @@ namespace
         for(int cap : {1, 16, 256})
         {
             SCOPED_TRACE(cap);
-            setenv("HIPBLASLT_TUNING_MAX_CANDIDATES", std::to_string(cap).c_str(), 1);
+            hipblaslt_clients::setEnv(
+                "HIPBLASLT_TUNING_MAX_CANDIDATES", std::to_string(cap).c_str(), 1);
             hipblaslt_tuning_reset_for_test();
 
             const auto offered = problem.offered(cap);
@@ -1911,7 +1892,7 @@ namespace
         ASSERT_GT(before, 0u) << "tune mode recorded nothing";
 
         enterMode("tune", m_path);
-        setenv("HIPBLASLT_TUNING_BUDGET_MS_PER_SHAPE", "1000", 1);
+        hipblaslt_clients::setEnv("HIPBLASLT_TUNING_BUDGET_MS_PER_SHAPE", "1000", 1);
         hipblaslt_tuning_reset_for_test();
         ASSERT_TRUE(runGemm(1024, 512, 1024));
 
@@ -2067,7 +2048,7 @@ namespace
     TEST_F(TuningTune_pre_checkin, NarrowerFinishedSearchIsWidenedButNotRepeated)
     {
         enterMode("tune", m_path);
-        setenv("HIPBLASLT_TUNING_MAX_CANDIDATES", "2", 1);
+        hipblaslt_clients::setEnv("HIPBLASLT_TUNING_MAX_CANDIDATES", "2", 1);
         hipblaslt_tuning_reset_for_test();
         ASSERT_TRUE(runGemm(1024, 512, 1024));
         ASSERT_EQ(valueRowCount(m_path), 1u) << "tune mode did not record exactly one row";
@@ -2078,7 +2059,7 @@ namespace
             << "a finished two-candidate search stopped a sixteen-candidate run from tuning";
 
         enterMode("tune", m_path);
-        setenv("HIPBLASLT_TUNING_MAX_CANDIDATES", "2", 1);
+        hipblaslt_clients::setEnv("HIPBLASLT_TUNING_MAX_CANDIDATES", "2", 1);
         hipblaslt_tuning_reset_for_test();
         ASSERT_TRUE(runGemm(1024, 512, 1024));
         EXPECT_EQ(valueRowCount(m_path), 2u)
@@ -2092,7 +2073,7 @@ namespace
     TEST_F(TuningTune_pre_checkin, BudgetExhaustedShapeIsNotRetried)
     {
         enterMode("tune", m_path);
-        setenv("HIPBLASLT_TUNING_BUDGET_MS_PER_SHAPE", "1", 1);
+        hipblaslt_clients::setEnv("HIPBLASLT_TUNING_BUDGET_MS_PER_SHAPE", "1", 1);
         hipblaslt_tuning_reset_for_test();
         // Read as spent at once, however quickly this machine runs the search,
         // so it stops before measuring anything: a skip that records no row.

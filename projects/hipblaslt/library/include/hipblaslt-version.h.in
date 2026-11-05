@@ -28,7 +28,6 @@
  * \brief hipblaslt-version.h provides the configured version and settings
  */
 
-#pragma once
 #ifndef _HIPBLASLT_VERSION_H_
 #define _HIPBLASLT_VERSION_H_
 

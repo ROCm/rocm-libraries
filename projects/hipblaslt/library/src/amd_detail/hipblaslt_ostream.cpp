@@ -327,13 +327,7 @@ hipblaslt_internal_ostream::worker::worker(int fd)
     }
 
     // Create a worker thread, capturing *this
-    m_thread = std::thread(
-#if __cplusplus >= 202002L
-        [=, this]
-#else
-        [=]
-#endif
-        { thread_function(); });
+    m_thread = std::thread([this] { thread_function(); });
 
     // Detach from the worker thread
     m_thread.detach();

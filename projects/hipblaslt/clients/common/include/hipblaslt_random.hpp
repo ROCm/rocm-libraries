@@ -166,7 +166,6 @@ public:
         return random_nan_data<hip_bfloat16, uint16_t, 7, 8>();
     }
 
-#if HIP_FP8_TYPE_FNUZ
     // Single NaN float8...
     explicit operator hipblaslt_f8_fnuz()
     {
@@ -190,9 +189,7 @@ public:
         x.bits = 0x80;
         return x.value;
     }
-#endif
 
-#if HIP_FP8_TYPE_OCP
     // Positive NaN float8...
     explicit operator hipblaslt_f8()
     {
@@ -216,7 +213,6 @@ public:
         x.bits = 0x7e;
         return x.value;
     }
-#endif
 
     // Single NaN e8...
     explicit operator hipblaslt_e8()
@@ -330,12 +326,8 @@ inline float random_generator()
 template <>
 inline hipblasLtHalf random_generator<hipblasLtHalf>()
 {
-#if defined(__HIP_PLATFORM_AMD__)
-#define CAST
-#else
-#define CAST static_cast<float>
-#endif
-    return hipblasLtHalf(CAST(std::uniform_int_distribution<int>(-2, 2)(t_hipblaslt_rng)));
+    return hipblasLtHalf(
+        static_cast<float>(std::uniform_int_distribution<int>(-2, 2)(t_hipblaslt_rng)));
 };
 
 // for hip_bfloat16, generate float, and convert to hip_bfloat16
@@ -343,12 +335,8 @@ inline hipblasLtHalf random_generator<hipblasLtHalf>()
 template <>
 inline hip_bfloat16 random_generator<hip_bfloat16>()
 {
-#if defined(__HIP_PLATFORM_AMD__)
-#define CAST
-#else
-#define CAST static_cast<float>
-#endif
-    return hip_bfloat16(CAST(std::uniform_int_distribution<int>(-2, 2)(t_hipblaslt_rng)));
+    return hip_bfloat16(
+        static_cast<float>(std::uniform_int_distribution<int>(-2, 2)(t_hipblaslt_rng)));
 };
 
 /*! \brief  generate a random number in range [1,2,3] */

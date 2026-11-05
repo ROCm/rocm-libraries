@@ -26,16 +26,17 @@
 
 #pragma once
 
-#include <hipblaslt/hipblaslt.h>
-#include <hipblaslt/hipblaslt-ext-op.h>
-#include <hipblaslt/hipblaslt-ext.hpp> // Add check for hipblaslt-ext
-#include "hipblaslt_test.hpp"
+#include "client_process.hpp"
 #include "flops.hpp"
 #include "hipblaslt_datatype2string.hpp"
 #include "hipblaslt_init.hpp"
 #include "hipblaslt_math.hpp"
 #include "hipblaslt_random.hpp"
+#include "hipblaslt_test.hpp"
 #include "hipblaslt_vector.hpp"
+#include <hipblaslt/hipblaslt-ext-op.h>
+#include <hipblaslt/hipblaslt-ext.hpp> // Add check for hipblaslt-ext
+#include <hipblaslt/hipblaslt.h>
 #ifdef CODE_COVERAGE
 #include "check_numerics_matrix.hpp"
 #include "hipblaslt_internal.hpp"
@@ -4186,15 +4187,15 @@ inline void testing_aux_check_numerics_func(const Arguments& arg)
     std::lock_guard<std::mutex> env_lock(env_mutex);
 
     auto reset_env = []() {
-        unsetenv("HIPBLASLT_CHECK_NUMERICS");
-        unsetenv("HIPBLASLT_CHECK_NUMERICS_SCAN_EVERY");
-        unsetenv("HIPBLASLT_CHECK_NUMERICS_SCAN_FROM");
-        unsetenv("HIPBLASLT_CHECK_NUMERICS_SCAN_UNTIL");
+        hipblaslt_clients::unsetEnv("HIPBLASLT_CHECK_NUMERICS");
+        hipblaslt_clients::unsetEnv("HIPBLASLT_CHECK_NUMERICS_SCAN_EVERY");
+        hipblaslt_clients::unsetEnv("HIPBLASLT_CHECK_NUMERICS_SCAN_FROM");
+        hipblaslt_clients::unsetEnv("HIPBLASLT_CHECK_NUMERICS_SCAN_UNTIL");
     };
     auto with_env = [](std::initializer_list<std::pair<const char*, const char*>> env,
                        auto                                                       inspect) {
         for(auto& kv : env)
-            setenv(kv.first, kv.second, 1);
+            hipblaslt_clients::setEnv(kv.first, kv.second, 1);
         hipblasLtHandle_t h = nullptr;
         EXPECT_HIPBLAS_STATUS(hipblasLtCreate(&h), HIPBLAS_STATUS_SUCCESS);
         inspect((rocblaslt_handle)h);
@@ -4223,7 +4224,7 @@ inline void testing_aux_check_numerics_func(const Arguments& arg)
     // HIPBLASLT_CHECK_NUMERICS string/numeric forms.
     auto check_mode = [&](const char* val, hipblaslt_check_numerics_mode expected) {
         reset_env();
-        setenv("HIPBLASLT_CHECK_NUMERICS", val, 1);
+        hipblaslt_clients::setEnv("HIPBLASLT_CHECK_NUMERICS", val, 1);
         hipblasLtHandle_t h = nullptr;
         EXPECT_HIPBLAS_STATUS(hipblasLtCreate(&h), HIPBLAS_STATUS_SUCCESS);
         ASSERT_TRUE(((rocblaslt_handle)h)->check_numerics == expected);
@@ -4267,7 +4268,7 @@ inline void testing_aux_check_numerics_func(const Arguments& arg)
 
     // Happy path: enable scanning, write NaN, scan_D, drain returns call_id 1.
     reset_env();
-    setenv("HIPBLASLT_CHECK_NUMERICS", "1", 1);
+    hipblaslt_clients::setEnv("HIPBLASLT_CHECK_NUMERICS", "1", 1);
     {
         hipblasLtHandle_t h = nullptr;
         EXPECT_HIPBLAS_STATUS(hipblasLtCreate(&h), HIPBLAS_STATUS_SUCCESS);
@@ -4309,7 +4310,7 @@ inline void testing_aux_check_numerics_func(const Arguments& arg)
     auto scan_one_with_nan
         = [&reset_env](hipDataType dt, const void* host_buf, size_t elem_size, uint32_t expected_drain) {
               reset_env();
-              setenv("HIPBLASLT_CHECK_NUMERICS", "1", 1);
+              hipblaslt_clients::setEnv("HIPBLASLT_CHECK_NUMERICS", "1", 1);
               hipblasLtHandle_t h = nullptr;
               EXPECT_HIPBLAS_STATUS(hipblasLtCreate(&h), HIPBLAS_STATUS_SUCCESS);
               rocblaslt_handle  rh = (rocblaslt_handle)h;
@@ -4379,7 +4380,7 @@ inline void testing_aux_check_numerics_func(const Arguments& arg)
     // and must return success without touching the flag.
     {
         reset_env();
-        setenv("HIPBLASLT_CHECK_NUMERICS", "1", 1);
+        hipblaslt_clients::setEnv("HIPBLASLT_CHECK_NUMERICS", "1", 1);
         hipblasLtHandle_t h = nullptr;
         EXPECT_HIPBLAS_STATUS(hipblasLtCreate(&h), HIPBLAS_STATUS_SUCCESS);
         rocblaslt_handle  rh = (rocblaslt_handle)h;
@@ -4407,8 +4408,8 @@ inline void testing_aux_check_numerics_func(const Arguments& arg)
     // the device flag).
     {
         reset_env();
-        setenv("HIPBLASLT_CHECK_NUMERICS", "1", 1);
-        setenv("HIPBLASLT_CHECK_NUMERICS_STOP_ON_FIRST", "1", 1);
+        hipblaslt_clients::setEnv("HIPBLASLT_CHECK_NUMERICS", "1", 1);
+        hipblaslt_clients::setEnv("HIPBLASLT_CHECK_NUMERICS_STOP_ON_FIRST", "1", 1);
         hipblasLtHandle_t h = nullptr;
         EXPECT_HIPBLAS_STATUS(hipblasLtCreate(&h), HIPBLAS_STATUS_SUCCESS);
         rocblaslt_handle rh = (rocblaslt_handle)h;
@@ -4450,8 +4451,8 @@ inline void testing_aux_check_numerics_func(const Arguments& arg)
     // so drain returns 3.
     {
         reset_env();
-        setenv("HIPBLASLT_CHECK_NUMERICS", "1", 1);
-        setenv("HIPBLASLT_CHECK_NUMERICS_SCAN_EVERY", "3", 1);
+        hipblaslt_clients::setEnv("HIPBLASLT_CHECK_NUMERICS", "1", 1);
+        hipblaslt_clients::setEnv("HIPBLASLT_CHECK_NUMERICS_SCAN_EVERY", "3", 1);
         hipblasLtHandle_t h = nullptr;
         EXPECT_HIPBLAS_STATUS(hipblasLtCreate(&h), HIPBLAS_STATUS_SUCCESS);
         rocblaslt_handle rh = (rocblaslt_handle)h;
@@ -4485,9 +4486,9 @@ inline void testing_aux_check_numerics_func(const Arguments& arg)
     // in-window call).
     {
         reset_env();
-        setenv("HIPBLASLT_CHECK_NUMERICS", "1", 1);
-        setenv("HIPBLASLT_CHECK_NUMERICS_SCAN_FROM", "3", 1);
-        setenv("HIPBLASLT_CHECK_NUMERICS_SCAN_UNTIL", "4", 1);
+        hipblaslt_clients::setEnv("HIPBLASLT_CHECK_NUMERICS", "1", 1);
+        hipblaslt_clients::setEnv("HIPBLASLT_CHECK_NUMERICS_SCAN_FROM", "3", 1);
+        hipblaslt_clients::setEnv("HIPBLASLT_CHECK_NUMERICS_SCAN_UNTIL", "4", 1);
         hipblasLtHandle_t h = nullptr;
         EXPECT_HIPBLAS_STATUS(hipblasLtCreate(&h), HIPBLAS_STATUS_SUCCESS);
         rocblaslt_handle rh = (rocblaslt_handle)h;

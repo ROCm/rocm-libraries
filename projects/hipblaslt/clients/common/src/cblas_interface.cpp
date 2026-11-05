@@ -95,7 +95,6 @@ template <typename T1, typename T2>
 constexpr bool is_any_custom_type_v
     = is_hip_custom_type<T1>::value || is_hip_custom_type<T2>::value;
 
-
 template <typename T>
 constexpr auto get_real_if_complex(const T& val)
 {
@@ -1248,9 +1247,7 @@ void small_gemm(hipblasOperation_t transA,
     {
         if(beta == 0.0)
         {
-#ifdef _OPENMP
 #pragma omp parallel for
-#endif
             for(int j = 0; j < n; ++j)
             {
                 for(int i = 0; i < m; ++i)
@@ -1261,9 +1258,7 @@ void small_gemm(hipblasOperation_t transA,
         }
         else
         {
-#ifdef _OPENMP
 #pragma omp parallel for
-#endif
             for(int j = 0; j < n; ++j)
             {
                 for(int i = 0; i < m; ++i)
@@ -1280,9 +1275,7 @@ void small_gemm(hipblasOperation_t transA,
         if(notTA)
         {
             // C = alpha*A*B + beta*C.
-#ifdef _OPENMP
 #pragma omp parallel for
-#endif
             for(int j = 0; j < n; ++j)
             {
                 if(beta == 0.0)
@@ -1313,9 +1306,7 @@ void small_gemm(hipblasOperation_t transA,
         else
         {
             // C = alpha*A**T*B + beta*C
-#ifdef _OPENMP
 #pragma omp parallel for
-#endif
             for(int j = 0; j < n; ++j)
             {
                 for(int i = 0; i < m; ++i)
@@ -1342,9 +1333,7 @@ void small_gemm(hipblasOperation_t transA,
         if(notTA)
         {
             //  C = alpha*A*B**T + beta*C
-#ifdef _OPENMP
 #pragma omp parallel for
-#endif
             for(int j = 0; j < n; ++j)
             {
                 if(beta == 0.0)
@@ -1375,9 +1364,7 @@ void small_gemm(hipblasOperation_t transA,
         else
         {
             // C = alpha*A**T*B**T + beta*C
-#ifdef _OPENMP
 #pragma omp parallel for
-#endif
             for(int j = 0; j < n; ++j)
             {
                 for(int i = 0; i < m; ++i)

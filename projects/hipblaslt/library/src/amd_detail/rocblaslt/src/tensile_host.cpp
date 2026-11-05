@@ -93,10 +93,6 @@
 
 #define HIPBLASLT_LIB_PATH "/opt/rocm/lib"
 
-#ifdef ENABLE_ROCTX
-#include <roctracer/roctx.h>
-#endif
-
 #define INTERNAL_HIPHOSTMEM_SIZE 32768
 
 #if HIPBLASLT_HAS_GEMM_A2A_FUSION

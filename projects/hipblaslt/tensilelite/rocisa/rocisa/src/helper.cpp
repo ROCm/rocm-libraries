@@ -240,12 +240,10 @@ std::string nullDevicePath()
 
 #else
 // POSIX implementation.
+#include <cxxabi.h>
 #include <fcntl.h>
 #include <sys/wait.h>
 #include <unistd.h>
-#ifdef __GNUG__
-#include <cxxabi.h>
-#endif
 
 std::pair<int, std::string> run(const std::vector<char*>& cmd, const std::string& input, bool debug)
 {

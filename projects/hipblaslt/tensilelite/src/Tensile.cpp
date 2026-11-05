@@ -29,14 +29,6 @@
 #include <Tensile/ContractionProblem.hpp>
 #include <Tensile/ContractionSolution.hpp>
 
-#ifdef TENSILE_YAML
-#include <Tensile/llvm/Loading.hpp>
-#endif
-
-#ifdef TENSILE_MSGPACK
-#include <Tensile/msgpack/Loading.hpp>
-#endif
-
 namespace TensileLite
 {
 
@@ -46,13 +38,6 @@ namespace TensileLite
     TENSILELITEHOST_EXPORT Solution::~Solution()               = default;
     TENSILELITEHOST_EXPORT SolutionAdapter::~SolutionAdapter() = default;
 
-#ifdef TENSILE_MSGPACK
-    std::map<int, std::string> LoadLibraryMapping(std::string const& filename)
-    {
-        return MessagePackLoadLibraryMapping(filename);
-    }
-#endif
-
     template <typename MyProblem, typename MySolution>
     std::shared_ptr<SolutionLibrary<MyProblem, MySolution>>
         LoadLibraryFile(std::string const& filename)
@@ -60,65 +45,7 @@ namespace TensileLite
         return LoadLibraryFilePreload<MyProblem, MySolution>(filename, {});
     }
 
-    template <typename MyProblem, typename MySolution>
-    std::shared_ptr<SolutionLibrary<MyProblem, MySolution>>
-        LoadLibraryFilePreload(std::string const&                  filename,
-                               const std::vector<LazyLoadingInit>& preloaded)
-    {
-        std::shared_ptr<SolutionLibrary<MyProblem, MySolution>> rv;
-
-#ifdef TENSILE_MSGPACK
-        rv = MessagePackLoadLibraryFile<MyProblem, MySolution>(filename, preloaded);
-        if(rv)
-            return rv;
-#endif
-
-#ifdef TENSILE_YAML
-        rv = LLVMLoadLibraryFile<MyProblem, MySolution>(filename, preloaded);
-        if(rv)
-            return rv;
-#endif
-
-        // Failed to load library, return nullptr.
-        return nullptr;
-    }
-
-    template <typename MyProblem, typename MySolution>
-    std::shared_ptr<SolutionLibrary<MyProblem, MySolution>>
-        LoadLibraryData(std::vector<uint8_t> const& data)
-    {
-        std::shared_ptr<SolutionLibrary<MyProblem, MySolution>> rv;
-
-#ifdef TENSILE_MSGPACK
-        rv = MessagePackLoadLibraryData<MyProblem, MySolution>(data);
-        if(rv)
-            return rv;
-#endif
-
-#ifdef TENSILE_YAML
-        rv = LLVMLoadLibraryData<MyProblem, MySolution>(data);
-        if(rv)
-            return rv;
-#endif
-
-        // Failed to load library, return nullptr.
-        return nullptr;
-    }
-
-#if defined(__GNUC__) || defined(__clang__)
-#pragma GCC visibility push(default)
-#endif
-    template std::shared_ptr<SolutionLibrary<ContractionProblemGemm, ContractionSolution>>
+    template TENSILELITEHOST_EXPORT
+        std::shared_ptr<SolutionLibrary<ContractionProblemGemm, ContractionSolution>>
         LoadLibraryFile<ContractionProblemGemm, ContractionSolution>(std::string const& filename);
-
-    template std::shared_ptr<SolutionLibrary<ContractionProblemGemm, ContractionSolution>>
-        LoadLibraryFilePreload<ContractionProblemGemm, ContractionSolution>(
-            std::string const& filename, const std::vector<LazyLoadingInit>& preloaded);
-
-    template std::shared_ptr<SolutionLibrary<ContractionProblemGemm, ContractionSolution>>
-        LoadLibraryData<ContractionProblemGemm, ContractionSolution>(
-            std::vector<uint8_t> const& data);
-#if defined(__GNUC__) || defined(__clang__)
-#pragma GCC visibility pop
-#endif
 } // namespace TensileLite

@@ -34,9 +34,7 @@
 #include "rocblaslt-types.h"
 #include <vector>
 
-#ifdef __cplusplus
 extern "C" {
-#endif
 
 /*
  * ===========================================================================
@@ -131,7 +129,6 @@ int rocblaslt_matmul_is_tuned(rocblaslt_handle        handle,
                               rocblaslt_matrix_layout Bdesc,
                               rocblaslt_matrix_layout Cdesc,
                               rocblaslt_matrix_layout Ddesc);
-#ifdef __cplusplus
 }
 
 // Grouped GEMM (HIPBLASLT_BATCH_MODE_GROUPED layouts) behind rocblaslt_matmul_algo_get_heuristic
@@ -286,5 +283,3 @@ std::string rocblaslt_get_kernel_name_from_algo(rocblaslt_handle             han
 
 std::string rocblaslt_get_solution_name_from_algo(rocblaslt_handle             handle,
                                                   const rocblaslt_matmul_algo& algo);
-
-#endif

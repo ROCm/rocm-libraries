@@ -30,14 +30,7 @@
 
 #if defined(__clang__) && defined(__HIP__)
 
-#if(defined(__NVCC__) || defined(__HIPCC__)) \
-    || (defined(__clang__) && (defined(__CUDA__)) || defined(__HIP__))
 #define INLINEDEVICE __forceinline__ __device__
-#elif defined(__CUDACC_RTC__)
-#define INLINEDEVICE __forceinline__ __device__
-#else
-#define INLINEDEVICE inline
-#endif
 
 #if defined(__gfx803__) || defined(__gfx900__) || defined(__gfx906__) || defined(__gfx908__) \
     || defined(__gfx90a__) || defined(__gfx942__) || defined(__gfx950__) // test device
