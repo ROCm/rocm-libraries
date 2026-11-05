@@ -498,7 +498,7 @@ def test_emit_asm_allows_only_audited_ds_load_b128_vgpr_boundary_crossing():
         _emit(
             [
                 {"kind": "instruction", "mnemonic": "ds_load_b128",
-                 "dst": [vgpr(253, 4)], "src": [vgpr(8)]},
+                 "dst": [vgpr(1021, 4)], "src": [vgpr(8)]},
             ]
         )
 
@@ -506,7 +506,7 @@ def test_emit_asm_allows_only_audited_ds_load_b128_vgpr_boundary_crossing():
         _emit(
             [
                 {"kind": "instruction", "mnemonic": "ds_store_b128",
-                 "src": [vgpr(8), vgpr(254, 4)]},
+                 "src": [vgpr(8), vgpr(1022, 4)]},
             ]
         )
 
