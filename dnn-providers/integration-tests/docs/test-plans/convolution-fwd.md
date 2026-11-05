@@ -277,12 +277,43 @@ not with the fused topologies or the feature probes (T12, §4.3).
 | S45 | F7 filter larger than the input | filter = spatial + 2, pad 1 (output 1) | 1D 2D 3D | F7 |
 | S46 | F8 stride 4 | stride 4 | 1D 2D 3D | F8 |
 
-That is 111 shape × rank combinations. Each is generated per layout and data type
-as the level rules (§4.1) require.
+S47–S62 are 2D classes that S1–S46 and the corpus pick both miss: depthwise
+with odd or small channel counts, depthwise on non-square and odd images,
+depthwise with dilation, unequal strides or padding other than "same", grouped
+with dilation at stride 1, and dense convolution with strides or dilation on
+non-square images. They came from comparing the plan with what a direct-kernel
+engine serves; each is a generic API hazard, not an engine rule. Before them,
+every depthwise case had an even C ≥ 16, and every non-square image ran at
+stride 1 without dilation. Values are the S size; the L form keeps the defining
+channel count, stride, dilation and padding and grows the image (and C = K = 128
+where C is not the feature).
+
+| Id | Class | Parameters (2D) |
+|---|---|---|
+| S47 | depthwise, odd C < 16, 7×7 | G = C = K 5, 9², filter 7, pad 3 |
+| S48 | depthwise, odd C, odd image | G = C = K 7, 13², filter 3, pad 1 |
+| S49 | depthwise stride 2, odd C, odd image | G = C = K 5, 17², stride 2 |
+| S50 | depthwise C ≥ 64, tall non-square image | G = C = K 64, 70×40 |
+| S51 | depthwise stride 2, non-square, even height | G = C = K 96, 16×18, stride 2 |
+| S52 | depthwise stride 2, odd image, C ≥ 64 | G = C = K 96, 17², stride 2 |
+| S53 | depthwise, dilated | G = C = K 32, 15², dilation 2, pad 2 |
+| S54 | depthwise, unequal strides | G = C = K 32, stride (1, 2) |
+| S55 | depthwise, no padding | G = C = K 32, pad 0 |
+| S56 | depthwise, padding larger than "same" | G = C = K 32, pad 2 |
+| S57 | depthwise filter > 7, C < 64 | G = C = K 5, 56×24, filter 17, pad 8 |
+| S58 | grouped (not depthwise), dilated, stride 1 | G 2, C = K 16, 15², filter 5, dilation 2, pad 4 |
+| S59 | non-square filter, unequal stride, non-square image | C 32, K 64, 11×17, filter 3×5, stride (1, 2), pad (1, 2) |
+| S60 | dense strided, non-square odd image | C 32, K 64, 17×19, stride 2 |
+| S61 | dense dilated, non-square image | C = K 32, 15×17, dilation 2, pad 2 |
+| S62 | depthwise multiplier 2, odd C | N 3, G = C 5, K 10, 12² |
+
+S8 already crosses groups with dilation, but only at stride 2; S58 is the
+stride-1 form. S1–S62 make 127 shape × rank combinations. Each is generated per
+layout and data type as the level rules (§4.1) require.
 
 ### 3.2 Medium (L)
 
-L*n* has the same features as S*n* (S1–S22; there is no L23). What changes is the
+L*n* has the same features as S*n* (S1–S22 and S24–S62; there is no L23). What changes is the
 base size:
 
 | Rank | N | C = K | Spatial |
@@ -412,7 +443,7 @@ that holds its graph; the levels cascade.
 |---|---|---|---|---|
 | Shape size | ≤ 20 MFLOP | ≤ 200 MFLOP (+3 M) | ≤ 8 GFLOP | unbounded |
 | Plain core (18) | S1–S9, layout × dtype pair rotated per rank | every S shape × rank once, pair rotated (≥ 2× core) | every S shape × every pair of its rank | L × every pair |
-| Geometry classes S24–S46 | — | each class × rank once | × every pair of its rank; L24–L46 × 2 pairs | L24–L46 × every pair; no fused or feature crossing (T12) |
+| Geometry classes S24–S62 | — | each class × rank once | × every pair of its rank; L24–L62 × 2 pairs | L24–L62 × every pair; no fused or feature crossing (T12 for S24–S46; S47–S62 are never put in the fused and feature rotations) |
 | Rejection probes | `CONVOLUTION`, asymmetric pad (S18), fp8, double, sigmoid fusion | `CONVOLUTION` per rank; 6 extra types; 5 mixed pairs | × core | asymmetric padding, mixed layouts, strides and mixed types × every S shape; `CONVOLUTION`, extra types and override shape stay at nightly's × core (T11) |
 | F13 `conv_mode` | S3 | 1 per rank | × core (rank × layout × dtype) | — (T11) |
 | F15–F16 layout, strides | — | 1 case each | rank × dtype, 2 mixes and 3 stride kinds | paired with every S shape |
@@ -433,12 +464,12 @@ Cases generated (own level / cumulative):
 | Level | Plain conv | Fused | Own | Cumulative | Claim | Probe |
 |---|---|---|---|---|---|---|
 | quick | 30 | 109 | **139** | 139 | 62 | 77 |
-| PR | 178 | 164 | **342** | 481 | 161 | 181 |
-| nightly | 1,226 | 822 | **2,048** | 2,529 | 1,150 | 898 |
-| full | 901 | 776 | **1,677** | 4,206 | 902 | 775 |
+| PR | 194 | 164 | **358** | 497 | 177 | 181 |
+| nightly | 1,338 | 822 | **2,160** | 2,657 | 1,262 | 898 |
+| full | 965 | 776 | **1,741** | 4,398 | 966 | 775 |
 
-By size class: quick S 139. PR S 291, H 18, M 3, R 30. Nightly S 1,399, L 309,
-M 106, H 162, A 12, R 60. Full S 843, L 767, R 47, X 20. 509 distinct conv
+By size class: quick S 139. PR S 307, H 18, M 3, R 30. Nightly S 1,479, L 341,
+M 106, H 162, A 12, R 60. Full S 843, L 831, R 47, X 20. 541 distinct conv
 geometries in all. The trims T8–T12 (§4.3) remove 4,139 of the generated
 synthetic cases and the R set adds 137. Counts are those of the generator;
 `generate_conv_fwd_bundles.py --report` prints them again, with the trimmed

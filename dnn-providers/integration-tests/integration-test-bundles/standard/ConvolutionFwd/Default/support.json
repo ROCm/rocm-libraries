@@ -149,6 +149,31 @@
             "linux"
           ]
         }
+      },
+      {
+        "cases": [
+          "S47_2d_i9x9_n2c5k5g5_f7x7_bf16_cf",
+          "S48_2d_i13x13_n2c7k7g7_f3x3_bf16_cl",
+          "S49_2d_i17x17_n2c5k5g5_f3x3_fp32_cf",
+          "S50_2d_i70x40_n2c64k64g64_f3x3_fp32_cl",
+          "S51_2d_i16x18_n2c96k96g96_f3x3_fp16_cf",
+          "S52_2d_i17x17_n2c96k96g96_f3x3_fp16_cl",
+          "S53_2d_i15x15_n2c32k32g32_f3x3_bf16_cf",
+          "S54_2d_i16x16_n2c32k32g32_f3x3_bf16_cl",
+          "S55_2d_i16x16_n2c32k32g32_f3x3_fp32_cf",
+          "S56_2d_i16x16_n2c32k32g32_f3x3_fp32_cl",
+          "S57_2d_i56x24_n2c5k5g5_f17x17_fp16_cf",
+          "S58_2d_i15x15_n2c16k16g2_f5x5_fp16_cl",
+          "S59_2d_i11x17_n2c32k64_f3x5_bf16_cf",
+          "S60_2d_i17x19_n2c32k64_f3x3_bf16_cl",
+          "S61_2d_i15x17_n2c32k32_f3x3_fp32_cf",
+          "S62_2d_i12x12_n3c5k10g5_f3x3_fp32_cl"
+        ],
+        "support": {
+          "gfx90a": [
+            "linux"
+          ]
+        }
       }
     ]
   },

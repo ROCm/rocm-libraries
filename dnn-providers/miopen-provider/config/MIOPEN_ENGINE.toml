@@ -73,8 +73,10 @@ rtol = 1e-5
 #   A 3,200 - 4,608 (L10, A1, A2)      1.9e-4
 #   A >= 65,536 (S19, L19, X4)         8.2e-3
 # Each class takes about 2x its observed maximum. Later entries win.
-# The R shapes and the S24-S46 / L24-L46 shapes are placed in a class by their
-# accumulation length; all of them pass in that class on gfx942 and gfx90a.
+# The R shapes and the S24-S62 / L24-L62 shapes are placed in a class by their
+# accumulation length; all of them pass in that class on gfx942 and gfx90a. S shapes
+# with A above 400 join the first class: S31 (768) and S59 (480; one element of
+# 12,672 off by 2.5e-5 on gfx90a at the default atol 1e-5).
 [[tolerance_overrides]]
 filters = [
     "*_ConvolutionFwd*.L*_fp32_*",
@@ -82,6 +84,7 @@ filters = [
     "*_ConvolutionFwd*.H*_fp32_*",
     "*_ConvolutionFwd*.X*_fp32_*",
     "*_ConvolutionFwd*.S31_*_fp32_*",
+    "*_ConvolutionFwd*.S59_*_fp32_*",
     "*_ConvolutionFwd*.R029_*_fp32_*",
     "*_ConvolutionFwd*.R061_*_fp32_*",
     "*_ConvolutionFwd*.R065_*_fp32_*",
