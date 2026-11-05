@@ -171,6 +171,87 @@ def test_evaluator_accepts_the_safe_subset(tmp_path, expression, expected):
 
 
 @pytest.mark.parametrize(
+    "expression, expected",
+    [
+        # bug caught: an evaluator that evaluates both operands, a skipped conditional branch
+        # or a chained comparison's later operands, so a guarded division fails
+        ("a == 2 or 1 // 0", True),
+        ("a != 2 and 1 // 0", False),
+        ("1 if a == 2 else 1 // 0", 1),
+        ("1 // 0 if a == 1 else 5", 5),
+        ("a < 1 < 1 // 0", False),
+        # and / or give back an operand, not a bool
+        ("0 or n", 7),
+        ("a and n", 7),
+        ("n and 0", 0),
+        ("a == 2 == 2", True),
+        ("a not in [1]", True),
+        ("'ab' in 'cabd'", True),
+        ("not []", True),
+        ("2 ** -1", 0.5),
+        ("a ** n", 128),
+        ("[min(a, n), -n, +a]", [2, -7, 2]),
+        ("[a, n][a - 1] + [[1], [2]][1][0]", 9),
+    ],
+)
+def test_evaluator_keeps_python_order_short_circuits_and_operands(
+    tmp_path, expression, expected
+):
+    assert derived(tmp_path, expression) == expected
+
+
+@pytest.mark.parametrize("exponent", ["100000", "-100000"])
+def test_an_oversized_exponent_is_an_evaluation_error_naming_the_space(
+    tmp_path, exponent
+):
+    sp = space_lib.load_space(write_space(tmp_path, derive={"r": f"a ** {exponent}"}))
+    with pytest.raises(space_lib.SpaceError, match=f"Toy/Default.*exponent {exponent}"):
+        sp.derive_env({"a": 1, "n": 1})
+
+
+def test_an_axis_named_like_the_evaluators_own_variables_is_read_as_an_axis(tmp_path):
+    # bug caught: an expression compiled to code whose parameter or helper shadows an axis
+    path = write_space(
+        tmp_path,
+        axes={"env": {"values": [1, 2]}, "_power": {"values": [3]}},
+        derive={"r": "env ** _power + min(env, _power)"},
+        constraints=[],
+        case={"values": {"e": "${env}"}, "metadata": {"purpose": "probe"}},
+    )
+    sp = space_lib.load_space(path)
+    assert sp.derive_env({"env": 2, "_power": 3})["r"] == 10
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        1,
+        1.0,
+        True,
+        None,
+        'é\u2028"\\',
+        [1, [2.5, "x", None], {"b": 1, "a": [True]}],
+        {"z": 1, "a": {"y": 2, "b": 3}},
+        [float("nan"), float("inf"), -float("inf")],
+        {"set": {3}, "tuple": (1, 2)},
+    ],
+)
+def test_the_search_encoders_write_the_text_json_dumps_writes(value):
+    # bug caught: a faster encoder whose text differs from json.dumps's (key order, escapes,
+    # int/float/bool kinds, the repr fallback), which would merge or split rendered values
+    try:
+        expected = json.dumps(value)
+    except TypeError:
+        with pytest.raises(TypeError):
+            pairwise._dumps(value)
+    else:
+        assert pairwise._dumps(value) == expected
+    assert pairwise._dumps_sorted(value) == json.dumps(
+        value, sort_keys=True, default=repr
+    )
+
+
+@pytest.mark.parametrize(
     "expression",
     [
         "foo(1)",

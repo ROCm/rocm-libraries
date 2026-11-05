@@ -95,6 +95,36 @@ from typing import NamedTuple
 
 from space import SpaceError, _Expr, _Subst
 
+
+def _json_encoder(**options):
+    """A ``dumps`` with the given ``json.dumps`` options whose encoder is built once: the
+    search encodes millions of small values, and ``json.dumps`` with options builds an encoder
+    (and the C encoder behind it) at every call. The text is ``json.dumps(value, **options)``'s.
+    """
+    encoder = json.JSONEncoder(**options)
+    try:
+        from json.encoder import c_make_encoder, encode_basestring_ascii
+
+        fast = c_make_encoder(
+            None,  # no circular-reference check: the values are rendered JSON, never cyclic
+            encoder.default,
+            encode_basestring_ascii,
+            encoder.indent,
+            encoder.key_separator,
+            encoder.item_separator,
+            encoder.sort_keys,
+            encoder.skipkeys,
+            encoder.allow_nan,
+        )
+    except (ImportError, TypeError):
+        # no C encoder (or another signature): encode() is public
+        return encoder.encode
+    return lambda value: "".join(fast(value, 0))
+
+
+_dumps = _json_encoder()
+_dumps_sorted = _json_encoder(sort_keys=True, default=repr)
+
 DEFAULT_CANDIDATES = 50
 DEFAULT_EXHAUSTIVE_CAP = 200_000
 # Attempts to find the legal base row that fills the axes a pair does not depend on.
@@ -321,7 +351,7 @@ def _rendered(case):
     metadata = case["metadata"]
     graph = [case.get(k) for k in GRAPH_CASE_KEYS]
     graph.append({k: metadata[k] for k in GRAPH_METADATA_KEYS if k in metadata})
-    return json.dumps(graph, sort_keys=True, default=repr)
+    return _dumps_sorted(graph)
 
 
 class Liveness:
@@ -383,7 +413,7 @@ class Liveness:
         except SpaceError:
             raise _NoRow from None
         inputs = self.deps.case_inputs[axis]
-        seen = [json.dumps(env[n]) for n in inputs]
+        seen = [_dumps(env[n]) for n in inputs]
         base = None
         own = values[axis]
         for level in self.levels[axis]:
@@ -393,7 +423,7 @@ class Liveness:
                 alt = self._alternative(env, axis, level)
             except SpaceError:
                 continue  # no such row
-            if all(json.dumps(alt[n]) == v for n, v in zip(inputs, seen)):
+            if all(_dumps(alt[n]) == v for n, v in zip(inputs, seen)):
                 continue  # the case template reads the same values: the same case
             try:
                 if base is None:
@@ -439,7 +469,7 @@ class Liveness:
         pos = self.position[axis]
         key = (
             pos,
-            tuple(json.dumps(values[self.names[p]]) for p in self.support[pos]),
+            tuple(_dumps(values[self.names[p]]) for p in self.support[pos]),
         )
         hit = self._live_by_value.get(key)
         if hit is None:
@@ -535,9 +565,7 @@ def _group_value(group, env):
             return None
     elif guard is not None and not guard:
         return None
-    return json.dumps(
-        [part.expr.evaluate(env) for part in group.parts], sort_keys=True, default=repr
-    )
+    return _dumps_sorted([part.expr.evaluate(env) for part in group.parts])
 
 
 _UNKNOWN = object()

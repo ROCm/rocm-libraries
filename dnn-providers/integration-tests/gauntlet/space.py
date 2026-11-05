@@ -125,6 +125,9 @@ class _Expr:
             raise self._error(f"syntax error: {e.msg}") from None
         self._body = tree.body
         self._validate(self._body, known_names)
+        self._subtrees = {}
+        # compiled on the first evaluation: most expressions of a space never run
+        self._compiled = None
 
     def _error(self, message):
         return SpaceError(
@@ -194,8 +197,11 @@ class _Expr:
             raise self._error(f"{t.__name__} is not allowed")
 
     def evaluate(self, env):
+        run = self._compiled
+        if run is None:
+            run = self._compiled = self._compile(self._body)
         try:
-            return self._eval(self._body, env)
+            return run(env)
         except SpaceError:
             raise
         except (
@@ -208,51 +214,68 @@ class _Expr:
             raise self._error(f"evaluation failed: {type(e).__name__}: {e}") from None
 
     def _eval(self, node, env):
-        t = type(node)
-        if t is ast.Constant:
-            return node.value
-        if t is ast.Name:
-            return env[node.id]
-        if t is ast.List:
-            return [self._eval(e, env) for e in node.elts]
-        if t is ast.BinOp:
-            left = self._eval(node.left, env)
-            right = self._eval(node.right, env)
-            if (
-                isinstance(node.op, ast.Pow)
-                and isinstance(right, int)
-                and abs(right) > _MAX_EXPONENT
-            ):
-                raise self._error(f"exponent {right} exceeds {_MAX_EXPONENT}")
-            return _BINOPS[type(node.op)](left, right)
-        if t is ast.UnaryOp:
-            value = self._eval(node.operand, env)
-            if isinstance(node.op, ast.Not):
-                return not value
-            return _UNARYOPS[type(node.op)](value)
-        if t is ast.BoolOp:
-            is_and = isinstance(node.op, ast.And)
-            result = None
-            for v in node.values:
-                result = self._eval(v, env)
-                if bool(result) != is_and:
-                    return result
-            return result
-        if t is ast.Compare:
-            left = self._eval(node.left, env)
-            for op, comparator in zip(node.ops, node.comparators):
-                right = self._eval(comparator, env)
-                if not _CMPOPS[type(op)](left, right):
-                    return False
-                left = right
-            return True
-        if t is ast.IfExp:
-            branch = node.body if self._eval(node.test, env) else node.orelse
-            return self._eval(branch, env)
-        if t is ast.Subscript:
-            return self._eval(node.value, env)[self._eval(node.slice, env)]
-        # ast.Call: validated to a whitelisted function.
-        return _FUNCTIONS[node.func.id](*(self._eval(a, env) for a in node.args))
+        """The value of any subtree of a validated expression (the dependency analysis evaluates
+        the subtrees it finds fully known). Each subtree is compiled once."""
+        run = self._subtrees.get(node)
+        if run is None:
+            run = self._subtrees[node] = self._compile(node)
+        return run(env)
+
+    def _power(self, base, exponent):
+        if isinstance(exponent, int) and abs(exponent) > _MAX_EXPONENT:
+            raise self._error(f"exponent {exponent} exceeds {_MAX_EXPONENT}")
+        return base**exponent
+
+    def _compile(self, node):
+        """``node`` as a function of the environment: the validated tree lowered to Python code
+        once (a name is ``env[name]``, ``**`` is ``self._power``) instead of walked at every
+        evaluation. Python's own evaluation order, short circuits (``and`` / ``or`` / ``if`` /
+        chained comparisons) and operators are the ones the space language is defined by.
+        """
+        body = _Lowering().visit(copy.deepcopy(node))
+        code = ast.fix_missing_locations(
+            ast.Expression(
+                ast.Lambda(
+                    args=ast.arguments(
+                        posonlyargs=[],
+                        args=[ast.arg("env")],
+                        kwonlyargs=[],
+                        kw_defaults=[],
+                        defaults=[],
+                    ),
+                    body=body,
+                )
+            )
+        )
+        scope = {"__builtins__": {}, "_power": self._power, **_FUNCTIONS}
+        return eval(compile(code, f"<space expression {self.source!r}>", "eval"), scope)
+
+
+class _Lowering(ast.NodeTransformer):
+    """Rewrites a validated expression into code over the environment ``env``."""
+
+    def visit_Name(self, node):
+        return ast.Subscript(
+            value=ast.Name("env", ast.Load()),
+            slice=ast.Constant(node.id),
+            ctx=ast.Load(),
+        )
+
+    def visit_BinOp(self, node):
+        self.generic_visit(node)
+        if isinstance(node.op, ast.Pow):
+            return ast.Call(
+                func=ast.Name("_power", ast.Load()),
+                args=[node.left, node.right],
+                keywords=[],
+            )
+        return node
+
+    def visit_Call(self, node):
+        # the function is one of _FUNCTIONS, a global of the compiled code: only the arguments are
+        # lowered
+        node.args = [self.visit(a) for a in node.args]
+        return node
 
 
 class _Subst:
