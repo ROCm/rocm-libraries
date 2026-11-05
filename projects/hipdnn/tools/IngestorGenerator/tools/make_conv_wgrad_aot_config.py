@@ -575,13 +575,23 @@ def build_config(
                 if s.is_direct and s.direct_variant == variant_name
             ]
             if members:
-                variants.append(
-                    _fwd._variant(
-                        _DIRECT_VARIANT_NAMES[variant_name],
-                        spec_order(members[0]),
-                        members,
-                    )
+                variant = _fwd._variant(
+                    _DIRECT_VARIANT_NAMES[variant_name],
+                    spec_order(members[0]),
+                    members,
                 )
+                # A direct/helper spec's split_k is DIRECT_PLACEHOLDERS' -1 (the
+                # dataclass's own "auto" sentinel, never read back by
+                # to_identity() for a direct spec): correct and required for
+                # spec/validator agreement, but the KDP codegen tool reserves
+                # -1 globally as "descriptor incomplete" and refuses any kernel
+                # that ships it. Ship 1 in the catalog metadata instead -- an
+                # equally inert placeholder here, since nothing reads this
+                # metadata field back for a direct/helper instance either.
+                for shape in variant["shapes"]:
+                    if shape.get("split_k") == -1:
+                        shape["split_k"] = 1
+                variants.append(variant)
         packs.append(
             {
                 "name": shard,
