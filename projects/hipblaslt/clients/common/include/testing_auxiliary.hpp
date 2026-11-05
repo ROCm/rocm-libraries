@@ -26,6 +26,10 @@
 
 #pragma once
 
+#include <hipblaslt/hipblaslt.h>
+#include <hipblaslt/hipblaslt-ext-op.h>
+#include <hipblaslt/hipblaslt-ext.hpp> // Add check for hipblaslt-ext
+#include "hipblaslt_test.hpp"
 #include "flops.hpp"
 #include "hipblaslt_datatype2string.hpp"
 #include "hipblaslt_math.hpp"
@@ -570,10 +574,12 @@ void testing_aux_matmul_set_get_attr(const Arguments& arg)
 
     // for HIPBLASLT_MATMUL_DESC_A_INT4_ENCODING_EXT (w4a16 weight encoding)
     int32_t enc_r = -1;
-    EXPECT_HIPBLAS_STATUS(
-        hipblasLtMatmulDescGetAttribute(
-            matmul, HIPBLASLT_MATMUL_DESC_A_INT4_ENCODING_EXT, &enc_r, sizeof(enc_r), &sizeWritten),
-        HIPBLAS_STATUS_SUCCESS);
+    EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescGetAttribute(matmul,
+                                                          HIPBLASLT_MATMUL_DESC_A_INT4_ENCODING_EXT,
+                                                          &enc_r,
+                                                          sizeof(enc_r),
+                                                          &sizeWritten),
+                          HIPBLAS_STATUS_SUCCESS);
     ASSERT_TRUE(enc_r == HIPBLASLT_INT4_ENCODING_SIGNED_EXT); // default
     ASSERT_TRUE(sizeWritten == sizeof(int32_t));
 
@@ -585,19 +591,16 @@ void testing_aux_matmul_set_get_attr(const Arguments& arg)
             HIPBLAS_STATUS_SUCCESS);
         enc_r = -1;
         EXPECT_HIPBLAS_STATUS(
-            hipblasLtMatmulDescGetAttribute(matmul,
-                                            HIPBLASLT_MATMUL_DESC_A_INT4_ENCODING_EXT,
-                                            &enc_r,
-                                            sizeof(enc_r),
-                                            &sizeWritten),
+            hipblasLtMatmulDescGetAttribute(
+                matmul, HIPBLASLT_MATMUL_DESC_A_INT4_ENCODING_EXT, &enc_r, sizeof(enc_r), &sizeWritten),
             HIPBLAS_STATUS_SUCCESS);
         ASSERT_TRUE(enc_r == enc);
     }
 
     // Out of range and undersized buffers are rejected, and a rejected set
     // leaves the previously stored value alone.
-    const int32_t encLast  = HIPBLASLT_INT4_ENCODING_END_EXT - 1;
-    const int32_t encBad[] = {-1, HIPBLASLT_INT4_ENCODING_END_EXT, 99};
+    const int32_t encLast    = HIPBLASLT_INT4_ENCODING_END_EXT - 1;
+    const int32_t encBad[]   = {-1, HIPBLASLT_INT4_ENCODING_END_EXT, 99};
     for(int32_t bad : encBad)
     {
         EXPECT_HIPBLAS_STATUS(
@@ -606,10 +609,11 @@ void testing_aux_matmul_set_get_attr(const Arguments& arg)
             HIPBLAS_STATUS_INVALID_VALUE);
     }
     int8_t encTooSmall = 0;
-    EXPECT_HIPBLAS_STATUS(
-        hipblasLtMatmulDescSetAttribute(
-            matmul, HIPBLASLT_MATMUL_DESC_A_INT4_ENCODING_EXT, &encTooSmall, sizeof(encTooSmall)),
-        HIPBLAS_STATUS_INVALID_VALUE);
+    EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescSetAttribute(matmul,
+                                                          HIPBLASLT_MATMUL_DESC_A_INT4_ENCODING_EXT,
+                                                          &encTooSmall,
+                                                          sizeof(encTooSmall)),
+                          HIPBLAS_STATUS_INVALID_VALUE);
     enc_r = -1;
     EXPECT_HIPBLAS_STATUS(
         hipblasLtMatmulDescGetAttribute(
@@ -841,7 +845,9 @@ void testing_aux_matmul_set_get_attr(const Arguments& arg)
                                                           &sizeWritten),
                           HIPBLAS_STATUS_SUCCESS);
 
-    ASSERT_TRUE(scale_mode_a_r == HIPBLASLT_MATMUL_MATRIX_SCALE_VEC16_UE4M3); // validate round-trip
+    ASSERT_TRUE(
+        scale_mode_a_r
+        == HIPBLASLT_MATMUL_MATRIX_SCALE_VEC16_UE4M3); // validate round-trip
     ASSERT_TRUE(scale_mode_b_r == HIPBLASLT_MATMUL_MATRIX_SCALE_VEC16_UE4M3); // ditto
 
     // Round-trip every mode through the independent setter and getter mappings.
@@ -1347,24 +1353,29 @@ void testing_aux_matmul_sm_count_target(const Arguments& arg)
 
     // Default value must be 0 ("use all CUs the device exposes").
     int32_t value_r = -1;
-    EXPECT_HIPBLAS_STATUS(
-        hipblasLtMatmulDescGetAttribute(
-            matmul, HIPBLASLT_MATMUL_DESC_SM_COUNT_TARGET, &value_r, sizeof(value_r), &sizeWritten),
-        HIPBLAS_STATUS_SUCCESS);
+    EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescGetAttribute(matmul,
+                                                          HIPBLASLT_MATMUL_DESC_SM_COUNT_TARGET,
+                                                          &value_r,
+                                                          sizeof(value_r),
+                                                          &sizeWritten),
+                          HIPBLAS_STATUS_SUCCESS);
     ASSERT_TRUE(value_r == 0);
     ASSERT_TRUE(sizeWritten == sizeof(int32_t));
 
     // Round-trip set/get with a valid value.
     int32_t value_set = 80;
-    EXPECT_HIPBLAS_STATUS(
-        hipblasLtMatmulDescSetAttribute(
-            matmul, HIPBLASLT_MATMUL_DESC_SM_COUNT_TARGET, &value_set, sizeof(value_set)),
-        HIPBLAS_STATUS_SUCCESS);
+    EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescSetAttribute(matmul,
+                                                          HIPBLASLT_MATMUL_DESC_SM_COUNT_TARGET,
+                                                          &value_set,
+                                                          sizeof(value_set)),
+                          HIPBLAS_STATUS_SUCCESS);
     value_r = 0;
-    EXPECT_HIPBLAS_STATUS(
-        hipblasLtMatmulDescGetAttribute(
-            matmul, HIPBLASLT_MATMUL_DESC_SM_COUNT_TARGET, &value_r, sizeof(value_r), &sizeWritten),
-        HIPBLAS_STATUS_SUCCESS);
+    EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescGetAttribute(matmul,
+                                                          HIPBLASLT_MATMUL_DESC_SM_COUNT_TARGET,
+                                                          &value_r,
+                                                          sizeof(value_r),
+                                                          &sizeWritten),
+                          HIPBLAS_STATUS_SUCCESS);
     ASSERT_TRUE(value_r == value_set);
 
     // Setting back to 0 (the "use all CUs" sentinel) must be accepted.
@@ -1375,22 +1386,26 @@ void testing_aux_matmul_sm_count_target(const Arguments& arg)
 
     // Negative values must be rejected and must leave the stored value unchanged.
     int32_t negative = -5;
-    EXPECT_HIPBLAS_STATUS(
-        hipblasLtMatmulDescSetAttribute(
-            matmul, HIPBLASLT_MATMUL_DESC_SM_COUNT_TARGET, &negative, sizeof(negative)),
-        HIPBLAS_STATUS_INVALID_VALUE);
+    EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescSetAttribute(matmul,
+                                                          HIPBLASLT_MATMUL_DESC_SM_COUNT_TARGET,
+                                                          &negative,
+                                                          sizeof(negative)),
+                          HIPBLAS_STATUS_INVALID_VALUE);
     value_r = -1;
-    EXPECT_HIPBLAS_STATUS(
-        hipblasLtMatmulDescGetAttribute(
-            matmul, HIPBLASLT_MATMUL_DESC_SM_COUNT_TARGET, &value_r, sizeof(value_r), &sizeWritten),
-        HIPBLAS_STATUS_SUCCESS);
+    EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescGetAttribute(matmul,
+                                                          HIPBLASLT_MATMUL_DESC_SM_COUNT_TARGET,
+                                                          &value_r,
+                                                          sizeof(value_r),
+                                                          &sizeWritten),
+                          HIPBLAS_STATUS_SUCCESS);
     ASSERT_TRUE(value_r == 0); // unchanged (last successful set was 0)
 
     // Undersized buffer is INVALID_VALUE for both set and get.
-    EXPECT_HIPBLAS_STATUS(
-        hipblasLtMatmulDescSetAttribute(
-            matmul, HIPBLASLT_MATMUL_DESC_SM_COUNT_TARGET, &value_set, sizeof(int32_t) / 2),
-        HIPBLAS_STATUS_INVALID_VALUE);
+    EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescSetAttribute(matmul,
+                                                          HIPBLASLT_MATMUL_DESC_SM_COUNT_TARGET,
+                                                          &value_set,
+                                                          sizeof(int32_t) / 2),
+                          HIPBLAS_STATUS_INVALID_VALUE);
     EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescGetAttribute(matmul,
                                                           HIPBLASLT_MATMUL_DESC_SM_COUNT_TARGET,
                                                           &value_r,
@@ -1409,72 +1424,71 @@ void testing_aux_matmul_streamk_tile_scheduling_ext(const Arguments& arg)
 
     // Default is OFF (0); set sm_count_target > 0 to engage the heuristic.
     int32_t value_r = -1;
-    EXPECT_HIPBLAS_STATUS(
-        hipblasLtMatmulDescGetAttribute(matmul,
-                                        HIPBLASLT_MATMUL_DESC_STREAMK_TILE_SCHEDULING_EXT,
-                                        &value_r,
-                                        sizeof(value_r),
-                                        &sizeWritten),
-        HIPBLAS_STATUS_SUCCESS);
+    EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescGetAttribute(matmul,
+                                                          HIPBLASLT_MATMUL_DESC_STREAMK_TILE_SCHEDULING_EXT,
+                                                          &value_r,
+                                                          sizeof(value_r),
+                                                          &sizeWritten),
+                          HIPBLAS_STATUS_SUCCESS);
     ASSERT_TRUE(value_r == 0);
 
     // ON then OFF round-trip.
     int32_t enable = 1;
-    EXPECT_HIPBLAS_STATUS(
-        hipblasLtMatmulDescSetAttribute(
-            matmul, HIPBLASLT_MATMUL_DESC_STREAMK_TILE_SCHEDULING_EXT, &enable, sizeof(enable)),
-        HIPBLAS_STATUS_SUCCESS);
-    EXPECT_HIPBLAS_STATUS(
-        hipblasLtMatmulDescGetAttribute(matmul,
-                                        HIPBLASLT_MATMUL_DESC_STREAMK_TILE_SCHEDULING_EXT,
-                                        &value_r,
-                                        sizeof(value_r),
-                                        &sizeWritten),
-        HIPBLAS_STATUS_SUCCESS);
+    EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescSetAttribute(matmul,
+                                                          HIPBLASLT_MATMUL_DESC_STREAMK_TILE_SCHEDULING_EXT,
+                                                          &enable,
+                                                          sizeof(enable)),
+                          HIPBLAS_STATUS_SUCCESS);
+    EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescGetAttribute(matmul,
+                                                          HIPBLASLT_MATMUL_DESC_STREAMK_TILE_SCHEDULING_EXT,
+                                                          &value_r,
+                                                          sizeof(value_r),
+                                                          &sizeWritten),
+                          HIPBLAS_STATUS_SUCCESS);
     ASSERT_TRUE(value_r == 1);
 
     // AUTO (2) is also accepted and round-trips.
     int32_t auto_mode = 2;
-    EXPECT_HIPBLAS_STATUS(
-        hipblasLtMatmulDescSetAttribute(matmul,
-                                        HIPBLASLT_MATMUL_DESC_STREAMK_TILE_SCHEDULING_EXT,
-                                        &auto_mode,
-                                        sizeof(auto_mode)),
-        HIPBLAS_STATUS_SUCCESS);
-    EXPECT_HIPBLAS_STATUS(
-        hipblasLtMatmulDescGetAttribute(matmul,
-                                        HIPBLASLT_MATMUL_DESC_STREAMK_TILE_SCHEDULING_EXT,
-                                        &value_r,
-                                        sizeof(value_r),
-                                        &sizeWritten),
-        HIPBLAS_STATUS_SUCCESS);
+    EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescSetAttribute(matmul,
+                                                          HIPBLASLT_MATMUL_DESC_STREAMK_TILE_SCHEDULING_EXT,
+                                                          &auto_mode,
+                                                          sizeof(auto_mode)),
+                          HIPBLAS_STATUS_SUCCESS);
+    EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescGetAttribute(matmul,
+                                                          HIPBLASLT_MATMUL_DESC_STREAMK_TILE_SCHEDULING_EXT,
+                                                          &value_r,
+                                                          sizeof(value_r),
+                                                          &sizeWritten),
+                          HIPBLAS_STATUS_SUCCESS);
     ASSERT_TRUE(value_r == 2);
 
     // Values outside {0,1,2} are rejected with INVALID_VALUE (previously
     // any nonzero value was silently clamped to 1).
     int32_t three = 3;
-    EXPECT_HIPBLAS_STATUS(
-        hipblasLtMatmulDescSetAttribute(
-            matmul, HIPBLASLT_MATMUL_DESC_STREAMK_TILE_SCHEDULING_EXT, &three, sizeof(three)),
-        HIPBLAS_STATUS_INVALID_VALUE);
+    EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescSetAttribute(matmul,
+                                                          HIPBLASLT_MATMUL_DESC_STREAMK_TILE_SCHEDULING_EXT,
+                                                          &three,
+                                                          sizeof(three)),
+                          HIPBLAS_STATUS_INVALID_VALUE);
     int32_t negative = -1;
-    EXPECT_HIPBLAS_STATUS(
-        hipblasLtMatmulDescSetAttribute(
-            matmul, HIPBLASLT_MATMUL_DESC_STREAMK_TILE_SCHEDULING_EXT, &negative, sizeof(negative)),
-        HIPBLAS_STATUS_INVALID_VALUE);
+    EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescSetAttribute(matmul,
+                                                          HIPBLASLT_MATMUL_DESC_STREAMK_TILE_SCHEDULING_EXT,
+                                                          &negative,
+                                                          sizeof(negative)),
+                          HIPBLAS_STATUS_INVALID_VALUE);
 
     int32_t disable = 0;
-    EXPECT_HIPBLAS_STATUS(
-        hipblasLtMatmulDescSetAttribute(
-            matmul, HIPBLASLT_MATMUL_DESC_STREAMK_TILE_SCHEDULING_EXT, &disable, sizeof(disable)),
-        HIPBLAS_STATUS_SUCCESS);
-    EXPECT_HIPBLAS_STATUS(
-        hipblasLtMatmulDescGetAttribute(matmul,
-                                        HIPBLASLT_MATMUL_DESC_STREAMK_TILE_SCHEDULING_EXT,
-                                        &value_r,
-                                        sizeof(value_r),
-                                        &sizeWritten),
-        HIPBLAS_STATUS_SUCCESS);
+    EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescSetAttribute(matmul,
+                                                          HIPBLASLT_MATMUL_DESC_STREAMK_TILE_SCHEDULING_EXT,
+                                                          &disable,
+                                                          sizeof(disable)),
+                          HIPBLAS_STATUS_SUCCESS);
+    EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescGetAttribute(matmul,
+                                                          HIPBLASLT_MATMUL_DESC_STREAMK_TILE_SCHEDULING_EXT,
+                                                          &value_r,
+                                                          sizeof(value_r),
+                                                          &sizeWritten),
+                          HIPBLAS_STATUS_SUCCESS);
     ASSERT_TRUE(value_r == 0);
 
     CHECK_HIPBLASLT_ERROR(hipblasLtMatmulDescDestroy(matmul));
@@ -1623,45 +1637,51 @@ void testing_aux_matmul_pref_sm_count_target(const Arguments& arg)
     size_t  sizeWritten = 0;
 
     // Default value must be 0.
-    EXPECT_HIPBLAS_STATUS(
-        hipblasLtMatmulPreferenceGetAttribute(
-            pref, HIPBLASLT_MATMUL_PREF_SM_COUNT_TARGET, &value_r, sizeof(value_r), &sizeWritten),
-        HIPBLAS_STATUS_SUCCESS);
+    EXPECT_HIPBLAS_STATUS(hipblasLtMatmulPreferenceGetAttribute(pref,
+                                                                HIPBLASLT_MATMUL_PREF_SM_COUNT_TARGET,
+                                                                &value_r,
+                                                                sizeof(value_r),
+                                                                &sizeWritten),
+                          HIPBLAS_STATUS_SUCCESS);
     ASSERT_TRUE(value_r == 0);
     ASSERT_TRUE(sizeWritten == sizeof(int32_t));
 
     // Round-trip set/get.
     int32_t value_set = 132;
-    EXPECT_HIPBLAS_STATUS(
-        hipblasLtMatmulPreferenceSetAttribute(
-            pref, HIPBLASLT_MATMUL_PREF_SM_COUNT_TARGET, &value_set, sizeof(value_set)),
-        HIPBLAS_STATUS_SUCCESS);
+    EXPECT_HIPBLAS_STATUS(hipblasLtMatmulPreferenceSetAttribute(pref,
+                                                                HIPBLASLT_MATMUL_PREF_SM_COUNT_TARGET,
+                                                                &value_set,
+                                                                sizeof(value_set)),
+                          HIPBLAS_STATUS_SUCCESS);
     value_r = 0;
-    EXPECT_HIPBLAS_STATUS(
-        hipblasLtMatmulPreferenceGetAttribute(
-            pref, HIPBLASLT_MATMUL_PREF_SM_COUNT_TARGET, &value_r, sizeof(value_r), &sizeWritten),
-        HIPBLAS_STATUS_SUCCESS);
+    EXPECT_HIPBLAS_STATUS(hipblasLtMatmulPreferenceGetAttribute(pref,
+                                                                HIPBLASLT_MATMUL_PREF_SM_COUNT_TARGET,
+                                                                &value_r,
+                                                                sizeof(value_r),
+                                                                &sizeWritten),
+                          HIPBLAS_STATUS_SUCCESS);
     ASSERT_TRUE(value_r == value_set);
 
     // Negative values must be rejected.
     int32_t negative = -42;
-    EXPECT_HIPBLAS_STATUS(
-        hipblasLtMatmulPreferenceSetAttribute(
-            pref, HIPBLASLT_MATMUL_PREF_SM_COUNT_TARGET, &negative, sizeof(negative)),
-        HIPBLAS_STATUS_INVALID_VALUE);
+    EXPECT_HIPBLAS_STATUS(hipblasLtMatmulPreferenceSetAttribute(pref,
+                                                                HIPBLASLT_MATMUL_PREF_SM_COUNT_TARGET,
+                                                                &negative,
+                                                                sizeof(negative)),
+                          HIPBLAS_STATUS_INVALID_VALUE);
 
     // Undersized buffer is INVALID_VALUE for both setter and getter.
-    EXPECT_HIPBLAS_STATUS(
-        hipblasLtMatmulPreferenceSetAttribute(
-            pref, HIPBLASLT_MATMUL_PREF_SM_COUNT_TARGET, &value_set, sizeof(int32_t) / 2),
-        HIPBLAS_STATUS_INVALID_VALUE);
-    EXPECT_HIPBLAS_STATUS(
-        hipblasLtMatmulPreferenceGetAttribute(pref,
-                                              HIPBLASLT_MATMUL_PREF_SM_COUNT_TARGET,
-                                              &value_r,
-                                              sizeof(int32_t) / 2,
-                                              &sizeWritten),
-        HIPBLAS_STATUS_INVALID_VALUE);
+    EXPECT_HIPBLAS_STATUS(hipblasLtMatmulPreferenceSetAttribute(pref,
+                                                                HIPBLASLT_MATMUL_PREF_SM_COUNT_TARGET,
+                                                                &value_set,
+                                                                sizeof(int32_t) / 2),
+                          HIPBLAS_STATUS_INVALID_VALUE);
+    EXPECT_HIPBLAS_STATUS(hipblasLtMatmulPreferenceGetAttribute(pref,
+                                                                HIPBLASLT_MATMUL_PREF_SM_COUNT_TARGET,
+                                                                &value_r,
+                                                                sizeof(int32_t) / 2,
+                                                                &sizeWritten),
+                          HIPBLAS_STATUS_INVALID_VALUE);
 }
 
 void testing_aux_matmul_alg_init_bad_arg(const Arguments& arg) {}
@@ -2048,9 +2068,9 @@ void testing_aux_f16_alpha_null_a_b_ext(const Arguments& arg)
     const int64_t k           = arg.K[0];
     const int64_t batch_count = 1;
 
-    hipblasLtHalf            alpha_one(1.0f);
-    hipblasLtHalf            alpha_zero(0.0f);
-    hipblasLtHalf            beta(1.0f);
+    hipblasLtHalf alpha_one(1.0f);
+    hipblasLtHalf alpha_zero(0.0f);
+    hipblasLtHalf beta(1.0f);
     alignas(4) unsigned char zero_half_poison[4] = {0x00, 0x00, 0x00, 0x3c};
 
     hipblasLtHandle_t handle;
@@ -2062,7 +2082,7 @@ void testing_aux_f16_alpha_null_a_b_ext(const Arguments& arg)
     CHECK_HIP_ERROR(hipMalloc(&d_d, m * n * batch_count * sizeof(hipblasLtHalf)));
 
     auto set_problem = [&](const void* alpha) {
-        hipblaslt_ext::Gemm         gemm(handle,
+        hipblaslt_ext::Gemm gemm(handle,
                                  HIPBLAS_OP_N,
                                  HIPBLAS_OP_T,
                                  HIP_R_16F,
@@ -2113,7 +2133,7 @@ void testing_aux_c32_alpha_null_a_b_ext(const Arguments& arg)
     CHECK_HIP_ERROR(hipMalloc(&d_d, m * n * batch_count * sizeof(hipblaslt_complex_float)));
 
     auto set_problem = [&](const void* alpha) {
-        hipblaslt_ext::Gemm         gemm(handle,
+        hipblaslt_ext::Gemm gemm(handle,
                                  HIPBLAS_OP_N,
                                  HIPBLAS_OP_N,
                                  HIP_C_32F,
@@ -3103,9 +3123,9 @@ inline void testing_aux_rocblaslt_utility_func(const Arguments& arg)
     ASSERT_TRUE(
         std::string_view{hipDataType_to_bench_string(static_cast<hipDataType>(HIP_R_4F_E2M1))}
         == "f4_r");
-    ASSERT_TRUE(
-        std::string_view{hipDataType_to_bench_string(static_cast<hipDataType>(HIP_R_4F_E2M1 + 1))}
-        == "invalid");
+    ASSERT_TRUE(std::string_view{
+                    hipDataType_to_bench_string(static_cast<hipDataType>(HIP_R_4F_E2M1 + 1))}
+                == "invalid");
 
     // Test rocblaslt_compute_type_to_string
     ASSERT_TRUE(std::string_view{rocblaslt_compute_type_to_string(rocblaslt_compute_f16)}
@@ -4018,8 +4038,8 @@ inline void testing_aux_rocblaslt_rocroller_host_func(const Arguments& arg)
     bool                   gradient = false;
     rocblaslt_compute_type compute_type;
     rocblaslt_handle       roc_handle = (rocblaslt_handle)handle;
-    hipblasLtBatchMode_t   batchMode  = HIPBLASLT_BATCH_MODE_STRIDED;
-    rocblaslt_status       isValid    = rocblaslt_matmul_valid_args(matmul_descr,
+    hipblasLtBatchMode_t batchMode = HIPBLASLT_BATCH_MODE_STRIDED;
+    rocblaslt_status isValid = rocblaslt_matmul_valid_args(matmul_descr,
                                                            A,
                                                            B,
                                                            C,
@@ -4181,15 +4201,15 @@ inline void testing_aux_check_numerics_func(const Arguments& arg)
         unsetenv("HIPBLASLT_CHECK_NUMERICS_SCAN_FROM");
         unsetenv("HIPBLASLT_CHECK_NUMERICS_SCAN_UNTIL");
     };
-    auto with_env
-        = [](std::initializer_list<std::pair<const char*, const char*>> env, auto inspect) {
-              for(auto& kv : env)
-                  setenv(kv.first, kv.second, 1);
-              hipblasLtHandle_t h = nullptr;
-              EXPECT_HIPBLAS_STATUS(hipblasLtCreate(&h), HIPBLAS_STATUS_SUCCESS);
-              inspect((rocblaslt_handle)h);
-              EXPECT_HIPBLAS_STATUS(hipblasLtDestroy(h), HIPBLAS_STATUS_SUCCESS);
-          };
+    auto with_env = [](std::initializer_list<std::pair<const char*, const char*>> env,
+                       auto                                                       inspect) {
+        for(auto& kv : env)
+            setenv(kv.first, kv.second, 1);
+        hipblasLtHandle_t h = nullptr;
+        EXPECT_HIPBLAS_STATUS(hipblasLtCreate(&h), HIPBLAS_STATUS_SUCCESS);
+        inspect((rocblaslt_handle)h);
+        EXPECT_HIPBLAS_STATUS(hipblasLtDestroy(h), HIPBLAS_STATUS_SUCCESS);
+    };
 
     reset_env();
 
@@ -4268,13 +4288,15 @@ inline void testing_aux_check_numerics_func(const Arguments& arg)
         float*            d_buf = nullptr;
         ASSERT_EQ(hipMalloc(&d_buf, M * N * sizeof(float)), hipSuccess);
         std::vector<float> h_buf(M * N, std::numeric_limits<float>::quiet_NaN());
-        ASSERT_EQ(hipMemcpy(d_buf, h_buf.data(), M * N * sizeof(float), hipMemcpyHostToDevice),
+        ASSERT_EQ(hipMemcpy(d_buf, h_buf.data(),
+                            M * N * sizeof(float), hipMemcpyHostToDevice),
                   hipSuccess);
 
         const uint32_t call_id = hipblaslt_check_numerics_begin_call(rh);
         ASSERT_EQ(call_id, 1u);
-        ASSERT_TRUE(hipblaslt_check_numerics_scan_D(
-                        rh, nullptr, call_id, M, N, 1, HIP_R_32F, d_buf, M, M * N, false)
+        ASSERT_TRUE(hipblaslt_check_numerics_scan_D(rh, nullptr, call_id,
+                                                    M, N, 1, HIP_R_32F,
+                                                    d_buf, M, M * N, false)
                     == rocblaslt_status_success);
 
         uint32_t out = 0;
@@ -4294,30 +4316,31 @@ inline void testing_aux_check_numerics_func(const Arguments& arg)
     // we assert the device flag captures call_id 1. Catches a regression in
     // any single dtype's template instantiation that the f32 happy path
     // above would miss.
-    auto scan_one_with_nan = [&reset_env](hipDataType dt,
-                                          const void* host_buf,
-                                          size_t      elem_size,
-                                          uint32_t    expected_drain) {
-        reset_env();
-        setenv("HIPBLASLT_CHECK_NUMERICS", "1", 1);
-        hipblasLtHandle_t h = nullptr;
-        EXPECT_HIPBLAS_STATUS(hipblasLtCreate(&h), HIPBLAS_STATUS_SUCCESS);
-        rocblaslt_handle  rh = (rocblaslt_handle)h;
-        constexpr int64_t M = 4, N = 4;
-        void*             d_buf = nullptr;
-        ASSERT_EQ(hipMalloc(&d_buf, M * N * elem_size), hipSuccess);
-        ASSERT_EQ(hipMemcpy(d_buf, host_buf, M * N * elem_size, hipMemcpyHostToDevice), hipSuccess);
-        const uint32_t call_id = hipblaslt_check_numerics_begin_call(rh);
-        ASSERT_EQ(call_id, 1u);
-        ASSERT_TRUE(hipblaslt_check_numerics_scan_D(
-                        rh, nullptr, call_id, M, N, 1, dt, d_buf, M, M * N, false)
-                    == rocblaslt_status_success);
-        uint32_t out = 0;
-        EXPECT_HIPBLAS_STATUS(hipblasLtCheckNumericsDrain(h, &out), HIPBLAS_STATUS_SUCCESS);
-        ASSERT_EQ(out, expected_drain);
-        ASSERT_EQ(hipFree(d_buf), hipSuccess);
-        EXPECT_HIPBLAS_STATUS(hipblasLtDestroy(h), HIPBLAS_STATUS_SUCCESS);
-    };
+    auto scan_one_with_nan
+        = [&reset_env](hipDataType dt, const void* host_buf, size_t elem_size, uint32_t expected_drain) {
+              reset_env();
+              setenv("HIPBLASLT_CHECK_NUMERICS", "1", 1);
+              hipblasLtHandle_t h = nullptr;
+              EXPECT_HIPBLAS_STATUS(hipblasLtCreate(&h), HIPBLAS_STATUS_SUCCESS);
+              rocblaslt_handle  rh = (rocblaslt_handle)h;
+              constexpr int64_t M = 4, N = 4;
+              void*             d_buf = nullptr;
+              ASSERT_EQ(hipMalloc(&d_buf, M * N * elem_size), hipSuccess);
+              ASSERT_EQ(
+                  hipMemcpy(d_buf, host_buf, M * N * elem_size, hipMemcpyHostToDevice),
+                  hipSuccess);
+              const uint32_t call_id = hipblaslt_check_numerics_begin_call(rh);
+              ASSERT_EQ(call_id, 1u);
+              ASSERT_TRUE(hipblaslt_check_numerics_scan_D(
+                              rh, nullptr, call_id, M, N, 1, dt, d_buf, M, M * N, false)
+                          == rocblaslt_status_success);
+              uint32_t out = 0;
+              EXPECT_HIPBLAS_STATUS(hipblasLtCheckNumericsDrain(h, &out),
+                                    HIPBLAS_STATUS_SUCCESS);
+              ASSERT_EQ(out, expected_drain);
+              ASSERT_EQ(hipFree(d_buf), hipSuccess);
+              EXPECT_HIPBLAS_STATUS(hipblasLtDestroy(h), HIPBLAS_STATUS_SUCCESS);
+          };
 
     {
         std::vector<double> b(16, std::numeric_limits<double>::quiet_NaN());
@@ -4329,7 +4352,8 @@ inline void testing_aux_check_numerics_func(const Arguments& arg)
     }
     {
         // f32 quiet NaN truncates to bf16 0x7FC0 (exp=0xFF, mantissa nonzero) -- still NaN.
-        std::vector<hip_bfloat16> b(16, hip_bfloat16(std::numeric_limits<float>::quiet_NaN()));
+        std::vector<hip_bfloat16> b(16,
+                                    hip_bfloat16(std::numeric_limits<float>::quiet_NaN()));
         scan_one_with_nan(HIP_R_16BF, b.data(), sizeof(hip_bfloat16), 1u);
     }
     {
@@ -4374,11 +4398,12 @@ inline void testing_aux_check_numerics_func(const Arguments& arg)
         std::vector<int8_t> h_buf(M * N, static_cast<int8_t>(0xFF));
         int8_t*             d_buf = nullptr;
         ASSERT_EQ(hipMalloc(&d_buf, M * N * sizeof(int8_t)), hipSuccess);
-        ASSERT_EQ(hipMemcpy(d_buf, h_buf.data(), M * N * sizeof(int8_t), hipMemcpyHostToDevice),
-                  hipSuccess);
+        ASSERT_EQ(
+            hipMemcpy(d_buf, h_buf.data(), M * N * sizeof(int8_t), hipMemcpyHostToDevice),
+            hipSuccess);
         const uint32_t call_id = hipblaslt_check_numerics_begin_call(rh);
-        ASSERT_TRUE(hipblaslt_check_numerics_scan_D(
-                        rh, nullptr, call_id, M, N, 1, HIP_R_8I, d_buf, M, M * N, false)
+        ASSERT_TRUE(hipblaslt_check_numerics_scan_D(rh, nullptr, call_id, M, N, 1, HIP_R_8I,
+                                                    d_buf, M, M * N, false)
                     == rocblaslt_status_success);
         uint32_t out = 99;
         EXPECT_HIPBLAS_STATUS(hipblasLtCheckNumericsDrain(h, &out), HIPBLAS_STATUS_SUCCESS);
@@ -4404,12 +4429,13 @@ inline void testing_aux_check_numerics_func(const Arguments& arg)
         float*            d_buf = nullptr;
         ASSERT_EQ(hipMalloc(&d_buf, M * N * sizeof(float)), hipSuccess);
         std::vector<float> h_buf(M * N, std::numeric_limits<float>::quiet_NaN());
-        ASSERT_EQ(hipMemcpy(d_buf, h_buf.data(), M * N * sizeof(float), hipMemcpyHostToDevice),
+        ASSERT_EQ(hipMemcpy(d_buf, h_buf.data(), M * N * sizeof(float),
+                            hipMemcpyHostToDevice),
                   hipSuccess);
 
         const uint32_t cid = hipblaslt_check_numerics_begin_call(rh);
-        ASSERT_TRUE(hipblaslt_check_numerics_scan_D(
-                        rh, nullptr, cid, M, N, 1, HIP_R_32F, d_buf, M, M * N, false)
+        ASSERT_TRUE(hipblaslt_check_numerics_scan_D(rh, nullptr, cid, M, N, 1, HIP_R_32F,
+                                                    d_buf, M, M * N, false)
                     == rocblaslt_status_success);
         uint32_t out = 0;
         EXPECT_HIPBLAS_STATUS(hipblasLtCheckNumericsDrain(h, &out), HIPBLAS_STATUS_SUCCESS);
@@ -4417,8 +4443,8 @@ inline void testing_aux_check_numerics_func(const Arguments& arg)
         // After the sticky drain, short_circuit is set so further scans bail.
         ASSERT_TRUE(rh->check_numerics_short_circuit.load());
         const uint32_t cid2 = hipblaslt_check_numerics_begin_call(rh);
-        ASSERT_TRUE(hipblaslt_check_numerics_scan_D(
-                        rh, nullptr, cid2, M, N, 1, HIP_R_32F, d_buf, M, M * N, false)
+        ASSERT_TRUE(hipblaslt_check_numerics_scan_D(rh, nullptr, cid2, M, N, 1, HIP_R_32F,
+                                                    d_buf, M, M * N, false)
                     == rocblaslt_status_success);
         // Re-drain returns the same id (device flag was not memset).
         out = 0;
@@ -4445,14 +4471,15 @@ inline void testing_aux_check_numerics_func(const Arguments& arg)
         float*            d_buf = nullptr;
         ASSERT_EQ(hipMalloc(&d_buf, M * N * sizeof(float)), hipSuccess);
         std::vector<float> h_buf(M * N, std::numeric_limits<float>::quiet_NaN());
-        ASSERT_EQ(hipMemcpy(d_buf, h_buf.data(), M * N * sizeof(float), hipMemcpyHostToDevice),
+        ASSERT_EQ(hipMemcpy(d_buf, h_buf.data(), M * N * sizeof(float),
+                            hipMemcpyHostToDevice),
                   hipSuccess);
 
         for(int i = 0; i < 5; ++i)
         {
             const uint32_t cid = hipblaslt_check_numerics_begin_call(rh);
-            ASSERT_TRUE(hipblaslt_check_numerics_scan_D(
-                            rh, nullptr, cid, M, N, 1, HIP_R_32F, d_buf, M, M * N, false)
+            ASSERT_TRUE(hipblaslt_check_numerics_scan_D(rh, nullptr, cid, M, N, 1, HIP_R_32F,
+                                                        d_buf, M, M * N, false)
                         == rocblaslt_status_success);
         }
         uint32_t out = 0;
@@ -4481,14 +4508,15 @@ inline void testing_aux_check_numerics_func(const Arguments& arg)
         float*            d_buf = nullptr;
         ASSERT_EQ(hipMalloc(&d_buf, M * N * sizeof(float)), hipSuccess);
         std::vector<float> h_buf(M * N, std::numeric_limits<float>::quiet_NaN());
-        ASSERT_EQ(hipMemcpy(d_buf, h_buf.data(), M * N * sizeof(float), hipMemcpyHostToDevice),
+        ASSERT_EQ(hipMemcpy(d_buf, h_buf.data(), M * N * sizeof(float),
+                            hipMemcpyHostToDevice),
                   hipSuccess);
 
         for(int i = 0; i < 5; ++i)
         {
             const uint32_t cid = hipblaslt_check_numerics_begin_call(rh);
-            ASSERT_TRUE(hipblaslt_check_numerics_scan_D(
-                            rh, nullptr, cid, M, N, 1, HIP_R_32F, d_buf, M, M * N, false)
+            ASSERT_TRUE(hipblaslt_check_numerics_scan_D(rh, nullptr, cid, M, N, 1, HIP_R_32F,
+                                                        d_buf, M, M * N, false)
                         == rocblaslt_status_success);
         }
         uint32_t out = 0;
