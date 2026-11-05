@@ -64,6 +64,7 @@ BenchmarkProblems:
             macrotile: [16, 16, 128]
             threads: [64, 1, 1]
             grid: [TilesX, TilesY, Batch]
+            uniformSummationOrder: true
         - MatrixInstruction:
           - [16, 16, 128, 1]
         - PreloadKernArgs: [False]
@@ -148,6 +149,7 @@ BenchmarkProblems:
             macrotile: [256, 128, 128]
             threads: [256, 1, 1]
             grid: [TilesX, TilesY, Batch]
+            uniformSummationOrder: true
         - MatrixInstruction:
           - [16, 16, 128, 1]
         - PreloadKernArgs: [False]
@@ -243,6 +245,7 @@ BenchmarkProblems:
             macrotile: [256, 256, 128]
             threads: [256, 1, 1]
             grid: [TilesXY, One, Batch]
+            uniformSummationOrder: true
         - MatrixInstruction:
           - [16, 16, 128, 1]
         - PreloadKernArgs: [False]
@@ -327,6 +330,7 @@ BenchmarkProblems:
             macrotile: [32, 32, 64]
             threads: [64, 1, 1]
             grid: [TilesX, TilesY, Batch]
+            uniformSummationOrder: true
         - MatrixInstruction:
           - [32, 32, 64, 1]
         - PreloadKernArgs: [False]
@@ -411,6 +415,7 @@ BenchmarkProblems:
             macrotile: [16, 16, 128]
             threads: [64, 1, 1]
             grid: [TilesX, TilesY, Batch]
+            uniformSummationOrder: true
         - MatrixInstruction:
           - [16, 16, 128, 1]
         - PreloadKernArgs: [False]
@@ -495,6 +500,7 @@ BenchmarkProblems:
             macrotile: [256, 128, 128]
             threads: [256, 1, 1]
             grid: [TilesX, TilesY, Batch]
+            uniformSummationOrder: true
         - MatrixInstruction:
           - [16, 16, 128, 1]
         - PreloadKernArgs: [False]
@@ -590,6 +596,7 @@ BenchmarkProblems:
             macrotile: [256, 256, 128]
             threads: [256, 1, 1]
             grid: [TilesXY, One, Batch]
+            uniformSummationOrder: true
         - MatrixInstruction:
           - [16, 16, 128, 1]
         - PreloadKernArgs: [False]
@@ -674,6 +681,7 @@ BenchmarkProblems:
             macrotile: [32, 32, 64]
             threads: [64, 1, 1]
             grid: [TilesX, TilesY, Batch]
+            uniformSummationOrder: true
         - MatrixInstruction:
           - [32, 32, 64, 1]
         - PreloadKernArgs: [False]
@@ -758,6 +766,7 @@ BenchmarkProblems:
             macrotile: [16, 16, 128]
             threads: [64, 1, 1]
             grid: [TilesX, TilesY, Batch]
+            uniformSummationOrder: true
         - MatrixInstruction:
           - [16, 16, 128, 1]
         - PreloadKernArgs: [False]
@@ -842,6 +851,7 @@ BenchmarkProblems:
             macrotile: [256, 128, 128]
             threads: [256, 1, 1]
             grid: [TilesX, TilesY, Batch]
+            uniformSummationOrder: true
         - MatrixInstruction:
           - [16, 16, 128, 1]
         - PreloadKernArgs: [False]
@@ -937,6 +947,7 @@ BenchmarkProblems:
             macrotile: [256, 256, 128]
             threads: [256, 1, 1]
             grid: [TilesXY, One, Batch]
+            uniformSummationOrder: true
         - MatrixInstruction:
           - [16, 16, 128, 1]
         - PreloadKernArgs: [False]
@@ -1021,6 +1032,7 @@ BenchmarkProblems:
             macrotile: [32, 32, 64]
             threads: [64, 1, 1]
             grid: [TilesX, TilesY, Batch]
+            uniformSummationOrder: true
         - MatrixInstruction:
           - [32, 32, 64, 1]
         - PreloadKernArgs: [False]
@@ -1105,6 +1117,7 @@ BenchmarkProblems:
             macrotile: [16, 16, 128]
             threads: [64, 1, 1]
             grid: [TilesX, TilesY, Batch]
+            uniformSummationOrder: true
         - MatrixInstruction:
           - [16, 16, 128, 1]
         - PreloadKernArgs: [False]
@@ -1189,6 +1202,7 @@ BenchmarkProblems:
             macrotile: [256, 128, 128]
             threads: [256, 1, 1]
             grid: [TilesX, TilesY, Batch]
+            uniformSummationOrder: true
         - MatrixInstruction:
           - [16, 16, 128, 1]
         - PreloadKernArgs: [False]
@@ -1284,6 +1298,7 @@ BenchmarkProblems:
             macrotile: [256, 256, 128]
             threads: [256, 1, 1]
             grid: [TilesXY, One, Batch]
+            uniformSummationOrder: true
         - MatrixInstruction:
           - [16, 16, 128, 1]
         - PreloadKernArgs: [False]
@@ -1379,6 +1394,7 @@ BenchmarkProblems:
             macrotile: [32, 32, 128]
             threads: [256, 1, 1]
             grid: [TilesXY, One, Batch]
+            uniformSummationOrder: true
         - MatrixInstruction:
           - [16, 16, 128, 1]
         - PreloadKernArgs: [False]
@@ -1463,6 +1479,7 @@ BenchmarkProblems:
             macrotile: [32, 32, 64]
             threads: [64, 1, 1]
             grid: [TilesX, TilesY, Batch]
+            uniformSummationOrder: true
         - MatrixInstruction:
           - [32, 32, 64, 1]
         - PreloadKernArgs: [False]
@@ -1547,6 +1564,7 @@ BenchmarkProblems:
             macrotile: [16, 16, 128]
             threads: [64, 1, 1]
             grid: [TilesX, TilesY, Batch]
+            uniformSummationOrder: true
         - MatrixInstruction:
           - [16, 16, 128, 1]
         - PreloadKernArgs: [False]
@@ -1631,6 +1649,7 @@ BenchmarkProblems:
             macrotile: [256, 128, 128]
             threads: [256, 1, 1]
             grid: [TilesX, TilesY, Batch]
+            uniformSummationOrder: true
         - MatrixInstruction:
           - [16, 16, 128, 1]
         - PreloadKernArgs: [False]
@@ -1726,6 +1745,7 @@ BenchmarkProblems:
             macrotile: [256, 256, 128]
             threads: [256, 1, 1]
             grid: [TilesXY, One, Batch]
+            uniformSummationOrder: true
         - MatrixInstruction:
           - [16, 16, 128, 1]
         - PreloadKernArgs: [False]
@@ -1821,6 +1841,7 @@ BenchmarkProblems:
             macrotile: [32, 32, 128]
             threads: [256, 1, 1]
             grid: [TilesXY, One, Batch]
+            uniformSummationOrder: true
         - MatrixInstruction:
           - [16, 16, 128, 1]
         - PreloadKernArgs: [False]
@@ -1905,6 +1926,7 @@ BenchmarkProblems:
             macrotile: [32, 32, 64]
             threads: [64, 1, 1]
             grid: [TilesX, TilesY, Batch]
+            uniformSummationOrder: true
         - MatrixInstruction:
           - [32, 32, 64, 1]
         - PreloadKernArgs: [False]
@@ -1989,6 +2011,7 @@ BenchmarkProblems:
             macrotile: [16, 16, 128]
             threads: [64, 1, 1]
             grid: [TilesX, TilesY, Batch]
+            uniformSummationOrder: true
         - MatrixInstruction:
           - [16, 16, 128, 1]
         - PreloadKernArgs: [False]
@@ -2073,6 +2096,7 @@ BenchmarkProblems:
             macrotile: [256, 128, 128]
             threads: [256, 1, 1]
             grid: [TilesX, TilesY, Batch]
+            uniformSummationOrder: true
         - MatrixInstruction:
           - [16, 16, 128, 1]
         - PreloadKernArgs: [False]
@@ -2168,6 +2192,7 @@ BenchmarkProblems:
             macrotile: [256, 256, 128]
             threads: [256, 1, 1]
             grid: [TilesXY, One, Batch]
+            uniformSummationOrder: true
         - MatrixInstruction:
           - [16, 16, 128, 1]
         - PreloadKernArgs: [False]
@@ -2263,6 +2288,7 @@ BenchmarkProblems:
             macrotile: [32, 32, 128]
             threads: [256, 1, 1]
             grid: [TilesXY, One, Batch]
+            uniformSummationOrder: true
         - MatrixInstruction:
           - [16, 16, 128, 1]
         - PreloadKernArgs: [False]
@@ -2347,6 +2373,7 @@ BenchmarkProblems:
             macrotile: [32, 32, 64]
             threads: [64, 1, 1]
             grid: [TilesX, TilesY, Batch]
+            uniformSummationOrder: true
         - MatrixInstruction:
           - [32, 32, 64, 1]
         - PreloadKernArgs: [False]
@@ -2431,6 +2458,7 @@ BenchmarkProblems:
             macrotile: [16, 16, 128]
             threads: [64, 1, 1]
             grid: [TilesX, TilesY, Batch]
+            uniformSummationOrder: true
         - MatrixInstruction:
           - [16, 16, 128, 1]
         - PreloadKernArgs: [False]
@@ -2515,6 +2543,7 @@ BenchmarkProblems:
             macrotile: [256, 128, 128]
             threads: [256, 1, 1]
             grid: [TilesX, TilesY, Batch]
+            uniformSummationOrder: true
         - MatrixInstruction:
           - [16, 16, 128, 1]
         - PreloadKernArgs: [False]
@@ -2610,6 +2639,7 @@ BenchmarkProblems:
             macrotile: [256, 256, 128]
             threads: [256, 1, 1]
             grid: [TilesXY, One, Batch]
+            uniformSummationOrder: true
         - MatrixInstruction:
           - [16, 16, 128, 1]
         - PreloadKernArgs: [False]
@@ -2694,6 +2724,7 @@ BenchmarkProblems:
             macrotile: [32, 32, 64]
             threads: [64, 1, 1]
             grid: [TilesX, TilesY, Batch]
+            uniformSummationOrder: true
         - MatrixInstruction:
           - [32, 32, 64, 1]
         - PreloadKernArgs: [False]
@@ -2778,6 +2809,7 @@ BenchmarkProblems:
             macrotile: [16, 16, 128]
             threads: [64, 1, 1]
             grid: [TilesX, TilesY, Batch]
+            uniformSummationOrder: true
         - MatrixInstruction:
           - [16, 16, 128, 1]
         - PreloadKernArgs: [False]
@@ -2862,6 +2894,7 @@ BenchmarkProblems:
             macrotile: [256, 128, 128]
             threads: [256, 1, 1]
             grid: [TilesX, TilesY, Batch]
+            uniformSummationOrder: true
         - MatrixInstruction:
           - [16, 16, 128, 1]
         - PreloadKernArgs: [False]
@@ -2957,6 +2990,7 @@ BenchmarkProblems:
             macrotile: [256, 256, 128]
             threads: [256, 1, 1]
             grid: [TilesXY, One, Batch]
+            uniformSummationOrder: true
         - MatrixInstruction:
           - [16, 16, 128, 1]
         - PreloadKernArgs: [False]
@@ -3041,6 +3075,7 @@ BenchmarkProblems:
             macrotile: [32, 32, 64]
             threads: [64, 1, 1]
             grid: [TilesX, TilesY, Batch]
+            uniformSummationOrder: true
         - MatrixInstruction:
           - [32, 32, 64, 1]
         - PreloadKernArgs: [False]
@@ -3125,6 +3160,7 @@ BenchmarkProblems:
             macrotile: [16, 16, 128]
             threads: [64, 1, 1]
             grid: [TilesX, TilesY, Batch]
+            uniformSummationOrder: true
         - MatrixInstruction:
           - [16, 16, 128, 1]
         - PreloadKernArgs: [False]
@@ -3209,6 +3245,7 @@ BenchmarkProblems:
             macrotile: [256, 128, 128]
             threads: [256, 1, 1]
             grid: [TilesX, TilesY, Batch]
+            uniformSummationOrder: true
         - MatrixInstruction:
           - [16, 16, 128, 1]
         - PreloadKernArgs: [False]
@@ -3304,6 +3341,7 @@ BenchmarkProblems:
             macrotile: [256, 256, 128]
             threads: [256, 1, 1]
             grid: [TilesXY, One, Batch]
+            uniformSummationOrder: true
         - MatrixInstruction:
           - [16, 16, 128, 1]
         - PreloadKernArgs: [False]
@@ -3388,6 +3426,7 @@ BenchmarkProblems:
             macrotile: [32, 32, 64]
             threads: [64, 1, 1]
             grid: [TilesX, TilesY, Batch]
+            uniformSummationOrder: true
         - MatrixInstruction:
           - [32, 32, 64, 1]
         - PreloadKernArgs: [False]
