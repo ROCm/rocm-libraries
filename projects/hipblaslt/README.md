@@ -247,7 +247,7 @@ inv build --architecture gfx1100 --clean
 * `HIPBLASLT_ENABLE_BLIS`: Enable BLIS support (default `ON`)
 * `HIPBLASLT_ENABLE_HIP`: Use the HIP runtime (default `ON`)
 * `HIPBLASLT_ENABLE_YAML`: Use YAML for serializing and parsing configuration files; if `OFF` msgpack will be used (default `OFF`)
-* `HIPBLASLT_ENABLE_OPENMP`: "Use OpenMP to improve performance (default `ON`)
+* `HIPBLASLT_ENABLE_OPENMP`: Enable OpenMP support (default `ON`). The hipBLASLt and TensileLite clients and their tests require OpenMP; keep this option `ON` when building them standalone on Linux.
 * `HIPBLASLT_ENABLE_ROCROLLER:` Use RocRoller library (default `OFF`)
 * `GPU_TARGETS:` Semicolon separated list of gfx targets to build
 
