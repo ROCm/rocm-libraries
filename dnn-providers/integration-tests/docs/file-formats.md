@@ -509,17 +509,20 @@ harness checks claims during a run, and every verdict that a run can report.
 [Support Claim Enforcement](support-claim-enforcement.md) describes the harness
 lifecycle behind it.
 
-## Per-engine test config — `config/<ENGINE_NAME>.toml`
+## Engine test config — `config/<ENGINE_NAME>.toml`
 
-Each provider owns one TOML file for each engine. The file is passed to the
-binary as `--test-config` (CTest lanes pass it for you). It changes how the
-harness tests *that engine*. You do not recompile or change the bundles.
+Each provider owns one TOML file for each engine, or for each engine family:
+engines of one family may share a single file (hip-kernel-provider's gfx950
+attention engines all use `config/hipkernel_Gfx950Attention.toml`). The file is
+passed to the binary as `--test-config` (CTest lanes pass it for you). It
+changes how the harness tests the engines it covers. You do not recompile or
+change the bundles.
 
 | Provider | Files |
 |---|---|
 | miopen-provider | `config/MIOPEN_ENGINE.toml` |
 | hipblaslt-provider | `config/HIPBLASLT_ENGINE.toml` |
-| hip-kernel-provider | `config/HIP_MLOPS_ENGINE.toml`, `config/ASM_SDPA_ENGINE.toml` |
+| hip-kernel-provider | `config/HIP_MLOPS_ENGINE.toml`, `config/ASM_SDPA_ENGINE.toml`, `config/hipkernel_Gfx950Attention.toml` (shared by the gfx950 attention family) |
 
 ```toml
 [meta]
