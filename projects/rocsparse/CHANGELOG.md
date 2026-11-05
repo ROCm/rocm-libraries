@@ -6,7 +6,7 @@ Documentation for rocSPARSE is available at
 ## (Unreleased) rocSPARSE 5.3.0
 
 ### Changed
-* `rocsparse_sptrsv` solves a CSC matrix without transpose directly on its columns, instead of building the transposed structure during the analysis and gathering the matrix values at every solve. The analysis is a single pass over the matrix and needs much less memory. Results of these solves are not bitwise reproducible because the solve uses atomic additions, and their analysis is kept in the SpTRSV descriptor instead of being shared through the matrix info with `rocsparse_analysis_policy_reuse`.
+* `rocsparse_sptrsv` and `rocsparse_spsv` solve a CSC matrix without transpose directly on its columns, instead of building the transposed structure during the analysis and gathering the matrix values at every solve. The analysis is a single pass over the matrix and needs much less memory. Results of these solves are not bitwise reproducible because the solve uses atomic additions. With `rocsparse_sptrsv`, their analysis is kept in the SpTRSV descriptor instead of being shared through the matrix info with `rocsparse_analysis_policy_reuse`.
 * The incomplete factorization kernels used by `rocsparse_spic0`, `rocsparse_spilu0`, and `rocsparse_spildlt0` (`csric0`, `csrilu0`, `csrildlt0`, `bsric0`, and `bsrilu0`) now clamp the batch dimension of their launch grids to the device limit and cover the remaining batch instances with a grid-stride loop. The singularity-position initialization grid-strides as well, so these routines support batch counts above the grid limit.
 
 ### Resolved issues

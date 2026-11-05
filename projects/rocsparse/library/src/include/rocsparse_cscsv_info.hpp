@@ -25,16 +25,23 @@
 #pragma once
 
 #include "rocsparse_control.hpp"
+#include "rocsparse_csrsv_info.hpp"
+#include "rocsparse_indextype_utils.hpp"
 #include "rocsparse_singular_info_t.hpp"
 #include "rocsparse_trm_data_t.hpp"
 
-// Analysis of the CSC column triangular solve, stored under rocsparse_operation_none.
+#include <memory>
+
+// Analysis of the CSC triangular solve. The CSC solve without transpose stores its analysis
+// here under rocsparse_operation_none; the other operations use the transposed CSR analysis.
 struct _rocsparse_cscsv_info : rocsparse::trm_data_t
 {
 protected:
     rocsparse::singular_info_t m_singularity_numeric_exact{};
-    // Number of unknowns each unknown depends on.
-    void* m_dependency_count{nullptr};
+    // Number of unknowns each unknown depends on, per fill mode.
+    void* m_dependency_count[2]{};
+    // Transposed CSR analysis, shared with the matrix info with rocsparse_analysis_policy_reuse.
+    std::shared_ptr<_rocsparse_csrsv_info> m_csrsv_info;
 
 public:
     _rocsparse_cscsv_info()                             = default;
@@ -43,22 +50,33 @@ public:
 
     ~_rocsparse_cscsv_info()
     {
-        WARNING_IF_HIP_ERROR(rocsparse_hipFree(this->m_dependency_count));
+        for(auto& p : this->m_dependency_count)
+        {
+            WARNING_IF_HIP_ERROR(rocsparse_hipFree(p));
+        }
     }
 
-    const void* get_dependency_count() const
+    // Copies the CSC analysis of that; the transposed analysis is linked by the caller.
+    void copy(const _rocsparse_cscsv_info* that, hipStream_t stream)
     {
-        return this->m_dependency_count;
-    }
-
-    void* get_dependency_count()
-    {
-        return this->m_dependency_count;
-    }
-
-    void** get_ref_dependency_count()
-    {
-        return &this->m_dependency_count;
+        this->trm_data_t::copy(that, stream);
+        for(int f = 0; f < 2; ++f)
+        {
+            const rocsparse_fill_mode fill_mode
+                = (f == 0) ? rocsparse_fill_mode_lower : rocsparse_fill_mode_upper;
+            const rocsparse::trm_info_t* trm = that->get(rocsparse_operation_none, fill_mode);
+            if(that->m_dependency_count[f] != nullptr && trm != nullptr)
+            {
+                const size_t size
+                    = rocsparse::indextype_sizeof(trm->get_index_indextype()) * trm->get_m();
+                WARNING_IF_HIP_ERROR(rocsparse_hipFree(this->m_dependency_count[f]));
+                THROW_IF_HIP_ERROR(rocsparse_hipMalloc(&this->m_dependency_count[f], size));
+                THROW_IF_HIP_ERROR(rocsparse_hipMemcpy(this->m_dependency_count[f],
+                                                       that->m_dependency_count[f],
+                                                       size,
+                                                       hipMemcpyDeviceToDevice));
+            }
+        }
     }
 
     rocsparse::singular_info_t* get_singularity_numeric_exact()
@@ -72,6 +90,50 @@ public:
     {
         THROW_IF_ROCSPARSE_ERROR(this->m_singularity_numeric_exact.create_singular_pivot_async(
             batch_count, indextype, stream));
+    }
+
+    const void* get_dependency_count(rocsparse_fill_mode fill_mode) const
+    {
+        return this->m_dependency_count[fill_mode == rocsparse_fill_mode_upper];
+    }
+
+    void* get_dependency_count(rocsparse_fill_mode fill_mode)
+    {
+        return this->m_dependency_count[fill_mode == rocsparse_fill_mode_upper];
+    }
+
+    void** get_ref_dependency_count(rocsparse_fill_mode fill_mode)
+    {
+        return &this->m_dependency_count[fill_mode == rocsparse_fill_mode_upper];
+    }
+
+    rocsparse_csrsv_info get_csrsv_info()
+    {
+        return this->m_csrsv_info.get();
+    }
+
+    void set_csrsv_info(rocsparse_csrsv_info value)
+    {
+        this->m_csrsv_info = std::shared_ptr<_rocsparse_csrsv_info>(value);
+    }
+
+    void set_shared_csrsv_info(std::shared_ptr<_rocsparse_csrsv_info> value)
+    {
+        this->m_csrsv_info = value;
+    }
+
+    // Pivots of the analysis that was performed, CSC or transposed.
+    rocsparse::pivot_info_t* get_symbolic_pivot()
+    {
+        return (this->m_csrsv_info != nullptr)
+                   ? static_cast<rocsparse::pivot_info_t*>(this->m_csrsv_info.get())
+                   : static_cast<rocsparse::pivot_info_t*>(this);
+    }
+
+    rocsparse::singular_info_t* get_exact_pivot()
+    {
+        return (this->m_csrsv_info != nullptr) ? this->m_csrsv_info->get_singularity_numeric_exact()
+                                               : &this->m_singularity_numeric_exact;
     }
 };
 typedef _rocsparse_cscsv_info* rocsparse_cscsv_info;
