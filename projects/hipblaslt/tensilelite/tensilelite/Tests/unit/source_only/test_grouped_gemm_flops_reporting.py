@@ -31,7 +31,7 @@ import pytest
 
 pytestmark = pytest.mark.unit
 
-_REPO_ROOT = Path(__file__).resolve().parents[3]
+_REPO_ROOT = Path(__file__).resolve().parents[4]
 _BENCHMARK_TIMER_PATH = _REPO_ROOT / "client" / "src" / "BenchmarkTimer.cpp"
 _PROGRESS_LISTENER_PATH = _REPO_ROOT / "client" / "src" / "ProgressListener.cpp"
 
