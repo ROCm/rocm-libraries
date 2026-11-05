@@ -1382,8 +1382,3 @@ catch(const std::exception& exp)
     hipblaslt_cerr << exp.what() << std::endl;
     return -1;
 }
-catch(const std::runtime_error& exp)
-{
-    hipblaslt_cerr << exp.what() << std::endl;
-    return -1;
-}
