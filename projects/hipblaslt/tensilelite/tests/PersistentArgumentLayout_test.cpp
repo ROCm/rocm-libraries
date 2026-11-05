@@ -589,7 +589,7 @@ TEST(PersistentArgumentLayout, ClusterStreamKVersionZeroKeepsPrebuiltScheduling)
     EXPECT_EQ(invocation.clusterDim.x, 2u);
     EXPECT_EQ(invocation.clusterDim.y, 1u);
     EXPECT_EQ(value<uint32_t>(invocation.args, "skGrid"), 8u);
-    const auto expected = streamKStaticSplit(36, 3, 8, device.skFullTiles, false);
+    const auto expected = StreamK::Static::computeSplit(36, 3, 8, device.skFullTiles, false);
     EXPECT_EQ(value<uint32_t>(invocation.args, "skTiles"), expected.skTiles);
     EXPECT_EQ(value<uint32_t>(invocation.args, "SKItersPerWG"), expected.skItersPerWG);
 
@@ -699,7 +699,7 @@ TEST(PersistentArgumentLayout, ClusterUniformOrderKeepsIdenticalSplitSignatures)
         ASSERT_GT(launch.grid, cluster.blocks);
         EXPECT_EQ(cluster.split.extraIters, 0u);
         EXPECT_EQ(cluster.split.skTiles, cluster.blocks);
-        EXPECT_TRUE(streamKStaticSplitRowUniform(cluster.split, cluster.blocks,
+        EXPECT_TRUE(StreamK::Static::isRowUniform(cluster.split, cluster.blocks,
             cluster.itersPerTile, launch.grid, false, true));
         EXPECT_TRUE(solution.uniformSummationOrderSupported(problem, device));
         const auto call = solution.generateSingleCall<true>(
@@ -709,8 +709,8 @@ TEST(PersistentArgumentLayout, ClusterUniformOrderKeepsIdenticalSplitSignatures)
         solution.problemType.useInitialStridesCD = true;
         EXPECT_FALSE(solution.uniformSummationOrderSupported(problem, device));
     }
-    const auto irregular = streamKStaticSplit(3, 65, 7, 1, false);
-    EXPECT_FALSE(streamKStaticSplitRowUniform(irregular, 3, 65, 7, false, true));
+    const auto irregular = StreamK::Static::computeSplit(3, 65, 7, 1, false);
+    EXPECT_FALSE(StreamK::Static::isRowUniform(irregular, 3, 65, 7, false, true));
 }
 
 TEST(PersistentArgumentLayout, ClusterStreamKWholeTileGridDoesNotCreateResidentTreeSplits)
@@ -855,7 +855,8 @@ TEST(PersistentArgumentLayout, UnevenStaticSplitsStayInsideTheirOutputBlocks)
         size_t previousEnd = 0;
         for(size_t w = 0; w < launch.grid; ++w)
         {
-            const auto range = streamKWorkgroupIterRange(w, blocks, iters, launch.grid, true, true);
+            const auto range
+                = StreamK::Static::workgroupIterRange(w, blocks, iters, launch.grid, true, true);
             EXPECT_EQ(range.start, previousEnd);
             ASSERT_GT(range.end, range.start);
             EXPECT_EQ(range.start / iters, (range.end - 1) / iters);

@@ -119,7 +119,7 @@ def skPaddedItersPerTile(module, kernel, dst, src,
     starts on an epoch boundary: the last boundary before the padded end is
     paddedIters-g, which is below the real count.
 
-    Mirrors ContractionSolution::skPaddedItersPerTile() on the host. Returns
+    Mirrors StreamK::paddedItersPerTile() on the host. Returns
     the register holding the count: `src` itself when one epoch is one
     iteration, so a kernel without scale reuse emits what it emitted before.
     """

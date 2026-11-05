@@ -1002,7 +1002,7 @@ TEST(StreamKLaunchSummaryTest, SummaryReportsNamedPolicyAndEffectiveAssignment)
         initStreamKSolution(solution, 3);
         solution.sizeMapping.tileProcessingStrategy = test.strategy;
         solution.sizeMapping.workAssignment = test.assignment;
-        StreamKDecisions decisions;
+        StreamK::Decisions decisions;
         decisions.isDynamic = test.dynamic;
         std::ostringstream os;
         solution.printStreamKLaunchSummary(os, problem, decisions);
@@ -1350,7 +1350,7 @@ TEST(PersistentLaunchSummaryTest, SpatialClusterKeepsWholeClusterFixedGrid)
 // (the tree path only reserves when tiles % grid != 0). The snapshot and the
 // caller-facing requiredWorkspaceSize() both size that reservation with
 // partialTileSize(finalGrid); see the comment on
-// StreamKDecisions::requiredWorkspaceBytes.
+// StreamK::Decisions::requiredWorkspaceBytes.
 // ---------------------------------------------------------------------------
 TEST(StreamKLaunchSummaryTest, Sk3ParallelReductionReservesPartialsWorkspace)
 {
@@ -1651,7 +1651,7 @@ TEST(StreamKLaunchSummaryTest, GsuWorkspacePreservesSplitOneBiasD)
 // still says parallel -- it never looks at the workspace -- but origami's
 // k_split_aware grid selection does: with zero workspace no split factor F >= 2
 // is admissible, so it returns grid == tiles (64) instead of 256. That leaves a
-// (parallel, F == 1) triple, which streamKReconcileReduction() demotes to tree.
+// (parallel, F == 1) triple, which StreamK::reconcileReduction() demotes to tree.
 //
 // The demotion is not conditioned on the mode -- F < 2 is unlaunchable for
 // parallel either way -- so this pins that the mode-off path reaches the same
@@ -1687,7 +1687,7 @@ TEST(StreamKLaunchSummaryTest, Sk3ParallelWorkspaceStarvedNoUniformOrderReconcil
     auto d = solution.computeStreamKDecisions(problem, env.device);
 
     EXPECT_EQ(d.reduction, origami::reduction_t::tree)
-        << "streamKReconcileReduction demotes parallel at a split factor of 1, "
+        << "StreamK::reconcileReduction demotes parallel at a split factor of 1, "
            "with the mode off as well as on";
     EXPECT_FALSE(d.workspaceDPFallbackFired)
         << "the reconcile ran first, so the workspace guard saw tree and divisible "
@@ -1724,7 +1724,7 @@ TEST(StreamKLaunchSummaryTest, Sk3ParallelWorkspaceStarvedNoUniformOrderReconcil
 //
 // Grid selection behaves identically: the F-star snap in getSKGridImpl only fires for
 // g0 != tiles, and here g0 == tiles == 64. So the snapshot again reaches the reconcile
-// with a (parallel, F == 1) triple and streamKReconcileReduction() demotes it to tree
+// with a (parallel, F == 1) triple and StreamK::reconcileReduction() demotes it to tree
 // BEFORE the workspace-fit guard. The guard then sees tree with tiles % grid == 0,
 // decides no partials are needed, and never runs its body: idealWorkspaceBytes stays 0
 // and workspaceDPFallbackFired stays false.
@@ -1761,7 +1761,7 @@ TEST(StreamKLaunchSummaryTest, Sk3ParallelWorkspaceStarvedUniformOrderReconciles
     auto d = solution.computeStreamKDecisions(problem, env.device);
 
     EXPECT_EQ(d.reduction, origami::reduction_t::tree)
-        << "streamKReconcileReduction demotes parallel at a split factor of 1";
+        << "StreamK::reconcileReduction demotes parallel at a split factor of 1";
     EXPECT_FALSE(d.workspaceDPFallbackFired)
         << "the reconcile ran first, so the workspace guard saw tree and divisible "
            "tiles and never fired";
@@ -1800,7 +1800,7 @@ TEST(StreamKLaunchSummaryTest, Sk3ParallelWorkspaceStarvedUniformOrderReconciles
 // a no-op even when it fires. persistentFixedGrid bypasses origami's selection entirely
 // (getSKGridImpl takes the user-override branch before it consults persistentDynamicGrid), so
 // a fixed grid of 2*tiles keeps the split factor at 2 -- which
-// streamKReconcileReduction accepts -- while the workspace stays at zero. That is the
+// StreamK::reconcileReduction accepts -- while the workspace stays at zero. That is the
 // one shape where the guard sees parallel, computes a non-zero partials size, finds it
 // does not fit, and actually moves the grid.
 //
@@ -1819,7 +1819,7 @@ TEST(StreamKLaunchSummaryTest, Sk3ParallelFixedGridWorkspaceDpFallbackFires)
     problem.setWorkspaceSize(0); // no workspace at all
 
     // 2 * tiles, so the split factor is exactly 2 -- the smallest value parallel
-    // reduction can express, and enough for streamKReconcileReduction to leave it
+    // reduction can express, and enough for StreamK::reconcileReduction to leave it
     // alone.
     env.device.persistentFixedGrid = 128;
 

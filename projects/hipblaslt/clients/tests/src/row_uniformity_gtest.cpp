@@ -1273,8 +1273,9 @@ namespace
     {
         const SplitCase& c = GetParam();
 
-        const TensileLite::StreamKStaticSplit split = TensileLite::streamKStaticSplit(
-            c.tiles, c.itersPerTile, c.grid, c.skFullTiles, c.forceDPOnly);
+        const TensileLite::StreamK::Static::Split split
+            = TensileLite::StreamK::Static::computeSplit(
+                c.tiles, c.itersPerTile, c.grid, c.skFullTiles, c.forceDPOnly);
 
         EXPECT_EQ(split.skTiles, c.skTiles) << "packed skTiles";
         EXPECT_EQ(split.skItersPerWG, c.skItersPerWG) << "packed SKItersPerWG";
@@ -1283,12 +1284,12 @@ namespace
 
         // The per-tile extra-iters mapping runs only under uniform summation order, so
         // the mode term is pinned on and c.perTileExtraIters stays the variable.
-        EXPECT_EQ(TensileLite::streamKStaticSplitRowUniform(split,
-                                                            c.tiles,
-                                                            c.itersPerTile,
-                                                            c.grid,
-                                                            c.perTileExtraIters,
-                                                            /*uniformSummationOrder=*/true),
+        EXPECT_EQ(TensileLite::StreamK::Static::isRowUniform(split,
+                                                             c.tiles,
+                                                             c.itersPerTile,
+                                                             c.grid,
+                                                             c.perTileExtraIters,
+                                                             /*uniformSummationOrder=*/true),
                   c.rowUniform)
             << "tiles=" << c.tiles << " itersPerTile=" << c.itersPerTile << " grid=" << c.grid
             << " skFullTiles=" << c.skFullTiles << " forceDPOnly=" << c.forceDPOnly
@@ -1320,12 +1321,12 @@ namespace
         for(size_t w = 0; w < skGrid; ++w)
         {
             const auto range
-                = TensileLite::streamKWorkgroupIterRange(w,
-                                                         tiles,
-                                                         itersPerTile,
-                                                         skGrid,
-                                                         /*perTileCapable=*/true,
-                                                         /*uniformSummationOrder=*/true);
+                = TensileLite::StreamK::Static::workgroupIterRange(w,
+                                                                   tiles,
+                                                                   itersPerTile,
+                                                                   skGrid,
+                                                                   /*perTileCapable=*/true,
+                                                                   /*uniformSummationOrder=*/true);
             for(size_t it = range.start; it < range.end; ++it)
             {
                 ASSERT_LT(it, size_t{68});
@@ -1337,36 +1338,36 @@ namespace
         // Without the capability, the same shape stays on the global first-E
         // mapping and is not row-uniform.
         const auto split
-            = TensileLite::streamKStaticSplit(tiles, itersPerTile, skGrid, 1, false);
-        EXPECT_FALSE(TensileLite::streamKStaticSplitRowUniform(split,
-                                                              tiles,
-                                                              itersPerTile,
-                                                              skGrid,
-                                                              /*perTileCapable=*/false,
-                                                              /*uniformSummationOrder=*/true));
-        EXPECT_TRUE(TensileLite::streamKStaticSplitRowUniform(split,
-                                                             tiles,
-                                                             itersPerTile,
-                                                             skGrid,
-                                                             /*perTileCapable=*/true,
-                                                             /*uniformSummationOrder=*/true));
+            = TensileLite::StreamK::Static::computeSplit(tiles, itersPerTile, skGrid, 1, false);
+        EXPECT_FALSE(TensileLite::StreamK::Static::isRowUniform(split,
+                                                                tiles,
+                                                                itersPerTile,
+                                                                skGrid,
+                                                                /*perTileCapable=*/false,
+                                                                /*uniformSummationOrder=*/true));
+        EXPECT_TRUE(TensileLite::StreamK::Static::isRowUniform(split,
+                                                               tiles,
+                                                               itersPerTile,
+                                                               skGrid,
+                                                               /*perTileCapable=*/true,
+                                                               /*uniformSummationOrder=*/true));
         // Capability alone is not enough: with the mode off the kernel still runs the
         // global first-E mapping.
-        EXPECT_FALSE(TensileLite::streamKStaticSplitRowUniform(split,
-                                                              tiles,
-                                                              itersPerTile,
-                                                              skGrid,
-                                                              /*perTileCapable=*/true,
-                                                              /*uniformSummationOrder=*/false));
+        EXPECT_FALSE(TensileLite::StreamK::Static::isRowUniform(split,
+                                                                tiles,
+                                                                itersPerTile,
+                                                                skGrid,
+                                                                /*perTileCapable=*/true,
+                                                                /*uniformSummationOrder=*/false));
 
         // When I % F == 0 the per-tile mapping must match the global E==0 path.
         constexpr size_t evenI = 16;
         for(size_t w = 0; w < skGrid; ++w)
         {
-            const auto perTile = TensileLite::streamKWorkgroupIterRange(
+            const auto perTile = TensileLite::StreamK::Static::workgroupIterRange(
                 w, tiles, evenI, skGrid, /*perTileCapable=*/true,
                 /*uniformSummationOrder=*/true);
-            const auto global = TensileLite::streamKWorkgroupIterRange(
+            const auto global = TensileLite::StreamK::Static::workgroupIterRange(
                 w, tiles, evenI, skGrid, /*perTileCapable=*/false,
                 /*uniformSummationOrder=*/true);
             EXPECT_EQ(perTile.start, global.start) << "w=" << w;
@@ -1415,7 +1416,7 @@ namespace
                 size_t covered = 0;
                 for(size_t w = 0; w < s.grid; ++w)
                 {
-                    const auto range = TensileLite::streamKWorkgroupIterRange(
+                    const auto range = TensileLite::StreamK::Static::workgroupIterRange(
                         w, s.tiles, s.itersPerTile, s.grid, perTile,
                         /*uniformSummationOrder=*/true, g);
 
@@ -1431,7 +1432,7 @@ namespace
             // The packed stride is itself a whole number of units, so the
             // device's w*W term cannot land mid-epoch either, and the leftover
             // it distributes is a whole number of units.
-            const TensileLite::StreamKStaticSplit split = TensileLite::streamKStaticSplit(
+            const TensileLite::StreamK::Static::Split split = TensileLite::StreamK::Static::computeSplit(
                 s.tiles, s.itersPerTile, s.grid, /*skFullTiles=*/1, /*forceDPOnly=*/false, g);
             EXPECT_EQ(split.skItersPerWG % g, size_t{0}) << "packed SKItersPerWG";
             EXPECT_EQ(split.extraIters % g, size_t{0}) << "leftover";
@@ -1463,12 +1464,12 @@ namespace
                     SCOPED_TRACE("tiles=" + std::to_string(t) + " itersPerTile="
                                  + std::to_string(i) + " grid=" + std::to_string(grid));
 
-                    const size_t padded = TensileLite::skPaddedItersPerTile(i, g);
+                    const size_t padded = TensileLite::StreamK::paddedItersPerTile(i, g);
                     EXPECT_EQ(padded % g, size_t{0});
                     EXPECT_GE(padded, i);
                     EXPECT_LT(padded - i, g);
 
-                    const auto split = TensileLite::streamKStaticSplit(t, i, grid, 1, false, g);
+                    const auto split = TensileLite::StreamK::Static::computeSplit(t, i, grid, 1, false, g);
                     EXPECT_EQ(split.skItersPerWG % g, size_t{0}) << "packed SKItersPerWG";
                     EXPECT_EQ(split.extraIters % g, size_t{0}) << "leftover";
 
@@ -1477,7 +1478,7 @@ namespace
                         std::vector<int> claims(t * i, 0);
                         for(size_t w = 0; w < grid; ++w)
                         {
-                            const auto r = TensileLite::streamKWorkgroupIterRange(
+                            const auto r = TensileLite::StreamK::Static::workgroupIterRange(
                                 w, t, i, grid, perTile, true, g);
                             EXPECT_EQ(r.start % g, size_t{0})
                                 << "w=" << w << " perTile=" << perTile;
@@ -1506,13 +1507,13 @@ namespace
         const size_t itersPerTile[] = {0, 1, 2, 7, 16, 33, 64, 257};
         for(size_t i : itersPerTile)
         {
-            EXPECT_EQ(TensileLite::skPaddedItersPerTile(i, 0), i);
-            EXPECT_EQ(TensileLite::skPaddedItersPerTile(i, 1), i);
+            EXPECT_EQ(TensileLite::StreamK::paddedItersPerTile(i, 0), i);
+            EXPECT_EQ(TensileLite::StreamK::paddedItersPerTile(i, 1), i);
         }
-        EXPECT_EQ(TensileLite::skPaddedItersPerTile(0, 2), size_t{0});
-        EXPECT_EQ(TensileLite::skPaddedItersPerTile(17, 2), size_t{18});
-        EXPECT_EQ(TensileLite::skPaddedItersPerTile(18, 2), size_t{18});
-        EXPECT_EQ(TensileLite::skPaddedItersPerTile(17, 4), size_t{20});
+        EXPECT_EQ(TensileLite::StreamK::paddedItersPerTile(0, 2), size_t{0});
+        EXPECT_EQ(TensileLite::StreamK::paddedItersPerTile(17, 2), size_t{18});
+        EXPECT_EQ(TensileLite::StreamK::paddedItersPerTile(18, 2), size_t{18});
+        EXPECT_EQ(TensileLite::StreamK::paddedItersPerTile(17, 4), size_t{20});
     }
 
     // Granularity one has to leave every existing kernel exactly as it was.
@@ -1526,8 +1527,8 @@ namespace
             for(size_t i : itersPerTile)
                 for(size_t grid : grids)
                 {
-                    const auto implicit = TensileLite::streamKStaticSplit(t, i, grid, 1, false);
-                    const auto explicit1 = TensileLite::streamKStaticSplit(t, i, grid, 1, false, 1);
+                    const auto implicit = TensileLite::StreamK::Static::computeSplit(t, i, grid, 1, false);
+                    const auto explicit1 = TensileLite::StreamK::Static::computeSplit(t, i, grid, 1, false, 1);
                     EXPECT_EQ(implicit.skTiles, explicit1.skTiles);
                     EXPECT_EQ(implicit.skItersPerWG, explicit1.skItersPerWG);
                     EXPECT_EQ(implicit.extraIters, explicit1.extraIters);
@@ -1535,9 +1536,9 @@ namespace
                     for(size_t w = 0; w < grid; ++w)
                         for(bool perTile : {false, true})
                         {
-                            const auto a = TensileLite::streamKWorkgroupIterRange(
+                            const auto a = TensileLite::StreamK::Static::workgroupIterRange(
                                 w, t, i, grid, perTile, true);
-                            const auto b = TensileLite::streamKWorkgroupIterRange(
+                            const auto b = TensileLite::StreamK::Static::workgroupIterRange(
                                 w, t, i, grid, perTile, true, 1);
                             EXPECT_EQ(a.start, b.start) << "t=" << t << " i=" << i
                                                         << " grid=" << grid << " w=" << w;
@@ -1647,15 +1648,19 @@ namespace
         ASSERT_GT(grid, 0u);
         const size_t iters
             = std::max(size_t{1}, problem.getItersPerTile(solution->sizeMapping));
-        const auto split = TensileLite::streamKStaticSplit(
-            tiles, iters, grid, hardware.skFullTiles, solution->sizeMapping.isPersistentDataParallel());
+        const auto split = TensileLite::StreamK::Static::computeSplit(
+            tiles,
+            iters,
+            grid,
+            hardware.skFullTiles,
+            solution->sizeMapping.isPersistentDataParallel());
         EXPECT_TRUE(
-            TensileLite::streamKStaticSplitRowUniform(split,
-                                                      tiles,
-                                                      iters,
-                                                      grid,
-                                                      solution->internalArgsSupport.perTileExtraIters,
-                                                      problem.getParams().uniformSummationOrder()))
+            TensileLite::StreamK::Static::isRowUniform(split,
+                                                       tiles,
+                                                       iters,
+                                                       grid,
+                                                       solution->internalArgsSupport.perTileExtraIters,
+                                                       problem.getParams().uniformSummationOrder()))
             << "the unmodified probe must be launch-legal on the static split "
                "(tiles="
             << tiles << " grid=" << grid << " skTiles=" << split.skTiles
@@ -2077,7 +2082,7 @@ namespace
         // An odd number of DepthU per tile used to be refused: the leftover
         // half-epoch forced the split back to single iterations, which let a
         // cut straddle a granule. The flat space is now measured in tiles
-        // padded to a whole epoch (skPaddedItersPerTile), so the quantum holds
+        // padded to a whole epoch (StreamK::paddedItersPerTile), so the quantum holds
         // whatever the tile's K is and the tile's own iteration count no
         // longer enters the audit.
         {"MXDepthU128EpochRagged", 32, 128, 896, false},
@@ -2161,8 +2166,8 @@ namespace
         size_t                          tiles         = 0;
         size_t                          itersPerTile  = 0;
         size_t                          grid          = 0;
-        TensileLite::StreamKStaticSplit split;
-        bool                            rowUniform = false;
+        TensileLite::StreamK::Static::Split split;
+        bool                                rowUniform = false;
         // Row-uniform and refused by the pre-existing tiles % grid == 0 test,
         // i.e. exactly the regime this change adds.
         bool newlyAdmitted     = false;
@@ -2250,14 +2255,14 @@ namespace
             return out;
 
         auto const* amdgpu = dynamic_cast<TensileLite::AMDGPU const*>(&hardware);
-        out.split          = TensileLite::streamKStaticSplit(
+        out.split          = TensileLite::StreamK::Static::computeSplit(
             out.tiles,
             out.itersPerTile,
             out.grid,
             amdgpu != nullptr ? amdgpu->skFullTiles : 1,
             solution.sizeMapping.isPersistentDataParallel());
         out.perTileExtraIters = solution.internalArgsSupport.perTileExtraIters;
-        out.rowUniform        = TensileLite::streamKStaticSplitRowUniform(
+        out.rowUniform        = TensileLite::StreamK::Static::isRowUniform(
             out.split,
             out.tiles,
             out.itersPerTile,
@@ -2605,7 +2610,7 @@ namespace
         TensileLite::StreamKSettings sk;
         sk.reduction = origami::reduction_t::parallel;
         sk.grid      = grid;
-        EXPECT_TRUE(TensileLite::streamKParallelReductionRowUniform(
+        EXPECT_TRUE(TensileLite::StreamK::isParallelReductionRowUniform(
             sk, solution->sizeMapping.streamKAtomic, /*staticTwoTilePacking=*/true, tiles))
             << "gate helper must admit the resolved parallel settings (grid=" << grid
             << " tiles=" << tiles << ")";
@@ -3000,21 +3005,23 @@ namespace
         EXPECT_EQ(grid % tiles, 0u) << "the selected grid must stay a multiple of the tiles";
 
         // The grid is admissible on its own terms, not merely small enough.
-        const TensileLite::StreamKStaticSplit split = TensileLite::streamKStaticSplit(
-            tiles, I, grid, /*skFullTiles=*/1, /*forceDPOnly=*/false);
+        const TensileLite::StreamK::Static::Split split
+            = TensileLite::StreamK::Static::computeSplit(
+                tiles, I, grid, /*skFullTiles=*/1, /*forceDPOnly=*/false);
         EXPECT_TRUE(
-            TensileLite::streamKStaticSplitRowUniform(split,
-                                                      tiles,
-                                                      I,
-                                                      grid,
-                                                      solution->internalArgsSupport.perTileExtraIters,
-                                                      problem.getParams().uniformSummationOrder()))
+            TensileLite::StreamK::Static::isRowUniform(split,
+                                                       tiles,
+                                                       I,
+                                                       grid,
+                                                       solution->internalArgsSupport.perTileExtraIters,
+                                                       problem.getParams().uniformSummationOrder()))
             << "grid=" << grid << " must pack row-uniformly";
 
         // What clamping after selection produces instead -- the mode-off grid above.
-        const TensileLite::StreamKStaticSplit clamped = TensileLite::streamKStaticSplit(
-            tiles, I, TensileLite::StreamKFlagElements, 1, false);
-        EXPECT_FALSE(TensileLite::streamKStaticSplitRowUniform(
+        const TensileLite::StreamK::Static::Split clamped
+            = TensileLite::StreamK::Static::computeSplit(
+                tiles, I, TensileLite::StreamKFlagElements, 1, false);
+        EXPECT_FALSE(TensileLite::StreamK::Static::isRowUniform(
             clamped,
             tiles,
             I,
@@ -3062,15 +3069,16 @@ namespace
             << "all-full leaves no partial tiles, so the launch takes no flag region and the "
                "bound does not apply -- the grid may legally exceed it";
 
-        const TensileLite::StreamKStaticSplit split = TensileLite::streamKStaticSplit(
-            tiles, I, grid, /*skFullTiles=*/1, /*forceDPOnly=*/false);
+        const TensileLite::StreamK::Static::Split split
+            = TensileLite::StreamK::Static::computeSplit(
+                tiles, I, grid, /*skFullTiles=*/1, /*forceDPOnly=*/false);
         EXPECT_TRUE(
-            TensileLite::streamKStaticSplitRowUniform(split,
-                                                      tiles,
-                                                      I,
-                                                      grid,
-                                                      solution->internalArgsSupport.perTileExtraIters,
-                                                      problem.getParams().uniformSummationOrder()))
+            TensileLite::StreamK::Static::isRowUniform(split,
+                                                       tiles,
+                                                       I,
+                                                       grid,
+                                                       solution->internalArgsSupport.perTileExtraIters,
+                                                       problem.getParams().uniformSummationOrder()))
             << "the all-full grid must remain admissible above the bound";
     }
 
