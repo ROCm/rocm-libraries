@@ -2190,7 +2190,7 @@ private:
         }
 
         shadowByArchTier(catalog, context);
-        applyCandidateFilters(slot, context, catalog);
+        applyCandidateFilters(slot, context, bound, catalog);
 
         HIPDNN_PLUGIN_LOG_INFO(
             _logPrefix << (_slotted ? "slot '" + slot.name + "' catalog" : "catalog")
@@ -2271,6 +2271,7 @@ private:
     /// and means no refinement, and the registry is immutable once the provider loaded.
     void applyCandidateFilters(const SlotState& slot,
                                const MatchContext& context,
+                               const BoundTokens& bound,
                                Catalog& catalog) const
     {
         if(catalog.entries.empty())
@@ -2322,7 +2323,7 @@ private:
 
                 const auto description
                     = describeDescriptor("matcher", matcher.descriptor.name, matcher.descriptor.id);
-                const auto kept = filter(context, catalog.bound, candidates);
+                const auto kept = filter(context, bound, candidates);
                 if(kept.size() != candidates.size())
                 {
                     throw std::runtime_error("the candidate filter of " + description + " returned "

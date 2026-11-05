@@ -556,7 +556,10 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
        AND HIPKERNELPROVIDER_ENABLE_ROCKE
        AND _hkp_gfx950_conv_fwd
        AND TARGET hipdnn_integration_tests)
-        hkp_reserve_census_shard(_hkp_gfx950_shard_dest gfx950)
+        # The TOML goes to the reservation as well as TEST_CONFIG; hkp_reserve_census_shard()
+        # says why.
+        set(_config "${CMAKE_CURRENT_SOURCE_DIR}/../config/hipkernel_Gfx950ConvFwd.toml")
+        hkp_reserve_census_shard(_hkp_gfx950_shard_dest gfx950 FILES "${_config}")
         set(_gfx950_shard_args
             INSTALL_DESTINATION "${_hkp_gfx950_shard_dest}"
             INSTALL_STAGING_KEY hkp_census_gfx950)
@@ -567,7 +570,7 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
             ENGINE_NAME    "hipkernel:Gfx950ConvFwd"
             INSTALL_SUBDIR hip_kernel_provider
             ${_gfx950_shard_args}
-            TEST_CONFIG    ${CMAKE_CURRENT_SOURCE_DIR}/../config/hipkernel_Gfx950ConvFwd.toml
+            TEST_CONFIG    ${_config}
             GTEST_FILTER   "quick_Gfx950ConvFwd*:standard_Gfx950ConvFwd*"
             ENVIRONMENT    ${TEST_ENVIRONMENT}
             ${_gfx950_conv_fwd_category_args}
