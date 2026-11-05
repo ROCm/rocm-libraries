@@ -457,6 +457,18 @@ IR_CASES = {
             "param x: states two upper bounds (le, lt) -- state one",
         ],
     ),
+    # eq states both ends, so it is the word that declares x's lower end.
+    "quotient_bounds_eq": (
+        lambda: _with_attrs(
+            {"x": {"eq": -1}, "y": {"le": '{"div":[{"param":"x"},{"param":"M"}]}'}}
+        ),
+        [
+            (
+                "param y: quotient_of(x, M) needs x ge 0 -- x is declared with eq=-1.\n"
+                'Fix: b.param("x", I32, ge=0, ...)'
+            )
+        ],
+    ),
 }
 
 
