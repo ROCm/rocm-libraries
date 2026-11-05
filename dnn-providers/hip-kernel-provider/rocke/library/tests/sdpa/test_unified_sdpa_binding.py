@@ -32,7 +32,7 @@ from tests.sdpa import cases as C
 from tests.sdpa import helpers as H
 from tests.sdpa.binding_harness import bind_tensors, outputs
 from tests.sdpa.request_bridge import request_from_case
-from tests.sdpa.request_cases import bhsd, make_request, packed
+from tests.sdpa.request_cases import bhsd, make_request, packed, ragged_offset
 
 ARCH = "gfx950"
 
@@ -168,6 +168,43 @@ def test_invalid_seq_len_is_refused_before_launch(key, values, match):
     tensors[key] = torch.tensor(values, dtype=torch.int32)
     with pytest.raises(ValueError, match=match):
         sdpa_unified_bind(req, tensors)
+
+
+def _ragged_request():
+    def ragged(t):
+        return replace(
+            t,
+            ragged_offset=ragged_offset(t.dims[0]),  # int32
+            ragged_offset_multiplier=t.strides[2],
+        )
+
+    req = make_request(d=64)
+    req = replace(req, **{n: ragged(getattr(req, n)) for n in ("q", "k", "v", "o")})
+    assert sdpa_unified_admits(req)[0]
+    tensors = {
+        n: torch.randn(getattr(req, n).volume).half() for n in ("q", "k", "v", "o")
+    }
+    return req, tensors
+
+
+@pytest.mark.parametrize(
+    "offsets,dtype",
+    [
+        # Truncate to the valid int32 offsets [0, 4, 8].
+        ([0.5, 4.5, 8.5], torch.float32),
+        # Integer, but not the int32 the request's ragged_offset describes.
+        ([0, 4, 8], torch.int64),
+    ],
+    ids=["float32", "int64"],
+)
+def test_ragged_offsets_of_another_dtype_are_refused(offsets, dtype):
+    req, tensors = _ragged_request()
+    tensors["ragged_offset_q"] = torch.tensor([0, 4, 8], dtype=torch.int32)
+    tensors["ragged_offset_k"] = torch.tensor([0, 4, 8], dtype=torch.int32)
+    _LaunchPlan(req, dict(tensors))  # int32 offsets bind
+    tensors["ragged_offset_q"] = torch.tensor(offsets, dtype=dtype)
+    with pytest.raises(ValueError, match="q: ragged offsets must be torch.int32"):
+        _LaunchPlan(req, tensors)
 
 
 def test_a_tensor_that_disagrees_with_the_request_is_refused():

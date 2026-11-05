@@ -15,6 +15,8 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
+from rocke.runtime.torch_interop import torch_dtype
+
 from dispatch.attention import AttentionMaskType, AttentionRequest
 from dispatch.attention.common import Alignment, AttentionBand
 
@@ -285,6 +287,14 @@ class Operand:
             raise ValueError(f"{name}: a ragged buffer must be contiguous")
         _, s_h, s_s, s_d = desc.strides
         mult = int(desc.ragged_offset_multiplier)
+        # ``int()`` in ``host_ints`` would truncate a float offset (0.5 -> 0)
+        # and bind it as if it were the integer the request describes.
+        want = torch_dtype(desc.ragged_offset.dtype)
+        if offsets.dtype != want:
+            raise ValueError(
+                f"{name}: ragged offsets must be {want} as the request's "
+                f"ragged_offset describes, got {offsets.dtype}"
+            )
         self.flat = tensor.reshape(-1)
         self.starts = [o * mult for o in host_ints(offsets)]
         self.row_strides = (s_s, s_h, s_d)
