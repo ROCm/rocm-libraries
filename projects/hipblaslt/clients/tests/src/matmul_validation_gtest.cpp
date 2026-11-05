@@ -255,19 +255,19 @@ TEST(HostNumericsMatmulValidation, MixedPrecisionNormUsesGemmTolerance)
     outputs.scaleBatch(0, 1.001);
     const auto summary = outputs.validate(ScalarType::Float16);
     EXPECT_TRUE(summary.outputCheckFailures.empty());
-    EXPECT_GT(summary.relativeFrobeniusError, norm_tolerance(ScalarType::Float32));
+    EXPECT_GT(summary.relativeFrobeniusError, *norm_tolerance(ScalarType::Float32));
     EXPECT_DOUBLE_EQ(
-        norm_tolerance(
+        *norm_tolerance(
             ScalarType::Float32, HIPBLAS_COMPUTE_32F, ScalarType::Float16, ScalarType::Float16),
         0.01);
     EXPECT_DOUBLE_EQ(
-        norm_tolerance(
+        *norm_tolerance(
             ScalarType::Float16, HIPBLAS_COMPUTE_32F, ScalarType::BFloat16, ScalarType::BFloat16),
         0.1);
-    EXPECT_DOUBLE_EQ(norm_tolerance(ScalarType::Float32,
-                                    HIPBLAS_COMPUTE_32F_FAST_16BF,
-                                    ScalarType::Float32,
-                                    ScalarType::Float32),
+    EXPECT_DOUBLE_EQ(*norm_tolerance(ScalarType::Float32,
+                                     HIPBLAS_COMPUTE_32F_FAST_16BF,
+                                     ScalarType::Float32,
+                                     ScalarType::Float32),
                      0.5);
 }
 
@@ -287,7 +287,7 @@ TEST(HostNumericsMatmulValidation, HalfOutputNormUsesHalfTolerance)
     }
     const auto within = withinLimit.validate(ScalarType::Float16);
     EXPECT_TRUE(within.outputCheckFailures.empty());
-    EXPECT_GT(within.relativeFrobeniusError, norm_tolerance(ScalarType::Float32));
+    EXPECT_GT(within.relativeFrobeniusError, *norm_tolerance(ScalarType::Float32));
     const auto beyond = beyondLimit.validate(ScalarType::Float16);
     ASSERT_EQ(beyond.outputCheckFailures.size(), 1u);
     EXPECT_EQ(beyond.outputCheckFailures[0].kind, Kind::Norm);

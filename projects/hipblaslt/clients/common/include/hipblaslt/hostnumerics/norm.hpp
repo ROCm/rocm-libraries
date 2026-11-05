@@ -9,11 +9,11 @@
 #include <hipblaslt/hipblaslt.h>
 #include <optional>
 #include <roc/hostnumerics/scalar.hpp>
-#include <stdexcept>
 
 // These are product-level acceptance policies, not numerical mechanics.
-// Problem/architecture-specific callers may widen them.
-inline double norm_tolerance(roc::hostnumerics::ScalarType type)
+// Problem/architecture-specific callers may widen them. Types without a
+// policy have no limit, and a norm check of them fails.
+inline std::optional<double> norm_tolerance(roc::hostnumerics::ScalarType type)
 {
     using roc::hostnumerics::ScalarType;
     switch(type)
@@ -44,39 +44,39 @@ inline double norm_tolerance(roc::hostnumerics::ScalarType type)
     case ScalarType::Float6E3M2:
         return 0.5;
     default:
-        throw std::runtime_error("Unsupported type in hipBLASLt norm tolerance policy.");
+        return std::nullopt;
     }
 }
 
 inline bool norm_check(double normError, roc::hostnumerics::ScalarType type)
 {
-    const double tolerance = norm_tolerance(type);
-    return tolerance > 0.0 && normError < tolerance;
+    const auto tolerance = norm_tolerance(type);
+    return tolerance && normError < *tolerance;
 }
 
-// The norm limit for a GEMM, widened for lower-precision inputs and compute.
-inline double norm_tolerance(roc::hostnumerics::ScalarType                outputType,
-                             hipblasComputeType_t                         computeType,
-                             std::optional<roc::hostnumerics::ScalarType> inputTypeA,
-                             std::optional<roc::hostnumerics::ScalarType> inputTypeB)
+// The norm limit for a GEMM: the widest limit of its output and input types,
+// widened further for reduced-precision compute.
+inline std::optional<double> norm_tolerance(roc::hostnumerics::ScalarType outputType,
+                                            hipblasComputeType_t          computeType,
+                                            roc::hostnumerics::ScalarType inputTypeA,
+                                            roc::hostnumerics::ScalarType inputTypeB)
 {
-    double tolerance = norm_tolerance(outputType);
-    if(computeType == HIPBLAS_COMPUTE_32F_FAST_16BF
+    std::optional<double> tolerance;
+    for(const auto type : {outputType, inputTypeA, inputTypeB})
+        if(const auto limit = norm_tolerance(type))
+            tolerance = std::max(tolerance.value_or(0.0), *limit);
+    if(tolerance && computeType == HIPBLAS_COMPUTE_32F_FAST_16BF
        && outputType == roc::hostnumerics::ScalarType::Float32)
-        tolerance = std::max(tolerance, 0.5);
-    if(inputTypeA)
-        tolerance = std::max(tolerance, norm_tolerance(*inputTypeA));
-    if(inputTypeB)
-        tolerance = std::max(tolerance, norm_tolerance(*inputTypeB));
+        tolerance = std::max(*tolerance, 0.5);
     return tolerance;
 }
 
-inline bool norm_check(double                                       normError,
-                       roc::hostnumerics::ScalarType                outputType,
-                       hipblasComputeType_t                         computeType,
-                       std::optional<roc::hostnumerics::ScalarType> inputTypeA,
-                       std::optional<roc::hostnumerics::ScalarType> inputTypeB)
+inline bool norm_check(double                        normError,
+                       roc::hostnumerics::ScalarType outputType,
+                       hipblasComputeType_t          computeType,
+                       roc::hostnumerics::ScalarType inputTypeA,
+                       roc::hostnumerics::ScalarType inputTypeB)
 {
-    const double tolerance = norm_tolerance(outputType, computeType, inputTypeA, inputTypeB);
-    return tolerance > 0.0 && normError < tolerance;
+    const auto tolerance = norm_tolerance(outputType, computeType, inputTypeA, inputTypeB);
+    return tolerance && normError < *tolerance;
 }
