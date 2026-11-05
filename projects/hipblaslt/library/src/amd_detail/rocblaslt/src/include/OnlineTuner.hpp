@@ -64,30 +64,13 @@ namespace rocblaslt
      * stores: each key is explored once and gets one row, and later calls
      * replay that row without entering the tuner.
      *
-     * SCOPE: WHICH CALLS ARE TUNED. This is the authoritative statement.
-     *
-     *  - Tuned: hipblasLtMatmul with algo == nullptr. The library chooses the
-     *    kernel (SolutionLookup::PerDispatch) and launches it in the same call
-     *    on the same thread, so a probe offered at selection is paired exactly
-     *    with the launch that measures it.
-     *  - Not tuned: hipblasLtMatmul with an algo the caller supplies, from any
-     *    source. It is launched as given, never measured and never harvested.
-     *  - Not tuned: hipblasLtMatmulAlgoGetHeuristic (SolutionLookup::Heuristic).
-     *    It is answered with the measured winner if there is one and its normal
-     *    ranking otherwise, is never offered a probe, and registers nothing. So
-     *    the GetHeuristic-then-hipblasLtMatmul(algo) flow is not tuned; it is
-     *    served only what null-algo dispatches of the problem, or the cache
-     *    file, provide.
-     *  - Not tuned: the hipblaslt_ext GEMM and grouped GEMM interfaces, and
-     *    problems tuningCacheKeyable() refuses.
-     *
-     * The line is drawn there because a launch of a caller-supplied algo
-     * cannot be paired with the selection visit that produced it (see t_offer
-     * in OnlineTuner.cpp), and a probe handed to a caller that keeps the algo
-     * would never be measured. With info logging on, the first heuristic query
-     * and the first caller-supplied algo of a process each log one
-     * online-not-tuned line; see TensileLite::noteOnlineScopeEvent().
-     * docs/reference/env-variables.rst states the same scope for users.
+     * Which problems are explored is onlineTunable() in tensile_host.cpp;
+     * env-variables.rst describes it for users. Only hipblasLtMatmul with
+     * algo == nullptr reaches the tuner: such a call selects and launches on
+     * one thread, so a probe offered at selection is paired exactly with the
+     * launch that measures it (t_offer in OnlineTuner.cpp). A caller-supplied
+     * algo cannot be paired that way, and a heuristic query's caller keeps the
+     * algo, so a probe handed to either would never be measured.
      */
     class OnlineTuner
     {
