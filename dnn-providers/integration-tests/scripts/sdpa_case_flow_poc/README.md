@@ -231,10 +231,10 @@ The default values are:
 - the descale filter (`--descale-non-fp8-filter`) off.
 
 With these defaults, and an input whose SHA-256 is the one in
-`levels.csv.sha256`, the script checks the counts that it records: 14,389 rows
-in 782 sweeps.
+`levels.csv.sha256`, the script checks the counts that it records: 17,969 rows
+in 832 sweeps.
 
-`--no-zero-stride-filter` also selects the 734 zero-stride rows that a bundle can
+`--no-zero-stride-filter` also selects the 870 zero-stride rows that a bundle can
 otherwise express. The data-SDK change that they need (PR #14709) is merged. But
 these rows are left out of this bundle set. Adding them is planned as a
 follow-up change.

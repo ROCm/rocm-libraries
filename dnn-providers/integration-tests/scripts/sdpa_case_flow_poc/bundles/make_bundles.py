@@ -135,11 +135,27 @@ def check_tree(bundle_dir, op_dir, placed, export_dir):
     """Problems found in the written tree; empty when every check holds."""
     sys.path.insert(0, str(MIGRATION))
     from bundle_utils import (
+        aliases_by_name,
         canon,
         canonical_uid_map_by_name,
         expand,
+        name_by_uid,
         remap_graph,
     )  # noqa: E402
+
+    def uids_by_name(meta, graph, section):
+        """Entries of a uid-carrying metadata section with every uid named, sorted."""
+        names = name_by_uid(graph)
+        return sorted(
+            json.dumps(
+                {
+                    k: names.get(v, v) if k in ("uid", "lengths", "like") else v
+                    for k, v in e.items()
+                },
+                sort_keys=True,
+            )
+            for e in meta.get(section, [])
+        )
 
     problems = []
     expected = defaultdict(dict)
@@ -182,14 +198,28 @@ def check_tree(bundle_dir, op_dir, placed, export_dir):
             row = cases.get(c["id"])
             if row is None:
                 continue
-            graph = json.loads(
-                (export_dir / row["case_key"] / f"{row['case_key']}.json").read_text()
-            )
-            graph = remap_graph(graph, canonical_uid_map_by_name(graph))
-            if canon(expand(template, c.get("values", {}))) != canon(graph):
+            case_dir = export_dir / row["case_key"]
+            graph = json.loads((case_dir / f"{row['case_key']}.json").read_text())
+            meta = json.loads((case_dir / f"{row['case_key']}.meta.json").read_text())
+            expanded = expand(template, c.get("values", {}))
+            if canon(expanded) != canon(
+                remap_graph(graph, canonical_uid_map_by_name(graph))
+            ):
                 problems.append(
                     f"{sweep_path}:{c['id']} does not re-expand to its exported graph"
                 )
+            placed_meta = c.get("metadata", {})
+            if aliases_by_name(placed_meta, expanded) != aliases_by_name(meta, graph):
+                problems.append(
+                    f"{sweep_path}:{c['id']} aliases differ from its exported metadata"
+                )
+            for section in ("start_offsets", "live_rows"):
+                if uids_by_name(placed_meta, expanded, section) != uids_by_name(
+                    meta, graph, section
+                ):
+                    problems.append(
+                        f"{sweep_path}:{c['id']} {section} differ from its exported metadata"
+                    )
     return problems
 
 

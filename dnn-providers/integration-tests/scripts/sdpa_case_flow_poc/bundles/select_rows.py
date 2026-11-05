@@ -9,16 +9,16 @@ Reads levels.csv and never edits it. Writes:
   summary.json    counts per reason and per tier
 
 Exclusion reasons:
-  content reasons     a bundle cannot express the row (exact input contents, aliasing,
-                      arch-dependent dtypes, a data start past an aligned allocation start)
+  content reasons     a bundle cannot express the row (exact input contents, an output
+                      written over an input, inputs that share memory in a way the case
+                      builder keeps as separate buffers, arch-dependent dtypes)
   zero_stride_needs_pr14709, dropout_without_rng_dump, reference_declines_descale_non_fp8
                       the extra exclusions. The last one is off by default (--descale-non-fp8-filter
                       turns it on). It takes the clauses of the model's answer-key rule
                       AK-DESCALE-WITH-FP8 that forbid a present Q, K or V descale. Levels that ignore
                       the answer-key rules admit such rows, and no reference can check them.
   not_selected:tier, not_selected:min_sweep_size         the selection parameters
-  frontend_rejects, realise_error, content_not_expressible, start_offset_not_expressible,
-  export_error, export_missing
+  frontend_rejects, realise_error, content_not_expressible, export_error, export_missing
                       outcomes of a runner export, when --export-outcomes is given
 
 With the default parameters, and an input whose SHA-256 equals the one in
@@ -30,6 +30,7 @@ import csv
 import functools
 import hashlib
 import json
+import re
 import sys
 from collections import Counter
 from pathlib import Path
@@ -58,25 +59,24 @@ EXPECTED = {
     "content_reasons": {
         "ragged_offsets": 3769,
         "page_table_contents": 190,
-        "tensor_overlap": 1314,
+        "tensor_overlap": 234,
         "arch_dtype": 391,
-        "start_offset_not_expressible": 3688,
     },
     "extra_of_expressible": {
-        "zero_stride_needs_pr14709": 734,
+        "zero_stride_needs_pr14709": 870,
         "dropout_without_rng_dump": 10,
     },
     "per_tier": {
         # rows, bundle rows, strict sweeps, alignment-split sweeps, largest, 1-case, then the summed
         # est_seconds on gfx942 and gfx950 of the expressible rows before the extra exclusions
-        "quick": (1610, 1039, 87, 87, 250, 30, 35.6, 27.6),
-        "standard": (9434, 6100, 243, 243, 1455, 18, 344.5, 257.0),
-        "comprehensive": (4543, 2829, 196, 196, 664, 68, 1098.9, 782.1),
-        "full": (7390, 4421, 256, 256, 962, 66, 2147.5, 1537.6),
+        "quick": (1610, 1352, 90, 155, 384, 31, 47.1, 36.4),
+        "standard": (9434, 7467, 258, 466, 1949, 17, 426.5, 317.8),
+        "comprehensive": (4543, 3510, 211, 356, 879, 73, 1354.9, 964.3),
+        "full": (7390, 5640, 273, 482, 1463, 71, 2726.1, 1950.4),
     },
-    "bundle_rows": 14389,
-    "sweeps": 782,
-    "sweeps_alignment_split": 782,
+    "bundle_rows": 17969,
+    "sweeps": 832,
+    "sweeps_alignment_split": 1459,
 }
 
 
@@ -128,9 +128,7 @@ class Model:
         self.paged = values["paged_sides"]
         self.page_tables = values["page_tables"]
         self.packed_table = values["packed_page_table"]
-        self.shifted_starts = {
-            k for k, v in values["alignment"].items() if v["start_offset"] != 0
-        }
+        self.head_dim = values["head_dim"]
 
     def tensors(self, row, strict=True):
         """Sorted tuple of the tensor roles of a row's graph, with value-form tags when strict."""
@@ -214,13 +212,44 @@ def active(row, axis):
     return row[axis] not in ("", "-")
 
 
-ALIGNMENT_AXES = (
-    "alignment_q",
-    "alignment_k",
-    "alignment_v",
-    "alignment_o",
-    "alignment_stats",
-)
+def head_dims(row, model):
+    """(head_dim_qk, head_dim_v) of the row: its sizes, else the class values."""
+    sizes = dict(
+        (key, int(value))
+        for key, value in re.findall(r"([A-Za-z]+?)(\d+)", row["sizes"])
+    )
+    if "Dqk" in sizes and "Dv" in sizes:
+        return sizes["Dqk"], sizes["Dv"]
+    return model.head_dim[row["head_dim_qk"]], model.head_dim[row["head_dim_v"]]
+
+
+def overlap_not_expressible(row, model):
+    """True when the row's tensor overlap is not inputs that share memory as one buffer.
+
+    The view is V when head_dim_v <= head_dim_qk, else K; its owner is K, else Q (as in the
+    case builder). A view whose dims do not fit inside its owner leaves through the export
+    outcomes. A ragged row whose inputs share memory has its own reason.
+    """
+    overlap = row["tensor_overlap"]
+    if overlap == "separate":
+        return False
+    if overlap != "inputs_overlap":
+        return True
+    if active(row, "ragged_offsets"):
+        return False
+    if row["paged_kv"] != "absent":
+        return True
+    dqk, dv = head_dims(row, model)
+    view, owner = ("v", "k") if dv <= dqk else ("k", "q")
+    if row["strides_" + view] != "inherited" or row["dim_order_" + view] != "inherited":
+        return True
+
+    def relation(tensor):
+        return "same" if tensor == "q" else row[f"dtype_{tensor}_vs_q"]
+
+    return relation(view) != relation(owner) or (
+        row["alignment_" + view] != row["alignment_" + owner]
+    )
 
 
 def content_reasons(row, model):
@@ -230,7 +259,7 @@ def content_reasons(row, model):
         why.append("ragged_offsets")
     if row["paged_kv"] != "absent" and row["page_table_storage"] == "packed":
         why.append("page_table_contents")
-    if row["tensor_overlap"] != "separate":
+    if overlap_not_expressible(row, model):
         why.append("tensor_overlap")
     if (
         row["dtype_q"] in ("fp16", "bf16")
@@ -239,8 +268,6 @@ def content_reasons(row, model):
         row["matmul_input_precision"] == "fp8" and not row["dtype_q"].startswith("fp8")
     ):
         why.append("arch_dtype")
-    if any(row[ax] in model.shifted_starts for ax in ALIGNMENT_AXES):
-        why.append("start_offset_not_expressible")
     return why
 
 
@@ -311,7 +338,6 @@ EXPORT_REASON = {
     "frontend-rejected": "frontend_rejects",
     "realise-error": "realise_error",
     "content-not-expressible": "content_not_expressible",
-    "start-offset-not-expressible": "start_offset_not_expressible",
     "export-error": "export_error",
 }
 

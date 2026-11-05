@@ -410,6 +410,28 @@ int64_t elementCount(const Dims& dims)
     return count;
 }
 
+// Elements from a tensor's first element to its last, 1 + sum of (dim - 1) x |stride|; 0 when a
+// dim is 0. A ragged tensor holds its B x S token slots on the sequence axis and no batch axis.
+int64_t elementSpace(const Dims& dims, const Dims& strides, bool ragged)
+{
+    Dims extents = dims;
+    if(ragged)
+    {
+        extents[2] = checkedProduct(dims.at(0), dims.at(2), "ragged token slots");
+        extents[0] = 1;
+    }
+    int64_t space = 1;
+    for(size_t i = 0; i < extents.size(); ++i)
+    {
+        if(extents[i] == 0)
+        {
+            return 0;
+        }
+        space += checkedProduct(extents[i] - 1, std::llabs(strides.at(i)), "element space");
+    }
+    return space;
+}
+
 Contents integerContents(std::vector<int64_t> values, bool repeat)
 {
     return {std::move(values), repeat};
@@ -703,8 +725,9 @@ public:
         configureStats(stats);
         applyDimOverrides();
         addStructuralContents();
+        realiseOverlap();
 
-        return {graph, realisedText(), _contents, _startOffsets};
+        return {graph, realisedText(), _contents, _startOffsets, _views, _notRealised};
     }
 
 private:
@@ -735,6 +758,8 @@ private:
     std::vector<std::string> _notes;
     std::map<std::string, Contents> _contents;
     std::map<std::string, int64_t> _startOffsets;
+    std::vector<TensorView> _views;
+    std::vector<std::string> _notRealised;
     int64_t _nextUid = 1;
 
     // Value classes of tensor contents that the builder does not write: every row must hold the
@@ -942,14 +967,14 @@ private:
                 fail(orderAxis + "=" + order + " with " + strideAxis + "=" + strideClass
                      + ": a view inherits both its order and its strides");
             }
-            const auto owner = viewOwner(suffix, dims);
-            if(storedRagged(suffix) && dims.at(2) > owner->get_dim().at(2))
-            {
-                fail(strideAxis
-                     + "=inherited: a ragged view with longer sequences than its owner "
-                       "reads past the owner's buffer");
-            }
+            const auto owner = viewOwner(suffix);
             const Dims ownerStrides = owner->get_stride();
+            if(storedRagged(suffix)
+               && elementSpace(dims, ownerStrides, true) > elementSpace(
+                      owner->get_dim(), ownerStrides, storedRagged(ownerSuffixOf(suffix))))
+            {
+                fail(strideAxis + "=inherited: a ragged view reaches past the owner's buffer");
+            }
             return stridesFor(dims, {}, strideAxis, strideClass, false, &ownerStrides);
         }
         return stridesFor(dims,
@@ -989,10 +1014,8 @@ private:
     }
 
     // The input a view reads through (class_to_value tensor_overlap.inputs_overlap): V reads
-    // through K when head_dim_v <= head_dim_qk, else K reads through Q. A view with a dimension
-    // larger than its owner's does not fit inside the owner; the note `<view>_view_exceeds_owner`
-    // marks it.
-    TensorPtr viewOwner(const std::string& suffix, const Dims& dims)
+    // through K when head_dim_v <= head_dim_qk, else K reads through Q.
+    TensorPtr viewOwner(const std::string& suffix)
     {
         const auto& overlap = valueOf(_row, "tensor_overlap");
         if(overlap != "inputs_overlap")
@@ -1000,7 +1023,7 @@ private:
             fail("strides_" + suffix + "=inherited needs tensor_overlap=inputs_overlap, not "
                  + overlap);
         }
-        const std::string ownerSuffix = suffix == "v" ? "k" : (suffix == "k" ? "q" : "");
+        const std::string ownerSuffix = ownerSuffixOf(suffix);
         const TensorPtr owner = suffix == "v" ? _k : (suffix == "k" ? _q : nullptr);
         if(owner == nullptr)
         {
@@ -1019,16 +1042,108 @@ private:
                  + (vInsideK ? "V inside K" : "K inside Q"));
         }
         _notes.push_back(suffix + "_view_of=" + ownerSuffix);
-        const auto& ownerDims = owner->get_dim();
-        for(size_t i = 0; i < dims.size() && i < ownerDims.size(); ++i)
+        return owner;
+    }
+
+    static std::string ownerSuffixOf(const std::string& suffix)
+    {
+        return suffix == "v" ? "k" : (suffix == "k" ? "q" : "");
+    }
+
+    // tensor_overlap=inputs_overlap shares one buffer when the view (V when head_dim_v <=
+    // head_dim_qk, else K) reads its owner (K, else Q) through the owner's own layout, from the
+    // owner's data start. Every other overlap, and an inputs_overlap that misses a condition,
+    // keeps separate buffers and is listed in notRealised.
+    void realiseOverlap()
+    {
+        const auto& overlap = valueOf(_row, "tensor_overlap");
+        if(overlap == "separate")
         {
-            if(dims[i] > ownerDims[i])
+            return;
+        }
+        if(overlap == "output_overlaps_input" || overlap == "outputs_overlap")
+        {
+            _notRealised.push_back("tensor_overlap=" + overlap + "(output-overlap)");
+            return;
+        }
+        if(overlap != "inputs_overlap")
+        {
+            unknownValue("tensor_overlap", overlap);
+        }
+        const bool vInsideK = _dv <= _dqk;
+        const std::string suffix = vInsideK ? "v" : "k";
+        const TensorPtr& view = vInsideK ? _v : _k;
+        const TensorPtr& owner = vInsideK ? _k : _q;
+        if(const auto reason = overlapProblem(suffix, *view, *owner))
+        {
+            _notRealised.push_back("tensor_overlap=inputs_overlap(" + *reason + ")");
+            return;
+        }
+        if(_contents.count(view->get_name()) != 0)
+        {
+            fail("contents for '" + view->get_name()
+                 + "', which reads the memory of its owner and has no buffer to fill");
+        }
+        if(_startOffsets.erase(view->get_name()) != 0)
+        {
+            const std::string note = suffix + "_start_offset=";
+            _notes.erase(
+                std::remove_if(_notes.begin(),
+                               _notes.end(),
+                               [&note](const std::string& n) { return n.rfind(note, 0) == 0; }),
+                _notes.end());
+        }
+        _views.push_back({view->get_name(), owner->get_name(), 0});
+        _notes.push_back(suffix + "_shares_memory_of=" + ownerSuffixOf(suffix));
+    }
+
+    std::optional<std::string> overlapProblem(const std::string& suffix,
+                                              const TensorAttributes& view,
+                                              const TensorAttributes& owner) const
+    {
+        const std::string ownerSuffix = ownerSuffixOf(suffix);
+        if(valueOf(_row, "batch_packing") != "padded")
+        {
+            return "ragged";
+        }
+        if(valueOf(_row, "paged_kv") != "absent")
+        {
+            return "paged";
+        }
+        if(valueOf(_row, "strides_" + suffix) != "inherited"
+           || view.get_stride() != owner.get_stride())
+        {
+            return "view-layout-not-inherited";
+        }
+        if(view.get_data_type() != owner.get_data_type())
+        {
+            return "view-dtype-differs";
+        }
+        const auto& viewDims = view.get_dim();
+        const auto& ownerDims = owner.get_dim();
+        if(viewDims.size() != ownerDims.size())
+        {
+            return "view-does-not-fit";
+        }
+        for(size_t i = 0; i < viewDims.size(); ++i)
+        {
+            if(viewDims[i] > ownerDims[i])
             {
-                _notes.push_back(suffix + "_view_exceeds_owner");
-                break;
+                return "view-does-not-fit";
             }
         }
-        return owner;
+        for(const int64_t stride : owner.get_stride())
+        {
+            if(stride < 0)
+            {
+                return "negative-stride";
+            }
+        }
+        if(valueOf(_row, "alignment_" + suffix) != valueOf(_row, "alignment_" + ownerSuffix))
+        {
+            return "view-alignment-differs";
+        }
+        return std::nullopt;
     }
 
     // Start offsets are keyed by the tensor's own name; the SDPA node names O and Stats.
@@ -3149,6 +3264,7 @@ bool isRealisedContentAxis(const std::string& axis)
         "block_mask_pattern",
         "dropout_mask_pattern",
         "page_table_order",
+        "tensor_overlap",
     };
     return REALISED.count(axis) != 0;
 }
