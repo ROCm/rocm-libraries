@@ -1769,6 +1769,10 @@ void init_stinkytofu(nb::module_ m) {  // NOLINT(misc-use-internal-linkage)
                         std::cerr << "[StinkyTofu] WARNING: module option '" << key
                                   << "' was removed; a barrier issues when its threshold is met, "
                                   << "and the option is ignored\n";
+                    else if (key == "WmmaQueueDepth")
+                        std::cerr << "[StinkyTofu] WARNING: module option '" << key
+                                  << "' was removed; the WMMA queue depth is the hardware's (5 "
+                                  << "for v_wmma_scale*, 8 otherwise), and the option is ignored\n";
                     else if (isRemovedDsPacingOption(key))
                         std::cerr
                             << "[StinkyTofu] WARNING: module option '" << key

@@ -432,7 +432,7 @@ globalParameters["StinkyTofuEnableRemarks"] = False
 globalParameters["StinkyTofuTimePasses"] = False
 
 # Extra StinkyTofu module options, applied last so they override KernelWriter's own values,
-# e.g. {WmmaQueueDepth: 8, WmmaBatchSize: 2}. Keys are StinkyAsmModule::ModuleOptions names;
+# e.g. {WmmaBatchSize: 2}. Keys are StinkyAsmModule::ModuleOptions names;
 # see stinkytofu docs/user/scheduler-tuning-parameters.md.
 globalParameters["StinkyTofuModuleOptions"] = {}
 

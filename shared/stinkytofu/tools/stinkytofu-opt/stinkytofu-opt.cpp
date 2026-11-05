@@ -203,7 +203,6 @@ std::vector<RequestedPass> parsePassNames(int argc, char** argv, int startIdx) {
                 arg.starts_with("--wmma-queue-cover-cycles=") ||
                 arg.starts_with("--wmma-refill-mode=") || arg.starts_with("--wmma-batch-size=") ||
                 arg == "--ds-spread" || arg == "--no-ds-spread" ||
-                arg == "--wmma-fill-after-reset" || arg == "--no-wmma-fill-after-reset" ||
                 arg.starts_with("--barrier-half-slack=") ||
                 arg.starts_with("--wmma-barrier-cover-cycles=") ||
                 arg.starts_with("--ds-catch-up-pace=") || arg.starts_with("--ds-batch-wmmas=") ||
@@ -603,9 +602,6 @@ int main(int argc, char** argv) {
         } else if (a.starts_with("--tensor-load-ds-load-gap-cycles=")) {
             passFeatureConfig.dagFeatures.tensorLoadDsLoadGapCycles =
                 std::stoi(a.substr(std::string("--tensor-load-ds-load-gap-cycles=").size()));
-        } else if (a.starts_with("--wmma-queue-depth=")) {
-            passFeatureConfig.dagFeatures.wmmaQueueDepth =
-                std::stoi(a.substr(std::string("--wmma-queue-depth=").size()));
         } else if (a.starts_with("--wmma-queue-cover-cycles=")) {
             passFeatureConfig.dagFeatures.wmmaQueueCoverCycles =
                 std::stoi(a.substr(std::string("--wmma-queue-cover-cycles=").size()));
@@ -613,14 +609,13 @@ int main(int argc, char** argv) {
                    a.starts_with("--wmma-barrier-cover-cycles=")) {
             std::cerr << "warning: --wmma-barrier-cover-cycles was removed; a barrier issues "
                       << "when its threshold is met, and the flag is ignored\n";
+        } else if (a.starts_with("--wmma-queue-depth=")) {
+            std::cerr << "warning: --wmma-queue-depth was removed; the WMMA queue depth is the "
+                      << "hardware's (5 for v_wmma_scale*, 8 otherwise), and the flag is ignored\n";
         } else if (a == "--ds-spread") {
             passFeatureConfig.dagFeatures.dsSpread = true;
         } else if (a == "--no-ds-spread") {
             passFeatureConfig.dagFeatures.dsSpread = false;
-        } else if (a == "--wmma-fill-after-reset") {
-            passFeatureConfig.dagFeatures.wmmaFillAfterReset = true;
-        } else if (a == "--no-wmma-fill-after-reset") {
-            passFeatureConfig.dagFeatures.wmmaFillAfterReset = false;
         } else if (a.starts_with("--ds-batch-wmmas=")) {
             passFeatureConfig.dagFeatures.dsBatchWmmas =
                 std::stoi(a.substr(std::string("--ds-batch-wmmas=").size()));

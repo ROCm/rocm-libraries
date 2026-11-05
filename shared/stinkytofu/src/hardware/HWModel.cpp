@@ -84,6 +84,11 @@ constexpr HWModel kGfx1250Model = {
             .vmVsrcTex = 11,
             .vmVsrcBridge = 11,
         },
+    .matrix =
+        {
+            .wmmaQueueDepth = 8,
+            .scaleWmmaQueueDepth = 5,
+        },
 };
 
 // gfx1250v0: starts from the gfx1250 values. Kept as its own object so those
