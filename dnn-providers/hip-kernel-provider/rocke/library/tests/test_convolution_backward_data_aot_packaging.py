@@ -392,8 +392,8 @@ def test_the_plan_serves_rockes_offer(catalog):
 
     The coalesced-weights MFMA instances (waves_k > 1 or runtime_k_loop) used to be
     refused on every grouped problem, for a build_direct_reorganize_weights bug fixed
-    upstream of this PR's base (commit aa9ff78, #13075) -- confirmed fixed by running
-    the grouped_cpg4_kpg320 shape at groups=2 and groups=4 against the CPU reference on
+    upstream (commit aa9ff78) -- confirmed fixed by running the grouped_cpg4_kpg320
+    shape at groups=2 and groups=4 against the CPU reference on
     gfx950 (benchmark_grouped_conv.py --direction dgrad --algorithm
     direct_dgrad_mfma_rtc,direct_grouped_dgrad_mfma --verify): every instance passed.
     """

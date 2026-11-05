@@ -1204,8 +1204,8 @@ def format_instance_list(lst: InstanceList) -> str:
 #: Directions whose default (no-``ranker``) pick is the deterministic
 #: sorted-by-label order :func:`_instance_sort_key` defines, rather than the
 #: list file's on-disk order. Scoped to dgrad only: fwd's default pick is a
-#: hand-tuned family preference (e.g. #14628's windowed depthwise kernel
-#: sorting first in its catalog) that label order does not reproduce, and
+#: hand-tuned family preference (e.g. the windowed depthwise kernel sorting
+#: first in its catalog) that label order does not reproduce, and
 #: re-deriving it needs fresh measurement this change does not make.
 _SET_SEMANTICS_DIRECTIONS = frozenset({"dgrad"})
 

@@ -43,12 +43,17 @@ def catalog():
 @pytest.fixture(scope="module")
 def committed():
     """The committed per-dtype instance lists."""
-    return {
-        dtype: json.loads(
-            (_CONFIGS / tool.INSTANCE_LIST.format(dtype=dtype)).read_text()
-        )
+    paths = {
+        dtype: _CONFIGS / tool.INSTANCE_LIST.format(dtype=dtype)
         for dtype in tool.DTYPES
     }
+    missing = sorted(str(p) for p in paths.values() if not p.exists())
+    if missing:
+        pytest.skip(
+            "DVC-tracked instance list(s) not pulled, run `dvc pull` in "
+            f"{_CONFIGS}: {missing}"
+        )
+    return {dtype: json.loads(path.read_text()) for dtype, path in paths.items()}
 
 
 def _label(identity):

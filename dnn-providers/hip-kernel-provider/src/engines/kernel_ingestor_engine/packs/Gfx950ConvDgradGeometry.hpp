@@ -1922,15 +1922,14 @@ inline std::optional<std::pair<std::array<int64_t, 3>, int64_t>>
 ///   * grouped_dgrad_4c: groups % block_groups, then one forward launch,
 ///     (ceil(Wo' / block_q), groups / block_groups, N) of block_groups / 16 * waves_q * 64
 ///     threads (waves_q = block_q / 4 for the row-staged form).
-///   * grouped_dgrad_mfma / dgrad_mfma_rtc: mfmaKnobsFit; with coalesced weights
-///     groups == 1 only (rocKE's build_direct_reorganize_weights adds the group offset to
-///     the per-group K axis of ws_t a second time, _coalesced_groups_reason); the
-///     transpose W -> ws_t ((groups * KH * KW, ceil(kpg / 64), cpg) of 64), the reorganize
-///     ws_t -> ws_coa when coalesced ((groups * KH * KW * ceil(kpg / k_atom) * ceil(cpg /
-///     16), 1, 1) of 64), then the compute pass on (dY, ws, dX). ws_t is C * KH * KW * kpg
-///     * 2 bytes at offset 0, ws_coa groups * KH * KW * ceil(kpg / k_atom) * ceil(cpg /
-///     16) * 64 * (8 | 4) * 2 bytes at ws_t rounded up to 256. The runtime-channel
-///     transforms take the per-group cpg and kpg.
+///   * grouped_dgrad_mfma / dgrad_mfma_rtc: mfmaKnobsFit; grouped problems admitted
+///     unconditionally, coalesced weights included (rocKE's build_direct_reorganize_weights
+///     folds the group into k_new once, commit aa9ff78); the transpose W -> ws_t ((groups *
+///     KH * KW, ceil(kpg / 64), cpg) of 64), the reorganize ws_t -> ws_coa when coalesced
+///     ((groups * KH * KW * ceil(kpg / k_atom) * ceil(cpg / 16), 1, 1) of 64), then the
+///     compute pass on (dY, ws, dX). ws_t is C * KH * KW * kpg * 2 bytes at offset 0, ws_coa
+///     groups * KH * KW * ceil(kpg / k_atom) * ceil(cpg / 16) * 64 * (8 | 4) * 2 bytes at
+///     ws_t rounded up to 256. The runtime-channel transforms take the per-group cpg and kpg.
 /// Every tensor and workspace stays within the 32-bit kernel ABI.
 inline std::optional<Plan> directPlan(const Problem& problem, const DirectInstance& instance)
 {
