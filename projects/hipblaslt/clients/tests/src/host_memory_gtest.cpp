@@ -145,10 +145,10 @@ namespace
         memory_pool<h_memory>::ReleaseCached();
 
         // The extra would take this one to the limit, where it would count as large.
-        const size_t near  = kHostPoolRetainLimit - kHostPoolRetainLimit / 10;
-        auto         below = memory_pool<h_memory>::Get(near);
+        const size_t request = kHostPoolRetainLimit - kHostPoolRetainLimit / 10;
+        auto         below   = memory_pool<h_memory>::Get(request);
         SKIP_UNLESS_PINNED(below.get());
-        EXPECT_EQ(below.capacity(), near);
+        EXPECT_EQ(below.capacity(), request);
         memory_pool<h_memory>::Restore(below);
         memory_pool<h_memory>::ReleaseCached();
     }
