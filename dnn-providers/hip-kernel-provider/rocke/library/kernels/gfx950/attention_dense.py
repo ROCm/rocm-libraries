@@ -998,11 +998,6 @@ def build_attention_dense(
         kv_seq0 = b.global_load_i32(cu_kv, bt)
         kv_seq1 = b.global_load_i32(cu_kv, b.add(bt, b.const_i32(1)))
         seqlen_kv_b = b.sub(kv_seq1, kv_seq0)
-        # Rows in the packed K/V tensors, cu_seqlens_kv[batch]: the extent that bounds
-        # the K/V buffer resources below. Loaded beside the other cu_kv loads: the
-        # address is uniform (kernarg pointer and batch), so it stays an s_load into
-        # an SGPR rsrc (no readfirstlane, no waterfall) and shares their lgkmcnt wait.
-        kv_packed_rows = b.global_load_i32(cu_kv, batch_p)
         with b.scf_if(b.cmp_ge(b.mul(qb, b.const_i32(BLOCK_M)), seqlen_q_b)):
             b.ret()
         q_base = b.add(b.mul(q_seq0, _stride_q()), b.mul(hq, b.const_i32(D)))
@@ -1096,9 +1091,12 @@ def build_attention_dense(
     # develop emits two here, so sharing one silently breaks byte-identity (the
     # attention_dense representative-IR golden).
     #
-    # Gated on ``spec.paged``, not on ``spec.runtime_shape``: the two branches bound
-    # two DIFFERENT buffers, so this is not the removable bookkeeping split that the
-    # batch/seqlen param declaration was.
+    # Gated on ``spec.paged`` and ``varlen``, not on ``spec.runtime_shape``: the
+    # branches bound DIFFERENT extents (the whole page cache, the end of this
+    # workgroup's packed sequence, the contiguous batch*seqlen_kv rows), so this is
+    # not the removable bookkeeping split that the batch/seqlen param declaration
+    # was. Paged stays first: the spec rejects paged varlen, and a page cache is
+    # addressed through block_tables, never through packed offsets.
     if spec.paged:
         # The paged bound is the WHOLE page cache. Pages are addressed through
         # block_tables at page_id*block_size, so any page id the table can name must
@@ -1109,13 +1107,44 @@ def build_attention_dense(
         _kv_cache_elems = spec.num_kv_blocks * spec.block_size * Hkv * D * 2
         k_rsrc = b.buffer_rsrc(k, b.const_i32(_kv_cache_elems))
         v_rsrc = b.buffer_rsrc(v, b.const_i32(_kv_cache_elems))
+    elif varlen:
+        # Packed K/V: bound each workgroup by the end of ITS sequence,
+        # cu_seqlens_kv[bt + 1] (kv_seq1, loaded above). The spec maxima
+        # batch*seqlen_kv overshoot the packed rows whenever a sequence is shorter
+        # than the maximum, so two loads read past the allocation under them: the
+        # last sequence's one-tile-ahead prefetch and a sliding-window start tile
+        # past a sequence's keys. The descriptor is raw (stride 0), so the hardware
+        # range-checks each lane's byte voffset against num_records. Every K/V DMA
+        # lane moves one dword; a lane at or past the bound reads no memory and
+        # writes 0 into its LDS slot. The bound is a whole number of rows, so the cut
+        # falls exactly at row kv_seq1, which also stops those loads from reading
+        # the next sequence's rows. Rows that have keys never see a zeroed row: the
+        # tiles they consume end at (seqlen_kv_b // BN) * BN <= seqlen_kv_b, the
+        # prefetched tile is never consumed, and a window start tile past the keys
+        # feeds only q-blocks that have no key (their P@V now runs over zero V
+        # rows, not the next sequence's).
+        # Row size baked: varlen is never runtime_shape, so _stride_k() is the
+        # constant Hkv*D and a row is Hkv*D*2 bytes (the baked branch of
+        # _kv_elem_bytes_ir() below). kv_seq1 <= batch*seqlen_kv for a well-formed
+        # cu_seqlens_kv, and the preflight keeps batch*seqlen_kv*Hkv*D*2 < 2**31,
+        # so the i32 product cannot overflow.
+        assert not spec.runtime_shape, (
+            "runtime_shape admits a varlen spec, but the varlen K/V bound bakes the "
+            "row size Hkv*D*2: take it from _kv_elem_bytes_ir()'s runtime arm"
+        )
+        KV_ROW_BYTES = Hkv * D * 2
+        k_row_bytes = b.const_i32(KV_ROW_BYTES)
+        k_num_records = b.mul(kv_seq1, k_row_bytes)
+        k_rsrc = b.buffer_rsrc(k, k_num_records)
+        v_row_bytes = b.const_i32(KV_ROW_BYTES)
+        v_num_records = b.mul(kv_seq1, v_row_bytes)
+        v_rsrc = b.buffer_rsrc(v, v_num_records)
     else:
         # Contiguous K/V: num_records must track THIS launch's real extent, since
         # under runtime_shape one kernel serves every seqlen and a baked bound would
         # drop valid reads for a larger one. For the baked sub-modes the product is
         # exactly the B*Skv this used to bake -- run_attention_dense_torch fills the
-        # params from the same spec -- so only the emitted IR changes. Varlen has
-        # no such product: its extent is data, read from cu_seqlens_kv below.
+        # params from the same spec -- so only the emitted IR changes.
         # Per-(batch, token) K/V byte stride = Hkv*D*2. Runtime under runtime_shape
         # (one binary serves every head count), baked otherwise. Emitted fresh at each
         # buffer_rsrc so the baked branch keeps its exact two-const node count.
@@ -1126,24 +1155,12 @@ def build_attention_dense(
                 else b.const_i32(Hkv * D * 2)
             )
 
-        if varlen:
-            # Packed K/V hold only cu_seqlens_kv[batch] rows, fewer than the
-            # batch*seqlen_kv the spec maxima give whenever a sequence is shorter than
-            # the maximum. Bound by the packed extent: the hardware range check drops
-            # every K/V DMA dword at or past it (the last sequence's one-tile-ahead
-            # prefetch, a window start past a sequence's keys), so nothing beyond the
-            # allocation is read. What a dropped lane leaves in LDS is not relied on:
-            # the prefetched tile is never consumed, and a window start tile past the
-            # keys feeds only q-blocks that have no key.
-            k_rsrc = b.buffer_rsrc(k, b.mul(kv_packed_rows, _kv_elem_bytes_ir()))
-            v_rsrc = b.buffer_rsrc(v, b.mul(kv_packed_rows, _kv_elem_bytes_ir()))
-        else:
-            k_rsrc = b.buffer_rsrc(
-                k, b.mul(b.mul(batch_p, seqlen_kv_p), _kv_elem_bytes_ir())
-            )
-            v_rsrc = b.buffer_rsrc(
-                v, b.mul(b.mul(batch_p, seqlen_kv_p), _kv_elem_bytes_ir())
-            )
+        k_rsrc = b.buffer_rsrc(
+            k, b.mul(b.mul(batch_p, seqlen_kv_p), _kv_elem_bytes_ir())
+        )
+        v_rsrc = b.buffer_rsrc(
+            v, b.mul(b.mul(batch_p, seqlen_kv_p), _kv_elem_bytes_ir())
+        )
     # Unused, but the lowering keeps dead ops, so dropping it moves every golden.
     b.zext(b.to_sgpr_u32(b.mul(wave, b.const_i32(64 * 16))), I64)
     if spec.paged:
@@ -3172,10 +3189,7 @@ def run_attention_dense_torch(
 
     Varlen (``spec.varlen``): q/k/v/o use packed [total_tok, H, D] storage.
     Pass both int32 ``cu_seqlens`` [batch+1]. The nonpersistent ABI also takes
-    batch/seqlen_q/seqlen_kv scalars; optional LSE is the final pointer. The
-    kernel reads ``cu_seqlens_kv[batch]`` on the device and bounds the K/V buffer
-    resources by that many rows, so ``batch`` must be the sequence count and that
-    entry must equal ``k.shape[0]`` (host-checked only when ``emit_lse`` is on).
+    batch/seqlen_q/seqlen_kv scalars; optional LSE is the final pointer.
 
     Paged (``spec.paged``): K/V are a PAGED CACHE, not dense tensors -- ``k``/``v``
     are ``[num_kv_blocks, block_size, Hkv, D]`` and are addressed through
