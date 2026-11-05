@@ -35,8 +35,8 @@ GlobalParameters:
 # resident block) or its ASEM multiple. Those come back as
 # DID_NOT_SATISFY_ASSERTS, which leaves clientExit at 0 -- and so does a build
 # that silently produced no kernel. Check the per-size verdicts, not the exit
-# code. A full run is 676 rows: 654 PASSED, 22 rejected, 0 FAILED. The 22
-# rejections are the K-ceiling misses in groups 1-6; groups 7-12 should pass
+# code. A full run is 700 rows: 678 PASSED, 22 rejected, 0 FAILED. The 22
+# rejections are the K-ceiling misses in groups 1-6; groups 7-13 should pass
 # every row. No size is dead: every one of them runs on some tile.
 
 BenchmarkProblems:
@@ -917,5 +917,106 @@ BenchmarkProblems:
           - Exact: [192, 4096, 2, 512]    # nWG0=3 and a batch
           - Exact: [320, 4096, 1, 640]    # ceiling for kTiles 5
           - Exact: [64, 8192, 1, 256]     # one M-tile
+        - ActivationArgs:
+          - [Enum: none]
+
+  ########################################################################
+  # 13. A=F8 B=F8 at PrefetchLocalRead 0. A k-tile section then reads only
+  #     its own k-tile, from the LDS buffer that the TDM it issues for the
+  #     k-tile PrefetchGlobalRead ahead overwrites, so that load has to wait
+  #     for every read in the section. K of 3 k-tiles issues it from the
+  #     first section only, 4 k-tiles from the first two; the one-tile sizes
+  #     run the fill copy alone, the 4096-wide one the reuse copy too. The
+  #     second size group is DepthU 128 = MatrixInstK, where LoopIters 1
+  #     clamps PrefetchLocalRead to 0. MT 64x256.
+  #     2 size groups x 4 kernels x 3 sizes = 24 rows.
+  ########################################################################
+  -
+    - # ProblemType, TN
+      OperationType: GEMM
+      MacDataTypeA: F8
+      MacDataTypeB: F8
+      DataType: F8
+      DestDataType: s
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      Activation: False
+      SupportUserArgs: True
+      UseBias: 0
+
+    - # BenchmarkProblemSizeGroup, DepthU 256 (LoopIters 2)
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 128, 1,  1,  2,  8,  2, 2] # MT 64x256, kTiles 9
+        # Required by RAP.
+        - TileProcessingStrategy: [DataParallel]
+        - WorkAssignment: [StaticGrid]
+        - TDMInst: [3]
+        - DepthU: [256]
+        - AssertSummationElementMultiple: [256]
+        - PrefetchLocalRead: [0]
+        - ExpandPointerSwap: [False]
+        - PrefetchGlobalRead: [2]
+        - PrefetchAcrossPersistent: [0,1]
+        - ReuseAcrossPersistent: [0,1]
+        - ScheduleIterAlg: [4]
+        - StaggerU: [0]
+        - SourceSwap: [True]
+        - InitCIterWmma: [1]
+        - WorkGroupMapping: [8]
+        - WavefrontSize: [32]
+        - UseSgprForGRO: [0]
+        - ForceDisableShadowInit: [True]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [64, 256, 1, 768]      # one tile, 3 k-tiles
+          - Exact: [64, 256, 1, 1024]     # one tile, 4 k-tiles
+          - Exact: [320, 4096, 1, 1024]
+        - ActivationArgs:
+          - [Enum: none]
+
+    - # BenchmarkProblemSizeGroup, DepthU 128 = MatrixInstK (LoopIters 1)
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 128, 1,  1,  2,  8,  2, 2] # MT 64x256
+        # Required by RAP.
+        - TileProcessingStrategy: [DataParallel]
+        - WorkAssignment: [StaticGrid]
+        - TDMInst: [3]
+        - DepthU: [128]
+        - AssertSummationElementMultiple: [128]
+        - ExpandPointerSwap: [False]
+        - PrefetchGlobalRead: [2]
+        - PrefetchAcrossPersistent: [0,1]
+        - ReuseAcrossPersistent: [0,1]
+        - ScheduleIterAlg: [4]
+        - StaggerU: [0]
+        - SourceSwap: [True]
+        - InitCIterWmma: [1]
+        - WorkGroupMapping: [8]
+        - WavefrontSize: [32]
+        - UseSgprForGRO: [0]
+        - ForceDisableShadowInit: [True]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [64, 256, 1, 384]      # one tile, 3 k-tiles
+          - Exact: [64, 256, 1, 512]      # one tile, 4 k-tiles
+          - Exact: [320, 4096, 1, 1024]
         - ActivationArgs:
           - [Enum: none]

@@ -805,6 +805,56 @@ def test_rap_gives_each_iteration_of_a_resident_k_tile_its_own_buffer_set(
 
 
 # ---------------------------------------------------------------------------
+# PrefetchLocalRead 0. A k-tile section then reads only its own k-tile, from the
+# LDS buffer that the TDM it issues for the k-tile PrefetchGlobalRead ahead
+# overwrites, so that load has to wait for every read in the section. The
+# scheduler orders the two by their LDS memory tokens, so the sections' read
+# tokens have to rotate with their tensor tokens.
+# ---------------------------------------------------------------------------
+def _kTileSections(source):
+    """The main-loop k-tile sections of the fill and reuse copies, as line lists."""
+    sections = []
+    for begin, end in (("label_LoopBeginL:", "label_LoopEndL:"),
+                       ("label_LoopBeginL_RAPIterN:", "label_LoopEndL_RAPIterN:")):
+        loop = source.split(begin, 1)[1].split(end, 1)[0]
+        sections += [section.splitlines()
+                     for section in re.split(r"^.*RAP k-tile \d+ of \d+ ends here.*$", loop, flags=re.M)]
+    return sections
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        pytest.param({"PrefetchLocalRead": 0}, id="depthu_256"),
+        pytest.param(
+            # LoopIters 1: the PrefetchLocalRead >= LoopIters clamp sets it to 0.
+            {"DepthU": 128, "AssertSummationElementMultiple": 128},
+            id="depthu_equal_to_matrix_inst_k",
+        ),
+    ],
+)
+def test_rap_without_the_local_read_prefetch_reads_each_k_tile_before_overwriting_it(
+    _gp_gfx1250, gfx1250_iim, assembler, overrides
+):
+    sol = Solution(_make_params(gfx1250_iim, PrefetchAcrossPersistent=0, **overrides, **_AUDITED),
+                   False, False, False, assembler, gfx1250_iim)
+    assert sol.get("Valid") is True
+    assert sol["PrefetchLocalRead"] == 0
+    sections = _kTileSections(_kernelSource(sol, assembler))
+    assert len(sections) == 2 * sol["_RAPNumResidentKTiles"]
+    loading = 0
+    for idx, section in enumerate(sections):
+        lines = [line.strip() for line in section]
+        tdm = [i for i, line in enumerate(lines) if line.startswith("tensor_load_to_lds")]
+        reads = [i for i, line in enumerate(lines) if line.startswith("ds_load")]
+        if tdm:
+            loading += 1
+            assert reads and tdm[0] > reads[-1], \
+                f"section {idx} issues its TDM before its last LDS read"
+    assert loading, "no section issues a TDM, so nothing was checked"
+
+
+# ---------------------------------------------------------------------------
 # k_max model. Pinned to the two audited gfx1250 configs, whose true bounds were
 # measured by sweeping the resident k-tile count until rapCheckStoreNeutrality
 # fired: MacroTile 64x256 clears k=8 and trips at 9, 64x512 clears k=3 at 4.
