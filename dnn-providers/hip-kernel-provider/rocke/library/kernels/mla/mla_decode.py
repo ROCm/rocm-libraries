@@ -83,6 +83,7 @@ from kernels.common._bf16_rne import bf16x4_rne_finite
 from kernels.common._read_ahead import read_ahead
 from kernels.common.attention_arch import attention_lds_capacity_bytes
 from kernels.common.attention_dense_spec import INT32_LIMIT
+from rocke.core.arch.target import base_arch_from_target_id
 from rocke.core.ir import BF16, F32, I32, I64, IRBuilder, KernelDef, PtrType
 from rocke.helpers.attention import (
     mfma_16x16x16_for_dtype as _mfma_16x16x16,
@@ -108,6 +109,7 @@ from ._mla_body import (
     WT_PAD,
     pick4,
     query_reduce,
+    require_int_fields,
     shift,
 )
 
@@ -202,7 +204,7 @@ class MlaDecodeSpec:
         """
         if self.dtype != "bf16":
             raise ValueError(f"MLA decode supports bf16 only, got dtype={self.dtype!r}")
-        for name in (
+        counts = (
             "num_heads",
             "d_rope",
             "r_kv",
@@ -211,12 +213,10 @@ class MlaDecodeSpec:
             "heads_per_wave",
             "num_seg",
             "num_warps",
-        ):
+        )
+        require_int_fields(self, counts)
+        for name in counts:
             value = getattr(self, name)
-            # type(), not isinstance(): a bool or a float must not pass as a
-            # count (num_seg=True or 2.0 would pick a kernel variant).
-            if type(value) is not int:
-                raise ValueError(f"{name} must be an int, got {value!r}")
             if value <= 0:
                 raise ValueError(f"{name} must be positive, got {value}")
         if self.block_k & (self.block_k - 1):
@@ -316,7 +316,7 @@ def supports_mla_decode(spec: MlaDecodeSpec, *, arch: str) -> tuple[bool, str]:
     Returns ``(ok, reason)``; ``reason`` is empty when ``ok``. Every rejection
     names the offending field and what would be accepted.
     """
-    if arch.split(":")[0] != spec.ARCH:
+    if base_arch_from_target_id(arch) != spec.ARCH:
         return False, (
             f"{type(spec).__name__} emits the {spec.ARCH} MLA decode kernel, got "
             f"arch={arch!r}"
@@ -467,13 +467,23 @@ def mla_decode_max_num_seg(spec: MlaDecodeSpec, *, total_q: int) -> int:
     return (INT32_LIMIT - 1) // row_elems
 
 
-def check_mla_decode_extents(spec: MlaDecodeSpec, *, total_q: int) -> tuple[bool, str]:
-    """Whether a ``total_q``-token launch of ``spec`` stays i32-addressable.
+def check_mla_decode_extents(
+    spec: MlaDecodeSpec, *, total_q: int, max_seqlen_k: int
+) -> tuple[bool, str]:
+    """Whether a ``total_q``-token launch of ``spec`` with keys up to
+    ``max_seqlen_k`` per sequence stays within the kernels' i32 arithmetic.
 
     The widest tensor indexed by element is ``qa`` (``qa_cols`` per head) or,
     split, the workspace (``r_kv * num_seg`` per head); ``out`` and ``lse``
-    are narrower. Returns ``(ok, reason)``; ``reason`` is empty when ``ok``.
+    are narrower. A sequence's tile count is ``(s_k + block_k - 1) / block_k``
+    in i32, so the rounding addition bounds ``max_seqlen_k``. Returns
+    ``(ok, reason)``; ``reason`` is empty when ``ok``.
     """
+    if int(max_seqlen_k) + spec.block_k - 1 >= INT32_LIMIT:
+        return False, (
+            f"max_seqlen_k={max_seqlen_k} overflows the decode kernel's i32 "
+            f"tile count (s_k + block_k - 1 must stay below {INT32_LIMIT})"
+        )
     widest = max(spec.qa_cols, spec.r_kv * spec.num_seg)
     if int(total_q) * spec.num_heads * widest >= INT32_LIMIT:
         return False, (

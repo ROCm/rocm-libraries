@@ -19,6 +19,7 @@ Specs come from the dispatch factory, never hand-rolled. Every test is marked
 from __future__ import annotations
 
 import pytest
+from rocke.core.arch.target import base_arch_from_target_id
 
 torch = pytest.importorskip("torch", reason="ROCm torch required")
 
@@ -30,7 +31,9 @@ def _device_arch() -> str | None:
     # gcnArchName is a ROCm property: CUDA torch has a device but not it.
     if torch.version.hip is None or not torch.cuda.is_available():
         return None
-    arch = torch.cuda.get_device_properties(0).gcnArchName.split(":")[0].lower()
+    arch = base_arch_from_target_id(
+        torch.cuda.get_device_properties(0).gcnArchName.lower()
+    )
     return arch if arch in _ARCHES else None
 
 

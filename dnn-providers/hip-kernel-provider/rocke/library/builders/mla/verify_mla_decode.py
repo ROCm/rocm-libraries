@@ -655,9 +655,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     poison = args.mode != "oracle" if args.poison_unused is None else args.poison_unused
 
     import torch  # noqa: F401  -- binds the torch-bundled comgr before rocke
+    from rocke.core.arch.target import base_arch_from_target_id
     from rocke.runtime.hip_module import get_device_arch
 
-    arch = args.arch or (get_device_arch() or "gfx942").split(":")[0]
+    arch = args.arch or base_arch_from_target_id(get_device_arch() or "gfx942")
     cases = []
     for name in args.scenario or sorted(SCENARIOS):
         sc = SCENARIOS[name]

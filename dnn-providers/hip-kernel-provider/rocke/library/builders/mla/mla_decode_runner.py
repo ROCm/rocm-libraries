@@ -27,6 +27,7 @@ library itself stays importable without it.
 
 from __future__ import annotations
 
+import contextlib
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
@@ -39,6 +40,47 @@ if TYPE_CHECKING:
     from rocke.runtime import KernelLauncher, LaunchConfig
 
 __all__ = ["MlaDecodeRunner", "bmm_absorb_query", "bmm_project_latent"]
+
+# The alignment, in bytes, that the kernels declare (LLVM ``align=``) on each
+# pointer parameter: ``build_mla_decode`` and ``build_mla_decode_combine``
+# (``kernels/mla/mla_decode.py``, ``kernels/mla/mla_decode_combine.py``). The
+# compiler may emit loads and stores that need it, so a caller tensor that
+# starts short of it is refused rather than launched. ``part_acc`` / ``part_ml``
+# are the runner's own allocations and are always aligned.
+_POINTER_ALIGN = {
+    "qa": 16,
+    "c_kv": 16,
+    "k_rope": 16,
+    "out": 16,
+    "lse": 16,
+    "cu_seqlens_q": 4,
+    "cu_seqlens_k": 4,
+    "block_table": 4,
+}
+
+# torch reports ROCm devices as "cuda".
+_LAUNCH_DEVICE_TYPES = frozenset({"cuda"})
+
+
+def _byte_range(t: torch.Tensor) -> tuple[int, int] | None:
+    """``[start, stop)`` of the bytes ``t`` addresses, or ``None`` when it
+    addresses none (no elements, or no storage as on the meta device)."""
+    start = t.data_ptr()
+    if t.numel() == 0 or start == 0:
+        return None
+    span = sum((n - 1) * st for n, st in zip(t.shape, t.stride(), strict=True)) + 1
+    return start, start + span * t.element_size()
+
+
+def _on_stream(stream: int, device: torch.device):
+    """Make HIP stream handle ``stream`` torch's current stream for a ``with``
+    block, so allocations and copies in it are ordered on that stream. ``0`` is
+    torch's current stream already."""
+    import torch
+
+    if not stream:
+        return contextlib.nullcontext()
+    return torch.cuda.stream(torch.cuda.ExternalStream(stream, device=device))
 
 
 def bmm_absorb_query(
@@ -84,10 +126,20 @@ class MlaDecodeRunner:
 
     Single stream: the split workspace is one buffer per runner, reused by
     every launch, so concurrent launches on different streams would share it.
-    Use one runner per stream.
+    Use one runner per stream. The workspace is allocated on the stream of the
+    first launch that needs it, as are the outputs ``out`` / ``lse`` of a launch
+    that is not handed them.
+
+    Single device: the kernels are loaded on the device current at
+    construction, and a launch with tensors on another device is refused.
     """
 
+    # The device index the kernels were loaded on; ``None`` when there was no
+    # device to load them on (and then no device check is made).
+    _device_index: int | None = None
+
     def __init__(self, result: DispatchResult, *, num_seg: int | None = None) -> None:
+        import torch
         from rocke import compile_kernel
         from rocke.runtime import KernelLauncher
 
@@ -130,6 +182,8 @@ class MlaDecodeRunner:
                 ),
             )
         self._workspace: tuple[str, tuple[torch.Tensor, torch.Tensor]] | None = None
+        if torch.cuda.is_available():
+            self._device_index = torch.cuda.current_device()
 
     @property
     def kernel_names(self) -> tuple[str, ...]:
@@ -226,6 +280,16 @@ class MlaDecodeRunner:
         ):
             if t is not None and t.device != qa.device:
                 raise ValueError(f"{name} is on {t.device}; qa is on {qa.device}")
+        if qa.device.type not in _LAUNCH_DEVICE_TYPES:
+            raise ValueError(
+                f"the tensors are on {qa.device}; the kernels read device memory, "
+                "so they must be on a GPU"
+            )
+        if self._device_index is not None and qa.device.index != self._device_index:
+            raise ValueError(
+                f"the tensors are on {qa.device}; this runner's kernels were "
+                f"loaded on device {self._device_index}"
+            )
         if block_table.dtype != torch.int32:
             raise ValueError(
                 f"block_table must be torch.int32, got {block_table.dtype}"
@@ -248,6 +312,42 @@ class MlaDecodeRunner:
         )
         if not ok:
             raise ValueError(why)
+        named = {
+            "qa": qa,
+            "c_kv": c_kv,
+            "k_rope": k_rope,
+            "cu_seqlens_q": cu_seqlens_q,
+            "cu_seqlens_k": cu_seqlens_k,
+            "block_table": block_table,
+            "out": out,
+            "lse": lse,
+        }
+        named = {name: t for name, t in named.items() if t is not None}
+        for name, t in named.items():
+            align = _POINTER_ALIGN[name]
+            if t.data_ptr() % align:
+                raise ValueError(
+                    f"{name} starts at address {t.data_ptr():#x}, which is not "
+                    f"{align}-byte aligned as the kernel requires; pass a tensor "
+                    "that owns its storage or a view at an aligned offset"
+                )
+        # The kernel marks every pointer ``noalias``: an output sharing bytes
+        # with an input or with the other output would be a data race.
+        ranges = {name: _byte_range(t) for name, t in named.items()}
+        for out_name in ("out", "lse"):
+            mine = ranges.get(out_name)
+            if mine is None:
+                continue
+            for other, theirs in ranges.items():
+                if other == out_name or theirs is None:
+                    continue
+                if other in ("out", "lse") and other < out_name:
+                    continue  # the pair is reported once
+                if mine[0] < theirs[1] and theirs[0] < mine[1]:
+                    raise ValueError(
+                        f"{out_name} shares storage with {other}; the kernel "
+                        "declares them noalias, so give each its own buffer"
+                    )
 
     def check_contents(
         self,
@@ -256,6 +356,7 @@ class MlaDecodeRunner:
         block_table: torch.Tensor | None = None,
         *,
         num_pages: int | None = None,
+        stream: int = 0,
     ) -> None:
         """Check the offsets and page ids against the request (host sync).
 
@@ -268,10 +369,20 @@ class MlaDecodeRunner:
         block-table width :meth:`latent` checks, and a page id outside the
         cache reads out of bounds. Slots past a sequence's last page are not
         page ids and are not checked. This reads the arrays back, so it is
-        opt-in.
+        opt-in. ``stream`` is the HIP stream the launch will use (``0``: torch's
+        current stream): the readback is ordered on it, so it sees what was
+        queued there. The arrays are widened to int64 first, so offsets that
+        would wrap in int32 are rejected rather than read as small lengths.
         """
+        import torch
+
         req = self.request
-        cu_q, cu_k = cu_seqlens_q.cpu(), cu_seqlens_k.cpu()
+        with _on_stream(stream, cu_seqlens_q.device):
+            cu_q = cu_seqlens_q.cpu().to(torch.int64)
+            cu_k = cu_seqlens_k.cpu().to(torch.int64)
+            bt = None
+            if block_table is not None and num_pages is not None:
+                bt = block_table[: req.num_seqs].cpu().to(torch.int64)
         q_lens, k_lens = cu_q[1:] - cu_q[:-1], cu_k[1:] - cu_k[:-1]
         if int(q_lens.min()) < 0 or int(k_lens.min()) < 0:
             raise ValueError("cu_seqlens arrays must be non-decreasing")
@@ -292,8 +403,7 @@ class MlaDecodeRunner:
                 f"a sequence has {int(k_lens.max())} keys; the dispatched "
                 f"request states max_seqlen_k={req.max_seqlen_k}"
             )
-        if block_table is not None and num_pages is not None:
-            bt = block_table[: req.num_seqs].cpu()
+        if bt is not None:
             pbs = self.spec.page_block_size
             for s, k in enumerate(k_lens.tolist()):
                 row = bt[s, : -(-k // pbs)]
@@ -355,18 +465,25 @@ class MlaDecodeRunner:
         self._check_grids_fit_device(qa.device)
         if check_contents:
             self.check_contents(
-                cu_seqlens_q, cu_seqlens_k, block_table, num_pages=int(c_kv.shape[0])
+                cu_seqlens_q,
+                cu_seqlens_k,
+                block_table,
+                num_pages=int(c_kv.shape[0]),
+                stream=stream,
             )
         spec = self.spec
         total_q = int(qa.shape[0])
-        if out is None:
-            out = torch.empty(
-                total_q, spec.num_heads, spec.r_kv, dtype=qa.dtype, device=qa.device
-            )
-        if lse is None:
-            lse = torch.empty(
-                total_q, spec.num_heads, dtype=torch.float32, device=qa.device
-            )
+        # Allocate on the launch stream, so the caching allocator does not hand
+        # the kernels a block that work queued on another stream still uses.
+        with _on_stream(stream, qa.device):
+            if out is None:
+                out = torch.empty(
+                    total_q, spec.num_heads, spec.r_kv, dtype=qa.dtype, device=qa.device
+                )
+            if lse is None:
+                lse = torch.empty(
+                    total_q, spec.num_heads, dtype=torch.float32, device=qa.device
+                )
         vals = {
             "qa_ptr": qa,
             "c_kv_ptr": c_kv,
@@ -385,7 +502,8 @@ class MlaDecodeRunner:
         if self._combine is None:
             vals.update(out_ptr=out, lse_ptr=lse)
             return [(self._latent, vals, config)], out, lse
-        part_acc, part_ml = self.workspace(qa.device)
+        with _on_stream(stream, qa.device):
+            part_acc, part_ml = self.workspace(qa.device)
         vals.update(part_acc_ptr=part_acc, part_ml_ptr=part_ml, num_seg=spec.num_seg)
         combine_vals = {
             "out_ptr": out,

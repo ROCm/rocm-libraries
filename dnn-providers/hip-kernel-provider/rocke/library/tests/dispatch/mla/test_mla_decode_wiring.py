@@ -335,6 +335,20 @@ class TestFlavorRule:
         assert not flavor_honors_agpr_alloc("llvm20")
         assert flavor_honors_agpr_alloc("llvm22")
 
+    def test_a_newer_lane_is_served_whatever_its_datalayout(self, monkeypatch):
+        # The rule ranks compiler lanes; a lane added after the newest one is
+        # served before anyone records its datalayout generation.
+        from rocke.core import llvm_profile
+
+        ranks = dict(llvm_profile._LLVM_FLAVOR_RANK)
+        ranks["llvm99"] = max(ranks.values()) + 1
+        monkeypatch.setattr(llvm_profile, "_LLVM_FLAVOR_RANK", ranks)
+        assert flavor_honors_agpr_alloc("llvm99")
+
+    def test_a_name_that_is_not_a_lane_raises(self):
+        with pytest.raises(ValueError, match="unknown LLVM flavor"):
+            flavor_honors_agpr_alloc("gcc")
+
     @pytest.mark.parametrize("arch", sorted(DECODE))
     @pytest.mark.parametrize("flavor", LLVM_FLAVORS)
     def test_decode_admits_exactly_the_flavors_the_rule_serves(
@@ -343,6 +357,26 @@ class TestFlavorRule:
         monkeypatch.setenv("ROCKE_LLVM_FLAVOR", flavor)
         ok, why = MLA_REGISTRY.get(DECODE[arch]).admits(_decode(arch=arch))
         assert ok == flavor_honors_agpr_alloc(flavor), why
+
+
+class TestKeyLength:
+    """The kernel rounds each sequence's key count up to tiles in i32."""
+
+    @pytest.mark.parametrize("arch", sorted(DECODE))
+    def test_a_key_count_past_the_i32_tile_math_is_refused(self, arch):
+        ok, why = MLA_REGISTRY.get(DECODE[arch]).admits(
+            _decode(arch=arch, max_seqlen_k=2**31 - 1)
+        )
+        assert not ok and "tile count" in why
+
+    @pytest.mark.parametrize("arch", sorted(DECODE))
+    def test_the_largest_key_count_the_tile_math_holds_is_admitted(self, arch):
+        # block_k is the request's page size (one k-tile per page).
+        top = 2**31 - _decode(arch=arch).page_block_size
+        ok, why = MLA_REGISTRY.get(DECODE[arch]).admits(
+            _decode(arch=arch, max_seqlen_k=top)
+        )
+        assert ok, why
 
 
 class TestGridLimits:
@@ -392,6 +426,11 @@ class TestGridLimits:
         match = f"z extent {narrow + 1} exceeds the grid limit {narrow}"
         with pytest.raises(ValueError, match=match):
             launch.with_num_seg(narrow + 1)
+
+    def test_a_forced_split_count_must_be_an_int(self):
+        launch = mla_decode_launch(dispatch_mla(_decode(**self.SPLIT)))
+        with pytest.raises(TypeError, match="num_seg must be an int, got float"):
+            launch.with_num_seg(2.0)
 
     def test_selection_does_not_read_the_device(self, monkeypatch):
         """Dispatch ARCHITECTURE.md, section 6.2, rule 3: with ``num_cus`` given,

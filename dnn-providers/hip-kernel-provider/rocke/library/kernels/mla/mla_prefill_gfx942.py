@@ -112,6 +112,7 @@ from kernels.mla._mla_body import (
     open_kernel,
     pack_p,
     pick4,
+    require_int_fields,
     rescale_if_any,
     run_k_loops,
     scale_frag,
@@ -381,27 +382,25 @@ class MlaPrefillSpec:
                 raise TypeError(
                     f"{name} must be a bool, got {type(value).__name__} {value!r}"
                 )
-        for name in (
-            "num_heads",
-            "d_nope",
-            "d_rope",
-            "d_v",
-            "r_kv",
-            "block_q",
-            "block_k",
-            "r_kv_tile",
-            "num_warps",
-            "page_block_size",
-            "binary_search_iters",
-            "heads_per_wg",
-            "q_tiles_per_wg",
-            "num_xcds",
-        ):
-            value = getattr(self, name)
-            if type(value) is not int:
-                raise TypeError(
-                    f"{name} must be an int, got {type(value).__name__} {value!r}"
-                )
+        require_int_fields(
+            self,
+            (
+                "num_heads",
+                "d_nope",
+                "d_rope",
+                "d_v",
+                "r_kv",
+                "block_q",
+                "block_k",
+                "r_kv_tile",
+                "num_warps",
+                "page_block_size",
+                "binary_search_iters",
+                "heads_per_wg",
+                "q_tiles_per_wg",
+                "num_xcds",
+            ),
+        )
         positive = (
             "num_heads",
             "d_nope",

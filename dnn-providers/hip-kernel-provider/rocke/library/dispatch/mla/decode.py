@@ -198,7 +198,9 @@ def _decode_spec_gate(spec: MlaDecodeSpec, req: MLARequest) -> tuple[bool, str]:
     the kernel gate, and the combine gate when split. Dispatch's own choice and
     a forced split count (:meth:`MlaDecodeLaunch.with_num_seg`) pass the same
     gate."""
-    ok, why = check_mla_decode_extents(spec, total_q=req.total_q)
+    ok, why = check_mla_decode_extents(
+        spec, total_q=req.total_q, max_seqlen_k=req.max_seqlen_k
+    )
     if not ok:
         return False, why
     ok, why = _check_grids(spec, req)
@@ -269,7 +271,7 @@ def make_mla_decode_candidate(
             )
         try:
             spec = spec_for(req)
-        except ValueError as exc:
+        except (TypeError, ValueError) as exc:
             return False, f"spec rejected: {exc}"
         return _decode_spec_gate(spec, req)
 
@@ -392,12 +394,8 @@ class MlaDecodeLaunch:
     def with_num_seg(self, num_seg: int) -> MlaDecodeLaunch:
         """This launch with the split count forced (parity sweeps), gated as
         dispatch gates its own choice; the result's identity follows the spec."""
-        # Exact int: 1.9 would truncate to a single-pass binary with another
-        # signature, and True would pass as 1.
-        if type(num_seg) is not int:
-            raise ValueError(
-                f"num_seg must be an int, got {type(num_seg).__name__} {num_seg!r}"
-            )
+        # The spec's own check refuses a non-int num_seg (TypeError): 1.9 would
+        # truncate to a single-pass binary with another signature.
         req, cand = self.result.request, self.result.candidate
         spec = dataclasses.replace(self.spec, num_seg=num_seg)
         ok, why = _decode_spec_gate(spec, req)

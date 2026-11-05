@@ -37,9 +37,12 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 
+from rocke.core.arch.target import base_arch_from_target_id
 from rocke.core.ir import BF16, F32, I32, IRBuilder, KernelDef, PtrType
 from rocke.helpers.attention import safe_inv_l as _safe_inv_l
 from rocke.helpers.spec import SignatureBuilder
+
+from ._mla_body import require_int_fields
 
 __all__ = [  # noqa: RUF022  -- ordered spec -> gate -> launch geometry -> build
     "NEG_INIT",
@@ -64,6 +67,13 @@ SUPPORTED_ARCHES = ("gfx942", "gfx950")
 #: the ``m`` an empty segment reports. Finite on purpose: with every segment
 #: empty the merge's ``M`` equals it too, so ``2**(m_s - M)`` is 1 rather than
 #: ``-inf - -inf = NaN``, and ``l = 0`` then zeroes the row.
+#:
+#: The cost is a floor under live scores: one whose scaled log2 value is at or
+#: below ``NEG_INIT`` is weighted like a masked key, so a sequence with no key
+#: above it reads as empty (zero row, ``lse = -inf``). That needs ``|q . k|``
+#: past 1e30 for a single key, far outside any bf16 cache an attention layer
+#: produces; the MLA prefill's running max has the same floor (``NEG_INF`` in
+#: ``_mla_body``).
 NEG_INIT = -1e30
 
 
@@ -83,11 +93,9 @@ class MlaDecodeCombineSpec:
             raise ValueError(
                 f"MLA decode combine writes bf16 only, got dtype={self.dtype!r}"
             )
-        for name in ("num_heads", "r_kv", "num_warps"):
+        require_int_fields(self, ("num_heads", "r_kv", "num_warps"))
+        for name in ("num_heads", "r_kv"):
             value = getattr(self, name)
-            # type(), not isinstance(): a bool or a float must not pass as a count.
-            if type(value) is not int:
-                raise ValueError(f"{name} must be an int, got {value!r}")
             if value <= 0:
                 raise ValueError(f"{name} must be positive, got {value}")
         if self.num_warps not in (1, 2, 4, 8):
@@ -112,7 +120,7 @@ def supports_mla_decode_combine(
     spec: MlaDecodeCombineSpec, *, arch: str
 ) -> tuple[bool, str]:
     """``(ok, reason)``; ``reason`` is empty when ``ok``."""
-    if arch.split(":")[0] not in SUPPORTED_ARCHES:
+    if base_arch_from_target_id(arch) not in SUPPORTED_ARCHES:
         return False, (
             f"MLA decode combine supports {SUPPORTED_ARCHES} (wave64), got arch={arch!r}"
         )

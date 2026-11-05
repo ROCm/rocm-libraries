@@ -20,7 +20,6 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from _mla_resource_gate import require_tools_or_skip
 from kernels.mla._mla_body import flavor_honors_agpr_alloc
 from kernels.mla.mla_prefill_gfx942 import (
     MlaPrefillSpec,
@@ -35,6 +34,8 @@ from kernels.mla.mla_prefill_gfx942 import (
     supports_mla_prefill,
 )
 from rocke.core.lower_llvm import lower_kernel_to_llvm
+
+from ._compiler_test_utils import require_tools_or_skip
 
 
 def _spec(**kw) -> MlaPrefillSpec:

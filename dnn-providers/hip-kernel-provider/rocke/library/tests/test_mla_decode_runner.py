@@ -11,11 +11,14 @@ the ``num_seg`` override is refused before anything is compiled.
 
 from __future__ import annotations
 
+import contextlib
+
 import numpy as np
 import pytest
 
 torch = pytest.importorskip("torch", reason="torch required")
 
+from builders.mla import mla_decode_runner as runner_module  # noqa: E402
 from builders.mla.mla_decode_runner import (  # noqa: E402
     MlaDecodeRunner,
     bmm_absorb_query,
@@ -42,6 +45,61 @@ def _no_device_grid_query(monkeypatch):
     from rocke.runtime import hip_module
 
     monkeypatch.setattr(hip_module, "get_device_max_grid_size", lambda device=0: None)
+
+
+@pytest.fixture(autouse=True)
+def _host_tensors_count_as_gpu(monkeypatch):
+    """The runner refuses tensors that are not on a GPU; these tests run on CPU
+    (and meta) tensors. The tests of that refusal restore the real set."""
+    monkeypatch.setattr(
+        runner_module, "_LAUNCH_DEVICE_TYPES", frozenset({"cpu", "meta"})
+    )
+
+
+class _FakeStreams:
+    """Stand-ins for ``torch.cuda.ExternalStream`` / ``torch.cuda.stream`` that
+    log what they are asked, so the stream plumbing is checkable without a GPU.
+    ``log`` holds ``("external", handle, device)``, ``("enter",)``, ``("exit",)``
+    and ``("empty",)`` for each ``torch.empty`` call, in order."""
+
+    def __init__(self, monkeypatch):
+        self.log = []
+        log = self.log
+        real_empty = torch.empty
+
+        class Ctx:
+            def __init__(self, ext):
+                self.ext = ext
+
+            def __enter__(self):
+                log.append(("enter",))
+
+            def __exit__(self, *exc):
+                log.append(("exit",))
+
+        def external(handle, device=None):
+            log.append(("external", handle, device))
+            return handle
+
+        def empty(*a, **kw):
+            log.append(("empty",))
+            return real_empty(*a, **kw)
+
+        monkeypatch.setattr(torch.cuda, "ExternalStream", external)
+        monkeypatch.setattr(torch.cuda, "stream", Ctx)
+        monkeypatch.setattr(torch, "empty", empty)
+
+    def inside(self, kind):
+        """Whether every ``kind`` event in the log happened inside a stream block."""
+        depth, flags = 0, []
+        for event in self.log:
+            if event[0] == "enter":
+                depth += 1
+            elif event[0] == "exit":
+                depth -= 1
+            elif event[0] == kind:
+                flags.append(depth > 0)
+        return flags
 
 
 def _result(**overrides):
@@ -211,6 +269,92 @@ class TestInputChecks:
         with pytest.raises(ValueError, match="kernel's i32 offsets"):
             self._check_pitch(2**31 - PAGES + 1, num_seqs=2)
 
+    @pytest.mark.parametrize(
+        "name, elems, width",
+        [
+            ("qa", T * H * 576, None),
+            ("c_kv", B * PAGES * 16 * 512, (B * PAGES, 16, 512)),
+            ("k_rope", B * PAGES * 16 * 64, (B * PAGES, 16, 64)),
+            ("out", T * H * 512, None),
+            ("lse", T * H, None),
+        ],
+    )
+    def test_misaligned_pointer_is_refused(self, name, elems, width):
+        # A bf16 view starting at element 1 has the right shape and is
+        # contiguous, but starts 2 bytes past a 16-byte boundary (fp32: 4).
+        good = _inputs()[name]
+        flat = torch.zeros(elems + 1, dtype=good.dtype)[1:]
+        bad = flat.view(*(width or good.shape))
+        with pytest.raises(ValueError, match=f"{name} starts at address .*16-byte"):
+            _check(_uncompiled_runner(_result()), _inputs(**{name: bad}))
+
+    def test_aligned_offset_view_passes(self):
+        # 8 bf16 elements is 16 bytes: an offset view is fine when aligned.
+        flat = torch.zeros(T * H * 576 + 8, dtype=torch.bfloat16)[8:]
+        if flat.data_ptr() % 16:
+            pytest.skip("allocator base is not 16-byte aligned")
+        _check(_uncompiled_runner(_result()), _inputs(qa=flat.view(T, H, 576)))
+
+    def test_output_sharing_storage_with_an_input_is_refused(self):
+        t = _inputs()
+        # An ``out`` that is a contiguous, 16-byte aligned view into the cache.
+        out_view = t["c_kv"].view(-1)[: T * H * 512].view(T, H, 512)
+        with pytest.raises(ValueError, match="out shares storage with c_kv"):
+            _check(_uncompiled_runner(_result()), dict(t, out=out_view))
+
+    def test_outputs_sharing_storage_are_refused(self):
+        t = _inputs()
+        lse_view = t["out"].view(-1).view(torch.float32)[: T * H].view(T, H)
+        with pytest.raises(ValueError, match="lse shares storage with out"):
+            _check(_uncompiled_runner(_result()), dict(t, lse=lse_view))
+
+    def test_adjacent_views_of_one_buffer_are_not_aliases(self):
+        t = _inputs()
+        buf = torch.zeros(T * H * 512 + 2 * T * H, dtype=torch.bfloat16)
+        out = buf[: T * H * 512].view(T, H, 512)
+        lse = buf[T * H * 512 :].view(torch.float32).view(T, H)
+        _check(_uncompiled_runner(_result()), dict(t, out=out, lse=lse))
+
+    def test_cpu_tensors_are_refused(self, monkeypatch):
+        monkeypatch.setattr(runner_module, "_LAUNCH_DEVICE_TYPES", frozenset({"cuda"}))
+        runner = _uncompiled_runner(_result())
+        with pytest.raises(ValueError, match="must be on a GPU"):
+            _check(runner, _inputs())
+        # latent() and bind_latent() refuse them before preparing a launch.
+        for entry in (runner.latent, runner.bind_latent):
+            with pytest.raises(ValueError, match="must be on a GPU"):
+                entry(**_inputs(), scale=1.0)
+
+    def test_other_device_is_refused(self):
+        runner = _uncompiled_runner(_result())
+        runner._device_index = 1
+        with pytest.raises(ValueError, match="loaded on device 1"):
+            _check(runner, _inputs())
+        runner._device_index = None  # no device at construction: no check
+        _check(runner, _inputs())
+
+    def test_runner_binds_to_the_construction_device(self, monkeypatch):
+        import types
+
+        import rocke
+        import rocke.runtime
+
+        monkeypatch.setattr(
+            rocke,
+            "compile_kernel",
+            lambda kernel, **kw: types.SimpleNamespace(
+                hsaco=b"", kernel_name=kernel.name
+            ),
+        )
+        monkeypatch.setattr(
+            rocke.runtime, "KernelLauncher", lambda **kw: types.SimpleNamespace(**kw)
+        )
+        monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+        monkeypatch.setattr(torch.cuda, "current_device", lambda: 3)
+        assert MlaDecodeRunner(_result())._device_index == 3
+        monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
+        assert MlaDecodeRunner(_result())._device_index is None
+
     def test_contents_must_respect_the_request(self):
         runner = _uncompiled_runner(_result())
         t = _inputs()
@@ -237,6 +381,39 @@ class TestInputChecks:
         with pytest.raises(ValueError, match=r"must span \[0"):
             runner.check_contents(late, t["cu_seqlens_k"])
 
+    def test_wrapped_int32_offsets_are_rejected(self):
+        # 2147483640 -> -2147483640 is a drop of 4294967280, but the int32
+        # difference wraps to +16 and reads as a valid length.
+        runner = _uncompiled_runner(_result())
+        t = _inputs()
+        wrapped = torch.tensor(
+            [2147483640, -2147483640, -2147483640, -2147483640, -2147483640],
+            dtype=torch.int32,
+        )
+        with pytest.raises(ValueError, match="non-decreasing"):
+            runner.check_contents(t["cu_seqlens_q"], wrapped)
+        with pytest.raises(ValueError, match="non-decreasing"):
+            runner.check_contents(wrapped, t["cu_seqlens_k"])
+
+    def test_check_contents_reads_back_on_the_launch_stream(self, monkeypatch):
+        fake = _FakeStreams(monkeypatch)
+        runner = _uncompiled_runner(_result())
+        t = _inputs()
+        runner.check_contents(t["cu_seqlens_q"], t["cu_seqlens_k"], stream=0)
+        assert fake.log == []  # 0 is torch's current stream: nothing to enter
+        runner.check_contents(
+            t["cu_seqlens_q"],
+            t["cu_seqlens_k"],
+            t["block_table"],
+            num_pages=8,
+            stream=5,
+        )
+        assert fake.log == [
+            ("external", 5, t["cu_seqlens_q"].device),
+            ("enter",),
+            ("exit",),
+        ]
+
     def test_contents_check_used_page_ids_only(self):
         runner = _uncompiled_runner(_result())
         t = _inputs()
@@ -252,7 +429,8 @@ class TestNumSegOverride:
     @pytest.mark.parametrize("num_seg", [1.9, True, "2"])
     def test_non_int_override_is_refused(self, num_seg):
         # 1.9 would truncate to 1: a single-pass binary, not the split asked for.
-        with pytest.raises(ValueError, match="num_seg must be an int"):
+        # The spec's own check raises, as for every MLA spec field.
+        with pytest.raises(TypeError, match="num_seg must be an int"):
             mla_decode_launch(_result()).with_num_seg(num_seg)
 
     def test_override_past_the_i32_workspace_is_refused(self):
@@ -326,6 +504,52 @@ class TestLaunchChecksTheDevice:
         bad = _inputs(qa=torch.zeros(T + 1, H, 576, dtype=torch.bfloat16))
         with pytest.raises(ValueError, match="qa has shape"):
             runner._launches(**bad, scale=1.0, stream=0, check_contents=False)
+
+
+class TestAllocationStream:
+    """A launch on a supplied stream allocates what it needs on that stream.
+    Which stream the caching allocator then associates the blocks with is the
+    GPU's business and is not tested here: only that the allocation happens
+    inside the stream block, and that the content check is passed the stream
+    (the readback itself is not observable on CPU tensors)."""
+
+    @pytest.mark.parametrize("num_seg", [1, 2])
+    def test_outputs_and_workspace_are_allocated_on_the_launch_stream(
+        self, monkeypatch, num_seg
+    ):
+        runner = TestBindLatent()._runner(num_seg, [])
+        fake = _FakeStreams(monkeypatch)
+        t = _inputs()
+        runner._launches(
+            **dict(t, out=None, lse=None), scale=1.0, stream=9, check_contents=False
+        )
+        flags = fake.inside("empty")
+        assert len(flags) == (
+            2 if num_seg == 1 else 4
+        )  # out, lse (+ part_acc, part_ml)
+        assert all(flags)
+        assert ("external", 9, t["qa"].device) in fake.log
+
+    def test_stream_zero_enters_no_stream_block(self, monkeypatch):
+        runner = TestBindLatent()._runner(2, [])
+        fake = _FakeStreams(monkeypatch)
+        t = _inputs()
+        runner._launches(
+            **dict(t, out=None, lse=None), scale=1.0, stream=0, check_contents=False
+        )
+        assert [e for e in fake.log if e[0] != "empty"] == []
+
+    def test_launch_passes_its_stream_to_the_content_check(self, monkeypatch):
+        seen = {}
+
+        def spy(self, *args, **kwargs):
+            seen.update(kwargs)
+
+        monkeypatch.setattr(MlaDecodeRunner, "check_contents", spy)
+        _FakeStreams(monkeypatch)  # stream 11 is not a real handle
+        runner = TestBindLatent()._runner(1, [])
+        runner._launches(**_inputs(), scale=1.0, stream=11, check_contents=True)
+        assert seen["stream"] == 11
 
 
 class TestTorchStages:
@@ -453,7 +677,11 @@ class TestBindLatent:
         return runner
 
     @pytest.mark.parametrize("num_seg", [1, 2])
-    def test_bound_launches_are_the_unbound_ones(self, num_seg):
+    def test_bound_launches_are_the_unbound_ones(self, num_seg, monkeypatch):
+        # Stream 7 is not a real handle: no stream block on CPU tensors.
+        monkeypatch.setattr(
+            runner_module, "_on_stream", lambda stream, device: contextlib.nullcontext()
+        )
         args = dict(_inputs(), scale=0.1, stream=7)
         eager, bound = [], []
         self._runner(num_seg, eager).latent(**args)

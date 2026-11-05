@@ -24,7 +24,6 @@ import unittest
 
 import pytest
 
-from _mla_resource_gate import REQUIRE_ENV, require_tools_or_skip
 from dispatch.mla.decode import choose_num_seg
 from kernels.mla.mla_decode import (
     MlaDecodeSpec,
@@ -47,6 +46,8 @@ from kernels.mla.mla_decode_combine import (
 from kernels.mla.mla_decode_gfx950 import MlaDecodeGfx950Spec, build_mla_decode_gfx950
 from kernels.mla.mla_prefill_gfx942 import MlaPrefillSpec, mla_prefill_fwd_signature
 from rocke.core.lower_llvm import lower_kernel_to_llvm
+
+from ._compiler_test_utils import REQUIRE_COMPILER_TOOLS_ENV, require_tools_or_skip
 
 SPECS = {"gfx942": MlaDecodeSpec, "gfx950": MlaDecodeGfx950Spec}
 
@@ -72,18 +73,28 @@ class TestSpec:
             ({"num_seg": 0}, "num_seg must be positive"),
             ({"num_warps": 3}, "num_warps must be one of"),
             ({"page_block_size": 32}, "page_block_size must equal block_k"),
-            # A bool or float is not a count: True would pass "> 0", and 2.0
-            # would select the split-KV variant.
-            ({"num_seg": True}, "num_seg must be an int"),
-            ({"num_seg": 2.0}, "num_seg must be an int"),
-            ({"num_heads": 128.0}, "num_heads must be an int"),
-            ({"num_warps": True}, "num_warps must be an int"),
             ({"block_k": 48, "page_block_size": 48}, "block_k must be a power of two"),
         ],
     )
     def test_impossible_specs_raise(self, kw, match):
         kw.setdefault("num_heads", 128)
         with pytest.raises(ValueError, match=match):
+            MlaDecodeSpec(**kw)
+
+    @pytest.mark.parametrize(
+        "kw, match",
+        [
+            # A bool or float is not a count: True would pass "> 0", and 2.0
+            # would select the split-KV variant.
+            ({"num_seg": True}, "num_seg must be an int, got bool True"),
+            ({"num_seg": 2.0}, "num_seg must be an int, got float 2.0"),
+            ({"num_heads": 128.0}, "num_heads must be an int, got float"),
+            ({"num_warps": True}, "num_warps must be an int, got bool"),
+        ],
+    )
+    def test_non_int_counts_are_type_errors(self, kw, match):
+        kw.setdefault("num_heads", 128)
+        with pytest.raises(TypeError, match=match):
             MlaDecodeSpec(**kw)
 
     def test_name_records_split_but_not_the_count(self):
@@ -251,12 +262,20 @@ class TestLaunchGeometry:
     def test_extents_track_the_widest_tensor(self):
         # qa: 576 per head; split workspace: 512 * num_seg per head.
         single = MlaDecodeSpec(num_heads=128)
-        assert check_mla_decode_extents(single, total_q=29127)[0]
-        ok, why = check_mla_decode_extents(single, total_q=29128)
+        assert check_mla_decode_extents(single, total_q=29127, max_seqlen_k=1)[0]
+        ok, why = check_mla_decode_extents(single, total_q=29128, max_seqlen_k=1)
         assert not ok and "i32 offsets" in why
         split = MlaDecodeSpec(num_heads=128, num_seg=64)
-        assert check_mla_decode_extents(split, total_q=511)[0]
-        assert not check_mla_decode_extents(split, total_q=512)[0]
+        assert check_mla_decode_extents(split, total_q=511, max_seqlen_k=1)[0]
+        assert not check_mla_decode_extents(split, total_q=512, max_seqlen_k=1)[0]
+
+    def test_extents_bound_the_tile_count(self):
+        # The kernel rounds the key count up to tiles in i32: s_k + block_k - 1.
+        spec = MlaDecodeSpec(num_heads=128)
+        top = 2**31 - spec.block_k
+        assert check_mla_decode_extents(spec, total_q=1, max_seqlen_k=top)[0]
+        ok, why = check_mla_decode_extents(spec, total_q=1, max_seqlen_k=top + 1)
+        assert not ok and "tile count" in why
 
 
 class TestChooseNumSeg:
@@ -354,16 +373,25 @@ class TestCombine:
         assert spec.cols_per_lane == 8
 
     @pytest.mark.parametrize(
-        "kw, match",
+        "kw, exc, match",
         [
-            ({"num_heads": 0}, "num_heads must be positive"),
-            ({"num_heads": True}, "num_heads must be an int"),
-            ({"num_heads": 128, "r_kv": 512.0}, "r_kv must be an int"),
-            ({"num_heads": 128, "num_warps": True}, "num_warps must be an int"),
+            ({"num_heads": 0}, ValueError, "num_heads must be positive"),
+            ({"num_heads": True}, TypeError, "num_heads must be an int"),
+            ({"num_heads": 128, "r_kv": 512.0}, TypeError, "r_kv must be an int"),
+            (
+                {"num_heads": 128, "num_warps": True},
+                TypeError,
+                "num_warps must be an int",
+            ),
+            (
+                {"num_heads": 128, "num_warps": 3},
+                ValueError,
+                "num_warps must be one of",
+            ),
         ],
     )
-    def test_impossible_specs_raise(self, kw, match):
-        with pytest.raises(ValueError, match=match):
+    def test_impossible_specs_raise(self, kw, exc, match):
+        with pytest.raises(exc, match=match):
             MlaDecodeCombineSpec(**kw)
 
     def test_geometry_and_pack(self):
@@ -544,12 +572,12 @@ def _probe_could_not_run(
 ) -> tuple[str, str] | None:
     """``("tools" | "skip", reason)`` when the probe could not run the gate, else None.
 
-    ``"tools"``: a tool the gate needs is missing; whether that fails or skips is
-    the rule shared with the prefill resource guards
-    (:func:`_mla_resource_gate.require_tools_or_skip`). ``"skip"``: no tool is
+    ``"tools"``: the host cannot build or read the kernel, because a tool the
+    gate needs is missing or its comgr rejects a compile option. Whether that
+    fails or skips is the rule shared with the prefill resource guards
+    (:func:`_compiler_test_utils.require_tools_or_skip`). ``"skip"``: nothing is
     missing, but the host takes a different LLVM version or IR flavor than decode
-    serves (or its comgr rejects a compile option), so the gate has nothing to
-    check.
+    serves, so the gate has nothing to check.
     """
     output = (stdout + stderr).strip()
     # The probe prints its reason on stdout; stderr may end in an unrelated
@@ -562,12 +590,13 @@ def _probe_could_not_run(
     if (
         # comgr's option parser exit(1)s with this message and no Python
         # traceback; a traceback is a real failure, whatever its text. It is a
-        # comgr too old for the flags decode compiles with: a version mismatch.
+        # comgr too old for the flags decode compiles with: the loaded compiler
+        # cannot build this kernel, so this is a "tools" case.
         returncode == 1
         and "Unknown command line argument" in stderr
         and "Traceback" not in stderr
     ):
-        return "skip", f"the loaded comgr rejects a compile option: {output[-300:]}"
+        return "tools", f"the loaded comgr rejects a compile option: {output[-300:]}"
     return None
 
 
@@ -588,10 +617,11 @@ class TestResources:
 
     Zero scratch, and at most 256 VGPRs and 32 KiB of LDS, which is what two
     workgroups of four waves need per CU on both arches. Skipped where comgr,
-    llvm-objdump or llvm-readelf is missing -- unless
-    ``ROCKE_REQUIRE_COMPILER_TOOLS=1`` (set by the CTest entry when it supplies
-    ROCm's tools), which turns a missing tool into a failure. A host whose LLVM
-    version or IR flavor decode does not serve skips either way.
+    llvm-objdump or llvm-readelf is missing, or where the loaded comgr rejects a
+    compile option -- unless ``ROCKE_REQUIRE_COMPILER_TOOLS=1`` (set by the CTest
+    entry when it supplies ROCm's tools), which turns that skip into a failure.
+    A host whose LLVM version or IR flavor decode does not serve skips either
+    way.
     """
 
     @pytest.mark.parametrize("arch", sorted(SPECS))
@@ -624,10 +654,11 @@ class TestResources:
 class TestResourceGateVerdict:
     """How the resource gate classifies a probe that could not run it.
 
-    A missing tool is handed to the rule shared with the prefill resource guards
-    (:func:`_mla_resource_gate.require_tools_or_skip`); a host that takes a
-    different LLVM version or IR flavor skips either way, because no tool is
-    missing there.
+    A missing tool, or a compile option the loaded comgr rejects, is handed to
+    the rule shared with the prefill resource guards
+    (:func:`_compiler_test_utils.require_tools_or_skip`); a host that takes a
+    different LLVM version or IR flavor skips either way, because nothing the
+    gate needs is missing there.
     """
 
     _OPTION_ERROR = "error: Unknown command line argument '-amdgpu-foo'"
@@ -651,9 +682,9 @@ class TestResourceGateVerdict:
             "HSACO introspection unavailable: llvm-objdump failed",
         )
 
-    def test_comgr_rejecting_a_compile_option_is_a_skip(self):
+    def test_comgr_rejecting_a_compile_option_is_the_tools_verdict(self):
         verdict = _probe_could_not_run(1, "", self._OPTION_ERROR)
-        assert verdict is not None and verdict[0] == "skip"
+        assert verdict is not None and verdict[0] == "tools"
         assert self._OPTION_ERROR in verdict[1]
 
     def test_a_traceback_is_a_real_failure(self):
@@ -670,18 +701,23 @@ class TestRequireToolsOrSkip:
     compiler tools, skip elsewhere."""
 
     def test_fails_where_the_run_requires_the_tools(self, monkeypatch):
-        monkeypatch.setenv(REQUIRE_ENV, "1")
-        with pytest.raises(
-            AssertionError, match=f"^{REQUIRE_ENV}=1 but llvm-objdump failed$"
-        ):
+        monkeypatch.setenv(REQUIRE_COMPILER_TOOLS_ENV, "1")
+        # A SkipTest here must fail this test, not skip it: catch it explicitly.
+        try:
             require_tools_or_skip("llvm-objdump failed")
+        except AssertionError as exc:
+            assert str(exc) == f"{REQUIRE_COMPILER_TOOLS_ENV}=1 but llvm-objdump failed"
+        except unittest.SkipTest:
+            pytest.fail("skipped where the run requires the compiler tools")
+        else:
+            pytest.fail("returned where the run requires the compiler tools")
 
     @pytest.mark.parametrize("value", [None, "", "0", "true"])
     def test_skips_elsewhere(self, monkeypatch, value):
         if value is None:
-            monkeypatch.delenv(REQUIRE_ENV, raising=False)
+            monkeypatch.delenv(REQUIRE_COMPILER_TOOLS_ENV, raising=False)
         else:
-            monkeypatch.setenv(REQUIRE_ENV, value)
+            monkeypatch.setenv(REQUIRE_COMPILER_TOOLS_ENV, value)
         with pytest.raises(unittest.SkipTest, match="^llvm-objdump failed$"):
             require_tools_or_skip("llvm-objdump failed")
 
@@ -701,9 +737,14 @@ class TestSkipIfProbeDeclined:
         "",
     )
     OPTION_ERROR = (1, "", TestResourceGateVerdict._OPTION_ERROR)
+    OPTION_FAILS = (
+        f"fails: {REQUIRE_COMPILER_TOOLS_ENV}=1 but the resource gate cannot run: "
+        f"the loaded comgr rejects a compile option: "
+        f"{TestResourceGateVerdict._OPTION_ERROR}"
+    )
     RAN = (0, '{"scratch": 0, "vgpr": 1, "lds": 2}\n', "")
     FAILS = (
-        f"fails: {REQUIRE_ENV}=1 but the resource gate cannot run: "
+        f"fails: {REQUIRE_COMPILER_TOOLS_ENV}=1 but the resource gate cannot run: "
         "HSACO introspection unavailable: llvm-objdump failed"
     )
 
@@ -727,7 +768,7 @@ class TestSkipIfProbeDeclined:
             (HOST_MISMATCH, False, "skips"),
             (HOST_MISMATCH, True, "skips"),
             (OPTION_ERROR, False, "skips"),
-            (OPTION_ERROR, True, "skips"),
+            (OPTION_ERROR, True, OPTION_FAILS),
             (RAN, False, "returns"),
             (RAN, True, "returns"),
         ],
@@ -744,7 +785,7 @@ class TestSkipIfProbeDeclined:
     )
     def test_each_probe_outcome(self, monkeypatch, probe, required, outcome):
         if required:
-            monkeypatch.setenv(REQUIRE_ENV, "1")
+            monkeypatch.setenv(REQUIRE_COMPILER_TOOLS_ENV, "1")
         else:
-            monkeypatch.delenv(REQUIRE_ENV, raising=False)
+            monkeypatch.delenv(REQUIRE_COMPILER_TOOLS_ENV, raising=False)
         assert self._outcome(probe) == outcome
