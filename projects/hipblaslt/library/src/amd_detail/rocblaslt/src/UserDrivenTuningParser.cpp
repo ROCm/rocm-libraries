@@ -296,10 +296,9 @@ namespace TensileLite
             break;
         }
 
-        const char* modeName = tuning.mode() == TuningMode::Tune ? "tune" : "cache";
-
         std::ostringstream msg;
-        msg << "mode=" << modeName << " path=" << tuning.cachePath() << " load=" << statusName
+        msg << "mode=" << tuningModeName(tuning.mode()) << " path=" << tuning.cachePath()
+            << " load=" << statusName
             << " loaded=" << TuningCounters::instance().entriesLoaded.load();
 
         if(status == TuningLoadStatus::NoPath)

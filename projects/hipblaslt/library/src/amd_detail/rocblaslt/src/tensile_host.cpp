@@ -4158,6 +4158,7 @@ namespace
         static TensileLite::TuningSearch search(size_t workspaceBytes)
         {
             TensileLite::TuningSearch s;
+            s.mode           = TensileLite::TuningMode::Tune;
             s.allKernels     = allKernels();
             s.maxCandidates  = s.allKernels ? 0 : candidateCap();
             s.workspaceBytes = workspaceBytes;
@@ -5800,8 +5801,9 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
         const auto& tuning = TensileLite::TuningModeSingleton::getInstance();
         const bool  keyed  = tuning.reads() && !prob.grouped_gemm
                            && prob.batchMode != HIPBLASLT_BATCH_MODE_POINTER_ARRAY;
-        const bool tunes
-            = keyed && tuning.writes() && !streamIsCapturing(prob.stream) && !isFusedAllToAll(prob);
+        // Not writes(): online writes the file too but never searches here.
+        const bool tunes = keyed && tuning.mode() == TensileLite::TuningMode::Tune
+                           && !streamIsCapturing(prob.stream) && !isFusedAllToAll(prob);
 
         // A mode set without a path is otherwise reported by the heuristic
         // query, which a matmul-only caller never makes.
