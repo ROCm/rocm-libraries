@@ -1973,7 +1973,7 @@ std::vector<bool> returnsOneFlagTooFew(const MatchContext& /*context*/,
 
 /// Counts how often it is called with the graph match's own bound token present, and keeps
 /// every candidate -- for a test asserting the filter sees what the kernel matchers see.
-int g_filterSawBoundTokenCount = 0;
+int filterSawBoundTokenCount = 0;
 
 std::vector<bool> countBoundTokenSightings(const MatchContext& /*context*/,
                                            const BoundTokens& bound,
@@ -1981,7 +1981,7 @@ std::vector<bool> countBoundTokenSightings(const MatchContext& /*context*/,
 {
     if(tryGetBoundInt(bound, "test.bound_token") == BOUND_TOKEN_VALUE)
     {
-        ++g_filterSawBoundTokenCount;
+        ++filterSawBoundTokenCount;
     }
     return std::vector<bool>(candidates.size(), true);
 }
@@ -2086,7 +2086,7 @@ TEST(TestKernelIngestorStateManager, ACandidateFilterReturningTheWrongLengthThro
 /// the graph admits", which requires seeing what the graph matched.
 TEST(TestKernelIngestorStateManager, ACandidateFilterSeesTheGraphsBoundTokens)
 {
-    g_filterSawBoundTokenCount = 0;
+    filterSawBoundTokenCount = 0;
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
     const auto criterion = scopedGraphMatcher("test.graph_criterion", &acceptCriterion);
     const ScopedCandidateFilter filter("test.kernel", &countBoundTokenSightings);
@@ -2102,7 +2102,7 @@ TEST(TestKernelIngestorStateManager, ACandidateFilterSeesTheGraphsBoundTokens)
     const auto properties = testDeviceProperties();
     manager.unsortedCatalog(MatchContext{graph, 0, properties});
 
-    EXPECT_EQ(g_filterSawBoundTokenCount, 1);
+    EXPECT_EQ(filterSawBoundTokenCount, 1);
 }
 
 /// Two kernel-scoped matchers on one pack must agree on at most one KernelPrepareFn: a
