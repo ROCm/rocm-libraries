@@ -926,12 +926,16 @@ namespace rocsparse
                     while(atomicCAS(&g_fp16_lock, 0U, 1U) != 0U)
                         ;
 
+                    // Acquire: without this fence the load below can hit a stale cached
+                    // copy and overwrite the previous lock holder's update.
+                    __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "agent");
+
                     // Handle unpaired last element
                     half old_val = *addr;
                     *addr        = __hadd(old_val, __float2half(tmp));
 
                     // Ensure the write is visible to other threads before releasing the lock
-                    __threadfence();
+                    __builtin_amdgcn_fence(__ATOMIC_RELEASE, "agent");
 
                     // Release spinlock
                     atomicExch(&g_fp16_lock, 0U);
@@ -1042,12 +1046,16 @@ namespace rocsparse
                     while(atomicCAS(&g_bf16_lock, 0U, 1U) != 0U)
                         ;
 
+                    // Acquire: without this fence the load below can hit a stale cached
+                    // copy and overwrite the previous lock holder's update.
+                    __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "agent");
+
                     // Handle unpaired last element
                     rocsparse_bfloat16 old_val = *addr;
                     *addr = static_cast<rocsparse_bfloat16>(static_cast<float>(old_val) + tmp);
 
                     // Ensure the write is visible to other threads before releasing the lock
-                    __threadfence();
+                    __builtin_amdgcn_fence(__ATOMIC_RELEASE, "agent");
 
                     // Release spinlock
                     atomicExch(&g_bf16_lock, 0U);
