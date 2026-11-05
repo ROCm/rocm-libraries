@@ -47,11 +47,11 @@
 
 #include "rocke/arena.h" /* rocke_arena_strdup */
 #include "rocke/error_boundary.hpp" /* ckc::guard_builder boundary shim */
-#include "rocke/helper_helper_rocke.instances.common.attention_unified_selectors.h" /* rocke_attention_check_head_counts */
 #include "rocke/helper_rocke.core.arch.h" /* rocke_archtarget_from_gfx, op_for_shape */
 #include "rocke/helper_rocke.helpers.atoms.h" /* rocke_mfma_atom, make_c_warp_dstr_encoding */
 #include "rocke/helper_rocke.helpers.distribution.h" /* make_static_tile_distribution */
 #include "rocke/helper_rocke.helpers.spec.h" /* rocke_kernel_name_join */
+#include "rocke/helper_rocke.instances.common._fmha_common.h" /* rocke_attention_check_head_counts */
 #include "rocke/instance_gfx942_attention_tiled_3d.h"
 #include "rocke/instance_gfx942_attention_tiled_3d_internal.h"
 #include "rocke/ir.h"

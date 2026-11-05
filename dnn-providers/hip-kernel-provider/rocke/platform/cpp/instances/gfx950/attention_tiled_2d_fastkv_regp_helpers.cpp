@@ -9,6 +9,7 @@
 #include "rocke/error.hpp"
 #include "rocke/helper_instance_gfx950_attention_tiled_2d_fastkv_regp.h"
 #include "rocke/helper_rocke.helpers.spec.h" /* rocke_kernel_name_join */
+#include "rocke/helper_rocke.instances.common._fmha_common.h" /* rocke_attention_check_head_counts */
 
 #include "rocke/error_boundary.hpp" /* ckc::guard_builder boundary shim */
 #include <stdio.h>
@@ -344,6 +345,18 @@ rocke_kernel_def_t* rocke_build_unified_attention_2d_fastkv_register_p(
             rocke__fastkv_regp_set_err(
                 b, ROCKE_ERR_VALUE, "fastKV register-P experiment does not support FP8 KV cache");
             return NULL;
+        }
+        /* The tiled build reads spec.num_queries_per_kv, which raises ValueError
+         * with the head-count rule's text; check it here, before the shared
+         * scaffold divides by num_kv_heads. */
+        {
+            char why[160];
+            if(!rocke_attention_check_head_counts(
+                   spec->num_query_heads, spec->num_kv_heads, why, sizeof(why)))
+            {
+                rocke__fastkv_regp_set_err(b, ROCKE_ERR_VALUE, why);
+                return NULL;
+            }
         }
 
         /* return build_unified_attention_2d_tiled(_FastKvRegisterPProxy(spec), arch)

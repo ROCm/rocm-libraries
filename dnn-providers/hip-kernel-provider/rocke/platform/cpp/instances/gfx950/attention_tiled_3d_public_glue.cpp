@@ -72,7 +72,7 @@
  * _default() definitions below -- the gfx942 TU owns them. The structs are
  * byte-identical so the single shared definition is correct for both. */
 #include "rocke/error_boundary.hpp" /* ckc::guard_builder boundary shim */
-#include "rocke/helper_helper_rocke.instances.common.attention_unified_selectors.h" /* rocke_attention_check_head_counts */
+#include "rocke/helper_rocke.instances.common._fmha_common.h" /* rocke_attention_check_head_counts */
 #include "rocke/instance_gfx942_attention_tiled_3d.h"
 #include "rocke/instance_gfx950_attention_tiled_3d.h"
 #include "rocke/instance_gfx950_attention_tiled_3d_internal.h"

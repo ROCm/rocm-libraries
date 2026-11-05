@@ -91,16 +91,6 @@ typedef struct rocke_unified_attn_problem
 int rocke_unified_attn_num_queries_per_kv(rocke_ir_builder_t* b,
                                           const rocke_unified_attn_problem_t* p);
 
-/* Python: kernels.common._fmha_common.check_head_counts. True when both head
- * counts are positive and num_query_heads splits evenly over num_kv_heads;
- * otherwise false, with the Python reason text written to `reason`. Every
- * tiled attention entry runs it before naming the kernel (the name carries
- * the GQA ratio). */
-bool rocke_attention_check_head_counts(int num_query_heads,
-                                       int num_kv_heads,
-                                       char* reason,
-                                       size_t reason_cap);
-
 /* Python: _resolve_attention_arch() override hook. The Python memoizes the
  * device arch (falling back to "gfx950"); this lets a host pin the arch the
  * selectors resolve to (NULL restores the "gfx950" fallback). Pass a string

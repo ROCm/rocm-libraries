@@ -45,9 +45,9 @@
 #include "rocke/arena.h" /* rocke_arena_strdup */
 #include "rocke/error_boundary.hpp" /* ckc::guard_builder boundary shim */
 #include "rocke/helper_helper_rocke.helpers.attention.h" /* binary_search_seq_idx */
-#include "rocke/helper_helper_rocke.instances.common.attention_unified_selectors.h" /* rocke_attention_check_head_counts */
 #include "rocke/helper_helper_rocke.instances.gfx942.attention_tiled_2d.h" /* rocke__mfma_32x32_c_* */
 #include "rocke/helper_rocke.helpers.spec.h" /* rocke_kernel_name_join  */
+#include "rocke/helper_rocke.instances.common._fmha_common.h" /* rocke_attention_check_head_counts */
 
 #include <math.h>
 #include <stdio.h>

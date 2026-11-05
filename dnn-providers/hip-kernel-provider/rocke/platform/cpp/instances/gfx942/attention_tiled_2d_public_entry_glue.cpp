@@ -40,6 +40,7 @@
 
 #include "rocke/helper_helper_rocke.instances.common.attention_unified_selectors.h" /* rocke_unified_attn_tiled_2d_lds_bytes */
 #include "rocke/helper_rocke.helpers.spec.h" /* rocke_kernel_name_join */
+#include "rocke/helper_rocke.instances.common._fmha_common.h" /* rocke_attention_check_head_counts */
 
 #include "rocke/arena.h" /* rocke_arena_strdup */
 #include "rocke/error_boundary.hpp" /* ckc::guard_builder boundary shim */
