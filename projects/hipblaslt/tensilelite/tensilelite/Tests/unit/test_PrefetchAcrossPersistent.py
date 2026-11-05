@@ -1795,7 +1795,7 @@ def test_nonpersistent_vector_epilogue_keeps_its_existing_lds_layout(
 @pytest.mark.parametrize("streamk", [0, 3])
 def test_tdm_store_puts_the_vector_epilogue_after_the_staged_tile(
         _gp_gfx1250, gfx1250_iim, assembler, capsys, streamk):
-    sol, asm = _emit_asm(gfx1250_iim, assembler, mi=_BF16_VECTOR_MI, DepthU=64, ScheduleIterAlg=3,
+    sol, asm = _emit_asm(gfx1250_iim, assembler, mi=_BF16_VECTOR_MI, DepthU=64,
                          TDMStore=1, StreamK=streamk, StreamKForceDPOnly=0,
                          ProblemType=dict(_BF16_VECTOR_EPILOGUE, UseBias=1, UseScaleAlphaVec=1))
     assert sol.get("Valid"), capsys.readouterr().out
@@ -1809,7 +1809,7 @@ def test_tdm_store_puts_the_vector_epilogue_after_the_staged_tile(
     preloads = [s for s in re.split(r"store (?:bias|scaleAlpha)\b", asm)[:-1] if "buffer_load" in s]
     assert preloads
     for preload in preloads:
-        assert "wait for all global loads." in preload[preload.rindex("buffer_load"):]
+        assert "s_barrier_wait" in preload[preload.rindex("label_Load_Bias"):]
 
 
 # PAP and RAP on TDMFuse 1-3.
