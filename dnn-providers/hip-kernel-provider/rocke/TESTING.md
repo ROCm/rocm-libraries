@@ -340,8 +340,8 @@ Key semantics:
   builder refusing it fails the test. It runs in the developer's differential
   pytest pass with `rocke_engine`, and in installed host CI as the
   `rocke_hip_source_identity` CTest, which lowers through the installed
-  `rocke_ir_lower_cli` program (`ROCKE_IR_LOWER_CLI`) because the wheel has no
-  binding.
+  `rocke_ir_lower_cli` program (`ROCKE_IR_LOWER_CLI`, one `--hip-batch` run per
+  family) because the wheel has no binding.
 
 ### 4.4 Is the emitted IR legal? (the toolchain gate)
 

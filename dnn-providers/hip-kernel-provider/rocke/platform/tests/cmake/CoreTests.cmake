@@ -180,7 +180,7 @@ if(BUILD_TESTING)
   install(TARGETS rocke_ir_types RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
   set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS rocke_ir_types)
 
-  # Not a test: lowers serialized IR with the C++ engine, to LLVM IR or (--hip)
+  # Not a test: lowers serialized IR with the C++ engine, to LLVM IR or (--hip-batch)
   # HIP source. The HIP source identity gate runs the C++ lowering through it,
   # via ROCKE_IR_LOWER_CLI, where the rocke_engine binding is not built, as in
   # the installed test tree. It is installed beside the tests but kept out of
