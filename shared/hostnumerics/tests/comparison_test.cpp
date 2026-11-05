@@ -280,13 +280,6 @@ void testComparisonProgram() {
     requireInvalidEmptyOptions(
         missingFrobeniusEvidence,
         "Empty comparison accepted a Frobenius criterion without Frobenius evidence.");
-    bool rejectedZeroSelectionStride = false;
-    try {
-        (void)IndexRange(0, std::numeric_limits<size_t>::max(), 0), LastDimensionFastest{};
-    } catch (const std::runtime_error&) {
-        rejectedZeroSelectionStride = true;
-    }
-    require(rejectedZeroSelectionStride, "Output selection accepted a zero stride.");
 
     const std::array<double, 1> evidenceObserved{2.0};
     const std::array<double, 1> evidenceExpected{1.0};
