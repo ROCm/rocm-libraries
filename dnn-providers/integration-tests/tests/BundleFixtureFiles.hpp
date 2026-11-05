@@ -10,16 +10,19 @@
 #include <fstream>
 #include <memory>
 #include <optional>
+#include <set>
 #include <string>
 #include <utility>
 #include <variant>
 #include <vector>
 
 #include <gtest/gtest.h>
+#include <hipdnn_test_sdk/utilities/detail/FlatbufferTensorAttributesUtils.hpp>
 #include <nlohmann/json.hpp>
 
 #include "harness/VariantPack.hpp"
 #include "harness/bundle/IntegrationTestBundle.hpp"
+#include "harness/bundle/VariantPackBuilder.hpp"
 
 namespace hipdnn_integration_tests::bundle::fixtures
 {
@@ -507,6 +510,97 @@ inline void writeRaggedOutput(VariantPack& variantPack, float value)
 {
     auto* ptr = static_cast<float*>(variantPack.at(K_OUTPUT_UID));
     std::fill(ptr, ptr + K_RAGGED_OUTPUT_ELEMS, value);
+}
+
+/// The template of `graph`: each tensor takes its dims, strides and data type from the
+/// case.
+inline nlohmann::json templateOfGraph(nlohmann::json graph)
+{
+    for(auto& tensor : graph.at("tensors"))
+    {
+        tensor["dims"] = "${case.dims}";
+        tensor["strides"] = "${case.strides}";
+        tensor["data_type"] = "${case.data_type}";
+    }
+    return graph;
+}
+
+/// A sweep case for the template of `graph`, with format_version 2 metadata. The case
+/// marks `absentUids` absent, when there are any, and has no values for them.
+inline nlohmann::json optionalTensorSweepCase(const std::string& id,
+                                              const nlohmann::json& graph,
+                                              const std::vector<int64_t>& absentUids = {})
+{
+    auto tensors = nlohmann::json::array();
+    for(const auto& tensor : graph.at("tensors"))
+    {
+        const auto uid = tensor.at("uid").get<int64_t>();
+        if(std::find(absentUids.begin(), absentUids.end(), uid) != absentUids.end())
+        {
+            continue;
+        }
+        tensors.push_back(nlohmann::json{{"uid", uid},
+                                         {"dims", tensor.at("dims")},
+                                         {"strides", tensor.at("strides")},
+                                         {"data_type", tensor.at("data_type")}});
+    }
+    nlohmann::json caseJson
+        = {{"id", id},
+           {"values", {{"tensors", std::move(tensors)}}},
+           {"metadata", {{"format_version", 2}, {"operation", "SdpaFwd"}, {"seed", 42}}}};
+    if(!absentUids.empty())
+    {
+        caseJson["absent_tensors"] = absentUids;
+    }
+    return caseJson;
+}
+
+/// Writes graph.template.json and sweep.json under `dir`. A null `version` leaves the
+/// sweep without one.
+inline void writeTemplateSweep(const std::filesystem::path& dir,
+                               const nlohmann::json& templateJson,
+                               const nlohmann::json& cases,
+                               const nlohmann::json& version = 2)
+{
+    std::filesystem::create_directories(dir);
+    std::ofstream(dir / "graph.template.json") << templateJson.dump(2);
+    nlohmann::json sweep = {{"cases", cases}};
+    if(!version.is_null())
+    {
+        sweep["version"] = version;
+    }
+    std::ofstream(dir / "sweep.json") << sweep.dump(2);
+}
+
+/// The uids of the host variant pack of `bundle`, built with a new tensor for each input
+/// (each tensor that is not virtual and not an output) and each output.
+inline std::set<int64_t> hostVariantPackUids(const IntegrationTestBundle& bundle)
+{
+    const auto wrapper = bundle.graphWrapper();
+    const auto& attributes = wrapper.getTensorMap();
+    const std::set<int64_t> outputUids(bundle.outputTensorUids.begin(),
+                                       bundle.outputTensorUids.end());
+
+    TensorMap inputs;
+    for(const auto& [uid, tensorAttributes] : attributes)
+    {
+        if(!tensorAttributes->virtual_() && outputUids.count(uid) == 0)
+        {
+            inputs.emplace(uid,
+                           hipdnn_test_sdk::detail::createTensorFromAttribute(*tensorAttributes));
+        }
+    }
+    auto outputs = detail::allocateSentinelOutputs(
+        attributes, bundle.outputTensorUids, inputs, {}, /*onDevice=*/false);
+    const auto variantPack = detail::buildVariantPack(
+        inputs, outputs, attributes, bundle.outputTensorUids, /*useDevice=*/false);
+
+    std::set<int64_t> uids;
+    for(const auto& entry : variantPack)
+    {
+        uids.insert(entry.first);
+    }
+    return uids;
 }
 
 } // namespace hipdnn_integration_tests::bundle::fixtures

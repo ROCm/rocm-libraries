@@ -15,6 +15,7 @@
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 
 #include "harness/input-init/InputFillRecipes.hpp"
+#include "harness/input-init/TensorAliases.hpp"
 
 namespace hipdnn_integration_tests
 {
@@ -133,10 +134,22 @@ private:
 /// the forward of its Q, K and V (see deriveSdpaBackwardForwardOutputs()), whatever
 /// recipe they were filled with. A node whose forward cannot be derived makes the
 /// result unsupported, with the reason.
+///
+/// Each view in `aliases` keeps its place in the seed sequence, so no other tensor's
+/// contents change, but it is not filled and need not be in `inputs`. Each owner has
+/// its whole host allocation zeroed, then is filled once on the host. A recipe set()
+/// on a view makes the result invalid. Throws std::invalid_argument when an owner is
+/// missing from `ownedUids` or from `inputs`, or when fillDerivesInputs() is true for
+/// the graph.
 FillResult fillInputs(const hipdnn_flatbuffers_sdk::data_objects::Graph& graph,
                       InputTensorMap& inputs,
                       const std::vector<int64_t>& ownedUids,
                       InputFillRecipes& recipes,
-                      DeviceInputFiller* device);
+                      DeviceInputFiller* device,
+                      const std::vector<TensorAlias>& aliases = {});
+
+/// Whether fillInputs() replaces some inputs of `graph` after the fill with values
+/// derived from other inputs. Such a fill reads every input as its own tensor.
+bool fillDerivesInputs(const hipdnn_flatbuffers_sdk::data_objects::Graph& graph);
 
 } // namespace hipdnn_integration_tests

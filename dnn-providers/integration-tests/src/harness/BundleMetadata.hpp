@@ -15,6 +15,7 @@
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #include <hipdnn_data_sdk/logging/Logger.hpp>
@@ -23,9 +24,27 @@
 #include <nlohmann/json.hpp>
 
 #include "harness/input-init/InputFillRecipes.hpp"
+#include "harness/input-init/TensorAliases.hpp"
 
 namespace hipdnn_integration_tests
 {
+
+// A tensor whose data starts `startOffset` bytes past an aligned address in the
+// engine's variant pack.
+struct TensorStartOffset
+{
+    int64_t uid = 0;
+    int64_t startOffset = 0;
+
+    bool operator==(const TensorStartOffset& other) const
+    {
+        return uid == other.uid && startOffset == other.startOffset;
+    }
+};
+
+// The alignment of the address that a start offset counts from. A start offset is
+// greater than 0 and less than this value.
+inline constexpr int64_t K_START_OFFSET_BASE_ALIGNMENT = 256;
 
 /// How far up RFC 0015's enforcement ladder a bundle/case is checked.
 enum class EnforcementLevel
@@ -61,6 +80,10 @@ struct BundleMetadata
     std::optional<int64_t> seed;
     std::optional<int64_t> minimumVramMb;
     std::optional<std::unordered_map<int64_t, nlohmann::json>> inputs;
+    /// Inputs that read the memory of another input and have no allocation of their own.
+    std::vector<TensorAlias> aliases;
+    /// Tensors whose data starts past an aligned address in the engine's variant pack.
+    std::vector<TensorStartOffset> startOffsets;
     EnforcementLevel enforcementLevel = EnforcementLevel::FULL;
 
     /// The bundle opts out of the CPU / GPU reference executor as an oracle. A
@@ -89,9 +112,11 @@ inline bool excludedFromSupportClaims(const BundleMetadata& metadata)
 /// missing/invalid/unsupported `format_version`, an invalid `enforcement_level`,
 /// a non-boolean `no_cpu_reference` / `no_gpu_reference` / `expected_rejection`,
 /// an `archs` value that is not a non-empty array of base arch names,
-/// a non-numeric `inputs` key, an `inputs` entry that is not a valid fill spec, a
-/// feature that needs a higher `format_version`, a flag combination that contradicts
-/// the bundle's golden data, or (for a .meta.json file) unreadable or not valid JSON.
+/// a non-numeric `inputs` key, an `inputs` entry that is not a valid fill spec, an
+/// `aliases` value that parseTensorAliases() rejects, a view whose `inputs` entry sets a
+/// fill kind, a malformed `start_offsets` value, a feature that needs a higher
+/// `format_version`, a flag combination that contradicts the bundle's golden data, or
+/// (for a .meta.json file) unreadable or not valid JSON.
 /// An authoring error, never a "metadata not recorded" case, so it must not degrade
 /// to defaults.
 class BundleMetadataError : public std::runtime_error
@@ -132,10 +157,106 @@ inline bool usesArchList(const nlohmann::json& metadata)
     return metadata.contains("archs");
 }
 
-inline constexpr std::array<FormatVersion2Feature, 2> K_FORMAT_VERSION_2_FEATURES = {{
+inline bool usesAliases(const nlohmann::json& metadata)
+{
+    return metadata.contains("aliases");
+}
+
+inline bool usesStartOffsets(const nlohmann::json& metadata)
+{
+    return metadata.contains("start_offsets");
+}
+
+inline constexpr std::array<FormatVersion2Feature, 4> K_FORMAT_VERSION_2_FEATURES = {{
     {"kind values", &usesValuesFillKind},
     {"archs", &usesArchList},
+    {"aliases", &usesAliases},
+    {"start_offsets", &usesStartOffsets},
 }};
+
+inline std::string describeStartOffset(int64_t uid)
+{
+    return "start offset of tensor " + std::to_string(uid);
+}
+
+inline TensorStartOffset parseStartOffsetEntry(const nlohmann::json& entry, std::size_t index)
+{
+    std::string where = "start_offsets[" + std::to_string(index) + "]";
+    if(!entry.is_object())
+    {
+        throw std::invalid_argument(where + " is not an object");
+    }
+    const auto uid
+        = entry.contains("uid") ? tensor_alias_detail::integerValue(entry.at("uid")) : std::nullopt;
+    if(uid.has_value())
+    {
+        where += " (tensor " + std::to_string(*uid) + ")";
+    }
+
+    for(const auto& item : entry.items())
+    {
+        const auto& key = item.key();
+        if(key != "uid" && key != "start_offset")
+        {
+            std::string message = where;
+            message.append(" has unknown key \"").append(key).append("\"");
+            throw std::invalid_argument(message);
+        }
+    }
+
+    const auto readInteger = [&](const char* key) {
+        if(!entry.contains(key))
+        {
+            throw std::invalid_argument(where + " lacks \"" + key + "\"");
+        }
+        const auto value = tensor_alias_detail::integerValue(entry.at(key));
+        if(!value.has_value())
+        {
+            throw std::invalid_argument(where + ": \"" + key + "\" is not a 64-bit signed integer");
+        }
+        return *value;
+    };
+
+    TensorStartOffset parsed;
+    parsed.uid = readInteger("uid");
+    parsed.startOffset = readInteger("start_offset");
+    if(parsed.startOffset <= 0 || parsed.startOffset >= K_START_OFFSET_BASE_ALIGNMENT)
+    {
+        throw std::invalid_argument(
+            describeStartOffset(parsed.uid) + ": start_offset " + std::to_string(parsed.startOffset)
+            + " is not in the range 1 to " + std::to_string(K_START_OFFSET_BASE_ALIGNMENT - 1));
+    }
+    return parsed;
+}
+
+// Parses metadata `start_offsets`. Throws std::invalid_argument when the value is not a
+// non-empty array of {"uid", "start_offset"} objects with integer values, when a
+// start_offset is not in the range 1 to K_START_OFFSET_BASE_ALIGNMENT - 1, or when a uid
+// appears twice.
+inline std::vector<TensorStartOffset> parseStartOffsets(const nlohmann::json& json)
+{
+    if(!json.is_array())
+    {
+        throw std::invalid_argument("start_offsets is not an array");
+    }
+    if(json.empty())
+    {
+        throw std::invalid_argument("start_offsets is empty");
+    }
+    std::vector<TensorStartOffset> startOffsets;
+    std::unordered_set<int64_t> uids;
+    for(std::size_t i = 0; i < json.size(); ++i)
+    {
+        const auto parsed = parseStartOffsetEntry(json[i], i);
+        if(!uids.insert(parsed.uid).second)
+        {
+            throw std::invalid_argument(describeStartOffset(parsed.uid)
+                                        + ": the tensor appears in more than one entry");
+        }
+        startOffsets.push_back(parsed);
+    }
+    return startOffsets;
+}
 
 } // namespace bundle_metadata_detail
 
@@ -147,7 +268,9 @@ inline constexpr std::array<FormatVersion2Feature, 2> K_FORMAT_VERSION_2_FEATURE
 /// `enforcement_level`, has a reference/rejection flag that is not a boolean, has an
 /// `archs` value that is not a non-empty array of base arch names, has an
 /// `inputs` key that is not a tensor UID or an `inputs` entry that is not a valid fill
-/// spec, or uses a version-2 feature in version 1 metadata.
+/// spec, has an `aliases` value that parseTensorAliases() rejects or a view whose
+/// `inputs` entry sets a fill kind, has a malformed `start_offsets` value, or uses a
+/// version-2 feature in version 1 metadata.
 /// `source` names the origin (file path or sweep case) in
 /// the error message.
 inline BundleMetadata parseBundleMetadataJson(const nlohmann::json& json,
@@ -318,6 +441,51 @@ inline BundleMetadata parseBundleMetadataJson(const nlohmann::json& json,
             inputMap[uid] = val;
         }
         meta.inputs = std::move(inputMap);
+    }
+
+    // Version-1 metadata with `aliases` fails the version check below, whatever the value.
+    if(json.contains("aliases") && meta.formatVersion >= 2)
+    {
+        try
+        {
+            meta.aliases = parseTensorAliases(json.at("aliases"));
+        }
+        catch(const std::invalid_argument& e)
+        {
+            throw BundleMetadataError(where + ": " + e.what());
+        }
+    }
+
+    // Version-1 metadata with `start_offsets` fails the version check below, whatever the
+    // value.
+    if(json.contains("start_offsets") && meta.formatVersion >= 2)
+    {
+        try
+        {
+            meta.startOffsets = bundle_metadata_detail::parseStartOffsets(json.at("start_offsets"));
+        }
+        catch(const std::invalid_argument& e)
+        {
+            throw BundleMetadataError(where + ": " + e.what());
+        }
+    }
+
+    // A seed-only entry for a view is allowed and has no effect.
+    for(const auto& alias : meta.aliases)
+    {
+        if(!meta.inputs.has_value())
+        {
+            break;
+        }
+        const auto entry = meta.inputs->find(alias.uid);
+        if(entry != meta.inputs->end() && entry->second.contains("kind"))
+        {
+            std::string message = where;
+            message.append(": ")
+                .append(tensor_alias_detail::describe(alias))
+                .append(": the view's inputs entry sets a fill kind, and a view is never filled");
+            throw BundleMetadataError(message);
+        }
     }
 
     if(meta.formatVersion < 2)
