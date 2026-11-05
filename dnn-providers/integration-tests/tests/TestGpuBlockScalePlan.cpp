@@ -41,16 +41,18 @@ TEST(TestGpuBlockScalePlan, CompactMxGraphIsApplicable)
 
 TEST(TestGpuBlockScalePlan, InvalidScaleDimensionsAreNotApplicable)
 {
-    auto graph = createValidBlockScaleQuantizeGraph(
-        {2, 64, 32, 32}, {65536, 1024, 32, 1}, {2, 3, 32, 32});
+    auto graph
+        = createValidBlockScaleQuantizeGraph({2, 64, 32, 32}, {65536, 1024, 32, 1}, {2, 3, 32, 32});
     GpuReferenceGraphExecutor executor;
     EXPECT_FALSE(executor.isApplicable(graph.GetBufferPointer(), graph.GetSize()));
 }
 
 TEST(TestGpuBlockScalePlan, RankAboveLimitIsNotApplicable)
 {
-    auto graph = createValidBlockScaleQuantizeGraph(
-        {1, 2, 3, 4, 5, 6}, {720, 360, 120, 30, 6, 1}, {1, 1, 3, 4, 5, 6}, {360, 360, 120, 30, 6, 1});
+    auto graph = createValidBlockScaleQuantizeGraph({1, 2, 3, 4, 5, 6},
+                                                    {720, 360, 120, 30, 6, 1},
+                                                    {1, 1, 3, 4, 5, 6},
+                                                    {360, 360, 120, 30, 6, 1});
     GpuReferenceGraphExecutor executor;
     EXPECT_FALSE(executor.isApplicable(graph.GetBufferPointer(), graph.GetSize()));
 }

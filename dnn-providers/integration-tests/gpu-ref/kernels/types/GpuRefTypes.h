@@ -8,6 +8,10 @@
 
 #pragma once
 
+#include <hip/hip_fp4.h>
+#include <hip/hip_fp6.h>
+#include <hip/hip_fp8.h>
+
 #include "GpuRefBatchnormArgs.h"
 #include "GpuRefBlockScaleArgs.h"
 #include "GpuRefCommonArgs.h"
@@ -223,129 +227,6 @@ __device__ inline float roundToFp8(float x, int format)
     }
 }
 
-// These codecs intentionally stay self-contained instead of using HIP's MX types. GPU reference
-// kernels are embedded and compiled at runtime without a ROCm header tree, and reference conversion
-// must remain bit-exact across architectures rather than selecting hardware-dependent fast paths.
-__device__ inline float
-    compactFloatToFloat(unsigned char bits, int exponentBits, int mantissaBits, int exponentBias)
-{
-    const unsigned char signMask = 1u << (exponentBits + mantissaBits);
-    const unsigned char magnitude = bits & (signMask - 1u);
-    const unsigned char exponent = magnitude >> mantissaBits;
-    const unsigned char mantissa = magnitude & ((1u << mantissaBits) - 1u);
-    const float significand = exponent == 0 ? static_cast<float>(mantissa)
-                                            : static_cast<float>((1u << mantissaBits) + mantissa);
-    const int power = (exponent == 0 ? 1 : exponent) - exponentBias - mantissaBits;
-    const float value = __builtin_ldexpf(significand, power);
-    return (bits & signMask) != 0 ? -value : value;
-}
-
-template <int EXPONENT_BITS, int MANTISSA_BITS, int EXPONENT_BIAS>
-__device__ inline unsigned char floatToCompactFloat(float value)
-{
-    constexpr unsigned SIGN_MASK = 1u << (EXPONENT_BITS + MANTISSA_BITS);
-    constexpr unsigned MAX_CODE = SIGN_MASK - 1u;
-    if(__builtin_isnan(value))
-    {
-        return 0;
-    }
-    const bool negative = __builtin_signbit(value) != 0;
-    const float magnitude = __builtin_fabsf(value);
-    const auto decode = [](unsigned code) {
-        return compactFloatToFloat(
-            static_cast<unsigned char>(code), EXPONENT_BITS, MANTISSA_BITS, EXPONENT_BIAS);
-    };
-    unsigned code = MAX_CODE;
-    if(magnitude < decode(MAX_CODE))
-    {
-        unsigned low = 0;
-        unsigned high = MAX_CODE;
-        while(high - low > 1)
-        {
-            const unsigned middle = (low + high) / 2;
-            if(decode(middle) <= magnitude)
-            {
-                low = middle;
-            }
-            else
-            {
-                high = middle;
-            }
-        }
-        const float below = magnitude - decode(low);
-        const float above = decode(high) - magnitude;
-        code = below < above ? low : (above < below ? high : ((low & 1u) == 0 ? low : high));
-    }
-    return static_cast<unsigned char>(code | (negative ? SIGN_MASK : 0u));
-}
-
-template <int EXPONENT_BITS, int MANTISSA_BITS, int EXPONENT_BIAS>
-struct GpuRefCompactFloat
-{
-    unsigned char data;
-
-    GpuRefCompactFloat() = default;
-    __device__ explicit GpuRefCompactFloat(float value)
-        : data(floatToCompactFloat<EXPONENT_BITS, MANTISSA_BITS, EXPONENT_BIAS>(value))
-    {
-    }
-    __device__ operator float() const // NOLINT(google-explicit-constructor)
-    {
-        return compactFloatToFloat(data, EXPONENT_BITS, MANTISSA_BITS, EXPONENT_BIAS);
-    }
-};
-
-using GpuRefFp4E2M1 = GpuRefCompactFloat<2, 1, 1>;
-using GpuRefFp6E2M3 = GpuRefCompactFloat<2, 3, 1>;
-using GpuRefFp6E3M2 = GpuRefCompactFloat<3, 2, 3>;
-
-union FloatBits
-{
-    float value;
-    unsigned int bits;
-};
-
-struct GpuRefFp8E8M0
-{
-    unsigned char data;
-
-    GpuRefFp8E8M0() = default;
-    __device__ explicit GpuRefFp8E8M0(float value)
-    {
-        FloatBits fp32{value};
-        if(__builtin_isnan(value))
-        {
-            data = 0xFFu;
-        }
-        else if(value <= 0.0f)
-        {
-            data = 0;
-        }
-        else if(__builtin_isinf(value))
-        {
-            data = 0xFEu;
-        }
-        else
-        {
-            data = static_cast<unsigned char>((fp32.bits >> 23) & 0xFFu);
-        }
-    }
-    __device__ operator float() const // NOLINT(google-explicit-constructor)
-    {
-        if(data == 0xFFu)
-        {
-            return __builtin_nanf("");
-        }
-        if(data == 0)
-        {
-            return 0x1p-127f;
-        }
-        FloatBits fp32{};
-        fp32.bits = static_cast<unsigned int>(data) << 23;
-        return fp32.value;
-    }
-};
-
 template <typename T>
 __device__ inline T roundScaleUp(double value);
 
@@ -361,12 +242,12 @@ __device__ inline float roundScaleUp<float>(double value)
 }
 
 template <>
-__device__ inline GpuRefFp8E8M0 roundScaleUp<GpuRefFp8E8M0>(double value)
+__device__ inline __hip_fp8_e8m0 roundScaleUp<__hip_fp8_e8m0>(double value)
 {
-    GpuRefFp8E8M0 rounded(static_cast<float>(value));
-    if(static_cast<double>(static_cast<float>(rounded)) < value && rounded.data < 0xFEu)
+    __hip_fp8_e8m0 rounded(value);
+    if(static_cast<double>(static_cast<float>(rounded)) < value && rounded.__x < 0xFEu)
     {
-        ++rounded.data;
+        ++rounded.__x;
     }
     return rounded;
 }
