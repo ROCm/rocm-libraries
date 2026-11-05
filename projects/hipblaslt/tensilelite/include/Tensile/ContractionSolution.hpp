@@ -35,6 +35,7 @@
 #include <memory>
 #include <stdexcept>
 #include <string>
+#include <variant>
 #include <vector>
 
 #include <Tensile/Tensile.hpp>
@@ -545,11 +546,19 @@ namespace TensileLite
     {
         struct Static
         {
+            struct KernelArguments
+            {
+                uint32_t magicNumber = 0;
+                uint32_t magicShift  = 0;
+                uint32_t itersPerWG  = 0;
+                uint32_t grid        = 0;
+                uint32_t skTiles     = 0;
+            };
+
             struct Split
             {
-                uint32_t skTiles      = 0;
-                uint32_t skItersPerWG = 0;
-                uint32_t extraIters   = 0;
+                KernelArguments args;
+                uint32_t        extraIters = 0;
             };
 
             /**
@@ -643,20 +652,22 @@ namespace TensileLite
         struct Dynamic
         {
             /**
-             * Work items of a dynamic StreamK launch: whole tiles plus skSplit parts
-             * per split tile. Tiles split only under the debug overrides
+             * Kernel arguments of a dynamic StreamK launch: whole tiles plus `split`
+             * parts per split tile. Tiles split only under the debug overrides
              * (TENSILE_STREAMK_TILES / _SPLIT).
              */
-            struct Items
+            struct KernelArguments
             {
-                uint32_t skTiles;
-                uint32_t skSplit;
-                uint32_t skItersPerWI;
-                uint32_t totalItems;
+                uint32_t totalItems = 0;
+                uint32_t tiles      = 0;
+                uint32_t split      = 0;
+                uint32_t itersPerWI = 0;
+                uint32_t grid       = 0;
             };
 
             /**
-             * Compute the work items of a dynamic launch.
+             * Compute the work items of a dynamic launch. Every field but `grid`
+             * is filled in; `grid` is left at 0 for the caller.
              *
              * @param hardware      Source of the AMDGPU skTiles / skSplit overrides.
              * @param tiles         Tile count the work queue covers.
@@ -664,10 +675,10 @@ namespace TensileLite
              * @param kGranularity  Iterations per indivisible K unit. Chunk
              *                      boundaries are rounded onto that unit.
              */
-            TENSILELITEHOST_EXPORT static Items items(Hardware const& hardware,
-                                                      size_t          tiles,
-                                                      size_t          itersPerTile,
-                                                      size_t          kGranularity = 1);
+            TENSILELITEHOST_EXPORT static KernelArguments items(Hardware const& hardware,
+                                                                size_t          tiles,
+                                                                size_t          itersPerTile,
+                                                                size_t          kGranularity = 1);
 
             /**
              * Work item i sits in queue i % numQueues, and a workgroup pops only its
@@ -770,6 +781,12 @@ namespace TensileLite
             std::string fallbackReason;
         };
 
+        struct ArgumentSlots
+        {
+            std::variant<Static::KernelArguments, Dynamic::KernelArguments> words
+                = Static::KernelArguments{};
+        };
+
         // Snapshot of the StreamK launch-parameter DECISIONS for one
         // (solution, problem, hardware) triple. Populated by
         // ContractionSolution::computeStreamKDecisions() and consumed by solve().
@@ -777,11 +794,10 @@ namespace TensileLite
         //   available  = read from the value the launch uses, or from the same real
         //                helper/param solve() uses, so it reflects the launch exactly.
         //   recomputed = re-derived here rather than read back from a launched value:
-        //                either by mirroring the kernel-arg packing in makeArgs()
-        //                (skTiles/skSplit/totalItems) or by deriving from other fields.
-        //                Mirrors can drift silently if makeArgs() changes; each such
-        //                field names what it mirrors.
-        // This snapshot is not purely observational: reduction, skGrid and isDynamic are
+        //                either by mirroring the kernel-arg packing in makeArgs() (the
+        //                slots member) or by deriving from other fields. Mirrors can
+        //                drift silently if makeArgs() changes.
+        // This snapshot is not purely observational: reduction, grid() and isDynamic are
         // launch INPUTS -- solve() copies them into StreamKSettings and uses isDynamic as
         // its dynamic-queue predicate. Only the PRINTING is optional; see
         // Debug::printStreamKLaunchSummary() (TENSILE_DB bit 0x200000).
@@ -818,40 +834,57 @@ namespace TensileLite
             // fallback in computeStreamKDecisions(). Diagnostic intermediate.
             size_t skGridPreFallback  = 0;
 
-            // available: wired from sk.grid, the FINAL grid solve() launches with (after all
-            // fallbacks, in the order they are applied: fixedGrid, treeBounds,
-            // clusterDPMulticast, workspaceDP -- the same four names the report's
-            // "changedBy" ladder uses, which lists them latest-clamp-wins).
-            size_t finalGrid          = 0;
-            // available: the grid solve() initialises sk.grid from. finalGrid and skGrid
-            // always hold the same value -- computeStreamKDecisions() sets both to its final
-            // grid, and solve() writes the launched sk.grid back into both. Both exist
-            // because they are read for different reasons: skGrid is the launch INPUT
-            // solve() consumes, finalGrid is the reported outcome printed against
-            // selectedGrid.
-            size_t skGrid             = 0;
-            // The next three mirror the kernel-arg packing in makeArgs() (search for
-            // "SKTiles"/"skTiles"), evaluated on the FINAL post-fallback grid and
-            // reduction. They are hand-written mirrors: any change to the packing in
-            // makeArgs() must be reflected in computeStreamKDecisions() or the report
-            // silently drifts from the launch.
-            //
-            // recomputed: dynamic path  -> the SKTiles arg (debug override, else 0);
-            //             parallel path -> the split factor, which is what makeArgs packs
-            //                              into the skTiles slot on that path;
-            //             static SK3    -> streamKStaticSplit().skTiles, the stream-k
-            //                              (partial) tile count.
-            size_t skTiles          = 0;
-            // recomputed: dynamic path -> the SKSplit arg after the CeilDivide round-trip;
-            //             parallel path -> grid / tiles;
-            //             static SK3   -> 1 (no k-split; SK3 packs SKItersPerWG instead).
-            size_t skSplit          = 0;
-            // recomputed: work-item count. Dynamic path mirrors the packed TotalItems arg,
-            //             (tiles - skTiles) + skTiles*skSplit. The SK3 ABI has no TotalItems
-            //             arg, so on the parallel and static paths this is reported as
-            //             'tiles' (one work item per output tile) rather than mirroring a
-            //             packed value.
-            size_t totalItems       = 0;
+            //Streamk specific kernel arguments
+            ArgumentSlots slots;
+
+            //Accessors to handle streamk3  and streamk4 argument differences
+            size_t grid() const
+            {
+                return std::visit([](auto const& w) -> size_t { return w.grid; }, slots.words);
+            }
+            void setGrid(size_t g)
+            {
+                std::visit([g](auto& w) { w.grid = static_cast<uint32_t>(g); }, slots.words);
+            }
+
+            size_t skTiles() const
+            {
+                return std::visit(
+                    [](auto const& w) -> size_t {
+                        if constexpr(std::is_same_v<std::decay_t<decltype(w)>,
+                                                    Dynamic::KernelArguments>)
+                            return w.tiles;
+                        else
+                            return w.skTiles;
+                    },
+                    slots.words);
+            }
+
+            // Work split and work-item count the launch summary reports on every
+            // path. The dynamic path reads them from its kernel arguments; the
+            // static SK3 ABI has no such words, so they are derived:
+            //   parallel -> skSplit = grid / tiles, totalItems = tiles,
+            //   static   -> skSplit = 1,            totalItems = tiles,
+            //   cluster  -> parallelSplits,         spatial blocks.
+            size_t skSplit() const
+            {
+                if(auto const* dynamicArgs = std::get_if<Dynamic::KernelArguments>(&slots.words))
+                    return dynamicArgs->split;
+                if(clusterSchedule.enabled)
+                    return clusterSchedule.parallelSplits;
+                if(reduction == origami::reduction_t::parallel && tiles > 0)
+                    return grid() / tiles;
+                return 1;
+            }
+
+            size_t totalItems() const
+            {
+                if(auto const* dynamicArgs = std::get_if<Dynamic::KernelArguments>(&slots.words))
+                    return dynamicArgs->totalItems;
+                if(clusterSchedule.enabled)
+                    return clusterSchedule.blocks;
+                return tiles;
+            }
 
             // --- DP-only ---
             // The three flags below distinguish the source of a data-parallel-only launch:
@@ -866,7 +899,7 @@ namespace TensileLite
             bool streamKDP   = false;
 
             // --- Workspace / partials ---
-            // recomputed: skTiles > 0.
+            // recomputed: skTiles() > 0.
             bool   partialsPresent        = false;
             // recomputed: requiredWorkspaceBytes > 0.
             bool   workspaceAllocated     = false;
@@ -973,10 +1006,11 @@ namespace TensileLite
          * not required (unlike the tree all-partial model without per-tile extras).
          */
         TENSILELITEHOST_EXPORT static bool
-            isParallelReductionRowUniform(PersistentLaunchSettings const& launch,
-                                          int                             streamKAtomic,
-                                          bool                            staticTwoTilePacking,
-                                          size_t                          tiles);
+            isParallelReductionRowUniform(origami::reduction_t reduction,
+                                          size_t               grid,
+                                          int                  streamKAtomic,
+                                          bool                 staticTwoTilePacking,
+                                          size_t               tiles);
 
         /**
          * Warn that the clustered StreamK worker budget was rounded down to the
