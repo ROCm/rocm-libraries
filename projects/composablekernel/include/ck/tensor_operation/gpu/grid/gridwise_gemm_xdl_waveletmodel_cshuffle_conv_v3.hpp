@@ -84,7 +84,8 @@ template <typename ALayout,
           bool UseTdmA          = false,
           bool UseTdmB          = false,
           bool UseNamedBarrier  = false,
-          bool UseLdsTranspose  = false>
+          bool UseLdsTranspose  = false,
+          bool PersistentKernel = false>
 struct GridwiseGemm_xdl_waveletmodel_cshuffle_conv_v3
     : public GridwiseGemm_xdl_cshuffle_base<
           ALayout,
@@ -219,6 +220,28 @@ struct GridwiseGemm_xdl_waveletmodel_cshuffle_conv_v3
     // Wave specialization thread groups
     // =========================================================================
 
+    // Enable/disable the opaque thread id workaround (see GetLocalThreadId) for persistent kernels.
+    // It is passed down as template parameter to everything that reads the thread id:
+    // the thread groups, ThisThreadBlock, the blockwise gemm and XdlopsGemm (lane id).
+    static constexpr bool UseOpaqueThreadId = true;
+    static constexpr bool OpaqueThreadId    = PersistentKernel && UseOpaqueThreadId;
+
+    // Thread id used by the wave-specialization thread groups.
+    // In a persistent kernel the tile loop makes every thread-id dependent setup computation
+    // (per-thread coordinates of the block transfers / blockwise gemm) loop invariant. The
+    // compiler hoists it out of the tile loop and keeps it live across the whole tile, which
+    // costs registers and spills for large tiles. Making the id opaque recomputes the setup per
+    // tile instead (a few ALU ops).
+    __device__ static index_t GetLocalThreadId()
+    {
+        index_t tid = get_thread_local_1d_id();
+        if constexpr(OpaqueThreadId)
+        {
+            asm volatile("" : "+v"(tid));
+        }
+        return tid;
+    }
+
     // Math threads are 0..TileMath-1 (must be first, BlockwiseGemmXdlops_v1 uses
     // get_thread_local_1d_id() directly for wave index computation)
     struct TileMathThreadGroup
@@ -227,10 +250,10 @@ struct GridwiseGemm_xdl_waveletmodel_cshuffle_conv_v3
 
         __device__ static constexpr bool IsBelong()
         {
-            return get_thread_local_1d_id() < TileMathThreadGroupSize;
+            return GetLocalThreadId() < TileMathThreadGroupSize;
         }
 
-        __device__ static index_t GetThreadId() { return get_thread_local_1d_id(); }
+        __device__ static index_t GetThreadId() { return GetLocalThreadId(); }
 
         __device__ static index_t GetWaveId() { return GetThreadId() / get_warp_size(); }
 
@@ -247,12 +270,12 @@ struct GridwiseGemm_xdl_waveletmodel_cshuffle_conv_v3
 
         __device__ static constexpr bool IsBelong()
         {
-            return get_thread_local_1d_id() >= TileMathThreadGroupSize;
+            return GetLocalThreadId() >= TileMathThreadGroupSize;
         }
 
         __device__ static index_t GetThreadId()
         {
-            return get_thread_local_1d_id() - TileMathThreadGroupSize;
+            return GetLocalThreadId() - TileMathThreadGroupSize;
         }
 
         __device__ static index_t GetWaveId() { return GetThreadId() / get_warp_size(); }
@@ -265,7 +288,18 @@ struct GridwiseGemm_xdl_waveletmodel_cshuffle_conv_v3
 
     using NamedBarrierType = NamedBarrier<TileMathThreadGroup, UseNamedBarrier>;
 
-    using CShuffleBlockTransferThreadGroup = ThisThreadBlock<TileMathThreadGroupSize>;
+    // Persistent kernels convert and store the C tile in batches of this many (vector) stores:
+    // convert a batch, issue its stores back to back, then go on with the next one. Smaller
+    // batches spread the VMEM issue over the epilogue. The data and addresses of all the batches
+    // are kept in registers until the last store, so smaller batches do not cost s_wait_xcnt (but
+    // the registers are not recycled: raise this to >= the stores per thread if that spills).
+    static constexpr index_t EpilogueStoreBatchSize = 2;
+
+    // Workgroups loop over output tiles instead of processing a single tile each
+    static constexpr bool IsPersistentKernel = PersistentKernel;
+
+    using CShuffleBlockTransferThreadGroup =
+        ThisThreadBlock<TileMathThreadGroupSize, OpaqueThreadId>;
 
     // =========================================================================
     // Wave pipelines (from gridwise_gemm_waveletmodel.hpp)
@@ -980,7 +1014,10 @@ struct GridwiseGemm_xdl_waveletmodel_cshuffle_conv_v3
                 NXdlPerWave,
                 KPack,
                 ComputeTypeA,
-                ComputeTypeB>{};
+                ComputeTypeB,
+                false,
+                false,
+                OpaqueThreadId>{};
 
             auto c_thread_buf = blockwise_gemm.GetCThreadBuffer();
 
@@ -1024,7 +1061,13 @@ struct GridwiseGemm_xdl_waveletmodel_cshuffle_conv_v3
                                 const index_t k_batch     = 1,
                                 const index_t block_idx_x = static_cast<index_t>(blockIdx.x))
     {
-        barrier.Init();
+        // A persistent kernel creates and initializes the barrier once per workgroup (see
+        // RunWithBarrier); re-initializing it for every tile would race with waves that are still
+        // using it from the previous tile.
+        if constexpr(!PersistentKernel)
+        {
+            barrier.Init();
+        }
 
         const long_index_t a_space_size_divisor = SplitKOffsetHack ? k_batch : 1;
         const long_index_t b_space_size_divisor = SplitKOffsetHack ? k_batch : 1;
@@ -1298,12 +1341,24 @@ struct GridwiseGemm_xdl_waveletmodel_cshuffle_conv_v3
             // CShuffleNXdlPerWavePerShuffle) because the M2/M4/N2 SFC dimensions have equal
             // total and per-access lengths. See Base::GetCThreadWiseSpaceFillingCurve and
             // RunEpilogue in gridwise_gemm_xdl_cshuffle_common.hpp.
-            static_assert(MXdlPerWave % CShuffleMXdlPerWavePerShuffle == 0 &&
-                              NXdlPerWave % CShuffleNXdlPerWavePerShuffle == 0,
-                          "CShuffle XdlPerWave must divide MXdlPerWave/NXdlPerWave");
-            constexpr index_t num_access = (MXdlPerWave / CShuffleMXdlPerWavePerShuffle) *
-                                           (NXdlPerWave / CShuffleNXdlPerWavePerShuffle);
-            static_for<0, 2 * num_access, 1>{}([&](auto) { block_sync_lds(); });
+            if constexpr(!PersistentKernel)
+            {
+                static_assert(MXdlPerWave % CShuffleMXdlPerWavePerShuffle == 0 &&
+                                  NXdlPerWave % CShuffleNXdlPerWavePerShuffle == 0,
+                              "CShuffle XdlPerWave must divide MXdlPerWave/NXdlPerWave");
+                constexpr index_t num_access = (MXdlPerWave / CShuffleMXdlPerWavePerShuffle) *
+                                               (NXdlPerWave / CShuffleNXdlPerWavePerShuffle);
+                static_for<0, 2 * num_access, 1>{}([&](auto) { block_sync_lds(); });
+            }
+            else
+            {
+                wait_dscnt();
+                if constexpr(UseTdmB || UseTdmA)
+                {
+                    __builtin_amdgcn_s_wait_tensorcnt(0);
+                }
+                wait_async();
+            }
         }
         else if(TileMathThreadGroup::IsBelong())
         {
@@ -1324,7 +1379,8 @@ struct GridwiseGemm_xdl_waveletmodel_cshuffle_conv_v3
                 true,
                 true,
                 UseLdsTransposeA,
-                UseLdsTransposeB>{};
+                UseLdsTransposeB,
+                OpaqueThreadId>{};
 
             auto c_thread_buf = blockwise_gemm.GetCThreadBuffer();
 
@@ -1336,15 +1392,46 @@ struct GridwiseGemm_xdl_waveletmodel_cshuffle_conv_v3
                 num_k_block_main_loop,
                 barrier);
 
-            Base::template RunEpilogue<CGlobalMemoryDataOperation, false, true>(
-                blockwise_gemm,
-                c_grid_desc_mblock_mperblock_nblock_nperblock,
-                c_thread_buf,
-                block_m_id,
-                block_n_id,
-                p_shared_0,
-                p_c_grid,
-                c_element_op);
+            if constexpr(PersistentKernel)
+            {
+                const auto c_grid_desc_m_n = [&]() {
+                    return transform_tensor_descriptor(
+                        c_grid_desc_mblock_mperblock_nblock_nperblock,
+                        make_tuple(make_merge_transform(make_tuple(
+                                       c_grid_desc_mblock_mperblock_nblock_nperblock.GetLength(I0),
+                                       Number<MPerBlock>{})),
+                                   make_merge_transform(make_tuple(
+                                       c_grid_desc_mblock_mperblock_nblock_nperblock.GetLength(I2),
+                                       Number<NPerBlock>{}))),
+                        make_tuple(Sequence<0, 1>{}, Sequence<2, 3>{}),
+                        make_tuple(Sequence<0>{}, Sequence<1>{}));
+                }();
+
+                Base::template RunEpilogueNoShuffle<CGlobalMemoryDataOperation,
+                                                    true,
+                                                    Sequence<0, 1, 2, 3, 4, 5, 6, 7>,
+                                                    7,
+                                                    PersistentKernel ? EpilogueStoreBatchSize : 0>(
+                    blockwise_gemm,
+                    c_grid_desc_m_n,
+                    c_thread_buf,
+                    block_m_id,
+                    block_n_id,
+                    p_c_grid,
+                    c_element_op);
+            }
+            else
+            {
+                Base::template RunEpilogue<CGlobalMemoryDataOperation, false, true>(
+                    blockwise_gemm,
+                    c_grid_desc_mblock_mperblock_nblock_nperblock,
+                    c_thread_buf,
+                    block_m_id,
+                    block_n_id,
+                    p_shared_0,
+                    p_c_grid,
+                    c_element_op);
+            }
         }
     }
 
@@ -1371,6 +1458,10 @@ struct GridwiseGemm_xdl_waveletmodel_cshuffle_conv_v3
     {
         if constexpr(UseNamedBarrier)
         {
+            static_assert(!PersistentKernel,
+                          "A persistent kernel with named barrier must own the barrier: create and "
+                          "Init() it once per workgroup and call RunWithBarrier for every tile");
+
             __shared__ typename NamedBarrierType::barrier_t barrier_lds;
             NamedBarrierType barrier(&barrier_lds);
 
@@ -1407,6 +1498,47 @@ struct GridwiseGemm_xdl_waveletmodel_cshuffle_conv_v3
                 k_batch,
                 block_idx_x);
         }
+    }
+
+    // Same as Run (double buffer), for a barrier owned by the caller. For a persistent kernel the
+    // caller creates the barrier (in LDS) and calls barrier.Init() once, before the tile loop.
+    template <bool HasMainKBlockLoop,
+              InMemoryDataOperationEnum CGlobalMemoryDataOperation,
+              TailNumber TailNum,
+              typename AGridDesc_AK0_M_K1,
+              typename BGridDesc_BK0_N_K1,
+              typename CGridDesc_MBlock_MPerBlock_NBlock_NPerBlock,
+              bool SplitKOffsetHack = false>
+    __device__ static void
+    RunWithBarrier(const ADataType* p_a_grid,
+                   const BDataType* p_b_grid,
+                   CDataType* p_c_grid,
+                   void* p_shared_0,
+                   void* p_shared_1,
+                   const Problem& problem,
+                   const AGridDesc_AK0_M_K1& a_grid_desc_ak0_m_ak1,
+                   const BGridDesc_BK0_N_K1& b_grid_desc_bk0_n_bk1,
+                   const CGridDesc_MBlock_MPerBlock_NBlock_NPerBlock&
+                       c_grid_desc_mblock_mperblock_nblock_nperblock,
+                   const NamedBarrierType& barrier,
+                   const index_t k_id        = 0,
+                   const index_t k_batch     = 1,
+                   const index_t block_idx_x = static_cast<index_t>(blockIdx.x))
+    {
+        Run_<HasMainKBlockLoop, CGlobalMemoryDataOperation, TailNum, SplitKOffsetHack>(
+            p_a_grid,
+            p_b_grid,
+            p_c_grid,
+            p_shared_0,
+            p_shared_1,
+            problem,
+            a_grid_desc_ak0_m_ak1,
+            b_grid_desc_bk0_n_bk1,
+            c_grid_desc_mblock_mperblock_nblock_nperblock,
+            barrier,
+            k_id,
+            k_batch,
+            block_idx_x);
     }
 };
 

@@ -46,7 +46,8 @@ template <index_t BlockSize,
           typename ComputeTypeA = FloatA,
           typename ComputeTypeB = FloatB,
           bool DirectLoad       = false,
-          bool TransposeC       = false>
+          bool TransposeC       = false,
+          bool OpaqueThreadId   = false>
 struct BlockwiseGemmXdlops_k0mk1_k0nk1_m0n0m1n1m2m3m4n2_v1
 {
     static constexpr auto I0 = Number<0>{};
@@ -54,7 +55,7 @@ struct BlockwiseGemmXdlops_k0mk1_k0nk1_m0n0m1n1m2m3m4n2_v1
     static constexpr auto I2 = Number<2>{};
     static constexpr auto I3 = Number<3>{};
 
-    using ThisThreadBlock = ThisThreadBlock<BlockSize>;
+    using ThisThreadBlock = ThisThreadBlock<BlockSize, OpaqueThreadId>;
 
     using ElementDataTypeA =
         conditional_t<is_same_v<ComputeTypeA, ck::tf32_t>, float, ComputeTypeA>;
@@ -75,8 +76,14 @@ struct BlockwiseGemmXdlops_k0mk1_k0nk1_m0n0m1n1m2m3m4n2_v1
     static constexpr index_t NWaves   = NPerBlock / (NRepeat * NPerXDL);
     static constexpr index_t WaveSize = BlockSize / MWaves / NWaves;
 
-    static constexpr auto xdlops_gemm =
-        XdlopsGemm<ComputeTypeA, MPerXDL, NPerXDL, KPack, ComputeTypeB, TransposeC>{};
+    static constexpr auto xdlops_gemm = XdlopsGemm<ComputeTypeA,
+                                                   MPerXDL,
+                                                   NPerXDL,
+                                                   KPack,
+                                                   ComputeTypeB,
+                                                   TransposeC,
+                                                   false,
+                                                   OpaqueThreadId>{};
 
     static constexpr index_t KPerThread = KPerBlock / xdlops_gemm.K0PerXdlops;
 
@@ -288,6 +295,23 @@ struct BlockwiseGemmXdlops_k0mk1_k0nk1_m0n0m1n1m2m3m4n2_v1
             make_tuple(Sequence<0, 2, 4>{}, Sequence<1, 3, 5>{}));
 
         return xdlops_gemm.MakeCDescriptor_M0_N0_M1_N1_M2_M3_M4_N2(c_grid_desc_m0_n0_m1_n1_m2_n2);
+    }
+
+    template <typename CGridDesc_M_N>
+    __host__ __device__ static constexpr auto
+    MakeCGridDescriptor_M0_N0_M1_N1_M2_N2_N3_N4(const CGridDesc_M_N& c_grid_desc_m_n)
+    {
+        const auto M = c_grid_desc_m_n.GetLength(I0);
+        const auto N = c_grid_desc_m_n.GetLength(I1);
+
+        const auto c_grid_desc_m0_n0_m1_n1_m2_n2 = transform_tensor_descriptor(
+            c_grid_desc_m_n,
+            make_tuple(make_unmerge_transform(make_tuple(M / (MWaves * MPerXDL), MWaves, MPerXDL)),
+                       make_unmerge_transform(make_tuple(N / (NWaves * NPerXDL), NWaves, NPerXDL))),
+            make_tuple(Sequence<0>{}, Sequence<1>{}),
+            make_tuple(Sequence<0, 2, 4>{}, Sequence<1, 3, 5>{}));
+
+        return xdlops_gemm.MakeCDescriptor_M0_N0_M1_N1_M2_N2_N3_N4(c_grid_desc_m0_n0_m1_n1_m2_n2);
     }
 
     template <typename CGridDesc_G_M_N>
@@ -517,7 +541,8 @@ template <index_t BlockSize,
           bool DirectLoad       = false,
           bool TransposeC       = false,
           bool UseLdsTransposeA = false,
-          bool UseLdsTransposeB = false>
+          bool UseLdsTransposeB = false,
+          bool OpaqueThreadId   = false>
 struct BlockwiseGemmXdlops_k0mk1_k0nk1_m0n0m1n1m2m3m4n2_loop_knm_v1
     : BlockwiseGemmXdlops_k0mk1_k0nk1_m0n0m1n1m2m3m4n2_v1<BlockSize,
                                                           FloatA,
@@ -533,7 +558,8 @@ struct BlockwiseGemmXdlops_k0mk1_k0nk1_m0n0m1n1m2m3m4n2_loop_knm_v1
                                                           ComputeTypeA,
                                                           ComputeTypeB,
                                                           DirectLoad,
-                                                          TransposeC>
+                                                          TransposeC,
+                                                          OpaqueThreadId>
 {
     using Base = BlockwiseGemmXdlops_k0mk1_k0nk1_m0n0m1n1m2m3m4n2_v1<BlockSize,
                                                                      FloatA,
@@ -549,7 +575,8 @@ struct BlockwiseGemmXdlops_k0mk1_k0nk1_m0n0m1n1m2m3m4n2_loop_knm_v1
                                                                      ComputeTypeA,
                                                                      ComputeTypeB,
                                                                      DirectLoad,
-                                                                     TransposeC>;
+                                                                     TransposeC,
+                                                                     OpaqueThreadId>;
 
     using Base::A_K0;
     using Base::A_K1;

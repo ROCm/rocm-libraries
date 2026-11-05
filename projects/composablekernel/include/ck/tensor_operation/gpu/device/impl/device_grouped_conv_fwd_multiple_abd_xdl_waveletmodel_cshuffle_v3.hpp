@@ -173,22 +173,88 @@ __launch_bounds__(GridwiseGemm::LaunchBlockSize, MinimumOccupancy)
         __shared__ char p_shared_1[LDS_size];
 
         // only direct load pipeline with double buffer supported
-        GridwiseGemm::template Run<HasMainKBlockLoop, CGlobalMemoryDataOperation, TailNum>(
-            karg.p_a_grid + a_group_offset + a_n_offset,
-            karg.p_b_grid + b_group_offset,
-            karg.p_c_grid + e_group_offset + e_n_offset,
-            p_shared_0,
-            p_shared_1,
-            karg,
+        const auto transformed_a_desc =
             GridwiseGemm::template TransformGridA<decltype(a_grid_desc_ak0_m_ak1),
                                                   GridwiseGemm::AK0Number,
                                                   GridwiseGemm::AK1Number>(a_grid_desc_ak0_m_ak1,
-                                                                           get_device_arch()),
+                                                                           get_device_arch());
+        const auto transformed_b_desc =
             GridwiseGemm::template TransformGridB<decltype(b_grid_desc_bk0_n_bk1),
                                                   GridwiseGemm::BK0Number,
                                                   GridwiseGemm::BK1Number>(b_grid_desc_bk0_n_bk1,
-                                                                           get_device_arch()),
-            c_grid_desc_m_n);
+                                                                           get_device_arch());
+
+        // Runs the tiles of this workgroup: a single one, or all the ones it strides over for a
+        // persistent kernel. run_tile is the per-tile call.
+        const auto run_tiles = [&](const auto& run_tile) {
+            if constexpr(GridwiseGemm::IsPersistentKernel)
+            {
+                // The tile loop is uniform across the wave: keep its state in SGPRs
+                const index_t grid_size = amd_wave_read_first_lane(static_cast<index_t>(gridDim.x));
+                const index_t num_tiles = amd_wave_read_first_lane(
+                    GridwiseGemm::Block2CTileMap::CalculateGridSize(karg.M, karg.N));
+                index_t tile_idx = amd_wave_read_first_lane(static_cast<index_t>(blockIdx.x));
+
+                while(tile_idx < num_tiles)
+                {
+                    run_tile(tile_idx);
+                    // LDS is reused by the next tile
+                    // block_sync_lds();
+
+                    // Advance to the next work item
+                    tile_idx = amd_wave_read_first_lane(tile_idx + grid_size);
+                }
+            }
+            else
+            {
+                run_tile(static_cast<index_t>(blockIdx.x));
+            }
+        };
+
+        if constexpr(GridwiseGemm::IsPersistentKernel && GridwiseGemm::NamedBarrierType::IsEnabled)
+        {
+            // The barrier is owned by the workgroup, not by the tile: create and initialize it
+            // once, outside the tile loop
+            __shared__ typename GridwiseGemm::NamedBarrierType::barrier_t barrier_lds;
+            const typename GridwiseGemm::NamedBarrierType barrier(&barrier_lds);
+            barrier.Init();
+
+            run_tiles([&](const index_t tile_idx) {
+                GridwiseGemm::
+                    template RunWithBarrier<HasMainKBlockLoop, CGlobalMemoryDataOperation, TailNum>(
+                        karg.p_a_grid + a_group_offset + a_n_offset,
+                        karg.p_b_grid + b_group_offset,
+                        karg.p_c_grid + e_group_offset + e_n_offset,
+                        p_shared_0,
+                        p_shared_1,
+                        karg,
+                        transformed_a_desc,
+                        transformed_b_desc,
+                        c_grid_desc_m_n,
+                        barrier,
+                        0,
+                        1,
+                        tile_idx);
+            });
+        }
+        else
+        {
+            run_tiles([&](const index_t tile_idx) {
+                GridwiseGemm::template Run<HasMainKBlockLoop, CGlobalMemoryDataOperation, TailNum>(
+                    karg.p_a_grid + a_group_offset + a_n_offset,
+                    karg.p_b_grid + b_group_offset,
+                    karg.p_c_grid + e_group_offset + e_n_offset,
+                    p_shared_0,
+                    p_shared_1,
+                    karg,
+                    transformed_a_desc,
+                    transformed_b_desc,
+                    c_grid_desc_m_n,
+                    0,
+                    1,
+                    tile_idx);
+            });
+        }
     }
 #else
     ignore = karg;
@@ -274,7 +340,8 @@ template <index_t NDimSpatial,
           index_t NumGroupsToMerge  = 1,
           bool DirectLoad           = false,
           bool UseTdm               = false,
-          bool UseNamedBarrier      = false>
+          bool UseNamedBarrier      = false,
+          bool PersistentKernel     = false>
 struct DeviceGroupedConvFwdMultipleABD_WaveletModel_Xdl_CShuffle_V3
     : public DeviceGroupedConvFwdMultipleABD<NDimSpatial,
                                              ALayout,
@@ -567,7 +634,9 @@ struct DeviceGroupedConvFwdMultipleABD_WaveletModel_Xdl_CShuffle_V3
         DirectLoad,
         false, // UseTdmA
         UseTdm,
-        UseNamedBarrier>;
+        UseNamedBarrier,
+        false, // UseLdsTranspose
+        PersistentKernel>;
     using GridwiseGemm64 = GridwiseGemmBase<math::max(NXdlPerWave64, 1)>;
     using GridwiseGemm32 = GridwiseGemmBase<NXdlPerWave32>;
 
@@ -926,6 +995,34 @@ struct DeviceGroupedConvFwdMultipleABD_WaveletModel_Xdl_CShuffle_V3
     {
         using Argument = DeviceOp::Argument;
 
+        // Grid size that fills all compute units at the kernel's maximum occupancy.
+        // Intended for PersistentKernel, where workgroups loop over tiles and the grid size
+        // should match hardware capacity rather than problem size.
+        template <typename KernelFunction>
+        static index_t MaxOccupancyGridSize(const KernelFunction& kernel,
+                                            const StreamConfig& stream_config = StreamConfig{})
+        {
+            int occupancy = 0;
+            hip_check_error(hipOccupancyMaxActiveBlocksPerMultiprocessor(
+                &occupancy, kernel, LaunchBlockSize, 0));
+            occupancy = occupancy > 1 ? occupancy : 1;
+
+            hipDevice_t dev;
+            int cu_count = 0;
+            hip_check_error(hipGetDevice(&dev));
+            hip_check_error(
+                hipDeviceGetAttribute(&cu_count, hipDeviceAttributeMultiprocessorCount, dev));
+
+            if(stream_config.log_level_ > 0)
+            {
+                std::cout << "MaxActiveBlocksPerCU: " << occupancy
+                          << ", available CUs count: " << cu_count
+                          << ", occup. grid size: " << cu_count * occupancy << std::endl;
+            }
+
+            return static_cast<index_t>(cu_count * occupancy);
+        }
+
         template <typename GridwiseGemm>
         float RunGemm(const Argument& arg, const StreamConfig& stream_config = StreamConfig{})
         {
@@ -987,6 +1084,19 @@ struct DeviceGroupedConvFwdMultipleABD_WaveletModel_Xdl_CShuffle_V3
                 I1}; // kbatch
 
             const auto Run = [&](const auto& kernel) {
+                if constexpr(PersistentKernel && DirectLoad)
+                {
+                    // Persistent (2lds kernel only): workgroups loop over the M/N tiles (x), while
+                    // y (groups) and z (N) each get their own workgroups. Split the resident
+                    // workgroup budget across y * z so the whole grid fits on the device.
+                    const index_t max_wgs = MaxOccupancyGridSize(kernel, stream_config);
+                    std::cout << "max_wgs: " << max_wgs << std::endl;
+                    const index_t max_gdx = math::max(max_wgs / (gdy * gdz), index_t{1});
+                    std::cout << "max_gdx: " << max_gdx << std::endl;
+                    gdx = math::min(gdx, max_gdx);
+                    std::cout << "gdx: " << gdx << std::endl;
+                }
+
                 if(stream_config.flush_cache)
                 {
                     ave_time += launch_and_time_kernel_flush_cache(
@@ -1971,6 +2081,11 @@ struct DeviceGroupedConvFwdMultipleABD_WaveletModel_Xdl_CShuffle_V3
         if constexpr(UseNamedBarrier)
         {
             str << "_PingPong";
+        }
+
+        if constexpr(PersistentKernel)
+        {
+            str << "_Persistent";
         }
 
         str << "<"

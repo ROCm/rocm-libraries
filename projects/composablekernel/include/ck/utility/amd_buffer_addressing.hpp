@@ -930,6 +930,30 @@ __device__ void amd_buffer_store(const typename vector_type_maker<T, N>::type::t
 #endif
 }
 
+// Same as amd_buffer_store, but takes the final per-thread *byte* offset (an offset >= 2^31
+// makes the hardware drop the store, so validity has to be folded into it by the caller).
+// Lets the caller precompute the addresses of several stores ahead of time, so that no address
+// arithmetic is left between the stores.
+template <typename T,
+          index_t N,
+          AmdBufferCoherenceEnum coherence = AmdBufferCoherenceEnum::DefaultCoherence>
+__device__ void
+amd_buffer_store_at_byte_offset(const typename vector_type_maker<T, N>::type::type src_thread_data,
+                                T* p_dst_wave,
+                                const uint32_t dst_thread_byte_offset,
+                                const index_t dst_element_space_size)
+{
+    const int32x4_t dst_wave_buffer_resource =
+        make_wave_buffer_resource(p_dst_wave, dst_element_space_size);
+
+    using vector_t                = typename vector_type_maker<T, N>::type::type;
+    using scalar_t                = typename scalar_type<vector_t>::type;
+    constexpr index_t vector_size = scalar_type<vector_t>::vector_size;
+
+    amd_buffer_store_impl<scalar_t, vector_size, coherence>(
+        src_thread_data, dst_wave_buffer_resource, dst_thread_byte_offset, 0);
+}
+
 // buffer_atomic_add requires:
 //   1) p_dst_wave must point to global memory
 //   2) p_dst_wave must be a wavewise pointer.

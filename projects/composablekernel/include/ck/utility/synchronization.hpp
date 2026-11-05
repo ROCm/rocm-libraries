@@ -68,6 +68,23 @@ __device__ void block_sync_lds()
 #endif
 }
 
+__device__ void wait_async()
+{
+#if defined(__gfx125__)
+    __builtin_amdgcn_s_wait_asynccnt(0);
+#elif defined(__gfx12__)
+    asm volatile("\
+    s_wait_loadcnt 0x0 \n \
+    s_wait_dscnt 0x0 \
+    " ::);
+#else
+    asm volatile("\
+    s_waitcnt vmcnt(0) \n \
+    s_waitcnt lgkmcnt(0) \
+    " ::);
+#endif
+}
+
 __device__ void block_sync_lds_direct_load()
 {
 #if defined(__gfx125__)

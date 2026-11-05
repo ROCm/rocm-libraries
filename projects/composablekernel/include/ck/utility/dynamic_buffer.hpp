@@ -327,6 +327,29 @@ struct DynamicBuffer
         amd_tensor_load_to_lds<coherence>(tdm_desc);
     }
 
+    // Store x at a precomputed byte offset of a global buffer (AMD buffer addressing only).
+    // An offset >= 2^31 makes the store a no-op (used by the caller to encode "invalid").
+    template <typename X,
+              typename enable_if<is_same<typename scalar_type<remove_cvref_t<X>>::type,
+                                         typename scalar_type<remove_cvref_t<T>>::type>::value,
+                                 bool>::type = false>
+    __device__ void SetAtByteOffset(uint32_t byte_offset, const X& x)
+    {
+        static_assert(GetAddressSpace() == AddressSpaceEnum::Global,
+                      "SetAtByteOffset is only supported for global memory");
+        static_assert(sizeof(IndexType) <= sizeof(int32_t),
+                      "SetAtByteOffset requires AMD buffer addressing");
+
+        constexpr index_t scalar_per_t_vector = scalar_type<remove_cvref_t<T>>::vector_size;
+        constexpr index_t scalar_per_x_vector = scalar_type<remove_cvref_t<X>>::vector_size;
+        static_assert(scalar_per_x_vector % scalar_per_t_vector == 0,
+                      "wrong! X should contain multiple T");
+        constexpr index_t t_per_x = scalar_per_x_vector / scalar_per_t_vector;
+
+        amd_buffer_store_at_byte_offset<remove_cvref_t<T>, t_per_x, coherence>(
+            x, p_data_, byte_offset, element_space_size_ / PackedSize);
+    }
+
     template <typename X,
               typename enable_if<is_same<typename scalar_type<remove_cvref_t<X>>::type,
                                          typename scalar_type<remove_cvref_t<T>>::type>::value ||

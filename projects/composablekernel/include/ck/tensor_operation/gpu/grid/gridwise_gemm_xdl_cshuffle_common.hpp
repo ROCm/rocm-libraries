@@ -1948,104 +1948,225 @@ struct GridwiseGemm_xdl_cshuffle_base
               bool TransposeC,
               typename CThreadTransferSrcDstAccessOrder,
               index_t CThreadTransferSrcDstVectorDim,
+              index_t StoreBatchSize = 0, // > 0: convert and store in batches of this many accesses
               typename BlockwiseGemmPipe,
-              typename CGridDesc_M0_N0_M1_N1_M2_M3_M4_N2,
+              typename CGridDesc_M_N,
               typename CThreadBuffer,
               typename CDEElementwiseOperation>
-    __device__ static void RunEpilogueNoShuffle(
-        BlockwiseGemmPipe& blockwise_gemm,
-        const CGridDesc_M0_N0_M1_N1_M2_M3_M4_N2& c_grid_desc_m0_n0_m1_n1_m2_m3_m4_n2,
-        CThreadBuffer& c_thread_buf,
-        index_t block_m_id,
-        index_t block_n_id,
-        EDataType* p_c_grid,
-        const CDEElementwiseOperation& cde_element_op)
+    __device__ static void RunEpilogueNoShuffle(BlockwiseGemmPipe& blockwise_gemm,
+                                                const CGridDesc_M_N& c_grid_desc_m_n,
+                                                CThreadBuffer& c_thread_buf,
+                                                index_t block_m_id,
+                                                index_t block_n_id,
+                                                EDataType* p_c_grid,
+                                                const CDEElementwiseOperation& cde_element_op)
     {
         static_assert(IsMxGemm == false);
 
-        auto c_grid_buf = make_dynamic_buffer<AddressSpaceEnum::Global,
-                                              AmdBufferCoherenceEnum::DefaultCoherence,
-                                              IndexType>(
-            p_c_grid, c_grid_desc_m0_n0_m1_n1_m2_m3_m4_n2.GetElementSpaceSize());
-        static_assert(TransposeC == false);
-        const index_t m_block_data_idx_on_grid =
-            __builtin_amdgcn_readfirstlane(block_m_id * MPerBlock);
+        if constexpr(!TransposeC)
+        {
+            const auto c_grid_desc_m0_n0_m1_n1_m2_m3_m4_n2 =
+                blockwise_gemm.MakeCGridDescriptor_M0_N0_M1_N1_M2_M3_M4_N2(c_grid_desc_m_n);
+            auto c_grid_buf = make_dynamic_buffer<AddressSpaceEnum::Global,
+                                                  AmdBufferCoherenceEnum::DefaultCoherence,
+                                                  IndexType>(
+                p_c_grid, c_grid_desc_m0_n0_m1_n1_m2_m3_m4_n2.GetElementSpaceSize());
+            static_assert(TransposeC == false);
+            const index_t m_block_data_idx_on_grid =
+                __builtin_amdgcn_readfirstlane(block_m_id * MPerBlock);
 
-        const index_t n_block_data_idx_on_grid =
-            __builtin_amdgcn_readfirstlane(block_n_id * NPerBlock);
+            const index_t n_block_data_idx_on_grid =
+                __builtin_amdgcn_readfirstlane(block_n_id * NPerBlock);
 
-        constexpr auto c_thread_desc_m0_n0_m1_n1_m2_m3_m4_n2 =
-            BlockwiseGemmPipe::GetCThreadDescriptor_M0_N0_M1_N1_M2_M3_M4_N2();
+            constexpr auto c_thread_desc_m0_n0_m1_n1_m2_m3_m4_n2 =
+                BlockwiseGemmPipe::GetCThreadDescriptor_M0_N0_M1_N1_M2_M3_M4_N2();
 
-        constexpr auto c_block_desc_m0_n0_m1_n1_m2_m3_m4_n2 =
-            BlockwiseGemmPipe::GetCBlockDescriptor_M0_N0_M1_N1_M2_M3_M4_N2();
+            constexpr auto c_block_desc_m0_n0_m1_n1_m2_m3_m4_n2 =
+                BlockwiseGemmPipe::GetCBlockDescriptor_M0_N0_M1_N1_M2_M3_M4_N2();
 
-        constexpr auto M0 = c_block_desc_m0_n0_m1_n1_m2_m3_m4_n2.GetLength(I0);
-        constexpr auto N0 = c_block_desc_m0_n0_m1_n1_m2_m3_m4_n2.GetLength(I1);
-        constexpr auto M1 = c_block_desc_m0_n0_m1_n1_m2_m3_m4_n2.GetLength(I2);
-        constexpr auto N1 = c_block_desc_m0_n0_m1_n1_m2_m3_m4_n2.GetLength(I3);
-        constexpr auto M2 = c_block_desc_m0_n0_m1_n1_m2_m3_m4_n2.GetLength(I4);
-        constexpr auto M3 = c_block_desc_m0_n0_m1_n1_m2_m3_m4_n2.GetLength(I5);
-        constexpr auto M4 = c_block_desc_m0_n0_m1_n1_m2_m3_m4_n2.GetLength(I6);
-        constexpr auto N2 = c_block_desc_m0_n0_m1_n1_m2_m3_m4_n2.GetLength(I7);
+            constexpr auto M0 = c_block_desc_m0_n0_m1_n1_m2_m3_m4_n2.GetLength(I0);
+            constexpr auto N0 = c_block_desc_m0_n0_m1_n1_m2_m3_m4_n2.GetLength(I1);
+            constexpr auto M1 = c_block_desc_m0_n0_m1_n1_m2_m3_m4_n2.GetLength(I2);
+            constexpr auto N1 = c_block_desc_m0_n0_m1_n1_m2_m3_m4_n2.GetLength(I3);
+            constexpr auto M2 = c_block_desc_m0_n0_m1_n1_m2_m3_m4_n2.GetLength(I4);
+            constexpr auto M3 = c_block_desc_m0_n0_m1_n1_m2_m3_m4_n2.GetLength(I5);
+            constexpr auto M4 = c_block_desc_m0_n0_m1_n1_m2_m3_m4_n2.GetLength(I6);
+            constexpr auto N2 = c_block_desc_m0_n0_m1_n1_m2_m3_m4_n2.GetLength(I7);
 
-        // calculate origin of thread output tensor on global memory
-        //     blockwise GEMM c matrix starting index
-        const auto c_thread_mtx_on_block =
-            blockwise_gemm.CalculateCThreadOriginDataIndex(I0, I0, I0, I0);
+            // calculate origin of thread output tensor on global memory
+            //     blockwise GEMM c matrix starting index
+            const auto c_thread_mtx_on_block =
+                blockwise_gemm.CalculateCThreadOriginDataIndex(I0, I0, I0, I0);
 
-        const index_t m_thread_data_on_grid = m_block_data_idx_on_grid + c_thread_mtx_on_block[I0];
+            const index_t m_thread_data_on_grid =
+                m_block_data_idx_on_grid + c_thread_mtx_on_block[I0];
 
-        const index_t n_thread_data_on_grid = n_block_data_idx_on_grid + c_thread_mtx_on_block[I1];
+            const index_t n_thread_data_on_grid =
+                n_block_data_idx_on_grid + c_thread_mtx_on_block[I1];
 
-        const auto m_thread_data_on_grid_to_m0_m1_m2_m3_m4_adaptor =
-            make_single_stage_tensor_adaptor(
-                make_tuple(make_merge_transform(make_tuple(M0, M1, M2, M3, M4))),
-                make_tuple(Sequence<0, 1, 2, 3, 4>{}),
+            const auto m_thread_data_on_grid_to_m0_m1_m2_m3_m4_adaptor =
+                make_single_stage_tensor_adaptor(
+                    make_tuple(make_merge_transform(make_tuple(M0, M1, M2, M3, M4))),
+                    make_tuple(Sequence<0, 1, 2, 3, 4>{}),
+                    make_tuple(Sequence<0>{}));
+
+            const auto m_thread_data_on_grid_idx =
+                m_thread_data_on_grid_to_m0_m1_m2_m3_m4_adaptor.CalculateBottomIndex(
+                    make_multi_index(m_thread_data_on_grid));
+
+            const auto n_thread_data_on_grid_to_n0_n1_n2_adaptor = make_single_stage_tensor_adaptor(
+                make_tuple(make_merge_transform(make_tuple(N0, N1, N2))),
+                make_tuple(Sequence<0, 1, 2>{}),
                 make_tuple(Sequence<0>{}));
 
-        const auto m_thread_data_on_grid_idx =
-            m_thread_data_on_grid_to_m0_m1_m2_m3_m4_adaptor.CalculateBottomIndex(
-                make_multi_index(m_thread_data_on_grid));
+            const auto n_thread_data_on_grid_idx =
+                n_thread_data_on_grid_to_n0_n1_n2_adaptor.CalculateBottomIndex(
+                    make_multi_index(n_thread_data_on_grid));
 
-        const auto n_thread_data_on_grid_to_n0_n1_n2_adaptor = make_single_stage_tensor_adaptor(
-            make_tuple(make_merge_transform(make_tuple(N0, N1, N2))),
-            make_tuple(Sequence<0, 1, 2>{}),
-            make_tuple(Sequence<0>{}));
+            auto c_thread_copy =
+                ThreadwiseTensorSliceTransfer_v1r3<AccDataType,
+                                                   EDataType,
+                                                   decltype(c_thread_desc_m0_n0_m1_n1_m2_m3_m4_n2),
+                                                   decltype(c_grid_desc_m0_n0_m1_n1_m2_m3_m4_n2),
+                                                   CDEElementwiseOperation,
+                                                   Sequence<M0, N0, I1, I1, M2, I1, M4, I1>,
+                                                   CThreadTransferSrcDstAccessOrder,
+                                                   CThreadTransferSrcDstVectorDim,
+                                                   CShuffleBlockTransferScalarPerVector_NPerBlock,
+                                                   CGlobalMemoryDataOperation,
+                                                   1,
+                                                   true>{
+                    c_grid_desc_m0_n0_m1_n1_m2_m3_m4_n2,
+                    make_multi_index(m_thread_data_on_grid_idx[I0],
+                                     n_thread_data_on_grid_idx[I0],
+                                     m_thread_data_on_grid_idx[I1],
+                                     n_thread_data_on_grid_idx[I1],
+                                     m_thread_data_on_grid_idx[I2],
+                                     m_thread_data_on_grid_idx[I3],
+                                     m_thread_data_on_grid_idx[I4],
+                                     n_thread_data_on_grid_idx[I2]),
+                    cde_element_op};
 
-        const auto n_thread_data_on_grid_idx =
-            n_thread_data_on_grid_to_n0_n1_n2_adaptor.CalculateBottomIndex(
-                make_multi_index(n_thread_data_on_grid));
+            if constexpr(StoreBatchSize > 0)
+            {
+                c_thread_copy.template RunBatched<StoreBatchSize>(
+                    c_thread_desc_m0_n0_m1_n1_m2_m3_m4_n2,
+                    make_tuple(I0, I0, I0, I0, I0, I0, I0, I0),
+                    c_thread_buf,
+                    c_grid_desc_m0_n0_m1_n1_m2_m3_m4_n2,
+                    c_grid_buf);
+            }
+            else
+            {
+                c_thread_copy.Run(c_thread_desc_m0_n0_m1_n1_m2_m3_m4_n2,
+                                  make_tuple(I0, I0, I0, I0, I0, I0, I0, I0),
+                                  c_thread_buf,
+                                  c_grid_desc_m0_n0_m1_n1_m2_m3_m4_n2,
+                                  c_grid_buf);
+            }
+        }
+        else
+        {
+            const auto c_grid_desc_m0_n0_m1_n1_m2_n2_n3_n4 =
+                blockwise_gemm.MakeCGridDescriptor_M0_N0_M1_N1_M2_N2_N3_N4(c_grid_desc_m_n);
+            auto c_grid_buf = make_dynamic_buffer<AddressSpaceEnum::Global,
+                                                  AmdBufferCoherenceEnum::DefaultCoherence,
+                                                  IndexType>(
+                p_c_grid, c_grid_desc_m0_n0_m1_n1_m2_n2_n3_n4.GetElementSpaceSize());
 
-        auto c_thread_copy =
-            ThreadwiseTensorSliceTransfer_v1r3<AccDataType,
-                                               EDataType,
-                                               decltype(c_thread_desc_m0_n0_m1_n1_m2_m3_m4_n2),
-                                               decltype(c_grid_desc_m0_n0_m1_n1_m2_m3_m4_n2),
-                                               CDEElementwiseOperation,
-                                               Sequence<M0, N0, I1, I1, M2, I1, M4, I1>,
-                                               CThreadTransferSrcDstAccessOrder,
-                                               CThreadTransferSrcDstVectorDim,
-                                               CShuffleBlockTransferScalarPerVector_NPerBlock,
-                                               CGlobalMemoryDataOperation,
-                                               1,
-                                               true>{
-                c_grid_desc_m0_n0_m1_n1_m2_m3_m4_n2,
-                make_multi_index(m_thread_data_on_grid_idx[I0],
-                                 n_thread_data_on_grid_idx[I0],
-                                 m_thread_data_on_grid_idx[I1],
-                                 n_thread_data_on_grid_idx[I1],
-                                 m_thread_data_on_grid_idx[I2],
-                                 m_thread_data_on_grid_idx[I3],
-                                 m_thread_data_on_grid_idx[I4],
-                                 n_thread_data_on_grid_idx[I2]),
-                cde_element_op};
+            const index_t m_block_data_idx_on_grid =
+                __builtin_amdgcn_readfirstlane(block_m_id * MPerBlock);
 
-        c_thread_copy.Run(c_thread_desc_m0_n0_m1_n1_m2_m3_m4_n2,
-                          make_tuple(I0, I0, I0, I0, I0, I0, I0, I0),
-                          c_thread_buf,
-                          c_grid_desc_m0_n0_m1_n1_m2_m3_m4_n2,
-                          c_grid_buf);
+            const index_t n_block_data_idx_on_grid =
+                __builtin_amdgcn_readfirstlane(block_n_id * NPerBlock);
+
+            constexpr auto c_thread_desc_m0_n0_m1_n1_m2_n2_n3_n4 =
+                BlockwiseGemmPipe::GetCThreadDescriptor_M0_N0_M1_N1_M2_N2_N3_N4();
+
+            constexpr auto c_block_desc_m0_n0_m1_n1_m2_n2_n3_n4 =
+                BlockwiseGemmPipe::GetCBlockDescriptor_M0_N0_M1_N1_M2_N2_N3_N4();
+
+            constexpr auto M0 = c_block_desc_m0_n0_m1_n1_m2_n2_n3_n4.GetLength(I0);
+            constexpr auto N0 = c_block_desc_m0_n0_m1_n1_m2_n2_n3_n4.GetLength(I1);
+            constexpr auto M1 = c_block_desc_m0_n0_m1_n1_m2_n2_n3_n4.GetLength(I2);
+            constexpr auto N1 = c_block_desc_m0_n0_m1_n1_m2_n2_n3_n4.GetLength(I3);
+            constexpr auto M2 = c_block_desc_m0_n0_m1_n1_m2_n2_n3_n4.GetLength(I4);
+            constexpr auto N2 = c_block_desc_m0_n0_m1_n1_m2_n2_n3_n4.GetLength(I5);
+            constexpr auto N3 = c_block_desc_m0_n0_m1_n1_m2_n2_n3_n4.GetLength(I6);
+            constexpr auto N4 = c_block_desc_m0_n0_m1_n1_m2_n2_n3_n4.GetLength(I7);
+
+            // calculate origin of thread output tensor on global memory
+            //     blockwise GEMM c matrix starting index
+            const auto c_thread_mtx_on_block =
+                blockwise_gemm.CalculateCThreadOriginDataIndex(I0, I0, I0, I0);
+
+            const index_t m_thread_data_on_grid =
+                m_block_data_idx_on_grid + c_thread_mtx_on_block[I0];
+
+            const index_t n_thread_data_on_grid =
+                n_block_data_idx_on_grid + c_thread_mtx_on_block[I1];
+
+            const auto m_thread_data_on_grid_to_m0_m1_m2_adaptor = make_single_stage_tensor_adaptor(
+                make_tuple(make_merge_transform(make_tuple(M0, M1, M2))),
+                make_tuple(Sequence<0, 1, 2>{}),
+                make_tuple(Sequence<0>{}));
+
+            const auto m_thread_data_on_grid_idx =
+                m_thread_data_on_grid_to_m0_m1_m2_adaptor.CalculateBottomIndex(
+                    make_multi_index(m_thread_data_on_grid));
+
+            const auto n_thread_data_on_grid_to_n0_n1_n2_n3_n4_adaptor =
+                make_single_stage_tensor_adaptor(
+                    make_tuple(make_merge_transform(make_tuple(N0, N1, N2, N3, N4))),
+                    make_tuple(Sequence<0, 1, 2, 3, 4>{}),
+                    make_tuple(Sequence<0>{}));
+
+            const auto n_thread_data_on_grid_idx =
+                n_thread_data_on_grid_to_n0_n1_n2_n3_n4_adaptor.CalculateBottomIndex(
+                    make_multi_index(n_thread_data_on_grid));
+
+            auto c_thread_copy =
+                ThreadwiseTensorSliceTransfer_v1r3<AccDataType,
+                                                   EDataType,
+                                                   decltype(c_thread_desc_m0_n0_m1_n1_m2_n2_n3_n4),
+                                                   decltype(c_grid_desc_m0_n0_m1_n1_m2_n2_n3_n4),
+                                                   CDEElementwiseOperation,
+                                                   Sequence<M0, N0, I1, I1, I1, N2, I1, N4>,
+                                                   CThreadTransferSrcDstAccessOrder,
+                                                   CThreadTransferSrcDstVectorDim,
+                                                   CShuffleBlockTransferScalarPerVector_NPerBlock,
+                                                   CGlobalMemoryDataOperation,
+                                                   N4,
+                                                   true>{
+                    c_grid_desc_m0_n0_m1_n1_m2_n2_n3_n4,
+                    make_multi_index(m_thread_data_on_grid_idx[I0],
+                                     n_thread_data_on_grid_idx[I0],
+                                     m_thread_data_on_grid_idx[I1],
+                                     n_thread_data_on_grid_idx[I1],
+                                     m_thread_data_on_grid_idx[I2],
+                                     n_thread_data_on_grid_idx[I2],
+                                     n_thread_data_on_grid_idx[I3],
+                                     n_thread_data_on_grid_idx[I4]),
+                    cde_element_op};
+
+            if constexpr(StoreBatchSize > 0)
+            {
+                c_thread_copy.template RunBatched<StoreBatchSize>(
+                    c_thread_desc_m0_n0_m1_n1_m2_n2_n3_n4,
+                    make_tuple(I0, I0, I0, I0, I0, I0, I0, I0),
+                    c_thread_buf,
+                    c_grid_desc_m0_n0_m1_n1_m2_n2_n3_n4,
+                    c_grid_buf);
+            }
+            else
+            {
+                c_thread_copy.Run(c_thread_desc_m0_n0_m1_n1_m2_n2_n3_n4,
+                                  make_tuple(I0, I0, I0, I0, I0, I0, I0, I0),
+                                  c_thread_buf,
+                                  c_grid_desc_m0_n0_m1_n1_m2_n2_n3_n4,
+                                  c_grid_buf);
+            }
+        }
     }
 
     template <InMemoryDataOperationEnum CGlobalMemoryDataOperation,

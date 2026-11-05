@@ -2484,7 +2484,8 @@ template <typename base_type,
           index_t KPack,
           typename additional_type = base_type,
           bool TransposeC          = false,
-          bool is_scale_mfma       = false>
+          bool is_scale_mfma       = false,
+          bool OpaqueThreadId      = false>
 struct XdlopsGemm
 {
     static constexpr auto I0 = Number<0>{};
@@ -2776,7 +2777,16 @@ struct XdlopsGemm
         });
     }
 
-    __device__ static auto GetLaneId() { return get_thread_local_1d_id() % mfma_instr.wave_size; }
+    __device__ static auto GetLaneId()
+    {
+        index_t tid = get_thread_local_1d_id();
+        if constexpr(OpaqueThreadId)
+        {
+            // see ThisThreadBlock: keeps thread-id dependent setup out of persistent tile loops
+            asm volatile("" : "+v"(tid));
+        }
+        return tid % mfma_instr.wave_size;
+    }
 
     __device__ static auto GetBlkIdx()
     {

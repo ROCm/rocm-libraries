@@ -150,6 +150,177 @@ struct ThreadwiseTensorSliceTransfer_v1r3
         }
     }
 
+    // Same result as Run(), but split in two phases: first convert all the data and compute all
+    // destination offsets / validity flags, then issue all the stores back to back.
+    // Avoids interleaving address/data VALU work (which reuses the registers of in-flight stores,
+    // forcing s_wait_xcnt on gfx1250) with the stores. Costs num_access dst vectors + offsets of
+    // live registers, so only use it where the source registers are dead by then (epilogue).
+    // BatchSize: number of accesses converted and then stored together (0 or >= the number of
+    // accesses: everything in a single batch).
+    template <index_t BatchSize = 0,
+              typename SrcSliceOriginIdx,
+              typename SrcBuffer,
+              typename DstBuffer>
+    __device__ void RunBatched(const SrcDesc&,
+                               const SrcSliceOriginIdx&,
+                               const SrcBuffer& src_buf,
+                               const DstDesc& dst_desc,
+                               DstBuffer& dst_buf)
+    {
+        static_assert(SrcDesc::IsKnownAtCompileTime(),
+                      "wrong! SrcDesc need to known at compile-time");
+        static_assert(is_known_at_compile_time<remove_cvref_t<SrcSliceOriginIdx>>::value,
+                      "wrong! SrcSliceOrigin need to known at compile-time");
+        static_assert(SrcBuffer::IsStaticBuffer(), "wrong! SrcBuffer need to be StaticBuffer");
+
+        constexpr auto src_desc             = remove_cvref_t<SrcDesc>{};
+        constexpr auto src_slice_origin_idx = to_multi_index(SrcSliceOriginIdx{});
+
+        constexpr auto dst_scalar_per_access = generate_sequence(
+            detail::lambda_scalar_per_access<DstVectorDim, DstScalarPerVector>{}, Number<nDim>{});
+
+        constexpr auto dst_scalar_step_in_vector =
+            generate_sequence(detail::lambda_scalar_step_in_vector<DstVectorDim>{}, Number<nDim>{});
+
+        using SpaceFillingCurve = SpaceFillingCurve<SliceLengths,
+                                                    DimAccessOrder,
+                                                    remove_cv_t<decltype(dst_scalar_per_access)>>;
+
+        static_assert(DstScalarPerVector == SpaceFillingCurve::ScalarPerVector,
+                      "wrong!DstScalarPerVector != SpaceFillingCurve::ScalarPerVector");
+        using dst_vector_t = typename vector_type_maker<DstData, DstScalarPerVector>::type::type;
+
+        constexpr auto num_access = SpaceFillingCurve::GetNumOfAccess();
+
+        // validity can be folded into the offset for plain global stores using the buffer
+        // out-of-range-offset trick
+#if CK_EXPERIMENTAL_USE_BUFFER_STORE_OOB_CHECK_OFFSET_TRICK
+        constexpr bool fold_valid_into_offset =
+            DstInMemOp == InMemoryDataOperationEnum::Set &&
+            DstBuffer::GetAddressSpace() == AddressSpaceEnum::Global;
+#else
+        constexpr bool fold_valid_into_offset = false;
+#endif
+
+        constexpr index_t batch_size =
+            (BatchSize <= 0 || BatchSize > num_access) ? num_access : BatchSize;
+        constexpr index_t num_batches = (num_access + batch_size - 1) / batch_size;
+
+        // Data/addresses of all the batches are kept (not only of the current batch): see the
+        // keep-alive below.
+        StaticallyIndexedArray<dst_vector_t, num_access> dst_vectors;
+        StaticallyIndexedArray<index_t, num_access> dst_offsets;
+        StaticallyIndexedArray<bool, num_access> dst_valids;
+
+        static_for<0, num_batches, 1>{}([&](auto i_batch) {
+            // phase 1: data conversion + index computation for this batch, no stores
+            static_for<0, batch_size, 1>{}([&](auto i_in_batch) {
+                constexpr index_t access_id = i_batch * batch_size + i_in_batch;
+                if constexpr(access_id < num_access)
+                {
+                    constexpr auto idx_1d = Number<access_id>{};
+                    constexpr auto idx_md = SpaceFillingCurve::GetIndex(idx_1d);
+
+                    typename vector_type_maker<DstData, DstScalarPerVector>::type dst_vector;
+                    static_for<0, DstScalarPerVector, 1>{}([&](auto i) {
+                        constexpr index_t src_offset = src_desc.CalculateOffset(
+                            src_slice_origin_idx + idx_md + i * dst_scalar_step_in_vector);
+
+                        DstData v;
+
+                        // apply element-wise operation
+                        element_op_(v, src_buf[Number<src_offset>{}]);
+
+                        dst_vector.template AsType<DstData>()(i) = v;
+                    });
+
+                    dst_vector_t vec = dst_vector.template AsType<dst_vector_t>()[Number<0>{}];
+                    index_t offset   = dst_coord_.GetOffset();
+                    const bool valid = coordinate_has_valid_offset_assuming_visible_index_is_valid(
+                        dst_desc, dst_coord_);
+
+                    if constexpr(fold_valid_into_offset)
+                    {
+                        // Same trick as amd_buffer_store: a byte offset >= 2^31 makes the hardware
+                        // drop the store. Computed here, on the final byte address, so that every
+                        // store keeps its own address register and no address arithmetic is left
+                        // between the stores.
+                        uint32_t byte_offset = static_cast<uint32_t>(offset) * sizeof(DstData) +
+                                               (valid ? 0u : 0x80000000u);
+
+                        // Opaque to the optimizer: keep data and address materialized here instead
+                        // of being recomputed (into recycled registers) next to each store.
+                        asm volatile("" : "+v"(vec), "+v"(byte_offset));
+
+                        dst_vectors(idx_1d) = vec;
+                        dst_offsets(idx_1d) = static_cast<index_t>(byte_offset);
+                        dst_valids(idx_1d)  = true;
+                    }
+                    else
+                    {
+                        int valid_i = valid ? 1 : 0;
+                        asm volatile("" : "+v"(vec), "+v"(offset), "+v"(valid_i));
+
+                        dst_vectors(idx_1d) = vec;
+                        dst_offsets(idx_1d) = offset;
+                        dst_valids(idx_1d)  = valid_i != 0;
+                    }
+
+                    if constexpr(idx_1d.value != num_access - 1)
+                    {
+                        constexpr auto forward_step = SpaceFillingCurve::GetForwardStep(idx_1d);
+
+                        move_tensor_coordinate(dst_desc,
+                                               dst_coord_,
+                                               make_tensor_coordinate_step(dst_desc, forward_step));
+                    }
+                }
+            });
+
+            // phase 2: the stores of this batch together
+            static_for<0, batch_size, 1>{}([&](auto i_in_batch) {
+                constexpr index_t access_id = i_batch * batch_size + i_in_batch;
+                if constexpr(access_id < num_access)
+                {
+                    if constexpr(fold_valid_into_offset)
+                    {
+                        dst_buf.template SetAtByteOffset<dst_vector_t>(
+                            static_cast<uint32_t>(dst_offsets[Number<access_id>{}]),
+                            dst_vectors[Number<access_id>{}]);
+                    }
+                    else
+                    {
+                        dst_buf.template Update<DstInMemOp, dst_vector_t>(
+                            dst_offsets[Number<access_id>{}],
+                            dst_valids[Number<access_id>{}],
+                            dst_vectors[Number<access_id>{}]);
+                    }
+                }
+            });
+        });
+
+        // Keep the data and address registers of all the stores alive until here. Otherwise the
+        // allocator recycles the registers of the stores of a batch (still in flight) for the next
+        // batch, and each reuse costs an s_wait_xcnt on gfx1250.
+        if constexpr(num_batches > 1)
+        {
+            static_for<0, num_access, 1>{}([&](auto idx_1d) {
+                const dst_vector_t vec = dst_vectors[idx_1d];
+                const index_t offset   = dst_offsets[idx_1d];
+                asm volatile("" : : "v"(vec), "v"(offset));
+            });
+        }
+
+        // move dst coordinate back to slice origin (or not)
+        if constexpr(DstResetCoordinateAfterRun)
+        {
+            const auto dst_reset_step =
+                make_tensor_coordinate_step(dst_desc, GetDstCoordinateResetStep());
+
+            move_tensor_coordinate(dst_desc, dst_coord_, dst_reset_step);
+        }
+    }
+
     __device__ static constexpr auto GetDstCoordinateResetStep()
     {
         constexpr auto dst_scalar_per_access = generate_sequence(
