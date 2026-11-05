@@ -808,8 +808,8 @@ TEST(TestGpuReferenceGraphExecutor, UnsupportedNodeTypeThrows)
 {
     SKIP_IF_NO_DEVICES();
 
-    // ConvolutionBwd has no GPU plan yet - should throw
-    auto builder = hipdnn_test_sdk::utilities::createValidConvBwdGraph();
+    // BlockScaleDequantize has no GPU plan yet - should throw
+    auto builder = hipdnn_test_sdk::utilities::createValidBlockScaleDequantizeGraph();
 
     const std::unordered_map<int64_t, void*> variantPack;
 
