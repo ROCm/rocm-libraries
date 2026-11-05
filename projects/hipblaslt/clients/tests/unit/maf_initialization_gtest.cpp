@@ -15,39 +15,18 @@ TEST(HostUnitMafInitialization, LogicalBatchIndexAndBroadcast)
 {
     hn::Tensor tensor(hn::ScalarType::Float64, hn::Layout(hn::Shape{3, 4, 2}, {1, 6, 30}, 0));
     std::ranges::fill(tensor.rawEncodedBackingStorage(), std::byte{0xa5});
-    client::initializeMatrix(tensor,
-                             client::MatrixRole::A,
-                             hipblaslt_initialization::maf1_0,
-                             0,
-                             false,
-                             std::nullopt,
-                             false,
-                             {});
+    client::initializeMatrix(tensor, client::MatrixRole::A, hipblaslt_initialization::maf1_0, 0);
     for(size_t b = 0; b < 2; ++b)
         for(size_t j = 0; j < 4; ++j)
             for(size_t i = 0; i < 3; ++i)
                 EXPECT_EQ(tensor.loadAs<double>({i, j, b}), std::sin(double(i + 3 * j + 12 * b)));
     EXPECT_EQ(tensor.rawEncodedBackingStorage()[3 * sizeof(double)], std::byte{0xa5});
     hn::Tensor broadcast(hn::ScalarType::Float64, hn::Layout(hn::Shape{3, 4, 2}, {1, 3, 0}, 0));
-    client::initializeMatrix(broadcast,
-                             client::MatrixRole::B,
-                             hipblaslt_initialization::maf1_0,
-                             0,
-                             false,
-                             std::nullopt,
-                             false,
-                             {});
+    client::initializeMatrix(broadcast, client::MatrixRole::B, hipblaslt_initialization::maf1_0, 0);
     EXPECT_EQ(broadcast.loadAs<double>({1, 0, 1}), std::cos(1.0));
     hn::Tensor batch(hn::ScalarType::Float64, hn::Shape{3, 4});
-    client::initializeMatrix(batch,
-                             client::MatrixRole::A,
-                             hipblaslt_initialization::maf1_0,
-                             0,
-                             false,
-                             std::nullopt,
-                             false,
-                             {},
-                             1);
+    client::initializeMatrix(
+        batch, client::MatrixRole::A, hipblaslt_initialization::maf1_0, 0, {.batchIndex = 1});
     EXPECT_EQ(batch.loadAs<double>({1, 0}), tensor.loadAs<double>({1, 0, 1}));
 }
 
@@ -93,27 +72,14 @@ TEST(HostUnitMafInitialization, IndependentCodesScalesAndTailBlocks)
 TEST(HostUnitMafInitialization, NonScaledFp8UsesNormalAndRejectsIntegers)
 {
     hn::Tensor data(hn::ScalarType::Float8E4M3, hn::Shape{32768, 1});
-    client::initializeMatrix(data,
-                             client::MatrixRole::A,
-                             hipblaslt_initialization::maf2_0,
-                             0,
-                             false,
-                             std::nullopt,
-                             false,
-                             {});
+    client::initializeMatrix(data, client::MatrixRole::A, hipblaslt_initialization::maf2_0, 0);
     double squares = 0;
     for(size_t i = 0; i < 32768; ++i)
         squares += std::pow(data.loadAs<double>({i, 0}), 2);
     EXPECT_NEAR(squares / 32768, 1.0, 0.04);
     hn::Tensor integer(hn::ScalarType::Int32, hn::Shape{1, 1});
-    EXPECT_THROW(client::initializeMatrix(integer,
-                                          client::MatrixRole::A,
-                                          hipblaslt_initialization::maf1_0,
-                                          0,
-                                          false,
-                                          std::nullopt,
-                                          false,
-                                          {}),
+    EXPECT_THROW(client::initializeMatrix(
+                     integer, client::MatrixRole::A, hipblaslt_initialization::maf1_0, 0),
                  std::runtime_error);
     EXPECT_THROW(
         client::groupedGemmInitializationRecipe(hn::ScalarType::Float32,
@@ -132,15 +98,8 @@ TEST(HostUnitMafInitialization, SeedBatchTraversalAndThreadIndependence)
     client::maf::fill(batches, client::maf::Mode::Maf2, 0);
     omp_set_num_threads(8);
     hn::Tensor separate(hn::ScalarType::Float64, hn::Layout(hn::Shape{8192, 2}, {2, 1}, 0));
-    client::initializeMatrix(separate,
-                             client::MatrixRole::A,
-                             hipblaslt_initialization::maf2_0,
-                             1234,
-                             false,
-                             std::nullopt,
-                             false,
-                             {},
-                             1);
+    client::initializeMatrix(
+        separate, client::MatrixRole::A, hipblaslt_initialization::maf2_0, 1234, {.batchIndex = 1});
     omp_set_num_threads(previous);
     for(size_t j = 0; j < 2; ++j)
         for(size_t i = 0; i < 8192; ++i)

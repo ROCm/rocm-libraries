@@ -1883,11 +1883,11 @@ void testing_matmul_with_bias(const Arguments&                                  
                 role,
                 arg.initialization,
                 matrixSeed(role, batch),
-                forceNaN,
-                std::nullopt,
-                positiveOnlyInitialization,
-                {.pattern = iePattern, .reductionAxis = transA != HIPBLAS_OP_N ? 0u : 1u},
-                separateBatchStorage && matrix.batchStride() != 0 ? batch : 0);
+                {.forceNaN     = forceNaN,
+                 .positiveOnly = positiveOnlyInitialization,
+                 .integerExact
+                 = {.pattern = iePattern, .reductionAxis = transA != HIPBLAS_OP_N ? 0u : 1u},
+                 .batchIndex = separateBatchStorage && matrix.batchStride() != 0 ? batch : 0});
         };
 
         auto mxScaleBatchOutput = [](HipHostBuffer& buffer, size_t offset, size_t batchBytes) {

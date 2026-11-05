@@ -775,16 +775,13 @@ namespace hipblaslt::hostnumerics
                                         : TrigonometricComponent::Sine);
     }
 
-    void initializeMatrix(Tensor                         destination,
-                          MatrixRole                     role,
-                          hipblaslt_initialization       initialization,
-                          uint64_t                       seed,
-                          bool                           forceNaN,
-                          std::optional<OneSpecialValue> oneSpecialValue,
-                          bool                           positiveOnly,
-                          IntegerExactOptions            integerExact,
-                          size_t                         batchIndex)
+    void initializeMatrix(Tensor                             destination,
+                          MatrixRole                         role,
+                          hipblaslt_initialization           initialization,
+                          uint64_t                           seed,
+                          const MatrixInitializationOptions& options)
     {
+        const auto& [forceNaN, oneSpecialValue, positiveOnly, integerExact, batchIndex] = options;
         validateInitialization(role, initialization, oneSpecialValue, positiveOnly);
         if(integerExact.pattern != IntegerExactPattern::Standard
            && initialization != hipblaslt_initialization::integer_exact)

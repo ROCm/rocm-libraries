@@ -101,14 +101,21 @@ namespace hipblaslt::hostnumerics
     // Applies the hipBLASLt initialization policy directly to an existing
     // Tensor. The caller owns storage and supplies the exact seed used by the
     // selected recipe; MatrixRole only selects operand-specific value rules.
-    void initializeMatrix(::roc::hostnumerics::Tensor    destination,
-                          MatrixRole                     role,
-                          hipblaslt_initialization       initialization,
-                          uint64_t                       seed,
-                          bool                           forceNaN,
-                          std::optional<OneSpecialValue> oneSpecialValue,
-                          bool                           positiveOnly,
-                          IntegerExactOptions            integerExact,
-                          size_t                         batchIndex = 0);
+    struct MatrixInitializationOptions
+    {
+        // Fill every element with NaN instead of the selected values.
+        bool                           forceNaN = false;
+        std::optional<OneSpecialValue> oneSpecialValue;
+        bool                           positiveOnly = false;
+        IntegerExactOptions            integerExact;
+        // The batch index of the tensor's first batch, which MAF seeds use.
+        size_t batchIndex = 0;
+    };
+
+    void initializeMatrix(::roc::hostnumerics::Tensor        destination,
+                          MatrixRole                         role,
+                          hipblaslt_initialization           initialization,
+                          uint64_t                           seed,
+                          const MatrixInitializationOptions& options = {});
 
 } // namespace hipblaslt::hostnumerics
