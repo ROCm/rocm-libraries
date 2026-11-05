@@ -11,8 +11,12 @@ through it too, so the pairing cannot drift between them. Both LDS gates (the
 strided-KV dispatcher's and :func:`supports_split_kv_reduce`) size the reduce through
 :func:`split_kv_reduce_lds_bytes`.
 
-:func:`supports_split_kv_reduce` is the reduce kernel's one pack-time predicate. Each
-arch's module wraps it under the name its builder's predicate alias expects (gfx950:
+:func:`supports_split_kv_reduce` is the reduce kernel's one pack-time predicate. It
+leaves ``spec`` unannotated because each arch has its own reduce spec class, and
+``hkp_pack`` only accepts a predicate whose first parameter is annotated with the
+builder's spec class. So an arch cannot re-export it as-is (``hkp_pack`` would refuse
+the reduce builder at pack time); it must wrap it in a predicate typed with its own
+spec, under the name its builder's predicate alias expects (gfx950:
 ``supports_tiled_reduce_spec``).
 """
 
@@ -61,6 +65,10 @@ def supports_split_kv_reduce(spec, *, arch: str) -> Tuple[bool, str]:
     whose ``wave64_reduce_max/sum`` butterfly assumes a single wave64, so ``arch`` is
     gated like the segment kernel's: ``validate_tiled_attention_arch`` admits only the
     wave64 gfx950 and gfx942 targets and refuses wave32 RDNA.
+
+    Not a predicate ``hkp_pack`` can resolve on its own: ``spec`` is unannotated, so
+    each arch wraps this in a predicate whose ``spec`` is typed with its reduce spec
+    class (see the module docstring).
     """
     from rocke.core.arch.target import ArchTarget
 

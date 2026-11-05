@@ -42,7 +42,6 @@ from kernels.common._attention_strided_kv import (
 from kernels.common._lse_store import lse_row_has_mass, lse_store
 from kernels.common.attention_mask_type import band_mask_type
 from kernels.common.attention_split_kv_reduce import (
-    reduce_max_segments,
     split_kv_reduce_spec,
     supports_split_kv_reduce,
 )

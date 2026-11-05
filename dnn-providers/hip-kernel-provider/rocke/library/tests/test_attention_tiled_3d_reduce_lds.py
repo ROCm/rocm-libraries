@@ -120,7 +120,7 @@ def test_cpp_segment_bound_mirrors_the_arch_bound(request):
     each restated in C++, and equals the Python gate's bound."""
     from rocke.core.arch.target import ArchTarget
 
-    from kernels.gfx950.attention_tiled_3d import reduce_max_segments
+    from kernels.common.attention_split_kv_reduce import reduce_max_segments
 
     packs = _packs_dir(request.config)
     cap = _cpp_int(
