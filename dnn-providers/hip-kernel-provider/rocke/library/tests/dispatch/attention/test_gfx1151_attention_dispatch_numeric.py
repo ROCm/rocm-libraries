@@ -2125,6 +2125,79 @@ def test_runtime_head_dims_rows_ending_at_the_allocation(bucket, dim, algorithm)
     _assert_lse_close(got["lse"], lse)
 
 
+@pytest.mark.gpu
+@_NEEDS_GPU
+def test_bind_paged_dense_q_with_seqused_q():
+    """One paged prefill launch with a batch-strided (``dense_q``) Q / O and
+    ``seqused_q``, selected from the request's ``dense_q`` / ``seqused_q``
+    fields by ``dispatch_attention``: no ``cu_seqlens_q``, batch strides from
+    the tensors, rows past ``seqused_q[b]`` written as O = 0, LSE = -inf (all of
+    sequence 2's rows)."""
+    batch, sq, hq, hkv, dim, page, width = 3, 24, 4, 2, 64, 16, 3
+    used_q = np.array([24, 7, 0], dtype=np.int32)
+    used_k = np.array([41, 16, 5], dtype=np.int32)
+    rng = np.random.default_rng(1254)
+    num_pages = batch * width + 2
+    table = (
+        rng.permutation(num_pages)[: batch * width]
+        .reshape(batch, width)
+        .astype(np.int32)
+    )
+    q = rng.standard_normal((batch, sq, hq, dim)).astype(np.float16)
+    k_cache = rng.standard_normal((num_pages, page, hkv, dim)).astype(np.float16)
+    v_cache = rng.standard_normal((num_pages, page, hkv, dim)).astype(np.float16)
+    scale = 1.0 / np.sqrt(dim)
+    request = AttentionRequest(
+        batch=batch,
+        nhead_q=hq,
+        nhead_k=hkv,
+        seqlen_q=sq,
+        seqlen_k=width * page,
+        hdim_q=dim,
+        hdim_v=dim,
+        arch=_ARCH,
+        dtype="fp16",
+        layout="paged",
+        kv_block_size=page,
+        emit_lse=True,
+        dense_q=True,
+        seqused_q=True,
+        algorithm=_PREFILL,
+    )
+    spec = _dispatch_pinned(request).spec
+    assert spec.dense_q and spec.seqused_q
+    arrays = {
+        "q": q,
+        "k": k_cache,
+        "v": v_cache,
+        "out": np.full((batch, sq, hq, dim), np.nan, dtype=np.float16),
+        "lse": np.full((batch, hq, sq), np.nan, dtype=np.float32),
+        "seqused_q": used_q,
+        "seqused_k": used_k,
+        "block_table": table,
+    }
+    got = _launch_np(request, arrays, ("out", "lse"), scale=scale)
+
+    out = np.zeros((batch, sq, hq, dim), dtype=np.float32)
+    lse = np.full((batch, hq, sq), -np.inf, dtype=np.float32)
+    for b in range(batch):
+        rows, keys = int(used_q[b]), int(used_k[b])
+        if not rows:
+            continue
+        tok = np.arange(keys)
+        pages = table[b, tok // page]
+        k = k_cache[pages, tok % page][None]
+        v = v_cache[pages, tok % page][None]
+        qb = q[b : b + 1, :rows]
+        out[b, :rows] = _windowed_reference(
+            qb, k, v, scale=scale, ctx=0, left=0, right=-1
+        )[0]
+        lse[b, :, :rows] = _lse_reference(qb, k, scale, ctx=0, left=0, right=-1)[0]
+    np.testing.assert_allclose(got["out"], out, rtol=0, atol=2e-2)
+    _assert_lse_close(got["lse"], lse)
+    assert not got["out"][2].any() and np.isneginf(got["lse"][2]).all()
+
+
 # ---------------------------------------------------------------------
 # Structural launch-safety gate: no GPU, no torch, no compile, no
 # ``cu_seqlens``/``seqused_k``/``block_table`` content reads -- only
@@ -2744,3 +2817,89 @@ class TestMetadataSafety:
                 values["window_left"],
                 values["window_right"],
             ) == expected, extra
+
+
+def _paged_query_spec(**options):
+    from kernels.gfx1151.wmma_fmha_fwd_v2 import WmmaFmhaFwdV2Spec
+
+    return WmmaFmhaFwdV2Spec(
+        dtype="fp16", head_dim=64, layout="paged", page_block_size=8, **options
+    )
+
+
+def _paged_tensors(q):
+    k = _fake_tensor((5, 8, 2, 64))
+    return {
+        "q": q,
+        "k": k,
+        "v": k,
+        "out": q,
+        "seqused_k": _fake_tensor((2,), dtype="int32"),
+        "block_table": _fake_tensor((2, 4), dtype="int32"),
+    }
+
+
+class TestPagedQueryOptions:
+    """The prefill spec's ``dense_q`` / ``seqused_q`` options reach the
+    collected kernel arguments (no GPU)."""
+
+    def test_dense_q_takes_batch_strides_and_no_cu_seqlens_q(self):
+        # Batch rows padded by 8 elements: the batch stride comes from q.
+        q = _fake_tensor((2, 32, 4, 64), strides=(32 * 4 * 64 + 8, 4 * 64, 64, 1))
+        lse = _fake_tensor((2, 4, 32), dtype="float32")
+        values = _collect(
+            _dense_request(layout="paged", kv_block_size=8, emit_lse=True),
+            _paged_query_spec(dense_q=True),
+            {**_paged_tensors(q), "lse": lse},
+        )
+        assert "cu_seqlens_q" not in values
+        assert (values["stride_q_batch"], values["stride_o_batch"]) == (8200, 8200)
+        assert (values["stride_q_token"], values["stride_q_head"]) == (256, 64)
+        assert (values["stride_o_token"], values["stride_o_head"]) == (256, 64)
+        assert values["stride_lse_batch"] == 4 * 32
+        assert (values["stride_lse_token"], values["stride_lse_head"]) == (1, 32)
+
+    def test_dense_q_rejects_a_packed_or_mis_shaped_q(self):
+        request = _dense_request(layout="paged", kv_block_size=8)
+        spec = _paged_query_spec(dense_q=True)
+        with pytest.raises(ValueError, match="q must be rank-4"):
+            _collect(request, spec, _paged_tensors(_fake_tensor((64, 4, 64))))
+        with pytest.raises(ValueError, match="dense_q needs q"):
+            _collect(request, spec, _paged_tensors(_fake_tensor((2, 31, 4, 64))))
+
+    def test_seqused_q_is_required_and_passed(self):
+        request = _dense_request(layout="paged", kv_block_size=8)
+        tensors = {
+            **_paged_tensors(_fake_tensor((40, 4, 64))),
+            "cu_seqlens_q": _fake_tensor((3,), dtype="int32"),
+        }
+        for spec in (
+            _paged_query_spec(seqused_q=True),
+            _paged_query_spec(seqused_q=True, dense_q=True),
+        ):
+            if spec.dense_q:
+                tensors = _paged_tensors(_fake_tensor((2, 32, 4, 64)))
+            with pytest.raises(ValueError, match=r"require tensors\['seqused_q'\]"):
+                _collect(request, spec, tensors)
+            with pytest.raises(ValueError, match=r"seqused_q must have shape \[2\]"):
+                _collect(
+                    request,
+                    spec,
+                    {**tensors, "seqused_q": _fake_tensor((3,), dtype="int32")},
+                )
+            used = _fake_tensor((2,), dtype="int32")
+            values = _collect(request, spec, {**tensors, "seqused_q": used})
+            assert values["seqused_q"] is used
+
+    def test_off_options_keep_the_packed_query_arguments(self):
+        values = _collect(
+            _dense_request(layout="paged", kv_block_size=8),
+            _paged_query_spec(),
+            {
+                **_paged_tensors(_fake_tensor((40, 4, 64))),
+                "cu_seqlens_q": _fake_tensor((3,), dtype="int32"),
+                "seqused_q": _fake_tensor((2,), dtype="int32"),
+            },
+        )
+        assert "seqused_q" not in values and "cu_seqlens_q" in values
+        assert values["stride_q_batch"] == 0

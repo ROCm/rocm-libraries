@@ -108,8 +108,12 @@ extern "C" {
  * 12: indexed matrix sources, independent destination, and source-owned scales
  *     replace the flat MMA fields and role enum. Indexed queries supplement the
  *     result-aware A/B/C queries; native consumers must rebuild. ABI11 libraries
- *     do not share this combined layout and must be refused. */
-#define ROCKE_ABI_VERSION 12
+ *     do not share this combined layout and must be refused.
+ * 13: rocke_rdna_attn_params_t gained block_table_v mid-struct and k_ptr,
+ *     v_ptr and live_rows at its end, which changes its size and field
+ *     offsets; rocke_wmma_fmha_fwd_v2_spec_t gained dense_q and seqused_q in
+ *     the padding after page_block_size (its size and offsets are unchanged). */
+#define ROCKE_ABI_VERSION 13
 
 /* Wire ABI: the CBOR recipe/bundle/guard vocabulary this engine understands.
  * 2: list-tagged ("l") kernel attrs such as cluster_dims; level-1 engines drop them.

@@ -26,6 +26,8 @@
 #            lookups, ragged, everything at once)
 #   166..167 gfx12-generic unsplit wide Q with features
 #   168..169 processor replays (gfx1151, gfx1201) of feature configs
+#   170..179 QUERY_LENGTHS x (gfx11-generic, gfx12-generic): dense Q against
+#            a paged cache, and seqused_q on ragged / paged / dense-Q layouts
 #
 # The head counts (Hq / Hkv / Hv), head widths, strides and window bounds
 # are kernel arguments, so every config covers Hv != Hkv by construction.
@@ -51,7 +53,7 @@ KNOBS = (
 )
 # (dtype, head_dim, head_dim_v, mask, bias, flags, layout, page_block_size,
 #  block_n, wave_pair); flags: c softcap, s sinks, a ALiBi, q QQ-bias,
-#  8 FP8 (OCP E4M3FN) K/V.
+#  8 FP8 (OCP E4M3FN) K/V, d dense Q (paged), u seqused_q.
 FEATURES = (
     ("fp16", 128, 128, "none", None, "c", "dense", 0, 32, None),
     ("bf16", 256, 256, "causal", None, "c", "dense", 0, 32, None),
@@ -88,6 +90,13 @@ FEATURES_GFX12 = (
     ("bf16", 192, 128, "causal", None, "c8", "dense", 0, 32, False),
     ("fp16", 256, 128, "none", None, "s", "paged", 32, 32, False),
 )
+QUERY_LENGTHS = (
+    ("bf16", 128, 128, "causal", None, "d", "paged", 16, 32, None),
+    ("fp16", 64, 64, "causal", None, "du", "paged", 32, 32, None),
+    ("bf16", 128, 128, "causal", None, "u", "paged", 16, 32, None),
+    ("fp16", 128, 128, "none", None, "u", "ragged", 0, 32, None),
+    ("bf16", 256, 256, "causal", None, "du", "paged", 16, 32, None),
+)
 
 
 def _feature_fields(row):
@@ -104,6 +113,8 @@ def _feature_fields(row):
         use_qq_bias="q" in flags,
         layout=layout,
         page_block_size=ps,
+        dense_q="d" in flags,
+        seqused_q="u" in flags,
         kv_dtype="fp8e4m3" if "8" in flags else "",
         block_n=bn,
         wave_pair=pair,
@@ -211,6 +222,9 @@ def _configs():
         out.append(("gfx12-generic", _feature_fields(row)))
     out.append(("gfx1151", _feature_fields(FEATURES[2])))
     out.append(("gfx1201", _feature_fields(FEATURES[8])))
+    for arch in ARCHS:
+        for row in QUERY_LENGTHS:
+            out.append((arch, _feature_fields(row)))
     return out
 
 
