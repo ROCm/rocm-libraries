@@ -92,8 +92,7 @@ bool ConvHipImplicitGemmWmmaBwdData1d::IsApplicable(
         return false;
 
     // gfx110X / gfx115X WMMA only. gfx12 WMMA takes a different operand layout (8 elements per
-    // lane, no replication) and is not implemented here; gfx117X lacks these WMMA instructions and
-    // gfx101X / gfx103X have none.
+    // lane, no replication) and is not implemented here; gfx101X / gfx103X have no WMMA.
     const std::string dev_name = ctx.GetStream().GetDeviceName();
     if(!StartsWith(dev_name, "gfx110") && !StartsWith(dev_name, "gfx115"))
         return false;
