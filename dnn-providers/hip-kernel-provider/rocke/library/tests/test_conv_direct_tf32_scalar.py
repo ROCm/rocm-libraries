@@ -17,7 +17,7 @@ MFMAs (comgr cross-compile). GPU part (gfx950/gfx942 attached): correctness
 against an IEEE fp32 torch reference computed on the CPU, relative to the
 output peak -- 1e-5 for exact fp32 math; for the TF32 wgrad, 1e-4 on gfx950
 and, on gfx942, 1e-3 against a reference whose inputs are masked to what the
-native XF32 MFMA consumes (``_tf32_reference_inputs``).
+native XF32 MFMA consumes (``conv_reference.tf32_reference_inputs``).
 
 pytest forks per test on some setups, which leaves HIP without a device; run
 the GPU part as ``python3 library/tests/test_conv_direct_tf32_scalar.py``.
@@ -37,6 +37,8 @@ from kernels.common.conv_direct_grouped import DirectConvProblem as P
 _ARCHS = ("gfx950", "gfx942")
 _F32_DTYPES = ("fp32", "tf32")
 _HAS_TORCH = importlib.util.find_spec("torch") is not None
+if _HAS_TORCH:
+    from builders.common.conv_reference import tf32_reference_inputs
 if _HAS_TORCH:
     # Claim the HIP context for torch before rocke's runtime touches it (see
     # test_direct_conv_correctness.py). The reference itself runs on the CPU.
@@ -447,17 +449,6 @@ def _tf32_wgrad_tol(arch: str) -> float:
     return 1e-3 if arch == "gfx942" else 1e-4
 
 
-def _tf32_reference_inputs(t, arch: str):
-    """``t`` as the TF32 MMA on ``arch`` consumes it.
-
-    gfx942's native XF32 MFMA reads the top 19 bits of each fp32 operand
-    (``& 0xFFFFE000``); gfx950's BF16x3 emulation uses the full payload.
-    """
-    if arch != "gfx942":
-        return t
-    return (t.view(torch.int32) & -0x2000).view(torch.float32)
-
-
 def _ref_wgrad(X, dY, p):
     import torch.nn.functional as F
 
@@ -530,8 +521,8 @@ class TestGpuCorrectness(unittest.TestCase):
                     )
                     if dtype == "tf32":
                         ref = _ref_wgrad(
-                            _tf32_reference_inputs(X, _GPU),
-                            _tf32_reference_inputs(dY, _GPU),
+                            tf32_reference_inputs(X, _GPU),
+                            tf32_reference_inputs(dY, _GPU),
                             p,
                         )
                     else:

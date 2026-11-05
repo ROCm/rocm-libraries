@@ -576,24 +576,16 @@ def _tf32_is_emulated(arch: str, op_id: "str | None" = None) -> bool:
     """Whether ``arch`` (or the atom ``op_id``) runs TF32 as bf16x3 emulation.
 
     ``op_id`` (the kernel's MMA atom) is authoritative; without it the
-    catalog's 16x16 TF32 atom for ``arch`` decides. An arch with no TF32 atom
-    counts as native, so it gets the looser bound.
+    catalog's 16x16 TF32 atom for ``arch`` decides
+    (:func:`kernels.conv.direct_aot_jobs.tf32_is_emulated`).
     """
     from rocke.core.arch.target import emulated_tf32_operand_lens
 
     if op_id is not None:
         return emulated_tf32_operand_lens(op_id) is not None
-    from rocke.core.arch import ArchTarget
+    from kernels.conv.direct_aot_jobs import tf32_is_emulated
 
-    try:
-        target = ArchTarget.from_gfx(arch)
-    except Exception:  # noqa: BLE001 - unknown arch: no catalog to ask
-        return False
-    family = "wmma" if target.wave_size == 32 else "mma"
-    op = target.mma.select_largest_k(
-        family=family, a_dtype="tf32", b_dtype="tf32", c_dtype="fp32", m=16, n=16
-    )
-    return op is not None and not op.is_native
+    return tf32_is_emulated(arch)
 
 
 def _verify_tol(compute_dtype: str, arch: str, op_id: "str | None" = None) -> float:

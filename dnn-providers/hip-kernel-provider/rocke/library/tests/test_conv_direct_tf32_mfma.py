@@ -22,7 +22,7 @@ the ISA, including that the BF16x3 split of the loop-invariant weights is
 hoisted out of the row loop. The GPU part runs every variant on the device
 (gfx942 or gfx950) for both dtypes against a float64 CPU reference (no TF32
 anywhere in it). On gfx942 the TF32 reference reads the inputs masked to what
-the native XF32 MFMA consumes (``_tf32_reference_inputs``).
+the native XF32 MFMA consumes (``conv_reference.tf32_reference_inputs``).
 
 Run the GPU part as ``python3 test_conv_direct_tf32_mfma.py`` if pytest's
 forked workers report "No HIP GPUs are available".
@@ -72,6 +72,8 @@ from kernels.common.conv_direct_grouped import (
 from rocke.core.lower_llvm import lower_kernel_to_llvm
 
 _HAS_TORCH = importlib.util.find_spec("torch") is not None
+if _HAS_TORCH:
+    from builders.common.conv_reference import tf32_reference_inputs, tf32_reference_tol
 if _HAS_TORCH:
     # Claim the HIP context for torch before rocke's runtime does; see
     # test_direct_conv_correctness.py.
@@ -595,25 +597,11 @@ def _tolerance(dtype: str, arch: str) -> float:
     fp32 is exact fp32 MFMA arithmetic. gfx950 TF32 is the BF16x3 emulation,
     about fp32 accurate, and 1e-4 fails a single bf16 pass. gfx942 TF32 is
     the native XF32 MFMA, checked against masked inputs
-    (``_tf32_reference_inputs``) at 1e-3, as in test_conv_fwd_correctness.
+    (``conv_reference.tf32_reference_inputs``) at 1e-3, as in test_conv_fwd_correctness.
     """
     if dtype == "tf32":
-        return 1e-3 if arch == "gfx942" else 1e-4
+        return tf32_reference_tol(arch)
     return 2e-5
-
-
-def _tf32_reference_inputs(t, dtype: str, arch: str):
-    """``t`` as the MFMA on ``arch`` consumes it for a ``dtype`` problem.
-
-    gfx942's native XF32 MFMA reads the top 19 bits of each fp32 operand
-    (``& 0xFFFFE000``); gfx950's BF16x3 emulation and the fp32 atoms use the
-    full payload.
-    """
-    if dtype != "tf32" or arch != "gfx942":
-        return t
-    import torch
-
-    return (t.view(torch.int32) & -0x2000).view(torch.float32)
 
 
 def _u8(t):
@@ -671,8 +659,8 @@ def _run_fwd(spec, build, arch: str) -> float:
     B = torch.empty(p.total_k, p.KH, p.KW, p.cpg).uniform_(-1.0, 1.0)
     D = torch.empty(p.N, p.Ho, p.Wo, p.total_k)
     ref = _fwd_reference(
-        _tf32_reference_inputs(A, p.dtype, arch),
-        _tf32_reference_inputs(B, p.dtype, arch),
+        tf32_reference_inputs(A, arch, p.dtype),
+        tf32_reference_inputs(B, arch, p.dtype),
         p,
     )
 
@@ -734,8 +722,8 @@ def _run_dgrad(problem, fprop, arch: str) -> float:
     dX = torch.empty(p.N, p.H, p.W, p.total_c)
     ref = (
         torch.nn.functional.conv_transpose2d(
-            _tf32_reference_inputs(dY, p.dtype, arch).double().permute(0, 3, 1, 2),
-            _tf32_reference_inputs(W, p.dtype, arch).double().permute(0, 3, 1, 2),
+            tf32_reference_inputs(dY, arch, p.dtype).double().permute(0, 3, 1, 2),
+            tf32_reference_inputs(W, arch, p.dtype).double().permute(0, 3, 1, 2),
             padding=p.PAD,
             groups=p.groups,
         )
@@ -879,6 +867,73 @@ class TestDirectTf32Gpu(unittest.TestCase):
                     err = _run_dgrad(p, fprop, _GPU_ARCH)
                     print(f"  dgrad {label:16s} {dt}  rel_err={err:.2e}", flush=True)
                     self.assertLess(err, _tolerance(dt, _GPU_ARCH))
+
+
+class TestDirectF32Backend(unittest.TestCase):
+    """The C++ direct builders take no fp32 / tf32 problem (16c would build an
+    fp16 kernel under the spec's name), so the backend never hands them one:
+    ``python`` and ``cpp`` lower through Python without importing the engine
+    (``cpp`` recording the fallback), ``both`` reports the gap, and 16-bit
+    specs still reach the engine."""
+
+    _KINDS = (("16c", "16c"), ("gen", "generic"))
+
+    def _lower(self, spec, kind, arch, backend):
+        from rocke.core.backend import lower_conv_direct_grouped
+
+        return lower_conv_direct_grouped(spec, kind=kind, arch=arch, backend=backend)
+
+    def test_f32_never_reaches_the_engine(self):
+        from unittest import mock
+
+        from rocke.core import backend as bk
+
+        def no_engine():
+            raise bk.BackendError("rocke_engine is not importable")
+
+        with mock.patch.object(bk, "_import_engine", no_engine), mock.patch.dict(
+            os.environ, {"ROCKE_CPP_QUIET_FALLBACK": "1"}
+        ):
+            for name, kind in self._KINDS:
+                _, _, make, m = _FWD[name]
+                for arch in _ARCHES:
+                    for dt in _F32_DTYPES:
+                        spec = make(dt)
+                        for backend in ("python", "cpp"):
+                            with self.subTest(
+                                kind=kind, arch=arch, dtype=dt, backend=backend
+                            ):
+                                bk.reset_cpp_fallbacks()
+                                res = self._lower(spec, kind, arch, backend)
+                                self.assertEqual(res.backend, bk.BACKEND_PYTHON)
+                                self.assertEqual(
+                                    set(_mfma_calls(res.llvm_text)),
+                                    {_PHYS[(arch, dt, m)]},
+                                )
+                                fell_back = any(
+                                    "fp32-storage" in why
+                                    for _, why in bk.cpp_fallbacks()
+                                )
+                                self.assertEqual(fell_back, backend == "cpp")
+                        with self.subTest(
+                            kind=kind, arch=arch, dtype=dt, backend="both"
+                        ):
+                            with self.assertRaises(bk.BackendCoverageGap):
+                                self._lower(spec, kind, arch, "both")
+                # A 16-bit spec is not gated: it still goes to the engine.
+                with self.subTest(kind=kind, dtype="fp16"):
+                    with self.assertRaisesRegex(bk.BackendError, "not importable"):
+                        self._lower(make("fp16"), kind, "gfx950", "cpp")
+
+    def test_strict_cpp_refuses_f32(self):
+        from unittest import mock
+
+        from rocke.core import backend as bk
+
+        _, _, make, _ = _FWD["16c"]
+        with mock.patch.dict(os.environ, {"ROCKE_CPP_STRICT": "1"}):
+            with self.assertRaisesRegex(bk.BackendError, "fp32-storage"):
+                self._lower(make("tf32"), "16c", "gfx950", "cpp")
 
 
 if __name__ == "__main__":

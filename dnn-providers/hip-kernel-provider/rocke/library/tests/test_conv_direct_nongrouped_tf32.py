@@ -17,7 +17,7 @@ byte for byte. One comgr compile per (arch, dtype, atom) checks the ISA.
 On silicon (gfx942 / gfx950 + torch): output against an IEEE fp32
 ``conv2d`` reference computed on the CPU, relative to the output peak. On
 gfx942 the TF32 reference reads the inputs masked to what the native XF32 MFMA
-consumes (``_tf32_reference_inputs``).
+consumes (``conv_reference.tf32_reference_inputs``).
 
 Run GPU tests as a script if pytest reports "No HIP GPUs are available"::
 
@@ -40,6 +40,8 @@ from pathlib import Path
 from rocke.runtime.hip_module import get_device_arch
 
 _HAS_TORCH = importlib.util.find_spec("torch") is not None
+if _HAS_TORCH:
+    from builders.common.conv_reference import tf32_reference_inputs
 if _HAS_TORCH:
     # Claim the HIP context for torch before rocke's runtime touches it (see
     # test_direct_conv_correctness.py).
@@ -503,18 +505,6 @@ def _u8(t):
     return (ctypes.c_uint8 * t.nbytes).from_address(t.data_ptr())
 
 
-def _tf32_reference_inputs(t, dtype: str, arch: str):
-    """``t`` as the MFMA on ``arch`` consumes it for a ``dtype`` problem.
-
-    gfx942's native XF32 MFMA reads the top 19 bits of each fp32 operand
-    (``& 0xFFFFE000``); gfx950's BF16x3 emulation and the fp32 atoms use the
-    full payload.
-    """
-    if dtype != "tf32" or arch != "gfx942":
-        return t
-    return (t.view(torch.int32) & -0x2000).view(torch.float32)
-
-
 def _reference(A_t, B_t, p):
     """IEEE fp32 conv2d on the CPU, NHWK."""
     import torch.nn.functional as F
@@ -559,8 +549,8 @@ def run_f32_spec(arch: str, spec, artifact=None):
     B_t = torch.empty(p.kpg, p.KH, p.KW, p.cpg).uniform_(-1.0, 1.0, generator=g)
     D_t = torch.empty(p.N, p.Ho, p.Wo, p.kpg)
     ref = _reference(
-        _tf32_reference_inputs(A_t, p.dtype, arch),
-        _tf32_reference_inputs(B_t, p.dtype, arch),
+        tf32_reference_inputs(A_t, arch, p.dtype),
+        tf32_reference_inputs(B_t, arch, p.dtype),
         p,
     )
 
@@ -736,6 +726,38 @@ class TestF32PlainKernelOnly(unittest.TestCase):
             # 16-bit keeps both grids.
             self.assertTrue(list(nongrouped_split_knobs(arch, "fp16")))
             self.assertTrue(list(grouped_knobs(arch, "fp16")))
+
+
+class TestNongroupedF32Backend(unittest.TestCase):
+    """The C++ non-grouped builder takes no fp32 / tf32 problem: the backend
+    lowers those through Python (``cpp`` records the fallback) and ``both``
+    reports the gap, without importing the engine."""
+
+    def test_f32_never_reaches_the_engine(self):
+        from unittest import mock
+
+        from rocke.core import backend as bk
+
+        def no_engine():
+            raise bk.BackendError("rocke_engine is not importable")
+
+        with mock.patch.object(bk, "_import_engine", no_engine), mock.patch.dict(
+            os.environ, {"ROCKE_CPP_QUIET_FALLBACK": "1"}
+        ):
+            for dt in ("fp32", "tf32"):
+                spec = _spec(dt)
+                for backend in ("python", "cpp"):
+                    with self.subTest(dtype=dt, backend=backend):
+                        res = bk.lower_conv_direct_nongrouped(
+                            spec, arch="gfx950", backend=backend
+                        )
+                        self.assertEqual(res.backend, bk.BACKEND_PYTHON)
+                        self.assertTrue(_n_mfma_calls(res.llvm_text))
+                with self.subTest(dtype=dt, backend="both"):
+                    with self.assertRaises(bk.BackendCoverageGap):
+                        bk.lower_conv_direct_nongrouped(
+                            spec, arch="gfx950", backend="both"
+                        )
 
 
 if __name__ == "__main__":

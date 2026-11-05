@@ -310,7 +310,7 @@ class TestBackendBoth(unittest.TestCase):
         )
         plain = R(base, dgrad_fused_weights=False, dgrad_weights_lds=False)
         bad = [
-            R(base, problem=R(base.problem, dtype="fp32")),
+            R(base, problem=R(base.problem, dtype="fp64")),
             R(base, problem=R(base.problem, PAD=0)),
             R(base, problem=R(base.problem, kpg=6)),
             R(base, problem=R(base.problem, stride=2)),
@@ -392,8 +392,9 @@ class TestBackendBoth(unittest.TestCase):
 
     def test_4c_rejects_match(self):
         # The dtype reject reason is identical in both engines (the C++ engine
-        # prefixes its lowering context).
-        spec = DirectConv4cSpec(problem=_p4("fp32"))
+        # prefixes its lowering context). fp64 is unsupported in both: fp32 and
+        # tf32 are Python-only kinds the backend keeps off the C++ builder.
+        spec = DirectConv4cSpec(problem=_p4("fp64"))
         msgs = []
         for backend in ("python", "cpp"):
             with self.assertRaises(Exception) as cm:

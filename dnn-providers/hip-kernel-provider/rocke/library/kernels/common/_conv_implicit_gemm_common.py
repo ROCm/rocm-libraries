@@ -798,8 +798,9 @@ def _tf32_conv_spec_reason(
 # lane sit at the 512-VGPR ceiling once the hi/lo split temporaries are live,
 # and comgr's VGPR->AGPR spill path miscompiles kernels there: one accumulator
 # register comes out wrong while the same IR is correct at -O1 or with
-# -amdgpu-spill-vgpr-to-agpr=0 (the same failure as the MFMA dgrad budget,
-# PR #13495). Such tiles spill heavily anyway, so they are not worth keeping.
+# -amdgpu-spill-vgpr-to-agpr=0 (the same failure the direct MFMA dgrad's
+# 384-VGPR preload budget avoids). Such tiles spill heavily anyway, so they are
+# not worth keeping.
 _TF32_EMULATED_MAX_ACC_PER_LANE = 384
 
 
