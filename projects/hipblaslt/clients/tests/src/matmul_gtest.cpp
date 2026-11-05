@@ -27,6 +27,7 @@
 #include "hipblaslt_arguments.hpp"
 #include "hipblaslt_data.hpp"
 #include "hipblaslt_datatype2string.hpp"
+#include "hipblaslt_scaling_format.hpp"
 #include "hipblaslt_test.hpp"
 #include "testing_matmul.hpp"
 #include "testing_matmul_batch_offset.hpp"
