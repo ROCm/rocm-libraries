@@ -554,11 +554,14 @@ class Space:
         return row
 
     def expectation(self, env, purpose):
-        """What a case of this sample must do, ``declined`` or ``declined_or_pass``: the
-        space's ``expect`` rendered for the sample, else ``declined_or_pass`` for a probe, else
-        ``None`` (no expectation). ``purpose`` is the case's ``metadata.purpose``."""
+        """What a case of this sample must do, ``declined`` or ``declined_or_pass``: only a probe
+        has one, the space's ``expect`` rendered for the sample, else ``declined_or_pass``; a case
+        of any other ``purpose`` has ``None`` (no expectation) even when the space sets ``expect``.
+        ``purpose`` is the case's ``metadata.purpose``."""
+        if purpose != "probe":
+            return None
         if self.expect is None:
-            return DEFAULT_PROBE_EXPECT if purpose == "probe" else None
+            return DEFAULT_PROBE_EXPECT
         value = _render_case(self.expect, env)
         if value not in EXPECT_VALUES:
             raise SpaceError(

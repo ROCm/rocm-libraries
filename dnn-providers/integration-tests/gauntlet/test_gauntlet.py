@@ -7875,6 +7875,37 @@ def test_a_non_probe_space_has_no_expectation(run, tmp_path):
     assert code == 0
 
 
+def test_a_space_level_expect_applies_to_probe_cases_only(run, tmp_path):
+    # bug caught: a space mixing probe and regression cases judges the frozen regression cases
+    # against the probe `expect`, so a regression that passes is reported as a violation
+    code, space = _expect_run(
+        run,
+        tmp_path,
+        expect="declined",
+        metadata={"purpose": "${'probe' if a >= 2 else 'regression'}"},
+        samples=12,
+        default="pass",
+    )
+    seen = set()
+    for o in run.outcome_list:
+        a = sampler.sample(
+            space_lib.load_space(tmp_path / "spaces" / "Toy.space.json"),
+            o["shape_seed"],
+        ).axis_values["a"]
+        seen.add(a >= 2)
+        if a >= 2:
+            assert o["expect"] == "declined" and o["expectation"] == "violated"
+        else:
+            assert "expect" not in o and "expectation" not in o
+    assert seen == {True, False}
+    probes = [o for o in run.outcome_list if "expect" in o]
+    assert space["expectations"]["met"] + space["expectations"]["violated"] == len(
+        probes
+    )
+    assert space["expectations"]["violated"] == len(probes) < len(run.outcome_list)
+    assert code == 0
+
+
 def test_expect_is_an_expression_evaluated_per_case(run, tmp_path):
     # bug caught: `expect` read once per space, so every case of a mixed space shares one value
     code, space = _expect_run(
