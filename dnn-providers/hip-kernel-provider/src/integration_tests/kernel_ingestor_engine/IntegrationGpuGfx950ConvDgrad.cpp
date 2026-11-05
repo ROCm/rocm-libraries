@@ -286,6 +286,7 @@ struct DgradVariant
 };
 
 // gtest prints a parameter on failure; the name says everything about it.
+// NOLINTNEXTLINE(readability-identifier-naming) -- gtest customization point
 void PrintTo(const DgradVariant& variant, std::ostream* stream)
 {
     *stream << variant.name;
@@ -671,12 +672,12 @@ protected:
         Base::TearDown();
     }
 
-    int64_t engineId() const
+    static int64_t engineId()
     {
         return hipdnn_data_sdk::utilities::engineNameToId(ENGINE_NAME);
     }
 
-    const DgradGraph& graphOf(const DgradVariant& variant) const
+    static const DgradGraph& graphOf(const DgradVariant& variant)
     {
         return dgradGraphs().at(variant.graph.value());
     }
