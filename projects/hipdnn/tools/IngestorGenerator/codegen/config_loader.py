@@ -57,7 +57,6 @@ from .models import (
     KmdField,
     PackSpec,
     SlotSpec,
-    TrainedRanker,
 )
 
 
@@ -210,11 +209,7 @@ def load_config(path: Path) -> IngestorConfig:
         census_name_symbol=engine_raw.get("census_name_symbol"),
         shared_workspace=engine_raw.get("shared_workspace", ""),
         slug_override=engine_raw.get("slug"),
-        trained_rankers=_read_trained_rankers(
-            engine_raw.get("trained_rankers"),
-            slotted=slotted,
-            heuristic=engine_raw.get("heuristic", "native"),
-        ),
+        heuristics=_load_heuristics(engine_raw, slotted),
     )
 
     kmd_fields = _read_kmd_fields(raw.get("kmd_fields", []), "kmd_fields")
@@ -434,6 +429,9 @@ def load_config(path: Path) -> IngestorConfig:
         specialization=dict(specialization_raw),
         reduction=dict(raw.get("reduction") or {}),
         slots=slots,
+    )
+    config.engine.trained_catalog_sha256 = _load_trained_catalog_sha256(
+        engine_raw, config.engine.heuristics
     )
 
     _validate_config(config)
@@ -739,6 +737,83 @@ def _require_sequence(value, scope: str, what: str = "field names") -> list:
             f"characters, which silently does nothing."
         )
     return list(value)
+
+
+#: The UED roles `uhd_gen promote --role` binds per arch, in the order it accepts them.
+HEURISTIC_ROLES = (
+    "sort_kernel_catalog",
+    "predict_engine",
+    "predict_applicable_kernels",
+)
+
+#: One concrete architecture name. Mirrors `device_probe.ARCH_SHAPE` and its family-word
+#: refusal (tools/device_probe.py), which `codegen` cannot import; a test pins the two.
+_ARCH_TOKEN = re.compile(r"gfx[0-9a-f]{3,}(?:-[a-z]+)*")
+_ARCH_FAMILY_WORD = re.compile(r"-(?:generic|all|dcgpu|dgpu|igpu)(?:-|$)")
+_UUID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
+
+
+def _is_arch_token(text) -> bool:
+    return (
+        isinstance(text, str)
+        and _ARCH_TOKEN.fullmatch(text) is not None
+        and not _ARCH_FAMILY_WORD.search(text)
+    )
+
+
+def _load_heuristics(engine_raw: dict, slotted: bool) -> dict:
+    """Read ``engine.heuristics``: role -> arch -> UHD ids, as `uhd_gen promote`
+    writes them into the UED. Absent is ``{}``, which emits nothing."""
+    raw = engine_raw.get("heuristics")
+    if raw is None:
+        return {}
+    scope = "engine.heuristics"
+    if slotted:
+        raise ConfigError(
+            f"{scope} is set on a slotted engine; a slotted engine binds its rankers "
+            f"per slot (slots[].ranker), so per-arch engine bindings are not supported."
+        )
+    _require_mapping(raw, scope)
+    heuristics = {}
+    for role, arches in raw.items():
+        if role not in HEURISTIC_ROLES:
+            raise ConfigError(
+                f"{scope} names role {role!r}; expected one of {list(HEURISTIC_ROLES)} "
+                f"(the roles `uhd_gen promote --role` accepts)."
+            )
+        _require_mapping(arches, f"{scope}.{role}")
+        if not arches:
+            raise ConfigError(f"{scope}.{role} is empty; bind at least one arch.")
+        if role == "sort_kernel_catalog" and engine_raw.get("heuristic") == "none":
+            raise ConfigError(
+                f"{scope}.sort_kernel_catalog is set but engine.heuristic is 'none'; "
+                f"the arch entries follow the native 'default' UHD, which 'none' omits."
+            )
+        bound = {}
+        for arch, ids in arches.items():
+            key = f"{scope}.{role}.{arch}"
+            if arch == "default":
+                if role == "sort_kernel_catalog":
+                    raise ConfigError(
+                        f"{key}: the generator owns sort_kernel_catalog.default (the "
+                        f"native UHD from engine.heuristic); bind arch keys only."
+                    )
+            elif not _is_arch_token(arch):
+                raise ConfigError(
+                    f"{scope}.{role} key {arch!r} is not one concrete gfx architecture "
+                    f"name (e.g. gfx942) or 'default'."
+                )
+            ids = _require_sequence(ids, key, "UHD ids")
+            if not ids:
+                raise ConfigError(f"{key} is an empty list; bind at least one UHD id.")
+            for uhd in ids:
+                if not isinstance(uhd, str) or not _UUID.fullmatch(uhd):
+                    raise ConfigError(f"{key} holds {uhd!r}, which is not a UUID.")
+            if len(set(ids)) != len(ids):
+                raise ConfigError(f"{key} repeats a UHD id: {ids!r}.")
+            bound[arch] = ids
+        heuristics[role] = bound
+    return heuristics
 
 
 def _drop_tag_slot(match) -> str:
@@ -1316,6 +1391,35 @@ def _require_config_shapes(raw: dict) -> None:
             _require_mapping(pack_raw["kernel_template"], f"{where} kernel_template")
 
 
+_SHA256 = re.compile(r"[0-9a-f]{64}")
+
+
+def _load_trained_catalog_sha256(engine_raw: dict, heuristics: dict) -> dict:
+    """Read ``engine.trained_catalog_sha256``: arch -> the `codegen.catalog_fingerprint` of
+    the catalog the ``engine.heuristics.sort_kernel_catalog`` models bound under that arch
+    were trained on (tools/catalog_fingerprint.py prints it). When set, its keys must be
+    exactly those arch keys, so every bound ranker's catalog is gated. Absent is ``{}``,
+    which gates nothing."""
+    raw = engine_raw.get("trained_catalog_sha256")
+    if raw is None:
+        return {}
+    scope = "engine.trained_catalog_sha256"
+    trained = set(heuristics.get("sort_kernel_catalog", {}))
+    _require_mapping(raw, scope)
+    if set(raw) != trained:
+        raise ConfigError(
+            f"{scope} keys {sorted(raw)} must equal the arch keys bound under "
+            f"engine.heuristics.sort_kernel_catalog ({sorted(trained)})."
+        )
+    for arch, digest in raw.items():
+        if not isinstance(digest, str) or not _SHA256.fullmatch(digest):
+            raise ConfigError(
+                f"{scope}.{arch} must be 64 lowercase hex digits "
+                f"(tools/catalog_fingerprint.py); got {digest!r}."
+            )
+    return dict(raw)
+
+
 #: Every key each level of the config understands. Closed on purpose -- see
 #: `_reject_unknown_keys`.
 _KNOWN_TOP = frozenset(
@@ -1333,67 +1437,6 @@ _KNOWN_TOP = frozenset(
         "reduction",
     }
 )
-_UUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
-_SHA256 = re.compile(r"^[0-9a-f]{64}$")
-_ARCH_KEY = re.compile(r"^gfx[0-9a-f]+$")
-
-
-def _read_trained_rankers(raw, *, slotted: bool, heuristic) -> dict:
-    """``engine.trained_rankers``: arch key -> ``uhd_ids`` (the UHDs ``uhd_gen promote``
-    bound under that key, one per metric) and ``trained_catalog_sha256``. Refused on a
-    slotted engine (its rankers are per slot) and on one with no native heuristic (the
-    trained models sit beside its ``default``)."""
-    if raw is None:
-        return {}
-    if not isinstance(raw, dict) or not raw:
-        raise ConfigError(
-            "'engine.trained_rankers' must be a non-empty mapping of arch key to "
-            f"{{uhd_ids, trained_catalog_sha256}}; got {raw!r}."
-        )
-    if slotted:
-        raise ConfigError(
-            "'engine.trained_rankers' is engine-level; a slotted engine binds its rankers "
-            "per slot."
-        )
-    if heuristic == "none":
-        raise ConfigError(
-            "'engine.trained_rankers' needs 'engine.heuristic: native': the trained models "
-            "are bound beside the native default."
-        )
-    rankers = {}
-    for arch, entry in raw.items():
-        where = f"'engine.trained_rankers.{arch}'"
-        if not isinstance(arch, str) or not _ARCH_KEY.match(arch):
-            raise ConfigError(f"{where}: the key must be a gfx arch (e.g. gfx950).")
-        if not isinstance(entry, dict) or set(entry) != {
-            "uhd_ids",
-            "trained_catalog_sha256",
-        }:
-            raise ConfigError(
-                f"{where} must state exactly 'uhd_ids' and 'trained_catalog_sha256'; got "
-                f"{entry!r}."
-            )
-        ids = entry["uhd_ids"]
-        if (
-            not isinstance(ids, list)
-            or not ids
-            or any(not isinstance(i, str) or not _UUID.match(i) for i in ids)
-            or len(set(ids)) != len(ids)
-        ):
-            raise ConfigError(
-                f"{where} 'uhd_ids' must be a non-empty list of distinct lowercase UUIDs; "
-                f"got {ids!r}."
-            )
-        digest = entry["trained_catalog_sha256"]
-        if not isinstance(digest, str) or not _SHA256.match(digest):
-            raise ConfigError(
-                f"{where} 'trained_catalog_sha256' must be 64 lowercase hex digits "
-                f"(tools/catalog_fingerprint.py); got {digest!r}."
-            )
-        rankers[arch] = TrainedRanker(uhd_ids=list(ids), trained_catalog_sha256=digest)
-    return rankers
-
-
 _KNOWN_ENGINE = frozenset(
     {
         "name",
@@ -1404,7 +1447,8 @@ _KNOWN_ENGINE = frozenset(
         "census_name_symbol",
         "shared_workspace",
         "slug",
-        "trained_rankers",
+        "heuristics",
+        "trained_catalog_sha256",
     }
 )
 #: RFC 0021 §4's per-slot selection members, plus the slot's own ``specialization``.

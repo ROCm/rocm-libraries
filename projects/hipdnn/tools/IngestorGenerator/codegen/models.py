@@ -410,23 +410,6 @@ class GraphMatchSpec:
 
 
 @dataclass
-class TrainedRanker:
-    """A trained ``sort_kernel_catalog`` binding for one arch key of the UED role map, and
-    the catalog it was trained on.
-
-    ``uhd_ids`` are the bound UHDs (one per metric, as ``uhd_gen promote`` installs them
-    under the bundle's ``heuristics/``); the generator emits them beside the native
-    ``default`` so a regeneration keeps the binding. ``trained_catalog_sha256`` is
-    `codegen.catalog_fingerprint` of the KDP the models were trained against: the loader ties
-    a model to the UED/KMD/UMD ids only, so a catalog edit that keeps them would leave a stale
-    model ranking silently, and the regeneration gates fail instead.
-    """
-
-    uhd_ids: list[str]
-    trained_catalog_sha256: str
-
-
-@dataclass
 class EngineSpec:
     """The engine-level YAML block (``engine:`` in the config).
 
@@ -452,9 +435,15 @@ class EngineSpec:
     #: slug splits before every capital, so a local name ending in a digit-capital pair
     #: (``Unified2D``) would come out as ``unified2_d``.
     slug_override: str | None = None
-    #: Trained ``sort_kernel_catalog`` models per arch key (`TrainedRanker`). Empty: the
-    #: native ``default`` ranks on every arch.
-    trained_rankers: dict[str, TrainedRanker] = field(default_factory=dict)
+    #: Per-arch heuristic bindings `uhd_gen promote` writes into the UED: role ->
+    #: arch (or `default`) -> UHD ids, in config order. Empty emits nothing.
+    heuristics: dict[str, dict[str, list[str]]] = field(default_factory=dict)
+    #: ``engine.trained_catalog_sha256``: arch -> `codegen.catalog_fingerprint` of the
+    #: catalog the ``heuristics.sort_kernel_catalog`` models bound under that arch were
+    #: trained on. The loader ties a model to the UED/KMD/UMD ids only, so a catalog edit
+    #: that keeps them would leave a stale model ranking silently; the regeneration gates
+    #: (tests/test_trained_rankers.py) fail instead.
+    trained_catalog_sha256: dict[str, str] = field(default_factory=dict)
 
     @property
     def namespace(self) -> str:

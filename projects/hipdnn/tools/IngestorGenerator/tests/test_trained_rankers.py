@@ -1,14 +1,16 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""Trained ``sort_kernel_catalog`` rankers: the config binding the generator emits, the
-catalog fingerprint, and the gate that a shipped ranker was trained on the shipped catalog.
+"""Trained ``sort_kernel_catalog`` rankers: ``engine.trained_catalog_sha256`` beside the
+``engine.heuristics`` binding, the catalog fingerprint, and the gate that a shipped ranker
+was trained on the shipped catalog.
 
 The descriptor loader ties a trained model to its engine's UED/KMD/UMD ids only, so a
 catalog edit that keeps them (a kernel added, removed or renamed) leaves the model ranking a
-catalog it never saw, with no refusal. ``engine.trained_rankers.<arch>`` records the
-fingerprint of the catalog the model was trained on, and `TestShippedRankers` fails when the
-shipped KDP no longer matches it: retrain (or remove the binding) before shipping the edit.
+catalog it never saw, with no refusal. ``engine.trained_catalog_sha256.<arch>`` records the
+fingerprint of the catalog the models bound under ``engine.heuristics.sort_kernel_catalog.
+<arch>`` were trained on, and `TestShippedRankers` fails when the shipped KDP no longer
+matches it: retrain (or remove the binding) before shipping the edit.
 """
 
 from __future__ import annotations
@@ -47,9 +49,14 @@ def scale_add_raw(config_path) -> dict:
     return yaml.safe_load(config_path("scale_add.yaml").read_text())
 
 
-def _with_rankers(raw: dict, rankers) -> dict:
+def _with_rankers(raw: dict, ids, sha256) -> dict:
+    """``engine.heuristics.sort_kernel_catalog`` = ``ids`` and
+    ``engine.trained_catalog_sha256`` = ``sha256``; ``None`` leaves a key out."""
     out = copy.deepcopy(raw)
-    out["engine"]["trained_rankers"] = rankers
+    if ids is not None:
+        out["engine"]["heuristics"] = {"sort_kernel_catalog": ids}
+    if sha256 is not None:
+        out["engine"]["trained_catalog_sha256"] = sha256
     return out
 
 
@@ -62,10 +69,10 @@ def test_the_ued_binds_trained_rankers_beside_the_native_default(
     scale_add_raw, tmp_path
 ):
     raw = _with_rankers(
-        scale_add_raw,
-        {"gfx950": {"uhd_ids": [_TFLOPS_ID, _TIME_ID], "trained_catalog_sha256": _SHA}},
+        scale_add_raw, {"gfx950": [_TFLOPS_ID, _TIME_ID]}, {"gfx950": _SHA}
     )
     config = load_config(_write(tmp_path, raw))
+    assert config.engine.trained_catalog_sha256 == {"gfx950": _SHA}
     ids = mint_ids(config)
     ued = build_ued(config, ids)
     assert ued["sort_kernel_catalog"] == {
@@ -84,43 +91,42 @@ def test_no_trained_rankers_leaves_only_the_default(scale_add_config):
 
 
 @pytest.mark.parametrize(
-    "rankers",
+    ("ids", "sha256"),
     [
-        {},
-        {"default": {"uhd_ids": [_TFLOPS_ID], "trained_catalog_sha256": _SHA}},
-        {"gfx950": {"uhd_ids": [], "trained_catalog_sha256": _SHA}},
-        {"gfx950": {"uhd_ids": ["not-a-uuid"], "trained_catalog_sha256": _SHA}},
-        {
-            "gfx950": {
-                "uhd_ids": [_TFLOPS_ID, _TFLOPS_ID],
-                "trained_catalog_sha256": _SHA,
-            }
-        },
-        {"gfx950": {"uhd_ids": [_TFLOPS_ID], "trained_catalog_sha256": "abc"}},
-        {"gfx950": {"uhd_ids": [_TFLOPS_ID]}},
-        {"gfx950": {"uhd_ids": [_TFLOPS_ID], "trained_catalog_sha256": _SHA, "x": 1}},
+        (None, {"gfx950": _SHA}),
+        ({"gfx950": [_TFLOPS_ID]}, {"gfx942": _SHA}),
+        ({"gfx950": [_TFLOPS_ID]}, {"gfx950": _SHA, "gfx942": _SHA}),
+        ({"gfx950": [_TFLOPS_ID], "gfx942": [_TIME_ID]}, {"gfx950": _SHA}),
+        ({"gfx950": [_TFLOPS_ID]}, {"gfx950": "abc"}),
+        ({"gfx950": [_TFLOPS_ID]}, {"gfx950": _SHA.upper()}),
+        ({"gfx950": [_TFLOPS_ID]}, {"gfx950": 1}),
+        ({"gfx950": [_TFLOPS_ID]}, [_SHA]),
     ],
     ids=[
-        "empty",
-        "default-key",
-        "no-ids",
-        "bad-uuid",
-        "repeated-id",
+        "without-a-binding",
+        "other-arch",
+        "extra-arch",
+        "arch-without-sha",
         "short-sha",
-        "no-sha",
-        "unknown-key",
+        "uppercase-sha",
+        "not-a-string",
+        "not-a-mapping",
     ],
 )
-def test_malformed_trained_rankers_are_refused(scale_add_raw, tmp_path, rankers):
-    with pytest.raises(ConfigError):
-        load_config(_write(tmp_path, _with_rankers(scale_add_raw, rankers)))
+def test_malformed_trained_catalog_sha256_is_refused(
+    scale_add_raw, tmp_path, ids, sha256
+):
+    with pytest.raises(ConfigError, match="trained_catalog_sha256"):
+        load_config(_write(tmp_path, _with_rankers(scale_add_raw, ids, sha256)))
+
+
+def test_a_binding_without_a_fingerprint_gates_nothing(scale_add_raw, tmp_path):
+    raw = _with_rankers(scale_add_raw, {"gfx950": [_TFLOPS_ID]}, None)
+    assert load_config(_write(tmp_path, raw)).engine.trained_catalog_sha256 == {}
 
 
 def test_trained_rankers_need_the_native_default(scale_add_raw, tmp_path):
-    raw = _with_rankers(
-        scale_add_raw,
-        {"gfx950": {"uhd_ids": [_TFLOPS_ID], "trained_catalog_sha256": _SHA}},
-    )
+    raw = _with_rankers(scale_add_raw, {"gfx950": [_TFLOPS_ID]}, {"gfx950": _SHA})
     raw["engine"]["heuristic"] = "none"
     with pytest.raises(ConfigError, match="heuristic"):
         load_config(_write(tmp_path, raw))
@@ -194,7 +200,9 @@ _SELECTIONS = [
     p
     for p in sorted((_ROOT / "configs").glob("*.yaml"))
     if not p.name.endswith(".engine.yaml")
-    and (yaml.safe_load(p.read_text()).get("engine") or {}).get("trained_rankers")
+    and (yaml.safe_load(p.read_text()).get("engine") or {}).get(
+        "trained_catalog_sha256"
+    )
 ]
 
 
@@ -214,10 +222,11 @@ class TestShippedRankers:
             if not kdp.is_file():
                 pytest.skip(f"shipped KDP not in this checkout (dvc pull): {kdp}")
             shipped = catalog_fingerprint(json.loads(kdp.read_text()))
-            for arch, ranker in config.engine.trained_rankers.items():
-                assert shipped == ranker.trained_catalog_sha256, (
-                    f"{config.engine.name}'s {arch} ranker(s) {ranker.uhd_ids} were trained on "
-                    f"catalog {ranker.trained_catalog_sha256}, but {kdp.name} is now {shipped}. "
+            bound = config.engine.heuristics["sort_kernel_catalog"]
+            for arch, trained in config.engine.trained_catalog_sha256.items():
+                assert shipped == trained, (
+                    f"{config.engine.name}'s {arch} ranker(s) {bound[arch]} were trained on "
+                    f"catalog {trained}, but {kdp.name} is now {shipped}. "
                     f"The loader would keep using the stale model silently: retrain on the new "
                     f"catalog (hipdnn-uhd skill) and record the new fingerprint "
                     f"(tools/catalog_fingerprint.py), or remove the binding."
@@ -225,8 +234,10 @@ class TestShippedRankers:
 
     def test_the_shipped_ued_binds_the_configured_ids(self, config, bundle):
         ued = json.loads((bundle / f"{config.engine.slug}.ued.json").read_text())
-        for arch, ranker in config.engine.trained_rankers.items():
-            assert ued["sort_kernel_catalog"].get(arch) == ranker.uhd_ids
+        bound = config.engine.heuristics["sort_kernel_catalog"]
+        assert set(bound) == set(config.engine.trained_catalog_sha256)
+        for arch, ids in bound.items():
+            assert ued["sort_kernel_catalog"].get(arch) == ids
 
     def test_each_bound_id_is_installed(self, config, bundle):
         heuristics = bundle / "heuristics"
@@ -238,6 +249,6 @@ class TestShippedRankers:
             json.loads(p.read_text())["id"]
             for p in heuristics.rglob("heuristic.uhd.json")
         }
-        for arch, ranker in config.engine.trained_rankers.items():
-            missing = sorted(set(ranker.uhd_ids) - installed)
+        for arch, ids in config.engine.heuristics["sort_kernel_catalog"].items():
+            missing = sorted(set(ids) - installed)
             assert not missing, f"{arch}: {missing} bound but not under {heuristics}"

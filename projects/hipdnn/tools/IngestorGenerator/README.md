@@ -376,6 +376,40 @@ echo '*.kdp.json diff=kdp' >> "$(git rev-parse --git-path info/attributes)"
 The splice tool appends rather than interleaves, so its output reads as pure insertion
 under every algorithm.
 
+### Shipping a trained model
+
+`uhd_gen promote` copies a trained model into the bundle's `heuristics/` subtree and adds
+its UHD id to the UED, per arch: `sort_kernel_catalog.<arch>` after `default`, or a new
+role (`predict_engine`, `predict_applicable_kernels`) at the end of the document. The
+generator writes the UED too, so record the same binding in the config, or the next
+regeneration drops it (and the regeneration gate's byte compare fails):
+
+1. Run `uhd_gen promote` on the bundle. It prints the arch and the model's UHD id.
+2. Add them to `engine.heuristics`, in the order promote added them. For a registry-driven
+   engine put them in the manifest's `engine` block (`configs/<bundle>.engine.yaml`) **and**
+   the selection (`configs/<bundle>.yaml`): `registry_enumerator.py` copies the manifest's
+   `engine` into every config it writes, and regeneration gate g4 requires the selection's
+   engine to equal it, so a binding only in the selection fails g4 and the next
+   enumeration drops it.
+
+   ```yaml
+   engine:
+     heuristics:
+       sort_kernel_catalog:
+         gfx942: [4b750e22-2656-46ce-89e7-be9ba588d732]
+   ```
+
+3. Regenerate. The UED comes out byte-identical to the promoted one; nothing else
+   changes, and the reader still resolves the native UHD from `default` only, so the
+   model UHD under `heuristics/` mints and reuses no id.
+4. `dvc add heuristics` in the bundle directory, and commit the `.dvc` pointer.
+
+Roles are the three promote accepts. Keys are one concrete arch (`gfx942`, not `gfx9` or
+`gfx950-dcgpu`); `default` is allowed except under `sort_kernel_catalog`, whose `default`
+is the generator's native UHD (so that role also needs `heuristic: native`). Values are
+non-empty lists of distinct UUIDs. A slotted engine refuses the key: its rankers are
+per slot. Without `engine.heuristics` every output is unchanged.
+
 ## Output
 
 The descriptor directory mirrors the authored root, so the emitted tree copies across
@@ -877,10 +911,12 @@ engine:
                                   # Must be a single path stem (^[A-Za-z0-9_][A-Za-z0-9_-]*$).
   knobs: [block_size]             # optional; must all be int-typed kmd_fields
   heuristic: native | none        # optional, default "native"; "none" omits the UHD
-  trained_rankers:                # optional (needs heuristic: native); see below
-    gfx950:                       # a gfx arch key of the UED's sort_kernel_catalog
-      uhd_ids: [<uuid>, <uuid>]   # the UHDs uhd_gen promote bound, one per metric
-      trained_catalog_sha256: <64 hex>   # tools/catalog_fingerprint.py of the trained-on KDP
+  heuristics:                     # optional; per-arch model UHDs `uhd_gen promote` bound,
+    sort_kernel_catalog:          # role -> arch -> [UHD id]. See "Shipping a trained
+      gfx942: [<uhd-uuid>]        # model". Not allowed beside `slots`.
+  trained_catalog_sha256:         # optional; per arch bound under sort_kernel_catalog (all
+    gfx942: <64 hex>              # of them), the catalog its models were trained on. See
+                                  # "Trained rankers and catalog changes".
 
 kmd_fields:                       # the KMD's fields[] -- one per axis this engine's
   - name: block_size              # kernels vary along
@@ -921,26 +957,24 @@ packs:
         arch: []                   # optional; must be a subset of the pack's arch
 ```
 
-### Trained rankers: `engine.trained_rankers`
-
-A trained `sort_kernel_catalog` model (the `hipdnn-uhd` skill; `uhd_gen promote`) is bound
-in the UED as `"<arch>": [<uhd id>, ...]` beside the native `default`, and installed under the
-bundle's `heuristics/<ued id>/sort_kernel_catalog/<arch>/<metric>/`. Record the binding in
-both the selection and the manifest (they share the engine block), so a regeneration emits it
-instead of dropping it; the ids are the `id`s of the promoted `heuristic.uhd.json` files.
+### Trained rankers and catalog changes: `engine.trained_catalog_sha256`
 
 The descriptor loader ties a model only to its engine's UED/KMD/UMD ids, so a catalog edit
-that keeps those ids would leave the model ranking a catalog it never saw, silently.
-`trained_catalog_sha256` records the catalog the model was trained on
-(`codegen/catalog_fingerprint.py`: each kernel's name, metadata and spec, independent of ids
-and order), and `tests/test_trained_rankers.py` fails when the shipped KDP no longer matches.
-After a catalog change, retrain on the new catalog and record the new fingerprint:
+that keeps those ids (a kernel added, removed or renamed) would leave a model bound under
+`engine.heuristics.sort_kernel_catalog` ranking a catalog it never saw, silently.
+`engine.trained_catalog_sha256` records, per bound arch, the catalog the models were trained
+on (`codegen/catalog_fingerprint.py`: each kernel's name, metadata and spec, independent of
+ids and order). It is optional, but when set its keys must equal the arch keys under
+`heuristics.sort_kernel_catalog`, and like `heuristics` it goes in both the manifest and the
+selection. Set it whenever you bind a trained ranker.
+`tests/test_trained_rankers.py` fails when the shipped KDP no longer matches. After a
+catalog change, retrain on the new catalog and record the new fingerprint:
 
 ```bash
 python3 tools/catalog_fingerprint.py <bundle>/artifacts/<pack>.kdp.json
 ```
 
-The same test checks that the shipped UED binds exactly the recorded ids and, with the
+The same test checks that the shipped UED binds exactly the configured ids and, with the
 heuristics pulled from DVC, that each is installed.
 
 ### The engine manifest and `reduction:`

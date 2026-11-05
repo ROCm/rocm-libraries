@@ -12,14 +12,16 @@ engine:
   - use_mfma_32x32
   - use_transposed_qk_32x32
   heuristic: native
-  # Trained sort_kernel_catalog models (tflops, time) for gfx950, beside the native default;
-  # retrain when the catalog changes (tests/test_trained_rankers.py, README "Trained rankers").
-  trained_rankers:
-    gfx950:
-      uhd_ids:
+  # Trained sort_kernel_catalog models (tflops, time) for gfx950, beside the native
+  # default, and the catalog they were trained on; retrain when it changes
+  # (tests/test_trained_rankers.py, README "Shipping a trained model").
+  heuristics:
+    sort_kernel_catalog:
+      gfx950:
       - af8bdded-7551-437e-82d9-2c2f7c070dca
       - d83da43e-f23a-4216-ba8a-8c047880a8f2
-      trained_catalog_sha256: 6c9d65b50c6fe9c711f4ba4f0ca562c1805c8d63172af3e2b119c8b893d1eb05
+  trained_catalog_sha256:
+    gfx950: 6c9d65b50c6fe9c711f4ba4f0ca562c1805c8d63172af3e2b119c8b893d1eb05
 kmd_fields:
 - name: dtype
   type: string

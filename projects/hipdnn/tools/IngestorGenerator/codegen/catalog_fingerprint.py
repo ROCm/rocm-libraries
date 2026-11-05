@@ -4,7 +4,7 @@ A trained ``sort_kernel_catalog`` model is tied by the descriptor loader only to
 UED, KMD and UMD ids (``trained_against``). A catalog edit that keeps those ids (a kernel
 added, removed or renamed, a knob or spec changed) would leave the model ranking a catalog it
 never saw, with no refusal. The engine config records this fingerprint of the catalog the
-model was trained on (``engine.trained_rankers.<arch>.trained_catalog_sha256``) and the
+model was trained on (``engine.trained_catalog_sha256.<arch>``) and the
 regeneration gates compare it with the shipped KDP's, so such an edit fails until the model is
 retrained.
 

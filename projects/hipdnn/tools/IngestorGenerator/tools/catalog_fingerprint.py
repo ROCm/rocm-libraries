@@ -1,5 +1,5 @@
 """Print the catalog fingerprint of a KDP, the value an engine config records as
-``engine.trained_rankers.<arch>.trained_catalog_sha256`` when a ranker is trained on it.
+``engine.trained_catalog_sha256.<arch>`` when a ranker is trained on it.
 
     python3 tools/catalog_fingerprint.py <bundle>/artifacts/<pack>.kdp.json
 """
