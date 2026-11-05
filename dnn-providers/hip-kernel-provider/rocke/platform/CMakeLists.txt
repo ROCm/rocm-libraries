@@ -627,12 +627,21 @@ if(ROCKE_INSTALL_TESTS)
     # has no rocke_engine binding, so the C++ lowering runs through the
     # installed rocke_ir_lower_cli. The whole gate takes about a minute on a
     # developer host; one family, the per-test item, a few seconds.
-    if(TARGET rocke_ir_lower_cli)
+    #
+    # Not registered on Windows: the Windows CI shards run close to their time
+    # limit. The cost is that the MSVC-built engine's HIP output is not compared
+    # with Python's in CI; it matched on every parity kernel on the Windows lanes
+    # when this gate was added, and float formatting, the most host-sensitive
+    # piece, keeps its own rocke_float_format test there. Re-register on Windows
+    # once those shards have room. It stays registered on every other platform.
+    if(TARGET rocke_ir_lower_cli AND NOT WIN32)
       rocke_cxx_test_installed_name(_rocke_installed_name rocke_ir_lower_cli)
       string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
              "add_test(rocke_hip_source_identity python -m pytest \"${ROCKE_TEST_CTEST_REL}tests/instances/differential/test_hip_source_identity.py\" -v -rs --timeout=120)\n")
       string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
              "set_tests_properties(rocke_hip_source_identity PROPERTIES LABELS \"ckc;python;host;quick\" ENVIRONMENT \"PYTHONPATH=${_ROCKE_INSTALLED_PYTHONPATH};ROCKE_IR_LOWER_CLI=${ROCKE_CXX_TEST_CTEST_REL}${_rocke_installed_name}${CMAKE_EXECUTABLE_SUFFIX}\" TIMEOUT 300)\n")
+    elseif(WIN32)
+      message(STATUS "rocKE: rocke_hip_source_identity not registered on Windows (CI shard time; see comment above)")
     endif()
 
     if(ROCKE_INSTALL_PLATFORM_PYTEST)

@@ -80,6 +80,7 @@ test_categories:
       - "rocke_golden_static"
       - "rocke_differential_golden_ll"
       - "rocke_differential_golden_canonical"
+      # Not registered on Windows (see rocke/platform/CMakeLists.txt).
       - "rocke_hip_source_identity"
       - "rocke_library_conv_pytest"
       - "rocke_library_attention_cpu_pytest"
@@ -140,6 +141,7 @@ test_categories:
       - "rocke_golden_static"
       - "rocke_differential_golden_ll"
       - "rocke_differential_golden_canonical"
+      # Not registered on Windows (see rocke/platform/CMakeLists.txt).
       - "rocke_hip_source_identity"
       - "rocke_library_conv_pytest"
       - "rocke_library_attention_cpu_pytest"
