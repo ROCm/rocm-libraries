@@ -124,7 +124,7 @@ rocblaslt_status rocblaslt_matmul_impl(const rocblaslt_handle       handle,
     hipblasOperation_t opA           = matmul_descr->op_A;
     hipblasOperation_t opB           = matmul_descr->op_B;
     int                num_batches_a = matA->batch_count;
-    hipblasLtBatchMode_t batch_mode  = matA->batch_mode;    
+    hipblasLtBatchMode_t batch_mode  = matA->batch_mode;
     rocblaslt_epilogue epilogue      = matmul_descr->epilogue;
     void*              scaleA        = matmul_descr->scaleA;
     void*              scaleB        = matmul_descr->scaleB;
@@ -141,7 +141,7 @@ rocblaslt_status rocblaslt_matmul_impl(const rocblaslt_handle       handle,
     //   • Compute type is HIPBLAS_COMPUTE_{64F,32F}_EMULATED_FIXEDPOINT, or
     //     plain 64F/32F with HIPBLAS_EMULATE_{DOUBLE,SINGLE}_PRECISION=1
     //     (A/B/C/D types are validated against the compute type)
-    //   • Non-batched (batch_count == 1)
+    //   • Non-batched, strided layout (batch_count == 1, batch_mode == STRIDED)
     //   • Plain GEMM epilogue (no activation, no bias, no auxiliary outputs)
     //   • alpha/beta are host (non-device-pointer) scalars
     //   • Arithmetic intensity exceeds the threshold (compute-bound region),
@@ -155,7 +155,8 @@ rocblaslt_status rocblaslt_matmul_impl(const rocblaslt_handle       handle,
        && scaleAlphaVec == nullptr
        && E             == nullptr
        && !matmul_descr->pointermode
-       && epilogue      == ROCBLASLT_EPILOGUE_DEFAULT)
+       && epilogue      == ROCBLASLT_EPILOGUE_DEFAULT
+       && batch_mode    == HIPBLASLT_BATCH_MODE_STRIDED)
     {
         FixedPointEmulationSettings emulDecision = fixedPointEmulationDecision(
             handle, matmul_descr, compute_type, m, n, k, num_batches_a, workspaceSizeInBytes);
