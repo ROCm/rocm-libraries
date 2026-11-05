@@ -44,16 +44,35 @@ namespace conv {
 namespace {
 
 // Must match MIOpenConvDepthwise3dFwdHip.cpp.
-constexpr std::size_t kBlockSize = 256;
-constexpr std::size_t kTileH     = 4;
+constexpr std::size_t kTileH = 4;
 // The filter, H / W strides and dilations are compile-time constants and the input windows live
 // in registers; these bounds keep the per-thread register footprint (output tile, filter rows,
 // input window) small enough not to spill. A 7x7 filter with stride 2 (21-wide window) compiles
 // without spills for gfx1010 through gfx1201; a 32-wide window (7x7, dilation 4) spills.
 constexpr std::size_t kMaxFilterTaps2d = 49;
 constexpr std::size_t kMaxWindow       = 21;
-// HSA grid limit in work-items (1D grid).
-constexpr std::size_t kMaxGridX = 0x7fffffff;
+// HSA grid limits in work-items.
+constexpr std::size_t kMaxGridX  = 0x7fffffff;
+constexpr std::size_t kMaxGridYZ = 0xffff;
+
+// NCDHW launches one (n, k) output volume per blockIdx.y, which makes the filter wave-uniform so
+// it is read through the scalar unit and does not occupy VGPRs; on gfx1151 that was 1.1x to 1.25x
+// faster for 5x5x5. Blocks are then 64 threads, so small volumes leave few threads idle. NDHWC
+// (consecutive threads are consecutive channels), N x K beyond the grid y limit and filter slices
+// above 5x5 (whose weights spill SGPRs) use a 1D grid.
+constexpr std::size_t kMaxFilterTaps2dUniformK = 25;
+
+bool UniformK(const miopen::conv::ProblemDescription& problem)
+{
+    return !problem.IsLayoutNHWC() &&
+           problem.GetBatchSize() * problem.GetOutChannels() <= kMaxGridYZ &&
+           problem.GetWeightsHeight() * problem.GetWeightsWidth() <= kMaxFilterTaps2dUniformK;
+}
+
+std::size_t BlockSize(const miopen::conv::ProblemDescription& problem)
+{
+    return UniformK(problem) ? 64 : 256;
+}
 
 // Output depths per thread. Two depths share their input planes, which cuts DRAM reads; on gfx1151
 // it was about 1.1x faster for NCDHW 5x5x5 and neutral for 3x3x3, but slower for bf16 NDHWC. It
@@ -91,14 +110,29 @@ std::size_t WindowH(const miopen::conv::ProblemDescription& problem)
            (problem.GetWeightsHeight() - 1) * problem.GetDilationH() + 1;
 }
 
-std::size_t WorkItems(const miopen::conv::ProblemDescription& problem)
+// Output tiles of one (n, k) output volume.
+std::size_t TilesPerVolume(const miopen::conv::ProblemDescription& problem)
 {
     const std::size_t tile_w = TileW(problem);
     const std::size_t tile_d = TileD(problem);
-    return problem.GetBatchSize() * problem.GetOutChannels() *
-           ((problem.GetOutDepth() + tile_d - 1) / tile_d) *
+    return ((problem.GetOutDepth() + tile_d - 1) / tile_d) *
            ((problem.GetOutHeight() + kTileH - 1) / kTileH) *
            ((problem.GetOutWidth() + tile_w - 1) / tile_w);
+}
+
+std::size_t GridX(const miopen::conv::ProblemDescription& problem)
+{
+    const std::size_t block = BlockSize(problem);
+    const std::size_t items =
+        UniformK(problem)
+            ? TilesPerVolume(problem)
+            : problem.GetBatchSize() * problem.GetOutChannels() * TilesPerVolume(problem);
+    return ((items + block - 1) / block) * block;
+}
+
+std::size_t GridY(const miopen::conv::ProblemDescription& problem)
+{
+    return UniformK(problem) ? problem.GetBatchSize() * problem.GetOutChannels() : 1;
 }
 
 } // namespace
@@ -154,7 +188,7 @@ bool ConvHipDirectDepthwiseFwd3d::IsApplicable(
     if(WindowW(problem) > kMaxWindow || WindowH(problem) > kMaxWindow)
         return false;
 
-    return ((WorkItems(problem) + kBlockSize - 1) / kBlockSize) * kBlockSize <= kMaxGridX;
+    return GridX(problem) <= kMaxGridX;
 }
 
 ConvSolution
@@ -169,8 +203,8 @@ ConvHipDirectDepthwiseFwd3d::GetSolution(const ExecutionContext&,
     const int dtype = problem.IsFp32() ? 0 : (problem.IsFp16() ? 1 : 2);
     const int ndhwc = problem.IsLayoutNHWC() ? 1 : 0;
 
-    kernel.l_wk = {kBlockSize, 1, 1};
-    kernel.g_wk = {((WorkItems(problem) + kBlockSize - 1) / kBlockSize) * kBlockSize, 1, 1};
+    kernel.l_wk = {BlockSize(problem), 1, 1};
+    kernel.g_wk = {GridX(problem), GridY(problem), 1};
 
     kernel.comp_options =
         " -DDW_DTYPE=" + std::to_string(dtype) + " -DDW_NDHWC=" + std::to_string(ndhwc) +
@@ -182,7 +216,8 @@ ConvHipDirectDepthwiseFwd3d::GetSolution(const ExecutionContext&,
         " -DDW_DH=" + std::to_string(problem.GetDilationH()) +
         " -DDW_DW=" + std::to_string(problem.GetDilationW()) +
         " -DDW_TD=" + std::to_string(TileD(problem)) + " -DDW_TH=" + std::to_string(kTileH) +
-        " -DDW_TW=" + std::to_string(TileW(problem));
+        " -DDW_TW=" + std::to_string(TileW(problem)) +
+        " -DDW_UK=" + std::to_string(UniformK(problem) ? 1 : 0);
     result.construction_params.push_back(kernel);
 
     const int n   = static_cast<int>(problem.GetBatchSize());

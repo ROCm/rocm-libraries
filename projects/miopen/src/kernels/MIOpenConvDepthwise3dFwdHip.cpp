@@ -47,6 +47,7 @@
 //   DW_SH, DW_SW        stride along H, W
 //   DW_DH, DW_DW        dilation along H, W
 //   DW_TD, DW_TH, DW_TW output tile per thread; DW_TD > 1 requires depth stride and dilation 1
+//   DW_UK               1 = NCDHW grid with one (n, k) output volume per blockIdx.y
 
 #ifndef DW_DTYPE
 #define DW_DTYPE 0
@@ -85,7 +86,12 @@
 #define DW_TW 4
 #endif
 
-#define DW_BLOCK_SIZE 256
+#ifndef DW_UK
+#define DW_UK 0
+#endif
+// Uniform-k grids launch one (n, k) output volume per blockIdx.y; small blocks keep few threads
+// idle when that volume has few tiles.
+#define DW_BLOCK_SIZE (DW_UK ? 64 : 256)
 #define DW_SPAN ((DW_TW - 1) * DW_SW + (DW_KX - 1) * DW_DW + 1)
 #define DW_ROWS ((DW_TH - 1) * DW_SH + (DW_KY - 1) * DW_DH + 1)
 #define DW_PLANES (DW_TD + DW_KZ - 1)
@@ -151,6 +157,18 @@ extern "C" __global__ void __launch_bounds__(DW_BLOCK_SIZE)
     const int dt        = static_cast<int>(idx % dtiles);
     const int n         = static_cast<int>(idx / dtiles);
     const long w_stride = C;
+#elif DW_UK
+    // One (n, k) output volume per blockIdx.y, so k is wave-uniform and the weights are read
+    // through the scalar unit. idx = (dt * htiles + ht) * wtiles + wt
+    if(idx >= static_cast<long>(dtiles) * htiles * wtiles)
+        return;
+    const int wt = static_cast<int>(idx % wtiles);
+    idx /= wtiles;
+    const int ht        = static_cast<int>(idx % htiles);
+    const int dt        = static_cast<int>(idx / htiles);
+    const int k         = static_cast<int>(blockIdx.y % K);
+    const int n         = static_cast<int>(blockIdx.y / K);
+    const long w_stride = 1;
 #else
     // idx = (((n * K + k) * dtiles + dt) * htiles + ht) * wtiles + wt
     if(idx >= static_cast<long>(N) * K * dtiles * htiles * wtiles)
@@ -201,9 +219,25 @@ extern "C" __global__ void __launch_bounds__(DW_BLOCK_SIZE)
             const int z = p - o;
             if(z < 0 || z >= DW_KZ)
                 continue;
+#if DW_UK && DW_DTYPE != 0
+            // Scalar loads are 32-bit: read the 16-bit weights as words from the even element at
+            // or below the slice start (the buffer is 4-byte aligned) and pick the halves.
+            const long e0           = (static_cast<long>(k) * DW_KZ + z) * (DW_KY * DW_KX);
+            const unsigned int* w32 = reinterpret_cast<const unsigned int*>(wei) + (e0 >> 1);
+            const int par           = static_cast<int>(e0 & 1);
+#pragma unroll
+            for(int i = 0; i < DW_KY * DW_KX; ++i)
+            {
+                const int e           = par + i;
+                const unsigned int wd = w32[e >> 1];
+                const auto h          = static_cast<unsigned short>((e & 1) ? (wd >> 16) : wd);
+                wv[o][i / DW_KX][i % DW_KX] = to_float(__builtin_bit_cast(data_t, h));
+            }
+#else
             for(int y = 0; y < DW_KY; ++y)
                 for(int x = 0; x < DW_KX; ++x)
                     wv[o][y][x] = to_float(w_k[(z * DW_KY + y) * DW_KX + x]);
+#endif
         }
 #if DW_NDHWC
         const data_t* plane =
