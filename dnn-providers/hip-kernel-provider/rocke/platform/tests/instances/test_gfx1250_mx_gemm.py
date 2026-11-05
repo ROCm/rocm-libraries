@@ -1,6 +1,6 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""Coverage for the flag-free gfx1250 MX FP4 GEMM (``mxfp4_gemm``)."""
+"""Coverage for the flag-free gfx1250 MX GEMM (``mx_gemm``)."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ import unittest
 import numpy as np
 from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
 from rocke.examples.common.scaled_gemm_reference import decode_e8m0
-from rocke.examples.gfx1250.gemm.mxfp4_gemm_bench import (
+from rocke.examples.gfx1250.gemm.mx_gemm_bench import (
     _E2M1,
     SPARSE_ALPHA,
     SPARSE_STEPS,
@@ -27,15 +27,15 @@ from rocke.examples.gfx1250.gemm.mxfp4_gemm_bench import (
 )
 from rocke.examples.gfx1250.gemm.mxfp4_tdm_gemm import YAML_TILE
 from rocke.helpers.compile import _comgr_options_for_kernel
-from rocke.instances.gfx1250.mxfp4_gemm import (
+from rocke.instances.gfx1250.mx_gemm import (
     OUT_DTYPES,
     TILE_K,
     TILE_MN,
     WAVE_GROUPS,
     IntOps,
     LdsPad,
-    MxFp4GemmSpec,
-    build_mxfp4_gemm,
+    MxGemmSpec,
+    build_mx_gemm,
     derived_lds_pads,
     validate,
 )
@@ -49,14 +49,14 @@ _WMMA = r"call [^\n]*@llvm\.amdgcn\.wmma\.scale\."
 _MUL_I64 = r"= mul (nsw |nuw )*i64"
 
 
-def _spec(*problem, **fields) -> MxFp4GemmSpec:
+def _spec(*problem, **fields) -> MxGemmSpec:
     m, n, k = problem or _SMOKE
-    return MxFp4GemmSpec(name="t", M=m, N=n, K=k, **fields)
+    return MxGemmSpec(name="t", M=m, N=n, K=k, **fields)
 
 
-def _llvm(spec: MxFp4GemmSpec) -> str:
+def _llvm(spec: MxGemmSpec) -> str:
     return _lower_kernel_to_llvm_python(
-        build_mxfp4_gemm(spec), arch="gfx1250", llvm_flavor="llvm23"
+        build_mx_gemm(spec), arch="gfx1250", llvm_flavor="llvm23"
     )
 
 
@@ -80,7 +80,17 @@ def _landing(
     return j
 
 
-class MxFp4GemmSpecTest(unittest.TestCase):
+class MxGemmSpecTest(unittest.TestCase):
+    def test_former_module_names_alias_the_renamed_modules(self):
+        from rocke.examples.gfx1250.gemm import mx_gemm_bench, mxfp4_gemm_bench
+        from rocke.instances.gfx1250 import mx_gemm, mxfp4_gemm
+
+        self.assertIs(mxfp4_gemm_bench, mx_gemm_bench)
+        self.assertIs(mxfp4_gemm.MxFp4GemmSpec, mx_gemm.MxGemmSpec)
+        self.assertIs(mxfp4_gemm.build_mxfp4_gemm, mx_gemm.build_mx_gemm)
+        self.assertIs(mxfp4_gemm.mxfp4_gemm_grid, mx_gemm.mx_gemm_grid)
+        self.assertIs(mxfp4_gemm.TILE_MN, mx_gemm.TILE_MN)
+
     def test_validator_accepts_tuning_space_and_rejects_bad_specs(self):
         self.assertIsNone(validate(_spec()))
         self.assertIsNone(validate(_spec(*_BENCH, cluster_order="aid")))
@@ -279,7 +289,7 @@ class MxFp4GemmSpecTest(unittest.TestCase):
         self.assertTrue(tuned.kernel_name().endswith("_noinitc"))
 
 
-class MxFp4GemmLayoutTest(unittest.TestCase):
+class MxGemmLayoutTest(unittest.TestCase):
     def test_reads_land_where_tdm_writes(self):
         """Row and scale offsets agree with the TDM's padded writes, every
         lane read is contiguous, and the regions are disjoint and in bounds."""
@@ -354,7 +364,7 @@ class MxFp4GemmLayoutTest(unittest.TestCase):
                 self.assertLess(used[-1][1], layout.buffer_bytes)
 
 
-class MxFp4GemmIrTest(unittest.TestCase):
+class MxGemmIrTest(unittest.TestCase):
     def test_benchmark_config_matches_step6_14(self):
         """Gate 1: byte-identical LLVM IR (kernel name aside) at the benchmark
         problem, and Step 6.14's compile options plus the regclass-priority
@@ -362,7 +372,7 @@ class MxFp4GemmIrTest(unittest.TestCase):
         old = variant_spec("step6_14_mxfp4_gemm", *_BENCH, **YAML_TILE)
         new = _spec(*_BENCH, cluster_order="aid")
         old_kernel = build_mxfp4_tdm_gemm(old, arch="gfx1250")
-        new_kernel = build_mxfp4_gemm(new)
+        new_kernel = build_mx_gemm(new)
         old_llvm = _lower_kernel_to_llvm_python(
             old_kernel, arch="gfx1250", llvm_flavor="llvm23"
         )
@@ -497,7 +507,7 @@ class MxFp4GemmIrTest(unittest.TestCase):
                     f"K must be a multiple of 32: each E8M0 scale covers 32 K values (got K={K})",
                 )
                 with self.assertRaisesRegex(ValueError, "multiple of 32"):
-                    build_mxfp4_gemm(_spec(M, N, K))
+                    build_mx_gemm(_spec(M, N, K))
 
     def test_short_k(self):
         """One or two full tiles, with or without a tail. The loop body is
@@ -641,7 +651,7 @@ class MxFp4GemmIrTest(unittest.TestCase):
         )
 
 
-class MxFp4GemmBenchReferenceTest(unittest.TestCase):
+class MxGemmBenchReferenceTest(unittest.TestCase):
     def test_block_reference_is_the_full_reference_sliced(self):
         """``--verify block`` checks the first and last tiles plus random
         rows and columns, against the same values the full reference has."""
@@ -673,7 +683,7 @@ class MxFp4GemmBenchReferenceTest(unittest.TestCase):
             self.assertTrue(np.array_equal(swizzled[0], canonical[:, :4]))
 
 
-class MxFp4GemmSparseCheckTest(unittest.TestCase):
+class MxGemmSparseCheckTest(unittest.TestCase):
     """All E2M1 values in a few K-steps: exact FP32 sums at any K."""
 
     def _values(self, spec, data):
@@ -745,7 +755,7 @@ class MxFp4GemmSparseCheckTest(unittest.TestCase):
 
 
 @unittest.skipIf(shutil.which("llvm-objdump") is None, "needs llvm-objdump")
-class MxFp4GemmHostBuildTest(unittest.TestCase):
+class MxGemmHostBuildTest(unittest.TestCase):
     def test_resources(self):
         """Host compiles: VGPR file and LDS limits, no spills."""
         import tempfile
@@ -800,7 +810,7 @@ class MxFp4GemmHostBuildTest(unittest.TestCase):
         ):
             with self.subTest(spec.kernel_name()):
                 artifact = compile_kernel(
-                    build_mxfp4_gemm(spec), arch="gfx1250", backend="python"
+                    build_mx_gemm(spec), arch="gfx1250", backend="python"
                 )
                 with tempfile.NamedTemporaryFile(suffix=".hsaco") as handle:
                     handle.write(artifact.hsaco)
@@ -812,7 +822,7 @@ class MxFp4GemmHostBuildTest(unittest.TestCase):
                 self.assertEqual(loop_scratch_ops(info.objdump_text), 0)
 
 
-class MxFp4GemmDeviceTest(unittest.TestCase):
+class MxGemmDeviceTest(unittest.TestCase):
     def test_matches_reference_on_gfx1250(self):
         if get_device_arch(0) != "gfx1250":
             self.skipTest("visible HIP device 0 is not gfx1250")
