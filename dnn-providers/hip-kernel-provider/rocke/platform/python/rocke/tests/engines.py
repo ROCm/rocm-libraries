@@ -124,8 +124,11 @@ _NATIVE_REFUSAL = re.compile(r"\(status (\d+)\): (.*)", re.DOTALL)
 #: ``hip_outcomes_of_both_engines`` runs where the binding is not built.
 IR_LOWER_CLI_ENV = "ROCKE_IR_LOWER_CLI"
 
-# A generous bound on one rocke_ir_lower_cli run, which lowers every kernel it
-# is given: a parity family's kernels take a few seconds at most.
+# Bounds a hung rocke_ir_lower_cli run, which lowers every kernel it is given.
+# It sits below the 120 s per-test limit of the rocke_hip_source_identity CTest,
+# whose calls lower whole families, so a hang there is reported as this timeout
+# rather than as a pytest-timeout kill; a lane with a lower per-test limit
+# reports it as that limit's kill instead.
 _IR_LOWER_CLI_TIMEOUT_S = 90
 
 

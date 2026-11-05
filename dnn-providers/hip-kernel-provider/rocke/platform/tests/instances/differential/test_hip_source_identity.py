@@ -57,10 +57,9 @@ NO_KERNEL_FAMILIES = {
     "conv_abi": "prints kernel argument lists, not a kernel",
 }
 
-# One family's emitter run: every config, one process. The slowest family takes
-# about 25 s on a developer host. This bounds a hung emitter below the 120 s
-# per-test limit of the rocke_hip_source_identity CTest, so the hang is reported
-# here rather than as a pytest-timeout kill.
+# One family's emitter run: every config, one process. This bounds a hung
+# emitter below the 120 s per-test limit of the rocke_hip_source_identity CTest,
+# so the hang is reported here rather than as a pytest-timeout kill.
 EMITTER_TIMEOUT_S = 100
 
 # How a builder refusing a config ends: the exception line of one of these.
