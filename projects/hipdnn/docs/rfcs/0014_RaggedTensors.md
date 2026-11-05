@@ -2,7 +2,7 @@
 
 - Contributors: hipDNN maintainers
 - **Status**: In progress
-- **Status notes**: Frontend, flatbuffer, backend, plugin-version gate, and data SDK types (`RaggedTensor<T>`, `ShallowRaggedTensor<T>`) shipped (#8834, #11382, #12190). Plan-layer consumption was built first in the GPU reference (`GpuSdpaRaggedFwdPlan`, #11532) with ragged SDPA bundles (#12738), and now also in the CPU reference (`SdpaRaggedFwdPlan`). Both executors run every other single-node ragged SDPA graph, forward or backward, through a dense padded rewrite; see §4.10. Per-batch origins, lengths from `seq_len`, strided and head-major layouts, and the exact element-space footprint land with #15080.
+- **Status notes**: Frontend, flatbuffer, backend, plugin-version gate, and data SDK types (`RaggedTensor<T>`, `ShallowRaggedTensor<T>`) shipped (#8834, #11382, #12190). Plan-layer consumption was built first in the GPU reference (`GpuSdpaRaggedFwdPlan`, #11532) with ragged SDPA bundles (#12738), and now also in the CPU reference (`SdpaRaggedFwdPlan`). Both executors run the single-node ragged SDPA graphs the native plans decline, forward or backward, through a dense padded rewrite when it accepts them; see §4.10. Per-batch origins, lengths from `seq_len`, strided and head-major layouts, and the exact element-space footprint land with #15080.
 - **Last verified**: 2026-11-04 against #15080 on `develop` (49a01e717d5)
 
 ## Table of Contents
@@ -484,7 +484,8 @@ These apply to both `RaggedTensor<T>` and
      last live row. Batches with `lengths[b] == 0` own no rows: they
      are skipped by the contiguity check and their entry is the running
      end of the preceding batches (for leading empty batches, the origin
-     of the first non-empty batch), whatever their stored origin. The
+     of the first non-empty batch; when every batch is empty, every
+     entry, including the last, is `origins[0]`), whatever their stored origin. The
      accessor throws
      `std::logic_error` naming the non-empty batch `a` that precedes
      the break, when the next non-empty batch's origin is not
@@ -1050,14 +1051,18 @@ scope for this RFC.
 > container accepts ([§4.5](#45-data-sdk-shared-elements)) and the
 > `seq_len_q` / `seq_len_kv` pair (both or neither); they decline
 > `Max`, `Sum_exp` and ragged Q over paged K/V. Any other single-node
-> ragged SDPA graph, forward or backward, runs through a dense padded
-> rewrite (`RaggedSdpaDensify.hpp`) that unpacks the ragged tensors,
+> ragged SDPA graph, forward or backward, that the rewrite accepts runs
+> through a dense padded rewrite (`RaggedSdpaDensify.hpp`) that unpacks the ragged tensors,
 > runs the dense plan and packs the outputs back. The rewrite accepts
 > `INT32` and `INT64` offsets, serves ragged `Max` and `Sum_exp` and
-> ragged Q over non-ragged paged K/V, and declines a `ragged_offset` on
-> a paged K/V container. A length tensor of the graph (`seq_len_q` /
-> `seq_len_kv`) must be `INT32` `[B, 1, 1, 1]`; the rewrite declines any
-> other `seq_len` type. No op other than SDPA consumes ragged tensors
+> ragged Q over non-ragged paged K/V, and declines what it cannot
+> rewrite, so the graph is unsupported: a `ragged_offset` on a paged K/V
+> container; a ragged tensor that is not a Q/K/V/O/stats primary; a
+> partly ragged Q-side or K/V-side group; Q or K that is not rank 4;
+> ragged tensors whose batch differs from Q's, that are virtual, or whose
+> strides alias; an offset table that is not `INT32` / `INT64` `[B + 1]`;
+> a `seq_len` that is not `INT32` `[B, 1, 1, 1]`; and data types the
+> dense plan does not register. No op other than SDPA consumes ragged tensors
 > yet. The §4.11 pre-supplied input bundle is not implemented.
 > The bundle harness loads ragged inputs from golden blobs instead.
 > The sketches below show the intended shape.

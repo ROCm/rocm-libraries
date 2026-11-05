@@ -50,7 +50,7 @@ call:
 | fp8 dequantize | fp8 Q/K/V times their descales (scalar or `[B, H_kv, 1, 1]`) to FP32, then the float core runs | CPU `forward`, GPU `fprop` + `sdpaDequantRef` |
 | fp8 output scaling | core writes FP32 `O_f`; `amax_o = max \|O_f\|`, `O = O_f * scale_o` in O's dtype | CPU `forward`, GPU `sdpaScaleOutRef` |
 | Paged K/V | CPU: gather pages into dense K/V (`gatherPagedKv`). GPU: the kernel reads pages in place through the table | plans / kernel |
-| Ragged (RFC 0014) | native forward for bf16 and fp8 over any layout the container accepts, with the `seq_len_q/kv` pair; every other ragged graph (including `Max` / `Sum_exp`) is rewritten to its dense padded form, run dense, and packed back (`RaggedSdpaDensify.hpp`) | both executors |
+| Ragged (RFC 0014) | native forward for bf16 and fp8 over any layout the container accepts, with the `seq_len_q/kv` pair; other ragged graphs (including `Max` / `Sum_exp`) are rewritten to their dense padded form, run dense, and packed back (`RaggedSdpaDensify.hpp`) when the rewrite accepts them (what it declines: RFC 0014 §4.10) | both executors |
 | Philox dropout | the engine's `rng_dump` keep mask is applied as an explicit dropout mask with scale `1 / (1 - p)` | plans (`RngDumpHandoff.hpp` in the harness) |
 
 ### 1.3 What the references share
@@ -84,7 +84,7 @@ listed as an accepted hint (the last row).
 | Diagonal band (`left_bound`, `right_bound`, `diagonal_alignment`; deprecated causal flags) | Yes; bottom-right measured from each batch's live lengths | SEM-001, 003, 004, 005 |
 | Padding (`seq_len_q/kv`, `padding_mask`) | INT32 `[B, 1, 1, 1]`, both; pad rows give `O = 0`, `LSE = -inf` | SEM-008, 010 |
 | Paged K/V (`page_table_k/v`, `max_seq_len_kv`) | K, V or both paged, each with its own block size; table INT32 `[B, 1, ceil(max/block), 1]`; extent inferred as cuDNN does when unset; needs padding | SEM-009 |
-| Ragged tensors (`ragged_offset` on any primary) | native forward for BF16 and FP8 E4M3, any container-valid layout, `seq_len_q/kv` bound as lengths; everything else (other dtypes, bias, sinks, `Max` / `Sum_exp`, ragged Q over non-ragged paged K/V, backward) through the dense rewrite; a `ragged_offset` on a paged K/V container is declined | RFC 0014 |
+| Ragged tensors (`ragged_offset` on any primary) | native forward for BF16 and FP8 E4M3, any container-valid layout, `seq_len_q/kv` bound as lengths; everything else (other dtypes, bias, sinks, `Max` / `Sum_exp`, ragged Q over non-ragged paged K/V, backward) through the dense rewrite; the dense rewrite declines what it cannot rewrite (RFC 0014 §4.10) | RFC 0014 |
 | Attention sink (`sink_token`) | FLOAT `[1, H_q, 1, 1]` | SEM-022 |
 | ALiBi (`alibi_mask`) | cuDNN slopes, `+ (skv - sq) * slope(h)`; top-left causal only (as cuDNN). The frontend accepts other alignments; the references decline them | SEM-021 |
 | Block-sparse mask (`block_mask`) | UINT8, one bit per 128 x 128 tile | SEM-025 |

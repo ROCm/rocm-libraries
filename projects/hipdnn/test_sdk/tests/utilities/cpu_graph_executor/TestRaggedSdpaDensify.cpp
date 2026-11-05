@@ -946,6 +946,41 @@ TEST(TestRaggedSdpaDensify, Int64OffsetTablesMatchInt32)
     const auto& primary64 = dense64->primaries.front();
     EXPECT_EQ(hipdnn_test_sdk::detail::raggedElementOffsets(primary64, tokens64.data(), B),
               hipdnn_test_sdk::detail::raggedElementOffsets(primary32, Q_TOKENS.data(), B));
+
+    // A host copy sized by raggedOffsetBytes holds a strided table of either width: values at
+    // every stride-th slot, a sentinel in the gaps, so a read at the wrong slot or width differs.
+    for(const int64_t stride : {int64_t{1}, int64_t{3}})
+    {
+        auto strided32 = primary32;
+        auto strided64 = primary64;
+        strided32.offsetStride = stride;
+        strided64.offsetStride = stride;
+        const auto slots = static_cast<size_t>(B * stride + 1);
+        ASSERT_EQ(hipdnn_test_sdk::detail::raggedOffsetBytes(strided32, B), slots * 4);
+        ASSERT_EQ(hipdnn_test_sdk::detail::raggedOffsetBytes(strided64, B), slots * 8);
+
+        std::vector<int32_t> table32(slots, -1);
+        std::vector<int64_t> table64(slots, -1);
+        for(int64_t b = 0; b <= B; ++b)
+        {
+            table32[static_cast<size_t>(b * stride)] = Q_TOKENS[static_cast<size_t>(b)];
+            table64[static_cast<size_t>(b * stride)] = Q_TOKENS[static_cast<size_t>(b)];
+        }
+        EXPECT_EQ(hipdnn_test_sdk::detail::raggedElementOffsets(strided64, table64.data(), B),
+                  hipdnn_test_sdk::detail::raggedElementOffsets(strided32, table32.data(), B))
+            << "stride " << stride;
+    }
+}
+
+// A primary whose data type has no native mapping is declined, not thrown on.
+TEST(TestRaggedSdpaDensify, UnmappedPrimaryDataTypeIsDeclined)
+{
+    const auto make = [](DataType type) {
+        return editGraph(raggedGraph(false, true),
+                         [&](GraphT& g) { tensorOf(g, Q).data_type = type; });
+    };
+    EXPECT_TRUE(densifies(make(DataType::FLOAT)));
+    EXPECT_FALSE(densifies(make(DataType::INT8)));
 }
 
 // A ragged_offset tensor another attribute still names stays in the dense graph.

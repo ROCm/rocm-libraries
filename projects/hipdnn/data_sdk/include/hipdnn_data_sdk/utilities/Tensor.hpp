@@ -138,6 +138,8 @@ struct RaggedIterationInfo
      * part of equality. Zero-length batches own no rows: their entry is the running end of
      * the preceding batches (for leading empty batches, the origin of the first non-empty
      * batch), whatever their stored origin. The final entry is the end of the last live row.
+     * When every batch is empty there are no live rows: every entry, the final one included,
+     * is `origins[0]`.
      *
      * @return The offset table in element units.
      * @throws std::logic_error When the non-empty batches are not contiguous and in order,

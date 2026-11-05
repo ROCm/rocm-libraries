@@ -71,15 +71,24 @@ struct DenseSdpaFromRagged
 namespace ragged_densify_detail
 {
 
-inline size_t elementSizeOf(hipdnn_flatbuffers_sdk::data_objects::DataType type)
+// Byte size of one element, or nullopt for a data type without a native mapping (INT8, UINT8,
+// UNSET, ...).
+inline std::optional<size_t> elementSizeOf(hipdnn_flatbuffers_sdk::data_objects::DataType type)
 {
     // datatypeToNativeVariant has no INT64 case; offset tables may be INT64.
     if(type == hipdnn_flatbuffers_sdk::data_objects::DataType::INT64)
     {
         return sizeof(int64_t);
     }
-    return std::visit([](auto value) { return sizeof(value); },
-                      hipdnn_test_sdk::utilities::datatypeToNativeVariant(type));
+    try
+    {
+        return std::visit([](auto value) { return sizeof(value); },
+                          hipdnn_test_sdk::utilities::datatypeToNativeVariant(type));
+    }
+    catch(const std::runtime_error&)
+    {
+        return std::nullopt;
+    }
 }
 
 inline std::vector<int64_t> contiguousStrides(const std::vector<int64_t>& dims)
@@ -223,8 +232,6 @@ std::optional<DenseSdpaFromRagged> densify(hipdnn_flatbuffers_sdk::data_objects:
         }
     }
 
-    // A seq_len tensor is INT32 [B, 1, 1, 1], with B the batch of Q; its values are read as INT32
-    // and its batch stride is only meaningful on that shape.
     // Q and K are read as [B, H, S, D] below, ragged or not.
     if(tensors.at(attrs.q_tensor_uid)->dims.size() != 4
        || tensors.at(attrs.k_tensor_uid)->dims.size() != 4)
@@ -232,6 +239,8 @@ std::optional<DenseSdpaFromRagged> densify(hipdnn_flatbuffers_sdk::data_objects:
         return std::nullopt;
     }
     const auto& qDims = tensors.at(attrs.q_tensor_uid)->dims;
+    // A seq_len tensor is INT32 [B, 1, 1, 1], with B the batch of Q; its values are read as INT32
+    // and its batch stride is only meaningful on that shape.
     for(const auto& seqLenUid : {attrs.seq_len_q_tensor_uid, attrs.seq_len_kv_tensor_uid})
     {
         if(!seqLenUid.has_value())
@@ -239,7 +248,7 @@ std::optional<DenseSdpaFromRagged> densify(hipdnn_flatbuffers_sdk::data_objects:
             continue;
         }
         const auto it = tensors.find(seqLenUid.value());
-        if(qDims.empty() || it == tensors.end() || it->second->data_type != DataType::INT32
+        if(it == tensors.end() || it->second->data_type != DataType::INT32
            || !hipdnn_data_sdk::utilities::detail::isBatchAxisVector(it->second->dims, qDims[0]))
         {
             return std::nullopt;
@@ -249,10 +258,6 @@ std::optional<DenseSdpaFromRagged> densify(hipdnn_flatbuffers_sdk::data_objects:
     DenseSdpaFromRagged result;
     std::vector<int64_t> offsetUids;
     // Every offset table is read with Q's batch, so every ragged role must share it.
-    if(qDims.empty())
-    {
-        return std::nullopt;
-    }
     const int64_t batch = qDims[0];
     for(const auto& role : roles)
     {
@@ -274,15 +279,21 @@ std::optional<DenseSdpaFromRagged> densify(hipdnn_flatbuffers_sdk::data_objects:
         {
             return std::nullopt;
         }
+        const auto offsetSize = elementSizeOf(offsetIt->second->data_type);
+        const auto primarySize = elementSizeOf(tensor->data_type);
+        if(!offsetSize.has_value() || !primarySize.has_value())
+        {
+            return std::nullopt;
+        }
         RaggedSdpaPrimary primary;
         primary.uid = role.uid;
         primary.offsetUid = offsetUid;
-        primary.offsetElementSize = elementSizeOf(offsetIt->second->data_type);
+        primary.offsetElementSize = offsetSize.value();
         primary.offsetStride = offsetIt->second->strides.empty() ? 1 : offsetIt->second->strides[0];
         primary.multiplier = tensor->ragged_offset_multiplier;
         primary.dims = tensor->dims;
         primary.packedStrides = tensor->strides;
-        primary.elementSize = elementSizeOf(tensor->data_type);
+        primary.elementSize = primarySize.value();
         primary.queryPacking = role.queryPacking;
         primary.output = role.output;
         result.primaries.push_back(primary);

@@ -1969,9 +1969,9 @@ TEST(TestGpuSdpaRaggedFwdFp32, ShiftedOriginOffsets)
     runRaggedFwdCase(c);
 }
 
-// Row L9: non-monotonic origins with seq_len. Batch 0 sits after batch 1 and 2 in Q (origin rows
-// 10, 0, 5), K/V (6, 0, 2) and O (5, 10, 0); the lengths come from seq_len_q / seq_len_kv and
-// the last offset entry is unused.
+// Row L9: non-monotonic origins with seq_len. Batch 0 sits after batches 1 and 2 in Q (origin rows
+// 10, 0, 5) and K/V (6, 0, 2), and after batch 2 only in O (5, 10, 0); the lengths come from
+// seq_len_q / seq_len_kv and the last offset entry is unused.
 TEST(TestGpuSdpaRaggedFwdFp32, NonMonotonicOriginsWithSeqLen)
 {
     SKIP_IF_NO_DEVICES();

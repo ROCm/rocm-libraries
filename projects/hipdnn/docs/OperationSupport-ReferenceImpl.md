@@ -164,15 +164,15 @@ accepts: token-major, head-major, a padded token stride, and shifted or non-mono
 bound (both or neither; a `padding_mask` only with both, as `isSupportedSdpaPadding`), else from the
 `ragged_offset` blocks clamped to `S_max`. A node is keyed as ragged when any of its Q/K/V/O tensors
 has a `ragged_offset`. The ragged plan needs all four to be ragged, and the dense plan rejects any
-ragged tensor. So a partly ragged node is declined by both plans, and goes to the dense rewrite.
+ragged tensor. So a partly ragged node is declined by both plans and left to the dense rewrite, which declines it too.
 
 Ragged graphs the native ragged plan declines, and ragged backward graphs, run through the dense
-rewrite (`RaggedSdpaDensify.hpp`): the packed tensors are unpacked into dense padded ones with the
+rewrite when it accepts them (`RaggedSdpaDensify.hpp`): the packed tensors are unpacked into dense padded ones with the
 per-batch lengths (`seq_len` when supplied, else the offset blocks) as `seq_len_q/kv`, the dense plan
 runs, and the outputs are packed back. They therefore support everything the dense forward and
 backward columns list. The rewrite serves `Max` and `Sum_exp` (bound by `seq_len_q`), `INT64`
-offsets and ragged Q over non-ragged paged K/V; it declines a `ragged_offset` on a paged K/V
-container.
+offsets and ragged Q over non-ragged paged K/V. What it declines (for example a `ragged_offset` on
+paged K/V, a non-`INT32` `seq_len`) is listed in RFC 0014 §4.10; such a graph is unsupported.
 
 The semantics the references implement (cuDNN's), and every place where cuDNN, PyTorch, vLLM and
 FlashAttention-style kernels disagree, are recorded in the [SDPA semantics register](SdpaSemanticsRegister.md).
