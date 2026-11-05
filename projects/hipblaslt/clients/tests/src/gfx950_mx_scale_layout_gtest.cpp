@@ -16,7 +16,7 @@
 #include <hipblaslt/hipblaslt-ext.hpp>
 #include <hipblaslt/hipblaslt.h>
 
-#include "scoped_env_var.hpp"
+#include "scoped_env.hpp"
 
 #include <cstdio>
 #include <cstdlib>
@@ -38,6 +38,8 @@ extern "C" size_t hipblaslt_tuning_candidates_for_test(void*  handle,
 
 namespace
 {
+    using test_env::ScopedEnv;
+
     constexpr int64_t kM          = 128;
     constexpr int64_t kN          = 128;
     constexpr int64_t kK          = 256;
@@ -288,7 +290,7 @@ namespace
     // kernel and return wrong values.
     TEST_F(Gfx950MxScaleLayout, smoke_MatmulApiRocRollerOff)
     {
-        ScopedEnvVar env("HIPBLASLT_USE_ROCROLLER", "0");
+        ScopedEnv    env("HIPBLASLT_USE_ROCROLLER", "0");
         OwnedHandle  owner;
         ASSERT_EQ(hipblasLtCreate(&owner.handle), HIPBLAS_STATUS_SUCCESS);
         hipblasLtHandle_t handle = owner.handle;
@@ -338,7 +340,7 @@ namespace
 #ifdef HIPBLASLT_USE_ROCROLLER
         GTEST_SKIP() << "rocRoller is compiled in and serves packed scales itself";
 #endif
-        ScopedEnvVar env("HIPBLASLT_USE_ROCROLLER", nullptr);
+        ScopedEnv    env("HIPBLASLT_USE_ROCROLLER", nullptr);
         OwnedHandle  owner;
         ASSERT_EQ(hipblasLtCreate(&owner.handle), HIPBLAS_STATUS_SUCCESS);
         hipblasLtHandle_t handle = owner.handle;
@@ -368,11 +370,11 @@ namespace
     // Both the all-kernels enumeration (getAllSolutions) and the ranked prefix.
     TEST_F(Gfx950MxScaleLayout, smoke_TuningCandidates)
     {
-        ScopedEnvVar rocRoller("HIPBLASLT_USE_ROCROLLER", "0");
+        ScopedEnv rocRoller("HIPBLASLT_USE_ROCROLLER", "0");
         for(const char* allKernels : {"1", "0"})
         {
             SCOPED_TRACE(allKernels);
-            ScopedEnvVar policy("HIPBLASLT_TUNING_ALL_KERNELS", allKernels);
+            ScopedEnv    policy("HIPBLASLT_TUNING_ALL_KERNELS", allKernels);
             OwnedHandle  owner;
             ASSERT_EQ(hipblasLtCreate(&owner.handle), HIPBLAS_STATUS_SUCCESS);
             hipblasLtHandle_t handle = owner.handle;
@@ -405,7 +407,7 @@ namespace
     // scale 1001.
     TEST_F(Gfx950MxScaleLayout, smoke_TuningFileRowServesOnlyItsScaleLayout)
     {
-        ScopedEnvVar rocRoller("HIPBLASLT_USE_ROCROLLER", "0");
+        ScopedEnv    rocRoller("HIPBLASLT_USE_ROCROLLER", "0");
         int          rowIndex = -1;
         std::string  rowName;
         {
@@ -446,7 +448,7 @@ namespace
                 << "," << rowName << "\n";
             ASSERT_TRUE(out.good());
         }
-        ScopedEnvVar overrideFile("HIPBLASLT_TUNING_OVERRIDE_FILE", path.c_str());
+        ScopedEnv overrideFile("HIPBLASLT_TUNING_OVERRIDE_FILE", path.c_str());
         hipblaslt_tuning_reset_for_test();
 
         OwnedHandle owner;
@@ -473,7 +475,7 @@ namespace
     // query, scalar scales must not keep searching MX kernels.
     TEST_F(Gfx950MxScaleLayout, smoke_ReusedDescriptorLeavesMxScaling)
     {
-        ScopedEnvVar env("HIPBLASLT_USE_ROCROLLER", "0");
+        ScopedEnv    env("HIPBLASLT_USE_ROCROLLER", "0");
         OwnedHandle  owner;
         ASSERT_EQ(hipblasLtCreate(&owner.handle), HIPBLAS_STATUS_SUCCESS);
         hipblasLtHandle_t handle = owner.handle;

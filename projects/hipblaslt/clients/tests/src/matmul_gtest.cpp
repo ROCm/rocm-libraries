@@ -26,7 +26,7 @@
 #include "hipblaslt_data.hpp"
 #include "hipblaslt_datatype2string.hpp"
 #include "hipblaslt_test.hpp"
-#include "scoped_env_var.hpp"
+#include "scoped_env.hpp"
 #include "testing_matmul.hpp"
 #include "testing_matmul_batch_offset.hpp"
 #include <cctype>
@@ -646,7 +646,7 @@ namespace
     {
         void operator()(const Arguments& arg)
         {
-            ScopedEnvVar rocRoller("HIPBLASLT_USE_ROCROLLER", "0");
+            test_env::ScopedEnv rocRoller("HIPBLASLT_USE_ROCROLLER", "0");
             testing_matmul(arg);
         }
     };
