@@ -208,8 +208,8 @@ def _ingestor_base_spec(
             f"the ingestor's gfx942 persistent grid is D128 only, got D{req.hdim_q}"
         )
     bm = int(DENSE_TILE_GEOMETRIES["default"]["block_m"])
-    spec = _make_spec(req, bm, _DENSE_BLOCK_N, persistent=persistent)
-    spec = replace(spec, nonpersist_decode=nonpersist_decode, kv_segments=1)
+    spec = _make_spec(req, bm, _DENSE_BLOCK_N, persistent=persistent, split_kv=False)
+    spec = replace(spec, nonpersist_decode=nonpersist_decode)
     if persistent:
         spec = replace(spec, persist_decode=spec.resolved_persist_decode)
     return spec
@@ -222,8 +222,13 @@ def _make_spec(
     *,
     persistent: bool,
     window_wave_skip: bool = False,
+    split_kv: bool = True,
 ):
-    """The ``Gfx942AttentionDenseSpec`` for ``req`` at one tile geometry."""
+    """The ``Gfx942AttentionDenseSpec`` for ``req`` at one tile geometry.
+
+    ``split_kv=False`` keeps one KV segment and the requested grid: a split
+    turns ``persistent`` off, so a caller that fixes the grid must not get one.
+    """
     from kernels.gfx942.attention_dense import (
         Gfx942AttentionDenseSpec,
         _tuned_waves_per_eu,
@@ -267,7 +272,8 @@ def _make_spec(
         cus = int(req.num_cus) if int(req.num_cus) > 0 else _GFX942_NUM_PERSISTENT
         work = -(-sq // bm) * int(req.nhead_q) * int(req.batch)
         if (
-            sq % bm == 0
+            split_kv
+            and sq % bm == 0
             and not req.use_sinks
             and not req.emit_lse
             and not int(req.sliding_window)

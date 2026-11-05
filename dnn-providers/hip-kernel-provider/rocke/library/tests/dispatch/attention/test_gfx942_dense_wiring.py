@@ -527,6 +527,39 @@ class TestGfx942DenseIngestorGrids(unittest.TestCase):
                         attention_dense_cache_key(spec, arch="gfx942"),
                     )
 
+    def test_chunked_bottom_right_keeps_every_grid(self):
+        """A short bottom-right chunk is where the tuned default splits KV, which
+        turns its grid non-persistent; no ingestor grid may follow it."""
+        chunk = {
+            "nhead_q": 8,
+            "nhead_k": 8,
+            "seqlen_q": 512,
+            "seqlen_k": 2048,
+            "mask_type": AttentionMaskType.BOTTOM_RIGHT_CAUSAL,
+        }
+        with _Gfx942Arch():
+            tuned = _spec(_req(**chunk))
+            self.assertGreater(tuned.kv_segments, 1)
+            self.assertFalse(tuned.persistent)
+            grids = {
+                self._PERSIST: (True, "qb_minor"),
+                "gfx942_dense_qbminor": (False, "qb_minor"),
+                **{spec_id: (False, order) for spec_id, order in self._ORDERS.items()},
+            }
+            for spec_id, (persistent, order) in grids.items():
+                with self.subTest(spec_id=spec_id):
+                    spec = attention_tuning_spec(
+                        _req(spec_id=spec_id, **chunk), spec_id
+                    ).kernel_spec
+                    self.assertTrue(spec.causal_bottom_right)
+                    self.assertEqual(
+                        (spec.persistent, spec.nonpersist_decode, spec.kv_segments),
+                        (persistent, order, 1),
+                    )
+                    if persistent:
+                        self.assertEqual(spec.num_persistent, 304)
+                        self.assertIn(spec.persist_decode, self._RUNTIME_DECODES)
+
     def test_persistent_grid_is_d128_only(self):
         """At D64 the grid measured ahead, so the candidate admits no D64 request."""
         candidate = next(
