@@ -35,8 +35,9 @@ def validateTDMStore(state, printRejectionReason: bool) -> bool:
   That needs a 16-bit HPA output written directly to D, by a GlobalSplitU=1 kernel or as the
   final store of a non-atomic StreamK=3 tile, no LDS data kept from one persistent tile to the
   next, and MacroTile1 split evenly across the waves. The block also computes the elements
-  outside D and bounds only the D store, so besides D the epilogue may only read the bias and
-  ScaleAlphaVec vectors along M and the ScaleAB vectors, which go after the staged tile in LDS.
+  outside D and bounds only the C loads and the D store, so besides C and D the epilogue may only
+  read the bias and ScaleAlphaVec vectors along M and the ScaleAB vectors, which go after the
+  staged tile in LDS. It stores every edge tile itself, so AdaptiveGemm=1 is rejected.
   A GlobalSplitU=-1 kernel uses the block only when the runtime GSU is 1, and its GSU>1
   partials keep buffer_store; it is supported with MultipleBuffer and AdaptiveGemmGSUA=0.
   """
@@ -60,6 +61,8 @@ def validateTDMStore(state, printRejectionReason: bool) -> bool:
     reason = "TDMStore requires GlobalSplitU=1 or -1"
   elif state["GlobalSplitU"] == -1 and (state["GlobalSplitUAlgorithm"] != "MultipleBuffer" or state["AdaptiveGemmGSUA"]):
     reason = "TDMStore supports GlobalSplitU=-1 only with MultipleBuffer and AdaptiveGemmGSUA=0"
+  elif state["AdaptiveGemm"]:
+    reason = "TDMStore already stores every edge tile, so it does not support AdaptiveGemm=1"
   elif state["UseSubtileImpl"]:
     reason = "TDMStore does not support UseSubtileImpl"
   elif state["StoreRemapVectorWidth"]:

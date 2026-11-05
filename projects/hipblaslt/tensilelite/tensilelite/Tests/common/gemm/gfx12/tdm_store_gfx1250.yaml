@@ -32,10 +32,10 @@ BenchmarkProblems:
   ########################################
   # TDMStore stores every edge block of the beta=0 epilogue with
   # tensor_store_from_lds; the NonEdge block keeps buffer_store. The sizes have
-  # M-edge workgroups with M % 8 odd, 6, 4 and 0 (one per AdaptiveGemm edge
-  # block), N-edge-only workgroups and only NonEdge workgroups. The last size
-  # has NonEdge, M-edge, N-edge and corner workgroups and a leading dimension
-  # larger than M, so BoundsCheck also checks the gap between columns.
+  # M-edge workgroups with M % 8 odd, 6, 4 and 0, N-edge-only workgroups and
+  # only NonEdge workgroups. The last size has NonEdge, M-edge, N-edge and
+  # corner workgroups and a leading dimension larger than M, so BoundsCheck
+  # also checks the gap between columns.
   # DataInitTypeBeta is global, so the beta != 0 epilogue is checked in
   # tdm_store_beta_gfx1250.yaml.
   ########################################
@@ -63,7 +63,6 @@ BenchmarkProblems:
         - TDMInst: [3]
         - StoreVectorWidth: [-1]
         - GlobalSplitU: [1]
-        - AdaptiveGemm: [0, 1]
         - TDMStore: [0, 1]
         - SourceSwap: [False, True]
       BenchmarkJoinParameters:
@@ -96,7 +95,6 @@ BenchmarkProblems:
         - TDMInst: [3]
         - StoreVectorWidth: [-1]
         - GlobalSplitU: [1]
-        - AdaptiveGemm: [1]
         - Groups:
           - - ScheduleIterAlg: [4]
               TDMStore: [0, 1]
@@ -132,7 +130,6 @@ BenchmarkProblems:
         - TDMInst: [3]
         - StoreVectorWidth: [-1]
         - GlobalSplitU: [1]
-        - AdaptiveGemm: [1]
         - TDMStore: [0, 1]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
@@ -157,7 +154,6 @@ BenchmarkProblems:
         - TDMInst: [3]
         - StoreVectorWidth: [-1]
         - GlobalSplitU: [1]
-        - AdaptiveGemm: [1]
         - TDMStore: [1]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
@@ -187,7 +183,6 @@ BenchmarkProblems:
         - StoreVectorWidth: [-1]
         - WorkGroupMapping: [8]
         - StreamK: [3]
-        - AdaptiveGemm: [1]
         - TDMStore: [1]
         - SourceSwap: [False, True]
       BenchmarkJoinParameters:
@@ -220,7 +215,6 @@ BenchmarkProblems:
         - TDMInst: [3]
         - StoreVectorWidth: [-1]
         - GlobalSplitU: [1, -1]
-        - AdaptiveGemm: [1]
         - TDMStore: [0, 1]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
@@ -258,7 +252,6 @@ BenchmarkProblems:
         - StoreVectorWidth: [-1]
         - WorkGroupMapping: [8]
         - StreamK: [3]
-        - AdaptiveGemm: [1]
         - TDMStore: [0, 1]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
@@ -290,7 +283,6 @@ BenchmarkProblems:
         - TDMInst: [3]
         - StoreVectorWidth: [-1]
         - GlobalSplitU: [1]
-        - AdaptiveGemm: [1]
         - TDMStore: [1]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:

@@ -17659,11 +17659,11 @@ class KernelWriterAssembly(KernelWriter):
          and (kernel["GlobalSplitU"] > 1 or kernel["GlobalSplitU"] == -1):
         continue
       betaModule = Module("Beta_%u"%betaIdx)
-      # TDMStore: the single edge block of a beta=0, direct, non-atomic store to D (not a GSU or
+      # TDMStore: the single edge block of a direct, non-atomic store to D (not a GSU or
       # StreamK partial-tile store) is generated like the NonEdge block (widest vector width,
       # no per-element mask) and stores through LDS with tensor_store_from_lds, whose
       # tensor_dim bounds the tile to D.
-      tdmStoreBlock = kernel["TDMStore"] and edge and not beta and not atomic \
+      tdmStoreBlock = kernel["TDMStore"] and edge and not atomic \
         and kernel["_GlobalAccumulation"] in (None, "PartialsBuffer")
       blockVectorWidths, blockElements = vectorWidths, elements
       if tdmStoreBlock:

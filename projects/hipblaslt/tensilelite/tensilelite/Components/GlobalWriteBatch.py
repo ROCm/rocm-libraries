@@ -1209,6 +1209,8 @@ class GlobalWriteBatchWriter:
     else:
       module.addComment2(commentStr)
 
+    if self.beta and self.tdmStoreLdsBase is not None and self.batchIdx == 0:
+      module.add(self._emitTDMStoreBoundC())
     module.addComment1("calc coords, apply mask, and issue loads (if necessary)")
 
     if self.kernel["BufferStore"] and (self.edge or (self.kernel["NumWaveSplitK"] > 1)):
@@ -1901,6 +1903,33 @@ class GlobalWriteBatchWriter:
     module.add(SMulI32(dst=sgpr(self.tmpS01), src0=sgpr("WorkGroup0"), src1=mt0, comment="wg0*MT0"))
     module.add(VSubU32(dst=vgpr(base), src0=vgpr(base), src1=sgpr(self.tmpS01), comment="- wg0*MT0"))
     module.add(VLShiftLeftB32(dst=vgpr(base), shiftHex=int(log2(kw.states.bpeCexternal)), src=vgpr(base), comment="* bpe"))
+    return module
+
+  def _emitTDMStoreBoundC(self) -> Module:
+    """Set SrdC num_records to the bytes from the tile to the end of C.
+
+    The block reads C without per-element masks, so a load past the end of C must return zero
+    instead of reading memory after C; tensor_dim drops the elements that use those values.
+    """
+    module = Module("TDMStoreBoundC")
+    kw = self.parentWriter
+    strideC1 = "StrideC%s" % kw.states.indexChars[self.kernel["PackedC1IndicesX"][0]]
+    with kw.allocTmpSgpr(3, alignment=2, tag="tdmStoreBoundC") as tmp:
+      lo, hi, n = tmp.idx, tmp.idx + 1, tmp.idx + 2
+      module.add(SMulI32(dst=sgpr(n), src0=sgpr("WorkGroup1"), src1=self.kernel["MacroTile1"], comment="wg1*MT1"))
+      module.add(SSubU32(dst=sgpr(n), src0=kw.sizeRef(self.kernel["ProblemType"]["Index1"]), src1=sgpr(n), comment="SizeJ - wg1*MT1"))
+      module.add(SSubU32(dst=sgpr(n), src0=sgpr(n), src1=1, comment="columns before the last column of C"))
+      module.add(SMulHIU32(dst=sgpr(hi), src0=sgpr(n), src1=sgpr(strideC1), comment="hi(columns*StrideC)"))
+      module.add(SMulI32(dst=sgpr(lo), src0=sgpr(n), src1=sgpr(strideC1), comment="lo(columns*StrideC)"))
+      module.add(SMulI32(dst=sgpr(n), src0=sgpr("WorkGroup0"), src1=self.kernel["MacroTile0"], comment="wg0*MT0"))
+      module.add(SSubU32(dst=sgpr(n), src0=kw.sizeRef(self.kernel["ProblemType"]["Index0"]), src1=sgpr(n), comment="SizeI - wg0*MT0"))
+      module.add(SAddU32(dst=sgpr(lo), src0=sgpr(lo), src1=sgpr(n), comment="elements from the tile to the end of C"))
+      module.add(SAddCU32(dst=sgpr(hi), src0=sgpr(hi), src1=0, comment="carry"))
+      module.add(SLShiftLeftB64(dst=sgpr(lo, 2), src=sgpr(lo, 2), shiftHex=int(log2(kw.states.bpeCexternal)), comment="bytes"))
+      module.add(SCmpEQU32(src0=sgpr(hi), src1=0, comment="below 4 GiB?"))
+      module.add(SCSelectB32(dst=sgpr(lo), src0=sgpr(lo), src1="BufferOOB"))
+      module.add(SMinU32(dst=sgpr("SrdC+2"), src0=sgpr(lo), src1="BufferOOB", comment="num_records"))
+    module.add(kw.shiftSrd("C"))
     return module
 
   def _emitTDMStoreStaging(self, stagedElements) -> Module:

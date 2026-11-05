@@ -28,7 +28,9 @@ GlobalParameters:
 
 BenchmarkProblems:
   ########################################
-  # beta != 0: a TDMStore kernel keeps buffer_store in its beta != 0 epilogue.
+  # beta != 0: the edge tiles of the beta != 0 epilogue go through the TDM block,
+  # which reads C without masks: the last tile of each size reads past the end of
+  # C, and the second size has a leading dimension larger than M.
   ########################################
   -
     - &problem_type_bf16 # ProblemType TN
@@ -54,7 +56,6 @@ BenchmarkProblems:
         - TDMInst: [3]
         - StoreVectorWidth: [-1]
         - GlobalSplitU: [1]
-        - AdaptiveGemm: [1]
         - TDMStore: [1]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
@@ -84,7 +85,6 @@ BenchmarkProblems:
         - TDMInst: [3]
         - StoreVectorWidth: [-1]
         - GlobalSplitU: [1, -1]
-        - AdaptiveGemm: [1]
         - TDMStore: [1]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
@@ -95,3 +95,30 @@ BenchmarkProblems:
         - BiasTypeArgs: ['s']
         - ActivationArgs:
           - [Enum: relu]
+  ########################################
+  # Non-atomic StreamK=3: whole tiles and the tiles completed by the fixup read C in
+  # the TDM block; with K=1600 every workgroup stores two tiles.
+  ########################################
+  -
+    - *problem_type_bf16
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1, 1, 8, 8, 2, 2]
+        - WavefrontSize: [32]
+        - DepthU: [64]
+        - PrefetchGlobalRead: [1]
+        - PrefetchLocalRead: [1]
+        - ScheduleIterAlg: [3]
+        - TDMInst: [3]
+        - StoreVectorWidth: [-1]
+        - WorkGroupMapping: [8]
+        - StreamK: [3]
+        - TDMStore: [1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [505, 509, 2, 256, 520, 520, 256, 256]
+          - Exact: [505, 509, 2, 1600, 520, 520, 1600, 1600]
