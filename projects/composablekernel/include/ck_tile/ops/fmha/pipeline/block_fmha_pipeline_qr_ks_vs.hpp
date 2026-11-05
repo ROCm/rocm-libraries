@@ -76,7 +76,7 @@ struct BlockFmhaPipelineQRKSVS
     static constexpr bool kUseHdimTailArgs    = kPadHeadDimQ || kPadHeadDimV;
 
     // Separate K from V/dropout LDS to remove K/V aliasing barriers.
-#if defined(__gfx11__) || defined(__gfx120__)
+#if defined(__gfx11__) || defined(__gfx117__) || defined(__gfx120__)
     static constexpr bool kUseSeparateKVLds =
 #if defined(__gfx115__)
         // gfx115 separates LDS only for D128, except QK32/PV32.
@@ -90,6 +90,10 @@ struct BlockFmhaPipelineQRKSVS
            (kHasDropout && BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS))) &&
         // D256 keeps shared LDS to preserve long-sequence throughput.
         !(kQKHeaddim == 256 && kN1 == 256) &&
+#elif defined(__gfx117__)
+        // D128 bias/dropout uses shared LDS; the throughput tiles stay separate.
+        !(kQKHeaddim == 128 && kN1 == 128 && kHasDropout &&
+          BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS) &&
 #elif defined(__gfx120__)
         // D64 masked dropout+sink shares LDS for bias and unpadded ALiBi.
         !(kQKHeaddim == 64 && FmhaMask::IsMasking && kHasDropout && kHasSink &&
@@ -711,6 +715,11 @@ struct BlockFmhaPipelineQRKSVS
                                    BiasEnum == BlockAttentionBiasEnum::NO_BIAS
                                ? VPrefetchPoint::AfterSoftmax
                                : VPrefetchPoint::BeforeGemm0Tail;
+#elif defined(__gfx117__)
+                // The D256 N32 tile needs V's shorter live range to avoid spills.
+                if constexpr(kQKHeaddim == 256 && kN1 == 256 && kN0 == 32 && kK0 == 128 &&
+                             kK1 == 32)
+                    return VPrefetchPoint::AfterSoftmax;
 #elif defined(__gfx120__)
                 if constexpr(kUseSeparateKVLds)
                 {
@@ -725,8 +734,11 @@ struct BlockFmhaPipelineQRKSVS
                                : VPrefetchPoint::AfterSoftmax;
                 }
 #endif
-                // Shared LDS waits for softmax with V head padding, otherwise QK.
-                return kPadHeadDimV ? VPrefetchPoint::AfterSoftmax : VPrefetchPoint::AfterGemm0Tail;
+                // Separate LDS overlaps QK; shared LDS defers V according to padding.
+                return kUseSeparateKVLds
+                           ? VPrefetchPoint::BeforeGemm0Tail
+                           : (kPadHeadDimV ? VPrefetchPoint::AfterSoftmax
+                                          : VPrefetchPoint::AfterGemm0Tail);
 #else
                 // Other targets overlap V with the QK tail.
                 return VPrefetchPoint::BeforeGemm0Tail;
