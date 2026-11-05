@@ -84,13 +84,20 @@ constexpr std::string_view O_TOKEN = "gfx950_attention_dense.o.uid";
 constexpr std::string_view CAUSAL_TOKEN = "gfx950_attention_dense.causal";
 constexpr std::string_view SLIDING_WINDOW_TOKEN = "gfx950_attention_dense.sliding_window";
 constexpr std::string_view SCALE_BITS_TOKEN = "gfx950_attention_dense.scale_bits";
+constexpr std::string_view ALIBI_TOKEN = "gfx950_attention_dense.alibi";
 
 /// Every token the dispatch reads, in one place, so the case that removes them one at a
 /// time cannot quietly stop covering one.
 const std::vector<std::string_view>& allTokens()
 {
-    static const std::vector<std::string_view> s_tokens{
-        Q_TOKEN, K_TOKEN, V_TOKEN, O_TOKEN, CAUSAL_TOKEN, SLIDING_WINDOW_TOKEN, SCALE_BITS_TOKEN};
+    static const std::vector<std::string_view> s_tokens{Q_TOKEN,
+                                                        K_TOKEN,
+                                                        V_TOKEN,
+                                                        O_TOKEN,
+                                                        CAUSAL_TOKEN,
+                                                        SLIDING_WINDOW_TOKEN,
+                                                        SCALE_BITS_TOKEN,
+                                                        ALIBI_TOKEN};
     return s_tokens;
 }
 
@@ -150,7 +157,8 @@ enum class Mask
 
 /// The graph only has to be one the engine matches, so the tokens it binds can be read;
 /// the applicability rules are TestGfx950AttentionDenseMatchers.cpp's subject.
-flatbuffers::FlatBufferBuilder buildGraph(float scale, Mask mask, bool withBhsdTensor)
+flatbuffers::FlatBufferBuilder
+    buildGraph(float scale, Mask mask, bool withBhsdTensor, bool withAlibi)
 {
     flatbuffers::FlatBufferBuilder builder;
 
@@ -182,7 +190,7 @@ flatbuffers::FlatBufferBuilder buildGraph(float scale, Mask mask, bool withBhsdT
     attributesBuilder.add_causal_mask(false);
     attributesBuilder.add_causal_mask_bottom_right(false);
     attributesBuilder.add_attn_scale_value(scale);
-    attributesBuilder.add_alibi_mask(false);
+    attributesBuilder.add_alibi_mask(withAlibi);
     attributesBuilder.add_padding_mask(false);
     attributesBuilder.add_mma_core_mode(data_objects::DataType::UNSET);
     attributesBuilder.add_implementation(data_objects::AttentionImplementation::AUTO);
@@ -215,8 +223,9 @@ class AttentionGraph
 public:
     explicit AttentionGraph(float scale = 0.125F,
                             Mask mask = Mask::TOP_LEFT_CAUSAL,
-                            bool withBhsdTensor = false)
-        : _builder(buildGraph(scale, mask, withBhsdTensor))
+                            bool withBhsdTensor = false,
+                            bool withAlibi = false)
+        : _builder(buildGraph(scale, mask, withBhsdTensor, withAlibi))
         , _graph(_builder.GetBufferPointer(), _builder.GetSize())
     {
         _properties.gcnArchName = "gfx950";
@@ -292,21 +301,27 @@ int64_t ieee754Bits(float value)
 /// The ABI the rocKE builder declares, named as hkp_pack records it, so the signature
 /// comparison agrees and the failure below is the archive's rather than a mismatch;
 /// TestGfx950AttentionDenseSignature.cpp owns that comparison.
-std::vector<KernelArgument> recordedSignature()
+std::vector<KernelArgument> recordedSignature(bool alibi)
 {
     constexpr uint32_t POINTER_BYTES = 8;
     constexpr uint32_t SCALAR_BYTES = 4;
 
-    return {KernelArgument{"global_buffer", POINTER_BYTES, 0, "q_ptr"},
-            KernelArgument{"global_buffer", POINTER_BYTES, 0, "k_ptr"},
-            KernelArgument{"global_buffer", POINTER_BYTES, 0, "v_ptr"},
-            KernelArgument{"global_buffer", POINTER_BYTES, 0, "o_ptr"},
-            KernelArgument{"by_value", SCALAR_BYTES, 0, "scale"},
-            KernelArgument{"by_value", SCALAR_BYTES, 0, "batch"},
-            KernelArgument{"by_value", SCALAR_BYTES, 0, "seqlen_q"},
-            KernelArgument{"by_value", SCALAR_BYTES, 0, "seqlen_kv"},
-            KernelArgument{"by_value", SCALAR_BYTES, 0, "num_query_heads"},
-            KernelArgument{"by_value", SCALAR_BYTES, 0, "num_kv_heads"}};
+    std::vector<KernelArgument> signature{
+        KernelArgument{"global_buffer", POINTER_BYTES, 0, "q_ptr"},
+        KernelArgument{"global_buffer", POINTER_BYTES, 0, "k_ptr"},
+        KernelArgument{"global_buffer", POINTER_BYTES, 0, "v_ptr"},
+        KernelArgument{"global_buffer", POINTER_BYTES, 0, "o_ptr"},
+        KernelArgument{"by_value", SCALAR_BYTES, 0, "scale"},
+        KernelArgument{"by_value", SCALAR_BYTES, 0, "batch"},
+        KernelArgument{"by_value", SCALAR_BYTES, 0, "seqlen_q"},
+        KernelArgument{"by_value", SCALAR_BYTES, 0, "seqlen_kv"},
+        KernelArgument{"by_value", SCALAR_BYTES, 0, "num_query_heads"},
+        KernelArgument{"by_value", SCALAR_BYTES, 0, "num_kv_heads"}};
+    if(alibi)
+    {
+        signature.push_back(KernelArgument{"global_buffer", POINTER_BYTES, 0, "alibi_slopes_ptr"});
+    }
+    return signature;
 }
 
 /// A KPACK descriptor for this engine naming an archive that is not there, carrying the
@@ -315,7 +330,7 @@ std::vector<KernelArgument> recordedSignature()
 /// That absence is the point: every check prepare() performs BEFORE the loader runs is
 /// reached, and when they all pass the loader reports the missing file. No device, no
 /// compile, no launch.
-KernelDefinition makeKernel(int64_t blockM = 256, int64_t blockN = 64)
+KernelDefinition makeKernel(int64_t blockM = 256, int64_t blockN = 64, bool alibi = false)
 {
     KernelDefinition kernel;
     kernel.kernelId
@@ -329,13 +344,14 @@ KernelDefinition makeKernel(int64_t blockM = 256, int64_t blockN = 64)
     kernel.source.library = "there-is-no-archive-here.kpack";
     kernel.source.tocKey = "toc#0";
     kernel.source.symbol = "attention_dense";
-    kernel.source.signature = recordedSignature();
+    kernel.source.signature = recordedSignature(alibi);
     kernel.originDirectory = "/nonexistent";
     kernel.treeRoot = "/nonexistent";
     kernel.metadata = {
         {std::string("head_size"), HEAD_SIZE},
         {std::string("block_m"), blockM},
         {std::string("block_n"), blockN},
+        {std::string("use_alibi"), int64_t{alibi ? 1 : 0}},
     };
     return kernel;
 }
@@ -372,6 +388,8 @@ constexpr const char* OUTPUT_LAYOUT_MARKER = "not dense BSHD";
 
 /// The fragment only the tile refusal carries.
 constexpr const char* TILE_MARKER = "no supported block_m/block_n tile";
+
+constexpr const char* ALIBI_MARKER = "disagree on ALiBi";
 
 } // namespace
 
@@ -631,6 +649,41 @@ TEST(TestGfx950AttentionDenseDispatch, RefusesToPrepareACandidateThatIsNotKpack)
     const std::string failure = prepareFailure(graph, bindingsFor(graph), kernel);
     ASSERT_FALSE(failure.empty()) << "prepare() did not fail at all";
     EXPECT_NE(failure.find("'embedded_source'"), std::string::npos) << failure;
+}
+
+// =============================================================================
+// ALiBi
+// =============================================================================
+
+TEST(TestGfx950AttentionDenseDispatch, ReachesTheLoaderForAnAlibiGraphOnAnAlibiCandidate)
+{
+    const AttentionGraph graph(0.125F, Mask::TOP_LEFT_CAUSAL, false, /*withAlibi=*/true);
+    const std::string failure
+        = prepareFailure(graph, bindingsFor(graph), makeKernel(128, 64, /*alibi=*/true));
+    ASSERT_FALSE(failure.empty()) << "prepare() cannot succeed without the archive";
+    EXPECT_EQ(failure.find(ALIBI_MARKER), std::string::npos) << failure;
+    EXPECT_NE(failure.find("does not exist"), std::string::npos) << failure;
+}
+
+/// kernel_match never pairs an ALiBi graph with a plain candidate or the reverse; prepare()
+/// refuses both by name, because either would launch with the wrong argument list and
+/// scores without (or with) the bias.
+TEST(TestGfx950AttentionDenseDispatch, RefusesToPrepareWhenGraphAndCandidateDisagreeOnAlibi)
+{
+    const AttentionGraph alibi(0.125F, Mask::TOP_LEFT_CAUSAL, false, /*withAlibi=*/true);
+    const std::string onPlain = prepareFailure(alibi, bindingsFor(alibi), makeKernel());
+    EXPECT_NE(onPlain.find(ALIBI_MARKER), std::string::npos) << onPlain;
+
+    const AttentionGraph plain;
+    const std::string onAlibi
+        = prepareFailure(plain, bindingsFor(plain), makeKernel(128, 64, /*alibi=*/true));
+    EXPECT_NE(onAlibi.find(ALIBI_MARKER), std::string::npos) << onAlibi;
+
+    // A record written before the field reads as a plain candidate.
+    auto legacy = makeKernel();
+    legacy.metadata.erase(std::string("use_alibi"));
+    const std::string onLegacy = prepareFailure(alibi, bindingsFor(alibi), legacy);
+    EXPECT_NE(onLegacy.find(ALIBI_MARKER), std::string::npos) << onLegacy;
 }
 
 } // namespace hip_kernel_provider::kernel_ingestor_engine::testing

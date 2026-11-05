@@ -40,8 +40,9 @@
  * the matcher exist to stop, one layer lower down.
  *
  * Every variant in gfx950_attention_dense.kdp.json declares `persistent: false`,
- * `use_sinks: false`, `varlen: false` and `paged: false`, so the 8-argument form is the
- * only one that ships and the sink / cu_seqlens / page-table tails of
+ * `use_sinks: false`, `varlen: false` and `paged: false`, so the 10-argument form, and for
+ * a `use_alibi` variant the same ten plus the slopes pointer, are the only ones that ship;
+ * the sink / cu_seqlens / page-table tails of
  * attention_dense_signature are unreachable from this catalog. The 5-argument form is
  * covered here only as a shape the pack must refuse.
  *
@@ -114,6 +115,15 @@ std::vector<KernelArgument> persistentAbi()
     return signature;
 }
 
+/// The argument list of a use_alibi variant: the ten above, then the slopes pointer the
+/// gfx950 attention_dense signature appends (null selects hipDNN's built-in slopes).
+std::vector<KernelArgument> alibiAbi()
+{
+    auto signature = pythonAbi();
+    signature.push_back(KernelArgument{BUFFER_KIND, POINTER_BYTES, 0, "alibi_slopes_ptr"});
+    return signature;
+}
+
 std::vector<KernelArgument> withArgument(std::size_t index, const KernelArgument& argument)
 {
     auto signature = pythonAbi();
@@ -144,7 +154,8 @@ std::vector<int64_t> bshdStrides()
     return {SEQ * HEADS * HEAD_SIZE, HEAD_SIZE, HEADS * HEAD_SIZE, 1};
 }
 
-flatbuffers::FlatBufferBuilder buildAcceptedSdpaGraph()
+/// @p withAlibi sets alibi_mask, which only a use_alibi variant serves.
+flatbuffers::FlatBufferBuilder buildAcceptedSdpaGraph(bool withAlibi)
 {
     flatbuffers::FlatBufferBuilder builder;
 
@@ -169,7 +180,7 @@ flatbuffers::FlatBufferBuilder buildAcceptedSdpaGraph()
     attributesBuilder.add_causal_mask(false);
     attributesBuilder.add_causal_mask_bottom_right(false);
     attributesBuilder.add_attn_scale_value(SCALE);
-    attributesBuilder.add_alibi_mask(false);
+    attributesBuilder.add_alibi_mask(withAlibi);
     attributesBuilder.add_padding_mask(false);
     attributesBuilder.add_mma_core_mode(data_objects::DataType::UNSET);
     attributesBuilder.add_implementation(data_objects::AttentionImplementation::AUTO);
@@ -209,7 +220,7 @@ constexpr const char* MISMATCH_MARKER = "is packaged with arguments";
 /// as reporting the absence. The metadata is the completed baseline tile prepare() reads
 /// before the comparison; the tile is not what these cases are about, and
 /// TestGfx950AttentionDenseDispatch.cpp owns its refusal.
-KernelDefinition makeKernel(const std::vector<KernelArgument>& recorded)
+KernelDefinition makeKernel(const std::vector<KernelArgument>& recorded, bool alibi)
 {
     KernelDefinition kernel;
     kernel.kernelId
@@ -230,18 +241,19 @@ KernelDefinition makeKernel(const std::vector<KernelArgument>& recorded)
         {std::string("head_size"), HEAD_SIZE},
         {std::string("block_m"), int64_t{256}},
         {std::string("block_n"), int64_t{64}},
+        {std::string("use_alibi"), int64_t{alibi ? 1 : 0}},
     };
     return kernel;
 }
 
 /// Runs the pack's prepare() over a descriptor recording @p recorded and returns the
 /// message of whatever it throws. Empty means it returned a prepared dispatch, which no
-/// case expects.
-std::string prepareFailure(const std::vector<KernelArgument>& recorded)
+/// case expects. @p alibi makes both the graph and the candidate ALiBi ones.
+std::string prepareFailure(const std::vector<KernelArgument>& recorded, bool alibi = false)
 {
     registerNativeIngestorSymbols();
 
-    auto builder = buildAcceptedSdpaGraph();
+    auto builder = buildAcceptedSdpaGraph(alibi);
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 
@@ -270,7 +282,7 @@ std::string prepareFailure(const std::vector<KernelArgument>& recorded)
 
     try
     {
-        handler->prepare(context, *bound, makeKernel(recorded));
+        handler->prepare(context, *bound, makeKernel(recorded, alibi));
     }
     catch(const std::exception& error)
     {
@@ -281,9 +293,11 @@ std::string prepareFailure(const std::vector<KernelArgument>& recorded)
 
 /// Asserts the pack refuses @p recorded on signature grounds rather than on any of the
 /// other grounds prepare() can fail for.
-void expectRefused(const std::vector<KernelArgument>& recorded, const char* what)
+void expectRefused(const std::vector<KernelArgument>& recorded,
+                   const char* what,
+                   bool alibi = false)
 {
-    const std::string failure = prepareFailure(recorded);
+    const std::string failure = prepareFailure(recorded, alibi);
     ASSERT_FALSE(failure.empty()) << what << ": prepare() did not fail at all";
     EXPECT_NE(failure.find(MISMATCH_MARKER), std::string::npos)
         << what << ", but the failure was: " << failure;
@@ -423,6 +437,41 @@ TEST(TestGfx950AttentionDenseSignature, RefusesEachExchangeOfTwoLikeSlots)
             expectRefused(exchanged, what.c_str());
         }
     }
+}
+
+// =============================================================================
+// The ALiBi form
+// =============================================================================
+
+TEST(TestGfx950AttentionDenseSignature, AcceptsTheAlibiAbiThePythonDeclares)
+{
+    const std::string failure = prepareFailure(alibiAbi(), /*alibi=*/true);
+    ASSERT_FALSE(failure.empty()) << "the archive named by the fixture does not exist, so "
+                                     "prepare() cannot have succeeded";
+    EXPECT_EQ(failure.find(MISMATCH_MARKER), std::string::npos)
+        << "the pack refused the argument list the rocKE builder declares: " << failure;
+}
+
+TEST(TestGfx950AttentionDenseSignature, RefusesTheTenArgumentFormForAnAlibiCandidate)
+{
+    // An ALiBi candidate whose object records no slopes pointer: the launch would write
+    // one argument past the end of its kernarg segment.
+    expectRefused(pythonAbi(), "an ALiBi variant takes the slopes pointer", /*alibi=*/true);
+}
+
+TEST(TestGfx950AttentionDenseSignature, RefusesTheAlibiFormForAPlainCandidate)
+{
+    // The kernel would read an unwritten slot as the slopes pointer.
+    expectRefused(alibiAbi(), "a plain variant takes no slopes pointer");
+}
+
+TEST(TestGfx950AttentionDenseSignature, RefusesTheSlopesPointerUnderAnotherName)
+{
+    // The one slot an ALiBi variant adds is told apart from any other trailing pointer by
+    // its name alone.
+    auto renamed = alibiAbi();
+    renamed.back().name = "additive_bias_ptr";
+    expectRefused(renamed, "the eleventh argument is alibi_slopes_ptr", /*alibi=*/true);
 }
 
 } // namespace hip_kernel_provider::kernel_ingestor_engine::testing

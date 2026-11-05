@@ -64,6 +64,25 @@ TEST(TestIngestorDispatchAliases, ASupersededContractKeepsItsOwnHandler)
                            << " resolves to the current contract's handler";
 }
 
+// Saving requires the saved name to resolve to the handler that saved the plan, and the
+// current handler saves ALiBi plans, so the ALiBi name must resolve to it (not to v1's).
+TEST(TestIngestorDispatchAliases, TheAlibiContractResolvesToTheCurrentHandler)
+{
+    registerNativeIngestorSymbols();
+
+    const auto* current
+        = DispatchRegistry<Handle>::tryResolve("hipkernel.gfx950_attention_dense.dispatch");
+    const auto* v1 = DispatchRegistry<Handle>::tryResolve(
+        std::string(GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V1));
+    const auto* alibi = DispatchRegistry<Handle>::tryResolve(
+        std::string(GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_ALIBI_V1));
+
+    ASSERT_NE(alibi, nullptr) << GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_ALIBI_V1
+                              << " is not registered";
+    EXPECT_EQ(alibi, current);
+    EXPECT_NE(alibi, v1);
+}
+
 } // namespace
 } // namespace hip_kernel_provider::kernel_ingestor_engine
 

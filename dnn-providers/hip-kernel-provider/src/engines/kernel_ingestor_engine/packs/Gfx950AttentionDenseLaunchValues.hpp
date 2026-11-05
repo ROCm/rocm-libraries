@@ -41,6 +41,9 @@ struct AttentionDenseBinding
     int64_t causal = 0;
     int64_t slidingWindow = 0;
     float scale = 0.0F;
+    /// ALiBi with hipDNN's slopes (the graph's alibi_mask). The kernel computes the slopes
+    /// from num_query_heads, so ALiBi binds no tensor.
+    bool alibi = false;
 };
 
 /// The graph facts the matcher and prepare() both need, derived once from the tensors.
@@ -67,6 +70,12 @@ inline constexpr std::string_view GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V1
 inline constexpr std::string_view GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V2
     = "hipkernel.gfx950_attention_dense.dispatch.v2";
 
+/// The ALiBi contract: v2's values, and the launch also passes a null alibi_slopes_ptr
+/// after the head counts (11 kernel arguments), for use_alibi kernels. Named rather than
+/// numbered, so it does not take the next version of the plain contract.
+inline constexpr std::string_view GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_ALIBI_V1
+    = "hipkernel.gfx950_attention_dense.dispatch.alibi.v1";
+
 inline constexpr std::string_view GFX950_ATTENTION_DENSE_Q_UID_VALUE = "q.uid";
 inline constexpr std::string_view GFX950_ATTENTION_DENSE_K_UID_VALUE = "k.uid";
 inline constexpr std::string_view GFX950_ATTENTION_DENSE_V_UID_VALUE = "v.uid";
@@ -87,8 +96,8 @@ inline constexpr std::string_view GFX950_ATTENTION_DENSE_STRIDE_LAYOUT_VALUE = "
 /// The one stride layout the kernel supports. prepare() refuses every other layout.
 inline constexpr std::string_view GFX950_ATTENTION_DENSE_BSHD_LAYOUT = "bshd";
 
-/// The values of the `hipkernel.gfx950_attention_dense.dispatch.v1` and `.v2` contracts,
-/// which share one value set. `scale` is stored as a double, which holds every float
+/// The values of the `hipkernel.gfx950_attention_dense.dispatch.v1`, `.v2` and `.alibi.v1`
+/// contracts, which share one value set. `scale` is stored as a double, which holds every float
 /// exactly. `data_type` is the DataType enumerator name.
 hipdnn_plugin_sdk::ingestor::MetadataValues gfx950AttentionDenseLaunchValues(
     const AttentionDenseBinding& binding, const AttentionDenseProblem& problem, int64_t blockM);
@@ -101,16 +110,17 @@ struct Gfx950AttentionDenseLaunchInputs
     int64_t blockM = 0;
 };
 
-/// Reads the values of the `hipkernel.gfx950_attention_dense.dispatch.v1` or `.v2`
-/// contract (one value set; the versions differ only in the kernel arguments the launch
-/// passes). `batch`, `seqlen_q` and `seqlen_kv` must be in [1, INT32_MAX], because the kernel takes
+/// Reads the values of the `hipkernel.gfx950_attention_dense.dispatch.v1`, `.v2` or
+/// `.alibi.v1` contract (one value set; the contracts differ only in the kernel arguments
+/// the launch passes). The binding's `alibi` is true for `.alibi.v1` only. `batch`, `seqlen_q` and `seqlen_kv` must be in [1, INT32_MAX], because the kernel takes
 /// them as 32-bit integers. The head counts and `head_size` must be in [1, INT32_MAX].
 /// `block_m` must be a tile the kernel is built with. `scale` must convert to a float
 /// and back without change. `data_type` must be a type the kernel is built for, and
 /// `stride_layout` must be `bshd`.
 ///
-/// @throws HipdnnPluginException with a load refusal when the dispatch name is neither
-///         contract, or when a value is missing, extra, of another type or out of range.
+/// @throws HipdnnPluginException with a load refusal when the dispatch name is none of
+///         these contracts, or when a value is missing, extra, of another type or out of
+///         range.
 Gfx950AttentionDenseLaunchInputs readGfx950AttentionDenseLaunchInputs(
     const hipdnn_plugin_sdk::ingestor::SavedLaunchInputs& inputs);
 

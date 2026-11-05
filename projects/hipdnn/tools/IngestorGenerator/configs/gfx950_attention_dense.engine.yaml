@@ -60,6 +60,9 @@ kmd_fields:
 - name: block_n
   type: int
   default_value: 64
+- name: use_alibi
+  type: int
+  default_value: 0
 specialization:
   metadata_fields:
   - dtype
@@ -74,6 +77,7 @@ specialization:
   - seqlen_kv
   - block_m
   - block_n
+  - use_alibi
   matcher_only_fields: []
   vocabulary:
     dtype:
@@ -104,6 +108,8 @@ specialization:
       field: block_m
     block_n:
       field: block_n
+    use_alibi:
+      field: use_alibi
 kernel_source_kind: rocke
 workspace_policy: none
 
@@ -162,8 +168,18 @@ enumerate:
         - [128, 128, 128, 8]
     - fields: [dtype]
       values: [bf16, fp16]
-    - fields: [mask_type]
-      values: [TOP_LEFT_CAUSAL, NO_MASK]
+    # hipDNN defines ALiBi only with a top-left causal mask, so no other mask gets an
+    # ALiBi kernel.
+    - fields: [mask_type, use_alibi]
+      values:
+        - [TOP_LEFT_CAUSAL, false]
+        - [NO_MASK, false]
+        - [TOP_LEFT_CAUSAL, true]
+  # ALiBi kernels ship at one tile, 128/64: one per head configuration and dtype (66).
+  # 128/64 rather than the default 256/64 because kernel_match needs Sq % block_m == 0,
+  # and every Sq a 256 tile serves a 128 tile serves too, plus the odd multiples of 128.
+  feature_fields:
+    use_alibi: {name_token: _alibi, select: {block_m: 128, block_n: 64}}
   sweep_level: production
   space: slice
   # Spec fields the sweep may vary away from the candidate's own default spec.
@@ -177,15 +193,15 @@ enumerate:
   # lds_k_row_pad too: `space: slice` leaves it at its default while `space: full`
   # varies it. tests/test_registry_regeneration.py asserts the defaults (g1) and
   # diffs the enumeration against the shipped catalog on the shipped fields (g3).
-  spec_fields: [dtype, head_size, num_query_heads, num_kv_heads, causal, batch, seqlen_q, seqlen_kv, sliding_window, ragged, varlen, paged, persistent, block_m, block_n, waves_per_eu, lds_k_group_pad, lds_v_row_pad, lds_k_row_pad, lazy_rescale, wide_lds_dma, interleave, persist_decode, nonpersist_decode, num_persistent, block_size, num_kv_blocks, use_sinks]
+  spec_fields: [dtype, head_size, num_query_heads, num_kv_heads, causal, batch, seqlen_q, seqlen_kv, sliding_window, ragged, varlen, paged, persistent, block_m, block_n, waves_per_eu, lds_k_group_pad, lds_v_row_pad, lds_k_row_pad, lazy_rescale, wide_lds_dma, interleave, persist_decode, nonpersist_decode, num_persistent, block_size, num_kv_blocks, use_sinks, use_alibi]
   # Frozen build cost: a registry that grows past this fails here, not at pack time.
-  max_kernels: 840
+  max_kernels: 906
 
 # How the variant space is reduced; copied verbatim into the generated config.
 # Feature fields define a cell; performance knobs are the tuning arms, in priority order.
 reduction:
   fields:
-    feature: [dtype, head_size, num_query_heads, num_kv_heads, causal, sliding_window, ragged, batch, seqlen_q, seqlen_kv]
+    feature: [dtype, head_size, num_query_heads, num_kv_heads, causal, sliding_window, ragged, batch, seqlen_q, seqlen_kv, use_alibi]
     performance:
       - {name: block_m, divides: seqlen_q}
       - {name: block_n, divides: seqlen_kv}
@@ -223,6 +239,9 @@ ground_truth:
     mask_type:
       TOP_LEFT_CAUSAL: {/nodes/sdpa_node/attributes/causal_mask: true}
       NO_MASK: {/nodes/sdpa_node/attributes/causal_mask: false}
+    use_alibi:
+      false: {/nodes/sdpa_node/attributes/alibi_mask: false}
+      true: {/nodes/sdpa_node/attributes/alibi_mask: true}
 
 # Launch-surface audit (`tools/launch_surface.py --check <this file>`).
 launch_surface:
@@ -249,11 +268,12 @@ launch_surface:
   - name: matcher
     python_source: kernels/gfx950/attention_dense.py:build_attention_dense
     cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/Gfx950AttentionDenseNative.cpp
-    kmd_fields: [dtype, head_size, num_query_heads, num_kv_heads, causal, sliding_window, ragged, block_m, block_n]
+    kmd_fields: [dtype, head_size, num_query_heads, num_kv_heads, causal, sliding_window, ragged, block_m, block_n, use_alibi]
     guard: >
       kernelMatches() returns false (no panic) if dtype, head_size,
-      num_query_heads, num_kv_heads, causal or sliding_window disagrees with
-      the graph, the candidate's tile is illegal, or the candidate is ragged
+      num_query_heads, num_kv_heads, causal, sliding_window or use_alibi
+      disagrees with the graph (alibi_mask asks for use_alibi=1), the
+      candidate's tile is illegal, or the candidate is ragged
       (ragged != 0). The metadata's batch, seqlen_q and seqlen_kv are build
       inputs of a shape-generic kernel and are never compared; the graph's
       shape enters only through seqlen_q % block_m == 0 and
@@ -264,12 +284,14 @@ launch_surface:
   - name: kernargs
     python_source: kernels/gfx950/attention_dense.py:build_attention_dense
     cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/Gfx950AttentionDenseNative.cpp
-    kmd_fields: [ragged, seqlen_q, num_query_heads, batch]
+    kmd_fields: [ragged, seqlen_q, num_query_heads, batch, use_alibi]
     guard: >
-      attentionDenseKernelSignature() always returns the 10-arg form
+      attentionDenseKernelSignature() returns the 10-arg form
       (q,k,v,o,scale,batch,seqlen_q,seqlen_kv,num_query_heads,num_kv_heads):
       the runtime-shape grid body reads the shape and both head counts as
-      kernargs. Every variant is non-persistent and on the runtime-shape path,
+      kernargs. A use_alibi=1 candidate takes the 11-arg form, alibi_slopes_ptr
+      last, which the launch passes as null (hipDNN's slopes, computed in the
+      kernel from num_query_heads). Every variant is non-persistent and on the runtime-shape path,
       which enumerate.pin and the aligned catalog keep true. use_sinks=False;
       no sink_ptr slot. Validated at prepare() time by
       buildIngestorKernelCode(..., expectedSignature).

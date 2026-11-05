@@ -781,7 +781,7 @@ There is no packaging `--profile`, CMake `PROFILES` or external root manifest.
 |---|---|
 | `configs/scale_add.yaml` | Single-pack engine, like the shipped `conv_fwd`: one pack, one operation, its `graph_match` both admits the node type and validates shape |
 | `configs/binary_ops.yaml` | Multi-pack engine, like the shipped `pointwise`: one pack per operation sharing one KMD/UED/UHD/UDD, each naming its own operation-scoped UMD via `discriminator` |
-| `configs/gfx950_attention_dense.yaml` | The authored selection for the shipped `hipkernel:Gfx950AttentionDense` descriptors: 840 rocKE kernels in the `variants` form, a builder lowered by `hkp_pack` at build time |
+| `configs/gfx950_attention_dense.yaml` | The authored selection for the shipped `hipkernel:Gfx950AttentionDense` descriptors: 906 rocKE kernels in the `variants` form, a builder lowered by `hkp_pack` at build time |
 | `configs/gfx950_attention_dense.engine.yaml` | That engine's manifest: the registry space the selection is drawn from, its `reduction:` classification, ground-truth graph template and `launch_surface:` audit |
 | `configs/gfx950_attention_unified_2d.yaml` | The authored selection for the shipped `hipkernel:Gfx950AttentionUnified2D` descriptors: rocKE prefill kernels per head/dtype/mask cell, served through a host-derived identity paged-KV block table. Kernel and geometry counts: the bundle README, `rocKE/gfx950_attention_unified_2d/README.md` |
 | `configs/gfx950_attention_unified_2d.engine.yaml` | That engine's manifest: the `unified_tuning` geometries, the batch capacity (`enumerate.fixed.batch` -> the spec's `num_seqs`, which bounds the sequences one launch resolves at `2^ceil(log2(num_seqs+1)) - 1`), `mask_type` as the KMD's mask field, and the `engine.slug` override |
