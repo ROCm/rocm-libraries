@@ -115,11 +115,12 @@ requires = ["setuptools"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
-include = ["tensilelite*", "Tensile"]
+include = ["tensilelite*"]
 exclude = ["tensilelite.Tests.unit.source_only*"]
 
 [tool.setuptools.exclude-package-data]
 "*" = ["Tests/unit/source_only/*", "source_only/*"]
+
 [tool.uv]
 # Use the user's existing interpreter; never download a uv-managed Python.
 # rocisa is a HIP/nanobind native ext, so the chosen Python must have its dev

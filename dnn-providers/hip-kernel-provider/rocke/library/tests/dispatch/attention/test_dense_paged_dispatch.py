@@ -99,8 +99,8 @@ def test_paged_outside_the_cohort_is_refused(arch, spec_id, overrides, error):
 @pytest.mark.parametrize("arch,spec_id", _CASES)
 def test_paged_ragged_query_tail_follows_the_contiguous_kernel(arch, spec_id):
     req = _request(arch, seqlen_q=1088, seqlen_k=1088, sliding_window=0)
-    if arch == "gfx942":  # no ragged body on gfx942
-        with pytest.raises(ValueError, match="ragged"):
+    if arch == "gfx942":  # no partial-tile (ragged) body on gfx942
+        with pytest.raises(ValueError, match="seqlen_q 1088 is not a multiple of"):
             dispatch_attention(_pinned(req, spec_id))
     else:
         spec = dispatch_attention(_pinned(req, spec_id)).spec.kernel_spec
