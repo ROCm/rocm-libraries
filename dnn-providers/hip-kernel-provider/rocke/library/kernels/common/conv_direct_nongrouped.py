@@ -34,17 +34,51 @@ Per workgroup, with M = output channels and N = output pixels::
 LDS layouts
 -----------
 ``X`` is stored ``[pos][c]`` with ``pos = ih_lds * LDS_IN_W + iw_lds`` and a
-channel stride of ``ck + lds_pad``.  The pad is what keeps the 32 lanes of a
+channel stride of ``ck + lds_pad`` elements.  The pad is what keeps the 32 lanes of a
 ``ds_read_b128`` on distinct bank quads: with ``ck=16, pad=8`` the stride is
 24 halves = 12 dwords, so lanes 0..7 land on bank quads 0,12,24,4,16,28,8,20 --
 eight distinct quads covering the full 128-byte LDS service width.
 
+fp32 storage (``dtype`` ``"fp32"`` / ``"tf32"``) keeps the same rule in bytes,
+not elements: the pixel stride must be an *odd* number of 16-byte quads, so the
+pad is 16 bytes = 4 floats (``ck + 4``; ``ck + 8`` floats is an even quad count
+and 2-way conflicts). Re-derived for gfx950's 64 banks x 4 B, where a
+``ds_read_b128`` serves 16 lanes per phase against a 256-byte bank window, with
+:func:`rocke.analysis.lds.predict_lds_conflicts` on the B-fragment read (lane
+address ``lane_lo * stride * c_stride + lane_hi * FRAG``, both 16-byte halves of
+an 8-float fragment): pad 4 is conflict-free for the 32-wide atoms at stride 1,
+and 2-way at stride 2 -- the floor every pad hits there, as for 16-bit (an even
+multiplier of the pixel stride). The 16-wide atoms are 2-way at any pad with
+fp32: their ``lane_hi`` lanes sit 32 bytes over and share a phase with the
+``lane_hi = 0`` lanes. gfx942 predicts the same multiplicities. The pad is a
+spec field (``lds_pad``, in elements); :func:`nongrouped_knobs` sweeps 4 for
+fp32 storage, and the fp32 kernel name carries any other pad.
+
 ``W`` is stored **pre-swizzled into MFMA fragment order**: fragment slot
 ``((tap * M_TILES + m_tile) * KATOMS + k_atom) * 64 + lane`` holds exactly the
-``FRAG`` halves that ``lane`` feeds to the MFMA.  Both the staging store and the
+``FRAG`` elements that ``lane`` feeds to the MFMA.  Both the staging store and the
 consuming read are then linear in ``lane``, so no padding is needed and neither
 side can bank-conflict.  The staging thread's global read is ``FRAG`` contiguous
 channels of one ``k_out`` row, which is what the KRSC layout makes contiguous.
+An 8-float fragment is 32 bytes -- two ``ds_read_b128`` at a 32-byte lane stride,
+which is 2-way conflicted -- so with fp32 storage the array is split into
+``FRAG / 4`` planes of 16 bytes per slot (plane ``h`` holds floats ``4h..4h+3``
+of every slot), and each ``ds_read_b128`` / ``ds_write_b128`` is again linear in
+``lane`` at a 16-byte stride. 16-bit fragments are at most 16 bytes: one plane,
+the layout above.
+
+fp32 storage and TF32
+---------------------
+``problem.dtype`` ``"fp32"`` / ``"tf32"`` stores fp32 tensors (twice the LDS
+bytes and global traffic of the 16-bit kernels for the same tile) and builds the
+same K-contiguous ``FRAG``-element fragments. Each logical ``tile x tile`` atom
+is then issued by :func:`kernels.common.conv_direct_grouped._mma_f32_logical`:
+``"tf32"`` feeds TF32 operands (gfx950: one emulated 16x16x32 / 32x32x16 xf32
+atom per 8-element fragment, three bf16 MFMAs; gfx942: native 16x16x8 / 32x32x4
+xf32 atoms, 2 elements each), ``"fp32"`` the exact fp32 atoms (16x16x4 / 32x32x2).
+A 4-element fragment (the 32x32x8 / 16x16x16 atoms) on gfx950 TF32 is
+zero-padded to the 8-element atom -- correct but half wasted, so the sweep uses
+the 8-element (wide-K) atoms for fp32 storage on both arches.
 
 AOT kernel arguments
 --------------------
@@ -99,14 +133,42 @@ from kernels.common.conv_direct_grouped import (
     DirectConvProblem,
     _buf_load_vN,
     _buf_store_vN,
+    _elem_bytes,
+    _f32_mma_plan,
     _io_type,
+    _is_f32_storage,
+    _load_elems,
     _mfma,
+    _mma_f32_logical,
+    _store_from_f32,
     _trunc_f32,
     emit_direct_params,
 )
 
 # Global load width for the activation staging path, in halves (dwordx4).
 _X_LOAD_VEC = 8
+# Bytes of one dwordx4 global access / ds_read_b128: the staging vector and the
+# LDS alignment unit, whatever the element width.
+_VEC_BYTES = 16
+_NONGROUPED_DTYPES = ("fp16", "bf16", "fp32", "tf32")
+
+
+def _x_load_vec(dtype: str) -> int:
+    """Elements per activation staging load (one dwordx4): 8 halves, 4 floats."""
+    return _VEC_BYTES // _elem_bytes(dtype)
+
+
+def default_lds_pad(dtype: str) -> int:
+    """The bank-conflict-free activation pad for ``dtype``, in elements (16 bytes).
+
+    See the module docstring: 8 halves for fp16 / bf16, 4 floats for fp32 / tf32.
+    """
+    return _VEC_BYTES // _elem_bytes(dtype)
+
+
+# Kernel-name flag per dtype. fp16 has none (the historical names); fp32 storage
+# needs one or its binaries would collide with the fp16 names.
+_DTYPE_FLAG = {"fp16": "", "bf16": "bf16", "fp32": "fp32", "tf32": "tf32"}
 
 # Byte offset every masked-out buffer access is redirected to (see
 # build_direct_conv_nongrouped): the staging loads that fall outside the image
@@ -123,8 +185,8 @@ _I32_MAX = (1 << 31) - 1
 # Atom name -> (tile, K, frag). All supported atoms are square (M == N == tile),
 # which is what lets one code path serve them: a lane's operand row/column is
 # ``lane % tile`` and its K slice is ``(lane // tile) * frag``. ``frag`` is the
-# per-lane operand width in halves, and ``tile * tile / 64`` accumulator floats
-# per lane follow from the shape.
+# per-lane operand width in elements (halves, or floats with fp32 storage), and
+# ``tile * tile / 64`` accumulator floats per lane follow from the shape.
 #
 # The 16-wide atoms exist for output widths that are not a multiple of 32: with
 # a 32-wide pixel tile the last tile in each row computes columns past ``Wo``,
@@ -158,7 +220,10 @@ class DirectNongroupedConvSpec:
 
     atom: str = "32x32x16"
     wave_size: int = 64
-    lds_pad: int = 8  # extra halves on the LDS activation channel stride
+    # Extra elements on the LDS activation channel stride. 8 is the conflict-free
+    # pad for 16-bit dtypes; fp32 storage wants 4 (default_lds_pad), which
+    # nongrouped_knobs sweeps.
+    lds_pad: int = 8
 
     # Grid swizzle. The launch grid is flattened to 1-D and remapped so that the
     # workgroups a single XCD receives share operands. ``swizzle_wgm`` is the
@@ -215,8 +280,23 @@ class DirectNongroupedConvSpec:
 
     @property
     def frag(self) -> int:
-        """Halves per lane in an A/B operand fragment."""
+        """Elements per lane in an A/B operand fragment."""
         return _ATOMS[self.atom][2]
+
+    @property
+    def elem_bytes(self) -> int:
+        """Bytes per stored element: 2 for fp16 / bf16, 4 for fp32 / tf32."""
+        return _elem_bytes(self.problem.dtype)
+
+    @property
+    def x_load_vec(self) -> int:
+        """Elements per activation staging load (one dwordx4)."""
+        return _x_load_vec(self.problem.dtype)
+
+    @property
+    def w_planes(self) -> int:
+        """LDS planes of the weight array: one per 16 bytes of a fragment."""
+        return max(1, self.frag * self.elem_bytes // _VEC_BYTES)
 
     @property
     def acc_per_lane(self) -> int:
@@ -280,23 +360,25 @@ class DirectNongroupedConvSpec:
 
     @property
     def c_stride(self) -> int:
-        """LDS channel stride of the staged activation tile, in halves."""
+        """LDS channel stride of the staged activation tile, in elements."""
         return self.ck + self.lds_pad
 
     @property
     def lds_x_halves(self) -> int:
+        """Elements of the staged activation tile (halves for 16-bit dtypes)."""
         return self.lds_in_h * self.lds_in_w * self.c_stride
 
     @property
     def lds_w_halves(self) -> int:
+        """Elements of the staged weight tile (halves for 16-bit dtypes)."""
         p = self.problem
         return self.tile_k * p.KH * p.KW * self.ck
 
     @property
     def lds_bytes(self) -> int:
         # + one scratch fragment per array (see build_direct_conv_nongrouped).
-        one = self.lds_x_halves + _X_LOAD_VEC + self.lds_w_halves + self.frag
-        return 2 * one * (2 if self.double_buffer else 1)
+        one = self.lds_x_halves + self.x_load_vec + self.lds_w_halves + self.frag
+        return self.elem_bytes * one * (2 if self.double_buffer else 1)
 
     @property
     def acc_vgprs(self) -> int:
@@ -345,13 +427,32 @@ class DirectNongroupedConvSpec:
             f"we{self.waves_per_eu}" if self.waves_per_eu is not None else "",
             f"sc{self.split_c}" if self.split_c > 1 else "",
             f"grp{self.group_merge}" if self.grouped else "",
-            "bf16" if p.dtype == "bf16" else "",
+            # fp32 storage only: a pad other than the conflict-free default.
+            # (16-bit names never carried the pad; they keep their names.)
+            (
+                f"p{self.lds_pad}"
+                if p.dtype in ("fp32", "tf32")
+                and self.lds_pad != default_lds_pad(p.dtype)
+                else ""
+            ),
+            _DTYPE_FLAG.get(p.dtype, p.dtype),
         )
 
     def validate(self) -> None:
         p = self.problem
-        if p.dtype not in ("fp16", "bf16"):
-            raise ValueError(f"DirectNongroupedConvSpec: unsupported dtype {p.dtype!r}")
+        if p.dtype not in _NONGROUPED_DTYPES:
+            raise ValueError(
+                f"DirectNongroupedConvSpec: unsupported dtype {p.dtype!r} "
+                f"(expected one of {list(_NONGROUPED_DTYPES)})"
+            )
+        if _is_f32_storage(p.dtype) and (self.grouped or self.split_c != 1):
+            # The grouped-halo and split-C variants stage and reduce 16-bit
+            # data only; fp32 storage is wired through the plain kernel.
+            raise ValueError(
+                f"DirectNongroupedConvSpec: {p.dtype} storage supports the plain "
+                f"kernel only (grouped=False, split_c=1); got grouped="
+                f"{self.grouped}, split_c={self.split_c}"
+            )
         if not self.grouped and p.groups != 1:
             raise ValueError(
                 f"DirectNongroupedConvSpec is the groups==1 family (got groups={p.groups}); "
@@ -410,8 +511,10 @@ class DirectNongroupedConvSpec:
             )
         if self.ck % self.atom_k != 0:
             raise ValueError(f"ck {self.ck} not divisible by atom K {self.atom_k}")
-        if self.ck % _X_LOAD_VEC != 0:
-            raise ValueError(f"ck {self.ck} not divisible by {_X_LOAD_VEC}")
+        # Elements per dwordx4: 8 halves, 4 floats.
+        xv = self.x_load_vec
+        if self.ck % xv != 0:
+            raise ValueError(f"ck {self.ck} not divisible by {xv}")
         if self.merged_c % self.ck != 0:
             raise ValueError(f"C {self.merged_c} not divisible by ck {self.ck}")
         if self.merged_k % self.atom_tile != 0:
@@ -419,8 +522,8 @@ class DirectNongroupedConvSpec:
                 f"K {self.merged_k} must be a multiple of {self.atom_tile} "
                 f"(got {self.merged_k})"
             )
-        if self.merged_c % _X_LOAD_VEC != 0:
-            raise ValueError(f"C {self.merged_c} must be a multiple of {_X_LOAD_VEC}")
+        if self.merged_c % xv != 0:
+            raise ValueError(f"C {self.merged_c} must be a multiple of {xv}")
         if self.grouped and p.cpg % self.w_vec != 0:
             raise ValueError(
                 f"cpg {p.cpg} must be a multiple of the {self.w_vec}-channel "
@@ -428,13 +531,14 @@ class DirectNongroupedConvSpec:
             )
         if self.threads_per_block > 1024:
             raise ValueError(f"threads_per_block {self.threads_per_block} > 1024")
-        if self.lds_pad < 0 or self.lds_pad % 8 != 0:
-            # A negative pad shrinks the pixel stride below the ck halves each
-            # pixel stages, so neighbouring pixels overlap in LDS. The vec8 LDS
-            # store/load is emitted with align 16, so the pixel stride
-            # (ck + lds_pad halves) must be a multiple of 8 halves.
+        if self.lds_pad < 0 or self.lds_pad % xv != 0:
+            # A negative pad shrinks the pixel stride below the ck elements each
+            # pixel stages, so neighbouring pixels overlap in LDS. The 16-byte
+            # LDS store/load is emitted with align 16, so the pixel stride
+            # (ck + lds_pad elements) must be a multiple of 16 bytes: 8 halves,
+            # 4 floats.
             raise ValueError(
-                f"lds_pad must be a non-negative multiple of 8 to keep "
+                f"lds_pad must be a non-negative multiple of {xv} to keep "
                 f"ds_read_b128 aligned (got {self.lds_pad})"
             )
         if self.swizzle_wgm < 1:
@@ -455,9 +559,10 @@ class DirectNongroupedConvSpec:
                 f"flattened grid of {self.grid()[0]} workgroups exceeds "
                 f"{_I32_MAX}: grow the tile or split the batch"
             )
-        a_bytes = 2 * p.N * p.H * p.W * p.total_c
-        b_bytes = 2 * p.total_k * p.KH * p.KW * p.cpg
-        d_bytes = 2 * p.N * p.Ho * p.Wo * p.total_k
+        eb = self.elem_bytes
+        a_bytes = eb * p.N * p.H * p.W * p.total_c
+        b_bytes = eb * p.total_k * p.KH * p.KW * p.cpg
+        d_bytes = eb * p.N * p.Ho * p.Wo * p.total_k
         if max(a_bytes, b_bytes, d_bytes) > _OOB_BASE:
             # Masked staging loads and epilogue stores go to _OOB_BASE and rely
             # on it being past num_records; a larger tensor would hand the
@@ -466,7 +571,10 @@ class DirectNongroupedConvSpec:
                 f"tensors must fit below the {_OOB_BASE:#x}-byte masked-access "
                 f"offset (A {a_bytes} B, B {b_bytes} B, D {d_bytes} B)"
             )
-        if _OOB_BASE + 2 * (p.total_c + self.ck) > _I32_MAX:
+        # fp32 storage also reads a fragment as dwordx4 pieces up to 16 bytes
+        # past the chunk offset (_load_elems); 16-bit loads are one access.
+        tail = _VEC_BYTES if eb == 4 else 0
+        if _OOB_BASE + eb * (p.total_c + self.ck) + tail > _I32_MAX:
             # The last prefetch runs one chunk (two when double-buffered) past C.
             raise ValueError(
                 f"C {p.cpg} too large: the masked-load offset plus the channel "
@@ -514,12 +622,22 @@ def is_valid_nongrouped_spec(
         p = spec.problem
         if p.stride not in (1, 2):
             return False, f"stride {p.stride} is not supported (expected 1 or 2)"
-        ab = "bf16" if p.dtype == "bf16" else "f16"
         t, k = spec.atom_tile, spec.atom_k
-        if not target.mma.has_shape(
-            a_dtype=ab, b_dtype=ab, c_dtype="fp32", m=t, n=t, k=k
-        ):
-            return False, f"missing mfma_f32_{spec.atom}_{ab} on {arch}"
+        if _is_f32_storage(p.dtype):
+            # The logical atom is issued on the arch's fp32 / TF32 catalog atoms
+            # (split, or zero-padded) -- see _mma_f32_logical.
+            if _f32_mma_plan(arch, p.dtype, t, spec.frag) is None:
+                return (
+                    False,
+                    f"no {t}x{t} {p.dtype} MMA atom on {arch} for the "
+                    f"{spec.atom} fragment",
+                )
+        else:
+            ab = "bf16" if p.dtype == "bf16" else "f16"
+            if not target.mma.has_shape(
+                a_dtype=ab, b_dtype=ab, c_dtype="fp32", m=t, n=t, k=k
+            ):
+                return False, f"missing mfma_f32_{spec.atom}_{ab} on {arch}"
         if spec.wave_size != target.wave_size:
             return (
                 False,
@@ -555,26 +673,49 @@ _SIMDS_PER_CU = 4
 _REG_BUDGET_FILL = 0.8
 
 
-def nongrouped_live_regs(spec: DirectNongroupedConvSpec) -> int:
+def _is_emulated_tf32(spec: DirectNongroupedConvSpec, arch: "str | None") -> bool:
+    """True when ``spec`` issues TF32 through the BF16x3 emulation on ``arch``."""
+    if arch is None or spec.problem.dtype != "tf32":
+        return False
+    try:
+        plan = _f32_mma_plan(arch, "tf32", spec.atom_tile, spec.frag)
+    except KeyError:
+        return False
+    return plan is not None and not plan[0].is_native
+
+
+def nongrouped_live_regs(
+    spec: DirectNongroupedConvSpec, arch: "str | None" = None
+) -> int:
     """Estimated registers per lane live across the channel loop.
 
     The accumulators, the prefetched staging loads carried to the next
     iteration, and the operand fragments of one ``(k_atom, s)`` step: the
     activation fragments of every input row of the wave window (all ``KH`` tap
     rows reuse them) and one weight fragment per channel tile.
+
+    Registers follow bytes: a fragment of ``frag`` elements costs ``frag / 2``
+    registers with 16-bit storage and ``frag`` with fp32 storage; a staging load
+    is one dwordx4 (4 registers) either way. With ``arch`` given, TF32 on an
+    emulating arch (gfx950: BF16x3) adds the split of every live operand
+    fragment -- a bf16 "big" and a bf16 "small" half, together as many
+    registers as the fp32 fragment -- since the backend splits each fragment
+    once and reuses it across the taps and tiles that share it.
     """
     p = spec.problem
     threads = spec.threads_per_block
-    x_vecs = spec.lds_in_h * spec.lds_in_w * (spec.ck // _X_LOAD_VEC)
+    xv = spec.x_load_vec
+    x_vecs = spec.lds_in_h * spec.lds_in_w * (spec.ck // xv)
     w_slots = p.KH * p.KW * spec.m_tiles_total * spec.k_atoms * spec.wave_size
     x_passes = -(-x_vecs // threads)
     w_passes = -(-w_slots // threads)
-    frag_regs = spec.frag // 2
-    prefetch = x_passes * (_X_LOAD_VEC // 2) + w_passes * frag_regs
+    frag_regs = spec.frag * spec.elem_bytes // 4
+    prefetch = x_passes * (xv * spec.elem_bytes // 4) + w_passes * frag_regs
     in_rows = (spec.rows_per_wave - 1) * p.stride + (p.KH - 1) * p.dil_h + 1
     b_frags = in_rows * spec.n_col_blocks * frag_regs
     a_frags = spec.m_tiles_per_wave * frag_regs
-    return spec.acc_vgprs + prefetch + b_frags + a_frags
+    split = b_frags + a_frags if _is_emulated_tf32(spec, arch) else 0
+    return spec.acc_vgprs + prefetch + b_frags + a_frags + split
 
 
 def nongrouped_register_reason(
@@ -604,7 +745,7 @@ def nongrouped_register_reason(
         )
     waves = spec.threads_per_block // spec.wave_size
     budget = limits.vgprs // -(-waves // _SIMDS_PER_CU)
-    live = nongrouped_live_regs(spec)
+    live = nongrouped_live_regs(spec, arch)
     if live > _REG_BUDGET_FILL * budget:
         return (
             f"~{live} live registers per lane exceed {_REG_BUDGET_FILL:.0%} of the "
@@ -625,11 +766,21 @@ def nongrouped_register_reason(
 _SWEEP_TILE_H = (8, 16)
 _SWEEP_TILE_K = (32, 64, 128, 256)
 _SWEEP_CK = (16, 32, 64)
+# fp32 storage doubles the staged bytes: ck=64 mostly fails fits_lds (and what
+# fits leaves little room for tile_k), so the fp32 / tf32 grid stops at 32.
+_SWEEP_CK_F32 = (16, 32)
 _SWEEP_WAVES = ((2, 2), (1, 4), (2, 4), (4, 2), (1, 8))
 # Per MFMA tile size, the atoms to sweep in order of preference: the widest-K
 # atom the target has wins (fewer MFMAs per chunk), so gfx950 sweeps
 # 32x32x16 / 16x16x32 and gfx942 -- which has neither -- 32x32x8 / 16x16x16.
+# fp32 storage takes the first whose 8-element fragment the arch issues without
+# zero-padding: the wide-K atoms on both arches (gfx950 TF32: one emulated
+# xf32 atom; gfx942 TF32: four native xf32 atoms; fp32: the exact fp32 atoms).
 _SWEEP_ATOMS = (("32x32x16", "32x32x8"), ("16x16x32", "16x16x16"))
+
+
+def _sweep_ck(dtype: str) -> "tuple[int, ...]":
+    return _SWEEP_CK_F32 if _is_f32_storage(dtype) else _SWEEP_CK
 
 
 def _sweep_atoms(arch: str, dtype: str) -> "list[str]":
@@ -637,14 +788,20 @@ def _sweep_atoms(arch: str, dtype: str) -> "list[str]":
     from rocke.core.arch import ArchTarget
 
     target = ArchTarget.from_gfx(arch)
+    f32 = _is_f32_storage(dtype)
     ab = "bf16" if dtype == "bf16" else "f16"
     out = []
     for prefs in _SWEEP_ATOMS:
         for atom in prefs:
-            t, k, _ = _ATOMS[atom]
-            if target.mma.has_shape(
-                a_dtype=ab, b_dtype=ab, c_dtype="fp32", m=t, n=t, k=k
-            ):
+            t, k, frag = _ATOMS[atom]
+            if f32:
+                plan = _f32_mma_plan(arch, dtype, t, frag)
+                ok = plan is not None and plan[2] == 0
+            else:
+                ok = target.mma.has_shape(
+                    a_dtype=ab, b_dtype=ab, c_dtype="fp32", m=t, n=t, k=k
+                )
+            if ok:
                 out.append(atom)
                 break
     return out
@@ -682,9 +839,13 @@ def nongrouped_knobs(
     a cached binary serves any ``Wo`` and the run side picks the widths that fit
     the shape. Unvalidated: :func:`is_valid_nongrouped_spec` drops what a given
     problem or arch cannot run.
+
+    fp32 / tf32 knobs also set ``lds_pad`` to the 4-float conflict-free pad
+    (:func:`default_lds_pad`); 16-bit knobs leave it at the spec default.
     """
     import itertools
 
+    extra = {"lds_pad": default_lds_pad(dtype)} if _is_f32_storage(dtype) else {}
     for atom in _sweep_atoms(arch, dtype):
         at = _ATOMS[atom][0]
         widths = (
@@ -696,7 +857,7 @@ def nongrouped_knobs(
             for th, tk, ck, (wm, wn), wgm, ig, we in itertools.product(
                 _SWEEP_TILE_H,
                 _SWEEP_TILE_K,
-                _SWEEP_CK,
+                _sweep_ck(dtype),
                 _SWEEP_WAVES,
                 swizzle_wgm,
                 iglp,
@@ -713,6 +874,7 @@ def nongrouped_knobs(
                     swizzle_wgm=wgm,
                     iglp=ig,
                     waves_per_eu=we,
+                    **extra,
                 )
 
 
@@ -741,6 +903,9 @@ def nongrouped_split_knobs(
     one shape; without it the shape-independent AOT widths are produced.
     """
     import itertools
+
+    if _is_f32_storage(dtype):
+        return  # fp32 / tf32 storage runs the plain kernel only (see validate)
 
     for atom in _sweep_atoms(arch, dtype):
         at = _ATOMS[atom][0]
@@ -791,6 +956,9 @@ def grouped_knobs(
     """The swept ``grouped=True`` geometry, as spec kwargs (see
     :func:`nongrouped_knobs` for ``Wo``)."""
     import itertools
+
+    if _is_f32_storage(dtype):
+        return  # fp32 / tf32 storage runs the plain kernel only (see validate)
 
     for atom in _sweep_atoms(arch, dtype):
         at = _ATOMS[atom][0]
@@ -891,6 +1059,14 @@ def build_direct_conv_nongrouped(
     p = spec.problem
     io_type = _io_type(p.dtype)
     dtype = p.dtype
+    # fp32 storage ("fp32" / "tf32"): 4-byte elements, dwordx4-sized LDS and
+    # global pieces, and the logical atom issued by _mma_f32_logical. The
+    # 16-bit path below is emitted exactly as before.
+    F32S = _is_f32_storage(dtype)
+    EB = spec.elem_bytes
+    XV = spec.x_load_vec  # elements per staging load: 8 halves / 4 floats
+    WPL = spec.w_planes  # weight LDS planes (16 bytes of a fragment each)
+    WV = spec.frag // WPL  # elements per plane per slot
 
     KH, KW, S, PAD = p.KH, p.KW, p.stride, p.PAD
     DH, DW = p.dil_h, p.dil_w
@@ -914,12 +1090,15 @@ def build_direct_conv_nongrouped(
     LDS_IN_H, LDS_IN_W = spec.lds_in_h, spec.lds_in_w
 
     # Staging pass counts.
-    X_CV = CK // _X_LOAD_VEC  # channel vectors per staged pixel
+    X_CV = CK // XV  # channel vectors per staged pixel
     X_VECS = LDS_IN_H * LDS_IN_W * X_CV
     X_PASSES = (X_VECS + THREADS - 1) // THREADS
     W_SLOTS = N_TAPS * M_TILES * KATOMS * WAVE
     W_PASSES = (W_SLOTS + THREADS - 1) // THREADS
     W_VEC = spec.w_vec
+    # Weight plane stride (elements): plane h holds elements h*WV..h*WV+WV-1
+    # of every slot's fragment. One plane (the whole fragment) for 16-bit.
+    W_PLANE = W_SLOTS * WV
 
     b = IRBuilder(spec.kernel_name())
     b.kernel.attrs["max_workgroup_size"] = THREADS
@@ -957,7 +1136,7 @@ def build_direct_conv_nongrouped(
 
     c0 = b.const_i32(0)
     c1 = b.const_i32(1)
-    c_half = b.const_i32(2)
+    c_half = b.const_i32(EB)  # bytes per element
     # Predication for the staging loads is loop-invariant, so it is folded into
     # the *base* offset once, before the channel loop, rather than re-selected
     # every iteration. validate() guarantees ``_OOB_BASE`` is at or past the
@@ -977,7 +1156,7 @@ def build_direct_conv_nongrouped(
     # own slots past the end of the tile. Those slots write into a scratch tail
     # instead of running off the array (and over the neighbouring allocation).
     DB = spec.double_buffer
-    x_stage = spec.lds_x_halves + _X_LOAD_VEC
+    x_stage = spec.lds_x_halves + XV
     w_stage = spec.lds_w_halves + FRAG
     x_dump = spec.lds_x_halves
     w_dump = spec.lds_w_halves
@@ -1063,7 +1242,7 @@ def build_direct_conv_nongrouped(
     # ---- staging metadata (channel-independent; hoisted out of the C loop) --
 
     def _x_pass_meta():
-        """Per-pass (global byte offset base, LDS half index) for X."""
+        """Per-pass (global byte offset base, LDS element index) for X."""
         meta = []
         img_base = b.mul(n_img, params["p_A_stride_n"])
         if GROUPED:
@@ -1089,9 +1268,9 @@ def build_direct_conv_nongrouped(
             pix_off = b.add(
                 b.mul(ih, params["p_A_stride_hi"]), b.mul(iw, params["p_A_stride_wi"])
             )
-            elems = b.add(b.add(img_base, pix_off), b.mul(cv, b.const_i32(_X_LOAD_VEC)))
+            elems = b.add(b.add(img_base, pix_off), b.mul(cv, b.const_i32(XV)))
             lds_idx = b.add(
-                b.mul(pos, b.const_i32(CSTRIDE)), b.mul(cv, b.const_i32(_X_LOAD_VEC))
+                b.mul(pos, b.const_i32(CSTRIDE)), b.mul(cv, b.const_i32(XV))
             )
             if in_tile is not None:
                 lds_idx = b.select(in_tile, lds_idx, b.const_i32(x_dump))
@@ -1100,7 +1279,7 @@ def build_direct_conv_nongrouped(
         return meta
 
     def _w_pass_meta():
-        """Per-pass (global byte offset base, LDS half index) for W.
+        """Per-pass (global byte offset base, LDS element index) for W.
 
         Slot ``g`` decodes to the MFMA fragment that lane ``g % 64`` consumes for
         ``(tap, m_tile, k_atom)``, so the LDS index is simply ``g * FRAG``.
@@ -1164,11 +1343,24 @@ def build_direct_conv_nongrouped(
             krs_w = b.mul(krs_hr, b.const_i32(KW))
             krs = b.add(krs_w, s)
             elems = b.add(b.mul(krs, C_W), c_in_chunk)
-            lds_idx = b.mul(g, b.const_i32(FRAG))
-            if in_tile is not None:
-                lds_idx = b.select(in_tile, lds_idx, b.const_i32(w_dump))
+            if WPL == 1:
+                lds_idx = b.mul(g, b.const_i32(FRAG))
+                if in_tile is not None:
+                    lds_idx = b.select(in_tile, lds_idx, b.const_i32(w_dump))
+                base = b.select(valid, b.mul(elems, c_half), oob_base)
+                meta.append((base, lds_idx))
+                continue
+            # fp32 storage, 8-element fragment: one LDS index per plane. An
+            # out-of-tile slot dumps plane h into the scratch tail at h * WV.
+            slot = b.mul(g, b.const_i32(WV))
+            idxs = []
+            for h in range(WPL):
+                idx = slot if h == 0 else b.add(slot, b.const_i32(h * W_PLANE))
+                if in_tile is not None:
+                    idx = b.select(in_tile, idx, b.const_i32(w_dump + h * WV))
+                idxs.append(idx)
             base = b.select(valid, b.mul(elems, c_half), oob_base)
-            meta.append((base, lds_idx))
+            meta.append((base, idxs))
         return meta
 
     x_meta = _x_pass_meta()
@@ -1178,7 +1370,23 @@ def build_direct_conv_nongrouped(
     w_dwords = FRAG // 2
 
     def issue_stage_loads(c_off: Value):
-        """Issue the global loads for one channel chunk; returns raw registers."""
+        """Issue the global loads for one channel chunk; returns raw registers.
+
+        fp32 storage: one dwordx4 per activation vector, and one per weight
+        plane (``WPL`` per pass, flattened pass-major).
+        """
+        if F32S:
+            xs = [
+                _load_elems(b, dtype, a_rsrc, b.add(base, c_off), c0, XV)
+                for base, _ in x_meta
+            ]
+            ws = []
+            for base, _ in w_meta:
+                voff = b.add(base, c_off)
+                for h in range(WPL):
+                    v = voff if h == 0 else b.add(voff, b.const_i32(h * WV * EB))
+                    ws.append(_load_elems(b, dtype, b_rsrc, v, c0, WV))
+            return xs, ws
         xs = [
             _buf_load_vN(b, dtype, a_rsrc, b.add(base, c_off), c0, x_dwords)
             for base, _ in x_meta
@@ -1209,7 +1417,13 @@ def build_direct_conv_nongrouped(
     def commit_stage(xs, ws, x_buf=None, w_buf=None):
         for (_, lds_idx), val in zip(x_meta, xs):
             idx = lds_idx if x_buf is None else b.add(lds_idx, x_buf)
-            b.smem_store_vN(X_smem, [c0, idx], val, _X_LOAD_VEC)
+            b.smem_store_vN(X_smem, [c0, idx], val, XV)
+        if WPL > 1:
+            for j, (_, idxs) in enumerate(w_meta):
+                for h, lds_idx in enumerate(idxs):
+                    idx = lds_idx if w_buf is None else b.add(lds_idx, w_buf)
+                    b.smem_store_vN(W_smem, [c0, idx], ws[j * WPL + h], WV)
+            return
         for meta_w, val in zip(w_meta, ws):
             lds_idx = meta_w[-1]
             idx = lds_idx if w_buf is None else b.add(lds_idx, w_buf)
@@ -1224,15 +1438,41 @@ def build_direct_conv_nongrouped(
         b.mul(lane_lo, b.const_i32(S * CSTRIDE)), b.mul(lane_hi, b.const_i32(FRAG))
     )
     x_read_base = b.add(x_wave_term, x_lane_term)
-    # W: idx = wave_m block + lane*FRAG + compile-time term.
+    # W: idx = wave_m block + lane*WV + compile-time term (WV == FRAG unless
+    # the fragment is split into planes).
     w_read_base = b.add(
-        b.mul(wave_m, b.const_i32(MT_W * KATOMS * WAVE * FRAG)),
-        b.mul(lane, b.const_i32(FRAG)),
+        b.mul(wave_m, b.const_i32(MT_W * KATOMS * WAVE * WV)),
+        b.mul(lane, b.const_i32(WV)),
     )
 
+    def _lds_frag(smem: Value, idx: Value, plane_stride: int) -> Value:
+        """An fp32 fragment from 16-byte pieces ``plane_stride`` elements apart.
+
+        Each piece is one ``ds_read_b128`` (align 16, which is all the pixel
+        stride guarantees); the pieces are concatenated in K order.
+        """
+        n = min(FRAG, XV)
+        parts = [
+            b.smem_load_vN(
+                smem,
+                c0,
+                idx if h == 0 else b.add(idx, b.const_i32(h * plane_stride)),
+                dtype=io_type,
+                n=n,
+            )
+            for h in range(FRAG // n)
+        ]
+        while len(parts) > 1:
+            parts = [
+                b.vec_concat(parts[i], parts[i + 1]) for i in range(0, len(parts), 2)
+            ]
+        return parts[0]
+
     def read_a_frag(base: Value, tap: int, mt: int, katom: int) -> Value:
-        off = ((tap * M_TILES + mt) * KATOMS + katom) * WAVE * FRAG
+        off = ((tap * M_TILES + mt) * KATOMS + katom) * WAVE * WV
         idx = b.add(base, b.const_i32(off))
+        if F32S:
+            return _lds_frag(W_smem, idx, W_PLANE)
         return b.smem_load_vN(W_smem, c0, idx, dtype=io_type, n=FRAG)
 
     def read_b_frag(base: Value, in_row: int, cb: int, s: int, katom: int) -> Value:
@@ -1247,6 +1487,8 @@ def build_direct_conv_nongrouped(
         pos = in_row * LDS_IN_W + cb * AT * S + s * DW
         off = pos * CSTRIDE + katom * AK
         idx = b.add(base, b.const_i32(off))
+        if F32S:
+            return _lds_frag(X_smem, idx, XV)
         return b.smem_load_vN(X_smem, c0, idx, dtype=io_type, n=FRAG)
 
     # ---- main channel loop ------------------------------------------------
@@ -1278,6 +1520,17 @@ def build_direct_conv_nongrouped(
                             nt = row * NCB + cb
                             for mt in range(MT_W):
                                 idx = mt * NT_W + nt
+                                if F32S:
+                                    accs[idx] = _mma_f32_logical(
+                                        b,
+                                        arch,
+                                        dtype,
+                                        AT,
+                                        a_frags[mt],
+                                        bf_row[cb],
+                                        accs[idx],
+                                    )
+                                    continue
                                 accs[idx] = _mfma(
                                     b,
                                     dtype,
@@ -1287,7 +1540,7 @@ def build_direct_conv_nongrouped(
                                     accs[idx],
                                 )
 
-    c_ck_bytes = b.const_i32(CK * 2)
+    c_ck_bytes = b.const_i32(CK * EB)
     if SPLIT > 1:
         # Split ``split`` owns chunks [split*T/S, (split+1)*T/S) of the T
         # chunks of C; validate() keeps T >= S, so every split owns one.
@@ -1425,6 +1678,9 @@ def build_direct_conv_nongrouped(
                     quad = b.vec_pack(
                         [b.vec_extract(acc, 4 * q + j) for j in range(4)], F32
                     )
+                    if F32S:
+                        _store_from_f32(b, dtype, d_rsrc, safe, c0, quad, 4)
+                        continue
                     _buf_store_vN(
                         b, dtype, d_rsrc, safe, c0, _trunc_f32(b, dtype, quad), 2
                     )

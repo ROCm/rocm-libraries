@@ -1896,6 +1896,50 @@ def lower_gemm_multi_abd(
     )
 
 
+def _cpp_conv_dtype_gap(family: str, spec: Any) -> Optional[str]:
+    """Why the C++ ``family`` builder cannot build ``spec``'s dtype, or None.
+
+    The C++ conv builders have no TF32 path and no fp32-storage direct path:
+    the implicit-GEMM spec dict carries no ``mma_dtype``, and the direct
+    builders take no fp32 / tf32 problem (16c builds an fp16 kernel under the
+    spec's name, the others refuse it). Handed one, the engine would return a
+    different kernel than the Python engine, or a different refusal.
+    """
+    mma_dtype = getattr(getattr(spec, "data", None), "mma_dtype", None)
+    if mma_dtype is not None:
+        return f"the C++ {family} builder has no mma_dtype={mma_dtype!r} path"
+    dtype = getattr(getattr(spec, "problem", None), "dtype", None)
+    if family.startswith("conv_direct") and dtype in ("fp32", "tf32"):
+        return f"the C++ {family} builder has no {dtype} (fp32-storage) path"
+    return None
+
+
+def _lower_cpp_conv_dtype_gap(
+    family: str, spec: Any, backend: Optional[str], want_ir: bool, py_fn
+) -> Optional["GemmLowerResult"]:
+    """Lower a spec the C++ conv builder cannot serve (see
+    :func:`_cpp_conv_dtype_gap`) without handing it to the engine, or None.
+
+    ``python`` lowers it as always, before the engine is imported; ``cpp``
+    lowers through Python as a loud, recorded fallback (``ROCKE_CPP_STRICT=1``
+    raises), as for any kernel the engine cannot serve; ``both``, which never
+    falls back, reports the known gap instead of comparing two different
+    kernels.
+    """
+    reason = _cpp_conv_dtype_gap(family, spec)
+    if reason is None:
+        return None
+    chosen = resolve_backend(backend)
+    if chosen == BACKEND_CPP:
+        if _cpp_strict():
+            raise BackendError(reason)
+        _record_fallback(_name_of(spec), reason)
+    elif chosen != BACKEND_PYTHON:
+        raise BackendCoverageGap(reason)
+    ll, ir = py_fn(want_ir)
+    return GemmLowerResult(BACKEND_PYTHON, ll, ir)
+
+
 def lower_conv_implicit_gemm(
     spec: Any,
     *,
@@ -1924,6 +1968,11 @@ def lower_conv_implicit_gemm(
         from kernels.common.conv_implicit_gemm import resolve_fwd_split_k_spec
 
         spec = resolve_fwd_split_k_spec(spec, arch)
+
+    gap = _lower_cpp_conv_dtype_gap("conv_implicit_gemm", spec, backend, want_ir, py_fn)
+    if gap is not None:
+        return gap
+
     eng = _import_engine()
     sd = conv_implicit_gemm_spec_to_dict(spec)
     return _lower_family(
@@ -1972,6 +2021,12 @@ def lower_conv_direct_grouped(
             ir = serialize(k)
         return ll, ir
 
+    gap = _lower_cpp_conv_dtype_gap(
+        "conv_direct_grouped", spec, backend, want_ir, py_fn
+    )
+    if gap is not None:
+        return gap
+
     eng = _import_engine()
     sd = conv_direct_grouped_spec_to_dict(spec, kind)
     return _lower_family(
@@ -2008,6 +2063,12 @@ def lower_conv_direct_nongrouped(
 
             ir = serialize(k)
         return ll, ir
+
+    gap = _lower_cpp_conv_dtype_gap(
+        "conv_direct_nongrouped", spec, backend, want_ir, py_fn
+    )
+    if gap is not None:
+        return gap
 
     eng = _import_engine()
     sd = conv_direct_nongrouped_spec_to_dict(spec)

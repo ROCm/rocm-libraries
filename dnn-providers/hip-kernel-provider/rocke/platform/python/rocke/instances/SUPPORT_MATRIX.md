@@ -101,15 +101,16 @@ be smaller than 2 GiB.
 | Instance | gfx942 | gfx950 | gfx1151 | Notes |
 |---|:--:|:--:|:--:|---|
 | `conv_implicit_gemm` | ✅ | ✅ | ✅ | gfx1151: WMMA 16x16x16, `mem`+`default`, `wave_size=32`, `groups=1` |
-| `conv_implicit_gemm_auto` | ✅ | ✅ | ❌ | MFMA-specialized autotuned path (raw `MfmaAtom`, K=32 kpack); not ported to WMMA |
+| `conv_implicit_gemm` / `_dgrad` / `_wgrad` TF32 (`mma_dtype="tf32"`, fp32 storage) | ✅ | ✅ | ❌ | gfx942 native XF32 16x16x8 / 32x32x4; gfx950 BF16x3 emulation 16x16x32 / 32x32x16; MFMA only, M-outer LDS (no `lds_k_outer` / wgrad `async_dma`); dgrad 2-D only, as for every dtype |
 | `direct_conv_16c` | ❌ | ✅ | ❌ | `fold_k32` needs 16x16x32 atom (CDNA4) |
-| `direct_conv_4c` | ✅ | ✅ | ❌ | 4x4x4 MFMA atom not in WMMA catalog; fp16 and bf16 (`_1k` atom) |
+| `direct_conv_4c` | ✅ | ✅ | ❌ | 4x4x4 MFMA atom not in WMMA catalog; fp16 and bf16 (`_1k` atom); no fp32 / TF32 (no 4x4 atom: those problems use the generic kernel) |
 | `direct_conv_4c` dgrad (`direct_grouped_dgrad_4c`) | ✅ | ✅ | ❌ | `cpg=kpg=4`, 1x1/3x3 "same" padding, stride 1, fused weights (no pre-pass); LDS-staged weights and `stage_rows` need `ds_read_b64_tr_b16` (gfx950). In the AOT direct cache; not yet wired into dispatch |
 | `direct_conv` (generic) dgrad, fused weights (`direct_grouped_dgrad_fused`) | ✅ | ✅ | ❌ | stride 1, "same" padding, 1x1..7x7, `cpg`/`kpg` multiples of 4 up to 32 (`cpg != kpg` too), single kernel (no pre-pass); LDS-staged weights need `ds_read_b64_tr_b16` (gfx950), `fold_k32` the 16x16x32 atom; row-stream knobs (`prefetch_rows`, `lds_only_sync`, `waves_m`, `lds_pad`, `stage_out`, `row_exit`), `xcd_tiles` gfx950 only. In the AOT direct cache; not yet wired into dispatch |
 | `direct_depthwise_dgrad_win` | ✅ | ✅ | ❌ | `cpg=kpg=1`, stride 1, any padding; VALU form (scalar FMA, channel vectors); `dot2` tap pairing (`arith.fdot2`) and the Toeplitz MFMA form (`mfma_f32_16x16x32`, `groups % 8 == 0`) gfx950 only; the same Toeplitz form on the wave32 WMMA (`wmma_f32_16x16x32`, `mfma` at `wave_size=32`) gfx1250 only, dgrad only; with `fwd=True` (rotated filter, square filter only) the MFMA form runs the depthwise or grouped (`cpg=kpg` a multiple of 8 up to `DW_WIN_MAX_GROUP_CH`) forward at stride 1 or 2 (`out_stride=2` keeps every 2nd row/col) (AOT variant `direct_depthwise_win`, in the gfx950 fwd dispatcher list). The dgrad forms are in the AOT direct cache, not yet wired into dispatch |
 | `direct_depthwise_dgrad` (`DirectDepthwiseDgradStreamSpec`) | ✅ | ✅ | ❌ | `cpg=kpg=1`, any stride and padding; row-streaming scalar FMA at the target's wave size (wave64, or wave32 on gfx1250); `cpl` 2/4/8 channels per lane with packed `<2 x f32>` FMAs (`groups % cpl == 0`, `cpl*KH*KW <= 200`, `cpl*block_w*KH <= 192`). In the AOT direct cache; not yet wired into dispatch |
 | `direct_depthwise_tiled_dgrad` (`DirectDepthwiseTiledSpec(dgrad=True)`) | ✅ | ✅ | ❌ | `cpg=kpg=1`, stride 1, the forward tiled kernel with the filter rotated by 180 degrees; filters up to 64 on a side incl. non-square (51x5 / 5x51), per-axis padding (`pad_w`) with `PAD <= KH-1`, `PAD_W <= KW-1`. Served by the direct-conv AOT cache, not the dispatcher |
 | `conv_implicit_gemm_dgrad` stride-1 knobs | ✅ | ✅ | ❌ | folded sub-GEMM record (stride capability), `tap_outer_k` (wave64 MFMA, `kpg % tile_k == 0`), `dy_halo` / `dy_halo_setprio` / `dy_halo_kouter_pad` / `halo_max_wo` (on the tap-outer path, `Ho == Hi`, `Wo == Wi`; the pad needs `lds_k_outer`, gfx950); `xcd_tile_order` remaps only on gfx950. AOT grid: stride-1 tap-outer binaries next to the tilde ones, halo sub-grid on gfx950; not yet wired into dispatch |
+| direct conv fp32 / TF32 (`dtype="fp32"` / `"tf32"`, fp32 storage) | ✅ | ✅ | ❌ | 16c, 8c, 32c, generic, MFMA dgrad, direct wgrad, nongrouped: TF32 atoms (gfx942 native XF32, gfx950 BF16x3), `fp32` uses the exact fp32 atoms; scalar-FMA depthwise / scalar dgrad run fp32 math for both, one channel per lane (the channel-packed `cpl > 1` depthwise kernels are fp16 / bf16 only) |
 | `conv_implicit_gemm_wgrad` | ✅ | ✅ | ✅ | gfx1151/gfx1201/gfx1250: WMMA, `mem`+`default`; split-K (WMMA packed atomic, no two-stage) on gfx1250 only, automatic for bf16/fp32 and explicit-only for fp16, `split_k=1` on gfx1151/gfx1201 |
 | `conv_implicit_gemm_wgrad` stream-K | ✅ | ✅ | ❌ | CK iteration-balanced partition; `linear`/`tree` deterministic fixups need the cross-workgroup flag ops |
 | `conv_implicit_gemm` split-K forward (`split_k > 1`) | ❌ | ❌ | ❌ | gfx1250 only: WMMA, `mem` or `wavelet` pipeline, 2-D, not pointwise, identity `acc_epilogue`; no `async_dma`, `unroll_k`, `chiplet_swizzle` or `group_merge`. Each slice stores an fp32 partial tile into its slab of a `[ks_count][M][K]` workspace and `conv_fwd_split_k_reduce` folds the slabs into D; the degree is the `ks_count` kernarg, and `split_k = -1` resolves it (`resolve_conv_split_k`; 1 where splitting does not pay). Built into the AOT kernel cache; the dispatcher does not select it |
@@ -203,9 +204,8 @@ parity runs on the matching device and is not implied by the ✅ here.
   `gemm_multi_abd`) is rejected on gfx1151.
 - **Convolution on gfx1151:** `conv_implicit_gemm` runs on WMMA
   (16x16x16, `mem` pipeline, `default` epilogue, `wave_size=32`, `groups=1`).
-  `conv_implicit_gemm_auto` is a separate MFMA-specialized autotuned path
-  (raw `MfmaAtom`, K=32 kpack) that has not been ported to the WMMA atom
-  contract, so it stays MFMA-only.
+  TF32 compute (`ConvDataSpec.mma_dtype="tf32"`) is MFMA-only: no WMMA
+  catalog carries a TF32 atom, so `is_valid_spec` rejects it on gfx1151.
 - **Merged groups (`group_merge`)** is available in the forward
   (`conv_implicit_gemm`) and wgrad (`conv_implicit_gemm_wgrad`) directions for
   **depthwise** problems only (`cpg == kpg == 1`), and is inert at its default
