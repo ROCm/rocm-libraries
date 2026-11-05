@@ -814,7 +814,6 @@ endif()
 # Install TensileLite Python packages and test tools for artifact-based testing.
 # Produces:
 #   share/hipblaslt/tensilelite/tensilelite/ — TensileLite Python package
-#   share/hipblaslt/tensilelite/Tensile/     — legacy import compatibility shim
 #   share/hipblaslt/tensilelite/rocisa/       — rocisa Python package (normalized layout)
 #   share/hipblaslt/tensilelite/rocisa_tests/ — rocisa pytest modules
 #   share/hipblaslt/tensilelite/stinkytofu/   — stinkytofu Python package (gfx1250 backend)
@@ -832,11 +831,6 @@ if(HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS AND NOT WIN32)
         PATTERN ".pytest_cache" EXCLUDE
         PATTERN "*.pyc" EXCLUDE
         PATTERN "source_only" EXCLUDE
-    )
-    install(
-        FILES "${_tensilelite_src}/Tensile/__init__.py"
-        DESTINATION "${_tensilelite_install_dest}/Tensile"
-        COMPONENT tests
     )
 
     # Scripts used by unit tests
@@ -1190,11 +1184,9 @@ if(HIPBLASLT_ENABLE_COVERAGE)
         coverage
         DEPENDS code_cov_tests
         COMMAND ${LLVM_PROFDATA} merge -sparse "${coverage_dir}/profraw/hipblaslt-coverage_*.profraw" -o "${coverage_dir}/hipblaslt.profdata"
-        COMMAND ${LLVM_COV} report -object $<TARGET_FILE:hipblaslt> -object $<TARGET_FILE:hipblaslt-test> -instr-profile="${coverage_dir}/hipblaslt.profdata" --ignore-filename-regex=".*Tensile.*|.*origami.*|.*auxiliary\\.hpp|.*exceptions\\.hpp|.*hipblaslt_bfloat6\\.h|.*hipblaslt_float6\\.h|.*hipblaslt_float4\\.h|.*hipblaslt_e5m3\\.h|.*hipblaslt_e8\\.h|.*hipblaslt_float8\\.h|.*hipblaslt_xfloat32\\.h|.*hipblaslt-ext\\.hpp"
-        COMMAND ${LLVM_COV} show -object $<TARGET_FILE:hipblaslt> -object $<TARGET_FILE:hipblaslt-test> -instr-profile="${coverage_dir}/hipblaslt.profdata" --ignore-filename-regex=".*Tensile.*|.*origami.*|.*auxiliary\\.hpp|.*exceptions\\.hpp|.*hipblaslt_bfloat6\\.h|.*hipblaslt_float6\\.h|.*hipblaslt_float4\\.h|.*hipblaslt_e5m3\\.h|.*hipblaslt_e8\\.h|.*hipblaslt_float8\\.h|.*hipblaslt_xfloat32\\.h|.*hipblaslt-ext\\.hpp" -format=html -output-dir="${coverage_dir}"
-        COMMAND ${LLVM_COV} export -object $<TARGET_FILE:hipblaslt> -object $<TARGET_FILE:hipblaslt-test> -instr-profile="${coverage_dir}/hipblaslt.profdata" --ignore-filename-regex=".*Tensile.*|.*origami.*|.*auxiliary\\.hpp|.*exceptions\\.hpp|.*hipblaslt_bfloat6\\.h|.*hipblaslt_float6\\.h|.*hipblaslt_float4\\.h|.*hipblaslt_e5m3\\.h|.*hipblaslt_e8\\.h|.*hipblaslt_float8\\.h|.*hipblaslt_xfloat32\\.h|.*hipblaslt-ext\\.hpp" -format=lcov > "${coverage_dir}/coverage.info"
-        COMMAND ${CMAKE_COMMAND} -E echo "Coverage report generated in ${coverage_dir}/index.html"
-        COMMAND ${CMAKE_COMMAND} -E env bash ${CMAKE_SOURCE_DIR}/cmake/check_coverage_exit_code.sh ${coverage_dir}
+        COMMAND ${LLVM_COV} report -object $<TARGET_FILE:hipblaslt> -object $<TARGET_FILE:hipblaslt-test> -instr-profile="${coverage_dir}/hipblaslt.profdata" --ignore-filename-regex="${coverage_ignore_regex}"
+        COMMAND ${LLVM_COV} show -object $<TARGET_FILE:hipblaslt> -object $<TARGET_FILE:hipblaslt-test> -instr-profile="${coverage_dir}/hipblaslt.profdata" --ignore-filename-regex="${coverage_ignore_regex}" -format=html -output-dir="${coverage_dir}"
+        COMMAND ${LLVM_COV} export -object $<TARGET_FILE:hipblaslt> -object $<TARGET_FILE:hipblaslt-test> -instr-profile="${coverage_dir}/hipblaslt.profdata" --ignore-filename-regex="${coverage_ignore_regex}" -format=lcov > "${coverage_dir}/coverage.info"
         COMMENT "Generating code coverage report"
       )
 endif()

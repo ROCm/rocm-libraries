@@ -47,6 +47,7 @@ import adaptive_search as AS  # noqa: E402
 import gemm_full_benchmark as drv  # noqa: E402
 import gemm_search as GS  # noqa: E402
 import host_cache as HC  # noqa: E402
+import gemm_utils  # noqa: E402
 import run_one_gemm_kernel as worker  # noqa: E402
 from gemm_utils import GemmKernelConfig  # noqa: E402
 
@@ -159,9 +160,7 @@ class Toolchain:
         monkeypatch.setattr(drv, "subprocess", SimpleNamespace(
             Popen=lambda *a, **kw: _InProcess(self), PIPE=subprocess.PIPE,
             DEVNULL=subprocess.DEVNULL, TimeoutExpired=subprocess.TimeoutExpired))
-        for cache in ("_ab_cache", "_ref_cache"):
-            if hasattr(worker._run_one, cache):
-                monkeypatch.delattr(worker._run_one, cache)
+        monkeypatch.setattr(gemm_utils, "_SWEEP_CACHE", {})
 
     def build(self, cfgs, verbose=True, max_workers=None, *, errors=None,
               build_timeout=None):
@@ -1100,9 +1099,7 @@ def test_misleading_rows_never_become_winners(tmp_path, monkeypatch, confirm_ok)
 
 
 def test_worker_checks_the_library_identity_only_when_asked(monkeypatch, capsys):
-    for cache in ("_ab_cache", "_ref_cache"):
-        if hasattr(worker._run_one, cache):
-            monkeypatch.delattr(worker._run_one, cache)
+    monkeypatch.setattr(gemm_utils, "_SWEEP_CACHE", {})
     monkeypatch.setattr(worker, "GpuGemmRunner", lambda lib_path: _Runner(C, 1.0))
     worker._run_one(0, "a.so", P1, A, verify=True)
     worker._run_one(1, "a.so", P1, A, verify=True, check_identity=True)

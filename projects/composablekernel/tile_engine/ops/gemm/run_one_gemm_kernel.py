@@ -61,10 +61,12 @@ from gemm_utils import (  # noqa: E402
     _input_codec,
     _layout_from_kernel_name,
     _resolve_use_ocp,
+    _sweep_inputs,
+    _sweep_max_rel,
 )
 import numpy as np  # noqa: E402
 
-INPUT_SEED, INPUT_SCALE = 42, 0.1  # the random host inputs: randn * scale
+INPUT_SEED, INPUT_SCALE = 42, 0.1  # host inputs: normals * scale (as _sweep_inputs)
 # A search's inputs (``_search_host_data``): float32 normals of numpy's PCG64
 # generator, made, encoded and compared BLOCK elements at a time.
 SEARCH_INPUTS = "PCG64 float32"
@@ -88,15 +90,6 @@ def _check_identity(runner, kernel_name):
             f"identity mismatch: the library reports {runner.kernel_name!r}, "
             f"requested {kernel_name!r}"
         )
-
-
-def _inputs(problem):
-    """The fp32 host A (MxK) and B (KxN) every GEMM measurement uses."""
-    rng = np.random.RandomState(INPUT_SEED)
-    return (
-        (rng.randn(problem.M, problem.K) * INPUT_SCALE).astype(np.float32),
-        (rng.randn(problem.K, problem.N) * INPUT_SCALE).astype(np.float32),
-    )
 
 
 def _search_operand(gen, shape, dtype, use_ocp):
@@ -135,11 +128,11 @@ def _search_host_data(runner, problem):
     ``_host_data``). A and B are made in the memory order the kernel reads
     them and a block at a time, so the worker holds the encoded inputs, their
     fp32 values and the reference at most: about 5 bytes per input element
-    for fp8 and bf8, 6 for fp16 and bf16, against 12-60 for ``_inputs``
+    for fp8 and bf8, 6 for fp16 and bf16, against 12-60 for ``_sweep_inputs``
     and ``GpuGemmRunner.encode_inputs``/``reference``, which make float64
     normals, transposed copies and the inputs' encoding twice, with the
     fp8/bf8 encoder's temporaries on whole arrays. The values differ from
-    those of ``_inputs``; a search computes them only here, in its
+    those of ``_sweep_inputs``; a search computes them only here, in its
     preparations and its calls alike."""
     dtype = _dtype_from_kernel_name(runner.kernel_name)
     la, lb, _ = _layout_from_kernel_name(runner.kernel_name)
@@ -285,14 +278,9 @@ def _run_one(
             A = B = host = None
             search = search_host_data or host_cache is not None
             if not search:
-                # Cache host matrices per shape so batch mode doesn't regenerate
-                # huge inputs per kernel.
-                cache = getattr(_run_one, "_ab_cache", {})
-                key = (problem.M, problem.N, problem.K)
-                if key not in cache:
-                    cache[key] = _inputs(problem)
-                    _run_one._ab_cache = cache
-                A, B = cache[key]
+                # Drawn once per shape; kernels of the shape reuse their encoding
+                # and verify reference (gemm_utils._sweep_inputs).
+                A, B = _sweep_inputs((problem.M, problem.K), (problem.K, problem.N))
 
             # CRITICAL: load the library ONLY inside this subprocess.
             runner = GpuGemmRunner(lib_path=so_path)
@@ -333,20 +321,10 @@ def _run_one(
             elif verify and A is not None and B is not None:
                 # Reference uses the SAME quantized inputs the device sees, so the
                 # metric isolates compute error from input quantization (fp8/bf8
-                # rounding alone exceeds the default tolerance). It depends only on
-                # the cached inputs and their host encoding, so batch mode computes
-                # the host matmul once per shape and encoding, not once per kernel.
-                refs = getattr(_run_one, "_ref_cache", {})
-                ref_key = (
-                    key,
-                    _dtype_from_kernel_name(runner.kernel_name),
-                    runner._use_ocp,
-                )
-                if ref_key not in refs:
-                    ref = runner.reference(A, B)
-                    refs[ref_key] = (ref, float(np.max(np.abs(ref))) or 1.0)
-                    _run_one._ref_cache = refs
-                _check(out, result.output, *refs[ref_key], verify_tol)
+                # rounding alone exceeds the default tolerance).
+                max_rel = _sweep_max_rel(runner, A, B, result.output)
+                out["max_rel"] = max_rel
+                out["verified"] = bool(max_rel <= verify_tol)
             print(json.dumps(out), flush=True)
         else:
             print(
