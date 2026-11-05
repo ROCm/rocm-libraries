@@ -218,7 +218,8 @@ def make_candidate() -> KernelCandidate:
         family=FAMILY,
         algorithm="strided_decode",
         spec_id="strided_decode",
-        abi_version="rocke-attention-strided-kv/v1",
+        # v2: the head counts and the sliding window became kernargs.
+        abi_version="rocke-attention-strided-kv/v2",
         priority=20,
         capability=Capability(
             arches=("gfx942", "gfx950"),

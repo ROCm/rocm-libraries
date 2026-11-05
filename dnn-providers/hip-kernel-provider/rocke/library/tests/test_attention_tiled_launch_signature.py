@@ -73,15 +73,31 @@ def _decode(*, dtype="bf16", head_size=128, hq=32, hkv=8, sq=1, **kw):
     )
 
 
-# (arch, case id, problem, kernel-name suffix the route must emit or None). The
-# gfx942 4-warp GQA bodies (and the windowed route that takes them) are not listed:
-# they still declare no trailing qq_bias_stride_0, which the launch passes and the
-# kernel ignores.
+# (arch, case id, problem, kernel-name suffix the route must emit or None)
 _CASES_2D = (
     ("gfx942", "narrow_d64", _prefill(head_size=64, hq=8, hkv=8, sq=128), None),
     ("gfx942", "fp16_flash_d128", _prefill(dtype="fp16", sq=2048), None),
     ("gfx942", "bf16_flash_d128", _prefill(sq=2048), None),
+    ("gfx942", "window", _prefill(sliding_window=256, hq=8, hkv=8), None),
     ("gfx942", "sinks", _prefill(use_sinks=True), None),
+    (
+        "gfx942",
+        "4warp_d256",
+        _prefill(head_size=256, hq=16, hkv=2, sq=4096),
+        "_4wgqa",
+    ),
+    (
+        "gfx942",
+        "4warp_fold",
+        _prefill(sliding_window=4096, sq=8192),
+        "_4wgqa_fold",
+    ),
+    (
+        "gfx942",
+        "4warp_fp16_window",
+        _prefill(dtype="fp16", sliding_window=4096, sq=8192),
+        "_4wgqa",
+    ),
     ("gfx950", "bf16_d128", _prefill(), None),
     (
         "gfx950",
@@ -151,7 +167,9 @@ def test_3d_kernel_params_match_launch_signatures(arch, problem, strided_kv):
     _assert_matches(reduce, red_sig)
 
 
-@pytest.mark.parametrize("codepath", ["narrow", "transposed_x8", "splitkv"])
+@pytest.mark.parametrize(
+    "codepath", ["narrow", "transposed_x8", "gfx942_4warp", "splitkv"]
+)
 def test_tuning_candidate_signature_matches_its_kernel(codepath):
     """The registry's tuning candidates launch through ``candidate.signature``."""
     from dispatch.attention import attention_candidates

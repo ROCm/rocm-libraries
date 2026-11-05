@@ -410,8 +410,13 @@ rocke_dynamic_tensor_descriptor_t*
                                           rocke_value_t* const* strides);
 
 /* Python: DynamicTensorDescriptor.create with a mix of Value and int strides.
- * strides[i] == NULL takes static_strides[i] as a compile-time stride. */
-rocke_dynamic_tensor_descriptor_t*
+ * strides[i] == NULL takes static_strides[i] as a compile-time stride (1 when
+ * static_strides is NULL). Returns the descriptor as its base view (is_dynamic
+ * set; pass it to rocke_tensor_descriptor_transform / _offset directly), or NULL
+ * with the builder's error set -- the descriptor calls then no-op on the dead
+ * builder, so callers need not check. rocke_tensor_descriptor_naive_dynamic is
+ * this with every stride a Value. */
+rocke_tensor_descriptor_t*
     rocke_tensor_descriptor_naive_dynamic_mixed(rocke_ir_builder_t* b,
                                                 const char* name,
                                                 const char* const* coord_names,

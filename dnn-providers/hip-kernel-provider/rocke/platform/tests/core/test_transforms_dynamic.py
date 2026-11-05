@@ -617,6 +617,15 @@ class TestDynamicTensorDescriptor:
         with pytest.raises(ValueError, match="missing upper coords"):
             desc.offset(b, x=x)
 
+    @pytest.mark.parametrize("bad", [3.75, "3"])
+    def test_create_rejects_a_non_integer_stride(self, bad):
+        b = _builder()
+        (s0,) = _params(b, "s0")
+        with pytest.raises(TypeError, match=r"strides\[1\]"):
+            DynamicTensorDescriptor.create(
+                "t", coord_names=("a", "b"), strides=(s0, bad)
+            )
+
     def test_create_length_mismatch_rejected(self):
         b = _builder()
         (s0,) = _params(b, "s0")

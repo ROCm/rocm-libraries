@@ -1753,6 +1753,23 @@ def _tiled_cache_key(problem: UnifiedAttentionProblem, arch: str) -> Tuple:
     num_warps_2d = None if fp16_flash else _select_2d_num_warps(problem, arch)
     tile_size = _select_2d_tile_size(problem, arch)
     block_m_per_warp = _select_2d_block_m_per_warp(problem, arch)
+    # gfx950 schedule tail of `_spec_gfx950_generic`. Both flags are false
+    # outside the single-batch cohort (num_seqs == 1), so skip them there. Keyed
+    # as None when both are off, because the cohort itself does not change the
+    # kernel and a runtime batch search must not split ns=1 from ns>1 on it.
+    single_batch_sched = None
+    if _enable_single_batch_combo(problem, arch):
+        flags = (
+            _enable_softmax_mfma_interleave(problem, arch),
+            _enable_k_single_buffer(
+                problem,
+                arch,
+                num_warps=num_warps_2d,
+                block_m_per_warp=block_m_per_warp,
+                tile_size=tile_size,
+            ),
+        )
+        single_batch_sched = flags if any(flags) else None
     key = (
         "tiled",
         arch,
@@ -1797,24 +1814,12 @@ def _tiled_cache_key(problem: UnifiedAttentionProblem, arch: str) -> Tuple:
         # The builder derives the scalar-state / mask / skip-qreg / fast-paged-KV
         # spec fields from the combo predicate, which reads max_seqlen_q.
         _enable_combo_2d(problem, arch),
-        # gfx950 schedule tail of `_spec_gfx950_generic`. Both are false
-        # outside the single-batch cohort (num_seqs == 1), so gate on it and
-        # spare every other launch the selector walks. sched_barrier is implied
-        # by _enable_v_double_buffer, which is already in the key above.
-        (
-            (
-                _enable_softmax_mfma_interleave(problem, arch),
-                _enable_k_single_buffer(
-                    problem,
-                    arch,
-                    num_warps=num_warps_2d,
-                    block_m_per_warp=block_m_per_warp,
-                    tile_size=tile_size,
-                ),
-            )
-            if _enable_single_batch_combo(problem, arch)
-            else None
-        ),
+        # Bakes the 64/8 head geometry, which the heads entry above does not
+        # carry when the counts are kernargs.
+        _enable_fast_paged_kv_desc(problem, arch),
+        # sched_barrier is implied by _enable_v_double_buffer, which is already
+        # in the key above.
+        single_batch_sched,
         # Reads max_seqlen_q and max_seqlen_k (the 16 * T threshold). The
         # gfx1250 builder never sets this field, so keying it there would only
         # split identical kernels.
@@ -2948,6 +2953,25 @@ def _enable_transposed_subflags(problem: UnifiedAttentionProblem, arch: str) -> 
     if problem.softcap > 0 or _has_score_bias(problem):
         return False
     return _enable_transposed_qk_32x32(problem, arch)
+
+
+def _enable_fast_paged_kv_desc(problem: UnifiedAttentionProblem, arch: str) -> bool:
+    """The fast multi-block paged-KV descriptor of the no-window bf16 2D combo.
+
+    Its loader bakes the h64kv8 bf16 T=64 geometry (the spec validator pins it),
+    so it is on only for exactly that head pair. The head counts are kernargs
+    and the cache key carries only their ratio, so the key carries this flag
+    too: a 32/4 problem at the same ratio must not reuse a 64/8 fast binary.
+    """
+    return (
+        _enable_combo_2d(problem, arch)
+        and problem.sliding_window == 0
+        and problem.dtype == "bf16"
+        and not problem.use_fp8
+        and problem.num_query_heads == 64
+        and problem.num_kv_heads == 8
+        and _select_2d_tile_size(problem, arch) == 64
+    )
 
 
 # Largest paged KV cache, in bytes, that i32 addressing reads correctly on the
@@ -4449,8 +4473,8 @@ def _attn_signature(
     include_qq_bias_stride: bool = False,
     include_additive_bias: bool = False,
     kv_dtype: Optional[str] = None,
-    emit_lse: bool = False,
     runtime_fields: Sequence[str] = (),
+    emit_lse: bool = False,
 ):
     from rocke.helpers.spec import SignatureBuilder
 
@@ -6255,6 +6279,8 @@ def run_unified_attention_torch(
     ``NotImplementedError`` rather than returning without it. Rows with no
     visible key get ``-inf`` (and O = 0).
     """
+    if kv_layout == "strided" and problem.emit_lse:
+        raise NotImplementedError("LSE output is not implemented for strided-KV decode")
     # Caller-owned LSE output ([total_q, Hq, 1] FP32, ``problem.emit_lse``):
     # validated before any compile so a bad buffer never reaches a launch.
     validate_unified_lse(
@@ -6309,23 +6335,22 @@ def run_unified_attention_torch(
             )
         backend = implied
     # After the spec-contract checks, so a spec/problem bias mismatch is reported
-    # as such rather than as a bias-argument error.
+    # as such rather than as a bias-argument error. Bias-free paths do not need
+    # tensor metadata here; when bias is enabled, keep strict device access so a
+    # malformed non-None Q cannot bypass the same-device launch check.
+    q_device = q.device if problem.use_additive_bias and q is not None else None
     additive_bias_sq_stride = _validate_additive_bias(
         problem,
         additive_bias,
         additive_bias_batch_stride,
         additive_bias_head_stride,
         additive_bias_sq_stride,
-        None if q is None else q.device,
+        q_device,
     )
 
     if kv_layout not in ("paged", "strided"):
         raise ValueError("kv_layout must be 'paged' or 'strided'")
     if kv_layout == "strided":
-        if problem.emit_lse:
-            raise NotImplementedError(
-                "LSE output is not implemented for strided-KV decode"
-            )
         from .attention_kv_cache import StridedKvCacheLayout
 
         if _launch_arch not in ("gfx942", "gfx950"):
