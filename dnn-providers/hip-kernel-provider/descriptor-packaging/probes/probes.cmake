@@ -32,7 +32,7 @@
 # Fixed-arch slotted fixtures (_hkp_wire_fixed_arch_root in HkpPackaging.cmake): a build
 # that does not select the arch packs the root here instead, uninstalled, so packaging
 # signal does not depend on the lane's arches. multi_launch is all rocKE and needs it ON.
-hkp_selected_arches(_hkp_probe_selected _hkp_probe_selected_source)
+hkp_selected_arches(_hkp_probe_selected _hkp_probe_selected_source _hkp_probe_rejected)
 if(NOT "gfx950" IN_LIST _hkp_probe_selected)
     hkp_add_packaging_probe(ARCH gfx950 NAME slotted-hsaco-gfx950
         ROOT ../tests/fixtures/slotted_hsaco)
