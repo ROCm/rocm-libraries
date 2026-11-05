@@ -393,9 +393,6 @@ bool SdpaFwdPlanBuilder::isApplicable(
                                    + std::to_string(attrs.dropout_probability().value()) + ")");
     HIP_KERNEL_RETURN_FALSE_IF(attrs.alibi_mask(), "alibi_mask must be false");
     HIP_KERNEL_RETURN_FALSE_IF(attrs.padding_mask(), "padding_mask must be false");
-    HIP_KERNEL_RETURN_FALSE_IF(attrs.cu_seq_len_q_tensor_uid().has_value()
-                                   || attrs.cu_seq_len_kv_tensor_uid().has_value(),
-                               "cu_seq_len_q/cu_seq_len_kv tensors not supported");
     HIP_KERNEL_RETURN_FALSE_IF(attrs.attn_mask_tensor_uid(), // Change to bias
                                "attn_mask tensor not supported");
 
@@ -447,9 +444,12 @@ bool SdpaFwdPlanBuilder::isApplicable(
               + static_cast<int>(vTensor->ragged_offset_tensor_uid().has_value())
               + static_cast<int>(oTensor->ragged_offset_tensor_uid().has_value());
 
+        // Folded into one check: the function sits at clang-tidy's readability-function-size limit.
         HIP_KERNEL_RETURN_FALSE_IF(attrs.seq_len_kv_tensor_uid().has_value()
-                                       || attrs.seq_len_q_tensor_uid().has_value(),
-                                   "SEQ_LENS_Q and SEQ_LENS_KV not supported");
+                                       || attrs.seq_len_q_tensor_uid().has_value()
+                                       || attrs.cu_seq_len_q_tensor_uid().has_value()
+                                       || attrs.cu_seq_len_kv_tensor_uid().has_value(),
+                                   "SEQ_LENS_Q/KV and CU_SEQ_LEN_Q/KV not supported");
 
         HIP_KERNEL_RETURN_FALSE_IF(numberRagged != 0 && numberRagged != 4,
                                    "Either all or none of Q, K, V or O must be ragged");
