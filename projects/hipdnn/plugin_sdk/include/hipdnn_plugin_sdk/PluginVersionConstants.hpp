@@ -26,7 +26,7 @@ inline constexpr std::string_view K_OVERRIDE_EXECUTE_MIN_API_VERSION = "1.1.0";
 inline constexpr std::string_view K_PASS_BY_VALUE_MIN_API_VERSION = "1.2.0";
 
 // Minimum engine plugin C ABI version that advertises support for ragged
-// tensors (RFC 0014). Introduced in engine plugin API 1.2.0. The host's
+// tensors (RFC 0014). Introduced in engine plugin API 1.3.0. The host's
 // applicability filter rejects any plugin reporting an API version strictly
 // less than this when the graph contains ragged tensors.
 inline constexpr std::string_view K_RAGGED_TENSOR_MIN_API_VERSION = "1.3.0";
