@@ -14,7 +14,6 @@ import itertools
 import random
 import re
 import subprocess
-import sys
 from dataclasses import fields
 
 import pytest
@@ -49,6 +48,10 @@ from rocke.helpers.tiling.tensor_transforms.ranges import (
     VectorRun,
     _required_checks,
     _value_ranges,
+)
+from rocke.tests.subprocess_launcher import (
+    rocke_python_command,
+    rocke_subprocess_env,
 )
 
 
@@ -980,4 +983,6 @@ def test_descriptors_import_before_tensor_transforms():
         "import rocke.helpers.tiling.tensor_transforms.ranges\n"
         "import rocke.helpers.tiling.tensor_transforms\n"
     )
-    subprocess.run([sys.executable, "-c", code], check=True)
+    subprocess.run(
+        rocke_python_command("-c", code), check=True, env=rocke_subprocess_env()
+    )

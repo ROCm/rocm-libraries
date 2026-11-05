@@ -365,6 +365,10 @@ __host__ static inline void
         (fillValKernel<DataType>), gridDim, blockDim, 0, 0, data, elementSize, value);
 }
 
+// Relative tolerance for R_64F results: tight enough that a float
+// rounding (~1e-8) fails
+static const double fp64Tolerance = 1e-12;
+
 template <typename DDataType>
 std::pair<bool, double> compareEqual(DDataType const*             deviceD,
                                      DDataType const*             hostD,
@@ -375,8 +379,16 @@ std::pair<bool, double> compareEqual(DDataType const*             deviceD,
     bool   retval             = true;
     double max_relative_error = 0.0;
 
-    auto toDouble
-        = [](DDataType const& val) { return static_cast<double>(static_cast<float>(val)); };
+    auto toDouble = [](DDataType const& val) {
+        if constexpr(std::is_same_v<DDataType, double>)
+        {
+            return val;
+        }
+        else
+        {
+            return static_cast<double>(static_cast<float>(val));
+        }
+    };
 
     bool       isInf = false;
     bool       isNaN = false;
