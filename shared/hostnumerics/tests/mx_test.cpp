@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include <gtest/gtest.h>
+#include <omp.h>
 
 #include <algorithm>
 #include <array>
@@ -15,10 +16,6 @@
 #include <vector>
 
 #include "test_support.hpp"
-
-#ifdef _OPENMP
-#include <omp.h>
-#endif
 
 using namespace roc::hostnumerics;
 
@@ -452,14 +449,10 @@ TEST(MxGeneration, Behavior) {
         stochasticCase(GenerationRecipe::uniformInteger({.lower = -4, .upper = 4}),
                        MxDataQuantization::Nearest, std::nullopt, MxScaleGenerationMode::Derived));
     for (MxCase problem : stochasticCases) {
-#ifdef _OPENMP
         omp_set_dynamic(0);
         omp_set_num_threads(1);
-#endif
         const MxTensor oneThread = generateMx(problem);
-#ifdef _OPENMP
         omp_set_num_threads(4);
-#endif
         const MxTensor fourThreads = generateMx(problem);
         require(sameResult(oneThread, fourThreads),
                 "MX generation changed with OpenMP thread count.");
