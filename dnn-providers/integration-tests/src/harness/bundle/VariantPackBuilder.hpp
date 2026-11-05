@@ -3,11 +3,14 @@
 
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <stdexcept>
 #include <unordered_map>
 #include <vector>
 
+#include <hip/hip_runtime.h>
+#include <hipdnn_data_sdk/utilities/Workspace.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 
 #include "harness/VariantPack.hpp"
@@ -76,6 +79,60 @@ OutputTensors allocateSentinelOutputs(
     const TensorMap& loadedTensors,
     const std::unordered_map<int64_t, int64_t>& lengthUids,
     bool onDevice);
+
+// Moves the engine's view of some tensors to a copy that starts a given number of bytes
+// past an address aligned to K_START_OFFSET_BASE_ALIGNMENT. The tensors themselves do
+// not move.
+//
+// The constructor makes one copy for each entry of `startOffsets`, of the output or else
+// the input with that uid. It copies the tensor's bytes from its current variant-pack
+// pointer and sets that pointer to the copy. It then sets the pointer of each alias view
+// whose owner moved to the owner's new pointer plus the alias's byte offset. Throws
+// std::invalid_argument when a uid appears twice or has no tensor or no variant-pack
+// entry, and DeviceOutputError when a device call fails. After a throw, do not use the
+// variant pack.
+//
+// waitForEngine() waits for the device work that the engine started on the moved copies
+// and returns the result. It returns hipSuccess at once when no tensor moved or the
+// copies are on the host. A failure there is the engine's.
+//
+// copyOutputsBack() copies each moved output back into its tensor. Call it after
+// waitForEngine(). The destructor releases the copies, so the variant pack must not be
+// used after it.
+class StartOffsetStaging
+{
+public:
+    StartOffsetStaging(VariantPack& variantPack,
+                       TensorMap& inputs,
+                       OutputTensors& outputs,
+                       const std::vector<TensorStartOffset>& startOffsets,
+                       const std::vector<TensorAlias>& aliases,
+                       bool useDevice);
+    ~StartOffsetStaging() = default;
+
+    StartOffsetStaging(const StartOffsetStaging&) = delete;
+    StartOffsetStaging& operator=(const StartOffsetStaging&) = delete;
+    StartOffsetStaging(StartOffsetStaging&&) = delete;
+    StartOffsetStaging& operator=(StartOffsetStaging&&) = delete;
+
+    hipError_t waitForEngine() const;
+    void copyOutputsBack();
+
+private:
+    struct StagedOutput
+    {
+        void* tensorData;
+        const void* stagedData;
+        std::size_t bytes;
+    };
+
+    void* stage(void* source, std::size_t bytes, int64_t startOffset);
+
+    bool _useDevice;
+    std::vector<hipdnn_data_sdk::utilities::Workspace<>> _deviceCopies;
+    std::vector<std::vector<std::byte>> _hostCopies;
+    std::vector<StagedOutput> _outputs;
+};
 
 /// Tell each tensor which side now holds the fresh data. Without it the comparison
 /// reads the stale copy — silently, and in whichever direction is wrong.

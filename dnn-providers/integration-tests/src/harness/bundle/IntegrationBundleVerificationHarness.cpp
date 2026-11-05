@@ -1020,19 +1020,45 @@ OutputTensors IntegrationBundleVerificationHarness::allocateSentinelOutputs(bool
         onDevice);
 }
 
+TensorMap& IntegrationBundleVerificationHarness::variantPackInputs(bool useDevice)
+{
+    return (useDevice && !_packedInputs.empty()) ? _packedInputs : _inputs;
+}
+
 std::unordered_map<int64_t, void*>
     IntegrationBundleVerificationHarness::buildVariantPack(OutputTensors& outputs, bool useDevice)
 {
     const auto wrapper = _bundle->graphWrapper();
-    TensorMap& inputs = (useDevice && !_packedInputs.empty()) ? _packedInputs : _inputs;
     try
     {
-        return detail::buildVariantPack(inputs,
+        return detail::buildVariantPack(variantPackInputs(useDevice),
                                         outputs,
                                         wrapper.getTensorMap(),
                                         _bundle->outputTensorUids,
                                         useDevice,
                                         _bundle->metadata.aliases);
+    }
+    catch(const std::invalid_argument& e)
+    {
+        throw std::invalid_argument(std::string(e.what()) + " (" + _bundlePath.string() + ")");
+    }
+}
+
+detail::StartOffsetStaging IntegrationBundleVerificationHarness::stageStartOffsets(
+    std::unordered_map<int64_t, void*>& variantPack, OutputTensors& outputs, bool useDevice)
+{
+    try
+    {
+        return {variantPack,
+                variantPackInputs(useDevice),
+                outputs,
+                _bundle->metadata.startOffsets,
+                _bundle->metadata.aliases,
+                useDevice};
+    }
+    catch(const detail::DeviceOutputError& e)
+    {
+        throw detail::DeviceOutputError(std::string(e.what()) + " (" + _bundlePath.string() + ")");
     }
     catch(const std::invalid_argument& e)
     {
@@ -1063,6 +1089,8 @@ IntegrationBundleVerificationHarness::EngineRunResult
 
     run.outputs = allocateSentinelOutputs(_deps.policy.useDevice());
     auto variantPack = buildVariantPack(run.outputs, _deps.policy.useDevice());
+    // The references run on the tensors themselves; only the engine sees the moved copies.
+    auto staging = stageStartOffsets(variantPack, run.outputs, _deps.policy.useDevice());
 
     // The runner reports rather than asserts, so "the engine broke" is a value here
     // instead of a disposition read back off GTest, which cannot tell an engine
@@ -1085,6 +1113,22 @@ IntegrationBundleVerificationHarness::EngineRunResult
         return run;
     }
 
+    // The engine may run asynchronously, so a fault in its work on a moved copy can
+    // first show here.
+    if(const hipError_t status = staging.waitForEngine(); status != hipSuccess)
+    {
+        run.status = EngineStatus::ERRORED;
+        run.message = std::string("engine device work failed: ") + hipGetErrorString(status);
+        return run;
+    }
+    try
+    {
+        staging.copyOutputsBack();
+    }
+    catch(const detail::DeviceOutputError& e)
+    {
+        throw detail::DeviceOutputError(std::string(e.what()) + " (" + _bundlePath.string() + ")");
+    }
     markOutputsModified(run.outputs);
     run.status = EngineStatus::RAN;
     return run;
@@ -1159,6 +1203,8 @@ void IntegrationBundleVerificationHarness::benchmarkIfVerified(GraphSession& ses
     try
     {
         auto variantPack = buildVariantPack(engineOutputs, _deps.policy.useDevice());
+        const auto staging
+            = stageStartOffsets(variantPack, engineOutputs, _deps.policy.useDevice());
         _benchmark = _deps.engineRunner->benchmark(session, variantPack, *_deps.policy.benchmark);
     }
     catch(const std::exception& e)

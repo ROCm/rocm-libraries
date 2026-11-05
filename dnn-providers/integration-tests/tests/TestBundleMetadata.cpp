@@ -24,6 +24,7 @@ using hipdnn_integration_tests::metaJsonPath;
 using hipdnn_integration_tests::parseBundleMetadataJson;
 using hipdnn_integration_tests::parseTensorAliases;
 using hipdnn_integration_tests::TensorAlias;
+using hipdnn_integration_tests::TensorStartOffset;
 using hipdnn_integration_tests::toJson;
 using hipdnn_test_sdk::utilities::claimScratchDirectory;
 using hipdnn_test_sdk::utilities::isMetaJsonFile;
@@ -1049,6 +1050,103 @@ TEST(TestLoadBundleMetadata, AliasesInAVersion1FileThrows)
     const TempBundle bundle(
         R"({"format_version": 1, "aliases": [{"uid": 3, "of": 2, "byte_offset": 0}]})");
     EXPECT_THROW(loadBundleMetadata(bundle.bundleJsonPath()), BundleMetadataError);
+}
+
+// ---------------------------------------------------------------------------
+// start_offsets
+// ---------------------------------------------------------------------------
+
+TEST(TestParseBundleMetadataJson, StartOffsetsParseInFormatVersion2)
+{
+    const auto meta = parseBundleMetadataJson(nlohmann::json::parse(
+        R"({"format_version": 2, "start_offsets": [{"uid": 3, "start_offset": 2},
+                                                    {"uid": 7, "start_offset": 255}]})"));
+    ASSERT_EQ(meta.startOffsets.size(), 2u);
+    EXPECT_EQ(meta.startOffsets[0], (TensorStartOffset{3, 2}));
+    EXPECT_EQ(meta.startOffsets[1], (TensorStartOffset{7, 255}));
+}
+
+TEST(TestParseBundleMetadataJson, StartOffsetsAbsentLeavesTheListEmpty)
+{
+    const auto meta = parseBundleMetadataJson(nlohmann::json::parse(R"({"format_version": 2})"));
+    EXPECT_TRUE(meta.startOffsets.empty());
+}
+
+TEST(TestParseBundleMetadataJson, ThrowsOnStartOffsetsInFormatVersion1)
+{
+    const auto error = metadataError(
+        R"({"format_version": 1, "start_offsets": [{"uid": 3, "start_offset": 2}]})");
+    EXPECT_NE(error.find("case_0: start_offsets needs format_version 2"), std::string::npos)
+        << error;
+}
+
+// The version check wins over any problem in the value.
+TEST(TestParseBundleMetadataJson, ThrowsOnMalformedStartOffsetsInFormatVersion1)
+{
+    for(const auto* startOffsets :
+        {"[]", "3", R"([{"uid": 3}])", R"([{"uid": 3, "start_offset": 0}])"})
+    {
+        SCOPED_TRACE(startOffsets);
+        const auto error = metadataError(std::string(R"({"format_version": 1, "start_offsets": )")
+                                         + startOffsets + "}");
+        EXPECT_NE(error.find("case_0: start_offsets needs format_version 2"), std::string::npos)
+            << error;
+    }
+}
+
+TEST(TestParseBundleMetadataJson, ThrowsOnMalformedStartOffsets)
+{
+    struct Case
+    {
+        const char* startOffsets;
+        const char* rule;
+    };
+    const std::vector<Case> cases = {
+        {R"({"uid": 3, "start_offset": 2})", "start_offsets is not an array"},
+        {"[]", "start_offsets is empty"},
+        {"[3]", "start_offsets[0] is not an object"},
+        {R"([{"uid": 3}])", R"(start_offsets[0] (tensor 3) lacks "start_offset")"},
+        {R"([{"start_offset": 2}])", R"(start_offsets[0] lacks "uid")"},
+        {R"([{"uid": "3", "start_offset": 2}])",
+         R"(start_offsets[0]: "uid" is not a 64-bit signed integer)"},
+        {R"([{"uid": 3, "start_offset": 2.5}])",
+         R"(start_offsets[0] (tensor 3): "start_offset" is not a 64-bit signed integer)"},
+        {R"([{"uid": 3, "start_offset": 9223372036854775808}])",
+         R"(start_offsets[0] (tensor 3): "start_offset" is not a 64-bit signed integer)"},
+        {R"([{"uid": 3, "start_offset": 2, "alignment": 1}])",
+         R"(start_offsets[0] (tensor 3) has unknown key "alignment")"},
+        {R"([{"uid": 3, "start_offset": 0}])",
+         "start offset of tensor 3: start_offset 0 is not in the range 1 to 255"},
+        {R"([{"uid": 3, "start_offset": -1}])",
+         "start offset of tensor 3: start_offset -1 is not in the range 1 to 255"},
+        {R"([{"uid": 3, "start_offset": 256}])",
+         "start offset of tensor 3: start_offset 256 is not in the range 1 to 255"},
+        {R"([{"uid": 3, "start_offset": 2}, {"uid": 3, "start_offset": 4}])",
+         "start offset of tensor 3: the tensor appears in more than one entry"},
+    };
+    for(const auto& c : cases)
+    {
+        SCOPED_TRACE(c.startOffsets);
+        const auto error = metadataError(std::string(R"({"format_version": 2, "start_offsets": )")
+                                         + c.startOffsets + "}");
+        EXPECT_NE(error.find(std::string("case_0: ") + c.rule), std::string::npos) << error;
+    }
+}
+
+TEST(TestLoadBundleMetadata, StartOffsetsInAVersion1FileThrows)
+{
+    const TempBundle bundle(
+        R"({"format_version": 1, "start_offsets": [{"uid": 3, "start_offset": 2}]})");
+    EXPECT_THROW(loadBundleMetadata(bundle.bundleJsonPath()), BundleMetadataError);
+}
+
+TEST(TestLoadBundleMetadata, StartOffsetsInAVersion2FileLoad)
+{
+    const TempBundle bundle(
+        R"({"format_version": 2, "start_offsets": [{"uid": 3, "start_offset": 1}]})");
+    const auto meta = loadBundleMetadata(bundle.bundleJsonPath());
+    ASSERT_TRUE(meta.has_value());
+    EXPECT_EQ(meta->startOffsets, (std::vector<TensorStartOffset>{{3, 1}}));
 }
 
 // NOLINTEND(readability-identifier-naming)

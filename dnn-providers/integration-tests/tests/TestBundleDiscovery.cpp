@@ -2481,6 +2481,233 @@ TEST_F(TestBundleDiscoveryFixture, AliasInABundleWithSomeInputBlobsFailsTheLoad)
         << message;
 }
 
+// ---------------------------------------------------------------------------
+// start_offsets: the load-time rules
+// ---------------------------------------------------------------------------
+
+namespace
+{
+
+nlohmann::json startOffsetMetadata(const std::string& startOffsets,
+                                   const std::string& aliases = std::string())
+{
+    auto metadata = nlohmann::json{{"format_version", 2},
+                                   {"start_offsets", nlohmann::json::parse(startOffsets)}};
+    if(!aliases.empty())
+    {
+        metadata["aliases"] = nlohmann::json::parse(aliases);
+    }
+    return metadata;
+}
+
+struct StartOffsetRuleCase
+{
+    std::string name;
+    std::string startOffsets;
+    std::string aliases;
+    std::string patches;
+    std::string message;
+};
+
+// Each case breaks one rule on the graph of createMinimalBundle() or of a sweep case of
+// createTemplateSweep(): x=0 [2,3,4,5]; uids 1-4 [1,3,1,1]; y=5 is the output. Every
+// tensor has the default alignment 16.
+std::vector<StartOffsetRuleCase> startOffsetRuleCases()
+{
+    const std::string tensor3 = R"([{"uid": 3, "start_offset": 16}])";
+    const std::string view3Of2 = R"([{"uid": 3, "of": 2, "byte_offset": 0}])";
+    return {
+        {"not_in_graph",
+         R"([{"uid": 9, "start_offset": 16}])",
+         "",
+         "[]",
+         "start offset of tensor 9: the tensor is not a tensor of the graph"},
+        {"virtual",
+         tensor3,
+         "",
+         R"([{"uid": 3, "set": {"virtual": true}}])",
+         "start offset of tensor 3: the tensor is virtual"},
+        {"runtime_pass_by_value",
+         tensor3,
+         "",
+         R"([{"uid": 3, "set": {"is_runtime_pass_by_value": true}}])",
+         "start offset of tensor 3: the tensor is passed by value at run time"},
+        {"constant_value",
+         tensor3,
+         "",
+         R"([{"uid": 3, "set": {"value_type": "Float32Value", "value": 1.0}}])",
+         "start offset of tensor 3: the tensor has a constant value"},
+        {"alias_view",
+         tensor3,
+         view3Of2,
+         "[]",
+         "start offset of tensor 3: the tensor is alias view 3 of owner 2; a view moves with "
+         "its owner"},
+        {"sub_byte",
+         tensor3,
+         "",
+         R"([{"uid": 3, "set": {"data_type": "fp4_e2m1"}}])",
+         "start offset of tensor 3: the tensor has the sub-byte data type FP4_E2M1"},
+        {"default_alignment_does_not_divide_the_offset",
+         R"([{"uid": 3, "start_offset": 2}])",
+         "",
+         "[]",
+         "start offset of tensor 3: start_offset 2 is not a multiple of the tensor's "
+         "alignment 16"},
+        {"declared_alignment_does_not_divide_the_offset",
+         R"([{"uid": 5, "start_offset": 6}])",
+         "",
+         R"([{"uid": 5, "set": {"alignment": 4}}])",
+         "start offset of tensor 5: start_offset 6 is not a multiple of the tensor's "
+         "alignment 4"},
+    };
+}
+
+} // namespace
+
+TEST_F(TestBundleDiscoveryFixture, StartOffsetRuleViolationsFailTheLoadOfABundle)
+{
+    for(const auto& c : startOffsetRuleCases())
+    {
+        SCOPED_TRACE(c.name);
+        const auto root = _tempDir / ("direct_" + c.name);
+        const auto dir = root / "op" / "shifted";
+        createMinimalBundle(dir, "shifted");
+        auto graph = readJsonFile(dir / "shifted.json");
+        setTensorFields(graph, nlohmann::json::parse(c.patches));
+        writeJsonFile(dir / "shifted.json", graph);
+        writeJsonFile(dir / "shifted.meta.json", startOffsetMetadata(c.startOffsets, c.aliases));
+
+        EXPECT_THROW(loadIntegrationTestBundle(dir / "shifted.json"), BundleMetadataError);
+        const auto message = failedLoadMessage(root, _sweeps);
+        EXPECT_NE(message.find(c.message), std::string::npos) << message;
+    }
+}
+
+TEST_F(TestBundleDiscoveryFixture, StartOffsetRuleViolationsFailTheLoadOfASweepCase)
+{
+    for(const auto& c : startOffsetRuleCases())
+    {
+        SCOPED_TRACE(c.name);
+        const auto root = _tempDir / ("sweep_" + c.name);
+        const auto sweepDir = root / "quick" / "BatchnormFwdInference" / "Inference";
+        createTemplateSweep(sweepDir,
+                            {{"shifted_fp32_nchw",
+                              "float",
+                              {2, 3, 4, 5},
+                              {60, 20, 5, 1},
+                              {1, 3, 1, 1},
+                              {3, 1, 1, 1},
+                              false, // includeGolden
+                              false, // goldenHasPath
+                              true}}); // includeMetadata
+        auto sweepJson = readJsonFile(sweepDir / "sweep.json");
+        auto& caseJson = sweepJson["cases"][0];
+        caseJson["metadata"] = startOffsetMetadata(c.startOffsets, c.aliases);
+        caseJson["tensor_patches"] = nlohmann::json::parse(c.patches);
+        writeJsonFile(sweepDir / "sweep.json", sweepJson);
+
+        const auto message = failedLoadMessage(root, _sweeps);
+        EXPECT_NE(message.find(c.message), std::string::npos) << message;
+    }
+}
+
+// An input and an output, each with an alignment that divides its offset, and an alias
+// view of a moved owner whose offset keeps the view's alignment.
+TEST_F(TestBundleDiscoveryFixture, ValidStartOffsetsLoadInABundleAndASweepCase)
+{
+    using hipdnn_integration_tests::TensorStartOffset;
+    const std::string startOffsets
+        = R"([{"uid": 0, "start_offset": 2}, {"uid": 5, "start_offset": 1},
+              {"uid": 2, "start_offset": 4}])";
+    const std::string aliases = R"([{"uid": 3, "of": 2, "byte_offset": 8}])";
+    const auto patches = nlohmann::json::parse(
+        R"([{"uid": 0, "set": {"alignment": 2}},
+            {"uid": 5, "set": {"alignment": 0}},
+            {"uid": 2, "set": {"alignment": 4}},
+            {"uid": 3, "set": {"alignment": 4, "dims": [1, 1, 1, 1]}}])");
+    const std::vector<TensorStartOffset> expected = {{0, 2}, {5, 1}, {2, 4}};
+
+    const auto dir = _tempDir / "op" / "shifted";
+    createMinimalBundle(dir, "shifted");
+    auto graph = readJsonFile(dir / "shifted.json");
+    setTensorFields(graph, patches);
+    writeJsonFile(dir / "shifted.json", graph);
+    writeJsonFile(dir / "shifted.meta.json", startOffsetMetadata(startOffsets, aliases));
+    const auto direct = loadIntegrationTestBundle(dir / "shifted.json");
+    ASSERT_TRUE(std::holds_alternative<IntegrationTestBundle>(direct));
+    EXPECT_EQ(std::get<IntegrationTestBundle>(direct).metadata.startOffsets, expected);
+
+    const auto sweepDir = _tempDir / "quick" / "BatchnormFwdInference" / "Inference";
+    createTemplateSweep(sweepDir,
+                        {{"shifted_fp32_nchw",
+                          "float",
+                          {2, 3, 4, 5},
+                          {60, 20, 5, 1},
+                          {1, 3, 1, 1},
+                          {3, 1, 1, 1},
+                          false, // includeGolden
+                          false, // goldenHasPath
+                          true}}); // includeMetadata
+    auto sweepJson = readJsonFile(sweepDir / "sweep.json");
+    sweepJson["cases"][0]["metadata"] = startOffsetMetadata(startOffsets, aliases);
+    sweepJson["cases"][0]["tensor_patches"] = patches;
+    writeJsonFile(sweepDir / "sweep.json", sweepJson);
+
+    const auto discovered = discoverBundles(_tempDir);
+    const auto* sweepCase = findByTest(discovered, "shifted_fp32_nchw");
+    ASSERT_NE(sweepCase, nullptr);
+    const auto sweep = loadIntegrationTestBundle(*sweepCase, _sweeps);
+    ASSERT_TRUE(std::holds_alternative<IntegrationTestBundle>(sweep));
+    EXPECT_EQ(std::get<IntegrationTestBundle>(sweep).metadata.startOffsets, expected);
+}
+
+// The offset applies to the engine's copy only, so a bundle with golden data or tensor
+// blobs keeps them.
+TEST_F(TestBundleDiscoveryFixture, StartOffsetInABundleWithGoldenDataLoads)
+{
+    const auto startOffsets = startOffsetMetadata(R"([{"uid": 5, "start_offset": 16}])");
+
+    const auto dir = _tempDir / "op" / "shifted";
+    createLoadableBundle(dir, "shifted");
+    writeJsonFile(dir / "shifted.meta.json", startOffsets);
+    std::ofstream(dir / "shifted.tensors.dvc") << "outs:\n";
+    const auto direct = loadIntegrationTestBundle(dir / "shifted.json");
+    ASSERT_TRUE(std::holds_alternative<IntegrationTestBundle>(direct));
+    const auto& directBundle = std::get<IntegrationTestBundle>(direct);
+    EXPECT_TRUE(directBundle.hasGoldenOutputs);
+    EXPECT_EQ(directBundle.metadata.startOffsets.size(), 1u);
+
+    const auto sweepDir = _tempDir / "quick" / "BatchnormFwdInference" / "Inference";
+    createTemplateSweep(
+        sweepDir,
+        {{"shifted_fp32_nchw", "float", {2, 3, 4, 5}, {60, 20, 5, 1}, {1, 3, 1, 1}, {3, 1, 1, 1}}});
+    auto sweepJson = readJsonFile(sweepDir / "sweep.json");
+    sweepJson["cases"][0]["metadata"] = startOffsets;
+    writeJsonFile(sweepDir / "sweep.json", sweepJson);
+
+    const auto discovered = discoverBundles(_tempDir);
+    const auto* sweepCase = findByTest(discovered, "shifted_fp32_nchw");
+    ASSERT_NE(sweepCase, nullptr);
+    const auto sweep = loadIntegrationTestBundle(*sweepCase, _sweeps);
+    ASSERT_TRUE(std::holds_alternative<IntegrationTestBundle>(sweep));
+    const auto& sweepBundle = std::get<IntegrationTestBundle>(sweep);
+    EXPECT_TRUE(sweepBundle.hasGoldenOutputs);
+    EXPECT_EQ(sweepBundle.metadata.startOffsets.size(), 1u);
+}
+
+TEST_F(TestBundleDiscoveryFixture, StartOffsetInFormatVersion1MetadataFailsTheLoad)
+{
+    const auto dir = _tempDir / "op" / "shifted";
+    createMinimalBundle(dir, "shifted");
+    writeJsonFile(dir / "shifted.meta.json",
+                  nlohmann::json{{"format_version", 1},
+                                 {"start_offsets",
+                                  nlohmann::json::parse(R"([{"uid": 5, "start_offset": 16}])")}});
+    const auto message = failedLoadMessage(_tempDir, _sweeps);
+    EXPECT_NE(message.find("start_offsets needs format_version 2"), std::string::npos) << message;
+}
+
 TEST_F(TestBundleDiscoveryFixture, AliasInFormatVersion1MetadataFailsTheLoad)
 {
     const auto v1Aliases = nlohmann::json{
@@ -2653,6 +2880,10 @@ std::vector<AbsentRuleCase> absentRuleCases()
          metadataField("aliases",
                        nlohmann::json::array({{{"uid", 2}, {"of", SINK}, {"byte_offset", 0}}})),
          "absent tensor 0 is the owner of a metadata aliases entry"},
+        {"start_offsets_entry",
+         metadataField("start_offsets",
+                       nlohmann::json::array({{{"uid", SINK}, {"start_offset", 16}}})),
+         "absent tensor 0 has a metadata start_offsets entry"},
         {"golden_declared",
          caseField("golden", nlohmann::json{{"path", "golden/absent_case/tensors.dvc"}}),
          "absent_tensors and golden data do not mix"},
