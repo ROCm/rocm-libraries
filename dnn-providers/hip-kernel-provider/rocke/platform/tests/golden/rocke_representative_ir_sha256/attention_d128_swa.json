@@ -5,10 +5,10 @@
       "cases": {
         "attention_d128_swa/gfx942/4warp_gqa_fold": {
           "arch": "gfx942",
-          "bytes": 408566,
+          "bytes": 398438,
           "family": "attention_d128_swa",
           "kernel_name": "rocke_uattn2d_tiled_d128_b16_t32_g4_bf16_sw_wpe2_mw32_4wgqa_fold",
-          "sha256": "0c3c01d6023e7fece924282414af5eadda2b46bd9265a4711cea71b373b9439c",
+          "sha256": "27332106786c2556edbe87534f3c3091f416744e1f4bdc8574d0f9955a5307e7",
           "status": "ok"
         }
       },
@@ -18,10 +18,10 @@
       "cases": {
         "attention_d128_swa/gfx942/4warp_gqa_fold": {
           "arch": "gfx942",
-          "bytes": 408573,
+          "bytes": 398445,
           "family": "attention_d128_swa",
           "kernel_name": "rocke_uattn2d_tiled_d128_b16_t32_g4_bf16_sw_wpe2_mw32_4wgqa_fold",
-          "sha256": "c4b61f172d05ecb10e38d9c6cd7a29fcb5518f366f7a6d77a6e0899fe0a8d03b",
+          "sha256": "f21f758dd2fce376bbbc2cfed37875427c90f87f71cd7b556e361cc3ccfbf280",
           "status": "ok"
         }
       },
@@ -31,10 +31,10 @@
       "cases": {
         "attention_d128_swa/gfx942/4warp_gqa_fold": {
           "arch": "gfx942",
-          "bytes": 408637,
+          "bytes": 398509,
           "family": "attention_d128_swa",
           "kernel_name": "rocke_uattn2d_tiled_d128_b16_t32_g4_bf16_sw_wpe2_mw32_4wgqa_fold",
-          "sha256": "41a0c77c12071ad34f67e2349290b9838aba509d44e7bb9973dcdb67393f6a7e",
+          "sha256": "2c844b7c30e23d370aa5057b645020505ccca11954963fd905fc896bc64b67be",
           "status": "ok"
         }
       },
@@ -44,10 +44,10 @@
       "cases": {
         "attention_d128_swa/gfx942/4warp_gqa_fold": {
           "arch": "gfx942",
-          "bytes": 408637,
+          "bytes": 398509,
           "family": "attention_d128_swa",
           "kernel_name": "rocke_uattn2d_tiled_d128_b16_t32_g4_bf16_sw_wpe2_mw32_4wgqa_fold",
-          "sha256": "41a0c77c12071ad34f67e2349290b9838aba509d44e7bb9973dcdb67393f6a7e",
+          "sha256": "2c844b7c30e23d370aa5057b645020505ccca11954963fd905fc896bc64b67be",
           "status": "ok"
         }
       },
