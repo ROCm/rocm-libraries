@@ -380,45 +380,30 @@ static __host__ const uint32_t *getCPUWorkQueuePopCountAddr() {
     return popCountAddr;
 }
 
-template <typename T>
-static __global__ void readDeviceWordKernel(const T *src, T *dst) {
-    *dst = __hip_atomic_load(src, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
+// Copies between device memory and pinned host memory on the DMA (SDMA) engine, and returns once it has landed. A
+// plain hipMemcpyAsync of up to GPU_FORCE_BLIT_COPY_SIZE (16 KB by default) runs as a blit kernel with a 512- or
+// 1024-lane workgroup, which can't be placed beside a dense threading_main, so the host would wait forever. The copy
+// engine needs no compute units. hipMemcpyDeviceToDeviceNoCU is what selects it: HIP picks the engine from the kind
+// alone, so it also applies when one side is pinned host memory.
+static __host__ void copyOnDmaEngine(void *dst, const void *src, size_t bytes) {
+    __LIBHIPTHREADS_HIP_CHECK__(hipMemcpyAsync(dst, src, bytes, hipMemcpyDeviceToDeviceNoCU, getEnqueingStream()));
+    __LIBHIPTHREADS_HIP_CHECK__(hipStreamSynchronize(getEnqueingStream()));
 }
 
-// wthread::join() reads link_to_self from a block the device pass never sees (#ifndef __HIP_DEVICE_COMPILE__), so
-// without this the kernel would be missing at launch.
-template __global__ void readDeviceWordKernel<WorkNode_Header **>(WorkNode_Header **const *, WorkNode_Header ***);
-
-// Reads one word of device memory while threading_main is running. A device-to-host hipMemcpyAsync is a blit kernel
-// with a 1024-lane workgroup, which never fits beside a scheduler holding over half of each SIMD's wave slots, so the
-// host would wait forever. A single lane fits in any free slot.
+// Reads one word of device memory while threading_main is running.
 template <typename T>
 static __host__ T readDeviceWord(const T *src) {
     // Never freed: hipHostFree waits for all running kernels, threading_main included.
     thread_local T *slot = [](){
         void *temp;
-        __LIBHIPTHREADS_HIP_CHECK__(hipHostMalloc(&temp, sizeof(T), hipHostMallocMapped | hipHostMallocCoherent));
+        __LIBHIPTHREADS_HIP_CHECK__(hipHostMalloc(&temp, sizeof(T), hipHostMallocDefault));
         return static_cast<T *>(temp);
     }();
-    hipLaunchKernelGGL(readDeviceWordKernel<T>, dim3(1), dim3(1), 0, getEnqueingStream(), src, slot);
-    __LIBHIPTHREADS_HIP_CHECK__(hipStreamSynchronize(getEnqueingStream()));
+    copyOnDmaEngine(slot, src, sizeof(T));
     return *const_cast<volatile T *>(slot);
 }
 
-static __global__ void writeDeviceBytesKernel(const unsigned char *src, unsigned char *dst, size_t bytes) {
-    const size_t i = static_cast<size_t>(blockIdx.x) * blockDim.x + threadIdx.x;
-    if (((reinterpret_cast<uintptr_t>(dst) | bytes) & 7U) == 0) {
-        if (i < bytes / 8) {
-            reinterpret_cast<uint64_t *>(dst)[i] = reinterpret_cast<const uint64_t *>(src)[i];
-        }
-    } else if (i < bytes) {
-        dst[i] = src[i];
-    }
-}
-
-// Copies host memory to device memory while threading_main is running, and returns once it has landed. A host-to-device
-// hipMemcpyAsync is a blit kernel with 512-lane workgroups, which never fit beside a scheduler that has filled a WGP's
-// registers, so the host would wait forever. Single-wave blocks each fit in any free slot.
+// Copies host memory to device memory while threading_main is running.
 static __host__ void writeDeviceBytes(void *dst, const void *src, size_t bytes) {
     // Never freed: hipHostFree waits for all running kernels, threading_main included.
     static unsigned char *staging = nullptr;
@@ -429,18 +414,12 @@ static __host__ void writeDeviceBytes(void *dst, const void *src, size_t bytes) 
     if (bytes > capacity) {
         const size_t newCapacity = ::std::max<size_t>(bytes, 2 * capacity);
         void *temp;
-        __LIBHIPTHREADS_HIP_CHECK__(hipHostMalloc(&temp, newCapacity, hipHostMallocMapped | hipHostMallocCoherent));
+        __LIBHIPTHREADS_HIP_CHECK__(hipHostMalloc(&temp, newCapacity, hipHostMallocDefault));
         staging = static_cast<unsigned char *>(temp);
         capacity = newCapacity;
     }
     ::std::memcpy(staging, src, bytes);
-
-    constexpr uint32_t waveLanes = 32;
-    const size_t lanes = ((reinterpret_cast<uintptr_t>(dst) | bytes) & 7U) == 0 ? bytes / 8 : bytes;
-    const uint32_t blocks = static_cast<uint32_t>((lanes + waveLanes - 1) / waveLanes);
-    hipLaunchKernelGGL(writeDeviceBytesKernel, dim3(blocks), dim3(waveLanes), 0, getEnqueingStream(), staging,
-                       static_cast<unsigned char *>(dst), bytes);
-    __LIBHIPTHREADS_HIP_CHECK__(hipStreamSynchronize(getEnqueingStream()));
+    copyOnDmaEngine(dst, staging, bytes);
 }
 
 static __host__ void waitForSpaceInCPUQueue(const uint32_t myPushCount) {
