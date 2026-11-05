@@ -461,6 +461,10 @@ def build_ued(config: IngestorConfig, ids: dict) -> dict:
     if config.engine.has_heuristic:
         # RFC 0019 §3.1: the loader rejects a bare top-level `heuristic` pointer.
         ued["sort_kernel_catalog"] = {"default": ids["uhd"]}
+        # Trained models per arch key, beside the native default, as `uhd_gen promote`
+        # binds them; emitting them keeps a regeneration from dropping the binding.
+        for arch, ranker in sorted(config.engine.trained_rankers.items()):
+            ued["sort_kernel_catalog"][arch] = list(ranker.uhd_ids)
     if config.engine.knobs:
         ued["knobs"] = list(config.engine.knobs)
     if config.engine.behavior_notes:

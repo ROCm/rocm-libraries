@@ -877,6 +877,10 @@ engine:
                                   # Must be a single path stem (^[A-Za-z0-9_][A-Za-z0-9_-]*$).
   knobs: [block_size]             # optional; must all be int-typed kmd_fields
   heuristic: native | none        # optional, default "native"; "none" omits the UHD
+  trained_rankers:                # optional (needs heuristic: native); see below
+    gfx950:                       # a gfx arch key of the UED's sort_kernel_catalog
+      uhd_ids: [<uuid>, <uuid>]   # the UHDs uhd_gen promote bound, one per metric
+      trained_catalog_sha256: <64 hex>   # tools/catalog_fingerprint.py of the trained-on KDP
 
 kmd_fields:                       # the KMD's fields[] -- one per axis this engine's
   - name: block_size              # kernels vary along
@@ -916,6 +920,28 @@ packs:
         priority: 0
         arch: []                   # optional; must be a subset of the pack's arch
 ```
+
+### Trained rankers: `engine.trained_rankers`
+
+A trained `sort_kernel_catalog` model (the `hipdnn-uhd` skill; `uhd_gen promote`) is bound
+in the UED as `"<arch>": [<uhd id>, ...]` beside the native `default`, and installed under the
+bundle's `heuristics/<ued id>/sort_kernel_catalog/<arch>/<metric>/`. Record the binding in
+both the selection and the manifest (they share the engine block), so a regeneration emits it
+instead of dropping it; the ids are the `id`s of the promoted `heuristic.uhd.json` files.
+
+The descriptor loader ties a model only to its engine's UED/KMD/UMD ids, so a catalog edit
+that keeps those ids would leave the model ranking a catalog it never saw, silently.
+`trained_catalog_sha256` records the catalog the model was trained on
+(`codegen/catalog_fingerprint.py`: each kernel's name, metadata and spec, independent of ids
+and order), and `tests/test_trained_rankers.py` fails when the shipped KDP no longer matches.
+After a catalog change, retrain on the new catalog and record the new fingerprint:
+
+```bash
+python3 tools/catalog_fingerprint.py <bundle>/artifacts/<pack>.kdp.json
+```
+
+The same test checks that the shipped UED binds exactly the recorded ids and, with the
+heuristics pulled from DVC, that each is installed.
 
 ### The engine manifest and `reduction:`
 

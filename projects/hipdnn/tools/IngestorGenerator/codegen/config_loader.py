@@ -57,6 +57,7 @@ from .models import (
     KmdField,
     PackSpec,
     SlotSpec,
+    TrainedRanker,
 )
 
 
@@ -209,6 +210,11 @@ def load_config(path: Path) -> IngestorConfig:
         census_name_symbol=engine_raw.get("census_name_symbol"),
         shared_workspace=engine_raw.get("shared_workspace", ""),
         slug_override=engine_raw.get("slug"),
+        trained_rankers=_read_trained_rankers(
+            engine_raw.get("trained_rankers"),
+            slotted=slotted,
+            heuristic=engine_raw.get("heuristic", "native"),
+        ),
     )
 
     kmd_fields = _read_kmd_fields(raw.get("kmd_fields", []), "kmd_fields")
@@ -1327,6 +1333,67 @@ _KNOWN_TOP = frozenset(
         "reduction",
     }
 )
+_UUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
+_SHA256 = re.compile(r"^[0-9a-f]{64}$")
+_ARCH_KEY = re.compile(r"^gfx[0-9a-f]+$")
+
+
+def _read_trained_rankers(raw, *, slotted: bool, heuristic) -> dict:
+    """``engine.trained_rankers``: arch key -> ``uhd_ids`` (the UHDs ``uhd_gen promote``
+    bound under that key, one per metric) and ``trained_catalog_sha256``. Refused on a
+    slotted engine (its rankers are per slot) and on one with no native heuristic (the
+    trained models sit beside its ``default``)."""
+    if raw is None:
+        return {}
+    if not isinstance(raw, dict) or not raw:
+        raise ConfigError(
+            "'engine.trained_rankers' must be a non-empty mapping of arch key to "
+            f"{{uhd_ids, trained_catalog_sha256}}; got {raw!r}."
+        )
+    if slotted:
+        raise ConfigError(
+            "'engine.trained_rankers' is engine-level; a slotted engine binds its rankers "
+            "per slot."
+        )
+    if heuristic == "none":
+        raise ConfigError(
+            "'engine.trained_rankers' needs 'engine.heuristic: native': the trained models "
+            "are bound beside the native default."
+        )
+    rankers = {}
+    for arch, entry in raw.items():
+        where = f"'engine.trained_rankers.{arch}'"
+        if not isinstance(arch, str) or not _ARCH_KEY.match(arch):
+            raise ConfigError(f"{where}: the key must be a gfx arch (e.g. gfx950).")
+        if not isinstance(entry, dict) or set(entry) != {
+            "uhd_ids",
+            "trained_catalog_sha256",
+        }:
+            raise ConfigError(
+                f"{where} must state exactly 'uhd_ids' and 'trained_catalog_sha256'; got "
+                f"{entry!r}."
+            )
+        ids = entry["uhd_ids"]
+        if (
+            not isinstance(ids, list)
+            or not ids
+            or any(not isinstance(i, str) or not _UUID.match(i) for i in ids)
+            or len(set(ids)) != len(ids)
+        ):
+            raise ConfigError(
+                f"{where} 'uhd_ids' must be a non-empty list of distinct lowercase UUIDs; "
+                f"got {ids!r}."
+            )
+        digest = entry["trained_catalog_sha256"]
+        if not isinstance(digest, str) or not _SHA256.match(digest):
+            raise ConfigError(
+                f"{where} 'trained_catalog_sha256' must be 64 lowercase hex digits "
+                f"(tools/catalog_fingerprint.py); got {digest!r}."
+            )
+        rankers[arch] = TrainedRanker(uhd_ids=list(ids), trained_catalog_sha256=digest)
+    return rankers
+
+
 _KNOWN_ENGINE = frozenset(
     {
         "name",
@@ -1337,6 +1404,7 @@ _KNOWN_ENGINE = frozenset(
         "census_name_symbol",
         "shared_workspace",
         "slug",
+        "trained_rankers",
     }
 )
 #: RFC 0021 §4's per-slot selection members, plus the slot's own ``specialization``.
