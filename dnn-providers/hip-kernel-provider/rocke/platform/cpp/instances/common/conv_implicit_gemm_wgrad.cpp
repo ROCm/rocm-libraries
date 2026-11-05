@@ -1038,10 +1038,18 @@ bool rocke_implicit_gemm_conv_wgrad_is_valid_spec(const rocke_implicit_gemm_conv
     if(s->prefetch_addr && (s->async_dma || s->unroll_k))
     {
         if(reason && reason_cap)
-            snprintf(reason,
-                     reason_cap,
-                     "prefetch_addr is not supported with %s",
-                     s->async_dma ? "async_dma" : "unroll_k");
+        {
+            if(s->async_dma)
+                snprintf(reason,
+                         reason_cap,
+                         "prefetch_addr is not supported with async_dma: the direct "
+                         "global->LDS ping-pong has its own K loop");
+            else
+                snprintf(reason,
+                         reason_cap,
+                         "prefetch_addr is not supported with unroll_k: the "
+                         "double-buffered K loop has its own address schedule");
+        }
         return false;
     }
 

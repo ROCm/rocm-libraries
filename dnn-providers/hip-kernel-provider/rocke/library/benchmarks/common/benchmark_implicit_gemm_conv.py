@@ -4692,6 +4692,22 @@ def _cache_dispatch(args, arch, target, cases) -> int:
     return _run_from_cache(args, arch, target, cases, cache, directions)
 
 
+def _filter_wgrad_two_stage_candidates(candidates, two_stage_mode):
+    """Cached-candidate wgrad two-stage filter.
+
+    By default both split-K reductions compete: the cached two-stage
+    (scratch + reduce) kernels are timed next to the packed-atomic ones
+    whatever C/groups is -- the JIT sweep builds them for odd C/groups only,
+    but here they are already compiled, and deep f32-workspace splits beat
+    the atomic ones on many even shapes. Only an explicit
+    ``--two-stage never`` drops them outright; "auto" and "always" leave
+    ``candidates`` untouched regardless of C/groups parity.
+    """
+    if two_stage_mode != "never":
+        return candidates
+    return [c for c in candidates if not c[0].two_stage]
+
+
 def _run_from_cache(args, arch, target, cases, cache, directions) -> int:
     """Benchmark every cached kernel that can run each requested case.
 
@@ -4816,14 +4832,10 @@ def _run_from_cache(args, arch, target, cases, cache, directions) -> int:
                         flush=True,
                     )
                     continue
-            if direction == "wgrad" and args.two_stage == "never":
-                # By default both split-K reductions compete: the cached
-                # two-stage (scratch + reduce) kernels are timed next to the
-                # packed-atomic ones whatever C/groups is -- the JIT sweep
-                # builds them for odd C/groups only, but here they are already
-                # compiled, and deep f32-workspace splits beat the atomic ones
-                # on many even shapes. "never" drops them outright.
-                candidates = [c for c in candidates if not c[0].two_stage]
+            if direction == "wgrad":
+                candidates = _filter_wgrad_two_stage_candidates(
+                    candidates, args.two_stage
+                )
                 if not candidates:
                     print(
                         f"Case {case_idx} {problem.short()} {case_dtype} wgrad: "

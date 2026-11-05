@@ -362,6 +362,35 @@ void check_validator()
                   "wgrad async_dma requires lds_k_outer=True: the direct global->LDS load "
                   "needs a stride-1 reduction axis, which wgrad only has once the tile is "
                   "stored K-outer"));
+    /* prefetch_addr / register_prefetch reject reasons, verbatim from Python
+     * (_prefetch_addr_conflict / _register_prefetch_conflict). streamk="off"
+     * isolates these gates from the streamk/async_dma conflict checked above. */
+    s = spec(dense());
+    s.streamk = "off";
+    s.lds_k_outer = true;
+    s.async_dma = true;
+    s.prefetch_addr = true;
+    CHECK(rejects(s,
+                  "gfx950",
+                  "prefetch_addr is not supported with async_dma: the direct "
+                  "global->LDS ping-pong has its own K loop"));
+    s = spec(dense());
+    s.streamk = "off";
+    s.unroll_k = true;
+    s.prefetch_addr = true;
+    CHECK(rejects(s,
+                  "gfx950",
+                  "prefetch_addr is not supported with unroll_k: the "
+                  "double-buffered K loop has its own address schedule"));
+    s = spec(dense());
+    s.register_prefetch = true;
+    CHECK(rejects(s, "gfx950", "register_prefetch requires prefetch_addr=True"));
+    s = spec(dense());
+    s.streamk = "off";
+    s.prefetch_addr = true;
+    s.register_prefetch = true;
+    CHECK(rejects(s, "gfx950", "register_prefetch requires pipeline='compv3'; got pipeline='mem'"));
+
     s = spec(dense());
     s.tile_m = 96;
     CHECK(rejects(s,
