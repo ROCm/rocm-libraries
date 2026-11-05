@@ -37,6 +37,7 @@ rocsparse_status rocsparse::cscsv_diagonal_solve(rocsparse_handle            han
 {
     ROCSPARSE_ROUTINE_TRACE;
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::cscsv_checkarg_matrix_properties(A));
+#if defined(ROCSPARSE_WITH_SPTRSV_CSC)
     if(trans == rocsparse_operation_none)
     {
         const int64_t batch_count = y->batch_count;
@@ -82,6 +83,7 @@ rocsparse_status rocsparse::cscsv_diagonal_solve(rocsparse_handle            han
                                       handle->pointer_mode == rocsparse_pointer_mode_host));
         return rocsparse_status_success;
     }
+#endif
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::diagonal_solve_csc(handle,
                                                             trans,
                                                             modifier,

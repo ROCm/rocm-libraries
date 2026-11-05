@@ -27,6 +27,7 @@
 #include "rocsparse_cscsv_info.hpp"
 #include "rocsparse_handle.hpp"
 
+#if defined(ROCSPARSE_WITH_SPTRSV_CSC)
 namespace rocsparse
 {
     typedef rocsparse_status (*cscsv_build_tasks_t)(rocsparse_handle     handle,
@@ -51,3 +52,4 @@ namespace rocsparse
         cscsv_build_tasks_buffer_size_find(rocsparse::cscsv_build_tasks_buffer_size_t* launch,
                                            rocsparse_indextype                         i_type);
 }
+#endif

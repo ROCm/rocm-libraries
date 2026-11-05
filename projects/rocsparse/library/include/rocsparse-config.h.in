@@ -38,4 +38,7 @@
 #cmakedefine ROCSPARSE_WITH_TRSM_REFACTORING
 #cmakedefine ROCSPARSE_WITH_SPSORT
 
+/* rocSPARSE 5.3 */
+#cmakedefine ROCSPARSE_WITH_SPTRSV_CSC
+
 #endif /* ROCSPARSE_CONFIG_H */

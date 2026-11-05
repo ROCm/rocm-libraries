@@ -32,6 +32,7 @@
 #include <sstream>
 #include <tuple>
 
+#if defined(ROCSPARSE_WITH_SPTRSV_CSC)
 namespace rocsparse
 {
     // For each batch instance, resets the dependency counters from the analysis and starts the
@@ -134,3 +135,4 @@ rocsparse_status rocsparse::cscsv_init_launch_find(rocsparse::cscsv_init_launch_
     launch[0] = it->second;
     return rocsparse_status_success;
 }
+#endif

@@ -65,8 +65,9 @@ namespace rocsparse
         size_t m_sum_size{};
     };
 
-    // CSC triangular solve. Without transpose, the system is solved on the columns of the matrix;
-    // the other operations solve the transposed CSR system.
+    // CSC triangular solve. Without transpose, the system is solved on the columns of the matrix
+    // (when rocSPARSE is built with BUILD_WITH_SPTRSV_CSC); the other operations solve the
+    // transposed CSR system.
     rocsparse_status cscsv_analysis_buffer_size(rocsparse_handle            handle,
                                                 rocsparse_operation         trans,
                                                 rocsparse_const_spmat_descr A,

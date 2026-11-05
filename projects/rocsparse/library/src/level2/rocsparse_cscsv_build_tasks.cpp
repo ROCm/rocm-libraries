@@ -35,6 +35,7 @@
 #include <sstream>
 #include <tuple>
 
+#if defined(ROCSPARSE_WITH_SPTRSV_CSC)
 namespace rocsparse
 {
     // Tasks per column: one per chunk of NUM_LANES * NUM_ITEMS entries, at least one.
@@ -255,3 +256,4 @@ rocsparse_status rocsparse::cscsv_build_tasks_find(rocsparse::cscsv_build_tasks_
     build[0] = it->second;
     return rocsparse_status_success;
 }
+#endif

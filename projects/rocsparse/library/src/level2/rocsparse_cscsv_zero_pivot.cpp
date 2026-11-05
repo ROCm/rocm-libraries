@@ -74,6 +74,7 @@ rocsparse_status rocsparse::cscsv_zero_pivot(rocsparse_handle     handle,
     return rocsparse::csrsv_zero_pivot(handle, info->get_csrsv_info(), indextype, position);
 }
 
+#if defined(ROCSPARSE_WITH_SPTRSV_CSC)
 rocsparse_status rocsparse::cscsv_seed_zero_pivot(rocsparse_handle     handle,
                                                   rocsparse_indextype  indextype,
                                                   rocsparse_diag_type  diag_type,
@@ -100,3 +101,4 @@ rocsparse_status rocsparse::cscsv_seed_zero_pivot(rocsparse_handle     handle,
     }
     return rocsparse_status_success;
 }
+#endif

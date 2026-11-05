@@ -27,6 +27,7 @@
 #include "rocsparse_cscsv_info.hpp"
 #include "rocsparse_handle.hpp"
 
+#if defined(ROCSPARSE_WITH_SPTRSV_CSC)
 namespace rocsparse
 {
     typedef rocsparse_status (*cscsv_analysis_launch_t)(rocsparse_handle     handle,
@@ -45,3 +46,4 @@ namespace rocsparse
                                                 rocsparse_indextype                 i_type,
                                                 rocsparse_indextype                 j_type);
 }
+#endif

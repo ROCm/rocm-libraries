@@ -26,6 +26,7 @@
 
 #include "rocsparse_handle.hpp"
 
+#if defined(ROCSPARSE_WITH_SPTRSV_CSC)
 namespace rocsparse
 {
     struct cscsv_kernel_constants_t
@@ -79,3 +80,4 @@ namespace rocsparse
                                              rocsparse_indextype              j_type,
                                              rocsparse_datatype               t_type);
 }
+#endif

@@ -26,6 +26,7 @@
 #include "rocsparse_cscsv_build_tasks_kernel.hpp"
 #include "rocsparse_utility.hpp"
 
+#if defined(ROCSPARSE_WITH_SPTRSV_CSC)
 rocsparse::cscsv_solve_buffer_layout_t::cscsv_solve_buffer_layout_t(int64_t             m,
                                                                     int64_t             batch_count,
                                                                     rocsparse_indextype j_type,
@@ -60,6 +61,7 @@ void* rocsparse::cscsv_solve_buffer_layout_t::sum(void* buffer) const
 {
     return reinterpret_cast<char*>(buffer) + this->m_ticket_size + this->m_rem_size;
 }
+#endif
 
 rocsparse_status rocsparse::cscsv_checkarg_matrix_properties(rocsparse_const_spmat_descr A)
 {
@@ -84,6 +86,7 @@ rocsparse_status rocsparse::cscsv_analysis_buffer_size(rocsparse_handle         
 {
     ROCSPARSE_ROUTINE_TRACE;
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::cscsv_checkarg_matrix_properties(A));
+#if defined(ROCSPARSE_WITH_SPTRSV_CSC)
     if(trans == rocsparse_operation_none)
     {
         buffer_size_in_bytes[0] = 0;
@@ -96,6 +99,7 @@ rocsparse_status rocsparse::cscsv_analysis_buffer_size(rocsparse_handle         
         }
         return rocsparse_status_success;
     }
+#endif
     _rocsparse_mat_descr   descr_csr;
     _rocsparse_spmat_descr mat_csr;
     rocsparse::build_csr_from_csc(*A, mat_csr, descr_csr);
@@ -114,6 +118,7 @@ rocsparse_status rocsparse::cscsv_solve_buffer_size(rocsparse_handle            
 {
     ROCSPARSE_ROUTINE_TRACE;
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::cscsv_checkarg_matrix_properties(A));
+#if defined(ROCSPARSE_WITH_SPTRSV_CSC)
     if(trans == rocsparse_operation_none)
     {
         buffer_size_in_bytes[0] = rocsparse::cscsv_solve_buffer_layout_t(
@@ -121,6 +126,7 @@ rocsparse_status rocsparse::cscsv_solve_buffer_size(rocsparse_handle            
                                       .size();
         return rocsparse_status_success;
     }
+#endif
     _rocsparse_mat_descr   descr_csr;
     _rocsparse_spmat_descr mat_csr;
     rocsparse::build_csr_from_csc(*A, mat_csr, descr_csr);
