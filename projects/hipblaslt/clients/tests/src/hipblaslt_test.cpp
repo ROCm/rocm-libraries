@@ -231,14 +231,14 @@ void catch_signals_and_exceptions_as_failures(std::function<void()> test, bool s
     t_handler = old_handler;
 }
 
-void launch_test_on_streams(std::function<void()> test, size_t numStreams, size_t numDevices)
+void launch_test_repeatedly(std::function<void()> test, size_t numRepeats, size_t numDevices)
 {
     size_t devices = numDevices > 1 ? numDevices : 1;
-    size_t streams = numStreams > 1 ? numStreams : 1;
+    size_t repeats = numRepeats > 1 ? numRepeats : 1;
     for(size_t i = 0; i < devices; ++i)
     {
         CHECK_HIP_ERROR(hipSetDevice(i));
-        for(size_t j = 0; j < streams; ++j)
+        for(size_t j = 0; j < repeats; ++j)
         {
             catch_signals_and_exceptions_as_failures(test, true);
         }
@@ -247,7 +247,7 @@ void launch_test_on_streams(std::function<void()> test, size_t numStreams, size_
 
 void launch_test_on_threads(std::function<void()> test,
                             size_t                numThreads,
-                            size_t                numStreams,
+                            size_t                numRepeats,
                             size_t                numDevices)
 {
     auto promise = std::make_unique<std::promise<void>[]>(numThreads);
@@ -257,11 +257,27 @@ void launch_test_on_threads(std::function<void()> test,
         future[i] = promise[i].get_future();
 
     for(size_t i = 0; i < numThreads; ++i)
-        g_thread_pool.submit([=] { launch_test_on_streams(test, numStreams, numDevices); },
+        g_thread_pool.submit([=] { launch_test_repeatedly(test, numRepeats, numDevices); },
                              std::move(promise[i]));
 
     for(size_t i = 0; i < numThreads; ++i)
         future[i].get(); //Wait for tasks to complete
+}
+
+TEST(TestExecution, smoke_RepeatsOnEachWorker)
+{
+    for(size_t repeats : {0, 1, 3})
+        for(size_t threads : {0, 3})
+        {
+            SCOPED_TRACE(::testing::Message() << "repeats=" << repeats << " threads=" << threads);
+            std::atomic<size_t> calls{0};
+            auto                test = [&] { ++calls; };
+            if(threads)
+                launch_test_on_threads(test, threads, repeats, 1);
+            else
+                launch_test_repeatedly(test, repeats, 1);
+            EXPECT_EQ(calls.load(), (repeats ? repeats : 1) * (threads ? threads : 1));
+        }
 }
 
 // Convert stream to normalized Google Test name
