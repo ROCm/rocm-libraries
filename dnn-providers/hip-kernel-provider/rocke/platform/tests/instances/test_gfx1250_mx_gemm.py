@@ -109,8 +109,10 @@ class MxGemmSpecTest(unittest.TestCase):
         self.assertIsNone(validate(_spec(*_BENCH, cluster_order="aid")))
         self.assertIsNone(validate(_spec(cluster_dim=(1, 1, 1), out_dtype="bf16")))
         self.assertIsNone(validate(_spec(half_plr="none", local_prefetch=0)))
-        self.assertEqual(len(list(_valid_geometries())), 75)
-        self.assertEqual(len(list(_valid_geometries("16x16"))), 102)
+        self.assertEqual(len(list(_valid_geometries())), 87)
+        self.assertEqual(len(list(_valid_geometries("16x16"))), 122)
+        self.assertIsNone(validate(_spec(tile_m=128, tile_n=128, tile_k=1024)))
+        self.assertIn("LDS", validate(_spec(tile_k=1024)) or "")
         self.assertIsNone(validate(_spec(tile_m=32, mma="16x16")))
         bad = {
             "tile_m": {"tile_m": 48},

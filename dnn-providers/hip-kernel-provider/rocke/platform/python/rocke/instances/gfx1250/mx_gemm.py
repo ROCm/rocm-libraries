@@ -81,7 +81,7 @@ class _MxType:
 
 
 _MX_TYPES = {
-    "fp4": _MxType(4, "fp4e2m1", ("32x16", "16x16"), (128, 256, 512)),
+    "fp4": _MxType(4, "fp4e2m1", ("32x16", "16x16"), (128, 256, 512, 1024)),
     "fp8": _MxType(8, "fp8e4m3", ("16x16",), (128, 256)),
     "bf8": _MxType(8, "bf8e5m2", ("16x16",), (128, 256)),
 }
@@ -122,7 +122,7 @@ def _atom(mma: str, a_dtype: str, b_dtype: str) -> _MmaAtom:
 
 
 TILE_MN = (16, 32, 64, 128, 256)
-TILE_K = (128, 256, 512)
+TILE_K = (128, 256, 512, 1024)
 WAVE_GROUPS = ((2, 2), (4, 1), (1, 4))
 OUT_DTYPES = ("fp8e4m3", "fp16", "bf16")
 _OUT_TYPES = {"fp8e4m3": FP8E4M3, "fp16": F16, "bf16": BF16}
