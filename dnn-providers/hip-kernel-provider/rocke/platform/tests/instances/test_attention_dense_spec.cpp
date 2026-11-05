@@ -27,6 +27,7 @@
 #include <cstdio>
 #include <cstring>
 #include <string>
+#include <vector>
 
 #include "rocke/arena.h"
 #include "rocke/error_boundary.hpp" /* ckc::guard_builder */
@@ -551,6 +552,14 @@ void check_preflight_contract()
     unnamed.type_name = NULL;
     CHECK(!rocke_attention_dense_spec_preflight(
         &s, &unnamed, false, NULL, NULL, reason, sizeof(reason)));
+    /* A decode count with no list is an error, not a NULL dereference. */
+    for(int which = 0; which < 2; ++which)
+    {
+        rocke_attention_dense_traits_t broken = t;
+        (which == 0 ? broken.persist_decodes : broken.nonpersist_decodes) = NULL;
+        CHECK(!rocke_attention_dense_spec_validate(&s, &broken, false, reason, sizeof(reason)));
+        CHECK_STR(reason, "attention dense decode list is NULL");
+    }
 
     /* The arch half: run after the base checks pass, its reason under the
      * concrete type name, and its ctx is the one given. */
@@ -650,6 +659,18 @@ void check_reason_truncation()
     CHECK(!rocke_attention_dense_spec_validate(&s, &t, false, shortbuf, sizeof(shortbuf)));
     CHECK(std::strlen(shortbuf) == sizeof(shortbuf) - 1);
     CHECK(std::strcmp(shortbuf + sizeof(shortbuf) - 4, "...") == 0);
+
+    /* Preflight's inner reason is sized for the caller's buffer: a reason longer
+     * than ROCKE_ATTENTION_DENSE_REASON_CAP arrives whole under the type prefix. */
+    const std::string huge_decode(700, 'q');
+    s.persist_decode = huge_decode.c_str();
+    std::vector<char> big(4096);
+    CHECK(!rocke_attention_dense_spec_validate(&s, &t, false, big.data(), big.size()));
+    const std::string validated = big.data();
+    CHECK(validated.size() > ROCKE_ATTENTION_DENSE_REASON_CAP && validated.back() == '\'');
+    CHECK(!rocke_attention_dense_spec_preflight(&s, &t, false, NULL, NULL, big.data(), big.size()));
+    const std::string want = "invalid AttentionDenseSpec: " + validated;
+    CHECK_STR(big.data(), want.c_str());
 }
 
 /* zero_keyless_row's Python ValueError for an O store width other than 1, 2 or

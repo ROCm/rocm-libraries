@@ -454,6 +454,9 @@ bool rocke_attention_dense_spec_validate(const rocke_attention_dense_spec_t* s,
 {
     if(s == NULL || t == NULL)
         ROCKE_SPEC_FAIL(reason, cap, "attention dense spec is NULL");
+    if((t->num_persist_decodes != 0 && t->persist_decodes == NULL)
+       || (t->num_nonpersist_decodes != 0 && t->nonpersist_decodes == NULL))
+        ROCKE_SPEC_FAIL(reason, cap, "attention dense decode list is NULL");
 
     if(!streq(s->dtype, "bf16") && !streq(s->dtype, "fp16"))
         ROCKE_SPEC_FAIL(reason,
@@ -866,11 +869,11 @@ bool rocke_attention_dense_spec_preflight(const rocke_attention_dense_spec_t* s,
     /* 1. Re-run the concrete type's validators: the base __post_init__ on this
      * same spec, then the arch's own fields. Both Python subclasses call
      * super().__post_init__() first, so the first failing reason is the same. */
-    char why[ROCKE_ATTENTION_DENSE_REASON_CAP];
-    why[0] = '\0';
-    if(!rocke_attention_dense_spec_validate(s, t, lookahead, why, sizeof(why))
-       || (arch_validate != NULL && !arch_validate(ctx, why, sizeof(why))))
-        ROCKE_SPEC_FAIL(reason, cap, "invalid %s: %s", t->type_name, why);
+    /* Sized for the caller's buffer, so only `reason` decides truncation. */
+    std::vector<char> why(std::max(cap, (size_t)ROCKE_ATTENTION_DENSE_REASON_CAP), '\0');
+    if(!rocke_attention_dense_spec_validate(s, t, lookahead, why.data(), why.size())
+       || (arch_validate != NULL && !arch_validate(ctx, why.data(), why.size())))
+        ROCKE_SPEC_FAIL(reason, cap, "invalid %s: %s", t->type_name, why.data());
 
     /* 2. Positive extents. */
     const struct

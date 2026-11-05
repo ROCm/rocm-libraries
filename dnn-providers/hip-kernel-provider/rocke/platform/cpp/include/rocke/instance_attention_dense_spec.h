@@ -55,7 +55,12 @@
  *   - a decode the traits list but this port does not implement (Python raises
  *     KeyError): "<field> '<name>' is not implemented by the C++ port";
  *   - a NULL spec or traits: "attention dense spec is NULL" from validate,
- *     "attention dense spec, traits or type_name is NULL" from preflight.
+ *     "attention dense spec, traits or type_name is NULL" from preflight; a
+ *     traits decode count with a NULL list: "attention dense decode list is
+ *     NULL".
+ * A rejected decode name is quoted by rocke_py_str_repr, which matches Python's
+ * repr for every ASCII string; a name holding a non-printable non-ASCII
+ * character (e.g. U+00A0) keeps those bytes raw where Python escapes them.
  * A reason longer than the caller's buffer ends in "...".
  *
  * SPEC PRECONDITION. Python cannot reach a property on a spec __post_init__
