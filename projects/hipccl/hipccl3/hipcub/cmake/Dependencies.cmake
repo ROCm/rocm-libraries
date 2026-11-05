@@ -464,7 +464,12 @@ if(HIP_COMPILER STREQUAL "nvcc")
 else()
   # libhipcxx
   if(NOT TARGET libhipcxx::libhipcxx)
-    find_package(libhipcxx 3.4 REQUIRED)
+    # TODO: ideally we would hard require this, but this should be done in a seperate PR
+    # once libhipcxx has settled on the correct version in CI/ecosystem.
+    find_package(libhipcxx 3.0)
+    if(NOT TARGET libhipcxx::libhipcxx)
+        message(STATUS "Did not find libhipcxx >= 3.0!")
+    endif()
   endif()
 
   # rocPRIM (only for ROCm platform)
