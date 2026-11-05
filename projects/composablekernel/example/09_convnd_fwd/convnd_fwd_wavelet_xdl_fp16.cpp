@@ -38,35 +38,74 @@ using DeviceGroupedConvNDFwdInstance =
         InElementOp,
         WeiElementOp,
         OutElementOp,
-        ConvSpec,    // ConvForwardSpecialization
-        256,         // TileLoadThreadGroupSize
-        256,         // TileMathThreadGroupSize
-        128,         // MPerBlock
-        64,          // NPerBlock
-        64,          // KPerBlock
-        8,           // K1
-        32,          // MPerXdl
-        32,          // NPerXdl
-        1,           // MXdlPerWave
-        2,           // NXdlPerWave
-        S<8, 32, 1>, // ABlockTransferThreadClusterLengths_AK0_M_AK1
-        S<1, 0, 2>,  // ABlockTransferThreadClusterArrangeOrder
-        S<1, 0, 2>,  // ABlockTransferSrcAccessOrder
-        2,           // ABlockTransferSrcVectorDim
-        8,           // ABlockTransferSrcScalarPerVector
-        8,           // ABlockTransferDstScalarPerVector_AK1
-        1,           // ABlockLdsExtraM
-        S<8, 32, 1>, // BBlockTransferThreadClusterLengths_BK0_N_BK1
-        S<1, 0, 2>,  // BBlockTransferThreadClusterArrangeOrder
-        S<1, 0, 2>,  // BBlockTransferSrcAccessOrder
-        2,           // BBlockTransferSrcVectorDim
-        8,           // BBlockTransferSrcScalarPerVector
-        8,           // BBlockTransferDstScalarPerVector_BK1
-        1,           // BBlockLdsExtraN
+        ConvSpec, // ConvForwardSpecialization
+                  // 256,          // TileLoadThreadGroupSize
+                  // 512,          // TileMathThreadGroupSize
+                  // 256,          // MPerBlock
+                  // 256,          // NPerBlock
+                  // 128,          // KPerBlock
+                  // 8,            // K1
+                  // 16,           // MPerXdl
+                  // 16,           // NPerXdl
+                  // 2,            // MXdlPerWave
+                  // 16,           // NXdlPerWave
+                  // S<16, 16, 1>, // ABlockTransferThreadClusterLengths_AK0_M_AK1
+                  // S<1, 0, 2>,   // ABlockTransferThreadClusterArrangeOrder
+                  // S<1, 0, 2>,   // ABlockTransferSrcAccessOrder
+                  // 2,            // ABlockTransferSrcVectorDim
+                  // 8,            // ABlockTransferSrcScalarPerVector
+                  // 8,            // ABlockTransferDstScalarPerVector_AK1
+                  // 1,            // ABlockLdsExtraM
+                  // S<16, 16, 1>, // BBlockTransferThreadClusterLengths_BK0_N_BK1
+                  // S<1, 0, 2>,   // BBlockTransferThreadClusterArrangeOrder
+                  // S<1, 0, 2>,   // BBlockTransferSrcAccessOrder
+                  // 2,            // BBlockTransferSrcVectorDim
+                  // 8,            // BBlockTransferSrcScalarPerVector
+                  // 8,            // BBlockTransferDstScalarPerVector_BK1
+                  // 1,            // BBlockLdsExtraN
+                  // 1,
+                  // 8,
+                  // S<1, 32, 1, 16>,
+                  // 8,
+                  // InDataType,
+                  // InDataType,
+                  // 1,
+                  // true,
+                  // true>;
+        256,
+        256,
+        256,
+        128,
+        128,
+        8,
+        16,
+        16,
+        4,
+        8,
+        S<16, 16, 1>,
+        S<1, 0, 2>,
+        S<1, 0, 2>,
+        2,
+        8,
+        8,
+        1,
+        S<16, 16, 1>,
+        S<1, 0, 2>,
+        S<1, 0, 2>,
+        2,
+        8,
+        8,
         1,
         1,
-        S<1, 32, 1, 8>,
-        4>;
+        4,
+        S<1, 16, 1, 16>,
+        8,
+        InDataType,
+        InDataType,
+        1,
+        true,
+        true,
+        true>;
 
 #include "run_convnd_fwd_example.inc"
 
