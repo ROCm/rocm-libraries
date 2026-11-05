@@ -37,5 +37,13 @@ source behind unchanged signatures are API changes.
    check the code that reads the record, not only the writer.
 6. New environment variables users are expected to set are documented in `projects/miopen/docs/reference/env_variables.rst`;
    a changed default is described in the PR and in `projects/miopen/CHANGELOG.md`.
-7. New public declarations carry Doxygen documentation in the style of the surrounding `miopen.h` entries
+7. Contract table. For each public parameter the changed code reaches (arguments such as scale factors and attributes, returned
+   sizes, status codes), write one row: what the header and docs say; what the industry-standard library for the same operation
+   documents (the reference implementation the API is meant to match: read its documentation, cite the page, and say when only
+   secondary sources were found); what the tests' CPU reference does; and what each internal path does with the value (single
+   pass and multi-block, each data type, each backend). Flag every cell that differs from the others or that a user of the
+   documented API would not expect (a value converted to a narrower type than its declared one, a result that depends on an
+   internal threshold). Put the table under **Checked, no finding** or in the finding's **Proof**; a flagged cell that the change
+   introduced is a finding and a **Needs human decision** ([../policy.md](../policy.md) *Review rules*).
+8. New public declarations carry Doxygen documentation in the style of the surrounding `miopen.h` entries
    (`projects/miopen/docs/doxygen/Doxyfile` generates the API reference from it).

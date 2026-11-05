@@ -47,7 +47,10 @@ shared, published or swept, and no report or comment may depend on a reader open
   files in your packet first: they describe `$BASE` and prove nothing. If one is wrong, add
   the Handoff `SCOUT: <correction>`.
 - Check a failure at `$BASE` before calling it introduced; pre-existing problems are
-  `FUTURE WORK` at most. Do not re-raise a ledger `REFUTED` claim unless its code changed.
+  `FUTURE WORK` at most, except a difference between two paths that agreed at `$BASE`
+  ([../policy.md](../policy.md) *Review rules*). Do not re-raise a ledger `REFUTED` claim unless its code changed.
+- A finding whose fix is to document or state a behavior says whether the behavior is intended
+  ([../policy.md](../policy.md) *Review rules*).
 - Act outside `$SCRATCH` and `$EVIDENCE` only as the dispatch approves; put any other GPU,
   remote or shared-compute action under **Approval requests**.
 

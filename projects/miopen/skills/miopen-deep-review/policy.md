@@ -12,7 +12,7 @@ overrides the gate. A result on the merged tree (`DRIFT`) outranks the same resu
 | `BLOCKING` | Must fix before merge: a correctness or logic error, a security issue, a leak or crash in normal use, an ABI or API break without a migration path, missing tests for new functionality, an untested broad-blast-radius change to a default or shipping path, incomplete cleanup of code the change modifies (dead parameters, helpers, compatibility aliases for internal symbols) |
 | `IMPORTANT` | Should fix: real behavioral risk, an unvalidated likely edge case, a meaningful test gap, missing required device or architecture coverage, a maintainability issue likely to cause defects soon |
 | `SUGGESTION` | An improvement to code the change already touches |
-| `FUTURE WORK` | Code the change does not touch, larger refactors, follow-ups, pre-existing problems. Does not block |
+| `FUTURE WORK` | Code the change does not touch, larger refactors, follow-ups, pre-existing problems (not a difference the change introduces between two paths, see *Review rules*). Does not block |
 
 Never mark an unrelated improvement `BLOCKING` or soften incomplete cleanup.
 
@@ -56,6 +56,13 @@ diff; reformat churn mixed into a functional change.
   `BLOCKING`. A conflict whose resolution needs an author decision is `IMPORTANT` (kind `process`). A conflict that resolves
   mechanically and passes is no finding. A failure that also occurs at `$HEAD` belongs to `RUN`.
 - An undescribed public API change goes to **Needs human decision**, whatever its tier.
+- A pre-existing behavior is not `FUTURE WORK` when the change alters how two code paths that agreed at `$BASE` relate: a
+  parameter converted one way below a dispatch threshold and another way above it, one data type or direction changed and its
+  twin not. The difference is introduced by the change; tier it by its effect on the result.
+- A finding whose fix is to document or state a behavior says whether the behavior is intended. A surprising one (a user-facing
+  value silently narrowed or rounded, a result that depends on an internal threshold the API does not document) goes to
+  **Needs human decision** with the options `fix the cause` and `document`, whatever its tier; "document it" is not a fix for
+  a behavior nobody has said is intended.
 - A change that can affect TheRock (built code, tests, install, build, packaging or CI
   files) that TheRock CI neither builds nor tests (flag-guarded, skip-listed or
   test-excluded) is at least `IMPORTANT` unless the author reports verification. A change
