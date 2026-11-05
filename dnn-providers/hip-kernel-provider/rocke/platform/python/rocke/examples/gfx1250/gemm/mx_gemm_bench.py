@@ -541,10 +541,6 @@ def _optional_int(text: str) -> int | None:
     return None if text == "derived" else int(text)
 
 
-def _optional_str(text: str) -> str | None:
-    return None if text == "derived" else text
-
-
 def _bool(text: str) -> bool:
     if text not in ("0", "1"):
         raise argparse.ArgumentTypeError("expected 0 or 1")
@@ -563,7 +559,6 @@ _AXES = {
     "out_dtype": ("out_dtype", str, "fp8e4m3"),
     "gl2_prefetch_distance": ("gl2_prefetch_distance", int, "4"),
     "cluster_signal_wmmas": ("cluster_signal_wmmas", _optional_int, "derived"),
-    "cluster_signal": ("cluster_signal", _optional_str, "derived"),
     "init_c_peel": ("init_c_peel", _bool, "1"),
     "cluster_order": ("cluster_order", str, "hw"),
     "local_prefetch": ("local_prefetch", int, "1"),

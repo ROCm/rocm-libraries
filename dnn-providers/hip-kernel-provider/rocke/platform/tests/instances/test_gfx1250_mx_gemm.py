@@ -80,6 +80,31 @@ def _spec8(*problem, a_dtype="fp8", b_dtype="fp8", **fields) -> MxGemmSpec:
     return _spec(*problem, a_dtype=a_dtype, b_dtype=b_dtype, **fields)
 
 
+def _without_cluster_signal(llvm: str) -> str:
+    """Drop the wave-0 and drained cluster-signal sequences so the rest of
+    two kernels can be compared."""
+    drops = (
+        "declare void @llvm.amdgcn.s.wait.dscnt",
+        "declare void @llvm.amdgcn.s.wait.kmcnt",
+        "s_cmp_eq_u32 $0, 0",
+        "s_barrier_signal_isfirst",
+        "llvm.amdgcn.s.wait.dscnt",
+        "llvm.amdgcn.s.wait.kmcnt",
+        "s_wait_dscnt 35",
+    )
+    kept = []
+    drop_barrier = False
+    for line in llvm.splitlines(keepends=True):
+        if drop_barrier and "llvm.amdgcn.s.barrier()" in line:
+            drop_barrier = False
+            continue
+        drop_barrier = "s_wait_dscnt 35" in line
+        if any(token in line for token in drops):
+            continue
+        kept.append(line)
+    return "".join(kept)
+
+
 def _landing(
     layout, pad: LdsPad, j: int, iterate_rows: int, iterate_stride: int
 ) -> int:
@@ -126,7 +151,6 @@ class MxGemmSpecTest(unittest.TestCase):
             "half_b_order": {"half_b_order": "early"},
             "late needs half B": {"half_b_order": "late", "half_plr": "none"},
             "signal range": {"cluster_signal_wmmas": 17},
-            "signal form": {"cluster_signal": "early"},
             "out dtype": {"out_dtype": "fp32"},
             "pad block": {"a_lds_pad": LdsPad(16, 384)},
             "pad cut row": {"b_lds_pad": LdsPad(16, 128)},
@@ -325,7 +349,7 @@ class MxGemmSpecTest(unittest.TestCase):
 
     def test_derived_defaults(self):
         spec = _spec()
-        self.assertEqual(spec.signal_form, "wave0")
+        self.assertEqual(spec.signal_form, "drained")
         self.assertEqual(spec.signal_wmmas, 6)
         self.assertEqual(spec.fp8_convert_width, 8)
         self.assertEqual(spec.reads_per_step, 35)
@@ -471,9 +495,11 @@ class MxGemmLayoutTest(unittest.TestCase):
 
 class MxGemmIrTest(unittest.TestCase):
     def test_benchmark_config_matches_step6_14(self):
-        """Gate 1: byte-identical LLVM IR (kernel name aside) at the benchmark
-        problem, and Step 6.14's compile options plus the regclass-priority
-        allocator option."""
+        """Gate 1: the benchmark problem matches Step 6.14's LLVM IR and
+        compile options, apart from the cluster signal. Step 6.14 signals
+        from wave 0 and publishes the reads at the cluster wait. This kernel
+        drains every wave's LDS reads before the signal and has no second
+        publish."""
         old = variant_spec("step6_14_mxfp4_gemm", *_BENCH, **YAML_TILE)
         new = _spec(*_BENCH, cluster_order="aid")
         old_kernel = build_mxfp4_tdm_gemm(old, arch="gfx1250")
@@ -484,9 +510,11 @@ class MxGemmIrTest(unittest.TestCase):
         new_llvm = _lower_kernel_to_llvm_python(
             new_kernel, arch="gfx1250", llvm_flavor="llvm23"
         )
+        self.assertNotIn("s_cmp_eq_u32 $0, 0", new_llvm)
+        self.assertIn("s_cmp_eq_u32 $0, 0", old_llvm)
         self.assertEqual(
-            new_llvm.replace(new.kernel_name(), "KERNEL"),
-            old_llvm.replace(old.kernel_name(), "KERNEL"),
+            _without_cluster_signal(new_llvm.replace(new.kernel_name(), "KERNEL")),
+            _without_cluster_signal(old_llvm.replace(old.kernel_name(), "KERNEL")),
         )
         self.assertEqual(
             _comgr_options_for_kernel(new_kernel),
@@ -621,7 +649,10 @@ class MxGemmIrTest(unittest.TestCase):
                     len(re.findall(_WMMA, llvm)), (emitted * 4 + tail_steps) * 32
                 )
                 # Every tile, the tail included, signals the cluster once.
-                self.assertEqual(llvm.count("s_cmp_eq_u32 $0, 0"), emitted + 1)
+                # Two more isfirst signals open and close the kernel.
+                self.assertEqual(
+                    llvm.count("s_barrier_signal_isfirst"), 2 + emitted + 1
+                )
 
     def test_k_partial_step(self):
         """K a multiple of 32 but not 128: the tail rounds up to a whole
@@ -688,19 +719,16 @@ class MxGemmIrTest(unittest.TestCase):
         """tile_k 128 has no second-to-last K-step: each tile still signals
         once, before its cluster wait."""
         for fields in (
-            {"cluster_signal": "wave0"},
-            {"cluster_signal": "wave0", "half_plr": "none"},
-            {"cluster_signal": "drained"},
-            {"cluster_signal": "drained", "half_plr": "none", "local_prefetch": 0},
+            {},
+            {"half_plr": "none"},
+            {"half_plr": "none", "local_prefetch": 0},
         ):
             spec = _spec(tile_k=128, **fields)
             with self.subTest(**fields):
                 llvm = _llvm(spec)
                 self.assertEqual(len(re.findall(_WMMA, llvm)), 4 * 32)
-                if fields["cluster_signal"] == "drained":
-                    self.assertEqual(llvm.count("s_barrier_signal_isfirst"), 2 + 4)
-                else:
-                    self.assertEqual(llvm.count("s_cmp_eq_u32 $0, 0"), 4)
+                self.assertNotIn("s_cmp_eq_u32 $0, 0", llvm)
+                self.assertEqual(llvm.count("s_barrier_signal_isfirst"), 2 + 4)
                 self.assertEqual(llvm.count("s_barrier_wait -3"), 2 + 4)
 
     def test_direct_reads_refill_at_every_signal_point(self):
@@ -737,30 +765,27 @@ class MxGemmIrTest(unittest.TestCase):
 
     def test_schedule_variants_emit_their_waits_and_barriers(self):
         """Four tiles are emitted at the smoke shape (see the peel test), four
-        K-steps each; every tile adds one wait before its refill TDM."""
+        K-steps each. The cluster signal is drained, so it adds no
+        ``s_wait_dscnt``."""
         default = _llvm(_spec())
-        self.assertEqual(default.count('"s_wait_dscnt 35"'), 4 * (4 * 2 + 1))
-        self.assertEqual(default.count("s_cmp_eq_u32 $0, 0"), 4)
+        self.assertEqual(default.count('"s_wait_dscnt 35"'), 4 * (4 * 2))
+        self.assertNotIn("s_cmp_eq_u32 $0, 0", default)
         none = _llvm(_spec(half_plr="none"))
-        self.assertEqual(none.count('"s_wait_dscnt 35"'), 4 * (4 + 1))
+        self.assertEqual(none.count('"s_wait_dscnt 35"'), 4 * 4)
         direct = _llvm(_spec(half_plr="none", local_prefetch=0))
-        self.assertEqual(direct.count('"s_wait_dscnt 0"'), 4 * (4 + 1))
-        # The whole cluster barrier opens and closes the kernel; the drained
-        # signal adds its first half once per tile.
-        self.assertEqual(default.count("s_barrier_signal_isfirst"), 2)
-        drained = _llvm(_spec(cluster_signal="drained"))
-        self.assertNotIn("s_cmp_eq_u32 $0, 0", drained)
-        self.assertEqual(drained.count("s_barrier_signal_isfirst"), 2 + 4)
+        self.assertEqual(direct.count('"s_wait_dscnt 0"'), 4 * 4)
+        # The whole cluster barrier opens and closes the kernel; each tile's
+        # drained signal adds one more.
+        self.assertEqual(default.count("s_barrier_signal_isfirst"), 2 + 4)
         no_cluster = _llvm(_spec(cluster_dim=(1, 1, 1)))
         self.assertNotIn("s_barrier_signal -3", no_cluster)
-        self.assertEqual(no_cluster.count('"s_wait_dscnt 35"'), 4 * (4 * 2 + 1))
+        self.assertEqual(no_cluster.count('"s_wait_dscnt 35"'), 4 * (4 * 2))
         # half_b_order "late": per K-step a wait leaving B's second half (8
-        # reads) and one leaving the next scales and A (19); the late wait
-        # also leaves the next tile's scales and A.
+        # reads) and one leaving the next scales and A (19).
         late = _llvm(_spec(half_b_order="late"))
         self.assertNotIn('"s_wait_dscnt 35"', late)
         self.assertEqual(late.count('"s_wait_dscnt 8"'), 4 * 4)
-        self.assertEqual(late.count('"s_wait_dscnt 19"'), 4 * (4 + 1))
+        self.assertEqual(late.count('"s_wait_dscnt 19"'), 4 * 4)
         self.assertEqual(len(re.findall(_WMMA, late)), len(re.findall(_WMMA, default)))
         lds_read = r"load <\d+ x i32>, ptr addrspace\(3\)"
         self.assertEqual(
@@ -1036,7 +1061,6 @@ class MxGemmHostBuildTest(unittest.TestCase):
             _spec8(*_BENCH, local_prefetch=0, half_plr="none"),
             _spec8(*_BENCH, local_prefetch=0, half_plr="none", cluster_order="aid"),
             _spec8(*_BENCH, half_b_order="late"),
-            _spec8(*_BENCH, half_b_order="late", cluster_signal="wave0"),
             _spec(*_BENCH, half_b_order="late"),
             _spec8(
                 65536,
@@ -1089,10 +1113,8 @@ class MxGemmDeviceTest(unittest.TestCase):
                 _spec(cluster_dim=(1, 1, 1)),
                 _spec(half_plr="none"),
                 _spec(half_plr="none", local_prefetch=0),
-                _spec(cluster_signal="drained"),
                 _spec(init_c_peel=False),
                 _spec(half_b_order="late"),
-                _spec(half_b_order="late", cluster_signal="drained"),
                 _spec(tile_k=128, half_b_order="late"),
             ]
             + list(_valid_geometries("16x16", a_dtype="fp8", b_dtype="fp8"))
@@ -1104,7 +1126,6 @@ class MxGemmDeviceTest(unittest.TestCase):
                     {"tile_m": 128, "tile_k": 128, "half_plr": "none"},
                     {"local_prefetch": 0, "half_plr": "none"},
                     {"half_b_order": "late"},
-                    {"half_b_order": "late", "cluster_signal": "wave0"},
                     {"tile_k": 128, "half_b_order": "late"},
                     {
                         "tile_m": 256,

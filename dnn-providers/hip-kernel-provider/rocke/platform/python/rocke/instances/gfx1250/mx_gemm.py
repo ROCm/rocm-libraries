@@ -127,8 +127,6 @@ WAVE_GROUPS = ((2, 2), (4, 1), (1, 4))
 OUT_DTYPES = ("fp8e4m3", "fp16", "bf16")
 _OUT_TYPES = {"fp8e4m3": FP8E4M3, "fp16": F16, "bf16": BF16}
 _OUT_BYTES = {"fp8e4m3": 1, "fp16": 2, "bf16": 2}
-# The tile 6.14 was tuned at; the wave-0 cluster signal is its default.
-_BENCH_TILE = (256, 256, 512)
 _DEFAULT_SIGNAL_WMMAS = 6
 
 # TensileLite (calcLdsPad / calcLdsBlockSizePerPad / get_mxs_mt_config) for a
@@ -174,10 +172,6 @@ _CLUSTER_SIGNAL_ASM = (
     "s_barrier_signal -3"
 )
 _CLUSTER_WAIT_ASM = "s_barrier_wait -3"
-# Wave 0 alone signals, with no LDS drain. $0 is the wave index.
-_CLUSTER_SIGNAL_WAVE0_ASM = (
-    "s_cmp_eq_u32 $0, 0\n" "s_cbranch_scc0 1\n" "s_barrier_signal -3"
-)
 # $0 = this wave's SE/AID id word; bits 18:16 are the XCC.
 _AID_ID_ASM = "s_sendmsg_rtn_b32 $0, sendmsg(MSG_RTN_GET_SE_AID_ID)\ns_wait_kmcnt 0"
 _CLUSTERS_PER_AID_GROUP = 8
@@ -216,9 +210,9 @@ class MxGemmSpec:
     tile-pair count comes from ``K``.
 
     ``*_lds_pad`` override the derived padding of one operand (``None``:
-    derived, ``LdsPad()``: none). ``cluster_signal_wmmas`` and
-    ``cluster_signal`` default (``None``) to 6, clamped to the tile, and to
-    ``"wave0"`` at the 256x256x512 tile, ``"drained"`` otherwise.
+    derived, ``LdsPad()``: none). ``cluster_signal_wmmas`` defaults
+    (``None``) to 6, clamped to the tile. The cluster signal is drained:
+    every wave waits for its LDS reads, then one signals the cluster.
     ``half_b_order`` places the half-B reads of the next K-step (see
     :class:`TileCompute`).
     """
@@ -235,7 +229,6 @@ class MxGemmSpec:
     cluster_dim: tuple[int, int, int] = (4, 4, 1)
     gl2_prefetch_distance: int = 4
     cluster_signal_wmmas: int | None = None
-    cluster_signal: str | None = None
     a_lds_pad: LdsPad | None = None
     b_lds_pad: LdsPad | None = None
     a_scale_lds_pad: LdsPad | None = None
@@ -382,13 +375,8 @@ class MxGemmSpec:
 
     @property
     def signal_form(self) -> str | None:
-        """``"wave0"`` / ``"drained"``, or ``None`` without a cluster."""
-        if not self.has_cluster:
-            return None
-        if self.cluster_signal is not None:
-            return self.cluster_signal
-        tile = (self.tile_m, self.tile_n, self.tile_k)
-        return "wave0" if tile == _BENCH_TILE else "drained"
+        """``"drained"`` with a cluster, else ``None``."""
+        return "drained" if self.has_cluster else None
 
     @property
     def fp8_convert_width(self) -> int:
@@ -468,8 +456,6 @@ class MxGemmSpec:
             parts.append(f"pf{self.gl2_prefetch_distance}")
         if self.cluster_signal_wmmas is not None:
             parts.append(f"cs{self.cluster_signal_wmmas}")
-        if self.cluster_signal is not None:
-            parts.append(f"sig{self.cluster_signal}")
         for tag, pad in (
             ("pa", self.a_lds_pad),
             ("pb", self.b_lds_pad),
@@ -736,8 +722,6 @@ def validate(spec: MxGemmSpec, arch: str = "gfx1250") -> str | None:
         return "half_b_order 'late' needs half_plr 'b'"
     if spec.cluster_order not in ("hw", "aid"):
         return "cluster_order must be 'hw' or 'aid'"
-    if spec.cluster_signal not in (None, "wave0", "drained"):
-        return "cluster_signal must be 'wave0' or 'drained'"
     if not 0 <= spec.signal_wmmas <= spec.signal_limit:
         return f"cluster_signal_wmmas must be in 0..{spec.signal_limit}"
     if spec.gl2_prefetch_distance != 0 and not 2 <= spec.gl2_prefetch_distance <= 8:
@@ -1737,15 +1721,11 @@ class Pipeline:
         k = self.k
         b, ops, spec = k.b, k.ops, k.spec
         two_tiles = 2 * spec.tile_k
-        form = spec.signal_form
 
         def signal() -> None:
             k.fence()
-            if form == "wave0":
-                b.inline_asm(_CLUSTER_SIGNAL_WAVE0_ASM, "s,~{scc},~{memory}", [k.wave])
-            else:
-                b.s_waitcnt(lgkmcnt=0)
-                b.inline_asm(_CLUSTER_SIGNAL_ASM, "~{scc},~{memory}")
+            b.s_waitcnt(lgkmcnt=0)
+            b.inline_asm(_CLUSTER_SIGNAL_ASM, "~{scc},~{memory}")
             k.fence()
 
         def refill() -> None:
@@ -1762,12 +1742,6 @@ class Pipeline:
             k.fence()
             if spec.has_cluster:
                 b.inline_asm(_CLUSTER_WAIT_ASM, "~{memory}")
-            if form != "drained":
-                # No wave drained its reads of this buffer before the signal;
-                # the workgroup barrier publishes them here.
-                pending = min(spec.late_pending_reads, _DSCNT_MAX)
-                b.inline_asm(f"s_wait_dscnt {pending}", "~{memory}")
-                b.s_barrier_bare()
             self.tdm.issue(k.clamp_k(ops.v(ops.add(k0, two_tiles))), parity)
             k.fence()
 
