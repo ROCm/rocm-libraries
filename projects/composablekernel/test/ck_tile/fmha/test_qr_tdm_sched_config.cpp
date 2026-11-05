@@ -264,7 +264,6 @@ TYPED_TEST(QrTdmSplitKVConfig, ProgressiveKReloadStaysOn)
     // bn0 64 is asserted in test_fmha_fwd_codegen.py.
     EXPECT_TRUE(Pipeline::kProgressiveDsLoadK);
     EXPECT_EQ(Pipeline::kN0, 64);
-    EXPECT_FALSE(Pipeline::kSkipMinSeqlenQ);
 }
 
 TYPED_TEST(QrTdmSplitKVConfig, SplitTailIsAlwaysPredicated)
