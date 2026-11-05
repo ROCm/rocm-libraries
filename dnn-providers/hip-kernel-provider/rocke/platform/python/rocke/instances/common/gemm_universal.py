@@ -707,7 +707,7 @@ def is_valid_spec(spec: UniversalGemmSpec, arch: str = "gfx950") -> Tuple[bool, 
     ):
         return False, f"unsupported {a_name} warp_tile {atom} on {arch}"
     # The catalog can list an atom whose operand lane maps are not verified yet
-    # (develop's 16x16x128 bf8 row): the build would then fail on the missing
+    # (such as the 16x16x128 bf8 row): the build would then fail on the missing
     # map, so reject it here with one reason in both engines.
     op = _resolve_mma_op(spec, arch)
     if op is None or not op.has_ab_layouts():

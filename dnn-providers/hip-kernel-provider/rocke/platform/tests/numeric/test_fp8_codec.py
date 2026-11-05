@@ -5,8 +5,8 @@
 
 The one home for the codec's own facts: the decode tables against the format
 definitions (and ``ml_dtypes`` where the ``dev`` extra is installed), the exact
-encoders, and the rounding encoder. Harness tests check only how a harness uses
-the codec. CPU-only.
+encoders, and the rounding encoder. How a harness uses the codec is tested with
+that harness (test_universal_gemm_verify.py, test_fp8_trait_ab.py). CPU-only.
 """
 
 from __future__ import annotations
@@ -108,16 +108,6 @@ class TestExactEncoders(unittest.TestCase):
             vals = table[np.isfinite(table)]
             np.testing.assert_array_equal(table[encode(vals)], vals)
 
-    def test_the_harness_integer_range_is_exact(self):
-        # The exact-verify harnesses draw integers in -5..5 and lean on every
-        # one being exact in both formats.
-        vals = np.arange(-5, 6, dtype=np.float32)
-        for table, encode in (
-            (fp8e4m3_decode_table(), fp8e4m3_encode),
-            (bf8e5m2_decode_table(), bf8e5m2_encode),
-        ):
-            np.testing.assert_array_equal(table[encode(vals)], vals)
-
     def test_inexact_values_are_refused_and_named(self):
         # A silent round here would demote an exact compare to a tolerance
         # check without changing any output.
@@ -158,28 +148,18 @@ class TestE4m3Round(unittest.TestCase):
         x = np.array([1.05, 1.08, 1000.0, -1000.0, 0.0, -0.0], dtype=np.float32)
         self.assertEqual(list(fp8e4m3_round(x)), [0x38, 0x39, 0x7E, 0xFE, 0x00, 0x00])
 
-    def test_nan_is_rejected(self):
-        with self.assertRaises(ValueError):
-            fp8e4m3_round(np.array([np.nan], dtype=np.float32))
+    def test_negative_values_that_round_to_zero_give_plus_zero(self):
+        # The table holds one zero (+0, 0x00), as for the exact encoders.
+        x = np.array([-(2.0**-11), -0.0, 2.0**-11], dtype=np.float32)
+        self.assertEqual(list(fp8e4m3_round(x)), [0x00, 0x00, 0x00])
+
+    def test_nan_is_rejected_and_its_element_named(self):
+        with self.assertRaisesRegex(ValueError, "NaN at element 2"):
+            fp8e4m3_round(np.array([1.0, 2.0, np.nan, np.nan], dtype=np.float32))
 
     def test_shape_and_dtype(self):
         out = fp8e4m3_round(np.zeros((2, 3), dtype=np.float32))
         self.assertEqual((out.shape, out.dtype), ((2, 3), np.uint8))
-
-
-class TestHarnessesUseThisCodec(unittest.TestCase):
-    def test_the_manifest_runner_encoders(self):
-        from rocke.instances.common.manifest_runner import gemm
-
-        self.assertIs(gemm._F8_ENCODERS["fp8e4m3"], fp8e4m3_encode)
-        self.assertIs(gemm._F8_ENCODERS["bf8e5m2"], bf8e5m2_encode)
-
-    def test_the_fp8_measurement_data_rounds_here(self):
-        from rocke.examples.gfx1250.gemm_perf_fp8 import fp8_data
-
-        self.assertIs(fp8_data.fp8e4m3_round, fp8e4m3_round)
-        self.assertFalse(hasattr(fp8_data, "e4m3_round"))
-        self.assertFalse(hasattr(fp8_data, "E4M3_MAX"))
 
 
 if __name__ == "__main__":

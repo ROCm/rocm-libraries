@@ -253,6 +253,12 @@ class TestEightBitEncoders(unittest.TestCase):
     nearly every element and the verify lane cannot pass for bf8 at all.
     """
 
+    def test_the_encoders_are_the_shared_codec(self):
+        from rocke.numeric import fp8
+
+        self.assertIs(_F8_ENCODERS["fp8e4m3"], fp8.fp8e4m3_encode)
+        self.assertIs(_F8_ENCODERS["bf8e5m2"], fp8.bf8e5m2_encode)
+
     def test_test_inputs_are_exact_in_both_formats(self):
         import numpy as np
 

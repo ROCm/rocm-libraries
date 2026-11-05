@@ -534,9 +534,11 @@ def universal_gemm_spec_to_dict(spec: Any) -> Dict[str, Any]:
 
     The binding accepts a flat key view that mirrors every
     ``TileSpec`` / ``TraitSpec`` / ``DataSpec`` field plus the top-level
-    scalars. The fields are read from the dataclasses (see
-    :func:`_gemm_subspec_to_dict`), so a new field reaches the C engine without
-    a second list to update.
+    scalars. The dict takes every field from the dataclasses (see
+    :func:`_gemm_subspec_to_dict`), so a new field is always in it; the binding
+    still reads each key by name (``fill_universal_spec`` in
+    ``cpp/bindings/rocke_engine.cpp``), so a new field must also be read there,
+    or ``backend="cpp"`` keeps the C default for it without a word.
     """
     d = _gemm_subspec_to_dict(spec)
     d.update(_dataclass_items(spec.data))

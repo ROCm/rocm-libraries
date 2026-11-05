@@ -207,7 +207,8 @@ bool dict_str(const py::dict& d, const char* key, std::string& out)
 /* Fill a rocke_gemm_universal_spec_t (already default-initialised) from a spec
  * dict; the one reader of the GEMM spec dict. `store` keeps any string fields
  * alive for the spec's lifetime. build_spec (universal GEMM), the batched,
- * grouped and flatmm readers, and gemm_multi_d (its nested `base`) all call it.
+ * grouped and flatmm readers, and gemm_multi_d and gemm_multi_abd (their nested
+ * `base`) all call it.
  *
  * The dict mirrors UniversalGemmSpec. Recognised layouts (both accepted):
  *   (a) flat:   {name, tile_m, tile_n, ..., pipeline, epilogue, dtype_a, ...}

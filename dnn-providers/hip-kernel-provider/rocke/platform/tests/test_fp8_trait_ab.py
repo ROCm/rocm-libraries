@@ -81,6 +81,13 @@ class TestSweepExactSet(unittest.TestCase):
 
 
 class TestInputSets(unittest.TestCase):
+    def test_the_random_set_rounds_with_the_shared_codec(self):
+        from rocke.numeric.fp8 import fp8e4m3_round
+
+        self.assertIs(fp8_data.fp8e4m3_round, fp8e4m3_round)
+        self.assertFalse(hasattr(fp8_data, "e4m3_round"))
+        self.assertFalse(hasattr(fp8_data, "E4M3_MAX"))
+
     def test_int_set_is_exact_and_in_range(self):
         a8, b8, a, b = fp8_data.int_operands(np, 8, 4, 64)
         self.assertTrue(np.array_equal(fp8_data.e4m3_decode(np, a8), a))

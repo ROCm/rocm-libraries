@@ -371,9 +371,9 @@ class TestFp8IsGfx1250Only(unittest.TestCase):
 class TestAtomWithoutLaneMapIsRejected(unittest.TestCase):
     """An atom the catalog lists but whose A/B lane maps are not verified.
 
-    develop lists a 16x16x128 bf8 WMMA row with no operand maps. The validator
-    accepted it and the build then failed on the missing map; it is rejected
-    up front now, with the same reason as the C++ engine.
+    The catalog lists a 16x16x128 bf8 WMMA row with no operand maps. A
+    validator that accepts it hands the build an op with no A/B map to load
+    through; it is rejected up front, with the same reason as the C++ engine.
     """
 
     @staticmethod

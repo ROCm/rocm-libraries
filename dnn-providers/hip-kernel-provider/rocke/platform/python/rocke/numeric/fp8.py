@@ -86,8 +86,10 @@ def fp8e4m3_round(x):
     For inputs that need not be representable (random operand data), unlike
     :func:`fp8e4m3_encode`. Ties go to the even code, which in e4m3 is the
     even mantissa (the IEEE rule). Magnitudes beyond the largest finite value
-    (448) clamp to it, since the format has no infinity; NaN inputs are
-    rejected.
+    (448) clamp to it, since the format has no infinity. Zero, and a negative
+    value that rounds to zero, give +0 (code 0x00): the code table holds one
+    zero, as for the exact encoders. NaN inputs are rejected, naming the first
+    one's element.
     """
     return _round_nearest(x, fp8e4m3_decode_table(), "fp8e4m3")
 
@@ -113,9 +115,9 @@ def _encode_exact(x, table, name):
     """Encode f32 values to the 8-bit codes of ``table``, rejecting anything
     inexact.
 
-    This runner's verification argument rests on the device seeing exactly the
-    numbers the reference multiplies, so a silent round here would quietly
-    demote the gate to a tolerance check. Vectorised via the inverted decode
+    An exact verify harness rests on the device seeing exactly the numbers the
+    reference multiplies, so a silent round here would quietly demote its gate
+    to a tolerance check. Vectorised via the inverted decode
     table — a Python loop over a 4096x8192 operand is not viable.
     """
     import numpy as np
@@ -140,8 +142,9 @@ def _round_nearest(x, table, name):
 
     vals, codes = _sorted_codes(table)
     xf = np.ascontiguousarray(x, dtype=np.float32)
-    if np.isnan(xf).any():
-        raise ValueError(f"{name} round: NaN input")
+    nan = np.isnan(xf.ravel())
+    if nan.any():
+        raise ValueError(f"{name} round: NaN at element {int(np.flatnonzero(nan)[0])}")
     flat = np.clip(xf.ravel(), vals[0], vals[-1])
     hi = np.clip(np.searchsorted(vals, flat), 1, vals.size - 1)
     lo = hi - 1

@@ -816,7 +816,7 @@ bool rocke_gemm_universal_is_valid_spec(const rocke_gemm_universal_spec_t* spec,
     }
 
     /* The catalog can list an atom whose operand lane maps are not verified
-     * yet (develop's 16x16x128 bf8 row): the build would then fail on the
+     * yet (such as the 16x16x128 bf8 row): the build would then fail on the
      * missing map, so reject it here with one reason in both engines. */
     {
         const rocke_mmaop_t* op = ck_gemm_resolve_mma_op(spec, target);
