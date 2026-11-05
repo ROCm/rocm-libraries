@@ -94,7 +94,9 @@ class LayoutTests(unittest.TestCase):
         for dimensions in ([], [7], [2, 3], [2, 3, 5], [2, 1, 3, 2]):
             shape = hn.Shape(dimensions)
             self.assertEqual(
-                hn.Layout.contiguous(shape),
+                hn.Layout.contiguous(
+                    shape, hn.Permutation(list(range(len(dimensions))))
+                ),
                 hn.Layout.contiguous_last_dimension_fastest(shape),
             )
             for order in itertools.permutations(range(len(dimensions))):
@@ -122,6 +124,8 @@ class LayoutTests(unittest.TestCase):
 
     def test_invalid_contiguous_orders(self):
         shape = hn.Shape([2, 3, 5])
+        with self.assertRaises(TypeError):
+            hn.Layout.contiguous(shape)
         for order in ([], [0, 1], [0, 1, 2, 3]):
             with self.assertRaisesRegex(
                 RuntimeError, f"order rank {len(order)}.*shape rank 3"
