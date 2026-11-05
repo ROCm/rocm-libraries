@@ -95,25 +95,25 @@ struct HipRtcTypeName<hipdnn_data_sdk::types::fp8_e5m2_fnuz>
 template <>
 struct HipRtcTypeName<hipdnn_data_sdk::types::fp4_e2m1>
 {
-    static constexpr const char* VALUE = "gpu_ref::GpuRefFp4E2M1";
+    static constexpr const char* VALUE = "__hip_fp4_e2m1";
 };
 
 template <>
 struct HipRtcTypeName<hipdnn_data_sdk::types::fp6_e2m3>
 {
-    static constexpr const char* VALUE = "gpu_ref::GpuRefFp6E2M3";
+    static constexpr const char* VALUE = "__hip_fp6_e2m3";
 };
 
 template <>
 struct HipRtcTypeName<hipdnn_data_sdk::types::fp6_e3m2>
 {
-    static constexpr const char* VALUE = "gpu_ref::GpuRefFp6E3M2";
+    static constexpr const char* VALUE = "__hip_fp6_e3m2";
 };
 
 template <>
 struct HipRtcTypeName<hipdnn_data_sdk::types::fp8_e8m0>
 {
-    static constexpr const char* VALUE = "gpu_ref::GpuRefFp8E8M0";
+    static constexpr const char* VALUE = "__hip_fp8_e8m0";
 };
 
 } // namespace hipdnn_gpu_ref::detail
