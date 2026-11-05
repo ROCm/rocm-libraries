@@ -2,8 +2,8 @@
 # SPDX-License-Identifier: MIT
 """Flag-free gfx1250 MX GEMM: ``D = alpha * A @ B.T + beta * C`` (RCR).
 
-The Step 6.14 kernel of :mod:`.mxfp4_tdm_gemm` with its feature flags turned
-into structure. Always on: double-buffered TDM staging split over wave
+Derived from the Step 6.14 kernel of :mod:`.mxfp4_tdm_gemm`, with its
+feature flags turned into structure. Always on: double-buffered TDM staging split over wave
 parity, scales staged by TDM, padded and segment-interleaved LDS, hoisted
 descriptors, the tile k+2 refill inside tile k, the split cluster barrier,
 coarse LDS waits, a loop unrolled to one tile per LDS buffer and the vector
@@ -227,7 +227,6 @@ class MxGemmSpec:
     b_lds_pad: LdsPad | None = None
     a_scale_lds_pad: LdsPad | None = None
     b_scale_lds_pad: LdsPad | None = None
-    init_c_peel: bool = True
     local_prefetch: int = 1
     half_plr: str = "b"
     half_b_order: str = "ahead"
@@ -457,7 +456,6 @@ class MxGemmSpec:
             self.dtype_tag,
             *parts,
             flags={
-                "noinitc": not self.init_c_peel,
                 "lp0": self.local_prefetch == 0,
                 "hplrnone": self.half_plr == "none",
                 "hblate": self.half_b_late,
@@ -1359,16 +1357,14 @@ class TileCompute:
         self.k = k
         self.reader = reader
 
-    def _mma_fn(self, out, seed_zero):
+    def _mma_fn(self, out):
         k = self.k
         rn_count = k.spec.wave_repeat_n
         atom = k.spec.atom
-        zero = k.b.zero_vec_f32(atom.c_frag_len) if seed_zero else None
 
-        def mma(rm, rn, a_frag, b_frag, a_scale, b_scale, first_step):
+        def mma(rm, rn, a_frag, b_frag, a_scale, b_scale):
             index = rm * rn_count + rn
-            c_in = zero if (seed_zero and first_step) else out[index]
-            out[index] = k.b.mma(atom, a_frag, b_frag, c_in, a_scale, b_scale)
+            out[index] = k.b.mma(atom, a_frag, b_frag, out[index], a_scale, b_scale)
 
         return mma
 
@@ -1419,7 +1415,6 @@ class TileCompute:
         hooks: _Hooks,
         head=None,
         next_parity=None,
-        seed_zero=False,
         steps=None,
     ):
         """Returns ``(accumulators, head)``; ``head`` is the next tile's
@@ -1427,18 +1422,16 @@ class TileCompute:
         tile's K-step count (all of them unless it is the K tail)."""
         steps = self.k.spec.k_steps if steps is None else steps
         if self.k.spec.local_prefetch == 0:
-            return self._run_direct(parity, accumulators, seed_zero, hooks, steps)
+            return self._run_direct(parity, accumulators, hooks, steps)
         if self.k.spec.half_b_late:
             return self._run_half_b_late(
-                parity, accumulators, head, next_parity, seed_zero, hooks, steps
+                parity, accumulators, head, next_parity, hooks, steps
             )
         if self.k.spec.half_b:
             return self._run_half_b(
-                parity, accumulators, head, next_parity, seed_zero, hooks, steps
+                parity, accumulators, head, next_parity, hooks, steps
             )
-        return self._run_full(
-            parity, accumulators, head, next_parity, seed_zero, hooks, steps
-        )
+        return self._run_full(parity, accumulators, head, next_parity, hooks, steps)
 
     @staticmethod
     def _signal_before_late(hooks, steps: int) -> None:
@@ -1447,16 +1440,14 @@ class TileCompute:
         if steps == 1 and hooks.signal is not None:
             hooks.signal()
 
-    def _run_half_b(
-        self, parity, accumulators, head, next_parity, seed_zero, hooks, steps
-    ):
+    def _run_half_b(self, parity, accumulators, head, next_parity, hooks, steps):
         k, reader = self.k, self.reader
         spec = k.spec
         rm_count, rn_count = spec.wave_repeat_m, spec.wave_repeat_n
         half = rn_count // 2
         buffer = k.buffer_base(parity)
         out = list(accumulators)
-        mma = self._mma_fn(out, seed_zero)
+        mma = self._mma_fn(out)
         *head, b_halves = head
         next_buffer = k.buffer_base(next_parity)
         for step in range(steps):
@@ -1495,7 +1486,6 @@ class TileCompute:
                         b_halves[which][j],
                         a_scales[rm],
                         b_scales[rn],
-                        step == 0,
                     )
                 if signal_here and issued == spec.signal_wmmas:
                     hooks.signal()
@@ -1503,15 +1493,13 @@ class TileCompute:
                 b_halves = [next_first, next_second]
         return out, (*head, [next_first, next_second])
 
-    def _run_half_b_late(
-        self, parity, accumulators, head, next_parity, seed_zero, hooks, steps
-    ):
+    def _run_half_b_late(self, parity, accumulators, head, next_parity, hooks, steps):
         k, reader = self.k, self.reader
         spec = k.spec
         rm_count, half = spec.wave_repeat_m, spec.wave_repeat_n // 2
         buffer = k.buffer_base(parity)
         out = list(accumulators)
-        mma = self._mma_fn(out, seed_zero)
+        mma = self._mma_fn(out)
         *head, b_halves = head
         next_buffer = k.buffer_base(next_parity)
         waits = spec.dscnt_waits
@@ -1548,22 +1536,19 @@ class TileCompute:
                             b_halves[which][j],
                             a_scales[rm],
                             b_scales[rn],
-                            step == 0,
                         )
                 if signal_here and issued == spec.signal_wmmas:
                     hooks.signal()
             b_halves = [next_first, reader.b_group(*source, half, half)]
         return out, (*head, b_halves)
 
-    def _run_full(
-        self, parity, accumulators, head, next_parity, seed_zero, hooks, steps
-    ):
+    def _run_full(self, parity, accumulators, head, next_parity, hooks, steps):
         k, reader = self.k, self.reader
         spec = k.spec
         rm_count, rn_count = spec.wave_repeat_m, spec.wave_repeat_n
         buffer = k.buffer_base(parity)
         out = list(accumulators)
-        mma = self._mma_fn(out, seed_zero)
+        mma = self._mma_fn(out)
         a_frags, a_scales, b_scales, (b_frags,) = head
         next_buffer = k.buffer_base(next_parity)
         for step in range(steps):
@@ -1596,14 +1581,13 @@ class TileCompute:
                         b_frags[rn],
                         a_scales[rm],
                         b_scales[rn],
-                        step == 0,
                     )
             if signal_here and issued == spec.signal_wmmas:
                 hooks.signal()
             a_frags, a_scales, b_scales, b_frags = ahead
         return out, (a_frags, a_scales, b_scales, [b_frags])
 
-    def _run_direct(self, parity, accumulators, seed_zero, hooks, steps):
+    def _run_direct(self, parity, accumulators, hooks, steps):
         """local_prefetch 0: each K-step reads, drains and computes. The
         tile's last read is the last K-step's: its refill (GL2 prefetch, the
         signal) follows the drain, the cluster wait and TDM come
@@ -1613,7 +1597,7 @@ class TileCompute:
         rm_count, rn_count = spec.wave_repeat_m, spec.wave_repeat_n
         buffer = k.buffer_base(parity)
         out = list(accumulators)
-        mma = self._mma_fn(out, seed_zero)
+        mma = self._mma_fn(out)
         late_at = spec.signal_wmmas if spec.has_cluster else 0
         for step in range(steps):
             last = step + 1 == steps
@@ -1637,7 +1621,6 @@ class TileCompute:
                         b_frags[rn],
                         a_scales[rm],
                         b_scales[rn],
-                        step == 0,
                     )
             if last and issued == late_at:
                 hooks.late_refill()
@@ -1727,26 +1710,11 @@ class Pipeline:
             self.tdm.issue(k.tile_k_v, c1)
         for ahead in range(2, spec.gl2_prefetch_distance):
             self.gl2.prefetch(ops.v(ahead * spec.tile_k), ahead % 2)
-        peel = spec.init_c_peel
-        if peel or read_ahead:
+        if read_ahead:
             self.wait_next_tile()
-        undef = [b.undef_vec(F32, spec.atom.c_frag_len) for _ in range(n_acc)]
-        first_head = tile.first_head(c0) if read_ahead else None
-        if not peel:
-            accumulators = [b.zero_vec_f32(spec.atom.c_frag_len) for _ in range(n_acc)]
-            head_values = tile.flatten(first_head) if read_ahead else []
-            start, start_parity = c0, 0
-        else:
-            accumulators, head = tile.run(
-                c0,
-                undef,
-                seed_zero=True,
-                hooks=self.hooks(c0, c0, 0),
-                head=first_head,
-                next_parity=c1,
-            )
-            head_values = tile.flatten(head) if read_ahead else []
-            start, start_parity = k.tile_k_v, 1
+        accumulators = [b.zero_vec_f32(spec.atom.c_frag_len) for _ in range(n_acc)]
+        head_values = tile.flatten(tile.first_head(c0)) if read_ahead else []
+        start, start_parity = c0, 0
 
         def loop_tile(k_tile, parity: int, acc, head_vals, steps=None):
             if not read_ahead:

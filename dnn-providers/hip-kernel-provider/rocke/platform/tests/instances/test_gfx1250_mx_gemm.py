@@ -4,7 +4,6 @@
 
 from __future__ import annotations
 
-import dataclasses
 import itertools
 import re
 import shutil
@@ -28,7 +27,6 @@ from rocke.examples.gfx1250.gemm.mx_gemm_bench import (
     timed_inputs,
     verify_block,
 )
-from rocke.examples.gfx1250.gemm.mxfp4_tdm_gemm import YAML_TILE
 from rocke.helpers.compile import _comgr_options_for_kernel
 from rocke.instances.gfx1250.mx_gemm import (
     OUT_DTYPES,
@@ -42,8 +40,6 @@ from rocke.instances.gfx1250.mx_gemm import (
     derived_lds_pads,
     validate,
 )
-from rocke.instances.gfx1250.mxfp4_tdm_gemm import build_mxfp4_tdm_gemm
-from rocke.instances.gfx1250.mxfp4_tdm_gemm_variants import variant_spec
 from rocke.runtime.hip_module import get_device_arch
 
 _BENCH = (4096, 4096, 65536)
@@ -346,9 +342,8 @@ class MxGemmSpecTest(unittest.TestCase):
     def test_kernel_name_encodes_non_default_tuning(self):
         base = _spec().kernel_name()
         self.assertTrue(base.endswith("_t256x256x512_c4x4"), base)
-        tuned = _spec(cluster_dim=(2, 2, 1), gl2_prefetch_distance=0, init_c_peel=False)
-        self.assertIn("_c2x2_pf0", tuned.kernel_name())
-        self.assertTrue(tuned.kernel_name().endswith("_noinitc"))
+        tuned = _spec(cluster_dim=(2, 2, 1), gl2_prefetch_distance=0)
+        self.assertTrue(tuned.kernel_name().endswith("_c2x2_pf0"), tuned.kernel_name())
 
 
 class MxGemmLayoutTest(unittest.TestCase):
@@ -467,32 +462,22 @@ class MxGemmLayoutTest(unittest.TestCase):
 
 
 class MxGemmIrTest(unittest.TestCase):
-    def test_benchmark_config_matches_step6_14(self):
-        """Gate 1: byte-identical LLVM IR (kernel name aside) at the benchmark
-        problem, and Step 6.14's compile options plus the regclass-priority
-        allocator option. This kernel keeps the hardware cluster order, so
-        Step 6.14 is built without its AID remap."""
-        old = dataclasses.replace(
-            variant_spec("step6_14_mxfp4_gemm", *_BENCH, **YAML_TILE),
-            cluster_aid_remap=False,
-        )
-        new = _spec(*_BENCH)
-        old_kernel = build_mxfp4_tdm_gemm(old, arch="gfx1250")
-        new_kernel = build_mx_gemm(new)
-        old_llvm = _lower_kernel_to_llvm_python(
-            old_kernel, arch="gfx1250", llvm_flavor="llvm23"
-        )
-        new_llvm = _lower_kernel_to_llvm_python(
-            new_kernel, arch="gfx1250", llvm_flavor="llvm23"
-        )
+    def test_benchmark_compile_options(self):
+        """Expert scheduling in source order, with the regclass-priority
+        allocator option."""
         self.assertEqual(
-            new_llvm.replace(new.kernel_name(), "KERNEL"),
-            old_llvm.replace(old.kernel_name(), "KERNEL"),
-        )
-        self.assertEqual(
-            _comgr_options_for_kernel(new_kernel),
-            _comgr_options_for_kernel(old_kernel)
-            + ["-mllvm", "-greedy-regclass-priority-trumps-globalness"],
+            _comgr_options_for_kernel(build_mx_gemm(_spec(*_BENCH))),
+            [
+                "-O3",
+                "-mllvm",
+                "-amdgpu-expert-scheduling-mode",
+                "-mllvm",
+                "-enable-misched=false",
+                "-mllvm",
+                "-enable-post-misched=false",
+                "-mllvm",
+                "-greedy-regclass-priority-trumps-globalness",
+            ],
         )
 
     def test_16x16_atom(self):
@@ -595,27 +580,27 @@ class MxGemmIrTest(unittest.TestCase):
                 self.assertEqual("@llvm.smin.i32(" in llvm, runtime)
 
     def test_peeled_and_looped_tiles(self):
-        """The init-C peel, the odd-count peel and the two-tile loop body are
-        emitted once each; the loop covers the rest."""
-        for tiles, init_c in itertools.product((4, 5), (True, False)):
-            spec = _spec(1024, 1024, tiles * 512, init_c_peel=init_c)
-            emitted = int(init_c) + (tiles - int(init_c)) % 2 + 2
-            with self.subTest(tiles=tiles, init_c_peel=init_c):
+        """The odd-count peel and the two-tile loop body are emitted once
+        each; the loop covers the rest."""
+        for tiles in (4, 5):
+            spec = _spec(1024, 1024, tiles * 512)
+            emitted = tiles % 2 + 2
+            with self.subTest(tiles=tiles):
                 llvm = _llvm(spec)
                 self.assertEqual(len(re.findall(_WMMA, llvm)), emitted * 4 * 32)
-                # The first K-step of the init-C peel (or, without it, of an
-                # odd-count peel) reads the zero vector directly.
+                # The first K-step of an odd-count peel reads the zero
+                # accumulators directly.
                 zero_c = len(re.findall(_WMMA + r"[^\n]*<16 x float> %cz", llvm))
-                self.assertEqual(zero_c, 32 if init_c or tiles % 2 else 0)
+                self.assertEqual(zero_c, 32 if tiles % 2 else 0)
 
     def test_k_tail_tile(self):
         """K not a multiple of tile_k: the full tiles as before, then one
         tile of the remaining K-steps (loaded clipped at K)."""
-        for tail_steps, init_c in itertools.product((1, 2, 3), (True, False)):
-            spec = _spec(1024, 1024, 4 * 512 + tail_steps * 128, init_c_peel=init_c)
+        for tail_steps in (1, 2, 3):
+            spec = _spec(1024, 1024, 4 * 512 + tail_steps * 128)
             self.assertEqual(spec.tail_steps, tail_steps)
-            emitted = int(init_c) + (4 - int(init_c)) % 2 + 2
-            with self.subTest(tail_steps=tail_steps, init_c_peel=init_c):
+            emitted = 2
+            with self.subTest(tail_steps=tail_steps):
                 llvm = _llvm(spec)
                 self.assertEqual(
                     len(re.findall(_WMMA, llvm)), (emitted * 4 + tail_steps) * 32
@@ -632,7 +617,7 @@ class MxGemmIrTest(unittest.TestCase):
                 self.assertIsNone(validate(spec))
                 self.assertEqual(spec.tail_steps, -(-extra // 128))
                 llvm = _llvm(spec)
-                emitted = 1 + 3 % 2 + 2
+                emitted = 2
                 self.assertEqual(
                     len(re.findall(_WMMA, llvm)),
                     (emitted * 4 + spec.tail_steps) * 32,
@@ -658,29 +643,21 @@ class MxGemmIrTest(unittest.TestCase):
 
     def test_short_k(self):
         """One or two full tiles, with or without a tail. The loop body is
-        emitted (it runs zero times) after the init-C and odd-count peels."""
-        for k_dim, tile_k, init_c in itertools.product(
-            (128, 256, 384, 512, 640), (128, 256, 512), (True, False)
+        emitted (it runs zero times) after the odd-count peel."""
+        for k_dim, tile_k in itertools.product(
+            (128, 256, 384, 512, 640), (128, 256, 512)
         ):
-            spec = _spec(
-                1024,
-                1024,
-                k_dim,
-                tile_m=128,
-                tile_n=128,
-                tile_k=tile_k,
-                init_c_peel=init_c,
-            )
+            spec = _spec(1024, 1024, k_dim, tile_m=128, tile_n=128, tile_k=tile_k)
             if validate(spec) is not None:
                 self.assertLess(k_dim, tile_k)
                 continue
             full = k_dim // tile_k
             if full > 2:
                 continue
-            with self.subTest(K=k_dim, tile_k=tile_k, init_c_peel=init_c):
+            with self.subTest(K=k_dim, tile_k=tile_k):
                 llvm = _llvm(spec)
                 per_step = spec.wave_repeat_m * spec.wave_repeat_n
-                tiles = int(init_c) + (full - int(init_c)) % 2 + 2
+                tiles = full % 2 + 2
                 steps = tiles * spec.k_steps + spec.tail_steps
                 self.assertEqual(len(re.findall(_WMMA, llvm)), steps * per_step)
 
@@ -695,9 +672,9 @@ class MxGemmIrTest(unittest.TestCase):
             spec = _spec(tile_k=128, **fields)
             with self.subTest(**fields):
                 llvm = _llvm(spec)
-                self.assertEqual(len(re.findall(_WMMA, llvm)), 4 * 32)
-                self.assertEqual(llvm.count("s_cmp_eq_u32 $0, 0"), 4)
-                self.assertEqual(llvm.count("s_barrier_wait -3"), 2 + 4)
+                self.assertEqual(len(re.findall(_WMMA, llvm)), 2 * 32)
+                self.assertEqual(llvm.count("s_cmp_eq_u32 $0, 0"), 2)
+                self.assertEqual(llvm.count("s_barrier_wait -3"), 2 + 2)
 
     def test_direct_reads_refill_at_every_signal_point(self):
         """local_prefetch 0 issues each tile's refill TDM and cluster wait
@@ -732,28 +709,29 @@ class MxGemmIrTest(unittest.TestCase):
                     )
 
     def test_schedule_variants_emit_their_waits_and_barriers(self):
-        """Four tiles are emitted at the smoke shape (see the peel test), four
-        K-steps each; every tile adds one wait before its refill TDM."""
+        """Two tiles are emitted at the smoke shape (the loop body; see the
+        peel test), four K-steps each; every tile adds one wait before its
+        refill TDM."""
         default = _llvm(_spec())
-        self.assertEqual(default.count('"s_wait_dscnt 35"'), 4 * (4 * 2 + 1))
-        self.assertEqual(default.count("s_cmp_eq_u32 $0, 0"), 4)
+        self.assertEqual(default.count('"s_wait_dscnt 35"'), 2 * (4 * 2 + 1))
+        self.assertEqual(default.count("s_cmp_eq_u32 $0, 0"), 2)
         none = _llvm(_spec(half_plr="none"))
-        self.assertEqual(none.count('"s_wait_dscnt 35"'), 4 * (4 + 1))
+        self.assertEqual(none.count('"s_wait_dscnt 35"'), 2 * (4 + 1))
         direct = _llvm(_spec(half_plr="none", local_prefetch=0))
-        self.assertEqual(direct.count('"s_wait_dscnt 0"'), 4 * (4 + 1))
+        self.assertEqual(direct.count('"s_wait_dscnt 0"'), 2 * (4 + 1))
         # The whole cluster barrier opens and closes the kernel; the wave-0
         # signal adds no workgroup barrier of its own.
         self.assertEqual(default.count("s_barrier_signal_isfirst"), 2)
         no_cluster = _llvm(_spec(cluster_dim=(1, 1, 1)))
         self.assertNotIn("s_barrier_signal -3", no_cluster)
-        self.assertEqual(no_cluster.count('"s_wait_dscnt 35"'), 4 * (4 * 2 + 1))
+        self.assertEqual(no_cluster.count('"s_wait_dscnt 35"'), 2 * (4 * 2 + 1))
         # half_b_order "late": per K-step a wait leaving B's second half (8
         # reads) and one leaving the next scales and A (19); the late wait
         # also leaves the next tile's scales and A.
         late = _llvm(_spec(half_b_order="late"))
         self.assertNotIn('"s_wait_dscnt 35"', late)
-        self.assertEqual(late.count('"s_wait_dscnt 8"'), 4 * 4)
-        self.assertEqual(late.count('"s_wait_dscnt 19"'), 4 * (4 + 1))
+        self.assertEqual(late.count('"s_wait_dscnt 8"'), 2 * 4)
+        self.assertEqual(late.count('"s_wait_dscnt 19"'), 2 * (4 + 1))
         self.assertEqual(len(re.findall(_WMMA, late)), len(re.findall(_WMMA, default)))
         lds_read = r"load <\d+ x i32>, ptr addrspace\(3\)"
         self.assertEqual(
@@ -761,13 +739,13 @@ class MxGemmIrTest(unittest.TestCase):
         )
         no_prefetch = _llvm(_spec(gl2_prefetch_distance=0))
         self.assertNotIn("global.prefetch", no_prefetch)
-        # Six prefetches (tiles 2 and 3 up front, one per emitted tile) over
+        # Four prefetches (tiles 2 and 3 up front, one per emitted tile) over
         # 2048 lanes of the 4x4 cluster: 256 B rows give 2176 lines (two
         # rounds) per tile. 128 B rows give 2112 lines for an even tile and
         # only the 64 scale lines (one round) for an odd one.
         prefetch = "call void @llvm.amdgcn.global.prefetch"
-        self.assertEqual(default.count(prefetch), 6 * 2)
-        self.assertEqual(_llvm(_spec(tile_k=256)).count(prefetch), 3 * (2 + 1))
+        self.assertEqual(default.count(prefetch), 4 * 2)
+        self.assertEqual(_llvm(_spec(tile_k=256)).count(prefetch), 2 * (2 + 1))
 
     def test_two_n_repeats(self):
         """wave_repeat_n 2 (1x4 waves, tile_n 128): one 8 B B-scale read per
@@ -1079,7 +1057,6 @@ class MxGemmDeviceTest(unittest.TestCase):
                 _spec(cluster_dim=(1, 1, 1)),
                 _spec(half_plr="none"),
                 _spec(half_plr="none", local_prefetch=0),
-                _spec(init_c_peel=False),
                 _spec(half_b_order="late"),
                 _spec(tile_k=128, half_b_order="late"),
             ]
