@@ -24,6 +24,7 @@
  *
  *******************************************************************************/
 #include "hipblaslt/hipblaslt-ext.hpp"
+#include "hipblaslt_arguments.hpp"
 #include "hipblaslt_data.hpp"
 #include "hipblaslt_datatype2string.hpp"
 #include "hipblaslt_test.hpp"
