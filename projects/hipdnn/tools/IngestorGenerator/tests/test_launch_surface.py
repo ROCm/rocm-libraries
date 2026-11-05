@@ -39,7 +39,7 @@ _TOOL = _TOOLS / "launch_surface.py"
 sys.path.insert(0, str(_TOOLS))
 
 import launch_surface  # noqa: E402
-from tests.helpers import shipped_bundles  # noqa: E402
+from tests.helpers import shipped_bundle_params  # noqa: E402
 
 _REPO_ROOT = launch_surface.find_repo_root(_TOOLS)
 
@@ -763,17 +763,17 @@ class TestAgainstTheGfx950Manifest:
         assert "CHECK PASSED" in out
 
 
-# Manifests whose launch surface is stale against develop's rocKE: #15024 made the unified
-# 2D kernel's cu_q search trip count a runtime argument and removed binary_search_iters,
-# which the 'capacity' surface still names. Gated again once its owners update it.
-_LAUNCH_SURFACE_STALE = frozenset({"gfx950_attention_unified_2d"})
+# #15024 made the unified 2D kernel's cu_q search trip count a runtime argument and
+# removed binary_search_iters, which this manifest's 'capacity' surface still names.
+_LAUNCH_SURFACE_STALE = {
+    "gfx950_attention_unified_2d": (
+        "'capacity' surface names binary_search_iters, removed from rocKE by #15024"
+    ),
+}
 
 
 class TestAgainstTheShippedEngineManifest:
-    @pytest.mark.parametrize(
-        "engine",
-        [b for b in shipped_bundles() if b not in _LAUNCH_SURFACE_STALE],
-    )
+    @pytest.mark.parametrize("engine", shipped_bundle_params(_LAUNCH_SURFACE_STALE))
     def test_every_declared_surface_is_real_guarded_and_tested(self, engine):
         manifest = _TOOLS.parent / "configs" / f"{engine}.engine.yaml"
         result = _run("--check", str(manifest), cwd=_REPO_ROOT)

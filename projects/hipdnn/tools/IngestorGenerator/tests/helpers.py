@@ -8,6 +8,8 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 from codegen.models import (
     DIALECT_DIRECT_LOAD,
     DIALECT_PACKAGED,
@@ -36,6 +38,31 @@ def shipped_bundles() -> tuple:
             for p in _CONFIGS.glob("*" + _MANIFEST_SUFFIX)
         )
     )
+
+
+def shipped_bundle_params(known_failures: dict) -> list:
+    """``shipped_bundles()`` as pytest params. A bundle in ``known_failures`` (bundle to
+    reason) is a strict xfail rather than dropped, so the run reports it and its owners'
+    fix fails the gate until the entry goes. ``allow_skip`` carries the same reason
+    because hipdnn_strict_skips fails an xfail like any other skip."""
+    bundles = shipped_bundles()
+    unknown = set(known_failures) - set(bundles)
+    assert not unknown, f"no shipped manifest for {sorted(unknown)}"
+    return [
+        pytest.param(
+            bundle,
+            marks=(
+                (
+                    pytest.mark.xfail(strict=True, reason=known_failures[bundle]),
+                    pytest.mark.allow_skip(reason=known_failures[bundle]),
+                )
+                if bundle in known_failures
+                else ()
+            ),
+            id=bundle,
+        )
+        for bundle in bundles
+    ]
 
 
 def make_engine(**overrides) -> EngineSpec:
