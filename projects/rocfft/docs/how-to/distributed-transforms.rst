@@ -72,8 +72,9 @@ following additional steps are required:
    The function is present in every build. On a library built without
    ``ROCFFT_MPI_ENABLE``, which includes the packaged rocFFT, it returns
    ``rocfft_status_failure``. Check that status before calling
-   :cpp:func:`rocfft_plan_create`. An application message such as
-   ``R2C plan creation failed`` is the status of plan creation.
+   :cpp:func:`rocfft_plan_create`. With ``ROCFFT_LAYER=1``, a failed plan
+   creation writes the exception text to stderr, for example:
+   ``Inconsistent full data range detected for an input field``.
 
 #. Each rank allocates the same fields and calls
    :cpp:func:`rocfft_plan_description_add_infield` and
