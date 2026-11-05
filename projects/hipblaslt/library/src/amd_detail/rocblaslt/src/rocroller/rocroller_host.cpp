@@ -369,17 +369,19 @@ rocblaslt_status
         return rocblaslt_status_invalid_value;
     }
 
-    auto scale_type = hipDataType_to_rocRoller_type(prob.scale_type);
-    if(scale_type != rocRoller::DataType::None && scale_type != rocRoller::DataType::Float)
+    auto scale_type = normalizeOperandType(prob.scale_type);
+    if(scale_type != HIPBLASLT_DATATYPE_INVALID && scale_type != HIP_R_32F)
     {
-        std::cerr << "rocRoller only supports F32 as scale type not " << scale_type << std::endl;
+        // hip2RocRollerType throws on a format rocRoller does not name.
+        std::cerr << "rocRoller only supports F32 as scale type not "
+                  << hipDataType_to_string(scale_type) << std::endl;
         return rocblaslt_status_invalid_value;
     }
 
-    if(kernelType.typeAcc != rocRoller::DataType::Float)
+    if(kernelType.typeAcc != HIP_R_32F)
     {
-        std::cerr << "rocRoller only supports F32 accumulation, not " << kernelType.typeAcc
-                  << std::endl;
+        std::cerr << "rocRoller only supports F32 accumulation, not "
+                  << hipDataType_to_string(kernelType.typeAcc) << std::endl;
         return rocblaslt_status_invalid_value;
     }
 
