@@ -410,6 +410,17 @@ namespace TensileLite
         return false;
     }
 
+    void noteOnlineEventPairCap(int device, int cap)
+    {
+        if(!DiagnosticsState::instance().infoOn())
+            return;
+
+        std::ostringstream msg;
+        msg << "tuning-cache: online-event-pair-cap device=" << device << " cap=" << cap
+            << "; a launch ran untimed, see HIPBLASLT_TUNING_MAX_EVENT_PAIRS";
+        log_info(__func__, msg.str());
+    }
+
     void resetTuningDiagnosticsForTest()
     {
         DiagnosticsState& state = DiagnosticsState::instance();

@@ -34,6 +34,7 @@
  *****************************************************************************/
 
 #include "Debug.hpp"
+#include "OnlineTuner.hpp"
 #include "include/check_numerics_matrix.hpp"
 #include "rocblaslt-types.h"
 #include "rocblaslt_arch_revision.hpp"
@@ -4059,6 +4060,37 @@ namespace
             return std::max(1, envInt("HIPBLASLT_TUNING_MAX_CANDIDATES", 128));
         }
 
+        // Online's defaults are smaller: each timed launch is a caller's call.
+        // Unclamped, so the notice for a cap below 2 shows the value given; the
+        // tuner clamps it.
+        static int onlineCandidateCap()
+        {
+            return envInt("HIPBLASLT_TUNING_MAX_CANDIDATES", 5);
+        }
+        static int onlineHotIterations()
+        {
+            return std::max(1, envInt("HIPBLASLT_TUNING_HOT_ITERS", 3));
+        }
+        static int onlineColdIterations()
+        {
+            return std::max(0, envInt("HIPBLASLT_TUNING_COLD_ITERS", 0));
+        }
+        // These make the host wait around each kernel, which an online sample
+        // would time too. The variable that is set and non-zero, or null.
+        static const char* serializedLaunches()
+        {
+            for(const char* name : {"AMD_SERIALIZE_KERNEL", "HIP_LAUNCH_BLOCKING"})
+                if(envInt(name, 0) != 0)
+                    return name;
+            return nullptr;
+        }
+        static int onlineLivePairCap()
+        {
+            return std::max(1,
+                            envInt("HIPBLASLT_TUNING_MAX_EVENT_PAIRS",
+                                   rocblaslt::OnlineTunerConfig::c_defaultLivePairCap));
+        }
+
         /**
          * Invalidate the instruction cache between timed launches, as the bench
          * client does when tuning.
@@ -5570,6 +5602,60 @@ size_t tuningCandidatesForTest(const RocblasltContractionProblem& prob,
         indexes[i] = (*found)[i];
     return found->size();
 }
+
+namespace rocblaslt
+{
+    namespace
+    {
+        // The tuner's per-event lines, at info level. Called under the tuner's
+        // lock from inside a matmul, so a logging failure is swallowed.
+        void traceOnlineTuner(const char* func, const std::string& message)
+        {
+            try
+            {
+                log_info(func, message);
+            }
+            catch(...)
+            {
+            }
+        }
+    }
+
+    // Here, next to the mode singleton and the secure environment accessor.
+    OnlineTunerConfig onlineTunerConfig()
+    {
+        const auto& tuning = TensileLite::TuningModeSingleton::getInstance();
+
+        OnlineTunerConfig config;
+        config.enabled
+            = tuning.mode() == TensileLite::TuningMode::Online && !tuning.cachePath().empty();
+
+        config.topK        = TuningPolicy::onlineCandidateCap();
+        config.repeats     = TuningPolicy::onlineHotIterations();
+        config.coldCalls   = TuningPolicy::onlineColdIterations();
+        config.livePairCap = TuningPolicy::onlineLivePairCap();
+        if(get_logger_layer_mode() & rocblaslt_layer_mode_log_info)
+            config.trace = traceOnlineTuner;
+
+        config.livePairCapReached = TensileLite::noteOnlineEventPairCap;
+
+        // The startup line still names online as the mode, so say it is off.
+        const char* serialized = TuningPolicy::serializedLaunches();
+        if(config.enabled && config.topK < 2)
+            log_tuning_lifecycle(__func__,
+                                 "online-off max-candidates=" + std::to_string(config.topK)
+                                     + "; online tuning needs at least 2");
+        else if(config.enabled && serialized)
+        {
+            config.enabled = false;
+            log_tuning_lifecycle(__func__,
+                                 std::string("online-off ") + serialized
+                                     + " is set; serialized launches would time the host's waits");
+        }
+
+        return config;
+    }
+} // namespace rocblaslt
 
 static bool readsStreamKFlags(const TensileLite::ContractionSolution& solution)
 {
