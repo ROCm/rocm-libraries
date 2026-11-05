@@ -23,8 +23,12 @@ stages.
 - [Core tests and compiled usage example](tests/core_test.cpp).
 - [Permutations](include/roc/hostnumerics/permutation.hpp), which order
   axes from slowest to fastest, and the Python `Permutation` docstrings.
-- [Logical tensor shapes](include/roc/hostnumerics/shape.hpp) and the Python
-  `Shape` docstrings.
+- [Logical tensor shapes](include/roc/hostnumerics/shape.hpp), including
+  ordered coordinate traversal, and the Python `Shape` docstrings.
+- [Index ranges](include/roc/hostnumerics/index_range.hpp), which select
+  strided flat indices, and the Python `IndexRange` docstrings.
+- [Sampling](include/roc/hostnumerics/sampling.hpp), which chooses the flat
+  indices that reference validation checks.
 - [Tensor layouts](include/roc/hostnumerics/layout.hpp), which map coordinates
   to element offsets, and the Python `Layout` docstrings.
 

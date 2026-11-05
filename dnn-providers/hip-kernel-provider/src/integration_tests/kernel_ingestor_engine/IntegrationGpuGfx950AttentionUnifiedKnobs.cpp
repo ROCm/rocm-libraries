@@ -249,8 +249,8 @@ std::string maskName(Mask mask)
 
 /// Every Unified2D kernel class -- geometry x dtype x mask -- forced once, on a prefill shape
 /// with B > 1 and Sq != Skv: the default geometry cycling through the head configurations
-/// (every cell ships it), the others on a cell that ships them; then one cold case, which
-/// the engine's ranking serves with the default geometry.
+/// (every cell ships it), the others on a cell that ships them; then two cold cases, one at
+/// B 512, which the engine's ranking serves with the default geometry.
 std::vector<KnobCase> knobCases2D()
 {
     std::vector<KnobCase> cases;
@@ -290,14 +290,20 @@ std::vector<KnobCase> knobCases2D()
                      {DataType::BFLOAT16, 128, 8, 2, Mask::TOP_LEFT, 3, 512, 512},
                      {},
                      knobsOf(NARROW_4X16)});
+    // B 512 is one past what the old baked 9-iteration cu_q search resolved; the kernel now
+    // derives the trip count from the num_seqs kernarg, so every batch is served.
+    cases.push_back({"Unified2D_Cold_BatchPastTheOldBakedSearch",
+                     ENGINE_2D,
+                     {DataType::BFLOAT16, 128, 8, 2, Mask::TOP_LEFT, 512, 16, 64},
+                     {},
+                     knobsOf(NARROW_4X16)});
     return cases;
 }
 
 /// Every Unified3D kernel class -- num_segments x dtype x causal mask -- forced once on a
 /// decode shape (Sq 1): the default num_segments cycling through the head configurations, the
 /// others on a cell that ships them; a NO_MASK decode graph (served by the bottom-right
-/// kernel); and a cold B = 1024 decode case, past any 2D batch capacity: the decode grid has
-/// none.
+/// kernel); and a cold B = 1024 decode case.
 std::vector<KnobCase> knobCases3D()
 {
     std::vector<KnobCase> cases;
@@ -347,10 +353,6 @@ std::vector<KnobCase> knobCases()
 std::vector<DeclineCase> declineCases()
 {
     return {
-        // 2D bakes a batch capacity of 511 into its binary search.
-        {"Unified2D_BatchBeyondTheBakedCapacity",
-         ENGINE_2D,
-         {DataType::BFLOAT16, 128, 8, 2, Mask::NO_MASK, 512, 16, 64}},
         // The identity cache is cut into whole 16-token blocks.
         {"Unified2D_SeqKvNotAWholeNumberOfBlocks",
          ENGINE_2D,

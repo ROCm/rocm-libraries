@@ -12,10 +12,12 @@ Documentation for Composable Kernel available at [https://rocm.docs.amd.com/proj
 * Fixed padded-row output updates in the global-atomic path of CK Tile multiblock reduction, including float outputs on gfx11.
 * Fixed partial-vector direct reduction stores and scalar atomic output tails, and rejected incomplete packed atomic output vectors.
 * Fixed memory faults of CK Tile TDM transfers on gfx1250. The TDM and prefetch paths of the tile window read the tensor descriptor through a dangling reference, which some compilers fold to `INT32_MAX` tensor dimensions and strides.
+* Fixed the CK Tile GEMM Stream-K dispatcher rejecting linear and tree reduction kernels whose C store is narrower than 4 bytes, so fp16 and bf16 problems with an odd N (for example N = 1) get a linear or tree reduction kernel.
 
 ### Added
 
 * Added gfx1250 support and WMMA regression tests for CK Tile GEMM Stream-K with atomic, linear, and tree reduction.
+* Added a gfx1250 WMMA configuration and reduction-strategy selection to the CK Tile GEMM Stream-K dispatcher benchmark.
 * Added FP6 (E2M3) operands to the CK Tile microscaling (MX) GEMM TDM pipelines on gfx1250, for row-major A, column-major B, a 16x16x128 warp tile, and 32-element E8M0 scale blocks, with fp16 or bf16 output.
 * Added K tails to the CK Tile microscaling (MX) GEMM TDM pipelines on gfx1250: they accept any K that is a whole number of storage elements.
 
