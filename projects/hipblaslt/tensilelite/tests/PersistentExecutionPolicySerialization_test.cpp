@@ -474,6 +474,22 @@ namespace
                                  return std::string(info.param.strategy) + info.param.assignment;
                              });
 
+    TEST_F(PersistentExecutionPolicySerializationTest,
+           DeviceScalarAlphaCapabilityRoundTripsOnlyInProblemType)
+    {
+        for(int mode : {0, 1, 2, 3, 5, 6, 7})
+        {
+            SCOPED_TRACE(mode);
+            problem["useScaleAlphaVec"] = object(mode);
+            auto decoded = readSolution();
+            EXPECT_EQ(decoded->problemType.useScaleAlphaVec, mode);
+            internalArgs = output(decoded->internalArgsSupport);
+            EXPECT_EQ(internalArgs.count("deviceScalarAlpha"), 0u);
+            problem = output(decoded->problemType);
+            EXPECT_EQ(readSolution()->problemType.useScaleAlphaVec, mode);
+        }
+    }
+
     TEST_F(PersistentExecutionPolicySerializationTest, OmittedSelectorsDefaultToNonPersistent)
     {
         size.erase("tileProcessingStrategy");
