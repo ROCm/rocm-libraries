@@ -92,10 +92,10 @@ struct BlockFmhaFwdSplitKVPipelineQRKSVSTdm
     static constexpr bool kQuantized  = QScaleEnum == BlockAttentionQuantScaleEnum::PERTENSOR ||
                                        QScaleEnum == BlockAttentionQuantScaleEnum::PERHEAD ||
                                        kBlockScale;
-    static constexpr bool kVScaleOnOacc    = kQuantized && !kBlockScale;
-    static constexpr bool kStoreLSE        = Problem::kStoreLSE;
-    static constexpr bool kHasSink         = Problem::kHasSink;
-    static constexpr bool kIsPagedKV       = Problem::kIsPagedKV;
+    static constexpr bool kVScaleOnOacc = kQuantized && !kBlockScale;
+    static constexpr bool kStoreLSE     = Problem::kStoreLSE;
+    static constexpr bool kHasSink      = Problem::kHasSink;
+    static constexpr bool kIsPagedKV    = Problem::kIsPagedKV;
     // Paged walks start on a page-friendly boundary that can precede the split,
     // so the head erase below is needed there whatever the split bounds look
     // like. Everywhere else this follows the problem, as qr_ks_vs does.
@@ -119,8 +119,7 @@ struct BlockFmhaFwdSplitKVPipelineQRKSVSTdm
     static constexpr bool kDeferSink = kHwGemm1Scale && kHasSink;
     // MergeSink has no i_split test, so every split with work would add
     // exp(sink) again. Fail to compile rather than be silently wrong.
-    static_assert(!kDeferSink,
-                  "qr_tdm split-kv does not implement the deferred sink path");
+    static_assert(!kDeferSink, "qr_tdm split-kv does not implement the deferred sink path");
 
     static constexpr index_t kScaleBytes        = 4;
     static constexpr index_t kGemm1KPerByte     = kK1 / kScaleBytes;
@@ -457,15 +456,14 @@ struct BlockFmhaFwdSplitKVPipelineQRKSVSTdm
 
         // Q/K/V all reach LDS through load_tile_tdm; V is then read back with
         // ds_load_tr. V dram window keeps (kN1, kK1) shape.
-        static_assert(kM0 == QDramBlockWindowTmp{}.get_window_lengths()[I0] &&
-                          kSubQKHeaddim == QDramBlockWindowTmp{}.get_window_lengths()[I1] &&
-                          kN0 == KDramBlockWindowLengths{}[I0] &&
-                          kK0 == KDramBlockWindowLengths{}[I1] &&
-                          kN1 == VDramBlockWindowLengths{}[I0] &&
-                          kK1 == VDramBlockWindowLengths{}[I1] &&
-                          kM0 == BiasDramBlockWindowTmp{}.get_window_lengths()[I0] &&
-                          kN0 == BiasDramBlockWindowTmp{}.get_window_lengths()[I1],
-                      "wrong!");
+        static_assert(
+            kM0 == QDramBlockWindowTmp{}.get_window_lengths()[I0] &&
+                kSubQKHeaddim == QDramBlockWindowTmp{}.get_window_lengths()[I1] &&
+                kN0 == KDramBlockWindowLengths{}[I0] && kK0 == KDramBlockWindowLengths{}[I1] &&
+                kN1 == VDramBlockWindowLengths{}[I0] && kK1 == VDramBlockWindowLengths{}[I1] &&
+                kM0 == BiasDramBlockWindowTmp{}.get_window_lengths()[I0] &&
+                kN0 == BiasDramBlockWindowTmp{}.get_window_lengths()[I1],
+            "wrong!");
         // Block GEMM
         constexpr auto gemm_0 = Policy::template GetQKBlockGemm<Problem>();
         constexpr auto gemm_1 = Policy::template GetPVBlockGemm<Problem>();
@@ -1043,10 +1041,10 @@ struct BlockFmhaFwdSplitKVPipelineQRKSVSTdm
                 // The walk's ends are not kN0 aligned: erase the last tile's tail and,
                 // under paged-kv, the first tile's head (see aligned_physical_seqlen_k_start).
                 // Sink tiles are exempt from the head check: they start at column 0.
-                const bool is_last_tile  = (i_total_loops == (num_total_loop - 1));
-                const bool is_sink_tile  = (num_sink_loop > i_total_loops);
-                const bool check_head    = kIsPagedKV && !is_sink_tile &&
-                                        (i_total_loops == num_sink_loop);
+                const bool is_last_tile = (i_total_loops == (num_total_loop - 1));
+                const bool is_sink_tile = (num_sink_loop > i_total_loops);
+                const bool check_head =
+                    kIsPagedKV && !is_sink_tile && (i_total_loops == num_sink_loop);
                 if(is_last_tile || check_head)
                 {
                     set_tile_if(s_acc,
@@ -1067,17 +1065,14 @@ struct BlockFmhaFwdSplitKVPipelineQRKSVSTdm
             if constexpr(kPadSeqLenK || FmhaMask::IsMasking)
             {
                 // mask accepts only logical coordinates, do conversion here
-                bool need_perpixel_check = mask.IsEdgeTile(q_origin.at(I0),
-                                                           k_origin.at(I0) - kv_l2p_offset,
-                                                           number<kM0>{},
-                                                           number<kN0>{});
+                bool need_perpixel_check = mask.IsEdgeTile(
+                    q_origin.at(I0), k_origin.at(I0) - kv_l2p_offset, number<kM0>{}, number<kN0>{});
                 if(need_perpixel_check)
                 {
                     set_tile_if(
                         s_acc, -numeric<SMPLComputeDataType>::infinity(), [&](auto tile_idx) {
                             const auto row = q_origin.at(I0) + tile_idx.at(I0);
-                            const auto col =
-                                k_origin.at(I0) + tile_idx.at(I1) - kv_l2p_offset;
+                            const auto col = k_origin.at(I0) + tile_idx.at(I1) - kv_l2p_offset;
                             if constexpr(kHasSink)
                                 return mask.IsOutOfSinkBound(row, col);
                             else

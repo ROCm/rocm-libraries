@@ -196,7 +196,7 @@ int override_num_splits_if_necessary(int batch,
         // its bn0 64 split-kv tile (gfx9/gfx12 also emit bn0 128).
         const bool is_gfx125 = std::string{props.gcnArchName}.compare(0, 6, "gfx125") == 0;
 
-        int max_splits      = 128;
+        int max_splits       = 128;
         float fill_threshold = 0.8f;
         if(is_gfx125)
         {

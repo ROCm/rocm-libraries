@@ -1933,9 +1933,9 @@ INSTANTIATE_TEST_SUITE_P(TestCkTileFmhaFwd,
 
 TEST_P(PagedSplitKV, DataTypeConfig)
 {
-    auto [hdims, mode, page_block_size, num_splits, dims_mask]  = GetParam();
-    auto [hdim_q, hdim_v]                                       = hdims;
-    auto [batch, nhead, nhead_k, seqlen_q, seqlen_k, mask_str]  = dims_mask;
+    auto [hdims, mode, page_block_size, num_splits, dims_mask] = GetParam();
+    auto [hdim_q, hdim_v]                                      = hdims;
+    auto [batch, nhead, nhead_k, seqlen_q, seqlen_k, mask_str] = dims_mask;
 
     auto result = fmha_fwd_run<DataTypeConfig>(mode,
                                                batch,
@@ -1945,16 +1945,16 @@ TEST_P(PagedSplitKV, DataTypeConfig)
                                                {adjust_seqlen(seqlen_k)},
                                                hdim_q,
                                                hdim_v,
-                                               0,               // seqlen_knew
-                                               {-1},            // seqlen_qpads
-                                               {-1},            // seqlen_kpads
-                                               {},              // q_eff_lens_per_batch
-                                               {},              // kv_eff_lens_per_batch
-                                               0,               // rotary_dim
-                                               true,            // i_perm
-                                               false,           // o_perm
-                                               0,               // scale_s
-                                               0,               // logits_soft_cap
+                                               0,     // seqlen_knew
+                                               {-1},  // seqlen_qpads
+                                               {-1},  // seqlen_kpads
+                                               {},    // q_eff_lens_per_batch
+                                               {},    // kv_eff_lens_per_batch
+                                               0,     // rotary_dim
+                                               true,  // i_perm
+                                               false, // o_perm
+                                               0,     // scale_s
+                                               0,     // logits_soft_cap
                                                def_is_v_rowmajor,
                                                def_lse,         // lse
                                                page_block_size, // page_block_size

@@ -75,44 +75,42 @@ template <int HeadDim,
           int BlockM        = 128>
 struct SplitKVModel
 {
-    using Shape  = ck_tile::TileFmhaShape<ck_tile::sequence<BlockM, N, 32, ValueDim, 32, HeadDim>,
-                                          ck_tile::sequence<4, 1, 1>,
-                                          ck_tile::sequence<16, 16, 32>,
-                                          ck_tile::sequence<4, 1, 1>,
-                                          ck_tile::sequence<16, 16, 32>,
-                                          true>;
-    using Traits = ck_tile::TileFmhaFwdSplitKVTraits<true,  // kPadSeqLenQ
-                                                     true,  // kPadSeqLenK
-                                                     false, // kPadHeadDimQ
-                                                     false, // kPadHeadDimV
-                                                     false, // kHasLogitsSoftCap
-                                                     ck_tile::BlockAttentionBiasEnum::NO_BIAS,
-                                                     false, // kHasBiasGrad
-                                                     true,  // kStoreLSE
-                                                     false, // kDoFp8StaticQuant
-                                                     false, // kIsPagedKV
-                                                     UnevenSplits,
-                                                     false, // kMergeNumHeadGroupsSeqLenQ
-                                                     1,     // kBlockPerCu
-                                                     false>; // kHasSink
-    using Problem =
-        ck_tile::BlockFmhaFwdSplitKVPipelineProblem<Data,
-                                                    Data,
-                                                    Data,
-                                                    float,
-                                                    float,
-                                                    Data,
-                                                    float,
-                                                    Data,
-                                                    float,
-                                                    float,
-                                                    Shape,
-                                                    false,
-                                                    ck_tile::ComposedAttention<
-                                                        0,
-                                                        CK_TILE_FMHA_FWD_FAST_EXP2>,
-                                                    ck_tile::SimplifiedGenericAttentionMask<Mask>,
-                                                    Traits>;
+    using Shape   = ck_tile::TileFmhaShape<ck_tile::sequence<BlockM, N, 32, ValueDim, 32, HeadDim>,
+                                           ck_tile::sequence<4, 1, 1>,
+                                           ck_tile::sequence<16, 16, 32>,
+                                           ck_tile::sequence<4, 1, 1>,
+                                           ck_tile::sequence<16, 16, 32>,
+                                           true>;
+    using Traits  = ck_tile::TileFmhaFwdSplitKVTraits<true,  // kPadSeqLenQ
+                                                      true,  // kPadSeqLenK
+                                                      false, // kPadHeadDimQ
+                                                      false, // kPadHeadDimV
+                                                      false, // kHasLogitsSoftCap
+                                                      ck_tile::BlockAttentionBiasEnum::NO_BIAS,
+                                                      false, // kHasBiasGrad
+                                                      true,  // kStoreLSE
+                                                      false, // kDoFp8StaticQuant
+                                                      false, // kIsPagedKV
+                                                      UnevenSplits,
+                                                      false,  // kMergeNumHeadGroupsSeqLenQ
+                                                      1,      // kBlockPerCu
+                                                      false>; // kHasSink
+    using Problem = ck_tile::BlockFmhaFwdSplitKVPipelineProblem<
+        Data,
+        Data,
+        Data,
+        float,
+        float,
+        Data,
+        float,
+        Data,
+        float,
+        float,
+        Shape,
+        false,
+        ck_tile::ComposedAttention<0, CK_TILE_FMHA_FWD_FAST_EXP2>,
+        ck_tile::SimplifiedGenericAttentionMask<Mask>,
+        Traits>;
     using TdmPipeline = ck_tile::BlockFmhaFwdSplitKVPipelineQRKSVSTdm<Problem>;
 };
 
