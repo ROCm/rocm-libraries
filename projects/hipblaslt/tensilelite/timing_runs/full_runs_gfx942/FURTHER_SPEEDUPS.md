@@ -43,8 +43,21 @@ is slow today, the evidence, the options, an estimated saving in CI terms, and t
   gfx950 and gfx1250 force it off (`Tensile.py:837-839`). The bundled rocm_smi lists `/tmp` twice
   per GPU to find partition files (16 full scans with 8 GPUs); this host's `/tmp` has ~37k entries.
 - **Evidence:** `listener_setup` = 179.3 s over 441 launches (407 ms each), 22% of the 829 s
-  instrumented run total. With an empty private `/tmp`, `amdsmi_init` drops to ~102 ms. Turning the
-  monitor off gives 0.03 ms (`run_hotspots.md`).
+  instrumented run total. Measured with the real client (3 runs each, cores 48-72, GPU 6):
+
+  | Variant | `listener_setup` (ms) | `hip_initialization` (ms) |
+  |---|---:|---:|
+  | as in the pass (`ROCR_VISIBLE_DEVICES=6`, monitor on) | 404-411 | 378-409 |
+  | `hardware-monitor=False` | **0.02-0.03** | 386-430 |
+  | `HIP_VISIBLE_DEVICES=6` instead of ROCR (monitor on / off) | 406-407 / 0.02-0.03 | 384-391 |
+  | monitor on, private empty `/tmp` (mount namespace) | **102-103** | 380-407 |
+
+- **Why `amdsmi_init` costs ~400 ms here:** the bundled rocm_smi looks up
+  `rocmsmi_boot_{compute,memory}_partition_<i>.*` by listing `/tmp`, twice per GPU (16 full
+  directory scans with 8 GPUs). One `ls -f /tmp` of the 37,120 entries costs 25-45 ms. The path is
+  hard-coded: `TMPDIR` does not change it. The remaining ~100 ms is amd-smi's sysfs walk of all 8
+  GPUs (KFD `io_links`, PCI, DRM, hwmon), which does not honour `ROCR_VISIBLE_DEVICES`. So on a CI
+  runner with a small `/tmp` the cost is probably ~100 ms per launch (not measured on a runner).
 - **Wasted:** the monitor only samples around timed enqueues (`preEnqueues`/`postEnqueues`), and only
   11 of 123 configs time anything (A2). The other ~410 launches initialize it for nothing.
 - **Options:**
@@ -76,11 +89,27 @@ is slow today, the evidence, the options, an estimated saving in CI terms, and t
 
 ### A3. HIP initialization on every client launch
 
-- **Why it is slow:** `hipGetDeviceCount` takes ~336 ms: the runtime reads ~10,016 files under
-  `/sys/.../kfd/topology` (626 caches per MI300X × 8 GPUs, each read twice) before applying the
-  visibility filter. The first stream adds ~45 ms (each hardware queue registers a 186 MB region,
-  ~15 ms each). `ROCR_VISIBLE_DEVICES` vs `HIP_VISIBLE_DEVICES` makes no difference; no `HSA_*`
-  variable skips the topology read (`run_hotspots.md`).
+- **Where:** `client/main.cpp:883-897`: `GetHardware` (`hipGetDeviceCount`, `hipSetDevice`,
+  `hip::GetCurrentDevice`, `main.cpp:449-462`) and one `DeviceContext` (stream creation).
+- **Why it is slow:** a minimal probe (`hipGetDeviceCount` → `hipSetDevice` → `hipStreamCreate` →
+  `hipMalloc`) reproduces the 381 ms: `hipGetDeviceCount` 334-361 ms, `hipSetDevice` 0.0 ms, first
+  `hipStreamCreate` 44-45 ms, `hipMalloc` 0.1 ms.
+  - `hipGetDeviceCount` (= ROCr `hsa_init`): the thunk reads the topology of every KFD node before
+    `ROCR_VISIBLE_DEVICES` filtering. `strace` counts 16,266 `openat` and 26,481 `read`, including
+    10,016 opens of `/sys/devices/virtual/kfd/kfd/topology/nodes/<n>/caches/<c>/properties`
+    (626 cache entries per MI300X node, 8 GPU nodes, each read twice) and ~5,000 per-CPU cache
+    files (192 CPUs). The ~350 ms between the first KFD ioctl and the first queue ioctl contains
+    no ioctls: pure sysfs parsing. Reading the 5,008 GPU cache files once with `cat` costs 188 ms,
+    so two passes explain ~340 ms.
+  - First stream: each hardware queue gets a 186,019,840-byte anonymous mapping registered with
+    `AMDKFD_IOC_SVM` (~15 ms each, probably the per-queue CWSR save area) before
+    `AMDKFD_IOC_CREATE_QUEUE`; three are made at start-up.
+  - No variable helps: `ROCR_VISIBLE_DEVICES` vs `HIP_VISIBLE_DEVICES` gave 378-430 vs 384-391 ms,
+    and no `HSA_*` / `HSAKMT_*` variable in `libhsa-runtime64.so.1.18.70204` skips the
+    cache-topology parsing (checked the full list of environment strings).
+  - Concurrency: 4 simultaneous probes took 472-491 ms (`amdsmi_init`) and 439-453 ms
+    (`hipGetDeviceCount`) instead of 397 / 334 ms, so start-up mostly overlaps across processes
+    (relevant to A6b).
 - **Evidence:** `hip_initialization` 167.9 s / 441 launches (381 ms each). gfx950's ~150 ms is
   probably a smaller topology (inferred).
 - **Options:** fewer launches (A4); `GPU_MAX_HW_QUEUES=1` saves ~15 ms setup + ~15 ms exit per launch.
