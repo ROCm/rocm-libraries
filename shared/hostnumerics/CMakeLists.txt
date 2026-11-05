@@ -75,10 +75,7 @@ add_library(hostnumerics-core STATIC
 add_library(roc::hostnumerics-core ALIAS hostnumerics-core)
 
 add_library(hostnumerics-amd-gpu-layout STATIC
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/amd_gpu_layout/gfx1250_mx_layout.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/amd_gpu_layout/gfx950_mx_layout.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/amd_gpu_layout/mx.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/amd_gpu_layout/mx_layout_common.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/amd_gpu_layout/operand.cpp"
 )
 add_library(

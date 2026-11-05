@@ -1,50 +1,143 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-#include "_amd_gpu_layout_test_support.hpp"
+#include <gtest/gtest.h>
 
-namespace amd_gpu_layout_test {
+#include <algorithm>
+#include <numeric>
+#include <optional>
+#include <roc/hostnumerics/amd_gpu_layout/operand.hpp>
+#include <stdexcept>
+#include <vector>
+
+using namespace roc::hostnumerics::amd_gpu_layout;
+
 namespace {
-// The expected output of a swizzle-only layout, built by an independent index
-// walk over the kernel's lane and VGPR factors.
+// ============================================================================
+// Tutorial: preparing an operand for an AMD GPU kernel
+// ============================================================================
+
+// An operand tile stores each tile contiguously. K is the contiguous extent, in
+// the input and within each output tile. Here a 4 x 4 operand is split into
+// 2 x 2 tiles; no swizzle is requested.
+TEST(AmdGpuOperandLayoutTutorial, TileOperand) {
+    // Element (k, mn) is stored at k + 4 * mn and holds 10 * mn + k.
+    std::vector<int> operand(16);
+    for (int mn = 0; mn < 4; ++mn)
+        for (int k = 0; k < 4; ++k) operand[k + 4 * mn] = 10 * mn + k;
+
+    const std::vector<int> tiled = copyOperandToPhysicalLayout(
+        operand, OperandExtents{/*k=*/4, /*mn=*/4}, std::nullopt, OperandTile{/*k=*/2, /*mn=*/2});
+    // Tiles follow the same order as elements: the tile holding k 0-1, mn 0-1,
+    // then k 2-3, mn 0-1, then k 0-1, mn 2-3, and so on.
+    EXPECT_EQ(tiled,
+              (std::vector<int>{0, 1, 10, 11, 2, 3, 12, 13, 20, 21, 30, 31, 22, 23, 32, 33}));
+}
+
+// ============================================================================
+// Swizzles and tiles
+// ============================================================================
+
+// The factors of a natural element index, fastest first, as the kernel's VGPRs,
+// SIMDs and lanes index a swizzle tile: [VGPR index, VGPR block, SIMD block,
+// K swizzle tile, (K tile), lane, SIMD index index, SIMD index block,
+// MN swizzle tile, (MN tile)]. The tile factors are present only with a tile.
+std::vector<size_t> swizzleFactorSizes(size_t k, size_t mn, const OperandSwizzle& swizzle,
+                                       const std::optional<OperandTile>& tile) {
+    const size_t lanesPerSimd = 16, simdsPerWave = 4;
+    const size_t simdIndex = swizzle.tileMN / lanesPerSimd;
+    const size_t simdBlock = simdsPerWave / simdIndex;
+    const size_t vgprIndex = std::min(simdIndex, swizzle.subTileK);
+    const size_t vgprBlock = swizzle.tileK / simdBlock / vgprIndex;
+    const size_t simdIndexBlock = vgprIndex;
+    const size_t simdIndexIndex = simdIndex / simdIndexBlock;
+    if (!tile)
+        return {vgprIndex,    vgprBlock,      simdBlock,      k / swizzle.tileK,
+                lanesPerSimd, simdIndexIndex, simdIndexBlock, mn / swizzle.tileMN};
+    return {vgprIndex,    vgprBlock,      simdBlock,      tile->k / swizzle.tileK,   k / tile->k,
+            lanesPerSimd, simdIndexIndex, simdIndexBlock, tile->mn / swizzle.tileMN, mn / tile->mn};
+}
+
+// Stores each element at the offset whose index factors are ordered by
+// `physicalOrder`, fastest first.
 template <typename T>
-void expectSwizzled(size_t k, size_t mn, const OperandSwizzle& swizzle) {
-    std::vector<float> input(k * mn);
-    FillSwizzle(input, k, mn, swizzle);
-    std::vector<float> expected(k * mn);
-    FillPreSwizzle(expected, k, mn, swizzle);
-
-    const std::vector<T> typedInput(input.begin(), input.end());
-    const std::vector<T> output =
-        copyOperandToPhysicalLayout(typedInput, OperandExtents{k, mn}, swizzle, std::nullopt);
-    EXPECT_EQ(output, std::vector<T>(expected.begin(), expected.end()));
+std::vector<T> reorderFactors(const std::vector<T>& input, const std::vector<size_t>& sizes,
+                              const std::vector<size_t>& physicalOrder) {
+    std::vector<size_t> strides(sizes.size());
+    size_t stride = 1;
+    for (const size_t dimension : physicalOrder) {
+        strides[dimension] = stride;
+        stride *= sizes[dimension];
+    }
+    std::vector<T> output(input.size());
+    std::vector<size_t> coordinate(sizes.size(), 0);
+    for (size_t source = 0; source < input.size(); ++source) {
+        size_t destination = 0;
+        for (size_t dimension = 0; dimension < sizes.size(); ++dimension)
+            destination += coordinate[dimension] * strides[dimension];
+        output[destination] = input[source];
+        for (size_t dimension = 0;
+             dimension < sizes.size() && ++coordinate[dimension] == sizes[dimension]; ++dimension)
+            coordinate[dimension] = 0;
+    }
+    return output;
 }
 
-void expectSwizzledAndTiled(size_t k, size_t mn, const OperandSwizzle& swizzle,
-                            const OperandTile& tile) {
-    std::vector<float> input(k * mn);
-    FillSwizzleAndTile(input, k, mn, swizzle, tile);
-    std::vector<float> expected(k * mn);
-    FillPreSwizzleAndTile(expected, k, mn, swizzle, tile);
-    EXPECT_EQ(copyOperandToPhysicalLayout(input, OperandExtents{k, mn}, swizzle, tile), expected);
-}
-}  // namespace
+struct SwizzleCase {
+    size_t k;
+    size_t mn;
+    OperandSwizzle swizzle;
+    std::optional<OperandTile> tile;
+    std::vector<size_t> physicalOrder;
+};
 
-TEST(OperandLayoutTest, SwizzleTileMN64) {
-    expectSwizzled<float>(256, 128, OperandSwizzle{/*tileK=*/256, /*tileMN=*/64, /*subTileK=*/4});
+template <typename T>
+void expectKernelOrder(const SwizzleCase& test) {
+    std::vector<T> input(test.k * test.mn);
+    std::iota(input.begin(), input.end(), T{0});
+    const std::vector<T> expected = reorderFactors(
+        input, swizzleFactorSizes(test.k, test.mn, test.swizzle, test.tile), test.physicalOrder);
+    EXPECT_EQ(copyOperandToPhysicalLayout(input, OperandExtents{test.k, test.mn}, test.swizzle,
+                                          test.tile),
+              expected)
+        << "tileK " << test.swizzle.tileK << " tileMN " << test.swizzle.tileMN << " subTileK "
+        << test.swizzle.subTileK << (test.tile ? " with tile" : "");
 }
 
-TEST(OperandLayoutTest, SwizzleTileMN32SubTileK4) {
-    expectSwizzled<float>(128, 64, OperandSwizzle{/*tileK=*/128, /*tileMN=*/32, /*subTileK=*/4});
+// The kernel's load order for each swizzle: tileMN 64 and tileMN 32 with
+// subTileK 4 swap the SIMD index block with the VGPR index; tileMN 32 with
+// subTileK 4 also swaps the SIMD and VGPR blocks; tileMN 32 with subTileK 2
+// rotates the VGPR index, VGPR block and SIMD block. A tile moves its own
+// factors (K tile and MN tile) to the slowest positions.
+const std::vector<SwizzleCase>& swizzleCases() {
+    static const std::vector<SwizzleCase> cases{
+        {256, 128, OperandSwizzle{256, 64, 4}, std::nullopt, {6, 1, 2, 3, 4, 5, 0, 7}},
+        {128, 64, OperandSwizzle{128, 32, 4}, std::nullopt, {6, 2, 1, 3, 4, 5, 0, 7}},
+        {128, 64, OperandSwizzle{128, 32, 2}, std::nullopt, {1, 2, 0, 3, 4, 5, 6, 7}},
+        {256,
+         128,
+         OperandSwizzle{256, 64, 4},
+         OperandTile{256, 64},
+         {7, 1, 2, 3, 5, 6, 0, 8, 4, 9}},
+        {512,
+         128,
+         OperandSwizzle{128, 32, 4},
+         OperandTile{128, 32},
+         {7, 2, 1, 3, 5, 6, 0, 8, 4, 9}},
+        {256, 64, OperandSwizzle{128, 32, 2}, OperandTile{128, 64}, {1, 2, 0, 3, 5, 6, 7, 8, 4, 9}},
+    };
+    return cases;
 }
 
-TEST(OperandLayoutTest, SwizzleTileMN32SubTileK2) {
-    expectSwizzled<float>(128, 64, OperandSwizzle{/*tileK=*/128, /*tileMN=*/32, /*subTileK=*/2});
+TEST(OperandLayoutTest, SwizzlesIntoKernelLoadOrder) {
+    for (const SwizzleCase& test : swizzleCases()) expectKernelOrder<float>(test);
 }
 
 TEST(OperandLayoutTest, SwizzlesDoubleAndIntegerElements) {
-    expectSwizzled<double>(128, 64, OperandSwizzle{/*tileK=*/128, /*tileMN=*/32, /*subTileK=*/4});
-    expectSwizzled<int>(128, 64, OperandSwizzle{/*tileK=*/128, /*tileMN=*/32, /*subTileK=*/4});
+    for (const SwizzleCase& test : swizzleCases()) {
+        expectKernelOrder<double>(test);
+        expectKernelOrder<int>(test);
+    }
 }
 
 TEST(OperandLayoutTest, TileOnlyStoresEachTileContiguously) {
@@ -65,21 +158,6 @@ TEST(OperandLayoutTest, TileOnlyStoresEachTileContiguously) {
         }
 }
 
-TEST(OperandLayoutTest, SwizzleAndTileTileMN64) {
-    expectSwizzledAndTiled(256, 128, OperandSwizzle{/*tileK=*/256, /*tileMN=*/64, /*subTileK=*/4},
-                           OperandTile{/*k=*/256, /*mn=*/64});
-}
-
-TEST(OperandLayoutTest, SwizzleAndTileTileMN32SubTileK4) {
-    expectSwizzledAndTiled(512, 128, OperandSwizzle{/*tileK=*/128, /*tileMN=*/32, /*subTileK=*/4},
-                           OperandTile{/*k=*/128, /*mn=*/32});
-}
-
-TEST(OperandLayoutTest, SwizzleAndTileTileMN32SubTileK2) {
-    expectSwizzledAndTiled(256, 64, OperandSwizzle{/*tileK=*/128, /*tileMN=*/32, /*subTileK=*/2},
-                           OperandTile{/*k=*/128, /*mn=*/64});
-}
-
 TEST(OperandLayoutTest, NoSwizzleOrTileCopiesTheOperand) {
     const std::vector<int> input{1, 2, 3, 4, 5, 6};
     EXPECT_EQ(copyOperandToPhysicalLayout(input, OperandExtents{2, 3}, std::nullopt, std::nullopt),
@@ -91,12 +169,19 @@ TEST(OperandLayoutTest, NoSwizzleOrTileCopiesTheOperand) {
         eight);
 }
 
+// ============================================================================
+// Rejected inputs
+// ============================================================================
+
 TEST(OperandLayoutTest, RejectsElementCountMismatch) {
     const std::vector<float> input(100);
     EXPECT_THROW(copyOperandToPhysicalLayout(
                      input, OperandExtents{128, 64},
                      OperandSwizzle{/*tileK=*/128, /*tileMN=*/32, /*subTileK=*/4}, std::nullopt),
                  std::runtime_error);
+    EXPECT_THROW(
+        copyOperandToPhysicalLayout(input, OperandExtents{10, 9}, std::nullopt, std::nullopt),
+        std::runtime_error);
 }
 
 TEST(OperandLayoutTest, RejectsUnsupportedSwizzles) {
@@ -153,5 +238,4 @@ TEST(OperandLayoutTest, EmptyOperandRequiresDivisibleExtents) {
         copyOperandToPhysicalLayout(empty, OperandExtents{0, 4}, std::nullopt, OperandTile{16, 16}),
         std::runtime_error);
 }
-
-}  // namespace amd_gpu_layout_test
+}  // namespace

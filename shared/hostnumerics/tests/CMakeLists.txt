@@ -234,9 +234,7 @@ add_test(NAME hostnumerics-mx-tests COMMAND hostnumerics-mx-tests)
 
 add_executable(
     hostnumerics-amd-gpu-layout-tests
-    amd_gpu_gfx1250_layout_test.cpp
-    amd_gpu_gfx950_layout_test.cpp
-    amd_gpu_layout_dispatch_test.cpp
+    amd_gpu_mx_layout_test.cpp
     amd_gpu_operand_layout_test.cpp
 )
 target_link_libraries(
@@ -274,14 +272,6 @@ add_test(
         "${CMAKE_COMMAND}"
         -DHOSTNUMERICS_SOURCE_DIR=${PROJECT_SOURCE_DIR}
         -P "${CMAKE_CURRENT_SOURCE_DIR}/check_component_boundary.cmake"
-)
-
-add_test(
-    NAME hostnumerics-amd-gpu-layout-boundary
-    COMMAND
-        "${CMAKE_COMMAND}"
-        -DHOSTNUMERICS_SOURCE_DIR=${PROJECT_SOURCE_DIR}
-        -P "${CMAKE_CURRENT_SOURCE_DIR}/check_amd_gpu_layout_boundary.cmake"
 )
 
 add_test(
