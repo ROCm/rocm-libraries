@@ -40,10 +40,14 @@ change:
 
 - touches solver registration or IDs (`src/solver.cpp`), FindDb/PerfDb formats or keys, or the
   public/private ABI surface (`include/miopen/miopen.h`, `src/private/`, `test/public_abi/`), or
-- is large (more than about 40 files or 2000 changed lines; these thresholds are initial values, adjust
-  them from experience).
+- changes the observable behavior of a public API (return status, size or workspace queries, defaults),
+  even when the header and its paths are unchanged, or
+- is too large or spread out for one pass to cover, by judgment: many files across several areas of
+  product code. Bulk that is mostly one test file does not count.
 
-The user decides; if they continue, say in the report that the change is in the escalation class.
+This is a recommendation only. Nothing starts a deep review, and the user decides. If they continue,
+say in the report that the change is in the escalation class. If the user says a deep review has already
+run, skip the recommendation and review anyway.
 
 ## Step 1 - Orient
 
