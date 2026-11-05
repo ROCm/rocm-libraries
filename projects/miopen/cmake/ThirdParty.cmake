@@ -200,7 +200,7 @@ endif()
 # FunctionalPlus (transitive dep of frugally-deep build; only needed if we have
 # to build frugally-deep ourselves).
 # -----------------------------------------------------------------------------
-find_package(frugally-deep CONFIG QUIET)
+find_package(frugally-deep 0.21 CONFIG QUIET)
 _miopen_report_dep(frugally-deep "${frugally-deep_FOUND}" "${frugally-deep_VERSION}")
 if(NOT frugally-deep_FOUND)
     find_package(FunctionalPlus QUIET)
