@@ -36,11 +36,9 @@ THRUST_NAMESPACE_BEGIN
 namespace detail
 {
 template <typename T, typename SFINAE = void>
-// TODO(libhipcxx): replace inline with _CCCL_INLINE_VAR once libhipcxx gets ready
 inline constexpr bool is_output_iterator = true;
 
 template <typename T>
-// TODO(libhipcxx): replace inline with _CCCL_INLINE_VAR once libhipcxx gets ready
 inline constexpr bool is_output_iterator<T, _THRUST_STD::void_t<it_value_t<T>>> =
   _THRUST_STD::is_void_v<it_value_t<T>> || _THRUST_STD::is_same_v<it_value_t<T>, any_assign>;
 } // namespace detail
