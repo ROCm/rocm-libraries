@@ -964,13 +964,6 @@ try
         });
     }
 
-    auto problems        = problemFactory.problems();
-    int  firstProblemIdx = args["problem-start-idx"].as<int>();
-    int  numProblems     = args["num-problems"].as<int>();
-    if(numProblems < 0)
-        numProblems = problems.size();
-    int lastProblemIdx = firstProblemIdx + numProblems - 1;
-
     bool        gpuTimer        = args["use-gpu-timer"].as<bool>();
     bool        runKernels      = !args["selection-only"].as<bool>();
     bool        exitOnError     = args["exit-on-error"].as<bool>();
@@ -1256,24 +1249,20 @@ try
                                             auto&                ctx = *active[d];
                                             ScopedDevice         device(ctx.deviceId);
                                             ContractionInputs    scratch;
-                                            ProblemInputs const* inputs = rankInputs(scratch,
-                                                                                     *problem,
-                                                                                     active,
-                                                                                     d,
-                                                                                     k);
+                                            ProblemInputs const* inputs
+                                                = rankInputs(scratch, *problem, active, d, k);
                                             kernels[k][d]
                                                 = useUserArgs
-                                                      ? solution->solveTensileGPU(
-                                                          (*problem),
-                                                          *device0->inputArr[r],
-                                                          *hardware,
-                                                          &dUA,
-                                                          &dUAHost,
-                                                          nullptr,
-                                                          0,
-                                                          device0->stream)
-                                                      : solution->solve((*problem),
-                                                                        *device0->inputArr[r],
+                                                      ? solution->solveTensileGPU(*problem,
+                                                                                  *inputs,
+                                                                                  *hardware,
+                                                                                  &dUA,
+                                                                                  &dUAHost,
+                                                                                  nullptr,
+                                                                                  0,
+                                                                                  ctx.stream)
+                                                      : solution->solve(*problem,
+                                                                        *inputs,
                                                                         *hardware,
                                                                         nullptr,
                                                                         0,

@@ -37,6 +37,7 @@
 #include "DataInitialization.hpp"
 
 #include <cstddef>
+#include <cstdint>
 #include <roc/hostnumerics/freivalds.hpp>
 #include <roc/hostnumerics/operation_types.hpp>
 #include <span>
@@ -50,8 +51,7 @@ namespace TensileLite
         class ReferenceValidator : public RunListener
         {
         public:
-            ReferenceValidator(po::variables_map const&                    args,
-                               std::vector<std::shared_ptr<DeviceContext>> devices);
+            ReferenceValidator(po::variables_map const& args);
 
             virtual bool needMoreBenchmarkRuns() const override;
             virtual void preBenchmarkRun() override;
@@ -142,9 +142,9 @@ namespace TensileLite
                                       bool               hasNullPointer,
                                       bool               hasZeroElements) const;
 
-            std::vector<std::shared_ptr<DeviceContext>> m_devices;
             std::vector<std::shared_ptr<ProblemInputs>> m_referenceInputs;
             std::vector<roc::hostnumerics::IndexRange>  m_outputSelections;
+            std::vector<std::vector<uint8_t>>           m_referenceRecvs;
 
             size_t                   m_cpuResultBufferSize = 0;
             std::shared_ptr<uint8_t> m_cpuResultBuffer;
@@ -179,7 +179,7 @@ namespace TensileLite
             size_t m_errorsReported    = 0;
 
             bool validateSolution(size_t card, std::shared_ptr<ProblemInputs> inputs);
-            bool recvMatches(size_t dst, ContractionInputs const& inputs);
+            void referenceRecvs(ContractionProblemGemm const& problem);
         };
     } // namespace Client
 } // namespace TensileLite

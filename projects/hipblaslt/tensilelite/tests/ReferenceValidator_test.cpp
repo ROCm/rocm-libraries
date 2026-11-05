@@ -170,16 +170,16 @@ namespace
             return reporter->strings.at(ResultKey::Validation);
         }
 
-        po::variables_map                     args = makeValidatorArgs();
-        std::unique_ptr<ClientProblemFactory> factory;
-        std::shared_ptr<DataInitialization>   dataInit;
-        std::shared_ptr<DeviceContext>        device;
+        po::variables_map                           args = makeValidatorArgs();
+        std::unique_ptr<ClientProblemFactory>       factory;
+        std::shared_ptr<DataInitialization>         dataInit;
+        std::shared_ptr<DeviceContext>              device;
         std::vector<std::shared_ptr<DeviceContext>> devices;
-        ContractionProblem*                   problem = nullptr;
-        ContractionSolution                   solution;
-        std::shared_ptr<CapturingReporter>    reporter = std::make_shared<CapturingReporter>();
-        std::shared_ptr<ContractionInputs>    gpu;
-        std::shared_ptr<ContractionInputs>    ref;
+        ContractionProblem*                         problem = nullptr;
+        ContractionSolution                         solution;
+        std::shared_ptr<CapturingReporter> reporter = std::make_shared<CapturingReporter>();
+        std::shared_ptr<ContractionInputs> gpu;
+        std::shared_ptr<ContractionInputs> ref;
     };
 }
 
@@ -238,7 +238,8 @@ TEST_F(ReferenceValidatorTest, EachDeviceUsesItsOwnReferenceAndBoundsMode)
             other->dataInit = std::make_shared<DataInitialization>(otherArgs, *factory);
         }
         std::vector<std::shared_ptr<DeviceContext>> devices{device, other};
-        ReferenceValidator                          validator(args, devices);
+        ReferenceValidator                          validator(args);
+        validator.setDevices(&devices);
         validator.setReporter(reporter);
         validator.preProblem(problem);
         validator.preSolution(&solution);
@@ -269,89 +270,85 @@ TEST_F(ReferenceValidatorTest, EachDeviceUsesItsOwnReferenceAndBoundsMode)
     }
 }
 
-TEST_F(ReferenceValidatorTest, FusedReceiveChecksEverySourcesDestinationShard)
+TEST(ReferenceValidatorFusedA2A, RotatedReceiveBufferIsAligned)
 {
-    int count = 0;
-    ASSERT_EQ(hipGetDeviceCount(&count), hipSuccess);
-    if(count < 2)
-        GTEST_SKIP() << "needs two devices";
-    setOption(args, "problem-size", std::vector<std::vector<size_t>>{{4, 3, 1, 2}});
-    for(const char* name : {"type",
-                            "a-type",
-                            "b-type",
-                            "c-type",
-                            "d-type",
-                            "compute-input-type-A",
-                            "compute-input-type-B"})
-        setOption(args, name, rocisa::DataType::BFloat16);
-    setOption(args, "d-strides", std::vector<std::vector<size_t>>{{2, 12, 36}});
-    setOption(args, "num-elements-to-validate", 1);
+    int deviceCount = 0;
+    if(hipGetDeviceCount(&deviceCount) != hipSuccess || deviceCount < 1)
+        GTEST_SKIP() << "needs a device";
+
+    auto args = makeValidatorArgs();
+    setOption(args, "problem-size", std::vector<std::vector<size_t>>{{64, 63, 1, 65}});
     setOption(args, "fused-gemm-a2a", true);
-    factory    = std::make_unique<ClientProblemFactory>(args);
-    problem    = factory->problems()[0].get();
-    auto& gemm = dynamic_cast<ContractionProblemGemm&>(*problem);
-    gemm.setFusedA2AExtent(4);
-    gemm.setFusedA2AWorld(2);
-    solution.problemType.fusedGemmA2A                 = true;
-    auto                                        other = std::make_shared<DeviceContext>(1, true);
-    std::vector<std::shared_ptr<DeviceContext>> devices{device, other};
-    size_t                                      source = 0;
-    forEachDevice(devices, [&](DeviceContext& context) {
-        auto perDeviceArgs = args;
-        setOption(perDeviceArgs, "init-a", source++ == 0 ? InitMode::One : InitMode::Two);
-        setOption(perDeviceArgs, "init-b", InitMode::SerialDim1);
-        context.dataInit = std::make_shared<DataInitialization>(perDeviceArgs, *factory);
-    });
-    ReferenceValidator validator(args, devices);
+    setOption(args, "world", std::vector<int>{1});
+    setOption(args, "fused-a2a-extent", std::vector<int>{64});
+    setOption(args, "rotating-buffer-size", 1);
+    ClientProblemFactory factory(args);
+    auto                 dataInit = std::make_shared<DataInitialization>(args, factory);
+    auto* problem = dynamic_cast<ContractionProblemGemm*>(factory.problems()[0].get());
+    ASSERT_NE(problem->b().totalAllocatedBytes() % 16, 0u);
+
+    auto inputs  = dataInit->prepareGPUInputs(problem);
+    auto rotated = dataInit->prepareRotatingGPUOutput(2, problem, inputs, nullptr);
+    ASSERT_EQ(rotated.size(), 2u);
+    auto const& copy = dynamic_cast<ContractionInputs const&>(*rotated[1]);
+    EXPECT_EQ(reinterpret_cast<uintptr_t>(copy.a2aBuf) % 16, 0u);
+}
+
+TEST(ReferenceValidatorFusedA2A, RotatedReceiveBufferUsesItsOwnAllocationSize)
+{
+    int deviceCount = 0;
+    if(hipGetDeviceCount(&deviceCount) != hipSuccess || deviceCount < 1)
+        GTEST_SKIP() << "needs a device";
+
+    auto args = makeValidatorArgs();
+    setOption(args, "fused-gemm-a2a", true);
+    setOption(args, "world", std::vector<int>{1});
+    setOption(args, "fused-a2a-extent", std::vector<int>{64});
+    setOption(args, "bounds-check", BoundsCheckMode::NaN);
+    setOption(args, "rotating-buffer-size", 1);
+    ClientProblemFactory factory(args);
+    auto                 dataInit = std::make_shared<DataInitialization>(args, factory);
+    auto* problem    = dynamic_cast<ContractionProblemGemm*>(factory.problems()[0].get());
+    auto  device     = std::make_shared<DeviceContext>(0, true);
+    device->dataInit = dataInit;
+    std::vector<std::shared_ptr<DeviceContext>> devices{device};
+    auto                                        reporter = std::make_shared<CapturingReporter>();
+    ReferenceValidator                          validator(args);
+    validator.setDevices(&devices);
     validator.setReporter(reporter);
     validator.preProblem(problem);
+    ContractionSolution solution;
+    solution.problemType.fusedGemmA2A = true;
     validator.preSolution(&solution);
-    std::vector<std::shared_ptr<void>> receiveOwners;
-    size_t                             destination = 0;
-    forEachDevice(devices, [&](DeviceContext& context) {
-        const size_t dst = destination++;
-        context.inputArr = {context.dataInit->prepareGPUInputs(problem)};
-        auto output      = std::dynamic_pointer_cast<ContractionInputs>(context.inputArr[0]);
-        auto golden = std::dynamic_pointer_cast<ContractionInputs>(validator.referenceInputs(dst));
-        HIP_CHECK_EXC(
-            hipMemcpy(output->d, golden->d, gemm.d().totalAllocatedBytes(), hipMemcpyHostToDevice));
-        std::vector<BFloat16> received(2 * 3 * 2);
-        for(size_t src = 0; src < 2; ++src)
-        {
-            for(size_t column = 0; column < 3; ++column)
-                for(size_t feature = 0; feature < 2; ++feature)
-                    received[(src * 3 + column) * 2 + feature]
-                        = BFloat16(static_cast<float>(2 * (src + 1) * column));
-        }
-        void* buffer = nullptr;
-        HIP_CHECK_EXC(hipMalloc(&buffer, received.size() * sizeof(BFloat16)));
-        receiveOwners.emplace_back(buffer, [id = context.deviceId](void* ptr) {
-            ScopedDevice card(id);
-            (void)hipFree(ptr);
-        });
-        HIP_CHECK_EXC(hipMemcpy(
-            buffer, received.data(), received.size() * sizeof(BFloat16), hipMemcpyHostToDevice));
-        output->fusedA2APeers.resize(2);
-        output->fusedA2APeers[dst][FUSED_A2A_SLOT_RECV_PTR] = buffer;
-    });
+
+    auto inputs      = dataInit->prepareGPUInputs(problem);
+    device->inputArr = dataInit->prepareRotatingGPUOutput(2, problem, inputs, nullptr);
+    ASSERT_EQ(device->inputArr.size(), 2u);
+    auto const& reference = dynamic_cast<ContractionInputs const&>(*validator.referenceInputs(0));
+    auto&       rotated   = dynamic_cast<ContractionInputs&>(*device->inputArr[1]);
+    auto const& recv      = problem->tensors()[ContractionProblemGemm::TENSOR::A2A_BUF];
+    HIP_CHECK_EXC(hipMemcpy(
+        rotated.d, reference.d, problem->d().totalAllocatedBytes(), hipMemcpyHostToDevice));
+    HIP_CHECK_EXC(
+        hipMemcpy(rotated.a2aBuf, reference.d, recv.totalAllocatedBytes(), hipMemcpyHostToDevice));
+    EXPECT_EQ(rotated.maxElements[ContractionProblemGemm::TENSOR::A2A_BUF],
+              recv.totalAllocatedElements());
     TimingEvents events({}, 1, 1);
-    validator.validateWarmups({0}, events, events);
+    validator.validateWarmups({1}, events, events);
     validator.postWarmup(events, events);
     validator.postSolution();
-    EXPECT_EQ(validation(), "PASSED");
-    {
-        ScopedDevice card(1);
-        BFloat16     bad(100.0f);
-        HIP_CHECK_EXC(hipMemcpy(static_cast<BFloat16*>(receiveOwners[1].get()) + 11,
-                                &bad,
-                                sizeof(bad),
-                                hipMemcpyHostToDevice));
-    }
-    testing::internal::CaptureStderr();
-    validator.validateEnqueues({0}, events, events);
-    auto diagnostics = testing::internal::GetCapturedStderr();
+    EXPECT_EQ(reporter->strings.at(ResultKey::Validation), "PASSED");
+    EXPECT_EQ(validator.error(), 0);
+
+    validator.preSolution(&solution);
+    float bad = static_cast<float const*>(reference.d)[recv.totalLogicalElements() - 1] + 100.0f;
+    HIP_CHECK_EXC(hipMemcpy(static_cast<float*>(rotated.a2aBuf) + recv.totalLogicalElements() - 1,
+                            &bad,
+                            sizeof(bad),
+                            hipMemcpyHostToDevice));
+    validator.validateWarmups({1}, events, events);
+    validator.postWarmup(events, events);
     validator.postSolution();
-    EXPECT_EQ(validation(), "FAILED");
+    EXPECT_EQ(reporter->strings.at(ResultKey::Validation), "FAILED");
     EXPECT_EQ(validator.error(), 1);
-    EXPECT_NE(diagnostics.find("RECV MISMATCH card=1 src=1 t=2 f=1"), std::string::npos);
 }

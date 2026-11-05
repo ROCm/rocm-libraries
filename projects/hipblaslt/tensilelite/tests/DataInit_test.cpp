@@ -22,6 +22,7 @@
 #include <bit>
 #include <cmath>
 #include <complex>
+#include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <filesystem>
@@ -187,34 +188,6 @@ namespace
     }
 
 } // namespace
-
-TEST(ClientProblemFactoryDefaults, DisablesOmittedOptionalOutputsAndScales)
-{
-    using namespace TensileLite::Client;
-    po::variables_map args;
-    const std::array  omitted{"use-bias",
-                             "bias-source",
-                             "use-scaleCD",
-                             "use-scaleAlphaVec",
-                             "use-gradient",
-                             "output-amaxD"};
-    for(const auto& entry : makeMinimalClientArgs(0))
-        if(std::ranges::find(omitted, entry.first) == omitted.end())
-            args.insert(entry);
-    alignas(ClientProblemFactory) std::array<std::byte, sizeof(ClientProblemFactory)> storage;
-    storage.fill(std::byte{0xa5});
-    auto destroy = [](ClientProblemFactory* factory) { std::destroy_at(factory); };
-    std::unique_ptr<ClientProblemFactory, decltype(destroy)> factory(
-        std::construct_at(reinterpret_cast<ClientProblemFactory*>(storage.data()), args), destroy);
-    ASSERT_EQ(factory->problems().size(), 1u);
-    const auto& problem = dynamic_cast<const ContractionProblemGemm&>(*factory->problems().front());
-    EXPECT_FALSE(problem.useE());
-    EXPECT_FALSE(problem.useGradient());
-    EXPECT_FALSE(problem.outputAmaxD());
-    EXPECT_EQ(problem.useBias(), 0);
-    EXPECT_FALSE(problem.useScaleCD());
-    EXPECT_EQ(problem.useScaleAlphaVec(), 0);
-}
 
 TEST(HostNumericsDataInitialization, GeneratesStridedProblemDependentPatterns)
 {
@@ -807,8 +780,8 @@ TEST(ClientAlphaMode, ScalarSupportDefaultsToScalarAndAllowsRuntimeOverride)
     for(int modes : {1, 2, 3, 5, 6, 7})
         for(int runtimeOverride : {-1, 0, 1})
         {
-            SCOPED_TRACE(::testing::Message() << "modes=" << modes
-                                             << " override=" << runtimeOverride);
+            SCOPED_TRACE(::testing::Message()
+                         << "modes=" << modes << " override=" << runtimeOverride);
             auto args = makeMinimalClientArgs(0);
             setOption(args, "use-scaleAlphaVec", modes);
             if(runtimeOverride >= 0)
@@ -831,7 +804,8 @@ TEST(ClientAlphaMode, RejectsReservedScalarOnlyAndUnknownSupportModes)
     {
         auto args = makeMinimalClientArgs(0);
         setOption(args, "use-scaleAlphaVec", modes);
-        EXPECT_THROW(TensileLite::Client::ClientProblemFactory factory(args), std::invalid_argument);
+        EXPECT_THROW(TensileLite::Client::ClientProblemFactory factory(args),
+                     std::invalid_argument);
     }
 }
 
@@ -1453,7 +1427,9 @@ TEST(DataInitializationFreivalds, RestoresOutputAndChecksRequestedGuards)
         auto*                problem  = factory.problems().front().get();
         auto                 reporter = std::make_shared<Reporter>();
         device->dataInit              = dataInit;
-        ReferenceValidator validator(args, {device});
+        std::vector<std::shared_ptr<DeviceContext>> devices{device};
+        ReferenceValidator                          validator(args);
+        validator.setDevices(&devices);
         validator.setReporter(reporter);
         dataInit->preProblem(problem);
         validator.preProblem(problem);

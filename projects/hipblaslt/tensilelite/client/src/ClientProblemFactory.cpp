@@ -27,8 +27,8 @@
 #include "ClientProblemFactory.hpp"
 #include "DataInitialization.hpp"
 
-#include <Tensile/ScaleAlphaVec.hpp>
 #include <Tensile/FusedA2AKernArg.hpp>
+#include <Tensile/ScaleAlphaVec.hpp>
 
 #include <cstddef>
 #include <stdexcept>
@@ -380,11 +380,11 @@ namespace TensileLite
         void ClientProblemFactory::createProblems(std::vector<ContractionProblemGemm>& rv)
         {
             rv.clear();
-            int biasSize       = std::max(1, (int)m_biasTypeArgs.size());
-            int gateSize       = std::max(1, (int)m_gateTypeArgs.size());
-            int activationSize = std::max(1, (int)m_activationEnumArg.size());
+            int       biasSize        = std::max(1, (int)m_biasTypeArgs.size());
+            int       gateSize        = std::max(1, (int)m_gateTypeArgs.size());
+            int       activationSize  = std::max(1, (int)m_activationEnumArg.size());
             const int vectorAlphaMode = scaleAlphaVectorMode(m_useScaleAlphaVec);
-            int factorDimSize  = std::max(
+            int       factorDimSize   = std::max(
                 1, vectorAlphaMode == 3 || m_useBias == 3 ? (int)m_factorDimArgs.size() : 1);
             // StreamK=5 hybrid-mode toggle variants. When the YAML sets
             // StreamKHybridMode: [0, 1] each base problem is replayed
@@ -459,14 +459,13 @@ namespace TensileLite
                                         gateStrides = m_tensorStrides
                                             [ContractionProblemGemm::TENSOR::GATE_RESIDUAL][i];
 
-                                    if(m_useBias && m_useScaleAlphaVec
-                                       && m_useBias != m_useScaleAlphaVec)
+                                    if(!m_deviceScalarAlpha && m_useBias && vectorAlphaMode
+                                       && m_useBias != vectorAlphaMode)
                                         continue;
 
-                                    int factorDim = (m_useScaleAlphaVec == 1 || m_useBias == 1) ? 0
-                                                    : (m_useScaleAlphaVec == 2 || m_useBias == 2)
-                                                        ? 1
-                                                    : (m_useScaleAlphaVec == 3 || m_useBias == 3)
+                                    int factorDim = (vectorAlphaMode == 1 || m_useBias == 1)   ? 0
+                                                    : (vectorAlphaMode == 2 || m_useBias == 2) ? 1
+                                                    : (vectorAlphaMode == 3 || m_useBias == 3)
                                                         ? m_factorDimArgs[l]
                                                         : 0;
                                     rv.push_back(ContractionProblemGemm::FromIndexSizes(
@@ -490,8 +489,15 @@ namespace TensileLite
 
                                     rv.back().setComputeInputTypeA(m_computeInputTypeA);
                                     rv.back().setComputeInputTypeB(m_computeInputTypeB);
-                                    rv.back().setAlphaRestriction(toScalarValueEnum(
-                                        m_constantValues[ContractionProblemGemm::CONST::ALPHA]));
+                                    // A device scalar replaces the inline alpha, but its value is not
+                                    // available while constructing the problem. Do not select an
+                                    // AlphaValue-specialized solution from the ignored inline value.
+                                    rv.back().setAlphaRestriction(
+                                        m_deviceScalarAlpha
+                                            ? ScalarValue::Any
+                                            : toScalarValueEnum(
+                                                m_constantValues
+                                                    [ContractionProblemGemm::CONST::ALPHA]));
                                     rv.back().setCEqualsD(m_cEqualsD);
                                     rv.back().setAlphaType(
                                         m_constantTypes[ContractionProblemGemm::CONST::ALPHA]);
@@ -518,6 +524,19 @@ namespace TensileLite
                                     rv.back().setSwizzleTensorA(m_swizzleTensorA);
                                     rv.back().setSwizzleTensorB(m_swizzleTensorB);
                                     rv.back().setFusedGemmA2A(m_fusedGemmA2A);
+                                    if(m_fusedGemmA2A)
+                                    {
+                                        if(static_cast<size_t>(m_fusedA2AExtents[i])
+                                           > rv.back().freeSizeA(0))
+                                            throw std::invalid_argument(
+                                                concatenate("fused-a2a-extent=",
+                                                            m_fusedA2AExtents[i],
+                                                            " exceeds M=",
+                                                            rv.back().freeSizeA(0)));
+                                        rv.back().setWorld(m_worlds[i]);
+                                        rv.back().setFusedA2AExtent(m_fusedA2AExtents[i]);
+                                        rv.back().setA2ABuf();
+                                    }
                                     if(k < m_biasTypeArgs.size())
                                     {
                                         auto length
@@ -615,10 +634,13 @@ namespace TensileLite
                                         rv.back().setScaleD(
                                             m_constantTypes[ContractionProblemGemm::CONST::BETA]);
                                     }
-                                    rv.back().setUseScaleAlphaVec(m_useScaleAlphaVec);
+                                    rv.back().setUseScaleAlphaVec(m_deviceScalarAlpha
+                                                                      ? ScaleAlphaVecDeviceScalarBit
+                                                                      : vectorAlphaMode);
+                                    rv.back().setParams().setDeviceScalarAlpha(m_deviceScalarAlpha);
                                     rv.back().setScaleAlphaVec(
                                         m_constantTypes[ContractionProblemGemm::CONST::ALPHA],
-                                        rv.back().d().sizes()[factorDim],
+                                        m_deviceScalarAlpha ? 1 : rv.back().d().sizes()[factorDim],
                                         factorDim);
                                     rv.back().setGroupedGemm(m_groupedGemm);
                                     rv.back().setF32XdlMathOp(m_f32XdlMathOp);

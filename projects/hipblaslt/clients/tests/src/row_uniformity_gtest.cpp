@@ -52,6 +52,8 @@
 #endif
 
 #include <algorithm>
+#include <array>
+#include <cmath>
 #include <cstdint>
 #include <cstring>
 #include <filesystem>
@@ -74,6 +76,7 @@ namespace
     constexpr size_t   kMaxSweepCandidates     = 30;
     constexpr uint64_t kOperandASeedOffset     = 0;
     constexpr uint64_t kOperandBSeedOffset     = 1;
+    constexpr uint64_t kOperandLargeSeedOffset = 2;
 
     bool gpuAvailable()
     {
@@ -288,10 +291,12 @@ namespace
         {
         case HIP_R_32F:
             return roc::hostnumerics::ScalarType::Float32;
+        case HIP_R_16F:
+            return roc::hostnumerics::ScalarType::Float16;
         case HIP_R_16BF:
             return roc::hostnumerics::ScalarType::BFloat16;
         default:
-            throw std::invalid_argument("Row-uniformity operands must be FP32 or BF16");
+            throw std::invalid_argument("Row-uniformity operands must be FP32, FP16 or BF16");
         }
     }
 
@@ -312,16 +317,23 @@ namespace
     // largest possible accumulator stays far below FLT_MAX and the smallest
     // product far above the smallest normal, so neither overflow nor denormal
     // flush can occur.
-    roc::hostnumerics::Tensor
-        generateWideRangeOperand(hipDataType type, size_t elementCount, uint64_t seed)
+    // Random sign and mantissa, with a uniformly drawn exponent in [lower, upper].
+    roc::hostnumerics::Tensor generateOperand(
+        hipDataType type, size_t elementCount, uint64_t seed, int lowerExponent, int upperExponent)
     {
         using namespace roc::hostnumerics;
         const auto recipe = GenerationRecipe::realOnlyLastDimensionFastest(
-            GenerationRecipe::randomEncodedExponent({.lowerUnbiasedExponent = -12,
-                                                     .upperUnbiasedExponent = 12,
+            GenerationRecipe::randomEncodedExponent({.lowerUnbiasedExponent = lowerExponent,
+                                                     .upperUnbiasedExponent = upperExponent,
                                                      .sourceType            = ScalarType::Float32}),
             seed);
         return generate(hostnumericsOperandType(type), Shape{elementCount}, recipe);
+    }
+
+    roc::hostnumerics::Tensor
+        generateWideRangeOperand(hipDataType type, size_t elementCount, uint64_t seed)
+    {
+        return generateOperand(type, elementCount, seed, -12, 12);
     }
 
     TEST(RowUniformityData_pre_checkin, SharedGenerationAndTensorCodecDefineOperands)
@@ -416,6 +428,7 @@ namespace
             }
 
             const size_t abBytes = encodedElementBytes(m_problem.abType);
+            const size_t dBytes  = encodedElementBytes(m_problem.dType);
             if(hipMalloc(&m_deviceA, static_cast<size_t>(m * k) * abBytes) != hipSuccess
                || hipMalloc(&m_deviceB, static_cast<size_t>(k * n) * abBytes) != hipSuccess
                || hipMalloc(&m_deviceD, static_cast<size_t>(m * n) * dBytes) != hipSuccess
@@ -519,18 +532,17 @@ namespace
         bool referenceOrderMatters() const
         {
             auto product = [&](int64_t idx) {
-                return m_aVector[static_cast<size_t>(idx)] * m_hostB[static_cast<size_t>(idx)];
+                return m_aVector.loadAs<float>({static_cast<size_t>(idx)})
+                       * m_hostB.loadAs<float>({static_cast<size_t>(idx)});
             };
 
             float forward = 0.0f;
             for(int64_t idx = 0; idx < m_problem.k; ++idx)
-                forward += m_aVector.loadAs<float>({static_cast<size_t>(idx)})
-                           * m_hostB.loadAs<float>({static_cast<size_t>(idx)});
+                forward += product(idx);
 
             float reverse = 0.0f;
             for(int64_t idx = m_problem.k - 1; idx >= 0; --idx)
-                reverse += m_aVector.loadAs<float>({static_cast<size_t>(idx)})
-                           * m_hostB.loadAs<float>({static_cast<size_t>(idx)});
+                reverse += product(idx);
 
             if(m_problem.dType == HIP_R_32F)
                 return std::memcmp(&forward, &reverse, sizeof(float)) != 0;
@@ -545,10 +557,15 @@ namespace
                     part += product(idx);
                 strided += part;
             }
-            std::vector<float>         sums{forward, reverse, strided};
-            const std::vector<uint8_t> held = encodeOperand(sums, m_problem.dType);
-            return std::memcmp(held.data(), held.data() + 2, 2) != 0
-                   || std::memcmp(held.data(), held.data() + 4, 2) != 0;
+            const std::array<float, 3> sums{forward, reverse, strided};
+            roc::hostnumerics::Tensor  held(hostnumericsOperandType(m_problem.dType),
+                                           roc::hostnumerics::Shape{sums.size()});
+            roc::hostnumerics::generate(
+                held, [&](std::span<const size_t> index) { return sums[index[0]]; });
+            const auto bytes = held.rawEncodedBackingStorage();
+            const auto size  = encodedElementBytes(m_problem.dType);
+            return std::memcmp(bytes.data(), bytes.data() + size, size) != 0
+                   || std::memcmp(bytes.data(), bytes.data() + 2 * size, size) != 0;
         }
 
         std::vector<hipblasLtMatmulHeuristicResult_t>
@@ -674,7 +691,7 @@ namespace
         int64_t firstNonUniformRowOfLastRun() const
         {
             const int64_t m    = m_problem.m;
-            const size_t  size = elementSizeOf(m_problem.dType);
+            const size_t  size = encodedElementBytes(m_problem.dType);
             for(int64_t col = 0; col < m_problem.n; ++col)
             {
                 const uint8_t* base = m_hostD.data() + static_cast<size_t>(col * m) * size;
@@ -751,10 +768,44 @@ namespace
 
             const uint64_t seed = 0x52755f31u ^ static_cast<uint32_t>(m * 31 + n * 17 + k);
 
-            m_aVector = generateWideRangeOperand(
-                m_problem.abType, static_cast<size_t>(k), seed + kOperandASeedOffset);
-            m_hostB = generateWideRangeOperand(
-                m_problem.abType, static_cast<size_t>(k * n), seed + kOperandBSeedOffset);
+            if(m_problem.dType == HIP_R_32F)
+            {
+                m_aVector = generateWideRangeOperand(
+                    m_problem.abType, static_cast<size_t>(k), seed + kOperandASeedOffset);
+                m_hostB = generateWideRangeOperand(
+                    m_problem.abType, static_cast<size_t>(k * n), seed + kOperandBSeedOffset);
+            }
+            else
+            {
+                // Sums of the wide-range fill differ between orders only in bits
+                // a 16-bit D rounds away. Instead, each column pairs one large
+                // product, at k = 0, with its exact negation at k / 2, among
+                // small ones in [2^-4, 2^3): what the large product absorbs of the
+                // small ones while it is pending depends on the order, by far more
+                // than D's precision.
+                m_aVector = generateOperand(
+                    m_problem.abType, static_cast<size_t>(k), seed + kOperandASeedOffset, -4, 2);
+                m_hostB            = generateOperand(m_problem.abType,
+                                          static_cast<size_t>(k * n),
+                                          seed + kOperandBSeedOffset,
+                                          -4,
+                                          2);
+                const auto large   = generateOperand(m_problem.abType,
+                                                   static_cast<size_t>(n + 1),
+                                                   seed + kOperandLargeSeedOffset,
+                                                   12,
+                                                   12);
+                const auto largeAt = [&](int64_t index) {
+                    return std::fabs(large.loadAs<float>({static_cast<size_t>(index)}));
+                };
+                m_aVector.storeFrom({0}, largeAt(n));
+                m_aVector.storeFrom({static_cast<size_t>(k / 2)}, largeAt(n));
+                for(int64_t col = 0; col < n; ++col)
+                {
+                    m_hostB.storeFrom({static_cast<size_t>(col * k)}, largeAt(col));
+                    m_hostB.storeFrom({static_cast<size_t>(col * k + k / 2)}, -largeAt(col));
+                }
+            }
 
             const auto bStorage = m_hostB.rawEncodedBackingStorage();
             if(hipMemcpy(m_deviceB, bStorage.data(), bStorage.size(), hipMemcpyHostToDevice)
@@ -764,13 +815,12 @@ namespace
                 return false;
             }
 
-            const size_t abBytes = elementSizeOf(m_problem.abType);
+            const size_t abBytes = encodedElementBytes(m_problem.abType);
             if(m_problem.transA == HIPBLAS_OP_T)
             {
-                // Every column of a k x m A is the vector itself. encodeOperand
-                // rounds the reference vector to what the device will hold.
-                const std::vector<uint8_t> aColumn = encodeOperand(m_aVector, m_problem.abType);
-                std::vector<uint8_t>       aBytes(aColumn.size() * static_cast<size_t>(m));
+                // Every column of a k x m A is the vector itself.
+                const auto           aColumn = m_aVector.rawEncodedBackingStorage();
+                std::vector<uint8_t> aBytes(aColumn.size() * static_cast<size_t>(m));
                 for(int64_t col = 0; col < m; ++col)
                     std::memcpy(aBytes.data() + static_cast<size_t>(col) * aColumn.size(),
                                 aColumn.data(),
@@ -786,7 +836,6 @@ namespace
 
             // Column k of a column-major A is M copies of a[k], so A goes up one
             // column at a time and never needs an M*K host buffer.
-            const size_t              abBytes = encodedElementBytes(m_problem.abType);
             roc::hostnumerics::Tensor column(hostnumericsOperandType(m_problem.abType),
                                              roc::hostnumerics::Shape{static_cast<size_t>(m)});
             for(int64_t idx = 0; idx < k; ++idx)
@@ -825,7 +874,7 @@ namespace
                                             roc::hostnumerics::Shape{0}};
         roc::hostnumerics::Tensor m_hostB{roc::hostnumerics::ScalarType::Float32,
                                           roc::hostnumerics::Shape{0}};
-        std::vector<float>        m_hostD;
+        std::vector<uint8_t>      m_hostD;
     };
 
     // A fixture rather than bare TEST() only so the shared drivers can reach
@@ -1059,6 +1108,9 @@ namespace
 
             int        enumeratedCount = 0;
             const auto candidates      = harness.candidateAlgos(enumeratedCount, /*sweepBudget=*/0);
+            const bool gfx950          = gpuArchName().rfind("gfx950", 0) == 0;
+            if(candidates.empty() && gfx950Pick != nullptr && !gfx950)
+                GTEST_SKIP() << "No heuristic pick for this problem on " << gpuArchName();
             ASSERT_FALSE(candidates.empty()) << "No heuristic pick for this problem";
             if(gfx950Pick != nullptr && gfx950)
             {
@@ -1387,9 +1439,17 @@ namespace
             size_t grid;
         };
         const Shape shapes[] = {
-            {1, 64, 3},    {1, 64, 7},     {1, 64, 9},     {1, 64, 11},
-            {576, 4, 448}, {576, 8, 320},  {576, 16, 512}, {256, 64, 448},
-            {4, 16, 3},    {12, 8, 5},     {48, 12, 7},
+            {1, 64, 3},
+            {1, 64, 7},
+            {1, 64, 9},
+            {1, 64, 11},
+            {576, 4, 448},
+            {576, 8, 320},
+            {576, 16, 512},
+            {256, 64, 448},
+            {4, 16, 3},
+            {12, 8, 5},
+            {48, 12, 7},
         };
 
         for(const Shape& s : shapes)
@@ -1403,9 +1463,14 @@ namespace
                 size_t covered = 0;
                 for(size_t w = 0; w < s.grid; ++w)
                 {
-                    const auto range = TensileLite::streamKWorkgroupIterRange(
-                        w, s.tiles, s.itersPerTile, s.grid, perTile,
-                        /*uniformSummationOrder=*/true, g);
+                    const auto range
+                        = TensileLite::streamKWorkgroupIterRange(w,
+                                                                 s.tiles,
+                                                                 s.itersPerTile,
+                                                                 s.grid,
+                                                                 perTile,
+                                                                 /*uniformSummationOrder=*/true,
+                                                                 g);
 
                     EXPECT_EQ(range.start % g, size_t{0})
                         << "w=" << w << " perTile=" << perTile << " start=" << range.start;
@@ -1448,8 +1513,8 @@ namespace
             for(size_t t : tiles)
                 for(size_t grid : grids)
                 {
-                    SCOPED_TRACE("tiles=" + std::to_string(t) + " itersPerTile="
-                                 + std::to_string(i) + " grid=" + std::to_string(grid));
+                    SCOPED_TRACE("tiles=" + std::to_string(t) + " itersPerTile=" + std::to_string(i)
+                                 + " grid=" + std::to_string(grid));
 
                     const size_t padded = TensileLite::skPaddedItersPerTile(i, g);
                     EXPECT_EQ(padded % g, size_t{0});
@@ -1480,9 +1545,8 @@ namespace
                             }
                         }
                         for(size_t n = 0; n < claims.size(); ++n)
-                            EXPECT_EQ(claims[n], 1)
-                                << "perTile=" << perTile << " tile=" << (n / i)
-                                << " iter=" << (n % i);
+                            EXPECT_EQ(claims[n], 1) << "perTile=" << perTile << " tile=" << (n / i)
+                                                    << " iter=" << (n % i);
                     }
                 }
     }
@@ -1514,7 +1578,7 @@ namespace
             for(size_t i : itersPerTile)
                 for(size_t grid : grids)
                 {
-                    const auto implicit = TensileLite::streamKStaticSplit(t, i, grid, 1, false);
+                    const auto implicit  = TensileLite::streamKStaticSplit(t, i, grid, 1, false);
                     const auto explicit1 = TensileLite::streamKStaticSplit(t, i, grid, 1, false, 1);
                     EXPECT_EQ(implicit.skTiles, explicit1.skTiles);
                     EXPECT_EQ(implicit.skItersPerWG, explicit1.skItersPerWG);
@@ -1527,8 +1591,8 @@ namespace
                                 w, t, i, grid, perTile, true);
                             const auto b = TensileLite::streamKWorkgroupIterRange(
                                 w, t, i, grid, perTile, true, 1);
-                            EXPECT_EQ(a.start, b.start) << "t=" << t << " i=" << i
-                                                        << " grid=" << grid << " w=" << w;
+                            EXPECT_EQ(a.start, b.start)
+                                << "t=" << t << " i=" << i << " grid=" << grid << " w=" << w;
                             EXPECT_EQ(a.end, b.end);
                         }
                 }
@@ -1756,13 +1820,13 @@ namespace
     // would break row uniformity.
     TEST(RowUniformityStreamKRejection_pre_checkin, HandwrittenCustomKernelDeclaringUniformOrder)
     {
-        const auto hardware                           = probeHardware();
-        auto       solution                           = probeSolution();
-        solution->sizeMapping.tileProcessingStrategy  = TensileLite::TileProcessingStrategy::None;
-        solution->customKernel.name                   = "DummyCustomKernel";
-        solution->customKernel.generated              = false;
-        solution->customKernel.macrotile              = TensileLite::dim3(128, 128, 32);
-        solution->customKernel.uniformSummationOrder  = true;
+        const auto hardware                          = probeHardware();
+        auto       solution                          = probeSolution();
+        solution->sizeMapping.tileProcessingStrategy = TensileLite::TileProcessingStrategy::None;
+        solution->customKernel.name                  = "DummyCustomKernel";
+        solution->customKernel.generated             = false;
+        solution->customKernel.macrotile             = TensileLite::dim3(128, 128, 32);
+        solution->customKernel.uniformSummationOrder = true;
 
         EXPECT_TRUE(admitsUniformSummationOrder(*solution, hardware))
             << "a handwritten custom kernel that declares uniform summation order must be admitted";
@@ -1897,6 +1961,7 @@ namespace
         solution->sizeMapping.staggerU               = 16;
         solution->customKernel.name                  = "DummyCustomKernel";
         solution->customKernel.generated             = false;
+        solution->customKernel.uniformSummationOrder = true;
         auto problem                                 = probeProblem();
 
         EXPECT_FALSE(solution->uniformSummationOrderSupported(problem, hardware))

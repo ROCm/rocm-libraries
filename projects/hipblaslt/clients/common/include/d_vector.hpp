@@ -489,11 +489,10 @@ public:
         , m_bytes((s + m_pad * 2) * realDataTypeSize(dtype))
         , use_HMM(HMM)
     {
-        // Initialize every byte: the runtime-typed guard can be as wide as a
-        // double, rather than the one-byte char used for its backing array.
+        // Use a nonzero pattern throughout the guard so zero stores are detected.
         if(!m_init_guard_type)
         {
-            std::fill_n(reinterpret_cast<unsigned char*>(m_guard_type), sizeof(m_guard_type), 0xa5);
+            std::fill_n(m_guard_type, sizeof(m_guard_type), static_cast<char>(0xa5));
             m_init_guard_type = true;
         }
     }

@@ -118,6 +118,12 @@ namespace TensileLite
         using SwizzleCache    = LRUCache<SwizzleCacheKey, SwizzleCacheVal>;
         static thread_local SwizzleCache g_swizzleCache;
 
+        // Each rotating copy starts on a 256-byte boundary.
+        static size_t rotatingBytes(size_t bytes)
+        {
+            return RoundUpToMultiple<size_t>(bytes, 256);
+        }
+
         constexpr std::array<size_t, 5> dataSwizzlePermutation{0, 2, 3, 1, 4};
         constexpr std::array<size_t, 4> unrollMajorMXSwizzlePermutation{0, 2, 1, 3};
         constexpr std::array<size_t, 4> tiledMajorMXSwizzlePermutation{0, 1, 3, 2};
@@ -1060,7 +1066,7 @@ namespace TensileLite
                                 size_t const bytes
                                     = multiplyElementSize(it->second.maxElements,
                                                           DataTypeInfo::Get(dataType).elementSize);
-                                tmp_rm.push_back(bytes);
+                                tmp_rm.push_back(rotatingBytes(bytes));
                             }
                             if(vec_rm.empty())
                             {
@@ -1953,7 +1959,7 @@ namespace TensileLite
                 bool const varyScaleTiles = mxBlockFree > 1
                                             && hostnumerics::detail::isUnsignedExponentScale(
                                                 toHostNumericsMxScaleType(scaleEltType))
-                                            && isRandomLikeInitMode(effectiveScaleInitMode);
+                                            && IsRandomLike(effectiveScaleInitMode);
                 auto const paddedScaleShape = roc::hostnumerics::Shape{
                     kFast ? scaleDesc.sizes()[freeIdx] : scaleDesc.sizes()[boundIdx],
                     kFast ? scaleDesc.sizes()[boundIdx] : scaleDesc.sizes()[freeIdx]};

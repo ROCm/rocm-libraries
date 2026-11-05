@@ -669,8 +669,17 @@ namespace TensileLite::Client::hostnumerics
                 return failure(TranslationFailureCode::UnsupportedDataType,
                                "Unsupported TensileLite scalar value type.");
 
-            const auto mappedAlpha = detail::scalarValue(problem.alphaType(), inputs.alpha);
-            const auto mappedBeta  = detail::scalarValue(problem.betaType(), inputs.beta);
+            // A device scalar alpha replaces the inline alpha and disables the alpha vector.
+            const bool deviceScalarAlpha = problem.getParams().deviceScalarAlpha();
+            const bool useAlphaVector    = problem.useScaleAlphaVec() && !deviceScalarAlpha;
+            if(deviceScalarAlpha && inputs.scaleAlphaVec == nullptr)
+                return failure(TranslationFailureCode::MissingInput,
+                               "Device scalar alpha input is missing.");
+            const auto mappedAlpha
+                = deviceScalarAlpha
+                      ? std::optional(detail::scalarFromStorage(alphaType, inputs.scaleAlphaVec))
+                      : detail::scalarValue(problem.alphaType(), inputs.alpha);
+            const auto mappedBeta = detail::scalarValue(problem.betaType(), inputs.beta);
             if(!mappedAlpha || !mappedBeta)
                 return failure(TranslationFailureCode::InvalidDescriptor,
                                "Scalar value cannot be converted to its declared type.");
@@ -688,7 +697,7 @@ namespace TensileLite::Client::hostnumerics
 
             if(problem.useBias() && inputs.bias == nullptr && inputs.batchBias == nullptr)
                 return failure(TranslationFailureCode::MissingInput, "Bias input is missing.");
-            if(computeProduct && problem.useScaleAlphaVec() && inputs.scaleAlphaVec == nullptr)
+            if(computeProduct && useAlphaVector && inputs.scaleAlphaVec == nullptr)
             {
                 return failure(TranslationFailureCode::MissingInput,
                                "Scale-alpha vector input is missing.");
@@ -816,7 +825,7 @@ namespace TensileLite::Client::hostnumerics
             }
 
             const size_t scaleAlphaLength = scaleAlphaAxis == MatrixAxis::Row ? m : n;
-            if(computeProduct && problem.useScaleAlphaVec())
+            if(computeProduct && useAlphaVector)
             {
                 auto scaleAlphaResult
                     = detail::getSnapshot(alphaType, inputs.scaleAlphaVec, scaleAlphaLength);
