@@ -731,8 +731,9 @@ if(ROCKE_INSTALL_TESTS)
     # host-side SDPA sequence-length and padding-mask adapters/specs, the
     # fmha_mfma free-stride ABI and layout contracts, the 2D/3D mask_type spec
     # fields, the 3D segment+reduce module's pairing, the reduce's LDS segment
-    # bound against the compiled code object, and the backward-test memo bound
-    # in tests/conftest.py.
+    # bound against the compiled code object, the tiled C++ entries' head-count
+    # and arch refusals, the dense segment-combine launch ABI, and the
+    # backward-test memo bound in tests/conftest.py.
     # File-list style (same pattern as conv_pytest) so PYTHONPATH resolves rocke/
     # correctly from the installed tree.
     set(_ROCKE_LIBRARY_ATTENTION_CPU_TEST_RELPATHS
@@ -743,11 +744,15 @@ if(ROCKE_INSTALL_TESTS)
         "tests/library/tests/test_attention_tiled_2d_mask_type.py"
         "tests/library/tests/test_attention_tiled_3d_decode_split.py"
         "tests/library/tests/test_attention_tiled_3d_kv_cache_policy.py"
+        "tests/library/tests/test_attention_tiled_launch_signature.py"
+        "tests/library/tests/test_attention_tiled_cpp_entry_guards.py"
+        "tests/library/tests/test_attention_dense_kv_split_combine_abi.py"
         "tests/library/tests/test_attention_tiled_3d_mask_type.py"
         "tests/library/tests/test_attention_tiled_3d_module.py"
         "tests/library/tests/test_attention_tiled_3d_reduce_lds.py"
         "tests/library/tests/test_attention_unified_masked_tile_ir.py"
         "tests/library/tests/test_attention_unified_2d_lse_ir.py"
+        "tests/library/tests/test_d256_gfx942_fast_routing.py"
         "tests/library/tests/test_sdpa_seqlen.py"
         "tests/library/tests/test_sdpa_padding_mask.py"
         "tests/library/tests/test_fmha_mfma_free_stride.py"
@@ -765,6 +770,26 @@ if(ROCKE_INSTALL_TESTS)
            "  LABELS \"ckc\\;python\\;attention\\;host\\;quick\"\n"
            "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
            "  TIMEOUT 180)\n")
+
+    # Tiled attention cache-key contract (no GPU). The targeted share/split
+    # checks take seconds and run in the quick tier. The invariant sweep compares
+    # key equality with build equality across every selector threshold for each
+    # tiled arch, so each sweep case runs for tens of seconds: it is a separate
+    # standard-tier entry with its own budget.
+    string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+           "add_test(rocke_library_attention_cache_key_pytest python -m pytest \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_attention_tiled_cache_key.py\" -k \"not test_key_matches_build_identity\" -v -rs --timeout=30)\n")
+    string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+           "set_tests_properties(rocke_library_attention_cache_key_pytest PROPERTIES\n"
+           "  LABELS \"ckc\\;python\\;attention\\;host\\;quick\"\n"
+           "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
+           "  TIMEOUT 180)\n")
+    string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+           "add_test(rocke_library_attention_cache_key_sweep_pytest python -m pytest \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_attention_tiled_cache_key.py\" -k test_key_matches_build_identity -v -rs --timeout=240)\n")
+    string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+           "set_tests_properties(rocke_library_attention_cache_key_sweep_pytest PROPERTIES\n"
+           "  LABELS \"ckc\\;python\\;attention\\;host\\;standard\"\n"
+           "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
+           "  TIMEOUT 900)\n")
 
     # DSA lightning-indexer CPU tests (no GPU: validator, dispatch wiring, and the
     # Python-lowered IR-sha golden). Same staged-library PYTHONPATH as the conv
@@ -1009,7 +1034,9 @@ if(ROCKE_INSTALL_TESTS)
         "tests/library/tests/test_kda_decode_gfx950_numeric.py"
         "tests/library/tests/test_gfx1250_attention.py"
         "tests/library/tests/test_gfx942_gqa_head_fold_numeric.py"
+        "tests/library/tests/test_gfx942_4wgqa_bounds_numeric.py"
         "tests/library/tests/test_attention_gfx942_kv_pages.py"
+        "tests/library/tests/test_attention_tiled_runtime_shape_numeric.py"
         "tests/library/tests/test_attention_tiled_3d_kv_lds_swizzle.py"
         "tests/library/tests/test_attention_tiled_3d_running_max.py"
         "tests/library/tests/test_attention_unified_2d_masked_tile_numeric.py"
