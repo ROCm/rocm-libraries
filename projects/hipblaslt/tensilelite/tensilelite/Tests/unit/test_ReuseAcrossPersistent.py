@@ -1781,3 +1781,87 @@ def test_non_rap_activation_keeps_the_plain_stride():
         "s_add_u32 s[sgprNextTile], s[sgprNextTile], s[sgprPersistentGrid]",
         "s_cselect_b32 s[sgprNextTile], s[sgprTotalTiles], s[sgprNextTile]",
     ]
+
+
+# ---------------------------------------------------------------------------
+# Phase walk for a resident B. Inside each block a WGM > 1 remap makes, the
+# N-tile is the tile index mod the block width W, so the period is W; without
+# the remap, with a negative WGM, or with a short last block, the plain stride
+# stays. B needs no sparse rule.
+# ---------------------------------------------------------------------------
+def _phase_plan_b(grid, tiles, n0, n1, wgm):
+    """(stride, step) the kernel should derive for a resident B; the plain walk is (grid, 0)."""
+    if wgm <= 1:
+        return grid, 0
+    width = min(wgm, n1)
+    if n1 % width:
+        return grid, 0
+    gcd, coeff = _extended_gcd(grid, width)
+    if gcd == width:
+        return grid, 0
+    phases = width // gcd
+    return phases * grid, (coeff % phases) * grid
+
+
+def _n_tile(tile, n0, n1, wgm):
+    batch, inBatch = divmod(tile, n0 * n1)
+    return batch, _wgm_map(inBatch % n0, inBatch // n0, n0, n1, wgm)[1]
+
+
+# (NumWorkGroups0, NumWorkGroups1, batches, grid, WGM)
+_PHASE_WALK_B_CASES = [
+    (16, 3, 1, 32, 8), (16, 3, 1, 32, 3), (16, 4, 1, 17, 8), (16, 4, 2, 17, 2),
+    (8, 6, 1, 20, 3), (8, 6, 1, 20, 4), (5, 12, 1, 9, 6), (40, 1, 1, 7, 8),
+    (12, 3, 1, 16, 1), (12, 3, 1, 16, 0), (12, 3, 1, 16, -4), (12, 4, 1, 32, 8),
+    (12, 6, 3, 13, 6), (3, 300, 1, 255, 300), (24, 2, 1, 17, 16),
+]
+
+
+@pytest.mark.parametrize("wgmxcc", [-1, 1])
+@pytest.mark.parametrize("n0, n1, batches, grid, wgm", _PHASE_WALK_B_CASES)
+def test_phase_walk_for_b_matches_the_plan_and_keeps_each_workgroups_tiles(
+    _cpu, n0, n1, batches, grid, wgm, wgmxcc
+):
+    tiles = n0 * n1 * batches
+    init, advance = _emit(_peekKernel(wgmxcc, rap=2))
+    stride, step = _phase_plan_b(grid, tiles, n0, n1, _decoded(wgm, wgmxcc))
+    assert step < stride
+    seen = []
+    for rank in range(min(grid, tiles)):
+        plan, order = _run_walk(init, advance, rank, grid, tiles, n0, n1, _wgm_field(wgm, wgmxcc))
+        assert plan == (stride, step)
+        assert order == _walk(rank, tiles, stride, step)
+        assert sorted(order) == list(range(rank, tiles, grid)), "the walk changed which tiles a workgroup owns"
+        seen.extend(order)
+    assert sorted(seen) == list(range(tiles)), "some tile is not processed exactly once"
+
+
+# Within a phase the N-tile only changes where the walk crosses into the next
+# WGM block or batch, and never back: one refill per block, in N-tile order.
+@pytest.mark.parametrize("n0, n1, batches, grid, wgm", [
+    (16, 3, 1, 32, 8), (16, 4, 1, 17, 8), (16, 4, 2, 17, 2), (8, 6, 1, 20, 3),
+    (8, 8, 1, 18, 4), (5, 12, 1, 9, 6), (12, 6, 3, 13, 6),
+])
+def test_each_b_phase_reads_one_n_tile_per_block(_cpu, n0, n1, batches, grid, wgm):
+    tiles = n0 * n1 * batches
+    init, advance = _emit(_peekKernel(-1, rap=2))
+    stride, step = _phase_plan_b(grid, tiles, n0, n1, wgm)
+    assert stride > grid, "this case is meant to take the phased walk"
+    width = min(wgm, n1)
+    for rank in range(min(grid, tiles)):
+        _, order = _run_walk(init, advance, rank, grid, tiles, n0, n1, _wgm_field(wgm, -1))
+        phases = {}
+        for tile in order:
+            phases.setdefault((tile - rank) % stride, []).append(_n_tile(tile, n0, n1, wgm))
+        for offset, nTiles in phases.items():
+            runs = [k for i, k in enumerate(nTiles) if i == 0 or k != nTiles[i - 1]]
+            assert len(runs) == len(set(runs)), "rank %d, phase at +%d returns to an N-tile: %s" % (rank, offset, nTiles)
+            assert all(n % width == runs[0][1] % width for _, n in runs), \
+                "rank %d, phase at +%d changes position within a block: %s" % (rank, offset, nTiles)
+
+
+def test_the_b_walk_borrows_the_resident_n_tile_not_the_m_tile(_cpu):
+    writer = _PeekWriter()
+    init = StaticGrid().rapPhaseWalkInit(writer, _peekKernel(-1, rap=2), _PARTITION)
+    assert "sgprRAPResidentMTile" not in str(init)
+    assert set(re.findall(r"sgpr(RAPPhase\w+)", str(init))) == {"RAPPhasePlan", "RAPPhaseStart"}
