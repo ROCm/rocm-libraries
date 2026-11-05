@@ -745,11 +745,19 @@ if __name__ == "__main__":
             assert not report["torch_imported"]
 
 
-def test_reference_pytest_selects_cohort_and_keeps_negative_checks(tmp_path):
-    """Test collection with a fake HIP probe; this does not execute GPU kernels."""
-    import os
+@pytest.mark.timeout(90)
+def test_reference_pytest_selects_cohort_and_keeps_negative_checks(
+    monkeypatch, tmp_path
+):
+    """Test collection with a fake HIP probe; this does not execute GPU kernels.
 
-    import rocke
+    The subprocess watchdog owns the child deadline. The longer pytest backstop
+    leaves Windows time to stop and reap the child before interrupting the parent.
+    """
+    from rocke.tests.subprocess_launcher import (
+        rocke_python_command,
+        rocke_subprocess_env,
+    )
 
     (tmp_path / "conftest.py").write_text(
         """
@@ -778,16 +786,30 @@ def test_negative_control():
     pass
 """
     )
-    env = dict(os.environ, AMDGPU_FAMILIES="gfx94X-dcgpu", AMDGPU_TARGETS="gfx942")
-    env["PYTHONPATH"] = os.pathsep.join(
-        [
-            str(Path(rocke.__file__).resolve().parent.parent),
-            str(Path(__file__).parent),
-        ]
+    ambient = tmp_path / "ambient"
+    ambient.mkdir()
+    (ambient / "sitecustomize.py").write_text(
+        "raise AssertionError('inherited ambient PYTHONPATH')\n"
+    )
+    monkeypatch.setenv("PYTHONPATH", str(ambient))
+    monkeypatch.setenv("PYTEST_ADDOPTS", "--unexpected-ambient-option")
+    monkeypatch.setenv("PYTEST_PLUGINS", "unexpected_ambient_plugin")
+    child_env = dict(
+        os.environ,
+        AMDGPU_FAMILIES="gfx94X-dcgpu",
+        AMDGPU_TARGETS="gfx942",
+        PYTEST_DISABLE_PLUGIN_AUTOLOAD="1",
+        PYTHONNOUSERSITE="1",
+    )
+    child_env.pop("PYTHONPATH", None)
+    child_env.pop("PYTEST_ADDOPTS", None)
+    child_env.pop("PYTEST_PLUGINS", None)
+    env = rocke_subprocess_env(
+        child_env,
+        python_paths=(Path(__file__).parent,),
     )
     result = subprocess.run(
-        [
-            sys.executable,
+        rocke_python_command(
             "-m",
             "pytest",
             str(tmp_path / "test_probe.py"),
@@ -796,12 +818,13 @@ def test_negative_control():
             "conv",
             "--rocke-reference-arch",
             "gfx942",
-        ],
+        ),
+        check=False,
         env=env,
         cwd=tmp_path,
         capture_output=True,
         text=True,
-        timeout=30,
+        timeout=60,
     )
     assert result.returncode == 0, result.stdout + result.stderr
     assert "2 passed, 1 deselected" in result.stdout
