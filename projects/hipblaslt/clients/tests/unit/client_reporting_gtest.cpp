@@ -6,7 +6,7 @@
 
 namespace
 {
-    TEST(HostUnitClientReporting, FatalFailureReturnsFromCaller)
+    TEST(HostUnitClientReporting, smoke_FatalFailureReturnsFromCaller)
     {
         ::testing::TestPartResultArray results;
         int                            evaluations = 0;
@@ -30,7 +30,7 @@ namespace
                   std::string::npos);
     }
 
-    TEST(HostUnitClientReporting, SkipReturnsFromCaller)
+    TEST(HostUnitClientReporting, smoke_SkipReturnsFromCaller)
     {
         ::testing::TestPartResultArray results;
         bool                           continued = false;
@@ -48,7 +48,7 @@ namespace
         EXPECT_EQ(results.GetTestPartResult(0).type(), ::testing::TestPartResult::kSkip);
     }
 
-    TEST(HostUnitClientReporting, NonfatalFailureContinues)
+    TEST(HostUnitClientReporting, smoke_NonfatalFailureContinues)
     {
         bool continued = false;
         EXPECT_NONFATAL_FAILURE(
