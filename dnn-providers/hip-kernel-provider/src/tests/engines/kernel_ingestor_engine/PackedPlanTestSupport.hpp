@@ -274,24 +274,16 @@ public:
     }
 };
 
-// The number of entries in the kpack module caches of all packs that expose one. The
-// gfx1151 WMMA attention caches are file-local to their pack, so they are not counted.
+// The number of entries in the kpack module caches of the packs every test build compiles:
+// Pointwise, ConvFwd, gfx950 dense and unified 2D/3D, and gfx942 dense. The FlyDSL caches
+// (optional) and the gfx1151 caches (file-local) are not counted.
 inline size_t packModuleCacheEntries()
 {
-    size_t entries = pointwiseKpackModuleCache().size() + convFwdKpackModuleCache().size()
-                     + gfx950AttentionDenseKpackModuleCache().size()
-                     + gfx950AttentionUnified2DKpackModuleCache().size()
-                     + gfx950AttentionUnified3DKpackModuleCache().size()
-                     + gfx942AttentionDenseKpackModuleCache().size();
-#ifdef HIPDNN_ENGINE_FLYDSL
-    entries += flydslRmsNormKpackModuleCache().size() + flydslRmsNormBwdKpackModuleCache().size()
-               + flydslSdpaRdnaKpackModuleCache().size()
-               + flydslSdpaRdnaDecodeKpackModuleCache().size()
-               + flydslSdpaAiwKpackModuleCache().size() + flydslSdpaCdnaKpackModuleCache().size()
-               + flydslSdpaCdnaDualwaveKpackModuleCache().size()
-               + flydslSdpaCdnaDecodeKpackModuleCache().size();
-#endif
-    return entries;
+    return pointwiseKpackModuleCache().size() + convFwdKpackModuleCache().size()
+           + gfx950AttentionDenseKpackModuleCache().size()
+           + gfx950AttentionUnified2DKpackModuleCache().size()
+           + gfx950AttentionUnified3DKpackModuleCache().size()
+           + gfx942AttentionDenseKpackModuleCache().size();
 }
 
 } // namespace hip_kernel_provider::kernel_ingestor_engine::testing
