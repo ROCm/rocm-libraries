@@ -21,7 +21,7 @@
 #include "rocke/ir_internal.h" /* rocke_i_set_err */
 
 /* Largest per-lane fragment / accumulator length the attention atoms produce.
- * fp8/bf8 16x16x32 -> a_per_lane=8; wmma f16 -> a_frag_len=16, c_frag_len=8.
+ * fp8/bf8 16x16x32 -> a_per_lane=8; wmma f16 -> a_frag_len=16, dst.frag_len=8.
  * head_size up to 256 -> n_pv_atoms up to 16, n_qk_atoms up to 16. */
 #define ROCKE_ATTN_MAX_LANE 16
 #define ROCKE_ATTN_MAX_ATOMS 16

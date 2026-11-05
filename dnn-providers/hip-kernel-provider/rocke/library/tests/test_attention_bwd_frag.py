@@ -194,7 +194,7 @@ def _relabel_kernel(arch, dtype, a_k):
     tiles = []
     for t in range(plan.c_tiles):
         idx = b.add(b.mul(lane, b.const_i32(8)), b.const_i32(4 * t))
-        tiles.append(b.global_load_vN(src, idx, F32, c_op.c_frag_len))
+        tiles.append(b.global_load_vN(src, idx, F32, c_op.dst.frag_len))
     frag = F.emit_c_to_a(b, plan, tiles, dtype=dtype, lane=lane)
     assert frag.type == VectorType(F.ir_type(dtype), a_op.a_frag_len)
     for s in range(a_op.a_frag_len):

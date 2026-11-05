@@ -154,7 +154,7 @@ def mma_agpr_asm_steps(
     with a zero first (no ``v_accvgpr_write`` per call).
 
     ``agpr_base`` pins output ``i`` to the physical AGPR tuple starting at
-    ``agpr_base + i * c_frag_len`` (``={a[lo:hi]}``) instead of letting the
+    ``agpr_base + i * dst_frag_len`` (``={a[lo:hi]}``) instead of letting the
     allocator choose. Without it the production register allocator was seen
     to make room for short-lived asm outputs (S / dP) by moving part of the
     long-lived dK / dV accumulators to arch VGPRs and back every step, though

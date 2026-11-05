@@ -105,7 +105,7 @@ Other wave32 arches keep `split_k=1`, and no WMMA arch has the two-stage path.
   - §13.1 and §13.2 (checklists): "Is split-K needed?" is the policy's
     CTA-fill term against the reduction length (`wg_K`) and the dW tile grid
     (`wg_M`, `wg_N`). Group tiling folds the group into `block_id_z`
-    alongside the K-slice. Output store mapping is the WMMA C layout above.
+    alongside the K-slice. Output store mapping is the WMMA result layout above.
   - §14.1 and §16.1: the 16-bit degree against the atomic's rounding, a
     validator rule scoped to the wrong epilogue, and sweeping every 16-bit
     degree against the best `split_k=1` kernel before setting a cap (fp16

@@ -964,7 +964,7 @@ void rocke_gfx1151_dfcp_fuse_c0_to_conv1_a_regs(rocke_gfx1151_dfcp_build_ctx_t* 
         for(int kk = 0; kk < mfmas_n; ++kk)
         {
             rocke_value_t* acc = accs0[mi * mfmas_n + kk];
-            /* codes = [code_fn(b.vec_extract(acc, s)) for s in range(op0.c_frag_len)] */
+            /* codes = [code_fn(b.vec_extract(acc, s)) for s in range(op0.dst.frag_len)] */
             rocke_value_t* codes[ROCKE_GFX1151_DFCP_MAX_ACCS];
             for(int s = 0; s < op0->dst.frag_len; ++s)
                 codes[s] = rocke_gfx1151_dfcp_apply_code_fn(

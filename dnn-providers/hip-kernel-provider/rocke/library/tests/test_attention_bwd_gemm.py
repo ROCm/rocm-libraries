@@ -279,7 +279,7 @@ def test_mma_frag_issues_the_fragment_chain_of_mma(arch):
     dt = "fp16"
     g = BlockGemm(arch, dt, 32, 64, 64, (2, 1))
     b = IRBuilder("mma_frag_probe")
-    n = g.op.c_frag_len
+    n = g.op.dst.frag_len
     a = [[b.zero_vec_f32(4) for _ in range(g.k_steps)] for _ in range(g.frags_m)]
     bb = [[b.zero_vec_f32(4) for _ in range(g.k_steps)] for _ in range(g.frags_n)]
     acc = g.zero_acc(b)

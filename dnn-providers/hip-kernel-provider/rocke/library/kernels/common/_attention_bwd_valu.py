@@ -127,7 +127,7 @@ def rne_noguard_bf16(b: IRBuilder, frag: Value) -> Value:
 
 
 def cast_c_frag(b: IRBuilder, frag: Value, elem, bf16_cast: str = "generic") -> Value:
-    """Round an fp32 C fragment to the I/O dtype ``elem`` under ``bf16_cast``."""
+    """Round an fp32 result fragment to the I/O dtype ``elem`` under ``bf16_cast``."""
     if bf16_cast == "generic":
         return b.vec_cast_f32_to(frag, elem)
     if bf16_cast != "rne_noguard":
