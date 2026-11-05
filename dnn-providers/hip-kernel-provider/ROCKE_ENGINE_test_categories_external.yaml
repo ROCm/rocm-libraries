@@ -86,6 +86,8 @@ test_categories:
       - "rocke_global_load_index_width"
       - "rocke_ir_types"
       - "rocke_float_format"
+      # Not built on Windows (see rocke/platform/tests/cmake/CoreTests.cmake).
+      - "rocke_lower_serialized_ir_hip"
       - "rocke_opcode_values"
       - "rocke_unsigned_int_ops"
       - "rocke_intexpr"
@@ -172,6 +174,8 @@ test_categories:
       - "rocke_global_load_index_width"
       - "rocke_ir_types"
       - "rocke_float_format"
+      # Not built on Windows (see rocke/platform/tests/cmake/CoreTests.cmake).
+      - "rocke_lower_serialized_ir_hip"
       - "rocke_opcode_values"
       - "rocke_unsigned_int_ops"
       - "rocke_intexpr"

@@ -193,6 +193,23 @@ if(BUILD_TESTING)
   install(TARGETS rocke_ir_lower_cli
           RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
 
+  # The engine entry rocke_ir_lower_cli and the binding share, called with and
+  # without its optional message buffer. Not built on Windows: the Windows CI
+  # shards, close to their time limit, take no new tests, and this one stays
+  # with the HIP lowering tests that are kept off them (platform/CMakeLists.txt).
+  if(NOT WIN32)
+    add_executable(rocke_lower_serialized_ir_hip core/test_lower_serialized_ir_hip.cpp)
+    target_link_libraries(rocke_lower_serialized_ir_hip PRIVATE rocke_core)
+    add_test(NAME rocke_lower_serialized_ir_hip COMMAND rocke_lower_serialized_ir_hip)
+    set_tests_properties(rocke_lower_serialized_ir_hip PROPERTIES LABELS "ckc;unit;host")
+    rocke_cxx_test_installed_name(_rocke_installed_name rocke_lower_serialized_ir_hip)
+    set_target_properties(rocke_lower_serialized_ir_hip
+                          PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
+    install(TARGETS rocke_lower_serialized_ir_hip
+            RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
+    set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS rocke_lower_serialized_ir_hip)
+  endif()
+
   add_executable(rocke_float_format core/test_float_format.cpp)
   target_link_libraries(rocke_float_format PRIVATE rocke_core)
   add_test(NAME rocke_float_format COMMAND rocke_float_format)

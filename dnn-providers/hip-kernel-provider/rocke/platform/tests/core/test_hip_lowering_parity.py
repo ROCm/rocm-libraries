@@ -75,8 +75,9 @@ def test_waitcnt_is_refused_where_the_target_has_split_wait_counters(op):
 def test_ir_lower_cli_reports_what_the_binding_reports():
     """The installed test tree runs the C++ HIP lowering through
     rocke_ir_lower_cli, other lanes through the binding: for the same kernels,
-    in one batch, both report the same source and the same refusals, in order.
-    Runs where both are present."""
+    in one batch, both report the same source and the same refusals, in order,
+    including the parser's refusals of text that is not a kernel. Runs where
+    both are present."""
     pytest.importorskip("rocke_engine")
     waitcnt = serialize(_waitcnt_kernel("s_waitcnt").kernel)
     no_template = serialize(_inline_asm_kernel(template=None).kernel)
@@ -84,6 +85,8 @@ def test_ir_lower_cli_reports_what_the_binding_reports():
         (waitcnt, "gfx942"),
         (waitcnt, "gfx1250"),
         (no_template, "gfx942"),
+        ("", "gfx942"),
+        ("not serialized IR", "gfx942"),
         (waitcnt, "gfx950"),
     ]
     via_program = ir_lower_cli_hip_outcomes(kernels)
@@ -92,8 +95,12 @@ def test_ir_lower_cli_reports_what_the_binding_reports():
         False,
         True,
         True,
+        True,
+        True,
         False,
     ]
+    assert via_program[3] == HipRefusal("ValueError", "empty IR input")
+    assert via_program[4].error_type_name == "ValueError"
 
 
 @pytest.mark.parametrize("op", ["s_waitcnt", "sync_lds_only"])
