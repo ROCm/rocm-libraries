@@ -12,7 +12,9 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
   type, so `miopenGetReductionWorkspaceSize`, and the RNN workspace queries that include it, return
   a larger size for a wider compute type and a smaller one for a narrower type; allocate the
   workspace with the size returned. For such reductions it now returns `miopenStatusBadParm` for
-  the compute type `miopenInt64`.
+  the compute type `miopenInt64`. `alpha` is now converted to the compute type in every reduction;
+  single-pass reductions converted it to the input type, which truncated a fractional `alpha` for
+  INT8 input and rounded it for FP16 input.
 * [Conv] Fixed the 3D grouped backward-weights CK xdlops convolution solver skipping
   `valid_kernels[0]` during exhaustive tuning: the populate branch fell through instead of emitting
   the seeded first config, so GenericSearch began enumeration at `valid_kernels[1]` and the first

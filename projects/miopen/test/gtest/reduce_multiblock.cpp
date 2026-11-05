@@ -47,6 +47,7 @@ enum class Pattern
 {
     Const100,        // every element is 100
     Const300,        // every element is 300
+    Const1000,       // every element is 1000
     Const12,         // every element is 12
     Const1,          // every element is 1
     SignedHalves100, // +100 in the first half of the reduced elements, -100 in the second
@@ -78,6 +79,8 @@ struct MultiBlockCase
     float outputInit = 0.0f; // initial value of the output elements (matters if beta != 0)
     // the NaN propagation selects another instance of the kernels (CK_PARAM_NAN_PROPAGATE)
     bool propagateNan = false;
+    // compare with the expected value rounded to the output type, with no slack
+    bool exactOutput = false;
 
     friend std::ostream& operator<<(std::ostream& os, const MultiBlockCase& c)
     {
@@ -163,6 +166,7 @@ double PatternValue(Pattern p, std::size_t j, std::size_t k)
     {
     case Pattern::Const100: return 100.0;
     case Pattern::Const300: return 300.0;
+    case Pattern::Const1000: return 1000.0;
     case Pattern::Const12: return 12.0;
     case Pattern::Const1: return 1.0;
     case Pattern::SignedHalves100: return firstHalf ? 100.0 : -100.0;
@@ -279,6 +283,21 @@ std::pair<double, double> Tolerance(miopenDataType_t t)
     return {2e-5, 1e-8};
 }
 
+// The expected value rounded to the nearest value of the output type (ties to even)
+double RoundToOutputType(double v, miopenDataType_t t)
+{
+    if(t == miopenHalf)
+    {
+        int e = 0;
+        std::frexp(v, &e);
+        const double scale = std::ldexp(1.0, 11 - e); // 11 significant bits
+        return std::nearbyint(v * scale) / scale;
+    }
+    if(t == miopenInt8)
+        return std::nearbyint(v);
+    return static_cast<double>(static_cast<float>(v));
+}
+
 constexpr std::size_t canaryBytes = 512;
 constexpr std::uint8_t canaryByte = 0xA5;
 
@@ -378,11 +397,12 @@ void RunCase(const MultiBlockCase& c)
 
     const auto gpu = handle.Read<T>(output_dev, outTotal);
 
-    const auto [rel, abs] = Tolerance(c.inType);
+    const auto [rel, abs] = c.exactOutput ? std::pair{0.0, 0.0} : Tolerance(c.inType);
     for(std::size_t o = 0; o < outTotal; o++)
     {
         const double got = ToDouble(gpu[o]);
-        const double exp = ref.values[o];
+        const double exp =
+            c.exactOutput ? RoundToOutputType(ref.values[o], c.inType) : ref.values[o];
         EXPECT_LE(std::abs(got - exp), rel * std::abs(exp) + abs)
             << "output " << o << ": got " << got << ", expected " << exp;
     }
@@ -587,6 +607,45 @@ std::vector<MultiBlockCase> NanPropagationStandard()
     return cases;
 }
 
+// alpha is converted to the compute type in every reduction, in a single pass or in several
+// blocks: the same data reduced over 512 elements (one pass) and over 2048 elements (blocks) gives
+// the same result. An alpha converted to the input type first would change the one-pass result.
+const Shape singlePass512{"SinglePass512", {2, 512}, {1}};
+
+// 1000 * 1.0004 is 1000.4 in FP32 and rounds to 1000.5 in FP16; with alpha rounded to FP16 first
+// (1.0) the result would be 1000
+std::vector<MultiBlockCase> AlphaConversionFp16()
+{
+    constexpr auto hf = miopenHalf;
+    constexpr auto fl = miopenFloat;
+
+    std::vector<MultiBlockCase> cases;
+    for(const auto* s : {&singlePass512, &thread2Partial})
+    {
+        cases.push_back(
+            MakeCase("AlphaFp16", hf, fl, MIOPEN_REDUCE_TENSOR_AVG, *s, Pattern::Const1000));
+        cases.back().alpha       = 1.0004f;
+        cases.back().exactOutput = true;
+    }
+    return cases;
+}
+
+// the average of 100 is 100 and alpha 0.5 gives 50; an alpha converted to INT8 first would be 0
+std::vector<MultiBlockCase> AlphaConversionInt8()
+{
+    constexpr auto i8 = miopenInt8;
+    constexpr auto fl = miopenFloat;
+
+    std::vector<MultiBlockCase> cases;
+    for(const auto* s : {&singlePass512, &thread2Partial})
+    {
+        cases.push_back(
+            MakeCase("AlphaInt8", i8, fl, MIOPEN_REDUCE_TENSOR_AVG, *s, Pattern::Const100));
+        cases.back().alpha = 0.5f;
+    }
+    return cases;
+}
+
 std::vector<MultiBlockCase> Fp32Standard()
 {
     return {
@@ -745,6 +804,8 @@ INSTANTIATE_TEST_SUITE_P(Standard,
                              cases.insert(cases.end(), same.begin(), same.end());
                              const auto nan = NanPropagationStandard();
                              cases.insert(cases.end(), nan.begin(), nan.end());
+                             const auto alpha = AlphaConversionFp16();
+                             cases.insert(cases.end(), alpha.begin(), alpha.end());
                              return cases;
                          }()),
                          MIOPEN_REDUCE_MULTIBLOCK_NAME);
@@ -754,7 +815,12 @@ INSTANTIATE_TEST_SUITE_P(Standard,
                          MIOPEN_REDUCE_MULTIBLOCK_NAME);
 INSTANTIATE_TEST_SUITE_P(Standard,
                          GPU_ReduceMultiBlock_I8,
-                         ::testing::ValuesIn(Int8Standard()),
+                         ::testing::ValuesIn([] {
+                             auto cases       = Int8Standard();
+                             const auto alpha = AlphaConversionInt8();
+                             cases.insert(cases.end(), alpha.begin(), alpha.end());
+                             return cases;
+                         }()),
                          MIOPEN_REDUCE_MULTIBLOCK_NAME);
 INSTANTIATE_TEST_SUITE_P(Standard,
                          GPU_ReduceMultiBlockWorkspace_FP16,
