@@ -5,8 +5,8 @@
 
 The scalar reference below is deliberately not the vectorized code path: Python
 big integers, one element at a time, straight from the formulas in
-``flydsl/kernels_src/kernels/attention_bwd_cdna/philox.py`` and the counter map
-of ``attention_bwd_rdna/fmha_bwd_dkdv_gfx11.py``.
+``flydsl/kernels_src/kernels/attention_rdna4/philox.py`` and the counter map
+of ``attention_rdna4/flash_attn_func_gfx1201_aiw.py``.
 """
 
 import math

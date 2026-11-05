@@ -34,6 +34,7 @@ from ._types import Dropout, EngineDeclined, Mask, Varlen
 
 _FWD_OUTPUTS = ("o", "stats")
 _BWD_OUTPUTS = ("dq", "dk", "dv", "dbias")
+_INT32_MAX = 2**31 - 1
 
 
 @dataclass(frozen=True)
@@ -141,7 +142,14 @@ class Problem:
         if role is None:
             role = f"ragged_offset_{side}_{token_stride}"
             self._ragged[key] = role
-            offsets = (pos.to(torch.int64) * token_stride).to(torch.int32)
+            offsets = pos.to(torch.int64) * token_stride
+            if offsets.numel() and int(offsets.max()) > _INT32_MAX:
+                raise EngineDeclined(
+                    self.direction,
+                    f"adapter: ragged offset {int(offsets.max())} of packed {side} (token stride "
+                    f"{token_stride}) exceeds INT32; the ragged offset tensor is INT32",
+                )
+            offsets = offsets.to(torch.int32)
             self._add(role, offsets.view(-1, 1, 1, 1))
         return role
 

@@ -10,15 +10,19 @@
 ``run_aotriton.py --out`` directory). A shard needs a link when work its ``--resume`` would still do
 remains: a collected case of pass 1 without a row, a case of a pass directory's ``nodeids.txt`` without
 a row, or a pass the shard's pass-1 rows call for whose directory does not exist or lacks rows. The
-passes called for follow the flags the links recorded (``run_aotriton.run_options``): with
-``--all-engines`` the pinned sweeps (``run_aotriton.engine_work``), the reference-forward passes of
-``forward_failed`` and with ``--pairs`` the pair passes; with ``--exhaustive`` the candidate passes of
-pass 1's candidate counts (``run_aotriton.candidate_passes``, EXTREME pairs with ``--pairs``).
+passes called for are ``run_aotriton.planned_passes`` over the flags the links recorded
+(``run_aotriton.run_options``): with ``--all-engines`` the pinned sweeps, the reference-forward
+passes of ``forward_failed`` and with ``--pairs`` the pair passes; with ``--exhaustive`` the
+candidate passes of pass 1's candidate counts (EXTREME pairs with ``--pairs``). A shard without
+``run-options.json`` (written before the runner recorded its options) is read as an
+``--all-engines`` run without ``--pairs`` or ``--exhaustive``, so such a shard still completes.
 A shard whose ``collected.txt`` is missing or empty left no list of cases and goes back whole. With
-``--shards-file`` (``<suite> <k> <N>`` per line) a shard without a directory is listed too.
+``--shards-file`` a shard without a directory is listed too; the file has one ``<suite> <k> <N>``
+per line (suite name, 1-based shard index, shard count; ``reconcile.read_shards_file`` reads it).
 
-stdout: the shards to resubmit in ``submit_chains.sh --shards-file`` format, in file (else directory)
-order. stderr: ``<shard>: <reason>`` lines. Exit 0 whatever the list holds; 2 on usage errors.
+stdout: the shards to resubmit, one ``<suite> <k> <N>`` per line (the shards-file format), in file
+(else directory) order. stderr: ``<shard>: <reason>`` lines. Exit 0 whatever the list holds; 2 on
+usage errors.
 """
 
 import argparse
@@ -43,31 +47,10 @@ def shard_gaps(shard):
         for d, _ in reconcile.pass_dirs(shard):
             wanted[d] = reconcile.listing(d / reconcile.NODEIDS_NAME)
 
-        def plan(d, nodeids):
-            wanted[d] = list(dict.fromkeys([*wanted.get(d, ()), *nodeids]))
-
-        engines = shard / reconcile.ENGINES_DIR
         options = run_aotriton.run_options(shard)
-        if options["all_engines"]:
-            for (direction, engine), ids in run_aotriton.engine_work(rows).items():
-                plan(engines / direction / run_aotriton.engine_slug(engine), ids)
-            bwd_lists = {}
-            failed = run_aotriton.forward_failed(shard)
-            if failed:
-                refwd = engines / "refwd"
-                plan(refwd / "discovery", failed)
-                discovery = reconcile.read_rows(
-                    refwd / "discovery" / reconcile.CSV_NAME
-                )
-                for (_, engine), ids in run_aotriton.engine_work(discovery).items():
-                    plan(refwd / run_aotriton.engine_slug(engine), ids)
-                bwd_lists = {r["nodeid"]: r["bwd_engines"] for r in discovery}
-            if options["pairs"]:
-                for (fwd, bwd), ids in run_aotriton.pair_work(rows, bwd_lists).items():
-                    plan(engines / run_aotriton.pair_rel(fwd, bwd), ids)
-        if options["exhaustive"]:
-            for p in run_aotriton.candidate_passes(rows, options["pairs"]):
-                plan(shard / reconcile.CANDIDATES_DIR / p.rel, p.cases)
+        for p in run_aotriton.planned_passes(shard, rows, options):
+            d = shard / p.root / p.rel
+            wanted[d] = list(dict.fromkeys([*wanted.get(d, ()), *p.cases]))
         gaps = []
         for d, ids in sorted(wanted.items()):
             name = reconcile.pass_name(shard, d)

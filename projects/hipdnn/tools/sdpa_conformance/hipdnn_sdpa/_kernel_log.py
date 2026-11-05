@@ -79,6 +79,10 @@ class Capture:
     def __init__(self):
         self._selected: list = []  # (engine, slot or None, kernel) in log order
 
+    def selected(self) -> bool:
+        """Whether the build logged any kernel selection (false when no log is read at all)."""
+        return bool(self._selected)
+
     def kernel(self, plan_engine: str) -> str:
         """Kernel id of the engine that served the plan; empty when no selection was logged.
 
@@ -139,7 +143,7 @@ def _keep_decline(engine: str, line: str) -> None:
         if count >= contract.DECLINES_PER_ENGINE:
             return
         _DECLINE_COUNTS[engine] = count + 1
-        nodeid = os.environ.get("PYTEST_CURRENT_TEST", "").rsplit(" (", 1)[0]
+        nodeid = contract.current_nodeid()
         worker = os.environ.get("PYTEST_XDIST_WORKER") or "main"
         os.makedirs(directory, exist_ok=True)
         with open(os.path.join(directory, f"{worker}.jsonl"), "a") as out:
@@ -215,14 +219,22 @@ def _uninstall() -> None:
 
 
 def install_kernel_log() -> bool:
-    """Start reading the backend's INFO log; False when no backend library is mapped.
+    """Start reading the backend's INFO log; False, never an exception, when no backend library
+    is mapped or it lacks the log exports.
 
     Idempotent. Registers an exit hook that removes the callback.
     """
     if _INSTALLED is not None:
         return True
-    lib = _find_backend()
-    if lib is None or not _install(lib):
+    try:
+        lib = _find_backend()
+        installed = lib is not None and _install(lib)
+    except (
+        AttributeError,
+        OSError,
+    ):  # the backend lacks the log exports, or cannot be opened
+        return False
+    if not installed:
         return False
     atexit.register(_uninstall)
     return True

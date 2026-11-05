@@ -111,7 +111,7 @@ def declines_dir(tmp_path, monkeypatch):
 
 
 def current_nodeid():
-    return os.environ["PYTEST_CURRENT_TEST"].rsplit(" (", 1)[0]
+    return contract.current_nodeid()
 
 
 def read_declines(directory):
@@ -242,6 +242,14 @@ def test_install_is_a_no_op_reporting_false_without_a_backend(
     monkeypatch.setattr(_kernel_log, "_mapped_backend", lambda: None)
     monkeypatch.setitem(sys.modules, "hipdnn_frontend", None)
     assert _kernel_log.install_kernel_log() is False
+
+
+def test_install_reports_false_not_an_error_when_the_backend_lacks_the_log_exports(
+    fresh_install, monkeypatch
+):
+    monkeypatch.setattr(_kernel_log, "_find_backend", lambda: types.SimpleNamespace())
+    assert _kernel_log.install_kernel_log() is False
+    assert _kernel_log._INSTALLED is None
 
 
 def test_the_backend_is_found_in_the_process_maps(tmp_path):

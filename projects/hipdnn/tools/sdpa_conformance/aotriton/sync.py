@@ -5,7 +5,11 @@
 """Vendor AOTriton's flash test suite and verify the copy.
 
     sync.py --source <aotriton checkout>   copy the files, rewrite vendor.lock.json
-    sync.py --check                        verify the copy against vendor.lock.json
+    sync.py --check [--no-collect]         verify the copy against vendor.lock.json
+
+``--source`` refuses a checkout with uncommitted changes under the vendored paths, copies into a
+temporary directory and replaces ``vendor/`` only once the copy is complete; the lock is written
+last. ``--no-collect`` verifies hashes only and skips the collection counts.
 
 ``--check`` fails when a vendored file's sha256 differs, when ``aotriton_flash.py`` (replaced by
 ``shim/aotriton_flash.py``) is present under ``vendor/``, or when ``pytest --collect-only``
@@ -21,9 +25,11 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 from aotriton_layout import FLASH_TESTS, LOCK, VENDOR, clean_env, SDPA_ROOT
+from conformance_contract import FORWARD_TESTS
 
 TESTS_SRC = "modules/flash/tests"
 PLUGIN_SRC = "python/pytest-gpu-lease/pytest_gpu_lease"
@@ -32,7 +38,7 @@ REPLACED = "modules/flash/tests/aotriton_flash.py"
 RELEASES = (0, 1, 2, 3)
 TARGETS = {
     "default": FLASH_TESTS,
-    "forward": FLASH_TESTS / "test_forward.py",
+    "forward": FLASH_TESTS / FORWARD_TESTS,
 }
 _COLLECTED = re.compile(r"(\d+) tests? collected")
 
@@ -103,27 +109,63 @@ def collection_counts():
     }
 
 
+def _git(source, *args):
+    return subprocess.run(
+        ["git", "-C", str(source), *args], capture_output=True, text=True, check=True
+    ).stdout
+
+
+def refuse_dirty(source):
+    """Exit unless every vendored path of ``source`` is committed (the pin must describe the bytes)."""
+    dirty = _git(
+        source,
+        "status",
+        "--porcelain",
+        "--untracked-files=all",
+        "--",
+        TESTS_SRC,
+        PLUGIN_SRC,
+        LICENSE_SRC,
+    )
+    if dirty:
+        sys.exit(
+            f"refusing {source}: uncommitted changes under the vendored paths:\n{dirty}"
+        )
+
+
 def copy(source):
-    if (VENDOR).exists():
-        shutil.rmtree(VENDOR)
+    refuse_dirty(source)
+    pin = _git(source, "rev-parse", "HEAD").strip()
     rels = source_files(source)
-    for rel in rels:
-        dest = VENDOR / rel
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(source / rel, dest)
-    pin = subprocess.run(
-        ["git", "-C", str(source), "rev-parse", "HEAD"],
-        capture_output=True,
-        text=True,
-        check=True,
-    ).stdout.strip()
-    lock = {
-        "pin": pin,
-        "replaced": REPLACED,
-        "files": {rel: sha256(VENDOR / rel) for rel in rels},
-        "collection": collection_counts(),
-    }
-    LOCK.write_text(json.dumps(lock, indent=2, sort_keys=True) + "\n")
+    staging = Path(tempfile.mkdtemp(prefix=".vendor-new-", dir=VENDOR.parent))
+    backup = staging.with_name(staging.name + "-old")
+    swapped = False
+    try:
+        for rel in rels:
+            dest = staging / rel
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source / rel, dest)
+        files = {rel: sha256(staging / rel) for rel in rels}
+        if VENDOR.exists():
+            VENDOR.rename(backup)
+        staging.rename(VENDOR)
+        swapped = True
+        lock = {
+            "pin": pin,
+            "replaced": REPLACED,
+            "files": files,
+            "collection": collection_counts(),
+        }
+        LOCK.write_text(json.dumps(lock, indent=2, sort_keys=True) + "\n")
+    except BaseException:
+        if swapped:
+            shutil.rmtree(VENDOR, ignore_errors=True)
+        if backup.exists():
+            backup.rename(VENDOR)
+        raise
+    finally:
+        shutil.rmtree(staging, ignore_errors=True)
+        shutil.rmtree(backup, ignore_errors=True)
     print(f"vendored {len(rels)} files at {pin}; lock written to {LOCK}")
 
 

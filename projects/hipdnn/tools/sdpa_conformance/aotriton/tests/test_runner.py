@@ -60,9 +60,16 @@ def watchdog(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
-def rocm_path(monkeypatch):
-    """The setup_env.py activation sets ROCM_PATH; the runner's --hipdnn-prefix defaults to it."""
-    monkeypatch.setenv("ROCM_PATH", "/opt/fake-rocm")
+def rocm_path(monkeypatch, tmp_path_factory):
+    """A hipDNN prefix with an executable ``bin/hipdnn_bench``; the setup_env.py activation sets
+    ROCM_PATH, which the runner's --hipdnn-prefix defaults to."""
+    prefix = tmp_path_factory.mktemp("rocm")
+    bench = prefix / contract.BENCH_RELATIVE
+    bench.parent.mkdir(parents=True)
+    bench.write_text("#!/bin/sh\n")
+    bench.chmod(0o755)
+    monkeypatch.setenv("ROCM_PATH", str(prefix))
+    return str(prefix)
 
 
 @pytest.fixture
@@ -165,13 +172,13 @@ def test_empty_collection_runs_nothing_and_collection_errors_stop_the_run(
     assert run_aotriton.main(["--workers", "1", "--out", str(tmp_path / "b")]) == 2
 
 
-def test_every_pytest_command_checks_the_hipdnn_prefix(runner, tmp_path):
+def test_every_pytest_command_checks_the_hipdnn_prefix(runner, tmp_path, rocm_path):
     status, commands = runner(
         [["t.py::a"]], "--workers", "1", "--out", str(tmp_path / "o")
     )
     assert status == 0
     assert commands and all(
-        "--hipdnn-prefix=/opt/fake-rocm" in cmd for cmd, _ in commands
+        f"--hipdnn-prefix={rocm_path}" in cmd for cmd, _ in commands
     )
 
 
@@ -207,25 +214,23 @@ def test_fwd_no_stats_is_refused_outside_test_forward(runner, tmp_path):
 def test_fwd_no_stats_exports_the_env_var_only_when_asked(
     runner, tmp_path, monkeypatch
 ):
-    monkeypatch.setenv(
-        run_aotriton.FWD_NO_STATS_ENV, "1"
-    )  # stale value from the caller
+    monkeypatch.setenv(contract.FWD_NO_STATS_ENV, "1")  # stale value from the caller
     _, plain = runner([["t/test_forward.py::a"]], "--workers", "1", "--out", str(tmp_path / "a"), "--suite", "forward")  # fmt: skip
     _, flagged = runner([["t/test_forward.py::a"]], "--workers", "1", "--out", str(tmp_path / "b"), "--suite", "forward", "--fwd-no-stats")  # fmt: skip
-    assert all(run_aotriton.FWD_NO_STATS_ENV not in env for _, env in plain)
+    assert all(contract.FWD_NO_STATS_ENV not in env for _, env in plain)
     assert len(flagged) == 2
-    assert all(env[run_aotriton.FWD_NO_STATS_ENV] == "1" for _, env in flagged)
+    assert all(env[contract.FWD_NO_STATS_ENV] == "1" for _, env in flagged)
 
 
 def test_layout_mode_is_exported_to_every_pytest_process(runner, tmp_path, monkeypatch):
     monkeypatch.setenv(
-        layout.LAYOUT_MODE_ENV, "efficient"
+        contract.LAYOUT_MODE_ENV, "efficient"
     )  # stale value from the caller
     _, default = runner([["t/test_forward.py::a"]], "--workers", "1", "--out", str(tmp_path / "a"), "--suite", "forward")  # fmt: skip
     _, chosen = runner([["t/test_forward.py::a"]], "--workers", "1", "--out", str(tmp_path / "b"), "--suite", "forward", "--layout-mode", "aotriton")  # fmt: skip
     assert len(default) == len(chosen) == 2
-    assert all(env[layout.LAYOUT_MODE_ENV] == "pytorch" for _, env in default)
-    assert all(env[layout.LAYOUT_MODE_ENV] == "aotriton" for _, env in chosen)
+    assert all(env[contract.LAYOUT_MODE_ENV] == "pytorch" for _, env in default)
+    assert all(env[contract.LAYOUT_MODE_ENV] == "aotriton" for _, env in chosen)
 
 
 def test_an_unknown_layout_mode_is_refused(runner, tmp_path):
@@ -274,7 +279,6 @@ def test_all_engines_sweeps_each_non_winning_engine_over_its_cases_only(
         return fake_call(cmd, env=env, **kw)
 
     monkeypatch.setattr(run_aotriton.subprocess, "run", call)
-    monkeypatch.setenv("ROCM_PATH", "/opt/fake-rocm")
     status = run_aotriton.main(
         ["--workers", "2", "--out", str(tmp_path), "--all-engines", "--shard", "1/2", "--layout-mode", "efficient"]  # fmt: skip
     )
@@ -282,9 +286,9 @@ def test_all_engines_sweeps_each_non_winning_engine_over_its_cases_only(
     sweeps = {}
     for cmd, env in fake.commands[2:]:
         assert (
-            env[layout.LAYOUT_MODE_ENV] == "efficient"
+            env[contract.LAYOUT_MODE_ENV] == "efficient"
         )  # every later pass inherits the mode
-        pins = [k for k in env if k in run_aotriton.ENGINE_ENV.values() and env[k]]
+        pins = [k for k in env if k in contract.ENGINE_ENV.values() and env[k]]
         if len(pins) != 1:
             continue  # pair passes: both pins, covered by their own test
         (pin,) = pins
@@ -343,9 +347,12 @@ class Sim(FakePytest):
     ``behave(nodeid, pins, results_dir)`` returns (None: the case is not reached) to its
     results.csv, as the controller would."""
 
-    def __init__(self, ids_per_pass, behave):
+    def __init__(self, ids_per_pass, behave, status=None):
         super().__init__(ids_per_pass)
         self.behave, self.collected, self.runs = behave, [], []
+        self.status = status or (
+            lambda results, pins: 0
+        )  # pytest's exit status per run
 
     def __call__(self, cmd, env=None, capture_output=False, text=False):
         if "--collect-only" in cmd:
@@ -383,7 +390,7 @@ class Sim(FakePytest):
                 row = self.behave(nodeid, pins, results)
                 if row:
                     f.write(reconcile.format_row(row))
-        return subprocess.CompletedProcess(cmd, 0)
+        return subprocess.CompletedProcess(cmd, self.status(results, pins))
 
 
 def run_all_engines(monkeypatch, tmp_path, ids, behave, *extra):
@@ -590,6 +597,7 @@ def test_resume_runs_every_missing_id_of_the_shard_without_shard_and_never_a_cra
         + reconcile.format_row(rows_of([ids[0]])[0])
         + reconcile.format_row(rows_of([ids[2]], outcome="crash")[0])
     )  # fmt: skip
+    write_options(tmp_path, shard="1/2")
     sim = Sim([ids], ok_behave({(None, None): {}}))
     monkeypatch.setattr(run_aotriton.subprocess, "run", sim)
     status = run_aotriton.main(
@@ -834,7 +842,16 @@ def real_run(monkeypatch, tmp_path):
     """The runner over a synthetic suite with real pytest subprocesses, the real plugin and the
     file-backed fake ``hipdnn_sdpa`` (``tests/fakes``); the lease watchdog is not started.
     """
-    suite = tmp_path / "suite"
+    # The child pytest runs with --rootdir at the fakes; the suite must sit below that rootdir, or
+    # pytest walks every directory above the suite, the shared /tmp included, and an entry there it
+    # cannot stat aborts the collection. So the fakes are copied next to the suite.
+    fakes = tmp_path / "fakes"
+    shutil.copytree(
+        Path(__file__).parent / "fakes",
+        fakes,
+        ignore=shutil.ignore_patterns("__pycache__"),
+    )
+    suite = fakes / "suite"
     suite.mkdir()
     (suite / "test_forward.py").write_text(SUITE_FORWARD)
     (suite / "test_backward.py").write_text(SUITE_BACKWARD)
@@ -845,7 +862,6 @@ def real_run(monkeypatch, tmp_path):
     ctypes.CDLL("libm.so.6")  # any shared object stands in for the backend library
     libm = next(l.split()[-1] for l in open("/proc/self/maps") if "libm.so" in l)
     (rocm / "lib" / "libhipdnn_backend.so").write_bytes(Path(libm).read_bytes())
-    fakes = Path(__file__).parent / "fakes"
     monkeypatch.chdir(
         tmp_path
     )  # python -m pytest puts the cwd on sys.path: keep the real package out
@@ -860,7 +876,15 @@ def real_run(monkeypatch, tmp_path):
     out = tmp_path / "out"
 
     def go(*argv):
-        status = run_aotriton.main(["--workers", "1", "--out", str(out), *argv])
+        status = run_aotriton.main(
+            [
+                "--workers",
+                "1",
+                "--out",
+                str(out),
+                *argv,
+            ]
+        )
         return status, out
 
     return go
@@ -965,7 +989,7 @@ def candidate_behave(pass1, honored=True):
 
 
 def test_exhaustive_runs_one_pass_per_candidate_index_over_the_cases_that_have_it(
-    monkeypatch, tmp_path
+    monkeypatch, tmp_path, rocm_path
 ):
     ids = [f"{FWD}::f1", f"{FWD}::f2"]
     pass1 = {
@@ -994,7 +1018,7 @@ def test_exhaustive_runs_one_pass_per_candidate_index_over_the_cases_that_have_i
         )
         assert len(reconcile.read_rows(d / "results.csv")) == len(expected)
     main = [r for r in sim.runs if r[0] == tmp_path][0]
-    assert (main[1]["exhaustive"], main[1]["prefix"]) == ("1", "/opt/fake-rocm")
+    assert (main[1]["exhaustive"], main[1]["prefix"]) == ("1", rocm_path)
     assert {p["kernel_log"] for _, p, _ in sim.runs} == {
         "1"
     }  # candidate honoring needs ids
@@ -1166,3 +1190,207 @@ def test_not_enumerable_rows_resume_after_a_torn_last_row(tmp_path):
     path.write_text(",".join(reconcile.FIELDS) + "\n" + "x::a,not-enum")
     run_aotriton._not_enumerable_rows(tmp_path, {"x::a": "why a", "x::b": "why b"})
     assert [r["nodeid"] for r in reconcile.read_rows(path)] == ["x::a", "x::b"]
+
+
+# ------------------------------------------------------------------ run-options.json, --resume, exit status
+
+
+def write_options(out, **override):
+    """The run-options.json of a shard started with no flags but ``override``."""
+    options = {
+        "schema": 1, "hipdnn_prefix": "/x", "all_engines": False, "pairs": False,
+        "exhaustive": False, "kernel_ids": False, "layout_mode": "pytorch",
+        "fwd_no_stats": False, "suite": "default", "release": None, "shard": None,
+        "packed_gpu": False,
+    }  # fmt: skip
+    Path(out).mkdir(parents=True, exist_ok=True)
+    (Path(out) / "run-options.json").write_text(
+        json.dumps({**options, **override}) + "\n"
+    )
+
+
+def drop_rows(pass_dir, names):
+    """Remove the rows of the cases named ``names`` from ``pass_dir``'s results.csv."""
+    path = pass_dir / "results.csv"
+    kept = [
+        r for r in reconcile.read_rows(path) if r["nodeid"].split("::")[-1] not in names
+    ]
+    path.write_text(
+        ",".join(reconcile.FIELDS) + "\n" + "".join(map(reconcile.format_row, kept))
+    )
+
+
+def test_a_fresh_start_records_every_option_and_the_prefix(
+    monkeypatch, tmp_path, rocm_path
+):
+    run_with(monkeypatch, tmp_path, [f"{FWD}::f1"], ok_behave({(None, None): {}}),
+             "--shard", "1/2", "--release", "2", "--layout-mode", "efficient", "--kernel-ids")  # fmt: skip
+    assert json.loads((tmp_path / "run-options.json").read_text()) == {
+        "schema": 1, "hipdnn_prefix": rocm_path, "all_engines": False, "pairs": False,
+        "exhaustive": False, "kernel_ids": True, "layout_mode": "efficient",
+        "fwd_no_stats": False, "suite": "default", "release": 2, "shard": "1/2",
+        "packed_gpu": False,
+    }  # fmt: skip
+
+
+def test_resuming_an_exhaustive_run_runs_only_the_missing_candidate_cases(
+    monkeypatch, tmp_path, rocm_path
+):
+    ids = [f"{FWD}::f1", f"{FWD}::f2"]
+    pass1 = {
+        "f1": dict(fwd="hipdnn:A", fwd_engines="A", fwd_candidate='{"A": 3}'),
+        "f2": dict(fwd="hipdnn:A", fwd_engines="A", fwd_candidate='{"A": 2}'),
+    }
+    run_with(monkeypatch, tmp_path, ids, candidate_behave(pass1), "--exhaustive")
+    options = (tmp_path / "run-options.json").read_text()
+    cand = tmp_path / "cand" / "fwd" / "A"
+    drop_rows(cand / "0", {"f2"})  # a link that died inside candidate 0 ...
+    shutil.rmtree(cand / "2")  # ... and before candidate 2
+    assert sorted(g.split(":")[0] for g in completion.shard_gaps(tmp_path)) == [
+        "cand/fwd/A/0",
+        "cand/fwd/A/2",
+    ]
+
+    other = (
+        Path(rocm_path).parent / "rocm-moved"
+    )  # the prefix is not an option --resume compares
+    shutil.copytree(rocm_path, other)
+    status, sim = run_with(
+        monkeypatch, tmp_path, ids, candidate_behave(pass1), "--exhaustive", "--resume",
+        "--hipdnn-prefix", str(other),
+    )  # fmt: skip
+    assert status == 0
+    assert [(r[0], [i.split("::")[-1] for i in r[2]]) for r in sim.runs] == [
+        (cand / "0", ["f2"]),
+        (cand / "2", ["f1"]),
+    ]  # pass 1 and candidate 1 had every row
+    assert completion.shard_gaps(tmp_path) == []
+    assert (tmp_path / "run-options.json").read_text() == options
+
+
+def test_resuming_an_all_engines_pairs_run_runs_only_the_missing_cases(
+    monkeypatch, tmp_path
+):
+    flags = ("--all-engines", "--pairs")
+    behave = ok_behave({(None, None): PAIRS_PASS1})
+    run_with(monkeypatch, tmp_path, PAIRS_IDS, behave, *flags)
+    root = tmp_path / "all-engines"
+    drop_rows(root / "pair" / "B__X", {"b2"})
+    shutil.rmtree(root / "bwd" / "Y")
+    status, sim = run_with(monkeypatch, tmp_path, PAIRS_IDS, behave, *flags, "--resume")
+    assert status == 0
+    assert [(r[0], [i.split("::")[-1] for i in r[2]]) for r in sim.runs] == [
+        (root / "bwd" / "Y", ["b1", "b2"]),
+        (root / "pair" / "B__X", ["b2"]),
+    ]
+    assert completion.shard_gaps(tmp_path) == []
+    assert json.loads((tmp_path / "run-options.json").read_text())["pairs"] is True
+
+
+@pytest.mark.parametrize(
+    "first, resumed, key",
+    [
+        ((), ("--exhaustive",), "exhaustive: recorded False, requested True"),
+        (("--exhaustive",), (), "exhaustive: recorded True, requested False"),
+        ((), ("--all-engines",), "all_engines: recorded False, requested True"),
+        (("--all-engines",), ("--all-engines", "--pairs"), "pairs: recorded False, requested True"),
+        ((), ("--kernel-ids",), "kernel_ids: recorded False, requested True"),
+        ((), ("--layout-mode", "efficient"), "layout_mode: recorded 'pytorch', requested 'efficient'"),
+        ((), ("--packed-gpu",), "packed_gpu: recorded False, requested True"),
+        ((), ("--release", "1"), "release: recorded None, requested 1"),
+        ((), ("--shard", "1/2"), "shard: recorded None, requested '1/2'"),
+        ((), ("--suite", "forward"), "suite: recorded 'default', requested 'forward'"),
+        (("--suite", "forward"), ("--suite", "forward", "--fwd-no-stats"), "fwd_no_stats: recorded False, requested True"),
+    ],
+)  # fmt: skip
+def test_resume_with_other_options_is_refused_before_anything_runs(
+    monkeypatch, tmp_path, capsys, first, resumed, key
+):
+    run_with(
+        monkeypatch, tmp_path, [f"{FWD}::f1"], ok_behave({(None, None): {}}), *first
+    )
+    before = (tmp_path / "run-options.json").read_text()
+    capsys.readouterr()
+    status, sim = run_with(
+        monkeypatch,
+        tmp_path,
+        [f"{FWD}::f1"],
+        ok_behave({(None, None): {}}),
+        *resumed,
+        "--resume",
+    )
+    assert status == 2
+    assert key in capsys.readouterr().err
+    assert sim.commands == []  # not even a collection
+    assert (tmp_path / "run-options.json").read_text() == before
+
+
+def test_resume_of_a_shard_without_run_options_is_compared_against_the_legacy_defaults(
+    monkeypatch, tmp_path, capsys
+):
+    ids = [f"{FWD}::f1"]
+    (tmp_path / "results.csv").write_text(
+        ",".join(reconcile.FIELDS) + "\n" + reconcile.format_row(rows_of(ids)[0])
+    )  # written before the runner recorded its options: an --all-engines run
+    status, sim = run_with(monkeypatch, tmp_path, ids, ok_behave({}), "--resume")
+    assert status == 2 and sim.commands == []
+    assert "all_engines: recorded True, requested False" in capsys.readouterr().err
+    assert not (tmp_path / "run-options.json").exists()
+    status, _ = run_with(
+        monkeypatch, tmp_path, ids, ok_behave({}), "--all-engines", "--resume"
+    )
+    assert status == 0
+    assert (
+        json.loads((tmp_path / "run-options.json").read_text())["all_engines"] is True
+    )
+
+
+@pytest.mark.parametrize("flags", [("--pairs",), ("--pairs", "--exhaustive")])
+def test_pairs_without_all_engines_is_refused(tmp_path, capsys, flags):
+    with pytest.raises(SystemExit) as refused:
+        run_aotriton.main(["--workers", "1", "--out", str(tmp_path), *flags])
+    assert refused.value.code == 2
+    assert "--pairs needs --all-engines" in capsys.readouterr().err
+    assert not (tmp_path / "run-options.json").exists()
+
+
+@pytest.mark.parametrize("mode", ["missing", "not-executable"])
+def test_exhaustive_is_refused_without_an_executable_hipdnn_bench(
+    runner, tmp_path, rocm_path, mode
+):
+    bench = Path(rocm_path) / contract.BENCH_RELATIVE
+    if mode == "missing":
+        bench.unlink()
+    else:
+        bench.chmod(0o644)
+    with pytest.raises(SystemExit, match="hipdnn_bench"):
+        runner([], "--workers", "1", "--out", str(tmp_path / "o"), "--exhaustive")
+    assert not (tmp_path / "o" / "run-options.json").exists()
+
+
+@pytest.mark.parametrize(
+    "codes, expected",
+    [
+        ({"fwd/B": 3, "fwd/C": 0}, 3),  # a non-first pass fails; later passes succeed
+        ({"fwd/B": 3, "fwd/C": 4}, 3),  # the first non-zero status wins
+        ({"main": 1, "fwd/B": 0, "fwd/C": 2}, 1),
+        ({}, 0),
+    ],
+)
+def test_the_exit_status_is_the_first_non_zero_pytest_status_of_any_pass(
+    monkeypatch, tmp_path, codes, expected
+):
+    def status(results, pins):
+        name = (
+            "main" if results == tmp_path else f"{results.parent.name}/{results.name}"
+        )
+        return codes.get(name, 0)
+
+    pass1 = dict(fwd="hipdnn:A", fwd_engines="A;B;C")
+    sim = Sim([[f"{FWD}::f1"]], ok_behave({(None, None): pass1}), status)
+    monkeypatch.setattr(run_aotriton.subprocess, "run", sim)
+    result = run_aotriton.main(
+        ["--workers", "1", "--out", str(tmp_path), "--all-engines"]
+    )
+    assert {r[0].name for r in sim.runs} >= {"B", "C"}  # every pass ran regardless
+    assert result == expected

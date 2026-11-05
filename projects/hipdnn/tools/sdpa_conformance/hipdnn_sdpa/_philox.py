@@ -3,11 +3,12 @@
 
 """Pure-torch Philox4x32-10 and the FlyDSL SDPA backward's dropout mask.
 
-The map reproduced here is the one every shipped arch uses (lane width 32):
-``dnn-providers/hip-kernel-provider/flydsl/kernels_src/kernels/attention_bwd_cdna/philox.py``
+The map reproduced here is the one the FlyDSL SDPA dropout uses (lane width 32):
+``dnn-providers/hip-kernel-provider/flydsl/kernels_src/kernels/attention_rdna4/philox.py``
 (``philox_4x``, ``philox_u32``, ``Philox.grid_plane`` / ``grid_offset``,
-``dropout_threshold``) and ``attention_bwd_rdna/fmha_bwd_dkdv_gfx11.py`` (keep
-rule and counter layout).
+``dropout_threshold``, ``keep_mask``) and, for the plane a workgroup is on,
+``attention_rdna4/flash_attn_func_gfx1201_aiw.py`` (the dropout block that calls
+``grid_plane``).
 
 Element ``(q, kv)`` of sequence ``z`` and query head ``h`` draws counter::
 

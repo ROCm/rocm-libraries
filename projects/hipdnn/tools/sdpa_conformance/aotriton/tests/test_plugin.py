@@ -126,7 +126,7 @@ def test_ref_fail():
     )
 
 
-def test_reference_forward_without_a_hipdnn_backward_is_declined_whatever_the_result(
+def test_reference_forward_is_declined_unless_a_hipdnn_backward_ran(
     run,
 ):
     result, rows = run(
@@ -413,7 +413,7 @@ def test_forwarded_and_neutral_knobs_are_accepted(pytester, monkeypatch):
 
 # ------------------------------------------------------------------ sharding
 
-SHARD_SOURCE = "\n".join(f"def test_{c}():\n    pass\n" for c in "abcdefg")
+SHARD_SOURCE = "\n".join(f"def test_{c}():\n    pass\n" for c in "gcaedbf")
 
 
 def selected(pytester, shard):
@@ -424,8 +424,10 @@ def selected(pytester, shard):
 def test_shard_keeps_every_nth_sorted_node_id_and_shards_partition_the_suite(pytester):
     pytester.makepyfile(SHARD_SOURCE)
     shards = [selected(pytester, f"{i}/3") for i in (1, 2, 3)]
-    assert shards[0] == ["test_a", "test_d", "test_g"]
-    assert shards[1] == ["test_b", "test_e"] and shards[2] == ["test_c", "test_f"]
+    # SHARD_SOURCE defines the cases out of order: the shards follow the sorted node ids
+    assert sorted(shards[0]) == ["test_a", "test_d", "test_g"]
+    assert sorted(shards[1]) == ["test_b", "test_e"]
+    assert sorted(shards[2]) == ["test_c", "test_f"]
     assert sorted(sum(shards, [])) == [f"test_{c}" for c in "abcdefg"]
 
 
@@ -584,6 +586,9 @@ def test_never_calls_hipdnn():
 def test_calls_forward():
     assert call_fwd() == 'fake_fwd'
 
+def test_calls_backward_only():
+    assert call_bwd() == 'fake_bwd'
+
 def test_calls_both_from_threads():
     for fn in (call_fwd, call_bwd):
         t = threading.Thread(target=fn)
@@ -594,8 +599,20 @@ def test_failing_without_a_call_stays_fail():
     assert False
 """
     )
-    result.assert_outcomes(passed=3, failed=1)
+    result.assert_outcomes(passed=4, failed=1)
     assert rows["test_never_calls_hipdnn"]["outcome"] == "no-hipdnn"
+    only_bwd = rows["test_calls_backward_only"]
+    assert (
+        only_bwd["outcome"],
+        only_bwd["mode"],
+        only_bwd["fwd"],
+        only_bwd["bwd"],
+    ) == (
+        "pass",
+        "hipdnn",
+        "",
+        "hipdnn:fake_bwd",
+    )
     called = rows["test_calls_forward"]
     assert (called["outcome"], called["mode"], called["fwd"]) == (
         "pass",
@@ -641,6 +658,105 @@ def test_forward_fallback():
         "ref-fwd",
         "ref:no fwd",
     )
+
+
+# ------------------------------------------------------------------ a call that raises
+
+
+def test_a_call_that_raises_is_an_error_of_its_direction(run, fake_sdpa, tmp_path):
+    fake_sdpa.errors.update(bwd="Forward pass: execute failed")
+    repro = tmp_path / "out" / "repro"
+    result, rows = run(
+        BOTH_CALLED
+        + """
+def test_bwd_raises_after_fwd():
+    call_fwd()
+    call_bwd()
+
+def test_ref_fwd_then_bwd_raises():
+    plug.record('fwd', 'ref', 'no fwd engine')
+    call_bwd()
+""",
+        f"--repro-dir={repro}",
+    )
+    result.assert_outcomes(failed=2)
+    got = rows["test_bwd_raises_after_fwd"]
+    assert (got["outcome"], got["mode"], got["fwd"], got["bwd"], got["fail_side"]) == (
+        "fail",
+        "hipdnn",
+        "hipdnn:fake_fwd",
+        "error:fake_bwd",
+        "bwd",
+    )
+    assert "execute failed" in got["reason"]
+    ref = rows["test_ref_fwd_then_bwd_raises"]
+    assert (ref["outcome"], ref["mode"], ref["bwd"], ref["fail_side"]) == (
+        "fail",
+        "ref-fwd",
+        "error:fake_bwd",
+        "bwd",
+    )
+    assert "execute failed" in ref["reason"]
+    saved = [json.loads(f.read_text()) for f in repro.glob("*/saved.json")]
+    assert sorted(v["directions"] for v in saved) == [["bwd"], ["bwd", "fwd"]]
+
+
+def test_a_call_that_fails_before_its_graph_exists_still_names_its_direction(
+    run, fake_sdpa
+):
+    fake_sdpa.errors.update(fwd="no plan")
+    fake_sdpa.unbuilt.add("fwd")
+    result, rows = run(
+        BOTH_CALLED
+        + """
+def test_bwd_case_whose_forward_fails_to_build():
+    call_fwd()
+"""
+    )
+    got = rows["test_bwd_case_whose_forward_fails_to_build"]
+    assert (got["outcome"], got["fwd"], got["fail_side"]) == ("fail", "error:", "fwd")
+
+
+def test_a_backward_that_raised_unrecorded_is_charged_by_the_marker(
+    run, monkeypatch, tmp_path
+):
+    inflight = tmp_path / "inflight"
+    monkeypatch.setenv(contract.INFLIGHT_DIR_ENV, str(inflight))
+    monkeypatch.setenv(contract.PASS_SLUG_ENV, "main")
+    result, rows = run(
+        BOTH_CALLED
+        + f"""
+import json, os, pathlib
+MARKER = pathlib.Path({str(inflight / "main" / "main.json")!r})
+
+def test_marker_says_bwd():
+    call_fwd()
+    MARKER.parent.mkdir(parents=True, exist_ok=True)
+    MARKER.write_text(json.dumps(dict(nodeid=os.environ['PYTEST_CURRENT_TEST'].split(' ')[0], stage='execute', direction='bwd')))
+    assert False, 'boom'
+"""
+    )
+    got = rows["test_marker_says_bwd"]
+    assert (got["fail_side"], got["stage"]) == ("bwd", "execute")
+
+
+def test_a_repro_that_cannot_be_saved_keeps_the_failure_and_says_why(
+    run, fake_sdpa, tmp_path
+):
+    fake_sdpa.save_repro_error = OSError("disk full")
+    result, rows = run(
+        BOTH_CALLED
+        + """
+def test_fails():
+    call_both()
+    assert False, 'dq mismatch'
+""",
+        f"--repro-dir={tmp_path / 'out' / 'repro'}",
+    )
+    result.assert_outcomes(failed=1)
+    got = rows["test_fails"]
+    assert (got["outcome"], got["repro"]) == ("fail", "")
+    assert "dq mismatch" in got["reason"] and "disk full" in got["reason"]
 
 
 # ------------------------------------------------------------------ kernels, fail side, stage
@@ -771,6 +887,17 @@ def test_the_kernel_log_is_installed_only_when_asked_and_never_under_fake(
     assert fake_sdpa.log_installs == 1
     run(source, "--fake=always-decline")
     assert fake_sdpa.log_installs == 1
+
+
+def test_a_kernel_log_that_cannot_install_is_a_usage_error(
+    pytester, fake_sdpa, monkeypatch
+):
+    fake_sdpa.log_ok = False
+    monkeypatch.setenv(contract.KERNEL_LOG_ENV, "1")
+    pytester.makepyfile("def test_x():\n    pass\n")
+    result = pytester.runpytest(*PLUGIN)
+    assert result.ret == pytest.ExitCode.USAGE_ERROR
+    result.stderr.fnmatch_lines([f"*{contract.KERNEL_LOG_ENV}*"])
 
 
 # ------------------------------------------------------------------ repro on failure

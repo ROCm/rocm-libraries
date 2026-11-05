@@ -5,12 +5,15 @@
 
 Needs torch and ``hipdnn_frontend``; neither pytest nor AOTriton. For each direction the repro
 holds, a child process rebuilds the graph (``Graph()`` then ``from_json(handle, json)``), pins the
-engine named in ``meta.json``, binds the saved tensors by ``meta.json``'s role-to-uid map and
-executes. The child runs apart so a hardware fault ends it, not this report: a crash prints
+engine named in ``meta.json`` (and, for a call of an ``--exhaustive`` candidate pass, the pinned
+candidate: its saved knobs, else its index resolved through ``hipdnn_bench enumerate`` under
+``HIPDNN_SDPA_PREFIX``; never the engine's default kernel), binds the saved tensors by
+``meta.json``'s role-to-uid map and executes. The child runs apart so a hardware fault ends it, not this report: a crash prints
 ``reproduced: died with signal N`` (``reproduced: exited with status N`` for a plain exit) and the
 exit status is 1. A completed replay prints, per output role, the maximum absolute error against
 the hipDNN output the repro saved and against the FP32 reference attention (backward through
-autograd), and exits 0.
+autograd), and exits 0. Exit status 70 means the replay failed before the graph executed (a
+``from_json``, engine or candidate selection error; the child's traceback is printed above).
 
 The repro layout is documented in ``hipdnn_sdpa/_repro.py``.
 """
@@ -26,17 +29,18 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 for entry in (
+    HERE,  # conformance_contract
     HERE.parent,
     HERE / "shim",
 ):  # hipdnn_sdpa, then the reference in the shim
     if str(entry) not in sys.path:
         sys.path.insert(0, str(entry))
 
+import conformance_contract as contract  # noqa: E402
 import torch  # noqa: E402
 
 REPRODUCED_EXIT = 1
 SETUP_ERROR_EXIT = 70
-OUTPUT_ROLES = {"fwd": ("o", "stats"), "bwd": ("dq", "dk", "dv", "dbias")}
 
 
 def _dtype(name):
@@ -45,9 +49,9 @@ def _dtype(name):
 
 def _load(directory):
     root = Path(directory)
-    meta = json.loads((root / "meta.json").read_text())
-    tensors = torch.load(root / "tensors.pt")
-    outputs_path = root / "outputs.pt"
+    meta = json.loads((root / contract.REPRO_META).read_text())
+    tensors = torch.load(root / contract.REPRO_TENSORS)
+    outputs_path = root / contract.REPRO_OUTPUTS
     outputs = torch.load(outputs_path) if outputs_path.exists() else {}
     return root, meta, tensors, outputs
 
@@ -67,7 +71,7 @@ def _bind(meta, tensors, outputs, direction, device):
     bound = {}
     for role in meta["calls"][direction]["uids"]:
         saved = tensors.get(role)
-        if saved is None and role not in OUTPUT_ROLES[direction]:
+        if saved is None and role not in contract.OUTPUT_ROLES[direction]:
             saved = outputs.get(role)
         bound[role] = _materialize(meta["tensors"][role], saved, device)
     return bound
@@ -85,13 +89,19 @@ def replay_child(directory, out_path, device):
     for direction in meta["directions"]:
         call = meta["calls"][direction]
         graph = hipdnn.Graph()
-        err = graph.from_json(
-            handle, (Path(directory) / f"{direction}.graph.json").read_text()
-        )
+        graph_json = (
+            Path(directory) / contract.repro_graph_name(direction)
+        ).read_text()
+        err = graph.from_json(handle, graph_json)
         if err.is_bad():
             raise RuntimeError(f"from_json: {err.get_message()}")
         _, workspace_size, _ = _runtime._select(
-            graph, direction, call["engine"] or None, handle
+            graph,
+            direction,
+            call["engine"] or None,
+            handle,
+            graph_json,
+            call.get("candidate"),
         )
         bound = _bind(meta, tensors, outputs, direction, device)
         workspace = (
@@ -108,7 +118,9 @@ def replay_child(directory, out_path, device):
         if device == "cuda":
             torch.cuda.synchronize()
         results[direction] = {
-            role: bound[role].cpu() for role in OUTPUT_ROLES[direction] if role in bound
+            role: bound[role].cpu()
+            for role in contract.OUTPUT_ROLES[direction]
+            if role in bound
         }
     torch.save(results, out_path)
 

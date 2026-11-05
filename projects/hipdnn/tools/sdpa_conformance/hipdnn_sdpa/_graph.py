@@ -10,9 +10,9 @@ be serialized with ``Graph.to_json()`` straight after :func:`build`.
 
 Bindings used (``projects/hipdnn/python/frontend_bindings/src``):
 
-* ``Graph.tensor_like`` ``graph_bindings.cpp:771``; ``Graph.sdpa`` ``:701``;
-  ``Graph.sdpa_backward`` ``:711``; ``Graph.set_{compute,intermediate,io}_data_type``
-  ``:603-609``
+* ``Graph.tensor_like`` ``graph_bindings.cpp:797``; ``Graph.sdpa`` ``:719``;
+  ``Graph.sdpa_backward`` ``:729``; ``Graph.set_{compute,intermediate,io}_data_type``
+  ``:621-627``
 * ``Tensor`` ``set_{uid,name,data_type,stride,dim,output,is_pass_by_value}`` and
   ``get_{name,data_type,stride,dim}`` ``tensor_bindings.cpp:131-154``;
   ``Tensor.set_ragged_offset`` is Stream A's binding (``set_ragged_offset(tensor | None)``)
@@ -134,4 +134,78 @@ def build(prob: Problem):
     return g, uids
 
 
-__all__ = ["build", "frontend"]
+# What this package calls on ``hipdnn_frontend``, by class (module-level enums included).
+_REQUIRED = {
+    "Handle": (),
+    "KnobSetting": (),
+    "DataType": ("FLOAT",),
+    "DiagonalAlignment": ("TOP_LEFT", "BOTTOM_RIGHT"),
+    "HeuristicMode": ("FALLBACK",),
+    "Graph": (
+        "tensor_like",
+        "sdpa",
+        "sdpa_backward",
+        "set_io_data_type",
+        "set_compute_data_type",
+        "set_intermediate_data_type",
+        "to_json",
+        "build_operation_graph",
+        "create_execution_plans",
+        "create_execution_plan_ext",
+        "get_engine_configs",
+        "get_ranked_engine_ids",
+        "check_support",
+        "build_plans",
+        "get_execution_plan_engine_id",
+        "get_plan_name",
+        "get_workspace_size",
+        "execute",
+    ),
+    "Tensor": (
+        "set_is_pass_by_value",
+        "set_dim",
+        "set_stride",
+        "set_uid",
+        "set_ragged_offset",
+        "set_name",
+        "set_data_type",
+        "set_output",
+        "get_name",
+        "get_dim",
+        "get_stride",
+        "get_data_type",
+        "get_uid",
+    ),
+}
+_ATTRIBUTES = (
+    "set_attn_scale",
+    "set_diagonal_alignment",
+    "set_diagonal_band_left_bound",
+    "set_diagonal_band_right_bound",
+    "set_bias",
+    "set_padding_mask",
+    "set_seq_len_q",
+    "set_seq_len_kv",
+    "set_dropout",
+)
+_REQUIRED["SdpaAttributes"] = _ATTRIBUTES + ("set_generate_stats",)
+_REQUIRED["SdpaBackwardAttributes"] = _ATTRIBUTES + ("set_dbias",)
+
+
+def missing_bindings() -> list:
+    """Sorted ``"Class.attr"`` names this package calls that the imported ``hipdnn_frontend``
+    lacks; a missing class lists every one of its names (``Handle``, used only as a constructor,
+    is listed as ``"Handle"``)."""
+    hipdnn = frontend()
+    missing = []
+    for cls, attrs in _REQUIRED.items():
+        owner = getattr(hipdnn, cls, None)
+        if not attrs:
+            if owner is None:
+                missing.append(cls)
+            continue
+        missing += [f"{cls}.{a}" for a in attrs if not hasattr(owner, a)]
+    return sorted(missing)
+
+
+__all__ = ["build", "frontend", "missing_bindings"]

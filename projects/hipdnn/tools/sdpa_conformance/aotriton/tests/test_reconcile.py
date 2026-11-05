@@ -215,8 +215,8 @@ def test_extra_columns_round_trip_and_an_older_csv_reads_them_empty(tmp_path):
     assert [got[k] for k in reconcile.RESULTS_EXTRA_FIELDS] == [
         "k1", "k2", "bwd", "execute", "repro/x",
     ]  # fmt: skip
-    brian = ",".join(FIELDS[:8]) + "\na::t2,pass,hipdnn,hipdnn:e,,,A;B,C\n"
-    (tmp_path / "old.csv").write_text(brian)
+    legacy_csv = ",".join(FIELDS[:8]) + "\na::t2,pass,hipdnn,hipdnn:e,,,A;B,C\n"
+    (tmp_path / "old.csv").write_text(legacy_csv)
     (old,) = read_rows(tmp_path / "old.csv")
     assert (old["bwd_engines"], old["fwd_kernel"], old["fail_side"], old["repro"]) == (
         "C",
@@ -311,6 +311,78 @@ def test_pair_and_refwd_passes_get_engine_rows_and_a_mismatch_is_declined(tmp_pa
         "Y",
         "reference",
     )
+
+
+def test_a_fail_whose_failing_side_served_its_pin_stays_a_fail_in_pair_passes(tmp_path):
+    # The forward failed its comparison, so the backward never ran and its column is empty.
+    ids = [f"v/test_backward.py::b{i}" for i in (1, 2, 3)]
+    pair = {"kind": "pair", "direction": "bwd", "pin_fwd": "A", "pin_bwd": "X"}
+    write_pass(
+        tmp_path, "all-engines/pair/A__X", pair,
+        [row(ids[0], "fail", fwd="hipdnn:A", fail_side="fwd", stage="execute", reason="NaN"),
+         row(ids[1], "fail", fwd="hipdnn:B", fail_side="fwd", reason="NaN"),
+         row(ids[2], "fail", fwd="hipdnn:A", bwd="hipdnn:Z", fail_side="bwd")],
+        ids,
+    )  # fmt: skip
+    got = {r["nodeid"]: r for r in table(tmp_path)}
+    kept = got[ids[0]]
+    assert (kept["outcome"], kept["direction"], kept["engine"]) == ("fail", "fwd", "A")
+    assert (
+        got[ids[1]]["outcome"] == "declined"
+    )  # the failing forward is not the pinned A
+    assert got[ids[2]]["outcome"] == "declined"  # the backward served Z, not X
+    assert [f["nodeid"] for f in reconcile.failure_rows(tmp_path)] == [ids[0]]
+
+
+def test_a_state_of_an_erroring_call_names_its_engine_like_a_served_one(tmp_path):
+    assert reconcile.served_engines("error:X") == {"X"}
+    assert reconcile.served_engines("error:") == set()
+    sweep(
+        tmp_path,
+        "bwd",
+        "X",
+        [row(BWD_T, "fail", bwd="error:X", fail_side="bwd", reason="boom")],
+    )
+    pair = {"kind": "pair", "direction": "bwd", "pin_fwd": "A", "pin_bwd": "X"}
+    write_pass(
+        tmp_path, "all-engines/pair/A__X", pair,
+        [row(BWD_T, "fail", fwd="hipdnn:A", bwd="error:X", fail_side="bwd")], [BWD_T],
+    )  # fmt: skip
+    assert sorted(
+        (r["source"], r["engine"], r["outcome"]) for r in table(tmp_path)
+    ) == [
+        ("pair", "X", "fail"),
+        ("pinned", "X", "fail"),
+    ]
+    assert len(reconcile.failure_rows(tmp_path)) == 2
+
+
+def test_a_pinned_pass_that_served_a_composite_state_is_declined(tmp_path):
+    fwd_id, bwd_id = FWD_T, BWD_T
+    sweep(tmp_path, "fwd", "A", [row(fwd_id, fwd="hipdnn:A+B")])
+    sweep(tmp_path, "bwd", "A", [row(bwd_id, bwd="hipdnn:A+B")])
+    pair = {"kind": "pair", "direction": "bwd", "pin_fwd": "A", "pin_bwd": "A"}
+    write_pass(
+        tmp_path, "all-engines/pair/A__A", pair,
+        [row(bwd_id, fwd="hipdnn:A", bwd="hipdnn:A+B")], [bwd_id],
+    )  # fmt: skip
+    refwd = {
+        "kind": "refwd",
+        "direction": "bwd",
+        "pin_fwd": "reference",
+        "pin_bwd": "A",
+    }
+    write_pass(
+        tmp_path, "all-engines/refwd/A", refwd,
+        [row(bwd_id, fwd="ref:why", bwd="hipdnn:A+B")], [bwd_id],
+    )  # fmt: skip
+    rows = table(tmp_path)
+    assert len(rows) == 4
+    for r in rows:
+        assert (r["outcome"], r["reason"]) == (
+            "declined",
+            "served A+B, not the pinned A",
+        )
 
 
 def test_a_truncated_pass_csv_yields_not_run_rows_and_capture_dirs_are_ignored(
@@ -657,7 +729,7 @@ def two_shard_run(tmp_path):
     )
     (tmp_path / "shards.txt").write_text("default 1 3\ndefault 2 3\ndefault 3 3\n")
     (tmp_path / "baseline.txt").write_text(
-        f"# Brian\n{BWD[1]}\nv/test_backward.py::gone\n"
+        f"# baseline\n{BWD[1]}\nv/test_backward.py::gone\n"
     )
     return run
 
@@ -732,3 +804,41 @@ def test_report_cli_prints_the_report_and_writes_the_reconciled_csv(
     text = capsys.readouterr().out
     assert "== shards" in text and "== failures" in text and "== baseline" in text
     assert len(read_rows(out)) == 5
+
+
+def test_report_splits_baseline_ids_that_no_longer_fail_from_ones_that_did_not_run(
+    two_shard_run, tmp_path
+):
+    baseline = tmp_path / "b2.txt"
+    baseline.write_text(f"{BWD[0]}\n{BWD[2]}\nv/test_backward.py::gone\n")
+    diff = reconcile.run_report(two_shard_run, baseline=baseline)
+    diff = diff[diff.index("== baseline") :]
+    fixed, unconfirmed = diff[diff.index("no longer failing") :].split(
+        "not confirmed fixed"
+    )
+    assert "no longer failing" in fixed and f"{BWD[0]}: pass" in fixed
+    assert BWD[2] not in fixed and "gone" not in fixed
+    assert f"{BWD[2]}: not-run" in unconfirmed
+    assert "v/test_backward.py::gone: not in this run" in unconfirmed
+    assert "(in baseline, outcome" in fixed and "): 1" in fixed
+    assert "): 2" in unconfirmed.splitlines()[0]
+
+
+def test_report_lists_a_node_id_recorded_by_two_shard_directories(tmp_path):
+    real_shard(
+        tmp_path,
+        "default-1of2",
+        [row(BWD_T, "pass"), row("v/test_backward.py::b2")],
+        [BWD_T],
+    )
+    real_shard(tmp_path, "default-2of2", [row(BWD_T, "fail")], [BWD_T])
+    text = reconcile.run_report(tmp_path)
+    section = text[text.index("== duplicate node ids") :].split("\n\n")[0].splitlines()
+    assert section == ["== duplicate node ids", f"{BWD_T}: default-1of2, default-2of2"]
+    assert by_id(reconcile.reconcile(tmp_path))[BWD_T]["outcome"] == "pass"
+    clean = tmp_path / "clean"
+    real_shard(clean, "default-1of1", [row(BWD_T)], [BWD_T])
+    assert reconcile.run_report(clean).splitlines()[3:5] == [
+        "== duplicate node ids",
+        "none",
+    ]

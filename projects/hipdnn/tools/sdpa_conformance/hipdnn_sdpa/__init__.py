@@ -28,7 +28,9 @@ Tensor shapes:
 Conformance support (see ``aotriton/conformance_contract.py``): ``last_call(direction)`` returns the
 calling thread's latest successful call as a ``CallRecord`` (engine, kernel id, ranked engines,
 graph JSON, problem scalars); ``install_kernel_log()`` starts reading kernel ids and applicability
-declines from the backend's INFO log; ``save_repro(dir, records, tensors)`` writes a replayable
+declines from the backend's INFO log (``False`` when the backend cannot supply it);
+``missing_bindings()`` lists the ``"Class.attr"`` names this package calls that the imported
+``hipdnn_frontend`` lacks; ``save_repro(dir, records, tensors)`` writes a replayable
 repro directory (``aotriton/replay.py``).
 
 ``philox_mask`` reproduces the FlyDSL backward's dropout mask in pure torch.
@@ -63,6 +65,7 @@ def _load_contract():
 _load_contract()
 
 from ._api import sdpa_bwd, sdpa_fwd
+from ._graph import missing_bindings
 from ._kernel_log import install_kernel_log
 from ._philox import philox_mask
 from ._repro import save_repro
@@ -76,6 +79,7 @@ __all__ = [
     "Varlen",
     "install_kernel_log",
     "last_call",
+    "missing_bindings",
     "philox_mask",
     "save_repro",
     "sdpa_bwd",

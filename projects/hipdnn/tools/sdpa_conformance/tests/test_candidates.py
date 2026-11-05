@@ -137,3 +137,67 @@ def test_without_a_hipdnn_prefix_the_call_fails_loudly(bench, monkeypatch):
     monkeypatch.delenv(_candidates.contract.PREFIX_ENV)
     with pytest.raises(RuntimeError, match=_candidates.contract.PREFIX_ENV):
         _candidates.list(GRAPH, ENGINE)
+
+
+def test_a_bench_killed_by_a_signal_is_an_error_and_is_not_cached(bench):
+    calls = []
+
+    def killed(cmd, **kwargs):
+        calls.append(cmd)
+        return subprocess.CompletedProcess(cmd, -11, "", "")
+
+    _candidates._run = killed
+    for _ in range(2):
+        with pytest.raises(RuntimeError, match="died .*-11"):
+            _candidates.list(GRAPH, ENGINE)
+    assert len(calls) == 2  # not cached: the second call ran the bench again
+
+
+def test_a_nonzero_exit_without_a_message_is_an_error(bench):
+    _candidates._run = lambda cmd, **kw: subprocess.CompletedProcess(cmd, 1, "", "\n")
+    with pytest.raises(RuntimeError, match="no message"):
+        _candidates.list(GRAPH, ENGINE)
+
+
+def test_a_nonzero_exit_with_a_message_stays_not_enumerable(bench):
+    _candidates._run = lambda cmd, **kw: subprocess.CompletedProcess(
+        cmd, 3, "", "plugin load failed\n"
+    )
+    found = _candidates.list(GRAPH, ENGINE)
+    assert found == NotEnumerable("plugin load failed")
+
+
+def test_a_bench_that_times_out_is_an_error_and_is_not_cached(bench):
+    def hang(cmd, **kwargs):
+        raise subprocess.TimeoutExpired(cmd, kwargs["timeout"])
+
+    _candidates._run = hang
+    with pytest.raises(RuntimeError, match="timed out after 600"):
+        _candidates.list(GRAPH, ENGINE)
+    assert _candidates._CACHE == {}
+
+
+def test_a_bench_that_cannot_be_launched_is_not_enumerable_naming_the_path(bench):
+    def missing(cmd, **kwargs):
+        raise FileNotFoundError(2, "No such file or directory")
+
+    _candidates._run = missing
+    found = _candidates.list(GRAPH, ENGINE)
+    assert isinstance(found, NotEnumerable)
+    assert f"{PREFIX}/bin/hipdnn_bench" in found.message
+
+
+def test_the_cache_keeps_the_most_recently_used_entries(bench, monkeypatch):
+    monkeypatch.setattr(_candidates, "CACHE_LIMIT", 2)
+    fake = bench({ENGINE: [entry("k")]})
+    graphs = [f'{{"graph": {i}}}' for i in range(3)]
+    for graph in graphs[:2]:
+        _candidates.list(graph, ENGINE)
+    _candidates.list(graphs[0], ENGINE)  # hit: graph 1 is now the oldest
+    _candidates.list(graphs[2], ENGINE)  # evicts graph 1
+    assert len(fake.calls) == 3
+    _candidates.list(graphs[0], ENGINE)
+    assert len(fake.calls) == 3  # still cached
+    _candidates.list(graphs[1], ENGINE)
+    assert len(fake.calls) == 4  # was evicted
+    assert len(_candidates._CACHE) == 2
