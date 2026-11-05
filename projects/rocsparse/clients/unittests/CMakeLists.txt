@@ -56,6 +56,7 @@ set(ROCSPARSE_UNIT_TEST_SOURCES
 set(ROCSPARSE_UNIT_TEST_LIB_SOURCES
   ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/common/rocsparse_indextype_utils.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/common/rocsparse_datatype_utils.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/level2/rocsparse_csrmv_adaptive_analysis.cpp
 )
 
 add_executable(rocsparse-unit-test
@@ -319,6 +320,8 @@ set(ROCSPARSE_UNIT_TEST_DEVICE_SOURCES
   # the sibling unit-test branches above. Drives public entry points plus
   # rocsparse::convert_array, whose TU is already compiled in below.
   unit_test_internal_conversion_grid_clamp.cpp
+  # Default CSR SpMV algorithm selection (adaptive vs nnz-split).
+  unit_test_internal_level2_csrmv_default_dispatch.cpp
 )
 
 if(BUILD_WITH_SPSORT)
@@ -391,6 +394,7 @@ set(ROCSPARSE_UNIT_TEST_DEVICE_LIB_SOURCES
   ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/common/rocsparse_indextype_utils.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/level2/rocsparse_bsrmv_info.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/level2/rocsparse_csritsv_info.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/level2/rocsparse_csrmv_alg.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/level2/rocsparse_csrmv_info.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/extra/rocsparse_spgeam.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/extra/rocsparse_csrgeam.cpp

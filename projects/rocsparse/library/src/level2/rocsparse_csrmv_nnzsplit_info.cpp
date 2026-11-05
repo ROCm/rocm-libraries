@@ -36,6 +36,9 @@ void _rocsparse_csrmv_nnzsplit_info::clear()
     this->size                   = 0;
     this->use_starting_block_ids = false;
     this->indextype              = deprecated_rocsparse_indextype_u16;
+    this->block_size             = 0;
+    this->nnz_per_thread         = 0;
+    this->max_row_nnz            = 0;
 }
 
 rocsparse_status _rocsparse_csrmv_nnzsplit_info::allocate(size_t size,
@@ -52,6 +55,30 @@ rocsparse_status _rocsparse_csrmv_nnzsplit_info::allocate(size_t size,
 
     RETURN_IF_HIP_ERROR(rocsparse_hipMallocAsync(&this->id_buffer, buffer_size, stream));
     RETURN_IF_HIP_ERROR(rocsparse_hipMemsetAsync(this->id_buffer, 0, buffer_size, stream));
+
+    return rocsparse_status_success;
+}
+
+rocsparse_status
+    _rocsparse_csrmv_nnzsplit_info::copy_from(const _rocsparse_csrmv_nnzsplit_info& src)
+{
+    if(src.id_buffer != nullptr)
+    {
+        const size_t buffer_size = src.get_size_in_bytes();
+        if(this->id_buffer == nullptr)
+        {
+            RETURN_IF_HIP_ERROR(rocsparse_hipMalloc(&this->id_buffer, buffer_size));
+        }
+        RETURN_IF_HIP_ERROR(rocsparse_hipMemcpy(
+            this->id_buffer, src.id_buffer, buffer_size, hipMemcpyDeviceToDevice));
+    }
+
+    this->size                   = src.size;
+    this->use_starting_block_ids = src.use_starting_block_ids;
+    this->indextype              = src.indextype;
+    this->block_size             = src.block_size;
+    this->nnz_per_thread         = src.nnz_per_thread;
+    this->max_row_nnz            = src.max_row_nnz;
 
     return rocsparse_status_success;
 }
@@ -85,4 +112,15 @@ void* _rocsparse_csrmv_nnzsplit_info::get_starting_block_ids() const
 
     return static_cast<char*>(this->id_buffer)
            + rocsparse::indextype_sizeof(this->indextype) * (this->size + 1);
+}
+
+size_t _rocsparse_csrmv_nnzsplit_info::get_size_in_bytes() const
+{
+    if(this->id_buffer == nullptr)
+    {
+        return 0;
+    }
+
+    return rocsparse::indextype_sizeof(this->indextype) * (this->use_starting_block_ids ? 2 : 1)
+           * (this->size + 1);
 }
