@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <map>
+#include <memory>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -27,16 +28,23 @@ namespace
 {
 
 constexpr const char* CLASS_VALUES_JSON = R"json({
-  "schema_version": 3,
+  "schema_version": 4,
   "batch_size": {"one": 1, "many": 2},
   "q_heads": {"one": 1, "many": 8},
+  "head_counts": {"by_q_heads": {"mha": {"one": 1, "many": 8}, "gqa": {"many": 2},
+                                 "mqa": {"one": 1, "many": 1}},
+                  "k_and_v_differ": {"H_k": 2, "H_v": 4}},
   "seq_lengths": [{"seq_q": "many", "seq_kv": "many", "seq_q_vs_seq_kv": "equal",
                    "S_q": 64, "S_kv": 64}],
   "head_dim": {"d64": 64, "d128": 128},
   "dtype_differs": {"by_dtype_q": {"bf16": "fp8_e4m3"},
                     "by_arch": {"gfx942": {"fp8_e4m3": "fp8_e4m3_fnuz"}}},
   "dim_order": {"bhsd": ["B", "H", "S", "D"], "bshd": ["B", "S", "H", "D"],
-                "bsdh": ["B", "S", "D", "H"]},
+                "bsdh": ["B", "S", "D", "H"], "other_permutation": ["S", "B", "H", "D"]},
+  "alignment": {"wide_aligned": {"start_offset": 0, "declared_alignment": 16},
+                "element_aligned": {"start_offset": "element_size",
+                                    "declared_alignment": "element_size"},
+                "sub_element": {"start_offset": 1, "declared_alignment": 1}},
   "scale_value": {"inverse_sqrt_d": ["1/sqrt(head_dim_qk)"]},
   "dropout_probability": {"zero": 0.0},
   "dropout_seed_offset": {"seed": 1234, "offset": 0},
@@ -53,7 +61,8 @@ constexpr const char* CLASS_VALUES_JSON = R"json({
   "ragged_offsets": {"contiguous": {"offsets": "prefix_sum_of_lengths"},
                      "gapped": {"offsets": "full_slots"},
                      "leading_gap": {"offsets": "prefix_sum_after_gap"},
-                     "independent_starts": {"offsets": "slot_end_aligned"}},
+                     "independent_starts": {"offsets": "slot_end_aligned"},
+                     "out_of_order": {"offsets": "reversed_slots"}},
   "per_seq_len": {"all_full": ["S"], "all_equal_partial": [{"of": "S", "divide": 2}],
                   "mixed": ["S", {"of": "S", "divide": 2}], "some_zero": ["S", 0],
                   "all_zero": [0], "exceeds_storage": [{"of": "S", "add": 1}, "S"]},
@@ -222,6 +231,23 @@ std::vector<int64_t> rowOf(const std::vector<int64_t>& table, int64_t width, int
 std::vector<int64_t> stridesOf(const BuiltCase& built, const std::string& name)
 {
     return built.graph->getTensorsByName().at(name)->get_stride();
+}
+
+// The SDPA node names its outputs itself: O is the [B, 8, S, D] tensor and Stats the
+// [B, 8, S, 1] tensor that is not an input.
+std::shared_ptr<hipdnn_frontend::graph::TensorAttributes> outputOf(const BuiltCase& built,
+                                                                   int64_t lastDim)
+{
+    for(const auto& [name, tensor] : built.graph->getTensorsByName())
+    {
+        const auto& dims = tensor->get_dim();
+        if(name != "q" && name != "k" && name != "v" && dims.size() == 4 && dims[1] == 8
+           && dims[3] == lastDim && !tensor->get_is_virtual())
+        {
+            return tensor;
+        }
+    }
+    throw std::runtime_error("no output with last dim " + std::to_string(lastDim));
 }
 
 // V is a view into K, or K a view into Q; the view's layout values are `inherited`.
@@ -457,7 +483,7 @@ TEST(TestCaseGraph, RaggedLengthLongerThanTheSlotThrows)
 TEST(TestCaseGraph, OffsetsFollowEachTensorsOwnSequenceExtent)
 {
     // V is paged: its pool holds pages of 16 tokens. K is dense beside it and spans the declared
-    // maximum of 128 keys. The length tensor keeps the key length of 64.
+    // maximum of 5 pages x 16 = 80 keys. The length tensor keeps the key length of 64.
     auto row = raggedRow("ragged_kv_side", "contiguous", "all_full", "all_full");
     for(const auto& [axis, value] : pagedRow("dense"))
     {
@@ -467,10 +493,11 @@ TEST(TestCaseGraph, OffsetsFollowEachTensorsOwnSequenceExtent)
         }
     }
     row["paged_kv"] = "v_only";
+    row["page_count"] = "surplus";
     row["max_seq_len_kv"] = "larger";
     const auto built = build(row, sizes(4, 64, 64));
     EXPECT_EQ(integersOf(built, "ragged_offset_k"),
-              scaled({0, 128, 256, 384, 512}, BHSD_SEQUENCE_STRIDE));
+              scaled({0, 80, 160, 240, 320}, BHSD_SEQUENCE_STRIDE));
     EXPECT_EQ(integersOf(built, "ragged_offset_v"),
               scaled({0, 16, 32, 48, 64}, BHSD_SEQUENCE_STRIDE));
     EXPECT_EQ(integersOf(built, "seq_len_kv"), (std::vector<int64_t>{64}));
@@ -719,7 +746,9 @@ TEST(TestCaseGraph, ViewOfQReadsThroughQStrides)
 {
     auto row = viewRow("k");
     row["dim_order_q"] = "bshd";
-    const auto built = build(row, sizes(2, 64, 32));
+    auto z = sizes(2, 64, 32);
+    z.dv = 192;
+    const auto built = build(row, z);
     // Q is packed bshd with S_q 64; K, with S_kv 32, takes Q's strides.
     EXPECT_EQ(stridesOf(built, "k"), (std::vector<int64_t>{64 * 8 * 128, 128, 8 * 128, 1}));
     EXPECT_EQ(stridesOf(built, "k"), stridesOf(built, "q"));
@@ -730,7 +759,9 @@ TEST(TestCaseGraph, ViewLargerThanItsOwnerIsMarked)
 {
     auto row = viewRow("k");
     row["dim_order_q"] = "bshd";
-    const auto built = build(row, sizes(2, 32, 64));
+    auto z = sizes(2, 32, 64);
+    z.dv = 192;
+    const auto built = build(row, z);
     EXPECT_EQ(stridesOf(built, "k"), stridesOf(built, "q"));
     EXPECT_NE(built.realised.find("k_view_exceeds_owner"), std::string::npos) << built.realised;
 }
@@ -796,14 +827,30 @@ TEST(TestCaseGraph, InOrderTablesHoldEachSequencesOwnPages)
     }
 }
 
-TEST(TestCaseGraph, SurplusSlotsRepeatTheSequencesOwnPages)
+TEST(TestCaseGraph, SurplusSlotsPointAtPagesOfTheirOwn)
 {
+    // Five slots per sequence: the pool holds 4 x 5 pages and no slot repeats a page.
     auto row = pagedRow("dense", "in_order", "separate");
     row["page_count"] = "surplus";
+    row["max_seq_len_kv"] = "larger";
     const auto built = build(row, sizes(4, 64, 64));
-    EXPECT_EQ(
-        integersOf(built, "page_table_k"),
-        (std::vector<int64_t>{0, 1, 2, 3, 0, 4, 5, 6, 7, 4, 8, 9, 10, 11, 8, 12, 13, 14, 15, 12}));
+    EXPECT_EQ(integersOf(built, "page_table_k"), inOrderTable(4, 5, 5));
+    EXPECT_EQ(built.graph->getTensorsByName().at("k")->get_dim().at(0), 20);
+}
+
+TEST(TestCaseGraph, PagedPoolHoldsOnePagePerTableSlot)
+{
+    // K pages of 16 keys, V pages of 32; five K slots give a declared maximum of 80 keys, so V's
+    // table is ceil(80 / 32) = 3 slots wide.
+    auto row = pagedRow("dense", "in_order", "separate");
+    row["page_count"] = "surplus";
+    row["max_seq_len_kv"] = "larger";
+    row["page_size_k_vs_v"] = "differ";
+    const auto built = build(row, sizes(4, 64, 64));
+    const auto tensors = built.graph->getTensorsByName();
+    EXPECT_EQ(tensors.at("k")->get_dim(), (std::vector<int64_t>{20, 8, 16, 128}));
+    EXPECT_EQ(tensors.at("v")->get_dim(), (std::vector<int64_t>{12, 8, 32, 128}));
+    EXPECT_EQ(integersOf(built, "page_table_v"), inOrderTable(4, 3, 3));
 }
 
 TEST(TestCaseGraph, ShuffledTablesPermuteEachSequencesOwnPages)
@@ -1155,10 +1202,220 @@ TEST(TestCaseGraph, FuzzerHintClassesAreNotRealised)
     auto descale = baseRow();
     descale["scale_factor_values"] = "zero";
     EXPECT_THROW(build(descale, sizes(2, 64, 64)), CaseRealisationError);
-    for(const char* axis :
-        {"sink_values", "scale_factor_values", "special_values", "value_magnitude"})
+    // The representative class is the base value, so a row that holds it has nothing unrealised.
+    for(const auto& [axis, representative] :
+        std::vector<std::pair<std::string, std::string>>{{"sink_values", "ordinary"},
+                                                         {"scale_factor_values", "ordinary"},
+                                                         {"special_values", "none"},
+                                                         {"value_magnitude", "ordinary"}})
     {
         EXPECT_TRUE(sdpa_case_flow::isExecuteLevelAxis(axis)) << axis;
         EXPECT_FALSE(sdpa_case_flow::isRealisedContentAxis(axis)) << axis;
+        EXPECT_EQ(sdpa_case_flow::sharedBaseValue(axis), representative) << axis;
     }
+}
+
+TEST(TestCaseGraph, RaggedHeadMajorTensorHoldsEveryTokenOfAHead)
+{
+    // B 4 x S 64 = 256 token slots per head; the batch stride is one slot of 64 tokens.
+    auto row = withStats(raggedRow("ragged", "contiguous", "mixed", "all_full"), "packed_with_q");
+    row["dim_order_q"] = "bhsd";
+    row["dim_order_stats"] = "bhsd";
+    const auto built = build(row, sizes(4, 64, 64));
+    const std::vector<int64_t> headMajor = {64 * 128, 256 * 128, 128, 1};
+    EXPECT_EQ(stridesOf(built, "q"), headMajor);
+    EXPECT_EQ(stridesOf(built, "k"), headMajor);
+    EXPECT_EQ(stridesOf(built, "v"), headMajor);
+    EXPECT_EQ(outputOf(built, 1)->get_stride(), (std::vector<int64_t>{64, 256, 1, 1}));
+    EXPECT_EQ(integersOf(built, "ragged_offset_q"),
+              scaled({0, 64, 96, 160, 192}, BHSD_SEQUENCE_STRIDE));
+
+    // A dense bhsd tensor keeps per-batch slots.
+    EXPECT_EQ(stridesOf(build(baseRow(), sizes(4, 64, 64)), "q"),
+              (std::vector<int64_t>{8 * 64 * 128, 64 * 128, 128, 1}));
+}
+
+TEST(TestCaseGraph, RaggedSequenceOuterOrderFoldsTheBatchIntoTheTokens)
+{
+    auto row = raggedRow("ragged_q_side", "contiguous", "mixed", "all_full");
+    row["dim_order_q"] = "other_permutation";
+    const auto built = build(row, sizes(4, 64, 64));
+    EXPECT_EQ(stridesOf(built, "q"), outputOf(built, 128)->get_stride()) << "O is bshd";
+    EXPECT_EQ(stridesOf(built, "q"), (std::vector<int64_t>{64 * 8 * 128, 128, 8 * 128, 1}));
+
+    auto dense = baseRow();
+    dense["dim_order_q"] = "other_permutation";
+    EXPECT_EQ(stridesOf(build(dense, sizes(4, 64, 64)), "q"),
+              (std::vector<int64_t>{8 * 128, 128, 4 * 8 * 128, 1}));
+}
+
+TEST(TestCaseGraph, RaggedHeadDimStrideDoublesTheBatchSlotToo)
+{
+    auto row = raggedRow("ragged_q_side", "contiguous", "all_full", "all_full");
+    row["dim_order_q"] = "bhsd";
+    row["strides_q"] = "head_dim_strided";
+    const auto built = build(row, sizes(4, 64, 64));
+    EXPECT_EQ(stridesOf(built, "q"), (std::vector<int64_t>{2 * 64 * 128, 2 * 256 * 128, 256, 2}));
+}
+
+TEST(TestCaseGraph, PaddedAddsSixteenHeadDimSlotsInEveryOrder)
+{
+    auto row = baseRow();
+    row["strides_q"] = "padded";
+    EXPECT_EQ(stridesOf(build(row, sizes(2, 64, 64)), "q"),
+              (std::vector<int64_t>{8 * 64 * 144, 64 * 144, 144, 1}));
+    row["dim_order_q"] = "bsdh";
+    EXPECT_EQ(stridesOf(build(row, sizes(2, 64, 64)), "q"),
+              (std::vector<int64_t>{64 * 144 * 8, 1, 144 * 8, 8}));
+}
+
+TEST(TestCaseGraph, HeadCountsComeFromTheClassTable)
+{
+    const auto headsOf = [](const Row& row, const ClassValues& values) {
+        const CaseContext context{values, DescaleForm::BY_VALUE, "gfx942"};
+        const auto built = sdpa_case_flow::buildCaseGraph(row, {}, context);
+        const auto tensors = built.graph->getTensorsByName();
+        return std::make_pair(tensors.at("k")->get_dim().at(1), tensors.at("v")->get_dim().at(1));
+    };
+    auto row = baseRow();
+    row["k_head_sharing"] = "gqa";
+    row["v_head_sharing"] = "gqa";
+    EXPECT_EQ(headsOf(row, classValues()), std::make_pair(int64_t{2}, int64_t{2}));
+    row["k_heads_vs_v_heads"] = "differ";
+    EXPECT_EQ(headsOf(row, classValues()), std::make_pair(int64_t{2}, int64_t{4}));
+
+    std::string text = CLASS_VALUES_JSON;
+    const std::string gqa = "\"gqa\": {\"many\": 2}";
+    text.replace(text.find(gqa), gqa.size(), "\"gqa\": {\"many\": 4}");
+    const std::string differ = "\"H_k\": 2, \"H_v\": 4";
+    text.replace(text.find(differ), differ.size(), "\"H_k\": 4, \"H_v\": 2");
+    const auto other = sdpa_case_flow::parseClassValues(text);
+    EXPECT_EQ(headsOf(row, other), std::make_pair(int64_t{4}, int64_t{2}));
+    row["k_heads_vs_v_heads"] = "equal";
+    EXPECT_EQ(headsOf(row, other), std::make_pair(int64_t{4}, int64_t{4}));
+
+    row["q_heads"] = "one";
+    EXPECT_THROW(headsOf(row, classValues()), CaseRealisationError) << "gqa has no one-head count";
+}
+
+TEST(TestCaseGraph, ViewOwnerFollowsTheHeadDims)
+{
+    auto wideV = sizes(2, 64, 64);
+    wideV.dv = 192;
+    EXPECT_THROW(build(viewRow("v"), wideV), CaseRealisationError) << "V wider than K";
+    EXPECT_NO_THROW(build(viewRow("k"), wideV));
+    EXPECT_THROW(build(viewRow("k"), sizes(2, 64, 64)), CaseRealisationError) << "V fits K";
+}
+
+TEST(TestCaseGraph, AlignmentClassesMoveTheDataStart)
+{
+    auto row = baseRow();
+    const auto wide = build(row, sizes(2, 64, 64));
+    EXPECT_TRUE(wide.startOffsets.empty());
+    EXPECT_EQ(wide.graph->getTensorsByName().at("q")->get_alignment(), 16);
+
+    row["alignment_q"] = "element_aligned";
+    row["alignment_o"] = "sub_element";
+    const auto shifted = build(row, sizes(2, 64, 64));
+    const auto o = outputOf(shifted, 128);
+    EXPECT_EQ(shifted.startOffsets, (std::map<std::string, int64_t>{{"q", 2}, {o->get_name(), 1}}));
+    EXPECT_EQ(shifted.graph->getTensorsByName().at("q")->get_alignment(), 2);
+    EXPECT_EQ(o->get_alignment(), 1);
+    EXPECT_NE(shifted.realised.find("q_start_offset=2"), std::string::npos) << shifted.realised;
+
+    row["dtype_q"] = "fp8_e4m3";
+    row["dtype_o"] = "fp8_e4m3";
+    EXPECT_THROW(build(row, sizes(2, 64, 64)), CaseRealisationError) << "1-byte sub_element";
+}
+
+TEST(TestCaseGraph, OutOfOrderStoresSequenceBInSlotBMinusOneMinusB)
+{
+    const auto built
+        = build(raggedRow("ragged", "out_of_order", "mixed", "all_full"), sizes(4, 64, 64));
+    EXPECT_EQ(integersOf(built, "ragged_offset_q"),
+              scaled({192, 128, 64, 0, 256}, BSHD_SEQUENCE_STRIDE));
+    EXPECT_EQ(integersOf(built, "ragged_offset_k"),
+              scaled({192, 128, 64, 0, 256}, BHSD_SEQUENCE_STRIDE));
+    EXPECT_EQ(integersOf(built, "seq_len_q"), (std::vector<int64_t>{64, 32}));
+}
+
+TEST(TestCaseGraph, OwnStartsGiveVTheOtherLayout)
+{
+    auto row = raggedRow("ragged_kv_side", "contiguous", "all_full", "mixed");
+    row["v_packing"] = "own_starts";
+    const auto built = build(row, sizes(4, 64, 64));
+    EXPECT_EQ(integersOf(built, "ragged_offset_k"),
+              scaled({0, 64, 96, 160, 192}, BHSD_SEQUENCE_STRIDE));
+    EXPECT_EQ(integersOf(built, "ragged_offset_v"),
+              scaled({0, 64, 128, 192, 256}, BHSD_SEQUENCE_STRIDE));
+    EXPECT_NE(built.realised.find("v_packing=own_starts"), std::string::npos) << built.realised;
+}
+
+TEST(TestCaseGraph, PaddedVHasNoOffset)
+{
+    auto row = raggedRow("ragged_kv_side", "contiguous", "all_full", "mixed");
+    row["v_packing"] = "padded";
+    const auto built = build(row, sizes(4, 64, 64));
+    EXPECT_EQ(built.contents.count("ragged_offset_v"), 0u);
+    EXPECT_EQ(built.contents.count("ragged_offset_k"), 1u);
+    EXPECT_EQ(stridesOf(built, "v"), (std::vector<int64_t>{8 * 64 * 128, 64 * 128, 128, 1}))
+        << "a dense V keeps per-batch slots";
+}
+
+TEST(TestCaseGraph, OwnStartsNeedVsOwnOffsetTensor)
+{
+    auto row = withForm(raggedRow("ragged", "contiguous", "all_full", "all_full"), "shared_tokens");
+    row["v_packing"] = "own_starts";
+    EXPECT_THROW(build(row, sizes(4, 64, 64)), CaseRealisationError);
+}
+
+TEST(TestCaseGraph, RaggedViewLargerThanItsOwnerThrows)
+{
+    // K is ragged and reads through a dense Q; 64 keys do not fit a Q of 32 queries.
+    auto row = raggedRow("ragged_kv_side", "contiguous", "all_full", "all_full");
+    row["tensor_overlap"] = "inputs_overlap";
+    row["strides_k"] = "inherited";
+    row["dim_order_k"] = "inherited";
+    row["dim_order_q"] = "bshd";
+    auto z = sizes(2, 32, 64);
+    z.dv = 192;
+    EXPECT_THROW(build(row, z), CaseRealisationError);
+    EXPECT_NO_THROW(build(row, [&] {
+        auto fits = sizes(2, 64, 32);
+        fits.dv = 192;
+        return fits;
+    }()));
+
+    // More V heads than K heads stay inside V's own buffer.
+    auto vView = raggedRow("ragged_kv_side", "contiguous", "all_full", "all_full");
+    vView["tensor_overlap"] = "inputs_overlap";
+    vView["strides_v"] = "inherited";
+    vView["dim_order_v"] = "inherited";
+    auto moreHeads = sizes(2, 64, 64);
+    moreHeads.hk = 2;
+    moreHeads.hv = 4;
+    EXPECT_NO_THROW(build(vView, moreHeads));
+}
+
+TEST(TestCaseGraph, RaggedPagedKeyKeepsThePagePoolLayout)
+{
+    auto row = raggedRow("ragged_kv_side", "contiguous", "all_full", "all_full");
+    for(const auto& [axis, value] : pagedRow("dense"))
+    {
+        if(axis.rfind("page", 0) == 0 || axis == "max_seq_len_kv" || axis == "paged_kv")
+        {
+            row[axis] = value;
+        }
+    }
+    row["paged_kv"] = "k_only";
+    const auto built = build(row, sizes(4, 64, 64));
+    // A pool of 4 x 4 pages of 16 keys in bhsd order.
+    EXPECT_EQ(stridesOf(built, "k"), (std::vector<int64_t>{8 * 16 * 128, 16 * 128, 128, 1}));
+}
+
+TEST(TestCaseGraph, LargerMaximumNeedsATableWiderThanTheKeys)
+{
+    auto row = pagedRow("dense", "in_order", "separate");
+    row["max_seq_len_kv"] = "larger";
+    EXPECT_THROW(build(row, sizes(4, 64, 64)), CaseRealisationError) << "exact pages span S_kv";
 }

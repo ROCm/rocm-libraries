@@ -59,15 +59,6 @@ Notes hipDNN engines report map for both select and deselect. Any other value, i
 
 `deselect_numeric_notes({NONDETERMINISTIC})` keeps only engines that positively claim deterministic results; hipDNN engines declare no numerical notes, so a missing claim proves nothing. Until engine metadata carries the claim, the shim keeps its own allowlist, currently `MIOPEN_ENGINE_DETERMINISTIC`.
 
-## Ragged tensors
-
-hipDNN's ragged tensors ([RFC 0014](./rfcs/0014_RaggedTensors.md)) follow cuDNN frontend v1.24.0's SDPA ragged layouts except where listed.
-
-| Area | cuDNN frontend | hipDNN |
-|---|---|---|
-| Aliasing layouts | Validates ragged graphs by attribute only (padding mask required, architecture and paged restrictions; `sdpa_support_surface.h:90-92`); offset values are runtime data and are not checked at graph build | Rejects overlapping token rows and sorted-stride violations on the dense view, origins that are not whole tokens, `seq_len > S_max` and negative strides, when the tensor is constructed from its offset values. Zero-stride axes are broadcasts and are accepted. The container visits every logical element once and sizes its buffer from the addressed range |
-| Ragged offset on a paged K/V container | Accepts ragged offsets with paged attention from cuDNN 9.7 (`sdpa_support_surface.h:281-283`) | The dense rewrite declines a ragged offset on a paged K/V container. The native ragged forward gate declines ragged Q over paged K/V; the dense rewrite serves ragged Q over non-ragged paged K/V |
-
 ## Engine filtering
 
 `deselect_engines`, the behavior-note filters, and the determinism filter are applied to the applicable engines after plan creation. A filter set after plans were created takes effect at the next `check_support()`, `build_plans()`, or `build_plan_at_index()`, including for plans already created.

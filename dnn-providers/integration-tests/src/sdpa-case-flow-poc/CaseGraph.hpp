@@ -102,6 +102,16 @@ enum class OffsetLayout
     // offset b = (b x S + S - length b) x stride for b < B, offset B = B x S x stride: each
     // sequence ends at the end of its full slot.
     SLOT_END_ALIGNED,
+    // offset b = (B - 1 - b) x S x stride for b < B, offset B = B x S x stride: sequence b sits in
+    // slot B - 1 - b, so the starts fall in reverse order. The length tensors give the lengths.
+    REVERSED_SLOTS,
+};
+
+// Where an alignment class puts the data start, in bytes. std::nullopt means one element.
+struct AlignmentEntry
+{
+    std::optional<int64_t> startOffset;
+    std::optional<int64_t> declaredAlignment;
 };
 
 struct SequenceLengthEntry
@@ -118,6 +128,11 @@ struct ClassValues
 {
     std::map<std::string, int64_t> batchSize;
     std::map<std::string, int64_t> qHeads;
+    // Head sharing value (mha, gqa, mqa, non_divisor) -> q_heads class -> H_k or H_v.
+    std::map<std::string, std::map<std::string, int64_t>> headCounts;
+    // H_k and H_v when both sharings are gqa and k_heads_vs_v_heads is differ.
+    int64_t differK = 0;
+    int64_t differV = 0;
     std::vector<SequenceLengthEntry> sequenceLengths;
     std::map<std::string, int64_t> headDim;
     // dtype_q value -> format of a K or V whose relation to Q is "differs".
@@ -126,6 +141,8 @@ struct ClassValues
     std::map<std::string, std::map<std::string, std::string>> archFormat;
     // Physical order, outermost first, as indices into the logical dims [B, H, S, D].
     std::map<std::string, std::vector<size_t>> dimOrder;
+    // Alignment class -> data start offset and declared alignment.
+    std::map<std::string, AlignmentEntry> alignment;
     // Representatives of each class, primary first. A case uses the primary.
     std::map<std::string, std::vector<ScaleNumber>> scaleValue;
     std::map<std::string, double> dropoutProbability;
@@ -209,6 +226,9 @@ struct BuiltCase
     std::string realised;
     // Contents that replace the random input fill, keyed by tensor name.
     std::map<std::string, Contents> contents;
+    // Bytes between an aligned allocation start and the data start, keyed by the graph tensor's
+    // name. Only tensors with a non-zero offset are listed.
+    std::map<std::string, int64_t> startOffsets;
 };
 
 // The axis ids of the maintained forward SDPA model, in its column order.

@@ -101,11 +101,11 @@ thought about what makes sense or what hipDNN can express. This list is
   `causal_mask` is `present`.
 - A **combination** is one value for every active axis.
 
-Layer 0 has 102 axes and 372 values. That gives about 5.7 × 10⁴⁷ combinations.
+Layer 0 has 105 axes and 379 values. That gives about 4.5 × 10⁴⁸ combinations.
 Nobody can run that many cases. So we count **pairs**: two values of two
 different axes, for example `dtype_q = fp16` together with
 `causal_mask = present`. A pair is **valid** when at least one allowed
-combination holds it. Layer 0 has 68,021 valid pairs.
+combination holds it. Layer 0 has 70,613 valid pairs.
 
 **Pairwise testing** puts every valid pair in at least one case. Most defects
 need only one or two settings in a bad state, so pairwise testing finds most of
@@ -132,8 +132,8 @@ or about numbers. Examples:
 - `D-OUTPUT-SELF-ALIAS`: output strides that send two output elements to one
   address cannot hold both results.
 
-Layer 1 has 33 definition rules. They leave about 2.9 × 10⁴² combinations and
-60,807 valid pairs.
+Layer 1 has 34 definition rules. They leave about 2.1 × 10⁴³ combinations and
+63,262 valid pairs.
 
 **Layer 2 removes combinations that hipDNN's frontend cannot express.** These
 are **frontend** rules (ids `F-*`). The frontend is the hipDNN C++ API that
@@ -146,8 +146,8 @@ builds the graph. Examples:
 - `F-SCALE-TENSOR-BY-VALUE`: a scale tensor must be passed by value, so a
   scale in device memory cannot be stated.
 
-Layer 2 has 17 frontend rules. They leave about 1.3 × 10³⁷ combinations and
-49,862 valid pairs.
+Layer 2 has 17 frontend rules. They leave about 1.1 × 10³⁸ combinations and
+52,404 valid pairs.
 
 Some values and combinations have meaning, but the frontend cannot state them,
 refuses them, or is to refuse them. Layer 2 removes them. The model does not hold the values of
@@ -171,8 +171,8 @@ them from every row. `F-PAGED-NEEDS-SEQ-LENS` removes a combination, not a value
 
 Some combinations are valid but no reference executor can check them. They are
 not Layer 1 or Layer 2 rules. The answer key (section 4) holds them. Examples: the
-dropout pattern output with a caller-supplied mask, ragged offsets on a paged K
-or V, and ragged offsets stored as 64-bit integers.
+dropout pattern output with a caller-supplied mask, and ragged offsets on a
+paged K or V.
 
 **Hints for a fuzzer.** Some Layer 0 axes describe the numbers inside tensors:
 special numbers such as NaN or infinity (`special_values`), numbers large
@@ -191,7 +191,7 @@ are not part of this plan's bundles.
 ## 4. The model
 
 The model (`model.yaml`) is the Layer 2 space in a form that a script can
-use. It has 91 axes (38 of them child axes) and 335 values.
+use. It has 92 axes (39 of them child axes) and 339 values.
 
 **Classes, not numbers.** Most size axes hold a **class**, chosen by meaning.
 Example: `batch_size` is `one` or `many`. A **relationship** axis says how two
@@ -297,9 +297,11 @@ Each rule also has a `form`:
 | `setting` | Records a choice about how the model is built. It removes nothing. |
 | `covered` | A policy rule whose requests another rule already removes. |
 
-The model applies 42 exclusion rules: 28 definition, 12 frontend, 1 policy and
-1 choice. Together they make 13,674 of the 55,080 structurally possible pairs invalid.
-41,406 valid pairs remain.
+The model applies 45 exclusion rules: 32 definition, 12 frontend and 1 choice.
+Together they make 13,857 of the 56,412 structurally possible pairs invalid.
+42,555 valid pairs remain. One more definition exclusion,
+`D-RAGGED-NO-OVERLAP`, removes nothing: the value it forbids is not in the
+model.
 
 Example of a `forbid`:
 
@@ -313,11 +315,9 @@ Example of a `forbid`:
 With one key, a window cannot cover "some but not all" keys, so these rows
 are removed.
 
-The frontend rule `F-NO-NEGATIVE-STRIDE` removes negative strides, and the
-policy rule `P-NO-HEAD-DIM-BROADCAST` removes a zero stride on the head
-dimension of Q, K or V. Both name ticket ALMIOPEN-3114, which asks hipDNN to
-refuse these requests. The requests come back as rejection probes MV-22 and
-MV-23.
+The frontend rule `F-NO-NEGATIVE-STRIDE` removes negative strides. It names
+ticket ALMIOPEN-3114, which asks hipDNN to refuse these requests. The requests
+come back as rejection probe MV-22.
 
 ## 6. Generating the cases
 
@@ -438,10 +438,10 @@ Result for the generated CSV (section 8; times are the summed
 
 | Tier | Cases in this tier | Cumulative cases | Cumulative s, gfx942 | Cumulative s, gfx950 | Budget use, gfx942 |
 |---|---|---|---|---|---|
-| quick | 1,690 | 1,690 | 69.2 | 55.8 | 23.1 % |
-| standard | 9,130 | 10,820 | 571.3 | 429.3 | 31.7 % |
-| comprehensive | 4,438 | 15,258 | 2,233.1 | 1,612.3 | 62.0 % |
-| full | 7,237 | 22,495 | 5,392.4 | 3,872.0 | — |
+| quick | 1,610 | 1,610 | 66.3 | 53.5 | 22.1 % |
+| standard | 9,434 | 11,044 | 581.4 | 437.0 | 32.3 % |
+| comprehensive | 4,543 | 15,587 | 2,294.2 | 1,656.5 | 63.7 % |
+| full | 7,390 | 22,977 | 5,518.4 | 3,962.4 | — |
 
 These times are the PoC runner's times (`src/sdpa-case-flow-runner/`) for one engine
 run plus one reference run. The suite does more work per case, so its times are larger.
@@ -451,9 +451,9 @@ under the rules and the answer-key rules. A seed whose row the references can
 check goes to quick, at shape S. Any other seed goes to full. 14 seeds are in
 quick; `S3b-vllm-fp8kv-paged` is in full, because a K or V format that differs
 from Q has answer key "no". In the CSV a seed row has `origin` `real_world` and
-`detail` `seed:<id>`. Two seeds (`S10-blockmask-ragged` and
-`S10b-blockmask-paged`) matched rows that low-change pairwise had already made;
-those rows' `detail` carries the seed name.
+`detail` `seed:<id>`. One seed (`S10b-blockmask-paged`) matched rows that
+low-change pairwise had already made, one in each tier. Their `detail` carries
+the seed name.
 
 ## 8. The CSV
 
@@ -472,9 +472,9 @@ timing files or the generator changes the CSV, write the new SHA-256 to that
 file, and copy the new CSV to `test-plans/sdpa-fwd/levels.csv`, in the same
 change.
 
-`levels.csv` has one row per case: 22,495 rows. It has no quoted fields. A `-`
-means that a child axis is not active in that row. Each row has 104 columns: 13
-case columns, then 91 axis columns.
+`levels.csv` has one row per case: 22,977 rows. It has no quoted fields. A `-`
+means that a child axis is not active in that row. Each row has 105 columns: 13
+case columns, then 92 axis columns.
 
 **Case columns (13).**
 
@@ -494,7 +494,7 @@ case columns, then 91 axis columns.
 | `case_key` | 16 hex digits: a hash of the tier, the sizes and every axis value. It is unique per row and stays the same when `case_id` values shift. Use it as the key. |
 | `est_seconds_gfx950` | The time of the case on gfx950. |
 
-**Axis columns (91).** One column per model axis, from `batch_packing` to
+**Axis columns (92).** One column per model axis, from `batch_packing` to
 `value_magnitude`, in the order of `model.yaml`.
 
 ## 9. From rows to bundles
@@ -505,31 +505,46 @@ A **bundle** is a graph test in `integration-test-bundles/`. A **sweep** is a
 
 ### 9.1 Which rows a bundle can express
 
-A bundle holds a graph and, for each case, a few fixed values. It cannot hold
-exact tensor contents. So a row that needs exact contents cannot be a bundle
-yet. It stays in the generated CSV, and the selection step
-(`scripts/sdpa_case_flow_poc/bundles/select_rows.py`) skips it for the reasons below. A row can have several reasons.
+A bundle holds a graph and, for each case, a few fixed values. Some tensor
+contents are also bundle contents: dense page tables, `seq_len` values, block
+masks, descale lists, a caller's dropout mask, and dropout seeds and offsets
+held in device memory. Other exact contents cannot be in a bundle. So a row that
+needs them cannot be a bundle yet. It stays in the generated CSV, and the
+selection step (`scripts/sdpa_case_flow_poc/bundles/select_rows.py`) skips it for
+the reasons below.
 
-| Reason | Why a bundle cannot express it | Rows |
+The first five reasons say that a bundle cannot express the row. The last two
+are extra exclusions: the row could be a bundle, but the selection step leaves it
+out. The Rows column counts every row that has the reason. A row can have several
+reasons, so the counts overlap and do not add up to the number of excluded rows.
+
+| Reason | Why the row is not a bundle | Rows |
 |---|---|---|
-| `page_table_contents` | A packed page table carries a ragged offset, and the harness does not verify ragged graphs. Dense page tables are bundle contents. | 1,702 |
-| `ragged_offsets` | Ragged offsets are tensor contents. | 1,082 |
-| `tensor_overlap` | Two tensors that share memory need control of the pointers, which a bundle does not have. | 540 |
-| `arch_dtype` | The number format depends on the GPU (for example fp8 E4M3 becomes E4M3 FNUZ on gfx942), and one graph has one format. | 323 |
-| `zero_stride_needs_pr14709` | A zero stride on an input needs a data-SDK change (PR #14709). These rows are left out of this bundle set. Adding them is planned as a follow-up change. Only the selection step removes these rows. | 182 (6 otherwise expressible) |
-| `dropout_without_rng_dump` | Random dropout without an `rng_dump` output has no oracle: the references check random dropout only through the dumped mask. | 44 (8 otherwise expressible) |
+| `ragged_offsets` | Ragged offsets are tensor contents. | 3,769 |
+| `tensor_overlap` | Two tensors that share memory need control of the pointers, which a bundle does not have. | 1,314 |
+| `arch_dtype` | The number format depends on the GPU (for example fp8 E4M3 becomes E4M3 FNUZ on gfx942), and one graph has one format. | 391 |
+| `page_table_contents` | A packed page table carries a ragged offset, and the harness does not verify ragged graphs. Dense page tables are bundle contents. | 190 |
+| `start_offset_not_expressible` | An `alignment_*` value puts a tensor's data start past an aligned allocation start (`element_aligned`, `sub_element`). A bundle records only the declared alignment, not the start offset, so its case would test less than its row says. The exporter refuses these rows too (outcome `start-offset-not-expressible`). | 3,688 |
+| `zero_stride_needs_pr14709` | A zero stride on an input needs a data-SDK change (PR #14709). These rows are left out of this bundle set. Adding them is planned as a follow-up change. Only the selection step removes these rows. | 1,126 (734 otherwise expressible) |
+| `dropout_without_rng_dump` | Random dropout without an `rng_dump` output has no oracle: the references check random dropout only through the dumped mask. | 82 (10 otherwise expressible) |
 
-9,883 rows became bundles. 6,846 rows are excluded. The selection step never
-changes the model or the generated rows. It only filters. To bring a row back, change
-the filter and regenerate the bundles.
+These are the rows that the selection step chooses from the current
+`levels.csv`, which has 22,977 rows. 14,389 rows become bundles and 8,588 rows
+are excluded. Of the excluded rows, 7,844 have at least one of the first five
+reasons. The other 744 could be bundles but have an extra reason: 734 have only
+a zero stride and 10 have only dropout without `rng_dump`. The bundle set in
+the tree is regenerated from this selection later.
+
+The selection step never changes the model or the generated rows. It only
+filters. To bring a row back, change the filter and regenerate the bundles.
 
 | Tier | All rows | Bundle rows | Sweeps | Largest sweep | Summed `est_seconds` of the bundle rows, gfx942 / gfx950 |
 |---|---|---|---|---|---|
-| quick | 1,330 | 749 | 23 | 286 | 20.0 / 19.7 |
-| standard | 6,782 | 4,152 | 102 | 1,358 | 232.3 / 165.2 |
-| comprehensive | 3,080 | 1,582 | 59 | 639 | 564.6 / 498.7 |
-| full | 5,537 | 3,400 | 109 | 971 | 2,304.7 / 1,684.0 |
-| total | 16,729 | 9,883 | 293 | | |
+| quick | 1,610 | 1,039 | 87 | 250 | 35.6 / 27.6 |
+| standard | 9,434 | 6,100 | 243 | 1,455 | 324.6 / 242.1 |
+| comprehensive | 4,543 | 2,829 | 196 | 664 | 1,051.0 / 748.2 |
+| full | 7,390 | 4,421 | 256 | 962 | 2,036.7 / 1,458.4 |
+| total | 22,977 | 14,389 | 782 | | |
 
 ### 9.2 How a graph is made from a row
 
@@ -569,7 +584,7 @@ each. A row with only Q, K, V and O is `Base`. Examples:
 | `Stats_DqBv_DkBv_DvBv` | Stats plus the three descales |
 
 A name longer than 64 characters keeps its first tokens and ends with 6 hex
-digits of a hash. The 16,729 rows have 405 topologies; the bundle rows use 109.
+digits of a hash. The 22,977 rows have 486 topologies; the bundle rows use 257.
 One sweep holds the cases of one tier and one topology.
 
 The suite's import tool `migration-scripts/import_graph.py` groups the graphs.
@@ -594,9 +609,9 @@ of `values` is on its own line, and each tensor is on its own line.
 
 ### 9.4 Ids, names and metadata
 
-- **Case id**: `<dtype_q>_<case_key>`, for example `bf16_e50bd5c4cdf64be7`.
+- **Case id**: `<dtype_q>_<case_key>`, for example `bf16_52c686d72f0c4623`.
 - **GTest name**: `<tier>_SdpaFwdPlan_<Topology>.<case id>`, for example
-  `quick_SdpaFwdPlan_Base.bf16_e50bd5c4cdf64be7`.
+  `quick_SdpaFwdPlan_Base.bf16_52c686d72f0c4623`.
 - **Metadata** of each case: `format_version`, `generator`,
   `generator_version`, `reference_source`, `seed`, `case_key`, `csv_case_id`
   and `generated_from_sha256` (the SHA-256 of the generated CSV). Use
@@ -747,8 +762,16 @@ these defects need no skip.
   `support.json` file beside a sweep. It says that an engine supports a case on
   a given GPU ([Support Matrix](../support-matrix.md)). Claims come in a later
   change.
-- 6,846 rows are not bundles, mostly because they need exact tensor contents.
-  They are rows of the generated CSV, but no bundle holds them.
+- 8,588 rows are not bundles. 7,844 of them need contents or settings a bundle
+  cannot express (§ 9.1), mostly ragged offsets, data starts past an aligned
+  allocation start, and tensors that share memory. The other 744 have a zero
+  stride or random dropout without `rng_dump`. They are rows of the generated
+  CSV, but no bundle holds them.
+- `ASM_SDPA_ENGINE` declines every graph that declares a tensor alignment
+  below 16 bytes. So a runner pinned to it gets no engine result for an
+  `element_aligned` or `sub_element` row. The GPU reference reads and writes
+  that row's tensors at the shifted data starts. Below the CPU reference's
+  size limit, the runner compares the two references.
 - The rejection probes and the API-path variants in `injections.yaml` are not
   bundles. They belong to a rejection suite.
 - The sizes override cannot set the page size or the window bounds, so the

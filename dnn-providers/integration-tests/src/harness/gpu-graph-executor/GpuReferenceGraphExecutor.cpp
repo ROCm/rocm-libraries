@@ -261,7 +261,7 @@ struct GpuReferenceGraphExecutor::Impl
     {
         namespace rd = hipdnn_test_sdk::detail;
         const auto& primaries = dense.primaries;
-        // Host copy of the graph's own seq_len tensors (INT32 [B], element b at b * stride); empty
+        // Host copy of the graph's own seq_len tensors (INT32 [B, 1, 1, 1], element b at b * stride); empty
         // where the rewrite adds them.
         const auto readOwnSeqLen = [&](const std::optional<int64_t>& added,
                                        int64_t uid,

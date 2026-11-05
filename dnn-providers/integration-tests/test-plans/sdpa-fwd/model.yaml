@@ -65,8 +65,7 @@
 #   dnn-providers/integration-tests/docs/OperationSupport-GpuReferenceImpl.md). Where the code and
 #   a run disagree, the run decides.
 #   The frontend rule F-NO-NEGATIVE-STRIDE (not enforced yet, ALMIOPEN-3114) removes negative
-#   strides, and the policy rule P-NO-HEAD-DIM-BROADCAST removes a zero stride on the head dimension
-#   of Q, K or V, from the levels. They come back as rejection probes MV-22 and MV-23.
+#   strides from the levels. They come back as rejection probe MV-22.
 #   Quick treats the data-type combination as one setting (levels `super_setting`). Quick and
 #   standard admit answer_key partial.
 #   Five paging and packing values carry usage `fringe`, so only full runs them. Comprehensive
@@ -188,7 +187,7 @@ axes:
       - {id: ragged_kv_side, meaning: "K and V ragged; Q and O in equal-length slots"}
     api_paths: [cpp]   # ragged: set_ragged_offset is not bound in Python
     cite: "TA:508,562; PYT:130-160; @ 00d9c566bea set_ragged_offset per tensor (TensorAttributes.hpp), the frontend checks only the offset tensor itself"
-    note: "ragged_q_side usage common: vLLM's attention runs varlen queries (cu_seqlens_q) over a paged K/V cache (block_table), and the integration suite's reference bundles hd128_causal_ragged_paged and hd64_window_ragged_paged(_sinks) state this shape. ragged_kv_side has no known use: fringe."
+    note: "ragged_q_side usage common: vLLM's attention runs varlen queries (cu_seqlens_q) over a paged K/V cache (block_table), and the integration suite's reference bundles hd128_causal_ragged_paged and hd64_window_ragged_paged(_sinks) state this shape. ragged_kv_side has no known use: fringe. A ragged tensor in any dim order is written in a layout the references take: H outside S (bhsd) as head-major [H, T, D] with T = B x S, and S,B,H,D with the batch folded into the token axis ([T, H, D], the strides of bshd)."
     group: G5-batch-heads-kvstorage
     size_sensitive: ["yes", "ragged offsets cross tile edges; the diagonal is per sequence"]
     labels:
@@ -202,23 +201,25 @@ axes:
     value_kind: class
     parent: {batch_packing: [ragged, ragged_q_side, ragged_kv_side]}
     level: execute
-    meaning: "Contents of the ragged-offset tensors: B + 1 boundaries; sequence b's slot is offset[b + 1] - offset[b]."
+    meaning: "Contents of the ragged-offset tensors: B + 1 values; offset[b] is where sequence b starts. Without length tensors sequence b's slot is offset[b + 1] - offset[b]; with them the length tensors give the lengths."
     values:
       - {id: contiguous, meaning: "each sequence starts where the previous one ends"}
       - {id: gapped, meaning: "each slot is a full stored length; the length tensors give shorter live lengths, so a slot is longer than its sequence"}
       - {id: leading_gap, meaning: "the first sequence starts after the start of the tensor: all the spare room is before sequence 0"}
       - {id: independent_starts, meaning: "each sequence starts at a position of its own: it ends at the end of its full slot, so the gap before it is its own spare room and the gaps differ when the lengths differ"}
-    not_in_model: "out_of_order (a sequence stored before a sequence of lower index) and overlapping: frontend rule F-RAGGED-OFFSETS-ARE-LENGTHS. out_of_order with lengths from seq_len becomes stateable when PR #15080 merges. A start inside a token: Layer 1 D-RAGGED-WHOLE-TOKENS."
+      - {id: out_of_order, meaning: "sequences stored in another order than their index: sequence b sits in slot B - 1 - b; the length tensors give the lengths"}
+    not_in_model: "overlapping (two sequences share memory): Layer 1 D-RAGGED-NO-OVERLAP. A start inside a token: Layer 1 D-RAGGED-WHOLE-TOKENS."
     api_paths: [cpp]
-    cite: "TA:508; DH:243-262 (checks the offset tensor's own properties only); @ 91a40bdfd4c RaggedTokenBoundaries.hpp:67-71 (offset[0] must be 0), 89-100 (non-decreasing; no slot longer than S_max); RaggedSdpaDensify.hpp:463-477 (live lengths within the packed slots)"
-    note: "leading_gap and independent_starts answer_key no: at 91a40bdfd4c both references take offset[0] = 0 only and throw at execute otherwise (RaggedTokenBoundaries.hpp:67-71), and a slot longer than S_max is refused (95-100). With the class values independent_starts gives slot 0 a length of 1.5 x S (mixed) or 2 x S (some_zero). The labels follow the references, not the meaning: the values stay in the model whatever the references take. Both labels flip when PR #15080 (per-batch origins with lengths from seq_len) merges. gapped needs the length tensors, so it always runs through the dense rewrite (RaggedSdpaFwdSupport.hpp:161-165 declines seq_len tensors; RaggedSdpaDensify.hpp:30-32 reads them as live lengths)."
+    cite: "TA:508; DH:243-262 (checks the offset tensor's own properties only); @ 2fcf1e30202 RaggedTensor.hpp:91-99 (offset[0] any whole-token value of 0 or more), 101-111 (with length tensors: each length from them, at most S_max; starts in any order), 112-128 (without them: offsets must not decrease, each length is the block, capped at S_max), 208-219 (overlapping sequences refused); RaggedSdpaFwdSupport.hpp:165-168 (native plan: length tensors accepted); RaggedSdpaDensify.hpp:27-33 (dense rewrite: lengths from the length tensors, else from the offset blocks)"
+    note: "Both references take any whole-token offset[0] of 0 or more and, with the length tensors, start positions in any order with gaps between them. Without the length tensors the offsets are boundaries and lengths, so gapped, independent_starts and out_of_order need the length tensors (F-RAGGED-OFFSETS-ARE-LENGTHS). The answer_key yes of leading_gap, independent_starts and out_of_order is read in code; no runner row has measured them yet. The labels follow the references, not the meaning: the values stay in the model whatever the references take."
     group: G5-batch-heads-kvstorage
     size_sensitive: ["yes", "ragged offsets cross tile edges; the diagonal is per sequence"]
     labels:
       contiguous: [common, "yes", "yes"]
       gapped: [rare, "yes", "yes"]
-      leading_gap: [fringe, "yes", "no"]
-      independent_starts: [rare, "yes", "no"]
+      leading_gap: [fringe, "yes", "yes"]
+      independent_starts: [rare, "yes", "yes"]
+      out_of_order: [rare, "yes", "yes"]
 
   - id: ragged_offset_form
     kind: child
@@ -248,13 +249,13 @@ axes:
       - {id: int32, meaning: "INT32"}
       - {id: int64, meaning: "INT64"}
     api_paths: [cpp]   # set_ragged_offset is not bound in Python
-    cite: "@ 91a40bdfd4c DescriptorHelpers.hpp:243-275 (no check of the offset tensor's format); RaggedTensor.hpp:142-145 (offsets read as INT32 or INT64); references RaggedSdpaDensify.hpp:204-206 (dense rewrite: INT32 or INT64), RaggedSdpaFwdSupport.hpp:94-98 (native plan: INT32), FlatbufferDatatypeMapping.hpp:107-160 (no INT64 element type: 'Error: Invalid type')"
-    note: "int64 answer_key no: the dense rewrite takes INT64 offsets, but both references then stop with 'Error: Invalid type' because the test SDK's data-type mapping has no INT64 entry (FlatbufferDatatypeMapping.hpp:159; runner job 68273158, gfx942: every sampled INT64 row that no other value declined, 4 rows)."
+    cite: "@ 91a40bdfd4c DescriptorHelpers.hpp:243-275 (no check of the offset tensor's format); RaggedTensor.hpp:142-145 (offsets read as INT32 or INT64); references @ a6a860a8fff RaggedSdpaDensify.hpp:76-82 (dense rewrite: an INT64 element is sized without the test SDK's type mapping), 271-274 (INT32 or INT64 offsets), RaggedSdpaFwdSupport.hpp:97-99 (native plan: INT32)"
+    note: "int64 answer_key yes: the dense rewrite reads INT64 offsets (ALMIOPEN-3154). Both references ran and agreed on 60 clean ragged rows re-run with INT64 offsets, with the same results as INT32 (runner job 68283697, gfx942), and on the one INT64 row of levels.csv 6a630757 that both references ran. ASM_SDPA_ENGINE refuses INT64 offsets."
     group: G5-batch-heads-kvstorage
     size_sensitive: ["no", "element format of the offsets, the same at every size"]
     labels:
       int32: [common, layout, "yes"]
-      int64: [rare, layout, "no"]
+      int64: [rare, layout, "yes"]
 
   - id: o_packing
     kind: child
@@ -267,13 +268,33 @@ axes:
       - {id: own_starts, meaning: "O is ragged with its own offset tensor and other start positions (class_to_value o_packing)"}
       - {id: padded, meaning: "O is in plain [B, H_q, S_q, D_v] slots while Q is ragged"}
     api_paths: [cpp]   # set_ragged_offset is not bound in Python
-    cite: "TA:508 (a ragged offset per tensor); @ 91a40bdfd4c references RaggedTokenBoundaries.hpp:105-128 (Q and O must have the same token boundaries), RaggedSdpaDensify.hpp:83-91 (the primaries of a packing group are all ragged or all dense), 441-461 (one length list per packing group)"
-    note: "own_starts and padded answer_key no: at 91a40bdfd4c the references take O only with Q's token boundaries, ragged when Q is ragged."
+    cite: "TA:508 (a ragged offset per tensor); @ 2fcf1e30202 references RaggedTokenBoundaries.hpp:51-53 (Q and O may start their sequences at other positions; their per-batch lengths must match), RaggedSdpaDensify.hpp:226-243 and RaggedSdpaFwdSupport.hpp:153-163 (the tensors of a packing group are all ragged or all dense)"
+    note: "own_starts answer_key yes: the references take O with its own start positions when its lengths match Q's; it needs the length tensors (D-REL-O-OWN-STARTS-NEED-ROOM). padded answer_key no: both references decline a dense O beside a ragged Q (RaggedSdpaDensify.hpp:226-243, RaggedSdpaFwdSupport.hpp:153-163)."
     group: G5-batch-heads-kvstorage
     size_sensitive: ["yes", "ragged offsets cross tile edges; the diagonal is per sequence"]
     labels:
       as_q: [common, layout, "yes"]
-      own_starts: [fringe, layout, "no"]
+      own_starts: [fringe, layout, "yes"]
+      padded: [rare, layout, "no"]
+
+  - id: v_packing
+    kind: child
+    value_kind: categorical
+    parent: {batch_packing: [ragged, ragged_kv_side]}
+    level: graph
+    meaning: "How V stores its rows when K is ragged."
+    values:
+      - {id: as_k, meaning: "V is ragged with K's start positions"}
+      - {id: own_starts, meaning: "V is ragged with its own offset tensor and other start positions (class_to_value v_packing)"}
+      - {id: padded, meaning: "V is in plain [B, H_v, S_kv, D_v] slots while K is ragged"}
+    api_paths: [cpp]   # set_ragged_offset is not bound in Python
+    cite: "TA:508 (a ragged offset per tensor); @ 2fcf1e30202 references RaggedTokenBoundaries.hpp:51-53 (K and V may start their sequences at other positions; their per-batch lengths must match), RaggedSdpaDensify.hpp:226-243 and RaggedSdpaFwdSupport.hpp:153-163 (the tensors of a packing group are all ragged or all dense)"
+    note: "own_starts answer_key yes: it needs the length tensors; the references take K's and V's lengths from seq_len_kv and need them equal (D-REL-V-OWN-STARTS-NEED-ROOM). padded answer_key no: both references decline a dense V beside a ragged K (RaggedSdpaDensify.hpp:226-243, RaggedSdpaFwdSupport.hpp:153-163)."
+    group: G5-batch-heads-kvstorage
+    size_sensitive: ["yes", "ragged offsets cross tile edges; the diagonal is per sequence"]
+    labels:
+      as_k: [common, layout, "yes"]
+      own_starts: [fringe, layout, "yes"]
       padded: [rare, layout, "no"]
 
   - id: sequence_lengths
@@ -284,7 +305,7 @@ axes:
       - {id: uniform, meaning: "padding_mask false, no seq-len tensors"}
       - {id: variable, class: variable, meaning: "padding_mask true + seq_len_q and seq_len_kv tensors"}
       - {id: variable_no_flag, class: variable, meaning: "seq_len_q and seq_len_kv tensors with padding_mask false: the second spelling of per-sequence lengths. hipDNN's references read it as padding (SEM-008); cuDNN refuses it"}
-      - {id: lengths_in_offsets, class: variable, meaning: "ragged only: the ragged offsets give each length; no seq_len tensors. The third spelling of per-sequence lengths, the only one the native ragged plan reads"}
+      - {id: lengths_in_offsets, class: variable, meaning: "ragged only: the ragged offsets give each length; no seq_len tensors. The third spelling of per-sequence lengths"}
       - {id: cu_seq_len, class: variable, meaning: "cumulative lengths in cu_seq_len_q and cu_seq_len_kv tensors (B + 1 running totals); removed by F-NO-CU-SEQ-LEN"}
     api_paths: [cpp, python]
     cite: "SA:354,364,602; @ 00d9c566bea SdpaFwdNode.hpp:154-157,283-302 (each tensor checked alone, never against the flag); PlanUtils.hpp:112-157 (references: tensors without the flag are padding); @ 91a40bdfd4c no cu_seq_len setter"
@@ -634,7 +655,7 @@ axes:
      labels: {bhsd: [common, layout, "yes"], bshd: [common, layout, "yes"], other_permutation: [rare, layout, "yes"]}}
 
   - {id: strides_q, kind: class, level: graph, meaning: "Stride pattern of Q.", values: *stride_classes_qo, api_paths: [cpp, python], cite: "TA:438,627-630",
-     note: "zero_broadcast answer_key yes: no reference gate refuses a zero stride on B, H or S, and both references computed the rows that held one (provisional until the reference probe run). A zero stride on the head dim is P-NO-HEAD-DIM-BROADCAST.",
+     note: "zero_broadcast answer_key yes: no reference gate refuses a zero stride on B, H or S, and both references computed the rows that held one (provisional until the reference probe run). The builder puts the zero stride on the head dim only when B, H and S all have extent 1; D-REL-STRIDE-NEEDS-EXTENT removes the rows where D has extent 1 too.",
      group: G4-layout-memory, size_sensitive: ["no", "strides are products of the extents; tier S already has every extent above 1 (only tier X reaches 32-bit stride limits)"],
      labels: {packed: [common, layout, "yes"], padded: [common, layout, "yes"], non_contiguous_view: [common, layout, "yes"], zero_broadcast: [rare, layout, "yes"], negative: [rare, layout, "no"], self_overlapping: [rare, layout, "yes"], head_dim_strided: [rare, layout, "yes"]}}
   - {id: strides_k, kind: class, level: graph, meaning: "Stride pattern of K.", values: *stride_classes_kv, api_paths: [cpp, python], cite: "TA:438,627-630",
@@ -1237,7 +1258,7 @@ axes:
       - {id: packed_with_q, meaning: "Stats packed token by token with Q's token boundaries; with per_tensor_elements its own offset tensor counts Stats elements, with shared_tokens it reads Q's token list"}
     api_paths: [cpp]   # set_ragged_offset is not bound in Python
     cite: "TA:508; @ 91a40bdfd4c SdpaFwdNode.hpp:403-415 (Stats dims and strides filled only when empty; no ragged check); references RaggedSdpaFwdSupport.hpp:245-257 (native plan: FLOAT Stats, dense or packed), RaggedSdpaDensify.hpp:88-111 (dense rewrite: a Stats role in the query packing)"
-    note: "packed_with_q answer_key partial: the packed Stats must be token-major (AK-RAGGED-TOKEN-MAJOR) and FLOAT (dtype_stats). Provisional until the reference probe run."
+    note: "packed_with_q answer_key partial: the packed Stats must be in a layout the ragged container accepts (AK-RAGGED-TOKEN-MAJOR) and FLOAT (dtype_stats). Provisional until the reference probe run."
     group: G7-aux-outputs
     size_sensitive: ["yes", "ragged offsets cross tile edges; the diagonal is per sequence"]
     labels:
@@ -1566,6 +1587,7 @@ omitted:
   - {what: "the cuDNN-compatibility entry point", reason: "the same request with matmul_input_precision fp16 when the caller leaves it unset (API-path variant PV-CUDNN-COMPAT)"}
   - {what: "INT64 length tensors and page tables", reason: "the frontend takes INT32 only (frontend rule F-INDEX-TENSORS-INT32)"}
   - {what: "the unfuse-FMA hint (set_unfuse_fma)", reason: "advisory: Graph::sdpa warns and then ignores it (@ 91a40bdfd4c Graph.hpp:6382)"}
+  - {what: "storage route of the caller-mask dropout scale and of one-element descale and scale factors (by value or device memory)", reason: "storage route held fixed; follow-up (choice rule CH-FIXED-STORAGE-ROUTE)"}
 
 # ---------------------------------------------------------------------------------------------
 # Class-to-value table.
@@ -1632,9 +1654,9 @@ class_to_value:
     inherited: {order: owner, note: "a view: see strides.inherited"}
   strides:  # applied on top of the dim_order's packed strides
     packed: {change: none}
-    padded: {row_stride_extra_elements: 16, note: "innermost row stride = D + 16 elements"}
+    padded: {row_stride_extra_elements: 16, note: "D + 16 elements: 16 head-dim slots, wherever D sits in the order (in bsdh the stride outside D is (D + 16) x H)"}
     non_contiguous_view: {head_stride_multiplier: 2, note: "every head of a tensor with twice the heads"}
-    head_dim_strided: {head_dim_stride: 2, note: "the head-dim stride is 2 and every outer stride is twice its packed value"}
+    head_dim_strided: {head_dim_stride: twice_packed, note: "the head-dim stride and every stride outside D are twice their packed value; a stride inside D (H in bsdh) keeps its packed value"}
     inherited: {strides: owner,
                 note: "the tensor is a view; its numeric strides are its owner's strides, one per dim, applied to its own dims (so its dim order is the owner's). Owner: K for V when head_dim_v <= head_dim_qk, Q for K otherwise (tensor_overlap.inputs_overlap). Example: V d128 inside a packed bhsd K d192 has row stride 192"}
     zero_broadcast: {stride: 0, dimension: first_with_extent_over_1, search_order: [S, H, B, D]}
@@ -1650,6 +1672,7 @@ class_to_value:
     element_aligned: {base_alignment_bytes: 256, start_offset: element_size, declared_alignment: element_size}
     sub_element: {base_alignment_bytes: 256, start_offset: 1, declared_alignment: 1,
                   note: "start_offset and declared_alignment in bytes. Impossible for 1-byte formats (definition rule D-REL-SUB-ELEMENT-ALIGNMENT)"}
+    note: "The runner moves the data start by start_offset bytes from a base aligned to base_alignment_bytes and declares declared_alignment; the bundle harness keeps the declared alignment only."
   window:  # keys on one side of the diagonal; right_bound = keys, left_bound = keys + 1 (it counts the diagonal key, cuDNN)
     left_bound_adds: 1
     zero: {keys: 0, note: "left_bound 1 (the diagonal only), right_bound 0. The frontend refuses left_bound 0 (@ 00d9c566bea SdpaFwdNode.hpp:40-42 -> node/detail/Utilities.hpp:479-495)"}
@@ -1699,6 +1722,7 @@ class_to_value:
                    note: "keyed by stats_packing: Stats is ragged on packed_with_q rows. Its offsets follow Q's lengths and the row's ragged_offsets value, in Stats's element units (per_tensor_elements) or as Q's token list (shared_tokens)"}
     offsets: {dtype: ragged_offset_dtype, dims: [{of: B, add: 1}, 1, 1, 1], form: ragged_offset_form, by: ragged_offsets,
               note: "Q, O and a packed Stats use per_seq_len_q; K and V use per_seq_len_kv. Without per-sequence lengths (sequence_lengths uniform) every length is the stored length. ragged_offsets gives the formula; ragged_offset_form gives the unit and the sharing."}
+    note: "A ragged tensor with H outside S (bhsd) is written head-major as [H, T, D]: head stride T x D with T = B x S, sequence stride D. A ragged tensor in order S,B,H,D folds the batch into the token axis, [T, H, D] (the strides of bshd). bshd and bsdh keep their packed strides."
   ragged_offset_form:
     per_tensor_elements: {tensors: one_per_ragged_tensor, unit: elements, multiplier: 1, stored_length: tensor_sequence_extent,
                           note: "an offset counts elements of its own tensor: token x the tensor's sequence stride"}
@@ -1710,6 +1734,11 @@ class_to_value:
     own_starts: {o_offsets: {q_contiguous: full_slots, otherwise: prefix_sum_of_lengths},
                  note: "O has its own offset tensor: full slots beside a Q packed end to end, end to end beside any other Q layout"}
     padded: {o_offsets: none, note: "O keeps plain [B, H_q, S_q, D_v] slots"}
+  v_packing:
+    as_k: {v_offsets: as_k}
+    own_starts: {v_offsets: {k_contiguous: full_slots, otherwise: prefix_sum_of_lengths},
+                 note: "V has its own offset tensor: full slots beside a K packed end to end, end to end beside any other K layout"}
+    padded: {v_offsets: none, note: "V keeps plain [B, H_v, S_kv, D_v] slots"}
   matmul_input_precision:
     native: {mma_core_mode: unset}
     fp32: {mma_core_mode: fp32}
@@ -1741,6 +1770,8 @@ class_to_value:
                   note: "per ragged tensor, slack = B x S - the sum of its side's live lengths; the gap g = slack (all the spare room), or 0 on a side with no slack. offset b = (g + sum of the lengths of sequences 0 .. b-1) x stride, so offset[B] = B x S x stride, the end of the tensor. The length tensors, when present, hold the same live lengths. CaseGraph computes it"}
     independent_starts: {offsets: slot_end_aligned, count: {of: B, add: 1}, last: {of: B, multiply: S},
                          note: "offset b = (b x S + S - length b) x stride for b < B, and offset[B] = B x S x stride: each sequence ends at the end of its full slot, so the gap before sequence b is S - length b"}
+    out_of_order: {offsets: reversed_slots, count: {of: B, add: 1}, last: {of: B, multiply: S},
+                   note: "offset b = (B - 1 - b) x S x stride for b < B; offset[B] = B x S x stride"}
   block_mask_granularity:
     tile_128: {tile: [128, 128]}
     other_tile: {tile: [64, 64]}
@@ -1757,12 +1788,12 @@ class_to_value:
     some_rows_blocked: {allowed: all, blocked_rows: [last]}
     all_blocked: {allowed: none}
   paging:
-    sides: {present: [K, V], k_only: [K], v_only: [V], note: "The dense side keeps [B, H, S_kv, D]; S_kv there equals the paged side's key extent (max_seq_len_kv), @ 00d9c566bea PlanUtils.hpp:266-273"}
+    sides: {present: [K, V], k_only: [K], v_only: [V], note: "The dense side keeps [B, H, S_kv, D]; S_kv there equals the paged side's key extent (max_seq_len_kv), @ 00d9c566bea PlanUtils.hpp:266-273. Each paged side's pool holds B x (its table width) pages: one page per table slot, so surplus slots point at pages of their own"}
     page_table_sharing: {separate: {tables: two}, shared: {tables: one, note: "one INT32 [B, 1, pages, 1] tensor given to set_paged_attention_k_table and _v_table; the same page slots in the K and V containers"}}
     page_size: {one_token: 1, partial: 16, whole_sequence: S_kv}
     page_size_k_vs_v:
       equal: {v_page_size: {multiply: 1}}
-      differ: {v_page_size: {multiply: 2}, note: "V's page size = 2 x K's; V's table is ceil(max_seq_len_kv / V's page size) wide and V's pool holds B x that many pages"}
+      differ: {v_page_size: {multiply: 2}, note: "V's page size = 2 x K's; V's table is ceil(max_seq_len_kv / V's page size) wide. Each paged side's pool holds B x (its table width) pages"}
     page_table_storage:
       dense: {ragged_offset: none}
       packed: {ragged_offset: {dtype: int32, dims: [{of: B, add: 1}, 1, 1, 1], offset_of_sequence: {multiply: pages_per_sequence}},
@@ -1773,7 +1804,7 @@ class_to_value:
       insufficient: {of: exact, add: -1, needs: {exact_at_least: 2}}
     max_seq_len_kv:
       equal: S_kv
-      larger: {of: S_kv, multiply: 2}
+      larger: {of: pages_times_page_size, note: "pages per sequence x page size; with the class values this is always above S_kv (F-PAGE-TABLE-WIDTH-FOLLOWS-MAXLEN needs the table width ceil(max / page size))"}
       smaller: {of: S_kv, add: -1}
     page_table_order:
       in_order: {slot_of_page: identity,
@@ -1898,7 +1929,7 @@ level_labels:
     - {id: B4, why: "head size sets the tile stride", a: [head_dim_qk, head_dim_v], b: *g4}
     - {id: B5, why: "page count and ragged offsets are defined against the lengths",
        a: [seq_kv, sequence_lengths],
-       b: [batch_packing, ragged_offsets, batch_size, q_heads, k_head_sharing, v_head_sharing, k_heads_vs_v_heads,
+       b: [batch_packing, ragged_offsets, v_packing, batch_size, q_heads, k_head_sharing, v_head_sharing, k_heads_vs_v_heads,
            paged_kv, page_table_sharing, page_size_k_vs_v, page_table_storage, page_size, page_table_order, page_count,
            max_seq_len_kv]}
     - {id: B6, why: "one kernel per (format, head size, mask type)",
@@ -1968,18 +1999,15 @@ level_labels:
     - {id: AK-DROPOUT-NOT-PAGED-K, why: "random (Philox) dropout is checked through rng_dump, whose key extent the references compare with K's dim 2 (PU:549-553 isSdpaPhiloxDropoutWithDump), and K's dim 2 is the page size when K is paged. A caller mask over paged K is checkable: its last dim is compared with the paged key extent max_seq_len_kv (PU:400-415; a mask sized to the page is declined)", forbid_any: [
         {dropout: [random], paged_kv: [present, k_only]}],
        note: "The rng_dump comparison with the page size is a reference gap. The graph builder sizes a paged caller mask max_seq_len_kv wide."}
-    - {id: AK-RAGGED-TOKEN-MAJOR, why: "the references read a ragged tensor only when it is packed token by token, [B, H, S, D] with the sequence stride covering one token's H x D block; ragged graphs run natively (BF16, FP8 E4M3) or through the dense rewrite (every other format, bias, sinks) (RSD:23-31, 202-210; RTB:20-37; SRI:87). A head-major ragged tensor ([H, T]) is a valid request that they do not read; the head-major clauses flip when PR #15080 merges. Only the ragged side's tensors are held to it", forbid_any: [
-        {batch_packing: [ragged, ragged_q_side], dim_order_q: [bhsd, other_permutation]}, {batch_packing: [ragged, ragged_kv_side], dim_order_k: [bhsd, other_permutation]},
-        {batch_packing: [ragged, ragged_kv_side], dim_order_v: [bhsd, other_permutation]}, {batch_packing: [ragged, ragged_q_side], dim_order_o: [bhsd, other_permutation]},
-        {batch_packing: [ragged, ragged_q_side], stats_packing: [packed_with_q], dim_order_stats: [bhsd, other_permutation]},
+    - {id: AK-RAGGED-TOKEN-MAJOR, why: "the references read a ragged tensor only in a layout their ragged container accepts: sorted strides over [tokens, H, D] with the batch axis left out, and no negative or self-overlapping stride and no zero sequence stride on the ragged side; the case builder puts a zero stride on S first (@ 2fcf1e30202 RaggedTensor.hpp:238-259, RaggedTokenBoundaries.hpp:23-48). Ragged graphs run natively (BF16, FP8 E4M3) or through the dense rewrite (every other format, bias, sinks) (SRI:87). Only the ragged side's tensors are held to it", forbid_any: [
         {batch_packing: [ragged, ragged_q_side], strides_q: [zero_broadcast, negative, self_overlapping]},
         {batch_packing: [ragged, ragged_kv_side], strides_k: [zero_broadcast, negative, self_overlapping]},
         {batch_packing: [ragged, ragged_kv_side], strides_v: [zero_broadcast, negative, self_overlapping]},
         {batch_packing: [ragged, ragged_q_side], strides_o: [zero_broadcast, negative, self_overlapping]},
         {batch_packing: [ragged, ragged_q_side], stats_packing: [packed_with_q], strides_stats: [zero_broadcast, negative, self_overlapping]},
-        {batch_packing: [ragged, ragged_kv_side], dim_order_k: [inherited], dim_order_q: [bhsd, other_permutation]},
+        {batch_packing: [ragged_kv_side], dim_order_k: [inherited], dim_order_q: [bhsd]},
         {batch_packing: [ragged, ragged_kv_side], strides_k: [inherited], strides_q: [zero_broadcast, negative, self_overlapping]}],
-       note: "Evidence for the dense rewrite is code and the reference unit tests ZeroBiasThroughTheRewrite and ForwardWithBiasMatchesCpu. The PoC runs hold no fp32 or biased ragged row that the references computed. In those runs both references computed a bf16 token-major ragged row and declined non-token-major rows. A dense Stats beside a ragged Q is not held to it (RaggedSdpaDensify.hpp:88-91); a packed Stats is (RaggedSdpaFwdSupport.hpp:252-253). A view (`inherited`) has its owner's layout: K inside a dense Q on a ragged K/V side takes Q's order and strides, so the last two clauses name Q's values; V inside K is covered by K's own clauses (both are on the K/V side). bsdh keeps S outer of H and D and head_dim_strided keeps the token span within one token, so neither breaks the token-major test (RTB:28-36)."}
+       note: "The case builder writes a ragged tensor with H outside S (bhsd) head-major as [H, T, D] and folds the batch into the token axis for S,B,H,D ([T, H, D]), so every dim order is a layout the references take. Evidence for the dense rewrite is code and the reference unit tests ZeroBiasThroughTheRewrite and ForwardWithBiasMatchesCpu. The PoC runs hold no fp32 or biased ragged row that the references computed. A dense Stats beside a ragged Q is not held to it (@ 2fcf1e30202 RaggedSdpaDensify.hpp:234: Stats is left out of the all-ragged-or-all-dense test); a packed Stats is (RaggedSdpaFwdSupport.hpp:253-257). A view (`inherited`) has its owner's layout: K inside a dense Q on a ragged K/V side takes Q's strides, so the last two clauses name Q's values (a dense bhsd Q beside a ragged K/V side has per-batch slots, which the ragged container refuses; a ragged Q is head-major itself); V inside K is covered by K's own clauses (both are on the K/V side). bsdh and head_dim_strided keep the H and D strides sorted within one token, so neither breaks the sorted-stride test."}
     - {id: AK-RAGGED-NOT-ON-PAGED, why: "both references decline a ragged offset on a paged K or V container: tokens counted through pages are defined by no reference (RSD:154-163). Ragged Q over a paged, non-ragged K/V runs through the dense rewrite", forbid_any: [
         {batch_packing: [ragged, ragged_kv_side], paged_kv: [present, k_only, v_only]}]}
     - {id: AK-SCALE-FINITE, why: "both references decline a non-finite scale written into the graph as a number: every output would be NaN (PU:328-332 isSupportedSdpaScaleOperand; native ragged plan RaggedSdpaFwdSupport.hpp:233-238). A one-element by-value or FLOAT scale tensor holding NaN or inf is not checked (PU:333-349)", forbid_any: [
@@ -2004,7 +2032,7 @@ level_labels:
   # Targeted single cases. Each is the shared base plus
   # `changes`; the solver fills in anything a rule forces. They need no label.
   targeted:
-    # A negative or zero stride on the head dim is a rejection probe (MV-22a, MV-23b; policy), not a targeted case.
+    # A negative stride on the head dim is a rejection probe (MV-22a), not a targeted case.
     - {id: X2, why: "caller dropout mask may run as no dropout", changes: {dropout: caller_mask, dropout_mask_pattern: mixed}}
     - {id: X3a, why: "block mask may be ignored", changes: {block_mask: present, block_mask_pattern: mixed}}
     - {id: X3b, why: "max/sum-exp outputs may be ignored", changes: {max_sumexp_output: requested}}

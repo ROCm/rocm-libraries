@@ -4,8 +4,8 @@
 > Last updated: 2026-10-15
 
 - **Status**: In progress
-- **Status notes**: The generic bundle runner, template sweeps, `--verification-mode`, the `hipdnn_golden_data_tests` binary, and `verify_golden_bundles.py` shipped (#8228, #8926, #8641, #10416, #11494). Bundle `.meta.json` tolerance, tolerance calibration, the `forward_source` check, the 800 MB budget check, and a pre-commit hook are not built. Code is in `dnn-providers/integration-tests/src/harness/bundle/`.
-- **Last verified**: 2026-11-04 against `develop` (f7d1a530866) plus this change
+- **Status notes**: The generic bundle runner, template sweeps, `--verification-mode`, the `hipdnn_golden_data_tests` binary, and `verify_golden_bundles.py` shipped (#8228, #8926, #8641, #10416, #11494). Bundle `.meta.json` tolerance, tolerance calibration, the `forward_source` check, the 800 MB budget check, and a pre-commit hook are not built. A ragged tensor's `.bin` holds exactly its element space (#15080). Code is in `dnn-providers/integration-tests/src/harness/bundle/`.
+- **Last verified**: 2026-11-04 against #15080 on `develop` (49a01e717d5)
 
 ## Table of Contents
 1. [Summary](#summary)

@@ -5,7 +5,7 @@
 # cumulative check target.
 test_categories:
   quick:
-    description: "Device-free unit tests of the SDPA case builder"
+    description: "Unit tests of the SDPA case builder and runner helpers"
     test_patterns:
       - "hipdnn_sdpa_case_flow_case_graph_tests"
     labels:

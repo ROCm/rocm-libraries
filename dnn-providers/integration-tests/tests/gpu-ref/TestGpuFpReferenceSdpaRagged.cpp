@@ -1054,7 +1054,7 @@ TEST(TestGpuSdpaRaggedFwdFp32, ThrowsOnBadShapes)
 
     EXPECT_EQ(shapeError(d, d, d, d), "");
     expectError(shapeError({2, 4, 64}, d, d, d), "rank-4 [B, H, S, D]");
-    expectError(shapeError(d, d, d, d, /*offsetRows=*/2), "[B+1, 1, 1, 1]");
+    expectError(shapeError(d, d, d, d, /*offsetRows=*/2), "must have shape [B + 1, 1, 1, 1]");
     expectError(shapeError(raggedDims(2, 4, 4, 0), raggedDims(2, 4, 4, 0), d, d),
                 "all dimensions must be positive");
     expectError(shapeError(d, raggedDims(1, 4, 4, 16), d, d), "batch dimension mismatch");
@@ -1969,9 +1969,9 @@ TEST(TestGpuSdpaRaggedFwdFp32, ShiftedOriginOffsets)
     runRaggedFwdCase(c);
 }
 
-// Row L9: non-monotonic origins with seq_len. Batch 0 sits after batch 1 and 2 in Q (origin rows
-// 10, 0, 5), K/V (6, 0, 2) and O (5, 10, 0); the lengths come from seq_len_q / seq_len_kv and
-// the last offset entry is unused.
+// Row L9: non-monotonic origins with seq_len. Batch 0 sits after batches 1 and 2 in Q (origin rows
+// 10, 0, 5) and K/V (6, 0, 2), and after batch 2 only in O (5, 10, 0); the lengths come from
+// seq_len_q / seq_len_kv and the last offset entry is unused.
 TEST(TestGpuSdpaRaggedFwdFp32, NonMonotonicOriginsWithSeqLen)
 {
     SKIP_IF_NO_DEVICES();

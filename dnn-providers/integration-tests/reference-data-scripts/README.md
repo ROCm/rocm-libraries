@@ -216,7 +216,8 @@ forward bundle is still written, as an ordinary single-graph bundle at
 Q side (Q, O, dO, dQ, Stats), the K/V side (K, V, dK, dV) or every operand
 ragged. Each ragged tensor gets an INT32 offset tensor and a
 `ragged_offset_multiplier`. Batch `b` starts at its offset (its origin) and
-holds `seq_len[b]` token rows; `offset[B]` is not read. The `.bin` holds exactly
+holds `seq_len[b]` token rows; `offset[B]` is read with the table but neither used nor validated (origins come from
+entries 0..B-1, lengths from `seq_len`). The `.bin` holds exactly
 the `elementSpace` elements the sequences address (RFC 0014): up to the last row
 of the furthest sequence and nothing after it. Elements no sequence addresses
 are NaN in outputs and finite poison in inputs. The layout options take

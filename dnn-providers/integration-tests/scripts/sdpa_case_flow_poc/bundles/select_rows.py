@@ -10,14 +10,15 @@ Reads levels.csv and never edits it. Writes:
 
 Exclusion reasons:
   content reasons     a bundle cannot express the row (exact input contents, aliasing,
-                      arch-dependent dtypes)
+                      arch-dependent dtypes, a data start past an aligned allocation start)
   zero_stride_needs_pr14709, dropout_without_rng_dump, reference_declines_descale_non_fp8
                       the extra exclusions. The last one is off by default (--descale-non-fp8-filter
                       turns it on). It takes the clauses of the model's answer-key rule
                       AK-DESCALE-WITH-FP8 that forbid a present Q, K or V descale. Levels that ignore
                       the answer-key rules admit such rows, and no reference can check them.
   not_selected:tier, not_selected:min_sweep_size         the selection parameters
-  frontend_rejects, realise_error, content_not_expressible, export_missing
+  frontend_rejects, realise_error, content_not_expressible, start_offset_not_expressible,
+  export_error, export_missing
                       outcomes of a runner export, when --export-outcomes is given
 
 With the default parameters, and an input whose SHA-256 equals the one in
@@ -53,28 +54,29 @@ DESCALE_AXES = ("descale_q", "descale_k", "descale_v")
 
 # Counts for the CSV named by levels.csv.sha256, with the default parameters.
 EXPECTED = {
-    "rows": 22495,
+    "rows": 22977,
     "content_reasons": {
-        "ragged_offsets": 2883,
+        "ragged_offsets": 3769,
         "page_table_contents": 190,
-        "tensor_overlap": 1254,
-        "arch_dtype": 411,
+        "tensor_overlap": 1314,
+        "arch_dtype": 391,
+        "start_offset_not_expressible": 3688,
     },
     "extra_of_expressible": {
-        "zero_stride_needs_pr14709": 854,
+        "zero_stride_needs_pr14709": 734,
         "dropout_without_rng_dump": 10,
     },
     "per_tier": {
         # rows, bundle rows, strict sweeps, alignment-split sweeps, largest, 1-case, then the summed
         # est_seconds on gfx942 and gfx950 of the expressible rows before the extra exclusions
-        "quick": (1690, 1273, 89, 153, 316, 26, 44.0, 34.1),
-        "standard": (9130, 7410, 254, 473, 1826, 19, 425.0, 316.5),
-        "comprehensive": (4438, 3451, 208, 364, 790, 66, 1351.8, 961.9),
-        "full": (7237, 5355, 266, 485, 1243, 66, 2598.3, 1859.0),
+        "quick": (1610, 1039, 87, 87, 250, 30, 35.6, 27.6),
+        "standard": (9434, 6100, 243, 243, 1455, 18, 344.5, 257.0),
+        "comprehensive": (4543, 2829, 196, 196, 664, 68, 1098.9, 782.1),
+        "full": (7390, 4421, 256, 256, 962, 66, 2147.5, 1537.6),
     },
-    "bundle_rows": 17489,
-    "sweeps": 817,
-    "sweeps_alignment_split": 1475,
+    "bundle_rows": 14389,
+    "sweeps": 782,
+    "sweeps_alignment_split": 782,
 }
 
 
@@ -126,6 +128,9 @@ class Model:
         self.paged = values["paged_sides"]
         self.page_tables = values["page_tables"]
         self.packed_table = values["packed_page_table"]
+        self.shifted_starts = {
+            k for k, v in values["alignment"].items() if v["start_offset"] != 0
+        }
 
     def tensors(self, row, strict=True):
         """Sorted tuple of the tensor roles of a row's graph, with value-form tags when strict."""
@@ -209,7 +214,16 @@ def active(row, axis):
     return row[axis] not in ("", "-")
 
 
-def content_reasons(row):
+ALIGNMENT_AXES = (
+    "alignment_q",
+    "alignment_k",
+    "alignment_v",
+    "alignment_o",
+    "alignment_stats",
+)
+
+
+def content_reasons(row, model):
     """Why a bundle cannot express the row; empty when it can."""
     why = []
     if active(row, "ragged_offsets"):
@@ -225,6 +239,8 @@ def content_reasons(row):
         row["matmul_input_precision"] == "fp8" and not row["dtype_q"].startswith("fp8")
     ):
         why.append("arch_dtype")
+    if any(row[ax] in model.shifted_starts for ax in ALIGNMENT_AXES):
+        why.append("start_offset_not_expressible")
     return why
 
 
@@ -295,6 +311,8 @@ EXPORT_REASON = {
     "frontend-rejected": "frontend_rejects",
     "realise-error": "realise_error",
     "content-not-expressible": "content_not_expressible",
+    "start-offset-not-expressible": "start_offset_not_expressible",
+    "export-error": "export_error",
 }
 
 
@@ -331,7 +349,7 @@ def classify(
     """Reasons per row (list per row, in input order). An empty list means the row is selected."""
     reasons = []
     for r in rows:
-        why = content_reasons(r)
+        why = content_reasons(r, model)
         for x in extra_reasons(r, descale_filter, model_path):
             if x == "zero_stride_needs_pr14709" and not zero_stride_filter:
                 continue
@@ -361,14 +379,14 @@ def summarise(rows, reasons, model):
     content = Counter()
     extra_of_expressible = Counter()
     for r, w in zip(rows, reasons):
-        c = content_reasons(r)
+        c = content_reasons(r, model)
         content.update(c)
         if not c:
             extra_of_expressible.update(x for x in w if x in EXTRA_REASONS)
     per_tier = {}
     for lv in LEVELS:
         sel = [r for r, w in zip(rows, reasons) if not w and r["level"] == lv]
-        expr = [r for r in rows if r["level"] == lv and not content_reasons(r)]
+        expr = [r for r in rows if r["level"] == lv and not content_reasons(r, model)]
         strict = Counter(model.tensors(r, True) for r in sel)
         aligned = Counter(alignment_signature(model, r) for r in sel)
         per_tier[lv] = {

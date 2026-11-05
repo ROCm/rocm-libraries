@@ -32,9 +32,10 @@
 # Amended 2026-11-04 (Layer 0 fix). Layer 0 holds the request and the settings that tensor contents
 #   define. A missing engine, reference or frontend feature is never a reason to leave a value out of
 #   Layer 0 or to set it aside. Added by meaning: ragged_offset_unit, ragged_offset_sharing,
-#   ragged_offset_dtype, o_packing, length_form, block_mask_granularity, block_mask_dtype,
+#   ragged_offset_dtype, o_packing, v_packing, length_form, block_mask_granularity, block_mask_dtype,
 #   dropout_mask_dtype, rng_state_storage, sink_values, scale_factor_values, special_values,
-#   value_magnitude, execution_strategy, and the value independent_starts of ragged_offsets.
+#   value_magnitude, execution_strategy, dropout_scale_storage, descale_storage, and the value
+#   independent_starts of ragged_offsets.
 #   sink_dtype takes every format. Value classes of tensor contents (sink_values,
 #   scale_factor_values, special_values, value_magnitude, scale_value non_finite) are hints for a
 #   fuzzer: they are not for test-case generation.
@@ -156,9 +157,7 @@ axes:
       - {id: ragged_kv_side, meaning: "K and V squashed end to end; Q and O in equal-length slots. Added 2026-10-29"}
     notes: >-
       An output row belongs to its query, and each value to its key, so the values name the two sides.
-      O can be stored differently from Q (o_packing). V stored differently from K (in slots beside a ragged
-      K, or ragged with its own start positions) is meaningful too; it is not an axis here yet: an open
-      question for the user. Added 2026-10-29: the per-side values (ragged Q over a
+      O can be stored differently from Q (o_packing), and V differently from K (v_packing). Added 2026-10-29: the per-side values (ragged Q over a
       paged K/V cache is in the reference tests; the frontend puts a ragged offset on each tensor
       separately).
     source: "axis doc § 1"
@@ -178,7 +177,8 @@ axes:
       - {id: mid_token, meaning: "a start position falls inside a token (meaningless value — see Layer 1)"}
     notes: >-
       The value describes the start positions of the side's input tensors. Each ragged tensor can have
-      its own list (ragged_offset_sharing); O can start its sequences elsewhere (o_packing). Stats, when
+      its own list (ragged_offset_sharing); O can start its sequences elsewhere than Q (o_packing), and V elsewhere
+      than K (v_packing). Stats, when
       stats_packing is packed_with_q, uses Q's token boundaries. A gap exists only where some live length
       is shorter than its slot (Layer 1 D-REL-GAPPED-NEEDS-SHORT-LENGTHS).
     source: "axis doc § 10 'Ragged offsets'"
@@ -225,6 +225,18 @@ axes:
       - {id: own_starts, meaning: "O is ragged, and its sequences start at other positions than Q's"}
       - {id: padded, meaning: "O is in equal-length slots while Q is ragged"}
     notes: "An output row belongs to its query, so O has Q's sequences and lengths; only where O stores them can differ."
+    source: "axis doc § 1, § 10 'Ragged offsets'"
+
+  - id: v_packing
+    kind: child
+    value_kind: categorical
+    parent: {batch_packing: [ragged, ragged_kv_side]}
+    meaning: "How V stores its rows when K is ragged."
+    values:
+      - {id: as_k, meaning: "V is ragged with K's start positions"}
+      - {id: own_starts, meaning: "V is ragged, and its sequences start at other positions than K's"}
+      - {id: padded, meaning: "V is in plain slots while K is ragged"}
+    notes: "Each key pairs with one value, so V has K's sequences and lengths; only where V stores them can differ."
     source: "axis doc § 1, § 10 'Ragged offsets'"
 
   - id: sequence_lengths
@@ -725,6 +737,15 @@ axes:
     meaning: "Hand back which weights were dropped. Exists only when dropout is used (rule A)."
     values: *request
     source: "axis doc § 8 'Dropout-pattern output'"
+  - id: dropout_scale_storage
+    kind: child
+    value_kind: categorical
+    parent: {dropout: [caller_mask]}
+    meaning: "Where the rescale factor of a caller-supplied dropout pattern is held."
+    values:
+      - {id: by_value, meaning: "in the request, as a number"}
+      - {id: device_memory, meaning: "in device memory, read when the operation runs"}
+    source: "axis doc § 14 'Scalar by value vs device memory'"
 
   # ---------------------------------------------------------------- § 8 optional outputs
   - id: stats_output
@@ -786,6 +807,14 @@ axes:
   - {id: descale_v, kind: categorical, meaning: "Multiply stored V by factors to get its real values.", values: *descale_granularity, source: "axis doc § 9"}
   - {id: s_quantization, kind: categorical, meaning: "Scale S into a low-precision format before S·V and undo the scale after.", values: *presence, source: "axis doc § 9"}
   - {id: scale_o, kind: categorical, meaning: "Multiply O by a factor before storing it.", values: *presence, source: "axis doc § 9"}
+  - id: descale_storage
+    kind: categorical
+    meaning: "Where a one-element descale or scale factor (a per-tensor descale of Q, K or V, descale_s and scale_s, scale_o) is held, when the case has one."
+    values:
+      - {id: by_value, meaning: "in the request, as a number"}
+      - {id: device_memory, meaning: "in device memory, read when the operation runs"}
+    notes: "No single parent axis makes a one-element factor present: any of descale_q, descale_k, descale_v (present), s_quantization or scale_o can."
+    source: "axis doc § 14 'Scalar by value vs device memory'"
   - id: scale_factor_values
     kind: child
     value_kind: class

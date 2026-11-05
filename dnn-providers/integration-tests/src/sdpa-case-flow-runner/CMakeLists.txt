@@ -17,11 +17,15 @@ add_custom_command(
         -DSOURCE_1=${CMAKE_CURRENT_SOURCE_DIR}/Main.cpp
         -DSOURCE_2=${_it_src}/sdpa-case-flow-poc/CaseGraph.cpp
         -DSOURCE_3=${_it_src}/sdpa-case-flow-poc/CaseGraph.hpp
+        -DSOURCE_4=${CMAKE_CURRENT_SOURCE_DIR}/ShiftedStarts.hpp
+        -DSOURCE_5=${CMAKE_CURRENT_SOURCE_DIR}/RaggedCompareView.hpp
         -P ${CMAKE_CURRENT_SOURCE_DIR}/GenerateSourceHash.cmake
     DEPENDS
         ${CMAKE_CURRENT_SOURCE_DIR}/Main.cpp
         ${_it_src}/sdpa-case-flow-poc/CaseGraph.cpp
         ${_it_src}/sdpa-case-flow-poc/CaseGraph.hpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/ShiftedStarts.hpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/RaggedCompareView.hpp
         ${CMAKE_CURRENT_SOURCE_DIR}/GenerateSourceHash.cmake
     COMMENT "Hashing the SDPA case-flow runner sources"
     VERBATIM

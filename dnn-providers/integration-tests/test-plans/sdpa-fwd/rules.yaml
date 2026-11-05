@@ -124,11 +124,11 @@ rules:
     kind: definition
     form: exclusion
     basis: meaning
-    reason: "Two sequences of an output cannot share memory: two results would be written to one place. hipDNN's ragged form also refuses input sequences that share memory: its offsets must not decrease."
+    reason: "Two sequences of an output cannot share memory: two results would be written to one place. hipDNN's ragged form also refuses input sequences that share memory."
     note: "The input half rests on hipDNN's ragged format, not on the definition of attention."
-    source: "one memory location holds one value; @ 91a40bdfd4c projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/RaggedTensor.hpp:271-307 (offsets must not decrease)"
+    source: "one memory location holds one value; projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/RaggedTensor.hpp:208-219 (overlapping token intervals are refused)"
     probe: MV-10
-    moot: "Removes nothing. hipDNN's ragged offsets are B + 1 non-decreasing boundaries, so sequences cannot overlap and the value overlapping ({ragged_offsets: [overlapping]}) is not in the model (F-RAGGED-OFFSETS-ARE-LENGTHS). Its probe belongs to the rejection suite."
+    moot: "Removes nothing. The value overlapping ({ragged_offsets: [overlapping]}) is not in the model: Layer 1 removes it on its own. Its probe belongs to the rejection suite."
 
   - id: D-PAGES-SUFFICIENT
     kind: definition
@@ -214,10 +214,10 @@ rules:
     kind: definition
     form: exclusion
     basis: consistency
-    reason: "Start positions with gaps between sequences need at least two sequences."
-    forbid: {batch_size: [one], ragged_offsets: [independent_starts]}
-    source: "a gap between items needs two items"
-    adapted: "batch class zero dropped (F-EXTENT-NONZERO); values out_of_order and overlapping dropped (F-RAGGED-OFFSETS-ARE-LENGTHS)."
+    reason: "Out-of-order or independent start positions need at least two sequences: one sequence has no order, and a gap between sequences needs two."
+    forbid: {batch_size: [one], ragged_offsets: [out_of_order, independent_starts]}
+    source: "an order and a gap between items need two items"
+    adapted: "batch class zero dropped (F-EXTENT-NONZERO); value overlapping dropped (not in the model: D-RAGGED-NO-OVERLAP)."
 
   - id: D-REL-PAGE-SIZE
     kind: definition
@@ -422,6 +422,54 @@ rules:
     adapted: "Model only: the class value fixes how O's starts differ from Q's."
     evidence: inferred
 
+  - id: D-REL-VIEW-KEEPS-OWNER-ALIGNMENT
+    kind: definition
+    form: exclusion
+    basis: consistency
+    reason: "A view starts at its owner's first element, so its data start has the owner's alignment; a view with another alignment class contradicts itself."
+    forbid_any:
+      - {tensor_overlap: [inputs_overlap], strides_v: [inherited], alignment_k: [wide_aligned], alignment_v: [element_aligned, sub_element]}
+      - {tensor_overlap: [inputs_overlap], strides_v: [inherited], alignment_k: [element_aligned], alignment_v: [wide_aligned, sub_element]}
+      - {tensor_overlap: [inputs_overlap], strides_v: [inherited], alignment_k: [sub_element], alignment_v: [wide_aligned, element_aligned]}
+      - {tensor_overlap: [inputs_overlap], strides_k: [inherited], alignment_q: [wide_aligned], alignment_k: [element_aligned, sub_element]}
+      - {tensor_overlap: [inputs_overlap], strides_k: [inherited], alignment_q: [element_aligned], alignment_k: [wide_aligned, sub_element]}
+      - {tensor_overlap: [inputs_overlap], strides_k: [inherited], alignment_q: [sub_element], alignment_k: [wide_aligned, element_aligned]}
+    source: "class_to_value.tensor_overlap.inputs_overlap (the view reads from its owner's start); class_to_value.alignment (start_offset moves the data start)"
+    adapted: "Model only: the class values fix where a view starts."
+    evidence: inferred
+
+  - id: D-REL-RAGGED-VIEW-FITS-OWNER
+    kind: definition
+    form: exclusion
+    basis: consistency
+    reason: "A ragged K that is not paged and reads through Q holds B x S_kv token slots inside Q's B x S_q slots, so a key length longer than the query length reads past Q's buffer. A paged K keeps its own page pool."
+    forbid: {tensor_overlap: [inputs_overlap], strides_k: [inherited], batch_packing: [ragged, ragged_kv_side], paged_kv: [absent, v_only], seq_q_vs_seq_kv: [shorter]}
+    source: "class_to_value.tensor_overlap.inputs_overlap (K inside Q when head_dim_v > head_dim_qk); class_to_value.batch_packing (a ragged tensor stores B x S token slots)"
+    adapted: "Model only: the class values fix which tensor is the view and how a ragged tensor stores its tokens."
+    evidence: inferred
+
+  - id: D-REL-V-OWN-STARTS-NOT-SHARED
+    kind: definition
+    form: exclusion
+    basis: consistency
+    reason: "One list of start positions shared by K and V gives V K's starts, so V cannot start its sequences elsewhere."
+    forbid: {v_packing: [own_starts], ragged_offset_form: [shared_tokens]}
+    source: "class_to_value.ragged_offset_form.shared_tokens: K and V read one offset tensor"
+    adapted: "Layer 1 names ragged_offset_sharing shared_per_side; the model carries the sharing in ragged_offset_form (CH-FOLDED-CHILD-AXES)."
+    evidence: inferred
+
+  - id: D-REL-V-OWN-STARTS-NEED-ROOM
+    kind: definition
+    form: exclusion
+    basis: consistency
+    reason: "V's own list is full slots beside a K packed end to end, and end to end beside any other K layout, so the two lists differ only when some key/value length is shorter than its slot. With the offsets as the only lengths, V's own list would state other lengths than K's."
+    forbid_any:
+      - {v_packing: [own_starts], per_seq_len_kv: [all_full]}
+      - {v_packing: [own_starts], sequence_lengths: [uniform, lengths_in_offsets]}
+    source: "class_to_value.v_packing.own_starts; each key pairs with one value, so V has K's lengths (D-S-KV-LENGTH-SHARED)"
+    adapted: "Model only: the class value fixes how V's starts differ from K's."
+    evidence: inferred
+
   - id: D-INPUTS-OVERLAP-VIEW-DTYPE
     kind: definition
     form: exclusion
@@ -589,11 +637,11 @@ rules:
   - id: F-RAGGED-OFFSETS-ARE-LENGTHS
     kind: frontend
     form: exclusion
-    reason: "hipDNN's ragged form gives each ragged tensor B + 1 non-decreasing boundaries; sequence b holds [offset[b], offset[b + 1]). Under that form a sequence stored before a sequence of lower index, or two sequences that share memory, cannot be stated. When the offsets are the only lengths, a slot is its sequence, so a slot longer than its sequence (gapped, independent_starts) cannot be stated either."
-    forbid: {ragged_offsets: [gapped, independent_starts], sequence_lengths: [uniform, lengths_in_offsets]}
-    omits: "ragged_offsets values out_of_order and overlapping"
-    source: "@ 91a40bdfd4c projects/hipdnn/docs/rfcs/0014_RaggedTensors.md:153-155 (offsets start at 0 and do not decrease); DH:243-262 (the frontend checks only the offset tensor's own properties)"
-    debatable: "The frontend accepts any offset contents; the boundary form is the API's stated definition, and the references enforce it (@ 91a40bdfd4c RaggedTokenBoundaries.hpp:89-94). cuDNN's form, start positions with lengths from the length tensors, can state out-of-order and overlapping input sequences. Keeping out_of_order out of the model is a user decision (2026-11-03). The rule does not apply the start-at-0 clause of the same text: leading_gap and independent_starts (offset[0] > 0) stay model values."
+    reason: "Without length tensors the ragged offsets are boundaries and lengths: sequence b holds [offset[b], offset[b + 1]) and the offsets do not decrease. So a slot longer than its sequence (gapped, independent_starts) or a sequence stored before a sequence of lower index (out_of_order) cannot be stated. With length tensors the offsets are start positions only: any order can be stated, and the length tensors give the lengths."
+    forbid: {ragged_offsets: [gapped, independent_starts, out_of_order], sequence_lengths: [uniform, lengths_in_offsets]}
+    omits: "ragged_offsets value overlapping (Layer 1 D-RAGGED-NO-OVERLAP)"
+    source: "DH:243-262 (the frontend checks only the offset tensor's own properties); projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/RaggedTensor.hpp:101-128 (with length tensors the lengths come from them; without them each length is offset[b + 1] - offset[b], and a decrease is refused)"
+    debatable: "The frontend accepts any offset contents. The boundary form without length tensors is hipDNN's ragged definition; the references read the offsets that way when no length tensors are given and as start positions when they are. cuDNN's form is the same: start positions with lengths from the length tensors. Overlapping sequences stay out of the model (Layer 1 D-RAGGED-NO-OVERLAP). leading_gap (offset[0] > 0) needs no length tensors and is not removed here."
     evidence: read in code
 
   - id: F-PAGE-TABLE-WIDTH-FOLLOWS-MAXLEN
@@ -734,39 +782,11 @@ rules:
     form: covered
     reason: "A zero stride on a dimension of size > 1 of O, Stats, Max or Sum_exp should be refused."
     covered_by: D-OUTPUT-SELF-ALIAS
-    ticket: ALMIOPEN-3114
+    ticket: ALMIOPEN-3155
     source: "hipDNN policy"
     note: "Removes nothing: D-OUTPUT-SELF-ALIAS already removes zero_broadcast on strides_o and strides_stats (zero_broadcast means a dimension of extent > 1), and Max and Sum_exp have no stride axis (always packed). Its probes are MV-04a and MV-04c."
     probe: MV-04
     evidence: read in code
-
-  - id: P-NO-HEAD-DIM-BROADCAST
-    kind: policy
-    form: exclusion
-    reason: "A zero stride on the head-dimension axis of Q, K or V (head size > 1) should be refused: one head vector would be one repeated element."
-    forbid_any:
-      # The builder puts the zero stride on the first of S, H, B with extent > 1, else on D
-      # (class_to_value strides.zero_broadcast); these rows have extent 1 on S, H and B.
-      - {batch_size: [one], q_heads: [one], seq_q: [one], head_dim_qk: [d64, d128, d192, d256], strides_q: [zero_broadcast]}
-      - {batch_size: [one], q_heads: [one], k_head_sharing: [mha], seq_kv: [one], paged_kv: [absent], head_dim_qk: [d64, d128, d192, d256], strides_k: [zero_broadcast]}
-      - {batch_size: [one], k_head_sharing: [mqa], seq_kv: [one], paged_kv: [absent], head_dim_qk: [d64, d128, d192, d256], strides_k: [zero_broadcast]}
-      - {batch_size: [one], q_heads: [one], k_head_sharing: [mha], seq_kv: [one], paged_kv: [present, k_only], page_size: [one_token, whole_sequence], head_dim_qk: [d64, d128, d192, d256], strides_k: [zero_broadcast]}
-      - {batch_size: [one], k_head_sharing: [mqa], seq_kv: [one], paged_kv: [present, k_only], page_size: [one_token, whole_sequence], head_dim_qk: [d64, d128, d192, d256], strides_k: [zero_broadcast]}
-      - {batch_size: [one], q_heads: [one], k_head_sharing: [mha], seq_kv: [one], paged_kv: [v_only], max_seq_len_kv: [equal], head_dim_qk: [d64, d128, d192, d256], strides_k: [zero_broadcast]}
-      - {batch_size: [one], k_head_sharing: [mqa], seq_kv: [one], paged_kv: [v_only], max_seq_len_kv: [equal], head_dim_qk: [d64, d128, d192, d256], strides_k: [zero_broadcast]}
-      - {batch_size: [one], q_heads: [one], v_head_sharing: [mha], seq_kv: [one], paged_kv: [absent], head_dim_v: [d64, d128, d192, d256], strides_v: [zero_broadcast]}
-      - {batch_size: [one], v_head_sharing: [mqa], seq_kv: [one], paged_kv: [absent], head_dim_v: [d64, d128, d192, d256], strides_v: [zero_broadcast]}
-      - {batch_size: [one], q_heads: [one], v_head_sharing: [mha], seq_kv: [one], paged_kv: [present], page_size_k_vs_v: [equal], page_size: [one_token, whole_sequence], head_dim_v: [d64, d128, d192, d256], strides_v: [zero_broadcast]}
-      - {batch_size: [one], v_head_sharing: [mqa], seq_kv: [one], paged_kv: [present], page_size_k_vs_v: [equal], page_size: [one_token, whole_sequence], head_dim_v: [d64, d128, d192, d256], strides_v: [zero_broadcast]}
-      - {batch_size: [one], q_heads: [one], v_head_sharing: [mha], seq_kv: [one], paged_kv: [v_only], page_size: [one_token, whole_sequence], head_dim_v: [d64, d128, d192, d256], strides_v: [zero_broadcast]}
-      - {batch_size: [one], v_head_sharing: [mqa], seq_kv: [one], paged_kv: [v_only], page_size: [one_token, whole_sequence], head_dim_v: [d64, d128, d192, d256], strides_v: [zero_broadcast]}
-      - {batch_size: [one], q_heads: [one], v_head_sharing: [mha], seq_kv: [one], paged_kv: [k_only], max_seq_len_kv: [equal], head_dim_v: [d64, d128, d192, d256], strides_v: [zero_broadcast]}
-      - {batch_size: [one], v_head_sharing: [mqa], seq_kv: [one], paged_kv: [k_only], max_seq_len_kv: [equal], head_dim_v: [d64, d128, d192, d256], strides_v: [zero_broadcast]}
-    ticket: ALMIOPEN-3114
-    source: "hipDNN policy; cuDNN SDPA requires head-dim stride 1; the frontend accepts it (TA:438,627-630)"
-    note: "A zero stride on B, H or S of an input (a broadcast) stays in the model. O and Stats are covered by D-OUTPUT-SELF-ALIAS. Head size d1 is left to D-REL-STRIDE-NEEDS-EXTENT (no dimension with extent > 1). Paged sides use the page pool [B x pages, H, page size, D]; a dense side beside a paged one spans max_seq_len_kv. Checked row by row against the builder's stride placement."
-    probe: MV-23
-    evidence: "read in code (CaseGraph.cpp stridesFor, buildInputs, pagedTable)"
 
   # =========================================================================== choice
   - id: CH-SIZE-CLASSES
@@ -817,6 +837,13 @@ rules:
     reason: "Held fixed: workspace large enough; O and Stats non-virtual with an explicit format; graph default types unset; one fixed node name; engine pinned by name by the driver."
     applies_to: []
     source: "@ 91a40bdfd4c projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp:4855, 1008-1013"
+
+  - id: CH-FIXED-STORAGE-ROUTE
+    kind: choice
+    form: setting
+    reason: "The storage route (by value or device memory) of the caller-mask dropout scale and of one-element descale and scale factors is held fixed: the dropout scale is by value, a one-element factor follows the runner's descale form. Varying it is follow-up work."
+    applies_to: [dropout, descale_q, descale_k, descale_v, s_quantization, scale_o]
+    source: "Layer 0 axes dropout_scale_storage and descale_storage"
 
   - id: CH-FOLDED-CHILD-AXES
     kind: choice

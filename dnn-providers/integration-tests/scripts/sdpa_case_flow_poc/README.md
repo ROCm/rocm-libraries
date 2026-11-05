@@ -231,12 +231,13 @@ The default values are:
 - the descale filter (`--descale-non-fp8-filter`) off.
 
 With these defaults, and an input whose SHA-256 is the one in
-`levels.csv.sha256`, the script checks the counts that it records: 9,883 rows
-in 293 sweeps.
+`levels.csv.sha256`, the script checks the counts that it records: 14,389 rows
+in 782 sweeps.
 
-`--no-zero-stride-filter` also selects the 6 zero-stride rows. The data-SDK
-change that they need (PR #14709) is merged. But these 6 rows are left out of
-this bundle set. Adding them is planned as a follow-up change.
+`--no-zero-stride-filter` also selects the 734 zero-stride rows that a bundle can
+otherwise express. The data-SDK change that they need (PR #14709) is merged. But
+these rows are left out of this bundle set. Adding them is planned as a
+follow-up change.
 
 `topology.py --input … --class-values … --out topologies.csv` checks that the
 topology names and the tensor signatures map one to one, and lists them.
