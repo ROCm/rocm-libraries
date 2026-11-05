@@ -19,16 +19,24 @@ They run as pre-push hooks from the repo-root `.pre-commit-config.yaml`
 push changes. CI does not run these hooks. Enable once per clone:
 
 ```bash
-pre-commit install --hook-type pre-push
+pre-commit install --hook-type pre-push --install-hooks
 ```
 
-Two things to know before you do:
+Three things to know before you do:
 
-- Hooks use `python` from `PATH` (Python 3.10 or newer) and never install anything.
-  Missing or broken analyzers print a message and do not fail the hook.
+- The three rocke hooks use `python` from `PATH` (Python 3.10 or newer) and never
+  install anything. Missing or broken analyzers print a message and do not fail
+  the hook. A missing `python` does fail it: pre-commit reports
+  ``Executable `python` not found`` and the push stops. Many Linux installs have
+  only `python3` until a virtual environment is active, so check with
+  `python --version` in the shell you push from.
 - The config sets no default stages, so this also runs the repo's other hooks
   (black, the whitespace fixers, bandit and so on) on the pushed files at push
-  time, and those *can* fail a push. The three rocke checks cannot.
+  time, and those *can* fail a push. The three rocke checks cannot, apart from
+  the missing-`python` case above.
+- Those other hooks need their repositories downloaded. `--install-hooks` does
+  that now, so a network problem shows up as a failed install. Without it the
+  first push does the download, and a push with no network access fails.
 
 Optionally install the analyzers ahead of time in your development environment,
 then keep that environment active when pushing:
@@ -42,13 +50,23 @@ The version check also prepares Pyright's runtime before a push. Installing thes
 tools is optional and separate from the hooks, so setup failures cannot block a
 push. Pyright uses packages already available in your environment for import types.
 
-Run them by hand on any files, or on all of rocke (radon and pyright take tens of
-seconds there, vulture a few):
+Run them by hand. For chosen files, go through pre-commit:
 
 ```bash
-pre-commit run rocke-radon   --hook-stage pre-push --files <paths>
-pre-commit run rocke-pyright --hook-stage pre-push --all-files
+pre-commit run rocke-radon --hook-stage pre-push --files <paths>
 ```
+
+For all of rocke (radon and pyright take tens of seconds there, vulture a few),
+call the wrapper with no paths, from the repository root:
+
+```bash
+python dnn-providers/hip-kernel-provider/rocke/tools/advisory_checks.py pyright
+```
+
+This gives one report. Do not use `pre-commit run --all-files` for it: pre-commit
+splits a long file list into several runs to stay under the operating system's
+command-line limit, each printing its own partial report, and vulture rescans all
+of rocke every time.
 
 To see all three reports for a whole branch without installing the pre-push hook
 (this also runs the repo's other hooks):

@@ -21,12 +21,13 @@
 # What the reports mean and what to act on: rocke/docs/static-analysis.md.
 #
 # Usage (install optional tools separately; see the guide):
-#   pre-commit install --hook-type pre-push          # one-time: run on `git push`
+#   pre-commit install --hook-type pre-push --install-hooks   # one-time; runs on push
 #   pre-commit run rocke-radon --hook-stage pre-push --files <paths>
-#   pre-commit run rocke-vulture --hook-stage pre-push --all-files
-# Direct (the tool must be importable by this python):
+# Direct (the tool must be importable by this python). Use this form, not
+# `pre-commit run --all-files`, for all of rocke: pre-commit splits a long file
+# list into several runs, each printing its own report.
 #   python tools/advisory_checks.py radon library/kernels/gfx942/attention_tiled_2d.py
-#   python tools/advisory_checks.py vulture          # all of rocke
+#   python tools/advisory_checks.py vulture          # all of rocke, one report
 
 from __future__ import annotations
 
