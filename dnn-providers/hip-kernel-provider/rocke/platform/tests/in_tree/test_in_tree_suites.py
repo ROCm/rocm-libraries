@@ -12,6 +12,7 @@
 
 import importlib.util
 import os
+import re
 import subprocess
 from pathlib import Path
 
@@ -27,16 +28,15 @@ _LIBRARY_ROOTS = (
 # Importable package name -> optional modules that the directory needs.
 _SUITES = {
     "rocke.benchmark.perf.tests": (),
-    "rocke.heuristics.tests": ("pandas", "sklearn", "lightgbm"),
-    "rocke.tests.helpers.tiling": (),
 }
+# ``rocke.heuristics.tests`` is not listed. It needs ``pandas``, ``sklearn`` and
+# ``lightgbm``, and the CI images install none of them, so every file would skip.
+# Add ``"rocke.heuristics.tests": ("pandas", "sklearn", "lightgbm")`` after CI
+# installs these packages.
 
-
-# Files that need ``matplotlib`` skip without it, as the plotting helpers import it lazily.
-_PLOTTING = ("visualization/", "test_lds_conflict.py")
-# GPU demo kernels fail on a device other than the gfx90a they target, instead of
-# skipping. A GPU lane owns them, so this host lane leaves them out.
-_GPU_DEMO_DIRS = ("kernels/",)
+# ``test_wavescope_pmc.py`` runs a profiler subprocess per test with a 30 s limit.
+# That limit is not reliable on a loaded host, so no CI lane runs this file.
+_EXCLUDED_FILES = ("test_wavescope_pmc.py",)
 
 
 def _package_dir(package: str) -> Path:
@@ -52,7 +52,7 @@ _CASES = sorted(
     (package, path.relative_to(_package_dir(package)).as_posix())
     for package in _SUITES
     for path in _package_dir(package).rglob("test_*.py")
-    if not path.relative_to(_package_dir(package)).as_posix().startswith(_GPU_DEMO_DIRS)
+    if path.name not in _EXCLUDED_FILES
 )
 if not _CASES:
     raise RuntimeError("in-tree test directories contain no test files")
@@ -65,8 +65,6 @@ def test_in_tree_file(package, relpath):
     """Run one in-package test file in a child pytest process."""
     for module in _SUITES[package]:
         pytest.importorskip(module)
-    if relpath.startswith(_PLOTTING):
-        pytest.importorskip("matplotlib")
     library_roots = [root for root in _LIBRARY_ROOTS if (root / "kernels").is_dir()]
     env = rocke_subprocess_env(python_paths=library_roots)
     env["ROCKE_BACKEND"] = "python"
@@ -97,3 +95,6 @@ def test_in_tree_file(package, relpath):
         check=False,
     )
     assert result.returncode == 0, result.stdout[-4000:] or result.stderr[-4000:]
+    # pytest exits 0 when every test skips. Report that as a skip with the child's reasons.
+    if not re.search(r"\d+ passed", result.stdout):
+        pytest.skip("child ran no test: " + result.stdout[-1500:])

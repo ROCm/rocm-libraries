@@ -27,10 +27,6 @@ RAW = (
 
 
 @unittest.skipUnless(os.name == "posix", "executable profiler fixture requires POSIX")
-@unittest.skipUnless(
-    UTILITY.is_file(),
-    "capture_wavescope_pmc.py is in dsl_docs, which the installed layout omits",
-)
 class TestWaveScopePmc(unittest.TestCase):
     ARCH = "gfx950"
 
@@ -455,10 +451,6 @@ class TestWaveScopePmc(unittest.TestCase):
 
 
 @unittest.skipUnless(os.name == "posix", "executable profiler fixture requires POSIX")
-@unittest.skipUnless(
-    UTILITY.is_file(),
-    "capture_wavescope_pmc.py is in dsl_docs, which the installed layout omits",
-)
 class TestWaveScopePmcGfx942(TestWaveScopePmc):
     ARCH = "gfx942"
 
