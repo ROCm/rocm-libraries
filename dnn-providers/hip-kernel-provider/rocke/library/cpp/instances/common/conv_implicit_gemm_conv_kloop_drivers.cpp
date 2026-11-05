@@ -2825,8 +2825,9 @@ static rocke_value_t*
         rocke_value_t* wo_ = rocke_b_mul(b, wave_, rocke_b_const_i32(b, WEXT));
         conv_xpd_pcoords(ctx, rocke_b_add(b, m0, wo_), pc_own);
         for(int cw = 0; cw < QQ; ++cw)
-            conv_xpd_pcoords(
-                ctx, rocke_b_add(b, m0, rocke_b_const_i32(b, ((RR - 1) * QQ + cw) * WEXT)), pc_ring[cw]);
+            conv_xpd_pcoords(ctx,
+                             rocke_b_add(b, m0, rocke_b_const_i32(b, ((RR - 1) * QQ + cw) * WEXT)),
+                             pc_ring[cw]);
     }
     conv_xdst_t own[64];
     int n_own = 0;
