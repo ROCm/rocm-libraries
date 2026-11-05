@@ -29,6 +29,7 @@ import argparse
 import json
 import random
 import sys
+from dataclasses import replace
 from pathlib import Path
 
 _HERE = Path(__file__).resolve().parent
@@ -205,6 +206,8 @@ def synthetic_problems(specs) -> list:
     for spec in directs:
         for _ in range(2):
             rows.append(_direct_problem(spec, rng))
+        # The same instance on an fp32 graph dW: no cast step (and no implicit GEMM).
+        rows.append(replace(rows[-1], dw_fp32=True))
     for spec in helpers:
         for _ in range(2):
             rows.append(_direct_problem(spec, rng))
@@ -266,8 +269,8 @@ def _instance_fields(spec) -> str:
 
 
 def _problem_values(problem) -> list:
-    """n, c, k, hi, wi, y, x, strideH, strideW, padH, padW, dilationH, dilationW, groups --
-    the native Problem struct's field order."""
+    """n, c, k, hi, wi, y, x, strideH, strideW, padH, padW, dilationH, dilationW, groups,
+    dwFloat -- the native Problem struct's field order, the dtype aside."""
     return [
         problem.N,
         problem.C,
@@ -283,6 +286,7 @@ def _problem_values(problem) -> list:
         problem.dH,
         problem.dW,
         problem.groups,
+        int(problem.dw_fp32),
     ]
 
 
@@ -315,7 +319,7 @@ def render(specs, problems) -> str:
             kind = (
                 spec.kernel_family,
                 spec.direct_variant,
-                len(plan.steps) > 1,
+                len(plan.steps),
                 plan.zero_dw,
                 plan.split_k > 1,
             )
@@ -346,8 +350,9 @@ def render(specs, problems) -> str:
         "namespace hip_kernel_provider::kernel_ingestor_engine::wgrad_test_vectors",
         "{",
         "",
-        "/// n, c, k, hi, wi, y, x, strideH, strideW, padH, padW, dilationH, dilationW, groups.",
-        "using ProblemValues = std::array<int64_t, 14>;",
+        "/// n, c, k, hi, wi, y, x, strideH, strideW, padH, padW, dilationH, dilationW, groups,",
+        "/// dwFloat (the graph's dW is fp32).",
+        "using ProblemValues = std::array<int64_t, 15>;",
         "",
         "/// One catalog instance: its dtype and its KMD fields as name=value;..., those at",
         "/// their KMD default_value (DEFAULT_FIELDS) left out.",

@@ -402,7 +402,7 @@ std::vector<SerializedCase> serializedCases()
     gatherKnobs.targetBlocks = 1024;
     gatherKnobs.waveK16 = 2;
     // clang-format off
-    return {
+    std::vector<SerializedCase> cases{
         {"direct_wgrad", dense3x3, directInstance(DirectVariant::WGRAD, f3, wgradKnobs),
          {1, 0, 1, 0, 0, 1, 0, 1, 16, 1, 2, 64, 0, 1, 2, 14, 2, 28, 28, 28, 28, 1, 64, 64, 50176, 1792, 64, 50176, 1792, 64},
          0x3694f6228f5b3538ULL},
@@ -439,6 +439,13 @@ std::vector<SerializedCase> serializedCases()
          0x586b6f8dfc26c11cULL},
     };
     // clang-format on
+    // The direct literals are the adapter's plans on an fp32 graph dW, which no cast step
+    // follows.
+    for(auto& c : cases)
+    {
+        c.problem.dwFloat = c.instance.direct.has_value();
+    }
+    return cases;
 }
 
 // OnePlanPerFamilySerializesAsTheAdapterDoes (hand-pasted serialize()/digest() literals,
@@ -1030,17 +1037,18 @@ TEST(TestGfx950ConvWgradGeometry, EveryCatalogInstanceParses)
             }
         }
         // 156 implicit GEMM (110 two-stage) + 67 selectable direct + 9 fold helpers + the
-        // Stage 2 fold per dtype (the gfx950 wgrad AOT catalog: see IngestorGenerator's
+        // Stage 2 fold at 8 slabs and at one (the direct pipelines' cast) per dtype (the
+        // gfx950 wgrad AOT catalog: see IngestorGenerator's
         // test_enumerate_conv_wgrad_aot_instances.py / test_make_conv_wgrad_aot_config.py).
         EXPECT_EQ(implicitCount, 156U) << dtype;
-        EXPECT_EQ(helpers, 10U) << dtype;
+        EXPECT_EQ(helpers, 11U) << dtype;
         size_t directTotal = 0;
         for(const auto& [variant, count] : directByVariant)
         {
             directTotal += count;
         }
         EXPECT_EQ(directTotal, 67U) << dtype;
-        EXPECT_EQ(catalog::catalog(dtype).size(), 233U) << dtype;
+        EXPECT_EQ(catalog::catalog(dtype).size(), 234U) << dtype;
         // All seven direct pipelines are represented.
         for(const auto* variant : {"direct_wgrad",
                                    "direct_wgrad_tiled",
@@ -1217,11 +1225,14 @@ DescriptorId idOf(uint32_t value, uint8_t tag)
     return id;
 }
 
-KernelDefinition kernelOf(const Metadata& metadata, uint32_t id, uint8_t pack)
+/// Kernel @p id of the engine (dispatch) @p engine, in a pack of its own: the shipped
+/// catalog shards instances and helpers into separate packs of one dispatch.
+KernelDefinition kernelOf(const Metadata& metadata, uint32_t id, uint8_t engine)
 {
     KernelDefinition kernel;
-    kernel.kernelId = idOf(id, pack);
-    kernel.packId = idOf(0, pack);
+    kernel.kernelId = idOf(id, engine);
+    kernel.packId = idOf(id, static_cast<uint8_t>(engine + 1));
+    kernel.dispatchId = idOf(0, engine);
     kernel.source.kind = KernelSourceKind::KPACK;
     kernel.name = "gfx950_conv_wgrad_aot_test_" + std::to_string(id);
     for(const auto& [name, value] : metadata.fields)
@@ -1239,7 +1250,7 @@ KernelDefinition kernelOf(const Metadata& metadata, uint32_t id, uint8_t pack)
 }
 
 /// Runs the pack's KernelPrepareFn over @p kernels as the engine's shared state does at
-/// load, which also files each fold helper for its own pack.
+/// load, which also files each helper for its engine.
 void prepareAll(std::vector<KernelDefinition>& kernels)
 {
     hip_kernel_provider::kernel_ingestor_engine::registerNativeIngestorSymbols();
@@ -1303,12 +1314,22 @@ TEST(TestGfx950ConvWgradNative, WorkspaceBytesAndPrepareRefuseInLockstep)
                                           kernelOf(twoStageMetadata(), 2, 70),
                                           kernelOf(dwMetadata(), 3, 70),
                                           kernelOf(foldMetadata(9), 4, 70),
-                                          // The same depthwise instance in a pack without its fold.
-                                          kernelOf(dwMetadata(), 5, 71),
+                                          // The same depthwise instance in an engine
+                                          // with its fold but not its cast.
+                                          kernelOf(dwMetadata(), 5, 72),
                                           kernelOf(wsReduceMetadata(8), 6, 70),
-                                          // The same two-stage instance in a pack without its
-                                          // Stage 2.
-                                          kernelOf(twoStageMetadata(), 7, 71)};
+                                          // The same two-stage instance in an engine
+                                          // without its Stage 2.
+                                          kernelOf(twoStageMetadata(), 7, 72),
+                                          // The one-slab Stage 2: a direct pipeline's
+                                          // cast into a 16-bit dW.
+                                          kernelOf(wsReduceMetadata(1), 8, 70),
+                                          // A fold beside the same depthwise instance in
+                                          // an engine without its cast.
+                                          kernelOf(foldMetadata(9), 9, 72),
+                                          // The same depthwise instance in an engine
+                                          // without its fold.
+                                          kernelOf(dwMetadata(), 10, 74)};
     prepareAll(kernels);
     const auto& handler = dispatchHandler(GFX950_CONV_WGRAD_AOT);
 
@@ -1332,8 +1353,12 @@ TEST(TestGfx950ConvWgradNative, WorkspaceBytesAndPrepareRefuseInLockstep)
         {"two-stage on an fp32 dW", dense3x3, true, 1, false, 0},
         {"implicit on an fp32 dW", dense3x3, true, 0, false, 0},
         {"depthwise with its fold", depthwise, true, 2, true, 129024},
-        {"depthwise on a 16-bit dW", depthwise, false, 2, false, 0},
-        {"depthwise without its fold", depthwise, true, 4, false, 0},
+        // The slots, then the fp32 dW (C * 9 f32) at the next 256-byte boundary.
+        {"depthwise cast into a 16-bit dW", depthwise, false, 2, true, 129024 + 64 * 9 * 4},
+        {"depthwise without its cast", depthwise, false, 4, false, 0},
+        {"depthwise with its fold but not its cast", depthwise, true, 4, true, 129024},
+        {"the cast itself", depthwise, false, 7, false, 0},
+        {"depthwise without its fold", depthwise, true, 9, false, 0},
         {"the fold itself", depthwise, true, 3, false, 0},
         {"depthwise on a dense graph", dense3x3, true, 2, false, 0},
     };
@@ -1373,6 +1398,93 @@ TEST(TestGfx950ConvWgradNative, WorkspaceBytesAndPrepareRefuseInLockstep)
     otherBound[std::string(GFX950_CONV_WGRAD_AOT.outputToken)] = int64_t{7};
     EXPECT_THROW(handler.prepare(denseFixture.context(), otherBound, kernels[0]),
                  hipdnn_plugin_sdk::HipdnnPluginException);
+}
+
+/// The shipped catalog as the engine loads it: one dispatch, every kernel in the pack
+/// make_conv_wgrad_aot_config.shard_name(spec, "family") puts it in -- implicit GEMM in
+/// {dtype}_implicit, each direct pipeline and each helper variant in {dtype}_{variant} --
+/// so every helper sits in a pack other than its instance's.
+TEST(TestGfx950ConvWgradNative, TheShippedPacksServeEveryPlannedInstance)
+{
+    const auto idOf16 = [](size_t value, uint8_t tag) {
+        DescriptorId id{};
+        id[0] = tag;
+        id[14] = static_cast<uint8_t>(value >> 8);
+        id[15] = static_cast<uint8_t>(value);
+        return id;
+    };
+    constexpr uint8_t ENGINE = 0x90;
+    std::map<std::string, std::vector<KernelDefinition>> byDtype;
+    std::map<std::string, size_t> packs;
+    size_t next = 0;
+    for(const auto* dtype : {"fp16", "bf16"})
+    {
+        for(const auto& entry : catalog::catalog(dtype))
+        {
+            const auto shard = std::string(dtype) + "_"
+                               + (entry.integer("kernel_family") == 0
+                                      ? std::string("implicit")
+                                      : entry.text("direct_variant"));
+            const auto pack = packs.emplace(shard, packs.size()).first->second;
+            KernelDefinition kernel;
+            kernel.kernelId = idOf16(next++, ENGINE + 1);
+            kernel.packId = idOf16(pack, ENGINE + 2);
+            kernel.dispatchId = idOf16(0, ENGINE);
+            kernel.source.kind = KernelSourceKind::KPACK;
+            kernel.name = "gfx950_conv_wgrad_aot_" + entry.text("instance_id");
+            for(const auto& [name, value] : entry.fields)
+            {
+                if(const auto* integer = std::get_if<int64_t>(&value))
+                {
+                    kernel.metadata[name] = *integer;
+                }
+                else
+                {
+                    kernel.metadata[name] = std::get<std::string>(value);
+                }
+            }
+            byDtype[dtype].push_back(std::move(kernel));
+        }
+        prepareAll(byDtype[dtype]);
+    }
+    // Implicit, the seven direct pipelines, the fold and the Stage 2, per dtype.
+    EXPECT_EQ(packs.size(), 20U);
+
+    std::map<std::string, size_t> servedBySteps;
+    for(const auto& row : vectors::servedMatrix())
+    {
+        const auto problem = catalog::toProblem(row.problem, row.dtype);
+        const auto fixture = wgradFixture(problem, problem.dwFloat);
+        const auto bound = matchesGraph(GFX950_CONV_WGRAD_AOT, fixture.context());
+        const auto& kernels = byDtype.at(row.dtype);
+        if(!bound)
+        {
+            // A problem outside the graph contract (a nonpositive dY, say) serves nothing.
+            EXPECT_EQ(std::string(row.served).find('1'), std::string::npos)
+                << describe(problem);
+            continue;
+        }
+        const auto& entries = catalog::catalog(row.dtype);
+        for(size_t i = 0; i < kernels.size(); ++i)
+        {
+            const bool expected = row.served[i] == '1';
+            EXPECT_EQ(matchesKernel(GFX950_CONV_WGRAD_AOT, fixture.context(), kernels[i], *bound),
+                      expected)
+                << entries[i].text("direct_variant") << " " << entries[i].text("instance_id")
+                << " on " << describe(problem) << " " << row.dtype
+                << (problem.dwFloat ? " fp32 dW" : "");
+            if(expected)
+            {
+                const auto plan = wgrad::instancePlan(problem, *entries[i].instance);
+                ++servedBySteps[std::to_string(plan->steps.size())];
+            }
+        }
+    }
+    // One-, two- and three-step plans (a folded pipeline cast into a 16-bit dW) all serve.
+    for(const auto* steps : {"1", "2", "3"})
+    {
+        EXPECT_GT(servedBySteps[steps], 0U) << steps;
+    }
 }
 
 #endif // HIPDNN_ENABLE_KERNEL_INGESTOR

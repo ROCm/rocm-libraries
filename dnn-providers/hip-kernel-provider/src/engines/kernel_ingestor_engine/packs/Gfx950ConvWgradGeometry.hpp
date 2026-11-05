@@ -129,6 +129,10 @@ struct Problem
     int64_t dilationW;
     int64_t groups = 1;
     ElementType dtype = ElementType::FP16;
+    /// The graph's dW is fp32 rather than dtype (dw_fp32): implicit GEMM writes a dtype dW
+    /// only; the direct pipelines accumulate an fp32 one, written straight into an fp32 dW
+    /// or cast into a dtype one.
+    bool dwFloat = false;
 };
 
 /// What the problem implies: the dY extents, the per-group channel counts and the three
@@ -928,6 +932,8 @@ enum class Buffer : int64_t
     X = 1,
     DW = 2,
     WS = 3,
+    /// The fp32 dW a folded direct pipeline folds into before its cast to a 16-bit dW.
+    WS_DW = 4,
 };
 
 /// One launch of a plan (Gfx950ConvWgradStep): values are the by-value i32 arguments after
@@ -1124,6 +1130,13 @@ constexpr std::array<std::string_view, 5> WS_REDUCE_KERNARG_NAMES{
 /// WgradReduceSpec's default tile: one thread per element of a 4 x 64 dW patch.
 constexpr int64_t WS_REDUCE_TILE_M = 4;
 constexpr int64_t WS_REDUCE_TILE_N = 64;
+
+/// CAST_WS_REPLICAS: the Stage 2 fold a direct instance launches as the cast of its fp32
+/// dW into a 16-bit graph dW has one slab.
+constexpr int64_t CAST_WS_REPLICAS = 1;
+
+/// _WORKSPACE_ALIGN: workspace regions after the first start at a multiple of this.
+constexpr int64_t WORKSPACE_ALIGN = 256;
 
 /// The values for IMPLICIT_KERNARG_NAMES: ConvArgs.to_launch_values for a wgrad
 /// ConvProblem at @p splitK. GEMM M = kpg, N = Y * X * cpg, K = N * Ho * Wo; strides are
@@ -1391,7 +1404,8 @@ inline int64_t resolveSplitK(const Problem& p, const Geometry& g, const Implicit
 inline std::optional<Plan> implicitPlan(const Problem& problem, const ImplicitInstance& instance)
 {
     const auto geometry = deriveGeometry(problem);
-    if(!geometry || !implicitSupportsProblem(problem, *geometry, instance))
+    // An implicit-GEMM instance stores dW in the activation dtype.
+    if(!geometry || problem.dwFloat || !implicitSupportsProblem(problem, *geometry, instance))
     {
         return std::nullopt;
     }
@@ -1800,7 +1814,10 @@ constexpr int64_t FOLD_THREADS = 16 * 64;
 /// validator and launch geometry on the real problem, then
 ///   * direct_wgrad / _tiled: one launch atomically adding into a zeroed fp32 dW;
 ///   * the five folded pipelines: the compute pass storing its partial slots into the
-///     workspace (WS at offset 0), then the fold summing them into dW, written whole.
+///     workspace (WS at offset 0), then the fold summing them into dW, written whole;
+/// that fp32 dW being, on a 16-bit graph dW, a workspace region (WS, zeroed, for the
+/// atomic pipelines; WS_DW after the slots for the folded ones) a last cast step writes
+/// the graph's dW from.
 inline std::optional<Plan> directPlan(const Problem& problem, const DirectInstance& instance)
 {
     if(instance.variant == DirectVariant::NONE || isHelperVariant(instance.variant)
@@ -1858,16 +1875,48 @@ inline std::optional<Plan> directPlan(const Problem& problem, const DirectInstan
     {
         return std::nullopt;
     }
+    // _cast_step: on a 16-bit graph dW, the Stage 2 fold at CAST_WS_REPLICAS casts the
+    // fp32 dW (a workspace region) into it, over dW as one [K, Y * X * cpg] slab.
+    const auto dwF32Bytes = g.dwElements * 4;
+    const auto wgN = problem.y * problem.x * g.cpg;
+    const std::array<int64_t, 3> castGrid{
+        ceilDiv(wgN, WS_REDUCE_TILE_N), ceilDiv(problem.k, WS_REDUCE_TILE_M), 1};
+    constexpr int64_t CAST_THREADS = WS_REDUCE_TILE_M * WS_REDUCE_TILE_N;
+    if(!problem.dwFloat && !gridFits(castGrid, CAST_THREADS))
+    {
+        return std::nullopt;
+    }
+    const auto castStep = [&](Buffer from) {
+        return Step{PlanKernel::WS_REDUCE,
+                    Abi::WS_REDUCE,
+                    castGrid,
+                    CAST_THREADS,
+                    {from, Buffer::NONE, Buffer::DW},
+                    {static_cast<int32_t>(problem.k),
+                     static_cast<int32_t>(wgN),
+                     static_cast<int32_t>(dwF32Bytes),
+                     static_cast<int32_t>(g.tensorBytes[2]),
+                     1}};
+    };
     Plan plan{problem, g, {}, {}, false, 1};
     if(!isFoldedVariant(instance.variant))
     {
-        plan.zeroDw = true;
+        // The pass atomic-adds into a zeroed fp32 dW: the graph's own, or the WS region
+        // the cast then writes the 16-bit dW from.
         plan.steps.push_back(Step{PlanKernel::SELF,
                                   Abi::DIRECT_WGRAD,
                                   launch->grid,
                                   launch->block,
-                                  {Buffer::DY, Buffer::X, Buffer::DW},
+                                  {Buffer::DY, Buffer::X, problem.dwFloat ? Buffer::DW : Buffer::WS},
                                   directWgradValues(problem, g)});
+        if(problem.dwFloat)
+        {
+            plan.zeroDw = true;
+            return plan;
+        }
+        plan.zeroWs = true;
+        plan.workspaces.push_back({Buffer::WS, 0, dwF32Bytes});
+        plan.steps.push_back(castStep(Buffer::WS));
         return plan;
     }
     const auto taps = foldTaps(instance.variant, direct.kh, direct.kw, direct.cpg);
@@ -1887,9 +1936,21 @@ inline std::optional<Plan> directPlan(const Problem& problem, const DirectInstan
         Abi::FOLD,
         foldGrid,
         FOLD_THREADS,
-        {Buffer::WS, Buffer::NONE, Buffer::DW},
+        {Buffer::WS, Buffer::NONE, problem.dwFloat ? Buffer::DW : Buffer::WS_DW},
         {static_cast<int32_t>(launch->partitions), static_cast<int32_t>(launch->foldChannels)}});
     plan.workspaces.push_back({Buffer::WS, 0, launch->workspaceBytes});
+    if(problem.dwFloat)
+    {
+        return plan;
+    }
+    // The fold writes the fp32 dW whole into the WS_DW region after the partial slots.
+    const auto offset = ceilDiv(launch->workspaceBytes, WORKSPACE_ALIGN) * WORKSPACE_ALIGN;
+    if(offset + dwF32Bytes > I32_MAX)
+    {
+        return std::nullopt;
+    }
+    plan.workspaces.push_back({Buffer::WS_DW, offset, dwF32Bytes});
+    plan.steps.push_back(castStep(Buffer::WS_DW));
     return plan;
 }
 

@@ -25,8 +25,10 @@ identity's filter and channels-per-group; this tool asks it rather than restatin
 rule, so a pipeline whose fold changes comes out right too. Likewise a two-stage
 implicit-GEMM identity launches the Stage 2 fold of its f32 scratch
 (``direct_wgrad_ws_reduce``), which the dispatcher names
-(``dispatch.grouped_convolution._instance_helpers``). Helpers are never selectable on
-their own.
+(``dispatch.grouped_convolution._instance_helpers``). Every direct identity, on a graph
+whose dW is 16-bit, also launches the cast of its fp32 dW into it: that same Stage 2 at
+one slab (``convolution_backward_filter.CAST_WS_REPLICAS``). Helpers are never
+selectable on their own.
 
 The output is one JSON list per dtype (:data:`INSTANCE_LIST`), one compact identity
 per line, ordered by family (implicit GEMM, direct, helper), then ``stable_hash``::
@@ -102,13 +104,20 @@ def sweep_hashes(dtype: str, jobs: int) -> set:
     direct = enumerate_direct_jobs(
         arch=ARCH, target=target, directions=("wgrad",), dtype=dtype, jobs=jobs
     )
+    from benchmarks.common.kernel_cache import KernelIdentity
     from dispatch.grouped_convolution import _instance_helpers
 
     identities = [job.identity for job in [*implicit, *direct]]
     # The two-stage Stage 2 is no sweep job of its own: it is the helper the
-    # dispatcher names for a two-stage implicit-GEMM identity.
+    # dispatcher names for a two-stage implicit-GEMM identity; nor is the direct
+    # pipelines' cast, which is that Stage 2 at one slab.
     stage2 = [h for i in identities if i.needs_stage2 for h in _instance_helpers(i)]
-    return {i.stable_hash() for i in [*identities, *stage2]}
+    casts = [
+        KernelIdentity.from_dict(c)
+        for i in identities
+        for c in cast_identities(i.to_dict())
+    ]
+    return {i.stable_hash() for i in [*identities, *stage2, *casts]}
 
 
 def helper_identities(identity: dict) -> list:
@@ -153,12 +162,34 @@ def stage2_identities(identity: dict) -> list:
     return [helper.to_dict() for helper in _instance_helpers(ident)]
 
 
+def cast_identities(identity: dict) -> list:
+    """The cast a wgrad direct identity launches on a 16-bit dW: the Stage 2 of its
+    dtype at ``CAST_WS_REPLICAS`` slabs; ``[]`` for anything else."""
+    from dataclasses import replace
+
+    from benchmarks.common.kernel_cache import KernelIdentity
+    from builders.common.convolution_backward_filter import CAST_WS_REPLICAS
+    from kernels.conv.direct_aot_jobs import _ws_reduce_identity
+
+    if identity["direction"] != "direct_wgrad":
+        return []
+    ident = KernelIdentity.from_dict(identity)
+    cast = _ws_reduce_identity(ident.arch, ident.wave_size, CAST_WS_REPLICAS, ident.dtype_a)
+    return [replace(cast, llvm_flavor=ident.llvm_flavor).to_dict()]
+
+
 def with_helpers(identities: list) -> list:
     """``identities`` plus the helper each entry needs (the fold of a folded direct
-    entry, the Stage 2 of a two-stage implicit-GEMM one), each once, in order."""
+    entry and every direct entry's cast, the Stage 2 of a two-stage implicit-GEMM one),
+    each once, in order."""
     out, seen = [], set()
     for identity in identities:
-        for entry in [identity, *helper_identities(identity), *stage2_identities(identity)]:
+        for entry in [
+            identity,
+            *helper_identities(identity),
+            *cast_identities(identity),
+            *stage2_identities(identity),
+        ]:
             key = stable_hash(entry)
             if key not in seen:
                 seen.add(key)

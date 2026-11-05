@@ -66,10 +66,11 @@ def specs(identities):
     return sorted(out, key=lambda s: (s.dtype, s.instance_id))
 
 
-def test_the_committed_lists_hold_233_instances_per_dtype_across_all_8_families(specs):
+def test_the_committed_lists_hold_234_instances_per_dtype_across_all_8_families(specs):
     """156 implicit-GEMM (110 of them two-stage) + 67 direct + 9 fold helpers + the
-    one Stage 2 fold per dtype: the deliverable set for the gfx950 wgrad AOT catalog,
-    one count per (kernel_family, direct_variant) pair."""
+    Stage 2 fold at 8 slabs (the two-stage instances') and at one (the direct
+    instances' cast into a 16-bit dW) per dtype: the deliverable set for the gfx950
+    wgrad AOT catalog, one count per (kernel_family, direct_variant) pair."""
     by_dtype = collections.defaultdict(collections.Counter)
     for spec in specs:
         by_dtype[spec.dtype][(spec.kernel_family, spec.direct_variant)] += 1
@@ -84,11 +85,11 @@ def test_the_committed_lists_hold_233_instances_per_dtype_across_all_8_families(
             (1, "direct_wgrad_gather"): 16,
             (1, "direct_wgrad_grouped_mfma"): 6,
             (2, "direct_wgrad_fold"): 9,
-            (2, "direct_wgrad_ws_reduce"): 1,
+            (2, "direct_wgrad_ws_reduce"): 2,
         }
     assert sum(1 for s in specs if not s.is_helper) == 446
     assert sum(1 for s in specs if s.two_stage) == 220
-    assert len(specs) == 466
+    assert len(specs) == 468
 
 
 def test_every_two_stage_instance_has_its_stage2_in_the_catalog(specs):
@@ -105,6 +106,25 @@ def test_every_two_stage_instance_has_its_stage2_in_the_catalog(specs):
         if spec.two_stage:
             fields = gfx950_conv_wgrad_aot_ws_reduce_fields(spec)
             assert (fields["dtype"], fields["ws_replicas"]) in shipped
+
+
+def test_every_direct_instance_has_its_cast_in_the_catalog(specs):
+    """The cast a direct instance launches on a 16-bit dW (the one-slab Stage 2) is
+    shipped beside it, keyed as the native pack looks it up (dtype and ws_replicas)."""
+    from builders.common.convolution_backward_filter import (
+        gfx950_conv_wgrad_aot_cast_fields,
+    )
+
+    shipped = {
+        (s.dtype, s.ws_replicas) for s in specs if s.direct_variant == "direct_wgrad_ws_reduce"
+    }
+    checked = 0
+    for spec in specs:
+        if spec.is_direct and not spec.is_helper:
+            fields = gfx950_conv_wgrad_aot_cast_fields(spec)
+            assert (fields["dtype"], fields["ws_replicas"]) in shipped
+            checked += 1
+    assert checked == 134
 
 
 def test_instance_id_is_the_identity_stable_hash(identities):

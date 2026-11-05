@@ -51,8 +51,9 @@
 /// exactly when it has a plan there, and the dispatch runs that plan. Mirrors
 /// rocke/library/builders/common/convolution_backward_filter.py.
 ///
-/// The graph's dW dtype picks the family: an implicit-GEMM binary stores dW in the
-/// activation dtype, every direct pipeline accumulates an fp32 dW.
+/// An implicit-GEMM binary stores dW in the activation dtype; every direct pipeline
+/// accumulates an fp32 dW, which on a 16-bit graph dW is a workspace region the plan's
+/// last step (the Stage 2 fold at one slab) casts into the graph's dW.
 namespace hip_kernel_provider::kernel_ingestor_engine
 {
 
@@ -89,8 +90,8 @@ struct MatchedProblem
     wgrad::Problem problem;
     wgrad::Geometry geometry;
     data_objects::DataType dtype;
-    /// dW is fp32 (served by the direct pipelines) rather than the activation dtype
-    /// (served by implicit GEMM).
+    /// dW is fp32 (served by the direct pipelines alone) rather than the activation dtype;
+    /// problem.dwFloat holds it too.
     bool dwFloat;
 
     /// dY, X and dW storage sizes in bytes.
@@ -233,7 +234,8 @@ std::optional<MatchedProblem> matchProblem(const MatchContext& context)
                                  groups,
                                  x->data_type() == data_objects::DataType::HALF
                                      ? wgrad::ElementType::FP16
-                                     : wgrad::ElementType::BF16};
+                                     : wgrad::ElementType::BF16,
+                                 dw->data_type() == data_objects::DataType::FLOAT};
     // groups in [1, 65535] dividing C and K, a positive dY, every byte count in i32.
     const auto geometry = wgrad::deriveGeometry(problem);
     if(!geometry || dyDims->Get(0) != problem.n || dyDims->Get(1) != problem.k
@@ -241,11 +243,7 @@ std::optional<MatchedProblem> matchProblem(const MatchContext& context)
     {
         return std::nullopt;
     }
-    return MatchedProblem{binding,
-                          problem,
-                          *geometry,
-                          x->data_type(),
-                          dw->data_type() == data_objects::DataType::FLOAT};
+    return MatchedProblem{binding, problem, *geometry, x->data_type(), problem.dwFloat};
 }
 
 /// PROBLEM_TOKEN's value: the binding, the problem in wgrad::Problem's field order but its
@@ -310,7 +308,8 @@ std::optional<MatchedProblem> matchedFromBound(const MatchContext& context,
                                  v[15],
                                  v[16],
                                  dtype == data_objects::DataType::HALF ? wgrad::ElementType::FP16
-                                                                       : wgrad::ElementType::BF16};
+                                                                       : wgrad::ElementType::BF16,
+                                 v[18] != 0};
     const auto geometry = wgrad::deriveGeometry(problem);
     if(!geometry)
     {
@@ -363,21 +362,24 @@ std::optional<wgrad::AotInstance> aotInstance(const KernelDefinition& kernel)
     return wgrad::parseAotInstance(KernelMetadata{kernel});
 }
 
-/// Where a helper is looked up: the same pack, the same archive, the instance's dtype, the
-/// helper variant and what it bakes -- the fold's taps (gfx950_conv_wgrad_aot_fold_fields)
-/// or the Stage 2 fold's ws_replicas (gfx950_conv_wgrad_aot_ws_reduce_fields).
+/// Where a helper is looked up: the same dispatch (the engine's; helpers ship in packs of
+/// their own beside the instances, see make_conv_wgrad_aot_config.shard_name), the same
+/// archive, the instance's dtype, the helper variant and what it bakes -- the fold's taps
+/// (gfx950_conv_wgrad_aot_fold_fields) or the Stage 2 fold's ws_replicas
+/// (gfx950_conv_wgrad_aot_ws_reduce_fields).
 struct HelperKey
 {
     std::string archive;
-    DescriptorId packId;
+    DescriptorId dispatchId;
     wgrad::ElementType dtype;
     wgrad::DirectVariant variant;
     int64_t parameter;
 
     bool operator<(const HelperKey& other) const
     {
-        return std::tie(archive, packId, dtype, variant, parameter)
-               < std::tie(other.archive, other.packId, other.dtype, other.variant, other.parameter);
+        return std::tie(archive, dispatchId, dtype, variant, parameter)
+               < std::tie(
+                   other.archive, other.dispatchId, other.dtype, other.variant, other.parameter);
     }
 };
 
@@ -451,7 +453,7 @@ HelperRegistry& helperRegistry()
 /// The helper a plan step of @p instance launches on @p problem: a folded instance's fold,
 /// whose taps follow the problem's filter and (per-channel folds) cpg, which the
 /// capability match pins to the instance's own; a two-stage instance's Stage 2, keyed by
-/// its ws_replicas.
+/// its ws_replicas; a direct instance's cast into a 16-bit dW, the one-slab Stage 2.
 std::optional<KernelDefinition> findHelper(const KernelDefinition& kernel,
                                            const wgrad::AotInstance& instance,
                                            wgrad::PlanKernel helper,
@@ -462,18 +464,20 @@ std::optional<KernelDefinition> findHelper(const KernelDefinition& kernel,
     {
         return helperRegistry().find(HelperKey{
             archiveOf(kernel),
-            kernel.packId,
+            kernel.dispatchId,
             instance.dtype,
             wgrad::DirectVariant::FOLD,
             wgrad::foldTaps(instance.direct->variant, problem.y, problem.x, geometry.cpg)});
     }
-    if(helper == wgrad::PlanKernel::WS_REDUCE && instance.implicit)
+    if(helper == wgrad::PlanKernel::WS_REDUCE && (instance.implicit || instance.direct))
     {
-        return helperRegistry().find(HelperKey{archiveOf(kernel),
-                                               kernel.packId,
-                                               instance.dtype,
-                                               wgrad::DirectVariant::WS_REDUCE,
-                                               wgrad::effectiveWsReplicas(*instance.implicit)});
+        return helperRegistry().find(
+            HelperKey{archiveOf(kernel),
+                      kernel.dispatchId,
+                      instance.dtype,
+                      wgrad::DirectVariant::WS_REDUCE,
+                      instance.implicit ? wgrad::effectiveWsReplicas(*instance.implicit)
+                                        : wgrad::CAST_WS_REPLICAS});
     }
     return std::nullopt;
 }
@@ -505,7 +509,7 @@ std::shared_ptr<const void> aotPrepare(const KernelDefinition& kernel)
         {
             const auto variant = instance->direct->variant;
             helperRegistry().add(HelperKey{archiveOf(kernel),
-                                           kernel.packId,
+                                           kernel.dispatchId,
                                            instance->dtype,
                                            variant,
                                            variant == wgrad::DirectVariant::WS_REDUCE
@@ -534,8 +538,8 @@ const AotPrepared& preparedOf(const KernelDefinition& kernel, AotPrepared& scrat
 }
 
 /// The plan of @p kernel on @p matched when it is packaged code of a reviewed launch
-/// contract that computes it: the family the graph's dW dtype admits, the instance's plan
-/// (dtype pinned there), and every helper the plan launches present in its pack. The one
+/// contract that computes it: the instance's plan (dtype, and the families the graph's dW
+/// dtype admits, pinned there), and every helper the plan launches present beside it. The one
 /// path every native hook takes, so the matcher, workspaceBytes() and prepare() can never
 /// disagree on what is served.
 std::optional<wgrad::Plan> aotKernelPlan(const MatchedProblem& matched,
@@ -543,8 +547,7 @@ std::optional<wgrad::Plan> aotKernelPlan(const MatchedProblem& matched,
 {
     AotPrepared scratch;
     const auto& prepared = preparedOf(kernel, scratch);
-    if(!prepared.instance
-       || (prepared.instance->family == wgrad::KernelFamily::DIRECT) != matched.dwFloat)
+    if(!prepared.instance)
     {
         return std::nullopt;
     }
@@ -801,8 +804,9 @@ public:
     {
     }
 
-    /// The plan's workspace: the folded pipelines' partial slots or a two-stage instance's
-    /// f32 scratch; none for one-stage implicit GEMM or the atomic direct pipelines. A
+    /// The plan's workspace: the folded pipelines' partial slots, a two-stage instance's
+    /// f32 scratch, and a direct pipeline's fp32 dW on a 16-bit graph dW; none for
+    /// one-stage implicit GEMM or the atomic direct pipelines on an fp32 dW. A
     /// kernel the graph does not admit needs none: prepare() refuses it, through the same
     /// aotKernelPlan.
     size_t workspaceBytes(const MatchContext& context,
@@ -850,7 +854,7 @@ public:
             {
                 throw hipdnn_plugin_sdk::HipdnnPluginException(
                     HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-                    "gfx950_conv_wgrad instance has no helper of its plan in its pack");
+                    "gfx950_conv_wgrad instance has no helper of its plan in its engine");
             }
             steps.push_back({loadKernel(_loader, context, *helper, step), std::move(step)});
         }
@@ -941,7 +945,8 @@ public:
         }
         if(wgradPrepared.zeroWs())
         {
-            // Two-stage slices accumulate into the f32 scratch.
+            // Two-stage slices and the atomic direct pipelines on a 16-bit dW accumulate
+            // into the f32 scratch.
             const auto [ws, wsBytes] = region(wgrad::Buffer::WS);
             checkHip(hipMemsetAsync(ws, 0, static_cast<size_t>(wsBytes), stream),
                      "workspace zero-fill");

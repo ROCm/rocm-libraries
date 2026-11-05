@@ -89,7 +89,7 @@ def test_the_two_stage_identities_are_shipped_with_their_stage2(catalog, committ
         assert tool.stable_hash(stage2) in listed
 
 
-def test_the_lists_add_the_fold_helper_per_dtype_the_folded_families_need(committed):
+def test_the_lists_add_the_helpers_per_dtype_their_instances_need(committed):
     for dtype, entries in committed.items():
         helpers = [e for e in entries if tool.family(e) == "helper"]
         assert helpers, dtype
@@ -100,7 +100,11 @@ def test_the_lists_add_the_fold_helper_per_dtype_the_folded_families_need(commit
         needed = {
             tool.stable_hash(h)
             for e in entries
-            for h in [*tool.helper_identities(e), *tool.stage2_identities(e)]
+            for h in [
+                *tool.helper_identities(e),
+                *tool.cast_identities(e),
+                *tool.stage2_identities(e),
+            ]
         }
         listed = {tool.stable_hash(e) for e in helpers}
         assert needed == listed, dtype

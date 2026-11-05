@@ -20,6 +20,9 @@ it comes from (the dispatcher's registered gfx950 wgrad instances --
   (``direct_wgrad_ws_reduce``) and scratch exactly as the dispatcher does,
   on odd and even dW rows alike, and is refused by name only where K cannot
   split;
+* on a 16-bit graph dW a direct instance runs the dispatcher's (fp32-dW)
+  steps into a workspace and casts it into dW with the one-slab Stage 2; on an
+  fp32 dW it runs them unchanged and implicit GEMM is refused;
 * ``serialize()``/``digest()`` round-trip and are stable.
 """
 
@@ -34,6 +37,7 @@ from kernels.conv.kernel_identity import KernelIdentity
 
 from builders.common.convolution_backward_filter import (
     AOT_WGRAD_DIRECT_ALGORITHMS,
+    CAST_WS_REPLICAS,
     PACKAGED_LLVM_FLAVOR,
     Gfx950ConvWgradAotSpec,
     Gfx950ConvWgradProblem,
@@ -43,6 +47,7 @@ from builders.common.convolution_backward_filter import (
     gfx950_conv_wgrad_aot_serves,
     gfx950_conv_wgrad_aot_split_k,
     gfx950_conv_wgrad_aot_step_signature,
+    gfx950_conv_wgrad_aot_cast_fields,
     gfx950_conv_wgrad_aot_ws_reduce_fields,
     supports_gfx950_conv_wgrad_aot,
     supports_gfx950_conv_wgrad_aot_problem,
@@ -354,11 +359,13 @@ def test_implicit_gemm_split_k_matches_resolve_conv_split_k(catalog, shape):
 
 
 def test_direct_plans_match_the_dispatchers_grid_block_and_buffers(catalog):
-    """The direct-family plan (grid, block, buffers) matches
+    """The direct-family plan (grid, block, buffers) on an fp32 graph dW -- the
+    dW the dispatcher's direct plans write -- matches
     ``dispatch.grouped_convolution.launch_plan_for`` exactly, for every shape
     and dtype reaching a direct instance."""
     checked = 0
     for name, problem in {**_SHAPES, **_SHAPES_BF16}.items():
+        problem = replace(problem, dw_fp32=True)
         req = _req(problem)
         for inst_spec in registered_conv_grouped_instances(_ARCH, direction="wgrad"):
             ident = inst_spec.identity
@@ -379,6 +386,80 @@ def test_direct_plans_match_the_dispatchers_grid_block_and_buffers(catalog):
                 assert mine.buffers == step.buffers, ident.label()
             checked += 1
     assert checked > 0
+
+
+def test_direct_plans_cast_their_fp32_dw_into_a_16_bit_one(catalog):
+    """On a 16-bit graph dW a direct plan is its fp32-dW plan with that dW
+    moved into the workspace (zeroed for the atomic pipelines, after the
+    partial slots for the folded ones) and a last step, the one-slab Stage 2,
+    casting it into dW over one ``[K, Y*X*cpg]`` slab."""
+    checked = set()
+    for name, problem in {**_SHAPES, **_SHAPES_BF16}.items():
+        for ident, spec in catalog:
+            if not ident.is_direct or ident.dtype_a != problem.dtype:
+                continue
+            fp32, _ = gfx950_conv_wgrad_aot_plan(spec, replace(problem, dw_fp32=True))
+            half, why = gfx950_conv_wgrad_aot_plan(spec, problem)
+            assert (fp32 is None) == (half is None), (ident.label(), why)
+            if half is None:
+                continue
+            dw_f32 = problem.tensor_bytes(dw_bytes=4)[2]
+            cast = half.steps[-1]
+            assert len(half.steps) == len(fp32.steps) + 1, ident.label()
+            assert (cast.kernel, cast.abi, cast.block) == (
+                "direct_wgrad_ws_reduce",
+                "ws_reduce",
+                256,
+            )
+            wg_n = problem.Y * problem.X * problem.cpg
+            assert cast.grid == (-(-wg_n // 64), -(-problem.K // 4), 1)
+            assert cast.values == (
+                ("wg_M", problem.K),
+                ("wg_N", wg_n),
+                ("ws_bytes", dw_f32),
+                ("dw_bytes", problem.tensor_bytes(dw_bytes=2)[2]),
+                ("groups", 1),
+            )
+            assert half.buffer_bytes("dw") == dw_f32 // 2
+            assert not half.zero_dw
+            if spec.is_folded:
+                (slots,) = fp32.workspaces
+                assert half.workspaces[0] == slots
+                _, offset, size = half.workspaces[1]
+                assert half.workspaces[1][0] == "ws_dw" and size == dw_f32
+                assert offset >= slots[2] and offset % 256 == 0
+                assert half.steps[0] == fp32.steps[0]
+                assert half.steps[1] == replace(
+                    fp32.steps[1], buffers=("ws", None, "ws_dw")
+                )
+                assert cast.buffers == ("ws_dw", None, "dw")
+                assert not half.zero_ws
+            else:
+                assert half.workspaces == (("ws", 0, dw_f32),) and half.zero_ws
+                assert half.steps[0] == replace(fp32.steps[0], buffers=("dy", "x", "ws"))
+                assert cast.buffers == ("ws", None, "dw")
+            assert gfx950_conv_wgrad_aot_cast_fields(spec) == {
+                "dtype": spec.dtype,
+                "kernel_family": 2,
+                "direct_variant": "direct_wgrad_ws_reduce",
+                "ws_replicas": CAST_WS_REPLICAS,
+            }
+            checked.add(spec.is_folded)
+    assert checked == {True, False}
+
+
+def test_implicit_gemm_is_refused_on_an_fp32_dw(catalog):
+    problem = _SHAPES["dense3x3"]
+    refused = 0
+    for ident, spec in catalog:
+        if spec.is_direct or ident.dtype_a != problem.dtype:
+            continue
+        plan, why = gfx950_conv_wgrad_aot_plan(spec, replace(problem, dw_fp32=True))
+        assert plan is None, ident.label()
+        if gfx950_conv_wgrad_aot_serves(spec, problem)[0]:
+            assert "activation dtype" in why, (ident.label(), why)
+            refused += 1
+    assert refused > 0
 
 
 # ---------------------------------------------------------------------------

@@ -40,14 +40,19 @@ fp16/bf16 activations, symmetric padding. Eight families are packaged:
   the caller must zero it first; the other five instead store one partial
   slot per partition into a scratch workspace and need a second kernel,
   ``direct_wgrad_fold``, to sum the partitions into ``dW`` -- which it writes
-  whole, so it needs no zeroing. Reuses
-  :mod:`kernels.conv.direct_variants`'s ``(variant, problem, knobs)`` table
-  rather than re-deriving any of the seven families' shape rules.
+  whole, so it needs no zeroing. On a graph whose dW is 16-bit (the
+  activation dtype, ``Gfx950ConvWgradProblem.dw_fp32`` false) that fp32 dW is
+  a workspace region instead, and ``direct_wgrad_ws_reduce`` at
+  ``ws_replicas == 1`` -- a pure f32 -> ``dtype`` cast -- writes the graph's
+  dW from it. Reuses :mod:`kernels.conv.direct_variants`'s ``(variant,
+  problem, knobs)`` table rather than re-deriving any of the seven families'
+  shape rules.
 * **Helpers** (``kernel_family`` 2), never serving a problem on their own:
   ``direct_wgrad_fold``, packaged so the five folded pipelines' handler can
   load it, and ``direct_wgrad_ws_reduce``, the two-stage implicit GEMM's
   Stage 2 (one per dtype and ``ws_replicas``, which it records in that field;
-  every extent is a kernarg).
+  every extent is a kernarg) -- at ``ws_replicas == 1`` also the direct
+  pipelines' cast of their fp32 dW into a 16-bit one.
 
 :func:`gfx950_conv_wgrad_aot_plan` is the launch of one instance on one
 problem -- rocKE's own offer (``identity_supports_problem``,
@@ -303,6 +308,15 @@ class Gfx950ConvWgradProblem:
     groups: int = 1
     dtype: str = "fp16"
     layout: str = "NHWC"
+    #: The graph's dW is fp32 rather than ``dtype``. Implicit GEMM writes a
+    #: ``dtype`` dW only; the direct pipelines accumulate an fp32 one, written
+    #: straight into an fp32 dW or cast into a ``dtype`` one.
+    dw_fp32: bool = False
+
+    @property
+    def dw_element_bytes(self) -> int:
+        """The byte width of one graph dW element."""
+        return 4 if self.dw_fp32 else 2
 
     @property
     def cpg(self) -> int:
@@ -358,14 +372,16 @@ class Gfx950ConvWgradProblem:
             dil_w=self.dW,
         )
 
-    def tensor_bytes(self, dw_bytes: int = 2) -> tuple[int, int, int]:
+    def tensor_bytes(self, dw_bytes: int | None = None) -> tuple[int, int, int]:
         """``(dY, X, dW)`` sizes in bytes: dY/X are 16-bit elements over the
         whole batch (wgrad's reduction spans ``N``, so there is no per-image
         batch slice to shrink them the way dgrad's dX/dY are); ``dW`` is
         filter-shaped, independent of ``N``, in ``dw_bytes``-byte elements
-        (2 for an implicit-GEMM instance's native dtype, 4 for a direct
+        (by default the graph's, :attr:`dw_element_bytes`; 4 for a direct
         instance's fp32 accumulator -- see
         :func:`kernels.common.conv_abi.conv_direct_arg_names`)."""
+        if dw_bytes is None:
+            dw_bytes = self.dw_element_bytes
         return (
             self.N * self.Ho * self.Wo * self.K * 2,
             self.N * self.Hi * self.Wi * self.C * 2,
@@ -884,6 +900,26 @@ def gfx950_conv_wgrad_aot_ws_reduce_fields(spec: Gfx950ConvWgradAotSpec) -> dict
     }
 
 
+#: The ``ws_replicas`` of the Stage 2 fold a direct instance launches as the
+#: cast of its fp32 dW into a 16-bit graph dW: one slab, so the fold is a single
+#: load and a convert.
+CAST_WS_REPLICAS = 1
+
+
+def gfx950_conv_wgrad_aot_cast_fields(spec: Gfx950ConvWgradAotSpec) -> dict:
+    """The cast a direct instance pulls in on a 16-bit dW, as the KMD field
+    values that identify it in the catalog: the instance dtype's Stage 2 fold
+    at :data:`CAST_WS_REPLICAS`."""
+    if not spec.is_direct or spec.is_helper:
+        raise ValueError("only a direct instance casts its fp32 dW")
+    return {
+        "dtype": spec.dtype,
+        "kernel_family": KERNEL_FAMILY_WGRAD_HELPER,
+        "direct_variant": HELPER_VARIANT_WS_REDUCE,
+        "ws_replicas": CAST_WS_REPLICAS,
+    }
+
+
 # ---------------------------------------------------------------------------
 # Validation
 # ---------------------------------------------------------------------------
@@ -1100,11 +1136,15 @@ ABI_IMPLICIT_TWO_STAGE = "implicit_wgrad_two_stage"
 #: ``ws_reduce``: the Stage 2 fold's ``ws_ptr, dw_ptr`` then ``wg_M, wg_N,
 #: ws_bytes, dw_bytes, groups``.
 ABI_WS_REDUCE = "ws_reduce"
-#: Buffers a step binds: the three graph tensors, and the scratch.
+#: Buffers a step binds: the three graph tensors, the scratch, and the fp32 dW
+#: a folded direct pipeline folds into before its cast to a 16-bit dW.
 BUFFER_DY = "dy"
 BUFFER_X = "x"
 BUFFER_DW = "dw"
 BUFFER_WS = "ws"
+BUFFER_WS_DW = "ws_dw"
+#: Workspace regions after the first start at a multiple of this.
+_WORKSPACE_ALIGN = 256
 
 #: The integer codes :meth:`Gfx950ConvWgradPlan.serialize` writes.
 PLAN_KERNEL_CODES = {KERNEL_SELF: 0, HELPER_VARIANT_FOLD: 1, HELPER_VARIANT_WS_REDUCE: 2}
@@ -1115,7 +1155,14 @@ PLAN_ABI_CODES = {
     ABI_IMPLICIT_TWO_STAGE: 3,
     ABI_WS_REDUCE: 4,
 }
-PLAN_BUFFER_CODES = {None: -1, BUFFER_DY: 0, BUFFER_X: 1, BUFFER_DW: 2, BUFFER_WS: 3}
+PLAN_BUFFER_CODES = {
+    None: -1,
+    BUFFER_DY: 0,
+    BUFFER_X: 1,
+    BUFFER_DW: 2,
+    BUFFER_WS: 3,
+    BUFFER_WS_DW: 4,
+}
 
 _FNV_OFFSET = 0xCBF29CE484222325
 _FNV_PRIME = 0x100000001B3
@@ -1169,8 +1216,9 @@ class Gfx950ConvWgradPlan:
     def workspace_bytes(self) -> int:
         return max((offset + size for _, offset, size in self.workspaces), default=0)
 
-    def buffer_bytes(self, name: str, dw_bytes: int = 2) -> int:
-        """The byte size of buffer ``name``."""
+    def buffer_bytes(self, name: str, dw_bytes: int | None = None) -> int:
+        """The byte size of buffer ``name`` (dW in the graph's dtype unless
+        ``dw_bytes`` says otherwise)."""
         tensors = dict(
             zip(
                 (BUFFER_DY, BUFFER_X, BUFFER_DW),
@@ -1342,6 +1390,8 @@ def _implicit_plan(
     why = _grid_reason(grid, threads, _INT32_MAX)
     if why:
         return None, f"wgrad tile grid: {why}"
+    if problem.dw_fp32:
+        return None, "an implicit-GEMM instance stores dW in the activation dtype"
     tensors = problem.tensor_bytes(dw_bytes=2)
     if not spec.two_stage:
         values = _launch_values(args, tensors, split_k=split_k)
@@ -1461,24 +1511,45 @@ def _direct_plan(
     if why:
         return None, why
     args = ConvArgs.from_problem(direct, direction="wgrad")
+    dw_f32_bytes = tensors[2]
+    if problem.dw_fp32:
+        cast = None
+    else:
+        cast, why = _cast_step(spec, problem, dw_f32_bytes)
+        if cast is None:
+            return None, f"cast: {why}"
 
     if not spec.is_folded:
+        # The pass atomic-adds into a zeroed fp32 dW: the graph's own, or the
+        # ``ws`` region the cast then writes the 16-bit dW from.
+        target = BUFFER_DW if cast is None else BUFFER_WS
         step = Gfx950ConvWgradStep(
             KERNEL_SELF,
             ABI_DIRECT_WGRAD,
             grid,
             block[0],
-            (BUFFER_DY, BUFFER_X, BUFFER_DW),
+            (BUFFER_DY, BUFFER_X, target),
             _launch_values(args, tensors),
         )
+        if cast is None:
+            return (
+                Gfx950ConvWgradPlan(launched=problem, steps=(step,), zero_dw=True),
+                "ok",
+            )
         return (
-            Gfx950ConvWgradPlan(launched=problem, steps=(step,), zero_dw=True),
+            Gfx950ConvWgradPlan(
+                launched=problem,
+                steps=(step, cast),
+                workspaces=((BUFFER_WS, 0, dw_f32_bytes),),
+                zero_ws=True,
+            ),
             "ok",
         )
 
     # The five folded families: the compute pass stores one partial slot per
-    # partition into the scratch ``ws``; the fold sums them into dW (written
-    # whole, no zeroing).
+    # partition into the scratch ``ws``; the fold sums them into the fp32 dW
+    # (written whole, no zeroing) -- the graph's own, or the ``ws_dw`` region
+    # the cast then writes the 16-bit dW from.
     from kernels.common.conv_direct_dw_wgrad import DW_WGRAD_FOLD_ARGS, DwWgradFoldSpec
     from kernels.conv.direct_variants import direct_wgrad_fold_knobs
 
@@ -1507,15 +1578,60 @@ def _direct_plan(
         ABI_FOLD,
         fold_grid,
         fold_block[0],
-        (BUFFER_WS, None, BUFFER_DW),
+        (BUFFER_WS, None, BUFFER_DW if cast is None else BUFFER_WS_DW),
         tuple(zip(DW_WGRAD_FOLD_ARGS, (n_partitions, channels))),
     )
+    workspaces = ((BUFFER_WS, 0, workspace_bytes),)
+    if cast is None:
+        steps = (conv_step, fold_step)
+    else:
+        offset = _ceil_div(workspace_bytes, _WORKSPACE_ALIGN) * _WORKSPACE_ALIGN
+        if offset + dw_f32_bytes > _INT32_MAX:
+            return None, "the workspace exceeds the signed 32-bit kernel ABI"
+        workspaces += ((BUFFER_WS_DW, offset, dw_f32_bytes),)
+        cast = replace(cast, buffers=(BUFFER_WS_DW, None, BUFFER_DW))
+        steps = (conv_step, fold_step, cast)
     return (
         Gfx950ConvWgradPlan(
             launched=problem,
-            steps=(conv_step, fold_step),
-            workspaces=((BUFFER_WS, 0, workspace_bytes),),
+            steps=steps,
+            workspaces=workspaces,
             zero_dw=False,
+        ),
+        "ok",
+    )
+
+
+def _cast_step(
+    spec: Gfx950ConvWgradAotSpec, problem: Gfx950ConvWgradProblem, dw_f32_bytes: int
+) -> tuple[Gfx950ConvWgradStep | None, str]:
+    """The cast of a direct instance's fp32 dW (bound as ``ws``) into the
+    graph's 16-bit one: the Stage 2 fold at :data:`CAST_WS_REPLICAS`, over dW
+    as one ``[K, Y*X*cpg]`` slab (elementwise, so the group split is moot)."""
+    from kernels.common.conv_wgrad_workspace_reduce import wgrad_reduce_aot_spec
+
+    reduce_spec = wgrad_reduce_aot_spec(spec.dtype, CAST_WS_REPLICAS)
+    wg_m = problem.K
+    wg_n = problem.Y * problem.X * problem.cpg
+    grid = (_ceil_div(wg_n, reduce_spec.tile_n), _ceil_div(wg_m, reduce_spec.tile_m), 1)
+    why = _grid_reason(grid, reduce_spec.block_size, _INT32_MAX)
+    if why:
+        return None, why
+    values = (
+        ("wg_M", wg_m),
+        ("wg_N", wg_n),
+        ("ws_bytes", dw_f32_bytes),
+        ("dw_bytes", problem.tensor_bytes(dw_bytes=2)[2]),
+        ("groups", 1),
+    )
+    return (
+        Gfx950ConvWgradStep(
+            HELPER_VARIANT_WS_REDUCE,
+            ABI_WS_REDUCE,
+            grid,
+            reduce_spec.block_size,
+            (BUFFER_WS, None, BUFFER_DW),
+            values,
         ),
         "ok",
     )
