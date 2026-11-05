@@ -182,7 +182,13 @@ extern "C" __global__ void __launch_bounds__(DW_BLOCK_SIZE)
     const data_t* w_k = wei + static_cast<long>(k) * (DW_KZ * DW_KY * DW_KX);
     // Input plane p feeds output depth o through filter depth z = p - o. With DW_TD == 1 this is
     // one plane per filter tap along D (any depth stride / dilation); DW_TD > 1 needs both to be 1.
+    // Only the multi-depth loop is unrolled: unrolling the one-depth loop made it 1.15x to 1.2x
+    // slower on gfx1151.
+#if DW_TD > 1
 #pragma unroll
+#else
+#pragma nounroll
+#endif
     for(int p = 0; p < DW_PLANES; ++p)
     {
         const int di = do0 * sd - pd + p * dd;
