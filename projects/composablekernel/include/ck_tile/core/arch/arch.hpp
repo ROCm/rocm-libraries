@@ -315,7 +315,7 @@ static constexpr auto make_amdgcn_gfx1250_target()
 {
     return amdgcn_target<targetId,
                          amdgcn_target_family_id::GFX1250,
-                         amdgcn_target_arch_id::RDNA,
+                         amdgcn_target_arch_id::CDNA,
                          amdgcn_target_wave_size_id::WAVE32>{};
 }
 
@@ -324,7 +324,7 @@ static constexpr auto make_amdgcn_gfx1251_target()
 {
     return amdgcn_target<targetId,
                          amdgcn_target_family_id::GFX1251,
-                         amdgcn_target_arch_id::RDNA,
+                         amdgcn_target_arch_id::CDNA,
                          amdgcn_target_wave_size_id::WAVE32>{};
 }
 
