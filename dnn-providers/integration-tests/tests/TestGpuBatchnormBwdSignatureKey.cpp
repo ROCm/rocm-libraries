@@ -69,6 +69,41 @@ TEST(TestGpuBatchnormBwdSignatureKey, CreateFromNodeWithoutSavedStatistics)
     EXPECT_EQ(key, expected);
 }
 
+class TestGpuBatchnormBwdSignatureKeySavedStatistic : public testing::TestWithParam<int64_t>
+{
+};
+
+TEST_P(TestGpuBatchnormBwdSignatureKeySavedStatistic, MismatchedSavedStatisticsTypesThrow)
+{
+    auto builder
+        = hipdnn_test_sdk::utilities::createValidBatchnormBwdGraph({12, 4, 2, 1}, {2, 3, 2, 2});
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper matchingGraph(
+        builder.GetBufferPointer(), builder.GetSize());
+    EXPECT_NO_THROW(
+        GpuBatchnormBwdSignatureKey(matchingGraph.getNode(0), matchingGraph.getTensorMap()));
+
+    auto graph = UnPackGraph(builder.GetBufferPointer());
+    for(auto& tensor : graph->tensors)
+    {
+        if(tensor->uid == GetParam())
+        {
+            tensor->data_type = DataType::HALF;
+        }
+    }
+    builder.Clear();
+    builder.Finish(Graph::Pack(builder, graph.get()));
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper mismatchedGraph(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    EXPECT_THROW(
+        GpuBatchnormBwdSignatureKey(mismatchedGraph.getNode(0), mismatchedGraph.getTensorMap()),
+        std::runtime_error);
+}
+
+INSTANTIATE_TEST_SUITE_P(BothStatistics,
+                         TestGpuBatchnormBwdSignatureKeySavedStatistic,
+                         testing::Values(7, 8));
+
 TEST(TestGpuBatchnormBwdSignatureKey, RegistersFallbackWithoutSavedStatistics)
 {
     std::unordered_map<GpuBatchnormBwdSignatureKey,
