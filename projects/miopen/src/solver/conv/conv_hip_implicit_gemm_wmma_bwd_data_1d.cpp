@@ -201,7 +201,12 @@ ConvHipImplicitGemmWmmaBwdData1d::GetSolution(const ExecutionContext&,
             const auto& tensors = params.tensors;
             if(params.workSpace == nullptr || params.workSpaceSize < ws_bytes)
                 MIOPEN_THROW(miopenStatusBadParm, "Not enough workspace");
+            // Find times the invoker through the handle, which keeps the last kernel's time only:
+            // report the sum of both kernels.
+            float elapsed = 0.0f;
             handle.Run(weights_kern)(tensors.w, params.workSpace, ci, co, ci_pad, co_pad);
+            if(handle.IsProfilingEnabled())
+                elapsed += handle.GetKernelTime();
             handle.Run(main_kern)(tensors.in,
                                   params.workSpace,
                                   tensors.out,
@@ -212,6 +217,12 @@ ConvHipImplicitGemmWmmaBwdData1d::GetSolution(const ExecutionContext&,
                                   len_dy,
                                   len_dx,
                                   pad);
+            if(handle.IsProfilingEnabled())
+            {
+                elapsed += handle.GetKernelTime();
+                handle.ResetKernelTime();
+                handle.AccumKernelTime(elapsed);
+            }
         };
     };
     result.workspace_sz = ws_bytes;
