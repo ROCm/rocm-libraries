@@ -15,7 +15,7 @@ section "Windowed Depthwise Dgrad Kernel".
 ## Kernel and where it lives
 
 `DirectDepthwiseDgradWindowedSpec` / `build_direct_depthwise_dgrad_windowed`
-(VALU and `dot2` forms) and `_build_dw_dgrad_win_mfma` (Toeplitz MFMA form) in
+(VALU and `dot2` forms) and `_build_dw_dgrad_win_toeplitz` (Toeplitz MFMA form) in
 [`conv_direct_grouped.py`](../../../../../../library/kernels/common/conv_direct_grouped.py);
 C++ mirror [`conv_direct_grouped_build_depthwise_dgrad_win.cpp`](../../../../../cpp/instances/common/conv_direct_grouped_build_depthwise_dgrad_win.cpp).
 AOT cache variant `direct_depthwise_dgrad_win` (`DW_WIN_*`,
@@ -214,7 +214,7 @@ python3 -m pytest -q tests/test_conv_dgrad_depthwise_windowed.py \
 cd ../platform && export ROCKE=$(pwd) PYTHONPATH=$(pwd)/python:$(pwd)/../library
 python3 tools/check_byte_identity.py --only conv_direct_dgrad_ext,target_intrinsics
 python3 tests/instances/rocke_ir_parity_harness.py \
-    --check tests/golden/rocke_representative_ir_sha256.json --flavor llvm22
+    --check tests/golden/rocke_representative_ir_sha256/ --flavor llvm22
 ```
 
 ISA: `llvm-objdump -d --mcpu=gfx950`; count `v_cndmask_b32`, `buffer_load_*`,
