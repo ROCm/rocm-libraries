@@ -68,18 +68,28 @@ def ieee_fp32():
     and torch >= 2.9 defaults ``torch.backends.cudnn.conv.fp32_precision`` to
     ``"tf32"`` (``allow_tf32=True`` before that): once the backend honours it,
     the reference itself would silently become TF32. The new per-operator API
-    is used where it exists -- mixing it with the legacy ``allow_tf32`` flag
-    makes torch raise -- and the previous setting is restored on exit.
+    is used where it exists, for the GPU (cuDNN / MIOpen) and the CPU (oneDNN)
+    convolutions alike -- mixing it with the legacy ``allow_tf32`` flag makes
+    torch raise -- and the previous settings are restored on exit.
     """
     cudnn = torch.backends.cudnn
-    conv = getattr(cudnn, "conv", None)
-    if conv is not None and hasattr(conv, "fp32_precision"):
-        old = conv.fp32_precision
-        conv.fp32_precision = "ieee"
+    convs = [
+        conv
+        for conv in (
+            getattr(cudnn, "conv", None),
+            getattr(getattr(torch.backends, "mkldnn", None), "conv", None),
+        )
+        if conv is not None and hasattr(conv, "fp32_precision")
+    ]
+    if convs:
+        old = [conv.fp32_precision for conv in convs]
+        for conv in convs:
+            conv.fp32_precision = "ieee"
         try:
             yield
         finally:
-            conv.fp32_precision = old
+            for conv, prec in zip(convs, old):
+                conv.fp32_precision = prec
     else:
         old = cudnn.allow_tf32
         cudnn.allow_tf32 = False

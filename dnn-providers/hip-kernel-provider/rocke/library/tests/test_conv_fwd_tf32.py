@@ -436,6 +436,26 @@ class TestConvFwdTf32Backend(unittest.TestCase):
         with self.assertRaises(bk.BackendCoverageGap):
             bk.lower_conv_implicit_gemm(_spec(16, 32), arch="gfx950", backend="both")
 
+    def test_python_needs_no_engine(self):
+        """``python`` (and the ``cpp`` fallback) lower a TF32 spec in a
+        Python-only install: the C++ extension is never imported."""
+        from rocke.core import backend as bk
+
+        def no_engine():
+            raise bk.BackendError("rocke_engine is not importable")
+
+        with mock.patch.object(bk, "_import_engine", no_engine), mock.patch.dict(
+            os.environ, {"ROCKE_CPP_QUIET_FALLBACK": "1"}
+        ):
+            for arch, m, k, mfma in self._CASES:
+                for backend in ("python", "cpp"):
+                    with self.subTest(arch=arch, backend=backend):
+                        res = bk.lower_conv_implicit_gemm(
+                            _spec(m, k), arch=arch, backend=backend
+                        )
+                        self.assertEqual(res.backend, bk.BACKEND_PYTHON)
+                        self.assertIn(f"llvm.amdgcn.mfma.f32.{mfma}", res.llvm_text)
+
 
 if __name__ == "__main__":
     unittest.main()

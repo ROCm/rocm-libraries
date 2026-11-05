@@ -518,16 +518,16 @@ def _tf32_reference_inputs(t, dtype: str, arch: str):
 def _reference(A_t, B_t, p):
     """IEEE fp32 conv2d on the CPU, NHWK."""
     import torch.nn.functional as F
+    from builders.common.conv_reference import ieee_fp32
 
-    torch.backends.cudnn.allow_tf32 = False
-    torch.backends.cuda.matmul.allow_tf32 = False
-    out = F.conv2d(
-        A_t.permute(0, 3, 1, 2),
-        B_t.permute(0, 3, 1, 2),
-        padding=p.PAD,
-        stride=p.stride,
-        dilation=(p.dil_h, p.dil_w),
-    )
+    with ieee_fp32():
+        out = F.conv2d(
+            A_t.permute(0, 3, 1, 2),
+            B_t.permute(0, 3, 1, 2),
+            padding=p.PAD,
+            stride=p.stride,
+            dilation=(p.dil_h, p.dil_w),
+        )
     return out.permute(0, 2, 3, 1).contiguous()
 
 
