@@ -580,10 +580,9 @@ void checker_t::run()
     }
     if(!errors.empty())
         return;
-    if(rocke_attr_get(attrs, "gt") && rocke_attr_get(attrs, "ge"))
-        errors.push_back("param " + name + ": states two lower bounds (gt, ge) -- state one");
-    if(rocke_attr_get(attrs, "lt") && rocke_attr_get(attrs, "le"))
-        errors.push_back("param " + name + ": states two upper bounds (lt, le) -- state one");
+    for(const std::string& refusal : rocke_int_two_bounds_refusals(
+            [&](const char* word) { return rocke_attr_get(attrs, word) != NULL; }))
+        errors.push_back("param " + name + ": " + refusal);
     if(const rocke_attr_value_t* eq = rocke_attr_get(attrs, "eq"))
     {
         std::string others;

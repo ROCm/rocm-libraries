@@ -463,10 +463,9 @@ void gpu_check_form(const kernel_view_t& view,
                 return true;
         return false;
     };
-    if(has("gt") && has("ge"))
-        refuse("gpu_checked_value: states two lower bounds (gt, ge) -- state one");
-    if(has("lt") && has("le"))
-        refuse("gpu_checked_value: states two upper bounds (lt, le) -- state one");
+    const std::vector<std::string> two_bounds = rocke_int_two_bounds_refusals(has);
+    if(!two_bounds.empty())
+        refuse("gpu_checked_value: " + two_bounds.front());
     int64_t tmin = 0;
     int64_t tmax = 0;
     rocke_int_type_limits(t, &tmin, &tmax);

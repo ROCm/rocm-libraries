@@ -184,7 +184,7 @@ void case_refusals_match_the_python_builder()
             o->facts.lt = int_bound(4096);
             o->facts.le = int_bound(4095);
         },
-        "param ldc: states two upper bounds (lt, le) -- state one");
+        "param ldc: states two upper bounds (le, lt) -- state one");
     expect_refused(
         "lo",
         i32_type,
@@ -192,7 +192,7 @@ void case_refusals_match_the_python_builder()
             o->facts.gt = int_bound(0);
             o->facts.ge = int_bound(1);
         },
-        "param lo: states two lower bounds (gt, ge) -- state one");
+        "param lo: states two lower bounds (ge, gt) -- state one");
     expect_refused(
         "D",
         i32_type,

@@ -379,7 +379,7 @@ void test_concrete_importer_param_facts()
         {R"json({"ge":"{\"param\":\"K\"}"})json",
          "ldc: the relation names K, which is not a parameter of this kernel"},
         {R"json({"lt":4096,"le":4095})json",
-         "param ldc: states two upper bounds (lt, le) -- state one"},
+         "param ldc: states two upper bounds (le, lt) -- state one"},
     };
     for(const auto& c : bad)
     {

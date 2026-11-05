@@ -531,6 +531,8 @@ int64_t rocke_i_dpp_xor_ctrl(int64_t xor_mask, bool has_row_xmask);
 }
 
 #include <string>
+#include <utility>
+#include <vector>
 
 /* `t`'s name in upper case, as a declaration text writes a type (I32): the
  * Python texts' `t.name.upper()`. (cpp/core/ir/param_facts.cpp) */
@@ -563,6 +565,32 @@ inline constexpr rocke_int_bound_word_t ROCKE_INT_BOUND_WORDS[]
        {"le", &rocke_int_facts_t::le, ROCKE_INT_BOUND_UPPER},
        {"lt", &rocke_int_facts_t::lt, ROCKE_INT_BOUND_UPPER},
        {"eq", &rocke_int_facts_t::eq, ROCKE_INT_BOUND_BOTH}};
+
+/* "states two lower bounds (ge, gt) -- state one" for each end whose two words
+ * `stated(word)` holds for, the lower end first: a fact states each end once.
+ * The caller prefixes its subject. Python param_facts.two_bounds_refusals. */
+template <typename Stated>
+std::vector<std::string> rocke_int_two_bounds_refusals(Stated stated)
+{
+    std::vector<std::string> refusals;
+    for(const auto& [side, end] :
+        {std::pair{ROCKE_INT_BOUND_LOWER, "lower"}, std::pair{ROCKE_INT_BOUND_UPPER, "upper"}})
+    {
+        std::string words;
+        bool all_stated = true;
+        for(const auto& bound_word : ROCKE_INT_BOUND_WORDS)
+        {
+            if(bound_word.side != side)
+                continue;
+            words += (words.empty() ? "" : ", ") + std::string(bound_word.word);
+            all_stated = all_stated && stated(bound_word.word);
+        }
+        if(all_stated)
+            refusals.push_back(std::string("states two ") + end + " bounds (" + words
+                               + ") -- state one");
+    }
+    return refusals;
+}
 #endif
 
 #endif /* ROCKE_IR_INTERNAL_H */

@@ -127,12 +127,12 @@ REFUSALS = [
     (
         lambda b, M, sb, k0: b.param("ldc", I32, lt=4096, le=4095),
         ValueError,
-        "param ldc: states two upper bounds (lt, le) -- state one",
+        "param ldc: states two upper bounds (le, lt) -- state one",
     ),
     (
         lambda b, M, sb, k0: b.param("lo", I32, gt=0, ge=1),
         ValueError,
-        "param lo: states two lower bounds (gt, ge) -- state one",
+        "param lo: states two lower bounds (ge, gt) -- state one",
     ),
     (
         lambda b, M, sb, k0: b.param("D", I32, eq=128, multiple_of=8),
@@ -426,7 +426,7 @@ IR_CASES = {
         [
             "param M: ge must be an integer or a relation",
             "param M: multiple_of must be an integer",
-            "param x: states two lower bounds (gt, ge) -- state one",
+            "param x: states two lower bounds (ge, gt) -- state one",
             (
                 "param x: eq excludes every other word -- eq=M already decides ge, gt, "
                 "multiple_of"
@@ -447,6 +447,14 @@ IR_CASES = {
                 "param y: quotient_of(x, M) needs x ge 0 -- x is declared with ge=-1.\n"
                 'Fix: b.param("x", I32, ge=0, ...)'
             )
+        ],
+    ),
+    # Both ends stated twice: one refusal per end, the lower end first.
+    "two_bounds_each_end": (
+        lambda: _with_attrs({"x": {"gt": 0, "ge": 1, "lt": 9, "le": 8}}),
+        [
+            "param x: states two lower bounds (ge, gt) -- state one",
+            "param x: states two upper bounds (le, lt) -- state one",
         ],
     ),
 }

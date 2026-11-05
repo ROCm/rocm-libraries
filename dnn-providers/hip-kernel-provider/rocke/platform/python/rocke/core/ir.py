@@ -42,6 +42,7 @@ from .param_facts import (
     int_type_limits,
     is_plain_int,
     stored_int,
+    two_bounds_refusals,
 )
 from .value_sources import (
     ARITHMETIC,
@@ -1642,12 +1643,9 @@ def _gpu_check_form(
         raise ValueError(
             "gpu_checked_value: state at least one fact: ge, gt, le, lt or multiple_of"
         )
-    for kind, words in (("lower", LOWER_WORDS), ("upper", UPPER_WORDS)):
-        if all(w in stated for w in words):
-            raise ValueError(
-                f"gpu_checked_value: states two {kind} bounds ({', '.join(words)}) "
-                "-- state one"
-            )
+    refusals = two_bounds_refusals(stated)
+    if refusals:
+        raise ValueError(f"gpu_checked_value: {refusals[0]}")
     tmin, tmax = int_type_limits(t.name)
     if multiple_of is not None:
         if not is_plain_int(multiple_of):

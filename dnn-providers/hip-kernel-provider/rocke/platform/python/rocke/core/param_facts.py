@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import json
 import numbers
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Collection, Sequence
 from typing import TYPE_CHECKING, Any
 
 from .dtypes import UNSIGNED_INTEGER_DTYPES, dtype_info
@@ -58,19 +58,28 @@ __all__ = [
     "stated_param_interval",
     "stored_int",
     "stored_relation",
+    "two_bounds_refusals",
 ]
 
 # The inclusive ``(lower, upper)`` a value can take; ``None`` for an end that
 # is not known.
 Interval = tuple[int | None, int | None]
 
-# The words that state an integer fact, in the order they are checked and printed:
-# the words that take a bound, then multiple_of.
-_BOUND_WORDS = ("ge", "gt", "le", "lt", "eq")
+# The words that take a bound, in the order they are checked and printed, with
+# the end of the value each states (eq states both): ROCKE_INT_BOUND_WORDS in C++.
+_BOUND_WORD_ENDS = {
+    "ge": "lower",
+    "gt": "lower",
+    "le": "upper",
+    "lt": "upper",
+    "eq": "both",
+}
+_BOUND_WORDS = tuple(_BOUND_WORD_ENDS)
+# The words that state an integer fact: the words that take a bound, then multiple_of.
 FACT_WORDS = (*_BOUND_WORDS, "multiple_of")
-# Two of a kind on one declaration are refused; each pair is named exclusive first.
-LOWER_WORDS = ("gt", "ge")
-UPPER_WORDS = ("lt", "le")
+# The words that state each end; a fact states each end once (two_bounds_refusals).
+LOWER_WORDS = tuple(w for w, end in _BOUND_WORD_ENDS.items() if end == "lower")
+UPPER_WORDS = tuple(w for w, end in _BOUND_WORD_ENDS.items() if end == "upper")
 # LLVM argument attributes, emitted for a pointer parameter (``align`` is also
 # host-checked).
 POINTER_ATTRS = (
@@ -335,6 +344,18 @@ def _stated_lower_errors(
     return [f"param {name}: {text} needs {q} ge {least} -- {q} {declared}.\nFix: {fix}"]
 
 
+def two_bounds_refusals(stated: Collection[str]) -> list[str]:
+    """``"states two lower bounds (ge, gt) -- state one"`` for each end whose two
+    words ``stated`` both names, the lower end first: a fact states each end once.
+    The caller prefixes its subject. ``rocke_int_two_bounds_refusals`` in
+    ``cpp/include/rocke/ir_internal.h`` gives the same texts."""
+    return [
+        f"states two {end} bounds ({', '.join(words)}) -- state one"
+        for end, words in (("lower", LOWER_WORDS), ("upper", UPPER_WORDS))
+        if all(word in stated for word in words)
+    ]
+
+
 def stored_int(name: str, word: str, value: Any, *, relations: bool = False) -> int:
     """``value`` as a plain int, or a ``TypeError`` naming what ``word`` takes."""
     if isinstance(value, bool) or not isinstance(value, numbers.Integral):
@@ -394,11 +415,7 @@ def declaration_errors(
             errors.append(f"param {name}: {key} must be an integer")
     if errors:
         return errors
-    for kind, words in (("lower", LOWER_WORDS), ("upper", UPPER_WORDS)):
-        if all(w in attrs for w in words):
-            errors.append(
-                f"param {name}: states two {kind} bounds ({', '.join(words)}) -- state one"
-            )
+    errors.extend(f"param {name}: {text}" for text in two_bounds_refusals(attrs))
     if "eq" in attrs:
         others = [w for w in FACT_WORDS if w != "eq" and w in attrs]
         if others:

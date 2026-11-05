@@ -566,7 +566,7 @@ def test_a_load_that_reaches_only_a_condition_is_accepted():
         ),
         (
             "refuse_two_lower_bounds",
-            "gpu_checked_value: states two lower bounds (gt, ge) -- state one",
+            "gpu_checked_value: states two lower bounds (ge, gt) -- state one",
         ),
         ("refuse_empty_range", "gpu_checked_value: ge=5 and lt=5 leave no i32 value"),
         (
