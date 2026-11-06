@@ -252,10 +252,14 @@ TEST_P(GPU_CandidateSelection_FP32, EncodeInputFeaturesEdgeCases_Test)
     }
 }
 
+// EncodeKernelConfigs resolves candidates only through the precomputed table (no fdeep fallback;
+// the config encoder is not shipped), so it does NOT need the config encoder and runs without the
+// SKIP guard. A miss -- empty batch, a dimension mismatch, or a right-width candidate whose exact
+// key is not in the table (an un-enumerated config) -- must throw, which is what lets
+// RunAIHeuristics drop to the non-AI heuristic.
 TEST_P(GPU_CandidateSelection_FP32, EncodeKernelConfigsEdgeCases_Test)
 {
     const auto& params = GetParam();
-    SKIP_IF_NO_CONFIG_ENCODER(params);
     CandidateSelectionModel model(params.arch, params.solver);
     CandidateSelectionMetadata meta(params.arch, params.solver);
     size_t feature_size = meta.output_params().size() - meta.GetConstantOutputIndices().size();
@@ -265,6 +269,9 @@ TEST_P(GPU_CandidateSelection_FP32, EncodeKernelConfigsEdgeCases_Test)
     EXPECT_THROW(model.EncodeKernelConfigs(candidates_short), std::exception);
     std::vector<std::vector<float>> candidates_long(1, std::vector<float>(feature_size + 1, 2.0f));
     EXPECT_THROW(model.EncodeKernelConfigs(candidates_long), std::exception);
+    // Right width, but this value vector is not a real encoded config -> exact-key miss -> throw.
+    std::vector<std::vector<float>> candidates_unknown(1, std::vector<float>(feature_size, 2.0f));
+    EXPECT_THROW(model.EncodeKernelConfigs(candidates_unknown), std::exception);
 }
 
 TEST_P(GPU_CandidateSelection_FP32, KernelStrMappingUnknownKernelThrows_Test)
