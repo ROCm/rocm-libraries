@@ -2285,6 +2285,10 @@ TEST_P(local_matrix_formats, transposes)
         make(ref)->Transpose(transpose.get());
         expect_kept(*transpose, transposed(ref));
 
+        auto into_csr = empty_local_matrix<T>(backend());
+        make(ref)->Transpose(into_csr.get());
+        expect_kept(*into_csr, transposed(ref));
+
         // The transpose of a CSR matrix is a CSR matrix
         auto from_csr = make(banded<T>());
         make_local_matrix(backend(), ref)->Transpose(from_csr.get());
