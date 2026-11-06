@@ -18,6 +18,7 @@ The public repository for StinkyTofu is located at `https://github.com/ROCm/rocm
   .. grid-item-card:: User guides
 
     * :doc:`Global parameters <user/global-parameters>`
+    * :doc:`IR checkpoints <user/ir-checkpoint>`
     * :doc:`IR converter <user/ir-converter>`
     * :doc:`Assembly emitter <user/asm-emitter>`
     * :doc:`Virtual registers <user/virtual-registers>`

@@ -14,6 +14,9 @@ Control StinkyTofu behavior through TensileLite's `GlobalParameters` system -- e
 | `StinkyTofuVerifyEach` | `0`, `1` | `0` | Verify StinkyTofu ASM IR after every pass |
 | `StinkyTofuEnableRemarks` | `0`, `1` | `0` | Emit optimization remarks to stderr |
 | `StinkyTofuTimePasses` | `0`, `1` | `0` | Report per-pass wall time to stderr |
+| `StinkyTofuIRCheckpointAfterPass` | `<pmLabel>:<Pass>[#n]` | `""` | Where to dump or load the IR |
+| `StinkyTofuIRDumpPath` | directory | `""` | Dump each kernel's IR at the checkpoint |
+| `StinkyTofuIRLoadPath` | directory | `""` | Replace each kernel's IR at the checkpoint with an edited bundle |
 
 ---
 
@@ -139,6 +142,25 @@ A pass that only appears as an adaptor name (e.g. `InsertVgprMsbPass`, wrapped b
 
 ---
 
+## `StinkyTofuIRCheckpointAfterPass` / `StinkyTofuIRDumpPath` / `StinkyTofuIRLoadPath`
+
+Stop each kernel's pipeline after one pass and dump the region's IR to a bundle, or replace it
+with an edited bundle; the passes after the checkpoint then run on the edit. The CLI forms are
+`--st-ir-checkpoint`, `--dump-st-ir` and `--load-st-ir`.
+
+- The checkpoint names a pass manager label (the DebugLevel 2 prefixes above) and a pass:
+  `loopWithPrefetch+noLoadLoopBody:StinkyBuildImplicitDependencyPass`. It is the default when
+  only a directory is set. At `ScheduleIterAlg: 4`, use
+  `loopWithPrefetch+noLoadLoopBody:StinkyMergeBarrierPass` to edit the scheduler's order.
+- The dump and load paths are mutually exclusive. Relative paths are made absolute.
+- Either path turns off the kernel cache, so that every kernel runs the pipeline.
+- A kernel with no bundle in the load directory builds unedited, with a warning.
+
+See [IR checkpoints](ir-checkpoint.md) for the bundle layout, what an edit may change, the
+editor, and the error messages.
+
+---
+
 ## Usage
 
 ### Via CLI
@@ -151,6 +173,8 @@ Tensile.sh config.yaml output/ --global-parameters StinkyTofuOptLevel=3 'StinkyT
 Tensile.sh config.yaml output/ --global-parameters StinkyTofuOptLevel=3 'StinkyTofuDebugPass="StinkyDAGSchedulerPass"'
 Tensile.sh config.yaml output/ --global-parameters StinkyTofuOptLevel=3 StinkyTofuEnableRemarks=1
 Tensile.sh config.yaml output/ --global-parameters StinkyTofuOptLevel=3 StinkyTofuTimePasses=1
+Tensile.sh config.yaml output/ --build-only --dump-st-ir /tmp/ir/bundles
+Tensile.sh config.yaml output/ --load-st-ir /tmp/ir/load
 ```
 
 ### Via YAML

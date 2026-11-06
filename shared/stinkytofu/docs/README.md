@@ -3,6 +3,7 @@
 ## For Users
 
 - [Global Parameters](user/global-parameters.md) -- Control StinkyTofu via TensileLite's GlobalParameters
+- [IR Checkpoints](user/ir-checkpoint.md) -- Dump a kernel region after a pass, reorder it in the [IR editor](../tools/stinkytofu-ir-editor/README.md), and rebuild with the edit
 - [IR Converter](user/ir-converter.md) -- Convert instruction strings to IRList
 - [Assembly Emitter](user/asm-emitter.md) -- Convert IR to GPU assembly
 - [Virtual Registers](user/virtual-registers.md) -- Template-based code generation with register remapping
