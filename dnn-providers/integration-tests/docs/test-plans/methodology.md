@@ -5,7 +5,7 @@ how to turn that plan into bundles. It applies to every op family:
 convolution, matmul, normalisation, attention, pointwise, reduction and so on.
 [Convolution forward](convolution-fwd.md) is the worked example. The design and
 rationale are in
-[RFC 0021](../../../../projects/hipdnn/docs/rfcs/0021_PerOpTestPlans.md); this
+[RFC 0022](../../../../projects/hipdnn/docs/rfcs/0022_PerOpTestPlans.md); this
 guide is its operational form.
 
 A per-op plan decides **which graphs exist and in which tier they run**. It does
@@ -240,8 +240,8 @@ that selected it.
 ## 4. Golden tests
 
 A golden case is a sweep case whose expected output is computed once, by an
-independent third party, and stored with DVC beside the bundle (RFC 0011,
-`projects/hipdnn/docs/rfcs/0011_GoldenReferenceValidation.md`). In the default
+independent third party, and stored with DVC beside the bundle
+([RFC 0011](../../../../projects/hipdnn/docs/rfcs/0011_BundleTestFramework.md)). In the default
 `auto` verification mode a golden case is checked against the stored data
 instead of a live reference. Separately, `hipdnn_golden_data_tests` re-runs
 every golden case through the hipDNN CPU and GPU references and checks that
@@ -256,7 +256,7 @@ addresses:
 | Purpose | Problem without golden data | What golden data adds |
 |---|---|---|
 | **Check the references themselves** | A reference and an engine that share a bug agree, and the test passes. A reference that ignores a feature judges every engine wrong (L6). | A third party (for example PyTorch) gives a third, independent answer. When it agrees with both hipDNN references, the references are trustworthy for that kind of case. |
-| **Be the oracle where no reference exists** | A feature or op that no hipDNN reference implements cannot be judged. Its cases are unexercised (P7). | Stored output from the third party judges the case until a reference catches up. RFC 0011 cites SDPA, which had no C++ reference kernel, as the motivating case. |
+| **Be the oracle where no reference exists** | A feature or op that no hipDNN reference implements cannot be judged. Its cases are unexercised (P7). | Stored output from the third party judges the case until a reference catches up. RFC 0011 names this coverage gap (an operation that no reference executor implements cannot be tested) as one of its reasons for golden data. |
 | **Pin semantics** | The spec of a parameter can be read two ways (clip bounds, padding convention, rounding mode). The engine and the reference can agree on the wrong reading. | The third party's documented semantics fix the meaning. A disagreement shows up as a failure against all three. |
 | **Anchor numerics** | A live reference is recomputed on every run. A change to the reference, or run-to-run variance on the GPU, moves the expected value with it. | Stored data does not move. It is a stable regression anchor with a tolerance calibrated per case (`meta.json`), which can be tighter than the op's default. |
 

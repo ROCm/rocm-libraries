@@ -8,7 +8,7 @@ it runs. Backward-data (`ConvolutionBwd`) and weight gradient (`ConvolutionWrw`)
 are out of scope; each gets its own plan in this folder (`convolution-bwd.md`,
 `convolution-wrw.md`).
 
-The plan follows RFC 0021 (Per-Op Test Plans) and the [methodology](methodology.md).
+The plan follows [RFC 0022](../../../../projects/hipdnn/docs/rfcs/0022_PerOpTestPlans.md) (Per-Op Test Plans) and the [methodology](methodology.md).
 See [the test-plans index](README.md) for the level definitions.
 
 The bundles are **generated** from this plan. Nobody edits them by hand:
@@ -425,7 +425,7 @@ The sweep is a set of cases over three core axes plus feature axes.
 
 | Rule | Meaning |
 |---|---|
-| Core cover | Every level holds every core combination at least once, for plain conv and for **each** fused topology (seven topologies × 18). In quick, at least one engine executes each core cell. |
+| Core cover | Every level holds every core combination at least once, for plain conv and for **each** fused topology (seven topologies × 18). In quick, at least one engine executes each core cell (RFC 0022 §8.1). **Today that holds for plain conv only.** In quick on gfx942, MIOpen executes 18 of 18 plain cells, 11 of 18 `act` cells and 4 of 18 `bias_act` cells, and none of the other four topologies, which are probes it declines; on gfx90a it declines every fused graph. The cells are generated; the missing execution is engine support (ALMIOPEN-3008 tracks the defects behind the declines that are workarounds). |
 | One feature at a time | Each S and L shape changes one feature from the defaults, so a failure points at that feature. |
 | Size grows with level | Each level has a size ceiling (§3). PR proves a feature works; nightly proves it still works at medium size. |
 | All-pairs | By the end of nightly, every S shape meets every layout × data type pair of its rank, and every feature value meets every core value (`conv_mode`, data types, values, mixed layouts and non-packed strides each cross rank × data type, or rank × layout). Full pairs each feature value with every S shape once. |
@@ -436,7 +436,7 @@ The sweep is a set of cases over three core axes plus feature axes.
 
 ### 4.1 Level contents
 
-Each level answers one question (RFC 0021 §8.2). A case sits in the lowest level
+Each level answers one question (RFC 0022 §8.2). A case sits in the lowest level
 that holds its graph; the levels cascade.
 
 | Feature group | quick — what catches gross breakage? | PR — what must every PR test? | nightly — wider per engine | full — wider sweeps |
@@ -457,18 +457,18 @@ that holds its graph; the levels cascade.
 | Fusion core (6 topologies × 18) | 1 per cell; ReLU family rotated | `act`, `bias_act`: 2× core; the others 1×; all 13 activations over the cells | `act`: every S shape × every pair, activation rotated; `bias_act`: the same in fp32, and one fp16 / bf16 case per activation × core cell (T10); the other four topologies: from quick and PR (T9) | `act`: the executed activations × core and × every S and L shape (T8); `bias_act`: activation × core in fp32 (T10); the other four topologies: from quick and PR (T9) |
 | Fusion features F25–F31 | — | each variant once | each variant × rank (`bias_act`, `scale_bias_act`, `act`) | — |
 | Fusion at size | — | — | every L shape once per `act` and `bias_act`; M2, M3, M6, M9 × every pair | — |
-| Golden (§5) | G1, G7 | G2–G6, G8–G15 | G16, G17 | — |
+| Golden (§5) | G1, G7 (deferred) | G2–G6, G8–G15 (deferred) | G16, G17 (deferred) | — |
 
 Cases generated (own level / cumulative):
 
-| Level | Plain conv | Fused | Own | Cumulative | Claim | Probe |
-|---|---|---|---|---|---|---|
-| quick | 30 | 109 | **139** | 139 | 62 | 77 |
-| PR | 194 | 164 | **358** | 497 | 177 | 181 |
-| nightly | 1,338 | 822 | **2,160** | 2,657 | 1,262 | 898 |
-| full | 965 | 776 | **1,741** | 4,398 | 966 | 775 |
+| Level | Plain conv | Fused | Own | Cumulative | Claim | Probe | Regression |
+|---|---|---|---|---|---|---|---|
+| quick | 30 | 109 | **139** | 139 | 62 | 77 | 0 |
+| PR | 194 | 164 | **358** | 497 | 177 | 181 | 0 |
+| nightly | 1,338 | 824 | **2,162** | 2,659 | 1,262 | 898 | 2 |
+| full | 965 | 776 | **1,741** | 4,400 | 966 | 775 | 0 |
 
-By size class: quick S 139. PR S 307, H 18, M 3, R 30. Nightly S 1,479, L 341,
+By size class: quick S 139. PR S 307, H 18, M 3, R 30. Nightly S 1,481, L 341,
 M 106, H 162, A 12, R 60. Full S 843, L 831, R 47, X 20. 541 distinct conv
 geometries in all. The trims T8–T12 (§4.3) remove 4,139 of the generated
 synthetic cases and the R set adds 137. Counts are those of the generator;
@@ -477,7 +477,7 @@ count per level and trim.
 
 ### 4.2 Probes and regressions
 
-Each case carries a `purpose` in its metadata (RFC 0021 §9):
+Each case carries a `purpose` in its metadata (RFC 0022 §9):
 
 | Purpose | Expected outcome | Claims |
 |---|---|---|
@@ -501,9 +501,12 @@ When an engine adds a probe feature, the run reports `unclaimed_support`; the
 plan then moves those cases to `claim` and the generator is edited, not the
 bundles.
 
-There are no `regression` cases yet: no escaped conv-forward bug has a pinned
-reproducer. Each one lands in the lowest level that can afford it, written by
-the generator as a concrete case with its source linked in `notes`.
+The regression cases so far are two, in nightly: conv → ReLU and conv → bias →
+ReLU with `relu_lower_clip_slope` 0 (S3, 2D, fp32, channels-first), which must
+run as standard ReLU (#14363). They are written by the generator after every
+rotated case, so adding one moves no other case id; the activation encoding
+lives in `ACT_ENCODINGS`, outside the activation rotation. Each new regression
+lands in the lowest level that can afford it, with its source in `notes`.
 
 ### 4.3 Products deliberately not run
 
@@ -542,15 +545,16 @@ bundles are never trimmed.
 
 | Estimate | Value |
 |---|---|
-| FLOP per case | 0.01 M – 116 G; quick ≤ 14 M, PR ≤ 3.6 G (the three M cases), nightly ≤ 7.1 G, full 116 G (X2) |
+| FLOP per case | 0.01 M – 116 G; quick ≤ 14 M, PR ≤ 3.6 G (the three M cases), nightly ≤ 7.2 G, full 116 G (X2) |
 | Oracle | GPU reference first. The CPU reference fallback costs seconds per M case and minutes per X case, so X cases must find a GPU reference. |
 | Compile and solver search | Paid once per unique shape on a cold cache; it dominates execution. Measured in §4.5. |
 | Device memory | X1 ≈ 0.4 GB, X3 ≈ 13 GB (fp16), so `minimum_vram_mb` is set on those cases. |
 
 ### 4.5 Measured run
 
-One cold run of every level on gfx942 (MI300X, 64 CPUs, one GPU) with the MIOpen
-plugin, in 60-test chunks across 10 processes:
+One cold run of every level of the first, 5,469-case set on gfx942 (MI300X, 64
+CPUs, one GPU) with the MIOpen plugin, in 60-test chunks across 10 processes. The
+serial times of the current set are in the last table of this section.
 
 | Level | Cases | Wall time |
 |---|---|---|
@@ -607,9 +611,14 @@ harvested from these runs: 2,278 on gfx942 and 1,693 on gfx90a.
 
 ## 5. Golden reference
 
+**Deferred.** None of the golden cases below exists yet, and the golden
+generator (`generate_conv_fwd_golden.py`, RFC 0022 §15 I7) is not written. The
+table is the selection the generator will implement; until then every case it
+names runs live against the hipDNN references, like the rest of the sweep.
+
 Golden cases are chosen by the criteria in
-[methodology §4.2](methodology.md#42-which-cases-should-be-golden). Each one is
-generated by PyTorch and must fit the 2 MiB per-case budget with finite values.
+[methodology §4.2](methodology.md#42-which-cases-should-be-golden). Each one is to
+be generated by PyTorch and must fit the 2 MiB per-case budget with finite values.
 **G-A covers every rank × layout family and every data type for the plain op,
 and every fused topology once.** The baseline is a cover, not the complete 18-cell
 product: each of the six rank × layout families appears once with a rotating
@@ -635,8 +644,8 @@ data type, so each data type appears twice.
 | G16 | conv | 2D NHWC fp32, N 1, C 512 → K 64, 7², 3×3, pad 1 (accumulation length 4,608; ~1.3 MB) | G-D: long accumulation | nightly |
 | G17 | conv | 1D NLC fp16, M11 at N 4 (Conformer depthwise; ~0.5 MB) | G-F production anchor | nightly |
 
-Seventeen cases, inside the 6–20 range of RFC 0021. Each golden case is also a
-live sweep case, so no level that runs without `dvc pull` loses coverage.
+Seventeen cases, inside the 6–20 range of RFC 0022 §12.2. Each golden case is also a
+live sweep case, so no level that runs without `dvc pull` will lose coverage.
 
 - **Not golden:** NaN / Inf cases (F22) stay live with a matching-infinities
   validator, because golden tensors must be finite. All X shapes and the other
@@ -652,7 +661,7 @@ live sweep case, so no level that runs without `dvc pull` loses coverage.
   and bf16 cases, which matches the engines' accumulation contract and keeps
   the calibrated tolerance tighter than the op default of 0.1. Recorded per case
   in `meta.json`.
-- **Confirmation:** `hipdnn_golden_data_tests --reference both` passes for every
+- **Confirmation:** `hipdnn_golden_data_tests --reference both` must pass for every
   golden case except G13. G13 cannot be confirmed by a hipDNN reference until F13's
   reference fix lands; until then it is confirmed by a second independent
   computation (the same convolution done directly with NumPy in fp64).
@@ -674,7 +683,7 @@ These features need reference or harness work before their cases can be judged
 or run. The generator emits their cases now; they are unclaimed until the work
 lands.
 
-| Feature | Gap | Needed | RFC 0021 |
+| Feature | Gap | Needed | RFC 0022 §15 |
 |---|---|---|---|
 | F13 `CONVOLUTION` | The CPU reference rejects it (`CpuFpReferenceConvolution.hpp`). The GPU reference has no `conv_mode` handling, so it would compute cross-correlation and judge a correct result wrong. | Flip the filter in both references; until then, golden data only. | I6 |
 | F11 asymmetric padding | The GPU reference supports it (`TestGpuConvFwdRefAsymPad*`). The CPU reference takes pre and post separately but has no asymmetric test. | Add a CPU reference test. | I6 |
@@ -696,7 +705,7 @@ in the same pull request.
 
 ## 7. Exhaustive mode
 
-Convolution forward has an exhaustive mode. It is a separate tool (RFC 0021 §14);
+Convolution forward has an exhaustive mode. It is a separate tool (RFC 0022 §14);
 this plan only declares what the tool reads. The declarations live in
 `reference-data-scripts/conv_fwd_plan.py`, the same module the bundle generator
 reads, so there is one copy of the legality rules.

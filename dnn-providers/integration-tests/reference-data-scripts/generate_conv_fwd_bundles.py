@@ -332,7 +332,7 @@ def case_values(c):
     if topo != "conv":
         attrs["conv_y_virtual"] = c["conv_y_virtual"]
     if topo in P.HAS_ACT_PLACEHOLDERS:
-        op, lo, slope, hi, alpha, sbeta, pbeta = P.ACTS[c["act"]]
+        op, lo, slope, hi, alpha, sbeta, pbeta = P.ACT_PARAMS[c["act"]]
         attrs.update(
             act_operation=op,
             act_relu_lower_clip=lo,
@@ -408,7 +408,7 @@ def sweep_case(c, cid):
         "operation": "ConvolutionFwd"
         + ("" if c["topo"] == "conv" else f"+{c['topo']}"),
         "plan_items": list(c["ids"]),
-        "purpose": "probe" if probe else "claim",
+        "purpose": P.purpose(c),
         "size_class": c["size"],
         "seed": _seed(cid, "case"),
         "inputs": input_recipes(c, cid),
@@ -416,6 +416,8 @@ def sweep_case(c, cid):
     notes = []
     if probe:
         notes.append("probe: " + "; ".join(probe))
+    if c.get("regression"):
+        notes.append("regression: " + c["regression"])
     if c.get("src"):
         notes.append(c["src"])
     if notes:
@@ -739,6 +741,16 @@ def rules(lv):
         for rid, e in P.R_SHAPES.items():
             if e["level"] == "comprehensive":
                 add(b.R(rid))
+        # Regressions (plan section 4.2), after every rotated case so no id moves.
+        for topo in ("act", "bias_act"):
+            add(
+                fuse(
+                    b.S("S3", 2, P1),
+                    topo,
+                    act="relu_slope0",
+                    regression="a relu_lower_clip_slope of 0 must run as standard ReLU (#14363)",
+                )
+            )
 
     else:  # full: which wider sweeps must exist in the full suite?
         for r in P.RANKS:

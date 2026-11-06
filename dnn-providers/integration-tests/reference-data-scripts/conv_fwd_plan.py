@@ -98,6 +98,11 @@ ACTS = {
     "identity": ("identity", None, None, None, None, None, None),
 }
 RELU_FAMILY = ("relu", "relu_lo", "relu6", "relu_clamp", "relu_leaky")
+# Equivalent encodings of a ReLU-family activation. They are not rotated with ACTS;
+# each appears only in the regression cases that pin it (plan section 4.2).
+# relu_slope0: a relu_lower_clip_slope of 0 must run as standard ReLU (#14363).
+ACT_ENCODINGS = {"relu_slope0": ("relu_fwd", None, 0.0, None, None, None, None)}
+ACT_PARAMS = {**ACTS, **ACT_ENCODINGS}
 
 # Fused topologies. Each is one bundle directory under ConvolutionFwdPointwise/.
 TOPOLOGIES = (
@@ -306,7 +311,7 @@ def fits(c, level):
 def canon(c):
     """Stable key of the graph: everything that changes the graph or its data,
     nothing that only labels the case."""
-    skip = {"ids", "size", "src"}
+    skip = {"ids", "size", "src", "regression"}
     return json.dumps(
         {k: v for k, v in sorted(c.items()) if k not in skip}, sort_keys=True
     )
@@ -317,7 +322,7 @@ def short_hash(c):
 
 
 # --------------------------------------------------------------------------
-# Purpose (RFC 0021 section 9). Engine independent: a probe exists to exercise a
+# Purpose (RFC 0022 section 9). Engine independent: a probe exists to exercise a
 # feature that is unsupported, awkward or a hazard; a claim is a mainstream graph.
 # --------------------------------------------------------------------------
 
@@ -354,7 +359,9 @@ def probe_reasons(c):
     topo = c["topo"]
     if topo in ("scale_bias_act", "add_relu", "bias_add_relu", "act_add"):
         why.append("F27-F29 topology")
-    if topo in HAS_ACT_PLACEHOLDERS and c["act"] not in RELU_FAMILY:
+    if topo in HAS_ACT_PLACEHOLDERS and c["act"] not in RELU_FAMILY + tuple(
+        ACT_ENCODINGS
+    ):
         why.append("F26 non-ReLU activation")
     if topo in HAS_BIAS and (
         c["bias"] != "channel" or c["bias_t"] != c["xt"] or c["bias_first"]
@@ -370,7 +377,11 @@ def probe_reasons(c):
 
 
 def purpose(c):
-    return "probe" if probe_reasons(c) else "claim"
+    """probe, regression (a case that pins an escaped bug; claimed like a claim case)
+    or claim."""
+    if probe_reasons(c):
+        return "probe"
+    return "regression" if c.get("regression") else "claim"
 
 
 # --------------------------------------------------------------------------
@@ -966,7 +977,7 @@ def core_cell(c):
 # --------------------------------------------------------------------------
 # Value domains (F21). The fill recipes the harness has are 'free' (uniform in
 # [lo, hi]) and 'fixed' (constant). NaN, Inf, subnormal injection and sparsity
-# need harness work (RFC 0021 I4) and are not generated.
+# need harness work (RFC 0022 I4) and are not generated.
 # --------------------------------------------------------------------------
 
 
