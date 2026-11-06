@@ -18,7 +18,9 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          sparse-checkout: projects/hipblaslt/clients/scripts/rocjitsu
+          sparse-checkout: |
+            projects/hipblaslt/clients/scripts/rocjitsu
+            .github/scripts
           persist-credentials: false
 
       # The tests use stand-in benchmarks and emulators, so the GEMM workload
