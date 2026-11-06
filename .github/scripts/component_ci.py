@@ -52,6 +52,7 @@ COMPONENTS = {
         "projects/hipblaslt/tensilelite/tensilelite/Tests/unit/"
         "test_solution_uid_uniqueness.py",
         "projects/hipblaslt/tensilelite/tox.ini",
+        "projects/hipblaslt/tensilelite/requirements-tox-constraints.txt",
         ".github/workflows/component-ci-library-uniqueness.yml",
     ],
     "hipblaslt_rocjitsu_scripts": [

@@ -1,7 +1,7 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""Generate pip requirements from the project's dependency groups and uv.lock."""
+"""Generate pip requirements and constraints from dependency groups and uv.lock."""
 
 import argparse
 import subprocess
@@ -40,6 +40,11 @@ profiles = {
     "requirements-dev.txt": (
         "Full Python requirements for core builds, tests, and contributor tasks.",
         ["--group", "dev", "--no-editable"],
+    ),
+    # Pip constraints require package names, so omit local path requirements.
+    "requirements-tox-constraints.txt": (
+        "Locked dependency versions for pip constraints; local packages are installed separately.",
+        ["--group", "dev", "--no-emit-local"],
     ),
     # Excludes the project's runtime dependencies; tox installs those per environment.
     "requirements-tox.txt": (
