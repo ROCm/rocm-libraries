@@ -400,7 +400,10 @@ namespace rocalution
                 // Check convergence
                 res = this->Norm_(*r[0]);
 
-                if(this->iter_ctrl_.CheckResidualNoCount(std::abs(res)))
+                // Below the minimum iteration count an exact solution has no residual to
+                // orthogonalize
+                if(this->iter_ctrl_.CheckResidualNoCount(std::abs(res))
+                   || res == static_cast<ValueType>(0))
                 {
                     converged = true;
                     break;
@@ -614,7 +617,10 @@ namespace rocalution
                 // Check convergence
                 res = this->Norm_(*r[0]);
 
-                if(this->iter_ctrl_.CheckResidualNoCount(std::abs(res)))
+                // Below the minimum iteration count an exact solution has no residual to
+                // orthogonalize
+                if(this->iter_ctrl_.CheckResidualNoCount(std::abs(res))
+                   || res == static_cast<ValueType>(0))
                 {
                     converged = true;
                     break;

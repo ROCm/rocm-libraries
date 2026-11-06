@@ -1767,6 +1767,45 @@ TYPED_TEST(solvers, minimum_iteration_count_delays_convergence)
     }
 }
 
+// The first step solves 2 I x = (1, 1, 1, 1) exactly, so below the minimum iteration
+// count the next step would divide by zero: GMRES and FGMRES in normalizing the next
+// Arnoldi vector or the restart residual, BiCGStab(1) in its Gram-Schmidt step, and
+// BiCGStab(2) in a rho == 0 breakdown of its next BiCG step
+TYPED_TEST(solvers, an_exact_step_below_the_minimum_iteration_count_stops_the_solve)
+{
+    using T = typename TypeParam::value_type;
+    auto A  = this->make(diagonal(Vec<T>(4, 2)));
+
+    for(const Method<T>& m : {with_basis<GMRES<T>>("GMRES", 1),
+                              with_basis<GMRES<T>>("GMRES", 2),
+                              with_basis<FGMRES<T>>("FGMRES", 1),
+                              with_basis<FGMRES<T>>("FGMRES", 2),
+                              bicgstabl<T>(1),
+                              bicgstabl<T>(2)})
+    {
+        for(bool precond : {false, true})
+        {
+            SCOPED_TRACE(trace(m, precond));
+            Jacobi<T> jacobi;
+            auto      solver = m.make();
+            solver->Init(0.0, 0.0, 1e8, 3, 10);
+            set_up(*solver, m, *A, precond ? &jacobi : nullptr);
+
+            Outcome<T>        out;
+            const std::string log
+                = logged([&] { out = solve(*solver, *A, Vec<T>(4, 1), Vec<T>(4, 0)); });
+            EXPECT_EQ(log.find("rho == 0"), std::string::npos) << log;
+            EXPECT_EQ(out.x, Vec<T>(4, 0.5));
+            // BiCGStab(l) counts completed cycles
+            EXPECT_EQ(out.iterations, is_bicgstabl(m) ? 0 : 1);
+            // Below the minimum iteration count the residual checks reach no tolerance,
+            // so the exact solution stops with status 0
+            EXPECT_EQ(out.status, 0);
+            EXPECT_EQ(out.residual, 0);
+        }
+    }
+}
+
 TYPED_TEST(solvers, current_residual_is_measured_in_the_chosen_norm)
 {
     using T          = typename TypeParam::value_type;
