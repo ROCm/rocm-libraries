@@ -112,6 +112,10 @@ static const feature_row_t k_shipped_paged[] = {
     {"fp16", 96, 96, "causal", NULL, "u", "paged", 16, 32, -1},
 };
 
+/* gfx11 ships head 96 at pages 32 and 64 with block_m 64. */
+static const feature_row_t k_shipped_paged_gfx11
+    = {"fp16", 96, 96, "causal", NULL, "du", "paged", 32, 32, -1};
+
 static rocke_wmma_fmha_fwd_v2_spec_t feature_spec(const feature_row_t* r)
 {
     rocke_wmma_fmha_fwd_v2_spec_t s = base_spec(r->dtype, r->hd, r->hdv, r->mask, r->bias);
@@ -244,6 +248,9 @@ static void build_table(void)
     for(a = 0; a < 2; ++a)
         for(i = 0; i < (int)(sizeof(k_shipped_paged) / sizeof(k_shipped_paged[0])); ++i)
             push(archs[a], feature_spec(&k_shipped_paged[i]));
+    s = feature_spec(&k_shipped_paged_gfx11);
+    s.block_m = 64;
+    push("gfx11-generic", s);
 }
 
 int main(int argc, char** argv)
