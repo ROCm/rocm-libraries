@@ -461,6 +461,23 @@ namespace rocalution
     }
     // LCOV_EXCL_STOP
 
+    template <class OperatorType, class VectorType, typename ValueType>
+    void BaseAMG<OperatorType, VectorType, ValueType>::MoveToBackendOf_(
+        OperatorType* op, const OperatorType& src) const
+    {
+        assert(op != NULL);
+
+        // Not CloneBackend, which also gives a GlobalMatrix the parallel manager of src
+        if(static_cast<const BaseRocalution<ValueType>&>(src).is_accel_())
+        {
+            op->MoveToAccelerator();
+        }
+        else
+        {
+            op->MoveToHost();
+        }
+    }
+
     template class BaseAMG<LocalMatrix<double>, LocalVector<double>, double>;
     template class BaseAMG<LocalMatrix<float>, LocalVector<float>, float>;
 #ifdef SUPPORT_COMPLEX

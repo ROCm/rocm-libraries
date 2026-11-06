@@ -194,7 +194,7 @@ namespace rocalution
 
             if(i == this->levels_ - this->host_level_ - 1)
             {
-                this->op_level_[i - 1]->CloneBackend(*this->restrict_op_level_[i - 1]);
+                this->MoveToBackendOf_(this->op_level_[i - 1], *this->restrict_op_level_[i - 1]);
             }
         }
 

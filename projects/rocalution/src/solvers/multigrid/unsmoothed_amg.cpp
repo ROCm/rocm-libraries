@@ -134,8 +134,8 @@ namespace rocalution
         // If all coarse levels are on the host, move the transfer operators for the product
         if(this->host_level_ == this->levels_ - 1)
         {
-            this->restrict_op_level_[0]->CloneBackend(*this->op_);
-            this->prolong_op_level_[0]->CloneBackend(*this->op_);
+            this->MoveToBackendOf_(this->restrict_op_level_[0], *this->op_);
+            this->MoveToBackendOf_(this->prolong_op_level_[0], *this->op_);
         }
 
         if(this->op_->GetFormat() != CSR)
@@ -173,7 +173,7 @@ namespace rocalution
             // Create coarse operator, on the backend of its transfer operators
             this->op_level_[i]->Clear();
             this->op_level_[i]->ConvertToCSR();
-            this->op_level_[i]->CloneBackend(*this->restrict_op_level_[i]);
+            this->MoveToBackendOf_(this->op_level_[i], *this->restrict_op_level_[i]);
 
             if(i == this->levels_ - this->host_level_ - 1)
             {
@@ -185,7 +185,7 @@ namespace rocalution
 
             if(i == this->levels_ - this->host_level_ - 1)
             {
-                this->op_level_[i - 1]->CloneBackend(*this->restrict_op_level_[i - 1]);
+                this->MoveToBackendOf_(this->op_level_[i - 1], *this->restrict_op_level_[i - 1]);
             }
 
             if(this->over_interp_ > static_cast<ValueType>(1))
