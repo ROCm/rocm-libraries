@@ -833,11 +833,15 @@ if(ROCKE_INSTALL_TESTS)
 
     # Library conv TF32 tests (no GPU required): validation, IR lowering on
     # gfx942 and gfx950, comgr ISA checks (skipped without comgr/llvm-objdump),
-    # the benchmark/AOT dtype plumbing. Their own entry rather than part of
+    # the benchmark/AOT dtype plumbing, the validate gate and the direct-conv
+    # backend's dual-engine parity (its engine classes skip without
+    # rocke_engine). Their own entry rather than part of
     # rocke_library_conv_pytest: the build-and-lower matrices take tens of
     # seconds, past that entry's per-test timeout. Both run in the quick and
-    # ffm-quick tiers (ROCKE_ENGINE_test_categories_external.yaml). The GPU
-    # classes (all named *Gpu*) are deselected here and run in the GPU list.
+    # ffm-quick tiers (ROCKE_ENGINE_test_categories_external.yaml), and both
+    # bake in the quick label so `ctest -L quick` finds them without that
+    # file's labelling. The GPU classes (all named *Gpu*) are deselected here
+    # and run in the GPU list.
     set(_ROCKE_LIBRARY_CONV_TF32_TEST_RELPATHS
         "tests/library/tests/test_conv_fwd_tf32.py"
         "tests/library/tests/test_conv_dgrad_tf32.py"
@@ -847,7 +851,10 @@ if(ROCKE_INSTALL_TESTS)
         "tests/library/tests/test_conv_direct_tf32_scalar.py"
         "tests/library/tests/test_conv_direct_nongrouped_tf32.py"
         "tests/library/tests/test_benchmark_tf32_plumbing.py"
-        "tests/library/tests/test_direct_tf32_plumbing.py")
+        "tests/library/tests/test_direct_tf32_plumbing.py"
+        "tests/library/tests/test_llvm_tools.py"
+        "tests/library/tests/test_conv_tf32_validate_gate.py"
+        "tests/library/tests/test_conv_direct_grouped_backend_parity.py")
     set(_ROCKE_LIBRARY_CONV_TF32_TESTS "")
     foreach(_rocke_conv_tf32_test ${_ROCKE_LIBRARY_CONV_TF32_TEST_RELPATHS})
       string(APPEND _ROCKE_LIBRARY_CONV_TF32_TESTS
@@ -857,7 +864,7 @@ if(ROCKE_INSTALL_TESTS)
            "add_test(rocke_library_conv_tf32_pytest python -m pytest${_ROCKE_LIBRARY_CONV_TF32_TESTS} -k \"not Gpu\" -v -rs --timeout=120)\n")
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
            "set_tests_properties(rocke_library_conv_tf32_pytest PROPERTIES\n"
-           "  LABELS \"ckc\\;python\\;conv\\;host\"\n"
+           "  LABELS \"ckc\\;python\\;conv\\;host\\;quick\"\n"
            "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
            "  TIMEOUT 900)\n")
 
