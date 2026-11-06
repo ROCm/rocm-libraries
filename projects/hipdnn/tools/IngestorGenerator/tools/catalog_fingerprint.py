@@ -7,12 +7,29 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from codegen.catalog_fingerprint import catalog_fingerprint  # noqa: E402
+import catalog_diff
+
+
+def catalog_fingerprint(kdp: dict) -> str:
+    """sha256 hex of a KDP's kernels, independent of descriptor ids and kernel order.
+
+    Keyed on the same identity ``catalog_diff``'s regeneration gate (g3) uses --
+    ``catalog_diff.entry_key``: the full ``kernel_source``/``sources`` (every key,
+    not just ``spec``) plus ``arch``, ``metadata``, ``priority`` and ``version``.
+    A builder, target, arch or priority edit the regeneration gate catches
+    therefore changes this fingerprint too, so a trained ranker is never left
+    silently ranking a catalog it never saw.
+    """
+    entries = sorted(
+        json.dumps(catalog_diff.entry_key(k), sort_keys=True, separators=(",", ":"))
+        for k in kdp.get("kernelDescriptors", [])
+    )
+    return hashlib.sha256("\n".join(entries).encode("utf-8")).hexdigest()
 
 
 def main(argv=None) -> int:

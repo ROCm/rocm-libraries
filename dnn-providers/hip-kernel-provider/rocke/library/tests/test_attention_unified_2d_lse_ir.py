@@ -10,6 +10,7 @@ import pytest
 
 from rocke.core.lower_llvm import lower_kernel_to_llvm
 from rocke.core.passes import eliminate_dead_pure_ops
+from rocke.helpers.tiling.lds_conflict import NumBuilder
 
 _BASE = dict(
     head_size=128,
@@ -349,23 +350,12 @@ def test_gfx942_production_specs_use_branches_the_numeric_gate_covers(fields, br
 _GFX950_BRANCHES = ("transposed32", "mfma32", "striped16")
 
 
-class _IntBuilder:
-    """Evaluates the index arithmetic ``unified_lse_offset`` emits on ints."""
-
-    def add(self, a, b):
-        return a + b
-
-    def mul(self, a, b):
-        return a * b
-
-    def const_i32(self, v):
-        return v
-
-
 def _offsets(layout, q_lens, heads):
+    """Evaluates the index arithmetic ``unified_lse_offset`` emits on ints, via
+    ``NumBuilder`` (its ``add``/``mul``/``const_i32`` cover what this needs)."""
     from kernels.common._lse_store import unified_lse_offset
 
-    b, out, start = _IntBuilder(), {}, 0
+    b, out, start = NumBuilder(0), {}, 0
     for seq, q_len in enumerate(q_lens):
         for pos in range(q_len):
             for head in range(heads):
@@ -413,7 +403,7 @@ def test_lse_offset_rejects_an_unknown_layout():
 
     with pytest.raises(ValueError, match="lse layout must be one of"):
         unified_lse_offset(
-            _IntBuilder(), "bshd", cu_q_start=0, q_len=1, pos=0, head=0, num_heads=1
+            NumBuilder(0), "bshd", cu_q_start=0, q_len=1, pos=0, head=0, num_heads=1
         )
 
 

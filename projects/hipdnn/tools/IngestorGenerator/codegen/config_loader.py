@@ -1395,9 +1395,9 @@ _SHA256 = re.compile(r"[0-9a-f]{64}")
 
 
 def _load_trained_catalog_sha256(engine_raw: dict, heuristics: dict) -> dict:
-    """Read ``engine.trained_catalog_sha256``: arch -> the `codegen.catalog_fingerprint` of
-    the catalog the ``engine.heuristics.sort_kernel_catalog`` models bound under that arch
-    were trained on (tools/catalog_fingerprint.py prints it). When set, its keys must be
+    """Read ``engine.trained_catalog_sha256``: arch -> the `tools/catalog_fingerprint.py`
+    hash of the catalog the ``engine.heuristics.sort_kernel_catalog`` models bound under
+    that arch were trained on (tools/catalog_fingerprint.py prints it). When set, its keys must be
     exactly those arch keys, so every bound ranker's catalog is gated. Absent is ``{}``,
     which gates nothing."""
     raw = engine_raw.get("trained_catalog_sha256")

@@ -47,12 +47,12 @@ git, `model.bin` in DVC (`model.bin.dvc`). Only the cells that ship more than on
 a model a choice; elsewhere a graph matches one kernel and the model and the native scorer
 agree.
 
-- Trained on 810 SDPA graphs over the 21 multi-variant cells (D64/D128 cells shipping two or three tile geometries), each kernel timed on MI355X
+- Trained on 810 SDPA graphs over the 21 multi-variant cells (D64/D128 cells shipping two or three tile geometries), each kernel timed on gfx950
   (`hipdnn_corpus_gen`, `hipdnn_bench`, `uhd_gen`; the `hipdnn-uhd` skill).
 - Validated on 352 held-out graphs (never trained on): geomean regret 1.0028 (tflops) / 1.0032
   (time) vs native 1.0186; top-1 97.2% / 94.9% vs 82.4%; faster than native by more than 2% on
-  52–53 graphs. One graph is more than 5% slower than native (1.18x, a 0.18 ms graph). A retrain
-  on 3,330 graphs scored the same, so these models stay. Stage V on MI355X (`validate_l2.py`,
+  52–53 graphs. One graph is more than 5% slower than native (1.18x). A retrain
+  on 3,330 graphs scored the same, so these models stay. Stage V on gfx950 (`validate_l2.py`,
   `decide.py l2 --baseline native`): the runtime reads each model, no winner record decides,
   and the regret gate passes.
 - The engine config binds the ids (`engine.heuristics`) and records the fingerprint of the

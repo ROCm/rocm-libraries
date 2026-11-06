@@ -17,16 +17,21 @@ from __future__ import annotations
 
 import copy
 import json
+import sys
 from pathlib import Path
 
 import pytest
 import yaml
 
-from codegen.catalog_fingerprint import catalog_fingerprint
 from codegen.config_loader import ConfigError, load_config
 from codegen.generator import build_ued, mint_ids
 
 _ROOT = Path(__file__).resolve().parents[1]
+
+sys.path.insert(0, str(_ROOT / "tools"))
+
+from catalog_fingerprint import catalog_fingerprint  # noqa: E402
+
 _REPO = _ROOT.parents[3]
 _DESCRIPTORS = (
     _REPO
@@ -141,13 +146,31 @@ def _kdp(*kernels) -> dict:
     return {"id": "kdp-id", "kernelDescriptors": list(kernels)}
 
 
-def _kernel(name, *, kid="k-id", tile=64, spec_tile=64) -> dict:
-    return {
+def _kernel(
+    name,
+    *,
+    kid="k-id",
+    tile=64,
+    spec_tile=64,
+    kind="rocke",
+    target=None,
+    arch=None,
+    priority=None,
+) -> dict:
+    source = {"kind": kind, "spec": {"tile_size": spec_tile}}
+    if target is not None:
+        source["target"] = target
+    entry = {
         "id": kid,
         "name": name,
         "metadata": {"tile_size": tile},
-        "kernel_source": {"kind": "rocke", "spec": {"tile_size": spec_tile}},
+        "kernel_source": source,
     }
+    if arch is not None:
+        entry["arch"] = arch
+    if priority is not None:
+        entry["priority"] = priority
+    return entry
 
 
 def test_the_fingerprint_ignores_ids_and_kernel_order():
@@ -166,10 +189,28 @@ def test_the_fingerprint_ignores_ids_and_kernel_order():
         _kdp(_kernel("a"), _kernel("b2")),  # renamed
         _kdp(_kernel("a"), _kernel("b", tile=32)),  # metadata
         _kdp(_kernel("a"), _kernel("b", spec_tile=32)),  # spec
+        _kdp(_kernel("a"), _kernel("b", kind="cktile")),  # builder
+        _kdp(_kernel("a"), _kernel("b", target="gfx942")),  # target
+        _kdp(_kernel("a"), _kernel("b", arch=["gfx950"])),  # arch
+        _kdp(_kernel("a"), _kernel("b", priority=1)),  # priority
     ],
-    ids=["added", "removed", "renamed", "metadata", "spec"],
+    ids=[
+        "added",
+        "removed",
+        "renamed",
+        "metadata",
+        "spec",
+        "builder",
+        "target",
+        "arch",
+        "priority",
+    ],
 )
 def test_the_fingerprint_changes_with_the_catalog(edited):
+    """Every edit ``catalog_diff``'s regeneration gate (g3) catches must also move the
+    fingerprint: a builder (kernel_source kind), target, arch or priority edit that the
+    gate flags as a different catalog must not leave a trained ranker's fingerprint
+    unchanged (it would then rank a catalog it was never trained on, undetected)."""
     assert catalog_fingerprint(edited) != catalog_fingerprint(
         _kdp(_kernel("a"), _kernel("b"))
     )
