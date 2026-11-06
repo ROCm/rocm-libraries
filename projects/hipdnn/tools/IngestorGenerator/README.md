@@ -724,7 +724,7 @@ on the verifying machine.
 | `tools/registry_enumerator.py` | Which kernels does the rocKE registry offer this engine? Expands an engine manifest into a generator config; reports how a shape corpus falls on its cells (by cell axes; it does not check that a sequence length can be served); prints the space by knob with exact instance counts | `registry_enumerator.py --manifest M --out C [--shapes S] [--strict]`, or `--manifest M --plan-space [--strict]` (`--plan-space` with `--out` or `--shapes` is a usage error). Exit 2 is unusable input, naming the field: a malformed manifest, a duplicate key, a `ground_truth.value_map` whose keys differ from a cell field's values, or a builder value with no `specialization.vocabulary` mapping; `--strict` makes exit 1 mean an instance count over `aot_budget_per_arch` or a `--shapes` GAP; an over-budget build writes nothing |
 | `tools/factorise_config.py` | Compacts an enumerated config into the `variants` form, refusing output that does not re-expand to the input | `factorise_config.py --config C --out S --knobs K1,K2,... [--vocabulary 'field:from=to,...']` |
 | `tools/catalog_diff.py` | Is a regenerated catalog the shipped one? Order-blind; UUID-blind with `--ignore-ids` (needed only for output generated with `--new-ids` or with nothing to reuse); `--expect-ids` requires the shipped ids to be reused, as after a splice or a `generate.py` run that reused the installed bundle's ids; `--subset` requires only that every shipped kernel is present. An entry is its name, whole `kernel_source` (every key, the spec as below) or, for a multi-launch entry, its `sources` map by launch name, `arch`, metadata, priority and version. Without `--strict-spec` (and with `--subset`) the spec comparison is keyed on the shipped fields: the header's `spec fields` line lists the regenerated-only fields it did not compare. A malformed entry or KMD exits 2, as does an `--expect-ids` name present in both catalogs used a different number of times | `catalog_diff.py --shipped K --regenerated K2 [--ignore-ids] [--expect-ids] [--strict-spec \| --subset] [--shipped-kmd M --regenerated-kmd M2]` |
-| `tools/variant_reduce.py` | Which variants of a selection do autotune rankings justify? Reports the ε curve and per-variant reasons and proposes knob-level rules. Rule ids (`R` and six hex digits) are derived from the rule text, so an id is stable while the text is; a `keep X=v only for <cells>` rule's cells, and so its id, can change with `--budget`; a rule no longer proposed exits 2. Exit 1: over budget, or the applied rules together lose more of some graph's best time than the rules' ε (the report names those graphs); 2: unusable input; 3: a failed correctness verdict, timing phases missing for some (round, corpus), or the reduced arm's sweep is incomplete (no `summary.json` or no usable `expected_phases`, no expected timing phase for the arm, an expected phase with no record, a timing phase with no winners). `--out` is never written on 1 or 3; the report is, except for an incomplete sweep, which writes nothing. A sweep of fewer than 2 rounds warns that its noise floor is assumed (`reduction.single_round_epsilon`) | `variant_reduce.py --selection S --kdp INSTALLED_KDP --sweep-output DIR [--arm A] --out S2 --report R [--budget N] [--apply-rules ID,ID]` |
+| `tools/variant_reduce.py` | Which variants of a selection do autotune rankings justify? Reports the ε curve and per-variant reasons and proposes knob-level rules. Rule ids (`R` and six hex digits) are derived from the rule text, so an id is stable while the text is; a `keep X=v only for <cells>` rule's cells, and so its id, can change with `--budget`; a rule no longer proposed exits 2. Exit 1: over budget, or the applied rules together lose more of some graph's best time than the rules' ε (the report names those graphs); a slotted engine is checked per slot, see [Reducing a slotted engine](#reducing-a-slotted-engine); 2: unusable input; 3: a failed correctness verdict, timing phases missing for some (round, corpus), or the reduced arm's sweep is incomplete (no `summary.json` or no usable `expected_phases`, no expected timing phase for the arm, an expected phase with no record, a timing phase with no winners, for a slotted engine in any slot). `--out` is never written on 1 or 3; the report is, except for an incomplete sweep, which writes nothing. A sweep of fewer than 2 rounds warns that its noise floor is assumed (`reduction.single_round_epsilon`) | `variant_reduce.py --selection S --kdp INSTALLED_KDP [--kdp ...] --sweep-output DIR [--arm A] --out S2 --report R [--budget N] [--apply-rules ID,ID]` |
 | `tools/ground_truth.py` | How does hipDNN compare with the kernel owner's numbers? | `ground_truth.py {ingest,graphs,compare}`; see RUNBOOK stages 2 and 6. `graphs` records each graph's semantic identity and its row's digest; `compare` exits 2 when a row or a swept graph no longer matches that record (rerun `graphs`), and otherwise 0 whatever it finds (the report is for review; an accepted exception is a normal outcome); `compare --strict` exits 1 unless every row is within `--margin`, not declined in any timing round, and has a passing correctness verdict (a timing-only sweep, or a row with no usable reference, refuses) |
 | `tools/mine_shapes.py` | Build the attention shape corpus, refusing categoricals it does not recognise. | see `--help` |
 | `tools/field_audit.py` | Which schema fields are never named as an accessor call in the native sources? A lexical inventory bounding the unchecked set | `field_audit.py SCHEMA.fbs SOURCE...`; prints `UNCHECKED: <field>` per unreferenced field and exits 1. Exits 2 on a schema that parses to zero fields, so an unparsed schema cannot read as a clean audit |
@@ -1170,6 +1170,32 @@ name, its kernels within the slot, and only a new slot or a retuned kernel gets 
 scratch bundle (`also_from`) supplies the same ids for a slot added since installation. A slotted
 engine is one bundle, so `--engine-ids-from` (sibling mode) is refused for it. Unslotted output
 is byte-identical to a generator without slots (`tests/test_slots.py` pins it against a golden).
+
+### Reducing a slotted engine
+
+`variant_reduce.py` reduces a slotted selection per slot. A slot's rankings are the `v:3` slot
+records of the sweep's winner shards, keyed by graph, device and slot; its floor, coverage,
+noise floor and ε use that slot's kernels and the `reduction.fields` its own `kmd_fields`
+declare. Its `v:3` program lines are validated against the selection's slots (exit 2 in
+an unslotted sweep, or for a pick naming an unknown slot) and never ranked. A slot's cells lead with the pack, so
+a slot's packs (its discriminators) are floored apart. Pass `--kdp` once per pack; each KDP
+pairs with the pack whose kernel names it holds.
+
+- **Budget.** `reduction.aot_budget_per_arch` and `--budget` bound each pack per arch, the
+  count `generate.py` warns on, not a slot or the engine.
+- **Loss.** `--apply-rules` ids are per slot (a slot's id hashes the slot with the rule text); a
+  slot with no chosen rule keeps all its kernels. The applied rules' loss is checked per
+  slot: it bounds each slot with the other slots at their reference picks, not the whole
+  program, so the final full-corpus sweep stays the program-level check.
+- **Sweep.** A slotted selection needs slot records (`v:3`) and an unslotted one whole-graph
+  records (`v:2`); the other kind is exit 2. A timing phase with no records for a slot is exit 3.
+- **Output.** One selection with every pack kept, each filtered to its slot's kept kernels;
+  `slot`, `arch`, `discriminator`, `default` markers and `reduction:` are preserved, so
+  `generate.py` consumes it unchanged.
+
+The line versions `variant_reduce.py` accepts are pinned to the SDK writer by
+`tests/fixtures/winner_lines_golden.jsonl`, which `tests/test_winner_line_golden.py` and the SDK
+test `TestWinnerLineGolden` both read.
 
 CI covers slots through the validator roots (`hipdnn_validate_descriptors_slotted_*`) and this
 suite; the `uhd_gen` slot tests run locally only (see the uhd_gen README).
