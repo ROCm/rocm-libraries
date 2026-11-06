@@ -7,6 +7,7 @@
 #include "find_db.hpp"
 #include "../lib_env_var.hpp"
 
+#include <cmath>
 #include <fstream>
 #include <iterator>
 #include <sstream>
@@ -53,6 +54,20 @@ std::string ReadFile(const miopen::fs::path& path)
     return {std::istreambuf_iterator<char>{file}, std::istreambuf_iterator<char>{}};
 }
 
+// True if one of the measured entries of a find-db record line ("key=solver:time,ws,algo;...")
+// has this time.
+bool HasMeasuredTime(const std::string& record, float time)
+{
+    std::istringstream entries{record.substr(record.find('=') + 1)};
+    for(std::string entry; std::getline(entries, entry, ';');)
+    {
+        const auto t = std::stof(entry.substr(entry.find(':') + 1));
+        if(t < miopen::FindDbData::NotMeasuredTime() && std::abs(t - time) <= 1e-6f * t)
+            return true;
+    }
+    return false;
+}
+
 // A solver that Find skips for lack of workspace is written to the find-db as a not-measured
 // entry with the workspace it needs: the record is reused while the caller provides the same
 // workspace, and Find runs again once enough is provided for that solver.
@@ -92,6 +107,7 @@ void RunSkippedForWorkspace()
                                   ws.ptr(),
                                   ws.size(),
                                   false);
+        return perf[0];
     };
 
     // No workspace: GemmFwdRest (im2col) is skipped and recorded as not measured.
@@ -108,11 +124,20 @@ void RunSkippedForWorkspace()
     find(no_ws);
     EXPECT_EQ(ReadFile(temp_file.Path()), record);
 
-    // The workspace the not-measured entry records: Find runs again and measures GemmFwdRest.
     const auto ws_pos    = record.find(not_measured.str()) + not_measured.str().size();
     const auto needed_ws = std::stoull(record.substr(ws_pos, record.find(',', ws_pos) - ws_pos));
     EXPECT_GT(needed_ws, 0);
     Workspace full_ws{needed_ws};
+
+    // Fast Find never runs Find: with the workspace GemmFwdRest needs, it still uses the measured
+    // entries of the record rather than the immediate mode fallback, and leaves the record as is.
+    conv.findMode.Set(miopen::FindMode::Values::Fast);
+    const auto fast = find(full_ws);
+    EXPECT_EQ(ReadFile(temp_file.Path()), record);
+    EXPECT_TRUE(HasMeasuredTime(record, fast.time)) << fast.time << '\n' << record;
+    conv.findMode.Set(miopen::FindMode::Values::Hybrid);
+
+    // The workspace the not-measured entry records: Find runs again and measures GemmFwdRest.
     find(full_ws);
     const auto regenerated = ReadFile(temp_file.Path());
     EXPECT_NE(regenerated.find("GemmFwdRest:"), std::string::npos) << regenerated;

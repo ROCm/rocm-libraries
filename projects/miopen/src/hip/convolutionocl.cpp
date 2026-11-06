@@ -99,6 +99,9 @@ std::vector<miopenConvSolution_t> GetSolutions(const ExecutionContext& ctx,
     auto interim = std::vector<miopenConvSolution_t>{};
     interim.reserve(20); // Heuristic for speed.
 
+    // Fast Find never runs Find, so it uses the measured entries whatever workspace it provides.
+    const bool find_may_run = !problem.GetConv().findMode.IsFast(ctx);
+
     for(const auto& pair : fdb_record)
     {
         // A solver Find skipped for lack of workspace has no measured time. If it fits the
@@ -106,11 +109,12 @@ std::vector<miopenConvSolution_t> GetSolutions(const ExecutionContext& ctx,
         // so that Hybrid Find runs Normal Find (TryLoad() then runs Find again).
         if(!pair.second.IsMeasured())
         {
-            if(invokeParams != nullptr && conv::IsEnoughWorkspace("GetSolutions",
-                                                                  solver::Id{pair.first},
-                                                                  pair.second.workspace,
-                                                                  invokeParams,
-                                                                  false))
+            if(find_may_run && invokeParams != nullptr &&
+               conv::IsEnoughWorkspace("GetSolutions",
+                                       solver::Id{pair.first},
+                                       pair.second.workspace,
+                                       invokeParams,
+                                       false))
             {
                 MIOPEN_LOG_I("Find-db record was found with less workspace than provided now.");
                 return {};
