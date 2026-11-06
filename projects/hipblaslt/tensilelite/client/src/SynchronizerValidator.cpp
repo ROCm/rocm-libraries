@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "SynchronizerValidator.hpp"
+#include "TimingInstrumentation.hpp"
 
 #include "ResultReporter.hpp"
 
@@ -178,6 +179,7 @@ namespace TensileLite
             m_launchedSinceCheck = false;
             try
             {
+                ScopedTimer timer("synchronizer_check");
                 checkInputs("enqueues");
             }
             catch(...)
@@ -198,6 +200,7 @@ namespace TensileLite
 
             try
             {
+                ScopedTimer timer("synchronizer_check");
                 checkInputs(stage);
             }
             catch(...)
@@ -211,7 +214,11 @@ namespace TensileLite
         void SynchronizerValidator::checkInputs(char const* stage)
         {
             if(!active() || m_problem == nullptr || m_iterationInputs.empty())
+            {
+                // Solution cannot use the Synchronizer (or the check is off): nothing to read.
+                ScopedTimer timer("synchronizer_inactive");
                 return;
+            }
 
             // Rotating-buffer inputs usually share the Synchronizer, but they are
             // built once per problem, so under GuardPageAll they keep the first
@@ -301,7 +308,10 @@ namespace TensileLite
                                                 size_t                        gemmIdx)
         {
             if(deviceSynchronizer == nullptr)
+            {
+                ScopedTimer timer("synchronizer_no_buffer");
                 return true;
+            }
 
             auto const&  tensor = problem.tensors()[ContractionProblemGemm::TENSOR::Synchronizer];
             size_t const bytes  = tensor.totalAllocatedBytes();
@@ -342,10 +352,19 @@ namespace TensileLite
         {
             // Once per run iteration, so the copy is hot: pinned staging avoids
             // the pageable bounce buffer.
-            uint8_t* host = readBuffer(deviceId, device, bytes);
+            uint8_t* host;
+            {
+                ScopedTimer timer("synchronizer_readback");
+                host = readBuffer(deviceId, device, bytes);
+            }
 
             SynchronizerResidue residue;
-            if(!scanSynchronizerResidue(host, bytes, residue))
+            bool                dirty;
+            {
+                ScopedTimer timer("synchronizer_scan");
+                dirty = scanSynchronizerResidue(host, bytes, residue);
+            }
+            if(!dirty)
                 return true;
 
             std::ostringstream msg;

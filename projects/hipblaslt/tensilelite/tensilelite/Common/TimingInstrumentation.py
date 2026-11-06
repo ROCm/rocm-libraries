@@ -46,7 +46,7 @@ _timing_buffer = []
 
 
 @contextmanager
-def timing_context(category_name):
+def timing_context(category_name, enabled=None):
     """Context manager for timing instrumentation.
 
     Records raw wall-clock time with no overhead subtraction.  Python-side
@@ -54,8 +54,14 @@ def timing_context(category_name):
     tracked because there are only ~a dozen calls per run — the overhead
     is negligible relative to the seconds-scale measurements.  C++ overhead
     is tracked separately via a calibrated timing_overhead record.
+
+    ``enabled`` overrides ``globalParameters["TimingInstrumentation"]``, for code that runs outside
+    a Tensile invocation (e.g. the test harness packing an artifact), where the global parameters
+    do not describe the current run.
     """
-    if globalParameters.get("TimingInstrumentation", False):
+    if enabled is None:
+        enabled = globalParameters.get("TimingInstrumentation", False)
+    if enabled:
         start = time.time_ns()
         try:
             yield
@@ -64,6 +70,16 @@ def timing_context(category_name):
             _timing_buffer.append((category_name, elapsed_ns / 1_000_000))
     else:
         yield
+
+
+def record_timing(category_name, duration_ms):
+    """Record a duration that was computed by hand (e.g. a difference of two measurements).
+
+    Use this for time that cannot be wrapped in a single ``timing_context`` scope, such as the
+    part of an outer call that is not spent inside a callback it makes.
+    """
+    if globalParameters.get("TimingInstrumentation", False):
+        _timing_buffer.append((category_name, max(0.0, duration_ms)))
 
 
 def flush_timing_buffer():

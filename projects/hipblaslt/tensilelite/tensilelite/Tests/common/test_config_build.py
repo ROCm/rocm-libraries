@@ -51,7 +51,7 @@ import pytest
 
 from tensilelite import Tensile as tensilelite
 
-from artifact_helpers import artifact_name_for_config, compress_output
+from artifact_helpers import artifact_name_for_config, artifact_timing, compress_output
 
 
 def _build(config: str, output_dir: str, artifact_dir: str, tensile_args: list[str]) -> None:
@@ -61,7 +61,8 @@ def _build(config: str, output_dir: str, artifact_dir: str, tensile_args: list[s
     subprocess (where it runs in a clean process to avoid global-state bleed).
     """
     tensilelite.Tensile([config, output_dir, "--build-only", *tensile_args])
-    compress_output(output_dir, dest_dir=artifact_dir, name=artifact_name_for_config(config))
+    with artifact_timing("python_artifact_compress", tensile_args):
+        compress_output(output_dir, dest_dir=artifact_dir, name=artifact_name_for_config(config))
 
 
 def test_config_build(tensile_args: list[str], config: str, tmpdir: py.path.local, pytestconfig: pytest.Config) -> None:

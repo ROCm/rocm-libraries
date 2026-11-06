@@ -27,6 +27,8 @@ import os
 import subprocess
 import shlex
 import shutil
+import sys
+import time
 
 from pathlib import Path
 from enum import Enum
@@ -46,7 +48,7 @@ from .Common import ensurePath, print1, printExit, printWarning, ClientExecution
 from .Common.Architectures import (ARCH_CAP_OVERRIDES, archNamesByIsa, baseArchName,
                                    capOverrideKeyOf, isaToGfx)
 from .Common.GlobalParameters import globalParameters
-from .Common.TimingInstrumentation import timing_context
+from .Common.TimingInstrumentation import record_timing, timing_context
 from .TensileCreateLibrary import copyStaticFiles, libraryDir
 from .ParallelExecution import detectAvailableGpus, runClientParallel
 from .Contractions import FreeIndex, BatchIndex
@@ -117,6 +119,7 @@ def clientLibraryFiles(clientLibraryPath, archs):
 
 def main(config, assembler: Assembler, cCompiler: str, isaInfoMap, outputPath: Path, deviceId: int, gfxName: str, archNames=None):
 
+  libraryClientStartNs = time.perf_counter_ns()
   libraryLogicPath = ensurePath(outputPath / LIBRARY_LOGIC_DIR)
   clientLibraryPath = ensurePath(outputPath / LIBRARY_CLIENT_DIR)
   sourcePath = ensurePath(clientLibraryPath / "source")
@@ -142,10 +145,12 @@ def main(config, assembler: Assembler, cCompiler: str, isaInfoMap, outputPath: P
   else:
     env["PYTHONPATH"] = module_path
 
+  record_timing("python_library_client_setup", (time.perf_counter_ns() - libraryClientStartNs) / 1e6)
   createLibraryScript = getBuildClientLibraryScript(
       clientLibraryPath, libraryLogicPath, str(assembler.path),
       rebuildTargetGfx(gfxName, archNames))
-  subprocess.run(shlex.split(createLibraryScript), env=env, cwd=clientLibraryPath)
+  with timing_context("python_library_client_create_library"):
+    subprocess.run(shlex.split(createLibraryScript), env=env, cwd=clientLibraryPath)
   # The re-spawned build wrote its code objects into the subtree named for the
   # architecture it was asked for -- the same name just passed to it -- so they
   # have to be read back under that name. An ISA-derived name would
@@ -155,6 +160,7 @@ def main(config, assembler: Assembler, cCompiler: str, isaInfoMap, outputPath: P
   archs = [buildArchNames.get(isa) or isaToGfx(isa) for isa in isaInfoMap.keys()]
   coList, libraryList = clientLibraryFiles(clientLibraryPath, archs)
 
+  writeConfigsStartNs = time.perf_counter_ns()
   clientParametersPaths = []
   splitGSU = False
   printSolutionRejectionReason = True
@@ -225,6 +231,7 @@ def main(config, assembler: Assembler, cCompiler: str, isaInfoMap, outputPath: P
                                   libraryFile=libraryList[0],
                                   gateTypeArgs=gateTypeArgs))
 
+  record_timing("python_library_client_write_configs", (time.perf_counter_ns() - writeConfigsStartNs) / 1e6)
   forBenchmark = False
   problemSizes = None
 
@@ -313,7 +320,11 @@ def runClient(libraryLogicPath, forBenchmark, enableTileSelection, cxxCompiler: 
   else:
     numGpus = parallelGpus
 
-  with timing_context("python_client_execution"):
+  # The library-client launch (forBenchmark=False) is a different phase from the benchmark
+  # launches and runs without --timing-instrumentation, so it gets its own timer names instead of
+  # being counted as benchmark client execution with no C++ timers.
+  timerPrefix = "python_client" if forBenchmark else "python_library_client"
+  with timing_context(f"{timerPrefix}_execution"):
     # Use parallel execution only for benchmarking with multiple GPUs
     if numGpus > 1 and forBenchmark:
       return runClientParallel(buildPath, configPaths, numGpus, timingEnabled, getClientExecutablePath)
@@ -330,11 +341,19 @@ def runClient(libraryLogicPath, forBenchmark, enableTileSelection, cxxCompiler: 
       return 0
 
     # Original single-GPU path
-    runScriptName = writeRunScript(buildPath, forBenchmark, enableTileSelection, cxxCompiler, cCompiler, buildPath, configPaths)
+    with timing_context(f"{timerPrefix}_write_run_script"):
+      runScriptName = writeRunScript(buildPath, forBenchmark, enableTileSelection, cxxCompiler, cCompiler, buildPath, configPaths)
 
     with ClientExecutionLock(globalParameters["ClientExecutionLockPath"]):
-      process = subprocess.Popen(runScriptName, cwd=buildPath)
-      process.communicate()
+      with timing_context(f"{timerPrefix}_subprocess"):
+        if timingEnabled and forBenchmark:
+          # Wall-clock stamps (ns since epoch) so analyze_timing.py can split the
+          # subprocess time into process startup / client main() / teardown.
+          print(f"TIMING_TS:py_popen_start:{time.time_ns()}", file=sys.stderr, flush=True)
+        process = subprocess.Popen(runScriptName, cwd=buildPath)
+        process.communicate()
+        if timingEnabled and forBenchmark:
+          print(f"TIMING_TS:py_communicate_end:{time.time_ns()}", file=sys.stderr, flush=True)
 
   if process.returncode:
     printWarning("ClientWriter Benchmark Process exited with code %u" % process.returncode)
