@@ -711,8 +711,7 @@ namespace
 
         try
         {
-            const std::string_view arch_base
-                = std::string_view(arch).substr(0, arch.find(':'));
+            const std::string_view arch_base = std::string_view(arch).substr(0, arch.find(':'));
             if(arch_base.empty())
                 return false;
             for(const char* const* p = patterns; *p != nullptr; ++p)
