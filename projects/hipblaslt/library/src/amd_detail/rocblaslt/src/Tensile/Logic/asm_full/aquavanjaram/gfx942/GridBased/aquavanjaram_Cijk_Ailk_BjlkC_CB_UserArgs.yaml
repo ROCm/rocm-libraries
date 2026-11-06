@@ -2,7 +2,7 @@ MinimumRequiredVersion: 5.0.0
 ScheduleName: aquavanjaram
 ArchitectureName: gfx942
 CUCount: null
-UseKdTree: true
+UseKdTree: false
 DeviceNames: [Device 0049, Device 0050]
 ProblemType:
   Activation: false
@@ -474,7 +474,7 @@ Solutions:
   Valid: true
   WavefrontSize: 64
   WorkGroup: [128, 2, 1]
-  WorkGroupMapping: 18
+  WorkGroupMapping: 16
   _GlobalAccumulation: null
   _UseSgprForGRO: false
   _VectorStore: 1
@@ -791,7 +791,7 @@ Solutions:
   Valid: true
   WavefrontSize: 64
   WorkGroup: [128, 2, 1]
-  WorkGroupMapping: 30
+  WorkGroupMapping: 32
   _GlobalAccumulation: null
   _UseSgprForGRO: false
   _VectorStore: 1
@@ -31601,7 +31601,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: -12
+  WorkGroupMapping: -16
   _GlobalAccumulation: null
   _UseSgprForGRO: 1
   _VectorStore: 1
@@ -31942,7 +31942,7 @@ Solutions:
   VectorWidthA: 1
   VectorWidthB: 1
   WavefrontSize: 64
-  WorkGroupMapping: -12
+  WorkGroupMapping: -16
   _GlobalAccumulation: null
   _UseSgprForGRO: 1
   _VectorStore: 1
@@ -32171,7 +32171,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: -12
+  WorkGroupMapping: -16
   _GlobalAccumulation: null
   _UseSgprForGRO: 1
   _VectorStore: 1
@@ -32285,7 +32285,7 @@ Solutions:
   VectorWidthA: 1
   VectorWidthB: 1
   WavefrontSize: 64
-  WorkGroupMapping: -12
+  WorkGroupMapping: -16
   _GlobalAccumulation: null
   _UseSgprForGRO: 1
   _VectorStore: 1
@@ -32395,7 +32395,7 @@ Solutions:
   VectorWidthA: 1
   VectorWidthB: 1
   WavefrontSize: 64
-  WorkGroupMapping: -36
+  WorkGroupMapping: -32
   _GlobalAccumulation: null
   _UseSgprForGRO: 1
   _VectorStore: 1
@@ -32509,7 +32509,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: -36
+  WorkGroupMapping: -32
   _GlobalAccumulation: null
   _UseSgprForGRO: 1
   _VectorStore: 1
@@ -32622,7 +32622,7 @@ Solutions:
   VectorWidthA: 1
   VectorWidthB: 1
   WavefrontSize: 64
-  WorkGroupMapping: -36
+  WorkGroupMapping: -32
   _GlobalAccumulation: null
   _UseSgprForGRO: 1
   _VectorStore: 1
@@ -32735,7 +32735,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: -36
+  WorkGroupMapping: -32
   _GlobalAccumulation: null
   _UseSgprForGRO: 1
   _VectorStore: 1
@@ -32846,7 +32846,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: -36
+  WorkGroupMapping: -32
   _GlobalAccumulation: null
   _UseSgprForGRO: 1
   _VectorStore: 1
@@ -32960,7 +32960,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: -36
+  WorkGroupMapping: -32
   _GlobalAccumulation: null
   _UseSgprForGRO: 1
   _VectorStore: 1
@@ -33073,7 +33073,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: -36
+  WorkGroupMapping: -32
   _GlobalAccumulation: null
   _UseSgprForGRO: 1
   _VectorStore: 1
@@ -33185,7 +33185,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: -36
+  WorkGroupMapping: -32
   _GlobalAccumulation: null
   _UseSgprForGRO: 1
   _VectorStore: 1
@@ -33299,7 +33299,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: -36
+  WorkGroupMapping: -32
   _GlobalAccumulation: null
   _UseSgprForGRO: 1
   _VectorStore: 1
@@ -33412,7 +33412,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: -36
+  WorkGroupMapping: -32
   _GlobalAccumulation: null
   _UseSgprForGRO: 1
   _VectorStore: 1
@@ -39938,7 +39938,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: -12
+  WorkGroupMapping: -16
   _GlobalAccumulation: null
   _UseSgprForGRO: 1
   _VectorStore: 1
@@ -40054,7 +40054,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: -12
+  WorkGroupMapping: -16
   _GlobalAccumulation: null
   _UseSgprForGRO: 0
   _VectorStore: 1
@@ -40170,7 +40170,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: -12
+  WorkGroupMapping: -16
   _GlobalAccumulation: null
   _UseSgprForGRO: 0
   _VectorStore: 1
@@ -40398,7 +40398,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: -12
+  WorkGroupMapping: -16
   _GlobalAccumulation: null
   _UseSgprForGRO: 1
   _VectorStore: 1
@@ -40625,7 +40625,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: -12
+  WorkGroupMapping: -16
   _GlobalAccumulation: null
   _UseSgprForGRO: 1
   _VectorStore: 1
@@ -41080,7 +41080,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: -12
+  WorkGroupMapping: -16
   _GlobalAccumulation: null
   _UseSgprForGRO: 0
   _VectorStore: 1
@@ -41194,7 +41194,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: -12
+  WorkGroupMapping: -16
   _GlobalAccumulation: null
   _UseSgprForGRO: 0
   _VectorStore: 1
@@ -41309,7 +41309,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: -12
+  WorkGroupMapping: -16
   _GlobalAccumulation: null
   _UseSgprForGRO: 0
   _VectorStore: 1
@@ -41537,7 +41537,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: -12
+  WorkGroupMapping: -16
   _GlobalAccumulation: null
   _UseSgprForGRO: 1
   _VectorStore: 1
@@ -42104,7 +42104,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: -36
+  WorkGroupMapping: -32
   _GlobalAccumulation: null
   _UseSgprForGRO: 1
   _VectorStore: 1
@@ -42221,7 +42221,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: -36
+  WorkGroupMapping: -32
   _GlobalAccumulation: null
   _UseSgprForGRO: 1
   _VectorStore: 1
@@ -42338,7 +42338,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: -36
+  WorkGroupMapping: -32
   _GlobalAccumulation: null
   _UseSgprForGRO: 0
   _VectorStore: 1
@@ -42453,7 +42453,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: -36
+  WorkGroupMapping: -32
   _GlobalAccumulation: null
   _UseSgprForGRO: 1
   _VectorStore: 1
@@ -42567,7 +42567,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: -36
+  WorkGroupMapping: -32
   _GlobalAccumulation: null
   _UseSgprForGRO: 1
   _VectorStore: 1
@@ -42681,7 +42681,7 @@ Solutions:
   VectorWidthA: 1
   VectorWidthB: 1
   WavefrontSize: 64
-  WorkGroupMapping: -36
+  WorkGroupMapping: -32
   _GlobalAccumulation: null
   _UseSgprForGRO: 1
   _VectorStore: 1
@@ -42797,7 +42797,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: -36
+  WorkGroupMapping: -32
   _GlobalAccumulation: null
   _UseSgprForGRO: 1
   _VectorStore: 1
@@ -42911,7 +42911,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: -36
+  WorkGroupMapping: -32
   _GlobalAccumulation: null
   _UseSgprForGRO: 1
   _VectorStore: 1
@@ -43025,7 +43025,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: -36
+  WorkGroupMapping: -32
   _GlobalAccumulation: null
   _UseSgprForGRO: 1
   _VectorStore: 1
@@ -43141,7 +43141,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: -36
+  WorkGroupMapping: -32
   _GlobalAccumulation: null
   _UseSgprForGRO: 1
   _VectorStore: 1
@@ -43256,7 +43256,7 @@ Solutions:
   VectorWidthA: 1
   VectorWidthB: 1
   WavefrontSize: 64
-  WorkGroupMapping: -36
+  WorkGroupMapping: -32
   _GlobalAccumulation: null
   _UseSgprForGRO: 1
   _VectorStore: 1
@@ -43371,7 +43371,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: -36
+  WorkGroupMapping: -32
   _GlobalAccumulation: null
   _UseSgprForGRO: 1
   _VectorStore: 1
@@ -43485,7 +43485,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: -36
+  WorkGroupMapping: -32
   _GlobalAccumulation: null
   _UseSgprForGRO: 0
   _VectorStore: 1
@@ -46965,7 +46965,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: 12
+  WorkGroupMapping: 16
   _GlobalAccumulation: null
   _UseSgprForGRO: 1
   _VectorStore: 1
@@ -47077,7 +47077,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: 12
+  WorkGroupMapping: 16
   _GlobalAccumulation: null
   _UseSgprForGRO: 1
   _VectorStore: 1
@@ -47191,7 +47191,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: 12
+  WorkGroupMapping: 16
   _GlobalAccumulation: null
   _UseSgprForGRO: 1
   _VectorStore: 1
@@ -47306,7 +47306,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: 12
+  WorkGroupMapping: 16
   _GlobalAccumulation: null
   _UseSgprForGRO: 1
   _VectorStore: 1
@@ -47419,7 +47419,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: 12
+  WorkGroupMapping: 16
   _GlobalAccumulation: null
   _UseSgprForGRO: 1
   _VectorStore: 1
@@ -47535,7 +47535,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: 12
+  WorkGroupMapping: 16
   _GlobalAccumulation: null
   _UseSgprForGRO: 0
   _VectorStore: 1
@@ -47650,7 +47650,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: 12
+  WorkGroupMapping: 16
   _GlobalAccumulation: null
   _UseSgprForGRO: 1
   _VectorStore: 1
@@ -47989,7 +47989,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: 12
+  WorkGroupMapping: 16
   _GlobalAccumulation: null
   _UseSgprForGRO: 1
   _VectorStore: 1
@@ -48556,7 +48556,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: 12
+  WorkGroupMapping: 16
   _GlobalAccumulation: null
   _UseSgprForGRO: 1
   _VectorStore: 1
@@ -48671,7 +48671,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: 12
+  WorkGroupMapping: 16
   _GlobalAccumulation: null
   _UseSgprForGRO: 1
   _VectorStore: 1
@@ -48784,7 +48784,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: 12
+  WorkGroupMapping: 16
   _GlobalAccumulation: null
   _UseSgprForGRO: 0
   _VectorStore: 1
@@ -48898,7 +48898,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: 12
+  WorkGroupMapping: 16
   _GlobalAccumulation: null
   _UseSgprForGRO: 1
   _VectorStore: 1
@@ -49010,7 +49010,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: 12
+  WorkGroupMapping: 16
   _GlobalAccumulation: null
   _UseSgprForGRO: 1
   _VectorStore: 1
@@ -49125,7 +49125,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: 12
+  WorkGroupMapping: 16
   _GlobalAccumulation: null
   _UseSgprForGRO: 0
   _VectorStore: 1
@@ -49236,7 +49236,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: 12
+  WorkGroupMapping: 16
   _GlobalAccumulation: null
   _UseSgprForGRO: 1
   _VectorStore: 1
@@ -49350,7 +49350,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: 12
+  WorkGroupMapping: 16
   _GlobalAccumulation: null
   _UseSgprForGRO: 1
   _VectorStore: 1
@@ -49464,7 +49464,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: 12
+  WorkGroupMapping: 16
   _GlobalAccumulation: null
   _UseSgprForGRO: 1
   _VectorStore: 1
@@ -49579,7 +49579,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: 12
+  WorkGroupMapping: 16
   _GlobalAccumulation: null
   _UseSgprForGRO: 0
   _VectorStore: 1
@@ -49694,7 +49694,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: 12
+  WorkGroupMapping: 16
   _GlobalAccumulation: null
   _UseSgprForGRO: 0
   _VectorStore: 1
@@ -50035,7 +50035,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: 12
+  WorkGroupMapping: 16
   _GlobalAccumulation: null
   _UseSgprForGRO: 1
   _VectorStore: 1
@@ -50265,7 +50265,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: 12
+  WorkGroupMapping: 16
   _GlobalAccumulation: null
   _UseSgprForGRO: 1
   _VectorStore: 1
@@ -50613,7 +50613,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: 12
+  WorkGroupMapping: 16
   _GlobalAccumulation: null
   _UseSgprForGRO: 1
   _VectorStore: 1
@@ -50726,7 +50726,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: 12
+  WorkGroupMapping: 16
   _GlobalAccumulation: null
   _UseSgprForGRO: 1
   _VectorStore: 1
@@ -50843,7 +50843,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: 12
+  WorkGroupMapping: 16
   _GlobalAccumulation: null
   _UseSgprForGRO: 0
   _VectorStore: 1
@@ -50958,7 +50958,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: 12
+  WorkGroupMapping: 16
   _GlobalAccumulation: null
   _UseSgprForGRO: 1
   _VectorStore: 1
@@ -51194,7 +51194,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: 12
+  WorkGroupMapping: 16
   _GlobalAccumulation: null
   _UseSgprForGRO: 0
   _VectorStore: 1
@@ -51310,7 +51310,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: 12
+  WorkGroupMapping: 16
   _GlobalAccumulation: null
   _UseSgprForGRO: 0
   _VectorStore: 1
@@ -51544,7 +51544,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: 12
+  WorkGroupMapping: 16
   _GlobalAccumulation: null
   _UseSgprForGRO: 0
   _VectorStore: 1
@@ -51662,7 +51662,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: -36
+  WorkGroupMapping: -32
   _GlobalAccumulation: null
   _UseSgprForGRO: 0
   _VectorStore: 1
@@ -51779,7 +51779,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: -36
+  WorkGroupMapping: -32
   _GlobalAccumulation: null
   _UseSgprForGRO: 0
   _VectorStore: 1
@@ -51896,7 +51896,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: -36
+  WorkGroupMapping: -32
   _GlobalAccumulation: null
   _UseSgprForGRO: 0
   _VectorStore: 1
@@ -52014,7 +52014,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: -36
+  WorkGroupMapping: -32
   _GlobalAccumulation: null
   _UseSgprForGRO: 0
   _VectorStore: 1
@@ -52130,7 +52130,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: -36
+  WorkGroupMapping: -32
   _GlobalAccumulation: null
   _UseSgprForGRO: 0
   _VectorStore: 1
@@ -52246,7 +52246,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: -36
+  WorkGroupMapping: -32
   _GlobalAccumulation: null
   _UseSgprForGRO: 1
   _VectorStore: 1
@@ -56421,7 +56421,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: 36
+  WorkGroupMapping: 32
   _GlobalAccumulation: null
   _UseSgprForGRO: 1
   _VectorStore: 1
@@ -56533,7 +56533,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: 36
+  WorkGroupMapping: 32
   _GlobalAccumulation: null
   _UseSgprForGRO: 1
   _VectorStore: 1
@@ -56648,7 +56648,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: 36
+  WorkGroupMapping: 32
   _GlobalAccumulation: null
   _UseSgprForGRO: 0
   _VectorStore: 1
@@ -56759,7 +56759,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: 36
+  WorkGroupMapping: 32
   _GlobalAccumulation: null
   _UseSgprForGRO: 1
   _VectorStore: 1
@@ -56873,7 +56873,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: 36
+  WorkGroupMapping: 32
   _GlobalAccumulation: null
   _UseSgprForGRO: 1
   _VectorStore: 1
@@ -56986,7 +56986,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: 36
+  WorkGroupMapping: 32
   _GlobalAccumulation: null
   _UseSgprForGRO: 0
   _VectorStore: 1
@@ -57100,7 +57100,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: 36
+  WorkGroupMapping: 32
   _GlobalAccumulation: null
   _UseSgprForGRO: 1
   _VectorStore: 1
@@ -57213,7 +57213,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: 36
+  WorkGroupMapping: 32
   _GlobalAccumulation: null
   _UseSgprForGRO: 0
   _VectorStore: 1
@@ -57326,7 +57326,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: 36
+  WorkGroupMapping: 32
   _GlobalAccumulation: null
   _UseSgprForGRO: 1
   _VectorStore: 1
@@ -57443,7 +57443,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: 36
+  WorkGroupMapping: 32
   _GlobalAccumulation: null
   _UseSgprForGRO: 1
   _VectorStore: 1
@@ -57559,7 +57559,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: 36
+  WorkGroupMapping: 32
   _GlobalAccumulation: null
   _UseSgprForGRO: 1
   _VectorStore: 1
@@ -57672,7 +57672,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: 36
+  WorkGroupMapping: 32
   _GlobalAccumulation: null
   _UseSgprForGRO: 1
   _VectorStore: 1
@@ -57787,7 +57787,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: 36
+  WorkGroupMapping: 32
   _GlobalAccumulation: null
   _UseSgprForGRO: 1
   _VectorStore: 1
@@ -57903,7 +57903,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: 36
+  WorkGroupMapping: 32
   _GlobalAccumulation: null
   _UseSgprForGRO: 0
   _VectorStore: 1
@@ -58018,7 +58018,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: 36
+  WorkGroupMapping: 32
   _GlobalAccumulation: null
   _UseSgprForGRO: 1
   _VectorStore: 1
@@ -58133,7 +58133,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: 36
+  WorkGroupMapping: 32
   _GlobalAccumulation: null
   _UseSgprForGRO: 1
   _VectorStore: 1
@@ -58249,7 +58249,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: 36
+  WorkGroupMapping: 32
   _GlobalAccumulation: null
   _UseSgprForGRO: 0
   _VectorStore: 1
@@ -58363,7 +58363,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: 36
+  WorkGroupMapping: 32
   _GlobalAccumulation: null
   _UseSgprForGRO: 1
   _VectorStore: 1
@@ -58478,7 +58478,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: 36
+  WorkGroupMapping: 32
   _GlobalAccumulation: null
   _UseSgprForGRO: 0
   _VectorStore: 1
@@ -58592,7 +58592,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: 36
+  WorkGroupMapping: 32
   _GlobalAccumulation: null
   _UseSgprForGRO: 0
   _VectorStore: 1
@@ -58709,7 +58709,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: 36
+  WorkGroupMapping: 32
   _GlobalAccumulation: null
   _UseSgprForGRO: 0
   _VectorStore: 1
@@ -58824,7 +58824,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: 36
+  WorkGroupMapping: 32
   _GlobalAccumulation: null
   _UseSgprForGRO: 1
   _VectorStore: 1
@@ -58942,7 +58942,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: 36
+  WorkGroupMapping: 32
   _GlobalAccumulation: null
   _UseSgprForGRO: 0
   _VectorStore: 1
@@ -59058,7 +59058,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: 36
+  WorkGroupMapping: 32
   _GlobalAccumulation: null
   _UseSgprForGRO: 1
   _VectorStore: 1
@@ -59174,7 +59174,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: 36
+  WorkGroupMapping: 32
   _GlobalAccumulation: null
   _UseSgprForGRO: 1
   _VectorStore: 1
@@ -59291,7 +59291,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: 36
+  WorkGroupMapping: 32
   _GlobalAccumulation: null
   _UseSgprForGRO: 0
   _VectorStore: 1
@@ -59408,7 +59408,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: 36
+  WorkGroupMapping: 32
   _GlobalAccumulation: null
   _UseSgprForGRO: 0
   _VectorStore: 1
@@ -59525,7 +59525,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: 36
+  WorkGroupMapping: 32
   _GlobalAccumulation: null
   _UseSgprForGRO: 0
   _VectorStore: 1
@@ -59641,7 +59641,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: 36
+  WorkGroupMapping: 32
   _GlobalAccumulation: null
   _UseSgprForGRO: 0
   _VectorStore: 1
@@ -59759,7 +59759,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: 36
+  WorkGroupMapping: 32
   _GlobalAccumulation: null
   _UseSgprForGRO: 0
   _VectorStore: 1
@@ -59877,7 +59877,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: 36
+  WorkGroupMapping: 32
   _GlobalAccumulation: null
   _UseSgprForGRO: 0
   _VectorStore: 1
@@ -59994,7 +59994,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: 36
+  WorkGroupMapping: 32
   _GlobalAccumulation: null
   _UseSgprForGRO: 0
   _VectorStore: 1
@@ -60110,7 +60110,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: 36
+  WorkGroupMapping: 32
   _GlobalAccumulation: null
   _UseSgprForGRO: 1
   _VectorStore: 1
@@ -60227,7 +60227,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: 36
+  WorkGroupMapping: 32
   _GlobalAccumulation: null
   _UseSgprForGRO: 0
   _VectorStore: 1
@@ -60343,7 +60343,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: 36
+  WorkGroupMapping: 32
   _GlobalAccumulation: null
   _UseSgprForGRO: 1
   _VectorStore: 1
@@ -62398,7 +62398,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: 36
+  WorkGroupMapping: 32
   _GlobalAccumulation: null
   _UseSgprForGRO: 1
   _VectorStore: 1
@@ -62512,7 +62512,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: 36
+  WorkGroupMapping: 32
   _GlobalAccumulation: null
   _UseSgprForGRO: 0
   _VectorStore: 1
@@ -62629,7 +62629,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: 36
+  WorkGroupMapping: 32
   _GlobalAccumulation: null
   _UseSgprForGRO: 0
   _VectorStore: 1
@@ -62744,7 +62744,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: 36
+  WorkGroupMapping: 32
   _GlobalAccumulation: null
   _UseSgprForGRO: 0
   _VectorStore: 1
@@ -62859,7 +62859,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: 36
+  WorkGroupMapping: 32
   _GlobalAccumulation: null
   _UseSgprForGRO: 0
   _VectorStore: 1
@@ -62974,7 +62974,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: 36
+  WorkGroupMapping: 32
   _GlobalAccumulation: null
   _UseSgprForGRO: 0
   _VectorStore: 1
@@ -63090,7 +63090,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: 36
+  WorkGroupMapping: 32
   _GlobalAccumulation: null
   _UseSgprForGRO: 0
   _VectorStore: 1
@@ -63204,7 +63204,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: 36
+  WorkGroupMapping: 32
   _GlobalAccumulation: null
   _UseSgprForGRO: 1
   _VectorStore: 1
@@ -63321,7 +63321,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: 36
+  WorkGroupMapping: 32
   _GlobalAccumulation: null
   _UseSgprForGRO: 0
   _VectorStore: 1
@@ -63438,7 +63438,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: 36
+  WorkGroupMapping: 32
   _GlobalAccumulation: null
   _UseSgprForGRO: 0
   _VectorStore: 1
@@ -63676,7 +63676,7 @@ Solutions:
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: -6
+  WorkGroupMapping: -8
   WorkGroupMappingXCC: 2
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
@@ -64209,7 +64209,7 @@ Solutions:
   VectorWidthB: 2
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkGroupMappingXCC: 4
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
@@ -64474,7 +64474,7 @@ Solutions:
   VectorWidthB: 2
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkGroupMappingXCC: 4
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
@@ -65008,7 +65008,7 @@ Solutions:
   VectorWidthB: 1
   WaveSeparateGlobalReadA: 2
   WavefrontSize: 64
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -65270,7 +65270,7 @@ Solutions:
   VectorWidthA: 2
   VectorWidthB: 1
   WavefrontSize: 64
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -65532,7 +65532,7 @@ Solutions:
   VectorWidthB: 1
   WaveSeparateGlobalReadA: 2
   WavefrontSize: 64
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -66598,7 +66598,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkGroupMappingXCC: 4
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
@@ -68723,7 +68723,7 @@ Solutions:
   WaveSeparateGlobalReadA: 2
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -68987,7 +68987,7 @@ Solutions:
   VectorWidthB: 2
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -69515,7 +69515,7 @@ Solutions:
   VectorWidthB: 1
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -69779,7 +69779,7 @@ Solutions:
   WaveSeparateGlobalReadA: 2
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkGroupMappingXCC: 4
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
@@ -70311,7 +70311,7 @@ Solutions:
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -70572,7 +70572,7 @@ Solutions:
   VectorWidthA: 1
   VectorWidthB: 2
   WavefrontSize: 64
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -70839,7 +70839,7 @@ Solutions:
   WaveSeparateGlobalReadA: 2
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -71628,7 +71628,7 @@ Solutions:
   VectorWidthA: 1
   VectorWidthB: 2
   WavefrontSize: 64
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -71894,7 +71894,7 @@ Solutions:
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -72164,7 +72164,7 @@ Solutions:
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -72431,7 +72431,7 @@ Solutions:
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -73235,7 +73235,7 @@ Solutions:
   WaveSeparateGlobalReadA: 2
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -74304,7 +74304,7 @@ Solutions:
   WaveSeparateGlobalReadA: 2
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -75104,7 +75104,7 @@ Solutions:
   WaveSeparateGlobalReadA: 2
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
-  WorkGroupMapping: -6
+  WorkGroupMapping: -8
   WorkGroupMappingXCC: 2
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
@@ -75369,7 +75369,7 @@ Solutions:
   VectorWidthB: 2
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -75898,7 +75898,7 @@ Solutions:
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -76163,7 +76163,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -76433,7 +76433,7 @@ Solutions:
   WaveSeparateGlobalReadA: 2
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
-  WorkGroupMapping: -6
+  WorkGroupMapping: -8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -76967,7 +76967,7 @@ Solutions:
   VectorWidthB: 1
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkGroupMappingXCC: 4
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
@@ -78566,7 +78566,7 @@ Solutions:
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -80427,7 +80427,7 @@ Solutions:
   WaveSeparateGlobalReadA: 2
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkGroupMappingXCC: 4
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
@@ -82552,7 +82552,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkGroupMappingXCC: 2
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
@@ -84148,7 +84148,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkGroupMappingXCC: 2
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 32
@@ -85471,7 +85471,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: -6
+  WorkGroupMapping: -8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -85739,7 +85739,7 @@ Solutions:
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: -6
+  WorkGroupMapping: -8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -86007,7 +86007,7 @@ Solutions:
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -87338,7 +87338,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: -6
+  WorkGroupMapping: -8
   WorkGroupMappingXCC: 2
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
@@ -87607,7 +87607,7 @@ Solutions:
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkGroupMappingXCC: 2
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
@@ -87873,7 +87873,7 @@ Solutions:
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkGroupMappingXCC: 4
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
@@ -88139,7 +88139,7 @@ Solutions:
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkGroupMappingXCC: 2
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
@@ -89473,7 +89473,7 @@ Solutions:
   WaveSeparateGlobalReadA: 2
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -91069,7 +91069,7 @@ Solutions:
   WaveSeparateGlobalReadA: 2
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -91335,7 +91335,7 @@ Solutions:
   VectorWidthA: 2
   VectorWidthB: 1
   WavefrontSize: 64
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -91599,7 +91599,7 @@ Solutions:
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -92659,7 +92659,7 @@ Solutions:
   VectorWidthA: 1
   VectorWidthB: 1
   WavefrontSize: 64
-  WorkGroupMapping: -6
+  WorkGroupMapping: -8
   WorkGroupMappingXCC: 4
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
@@ -94523,7 +94523,7 @@ Solutions:
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: -6
+  WorkGroupMapping: -8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -94787,7 +94787,7 @@ Solutions:
   VectorWidthA: 2
   VectorWidthB: 1
   WavefrontSize: 64
-  WorkGroupMapping: -6
+  WorkGroupMapping: -8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -95047,7 +95047,7 @@ Solutions:
   VectorWidthA: 2
   VectorWidthB: 1
   WavefrontSize: 64
-  WorkGroupMapping: -6
+  WorkGroupMapping: -8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -95311,7 +95311,7 @@ Solutions:
   VectorWidthA: 1
   VectorWidthB: 1
   WavefrontSize: 64
-  WorkGroupMapping: -6
+  WorkGroupMapping: -8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -98491,7 +98491,7 @@ Solutions:
   VectorWidthB: 1
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -98757,7 +98757,7 @@ Solutions:
   WaveSeparateGlobalReadA: 2
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkGroupMappingXCC: 2
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
@@ -99825,7 +99825,7 @@ Solutions:
   VectorWidthB: 1
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
-  WorkGroupMapping: -6
+  WorkGroupMapping: -8
   WorkGroupMappingXCC: 2
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
@@ -101417,7 +101417,7 @@ Solutions:
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: -6
+  WorkGroupMapping: -8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -101948,7 +101948,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkGroupMappingXCC: 4
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
@@ -102748,7 +102748,7 @@ Solutions:
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkGroupMappingXCC: 4
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
@@ -103807,7 +103807,7 @@ Solutions:
   VectorWidthA: 1
   VectorWidthB: 1
   WavefrontSize: 64
-  WorkGroupMapping: -6
+  WorkGroupMapping: -8
   WorkGroupMappingXCC: 2
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
@@ -106194,7 +106194,7 @@ Solutions:
   VectorWidthB: 1
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
-  WorkGroupMapping: -6
+  WorkGroupMapping: -8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -109898,7 +109898,7 @@ Solutions:
   VectorWidthB: 1
   WaveSeparateGlobalReadA: 2
   WavefrontSize: 64
-  WorkGroupMapping: -6
+  WorkGroupMapping: -8
   WorkGroupMappingXCC: 4
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
@@ -110430,7 +110430,7 @@ Solutions:
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: -6
+  WorkGroupMapping: -8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -111223,7 +111223,7 @@ Solutions:
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: -6
+  WorkGroupMapping: -8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -112291,7 +112291,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: -6
+  WorkGroupMapping: -8
   WorkGroupMappingXCC: 2
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
@@ -112552,7 +112552,7 @@ Solutions:
   VectorWidthB: 1
   WaveSeparateGlobalReadA: 2
   WavefrontSize: 64
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -113085,7 +113085,7 @@ Solutions:
   WaveSeparateGlobalReadA: 2
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -121864,7 +121864,7 @@ Solutions:
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkGroupMappingXCC: 4
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
@@ -122395,7 +122395,7 @@ Solutions:
   WaveSeparateGlobalReadA: 2
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
-  WorkGroupMapping: -6
+  WorkGroupMapping: -8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -123186,7 +123186,7 @@ Solutions:
   VectorWidthA: 2
   VectorWidthB: 2
   WavefrontSize: 64
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkGroupMappingXCC: 4
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
@@ -126380,7 +126380,7 @@ Solutions:
   WaveSeparateGlobalReadA: 2
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: -6
+  WorkGroupMapping: -8
   WorkGroupMappingXCC: 4
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
@@ -127714,7 +127714,7 @@ Solutions:
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: -6
+  WorkGroupMapping: -8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -128781,7 +128781,7 @@ Solutions:
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkGroupMappingXCC: 2
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
@@ -131170,7 +131170,7 @@ Solutions:
   VectorWidthA: 2
   VectorWidthB: 1
   WavefrontSize: 64
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -131435,7 +131435,7 @@ Solutions:
   VectorWidthB: 2
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -136483,7 +136483,7 @@ Solutions:
   VectorWidthB: 2
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
-  WorkGroupMapping: -6
+  WorkGroupMapping: -8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -138620,7 +138620,7 @@ Solutions:
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: -6
+  WorkGroupMapping: -8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -139684,7 +139684,7 @@ Solutions:
   VectorWidthB: 2
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -144492,7 +144492,7 @@ Solutions:
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: -6
+  WorkGroupMapping: -8
   WorkGroupMappingXCC: 4
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
@@ -151679,7 +151679,7 @@ Solutions:
   VectorWidthA: 2
   VectorWidthB: 1
   WavefrontSize: 64
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -152742,7 +152742,7 @@ Solutions:
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: -6
+  WorkGroupMapping: -8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -163651,7 +163651,7 @@ Solutions:
   VectorWidthB: 2
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkGroupMappingXCC: 4
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
@@ -164182,7 +164182,7 @@ Solutions:
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkGroupMappingXCC: 4
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
@@ -164448,7 +164448,7 @@ Solutions:
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: -6
+  WorkGroupMapping: -8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -165788,7 +165788,7 @@ Solutions:
   VectorWidthB: 2
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkGroupMappingXCC: 2
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
@@ -167120,7 +167120,7 @@ Solutions:
   WaveSeparateGlobalReadA: 2
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
-  WorkGroupMapping: -6
+  WorkGroupMapping: -8
   WorkGroupMappingXCC: 4
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
@@ -167384,7 +167384,7 @@ Solutions:
   VectorWidthB: 1
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkGroupMappingXCC: 4
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
@@ -170324,7 +170324,7 @@ Solutions:
   VectorWidthB: 2
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkGroupMappingXCC: 4
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
@@ -172191,7 +172191,7 @@ Solutions:
   VectorWidthB: 1
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
-  WorkGroupMapping: -6
+  WorkGroupMapping: -8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -172458,7 +172458,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: -6
+  WorkGroupMapping: -8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -174600,7 +174600,7 @@ Solutions:
   WaveSeparateGlobalReadA: 2
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -177003,7 +177003,7 @@ Solutions:
   WaveSeparateGlobalReadA: 2
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkGroupMappingXCC: 4
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
@@ -177273,7 +177273,7 @@ Solutions:
   VectorWidthB: 2
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: -6
+  WorkGroupMapping: -8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -178342,7 +178342,7 @@ Solutions:
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -179148,7 +179148,7 @@ Solutions:
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkGroupMappingXCC: 2
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
@@ -182875,7 +182875,7 @@ Solutions:
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkGroupMappingXCC: 2
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
@@ -184741,7 +184741,7 @@ Solutions:
   VectorWidthB: 2
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: -6
+  WorkGroupMapping: -8
   WorkGroupMappingXCC: 4
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
@@ -186076,7 +186076,7 @@ Solutions:
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkGroupMappingXCC: 4
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
@@ -186343,7 +186343,7 @@ Solutions:
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: -6
+  WorkGroupMapping: -8
   WorkGroupMappingXCC: 4
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
@@ -190875,7 +190875,7 @@ Solutions:
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkGroupMappingXCC: 2
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
@@ -193021,7 +193021,7 @@ Solutions:
   VectorWidthB: 2
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
-  WorkGroupMapping: -6
+  WorkGroupMapping: -8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -194089,7 +194089,7 @@ Solutions:
   VectorWidthB: 2
   WaveSeparateGlobalReadA: 2
   WavefrontSize: 64
-  WorkGroupMapping: -6
+  WorkGroupMapping: -8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -199961,7 +199961,7 @@ Solutions:
   VectorWidthA: 1
   VectorWidthB: 2
   WavefrontSize: 64
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -200227,7 +200227,7 @@ Solutions:
   WaveSeparateGlobalReadA: 2
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkGroupMappingXCC: 2
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
@@ -201023,7 +201023,7 @@ Solutions:
   VectorWidthA: 1
   VectorWidthB: 1
   WavefrontSize: 64
-  WorkGroupMapping: -6
+  WorkGroupMapping: -8
   WorkGroupMappingXCC: 4
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
@@ -202896,7 +202896,7 @@ Solutions:
   VectorWidthB: 2
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkGroupMappingXCC: 4
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
@@ -203700,7 +203700,7 @@ Solutions:
   VectorWidthA: 1
   VectorWidthB: 2
   WavefrontSize: 64
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkGroupMappingXCC: 4
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
@@ -204233,7 +204233,7 @@ Solutions:
   WaveSeparateGlobalReadA: 2
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkGroupMappingXCC: 4
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
@@ -205299,7 +205299,7 @@ Solutions:
   VectorWidthA: 1
   VectorWidthB: 1
   WavefrontSize: 64
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 32
   _DepthUA: 32
@@ -205831,7 +205831,7 @@ Solutions:
   VectorWidthB: 1
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
-  WorkGroupMapping: -6
+  WorkGroupMapping: -8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -209551,7 +209551,7 @@ Solutions:
   VectorWidthB: 2
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkGroupMappingXCC: 4
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
@@ -213551,7 +213551,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: -6
+  WorkGroupMapping: -8
   WorkGroupMappingXCC: 4
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
@@ -216750,7 +216750,7 @@ Solutions:
   VectorWidthB: 2
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: -6
+  WorkGroupMapping: -8
   WorkGroupMappingXCC: 2
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
@@ -217816,7 +217816,7 @@ Solutions:
   WaveSeparateGlobalReadA: 2
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 32
   _DepthUA: 32
@@ -218617,7 +218617,7 @@ Solutions:
   VectorWidthB: 2
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
-  WorkGroupMapping: -6
+  WorkGroupMapping: -8
   WorkGroupMappingXCC: 2
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
@@ -219680,7 +219680,7 @@ Solutions:
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkGroupMappingXCC: 2
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
@@ -225015,7 +225015,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: -6
+  WorkGroupMapping: -8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -226077,7 +226077,7 @@ Solutions:
   VectorWidthB: 2
   WaveSeparateGlobalReadA: 2
   WavefrontSize: 64
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -226605,7 +226605,7 @@ Solutions:
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkGroupMappingXCC: 4
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
@@ -228995,7 +228995,7 @@ Solutions:
   VectorWidthB: 2
   WaveSeparateGlobalReadA: 2
   WavefrontSize: 64
-  WorkGroupMapping: -6
+  WorkGroupMapping: -8
   WorkGroupMappingXCC: 2
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
@@ -230593,7 +230593,7 @@ Solutions:
   VectorWidthB: 1
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
-  WorkGroupMapping: -6
+  WorkGroupMapping: -8
   WorkGroupMappingXCC: 2
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
@@ -231646,7 +231646,7 @@ Solutions:
   VectorWidthA: 1
   VectorWidthB: 1
   WavefrontSize: 64
-  WorkGroupMapping: -6
+  WorkGroupMapping: -8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -232975,7 +232975,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -235098,7 +235098,7 @@ Solutions:
   WaveSeparateGlobalReadA: 2
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -235364,7 +235364,7 @@ Solutions:
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -235892,7 +235892,7 @@ Solutions:
   VectorWidthB: 2
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkGroupMappingXCC: 2
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
@@ -237491,7 +237491,7 @@ Solutions:
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkGroupMappingXCC: 4
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 32
@@ -238022,7 +238022,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: -6
+  WorkGroupMapping: -8
   WorkGroupMappingXCC: 4
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
@@ -240413,7 +240413,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 32
   _DepthUA: 32
@@ -241473,7 +241473,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkGroupMappingXCC: 2
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
@@ -242270,7 +242270,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -243332,7 +243332,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -243868,7 +243868,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkGroupMappingXCC: 4
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
@@ -244934,7 +244934,7 @@ Solutions:
   WaveSeparateGlobalReadA: 2
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: -6
+  WorkGroupMapping: -8
   WorkGroupMappingXCC: 4
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
@@ -245739,7 +245739,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -247613,7 +247613,7 @@ Solutions:
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkGroupMappingXCC: 4
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
@@ -249469,7 +249469,7 @@ Solutions:
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 32
   _DepthUA: 32
@@ -249733,7 +249733,7 @@ Solutions:
   WaveSeparateGlobalReadA: 2
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -250001,7 +250001,7 @@ Solutions:
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: -6
+  WorkGroupMapping: -8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -253720,7 +253720,7 @@ Solutions:
   VectorWidthA: 2
   VectorWidthB: 1
   WavefrontSize: 64
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -253982,7 +253982,7 @@ Solutions:
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -255568,7 +255568,7 @@ Solutions:
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -255830,7 +255830,7 @@ Solutions:
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -257160,7 +257160,7 @@ Solutions:
   VectorWidthA: 1
   VectorWidthB: 2
   WavefrontSize: 64
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkGroupMappingXCC: 4
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
@@ -261690,7 +261690,7 @@ Solutions:
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: -6
+  WorkGroupMapping: -8
   WorkGroupMappingXCC: 2
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
@@ -262222,7 +262222,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: -6
+  WorkGroupMapping: -8
   WorkGroupMappingXCC: 4
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
@@ -265947,7 +265947,7 @@ Solutions:
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 32
   _DepthUA: 32
@@ -266213,7 +266213,7 @@ Solutions:
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 32
   _DepthUA: 32
@@ -266475,7 +266475,7 @@ Solutions:
   VectorWidthB: 2
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -266733,7 +266733,7 @@ Solutions:
   VectorWidthB: 2
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -267265,7 +267265,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -267529,7 +267529,7 @@ Solutions:
   WaveSeparateGlobalReadA: 2
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -267795,7 +267795,7 @@ Solutions:
   VectorWidthB: 1
   WaveSeparateGlobalReadA: 2
   WavefrontSize: 64
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -268319,7 +268319,7 @@ Solutions:
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -268840,7 +268840,7 @@ Solutions:
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -270965,7 +270965,7 @@ Solutions:
   VectorWidthB: 2
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
-  WorkGroupMapping: -6
+  WorkGroupMapping: -8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -271229,7 +271229,7 @@ Solutions:
   VectorWidthB: 2
   WaveSeparateGlobalReadA: 2
   WavefrontSize: 64
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkGroupMappingXCC: 2
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
@@ -271495,7 +271495,7 @@ Solutions:
   WaveSeparateGlobalReadA: 2
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkGroupMappingXCC: 2
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
@@ -271761,7 +271761,7 @@ Solutions:
   WaveSeparateGlobalReadA: 2
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
-  WorkGroupMapping: -6
+  WorkGroupMapping: -8
   WorkGroupMappingXCC: 2
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
@@ -273087,7 +273087,7 @@ Solutions:
   VectorWidthB: 1
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -273349,7 +273349,7 @@ Solutions:
   VectorWidthA: 1
   VectorWidthB: 2
   WavefrontSize: 64
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkGroupMappingXCC: 2
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
@@ -273615,7 +273615,7 @@ Solutions:
   VectorWidthB: 2
   WaveSeparateGlobalReadA: 2
   WavefrontSize: 64
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -273875,7 +273875,7 @@ Solutions:
   VectorWidthB: 1
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -274404,7 +274404,7 @@ Solutions:
   WaveSeparateGlobalReadA: 2
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -274934,7 +274934,7 @@ Solutions:
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 64
   _DepthUA: 64
@@ -275733,7 +275733,7 @@ Solutions:
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: -6
+  WorkGroupMapping: -8
   WorkGroupMappingXCC: 4
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
@@ -275999,7 +275999,7 @@ Solutions:
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -276265,7 +276265,7 @@ Solutions:
   WaveSeparateGlobalReadA: 2
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -276531,7 +276531,7 @@ Solutions:
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: -6
+  WorkGroupMapping: -8
   WorkGroupMappingXCC: 4
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
@@ -277861,7 +277861,7 @@ Solutions:
   VectorWidthA: 1
   VectorWidthB: 2
   WavefrontSize: 64
-  WorkGroupMapping: -6
+  WorkGroupMapping: -8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -278388,7 +278388,7 @@ Solutions:
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 32
   _DepthUA: 32
@@ -278650,7 +278650,7 @@ Solutions:
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 32
   _DepthUA: 32
@@ -278916,7 +278916,7 @@ Solutions:
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 32
   _DepthUA: 32
@@ -280513,7 +280513,7 @@ Solutions:
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -280779,7 +280779,7 @@ Solutions:
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -282647,7 +282647,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -283449,7 +283449,7 @@ Solutions:
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: -6
+  WorkGroupMapping: -8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -287440,7 +287440,7 @@ Solutions:
   VectorWidthB: 1
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -290895,7 +290895,7 @@ Solutions:
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: -6
+  WorkGroupMapping: -8
   WorkGroupMappingXCC: 4
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
@@ -291430,7 +291430,7 @@ Solutions:
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: -6
+  WorkGroupMapping: -8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -292497,7 +292497,7 @@ Solutions:
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkGroupMappingXCC: 2
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 32
@@ -293024,7 +293024,7 @@ Solutions:
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -293285,7 +293285,7 @@ Solutions:
   VectorWidthB: 1
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -293818,7 +293818,7 @@ Solutions:
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -294612,7 +294612,7 @@ Solutions:
   VectorWidthB: 1
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkGroupMappingXCC: 2
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
@@ -294879,7 +294879,7 @@ Solutions:
   VectorWidthB: 1
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkGroupMappingXCC: 4
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
@@ -295941,7 +295941,7 @@ Solutions:
   VectorWidthB: 2
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: -6
+  WorkGroupMapping: -8
   WorkGroupMappingXCC: 2
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
@@ -297533,7 +297533,7 @@ Solutions:
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -298068,7 +298068,7 @@ Solutions:
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 32
   _DepthUA: 32
@@ -298596,7 +298596,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkGroupMappingXCC: 2
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
@@ -299122,7 +299122,7 @@ Solutions:
   VectorWidthA: 2
   VectorWidthB: 1
   WavefrontSize: 64
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -299383,7 +299383,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -302046,7 +302046,7 @@ Solutions:
   WaveSeparateGlobalReadA: 2
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -302840,7 +302840,7 @@ Solutions:
   VectorWidthA: 1
   VectorWidthB: 2
   WavefrontSize: 64
-  WorkGroupMapping: -6
+  WorkGroupMapping: -8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -303639,7 +303639,7 @@ Solutions:
   WaveSeparateGlobalReadA: 2
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -303904,7 +303904,7 @@ Solutions:
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: -6
+  WorkGroupMapping: -8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -304165,7 +304165,7 @@ Solutions:
   VectorWidthB: 1
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
-  WorkGroupMapping: -6
+  WorkGroupMapping: -8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -304428,7 +304428,7 @@ Solutions:
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -304693,7 +304693,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -304961,7 +304961,7 @@ Solutions:
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -305495,7 +305495,7 @@ Solutions:
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -305764,7 +305764,7 @@ Solutions:
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -306296,7 +306296,7 @@ Solutions:
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -306830,7 +306830,7 @@ Solutions:
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -307091,7 +307091,7 @@ Solutions:
   WaveSeparateGlobalReadA: 2
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -307620,7 +307620,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: -6
+  WorkGroupMapping: -8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -307887,7 +307887,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -309742,7 +309742,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: -6
+  WorkGroupMapping: -8
   WorkGroupMappingXCC: 2
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
@@ -310008,7 +310008,7 @@ Solutions:
   WaveSeparateGlobalReadA: 2
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -311614,7 +311614,7 @@ Solutions:
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: -6
+  WorkGroupMapping: -8
   WorkGroupMappingXCC: 4
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
@@ -312416,7 +312416,7 @@ Solutions:
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkGroupMappingXCC: 2
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
@@ -312684,7 +312684,7 @@ Solutions:
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -313479,7 +313479,7 @@ Solutions:
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkGroupMappingXCC: 4
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
@@ -313746,7 +313746,7 @@ Solutions:
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkGroupMappingXCC: 2
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
@@ -314009,7 +314009,7 @@ Solutions:
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkGroupMappingXCC: 2
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
@@ -314537,7 +314537,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -315061,7 +315061,7 @@ Solutions:
   VectorWidthB: 2
   WaveSeparateGlobalReadA: 2
   WavefrontSize: 64
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -315321,7 +315321,7 @@ Solutions:
   VectorWidthB: 1
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -315842,7 +315842,7 @@ Solutions:
   VectorWidthA: 2
   VectorWidthB: 2
   WavefrontSize: 64
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkGroupMappingXCC: 2
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
@@ -316106,7 +316106,7 @@ Solutions:
   WaveSeparateGlobalReadA: 2
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkGroupMappingXCC: 4
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
@@ -316368,7 +316368,7 @@ Solutions:
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -317432,7 +317432,7 @@ Solutions:
   WaveSeparateGlobalReadA: 2
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
-  WorkGroupMapping: -6
+  WorkGroupMapping: -8
   WorkGroupMappingXCC: 4
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
@@ -319556,7 +319556,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkGroupMappingXCC: 4
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
@@ -319821,7 +319821,7 @@ Solutions:
   WaveSeparateGlobalReadA: 2
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -320083,7 +320083,7 @@ Solutions:
   WaveSeparateGlobalReadA: 2
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 32
   _DepthUA: 32
@@ -320620,7 +320620,7 @@ Solutions:
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -320887,7 +320887,7 @@ Solutions:
   WaveSeparateGlobalReadA: 2
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkGroupMappingXCC: 2
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
@@ -321415,7 +321415,7 @@ Solutions:
   VectorWidthB: 2
   WaveSeparateGlobalReadA: 2
   WavefrontSize: 64
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -321947,7 +321947,7 @@ Solutions:
   VectorWidthB: 2
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkGroupMappingXCC: 2
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
@@ -322214,7 +322214,7 @@ Solutions:
   WaveSeparateGlobalReadA: 2
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -324069,7 +324069,7 @@ Solutions:
   WaveSeparateGlobalReadA: 2
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
-  WorkGroupMapping: -6
+  WorkGroupMapping: -8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -324332,7 +324332,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -324599,7 +324599,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkGroupMappingXCC: 2
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
@@ -324864,7 +324864,7 @@ Solutions:
   WaveSeparateGlobalReadA: 2
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkGroupMappingXCC: 2
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
@@ -325133,7 +325133,7 @@ Solutions:
   WaveSeparateGlobalReadA: 2
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -328576,7 +328576,7 @@ Solutions:
   VectorWidthA: 2
   VectorWidthB: 1
   WavefrontSize: 64
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 32
   _DepthUA: 32
@@ -328841,7 +328841,7 @@ Solutions:
   WaveSeparateGlobalReadA: 2
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
-  WorkGroupMapping: -6
+  WorkGroupMapping: -8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 32
   _DepthUA: 32
@@ -329645,7 +329645,7 @@ Solutions:
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -329910,7 +329910,7 @@ Solutions:
   WaveSeparateGlobalReadA: 2
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -330175,7 +330175,7 @@ Solutions:
   VectorWidthB: 1
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -330705,7 +330705,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -330969,7 +330969,7 @@ Solutions:
   VectorWidthB: 2
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -332830,7 +332830,7 @@ Solutions:
   VectorWidthB: 2
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -336541,7 +336541,7 @@ Solutions:
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: -6
+  WorkGroupMapping: -8
   WorkGroupMappingXCC: 4
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
@@ -337332,7 +337332,7 @@ Solutions:
   VectorWidthB: 2
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkGroupMappingXCC: 4
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
@@ -337599,7 +337599,7 @@ Solutions:
   WaveSeparateGlobalReadA: 2
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -338127,7 +338127,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: -6
+  WorkGroupMapping: -8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -338388,7 +338388,7 @@ Solutions:
   VectorWidthB: 1
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -338652,7 +338652,7 @@ Solutions:
   WaveSeparateGlobalReadA: 2
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -338920,7 +338920,7 @@ Solutions:
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -339188,7 +339188,7 @@ Solutions:
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -339717,7 +339717,7 @@ Solutions:
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -339982,7 +339982,7 @@ Solutions:
   VectorWidthA: 1
   VectorWidthB: 1
   WavefrontSize: 64
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkGroupMappingXCC: 2
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 32
@@ -340249,7 +340249,7 @@ Solutions:
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 32
   _DepthUA: 32
@@ -340514,7 +340514,7 @@ Solutions:
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 32
   _DepthUA: 32
@@ -340779,7 +340779,7 @@ Solutions:
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkGroupMappingXCC: 2
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
@@ -341046,7 +341046,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkGroupMappingXCC: 2
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
@@ -341311,7 +341311,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkGroupMappingXCC: 2
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
@@ -341578,7 +341578,7 @@ Solutions:
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -342370,7 +342370,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkGroupMappingXCC: 2
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
@@ -342636,7 +342636,7 @@ Solutions:
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkGroupMappingXCC: 2
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
@@ -342905,7 +342905,7 @@ Solutions:
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: -6
+  WorkGroupMapping: -8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 32
   _DepthUA: 32
@@ -343172,7 +343172,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkGroupMappingXCC: 4
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 32
@@ -343439,7 +343439,7 @@ Solutions:
   WaveSeparateGlobalReadA: 2
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -343972,7 +343972,7 @@ Solutions:
   WaveSeparateGlobalReadA: 2
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -344759,7 +344759,7 @@ Solutions:
   VectorWidthA: 2
   VectorWidthB: 1
   WavefrontSize: 64
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -345025,7 +345025,7 @@ Solutions:
   VectorWidthB: 2
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkGroupMappingXCC: 4
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
@@ -345820,7 +345820,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -346083,7 +346083,7 @@ Solutions:
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -346347,7 +346347,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkGroupMappingXCC: 2
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
@@ -347398,7 +347398,7 @@ Solutions:
   VectorWidthB: 2
   WaveSeparateGlobalReadA: 2
   WavefrontSize: 64
-  WorkGroupMapping: -6
+  WorkGroupMapping: -8
   WorkGroupMappingXCC: 2
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
@@ -347930,7 +347930,7 @@ Solutions:
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -348461,7 +348461,7 @@ Solutions:
   VectorWidthB: 1
   WaveSeparateGlobalReadA: 2
   WavefrontSize: 64
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkGroupMappingXCC: 2
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 32
@@ -350319,7 +350319,7 @@ Solutions:
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -350852,7 +350852,7 @@ Solutions:
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -351117,7 +351117,7 @@ Solutions:
   WaveSeparateGlobalReadA: 2
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -353500,7 +353500,7 @@ Solutions:
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkGroupMappingXCC: 2
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
@@ -354299,7 +354299,7 @@ Solutions:
   WaveSeparateGlobalReadA: 2
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -354559,7 +354559,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -355607,7 +355607,7 @@ Solutions:
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkGroupMappingXCC: 2
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
@@ -356406,7 +356406,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -357991,7 +357991,7 @@ Solutions:
   VectorWidthB: 1
   WaveSeparateGlobalReadA: 2
   WavefrontSize: 64
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -360112,7 +360112,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -360641,7 +360641,7 @@ Solutions:
   WaveSeparateGlobalReadA: 2
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -361442,7 +361442,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkGroupMappingXCC: 4
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
@@ -361972,7 +361972,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkGroupMappingXCC: 2
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
@@ -362239,7 +362239,7 @@ Solutions:
   WaveSeparateGlobalReadA: 2
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -362498,7 +362498,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -362764,7 +362764,7 @@ Solutions:
   VectorWidthB: 1
   WaveSeparateGlobalReadA: 2
   WavefrontSize: 64
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -363559,7 +363559,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: -6
+  WorkGroupMapping: -8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -364890,7 +364890,7 @@ Solutions:
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -365154,7 +365154,7 @@ Solutions:
   VectorWidthA: 1
   VectorWidthB: 2
   WavefrontSize: 64
-  WorkGroupMapping: -6
+  WorkGroupMapping: -8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 32
   _DepthUA: 32
@@ -365949,7 +365949,7 @@ Solutions:
   WaveSeparateGlobalReadA: 2
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -366743,7 +366743,7 @@ Solutions:
   VectorWidthB: 2
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkGroupMappingXCC: 4
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
@@ -367274,7 +367274,7 @@ Solutions:
   WaveSeparateGlobalReadA: 2
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
-  WorkGroupMapping: -6
+  WorkGroupMapping: -8
   WorkGroupMappingXCC: 4
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
@@ -368068,7 +368068,7 @@ Solutions:
   VectorWidthB: 2
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -368332,7 +368332,7 @@ Solutions:
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -368863,7 +368863,7 @@ Solutions:
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: -6
+  WorkGroupMapping: -8
   WorkGroupMappingXCC: 2
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
@@ -370461,7 +370461,7 @@ Solutions:
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -370996,7 +370996,7 @@ Solutions:
   WaveSeparateGlobalReadA: 2
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -372327,7 +372327,7 @@ Solutions:
   VectorWidthB: 2
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: -6
+  WorkGroupMapping: -8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 32
   _DepthUA: 32
@@ -372589,7 +372589,7 @@ Solutions:
   VectorWidthB: 2
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -372854,7 +372854,7 @@ Solutions:
   WaveSeparateGlobalReadA: 2
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -373114,7 +373114,7 @@ Solutions:
   VectorWidthA: 1
   VectorWidthB: 2
   WavefrontSize: 64
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -373645,7 +373645,7 @@ Solutions:
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -373905,7 +373905,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -374167,7 +374167,7 @@ Solutions:
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkGroupMappingXCC: 2
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
@@ -374698,7 +374698,7 @@ Solutions:
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -374960,7 +374960,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -375224,7 +375224,7 @@ Solutions:
   VectorWidthB: 1
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -375490,7 +375490,7 @@ Solutions:
   VectorWidthB: 1
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -378137,7 +378137,7 @@ Solutions:
   VectorWidthA: 2
   VectorWidthB: 2
   WavefrontSize: 64
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -378662,7 +378662,7 @@ Solutions:
   VectorWidthA: 2
   VectorWidthB: 2
   WavefrontSize: 64
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -379723,7 +379723,7 @@ Solutions:
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -381048,7 +381048,7 @@ Solutions:
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkGroupMappingXCC: 4
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
@@ -381318,7 +381318,7 @@ Solutions:
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -382926,7 +382926,7 @@ Solutions:
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: -6
+  WorkGroupMapping: -8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -383457,7 +383457,7 @@ Solutions:
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkGroupMappingXCC: 2
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
@@ -383721,7 +383721,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -383986,7 +383986,7 @@ Solutions:
   VectorWidthB: 1
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -384252,7 +384252,7 @@ Solutions:
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkGroupMappingXCC: 2
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
@@ -385315,7 +385315,7 @@ Solutions:
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: -6
+  WorkGroupMapping: -8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 32
   _DepthUA: 32
@@ -387446,7 +387446,7 @@ Solutions:
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkGroupMappingXCC: 2
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
@@ -389303,7 +389303,7 @@ Solutions:
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -391690,7 +391690,7 @@ Solutions:
   VectorWidthB: 2
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
-  WorkGroupMapping: -6
+  WorkGroupMapping: -8
   WorkGroupMappingXCC: 2
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
@@ -391952,7 +391952,7 @@ Solutions:
   VectorWidthB: 2
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -392220,7 +392220,7 @@ Solutions:
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -392489,7 +392489,7 @@ Solutions:
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: -6
+  WorkGroupMapping: -8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -393547,7 +393547,7 @@ Solutions:
   VectorWidthB: 2
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -397270,7 +397270,7 @@ Solutions:
   VectorWidthB: 1
   WaveSeparateGlobalReadA: 2
   WavefrontSize: 64
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -397798,7 +397798,7 @@ Solutions:
   WaveSeparateGlobalReadA: 2
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -400177,7 +400177,7 @@ Solutions:
   VectorWidthB: 2
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -400706,7 +400706,7 @@ Solutions:
   VectorWidthB: 2
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -400972,7 +400972,7 @@ Solutions:
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -401235,7 +401235,7 @@ Solutions:
   VectorWidthB: 2
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkGroupMappingXCC: 2
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
@@ -401499,7 +401499,7 @@ Solutions:
   VectorWidthB: 2
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkGroupMappingXCC: 2
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
@@ -402833,7 +402833,7 @@ Solutions:
   WaveSeparateGlobalReadA: 2
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
-  WorkGroupMapping: -6
+  WorkGroupMapping: -8
   WorkGroupMappingXCC: 4
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 32
@@ -404157,7 +404157,7 @@ Solutions:
   VectorWidthB: 2
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -404420,7 +404420,7 @@ Solutions:
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkGroupMappingXCC: 4
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
@@ -404954,7 +404954,7 @@ Solutions:
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: -6
+  WorkGroupMapping: -8
   WorkGroupMappingXCC: 2
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
@@ -407882,7 +407882,7 @@ Solutions:
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkGroupMappingXCC: 2
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
@@ -408419,7 +408419,7 @@ Solutions:
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: -6
+  WorkGroupMapping: -8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
@@ -408687,7 +408687,7 @@ Solutions:
   VectorWidthA: 1
   VectorWidthB: 1
   WavefrontSize: 64
-  WorkGroupMapping: -6
+  WorkGroupMapping: -8
   WorkGroupMappingXCC: 2
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
@@ -409486,7 +409486,7 @@ Solutions:
   WaveSeparateGlobalReadB: 2
   WavefrontSize: 64
   WorkGroup: [64, 4, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkGroupMappingXCC: 2
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
@@ -409751,7 +409751,7 @@ Solutions:
   WaveSeparateGlobalReadA: 2
   WavefrontSize: 64
   WorkGroup: [32, 8, 1]
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkGroupMappingXCC: 2
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
@@ -410013,7 +410013,7 @@ Solutions:
   VectorWidthA: 2
   VectorWidthB: 2
   WavefrontSize: 64
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkGroupMappingXCC: 2
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
@@ -413999,7 +413999,7 @@ Solutions:
   VectorWidthB: 2
   WaveSeparateGlobalReadA: 2
   WavefrontSize: 64
-  WorkGroupMapping: 6
+  WorkGroupMapping: 8
   WorkspaceCheck: [8, 0, 0]
   _DepthU: 16
   _DepthUA: 16
