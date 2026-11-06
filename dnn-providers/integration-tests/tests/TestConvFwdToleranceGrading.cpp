@@ -376,8 +376,8 @@ TEST_F(TestConvFwdToleranceGradingFixture, ConvolutionComputingInHalfKeepsTheDef
     Spec spec;
     spec.convCompute = "half";
     const auto bundle = loadBundle(spec);
-    const float fixedDefault = tolerance::defaultTolerance(
-        bundle->graphWrapper(), hipdnn_flatbuffers_sdk::data_objects::DataType::HALF);
+    const auto fixedDefault = static_cast<double>(tolerance::defaultTolerance(
+        bundle->graphWrapper(), hipdnn_flatbuffers_sdk::data_objects::DataType::HALF));
     expectReported(grade(spec, K_FAR_OFF, K_REFERENCE),
                    AbsRelTolerance{fixedDefault, fixedDefault});
 }

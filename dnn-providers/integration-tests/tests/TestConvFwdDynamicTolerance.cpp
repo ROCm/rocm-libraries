@@ -180,6 +180,8 @@ fb::GraphWrapper buildGraph(flatbuffers::FlatBufferBuilder& b, const GraphSpec& 
         addPointwise(PointwiseMode::MUL, SCALE_UID, BIAS_UID, MUL_OUT_UID);
         last = MUL_OUT_UID;
         break;
+    default:
+        break;
     }
     if(spec.withBias)
     {
