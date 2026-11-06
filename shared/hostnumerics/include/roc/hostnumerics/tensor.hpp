@@ -74,12 +74,15 @@ size_t storageBytesForLayout(ScalarType type, const Layout& layout);
 // retains a caller-supplied lifetime anchor and performs no copy.
 class Tensor {
    public:
+    // A rank-zero tensor whose ScalarType is the native mapping of Source.
     template <typename Source>
         requires NativeScalar<Source>
-    Tensor(Source value) : Tensor(nativeScalarType<std::remove_cvref_t<Source>>, Shape{}) {
+    explicit Tensor(Source value) : Tensor(nativeScalarType<std::remove_cvref_t<Source>>, Shape{}) {
         detail::encodeScalar(m_type, rawEncodedBackingStorage(), 0, std::move(value));
     }
 
+    // Allocates storage with every bit zero. The shape form uses
+    // Layout::contiguousLastDimensionFastest.
     Tensor(ScalarType type, Shape shape);
 
     Tensor(ScalarType type, Layout layout);
@@ -300,9 +303,7 @@ class Tensor {
     Tensor copyWithZeroPadding(Shape shape) const;
 
     // destinationToSource[d] names the source dimension copied to destination dimension d.
-    Tensor copyWithPermutedDimensions(std::span<const size_t> destinationToSource) const;
-
-    Tensor copyWithPermutedDimensions(std::initializer_list<size_t> destinationToSource) const;
+    Tensor copyWithPermutedDimensions(const Permutation& destinationToSource) const;
 
     Tensor copyConvertedTo(ScalarType type) const;
 

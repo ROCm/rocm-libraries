@@ -6,7 +6,6 @@
 #include <cassert>
 #include <functional>
 #include <numeric>
-#include <roc/hostnumerics/detail/shape_access.hpp>
 #include <roc/hostnumerics/layout.hpp>
 #include <set>
 #include <type_traits>
@@ -14,12 +13,10 @@
 
 namespace roc::hostnumerics::detail {
 inline std::vector<size_t> validatedIndexOrder(size_t rank, std::span<const size_t> order) {
-    std::vector<size_t> axes(order.begin(), order.end());
-    if (axes.size() != rank)
+    if (order.size() != rank)
         throw std::runtime_error("Tensor index order rank does not match shape rank.");
-    if (!detail::ShapeAccess::isValidIndexOrder(rank, axes))
-        throw std::runtime_error("Tensor index order must contain each dimension once.");
-    return axes;
+    const Permutation permutation(order);
+    return std::vector<size_t>(permutation.begin(), permutation.end());
 }
 
 // Internal iteration stores validated axis orders as plain vectors.

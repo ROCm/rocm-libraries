@@ -70,12 +70,10 @@ class MlDtypesOracleTests(unittest.TestCase):
                 expected = raw.view(np.dtype(oracle_type)).astype(np.float32)
                 tensor = hv.Tensor.from_storage(
                     scalar_type,
-                    [raw.size],
+                    hv.Layout.contiguous_last_dimension_fastest(hv.Shape([raw.size])),
                     pack_host_codes(raw, bits),
-                    strides=None,
-                    offset=0,
                 )
-                observed = hv.to_numpy(tensor, np.float32)
+                observed = hv.to_numpy_as(tensor, np.float32)
                 self.assert_same_float_values(observed, expected)
 
 

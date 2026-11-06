@@ -3,7 +3,6 @@
 
 #include <TensileLite/Client/hostnumerics/GemmInvocationAdapter.hpp>
 #include <TensileLite/Client/hostnumerics/HostNumericsBridge.hpp>
-#include <roc/hostnumerics/detail/shape_access.hpp>
 
 #include <Tensile/TensorDescriptor_fwd.hpp>
 #include <Tensile/Utils.hpp>
@@ -302,16 +301,16 @@ namespace TensileLite::Client::hostnumerics
         inline Expected<std::pair<Layout, ptrdiff_t>, DescriptorFailure>
             rebaseLayoutToByteAlignedStorage(ScalarType type, const Layout& layout)
         {
-            const auto bounds = roc::hostnumerics::detail::getElementBounds(layout);
+            const auto bounds = layout.getElementBounds();
             if(!bounds)
                 return Unexpected(DescriptorFailure(bounds.error()));
-            if(bounds->second < bounds->first)
+            if(!*bounds)
                 return std::pair{
                     Layout(layout.shape(),
                            std::vector<ptrdiff_t>(layout.strides().begin(), layout.strides().end()),
                            0),
                     ptrdiff_t{0}};
-            const ptrdiff_t lowerOffset = bounds->first;
+            const ptrdiff_t lowerOffset = (*bounds)->lowest;
             if(lowerOffset < 0)
             {
                 return Unexpected(DescriptorFailure(DescriptorError::BeforeBatchStorage));
@@ -607,7 +606,7 @@ namespace TensileLite::Client::hostnumerics
                 = problem.outputAmaxD()
                   || (useGradient && useBias && biasSource == ContractionProblemGemm::D);
             const auto logicalCount
-                = roc::hostnumerics::detail::ShapeAccess::getElementCount(problem.d().sizes());
+                = roc::hostnumerics::Shape::getElementCount(problem.d().sizes());
             if(!logicalCount)
                 return failure(TranslationFailureCode::InvalidDescriptor,
                                "Tensor shape element count exceeds size_t.");

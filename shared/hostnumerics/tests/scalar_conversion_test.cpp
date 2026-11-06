@@ -128,10 +128,10 @@ TYPED_TEST_SUITE(CharacterConversion, Characters);
 
 TYPED_TEST(CharacterConversion, ConvertsNumericValuesUnderEveryPolicy) {
     using T = TypeParam;
-    const ScalarConversionOptions saturate{IntegerRounding::TowardZero, IntegerOverflow::Saturate};
+    const IntegerConversionOptions saturate{IntegerRounding::TowardZero, IntegerOverflow::Saturate};
     for (const auto overflow :
          {IntegerOverflow::Identity, IntegerOverflow::Saturate, IntegerOverflow::ModuloWrap}) {
-        const ScalarConversionOptions options{IntegerRounding::TowardZero, overflow};
+        const IntegerConversionOptions options{IntegerRounding::TowardZero, overflow};
         EXPECT_EQ(convertScalar<int64_t>(T{42}, options), 42);
         EXPECT_EQ(convertScalar<uint64_t>(std::numeric_limits<T>::max(), options),
                   static_cast<uint64_t>(std::numeric_limits<T>::max()));
@@ -142,8 +142,8 @@ TYPED_TEST(CharacterConversion, ConvertsNumericValuesUnderEveryPolicy) {
 }
 
 TEST(ScalarConversion, NarrowsCharacterValues) {
-    const ScalarConversionOptions saturate{IntegerRounding::TowardZero, IntegerOverflow::Saturate};
-    const ScalarConversionOptions wrap{IntegerRounding::TowardZero, IntegerOverflow::ModuloWrap};
+    const IntegerConversionOptions saturate{IntegerRounding::TowardZero, IntegerOverflow::Saturate};
+    const IntegerConversionOptions wrap{IntegerRounding::TowardZero, IntegerOverflow::ModuloWrap};
     EXPECT_EQ(convertScalar<uint8_t>(char16_t{256}, saturate), 255);
     EXPECT_EQ(convertScalar<uint8_t>(char16_t{256}, wrap), 0);
 }
@@ -154,9 +154,15 @@ concept ConvertsWithoutPolicies = requires(Source source) { convertScalar<int32_
 void testIntegerConversionPrimitives() {
     static_assert(!std::is_default_constructible_v<ScalarConversionOptions>);
     static_assert(!std::is_constructible_v<ScalarConversionOptions, IntegerRounding>);
+    static_assert(
+        !std::is_constructible_v<ScalarConversionOptions, IntegerRounding, IntegerOverflow>);
+    static_assert(!std::is_default_constructible_v<IntegerConversionOptions>);
+    static_assert(!std::is_constructible_v<IntegerConversionOptions, IntegerRounding>);
     static_assert(!ConvertsWithoutPolicies<double>);
     const ScalarConversionOptions nearestBFloat16{
-        IntegerRounding::TowardZero, IntegerOverflow::Identity, BFloat16Rounding::NearestEven};
+        IntegerRounding::TowardZero,     IntegerOverflow::Identity,
+        BFloat16Rounding::NearestEven,   FloatingSourcePrecision::Float32,
+        FloatingOverflow::FormatDefault, E8M0Underflow::Nearest};
 
     constexpr float bfloat16RoundingBoundary = 1.005859375f;
     Tensor nearestEven(ScalarType::BFloat16, Shape{1});
@@ -165,25 +171,27 @@ void testIntegerConversionPrimitives() {
             "Explicit BFloat16 conversion did not round to nearest even.");
 
     const ScalarConversionOptions truncateBFloat16{
-        IntegerRounding::TowardZero, IntegerOverflow::Identity, BFloat16Rounding::Truncate};
+        IntegerRounding::TowardZero,     IntegerOverflow::Identity,
+        BFloat16Rounding::Truncate,      FloatingSourcePrecision::Float32,
+        FloatingOverflow::FormatDefault, E8M0Underflow::Nearest};
     Tensor truncated(ScalarType::BFloat16, Shape{1});
     truncated.storeFrom({0}, bfloat16RoundingBoundary, truncateBFloat16);
     require(tensorRaw(truncated) == 0x3f80,
             "Explicit BFloat16 truncation did not discard the low bits.");
 
-    const ScalarConversionOptions identityTowardZero{
+    const IntegerConversionOptions identityTowardZero{
         IntegerRounding::TowardZero,
         IntegerOverflow::Identity,
     };
-    const ScalarConversionOptions identityNearestEven{
+    const IntegerConversionOptions identityNearestEven{
         IntegerRounding::NearestEven,
         IntegerOverflow::Identity,
     };
-    const ScalarConversionOptions saturateNearestEven{
+    const IntegerConversionOptions saturateNearestEven{
         IntegerRounding::NearestEven,
         IntegerOverflow::Saturate,
     };
-    const ScalarConversionOptions wrapNearestEven{
+    const IntegerConversionOptions wrapNearestEven{
         IntegerRounding::NearestEven,
         IntegerOverflow::ModuloWrap,
     };
@@ -195,8 +203,16 @@ void testIntegerConversionPrimitives() {
                 128.0, {IntegerRounding::TowardZero, IntegerOverflow::ModuloWrap}) == -128,
             "Explicit modulo overflow conversion mismatch.");
 
-    const Tensor saturatedInt4 = Tensor::scalar(ScalarType::Int4, 9, saturateNearestEven);
-    const Tensor wrappedInt4 = Tensor::scalar(ScalarType::Int4, 9, wrapNearestEven);
+    const auto int4Storage = [](IntegerOverflow overflow) {
+        return ScalarConversionOptions{
+            IntegerRounding::NearestEven,    overflow,
+            BFloat16Rounding::NearestEven,   FloatingSourcePrecision::Float32,
+            FloatingOverflow::FormatDefault, E8M0Underflow::Nearest};
+    };
+    const Tensor saturatedInt4 =
+        Tensor::scalar(ScalarType::Int4, 9, int4Storage(IntegerOverflow::Saturate));
+    const Tensor wrappedInt4 =
+        Tensor::scalar(ScalarType::Int4, 9, int4Storage(IntegerOverflow::ModuloWrap));
     require(saturatedInt4.item<int>() == 7 && wrappedInt4.item<int>() == -7,
             "Explicit-policy rank-zero integer construction mismatch.");
     const Tensor explicitlyTruncatedBFloat16 =

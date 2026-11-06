@@ -21,19 +21,6 @@
 
 namespace roc::hostnumerics {
 struct LastDimensionFastest {};
-namespace detail {
-struct ShapeAccess;
-
-inline bool canBroadcastTo(std::span<const size_t> source,
-                           std::span<const size_t> destination) noexcept {
-    if (source.size() > destination.size()) return false;
-    const size_t leading = destination.size() - source.size();
-    for (size_t axis = 0; axis < source.size(); ++axis)
-        if (source[axis] != 1 && source[axis] != destination[leading + axis]) return false;
-    return true;
-}
-
-}  // namespace detail
 
 // A Shape traversal callback, taking (flat index, coordinates) or only
 // (coordinates). The two-argument form is used when both are available.
@@ -99,6 +86,19 @@ class Shape {
 
     size_t elementCount() const noexcept {
         return m_elementCount;
+    }
+
+    // The product of the extents, or std::nullopt if it does not fit size_t.
+    // Descriptor translators use it to reject an extent list without throwing.
+    static std::optional<size_t> getElementCount(std::span<const size_t> dimensions) noexcept {
+        if (std::find(dimensions.begin(), dimensions.end(), size_t{0}) != dimensions.end())
+            return 0;
+        size_t count = 1;
+        for (size_t extent : dimensions) {
+            if (count > std::numeric_limits<size_t>::max() / extent) return std::nullopt;
+            count *= extent;
+        }
+        return count;
     }
 
     // Select dimensions in the supplied order; repetition is allowed.
@@ -233,8 +233,6 @@ class Shape {
     }
 
    private:
-    friend struct detail::ShapeAccess;
-
     template <typename Function>
     static void visitCoordinate(Function& function, size_t index,
                                 std::span<const size_t> coordinates) {
@@ -297,17 +295,6 @@ class Shape {
             result[axis] = index % m_dimensions[axis];
             index /= m_dimensions[axis];
         }
-    }
-
-    static std::optional<size_t> getElementCount(std::span<const size_t> dimensions) noexcept {
-        if (std::find(dimensions.begin(), dimensions.end(), size_t{0}) != dimensions.end())
-            return 0;
-        size_t count = 1;
-        for (size_t extent : dimensions) {
-            if (count > std::numeric_limits<size_t>::max() / extent) return std::nullopt;
-            count *= extent;
-        }
-        return count;
     }
 
     std::vector<size_t> m_dimensions;

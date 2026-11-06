@@ -7,7 +7,6 @@
 
 #include <TensileLite/Client/hostnumerics/ReferenceElements.hpp>
 #include <roc/hostnumerics/comparison.hpp>
-#include <roc/hostnumerics/detail/shape_access.hpp>
 #include <roc/hostnumerics/epilogue.hpp>
 #include <roc/hostnumerics/operation_types.hpp>
 #include <roc/hostnumerics/sampling.hpp>
@@ -124,7 +123,7 @@ namespace TensileLite::Client
             return roc::hostnumerics::detail::Unexpected(hostnumerics::detail::DescriptorFailure(
                 hostnumerics::detail::DescriptorError::StrideRankMismatch));
         }
-        if(!roc::hostnumerics::detail::ShapeAccess::getElementCount(descriptor.sizes()))
+        if(!roc::hostnumerics::Shape::getElementCount(descriptor.sizes()))
         {
             return roc::hostnumerics::detail::Unexpected(hostnumerics::detail::DescriptorFailure(
                 hostnumerics::detail::DescriptorError::ElementCountOverflow));
@@ -391,7 +390,7 @@ namespace TensileLite::Client
         getReferenceIndexRange(TensorDescriptor const& descriptor, ReferenceElements elements)
     {
         const auto logicalCount
-            = roc::hostnumerics::detail::ShapeAccess::getElementCount(descriptor.sizes());
+            = roc::hostnumerics::Shape::getElementCount(descriptor.sizes());
         if(!logicalCount)
         {
             return roc::hostnumerics::detail::Unexpected(hostnumerics::detail::DescriptorFailure(

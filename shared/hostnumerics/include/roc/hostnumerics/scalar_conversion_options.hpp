@@ -30,19 +30,25 @@ enum class E8M0Underflow : uint8_t {
     FlushBelowFloat32Normal,
 };
 
+// Policy for converting values into encoded storage. Every field is required:
+// each choice only affects destinations of the corresponding encoding, but the
+// caller states all of them so that no policy is chosen implicitly.
 struct ScalarConversionOptions {
-    constexpr ScalarConversionOptions(
-        IntegerRounding rounding, IntegerOverflow overflow,
-        BFloat16Rounding bfloatRounding = BFloat16Rounding::NearestEven,
-        FloatingSourcePrecision precision = FloatingSourcePrecision::Float32,
-        FloatingOverflow floatingRange = FloatingOverflow::FormatDefault,
-        E8M0Underflow scaleUnderflow = E8M0Underflow::Nearest) noexcept
+    constexpr ScalarConversionOptions(IntegerRounding rounding, IntegerOverflow overflow,
+                                      BFloat16Rounding bfloatRounding,
+                                      FloatingSourcePrecision precision,
+                                      FloatingOverflow floatingRange,
+                                      E8M0Underflow scaleUnderflow) noexcept
         : integerRounding(rounding),
           integerOverflow(overflow),
           bfloat16Rounding(bfloatRounding),
           floatingSourcePrecision(precision),
           floatingOverflow(floatingRange),
           e8m0Underflow(scaleUnderflow) {}
+
+    constexpr IntegerConversionOptions integerConversion() const noexcept {
+        return {integerRounding, integerOverflow};
+    }
 
     IntegerRounding integerRounding;
     IntegerOverflow integerOverflow;

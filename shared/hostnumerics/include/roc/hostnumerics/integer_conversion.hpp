@@ -34,6 +34,16 @@ enum class IntegerOverflow : uint8_t {
     ModuloWrap,
 };
 
+// Policy for converting a value to an integer destination. Both choices are
+// required; the constructor has no defaults.
+struct IntegerConversionOptions {
+    constexpr IntegerConversionOptions(IntegerRounding rounding, IntegerOverflow overflow) noexcept
+        : rounding(rounding), overflow(overflow) {}
+
+    IntegerRounding rounding;
+    IntegerOverflow overflow;
+};
+
 namespace detail {
 template <std::floating_point Floating>
 Floating roundToIntegral(Floating value, IntegerRounding rounding) noexcept {

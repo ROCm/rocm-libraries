@@ -41,8 +41,8 @@ void testReferenceEpilogue() {
             "Reference epilogue defaults do not use the requested compute type.");
     options.bias = Tensor::copyNativeStorage<float>(
         Layout::contiguousLastDimensionFastest(Shape{2, 1}), std::span<const float>(bias));
-    options.outputScale = 2.0;
-    options.auxiliaryScale = 3.0;
+    options.outputScale = Tensor(2.0);
+    options.auxiliaryScale = Tensor(3.0);
     options.activation = ReluActivation{};
     referenceEpilogueInto(
         inputTensor,
@@ -142,7 +142,7 @@ void testReferenceEpilogue() {
     EpilogueOptions gatedOptions(ScalarType::Float32);
     gatedOptions.gateResidual = Tensor::copyNativeStorage<float>(
         Layout::contiguousLastDimensionFastest(Shape{2, 2}), std::span<const float>(gate));
-    gatedOptions.outputScale = 2.0;
+    gatedOptions.outputScale = Tensor(2.0);
     referenceEpilogueInto(inputTensor, {.output = gatedOutput}, gatedOptions);
     require(compare(gatedOutput,
                     Tensor::copyNativeValues<float>(

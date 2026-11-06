@@ -99,7 +99,7 @@ int main(int argc, char** argv)
         = paddedWeight
               .reshapeSharingStorage(
                   Shape{paddedM / MiM, MiM, paddedK / (MiK * PackK), MiK / MiKv, MiKv * PackK})
-              .copyWithPermutedDimensions({0, 2, 3, 1, 4});
+              .copyWithPermutedDimensions(roc::hostnumerics::Permutation{0, 2, 3, 1, 4});
     std::cout << "Swizzle weight:\n";
     printTensor<int>(std::cout, permuted);
     return 0;

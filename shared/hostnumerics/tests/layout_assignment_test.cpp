@@ -28,7 +28,7 @@ void operator delete(void* memory, std::size_t) noexcept {
 int main() {
     using namespace roc::hostnumerics;
     const Layout source(Shape{2, 3}, {3, 1}, 0);
-    Layout target;
+    Layout target(Shape{}, {}, 0);
     bool copyFailed = false;
     // Allow the shape copy, then fail the stride allocation.
     allocationBudget = 1;
@@ -38,5 +38,5 @@ int main() {
         copyFailed = true;
     }
     allocationBudget = -1;
-    return target == (copyFailed ? Layout{} : source) ? 0 : 1;
+    return target == (copyFailed ? Layout(Shape{}, {}, 0) : source) ? 0 : 1;
 }

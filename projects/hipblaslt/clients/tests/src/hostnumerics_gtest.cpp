@@ -1917,7 +1917,7 @@ TEST(HostNumericsInitialization_pre_checkin, integer_exact_mx_swizzled_reference
                                              isA ? MatrixRole::A : MatrixRole::B);
                         const auto scalesForDevice
                             = layout == MxScaleStorageLayout::Gfx950 && !kMajor
-                                  ? generated.scales.copyWithPermutedDimensions({1, 0})
+                                  ? generated.scales.copyWithPermutedDimensions(roc::hostnumerics::Permutation{1, 0})
                                   : generated.scales;
                         const amd_gpu_layout::MxScaleStoragePlan plan(
                             {scalesForDevice.shape()[0], scalesForDevice.shape()[1]}, 32, layout);

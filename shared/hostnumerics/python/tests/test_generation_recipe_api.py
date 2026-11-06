@@ -68,7 +68,7 @@ class GenerationRecipeApiTests(unittest.TestCase):
         self.assertEqual(recipe.index_order(3), order)
         tensor = hv.generate_tensor(hv.ScalarType.Float32, [2, 3, 4], recipe)
         np.testing.assert_array_equal(
-            hv.to_numpy(tensor, dtype=None),
+            hv.to_numpy(tensor),
             np.arange(24, dtype=np.float32).reshape((2, 3, 4), order="F"),
         )
         # Orders must be Permutations; plain sequences are rejected.
@@ -98,7 +98,7 @@ class GenerationRecipeApiTests(unittest.TestCase):
         )
 
         observed = hv.to_numpy(
-            hv.generate_tensor(hv.ScalarType.Float32, [2, 3], recipe), dtype=None
+            hv.generate_tensor(hv.ScalarType.Float32, [2, 3], recipe)
         )
         np.testing.assert_array_equal(
             observed,
@@ -139,15 +139,15 @@ class GenerationRecipeApiTests(unittest.TestCase):
         )
 
         np.testing.assert_array_equal(
-            hv.to_numpy(real_only, dtype=None),
+            hv.to_numpy(real_only),
             np.asarray([2.0 + 0.0j, 2.0 + 0.0j], dtype=np.complex64),
         )
         np.testing.assert_array_equal(
-            hv.to_numpy(replicated, dtype=None),
+            hv.to_numpy(replicated),
             np.asarray([2.0 + 2.0j, 2.0 + 2.0j], dtype=np.complex64),
         )
         np.testing.assert_array_equal(
-            hv.to_numpy(cartesian, dtype=None),
+            hv.to_numpy(cartesian),
             np.asarray([2.0 - 3.0j, 2.0 - 3.0j], dtype=np.complex64),
         )
 
@@ -161,7 +161,7 @@ class GenerationRecipeApiTests(unittest.TestCase):
         tensor = hv.generate_tensor(hv.ScalarType.Float32, layout, recipe)
 
         np.testing.assert_array_equal(
-            hv.to_numpy(tensor, dtype=None),
+            hv.to_numpy(tensor),
             np.asarray([[0.0, 1.0], [2.0, 3.0]], dtype=np.float32),
         )
         storage = np.frombuffer(tensor.storage, dtype=np.float32)
@@ -177,7 +177,7 @@ class GenerationRecipeApiTests(unittest.TestCase):
         )
         self.assertIs(hv.generate_at(tensor, 1, replacement), tensor)
         np.testing.assert_array_equal(
-            hv.to_numpy(tensor, dtype=None),
+            hv.to_numpy(tensor),
             np.asarray([[0.0, 9.0], [2.0, 3.0]], dtype=np.float32),
         )
 
@@ -273,10 +273,12 @@ class GenerationRecipeApiTests(unittest.TestCase):
             np.dtype(np.float32),
         )
         tensor = hv.Tensor.from_storage(
-            hv.ScalarType.Float4E2M1, [2], bytes([0x21]), strides=None, offset=0
+            hv.ScalarType.Float4E2M1,
+            hv.Layout.contiguous_last_dimension_fastest(hv.Shape([2])),
+            bytes([0x21]),
         )
         self.assertEqual(len(tensor.storage), 1)
-        self.assertEqual(hv.to_numpy(tensor, dtype=None).dtype, np.dtype(np.float32))
+        self.assertEqual(hv.to_numpy(tensor).dtype, np.dtype(np.float32))
 
     def test_only_canonical_index_order_name_is_exposed(self):
         self.assertFalse(hasattr(hv, "LogicalIndexOrder"))

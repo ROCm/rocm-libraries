@@ -55,10 +55,10 @@ class MxTests(unittest.TestCase):  # noqa: F405
                 self.assertEqual(first.data.storage, second.data.storage)
                 self.assertEqual(first.scales.storage, second.scales.storage)
 
-                data = hv.to_numpy(first.data, dtype=None)
-                scales = hv.to_numpy(first.scales, dtype=None).reshape(-1)
-                scale_indices = hv.to_numpy(first.scale_indices, np.uint32)
-                reference = hv.to_numpy(first.reference, dtype=None)
+                data = hv.to_numpy(first.data)
+                scales = hv.to_numpy(first.scales).reshape(-1)
+                scale_indices = hv.to_numpy_as(first.scale_indices, np.uint32)
+                reference = hv.to_numpy(first.reference)
                 expected = np.empty(dimensions, dtype=np.float32)
                 for row in range(dimensions[0]):
                     for column in range(dimensions[1]):
@@ -113,17 +113,17 @@ class MxTests(unittest.TestCase):  # noqa: F405
                 self.assertEqual(observed.data.storage, expected_data)
                 self.assertEqual(observed.scales.storage, expected_scales)
                 np.testing.assert_array_equal(
-                    hv.to_numpy(observed.scale_indices, np.uint32),
+                    hv.to_numpy_as(observed.scale_indices, np.uint32),
                     expected_indices,
                 )
                 np.testing.assert_array_equal(
-                    hv.to_numpy(observed.reference, np.float32),
+                    hv.to_numpy_as(observed.reference, np.float32),
                     expected_reference,
                 )
                 self.assertTrue(
                     np.all(
-                        (hv.to_numpy(observed.reference, dtype=None) >= minimum)
-                        & (hv.to_numpy(observed.reference, dtype=None) <= maximum)
+                        (hv.to_numpy(observed.reference) >= minimum)
+                        & (hv.to_numpy(observed.reference) <= maximum)
                     )
                 )
 
@@ -148,6 +148,6 @@ class MxTests(unittest.TestCase):  # noqa: F405
 
         observed = hv.generate_mx([8, 8], data_generation, options)
         np.testing.assert_array_equal(
-            hv.to_numpy(observed.scales, dtype=None),
+            hv.to_numpy(observed.scales),
             np.ones(observed.scales.shape, dtype=np.float32),
         )

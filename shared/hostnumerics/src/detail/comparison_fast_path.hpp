@@ -21,6 +21,7 @@
 
 #include "comparison_common.hpp"
 #include "comparison_iteration.hpp"
+#include "layout_analysis.hpp"
 #include "threading.hpp"
 
 namespace roc::hostnumerics::detail {
@@ -75,8 +76,9 @@ inline bool encodedValuesAreIdentical(const Tensor& observed, const Tensor& expe
     const auto expectedStorage = expected.rawEncodedBackingStorage();
 
     if (hasProvablyDistinctElementOffsets(observed.layout())) {
-        const auto [firstElement, lastElement] = elementBounds(observed.layout());
-        if (firstElement >= 0 && lastElement >= firstElement &&
+        // elementCount is nonzero, so the layout addresses at least one element.
+        const auto [firstElement, lastElement] = *elementBounds(observed.layout());
+        if (firstElement >= 0 &&
             static_cast<uintmax_t>(lastElement - firstElement) + 1 == elementCount &&
             static_cast<uint64_t>(firstElement) <=
                 std::numeric_limits<uint64_t>::max() / storageBits &&

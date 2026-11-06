@@ -130,7 +130,7 @@ void swizzle_tensor(T*               dst,
             Shape(colMaj ? std::vector<size_t>{b, k, m_n} : std::vector<size_t>{b, m_n, k})),
         std::as_bytes(std::span<const T>(compact)));
     if(colMaj)
-        tmpTensor = tmpTensor.copyWithPermutedDimensions({0, 2, 1});
+        tmpTensor = tmpTensor.copyWithPermutedDimensions(roc::hostnumerics::Permutation{0, 2, 1});
 
     auto       MultipleM_N  = MiM_N;
     auto       MultipleK    = MiK * PackK;
@@ -139,7 +139,7 @@ void swizzle_tensor(T*               dst,
     Tensor     paddedTensor = tmpTensor.copyWithZeroPadding(Shape{b, paddedM_N, paddedK});
     Tensor     reshaped     = paddedTensor.reshapeSharingStorage(
         Shape{b, paddedM_N / MiM_N, MiM_N, paddedK / (MiK * PackK), MiK / MiKv, MiKv * PackK});
-    Tensor       permuted    = reshaped.copyWithPermutedDimensions({0, 1, 3, 4, 2, 5});
+    Tensor       permuted    = reshaped.copyWithPermutedDimensions(roc::hostnumerics::Permutation{0, 1, 3, 4, 2, 5});
     const size_t outputBytes = b * paddedM_N * paddedK * sizeof(T);
     if(permuted.rawEncodedBackingStorage().size() != outputBytes)
         throw std::runtime_error("swizzle_tensor produced an unexpected storage size.");
@@ -1937,7 +1937,7 @@ void testing_matmul_with_bias(const Arguments&                                  
                     = scalePlan.layout()
                                   == roc::hostnumerics::amd_gpu_layout::MxScaleStorageLayout::Gfx950
                               && blockColumns > 1
-                          ? generated.scales.copyWithPermutedDimensions({1, 0})
+                          ? generated.scales.copyWithPermutedDimensions(roc::hostnumerics::Permutation{1, 0})
                           : generated.scales;
                 const std::vector<std::byte> scaleStorage
                     = roc::hostnumerics::amd_gpu_layout::copyMxScaleStorageToPhysicalLayout(

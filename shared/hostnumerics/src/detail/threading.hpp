@@ -16,6 +16,7 @@
 #include <utility>
 #include <vector>
 
+#include "layout_analysis.hpp"
 #include "tensor_storage.hpp"
 
 namespace roc::hostnumerics::detail {

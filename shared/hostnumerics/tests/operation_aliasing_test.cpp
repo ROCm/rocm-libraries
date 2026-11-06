@@ -131,7 +131,7 @@ void testReferenceOperationAliasing() {
     Tensor epilogueInPlace =
         Tensor::copyNativeValues<float>(Shape{1, 2}, std::array<float, 2>{1.0f, -2.0f});
     EpilogueOptions epilogueInPlaceOptions(ScalarType::Float32);
-    epilogueInPlaceOptions.outputScale = 2.0;
+    epilogueInPlaceOptions.outputScale = Tensor(2.0);
     referenceEpilogueInto(epilogueInPlace, {.output = epilogueInPlace}, epilogueInPlaceOptions);
     require(epilogueInPlace.loadAs<float>({0, 0}) == 2.0f &&
                 epilogueInPlace.loadAs<float>({0, 1}) == -4.0f,

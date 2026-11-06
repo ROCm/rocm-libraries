@@ -23,6 +23,7 @@
 #include "detail/comparison_common.hpp"
 #include "detail/comparison_fast_path.hpp"
 #include "detail/comparison_iteration.hpp"
+#include "detail/layout_analysis.hpp"
 #include "detail/runtime_tensor_io.hpp"
 #include "detail/threading.hpp"
 
@@ -381,8 +382,8 @@ SentinelReport checkUnusedTensorStorage(const Tensor& logicalTensor, size_t allo
     const auto& layout = logicalTensor.layout();
     detail::validateSentinelRange(logicalTensor.type(), logicalTensor.rawEncodedBackingStorage(), 0,
                                   allocatedElements);
-    const auto [lower, upper] = detail::elementBounds(layout);
-    if (upper >= lower && (lower < 0 || static_cast<size_t>(upper) >= allocatedElements))
+    const auto bounds = detail::elementBounds(layout);
+    if (bounds && (bounds->lowest < 0 || static_cast<size_t>(bounds->highest) >= allocatedElements))
         throw std::runtime_error("Logical tensor addresses outside allocated storage.");
     std::vector<bool> used(allocatedElements, false);
     layout.shape().forEachCoordinateLastDimensionFastest(

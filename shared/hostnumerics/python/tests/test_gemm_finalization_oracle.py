@@ -45,15 +45,11 @@ class GemmFinalizationOracleTests(unittest.TestCase):
         partial = run(set(selected))
 
         self.assertIsNotNone(full.raw_output)
+        np.testing.assert_array_equal(hv.to_numpy(full.raw_output), expected_raw)
+        np.testing.assert_array_equal(hv.to_numpy(full.output), expected_output)
         np.testing.assert_array_equal(
-            hv.to_numpy(full.raw_output, dtype=None), expected_raw
-        )
-        np.testing.assert_array_equal(
-            hv.to_numpy(full.output, dtype=None), expected_output
-        )
-        np.testing.assert_array_equal(
-            hv.to_numpy(partial.output, dtype=None),
-            selected_values(hv.to_numpy(full.output, dtype=None), selected),
+            hv.to_numpy(partial.output),
+            selected_values(hv.to_numpy(full.output), selected),
         )
 
     def test_int32_wrapping_precedes_saturating_conversion(self):
@@ -105,9 +101,7 @@ class GemmFinalizationOracleTests(unittest.TestCase):
             conjugate_b=False,
             output_layout=None,
         )
-        np.testing.assert_array_equal(
-            hv.to_numpy(observed, dtype=None), saturating_int8(targets)
-        )
+        np.testing.assert_array_equal(hv.to_numpy(observed), saturating_int8(targets))
 
     def test_selected_float_results_match_full_result_and_numpy(self):
         rows = 35
@@ -153,7 +147,6 @@ class GemmFinalizationOracleTests(unittest.TestCase):
                 conjugate_b=False,
                 output_layout=None,
             ),
-            dtype=None,
         )
         partial = hv.to_numpy(
             reference_gemm(
@@ -174,7 +167,6 @@ class GemmFinalizationOracleTests(unittest.TestCase):
                 conjugate_b=False,
                 output_layout=None,
             ),
-            dtype=None,
         )
         np.testing.assert_allclose(
             full, expected, rtol=relative_tolerance, atol=absolute_tolerance

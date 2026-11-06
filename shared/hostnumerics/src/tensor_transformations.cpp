@@ -10,6 +10,7 @@
 #include <type_traits>
 #include <vector>
 
+#include "detail/layout_analysis.hpp"
 #include "detail/layout_iteration.hpp"
 #include "detail/prepared_scalar_storage.hpp"
 #include "detail/tensor_conversion.hpp"
@@ -97,7 +98,8 @@ void copyConvertedRange(std::span<const std::byte> sourceStorage, ptrdiff_t sour
                                                        sizeof(typename SourceTag::Storage),
                             sizeof(encoded));
                 if constexpr (UseFloat16Lookup && SourceTag::type == ScalarType::Float16)
-                    value = convertScalar<Intermediate>(float16Values[encoded], options);
+                    value = convertScalar<Intermediate>(float16Values[encoded],
+                                                        options.integerConversion());
                 else
                     value =
                         detail::decodeScalarValueKnown<SourceTag, Intermediate>(encoded, options);
@@ -378,8 +380,7 @@ Tensor Tensor::copyWithZeroPadding(Shape shape) const {
     return result;
 }
 
-Tensor Tensor::copyWithPermutedDimensions(std::span<const size_t> destinationToSource) const {
-    const Permutation permutation(destinationToSource);
+Tensor Tensor::copyWithPermutedDimensions(const Permutation& permutation) const {
     if (permutation.size() != shape().rank())
         throw std::runtime_error("Tensor permutation rank does not match the tensor.");
 
@@ -404,11 +405,6 @@ Tensor Tensor::copyWithPermutedDimensions(std::span<const size_t> destinationToS
                 bits);
         });
     return result;
-}
-
-Tensor Tensor::copyWithPermutedDimensions(std::initializer_list<size_t> destinationToSource) const {
-    return copyWithPermutedDimensions(
-        std::span<const size_t>(destinationToSource.begin(), destinationToSource.size()));
 }
 
 Tensor Tensor::copyConvertedTo(ScalarType destinationType) const {

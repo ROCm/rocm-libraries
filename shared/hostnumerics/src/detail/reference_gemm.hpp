@@ -7,7 +7,6 @@
 #include <complex>
 #include <cstddef>
 #include <optional>
-#include <roc/hostnumerics/detail/shape_access.hpp>
 #include <roc/hostnumerics/gemm.hpp>
 #include <stdexcept>
 #include <string>
@@ -15,6 +14,7 @@
 #include <vector>
 
 #include "gemm_invocation.hpp"
+#include "layout_analysis.hpp"
 #include "reference_common.hpp"
 #include "threading.hpp"
 

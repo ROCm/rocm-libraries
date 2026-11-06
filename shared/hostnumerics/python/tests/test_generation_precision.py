@@ -43,8 +43,10 @@ def options():
     return hv.ScalarConversionOptions(
         hv.IntegerRounding.NearestEven,
         hv.IntegerOverflow.Saturate,
+        bfloat16_rounding=hv.BFloat16Rounding.NearestEven,
         floating_source_precision=hv.FloatingSourcePrecision.Direct,
         floating_overflow=hv.FloatingOverflow.SaturateFinite,
+        e8m0_underflow=hv.E8M0Underflow.Nearest,
     )
 
 

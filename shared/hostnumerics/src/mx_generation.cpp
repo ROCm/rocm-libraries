@@ -19,6 +19,7 @@
 #include "detail/generation_recipe_access.hpp"
 #include "detail/generation_values.hpp"
 #include "detail/index_iteration.hpp"
+#include "detail/layout_analysis.hpp"
 #include "detail/mx_packing.hpp"
 #include "detail/runtime_tensor_io.hpp"
 #include "detail/tensor_storage.hpp"
