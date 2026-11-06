@@ -19235,8 +19235,16 @@ class KernelWriterAssembly(KernelWriter):
         COALESCE_MIWT_FLOOR = 4
         miwt = kernel.get("MIWaveTile", [0, 0])
         maxVgpr = self.states.regCaps["MaxVgpr"]
-        coalesceCvtTotal = base + 2   # shared staging window (base) + coalesceVoff + coalesceBlend
-        coalesceFits = (self.vgprPool.size() + coalesceCvtTotal) <= maxVgpr
+        # Fold-attributable VGPR increment over the non-fold subtile store. The base-7 block (the
+        # 4-reg pack quad + vPermAddr/vLaneGroupDelta/vAddrScratch) is allocated for the subtile
+        # paired store whether or not the fold is active, so it is ALREADY reflected in
+        # pool.size(); the fold adds only the two coalesce-only registers vgprVoff + vgprBlendTmp.
+        # batchB's packed data and the blended store src reuse dead ValuC (see
+        # _emit16bitSubtilePairedStoreCoalesce), so the measured net cost is 0. Charge the +2
+        # increment, not the full base+2 block -- charging the shared base double-counts registers
+        # already in budget and spuriously rejects wider tiles (e.g. MT256x320) that have room.
+        coalesceFoldExtra = 2   # vgprVoff + vgprBlendTmp; base-7 is shared with the non-fold path
+        coalesceFits = (self.vgprPool.size() + coalesceFoldExtra) <= maxVgpr
         # _COALESCE_MEASURE_OFF: measurement switch to force the coalesce off everywhere (no-coalesce
         # baseline build), independent of DPPStoreFold.
         # DPPStoreFold is the singular decider: when set (and the structural preconditions below
@@ -19255,6 +19263,16 @@ class KernelWriterAssembly(KernelWriter):
         # Published so the operand-lend policy (_selectPlsinFusedStorePolicy) couples the lend
         # to the fold, and so GlobalWriteBatch knows the fold is live on this kernel.
         self.states.subtileCoalesceActive = isSubtileCoalesce
+        # The DPP coalesce requires the N-column-aligned batch tiling (_coalesceBatchBounds in the
+        # store-batch loop) so a batch never straddles an N-column -- but that tiling is only built
+        # on the non-CompactLoopStore path (CLS emits a reduced runtime-loop body, where
+        # numBatchesCLS<numBatches has its own meaning that our re-tiling would corrupt). Every
+        # current F4BS subtile-coalesce kernel is CLS-off; enforce that so a future CLS+fold kernel
+        # fails loud here instead of silently straddling N-columns (MIWT[0]%4!=0) and mis-placing
+        # the bias/ScaleAlphaVec store-drain barrier.
+        assert not (isSubtileCoalesce and kernel["CompactLoopStore"]), \
+          "DPP store-coalesce + CompactLoopStore is unsupported (N-column-aligned store batching " \
+          "is only applied on the non-CLS path)."
         coalesceVoff = coalesceBlend = -1
         if isSubtileCoalesce:
           coalesceVoff, coalesceBlend = nxt, nxt + 1
@@ -19699,6 +19717,21 @@ class KernelWriterAssembly(KernelWriter):
     if ss.cfg.numElementsPerBatchLimitedBySgprs < numElementsPerBatch:
       numElementsPerBatch = ss.cfg.numElementsPerBatchLimitedBySgprs
 
+    # Coalesce-aware batch floor for the wide "320" tiles (MT256x320, MT320x256). The DPP
+    # coalesce's marginal cost is only +2 fresh VGPRs (vVoff/vBlend) -- batchB's pack and the blend
+    # reuse dead ValuC, the read window is reused across batchA->batchB -- so two M-pairs fit in one
+    # batch at vgpr 250+2<=256. The generic sizer prices elements at the non-coalesce rate and, on
+    # these register-tight weave tiles, caps the batch at one pair (3) -- below the coalesce's
+    # 4-element (two-M-pair) minimum, so the coalesce never forms. Floor to 4 so the clean
+    # pair-of-pairs is co-resident. Verified: vgpr_count<=256, norm_error 0.
+    if (getattr(self.states, "subtileCoalesceActive", False)
+            and getattr(self.states, "subtileFusedFullTileStore", False)
+            and ((kernel.get("MacroTile0") == 256 and kernel.get("MacroTile1") == 320)
+                 or (kernel.get("MacroTile0") == 320 and kernel.get("MacroTile1") == 256))):
+      _floor = min(len(element), 4)  # coalesce minimum = 2 M-pairs
+      if numElementsPerBatch < _floor:
+        numElementsPerBatch = _floor
+
     # TODO: Which of DataType or DestDataType is in a better sense? 0114: Check Using DestDataType + HSS
     destType = kernel["ProblemType"]["DestDataType"]
     srcType  = kernel["ProblemType"]["DataType"]
@@ -20018,6 +20051,44 @@ class KernelWriterAssembly(KernelWriter):
         else:
           numBatchesCLS = numBatches
 
+        # Subtile DPP coalesce: tile each N-group (contiguous same-blockIdxN run) on its OWN so a
+        # batch never straddles an N-column. The coalesce joins 4 M-adjacent blocks (two pairs);
+        # when the N-group (MIWaveTile[0] M-blocks) is NOT a multiple of 4, consecutive groups-of-4
+        # cross the N-column boundary, _samePair rejects the cross-N pair, and the whole straddling
+        # batch falls to the uncoalesced store. Capping batches at the N-group boundary keeps the
+        # clean pairs-of-pairs co-resident; the <4 remainder (e.g. the 2-block tail of a 10-tall
+        # MIWT[0]=10 column) becomes the uncoalesced orphan.
+        #   GATE: only when MIWaveTile[0] % 4 != 0. When MIWT[0] is a multiple of 4 (4, 8, 12, ...)
+        #   the groups-of-4 already tile every N-column cleanly regardless of batch size, so this
+        #   capping is pure loss -- it would SHRINK an efficiently-large multi-N-group batch down to
+        #   one N-group and regress those tiles (measured: MT256x288/MIWT4, MT256x256/MIWT8). It is
+        #   needed only for MIWT[0]=10 (MT320x256) et al. CLS is off on these subtile kernels, so
+        #   the all-zero look-ahead arrays below stay correct (indexing guarded in the loop).
+        _coalesceBatchBounds = None
+        _miwt0 = kernel.get("MIWaveTile", [0])[0]
+        if getattr(self.states, "subtileCoalesceActive", False) and not kernel["CompactLoopStore"] \
+            and _miwt0 % 4 != 0:
+          _coalesceBatchBounds = []
+          _i = 0
+          while _i < len(element):
+            _n = element[_i][0]
+            _j = _i
+            while _j < len(element) and element[_j][0] == _n:
+              _j += 1
+            _k = _i
+            while _k < _j:
+              _stop = min(_k + numElementsPerBatch, _j)
+              _coalesceBatchBounds.append((_k, _stop))
+              _k = _stop
+            _i = _j
+          numBatchesCLS = len(_coalesceBatchBounds)
+          # The N-group split can create MORE batches than the uniform count. Make numBatches the
+          # real batch count so every batchIdx-count-dependent consumer stays correct -- in
+          # particular globalWriteBatch's isLastBatch (== numBatches-1), which places the single
+          # cross-wave s_barrier that drains bias/ScaleAlphaVec LDS reads before the subtile stores.
+          # (The look-ahead arrays below are all-zero here -- CLS is off -- so resizing is harmless.)
+          numBatches = numBatchesCLS
+
         # Per-batch look-ahead: boundary delta vs first real row jump (primer).
         next_rowInc_per_batch = [0] * numBatches
         next_firing_per_batch = [0] * numBatches
@@ -20049,8 +20120,11 @@ class KernelWriterAssembly(KernelWriter):
           passAccVgprRead = deepcopy(codeAccVgprRead) if codeAccVgprRead is not None else None
           passMulAlpha    = deepcopy(codeMulAlpha) if codeMulAlpha is not None else None
           for batchIdx in range(0, numBatchesCLS):
-            elementStartIdx = batchIdx * numElementsPerBatch
-            elementStopIdx = min( elementStartIdx + numElementsPerBatch, len(element) )
+            if _coalesceBatchBounds is not None:
+              elementStartIdx, elementStopIdx = _coalesceBatchBounds[batchIdx]
+            else:
+              elementStartIdx = batchIdx * numElementsPerBatch
+              elementStopIdx = min( elementStartIdx + numElementsPerBatch, len(element) )
             elementsThisBatch = element[elementStartIdx:elementStopIdx]
             #print("BATCH[%u/%u]: element[%u:%u] VGPRs=%u" % (batchIdx, numBatches, elementStartIdx, elementStopIdx,ss.numVgprsPerElement ))
             # elementVgprs can be large and should be perfectly tuned to the number of available
@@ -20061,7 +20135,7 @@ class KernelWriterAssembly(KernelWriter):
               self.StoreRemapLastBatch = 1 if (batchIdx+1) % nBatchesPerRow == 0 else 0
 
             # Primer uses the next real row jump; boundary delta may be 0 (mid-row).
-            _next_firing_rowInc = next_firing_per_batch[batchIdx]
+            _next_firing_rowInc = next_firing_per_batch[batchIdx] if batchIdx < numBatches else 0
             _direct_next_rowInc = next_rowInc_per_batch[batchIdx] if batchIdx < numBatches else 0
             m.add(self.globalWriteBatch(kernel, tPA, tPB, activation, ss, batchIdx, \
                 applyAlpha, beta, edge, atomic, gwvw, atomicW, \
