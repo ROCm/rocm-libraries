@@ -13,8 +13,8 @@ CPython runtime attribute ``os.name`` against the sentinel ``"nt"`` (Windows).
   * TRUE branch  -> ``os.name == "nt"`` (Windows).  Delegates to
                     ``_supportedComponent(enumerator, ["hipinfo", "hipInfo"])``.
   * FALSE branch -> ``os.name != "nt"`` (POSIX/Linux).  Delegates to
-                    ``_supportedComponent(enumerator, ["rocm_agent_enumerator",
-                    "amdgpu-arch"])``.
+                    ``_supportedComponent(enumerator, ["offload-arch",
+                    "amdgpu-arch", "rocm_agent_enumerator"])``.
 
 Domain is exhaustive over {posix, nt}.  Tests pin ACTUAL observed behavior
 via monkeypatching ``os.name`` in the real function.  CPU-only, no GPU probe.
@@ -51,7 +51,7 @@ def test_nt_os_name_selects_windows_branch():
 
 
 def test_posix_os_name_selects_posix_branch():
-    """os.name='posix' -> predicate False -> POSIX rocm_agent_enumerator branch selected."""
+    """os.name='posix' -> predicate False -> POSIX enumerator branch selected."""
     assert _nt_branch_selected("posix") is False
 
 
@@ -99,7 +99,7 @@ def test_real_function_posix_accepts_rocm_agent_enumerator(monkeypatch):
     """FALSE branch (os.name='posix'): supportedDeviceEnumerator returns True for 'rocm_agent_enumerator'.
 
     On POSIX the function routes to _supportedComponent with targets
-    ['rocm_agent_enumerator', 'amdgpu-arch'], so 'rocm_agent_enumerator' must be accepted.
+    ['offload-arch', 'amdgpu-arch', 'rocm_agent_enumerator'], so it must be accepted.
     """
     supportedDeviceEnumerator = _import_supported_device_enumerator()
     monkeypatch.setattr(os, "name", "posix")
@@ -107,11 +107,19 @@ def test_real_function_posix_accepts_rocm_agent_enumerator(monkeypatch):
     assert supportedDeviceEnumerator("rocm_agent_enumerator") is True
 
 
+def test_real_function_posix_accepts_offload_arch(monkeypatch):
+    """The preferred POSIX enumerator is accepted by the real predicate."""
+    supportedDeviceEnumerator = _import_supported_device_enumerator()
+    monkeypatch.setattr(os, "name", "posix")
+
+    assert supportedDeviceEnumerator("offload-arch") is True
+
+
 def test_real_function_posix_accepts_amdgpu_arch(monkeypatch):
     """FALSE branch (os.name='posix'): supportedDeviceEnumerator returns True for 'amdgpu-arch'.
 
     On POSIX the function routes to _supportedComponent with targets
-    ['rocm_agent_enumerator', 'amdgpu-arch'], so 'amdgpu-arch' must be accepted.
+    ['offload-arch', 'amdgpu-arch', 'rocm_agent_enumerator'], so 'amdgpu-arch' must be accepted.
     """
     supportedDeviceEnumerator = _import_supported_device_enumerator()
     monkeypatch.setattr(os, "name", "posix")
@@ -123,7 +131,7 @@ def test_real_function_posix_rejects_hipinfo(monkeypatch):
     """FALSE branch (os.name='posix'): supportedDeviceEnumerator returns False for 'hipinfo'.
 
     On POSIX the function routes to _supportedComponent with targets
-    ['rocm_agent_enumerator', 'amdgpu-arch'], so 'hipinfo' must be rejected.
+    ['offload-arch', 'amdgpu-arch', 'rocm_agent_enumerator'], so 'hipinfo' must be rejected.
     """
     supportedDeviceEnumerator = _import_supported_device_enumerator()
     monkeypatch.setattr(os, "name", "posix")
