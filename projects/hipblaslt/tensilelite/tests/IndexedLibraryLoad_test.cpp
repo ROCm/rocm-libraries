@@ -897,7 +897,7 @@ TEST_F(PlaceholderIndexedShardTest, AllSolutionsIteratorLoadsUnvisitedIndexedSha
     // cache, otherwise the iterator sees an empty solutions map and throws.
     EXPECT_NO_THROW({
         Client::AllSolutionsIterator iterator(
-            master, std::shared_ptr<Hardware>{}, 2.0, -1, -1, false);
+            master, std::shared_ptr<Hardware>{}, 2.0, -1, -1, false, false);
     });
 
     EXPECT_EQ(master->solutions.size(), shardIndices.size());
