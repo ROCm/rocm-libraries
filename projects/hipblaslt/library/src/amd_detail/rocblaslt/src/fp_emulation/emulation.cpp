@@ -1453,8 +1453,8 @@ namespace FixedPointEmulation
         const bool tA = (opA != HIPBLAS_OP_N);
         const bool tB = (opB != HIPBLAS_OP_N);
 
-        /* sv_support is a bitmask (bit 0 = Inf, bit 1 = NaN; DEFAULT = 0xFFFF),
-         * so keep only the bits the kernels understand. */
+        /* sv_support is a bitmask (bit 0 = Inf, bit 1 = NaN); the descriptor
+         * accepts any 16-bit mask, so keep only the bits the kernels understand. */
         const uint32_t svmask = decision.sv_support & 0x3u;
 
         if(svmask != 0u)
@@ -2206,8 +2206,12 @@ FixedPointEmulationSettings fixedPointEmulationDecision(const _rocblaslt_handle*
     if(!get_perf_model_params(dev))
         return result;
 
-    /* Resolve sv_support from descriptor (overrides env var when descriptor is present). */
-    if(ed)
+    /* Special-values mask.
+     * Priority: desc->emulation_sv_support (non-DEFAULT) > env var > 0x3.
+     * DEFAULT (0xFFFF, like cudaEmulationSpecialValuesSupport's DEFAULT)
+     * keeps the env-var value resolved above, matching how DEFAULT/0 inherit
+     * the env var for the strategy and the precision target.               */
+    if(ed && ed->emulation_sv_support != HIPBLASLT_EMULATION_SV_SUPPORT_DEFAULT)
         result.sv_support = ed->emulation_sv_support;
 
     /* ADP target precision.

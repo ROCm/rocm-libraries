@@ -427,6 +427,46 @@ namespace
         emulAttach(m_emul_desc, m_ed);
     }
 
+    // HIPBLASLT_EMULATION_DESC_SPECIAL_VALUES_SUPPORT left at its default
+    // (0xFFFF) inherits HIPBLAS_EMULATION_SPECIAL_VALUES_SUPPORT_MASK, like the
+    // DEFAULT / 0 values of the strategy and precision attributes; any other
+    // value overrides the env var.
+    TEST_F(FixedPointEmulationTest, SpecialValuesDefaultInheritsEnvVar)
+    {
+        const auto* dp       = reinterpret_cast<const _rocblaslt_matmul_desc*>(m_emul_desc);
+        auto        resolved = [&]() {
+            const FixedPointEmulationSettings d = fixedPointEmulationDecision(
+                m_roc, dp, rocblaslt_compute_f64_emulated_fixedpoint, 256, 256, 256, 1, ~size_t{0});
+            EXPECT_EQ(d.status, rocblaslt_status_success);
+            return d.sv_support;
+        };
+        const uint32_t env_mask = fixedPointEmulationSpecialValuesMask() & 0x3u;
+
+        /* No descriptor: env var (or 0x3). */
+        emulAttach(m_emul_desc, nullptr);
+        EXPECT_EQ(resolved(), env_mask);
+        emulAttach(m_emul_desc, m_ed);
+
+        /* Descriptor attached, attribute never set: same as no descriptor. */
+        int32_t got = 0;
+        ASSERT_EQ(hipblasLtEmulationDescGetAttribute(
+                      m_ed, HIPBLASLT_EMULATION_DESC_SPECIAL_VALUES_SUPPORT, &got, sizeof(got), nullptr),
+                  HIPBLAS_STATUS_SUCCESS);
+        EXPECT_EQ(got, 0xFFFF);
+        EXPECT_EQ(resolved(), env_mask);
+
+        /* Explicit values override the env var, including 0 and the default
+         * set explicitly (which still inherits). */
+        for(int32_t v : {0, 1, 2, 3, 0xFFFF})
+        {
+            ASSERT_EQ(hipblasLtEmulationDescSetAttribute(
+                          m_ed, HIPBLASLT_EMULATION_DESC_SPECIAL_VALUES_SUPPORT, &v, sizeof(v)),
+                      HIPBLAS_STATUS_SUCCESS);
+            EXPECT_EQ(resolved() & 0x3u, v == 0xFFFF ? env_mask : static_cast<uint32_t>(v))
+                << "attribute value " << v;
+        }
+    }
+
     // Verifies that EAGER strategy bypasses the cost model for both FP64 and FP32.
     //
     // Design: use a small GEMM (16³) with EAGER to establish device support — a

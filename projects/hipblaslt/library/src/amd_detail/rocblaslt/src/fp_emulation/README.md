@@ -252,7 +252,7 @@ Emulation descriptor attributes (`hipblasLtEmulationDescAttributes_t`):
 | Attribute | Type | Meaning |
 | --- | --- | --- |
 | `HIPBLASLT_EMULATION_DESC_STRATEGY` | `int32_t` (`hipblasEmulationStrategy_t`) | `DEFAULT` (0) = inherit env var, `PERFORMANT` (1), `EAGER` (2). |
-| `HIPBLASLT_EMULATION_DESC_SPECIAL_VALUES_SUPPORT` | `int32_t` bitmask | Bit 0 = Inf, bit 1 = NaN; same layout as the env var: `0` = none, `1` = Inf, `2` = NaN, `3` = both, `0xFFFF` (default) = both. Values match CUDA's `cudaEmulationSpecialValuesSupport`. Stored internally as a `uint32_t`. |
+| `HIPBLASLT_EMULATION_DESC_SPECIAL_VALUES_SUPPORT` | `int32_t` bitmask | Bit 0 = Inf, bit 1 = NaN; same layout as the env var: `0` = none, `1` = Inf, `2` = NaN, `3` = both, `0xFFFF` (default) = inherit `HIPBLAS_EMULATION_SPECIAL_VALUES_SUPPORT_MASK`. Values match CUDA's `cudaEmulationSpecialValuesSupport`. Stored internally as a `uint32_t`. |
 | `HIPBLASLT_EMULATION_DESC_FIXEDPOINT_MAX_MANTISSA_BIT_COUNT` | `int32_t` | ADP precision target in mantissa bits; `0` = inherit env var. |
 | `HIPBLASLT_EMULATION_DESC_FIXEDPOINT_MANTISSA_CONTROL` | `int32_t` | Not used at the moment; the value is stored and returned by Get, but has no effect. Default `0`. |
 | `HIPBLASLT_EMULATION_DESC_FIXEDPOINT_MANTISSA_BIT_OFFSET` | `int32_t` | Not used at the moment; the value is stored and returned by Get, but has no effect. Default `0`. |

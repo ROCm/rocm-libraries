@@ -250,7 +250,7 @@ struct FixedPointEmulationSettings
  * Setting precedence (highest to lowest):
  *   1. Per-matmul descriptor fields (desc->emulation_*; sentinel = inherit)
  *   2. Environment variables (read once, process-wide)
- *   3. Built-in defaults (ADP mode, S_MAX moduli, sv_support = DEFAULT)
+ *   3. Built-in defaults (ADP mode, S_MAX moduli, sv_support = 0x3)
  *
  * desc may be nullptr when called from code that has no matmul desc
  * (e.g. workspace size query with no attached desc).

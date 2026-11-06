@@ -1039,7 +1039,8 @@ rocblaslt_status rocblaslt_emulation_desc_set_attribute(hipblasLtEmulationDesc_t
         {
             int32_t v = 0;
             memcpy(&v, buf, sizeof(int32_t));
-            /* Bitmask (bit 0 = Inf, bit 1 = NaN); DEFAULT = 0xFFFF. Accept any 16-bit
+            /* Bitmask (bit 0 = Inf, bit 1 = NaN); DEFAULT = 0xFFFF inherits
+             * HIPBLAS_EMULATION_SPECIAL_VALUES_SUPPORT_MASK. Accept any 16-bit
              * mask like CUDA; bits beyond Inf/NaN are ignored by the emulation. */
             if(v < 0 || v > 0xFFFF)
                 return rocblaslt_status_invalid_value;

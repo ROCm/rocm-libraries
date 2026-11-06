@@ -225,7 +225,7 @@ All attributes are of type ``int32_t``:
        the environment variable setting (default).
    * - ``HIPBLASLT_EMULATION_DESC_SPECIAL_VALUES_SUPPORT``
      - The Inf and NaN detection bitmask: ``0``, ``1``, ``2``, or ``3``.
-       The default, ``0xFFFF``, detects both.
+       The default, ``0xFFFF``, uses the environment variable setting.
 
 To apply the descriptor, attach it to a matmul descriptor:
 
@@ -244,21 +244,15 @@ uses the matmul descriptor has completed, then destroy it with
 Setting precedence
 ------------------
 
-For the strategy and the precision target, hipBLASLt uses the first of these
-that is set:
+For each setting, hipBLASLt uses the first of these that is set:
 
-#. The attribute on the attached emulation descriptor.
+#. The attribute on the attached emulation descriptor. An attribute left at
+   its default (``HIPBLAS_EMULATION_STRATEGY_DEFAULT`` for the strategy,
+   ``0`` for the precision target, ``0xFFFF`` for Inf and NaN detection)
+   counts as not set.
 #. The environment variable, which is read once, at first use.
-#. The built-in default: ``performant`` strategy, and 52 mantissa bits for
-   FP64 or 23 for FP32.
-
-Inf and NaN detection works differently. If an emulation descriptor is
-attached, hipBLASLt always uses its ``HIPBLASLT_EMULATION_DESC_SPECIAL_VALUES_SUPPORT``
-value, including the default of ``0xFFFF``, and ignores
-``HIPBLAS_EMULATION_SPECIAL_VALUES_SUPPORT_MASK``. Without an attached
-descriptor, hipBLASLt uses the environment variable, or ``0x3`` if it's unset.
-To skip detection for a matmul that has a descriptor attached, set the
-attribute to ``0``.
+#. The built-in default: ``performant`` strategy, 52 mantissa bits for FP64
+   or 23 for FP32, and ``0x3`` (detect both Inf and NaN).
 
 Allocating the workspace
 ========================

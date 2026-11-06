@@ -62,9 +62,10 @@ values and uses the default instead.
         | Bitmask controlling Inf and NaN detection in the input matrices.
         | Setting it to 0 skips detection, which is faster but silently
           corrupts the output for inputs that contain Inf or NaN.
-        | Ignored for a matmul that has an emulation descriptor attached. The
+        | For a matmul with an emulation descriptor attached, the
           descriptor's ``HIPBLASLT_EMULATION_DESC_SPECIAL_VALUES_SUPPORT``
-          attribute applies instead.
+          attribute applies instead, unless it is left at its default of
+          ``0xFFFF``.
         | CUDA equivalent: ``CUBLAS_EMULATION_SPECIAL_VALUES_SUPPORT_MASK``.
       - | Bit 0: Inf detection
         | Bit 1: NaN detection

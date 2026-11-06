@@ -251,8 +251,9 @@ FP32/FP64 fixed-point emulation
 These variables control whether hipBLASLt emulates FP64 and FP32 matmuls on
 INT8 matrix cores, and with what precision. hipBLASLt reads them once, at first
 use, and applies them to all GEMMs in the process. Changing a variable after
-that has no effect. For a single matmul, an attached emulation descriptor
-overrides the strategy, precision target, and Inf and NaN detection settings.
+that has no effect. For a single matmul, an attribute set on an attached
+emulation descriptor overrides the strategy, precision target, or Inf and NaN
+detection setting. An attribute left at its default uses the variable.
 
 These variables don't allocate the workspace buffer that emulation requires.
 You allocate it and pass it to ``hipblasLtMatmul``. For more information, see
