@@ -618,6 +618,148 @@ memory (see "Host verification memory"). If nearly every candidate gets
 built, the problems are choosing different kernels: lower `new_builds_per_run`
 or keep the default `shared` seed policy.
 
+#### Experimental tuning comparison (opt-in)
+
+The following controls leave the PR14938 defaults unchanged. They are
+experiments, not demonstrated GPU speedups.
+
+| Technique | Enable | Baseline |
+|---|---|---|
+| Broad predictor prior | Selector `--ranked_top_k 0`; search `warm_start.ranked_csv` and `use_prior: true` | Ranked CSV truncated to selector `top_k`; no prior unless requested |
+| Diverse warm starts | Selector `--family_cap 1` | Ordinary predicted top-K |
+| Bounded statistical confirmation | `confirm.mode: "race"` | Fixed `fresh_calls`, minimum passing median |
+| Build-aware TPE/GP proposals | `build_aware: {"rank_fraction": 0.1, "explore_probability": 0.2}` | Highest acquisition score |
+| TPE-containing portfolio | `strategy: "portfolio"`, `portfolio_members: ["hill", "gp", "de", "tpe"]` | Portfolio members `hill,gp,de` |
+
+`--top_k` controls warm picks independently of `--ranked_top_k` (omitted:
+same top-K CSV as before; zero: every ranked candidate). `--family_cap`
+first limits picks per tile/warp geometry, pipeline, scheduler, epilogue and
+persistence family; vector-width and padding siblings share a family. It
+then backfills by raw predictor rank if there are too few families, keeping
+the requested warm budget. CSV ranks/predictions never change with diversity.
+
+Build-aware selection acts **before trial creation**, on TPE/GP's existing
+scored legal pools. It prefers successfully built or currently planned kernels
+inside the top acquisition-rank fraction, including ties at its boundary.
+With probability `explore_probability` it retains the cost-blind winner.
+Availability is refreshed across problems each round; failed builds do not
+count as reusable. Startup queues, DE/hill proposals, budgets and ask/tell
+ownership are unchanged. Acquisition ranks are not calibrated expected
+speedups: the preference is a build-slot heuristic, not EI per wall-clock
+second. A portfolio must contain TPE or GP to enable it. Tiny domains still
+fall back to exhaustive search, as before.
+
+Race example:
+
+```json
+{"confirm": {"mode": "race", "finalists": 2, "min_calls": 3,
+             "fresh_calls": 9, "alpha": 0.05, "margin": 0.01}}
+```
+
+In race mode, `fresh_calls` is the maximum calls **per finalist** and
+`min_calls` is at least three. Every call remains correctness-verified;
+failed/invalid finalists are removed, with no discovery fallback. Calls
+interleave, rotate finalist order and require one known, stable device per
+problem. After the minimum, paired log-time t tests compare all surviving
+finalists. Holm correction retains the original ordered-pair hypothesis
+family (unavailable pairs have p=1); each look spends at most
+`alpha / (fresh_calls - min_calls + 1)`. A single survivor stops early.
+Unseparated finalists use the full budget and export the lowest verified
+median with `selection: "budget_exhausted"` and explicit `tied_kernels`.
+That tie is not proof of equivalence or of the selected kernel's superiority.
+
+Disjoint repeat-call pairs update a separate noise model per problem;
+`summary.json.confirmation` records the noise, device, eliminations and looks.
+The tests use observed call variability, not the discovery noise floor.
+These statistical decisions assume suitably independent timing blocks and
+approximately normal log differences: validate those assumptions on the
+target GPU. Confirmation noise is **not** fed retrospectively into discovery.
+
+`summary.json` also records portfolio allocations, `build_preferred` selections
+and phase wall times (`ask`, `build_missing`, `measure_pairs`, `confirm`).
+Adapter phase times include their host/setup/verification overhead and
+parallel work; they are not summed serial work or pure GPU execution time.
+`run.json` hashes warm/prior files and records `CK_TILE_BENCH_*` overrides.
+Model training provenance and device/partition/clock controls still need to be
+recorded alongside the experiment.
+
+**Reproducible ablations.** Run from this directory after creating
+`candidates.json` and the ordinary warm-only TPE `search.json` above. Use one
+model and one candidate domain for both shortlists:
+
+```bash
+H=../../../dispatcher/heuristics
+python $H/select_kernels.py --candidates candidates.json \
+    --model_dir $H/models/gemm_universal_fp16_gfx950 --top_k 5 \
+    --out_pairs picks.json --out_ranked ranked_all.csv --ranked_top_k 0
+python $H/select_kernels.py --candidates candidates.json \
+    --model_dir $H/models/gemm_universal_fp16_gfx950 --top_k 5 \
+    --out_pairs diverse.json --family_cap 1
+python compare_search.py prepare --baseline search.json \
+    --ranked-csv ranked_all.csv --diverse-pairs diverse.json \
+    --seeds 0 1 2 3 4 --output comparison
+```
+
+This only writes configs and a manifest; it **does not start GPU jobs**.
+The baseline must be TPE with warm pairs, no prior, fixed confirmation and no
+experimental controls. Each seed has nine arms, deterministically shuffled:
+`baseline`, `broad_prior`, `diverse_warm`, `confirmation_control`, `race`,
+`build_aware`, `portfolio_control`, `portfolio_tpe`, and `combined`.
+The fixed-confirmation control and race share a maximum of
+`max(9, baseline.fresh_calls)` calls per finalist. Portfolio membership has its
+own control, so changing the search family is not mistaken for adding TPE.
+All arms retain the same discovery/build budgets and warm-start count.
+
+On the GPU host, run the manifest sequentially, keeping all driver arguments
+identical. For example (adjust the hardware/workload arguments as a group):
+
+```python
+import json
+import subprocess
+import sys
+from pathlib import Path
+
+common = [
+    sys.executable, "gemm_full_benchmark.py", "configs/default_config.json",
+    "--variant", "gemm_universal", "--arch", "gfx950",
+    "--dtype", "fp16", "--layout", "rcr", "--problems", "problems.json",
+    "--devices", "0,",
+]
+for case in json.loads(Path("comparison/manifest.json").read_text())["runs"]:
+    result = subprocess.run(common + [
+        "--search-config", case["config"], "--search-output-dir", case["output_dir"],
+    ])
+    if result.returncode:
+        raise SystemExit(f"{case['arm']} seed {case['seed']} failed: {result.returncode}")
+```
+
+Do not pass either shortlist as the driver's `--pairs`: that would restrict
+the domain rather than supply warm starts. Reuse the generated baseline
+config on the original PR14938 checkout for a separate historical control if
+needed; the unchanged defaults on this branch are the instrumented control.
+
+```bash
+python compare_search.py summarize comparison/manifest.json > comparison/results.csv
+```
+
+The CSV keeps each seed separate, includes failures/missing runs, counts
+exhaustive fallbacks, and refuses changed settings/inputs/domains/execution contexts
+or a purported full prior with missing eligible entries. It reports
+`control_relative_quality` as the geometric mean of
+`control_confirmed_ms / arm_confirmed_ms`, only when both runs have winners
+for every problem. Race uses `confirmation_control`; `portfolio_tpe` uses
+`portfolio_control`; other arms use `baseline`. Values above one mean faster
+than that control, **not** better than a verified exhaustive reference.
+An incomplete matrix exits nonzero; partial runs are never silently dropped.
+
+Use longer, independent, interleaved remeasurement of the union of finalists
+before drawing performance conclusions. Hold GPU partition/CU count, clocks,
+dtype/layout, compiler concurrency/timeouts, timing overrides and cache
+policy fixed; separate CPX/full-GPU and held-out shape families. Report
+confirmation cost and no-winner rates, not only successful winners. Predictor
+preprocessing is outside driver wall time and should be reported separately.
+An admission deadline is still not a hard wall-clock cutoff.
+
 ### Multi-GPU parallelism
 
 Phase 3 fans the `(kernel × problem)` work out across **every visible GPU** in

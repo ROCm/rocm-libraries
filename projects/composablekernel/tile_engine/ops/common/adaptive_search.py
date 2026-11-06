@@ -258,6 +258,16 @@ class WarmStartSettings:
 class ConfirmSettings:
     finalists: int = 2
     fresh_calls: int = 3
+    mode: str = "fixed"
+    min_calls: int = 3
+    alpha: float = 0.05
+    margin: float = 0.01
+
+
+@dataclass(frozen=True)
+class BuildAwareSettings:
+    rank_fraction: float = 0.1
+    explore_probability: float = 0.2
 
 
 @dataclass(frozen=True)
@@ -298,6 +308,8 @@ class SearchSettings:
     confirm: ConfirmSettings = field(default_factory=ConfirmSettings)
     measurement_policy: str = "full"
     host_cache: HostCacheSettings = field(default_factory=HostCacheSettings)
+    portfolio_members: Optional[tuple] = None
+    build_aware: Optional[BuildAwareSettings] = None
 
     @classmethod
     def from_json(cls, source) -> "SearchSettings":
@@ -348,6 +360,44 @@ class SearchSettings:
                 )
         cd, cw = data.get("confirm", {}), w + ".confirm"
         _check_keys(cd, [f for f in ConfirmSettings.__dataclass_fields__], cw)
+        confirm = ConfirmSettings(
+            finalists=_get(cd, cw, "finalists", int, 2, _positive, ">= 1"),
+            fresh_calls=_get(cd, cw, "fresh_calls", int, 3, _positive, ">= 1"),
+            mode=_get(cd, cw, "mode", str, "fixed",
+                      lambda v: v in ("fixed", "race"), "fixed or race"),
+            min_calls=_get(cd, cw, "min_calls", int, 3, lambda v: v >= 3, ">= 3"),
+            alpha=_get(cd, cw, "alpha", float, 0.05, lambda v: 0 < v < 1, "in (0, 1)"),
+            margin=_get(cd, cw, "margin", float, 0.01, lambda v: v >= 0, ">= 0"),
+        )
+        if confirm.mode == "fixed" and any(k in cd for k in ("min_calls", "alpha", "margin")):
+            raise SettingsError(f"{cw}: min_calls, alpha and margin require mode=race")
+        if confirm.mode == "race" and confirm.fresh_calls < confirm.min_calls:
+            raise SettingsError(f"{cw}: fresh_calls must be >= min_calls in race mode")
+        members = None
+        if "portfolio_members" in data:
+            raw = _get(data, w, "portfolio_members", list)
+            if (strategy != "portfolio" or not raw
+                    or any(not isinstance(m, str) or m not in names[:-1] for m in raw)
+                    or len(set(raw)) != len(raw)):
+                raise SettingsError(
+                    f"{w}.portfolio_members: requires strategy=portfolio and distinct "
+                    f"members from {names[:-1]}")
+            members = tuple(raw)
+        build_aware = None
+        if "build_aware" in data:
+            bd, bw = data["build_aware"], w + ".build_aware"
+            _check_keys(bd, BuildAwareSettings.__dataclass_fields__, bw)
+            supported = (strategy in ("tpe", "gp") or strategy == "portfolio"
+                         and any(m in ("tpe", "gp") for m in
+                                 (members or _ck_search().DEFAULT_PORTFOLIO)))
+            if not supported:
+                raise SettingsError(f"{bw}: requires TPE or GP, alone or in a portfolio")
+            build_aware = BuildAwareSettings(
+                rank_fraction=_get(bd, bw, "rank_fraction", float, 0.1,
+                                   lambda v: 0 < v <= 1, "in (0, 1]"),
+                explore_probability=_get(bd, bw, "explore_probability", float, 0.2,
+                                         lambda v: 0 <= v <= 1, "in [0, 1]"),
+            )
         hd, hw = data.get("host_cache", {}), w + ".host_cache"
         _check_keys(hd, [f for f in HostCacheSettings.__dataclass_fields__], hw)
         return cls(
@@ -365,10 +415,9 @@ class SearchSettings:
             max_stall_rounds=_get(data, w, "max_stall_rounds", int, 8, _positive, ">= 1"),
             build_timeout_s=_get(data, w, "build_timeout_s", int, None, _positive, ">= 1"),
             warm_start=warm,
-            confirm=ConfirmSettings(
-                finalists=_get(cd, cw, "finalists", int, 2, _positive, ">= 1"),
-                fresh_calls=_get(cd, cw, "fresh_calls", int, 3, _positive, ">= 1"),
-            ),
+            confirm=confirm,
+            portfolio_members=members,
+            build_aware=build_aware,
             measurement_policy=_get(
                 data, w, "measurement_policy", str, "full",
                 lambda v: v in MEASUREMENT_POLICIES, f"one of {MEASUREMENT_POLICIES}",
@@ -386,6 +435,16 @@ class SearchSettings:
         """The settings as accepted by ``from_json`` (paths resolved)."""
         d = {f: getattr(self, f) for f in self.__dataclass_fields__}
         d["confirm"] = vars(self.confirm).copy()
+        if self.confirm.mode == "fixed":
+            d["confirm"] = {k: d["confirm"][k] for k in ("finalists", "fresh_calls")}
+        if self.portfolio_members is None:
+            del d["portfolio_members"]
+        else:
+            d["portfolio_members"] = list(self.portfolio_members)
+        if self.build_aware is None:
+            del d["build_aware"]
+        else:
+            d["build_aware"] = vars(self.build_aware).copy()
         d["host_cache"] = {k: v for k, v in vars(self.host_cache).items()
                            if v is not None}
         for name in ("deadline_s", "build_timeout_s"):
@@ -651,6 +710,7 @@ class _Problem:
         self.seed = 0
         self.warm: List[str] = []
         self.prior_entries = 0
+        self.build_preference = None
         self.requeue: list = []  # trials to re-admit (unattempted once)
         self.retried: set = set()  # uids already re-queued once
         self.deferred: list = []  # same-round duplicates of an in-flight key
@@ -667,9 +727,9 @@ class _Problem:
 StrategyFactory = Callable[[str, Any, int, Sequence[Mapping], Any], Any]
 
 
-def _default_factory(name, space, seed, warm_records, prior):
+def _default_factory(name, space, seed, warm_records, prior, *, options=None):
     return _ck_search().make_strategy(
-        name, space, seed, warm_records=warm_records, prior=prior
+        name, space, seed, warm_records=warm_records, prior=prior, options=options
     )
 
 
@@ -729,7 +789,9 @@ class SearchCoordinator:
         self.settings = settings
         self.clock = clock
         self.log = log
-        self.strategy_factory = strategy_factory or _default_factory
+        if strategy_factory is not None and settings.portfolio_members is not None:
+            raise SettingsError("portfolio_members requires the default strategy factory")
+        self.strategy_factory = strategy_factory
         self.writer = RunWriter(out_dir)
         self.writer.check_fresh()
         warm = settings.warm_start
@@ -756,6 +818,8 @@ class SearchCoordinator:
         self._ck = None
         self._run_json = None
         self.noise = None  # the timing noise model shared by every strategy
+        self.confirmation = {}
+        self.phase_s = dict.fromkeys(("ask", "build_missing", "measure_pairs", "confirm"), 0.0)
 
     # ------------------------------------------------------------ public
 
@@ -822,12 +886,16 @@ class SearchCoordinator:
     # ------------------------------------------------------------- setup
 
     def _call(self, what: str, fn, *args):
+        start = self.clock()
         try:
             return fn(*args)
         except AdapterError:
             raise
         except Exception as e:  # noqa: BLE001 - an adapter failure ends the run
             raise AdapterError(f"{what} failed: {type(e).__name__}: {e}") from e
+        finally:
+            if what in self.phase_s:
+                self.phase_s[what] += self.clock() - start
 
     def _setup(self) -> None:
         s = self.settings
@@ -866,7 +934,19 @@ class SearchCoordinator:
             else:
                 warm = self._warm_records(p)
                 prior = self._prior(p)
-            p.strategy = self.strategy_factory(p.strategy_name, p.space, p.seed, warm, prior)
+            if self.strategy_factory is not None:
+                p.strategy = self.strategy_factory(
+                    p.strategy_name, p.space, p.seed, warm, prior)
+            else:
+                options = ({"members": s.portfolio_members}
+                           if p.strategy_name == "portfolio" and s.portfolio_members
+                           else None)
+                p.strategy = _default_factory(
+                    p.strategy_name, p.space, p.seed, warm, prior, options=options)
+            if s.build_aware is not None and p.strategy_name != "exhaustive":
+                p.build_preference = self._ck.BuildPreference(**vars(s.build_aware))
+                if not self._ck.attach_build_preference(p.strategy, p.build_preference):
+                    raise SettingsError(f"{p.key}: strategy does not support build_aware")
             # As upstream's run loop does: a gain counts only beyond timing noise.
             attach = getattr(p.strategy, "attach_noise", None)
             if attach is not None:
@@ -877,6 +957,12 @@ class SearchCoordinator:
             "exhaustive": False,
             "settings": s.to_json(),
             "context": context,
+            "warm_start_sha256": {
+                path: sha256_file(path)
+                for path in (() if s.warm_start is None else
+                             (s.warm_start.pairs_file, s.warm_start.ranked_csv))
+                if path is not None
+            },
             "ck_search": {
                 "origin_sha": getattr(self._ck, "ORIGIN_SHA", ""),
                 "strategies": list(getattr(self._ck, "STRATEGY_NAMES", ())),
@@ -1101,7 +1187,14 @@ class SearchCoordinator:
                 n = min(n, capacity + self._build_free(p, planned))
             if n <= 0:
                 continue
-            trials = list(p.strategy.ask(n))
+            if p.build_preference is not None:
+                rows = set(self._build_free_rows(p, planned, inflight))
+                p.build_preference.keys = {k for k, i in p.members.items() if i in rows}
+            ask_start = self.clock()
+            try:
+                trials = list(p.strategy.ask(n))
+            finally:
+                self.phase_s["ask"] += self.clock() - ask_start
             if len(trials) > n:
                 raise RuntimeError(f"{p.key}: strategy asked {len(trials)} > {n} trials")
             self.counts["proposed"] += len(trials)
@@ -1294,6 +1387,11 @@ class SearchCoordinator:
                 "discovery_best": None if best is None else {
                     "kernel": p.by_key[best[0]].kernel_name, "latency_ms": best[1][0]},
             }
+            if p.build_preference is not None:
+                problems[p.key]["build_preferred"] = p.build_preference.selections
+            allocation = getattr(p.strategy, "allocation", None)
+            if allocation is not None:
+                problems[p.key]["portfolio_allocation"] = allocation()
         out.write_json("summary.json", {
             "status": status,
             "exit_code": exit_code,
@@ -1306,6 +1404,8 @@ class SearchCoordinator:
             "artifacts": self.registry.to_json(),
             "problems": problems,
             "wall_s": wall,
+            "phase_s": self.phase_s,
+            "confirmation": self.confirmation,
         }, final=True)
 
     def _confirm(self, stop: str) -> Dict[str, dict]:
@@ -1316,6 +1416,8 @@ class SearchCoordinator:
         call. The winner is the lowest median among the finalists whose calls all
         passed: there is no fallback to unconfirmed discovery results."""
         cf = self.settings.confirm
+        if cf.mode == "race":
+            return self._confirm_race(stop)
         fins = {
             p: sorted(p.best.items(), key=lambda kv: (kv[1][0], kv[0]))[: cf.finalists]
             for p in self.problems
@@ -1369,6 +1471,119 @@ class SearchCoordinator:
                 why = f"no verified discovery measurement (search: {p.finished or stop})"
             self.unresolved[p.key] = why
             self._event("final", problem=p.key, unresolved=why)
+        return winners
+
+    def _confirm_race(self, stop: str) -> Dict[str, dict]:
+        """Bounded, interleaved calls with a fixed hypothesis/looks budget.
+
+        Holm includes every original ordered pair at each look; unavailable
+        pairs get p=1. This avoids shrinking the error budget's denominator
+        after data-dependent eliminations. Statistical guarantees still rely
+        on the paired log-t test's noise assumptions.
+        """
+        cf = self.settings.confirm
+        race = self._ck.Race(alpha=cf.alpha, margin=cf.margin, min_samples=cf.min_calls)
+        max_looks = cf.fresh_calls - cf.min_calls + 1
+        finalists = {
+            p: sorted(p.best, key=lambda k: (p.best[k][0], k))[:cf.finalists]
+            for p in self.problems
+        }
+        live = {p: list(keys) for p, keys in finalists.items()}
+        samples = {p: {k: [] for k in keys} for p, keys in finalists.items()}
+        hypotheses = {p: [(a, b) for a in keys for b in keys if a != b]
+                      for p, keys in finalists.items()}
+        noise = {p: self._ck.NoiseModel() for p in finalists}
+        devices, stopped = {}, set()
+        for p, keys in finalists.items():
+            self.confirmation[p.key] = {
+                "mode": "race", "max_looks": max_looks, "looks": 0,
+                "eliminated": [], "failed": {}, "device": None,
+            }
+        for j in range(cf.fresh_calls):
+            reqs, owners = [], {}
+            for p, keys in live.items():
+                if p in stopped:
+                    continue
+                # Rotate order to avoid giving the discovery leader first slot
+                # in every timing block.
+                order = keys[j % len(keys):] + keys[:j % len(keys)] if keys else []
+                for k in order:
+                    req = PairRequest(p.key, k, p.by_key[k].kernel_name,
+                                      p.best[k][1], self._call_id("c"))
+                    reqs.append(req)
+                    owners[req.call_id] = p
+            if not reqs:
+                break
+            self.counts["confirm_calls"] += len(reqs)
+            self.ledger.confirm_calls += len(reqs)
+            got = self._exchange("confirm", self.adapter.confirm, reqs)
+            for r in reqs:
+                p = owners[r.call_id]
+                outcome = got[r.call_id]
+                status, lat, diag = _checked(outcome)
+                self._event("confirm", problem=p.key, kernel=r.kernel_name,
+                            trial_uid=r.trial_uid, call_id=r.call_id, call=j,
+                            status=status, latency_ms=lat, diag=diag, device=outcome.device)
+                if status != "ok":
+                    live[p].remove(r.candidate_key)
+                    self.confirmation[p.key]["failed"][r.kernel_name] = status
+                    continue
+                if not outcome.device or devices.setdefault(p, outcome.device) != outcome.device:
+                    raise ContractError(
+                        f"race confirmation for {p.key}: requires one known device "
+                        "across all finalists and calls")
+                self.confirmation[p.key]["device"] = outcome.device
+                values = samples[p][r.candidate_key]
+                values.append((j, lat))
+                if len(values) % 2 == 0:
+                    noise[p].update_call(values[-2][1], values[-1][1])
+            if j + 1 < cf.min_calls:
+                continue
+            for p, keys in live.items():
+                if p in stopped:
+                    continue
+                meta = self.confirmation[p.key]
+                meta["looks"] += 1
+                calls = {k: samples[p][k] for k in keys}
+                raw = race.pvalues(calls)
+                adjusted = self._ck.holm([raw.get(pair, 1.0) for pair in hypotheses[p]])
+                leader = race.leader(calls)
+                eliminated = sorted({a for (a, _), value in zip(hypotheses[p], adjusted)
+                                     if value < cf.alpha / max_looks and a != leader})
+                live[p] = [k for k in keys if k not in eliminated]
+                names = [p.by_key[k].kernel_name for k in eliminated]
+                meta["eliminated"].extend(names)
+                self._event("race", problem=p.key, look=meta["looks"],
+                            max_looks=max_looks, eliminated=names,
+                            survivors=[p.by_key[k].kernel_name for k in live[p]],
+                            alpha_per_look=cf.alpha / max_looks,
+                            call_sigma=noise[p].call_sigma)
+                if len(live[p]) <= 1:
+                    stopped.add(p)
+        winners = {}
+        for p, keys in live.items():
+            meta = self.confirmation[p.key]
+            meta["noise_model"] = noise[p].to_json()
+            meta["call_sigma"] = noise[p].call_sigma
+            meta["survivors"] = [p.by_key[k].kernel_name for k in keys]
+            passed = [k for k in keys if len(samples[p][k]) >= cf.min_calls]
+            if passed:
+                ck = min(passed, key=lambda k: (
+                    statistics.median(v for _, v in samples[p][k]), p.by_key[k].kernel_name))
+                values = [v for _, v in samples[p][ck]]
+                name = p.by_key[ck].kernel_name
+                winners[p.key] = {
+                    "kernel": name, "median_ms": statistics.median(values),
+                    "calls_ms": values, "discovery_ms": p.best[ck][0],
+                    "selection": "single_survivor" if len(passed) == 1 else "budget_exhausted",
+                    "tied_kernels": [p.by_key[k].kernel_name for k in passed] if len(passed) > 1 else [],
+                }
+                self._event("final", problem=p.key, **winners[p.key])
+            else:
+                why = ("no finalist passed race confirmation" if finalists[p] else
+                       p.finished or f"no verified discovery measurement (search: {stop})")
+                self.unresolved[p.key] = why
+                self._event("final", problem=p.key, unresolved=why)
         return winners
 
     # ------------------------------------------------------------ finish
