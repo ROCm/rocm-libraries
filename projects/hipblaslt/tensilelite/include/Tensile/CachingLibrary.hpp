@@ -166,6 +166,7 @@ namespace TensileLite
             = CacheMap<bool, AMDGPU, MyProblem>;
         using CachesGroupedGemm
             = CacheMap<SolutionVector<MySolution>, AMDGPU, std::vector<MyProblem>>;
+        using CachesGroupedGemmAllSolsFlag = CacheMap<bool, AMDGPU, std::vector<MyProblem>>;
 
         CachingLibrary(std::shared_ptr<Library> subLibrary)
             : m_subLibrary(subLibrary)
@@ -173,6 +174,7 @@ namespace TensileLite
             , m_caches(SolutionVector<MySolution>{})
             , m_cachesAllSolutions(false)
             , m_cachesGroupedGemm(SolutionVector<MySolution>{})
+            , m_cachesGroupedGemmAllSolutions(false)
         {
         }
 
@@ -308,13 +310,21 @@ namespace TensileLite
                 SolutionVector<MySolution> solutions;
                 solutions = m_cachesGroupedGemm.find(problems, amdgpu);
 
-                if(solutions.size() != 0)
+                // As for a single GEMM: a cached list shorter than the request is
+                // served only if the sub-library had no more to give.
+                if(solutions.size() != 0
+                   && (solutions.size() >= static_cast<size_t>(numSolutions)
+                       || m_cachesGroupedGemmAllSolutions.find(problems, amdgpu)))
                     return solutions;
 
                 solutions
                     = m_subLibrary->findTopSolutionsGroupedGemm(problems, hardware, numSolutions);
                 if(solutions.size() != 0)
+                {
                     m_cachesGroupedGemm.add(solutions, problems, amdgpu);
+                    m_cachesGroupedGemmAllSolutions.add(
+                        solutions.size() < static_cast<size_t>(numSolutions), problems, amdgpu);
+                }
 
                 return solutions;
             }
@@ -326,12 +336,13 @@ namespace TensileLite
         }
 
     private:
-        std::shared_ptr<Library>  m_subLibrary;
-        mutable Cache             m_cache;
-        mutable Caches            m_caches;
-        mutable CachesAllSolsFlag m_cachesAllSolutions;
-        mutable CachesGroupedGemm m_cachesGroupedGemm;
-        mutable std::atomic<bool> lastFindTopRetAll = false;
+        std::shared_ptr<Library>             m_subLibrary;
+        mutable Cache                        m_cache;
+        mutable Caches                       m_caches;
+        mutable CachesAllSolsFlag            m_cachesAllSolutions;
+        mutable CachesGroupedGemm            m_cachesGroupedGemm;
+        mutable CachesGroupedGemmAllSolsFlag m_cachesGroupedGemmAllSolutions;
+        mutable std::atomic<bool>            lastFindTopRetAll = false;
     };
 
 } // namespace TensileLite
