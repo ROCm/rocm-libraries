@@ -147,23 +147,10 @@ TEST_P(matrix_formats, copies_within_the_backend)
             rocalution::_rocalution_sync();
             expect_matrix(*C, ref);
 
-            auto into_empty = [&] {
-                auto B = empty<T>();
-                copy.second(*B);
-                rocalution::_rocalution_sync();
-                expect_matrix(*B, ref);
-            };
-
-            // CopyToAsync comes last, as the skip ends the current value type
-            if(copy.first == "CopyToAsync" && backend() == Backend::Accelerator
-               && (format().id == rocalution::ELL || format().id == rocalution::BCSR))
-            {
-                KNOWN_BUG("into an empty matrix it tests the source for being empty and copies "
-                          "into an unallocated matrix, which exits the process");
-                expect_in_child(into_empty);
-                continue;
-            }
-            into_empty();
+            auto B = empty<T>();
+            copy.second(*B);
+            rocalution::_rocalution_sync();
+            expect_matrix(*B, ref);
         }
     });
 }
