@@ -254,13 +254,16 @@ class TestInertSweepDetection(unittest.TestCase):
         """Backend-level inertness: the IR differs, the machine code does not."""
         m = _sweep()
         cfg, fin = self._big_finalists()
-        # Two values are a comparison; each extra one is one more COMGR compile.
-        # null and 4 are the pair that compiles to the same code on this tile
-        # (1 and 2 change the register budget).
-        m.apply_set_overrides(cfg, ["traits.waves_per_eu=[null,4]"])
+        # Each value is one more COMGR compile, so three: null and 4 compile to
+        # the same code on this tile, and 1 does not (it changes the register
+        # budget). A detector that warns only when every value matches, rather
+        # than when some do, then fails here.
+        m.apply_set_overrides(cfg, ["traits.waves_per_eu=[null,1,4]"])
         warns = self._warnings_for(m, cfg, fin, "waves_per_eu")
         self.assertTrue(warns, "waves_per_eu is a no-op where LDS pins occupancy")
         self.assertIn("SAME kernel", warns[0])
+        self.assertIn("None / 4", warns[0], "the duplicate pair, without the 1")
+        self.assertNotIn("/ 1", warns[0])
 
     def test_ab_load_elem_bytes_is_flagged_under_tdm(self):
         """Emitter-level inertness: TDM replaces the per-lane global load."""
