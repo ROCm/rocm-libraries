@@ -4,7 +4,6 @@
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
 #include <algorithm>
-#include <cmath>
 #include <cstdint>
 #include <initializer_list>
 #include <limits>
@@ -37,10 +36,10 @@
  *
  * The kernel is `rocke/library/kernels/gfx942/attention_dense.py`'s
  * `build_attention_dense`, packaged (kind: rocke -> kpack) for gfx942 only. Matching and
- * dispatch are shared with the gfx950 twin (AttentionDenseNative.cpp); what is gfx942's
- * own is bound here: the [2^-64, 2^4] scale range, the gfx942 tile rules, the causal
- * sliding window baked per candidate with its zero-trip guard, the stats (LSE) output an
- * emit_lse candidate writes, the launch grid each candidate is built for (the qb_minor,
+ * dispatch, the [2^-64, 2^4] scale range included, are shared with the gfx950 twin
+ * (AttentionDenseNative.cpp); what is gfx942's own is bound here: the gfx942 tile rules, the
+ * causal sliding window baked per candidate with its zero-trip guard, the stats (LSE) output
+ * an emit_lse candidate writes, the launch grid each candidate is built for (the qb_minor,
  * bt_hkv_minor or hq_minor_swz block order, or the D128 persistent grid), and the v1
  * launch contract.
  *
@@ -122,21 +121,6 @@ constexpr int64_t NARROW_WINDOW = 256;
 /// ...and only where the catalog's persistent CTA count (_GFX942_NUM_PERSISTENT, the one
 /// every persistent variant bakes) is a multiple of the device's CU count.
 constexpr int64_t CATALOG_NUM_PERSISTENT = 304;
-
-// The body multiplies the f32 QK accumulator by scale * log2(e), then masks with the finite
-// sentinel -1e30 (attention_dense.py qk_scale, do_mask). A visible score below -1e30 loses
-// the row max to a masked key, and a product past FLT_MAX makes s - m = inf - inf = NaN.
-// The scale is bounded to gfx950's [2^-64, 2^4] (Gfx950AttentionDenseNative.cpp). At 2^4
-// the multiplier is 16 * log2(e) ~= 23.08. fp16 inputs at D <= 128 give
-// |q.k| <= 128 * 65504^2 ~= 5.5e11, so every score stays within ~1.3e13, nearly 17 orders
-// of magnitude inside -1e30. bf16 shares f32's exponent range, so no scale bound covers
-// every bf16 input, but a score reaches -1e30 only past |q.k| ~= 4.3e28 and FLT_MAX only
-// past ~1.5e37. The lower bound, which also declines zero and negative scales, is gfx950's,
-// so both dense engines serve one range; change them together. NaN and ±inf are outside it.
-bool isSupportedAttentionScale(float scale)
-{
-    return !std::isnan(scale) && scale >= 0x1p-64F && scale <= 0x1p4F;
-}
 
 /// Whether a candidate writes LSE: emit_lse 1 or 0. A record without the field reaches here
 /// completed to 0 through the KMD default, so a missing or other value is malformed.
@@ -224,8 +208,6 @@ constexpr attention_dense::AttentionDenseArch gfx942Arch()
     arch.tokens.stats = "gfx942_attention_dense.stats.uid";
     // The head fields of the KMD are canonical build inputs, never compared.
     arch.matchesHeadCounts = false;
-    arch.isSupportedScale = &isSupportedAttentionScale;
-    arch.unsupportedScaleReason = "is outside the supported [2^-64, 2^4]";
     arch.isSupportedTile = &isSupportedGfx942AttentionDenseTile;
     arch.geometry = &gfx942Geometry;
     arch.windowReachesKeys = &gfx942AttentionDenseWindowReachesKeys;

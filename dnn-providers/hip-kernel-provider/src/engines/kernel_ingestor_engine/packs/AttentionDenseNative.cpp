@@ -114,6 +114,26 @@ bool isWellFormedOperand(const data_objects::TensorAttributes& tensor)
            && !tensor.ragged_offset_tensor_uid().has_value();
 }
 
+// The softmax scales both kernels compute correctly: a chosen margin, not a hardware limit,
+// and the range gfx950's run_attention_dense_torch checks. gfx950 takes the row max on
+// unscaled scores (valid only for scale > 0), folds the scale into an fma whose rounding
+// residue grows with the scale, and masks raw scores with a power-of-two sentinel. gfx942
+// multiplies the f32 QK accumulator by scale * log2(e), then masks with the finite sentinel
+// -1e30 (its attention_dense.py qk_scale, do_mask): a visible score below -1e30 loses the
+// row max to a masked key, and a product past FLT_MAX makes s - m = inf - inf = NaN. At 2^4 the
+// multiplier is 16 * log2(e) ~= 23.08, and fp16 inputs at D <= 128 give
+// |q.k| <= 128 * 65504^2 ~= 5.5e11, so every score stays within ~1.3e13, far inside -1e30.
+// bf16 shares f32's exponent range, so no scale bound covers every bf16 input, but a score
+// reaches -1e30 only past |q.k| ~= 4.3e28 and FLT_MAX only past ~1.5e37. NaN, ±inf, zero
+// and negative scales are outside the range.
+bool isSupportedScale(float scale)
+{
+    return !std::isnan(scale) && scale >= 0x1p-64F && scale <= 0x1p4F;
+}
+
+/// The graph decline and saved-plan refusal text for a scale isSupportedScale rejects.
+constexpr std::string_view UNSUPPORTED_SCALE_REASON = "is outside the supported [2^-64, 2^4]";
+
 // ---------------------------------------------------------------------------
 // Decline logging
 //
@@ -759,10 +779,10 @@ std::optional<BoundTokens> graphMatches(const MatchContext& context, const Atten
     // cuDNN's default: its SDPA node multiplies by attn_scale only when one is set. It is
     // resolved here, once, and prepare() launches with the bound value.
     const float scale = attributes.attn_scale_value().value_or(1.0F);
-    if(!arch.isSupportedScale(scale))
+    if(!isSupportedScale(scale))
     {
         HIPDNN_PLUGIN_LOG_INFO(declined(arch, "scale")
-                               << "attn_scale " << scale << " " << arch.unsupportedScaleReason);
+                               << "attn_scale " << scale << " " << UNSUPPORTED_SCALE_REASON);
         return std::nullopt;
     }
 
@@ -1763,10 +1783,9 @@ AttentionDenseLaunchInputs readLaunchInputs(const SavedLaunchInputs& inputs,
             inputs, SCALE_VALUE, "must be a finite double that a float holds exactly");
     }
     binding.scale = static_cast<float>(scale);
-    if(!arch.isSupportedScale(binding.scale))
+    if(!isSupportedScale(binding.scale))
     {
-        refuseAttentionDenseLaunchValue(
-            inputs, SCALE_VALUE, std::string(arch.unsupportedScaleReason));
+        refuseAttentionDenseLaunchValue(inputs, SCALE_VALUE, std::string(UNSUPPORTED_SCALE_REASON));
     }
 
     const std::string dataTypeName = requireLaunchString(inputs, DATA_TYPE_VALUE);

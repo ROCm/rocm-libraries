@@ -3,7 +3,6 @@
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
-#include <cmath>
 #include <cstdint>
 #include <memory>
 #include <optional>
@@ -33,11 +32,11 @@
  *
  * The kernel is `rocke/library/kernels/gfx950/attention_dense.py`'s
  * `build_attention_dense`, packaged (kind: rocke -> kpack) for gfx950 only. Matching and
- * dispatch are shared with the gfx942 twin (AttentionDenseNative.cpp); what is gfx950's
- * own is bound here: the [2^-64, 2^4] scale range, the block_m {128, 256} tiles with their
- * LDS budget, no sliding window, a head-count comparison because the catalog lists each
- * head configuration as its own entry, and the v1 (8-argument) and v2 (10-argument)
- * launch contracts.
+ * dispatch, the [2^-64, 2^4] scale range included, are shared with the gfx942 twin
+ * (AttentionDenseNative.cpp); what is gfx950's own is bound here: the block_m {128, 256}
+ * tiles with their LDS budget, no sliding window, a head-count comparison because the
+ * catalog lists each head configuration as its own entry, and the v1 (8-argument) and v2
+ * (10-argument) launch contracts.
  */
 namespace hip_kernel_provider::kernel_ingestor_engine
 {
@@ -56,15 +55,6 @@ constexpr std::string_view DISPATCH_SYMBOL = "hipkernel.gfx950_attention_dense.d
 /// The tile every legacy record completes to, and the one cold selection prefers.
 constexpr int64_t BASELINE_BLOCK_M = 256;
 constexpr int64_t BASELINE_BLOCK_N = 64;
-
-// The kernel takes the row max on unscaled scores (valid only for scale > 0), folds the
-// scale into an fma whose rounding residue grows with the scale, and masks raw scores
-// with a power-of-two sentinel. Mirrors run_attention_dense_torch's [2^-64, 2^4] range.
-// NaN and ±inf are outside the range.
-bool isSupportedAttentionScale(float scale)
-{
-    return !std::isnan(scale) && scale >= 0x1p-64F && scale <= 0x1p4F;
-}
 
 attention_dense::AttentionDenseGeometry gfx950Geometry(int64_t blockM,
                                                        int64_t seqLenQ,
@@ -93,8 +83,6 @@ constexpr attention_dense::AttentionDenseArch gfx950Arch()
     arch.tokens.slidingWindow = "gfx950_attention_dense.sliding_window";
     arch.tokens.scaleBits = "gfx950_attention_dense.scale_bits";
     arch.matchesHeadCounts = true;
-    arch.isSupportedScale = &isSupportedAttentionScale;
-    arch.unsupportedScaleReason = "is outside the supported [2^-64, 2^4]";
     arch.isSupportedTile = &isSupportedGfx950AttentionDenseTile;
     arch.geometry = &gfx950Geometry;
     // No catalog variant carries a non-zero sliding_window, so a windowed mask has no

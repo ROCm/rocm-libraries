@@ -144,9 +144,9 @@ TEST_P(TestAttentionDenseMatch, DeclinesEveryOtherComputeDataType)
 }
 
 // =============================================================================
-// The softmax scale. Both arches serve [2^-64, 2^4], bounds included; each arch's
-// isSupportedAttentionScale says why. Every other scale declines under 'scale' with the
-// range in its reason.
+// The softmax scale. Both arches serve [2^-64, 2^4], bounds included; the shared
+// isSupportedScale (AttentionDenseNative.cpp) says why. Every other scale declines under
+// 'scale' with the range in its reason.
 // =============================================================================
 
 TEST_P(TestAttentionDenseMatch, ServesOnlyTheSupportedScaleRange)

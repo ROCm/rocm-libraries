@@ -180,10 +180,6 @@ struct AttentionDenseArch
     /// Whether kernelMatches compares the candidate's num_query_heads/num_kv_heads with the
     /// graph's: true where the catalog lists each head configuration as its own entry.
     bool matchesHeadCounts = false;
-    /// The softmax scales the kernel computes correctly, and the decline and restore text
-    /// for any other.
-    bool (*isSupportedScale)(float scale) = nullptr;
-    std::string_view unsupportedScaleReason;
     /// Whether (blockM, blockN) is a tile the kernel is built with at headSize. Total over
     /// every int64 triple.
     bool (*isSupportedTile)(int64_t headSize, int64_t blockM, int64_t blockN) = nullptr;
