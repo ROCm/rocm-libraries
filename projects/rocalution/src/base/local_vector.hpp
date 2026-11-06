@@ -605,8 +605,8 @@ namespace rocalution
       * stores that absolute value in \p value. Ties resolve to the smallest index, and an empty
       * vector returns -1 with \p value 0. In the case of complex types, the absolute value is
       * the modulus |z|, and not |re| + |im| as in BLAS icamax, and \p value has a zero
-      * imaginary part. Components with a NaN modulus are skipped, so a complex vector without
-      * a component of positive modulus returns 0 with \p value 0.
+      * imaginary part. Components with a NaN modulus are skipped. A nonempty complex vector
+      * without a component of positive modulus returns 0 with \p value 0.
       *
       * \par Example
       * \code{.cpp}
