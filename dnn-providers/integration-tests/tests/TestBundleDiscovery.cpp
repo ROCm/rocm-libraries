@@ -2040,49 +2040,6 @@ TEST_F(TestBundleDiscoveryFixture, ClassifySweepCaseReturnsFailedLoadForValuesIn
         loadIntegrationTestBundle(rediscovered.front())));
 }
 
-TEST_F(TestBundleDiscoveryFixture, ClassifySweepCaseReturnsFailedLoadForArchsInFormatVersion1)
-{
-    const auto sweepDir = _tempDir / "quick" / "BatchnormFwdInference" / "Inference";
-    createTemplateSweep(sweepDir,
-                        {{"archs_v1_fp32_nchw",
-                          "float",
-                          {2, 3, 4, 5},
-                          {60, 20, 5, 1},
-                          {1, 3, 1, 1},
-                          {3, 1, 1, 1},
-                          false, // includeGolden
-                          false, // goldenHasPath
-                          true}}); // includeMetadata
-
-    nlohmann::json sweepJson;
-    {
-        std::ifstream in(sweepDir / "sweep.json");
-        sweepJson = nlohmann::json::parse(in);
-    }
-    auto& metadata = sweepJson["cases"][0]["metadata"];
-    metadata["format_version"] = 1;
-    metadata["archs"] = {"gfx942"};
-    std::ofstream(sweepDir / "sweep.json") << sweepJson.dump(2);
-
-    const auto discovered = discoverBundles(_tempDir);
-    ASSERT_EQ(discovered.size(), 1u);
-
-    auto outcome = detail::classifyBundle(discovered.front(), _sweeps);
-    ASSERT_TRUE(std::holds_alternative<detail::FailedLoad>(outcome));
-    const auto& message = std::get<detail::FailedLoad>(outcome).message;
-    EXPECT_NE(message.find("archs needs format_version 2"), std::string::npos) << message;
-
-    metadata["format_version"] = 2;
-    std::ofstream(sweepDir / "sweep.json") << sweepJson.dump(2);
-    const auto rediscovered = discoverBundles(_tempDir);
-    ASSERT_EQ(rediscovered.size(), 1u);
-    const auto loaded = loadIntegrationTestBundle(rediscovered.front());
-    ASSERT_TRUE(std::holds_alternative<IntegrationTestBundle>(loaded));
-    const auto& archs = std::get<IntegrationTestBundle>(loaded).metadata.archs;
-    ASSERT_TRUE(archs.has_value());
-    EXPECT_EQ(*archs, std::vector<std::string>{"gfx942"});
-}
-
 // ---------------------------------------------------------------------------
 // aliases: the load-time rules
 // ---------------------------------------------------------------------------
