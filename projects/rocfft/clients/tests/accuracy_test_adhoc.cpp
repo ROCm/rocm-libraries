@@ -754,6 +754,10 @@ INSTANTIATE_TEST_SUITE_P(adhoc_64_bit_idx_twiddle_large_slow,
 // Batches are the smallest that push that launch past 2^32 - 1 work items.
 const auto adhoc_stockham_grid_y_split_slow_tokens = {
     // clang-format off
+    // 1D: splits the STOCKHAM row kernel on gfx1201
+    "complex_forward_len_64_half_ip_batch_268435456_istride_1_CI_ostride_1_CI_idist_64_odist_64_ioffset_0_0_ooffset_0_0", // ~64 GiB VRAM
+    // 2D small: splits 2D_SINGLE on gfx1201
+    "complex_forward_len_4_4_half_ip_batch_536870912_istride_4_1_CI_ostride_4_1_CI_idist_16_odist_16_ioffset_0_0_ooffset_0_0", // ~32 GiB VRAM
     // reported case (ROCM-32021); splits SBRC_TRANSPOSE_XY_Z on gfx1201
     "complex_forward_len_512_512_512_single_ip_batch_128_istride_262144_512_1_CI_ostride_262144_512_1_CI_idist_134217728_odist_134217728_ioffset_0_0_ooffset_0_0", // ~256 GiB VRAM
     "complex_inverse_len_512_512_512_single_ip_batch_128_istride_262144_512_1_CI_ostride_262144_512_1_CI_idist_134217728_odist_134217728_ioffset_0_0_ooffset_0_0", // ~256 GiB VRAM
@@ -783,8 +787,9 @@ const auto adhoc_stockham_grid_y_split_slow_tokens = {
     // 3D_TRTRTR and 3D real TR pairs: split SBRC_TRANSPOSE_Z_XY on gfx1201
     "complex_forward_len_64_56_65_half_ip_batch_66577_istride_3640_65_1_CI_ostride_3640_65_1_CI_idist_232960_odist_232960_ioffset_0_0_ooffset_0_0", // ~117 GiB VRAM
     "real_forward_len_64_56_65_half_ip_batch_66577_istride_3696_66_1_R_ostride_1848_33_1_HI_idist_236544_odist_118272_ioffset_0_0_ooffset_0_0", // ~147 GiB VRAM
-    // 3D_PP and REAL_3D_PP: split the partial-pass SBCC kernel on gfx1201
+    // 3D_PP: splits the partial-pass STOCKHAM and SBCC kernels on gfx1201
     "complex_forward_len_32_32_64_single_ip_batch_262144_istride_2048_64_1_CI_ostride_2048_64_1_CI_idist_65536_odist_65536_ioffset_0_0_ooffset_0_0", // ~256 GiB VRAM
+    // REAL_3D_PP: splits the partial-pass SBCC kernel on gfx1201
     "real_forward_len_84_84_72_single_ip_batch_64074_istride_6216_74_1_R_ostride_3108_37_1_HI_idist_522144_odist_261072_ioffset_0_0_ooffset_0_0", // ~249 GiB VRAM
     // clang-format on
 };
