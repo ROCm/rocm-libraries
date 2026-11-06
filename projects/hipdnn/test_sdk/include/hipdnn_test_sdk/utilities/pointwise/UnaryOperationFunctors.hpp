@@ -13,6 +13,9 @@
 namespace hipdnn_test_sdk::utilities::pointwise
 {
 
+// Defined here because M_PI is not portable across compilers.
+inline constexpr double PI = 3.14159265;
+
 // Unary operations with explicit ComputeType and OutputType
 // ComputeType: The type used for intermediate calculations
 // OutputType: The type returned from the operation
@@ -141,7 +144,7 @@ struct GeluApproxTanhForward
         auto xCompute = static_cast<ComputeType>(x);
         // GELU_tanh(x) ~= 0.5 * x * (1 + tanh(sqrt(2/π) * (x + 0.044715 * x³)))
         static const ComputeType s_kSqrt2OverPi
-            = sqrt(ComputeType{2} / static_cast<ComputeType>(3.14159265));
+            = sqrt(ComputeType{2} / static_cast<ComputeType>(PI));
         static const auto s_kCoeff = static_cast<ComputeType>(0.044715);
         auto inner = s_kSqrt2OverPi * (xCompute + s_kCoeff * xCompute * xCompute * xCompute);
         auto result = ComputeType{0.5} * xCompute * (ComputeType{1} + tanh(inner));
@@ -321,10 +324,9 @@ struct SoftplusForward
         auto xCompute = static_cast<ComputeType>(x);
         auto scaled = beta * xCompute;
         // Softplus(x) = log1p(exp(beta * x)) / beta. log1p avoids rounding 1 + exp(...) to 1 for
-        // very negative beta * x. Fallback to x when exp would overflow and the result is
-        // indistinguishable from the linear regime.
-        // The threshold of 20 is chosen as a safe value to avoid overflow in the exponential function
-        // (The same value is used in PyTorch's implementation of Softplus)
+        // very negative beta * x. Fall back to x above a threshold of 20, where log1p(exp(s)) / beta
+        // is indistinguishable from x. This also avoids overflow in exp (the same value is used in
+        // PyTorch's Softplus).
         ComputeType result = scaled > ComputeType{20}
                                  ? xCompute
                                  : hipdnn_test_sdk::detail::safeConvert<ComputeType>(

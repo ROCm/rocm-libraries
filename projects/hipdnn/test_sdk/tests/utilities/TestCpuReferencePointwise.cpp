@@ -3587,6 +3587,36 @@ TYPED_TEST(CpuReferencePointwiseNaNFixture, ComparisonsWithNaNFollowIeeeSemantic
     EXPECT_TRUE(compare(PointwiseMode::CMP_NEQ));
     EXPECT_FALSE(compare(PointwiseMode::CMP_LT));
     EXPECT_FALSE(compare(PointwiseMode::CMP_GE));
+    EXPECT_FALSE(compare(PointwiseMode::CMP_LE));
+    EXPECT_FALSE(compare(PointwiseMode::CMP_GT));
+}
+
+TYPED_TEST(CpuReferencePointwiseNaNFixture, ComparisonsWithInfinityFollowIeeeSemantics)
+{
+    Tensor<TypeParam> input1({1, 1, 1, 1});
+    Tensor<TypeParam> input2({1, 1, 1, 1});
+    Tensor<bool> output({1, 1, 1, 1});
+
+    input1.setHostValue(std::numeric_limits<TypeParam>::infinity(), 0, 0, 0, 0);
+    input2.setHostValue(safeTestTypeCast<TypeParam>(TEST_VALUE_2), 0, 0, 0, 0);
+
+    const auto compare = [&](PointwiseMode mode) {
+        CpuReferencePointwiseImpl<bool, TypeParam, TypeParam>::pointwiseCompute(
+            mode, output, input1, input2);
+        return output.getHostValue(0, 0, 0, 0);
+    };
+
+    EXPECT_TRUE(compare(PointwiseMode::CMP_GT));
+    EXPECT_TRUE(compare(PointwiseMode::CMP_GE));
+    EXPECT_TRUE(compare(PointwiseMode::CMP_NEQ));
+    EXPECT_FALSE(compare(PointwiseMode::CMP_EQ));
+    EXPECT_FALSE(compare(PointwiseMode::CMP_LT));
+    EXPECT_FALSE(compare(PointwiseMode::CMP_LE));
+
+    input2.setHostValue(std::numeric_limits<TypeParam>::infinity(), 0, 0, 0, 0);
+    EXPECT_TRUE(compare(PointwiseMode::CMP_EQ));
+    EXPECT_TRUE(compare(PointwiseMode::CMP_LE));
+    EXPECT_FALSE(compare(PointwiseMode::CMP_GT));
 }
 
 // --- Logical operation tests (BOOLEAN in / BOOLEAN out) ---
@@ -3632,6 +3662,34 @@ TEST(TestCpuReferencePointwiseLogical, LogicalNotOperation)
 
     EXPECT_FALSE(output.getHostValue(0, 0, 0, 0));
     EXPECT_TRUE(output.getHostValue(0, 0, 0, 1));
+}
+
+TEST(TestCpuReferencePointwiseLogical, NumericInputsAreTrueWhenNonZero)
+{
+    Tensor<float> input1({1, 1, 1, 3});
+    Tensor<float> input2({1, 1, 1, 3});
+    Tensor<bool> andOutput({1, 1, 1, 3});
+    Tensor<bool> notOutput({1, 1, 1, 3});
+
+    const std::vector<float> values1 = {0.0f, 2.5f, -1.0f};
+    const std::vector<float> values2 = {1.0f, 0.0f, 3.0f};
+    for(int64_t i = 0; i < 3; ++i)
+    {
+        input1.setHostValue(values1[static_cast<size_t>(i)], 0, 0, 0, i);
+        input2.setHostValue(values2[static_cast<size_t>(i)], 0, 0, 0, i);
+    }
+
+    CpuReferencePointwiseImpl<bool, float, float>::pointwiseCompute(
+        PointwiseMode::LOGICAL_AND, andOutput, input1, input2);
+    CpuReferencePointwiseImpl<bool, float>::pointwiseCompute(
+        PointwiseMode::LOGICAL_NOT, notOutput, input1);
+
+    EXPECT_FALSE(andOutput.getHostValue(0, 0, 0, 0));
+    EXPECT_FALSE(andOutput.getHostValue(0, 0, 0, 1));
+    EXPECT_TRUE(andOutput.getHostValue(0, 0, 0, 2));
+    EXPECT_TRUE(notOutput.getHostValue(0, 0, 0, 0));
+    EXPECT_FALSE(notOutput.getHostValue(0, 0, 0, 1));
+    EXPECT_FALSE(notOutput.getHostValue(0, 0, 0, 2));
 }
 
 // --- GEN_INDEX error cases ---

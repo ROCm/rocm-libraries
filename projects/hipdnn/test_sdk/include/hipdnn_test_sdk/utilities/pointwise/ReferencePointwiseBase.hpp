@@ -74,7 +74,6 @@ public:
                                                                               softplusBeta);
     }
 
-    template <typename ComputeType = double>
     static void pointwiseCompute(hipdnn_flatbuffers_sdk::data_objects::PointwiseMode operation,
                                  hipdnn_data_sdk::utilities::TensorBase<OutputType>& output,
                                  const int64_t axis)
