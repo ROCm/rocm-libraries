@@ -459,7 +459,27 @@ def test_installed_platform_pytest_parts_keep_the_suite_tier_labels(tmp_path):
     assert labels.get("rocke_tiling_visualization_pytest") == {"comprehensive", "full"}
 
 
-def test_relocated_cmake_consumer_links_lowerer(tmp_path):
+# (exported target, installed header, extern "C" symbol it declares). The
+# library case links only ckc::rocke_library, so it also proves the archive
+# brings ckc::rocke_core and Threads with it.
+_RELOCATED_CONSUMERS = [
+    pytest.param(
+        "rocke_core",
+        "rocke/lower_llvm.h",
+        "rocke_lower_kernel_to_llvm_ex",
+        id="rocke_core",
+    ),
+    pytest.param(
+        "rocke_library",
+        "rocke/instance_conv_implicit_gemm.h",
+        "rocke_conv_implicit_gemm_lower_to_llvm",
+        id="rocke_library",
+    ),
+]
+
+
+@pytest.mark.parametrize(("target", "header", "symbol"), _RELOCATED_CONSUMERS)
+def test_relocated_cmake_consumer_links_lowerer(tmp_path, target, header, symbol):
     """Run against a fresh build supplied by the host validation lane."""
     build = os.environ.get("ROCKE_LINK_TEST_BUILD_DIR")
     if not build:
@@ -468,6 +488,11 @@ def test_relocated_cmake_consumer_links_lowerer(tmp_path):
     subprocess.run(["cmake", "--install", build, "--prefix", str(prefix)], check=True)
     relocated = tmp_path / "relocated"
     prefix.rename(relocated)
+    archives = ("librocke_library.a", "rocke_library.lib")
+    if target == "rocke_library" and not any(
+        any(relocated.glob(f"**/{archive}")) for archive in archives
+    ):
+        pytest.skip("this build installs no rocke_library archive")
     source = tmp_path / "consumer"
     source.mkdir()
     (source / "CMakeLists.txt").write_text(
@@ -478,13 +503,13 @@ def test_relocated_cmake_consumer_links_lowerer(tmp_path):
         '  message(FATAL_ERROR "missing transitive thread dependency")\n'
         "endif()\n"
         "add_executable(consumer main.cpp)\n"
-        "target_link_libraries(consumer PRIVATE ckc::rocke_core)\n"
+        f"target_link_libraries(consumer PRIVATE ckc::{target})\n"
     )
     # Taking the API address forces archive extraction without needing a GPU or
     # a valid kernel. The executable must resolve the detector dependencies.
     (source / "main.cpp").write_text(
-        '#include "rocke/lower_llvm.h"\n'
-        "auto volatile lower = &rocke_lower_kernel_to_llvm_ex;\n"
+        f'#include "{header}"\n'
+        f"auto volatile lower = &{symbol};\n"
         "int main() { return lower == nullptr; }\n"
     )
     output = tmp_path / "consumer-build"
