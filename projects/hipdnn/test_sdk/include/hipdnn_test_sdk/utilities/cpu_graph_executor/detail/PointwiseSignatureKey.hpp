@@ -546,27 +546,6 @@ private:
                                                     OutputDataTypeEnum>>();
     }
 
-    template <hipdnn_flatbuffers_sdk::data_objects::PointwiseMode ModeEnum,
-              hipdnn_flatbuffers_sdk::data_objects::DataType Input0DataTypeEnum,
-              hipdnn_flatbuffers_sdk::data_objects::DataType Input1DataTypeEnum,
-              hipdnn_flatbuffers_sdk::data_objects::DataType ComputeDataTypeEnum>
-    static void addComparisonPlanBuilder(std::unordered_map<PointwiseSignatureKey,
-                                                            std::unique_ptr<IGraphNodePlanBuilder>,
-                                                            PointwiseSignatureKey>& map)
-    {
-        map[PointwiseSignatureKey(ModeEnum,
-                                  Input0DataTypeEnum,
-                                  ComputeDataTypeEnum,
-                                  hipdnn_flatbuffers_sdk::data_objects::DataType::BOOLEAN,
-                                  Input1DataTypeEnum)]
-            = std::make_unique<
-                PointwisePlanBuilder<Input0DataTypeEnum,
-                                     Input1DataTypeEnum,
-                                     Input1DataTypeEnum,
-                                     ComputeDataTypeEnum,
-                                     hipdnn_flatbuffers_sdk::data_objects::DataType::BOOLEAN>>();
-    }
-
     template <hipdnn_flatbuffers_sdk::data_objects::DataType Input0DataTypeEnum,
               hipdnn_flatbuffers_sdk::data_objects::DataType Input1DataTypeEnum,
               hipdnn_flatbuffers_sdk::data_objects::DataType ComputeDataTypeEnum>
@@ -575,30 +554,36 @@ private:
                                                              PointwiseSignatureKey>& map)
     {
         using hipdnn_flatbuffers_sdk::data_objects::PointwiseMode;
-        addComparisonPlanBuilder<PointwiseMode::CMP_GT,
-                                 Input0DataTypeEnum,
-                                 Input1DataTypeEnum,
-                                 ComputeDataTypeEnum>(map);
-        addComparisonPlanBuilder<PointwiseMode::CMP_EQ,
-                                 Input0DataTypeEnum,
-                                 Input1DataTypeEnum,
-                                 ComputeDataTypeEnum>(map);
-        addComparisonPlanBuilder<PointwiseMode::CMP_NEQ,
-                                 Input0DataTypeEnum,
-                                 Input1DataTypeEnum,
-                                 ComputeDataTypeEnum>(map);
-        addComparisonPlanBuilder<PointwiseMode::CMP_GE,
-                                 Input0DataTypeEnum,
-                                 Input1DataTypeEnum,
-                                 ComputeDataTypeEnum>(map);
-        addComparisonPlanBuilder<PointwiseMode::CMP_LT,
-                                 Input0DataTypeEnum,
-                                 Input1DataTypeEnum,
-                                 ComputeDataTypeEnum>(map);
-        addComparisonPlanBuilder<PointwiseMode::CMP_LE,
-                                 Input0DataTypeEnum,
-                                 Input1DataTypeEnum,
-                                 ComputeDataTypeEnum>(map);
+        addBinaryPlanBuilder<PointwiseMode::CMP_GT,
+                             Input0DataTypeEnum,
+                             Input1DataTypeEnum,
+                             ComputeDataTypeEnum,
+                             hipdnn_flatbuffers_sdk::data_objects::DataType::BOOLEAN>(map);
+        addBinaryPlanBuilder<PointwiseMode::CMP_EQ,
+                             Input0DataTypeEnum,
+                             Input1DataTypeEnum,
+                             ComputeDataTypeEnum,
+                             hipdnn_flatbuffers_sdk::data_objects::DataType::BOOLEAN>(map);
+        addBinaryPlanBuilder<PointwiseMode::CMP_NEQ,
+                             Input0DataTypeEnum,
+                             Input1DataTypeEnum,
+                             ComputeDataTypeEnum,
+                             hipdnn_flatbuffers_sdk::data_objects::DataType::BOOLEAN>(map);
+        addBinaryPlanBuilder<PointwiseMode::CMP_GE,
+                             Input0DataTypeEnum,
+                             Input1DataTypeEnum,
+                             ComputeDataTypeEnum,
+                             hipdnn_flatbuffers_sdk::data_objects::DataType::BOOLEAN>(map);
+        addBinaryPlanBuilder<PointwiseMode::CMP_LT,
+                             Input0DataTypeEnum,
+                             Input1DataTypeEnum,
+                             ComputeDataTypeEnum,
+                             hipdnn_flatbuffers_sdk::data_objects::DataType::BOOLEAN>(map);
+        addBinaryPlanBuilder<PointwiseMode::CMP_LE,
+                             Input0DataTypeEnum,
+                             Input1DataTypeEnum,
+                             ComputeDataTypeEnum,
+                             hipdnn_flatbuffers_sdk::data_objects::DataType::BOOLEAN>(map);
     }
 };
 

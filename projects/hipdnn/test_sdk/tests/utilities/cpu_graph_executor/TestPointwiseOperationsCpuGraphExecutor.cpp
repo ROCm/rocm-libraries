@@ -471,6 +471,39 @@ TYPED_TEST(PointwiseOperationsCpuGraphExecutor, ReluBackwardUpperBoundOnlyAboveB
     PointwiseTestHelper::runBinaryTest<TypeParam>(params);
 }
 
+namespace
+{
+// Hands out sequential uids for the tensors of a hand-built composed graph.
+struct ComposedGraphTensorFactory
+{
+    int64_t uid = 1;
+
+    std::shared_ptr<hipdnn_frontend::graph::TensorAttributes>
+        makeInput(const std::string& name, const std::vector<int64_t>& dims)
+    {
+        auto attributes = hipdnn_frontend::graph::makeTensorAttributes(
+            name,
+            hipdnn_frontend::DataType::FLOAT,
+            dims,
+            generateStrides(dims, TensorLayout::NCHW.strideOrder));
+        attributes.set_uid(uid++);
+        return std::make_shared<hipdnn_frontend::graph::TensorAttributes>(std::move(attributes));
+    }
+
+    void configureOutput(const std::shared_ptr<hipdnn_frontend::graph::TensorAttributes>& tensor,
+                         hipdnn_frontend::DataType dataType,
+                         const std::vector<int64_t>& dims)
+    {
+        if(!tensor->has_uid())
+        {
+            tensor->set_uid(uid++);
+        }
+        tensor->set_data_type(dataType).set_dim(dims).set_stride(
+            generateStrides(dims, TensorLayout::NCHW.strideOrder));
+    }
+};
+} // namespace
+
 TEST(TestPointwiseOperationsCpuGraphExecutor, PreluForwardBackwardComposedGraph)
 {
     const std::vector<int64_t> tensorDims = {1, 2, 2, 2};
@@ -491,75 +524,55 @@ TEST(TestPointwiseOperationsCpuGraphExecutor, PreluForwardBackwardComposedGraph)
         .set_compute_data_type(hipdnn_frontend::DataType::FLOAT)
         .set_intermediate_data_type(hipdnn_frontend::DataType::FLOAT);
 
-    int64_t uid = 1;
-    const auto makeInput = [&](const std::string& name, const std::vector<int64_t>& dims) {
-        auto attributes = hipdnn_frontend::graph::makeTensorAttributes(
-            name,
-            hipdnn_frontend::DataType::FLOAT,
-            dims,
-            generateStrides(dims, TensorLayout::NCHW.strideOrder));
-        attributes.set_uid(uid++);
-        return std::make_shared<hipdnn_frontend::graph::TensorAttributes>(std::move(attributes));
-    };
-    const auto configureOutput
-        = [&](const std::shared_ptr<hipdnn_frontend::graph::TensorAttributes>& tensor,
-              hipdnn_frontend::DataType dataType,
-              const std::vector<int64_t>& dims) {
-              if(!tensor->has_uid())
-              {
-                  tensor->set_uid(uid++);
-              }
-              tensor->set_data_type(dataType).set_dim(dims).set_stride(
-                  generateStrides(dims, TensorLayout::NCHW.strideOrder));
-          };
+    ComposedGraphTensorFactory tensors;
 
-    auto dyTensor = makeInput("dy", tensorDims);
-    auto xTensor = makeInput("x", tensorDims);
-    auto alphaTensor = makeInput("alpha", alphaDims);
-    auto zeroTensor = makeInput("zero", scalarDims);
+    auto dyTensor = tensors.makeInput("dy", tensorDims);
+    auto xTensor = tensors.makeInput("x", tensorDims);
+    auto alphaTensor = tensors.makeInput("alpha", alphaDims);
+    auto zeroTensor = tensors.makeInput("zero", scalarDims);
 
     hipdnn_frontend::graph::PointwiseAttributes compareAttrs;
     compareAttrs.set_name("positive_mask").set_mode(hipdnn_frontend::PointwiseMode::CMP_GT);
     auto positiveMask = graph->pointwise(xTensor, zeroTensor, compareAttrs);
-    configureOutput(positiveMask, hipdnn_frontend::DataType::BOOLEAN, tensorDims);
+    tensors.configureOutput(positiveMask, hipdnn_frontend::DataType::BOOLEAN, tensorDims);
 
     hipdnn_frontend::graph::PointwiseAttributes multiplyXAlphaAttrs;
     multiplyXAlphaAttrs.set_name("x_times_alpha").set_mode(hipdnn_frontend::PointwiseMode::MUL);
     auto xTimesAlpha = graph->pointwise(xTensor, alphaTensor, multiplyXAlphaAttrs);
-    configureOutput(xTimesAlpha, hipdnn_frontend::DataType::FLOAT, tensorDims);
+    tensors.configureOutput(xTimesAlpha, hipdnn_frontend::DataType::FLOAT, tensorDims);
 
     hipdnn_frontend::graph::PointwiseAttributes ySelectAttrs;
     ySelectAttrs.set_name("y_select").set_mode(hipdnn_frontend::PointwiseMode::BINARY_SELECT);
     auto yTensor = graph->pointwise(xTensor, xTimesAlpha, positiveMask, ySelectAttrs);
-    configureOutput(yTensor, hipdnn_frontend::DataType::FLOAT, tensorDims);
+    tensors.configureOutput(yTensor, hipdnn_frontend::DataType::FLOAT, tensorDims);
     yTensor->set_output(true);
 
     hipdnn_frontend::graph::PointwiseAttributes multiplyAlphaAttrs;
     multiplyAlphaAttrs.set_name("dy_times_alpha").set_mode(hipdnn_frontend::PointwiseMode::MUL);
     auto dyTimesAlpha = graph->pointwise(dyTensor, alphaTensor, multiplyAlphaAttrs);
-    configureOutput(dyTimesAlpha, hipdnn_frontend::DataType::FLOAT, tensorDims);
+    tensors.configureOutput(dyTimesAlpha, hipdnn_frontend::DataType::FLOAT, tensorDims);
 
     hipdnn_frontend::graph::PointwiseAttributes dxSelectAttrs;
     dxSelectAttrs.set_name("dx_select").set_mode(hipdnn_frontend::PointwiseMode::BINARY_SELECT);
     auto dxTensor = graph->pointwise(dyTensor, dyTimesAlpha, positiveMask, dxSelectAttrs);
-    configureOutput(dxTensor, hipdnn_frontend::DataType::FLOAT, tensorDims);
+    tensors.configureOutput(dxTensor, hipdnn_frontend::DataType::FLOAT, tensorDims);
     dxTensor->set_output(true);
 
     hipdnn_frontend::graph::PointwiseAttributes multiplyXAttrs;
     multiplyXAttrs.set_name("dy_times_x").set_mode(hipdnn_frontend::PointwiseMode::MUL);
     auto dyTimesX = graph->pointwise(dyTensor, xTensor, multiplyXAttrs);
-    configureOutput(dyTimesX, hipdnn_frontend::DataType::FLOAT, tensorDims);
+    tensors.configureOutput(dyTimesX, hipdnn_frontend::DataType::FLOAT, tensorDims);
 
     hipdnn_frontend::graph::PointwiseAttributes dalphaSelectAttrs;
     dalphaSelectAttrs.set_name("dalpha_select")
         .set_mode(hipdnn_frontend::PointwiseMode::BINARY_SELECT);
     auto dalphaTerms = graph->pointwise(zeroTensor, dyTimesX, positiveMask, dalphaSelectAttrs);
-    configureOutput(dalphaTerms, hipdnn_frontend::DataType::FLOAT, tensorDims);
+    tensors.configureOutput(dalphaTerms, hipdnn_frontend::DataType::FLOAT, tensorDims);
 
     hipdnn_frontend::graph::ReductionAttributes reduceAttrs;
     reduceAttrs.set_name("dalpha_reduce").set_mode(hipdnn_frontend::ReductionMode::ADD);
     auto dalphaTensor = graph->reduction(dalphaTerms, reduceAttrs);
-    configureOutput(dalphaTensor, hipdnn_frontend::DataType::FLOAT, alphaDims);
+    tensors.configureOutput(dalphaTensor, hipdnn_frontend::DataType::FLOAT, alphaDims);
     dalphaTensor->set_output(true);
 
     constexpr std::array<std::array<float, 4>, 2> X_VALUES = {
@@ -639,7 +652,6 @@ TYPED_TEST(PointwiseOperationsCpuGraphExecutor, UnaryExp)
     PointwiseTestParams params;
     params.mode = hipdnn_frontend::PointwiseMode::EXP;
     params.in0TensorValue = 1.5f;
-    params.testDescription = "Exponential of a positive input";
 
     PointwiseTestHelper::runUnaryTest<TypeParam>(params);
 }
@@ -649,7 +661,6 @@ TYPED_TEST(PointwiseOperationsCpuGraphExecutor, UnarySqrt)
     PointwiseTestParams params;
     params.mode = hipdnn_frontend::PointwiseMode::SQRT;
     params.in0TensorValue = 4.0f;
-    params.testDescription = "Square root of a positive input";
 
     PointwiseTestHelper::runUnaryTest<TypeParam>(params);
 }
@@ -659,7 +670,6 @@ TYPED_TEST(PointwiseOperationsCpuGraphExecutor, UnaryFloorNegativeInput)
     PointwiseTestParams params;
     params.mode = hipdnn_frontend::PointwiseMode::FLOOR;
     params.in0TensorValue = -1.5f;
-    params.testDescription = "Floor of a negative fractional input";
 
     PointwiseTestHelper::runUnaryTest<TypeParam>(params);
 }
@@ -669,7 +679,6 @@ TYPED_TEST(PointwiseOperationsCpuGraphExecutor, UnaryIdentity)
     PointwiseTestParams params;
     params.mode = hipdnn_frontend::PointwiseMode::IDENTITY;
     params.in0TensorValue = 3.0f;
-    params.testDescription = "Identity passes the input through";
 
     PointwiseTestHelper::runUnaryTest<TypeParam>(params);
 }
@@ -680,7 +689,6 @@ TYPED_TEST(PointwiseOperationsCpuGraphExecutor, UnaryEluWithAlpha)
     params.mode = hipdnn_frontend::PointwiseMode::ELU_FWD;
     params.in0TensorValue = -1.0f;
     params.eluAlpha = 0.5f;
-    params.testDescription = "ELU with negative input and custom alpha";
 
     PointwiseTestHelper::runUnaryTest<TypeParam>(params);
 }
@@ -691,7 +699,6 @@ TYPED_TEST(PointwiseOperationsCpuGraphExecutor, UnarySoftplusWithBeta)
     params.mode = hipdnn_frontend::PointwiseMode::SOFTPLUS_FWD;
     params.in0TensorValue = 1.0f;
     params.softplusBeta = 2.0f;
-    params.testDescription = "Softplus with custom beta";
 
     PointwiseTestHelper::runUnaryTest<TypeParam>(params);
 }
@@ -706,7 +713,6 @@ TYPED_TEST(PointwiseOperationsCpuGraphExecutor, BinaryDivide)
     params.mode = hipdnn_frontend::PointwiseMode::DIV;
     params.in0TensorValue = 6.0f;
     params.in1TensorValue = 3.0f;
-    params.testDescription = "DIV with same-shape inputs";
 
     PointwiseTestHelper::runBinaryTest<TypeParam>(params);
 }
@@ -718,7 +724,6 @@ TYPED_TEST(PointwiseOperationsCpuGraphExecutor, BinaryDivideBroadcastChannel)
     params.in0TensorValue = 6.0f;
     params.in1TensorValue = 3.0f;
     params.in1Dims = {1, 3, 1, 1};
-    params.testDescription = "DIV with in1 broadcast over H and W";
 
     PointwiseTestHelper::runBinaryTest<TypeParam>(params);
 }
@@ -729,7 +734,6 @@ TYPED_TEST(PointwiseOperationsCpuGraphExecutor, BinaryAddSquare)
     params.mode = hipdnn_frontend::PointwiseMode::ADD_SQUARE;
     params.in0TensorValue = 1.0f;
     params.in1TensorValue = 2.0f;
-    params.testDescription = "ADD_SQUARE with same-shape inputs";
 
     PointwiseTestHelper::runBinaryTest<TypeParam>(params);
 }
@@ -741,7 +745,6 @@ TYPED_TEST(PointwiseOperationsCpuGraphExecutor, BinaryAddSquareBroadcastScalarIn
     params.in0TensorValue = 1.0f;
     params.in1TensorValue = 2.0f;
     params.in0Dims = {1, 1, 1, 1};
-    params.testDescription = "ADD_SQUARE with in0 broadcast to the output shape";
 
     PointwiseTestHelper::runBinaryTest<TypeParam>(params);
 }
@@ -752,7 +755,6 @@ TYPED_TEST(PointwiseOperationsCpuGraphExecutor, BinaryGeluBackwardPositiveX)
     params.mode = hipdnn_frontend::PointwiseMode::GELU_BWD;
     params.in0TensorValue = 2.0f;
     params.in1TensorValue = 1.0f;
-    params.testDescription = "GELU backward with positive X";
 
     PointwiseTestHelper::runBinaryTest<TypeParam>(params);
 }
@@ -764,7 +766,6 @@ TYPED_TEST(PointwiseOperationsCpuGraphExecutor, BinaryGeluBackwardNegativeXBroad
     params.in0TensorValue = 2.0f;
     params.in1TensorValue = -1.0f;
     params.in1Dims = {1, 3, 1, 1};
-    params.testDescription = "GELU backward with X broadcast over H and W";
 
     PointwiseTestHelper::runBinaryTest<TypeParam>(params);
 }
@@ -775,7 +776,6 @@ TYPED_TEST(PointwiseOperationsCpuGraphExecutor, BinaryGeluApproxTanhBackwardNega
     params.mode = hipdnn_frontend::PointwiseMode::GELU_APPROX_TANH_BWD;
     params.in0TensorValue = 2.0f;
     params.in1TensorValue = -1.0f;
-    params.testDescription = "GELU tanh backward with negative X";
 
     PointwiseTestHelper::runBinaryTest<TypeParam>(params);
 }
@@ -787,7 +787,6 @@ TYPED_TEST(PointwiseOperationsCpuGraphExecutor, BinarySwishBackwardWithBeta)
     params.in0TensorValue = 2.0f;
     params.in1TensorValue = 1.0f;
     params.swishBeta = 0.5f;
-    params.testDescription = "Swish backward with custom beta";
 
     PointwiseTestHelper::runBinaryTest<TypeParam>(params);
 }
@@ -799,7 +798,6 @@ TYPED_TEST(PointwiseOperationsCpuGraphExecutor, BinaryEluBackwardWithAlpha)
     params.in0TensorValue = 2.0f;
     params.in1TensorValue = -1.0f;
     params.eluAlpha = 0.5f;
-    params.testDescription = "ELU backward with custom alpha";
 
     PointwiseTestHelper::runBinaryTest<TypeParam>(params);
 }
@@ -810,7 +808,6 @@ TYPED_TEST(PointwiseOperationsCpuGraphExecutor, BinarySoftplusBackwardNegativeX)
     params.mode = hipdnn_frontend::PointwiseMode::SOFTPLUS_BWD;
     params.in0TensorValue = 2.0f;
     params.in1TensorValue = -1.0f;
-    params.testDescription = "Softplus backward with negative X";
 
     PointwiseTestHelper::runBinaryTest<TypeParam>(params);
 }
@@ -821,7 +818,6 @@ TEST(TestPointwiseOperationsCpuGraphExecutor, DivideMixedTypeFloatInputHalfDivis
     params.mode = hipdnn_frontend::PointwiseMode::DIV;
     params.in0TensorValue = 6.0f;
     params.in1TensorValue = 4.0f;
-    params.testDescription = "DIV with float dividend and half divisor";
 
     PointwiseTestHelper::runBinaryTest<float, half>(params);
 }
@@ -832,7 +828,6 @@ TEST(TestPointwiseOperationsCpuGraphExecutor, SoftplusBackwardMixedTypeFloatDyHa
     params.mode = hipdnn_frontend::PointwiseMode::SOFTPLUS_BWD;
     params.in0TensorValue = 2.0f;
     params.in1TensorValue = 1.0f;
-    params.testDescription = "Softplus backward with float dy and half x";
 
     PointwiseTestHelper::runBinaryTest<float, half>(params);
 }
@@ -848,7 +843,6 @@ TYPED_TEST(PointwiseOperationsCpuGraphExecutor, BinaryCompareEqualEqualInputs)
     params.in0TensorValue = 2.0f;
     params.in1TensorValue = 2.0f;
     params.expectedBoolean = true;
-    params.testDescription = "CMP_EQ with equal inputs";
 
     PointwiseTestHelper::runBinaryTest<TypeParam, TypeParam, bool>(params);
 }
@@ -861,7 +855,6 @@ TYPED_TEST(PointwiseOperationsCpuGraphExecutor, BinaryCompareNotEqualBroadcastCh
     params.in1TensorValue = 2.0f;
     params.in1Dims = {1, 3, 1, 1};
     params.expectedBoolean = true;
-    params.testDescription = "CMP_NEQ with in1 broadcast";
 
     PointwiseTestHelper::runBinaryTest<TypeParam, TypeParam, bool>(params);
 }
@@ -873,7 +866,6 @@ TYPED_TEST(PointwiseOperationsCpuGraphExecutor, BinaryCompareGreaterEqualFirstLa
     params.in0TensorValue = 3.0f;
     params.in1TensorValue = 2.0f;
     params.expectedBoolean = true;
-    params.testDescription = "CMP_GE with a larger first input";
 
     PointwiseTestHelper::runBinaryTest<TypeParam, TypeParam, bool>(params);
 }
@@ -885,7 +877,6 @@ TYPED_TEST(PointwiseOperationsCpuGraphExecutor, BinaryCompareLessFirstSmaller)
     params.in0TensorValue = 1.0f;
     params.in1TensorValue = 2.0f;
     params.expectedBoolean = true;
-    params.testDescription = "CMP_LT with a smaller first input";
 
     PointwiseTestHelper::runBinaryTest<TypeParam, TypeParam, bool>(params);
 }
@@ -897,7 +888,6 @@ TYPED_TEST(PointwiseOperationsCpuGraphExecutor, BinaryCompareLessFirstLarger)
     params.in0TensorValue = 3.0f;
     params.in1TensorValue = 2.0f;
     params.expectedBoolean = false;
-    params.testDescription = "CMP_LT with a larger first input";
 
     PointwiseTestHelper::runBinaryTest<TypeParam, TypeParam, bool>(params);
 }
@@ -913,7 +903,6 @@ TEST(TestPointwiseOperationsCpuGraphExecutor, LogicalAndTrueAndFalse)
     params.in0TensorValue = 1.0f;
     params.in1TensorValue = 0.0f;
     params.expectedBoolean = false;
-    params.testDescription = "true AND false";
 
     PointwiseTestHelper::runBinaryTest<bool, bool, bool>(params);
 }
@@ -925,7 +914,6 @@ TEST(TestPointwiseOperationsCpuGraphExecutor, LogicalOrFalseOrTrue)
     params.in0TensorValue = 0.0f;
     params.in1TensorValue = 1.0f;
     params.expectedBoolean = true;
-    params.testDescription = "false OR true";
 
     PointwiseTestHelper::runBinaryTest<bool, bool, bool>(params);
 }
@@ -936,7 +924,6 @@ TEST(TestPointwiseOperationsCpuGraphExecutor, LogicalNotTrue)
     params.mode = hipdnn_frontend::PointwiseMode::LOGICAL_NOT;
     params.in0TensorValue = 1.0f;
     params.expectedBoolean = false;
-    params.testDescription = "NOT true";
 
     PointwiseTestHelper::runUnaryTest<bool>(params);
 }
@@ -953,7 +940,6 @@ TYPED_TEST(PointwiseOperationsCpuGraphExecutor, GenIndexChannelAxis)
     params.axis = 1;
     params.in0Dims = {2, 3, 2, 2};
     params.outputDims = {2, 3, 2, 2};
-    params.testDescription = "Each element holds its channel index";
 
     PointwiseTestHelper::runUnaryTest<TypeParam, int32_t>(params);
 }
@@ -966,7 +952,6 @@ TYPED_TEST(PointwiseOperationsCpuGraphExecutor, GenIndexLastAxis)
     params.axis = 3;
     params.in0Dims = {2, 3, 2, 4};
     params.outputDims = {2, 3, 2, 4};
-    params.testDescription = "Each element holds its width index";
 
     PointwiseTestHelper::runUnaryTest<TypeParam, int32_t>(params);
 }
@@ -986,63 +971,43 @@ TEST(TestPointwiseOperationsCpuGraphExecutor, ExpReciprocalDivideComposedGraph)
         .set_compute_data_type(hipdnn_frontend::DataType::FLOAT)
         .set_intermediate_data_type(hipdnn_frontend::DataType::FLOAT);
 
-    int64_t uid = 1;
-    const auto makeInput = [&](const std::string& name, const std::vector<int64_t>& dims) {
-        auto attributes = hipdnn_frontend::graph::makeTensorAttributes(
-            name,
-            hipdnn_frontend::DataType::FLOAT,
-            dims,
-            generateStrides(dims, TensorLayout::NCHW.strideOrder));
-        attributes.set_uid(uid++);
-        return std::make_shared<hipdnn_frontend::graph::TensorAttributes>(std::move(attributes));
-    };
-    const auto configureOutput
-        = [&](const std::shared_ptr<hipdnn_frontend::graph::TensorAttributes>& tensor,
-              hipdnn_frontend::DataType dataType,
-              const std::vector<int64_t>& dims) {
-              if(!tensor->has_uid())
-              {
-                  tensor->set_uid(uid++);
-              }
-              tensor->set_data_type(dataType).set_dim(dims).set_stride(
-                  generateStrides(dims, TensorLayout::NCHW.strideOrder));
-          };
+    ComposedGraphTensorFactory tensors;
 
-    auto xTensor = makeInput("x", tensorDims);
-    auto zeroTensor = makeInput("zero", scalarDims);
+    auto xTensor = tensors.makeInput("x", tensorDims);
+    auto zeroTensor = tensors.makeInput("zero", scalarDims);
 
     hipdnn_frontend::graph::PointwiseAttributes expAttrs;
     expAttrs.set_name("exp").set_mode(hipdnn_frontend::PointwiseMode::EXP);
     auto expTensor = graph->pointwise(xTensor, expAttrs);
-    configureOutput(expTensor, hipdnn_frontend::DataType::FLOAT, tensorDims);
+    tensors.configureOutput(expTensor, hipdnn_frontend::DataType::FLOAT, tensorDims);
 
     hipdnn_frontend::graph::PointwiseAttributes reciprocalAttrs;
     reciprocalAttrs.set_name("reciprocal").set_mode(hipdnn_frontend::PointwiseMode::RECIPROCAL);
     auto reciprocalTensor = graph->pointwise(expTensor, reciprocalAttrs);
-    configureOutput(reciprocalTensor, hipdnn_frontend::DataType::FLOAT, tensorDims);
+    tensors.configureOutput(reciprocalTensor, hipdnn_frontend::DataType::FLOAT, tensorDims);
 
     // exp(-x) / exp(x) = exp(-2x)
     hipdnn_frontend::graph::PointwiseAttributes divideAttrs;
     divideAttrs.set_name("divide").set_mode(hipdnn_frontend::PointwiseMode::DIV);
     auto quotientTensor = graph->pointwise(reciprocalTensor, expTensor, divideAttrs);
-    configureOutput(quotientTensor, hipdnn_frontend::DataType::FLOAT, tensorDims);
+    tensors.configureOutput(quotientTensor, hipdnn_frontend::DataType::FLOAT, tensorDims);
 
     hipdnn_frontend::graph::PointwiseAttributes compareAttrs;
     compareAttrs.set_name("positive").set_mode(hipdnn_frontend::PointwiseMode::CMP_GT);
     auto positiveMask = graph->pointwise(xTensor, zeroTensor, compareAttrs);
-    configureOutput(positiveMask, hipdnn_frontend::DataType::BOOLEAN, tensorDims);
+    tensors.configureOutput(positiveMask, hipdnn_frontend::DataType::BOOLEAN, tensorDims);
 
     hipdnn_frontend::graph::PointwiseAttributes notAttrs;
     notAttrs.set_name("non_positive").set_mode(hipdnn_frontend::PointwiseMode::LOGICAL_NOT);
     auto nonPositiveTensor = graph->pointwise(positiveMask, notAttrs);
-    configureOutput(nonPositiveTensor, hipdnn_frontend::DataType::BOOLEAN, tensorDims);
+    tensors.configureOutput(nonPositiveTensor, hipdnn_frontend::DataType::BOOLEAN, tensorDims);
 
     // exp(-2x) where x <= 0, exp(x) otherwise
     hipdnn_frontend::graph::PointwiseAttributes selectAttrs;
     selectAttrs.set_name("select").set_mode(hipdnn_frontend::PointwiseMode::BINARY_SELECT);
     auto selectedTensor
         = graph->pointwise(quotientTensor, expTensor, nonPositiveTensor, selectAttrs);
-    configureOutput(selectedTensor, hipdnn_frontend::DataType::FLOAT, tensorDims);
+    tensors.configureOutput(selectedTensor, hipdnn_frontend::DataType::FLOAT, tensorDims);
     selectedTensor->set_output(true);
 
     constexpr std::array<float, 8> X_VALUES = {-1.0f, -0.5f, 0.0f, 0.25f, 0.5f, 1.0f, 1.5f, -2.0f};

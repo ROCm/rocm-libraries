@@ -69,6 +69,13 @@ struct PointwiseParams
     std::optional<float> eluAlpha;
     std::optional<float> softplusBeta;
     std::optional<int64_t> axis;
+
+    bool hasModeParameters() const
+    {
+        return reluLowerClip.has_value() || reluUpperClip.has_value()
+               || reluLowerClipSlope.has_value() || swishBeta.has_value() || eluAlpha.has_value()
+               || softplusBeta.has_value();
+    }
 };
 
 template <typename Input0Type, typename Input1Type, typename Input2Type, typename OutputType>
@@ -87,9 +94,7 @@ public:
 
     void execute(const std::unordered_map<int64_t, void*>& variantPack) override
     {
-        if(_params.reluLowerClip.has_value() || _params.reluUpperClip.has_value()
-           || _params.reluLowerClipSlope.has_value() || _params.swishBeta.has_value()
-           || _params.eluAlpha.has_value() || _params.softplusBeta.has_value())
+        if(_params.hasModeParameters())
         {
             executeParameterized(variantPack);
         }
@@ -180,13 +185,12 @@ private:
                 _params.mode,
                 *shallowOut0Tensor,
                 *shallowIn0Tensor,
-                _params.reluLowerClip.has_value() ? _params.reluLowerClip.value() : 0.0f,
-                _params.reluUpperClip.has_value() ? _params.reluUpperClip.value()
-                                                  : std::numeric_limits<float>::max(),
-                _params.reluLowerClipSlope.has_value() ? _params.reluLowerClipSlope.value() : 0.0f,
-                _params.swishBeta.has_value() ? _params.swishBeta.value() : 1.0f,
-                _params.eluAlpha.has_value() ? _params.eluAlpha.value() : 1.0f,
-                _params.softplusBeta.has_value() ? _params.softplusBeta.value() : 1.0f);
+                _params.reluLowerClip.value_or(0.0f),
+                _params.reluUpperClip.value_or(std::numeric_limits<float>::max()),
+                _params.reluLowerClipSlope.value_or(0.0f),
+                _params.swishBeta.value_or(1.0f),
+                _params.eluAlpha.value_or(1.0f),
+                _params.softplusBeta.value_or(1.0f));
         }
         else if(hipdnn_flatbuffers_sdk::utilities::isBinaryPointwiseMode(_params.mode))
         {
@@ -199,19 +203,16 @@ private:
                 _params.in1Tensor.value(), variantPack.at(_params.in1Tensor.value().uid));
 
             utilities::CpuReferencePointwiseImpl<OutputType, Input0Type, Input1Type>::
-                pointwiseCompute(
-                    _params.mode,
-                    *shallowOut0Tensor,
-                    *shallowIn0Tensor,
-                    *shallowIn1Tensor,
-                    _params.reluLowerClip.has_value() ? _params.reluLowerClip.value() : 0.0f,
-                    _params.reluUpperClip.has_value() ? _params.reluUpperClip.value()
-                                                      : std::numeric_limits<float>::max(),
-                    _params.reluLowerClipSlope.has_value() ? _params.reluLowerClipSlope.value()
-                                                           : 0.0f,
-                    _params.swishBeta.has_value() ? _params.swishBeta.value() : 1.0f,
-                    _params.eluAlpha.has_value() ? _params.eluAlpha.value() : 1.0f,
-                    _params.softplusBeta.has_value() ? _params.softplusBeta.value() : 1.0f);
+                pointwiseCompute(_params.mode,
+                                 *shallowOut0Tensor,
+                                 *shallowIn0Tensor,
+                                 *shallowIn1Tensor,
+                                 _params.reluLowerClip.value_or(0.0f),
+                                 _params.reluUpperClip.value_or(std::numeric_limits<float>::max()),
+                                 _params.reluLowerClipSlope.value_or(0.0f),
+                                 _params.swishBeta.value_or(1.0f),
+                                 _params.eluAlpha.value_or(1.0f),
+                                 _params.softplusBeta.value_or(1.0f));
         }
         else
         {
@@ -304,6 +305,16 @@ public:
             CHECK_OPTIONAL_TENSOR_EXISTS(tensorMap, nodeAttributes->in_2_tensor_uid());
             CHECK_OPTIONAL_TENSOR_TYPE(
                 tensorMap, nodeAttributes->in_2_tensor_uid(), Input2DataTypeEnum);
+        }
+
+        if(mode == hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::GEN_INDEX)
+        {
+            const auto axis = nodeAttributes->axis_tensor_uid().value();
+            const auto* dims = tensorMap.at(nodeAttributes->out_0_tensor_uid())->dims();
+            if(axis < 0 || dims == nullptr || static_cast<size_t>(axis) >= dims->size())
+            {
+                return false;
+            }
         }
 
         CHECK_NO_RAGGED_TENSORS(tensorMap);

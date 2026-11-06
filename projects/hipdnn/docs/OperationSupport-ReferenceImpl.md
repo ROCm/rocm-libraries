@@ -49,8 +49,8 @@ The following table lists all operations currently supported in the CPU Referenc
 | SDPA Backward | FP16, BFP16, FP32 | Op-defined | CPU Reference | See [SDPA Restrictions](#sdpa-restrictions) |
 | BlockScale Quantize | FP32, FP16, BFP16 in; FP8, FP6, FP4 out | Op-defined | CPU Reference | See [Block-Scale Quantization](#block-scale-quantization) |
 | BlockScale Dequantize | FP8, FP6, FP4 in; FP32, FP16, BFP16 out | Op-defined | CPU Reference | See [Block-Scale Quantization](#block-scale-quantization) |
-| Pointwise Unary | FP16, BFP16, FP32 | All | CPU Reference |  |
-| Pointwise Binary | FP16, BFP16, FP32 | All | CPU Reference |  |
+| Pointwise Unary | FP16, BFP16, FP32 | All | CPU Reference | `LOGICAL_NOT` is BOOLEAN only; `GEN_INDEX` outputs INT32 |
+| Pointwise Binary | FP16, BFP16, FP32 | All | CPU Reference | `CMP_*` outputs BOOLEAN; `LOGICAL_AND`/`LOGICAL_OR` are BOOLEAN only |
 | Pointwise Ternary | FP16, BFP16, FP32 | All | CPU Reference | BINARY_SELECT with BOOLEAN mask |
 
 ## Implementation Details
@@ -111,12 +111,16 @@ The following table lists all operations currently supported in the CPU Referenc
 
 | Operation Type | Plan Builder | Signature Key | Supported Operations |
 |----------------|-------------|---------------|---------------------|
-| Unary Operations | `PointwisePlanBuilder` | `PointwiseSignatureKey` | RELU_FWD, SIGMOID_FWD, TANH_FWD, ABS, NEG, GELU_FWD, GELU_APPROX_TANH_FWD, SWISH_FWD, IDENTITY, EXP, LOG, SQRT, RSQRT, RECIPROCAL, SIN, TAN, ERF, CEIL, FLOOR, ELU_FWD, SOFTPLUS_FWD, LOGICAL_NOT (BOOLEAN only), GEN_INDEX (FLOAT/HALF/BFLOAT16/INT32 output) |
+| Unary Operations | `PointwisePlanBuilder` | `PointwiseSignatureKey` | RELU_FWD, SIGMOID_FWD, TANH_FWD, ABS, NEG, GELU_FWD, GELU_APPROX_TANH_FWD, SWISH_FWD, IDENTITY, EXP, LOG, SQRT, RSQRT, RECIPROCAL, SIN, TAN, ERF, CEIL, FLOOR, ELU_FWD, SOFTPLUS_FWD, LOGICAL_NOT (BOOLEAN only), GEN_INDEX (INT32 output only) |
 | Binary Operations | `PointwisePlanBuilder` | `PointwiseSignatureKey` | ADD, SUB, MUL, DIV, ADD_SQUARE, MAX, MIN, CMP_EQ, CMP_NEQ, CMP_GT, CMP_GE, CMP_LT, CMP_LE, LOGICAL_AND (BOOLEAN only), LOGICAL_OR (BOOLEAN only), RELU_BWD, SIGMOID_BWD, TANH_BWD, GELU_BWD, GELU_APPROX_TANH_BWD, SWISH_BWD, ELU_BWD, SOFTPLUS_BWD |
 | Ternary Operations | `PointwisePlanBuilder` | `PointwiseSignatureKey` | BINARY_SELECT (BOOLEAN mask) |
 
 `CMP_*` outputs must have their tensor data type explicitly set to `BOOLEAN`; generic
 pointwise output inference otherwise uses the graph's intermediate data type.
+
+`GEN_INDEX` requires `axis_tensor_uid` (a plain axis index) and produces INT32 output. A node
+without an axis is declined by `isApplicable`. cuDNN passes an unset axis to its backend as -1;
+the CPU reference does not follow that and keeps the strict contract.
 
 ## Operation Restrictions
 
@@ -210,8 +214,8 @@ for the verification modes.
 - **FP32**: Single-precision floating point (32-bit)
 - **FP8 (E4M3, E5M2, E4M3_FNUZ, E8M0)**: 8-bit floating point; E8M0 is the exponent-only block scale type
 - **FP6 (E2M3, E3M2), FP4 (E2M1)**: Micro-scaling (MX) narrow floating point types, used by block-scale quantization only
-- **INT32**: Index tensors (resample)
-- **BOOLEAN**: Comparison outputs and `BINARY_SELECT` masks
+- **INT32**: Index tensors (resample) and `GEN_INDEX` outputs
+- **BOOLEAN**: Comparison and logical outputs, and `BINARY_SELECT` masks
 
 ### Layouts
 - **NCHW**: Batch, Channels, Height, Width (2D, channel-first)
