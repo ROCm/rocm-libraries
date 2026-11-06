@@ -42,14 +42,17 @@ ug-flag poll, ATOM's order; 0 = after: a must-lose order control), ``pslot`` (do
 own ug flags right before its MFMAs instead of the round waiting for all its slots: the latency chain overlapped slot
 by slot), ``smap`` (down, 1: a wave's slots of a round contiguous instead of ATOM's wave-strided), ``ug_sop`` /
 ``ug_ra`` (the ug GEMV's ``stage_wqkv`` levers: op_sel-packed scales, LDS read-ahead; bitwise), ``chains`` (down MFMA
-accumulators: 2 = ATOM; TOLERANCE class otherwise: the K-step sum is reassociated), ``mutate`` (test only,
-:data:`MUTANTS`).
+accumulators: 2 = ATOM; TOLERANCE class otherwise: the K-step sum is reassociated), ``rbar`` (route, W15 climb r0:
+1 = ATOM's trailing barrier; 0 = none: route keeps no LDS, so the CTA's other waves go on to the next stage while
+wave 0 finishes the top-k; every wave skips the same barrier, so the CTA's barrier count stays matched), ``mutate``
+(test only, :data:`MUTANTS`).
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import os  # W15 r0 fix (direct_fn's objdump path)
 import sys
 from dataclasses import dataclass, fields
 
@@ -202,6 +205,10 @@ class MoeKnobs:
     smap: int = 0
     ug_sop: int = 0
     ug_ra: int = 0
+    rbar: int = 1
+    direct: int = 0  # W15 r0 fix: bitmask of DIRECT_STAGES (xq 1, route 2, reduce 4, down 8, shm 16): Rust direct
+    direct_lv: int = 0  # W15 r0 fix: the direct compiler's lever set for those stages (0 none, 1 Dm, 2 Db; PORT §5)
+    down_dbg: int = 0  # W15 r0 fix: down-miscompile bisect probes (standalone builds only, build_down_kernel)
     mutate: str = ""
 
     def __post_init__(self):
@@ -215,8 +222,15 @@ class MoeKnobs:
             raise ValueError("sop: 0 | 1")
         if self.pslot not in (0, 1) or self.smap not in (0, 1):
             raise ValueError("pslot / smap: 0 | 1")
-        if self.ug_sop not in (0, 1, 2) or self.ug_ra not in (0, 1):
-            raise ValueError("ug_sop: 0 | 1 | 2, ug_ra: 0 | 1 (stage_wqkv.WqkvKnobs sop / ra of the ug GEMV)")
+        if self.rbar not in (0, 1):
+            raise ValueError("rbar: 0 | 1")
+        if not 0 <= self.direct <= 31:
+            raise ValueError("direct: a bitmask of xq 1 | route 2 | reduce 4 | down 8 | shm 16 (direct_fn.py)")
+        if self.direct_lv not in (0, 1, 2) or not 0 <= self.down_dbg <= 11:
+            raise ValueError("direct_lv: 0 | 1 (Dm) | 2 (Db); down_dbg: 0-11")
+        if self.ug_sop not in (0, 1, 2) or self.ug_ra not in (0, 1, 2, 3, 4):
+            raise ValueError("ug_sop: 0 | 1 | 2, ug_ra: 0 | 1 (stage_wqkv.WqkvKnobs sop / ra of the ug GEMV) | 2 / 4 "
+                             "(W15 r0 fix: B lookahead depth 1 / 2, stage_ug la) | 3 (ra 1 below 12 rows only)")
 
     def spec(self) -> str:
         d = MoeKnobs()
@@ -529,7 +543,8 @@ def build_route_kernel(sh: Shape, knobs: MoeKnobs = MoeKnobs()):
                 at = b.add(b.mul(b.add(c(r * S), t), c(2 * K)), lane)
                 b.buffer_store_cp(b.vec_pack([my_id, tag], I32), r_r, b.mul(at, c(8)), c(0), aux=CM_DEV)
                 b.buffer_store_cp(b.vec_pack([wbits, tag], I32), r_r, b.mul(b.add(at, c(K)), c(8)), c(0), aux=CM_DEV)
-    e.barrier()
+    if knobs.rbar:
+        e.barrier()
     b.ret()
     return b.kernel
 
@@ -569,6 +584,24 @@ def build_down_kernel(sh: Shape, ntasks: int, knobs: MoeKnobs = MoeKnobs()):
             with b.scf_if(b.cmp_lt(u, c(tw))):
                 e.lds_st(b.add(tab, u), e.ld(r_t, u, 1, 0))
         e.barrier()
+    dbg = knobs.down_dbg  # W15 r0 fix (0: the body)
+    if dbg and not _STANDALONE:
+        raise ValueError("down_dbg probes are for standalone (srig) builds")
+
+    def dbg_put(idx, v):
+        """Probe word ``v`` -> output pair ``idx`` of dst0 (``(v, tag)``, the srig compares every pair); task 0's CTA
+        only (every CTA writing the same pairs raced)."""
+        with b.scf_if(b.cmp_eq(tasks[0], c(0))):
+            b.buffer_store_cp(b.vec_pack([b.bitcast(v, I32) if v.type != I32 else v, tag], I32), e.rsrc(p["dst0"]),
+                              b.mul(idx, c(8)), c(0), aux=CM_SYS)  # fmt: skip
+
+    if dbg == 1:  # the route table as the body's LDS reads see it
+        for i in range(-(-sh.tab_words // THREADS)):
+            u = b.add(tid, c(THREADS * i))
+            with b.scf_if(b.cmp_lt(u, c(sh.tab_words))):
+                dbg_put(u, e.lds_i(b.add(tab, u)))
+        b.ret()
+        return b.kernel
     nu = e.lds_i(b.add(tab, c(2 * S * K)))
     sl = b.add(wsl, b.mul(wave, c(WSL_WORDS)))
     slots = knobs.r_max // n if knobs.r_max >= n else 1
@@ -612,6 +645,14 @@ def build_down_kernel(sh: Shape, ntasks: int, knobs: MoeKnobs = MoeKnobs()):
             word = e.ld(r_ws, b.lshr(wsi, c(2)), 1, 0)
             sa = b.land(b.lshr(word, b.mul(b.land(wsi, c(3)), c(8))), c(0xFF))
             ops.append((st, live, lo, hi, sa))
+            if dbg == 9 and i == 0:  # the first step's operands, every wave and lane
+                base9 = b.mul(b.add(b.mul(wave, c(64)), lane), c(16))
+                for q in range(4):
+                    dbg_put(b.add(base9, c(q)), b.vec_extract(lo, q))
+                    dbg_put(b.add(base9, c(4 + q)), b.vec_extract(hi, q))
+                dbg_put(b.add(base9, c(8)), sa)
+                dbg_put(b.add(base9, c(9)), lo_at)
+                dbg_put(b.add(base9, c(10)), wsi)
         return ops
 
     def fp8_mfmas(ops, rows):
@@ -643,6 +684,14 @@ def build_down_kernel(sh: Shape, ntasks: int, knobs: MoeKnobs = MoeKnobs()):
             sa2 = b.select(unit, c(UNIT_SCALE), sa)
             sb2 = b.select(unit, c(UNIT_SCALE), sb)
             acc = b.mfma_scale_mx(av, xv, acc, sa2, sb2, shape="16x16x128", fmt_a="fp8", fmt_b="fp8")
+            if dbg == 8:  # the accumulator after each step, the step's B word 0 and its scales (every wave / lane)
+                base8 = b.mul(b.add(b.mul(b.add(b.mul(c(idx), c(WAVES)), wave), c(64)), lane), c(8))
+                for q in range(4):
+                    dbg_put(b.add(base8, c(q)), b.vec_extract(acc, q))
+                dbg_put(b.add(base8, c(4)), b.vec_extract(xv, 0))
+                dbg_put(b.add(base8, c(5)), sa2)
+                dbg_put(b.add(base8, c(6)), sb2)
+                dbg_put(b.add(base8, c(7)), b.vec_extract(av, 0))
         e.lds_st(b.add(red, b.mul(b.add(b.mul(wave, c(64)), lane), c(4))),
                  b.vec_pack([b.bitcast(b.vec_extract(acc, q), I32) for q in range(4)], I32), 4)  # fmt: skip
 
@@ -679,6 +728,18 @@ def build_down_kernel(sh: Shape, ntasks: int, knobs: MoeKnobs = MoeKnobs()):
                 (r_c, lambda u, t0=t0: b.add(c(t0 * groups), u), nn * groups, sxsl, groups),
             ])  # fmt: skip
             e.barrier()
+            if dbg == 7:  # the LDS rows poll_copy wrote (x words with the row pad, then the codes)
+                xw = nn * (words + W.LDS_PAD)
+                for i7 in range(-(-xw // THREADS)):
+                    u7 = b.add(tid, c(THREADS * i7))
+                    with b.scf_if(b.cmp_lt(u7, c(xw))):
+                        dbg_put(u7, e.lds_i(b.add(sxl, u7)))
+                gw = nn * (groups + W.LDS_PAD)
+                for i7 in range(-(-gw // THREADS)):
+                    u7 = b.add(tid, c(THREADS * i7))
+                    with b.scf_if(b.cmp_lt(u7, c(gw))):
+                        dbg_put(b.add(u7, c(8192)), e.lds_i(b.add(sxsl, u7)))
+                return
             for jt in range(n):
                 fp8_mfmas(shops[jt], nn)
                 e.barrier()
@@ -726,6 +787,10 @@ def build_down_kernel(sh: Shape, ntasks: int, knobs: MoeKnobs = MoeKnobs()):
         if knobs.mutate == "row":
             row = first
         lane_word = e.fresh(b.add(b.mul(row, c(MID_WORDS)), b.mul(j4, c(4))))
+        if dbg == 5:  # the mid rows / word addresses of the first call on wave 0 (per lane)
+            with b.scf_if(b.cmp_eq(wave, c(0))):
+                dbg_put(b.add(c(4096), lane), row)
+                dbg_put(b.add(c(4096 + 64), lane), lane_word)
         bvs = []
         for st in range(STEPS):
             lo = e.ld(r_mid, b.add(lane_word, c(st * 32)), 4, CM_DEV)
@@ -784,11 +849,24 @@ def build_down_kernel(sh: Shape, ntasks: int, knobs: MoeKnobs = MoeKnobs()):
             acc = b.vec_pack([b.fadd(b.vec_extract(acc, q), b.vec_extract(accs[h], q)) for q in range(4)], F32)
         pick = pick_at(b.add(first, col))
         ok = b.land(live, b.cmp_lt(jj, count))
+        if dbg == 10:  # every wave's contrib store per call: the pick, the word address (q 0), ok, first, count
+            dbg6[0] += 1
+            base10 = b.mul(b.add(b.mul(b.add(b.mul(c(dbg6[0] - 1), c(WAVES)), wave), c(64)), lane), c(5))
+            at0 = b.add(contrib, b.add(c(jt * picks * 16), b.add(b.mul(pick, c(16)), b.mul(j4, c(4)))))
+            for q, v in enumerate((pick, at0, b.select(ok, c(1), c(0)), first, count)):
+                dbg_put(b.add(base10, c(q)), v)
+        if dbg == 6:  # each down_mfma call's accumulator lane words before the contrib store (wave 0, call order)
+            dbg6[0] += 1
+            with b.scf_if(b.cmp_eq(wave, c(0))):
+                for q in range(4):
+                    dbg_put(b.add(c(8192 + 256 * (dbg6[0] - 1) + 64 * q), lane), b.vec_extract(acc, q))
         with b.scf_if(ok):
             for q in range(4):
                 r = b.add(b.mul(j4, c(4)), c(q))
                 at = b.add(contrib, b.add(c(jt * picks * 16), b.add(b.mul(pick, c(16)), r)))
                 e.lds_st(at, b.bitcast(b.vec_extract(acc, q), I32))
+                if dbg == 11:  # the value each contrib store writes, at the contrib word's index (cf. probe 3)
+                    dbg_put(b.add(c(jt * picks * 16), b.add(b.mul(pick, c(16)), r)), b.vec_extract(acc, q))
 
     def rounds():
         nr = b.div(b.add(nu, c(per_round - 1)), c(per_round))
@@ -800,6 +878,13 @@ def build_down_kernel(sh: Shape, ntasks: int, knobs: MoeKnobs = MoeKnobs()):
             ucs = [b.smin(u, b.sub(nu, c(1))) for u in us]
             firsts = [slot_first(u) for u in ucs]
             es = [union_expert(u) for u in ucs]
+            if dbg == 2:  # round / slot selection: per (round <= 3, wave, slot) nu, u, first, expert, count
+                with b.scf_if(b.land(b.cmp_eq(lane, c(0)), b.cmp_lt(rnd, c(4)))):
+                    for i in range(slots):
+                        base_i = b.mul(b.add(b.mul(b.add(b.mul(rnd, c(WAVES)), wave), c(slots)), c(i)), c(8))
+                        cnt_i = b.sub(slot_first(b.add(ucs[i], c(1))), firsts[i])
+                        for q, v in enumerate((nu, us[i], ucs[i], firsts[i], es[i], cnt_i)):
+                            dbg_put(b.add(base_i, c(q)), v)
 
             def weights():
                 svs = [scale_block_loads(ex, task) for task in tasks for ex in es]
@@ -890,13 +975,35 @@ def build_down_kernel(sh: Shape, ntasks: int, knobs: MoeKnobs = MoeKnobs()):
                         b.buffer_store_cp(data, e.rsrc(p[f"dst{pp}"]), b.mul(pidx, c(8)), c(0), aux=CM_SYS)
         e.barrier()
 
+    dbg6 = [0]
     if knobs.sh_first:
         down_shared()
+    if dbg in (7, 8, 9):
+        b.ret()
+        return b.kernel
+    if dbg == 4:  # the shared expert's results (sdl) after down_shared
+        e.barrier()
+        for i in range(-(-(n * S * ROWS) // THREADS)):
+            u = b.add(tid, c(THREADS * i))
+            with b.scf_if(b.cmp_lt(u, c(n * S * ROWS))):
+                dbg_put(u, e.lds_i(b.add(sdl, u)))
+        b.ret()
+        return b.kernel
     rounds()
     if not knobs.sh_first:
         e.barrier()
         down_shared()
     e.barrier()
+    if dbg in (5, 6, 10, 11):  # their probes sit where the results would go: no combine
+        b.ret()
+        return b.kernel
+    if dbg == 3:  # the routed contributions (contrib) after every round
+        for i in range(-(-(n * picks * 16) // THREADS)):
+            u = b.add(tid, c(THREADS * i))
+            with b.scf_if(b.cmp_lt(u, c(n * picks * 16))):
+                dbg_put(u, e.lds_i(b.add(contrib, u)))
+        b.ret()
+        return b.kernel
     for t0, nn in token_tiles(S):
         for jt in range(n):
             combine(tasks[jt], jt, t0, nn)
@@ -1077,6 +1184,40 @@ def _lower(kernel, sym, arch="gfx950", flavor=None):
                                  knobs=DeviceFunctionKnobs(lds="arg", inline="always"))  # fmt: skip
 
 
+DIRECT_STAGES = ("xq", "route", "reduce", "down", "shm")  # W15 r0 fix: direct device-function bodies (bits 1 .. 16)
+# PORT-K2-moe 5's booked direct lever sets (srig jobs s1-s5): 0 none, 1 Dm, 2 Db
+DIRECT_LEVER_SETS = (
+    "",
+    "dppmirror,ldsquads,litreuse,litshare,minmax,nofence,selxor,subadd,wgfence,xorcmp,scalesep,dsrebase,loadorder",
+    "dppcombine,dppcombinef,dppmirror,ldspairs,ldsquads,litreuse,litshare,minmax,nopause,selxor,storewait,subadd,"
+    "vmemfirst,wgfence,xorcmp,scalesep,dsrebase,loadorder",
+)
+
+
+def _direct(fn, build, knobs, out, stage):
+    """W15 r0 fix ``direct=1``: ``fn``'s body replaced by the Rust direct compiler's code (``direct_fn``), same symbol /
+    ABI / attributes; ``build()`` makes a fresh KernelDef of the same body. Returns (fn, extra json meta); direct=0:
+    (fn, {}). A refusal raises (a refused candidate is a build failure, never a silent COMGR fallback)."""
+    if not knobs.direct & (1 << DIRECT_STAGES.index(stage)):
+        return fn, {}
+    import dataclasses
+
+    from . import direct_fn as D
+
+    obj = os.environ.get("ROCKE_DFN_OBJDUMP", "/opt/rocm/llvm/bin/llvm-objdump")
+    saved = os.environ.get("ROCKE_DIRECT_LEVERS")
+    os.environ["ROCKE_DIRECT_LEVERS"] = DIRECT_LEVER_SETS[knobs.direct_lv]
+    try:
+        r = D.direct_device_function(build(), fn.symbol, fn.abi, objdump=obj, workdir=os.path.join(out, "_direct"),
+                                     lds_bytes=fn.lds_bytes, datalayout=fn.ir)  # fmt: skip
+    finally:
+        if saved is None:
+            os.environ.pop("ROCKE_DIRECT_LEVERS", None)
+        else:
+            os.environ["ROCKE_DIRECT_LEVERS"] = saved
+    return dataclasses.replace(fn, ir=r["ir"]), {"direct": r["meta"], "code_object": "rust-direct device function"}
+
+
 def _write(fn, out, stem, meta, bitcode=False):
     from ..qwen38_mono.device_function import write_device_function
 
@@ -1107,11 +1248,13 @@ def write_stage_functions(out: str, stage: str, shapes, knobs: MoeKnobs = MoeKno
         for cm in x_cms:
             v = f"c{cm}"
             fn = _lower(build_xq_kernel(cm, knobs), symbol("xq", v), arch, flavor)
-            written.append(_write(fn, out, f"xq_{v}", {**meta0, "variant": v}, bitcode))
+            fn, dm = _direct(fn, lambda: build_xq_kernel(cm, knobs), knobs, out, "xq")  # W15 r0 fix (off: unchanged)
+            written.append(_write(fn, out, f"xq_{v}", {**meta0, "variant": v, **dm}, bitcode))
         return written
     if stage == "shm":
         fn = _lower(build_shm_kernel(knobs), symbol("shm", "t"), arch, flavor)
-        return [_write(fn, out, "shm_t", {**meta0, "variant": "t"}, bitcode)]
+        fn, dm = _direct(fn, lambda: build_shm_kernel(knobs), knobs, out, "shm")  # W15 r0 fix (off: unchanged)
+        return [_write(fn, out, "shm_t", {**meta0, "variant": "t", **dm}, bitcode)]
     seen = set()
     for sh in shapes:
         if stage == "route":
@@ -1122,13 +1265,15 @@ def write_stage_functions(out: str, stage: str, shapes, knobs: MoeKnobs = MoeKno
                 continue
             seen.add(sh_key)
             fn = _lower(build_route_kernel(sh, knobs), symbol("route", vv), arch, flavor)
+            fn, dm = _direct(fn, lambda: build_route_kernel(sh, knobs), knobs, out, "route")  # W15 r0 fix (off: unchanged)
             # route's code does not depend on ug_groups / tok_par: one variant a (S, E, K)
-            written.append(_write(fn, out, f"route_{vv}", {**meta0, "variant": vv}, bitcode))
+            written.append(_write(fn, out, f"route_{vv}", {**meta0, "variant": vv, **dm}, bitcode))
         elif stage == "down":
             for nt in (1, 2):
                 v = sh.variant(f"t{nt}")
                 fn = _lower(build_down_kernel(sh, nt, knobs), symbol("down", v), arch, flavor)
-                written.append(_write(fn, out, f"down_{v}", {**meta0, "variant": v}, bitcode))
+                fn, dm = _direct(fn, lambda: build_down_kernel(sh, nt, knobs), knobs, out, "down")  # W15 r0 fix
+                written.append(_write(fn, out, f"down_{v}", {**meta0, "variant": v, **dm}, bitcode))
         elif stage == "reduce":
             rows = sh.tokens // TP if sh.tok_par else sh.tokens
             v = f"n{rows}"
@@ -1136,7 +1281,8 @@ def write_stage_functions(out: str, stage: str, shapes, knobs: MoeKnobs = MoeKno
                 continue
             seen.add(v)
             fn = _lower(build_reduce_kernel(rows, knobs), symbol("reduce", v), arch, flavor)
-            written.append(_write(fn, out, f"reduce_{v}", {**meta0, "variant": v}, bitcode))
+            fn, dm = _direct(fn, lambda: build_reduce_kernel(rows, knobs), knobs, out, "reduce")  # W15 r0 fix (off: unchanged)
+            written.append(_write(fn, out, f"reduce_{v}", {**meta0, "variant": v, **dm}, bitcode))
         elif stage == "ug":
             from . import stage_ug as U
 
@@ -1144,9 +1290,12 @@ def write_stage_functions(out: str, stage: str, shapes, knobs: MoeKnobs = MoeKno
             if v in seen:
                 continue
             seen.add(v)
-            uk = W.WqkvKnobs(**{k: getattr(knobs, k) for k in ("pause", "w_cpol")}, sop=knobs.ug_sop, ra=knobs.ug_ra,
+            # W15 r0 fix: ug_ra 2 / 4 = lookahead la 1 / 2; 3 = ATOM's ura (ra 1) only below 12 rows (0, 1: as before)
+            ura = 1 if knobs.ug_ra == 1 or (knobs.ug_ra == 3 and sh.tokens < 12) else 0
+            ula = {2: 1, 4: 2}.get(knobs.ug_ra, 0)
+            uk = W.WqkvKnobs(**{k: getattr(knobs, k) for k in ("pause", "w_cpol")}, sop=knobs.ug_sop, ra=ura,
                              **({"mutate": knobs.mutate} if knobs.mutate else {}))  # fmt: skip
-            ker = U.build_ug_kernel(min(sh.tokens, TILE), sh.ug_groups, uk)
+            ker = U.build_ug_kernel(min(sh.tokens, TILE), sh.ug_groups, uk, **({"la": ula} if ula else {}))
             fn = _lower(ker, f"{W.SYMBOL_PREFIX}ug_{v}", arch, flavor)
             written.append(_write(fn, out, f"ug_{v}", {**meta0, "variant": v, "rows": sh.tokens, "groups": sh.ug_groups,
                                                          "abi_v41": [list(a) for a in U.ABI]}, bitcode))  # fmt: skip

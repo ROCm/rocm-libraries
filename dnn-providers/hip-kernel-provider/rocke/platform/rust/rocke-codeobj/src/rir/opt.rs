@@ -3170,6 +3170,10 @@ pub fn kernarg_layout(kernel: &Kernel) -> (Vec<u32>, u32) {
 /// less the kernarg segment pointer's two.
 pub const PRELOAD_SGPRS: u32 = 14;
 
+/// Argument SGPRs of a `devfn` build (s2 .. s65): the code is never launched as a kernel (its descriptor's preload
+/// fields are then not meaningful), only disassembled into a device function.
+pub const DEVFN_PRELOAD_SGPRS: u32 = 64;
+
 /// gfx950 kernarg preload, as LLVM's AMDGPU backend assigns it: the leading
 /// `inreg` parameters, in order, each preloaded into the user SGPRs after
 /// the kernarg segment pointer at its kernarg dword (s[2 + offset / 4]), up
@@ -3181,10 +3185,13 @@ pub fn kernarg_preload(kernel: &Kernel) -> (Vec<(usize, u32)>, u32) {
     let (offsets, _) = kernarg_layout(kernel);
     let mut out = Vec::new();
     let mut end = 0;
+    // Lever `devfn` (W15 climb r0 fix, dsv41_mono/direct_fn.py): the code is wrapped as a DEVICE FUNCTION whose
+    // caller puts every argument in s[2 + dword] itself, so the hardware's 16 user SGPRs do not bound it.
+    let limit = if super::lever("devfn") { DEVFN_PRELOAD_SGPRS } else { PRELOAD_SGPRS };
     for (index, param) in kernel.params.iter().enumerate() {
         let first = offsets[index] / 4;
         let last = first + param.ty.dwords();
-        if !param.inreg || last > PRELOAD_SGPRS {
+        if !param.inreg || last > limit {
             break;
         }
         out.push((index, first));
@@ -3325,6 +3332,9 @@ pub fn optimize_keeping_lds_loads(kernel: &mut Kernel, lds: &mut FxHashMap<Value
 
 fn optimize_with(kernel: &mut Kernel, lds: &mut FxHashMap<ValueId, u32>, mut ws: Workspace) -> Result<Facts, CompileError> {
     super::unroll::unroll_loops(kernel, lds)?;
+    if !super::debug_flag("nopopcount") {
+        super::idioms::popcount(kernel);  // W15 climb r0 fix (rir::idioms)
+    }
     // LDS loads merge once addresses are legalized: equal addresses are then
     // equal values, and stores have extents.
     let keep_lds_loads = std::mem::replace(&mut ws.keep_lds_loads, true);

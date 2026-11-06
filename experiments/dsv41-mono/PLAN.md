@@ -141,3 +141,39 @@ Every W12 agent applies these. Each one was learned the hard way.
     work exists and must be CONTINUED, not redone: rocKE dsv41_mono/{stage_moe.py, stage_attn.py, stage_router.py,
     stage_norm.py, stage_gate.py, seam_common.py, README.md} and the harness hackathon-prep/dsv41/w15/{rig, moe,
     stages, ws}. Read them (and README.md) first, check what is gated, and pick up from there.
+15. 2026-11-05 (user asked whether the hiptensor-support search engine helps). It is already copied into copy-rocm-lib
+    (platform/python/rocke/dispatch/tuning/search/, see qwen38-true-mono/search/INVENTORY.md) and is what the W15 climb
+    must drive directly, not ad-hoc loops:
+    - HillClimb (local.py) = lookback + combination re-sweep of near-neutral moves; Portfolio (DE / TPE / GP-EI under a
+      bandit) for the larger knob surfaces;
+    - halving.py multi-fidelity ladder = decision 12's funnel: rung 0 the in-situ rig (seconds), last rung the served
+      cell; Race / NoiseModel (stats.py) to handle the per-call "compile lottery" noise (nop drifting 1.001-1.008);
+    - Evaluator: mandatory bitwise check per artifact (the port gates), spill rejection, cache keyed by toolchain;
+    - compiler (COMGR vs Rust direct) and pass order as categorical params;
+    - record every rig/served sweep as a replay table + TraceWriter trace so strategies can be scored offline later.
+    Wrap the K2 ports' knobs (13+) and the decision-10 schedule surface as a SearchSpace with a CallableBackend
+    (rig rung) and a served backend (last rung).
+16. 2026-11-05 (user): "no shortcuts, port rocKE efficiently and crush the competition ground up with rocKE".
+    W16 (run wf_35ddf2a6-97c), alongside W15 (knob climb on the ports inside the FlyDSL shells):
+    I1 fast-iteration infra (persistent code-object cache, byte-identical to fresh compiles; runtime arm switching in
+    one server; the rig as the search engine's cheap rung) -> S1 rocKE-owned K1 / K2 / draft K2 layer kernels built from
+    the ported stages (rocKE owns launch, CTA allocation, sync, CCL, schedule; natives folded; serial hand-offs fused;
+    bitwise vs ATOM) -> C1 Rust direct on whole kernels (compiler defects fixed; auto-select) -> served confirm
+    (TP2 C1-C32 incl. C10, both nodes, TP4, accuracy). Each step build -> adversarial verify (3 rounds) -> fix.
+17. 2026-11-05: n01-09 drained ("SlurmdSpoolDir is full"): our node-local job scratch filled /tmp (dsv41 632 GB, q38
+    203 GB). User approved cleaning job dirs + caches (keep seeds); an admin has to do it. From now on every job
+    script deletes its own node-local job dir after saving results (dsv41_job.sh fixed; W15/W16 harness copies must do
+    the same) and checks free /tmp before starting (alola rule 263). This is the only sanctioned delete.
+18. 2026-11-05 (user): TP8 head-to-head with LithosAI (2,116 tok/s per user, 8x MI355X, step 2.8 ms, credited 75%
+    acceptance; self-reported). W17 (run wf_ccaeb6fe-5ba): rocKE FP8 blockscale GEMM for the K=288 shared-expert down
+    projection that blocks ATOM at TP8 (ATOM_DSV41_RK_K288) -> TP8 bring-up + accuracy + baseline (step time, measured AL,
+    tok/s under both measured and credited-75% acceptance) -> our stack at TP8 + WaveScope, w17/TP8-vs-LITHOS.md.
+    TP8 jobs take a whole node: only when 8 GPUs are free, short and few.
+19. 2026-11-06 (user): kill all workflows. Stopped W15 (climb round 0 fix round), W16 (I1 infra fix round), W17 (TP8
+    bring-up fix round); cancelled their 13 cluster jobs and the login-node TP8 submit watcher. State to resume from:
+    - verified: WP1 graph prefill (x1.17-1.45 at C4-C32); both bitwise rocKE ports (w15/PORT-*.md); the K288 GEMM that
+      unblocks TP8 (w17/K1-k288-gemm.md);
+    - open: W15 climb round 0 DRY + fix round (w15/CLIMB.md); W16 I1 infra in its 2nd fix round (w16/I1-infra.md;
+      cache 4.4x faster start, switch byte-identity unproven); W17 B1 bring-up (w17/B1-tp8-bringup.md; TP8 step 0.74 of
+      TP2, 1.48x LithosAI's step, accuracy replicate b1t7 and the served matrix b1t5 never ran).
+    - cluster: n01-09 drained (/tmp full; needs admin cleanup), n07-17 GPU at bus 0x05 has an ECC storm (rule 268).

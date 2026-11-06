@@ -91,7 +91,13 @@ def _rounds(b, c, ks, slices):
     return out
 
 
-def build_ug_kernel(rows: int, groups: int, knobs: W.WqkvKnobs = W.WqkvKnobs()):
+def build_ug_kernel(rows: int, groups: int, knobs: W.WqkvKnobs = W.WqkvKnobs(), la: int = 0):
+    """``la`` (W15 climb r0 fix; 0 = parity): B-operand LOOKAHEAD of depth ``la`` (1 or 2) over the flattened K steps
+    of every round: step g + la's LDS reads issued right before step g's MFMAs (across round boundaries), so only
+    ``la`` steps' operands are live ahead, where ``ra`` 1 reads a whole round's (8 steps at groups 2) before its first
+    MFMA. Same MFMA operands, order and accumulators: bitwise. Not with ``ra``."""
+    if la not in (0, 1, 2) or (la and knobs.ra):
+        raise ValueError("ug la: 0 | 1 | 2, and not with ra")
     if not 1 <= rows <= W.TILE:
         raise ValueError(f"rows {rows}: the one-tile build has 1..{W.TILE}")
     if groups not in (1, 2):
@@ -167,6 +173,17 @@ def build_ug_kernel(rows: int, groups: int, knobs: W.WqkvKnobs = W.WqkvKnobs()):
         return b.vec_extract(b.smem_load_vN(e_.pool, at, dtype=I32, n=1), 0)
 
     accs = [b.vec_pack([b.const_f32(0.0)] * 4, F32) for _ in range(2)]
+    # ``la``: the flattened K steps (round, step) and their pending B operands (W15 r0 fix; la=0: unused)
+    flat = [(rr, ii) for rr, rd in enumerate(rounds) for ii in range(rd[2])]
+    pend = {}
+
+    def ensure(g):
+        if la and g < len(flat) and g not in pend:
+            rr, ii = flat[g]
+            pend[g] = b_operand(b.add(rounds[rr][1], c(ii)))
+
+    for g0 in range(la):
+        ensure(g0)
     ops = [loads(rounds[q]) for q in range(min(ahead, len(rounds)))]
     for r, rnd in enumerate(rounds):
         sc0, st0, n, sc_steps = rnd
@@ -199,9 +216,14 @@ def build_ug_kernel(rows: int, groups: int, knobs: W.WqkvKnobs = W.WqkvKnobs()):
             sas.append(row)
         bs = [b_operand(b.add(st0, c(i))) for i in range(n)] if knobs.ra else None
         for i in range(n):
+            if la:
+                g = flat.index((r, i))
+                ensure(g + la)
+                ensure(g)
+                bv_la = pend.pop(g)
             if knobs.mutate == "chain_drop" and i == 1 and n > 1:
                 continue
-            bv, sb = bs[i] if bs is not None else b_operand(b.add(st0, c(i)))
+            bv, sb = bv_la if la else (bs[i] if bs is not None else b_operand(b.add(st0, c(i))))
             for t in range(2):
                 sa, osa = sas[t][i]
                 av = avs[t][i]

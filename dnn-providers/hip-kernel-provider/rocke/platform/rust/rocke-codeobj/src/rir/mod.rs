@@ -12,6 +12,7 @@ mod fma_chains;
 mod fma_mix;
 #[rustfmt::skip]
 pub mod gen_isa;
+mod idioms;  // W15 climb r0 fix: SWAR popcount -> v_bcnt (`nopopcount` debug flag: off)
 pub mod isa;
 mod hashcons;
 pub mod isel;
@@ -115,6 +116,8 @@ pub(crate) fn debug_flag(name: &str) -> bool {
 ///   the instructions its address waits on, as soon as they are ready, ahead
 ///   of instructions that could start sooner (`rir::post`): the loads keep
 ///   the most in flight.
+/// - `devfn`: every leading `inreg` parameter is preloaded, past the 14 user SGPRs (`opt::kernarg_preload`): the
+///   build is disassembled into a device function (`dsv41_mono/direct_fn.py`), never launched.
 /// - `litshare`: one register per literal and block before scheduling
 ///   (`target::gfx9::lits`; the debug flag `litshare` too).
 ///

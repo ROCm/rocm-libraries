@@ -201,7 +201,8 @@ pub fn with_preload(mut r: ProgramResources, preload: u32, wg_ids: [bool; 3]) ->
     let inputs = 2 + preload + wg_ids.iter().filter(|&&on| on).count() as u32;
     r.sgpr_count = r.sgpr_count.max(inputs + EXTRA_SGPRS);
     r.rsrc1 = r.rsrc1 & !(0xf << 6) | (r.sgpr_count.div_ceil(8) - 1) << 6;
-    r.rsrc2 = r.rsrc2 & !(0x1f << 1) | (2 + preload) << 1;
+    // USER_SGPR_COUNT is 5 bits: a `devfn` build (more than 14 preloaded dwords, never launched) saturates it
+    r.rsrc2 = r.rsrc2 & !(0x1f << 1) | (2 + preload).min(31) << 1;
     r
 }
 

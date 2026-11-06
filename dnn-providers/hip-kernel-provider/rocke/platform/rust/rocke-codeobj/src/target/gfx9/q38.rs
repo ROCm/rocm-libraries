@@ -341,6 +341,21 @@ mod tests {
         let entry = &k.hsaco;
         let text_has = |w: u32| entry.windows(4).any(|x| x == w.to_le_bytes());
         assert!(text_has(0xc006_0080) && text_has(0xbf82_0038), "the preload entry");
+        // W15 climb r0 fix, lever `devfn`: all eight (16 dwords) live in s[2..17], no kernarg load past the entry.
+        let dev = crate::rir::with_levers(&["devfn"], || rir::compile_any_target(&last, Target::Gfx950))
+            .unwrap_or_else(|e| panic!("{e}"));
+        let kd = descriptor(&dev.hsaco);
+        assert_eq!(u16::from_le_bytes([kd[58], kd[59]]), 16, "devfn: every inreg dword preloaded");
+        // the body loads only %Y (not inreg, at kernarg offset 64)
+        let low: Vec<String> = dev
+            .listing()
+            .lines()
+            .map(str::trim_start)
+            .filter(|x| x.starts_with("s_load_dword"))
+            .filter(|x| x.split("imm:").nth(1).and_then(|r| r.split_whitespace().next()).and_then(|n| n.parse::<i64>().ok()).unwrap_or(0) < 64)
+            .map(String::from)
+            .collect();
+        assert!(low.is_empty(), "devfn: a preloaded argument loaded in the body: {low:?}");
     }
 
     /// `storewait`: a barrier waits on vmcnt for the youngest store in flight,
