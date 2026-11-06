@@ -49,9 +49,8 @@ std::string validatorNotApplicable(const std::string& label,
 /// site the comparison runs on. Distinct from validatorNotApplicable because the data
 /// type is fine here and naming it would send the reader to the wrong config field.
 ///
-/// Falling back to the host validator would read device memory through host pointers,
-/// and silently grading to a validator the config did not ask for is the miscompare
-/// this whole mechanism exists to prevent.
+/// makeValidator() has no device implementation of the kind, so it returns this report
+/// for a device-site request.
 std::string validatorNotApplicableAtSite(const std::string& label,
                                          hipdnn_flatbuffers_sdk::data_objects::DataType dataType,
                                          const char* validatorName)
@@ -115,6 +114,37 @@ bool isFloatingPoint(hipdnn_flatbuffers_sdk::data_objects::DataType dataType)
     default:
         return false;
     }
+}
+
+// The floating-point data types that have a device allclose validator.
+bool hasDeviceAllClose(hipdnn_flatbuffers_sdk::data_objects::DataType dataType)
+{
+    using hipdnn_flatbuffers_sdk::data_objects::DataType;
+    return dataType == DataType::FLOAT || dataType == DataType::HALF
+           || dataType == DataType::BFLOAT16 || dataType == DataType::DOUBLE;
+}
+
+// Grades a floating-point allclose tensor at the device site so that same-signed
+// infinities match, as on the host. The device validator fails every infinity, so a
+// tensor that fails on the device is graded again on the host.
+bool deviceAllCloseMatchingInfinities(hipdnn_flatbuffers_sdk::data_objects::DataType dataType,
+                                      const std::string& label,
+                                      hipdnn_data_sdk::utilities::ITensor& expected,
+                                      hipdnn_data_sdk::utilities::ITensor& actual,
+                                      ComparisonTolerance tolerance)
+{
+    tolerance.kind = ValidatorKind::ALLCLOSE;
+    if(makeValidator(dataType, label, tolerance, ValidationSite::DEVICE)
+           .validator->allClose(expected, actual))
+    {
+        return true;
+    }
+
+    expected.rawHostData();
+    actual.rawHostData();
+    tolerance.kind = ValidatorKind::ALLCLOSE_MATCHING_INFINITIES;
+    return makeValidator(dataType, label, tolerance, ValidationSite::HOST)
+        .validator->allClose(expected, actual);
 }
 
 } // namespace
@@ -277,6 +307,19 @@ std::optional<TensorMismatch>
         {
             tolerance.kind = ValidatorKind::ALLCLOSE_MATCHING_INFINITIES;
         }
+    }
+    else if(hasDeviceAllClose(dataType)
+            && (tolerance.kind == ValidatorKind::ALLCLOSE
+                || tolerance.kind == ValidatorKind::ALLCLOSE_MATCHING_INFINITIES))
+    {
+        if(deviceAllCloseMatchingInfinities(dataType, label, expected, actual, tolerance))
+        {
+            return std::nullopt;
+        }
+        return TensorMismatch{
+            uid,
+            label,
+            formatMismatchReport(uid, label, dataType, expected, actual, tolerance, contextLine)};
     }
 
     auto selection = makeValidator(dataType, label, tolerance, site);

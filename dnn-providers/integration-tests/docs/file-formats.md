@@ -974,12 +974,14 @@ The two non-default validators:
   in both the reference and the engine output compares equal. NaN,
   opposite-signed infinities, and finite-versus-infinite still fail. Use it for
   outputs whose correct value is infinite on both sides, such as the log-sum-exp
-  of a fully masked SDPA row. In a bundle test, the host `allclose` comparison of
-  a floating-point output also matches same-signed infinities. It is
-  **host-only**. A tensor that it selects fails
-  with `Validator override NOT APPLICABLE ON DEVICE` whenever its comparison runs
-  on the device. Under `auto`, this is every run where the GPU reference
-  produced the expected values. Run such a config with `--validator cpu`.
+  of a fully masked SDPA row. In a bundle test, the `allclose` comparison of a
+  floating-point output also matches same-signed infinities on the host. On the
+  device, a float, half, bfloat16 or double output follows the same rule: a
+  tensor that fails the device check is graded again on the host. In a C++
+  graph test, this validator is **host-only**. A tensor that it selects fails
+  with `Validator override NOT APPLICABLE ON DEVICE` whenever its comparison
+  runs on the device. Under `auto`, this is every run where the GPU reference produced
+  the expected values. Run such a config with `--validator cpu`.
   Alternatively, narrow the `tensors` glob.
 
 Neither validator is defined for integer outputs. If a glob selects an integer

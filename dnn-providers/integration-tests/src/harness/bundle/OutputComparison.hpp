@@ -66,10 +66,11 @@ using ExpectedTensorLookup = std::function<hipdnn_data_sdk::utilities::ITensor&(
 /// disagreements still fail, and finite elements are still graded by atol/rtol. It
 /// exists for an output whose correct value is infinite on both sides — an SDPA
 /// forward log-sum-exp row that is fully masked, whose reference and device values
-/// are both -inf and are both right. It has no device implementation.
+/// are both -inf and are both right. makeValidator() has no device implementation of it.
 ///
-/// compareTensor() grades a floating-point ALLCLOSE tensor on the host as
-/// ALLCLOSE_MATCHING_INFINITIES.
+/// compareTensor() grades a floating-point ALLCLOSE tensor as
+/// ALLCLOSE_MATCHING_INFINITIES on the host, and a FLOAT, HALF, BFLOAT16 or DOUBLE one
+/// also on the device.
 ///
 /// Nothing selects RMS or ALLCLOSE_MATCHING_INFINITIES on its own: only an engine's
 /// TOML config can, via a [[validator_overrides]] entry naming the tensor.
@@ -123,9 +124,11 @@ using ToleranceLookup = std::function<ComparisonTolerance(
 /// describe a failure is an argument. The mismatch report is always built on the
 /// host, whichever site made the pass/fail call.
 ///
-/// On the host, a floating-point tensor graded by ALLCLOSE matches same-signed
-/// infinities (see ValidatorKind). A ragged tensor at the device site is reported as
-/// not comparable.
+/// A floating-point tensor graded by ALLCLOSE or ALLCLOSE_MATCHING_INFINITIES matches
+/// same-signed infinities on the host (see ValidatorKind). At the device site, a FLOAT,
+/// HALF, BFLOAT16 or DOUBLE tensor graded by either kind follows the same rule: a tensor
+/// that fails the device allclose is graded again on the host. A ragged tensor at the
+/// device site is reported as not comparable.
 std::optional<TensorMismatch>
     compareTensor(int64_t uid,
                   const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& attrs,
