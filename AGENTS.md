@@ -106,6 +106,7 @@ All under [`projects/hipdnn/tools/ai/skills/`](projects/hipdnn/tools/ai/skills/)
 | Skill | Path | Use it when |
 | --- | --- | --- |
 | `worktree-venv` | [`skills/worktree-venv/`](skills/worktree-venv/SKILL.md) | Giving each git worktree its own Python venv for a rocm-libraries package. |
+| `split-to-stack` | [`skills/split-to-stack/`](skills/split-to-stack/SKILL.md) | Splitting an oversized branch, a range of stacked branches, or a whole stack into a linear stack of single-purpose, reviewable branches (plan first; local only unless publishing is requested). |
 
 ## Component entry points
 
