@@ -93,7 +93,7 @@ from ..Toolchain.Component import Assembler
 from ..Utilities.Decorators.Profile import profile
 from ..Utilities.Decorators.Timing import timing
 
-from .ParseArguments import parseArguments
+from .parse_arguments import parseArguments
 
 
 def _parseLogicFileForLibrary(*args) -> LibraryIO.LibraryLogic:
@@ -1636,7 +1636,7 @@ def _buildGroupsSeparately(groups: List[List[str]], requestedJobs: int) -> None:
             procs.append((
                 group,
                 subprocess.Popen(
-                    [sys.executable, "-m", "tensilelite.TensileCreateLibrary"]
+                    [sys.executable, "-m", "tensilelite.create_library"]
                     + _argvForArchitectures(argv, group, groupJobs),
                     env=env,
                 ),
@@ -1659,7 +1659,7 @@ def _buildGroupsSeparately(groups: List[List[str]], requestedJobs: int) -> None:
 
 
 @profile
-def run():
+def main():
     start = timer()
     print1("")
     print1(HR)

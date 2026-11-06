@@ -79,7 +79,7 @@ CLIENT_PARAMETERS_FILENAME = "ClientParameters.ini"
 #: ini key -> GlobalParameters key for pairs the source scan cannot resolve on
 #: its own. Each is a deliberate exception, not a copy of what the scan finds.
 CLIENT_PARAMETER_OVERRIDES = {
-    # deviceId reaches ClientWriter as a function argument; Tensile.py sources it
+    # deviceId reaches ClientWriter as a function argument; tensilelite.py sources it
     # from config["GlobalParameters"]["Device"], which is a different module.
     "device-idx": "Device",
     # The scan reports these as ambiguous because the value is conditionally
