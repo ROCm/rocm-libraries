@@ -1276,10 +1276,10 @@ def _toolchain() -> dict:
         out["llvm_flavor"] = str(_resolve_llvm_flavor())
     except Exception:
         pass
-    try:
-        import torch
+    try:  # the installed package's version: torch itself is not imported here
+        from importlib.metadata import version
 
-        out["torch_version"] = str(torch.__version__)
+        out["torch_version"] = version("torch")
     except Exception:
         pass
     return out

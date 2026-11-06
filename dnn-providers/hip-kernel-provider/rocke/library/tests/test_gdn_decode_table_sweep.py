@@ -1320,6 +1320,22 @@ def test_run_meta_records_the_resolved_backend_and_llvm_flavor(monkeypatch):
     assert (tool["backend"], tool["llvm_flavor"]) == ("unknown", "unknown")
 
 
+def test_torch_version_comes_from_the_package_metadata(monkeypatch):
+    """The sweep records torch's version from the installed package's metadata,
+    so a host without torch records ``unknown`` instead of failing, and the
+    tool module does not import torch for it."""
+    import importlib.metadata as md
+
+    monkeypatch.setattr(md, "version", lambda name: "2.9.0+rocm7.1")
+    assert sweep._toolchain()["torch_version"] == "2.9.0+rocm7.1"
+
+    def missing(name):
+        raise md.PackageNotFoundError(name)
+
+    monkeypatch.setattr(md, "version", missing)
+    assert sweep._toolchain()["torch_version"] == "unknown"
+
+
 @pytest.mark.parametrize(
     "walk",
     [
