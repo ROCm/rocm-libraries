@@ -10,7 +10,10 @@ sweep per signature instead. For every selected row, sorted by tier, topology, s
 size (largest first, so the superset's own rows create the template), signature and
 case_key, the script runs the suite's import_graph.py in grouped mode on the row's exported
 graph, into an empty work tree W that holds only <tier>/<OP>/ (so each import scans only
-these sweeps):
+these sweeps). The imports run in this process with one shared
+import_graph.ImportCache, so each sweep is parsed once and its sweep.json is written
+once: when the next row goes to another tier or topology, and at the end. Each import
+gets these arguments:
 
   --graph <export>/<case_key>/<case_key>.json --bundle-dir W --tier T --op-dir OP
   --topology NAME --template-attributes --template-alignment --skeleton-value-form
@@ -35,13 +38,15 @@ k the cases already in the sweep, and projects the full-run time per tier from t
 sizes of all selected rows.
 """
 import argparse
+import contextlib
+import importlib.util
+import io
 import json
-import os
 import re
 import shutil
-import subprocess
 import sys
 import time
+import traceback
 from collections import Counter, defaultdict
 from pathlib import Path
 
@@ -134,10 +139,20 @@ def import_order(row):
     )
 
 
-def run_import(import_graph, graph, bundle_dir, row, op_dir, env, flags):
+def load_import_graph(path):
+    """The import_graph module at path. Its folder goes first on sys.path."""
+    sys.path.insert(0, str(path.resolve().parent))
+    spec = importlib.util.spec_from_file_location("import_graph", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def run_import(import_graph, cache, graph, bundle_dir, row, op_dir, flags):
+    """(return code, stderr text, seconds, command line) of one in-process import."""
     cmd = [
         sys.executable,
-        str(import_graph),
+        import_graph.__file__,
         "--graph",
         str(graph),
         "--bundle-dir",
@@ -153,9 +168,19 @@ def run_import(import_graph, graph, bundle_dir, row, op_dir, env, flags):
         row["_case_id"],
         "--strict",
     ]
+    err = io.StringIO()
     start = time.monotonic()
-    proc = subprocess.run(cmd, capture_output=True, text=True, env=env)
-    return proc, time.monotonic() - start, cmd
+    with contextlib.redirect_stdout(err), contextlib.redirect_stderr(err):
+        try:
+            rc = import_graph.main(cmd[2:], cache)
+        except SystemExit as e:
+            if isinstance(e.code, str):
+                print(e.code, file=sys.stderr)
+            rc = int(e.code) if isinstance(e.code, int) else 0 if e.code is None else 1
+        except Exception:
+            traceback.print_exc()
+            rc = 1
+    return rc, err.getvalue(), time.monotonic() - start, cmd
 
 
 def check_tree(bundle_dir, op_dir, placed, export_dir):
@@ -346,7 +371,12 @@ def main():
         help="bundle tree to copy the finished op folders into",
     )
     ap.add_argument("--op-dir", default="SdpaFwdPlan")
-    ap.add_argument("--import-graph", type=Path, default=MIGRATION / "import_graph.py")
+    ap.add_argument(
+        "--import-graph",
+        type=Path,
+        default=MIGRATION / "import_graph.py",
+        help="import_graph.py to run; its folder also supplies bundle_utils",
+    )
     ap.add_argument(
         "--out-dir",
         type=Path,
@@ -413,8 +443,8 @@ def main():
         )
 
     prepare_work_dir(args.work_dir)
-    env = dict(os.environ)
-    env["PYTHONDONTWRITEBYTECODE"] = "1"
+    import_graph = load_import_graph(args.import_graph)
+    cache = import_graph.ImportCache()
     args.out_dir.mkdir(parents=True, exist_ok=True)
     log = open(args.out_dir / "imports.log", "w")
     timing = open(args.out_dir / "timings.csv", "w")
@@ -424,27 +454,29 @@ def main():
     started = time.monotonic()
     for n, r in enumerate(rows, 1):
         graph = args.export_dir / r["case_key"] / f"{r['case_key']}.json"
-        proc, seconds, cmd = run_import(
-            args.import_graph, graph, args.work_dir, r, args.op_dir, env, flags
+        rc, stderr, seconds, cmd = run_import(
+            import_graph, cache, graph, args.work_dir, r, args.op_dir, flags
         )
         key = (r["level"], r["_topology"])
+        if n == len(rows) or (rows[n]["level"], rows[n]["_topology"]) != key:
+            cache.flush()
         times.append(seconds)
         timing.write(
-            f"{r['level']},{r['_topology']},{in_sweep[key]},{seconds:.4f},{proc.returncode}\n"
+            f"{r['level']},{r['_topology']},{in_sweep[key]},{seconds:.4f},{rc}\n"
         )
         log.write(
-            f"### {n}/{len(rows)} rc={proc.returncode} {seconds:.2f}s {' '.join(cmd)}\n{proc.stderr}\n"
+            f"### {n}/{len(rows)} rc={rc} {seconds:.2f}s {' '.join(cmd)}\n{stderr}\n"
         )
-        if proc.returncode != 0:
+        if rc != 0:
             failures.append(
                 {
                     "case_key": r["case_key"],
-                    "rc": proc.returncode,
-                    "stderr": proc.stderr[-1500:],
+                    "rc": rc,
+                    "stderr": stderr[-1500:],
                 }
             )
             print(
-                f"make_bundles: import failed for {r['case_key']} (rc {proc.returncode})",
+                f"make_bundles: import failed for {r['case_key']} (rc {rc})",
                 file=sys.stderr,
             )
             if not args.keep_going:
@@ -458,6 +490,7 @@ def main():
                 f"make_bundles: {n}/{len(rows)} imported, {time.monotonic() - started:.0f}s",
                 file=sys.stderr,
             )
+    cache.flush()
     log.close()
     timing.close()
 
