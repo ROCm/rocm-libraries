@@ -34,6 +34,7 @@
  *****************************************************************************/
 
 #include "Debug.hpp"
+#include "alpha_mode_logging.hpp"
 #include "include/check_numerics_matrix.hpp"
 #include "rocblaslt-types.h"
 #include "rocblaslt_arch_revision.hpp"
@@ -1300,7 +1301,7 @@ namespace
             problem.useScaleCD() ? "--scaleD" : "",
             problem.swizzleTensorA() ? "--swizzleA" : "",
             problem.swizzleTensorB() ? "--swizzleB" : "",
-            problem.useScaleAlphaVec() ? "--scaleAlpha_vector" : "",
+            rocblaslt::benchAlphaFlag(problem),
             problem.useGradient() ? "--gradient" : "",
             problem.useE() ? "--use_e" : "",
             problem.useBias() ? "--bias_vector" : "",
@@ -1426,7 +1427,9 @@ namespace
                     "swizzleB",
                     problem.swizzleTensorB() ? "true" : "false",
                     "scaleAlpha_vector",
-                    problem.useScaleAlphaVec() ? "true" : "false",
+                    rocblaslt::logVectorAlpha(problem) ? "true" : "false",
+                    "device_scalar_alpha",
+                    problem.getParams().deviceScalarAlpha() ? "true" : "false",
                     "gradient",
                     problem.useGradient() ? "true" : "false",
                     "use_e",
@@ -1543,7 +1546,9 @@ namespace
                     "swizzleB",
                     problem.swizzleTensorB() ? "true" : "false",
                     "scaleAlpha_vector",
-                    problem.useScaleAlphaVec() ? "true" : "false",
+                    rocblaslt::logVectorAlpha(problem) ? "true" : "false",
+                    "device_scalar_alpha",
+                    problem.getParams().deviceScalarAlpha() ? "true" : "false",
                     "gradient",
                     problem.useGradient() ? "true" : "false",
                     "use_e",
@@ -1667,7 +1672,7 @@ namespace
             problem.gemms[0].useScaleCD() ? "--scaleD" : "",
             problem.gemms[0].swizzleTensorA() ? "--swizzleA" : "",
             problem.gemms[0].swizzleTensorB() ? "--swizzleB" : "",
-            problem.gemms[0].useScaleAlphaVec() ? "--scaleAlpha_vector" : "",
+            rocblaslt::benchAlphaFlag(problem.gemms[0]),
             problem.gemms[0].useGradient() ? "--gradient" : "",
             problem.gemms[0].useE() ? "--use_e" : "",
             problem.gemms[0].useBias() ? "--bias_vector" : "",
@@ -1827,7 +1832,9 @@ namespace
             "swizzleB",
             problem.gemms[0].swizzleTensorB() ? "true" : "false",
             "scaleAlpha_vector",
-            problem.gemms[0].useScaleAlphaVec() ? "true" : "false",
+            rocblaslt::logVectorAlpha(problem.gemms[0]) ? "true" : "false",
+            "device_scalar_alpha",
+            problem.gemms[0].getParams().deviceScalarAlpha() ? "true" : "false",
             "gradient",
             problem.gemms[0].useGradient() ? "true" : "false",
             "use_e",
@@ -1973,7 +1980,9 @@ namespace
             "swizzleB",
             problem.gemms[0].swizzleTensorB() ? "true" : "false",
             "scaleAlpha_vector",
-            problem.gemms[0].useScaleAlphaVec() ? "true" : "false",
+            rocblaslt::logVectorAlpha(problem.gemms[0]) ? "true" : "false",
+            "device_scalar_alpha",
+            problem.gemms[0].getParams().deviceScalarAlpha() ? "true" : "false",
             "gradient",
             problem.gemms[0].useGradient() ? "true" : "false",
             "use_e",
