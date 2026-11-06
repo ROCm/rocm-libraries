@@ -952,8 +952,8 @@ namespace
         return {{"wide", full<T>(5, 7)}, {"tall", full<T>(7, 5)}};
     }
 
-    // The accelerator HYB and DENSE ApplyAdd overwrite the output (a known bug), which
-    // does not show when it starts out zero
+    // An ApplyAdd that overwrites the output only shows when the output does not start
+    // out zero
     template <typename T>
     void test_apply_add(Backend b, Format f)
     {
@@ -980,11 +980,6 @@ namespace
             A->ApplyAdd(*make_vector(b, x), half, out.get());
             EXPECT_EQ(values_of(*out),
                       apply_add(ref, x, half, std::vector<T>(ref.n, static_cast<T>(0))));
-        }
-
-        if(b == Backend::Accelerator)
-        {
-            KNOWN_BUG("ellmv and gemv get beta 0, so the output is overwritten");
         }
 
         for(const auto& matrix : apply_add_cases<T>(f))

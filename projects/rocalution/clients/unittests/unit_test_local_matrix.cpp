@@ -1066,8 +1066,6 @@ TYPED_TEST(local_matrix, async_moves_complete_on_sync)
 
 TEST_P(local_matrix_formats, apply_and_apply_add_match_the_reference)
 {
-    const bool apply_add_bug = backend() == Backend::Accelerator && (is(HYB) || is(DENSE));
-
     for_each_type<RealTypes>([&](auto type) {
         using T = typename decltype(type)::type;
 
@@ -1093,18 +1091,9 @@ TEST_P(local_matrix_formats, apply_and_apply_add_match_the_reference)
             vy = vector_of(y0);
             A->ApplyAdd(*vx, 3.0, vy.get());
             expect_kept(*A, ref);
-            if(apply_add_bug && !run_known_bugs())
-            {
-                continue;
-            }
             expect_vector(*vy, expected, backend(), scaled_tol<T>(1e-14));
         }
     });
-
-    if(apply_add_bug)
-    {
-        KNOWN_BUG("HIP HYB and DENSE ApplyAdd ignore the output");
-    }
 }
 
 TEST_P(local_matrix_formats, apply_of_a_rectangular_matrix)

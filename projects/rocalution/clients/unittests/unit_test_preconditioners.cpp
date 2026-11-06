@@ -2432,18 +2432,9 @@ TYPED_TEST(preconditioners, multicolored_blocks_apply_in_every_format)
         }
     };
 
-    const bool hip = this->backend() == Backend::Accelerator;
     for(const Format& f : formats())
     {
-        const bool ignores_output = hip && (f.id == rocalution::HYB || f.id == rocalution::DENSE);
-        check(f, !ignores_output, !ignores_output && f.id != rocalution::DIA);
-    }
-
-    if(hip)
-    {
-        KNOWN_BUG("HIP HYB and DENSE ApplyAdd ignore the output");
-        check(Format{rocalution::HYB, 1}, true, true);
-        check(Format{rocalution::DENSE, 1}, true, true);
+        check(f, true, f.id != rocalution::DIA);
     }
 
     KNOWN_BUG("csr_to_dia writes past the values of a matrix with more rows than columns; on the "
@@ -2776,13 +2767,9 @@ TYPED_TEST(preconditioners, multielimination_blocks_apply_in_every_format_and_mo
         expect_near(apply(p, *A, r), exact_solve(ref, r), tol<T>());
     };
 
-    const bool hip = this->backend() == Backend::Accelerator;
     for(const Format& f : formats())
     {
-        if(!(hip && (f.id == rocalution::HYB || f.id == rocalution::DENSE)))
-        {
-            check(f);
-        }
+        check(f);
     }
 
     {
@@ -2798,13 +2785,6 @@ TYPED_TEST(preconditioners, multielimination_blocks_apply_in_every_format_and_mo
         expect_near(apply(p, *B, r), exact_solve(ref, r), tol<T>());
         move(this->backend(), p, *B);
         expect_near(apply(p, *B, r), exact_solve(ref, r), tol<T>());
-    }
-
-    if(hip)
-    {
-        KNOWN_BUG("HIP HYB and DENSE ApplyAdd ignore the output");
-        check(Format{rocalution::HYB, 1});
-        check(Format{rocalution::DENSE, 1});
     }
 }
 

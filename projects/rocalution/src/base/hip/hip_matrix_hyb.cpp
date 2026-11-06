@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2023 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -782,7 +782,7 @@ namespace rocalution
             // ELL
             if(this->ell_nnz_ > 0)
             {
-                ValueType beta = 0.0;
+                ValueType beta = 1.0;
 
                 rocsparse_status status;
                 status = rocsparseTellmv(ROCSPARSE_HANDLE(this->local_backend_.ROC_sparse_handle),
@@ -803,7 +803,6 @@ namespace rocalution
             // COO
             if(this->coo_nnz_ > 0)
             {
-                // Add to y from ELL part
                 ValueType beta = 1.0;
 
                 rocsparse_status status;
