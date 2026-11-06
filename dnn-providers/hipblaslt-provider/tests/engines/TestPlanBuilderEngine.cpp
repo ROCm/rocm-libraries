@@ -11,7 +11,7 @@
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 #include <hipdnn_test_sdk/utilities/MockGraph.hpp>
 
-#include "engines/HipblasltEngine.hpp"
+#include "engines/PlanBuilderEngine.hpp"
 #include "mocks/MockHipdnnEnginePluginExecutionContext.hpp"
 #include "mocks/MockPlanBuilder.hpp"
 
@@ -20,15 +20,15 @@ using namespace hipdnn_test_sdk::utilities;
 using namespace hipdnn_plugin_sdk;
 using namespace hipdnn_flatbuffers_sdk::flatbuffer_utilities;
 
-TEST(TestHipblasltEngine, ConstructorAndId)
+TEST(TestPlanBuilderEngine, ConstructorAndId)
 {
-    HipblasltEngine const engine(42);
+    PlanBuilderEngine const engine(42);
     EXPECT_EQ(engine.id(), 42);
 }
 
-TEST(TestHipblasltEngine, WorkspaceSizeReturnsZeroIfNoPlanBuilders)
+TEST(TestPlanBuilderEngine, WorkspaceSizeReturnsZeroIfNoPlanBuilders)
 {
-    HipblasltEngine const engine(1);
+    PlanBuilderEngine const engine(1);
 
     MockGraph const mockGraph;
 
@@ -36,7 +36,7 @@ TEST(TestHipblasltEngine, WorkspaceSizeReturnsZeroIfNoPlanBuilders)
     EXPECT_EQ(engine.getWorkspaceSize(dummyHandle, mockGraph), 0u);
 }
 
-TEST(TestHipblasltEngine, WorkspaceSizeReturnsPlanBuilderWorkspace)
+TEST(TestPlanBuilderEngine, WorkspaceSizeReturnsPlanBuilderWorkspace)
 {
     auto mockPlanBuilder = std::make_unique<MockPlanBuilder>();
     EXPECT_CALL(*mockPlanBuilder, isApplicable(::testing::_, ::testing::_))
@@ -44,7 +44,7 @@ TEST(TestHipblasltEngine, WorkspaceSizeReturnsPlanBuilderWorkspace)
     EXPECT_CALL(*mockPlanBuilder, getWorkspaceSize(::testing::_, ::testing::_))
         .WillOnce(::testing::Return(1337u));
 
-    HipblasltEngine engine(1);
+    PlanBuilderEngine engine(1);
     engine.addPlanBuilder(std::move(mockPlanBuilder));
 
     MockGraph const mockGraph;
@@ -53,7 +53,7 @@ TEST(TestHipblasltEngine, WorkspaceSizeReturnsPlanBuilderWorkspace)
     EXPECT_EQ(engine.getWorkspaceSize(dummyHandle, mockGraph), 1337u);
 }
 
-TEST(TestHipblasltEngine, WorkspaceSizeReturnsMaxPlanBuilderWorkspace)
+TEST(TestPlanBuilderEngine, WorkspaceSizeReturnsMaxPlanBuilderWorkspace)
 {
     auto mockPlanBuilder = std::make_unique<MockPlanBuilder>();
     auto mockPlanBuilder2 = std::make_unique<MockPlanBuilder>();
@@ -67,7 +67,7 @@ TEST(TestHipblasltEngine, WorkspaceSizeReturnsMaxPlanBuilderWorkspace)
     EXPECT_CALL(*mockPlanBuilder2, getWorkspaceSize(::testing::_, ::testing::_))
         .WillOnce(::testing::Return(45000u));
 
-    HipblasltEngine engine(1);
+    PlanBuilderEngine engine(1);
     engine.addPlanBuilder(std::move(mockPlanBuilder));
     engine.addPlanBuilder(std::move(mockPlanBuilder2));
 
@@ -77,13 +77,13 @@ TEST(TestHipblasltEngine, WorkspaceSizeReturnsMaxPlanBuilderWorkspace)
     EXPECT_EQ(engine.getWorkspaceSize(dummyHandle, mockGraph), 45000u);
 }
 
-TEST(TestHipblasltEngine, WorkspaceSizeReturnsZeroIfNoPlanBuilderApplicable)
+TEST(TestPlanBuilderEngine, WorkspaceSizeReturnsZeroIfNoPlanBuilderApplicable)
 {
     auto mockPlanBuilder = std::make_unique<MockPlanBuilder>();
     EXPECT_CALL(*mockPlanBuilder, isApplicable(::testing::_, ::testing::_))
         .WillOnce(::testing::Return(false));
 
-    HipblasltEngine engine(1);
+    PlanBuilderEngine engine(1);
     engine.addPlanBuilder(std::move(mockPlanBuilder));
 
     MockGraph const mockGraph;
@@ -92,14 +92,14 @@ TEST(TestHipblasltEngine, WorkspaceSizeReturnsZeroIfNoPlanBuilderApplicable)
     EXPECT_EQ(engine.getWorkspaceSize(dummyHandle, mockGraph), 0u);
 }
 
-TEST(TestHipblasltEngine, IsApplicableReturnsTrueIfAnyPlanBuilderApplicable)
+TEST(TestPlanBuilderEngine, IsApplicableReturnsTrueIfAnyPlanBuilderApplicable)
 {
     auto mockPlanBuilder = std::make_unique<MockPlanBuilder>();
 
     EXPECT_CALL(*mockPlanBuilder, isApplicable(::testing::_, ::testing::_))
         .WillOnce(::testing::Return(true));
 
-    HipblasltEngine engine(0);
+    PlanBuilderEngine engine(0);
     engine.addPlanBuilder(std::move(mockPlanBuilder));
 
     MockGraph const mockGraph;
@@ -109,7 +109,7 @@ TEST(TestHipblasltEngine, IsApplicableReturnsTrueIfAnyPlanBuilderApplicable)
     EXPECT_TRUE(engine.isApplicable(dummyHandle, mockGraph));
 }
 
-TEST(TestHipblasltEngine, IsApplicableReturnsAfterTheFirstApplicablePlanBuilder)
+TEST(TestPlanBuilderEngine, IsApplicableReturnsAfterTheFirstApplicablePlanBuilder)
 {
     auto mockPlanBuilder1 = std::make_unique<MockPlanBuilder>();
     auto mockPlanBuilder2 = std::make_unique<MockPlanBuilder>();
@@ -118,7 +118,7 @@ TEST(TestHipblasltEngine, IsApplicableReturnsAfterTheFirstApplicablePlanBuilder)
         .WillOnce(::testing::Return(true));
     EXPECT_CALL(*mockPlanBuilder2, isApplicable(::testing::_, ::testing::_)).Times(0);
 
-    HipblasltEngine engine(0);
+    PlanBuilderEngine engine(0);
     engine.addPlanBuilder(std::move(mockPlanBuilder1));
     engine.addPlanBuilder(std::move(mockPlanBuilder2));
 
@@ -129,9 +129,9 @@ TEST(TestHipblasltEngine, IsApplicableReturnsAfterTheFirstApplicablePlanBuilder)
     EXPECT_TRUE(engine.isApplicable(dummyHandle, mockGraph));
 }
 
-TEST(TestHipblasltEngine, IsApplicableReturnsFalseIfNoPlanBuilders)
+TEST(TestPlanBuilderEngine, IsApplicableReturnsFalseIfNoPlanBuilders)
 {
-    HipblasltEngine const engine(0);
+    PlanBuilderEngine const engine(0);
 
     MockGraph const mockGraph;
     auto graphBuilder = hipdnn_test_sdk::utilities::createEmptyValidGraph();
@@ -140,13 +140,13 @@ TEST(TestHipblasltEngine, IsApplicableReturnsFalseIfNoPlanBuilders)
     EXPECT_FALSE(engine.isApplicable(dummyHandle, mockGraph));
 }
 
-TEST(TestHipblasltEngine, IsApplicableReturnsFalseIfNoPlanBuilderApplicable)
+TEST(TestPlanBuilderEngine, IsApplicableReturnsFalseIfNoPlanBuilderApplicable)
 {
     auto mockPlanBuilder = std::make_unique<MockPlanBuilder>();
     EXPECT_CALL(*mockPlanBuilder, isApplicable(::testing::_, ::testing::_))
         .WillOnce(::testing::Return(false));
 
-    HipblasltEngine engine(0);
+    PlanBuilderEngine engine(0);
     engine.addPlanBuilder(std::move(mockPlanBuilder));
 
     MockGraph const mockGraph;
@@ -156,9 +156,9 @@ TEST(TestHipblasltEngine, IsApplicableReturnsFalseIfNoPlanBuilderApplicable)
     EXPECT_FALSE(engine.isApplicable(dummyHandle, mockGraph));
 }
 
-TEST(TestHipblasltEngine, GetDetailsReturnsSerializedEngineDetails)
+TEST(TestPlanBuilderEngine, GetDetailsReturnsSerializedEngineDetails)
 {
-    HipblasltEngine const engine(hipdnn_data_sdk::utilities::HIPBLASLT_ENGINE_ID);
+    PlanBuilderEngine const engine(hipdnn_data_sdk::utilities::HIPBLASLT_ENGINE_ID);
     HipdnnEnginePluginHandle dummyHandle;
 
     hipdnnPluginConstData_t result;
@@ -169,7 +169,7 @@ TEST(TestHipblasltEngine, GetDetailsReturnsSerializedEngineDetails)
     EXPECT_EQ(engineDetails.engineId(), hipdnn_data_sdk::utilities::HIPBLASLT_ENGINE_ID);
 }
 
-TEST(TestHipblasltEngine, InitializeExecutionContextInvokesFirstApplicablePlanBuilder)
+TEST(TestPlanBuilderEngine, InitializeExecutionContextInvokesFirstApplicablePlanBuilder)
 {
     auto mockPlanBuilder1 = std::make_unique<MockPlanBuilder>();
     auto mockPlanBuilder2 = std::make_unique<MockPlanBuilder>();
@@ -181,7 +181,7 @@ TEST(TestHipblasltEngine, InitializeExecutionContextInvokesFirstApplicablePlanBu
     EXPECT_CALL(*mockPlanBuilder2, isApplicable(::testing::_, ::testing::_)).Times(0);
     EXPECT_CALL(*mockPlanBuilder2, buildPlan(::testing::_, ::testing::_, ::testing::_)).Times(0);
 
-    HipblasltEngine engine(1);
+    PlanBuilderEngine engine(1);
     engine.addPlanBuilder(std::move(mockPlanBuilder1));
     engine.addPlanBuilder(std::move(mockPlanBuilder2));
 
@@ -192,7 +192,7 @@ TEST(TestHipblasltEngine, InitializeExecutionContextInvokesFirstApplicablePlanBu
     engine.initializeExecutionContext(dummyHandle, mockGraph, ctx);
 }
 
-TEST(TestHipblasltEngine, InitializeExecutionContextSkipsNonApplicableBuilders)
+TEST(TestPlanBuilderEngine, InitializeExecutionContextSkipsNonApplicableBuilders)
 {
     auto mockPlanBuilder1 = std::make_unique<MockPlanBuilder>();
     auto mockPlanBuilder2 = std::make_unique<MockPlanBuilder>();
@@ -205,7 +205,7 @@ TEST(TestHipblasltEngine, InitializeExecutionContextSkipsNonApplicableBuilders)
         .WillOnce(::testing::Return(true));
     EXPECT_CALL(*mockPlanBuilder2, buildPlan(::testing::_, ::testing::_, ::testing::_)).Times(1);
 
-    HipblasltEngine engine(1);
+    PlanBuilderEngine engine(1);
     engine.addPlanBuilder(std::move(mockPlanBuilder1));
     engine.addPlanBuilder(std::move(mockPlanBuilder2));
 
@@ -216,7 +216,7 @@ TEST(TestHipblasltEngine, InitializeExecutionContextSkipsNonApplicableBuilders)
     engine.initializeExecutionContext(dummyHandle, mockGraph, ctx);
 }
 
-TEST(TestHipblasltEngine, InitializeExecutionContextDoesNotCallBuildPlanIfNoApplicableBuilders)
+TEST(TestPlanBuilderEngine, InitializeExecutionContextDoesNotCallBuildPlanIfNoApplicableBuilders)
 {
     auto mockPlanBuilder1 = std::make_unique<MockPlanBuilder>();
     auto mockPlanBuilder2 = std::make_unique<MockPlanBuilder>();
@@ -228,7 +228,7 @@ TEST(TestHipblasltEngine, InitializeExecutionContextDoesNotCallBuildPlanIfNoAppl
         .WillOnce(::testing::Return(false));
     EXPECT_CALL(*mockPlanBuilder2, buildPlan(::testing::_, ::testing::_, ::testing::_)).Times(0);
 
-    HipblasltEngine engine(1);
+    PlanBuilderEngine engine(1);
     engine.addPlanBuilder(std::move(mockPlanBuilder1));
     engine.addPlanBuilder(std::move(mockPlanBuilder2));
 

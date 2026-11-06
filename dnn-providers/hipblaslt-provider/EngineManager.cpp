@@ -7,7 +7,7 @@
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 
 #include "EngineManager.hpp"
-#include "engines/HipblasltEngine.hpp"
+#include "engines/PlanBuilderEngine.hpp"
 
 using namespace hipdnn_plugin_sdk;
 using namespace hipdnn_flatbuffers_sdk::flatbuffer_utilities;

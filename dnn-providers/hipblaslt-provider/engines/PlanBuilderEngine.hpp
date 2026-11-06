@@ -13,10 +13,12 @@
 namespace hipblaslt_plugin
 {
 
-class HipblasltEngine : public IEngine
+/// An engine that serves a graph through the first of its plan builders that applies. Backend
+/// neutral: the hipBLASLt and rocBLAS engines are each one of these with their own builders.
+class PlanBuilderEngine : public IEngine
 {
 public:
-    HipblasltEngine(int64_t id);
+    PlanBuilderEngine(int64_t id);
 
     int64_t id() const override;
 

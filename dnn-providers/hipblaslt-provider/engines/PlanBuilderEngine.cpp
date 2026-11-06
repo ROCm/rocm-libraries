@@ -1,24 +1,24 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
-#include "HipblasltEngine.hpp"
+#include "PlanBuilderEngine.hpp"
 
 #include <hipdnn_flatbuffers_sdk/data_objects/engine_details_generated.h>
 
 namespace hipblaslt_plugin
 {
 
-HipblasltEngine::HipblasltEngine(int64_t id)
+PlanBuilderEngine::PlanBuilderEngine(int64_t id)
     : _id(id)
 {
 }
 
-int64_t HipblasltEngine::id() const
+int64_t PlanBuilderEngine::id() const
 {
     return _id;
 }
 
-bool HipblasltEngine::isApplicable(
+bool PlanBuilderEngine::isApplicable(
     HipdnnEnginePluginHandle& handle,
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph) const
 {
@@ -34,8 +34,8 @@ bool HipblasltEngine::isApplicable(
     return false;
 }
 
-void HipblasltEngine::getDetails(HipdnnEnginePluginHandle& handle,
-                                 hipdnnPluginConstData_t& detailsOut) const
+void PlanBuilderEngine::getDetails(HipdnnEnginePluginHandle& handle,
+                                   hipdnnPluginConstData_t& detailsOut) const
 {
     flatbuffers::FlatBufferBuilder builder;
     auto engineDetails = hipdnn_flatbuffers_sdk::data_objects::CreateEngineDetails(builder, _id);
@@ -47,7 +47,7 @@ void HipblasltEngine::getDetails(HipdnnEnginePluginHandle& handle,
     handle.storeEngineDetailsDetachedBuffer(detailsOut.ptr, std::move(detachedBuffer));
 }
 
-size_t HipblasltEngine::getWorkspaceSize(
+size_t PlanBuilderEngine::getWorkspaceSize(
     const HipdnnEnginePluginHandle& handle,
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph) const
 {
@@ -62,7 +62,7 @@ size_t HipblasltEngine::getWorkspaceSize(
     return workspaceSize;
 }
 
-void HipblasltEngine::initializeExecutionContext(
+void PlanBuilderEngine::initializeExecutionContext(
     const HipdnnEnginePluginHandle& handle,
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
     HipdnnEnginePluginExecutionContext& executionContext) const
@@ -77,7 +77,7 @@ void HipblasltEngine::initializeExecutionContext(
     }
 }
 
-void HipblasltEngine::addPlanBuilder(std::unique_ptr<IPlanBuilder> planBuilder)
+void PlanBuilderEngine::addPlanBuilder(std::unique_ptr<IPlanBuilder> planBuilder)
 {
     _planBuilders.push_back(std::move(planBuilder));
 }

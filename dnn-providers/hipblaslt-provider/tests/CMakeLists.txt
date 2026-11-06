@@ -20,10 +20,10 @@ add_executable(
     engines/plans/TestHipblasltMatmulPlanBuilder.cpp
     $<$<BOOL:${HIPBLASLTPROVIDER_ENABLE_MX_GEMM}>:engines/plans/TestHipblasltMxMatmulPlan.cpp>
     $<$<BOOL:${HIPBLASLTPROVIDER_ENABLE_MX_GEMM}>:engines/plans/TestHipblasltMxMatmulPlanBuilder.cpp>
-    engines/TestHipblasltEngine.cpp
+    engines/TestPlanBuilderEngine.cpp
     main.cpp
-    TestHipblasltEngineManager.cpp
-    TestHipblasltEnginePluginApi.cpp
+    TestPlanBuilderEngineManager.cpp
+    TestPlanBuilderEnginePluginApi.cpp
     TestHipblasltHandleFactory.cpp
     TestHipblasltHipdnnEnginePluginHandle.cpp
     TestHipblasltHipdnnPluginExecutionContext.cpp
@@ -32,6 +32,8 @@ add_executable(
     TestHipblasltMatrixTransformDesc.cpp
     TestHipblasltPluginApi.cpp
     TestHipblasltUtils.cpp
+    $<$<BOOL:${HIPBLASLTPROVIDER_ENABLE_ROCBLAS}>:engines/rocblas/TestMatmulProblem.cpp>
+    $<$<BOOL:${HIPBLASLTPROVIDER_ENABLE_ROCBLAS}>:engines/rocblas/TestGpuRocblasMatmulPlan.cpp>
 )
 
 target_compile_options(hipblaslt_plugin_tests PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})

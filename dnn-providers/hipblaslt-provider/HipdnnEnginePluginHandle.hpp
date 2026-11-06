@@ -7,6 +7,10 @@
 #include <hipblaslt/hipblaslt.h>
 #include <memory>
 #include <unordered_map>
+#ifdef HIPBLASLTPROVIDER_ENABLE_ROCBLAS
+#include <mutex>
+#include <rocblas/rocblas.h>
+#endif
 
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
@@ -18,9 +22,37 @@
 struct HipdnnEnginePluginHandle
 {
 public:
-    virtual ~HipdnnEnginePluginHandle() = default;
+    virtual ~HipdnnEnginePluginHandle()
+    {
+#ifdef HIPBLASLTPROVIDER_ENABLE_ROCBLAS
+        if(_rocblasHandle != nullptr)
+        {
+            rocblas_destroy_handle(_rocblasHandle);
+        }
+#endif
+    }
 
     hipblasLtHandle_t hipblasltHandle = nullptr;
+
+#ifdef HIPBLASLTPROVIDER_ENABLE_ROCBLAS
+    /// The rocBLAS handle, created on first use: creating one loads rocBLAS's kernel library,
+    /// a cost a handle that only ever serves hipBLASLt graphs should not pay.
+    rocblas_handle rocblasHandle() const
+    {
+        std::call_once(_rocblasOnce, [this] {
+            if(rocblas_create_handle(&_rocblasHandle) != rocblas_status_success)
+            {
+                _rocblasHandle = nullptr;
+            }
+        });
+        if(_rocblasHandle == nullptr)
+        {
+            throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+                                                           "Failed to create rocBLAS handle");
+        }
+        return _rocblasHandle;
+    }
+#endif
 
     void setStream(hipStream_t stream)
     {
@@ -66,6 +98,10 @@ public:
     }
 
 private:
+#ifdef HIPBLASLTPROVIDER_ENABLE_ROCBLAS
+    mutable std::once_flag _rocblasOnce;
+    mutable rocblas_handle _rocblasHandle = nullptr;
+#endif
     hipStream_t _stream = nullptr;
     std::unordered_map<const void*, std::unique_ptr<flatbuffers::DetachedBuffer>>
         _engineDetailsBuffers;

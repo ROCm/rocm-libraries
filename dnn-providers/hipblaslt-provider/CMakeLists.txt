@@ -26,6 +26,9 @@ project(hipblaslt-provider VERSION ${HIPBLASLT_PROVIDER_VERSION} LANGUAGES CXX)
 # (typically OFF) and the injected value is silently ignored, leaving the
 # feature compiled out despite the flag being set.
 # ----------------------------------------------------------------------------
+# rocBLAS engines: ROCBLAS_MATMUL_ENGINE now, explicit-GEMM convolution later. OFF while the
+# provider grows from a hipBLASLt wrapper into a BLAS provider.
+option(HIPBLASLTPROVIDER_ENABLE_ROCBLAS "Build the rocBLAS engines" OFF)
 option(HIPBLASLTPROVIDER_ENABLE_MX_GEMM
     "Enable MX (microscaling) data-type support for GEMM" OFF
 )
@@ -167,10 +170,13 @@ message(STATUS "Plugin install directory: ${HIPDNN_INSTALL_PLUGIN_ENGINE_DIR}")
 file(MAKE_DIRECTORY ${HIPDNN_BUILD_PLUGIN_ENGINE_DIR})
 
 find_package(hipblaslt CONFIG REQUIRED)
+if(HIPBLASLTPROVIDER_ENABLE_ROCBLAS)
+    find_package(rocblas CONFIG REQUIRED)
+endif()
 
 add_library(
     hipblaslt_plugin_private
-    engines/HipblasltEngine.cpp
+    engines/PlanBuilderEngine.cpp
     EngineManager.cpp
     HipblasltHandleFactory.cpp
     HipblasltContainer.cpp
@@ -183,8 +189,15 @@ add_library(
     HipblasltMatmulDesc.cpp
     HipblasltMatrixLayout.cpp
     HipblasltMatrixTransformDesc.cpp
+    $<$<BOOL:${HIPBLASLTPROVIDER_ENABLE_ROCBLAS}>:common/MatmulProblem.cpp>
+    $<$<BOOL:${HIPBLASLTPROVIDER_ENABLE_ROCBLAS}>:engines/rocblas/RocblasGemm.cpp>
+    $<$<BOOL:${HIPBLASLTPROVIDER_ENABLE_ROCBLAS}>:engines/rocblas/RocblasMatmulPlanBuilder.cpp>
 )
 target_include_directories(hipblaslt_plugin_private PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+if(HIPBLASLTPROVIDER_ENABLE_ROCBLAS)
+    target_link_libraries(hipblaslt_plugin_private PUBLIC roc::rocblas)
+    target_compile_definitions(hipblaslt_plugin_private PUBLIC HIPBLASLTPROVIDER_ENABLE_ROCBLAS=1)
+endif()
 dnn_provider_generate_version_header(hipblaslt_provider hipblaslt_plugin_private ${CMAKE_CURRENT_LIST_DIR})
 target_link_libraries(hipblaslt_plugin_private PUBLIC roc::hipblaslt hipdnn_data_sdk hipdnn_flatbuffers_sdk hipdnn_plugin_sdk hip::host)
 
