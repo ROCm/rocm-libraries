@@ -8,6 +8,7 @@
  */
 #include "rocke/helper_rocke.instances.common._fmha_common.h"
 
+#include <stdio.h>
 #include <string.h>
 
 #include "rocke/helper_rocke.helpers.io.h" /* rocke_b_io_ir_type */
@@ -100,6 +101,23 @@ rocke_fmha_common_spec_t rocke_fmha_common_spec_default(rocke_fmha_shape_t shape
 
 /* Set *out_reason (if non-NULL) to an arena-printf'd message, falling back to
  * `fallback` on OOM. Returns `ret` so callers can `return reject(...)`. */
+bool rocke_attention_check_head_counts(int num_query_heads,
+                                       int num_kv_heads,
+                                       char* reason,
+                                       size_t reason_cap)
+{
+    const char* fmt = NULL;
+    if(num_query_heads <= 0 || num_kv_heads <= 0)
+        fmt = "num_query_heads / num_kv_heads must be > 0 (got %d, %d)";
+    else if(num_query_heads % num_kv_heads != 0)
+        fmt = "num_query_heads (%d) must be divisible by num_kv_heads (%d) for GQA / MQA";
+    if(fmt == NULL)
+        return true;
+    if(reason != NULL && reason_cap > 0)
+        (void)snprintf(reason, reason_cap, fmt, num_query_heads, num_kv_heads);
+    return false;
+}
+
 static bool rocke_i_fmha_set_reason(rocke_arena_t* arena,
                                     const char** out_reason,
                                     bool ret,
@@ -157,33 +175,18 @@ bool rocke_fmha_validate_common_spec(rocke_arena_t* arena,
                                s->head_size),
             "head_size not in the supported set");
     }
-    /* if s.num_query_heads <= 0 or s.num_kv_heads <= 0: */
-    if(s->num_query_heads <= 0 || s->num_kv_heads <= 0)
+    /* ok, reason = check_head_counts(s.num_query_heads, s.num_kv_heads) */
     {
-        return rocke_i_fmha_set_reason(
-            arena,
-            out_reason,
-            false,
-            rocke_arena_printf(arena,
-                               "num_query_heads / num_kv_heads must be > 0 "
-                               "(got %d, %d)",
-                               s->num_query_heads,
-                               s->num_kv_heads),
-            "num_query_heads / num_kv_heads must be > 0");
-    }
-    /* if s.num_query_heads % s.num_kv_heads != 0: */
-    if((s->num_query_heads % s->num_kv_heads) != 0)
-    {
-        return rocke_i_fmha_set_reason(
-            arena,
-            out_reason,
-            false,
-            rocke_arena_printf(arena,
-                               "num_query_heads (%d) must be divisible by "
-                               "num_kv_heads (%d) for GQA / MQA",
-                               s->num_query_heads,
-                               s->num_kv_heads),
-            "num_query_heads must be divisible by num_kv_heads");
+        char why[160];
+        if(!rocke_attention_check_head_counts(
+               s->num_query_heads, s->num_kv_heads, why, sizeof(why)))
+        {
+            return rocke_i_fmha_set_reason(arena,
+                                           out_reason,
+                                           false,
+                                           rocke_arena_printf(arena, "%s", why),
+                                           "num_query_heads / num_kv_heads not a valid GQA pair");
+        }
     }
     /* if s.block_size_q not in (16, 32, 64, 128): */
     if(s->block_size_q != 16 && s->block_size_q != 32 && s->block_size_q != 64

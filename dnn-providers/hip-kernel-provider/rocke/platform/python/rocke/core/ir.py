@@ -671,14 +671,15 @@ def _mma_c_frag_len(op_id: str) -> int:
     return frag_len
 
 
-def _mma_c_dtype(op_id: str) -> str:
-    """The accumulator dtype of ``op_id``, from the arch catalog.
+def _mma_dst_dtype(op_id: str) -> str:
+    """The result dtype of ``op_id``, from the arch catalog.
 
     Sourced from ``core/arch/data/arch_specs.json`` via
-    ``target._op_id_c_dtype``. Op_ids absent from the catalog accumulate in
+    ``target._op_id_dst_dtype``: the accumulator dtype, except for an atom
+    whose result dtype differs from it. Op_ids absent from the catalog return
     fp32.
     """
-    return _arch._op_id_c_dtype().get(op_id, "fp32")
+    return _arch._op_id_dst_dtype().get(op_id, "fp32")
 
 
 @dataclass(frozen=True)
@@ -2433,8 +2434,9 @@ class IRBuilder:
     ) -> Value:
         """Packed-fp16 atomic add: two fp16 lanes per transaction.
 
-        Lowers to AMDGPU's ``llvm.amdgcn.global.atomic.fadd.v2f16``
-        intrinsic (gfx940+); returns the pre-add value. ``value``
+        Lowers to a generic ``atomicrmw fadd <2 x half>`` (agent scope)
+        with the AMDGPU memory-model metadata, which the backend selects as
+        ``global_atomic_pk_add_f16``; returns the pre-add value. ``value``
         must be a ``<2 x f16>`` vector and the pointer must reach
         into an fp16 buffer with an even element index.
         """
@@ -3145,9 +3147,10 @@ class IRBuilder:
         matching MFMA call on CDNA or the WMMA call on RDNA. **One kernel body,
         two ISAs.**
 
-        The result vector type is ``<c_frag_len x C>``: the per-lane
-        accumulator length the atom produces, with C the instruction's
-        accumulator dtype from the arch catalog. When ``op`` is an ``op_id``
+        The result vector type is ``<c_frag_len x D>``: the per-lane
+        accumulator length the atom produces, with D the instruction's result
+        dtype from the arch catalog (``dst_dtype``; the accumulator dtype for
+        every atom whose result is its accumulator). When ``op`` is an ``op_id``
         string the frag length is resolved from the static MMA fragment table;
         an emulated atom's op_id resolves through the physical atom it expands
         into.
@@ -3177,10 +3180,10 @@ class IRBuilder:
             if hasattr(op, "c_frag_len") and op.c_frag_len
             else _mma_c_frag_len(op_id)
         )
-        # Accumulator element type: the atom's own c_dtype when ``op`` is an
-        # MmaOp, else the catalog's accumulator dtype for the op_id.
-        c_dtype = getattr(op, "c_dtype", None) or _mma_c_dtype(op_id)
-        c_elem = dtype_to_ir_type(c_dtype)
+        # Result element type: the atom's own dst_dtype when ``op`` is an
+        # MmaOp, else the catalog's result dtype for the op_id.
+        dst_dtype = getattr(op, "dst_dtype", None) or _mma_dst_dtype(op_id)
+        dst_elem = dtype_to_ir_type(dst_dtype)
         hint = (
             "mxacc"
             if _arch._op_id_family().get(op_id) in ("wmma_scaled", "mfma_scaled")
@@ -3189,7 +3192,7 @@ class IRBuilder:
         return self._op(
             "tile.mma",
             [a, b, c, *extra],
-            [VectorType(c_elem, c_frag_len)],
+            [VectorType(dst_elem, c_frag_len)],
             attrs={"op_id": op_id, **(attrs or {})},
             result_name_hint=hint,
         ).result
@@ -5524,15 +5527,19 @@ class IRBuilder:
 
     def trap(self) -> None:
         """Abort the kernel: ``call void @llvm.trap()`` (HIP
-        ``__builtin_trap()``), ``s_trap 2`` on the GPU.
+        ``__builtin_trap()``). The AMDGPU backend emits ``s_trap 2``; on gfx11
+        it emits its simulated trap instead: ``s_trap 2``, then ``s_sendmsg``,
+        then an ``s_sethalt`` loop.
 
-        A taken trap ends the kernel with a hardware exception. What the host
-        sees depends on the HIP runtime: the launch reports an error, or the
-        runtime aborts the process. Either way the process cannot use the GPU
-        afterwards. So a trap is the last resort, for a condition the host
-        checks before the launch and that must still never reach a memory
-        access on the device. Put it under a branch on that condition
-        (``scf_if``).
+        What a taken trap does depends on the host. On Linux (ROCr) the queue
+        reports an error and the runtime aborts the process. On Windows the
+        HIP runtime never turns the trap into an error: the launch never
+        returns. Under a debugger the wave stops at the trap. None of these
+        lets the process carry on, so a trap is the last resort, for a
+        condition the host checks before the launch and that must still never
+        reach a memory access on the device. Put it under a branch on that
+        condition (``scf_if``). A check the process must survive belongs on
+        the host, before the launch, not in a trap.
         """
         self._op("tile.trap")
 
