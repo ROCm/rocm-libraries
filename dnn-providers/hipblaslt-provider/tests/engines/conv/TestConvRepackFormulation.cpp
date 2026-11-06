@@ -59,6 +59,15 @@ const Args* stepArgs(const RepackStep& step)
     return std::get_if<Args>(&step.args);
 }
 
+/// Stages that run GEMMs: one per slice of images (a final rounding stage runs none).
+size_t gemmStages(const ConvGemmPlanCalls& calls)
+{
+    return static_cast<size_t>(
+        std::count_if(calls.stages.begin(), calls.stages.end(), [](const ConvGemmStage& stage) {
+            return !stage.calls.empty();
+        }));
+}
+
 TEST(TestConvRepackFormulation, DirectRowsArePreferred)
 {
     for(const auto direction : ALL_DIRECTIONS)
@@ -422,12 +431,12 @@ TEST(TestConvRepackFormulation, ALowerCapSlicesSmallShapes)
                     const auto problem = parse(shape, direction);
                     const auto whole = im2colGemmCalls(problem);
                     ASSERT_TRUE(whole.has_value());
-                    ASSERT_EQ(whole->stages.size(), 1u);
+                    ASSERT_EQ(gemmStages(*whole), 1u);
                     // One byte short of the whole is the tightest cap: alignment padding is
                     // counted once per workspace tensor, never per image.
                     const auto sliced = im2colGemmCalls(problem, whole->workspaceBytes - 1);
                     ASSERT_TRUE(sliced.has_value()) << "n " << n << " channels last " << last;
-                    EXPECT_GT(sliced->stages.size(), 1u);
+                    EXPECT_GT(gemmStages(*sliced), 1u);
                     EXPECT_LT(sliced->workspaceBytes, whole->workspaceBytes);
                 }
             }
