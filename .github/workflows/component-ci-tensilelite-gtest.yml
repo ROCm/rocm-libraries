@@ -29,6 +29,10 @@ jobs:
     runs-on: ${{ inputs.linux_runner }}
     container:
       image: ${{ inputs.docker_image }}
+    # The pins also key the tarball cache, so a new pin gets a new cache entry.
+    env:
+      MSGPACK_SHA256: 7504b7af7e7b9002ce529d4f941e1b7fb1fb435768780ce7da4abaac79bb156f
+      GTEST_SHA256: 7b42b4d6ed48810c5362c265a17faebe90dc2373c885e5216439d37927f02926
     # ROCM_PATH comes from setup-rocm-linux.
     defaults:
       run:
@@ -56,22 +60,34 @@ jobs:
       - name: Install Python dependencies
         run: pip install -r requirements.txt
 
+      # Cached so a run doesn't need github.com; a relative path, since the action runs in the
+      # container. The checksum check below still runs on a cache hit.
+      - name: Cache msgpack-cxx and GTest tarballs
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .tensilelite-gtest-deps
+          key: tensilelite-gtest-deps-${{ env.MSGPACK_SHA256 }}-${{ env.GTEST_SHA256 }}
+
       # msgpack-cxx and GTest are build-time third-parties stripped from the dist; vendor them.
       - name: Provide msgpack-cxx and GTest
         run: |
           set -euo pipefail
+          D="$GITHUB_WORKSPACE/.tensilelite-gtest-deps"
+          mkdir -p "$D"
           # Pinned by checksum: a changed or tampered tarball fails here, not mid-build.
           fetch() {
-            curl -fsSL --retry 5 --retry-connrefused --retry-delay 5 -o "$RUNNER_TEMP/$2" "$1"
-            echo "$3  $RUNNER_TEMP/$2" | sha256sum -c -
-            tar xzf "$RUNNER_TEMP/$2" -C "$RUNNER_TEMP"
+            if ! echo "$3  $D/$2" | sha256sum -c --status - 2>/dev/null; then
+              curl -fsSL --retry 5 --retry-connrefused --retry-delay 5 -o "$D/$2" "$1"
+              echo "$3  $D/$2" | sha256sum -c -
+            fi
+            tar xzf "$D/$2" -C "$RUNNER_TEMP"
           }
           fetch https://github.com/msgpack/msgpack-c/releases/download/cpp-7.0.0/msgpack-cxx-7.0.0.tar.gz \
-            msgpack-cxx-7.0.0.tar.gz 7504b7af7e7b9002ce529d4f941e1b7fb1fb435768780ce7da4abaac79bb156f
+            msgpack-cxx-7.0.0.tar.gz "$MSGPACK_SHA256"
           cmake -S "$RUNNER_TEMP/msgpack-cxx-7.0.0" -B "$RUNNER_TEMP/msgpack-build" -DMSGPACK_USE_BOOST=OFF -DMSGPACK_BUILD_TESTS=OFF
           cmake --install "$RUNNER_TEMP/msgpack-build"
           fetch https://github.com/google/googletest/archive/refs/tags/v1.15.2.tar.gz \
-            googletest-1.15.2.tar.gz 7b42b4d6ed48810c5362c265a17faebe90dc2373c885e5216439d37927f02926
+            googletest-1.15.2.tar.gz "$GTEST_SHA256"
           cmake -S "$RUNNER_TEMP/googletest-1.15.2" -B "$RUNNER_TEMP/gtest-build" -DBUILD_GMOCK=ON -DINSTALL_GTEST=ON -DCMAKE_POSITION_INDEPENDENT_CODE=ON
           cmake --build "$RUNNER_TEMP/gtest-build" --parallel --target install
 
