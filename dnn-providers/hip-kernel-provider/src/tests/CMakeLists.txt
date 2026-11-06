@@ -495,9 +495,11 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
         )
     endif()
 
-    # Census for the gfx942 attention production packs, the same two calls per engine as
-    # gfx950's above. Each item is "<snake slug>|<engine local name>|<companion cases>".
+    # Census for the gfx942 attention production packs, the same calls per engine as
+    # gfx950's above. Each item is "<snake slug>|<engine local name>|<companion cases>";
+    # "none" registers no companion Test<local>CatalogTiles suite.
     foreach(_gfx942_engine IN ITEMS
+            "unified_3d|Gfx942AttentionUnified3d|none"
             "unified_2d|Gfx942AttentionUnified2D|EveryShippedKernelsGeometryIsOneTheEngineLaunches,EveryCellShipsItsHeadSizesDefaultGeometry,EveryShippedKernelIsBottomRightCausalWithoutAWindow")
         string(REPLACE "|" ";" _gfx942_engine "${_gfx942_engine}")
         list(GET _gfx942_engine 0 _snake)
@@ -524,13 +526,15 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
                     CarriesNoGraphScopedMatcher
                     CarriesExactlyOneSharedKernelScopedMatcher
             )
-            hkp_register_census_tests(
-                TARGET hip_kernel_provider_census_tests
-                PACK_NAME product
-                ARCHES gfx942
-                SUITES Test${_local}CatalogTiles
-                EXPECTED_CASES ${_companion_cases}
-            )
+            if(NOT _companion_cases STREQUAL "none")
+                hkp_register_census_tests(
+                    TARGET hip_kernel_provider_census_tests
+                    PACK_NAME product
+                    ARCHES gfx942
+                    SUITES Test${_local}CatalogTiles
+                    EXPECTED_CASES ${_companion_cases}
+                )
+            endif()
         else()
             message(STATUS
                 "hkp: this configuration does not ship hipkernel:${_local} for "

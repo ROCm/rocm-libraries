@@ -439,10 +439,12 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
         endif()
     endforeach()
 
-    # The gfx942 attention engines, routed into the gfx942 shard the same way. The file is
-    # truncated once here; every gfx942 engine appends to it, so a later gfx942 engine adds
-    # an item to the loop below rather than a second truncation. Each item is
-    # "<snake slug>|<engine local name>"; each engine has its own TOML and categories YAML.
+    # The gfx942 attention engines (hipkernel:Gfx942AttentionUnified3d, split-KV decode, and
+    # hipkernel:Gfx942AttentionUnified2D, prefill), routed into the gfx942 shard the same
+    # way. The file is truncated once here and every gfx942 engine appends to it, so a
+    # further gfx942 engine adds an item to the loop below rather than a second
+    # truncation. Each item is "<snake slug>|<engine local name>"; each engine has its own
+    # TOML and categories YAML.
     set(_hkp_gfx942_external_ctest
         "${CMAKE_CURRENT_BINARY_DIR}/census_external_gfx942_CTestTestfile.cmake")
     file(WRITE "${_hkp_gfx942_external_ctest}" "")
@@ -450,6 +452,7 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
                  HKP_CENSUS_EXTERNAL_TEST_FILE_gfx942 "${_hkp_gfx942_external_ctest}")
 
     foreach(_gfx942_engine IN ITEMS
+            "unified_3d|Gfx942AttentionUnified3d"
             "unified_2d|Gfx942AttentionUnified2D")
         string(REPLACE "|" ";" _gfx942_engine "${_gfx942_engine}")
         list(GET _gfx942_engine 0 _snake)
@@ -598,9 +601,9 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
     #
     # The first drain sits beside the cross-provider target, far higher up, so it can
     # only carry what was staged before it, and the property is emptied when consumed --
-    # anything here is by definition late. Nothing is today, both gfx950 registrations
-    # routing to their own architecture's shard, but an external target registered below
-    # that first drain would otherwise never reach the install tree.
+    # anything here is by definition late. Nothing is today, every gfx950 and gfx942
+    # registration routing to its own architecture's shard, but an external target
+    # registered below that first drain would otherwise never reach the install tree.
     #
     # Only the YAML path needs it. Without categorization there is no common file to
     # append to and install_provider_ctest_files() below does its own drain, which

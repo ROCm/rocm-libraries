@@ -106,9 +106,24 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
             kernel_ingestor_engine/IntegrationGpuGfx950AttentionUnifiedKnobs.cpp
         )
     endif()
-    # The gfx942 Unified2D knobs suite: compiled on any build arch when the product carries
-    # the bundle, GTEST_SKIPs off gfx942.
-    hkp_product_offers_engine(_hkp_gfx942_unified_2d_bundle "hipkernel:Gfx942AttentionUnified2D")
+    # The gfx942 unified 3D (split-KV decode) knob suite: forced block_size/num_segments
+    # select one shipped kernel, launched on a gfx942 device against the CPU reference.
+    # Gated like the census and the engine's external integration target, so a build that
+    # does not ship the engine compiles no case for it; it GTEST_SKIPs on other devices.
+    hkp_gfx942_attention_unified_3d_available(_hkp_gfx942_unified_3d_suite)
+    if(_hkp_gfx942_unified_3d_suite AND NOT HIPDNN_ENABLE_SDPA)
+        message(WARNING
+                "HIPDNN_ENABLE_KERNEL_INGESTOR is ON but hipDNN was built with HIPDNN_ENABLE_SDPA=OFF. "
+                "Skipping gfx942 unified 3D knob integration tests. Rebuild hipDNN with -DHIPDNN_ENABLE_SDPA=ON to enable them.")
+    elseif(_hkp_gfx942_unified_3d_suite)
+        target_sources(hip_kernel_provider_integration_tests PRIVATE
+            kernel_ingestor_engine/IntegrationGpuGfx942AttentionUnified3dKnobs.cpp
+        )
+    endif()
+    # The gfx942 unified 2D (prefill) knob suite: forced geometry knobs select one shipped
+    # kernel, launched on a gfx942 device against the CPU reference. Gated like the 3D suite
+    # above; it GTEST_SKIPs on other devices.
+    hkp_gfx942_attention_unified_2d_available(_hkp_gfx942_unified_2d_bundle)
     if(_hkp_gfx942_unified_2d_bundle AND NOT HIPDNN_ENABLE_SDPA)
         message(WARNING
                 "HIPDNN_ENABLE_KERNEL_INGESTOR is ON but hipDNN was built with HIPDNN_ENABLE_SDPA=OFF. "
@@ -266,9 +281,11 @@ foreach(_gfx950_engine IN ITEMS
     endif()
 endforeach()
 
-# One gpu_ref entry per gfx942 attention engine, gated and routed into the gfx942 shard
-# for the same reasons as the gfx950 entries above.
+# One gpu_ref entry per gfx942 attention engine (hipkernel:Gfx942AttentionUnified3d,
+# split-KV decode, and hipkernel:Gfx942AttentionUnified2D, prefill), gated and routed into
+# the gfx942 shard for the same reasons as the gfx950 entries above.
 foreach(_gfx942_engine IN ITEMS
+        "unified_3d|Gfx942AttentionUnified3d"
         "unified_2d|Gfx942AttentionUnified2D")
     string(REPLACE "|" ";" _gfx942_engine "${_gfx942_engine}")
     list(GET _gfx942_engine 0 _snake)

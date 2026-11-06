@@ -20,6 +20,7 @@ Documentation for rocSPARSE is available at
 * Fixed a second integer overflow in `rocsparse_csr2hyb`, in the maximum ELL row width check. `2 * (csr_nnz - 1)` was evaluated in 32-bit arithmetic, so for matrices with more than 2^30 (~1.07 billion) nonzeros the allowed width became negative and the conversion rejected every ELL width with `rocsparse_status_invalid_value`. The check is now evaluated in 64-bit arithmetic.
 * Fixed intermittently wrong results in `rocsparse_spmv`, `rocsparse_spmm`, and `rocsparse_spgemm` with `_Float16` or `rocsparse_bfloat16` output when the output has an odd number of elements or an odd batch stride. One concurrent update to the last element could occasionally be lost.
 * Fixed `rocsparse_Xcsrsm_solve`, `rocsparse_spsm`, and `rocsparse_sptrsm` (CSR, CSC, and COO formats) returning incorrect results for complex types when `trans_B` is `rocsparse_operation_conjugate_transpose` and there is a single right-hand side.
+* Fixed `rocsparse_v2_spmv` ignoring the `rocsparse_spmv_input_nnz_use_starting_block_ids` input. The CSR nnz-split analysis never received the value set with `rocsparse_spmv_set_input`, so it always ran without starting block IDs. The analysis now uses the value from the SpMV descriptor.
 
 ### Upcoming changes
 * Deprecated the `rocsparse_sddmm_alg_dense` enum value. It will be removed in a future release, along with its rocBLAS dependency. Use `rocsparse_sddmm_alg_default` instead.
