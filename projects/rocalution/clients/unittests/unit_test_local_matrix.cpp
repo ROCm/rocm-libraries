@@ -984,11 +984,14 @@ TEST_P(local_matrix_formats, converts_between_formats_on_its_backend)
         B->ConvertToHYB();
         B->ConvertToBCSR(3);
         expect_matrix(*B, ref, Format{BCSR, 3}, backend());
-        B->ConvertTo(format().id, format().blockdim);
-        expect_kept(*B, ref);
 
-        // Without a block dimension, a BCSR matrix keeps its own
-        B->ConvertTo(B->GetFormat());
+        // With a block dimension of 1 or less, a BCSR matrix keeps its own
+        B->ConvertTo(BCSR);
+        B->ConvertTo(BCSR, 0);
+        B->ConvertToBCSR(1);
+        expect_matrix(*B, ref, Format{BCSR, 3}, backend());
+
+        B->ConvertTo(format().id, format().blockdim);
         expect_kept(*B, ref);
     });
 }

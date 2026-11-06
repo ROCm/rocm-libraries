@@ -227,8 +227,8 @@ namespace rocalution
         void ConvertToMCSR(void);
         /** \brief Convert the matrix to BCSR structure
       * \details
-      * \p blockdim must be greater than 1. A BCSR matrix keeps its block dimension for
-      * a \p blockdim of 1 or less.
+      * For a matrix that is not BCSR yet, \p blockdim must be greater than 1. A BCSR
+      * matrix keeps its block dimension for a \p blockdim of 1 or less.
       */
         ROCALUTION_EXPORT
         void ConvertToBCSR(int blockdim);
@@ -249,8 +249,9 @@ namespace rocalution
         void ConvertToDENSE(void);
         /** \brief Convert the matrix to specified matrix ID format
       * \details
-      * \p blockdim is the block dimension of a BCSR matrix and must be greater than 1.
-      * A BCSR matrix keeps its block dimension for a \p blockdim of 1 or less.
+      * \p blockdim is the block dimension for BCSR. For a matrix that is not BCSR yet, it
+      * must be greater than 1. A BCSR matrix keeps its block dimension for a \p blockdim
+      * of 1 or less.
       */
         ROCALUTION_EXPORT
         void ConvertTo(unsigned int matrix_format, int blockdim = 1);
