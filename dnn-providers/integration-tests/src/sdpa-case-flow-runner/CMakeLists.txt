@@ -70,7 +70,8 @@ set_target_properties(${SDPA_CASE_FLOW_RUNNER_EXE}
 
 add_subdirectory(${_it_src}/sdpa-case-flow-poc/tests ${CMAKE_CURRENT_BINARY_DIR}/case-graph-tests)
 
-# Pytest suite of the SDPA case-flow bundle tools (superset template grouping); needs no build.
+# Pytest suites of the SDPA case-flow bundle tools (superset template grouping) and of the case
+# generator; they need no build.
 if(Python3_FOUND)
     execute_process(
         COMMAND ${Python3_EXECUTABLE} -c "import pytest, yaml"
@@ -84,6 +85,7 @@ if(Python3_FOUND AND NOT _case_flow_pytest_probe)
         NAME ${SDPA_CASE_FLOW_POC_PYTHON_TESTS}
         COMMAND ${Python3_EXECUTABLE} -m pytest -q -p no:cacheprovider
                 ${_it_src}/../scripts/sdpa_case_flow_poc/bundles/tests
+                ${_it_src}/../scripts/sdpa_case_flow_poc/tests
     )
     set_tests_properties(${SDPA_CASE_FLOW_POC_PYTHON_TESTS}
                          PROPERTIES ENVIRONMENT "PYTEST_DISABLE_PLUGIN_AUTOLOAD=1;PYTHONDONTWRITEBYTECODE=1")

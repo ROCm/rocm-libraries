@@ -41,6 +41,17 @@ For each level of the `levels` recipe in model.yaml:
 Checked once for the file: every axis has `size_sensitive: [yes | no, reason]`; a case holding a
 value whose usage label is `fringe` is at a level whose `usage` accepts fringe; targeted and
 real-world cases are hand-picked and exempt.
+  singles   (also alone, with `--only uncheckable-singles`; it reads only the CSV, model.yaml and
+            rules.yaml) a case is uncheckable when it holds a value whose answer key is "no" or an
+            answer_key_needs combination. A level with `answerable` holds no uncheckable case except
+            targeted and real-world cases and uncheckable singles (detail `uncheckable <target>`).
+            With `uncheckable_singles: <shape tier>` on a level, every target that a row breaking
+            no rule can hold (a value whose answer key is "no" and that is not the shared base
+            value; `<rule id>#<index>` for an answer_key_needs combination) is named by exactly one
+            case, a single of that level at that tier, and no single names another target. A single
+            holds its target. It holds no other uncheckable reason unless no row that breaks no
+            rule and no other answer-key rule holds the target. The singles are exempt from the
+            label, change-limit and coverage checks of their level.
 Exit status 0 on pass, 1 on fail.
 """
 
@@ -48,6 +59,7 @@ from __future__ import annotations
 
 import argparse
 import itertools
+import re
 import sys
 from pathlib import Path
 
@@ -65,6 +77,7 @@ def level_groups(lv: dict, spec: Spec | None = None) -> dict:
 
 
 MAX_LISTED = 20
+SINGLE_TARGET = re.compile(r"(?:^|; )(?:one-at-a-time:)?uncheckable ([^\s;]+)")
 # Origins whose rows the change limit does not apply to.
 NOT_PAIRWISE = ("targeted", "real_world", "size-sweep", "coverage")
 BASE = "shared"
@@ -80,6 +93,142 @@ def change_limit(lv: dict):
     return int(lim), False
 
 
+def single_targets(meta: dict) -> list:
+    """The uncheckable targets a case's detail names (empty for a case that is not a single)."""
+    return SINGLE_TARGET.findall(meta.get("detail") or "")
+
+
+def check_singles(spec: Spec, doc: dict, cases: list) -> tuple:
+    """Return (problems, summary) of the uncheckable-singles check (module docstring)."""
+    labels = {
+        a["id"]: {v: str(t[2]) for v, t in a["labels"].items()} for a in doc["axes"]
+    }
+    base = spec.base_row(BASE)
+    ak = []
+    for r in doc["level_labels"].get("answer_key_needs") or []:
+        conjs = ([r["forbid"]] if "forbid" in r else []) + list(
+            r.get("forbid_any") or []
+        )
+        for i, c in enumerate(conjs):
+            ak.append((r["id"], i, {ax: set(vs) for ax, vs in c.items()}))
+    no_nogoods = []
+    for a in spec.axes:
+        no = {v for v in spec.values[a] if labels[a][v] == "no"}
+        if no:
+            no_nogoods.append((f"ANSWER-KEY-NO-{a}", {a: no}))
+    ak_nogoods = [(rid, c) for rid, _, c in ak]
+    model_ids = set(spec.rule_ids)
+    all_ids = (
+        model_ids | {rid for rid, _ in ak_nogoods} | {rid for rid, _ in no_nogoods}
+    )
+
+    def reasons(row):
+        out = {
+            f"{a}={row[a]}"
+            for a in spec.axes
+            if row[a] is not None and labels[a][row[a]] == "no"
+        }
+        out |= {rid for rid, _, c in ak if all(row[x] in vs for x, vs in c.items())}
+        return out
+
+    def combos(c):
+        axes = list(c)
+        return [
+            dict(zip(axes, vs))
+            for vs in itertools.product(*[sorted(c[x]) for x in axes])
+        ]
+
+    saved = spec.nogoods
+    spec.nogoods = saved + ak_nogoods + no_nogoods
+    try:
+        targets = {}
+        for a in spec.axes:
+            for v in spec.values[a]:
+                if (
+                    labels[a][v] == "no"
+                    and v != base[a]
+                    and spec.satisfiable({a: v}, model_ids)
+                ):
+                    own = f"ANSWER-KEY-NO-{a}"
+                    targets[f"{a}={v}"] = (
+                        {a: {v}},
+                        f"{a}={v}",
+                        spec.satisfiable({a: v}, all_ids - {own}),
+                    )
+        for rid, i, c in ak:
+            if any(spec.satisfiable(f, model_ids) for f in combos(c)):
+                targets[f"{rid}#{i}"] = (
+                    c,
+                    rid,
+                    any(spec.satisfiable(f, all_ids - {rid}) for f in combos(c)),
+                )
+    finally:
+        spec.nogoods = saved
+
+    levels = doc["levels"]
+    answerable = {lv["name"] for lv in levels if lv.get("answerable")}
+    single_levels = {
+        lv["name"]: lv["uncheckable_singles"]
+        for lv in levels
+        if lv.get("uncheckable_singles")
+    }
+    problems, named, n_singles, unchecked = [], {}, 0, 0
+    for cid, meta, row in cases:
+        got = single_targets(meta)
+        why = reasons(row)
+        if not got:
+            if why:
+                unchecked += 1
+                if meta["level"] in answerable and meta["origin"] not in (
+                    "targeted",
+                    "real_world",
+                ):
+                    problems.append(
+                        f"{cid}: uncheckable ({', '.join(sorted(why))}) at {meta['level']}, origin {meta['origin']}"
+                    )
+            continue
+        n_singles += 1
+        if single_levels.get(meta["level"]) != meta["shape_tier"]:
+            problems.append(
+                f"{cid}: a single at {meta['level']} tier {meta['shape_tier']}, not a level's uncheckable_singles tier"
+            )
+        own_reasons = set()
+        restricted = True
+        for target in got:
+            named.setdefault(target, []).append(cid)
+            if target not in targets:
+                problems.append(
+                    f"{cid}: names {target}, which is not a target a valid row can hold"
+                )
+                continue
+            conj, own, feasible = targets[target]
+            own_reasons.add(own)
+            restricted = restricted and feasible
+            if not all(row[x] in vs for x, vs in conj.items()):
+                problems.append(f"{cid}: does not hold its target {target}")
+        extra = why - own_reasons
+        if extra and restricted:
+            problems.append(
+                f"{cid}: holds {', '.join(sorted(extra))} besides {', '.join(got)}, although a row without them can"
+            )
+    if single_levels:
+        for target in targets:
+            n = len(named.get(target, []))
+            if n != 1:
+                problems.append(f"target {target}: {n} singles name it, not 1")
+    elif named:
+        problems.append(
+            f"{len(named)} targets have singles, but no level has uncheckable_singles"
+        )
+    fallback = sorted(t for t, (_, _, ok) in targets.items() if not ok)
+    summary = (
+        f"singles: {n_singles} cases name {len(named)} targets of {len(targets)}; "
+        f"targets with no row free of other reasons: {', '.join(fallback) or 'none'}; "
+        f"other uncheckable cases: {unchecked} (hand-picked or at a level that is not answerable)"
+    )
+    return problems, summary
+
+
 def wanted(spec: dict, name: str, got: str) -> bool:
     want = spec.get(name, "any")
     if want == "any":
@@ -91,6 +240,7 @@ def wanted(spec: dict, name: str, got: str) -> bool:
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--model-dir", required=True, type=Path)
+    ap.add_argument("--only", choices=["uncheckable-singles"])
     ap.add_argument("csv", type=Path)
     args = ap.parse_args(argv)
 
@@ -122,6 +272,16 @@ def main(argv=None) -> int:
     cases = list(read_cases(args.csv, spec))
     model_ids = set(spec.rule_ids)
     failed = False
+
+    single_problems, single_summary = check_singles(spec, doc, cases)
+    print(("PASS" if not single_problems else "FAIL") + f" {single_summary}")
+    for p in single_problems[:MAX_LISTED]:
+        print(f"  {p}")
+    if len(single_problems) > MAX_LISTED:
+        print(f"  ... {len(single_problems) - MAX_LISTED} more")
+    failed |= bool(single_problems)
+    if args.only:
+        return 1 if failed else 0
 
     general = []
     sensitive = {}
@@ -239,7 +399,11 @@ def main(argv=None) -> int:
 
         if limit is not None:
             for cid, meta, row in cases:
-                if meta["level"] != lv["name"] or meta["origin"] in NOT_PAIRWISE:
+                if (
+                    meta["level"] != lv["name"]
+                    or meta["origin"] in NOT_PAIRWISE
+                    or single_targets(meta)
+                ):
                     continue
                 if packed(meta):
                     continue
@@ -257,6 +421,7 @@ def main(argv=None) -> int:
                 meta["level"] != lv["name"]
                 or meta["origin"] in ("targeted", "real_world")
                 or meta.get("filled_from")
+                or single_targets(meta)
             ):
                 continue
             for a in spec.axes:
@@ -368,6 +533,8 @@ def main(argv=None) -> int:
         held_any = set()
         most = 0
         for _, meta, row in mine:
+            if single_targets(meta):
+                continue
             n = change_count(spec, base, row, groups)
             pairs_here = list(row_pairs(spec, row, groups))
             held_any.update(pairs_here)
@@ -500,14 +667,15 @@ def main(argv=None) -> int:
                 for cid, meta, row in cases
                 if meta["level"] == lv["name"]
                 and meta["origin"] not in NOT_PAIRWISE
+                and not single_targets(meta)
                 and not packed(meta)
                 and tuple(row[a] for a in spec.axes) not in lower
                 and change_count(spec, base, row, groups) > limit
             ]
             only = 0
             changes_of, holders = {}, {}
-            for _, _, r in mine:
-                if first and needs_capability(r):
+            for _, m, r in mine:
+                if (first and needs_capability(r)) or single_targets(m):
                     continue
                 k = tuple(r[a] for a in spec.axes)
                 if k in changes_of:

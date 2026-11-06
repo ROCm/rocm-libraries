@@ -174,7 +174,7 @@ def _dim_order(value, where: str) -> list:
 
 
 def _differs_formats(rel: dict, model: Model, where: str) -> tuple:
-    """dtype_q -> K/V format for 'differs', and per-arch format substitutions."""
+    """dtype_q -> K/V format for 'differs', and the optional per-arch format substitutions."""
     when_q = _format_list(_entry(rel, "when_q", where), model, where + ".when_q")
     if len(set(when_q)) != len(when_q):
         raise ModelError(f"class_to_value: {where}.when_q names a format twice")
@@ -185,7 +185,7 @@ def _differs_formats(rel: dict, model: Model, where: str) -> tuple:
         by_q.setdefault(q, otherwise)
 
     by_arch = {}
-    arch_table = _entry(rel, "by_arch", where)
+    arch_table = rel.get("by_arch", {})
     if not isinstance(arch_table, dict):
         raise ModelError(f"class_to_value: {where}.by_arch is not a mapping")
     for arch, subs in arch_table.items():
@@ -580,7 +580,7 @@ def build(model: Model, model_dir: Path) -> dict:
                 )
                 for s, d in subs.items()
             }
-            for arch, subs in _entry(mma_mode, "by_arch", where).items()
+            for arch, subs in mma_mode.get("by_arch", {}).items()
         },
     }
     if mma_fp8["when_q_is_fp8"] is None:

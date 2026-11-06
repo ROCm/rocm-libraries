@@ -11,8 +11,8 @@ Reads levels.csv and never edits it. Writes:
 Exclusion reasons:
   content reasons     a bundle cannot express the row (an output written over an input,
                       inputs that share memory in a way the case builder keeps as separate
-                      buffers, arch-dependent dtypes), or its outputs have no element to
-                      compare (a ragged Q that gives no query token)
+                      buffers), or its outputs have no element to compare (a ragged Q that
+                      gives no query token)
   dropout_without_rng_dump, reference_declines_descale_non_fp8
                       the extra exclusions. The second one is off by default (--descale-non-fp8-filter
                       turns it on). It takes the clauses of the model's answer-key rule
@@ -55,26 +55,25 @@ DESCALE_AXES = ("descale_q", "descale_k", "descale_v")
 
 # Counts for the CSV named by levels.csv.sha256, with the default parameters.
 EXPECTED = {
-    "rows": 35255,
+    "rows": 27249,
     "content_reasons": {
-        "tensor_overlap": 310,
-        "ragged_query_without_tokens": 132,
-        "arch_dtype": 103,
+        "tensor_overlap": 57,
+        "ragged_query_without_tokens": 56,
     },
     "extra_of_expressible": {
-        "dropout_without_rng_dump": 18,
+        "dropout_without_rng_dump": 4,
     },
     "per_tier": {
         # rows, bundle rows, strict sweeps, alignment-split sweeps, largest, 1-case, then the summed
         # est_seconds on gfx942 and gfx950 of the expressible rows before the extra exclusions
-        "quick": (1461, 1445, 120, 184, 400, 56, 50.9, 39.4),
-        "standard": (8631, 8560, 314, 534, 2142, 33, 457.8, 341.3),
-        "comprehensive": (4070, 4033, 264, 423, 969, 116, 1487.4, 1059.5),
-        "full": (21093, 20814, 702, 1062, 3755, 83, 7294.8, 5205.0),
+        "quick": (1506, 1500, 142, 223, 353, 59, 53.1, 41.0),
+        "standard": (9555, 9519, 377, 631, 2174, 31, 515.8, 384.2),
+        "comprehensive": (4643, 4622, 332, 525, 966, 127, 1745.8, 1243.7),
+        "full": (11545, 11491, 464, 749, 2451, 146, 4693.1, 3354.8),
     },
-    "bundle_rows": 34852,
-    "sweeps": 1400,
-    "sweeps_alignment_split": 2203,
+    "bundle_rows": 27132,
+    "sweeps": 1315,
+    "sweeps_alignment_split": 2128,
 }
 
 
@@ -301,13 +300,6 @@ def content_reasons(row, model):
         why.append("tensor_overlap")
     if ragged_query_without_tokens(row, model):
         why.append("ragged_query_without_tokens")
-    if (
-        row["dtype_q"] in ("fp16", "bf16")
-        and "differs" in (row["dtype_k_vs_q"], row["dtype_v_vs_q"])
-    ) or (
-        row["matmul_input_precision"] == "fp8" and not row["dtype_q"].startswith("fp8")
-    ):
-        why.append("arch_dtype")
     return why
 
 

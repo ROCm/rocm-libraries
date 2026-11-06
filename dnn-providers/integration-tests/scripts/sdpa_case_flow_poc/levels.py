@@ -28,9 +28,19 @@ Per level, in recipe order:
   3. One-at-a-time rows from the shared base, targeted cases and real-world cases, when the recipe
      asks for them. Targeted and real-world cases skip the level's labels. A targeted case whose
      row an answer_key_needs rule matches waits for the next level with `targeted` that is not
-     `answerable`. Seeds (`seeds`) are completed with the fewest changes; one whose row the
-     references can check joins the real-world cases, any other one runs in the last level.
-     Seeds are written as origin real_world, detail seed:<id>.
+     `answerable`; when no such level follows, it runs in the last level. Seeds (`seeds`) are
+     completed with the fewest changes; one whose row the references can check joins the
+     real-world cases, any other one runs in the last level. Seeds are written as origin
+     real_world, detail seed:<id>.
+     With `uncheckable_singles: <shape tier>`, the level also takes one row per uncheckable target,
+     at that tier only (origin one-at-a-time, detail `uncheckable <target>`). The targets are every
+     value whose answer key is "no" (not the shared base value) and every answer_key_needs
+     combination (target `<rule id>#<index>`), when a row that breaks no rule can hold it. A value's
+     row is built as a one-at-a-time row; a combination's row is the fewest-change row that holds
+     the first value combination of it a row can hold (axes in the combination's order, values
+     sorted). The row obeys every answer-key rule but the target's own, so it holds no other
+     uncheckable reason; when no such row exists, it obeys only the rules, and the summary lists
+     the other reasons it holds. Equal rows merge; the merged row names every target it serves.
   4. Every row is expanded over the level's shape tiers, subject to the level's per-case ceiling.
      A level can restrict its own new cases (the cases it does not keep move up one level):
        larger_tiers: size_sensitive   a case at a tier other than S is kept only if its row changes,
@@ -83,7 +93,8 @@ Checkable coverage (origin coverage). A row is checkable when no answer_key_need
 and none of its values has answer key "no". Every value whose answer key is not "no" appears in a
 checkable row: for a value that no row holds so, the fewest-change checkable row that holds it is
 added to the last level at tier S. The summary lists a value with no such row, and the values
-whose answer key is "no".
+whose answer key is "no". A level with `answerable` holds no uncheckable row except the targeted,
+real-world and uncheckable-single rows.
 
 Run: python3 -m sdpa_case_flow_poc.levels --model-dir DIR --out-dir DIR [--seed N]
          [--timings ARCH=CSV ...]
@@ -353,6 +364,13 @@ def load_recipe(model: Model, model_dir: Path) -> Recipe:
         if any(t not in spec["shapes"] for t in spec.get("tiers_per_value") or []):
             raise ModelError(
                 f"level {spec['name']}: tiers_per_value names a tier outside its shapes"
+            )
+        singles = spec.get("uncheckable_singles")
+        if singles is not None and (
+            singles not in spec["shapes"] or not spec.get("answerable")
+        ):
+            raise ModelError(
+                f"level {spec['name']}: uncheckable_singles needs `answerable` and one of its shapes"
             )
         sweep = spec.get("size_sweep", [])
         if not isinstance(sweep, list) or any(
@@ -731,11 +749,16 @@ def fmt_sizes(z: dict) -> str:
 def seed_completions(model: Model, recipe: Recipe) -> list:
     """Return (id, row, checkable) per seed: its fewest-change row under the rules, the answer-key rules
     and the labels every answerable level shares, else under the rules alone (checkable False).
+    A level with `uncheckable_singles` does not count among the answerable levels here.
     """
     if not recipe.seeds:
         return []
     base = model.base_cases[BASE]
-    answerable = [s for s in recipe.levels if s.get("answerable")]
+    answerable = [
+        s
+        for s in recipe.levels
+        if s.get("answerable") and not s.get("uncheckable_singles")
+    ]
 
     def union(name):
         wants = [s.get(name, "any") for s in answerable]
@@ -1086,6 +1109,7 @@ class SweepReport:
     merged: list = field(default_factory=list)
     coverage: dict = field(default_factory=dict)
     key_length: list = field(default_factory=list)
+    singles: list = field(default_factory=list)
 
 
 def sweep_rows(model: Model, recipe: Recipe):
@@ -1344,6 +1368,70 @@ def coverage_rows(model: Model, recipe: Recipe, rows: list):
     return added, blocked, no_values
 
 
+def uncheckable_singles(model: Model, recipe: Recipe):
+    """Return ([(row, target)], report) with one row per uncheckable target (module docstring).
+
+    `report` holds one entry per target: (target, mode, other reasons the row holds), mode
+    `restricted`, `fallback` or `no valid row` (then the row is None and the target is left out).
+    """
+    base = model.base_cases[BASE]
+    extra = checkable_rules(model, recipe)
+    plain = Solver(model)
+    plain_lc = LowChange(model, plain, base, len(model.axes))
+    out, report = [], []
+
+    def other_reasons(row, own):
+        no = [
+            f"{a}={row[a]}"
+            for a in model.axes
+            if row[a] is not None and recipe.labels[a][row[a]][2] == "no"
+        ]
+        return [x for x in no + answer_rule_ids(recipe, row) if x != own]
+
+    for a in model.axes:
+        for v in model.values[a]:
+            if v == model.base_cases[BASE][a] or recipe.labels[a][v][2] != "no":
+                continue
+            target = f"{a}={v}"
+            if not plain.feasible({a: v}):
+                report.append((target, "no valid row", []))
+                continue
+            own = [r for r in extra if r.id != f"ANSWER-KEY-NO-{a}"]
+            solver = Solver(model, rules=list(model.rules) + own)
+            row, mode = None, "restricted"
+            if solver.feasible({a: v}):
+                row = solver.complete({a: v}, prefs=base)
+            if row is None:
+                row, mode = plain.complete({a: v}, prefs=base), "fallback"
+            out.append((row, target))
+            report.append((target, mode, other_reasons(row, target)))
+
+    for r in recipe.answer_rules:
+        own = [x for x in extra if x.id != r.id]
+        restricted = LowChange(
+            model, Solver(model, rules=list(model.rules) + own), base, len(model.axes)
+        )
+        for i, c in enumerate(r.conjs):
+            target = f"{r.id}#{i}"
+            axes = list(c)
+            combos = list(itertools.product(*[sorted(c[x]) for x in axes]))
+            row = None
+            for mode, lc in (("restricted", restricted), ("fallback", plain_lc)):
+                for combo in combos:
+                    got = lc.complete(dict(zip(axes, combo)))
+                    if got is not None:
+                        row = got[0]
+                        break
+                if row is not None:
+                    break
+            if row is None:
+                report.append((target, "no valid row", []))
+                continue
+            out.append((row, target))
+            report.append((target, mode, other_reasons(row, r.id)))
+    return out, report
+
+
 # ------------------------------------------------------------------ assignment
 def need_rules(model: Model) -> list:
     """The rows that need a harness capability (generator_hints.harness_needs), as exclusion rules."""
@@ -1437,6 +1525,7 @@ def assign(model: Model, recipe: Recipe, seed: int, candidates: int = 2):
     notes = []
     real_world_done = False
     pending_targeted = None
+    singles_report = []
     seed_rows = seed_completions(model, recipe)
 
     def add_srow(row, origin, detail, li, fixed_tier=None, sizes=None):
@@ -1610,6 +1699,17 @@ def assign(model: Model, recipe: Recipe, seed: int, candidates: int = 2):
             rows, _ = modes.one_at_a_time(model, solver, [BASE])
             for meta, r in rows:
                 n_oat += add_srow(r, "one-at-a-time", meta["varied"], li)
+        n_single = 0
+        if spec.get("uncheckable_singles"):
+            got, singles_report = uncheckable_singles(model, recipe)
+            for r, target in got:
+                n_single += add_srow(
+                    r,
+                    "one-at-a-time",
+                    f"uncheckable {target}",
+                    li,
+                    spec["uncheckable_singles"],
+                )
         n_tg = 0
         if spec.get("targeted"):
             if pending_targeted is None:
@@ -1689,16 +1789,22 @@ def assign(model: Model, recipe: Recipe, seed: int, candidates: int = 2):
                 "max_changes_used": most,
                 "new_pairwise_rows": n_pw,
                 "new_oat_rows": n_oat,
+                "new_single_rows": n_single,
                 "new_targeted_rows": n_tg,
                 "new_real_world_rows": n_rw,
                 "banned_values": len(banned),
             }
         )
 
-    for t, _ in pending_targeted or []:
+    last = len(recipe.levels) - 1
+    for t, r in pending_targeted or []:
         notes.append(
-            f"targeted {t['id']}: an answer_key_needs rule matches its row and no later "
-            "targeted level is not answerable; skipped"
+            f"targeted {t['id']}: answer_key_needs {', '.join(answer_rule_ids(recipe, r))} "
+            f"matches its row and no later targeted level is not answerable; it runs at "
+            f"{recipe.levels[last]['name']}"
+        )
+        stats[last]["new_targeted_rows"] += add_srow(
+            r, "targeted", t["id"], last, t.get("tier", "S"), t.get("sizes")
         )
 
     sweep, report = sweep_rows(model, recipe)
@@ -1709,7 +1815,7 @@ def assign(model: Model, recipe: Recipe, seed: int, candidates: int = 2):
         else:
             report.merged.append(detail)
 
-    last = len(recipe.levels) - 1
+    report.singles = singles_report
     added, blocked, no_values = coverage_rows(model, recipe, [sr.row for sr in srows])
     for row, detail in added:
         stats[last]["new_coverage_rows"] += add_srow(row, COVERAGE, detail, last, "S")
@@ -2500,6 +2606,23 @@ def sweep_summary(recipe: Recipe, cases, report: SweepReport) -> list:
         + (", ".join(cov.get("no", [])) or "none")
         + ".",
     ]
+    if report.singles:
+        modes_count = Counter(mode for _, mode, _ in report.singles)
+        out += [
+            "",
+            "## Uncheckable singles",
+            "",
+            f"Targets: {len(report.singles)}; "
+            + ", ".join(f"{m} {n}" for m, n in sorted(modes_count.items()))
+            + ". A `fallback` row holds the other uncheckable reasons listed.",
+            "",
+            "| Target | Row | Other reasons the row holds |",
+            "|---|---|---|",
+        ]
+        out += [
+            f"| {target} | {mode} | {', '.join(other) or '-'} |"
+            for target, mode, other in report.singles
+        ]
     return out
 
 

@@ -249,5 +249,5 @@ def test_every_expressible_zero_stride_row_of_the_committed_csv_is_selected(
         if not select_rows.content_reasons(r, model)
         and not select_rows.extra_reasons(r)
     ]
-    assert len(expressible) == 106
+    assert len(expressible) == 1094
     assert all(not w for _, w in expressible)

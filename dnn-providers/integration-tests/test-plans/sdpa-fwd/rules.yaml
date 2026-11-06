@@ -512,7 +512,7 @@ rules:
       - {tensor_overlap: [inputs_overlap], head_dim_qk: [d256], head_dim_v: [d512, d576], dtype_k_vs_q: [differs]}
       - {tensor_overlap: [inputs_overlap], head_dim_qk: [d512], head_dim_v: [d576], dtype_k_vs_q: [differs]}
     source: "class_to_value.tensor_overlap.inputs_overlap; the harness refuses a view whose data type differs from its owner's"
-    adapted: "Layer 1 states the rule over dtype_q, dtype_k, dtype_v and head_dim_v_vs_qk. Here V inside K needs dtype_v_vs_q = dtype_k_vs_q: each 'differs' maps to one format per Q format, also after the by_arch swap (class_to_value.dtype_relation), so equal relations mean equal formats. K inside Q needs dtype_k_vs_q same. The head-size relation is written over the head_dim_qk x head_dim_v value pairs."
+    adapted: "Layer 1 states the rule over dtype_q, dtype_k, dtype_v and head_dim_v_vs_qk. Here V inside K needs dtype_v_vs_q = dtype_k_vs_q: each 'differs' maps to one format per Q format (class_to_value.dtype_relation), so equal relations mean equal formats. K inside Q needs dtype_k_vs_q same. The head-size relation is written over the head_dim_qk x head_dim_v value pairs."
     evidence: inferred
 
   - id: D-INPUTS-OVERLAP-VIEW-LAYOUT
@@ -588,6 +588,21 @@ rules:
     source: "class_to_value.tensor_overlap.inputs_overlap and class_to_value.strides.inherited"
     adapted: "The head-size relation is written over the head_dim_qk x head_dim_v value pairs (Layer 1 names head_dim_v_vs_qk). A view smaller than its owner reads with the owner's strides; whether it fits at a row's sizes is a per-row question, not a rule."
     evidence: inferred
+
+  - id: D-REL-VIEW-FITS-OWNER
+    kind: definition
+    form: exclusion
+    basis: consistency
+    reason: "A view reads inside its owner's buffer, so no dim of the view is larger than the owner's. V inside K needs H_v <= H_k. K inside Q needs S_kv <= S_q. The batch, K's heads against Q's heads and the head sizes always fit."
+    forbid_any:
+      - {tensor_overlap: [inputs_overlap], strides_v: [inherited], paged_kv: [absent], k_head_sharing: [gqa, mqa], v_head_sharing: [mha]}
+      - {tensor_overlap: [inputs_overlap], strides_v: [inherited], paged_kv: [absent], k_head_sharing: [mqa], v_head_sharing: [gqa]}
+      - {tensor_overlap: [inputs_overlap], strides_v: [inherited], paged_kv: [absent], k_head_sharing: [gqa], v_head_sharing: [gqa], k_heads_vs_v_heads: [differ]}
+      - {tensor_overlap: [inputs_overlap], strides_k: [inherited], paged_kv: [absent], seq_q_vs_seq_kv: [shorter]}
+    source: "the case builder's shared-memory check (@ 60109961eee src/sdpa-case-flow-poc/CaseGraph.cpp:1121-1134 overlapProblem: a view dim larger than its owner's dim is 'view-does-not-fit'); class_to_value.head_counts (H_v > H_k for these sharing pairs; k_and_v_differ gives V more heads than K); class_to_value.seq_lengths (shorter: S_q < S_kv)"
+    adapted: "Model only: the class values fix which tensor is the view (strides `inherited`, D-INPUTS-OVERLAP-VIEW-LAYOUT) and its sizes."
+    note: "The rule states the fit for unpaged storage only: the case builder makes no shared-memory view on a paged row (overlapProblem returns 'paged' before the fit check), and a paged side holds a page pool, not [B, H, S, D] slots. A view on a ragged row is out of generation (CH-RAGGED-SHARED-MEMORY-LATER)."
+    evidence: read in code
 
   # =========================================================================== definition — structural
   # The model's shape enforces these. Rejection probes name them as their basis.
@@ -833,6 +848,31 @@ rules:
     probe: MV-04
     evidence: read in code
 
+  - id: P-RAGGED-STRIDES-NO-ALIAS
+    kind: policy
+    form: exclusion
+    reason: "A ragged Q, K or V with a zero sequence stride, or with token rows or heads that share elements, should be refused. The ragged tensor contract of RFC 0014 needs a positive sequence-axis stride and the sorted-stride rule over the non-batch axes."
+    forbid_any:
+      - {batch_packing: [ragged, ragged_q_side], seq_q: [many], strides_q: [zero_broadcast]}
+      - {batch_packing: [ragged, ragged_q_side], seq_q: [many], head_dim_qk: [d64, d96, d128, d192, d256, d512, d576], strides_q: [self_overlapping]}
+      - {batch_packing: [ragged, ragged_q_side], seq_q: [many], q_heads: [many], strides_q: [self_overlapping]}
+      - {batch_packing: [ragged, ragged_q_side], q_heads: [many], head_dim_qk: [d64, d96, d128, d192, d256, d512, d576], strides_q: [self_overlapping]}
+      - {batch_packing: [ragged, ragged_kv_side], seq_kv: [many], strides_k: [zero_broadcast]}
+      - {batch_packing: [ragged, ragged_kv_side], paged_kv: [v_only], max_seq_len_kv: [larger], strides_k: [zero_broadcast]}
+      - {batch_packing: [ragged, ragged_kv_side], seq_kv: [many], head_dim_qk: [d64, d96, d128, d192, d256, d512, d576], strides_k: [self_overlapping]}
+      - {batch_packing: [ragged, ragged_kv_side], paged_kv: [v_only], max_seq_len_kv: [larger], head_dim_qk: [d64, d96, d128, d192, d256, d512, d576], strides_k: [self_overlapping]}
+      - {batch_packing: [ragged, ragged_kv_side], seq_kv: [many], q_heads: [many], k_head_sharing: [mha, gqa], strides_k: [self_overlapping]}
+      - {batch_packing: [ragged, ragged_kv_side], paged_kv: [v_only], max_seq_len_kv: [larger], q_heads: [many], k_head_sharing: [mha, gqa], strides_k: [self_overlapping]}
+      - {batch_packing: [ragged, ragged_kv_side], q_heads: [many], k_head_sharing: [mha, gqa], head_dim_qk: [d64, d96, d128, d192, d256, d512, d576], strides_k: [self_overlapping]}
+      - {batch_packing: [ragged, ragged_kv_side], v_packing: [as_k, own_starts], seq_kv: [many], strides_v: [zero_broadcast]}
+      - {batch_packing: [ragged, ragged_kv_side], v_packing: [as_k, own_starts], seq_kv: [many], head_dim_v: [d64, d96, d128, d192, d256, d512, d576], strides_v: [self_overlapping]}
+      - {batch_packing: [ragged, ragged_kv_side], v_packing: [as_k, own_starts], seq_kv: [many], q_heads: [many], v_head_sharing: [mha, gqa], strides_v: [self_overlapping]}
+      - {batch_packing: [ragged, ragged_kv_side], v_packing: [as_k, own_starts], q_heads: [many], v_head_sharing: [mha, gqa], head_dim_v: [d64, d96, d128, d192, d256, d512, d576], strides_v: [self_overlapping]}
+    ticket: "to file"
+    source: "projects/hipdnn/docs/rfcs/0014_RaggedTensors.md (constructor-time validation: a positive sequence-axis stride; the sorted-stride rule, with the batch axis excluded and zero-stride axes exempt); the data SDK refuses the layout (@ 60109961eee projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/RaggedTensor.hpp:69-71, 171-173, 255 sorted-stride rule)"
+    note: "class_to_value.strides puts a zero stride on S first (then H, B, D): it breaks the contract only on S. self_overlapping goes on S first (then H, B) and shares elements with a partner dim (D first, then S, H, B); it breaks the contract unless the partner is the batch axis, so it needs S or H above 1 and D or a second non-batch dim above 1. The dense K beside a paged V has S = max_seq_len_kv. A ragged V is never paged (D-RAGGED-NOT-THROUGH-PAGES). O and Stats take neither stride (D-OUTPUT-SELF-ALIAS). AK-RAGGED-TOKEN-MAJOR names these layouts as uncheckable. F-RAGGED-MULTIPLIER-AT-LEAST-ONE removes a zero sequence stride on a shared-token ragged tensor. A view (`inherited`) of a ragged owner is out of generation (CH-RAGGED-SHARED-MEMORY-LATER)."
+    evidence: read in code
+
   # =========================================================================== choice
   - id: CH-SIZE-CLASSES
     kind: choice
@@ -908,6 +948,13 @@ rules:
       - {special_values: [infinity, nan, negative_infinity_bias, subnormal, signed_zero]}
       - {value_magnitude: [overflow_prone, precision_loss_prone]}
     source: "user decision 2026-11-04: the content value classes are left as hints for a fuzzer; a NaN or infinite scale is held out with no answer"
+
+  - id: CH-RAGGED-SHARED-MEMORY-LATER
+    kind: choice
+    form: exclusion
+    reason: "Inputs that share memory on a ragged row are left out of generation. ALMIOPEN-3180 tracks aliases whose owner is ragged."
+    forbid: {batch_packing: [ragged, ragged_q_side, ragged_kv_side], tensor_overlap: [inputs_overlap]}
+    source: "judgement call, 2026-11-06; ALMIOPEN-3180"
 
   - id: CH-STRATIFY-DTYPE
     kind: choice

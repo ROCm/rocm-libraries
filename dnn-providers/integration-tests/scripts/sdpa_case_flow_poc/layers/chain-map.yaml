@@ -87,7 +87,7 @@ rule_translations:
   D-INPUTS-OVERLAP-VIEW-DTYPE:
     layer1: "tensor_overlap, head_dim_v_vs_qk, dtype_q, dtype_k, dtype_v (absolute formats)"
     model: "tensor_overlap, head_dim_qk x head_dim_v value pairs, dtype_k_vs_q, dtype_v_vs_q"
-    why: "The model states K and V formats relative to Q (CH-DTYPE-MIX-RELATIONSHIP) and the head-size relation through the two head-size levels (CH-HEAD-DIM-LEVELS). V inside K: the two relations are equal (one 'differs' format per Q format, also after the by_arch swap). K inside Q: K is 'same'."
+    why: "The model states K and V formats relative to Q (CH-DTYPE-MIX-RELATIONSHIP) and the head-size relation through the two head-size levels (CH-HEAD-DIM-LEVELS). V inside K: the two relations are equal (one 'differs' format per Q format). K inside Q: K is 'same'."
   D-INPUTS-OVERLAP-VIEW-LAYOUT:
     layer1: "tensor_overlap, head_dim_v_vs_qk, strides_k, strides_v, dim_order_k, dim_order_v"
     model: "tensor_overlap, head_dim_qk x head_dim_v value pairs, strides_k, strides_v, dim_order_k, dim_order_v"

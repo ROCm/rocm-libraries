@@ -365,16 +365,15 @@ The script uses these methods:
 `dim_order_q = bshd` and `dim_order_o = bshd` count as no change, as the base
 value `bhsd` does. The same holds for K and V on a ragged K/V side. A search
 for the fewest changes tries `bshd` first in such a row
-(`generator_hints.plain_when` in `model.yaml`). This applies to the size-sweep
-crossings and the coverage rows. Low-change pairwise rows never hold a ragged
-setting (see "Rows a bundle can hold"), and packed rows take any order. So the
-ragged rows of quick are mostly the hand-picked ones, which are token-major
-except one head-major case for contrast.
+(`generator_hints.plain_when` in `model.yaml`). This applies to the low-change
+rows, the size-sweep crossings and the coverage rows. Packed rows take any
+order.
 
 **Rows a bundle can hold.** Some rows need a harness capability before a
-bundle can hold them, for example ragged offsets or a zero stride
-(`generator_hints.harness_needs` lists the rows of each capability; an axis
-names in `harness_needs` the values that need one). Every tier has
+bundle can hold them, for example an output written over an input, or random
+dropout without the dumped mask (`generator_hints.harness_needs` lists the rows
+of each capability; an axis names in `harness_needs` the values that need one).
+Every tier has
 `bundle_first: true`. Its low-change steps take only the pairs that a row with
 no such need can hold, and build only such rows. So each of those pairs is in a
 row that a bundle can hold. Then packed pairwise covers the tier's other pairs,
@@ -408,7 +407,18 @@ the recipe are open to review.
 | quick | `usage` common; `changes_numbers` not "no"; answer key yes or partial | yes | all, bundle rows first, low-change; packed for the rest | real-world rows and checkable seeds | S | 20 MFLOP | 5 min |
 | standard | as quick, plus `usage` rare | yes | all, bundle rows first, low-change; packed for the rest | targeted | S, H, M | 200 MFLOP | 30 min |
 | comprehensive | as standard | yes | within groups and bridges, bundle rows first, low-change; packed for the rest | one-at-a-time at S and L | S, H, M, L (one per row) | 8,000 MFLOP | 60 min |
-| full | everything, including `fringe` and answer key "no" | no | all, bundle rows first, low-change; packed for the rest | one-at-a-time at S and L; the base case at X | S, H, M, L, X | none | none |
+| full | every `usage` (also `fringe`) and every `changes_numbers`; answer key yes or partial | yes | all, bundle rows first, low-change; packed for the rest | one-at-a-time at S and L; uncheckable singles at S; the base case at X | S, H, M, L, X | none | none |
+
+**Uncheckable singles.** A case is uncheckable when it holds a value whose
+answer key is "no", or a combination of an answer-key rule
+(`level_labels.answer_key_needs`). No reference can compute its expected output.
+No tier pairs such a value or combination with other settings. Instead, full
+holds one case for each of them, at shape tier S (`uncheckable_singles: S`).
+Each single is origin `one-at-a-time` with detail `uncheckable <target>`: the
+target is `<axis>=<value>`, or `<rule id>#<index>` for a combination. A single
+holds only its own uncheckable reason when a valid row can; the levels summary
+lists the singles that hold more. A target that no valid row can hold has no
+single. The harness reports a single that an engine accepts as Unverifiable.
 
 **Size sweep.** Each level names the size-sweep rows it takes (`size_sweep`
 in `levels:`). quick takes the typical sizes, which are most likely to pass.
@@ -482,22 +492,23 @@ Result for the generated CSV (section 8; times are the summed
 
 | Tier | Cases in this tier | Cumulative cases | Cumulative s, gfx942 | Cumulative s, gfx950 | Budget use, gfx942 |
 |---|---|---|---|---|---|
-| quick | 1,461 | 1,461 | 61.4 | 49.7 | 20.5 % |
-| standard | 8,631 | 10,092 | 521.7 | 393.0 | 29.0 % |
-| comprehensive | 4,070 | 14,162 | 2,015.9 | 1,457.2 | 56.0 % |
-| full | 21,093 | 35,255 | 9,373.0 | 6,706.1 | — |
+| quick | 1,506 | 1,506 | 63.3 | 51.1 | 21.1 % |
+| standard | 9,555 | 11,061 | 580.7 | 436.6 | 32.3 % |
+| comprehensive | 4,643 | 15,704 | 2,333.2 | 1,685.0 | 64.8 % |
+| full | 11,545 | 27,249 | 7,043.4 | 5,052.0 | — |
 
 These times are the PoC runner's times (`src/sdpa-case-flow-runner/`) for one engine
 run plus one reference run. The suite does more work per case, so its times are larger.
 
 **Seeds.** The script completes each of the 15 seeds with the fewest changes
 under the rules and the answer-key rules. A seed whose row the references can
-check goes to quick, at shape S. Any other seed goes to full. 14 seeds are in
+check goes to quick, at shape S. Any other seed goes to full. Whether the
+references can check a seed's row is decided by the labels of quick, standard and
+comprehensive (full's `uncheckable_singles` does not count). 14 seeds are in
 quick; `S3b-vllm-fp8kv-paged` is in full, because a K or V format that differs
 from Q has answer key "no". In the CSV a seed row has `origin` `real_world` and
-`detail` `seed:<id>`. One seed (`S10b-blockmask-paged`) matched rows that
-low-change pairwise had already made, one in each tier. Their `detail` carries
-the seed name.
+`detail` `seed:<id>`. When a seed's row equals a row that the tier already
+holds, the two merge, and that row's `detail` carries the seed name.
 
 ## 8. The CSV
 
@@ -516,7 +527,7 @@ timing files or the generator changes the CSV, write the new SHA-256 to that
 file, and copy the new CSV to `test-plans/sdpa-fwd/levels.csv`, in the same
 change.
 
-`levels.csv` has one row per case: 35,255 rows. It has no quoted fields. A `-`
+`levels.csv` has one row per case: 27,249 rows. It has no quoted fields. A `-`
 means that a child axis is not active in that row. Each row has 105 columns: 13
 case columns, then 92 axis columns.
 
@@ -557,23 +568,22 @@ a bundle cannot express or compare stays in the generated CSV, and the
 selection step (`scripts/sdpa_case_flow_poc/bundles/select_rows.py`) skips it for
 the reasons below.
 
-The first three reasons say that a bundle cannot express or compare the row. The
+The first two reasons say that a bundle cannot express or compare the row. The
 last one is an extra exclusion: the row could be a bundle, but the selection step
 leaves it out. The Rows column counts every row that has the reason. A row can have several
 reasons, so the counts overlap and do not add up to the number of excluded rows.
 
 | Reason | Why the row is not a bundle | Rows |
 |---|---|---|
-| `tensor_overlap` | An output written over an input, inputs that share memory on a row with paged K and V, and inputs that share memory on a ragged row need control of the pointers that a bundle does not have. Inputs that share memory on a padded, non-paged row are bundle contents (metadata `aliases`); a view that does not fit inside its owner leaves through the export outcomes. | 310 |
-| `ragged_query_without_tokens` | A ragged Q gives no query token to compare: every sequence length is 0, or the lengths come from the Q offsets and a zero sequence stride makes every offset 0. Its outputs have no element to compare, and a comparison that compares no element fails. | 132 |
-| `arch_dtype` | The number format depends on the GPU (for example fp8 E4M3 becomes E4M3 FNUZ on gfx942), and one graph has one format. | 103 |
-| `dropout_without_rng_dump` | Random dropout without an `rng_dump` output has no oracle: the references check random dropout only through the dumped mask. | 58 (18 otherwise expressible) |
+| `tensor_overlap` | An output written over an input, inputs that share memory on a row with paged K and V, and inputs that share memory on a ragged row need control of the pointers that a bundle does not have. Inputs that share memory on a padded, non-paged row are bundle contents (metadata `aliases`). The generator holds no view larger than its owner (rule `D-REL-VIEW-FITS-OWNER`) and no inputs that share memory on a ragged row (rule `CH-RAGGED-SHARED-MEMORY-LATER`). | 57 |
+| `ragged_query_without_tokens` | A ragged Q gives no query token to compare: every sequence length is 0, or the lengths come from the Q offsets and a zero sequence stride makes every offset 0. Its outputs have no element to compare, and a comparison that compares no element passes without a check. | 56 |
+| `dropout_without_rng_dump` | Random dropout without an `rng_dump` output has no oracle: the references check random dropout only through the dumped mask. | 4 (4 otherwise expressible) |
 
 These are the rows that the selection step chooses from the current
-`levels.csv`, which has 35,255 rows. 34,852 rows become bundles and 403 rows
-are excluded. Of the excluded rows, 385 have at least one of the first three
-reasons. The other 18 could be bundles but have only dropout without
-`rng_dump`. A data start past an aligned allocation start (`element_aligned`, `sub_element`) is a bundle
+`levels.csv`, which has 27,249 rows. 27,132 rows become bundles and 117 rows
+are excluded. Of the excluded rows, 113 have at least one of the first two
+reasons. The other 4 could be bundles but have only dropout without
+`rng_dump`; 3 of them are uncheckable singles. A data start past an aligned allocation start (`element_aligned`, `sub_element`) is a bundle
 content: the case's metadata `start_offsets` gives the offset of each such
 tensor. When the case has per-sequence query lengths in a `seq_len_q` tensor,
 the metadata `live_rows` marks the dense Stats, logit-max and sum-of-exponents
@@ -585,11 +595,11 @@ filters. To bring a row back, change the filter and regenerate the bundles.
 
 | Tier | All rows | Bundle rows | Sweeps | Largest sweep | Summed `est_seconds` of the bundle rows, gfx942 / gfx950 |
 |---|---|---|---|---|---|
-| quick | 1,461 | 1,445 | 120 | 400 | 50.9 / 39.4 |
-| standard | 8,631 | 8,560 | 314 | 2,142 | 457.8 / 341.3 |
-| comprehensive | 4,070 | 4,033 | 264 | 969 | 1,487.4 / 1,059.5 |
-| full | 21,093 | 20,814 | 702 | 3,755 | 7,292.0 / 5,203.0 |
-| total | 35,255 | 34,852 | 1,400 | | |
+| quick | 1,506 | 1,500 | 142 | 353 | 53.1 / 41.0 |
+| standard | 9,555 | 9,519 | 377 | 2,174 | 515.8 / 384.2 |
+| comprehensive | 4,643 | 4,622 | 332 | 966 | 1,745.8 / 1,243.7 |
+| full | 11,545 | 11,491 | 464 | 2,451 | 4,693.0 / 3,354.7 |
+| total | 27,249 | 27,132 | 1,315 | | |
 
 ### 9.2 How a graph is made from a row
 
@@ -607,9 +617,10 @@ names this graph builder.
 3. It writes the graph as JSON text with `Graph::to_json()`. This is the same
    converter that the suite's graph capture uses. No GPU is needed.
 
-The graphs exported for gfx942 and for gfx950 are byte-identical for every
-bundle row, because the rows that depend on the GPU are excluded
-(`arch_dtype`).
+The graphs exported for gfx942 and for gfx950 are the same for every bundle
+row once the bundle import renumbers the tensor uids
+(`scripts/sdpa_case_flow_poc/bundles/compare_exports.py`): each number format
+is the same on every GPU (`class_to_value` in `model.yaml`).
 
 ### 9.3 Topologies and sweeps
 
@@ -629,7 +640,7 @@ each. A row with only Q, K, V and O is `Base`. Examples:
 | `Stats_DqBv_DkBv_DvBv` | Stats plus the three descales |
 
 A name longer than 64 characters keeps its first tokens and ends with 6 hex
-digits of a hash. The 35,255 rows have 812 topologies; the bundle rows use 641.
+digits of a hash. The 27,249 rows have 482 topologies; the bundle rows use 467.
 One sweep holds the cases of one tier and one topology.
 
 The suite's import tool `migration-scripts/import_graph.py` groups the graphs.
