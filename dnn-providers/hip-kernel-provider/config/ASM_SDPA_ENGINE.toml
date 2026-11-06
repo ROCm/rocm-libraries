@@ -1544,3 +1544,29 @@ filters = [
     "*_SdpaFwdPlan_SlQ_SlKv_ScRt_DSeed_DOff_Rng.*",
 ]
 reason = "ALMIOPEN-3126: the dropout RNG dump is accepted but never written"
+
+# SdpaFwdPlan cases with a Q, K or V descale on bf16 inputs. No reference computes them, so the result cannot be checked.
+[[test_skips]]
+archs = ["gfx942", "gfx950"]
+filters = [
+    "full_SdpaFwdPlan_AmaxO_Dq_Dk_Dv.bf16_80880308a642c59d",
+    "full_SdpaFwdPlan_AmaxO_Dq_Dk_Dv.bf16_a5d80bae97805285",
+    "full_SdpaFwdPlan_AmaxO_Dq_Dk_Dv.bf16_c536156446281786",
+]
+reason = "ALMIOPEN-3132: no reference accepts a Q, K or V descale on non-fp8 inputs, so the result cannot be checked"
+
+# SdpaFwdPlan cases with a non-UINT8 block mask, a non-FLOAT dropout mask, or an RNG dump without seed and offset. No reference computes them, so the result cannot be checked.
+[[test_skips]]
+archs = ["gfx942", "gfx950"]
+filters = [
+    "full_SdpaFwdPlan_Bm_Bias_Stats.bf16_06f696692ed5832e",
+    "full_SdpaFwdPlan_DMask_DScBv_AmaxO.bf16_1bc7e9656d1ce485",
+    "full_SdpaFwdPlan_DMask_DScBv_AmaxO.bf16_62b0e1063f6772bd",
+    "full_SdpaFwdPlan_DMask_DScBv_AmaxO.bf16_7d721dd65641a53a",
+    "full_SdpaFwdPlan_DMask_DScBv_AmaxO.bf16_82f303ca08da5d0a",
+    "full_SdpaFwdPlan_DMask_DScBv_AmaxO.bf16_9c28eb0e5a369744",
+    "full_SdpaFwdPlan_DMask_DScBv_AmaxO.bf16_bfa9ed08f0332933",
+    "full_SdpaFwdPlan_DMask_DScBv_Rng.bf16_f319fd144abc8986",
+    "full_SdpaFwdPlan_Rng.bf16_d76387ccee33e522",
+]
+reason = "ALMIOPEN-3211: no reference supports this block-mask, dropout-mask or RNG-dump form, so the result cannot be checked"
