@@ -6,7 +6,9 @@
 #include <hipdnn_data_sdk/types.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_test_sdk/utilities/DynamicTolerances.hpp>
+#include <hipdnn_test_sdk/utilities/pointwise/CpuDeviceExecutor.hpp>
 #include <hipdnn_test_sdk/utilities/pointwise/PointwiseErrorClassification.hpp>
+#include <hipdnn_test_sdk/utilities/pointwise/ReferencePointwiseBase.hpp>
 #include <vector>
 
 using namespace hipdnn_data_sdk::types;
@@ -450,8 +452,9 @@ TEST(TestClassifyPointwiseOp, AllModesReturnValidClass)
             << name;
     }
 
-    // The float evaluation of the newly implemented unary modes must stay within the tolerance of
-    // their class relative to the exact (double) result.
+    // The float evaluation of the newly implemented unary modes (run through the CPU reference with
+    // float compute) must stay within the tolerance of their class relative to the exact (double)
+    // result.
     struct UnaryCase
     {
         PointwiseMode mode;
@@ -474,14 +477,23 @@ TEST(TestClassifyPointwiseOp, AllModesReturnValidClass)
 
     for(const auto& testCase : allCases)
     {
+        hipdnn_data_sdk::utilities::Tensor<float> input({1, 1, 1, 1});
+        hipdnn_data_sdk::utilities::Tensor<float> output({1, 1, 1, 1});
+        input.fillWithValue(static_cast<float>(testCase.input));
+
+        hipdnn_test_sdk::utilities::ReferencePointwiseBase<
+            hipdnn_test_sdk::utilities::CpuDeviceExecutor<float, float>,
+            float,
+            float>::pointwiseCompute<float, float>(testCase.mode, output, input);
+
         const double scale = isBoundedOutput(testCase.mode)
                                  ? 1.0
                                  : std::max(std::abs(testCase.input), std::abs(testCase.exact));
         const auto tol = static_cast<double>(calculatePointwiseTolerance<float, float, float>(
             scale, classifyPointwiseOp(testCase.mode)));
 
-        EXPECT_LE(
-            std::abs(static_cast<double>(static_cast<float>(testCase.exact)) - testCase.exact), tol)
+        EXPECT_LE(std::abs(static_cast<double>(output.getHostValue(0, 0, 0, 0)) - testCase.exact),
+                  tol)
             << EnumNamesPointwiseMode()[static_cast<int>(testCase.mode)];
     }
 }

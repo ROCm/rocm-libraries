@@ -3663,3 +3663,117 @@ TEST(TestCpuReferencePointwiseGenIndex, Int32OutputAndAxisValidation)
                      PointwiseMode::EXP, output, int64_t{1})),
                  std::runtime_error);
 }
+
+// --- Scalar attribute omitted: ELU/Softplus/Swish default to 1 (hard-coded expected values) ---
+
+TEST(TestCpuReferencePointwiseScalarDefaults, OmittedScalarAttributesDefaultToOne)
+{
+    Tensor<float> input({1, 1, 1, 1});
+    Tensor<float> upstreamGrad({1, 1, 1, 1});
+    Tensor<float> output({1, 1, 1, 1});
+    upstreamGrad.fillWithValue(2.0f);
+
+    using ForwardImpl = CpuReferencePointwiseImpl<float, float>;
+    using BackwardImpl = CpuReferencePointwiseImpl<float, float, float>;
+
+    input.fillWithValue(-1.0f);
+    ForwardImpl::pointwiseCompute(PointwiseMode::ELU_FWD, output, input);
+    EXPECT_NEAR(output.getHostValue(0, 0, 0, 0), -0.6321205588f, 1e-7f); // exp(-1) - 1
+
+    input.fillWithValue(1.0f);
+    ForwardImpl::pointwiseCompute(PointwiseMode::SOFTPLUS_FWD, output, input);
+    EXPECT_NEAR(output.getHostValue(0, 0, 0, 0), 1.3132616875f, 1e-7f); // log(1 + e)
+
+    input.fillWithValue(-1.0f);
+    BackwardImpl::pointwiseCompute(PointwiseMode::ELU_BWD, output, upstreamGrad, input);
+    EXPECT_NEAR(output.getHostValue(0, 0, 0, 0), 0.7357588823f, 1e-7f); // 2 * exp(-1)
+
+    input.fillWithValue(1.0f);
+    BackwardImpl::pointwiseCompute(PointwiseMode::SWISH_BWD, output, upstreamGrad, input);
+    EXPECT_NEAR(output.getHostValue(0, 0, 0, 0), 1.8553410236f, 1e-7f); // 2 * (s + x s (1 - s))
+
+    BackwardImpl::pointwiseCompute(PointwiseMode::SOFTPLUS_BWD, output, upstreamGrad, input);
+    EXPECT_NEAR(output.getHostValue(0, 0, 0, 0), 1.4621171573f, 1e-7f); // 2 * sigmoid(1)
+}
+
+// --- Softplus switches to the linear branch once beta * x exceeds 20 ---
+
+TEST(TestCpuReferencePointwiseSoftplusLinearBranch, MatchesFormulaAroundTheCutoff)
+{
+    // x, beta, expected log(1 + exp(beta * x)) / beta
+    struct Case
+    {
+        float x;
+        float beta;
+        float expected;
+    };
+    const std::vector<Case> cases = {
+        {10.0f, 1.0f, 10.0000453989f}, // beta * x = 10, below the cutoff
+        {20.0f, 1.0f, 20.0000000021f}, // beta * x = 20, at the cutoff
+        {40.0f, 1.0f, 40.0f}, // beta * x = 40, linear branch
+        {60.0f, 0.5f, 60.0f}, // beta * x = 30, linear branch with beta != 1
+        {5.0f, 2.0f, 5.0000226995f}, // beta * x = 10, below the cutoff with beta != 1
+    };
+
+    for(const auto& testCase : cases)
+    {
+        Tensor<float> input({1, 1, 1, 1});
+        Tensor<float> output({1, 1, 1, 1});
+        input.fillWithValue(testCase.x);
+
+        CpuReferencePointwiseImpl<float, float>::pointwiseCompute(PointwiseMode::SOFTPLUS_FWD,
+                                                                  output,
+                                                                  input,
+                                                                  0.0f,
+                                                                  std::numeric_limits<float>::max(),
+                                                                  0.0f,
+                                                                  1.0f,
+                                                                  1.0f,
+                                                                  testCase.beta);
+
+        EXPECT_NEAR(output.getHostValue(0, 0, 0, 0), testCase.expected, 1e-7f)
+            << "x=" << testCase.x << ", beta=" << testCase.beta;
+    }
+}
+
+// --- ELU and Softplus must not lose small values to cancellation ---
+
+TEST(TestCpuReferencePointwiseCancellation, EluKeepsTheNegativeBranchNearZero)
+{
+    // exp(x) - 1 rounds to 0 for x = -1e-20, but alpha * expm1(x) = 1e20 * -1e-20 = -1.
+    Tensor<float> input({1, 1, 1, 1});
+    Tensor<float> output({1, 1, 1, 1});
+    input.fillWithValue(-1e-20f);
+
+    CpuReferencePointwiseImpl<float, float>::pointwiseCompute(PointwiseMode::ELU_FWD,
+                                                              output,
+                                                              input,
+                                                              0.0f,
+                                                              std::numeric_limits<float>::max(),
+                                                              0.0f,
+                                                              1.0f,
+                                                              1e20f,
+                                                              1.0f);
+
+    EXPECT_NEAR(output.getHostValue(0, 0, 0, 0), -1.0f, 1e-6f);
+}
+
+TEST(TestCpuReferencePointwiseCancellation, SoftplusKeepsTheNegativeTail)
+{
+    // 1 + exp(-40) rounds to 1, but log1p(exp(-40)) / 1e-16 = 4.2484e-18 / 1e-16 = 0.0424835.
+    Tensor<float> input({1, 1, 1, 1});
+    Tensor<float> output({1, 1, 1, 1});
+    input.fillWithValue(-4e17f);
+
+    CpuReferencePointwiseImpl<float, float>::pointwiseCompute(PointwiseMode::SOFTPLUS_FWD,
+                                                              output,
+                                                              input,
+                                                              0.0f,
+                                                              std::numeric_limits<float>::max(),
+                                                              0.0f,
+                                                              1.0f,
+                                                              1.0f,
+                                                              1e-16f);
+
+    EXPECT_NEAR(output.getHostValue(0, 0, 0, 0), 0.0424835f, 1e-7f);
+}

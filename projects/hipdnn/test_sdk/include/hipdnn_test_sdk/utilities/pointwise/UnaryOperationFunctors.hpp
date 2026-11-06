@@ -292,11 +292,14 @@ struct EluForward
     template <typename X>
     OutputType operator()(const X& x) const
     {
-        using hipdnn_data_sdk::types::exp;
         auto xCompute = static_cast<ComputeType>(x);
-        // ELU(x) = x for x > 0, alpha * (exp(x) - 1) otherwise
-        auto result
-            = xCompute > ComputeType{0} ? xCompute : alpha * (exp(xCompute) - ComputeType{1});
+        // ELU(x) = x for x > 0, alpha * expm1(x) otherwise. expm1 avoids the cancellation in
+        // exp(x) - 1 for x close to zero.
+        auto result = xCompute > ComputeType{0}
+                          ? xCompute
+                          : alpha
+                                * hipdnn_test_sdk::detail::safeConvert<ComputeType>(
+                                    std::expm1(static_cast<double>(xCompute)));
         return static_cast<OutputType>(result);
     }
 };
@@ -315,15 +318,18 @@ struct SoftplusForward
     OutputType operator()(const X& x) const
     {
         using hipdnn_data_sdk::types::exp;
-        using hipdnn_data_sdk::types::log;
         auto xCompute = static_cast<ComputeType>(x);
         auto scaled = beta * xCompute;
-        // Softplus(x) = log(1 + exp(beta * x)) / beta. Fallback to x when exp would overflow
-        // and the result is indistinguishable from the linear regime.
+        // Softplus(x) = log1p(exp(beta * x)) / beta. log1p avoids rounding 1 + exp(...) to 1 for
+        // very negative beta * x. Fallback to x when exp would overflow and the result is
+        // indistinguishable from the linear regime.
         // The threshold of 20 is chosen as a safe value to avoid overflow in the exponential function
         // (The same value is used in PyTorch's implementation of Softplus)
-        ComputeType result
-            = scaled > ComputeType{20} ? xCompute : log(ComputeType{1} + exp(scaled)) / beta;
+        ComputeType result = scaled > ComputeType{20}
+                                 ? xCompute
+                                 : hipdnn_test_sdk::detail::safeConvert<ComputeType>(
+                                       std::log1p(static_cast<double>(exp(scaled))))
+                                       / beta;
         return static_cast<OutputType>(result);
     }
 };
