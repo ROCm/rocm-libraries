@@ -26,6 +26,10 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
   can differ (for an FP16 output with `beta` = 1, the RNN bias gradient, by more than one ulp when
   the sum cancels). An integer compute type truncates a fractional `alpha`, `beta` and prior
   output.
+* [Reduce] Fixed an out-of-bounds read of shared memory in the warp-wise reductions with indices
+  that do not use the built-in shuffle (a compute type other than FP32 or FP64, for example FP16
+  compute with `MIN`, `MAX` or `AMAX`): the lanes at the end of a warp read the slots of the next
+  warp, and the last warp read past the end of the buffer. The result was not affected.
 * [Conv] Fixed the 3D grouped backward-weights CK xdlops convolution solver skipping
   `valid_kernels[0]` during exhaustive tuning: the populate branch fell through instead of emitting
   the seeded first config, so GenericSearch began enumeration at `valid_kernels[1]` and the first
