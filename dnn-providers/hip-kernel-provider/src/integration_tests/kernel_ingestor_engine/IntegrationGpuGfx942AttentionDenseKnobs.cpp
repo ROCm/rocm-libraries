@@ -82,6 +82,10 @@ using namespace hip_kernel_provider::test_utilities;
  * A saved plan of one case, and of its LSE twin, is loaded with a new handle in both save
  * forms and must compute the original graph's CPU reference without selecting a kernel
  * again.
+ *
+ * Tiers: the per-kernel rows (about 400 s on MI300X) are instantiated as `Comprehensive/`,
+ * which HIP_MLOPS_ENGINE_test_categories.yaml keeps out of the quick, standard and ffm-quick
+ * tiers; the coverage, filter, swizzle-legality and save/load cases run in every tier.
  */
 namespace hip_kernel_provider::kernel_ingestor_engine::integration
 {
@@ -1146,7 +1150,7 @@ TEST_F(IntegrationGpuGfx942AttentionDenseSaveLoad, RestoresAPersistentLsePlanInA
     roundTripInAFreshHandle(SaveForm::PLAN_ONLY, SAVE_LOAD_PERSISTENT_LSE_CASE);
 }
 
-INSTANTIATE_TEST_SUITE_P(Quick,
+INSTANTIATE_TEST_SUITE_P(Comprehensive,
                          IntegrationGpuGfx942AttentionDenseKnobs,
                          ::testing::ValuesIn(knobCases()),
                          [](const ::testing::TestParamInfo<KnobCase>& info) {
