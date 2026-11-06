@@ -1448,16 +1448,6 @@ function(hkp_product_offers_engine out_var engine)
 endfunction()
 
 # ---------------------------------------------------------------------------
-# hkp_gfx950_conv_dgrad_aot_available(<out>)
-#   The same predicate for the shape-generic AOT-instance backward-data engine,
-#   hipkernel:Gfx950ConvDgradAot, which ships its own bundle (the `product` root).
-# ---------------------------------------------------------------------------
-function(hkp_gfx950_conv_dgrad_aot_available out_var)
-    hkp_product_ships_engine_for_arch(_ships "hipkernel:Gfx950ConvDgradAot" gfx950)
-    set(${out_var} "${_ships}" PARENT_SCOPE)
-endfunction()
-
-# ---------------------------------------------------------------------------
 # _hkp_resolve_rocke_args(out_args out_comgr_lib)
 #   Resolve the rocKE toolchain once and return the keyword list every pack target is
 #   wired with, plus the comgr library the ctest entries forward. Called once for all

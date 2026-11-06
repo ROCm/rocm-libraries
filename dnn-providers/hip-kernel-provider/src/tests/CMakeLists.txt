@@ -555,23 +555,15 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
 
     # Census for the shape-generic backward-data AOT-instance pack,
     # hipkernel:Gfx950ConvDgradAot.
-    hkp_gfx950_conv_dgrad_aot_available(_hkp_gfx950_conv_dgrad_aot)
+    hkp_product_ships_engine_for_arch(_hkp_gfx950_conv_dgrad_aot
+                                      "hipkernel:Gfx950ConvDgradAot" gfx950)
     if(_hkp_gfx950_conv_dgrad_aot)
         hkp_register_census_tests(
             TARGET hip_kernel_provider_census_tests
             PACK_NAME product
             ARCHES gfx950
             SUITES TestGfx950ConvDgradAotPacks
-            EXPECTED_CASES
-                LoadsExactlyTheEmittedPacks
-                LoadsExactlyTheEmittedKernels
-                EveryLoadedDescriptorCoversTheRequestedArch
-                EveryKernelDeclaresTheEmittedRuntimeSourceKind
-                DeclaresTheConfiguredSdkVersion
-                ExposesTheConfiguredKnobs
-                RanksThroughItsRegisteredScoreSymbol
-                CarriesNoGraphScopedMatcher
-                CarriesExactlyOneSharedKernelScopedMatcher
+            EXPECTED_CASES ${_hkp_generated_packs_cases}
         )
     else()
         message(STATUS
