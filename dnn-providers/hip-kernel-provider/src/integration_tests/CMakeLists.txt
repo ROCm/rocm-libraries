@@ -125,6 +125,14 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
         kernel_ingestor_engine/IntegrationGpuKernelIngestorKpack.cpp
         kernel_ingestor_engine/IntegrationGraphVerificationContext.cpp
     )
+    # The conv engine group's engines, end to end. The definition is set directly for the
+    # same reason as the ingestor's below: this target does not link the provider.
+    if(HIPKERNELPROVIDER_ENABLE_CONV)
+        target_sources(hip_kernel_provider_integration_tests PRIVATE
+            kernel_ingestor_engine/IntegrationGpuConvNaive.cpp
+        )
+        target_compile_definitions(hip_kernel_provider_integration_tests PRIVATE HIPDNN_ENGINE_CONV=1)
+    endif()
     # This target links only the SDKs, not hip_kernel_provider_private, so it does not
     # inherit the provider's gate and needs the definition set directly.
     target_compile_definitions(hip_kernel_provider_integration_tests
