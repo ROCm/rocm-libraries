@@ -163,7 +163,7 @@ namespace
         inputs.mxsa = mxsa.data();
         inputs.mxsb = mxsb.data();
 
-        executeReferenceGemm(problem, inputs, /*elementsToValidate=*/-1, requireBlockedExecution);
+        executeReferenceGemm(problem, inputs, ReferenceElements::all(), requireBlockedExecution);
         EXPECT_EQ(d, (std::vector<float>{128, 128, 128, 128}));
     }
 
@@ -191,7 +191,7 @@ TEST(ReferenceMXGemm, SupportsMixedInputTypesWithMXFP4)
     inputs.mxsa = mxsa.data();
     inputs.mxsb = mxsb.data();
 
-    executeReferenceGemm(problem, inputs, /*elementsToValidate=*/-1, requireBlockedExecution);
+    executeReferenceGemm(problem, inputs, ReferenceElements::all(), requireBlockedExecution);
     EXPECT_EQ(d[0], 64);
 }
 
@@ -221,7 +221,7 @@ TEST(ReferenceMXGemm, TreatsE8RawZeroAsZero)
     inputs.mxsb = mxsb.data();
 
     executeReferenceGemm(
-        problem, inputs, /*elementsToValidate=*/-1, roc::hostnumerics::GemmBackend::Automatic);
+        problem, inputs, ReferenceElements::all(), roc::hostnumerics::GemmBackend::Automatic);
     EXPECT_EQ(d[0], 0.0f);
 }
 
@@ -259,8 +259,7 @@ TEST(ReferenceMXGemm, ComputesScaledFP8Gemm)
     inputsBlocked.mxsa = mxsa.data();
     inputsBlocked.mxsb = mxsb.data();
 
-    executeReferenceGemm(
-        problem, inputsBlocked, /*elementsToValidate=*/-1, requireBlockedExecution);
+    executeReferenceGemm(problem, inputsBlocked, ReferenceElements::all(), requireBlockedExecution);
 
     const auto expected   = expectedMXGemm(problem, a, b, c, mxsa, mxsb, 1.0f, 0.0f);
     const auto comparison = roc::hostnumerics::compare(
@@ -316,8 +315,7 @@ TEST(ReferenceMXGemm, ComputesScaledFP8GemmWithBetaAndBias)
     inputsBlocked.mxsb = mxsb.data();
     inputsBlocked.bias = bias.data();
 
-    executeReferenceGemm(
-        problem, inputsBlocked, /*elementsToValidate=*/-1, requireBlockedExecution);
+    executeReferenceGemm(problem, inputsBlocked, ReferenceElements::all(), requireBlockedExecution);
 
     const auto expected   = expectedMXGemm(problem, a, b, c, mxsa, mxsb, 1.0f, 0.5f, &bias);
     const auto comparison = roc::hostnumerics::compare(
@@ -405,9 +403,8 @@ TEST(ReferenceMXGemm, FreeTileScalesMatchReplicatedPerRowScales)
     inputsRowwise.mxsa = rowA.data();
     inputsRowwise.mxsb = rowB.data();
 
-    executeReferenceGemm(tiled, inputsTiled, /*elementsToValidate=*/-1, requireBlockedExecution);
-    executeReferenceGemm(
-        rowwise, inputsRowwise, /*elementsToValidate=*/-1, requireBlockedExecution);
+    executeReferenceGemm(tiled, inputsTiled, ReferenceElements::all(), requireBlockedExecution);
+    executeReferenceGemm(rowwise, inputsRowwise, ReferenceElements::all(), requireBlockedExecution);
     EXPECT_EQ(dTiled, dRowwise);
     EXPECT_EQ(dRowwise, expectedMXGemm(rowwise, a, b, c, rowA, rowB, 1.0f, 0.0f));
 }
@@ -440,6 +437,6 @@ TEST(ReferenceMXGemm, Block128HandlesPartialFinalBlock)
     ContractionInputs inputs(a.data(), b.data(), c.data(), d.data(), 1.0f, 0.0f);
     inputs.mxsa = mxsa.data();
     inputs.mxsb = mxsb.data();
-    executeReferenceGemm(problem, inputs, /*elementsToValidate=*/-1, requireBlockedExecution);
+    executeReferenceGemm(problem, inputs, ReferenceElements::all(), requireBlockedExecution);
     EXPECT_EQ(d, expectedMXGemm(problem, a, b, c, mxsa, mxsb, 1.0f, 0.0f));
 }

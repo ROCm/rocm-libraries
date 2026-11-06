@@ -49,6 +49,19 @@ namespace TensileLite
 {
     namespace Client
     {
+        namespace
+        {
+            // --num-elements-to-validate N > 0 samples about N output elements.
+            // -1 checks every element, and 0 turns checking off but still computes
+            // every element of a reference that is printed.
+            ReferenceElements referenceElements(int elementsToValidate)
+            {
+                return elementsToValidate > 0
+                           ? ReferenceElements::sampled(static_cast<size_t>(elementsToValidate))
+                           : ReferenceElements::all();
+            }
+        }
+
         ReferenceValidator::ReferenceValidator(po::variables_map const& args)
         {
             m_elementsToValidate = args["num-elements-to-validate"].as<int>();
@@ -113,7 +126,7 @@ namespace TensileLite
                             "Freivalds does not support fused GEMM all-to-all validation.");
                     if(!m_freivalds)
                         m_outputSelections.push_back(referenceIndexRange(
-                            gemm->d(), static_cast<size_t>(m_elementsToValidate)));
+                            gemm->d(), referenceElements(m_elementsToValidate)));
                     size_t M          = gemm->freeSizeA(0);
                     size_t N          = gemm->freeSizeB(0);
                     size_t K          = gemm->boundSize(0);
@@ -134,7 +147,7 @@ namespace TensileLite
                         auto& g = grouped->gemms[i];
                         if(!m_freivalds)
                             m_outputSelections.push_back(referenceIndexRange(
-                                g.d(), static_cast<size_t>(m_elementsToValidate)));
+                                g.d(), referenceElements(m_elementsToValidate)));
                         size_t M          = g.freeSizeA(0);
                         size_t N          = g.freeSizeB(0);
                         size_t K          = g.boundSize(0);
@@ -774,7 +787,7 @@ namespace TensileLite
                     = tensorRole == ContractionProblemGemm::TENSOR::D
                               || tensorRole == ContractionProblemGemm::TENSOR::E
                           ? outputSelection
-                          : referenceIndexRange(tensor, static_cast<size_t>(m_elementsToValidate));
+                          : referenceIndexRange(tensor, referenceElements(m_elementsToValidate));
 
                 void const* refPtr = nullptr;
                 void const* resPtr = nullptr;
