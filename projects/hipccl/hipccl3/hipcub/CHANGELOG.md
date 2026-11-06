@@ -31,7 +31,7 @@ Full documentation for hipCUB is available at [https://rocm.docs.amd.com/project
 
 ### Removed
 
-* Removed the deprecated thread operators `Equality`, `Inequality`, `Sum`, `Difference`, `Division`, `Max` and `Min`.
+* Removed the deprecated thread operators `Equality`, `Inequality`, `InequalityWrapper`, `Sum`, `Difference`, `Division`, `Max` and `Min` from the CUB backend. They remain available (deprecated) in the rocPRIM backend for backward compatibility.
 
 ## hipCUB-5.0.0 for ROCm 10.2.0
  

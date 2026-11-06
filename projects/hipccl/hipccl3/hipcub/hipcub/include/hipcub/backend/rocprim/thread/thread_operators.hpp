@@ -58,6 +58,84 @@ struct HIPCUB_DEPRECATED_BECAUSE("Use hip::std::equal_to instead") Equality
     }
 };
 
+// Deprecated: new code should use _HIPCUB_STD::not_equal_to<> instead.
+struct HIPCUB_DEPRECATED_BECAUSE("Use hip::std::not_equal_to<T> instead.") Inequality
+{
+    template<class T, class U>
+    HIPCUB_HOST_DEVICE inline constexpr bool operator()(T&& t, U&& u) const
+    {
+        return std::forward<T>(t) != std::forward<U>(u);
+    }
+};
+
+// Deprecated: new code should use _HIPCUB_STD::not_equal_to<> instead.
+template<class EqualityOp>
+struct HIPCUB_DEPRECATED_BECAUSE("Use hip::std::not_equal_to<T> instead.") InequalityWrapper
+{
+    EqualityOp op;
+
+    HIPCUB_HOST_DEVICE inline
+    InequalityWrapper(EqualityOp op) : op(op) {}
+
+    template<class T, class U>
+    HIPCUB_HOST_DEVICE inline bool operator()(T&& t, U&& u)
+    {
+        return !op(std::forward<T>(t), std::forward<U>(u));
+    }
+};
+
+// Deprecated: new code should use _HIPCUB_STD::plus<> instead.
+struct HIPCUB_DEPRECATED_BECAUSE("Use hip::std::plus<T> instead.") Sum
+{
+    template<class T, class U>
+    HIPCUB_HOST_DEVICE inline constexpr auto operator()(T&& t, U&& u) const -> decltype(auto)
+    {
+        return std::forward<T>(t) + std::forward<U>(u);
+    }
+};
+
+// Deprecated: new code should use _HIPCUB_STD::minus<> instead.
+struct HIPCUB_DEPRECATED_BECAUSE("Use hip::std::minus<T> instead") Difference
+{
+    template<class T, class U>
+    HIPCUB_HOST_DEVICE inline constexpr auto operator()(T&& t, U&& u) const -> decltype(auto)
+    {
+        return std::forward<T>(t) - std::forward<U>(u);
+    }
+};
+
+// Deprecated: new code should use _HIPCUB_STD::divides<> instead.
+struct HIPCUB_DEPRECATED_BECAUSE("Use hip::std::divides<T> instead") Division
+{
+    template<class T, class U>
+    HIPCUB_HOST_DEVICE inline constexpr auto operator()(T&& t, U&& u) const -> decltype(auto)
+    {
+        return std::forward<T>(t) / std::forward<U>(u);
+    }
+};
+
+// Deprecated: new code should use hip::maximum instead.
+struct HIPCUB_DEPRECATED_BECAUSE("Use hip::maximum<T> instead.") Max
+{
+    template<class T, class U>
+    HIPCUB_HOST_DEVICE inline constexpr typename std::common_type<T, U>::type
+        operator()(T&& t, U&& u) const
+    {
+        return (((u) > (t)) ? (u) : (t));
+    }
+};
+
+// Deprecated: new code should use hip::minimum instead.
+struct HIPCUB_DEPRECATED_BECAUSE("Use hip::minimum<T> instead.") Min
+{
+    template<class T, class U>
+    HIPCUB_HOST_DEVICE inline constexpr typename std::common_type<T, U>::type
+        operator()(T&& t, U&& u) const
+    {
+        return (((u) < (t)) ? (u) : (t));
+    }
+};
+
 struct ArgMax
 {
     template<
