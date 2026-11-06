@@ -752,3 +752,45 @@ TYPED_TEST(hip_blas_wrapper, dense_apply_is_the_product)
         expect_all_near(values_of(*out), a.apply(x), tol<T>());
     }
 }
+
+// The HIP DENSE ApplyAdd is the same gemv with the scalar as alpha. The known bug, beta 0,
+// does not show when the output starts out zero.
+TYPED_TEST(hip_blas_wrapper, dense_apply_add_adds_the_scaled_product)
+{
+    using T = typename TypeParam::value_type;
+
+    Csr<T> a(3, 4);
+    for(int i = 0; i < 3; ++i)
+    {
+        for(int j = 0; j < 4; ++j)
+        {
+            a.add(j, from_int<T>(i * 4 + j + 1));
+        }
+        a.end_row();
+    }
+    auto A = make_matrix(Backend::Accelerator, Format{rocalution::DENSE, 1}, *a.host_csr());
+    ASSERT_NE(A, nullptr);
+
+    const std::vector<T> x        = from_ints<T>({1, -2, 3, -6});
+    const T              scalar   = value<T>(0.5, -1.5);
+    auto                 in       = make_vector(Backend::Accelerator, x);
+    auto                 expected = [&](std::vector<T> y) {
+        const std::vector<T> Ax = a.apply(x);
+        for(int i = 0; i < 3; ++i)
+        {
+            y[i] += scalar * Ax[i];
+        }
+        return y;
+    };
+
+    auto out = make_vector(Backend::Accelerator, std::vector<T>(3, static_cast<T>(0)));
+    A->ApplyAdd(*in, scalar, out.get());
+    expect_all_near(values_of(*out), expected(std::vector<T>(3, static_cast<T>(0))), tol<T>());
+
+    KNOWN_BUG("gemv gets beta 0, so the output is overwritten");
+
+    const std::vector<T> y(3, from_int<T>(-7));
+    out = make_vector(Backend::Accelerator, y);
+    A->ApplyAdd(*in, scalar, out.get());
+    expect_all_near(values_of(*out), expected(y), tol<T>());
+}
