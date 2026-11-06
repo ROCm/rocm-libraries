@@ -970,6 +970,7 @@ namespace TensileLite
             Range, // RangeMatching
             FreeSize, // FreeSizeMatching
             GridBased, // GridBasedMatching
+            MeshBased, // MeshBasedMatching
             Prediction, // PredictionMatching
             Experimental, // ExperimentalStreamK or ExperimentalMLP
             Others, // Default
