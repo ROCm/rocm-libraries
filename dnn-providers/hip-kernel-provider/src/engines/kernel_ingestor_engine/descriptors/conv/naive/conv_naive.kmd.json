@@ -1,0 +1,15 @@
+{
+  "version": "1.0",
+  "id": "93087dd4-7d8b-43eb-b783-32c178393589",
+  "name": "conv_naive variant fields",
+  "fields": [
+    {
+      "name": "dtype",
+      "type": "string"
+    },
+    {
+      "name": "direction",
+      "type": "string"
+    }
+  ]
+}

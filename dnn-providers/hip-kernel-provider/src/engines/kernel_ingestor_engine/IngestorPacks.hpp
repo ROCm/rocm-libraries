@@ -48,6 +48,11 @@ void resetPointwiseModuleCache();
 void registerConvFwdSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
 void resetConvFwdModuleCache();
 
+/// @see packs/ConvNaiveNative.cpp. The conv engine group's naive convolution: one pack
+/// serving three engines, CONV_NAIVE_FWD, CONV_NAIVE_BWD and CONV_NAIVE_WRW.
+void registerConvNaiveSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
+void resetConvNaiveModuleCache();
+
 /// The engine name gfx950_attention_dense.ued.json declares. The pack table, the pack's
 /// own log lines and the descriptor census (which looks the loaded set up by this name)
 /// all read it here, so a rename that misses the descriptor fails the census.

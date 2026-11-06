@@ -71,6 +71,11 @@ option(HIPDNN_ENABLE_KERNEL_INGESTOR "Enable the generic kernel ingestor" OFF)
 # HIPDNN_ENABLE_KERNEL_INGESTOR OFF it builds nothing.
 option(HIPKERNELPROVIDER_ENABLE_FLYDSL
        "Pack the prebuilt FlyDSL kernels for the kernel ingestor" OFF)
+# The conv engine group (conv/): HIP convolution kernels compiled at runtime through
+# HIPRTC and served by the kernel ingestor. OFF while the group is being built out; with
+# HIPDNN_ENABLE_KERNEL_INGESTOR OFF it builds nothing.
+option(HIPKERNELPROVIDER_ENABLE_CONV
+       "Build the conv engine group (naive convolution) for the kernel ingestor" OFF)
 option(ENABLE_ASM_SDPA_ENGINE "Build the ASM SDPA engine" ON)
 option(ENABLE_HIP_MLOPS_ENGINE "Build the HIP kernel engine" ON)
 

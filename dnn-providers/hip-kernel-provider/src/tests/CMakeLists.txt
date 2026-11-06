@@ -49,6 +49,15 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
              kernels/PointwiseMul.cpp
              kernels/PointwiseSub.cpp
     )
+    if(HIPKERNELPROVIDER_ENABLE_CONV)
+        # The conv engine group's production kernels, under the keys its shipped
+        # descriptors name, so the conv tests compile them as the plugin does.
+        add_kernels_for_embedding(
+            TARGET hip_kernel_provider_tests
+            FILES ${HKP_CONV_KERNEL_SOURCES}
+            KEYS ${HKP_CONV_KERNEL_KEYS}
+        )
+    endif()
 endif()
 embed_kernel_sources(
     TARGET hip_kernel_provider_tests

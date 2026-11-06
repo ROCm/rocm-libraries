@@ -1,0 +1,7 @@
+{
+  "version": "1.0",
+  "id": "0dec0719-a2c5-498f-996c-bb81e993293f",
+  "name": "kernel dtype and direction match the graph",
+  "scope": "kernel",
+  "match_symbol": "hipkernel.conv_naive.kernel_match"
+}

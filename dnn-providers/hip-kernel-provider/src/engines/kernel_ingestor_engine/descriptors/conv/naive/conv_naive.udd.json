@@ -1,0 +1,6 @@
+{
+  "version": "1.0",
+  "id": "a382d637-854c-4e42-ade4-8e4aaf6a06b1",
+  "name": "conv_naive dispatch",
+  "dispatch_symbol": "hipkernel.conv_naive.dispatch"
+}

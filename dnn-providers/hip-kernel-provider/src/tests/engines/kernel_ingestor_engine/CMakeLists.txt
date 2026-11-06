@@ -117,6 +117,13 @@ target_sources(hip_kernel_provider_census_tests PRIVATE
 # Split across the two binaries on the same rule as the packs above: the census over the
 # staged shard goes to the census binary, and the seam suites -- matchers, scoring,
 # dispatch, the real launches -- stay in the ordinary one.
+if(HIPKERNELPROVIDER_ENABLE_CONV)
+    target_sources(hip_kernel_provider_tests PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestConvNaiveProblem.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestConvNaiveDevice.cpp
+    )
+endif()
+
 if(HIPKERNELPROVIDER_FLYDSL_ACTIVE)
     target_sources(hip_kernel_provider_tests PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestFlydslRmsNormEngine.cpp
