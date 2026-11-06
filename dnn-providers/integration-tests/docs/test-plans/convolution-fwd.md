@@ -5,8 +5,8 @@ and its pointwise fusions that a complete test sweep must exercise, and how the
 sweep is spread across levels. It does not depend on any engine: the sweep
 describes the problem space, and each engine's support claims decide which cases
 it runs. Backward-data (`ConvolutionBwd`) and weight gradient (`ConvolutionWrw`)
-are out of scope; each gets its own plan in this folder (`convolution-bwd.md`,
-`convolution-wrw.md`).
+are out of scope; each gets its own plan in this folder
+([convolution-bwd.md](convolution-bwd.md), `convolution-wrw.md`).
 
 The plan follows RFC 0021 (Per-Op Test Plans) and the [methodology](methodology.md).
 See [the test-plans index](README.md) for the level definitions.

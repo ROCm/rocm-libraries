@@ -17,6 +17,7 @@ plan in the same pull request.
 | Plan | Bundles |
 |---|---|
 | [Convolution forward](convolution-fwd.md) | `ConvolutionFwd/Default`, `ConvolutionFwdPointwise/Default`, `ConvolutionFwdPointwise/Variant2` … `Variant6` (written by `reference-data-scripts/generate_conv_fwd_bundles.py`) |
+| [Convolution backward data](convolution-bwd.md) | `ConvolutionBwd/Default`, `ConvolutionBwdPointwise/Default`, `ConvolutionBwdPointwise/Variant2` … `Variant4` (written by `reference-data-scripts/generate_conv_bwd_bundles.py`) |
 
 ## Tiers
 

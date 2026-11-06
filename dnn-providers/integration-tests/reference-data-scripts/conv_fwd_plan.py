@@ -19,6 +19,10 @@ records which products no engine executed when they were measured, and each
 trim names the trigger that brings its product back. A case is a plain
 ``dict``; ``finalize`` resolves every default so that two spellings of one
 graph compare equal.
+
+The backward-data plan (``conv_bwd_plan.py``) imports the geometry, the
+legality rules, the S, L, M, H, A and X catalog and the ceilings from here, so a
+change to them regenerates both plans' bundles.
 """
 
 from __future__ import annotations
