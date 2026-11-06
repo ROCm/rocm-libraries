@@ -59,7 +59,7 @@ from copy import deepcopy
 # distributes the leftover in units of skKGranularity instead of single
 # iterations, which keeps every workgroup start on an epoch boundary. The host
 # packs SKItersPerWG already rounded down to a multiple of the same quantum
-# (StreamK::Static::computeSplit in ContractionSolution.cpp), so the leftover is a whole
+# (StreamK::Static::computeSplit in StreamK.cpp), so the leftover is a whole
 # number of epochs and the closed-form inverses in the fixup path stay valid.
 #
 # This is a no-op (granularity 1) for every non-dual-period kernel.
