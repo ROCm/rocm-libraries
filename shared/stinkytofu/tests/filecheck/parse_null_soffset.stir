@@ -1,0 +1,13 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --print-output
+#
+# The printer writes an absent buffer soffset as `null`; the parser must read it back, or an IR
+# checkpoint bundle holding a buffer store does not load.
+#
+# CHECK-LABEL: @null_soffset
+# CHECK: "st.buffer_store_b128"(v[48:51], v39, s[16:19], null)
+
+st.func @null_soffset() {
+^entry:
+  "st.buffer_store_b128"(v[48:51], v39, s[16:19], null) { mod.mubuf = { offen = true, offset12 = 0, glc = false, slc = false, nt = false, lds = false, scope = "SCOPE_CU", th = "TH_STORE_RT" } }
+  "st.s_endpgm"()
+}

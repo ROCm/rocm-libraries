@@ -1004,6 +1004,9 @@ std::optional<StinkyRegister> IRParser::parseRegister() {
         }
     }
 
+    // "null" is the no-op resource the printer writes for an absent buffer soffset.
+    if (regTypeStr == "null") return StinkyRegister(regTypeStr);
+
     RegType regType = stringToRegType(regTypeStr);
 
     // Validate register type
