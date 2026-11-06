@@ -202,10 +202,13 @@ def gemm_config_supported(q: GemmSupportQuery) -> Tuple[bool, str]:
     if family == "wmma":
         if q.warp_tile != (16, 16, 16):
             return False, f"WMMA path supports only 16x16x16, got {q.warp_tile}"
-        if q.pipeline != "mem":
+        # Mirrors is_valid_spec: gfx1201 also takes the compv4 double buffer.
+        pipelines = ("mem", "compv4") if q.arch == "gfx1201" else ("mem",)
+        if q.pipeline not in pipelines:
+            names = " or ".join(f"'{p}'" for p in pipelines)
             return (
                 False,
-                f"WMMA path supports only the 'mem' pipeline, got {q.pipeline!r}",
+                f"WMMA path supports only the {names} pipeline, got {q.pipeline!r}",
             )
         if q.epilogue != "default":
             return (

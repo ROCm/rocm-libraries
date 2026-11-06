@@ -738,10 +738,12 @@ def is_valid_spec(spec: UniversalGemmSpec, arch: str = "gfx950") -> Tuple[bool, 
     # gfx11/gfx12 RDNA supports the 16x16x16 atom and gfx1250 supports the
     # gfx1250-class 16x16x32 (f16/bf16), 16x16x64 (fp8/bf8) and 16x16x128
     # (fp8, the dedicated fp8 x fp8 instruction) atoms, all
-    # through the simple ``mem`` / ``wmma_v1`` pipelines. The richer pipelines
-    # (compv3 / compv4 scheduler interleave), DTLA and preshuffle encode
-    # MFMA-shaped assumptions and are gated off until ported. CDNA MFMA keeps
-    # the full matrix.
+    # through the simple ``mem`` / ``wmma_v1`` pipelines. gfx1201 additionally
+    # takes ``compv4``: the double-buffered K loop, whose WMMA phase reads the
+    # LDS half the loop filled (``_emit_wmma_phase`` follows the parity under
+    # ``_db`` as under ``_prefetch``). It is verified on silicon there only.
+    # DTLA and preshuffle encode MFMA-shaped assumptions and are gated off
+    # until ported. CDNA MFMA keeps the full matrix.
     if family == "wmma":
         supported_atoms = {(16, 16, 16)}
         if arch == "gfx1250":
@@ -751,9 +753,13 @@ def is_valid_spec(spec: UniversalGemmSpec, arch: str = "gfx950") -> Tuple[bool, 
                 f"{m}x{n}x{k}" for (m, n, k) in sorted(supported_atoms)
             )
             return False, f"WMMA path supports only {supported} (got {atom}) on {arch}"
-        if spec.trait.pipeline not in ("mem", "wmma_v1"):
+        wmma_pipelines = (
+            ("mem", "wmma_v1", "compv4") if arch == "gfx1201" else ("mem", "wmma_v1")
+        )
+        if spec.trait.pipeline not in wmma_pipelines:
+            names = " or ".join(f"'{p}'" for p in wmma_pipelines)
             return False, (
-                f"WMMA path supports only the 'mem' or 'wmma_v1' pipeline "
+                f"WMMA path supports only the {names} pipeline "
                 f"(got {spec.trait.pipeline!r}) on {arch}"
             )
         # The cshuffle epilogue is admitted on gfx1250 only. Its accumulator
@@ -769,24 +775,21 @@ def is_valid_spec(spec: UniversalGemmSpec, arch: str = "gfx950") -> Tuple[bool, 
                 f"WMMA path supports the {spec.trait.epilogue!r} epilogue "
                 f"only on gfx1250, not {arch}"
             )
-        # ``lds_swizzle`` is rejected for the whole family, not only the load
-        # paths that structurally cannot express it. It XORs the LDS *column*
-        # on the store side, and the inverse permutation is applied on the MFMA
-        # read path (``emit_mfma_phase``) but not on the WMMA one
-        # (``_emit_wmma_phase`` has no ``_swz_col``). Where it emits at all it
-        # therefore writes one address and reads another: fast, plausible, and
-        # numerically wrong, so a sweep ranks it as a winner while it is
-        # incorrect. Under TDM it emits nothing instead, the mover owning the
-        # LDS write -- silently inert rather than silently wrong. It is bit-exact
-        # on the CDNA MFMA path, hence family scope rather than a global gate.
-        # Every WMMA target is affected: gfx1151 returns wrong outputs with it too.
+        # ``lds_swizzle`` XORs the LDS column on the store side; the WMMA
+        # fragment read applies the same XOR (``_emit_frag_smem_load``), keyed
+        # on the same parity-free row. That pairing is verified on silicon on
+        # gfx1201 only, so the knob is admitted there and rejected on the other
+        # WMMA targets until they are verified too. gfx1201 has neither TDM
+        # (where the mover owns the LDS write and no store-side XOR exists) nor
+        # fp8 A/B (whose dword fragments are not element-indexed), so both
+        # excluded cases are already rejected above for it.
         for flag, label in (
             (spec.trait.preshuffle_b, "preshuffle_b"),
             (spec.trait.direct_to_lds, "direct_to_lds"),
             (spec.trait.dtl_prefetch, "dtl_prefetch"),
             (spec.trait.active_tile_skip, "active_tile_skip"),
             (spec.trait.chiplet_swizzle, "chiplet_swizzle"),
-            (spec.trait.lds_swizzle, "lds_swizzle"),
+            (spec.trait.lds_swizzle and arch != "gfx1201", "lds_swizzle"),
         ):
             if flag:
                 return False, f"WMMA path does not support {label} on {arch}"
@@ -2173,6 +2176,7 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
         atom_mn_base: Value,
         k_tile_base: Value,
         frag_len: int,
+        swz_row: Optional[Value] = None,
     ) -> Value:
         """Load one ``frag_len``-wide operand fragment from a row-major LDS tile.
 
@@ -2190,6 +2194,12 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
         dword per slot covering four K-contiguous bytes. The lane therefore
         reads ``4 * frag_len`` LDS elements, and the byte vector is bitcast to
         the dword vector the intrinsic takes.
+
+        ``swz_row`` is the parity-free tile row the store side keyed
+        ``lds_swizzle`` on; when given, every chunk's column goes through the
+        same ``_swz_col`` XOR. The XOR moves whole ``elem``-wide slots and
+        ``elem`` is at least the fragment width, so each 8-wide chunk stays
+        contiguous.
         """
         lds_row = b.add(atom_mn_base, mn_in_atom)
         lds_col = b.add(k_tile_base, k_in_atom)
@@ -2212,17 +2222,14 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
             return frag
         max_vec = 8 if storage_dtype in (F16, BF16) else frag_len
         if frag_len <= max_vec:
-            return _emit_smem_load(b, src, lds_row, lds_col, frag_len, storage_dtype)
+            col = lds_col if swz_row is None else _swz_col(lds_col, swz_row)
+            return _emit_smem_load(b, src, lds_row, col, frag_len, storage_dtype)
         frag = None
         for off in range(0, frag_len, max_vec):
-            chunk = _emit_smem_load(
-                b,
-                src,
-                lds_row,
-                b.add(lds_col, b.const_i32(off)),
-                max_vec,
-                storage_dtype,
-            )
+            col = b.add(lds_col, b.const_i32(off))
+            if swz_row is not None:
+                col = _swz_col(col, swz_row)
+            chunk = _emit_smem_load(b, src, lds_row, col, max_vec, storage_dtype)
             frag = chunk if frag is None else b.vec_concat(frag, chunk)
         return frag
 
@@ -2258,12 +2265,15 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
         warp_m_off = b.mul(warp_m_idx, b.const_i32(mfmas_m * t.warp_tile_m))
         warp_n_off = b.mul(warp_n_idx, b.const_i32(mfmas_n * t.warp_tile_n))
         # The ring/ping-pong slot this K-tile was filled into. The load side
-        # already offsets its LDS destination by the parity; without the same
-        # shift here every WMMA reads slot 0 while the mover is filling another,
-        # which is a read/write race rather than a wrong-address bug -- hence
-        # non-deterministic output that worsens with ring depth.
+        # already offsets its LDS destination by the parity, under both the
+        # DTL prefetch ring and the compv4 double buffer; without the same
+        # shift here every WMMA reads slot 0 while the next tile is being
+        # filled into the other, which is a read/write race rather than a
+        # wrong-address bug -- hence non-deterministic output that worsens
+        # with ring depth.
         _parity_is_value = isinstance(lds_parity, Value)
-        if _prefetch and _parity_is_value:
+        _two_buf = _prefetch or _db
+        if _two_buf and _parity_is_value:
             a_par_row_v = b.mul(lds_parity, b.const_i32(block_m))
             b_par_row_v = b.mul(lds_parity, b.const_i32(block_n))
             a_par_row_static = 0
@@ -2271,8 +2281,8 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
         else:
             a_par_row_v = None
             b_par_row_v = None
-            a_par_row_static = lds_parity * block_m if _prefetch else 0
-            b_par_row_static = lds_parity * block_n if _prefetch else 0
+            a_par_row_static = lds_parity * block_m if _two_buf else 0
+            b_par_row_static = lds_parity * block_n if _two_buf else 0
         new_accs: List[Value] = list(iter_vars)
         for kk in range(k_atoms):
             k_tile_base = b.const_i32(kk * t.warp_tile_k)
@@ -2284,6 +2294,14 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
                 )
                 if a_par_row_v is not None:
                     atom_row = b.add(atom_row, a_par_row_v)
+                a_swz_row = (
+                    b.add(
+                        b.add(warp_m_off, b.const_i32(mi * t.warp_tile_m)),
+                        a_row_in_atom,
+                    )
+                    if _SWZ
+                    else None
+                )
                 a_rows.append(
                     _emit_frag_smem_load(
                         A_src,
@@ -2292,6 +2310,7 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
                         atom_row,
                         k_tile_base,
                         a_per_lane,
+                        a_swz_row,
                     )
                 )
             b_cols = []
@@ -2302,6 +2321,14 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
                 )
                 if b_par_row_v is not None:
                     atom_row = b.add(atom_row, b_par_row_v)
+                b_swz_row = (
+                    b.add(
+                        b.add(warp_n_off, b.const_i32(ni * t.warp_tile_n)),
+                        b_col_in_atom,
+                    )
+                    if _SWZ
+                    else None
+                )
                 b_cols.append(
                     _emit_frag_smem_load(
                         B_src,
@@ -2310,6 +2337,7 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
                         atom_row,
                         k_tile_base,
                         b_per_lane,
+                        b_swz_row,
                     )
                 )
             if after_last_reads is not None and kk == k_atoms - 1:

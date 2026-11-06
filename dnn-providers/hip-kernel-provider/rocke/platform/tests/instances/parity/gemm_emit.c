@@ -652,6 +652,33 @@ static int make_spec(int idx, rocke_gemm_universal_spec_t* spec)
         spec->block_size = 256;
         spec->batched = false;
         break;
+    case 33: /* gfx1201 compv4: double-buffered WMMA K loop, 128x128x32 2x2 waves */
+    case 34: /* config 33's loop with lds_swizzle, 128x64x32 2x1 waves */
+    {
+        /* mirrors _GFX1201_COMPV4_CONFIGS in gemm_emit.py */
+        bool swz = idx == 34;
+        int tn = swz ? 64 : 128;
+        int wn = swz ? 1 : 2;
+        spec->name = swz ? "test_gfx1201_compv4_swizzle" : "test_gfx1201_compv4";
+        spec->tile = (rocke_gemm_tile_spec_t){.tile_m = 128,
+                                              .tile_n = tn,
+                                              .tile_k = 32,
+                                              .warp_m = 2,
+                                              .warp_n = wn,
+                                              .warp_k = 1,
+                                              .warp_tile_m = 16,
+                                              .warp_tile_n = 16,
+                                              .warp_tile_k = 16};
+        spec->trait.pipeline = "compv4";
+        spec->trait.scheduler = "intrawave";
+        spec->trait.epilogue = "default";
+        spec->trait.lds_swizzle = swz;
+        spec->data.dtype_a = "fp16";
+        spec->wave_size = 32;
+        spec->block_size = 32 * 2 * wn;
+        spec->batched = false;
+        break;
+    }
     default:
         return -1;
     }
@@ -659,8 +686,8 @@ static int make_spec(int idx, rocke_gemm_universal_spec_t* spec)
     return 0;
 }
 
-/* Configs 9, 11 and 12 exercise gfx942; configs 13-30 and 32 gfx1250; the rest
- * use the gfx950 baseline. */
+/* Configs 9, 11 and 12 exercise gfx942; configs 13-30 and 32 gfx1250; 33-34
+ * gfx1201; the rest use the gfx950 baseline. */
 static const char* arch_for(int idx)
 {
     if(idx == 9 || idx == 11 || idx == 12)
@@ -671,6 +698,10 @@ static const char* arch_for(int idx)
     {
         return "gfx1250";
     }
+    if(idx == 33 || idx == 34)
+    {
+        return "gfx1201";
+    }
     return "gfx950";
 }
 
@@ -678,7 +709,7 @@ int main(int argc, char** argv)
 {
     if(argc < 2)
     {
-        fprintf(stderr, "usage: %s <config_index 0..32>\n", argv[0]);
+        fprintf(stderr, "usage: %s <config_index 0..34>\n", argv[0]);
         return 2;
     }
     int idx = atoi(argv[1]);
