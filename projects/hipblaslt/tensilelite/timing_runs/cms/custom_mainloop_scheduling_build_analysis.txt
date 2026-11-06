@@ -1,0 +1,135 @@
+========================================================================================================================
+TIMING ANALYSIS SUMMARY
+========================================================================================================================
+
+TIMING BY PHASE
+------------------------------------------------------------------------------------------------------------------------
+  Category                                      Count     Total (ms)      Mean (ms) % of Parent     % of Wall
+------------------------------------------------------------------------------------------------------------------------
+  python_benchmark_problems                         1     103,629.97     103,629.97                    100.0%
+    --------------------------------------------------------------------------------------------------------------------
+    python_kernel_compilation                      66      89,512.32       1,356.25       86.4%         86.4%
+      - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - 
+      python_kernel_codegen                        66      50,352.76         762.92       56.3%         48.6%
+      - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - 
+      python_kernel_build_src_co                   66      19,058.00         288.76       21.3%         18.4%
+        . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 
+        python_kernel_build_src_co.compile          3      18,805.92       6,268.64       98.7%         18.1%
+        python_kernel_build_src_co.cache_check       66         212.03           3.21        1.1%          0.2%
+        python_kernel_build_src_co.unbundle         3          24.04           8.01        0.1%          0.0%
+        (untracked)                                            10.00                       0.1%          0.0%
+        python_kernel_build_src_co.setup           66           3.17           0.05        0.0%          0.0%
+        python_kernel_build_src_co.cache_populate        3           2.62           0.88        0.0%          0.0%
+        python_kernel_build_src_co.move             3           0.21           0.07        0.0%          0.0%
+      - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - 
+      python_kernel_write_assemble                 66      13,373.40         202.63       14.9%         12.9%
+      - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - 
+      python_kernel_write_helpers                  66       2,185.94          33.12        2.4%          2.1%
+      - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - 
+      python_kernel_validate                       66       2,064.63          31.28        2.3%          2.0%
+      - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - 
+      python_kernel_build_co                       66       1,695.29          25.69        1.9%          1.6%
+      - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - 
+      python_kernel_bench_setup                    66         366.11           5.55        0.4%          0.4%
+      - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - 
+      python_kernel_bench_postprocess              66         205.57           3.11        0.2%          0.2%
+        . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 
+        python_benchpost_lib_construction          66         105.83           1.60       51.5%          0.1%
+        python_benchpost_library_write             66          38.19           0.58       18.6%          0.0%
+        python_benchpost_naming                    66          29.48           0.45       14.3%          0.0%
+        python_benchpost_client_config             66          28.77           0.44       14.0%          0.0%
+        (untracked)                                             3.30                       1.6%          0.0%
+      - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - 
+      (untracked)                                             153.55                       0.2%          0.1%
+      - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - 
+      python_kernel_setup                          66          57.09           0.87        0.1%          0.1%
+    --------------------------------------------------------------------------------------------------------------------
+    python_solution_generation                     66      13,842.92         209.74       13.4%         13.4%
+      - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - 
+      python_solgen_forked_solutions               66      13,841.56         209.72      100.0%         13.4%
+      - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - 
+      (untracked)                                               0.98                       0.0%          0.0%
+      - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - 
+      python_solgen_fork_permutations              66           0.28           0.00        0.0%          0.0%
+      - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - 
+      python_solgen_custom_kernels                 66           0.11           0.00        0.0%          0.0%
+    --------------------------------------------------------------------------------------------------------------------
+    (untracked)                                               145.59                       0.1%          0.1%
+    --------------------------------------------------------------------------------------------------------------------
+    python_write_cache                             66          81.32           1.23        0.1%          0.1%
+    --------------------------------------------------------------------------------------------------------------------
+    python_write_solutions                         66          32.50           0.49        0.0%          0.0%
+      - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - 
+      python_wsol_dump                             66          24.75           0.38       76.2%          0.0%
+      - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - 
+      (untracked)                                               5.50                      16.9%          0.0%
+      - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - 
+      python_wsol_header                           66           1.57           0.02        4.8%          0.0%
+      - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - 
+      python_wsol_prepare                          66           0.68           0.01        2.1%          0.0%
+        . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 
+        python_wsol_prepare_nocache                66           0.55           0.01       80.4%          0.0%
+        (untracked)                                             0.13                      19.6%          0.0%
+    --------------------------------------------------------------------------------------------------------------------
+    python_solution_indexing                       66          15.25           0.23        0.0%          0.0%
+    --------------------------------------------------------------------------------------------------------------------
+    python_cache_check                             66           0.07           0.00        0.0%          0.0%
+
+------------------------------------------------------------------------------------------------------------------------
+  ESTIMATED WALL CLOCK TIME: 103.63s
+
+HIERARCHY VALIDATION: OK (all child phases fit within their parents)
+
+TIME BREAKDOWN (visual, % of wall clock)
+------------------------------------------------------------------------------------------------------------------------
+  python_benchmark_problems                 100.0% ##################################################
+    python_kernel_compilation                86.4% ###########################################
+      python_kernel_codegen                  48.6% ########################
+      python_kernel_build_src_co             18.4% #########
+        python_kernel_build_src_co.compile   18.1% #########
+        python_kernel_build_src_co.cache_check    0.2% 
+        python_kernel_build_src_co.unbundle    0.0% 
+        (untracked)                           0.0% 
+        python_kernel_build_src_co.setup      0.0% 
+        python_kernel_build_src_co.cache_populate    0.0% 
+        python_kernel_build_src_co.move       0.0% 
+      python_kernel_write_assemble           12.9% ######
+      python_kernel_write_helpers             2.1% #
+      python_kernel_validate                  2.0% 
+      python_kernel_build_co                  1.6% 
+      python_kernel_bench_setup               0.4% 
+      python_kernel_bench_postprocess         0.2% 
+        python_benchpost_lib_construction     0.1% 
+        python_benchpost_library_write        0.0% 
+        python_benchpost_naming               0.0% 
+        python_benchpost_client_config        0.0% 
+        (untracked)                           0.0% 
+      (untracked)                             0.1% 
+      python_kernel_setup                     0.1% 
+    python_solution_generation               13.4% ######
+      python_solgen_forked_solutions         13.4% ######
+      (untracked)                             0.0% 
+      python_solgen_fork_permutations         0.0% 
+      python_solgen_custom_kernels            0.0% 
+    (untracked)                               0.1% 
+    python_write_cache                        0.1% 
+    python_write_solutions                    0.0% 
+      python_wsol_dump                        0.0% 
+      (untracked)                             0.0% 
+      python_wsol_header                      0.0% 
+      python_wsol_prepare                     0.0% 
+        python_wsol_prepare_nocache           0.0% 
+        (untracked)                           0.0% 
+    python_solution_indexing                  0.0% 
+    python_cache_check                        0.0% 
+
+KEY INSIGHTS (% of wall clock)
+------------------------------------------------------------------------------------------------------------------------
+  Python phases (code gen, compilation):  103.36s (99.7%)
+  Python I/O overhead (cache, YAML):      0.11s (0.1%)
+  C++ client setup (library loading):     0.00s (0.0%)
+  Data preparation (CPU init, GPU prep):  0.00s (0.0%)
+  Reference computation (CPU GEMM):       0.00s (0.0%)
+  Kernel execution (warmup, benchmark):   0.00s (0.0%)
+
+

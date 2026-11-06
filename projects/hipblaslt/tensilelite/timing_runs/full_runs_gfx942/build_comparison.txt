@@ -1,0 +1,43 @@
+Category                                                                    pre s     post s    delta
+TOTAL RUNTIME                                                                2134.4     1152.1   -46.0%
+BUILD: solution generation & compile                                       2086.5     1104.8   -47.1%
+  Solution generation & build (Python)                                     2086.5     1104.8   -47.1%
+    python_kernel_compilation                                              1667.0      807.2   -51.6%
+      python_kernel_codegen                                                 455.1      268.2   -41.1%
+      python_kernel_write_assemble                                          158.1      173.4    +9.7%
+      python_kernel_bench_postprocess                                       123.7      122.7    -0.8%
+        python_benchpost_lib_construction                                    83.0       77.8    -6.3%
+        python_benchpost_library_write                                       28.5       32.6   +14.5%
+        python_benchpost_naming                                              12.1       12.2    +0.6%
+      python_kernel_bench_setup                                             123.6        4.4   -96.4%
+      python_kernel_validate                                                 73.2      125.9   +71.9%
+      python_kernel_setup                                                    31.8       31.5    -0.8%
+      python_kernel_build_co                                                 20.3       20.7    +1.6%
+      python_kernel_write_helpers                                             8.0        6.8   -15.4%
+      (untracked)                                                           673.1        5.8   -99.1%
+    python_solution_generation                                              419.6      297.6   -29.1%
+      python_solgen_forked_solutions                                        418.5      296.4   -29.2%
+      python_solgen_custom_kernels                                            1.1        1.2    +7.4%
+SHARED: cache & solution files                                               33.0       32.6    -1.1%
+  python_write_solutions                                                     20.8       20.5    -1.2%
+    python_wsol_dump                                                         20.1       20.0    -0.8%
+  python_solution_indexing                                                   11.7       11.5    -1.5%
+UNATTRIBUTED (untracked time & timer overhead)                               14.9       14.7    -1.2%
+  (untracked in python_benchmark_problems)                                   14.9       14.7    -1.2%
+      python_kernel_build_src_co_wait                                         0.0       47.7      new
+
+pytest wall sum: pre 2898 s, post 1886 s (-34.9%)
+largest per-config (pre -> post s):
+  common__gemm__dtv                                              251 ->   160
+  common__gemm__cgemm                                            107 ->    96
+  common__gemm__bufferLoadStore0                                  99 ->    81
+  common__gemm__mix_cvt_after_ds_fnuz                             77 ->    60
+  common__gemm__zgemm                                             76 ->    70
+  common__gemm__fp16_tn                                           74 ->    57
+  common__gradient__fp16_gradient_bias                            68 ->    18
+  common__gemm__gemm_bias_strided_batched_broadcast_gfx940        61 ->    13
+  common__gemm__lsu_fnuz                                          52 ->    35
+  common__sparse__gfx94x__f8n_gate_r                              49 ->    22
+  common__gemm__fp16_HH_BHS_bf16mfma                              49 ->    29
+  common__gemm__bf16_tn                                           46 ->    35
+slower by >2 s: []

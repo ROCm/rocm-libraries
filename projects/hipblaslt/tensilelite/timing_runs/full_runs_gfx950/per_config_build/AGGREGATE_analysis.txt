@@ -1,0 +1,598 @@
+=============================================================================================================================
+TIMING ANALYSIS SUMMARY
+=============================================================================================================================
+
+TIMING BY PURPOSE
+-----------------------------------------------------------------------------------------------------------------------------
+  Category                                                      Count     Total (ms)      Mean (ms) % of Parent     % of Wall
+-----------------------------------------------------------------------------------------------------------------------------
+  TOTAL RUNTIME                                                         2,577,849.77                                   100.0%
+    BUILD: solution generation & compile                                2,530,063.12                      98.1%         98.1%
+      Solution generation & build (Python)                              2,510,348.29                      99.2%         97.4%
+        python_kernel_compilation                                 855   2,203,797.86       2,577.54       87.8%         85.5%
+          python_kernel_build_src_co                              855   1,007,817.04       1,178.73       45.7%         39.1%
+            python_kernel_build_src_co.compile                    263   1,004,724.33       3,820.24       99.7%         39.0%
+            python_kernel_build_src_co.unbundle                   263       1,566.60           5.96        0.2%          0.1%
+            python_kernel_build_src_co.cache_check                855       1,172.50           1.37        0.1%          0.0%
+            python_kernel_build_src_co.cache_populate             263         214.63           0.82        0.0%          0.0%
+            python_kernel_build_src_co.setup                      855          22.87           0.03        0.0%          0.0%
+            python_kernel_build_src_co.move                       263          17.46           0.07        0.0%          0.0%
+            (untracked)                                                        98.65                       0.0%          0.0%
+          python_kernel_codegen                                   855     592,584.11         693.08       26.9%         23.0%
+          python_kernel_write_assemble                            855     227,868.45         266.51       10.3%          8.8%
+          python_kernel_bench_setup                               855     131,638.45         153.96        6.0%          5.1%
+          python_kernel_bench_postprocess                         855     106,816.89         124.93        4.8%          4.1%
+            python_benchpost_lib_construction                     855      74,773.69          87.45       70.0%          2.9%
+            python_benchpost_library_write                        855      22,324.17          26.11       20.9%          0.9%
+            python_benchpost_naming                               855       9,436.66          11.04        8.8%          0.4%
+            python_benchpost_client_config                        855         249.07           0.29        0.2%          0.0%
+            (untracked)                                                        33.30                       0.0%          0.0%
+          python_kernel_validate                                  855      81,431.47          95.24        3.7%          3.2%
+          python_kernel_setup                                     855      20,886.91          24.43        0.9%          0.8%
+          python_kernel_build_co                                  855      18,912.53          22.12        0.9%          0.7%
+          python_kernel_write_helpers                             855      11,912.59          13.93        0.5%          0.5%
+          (untracked)                                                       3,929.43                       0.2%          0.2%
+        python_solution_generation                                823     306,550.42         372.48       12.2%         11.9%
+          python_solgen_forked_solutions                          823     306,464.54         372.37      100.0%         11.9%
+          python_solgen_custom_kernels                            823          67.99           0.08        0.0%          0.0%
+          python_solgen_fork_permutations                         823           4.83           0.01        0.0%          0.0%
+          (untracked)                                                          13.06                       0.0%          0.0%
+      Ductile GA search (Python)                                           19,714.83                       0.8%          0.8%
+        python_ductile_initial_sampling                             8      13,760.99       1,720.12       69.8%          0.5%
+        python_ductile_generate_solutions                          32       4,536.07         141.75       23.0%          0.2%
+        python_ductile_ga_between_evaluations                       8       1,366.26         170.78        6.9%          0.1%
+        python_ductile_setup                                        8          30.08           3.76        0.2%          0.0%
+        python_ductile_clear_artifacts                             24          16.81           0.70        0.1%          0.0%
+        python_ductile_read_scores                                 32           4.29           0.13        0.0%          0.0%
+        python_ductile_verification                                 8           0.33           0.04        0.0%          0.0%
+    SHARED: cache & solution files                                         23,180.53                       0.9%          0.9%
+      python_write_solutions                                      855      14,069.93          16.46       60.7%          0.5%
+        python_wsol_dump                                          855      13,390.16          15.66       95.2%          0.5%
+        python_wsol_prepare                                       855         531.38           0.62        3.8%          0.0%
+          python_wsol_prepare_nocache                             855         529.92           0.62       99.7%          0.0%
+          (untracked)                                                           1.47                       0.3%          0.0%
+        python_wsol_header                                        855          12.63           0.01        0.1%          0.0%
+        (untracked)                                                           135.75                       1.0%          0.0%
+      python_solution_indexing                                    855       8,279.91           9.68       35.7%          0.3%
+      python_write_cache                                          855         830.02           0.97        3.6%          0.0%
+      python_cache_check                                          831           0.67           0.00        0.0%          0.0%
+    RUN: benchmark client                                                  12,995.06                       0.5%          0.5%
+      Client launch (startup, setup & teardown)                             9,950.79                      76.6%          0.4%
+        hip_initialization                                         32       4,712.80         147.27       47.4%          0.2%
+        process_exit                                               32       3,467.40         108.36       34.8%          0.1%
+        main_problem_factory                                       32         595.29          18.60        6.0%          0.0%
+          factory_hip_get_device_properties                         4         590.74         147.68       99.2%          0.0%
+          (untracked)                                                           4.56                       0.8%          0.0%
+        process_startup                                            32         468.60          14.64        4.7%          0.0%
+        main_teardown_locals                                       32         386.04          12.06        3.9%          0.0%
+        data_init_setup                                            32          97.08           3.03        1.0%          0.0%
+        code_object_loading                                        32          96.45           3.01        1.0%          0.0%
+        library_loading                                            32          65.62           2.05        0.7%          0.0%
+        lazy_loading_init                                          32          45.39           1.42        0.5%          0.0%
+        main_parse_args                                            32          11.80           0.37        0.1%          0.0%
+        reporter_setup                                             32           1.84           0.06        0.0%          0.0%
+        python_client_write_run_script                             32           1.63           0.05        0.0%          0.0%
+        listener_setup                                             32           0.52           0.02        0.0%          0.0%
+        solution_iterator_setup                                    32           0.33           0.01        0.0%          0.0%
+      Input data preparation                                                3,004.17                      23.1%          0.1%
+        gpu_input_preparation                                      40       2,387.72          59.69       79.5%          0.1%
+          gpu_input_prep_init_cpu_inputs                           39       1,309.51          33.58       54.8%          0.1%
+          gpu_input_prep_copy_valid_to_gpu                         40         937.87          23.45       39.3%          0.0%
+          gpu_input_prep_copy_swizzled                              4         135.91          33.98        5.7%          0.0%
+          gpu_input_prep_batched_inputs                            40           2.63           0.07        0.1%          0.0%
+          gpu_input_prep_copy_inputs_d2d                           40           0.98           0.02        0.0%          0.0%
+          gpu_input_prep_constant_inputs                           39           0.64           0.02        0.0%          0.0%
+          gpu_input_prep_convert_to_inputs                         40           0.11           0.00        0.0%          0.0%
+          gpu_input_prep_slow_path                                 40           0.00           0.00        0.0%          0.0%
+          (untracked)                                                           0.07                       0.0%          0.0%
+        pre_solution_listener.DataInitialization                  585         488.60           0.84       16.3%          0.0%
+          pre_solution_mx_init_data                               130         369.08           2.84       75.5%          0.0%
+            pre_solution_mx_side_regenerate                         8         369.03          46.13      100.0%          0.0%
+            pre_solution_mx_side_cache_hit                        252           0.02           0.00        0.0%          0.0%
+            (untracked)                                                         0.02                       0.0%          0.0%
+          pre_solution_mx_copy_valid_to_gpu_no_regen              126         103.07           0.82       21.1%          0.0%
+          pre_solution_mx_cpu_sync_no_regen                       126           8.60           0.07        1.8%          0.0%
+          pre_solution_mx_copy_valid_to_gpu_after_regen             4           3.29           0.82        0.7%          0.0%
+          pre_solution_mx_copy_inputs_d2d_no_regen                126           3.18           0.03        0.7%          0.0%
+          pre_solution_mx_cpu_sync_after_regen                      4           1.19           0.30        0.2%          0.0%
+          pre_solution_mx_copy_inputs_d2d_after_regen               4           0.13           0.03        0.0%          0.0%
+          pre_solution_mx_check                                   585           0.03           0.00        0.0%          0.0%
+          (untracked)                                                           0.03                       0.0%          0.0%
+        cpu_data_init                                               1         119.66         119.66        4.0%          0.0%
+        rotating_buffer_preparation                                40           6.46           0.16        0.2%          0.0%
+        gpu_input_reset                                             1           1.73           1.73        0.1%          0.0%
+          gpu_input_reset_copy_valid_to_gpu                         1           0.82           0.82       47.6%          0.0%
+          gpu_input_reset_copy_swizzled                             1           0.81           0.81       46.9%          0.0%
+          gpu_input_reset_batched_inputs                            1           0.06           0.06        3.7%          0.0%
+          gpu_input_reset_copy_inputs_d2d                           1           0.03           0.03        1.7%          0.0%
+          gpu_input_reset_convert_to_inputs                         1           0.00           0.00        0.0%          0.0%
+          gpu_input_reset_slow_path                                 1           0.00           0.00        0.0%          0.0%
+      Per-solution bookkeeping & reporting                                     30.61                       0.2%          0.0%
+        pre_solution_listener.AllSolutionsIterator                585          10.23           0.02       33.4%          0.0%
+        post_solution_log                                         585           5.20           0.01       17.0%          0.0%
+        pre_solution_listener.BenchmarkTimer                      585           3.99           0.01       13.0%          0.0%
+        pre_solution_listener.ProgressListener                    585           2.60           0.00        8.5%          0.0%
+        run_current_solution_check                                585           2.03           0.00        6.6%          0.0%
+        pre_solution_listener.MetaResultReporter                  585           2.00           0.00        6.5%          0.0%
+        post_solution_reporting                                   585           1.75           0.00        5.7%          0.0%
+        post_problem                                               40           1.66           0.04        5.4%          0.0%
+        finalize_report                                            32           0.35           0.01        1.1%          0.0%
+        post_solution_perf_calc                                   585           0.25           0.00        0.8%          0.0%
+        problem_report_index                                       40           0.15           0.00        0.5%          0.0%
+        solution_selection                                        585           0.14           0.00        0.5%          0.0%
+        pre_solution_listener.SynchronizerValidator               585           0.10           0.00        0.3%          0.0%
+        problem_teardown                                           40           0.06           0.00        0.2%          0.0%
+        solution_teardown                                         585           0.02           0.00        0.1%          0.0%
+        post_solution_result_file                                 585           0.01           0.00        0.0%          0.0%
+        post_solution_validation                                  585           0.01           0.00        0.0%          0.0%
+        pre_solution_listener.HardwareMonitorListener             585           0.01           0.00        0.0%          0.0%
+        post_solution_sol_advance                                 585           0.01           0.00        0.0%          0.0%
+        post_solution_perf_reset                                  585           0.01           0.00        0.0%          0.0%
+        run_iteration_teardown                                      1           0.01           0.01        0.0%          0.0%
+      Reference GEMM (CPU)                                                      7.11                       0.1%          0.0%
+        pre_solution_listener.ReferenceValidator                  585           4.64           0.01       65.2%          0.0%
+          cpu_reference_gemm_per_solution_inputs_changed            1           4.62           4.62       99.5%          0.0%
+            solve_cpu_slow_per_solution_inputs_changed              1           4.62           4.62      100.0%          0.0%
+          (untracked)                                                           0.02                       0.5%          0.0%
+        cpu_reference_gemm                                          1           2.47           2.47       34.8%          0.0%
+          solve_cpu_slow                                            1           2.46           2.46       99.5%          0.0%
+          (untracked)                                                           0.01                       0.5%          0.0%
+      Validation                                                                2.20                       0.0%          0.0%
+        validate_warmups_listener.ReferenceValidator                1           1.25           1.25       57.0%          0.0%
+          validate_result_buffer_alloc                              1           0.94           0.94       74.9%          0.0%
+          validate_gpu_readback                                     1           0.30           0.30       24.2%          0.0%
+          validate_element_comparison                               1           0.01           0.01        0.7%          0.0%
+          validate_inputs_copy                                      1           0.00           0.00        0.1%          0.0%
+          validate_report                                           1           0.00           0.00        0.0%          0.0%
+          validate_setup                                            1           0.00           0.00        0.0%          0.0%
+        validate_warmups_listener.SynchronizerValidator             1           0.94           0.94       42.9%          0.0%
+          validate_synchronizer_check                               1           0.94           0.94      100.0%          0.0%
+            validate_synchronizer_readback                          1           0.78           0.78       82.5%          0.0%
+            validate_synchronizer_scan                              1           0.16           0.16       17.5%          0.0%
+        validate_warmups_listener.MetaResultReporter                1           0.00           0.00        0.0%          0.0%
+        validate_warmups_listener.HardwareMonitorListener           1           0.00           0.00        0.0%          0.0%
+        validate_warmups_listener.AllSolutionsIterator              1           0.00           0.00        0.0%          0.0%
+        validate_warmups_listener.ProgressListener                  1           0.00           0.00        0.0%          0.0%
+        validate_warmups_listener.DataInitialization                1           0.00           0.00        0.0%          0.0%
+      Kernel launch & execution                                                 0.18                       0.0%          0.0%
+        kernel_solving                                              1           0.08           0.08       45.7%          0.0%
+        warmup_runs                                                 2           0.08           0.04       43.5%          0.0%
+        warmup_events_setup                                         1           0.02           0.02        8.2%          0.0%
+        validate_warmups_listener.BenchmarkTimer                    1           0.00           0.00        2.4%          0.0%
+          validate_gpu_sync                                         1           0.00           0.00      100.0%          0.0%
+        benchmark_runs                                              1           0.00           0.00        0.2%          0.0%
+          benchmark_pre_syncs                                       1           0.00           0.00       50.0%          0.0%
+          benchmark_post_syncs                                      1           0.00           0.00       50.0%          0.0%
+    MEASUREMENT OVERHEAD (instrumentation)                                    362.86                       0.0%          0.0%
+      main_timing_calibration                                      32         346.48          10.83       95.5%          0.0%
+      flush_timing_buffer                                          32          15.18           0.47        4.2%          0.0%
+      (timer overhead subtracted from parent timers)                            0.60                       0.2%          0.0%
+      timing_overhead                                              32           0.60           0.02        0.2%          0.0%
+    UNATTRIBUTED (untracked time & timer overhead)                         11,248.20                       0.4%          0.4%
+      (untracked in python_benchmark_problems)                             11,227.86                      99.8%          0.4%
+      (untracked in python_client_execution)                                   13.36                       0.1%          0.0%
+      (untracked in pre_solution)                                               6.21                       0.1%          0.0%
+      (untracked in pre_problem)                                                0.69                       0.0%          0.0%
+      (untracked in post_solution)                                              0.08                       0.0%          0.0%
+
+TIMING BY TIMER NESTING (legacy view)
+-----------------------------------------------------------------------------------------------------------------------------
+  Category                                                      Count     Total (ms)      Mean (ms) % of Parent     % of Wall
+-----------------------------------------------------------------------------------------------------------------------------
+  python_benchmark_problems                                       184   2,577,849.18      14,010.05                    100.0%
+    -------------------------------------------------------------------------------------------------------------------------
+    python_kernel_compilation                                     855   2,203,797.86       2,577.54       85.5%         85.5%
+      - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - 
+      python_kernel_build_src_co                                  855   1,007,817.04       1,178.73       45.7%         39.1%
+        . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 
+        python_kernel_build_src_co.compile                        263   1,004,724.33       3,820.24       99.7%         39.0%
+        python_kernel_build_src_co.unbundle                       263       1,566.60           5.96        0.2%          0.1%
+        python_kernel_build_src_co.cache_check                    855       1,172.50           1.37        0.1%          0.0%
+        python_kernel_build_src_co.cache_populate                 263         214.63           0.82        0.0%          0.0%
+        (untracked)                                                            98.65                       0.0%          0.0%
+        python_kernel_build_src_co.setup                          855          22.87           0.03        0.0%          0.0%
+        python_kernel_build_src_co.move                           263          17.46           0.07        0.0%          0.0%
+      - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - 
+      python_kernel_codegen                                       855     592,584.11         693.08       26.9%         23.0%
+      - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - 
+      python_kernel_write_assemble                                855     227,868.45         266.51       10.3%          8.8%
+      - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - 
+      python_kernel_bench_setup                                   855     131,638.45         153.96        6.0%          5.1%
+      - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - 
+      python_kernel_bench_postprocess                             855     106,816.89         124.93        4.8%          4.1%
+        . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 
+        python_benchpost_lib_construction                         855      74,773.69          87.45       70.0%          2.9%
+        python_benchpost_library_write                            855      22,324.17          26.11       20.9%          0.9%
+        python_benchpost_naming                                   855       9,436.66          11.04        8.8%          0.4%
+        python_benchpost_client_config                            855         249.07           0.29        0.2%          0.0%
+        (untracked)                                                            33.30                       0.0%          0.0%
+      - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - 
+      python_kernel_validate                                      855      81,431.47          95.24        3.7%          3.2%
+      - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - 
+      python_kernel_setup                                         855      20,886.91          24.43        0.9%          0.8%
+      - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - 
+      python_kernel_build_co                                      855      18,912.53          22.12        0.9%          0.7%
+      - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - 
+      python_kernel_write_helpers                                 855      11,912.59          13.93        0.5%          0.5%
+      - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - 
+      (untracked)                                                           3,929.43                       0.2%          0.2%
+    -------------------------------------------------------------------------------------------------------------------------
+    python_solution_generation                                    823     306,550.42         372.48       11.9%         11.9%
+      - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - 
+      python_solgen_forked_solutions                              823     306,464.54         372.37      100.0%         11.9%
+      - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - 
+      python_solgen_custom_kernels                                823          67.99           0.08        0.0%          0.0%
+      - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - 
+      (untracked)                                                              13.06                       0.0%          0.0%
+      - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - 
+      python_solgen_fork_permutations                             823           4.83           0.01        0.0%          0.0%
+    -------------------------------------------------------------------------------------------------------------------------
+    python_write_solutions                                        855      14,069.93          16.46        0.5%          0.5%
+      - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - 
+      python_wsol_dump                                            855      13,390.16          15.66       95.2%          0.5%
+      - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - 
+      python_wsol_prepare                                         855         531.38           0.62        3.8%          0.0%
+        . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 
+        python_wsol_prepare_nocache                               855         529.92           0.62       99.7%          0.0%
+        (untracked)                                                             1.47                       0.3%          0.0%
+      - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - 
+      (untracked)                                                             135.75                       1.0%          0.0%
+      - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - 
+      python_wsol_header                                          855          12.63           0.01        0.1%          0.0%
+    -------------------------------------------------------------------------------------------------------------------------
+    python_ductile_initial_sampling                                 8      13,760.99       1,720.12        0.5%          0.5%
+    -------------------------------------------------------------------------------------------------------------------------
+    python_client_execution                                        32      13,377.67         418.05        0.5%          0.5%
+      - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - 
+      C++ Client Setup & Teardown                                          10,297.27                      77.0%          0.4%
+        . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 
+        hip_initialization                                         32       4,712.80         147.27       45.8%          0.2%
+        process_exit                                               32       3,467.40         108.36       33.7%          0.1%
+        main_problem_factory                                       32         595.29          18.60        5.8%          0.0%
+          factory_hip_get_device_properties                         4         590.74         147.68       99.2%          0.0%
+          (untracked)                                                           4.56                       0.8%          0.0%
+        process_startup                                            32         468.60          14.64        4.6%          0.0%
+        main_teardown_locals                                       32         386.04          12.06        3.7%          0.0%
+        main_timing_calibration                                    32         346.48          10.83        3.4%          0.0%
+        data_init_setup                                            32          97.08           3.03        0.9%          0.0%
+        code_object_loading                                        32          96.45           3.01        0.9%          0.0%
+        library_loading                                            32          65.62           2.05        0.6%          0.0%
+        lazy_loading_init                                          32          45.39           1.42        0.4%          0.0%
+        main_parse_args                                            32          11.80           0.37        0.1%          0.0%
+        reporter_setup                                             32           1.84           0.06        0.0%          0.0%
+        python_client_write_run_script                             32           1.63           0.05        0.0%          0.0%
+        listener_setup                                             32           0.52           0.02        0.0%          0.0%
+        solution_iterator_setup                                    32           0.33           0.01        0.0%          0.0%
+      - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - 
+      Data Preparation                                                      2,518.74                      18.8%          0.1%
+        . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 
+        gpu_input_preparation                                      40       2,387.72          59.69       94.8%          0.1%
+          gpu_input_prep_init_cpu_inputs                           39       1,309.51          33.58       54.8%          0.1%
+          gpu_input_prep_copy_valid_to_gpu                         40         937.87          23.45       39.3%          0.0%
+          gpu_input_prep_copy_swizzled                              4         135.91          33.98        5.7%          0.0%
+          gpu_input_prep_batched_inputs                            40           2.63           0.07        0.1%          0.0%
+          gpu_input_prep_copy_inputs_d2d                           40           0.98           0.02        0.0%          0.0%
+          gpu_input_prep_constant_inputs                           39           0.64           0.02        0.0%          0.0%
+          gpu_input_prep_convert_to_inputs                         40           0.11           0.00        0.0%          0.0%
+          (untracked)                                                           0.07                       0.0%          0.0%
+          gpu_input_prep_slow_path                                 40           0.00           0.00        0.0%          0.0%
+        pre_problem                                                40         122.83           3.07        4.9%          0.0%
+          cpu_data_init                                             1         119.66         119.66       97.4%          0.0%
+          cpu_reference_gemm                                        1           2.47           2.47        2.0%          0.0%
+            solve_cpu_slow                                          1           2.46           2.46       99.5%          0.0%
+            (untracked)                                                         0.01                       0.5%          0.0%
+          (untracked)                                                           0.69                       0.6%          0.0%
+        rotating_buffer_preparation                                40           6.46           0.16        0.3%          0.0%
+        gpu_input_reset                                             1           1.73           1.73        0.1%          0.0%
+          gpu_input_reset_copy_valid_to_gpu                         1           0.82           0.82       47.6%          0.0%
+          gpu_input_reset_copy_swizzled                             1           0.81           0.81       46.9%          0.0%
+          gpu_input_reset_batched_inputs                            1           0.06           0.06        3.7%          0.0%
+          gpu_input_reset_copy_inputs_d2d                           1           0.03           0.03        1.7%          0.0%
+          gpu_input_reset_convert_to_inputs                         1           0.00           0.00        0.0%          0.0%
+          gpu_input_reset_slow_path                                 1           0.00           0.00        0.0%          0.0%
+      - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - 
+      Kernel Execution                                                        530.31                       4.0%          0.0%
+        . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 
+        pre_solution                                              585         518.39           0.89       97.8%          0.0%
+          pre_solution_listener.DataInitialization                585         488.60           0.84       94.3%          0.0%
+            pre_solution_mx_init_data                             130         369.08           2.84       75.5%          0.0%
+              pre_solution_mx_side_regenerate                       8         369.03          46.13      100.0%          0.0%
+              (untracked)                                                       0.02                       0.0%          0.0%
+              pre_solution_mx_side_cache_hit                      252           0.02           0.00        0.0%          0.0%
+            pre_solution_mx_copy_valid_to_gpu_no_regen            126         103.07           0.82       21.1%          0.0%
+            pre_solution_mx_cpu_sync_no_regen                     126           8.60           0.07        1.8%          0.0%
+            pre_solution_mx_copy_valid_to_gpu_after_regen           4           3.29           0.82        0.7%          0.0%
+            pre_solution_mx_copy_inputs_d2d_no_regen              126           3.18           0.03        0.7%          0.0%
+            pre_solution_mx_cpu_sync_after_regen                    4           1.19           0.30        0.2%          0.0%
+            pre_solution_mx_copy_inputs_d2d_after_regen             4           0.13           0.03        0.0%          0.0%
+            (untracked)                                                         0.03                       0.0%          0.0%
+            pre_solution_mx_check                                 585           0.03           0.00        0.0%          0.0%
+          pre_solution_listener.AllSolutionsIterator              585          10.23           0.02        2.0%          0.0%
+          (untracked)                                                           6.21                       1.2%          0.0%
+          pre_solution_listener.ReferenceValidator                585           4.64           0.01        0.9%          0.0%
+            cpu_reference_gemm_per_solution_inputs_changed          1           4.62           4.62       99.5%          0.0%
+              solve_cpu_slow_per_solution_inputs_changed            1           4.62           4.62      100.0%          0.0%
+            (untracked)                                                         0.02                       0.5%          0.0%
+          pre_solution_listener.BenchmarkTimer                    585           3.99           0.01        0.8%          0.0%
+          pre_solution_listener.ProgressListener                  585           2.60           0.00        0.5%          0.0%
+          pre_solution_listener.MetaResultReporter                585           2.00           0.00        0.4%          0.0%
+          pre_solution_listener.SynchronizerValidator             585           0.10           0.00        0.0%          0.0%
+          pre_solution_listener.HardwareMonitorListener           585           0.01           0.00        0.0%          0.0%
+        post_solution                                             585           7.33           0.01        1.4%          0.0%
+          post_solution_log                                       585           5.20           0.01       70.9%          0.0%
+          post_solution_reporting                                 585           1.75           0.00       23.9%          0.0%
+          post_solution_perf_calc                                 585           0.25           0.00        3.5%          0.0%
+          (untracked)                                                           0.08                       1.1%          0.0%
+          post_solution_result_file                               585           0.01           0.00        0.2%          0.0%
+          post_solution_validation                                585           0.01           0.00        0.2%          0.0%
+          post_solution_sol_advance                               585           0.01           0.00        0.2%          0.0%
+          post_solution_perf_reset                                585           0.01           0.00        0.2%          0.0%
+        run_current_solution_check                                585           2.03           0.00        0.4%          0.0%
+        post_problem                                               40           1.66           0.04        0.3%          0.0%
+        finalize_report                                            32           0.35           0.01        0.1%          0.0%
+        problem_report_index                                       40           0.15           0.00        0.0%          0.0%
+        solution_selection                                        585           0.14           0.00        0.0%          0.0%
+        kernel_solving                                              1           0.08           0.08        0.0%          0.0%
+        warmup_runs                                                 2           0.08           0.04        0.0%          0.0%
+        problem_teardown                                           40           0.06           0.00        0.0%          0.0%
+        solution_teardown                                         585           0.02           0.00        0.0%          0.0%
+        warmup_events_setup                                         1           0.02           0.02        0.0%          0.0%
+        run_iteration_teardown                                      1           0.01           0.01        0.0%          0.0%
+        benchmark_runs                                              1           0.00           0.00        0.0%          0.0%
+          benchmark_pre_syncs                                       1           0.00           0.00       31.1%          0.0%
+          benchmark_post_syncs                                      1           0.00           0.00       31.1%          0.0%
+      - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - 
+      Timing Overhead                                                          15.78                       0.1%          0.0%
+        . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 
+        flush_timing_buffer                                        32          15.18           0.47       96.2%          0.0%
+        timing_overhead                                            32           0.60           0.02        3.8%          0.0%
+      - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - 
+      (untracked C++ overhead)                                                 13.36                       0.1%          0.0%
+      - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - 
+      Reference Computation                                                     2.22                       0.0%          0.0%
+        . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 
+        validate_warmups                                            1           2.22           2.22      100.0%          0.0%
+          validate_warmups_listener.ReferenceValidator              1           1.26           1.26       56.8%          0.0%
+            validate_result_buffer_alloc                            1           0.94           0.94       74.6%          0.0%
+            validate_gpu_readback                                   1           0.30           0.30       24.1%          0.0%
+            validate_element_comparison                             1           0.01           0.01        0.7%          0.0%
+            validate_inputs_copy                                    1           0.00           0.00        0.1%          0.0%
+            validate_report                                         1           0.00           0.00        0.0%          0.0%
+            validate_setup                                          1           0.00           0.00        0.0%          0.0%
+          validate_warmups_listener.SynchronizerValidator           1           0.94           0.94       42.6%          0.0%
+            validate_synchronizer_check                             1           0.94           0.94      100.0%          0.0%
+              validate_synchronizer_readback                        1           0.78           0.78       82.5%          0.0%
+              validate_synchronizer_scan                            1           0.16           0.16       17.4%          0.0%
+          validate_warmups_listener.BenchmarkTimer                  1           0.01           0.01        0.2%          0.0%
+            validate_gpu_sync                                       1           0.00           0.00       85.9%          0.0%
+          validate_warmups_listener.MetaResultReporter              1           0.00           0.00        0.0%          0.0%
+          validate_warmups_listener.HardwareMonitorListener         1           0.00           0.00        0.0%          0.0%
+          validate_warmups_listener.AllSolutionsIterator            1           0.00           0.00        0.0%          0.0%
+          validate_warmups_listener.ProgressListener                1           0.00           0.00        0.0%          0.0%
+          validate_warmups_listener.DataInitialization              1           0.00           0.00        0.0%          0.0%
+    -------------------------------------------------------------------------------------------------------------------------
+    (untracked)                                                            11,227.86                       0.4%          0.4%
+    -------------------------------------------------------------------------------------------------------------------------
+    python_solution_indexing                                      855       8,279.91           9.68        0.3%          0.3%
+    -------------------------------------------------------------------------------------------------------------------------
+    python_ductile_generate_solutions                              32       4,536.07         141.75        0.2%          0.2%
+    -------------------------------------------------------------------------------------------------------------------------
+    python_ductile_ga_between_evaluations                           8       1,366.26         170.78        0.1%          0.1%
+    -------------------------------------------------------------------------------------------------------------------------
+    python_write_cache                                            855         830.02           0.97        0.0%          0.0%
+    -------------------------------------------------------------------------------------------------------------------------
+    python_ductile_setup                                            8          30.08           3.76        0.0%          0.0%
+    -------------------------------------------------------------------------------------------------------------------------
+    python_ductile_clear_artifacts                                 24          16.81           0.70        0.0%          0.0%
+    -------------------------------------------------------------------------------------------------------------------------
+    python_ductile_read_scores                                     32           4.29           0.13        0.0%          0.0%
+    -------------------------------------------------------------------------------------------------------------------------
+    python_cache_check                                            831           0.67           0.00        0.0%          0.0%
+    -------------------------------------------------------------------------------------------------------------------------
+    python_ductile_verification                                     8           0.33           0.04        0.0%          0.0%
+
+  Overlapping Totals (wrap other timers; not summed into the tree)
+  ---------------------------------------------------------------------------------------------------------------------------
+  python_client_subprocess                                         32      13,365.64         417.68        0.5%              
+  main_total                                                       32       9,027.25         282.10        0.4%              
+  problem_total                                                    40       3,051.85          76.30        0.1%              
+  solution_total                                                  585         532.32           0.91        0.0%              
+  run_iteration_total                                               1           4.14           4.14        0.0%              
+  validate_total                                                    1           1.25           1.25        0.0%              
+  validate_check_results_typed                                      1           1.25           1.25        0.0%              
+
+-----------------------------------------------------------------------------------------------------------------------------
+HIERARCHY VALIDATION: OK (all child phases fit within their parents)
+
+TIME BREAKDOWN (visual, % of wall clock)
+-----------------------------------------------------------------------------------------------------------------------------
+  TOTAL RUNTIME                                             100.0% ##################################################
+    BUILD: solution generation & compile                     98.1% #################################################
+      Solution generation & build (Python)                   97.4% ################################################
+        python_kernel_compilation                            85.5% ##########################################
+          python_kernel_build_src_co                         39.1% ###################
+            python_kernel_build_src_co.compile               39.0% ###################
+            python_kernel_build_src_co.unbundle               0.1% 
+            python_kernel_build_src_co.cache_check            0.0% 
+            python_kernel_build_src_co.cache_populate         0.0% 
+            python_kernel_build_src_co.setup                  0.0% 
+            python_kernel_build_src_co.move                   0.0% 
+            (untracked)                                       0.0% 
+          python_kernel_codegen                              23.0% ###########
+          python_kernel_write_assemble                        8.8% ####
+          python_kernel_bench_setup                           5.1% ##
+          python_kernel_bench_postprocess                     4.1% ##
+            python_benchpost_lib_construction                 2.9% #
+            python_benchpost_library_write                    0.9% 
+            python_benchpost_naming                           0.4% 
+            python_benchpost_client_config                    0.0% 
+            (untracked)                                       0.0% 
+          python_kernel_validate                              3.2% #
+          python_kernel_setup                                 0.8% 
+          python_kernel_build_co                              0.7% 
+          python_kernel_write_helpers                         0.5% 
+          (untracked)                                         0.2% 
+        python_solution_generation                           11.9% #####
+          python_solgen_forked_solutions                     11.9% #####
+          python_solgen_custom_kernels                        0.0% 
+          python_solgen_fork_permutations                     0.0% 
+          (untracked)                                         0.0% 
+      Ductile GA search (Python)                              0.8% 
+        python_ductile_initial_sampling                       0.5% 
+        python_ductile_generate_solutions                     0.2% 
+        python_ductile_ga_between_evaluations                 0.1% 
+        python_ductile_setup                                  0.0% 
+        python_ductile_clear_artifacts                        0.0% 
+        python_ductile_read_scores                            0.0% 
+        python_ductile_verification                           0.0% 
+    SHARED: cache & solution files                            0.9% 
+      python_write_solutions                                  0.5% 
+        python_wsol_dump                                      0.5% 
+        python_wsol_prepare                                   0.0% 
+          python_wsol_prepare_nocache                         0.0% 
+          (untracked)                                         0.0% 
+        python_wsol_header                                    0.0% 
+        (untracked)                                           0.0% 
+      python_solution_indexing                                0.3% 
+      python_write_cache                                      0.0% 
+      python_cache_check                                      0.0% 
+    RUN: benchmark client                                     0.5% 
+      Client launch (startup, setup & teardown)               0.4% 
+        hip_initialization                                    0.2% 
+        process_exit                                          0.1% 
+        main_problem_factory                                  0.0% 
+          factory_hip_get_device_properties                   0.0% 
+          (untracked)                                         0.0% 
+        process_startup                                       0.0% 
+        main_teardown_locals                                  0.0% 
+        data_init_setup                                       0.0% 
+        code_object_loading                                   0.0% 
+        library_loading                                       0.0% 
+        lazy_loading_init                                     0.0% 
+        main_parse_args                                       0.0% 
+        reporter_setup                                        0.0% 
+        python_client_write_run_script                        0.0% 
+        listener_setup                                        0.0% 
+        solution_iterator_setup                               0.0% 
+      Input data preparation                                  0.1% 
+        gpu_input_preparation                                 0.1% 
+          gpu_input_prep_init_cpu_inputs                      0.1% 
+          gpu_input_prep_copy_valid_to_gpu                    0.0% 
+          gpu_input_prep_copy_swizzled                        0.0% 
+          gpu_input_prep_batched_inputs                       0.0% 
+          gpu_input_prep_copy_inputs_d2d                      0.0% 
+          gpu_input_prep_constant_inputs                      0.0% 
+          gpu_input_prep_convert_to_inputs                    0.0% 
+          gpu_input_prep_slow_path                            0.0% 
+          (untracked)                                         0.0% 
+        pre_solution_listener.DataInitialization              0.0% 
+          pre_solution_mx_init_data                           0.0% 
+            pre_solution_mx_side_regenerate                   0.0% 
+            pre_solution_mx_side_cache_hit                    0.0% 
+            (untracked)                                       0.0% 
+          pre_solution_mx_copy_valid_to_gpu_no_regen          0.0% 
+          pre_solution_mx_cpu_sync_no_regen                   0.0% 
+          pre_solution_mx_copy_valid_to_gpu_after_regen       0.0% 
+          pre_solution_mx_copy_inputs_d2d_no_regen            0.0% 
+          pre_solution_mx_cpu_sync_after_regen                0.0% 
+          pre_solution_mx_copy_inputs_d2d_after_regen         0.0% 
+          pre_solution_mx_check                               0.0% 
+          (untracked)                                         0.0% 
+        cpu_data_init                                         0.0% 
+        rotating_buffer_preparation                           0.0% 
+        gpu_input_reset                                       0.0% 
+          gpu_input_reset_copy_valid_to_gpu                   0.0% 
+          gpu_input_reset_copy_swizzled                       0.0% 
+          gpu_input_reset_batched_inputs                      0.0% 
+          gpu_input_reset_copy_inputs_d2d                     0.0% 
+          gpu_input_reset_convert_to_inputs                   0.0% 
+          gpu_input_reset_slow_path                           0.0% 
+      Per-solution bookkeeping & reporting                    0.0% 
+        pre_solution_listener.AllSolutionsIterator            0.0% 
+        post_solution_log                                     0.0% 
+        pre_solution_listener.BenchmarkTimer                  0.0% 
+        pre_solution_listener.ProgressListener                0.0% 
+        run_current_solution_check                            0.0% 
+        pre_solution_listener.MetaResultReporter              0.0% 
+        post_solution_reporting                               0.0% 
+        post_problem                                          0.0% 
+        finalize_report                                       0.0% 
+        post_solution_perf_calc                               0.0% 
+        problem_report_index                                  0.0% 
+        solution_selection                                    0.0% 
+        pre_solution_listener.SynchronizerValidator           0.0% 
+        problem_teardown                                      0.0% 
+        solution_teardown                                     0.0% 
+        post_solution_result_file                             0.0% 
+        post_solution_validation                              0.0% 
+        pre_solution_listener.HardwareMonitorListener         0.0% 
+        post_solution_sol_advance                             0.0% 
+        post_solution_perf_reset                              0.0% 
+        run_iteration_teardown                                0.0% 
+      Reference GEMM (CPU)                                    0.0% 
+        pre_solution_listener.ReferenceValidator              0.0% 
+          cpu_reference_gemm_per_solution_inputs_changed      0.0% 
+            solve_cpu_slow_per_solution_inputs_changed        0.0% 
+          (untracked)                                         0.0% 
+        cpu_reference_gemm                                    0.0% 
+          solve_cpu_slow                                      0.0% 
+          (untracked)                                         0.0% 
+      Validation                                              0.0% 
+        validate_warmups_listener.ReferenceValidator          0.0% 
+          validate_result_buffer_alloc                        0.0% 
+          validate_gpu_readback                               0.0% 
+          validate_element_comparison                         0.0% 
+          validate_inputs_copy                                0.0% 
+          validate_report                                     0.0% 
+          validate_setup                                      0.0% 
+        validate_warmups_listener.SynchronizerValidator       0.0% 
+          validate_synchronizer_check                         0.0% 
+            validate_synchronizer_readback                    0.0% 
+            validate_synchronizer_scan                        0.0% 
+        validate_warmups_listener.MetaResultReporter          0.0% 
+        validate_warmups_listener.HardwareMonitorListener     0.0% 
+        validate_warmups_listener.AllSolutionsIterator        0.0% 
+        validate_warmups_listener.ProgressListener            0.0% 
+        validate_warmups_listener.DataInitialization          0.0% 
+      Kernel launch & execution                               0.0% 
+        kernel_solving                                        0.0% 
+        warmup_runs                                           0.0% 
+        warmup_events_setup                                   0.0% 
+        validate_warmups_listener.BenchmarkTimer              0.0% 
+          validate_gpu_sync                                   0.0% 
+        benchmark_runs                                        0.0% 
+          benchmark_pre_syncs                                 0.0% 
+          benchmark_post_syncs                                0.0% 
+    MEASUREMENT OVERHEAD (instrumentation)                    0.0% 
+      main_timing_calibration                                 0.0% 
+      flush_timing_buffer                                     0.0% 
+      (timer overhead subtracted from parent timers)          0.0% 
+      timing_overhead                                         0.0% 
+    UNATTRIBUTED (untracked time & timer overhead)            0.4% 
+      (untracked in python_benchmark_problems)                0.4% 
+      (untracked in python_client_execution)                  0.0% 
+      (untracked in pre_solution)                             0.0% 
+      (untracked in pre_problem)                              0.0% 
+      (untracked in post_solution)                            0.0% 
+
+KEY INSIGHTS (% of wall clock)
+-----------------------------------------------------------------------------------------------------------------------------
+  Solution generation & build (Python)           2510.35s (97.4%)
+  SHARED: cache & solution files                 23.18s (0.9%)
+  Ductile GA search (Python)                     19.71s (0.8%)
+  Client launch (startup, setup & teardown)      9.95s (0.4%)
+  Input data preparation                         3.00s (0.1%)
+  MEASUREMENT OVERHEAD (instrumentation)         0.36s (0.0%)
+  Per-solution bookkeeping & reporting           0.03s (0.0%)
+  Reference GEMM (CPU)                           0.01s (0.0%)
+  Validation                                     0.00s (0.0%)
+  Kernel launch & execution                      0.00s (0.0%)
+  UNATTRIBUTED (untracked time & timer overhead) 11.25s (0.4%)
+
+
+TOP 10 SLOWEST PROBLEMS (by CPU reference time)
+-----------------------------------------------------------------------------------------------------------------------------
+         M        N        K    Batch      TypeA      TypeD CPU Ref (ms)   GPU (ms)
+  ---------------------------------------------------------------------------------------------------------------------------
+      2048      256      128       16     Float8   BFloat16         2.47       0.00
+

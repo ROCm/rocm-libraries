@@ -1,0 +1,4 @@
+custom_mainloop_scheduling rc=0 112s
+custom_mainloop_scheduling_tf32 rc=0 45s
+f8bf16_tn_cms rc=1 23s
+DONE
