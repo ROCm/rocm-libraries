@@ -2,7 +2,7 @@
 
 This root holds the descriptors the provider **ships**. Its sibling `test_descriptors/`
 stages into the build tree for the unit and integration binaries and is installed only
-under `HIPKERNELPROVIDER_ENABLE_TESTS`. It holds two producers' bundles:
+under `HIPKERNELPROVIDER_ENABLE_TESTS`. It holds three producers' bundles:
 
 - Five rocKE bundles: `rocKE/gfx950_attention_dense/`, `rocKE/gfx950_attention_unified_2d/`
   and `rocKE/gfx950_attention_unified_3d/`, whose KDPs are stored in DVC (see
@@ -22,6 +22,12 @@ under `HIPKERNELPROVIDER_ENABLE_TESTS`. It holds two producers' bundles:
   packs for a build whose GPU targets include one of its arches and that has FlyDSL
   enabled (`HIPKERNELPROVIDER_ENABLE_FLYDSL`, OFF by default; TheRock turns it on). The objects and descriptors are
   generated, not hand-written: see `flydsl/REGEN.md` in the provider tree.
+- `conv/<family>/`, the conv engine group, one bundle per convolution engine family. Its
+  kernels are HIP source, `kind: "embedded_source"`, stored beside their descriptors under
+  `conv/<family>/kernels/`, embedded in the plugin and compiled at runtime through HIPRTC, so
+  its KDPs declare no arch and pack into every shard. A bundle packs for a build that has the
+  group enabled (`HIPKERNELPROVIDER_ENABLE_CONV`, OFF by default). See `conv/README.md` in the
+  provider tree.
 
 For any other build the root has nothing to pack and production packaging is dormant,
 unless the cache variable below is pointed elsewhere.
