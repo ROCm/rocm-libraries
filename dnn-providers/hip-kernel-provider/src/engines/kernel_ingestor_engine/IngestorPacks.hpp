@@ -144,6 +144,15 @@ void resetGfx950ConvDgradAotModuleCache();
 /// plan build actually reads; this function runs inside the plugin. FOR TESTS ONLY.
 void setGfx950ConvDgradAotBatchChunkByteLimitForTesting(int64_t limit);
 
+/// The engine name attention_general_bwd.ued.json declares; read by the pack table, the
+/// pack's decline log lines and its descriptor census.
+inline constexpr std::string_view ATTENTION_GENERAL_BWD_ENGINE_NAME
+    = "hipkernel:AttentionGeneralBwd";
+
+/// @see packs/AttentionGeneralBwdNative.cpp
+void registerAttentionGeneralBwdSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
+void resetAttentionGeneralBwdModuleCache();
+
 /// Drops every pack's cached kpack modules and closes every kpack archive
 /// SharedKpackArchives retains, so the next dispatch re-reads its archive from disk. Leases
 /// stay held: the archive that next dispatch opens is retained again.
