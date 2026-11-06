@@ -12,9 +12,10 @@
 // w[ci][co][k]; lane l owns CT_QR consecutive q, i.e. S * CT_QR consecutive outputs per channel.
 // dy is staged in LDS CT_CI_T input channels at a time.
 //
-// fp16 / bf16 weights are first converted to fp32 into the workspace by
-// MIOpenConvTranspose1dFmaHipWeights: scalar loads are 32-bit, so 16-bit weights read in the main
-// kernel would become per-lane vector loads.
+// Scalar loads are 32-bit, so 16-bit weights read as 16-bit values would become per-lane vector
+// loads. fp16 / bf16 weights are therefore either converted to fp32 into a workspace first by
+// MIOpenConvTranspose1dFmaHipWeights (CT_WS 1), or read as 32-bit words holding two values each and
+// unpacked in scalar registers (CT_WS 0, no workspace).
 
 #ifndef MIOPEN_HIP_RUNTIME_COMPILE
 #include <hip/hip_runtime.h>
@@ -37,6 +38,9 @@
 #endif
 #ifndef CT_CI_T
 #define CT_CI_T 32
+#endif
+#ifndef CT_WS
+#define CT_WS 1 // fp16 / bf16: fp32 weights from the workspace (1) or 16-bit weights in place (0)
 #endif
 
 #define CT_BLOCK_SIZE 256
@@ -70,16 +74,63 @@ __device__ static inline data_t from_float(float v)
 }
 #endif
 
+// 16-bit weights read in place.
+#define CT_W16 (CT_DTYPE != 0 && !CT_WS)
+#if CT_W16
+typedef data_t weight_t;
+#else
+typedef float weight_t;
+#endif
+
+#if CT_DTYPE != 0
 extern "C" __global__ void __launch_bounds__(CT_BLOCK_SIZE)
     MIOpenConvTranspose1dFmaHipWeights(const data_t* __restrict__ w, float* __restrict__ wf, int n)
 {
     for(int i = blockIdx.x * CT_BLOCK_SIZE + threadIdx.x; i < n; i += gridDim.x * CT_BLOCK_SIZE)
         wf[i] = to_float(w[i]);
 }
+#endif
+
+#if CT_W16
+// 32-bit words covering the K weights of one output channel: a channel starts on a word boundary
+// when K is even, and may start in the upper half of a word when K is odd.
+#define CT_KW (CT_K % 2 == 0 ? CT_K / 2 : CT_K / 2 + 1)
+
+__device__ static inline float half_to_float(unsigned int h)
+{
+#if CT_DTYPE == 1
+    return static_cast<float>(__builtin_bit_cast(_Float16, static_cast<unsigned short>(h)));
+#else
+    return __builtin_bit_cast(float, h << 16);
+#endif
+}
+
+// The K values of a channel from its words; sh is 16 when the channel starts in the upper half of
+// its first word (K odd only), else 0. Scalar (SALU) work only.
+__device__ static inline void
+unpack_weights(const unsigned int (&wd)[CT_KW], unsigned int sh, float (&wv)[CT_K])
+{
+#pragma unroll
+    for(int i = 0; i < (CT_K + 1) / 2; ++i)
+    {
+        unsigned int word = wd[i];
+#if CT_K % 2 != 0
+        if(i + 1 < CT_KW)
+            word = static_cast<unsigned int>(
+                ((static_cast<unsigned long long>(wd[i + 1]) << 32) | wd[i]) >> sh);
+        else
+            word >>= sh;
+#endif
+        wv[2 * i] = half_to_float(word & 0xffffu);
+        if(2 * i + 1 < CT_K)
+            wv[2 * i + 1] = half_to_float(word >> 16);
+    }
+}
+#endif
 
 extern "C" __global__ void __launch_bounds__(CT_BLOCK_SIZE)
     MIOpenConvTranspose1dFmaHip(const data_t* __restrict__ dy,
-                                const float* __restrict__ w, // fp32; the workspace for fp16 / bf16
+                                const weight_t* __restrict__ w,
                                 data_t* __restrict__ dx,
                                 int ci_n,
                                 int co_n,
@@ -96,6 +147,9 @@ extern "C" __global__ void __launch_bounds__(CT_BLOCK_SIZE)
     const int co0  = blockIdx.y * CT_CO_T + wave * CT_CO_W;
     dy += static_cast<size_t>(blockIdx.z) * ci_n * len_dy;
     dx += static_cast<size_t>(blockIdx.z) * co_n * len_dx;
+#if CT_W16
+    const size_t w_words = (static_cast<size_t>(ci_n) * co_n * CT_K + 1) / 2;
+#endif
 
     float acc[CT_S][CT_CO_W][CT_QR];
 #pragma unroll
@@ -137,20 +191,45 @@ extern "C" __global__ void __launch_bounds__(CT_BLOCK_SIZE)
 #pragma unroll
             for(int j = 0; j < CT_QR + CT_T - 1; ++j)
                 xv[j] = xs[ii][lane * CT_QR + j];
+            // First weight of each of the wave's channels; clamped so that the channels past co_n
+            // in the last tile read valid memory (their results are not stored).
+            size_t e[CT_CO_W];
+#pragma unroll
+            for(int c = 0; c < CT_CO_W; ++c)
+                e[c] = (static_cast<size_t>(cb + ii) * co_n + min(co0 + c, co_n - 1)) * CT_K;
+#if CT_W16
+            // All the words first, so that the scalar loads are issued together.
+            const unsigned int* w32 = reinterpret_cast<const unsigned int*>(w);
+            unsigned int wd[CT_CO_W][CT_KW];
+#pragma unroll
+            for(int c = 0; c < CT_CO_W; ++c)
+#pragma unroll
+                for(int i = 0; i < CT_KW; ++i)
+                {
+                    // With K odd the last word may lie past the tensor: clamp it.
+                    const size_t k = e[c] / 2 + i;
+                    wd[c][i]       = w32[CT_K % 2 == 0 || k < w_words ? k : w_words - 1];
+                }
+#endif
 #pragma unroll
             for(int c = 0; c < CT_CO_W; ++c)
             {
-                // Clamped so that the channels past co_n in the last tile read valid memory; their
-                // results are not stored.
-                const float* wp =
-                    w + (static_cast<size_t>(cb + ii) * co_n + min(co0 + c, co_n - 1)) * CT_K;
+                float wv[CT_K];
+#if !CT_W16
+#pragma unroll
+                for(int t = 0; t < CT_K; ++t)
+                    wv[t] = w[e[c] + t];
+#else
+                const unsigned int sh =
+                    CT_K % 2 != 0 ? static_cast<unsigned int>(e[c] % 2) * 16 : 0u;
+                unpack_weights(wd[c], sh, wv);
+#endif
 #pragma unroll
                 for(int t = 0; t < CT_K; ++t)
                 {
-                    const float wv = wp[t];
 #pragma unroll
                     for(int j = 0; j < CT_QR; ++j)
-                        acc[t % CT_S][c][j] += wv * xv[j + CT_T - 1 - t / CT_S];
+                        acc[t % CT_S][c][j] += wv[t] * xv[j + CT_T - 1 - t / CT_S];
                 }
             }
         }
