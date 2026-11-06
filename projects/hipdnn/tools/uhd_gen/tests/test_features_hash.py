@@ -54,8 +54,32 @@ def test_a_supplied_evaluator_that_cannot_run_is_refused_not_rehashed_in_python(
     """There is no Python fallback hash; an unrunnable evaluator is an error."""
     monkeypatch.setenv(features.EVALUATOR_ENV_VAR, "hipdnn_uhd_features_not_installed")
     monkeypatch.setenv("PATH", str(tmp_path))
+    monkeypatch.setattr(features, "_evaluator_search_roots", lambda: [tmp_path])
     with pytest.raises(ValueError, match="hipdnn_uhd_features_not_installed"):
         compute_features_hash(RAW_SIGNATURE)
+    with pytest.raises(ValueError, match="--feature-evaluator"):
+        compute_features_hash(RAW_SIGNATURE, executable=tmp_path / "missing")
+
+
+def test_an_inherited_evaluator_the_container_lacks_falls_back_to_the_installed_one(
+    monkeypatch, tmp_path, caplog
+):
+    """A host path in the environment that this filesystem does not hold is searched past."""
+    monkeypatch.setenv(
+        features.EVALUATOR_ENV_VAR, str(tmp_path / "host" / features.EVALUATOR_NAME)
+    )
+    monkeypatch.setenv("PATH", str(tmp_path / "nothing-here"))
+    stub = (
+        tmp_path
+        / "bin"
+        / (features.EVALUATOR_NAME + (".exe" if os.name == "nt" else ""))
+    )
+    stub.parent.mkdir()
+    stub.write_text("")
+    stub.chmod(0o755)
+    monkeypatch.setattr(features, "_evaluator_search_roots", lambda: [tmp_path])
+    assert Path(features.resolve_feature_evaluator()).samefile(stub)
+    assert features.EVALUATOR_ENV_VAR in caplog.text
 
 
 def test_an_installed_evaluator_is_found_without_path_or_environment(

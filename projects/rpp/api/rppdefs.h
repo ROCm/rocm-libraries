@@ -454,6 +454,18 @@ typedef enum {
     RpptColorRange_FULL = 2    /*!< Full / JPEG / PC range */
 } RpptColorRange;
 
+/*! \brief Bayer colour filter array pattern for \ref rppt_bayer_to_rgb.
+ * \details Names the colours of the top-left 2x2 block of the mosaic, row-major: RGGB is
+ * R at (0,0), G at (0,1) and (1,0), B at (1,1). The pattern repeats every 2 pixels in x and y.
+ * \ingroup group_rppdefs
+ */
+typedef enum {
+    RpptBayerPattern_RGGB = 0, /*!< R G / G B */
+    RpptBayerPattern_BGGR = 1, /*!< B G / G R */
+    RpptBayerPattern_GRBG = 2, /*!< G R / B G */
+    RpptBayerPattern_GBRG = 3  /*!< G B / R G */
+} RpptBayerPattern;
+
 /*! \brief RPPT Tensor 2D ROI type enum
  * \ingroup group_rppdefs
  */
