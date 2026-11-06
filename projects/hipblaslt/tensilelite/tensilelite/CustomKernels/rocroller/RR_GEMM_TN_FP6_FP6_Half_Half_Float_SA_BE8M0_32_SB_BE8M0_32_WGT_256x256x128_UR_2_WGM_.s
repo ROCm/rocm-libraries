@@ -3,7 +3,7 @@
 
 
 
-.amdgcn_target "amdgcn-amd-amdhsa--gfx950:sramecc+"
+.amdgcn_target "amdgcn-amd-amdhsa--gfx950"
 .set .amdgcn.next_free_vgpr, 0
 .set .amdgcn.next_free_sgpr, 0
 .text
@@ -10342,6 +10342,7 @@ custom.config:
     macrotile: [256, 256, 128]
     threads: [256, 1, 1]
     grid: [TilesXY, One, Batch]
+    uniformSummationOrder: true
   MatrixInstruction: [16, 16, 128, 1]
   StaggerU: 0
   EnableMatrixInstruction: True

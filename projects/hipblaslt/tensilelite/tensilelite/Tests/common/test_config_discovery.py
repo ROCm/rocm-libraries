@@ -44,6 +44,7 @@ def test_yaml_that_is_not_a_config_is_skipped(tmp_path, body):
 @pytest.mark.parametrize(
     "rel",
     [
+        "unit/data/rocroller_predicate_manifest.yaml",
         "unit/rocroller_streamk_metadata.yaml",
     ],
 )
