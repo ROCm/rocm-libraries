@@ -388,6 +388,27 @@ TYPED_TEST(local_matrix_amg,
     EXPECT_EQ(result.first, (std::vector<int>{1, 2, 2}));
 }
 
+// The threshold 0.25 a_01 of a subnormal coupling rounds to zero, yet a_01 stays strong, so
+// neither point is an F point from the start. Otherwise lambda counts each of them twice,
+// beyond the bound n - 1 of the buckets, and no C point is left for them.
+TYPED_TEST(local_matrix_amg, rs_coarsening_of_couplings_whose_threshold_rounds_to_zero)
+{
+    using T      = typename TypeParam::value_type;
+    const T tiny = -std::numeric_limits<T>::denorm_min();
+    Csr<T>  ref(2);
+    ref.add(0, 1.0);
+    ref.add(1, tiny);
+    ref.end_row();
+    ref.add(0, tiny);
+    ref.add(1, 1.0);
+    ref.end_row();
+
+    const auto result = rs_coarsening_on(TypeParam::backend, ref);
+    EXPECT_EQ(result.second, (std::vector<bool>{false, true, true, false}));
+    EXPECT_EQ(result.second, rs_strength(ref, 0.25));
+    expect_valid_splitting(ref, result.second, result.first);
+}
+
 // Strength does not change when a row is scaled by -1
 TYPED_TEST(local_matrix_amg, rs_coarsening_of_a_negated_grid)
 {

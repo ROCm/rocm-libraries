@@ -7305,6 +7305,7 @@ namespace rocalution
             // S_ij = { 1   if i != j and -a_ij > eps * max(-a_ik) for k != i }
             //        { 0   otherwise                                         }
             //
+            // where row i is scaled by -1 first if its diagonal is negative.
             // This means, S_ij is 1, only if i strongly depends on j.
             // S has been extended to also work with matrices that do not have
             // fully non-positive off-diagonal entries.

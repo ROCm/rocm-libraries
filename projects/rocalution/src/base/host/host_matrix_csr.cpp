@@ -6897,6 +6897,7 @@ namespace rocalution
         // S_ij = { 1   if i != j and -a_ij > eps * max(-a_ik) for k != i
         //        { 0   otherwise
         //
+        // where row i is scaled by -1 first if its diagonal is negative.
         // This means, S_ij is 1, only if i strongly depends on j.
         // S has been extended to also work with matrices that do not have
         // fully non-positive off-diagonal entries.
@@ -6953,16 +6954,19 @@ namespace rocalution
             ValueType cond = (sign ? max_a_ik : min_a_ik) * static_cast<ValueType>(eps);
 
             // Fill S
+            bool depends = false;
             for(PtrType j = row_begin; j < row_end; ++j)
             {
                 int       col = this->mat_.col[j];
                 ValueType val = this->mat_.val[j];
 
                 cast_S->vec_[j] = (col != i) && (sign ? val > cond : val < cond);
+                depends         = depends || cast_S->vec_[j];
             }
 
-            // If cond is zero -> i is independent of other grid points
-            if(cond == static_cast<ValueType>(0))
+            // i is an F point from the start if it depends on no other point. cond can round
+            // to zero although i depends on other points.
+            if(!depends)
             {
                 cast_cf->vec_[i] = 2;
             }
