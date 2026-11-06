@@ -24,8 +24,9 @@ contributes what is conv-specific:
   (:func:`wgrad_atomic_epilogue_available`) and accumulates rounding error with
   the degree (:data:`ATOMIC_16BIT_MAX_SPLIT_K`); a merged tile reduces through
   the workspace only; the workspace must fit the i32 ``ws_bytes`` kernarg;
-  WMMA (wave32) arches have no workspace path, and their packed atomic needs
-  neither cshuffle nor an even store vector;
+  on WMMA (wave32) the workspace path needs the arch's float global atomics
+  (gfx1250), and the packed atomic needs neither cshuffle nor an even store
+  vector;
 * the gridDim.z budget (``z = groups * split_k``);
 * for the forward split (the two-stage WMMA kernel, built on
   :data:`FWD_SPLIT_K_ARCHS` only): its GEMM ``N*[Do*]Ho*Wo x kpg x
@@ -203,10 +204,12 @@ def _resolve_wgrad(
     # drop an off-diagonal group pair, so only the workspace carries the mask.
     # On MFMA the packed 16-bit atomic is emitted by the cshuffle epilogue only
     # (the direct-store one scatters the MFMA layout and has no pairs to add).
-    # WMMA (wave32) has only the default epilogue, and its split-K epilogue
-    # forms each packed pair itself.
+    # On WMMA (wave32) the default split-K epilogue forms each packed pair
+    # itself; the cshuffle one pairs from LDS as on MFMA.
     wave_size = ArchTarget.from_gfx(arch).wave_size
-    layout_ok, atomic_why = wgrad_atomic_epilogue_available(p, dtype, None, wave_size)
+    layout_ok, atomic_why = wgrad_atomic_epilogue_available(
+        p, dtype, None, wave_size, epilogue
+    )
     if gm > 1:
         atomic_why = "a merged tile reduces through the workspace only"
     elif wave_size == 32 and not wgrad_wmma_split_k_available(arch):
@@ -220,7 +223,8 @@ def _resolve_wgrad(
         atomic_why = "the default epilogue emits no packed 16-bit atomic"
     atomic_ok = atomic_why == "ok"
     # Deliberately unmerged: the workspace is R copies of the true dW. WMMA
-    # arches have no two-stage path, so no workspace at all.
+    # arches without float global atomics have no two-stage path, so no
+    # workspace at all.
     ws_ok = (
         wgrad_two_stage_available(arch)
         and wgrad_workspace_nbytes(p, ws_replicas) <= MAX_WGRAD_WS_BYTES
@@ -292,12 +296,15 @@ def _resolve_wgrad(
             groups=grid_groups,
             block_size=block_size,
             # Selects the arch's WgradSplitPolicy (gfx1250) where it has one.
-            dtype_d=dtype,
+            # The workspace reduction accumulates in fp32 whatever dW's dtype,
+            # so the 16-bit packed-atomic accuracy caps do not apply to it.
+            dtype_d="fp32" if reduction == "workspace" else dtype,
         )
         if reduction == "atomic" and not atomic_ok and allow_unsplit:
             # An auto degree the packed atomic cannot serve runs unsplit, as
-            # on the planner path (e.g. a WMMA 16-bit dW with an odd row: no
-            # packed pair and no workspace). A forced degree still raises.
+            # on the planner path (e.g. a WMMA 16-bit dW with an odd row and
+            # the reduction fixed to the atomic: no packed pair). A forced
+            # degree still raises.
             return ConvSplitK(
                 1,
                 False,

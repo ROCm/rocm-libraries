@@ -43,6 +43,7 @@ from ..Common import assignParameterWithDefault, IsaInfo, \
                     deriveWaveParams, \
                     swizzleGeometry
 from ..Common.DataType import DataType
+from ..Common.ScaleAlphaVec import scaleAlphaSupportsDeviceScalar, scaleAlphaVectorMode
 from ..Common.LdsPaddingLimits import B128_PAD_STEP_BYTES, LDS_PAD_STEP_BYTES, \
                                        ldsBlockError, ldsPadError
 from ..Components.DecouplePGR import pgrLevelsForTensors, ldsBlocksForPgrLevel, \
@@ -911,6 +912,16 @@ def isExtractableIndex(ks, index, tc='x'):
 ################################################################################
 _stinkyTuneAnnounced = set()  # print the StinkyTofuParameters notice once per distinct value
 
+def _usesFp8LdsConfig(dtype, state):
+    """True when the LDS pad / block config of an 8-bit tensor follows the fp8 rules.
+
+    Sparse int8 kernels read LDS through the same LDS-transpose and TDM path as
+    fp8, so they share its pad and block sizes. Dense int8 keeps its existing
+    path: this module is shared with hipBLASLt, whose int8 kernels must not move.
+    """
+    return dtype.is8bitFloat() or (bool(state["ProblemType"]["Sparse"]) and dtype.isInt8())
+
+
 class Solution(collections.abc.Mapping):
   MAX_NUM_DS_LOAD_VGPRS: int = 4
   MAX_NUM_DS_LOAD_BYTES: int = 4 * MAX_NUM_DS_LOAD_VGPRS
@@ -1032,6 +1043,14 @@ class Solution(collections.abc.Mapping):
     # skip post-derived validation to avoid cascading/noisy type mismatch records.
     pre_records = validateParameterTypes(self._state, srcFile=srcName)
     mergeMismatchRecords(pre_records)
+
+    # Check before either derivation path, including pre-derived/custom kernels.
+    if (scaleAlphaSupportsDeviceScalar(self["ProblemType"]["UseScaleAlphaVec"])
+        and tuple(self["ISA"]) != (12, 5, 0)):
+      reject(self._state, printSolutionRejectionReason,
+             "UseScaleAlphaVec device scalar alpha (5/6/7) is only supported on gfx1250")
+      self["Valid"] = False
+      return
 
     isHandwrittenCustomKernel = ("CustomKernel" in self._state
         and self._state["CustomKernel"].get("name", "")
@@ -1283,6 +1302,9 @@ class Solution(collections.abc.Mapping):
         reject(state, printRejectionReason, f"size of WorkGroup {state['NumThreads']} should be multiple of WavefrontSize {state['WavefrontSize']}")
 
       state["NumWaves"] = state["NumThreads"] // state['WavefrontSize']
+      numWaves = state["NumWaves"]
+      if state["ProblemType"].get("OutputAmaxD", False) and numWaves & (numWaves - 1):
+        reject(state, printRejectionReason, f"OutputAmaxD needs a power-of-two NumWaves ({numWaves}): the inter-wave amax reduction halves it each step")
 
     # macro tile sizes
     if "SubGroup0" in state and "ThreadTile0" in state:
@@ -2714,6 +2736,14 @@ class Solution(collections.abc.Mapping):
               or (hasStaticAssignment(state) and not state["ProblemType"]["Gradient"]
                   and not state["ProblemType"]["Sparse"] and not state.get("UseSubtileImpl", False))))
     state["InternalSupportParams"]["SupportOccupancyProbe"] = _supportOccupancyProbe(state)
+
+    if (scaleAlphaSupportsDeviceScalar(state["ProblemType"]["UseScaleAlphaVec"])
+          and not isCustomKernelConfig(state)
+          and not (state["ProblemType"]["ComputeDataType"].isSingle()
+                   and state["KernelLanguage"] == "Assembly")):
+      reject(state, printRejectionReason,
+             "UseScaleAlphaVec scalar support requires an Assembly kernel with FP32 compute")
+      return
 
     if isPersistent(state):
       #state["AssertSummationElementMultiple"] = 1 # Cannot keep ASEM with Stream-K
@@ -4263,13 +4293,13 @@ class Solution(collections.abc.Mapping):
       vgprsPerElement += vgprsPerAddr  # addrGSUSyncVgprs
 
     # One buffer set per resident k-tile: a ValuA block plus its MX scale block,
-    # numVgprBuffer blocks of each. Mirrors vgprAllocationImplClassic, including
-    # its ceil: at MXBlock 128 a WaveTile's single e8 still takes a whole VGPR,
-    # which flooring the product would price at none. The MX TileSpan halving is
-    # deliberately not modelled: leaving it out overstates R, which understates
-    # k, and only the understating direction is safe here.
-    numVgprBuffer = state["LoopIters"] if state["ClusterLocalRead"] \
-                    else state["PrefetchLocalRead"] + 1
+    # LoopIters blocks of each, one per iteration whatever the prefetch slots.
+    # Mirrors vgprAllocationImplClassic, including its ceil: at MXBlock 128 a
+    # WaveTile's single e8 still takes a whole VGPR, which flooring the product
+    # would price at none. The MX TileSpan halving is deliberately not modelled:
+    # leaving it out overstates R, which understates k, and only the
+    # understating direction is safe here.
+    numVgprBuffer = state["LoopIters"]
     macA = problemType.get("MacDataTypeA") or problemType["DataType"]
     bpeA = bpr * macA.numRegisters()
     mxsaPerBlock = 0
@@ -4636,7 +4666,7 @@ class Solution(collections.abc.Mapping):
                       mt, "pad", miwt, miwg, state["MatrixInstK"], tdm,
                       tdmComponentBytes=tdmComponentBytes,
                       tdmNumComponents=tdmNumComponents)
-                elif macDtype.is8bitFloat() and ldstr:
+                elif _usesFp8LdsConfig(macDtype, state) and ldstr:
                   ldsPad = get_fp8_mt_config(
                       mt, "pad", miwt, miwg, state["MatrixInstK"], tdm,
                       tdmComponentBytes=tdmComponentBytes,
@@ -4887,7 +4917,7 @@ class Solution(collections.abc.Mapping):
                                             state.get(f"enableTDM{tc}", False),
                                             tdmComponentBytes=tdmComponentBytes,
                                             tdmNumComponents=tdmNumComponents)
-                  elif tmpBpe == 1 and ldsType.is8bitFloat() and state.get("enableLDSTr%s"%tc, False):
+                  elif tmpBpe == 1 and _usesFp8LdsConfig(ldsType, state) and state.get("enableLDSTr%s"%tc, False):
                     LdsBlockSizePerPad = get_fp8_mt_config(mt, "perBlock", miwt, miwg, state["MatrixInstK"],
                                             state.get(f"enableTDM{tc}", False),
                                             tdmComponentBytes=tdmComponentBytes,
@@ -6544,7 +6574,7 @@ class Solution(collections.abc.Mapping):
             mt, miwt, miwg, k, tdm,
             tdmComponentBytes=tdmComponentBytes,
             tdmNumComponents=tdmNumComponents)
-      if dtype.numBytes() == 1 and dtype.is8bitFloat() and ldstr:
+      if dtype.numBytes() == 1 and _usesFp8LdsConfig(dtype, state) and ldstr:
         return get_fp8_valid_blocks(
             mt, miwt, miwg, k, tdm,
             tdmComponentBytes=tdmComponentBytes,
@@ -7339,7 +7369,7 @@ class Solution(collections.abc.Mapping):
     # Calc the required LDS
     vecDT = VectorDataTypes()
     biasDim = state["ProblemType"]["UseBias"]
-    savDim = state["ProblemType"]["UseScaleAlphaVec"]
+    savDim = scaleAlphaVectorMode(state["ProblemType"]["UseScaleAlphaVec"])
     sAB = state["ProblemType"]["UseScaleAB"] == "Vector"
     # Calc LDS for Bias
     maxTurn = 0
@@ -7854,7 +7884,7 @@ class Solution(collections.abc.Mapping):
         reject(state, printRejectionReason, "Bias reduction does not support GroupLoadStore.")
 
     # Bias and ScaleAlphaVec
-    if state["ProblemType"]["UseBias"] != 0 and state["ProblemType"]["UseScaleAlphaVec"] != 0 and state["ProblemType"]["UseBias"] != state["ProblemType"]["UseScaleAlphaVec"]:
+    if state["ProblemType"]["UseBias"] != 0 and state["ProblemType"]["UseScaleAlphaVec"] != 0 and state["ProblemType"]["UseBias"] != scaleAlphaVectorMode(state["ProblemType"]["UseScaleAlphaVec"]):
       reject(state, printRejectionReason, "When both UseBias and UseScaleAlphaVec are enabled then UseBias and UseScaleAlphaVec must have same settings.")
 
     # ScaleAB or ScaleABVec
