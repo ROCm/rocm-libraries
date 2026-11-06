@@ -38,6 +38,20 @@ public:
     {
         _ctx.clearNamespace("kernel");
     }
+    /// Rebinds one kernel variable, named without the sigil (`kernel.tile[0]`), or unbinds
+    /// it when @p value is empty. Rebinding only the names a signature reads is cheaper per
+    /// candidate than clearKernelVars() followed by bindKernelVars().
+    void setKernelVar(const std::string& boundName, std::optional<VariableContext::ValueType> value)
+    {
+        if(value)
+        {
+            _ctx.bindBare(boundName, std::move(*value));
+        }
+        else
+        {
+            _ctx.unbindBare(boundName);
+        }
+    }
     void bindQueryVars(const ValueMap& props)
     {
         for(const auto& [name, value] : props)
@@ -114,10 +128,15 @@ public:
         , _expressions(signature)
     {
         _vocabularies.resize(_expressions.size());
+        _boundNames.resize(_expressions.size());
         for(size_t i = 0; i < _expressions.size(); ++i)
         {
             (_expressions.referencesKernel(i) ? _kernelIndices : _sharedIndices).push_back(i);
             const auto& reference = _expressions.reference(i);
+            if(!reference.empty())
+            {
+                _boundNames[i] = reference.substr(1);
+            }
             if(const auto found = encoding.find(reference);
                !reference.empty() && found != encoding.end())
             {
@@ -263,11 +282,14 @@ private:
             return ExpressionSet::number(_expressions.resolve(i, ctx));
         }
 
-        const auto* bound = ctx.find(reference);
-        if(bound == nullptr)
+        // Look the bare name up directly: VariableContext::find would copy it per row.
+        const auto& bindings = ctx.bindings();
+        const auto found = bindings.find(_boundNames[i]);
+        if(found == bindings.end())
         {
             throw JsonLogicError("Undefined variable: " + reference);
         }
+        const auto* bound = &found->second;
         const double result = std::visit(
             [&](const auto& held) -> double {
                 using T = std::decay_t<decltype(held)>;
@@ -341,6 +363,8 @@ private:
     ExpressionSet _expressions;
     /// Per entry, the vocabulary of a bare reference the descriptor declares categorical.
     std::vector<std::map<std::string, int32_t>> _vocabularies;
+    /// Per bare-reference entry, its binding key: the reference without the `$` sigil.
+    std::vector<std::string> _boundNames;
     std::vector<size_t> _sharedIndices;
     std::vector<size_t> _kernelIndices;
 };
