@@ -125,6 +125,7 @@ rocsparse_status rocsparse_csric0_singular_pivot(rocsparse_handle   handle,
 *  \retval     rocsparse_status_success the operation completed successfully.
 *  \retval     rocsparse_status_invalid_handle the library context was not initialized.
 *  \retval     rocsparse_status_invalid_pointer \p info pointer is invalid.
+*  \retval     rocsparse_status_invalid_value \p tolerance is negative.
 */
 ROCSPARSE_EXPORT
 rocsparse_status rocsparse_csric0_set_tolerance(rocsparse_handle   handle,
