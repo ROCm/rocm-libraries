@@ -1891,8 +1891,6 @@ namespace
     class complex_solvers : public solvers<P>
     {
     };
-
-    using ComplexTypes = testing::Types<cfloat, cdouble>;
 }
 
 TYPED_TEST_SUITE(complex_solvers, WithBackends<ComplexTypes>, TypedName);
@@ -1919,30 +1917,37 @@ TYPED_TEST(complex_solvers, current_residual_is_measured_in_the_chosen_norm)
         EXPECT_EQ(out.iterations, 2);
         EXPECT_EQ(out.status, 4);
 
-        const Vec<T>        Ax = ref.apply(out.x);
         std::vector<double> moduli(n);
         for(int i = 0; i < n; ++i)
         {
-            moduli[i] = std::abs(std::complex<double>(b[i] - Ax[i]));
+            std::complex<double> r(b[i]);
+            for(auto k = ref.row_offset[i]; k < ref.row_offset[i + 1]; ++k)
+            {
+                r -= std::complex<double>(ref.val[k]) * std::complex<double>(out.x[ref.col[k]]);
+            }
+            moduli[i] = std::abs(r);
         }
         const auto    largest = std::max_element(moduli.begin(), moduli.end());
         const int64_t index   = largest - moduli.begin();
         const double  expected
             = type == 1 ? std::accumulate(moduli.begin(), moduli.end(), 0.0) : *largest;
+        // The solver updates its residual by a recurrence, which drifts from b - A x by a few
+        // roundings in T of |A| |x|: about 1e-15 of the residual in double, 4e-6 in float
         EXPECT_NEAR(out.residual, expected, scaled_tol<T>(1e-12) * expected);
 
         if(type == 3)
         {
             // The largest modulus is unique, so that rounding does not move its index
-            for(int i = 0; i < n; ++i)
-            {
-                ASSERT_TRUE(i == index || moduli[i] < 0.99 * *largest);
-            }
+            ASSERT_IN_LOOP(std::count_if(moduli.begin(),
+                                         moduli.end(),
+                                         [&](double m) { return m >= 0.99 * *largest; })
+                           == 1);
             EXPECT_EQ(solver.GetAmaxResidualIndex(), index);
         }
     }
 }
 
+// QMRCGStab also uses the norm in its iteration, not only in the stopping test
 TYPED_TEST(complex_solvers, converge_with_the_l1_and_linf_residual_norms)
 {
     using T          = typename TypeParam::value_type;
@@ -1952,17 +1957,22 @@ TYPED_TEST(complex_solvers, converge_with_the_l1_and_linf_residual_norms)
     const double rel = loose_tol<T>(1e-10);
     auto         A   = this->make(ref);
 
-    for(int type : {1, 3})
+    for(const Method<T>& m : {method<BiCGStab<T>>("BiCGStab"), method<QMRCGStab<T>>("QMRCGStab")})
     {
-        SCOPED_TRACE("norm " + std::to_string(type));
-        BiCGStab<T> solver;
-        solver.Init(0.0, rel, 1e8, 100);
-        solver.SetResidualNorm(type);
-        set_up(solver, method<BiCGStab<T>>("BiCGStab"), *A, nullptr);
+        for(int type : {1, 3})
+        {
+            SCOPED_TRACE(m.name + ", norm " + std::to_string(type));
+            auto solver = m.make();
+            solver->Init(0.0, rel, 1e8, 100);
+            solver->SetResidualNorm(type);
+            set_up(*solver, m, *A, nullptr);
 
-        const Outcome<T> out = solve(solver, *A, b, Vec<T>(n, 0));
-        EXPECT_EQ(out.status, 2);
-        expect_all_near(ref.apply(out.x), b, 100 * rel);
+            const Outcome<T> out = solve(*solver, *A, b, Vec<T>(n, 0));
+            EXPECT_EQ(out.status, 2);
+            // In both norms |b - A x|_i <= rel |b|_1 = 28.5 rel, up to the drift of the
+            // updated residual
+            expect_all_near(ref.apply(out.x), b, 100 * rel);
+        }
     }
 }
 #endif

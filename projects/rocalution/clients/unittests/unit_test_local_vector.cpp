@@ -81,12 +81,6 @@ namespace
     template <typename... Lists>
     using Concat = typename concat_types<Lists...>::type;
 
-#ifdef SUPPORT_COMPLEX
-    using ComplexTypes = testing::Types<cfloat, cdouble>;
-#else
-    using ComplexTypes = testing::Types<>;
-#endif
-
     // The value types and backends for which the backend vectors define an
     // operation; the others end the program
     using BlasTypes       = Concat<WithBackends<FloatingTypes>, HostOnly<IntegerTypes>>;

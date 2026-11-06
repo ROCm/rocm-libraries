@@ -369,10 +369,12 @@ namespace rocalution_unit
     using AllValueTypes = testing::Types<float, double, cfloat, cdouble, int, int64_t, bool>;
     using NumericTypes  = testing::Types<float, double, cfloat, cdouble, int, int64_t>;
     using FloatingTypes = testing::Types<float, double, cfloat, cdouble>;
+    using ComplexTypes  = testing::Types<cfloat, cdouble>;
 #else
     using AllValueTypes = testing::Types<float, double, int, int64_t, bool>;
     using NumericTypes  = testing::Types<float, double, int, int64_t>;
     using FloatingTypes = testing::Types<float, double>;
+    using ComplexTypes  = testing::Types<>;
 #endif
     using RealTypes    = testing::Types<float, double>;
     using IntegerTypes = testing::Types<int, int64_t>;
