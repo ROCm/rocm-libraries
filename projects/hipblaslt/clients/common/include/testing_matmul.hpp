@@ -4430,7 +4430,7 @@ void testing_matmul_with_bias(const Arguments&                                  
                             operation,
                             epilogue,
                             hipblaslt::hostnumerics::scalarType(auxiliary ? Taux : To),
-                            {freivalds_seed(arg)},
+                            freivalds_seed(arg),
                             {});
                         if(const auto* failure = std::get_if<FreivaldsPreparationFailure>(&result))
                             throw std::invalid_argument("Freivalds: " + failure->reason);

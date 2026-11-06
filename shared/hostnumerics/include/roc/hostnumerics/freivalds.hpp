@@ -18,15 +18,10 @@
 namespace roc::hostnumerics {
 inline constexpr uint64_t freivaldsModulus = (uint64_t{1} << 61) - 1;
 
-enum class FreivaldsProbeAlgorithm { SplitMix64Rejection, SplitMix64Legacy };
-struct FreivaldsProbeOptions {
-    uint64_t seed = 0;
-    FreivaldsProbeAlgorithm algorithm = FreivaldsProbeAlgorithm::SplitMix64Rejection;
-};
-
 // Integer-only arithmetic and reproducible protocol vectors. These functions
 // have no HIP dependency. Multiply/add require residues less than the modulus.
-uint64_t freivaldsProbe(uint64_t seed, uint64_t index, FreivaldsProbeAlgorithm algorithm);
+// freivaldsProbe returns a residue in [1, P) that depends only on seed and index.
+uint64_t freivaldsProbe(uint64_t seed, uint64_t index);
 uint64_t freivaldsResidue(int64_t value);
 uint64_t freivaldsAdd(uint64_t a, uint64_t b);
 uint64_t freivaldsMultiply(uint64_t a, uint64_t b);
@@ -139,8 +134,7 @@ class FreivaldsPlan {
     explicit FreivaldsPlan(std::shared_ptr<const Data> data);
     std::shared_ptr<const Data> m_data;
     friend FreivaldsPreparation prepareFreivalds(const Tensor&, const Tensor&, const MatmulOptions&,
-                                                 const EpilogueOptions&, ScalarType,
-                                                 const FreivaldsProbeOptions&,
+                                                 const EpilogueOptions&, ScalarType, uint64_t,
                                                  const FreivaldsLimits&);
 };
 
@@ -152,9 +146,9 @@ class FreivaldsPlan {
 // scalar output scale, C and broadcast bias; output conversion may round/saturate.
 // Nonlinear/auxiliary checks are separate operations. No special input pattern
 // or generation recipe is required. Copies logical inputs into private storage.
+// `probeSeed` selects the reproducible right and left probe vectors.
 FreivaldsPreparation prepareFreivalds(const Tensor& a, const Tensor& b,
                                       const MatmulOptions& operation,
                                       const EpilogueOptions& epilogue, ScalarType outputType,
-                                      const FreivaldsProbeOptions& probes,
-                                      const FreivaldsLimits& limits);
+                                      uint64_t probeSeed, const FreivaldsLimits& limits);
 }  // namespace roc::hostnumerics

@@ -38,14 +38,12 @@ TEST(Freivalds, PortableArithmeticAgainstPythonIntegers) {
     EXPECT_EQ(freivaldsAdd(freivaldsModulus - 1, 1), 0);
     EXPECT_EQ(freivaldsResidue(std::numeric_limits<int64_t>::min()), freivaldsModulus - 4);
     EXPECT_THROW(freivaldsMultiply(freivaldsModulus, 1), std::runtime_error);
-    for (auto algorithm :
-         {FreivaldsProbeAlgorithm::SplitMix64Legacy, FreivaldsProbeAlgorithm::SplitMix64Rejection})
-        for (size_t i = 0; i < 100; ++i) {
-            const auto value = freivaldsProbe(73, i, algorithm);
-            EXPECT_GT(value, 0);
-            EXPECT_LT(value, freivaldsModulus);
-            EXPECT_EQ(value, freivaldsProbe(73, i, algorithm));
-        }
+    for (size_t i = 0; i < 100; ++i) {
+        const auto value = freivaldsProbe(73, i);
+        EXPECT_GT(value, 0);
+        EXPECT_LT(value, freivaldsModulus);
+        EXPECT_EQ(value, freivaldsProbe(73, i));
+    }
 }
 
 TEST(Freivalds, DenseIntegerOracleWithScalesBiasRoundingAndSaturation) {
@@ -72,8 +70,8 @@ TEST(Freivalds, DenseIntegerOracleWithScalesBiasRoundingAndSaturation) {
     for (const auto type : {ScalarType::Float32, ScalarType::Float16, ScalarType::BFloat16,
                             ScalarType::Int8, ScalarType::Float8E4M3Fnuz}) {
         SCOPED_TRACE(static_cast<int>(type));
-        auto plan = requirePlan(
-            prepareFreivalds(a, b, MatmulOptions{ScalarType::Float32}, e, type, {}, {}));
+        auto plan =
+            requirePlan(prepareFreivalds(a, b, MatmulOptions{ScalarType::Float32}, e, type, 0, {}));
         Tensor d(type, Layout(Shape{m, n}, {1, ptrdiff_t(m + 7)}, 3));
         const ScalarConversionOptions conversion{IntegerRounding::TowardZero,
                                                  IntegerOverflow::Saturate};
@@ -109,7 +107,7 @@ TEST(Freivalds, ImmutableInputsAndSingleAndCancellingErrors) {
         }
     auto plan = requirePlan(prepareFreivalds(a, b, MatmulOptions{ScalarType::Float32},
                                              EpilogueOptions{ScalarType::Float32},
-                                             ScalarType::Float32, {}, {}));
+                                             ScalarType::Float32, 0, {}));
     Tensor d(ScalarType::Float32, Shape{2, 2});
     for (size_t i = 0; i < 2; ++i)
         for (size_t j = 0; j < 2; ++j) {
@@ -144,7 +142,7 @@ TEST(Freivalds, BoundedAccumulationRetainsExactDefaultAndDetectsCorruption) {
     for (const auto type : {ScalarType::Float32, ScalarType::Float16, ScalarType::BFloat16}) {
         const auto plan =
             requirePlan(prepareFreivalds(a, b, MatmulOptions{ScalarType::Float32},
-                                         EpilogueOptions{ScalarType::Float32}, type, {}, {}));
+                                         EpilogueOptions{ScalarType::Float32}, type, 0, {}));
         Tensor d(type, Shape{1, 1});
         d.storeFrom({0, 0}, 0x1p-23);
         EXPECT_EQ(plan.check(d, std::numeric_limits<size_t>::max(), {}).status,
@@ -178,7 +176,7 @@ TEST(Freivalds, ComputationBoundIncludesOutputRoundingTies) {
         a.storeFrom({1, 0}, -midpoint);
         const auto plan =
             requirePlan(prepareFreivalds(a, b, MatmulOptions{ScalarType::Float32},
-                                         EpilogueOptions{ScalarType::Float32}, type, {}, {}));
+                                         EpilogueOptions{ScalarType::Float32}, type, 0, {}));
         Tensor d(type, Shape{2, 1});
         d.storeFrom({0, 0}, midpoint + 1);
         d.storeFrom({1, 0}, -midpoint - 1);
@@ -206,7 +204,7 @@ TEST(Freivalds, ComputationBoundCannotCrossConsecutiveIntegerBoundary) {
         b.storeFrom({0, 0}, 1);
         const auto plan =
             requirePlan(prepareFreivalds(a, b, MatmulOptions{ScalarType::Float32},
-                                         EpilogueOptions{ScalarType::Float32}, type, {}, {}));
+                                         EpilogueOptions{ScalarType::Float32}, type, 0, {}));
         Tensor d(type, Shape{2, 1});
         d.storeFrom({0, 0}, limit - 1);
         d.storeFrom({1, 0}, -limit + 1);
@@ -223,7 +221,7 @@ TEST(Freivalds, ComputationBoundCannotCrossConsecutiveIntegerBoundary) {
     b.storeFrom({0, 0}, 1);
     const auto plan = requirePlan(prepareFreivalds(a, b, MatmulOptions(ScalarType::Float64),
                                                    EpilogueOptions(ScalarType::Float64),
-                                                   ScalarType::Float64, {}, {}));
+                                                   ScalarType::Float64, 0, {}));
     Tensor d(ScalarType::Float64, Shape{1, 1});
     d.storeFrom({0, 0}, 0x1p50);
     EXPECT_EQ(plan.check(d, std::numeric_limits<size_t>::max(), {}).status,
@@ -239,7 +237,7 @@ TEST(Freivalds, ExportedTensorsCannotMutatePlanState) {
     b.storeFrom({0, 1}, 4);
     const auto plan = requirePlan(prepareFreivalds(a, b, MatmulOptions{ScalarType::Float32},
                                                    EpilogueOptions{ScalarType::Float32},
-                                                   ScalarType::Float32, {}, {}));
+                                                   ScalarType::Float32, 0, {}));
     const auto request = plan.copyRequest();
     ASSERT_EQ(request.rightProbe.type(), ScalarType::UInt64);
     ASSERT_EQ(request.rightProbe.shape(), (Shape{2}));
@@ -266,7 +264,7 @@ TEST(Freivalds, StridedObservationsValidateTypeResiduesAndCompleteBackingStorage
     limits.maxObservationBytes = 256;
     const auto plan = requirePlan(prepareFreivalds(a, b, MatmulOptions{ScalarType::Float32},
                                                    EpilogueOptions{ScalarType::Float32},
-                                                   ScalarType::Float32, {}, limits));
+                                                   ScalarType::Float32, 0, limits));
     FreivaldsObservation observation;
     observation.requestIdentity = plan.copyRequest().identity;
     observation.checkedElements = 6;
@@ -322,7 +320,7 @@ TEST(Freivalds, ObservationCompletenessAndExceptionBudgets) {
     limits.maxRecomputeMultiplyAdds = 1;
     auto plan = requirePlan(prepareFreivalds(a, b, MatmulOptions{ScalarType::Float32},
                                              EpilogueOptions{ScalarType::Float32},
-                                             ScalarType::Float32, {}, limits));
+                                             ScalarType::Float32, 0, limits));
     FreivaldsObservation observation;
     observation.requestIdentity = plan.copyRequest().identity;
     observation.checkedElements = 6;
@@ -364,21 +362,21 @@ TEST(Freivalds, RejectsInexactNonlinearAndOverBudgetProblems) {
     b.storeFrom({1, 0}, 1.0f);
     auto rejected =
         prepareFreivalds(a, b, MatmulOptions{ScalarType::Float32},
-                         EpilogueOptions{ScalarType::Float32}, ScalarType::Float32, {}, {});
+                         EpilogueOptions{ScalarType::Float32}, ScalarType::Float32, 0, {});
     EXPECT_EQ(std::get<FreivaldsPreparationFailure>(rejected).status,
               VerificationStatus::Unsupported);
     a.storeFrom({0, 0}, 0.5f);
     EXPECT_EQ(
         std::get<FreivaldsPreparationFailure>(
             prepareFreivalds(a, b, MatmulOptions{ScalarType::Float32},
-                             EpilogueOptions{ScalarType::Float32}, ScalarType::Float32, {}, {}))
+                             EpilogueOptions{ScalarType::Float32}, ScalarType::Float32, 0, {}))
             .status,
         VerificationStatus::Unsupported);
     EpilogueOptions e(ScalarType::Float32);
     e.activation = ReluActivation{};
     EXPECT_EQ(std::get<FreivaldsPreparationFailure>(
                   prepareFreivalds(a, b, MatmulOptions{ScalarType::Float32}, e, ScalarType::Float32,
-                                   {}, {}))
+                                   0, {}))
                   .status,
               VerificationStatus::Unsupported);
     // Zero-storage inputs can describe a huge output. Refuse its summaries
@@ -388,13 +386,13 @@ TEST(Freivalds, RejectsInexactNonlinearAndOverBudgetProblems) {
     EXPECT_EQ(
         std::get<FreivaldsPreparationFailure>(
             prepareFreivalds(hugeA, emptyB, MatmulOptions{ScalarType::Float32},
-                             EpilogueOptions{ScalarType::Float32}, ScalarType::Float32, {}, {}))
+                             EpilogueOptions{ScalarType::Float32}, ScalarType::Float32, 0, {}))
             .status,
         VerificationStatus::Incomplete);
     Tensor emptyA(ScalarType::Float32, Shape{0, 3}), normalB(ScalarType::Float32, Shape{3, 7});
     auto empty = requirePlan(prepareFreivalds(emptyA, normalB, MatmulOptions{ScalarType::Float32},
                                               EpilogueOptions{ScalarType::Float32},
-                                              ScalarType::Float32, {}, {}));
+                                              ScalarType::Float32, 0, {}));
     EXPECT_EQ(
         empty
             .check(Tensor(ScalarType::Float32, Shape{0, 7}), std::numeric_limits<size_t>::max(), {})
@@ -414,7 +412,7 @@ TEST(Freivalds, RefusesRepresentableOutputBeyondHalfAccumulatorExactRange) {
     ASSERT_EQ(output.loadAs<float>({0, 0}), 20000.0f);
     const auto prepared =
         prepareFreivalds(a, b, MatmulOptions{ScalarType::Float16},
-                         EpilogueOptions{ScalarType::Float16}, ScalarType::Float16, {}, {});
+                         EpilogueOptions{ScalarType::Float16}, ScalarType::Float16, 0, {});
     ASSERT_TRUE(std::holds_alternative<FreivaldsPreparationFailure>(prepared));
     EXPECT_EQ(std::get<FreivaldsPreparationFailure>(prepared).status,
               VerificationStatus::Unsupported);
@@ -434,7 +432,7 @@ TEST(Freivalds, UsesMatmulOperandScalesAndCertifiesComputeConversion) {
     operation.preQuantizationScalesA = {Tensor(2.0f), alongK};
     operation.preQuantizationScalesB = {Tensor(-3.0f)};
     const auto plan = requirePlan(prepareFreivalds(
-        a, b, operation, EpilogueOptions{ScalarType::Float32}, ScalarType::Float32, {}, {}));
+        a, b, operation, EpilogueOptions{ScalarType::Float32}, ScalarType::Float32, 0, {}));
     auto observed =
         matmul(a, b, ScalarType::Float32, operation, std::nullopt, GemmBackend::Automatic);
     EXPECT_EQ(plan.check(observed, std::numeric_limits<size_t>::max(), {}).status,
@@ -448,7 +446,7 @@ TEST(Freivalds, UsesMatmulOperandScalesAndCertifiesComputeConversion) {
     a.storeFrom({0, 0}, 2049.0f);
     EXPECT_EQ(std::get<FreivaldsPreparationFailure>(
                   prepareFreivalds(a, b, operation, EpilogueOptions{ScalarType::Float32},
-                                   ScalarType::Float32, {}, {}))
+                                   ScalarType::Float32, 0, {}))
                   .status,
               VerificationStatus::Unsupported);
     // A subsequent zero must not hide an inexact scaling prefix.
@@ -456,7 +454,7 @@ TEST(Freivalds, UsesMatmulOperandScalesAndCertifiesComputeConversion) {
     operation.preQuantizationScalesA = {Tensor(0x1p53), Tensor(0.0f)};
     EXPECT_EQ(std::get<FreivaldsPreparationFailure>(
                   prepareFreivalds(a, b, operation, EpilogueOptions{ScalarType::Float32},
-                                   ScalarType::Float32, {}, {}))
+                                   ScalarType::Float32, 0, {}))
                   .status,
               VerificationStatus::Unsupported);
 
@@ -465,7 +463,7 @@ TEST(Freivalds, UsesMatmulOperandScalesAndCertifiesComputeConversion) {
     limits.maxPreparationMultiplyAdds = 1;
     EXPECT_EQ(std::get<FreivaldsPreparationFailure>(
                   prepareFreivalds(a, b, operation, EpilogueOptions{ScalarType::Float32},
-                                   ScalarType::Float32, {}, limits))
+                                   ScalarType::Float32, 0, limits))
                   .status,
               VerificationStatus::Incomplete);
 }
@@ -476,7 +474,7 @@ TEST(Freivalds, ObservationStorageIsBoundedBeforeCopiesAndExceptionGrowth) {
     limits.maxObservationBytes = 256;
     auto plan = requirePlan(prepareFreivalds(a, b, MatmulOptions{ScalarType::Float32},
                                              EpilogueOptions{ScalarType::Float32},
-                                             ScalarType::Float32, {}, limits));
+                                             ScalarType::Float32, 0, limits));
     EXPECT_EQ(plan.copyRequest().maximumExceptions, 2);
     Tensor d(ScalarType::Float32, Shape{2, 3});
     EXPECT_EQ(plan.check(d, std::numeric_limits<size_t>::max(), {}).status,
@@ -503,7 +501,7 @@ TEST(Freivalds, ObservationStorageIsBoundedBeforeCopiesAndExceptionGrowth) {
     EXPECT_EQ(
         std::get<FreivaldsPreparationFailure>(
             prepareFreivalds(a, b, MatmulOptions{ScalarType::Float32},
-                             EpilogueOptions{ScalarType::Float32}, ScalarType::Float32, {}, limits))
+                             EpilogueOptions{ScalarType::Float32}, ScalarType::Float32, 0, limits))
             .status,
         VerificationStatus::Incomplete);
 }
@@ -514,18 +512,18 @@ TEST(Freivalds, ZeroResultDoesNotHideInexactFactorPrefixes) {
     // (4097*4097) rounds in F32 before the later zero is encountered.
     epilogue.inputScaleFactors = {Tensor(4097.0f), Tensor(4097.0f), Tensor(0.0f)};
     auto result = prepareFreivalds(a, b, MatmulOptions{ScalarType::Float32}, epilogue,
-                                   ScalarType::Float32, {}, {});
+                                   ScalarType::Float32, 0, {});
     EXPECT_EQ(std::get<FreivaldsPreparationFailure>(result).status,
               VerificationStatus::Unsupported);
     // The same issue across a row and a column factor must be caught too.
     epilogue.inputScaleFactors[0] = Tensor(4097.0f).reshapeSharingStorage(Shape{1, 1});
     result = prepareFreivalds(a, b, MatmulOptions{ScalarType::Float32}, epilogue,
-                              ScalarType::Float32, {}, {});
+                              ScalarType::Float32, 0, {});
     EXPECT_EQ(std::get<FreivaldsPreparationFailure>(result).status,
               VerificationStatus::Unsupported);
     epilogue.inputScaleFactors = {Tensor(0.0f), Tensor(4097.0f), Tensor(4097.0f)};
     auto plan = requirePlan(prepareFreivalds(a, b, MatmulOptions{ScalarType::Float32}, epilogue,
-                                             ScalarType::Float32, {}, {}));
+                                             ScalarType::Float32, 0, {}));
     EXPECT_EQ(
         plan.check(Tensor(ScalarType::Float32, Shape{1, 1}), std::numeric_limits<size_t>::max(), {})
             .status,
@@ -541,7 +539,7 @@ TEST(Freivalds, WideIntegerComputationAndRoundedInfinity) {
     const MatmulOptions operation(ScalarType::Float64);
     const EpilogueOptions epilogue(ScalarType::Float64);
     auto plan =
-        requirePlan(prepareFreivalds(a, b, operation, epilogue, ScalarType::Float64, {}, {}));
+        requirePlan(prepareFreivalds(a, b, operation, epilogue, ScalarType::Float64, 0, {}));
     Tensor d(ScalarType::Float64, Shape{1, 1});
     d.storeFrom({0, 0}, 3.0);
     EXPECT_EQ(plan.check(d, std::numeric_limits<size_t>::max(), {}).status,
@@ -552,7 +550,7 @@ TEST(Freivalds, WideIntegerComputationAndRoundedInfinity) {
 
     a.storeFrom({0, 2}, 0.0);
     auto narrow =
-        requirePlan(prepareFreivalds(a, b, operation, epilogue, ScalarType::Float16, {}, {}));
+        requirePlan(prepareFreivalds(a, b, operation, epilogue, ScalarType::Float16, 0, {}));
     Tensor half(ScalarType::Float16, Shape{1, 1});
     half.storeFrom({0, 0}, 0x1p40 + 3);
     ASSERT_TRUE(std::isinf(half.loadAs<double>({0, 0})));
@@ -576,7 +574,7 @@ TEST(Freivalds, RefusesModulusAliasesAndFractionalCoefficients) {
         epilogue.bias = Tensor(float(-sign)).reshapeSharingStorage(Shape{1, 1});
         EXPECT_EQ(std::get<FreivaldsPreparationFailure>(
                       prepareFreivalds(a, b, MatmulOptions{ScalarType::Float32}, epilogue,
-                                       ScalarType::Float32, {}, {}))
+                                       ScalarType::Float32, 0, {}))
                       .status,
                   VerificationStatus::Unsupported);
     }
@@ -584,7 +582,7 @@ TEST(Freivalds, RefusesModulusAliasesAndFractionalCoefficients) {
     epilogue.bias = Tensor(-2.0f).reshapeSharingStorage(Shape{1, 1});
     EXPECT_EQ(
         requirePlan(prepareFreivalds(a, b, MatmulOptions{ScalarType::Float32}, epilogue,
-                                     ScalarType::Float32, {}, {}))
+                                     ScalarType::Float32, 0, {}))
             .check(Tensor(ScalarType::Float32, Shape{1, 1}), std::numeric_limits<size_t>::max(), {})
             .status,
         VerificationStatus::Passed);
@@ -606,7 +604,7 @@ TEST(Freivalds, RefusesModulusAliasesAndFractionalCoefficients) {
         }
         EXPECT_EQ(std::get<FreivaldsPreparationFailure>(
                       prepareFreivalds(a, b, MatmulOptions{ScalarType::Float32}, fractional,
-                                       ScalarType::Float32, {}, {}))
+                                       ScalarType::Float32, 0, {}))
                       .status,
                   VerificationStatus::Unsupported);
     }
@@ -618,7 +616,7 @@ TEST(Freivalds, DetectsShiftedRowsAndDuplicatedColumns) {
     for (size_t j = 0; j < 4; ++j) b.storeFrom({0, j}, int(j + 2));
     const auto plan = requirePlan(prepareFreivalds(a, b, MatmulOptions{ScalarType::Float32},
                                                    EpilogueOptions{ScalarType::Float32},
-                                                   ScalarType::Float32, {}, {}));
+                                                   ScalarType::Float32, 0, {}));
     for (int fault = 0; fault < 3; ++fault) {
         Tensor d(ScalarType::Float32, Shape{3, 4});
         for (size_t i = 0; i < 3; ++i)

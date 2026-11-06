@@ -1347,9 +1347,7 @@ namespace TensileLite::Client::hostnumerics
     }
 
     roc::hostnumerics::FreivaldsPreparation GemmInvocationAdapter::prepareFreivalds(
-        size_t                                          batch,
-        const roc::hostnumerics::FreivaldsProbeOptions& probes,
-        const roc::hostnumerics::FreivaldsLimits&       limits) const
+        size_t batch, uint64_t probeSeed, const roc::hostnumerics::FreivaldsLimits& limits) const
     {
         using namespace roc::hostnumerics;
         if(batch >= m_state->batchPlans.size())
@@ -1369,7 +1367,7 @@ namespace TensileLite::Client::hostnumerics
                                                    numerical.options,
                                                    numerical.epilogue->options,
                                                    m_state->typeD,
-                                                   probes,
+                                                   probeSeed,
                                                    limits);
     }
 
