@@ -149,6 +149,7 @@ def executeStepsInConfig(
                 buildOnly,
                 solutionPoolFiles,
                 archNames=archNames,
+                hasLibraryLogic="LibraryLogic" in config,
             )
         flush_timing_buffer()
         print1("")

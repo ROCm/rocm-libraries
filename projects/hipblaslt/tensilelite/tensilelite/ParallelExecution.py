@@ -308,13 +308,20 @@ def runClientParallel(buildPath, configPaths, numGpus, timingEnabled, getClientE
 
         # Merge results from all GPUs
         originalResultsPath = None
+        noResultsFile = False
         with open(configPath, 'r') as f:
             for line in f:
-                if line.strip().startswith('results-file='):
-                    originalResultsPath = line.strip().split('=', 1)[1]
-                    break
+                key, _, value = line.strip().partition('=')
+                if key == 'results-file' and originalResultsPath is None:
+                    originalResultsPath = value
+                elif key == 'no-results-file':
+                    noResultsFile = value.lower() in ('1', 'true', 'yes')
 
-        if originalResultsPath:
+        if noResultsFile:
+            # The clients wrote no results; merging would create an empty results CSV.
+            print1(f"# No results file requested in {configPath}; nothing to merge")
+            shutil.rmtree(parallelDir)
+        elif originalResultsPath:
             resultsPaths = [r for _, r, _ in gpuConfigs]
             mergeResultsCsv(resultsPaths, originalResultsPath)
             print1(f"# Merged results from {len(resultsPaths)} GPUs to {originalResultsPath}")
