@@ -10,6 +10,7 @@
 #include <type_traits>
 #include <vector>
 
+#include "detail/layout_analysis.hpp"
 #include "detail/layout_iteration.hpp"
 #include "detail/prepared_scalar_storage.hpp"
 #include "detail/tensor_conversion.hpp"

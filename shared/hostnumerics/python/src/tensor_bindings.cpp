@@ -324,10 +324,10 @@ Tensor tensorFromNumpy(nb::object array) {
     }
     if (!view.buf) throw std::runtime_error("Nonempty NumPy Tensor has a null data pointer.");
 
-    // Offsets relative to the buffer pointer; lower <= 0 <= upper for a nonempty buffer.
+    // Offsets relative to the buffer pointer; lowest <= 0 <= highest for a nonempty buffer.
     const auto bounds = bufferLayout.getElementBounds();
     if (!bounds) throw std::runtime_error(bounds.error().message());
-    const auto [lowerOffset, upperOffset] = *bounds;
+    const auto [lowerOffset, upperOffset] = **bounds;
     if (lowerOffset == std::numeric_limits<ptrdiff_t>::min())
         throw std::runtime_error("NumPy Tensor base offset overflow.");
     const ptrdiff_t normalizedOffset = -lowerOffset;

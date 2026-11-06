@@ -23,16 +23,6 @@ namespace roc::hostnumerics {
 struct LastDimensionFastest {};
 namespace detail {
 struct ShapeAccess;
-
-inline bool canBroadcastTo(std::span<const size_t> source,
-                           std::span<const size_t> destination) noexcept {
-    if (source.size() > destination.size()) return false;
-    const size_t leading = destination.size() - source.size();
-    for (size_t axis = 0; axis < source.size(); ++axis)
-        if (source[axis] != 1 && source[axis] != destination[leading + axis]) return false;
-    return true;
-}
-
 }  // namespace detail
 
 // A Shape traversal callback, taking (flat index, coordinates) or only

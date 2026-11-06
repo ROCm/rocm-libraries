@@ -248,7 +248,7 @@ class LayoutTests(unittest.TestCase):
                     7 + sum(i * s for i, s in zip(point, strides))
                     for point in itertools.product(*(range(d) for d in dimensions))
                 ]
-                expected = (min(offsets), max(offsets)) if offsets else (0, -1)
+                expected = (min(offsets), max(offsets)) if offsets else None
                 self.assertEqual(layout.element_bounds(), expected)
         for layout, message in (
             (

@@ -13,6 +13,7 @@
 #include <string>
 #include <type_traits>
 
+#include "layout_analysis.hpp"
 #include "reference_common.hpp"
 #include "threading.hpp"
 
