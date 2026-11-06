@@ -87,7 +87,7 @@ constexpr std::string_view BLOCK_N_FIELD = "block_n";
 // value served.
 constexpr std::string_view KV_SEGMENTS_FIELD = "kv_segments";
 
-// The graph-reading helpers every single-node SDPA-forward pack shares.
+// sdpa_graph's single-node SDPA-forward helpers this pack reads the graph with.
 using sdpa_graph::BATCH_AXIS;
 using sdpa_graph::computesInFloat;
 using sdpa_graph::describeOperand;
@@ -1503,9 +1503,9 @@ private:
                                           + inputs.dispatchSymbol + "' " + reason);
 }
 
-// Refuses a saved causal flag or window that graphMatches never binds. Both are baked into
-// the code object and the launch does not read them, so these are checks of the plan's
-// integrity, not of the launch.
+// Refuses a saved causal flag or window outside maskFor's rules. Both are baked into the code
+// object and the launch does not read them, so these are checks of the plan's integrity, not
+// of the launch.
 void requireServedSavedMask(const SavedLaunchInputs& inputs,
                             const AttentionDenseLaunchInputs& launch)
 {
@@ -1767,10 +1767,7 @@ AttentionDenseLaunchInputs readLaunchInputs(const SavedLaunchInputs& inputs,
     problem.headSize = requireLaunchInt(inputs, HEAD_SIZE_VALUE, 1, INT32_LIMIT);
     launch.blockM = requireLaunchInt(inputs, BLOCK_M_VALUE);
 
-    if(arch.refusesUnservedSavedValues)
-    {
-        requireServedSavedMask(inputs, launch);
-    }
+    requireServedSavedMask(inputs, launch);
 
     // The kernel takes the scale as a float. A double that a float cannot hold exactly was
     // not written from one.
@@ -1834,10 +1831,7 @@ AttentionDenseLaunchInputs readLaunchInputs(const SavedLaunchInputs& inputs,
             inputs, BLOCK_M_VALUE, "is not a tile the kernel is built with: " + error.getMessage());
     }
 
-    if(arch.refusesUnservedSavedValues)
-    {
-        requireServedSavedShape(inputs, launch);
-    }
+    requireServedSavedShape(inputs, launch);
     if(arch.servesGrids())
     {
         launch.grid = readSavedGrid(inputs, launch);

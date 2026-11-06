@@ -216,7 +216,6 @@ constexpr attention_dense::AttentionDenseArch gfx942Arch()
     // Each candidate's grid: a block order of the one-CTA-per-block grid, or (D128) the
     // persistent grid with its fast-division kernargs.
     arch.candidateGrid = &candidateGrid;
-    arch.refusesUnservedSavedValues = true;
     arch.currentContract = {GFX942_ATTENTION_DENSE_DISPATCH_SYMBOL_V1,
                             attention_dense::AttentionDenseAbi::RUNTIME_HEAD_COUNTS};
     // No gfx942 kernel ever baked the head counts, so there is no superseded contract.

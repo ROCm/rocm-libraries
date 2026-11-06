@@ -30,8 +30,8 @@
  * `rocke/library/kernels/gfx950/attention_dense.py`. They take the same ABI, launch on the
  * same grid formula and are bound from the same graph contract, so one copy of that code
  * serves both engines. What differs per arch reaches it through the descriptor: the tile
- * rules and launch geometry, the scale range, whether a causal sliding window is served,
- * whether the candidate's head counts are compared, the launch grids its catalog carries
+ * rules and launch geometry, whether a causal sliding window is served, whether the
+ * candidate's head counts are compared, the launch grids its catalog carries
  * (AttentionDensePersistent.hpp), and the launch contracts. Scoring and
  * every read of a KMD field only one engine declares stay in that engine's own
  * `Gfx9xxAttentionDenseNative.cpp`, which also owns the module cache and registration.
@@ -212,12 +212,6 @@ struct AttentionDenseArch
     std::optional<AttentionDenseGrid> (*candidateGrid)(
         const hipdnn_plugin_sdk::ingestor::KernelDefinition& kernel)
         = nullptr;
-    /// Whether restore refuses saved values the graph and kernel match never bind: causal
-    /// outside {0, 1}, a negative window, a window without causal, or one that leaves query
-    /// rows no key; num_query_heads not a multiple of num_kv_heads, a head_size other than
-    /// 64 or 128, K/V of 2^31 bytes or Q/O of 2^31 elements, or seqlen_q not a multiple of
-    /// block_m.
-    bool refusesUnservedSavedValues = false;
     /// The contract the engine's catalog dispatches through and new plans are saved under.
     AttentionDenseContract currentContract;
     /// A superseded contract whose plans still restore, or an empty symbol for none. It
@@ -316,21 +310,23 @@ hipdnn_plugin_sdk::ingestor::MetadataValues launchValues(const AttentionDenseBin
 /**
  * @brief Reads @p arch's launch values back into the launch state.
  *
- * The dispatch name must be the arch's current or legacy contract; anything else,
- * including the unversioned name, is refused against the current one. `batch`, `seqlen_q`
- * and `seqlen_kv`, the head counts and `head_size` must be in [1, INT32_MAX], because the
+ * The dispatch name must be the arch's current or legacy contract; anything else, including
+ * the unversioned name, is refused against the current one. `batch`, `seqlen_q` and
+ * `seqlen_kv`, the head counts and `head_size` must be in [1, INT32_MAX], because the
  * kernel takes them as 32-bit integers. `block_m` must be a tile the arch builds. `scale`
- * must convert to a float and back without change and be a scale the arch supports.
- * `data_type` must be a type the kernel is built for, and `stride_layout` must be `bshd`.
- * An arch with refusesUnservedSavedValues also refuses a mask or shape the graph and kernel
- * match never bind. An arch that serves stats also reads `stats.uid`, which must be
- * ATTENTION_DENSE_NO_STATS or a uid (non-negative); whether the restored kernel writes LSE
- * is checked against it by the restore's signature comparison, which this reader does not
- * see. An arch that serves grids also reads `grid_order`, which must name one; on the
- * persistent grid `persist_decode` must name a runtime decode (never `auto` or gqa_pair*)
- * and `num_persistent` be in [1, INT32_MAX], and off it they must be empty and 0. The
- * grid's legality at the saved shape (AttentionDensePersistent.hpp gridIllegality) is
- * re-checked.
+ * must convert to a float and back without change, within [2^-64, 2^4]. `data_type` must be
+ * a type the kernel is built for, and `stride_layout` must be `bshd`. As both arches' graph
+ * and kernel match require, `causal` must be 0 or 1; `sliding_window` non-negative, 0
+ * unless `causal` is 1, and not so narrow that the last query rows see no key;
+ * `num_query_heads` a multiple of `num_kv_heads`; `head_size` 64 or 128; K/V below 2^31
+ * bytes and Q/O below 2^31 elements; and `seqlen_q` a multiple of `block_m`. An arch that
+ * serves stats also reads `stats.uid`, which must be ATTENTION_DENSE_NO_STATS or a uid
+ * (non-negative); whether the restored kernel writes LSE is checked against it by the
+ * restore's signature comparison, which this reader does not see. An arch that serves grids
+ * also reads `grid_order`, which must name one; on the persistent grid `persist_decode`
+ * must name a runtime decode (never `auto` or gqa_pair*) and `num_persistent` be in
+ * [1, INT32_MAX], and off it they must be empty and 0. The grid's legality at the saved
+ * shape (AttentionDensePersistent.hpp gridIllegality) is re-checked.
  *
  * @throws HipdnnPluginException with a load refusal when the dispatch name is neither
  *         contract, or when a value is missing, extra, of another type or out of range.

@@ -24,7 +24,7 @@
  * @brief The graph-reading helpers every ingestor pack that serves a single dense BSHD
  *        SDPA-forward node shares: finding the node and its operands, the operand checks
  *        made before anything indexes an axis, the problem read from Q and K, the f32
- *        compute-type rule, and the decline-line head.
+ *        compute-type rule for the packs that apply it, and the decline-line head.
  *
  * Pack-family rules (mask kinds, dtypes, the decode rule) stay with the family, e.g.
  * UnifiedAttentionGraphMatch.hpp.

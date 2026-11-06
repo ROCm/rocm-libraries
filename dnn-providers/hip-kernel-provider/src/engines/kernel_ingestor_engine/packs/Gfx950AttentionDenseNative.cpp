@@ -90,9 +90,6 @@ constexpr attention_dense::AttentionDenseArch gfx950Arch()
     arch.windowReachesKeys = nullptr;
     // No catalog variant writes LSE, so every stats output declines under 'stats'.
     arch.candidateWritesLse = nullptr;
-    // The v1/v2 reader shipped without the saved mask and shape checks, and its contracts
-    // are frozen.
-    arch.refusesUnservedSavedValues = false;
     arch.currentContract = {GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V2,
                             attention_dense::AttentionDenseAbi::RUNTIME_HEAD_COUNTS};
     arch.legacyContract = {GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V1,

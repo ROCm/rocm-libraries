@@ -8,6 +8,7 @@
 #include <initializer_list>
 #include <limits>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -155,6 +156,9 @@ ConvFwdLaunchInputs convFwdInputs()
         ConvFwdBinding{21, 22, 23}, ConvFwdExtents{31, 32, 33, 34, 35, 3, 4}, 64};
 }
 
+// A shape the gfx950 match serves, with distinct values. The window is one the match never
+// binds, but the reader holds a saved window only to the mask rules, as gfx950's frozen
+// samples need.
 Gfx950AttentionDenseLaunchInputs gfx950AttentionDenseInputs()
 {
     Gfx950AttentionDenseLaunchInputs launch;
@@ -166,13 +170,13 @@ Gfx950AttentionDenseLaunchInputs gfx950AttentionDenseInputs()
     launch.binding.slidingWindow = 45;
     launch.binding.scale = 0.1F;
     launch.problem.batch = 51;
-    launch.problem.seqLenQ = 52;
-    launch.problem.seqLenKv = 53;
-    launch.problem.numQueryHeads = 54;
-    launch.problem.numKvHeads = 55;
-    launch.problem.headSize = 56;
+    launch.problem.seqLenQ = 1536;
+    launch.problem.seqLenKv = 1600;
+    launch.problem.numQueryHeads = 8;
+    launch.problem.numKvHeads = 4;
+    launch.problem.headSize = 128;
     launch.problem.dataType = hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16;
-    launch.blockM = 128;
+    launch.blockM = 256;
     return launch;
 }
 
@@ -460,10 +464,9 @@ TEST(TestPackLaunchValues, Gfx950AttentionDenseRefusesAStringValueOfAnotherType)
 // gfx942 dense attention
 //
 // One contract, v1, with gfx950's value set plus stats.uid. Its reader holds the restore to
-// what the gfx942 graph and kernel match bind: a scale in [2^-64, 2^4], a block_m gfx942
-// builds, causal 0 or 1, a causal window that leaves no query row without a key, grouped
-// heads, head_size 64 or 128, operands within 32-bit offsets, seqlen_q a multiple of
-// block_m, and a stats uid that is -1 (none) or non-negative.
+// what the gfx942 graph and kernel match bind: besides the scale range and the mask and shape
+// rules both dense readers share (below), a block_m gfx942 builds and a stats uid that is -1
+// (none) or non-negative.
 // ---------------------------------------------------------------------------
 
 // A shape the gfx942 match serves, with distinct values. seqlen_q 1536 is a multiple of
@@ -811,31 +814,55 @@ TEST(TestPackLaunchValues, Gfx942AttentionDenseRefusesABlockMGfx942DoesNotBuild)
     }
 }
 
-// causal and sliding_window are baked into the code object, so the launch never reads them;
-// a plan holding a mask the graph match never binds is refused rather than launched.
-TEST(TestPackLaunchValues, Gfx942AttentionDenseRefusesAMaskTheGraphMatchNeverBinds)
+// ---------------------------------------------------------------------------
+// Both dense readers: the mask and shape rules
+//
+// Both arches' graph and kernel match apply one set of mask and shape rules, so each reader
+// refuses the same saved values. Both plans hold a causal window, seqlen_q 1536 against
+// seqlen_kv 1600, and 8 query heads over 4 kv heads of 128 two-byte elements; only block_m
+// differs.
+// ---------------------------------------------------------------------------
+
+struct AttentionDenseReader
 {
-    const auto valid = savedGfx942AttentionDense();
+    std::string_view label;
+    AttentionDenseLaunchInputs (*read)(const SavedLaunchInputs&);
+    SavedLaunchInputs (*saved)();
+};
+
+const AttentionDenseReader GFX942_ATTENTION_DENSE_READER{
+    "Gfx942", &readGfx942AttentionDenseLaunchInputs, &savedGfx942AttentionDense};
+const AttentionDenseReader GFX950_ATTENTION_DENSE_READER{
+    "Gfx950", &readGfx950AttentionDenseLaunchInputs, &savedGfx950AttentionDense};
+
+class TestAttentionDenseSavedValues : public ::testing::TestWithParam<const AttentionDenseReader*>
+{
+};
+
+// causal and sliding_window are baked into the code object, so the launch never reads them;
+// a plan holding a causal flag or window outside the graph match's mask rules is refused
+// rather than launched. gfx950's match binds no window, but its reader holds a saved one only
+// to these rules, as its frozen samples need.
+TEST_P(TestAttentionDenseSavedValues, RefusesAMaskOutsideTheMaskRules)
+{
+    const auto read = GetParam()->read;
+    const auto valid = GetParam()->saved();
 
     for(const int64_t causal : {int64_t{2}, int64_t{-1}})
     {
         SCOPED_TRACE(causal);
         SavedLaunchInputs badCausal = valid;
         badCausal.values["causal"] = causal;
-        expectReadRefusal(
-            &readGfx942AttentionDenseLaunchInputs, badCausal, "launch value 'causal'");
+        expectReadRefusal(read, badCausal, "launch value 'causal'");
     }
 
     SavedLaunchInputs negativeWindow = valid;
     negativeWindow.values["sliding_window"] = int64_t{-1};
-    expectReadRefusal(
-        &readGfx942AttentionDenseLaunchInputs, negativeWindow, "launch value 'sliding_window'");
+    expectReadRefusal(read, negativeWindow, "launch value 'sliding_window'");
 
     SavedLaunchInputs windowWithoutCausal = valid;
     windowWithoutCausal.values["causal"] = int64_t{0};
-    expectReadRefusal(&readGfx942AttentionDenseLaunchInputs,
-                      windowWithoutCausal,
-                      "launch value 'sliding_window'");
+    expectReadRefusal(read, windowWithoutCausal, "launch value 'sliding_window'");
 
     // A 512-key window over seqlen_q 1536 and seqlen_kv 1024: row 1535 sees (1023, 1535], no
     // key.
@@ -843,14 +870,13 @@ TEST(TestPackLaunchValues, Gfx942AttentionDenseRefusesAMaskTheGraphMatchNeverBin
     keylessRows.values["seqlen_q"] = int64_t{1536};
     keylessRows.values["seqlen_kv"] = int64_t{1024};
     keylessRows.values["sliding_window"] = int64_t{512};
-    expectReadRefusal(
-        &readGfx942AttentionDenseLaunchInputs, keylessRows, "launch value 'sliding_window'");
-    expectReadRefusal(&readGfx942AttentionDenseLaunchInputs, keylessRows, "no key");
+    expectReadRefusal(read, keylessRows, "launch value 'sliding_window'");
+    expectReadRefusal(read, keylessRows, "no key");
 
     // One key wider and the last row sees the last key.
     SavedLaunchInputs lastRowReaches = keylessRows;
     lastRowReaches.values["sliding_window"] = int64_t{513};
-    EXPECT_EQ(readGfx942AttentionDenseLaunchInputs(lastRowReaches).binding.slidingWindow, 513);
+    EXPECT_EQ(read(lastRowReaches).binding.slidingWindow, 513);
 
     // No window, causal or not, always restores.
     for(const int64_t causal : {int64_t{0}, int64_t{1}})
@@ -859,7 +885,7 @@ TEST(TestPackLaunchValues, Gfx942AttentionDenseRefusesAMaskTheGraphMatchNeverBin
         SavedLaunchInputs noWindow = keylessRows;
         noWindow.values["causal"] = causal;
         noWindow.values["sliding_window"] = int64_t{0};
-        EXPECT_EQ(readGfx942AttentionDenseLaunchInputs(noWindow).binding.causal, causal);
+        EXPECT_EQ(read(noWindow).binding.causal, causal);
     }
 }
 
@@ -869,99 +895,113 @@ TEST(TestPackLaunchValues, Gfx942AttentionDenseRefusesAMaskTheGraphMatchNeverBin
 
 // The kernel's kv head is the query head over num_query_heads / num_kv_heads: a group of 0
 // for 2 over 4, and a kv head past the last for 6 over 4.
-TEST(TestPackLaunchValues, Gfx942AttentionDenseRefusesQueryHeadsNotAMultipleOfKvHeads)
+TEST_P(TestAttentionDenseSavedValues, RefusesQueryHeadsNotAMultipleOfKvHeads)
 {
-    const auto valid = savedGfx942AttentionDense();
+    const auto read = GetParam()->read;
+    const auto valid = GetParam()->saved();
 
     for(const int64_t numQueryHeads : {int64_t{2}, int64_t{6}})
     {
         SCOPED_TRACE(numQueryHeads);
         SavedLaunchInputs ungrouped = valid;
         ungrouped.values["num_query_heads"] = numQueryHeads;
-        expectReadRefusal(
-            &readGfx942AttentionDenseLaunchInputs, ungrouped, "launch value 'num_query_heads'");
-        expectReadRefusal(&readGfx942AttentionDenseLaunchInputs,
-                          ungrouped,
-                          "must be a multiple of 'num_kv_heads' 4");
+        expectReadRefusal(read, ungrouped, "launch value 'num_query_heads'");
+        expectReadRefusal(read, ungrouped, "must be a multiple of 'num_kv_heads' 4");
     }
 }
 
-TEST(TestPackLaunchValues, Gfx942AttentionDenseRefusesAHeadSizeTheKernelIsNotBuiltFor)
+TEST_P(TestAttentionDenseSavedValues, RefusesAHeadSizeTheKernelIsNotBuiltFor)
 {
-    const auto valid = savedGfx942AttentionDense();
+    const auto read = GetParam()->read;
+    const auto valid = GetParam()->saved();
 
     for(const int64_t headSize : {int64_t{32}, int64_t{96}, int64_t{256}})
     {
         SCOPED_TRACE(headSize);
         SavedLaunchInputs unbuilt = valid;
         unbuilt.values["head_size"] = headSize;
-        expectReadRefusal(
-            &readGfx942AttentionDenseLaunchInputs, unbuilt, "launch value 'head_size'");
-        expectReadRefusal(&readGfx942AttentionDenseLaunchInputs, unbuilt, "must be 64 or 128");
+        expectReadRefusal(read, unbuilt, "launch value 'head_size'");
+        expectReadRefusal(read, unbuilt, "must be 64 or 128");
     }
 
     SavedLaunchInputs built = valid;
     built.values["head_size"] = int64_t{64};
-    EXPECT_EQ(readGfx942AttentionDenseLaunchInputs(built).problem.headSize, 64);
+    EXPECT_EQ(read(built).problem.headSize, 64);
 }
 
-// One batch of 4 kv heads of 128 halves is 1024 bytes per key, so 2^21 keys is 2^31 bytes.
-TEST(TestPackLaunchValues, Gfx942AttentionDenseRefusesKvOf2To31BytesOrMore)
+// One batch of 4 kv heads of 128 two-byte elements is 1024 bytes per key, so 2^21 keys is
+// 2^31 bytes.
+TEST_P(TestAttentionDenseSavedValues, RefusesKvOf2To31BytesOrMore)
 {
-    auto valid = savedGfx942AttentionDense();
+    const auto read = GetParam()->read;
+    auto valid = GetParam()->saved();
     valid.values["batch"] = int64_t{1};
 
     SavedLaunchInputs tooLong = valid;
     tooLong.values["seqlen_kv"] = int64_t{2097152};
-    expectReadRefusal(&readGfx942AttentionDenseLaunchInputs,
-                      tooLong,
-                      "launch values 'batch', 'seqlen_kv', 'num_kv_heads' and 'head_size'");
-    expectReadRefusal(&readGfx942AttentionDenseLaunchInputs, tooLong, "2^31 bytes or more");
+    expectReadRefusal(
+        read, tooLong, "launch values 'batch', 'seqlen_kv', 'num_kv_heads' and 'head_size'");
+    expectReadRefusal(read, tooLong, "2^31 bytes or more");
 
     SavedLaunchInputs fits = valid;
     fits.values["seqlen_kv"] = int64_t{2097151};
-    EXPECT_EQ(readGfx942AttentionDenseLaunchInputs(fits).problem.seqLenKv, 2097151);
+    EXPECT_EQ(read(fits).problem.seqLenKv, 2097151);
 }
 
 // One batch of 8 query heads of 128 elements is 1024 elements per query row, so 2^31
-// elements is 2^21 rows. 2097216 is the first multiple of block_m 96 at or past that.
-TEST(TestPackLaunchValues, Gfx942AttentionDenseRefusesQoOf2To31ElementsOrMore)
+// elements is 2^21 rows. The first multiple of block_m at or past that is refused, and the
+// one before it restores: 2097216 and 2097120 at gfx942's 96, 2097152 and 2096896 at
+// gfx950's 256.
+TEST_P(TestAttentionDenseSavedValues, RefusesQoOf2To31ElementsOrMore)
 {
-    auto valid = savedGfx942AttentionDense();
+    constexpr int64_t ROWS_AT_LIMIT = 2097152; // 2^21
+    const auto read = GetParam()->read;
+    auto valid = GetParam()->saved();
     valid.values["batch"] = int64_t{1};
     valid.values["sliding_window"] = int64_t{0};
+    const int64_t blockM = read(valid).blockM;
+    const int64_t firstPast = (ROWS_AT_LIMIT + blockM - 1) / blockM * blockM;
 
     SavedLaunchInputs tooLong = valid;
-    tooLong.values["seqlen_q"] = int64_t{2097216};
-    expectReadRefusal(&readGfx942AttentionDenseLaunchInputs,
-                      tooLong,
-                      "launch values 'batch', 'seqlen_q', 'num_query_heads' and 'head_size'");
-    expectReadRefusal(&readGfx942AttentionDenseLaunchInputs, tooLong, "2^31 elements or more");
+    tooLong.values["seqlen_q"] = firstPast;
+    expectReadRefusal(
+        read, tooLong, "launch values 'batch', 'seqlen_q', 'num_query_heads' and 'head_size'");
+    expectReadRefusal(read, tooLong, "2^31 elements or more");
 
     SavedLaunchInputs fits = valid;
-    fits.values["seqlen_q"] = int64_t{2097120};
-    EXPECT_EQ(readGfx942AttentionDenseLaunchInputs(fits).problem.seqLenQ, 2097120);
+    fits.values["seqlen_q"] = firstPast - blockM;
+    EXPECT_EQ(read(fits).problem.seqLenQ, firstPast - blockM);
 }
 
 // The grid is ceil(seqlen_q / block_m), and the last query tile is read and written whole.
-TEST(TestPackLaunchValues, Gfx942AttentionDenseRefusesASeqLenQNotAMultipleOfBlockM)
+TEST_P(TestAttentionDenseSavedValues, RefusesASeqLenQNotAMultipleOfBlockM)
 {
-    const auto valid = savedGfx942AttentionDense();
+    const auto read = GetParam()->read;
+    const auto valid = GetParam()->saved();
+    const int64_t blockM = read(valid).blockM;
 
-    for(const int64_t seqLenQ : {int64_t{32}, int64_t{1568}})
+    for(const int64_t seqLenQ : {int64_t{32}, int64_t{300}, int64_t{1568}})
     {
         SCOPED_TRACE(seqLenQ);
         SavedLaunchInputs ragged = valid;
         ragged.values["seqlen_q"] = seqLenQ;
-        expectReadRefusal(&readGfx942AttentionDenseLaunchInputs, ragged, "launch value 'seqlen_q'");
+        expectReadRefusal(read, ragged, "launch value 'seqlen_q'");
         expectReadRefusal(
-            &readGfx942AttentionDenseLaunchInputs, ragged, "must be a multiple of 'block_m' 96");
+            read, ragged, "must be a multiple of 'block_m' " + std::to_string(blockM));
     }
 
     SavedLaunchInputs oneTile = valid;
-    oneTile.values["seqlen_q"] = int64_t{96};
-    EXPECT_EQ(readGfx942AttentionDenseLaunchInputs(oneTile).problem.seqLenQ, 96);
+    oneTile.values["seqlen_q"] = blockM;
+    EXPECT_EQ(read(oneTile).problem.seqLenQ, blockM);
 }
+
+INSTANTIATE_TEST_SUITE_P(,
+                         TestAttentionDenseSavedValues,
+                         ::testing::Values(&GFX942_ATTENTION_DENSE_READER,
+                                           &GFX950_ATTENTION_DENSE_READER),
+                         [](const ::testing::TestParamInfo<const AttentionDenseReader*>& info) {
+                             return std::string(info.param->label);
+                         });
 
 } // namespace
 } // namespace hip_kernel_provider::kernel_ingestor_engine
