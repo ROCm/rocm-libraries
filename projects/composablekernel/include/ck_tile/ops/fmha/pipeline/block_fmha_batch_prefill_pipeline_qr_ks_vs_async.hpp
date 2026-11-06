@@ -15,10 +15,6 @@
 #include "ck_tile/ops/gemm/warp/warp_wmma_gemm_gfx11_utils.hpp"
 #include "ck_tile/ops/reduce/block/block_reduce.hpp"
 
-#ifndef CK_TILE_FMHA_BATCH_PREFILL_GFX11_DISABLE_P_PERMUTE
-#define CK_TILE_FMHA_BATCH_PREFILL_GFX11_DISABLE_P_PERMUTE 0
-#endif
-
 namespace ck_tile {
 
 // Load physical pages from page_idx lookup table.
@@ -257,12 +253,29 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSAsync
     // comes before the shape checks.
 #if !CK_TILE_FMHA_BATCH_PREFILL_GFX11_INDEPENDENT_V
     // Turning the knob off would move the M128 instances onto the fallback gemm1, which
-    // is only verified for the M64 shapes.
-    static_assert(!Policy::kUseSyncKLoad,
+    // is only verified for the M64 shapes. The M64 shapes never use Independent-V, so
+    // they still build. Keyed on the shape, not kBlockSize, which uses get_warp_size()
+    // and differs on the host pass.
+    static_assert(!(Policy::kUseSyncKLoad && BlockFmhaShape::kM0 == 128 &&
+                    BlockFmhaShape::kN1 == 128),
                   "batch_prefill_gfx11 M128 instances are only verified on the "
                   "Independent-V gemm1; CK_TILE_FMHA_BATCH_PREFILL_GFX11_INDEPENDENT_V "
-                  "must stay 1");
+                  "must stay 1 for them");
 #endif
+    // (M0, N1, QK head dim) of the device-verified shapes: M128 on Independent-V and
+    // M64 on the fallback gemm1. Each warp owns 16 rows, requiring M0 / 16 warps. The
+    // dispatcher allowlist GFX11_BATCH_PREFILL_SHAPES lists the same shapes; this also
+    // covers instances built outside the dispatcher.
+    static_assert(!Policy::kUseSyncKLoad ||
+                      (BlockFmhaShape::NumGemm0Warps == BlockFmhaShape::kM0 / 16 &&
+                       ((BlockFmhaShape::kM0 == 128 && BlockFmhaShape::kN1 == 128 &&
+                         BlockFmhaShape::kQKHeaddim == 128) ||
+                        (BlockFmhaShape::kM0 == 64 && BlockFmhaShape::kN1 == 96 &&
+                         BlockFmhaShape::kQKHeaddim == 96) ||
+                        (BlockFmhaShape::kM0 == 64 && BlockFmhaShape::kN1 == 64 &&
+                         BlockFmhaShape::kQKHeaddim == 64))),
+                  "batch_prefill_gfx11 is only verified for (M0, N1, QK head dim) "
+                  "(128, 128, 128), (64, 96, 96) and (64, 64, 64), with M0 / 16 warps");
     // PermuteWarpGemmCToA moves P within a warp only, so both gemms need the same
     // M-only warp layout; the permute and the K LDS layout also assume 16x16x16 WMMA
     // and K0=32.
@@ -1541,7 +1554,9 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSAsync
                     return o_acc;
             }();
 
-#if defined(__gfx11__) && !CK_TILE_FMHA_BATCH_PREFILL_GFX11_DISABLE_P_PERMUTE
+#if defined(__gfx11__)
+            // Both gemm1 paths consume P in the WMMA A distribution, not the C
+            // distribution gemm0 leaves it in.
             auto p_for_gemm1 = [&]() {
                 if constexpr(Policy::template UseIndependentVBuffer<Problem>())
                 {
@@ -1556,14 +1571,6 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSAsync
             }();
             PermuteWarpGemmCToA(p_for_gemm1, p);
 #else
-#if defined(__gfx11__)
-            // The host pass always takes this branch, so only the gfx11 device pass can
-            // check that the permute was not switched off. Both gemm1 paths consume P in
-            // the WMMA A distribution, not the C distribution gemm0 leaves it in.
-            static_assert(!Policy::kUseSyncKLoad,
-                          "batch_prefill_gfx11 gemm1 needs the gfx11 C->A permute; "
-                          "do not disable P_PERMUTE");
-#endif
             const auto& p_for_gemm1 = p;
 #endif
 

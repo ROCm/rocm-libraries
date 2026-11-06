@@ -2394,8 +2394,9 @@ def _expand_batch_prefill(
         hdims = SUPPORTED_HDIMS.get(dtype, [])
         if arch == "gfx1100":
             # (96, 96) is not a global supported_hdims pair; it is emitted only
-            # here, for this arch and family, as an exact-head-dim instance.
-            hdims = list(GFX11_BATCH_PREFILL_M0)
+            # here, for this arch and family. Gfx11Policy is verified only for
+            # fp16/bf16, so other dtypes get no gfx1100 batch_prefill instances.
+            hdims = list(GFX11_BATCH_PREFILL_M0) if dtype in DT_FP16_BF16 else []
         if restrict_hdims is not None:
             hdims = [hv for hv in hdims if hv in restrict_hdims]
         for hq, hv in hdims:
@@ -2404,7 +2405,8 @@ def _expand_batch_prefill(
             for tc in tiles:
                 bk1 = _bp_bk1(tc.bm0, tc.bn0, tc.bk0, hq)
                 if arch == "gfx1100" and (
-                    tc.rm0 * GFX11_WARP_SIZE != GFX11_BATCH_PREFILL_M0[(hq, hv)] * 2
+                    tc.bm0 != GFX11_BATCH_PREFILL_M0[(hq, hv)]
+                    or tc.rm0 * GFX11_WARP_SIZE != tc.bm0 * 2
                     or tc.bn0 != 32
                     or tc.bn1 != hv
                     or bk1 != 32
@@ -2452,8 +2454,9 @@ def _expand_batch_prefill(
                                 tile_k0=tc.bk0,
                                 tile_n1=tc.bn1,
                                 tile_k1=bk1,
-                                # Exact head dim, not ceil_to_qualified_tile_length:
-                                # that is what makes these native rather than padded.
+                                # gemm0 loops over the head dim itself rather than
+                                # ceil_to_qualified_tile_length (4 -> 3 K0 steps for
+                                # hdim 96); Q is still loaded padded to kSubQKHeaddim.
                                 tile_k0max=hq if arch == "gfx1100" else tc.bk0max,
                                 wave_m0=tc.rm0,
                                 wave_n0=1,

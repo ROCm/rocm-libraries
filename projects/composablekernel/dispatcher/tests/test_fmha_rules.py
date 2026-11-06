@@ -7,10 +7,11 @@ import json
 import sys
 import os
 import unittest
+from unittest import mock
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "codegen"))
 
-from fmha.validation import validate_config, load_arch_specs
+from fmha.validation import GFX11_BATCH_PREFILL_M0, validate_config, load_arch_specs
 
 SPECS = load_arch_specs()
 
@@ -79,10 +80,12 @@ def _gfx11_batch_prefill_config(pipeline="batch_prefill_gfx11", **sig_overrides)
         **sig_overrides,
     )
     hdim = cfg["signature"]["hdim_q"]
-    m0 = 128 if hdim == 128 else 64
+    hdim_v = cfg["signature"]["hdim_v"]
+    # Pairs outside the table only exercise the hdim-pair rejection.
+    m0 = GFX11_BATCH_PREFILL_M0.get((hdim, hdim_v), 128)
     waves = m0 * 2 // 32
     cfg["signature"]["mode"] = "group"
-    cfg["algorithm"]["tile"] = [m0, 32, 32, cfg["signature"]["hdim_v"], 32, hdim]
+    cfg["algorithm"]["tile"] = [m0, 32, 32, hdim_v, 32, hdim]
     cfg["algorithm"]["wave"] = [waves, 1, 1, waves, 1, 1, 1, 1, 1]
     cfg["algorithm"]["warp"] = [16, 16, 16, 16, 16, 16, 16, 16, 16]
     return cfg
@@ -215,7 +218,7 @@ class TestValidateConfig(unittest.TestCase):
         self.assertFalse(r.valid)
         self.assertTrue(any("linear" in e for e in r.errors), r.errors)
 
-    def test_gfx1100_batch_prefill_gfx11_accepts_native_hdims(self):
+    def test_gfx1100_batch_prefill_gfx11_accepts_verified_hdim_pairs(self):
         """128 rides Independent-V; 96 and 64 ride the fallback gemm1 on M64."""
         for hdim in (128, 96, 64):
             with self.subTest(hdim=hdim):
@@ -223,8 +226,8 @@ class TestValidateConfig(unittest.TestCase):
                 r = validate_config(cfg, SPECS)
                 self.assertTrue(r.valid, r.errors)
 
-    def test_gfx1100_batch_prefill_gfx11_rejects_padded_hdim_pair(self):
-        """(96, 128) is the padded pair these native instances replace."""
+    def test_gfx1100_batch_prefill_gfx11_rejects_mixed_hdim_pair(self):
+        """The gfx1100 allowlist supports only matched Q/K and V head dimensions."""
         cfg = _gfx11_batch_prefill_config(hdim_q=96, hdim_v=128)
         r = validate_config(cfg, SPECS)
         self.assertFalse(r.valid)
@@ -269,12 +272,19 @@ class TestValidateConfig(unittest.TestCase):
     )
     def test_gfx1100_batch_prefill_emission_matches_allowlist(self):
         """Every allowlisted shape is emitted, and every emitted config validates."""
-        sys.path.insert(
-            0, os.path.join(os.path.dirname(__file__), "..", "codegen", "fmha")
-        )
-        import instance_gen
-        from fmha.validation import GFX11_BATCH_PREFILL_SHAPES
+        codegen_dir = os.path.join(os.path.dirname(__file__), "..", "codegen", "fmha")
+        # Scope instance_gen's import-time path changes and temporary modules.
+        # Validate with the same validation module object used by instance_gen.
+        with (
+            mock.patch.object(sys, "path", [codegen_dir, *sys.path]),
+            mock.patch.dict(sys.modules),
+        ):
+            import instance_gen
 
+            validation = sys.modules["validation"]
+            self._check_gfx1100_batch_prefill_emission(instance_gen, validation)
+
+    def _check_gfx1100_batch_prefill_emission(self, instance_gen, validation):
         sweep = os.path.join(
             os.path.dirname(__file__),
             "..",
@@ -286,16 +296,25 @@ class TestValidateConfig(unittest.TestCase):
             "batch_prefill.json",
         )
         configs = instance_gen.expand_sweep(sweep, "gfx1100")
+        specs = validation.load_arch_specs()
         shapes = set()
         for c in configs:
             cfg = json.loads(c.to_codegen_json())
-            r = validate_config(cfg, SPECS)
+            r = validation.validate_config(cfg, specs)
             self.assertTrue(r.valid, (c.name, r.errors))
             alg = cfg["algorithm"]
             shapes.add(
                 (tuple(alg["tile"][:6]), tuple(alg["wave"][:6]), tuple(alg["warp"][:6]))
             )
-        self.assertEqual(shapes, GFX11_BATCH_PREFILL_SHAPES)
+        self.assertEqual(shapes, validation.GFX11_BATCH_PREFILL_SHAPES)
+        # Gfx11Policy is verified for fp16/bf16 only; a dtype added to gfx1100
+        # later must not inherit these shapes.
+        self.assertEqual(
+            instance_gen._expand_batch_prefill(
+                "gfx1100", ["fp8bf16"], None, None, None
+            ),
+            [],
+        )
 
     def test_gfx1100_batch_prefill_gfx11_rejects_dropout(self):
         cfg = _gfx11_batch_prefill_config(dropout=True)

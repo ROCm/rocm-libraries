@@ -371,15 +371,15 @@ GFX11_BATCH_PREFILL_SHAPES = {
     ((64, 32, 32, 64, 32, 64), (4, 1, 1, 4, 1, 1), (16, 16, 16, 16, 16, 16)),
 }
 
-# gfx1100 batch_prefill: each head-dim pair maps to the one M0 that has device
-# evidence. Each warp owns one 16-row WMMA slice, so the block is M0 / 16 warps of
-# 32 lanes, i.e. M0 * 2 threads: M0=128 lands on Gfx11Policy's Independent-V path
-# (block 256) and M0=64 on the fallback gemm1, which the pipeline reaches by
-# permuting P into that gemm's A distribution.
+# gfx1100 batch_prefill: each (hdim_q, hdim_v) pair maps to the one M0 that has
+# device evidence, derived from the shapes above so the two cannot drift. Each warp
+# owns one 16-row WMMA slice, so the block is M0 / 16 warps of 32 lanes, i.e.
+# M0 * 2 threads: M0=128 lands on Gfx11Policy's Independent-V path (block 256) and
+# M0=64 on the fallback gemm1, which the pipeline reaches by permuting P into that
+# gemm's A distribution.
 GFX11_BATCH_PREFILL_M0 = {
-    (128, 128): 128,
-    (96, 96): 64,
-    (64, 64): 64,
+    (tile[5], tile[3]): tile[0]
+    for tile, _, _ in sorted(GFX11_BATCH_PREFILL_SHAPES, reverse=True)
 }
 
 
@@ -971,16 +971,17 @@ def validate_config(
                 result.add_error(
                     f"batch_prefill_gfx11 requires tile N0=32, N1={hdim_v}, K1=32"
                 )
-            # These instances are native, so the Q tile length is the head dim
-            # itself rather than ceil_to_qualified_tile_length(hdim_q).
+            # The gemm0 K loop runs over the head dim itself rather than
+            # ceil_to_qualified_tile_length(hdim_q). Q is still loaded through
+            # kSubQKHeaddim, i.e. padded to 128 for hdim 96.
             if len(tile) >= 6 and tile[5] != hdim_q:
                 result.add_error(
                     f"batch_prefill_gfx11 requires tile QK head dimension {hdim_q}, "
                     f"got {tile[5]}"
                 )
-            # The async copy strides K into LDS by kK1 while gemm0 reads kK0-deep
-            # chunks out of the same buffer, so the pipeline static_asserts that
-            # the two agree; see block_fmha_batch_prefill_pipeline_qr_ks_vs_async.
+            # K staging uses kK1 while gemm0 consumes kK0-deep chunks; the two
+            # tile depths must agree, as the pipeline static_asserts; see
+            # block_fmha_batch_prefill_pipeline_qr_ks_vs_async.
             if len(tile) >= 5 and tile[2] != tile[4]:
                 result.add_error(
                     f"batch_prefill_gfx11 requires tile K0 == K1, got "
