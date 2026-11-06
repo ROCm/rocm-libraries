@@ -137,7 +137,9 @@ BenchmarkProblems:
           - Exact: [511, 512, 1, 128]
           - Exact: [511, 509, 2, 128, 520, 520, 128, 128]
   ########################################
-  # MacroTile0 512 over 8 waves: staging offsets above the 16-bit DS offset.
+  # MacroTile0 512 over 4 waves: staging offsets above the 16-bit DS offset. Not over 8:
+  # gfx1250 runs a workgroup on the 4 SIMDs of one CU, so 8 waves get at most 512 VGPRs
+  # each, fewer than this tile needs, and the command processor rejects the dispatch.
   ########################################
   -
     - *problem_type_bf16
@@ -146,7 +148,7 @@ BenchmarkProblems:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
         - MatrixInstruction:
-          - [16, 16, 32, 1, 1, 4, 8, 8, 1]
+          - [16, 16, 32, 1, 1, 8, 8, 4, 1]
         - WavefrontSize: [32]
         - DepthU: [64]
         - PrefetchGlobalRead: [2]
