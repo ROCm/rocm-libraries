@@ -10,34 +10,23 @@ wider than what the sweeps reach (the claims are the cases the engine serves, no
 covering set), so only the claimed-subset direction is checked.
 """
 
-import json
-from pathlib import Path
-
 import pytest
+
+from bundle_coverage import SWEEPS, catalog_path, claimed_cases, load_catalog
 
 pytestmark = pytest.mark.quick
 
-REPO = Path(__file__).resolve().parents[4]
-CATALOG = (
-    REPO
-    / "dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/descriptors"
-    / "rocKE/gfx942_attention_unified_2d/artifacts/gfx942_attention_unified_2d.kdp.json"
+ARCH = "gfx942"
+CATALOG = catalog_path(
+    "gfx942_attention_unified_2d", "gfx942_attention_unified_2d.kdp.json"
 )
 ENGINE = "hipkernel:Gfx942AttentionUnified2D"
-SWEEPS = [
-    REPO
-    / "dnn-providers/integration-tests/integration-test-bundles"
-    / tier
-    / "SdpaFwd/Default"
-    for tier in ("quick", "standard")
-]
-# The sweep JSON spells dtypes as hipDNN does; the catalog spec as rocKE does.
-SWEEP_DTYPES = {"bfloat16": "bf16", "half": "fp16"}
+# The graph's io_data_type as the catalog spec spells it.
+SPEC_DTYPE = {"half": "fp16", "bfloat16": "bf16"}
 
 
-def catalog_cells(kdp_path):
+def catalog_cells(kdp):
     """(dtype, head_size, GQA ratio) of every kernel the descriptor packs."""
-    kdp = json.loads(kdp_path.read_text(encoding="utf-8"))
     cells = set()
     for kernel in kdp["kernelDescriptors"]:
         spec = kernel["kernel_source"]["spec"]
@@ -51,59 +40,29 @@ def catalog_cells(kdp_path):
     return cells
 
 
-def claimed_case_ids(sweep_dir):
-    """Ids of the cases support.json claims for ENGINE on gfx942."""
-    support = json.loads((sweep_dir / "support.json").read_text(encoding="utf-8"))
-    claimed = set()
-    for claim in support["claims"].get(ENGINE, []):
-        if "gfx942" in claim["support"]:
-            claimed.update(claim["cases"])
-    return claimed
-
-
-def claimed_cases(sweep_dir):
-    """(id, dtype, head_size, Hq, Hkv, attributes) of every claimed case."""
-    template = json.loads(
-        (sweep_dir / "graph.template.json").read_text(encoding="utf-8")
-    )
-    uid = {tensor["name"]: tensor["uid"] for tensor in template["tensors"]}
-    sweep = json.loads((sweep_dir / "sweep.json").read_text(encoding="utf-8"))
-    claimed = claimed_case_ids(sweep_dir)
-    cases = []
-    for case in sweep["cases"]:
-        if case["id"] not in claimed:
-            continue
-        values = case["values"]
-        dims = {tensor["uid"]: tensor["dims"] for tensor in values["tensors"]}
-        q, k = dims[uid["Q"]], dims[uid["K"]]
-        cases.append(
-            (
-                case["id"],
-                SWEEP_DTYPES.get(values["io_data_type"], values["io_data_type"]),
-                q[3],
-                q[1],
-                k[1],
-                values.get("attributes", {}),
-            )
-        )
-    return cases
-
-
 def all_claimed_cases():
-    cases = [case for sweep_dir in SWEEPS for case in claimed_cases(sweep_dir)]
+    """(id, dtype, head_size, Hq, Hkv, attributes) of every case claimed on ARCH."""
+    cases = [
+        (
+            case["id"],
+            SPEC_DTYPE.get(
+                case["values"]["io_data_type"], case["values"]["io_data_type"]
+            ),
+            q[3],
+            q[1],
+            k[1],
+            case["values"].get("attributes", {}),
+        )
+        for sweep_dir in SWEEPS
+        for case, q, k in claimed_cases(sweep_dir, ENGINE, ARCH)
+    ]
     assert cases, "support.json claims no case for this engine"
     return cases
 
 
 def test_every_claimed_case_is_a_cell_the_catalog_compiles():
-    # The KDP is a DVC output (descriptors/README.md), so a checkout without a
-    # `dvc pull` has no catalog to compare.
-    if not CATALOG.exists():
-        pytest.skip(
-            f"gfx942 catalog not pulled; run: dvc pull -r ingestor {CATALOG.parent}.dvc"
-        )
+    catalog = catalog_cells(load_catalog(CATALOG, ARCH))
     # An unreadable or emptied catalog would otherwise pass as "nothing unknown".
-    catalog = catalog_cells(CATALOG)
     assert catalog, f"no kernels read from {CATALOG}"
     missing = sorted(
         (case_id, (dtype, head_size, hq // hkv))
