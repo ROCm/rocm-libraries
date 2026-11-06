@@ -38,6 +38,9 @@ def test_signature_mismatches_compare_roles_and_value_forms(tmp_path):
     export(tmp_path, "by_value", BASE + BY_VALUE_SEED + RNG_DUMP)
     export(tmp_path, "unlisted", BASE + DEVICE_SEED + RNG_DUMP)
     export(tmp_path, "stats", BASE + [{"name": "sdpa_fwd::STATS"}])
+    ragged_stats = [{"name": "sdpa_fwd::STATS", "ragged_offset_tensor_uid": 4}]
+    export(tmp_path, "ragged_stats", BASE + ragged_stats)
+    export(tmp_path, "ragged_stats_listed_dense", BASE + ragged_stats)
     export(
         tmp_path,
         "runtime",
@@ -48,6 +51,8 @@ def test_signature_mismatches_compare_roles_and_value_forms(tmp_path):
         row("by_value", "dropout_seed", "dropout_offset", "rng_dump"),
         row("unlisted", "rng_dump"),
         row("stats", "stats"),
+        row("ragged_stats", "stats[ragged]"),
+        row("ragged_stats_listed_dense", "stats"),
         row("runtime", "attn_scale[runtime]"),
     ]
     assert make_bundles.signature_mismatches(rows, tmp_path) == [
@@ -57,6 +62,7 @@ def test_signature_mismatches_compare_roles_and_value_forms(tmp_path):
             ["dropout_offset[by_value]", "dropout_seed[by_value]"],
         ),
         ("unlisted", [], ["dropout_offset", "dropout_seed"]),
+        ("ragged_stats_listed_dense", ["stats"], ["stats[ragged]"]),
     ]
 
 

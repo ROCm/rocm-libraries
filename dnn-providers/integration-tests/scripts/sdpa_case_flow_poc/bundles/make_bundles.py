@@ -94,6 +94,8 @@ def graph_roles(graph):
             role += "[by_value]"
         elif t.get("is_runtime_pass_by_value"):
             role += "[runtime]"
+        elif role == "stats" and t.get("ragged_offset_tensor_uid") is not None:
+            role += "[ragged]"
         out.add(role)
     return out
 

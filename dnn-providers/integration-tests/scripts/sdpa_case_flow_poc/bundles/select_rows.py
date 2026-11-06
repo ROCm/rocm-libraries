@@ -66,14 +66,14 @@ EXPECTED = {
     "per_tier": {
         # rows, bundle rows, strict sweeps, alignment-split sweeps, largest, 1-case, then the summed
         # est_seconds on gfx942 and gfx950 of the expressible rows before the extra exclusions
-        "quick": (1506, 1500, 142, 223, 353, 59, 53.1, 41.0),
-        "standard": (9555, 9519, 377, 631, 2174, 31, 515.8, 384.2),
-        "comprehensive": (4643, 4622, 332, 525, 966, 127, 1745.8, 1243.7),
-        "full": (11545, 11491, 464, 749, 2451, 146, 4693.1, 3354.8),
+        "quick": (1506, 1500, 143, 224, 353, 59, 53.1, 41.0),
+        "standard": (9555, 9519, 379, 633, 2174, 32, 515.8, 384.2),
+        "comprehensive": (4643, 4622, 334, 527, 966, 129, 1745.8, 1243.7),
+        "full": (11545, 11491, 466, 751, 2451, 148, 4693.1, 3354.8),
     },
     "bundle_rows": 27132,
-    "sweeps": 1315,
-    "sweeps_alignment_split": 2128,
+    "sweeps": 1322,
+    "sweeps_alignment_split": 2135,
 }
 
 
@@ -128,22 +128,27 @@ class Model:
         self.packed_table = values["packed_page_table"]
         self.head_dim = values["head_dim"]
 
-    def ragged_offsets(self, row):
-        """The ragged offset tensors of a row's graph, named as the case builder names them."""
+    def ragged_letters(self, row):
+        """The tensors of a row's graph that are ragged (Q, K, V, O, Stats)."""
         letters = [
             letter
             for letter in self.ragged[row["batch_packing"]]
             if not (letter == "O" and row["o_packing"] == "padded")
             and not (letter == "V" and row["v_packing"] == "padded")
         ]
-        if not letters:
-            return []
         if (
             "Q" in letters
             and row["stats_output"] == "requested"
             and active(row, "stats_packing")
         ):
             letters += self.ragged_stats[row["stats_packing"]]
+        return letters
+
+    def ragged_offsets(self, row):
+        """The ragged offset tensors of a row's graph, named as the case builder names them."""
+        letters = self.ragged_letters(row)
+        if not letters:
+            return []
         if row["ragged_offset_form"] == "shared_tokens":
             sides = {
                 "kv_side" if letter in ("K", "V") else "q_side" for letter in letters
@@ -152,7 +157,8 @@ class Model:
         return ["ragged_offset_" + letter.lower() for letter in letters]
 
     def tensors(self, row, strict=True):
-        """Sorted tuple of the tensor roles of a row's graph, with value-form tags when strict."""
+        """Sorted tuple of the tensor roles of a row's graph, with value-form tags and the
+        ragged tag of Stats when strict."""
         t = ["q", "k", "v", "o"]
         bv = (lambda n: n + "[by_value]") if strict else (lambda n: n)
 
@@ -191,7 +197,8 @@ class Model:
             t.append("rng_dump")
 
         if row["stats_output"] == "requested":
-            t.append("stats")
+            ragged = strict and "Stats" in self.ragged_letters(row)
+            t.append("stats[ragged]" if ragged else "stats")
         ms = row["max_sumexp_output"]
         if ms in ("requested", "max_only"):
             t.append("logit_max")

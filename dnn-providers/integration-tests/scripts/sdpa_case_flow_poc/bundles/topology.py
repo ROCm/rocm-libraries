@@ -4,10 +4,11 @@
 """Deterministic topology (sweep folder) names for SDPA forward case rows.
 
 A row's strict signature is the set of tensor roles of its graph plus the value form of
-each by-value or runtime tensor (select_rows.Model.tensors). The name lists the optional
-roles (every role except Q, K, V and O) in a fixed order, one token per role, joined by
-'_'. A row with no optional role is 'Base'. A name longer than 64 characters keeps its
-leading tokens and ends with '_' and 6 hex digits of the sha256 of the full name.
+each by-value or runtime tensor and whether Stats is ragged (select_rows.Model.tensors).
+The name lists the optional roles (every role except Q, K, V and O) in a fixed order, one
+token per role, joined by '_'. A row with no optional role is 'Base'. A name longer than 64
+characters keeps its leading tokens and ends with '_' and 6 hex digits of the sha256 of the
+full name.
 
 A superset template holds the tensors of several signatures: a row whose signature is a
 subset of the template's runs as a sweep case that names its missing tensors absent. Per
@@ -62,6 +63,7 @@ ROLE_TOKENS = (
     ("dropout_scale[by_value]", "DScBv"),
     ("rng_dump", "Rng"),
     ("stats", "Stats"),
+    ("stats[ragged]", "StatsRg"),
     ("logit_max", "Max"),
     ("score_sum_exp", "SumExp"),
     ("amax_s", "AmaxS"),

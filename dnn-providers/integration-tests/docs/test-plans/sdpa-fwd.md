@@ -595,11 +595,11 @@ filters. To bring a row back, change the filter and regenerate the bundles.
 
 | Tier | All rows | Bundle rows | Sweeps | Largest sweep | Summed `est_seconds` of the bundle rows, gfx942 / gfx950 |
 |---|---|---|---|---|---|
-| quick | 1,506 | 1,500 | 142 | 353 | 53.1 / 41.0 |
-| standard | 9,555 | 9,519 | 377 | 2,174 | 515.8 / 384.2 |
-| comprehensive | 4,643 | 4,622 | 332 | 966 | 1,745.8 / 1,243.7 |
-| full | 11,545 | 11,491 | 464 | 2,451 | 4,693.0 / 3,354.7 |
-| total | 27,249 | 27,132 | 1,315 | | |
+| quick | 1,506 | 1,500 | 143 | 353 | 53.1 / 41.0 |
+| standard | 9,555 | 9,519 | 379 | 2,174 | 515.8 / 384.2 |
+| comprehensive | 4,643 | 4,622 | 334 | 966 | 1,745.8 / 1,243.7 |
+| full | 11,545 | 11,491 | 466 | 2,451 | 4,693.0 / 3,354.7 |
+| total | 27,249 | 27,132 | 1,322 | | |
 
 ### 9.2 How a graph is made from a row
 
@@ -640,7 +640,7 @@ each. A row with only Q, K, V and O is `Base`. Examples:
 | `Stats_DqBv_DkBv_DvBv` | Stats plus the three descales |
 
 A name longer than 64 characters keeps its first tokens and ends with 6 hex
-digits of a hash. The 27,249 rows have 482 topologies; the bundle rows use 467.
+digits of a hash. The 27,249 rows have 484 topologies; the bundle rows use 469.
 One sweep holds the cases of one tier and one topology.
 
 The suite's import tool `migration-scripts/import_graph.py` groups the graphs.

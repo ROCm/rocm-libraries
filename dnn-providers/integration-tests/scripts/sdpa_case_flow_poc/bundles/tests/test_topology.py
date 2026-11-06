@@ -411,5 +411,49 @@ def test_every_ragged_offset_role_has_a_token():
         "v",
     )
     assert topology.topology_name(sig) == "RgQs_RgKvs"
-    sig = ("k", "o", "q", "ragged_offset_q", "ragged_offset_stats", "stats", "v")
-    assert topology.topology_name(sig) == "RgQ_RgSt_Stats"
+    sig = (
+        "k",
+        "o",
+        "q",
+        "ragged_offset_q",
+        "ragged_offset_stats",
+        "stats[ragged]",
+        "v",
+    )
+    assert topology.topology_name(sig) == "RgQ_RgSt_StatsRg"
+
+
+SHARED_TOKENS_STATS = {
+    "batch_packing": "ragged",
+    "ragged_offset_form": "shared_tokens",
+    "o_packing": "ragged",
+    "v_packing": "ragged",
+    "stats_output": "requested",
+}
+
+
+def test_ragged_stats_is_its_own_role_when_the_offsets_are_shared(model):
+    ragged, dense, no_stats = signatures(
+        model,
+        [
+            row(**SHARED_TOKENS_STATS, stats_packing="packed_with_q"),
+            row(**SHARED_TOKENS_STATS, stats_packing="dense"),
+            row(**dict(SHARED_TOKENS_STATS, stats_output="not_requested")),
+        ],
+    )
+    assert "stats[ragged]" in ragged and "stats" not in ragged
+    assert "stats" in dense and "stats[ragged]" not in dense
+    assert topology.topology_name(ragged) == "RgQs_RgKvs_StatsRg"
+    assert topology.topology_name(dense) == "RgQs_RgKvs_Stats"
+    mapping = topology.superset_map([ragged, dense, no_stats])
+    topology.check_superset_map(mapping)
+    assert mapping[ragged] == ragged
+    assert mapping[dense] == dense
+    assert mapping[no_stats] in (ragged, dense)
+
+
+def test_the_loose_signature_keeps_one_stats_role(model):
+    loose = model.tensors(
+        row(**SHARED_TOKENS_STATS, stats_packing="packed_with_q"), False
+    )
+    assert "stats" in loose and "stats[ragged]" not in loose
