@@ -26,7 +26,7 @@ from pathlib import Path
 
 import pytest
 
-from config_helpers import findAvailableArchs, findConfigs
+from config_helpers import curatedArchsFromMarkers, findAvailableArchs, findConfigs
 
 _COMMON_DIR = Path(__file__).parent
 
@@ -80,5 +80,6 @@ def pytest_generate_tests(metafunc):
     gpu_targets = metafunc.config.getoption("--gpu-targets", default=None)
     archs = findAvailableArchs(gpu_targets)
     configs = findConfigs(availableArchs=archs,
-                          splitWorlds=not metafunc.config.getoption("--build-only", default=False))
+                          splitWorlds=not metafunc.config.getoption("--build-only", default=False),
+                          curatedArchs=curatedArchsFromMarkers(metafunc.config.getini("markers")))
     metafunc.parametrize("config", configs)
