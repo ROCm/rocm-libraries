@@ -465,7 +465,7 @@ struct ProcessImpl
 
     int Wait()
     {
-        if(inputWrite.fd >= 0)
+        if(inputWrite.fd >= 0 && pid > 0)
         {
             std::array<char, 1024> buffer{};
             while(*inStream)

@@ -145,13 +145,15 @@ std::string AmdgcnAssemble(std::string_view source,
     if(GcnAssemblerHasBug34765())
         GenerateClangDefsym(options, "WORKAROUND_BUG_34765", 1);
 
-    // .string(): streaming the path itself would quote it, and no shell strips the quotes.
-    options << " - -o " << outfile.Path().string();
+    // Process splits args on whitespace and no shell strips quotes, so pass a bare file name and
+    // run in its directory: a temp dir path containing a space would otherwise be split.
+    options << " - -o " << outfile.Path().filename().string();
     MIOPEN_LOG_I2("'" << options.str() << "'");
 
     std::istringstream clang_stdin(source.data());
     const auto clang_path = GetGcnAssemblerPath();
-    const auto clang_rc = miopen::Process{clang_path}(options.str(), "", nullptr, {}, &clang_stdin);
+    const auto clang_rc = miopen::Process{clang_path}(
+        options.str(), outfile.Path().parent_path().string(), nullptr, {}, &clang_stdin);
     if(clang_rc != 0)
     {
         MIOPEN_LOG_W(options.str());
