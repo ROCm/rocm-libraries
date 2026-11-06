@@ -1247,6 +1247,27 @@ static rocke_status_t rocke_h_op_tile_trap(rocke_h_lowerer_t* lw, const rocke_op
     return lw->status;
 }
 
+/* Python _op_tile_gpu_check_failed: store 1 to the kernel's GPU-check word,
+ * then return from the kernel. */
+static rocke_status_t rocke_h_op_tile_gpu_check_failed(rocke_h_lowerer_t* lw, const rocke_op_t* op)
+{
+    char err[64];
+    if(!rocke_h_live(lw))
+    {
+        return lw->status;
+    }
+    if(const char* error = rocke_i_gpu_check_failed_op_error(op, err, sizeof err))
+    {
+        return rocke_h_fail(lw, ROCKE_ERR_VALUE, "%s", error);
+    }
+    lw->gpu_check_word = rocke_i_gpu_check_word_symbol(&lw->b->arena, lw->kernel->name);
+    rocke_h_emitf(lw,
+                  "__hip_atomic_store(&%s, 1, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);",
+                  lw->gpu_check_word);
+    rocke_h_emit(lw, "return;");
+    return lw->status;
+}
+
 /* ============================== vector =================================== */
 
 /* def _op_vector_bitcast(self, op): memcpy into the result type. */
@@ -2033,6 +2054,7 @@ const rocke_h_handler_entry_t* rocke_h_handlers_mma(void)
         {ROCKE_OP_TILE_S_WAITCNT, rocke_h_op_tile_s_waitcnt},
         {ROCKE_OP_TILE_S_SETPRIO, rocke_h_op_tile_s_setprio},
         {ROCKE_OP_TILE_TRAP, rocke_h_op_tile_trap},
+        {ROCKE_OP_TILE_GPU_CHECK_FAILED, rocke_h_op_tile_gpu_check_failed},
         {ROCKE_OP_TILE_IGLP_OPT, rocke_h_op_tile_iglp_opt},
         {ROCKE_OP_TILE_SCHED_BARRIER, rocke_h_op_tile_sched_barrier},
         {ROCKE_OP_TILE_SCHED_GROUP_BARRIER, rocke_h_op_tile_sched_group_barrier},
