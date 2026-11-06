@@ -527,19 +527,19 @@ namespace rocalution
 
             if(this->mat_.row_offset != NULL)
             {
-                copy_d2h(this->nrow_ + 1,
+                copy_d2d(this->nrow_ + 1,
                          this->mat_.row_offset,
                          hip_cast_mat->mat_.row_offset,
                          true,
                          HIPSTREAM(_get_backend_descriptor()->HIP_stream_current));
             }
 
-            copy_d2h(this->nnz_,
+            copy_d2d(this->nnz_,
                      this->mat_.col,
                      hip_cast_mat->mat_.col,
                      true,
                      HIPSTREAM(_get_backend_descriptor()->HIP_stream_current));
-            copy_d2h(this->nnz_,
+            copy_d2d(this->nnz_,
                      this->mat_.val,
                      hip_cast_mat->mat_.val,
                      true,

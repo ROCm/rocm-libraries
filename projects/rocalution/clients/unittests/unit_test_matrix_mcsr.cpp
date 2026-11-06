@@ -201,6 +201,14 @@ TYPED_TEST(matrix_mcsr, copy_of_an_unallocated_matrix_is_empty)
     if(auto accel = dynamic_cast<rocalution::AcceleratorMatrix<T>*>(dst.get()))
     {
         accel->CopyFromHost(*dynamic_cast<HostMatrix<T>*>(src.get()));
+
+        auto async = empty_matrix<T>(TypeParam::backend, mcsr_format);
+        dynamic_cast<rocalution::AcceleratorMatrix<T>&>(*async).CopyFromHostAsync(
+            *dynamic_cast<HostMatrix<T>*>(src.get()));
+        rocalution::_rocalution_sync();
+        EXPECT_EQ(async->GetM(), 0);
+        EXPECT_EQ(async->GetN(), 0);
+        EXPECT_EQ(async->GetNnz(), 0);
     }
     else
     {
