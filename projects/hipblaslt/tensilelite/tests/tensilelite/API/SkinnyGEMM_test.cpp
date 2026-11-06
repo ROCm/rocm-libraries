@@ -146,6 +146,20 @@ static SkinnyGEMMConfig splitK(SkinnyGEMMConfig base) {
   return base;
 }
 
+// Whether the kernel declares wholeTiles and pieces: the MFMA 3-D kernel with a
+// power of two tn.
+static bool declaresRemainderArgs(const SkinnyGEMMConfig &gemm) {
+  return gemm.mfma && gemm.grid3d && (gemm.tn & (gemm.tn - 1)) == 0;
+}
+
+// The kernarg segment: the 96 bytes of the arguments every kernel declares, 4
+// more for spk and 8 more for wholeTiles and pieces, rounded up to 8.
+static std::string kernargSegment(const SkinnyGEMMConfig &gemm) {
+  int32_t bytes = 96 + (gemm.useSplitK ? 4 : 0) +
+                  (declaresRemainderArgs(gemm) ? 8 : 0);
+  return ".kernarg_segment_size: " + std::to_string((bytes + 7) / 8 * 8);
+}
+
 static bool isBlank(char c) { return c == ' ' || c == '\t'; }
 
 static std::string trimmed(const std::string &line) {
@@ -214,10 +228,9 @@ TEST(SkinnyGEMM, AssemblyHasTheKernelAbi) {
       assembly,
       {".name: gemm_BM1_TN1_LANES_K16_WAVES2_UP_ITERS0_PF1_"
        "GROUP1_NUM_XCDS1_GRID_3D1_USE_BETA0",
-       ".kernarg_segment_size: 112", ".group_segment_fixed_size: 0",
+       ".kernarg_segment_size: 96", ".group_segment_fixed_size: 0",
        ".max_flat_workgroup_size: 128"});
-  // The pointers, the scalars, the workgroup counts and the remainder narrowing
-  // arguments.
+  // The pointers, the scalars and the workgroup count.
   expectLinesInOrder(assembly, {".name: D",
                                 ".offset: 0",
                                 ".name: A",
@@ -244,20 +257,19 @@ TEST(SkinnyGEMM, AssemblyHasTheKernelAbi) {
                                 ".offset: 72",
                                 ".name: k",
                                 ".offset: 76",
-                                ".name: spk",
-                                ".offset: 80",
                                 ".name: ldC",
-                                ".offset: 84",
+                                ".offset: 80",
                                 ".name: alpha",
-                                ".offset: 88",
+                                ".offset: 84",
                                 ".name: beta",
-                                ".offset: 92",
+                                ".offset: 88",
                                 ".name: numWorkGroupsX",
-                                ".offset: 96",
-                                ".name: wholeTiles",
-                                ".offset: 100",
-                                ".name: pieces",
-                                ".offset: 104"});
+                                ".offset: 92"});
+  // Only the split-K kernel has spk and only the MFMA 3-D kernel has the
+  // remainder narrowing arguments.
+  EXPECT_EQ(assembly.find(".name: spk"), std::string::npos);
+  EXPECT_EQ(assembly.find(".name: wholeTiles"), std::string::npos);
+  EXPECT_EQ(assembly.find(".name: pieces"), std::string::npos);
   EXPECT_EQ(assembly.find("hidden_"), std::string::npos);
   // Both launches only use the workgroup id x.
   EXPECT_NE(assembly.find(".amdhsa_system_sgpr_workgroup_id_x 1"),
@@ -976,15 +988,15 @@ TEST(SkinnyGEMM, PersistentLaunchAbi) {
             std::string::npos);
   EXPECT_EQ(assembly.find("workgroup_id_y"), std::string::npos);
   EXPECT_EQ(assembly.find("workgroup_id_z"), std::string::npos);
-  EXPECT_NE(assembly.find(".kernarg_segment_size: 112"), std::string::npos);
-  EXPECT_EQ(countLinesContaining(assembly, "s[0:1], 96"), 1);
+  EXPECT_NE(assembly.find(".kernarg_segment_size: 96"), std::string::npos);
+  EXPECT_EQ(countLinesContaining(assembly, "s[0:1], 92"), 1);
   // The remainder narrowing arguments are the MFMA 3-D kernel's.
-  EXPECT_EQ(countLinesContaining(assembly, "s[0:1], 100"), 0);
-  EXPECT_EQ(countLinesContaining(assembly, "s[0:1], 104"), 0);
+  EXPECT_EQ(assembly.find(".name: wholeTiles"), std::string::npos);
+  EXPECT_EQ(assembly.find(".name: pieces"), std::string::npos);
   // The kernel loads alpha but not C, ldC or beta.
-  EXPECT_EQ(countLinesContaining(assembly, "s[0:1], 88"), 1);
-  EXPECT_EQ(countLinesContaining(assembly, "s[0:1], 84"), 0);
-  EXPECT_EQ(countLinesContaining(assembly, "s[0:1], 92"), 0);
+  EXPECT_EQ(countLinesContaining(assembly, "s[0:1], 84"), 1);
+  EXPECT_EQ(countLinesContaining(assembly, "s[0:1], 80"), 0);
+  EXPECT_EQ(countLinesContaining(assembly, "s[0:1], 88"), 0);
   EXPECT_EQ(countLinesContaining(assembly, "s[0:1], 48"), 0);
 }
 
@@ -1184,7 +1196,7 @@ TEST(SkinnyGEMM, BetaVariantSharesTheAbi) {
       assembly,
       {".name: gemm_BM1_TN1_LANES_K16_WAVES2_UP_ITERS0_PF1_"
        "GROUP1_NUM_XCDS1_GRID_3D1_USE_BETA1",
-       ".kernarg_segment_size: 112", ".group_segment_fixed_size: 0",
+       ".kernarg_segment_size: 96", ".group_segment_fixed_size: 0",
        ".max_flat_workgroup_size: 128"});
   expectLinesInOrder(assembly, {".name: D",
                                 ".offset: 0",
@@ -1194,20 +1206,16 @@ TEST(SkinnyGEMM, BetaVariantSharesTheAbi) {
                                 ".offset: 48",
                                 ".name: ldD",
                                 ".offset: 56",
-                                ".name: spk",
-                                ".offset: 80",
                                 ".name: ldC",
-                                ".offset: 84",
+                                ".offset: 80",
                                 ".name: alpha",
-                                ".offset: 88",
+                                ".offset: 84",
                                 ".name: beta",
-                                ".offset: 92",
+                                ".offset: 88",
                                 ".name: numWorkGroupsX",
-                                ".offset: 96",
-                                ".name: wholeTiles",
-                                ".offset: 100",
-                                ".name: pieces",
-                                ".offset: 104"});
+                                ".offset: 92"});
+  EXPECT_EQ(assembly.find(".name: spk"), std::string::npos);
+  EXPECT_EQ(assembly.find(".name: wholeTiles"), std::string::npos);
   EXPECT_EQ(assembly.find("hidden_"), std::string::npos);
 }
 
@@ -1446,8 +1454,8 @@ TEST(SplitKReduce, DeclaresTheKernargLayout) {
 }
 
 // The kernargs are explicit, so every code object version emits the same
-// kernel symbol and the same 112-byte segment; only the directives and the
-// metadata version differ.
+// kernel symbol and the same segment (96 bytes, 104 with split-K); only the
+// directives and the metadata version differ.
 TEST(SkinnyGEMM, KernargsAreTheSameAtEveryCodeObjectVersion) {
   struct VersionCase {
     CodeObjectVersion version;
@@ -1464,7 +1472,7 @@ TEST(SkinnyGEMM, KernargsAreTheSameAtEveryCodeObjectVersion) {
   };
   SkinnyGEMMConfig grid3d = config(1, 1, 16, 2, 1);
   for (const SkinnyGEMMConfig &gemm :
-       {grid3d, persistentConfig(config(1, 1, 16, 1, 1))}) {
+       {grid3d, persistentConfig(config(1, 1, 16, 1, 1)), splitK(grid3d)}) {
     for (const VersionCase &versionCase : cases) {
       KernelAbi abi;
       abi.codeObjectVersion = versionCase.version;
@@ -1473,7 +1481,7 @@ TEST(SkinnyGEMM, KernargsAreTheSameAtEveryCodeObjectVersion) {
                    versionCase.directive + "\nassembly:\n" + assembly);
       EXPECT_NE(assembly.find(".name: " + skinnyGEMMKernelName(gemm)),
                 std::string::npos);
-      EXPECT_NE(assembly.find(".kernarg_segment_size: 112"), std::string::npos);
+      EXPECT_NE(assembly.find(kernargSegment(gemm)), std::string::npos);
       EXPECT_NE(assembly.find(versionCase.directive), std::string::npos);
       EXPECT_NE(assembly.find(versionCase.metadataVersion), std::string::npos);
       EXPECT_NE(assembly.find(".name: numWorkGroupsX"), std::string::npos);
@@ -1951,7 +1959,7 @@ TEST(SkinnyGEMMMfma, KeepsTheAbi) {
     SCOPED_TRACE(skinnyGEMMKernelName(gemm));
     EXPECT_NE(text.find(".name: " + skinnyGEMMKernelName(gemm)),
               std::string::npos);
-    EXPECT_NE(text.find(".kernarg_segment_size: 112"), std::string::npos);
+    EXPECT_NE(text.find(kernargSegment(gemm)), std::string::npos);
     EXPECT_NE(text.find(".name: numWorkGroupsX"), std::string::npos);
     EXPECT_EQ(text.find("hidden_"), std::string::npos);
     std::string preloaded =
@@ -2046,7 +2054,7 @@ static int32_t kernargLoads(const std::string &text, int32_t offset) {
 
 // The 3-D launch is flat: its kernel decodes the tile and the split from the
 // workgroup id x, so it enables no other id and never reads numWorkGroupsX
-// (96), which the persistent kernel reads once.
+// (92), which the persistent kernel reads once.
 TEST(SkinnyGEMM, Grid3dUsesOnlyWorkgroupIdX) {
   std::vector<SkinnyGEMMConfig> grid3d;
   for (bool useBeta : {false, true}) {
@@ -2071,9 +2079,9 @@ TEST(SkinnyGEMM, Grid3dUsesOnlyWorkgroupIdX) {
               std::string::npos);
     EXPECT_EQ(text.find("workgroup_id_y"), std::string::npos);
     EXPECT_EQ(text.find("workgroup_id_z"), std::string::npos);
-    EXPECT_EQ(kernargLoads(text, 96), 0);
+    EXPECT_EQ(kernargLoads(text, 92), 0);
   }
-  EXPECT_EQ(kernargLoads(emitted(persistentConfig(config(1, 1, 16, 1, 1))), 96),
+  EXPECT_EQ(kernargLoads(emitted(persistentConfig(config(1, 1, 16, 1, 1))), 92),
             1);
 }
 
@@ -2094,23 +2102,22 @@ static std::vector<SkinnyGEMMConfig> everyPath() {
   return result;
 }
 
-// ws (40) and spk (80) are in the ABI of every variant, but only the split-K
-// one reads them, and only it stores the workspace or decodes a split.
-TEST(SkinnyGEMM, WithoutSplitKTheKernelReadsNeitherSpkNorWs) {
+// Only the split-K variant declares spk (80); ws (40) is in the ABI of every
+// variant, but only the split-K one reads it, stores the workspace or decodes a
+// split.
+TEST(SkinnyGEMM, WithoutSplitKTheKernelHasNoSpkAndReadsNoWs) {
   for (const SkinnyGEMMConfig &gemm : everyPath()) {
     SCOPED_TRACE(skinnyGEMMKernelName(gemm));
     std::string text = emitted(gemm);
-    EXPECT_EQ(kernargLoads(text, 80), 0);
     EXPECT_EQ(kernargLoads(text, 40), 0);
     EXPECT_EQ(text.find("label_workspace"), std::string::npos);
     EXPECT_EQ(text.find("label_stored"), std::string::npos);
     EXPECT_EQ(text.find("flat_split_done"), std::string::npos);
     // The f32 stores of the workspace are dwordx4 runs here.
     EXPECT_EQ(text.find("buffer_store_dwordx4"), std::string::npos);
-    // The ABI is unchanged.
     EXPECT_NE(text.find(".name: ws"), std::string::npos);
-    EXPECT_NE(text.find(".name: spk"), std::string::npos);
-    EXPECT_NE(text.find(".kernarg_segment_size: 112"), std::string::npos);
+    EXPECT_EQ(text.find(".name: spk"), std::string::npos);
+    EXPECT_NE(text.find(kernargSegment(gemm)), std::string::npos);
   }
 }
 
@@ -2121,6 +2128,8 @@ TEST(SkinnyGEMM, WithSplitKTheKernelReadsSpkAndWs) {
     std::string text = emitted(gemm);
     EXPECT_EQ(kernargLoads(text, 80), 1);
     EXPECT_EQ(kernargLoads(text, 40), 1);
+    EXPECT_NE(text.find(".name: spk"), std::string::npos);
+    EXPECT_NE(text.find(kernargSegment(gemm)), std::string::npos);
     EXPECT_NE(text.find("label_workspace"), std::string::npos);
     EXPECT_NE(text.find("buffer_store_dword"), std::string::npos);
   }
@@ -2129,7 +2138,8 @@ TEST(SkinnyGEMM, WithSplitKTheKernelReadsSpkAndWs) {
             std::string::npos);
 }
 
-// Preloading the arguments must also work when spk and ws are not loaded.
+// Preloading the arguments must also work when ws is not loaded and spk is
+// absent.
 TEST(SkinnyGEMM, WithoutSplitKTheKernelPreloadsAndAssembles) {
   Target target = Target::get("gfx950");
   for (const SkinnyGEMMConfig &gemm : everyPath()) {
@@ -2465,10 +2475,9 @@ TEST(SkinnyGEMMLds, PartialTailSlotCountsForTheLdsBudget) {
 
 // The remainder narrowing of the MFMA 3-D kernel.
 
-// The kernel reads wholeTiles (100) and pieces (104) only in the MFMA 3-D
-// launch with a power of two tn; the other kernels declare them and ignore
-// them.
-TEST(SkinnyGEMMRemainder, OnlyThePowerOfTwoMfma3dKernelReadsTheArguments) {
+// Only the MFMA 3-D launch with a power of two tn declares wholeTiles (96) and
+// pieces (100) and reads them; the other kernels have neither.
+TEST(SkinnyGEMMRemainder, OnlyThePowerOfTwoMfma3dKernelDeclaresTheArguments) {
   std::vector<SkinnyGEMMConfig> readers, others;
   for (int32_t tn : {1, 2, 4}) {
     readers.push_back(ldsConfig(16, tn, 2, 2, true, true));
@@ -2483,15 +2492,72 @@ TEST(SkinnyGEMMRemainder, OnlyThePowerOfTwoMfma3dKernelReadsTheArguments) {
   for (const SkinnyGEMMConfig &gemm : readers) {
     SCOPED_TRACE(skinnyGEMMKernelName(gemm));
     std::string text = emitted(gemm);
+    EXPECT_NE(text.find(".name: wholeTiles"), std::string::npos);
+    EXPECT_NE(text.find(".name: pieces"), std::string::npos);
+    EXPECT_EQ(kernargLoads(text, 96), 1);
     EXPECT_EQ(kernargLoads(text, 100), 1);
-    EXPECT_EQ(kernargLoads(text, 104), 1);
   }
   for (const SkinnyGEMMConfig &gemm : others) {
     SCOPED_TRACE(skinnyGEMMKernelName(gemm));
     std::string text = emitted(gemm);
-    EXPECT_EQ(kernargLoads(text, 100), 0);
-    EXPECT_EQ(kernargLoads(text, 104), 0);
+    EXPECT_EQ(text.find(".name: wholeTiles"), std::string::npos);
+    EXPECT_EQ(text.find(".name: pieces"), std::string::npos);
   }
+}
+
+// The names and offsets of the kernargs from k on, in order.
+using ArgLayout = std::vector<std::pair<std::string, int32_t>>;
+
+static void expectArgsFromK(const SkinnyGEMMConfig &gemm,
+                            const ArgLayout &layout) {
+  std::string text = emitted(gemm);
+  SCOPED_TRACE(skinnyGEMMKernelName(gemm));
+  std::vector<std::string> expected;
+  for (const auto &[name, offset] : layout) {
+    expected.push_back(".name: " + name);
+    expected.push_back(".offset: " + std::to_string(offset));
+  }
+  expectLinesInOrder(text, std::vector<std::string_view>(expected.begin(),
+                                                         expected.end()));
+  EXPECT_NE(text.find(kernargSegment(gemm)), std::string::npos);
+  EXPECT_EQ(text.find(".name: spk") != std::string::npos, gemm.useSplitK);
+  EXPECT_EQ(text.find(".name: wholeTiles") != std::string::npos,
+            declaresRemainderArgs(gemm));
+}
+
+// The four variants of the kernarg layout: with and without spk, with and
+// without the remainder narrowing arguments.
+TEST(SkinnyGEMM, KernargLayoutOfTheFourVariants) {
+  SkinnyGEMMConfig valu = config(1, 1, 16, 1, 1);
+  SkinnyGEMMConfig remainder = ldsConfig(16, 1, 2, 2);
+  ASSERT_FALSE(declaresRemainderArgs(valu));
+  ASSERT_TRUE(declaresRemainderArgs(remainder));
+  expectArgsFromK(valu, {{"k", 76},
+                         {"ldC", 80},
+                         {"alpha", 84},
+                         {"beta", 88},
+                         {"numWorkGroupsX", 92}});
+  expectArgsFromK(splitK(valu), {{"k", 76},
+                                 {"spk", 80},
+                                 {"ldC", 84},
+                                 {"alpha", 88},
+                                 {"beta", 92},
+                                 {"numWorkGroupsX", 96}});
+  expectArgsFromK(remainder, {{"k", 76},
+                              {"ldC", 80},
+                              {"alpha", 84},
+                              {"beta", 88},
+                              {"numWorkGroupsX", 92},
+                              {"wholeTiles", 96},
+                              {"pieces", 100}});
+  expectArgsFromK(splitK(remainder), {{"k", 76},
+                                      {"spk", 80},
+                                      {"ldC", 84},
+                                      {"alpha", 88},
+                                      {"beta", 92},
+                                      {"numWorkGroupsX", 96},
+                                      {"wholeTiles", 100},
+                                      {"pieces", 104}});
 }
 
 // log2(2 * tn) + 1 copies of the K loop for the staged MFMA 3-D kernel with a

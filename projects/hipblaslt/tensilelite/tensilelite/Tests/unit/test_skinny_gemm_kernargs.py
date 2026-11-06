@@ -8,12 +8,15 @@ import types
 import pytest
 
 
-def test_skinny_gemm_logic_args_use_spk_semantic():
+def test_skinny_gemm_args_have_no_spk():
     from tensilelite.KernelGenerators.SkinnyGEMM import args
 
     semantics = [entry["semantic"] for entry in args()]
     assert semantics.count("SizeSum") == 1
-    assert "Spk" in semantics
+    assert "Spk" not in semantics
+    # The generated kernels are VALU, which have no remainder narrowing arguments either.
+    assert semantics[-1] == "NumWorkGroupsX"
+    assert "ConstantZero" not in [e["semantic"] for e in args() if e["type"] == "int32"]
 
 
 ARG_SIZES = {"address": 8, "uint64": 8, "int32": 4, "float32": 4}
@@ -37,11 +40,10 @@ def test_skinny_gemm_args_kernarg_offsets():
         offsets.append(offset)
         offset += ARG_SIZES[entry["type"]]
     semantics = [entry["semantic"] for entry in args()]
-    assert offsets[semantics.index("NumWorkGroupsX")] == 96
-    assert offsets[-2:] == [100, 104]
-    assert semantics[-2:] == ["ConstantZero", "ConstantZero"]
-    assert offset == 108
-    assert (offset + 7) // 8 * 8 == 112
+    assert offsets[semantics.index("NumWorkGroupsX")] == 92
+    assert semantics[-1] == "NumWorkGroupsX"
+    assert offset == 96
+    assert (offset + 7) // 8 * 8 == 96
 
 
 @pytest.mark.parametrize(

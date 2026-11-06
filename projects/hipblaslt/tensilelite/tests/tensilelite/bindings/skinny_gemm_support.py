@@ -727,6 +727,11 @@ class Problem:
         return self.tilesX * ceilDiv(self.skinny, self.bm)
 
     @property
+    def has_remainder_args(self) -> bool:
+        """Whether the kernel declares wholeTiles and pieces (SkinnyDims::remainder)."""
+        return self.mfma and self.grid3d and isPowerOfTwo(self.tn)
+
+    @property
     def plan(self) -> RemainderPlan:
         return remainderPlan(self.tiles, self.cus, self.pieces)
 
@@ -1360,9 +1365,9 @@ def makeProblem(
     allows it for the final spk, lanes_k, bm and tn and k % spk == 0, while an
     explicit up_scales = 1 works for any spk and k. Without an explicit spk the
     kernel is the one without split-K, which covers the whole K (spk is then k
-    rounded up to whole iterations, and the kernel ignores it); any explicit spk
-    selects the split-K variant, even when it gives a single split. The MFMA
-    kernel is explicit only (mfma=True); the unspecified knobs then take the
+    rounded up to whole iterations, and the kernel has no spk argument); any
+    explicit spk selects the split-K variant, even when it gives a single
+    split. The MFMA kernel is explicit only (mfma=True); the unspecified knobs then take the
     pickMfmaConfig defaults (with lds only if lds is true) and an invalid
     explicit knob is rejected. mfma=False selects the VALU defaults. Without mfma
     the defaults are those of pickConfig, which may pick the MFMA kernel, unless
@@ -1606,16 +1611,20 @@ def reduceKernel(
 def gemmArgs(p: Problem, dBuf, aBuf, bBuf, sclABuf, sclBBuf, wsBuf, cBuf) -> tuple:
     """The kernargs of the GEMM kernel, which has no hidden arguments: the
     pointers D, A, B, scalesA, scalesB, ws and C, then ldD, ldA, ldB, m, n, k,
-    spk and ldC (i32; ldD, ldA, ldB and ldC are byte strides), then alpha and
-    beta (f32), then numWorkGroupsX (i32), the launched workgroup count x,
-    which only the persistent kernel reads, then the remainder narrowing
-    wholeTiles and pieces (i32), which are zero unless the problem has a
-    remainder plan."""
+    spk (only for the split-K kernel, whose name ends in _USE_SPLIT_K1) and ldC
+    (i32; ldD, ldA, ldB and ldC are byte strides), then alpha and beta (f32),
+    then numWorkGroupsX (i32), the launched workgroup count x, which only the
+    persistent kernel reads, then, only for the kernel with remainder narrowing
+    (has_remainder_args), wholeTiles and pieces (i32), which are zero unless the
+    problem has a remainder plan."""
     # D and C are bf16 (2 bytes); A and B are fp8, so their element and byte
     # strides coincide. The byte strides of D and C are even by construction.
     strides = (2 * p.ldD, p.ldA, p.ldB)
     plan = p.plan
     remainder = (plan.whole_tiles, plan.pieces) if plan.pieces > 1 else (0, 0)
+    if not p.has_remainder_args:
+        remainder = ()
+    scalars = (*strides, p.m, p.n, p.k, *((p.spk,) if p.use_split_k else ()), 2 * p.ldC)
     return (
         dBuf.pointer,
         aBuf.pointer,
@@ -1624,10 +1633,7 @@ def gemmArgs(p: Problem, dBuf, aBuf, bBuf, sclABuf, sclBBuf, wsBuf, cBuf) -> tup
         sclBBuf.pointer,
         wsBuf.pointer,
         cBuf.pointer,
-        *(
-            ctypes.c_int32(value)
-            for value in (*strides, p.m, p.n, p.k, p.spk, 2 * p.ldC)
-        ),
+        *(ctypes.c_int32(value) for value in scalars),
         ctypes.c_float(p.alpha),
         ctypes.c_float(p.beta),
         ctypes.c_int32(p.grid[0]),

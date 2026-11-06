@@ -59,7 +59,8 @@ NB_MODULE(tensilelite_codegen, m) {
       "lds (true stages the operands of the MFMA path through LDS) and "
       "useSplitK (USE_SPLIT_K, true reads spk and splits K at run time, "
       "storing the slices of several splits into the workspace for "
-      "splitk_reduce; false covers the whole K and ignores spk and ws).")
+      "splitk_reduce; false covers the whole K, has no spk argument and "
+      "ignores ws).")
       .def(
           "__init__",
           [](SkinnyGEMMConfig *self, int32_t bm, int32_t tn, int32_t lanesK,

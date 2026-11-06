@@ -2,12 +2,15 @@
 # SPDX-License-Identifier: MIT
 """Tests for the skinny MXFP8 GEMM kernels of the tensilelite_codegen bindings."""
 
+import ctypes
 import dataclasses
+import re
 from contextlib import ExitStack
 
 import numpy as np
 import pytest
 import skinny_gemm_support as support
+import yaml
 import tensilelite_codegen as codegen
 import tensilelite_jit as jit
 
@@ -120,7 +123,7 @@ def test_emit_skinny_gemm_assembles():
     config = codegen.SkinnyGEMMConfig(lanesK=16, waves=1, prefetch=1)
     asm = codegen.emitSkinnyGEMM(config)
     assert f".globl {codegen.skinnyGEMMKernelName(config)}" in asm
-    assert ".kernarg_segment_size: 112" in asm
+    assert ".kernarg_segment_size: 96" in asm
     assert ".group_segment_fixed_size: 0" in asm
     assert jit.assembleToHSACO(asm, support.TARGET)[:4] == ELF_MAGIC
 
@@ -2804,6 +2807,104 @@ def test_max_preload_dwords_must_not_be_negative():
         codegen.emitSplitKReduce("gfx950", 6, -1)
 
 
+def emittedKernargs(asm):
+    """The explicit kernargs and the kernarg segment size of the emitted kernel."""
+    match = re.search(r"\.amdgpu_metadata\n(.*?)\n\.end_amdgpu_metadata", asm, re.S)
+    assert match, "no metadata in the emitted assembly"
+    kernel = yaml.safe_load(match.group(1).split("\n...")[0])["amdhsa.kernels"][0]
+    return kernel[".args"], kernel[".kernarg_segment_size"]
+
+
+def hostKernargLayout(args):
+    """The (offset, size) of every host argument, packed with natural alignment."""
+    layout = []
+    offset = 0
+    for value in args:
+        size = ctypes.sizeof(value) if isinstance(value, ctypes._SimpleCData) else 8
+        offset = (offset + size - 1) // size * size
+        layout.append((offset, size))
+        offset += size
+    return layout, offset
+
+
+# Only an explicit spk selects the split-K kernel, so the code object version
+# cases with a spk are split-K even with a single split.
+MFMA_KNOBS = dict(mfma=True, lds=True, bm=16, tn=1, waves=4, pf=2)
+KERNARG_LAYOUT_CASES = {
+    "valu_grid3d": lambda: resolve(2, 300, 2048, up_scales=0),
+    "valu_grid3d_split_k": lambda: codeObjectVersionProblem("grid3d"),
+    "valu_grid3d_multi_split_k": lambda: codeObjectVersionProblem("grid3d_split_k"),
+    "valu_persistent": lambda: resolve(
+        7, 150, 1024, bm=3, tn=2, lanes_k=16, waves=2, pf=1, blocks=5, up_scales=0
+    ),
+    "valu_persistent_split_k": lambda: codeObjectVersionProblem("persistent_split_k"),
+    "mfma_persistent": lambda: resolve(2000, 1, 4096, blocks=5, **MFMA_KNOBS),
+    "mfma_grid3d": lambda: resolve(2000, 1, 4096, **MFMA_KNOBS),
+    "mfma_grid3d_split_k": lambda: resolve(2000, 1, 4096, spk=1024, **MFMA_KNOBS),
+    "mfma_grid3d_remainder": lambda: dataclasses.replace(
+        resolve(2000, 1, 4096, **MFMA_KNOBS), pieces=4, cus=6
+    ),
+    "mfma_grid3d_odd_tn": lambda: resolve(
+        2000, 1, 4096, **{**MFMA_KNOBS, "tn": 3, "waves": 2}
+    ),
+}
+
+
+def checkGemmArgsMatchKernargs(p, codeObjectVersion, maxPreloadDwords):
+    emitted, segmentSize = emittedKernargs(
+        support.gemmAsm(p, codeObjectVersion, maxPreloadDwords)
+    )
+    args = support.gemmArgs(p, *zeroBuffers())
+    layout, total = hostKernargLayout(args)
+    assert layout == [(arg[".offset"], arg[".size"]) for arg in emitted]
+    assert not any(arg[".value_kind"].startswith("hidden_") for arg in emitted)
+    assert segmentSize == (total + 7) // 8 * 8
+    names = [arg[".name"] for arg in emitted]
+    assert ("spk" in names) == p.use_split_k
+    assert ("wholeTiles" in names) == ("pieces" in names) == p.has_remainder_args
+    # The 17 arguments of the kernel without spk and remainder arguments, and the
+    # segment sizes of its four variants.
+    assert len(emitted) == 17 + p.use_split_k + 2 * p.has_remainder_args
+    assert segmentSize == {(False, False): 96, (True, False): 104,
+                           (False, True): 104, (True, True): 112}[
+        (p.use_split_k, p.has_remainder_args)
+    ]
+    if p.use_split_k:
+        index = names.index("spk")
+        assert emitted[index][".offset"] == 80
+        assert args[index].value == p.spk
+    if not p.has_remainder_args:
+        assert names[-1] == "numWorkGroupsX"
+        return
+    index = names.index("numWorkGroupsX")
+    assert names[index + 1:] == ["wholeTiles", "pieces"]
+    assert [emitted[index + i][".offset"] for i in (1, 2)] == [
+        emitted[index][".offset"] + 4,
+        emitted[index][".offset"] + 8,
+    ]
+    plan = p.plan
+    expected = [plan.whole_tiles, plan.pieces] if plan.pieces > 1 else [0, 0]
+    assert [args[index + i].value for i in (1, 2)] == expected
+
+
+@pytest.mark.parametrize("name", KERNARG_LAYOUT_CASES)
+def test_gemm_args_match_the_emitted_kernargs(name):
+    checkGemmArgsMatchKernargs(KERNARG_LAYOUT_CASES[name](), 6, 0)
+
+
+# The preload window is before spk, so neither the preload nor the code object
+# version moves the layout.
+@pytest.mark.parametrize("maxPreloadDwords", PRELOAD_DWORDS)
+@pytest.mark.parametrize("codeObjectVersion", support.CODE_OBJECT_VERSIONS)
+@pytest.mark.parametrize("name", ["valu_grid3d", "valu_grid3d_split_k"])
+def test_gemm_args_match_the_kernargs_at_every_code_object_version(
+    name, codeObjectVersion, maxPreloadDwords
+):
+    checkGemmArgsMatchKernargs(
+        KERNARG_LAYOUT_CASES[name](), codeObjectVersion, maxPreloadDwords
+    )
+
+
 def test_strip_preload_directives_removes_only_the_two_directives():
     asm = "a\n  .amdhsa_user_sgpr_kernarg_preload_length 14\nb\n"
     asm += ".amdhsa_user_sgpr_kernarg_preload_offset 0\nc\n"
@@ -4205,9 +4306,9 @@ def test_grid3d_is_flat_and_only_the_persistent_kernel_reads_its_count():
     assert support.ceilDiv(p.skinny, p.bm) >= 2
     assert p.grid == (p.tilesX * support.ceilDiv(p.skinny, p.bm) * p.splits, 1, 1)
     args = support.gemmArgs(p, *zeroBuffers())
-    assert len(args) == 20
-    assert args[17].value == p.grid[0]
-    assert [a.value for a in args[-2:]] == [0, 0]
+    # A VALU split-K kernel has no remainder narrowing arguments.
+    assert len(args) == 18
+    assert args[-1].value == p.grid[0]
 
 
 # The flat decode of the 3-D launch: the tile (tx, ty) and the split kz come from

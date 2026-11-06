@@ -67,13 +67,10 @@ EXPECTED_ARGS = [
     {"type": "int32", "semantic": "SizeFree0"},
     {"type": "int32", "semantic": "SizeFree1"},
     {"type": "int32", "semantic": "SizeSum"},
-    {"type": "int32", "semantic": "Spk"},
     {"type": "int32", "semantic": "StrideC0Bytes"},
     {"type": "float32", "semantic": "Alpha"},
     {"type": "float32", "semantic": "Beta"},
     {"type": "int32", "semantic": "NumWorkGroupsX"},
-    {"type": "int32", "semantic": "ConstantZero"},
-    {"type": "int32", "semantic": "ConstantZero"},
 ]
 
 COMMON_ASSERTS = {
@@ -724,8 +721,8 @@ def test_real_source_is_code_object_v6():
 
 
 ARG_NAMES = [
-    "D", "A", "B", "scalesA", "scalesB", "ws", "C", "ldD", "ldA", "ldB", "m", "n", "k", "spk",
-    "ldC", "alpha", "beta", "numWorkGroupsX", "wholeTiles", "pieces",
+    "D", "A", "B", "scalesA", "scalesB", "ws", "C", "ldD", "ldA", "ldB", "m", "n", "k",
+    "ldC", "alpha", "beta", "numWorkGroupsX",
 ]
 ARG_SIZES = {"address": 8, "uint64": 8, "int32": 4, "float32": 4}
 
@@ -734,7 +731,7 @@ def checkEmittedArguments(source):
     """The explicit kernargs are the declared ones, packed in order, and they are the whole segment."""
     explicit = emittedExplicitArgs(source)
     declared = SkinnyGEMM.args()
-    assert len(explicit) == len(declared) == len(ARG_NAMES) == 20
+    assert len(explicit) == len(declared) == len(ARG_NAMES) == 17
     assert [arg[".name"] for arg in explicit] == ARG_NAMES
     offset = 0
     for emitted, arg in zip(explicit, declared):
@@ -744,8 +741,8 @@ def checkEmittedArguments(source):
         offset += emitted[".size"]
     assert "hidden_" not in source
     # The segment is the arguments rounded up to 8 bytes.
-    assert offset == 108
-    assert emittedKernelMetadata(source)[".kernarg_segment_size"] == 112
+    assert offset == 96
+    assert emittedKernelMetadata(source)[".kernarg_segment_size"] == 96
 
 
 @needsCodegen

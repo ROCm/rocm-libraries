@@ -45,18 +45,11 @@ _ARGS = (
     {"type": "int32", "semantic": "SizeFree0"},
     {"type": "int32", "semantic": "SizeFree1"},
     {"type": "int32", "semantic": "SizeSum"},
-    # Split-K chunk: ignored by the generated kernels, which have no useSplitK;
-    # kept in the shared ABI.
-    {"type": "int32", "semantic": "Spk"},
     {"type": "int32", "semantic": "StrideC0Bytes"},
     {"type": "float32", "semantic": "Alpha"},
     {"type": "float32", "semantic": "Beta"},
     # The launched workgroup count x, filled by the host; only the persistent kernel reads it.
     {"type": "int32", "semantic": "NumWorkGroupsX"},
-    # The remainder narrowing of the MFMA 3-D kernel (whole tiles, pieces per remainder tile); zero
-    # means off, which is what the custom-kernel path passes.
-    {"type": "int32", "semantic": "ConstantZero"},
-    {"type": "int32", "semantic": "ConstantZero"},
 )
 
 

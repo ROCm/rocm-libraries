@@ -28,11 +28,14 @@ using codegen::RegisterRef;
 /// Kernarg offsets of the GEMM kernel's arguments.
 struct SkinnyArguments {
   int32_t d, a, b, scalesA, scalesB, ws, c;
-  int32_t ldD, ldA, ldB, m, n, k, spk, ldC, alpha, beta;
+  int32_t ldD, ldA, ldB, m, n, k, ldC, alpha, beta;
+  /// Only the split-K kernel declares the split size.
+  std::optional<int32_t> spk;
   /// Only the persistent launch reads the block count.
   int32_t blocksX;
-  /// The remainder narrowing of the MFMA 3-D launch, see emitSkinnyGEMM.
-  int32_t wholeTiles, pieces;
+  /// The remainder narrowing of the MFMA 3-D launch, see emitSkinnyGEMM; only
+  /// that kernel declares them.
+  std::optional<int32_t> wholeTiles, pieces;
 };
 
 /// Constants derived from the knobs, named after the quantities they stand for.

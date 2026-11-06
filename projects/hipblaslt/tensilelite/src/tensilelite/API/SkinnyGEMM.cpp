@@ -456,11 +456,11 @@ void SkinnyGEMMEmitter::emitArguments(
   if (scalars.blocksX)
     kernel.loadArgument(scalars.blocksX->ref(), arguments.blocksX);
   if (scalars.pieces) {
-    kernel.loadArgument(scalars.wholeTiles->ref(), arguments.wholeTiles);
-    kernel.loadArgument(scalars.pieces->ref(), arguments.pieces);
+    kernel.loadArgument(scalars.wholeTiles->ref(), *arguments.wholeTiles);
+    kernel.loadArgument(scalars.pieces->ref(), *arguments.pieces);
   }
   if (spk)
-    kernel.loadArgument(spk->ref(), arguments.spk);
+    kernel.loadArgument(spk->ref(), *arguments.spk);
   kernel.loadArgument(alpha.ref(0, 1), arguments.alpha);
   kernel.loadArgument(k.ref(), arguments.k);
   kernel.loadArgument(n.ref(), arguments.n);
@@ -838,11 +838,12 @@ static void validate(const SkinnyGEMMConfig &config) {
           "at least 1");
 }
 
-// The kernarg layout: the pointers, the i32 and f32 scalars,
-// then the host-filled workgroup count and the remainder narrowing arguments;
-// no hidden arguments, so it works at
-// every code object version.
-static SkinnyArguments declareArguments(KernelSignature &signature) {
+// The kernarg layout: the pointers, the i32 and f32 scalars (spk only with
+// useSplitK), then the host-filled workgroup count and, only for the kernel
+// that reads them, the remainder narrowing arguments; no hidden arguments, so
+// it works at every code object version.
+static SkinnyArguments declareArguments(KernelSignature &signature,
+                                        const SkinnyDims &dims) {
   SkinnyArguments arguments;
   arguments.d = signature.addPointer("D");
   arguments.a = signature.addPointer("A");
@@ -857,7 +858,9 @@ static SkinnyArguments declareArguments(KernelSignature &signature) {
   arguments.m = signature.addScalar("m", 4);
   arguments.n = signature.addScalar("n", 4);
   arguments.k = signature.addScalar("k", 4);
-  arguments.spk = signature.addScalar("spk", 4);
+  // Only the split-K kernel reads spk, so the others do not declare it.
+  if (dims.useSplitK)
+    arguments.spk = signature.addScalar("spk", 4);
   arguments.ldC = signature.addScalar("ldC", 4);
   // The f32 scalars only need their size: the metadata has no value type.
   arguments.alpha = signature.addScalar("alpha", 4);
@@ -865,10 +868,12 @@ static SkinnyArguments declareArguments(KernelSignature &signature) {
   // The host fills numWorkGroupsX with the launched workgroup count; only the
   // persistent launch reads it.
   arguments.blocksX = signature.addScalar("numWorkGroupsX", 4);
-  // Zero disables the remainder narrowing; only the MFMA 3-D kernel reads
-  // these.
-  arguments.wholeTiles = signature.addScalar("wholeTiles", 4);
-  arguments.pieces = signature.addScalar("pieces", 4);
+  // Only the remainder kernel reads these, so the others do not declare them;
+  // zero disables the narrowing.
+  if (dims.remainder) {
+    arguments.wholeTiles = signature.addScalar("wholeTiles", 4);
+    arguments.pieces = signature.addScalar("pieces", 4);
+  }
   return arguments;
 }
 
@@ -904,7 +909,7 @@ std::string rocm::tensilelite::emitSkinnyGEMM(const Target &target,
         "config exceeds the LDS budget: " + std::to_string(dims.reduceBytes) +
         " bytes of " + std::to_string(maxDsOffset + 1) + " addressable");
   KernelSignature signature;
-  SkinnyArguments arguments = declareArguments(signature);
+  SkinnyArguments arguments = declareArguments(signature, dims);
   // Both launches only use the workgroup id x; the 3-D launch decodes its tile
   // and split from it.
   KernelOptions options;

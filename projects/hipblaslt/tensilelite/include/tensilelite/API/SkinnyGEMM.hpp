@@ -53,7 +53,8 @@ struct SkinnyGEMMConfig {
   bool lds = false;
   /// USE_SPLIT_K: whether the kernel splits K at run time by spk and stores the
   /// raw slices of several splits into the workspace (see emitSkinnyGEMM);
-  /// without it the kernel covers the whole K and never reads spk or ws.
+  /// without it the kernel covers the whole K, has no spk argument and never
+  /// reads ws.
   bool useSplitK = false;
 };
 
@@ -75,22 +76,26 @@ std::string skinnyGEMMKernelName(const SkinnyGEMMConfig &config);
 /// buffer access, which ROCm enables on gfx9+. The kernargs, with their byte
 /// offsets, are the pointers D (0), A (8), B (16), scalesA (24), scalesB (32),
 /// ws (40) and C (48), then the i32 ldD (56), ldA (60), ldB (64), m (68), n
-/// (72), k (76), spk (80) and ldC (84), then the f32 alpha (88) and beta (92),
-/// then the i32 numWorkGroupsX (96), the launched workgroup count that the host
-/// (or the launcher) fills and only the persistent launch reads, then the i32
-/// wholeTiles (100) and pieces (104) of the remainder narrowing (below), zero
-/// to disable it, for a segment size of 112 (the 108 bytes of arguments rounded
-/// up to 8). The ABI is unchanged and shared by every variant: spk and ws stay
-/// in it, and without useSplitK the kernel ignores them (ws may be null and spk
-/// any value), like C, ldC and beta without useBeta. There are no hidden
-/// arguments at any code object version. abi selects the code object version
-/// (v4, v5 or v6) of the directives and the metadata, and maxPreloadDwords,
-/// which preloads the leading pointers into SGPRs (the first 14 dwords are D,
-/// A, B, scalesA, scalesB, ws and C): each is copied into its resource and its
-/// register released right after, so the registers are reusable, and with 0 the
-/// emitted kernel is unchanged. The block is (64 * waves, 1, 1). BN = waves *
-/// (64 / lanesK) * tn, or 16 * tn with mfma. Both values of useBeta share this
-/// ABI.
+/// (72) and k (76), then, with useSplitK only, the i32 spk (80). ldC, alpha,
+/// beta and numWorkGroupsX follow packed: the i32 ldC (84 with useSplitK, 80
+/// without), the f32 alpha (88/84) and beta (92/88), the i32 numWorkGroupsX
+/// (96/92), the launched workgroup count that the host (or the launcher) fills
+/// and only the persistent launch reads. Only the MFMA 3-D kernel with a power
+/// of two tn (the remainder narrowing kernel, below) declares the i32
+/// wholeTiles and pieces after them, zero to disable the narrowing: at 100 and
+/// 104 with useSplitK, at 96 and 100 without. The segment size (the arguments
+/// rounded up to 8 bytes) is 96 with neither spk nor the remainder arguments,
+/// 104 with only one of them (100 or 104 bytes of arguments) and 112 with both
+/// (108 bytes). ws stays in every variant and without useSplitK the kernel
+/// ignores it (it may be null), like C, ldC and beta without useBeta. There are
+/// no hidden arguments at any code object version. abi selects the code object
+/// version (v4, v5 or v6) of the directives and the metadata, and
+/// maxPreloadDwords, which preloads the leading pointers into SGPRs (the first
+/// 14 dwords are D, A, B, scalesA, scalesB, ws and C): each is copied into its
+/// resource and its register released right after, so the registers are
+/// reusable, and with 0 the emitted kernel is unchanged. The block is (64 *
+/// waves, 1, 1). BN = waves * (64 / lanesK) * tn, or 16 * tn with mfma. Both
+/// values of useBeta share this ABI.
 ///
 /// Without useSplitK the kernel covers the K range [0, k), in iterations of 64
 /// * lanesK (256 with mfma) followed by the partial tail step, always emitted
@@ -209,8 +214,8 @@ std::string skinnyGEMMKernelName(const SkinnyGEMMConfig &config);
 /// LDS of slot 0), as on the other path; it is then read from LDS and masked in
 /// registers exactly as there.
 ///
-/// Remainder narrowing (mfma with grid3d and a power of two tn only; the VALU
-/// and the persistent kernels ignore wholeTiles and pieces). When the tiles of
+/// Remainder narrowing (mfma with grid3d and a power of two tn only; the other
+/// kernels have no wholeTiles and pieces arguments). When the tiles of
 /// the problem do not fill the compute units evenly, the last tiles can run on
 /// idle ones: with T = tilesX * tilesY tiles, a tile being one workgroup tile
 /// (tx, ty) of the grid, and C compute units, the host launches the 1-D grid
@@ -228,12 +233,12 @@ std::string skinnyGEMMKernelName(const SkinnyGEMMConfig &config);
 /// (of the last tile, past the output) ends its workgroup right away. The
 /// contract is that pieces is a power of two in [2, 16 * tn] (pieces < 2
 /// disables the narrowing, and wholeTiles is then ignored), that tn is a power
-/// of two (else the kernel ignores pieces), and a single K split: no useSplitK,
-/// or spk >= k. With lds a piece of pw columns only loads the 8-column units of
-/// the wide operand that it owns, pw / 8 of them or one when pw < 8, through
-/// variants of the K loop selected at run time (log2(2 * tn) + 1 copies of it),
-/// as an issued load costs the same when it is dead; without lds the dead
-/// columns are only masked, so the narrowing gives no gain there.
+/// of two (else the kernel has no pieces argument), and a single K split: no
+/// useSplitK, or spk >= k. With lds a piece of pw columns only loads the
+/// 8-column units of the wide operand that it owns, pw / 8 of them or one when
+/// pw < 8, through variants of the K loop selected at run time (log2(2 * tn) +
+/// 1 copies of it), as an issued load costs the same when it is dead; without
+/// lds the dead columns are only masked, so the narrowing gives no gain there.
 ///
 /// With mfma every buffer must be smaller than 2 GiB (each operand, the scales,
 /// D and C, and with useSplitK the workspace of splits * m * n * 4 bytes), as
