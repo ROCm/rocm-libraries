@@ -37,6 +37,44 @@ if(BUILD_TESTING)
             "CTest is not registered")
   endif()
 
+  # The binding consumes Python-built IR; this binary exercises the independent
+  # C builder as well, including compiler-dependent argument evaluation order.
+  set_source_files_properties(instances/parity/optimization_barrier_emit.c
+                              PROPERTIES LANGUAGE CXX)
+  add_executable(rocke_optimization_barrier_emit
+                 instances/parity/optimization_barrier_emit.c)
+  target_link_libraries(rocke_optimization_barrier_emit PRIVATE rocke_core)
+  # The supported CMake minimum predates language flags for a .c file.
+  if(MSVC OR CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
+    target_compile_options(rocke_optimization_barrier_emit PRIVATE /TP)
+  else()
+    target_compile_options(rocke_optimization_barrier_emit PRIVATE -x c++)
+  endif()
+  rocke_cxx_test_installed_name(_rocke_installed_name
+                              rocke_optimization_barrier_emit)
+  set_target_properties(rocke_optimization_barrier_emit
+                        PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
+  install(TARGETS rocke_optimization_barrier_emit
+          RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
+  if(Python3_Interpreter_FOUND)
+    set(_rocke_core_tests "${CMAKE_CURRENT_SOURCE_DIR}/core")
+    set(_rocke_python_root "${CMAKE_CURRENT_SOURCE_DIR}/../python")
+    set(_rocke_parity_dir
+        "${CMAKE_CURRENT_SOURCE_DIR}/instances/parity")
+    add_test(
+      NAME rocke_optimization_barrier_hip_pair
+      COMMAND "${Python3_EXECUTABLE}"
+              "${_rocke_core_tests}/test_optimization_barrier_cli.py"
+              --native "$<TARGET_FILE:rocke_optimization_barrier_emit>"
+              --launcher
+              "${_rocke_python_root}/rocke/tests/subprocess_launcher.py"
+              --emitter
+              "${_rocke_parity_dir}/optimization_barrier_emit.py"
+              --count 17)
+    set_tests_properties(rocke_optimization_barrier_hip_pair
+                         PROPERTIES LABELS "ckc;python;host;quick" TIMEOUT 120)
+  endif()
+
   add_executable(rocke_optimization_barrier core/test_optimization_barrier.cpp)
   target_link_libraries(rocke_optimization_barrier PRIVATE rocke_core)
   add_test(NAME rocke_optimization_barrier COMMAND rocke_optimization_barrier)
@@ -279,6 +317,59 @@ if(BUILD_TESTING)
                  rocke_loop_carried_descriptor)
   endif()
 
+  # The C++ builder refuses an scf.for whose induction variable or carried value
+  # reuses a name that is taken.
+  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/core/test_scf_for_name_reuse.cpp")
+    add_executable(rocke_scf_for_name_reuse core/test_scf_for_name_reuse.cpp)
+    target_link_libraries(rocke_scf_for_name_reuse PRIVATE rocke_core)
+    add_test(NAME rocke_scf_for_name_reuse COMMAND rocke_scf_for_name_reuse)
+    set_tests_properties(rocke_scf_for_name_reuse PROPERTIES LABELS "ckc;unit;host")
+    rocke_cxx_test_installed_name(_rocke_installed_name rocke_scf_for_name_reuse)
+    set_target_properties(rocke_scf_for_name_reuse
+                          PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
+    install(TARGETS rocke_scf_for_name_reuse
+            RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
+    set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS
+                 rocke_scf_for_name_reuse)
+  endif()
+
+  # A failed LLVM lowering gives the values of an scf.for body their names back.
+  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/core/test_scf_for_lowering_restores_names.cpp")
+    add_executable(rocke_scf_for_lowering_restores_names
+                   core/test_scf_for_lowering_restores_names.cpp)
+    target_link_libraries(rocke_scf_for_lowering_restores_names PRIVATE rocke_core)
+    add_test(NAME rocke_scf_for_lowering_restores_names
+             COMMAND rocke_scf_for_lowering_restores_names)
+    set_tests_properties(rocke_scf_for_lowering_restores_names
+                         PROPERTIES LABELS "ckc;unit;host")
+    rocke_cxx_test_installed_name(_rocke_installed_name rocke_scf_for_lowering_restores_names)
+    set_target_properties(rocke_scf_for_lowering_restores_names
+                          PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
+    install(TARGETS rocke_scf_for_lowering_restores_names
+            RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
+    set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS
+                 rocke_scf_for_lowering_restores_names)
+  endif()
+
+  # The C++ engine lowers an unrolled scf.for whose body holds nested regions,
+  # each trip defining names of its own.
+  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/core/test_unrolled_for_nested_regions.cpp")
+    add_executable(rocke_unrolled_for_nested_regions
+                   core/test_unrolled_for_nested_regions.cpp)
+    target_link_libraries(rocke_unrolled_for_nested_regions PRIVATE rocke_core)
+    add_test(NAME rocke_unrolled_for_nested_regions
+             COMMAND rocke_unrolled_for_nested_regions)
+    set_tests_properties(rocke_unrolled_for_nested_regions
+                         PROPERTIES LABELS "ckc;unit;host")
+    rocke_cxx_test_installed_name(_rocke_installed_name rocke_unrolled_for_nested_regions)
+    set_target_properties(rocke_unrolled_for_nested_regions
+                          PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
+    install(TARGETS rocke_unrolled_for_nested_regions
+            RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
+    set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS
+                 rocke_unrolled_for_nested_regions)
+  endif()
+
   # Direct f32 tanh lowering and narrow-type rejection in the C++ engine.
   if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/core/test_tanh_lowering.cpp")
     add_executable(rocke_tanh_lowering core/test_tanh_lowering.cpp)
@@ -309,6 +400,22 @@ if(BUILD_TESTING)
             RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
     set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS
                  rocke_barrier_fence)
+  endif()
+
+  # MfmaAtom.lane_to_output: every lane and slot against atoms.py's layouts.
+  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/core/test_mfma_atom_lane_to_output.cpp")
+    add_executable(rocke_mfma_atom_lane_to_output core/test_mfma_atom_lane_to_output.cpp)
+    target_link_libraries(rocke_mfma_atom_lane_to_output PRIVATE rocke_core)
+    add_test(NAME rocke_mfma_atom_lane_to_output COMMAND rocke_mfma_atom_lane_to_output)
+    set_tests_properties(rocke_mfma_atom_lane_to_output
+                         PROPERTIES LABELS "ckc;unit;host")
+    rocke_cxx_test_installed_name(_rocke_installed_name rocke_mfma_atom_lane_to_output)
+    set_target_properties(rocke_mfma_atom_lane_to_output
+                          PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
+    install(TARGETS rocke_mfma_atom_lane_to_output
+            RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
+    set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS
+                 rocke_mfma_atom_lane_to_output)
   endif()
 
   # BF16x3 expansion of the emulated XF32 atoms, lowered from serialized IR.

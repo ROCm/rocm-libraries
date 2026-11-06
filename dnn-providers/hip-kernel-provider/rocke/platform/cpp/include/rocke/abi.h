@@ -92,8 +92,14 @@ extern "C" {
  *    emit_lse at their end, which changes their size.
  * 7: rocke_mma_op_t gained dst_dtype at its end (sizeof again), and the
  *    rocke_mma_catalog_enumerate / _has_shape / _select_largest_k /
- *    _op_for_shape signatures gained a trailing dst_dtype parameter. */
-#define ROCKE_ABI_VERSION 7
+ *    _op_for_shape signatures gained a trailing dst_dtype parameter.
+ * 8: rocke_direct_fwd_wmma_spec_t gained strided_view, fold_n and poly_view
+ *    at its end, which changes its size; rocke_direct_conv_problem_total_c /
+ *    _total_k return long long (they returned int), which changes their
+ *    signature.
+ * 9: rocke_block_scale_gemm_spec_t lost per_input_row at its end, which
+ *    changes its size. */
+#define ROCKE_ABI_VERSION 9
 
 /* Wire ABI: the CBOR recipe/bundle/guard vocabulary this engine understands.
  * 2: list-tagged ("l") kernel attrs such as cluster_dims; level-1 engines drop them.

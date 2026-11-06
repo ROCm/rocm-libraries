@@ -35,6 +35,7 @@ from __future__ import annotations
 import enum
 import os
 import warnings
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from typing import Dict, List, NamedTuple, Optional, Set, Tuple
 
@@ -581,11 +582,6 @@ _INTRINSIC_DECLS: Dict[str, str] = {
         "declare i32 @llvm.amdgcn.update.dpp.i32("
         "i32, i32, i32 immarg, i32 immarg, i32 immarg, i1 immarg)"
     ),
-    # Packed fp16 atomic add (gfx940+). Two fp16 lanes per atomic transaction.
-    "global.atomic.fadd.v2f16": (
-        "declare <2 x half> @llvm.amdgcn.global.atomic.fadd.v2f16.p1("
-        "ptr addrspace(1), <2 x half>)"
-    ),
     "mbcnt.lo": ("declare i32 @llvm.amdgcn.mbcnt.lo(i32, i32)"),
     "mbcnt.hi": ("declare i32 @llvm.amdgcn.mbcnt.hi(i32, i32)"),
     "ds.read.tr16.b64": (
@@ -964,6 +960,13 @@ _AV_B128_PTR_TYPES: Dict[int, str] = {
     0: "ptr",
     1: "ptr addrspace(1)",
 }
+# A ``memref.global_load*`` is a plain ``load``, which reads through a global
+# pointer or through a parameter declared ``addr_space="constant"``. It names
+# the pointer's own type, so no table entry needs a declare.
+_GLOBAL_LOAD_PTR_TYPES: dict[int, str] = {
+    1: "ptr addrspace(1)",
+    4: "ptr addrspace(4)",
+}
 
 
 # Declaration overrides, one table per declaration ABI generation
@@ -1237,6 +1240,39 @@ def _llvm_loop_carried_type(t: Type) -> str:
         raise NotImplementedError(
             f"scf.for loop-carried type {t.name!r} has no LLVM mapping"
         ) from exc
+
+
+def _ops_in_region(region: Region) -> Iterator[Op]:
+    """Yield every op of ``region`` in order, each followed by the ops of the
+    regions nested in it (an ``scf.if`` body, an if/else branch, an inner loop
+    body), to any depth."""
+    for op in region.ops:
+        yield op
+        for nested in op.regions:
+            yield from _ops_in_region(nested)
+
+
+def _loop_block_values(loop: Op) -> tuple[Value | None, list[Value]]:
+    """Return the induction variable and the carried values of the ``scf.for``
+    ``loop`` that its body reads, nested regions included.
+
+    The loop does not hold these values; they are found as operands of the
+    body's ops. A value the body never reads is not returned (the induction
+    variable is then ``None``).
+    """
+    iv_name = loop.attrs["iv"]
+    carried_names = {meta["name"] for meta in loop.attrs.get("iter_args", [])}
+    iv: Value | None = None
+    carried: list[Value] = []
+    for body_op in _ops_in_region(loop.regions[0]):
+        for operand in body_op.operands:
+            if operand.op is not loop:
+                continue
+            if operand.name == iv_name:
+                iv = operand
+            elif operand.name in carried_names and operand not in carried:
+                carried.append(operand)
+    return iv, carried
 
 
 def _scf_iter_llvm_types(op: Op, num_iter: int) -> List[str]:
@@ -1753,6 +1789,9 @@ class _Lowerer:
         # For scf.for nesting we record the body-region's recorded
         # yield-operand stack so the latch block can read it back.
         self._yield_stack: List[List[str]] = []
+        # The names the headers of the rolled scf.for loops lowered so far
+        # define (see _claim_loop_header_names).
+        self._loop_header_names: set[str] = set()
 
     # ----- helpers -----
 
@@ -1867,20 +1906,24 @@ class _Lowerer:
     def _anyptr_space(
         self, op: str, ptr: Value, allowed: Dict[int, str]
     ) -> Tuple[int, str]:
-        """Resolve an ``llvm_anyptr_ty`` operand to its (address space, type).
+        """Resolve a pointer operand that may be in any of the ``allowed``
+        address spaces to its (address space, type).
 
-        For these intrinsics the address space is part of the overload, so the
-        mangled name, the declare, and the call site all have to agree with the
-        pointer's real type. Naming a bare ``ptr`` for an ``addrspace(N)`` value
-        is not a lax spelling -- LLVM rejects the module outright with
-        "defined with type 'ptr addrspace(N)' but expected 'ptr'".
+        For an ``llvm_anyptr_ty`` intrinsic the address space is part of the
+        overload, and for a plain ``load`` it is part of the instruction, so
+        the call site has to name the pointer's real type. Naming a bare
+        ``ptr`` for an ``addrspace(N)`` value is not a lax spelling -- LLVM
+        rejects the module outright with "defined with type
+        'ptr addrspace(N)' but expected 'ptr'". A pointer in another space is
+        refused with a ``TypeError``, as :meth:`_require_global_header_ptr`
+        refuses one.
         """
         ty = self._ptr_llvm_type(ptr)
         for space, text in allowed.items():
             if text == ty:
                 return space, text
-        raise ValueError(
-            f"{op}: pointer operand is {ty}, but the intrinsic accepts only "
+        raise TypeError(
+            f"{op}: pointer operand is {ty}, but the op accepts only "
             f"{', '.join(allowed[s] for s in sorted(allowed))}"
         )
 
@@ -1915,27 +1958,48 @@ class _Lowerer:
         IR type at a call site instead would emit a type mismatch against the
         signature.
         """
-        for p in self.kernel.params:
-            if f"%{p.name}" == v.name:
-                return _param_llvm_type(p)
+        param = self._param_of(v)
+        if param is not None:
+            return _param_llvm_type(param)
         return _llvm_type(v.type)
 
-    def _require_global_header_ptr(self, op_name: str, ptr: Value) -> None:
-        """Refuse ``op_name`` when the module types its ``ptr`` operand other
-        than ``ptr addrspace(1)``.
+    def _param_of(self, v: Value) -> Param | None:
+        """The kernel parameter ``v`` names, or ``None`` for any other value."""
+        for p in self.kernel.params:
+            if f"%{p.name}" == v.name:
+                return p
+        return None
 
-        The global-pointer ops emit against ``ptr addrspace(1)``. The IR rules
-        check the IR type, but a parameter's ``addr_space`` override (such as
-        ``"constant"``) moves its header type away from it, and the emitted
-        instruction would then not match the header. The C++ engine
-        (``ll_require_global_header_ptr``) refuses with the same text.
+    def _require_header_ptr(
+        self, op_name: str, ptr: Value, operand: str, space: str, expected: str
+    ) -> None:
+        """Refuse ``op_name`` unless the module types its ``operand`` as
+        ``expected``, the LLVM pointer text of the ``space`` the op names.
+
+        An op that names its pointer in one fixed space checks it here. The IR
+        rules check the IR type, but a parameter's ``addr_space`` override
+        (such as ``"constant"``) moves its header type away from it, and the
+        emitted instruction would then not match the header; the message
+        blames the override only when it moved the header. ``op_name`` is the
+        op's builder. The C++ engine (``rocke_ll_require_header_ptr``) refuses
+        with the same text.
         """
         header = self._ptr_llvm_type(ptr)
-        if header != "ptr addrspace(1)":
-            raise TypeError(
-                f"{op_name} ptr must be a global pointer, got {header} "
-                "(its parameter's addr_space)"
-            )
+        if header == expected:
+            return
+        param = self._param_of(ptr)
+        moved = param is not None and _param_llvm_type(param) != _llvm_type(param.type)
+        cause = " (its parameter's addr_space)" if moved else ""
+        raise TypeError(
+            f"{op_name} {operand} must be a {space} pointer, got {header}{cause}"
+        )
+
+    def _require_global_header_ptr(
+        self, op_name: str, ptr: Value, operand: str = "ptr"
+    ) -> None:
+        """:meth:`_require_header_ptr` for an op that names its pointer
+        ``ptr addrspace(1)``."""
+        self._require_header_ptr(op_name, ptr, operand, "global", "ptr addrspace(1)")
 
     def _need(self, key: str) -> None:
         """Register a demand for an intrinsic declaration, and vet it.
@@ -3429,31 +3493,34 @@ class _Lowerer:
 
     def _op_memref_global_load(self, op: Op) -> None:
         ptr, idx = op.operands
+        _, ptr_ty = self._anyptr_space("global_load_f16", ptr, _GLOBAL_LOAD_PTR_TYPES)
         gep = self._fresh("gep")
         align = int(op.attrs.get("align", 2))
         self._current().emit(
-            f"  {gep} = getelementptr inbounds half, ptr addrspace(1) "
+            f"  {gep} = getelementptr inbounds half, {ptr_ty} "
             f"{self._operand(ptr)}, i32 {self._operand(idx)}"
         )
         self._current().emit(
-            f"  {op.result.name} = load half, ptr addrspace(1) {gep}, align {align}"
+            f"  {op.result.name} = load half, {ptr_ty} {gep}, align {align}"
         )
 
     def _op_memref_global_load_typed(self, op: Op) -> None:
         ptr, idx = op.operands
+        _, ptr_ty = self._anyptr_space("global_load", ptr, _GLOBAL_LOAD_PTR_TYPES)
         elem_ty = _llvm_type(op.result.type)
         gep = self._fresh("gep")
         align = int(op.attrs.get("align", 1))
         self._current().emit(
-            f"  {gep} = getelementptr inbounds {elem_ty}, ptr addrspace(1) "
+            f"  {gep} = getelementptr inbounds {elem_ty}, {ptr_ty} "
             f"{self._operand(ptr)}, i32 {self._operand(idx)}"
         )
         self._current().emit(
-            f"  {op.result.name} = load {elem_ty}, ptr addrspace(1) {gep}, align {align}"
+            f"  {op.result.name} = load {elem_ty}, {ptr_ty} {gep}, align {align}"
         )
 
     def _op_memref_global_store(self, op: Op) -> None:
         ptr, idx, val = op.operands
+        self._require_global_header_ptr("store_f16", ptr)
         gep = self._fresh("gep")
         align = int(op.attrs.get("align", 2))
         self._current().emit(
@@ -3466,6 +3533,7 @@ class _Lowerer:
 
     def _op_memref_global_store_typed(self, op: Op) -> None:
         ptr, idx, val = op.operands
+        self._require_global_header_ptr("global_store", ptr)
         elem_ty = _llvm_type(val.type)
         gep = self._fresh("gep")
         align = int(op.attrs.get("align", 1))
@@ -3485,6 +3553,7 @@ class _Lowerer:
         ``atomicrmw`` semantics, which match HIP's ``atomicAdd``).
         """
         ptr, idx, val = op.operands
+        self._require_global_header_ptr("global_atomic_add", ptr)
         elem_ty = _llvm_type(val.type)
         gep = self._fresh("gep")
         self._current().emit(
@@ -3529,6 +3598,7 @@ class _Lowerer:
     def _op_memref_global_flag_store(self, op: Op) -> None:
         """Lower ``memref.global_flag_store`` to a scoped ``store atomic i32``."""
         ptr, idx, val = op.operands
+        self._require_global_header_ptr("global_flag_store", ptr)
         scope = _sync_attr(op, "scope", _FENCE_SCOPES)
         ordering = _sync_attr(op, "ordering", _FLAG_STORE_ORDERINGS)
         gep = self._fresh("gep")
@@ -3549,6 +3619,7 @@ class _Lowerer:
         orders every later global load after the observed flag value.
         """
         ptr, idx, expect = op.operands
+        self._require_global_header_ptr("global_flag_wait_eq", ptr)
         scope = _sync_attr(op, "scope", _FENCE_SCOPES)
         gep = self._fresh("gep")
         cur = self._current()
@@ -3584,6 +3655,7 @@ class _Lowerer:
         C-scatter address fix, so match its width).
         """
         ptr, idx, val = op.operands
+        self._require_global_header_ptr("global_atomic_add_pk_bf16", ptr)
         idx_ty = _llvm_type(idx.type)
         gep = self._fresh("gep")
         self._current().emit(
@@ -3605,27 +3677,36 @@ class _Lowerer:
     def _op_memref_global_atomic_add_pk_f16(self, op: Op) -> None:
         """Lower the packed-fp16 atomic add to its AMDGCN intrinsic.
 
-        Mirrors ``_op_memref_global_atomic_add_pk_bf16`` for fp16.
-        GEPs into the fp16 buffer at ``idx`` and calls
-        ``llvm.amdgcn.global.atomic.fadd.v2f16.p1`` (gfx940+).
+        Mirrors ``_op_memref_global_atomic_add_pk_bf16`` for fp16: a generic
+        ``atomicrmw fadd <2 x half>`` (agent scope, monotonic) with the
+        device-local memory-model metadata, which the backend selects as the
+        native ``global_atomic_pk_add_f16``. The legacy
+        ``llvm.amdgcn.global.atomic.fadd.v2f16`` intrinsic it replaces is
+        lowered on gfx1250 as a fenced atomic: a ``global_wb`` / ``global_inv``
+        pair and full counter drains around every single add, which
+        serialised the split-K epilogues.
         """
         ptr, idx, val = op.operands
-        self._need("global.atomic.fadd.v2f16")
+        self._require_global_header_ptr("global_atomic_add_pk_f16", ptr)
         gep = self._fresh("gep")
         self._current().emit(
             f"  {gep} = getelementptr inbounds half, ptr addrspace(1) "
             f"{self._operand(ptr)}, i32 {self._operand(idx)}"
         )
+        self._needs_fp_atomic_md = True
         self._current().emit(
-            f"  {op.result.name} = call <2 x half> "
-            f"@llvm.amdgcn.global.atomic.fadd.v2f16.p1("
-            f"ptr addrspace(1) {gep}, <2 x half> {self._operand(val)})"
+            f"  {op.result.name} = atomicrmw fadd ptr addrspace(1) {gep}, "
+            f'<2 x half> {self._operand(val)} syncscope("agent") monotonic'
+            ", !amdgpu.no.fine.grained.memory !1"
+            ", !amdgpu.no.remote.memory !1"
+            ", !amdgpu.ignore.denormal.mode !1"
         )
 
     def _op_memref_global_load_vN(self, op: Op) -> None:
         """Vectorised <vec x 16-bit> load: a single naturally-aligned
         global_load_dwordx{1,2,4} on AMDGPU when the address is aligned."""
         ptr, idx = op.operands
+        _, ptr_ty = self._anyptr_space("global_load_vN", ptr, _GLOBAL_LOAD_PTR_TYPES)
         vec = int(op.attrs["vec"])
         elem_ty = _llvm_type(op.result.type.elem)  # type: ignore[attr-defined]
         # GEP index width must match the operand type -- i64 indices are
@@ -3636,12 +3717,12 @@ class _Lowerer:
         # elem, then bitcast to ptr to <vec x elem>. This is exactly the
         # pattern Clang emits for `*(__fp16x4_t*)(ptr + idx)`.
         self._current().emit(
-            f"  {gep} = getelementptr inbounds {elem_ty}, ptr addrspace(1) "
+            f"  {gep} = getelementptr inbounds {elem_ty}, {ptr_ty} "
             f"{self._operand(ptr)}, {idx_ty} {self._operand(idx)}"
         )
         align = int(op.attrs.get("align", vec * 2))
         self._current().emit(
-            f"  {op.result.name} = load <{vec} x {elem_ty}>, ptr addrspace(1) {gep}, "
+            f"  {op.result.name} = load <{vec} x {elem_ty}>, {ptr_ty} {gep}, "
             f"align {align}{self._nontemporal_md(op)}"
         )
 
@@ -4512,6 +4593,7 @@ class _Lowerer:
         addresses form a stride-1 pattern across active lanes.
         """
         ptr, addrs, values = op.operands
+        self._require_global_header_ptr("cooperative_global_store", ptr)
         n = int(op.attrs["vec"])
         if not isinstance(values.type, VectorType):
             raise NotImplementedError("cooperative_global_store requires vector values")
@@ -5066,11 +5148,7 @@ class _Lowerer:
             "global_prefetch", _OpTargetFact.GLOBAL_PREFETCH
         )
         (ptr,) = op.operands
-        if self._ptr_llvm_type(ptr) != "ptr addrspace(1)":
-            raise TypeError(
-                f"global_prefetch ptr must be a global pointer, "
-                f"got {self._ptr_llvm_type(ptr)}"
-            )
+        self._require_global_header_ptr("global_prefetch", ptr)
         cp = self._check_cachepolicy("global_prefetch", op.attrs.get("cachepolicy", 0))
         self._need("global.prefetch")
         self._current().emit(
@@ -5081,11 +5159,7 @@ class _Lowerer:
     def _op_tile_flat_prefetch(self, op: Op) -> None:
         self._require_llvm23_target_fact("flat_prefetch", _OpTargetFact.GLOBAL_PREFETCH)
         (ptr,) = op.operands
-        if self._ptr_llvm_type(ptr) != "ptr":
-            raise TypeError(
-                f"flat_prefetch ptr must be a flat pointer, "
-                f"got {self._ptr_llvm_type(ptr)}"
-            )
+        self._require_header_ptr("flat_prefetch", ptr, "ptr", "flat", "ptr")
         cp = self._check_cachepolicy("flat_prefetch", op.attrs.get("cachepolicy", 0))
         self._need("flat.prefetch")
         self._current().emit(
@@ -5234,8 +5308,11 @@ class _Lowerer:
             )
         template = _escape_llvm_asm_string(op.attrs["template"])
         constraints = op.attrs["constraints"]
+        sideeffect = op.attrs.get("sideeffect", True)
+        if not isinstance(sideeffect, bool):
+            raise ValueError("LLVM inline asm sideeffect must be a boolean")
         flags = []
-        if op.attrs.get("sideeffect", True):
+        if sideeffect:
             flags.append("sideeffect")
         # NOTE: ``convergent`` is NOT a valid textual keyword on an LLVM
         # inline-asm call expression (comgr rejects ``asm sideeffect
@@ -5552,6 +5629,9 @@ class _Lowerer:
         src_index = op.operands[1]
         lds_smem = op.operands[2]
         lds_indices = op.operands[3:]
+        self._require_global_header_ptr(
+            "global_load_async_to_lds", src_ptr, operand="src_ptr"
+        )
         width = int(op.attrs["width_bytes"])
         cpol = int(op.attrs.get("cpol", 0))
         ioff = int(op.attrs.get("offset_bytes", 0))
@@ -5588,10 +5668,9 @@ class _Lowerer:
         if len(op.operands) != 2:
             raise ValueError("global_store_async_from_lds expects two operands")
         dst_ptr, lds_ptr = op.operands
-        if self._ptr_llvm_type(dst_ptr) != "ptr addrspace(1)":
-            raise TypeError(
-                "global_store_async_from_lds dst_ptr must be a global pointer"
-            )
+        self._require_global_header_ptr(
+            "global_store_async_from_lds", dst_ptr, operand="dst_ptr"
+        )
         width = int(op.attrs["width_bytes"])
         if width not in (1, 4, 8, 16):
             raise ValueError(
@@ -5624,8 +5703,9 @@ class _Lowerer:
         if len(op.operands) != 1:
             raise ValueError("global_load_tr16_b128 expects one operand")
         src_ptr = op.operands[0]
-        if self._ptr_llvm_type(src_ptr) != "ptr addrspace(1)":
-            raise TypeError("global_load_tr16_b128 src_ptr must be a global pointer")
+        self._require_global_header_ptr(
+            "global_load_tr16_b128", src_ptr, operand="src_ptr"
+        )
         dtype = str(op.attrs.get("dtype", ""))
         suffixes = {"f16": "v8f16", "bf16": "v8bf16", "i16": "v8i16"}
         if dtype not in suffixes:
@@ -5660,8 +5740,7 @@ class _Lowerer:
         if len(op.operands) != 2 or len(op.results) != 1:
             raise ValueError("cluster_load expects two operands and one result")
         ptr, mask = op.operands
-        if self._ptr_llvm_type(ptr) != "ptr addrspace(1)":
-            raise TypeError("cluster_load ptr must be a global pointer")
+        self._require_global_header_ptr("cluster_load", ptr)
         if mask.type != I32:
             raise TypeError("cluster_load mask must be i32")
         width = int(op.attrs.get("width_bytes", 0))
@@ -5697,10 +5776,9 @@ class _Lowerer:
         if len(op.operands) != 3:
             raise ValueError("cluster_load_async_to_lds expects three operands")
         src_ptr, lds_ptr, mask = op.operands
-        if self._ptr_llvm_type(src_ptr) != "ptr addrspace(1)":
-            raise TypeError(
-                "cluster_load_async_to_lds src_ptr must be a global pointer"
-            )
+        self._require_global_header_ptr(
+            "cluster_load_async_to_lds", src_ptr, operand="src_ptr"
+        )
         if mask.type != I32:
             raise TypeError("cluster_load_async_to_lds mask must be i32")
         width = int(op.attrs.get("width_bytes", 0))
@@ -5975,15 +6053,23 @@ class _Lowerer:
         On the modern-flavor path we accept either an ``i32`` or an ``i64``
         ``num_bytes`` operand and ``zext`` ``i32`` callers up; ``i64``
         callers reach the full 64-bit range needed for >4 GiB KV
-        caches that would otherwise OOB-zero at the tail.
+        caches that would otherwise OOB-zero at the tail. LLVM 20 takes only
+        an ``i32``, so any other ``num_bytes`` is refused there: printed as
+        the ``i32`` operand, it would not match its own definition.
+
+        The intrinsic is the ``p1`` overload, so ``ptr`` must be
+        ``ptr addrspace(1)`` in the kernel header. A parameter declared
+        ``addr_space="constant"`` is ``ptr addrspace(4)`` there, and is
+        refused as the global-pointer ops refuse it.
 
         Flags = the target ISA backend's ``buffer_rsrc_word3`` -- the rsrc
         DWORD3 that makes the descriptor bounds-checked. Its encoding is
         ISA-specific (``0x00027000`` on gfx9, ``0x31014000`` on gfx11 /
         gfx12); the HIP lowering takes the same word from the same backend.
         """
-        self._need("make.buffer.rsrc.p1")
         ptr, num_bytes = op.operands
+        self._require_global_header_ptr("buffer_rsrc", ptr)
+        self._need("make.buffer.rsrc.p1")
         if _is_modern_flavor(self._flavor):
             intrinsic = "llvm.amdgcn.make.buffer.rsrc.p8.p1"
             nb_ty = _llvm_type(num_bytes.type)
@@ -5996,11 +6082,18 @@ class _Lowerer:
                 )
             else:
                 raise ValueError(
-                    f"tile.buffer_rsrc num_bytes must be i32 or i64, got {nb_ty}"
+                    f"buffer_rsrc num_bytes must be i32 or i64, got {nb_ty}"
                 )
             nb_text = f"i64 {nb_arg}"
         else:
             intrinsic = "llvm.amdgcn.make.buffer.rsrc.p1"
+            nb_ty = _llvm_type(num_bytes.type)
+            if nb_ty != "i32":
+                raise ValueError(
+                    f"buffer_rsrc num_bytes must be i32 at llvm20, got {nb_ty}; "
+                    "the llvm20 make.buffer.rsrc takes an i32 num_records, so pass "
+                    "the byte count as i32"
+                )
             nb_text = f"i32 {self._operand(num_bytes)}"
         word3 = self._backend.buffer_rsrc_word3
         self._current().emit(
@@ -6414,6 +6507,7 @@ class _Lowerer:
 
     def _op_tile_global_load_lds(self, op: Op) -> None:
         src_ptr, byte_off, lds_addr = op.operands
+        self._require_global_header_ptr("global_load_lds", src_ptr, operand="src_ptr")
         size_bytes = int(op.attrs["size_bytes"])
         aux = int(op.attrs.get("aux", 0))
         self._need("global.load.lds")
@@ -6521,6 +6615,7 @@ class _Lowerer:
 
     def _op_memref_global_store_vN(self, op: Op) -> None:
         ptr, idx, val = op.operands
+        self._require_global_header_ptr("global_store_vN", ptr)
         vec = int(op.attrs["vec"])
         gep = self._fresh("gep")
         elem_ty = (
@@ -6562,6 +6657,7 @@ class _Lowerer:
 
     def _op_memref_global_atomic_add_f32(self, op: Op) -> None:
         ptr, idx, val = op.operands
+        self._require_global_header_ptr("global_atomic_add_f32", ptr)
         gep = self._fresh("gep")
         self._current().emit(
             f"  {gep} = getelementptr inbounds float, ptr addrspace(1) "
@@ -6907,14 +7003,45 @@ class _Lowerer:
         else:
             self._lower_normal_for(op)
 
+    def _claim_loop_header_names(self, op: Op, header_label: str) -> str:
+        """Return the suffix the rolled ``scf.for`` ``op`` adds to the names its
+        header defines (its induction variable and carried values), and record
+        the names it defines.
+
+        A loop names these values itself, so two loops of one kernel may share
+        a name: loops side by side, or a loop lowered once per trip of an
+        unrolled loop around it. LLVM needs every name defined once, so the
+        first loop to define a name keeps it, and a loop that would define a
+        name again adds ``.<header_label>`` (unique in the kernel) to all of
+        its names. An earlier loop may have named a value like that itself
+        (``%acc.for.header.5``), so while a suffixed name is still taken the loop
+        adds ``.<header_label>.<n>`` instead, for the first ``n = 1, 2, ...``
+        that leaves all of its names free.
+        """
+        names = [op.attrs["iv"]] + [
+            meta["name"] for meta in op.attrs.get("iter_args", [])
+        ]
+        suffix = ""
+        attempt = 0
+        while not self._loop_header_names.isdisjoint(name + suffix for name in names):
+            suffix = f".{header_label}" + (f".{attempt}" if attempt else "")
+            attempt += 1
+        self._loop_header_names.update(name + suffix for name in names)
+        return suffix
+
     def _lower_normal_for(self, op: Op) -> None:
-        """Lower scf.for to normal LLVM loop (header, body, latch, exit)."""
+        """Lower scf.for to normal LLVM loop (header, body, latch, exit).
+
+        When an earlier loop already defined one of this loop's names, the
+        header's induction variable and carried values take a suffix (see
+        :meth:`_claim_loop_header_names`); the body's reads of them are renamed
+        to match while it lowers.
+        """
         num_iter = int(op.attrs.get("num_iter_args", 0))
         lower, upper, step = op.operands[:3]
         iter_inits = op.operands[3 : 3 + num_iter]
         iter_meta = op.attrs.get("iter_args", [])
         iter_llvm_types = _scf_iter_llvm_types(op, num_iter)
-        iv_name = op.attrs["iv"]
         iv_ty = _llvm_type(lower.type)
 
         # Capture the predecessor block (for the from-entry edge of phis).
@@ -6925,6 +7052,10 @@ class _Lowerer:
         self._blocks[-2].emit(f"  br label %{header.label}")
         self._blocks[-2].terminated = True
 
+        suffix = self._claim_loop_header_names(op, header.label)
+        iv_name = op.attrs["iv"] + suffix
+        iter_names = [meta["name"] + suffix for meta in iter_meta]
+
         # Emit phi nodes in header (filled in for the latch edge after the
         # body region is lowered).
         header.emit(
@@ -6932,11 +7063,11 @@ class _Lowerer:
             f"[ %iv.next.{header.label}, %FOR_LATCH ]"
         )
         iter_phi_lines: List[int] = []
-        for meta, init, ll_ty in zip(iter_meta, iter_inits, iter_llvm_types):
+        for name, init, ll_ty in zip(iter_names, iter_inits, iter_llvm_types):
             header.emit(
-                f"  {meta['name']} = phi {ll_ty} "
+                f"  {name} = phi {ll_ty} "
                 f"[ {self._operand(init)}, %{pred_block} ], "
-                f"[ {meta['name']}.next.{header.label}, %FOR_LATCH ]"
+                f"[ {name}.next.{header.label}, %FOR_LATCH ]"
             )
             iter_phi_lines.append(len(header.lines) - 1)
 
@@ -6949,9 +7080,19 @@ class _Lowerer:
         header.emit(f"  br i1 {cmp}, label %{body.label}, label %FOR_EXIT")
         header.terminated = True
 
-        # Lower body region into body block (and any sub-blocks it spawns).
+        # Lower body region into body block (and any sub-blocks it spawns),
+        # its reads of the header's values renamed to the names defined above.
+        iv_value, carried_values = _loop_block_values(op)
+        block_values = ([iv_value] if iv_value is not None else []) + carried_values
+        saved_names = [(value, value.name) for value in block_values] if suffix else []
+        for value, name in saved_names:
+            value.name = name + suffix
         self._yield_stack.append([])
-        self.lower_region(op.regions[0])
+        try:
+            self.lower_region(op.regions[0])
+        finally:
+            for value, name in saved_names:
+                value.name = name
 
         # Body may have terminated itself if there was a scf.yield;
         # otherwise we expect the last op to be scf.yield emitted into the
@@ -6969,9 +7110,9 @@ class _Lowerer:
 
         iv_next = f"%iv.next.{header.label}"
         latch.emit(f"  {iv_next} = add nsw {iv_ty} {iv_name}, {self._operand(step)}")
-        for meta, yld, ll_ty in zip(iter_meta, yielded, iter_llvm_types):
+        for name, yld, ll_ty in zip(iter_names, yielded, iter_llvm_types):
             latch.emit(
-                f"  {meta['name']}.next.{header.label} = bitcast {ll_ty} {yld} to {ll_ty}"
+                f"  {name}.next.{header.label} = bitcast {ll_ty} {yld} to {ll_ty}"
             )
         latch.emit(f"  br label %{header.label}")
         latch.terminated = True
@@ -6985,10 +7126,8 @@ class _Lowerer:
         # Bind the for op's results: in LLVM IR, the header phi values
         # (which include the yielded values from the last latch iteration)
         # are the loop results. We add aliases via bitcast in the exit.
-        for meta, result, ll_ty in zip(iter_meta, op.results, iter_llvm_types):
-            exit_blk.emit(
-                f"  {result.name} = bitcast {ll_ty} {meta['name']} to {ll_ty}"
-            )
+        for name, result, ll_ty in zip(iter_names, op.results, iter_llvm_types):
+            exit_blk.emit(f"  {result.name} = bitcast {ll_ty} {name} to {ll_ty}")
 
     def _lower_unrolled_for(self, op: Op) -> None:
         """Lower scf.for to unrolled straight-line code (no control flow).
@@ -6999,6 +7138,12 @@ class _Lowerer:
         Strategy: Create synthetic SSA values for IV and iter args for each iteration,
         lower the body region which references these values, collect yielded values,
         and use them as inputs for the next iteration.
+
+        The renaming reaches every region nested in the body (an ``scf.if``
+        body, an if/else branch, an inner loop), so a trip reads its own
+        values and defines its own names there too. A shared-memory allocation
+        keeps its name: it is one module-level buffer that every trip shares,
+        found by that name (see :meth:`_collect_smem`).
         """
         # Extract loop parameters
         num_iter = int(op.attrs.get("num_iter_args", 0))
@@ -7006,7 +7151,6 @@ class _Lowerer:
         iter_inits = op.operands[3 : 3 + num_iter]
         iter_meta = op.attrs.get("iter_args", [])
         iter_llvm_types = _scf_iter_llvm_types(op, num_iter)
-        iv_name = op.attrs["iv"]
 
         # Evaluate constant bounds
         lower_val = self._eval_constant(lower)
@@ -7022,25 +7166,14 @@ class _Lowerer:
         for meta, init in zip(iter_meta, iter_inits):
             current_iter_values[meta["name"]] = self._operand(init)
 
-        # Create a fake op to hold IV and iter arg SSA values for each iteration
-        # We'll temporarily replace the original op in each Value's op field
-
-        # Find the Value objects for IV and iter args
-        # These are created when the scf.for was built and stored in the op
-        iv_value_obj = None
-        iter_value_objs: List[Value] = []
-
-        # The IV and iter arg Values are referenced by ops in the body region
-        # We need to find them by scanning the region
-        for body_op in op.regions[0].ops:
-            if hasattr(body_op, "operands"):
-                for operand in body_op.operands:
-                    if operand.name == iv_name and operand.op == op:
-                        iv_value_obj = operand
-                    for meta in iter_meta:
-                        if operand.name == meta["name"] and operand.op == op:
-                            if operand not in iter_value_objs:
-                                iter_value_objs.append(operand)
+        # The IV and iter arg Values the body reads, nested regions included.
+        iv_value_obj, iter_value_objs = _loop_block_values(op)
+        body_results = [
+            result
+            for body_op in _ops_in_region(op.regions[0])
+            if body_op.name != "tile.smem_alloc"
+            for result in body_op.results
+        ]
 
         # Phase 4a: Detect if loop body has trailing sync() that could be elided
         # Only if elide_trailing_barrier flag is True
@@ -7081,13 +7214,12 @@ class _Lowerer:
                         val_obj.name = current_iter_values[meta["name"]]
                         break
 
-            # Rename all op results in the body to have unique names
-            for body_op in op.regions[0].ops:
-                if len(body_op.results) > 0:
-                    for result in body_op.results:
-                        values_to_rename.append((result, result.name))
-                        base_name = result.name.lstrip("%")
-                        result.name = f"%{base_name}{iteration_suffix}"
+            # Rename the op results in the body, nested regions included, to
+            # have unique names (shared-memory allocations keep theirs)
+            for result in body_results:
+                values_to_rename.append((result, result.name))
+                base_name = result.name.lstrip("%")
+                result.name = f"%{base_name}{iteration_suffix}"
 
             # Phase 4a: Mark trailing sync for elision in non-final iterations
             # Rationale: sync before yield ensures current iter's LDS writes are
@@ -7103,15 +7235,16 @@ class _Lowerer:
 
             # Lower the body region - it will now produce unique LLVM SSA names
             self._yield_stack.append([])
-            self.lower_region(op.regions[0])
+            try:
+                self.lower_region(op.regions[0])
+            finally:
+                # Restore all original names
+                for val_obj, saved_name in values_to_rename:
+                    val_obj.name = saved_name
             yielded = self._yield_stack.pop()
 
             # Clear elision marker
             self._unroll_elide_sync_op = None
-
-            # Restore all original names
-            for val_obj, saved_name in values_to_rename:
-                val_obj.name = saved_name
 
             # Verify yield count
             if len(yielded) != num_iter:

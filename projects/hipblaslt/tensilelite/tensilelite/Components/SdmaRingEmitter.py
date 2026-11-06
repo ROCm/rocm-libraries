@@ -38,7 +38,7 @@ assert OFF_doorbell == OFF_wptr + 8, "submitPacket's x4 load needs wptr then doo
 assert OFF_recvPtr == OFF_flagPtr + 8, "the SDMA loader's x4 needs flagPtr then recvPtr"
 
 # Cursor pair, at the front of this device's counter buffer; the caller passes
-# the block base and its queue's byte offset (client/src/FusedA2ARunner.cpp).
+# the block base and its queue's byte offset (client/src/DeviceContext.cpp).
 CUR_cachedWptr    = 0  # producer reservation cursor (CAS target)
 CUR_committedWptr = 8  # commit-serialization cursor
 CURSOR_PAIR_BYTES = 16
