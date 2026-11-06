@@ -156,7 +156,13 @@ Program::Program(std::string kernelFileName, const std::vector<std::string>& opt
             _binary = std::move(*cached);
             return;
         }
-        // Absent, unreadable or not loadable on this device: compile and replace it below.
+        // Absent, unreadable or not loadable on this device: compile and replace it below. A
+        // failed load leaves HIP's last error set; clear it, since the fallback recovers and a
+        // caller checking hipGetLastError later must not see a failure that did not happen.
+        if(cached.has_value())
+        {
+            static_cast<void>(hipGetLastError());
+        }
         _module = nullptr;
     }
 
