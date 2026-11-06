@@ -661,6 +661,33 @@ TEST_F(TestGoldenHarnessFixture, MismatchingOutputYieldsFail)
     EXPECT_FALSE(testing_support::anySkipped(results));
 }
 
+// An fp8 output is graded at one step of its format. Near zero that step is the
+// subnormal step 2^-9 of FP8_E4M3, so one step from the zero golden passes and two fail.
+TEST_F(TestGoldenHarnessFixture, Fp8OutputOneStepFromGoldenYieldsPass)
+{
+    testing_support::HarnessMocks mocks;
+    testing_support::engineWrites(mocks.engineRunner, &fixtures::writeFp8E4M3Output, 0x1p-9f);
+
+    ::testing::TestPartResultArray results;
+    runCapturing(mocks, fixtures::loadBundle(_tempDir, "fp8_one_step", true, "fp8_e4m3"), &results);
+
+    EXPECT_FALSE(testing_support::anyFailed(results));
+    EXPECT_FALSE(testing_support::anySkipped(results));
+}
+
+TEST_F(TestGoldenHarnessFixture, Fp8OutputTwoStepsFromGoldenYieldsFail)
+{
+    testing_support::HarnessMocks mocks;
+    testing_support::engineWrites(mocks.engineRunner, &fixtures::writeFp8E4M3Output, 0x1p-8f);
+
+    ::testing::TestPartResultArray results;
+    runCapturing(
+        mocks, fixtures::loadBundle(_tempDir, "fp8_two_steps", true, "fp8_e4m3"), &results);
+
+    EXPECT_TRUE(testing_support::anyFailed(results));
+    EXPECT_FALSE(testing_support::anySkipped(results));
+}
+
 TEST_F(TestGoldenHarnessFixture, RaggedMatchingOutputYieldsPass)
 {
     testing_support::HarnessMocks mocks;
