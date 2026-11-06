@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -169,18 +169,23 @@ namespace rocalution
         assert(this->restrict_op_level_[0] != NULL);
         assert(this->prolong_op_level_[0] != NULL);
 
-        // Create coarse operator, on the backend of its transfer operators
+        // Create coarse operator, on the backend of the finest operator
         this->op_level_[0]->Clear();
         this->op_level_[0]->ConvertToCSR();
-        this->op_level_[0]->CloneBackend(*this->restrict_op_level_[0]);
+        this->op_level_[0]->CloneBackend(*this->op_);
 
-        // The product needs the operator in CSR, and on the host if all coarse levels are
-        if(this->op_->GetFormat() != CSR || this->host_level_ == this->levels_ - 1)
+        // If all coarse levels are on the host, move the transfer operators for the product
+        if(this->host_level_ == this->levels_ - 1)
+        {
+            this->restrict_op_level_[0]->CloneBackend(*this->op_);
+            this->prolong_op_level_[0]->CloneBackend(*this->op_);
+        }
+
+        if(this->op_->GetFormat() != CSR)
         {
             OperatorType op_csr;
             op_csr.CloneFrom(*this->op_);
             op_csr.ConvertToCSR();
-            op_csr.CloneBackend(*this->restrict_op_level_[0]);
 
             this->op_level_[0]->TripleMatrixProduct(
                 *this->restrict_op_level_[0], op_csr, *this->prolong_op_level_[0]);
@@ -189,6 +194,13 @@ namespace rocalution
         {
             this->op_level_[0]->TripleMatrixProduct(
                 *this->restrict_op_level_[0], *this->op_, *this->prolong_op_level_[0]);
+        }
+
+        if(this->host_level_ == this->levels_ - 1)
+        {
+            this->op_level_[0]->MoveToHost();
+            this->restrict_op_level_[0]->MoveToHost();
+            this->prolong_op_level_[0]->MoveToHost();
         }
 
         for(int i = 1; i < this->levels_ - 1; ++i)

@@ -126,18 +126,23 @@ namespace rocalution
         assert(this->restrict_op_level_[0] != NULL);
         assert(this->prolong_op_level_[0] != NULL);
 
-        // Create coarse operator, on the backend of its transfer operators
+        // Create coarse operator, on the backend of the finest operator
         this->op_level_[0]->Clear();
         this->op_level_[0]->ConvertToCSR();
-        this->op_level_[0]->CloneBackend(*this->restrict_op_level_[0]);
+        this->op_level_[0]->CloneBackend(*this->op_);
 
-        // The product needs the operator in CSR, and on the host if all coarse levels are
-        if(this->op_->GetFormat() != CSR || this->host_level_ == this->levels_ - 1)
+        // If all coarse levels are on the host, move the transfer operators for the product
+        if(this->host_level_ == this->levels_ - 1)
+        {
+            this->restrict_op_level_[0]->CloneBackend(*this->op_);
+            this->prolong_op_level_[0]->CloneBackend(*this->op_);
+        }
+
+        if(this->op_->GetFormat() != CSR)
         {
             OperatorType op_csr;
             op_csr.CloneFrom(*this->op_);
             op_csr.ConvertToCSR();
-            op_csr.CloneBackend(*this->restrict_op_level_[0]);
 
             this->op_level_[0]->TripleMatrixProduct(
                 *this->restrict_op_level_[0], op_csr, *this->prolong_op_level_[0]);
@@ -151,6 +156,13 @@ namespace rocalution
         if(this->over_interp_ > static_cast<ValueType>(1))
         {
             this->op_level_[0]->Scale(static_cast<ValueType>(1) / this->over_interp_);
+        }
+
+        if(this->host_level_ == this->levels_ - 1)
+        {
+            this->op_level_[0]->MoveToHost();
+            this->restrict_op_level_[0]->MoveToHost();
+            this->prolong_op_level_[0]->MoveToHost();
         }
 
         for(int i = 1; i < this->levels_ - 1; ++i)

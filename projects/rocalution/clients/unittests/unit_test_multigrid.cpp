@@ -268,15 +268,16 @@ namespace
         return h;
     }
 
-    // The same transfer operators, with the Galerkin products of the new finest operator
+    // The same transfer operators, with the Galerkin products of the new finest operator,
+    // each scaled by coarse_scale
     template <typename T>
-    Hierarchy<T> with_finest(const Hierarchy<T>& h, const Csr<T>& A0)
+    Hierarchy<T> with_finest(const Hierarchy<T>& h, const Csr<T>& A0, double coarse_scale = 1.0)
     {
         Hierarchy<T> n = h;
         n.A[0]         = A0;
         for(int l = 0; l + 1 < h.levels(); ++l)
         {
-            n.A[l + 1] = galerkin(h.R[l], n.A[l], h.P[l], 1.0);
+            n.A[l + 1] = galerkin(h.R[l], n.A[l], h.P[l], coarse_scale);
         }
         return n;
     }
@@ -2280,6 +2281,8 @@ TYPED_TEST(multigrid_backends, rebuild_numeric_keeps_the_host_levels)
         std::vector<bool> host(levels - 1, true);
         host[0] = false;
         EXPECT_EQ(coarse_on_host(*m.amg), host);
+        EXPECT_EQ(transfers_on_host(*m.amg), host);
+        EXPECT_FALSE(MatrixPeek<T>::on_host(*m.A));
         const Hierarchy<T> expected = with_finest(before, next);
         const Hierarchy<T> after    = hierarchy_of(*m.amg, next);
         for(int l = 1; l < levels; ++l)
@@ -2293,8 +2296,17 @@ TYPED_TEST(multigrid_backends, rebuild_numeric_keeps_the_host_levels)
                     tol<T>());
     }
 
-    // One host level, and all coarse levels on the host, where the finest operator is not
+    // One host level, and all coarse levels on the host, where the finest operator is not.
+    // UA with over-interpolation scales each coarse operator
+    std::vector<std::pair<AmgCase<T>, double>> cases;
     for(const AmgCase<T>& c : amg_classes<T>())
+    {
+        cases.push_back({c, 1.0});
+    }
+    cases.push_back(
+        {{"UA with over-interpolation", [] { return make_ua<T>(PMIS, 1.5); }, CycleOptions()},
+         1.0 / 1.5});
+    for(const auto& [c, coarse_scale] : cases)
     {
         for(bool all : {false, true})
         {
@@ -2317,7 +2329,9 @@ TYPED_TEST(multigrid_backends, rebuild_numeric_keeps_the_host_levels)
                 host[l] = true;
             }
             EXPECT_EQ(coarse_on_host(*m.amg), host);
-            const Hierarchy<T> expected = with_finest(before, next);
+            EXPECT_EQ(transfers_on_host(*m.amg), host);
+            EXPECT_FALSE(MatrixPeek<T>::on_host(*m.A));
+            const Hierarchy<T> expected = with_finest(before, next, coarse_scale);
             const Hierarchy<T> after    = hierarchy_of(*m.amg, next);
             for(int l = 1; l < levels; ++l)
             {

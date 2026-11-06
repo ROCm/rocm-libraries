@@ -46,7 +46,7 @@ Full documentation for rocALUTION is available at [https://rocm.docs.amd.com/pro
 * Fixed the K-cycle returning NaN when a coarse residual is zero, or when its first step solves a coarse level exactly. It now keeps the correction it has computed.
 * Fixed `UAAMG` failing an assert at a level without aggregates. Like `SAAMG`, it now stops coarsening at that level.
 * Fixed `UAAMG::ReBuildNumeric()` not scaling the coarse operators by the over-interpolation factor.
-* Fixed `ReBuildNumeric` of the AMG solvers failing a backend assert after `SetHostLevels`. The coarse operators are now recomputed on the backend of their level.
+* Fixed `ReBuildNumeric()` of the AMG solvers failing a backend assert after `SetHostLevels()`. The coarse operators are now recomputed, and end up on the backend of their level.
 
 ## (Unreleased) rocALUTION 4.1.1
 
