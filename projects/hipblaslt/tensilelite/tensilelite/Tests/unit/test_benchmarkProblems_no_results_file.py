@@ -193,7 +193,7 @@ def test_write_benchmark_files_results_policy(
         applyNaming=lambda *args: None,
     )
     monkeypatch.setattr(bp, "copyStaticFiles", lambda *args: None)
-    monkeypatch.setattr(bp, "initHelperKernelObjects", lambda *args: [])
+    monkeypatch.setattr(bp, "HelperKernelObjectsMemo", lambda *args: lambda solution: [])
     monkeypatch.setattr(bp, "KernelWriterAssembly", lambda *args: None)
     monkeypatch.setattr(bp, "cmdLineArchsFor", lambda *args: ["gfx950"])
     monkeypatch.setattr(bp, "writeSolutionsAndKernels", lambda *args, **kwargs: ([], None))
