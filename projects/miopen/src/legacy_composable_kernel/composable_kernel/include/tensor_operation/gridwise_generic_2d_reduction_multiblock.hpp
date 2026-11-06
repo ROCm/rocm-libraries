@@ -36,7 +36,7 @@ namespace ck {
 
 template <index_t BlockSize,
           typename srcDataType,
-          typename wsDataType,  // type of the per-block partial results in the workspace
+          typename wsDataType, // type of the per-block partial results in the workspace
           typename compType,
           typename src2dDescType,
           typename dst1dDescType,
