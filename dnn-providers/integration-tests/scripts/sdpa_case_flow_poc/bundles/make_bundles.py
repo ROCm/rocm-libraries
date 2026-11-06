@@ -20,11 +20,13 @@ gets these arguments:
   --only-op-dir --require-marked-sweep [--superset-templates]
   --case-id <dtype_q>_<case_key> --strict
 
-Afterwards it checks that every case of one topology name lands in one sweep per tier
-(<tier>/<OP>/<NAME>/), that no sweep holds two topology names, that the op folder holds no
-other sweep, and that every case re-expands to its exported graph. With --install-into TREE
-it then copies each <tier>/<OP>/ folder of W into TREE; the copy refuses any path that exists
-in TREE and checks every copied file byte for byte. It writes:
+Before the imports it checks that the exported graph of each row holds exactly the tensors
+of the row's signature, in the same value form. Afterwards it checks that every case of one
+topology name lands in one sweep per tier (<tier>/<OP>/<NAME>/), that no sweep holds two
+topology names, that the op folder holds no other sweep, and that every case re-expands to
+its exported graph. With --install-into TREE it then copies each <tier>/<OP>/ folder of W
+into TREE; the copy refuses any path that exists in TREE and checks every copied file byte
+for byte. It writes:
 
   placements.csv  case_key, tier, topology, case_id, bundle_path, gtest_name
   report.json     per-import times, sweep.json bytes per case, failures, projections, and
@@ -77,6 +79,36 @@ def sanitize_gtest(s):
 
 def gtest_name(tier, op_dir, topo, cid):
     return f"{sanitize_gtest(tier)}_{sanitize_gtest(op_dir)}_{sanitize_gtest(topo)}.{sanitize_gtest(cid)}"
+
+
+# Signature roles of the exported tensors whose name differs from the role.
+TENSOR_NAME_ROLES = {"sdpa_fwd::O": "o", "sdpa_fwd::STATS": "stats"}
+
+
+def graph_roles(graph):
+    """The strict signature roles of the tensors of an exported graph."""
+    out = set()
+    for t in graph.get("tensors", []):
+        role = TENSOR_NAME_ROLES.get(t.get("name"), t.get("name"))
+        if "value" in t:
+            role += "[by_value]"
+        elif t.get("is_runtime_pass_by_value"):
+            role += "[runtime]"
+        out.add(role)
+    return out
+
+
+def signature_mismatches(rows, export_dir):
+    """(case_key, signature roles the graph lacks, graph roles the signature lacks) per
+    row whose exported graph does not hold exactly the tensors of its signature."""
+    out = []
+    for r in rows:
+        want = set(r["_signature"])
+        path = export_dir / r["case_key"] / f"{r['case_key']}.json"
+        have = graph_roles(json.loads(path.read_text()))
+        if want != have:
+            out.append((r["case_key"], sorted(want - have), sorted(have - want)))
+    return out
 
 
 def load_rows(selected, class_values):
@@ -440,6 +472,16 @@ def main():
     if missing:
         sys.exit(
             f"make_bundles: {len(missing)} selected rows have no exported graph, e.g. {missing[:5]}"
+        )
+    mismatched = signature_mismatches(rows, args.export_dir)
+    if mismatched:
+        examples = "; ".join(
+            f"{key}: graph lacks {lacking}, signature lacks {extra}"
+            for key, lacking, extra in mismatched[:5]
+        )
+        sys.exit(
+            f"make_bundles: {len(mismatched)} rows have an exported graph whose tensors"
+            f" differ from the row's signature, e.g. {examples}"
         )
 
     prepare_work_dir(args.work_dir)

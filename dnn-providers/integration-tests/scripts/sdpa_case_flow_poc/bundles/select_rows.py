@@ -70,11 +70,11 @@ EXPECTED = {
         "quick": (1461, 1412, 91, 155, 400, 29, 49.9, 38.6),
         "standard": (8631, 8440, 270, 490, 2142, 20, 453.2, 337.9),
         "comprehensive": (4070, 3966, 221, 380, 969, 77, 1470.4, 1047.4),
-        "full": (21093, 20732, 647, 1002, 3755, 58, 7268.4, 5186.2),
+        "full": (21093, 20732, 663, 1023, 3755, 61, 7268.4, 5186.2),
     },
     "bundle_rows": 34550,
-    "sweeps": 1229,
-    "sweeps_alignment_split": 2027,
+    "sweeps": 1245,
+    "sweeps_alignment_split": 2048,
 }
 
 
@@ -158,8 +158,11 @@ class Model:
             t.append("attn_scale")
 
         d = row["dropout"]
-        if d == "random" and row["dropout_rng_state"] == "caller_supplied":
+        rng = row["dropout_rng_state"]
+        if d == "random" and rng == "caller_supplied":
             t += [bv("dropout_seed"), bv("dropout_offset")]
+        elif d == "random" and rng == "caller_supplied_device_memory":
+            t += ["dropout_seed", "dropout_offset"]
         elif d == "caller_mask":
             t += ["dropout_mask", bv("dropout_scale")]
         if d != "absent" and row["dropout_pattern_output"] == "requested":

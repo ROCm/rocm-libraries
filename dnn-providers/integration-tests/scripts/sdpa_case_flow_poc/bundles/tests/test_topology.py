@@ -174,6 +174,45 @@ def test_a_signature_joins_a_larger_template_through_a_smaller_one(model):
             {"dropout": "absent"},
         ),
         (
+            {
+                "dropout": "random",
+                "dropout_rng_state": "caller_supplied_device_memory",
+                "dropout_pattern_output": "requested",
+                "bias": "present",
+            },
+            {
+                "dropout": "random",
+                "dropout_rng_state": "not_supplied",
+                "dropout_pattern_output": "requested",
+            },
+        ),
+        (
+            {
+                "dropout": "random",
+                "dropout_rng_state": "caller_supplied_device_memory",
+                "dropout_pattern_output": "requested",
+                "bias": "present",
+            },
+            {
+                "dropout": "random",
+                "dropout_rng_state": "caller_supplied",
+                "dropout_pattern_output": "requested",
+            },
+        ),
+        (
+            {
+                "dropout": "random",
+                "dropout_rng_state": "caller_supplied",
+                "dropout_pattern_output": "requested",
+                "bias": "present",
+            },
+            {
+                "dropout": "random",
+                "dropout_rng_state": "caller_supplied_device_memory",
+                "dropout_pattern_output": "requested",
+            },
+        ),
+        (
             {"batch_packing": "ragged", "bias": "present"},
             {"batch_packing": "ragged_q_side"},
         ),
@@ -188,6 +227,21 @@ def test_alternative_forms_never_share_a_superset(model, larger, smaller):
     mapping = superset_of(model, [row(**larger), row(**smaller)])
     assert mapping[small] == small, (small, big)
     assert mapping[big] == big
+
+
+def test_device_memory_seed_and_offset_are_their_own_roles(model):
+    (sig,) = signatures(
+        model,
+        [
+            row(
+                dropout="random",
+                dropout_rng_state="caller_supplied_device_memory",
+                dropout_pattern_output="requested",
+            )
+        ],
+    )
+    assert {"dropout_seed", "dropout_offset", "rng_dump"} <= set(sig)
+    assert topology.topology_name(sig) == "DSeed_DOff_Rng"
 
 
 @pytest.mark.parametrize("side", ["descale_q", "descale_k", "descale_v"])

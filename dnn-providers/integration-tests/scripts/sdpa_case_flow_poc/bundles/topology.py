@@ -53,6 +53,8 @@ ROLE_TOKENS = (
     ("attn_scale", "ScDev"),
     ("dropout_seed[by_value]", "DSeedBv"),
     ("dropout_offset[by_value]", "DOffBv"),
+    ("dropout_seed", "DSeed"),
+    ("dropout_offset", "DOff"),
     ("dropout_mask", "DMask"),
     ("dropout_scale[by_value]", "DScBv"),
     ("rng_dump", "Rng"),
@@ -112,6 +114,8 @@ SCALE_ROLES = ("attn_scale[by_value]", "attn_scale[runtime]", "attn_scale")
 DROPOUT_INPUT_ROLES = (
     "dropout_seed[by_value]",
     "dropout_offset[by_value]",
+    "dropout_seed",
+    "dropout_offset",
     "dropout_mask",
     "dropout_scale[by_value]",
 )
