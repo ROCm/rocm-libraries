@@ -143,6 +143,25 @@ class WorkAssignment(Component):
         self._clusterElectArriveSignal(writer, module, labelBase='PersistentMC_SkipSignal', electTag='PersistentMulticastElect')
         return module
 
+    def persistentClusterPrefetchHandoff(self, writer, kernel):
+        """Release PAP's destination bank across all multicast peers.
+
+        PAP is placed after the last reads of that bank have been issued; the
+        remaining current-tile compute/reads use registers or the other bank.
+        A local barrier alone cannot protect a peer's LDS from multicast writes.
+        Complete this cluster phase here because primed entry skips the normal
+        first-load wait. The loop-close fallback must then skip its arrive too.
+        """
+        module = Module('Persistent cluster PAP handoff')
+        if not persistentSpatialCluster(kernel):
+            return module
+        assert writer.states.asmCaps.get('HasClusterBarrier', False), 'cluster B-multicast requires the HasClusterBarrier asm capability'
+        module.add(SWaitCnt(dscnt=0, comment='PAP: finish reads of the next-tile LDS bank'))
+        module.add(SBarrier(comment='PAP: all waves release the multicast destination bank'))
+        self._clusterElectArriveSignal(writer, module, labelBase='PersistentMC_SkipPapSignal',
+                                       electTag='PersistentMulticastPapElect', wait=True)
+        return module
+
     def persistentClusterNextTileArrive(self, writer, kernel):
         """Arrive for the next tile's first-load cluster wait.
 
@@ -160,6 +179,11 @@ class WorkAssignment(Component):
         module.addComment0('cluster B-multicast: arrive for the next tile once this tile is done with LDS')
         module.add(SCmpGeU32(src0=sgpr(partition.cursor), src1=sgpr(partition.bound), comment='no next tile: nothing to arrive for'))
         module.add(SCBranchSCC1(labelName=skipArrive.getLabelName()))
+        if kernel.get('PrefetchAcrossPersistent', 0):
+            module.add(SBitcmp1B32(src0=sgpr('PersistentPrefetchState'), src1=0,
+                                   comment='PAP already completed the next-tile cluster handoff?'))
+            module.add(SCBranchSCC1(labelName=skipArrive.getLabelName(),
+                                    comment='primed entry skips the matching first-load wait'))
         module.add(SWaitCnt(dscnt=0, comment='LDS reads of this tile done'))
         module.add(SBarrier(comment='all waves done with LDS before the cluster arrive'))
         self._clusterElectArriveSignal(writer, module, labelBase='PersistentMC_SkipTileSignal', electTag='PersistentMulticastTileElect')
