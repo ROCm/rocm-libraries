@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -142,7 +143,7 @@ std::vector<KernelArgument> gfx950AttentionDenseSignature(bool withHeads)
 // module load when its signature is the one that contract launches.
 IngestorPlanPayload gfx950AttentionDensePayload(std::string_view dispatchSymbol, bool withHeads)
 {
-    const AttentionDenseBinding binding{1, 2, 3, 4, 1, 0, 0.125F};
+    const AttentionDenseBinding binding{1, 2, 3, 4, 1, 0, 0.125F, std::nullopt};
     AttentionDenseProblem problem;
     problem.batch = 2;
     problem.seqLenQ = 512;
@@ -157,6 +158,41 @@ IngestorPlanPayload gfx950AttentionDensePayload(std::string_view dispatchSymbol,
     payload.launchValues = gfx950AttentionDenseLaunchValues(binding, problem, int64_t{256});
     payload.symbol = "attention_dense";
     payload.recordedSignature = gfx950AttentionDenseSignature(withHeads);
+    return payload;
+}
+
+// A gfx950 dense-attention bias plan under v3, the contract of a bias kernel: the v2 values
+// plus a [B, 1, Sq, Skv] bias. Its recorded signature is v2's ten arguments, then the bias
+// pointer and its three strides when `withBiasTail`.
+IngestorPlanPayload gfx950AttentionDenseBiasPayload(bool withBiasTail)
+{
+    const AttentionDenseBinding binding{
+        1, 2, 3, 4, 1, 0, 0.125F, AdditiveBias{5, {512 * 512, 0, 512}}};
+    AttentionDenseProblem problem;
+    problem.batch = 2;
+    problem.seqLenQ = 512;
+    problem.seqLenKv = 512;
+    problem.numQueryHeads = 8;
+    problem.numKvHeads = 4;
+    problem.headSize = 128;
+    problem.dataType = data_objects::DataType::BFLOAT16;
+
+    IngestorPlanPayload payload = validConvFwdPayload();
+    payload.dispatchSymbol = std::string(GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V3);
+    payload.launchValues = gfx950AttentionDenseLaunchValues(binding, problem, int64_t{256});
+    payload.symbol = "attention_dense";
+    payload.recordedSignature = gfx950AttentionDenseSignature(/*withHeads=*/true);
+    if(withBiasTail)
+    {
+        payload.recordedSignature.push_back(
+            KernelArgument{"global_buffer", 8, 56, "additive_bias_ptr"});
+        payload.recordedSignature.push_back(
+            KernelArgument{"by_value", 4, 64, "additive_bias_batch_stride"});
+        payload.recordedSignature.push_back(
+            KernelArgument{"by_value", 4, 68, "additive_bias_head_stride"});
+        payload.recordedSignature.push_back(
+            KernelArgument{"by_value", 4, 72, "additive_bias_sq_stride"});
+    }
     return payload;
 }
 
@@ -302,13 +338,17 @@ TEST_F(TestIngestorPlanRestoreChecks, RefusesASignatureThePackDoesNotLaunch)
 }
 
 // Each gfx950 dense-attention contract restores only the code object it launches: v1 the
-// 8-argument kernels that bake the head counts, v2 the 10-argument kernels that read them.
+// 8-argument kernels that bake the head counts, v2 the 10-argument kernels that read them,
+// and v3 the 14-argument bias kernels.
 TEST_F(TestIngestorPlanRestoreChecks, Gfx950AttentionDenseContractsRefuseTheOtherSignature)
 {
     expectRefusal(gfx950AttentionDensePayload(GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V1, true),
                   HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE,
                   "the saved kernel's arguments do not match what this provider launches");
     expectRefusal(gfx950AttentionDensePayload(GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V2, false),
+                  HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE,
+                  "the saved kernel's arguments do not match what this provider launches");
+    expectRefusal(gfx950AttentionDenseBiasPayload(/*withBiasTail=*/false),
                   HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE,
                   "the saved kernel's arguments do not match what this provider launches");
 }
@@ -326,6 +366,10 @@ TEST_F(TestIngestorPlanRestoreChecks, Gfx950AttentionDenseContractsAcceptTheirOw
         payload.launchValues["block_m"] = int64_t{64};
         expectRefusal(payload, HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE, "launch value 'block_m'");
     }
+
+    auto bias = gfx950AttentionDenseBiasPayload(/*withBiasTail=*/true);
+    bias.launchValues["block_m"] = int64_t{64};
+    expectRefusal(bias, HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE, "launch value 'block_m'");
 }
 
 TEST_F(TestIngestorPlanRestoreChecks, RefusesAnUnversionedAlias)

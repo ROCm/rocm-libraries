@@ -59,11 +59,18 @@ constexpr std::string_view KERNEL_MATCHER_SYMBOL = "hipkernel.gfx950_attention_d
 constexpr std::string_view SCORE_SYMBOL = "hipkernel.gfx950_attention_dense.score";
 /// The mask type graph_match derives and kernel_match compares, as the engine names it.
 constexpr std::string_view CAUSAL_TOKEN = "gfx950_attention_dense.causal";
+/// The additive-bias tokens graph_match binds (the uid and strides only when the flag is 1).
+constexpr std::string_view BIAS_TOKEN = "gfx950_attention_dense.bias";
+constexpr std::string_view BIAS_UID_TOKEN = "gfx950_attention_dense.bias.uid";
+constexpr std::string_view BIAS_STRIDE_BATCH_TOKEN = "gfx950_attention_dense.bias.stride_batch";
+constexpr std::string_view BIAS_STRIDE_HEAD_TOKEN = "gfx950_attention_dense.bias.stride_head";
+constexpr std::string_view BIAS_STRIDE_QUERY_TOKEN = "gfx950_attention_dense.bias.stride_query";
 
 constexpr int64_t Q_UID = 1;
 constexpr int64_t K_UID = 2;
 constexpr int64_t V_UID = 3;
 constexpr int64_t O_UID = 4;
+constexpr int64_t BIAS_UID = 5;
 constexpr int64_t EXTRA_UID = 99;
 
 /// Base shape: bf16, D128, B=2, Hq=Hkv=4, Sq=Skv=256, top-left causal.
@@ -164,6 +171,17 @@ std::vector<int64_t> operandStrides(const std::optional<std::vector<int64_t>>& s
                                        : stridesFor(layout, heads, sequence, headSize);
 }
 
+/// An attn_mask tensor written into the graph under BIAS_UID, which the SDPA node names.
+struct BiasTensorSpec
+{
+    std::vector<int64_t> dims;
+    std::vector<int64_t> strides;
+    data_objects::DataType dataType = data_objects::DataType::FLOAT;
+    bool isVirtual = false;
+    bool passByValue = false;
+    std::optional<int64_t> raggedOffsetUid;
+};
+
 struct GraphSpec
 {
     int64_t batch = BATCH;
@@ -225,6 +243,7 @@ struct GraphSpec
     std::optional<float> attnScaleValue = SCALE;
 
     // Optional features.
+    std::optional<BiasTensorSpec> bias;
     std::optional<int64_t> attnMaskUid;
     std::optional<int64_t> scaleTensorUid;
     std::optional<int64_t> seqLenQUid;
@@ -344,6 +363,21 @@ flatbuffers::FlatBufferBuilder buildSdpaGraph(const GraphSpec& spec)
         tensors.push_back(
             tensorFor(O_UID, spec.oDataType.value_or(spec.dataType), oStridesPtr, oDims));
     }
+    if(spec.bias.has_value())
+    {
+        tensors.push_back(
+            data_objects::CreateTensorAttributesDirect(builder,
+                                                       BIAS_UID,
+                                                       nullptr,
+                                                       spec.bias->dataType,
+                                                       &spec.bias->strides,
+                                                       &spec.bias->dims,
+                                                       spec.bias->isVirtual,
+                                                       data_objects::TensorValue::NONE,
+                                                       0,
+                                                       spec.bias->passByValue,
+                                                       spec.bias->raggedOffsetUid));
+    }
 
     const auto attributesFor = [&]() {
         data_objects::SdpaAttributesBuilder attributesBuilder(builder);
@@ -371,6 +405,10 @@ flatbuffers::FlatBufferBuilder buildSdpaGraph(const GraphSpec& spec)
         if(spec.attnMaskUid.has_value())
         {
             attributesBuilder.add_attn_mask_tensor_uid(*spec.attnMaskUid);
+        }
+        else if(spec.bias.has_value())
+        {
+            attributesBuilder.add_attn_mask_tensor_uid(BIAS_UID);
         }
         if(spec.scaleTensorUid.has_value())
         {
@@ -563,6 +601,8 @@ struct KernelSpec
     int64_t ragged = 0;
     int64_t blockM = 256;
     int64_t blockN = 64;
+    /// Absent is a record written before the field, which the KMD default completes to 0.
+    std::optional<int64_t> useAdditiveBias;
     /// The descriptor id's final byte. Only the ranking cases vary it.
     unsigned idByte = 0xa1;
 };
@@ -600,6 +640,10 @@ hipdnn_plugin_sdk::ingestor::KernelDefinition makeKernel(const KernelSpec& spec)
         {std::string("block_m"), spec.blockM},
         {std::string("block_n"), spec.blockN},
     };
+    if(spec.useAdditiveBias.has_value())
+    {
+        kernel.metadata[std::string("use_additive_bias")] = *spec.useAdditiveBias;
+    }
     return kernel;
 }
 
@@ -1933,11 +1977,13 @@ TEST(TestGfx950AttentionDenseGraphMatch, DeclinesTheGraphMatchGateCounterexample
 // Declined optional features
 // ---------------------------------------------------------------------------
 
-TEST(TestGfx950AttentionDenseGraphMatch, DeclinesAdditiveAttentionMask)
+TEST(TestGfx950AttentionDenseGraphMatch, DeclinesAnAttnMaskUidNamingNoTensor)
 {
     GraphSpec spec;
     spec.attnMaskUid = EXTRA_UID;
-    EXPECT_FALSE(matchGraph(spec).has_value());
+    const auto decline = loggedDecline(spec);
+    EXPECT_EQ(decline.cause, "attn_mask") << decline.detail;
+    EXPECT_NE(decline.detail.find("uid 99"), std::string::npos) << decline.detail;
 }
 
 TEST(TestGfx950AttentionDenseGraphMatch, DeclinesDeviceResidentScaleTensor)
@@ -2738,6 +2784,221 @@ TEST(TestGfx950AttentionDenseScore, ScoresEveryTileDeterministicallyAsAPositiveF
 }
 
 } // namespace
+
+// ---------------------------------------------------------------------------
+// Additive bias (attn_mask)
+// ---------------------------------------------------------------------------
+
+namespace
+{
+
+/// Packed strides for @p dims, innermost last.
+std::vector<int64_t> packedStrides(const std::vector<int64_t>& dims)
+{
+    std::vector<int64_t> strides(dims.size(), 1);
+    for(std::size_t axis = dims.size() - 1; axis > 0; --axis)
+    {
+        strides[axis - 1] = strides[axis] * dims[axis];
+    }
+    return strides;
+}
+
+/// The base graph with an fp32 bias of @p dims, packed unless @p strides is given.
+GraphSpec withBias(std::vector<int64_t> dims,
+                   const std::optional<std::vector<int64_t>>& strides = {})
+{
+    GraphSpec spec;
+    BiasTensorSpec bias;
+    bias.strides = strides.value_or(packedStrides(dims));
+    bias.dims = std::move(dims);
+    spec.bias = bias;
+    return spec;
+}
+
+int64_t boundOr(const BoundTokens& bound, std::string_view token, int64_t fallback)
+{
+    return hipdnn_plugin_sdk::ingestor::tryGetBoundInt(bound, token).value_or(fallback);
+}
+
+} // namespace
+
+TEST(TestGfx950AttentionDenseGraphMatch, BindsAFullBiasAndItsStrides)
+{
+    const auto bound = matchGraph(withBias({BATCH, HEADS, SEQ, SEQ}));
+    ASSERT_TRUE(bound.has_value());
+    EXPECT_EQ(boundOr(*bound, BIAS_TOKEN, -1), 1);
+    EXPECT_EQ(boundOr(*bound, BIAS_UID_TOKEN, -1), BIAS_UID);
+    EXPECT_EQ(boundOr(*bound, BIAS_STRIDE_BATCH_TOKEN, -1), HEADS * SEQ * SEQ);
+    EXPECT_EQ(boundOr(*bound, BIAS_STRIDE_HEAD_TOKEN, -1), SEQ * SEQ);
+    EXPECT_EQ(boundOr(*bound, BIAS_STRIDE_QUERY_TOKEN, -1), SEQ);
+}
+
+/// An extent-1 axis broadcasts through stride 0, whatever stride the tensor writes on it:
+/// the kernel multiplies every axis index by its stride, and only a zero keeps a broadcast
+/// axis on its one row.
+TEST(TestGfx950AttentionDenseGraphMatch, BindsStrideZeroOnEveryBroadcastAxis)
+{
+    constexpr int64_t ANY = 12345;
+    const auto keyRow = matchGraph(withBias({1, 1, 1, SEQ}, {{ANY, ANY, ANY, 1}}));
+    ASSERT_TRUE(keyRow.has_value());
+    EXPECT_EQ(boundOr(*keyRow, BIAS_STRIDE_BATCH_TOKEN, -1), 0);
+    EXPECT_EQ(boundOr(*keyRow, BIAS_STRIDE_HEAD_TOKEN, -1), 0);
+    EXPECT_EQ(boundOr(*keyRow, BIAS_STRIDE_QUERY_TOKEN, -1), 0);
+
+    const auto perBatch = matchGraph(withBias({BATCH, 1, SEQ, SEQ}, {{SEQ * SEQ, ANY, SEQ, 1}}));
+    ASSERT_TRUE(perBatch.has_value());
+    EXPECT_EQ(boundOr(*perBatch, BIAS_STRIDE_BATCH_TOKEN, -1), SEQ * SEQ);
+    EXPECT_EQ(boundOr(*perBatch, BIAS_STRIDE_HEAD_TOKEN, -1), 0);
+    EXPECT_EQ(boundOr(*perBatch, BIAS_STRIDE_QUERY_TOKEN, -1), SEQ);
+
+    const auto perHead = matchGraph(withBias({1, HEADS, SEQ, SEQ}));
+    ASSERT_TRUE(perHead.has_value());
+    EXPECT_EQ(boundOr(*perHead, BIAS_STRIDE_BATCH_TOKEN, -1), 0);
+    EXPECT_EQ(boundOr(*perHead, BIAS_STRIDE_HEAD_TOKEN, -1), SEQ * SEQ);
+    EXPECT_EQ(boundOr(*perHead, BIAS_STRIDE_QUERY_TOKEN, -1), SEQ);
+
+    // A broadcast axis's written stride is never used, so one the range check would refuse
+    // on a full axis (negative, or 2^31 and above) is accepted there.
+    const auto unusable = matchGraph(withBias({1, 1, SEQ, SEQ}, {{-1, int64_t{1} << 40, SEQ, 1}}));
+    ASSERT_TRUE(unusable.has_value());
+    EXPECT_EQ(boundOr(*unusable, BIAS_STRIDE_BATCH_TOKEN, -1), 0);
+    EXPECT_EQ(boundOr(*unusable, BIAS_STRIDE_HEAD_TOKEN, -1), 0);
+}
+
+TEST(TestGfx950AttentionDenseGraphMatch, BindsNoBiasForAGraphWithoutOne)
+{
+    const auto bound = matchGraph(GraphSpec{});
+    ASSERT_TRUE(bound.has_value());
+    EXPECT_EQ(boundOr(*bound, BIAS_TOKEN, -1), 0);
+    EXPECT_EQ(boundOr(*bound, BIAS_UID_TOKEN, -1), -1);
+}
+
+TEST(TestGfx950AttentionDenseGraphMatch, DeclinesABiasTheKernelCannotRead)
+{
+    struct Case
+    {
+        const char* what;
+        GraphSpec spec;
+        const char* cause;
+    };
+    std::vector<Case> cases;
+
+    auto halfBias = withBias({BATCH, HEADS, SEQ, SEQ});
+    halfBias.bias->dataType = data_objects::DataType::BFLOAT16;
+    cases.push_back({"a bf16 bias (the kernel reads fp32)", halfBias, "attn_mask"});
+
+    cases.push_back({"a rank-3 bias", withBias({HEADS, SEQ, SEQ}), "attn_mask"});
+    cases.push_back(
+        {"a key extent other than Skv", withBias({BATCH, HEADS, SEQ, SEQ / 2}), "attn_mask"});
+    cases.push_back(
+        {"a key axis that is not unit-stride",
+         withBias({BATCH, HEADS, SEQ, SEQ}, {{HEADS * SEQ * SEQ * 2, SEQ * SEQ * 2, SEQ * 2, 2}}),
+         "attn_mask"});
+    cases.push_back(
+        {"a head extent that is neither 1 nor Hq", withBias({BATCH, 2, SEQ, SEQ}), "attn_mask"});
+    cases.push_back(
+        {"a query extent that is neither 1 nor Sq", withBias({BATCH, HEADS, 2, SEQ}), "attn_mask"});
+    cases.push_back({"a negative stride on a full axis",
+                     withBias({BATCH, HEADS, SEQ, SEQ}, {{-HEADS * SEQ * SEQ, SEQ * SEQ, SEQ, 1}}),
+                     "attn_mask"});
+    cases.push_back({"a stride of 2^31",
+                     withBias({BATCH, HEADS, SEQ, SEQ}, {{int64_t{1} << 31, SEQ * SEQ, SEQ, 1}}),
+                     "attn_mask"});
+    // One less passes the stride check, so only the reach check stops it: the batch axis
+    // alone then reaches past element 2^31 - 1.
+    cases.push_back(
+        {"a stride of 2^31 - 1 on a full axis",
+         withBias({BATCH, HEADS, SEQ, SEQ}, {{(int64_t{1} << 31) - 1, SEQ * SEQ, SEQ, 1}}),
+         "size_limit"});
+    // Every stride fits in i32, but (B-1)*2^30 + (Hq-1)*2^29 is past 2^31.
+    cases.push_back(
+        {"a last element past 2^31",
+         withBias({BATCH, HEADS, SEQ, SEQ}, {{int64_t{1} << 30, int64_t{1} << 29, SEQ, 1}}),
+         "size_limit"});
+
+    auto virtualBias = withBias({BATCH, HEADS, SEQ, SEQ});
+    virtualBias.bias->isVirtual = true;
+    cases.push_back({"a virtual bias", virtualBias, "attn_mask"});
+
+    auto raggedBias = withBias({BATCH, HEADS, SEQ, SEQ});
+    raggedBias.bias->raggedOffsetUid = EXTRA_UID;
+    cases.push_back({"a ragged bias", raggedBias, "attn_mask"});
+
+    auto byValueBias = withBias({BATCH, HEADS, SEQ, SEQ});
+    byValueBias.bias->passByValue = true;
+    cases.push_back({"a pass-by-value bias", byValueBias, "attn_mask"});
+
+    for(const auto& c : cases)
+    {
+        SCOPED_TRACE(c.what);
+        const auto decline = loggedDecline(c.spec);
+        EXPECT_EQ(decline.cause, c.cause) << decline.detail;
+        EXPECT_NE(decline.detail.find("attn_mask"), std::string::npos) << decline.detail;
+    }
+}
+
+/// The last element the kernel reaches is (Skv-1) + (Sq-1)*sq + (Hq-1)*hs + (B-1)*bs. A
+/// batch stride that puts it at 2^31 - 1 is the largest bias the kernel can address; one
+/// more element is refused.
+TEST(TestGfx950AttentionDenseGraphMatch, AdditiveBiasReachAdmitsTheLastGraphUnderIt)
+{
+    ASSERT_EQ(BATCH, 2) << "the batch stride below is (B-1) * stride with B-1 = 1";
+    const int64_t headStride = SEQ * SEQ;
+    const int64_t rest = (SEQ - 1) + (SEQ - 1) * SEQ + (HEADS - 1) * headStride;
+    const int64_t lastFittingBatchStride = INT32_LIMIT - 1 - rest;
+
+    const auto under = matchGraph(
+        withBias({BATCH, HEADS, SEQ, SEQ}, {{lastFittingBatchStride, headStride, SEQ, 1}}));
+    ASSERT_TRUE(under.has_value()) << "last element 2^31 - 1";
+    EXPECT_EQ(boundOr(*under, BIAS_STRIDE_BATCH_TOKEN, -1), lastFittingBatchStride);
+
+    const auto decline = loggedDecline(
+        withBias({BATCH, HEADS, SEQ, SEQ}, {{lastFittingBatchStride + 1, headStride, SEQ, 1}}));
+    EXPECT_EQ(decline.cause, "size_limit") << "last element exactly 2^31: " << decline.detail;
+}
+
+/// A bias graph is served by bias candidates only, and a plain graph by plain ones: their
+/// scores differ, and so do their argument lists. A record without the field is a plain
+/// candidate (the KMD default 0).
+TEST(TestGfx950AttentionDenseKernelMatch, PairsBiasGraphsWithBiasCandidatesOnly)
+{
+    const auto biasGraph = withBias({BATCH, HEADS, SEQ, SEQ});
+    KernelSpec biasKernel;
+    biasKernel.useAdditiveBias = 1;
+    KernelSpec plainKernel;
+    plainKernel.useAdditiveBias = 0;
+    const KernelSpec legacyKernel;
+
+    EXPECT_TRUE(matchesKernel(biasGraph, biasKernel));
+    EXPECT_FALSE(matchesKernel(biasGraph, plainKernel));
+    EXPECT_FALSE(matchesKernel(biasGraph, legacyKernel));
+
+    EXPECT_FALSE(matchesKernel(GraphSpec{}, biasKernel));
+    EXPECT_TRUE(matchesKernel(GraphSpec{}, plainKernel));
+    EXPECT_TRUE(matchesKernel(GraphSpec{}, legacyKernel));
+
+    // A field that is neither 0 nor 1 is a malformed record: it serves no graph.
+    KernelSpec malformedKernel;
+    malformedKernel.useAdditiveBias = 2;
+    EXPECT_FALSE(matchesKernel(biasGraph, malformedKernel));
+    EXPECT_FALSE(matchesKernel(GraphSpec{}, malformedKernel));
+}
+
+/// kernel_match reads the bias flag from the binding instead of assuming one; a binding
+/// that lacks it (a renamed token) is refused rather than read as "no bias".
+TEST(TestGfx950AttentionDenseKernelMatch, RefusesABindingWithoutTheBiasFlag)
+{
+    auto bound = matchGraph(GraphSpec{});
+    ASSERT_TRUE(bound.has_value());
+    KernelSpec plainKernel;
+    plainKernel.useAdditiveBias = 0;
+    ASSERT_TRUE(kernelMatchesWithBinding(GraphSpec{}, *bound, plainKernel));
+
+    bound->erase(std::string(BIAS_TOKEN));
+    EXPECT_FALSE(kernelMatchesWithBinding(GraphSpec{}, *bound, plainKernel));
+    EXPECT_FALSE(kernelMatchesWithBinding(GraphSpec{}, *bound, KernelSpec{}));
+}
+
 } // namespace hip_kernel_provider::kernel_ingestor_engine::testing
 
 #endif // HIPDNN_ENABLE_KERNEL_INGESTOR

@@ -3,6 +3,7 @@
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
+#include <array>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -70,7 +71,7 @@ constexpr std::string_view KERNEL_MATCHER_SYMBOL = "hipkernel.gfx950_attention_d
 constexpr std::string_view SCORE_SYMBOL = "hipkernel.gfx950_attention_dense.score";
 constexpr std::string_view DISPATCH_SYMBOL = "hipkernel.gfx950_attention_dense.dispatch";
 
-// KMD fields (12-field schema). The KMD carries only what varies between candidates, so
+// KMD fields (13-field schema). The KMD carries only what varies between candidates, so
 // waves_per_eu/persistent/num_persistent/wide_lds_dma are absent: every shipped variant
 // holds them at one value. A variant that moved any of them would have to add it here
 // first, or the candidates collide on the catalog key and the loader drops one.
@@ -83,6 +84,8 @@ constexpr std::string_view SLIDING_WINDOW_FIELD = "sliding_window";
 constexpr std::string_view RAGGED_FIELD = "ragged";
 constexpr std::string_view BLOCK_M_FIELD = "block_m";
 constexpr std::string_view BLOCK_N_FIELD = "block_n";
+/// 1 for a kernel that adds an fp32 bias; the KMD default 0 completes a record without it.
+constexpr std::string_view USE_ADDITIVE_BIAS_FIELD = "use_additive_bias";
 
 /// The tile every legacy record completes to, and the one cold selection prefers.
 constexpr int64_t BASELINE_BLOCK_M = 256;
@@ -99,6 +102,20 @@ constexpr std::string_view CAUSAL_TOKEN = "gfx950_attention_dense.causal";
 constexpr std::string_view SLIDING_WINDOW_TOKEN = "gfx950_attention_dense.sliding_window";
 /// The softmax scale, f32, bound as its bit pattern (BoundTokens carry int64_t).
 constexpr std::string_view SCALE_BITS_TOKEN = "gfx950_attention_dense.scale_bits";
+/// 1 when the graph carries an additive bias (attn_mask), else 0. The four tokens after it
+/// are bound only when it is 1.
+constexpr std::string_view BIAS_TOKEN = "gfx950_attention_dense.bias";
+constexpr std::string_view BIAS_UID_TOKEN = "gfx950_attention_dense.bias.uid";
+constexpr std::string_view BIAS_STRIDE_BATCH_TOKEN = "gfx950_attention_dense.bias.stride_batch";
+constexpr std::string_view BIAS_STRIDE_HEAD_TOKEN = "gfx950_attention_dense.bias.stride_head";
+constexpr std::string_view BIAS_STRIDE_QUERY_TOKEN = "gfx950_attention_dense.bias.stride_query";
+/// The largest bias stride and bias element index a launch may use: the kernel takes each
+/// stride as an int32_t and addresses the bias with 32-bit element offsets. rocKE states the
+/// same bound as ADDITIVE_BIAS_INDEX_LIMIT (an exclusive 2^31) in
+/// kernels/common/_attention_additive_bias.py. additiveBiasFor(), the dispatch's bound-token
+/// reader (attentionDenseBinding()) and the saved-plan reader all check against this one
+/// constant; test_registry_regeneration.py ties it to the rocKE limit.
+constexpr int64_t MAX_BIAS_INDEX = std::numeric_limits<int32_t>::max();
 
 /// hipDNN tensor axes. The LOGICAL order is always (B, H, S, D) regardless of layout.
 constexpr uint32_t BATCH_AXIS = 0;
@@ -152,6 +169,26 @@ std::optional<int64_t> checkedProduct(std::initializer_list<int64_t> factors)
         }
     }
     return product;
+}
+
+/// The largest bias element index a launch reaches: (seqlen_kv - 1) plus, for each
+/// leading axis, (extent - 1) * stride, with the problem's batch, query-head and query-row
+/// extents. nullopt when a product or the sum overflows int64_t. The kernel addresses the
+/// bias with 32-bit element offsets, so a launch needs this at most MAX_BIAS_INDEX.
+std::optional<int64_t> largestAdditiveBiasIndex(const AttentionDenseProblem& problem,
+                                                const std::array<int32_t, 3>& strides)
+{
+    const std::array<int64_t, 3> extents{problem.batch, problem.numQueryHeads, problem.seqLenQ};
+    int64_t largest = problem.seqLenKv - 1;
+    for(size_t axis = 0; axis < extents.size(); ++axis)
+    {
+        const auto reach = checkedProduct({extents[axis] - 1, int64_t{strides[axis]}});
+        if(!reach.has_value() || __builtin_add_overflow(largest, *reach, &largest))
+        {
+            return std::nullopt;
+        }
+    }
+    return largest;
 }
 
 /// Total over an UNVALIDATED graph: rank, stride/dim agreement and positive extents,
@@ -384,6 +421,81 @@ AttentionDenseProblem problemFor(const data_objects::TensorAttributes& q,
 }
 
 /**
+ * @brief The graph's additive bias as the kernel reads it, or nullopt (logged) when the
+ *        kernel cannot read it.
+ *
+ * hipDNN's attn_mask is an additive bias on the scaled scores. The kernel reads it as fp32
+ * [B|1, Hq|1, Sq|1, Skv] with a unit-stride key axis, indexed by the query head, through
+ * one runtime stride per leading axis; an extent-1 axis broadcasts through stride 0. It
+ * indexes in i32, so the largest element it can reach must be below 2^31.
+ *
+ * Gfx1151WmmaAttentionNative.cpp's biasFor checks the same layout with two differences:
+ * it range-checks a broadcast axis's stride before replacing it with 0 (this pack ignores
+ * it: a size-1 axis is never stepped along), and it bounds the tensor's byte address where
+ * this pack bounds the largest element index the kernel reads (the rocKE kernels index the
+ * bias in i32 elements). Merging the two is a follow-up (see the rocKE known_gaps.md).
+ */
+std::optional<AdditiveBias>
+    additiveBiasFor(const MatchContext& context, int64_t uid, const AttentionDenseProblem& problem)
+{
+    const auto* tensor = findTensor(context, uid);
+    if(tensor == nullptr || tensor->virtual_() || tensor->ragged_offset_tensor_uid().has_value()
+       || hipdnn_flatbuffers_sdk::utilities::isPassByValueTensor(tensor))
+    {
+        HIPDNN_PLUGIN_LOG_INFO(Declined{"attn_mask"}
+                               << "the attn_mask tensor (uid " << uid
+                               << ") must be a real, non-ragged tensor in the graph");
+        return std::nullopt;
+    }
+    const auto* dims = tensor->dims();
+    const auto* strides = tensor->strides();
+    if(dims == nullptr || strides == nullptr || dims->size() != SDPA_RANK
+       || strides->size() != SDPA_RANK || dims->Get(HEAD_SIZE_AXIS) != problem.seqLenKv
+       || (problem.seqLenKv > 1 && strides->Get(HEAD_SIZE_AXIS) != 1))
+    {
+        HIPDNN_PLUGIN_LOG_INFO(Declined{"attn_mask"}
+                               << describeOperand("attn_mask", *tensor)
+                               << " must be rank-4 [B|1, Hq|1, Sq|1, Skv] with Skv = "
+                               << problem.seqLenKv << " at unit stride");
+        return std::nullopt;
+    }
+    if(tensor->data_type() != data_objects::DataType::FLOAT)
+    {
+        HIPDNN_PLUGIN_LOG_INFO(Declined{"attn_mask"}
+                               << "attn_mask data type " << tensor->data_type()
+                               << " is not supported; the kernel reads an FP32 bias");
+        return std::nullopt;
+    }
+
+    const std::array<int64_t, 3> extents{problem.batch, problem.numQueryHeads, problem.seqLenQ};
+    AdditiveBias bias;
+    bias.uid = uid;
+    for(uint32_t axis = 0; axis < extents.size(); ++axis)
+    {
+        const int64_t extent = dims->Get(axis);
+        const int64_t stride = extent == 1 ? 0 : strides->Get(axis);
+        if((extent != 1 && extent != extents[axis]) || stride < 0 || stride > MAX_BIAS_INDEX)
+        {
+            HIPDNN_PLUGIN_LOG_INFO(Declined{"attn_mask"}
+                                   << describeOperand("attn_mask", *tensor) << " axis " << axis
+                                   << " must have extent 1 or " << extents[axis]
+                                   << " and a stride in [0, 2^31)");
+            return std::nullopt;
+        }
+        bias.strides[axis] = static_cast<int32_t>(stride);
+    }
+    const auto maxIndex = largestAdditiveBiasIndex(problem, bias.strides);
+    if(!maxIndex.has_value() || *maxIndex > MAX_BIAS_INDEX)
+    {
+        HIPDNN_PLUGIN_LOG_INFO(Declined{"size_limit"}
+                               << "attn_mask reaches element 2^31 or beyond; the kernel "
+                                  "addresses the bias with 32-bit element offsets");
+        return std::nullopt;
+    }
+    return bias;
+}
+
+/**
  * @brief Graph-scoped applicability for the whole engine.
  *
  * Each decline of a graph with an SDPA-forward node logs its cause at INFO (see Declined);
@@ -409,7 +521,8 @@ std::optional<BoundTokens> gfx950AttentionDenseGraphMatches(const MatchContext& 
     }
     const auto& attributes = *attributesPtr;
 
-    // --- 2. Operands. Q/K/V/O are the four the shipped 8-arg ABI has pointers for.
+    // --- 2. Operands. Q/K/V/O are the four pointers every candidate's ABI has; the
+    //     optional attn_mask (step 8) adds the bias pointer of the 14-arg form.
     const auto* q = findTensor(context, attributes.q_tensor_uid());
     const auto* k = findTensor(context, attributes.k_tensor_uid());
     const auto* v = findTensor(context, attributes.v_tensor_uid());
@@ -590,15 +703,18 @@ std::optional<BoundTokens> gfx950AttentionDenseGraphMatches(const MatchContext& 
         return std::nullopt;
     }
 
-    // --- 8. Every optional attribute this kernel cannot honour, declined explicitly.
+    // --- 8. The additive bias, then every optional attribute this kernel cannot honour,
+    // declined explicitly.
 
-    // Additive attention bias.
-    if(attributes.attn_mask_tensor_uid().has_value())
+    // Additive attention bias: served by the use_additive_bias variants.
+    std::optional<AdditiveBias> bias;
+    if(const auto maskUid = attributes.attn_mask_tensor_uid(); maskUid.has_value())
     {
-        HIPDNN_PLUGIN_LOG_INFO(Declined{"attn_mask"}
-                               << "an additive attention mask (attn_mask tensor) is not "
-                                  "supported");
-        return std::nullopt;
+        bias = additiveBiasFor(context, *maskUid, problem);
+        if(!bias.has_value())
+        {
+            return std::nullopt;
+        }
     }
     // Device-resident scale: the ABI takes `scale` as an f32 kernarg.
     if(attributes.scale_tensor_uid().has_value())
@@ -728,6 +844,14 @@ std::optional<BoundTokens> gfx950AttentionDenseGraphMatches(const MatchContext& 
     static_assert(sizeof(scaleBits) == sizeof(scale), "float must be 32-bit to round-trip");
     std::memcpy(&scaleBits, &scale, sizeof(scale));
     bound[std::string(SCALE_BITS_TOKEN)] = static_cast<int64_t>(scaleBits);
+    bound[std::string(BIAS_TOKEN)] = int64_t{bias.has_value() ? 1 : 0};
+    if(bias.has_value())
+    {
+        bound[std::string(BIAS_UID_TOKEN)] = bias->uid;
+        bound[std::string(BIAS_STRIDE_BATCH_TOKEN)] = static_cast<int64_t>(bias->strides[0]);
+        bound[std::string(BIAS_STRIDE_HEAD_TOKEN)] = static_cast<int64_t>(bias->strides[1]);
+        bound[std::string(BIAS_STRIDE_QUERY_TOKEN)] = static_cast<int64_t>(bias->strides[2]);
+    }
     return bound;
 }
 
@@ -756,6 +880,29 @@ AttentionDenseBinding attentionDenseBinding(const BoundTokens& bound)
 
     const auto scaleBits = static_cast<int32_t>(read(SCALE_BITS_TOKEN));
     std::memcpy(&binding.scale, &scaleBits, sizeof(binding.scale));
+    if(read(BIAS_TOKEN) != 0)
+    {
+        // graph_match binds strides in [0, MAX_BIAS_INDEX] (the message's [0, 2^31));
+        // re-checked so a wrapped kernarg cannot reach the kernel from a binding
+        // graph_match did not produce.
+        const auto readStride = [&read](std::string_view token) {
+            const int64_t value = read(token);
+            if(value < 0 || value > MAX_BIAS_INDEX)
+            {
+                throw hipdnn_plugin_sdk::HipdnnPluginException(
+                    HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+                    "gfx950 attention_dense dispatch: bound token '" + std::string(token)
+                        + "' is outside [0, 2^31)");
+            }
+            return static_cast<int32_t>(value);
+        };
+        AdditiveBias bias;
+        bias.uid = read(BIAS_UID_TOKEN);
+        bias.strides = {readStride(BIAS_STRIDE_BATCH_TOKEN),
+                        readStride(BIAS_STRIDE_HEAD_TOKEN),
+                        readStride(BIAS_STRIDE_QUERY_TOKEN)};
+        binding.bias = bias;
+    }
     return binding;
 }
 
@@ -812,6 +959,25 @@ bool tileDivides(const AttentionDenseTile& tile, const AttentionDenseProblem& pr
     return problem.seqLenQ % tile.blockM == 0 && problem.seqLenKv % tile.blockN == 0;
 }
 
+/// Whether the candidate adds a bias (which also appends four kernel arguments), or
+/// nullopt for a malformed record. An absent field is the KMD default 0; a field holding
+/// another type or a value other than 0/1 is malformed and declines, rather than reading
+/// as a plain kernel. Total: never throws.
+std::optional<bool> candidateAdditiveBias(const KernelDefinition& kernel)
+{
+    const auto it = kernel.metadata.find(std::string(USE_ADDITIVE_BIAS_FIELD));
+    if(it == kernel.metadata.end())
+    {
+        return false;
+    }
+    const auto* value = std::get_if<int64_t>(&it->second);
+    if(value == nullptr || (*value != 0 && *value != 1))
+    {
+        return std::nullopt;
+    }
+    return *value == 1;
+}
+
 /**
  * @brief Kernel-scoped applicability: does THIS candidate's baked metadata fit?
  *
@@ -820,10 +986,10 @@ bool tileDivides(const AttentionDenseTile& tile, const AttentionDenseProblem& pr
  * declined even at its authored shape rather than matched on metadata equality.
  *
  * A served candidate receives batch/seqlen_q/seqlen_kv and num_query_heads/num_kv_heads
- * as runtime kernel arguments, so one binary serves any valid shape; the metadata's
- * shape fields are canonical build inputs and are not compared. The head counts are
- * still compared below because the catalog lists each head configuration as its own
- * entry.
+ * as runtime kernel arguments, so one binary serves any valid shape for the same head
+ * size/dtype/mask/bias configuration; the metadata's shape fields are canonical build
+ * inputs and are not compared. The head counts are still compared below because the
+ * catalog lists each head configuration as its own entry.
  *
  * Divisibility is against the candidate's OWN tile -- `Sq % block_m == 0` and
  * `Skv % block_n == 0` -- so one graph can admit some tiles of a cohort and not others.
@@ -891,6 +1057,15 @@ bool kernelMatches(const MatchContext& context,
         return false;
     }
 
+    // A bias graph needs a bias candidate and a plain graph a plain one: the scores and
+    // the argument lists differ.
+    const auto bias = hipdnn_plugin_sdk::ingestor::tryGetBoundInt(bound, BIAS_TOKEN);
+    const auto candidateBias = candidateAdditiveBias(kernel);
+    if(!bias.has_value() || !candidateBias.has_value() || *candidateBias != (*bias != 0))
+    {
+        return false;
+    }
+
     return tileDivides(*tile, problem);
 }
 
@@ -940,7 +1115,8 @@ double scoreKernel(const MatchContext& /*context*/,
 // Dispatch
 // ---------------------------------------------------------------------------
 
-/// The kernel signature for all variants in this engine.
+/// The kernel signature of a variant: the eight arguments every variant takes, then, for a
+/// use_additive_bias variant, the bias pointer and its batch/head/sq strides.
 ///
 /// All variants are non-persistent. use_sinks=False so no sink_ptr slot.
 ///
@@ -954,10 +1130,11 @@ double scoreKernel(const MatchContext& /*context*/,
 /// divergence here fails every dispatch rather than silently weakening the check.
 ///
 /// Offsets mirror the packed kernarg layout. They are not compared -- they exist so the
-/// mismatch diagnostic prints the real layout beside the recorded one instead of ten
-/// zeroes that read as data.
+/// mismatch diagnostic prints the real layout beside the recorded one instead of a row
+/// of zeroes that read as data.
 ///
-/// This is the dispatch.v2 form, which every kernel in the catalog takes.
+/// This is the dispatch.v2 form, which every plain kernel in the catalog takes. A
+/// use_additive_bias kernel takes the dispatch.v3 form, attentionDenseKernelSignatureV3().
 std::vector<KernelArgument> attentionDenseKernelSignature()
 {
     constexpr auto PTR = static_cast<uint32_t>(sizeof(void*));
@@ -986,24 +1163,81 @@ std::vector<KernelArgument> attentionDenseKernelSignatureV1()
     return signature;
 }
 
-/// The launch contract a dispatch handler serves. The two versions share their launch
-/// values and differ only in whether the launch passes the head counts.
+/// The dispatch.v3 form, which every use_additive_bias kernel takes: the v2 list, then
+/// the bias pointer and its batch/head/sq element strides.
+std::vector<KernelArgument> attentionDenseKernelSignatureV3()
+{
+    constexpr auto PTR = static_cast<uint32_t>(sizeof(void*));
+    constexpr auto I32 = static_cast<uint32_t>(sizeof(int32_t));
+
+    auto signature = attentionDenseKernelSignature();
+    // Spelled as kernels/common/_attention_additive_bias.py declares them.
+    signature.push_back(KernelArgument{"global_buffer", PTR, 56, "additive_bias_ptr"});
+    signature.push_back(KernelArgument{"by_value", I32, 64, "additive_bias_batch_stride"});
+    signature.push_back(KernelArgument{"by_value", I32, 68, "additive_bias_head_stride"});
+    signature.push_back(KernelArgument{"by_value", I32, 72, "additive_bias_sq_stride"});
+    return signature;
+}
+
+/// The launch contract a dispatch handler serves. v1 and v2 share their launch values and
+/// differ only in whether the launch passes the head counts; v3 is v2 plus the bias.
 enum class AttentionDenseContract
 {
     V1,
-    V2
+    V2,
+    V3
 };
 
 std::string_view contractSymbol(AttentionDenseContract contract)
 {
-    return contract == AttentionDenseContract::V1 ? GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V1
+    if(contract == AttentionDenseContract::V1)
+    {
+        return GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V1;
+    }
+    return contract == AttentionDenseContract::V3 ? GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V3
                                                   : GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V2;
 }
 
 std::vector<KernelArgument> contractSignature(AttentionDenseContract contract)
 {
-    return contract == AttentionDenseContract::V1 ? attentionDenseKernelSignatureV1()
+    if(contract == AttentionDenseContract::V1)
+    {
+        return attentionDenseKernelSignatureV1();
+    }
+    return contract == AttentionDenseContract::V3 ? attentionDenseKernelSignatureV3()
                                                   : attentionDenseKernelSignature();
+}
+
+/// The contract a plan built from a graph takes, for a handler registered under
+/// @p handler: the current handler gives a bias binding v3 and a plain one v2; the v1
+/// handler, kept for saved plans, has no bias form.
+AttentionDenseContract preparedContract(AttentionDenseContract handler, bool additiveBias)
+{
+    if(handler == AttentionDenseContract::V1)
+    {
+        if(additiveBias)
+        {
+            throw hipdnn_plugin_sdk::HipdnnPluginException(
+                HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                "gfx950 attention_dense: the dispatch.v1 contract has no additive bias form");
+        }
+        return AttentionDenseContract::V1;
+    }
+    return additiveBias ? AttentionDenseContract::V3 : AttentionDenseContract::V2;
+}
+
+/// The contract a saved plan restores under, for a handler registered under @p handler:
+/// the current handler serves both current contracts and reads the one the plan names
+/// (anything but v3 is read, and refused, against v2); the v1 handler only v1.
+AttentionDenseContract restoredContract(AttentionDenseContract handler,
+                                        std::string_view dispatchSymbol)
+{
+    if(handler == AttentionDenseContract::V1)
+    {
+        return AttentionDenseContract::V1;
+    }
+    return dispatchSymbol == GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V3 ? AttentionDenseContract::V3
+                                                                       : AttentionDenseContract::V2;
 }
 
 /// The compiled kernel plus everything launch() needs, owning nothing that points back
@@ -1091,9 +1325,13 @@ std::unique_ptr<PreparedDispatch>
 /**
  * @brief The native dispatch behind this engine's UDD, for one launch contract.
  *
- * The v2 handler serves the catalog and saves new plans. The v1 handler is registered only
- * under the v1 name, so a plan saved before the head counts became runtime arguments
- * restores with its own 8-argument code object and launches it with 8 arguments.
+ * The current handler serves the catalog and both current contracts: it prepares a plain
+ * graph under v2 and a bias graph under v3, saves each plan under the contract it was
+ * prepared with, and restores either. It is registered under the unversioned name, v2 and
+ * v3, because a plan may be saved only under a name registered to the handler that saves
+ * it. The v1 handler is registered only under the v1 name, so a plan saved before the head
+ * counts became runtime arguments restores with its own 8-argument code object and
+ * launches it with 8 arguments.
  */
 class Gfx950AttentionDenseDispatchHandler : public IKernelDispatchHandler<Handle>
 {
@@ -1145,8 +1383,20 @@ public:
                     + "' declares no supported block_m/block_n tile");
         }
 
+        // kernel_match pairs a bias graph with a bias candidate only, so the binding and the
+        // candidate agree; this is the same defence in depth as the checks above.
+        const auto candidateBias = candidateAdditiveBias(kernel);
+        if(!candidateBias.has_value() || binding.bias.has_value() != *candidateBias)
+        {
+            throw hipdnn_plugin_sdk::HipdnnPluginException(
+                HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                "gfx950 attention_dense: kernel '" + toString(kernel.kernelId)
+                    + "' and the graph disagree on the additive bias");
+        }
+
+        const auto contract = preparedContract(_contract, binding.bias.has_value());
         auto code
-            = buildIngestorKernelCode(_kpackLoader, context, kernel, contractSignature(_contract));
+            = buildIngestorKernelCode(_kpackLoader, context, kernel, contractSignature(contract));
 
         const auto* q = findTensor(context, binding.q);
         const auto* k = findTensor(context, binding.k);
@@ -1156,7 +1406,7 @@ public:
             std::move(code),
             Gfx950AttentionDenseLaunchInputs{binding, problem, tile->blockM},
             toString(kernel.kernelId),
-            _contract);
+            contract);
     }
 
     std::unique_ptr<PreparedDispatch> restoreLaunch(const SavedLaunchInputs& inputs,
@@ -1164,16 +1414,17 @@ public:
                                                     int deviceOrdinal) const override
     {
         const std::string kernelName = toString(code.kernelId);
+        const auto contract = restoredContract(_contract, inputs.dispatchSymbol);
         // The saved code object must take this contract's arguments (checked first, inside
         // restoreIngestorLaunch), and its values must be saved under this contract's name.
-        const auto readThisContract = [this](const SavedLaunchInputs& saved) {
-            requireLaunchContract(saved, contractSymbol(_contract));
+        const auto readThisContract = [contract](const SavedLaunchInputs& saved) {
+            requireLaunchContract(saved, contractSymbol(contract));
             return readGfx950AttentionDenseLaunchInputs(saved);
         };
         auto restored = restoreIngestorLaunch<Gfx950AttentionDenseLaunchInputs>(
-            inputs, std::move(code), contractSignature(_contract), readThisContract, deviceOrdinal);
+            inputs, std::move(code), contractSignature(contract), readThisContract, deviceOrdinal);
         return makePreparedGfx950AttentionDense(
-            std::move(restored.code), restored.launch, kernelName, _contract);
+            std::move(restored.code), restored.launch, kernelName, contract);
     }
 
     std::optional<SavedLaunchInputs>
@@ -1212,7 +1463,8 @@ public:
         const auto& p = preparedDense.problem();
         auto& kernel = preparedDense.kernelForStream(handle.getStream());
         // Exactly the arguments the code object was checked against: v1 code objects bake
-        // the head counts, v2 code objects read them as the two trailing arguments.
+        // the head counts, v2 code objects read them as the two trailing arguments, and v3
+        // code objects take the bias pointer and its strides after them.
         if(preparedDense.contract() == AttentionDenseContract::V1)
         {
             kernel.launch(handle.getStream(),
@@ -1226,17 +1478,31 @@ public:
                           static_cast<int32_t>(p.seqLenKv));
             return;
         }
-        kernel.launch(handle.getStream(),
-                      q.ptr,
-                      k.ptr,
-                      v.ptr,
-                      o.ptr,
-                      binding.scale,
-                      static_cast<int32_t>(p.batch),
-                      static_cast<int32_t>(p.seqLenQ),
-                      static_cast<int32_t>(p.seqLenKv),
-                      static_cast<int32_t>(p.numQueryHeads),
-                      static_cast<int32_t>(p.numKvHeads));
+        const auto launchWith = [&](const auto&... tail) {
+            kernel.launch(handle.getStream(),
+                          q.ptr,
+                          k.ptr,
+                          v.ptr,
+                          o.ptr,
+                          binding.scale,
+                          static_cast<int32_t>(p.batch),
+                          static_cast<int32_t>(p.seqLenQ),
+                          static_cast<int32_t>(p.seqLenKv),
+                          static_cast<int32_t>(p.numQueryHeads),
+                          static_cast<int32_t>(p.numKvHeads),
+                          tail...);
+        };
+        if(preparedDense.contract() == AttentionDenseContract::V3)
+        {
+            const auto bias = hipdnn_plugin_sdk::findDeviceBuffer(
+                binding.bias->uid, deviceBuffers, numDeviceBuffers);
+            launchWith(bias.ptr,
+                       binding.bias->strides[0],
+                       binding.bias->strides[1],
+                       binding.bias->strides[2]);
+            return;
+        }
+        launchWith();
     }
 
 private:
@@ -1250,24 +1516,37 @@ MetadataValues gfx950AttentionDenseLaunchValues(const AttentionDenseBinding& bin
                                                 const AttentionDenseProblem& problem,
                                                 int64_t blockM)
 {
-    return {{std::string(GFX950_ATTENTION_DENSE_Q_UID_VALUE), binding.q},
-            {std::string(GFX950_ATTENTION_DENSE_K_UID_VALUE), binding.k},
-            {std::string(GFX950_ATTENTION_DENSE_V_UID_VALUE), binding.v},
-            {std::string(GFX950_ATTENTION_DENSE_O_UID_VALUE), binding.o},
-            {std::string(GFX950_ATTENTION_DENSE_CAUSAL_VALUE), binding.causal},
-            {std::string(GFX950_ATTENTION_DENSE_SLIDING_WINDOW_VALUE), binding.slidingWindow},
-            {std::string(GFX950_ATTENTION_DENSE_BATCH_VALUE), problem.batch},
-            {std::string(GFX950_ATTENTION_DENSE_SEQLEN_Q_VALUE), problem.seqLenQ},
-            {std::string(GFX950_ATTENTION_DENSE_SEQLEN_KV_VALUE), problem.seqLenKv},
-            {std::string(GFX950_ATTENTION_DENSE_NUM_QUERY_HEADS_VALUE), problem.numQueryHeads},
-            {std::string(GFX950_ATTENTION_DENSE_NUM_KV_HEADS_VALUE), problem.numKvHeads},
-            {std::string(GFX950_ATTENTION_DENSE_HEAD_SIZE_VALUE), problem.headSize},
-            {std::string(GFX950_ATTENTION_DENSE_BLOCK_M_VALUE), blockM},
-            {std::string(GFX950_ATTENTION_DENSE_SCALE_VALUE), static_cast<double>(binding.scale)},
-            {std::string(GFX950_ATTENTION_DENSE_DATA_TYPE_VALUE),
-             std::string(data_objects::EnumNameDataType(problem.dataType))},
-            {std::string(GFX950_ATTENTION_DENSE_STRIDE_LAYOUT_VALUE),
-             std::string(GFX950_ATTENTION_DENSE_BSHD_LAYOUT)}};
+    MetadataValues values{
+        {std::string(GFX950_ATTENTION_DENSE_Q_UID_VALUE), binding.q},
+        {std::string(GFX950_ATTENTION_DENSE_K_UID_VALUE), binding.k},
+        {std::string(GFX950_ATTENTION_DENSE_V_UID_VALUE), binding.v},
+        {std::string(GFX950_ATTENTION_DENSE_O_UID_VALUE), binding.o},
+        {std::string(GFX950_ATTENTION_DENSE_CAUSAL_VALUE), binding.causal},
+        {std::string(GFX950_ATTENTION_DENSE_SLIDING_WINDOW_VALUE), binding.slidingWindow},
+        {std::string(GFX950_ATTENTION_DENSE_BATCH_VALUE), problem.batch},
+        {std::string(GFX950_ATTENTION_DENSE_SEQLEN_Q_VALUE), problem.seqLenQ},
+        {std::string(GFX950_ATTENTION_DENSE_SEQLEN_KV_VALUE), problem.seqLenKv},
+        {std::string(GFX950_ATTENTION_DENSE_NUM_QUERY_HEADS_VALUE), problem.numQueryHeads},
+        {std::string(GFX950_ATTENTION_DENSE_NUM_KV_HEADS_VALUE), problem.numKvHeads},
+        {std::string(GFX950_ATTENTION_DENSE_HEAD_SIZE_VALUE), problem.headSize},
+        {std::string(GFX950_ATTENTION_DENSE_BLOCK_M_VALUE), blockM},
+        {std::string(GFX950_ATTENTION_DENSE_SCALE_VALUE), static_cast<double>(binding.scale)},
+        {std::string(GFX950_ATTENTION_DENSE_DATA_TYPE_VALUE),
+         std::string(data_objects::EnumNameDataType(problem.dataType))},
+        {std::string(GFX950_ATTENTION_DENSE_STRIDE_LAYOUT_VALUE),
+         std::string(GFX950_ATTENTION_DENSE_BSHD_LAYOUT)}};
+    if(binding.bias.has_value())
+    {
+        const auto& bias = *binding.bias;
+        values[std::string(GFX950_ATTENTION_DENSE_BIAS_UID_VALUE)] = bias.uid;
+        values[std::string(GFX950_ATTENTION_DENSE_BIAS_STRIDE_BATCH_VALUE)]
+            = int64_t{bias.strides[0]};
+        values[std::string(GFX950_ATTENTION_DENSE_BIAS_STRIDE_HEAD_VALUE)]
+            = int64_t{bias.strides[1]};
+        values[std::string(GFX950_ATTENTION_DENSE_BIAS_STRIDE_QUERY_VALUE)]
+            = int64_t{bias.strides[2]};
+    }
+    return values;
 }
 
 namespace
@@ -1288,29 +1567,45 @@ namespace
 Gfx950AttentionDenseLaunchInputs
     readGfx950AttentionDenseLaunchInputs(const SavedLaunchInputs& inputs)
 {
-    // v1 and v2 share this value set; anything else, including the unversioned name, is
-    // refused against v2, the current contract.
-    requireLaunchContract(inputs,
-                          inputs.dispatchSymbol == GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V1
-                              ? GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V1
-                              : GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V2);
-    requireOnlyLaunchValues(inputs,
-                            {GFX950_ATTENTION_DENSE_Q_UID_VALUE,
-                             GFX950_ATTENTION_DENSE_K_UID_VALUE,
-                             GFX950_ATTENTION_DENSE_V_UID_VALUE,
-                             GFX950_ATTENTION_DENSE_O_UID_VALUE,
-                             GFX950_ATTENTION_DENSE_CAUSAL_VALUE,
-                             GFX950_ATTENTION_DENSE_SLIDING_WINDOW_VALUE,
-                             GFX950_ATTENTION_DENSE_BATCH_VALUE,
-                             GFX950_ATTENTION_DENSE_SEQLEN_Q_VALUE,
-                             GFX950_ATTENTION_DENSE_SEQLEN_KV_VALUE,
-                             GFX950_ATTENTION_DENSE_NUM_QUERY_HEADS_VALUE,
-                             GFX950_ATTENTION_DENSE_NUM_KV_HEADS_VALUE,
-                             GFX950_ATTENTION_DENSE_HEAD_SIZE_VALUE,
-                             GFX950_ATTENTION_DENSE_BLOCK_M_VALUE,
-                             GFX950_ATTENTION_DENSE_SCALE_VALUE,
-                             GFX950_ATTENTION_DENSE_DATA_TYPE_VALUE,
-                             GFX950_ATTENTION_DENSE_STRIDE_LAYOUT_VALUE});
+    // v1 and v2 share one value set and v3 adds the bias values; anything else, including
+    // the unversioned name, is refused against v2, the current plain contract.
+    const auto& symbol = inputs.dispatchSymbol;
+    const bool withBias = symbol == GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V3;
+    std::string_view expected = GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V2;
+    if(symbol == GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V1)
+    {
+        expected = GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V1;
+    }
+    else if(withBias)
+    {
+        expected = GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V3;
+    }
+    requireLaunchContract(inputs, expected);
+    std::vector<std::string_view> names{GFX950_ATTENTION_DENSE_Q_UID_VALUE,
+                                        GFX950_ATTENTION_DENSE_K_UID_VALUE,
+                                        GFX950_ATTENTION_DENSE_V_UID_VALUE,
+                                        GFX950_ATTENTION_DENSE_O_UID_VALUE,
+                                        GFX950_ATTENTION_DENSE_CAUSAL_VALUE,
+                                        GFX950_ATTENTION_DENSE_SLIDING_WINDOW_VALUE,
+                                        GFX950_ATTENTION_DENSE_BATCH_VALUE,
+                                        GFX950_ATTENTION_DENSE_SEQLEN_Q_VALUE,
+                                        GFX950_ATTENTION_DENSE_SEQLEN_KV_VALUE,
+                                        GFX950_ATTENTION_DENSE_NUM_QUERY_HEADS_VALUE,
+                                        GFX950_ATTENTION_DENSE_NUM_KV_HEADS_VALUE,
+                                        GFX950_ATTENTION_DENSE_HEAD_SIZE_VALUE,
+                                        GFX950_ATTENTION_DENSE_BLOCK_M_VALUE,
+                                        GFX950_ATTENTION_DENSE_SCALE_VALUE,
+                                        GFX950_ATTENTION_DENSE_DATA_TYPE_VALUE,
+                                        GFX950_ATTENTION_DENSE_STRIDE_LAYOUT_VALUE};
+    if(withBias)
+    {
+        names.insert(names.end(),
+                     {GFX950_ATTENTION_DENSE_BIAS_UID_VALUE,
+                      GFX950_ATTENTION_DENSE_BIAS_STRIDE_BATCH_VALUE,
+                      GFX950_ATTENTION_DENSE_BIAS_STRIDE_HEAD_VALUE,
+                      GFX950_ATTENTION_DENSE_BIAS_STRIDE_QUERY_VALUE});
+    }
+    requireOnlyLaunchValues(inputs, names);
 
     constexpr int64_t INT32_LIMIT = std::numeric_limits<int32_t>::max();
 
@@ -1407,6 +1702,30 @@ Gfx950AttentionDenseLaunchInputs
                                         "is not a tile the kernel is built with: "
                                             + error.getMessage());
     }
+
+    if(withBias)
+    {
+        // The same bounds additiveBiasFor() puts on a graph's bias: the kernel takes each
+        // stride as an int32_t and addresses the bias with 32-bit element offsets.
+        AdditiveBias bias;
+        bias.uid = requireLaunchInt(inputs, GFX950_ATTENTION_DENSE_BIAS_UID_VALUE);
+        const auto readStride = [&inputs](std::string_view name) {
+            return static_cast<int32_t>(requireLaunchInt(inputs, name, 0, MAX_BIAS_INDEX));
+        };
+        bias.strides = {readStride(GFX950_ATTENTION_DENSE_BIAS_STRIDE_BATCH_VALUE),
+                        readStride(GFX950_ATTENTION_DENSE_BIAS_STRIDE_HEAD_VALUE),
+                        readStride(GFX950_ATTENTION_DENSE_BIAS_STRIDE_QUERY_VALUE)};
+        const auto largest = largestAdditiveBiasIndex(problem, bias.strides);
+        if(!largest.has_value() || *largest > MAX_BIAS_INDEX)
+        {
+            serialization::refuseIngestorPlan(
+                serialization::IngestorPlanRefusal::INCOMPATIBLE,
+                "the bias strides of dispatch '" + inputs.dispatchSymbol
+                    + "' reach element 2^31 or beyond; the kernel addresses the bias with "
+                      "32-bit element offsets");
+        }
+        binding.bias = bias;
+    }
     return launch;
 }
 
@@ -1424,8 +1743,8 @@ void resetGfx950AttentionDenseModuleCache()
 namespace
 {
 
-/// This engine's dispatch handler for one contract, process-lifetime. Both share one
-/// module cache and loader.
+/// This engine's dispatch handlers, process-lifetime: the current one (v2 and v3) and the
+/// v1 one. Both share one module cache and loader.
 const Gfx950AttentionDenseDispatchHandler&
     gfx950AttentionDenseDispatchHandler(AttentionDenseContract contract)
 {
@@ -1433,9 +1752,9 @@ const Gfx950AttentionDenseDispatchHandler&
         gfx950AttentionDenseKpackModuleCache());
     static const Gfx950AttentionDenseDispatchHandler s_v1(s_kpackLoader,
                                                           AttentionDenseContract::V1);
-    static const Gfx950AttentionDenseDispatchHandler s_v2(s_kpackLoader,
-                                                          AttentionDenseContract::V2);
-    return contract == AttentionDenseContract::V1 ? s_v1 : s_v2;
+    static const Gfx950AttentionDenseDispatchHandler s_current(s_kpackLoader,
+                                                               AttentionDenseContract::V2);
+    return contract == AttentionDenseContract::V1 ? s_v1 : s_current;
 }
 
 } // namespace
@@ -1445,11 +1764,14 @@ void registerGfx950AttentionDenseSymbols(SymbolScope<Handle>& scope)
     scope.add(std::string(GRAPH_MATCHER_SYMBOL), &gfx950AttentionDenseGraphMatches);
     scope.add(std::string(KERNEL_MATCHER_SYMBOL), &kernelMatches);
     scope.add(std::string(SCORE_SYMBOL), &scoreKernel);
-    // The UDD's unversioned name dispatches the catalog, all of which takes v2.
+    // The UDD's unversioned name dispatches the catalog: plain kernels take v2 and bias
+    // kernels v3, both served (and saved under) by the current handler.
     scope.add(std::string(DISPATCH_SYMBOL),
               &gfx950AttentionDenseDispatchHandler(AttentionDenseContract::V2));
     scope.add(std::string(GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V2),
               &gfx950AttentionDenseDispatchHandler(AttentionDenseContract::V2));
+    scope.add(std::string(GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V3),
+              &gfx950AttentionDenseDispatchHandler(AttentionDenseContract::V3));
     // Kept so plans saved under v1 still load and launch their 8-argument code object.
     scope.add(std::string(GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V1),
               &gfx950AttentionDenseDispatchHandler(AttentionDenseContract::V1));

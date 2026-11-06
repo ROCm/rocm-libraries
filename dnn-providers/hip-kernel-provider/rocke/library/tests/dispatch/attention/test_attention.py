@@ -36,7 +36,11 @@ _GFX950_DENSE_FEATURES = {
     "sinks",
     "sliding_window",
 }
-_GFX950_DENSE_GRID_FEATURES = _GFX950_DENSE_FEATURES | {"causal_bottom_right"}
+# The additive bias is served by the grid body only.
+_GFX950_DENSE_GRID_FEATURES = _GFX950_DENSE_FEATURES | {
+    "attn_bias",
+    "causal_bottom_right",
+}
 _RDNA_WMMA_FEATURES = {
     "causal",
     "causal_bottom_right",

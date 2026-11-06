@@ -60,6 +60,10 @@ kmd_fields:
 - name: block_n
   type: int
   default_value: 64
+# Additive bias (an fp32 attn_mask tensor); 0 on every kernel built before it.
+- name: use_additive_bias
+  type: int
+  default_value: 0
 specialization:
   metadata_fields:
   - dtype
@@ -74,6 +78,7 @@ specialization:
   - seqlen_kv
   - block_m
   - block_n
+  - use_additive_bias
   matcher_only_fields: []
   vocabulary:
     dtype:
@@ -104,6 +109,8 @@ specialization:
       field: block_m
     block_n:
       field: block_n
+    use_additive_bias:
+      field: use_additive_bias
 kernel_source_kind: rocke
 workspace_policy: none
 
@@ -164,6 +171,14 @@ enumerate:
       values: [bf16, fp16]
     - fields: [mask_type]
       values: [TOP_LEFT_CAUSAL, NO_MASK]
+    - fields: [use_attn_bias]
+      values: [false, true]
+  # Bias kernels ship at one tile, 128/64: one per head configuration, dtype and
+  # mask (132), which keeps the catalog within aot_budget_per_arch. 128/64 rather
+  # than the default 256/64 because kernel_match needs Sq % block_m == 0, and every
+  # Sq a 256 tile serves a 128 tile serves too, plus the odd multiples of 128.
+  feature_fields:
+    use_additive_bias: {name_token: _addb, select: {block_m: 128, block_n: 64}}
   sweep_level: production
   space: slice
   # Spec fields the sweep may vary away from the candidate's own default spec.
@@ -177,15 +192,16 @@ enumerate:
   # lds_k_row_pad too: `space: slice` leaves it at its default while `space: full`
   # varies it. tests/test_registry_regeneration.py asserts the defaults (g1) and
   # diffs the enumeration against the shipped catalog on the shipped fields (g3).
-  spec_fields: [dtype, head_size, num_query_heads, num_kv_heads, causal, batch, seqlen_q, seqlen_kv, sliding_window, ragged, varlen, paged, persistent, block_m, block_n, waves_per_eu, lds_k_group_pad, lds_v_row_pad, lds_k_row_pad, lazy_rescale, wide_lds_dma, interleave, persist_decode, nonpersist_decode, num_persistent, block_size, num_kv_blocks, use_sinks]
+  spec_fields: [dtype, head_size, num_query_heads, num_kv_heads, causal, batch, seqlen_q, seqlen_kv, sliding_window, ragged, varlen, paged, persistent, block_m, block_n, waves_per_eu, lds_k_group_pad, lds_v_row_pad, lds_k_row_pad, lazy_rescale, wide_lds_dma, interleave, persist_decode, nonpersist_decode, num_persistent, block_size, num_kv_blocks, use_sinks, use_additive_bias]
   # Frozen build cost: a registry that grows past this fails here, not at pack time.
-  max_kernels: 840
+  # 840 bias-off kernels plus 132 bias kernels.
+  max_kernels: 972
 
 # How the variant space is reduced; copied verbatim into the generated config.
 # Feature fields define a cell; performance knobs are the tuning arms, in priority order.
 reduction:
   fields:
-    feature: [dtype, head_size, num_query_heads, num_kv_heads, causal, sliding_window, ragged, batch, seqlen_q, seqlen_kv]
+    feature: [dtype, head_size, num_query_heads, num_kv_heads, causal, sliding_window, ragged, batch, seqlen_q, seqlen_kv, use_additive_bias]
     performance:
       - {name: block_m, divides: seqlen_q}
       - {name: block_n, divides: seqlen_kv}
@@ -249,11 +265,12 @@ launch_surface:
   - name: matcher
     python_source: kernels/gfx950/attention_dense.py:build_attention_dense
     cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/Gfx950AttentionDenseNative.cpp
-    kmd_fields: [dtype, head_size, num_query_heads, num_kv_heads, causal, sliding_window, ragged, block_m, block_n]
+    kmd_fields: [dtype, head_size, num_query_heads, num_kv_heads, causal, sliding_window, ragged, block_m, block_n, use_additive_bias]
     guard: >
       kernelMatches() returns false (no panic) if dtype, head_size,
-      num_query_heads, num_kv_heads, causal or sliding_window disagrees with
-      the graph, the candidate's tile is illegal, or the candidate is ragged
+      num_query_heads, num_kv_heads, causal, sliding_window or
+      use_additive_bias disagrees with the graph (an attn_mask tensor asks for
+      use_additive_bias=1), the candidate's tile is illegal, or the candidate is ragged
       (ragged != 0). The metadata's batch, seqlen_q and seqlen_kv are build
       inputs of a shape-generic kernel and are never compared; the graph's
       shape enters only through seqlen_q % block_m == 0 and
@@ -264,13 +281,16 @@ launch_surface:
   - name: kernargs
     python_source: kernels/gfx950/attention_dense.py:build_attention_dense
     cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/Gfx950AttentionDenseNative.cpp
-    kmd_fields: [ragged, seqlen_q, num_query_heads, batch]
+    kmd_fields: [ragged, seqlen_q, num_query_heads, batch, use_additive_bias]
     guard: >
-      attentionDenseKernelSignature() always returns the 10-arg form
+      attentionDenseKernelSignature() returns the 10-arg form
       (q,k,v,o,scale,batch,seqlen_q,seqlen_kv,num_query_heads,num_kv_heads):
       the runtime-shape grid body reads the shape and both head counts as
-      kernargs. Every variant is non-persistent and on the runtime-shape path,
-      which enumerate.pin and the aligned catalog keep true. use_sinks=False;
+      kernargs. A use_additive_bias=1 candidate takes the 14-arg form
+      (attentionDenseKernelSignatureV3()): additive_bias_ptr and its
+      batch/head/sq strides last. Every variant is non-persistent and on the
+      runtime-shape path, which enumerate.pin and the aligned catalog keep true.
+      use_sinks=False;
       no sink_ptr slot. Validated at prepare() time by
       buildIngestorKernelCode(..., expectedSignature).
     test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestGfx950AttentionDenseSignature.cpp

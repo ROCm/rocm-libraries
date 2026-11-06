@@ -7,8 +7,9 @@ Three consumers share the math here (``natural_lse_from_log2_stats``):
 
 * the gfx942 / gfx950 dense prefill kernels: ``lse_store`` emits the optional
   LSE store, ``dense_row_has_key`` / ``zero_keyless_row`` the empty-row output
-  masking, and ``validate_dense_lse`` is the host-side contract for the
-  caller-owned LSE buffer;
+  masking, ``validate_dense_lse`` is the host-side contract for the
+  caller-owned LSE buffer, and ``validate_dense_varlen_offsets`` its
+  packed-offset check, which the dense additive-bias path reuses;
 * the unified split-KV reduce and the unified tiled 2D epilogues (gfx942 /
   gfx950): the same IR helpers emit their LSE store, ``lse_row_has_mass`` the
   ``!(l == 0)`` row test, and ``validate_unified_lse`` is their host-side buffer
@@ -51,7 +52,7 @@ they accept.  Nothing is allocated (no LDS, no scratch).
 
 from __future__ import annotations
 
-from typing import Callable, Optional, Union
+from typing import Any, Callable, Optional, Union
 
 from rocke.core.ir import I16, I32, I64, IRBuilder, Value, VectorType
 from rocke.helpers.attention_fwd_ext import RowEpilogue, natural_lse_from_log2_stats
@@ -68,6 +69,7 @@ __all__ = [
     "make_mfma_lse_epilogue",
     "make_wmma_lse_epilogue",
     "validate_dense_lse",
+    "validate_dense_varlen_offsets",
     "zero_keyless_row",
 ]
 
@@ -195,6 +197,7 @@ def validate_dense_lse(
     block_tables=None,
     kv_lens=None,
     sinks=None,
+    additive_bias=None,
 ):
     """Validate only the new output contract; disabled callers keep their path."""
     if not spec.emit_lse:
@@ -223,6 +226,7 @@ def validate_dense_lse(
             "block_tables": block_tables,
             "kv_lens": kv_lens,
             "sinks": sinks,
+            "additive_bias": additive_bias,
         },
     )
 
@@ -242,25 +246,59 @@ def validate_dense_lse(
             raise ValueError(f"{name} must be contiguous")
     if q.shape[0] != out.shape[0] or k.shape[0] != v.shape[0]:
         raise ValueError("packed output/value extents must match query/key extents")
+    validate_dense_varlen_offsets(
+        spec,
+        cu_seqlens_q,
+        cu_seqlens_kv,
+        q_tokens=q.shape[0],
+        kv_tokens=k.shape[0],
+        device=q.device,
+    )
+
+
+def validate_dense_varlen_offsets(
+    spec: Any,
+    cu_seqlens_q: Any,
+    cu_seqlens_kv: Any,
+    *,
+    q_tokens: int,
+    kv_tokens: int,
+    device: Any,
+) -> None:
+    """Check packed varlen offsets against ``spec``: on ``device`` (the launch's Q
+    device; the kernel dereferences them), int32 [batch+1], spanning the packed
+    tensors, each length monotone, tile-aligned and within the spec maxima, and no
+    KV sequence empty. Reads the offsets to host: a device sync.
+
+    The packed dense body has no per-sequence load-tail handling, and the paths
+    that read per-sequence state (LSE, the additive bias) index it by in-sequence
+    position. An empty KV sequence is refused because the prologue always scores
+    KV tile 0, which for it is the next sequence's keys (and, for the last one,
+    K/V past the packed tensor); an empty query sequence writes nothing."""
+    import torch
+
     for name, tensor, extent, tile, maximum, allow_empty in (
-        ("cu_seqlens_q", cu_seqlens_q, q.shape[0], spec.block_m, spec.seqlen_q, True),
+        ("cu_seqlens_q", cu_seqlens_q, q_tokens, spec.block_m, spec.seqlen_q, True),
         (
             "cu_seqlens_kv",
             cu_seqlens_kv,
-            k.shape[0],
+            kv_tokens,
             spec.block_n,
             spec.seqlen_kv,
             False,
         ),
     ):
+        if tensor.device != device:
+            raise ValueError(
+                f"{name} must be on the same device as q, got "
+                f"{tensor.device} vs {device}"
+            )
         if str(tensor.dtype) != "torch.int32" or tuple(tensor.shape) != (
             spec.batch + 1,
         ):
             raise ValueError(f"{name} must be int32 [batch+1]")
         if not tensor.is_contiguous():
             raise ValueError(f"{name} must be contiguous")
-        # The existing packed body has no per-sequence load-tail handling.
-        # This enabled-path content check synchronizes device offsets to host.
         offsets = tensor.tolist()
         if offsets[0] != 0 or offsets[-1] != extent:
             raise ValueError(f"{name} endpoints must span its packed tensor")
@@ -271,7 +309,7 @@ def validate_dense_lse(
                     f"{name} lengths must be monotone, tile-aligned, and within spec"
                 )
             if not allow_empty and length == 0:
-                raise ValueError("LSE-enabled packed KV sequences must be nonempty")
+                raise ValueError(f"{name} sequences must be nonempty")
 
 
 Stride = Union[int, Value]

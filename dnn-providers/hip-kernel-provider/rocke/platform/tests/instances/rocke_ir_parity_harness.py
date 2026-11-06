@@ -4152,6 +4152,48 @@ def cases():
                 "use_sinks": True,
             },
         ),
+        # --- additive bias (grid body only): the aligned runtime-shape body with
+        # plain 16-byte loads (four keys each, element-aligned), the ragged body
+        # whose scalar loads are masked at the tails, and the
+        # windowed bodies that clamp the start tile because the bias load is plain
+        # (LSE on: baked tile count; varlen: per-sequence tile count). Numerics
+        # cannot observe that clamp (the window mask overwrites the read), so these
+        # hashes are its only CI pin. bias_catalog_tile is the configuration the
+        # hipDNN catalog ships (block_m 128 / block_n 64 at the qb_minor block
+        # order); the others run the spec's default 256/64 tile.
+        ("bias_sq512", {"use_additive_bias": True}),
+        (
+            "bias_catalog_tile_sq512",
+            {
+                "use_additive_bias": True,
+                "block_m": 128,
+                "block_n": 64,
+                "nonpersist_decode": "qb_minor",
+            },
+        ),
+        (
+            "bias_ragged_bottom_right_sq500",
+            {
+                "seqlen_q": 500,
+                "seqlen_kv": 1234,
+                "ragged": True,
+                "causal_bottom_right": True,
+                "use_additive_bias": True,
+            },
+        ),
+        (
+            "bias_lse_window_past_keys_sq512",
+            {
+                "use_additive_bias": True,
+                "emit_lse": True,
+                "seqlen_kv": 128,
+                "sliding_window": 64,
+            },
+        ),
+        (
+            "bias_varlen_window_sq512",
+            {"use_additive_bias": True, "varlen": True, "sliding_window": 64},
+        ),
     ):
         add(
             "attention_dense",

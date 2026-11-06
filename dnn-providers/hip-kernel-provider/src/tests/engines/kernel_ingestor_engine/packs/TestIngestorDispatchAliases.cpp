@@ -64,6 +64,16 @@ TEST(TestIngestorDispatchAliases, ASupersededContractKeepsItsOwnHandler)
                            << " resolves to the current contract's handler";
 }
 
+// The catalog's handler saves a bias plan under v3, and a plan may be saved only under a
+// name registered to the handler that saves it, so v3 resolves to the current handler.
+TEST(TestIngestorDispatchAliases, TheBiasContractIsServedByTheCurrentHandler)
+{
+    registerNativeIngestorSymbols();
+
+    expectOneHandler("hipkernel.gfx950_attention_dense.dispatch",
+                     GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V3);
+}
+
 } // namespace
 } // namespace hip_kernel_provider::kernel_ingestor_engine
 

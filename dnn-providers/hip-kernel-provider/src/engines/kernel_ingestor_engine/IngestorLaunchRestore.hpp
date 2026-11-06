@@ -7,7 +7,6 @@
 
 #include <algorithm>
 #include <cstdint>
-#include <initializer_list>
 #include <limits>
 #include <string>
 #include <string_view>
@@ -161,7 +160,7 @@ inline std::string requireLaunchString(const hipdnn_plugin_sdk::ingestor::SavedL
 
 /// Refuses the plan when it holds a launch value that is not in @p names.
 inline void requireOnlyLaunchValues(const hipdnn_plugin_sdk::ingestor::SavedLaunchInputs& inputs,
-                                    std::initializer_list<std::string_view> names)
+                                    const std::vector<std::string_view>& names)
 {
     for(const auto& entry : inputs.values)
     {

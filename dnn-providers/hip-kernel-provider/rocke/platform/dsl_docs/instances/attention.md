@@ -130,6 +130,24 @@ on-GPU numeric lane
 rather than the parity scenario set above; knob semantics are in the
 [builders/common Knob reference](../../../library/builders/common/README.md#knob-reference).
 
+The gfx950 dense kernel (`Gfx950AttentionDenseSpec.use_additive_bias`) takes the
+same bias and ABI tail on its grid body (not persistent, not paged). It composes
+with every mask (the numeric lane runs none, top-left, bottom-right and the sliding
+window; lookahead is covered by host tests only), ragged lengths, varlen (indexed
+by in-sequence position), sinks and LSE.
+Its bias-on body scales each score into the log2 domain right after the QK MFMA
+(`s * qk_scale + bias * log2e`) instead of folding the scale into the row max and
+the exp2 FMA, which a per-key term would break; the bias-off IR is unchanged. Its
+semantics differ from the unified kernels' (knob reference above): the bias is
+added before the mask and clamped at -2**97, and a row with no unmasked key writes
+zeros (see the [prefill builder README](../../../library/builders/gfx950/attention/prefill/README.md)).
+Numerics: [test_attention_dense_bias_gfx950_numeric.py](../../../library/tests/test_attention_dense_bias_gfx950_numeric.py)
+(needs torch) and its torch-free subset
+[test_attention_dense_bias_gfx950_gpu.py](../../../library/tests/test_attention_dense_bias_gfx950_gpu.py),
+which the CI GPU lane runs; four bias-on cases (including the windowed start-tile
+clamp) pin its IR in the representative golden. The hipDNN engine `hipkernel:Gfx950AttentionDense` serves an fp32
+`attn_mask` through its `use_additive_bias` variants (128/64 tile).
+
 bf16 attention uses the `mfma_f32_16x16x16_bf16` op via the `_1k` LLVM variant (with `<4 x i16>` operands; the plain `bf16.16x16x16` intrinsic does not exist on this target).
 
 CK Tile ``01_fmha`` family parity:

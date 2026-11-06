@@ -75,6 +75,12 @@ The mask is the cuDNN band ``(left = sliding_window, right = right_bound)`` on t
   0 by default). A row whose band holds no key (``seqlen_q > seqlen_kv + window``)
   outputs zeros. Bottom-right alignment (``causal_bottom_right``) is plain causal only.
 
+Additive bias (``use_additive_bias``, grid body only): an fp32 ``[B|1, Hq|1, Sq|1,
+Skv]`` tensor added to the scaled scores before the mask. With it on, each score is
+moved into the log2 domain (``s * qk_scale + bias / ln2``) right after the QK MFMA,
+and the row max and exp2 use it as is; the bias-off body keeps the raw-score form
+and its IR is unchanged.
+
 Experimental/negative levers from the sweep (step-2 8-cluster, K-staging, per-nsub
 staging, score truncation, PV V-prefetch) are intentionally NOT carried over — see
 the experiment's ``plan.md`` for their measured results.
@@ -120,10 +126,21 @@ from kernels.common.attention_dense_kv_split import (
     launch_segment_combine,
     segment_tile_range,
 )
+from kernels.common._attention_additive_bias import (
+    add_additive_bias_at,
+    add_additive_bias_x4_at,
+    additive_bias_elem_ptr,
+    additive_bias_launch_values,
+    additive_bias_row,
+    append_additive_bias_signature,
+    declare_additive_bias_params,
+    validate_dense_additive_bias,
+)
 from kernels.common._lse_store import (
     dense_row_has_key,
     lse_store,
     validate_dense_lse,
+    validate_dense_varlen_offsets,
     zero_keyless_row,
 )
 
@@ -192,6 +209,27 @@ _MAX_SCALE = 2.0**4
 # before the mask). Real maxima are far above both thresholds.
 _EMPTY_ROW_MAX_GRID = -(2.0**33)
 _EMPTY_ROW_MAX_PERSIST = -1e29
+# The grid body's mask sentinel, written into masked scores (see neg_inf in
+# build_attention_dense for why it is a power of two).
+_MASK_SENTINEL = -(2.0**99)
+# Bias-on grid body, natural-log (bias) units: the bias is clamped to this floor
+# before the log2 conversion, so a biased score stays near -2**97 * log2e (about
+# -2.3e29), strictly above _MASK_SENTINEL. Otherwise a bias of -inf or below about
+# -4.4e29 loses the row max to masked keys (they get P = 1). Keys at the floor still
+# get P = 0 next to any real key. A NaN bias also clamps to the floor: fmax lowers to
+# llvm.maxnum, which returns the non-NaN operand. 97 keeps the floor's score about
+# 2.8x above the sentinel and leaves room for _BIAS_LIVE_ROW_MIN between them.
+_BIAS_FLOOR = -(2.0**97)
+# Bias-on grid body, log2 (score) units -- the same number as _BIAS_FLOOR, but a
+# separate choice: it only has to sit above the floor's score and far below any real
+# one. A row whose running max is at or below it has no live key (every key it sees
+# is masked or at the floor), so it stores O = 0 and LSE = -inf, as the hipDNN
+# reference does for a row whose every score is -inf. A finite bias below about
+# -1.1e29 therefore counts as -inf too, where PyTorch would give the row the uniform
+# softmax. _EMPTY_ROW_MAX_GRID (-2**33) cannot serve here: a real bias of, say, -1e10
+# makes a legitimate row max far smaller than that.
+_BIAS_LIVE_ROW_MIN = -(2.0**97)
+assert _MASK_SENTINEL < _BIAS_FLOOR * LOG2E < _BIAS_LIVE_ROW_MIN
 
 
 @dataclass(frozen=True)
@@ -212,6 +250,10 @@ class Gfx950AttentionDenseSpec(_AttentionDenseSpecBase):
     # into this many contiguous chunks, one CTA each, merged by a combine kernel
     # (see kernels.common.attention_dense_kv_split). 1 (default) emits nothing new.
     kv_segments: int = field(default=1, kw_only=True)
+    # fp32 additive bias ``[B|1, Hq|1, Sq|1, Skv]`` added to the scaled scores
+    # (``QK * scale + bias``), indexed by query head. Appends four kernel params
+    # after all others (see ``_attention_additive_bias``). Grid body only.
+    use_additive_bias: bool = field(default=False, kw_only=True)
 
     def _supports_noncausal_window(self) -> bool:
         return True
@@ -339,6 +381,28 @@ class Gfx950AttentionDenseSpec(_AttentionDenseSpecBase):
                 raise ValueError("right_bound > 0 is not supported with paged / varlen")
         if self.paged and not self.causal:
             raise ValueError("paged attention is causal-only")
+        if type(self.use_additive_bias) is not bool:
+            raise ValueError(
+                "use_additive_bias must be a bool, got "
+                f"{type(self.use_additive_bias).__name__}"
+            )
+        if self.use_additive_bias:
+            # The persistent body declares no shape params and runs its own
+            # softmax; only the grid body adds the bias.
+            if self.persistent:
+                raise ValueError(
+                    "use_additive_bias is implemented on the grid body only "
+                    "(persistent=False)"
+                )
+            if self.paged:
+                raise ValueError("use_additive_bias is not supported with paged K/V")
+            # The KV-segment split writes partial rows for a combine kernel, so it
+            # would bypass the bias epilogue's keyless-row handling; refused like
+            # the other features without a segment rule (see check_kv_segments).
+            if self.kv_segments != 1:
+                raise ValueError(
+                    "use_additive_bias is not supported with kv_segments > 1"
+                )
         if self.causal_bottom_right:
             # The non-persistent contiguous builder is the only gfx950 path
             # that implements the compile-time shifted diagonal.
@@ -531,6 +595,8 @@ class Gfx950AttentionDenseSpec(_AttentionDenseSpecBase):
             parts.append("lse")
         if self.kv_segments != 1:
             parts.append(f"kvs{self.kv_segments}")
+        if self.use_additive_bias:
+            parts.append("addb")
         return tuple(parts)
 
     def _codegen_name_part(self) -> str:
@@ -681,7 +747,7 @@ def gfx950_dense_tile_legality(*, head_size: int) -> Tuple[Tuple[int, int], ...]
 def supports_attention_dense(
     spec: AttentionDenseSpec, *, arch: str = "gfx950"
 ) -> Tuple[bool, str]:
-    """Return (ok, reason). The kernel is gfx950-only and dense (no paging/bias)."""
+    """Return (ok, reason). The kernel is gfx950-only and dense."""
     if arch != "gfx950":
         return False, f"attention_dense is gfx950-only (got {arch})"
     if not isinstance(spec, Gfx950AttentionDenseSpec):
@@ -818,6 +884,7 @@ def build_attention_dense(
     LAZY_RESCALE = spec.lazy_rescale
     LAZY_THRESHOLD = float(spec.lazy_rescale_threshold)
     use_sinks = spec.use_sinks
+    USE_BIAS = spec.use_additive_bias
 
     K_STEPS = D // 16
     D_TILES = D // 32
@@ -934,6 +1001,9 @@ def build_attention_dense(
     KVS = spec.kv_segments
     if KVS > 1:
         segment_params = declare_segment_params(b)
+    if USE_BIAS:
+        # After every other param; attention_dense_signature appends the same four.
+        additive_bias = declare_additive_bias_params(b)
     qk_scale = b.fmul(scale, b.const_f32(LOG2E))
 
     # native v_exp_f32 (softmax arg bounded; see _MAX_SCALE) or the guarded exp2
@@ -954,7 +1024,11 @@ def build_attention_dense(
     # alpha = exp2(m_old - m_new) = 0, which clears it. A non-power-of-two
     # sentinel would instead leave a huge rounding residue whose sign depends on
     # the scale: exp2 of it is 0 when negative and inf (then NaN) when positive.
-    neg_inf = b.const_f32(-(2.0**99))
+    # With bias on, the scores are already scaled (add_bias), so the sentinel goes
+    # in unscaled and m seeds at it: a fully masked first tile gives P = exp2(0) = 1,
+    # cleared by the next real tile the same way. _BIAS_FLOOR keeps every biased
+    # score strictly above it.
+    neg_inf = b.const_f32(_MASK_SENTINEL)
     if use_sinks:
         rcp_ln2 = b.const_f32(LOG2E)
         one_f = b.const_f32(1.0)
@@ -1011,6 +1085,24 @@ def build_attention_dense(
             b.mul(b.mul(bt, seqlen_kv_p), _stride_k()),
             b.mul(hkv, b.const_i32(D)),
         )
+
+    if USE_BIAS:
+        # This lane's bias row base: the element index of key 0 for its query, which
+        # is the lane's column of the QK output (the S tile is held transposed: keys
+        # along C rows, queries along C columns), in sequence bt and head hq.
+        # Loop-invariant, so it is computed once here. Varlen indexes by the
+        # in-sequence position, so the bias is [B, Hq, max Sq, max Skv].
+        bias_q_row = b.add(q_tok0, _mfma_32x32_c_col(b, lane, 0))
+        bias_row = additive_bias_row(
+            b, additive_bias, seq_idx=bt, q_head=hq, q_row=bias_q_row
+        )
+        bias_log2e = b.const_f32(LOG2E)
+        bias_floor = b.const_f32(_BIAS_FLOOR)
+        # The bias load is masked only on the ragged body, the one body that visits
+        # rows and keys past the real extents (the partial last query block and KV
+        # tile). The others visit KV tiles below n_ktiles_val only: the loops stop
+        # at n_upper, and a sliding window's first tile is clamped (see start_tile).
+        bias_row_ok = b.cmp_lt(bias_q_row, b.const_i32(Sq)) if RAGGED else None
 
     # --- LDS allocation: PAD on K (bank-conflict fix), +PAD_V on V (transposed
     #     PV read bank-conflict pad). A per-ROW pad requires 1 row/instr (a
@@ -1315,14 +1407,85 @@ def build_attention_dense(
                     b.cmp_lt(ktok, b.const_i32(Skv)), s_reg[nsub][i], neg_inf
                 )
 
+    def add_bias(s_reg, tile_idx):
+        """Bias on: replace each raw score in-place by its log2-domain biased score
+        ``s * qk_scale + bias * log2e``, before any mask. Same lane->ktok map as
+        do_mask.
+
+        Why the scale moves here: bias off, the row max is taken over raw scores and
+        scaled afterwards (``max * qk_scale``, then ``exp2(s * qk_scale - m)``), which
+        is right only while every element is ``raw * qk_scale``. A per-key bias in
+        natural-log units breaks that: the max has to be over the biased scores, and
+        exp2 needs the bias in log2 units. So each score is scaled and biased once,
+        here, and softmax_max and _p_exp skip the scale on this path."""
+        tile_key0 = b.mul(tile_idx, b.const_i32(BN))
+        # The x4 bias loads lift the D128 LSE kernels past the 256-VGPR budget
+        # (2 waves/SIMD, LDS-bound) into a scratch spill; they keep the scalar loads.
+        x4 = not RAGGED and not (spec.emit_lse and D == 128)
+        if x4:
+            # One bias pointer per KV tile, at the lane's first key; the x4 loads
+            # below read at constant element offsets from it, which the backend
+            # folds into their immediates instead of extending and scaling an i32
+            # index per load.
+            c_row_lane = _mfma_32x32_c_row(b, lane, 0)
+            key0 = b.add(tile_key0, c_row_lane)
+            tile_ptr = additive_bias_elem_ptr(b, additive_bias, row=bias_row, col=key0)
+        for nsub in range(N_SUB):
+            if x4:
+                # C elements i0..i0+3 are keys c_row(i0)..c_row(i0)+3 of the
+                # lane's bias row (_mfma_32x32_c_row: c_row(i) = (i//4)*8 +
+                # (lane//32)*4 + i%4), so one 16-byte load per group replaces
+                # four scalar ones, at nsub*32 + c_row(i0) - c_row(0) =
+                # nsub*32 + (i0//4)*8 keys past the tile pointer. Every key is in
+                # range here, so the scalar path's per-key mask is not needed.
+                for i0 in range(0, 16, 4):
+                    scaled = [b.fmul(s_reg[nsub][i0 + j], qk_scale) for j in range(4)]
+                    s_reg[nsub][i0 : i0 + 4] = add_additive_bias_x4_at(
+                        b,
+                        scaled,
+                        tile_ptr,
+                        offset=nsub * 32 + (i0 // 4) * 8,
+                        rcp_ln2=bias_log2e,
+                        floor=bias_floor,
+                    )
+            else:
+                sub_base = b.add(tile_key0, b.const_i32(nsub * 32))
+                # Scalar loads: masked per key on the ragged body (the last tile
+                # and padded query rows can be out of range), plain otherwise.
+                for i in range(16):
+                    ktok = b.add(sub_base, _mfma_32x32_c_row(b, lane, i))
+                    in_range = None
+                    if RAGGED:
+                        skv_c = b.const_i32(Skv)
+                        key_ok = b.cmp_lt(ktok, skv_c)
+                        in_range = b.land(bias_row_ok, key_ok)
+                    scaled = b.fmul(s_reg[nsub][i], qk_scale)
+                    s_reg[nsub][i] = add_additive_bias_at(
+                        b,
+                        scaled,
+                        additive_bias,
+                        row=bias_row,
+                        col=ktok,
+                        mask=in_range,
+                        rcp_ln2=bias_log2e,
+                        floor=bias_floor,
+                    )
+
+    def _p_exp(s, neg_m):
+        """P = exp2(s * qk_scale - m); bias-on scores already carry the scale."""
+        if USE_BIAS:
+            return _exp2(b.fadd(s, neg_m))
+        return _exp2(b.fma(s, qk_scale, neg_m))
+
     def softmax_max(s_reg, m_i):
         local_max = neg_inf
         for nsub in range(N_SUB):
             for i in range(16):
                 local_max = b.fmax(local_max, s_reg[nsub][i])
         tile_max_raw = b.fmax(local_max, b.warp_shuffle_xor(local_max, 32))
-        # Into the log2 domain the running max, threshold, and sinks use.
-        tile_max = b.fmul(tile_max_raw, qk_scale)
+        # Into the log2 domain the running max, threshold, and sinks use (bias-on
+        # scores are already there).
+        tile_max = tile_max_raw if USE_BIAS else b.fmul(tile_max_raw, qk_scale)
         if LAZY_RESCALE:
             m_diff = b.fsub(tile_max, m_i)
             below_i32 = b.select(
@@ -1409,7 +1572,7 @@ def build_attention_dense(
                 if slot is None:
                     break
                 nsub, i = slot
-                p_vals[nsub][i] = _exp2(b.fma(s_reg[nsub][i], qk_scale, neg_m))
+                p_vals[nsub][i] = _p_exp(s_reg[nsub][i], neg_m)
                 n_emit += 1
             if SCHED_GROUP:
                 b.sched_group_barrier(DS_READ, SCHED_GROUP_DS_READ, 0)
@@ -1418,7 +1581,7 @@ def build_attention_dense(
                 b.sched_group_barrier(TRANS, max(1, n_emit), 0)
         for slot in it:
             nsub, i = slot
-            p_vals[nsub][i] = _exp2(b.fma(s_reg[nsub][i], qk_scale, neg_m))
+            p_vals[nsub][i] = _p_exp(s_reg[nsub][i], neg_m)
         l_local = b.const_f32(0.0)
         for nsub in range(N_SUB):
             for i in range(16):
@@ -1474,6 +1637,22 @@ def build_attention_dense(
                 start_tile,
                 b.const_i32(n_ktiles - 1),
             )
+        elif USE_BIAS:
+            # Same clamp wherever EMPTY_ROWS is off (LSE or varlen on). The bias is a
+            # plain global load, so a start tile past the keys would read past the
+            # bias. Pinned to the last real tile (n_ktiles_val, per sequence under
+            # varlen; not below 0). The clamp only bites when q_block_start - W >=
+            # seqlen_kv, so every key of that tile fails the window compare: the rows
+            # stay dead and the epilogue zeroes them, and the loops after the prologue
+            # run zero trips (start_tile + 1 == n_upper). K/V buffer loads are bounded
+            # by batch * seqlen_kv, which is exact only without varlen.
+            last_tile = b.sub(n_ktiles_val, b.const_i32(1))
+            last_tile = b.select(
+                b.cmp_lt(last_tile, b.const_i32(0)), b.const_i32(0), last_tile
+            )
+            start_tile = b.select(
+                b.cmp_lt(start_tile, last_tile), start_tile, last_tile
+            )
     elif KVS > 1:
         # This CTA's segment [start_tile, seg_hi) of [0, n_upper). The prologue
         # always computes start_tile; an empty segment's result is discarded at
@@ -1496,6 +1675,8 @@ def build_attention_dense(
     # the spec, so they cannot see a partial last KV tile.
     RAG_KBOUND = RAGGED and (Skv % BN != 0) and ((not causal) or Sq + RIGHT > Skv)
     s0 = do_qk(start_buf)
+    if USE_BIAS:
+        add_bias(s0, start_tile)
     if W > 0:
         do_mask(s0, start_tile, lower=True, upper=causal)
     else:
@@ -1516,8 +1697,7 @@ def build_attention_dense(
     # tile-0 softmax exp + relayout only; PV lags by one tile (fused into the loop).
     neg_m0 = b.fneg(m0)  # same unbounded-score limitation; see _MAX_SCALE
     p0_vals = [
-        [_exp2(b.fma(s0[nsub][i], qk_scale, neg_m0)) for i in range(16)]
-        for nsub in range(N_SUB)
+        [_p_exp(s0[nsub][i], neg_m0) for i in range(16)] for nsub in range(N_SUB)
     ]
     l0_local = b.const_f32(0.0)
     for nsub in range(N_SUB):
@@ -1555,6 +1735,8 @@ def build_attention_dense(
         b.s_waitcnt(vmcnt=LOOP_VMCNT)
         b.s_barrier_bare()
         s = do_qk(kbuf)
+        if USE_BIAS:
+            add_bias(s, j)
         if mask_lower or mask_upper:
             do_mask(s, j, lower=mask_lower, upper=mask_upper)
         if mask_kbound:
@@ -1741,7 +1923,9 @@ def build_attention_dense(
         rcp_l = b.rcp(b.select(positive_l, l_i, b.const_f32(1.0)))
     else:
         rcp_l = b.rcp(l_i)
-    if EMPTY_ROWS and not spec.runtime_shape:
+    # Bias on, the live-row test below replaces this one: _EMPTY_ROW_MAX_GRID is a
+    # threshold on unscaled maxima and would zero rows a large negative bias leaves live.
+    if EMPTY_ROWS and not USE_BIAS and not spec.runtime_shape:
         # A row whose band holds no key never sees a real score, so its running max is
         # still at the mask sentinel and its P is the exp2(0) = 1 of a fully masked tile
         # (the mean of V), not zero. Real maxima are bounded far above the threshold
@@ -1754,6 +1938,15 @@ def build_attention_dense(
             rcp_l,
             b.const_f32(0.0),
         )
+    if USE_BIAS:
+        # Bias on, a row with no live key (see _BIAS_LIVE_ROW_MIN) stores zeros, and
+        # with LSE on its LSE is -inf. That covers a window row with no key too, the
+        # case the EMPTY_ROWS test handles when bias is off. Without LSE the zeros
+        # come from rcp_l here; with LSE they come from row_has_key, which gains
+        # bias_row_live below and zeroes O in _emit_o_store.
+        bias_row_live = b.fcmp("ogt", m_i, b.const_f32(_BIAS_LIVE_ROW_MIN))
+        if not spec.emit_lse:
+            rcp_l = b.select(bias_row_live, rcp_l, b.const_f32(0.0))
     if varlen:
         o_base = b.add(b.mul(q_seq0, _stride_q()), b.mul(hq, b.const_i32(D)))
     else:
@@ -1779,6 +1972,8 @@ def build_attention_dense(
             window=W,
             right_bound=RIGHT,
         )
+        if USE_BIAS:
+            row_has_key = b.land(row_has_key, bias_row_live)
     if spec.emit_lse:
         if varlen:
             lse_index = b.add(b.mul(b.add(q_seq0, qtok), _hq_count()), hq)
@@ -3034,8 +3229,10 @@ def attention_dense_runtime_args(spec: AttentionDenseSpec) -> dict[str, int]:
 
 def attention_dense_signature(spec: AttentionDenseSpec):
     """ABI signature for :class:`KernelLauncher`. q/k/v/o pointers + f32 scale,
-    plus optional sink_ptr when ``spec.use_sinks``, and the two ``cu_seqlens``
-    i32 pointers when ``spec.varlen`` (see :func:`build_attention_dense`)."""
+    plus optional sink_ptr when ``spec.use_sinks``, the two ``cu_seqlens``
+    i32 pointers when ``spec.varlen``, and the additive-bias pointer and its three
+    strides, last, when ``spec.use_additive_bias`` (see
+    :func:`build_attention_dense`)."""
     from rocke.helpers.spec import SignatureBuilder
 
     sig = (
@@ -3064,6 +3261,8 @@ def attention_dense_signature(spec: AttentionDenseSpec):
     if getattr(spec, "kv_segments", 1) > 1:
         for name in SEGMENT_PARAMS:
             sig = sig.ptr(name, "f32")
+    if spec.use_additive_bias:
+        append_additive_bias_signature(sig)
     return sig.build()
 
 
@@ -3122,6 +3321,7 @@ def run_attention_dense_torch(
     sinks=None,
     validate_paged: bool = True,
     lse=None,
+    additive_bias=None,
 ):
     """High-level framework entry: compile (cached) + launch the dense prefill
     kernel on torch tensors. ``q``/``k``/``v``/``out`` are dense contiguous
@@ -3176,7 +3376,23 @@ def run_attention_dense_torch(
     logits that participate in the softmax denominator but have no value vector.
     Pass ``sinks`` (``spec.dtype`` ``[num_query_heads]``); a ``ValueError`` is
     raised if ``sinks`` is ``None`` when ``spec.use_sinks`` is True, or if
-    ``sinks`` is provided when ``spec.use_sinks`` is False."""
+    ``sinks`` is provided when ``spec.use_sinks`` is False.
+
+    Additive bias (``spec.use_additive_bias``): pass ``additive_bias``, an fp32
+    ``[B|1, Hq|1, Sq|1, Skv]`` tensor (``Sq``/``Skv`` the spec's, i.e. the maxima
+    for varlen, which indexes it by in-sequence position) on q's device,
+    contiguous along ``Skv``. It is added to the scaled scores before the mask,
+    ``softmax(QK * scale + bias)``; a size-1 axis broadcasts. ``-inf`` masks a key,
+    and so do NaN and any finite value below about -1.1e29. A row left with no
+    unmasked key stores O = 0 and LSE = -inf (the sink logit with ``use_sinks``):
+    the hipDNN reference's answer for a row whose every score is -inf. A row whose
+    keys are all finite but below about -1.1e29 (e.g. ``finfo(float32).min``
+    padding) gets the same zeros, where PyTorch would give it the uniform softmax.
+    Varlen offsets are checked as for LSE (on q's device, a device sync, no KV
+    sequence empty). With LSE on, the LSE buffer may not overlap the bias.
+    ``ValueError`` for a
+    missing, unexpected or malformed bias, ``NotImplementedError`` when its
+    largest element index reaches 2**31 (the kernel indexes it in i32)."""
     ok, why = supports_attention_dense(spec, arch=arch)
     if not ok:
         raise NotImplementedError(f"attention_dense unsupported for spec: {why}")
@@ -3274,7 +3490,12 @@ def run_attention_dense_torch(
             raise ValueError("sinks must be contiguous")
         if not sinks.is_cuda:
             raise ValueError("sinks must be a CUDA tensor")
-
+    # q is read only for a bias launch: plain launches may pass placeholder operands.
+    bias_strides = validate_dense_additive_bias(
+        spec,
+        additive_bias,
+        device=q.device if spec.use_additive_bias else None,
+    )
     validate_dense_lse(
         spec,
         q,
@@ -3287,9 +3508,21 @@ def run_attention_dense_torch(
         block_tables=block_tables,
         kv_lens=kv_lens,
         sinks=sinks,
+        additive_bias=additive_bias,
     )
     # After the LSE presence checks, which must fail before any input is touched.
     _check_head_dims(spec, q=q, k=k, v=v, out=out)
+    if spec.varlen and spec.use_additive_bias and not spec.emit_lse:
+        # The bias is sized by the spec maxima and loaded unmasked; with LSE on,
+        # validate_dense_lse above already ran this check (one device sync).
+        validate_dense_varlen_offsets(
+            spec,
+            cu_seqlens_q,
+            cu_seqlens_kv,
+            q_tokens=q.shape[0],
+            kv_tokens=k.shape[0],
+            device=q.device,
+        )
 
     from rocke.helpers.compile import compile_kernel
     from rocke.runtime import KernelLauncher, LaunchConfig
@@ -3329,6 +3562,8 @@ def run_attention_dense_torch(
     if spec.kv_segments > 1:
         workspace = allocate_segment_workspace(spec, q.device)
         vals.update(workspace)
+    if spec.use_additive_bias:
+        vals.update(additive_bias_launch_values(additive_bias, bias_strides))
     launcher(
         vals,
         config=LaunchConfig(

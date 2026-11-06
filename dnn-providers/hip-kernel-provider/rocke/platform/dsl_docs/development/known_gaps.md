@@ -210,16 +210,36 @@ The gfx950 unified tiled 2D and 3D split-KV kernels accept `use_additive_bias`
 in the Python engine only (`library/kernels/common/_attention_additive_bias.py`).
 With the flag off (the default) nothing is emitted, so every bias-off kernel is
 byte-identical and the gate is unaffected. With it on, the C++ engine has no
-equivalent and `rocke_ir_parity_harness.py` has no bias-on case. The C++ provider
-cannot request bias either, so Python and C++ selection agree on every problem
-the provider can express.
+equivalent and `rocke_ir_parity_harness.py` has no unified bias-on case. The C++
+provider cannot request unified bias either, so Python and C++ selection agree
+on every problem the provider can express.
+
+The gfx950 `attention_dense` grid body also takes `use_additive_bias` through
+the same helper. It is not a new gap: the dense family has no C++ builder mirror
+by design (see §6). Its five bias-on harness cases (`bias_sq512`,
+`bias_catalog_tile_sq512`, `bias_ragged_bottom_right_sq500`,
+`bias_lse_window_past_keys_sq512`, `bias_varlen_window_sq512`) are pinned in
+the representative-IR golden; `bias_catalog_tile_sq512` is the tile and block
+order the hipDNN catalog ships.
+`library/tests/test_attention_ir_cpp_parity.py` lowers the same cases through the
+C++ engine for byte-identity; it needs the `rocke_engine` binding, which the CI
+lanes do not build, so run it locally with `ROCKE_CPP_STRICT=1`.
+
+Bias validation is not shared everywhere yet. The host checks of a bias launch
+(`check_additive_bias_tensor`, `check_additive_bias_reach`) serve the unified
+and dense runners, but the gfx1151 dispatch binding (`dispatch/attention/bindings.py`)
+and the two hipDNN packs that accept `attn_mask` (`Gfx950AttentionDenseNative.cpp`,
+`Gfx1151WmmaAttentionNative.cpp`) keep their own copies of the layout rules, and
+the two C++ copies already differ on a broadcast axis's stride and on bounding
+bytes versus element indices. Merging them is a follow-up; a gfx942 dense hipDNN
+pack would otherwise add a third C++ copy.
 
 | Area | What's missing | Why blocked / what unblocks it |
 |---|---|---|
 | Problem and spec structs | `use_additive_bias` on the unified problem and the gfx950 tiled 2D / 3D spec structs, with the spec validator's rejections (mask-limit, invariant hoist, mask-once, non-transposed 32x32, grouped-kv2, register-PV, strided KV). | Scoped out of the Python feature change. Unblocked by adding the field to the public instance headers and mirroring the validators. |
 | Selectors / spec builder | The score-bias exclusion (`_has_score_bias`) in the fast-path gates, and the gfx950-only spec-builder threading of the flag. | Same; needs the struct field first. |
 | Kernel emission | The four trailing params (`additive_bias_ptr`, `additive_bias_batch_stride`, `additive_bias_head_stride`, `additive_bias_sq_stride`), the masked load and add on the 2D 16x16, 2D transposed 32x32 and 3D score paths, and the `addb` name token. | A port of `_attention_additive_bias.py` and its three call sites. |
-| Parity coverage | Bias-on cases in `rocke_ir_parity_harness.py` `cases()` and representative-IR goldens. | Needs the emission port above. |
+| Parity coverage | Unified bias-on cases in `rocke_ir_parity_harness.py` `cases()` and representative-IR goldens. | Needs the emission port above. |
 
 ---
 

@@ -161,6 +161,8 @@ def _kv_segments_in_scope(spec) -> bool:
         or spec.ragged
         or spec.varlen
         or spec.paged
+        # gfx950 only: the dense additive bias has no segment rule.
+        or getattr(spec, "use_additive_bias", False)
     )
 
 

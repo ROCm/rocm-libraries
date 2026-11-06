@@ -18,15 +18,18 @@
 #include <hipdnn_flatbuffers_sdk/data_objects/sdpa_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_flatbuffers_sdk/utilities/Uuid.hpp>
+#include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_plugin_sdk/ingestor/Descriptors.hpp>
 #include <hipdnn_plugin_sdk/ingestor/DeviceProperties.hpp>
 #include <hipdnn_plugin_sdk/ingestor/IKernelDispatchHandler.hpp>
 #include <hipdnn_plugin_sdk/ingestor/KernelDefinition.hpp>
 #include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
 #include <hipdnn_plugin_sdk/ingestor/NativeHooks.hpp>
+#include <hipdnn_plugin_sdk/ingestor/SavedDispatch.hpp>
 
 #include "core/Handle.hpp"
 #include "engines/kernel_ingestor_engine/KernelIngestorEngine.hpp"
+#include "engines/kernel_ingestor_engine/packs/Gfx950AttentionDenseLaunchValues.hpp"
 
 /**
  * @file TestGfx950AttentionDenseSignature.cpp
@@ -40,8 +43,9 @@
  * the matcher exist to stop, one layer lower down.
  *
  * Every variant in gfx950_attention_dense.kdp.json declares `persistent: false`,
- * `use_sinks: false`, `varlen: false` and `paged: false`, so the 8-argument form is the
- * only one that ships and the sink / cu_seqlens / page-table tails of
+ * `use_sinks: false`, `varlen: false` and `paged: false`, so the 10-argument form, and for
+ * a `use_additive_bias` variant the same ten plus the bias pointer and its three strides,
+ * are the only ones that ship; the sink / cu_seqlens / page-table tails of
  * attention_dense_signature are unreachable from this catalog. The 5-argument form is
  * covered here only as a shape the pack must refuse.
  *
@@ -53,7 +57,10 @@
  * below carries zero for it.
  *
  * No device, no compile and no launch: the archive named here does not exist, and both
- * the signature refusal and the archive's absence are raised on the host.
+ * the signature refusal and the archive's absence are raised on the host. The restore
+ * cases at the end run restoreLaunch() over v2 and v3 launch values on device ordinal -1,
+ * so a restore that passes the signature comparison and the launch values stops at the
+ * host-side ordinal refusal.
  */
 namespace hip_kernel_provider::kernel_ingestor_engine::testing
 {
@@ -114,6 +121,20 @@ std::vector<KernelArgument> persistentAbi()
     return signature;
 }
 
+/// The argument list of a use_additive_bias variant: the ten above, then the four
+/// kernels/common/_attention_additive_bias.py appends.
+std::vector<KernelArgument> biasAbi()
+{
+    auto signature = pythonAbi();
+    signature.push_back(KernelArgument{BUFFER_KIND, POINTER_BYTES, 0, "additive_bias_ptr"});
+    for(const char* name :
+        {"additive_bias_batch_stride", "additive_bias_head_stride", "additive_bias_sq_stride"})
+    {
+        signature.push_back(KernelArgument{BY_VALUE_KIND, SCALAR_BYTES, 0, name});
+    }
+    return signature;
+}
+
 std::vector<KernelArgument> withArgument(std::size_t index, const KernelArgument& argument)
 {
     auto signature = pythonAbi();
@@ -129,6 +150,7 @@ constexpr int64_t Q_UID = 1;
 constexpr int64_t K_UID = 2;
 constexpr int64_t V_UID = 3;
 constexpr int64_t O_UID = 4;
+constexpr int64_t BIAS_UID = 5;
 
 /// The shape is not what these cases are about -- any graph the engine accepts would do,
 /// and TestGfx950AttentionDenseMatchers.cpp owns the applicability rules.
@@ -144,18 +166,31 @@ std::vector<int64_t> bshdStrides()
     return {SEQ * HEADS * HEAD_SIZE, HEAD_SIZE, HEADS * HEAD_SIZE, 1};
 }
 
-flatbuffers::FlatBufferBuilder buildAcceptedSdpaGraph()
+/// @p withBias adds an fp32 [B, 1, Sq, Skv] attn_mask, which only a bias variant serves.
+flatbuffers::FlatBufferBuilder buildAcceptedSdpaGraph(bool withBias)
 {
     flatbuffers::FlatBufferBuilder builder;
 
     const std::vector<int64_t> dims{BATCH, HEADS, SEQ, HEAD_SIZE};
     const std::vector<int64_t> strides = bshdStrides();
+    const std::vector<int64_t> biasDims{BATCH, 1, SEQ, SEQ};
+    const std::vector<int64_t> biasStrides{SEQ * SEQ, SEQ * SEQ, SEQ, 1};
 
     std::vector<flatbuffers::Offset<data_objects::TensorAttributes>> tensors;
     for(const int64_t uid : {Q_UID, K_UID, V_UID, O_UID})
     {
         tensors.push_back(data_objects::CreateTensorAttributesDirect(
             builder, uid, nullptr, data_objects::DataType::BFLOAT16, &strides, &dims, false));
+    }
+    if(withBias)
+    {
+        tensors.push_back(data_objects::CreateTensorAttributesDirect(builder,
+                                                                     BIAS_UID,
+                                                                     nullptr,
+                                                                     data_objects::DataType::FLOAT,
+                                                                     &biasStrides,
+                                                                     &biasDims,
+                                                                     false));
     }
 
     data_objects::SdpaAttributesBuilder attributesBuilder(builder);
@@ -173,6 +208,10 @@ flatbuffers::FlatBufferBuilder buildAcceptedSdpaGraph()
     attributesBuilder.add_padding_mask(false);
     attributesBuilder.add_mma_core_mode(data_objects::DataType::UNSET);
     attributesBuilder.add_implementation(data_objects::AttentionImplementation::AUTO);
+    if(withBias)
+    {
+        attributesBuilder.add_attn_mask_tensor_uid(BIAS_UID);
+    }
     const auto attributes = attributesBuilder.Finish();
 
     std::vector<flatbuffers::Offset<data_objects::Node>> nodes;
@@ -209,7 +248,7 @@ constexpr const char* MISMATCH_MARKER = "is packaged with arguments";
 /// as reporting the absence. The metadata is the completed baseline tile prepare() reads
 /// before the comparison; the tile is not what these cases are about, and
 /// TestGfx950AttentionDenseDispatch.cpp owns its refusal.
-KernelDefinition makeKernel(const std::vector<KernelArgument>& recorded)
+KernelDefinition makeKernel(const std::vector<KernelArgument>& recorded, bool bias)
 {
     KernelDefinition kernel;
     kernel.kernelId
@@ -230,18 +269,19 @@ KernelDefinition makeKernel(const std::vector<KernelArgument>& recorded)
         {std::string("head_size"), HEAD_SIZE},
         {std::string("block_m"), int64_t{256}},
         {std::string("block_n"), int64_t{64}},
+        {std::string("use_additive_bias"), int64_t{bias ? 1 : 0}},
     };
     return kernel;
 }
 
 /// Runs the pack's prepare() over a descriptor recording @p recorded and returns the
 /// message of whatever it throws. Empty means it returned a prepared dispatch, which no
-/// case expects.
-std::string prepareFailure(const std::vector<KernelArgument>& recorded)
+/// case expects. @p bias makes both the graph and the candidate a bias one.
+std::string prepareFailure(const std::vector<KernelArgument>& recorded, bool bias = false)
 {
     registerNativeIngestorSymbols();
 
-    auto builder = buildAcceptedSdpaGraph();
+    auto builder = buildAcceptedSdpaGraph(bias);
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 
@@ -270,7 +310,7 @@ std::string prepareFailure(const std::vector<KernelArgument>& recorded)
 
     try
     {
-        handler->prepare(context, *bound, makeKernel(recorded));
+        handler->prepare(context, *bound, makeKernel(recorded, bias));
     }
     catch(const std::exception& error)
     {
@@ -281,9 +321,9 @@ std::string prepareFailure(const std::vector<KernelArgument>& recorded)
 
 /// Asserts the pack refuses @p recorded on signature grounds rather than on any of the
 /// other grounds prepare() can fail for.
-void expectRefused(const std::vector<KernelArgument>& recorded, const char* what)
+void expectRefused(const std::vector<KernelArgument>& recorded, const char* what, bool bias = false)
 {
-    const std::string failure = prepareFailure(recorded);
+    const std::string failure = prepareFailure(recorded, bias);
     ASSERT_FALSE(failure.empty()) << what << ": prepare() did not fail at all";
     EXPECT_NE(failure.find(MISMATCH_MARKER), std::string::npos)
         << what << ", but the failure was: " << failure;
@@ -423,6 +463,190 @@ TEST(TestGfx950AttentionDenseSignature, RefusesEachExchangeOfTwoLikeSlots)
             expectRefused(exchanged, what.c_str());
         }
     }
+}
+
+// =============================================================================
+// The additive-bias form
+// =============================================================================
+
+/// The positive control for a bias variant: a bias graph on a bias candidate recording
+/// the fourteen arguments the builder declares gets past the comparison to the loader.
+TEST(TestGfx950AttentionDenseSignature, AcceptsTheBiasAbiThePythonDeclares)
+{
+    const std::string failure = prepareFailure(biasAbi(), /*bias=*/true);
+    ASSERT_FALSE(failure.empty()) << "the archive named by the fixture does not exist, so "
+                                     "prepare() cannot have succeeded";
+    EXPECT_EQ(failure.find(MISMATCH_MARKER), std::string::npos)
+        << "the pack refused the argument list the rocKE builder declares: " << failure;
+}
+
+TEST(TestGfx950AttentionDenseSignature, RefusesTheTenArgumentFormForABiasCandidate)
+{
+    // A bias candidate whose object records no bias tail: the launch would write four
+    // arguments past the end of its kernarg segment.
+    expectRefused(pythonAbi(), "a bias variant takes the bias tail", /*bias=*/true);
+}
+
+TEST(TestGfx950AttentionDenseSignature, RefusesTheBiasFormForAPlainCandidate)
+{
+    expectRefused(biasAbi(), "a plain variant takes no bias tail");
+}
+
+TEST(TestGfx950AttentionDenseSignature, RefusesEachExchangeOfTwoBiasStrides)
+{
+    // Same kind and size; accepted, the kernel would stride over heads by the batch pitch.
+    const auto abi = biasAbi();
+    for(std::size_t first = abi.size() - 3; first < abi.size(); ++first)
+    {
+        for(std::size_t second = first + 1; second < abi.size(); ++second)
+        {
+            auto exchanged = abi;
+            std::swap(exchanged.at(first), exchanged.at(second));
+            const std::string what = abi.at(first).name + " <-> " + abi.at(second).name;
+            expectRefused(exchanged, what.c_str(), /*bias=*/true);
+        }
+    }
+}
+
+// =============================================================================
+// Restoring a saved plan
+// =============================================================================
+
+namespace
+{
+
+/// A tile the kernel is built with, so the saved block_m reads back.
+constexpr int64_t SAVED_BLOCK_M = 256;
+
+/// No device. A restore that passes the signature comparison and the launch values stops
+/// at the device load, which refuses a negative ordinal on the host.
+constexpr int NO_DEVICE = -1;
+
+/// The fragment only the restore's signature refusal carries, ahead of MISMATCH_MARKER.
+constexpr const char* RESTORE_MISMATCH_MARKER
+    = "the saved kernel's arguments do not match what this provider launches";
+
+/// The fragment of the device-ordinal refusal that follows every restore check.
+constexpr const char* NO_DEVICE_MARKER = "which names no device";
+
+/// Valid launch values for the fixture graph: `hipkernel.gfx950_attention_dense.dispatch.v2`,
+/// or `.v3` with the fixture's full [B, Hq, Sq, Skv] bias when @p withBias. Every value reads
+/// back, so only the recorded signature can stop a restore before the device load.
+hipdnn_plugin_sdk::ingestor::SavedLaunchInputs savedLaunchInputs(bool withBias)
+{
+    AttentionDenseBinding binding;
+    binding.q = Q_UID;
+    binding.k = K_UID;
+    binding.v = V_UID;
+    binding.o = O_UID;
+    binding.scale = SCALE;
+
+    AttentionDenseProblem problem;
+    problem.batch = BATCH;
+    problem.seqLenQ = SEQ;
+    problem.seqLenKv = SEQ;
+    problem.numQueryHeads = HEADS;
+    problem.numKvHeads = HEADS;
+    problem.headSize = HEAD_SIZE;
+    problem.dataType = data_objects::DataType::BFLOAT16;
+
+    if(withBias)
+    {
+        binding.bias = AdditiveBias{BIAS_UID,
+                                    {static_cast<int32_t>(HEADS * SEQ * SEQ),
+                                     static_cast<int32_t>(SEQ * SEQ),
+                                     static_cast<int32_t>(SEQ)}};
+    }
+    return {std::string(withBias ? GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V3
+                                 : GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V2),
+            gfx950AttentionDenseLaunchValues(binding, problem, SAVED_BLOCK_M)};
+}
+
+/// What restoreLaunch() threw. SUCCESS with no message means it returned, which no case
+/// expects.
+struct RestoreFailure
+{
+    hipdnnPluginStatus_t status = HIPDNN_PLUGIN_STATUS_SUCCESS;
+    std::string message;
+};
+
+/// Runs the restoreLaunch() of the handler registered under the saved contract over valid
+/// v2 (or, @p withBias, v3) launch values and a saved kernel whose recorded argument list
+/// is @p recorded, and returns what it throws.
+RestoreFailure restoreFailure(const std::vector<KernelArgument>& recorded, bool withBias)
+{
+    registerNativeIngestorSymbols();
+
+    const auto saved = savedLaunchInputs(withBias);
+    const auto* handler
+        = hipdnn_plugin_sdk::ingestor::DispatchRegistry<Handle>::resolve(saved.dispatchSymbol);
+    EXPECT_NE(handler, nullptr);
+    if(handler == nullptr)
+    {
+        return {};
+    }
+
+    hipdnn_plugin_sdk::ingestor::SavedKernelCode code;
+    code.kernelId
+        = hipdnn_flatbuffers_sdk::utilities::parseUuid("00000000-0000-4000-8000-0000000051a1");
+    code.sourceKind = KernelSourceKind::KPACK;
+    code.symbol = "attention_dense";
+    code.target = "gfx950";
+    code.recordedSignature = recorded;
+
+    try
+    {
+        static_cast<void>(handler->restoreLaunch(saved, std::move(code), NO_DEVICE));
+    }
+    catch(const hipdnn_plugin_sdk::HipdnnPluginException& error)
+    {
+        return {error.getStatus(), error.getMessage()};
+    }
+    return {};
+}
+
+} // namespace
+
+/// The positive control for the refusal below. The ten-argument form that v2 restores
+/// passes the signature comparison and the launch values and reaches the device load.
+TEST(TestGfx950AttentionDenseSignature, RestoresTheTenArgumentFormPastTheComparison)
+{
+    const auto failure = restoreFailure(pythonAbi(), /*withBias=*/false);
+    EXPECT_EQ(failure.status, HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR) << failure.message;
+    EXPECT_NE(failure.message.find(NO_DEVICE_MARKER), std::string::npos) << failure.message;
+    EXPECT_EQ(failure.message.find(MISMATCH_MARKER), std::string::npos) << failure.message;
+}
+
+/// v2 holds no bias, so a bias plan saves under v3. A v2 payload that names a bias kernel
+/// anyway (forged, or edited) records the fourteen-argument list. The restore must refuse
+/// it as incompatible, and must not launch a bias kernel with ten arguments.
+TEST(TestGfx950AttentionDenseSignature, RefusesToRestoreAV2PlanThatRecordsTheBiasForm)
+{
+    const auto failure = restoreFailure(biasAbi(), /*withBias=*/false);
+    EXPECT_EQ(failure.status, HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE) << failure.message;
+    EXPECT_NE(failure.message.find(RESTORE_MISMATCH_MARKER), std::string::npos) << failure.message;
+    EXPECT_NE(failure.message.find(MISMATCH_MARKER), std::string::npos) << failure.message;
+}
+
+/// The positive control for the refusal below. The fourteen-argument form that v3 restores
+/// passes the signature comparison and the bias values and reaches the device load.
+TEST(TestGfx950AttentionDenseSignature, RestoresTheFourteenArgumentFormPastTheComparison)
+{
+    const auto failure = restoreFailure(biasAbi(), /*withBias=*/true);
+    EXPECT_EQ(failure.status, HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR) << failure.message;
+    EXPECT_NE(failure.message.find(NO_DEVICE_MARKER), std::string::npos) << failure.message;
+    EXPECT_EQ(failure.message.find(MISMATCH_MARKER), std::string::npos) << failure.message;
+}
+
+/// A v3 payload that names a plain kernel records the ten-argument list. The restore must
+/// refuse it as incompatible, and must not pass four bias arguments the kernel does not
+/// declare.
+TEST(TestGfx950AttentionDenseSignature, RefusesToRestoreAV3PlanThatRecordsTheTenArgumentForm)
+{
+    const auto failure = restoreFailure(pythonAbi(), /*withBias=*/true);
+    EXPECT_EQ(failure.status, HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE) << failure.message;
+    EXPECT_NE(failure.message.find(RESTORE_MISMATCH_MARKER), std::string::npos) << failure.message;
+    EXPECT_NE(failure.message.find(MISMATCH_MARKER), std::string::npos) << failure.message;
 }
 
 } // namespace hip_kernel_provider::kernel_ingestor_engine::testing
