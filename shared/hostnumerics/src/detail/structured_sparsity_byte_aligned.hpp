@@ -61,7 +61,7 @@ inline StructuredSparsityWorkCounts applyTwoOfFourByteAligned(
 
     std::vector<size_t> coordinates(problem.input.shape().rank(), 0);
     for (size_t line = firstSlice; line < endSlice; ++line) {
-        coordinatesForLine(line, problem.input.shape(), axis, problem.pattern.indexOrder.entries(),
+        coordinatesForLine(line, problem.input.shape(), axis, problem.indexOrder.entries(),
                            coordinates);
         const ptrdiff_t inputBase = preparedElementOffset(problem.input.layout(), coordinates);
         const ptrdiff_t prunedBase = preparedElementOffset(problem.pruned.layout(), coordinates);
@@ -188,7 +188,7 @@ inline StructuredSparsityWorkCounts applyTwoOfFourByteAlignedStrided(
 
     std::vector<size_t> coordinates(problem.input.shape().rank(), 0);
     for (size_t line = firstSlice; line < endSlice; ++line) {
-        coordinatesForLine(line, problem.input.shape(), axis, problem.pattern.indexOrder.entries(),
+        coordinatesForLine(line, problem.input.shape(), axis, problem.indexOrder.entries(),
                            coordinates);
         const ptrdiff_t inputBase = preparedElementOffset(problem.input.layout(), coordinates);
         const ptrdiff_t prunedBase = preparedElementOffset(problem.pruned.layout(), coordinates);
@@ -287,7 +287,7 @@ template <size_t BytesPerElement>
 inline StructuredSparsityWorkCounts applyTwoOfFourByteAlignedBySelection(
     const StructuredSparsityInvocation& problem, const StructuredSparsityPlan& plan,
     size_t firstSlice, size_t endSlice, bool contiguousAxis) {
-    if (problem.pattern.selection == StructuredSparsitySelection::Random) {
+    if (std::holds_alternative<RandomStructuredSparsitySelection>(problem.pattern.selection)) {
         return contiguousAxis ? applyTwoOfFourByteAligned<BytesPerElement, true>(
                                     problem, plan, firstSlice, endSlice)
                               : applyTwoOfFourByteAlignedStrided<BytesPerElement, true>(

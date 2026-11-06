@@ -45,10 +45,6 @@ void registerOperationEnumBindings(nb::module_& module) {
         .value("Swish", Activation::Swish)
         .value("Clamp", Activation::Clamp);
 
-    nb::enum_<StructuredSparsitySelection>(module, "StructuredSparsitySelection")
-        .value("Fixed", StructuredSparsitySelection::Fixed)
-        .value("Random", StructuredSparsitySelection::Random);
-
     nb::enum_<ActivationApplication>(module, "ActivationApplication")
         .value("Forward", ActivationApplication::Forward)
         .value("Gradient", ActivationApplication::Gradient);

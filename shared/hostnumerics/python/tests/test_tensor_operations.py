@@ -248,9 +248,13 @@ class TensorOperationsTests(unittest.TestCase):  # noqa: F405
         self.assertEqual(layer_norm_outputs.mean.shape, [2])
         self.assertEqual(layer_norm_outputs.inverse_variance.shape, [2])
 
-        pattern = hv.StructuredSparsityPattern()
-        pattern.index_order = hv.Permutation([0])
-        pattern.axis = 0
+        pattern = hv.StructuredSparsityPattern(
+            axis=0,
+            group_size=4,
+            retained_elements=2,
+            selection=hv.FixedStructuredSparsitySelection([0, 1]),
+            index_order=hv.Permutation([0]),
+        )
         sparse = hv.apply_structured_sparsity(
             hv.from_numpy(np.arange(1, 9, dtype=np.float32)),
             pattern,

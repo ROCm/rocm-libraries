@@ -4,6 +4,7 @@
 #include <nanobind/stl/complex.h>
 #include <nanobind/stl/optional.h>
 #include <nanobind/stl/set.h>
+#include <nanobind/stl/variant.h>
 #include <nanobind/stl/vector.h>
 
 #include <complex>
@@ -239,14 +240,19 @@ void registerOperationBindings(nb::module_& module) {
             },
             nb::rv_policy::reference_internal);
 
+    nb::class_<FixedStructuredSparsitySelection>(module, "FixedStructuredSparsitySelection")
+        .def(nb::init<std::vector<size_t>>(), "positions"_a)
+        .def_rw("positions", &FixedStructuredSparsitySelection::positions);
+    nb::class_<RandomStructuredSparsitySelection>(module, "RandomStructuredSparsitySelection")
+        .def(nb::init<uint64_t>(), "seed"_a)
+        .def_rw("seed", &RandomStructuredSparsitySelection::seed);
     nb::class_<StructuredSparsityPattern>(module, "StructuredSparsityPattern")
-        .def(nb::init<>())
+        .def(nb::init<size_t, size_t, size_t, StructuredSparsitySelection, IndexOrder>(), "axis"_a,
+             "group_size"_a, "retained_elements"_a, "selection"_a, "index_order"_a)
         .def_rw("axis", &StructuredSparsityPattern::axis)
         .def_rw("group_size", &StructuredSparsityPattern::groupSize)
         .def_rw("retained_elements", &StructuredSparsityPattern::retainedElements)
         .def_rw("selection", &StructuredSparsityPattern::selection)
-        .def_rw("fixed_positions", &StructuredSparsityPattern::fixedPositions)
-        .def_rw("seed", &StructuredSparsityPattern::seed)
         .def_rw("index_order", &StructuredSparsityPattern::indexOrder);
     nb::class_<StructuredSparsitySliceRange>(module, "StructuredSparsitySliceRange")
         .def(nb::init<>())

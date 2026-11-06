@@ -13,10 +13,13 @@ class StructuredSparsityTests(unittest.TestCase):  # noqa: F405
                 tensor = hv.Tensor.from_storage(
                     hv.ScalarType.Float32, shape, b"", strides=[0, 0, 0], offset=0
                 )
-                pattern = hv.StructuredSparsityPattern()
-                pattern.index_order = hv.Permutation([0, 1, 2])
-                pattern.axis = 2
-                pattern.fixed_positions = [1, 3]
+                pattern = hv.StructuredSparsityPattern(
+                    axis=2,
+                    group_size=4,
+                    retained_elements=2,
+                    selection=hv.FixedStructuredSparsitySelection([1, 3]),
+                    index_order=hv.Permutation([0, 1, 2]),
+                )
                 result = hv.apply_structured_sparsity(tensor, pattern, True)
                 for output in (
                     result.pruned,
@@ -28,7 +31,7 @@ class StructuredSparsityTests(unittest.TestCase):  # noqa: F405
                     self.assertEqual(output.shape, shape)
                     self.assertEqual(output.size, 0)
                     self.assertEqual(output.storage, b"")
-                pattern.fixed_positions = [1, 4]
+                pattern.selection = hv.FixedStructuredSparsitySelection([1, 4])
                 with self.assertRaisesRegex(RuntimeError, "fixed position"):
                     hv.apply_structured_sparsity(tensor, pattern, True)
                 with self.assertRaisesRegex(RuntimeError, "input type must be UInt8"):
@@ -48,10 +51,15 @@ class StructuredSparsityTests(unittest.TestCase):  # noqa: F405
 
         for retained_positions in retained_position_sets:
             with self.subTest(retained_positions=retained_positions):
-                pattern = hv.StructuredSparsityPattern()
-                pattern.index_order = hv.Permutation([0, 1])
-                pattern.axis = 1
-                pattern.fixed_positions = list(retained_positions)
+                pattern = hv.StructuredSparsityPattern(
+                    axis=1,
+                    group_size=4,
+                    retained_elements=2,
+                    selection=hv.FixedStructuredSparsitySelection(
+                        list(retained_positions)
+                    ),
+                    index_order=hv.Permutation([0, 1]),
+                )
                 result = hv.apply_structured_sparsity(
                     hv.from_numpy(values), pattern, True
                 )
@@ -97,11 +105,13 @@ class StructuredSparsityTests(unittest.TestCase):  # noqa: F405
 
     def test_structured_sparsity_random_is_deterministic_and_self_consistent(self):
         values = np.arange(1, 65, dtype=np.float32).reshape(4, 16)
-        pattern = hv.StructuredSparsityPattern()
-        pattern.index_order = hv.Permutation([0, 1])
-        pattern.axis = 1
-        pattern.selection = hv.StructuredSparsitySelection.Random
-        pattern.seed = 0x12345678
+        pattern = hv.StructuredSparsityPattern(
+            axis=1,
+            group_size=4,
+            retained_elements=2,
+            selection=hv.RandomStructuredSparsitySelection(0x12345678),
+            index_order=hv.Permutation([0, 1]),
+        )
 
         first = hv.apply_structured_sparsity(hv.from_numpy(values), pattern, True)
         second = hv.apply_structured_sparsity(hv.from_numpy(values), pattern, True)
@@ -155,10 +165,13 @@ class StructuredSparsityTests(unittest.TestCase):  # noqa: F405
         strided = hv.Tensor.from_storage(
             hv.ScalarType.Float32, [2, 8], storage.tobytes(), [10, 1], offset=0
         )
-        pattern = hv.StructuredSparsityPattern()
-        pattern.index_order = hv.Permutation([0, 1])
-        pattern.axis = 1
-        pattern.fixed_positions = [1, 3]
+        pattern = hv.StructuredSparsityPattern(
+            axis=1,
+            group_size=4,
+            retained_elements=2,
+            selection=hv.FixedStructuredSparsitySelection([1, 3]),
+            index_order=hv.Permutation([0, 1]),
+        )
         observed = hv.apply_structured_sparsity(
             strided, pattern, emit_two_of_four_metadata=False
         )
