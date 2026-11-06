@@ -134,6 +134,67 @@ def initHelperKernelObjects(solution, kernelHelperType, cxxCompiler, isaInfoMap)
     return sorted(result, key=sortByEnum, reverse=True) # Ensure that we write Enum kernel helpers are first in list
 
 
+# Every solution field initHelperKernelObjects reads, directly or through isStreamK
+# (TileProcessingStrategy ... StreamKForceDPOnly). HelperKernelObjectsMemo keys on them, so a
+# field read by the init* functions below must be listed here (test_KernelHelperNaming_memo.py
+# checks it).
+HELPER_KERNEL_SOLUTION_FIELDS = ("ProblemType", "GlobalSplitU", "GlobalSplitUAlgorithm",
+                                 "StreamKAtomic", "_GlobalAccumulation", "AdaptiveGemmGSUA",
+                                 "ActivationFused", "WavefrontSize", "ISA",
+                                 "TileProcessingStrategy", "WorkAssignment", "_PersistentLoop",
+                                 "StreamK", "StreamKForceDPOnly")
+
+
+class HelperKernelObjectsMemo:
+    """initHelperKernelObjects for a fixed kernelHelperType, cxxCompiler and isaInfoMap, run
+    once per distinct helper input.
+
+    Solutions that agree on HELPER_KERNEL_SOLUTION_FIELDS (and on the global
+    internalParameters["GlobalSplitUPGR"]) get the same helper objects, so the objects are
+    built for the first such solution and the same list is returned for the others. Scope an
+    instance to one set of solutions (e.g. one benchmark step): it keeps every distinct
+    ProblemType and helper list it has built.
+    """
+
+    _absent = object()
+
+    def __init__(self, kernelHelperType, cxxCompiler, isaInfoMap):
+        self.kernelHelperType = kernelHelperType
+        self.cxxCompiler = cxxCompiler
+        self.isaInfoMap = isaInfoMap
+        self._problemTypes = []
+        self._objects = {}
+
+    def _problemTypeIndex(self, problemType):
+        # ProblemType is not cheaply hashable: key on its index in a list of distinct ones
+        # (a step normally has one).
+        for index, seen in enumerate(self._problemTypes):
+            if seen is problemType or seen == problemType:
+                return index
+        self._problemTypes.append(problemType)
+        return len(self._problemTypes) - 1
+
+    def _key(self, solution):
+        key = [internalParameters["GlobalSplitUPGR"]]
+        for field in HELPER_KERNEL_SOLUTION_FIELDS:
+            value = solution[field] if field in solution else self._absent
+            if field == "ProblemType":
+                value = self._problemTypeIndex(value)
+            elif isinstance(value, list):
+                value = tuple(value)
+            key.append(value)
+        return tuple(key)
+
+    def __call__(self, solution):
+        key = self._key(solution)
+        objects = self._objects.get(key)
+        if objects is None:
+            objects = initHelperKernelObjects(solution, self.kernelHelperType, self.cxxCompiler,
+                                              self.isaInfoMap)
+            self._objects[key] = objects
+        return objects
+
+
 def initBetaOnlyKernelObjects(solution):
   betaOnlyKernelObjects = []
   if (solution["GlobalSplitU"] > 1 or solution["GlobalSplitU"] == -1) or (isStreamK(solution) and solution["StreamKAtomic"] == 1):
