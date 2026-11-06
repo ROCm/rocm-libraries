@@ -98,7 +98,7 @@ hipDNN knob IDs are matched to `KnobType_t` by their last dot-separated segment,
 |---|---|---|
 | Data type | `INT32` or `INT64` | `INT32` only |
 | 1-D `(B+1)` tensor | Promoted to `(B+1,1,1,1)` in `infer_properties_node` | Promoted in place during validation, so either call order works; the tensor keeps its uid and handle |
-| Engine support | Unified SDPA engine on cuDNN 9.24+ | Only an engine plugin reporting API version 1.6.0 or newer; no in-tree engine or reference implements them yet (ALMIOPEN-2967) |
+| Engine support | Unified SDPA engine on cuDNN 9.24+ (mixed per-side forms: 9.25+) | Only an engine plugin reporting API version 1.6.0 or newer; no in-tree engine or reference implements them yet (ALMIOPEN-2967) |
 
 ## Build and execute
 

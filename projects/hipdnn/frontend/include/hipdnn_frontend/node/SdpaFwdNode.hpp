@@ -213,13 +213,13 @@ public:
             HIPDNN_CHECK_ERROR(detail::validateScalarParameter(scale, "SCALE tensor"));
         }
 
-        // Rule 6c: cu_seq_len_q / cu_seq_len_kv (cuDNN 9.25+).
+        // Rule 6c: cu_seq_len_q / cu_seq_len_kv (cuDNN 9.24+; the mixed per-side form 9.25+).
         // - Each side (Q, KV) uses either seq_len_* or cu_seq_len_*, never both. The sides may
-        //   differ; cuDNN 9.24 required cu on both.
+        //   differ (cuDNN 9.24 required cu on both).
         // - If either side is cumulative: padding_mask is required, both sides need a length
         //   tensor, and each cu tensor is INT32 (B+1,1,1,1) prefix sums starting at 0.
         // - A 1-D (B+1) tensor is promoted to that shape here, so the setter call order does
-        //   not matter (cuDNN promotes at validation too).
+        //   not matter (cuDNN promotes later, in infer_properties_node).
         const auto cuSeqLenQ = attributes.get_cu_seq_len_q();
         const auto cuSeqLenKv = attributes.get_cu_seq_len_kv();
         detail::promoteIndexTensorTo4d(cuSeqLenQ);

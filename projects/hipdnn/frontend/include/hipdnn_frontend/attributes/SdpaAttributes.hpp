@@ -194,13 +194,15 @@ public:
     {
         return getInput(InputNames::SEQ_LEN_KV);
     }
-    /// @brief Cumulative Q sequence lengths tensor, or null if unset.
+    /// @brief Cumulative Q sequence lengths tensor.
+    /// @return The tensor, or null if unset.
     // NOLINTNEXTLINE(readability-identifier-naming)
     std::shared_ptr<TensorAttributes> get_cu_seq_len_q() const
     {
         return getInput(InputNames::CU_SEQ_LEN_Q);
     }
-    /// @brief Cumulative KV sequence lengths tensor, or null if unset.
+    /// @brief Cumulative KV sequence lengths tensor.
+    /// @return The tensor, or null if unset.
     // NOLINTNEXTLINE(readability-identifier-naming)
     std::shared_ptr<TensorAttributes> get_cu_seq_len_kv() const
     {
@@ -388,7 +390,8 @@ public:
         return setInput(InputNames::SEQ_LEN_KV, std::move(value));
     }
     /**
-     * @brief Set the cumulative Q sequence lengths (forward only; cuDNN 9.25+ semantics).
+     * @brief Set the cumulative Q sequence lengths (forward only; cuDNN 9.24+, mixed with a
+     * seq_len_* tensor on the other side 9.25+).
      *
      * Exclusive prefix sums of the per-batch Q lengths: INT32, B+1 entries, starting at 0 (for
      * lengths 4, 3, 8 the tensor holds 0, 4, 7, 15). A 1-D (B+1) tensor is promoted to

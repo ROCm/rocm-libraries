@@ -384,7 +384,8 @@ requires the backend to detect ragged tensors in the graph
 
 `ragged_offset_multiplier` carries its own floor
 `K_RAGGED_OFFSET_MULTIPLIER_MIN_VERSION = "1.4.0"`, which **dominates**
-the ragged-tensor floor; `K_MAX_SUPPORTED_API_VERSION` is now `"1.4.0"`.
+the ragged-tensor floor. `K_MAX_SUPPORTED_API_VERSION` was `"1.4.0"` when this feature
+landed; it is now `"1.6.0"`, the SDPA `cu_seq_len` floor (RFC 0008 §4.5).
 It is surfaced by `GraphDescriptor::hasRaggedOffsetMultiplier()` (true
 when any tensor carries a non-default multiplier), which feeds
 `computeMinimumEnginePluginApiVersion` alongside the ragged flag.
