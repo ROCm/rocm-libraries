@@ -84,6 +84,7 @@ positive_patterns: &positive_patterns
   - "*/GPU_CandidateSelection_*"
   - "*/GPU_Find2Conv_*"
   - "*/GPU_FindDb_*"
+  - "*/GPU_FindDbWorkspace*"
   - "*/GPU_FindModeTrustVerify_*"
   # RNN family (replaces the *GRUExtra* / *lstm_extra* patterns, which matched nothing)
   - "*/GPU_GRU_*"
