@@ -69,6 +69,9 @@
  * # Int8 inputs, Int8 output, int32 alpha/beta, A/B in [-3, 3] (mostly unsaturated D)
  * ./cpu_gemm_driver --type i8 --typeCD i8 --int8Min -3 --int8Max 3 --validate --tryFastPath
  *
+ * # Float8 x Half inputs (MAC on Half), Float8 output
+ * ./cpu_gemm_driver --typeA f8 --typeB f16 --computeInputA f16 --typeCD f8 --validate
+ *
  * # Benchmark mode (validation disabled)
  * ./cpu_gemm_driver --M 2048 --N 2048 --K 2048 --validate 0 --tryFastPath 1
  *
@@ -80,6 +83,35 @@ namespace
 {
     using namespace TensileLite;
     using namespace TensileLite::Client;
+
+    // 8-bit float storage family: OCP (Float8, BFloat8) or fnuz (Float8_fnuz, BFloat8_fnuz).
+    enum class Float8Family
+    {
+        None,
+        OCP,
+        Fnuz
+    };
+
+    template <typename T>
+    constexpr Float8Family float8Family()
+    {
+        if constexpr(std::is_same_v<T, TensileLite::Float8>
+                     || std::is_same_v<T, TensileLite::BFloat8>)
+            return Float8Family::OCP;
+        else if constexpr(std::is_same_v<T, TensileLite::Float8_fnuz>
+                          || std::is_same_v<T, TensileLite::BFloat8_fnuz>)
+            return Float8Family::Fnuz;
+        else
+            return Float8Family::None;
+    }
+
+    bool scalarScaleConsumedBeforeNarrowing(rocisa::DataType storage, rocisa::DataType compute)
+    {
+        return storage == rocisa::DataType::Half
+               && (compute == rocisa::DataType::Float8 || compute == rocisa::DataType::BFloat8
+                   || compute == rocisa::DataType::Float8_fnuz
+                   || compute == rocisa::DataType::BFloat8_fnuz);
+    }
 
     // A slow, easy to understand, golden reference implementation of GEMM.
     // Used strictly for validating the correctness of the optimized path.
@@ -93,6 +125,8 @@ namespace
     //
     // scaleA is always indexed by row (M), scaleB always by col (N).
     // factorDim only affects scaleAlphaVec: 0 = row-dim (length M), 1 = col-dim (length N).
+    // preQuantizeScaleA/B apply consumed Scalar scales before quantizeA/B;
+    // the caller folds the remaining Scalar scales into alpha.
     //
     // Template parameters:
     //   AccumT         — epilogue type (float, double or int32_t): alpha, beta,
@@ -242,20 +276,22 @@ namespace
                          bool           transB,
                          AccumT         alpha,
                          AccumT         beta,
-                         const AccumT*  biasVec       = nullptr,
-                         const AccumT*  scaleAlphaVec = nullptr,
-                         ActivationType activation    = ActivationType::None,
-                         const AccumT*  scaleAVec     = nullptr,
-                         const AccumT*  scaleBVec     = nullptr,
-                         int            factorDim     = 0,
-                         QuantizeFn     quantizeA     = nullptr,
-                         QuantizeFn     quantizeB     = nullptr
+                         const AccumT*  biasVec           = nullptr,
+                         const AccumT*  scaleAlphaVec     = nullptr,
+                         ActivationType activation        = ActivationType::None,
+                         const AccumT*  scaleAVec         = nullptr,
+                         const AccumT*  scaleBVec         = nullptr,
+                         int            factorDim         = 0,
+                         QuantizeFn     quantizeA         = nullptr,
+                         QuantizeFn     quantizeB         = nullptr,
+                         MacT           preQuantizeScaleA = MacT(1),
+                         MacT           preQuantizeScaleB = MacT(1)
 #ifndef _WIN32
-                         ,
-                         MXGemmOperand  mxA           = {},
-                         MXGemmOperand  mxB           = {}
+                             ,
+                         MXGemmOperand mxA = {},
+                         MXGemmOperand mxB = {}
 #endif
-                         )
+    )
     {
 
         switch(activation)
@@ -309,8 +345,12 @@ namespace
                             size_t l    = lBase + t;
                             MacT   aVal = a[i * strideAM + l * strideAK];
                             MacT   bVal = b[l * strideBK + j * strideBN];
-                            if(quantizeA) aVal = static_cast<MacT>(quantizeA(static_cast<float>(aVal)));
-                            if(quantizeB) bVal = static_cast<MacT>(quantizeB(static_cast<float>(bVal)));
+                            if(quantizeA)
+                                aVal = static_cast<MacT>(
+                                    quantizeA(static_cast<float>(aVal * preQuantizeScaleA)));
+                            if(quantizeB)
+                                bVal = static_cast<MacT>(
+                                    quantizeB(static_cast<float>(bVal * preQuantizeScaleB)));
                             blockSum
                                 += static_cast<MacT>(static_cast<OperandMathOpT>(aVal))
                                    * static_cast<MacT>(static_cast<OperandMathOpT>(bVal));
@@ -337,8 +377,12 @@ namespace
                     {
                         MacT aVal = a[i * strideAM + l * strideAK];
                         MacT bVal = b[l * strideBK + j * strideBN];
-                        if(quantizeA) aVal = static_cast<MacT>(quantizeA(static_cast<float>(aVal)));
-                        if(quantizeB) bVal = static_cast<MacT>(quantizeB(static_cast<float>(bVal)));
+                        if(quantizeA)
+                            aVal = static_cast<MacT>(
+                                quantizeA(static_cast<float>(aVal * preQuantizeScaleA)));
+                        if(quantizeB)
+                            bVal = static_cast<MacT>(
+                                quantizeB(static_cast<float>(bVal * preQuantizeScaleB)));
                         sum += static_cast<MacT>(static_cast<OperandMathOpT>(aVal))
                                * static_cast<MacT>(static_cast<OperandMathOpT>(bVal));
                     }
@@ -385,7 +429,8 @@ namespace
     //            clamp to [-128, 127]; from an int32_t epilogue, clamp only.
     //   int32_t: plain static_cast (truncation from floating point, no clamp).
     //            Out-of-range conversion is undefined, so it throws here.
-    //   others:  plain static_cast.
+    //   others:  plain static_cast (Float8/BFloat8: round to nearest even, saturate
+    //            to the largest finite value).
     template <typename OutT, typename AccumT>
     OutT saturateCastLikeReference(AccumT val)
     {
@@ -863,6 +908,9 @@ int runGemm(size_t         m,
         }
         if constexpr(std::is_integral_v<OutputT>)
             d[0] = static_cast<OutputT>(d[0] > 0 ? d[0] - 16 : d[0] + 16); // stays in range
+        else if constexpr(float8Family<OutputT>() != Float8Family::None)
+            // d[0] + 16 could saturate back to d[0]; flip the sign instead (16 is exact).
+            d[0] = static_cast<OutputT>(static_cast<float>(d[0]) > 0.0f ? -16.0f : 16.0f);
         else
             d[0] = static_cast<OutputT>(static_cast<AccumulateT>(d[0])
                                         + static_cast<AccumulateT>(16.0));
@@ -942,15 +990,22 @@ int runGemm(size_t         m,
         }
 #endif
 
-        // Scalar ScaleAB folds into alpha (alpha * scaleA * scaleB, in the
-        // reference's order); an int32_t alpha is range-checked like the other
-        // int32_t intermediates.
+        // The GPU consumes a Scalar scale before Half-to-Float8 narrowing.
+        // Apply it during quantization and fold only remaining scales into
+        // alpha, in A-then-B order. Keep the source arrays unscaled.
         using GoldenAlphaT     = GoldenWideT<AccumulateT>;
         GoldenAlphaT wideAlpha = static_cast<GoldenAlphaT>(static_cast<AccumulateT>(alpha));
+        MacT         preQuantizeScaleA = MacT(1), preQuantizeScaleB = MacT(1);
         if(useScaleAB == "Scalar")
         {
-            wideAlpha = checkedInt32(wideAlpha * static_cast<GoldenAlphaT>(scaleABuf[0]));
-            wideAlpha = checkedInt32(wideAlpha * static_cast<GoldenAlphaT>(scaleBBuf[0]));
+            if(scalarScaleConsumedBeforeNarrowing(dtypeEnumA, computeInputA))
+                preQuantizeScaleA = static_cast<MacT>(scaleABuf[0]);
+            else
+                wideAlpha = checkedInt32(wideAlpha * static_cast<GoldenAlphaT>(scaleABuf[0]));
+            if(scalarScaleConsumedBeforeNarrowing(dtypeEnumB, computeInputB))
+                preQuantizeScaleB = static_cast<MacT>(scaleBBuf[0]);
+            else
+                wideAlpha = checkedInt32(wideAlpha * static_cast<GoldenAlphaT>(scaleBBuf[0]));
         }
         const AccumulateT goldenAlpha = static_cast<AccumulateT>(wideAlpha);
 
@@ -985,19 +1040,21 @@ int runGemm(size_t         m,
                     (useScaleAB == "Vector") ? scaleBBuf.data() : nullptr,
                     factorDim,
                     quantA,
-                    quantB
+                    quantB,
+                    preQuantizeScaleA,
+                    preQuantizeScaleB
 #ifndef _WIN32
                     ,
-                    MXGemmOperand{
-                        (isFP4 && mxBlockA > 0) ? mxsa.data() + batch * mxsaBatchStride : nullptr,
-                        mxBlockA,
-                        mxsaStrideM,
-                        mxsaStrideKBlk},
-                    MXGemmOperand{
-                        (isFP4 && mxBlockB > 0) ? mxsb.data() + batch * mxsbBatchStride : nullptr,
-                        mxBlockB,
-                        mxsbStrideN,
-                        mxsbStrideKBlk}
+                    MXGemmOperand{(isFP4 && mxBlockA > 0) ? mxsa.data() + batch * mxsaBatchStride
+                                                          : nullptr,
+                                  mxBlockA,
+                                  mxsaStrideM,
+                                  mxsaStrideKBlk},
+                    MXGemmOperand{(isFP4 && mxBlockB > 0) ? mxsb.data() + batch * mxsbBatchStride
+                                                          : nullptr,
+                                  mxBlockB,
+                                  mxsbStrideN,
+                                  mxsbStrideKBlk}
 #endif
                 );
             }
@@ -1017,8 +1074,17 @@ int runGemm(size_t         m,
         // step as the reference does. (It folds scaleAlphaVec into alpha before
         // multiplying by the sum, the reference multiplies after; the driver's
         // scaleAlphaVec values are +-1, so both give the same value.)
+        // Float8/BFloat8 outputs must match exactly too: with this driver's data every
+        // K-loop sum is exact in float. Products are +-1, or (one operand quantized to
+        // e4m3 from (-1, 1), the other +-1) multiples of 2^-9 (fnuz: 2^-10), whose sums
+        // are exact while |partial sum| < 2^15 (fnuz: 2^14). C, bias and scaleAlphaVec
+        // are +-1 and the ScaleAB scales integers, so the golden and the reference round
+        // the same epilogue operations to the same float values before the cast, and a
+        // wrong rounding or saturation is off by at least one F8 step.
+        constexpr bool isFloat8Output = float8Family<OutputT>() != Float8Family::None;
+
         double tolerance = [&]() {
-            if(isInt8)
+            if(isInt8 || isFloat8Output)
                 return 0.0;
             if(isFP4)
                 return 0.5;
@@ -1034,7 +1100,13 @@ int runGemm(size_t         m,
         {
             double valDut = static_cast<double>(d[i]);
             double valRef = static_cast<double>(saturateCastLikeReference<OutputT>(dRef[i]));
-            double diff   = std::abs(valDut - valRef);
+            // Equal values (also equal infinities) and NaN on both sides match; a NaN on
+            // one side only (e.g. an unsaturated Float8 overflow) is an infinite difference,
+            // which the tolerance check below would otherwise miss.
+            const bool bothNaN = std::isnan(valDut) && std::isnan(valRef);
+            double     diff    = (valDut == valRef || bothNaN) ? 0.0 : std::abs(valDut - valRef);
+            if(std::isnan(diff))
+                diff = std::numeric_limits<double>::infinity();
             maxDiff       = std::max(maxDiff, diff);
 
             if(diff > tolerance)
@@ -1099,7 +1171,7 @@ int main(int argc, char* argv[])
         "type", po::value<std::string>()->default_value("f32"), "Data type for A and B (f32, f64, tf32, f16, bf16, f8, bf8, f8fnuz, bf8fnuz, f4, i8)")(
         "typeA", po::value<std::string>()->default_value(""), "Override A storage type (defaults to --type)")(
         "typeB", po::value<std::string>()->default_value(""), "Override B storage type (defaults to --type)")(
-        "typeCD", po::value<std::string>()->default_value(""), "C/D (output) type: f32, f64, f16, bf16, i8, i32. Defaults to i32 for i8 inputs, f64 for f64 inputs, else f32; i8 inputs take any of i8, i32, f16, bf16, other inputs only the default")(
+        "typeCD", po::value<std::string>()->default_value(""), "C/D (output) type: f32, f64, f16, bf16, i8, i32, f8, bf8, f8fnuz, bf8fnuz. Defaults to i32 for i8 inputs, f64 for f64 inputs, else f32; i8 inputs take any of i8, i32, f16, bf16; 8-bit float inputs of one family (OCP or fnuz) take that family's f8/bf8, f8 x f16 takes f8 (f8fnuz x f16: f8fnuz); other inputs only the default")(
         "typeAlpha", po::value<std::string>()->default_value(""), "Alpha/beta type, also the reference's epilogue type: f32, f64, i32. Defaults to i32 when --typeCD is i8 or i32, f64 for f64 inputs, else f32; i32 needs integer --alpha/--beta")(
         "computeInputA", po::value<std::string>()->default_value(""), "Override A compute-input type for MAC (defaults to --typeA). Set smaller than storage to mimic kernels that quantize A.")(
         "computeInputB", po::value<std::string>()->default_value(""), "Override B compute-input type for MAC (defaults to --typeB). Set smaller than storage to mimic kernels that quantize B.")(
@@ -1242,11 +1314,20 @@ int main(int argc, char* argv[])
     if(typeAlphaStr.empty())
         typeAlphaStr = defaultAlpha;
 
-    if(!isInt8 && (typeCDStr != defaultCD || typeAlphaStr != defaultAlpha))
+    // Float8/BFloat8 C/D: the input types are checked at dispatch (runFloat8Output).
+    const bool isFloat8CD = (typeCDStr == "f8" || typeCDStr == "bf8" || typeCDStr == "f8fnuz"
+                             || typeCDStr == "bf8fnuz");
+
+    rocisa::DataType typeCD = rocisa::DataType::None;
+    if(isFloat8CD)
+        strToDataType(typeCDStr, typeCD);
+
+    if(!isInt8 && ((typeCDStr != defaultCD && !isFloat8CD) || typeAlphaStr != defaultAlpha))
     {
         std::cerr << "Error: --typeCD " << typeCDStr << " / --typeAlpha " << typeAlphaStr
-                  << " is only supported for i8 inputs (defaults here: " << defaultCD << " / "
-                  << defaultAlpha << ")" << std::endl;
+                  << " is only supported for i8 inputs, or f8/bf8/f8fnuz/bf8fnuz C/D with f32"
+                  << " alpha (defaults here: " << defaultCD << " / " << defaultAlpha << ")"
+                  << std::endl;
         return 1;
     }
 
@@ -1348,6 +1429,46 @@ int main(int argc, char* argv[])
             outputAmaxD, int8Min, int8Max);
     };
 
+    // Float8/BFloat8 C/D with float alpha/beta: the reference's Float8-output type ids.
+    // A and B are 8-bit floats of one family, with a Float8 or BFloat8 C/D of that
+    // family; or Float8 x Half in either order, with a C/D of the Float8 operand's type.
+    // The compute-input types must match one of those type ids, too (e.g. f8 x f16
+    // with --computeInputA f16 or --computeInputB f8), or the reference rejects them.
+    auto runFloat8Output = [&](auto aTag, auto bTag) -> int {
+        using AT                       = decltype(aTag);
+        using BT                       = decltype(bTag);
+        constexpr Float8Family familyA = float8Family<AT>();
+        constexpr Float8Family familyB = float8Family<BT>();
+        constexpr bool aIsFloat8 = std::is_same_v<AT, Float8> || std::is_same_v<AT, Float8_fnuz>;
+        constexpr bool bIsFloat8 = std::is_same_v<BT, Float8> || std::is_same_v<BT, Float8_fnuz>;
+        if constexpr(familyA != Float8Family::None && familyA == familyB)
+        {
+            constexpr bool isOCP = (familyA == Float8Family::OCP);
+            using F8T            = std::conditional_t<isOCP, Float8, Float8_fnuz>;
+            using BF8T           = std::conditional_t<isOCP, BFloat8, BFloat8_fnuz>;
+            if(typeCD == TypeInfo<F8T>::Enum)
+                return runTyped(AT{}, BT{}, float{}, F8T{});
+            if(typeCD == TypeInfo<BF8T>::Enum)
+                return runTyped(AT{}, BT{}, float{}, BF8T{});
+        }
+        else if constexpr(aIsFloat8 && std::is_same_v<BT, Half>)
+        {
+            if(typeCD == TypeInfo<AT>::Enum)
+                return runTyped(AT{}, BT{}, float{}, AT{});
+        }
+        else if constexpr(std::is_same_v<AT, Half> && bIsFloat8)
+        {
+            if(typeCD == TypeInfo<BT>::Enum)
+                return runTyped(AT{}, BT{}, float{}, BT{});
+        }
+        std::cerr << "Error: unsupported --typeCD " << typeCDStr << " for typeA=" << typeAStr
+                  << " typeB=" << typeBStr
+                  << " (supported: 8-bit float A and B of one family with that family's f8 or"
+                  << " bf8 C/D, or f8 x f16 / f8fnuz x f16 in either order with an f8 / f8fnuz"
+                  << " C/D)" << std::endl;
+        return 1;
+    };
+
     auto dispatchB = [&](auto aTag) -> int {
         using AT = decltype(aTag);
         auto callB = [&](auto bTag) -> int {
@@ -1393,6 +1514,8 @@ int main(int argc, char* argv[])
             }
             else
             {
+                if(isFloat8CD)
+                    return runFloat8Output(AT{}, BT{});
                 // Promote AccumulateT to double when both A and B storage are double (f64).
                 using AccT = std::conditional_t<
                     std::is_same_v<AT, double> && std::is_same_v<BT, double>, double, float>;
@@ -1434,7 +1557,10 @@ int main(int argc, char* argv[])
     }
     catch(const std::exception& e)
     {
-        std::cerr << "Runtime Error: " << e.what() << std::endl;
+        std::cerr << "Runtime Error: " << e.what() << " [typeA=" << typeAStr
+                  << ", typeB=" << typeBStr << ", computeInputA=" << computeInputAStr
+                  << ", computeInputB=" << computeInputBStr << ", typeCD=" << typeCDStr
+                  << ", typeAlpha=" << typeAlphaStr << "]" << std::endl;
         return 1;
     }
 
