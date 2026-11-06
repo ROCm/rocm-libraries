@@ -1475,16 +1475,6 @@ struct DeviceGroupedConvBwdWeight_Xdl_CShuffleV3
             }
         }
 
-        // Memory access runtime error on gfx1250 (inconsistent across runs)
-        // TODO: need fix
-        if constexpr(LargeTensors)
-        {
-            if(is_gfx125_supported())
-            {
-                return false;
-            }
-        }
-
         if constexpr(!LargeTensors)
         {
             if(arg.stride_overflow)
