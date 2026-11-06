@@ -1,0 +1,33 @@
+# RUN: D=$(mktemp -d) && %stinkytofu-opt --arch gfx1250 %s --StinkyBuildImplicitDependencyPass --StinkyWaitCntInsertionPass --print-output > $D/plain.out 2>/dev/null && %stinkytofu-opt --arch gfx1250 %s --StinkyBuildImplicitDependencyPass --StinkyWaitCntInsertionPass --print-output --checkpoint-after=opt:StinkyBuildImplicitDependencyPass --checkpoint-dump-dir=$D/bundles > $D/dump.out 2>/dev/null && cat $D/bundles/*/*.stir $D/bundles/*/meta.json && %stinkytofu-opt --arch gfx1250 %s --StinkyBuildImplicitDependencyPass --StinkyWaitCntInsertionPass --print-output --checkpoint-after=opt:StinkyBuildImplicitDependencyPass --checkpoint-load-dir=$D/bundles > $D/load.out 2>/dev/null && cmp $D/plain.out $D/dump.out && cmp $D/plain.out $D/load.out && echo ROUNDTRIP-IDENTICAL; rc=$?; rm -rf $D; exit $rc
+#
+# IR checkpoint, dump then load unedited: the dump carries one mod.ckpt id per
+# printed instruction, in program order, and the LDS tokens the implicit
+# dependency pass attached. Neither the dump nor loading the unedited bundle
+# may change the output.
+#
+# CHECK-LABEL: st.func @ir_checkpoint_roundtrip() {
+# CHECK-NEXT: ^entry:
+# CHECK-NEXT: v0 = "st.ds_load_b32"(v10, LDS0)
+# CHECK-SAME: mod.ckpt = { id = 0 } }
+# CHECK-NEXT: v30 = "st.ds_load_b32"(v10, LDS1)
+# CHECK-SAME: mod.ckpt = { id = 1 } }
+# CHECK-NEXT: v32 = "st.ds_load_b32"(v10, LDS1)
+# CHECK-SAME: mod.ckpt = { id = 2 } }
+# CHECK-NEXT: v7 = "st.v_add_f32"(v0, v1)
+# CHECK-SAME: mod.ckpt = { id = 3 } }
+# CHECK-NEXT: }
+# CHECK: "format_version": 1,
+# CHECK: "label": "opt",
+# CHECK: "pass": "StinkyBuildImplicitDependencyPass",
+# CHECK: "occurrence": 1,
+# CHECK: "instructions": 4,
+# CHECK: "fingerprint":
+# CHECK: ROUNDTRIP-IDENTICAL
+
+st.func @ir_checkpoint_roundtrip() {
+^entry:
+  v0 = "st.ds_load_b32"(v10) { mod.ds = { na = 1, offset = 0, gds = false }, mod.memtoken = { tokens = [0] } }
+  v30 = "st.ds_load_b32"(v10) { mod.ds = { na = 1, offset = 16, gds = false }, mod.memtoken = { tokens = [1] } }
+  v32 = "st.ds_load_b32"(v10) { mod.ds = { na = 1, offset = 20, gds = false }, mod.memtoken = { tokens = [1] } }
+  v7 = "st.v_add_f32"(v0, v1)
+}

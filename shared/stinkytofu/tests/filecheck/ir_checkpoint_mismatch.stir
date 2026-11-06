@@ -1,0 +1,21 @@
+# RUN: D=$(mktemp -d) && %stinkytofu-opt --arch gfx1250 %s --StinkyBuildImplicitDependencyPass --StinkyWaitCntInsertionPass --print-output --checkpoint-after=opt:StinkyBuildImplicitDependencyPass --checkpoint-dump-dir=$D > /dev/null 2>&1 && sed 's/offset = 20/offset = 24/' %s > $D/changed.stir && %stinkytofu-opt --arch gfx1250 $D/changed.stir --StinkyBuildImplicitDependencyPass --StinkyWaitCntInsertionPass --print-output --checkpoint-after=opt:StinkyBuildImplicitDependencyPass --checkpoint-load-dir=$D 2>&1; rc=$?; rm -rf $D; exit $rc
+# XFAIL
+#
+# IR checkpoint, fingerprint mismatch: the bundle was dumped from IR that
+# differs from what the build now produces at the checkpoint (one ds_load
+# offset changed). The ids would then name the wrong instructions, so the load
+# is a fatal error, never a silent build of either version.
+#
+# CHECK: FATAL ERROR: IRCheckpoint: the bundle
+# CHECK-SAME: was dumped from different IR.
+# CHECK-NEXT: bundle fingerprint
+# CHECK-NEXT: current fingerprint
+# CHECK-NOT: IRCheckpoint: loaded
+
+st.func @ir_checkpoint_mismatch() {
+^entry:
+  v0 = "st.ds_load_b32"(v10) { mod.ds = { na = 1, offset = 0, gds = false }, mod.memtoken = { tokens = [0] } }
+  v30 = "st.ds_load_b32"(v10) { mod.ds = { na = 1, offset = 16, gds = false }, mod.memtoken = { tokens = [1] } }
+  v32 = "st.ds_load_b32"(v10) { mod.ds = { na = 1, offset = 20, gds = false }, mod.memtoken = { tokens = [1] } }
+  v7 = "st.v_add_f32"(v0, v1)
+}

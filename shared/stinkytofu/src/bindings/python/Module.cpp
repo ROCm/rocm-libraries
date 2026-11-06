@@ -329,6 +329,15 @@ void StinkyAsmModule::retargetGroupEndpoint(IRBase* from, IRBase* ifFirst, IRBas
     }
 }
 
+bool StinkyAsmModule::isGroupEndpoint(const IRBase* node) const {
+    if (!node) return false;
+    for (const auto& [groupName, range] : pImpl->instructionGroups) {
+        (void)groupName;
+        if (range.first.getNodePtr() == node || range.last.getNodePtr() == node) return true;
+    }
+    return false;
+}
+
 const StinkyAsmModule::ModuleOptions& StinkyAsmModule::getModuleOptions() const {
     return this->moduleOptions;
 }

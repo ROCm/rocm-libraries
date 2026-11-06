@@ -128,6 +128,7 @@ set(UNIT_ASM_TEST_FILES
     unit/asm/WaitAluTrackerTest.cpp
     unit/asm/BasicBlockTest.cpp
     unit/asm/DumpStinkyModulePassTest.cpp
+    unit/asm/IRCheckpointTest.cpp
     unit/asm/StinkySignatureTest.cpp
     unit/asm/HWModelTest.cpp
     unit/asm/SchedulingKnobHeuristicsTest.cpp

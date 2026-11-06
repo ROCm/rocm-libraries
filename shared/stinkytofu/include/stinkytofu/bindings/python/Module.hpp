@@ -67,6 +67,11 @@
  * @note TimePasses: print a per-pass wall-time report to stderr after the
  * pipeline runs (Tensile `StinkyTofuTimePasses`, stinkytofu-opt
  * `--time-passes`).
+ * @note IRCheckpointAfterPass: `<pmLabel>:<PassName>[#n]`, the pass boundary
+ * IRCheckpointDumpDir / IRCheckpointLoadDir act on (Tensile
+ * `StinkyTofuIRCheckpointAfterPass`, stinkytofu-opt `--checkpoint-after=`).
+ * Dump writes the region IR there; load replaces it with an edited copy. The
+ * two directories are mutually exclusive. See docs/user/ir-checkpoint.md.
  */
 #define MODULE_OPTIONS_LIST(X)                    \
     X(DebugLevel, int)                            \
@@ -91,6 +96,9 @@
     X(UseSgprForGRO, int)                         \
     X(PrintBeforePass, std::string)               \
     X(PrintAfterPass, std::string)                \
+    X(IRCheckpointAfterPass, std::string)         \
+    X(IRCheckpointDumpDir, std::string)           \
+    X(IRCheckpointLoadDir, std::string)           \
     X(DebugPass, std::string)                     \
     X(PassOrderSnapshotJson, std::string)         \
     X(VerifyEach, bool)                           \
@@ -397,6 +405,13 @@ class STINKYTOFU_EXPORT StinkyAsmModule {
      * when it is the group's last. A null replacement leaves that side unchanged.
      */
     void retargetGroupEndpoint(IRBase* from, IRBase* ifFirst, IRBase* ifLast);
+
+    /**
+     * @brief Is \p node stored as some group's first or last?
+     *
+     * A later scoped pass finds its range through these nodes, so an edit must not remove them.
+     */
+    bool isGroupEndpoint(const IRBase* node) const;
 
     /**
      * @brief Get the ModuleOptions

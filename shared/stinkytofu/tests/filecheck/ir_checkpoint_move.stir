@@ -1,0 +1,26 @@
+# RUN: D=$(mktemp -d) && %stinkytofu-opt --arch gfx1250 %s --StinkyBuildImplicitDependencyPass --StinkyWaitCntInsertionPass --print-output --checkpoint-after=opt:StinkyBuildImplicitDependencyPass --checkpoint-dump-dir=$D/dump > /dev/null 2>&1 && mkdir $D/load && cp -r $D/dump/* $D/load/ && for f in $D/load/*/*.stir; do awk '/id = 2 }/ { held = $0; next } { print } /id = 3 }/ { print held }' "$f" > "$f.new" && mv "$f.new" "$f"; done && %stinkytofu-opt --arch gfx1250 %s --StinkyBuildImplicitDependencyPass --StinkyWaitCntInsertionPass --print-output --checkpoint-after=opt:StinkyBuildImplicitDependencyPass --checkpoint-load-dir=$D/load 2>&1; rc=$?; rm -rf $D; exit $rc
+#
+# IR checkpoint, one moved instruction: the edited bundle puts the v_add
+# (id 3) above the third ds_load (id 2). Waits are inserted after the
+# checkpoint, so they are derived again for the new order: v0 is now the
+# oldest of two outstanding loads, not three, and the drain before the add
+# becomes dscnt 1 instead of dscnt 2.
+#
+# CHECK: IRCheckpoint: loaded
+# CHECK-SAME: (1 moved, 0 new or changed, 0 removed)
+# CHECK-LABEL: st.func @ir_checkpoint_move() {
+# CHECK: v0 = "st.ds_load_b32"
+# CHECK-NEXT: v30 = "st.ds_load_b32"
+# CHECK-NEXT: "st.s_wait_dscnt"(1)
+# CHECK-SAME: dlcnt = 1
+# CHECK-NEXT: v7 = "st.v_add_f32"(v0, v1)
+# CHECK-NEXT: v32 = "st.ds_load_b32"
+# CHECK-NOT: s_wait_dscnt
+
+st.func @ir_checkpoint_move() {
+^entry:
+  v0 = "st.ds_load_b32"(v10) { mod.ds = { na = 1, offset = 0, gds = false }, mod.memtoken = { tokens = [0] } }
+  v30 = "st.ds_load_b32"(v10) { mod.ds = { na = 1, offset = 16, gds = false }, mod.memtoken = { tokens = [1] } }
+  v32 = "st.ds_load_b32"(v10) { mod.ds = { na = 1, offset = 20, gds = false }, mod.memtoken = { tokens = [1] } }
+  v7 = "st.v_add_f32"(v0, v1)
+}

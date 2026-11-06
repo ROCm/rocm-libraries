@@ -34,6 +34,7 @@
 #include "stinkytofu/core/PassManager.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmDirectives.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
+#include "stinkytofu/pipeline/IRCheckpoint.hpp"
 #include "stinkytofu/support/DebugPrintInstrumentation.hpp"
 #include "stinkytofu/support/StandardInstrumentations.hpp"
 #include "stinkytofu/support/TimePassesInstrumentation.hpp"
@@ -210,11 +211,13 @@ inline void configureModuleInstrumentations(ModulePassManager& mpm,
 /// StandardInstrumentations style): debug IR printing, per-pass StinkyTofu ASM IR
 /// verification when ModuleOptions.VerifyEach is set, and per-pass timing while a
 /// TimePassesSession is open. Drivers (backend, opt) should call this instead of
-/// wiring each observer individually.
+/// wiring each observer individually. \p checkpoint, when set, hooks itself in if
+/// \p label is its spec's label.
 inline void configureStandardInstrumentations(
     PassManager& pm, const StinkyAsmModule::ModuleOptions& opts, const std::string& label,
     const std::shared_ptr<DebugOutputStreams>& debugStreams,
-    const StinkyAsmModule* module = nullptr) {
+    const StinkyAsmModule* module = nullptr,
+    const std::shared_ptr<IRCheckpointSession>& checkpoint = nullptr) {
     configureDebugOutput(pm, opts, label, debugStreams, module);
     if (opts.VerifyEach) {
         pm.addInstrumentation(std::make_shared<VerifyInstrumentation>());
@@ -222,6 +225,7 @@ inline void configureStandardInstrumentations(
     if (auto timer = getActiveTimePasses()) {
         pm.addInstrumentation(std::move(timer));
     }
+    if (checkpoint) checkpoint->install(pm, label);
 }
 
 // -----------------------------------------------------------------------

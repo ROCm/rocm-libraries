@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: MIT
 
 target_sources(stinkytofu_objs PRIVATE
+    IRCheckpoint.cpp
     PassBuilder.cpp
     RegisterAllocationPipeline.cpp
 )

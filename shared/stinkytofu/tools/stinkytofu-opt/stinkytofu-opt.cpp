@@ -41,6 +41,7 @@
 #include "stinkytofu/ir/asm/StinkySignature.hpp"
 #include "stinkytofu/pipeline/Backend.hpp"
 #include "stinkytofu/pipeline/BackendRegistry.hpp"
+#include "stinkytofu/pipeline/IRCheckpoint.hpp"
 #include "stinkytofu/serialization/asm/IRConverter.hpp"
 #include "stinkytofu/serialization/asm/IRParser.hpp"
 #include "stinkytofu/serialization/asm/RawAsmParser.hpp"
@@ -217,7 +218,9 @@ std::vector<RequestedPass> parsePassNames(int argc, char** argv, int startIdx) {
                 arg == "--wait-alu-scoreboard" || arg.starts_with("--prefetch-lead-wmmas=") ||
                 arg.starts_with("--prefetch-lead-min-stage-wmmas=") ||
                 arg.starts_with("--war-gate-wmmas=") || arg == "--ds-slot-first" ||
-                arg.starts_with("--vgpr-msb-mode=") || arg == "--from-label" ||
+                arg.starts_with("--vgpr-msb-mode=") || arg.starts_with("--checkpoint-after=") ||
+                arg.starts_with("--checkpoint-dump-dir=") ||
+                arg.starts_with("--checkpoint-load-dir=") || arg == "--from-label" ||
                 arg == "--to-label" || isKernelConfigArg(arg))
                 continue;
             // Two-arg flags: skip both the flag and its value so the value
@@ -359,6 +362,12 @@ int main(int argc, char** argv) {
         std::cerr << "                   after.txt in the working directory (implied by\n";
         std::cerr << "                   --debug-pass)\n";
         std::cerr << "  --time-passes    Report per-pass wall time on stderr\n";
+        std::cerr << "  --checkpoint-after=<pmLabel>:<Pass>[#n]\n";
+        std::cerr << "                   IR checkpoint boundary; the named-pass pass manager is\n";
+        std::cerr << "                   labelled 'opt' (see docs/user/ir-checkpoint.md)\n";
+        std::cerr << "  --checkpoint-dump-dir=<dir>  Dump the IR at the checkpoint into <dir>\n";
+        std::cerr << "  --checkpoint-load-dir=<dir>  Replace the IR at the checkpoint with the\n";
+        std::cerr << "                   edited bundle in <dir>\n";
         std::cerr << "  --list-passes    List all available passes\n";
         std::cerr << "  --version        Show version information\n";
         std::cerr << "  --help           Show this help message\n\n";
@@ -427,6 +436,12 @@ int main(int argc, char** argv) {
         std::cerr << "                   after.txt in the working directory (implied by\n";
         std::cerr << "                   --debug-pass)\n";
         std::cerr << "  --time-passes    Report per-pass wall time on stderr\n";
+        std::cerr << "  --checkpoint-after=<pmLabel>:<Pass>[#n]\n";
+        std::cerr << "                   IR checkpoint boundary; the named-pass pass manager is\n";
+        std::cerr << "                   labelled 'opt' (see docs/user/ir-checkpoint.md)\n";
+        std::cerr << "  --checkpoint-dump-dir=<dir>  Dump the IR at the checkpoint into <dir>\n";
+        std::cerr << "  --checkpoint-load-dir=<dir>  Replace the IR at the checkpoint with the\n";
+        std::cerr << "                   edited bundle in <dir>\n";
         std::cerr << "  --list-passes    List all available passes\n";
         std::cerr << "  --version        Show version information\n";
         std::cerr << "  --help           Show this help message\n\n";
@@ -707,7 +722,17 @@ int main(int argc, char** argv) {
     std::string outputFile;
     std::string fromLabel;
     std::string toLabel;
+    std::string checkpointAfter;
+    std::string checkpointDumpDir;
+    std::string checkpointLoadDir;
     for (int i = 1; i < argc; ++i) {
+        const std::string_view flag = argv[i];
+        if (flag.starts_with("--checkpoint-after="))
+            checkpointAfter = flag.substr(std::string_view("--checkpoint-after=").size());
+        if (flag.starts_with("--checkpoint-dump-dir="))
+            checkpointDumpDir = flag.substr(std::string_view("--checkpoint-dump-dir=").size());
+        if (flag.starts_with("--checkpoint-load-dir="))
+            checkpointLoadDir = flag.substr(std::string_view("--checkpoint-load-dir=").size());
         if (std::string(argv[i]) == "--print-output") printOutput = true;
         if (std::string(argv[i]) == "--emit-asm") emitAsm = true;
         if (std::string(argv[i]) == "--remarks") enableRemarks = true;
@@ -922,6 +947,9 @@ int main(int argc, char** argv) {
             moduleOpts.EnableRemarks = enableRemarks;
             moduleOpts.VerifyEach = verifyEach;
             moduleOpts.TimePasses = timePasses;
+            moduleOpts.IRCheckpointAfterPass = checkpointAfter;
+            moduleOpts.IRCheckpointDumpDir = checkpointDumpDir;
+            moduleOpts.IRCheckpointLoadDir = checkpointLoadDir;
             // The --Tile*/--NumGR*/--NumWaves flags are parsed for both modes but
             // used to be applied only in individual-pass mode, so pipeline mode
             // silently ran every kernel with a zeroed tile config. Backend's entry
@@ -998,6 +1026,10 @@ int main(int argc, char** argv) {
                 auto pass = createPassByName(rp.name, rp.args);
                 if (pass) passManager.addPass(std::move(pass));
             }
+            // Reports an unmatched spec when it goes out of scope, after the run.
+            auto checkpoint = stinkytofu::IRCheckpointSession::create(
+                checkpointAfter, checkpointDumpDir, checkpointLoadDir, parsedFunc->funcName, arch);
+            if (checkpoint) checkpoint->install(passManager, "opt");
 
             stinkytofu::Function func(parsedFunc->funcName);
             func.setGemmTileConfig(gemmTileConfig);

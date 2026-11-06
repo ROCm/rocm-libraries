@@ -116,11 +116,12 @@ void addGfx1250RegionPasses(PassManager& pm, const StinkyAsmModule& module, OptL
 
 /// A fresh entry-scoped PassManager with analyses + standard instrumentation.
 PassManager makeEntryPM(const StinkyAsmModule& module,
-                        const std::shared_ptr<DebugOutputStreams>& debugStreams) {
+                        const std::shared_ptr<DebugOutputStreams>& debugStreams,
+                        const std::shared_ptr<IRCheckpointSession>& checkpoint) {
     PassManager pm;
     registerAllAnalyses(pm.getAnalysisManager());
     configureStandardInstrumentations(pm, module.getModuleOptions(), "module", debugStreams,
-                                      &module);
+                                      &module, checkpoint);
     return pm;
 }
 
@@ -137,6 +138,7 @@ bool buildGfx1250Pipeline(ModulePassManager& mpm, StinkyAsmModule& module, const
         std::max(0, std::min(moduleOptions.OptLevel, static_cast<int>(OptLevel::O3))));
     const bool runScheduler = optLevel != OptLevel::O0;
     auto debugStreams = createDebugOutputStreams(moduleOptions);
+    const auto checkpoint = IRCheckpointSession::create(module);
 
     configureModuleInstrumentations(mpm, moduleOptions, "module", debugStreams, &module);
 
@@ -150,7 +152,7 @@ bool buildGfx1250Pipeline(ModulePassManager& mpm, StinkyAsmModule& module, const
 
     // Region scheduling + kernel setup (entry only).
     {
-        PassManager pm = makeEntryPM(module, debugStreams);
+        PassManager pm = makeEntryPM(module, debugStreams, checkpoint);
         pm.addPass(createStinkyRemoveNopPass(/*vNopOnly=*/true));
         PB.applyExtensionPoint(PipelineExtensionPoint::BeforeRegionPasses, pm, module);
 
@@ -222,7 +224,8 @@ bool buildGfx1250Pipeline(ModulePassManager& mpm, StinkyAsmModule& module, const
             registerAllAnalyses(innerPM.getAnalysisManager());
             innerPM.setPassFeatureConfig(passFeatureConfig);
             configureStandardInstrumentations(innerPM, moduleOptions,
-                                              "loopWithPrefetch+noLoadLoopBody", debugStreams);
+                                              "loopWithPrefetch+noLoadLoopBody", debugStreams,
+                                              /*module=*/nullptr, checkpoint);
             PB.applyExtensionPoint(PipelineExtensionPoint::InnerRegionBegin, innerPM, module);
             addGfx1250RegionPasses(innerPM, module, optLevel, moduleOptions.EnableWaitCntInsertion,
                                    runScheduler);
@@ -245,7 +248,7 @@ bool buildGfx1250Pipeline(ModulePassManager& mpm, StinkyAsmModule& module, const
             PassManager epiloguePM;
             registerAllAnalyses(epiloguePM.getAnalysisManager());
             configureStandardInstrumentations(epiloguePM, moduleOptions, "globalWriteEpilogue",
-                                              debugStreams);
+                                              debugStreams, /*module=*/nullptr, checkpoint);
             epiloguePM.addPass(createEpilogueStoreSinkPass());
             pm.addPass(createKernelToRegionPassAdaptor(module, "globalWriteEpilogue",
                                                        std::move(epiloguePM)));
@@ -326,7 +329,7 @@ bool buildGfx1250Pipeline(ModulePassManager& mpm, StinkyAsmModule& module, const
     }
 
     {
-        PassManager pm = makeEntryPM(module, debugStreams);
+        PassManager pm = makeEntryPM(module, debugStreams, checkpoint);
         pm.addPass(createMemTokenConsistencyCheckPass());
 
         if (runScheduler) {
@@ -349,7 +352,7 @@ bool buildGfx1250Pipeline(ModulePassManager& mpm, StinkyAsmModule& module, const
 
     // Flatten callees + byte-layout tail (entry only, single linear stream).
     {
-        PassManager pm = makeEntryPM(module, debugStreams);
+        PassManager pm = makeEntryPM(module, debugStreams, checkpoint);
         // Re-merge callable functions into the entry at their ASM placement markers
         // so SwInstructionPrefetchRelStaticPass sees a single linear stream /
         // legacy emission order. After the multi-function passes above; no-op with
