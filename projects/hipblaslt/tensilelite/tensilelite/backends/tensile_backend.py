@@ -126,3 +126,11 @@ class TensileBackend(OptimizationBackend):
             True - TensileBackend can use solution pool files
         """
         return True
+
+    def uses_benchmark_results(self) -> bool:
+        """TensileBackend benchmarks all solutions of a step once and ignores the results.
+
+        Returns:
+            False - its steps can be prepared first and built together
+        """
+        return False

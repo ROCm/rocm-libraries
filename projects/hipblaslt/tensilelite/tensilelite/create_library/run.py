@@ -37,8 +37,9 @@ import sys
 import pickle
 import sys
 import zlib
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor
 from contextlib import contextmanager
+from dataclasses import dataclass
 from pathlib import Path
 from timeit import default_timer as timer
 from typing import Collection, Dict, List, NamedTuple, Optional, Union
@@ -46,6 +47,7 @@ from typing import Collection, Dict, List, NamedTuple, Optional, Union
 from .. import LibraryIO
 from ..Common import (
     CHeader,
+    CPUThreadCount,
     DebugConfig,
     ensurePath,
     HR,
@@ -457,9 +459,17 @@ def processKernelSource(kernelWriterAssembly, data, outOptions, splitGSU, kernel
     return _emitKernel(kernelWriterAssembly, splitGSU, kernel, compress)
 
 
-def _mapKernels(fn, kernels):
+def _processKernelSourceItem(compress, item) -> KernelCodeGenResult:
+    """processKernelSource for one (kernelWriterAssembly, rocisaData, outOptions, splitGSU,
+    kernel) item of generateBenchmarkKernels."""
+    kernelWriterAssembly, data, outOptions, splitGSU, kernel = item
+    return processKernelSource(kernelWriterAssembly, data, outOptions, splitGSU, kernel, compress)
+
+
+def _mapKernels(fn, kernels, procs=None):
     """Map ``fn`` over ``kernels`` in order on the parallel worker pool."""
-    return ParallelMap2(fn, kernels, "Generating assembly kernels", multiArg=False, return_as="list")
+    return ParallelMap2(fn, kernels, "Generating assembly kernels", multiArg=False, return_as="list",
+                        procs=procs)
 
 
 def _checkInvalidSolutionsAndKernels(errorTolerant, result, kernel):
@@ -487,8 +497,13 @@ def _checkInvalidSolutions(splitGSU, removeKernelNames, solutions):
     return invalids
 
 def removeInvalidSolutionsAndKernels(results, kernels, solutions, errorTolerant, printLevel: bool, splitGSU: bool):
-    removeKernelsAndResultsFlag = ParallelMap2(functools.partial(_checkInvalidSolutionsAndKernels, errorTolerant),
-                                               zip(results, kernels), "check invalid kernels and results", return_as="list")
+    # In the parent: the check is one attribute test per kernel. In a process pool each task
+    # pickled the codegen result and the kernel's state to a worker and back, and the pool had to
+    # be restarted or shrunk to the number of kernels and grown again for the next step.
+    removeKernelsAndResultsFlag = [
+        _checkInvalidSolutionsAndKernels(errorTolerant, result, kernel)
+        for result, kernel in zip(results, kernels)
+    ]
 
     if any(removeKernelsAndResultsFlag) and not errorTolerant:
         printExit("** kernel generation failure **")
@@ -665,7 +680,93 @@ def writeHelpers(
         kernelHeaderFile.write(HeaderText)
 
 
-def writeSolutionsAndKernels(
+def _timedBuildSourceCodeObjectFiles(*args):
+    """buildSourceCodeObjectFiles under the python_kernel_build_src_co timer, which runs
+    concurrently with kernel generation and assembly (see prepareSolutionsAndKernels)."""
+    with timing_context("python_kernel_build_src_co"):
+        return buildSourceCodeObjectFiles(*args)
+
+
+def overlapsHelperCompile() -> bool:
+    """Whether the benchmark helper kernels are compiled while the pools run: only with a pool
+    budget above one, since the compile takes one slot of it."""
+    return CPUThreadCount() > 1
+
+
+def benchmarkPoolSize(generateSourcesAndExit: bool) -> int:
+    """Process pool size for every pool of a benchmark run: solution generation in
+    BenchmarkProblems, codegen (generateBenchmarkKernels) and the invalid-kernel check and
+    assembly (finishSolutionsAndKernels).
+
+    When the helper compiles overlap (overlapsHelperCompile) they take one slot of the budget
+    (helperCompileExecutor runs one at a time), so the pools get one process less. All pools of
+    the run use that size, also those that never run beside a compile: joblib resizes its worker
+    pool whenever the size changes (stopping a worker, then starting one that imports Tensile
+    again), and alternating sizes every benchmark step made subtile_mxfp4's build 85 -> 150 s."""
+    budget = CPUThreadCount()
+    if overlapsHelperCompile() and not generateSourcesAndExit:
+        return budget - 1
+    return budget
+
+
+@contextmanager
+def helperCompileExecutor():
+    """The thread that compiles the benchmark helper kernels (Kernels.cpp) of the builds prepared
+    with it (prepareSolutionsAndKernels), one after the other and in the order they were
+    prepared: the compiles take one slot of the pool budget (benchmarkPoolSize), and a step whose
+    helper kernels an earlier step already compiled hits the helper-kernel cache, as when the
+    steps were built one after the other. Leaving the block, also through an exception, waits
+    for the running compile and cancels the queued ones, so no compile is left running."""
+    executor = ThreadPoolExecutor(max_workers=1)
+    try:
+        yield executor
+    finally:
+        executor.shutdown(wait=True, cancel_futures=True)
+
+
+@dataclass
+class BenchmarkKernelBuild:
+    """The kernels of one benchmark step between the phases of their build: prepared
+    (prepareSolutionsAndKernels), generated (generateBenchmarkKernels, which takes the builds of
+    several steps at once) and finished (finishSolutionsAndKernels)."""
+
+    outputPath: Path
+    asmToolchain: object
+    solutions: list
+    kernelWriterAssembly: KernelWriterAssembly
+    splitGSU: bool
+    archNames: Dict[IsaVersion, str]
+    errorTolerant: bool
+    generateSourcesAndExit: bool
+    compress: bool
+    removeTemporaries: bool
+    destRoot: Path
+    buildTmpPath: Path
+    assemblyTmpPath: Path
+    asmGroups: list
+    asmKernels: list
+    rocisaData: object
+    outOptions: object
+    poolSize: int
+    # The helper compile, while it may still be running (None: none, or already waited for).
+    helperBuild: Optional[Future]
+    # Set by generateBenchmarkKernels.
+    asmResults: Optional[List[KernelCodeGenResult]] = None
+
+
+def _profileKernelBuild(running: bool):
+    """PythonProfile profiles the kernel build only: each phase below starts the profiler and
+    stops it again, so the work between the phases (e.g. the next steps' solution generation)
+    is left out, as when each step was built in one call. Stats add up over the starts."""
+    if globalParameters["PythonProfile"]:
+        import yappi
+        if running:
+            yappi.start()
+        else:
+            yappi.stop()
+
+
+def prepareSolutionsAndKernels(
     outputPath,
     asmToolchain,
     srcToolchain,
@@ -675,19 +776,22 @@ def writeSolutionsAndKernels(
     kernelWriterAssembly,
     splitGSU: bool,
     cmdlineArchs: List[str],
+    helperExecutor: ThreadPoolExecutor,
     disableAsmComments: bool=False,
     errorTolerant: bool=False,
     generateSourcesAndExit: bool=False,
     compress: bool=True,
     removeTemporaries: bool=True,
-):
+) -> BenchmarkKernelBuild:
+    """The first phase of a benchmark step's kernel build: the build directories, the
+    representative assembly kernels to generate, and the helper kernels, written to Kernels.cpp
+    and queued for compiling on helperExecutor (helperCompileExecutor). Their compile only needs
+    the helper kernels, so it runs while the assembly kernels are generated, assembled and
+    linked. With a budget of one there is no slot to spare: the compile then finishes here."""
     if globalParameters["PythonProfile"]:
         globalParameters["CpuThreads"] = 0
         printWarning("Python profiling is enabled. CpuThreads set to 0.")
-        import yappi
-        yappi.start()
-
-    codeObjectFiles = []
+    _profileKernelBuild(True)
 
     archNames = archNamesByIsa(cmdlineArchs)
 
@@ -728,20 +832,108 @@ def writeSolutionsAndKernels(
         numAsmKernels = len(asmKernels)
         numKernels = len(asmKernels)
         assert numKernels == numAsmKernels, "Only assembly kernels are supported in TensileLite"
-        memcompress = numAsmKernels > 10000
-        unaryProcessKernelSource = functools.partial(
-            processKernelSource,
-            kernelWriterAssembly,
-            rocisa.rocIsa.getInstance().getData(),
-            outOptions,
-            splitGSU,
-            compress=memcompress,
+
+    with timing_context("python_kernel_write_helpers"):
+        writeHelpers(outputPath, kernelHelperObjs, KERNEL_HELPER_FILENAME_CPP, KERNEL_HELPER_FILENAME_H)
+    srcKernelFile = outputPath / "Kernels.cpp"
+
+    helperBuild = None
+    if not generateSourcesAndExit:
+        helperBuild = helperExecutor.submit(
+            _timedBuildSourceCodeObjectFiles,
+            srcToolchain.compiler,
+            srcToolchain.bundler,
+            destRoot,
+            objectTmpPath,
+            outputPath,
+            srcKernelFile,
+            cmdlineArchs,
         )
+        if not overlapsHelperCompile():
+            with timing_context("python_kernel_build_src_co_wait"):
+                helperBuild.result()
+            helperBuild = None
+
+    _profileKernelBuild(False)
+    return BenchmarkKernelBuild(
+        outputPath=outputPath,
+        asmToolchain=asmToolchain,
+        solutions=solutions,
+        kernelWriterAssembly=kernelWriterAssembly,
+        splitGSU=splitGSU,
+        archNames=archNames,
+        errorTolerant=errorTolerant,
+        generateSourcesAndExit=generateSourcesAndExit,
+        compress=compress,
+        removeTemporaries=removeTemporaries,
+        destRoot=destRoot,
+        buildTmpPath=buildTmpPath,
+        assemblyTmpPath=assemblyTmpPath,
+        asmGroups=asmGroups,
+        asmKernels=asmKernels,
+        rocisaData=rocisa.rocIsa.getInstance().getData(),
+        outOptions=outOptions,
+        poolSize=benchmarkPoolSize(generateSourcesAndExit),
+        helperBuild=helperBuild,
+    )
+
+
+def generateBenchmarkKernels(builds: List[BenchmarkKernelBuild]):
+    """Generate the assembly kernels of the given builds in one pool, so that the benchmark steps
+    of a config share it instead of each filling and draining a pool of its own
+    (timing_runs/DECISIONS.md topic 7, C). Each build gets the results of its own kernels, in
+    order."""
+    if not builds:
+        return
+    asmIter = list(itertools.chain.from_iterable(
+        zip(
+            itertools.repeat(build.kernelWriterAssembly),
+            itertools.repeat(build.rocisaData),
+            itertools.repeat(build.outOptions),
+            itertools.repeat(build.splitGSU),
+            build.asmKernels,
+        )
+        for build in builds
+    ))
+    # The generated sources are held until their step is finished: compress them, as for a
+    # step of more than 10000 kernels, when several steps share the pool.
+    memcompress = len(builds) > 1 or sum(len(build.asmKernels) for build in builds) > 10000
+    # Every build of a run has the same pool size (benchmarkPoolSize).
+    poolSize = builds[0].poolSize
+    _profileKernelBuild(True)
     with timing_context("python_kernel_codegen"):
-        asmResults = _mapKernels(unaryProcessKernelSource, asmKernels)
+        asmResults = _mapKernels(
+            functools.partial(_processKernelSourceItem, memcompress), asmIter, procs=poolSize
+        )
+    _profileKernelBuild(False)
+    start = 0
+    for build in builds:
+        build.asmResults = asmResults[start : start + len(build.asmKernels)]
+        start += len(build.asmKernels)
+
+
+def finishSolutionsAndKernels(build: BenchmarkKernelBuild):
+    """The last phase of a benchmark step's kernel build, after generateBenchmarkKernels: drop
+    the solutions whose kernels failed, copy the codegen results back to the solutions, assemble
+    and link the kernels, and wait for the helper compile. Returns the code object files and the
+    number of kernels."""
+    asmToolchain = build.asmToolchain
+    solutions = build.solutions
+    splitGSU = build.splitGSU
+    archNames = build.archNames
+    asmResults = build.asmResults
+    asmKernels = build.asmKernels
+    asmGroups = build.asmGroups
+    assemblyTmpPath = build.assemblyTmpPath
+    removeTemporaries = build.removeTemporaries
+    poolSize = build.poolSize
+    numKernels = len(asmKernels)
+    _profileKernelBuild(True)
+    codeObjectFiles = []
+
     with timing_context("python_kernel_validate"):
         removeInvalidSolutionsAndKernels(
-            asmResults, asmKernels, solutions, errorTolerant, getVerbosity(), splitGSU
+            asmResults, asmKernels, solutions, build.errorTolerant, getVerbosity(), splitGSU,
         )
         validKeys = {
             getKernelCompileKey(kernel, splitGSU) for kernel in asmKernels
@@ -751,6 +943,7 @@ def writeSolutionsAndKernels(
             asmResults, asmKernels, solutions, splitGSU
         )
 
+    # assemble goes to the pool workers: it must not refer to build (helperBuild is a Future).
     def assemble(ret):
         p, isa, wavefrontsize, _ = ret
         o_path = p.with_suffix(".o")
@@ -775,7 +968,10 @@ def writeSolutionsAndKernels(
             "Writing assembly kernels",
             return_as="list",
             multiArg=False,
+            procs=poolSize,
         )
+    # The generated sources are written: do not hold them until every step is finished.
+    build.asmResults = None
 
     # Remove solutions whose representative kernel failed to assemble.
     failedKeys = {
@@ -789,11 +985,8 @@ def writeSolutionsAndKernels(
         asmGroups[:] = [group for group in asmGroups if group.key not in failedKeys]
         asmKernels[:] = [group.representative for group in asmGroups]
 
-    with timing_context("python_kernel_write_helpers"):
-        writeHelpers(outputPath, kernelHelperObjs, KERNEL_HELPER_FILENAME_CPP, KERNEL_HELPER_FILENAME_H)
-    srcKernelFile = Path(outputPath) / "Kernels.cpp"
-
     if globalParameters["PythonProfile"]:
+        import yappi
         yappi.stop()
         yappi.get_func_stats().save("yappi_results.profile", type="callgrind")
         with open("yappi_results.txt", "w") as f:
@@ -802,31 +995,24 @@ def writeSolutionsAndKernels(
             with open("yappi_thread_stats.txt", "w") as f:
                 yappi.get_thread_stats().print_all(out=f)
 
-    if not generateSourcesAndExit:
+    if not build.generateSourcesAndExit:
         with timing_context("python_kernel_build_co"):
             codeObjectFiles += buildAssemblyCodeObjectFiles(
                 asmToolchain.linker,
                 asmToolchain.bundler,
                 asmGroups,
-                destRoot,
+                build.destRoot,
                 assemblyTmpPath,
-                compress,
+                build.compress,
                 archNames=archNames,
             )
 
-        with timing_context("python_kernel_build_src_co"):
-            buildSourceCodeObjectFiles(
-                srcToolchain.compiler,
-                srcToolchain.bundler,
-                destRoot,
-                objectTmpPath,
-                outputPath,
-                srcKernelFile,
-                cmdlineArchs,
-            )
+    if build.helperBuild is not None:
+        with timing_context("python_kernel_build_src_co_wait"):
+            build.helperBuild.result()
 
-    if removeTemporaries and not generateSourcesAndExit:
-        removeScratch(outputPath, buildTmpPath)
+    if removeTemporaries and not build.generateSourcesAndExit:
+        removeScratch(build.outputPath, build.buildTmpPath)
 
     return codeObjectFiles, numKernels
 
