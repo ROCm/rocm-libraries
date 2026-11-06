@@ -28,23 +28,37 @@
 #include <hip/hip_runtime_api.h>
 #include <iostream>
 
+#ifdef GOOGLE_TEST
+#include <gtest/gtest.h>
+#endif
+
 // Teardown must not throw: destructors are implicitly noexcept, so an exception
-// escaping one calls std::terminate. Log the status and keep going.
+// escaping one calls std::terminate. Under gtest, a failed status fails the
+// current test without stopping it; otherwise it is only logged.
 inline void rocsparse_clients_log_hip_error(const char* call, hipError_t status) noexcept
 {
+#ifdef GOOGLE_TEST
+    EXPECT_EQ(status, hipSuccess) << call << " failed: " << hipGetErrorString(status);
+#else
     if(status != hipSuccess)
     {
         std::cerr << call << " failed: " << hipGetErrorString(status) << " ("
                   << static_cast<int>(status) << ")" << std::endl;
     }
+#endif
 }
 
 inline void rocsparse_clients_log_rocsparse_error(const char*      call,
                                                   rocsparse_status status) noexcept
 {
+#ifdef GOOGLE_TEST
+    EXPECT_EQ(status, rocsparse_status_success)
+        << call << " failed: " << rocsparse_get_status_name(status);
+#else
     if(status != rocsparse_status_success)
     {
         std::cerr << call << " failed: " << rocsparse_get_status_name(status) << " ("
                   << static_cast<int>(status) << ")" << std::endl;
     }
+#endif
 }
