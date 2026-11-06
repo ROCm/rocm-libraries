@@ -66,8 +66,8 @@ _COHORT = [
     ("fp16", 128, 16, 4, False, True),  # flagship default (causal)
     ("fp16", 128, 16, 4, True, True),  # flagship persistent
     ("bf16", 128, 16, 4, True, True),  # bf16 D128 persistent (the VGPR-starved config)
-    # bf16 D128 default: the plain-exp2 arm -- the one config _use_exp2_fast turns
-    # off, and it does so on the grid, at every seqlen.
+    # bf16 D128 default: the plain-exp2 arm -- the one config default_use_exp2_fast
+    # turns off, and it does so on the grid, at every seqlen.
     ("bf16", 128, 16, 4, False, True),
     ("fp16", 64, 16, 16, False, True),  # D64 MHA default
     ("bf16", 64, 16, 4, True, True),  # D64 bf16 persistent (the wpe=4 config)

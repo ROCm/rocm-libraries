@@ -1028,8 +1028,8 @@ TEST(TestGfx942AttentionDenseScore, AnUnlaunchableRecordScoresZero)
     EXPECT_EQ(scoreOf(badTile), 0.0);
 }
 
-// The body levers' policies restate rocKE's _use_cfvst and _use_exp2_fast per dtype, head
-// size and grid kind (TestGfx942AttentionDenseScoreGoldens.inc).
+// The body levers' policies restate rocKE's default_use_cfvst and default_use_exp2_fast per
+// dtype, head size and grid kind (TestGfx942AttentionDenseScoreGoldens.inc).
 TEST(TestGfx942AttentionDenseScore, TheBodyPoliciesRestateThePython)
 {
     for(const auto& golden : POLICY_GOLDENS)

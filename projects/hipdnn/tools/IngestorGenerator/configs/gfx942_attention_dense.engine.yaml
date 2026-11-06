@@ -452,8 +452,9 @@ launch_surface:
   # levers and the body levers to order arms; only the grid enters the launch
   # (grid_select). use_cfvst and use_exp2_fast rank against the policy the kernel resolves
   # them to (gfx942AttentionDenseCfvstPolicy / gfx942AttentionDenseExp2FastPolicy in
-  # Gfx942AttentionDenseGeometry.hpp), checked against _use_cfvst / _use_exp2_fast and
-  # over the full enumeration by gen_gfx942_attention_dense_score_goldens.py.
+  # Gfx942AttentionDenseGeometry.hpp), checked against default_use_cfvst /
+  # default_use_exp2_fast and over the full enumeration by
+  # gen_gfx942_attention_dense_score_goldens.py.
   - name: score
     python_source: dispatch/attention/gfx942_dense.py:_base_spec
     cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/Gfx942AttentionDenseNative.cpp
@@ -483,7 +484,7 @@ launch_surface:
   # (gen_gfx942_attention_dense_score_goldens.py, kept current by IngestorGenerator's
   # tests/test_attention_dense_goldens.py).
   - name: cfvst_policy
-    python_source: kernels/gfx942/attention_dense.py:_use_cfvst
+    python_source: kernels/gfx942/attention_dense.py:default_use_cfvst
     cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/Gfx942AttentionDenseGeometry.hpp:gfx942AttentionDenseCfvstPolicy
     kmd_fields: [dtype, head_size, use_cfvst]
     guard: >
@@ -492,7 +493,7 @@ launch_surface:
     test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestGfx942AttentionDenseMatchers.cpp
 
   - name: exp2_fast_policy
-    python_source: kernels/gfx942/attention_dense.py:_use_exp2_fast
+    python_source: kernels/gfx942/attention_dense.py:default_use_exp2_fast
     cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/Gfx942AttentionDenseGeometry.hpp:gfx942AttentionDenseExp2FastPolicy
     kmd_fields: [dtype, head_size, persistent, use_exp2_fast]
     guard: >

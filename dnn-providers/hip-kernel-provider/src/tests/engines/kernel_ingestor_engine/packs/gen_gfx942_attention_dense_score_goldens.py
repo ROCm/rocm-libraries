@@ -6,7 +6,7 @@ policy arms in packs/Gfx942AttentionDenseNative.cpp, which
 TestGfx942AttentionDenseMatchers.cpp checks the C++ against:
 
   * POLICY_GOLDENS: per (dtype, head size, grid kind), what an unset use_cfvst and
-    use_exp2_fast resolve to (_use_cfvst, _use_exp2_fast), restated by
+    use_exp2_fast resolve to (default_use_cfvst, default_use_exp2_fast), restated by
     gfx942AttentionDenseCfvstPolicy and gfx942AttentionDenseExp2FastPolicy;
   * SCORE_GOLDENS: every kernel of hipkernel:Gfx942AttentionDense's full enumeration
     (registry_enumerator over configs/gfx942_attention_dense.engine.yaml), with its cell,
@@ -49,7 +49,7 @@ CANONICAL = {
 
 
 def policy_rows():
-    from kernels.gfx942.attention_dense import _use_cfvst, _use_exp2_fast
+    from kernels.gfx942.attention_dense import default_use_cfvst, default_use_exp2_fast
 
     rows = []
     for dtype, head_size, persistent in itertools.product(
@@ -60,8 +60,8 @@ def policy_rows():
                 dtype.upper(),
                 head_size,
                 persistent,
-                _use_cfvst(head_size, dtype),
-                _use_exp2_fast(head_size, dtype, persistent),
+                default_use_cfvst(head_size, dtype),
+                default_use_exp2_fast(head_size, dtype, persistent),
             )
         )
     return rows

@@ -193,12 +193,12 @@ inline Gfx942AttentionDenseGeometry gfx942AttentionDenseGeometry(int64_t blockM,
 }
 
 /**
- * @brief The body policy `_use_cfvst` resolves an unset `use_cfvst` to: the conflict-free
+ * @brief The body policy `default_use_cfvst` resolves an unset `use_cfvst` to: the conflict-free
  *        V store where one async-DMA instruction moves one K/V row (head size 128), either
  *        dtype, and the naive V path at 64.
  *
  * Read by the cold score only, which places the policy arm of each body knob first. The
- * Python is `rocke/library/kernels/gfx942/attention_dense.py:_use_cfvst`; the table in
+ * Python is `rocke/library/kernels/gfx942/attention_dense.py:default_use_cfvst`; the table in
  * TestGfx942AttentionDenseScoreGoldens.inc is generated from it.
  *
  * @param dtype The KMD dtype ("BF16" or "FP16").
@@ -211,12 +211,12 @@ inline bool gfx942AttentionDenseCfvstPolicy(std::string_view dtype, int64_t head
 }
 
 /**
- * @brief The body policy `_use_exp2_fast` resolves an unset `use_exp2_fast` to: the
+ * @brief The body policy `default_use_exp2_fast` resolves an unset `use_exp2_fast` to: the
  *        single-instruction exp2 everywhere except bf16 at head size 128 on a
  *        one-CTA-per-block grid, where it measured slower.
  *
  * Read by the cold score only. The Python is
- * `rocke/library/kernels/gfx942/attention_dense.py:_use_exp2_fast`; the table in
+ * `rocke/library/kernels/gfx942/attention_dense.py:default_use_exp2_fast`; the table in
  * TestGfx942AttentionDenseScoreGoldens.inc is generated from it.
  *
  * @param dtype The KMD dtype ("BF16" or "FP16").

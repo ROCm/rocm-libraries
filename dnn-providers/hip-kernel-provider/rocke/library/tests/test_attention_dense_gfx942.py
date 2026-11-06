@@ -47,6 +47,7 @@ from kernels.gfx942.attention_dense import (
     attention_dense_signature,
     bf16_cfvst_supported,
     build_attention_dense,
+    default_use_exp2_fast,
     gfx942_kernel_name,
     run_attention_dense_torch,
     supports_attention_dense,
@@ -58,7 +59,6 @@ from kernels.gfx942.attention_dense import (
     _lds_bytes,
     _use_kdb,
     _use_vpf,
-    _use_exp2_fast,
     _v_row_pad,
     _v_swizzle_width,
     _tuned_waves_per_eu,
@@ -2079,7 +2079,8 @@ def _walk_op_names(op):
         (64, "bf16", False, True),
         (64, "bf16", True, True),
         # bf16 D128 DEFAULT-GRID GUARD: plain exp2 on the default grid, exp2_fast on
-        # the persistent grid. The predicate reads no shape -- see _use_exp2_fast.
+        # the persistent grid. The predicate reads no shape -- see
+        # default_use_exp2_fast.
         (128, "bf16", False, False),
         (128, "bf16", True, True),
     ],
@@ -2098,7 +2099,7 @@ def test_exp2_fast_policy_bf16_d128_default_grid_guard(
     which is what lets bf16 D128 share one runtime-shape binary. Pins the guard so a
     future edit that changes the enabled set has to update this matrix on purpose.
     """
-    assert _use_exp2_fast(head_size, dtype, persistent) is expected
+    assert default_use_exp2_fast(head_size, dtype, persistent) is expected
 
 
 @pytest.mark.parametrize(

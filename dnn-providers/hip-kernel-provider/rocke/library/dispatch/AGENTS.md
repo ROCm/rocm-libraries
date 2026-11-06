@@ -213,7 +213,7 @@ causal attention (`sliding_window=0`, no sinks), with or without
 `causal_diag_split`: `lds_num_buffers=2` enables **K LDS double buffering
 only**, and `v_reg_prefetch=True` enables **V register prefetch only**. Both
 run on the CFVST body, which is already the D128 default
-(`use_cfvst=None` resolves on via `_use_cfvst`; `use_cfvst=False` opts out
+(`use_cfvst=None` resolves on via `default_use_cfvst`; `use_cfvst=False` opts out
 on either grid). KDB and VPF also require `persistent=True` and
 `block_n=64`, as enforced by the kernel's validator; turning on either one
 does not implicitly enable the other.
