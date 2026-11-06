@@ -42,7 +42,7 @@ Full documentation for rocALUTION is available at [https://rocm.docs.amd.com/pro
 * Fixed GS, SGS, ILU, ItILU0 and the LU solver aborting or leaking the triangular solve analysis when they are moved to the backend they are already on, for example by calling `MoveToAccelerator()` on a preconditioner that its solver has already moved.
 * Fixed ILUT and IC failing to solve after they are moved to another backend. IC now moves its inverse diagonal, and the IC factorization on the accelerator now computes it.
 * Fixed `LocalMatrix::Apply()` and `LocalMatrix::MatrixMult()` of complex DENSE matrices on the accelerator ending the program.
-* Fixed `Asum` and `Amax` of complex vectors on the accelerator ending the program, and so every complex solve on the accelerator with the L1 or infinity residual norm.
+* Fixed `LocalVector::Asum()` and `LocalVector::Amax()` of complex vectors on the accelerator ending the program, which also ended complex solves on the accelerator with the L1 residual norm, and complex `LocalMatrix` solves on the accelerator with the Linf residual norm.
 * Fixed `Asum` of complex vectors on the host returning the sums of the absolute real and imaginary parts as a complex number. On both backends it now returns the real sum of the moduli `|z|`, and `Amax` returns the entry with the largest modulus.
 
 ## (Unreleased) rocALUTION 4.1.1

@@ -1158,7 +1158,8 @@ namespace rocalution
 
 #ifdef SUPPORT_COMPLEX
     // Complex Asum and Amax use the modulus |z|, as the host. The rocBLAS complex asum and
-    // amax use |re| + |im| instead. hypot, as the squares of the parts can overflow.
+    // amax use |re| + |im| instead. The modulus uses hypot, as the squares of the parts can
+    // overflow.
     template <typename T>
     struct hip_complex_modulus
     {
@@ -1175,6 +1176,8 @@ namespace rocalution
         T       value;
     };
 
+    // A NaN modulus ranks below every other one, so that NaN entries are skipped, as on the
+    // host, and hip_max_modulus stays commutative, which rocprim::reduce requires
     template <typename T>
     struct hip_entry_modulus
     {
@@ -1182,7 +1185,8 @@ namespace rocalution
 
         __device__ hip_index_modulus<T> operator()(int64_t i) const
         {
-            return {i, hypot(vec[i].real(), vec[i].imag())};
+            const T modulus = hip_complex_modulus<T>()(vec[i]);
+            return {i, isnan(modulus) ? static_cast<T>(-1) : modulus};
         }
     };
 
@@ -1275,11 +1279,16 @@ namespace rocalution
 
             free_hip(&dres);
 
-            // The modulus of the entry as the host computes it. std::abs of a complex value
-            // rounds differently in HIP code, the host std::abs is hypot.
-            std::complex<T> entry;
-            copy_d2h(1, vec + res.index, &entry);
-            res.value = std::hypot(entry.real(), entry.imag());
+            // The modulus of the entry as the host computes it, with std::hypot as the host
+            // std::abs does: the device hypot and std::abs of a complex value in HIP code can
+            // round differently. A zero modulus stays zero even if entry 0 is NaN, as on the
+            // host.
+            if(res.value > static_cast<T>(0))
+            {
+                std::complex<T> entry;
+                copy_d2h(1, vec + res.index, &entry);
+                res.value = std::hypot(entry.real(), entry.imag());
+            }
         }
 
         value = res.value;

@@ -311,6 +311,10 @@ TYPED_TEST(backend_vector, asum_sums_the_magnitudes)
         using R     = real_t<T>;
         const R big = std::ldexp(R(1), std::numeric_limits<R>::max_exponent - 4);
         expect_near(this->vec(std::vector<T>{T(3 * big, 4 * big)})->Asum(), T(5 * big));
+
+        // Large enough for several blocks of the accelerator reduction
+        const std::vector<T> large(1 << 16, T(3, -4));
+        expect_near(this->vec(large)->Asum(), T(R(5 << 16)));
     }
     else
     {
@@ -349,8 +353,7 @@ TYPED_TEST(backend_vector, amax_returns_the_zero_based_index_and_the_largest_mag
     }
     T       value = T(0);
     int64_t index = this->vec(equal_magnitudes)->Amax(value);
-    EXPECT_GE(index, 0);
-    EXPECT_LT(index, 8);
+    EXPECT_EQ(index, 0);
     expect_magnitude(value, from_int<T>(7));
 
     for(int position : {0, 5, 11})
@@ -382,6 +385,35 @@ TYPED_TEST(backend_vector, amax_returns_the_zero_based_index_and_the_largest_mag
             = this->vec(std::vector<T>{T(big, 0), T(3 * big, 4 * big), T(4 * big, 0)})->Amax(value);
         EXPECT_EQ(index, 1);
         EXPECT_EQ(value, T(5 * big));
+
+        // Entries with a NaN modulus are skipped, wherever they are
+        const R nan = std::numeric_limits<R>::quiet_NaN();
+        index = this->vec(std::vector<T>{T(1), T(nan, 0), T(5), T(0, nan), T(2)})->Amax(value);
+        EXPECT_EQ(index, 2);
+        EXPECT_EQ(value, T(5));
+
+        index = this->vec(std::vector<T>{T(nan, 0), T(5), T(1)})->Amax(value);
+        EXPECT_EQ(index, 1);
+        EXPECT_EQ(value, T(5));
+
+        index = this->vec(std::vector<T>{T(nan, 0), T(0)})->Amax(value);
+        EXPECT_EQ(index, 0);
+        EXPECT_EQ(value, T(0));
+
+        // Large enough for several blocks of the accelerator reduction, with the ties of the
+        // largest modulus in different blocks
+        const int64_t  n = 1 << 16;
+        std::vector<T> large(n);
+        for(int64_t i = 0; i < n; ++i)
+        {
+            large[i] = i % 2 == 0 ? T(3, 4) : T(-3, -4);
+        }
+        large[n / 2 + 1] = T(6, -8);
+        large[n - 3]     = T(-6, 8);
+
+        index = this->vec(large)->Amax(value);
+        EXPECT_EQ(index, n / 2 + 1);
+        EXPECT_EQ(value, T(10));
     }
 }
 
