@@ -74,6 +74,12 @@ Why it is set up this way:
 - **Tier labels are `quick`, `standard`, `comprehensive` and `full`,** so the harness runs in
   every tier lane. Not `ffm-quick`/`ffm-full`: those run a fixed list of patterns on a tight
   time budget.
+- **`wrapper_abi_check` and `forwarding_failure_modes` get the same split.** They need no GPU,
+  but a runner on a GPU machine selects `-L ^<tier>$ -L ^ex_gpu_<arch>$`, which an entry with only
+  tier labels never matches. Each therefore also has one entry per `ex_gpu_*` label, such as
+  `wrapper_abi_check_ex_gpu_gfx110X`, so TheRock's GPU jobs run them. `miopen_add_wrapper_check`
+  registers the build-tree entries and `miopen_append_installed_wrapper_check` the packaged ones.
+  Select the bare entry by name with `ctest -R '^wrapper_abi_check$'`.
 - **In a discrete build, only the `test_hipdnn_shim_conv*` binaries get entries.** Any other binary would
   replay a filter that matches nothing, and the comparison rejects two empty runs.
 - **No build-tree entry without a GPU.** The shim tests are all `GPU_` tests.
@@ -181,7 +187,7 @@ read once per process, so each case runs a fresh process:
 - `script/test_forwarding_failure_modes.py` is the `unittest` module that runs the probe under
   each environment and checks its output.
 
-Run it from the build directory with `ctest -R forwarding_failure_modes`. It needs no GPU.
+Run it from the build directory with `ctest -R '^forwarding_failure_modes$'`. It needs no GPU.
 
 A missing backend cannot be tested directly. When `HIPDNN_BACKEND_LIBRARY_PATH` names a directory
 without the backend, hipDNN moves on to its next search location and may find the real backend
