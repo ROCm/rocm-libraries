@@ -739,7 +739,7 @@ namespace
     }
 
     // Block i of the Schwarz preconditioners owns the rows [i size, (i + 1) size),
-    // the last one up to n, and is extended by the overlap on both sides
+    // the last one up to n, and is extended by the overlap on both sides within [0, n)
     struct SchwarzBlock
     {
         int pos;
@@ -754,7 +754,7 @@ namespace
         for(int i = 0; i < nb; ++i)
         {
             const int begin = std::max(0, i * size - overlap);
-            const int end   = i == nb - 1 ? n : (i + 1) * size + overlap;
+            const int end   = i == nb - 1 ? n : std::min(n, (i + 1) * size + overlap);
             blocks.push_back({begin, end - begin, i * size - begin});
         }
         return blocks;
@@ -2039,8 +2039,21 @@ TYPED_TEST(preconditioners, as_adds_the_weighted_block_solves)
     const std::vector<T> r   = rhs<T>(ref.n);
     auto                 A   = this->make(ref);
 
-    for(const auto& [nb, overlap] : std::vector<std::pair<int, int>>{
-            {1, 0}, {1, 2}, {2, 0}, {2, 1}, {2, 3}, {3, 0}, {3, 1}, {3, 2}, {4, 0}, {4, 1}})
+    // With 4 blocks of 3 rows, an overlap of 2 puts rows 4 and 7 in three blocks, and an
+    // overlap of 4 puts rows 5 and 6 in all four and clips the second block at the first
+    // row and the third at the last
+    for(const auto& [nb, overlap] : std::vector<std::pair<int, int>>{{1, 0},
+                                                                     {1, 2},
+                                                                     {2, 0},
+                                                                     {2, 1},
+                                                                     {2, 3},
+                                                                     {3, 0},
+                                                                     {3, 1},
+                                                                     {3, 2},
+                                                                     {4, 0},
+                                                                     {4, 1},
+                                                                     {4, 2},
+                                                                     {4, 4}})
     {
         SCOPED_TRACE(std::to_string(nb) + " blocks, overlap " + std::to_string(overlap));
         ExactSolvers<T>                         local(nb);
@@ -2060,7 +2073,7 @@ TYPED_TEST(preconditioners, ras_takes_each_row_from_the_block_that_owns_it)
     auto                 A   = this->make(ref);
 
     for(const auto& [nb, overlap] : std::vector<std::pair<int, int>>{
-            {1, 0}, {1, 2}, {2, 0}, {2, 1}, {2, 3}, {3, 0}, {3, 1}, {3, 2}, {4, 1}})
+            {1, 0}, {1, 2}, {2, 0}, {2, 1}, {2, 3}, {3, 0}, {3, 1}, {3, 2}, {4, 1}, {4, 2}, {4, 4}})
     {
         SCOPED_TRACE(std::to_string(nb) + " blocks, overlap " + std::to_string(overlap));
         ExactSolvers<T>                          local(nb);
@@ -2095,6 +2108,26 @@ TYPED_TEST(preconditioners, schwarz_blocks_cover_the_rows_beyond_a_multiple_of_t
     ras.Build();
     expect_near(
         apply(ras, *A, r, 9.0), restricted_additive_schwarz(ref, 2, 1, r), scaled_tol<T>(1e-13));
+}
+
+// The setup runs in the child, since Set allocates what only the Clear of a built AS
+// frees
+TYPED_TEST(preconditioners, schwarz_preconditioners_need_a_row_per_block)
+{
+    using T          = typename TypeParam::value_type;
+    const Csr<T> ref = nonsymmetric<T>(12);
+
+    using AS = rocalution::AS<Matrix<T>, Vector<T>, T>;
+    EXPECT_ASSERT_DEATH(
+        {
+            auto            A = this->make(ref);
+            ExactSolvers<T> local(13);
+            AS              p;
+            p.Set(13, 0, local.get());
+            p.SetOperator(*A);
+            p.Build();
+        },
+        "num_blocks_ <= n");
 }
 
 TYPED_TEST(preconditioners, schwarz_preconditioners_move_and_take_a_new_configuration)

@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -37,6 +37,16 @@
 
 namespace rocalution
 {
+
+    // Of n rows split into num_blocks blocks of size = n / num_blocks, block i owns
+    // the rows [i size, (i + 1) size), the last one up to n
+    static void owned_rows(int n, int num_blocks, int i, int* begin, int* end)
+    {
+        int size = n / num_blocks;
+
+        *begin = i * size;
+        *end   = (i == num_blocks - 1) ? n : *begin + size;
+    }
 
     template <class OperatorType, class VectorType, typename ValueType>
     AS<OperatorType, VectorType, ValueType>::AS()
@@ -117,16 +127,19 @@ namespace rocalution
         assert(this->local_precond_ != NULL);
         assert(this->op_->GetLocalM() <= std::numeric_limits<int>::max());
 
-        int n    = static_cast<int>(this->op_->GetLocalM());
-        int size = n / this->num_blocks_;
+        int n = static_cast<int>(this->op_->GetLocalM());
 
-        // Block i owns the rows [i size, (i + 1) size), the last one up to n, and is
-        // extended by the overlap on both sides
+        assert(this->num_blocks_ <= n);
+
+        // Each block holds the rows it owns, extended by the overlap on both sides
         for(int i = 0; i < this->num_blocks_; ++i)
         {
-            int begin = std::max(i * size - this->overlap_, 0);
-            int end
-                = (i == this->num_blocks_ - 1) ? n : std::min((i + 1) * size + this->overlap_, n);
+            int begin;
+            int end;
+            owned_rows(n, this->num_blocks_, i, &begin, &end);
+
+            begin = std::max(begin - this->overlap_, 0);
+            end   = std::min(end + this->overlap_, n);
 
             this->pos_[i]   = begin;
             this->sizes_[i] = end - begin;
@@ -363,12 +376,12 @@ namespace rocalution
         }
 
         // Each block gives the rows it owns
-        int n    = static_cast<int>(this->op_->GetLocalM());
-        int size = n / this->num_blocks_;
+        int n = static_cast<int>(this->op_->GetLocalM());
         for(int i = 0; i < this->num_blocks_; ++i)
         {
-            int begin = i * size;
-            int end   = (i == this->num_blocks_ - 1) ? n : begin + size;
+            int begin;
+            int end;
+            owned_rows(n, this->num_blocks_, i, &begin, &end);
 
             x->CopyFrom(*this->z_[i], begin - this->pos_[i], begin, end - begin);
         }

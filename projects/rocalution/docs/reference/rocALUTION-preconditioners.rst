@@ -185,7 +185,7 @@ with :math:`S=ED^{-1}F`, where :math:`D` are the diagonal elements of :math:`K`.
 (Restricted) Additive Schwarz preconditioner
 ============================================
 
-The Additive Schwarz preconditioner relies on a preconditioning technique, where the linear system :math:`Ax=b` can be decomposed into small sub-problems based on :math:`A_{i} = R_{i}^{T}AR_{i}`, where :math:`R_{i}` are restriction operators. Those restriction operators produce sub-matrices which overlap. This leads to contributions from two preconditioners on the overlapped area which are scaled by :math:`1/2`.
+The Additive Schwarz preconditioner relies on a preconditioning technique, where the linear system :math:`Ax=b` can be decomposed into small sub-problems based on :math:`A_{i} = R_{i}^{T}AR_{i}`, where :math:`R_{i}` are restriction operators. Those restriction operators produce sub-matrices which overlap. Several preconditioners contribute on the overlapped area, so each row is scaled by :math:`1/k`, where :math:`k` is the number of sub-matrices that hold it.
 
 The Restricted Additive Schwarz preconditioner relies on a preconditioning technique, where the linear system :math:`Ax=b` can be decomposed into small sub-problems based on :math:`A_{i} = R_{i}^{T}AR_{i}`, where :math:`R_{i}` are restriction operators. The RAS method is a mixture of block Jacobi and the AS scheme. In this case, the sub-matrices contain overlapped areas from other blocks, too.
 
