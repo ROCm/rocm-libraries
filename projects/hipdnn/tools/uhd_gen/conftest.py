@@ -8,12 +8,26 @@ prerequisite: a Python package (pytest.importorskip), the hipdnn_uhd_features bi
 `evaluator` fixture), or the checkout's rocKE library. Locally that stays a skip. CMake's HIPDNN_REQUIRE_UHD_GEN_TESTS sets the variable
 on the ctest entries, so in CI a gap fails the run rather than passing having checked
 nothing. The skipped tests still report as skipped; the run's exit status is what changes.
+
+The one exception is a package that requirements.txt does not list, such as the `xgboost`
+extra: `importorskip_optional` skips for it without failing a required run, as the C++
+model-family tests do.
 """
 import os
 
 import pytest
 
 REQUIRE_VARIABLE = "HIPDNN_REQUIRE_UHD_GEN_TESTS"
+#: In the skip reason of a package outside requirements.txt, which a required run allows.
+OPTIONAL_DEPENDENCY_MARKER = "optional uhd_gen dependency"
+
+
+def importorskip_optional(module: str):
+    """`pytest.importorskip` for a package that is an optional extra of uhd_gen."""
+    return pytest.importorskip(
+        module,
+        reason=f"{module} is not installed ({OPTIONAL_DEPENDENCY_MARKER})",
+    )
 
 
 def prerequisites_required() -> bool:
@@ -22,7 +36,7 @@ def prerequisites_required() -> bool:
 
 
 class _RequirePrerequisites:
-    """Records every skip, at collection or at run time, and fails the session on any."""
+    """Records every skip but an optional dependency's, and fails the session on any."""
 
     def __init__(self) -> None:
         self.skipped: list[str] = []
@@ -35,7 +49,8 @@ class _RequirePrerequisites:
                 if isinstance(report.longrepr, tuple)
                 else report.longrepr
             )
-            self.skipped.append(f"{report.nodeid}: {reason}")
+            if OPTIONAL_DEPENDENCY_MARKER not in str(reason):
+                self.skipped.append(f"{report.nodeid}: {reason}")
 
     def pytest_collectreport(self, report) -> None:
         self._record(report)

@@ -46,6 +46,7 @@ from __future__ import annotations
 import argparse
 import json
 import hashlib
+import importlib.util
 import logging
 import sys
 import uuid
@@ -85,6 +86,14 @@ from .lgbm_to_flatbuffer import (
     SPLIT_LEAF,
     convert,
     resolve_training_date,
+)
+from .model_families import (
+    FAMILIES,
+    LIGHTGBM,
+    XGBOOST,
+    export_family,
+    model_summary,
+    train_family,
 )
 from .promote import add_promote_arguments, run_promote
 from .ranking_metrics import DEFAULT_RANKING_METRIC, RANKING_METRICS, ranking_metric
@@ -412,6 +421,19 @@ def _add_train_arguments(parser: argparse.ArgumentParser) -> None:
         help="Keep intermediate .lgbm file",
     )
     add_model_encoding_arguments(parser)
+    parser.add_argument(
+        "--model-family",
+        choices=FAMILIES,
+        default=LIGHTGBM,
+        dest="model_family",
+        help=(
+            "Library that fits the ensemble (default: lightgbm). Every family is written "
+            "as the same tree_data artifact; xgboost needs the optional xgboost package. "
+            "--group-by-feature and --keep-lgbm are LightGBM only. A non-LightGBM model is "
+            "always written as node_arrays with exact float64 leaves, so --model-encoding "
+            "and --leaf-precision apply to LightGBM only."
+        ),
+    )
     parser.add_argument(
         "--training-arches",
         nargs="+",
@@ -820,6 +842,16 @@ def _run_train(args: argparse.Namespace) -> int:
             args.descriptor_name
         ).name != args.descriptor_name or args.descriptor_name in ("", ".", ".."):
             raise ValueError("--descriptor-name must be a file stem, not a path")
+        if args.model_family != LIGHTGBM and (args.group_by_feature or args.keep_lgbm):
+            raise ValueError(
+                f"--model-family {args.model_family} fits a single ensemble: "
+                "--group-by-feature and --keep-lgbm are LightGBM only"
+            )
+        if args.model_family == XGBOOST and importlib.util.find_spec("xgboost") is None:
+            raise ValueError(
+                f"--model-family {XGBOOST} needs the optional xgboost package: "
+                'pip install -e ".[xgboost]" in projects/hipdnn/tools/uhd_gen'
+            )
         # Settled before data preparation or fitting, never stamped later.
         _resolve_score(args, immediate)
         if immediate:
@@ -953,16 +985,29 @@ def _run_train(args: argparse.Namespace) -> int:
                 len(df),
             )
 
-        model = train_model(
-            layer_one_df,
-            names,
-            args.target,
-            groups,
-            num_boost_round=args.num_boost_round,
-            early_stopping_rounds=args.early_stopping,
-            categorical_encoding=categorical_encoding,
-            feature_matrix=layer_one_matrix,
-        )
+        if args.model_family == LIGHTGBM:
+            model = train_model(
+                layer_one_df,
+                names,
+                args.target,
+                groups,
+                num_boost_round=args.num_boost_round,
+                early_stopping_rounds=args.early_stopping,
+                categorical_encoding=categorical_encoding,
+                feature_matrix=layer_one_matrix,
+            )
+        else:
+            model = train_family(
+                args.model_family,
+                layer_one_df,
+                names,
+                args.target,
+                groups,
+                num_boost_round=args.num_boost_round,
+                early_stopping_rounds=args.early_stopping,
+                categorical_encoding=categorical_encoding,
+                feature_matrix=layer_one_matrix,
+            )
 
         group_index, group_models = _group_models(
             args, df, names, groups, matrix, categorical_encoding
@@ -977,25 +1022,38 @@ def _run_train(args: argparse.Namespace) -> int:
 
     # No descriptor or model artifact is published before all input checks and fitting.
     output_dir.mkdir(parents=True, exist_ok=True)
-    lgbm_path = output_dir / "model.lgbm"
-    model.save_model(str(lgbm_path))
-
     fb_path = output_dir / "model.bin"
-    model_sha256 = convert(
-        lgbm_path,
-        features_hash,
-        fb_path,
-        num_training_samples=len(df),
-        training_arches=args.training_arches,
-        model_version=args.model_version,
-        training_date=training_date,
-        group_by_feature_index=group_index,
-        group_models=group_models or None,
-        encoding=args.model_encoding,
-        leaf_precision=args.leaf_precision,
-    )
-    if not args.keep_lgbm:
-        lgbm_path.unlink()
+    if args.model_family == LIGHTGBM:
+        lgbm_path = output_dir / "model.lgbm"
+        model.save_model(str(lgbm_path))
+        model_sha256 = convert(
+            lgbm_path,
+            features_hash,
+            fb_path,
+            num_training_samples=len(df),
+            training_arches=args.training_arches,
+            model_version=args.model_version,
+            training_date=training_date,
+            group_by_feature_index=group_index,
+            group_models=group_models or None,
+            encoding=args.model_encoding,
+            leaf_precision=args.leaf_precision,
+        )
+        if not args.keep_lgbm:
+            lgbm_path.unlink()
+    else:
+        # Written in the node_arrays encoding with float64 leaves, which is what keeps the
+        # export bit-exact against the library; --model-encoding and --leaf-precision
+        # apply to LightGBM models only.
+        model_sha256 = export_family(
+            model,
+            features_hash,
+            fb_path,
+            num_training_samples=len(df),
+            training_arches=args.training_arches,
+            model_version=args.model_version,
+            training_date=training_date,
+        )
     descriptor = {
         # Slot provenance (`slot`, or `kmds` for a slotted engine's L1 model) is a 1.1 feature.
         "version": "1.1" if {"slot", "kmds"} & set(trained_against) else "1.0",
@@ -1050,21 +1108,15 @@ def _run_train(args: argparse.Namespace) -> int:
         # to the group choice versus the member choice.
         "group_by_feature": args.group_by_feature,
         "group_models": len(group_models or []),
-        "num_trees": model.num_trees(),
-        "feature_importance": {
-            name: {"gain": float(gain), "split": int(split)}
-            for name, gain, split in zip(
-                names,
-                model.feature_importance(importance_type="gain"),
-                model.feature_importance(importance_type="split"),
-            )
-        },
+        "model_family": args.model_family,
+        **model_summary(model, names),
         "num_samples": len(df),
         "input_file": str(input_path.resolve()),
         "input_sha256": input_sha256,
         "training_arches": args.training_arches or [],
         "model_version": args.model_version,
         "training_options": {
+            "model_family": args.model_family,
             "num_boost_round": args.num_boost_round,
             "early_stopping_rounds": args.early_stopping,
         },

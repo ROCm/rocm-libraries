@@ -173,9 +173,10 @@ with its constant value), so the provenance says what was asked for and what nev
 | `--uhd-id` | No | Reuse this UUID as the descriptor's id instead of minting a fresh one |
 | `--num-boost-round` | No | Max boosting rounds (default: 500) |
 | `--early-stopping` | No | Early stopping patience (default: 50) |
-| `--keep-lgbm` | No | Keep intermediate .lgbm file |
-| `--model-encoding` | No | `model.bin` tree encoding: `split_leaf` (default) or `node_arrays`, for a runtime that predates `split_leaf` (see [The `model.bin` encoding](#the-modelbin-encoding)) |
-| `--leaf-precision` | No | `split_leaf` leaf storage: `float32` (default) or `float64` (exact) |
+| `--model-family` | No | Library that fits the ensemble: `lightgbm` (default), `sklearn-hgb` or `xgboost`. Every family is the same `tree_data` artifact; see [Model families](#model-families) |
+| `--keep-lgbm` | No | Keep intermediate .lgbm file (LightGBM only) |
+| `--model-encoding` | No | `model.bin` tree encoding: `split_leaf` (default) or `node_arrays`, for a runtime that predates `split_leaf` (see [The `model.bin` encoding](#the-modelbin-encoding)). LightGBM only: the other model families always write `node_arrays` |
+| `--leaf-precision` | No | `split_leaf` leaf storage: `float32` (default) or `float64` (exact). LightGBM only: the other model families always store exact `float64` leaves |
 | `--training-arches` | No | Architectures the model was trained on, for §9.2 OOD detection |
 | `--model-version` | No | Semantic version embedded in the model metadata |
 
@@ -1323,7 +1324,43 @@ recorded in `train_manifest.json` (as `{}` when there is none) and is the one
 - **Cross-validation**: GroupKFold over shapes -- the first grouping column, `--group-by`'s
   or the inferred `benchmark` -- so every device's measurements of one shape share a fold
 - **Early stopping**: Prevents overfitting
-- **Model format**: LightGBM → FlatBuffer GbdtModel
+- **Model format**: LightGBM, scikit-learn `HistGradientBoostingRegressor` or XGBoost
+  (`--model-family`) → FlatBuffer GbdtModel
+
+### Model families
+
+`--model-family` picks the library that fits the ensemble: `lightgbm` (the default),
+`sklearn-hgb` or `xgboost`. All three are written as the same `tree_data` `model.bin`
+the runtime already reads, so a family needs no runtime change and loads in any hipDNN
+that reads LightGBM models. `train_manifest.json` records the family and its tree count;
+the artifact's `framework` field names the library (`sklearn`, `xgboost`).
+
+The export is exact: for every input the runtime returns the same double as the library's
+own per-tree outputs added in the runtime's order. Two details make it so:
+
+- scikit-learn splits on float64 thresholds with `<=`, as the runtime does. A threshold
+  of `+inf` (a split that only sends missing values one way) is written as the largest
+  double, which no finite feature exceeds;
+- XGBoost compares a float32 copy of the feature with `<` against a float32 threshold.
+  The export writes the float64 midpoint between that threshold and the float32 just
+  below it, with `<=` or `<` chosen by which way float32 rounding sends the midpoint, so
+  every double the runtime sees takes the branch XGBoost takes.
+
+Leaves are stored already scaled by the learning rate, so `learningRate` is 1.0. XGBoost
+`predict` itself differs from the runtime by float32 rounding of the sum (about 1e-6 on a
+log-time score); scikit-learn's by the order of the addition only.
+
+A family's `model.bin` is always written in the `node_arrays` encoding with `float64`
+leaves (see [The `model.bin` encoding](#the-modelbin-encoding)), because `float32` leaves
+would break the bit-exact match above. `--model-encoding` and `--leaf-precision` apply to
+LightGBM models only.
+
+Refused, with the reason: `--group-by-feature` and `--keep-lgbm` (LightGBM only), XGBoost
+`dart` with dropout (its trees are rescaled at prediction time), XGBoost objectives and
+scikit-learn losses with an inverse link (the runtime sums leaves and applies none),
+multi-output models and categorical splits (`tree_data` has neither).
+
+`xgboost` is optional: `pip install -e ".[xgboost]"`.
 
 ## Testing
 

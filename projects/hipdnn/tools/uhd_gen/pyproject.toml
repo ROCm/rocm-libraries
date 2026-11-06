@@ -27,6 +27,10 @@ dev = [
     "pytest>=7.0.0",
     "pytest-cov>=4.0.0",
 ]
+# `train --model-family xgboost`; the other families need only requirements.txt.
+xgboost = [
+    "xgboost>=3.4.1",
+]
 
 [project.scripts]
 uhd-gen = "uhd_gen.__main__:main"

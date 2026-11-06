@@ -76,3 +76,35 @@ def test_a_required_run_with_nothing_skipped_passes(tmp_path):
     result = _run(tmp_path, "1", {"test_plain.py": "def test_runs():\n    pass\n"})
 
     assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_a_required_run_allows_a_skip_for_an_optional_dependency(tmp_path):
+    optional = {
+        "test_needs_an_extra.py": (
+            "from uhd_gen.conftest import importorskip_optional\n"
+            "def test_uses_it():\n"
+            "    importorskip_optional('an_extra_that_is_not_installed')\n"
+        )
+    }
+    result = _run(tmp_path, "1", optional)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "1 skipped" in result.stdout
+
+
+def test_a_required_run_still_fails_beside_an_optional_dependency_skip(tmp_path):
+    result = _run(
+        tmp_path,
+        "1",
+        {
+            "test_needs_an_extra.py": (
+                "from uhd_gen.conftest import importorskip_optional\n"
+                "def test_uses_it():\n"
+                "    importorskip_optional('an_extra_that_is_not_installed')\n"
+            ),
+            "test_needs_a_binary.py": SKIPPING["test_needs_a_binary.py"],
+        },
+    )
+
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "hipdnn_uhd_features was not found" in result.stdout
