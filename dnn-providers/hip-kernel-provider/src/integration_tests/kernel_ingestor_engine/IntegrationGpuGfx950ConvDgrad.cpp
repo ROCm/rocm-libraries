@@ -292,11 +292,6 @@ void PrintTo(const DgradVariant& variant, std::ostream* stream)
     *stream << variant.name;
 }
 
-std::string dtypeSuffix(DataType dtype)
-{
-    return dtype == DataType::HALF ? "Fp16" : "Bf16";
-}
-
 std::string dtypeToken(DataType dtype)
 {
     return dtype == DataType::HALF ? "fp16" : "bf16";
@@ -360,11 +355,6 @@ std::shared_ptr<Graph> buildDgradGraph(DataType dtype, const DgradProblem& probl
 KnobSetting benchmarkingKnob(bool enabled)
 {
     return KnobSetting(hipdnn_plugin_sdk::BENCHMARKING_KNOB_NAME, int64_t{enabled ? 1 : 0});
-}
-
-std::string candidateCount(size_t candidates)
-{
-    return std::to_string(candidates) + " candidate(s)";
 }
 
 /// The kernel id following @p marker in the last log that carries it, or empty.

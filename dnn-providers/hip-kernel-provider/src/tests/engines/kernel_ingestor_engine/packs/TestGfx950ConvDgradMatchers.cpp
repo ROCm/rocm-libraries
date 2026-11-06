@@ -149,15 +149,6 @@ GraphSpec graphSpec(const DgradShape& s,
     return spec;
 }
 
-DeviceProperties gfx950Properties(std::string arch = "gfx950")
-{
-    // By value: matcher tests run on CPU-only and non-gfx950 hosts.
-    DeviceProperties properties;
-    properties.gcnArchName = std::move(arch);
-    properties.warpSize = 64;
-    return properties;
-}
-
 flatbuffers::FlatBufferBuilder buildGraph(const GraphSpec& spec)
 {
     flatbuffers::FlatBufferBuilder builder;

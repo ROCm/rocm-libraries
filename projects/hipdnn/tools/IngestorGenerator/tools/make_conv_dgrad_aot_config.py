@@ -3,10 +3,10 @@
 # SPDX-License-Identifier: MIT
 """Turn rocKE AOT backward-data conv instances into a hipkernel:Gfx950ConvDgradAot config.
 
-The dgrad sibling of ``make_conv_aot_config.py``: same input (JSON lists of rocKE
-``KernelIdentity`` dicts, or objects carrying one under ``"identity"``), same output
-(a packaged-dialect generator config), same ``--stabilize-ids`` step. It reuses that
-tool's YAML dumper, variant layout and id derivation, with this engine as its own
+The input is JSON lists of rocKE ``KernelIdentity`` dicts (or objects carrying one
+under ``"identity"``); the output is a packaged-dialect generator config, followed by
+a ``--stabilize-ids`` step. The YAML dumper, variant layout and id derivation are the
+conv AOT tools' shared ones (``conv_aot_common.py``), with this engine as its own
 product engine: kernel ids are ``uuid5(INSTANCE_UUID_NAMESPACE, instance_id)`` and the
 bundle names its own native symbols (no ``native_symbols_from``).
 
@@ -48,7 +48,7 @@ _HERE = Path(__file__).resolve().parent
 if str(_HERE) not in sys.path:
     sys.path.insert(0, str(_HERE))
 
-import make_conv_aot_config as _fwd  # noqa: E402
+import conv_aot_common as _common  # noqa: E402
 
 #: The shipped dgrad engine: its own product engine (ids are uuid5 of instance_id).
 PRODUCT_ENGINE = "hipkernel:Gfx950ConvDgradAot"
@@ -305,20 +305,20 @@ _DIRECT_VARIANT_NAMES = {
     "reorganize_rtc": "gfx950_conv_dgrad_aot_reorganize_rtc_{dtype}_{instance_id}",
 }
 
-_bind_rocke = _fwd._bind_rocke
-engine_slug = _fwd.engine_slug
-dump_config = _fwd.dump_config
-INSTANCE_UUID_NAMESPACE = _fwd.INSTANCE_UUID_NAMESPACE
+_bind_rocke = _common.bind_rocke
+engine_slug = _common.engine_slug
+dump_config = _common.dump_config
+INSTANCE_UUID_NAMESPACE = _common.INSTANCE_UUID_NAMESPACE
 
 
 def kernel_uuid(instance_id: str, engine_name: str = PRODUCT_ENGINE) -> str:
-    """:func:`make_conv_aot_config.kernel_uuid` with this engine as the product."""
-    return _fwd.kernel_uuid(instance_id, engine_name, PRODUCT_ENGINE)
+    """:func:`conv_aot_common.kernel_uuid` with this engine as the product."""
+    return _common.kernel_uuid(instance_id, engine_name, PRODUCT_ENGINE)
 
 
 def stabilize_ids(kdp_path: Path, engine_name: str = PRODUCT_ENGINE) -> int:
-    """:func:`make_conv_aot_config.stabilize_ids` with this engine as the product."""
-    return _fwd.stabilize_ids(kdp_path, engine_name, PRODUCT_ENGINE)
+    """:func:`conv_aot_common.stabilize_ids` with this engine as the product."""
+    return _common.stabilize_ids(kdp_path, engine_name, PRODUCT_ENGINE)
 
 
 def spec_order(spec) -> tuple:
@@ -541,7 +541,9 @@ def build_config(
         implicit = [s for s in shards[shard] if not s.is_direct]
         if implicit:
             variants.append(
-                _fwd._variant(IMPLICIT_VARIANT_NAME, spec_order(implicit[0]), implicit)
+                _common.variant(
+                    IMPLICIT_VARIANT_NAME, spec_order(implicit[0]), implicit
+                )
             )
         for variant_name in _DIRECT_VARIANT_NAMES:
             members = [
@@ -551,7 +553,7 @@ def build_config(
             ]
             if members:
                 variants.append(
-                    _fwd._variant(
+                    _common.variant(
                         _DIRECT_VARIANT_NAMES[variant_name],
                         spec_order(members[0]),
                         members,
