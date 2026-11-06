@@ -5,7 +5,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import os
-import sys
 
 from geko.config_generator import cluster_sizes as cs
 from geko.config_generator.fork_params import post_processor as base_pp
@@ -14,6 +13,7 @@ from geko.config_generator.fork_params import optimization_param as opt_param
 from geko.config_generator.mi_designer import MFMAParameters
 from geko.config_generator.shared_utils import ConfigEntry, ForkParameter
 from geko.schemas import GemmType
+import pytest
 
 
 def _entry_with_groups(size, groups):
@@ -56,7 +56,7 @@ def test_cluster_sizes_mi_and_reorder(monkeypatch) -> None:
 
 
 def _post_cfg(mt_du=None, streamk=False):
-    gt = GemmType.from_tensile("N", "N", "H", "H", "S")
+    gt = GemmType.from_tensilelite("N", "N", "H", "H", "S")
     return {
         "GemmProblem": type("GP", (), {"gemm_type": gt})(),
         "ARCH": "gfx950",
@@ -67,7 +67,7 @@ def _post_cfg(mt_du=None, streamk=False):
 
 
 def test_base_postprocessor_mt_du_and_matcher(monkeypatch) -> None:
-    monkeypatch.setattr(opt_param, "load_tensile_metadata", lambda: {})
+    monkeypatch.setattr(opt_param, "load_tensilelite_metadata", lambda: {})
     # StreamK=True so the origami sentinels (WorkGroupMapping included) fire;
     # _origami_picks_wgm() gates them on StreamK being on.
     pp = base_pp.BasePostProcessor(_post_cfg(mt_du=[64, 32, 16], streamk=True))
@@ -90,7 +90,7 @@ def test_base_postprocessor_mt_du_and_matcher(monkeypatch) -> None:
 
 
 def test_gfx950_postprocessor_adjustments(monkeypatch) -> None:
-    monkeypatch.setattr(opt_param, "load_tensile_metadata", lambda: {})
+    monkeypatch.setattr(opt_param, "load_tensilelite_metadata", lambda: {})
     pp = gfx950_pp.GFX950PostProcessor(_post_cfg())
     fork = {
         "PrefetchGlobalRead": ForkParameter(name="PrefetchGlobalRead", values=[2]),
@@ -115,20 +115,20 @@ def test_gfx950_postprocessor_adjustments(monkeypatch) -> None:
     assert "MIArchVgpr" in g2[1]
     assert f2["UseCustomMainLoopSchedule"].values == [0]
 
-
-def test_load_cms_groups_import_error(monkeypatch) -> None:
-    monkeypatch.setitem(sys.modules, "tensilelite", None)
-    monkeypatch.setattr(os.path, "isdir", lambda _p: False)
-    raised = False
-    try:
-        gfx950_pp.load_CMS_groups("H", "N", "N", lambda *a, **k: ForkParameter(name=a[0], values=a[1]))
-    except ImportError:
-        raised = True
-    assert raised is True
-
-
+def test_load_cms_groups_uses_installed_tensilelite(monkeypatch) -> None:
+    pytest.importorskip("tensilelite", reason="requires an installed TensileLite")
+    pytest.importorskip("rocisa", reason="requires an importable rocisa")
+    monkeypatch.setattr(
+        os.path,
+        "isdir",
+        lambda _p: (_ for _ in ()).throw(AssertionError("checkout discovery is forbidden")),
+    )
+    result = gfx950_pp.load_CMS_groups(
+        "H", "N", "N", lambda *a, **k: ForkParameter(name=a[0], values=a[1])
+    )
+    assert isinstance(result, list)
 def test_base_postprocessor_ignore_non_temporal_filter(monkeypatch) -> None:
-    monkeypatch.setattr(opt_param, "load_tensile_metadata", lambda: {})
+    monkeypatch.setattr(opt_param, "load_tensilelite_metadata", lambda: {})
     cfg = _post_cfg()
     cfg["IGNORE_NON_TEMPORAL"] = True
     pp = base_pp.BasePostProcessor(cfg)
@@ -152,7 +152,7 @@ def test_base_postprocessor_ignore_non_temporal_filter(monkeypatch) -> None:
 
 def test_base_postprocessor_ignore_non_temporal_filter_disabled(monkeypatch) -> None:
     """When IGNORE_NON_TEMPORAL isn't set, NonTemporal* params stay active."""
-    monkeypatch.setattr(opt_param, "load_tensile_metadata", lambda: {})
+    monkeypatch.setattr(opt_param, "load_tensilelite_metadata", lambda: {})
     pp = base_pp.BasePostProcessor(_post_cfg())
     fork = {
         "NonTemporalA": ForkParameter(name="NonTemporalA", values=[0, 4], active=True),
@@ -167,7 +167,7 @@ def test_base_postprocessor_ignore_non_temporal_filter_disabled(monkeypatch) -> 
 
 def test_base_postprocessor_depthu_removed_when_in_all_mi_groups(monkeypatch) -> None:
     """DepthU is dropped from fork_params when every MI group entry carries it."""
-    monkeypatch.setattr(opt_param, "load_tensile_metadata", lambda: {})
+    monkeypatch.setattr(opt_param, "load_tensilelite_metadata", lambda: {})
     pp = base_pp.BasePostProcessor(_post_cfg())
     fork = {
         "DepthU": ForkParameter(name="DepthU", values=[128, 256, 512], active=True),
@@ -194,7 +194,7 @@ def test_base_postprocessor_depthu_removed_when_in_all_mi_groups(monkeypatch) ->
 
 def test_base_postprocessor_depthu_preserved_when_not_in_all_mi_groups(monkeypatch) -> None:
     """DepthU stays in fork_params if at least one MI group entry lacks it."""
-    monkeypatch.setattr(opt_param, "load_tensile_metadata", lambda: {})
+    monkeypatch.setattr(opt_param, "load_tensilelite_metadata", lambda: {})
     pp = base_pp.BasePostProcessor(_post_cfg())
     fork = {
         "DepthU": ForkParameter(name="DepthU", values=[128, 256, 512], active=True),

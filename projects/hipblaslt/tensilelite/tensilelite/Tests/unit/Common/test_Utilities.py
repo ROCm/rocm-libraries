@@ -28,7 +28,7 @@ import pytest
 from unittest.mock import mock_open, patch
 from pathlib import Path
 
-from tensilelite import __version__
+from tensilelite import GENERATOR_VERSION as __version__
 from tensilelite.Common import Utilities as UtilitiesModule
 from tensilelite.Common.Utilities import (
     ClientExecutionLock,

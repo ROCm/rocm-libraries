@@ -14,8 +14,9 @@ tox -e unit -- tensilelite/Tests/unit
 # Run a specific test category
 tox -e py3 -- tensilelite/Tests -m gemm
 
-# Run a single test directly (after a prior `invoke build-client`)
-tensilelite/bin/Tensile tensilelite/Tests/common/exception/<test>.yaml tensile-out
+# Run a single test directly after building and binding the client
+invoke configure-client --build-dir build_tmp
+python -m tensilelite run tensilelite/Tests/common/exception/<test>.yaml tensile-out
 ```
 
 ## Custom CMake Build
@@ -24,9 +25,10 @@ tensilelite/bin/Tensile tensilelite/Tests/common/exception/<test>.yaml tensile-o
 cmake --preset tensilelite -S .. -B my-custom-build
 cmake --build my-custom-build --parallel
 
-# Run test with custom client path
-tensilelite/bin/Tensile tensilelite/Tests/common/<test>.yaml tensile-out \
-    --prebuilt-client=my-custom-build/tensilelite-client/tensilelite-client
+# Run a test with a custom client path
+python -m tensilelite_configure_client \
+    --client "$PWD/my-custom-build/tensilelite/client/tensilelite-client"
+python -m tensilelite run tensilelite/Tests/common/<test>.yaml tensile-out
 
 # Build with custom args (e.g., Debug + specific GPU)
 TENSILELITE_CLIENT_ARGS="--build-type Debug --gpu-targets gfx90a --clean" tox -e py3 -- tensilelite/Tests -m common
