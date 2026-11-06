@@ -333,6 +333,18 @@ std::optional<BoundTokens> flydslSdpaBwdMergedGraphMatches(const MatchContext& c
                          "192, 224 or 256)");
         return std::nullopt;
     }
+    // Correctness decline pending a kernel investigation: on gfx950 the merged d192 f16 object
+    // returns a wrong dK for a causal or window mask (any diagonal bound) and passes unmasked
+    // graphs; the bf16 d192 objects and the split engine are correct on the same graphs.
+    if(problem.masked && problem.headDimQk == 192 && problem.headDimV == 192
+       && problem.dtype == data_objects::DataType::HALF)
+    {
+        logDecline(
+            "correctness",
+            "f16 head dims 192 with a causal or window mask return a wrong dK from the merged "
+            "object (pending a kernel investigation); the split engine serves it");
+        return std::nullopt;
+    }
     // BI-8: every merged bias object stages the bias through LDS.
     if(problem.biasUid != bwd::NO_UID && !native::stagesBias(problem))
     {
@@ -852,6 +864,7 @@ LaunchArguments launchArguments(const MergedPlan& plan,
     m.offDK = native::offsetArgsOf(problem.ragged.dK, buffer);
     m.offDV = native::offsetArgsOf(problem.ragged.dV, buffer);
     m.stats = native::statsArgsOf(problem, buffer);
+    m.stats.strides = native::rowStatsStrides(m.stats.strides, problem.seqLenQ);
     m.varlenBits = plan.varlenBits;
     m.numSeqlens = 0;
     m.maxSeqlenQ = toInt32(problem.seqLenQ, "seqlen_q");

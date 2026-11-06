@@ -1347,11 +1347,18 @@ TEST(TestFlydslSdpaBwdSplitLaunch, SharedBuffersStridesAndScalarsEqualTheMergedE
         const auto merged = mergedDumpOf(cell.spec, cell.row);
         const auto mergedValues = decode(merged.kernarg, mergedParams());
         const bool broadcast = merged.reduces;
+        // A unit-Sq graph gives the merged kernels a unit stats sequence stride, which they bound
+        // their LSE reads by; the split engine passes the stats as recorded (0).
+        const bool unitQuery = cell.spec.seqQ == 1;
 
         for(const Slot slot : {Slot::DKDV, Slot::DQ})
         {
             const auto dump = dumpOf(slot, cell.spec, cell.row);
             std::vector<std::string> skip{"LSE", "Delta"};
+            if(unitQuery)
+            {
+                skip.emplace_back("stride_stats_token");
+            }
             if(broadcast)
             {
                 // The broadcast dBias lives at the scratch offset, not the front.
@@ -1360,7 +1367,12 @@ TEST(TestFlydslSdpaBwdSplitLaunch, SharedBuffersStridesAndScalarsEqualTheMergedE
             expectSharedValuesEqual(valuesOf(slot, dump), mergedValues, skip, 40);
         }
         const auto prep = valuesOf(Slot::PREP, dumpOf(Slot::PREP, cell.spec, cell.row));
-        expectSharedValuesEqual(prep, mergedValues, {"LSE", "LSE_ws", "Delta"}, 10);
+        std::vector<std::string> prepSkip{"LSE", "LSE_ws", "Delta"};
+        if(unitQuery)
+        {
+            prepSkip.emplace_back("stride_stats_token");
+        }
+        expectSharedValuesEqual(prep, mergedValues, prepSkip, 10);
         // prep reads the raw statistics, as the merged kernel does.
         EXPECT_EQ(prep.at("LSE"), mergedValues.at("LSE"));
     }
@@ -2245,6 +2257,41 @@ TEST(TestFlydslSdpaBwdSplitGraph, TheMergedEngineDeclinesAnF32BiasAndValueHeadsW
         ASSERT_NE(decline, nullptr);
         EXPECT_EQ(decline->cause, cause) << decline->detail;
     }
+}
+
+TEST(TestFlydslSdpaBwdSplitGraph,
+     TheMergedEngineDeclinesAMaskedF16HeadDim192GraphTheSplitEngineServes)
+{
+    const auto atDtype = [](DataType dtype, int64_t headDim) {
+        auto spec = withHeadDims(baseSpec(), headDim, headDim);
+        spec.dtype = dtype;
+        return spec;
+    };
+    const auto splitServes = [](const SdpaBwdSpec& spec) {
+        const GraphFixture fixture(buildSdpaBwdGraph(spec));
+        return matchesGraph(splitSymbols(Slot::PREP), fixture.context()).has_value();
+    };
+    const auto mergedServes = [](const SdpaBwdSpec& spec) {
+        const GraphFixture fixture(buildSdpaBwdGraph(spec));
+        return matchesGraph(MERGED, fixture.context()).has_value();
+    };
+    const auto f16 = atDtype(DataType::HALF, 192);
+    // Any diagonal bound: top-left causal, a window, and bottom-right causal.
+    const auto bottomRight
+        = f16.withEdit([](SdpaBwdGraph& g) { g.attributes.causalMaskBottomRight = true; });
+    for(const auto& spec : {withCausal(f16), withWindow(f16), bottomRight})
+    {
+        EXPECT_FALSE(mergedServes(spec));
+        EXPECT_TRUE(splitServes(spec));
+        // The shared matcher accepts it: the decline is the merged engine's own.
+        EXPECT_TRUE(
+            std::holds_alternative<flydsl_sdpa_bwd::SdpaBwdProblem>(matchSdpaBwdSpec(spec)));
+    }
+    // Unmasked f16 d192, masked bf16 d192 and masked f16 at other head dims stay served.
+    EXPECT_TRUE(mergedServes(f16));
+    EXPECT_TRUE(mergedServes(withCausal(atDtype(DataType::BFLOAT16, 192))));
+    EXPECT_TRUE(mergedServes(withCausal(atDtype(DataType::HALF, 128))));
+    EXPECT_TRUE(mergedServes(withCausal(atDtype(DataType::HALF, 160))));
 }
 
 TEST(TestFlydslSdpaBwdSplitKernel, ARowReadsTheBiasAtTheWidthItWasBuiltFor)

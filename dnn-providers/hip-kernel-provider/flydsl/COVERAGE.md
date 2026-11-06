@@ -1105,6 +1105,11 @@ PyTorch's forward serves also trains. Each has its own rows; no input is convert
 | 16-bit bias whose row pitch is not a multiple of 16 bytes | served by dQ rows that read the bias directly | declines [bias] (BI-8) |
 | `Hk != Hv`, `Hq` a multiple of both (SH-1), no bias, not fp32, not ragged | served by dK-only and dV-only dK/dV rows and a V-head dQ row | declines [shape] |
 | dBias whose stride is not a multiple of 16 bytes (BI-9) | declines [layout] | declines [layout] |
+| f16 `Dqk = Dv = 192` with a causal or window mask (any diagonal bound) | served | declines [correctness] |
+
+The f16 d192 row is a correctness decline pending a kernel investigation: on gfx950 the merged
+f16 d192 object returns a wrong dK on masked graphs (unmasked f16 and every bf16 d192 graph pass),
+and the split engine is correct on the same graphs.
 
 **Rows and head dims.** The new rows are exact tiles on gfx950 and padded `g1` tiles on
 gfx11-generic, for f16 and bf16, with and without baked dropout.

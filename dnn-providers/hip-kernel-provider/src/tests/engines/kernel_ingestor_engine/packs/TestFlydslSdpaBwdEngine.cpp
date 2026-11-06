@@ -548,10 +548,11 @@ public:
         set3("dk", shape.kvHeads, shape.seqKv, shape.headDimQk);
         set3("dv", shape.kvHeads, shape.seqKv, shape.headDimV);
         set3("dq", shape.heads, shape.seqQ, shape.headDimQk);
-        // The stats' strides: the matcher records 0 on a unit axis.
+        // The stats' strides: the matcher records 0 on a unit axis, and the launch gives a
+        // unit sequence axis the contiguous pitch the kernels bound the LSE span by.
         set("stride_stats_batch", stride(shape.batch, shape.heads * shape.seqQ));
         set("stride_stats_head", stride(shape.heads, shape.seqQ));
-        set("stride_stats_token", stride(shape.seqQ, 1));
+        set("stride_stats_token", int64_t{1});
         const bool padded = shape.headDimQk != tile || shape.headDimV != tile;
         set("rt_flags", static_cast<int32_t>(padded ? 1 : 0));
     }
@@ -1712,6 +1713,16 @@ TEST(TestFlydslSdpaBwdMergedKernarg, ASingleRowQueryKeepsARowPitch)
     Shape shape;
     shape.seqQ = 1;
     expectKernarg(dumpOf(specOf(shape), plainRow()).kernarg, Golden(shape));
+}
+
+TEST(TestFlydslSdpaBwdMergedKernarg, ASingleRowQueryPassesANonZeroStatsSequenceStride)
+{
+    // A zero stride makes the kernels' LSE span rows * stride_seq empty: every LSE reads as 0.
+    Shape shape;
+    shape.seqQ = 1;
+    const auto values = decode(dumpOf(specOf(shape), plainRow()).kernarg, mergedSlots());
+    EXPECT_EQ(values.at("stride_stats_token"), 1U);
+    EXPECT_EQ(values.at("stride_stats_head"), 1U);
 }
 
 TEST(TestFlydslSdpaBwdMergedKernarg, ASingleRowKeyKeepsARowPitch)

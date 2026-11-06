@@ -193,6 +193,20 @@ inline bwd::Strides rowPitchStrides(bwd::Strides strides,
     return strides;
 }
 
+/// The stats' strides for a kernel that bounds its stats reads by rows * stride_seq (the
+/// merged kernels' LSE span). The matcher records 0 on a unit axis, which collapses that span
+/// to zero bytes and reads every LSE as 0; a unit sequence axis keeps the contiguous unit
+/// pitch of dense stats instead. The split prep kernel reads row 0 at offset 0 and bounds
+/// nothing by the stride, so it takes the stats as recorded.
+inline bwd::Strides rowStatsStrides(bwd::Strides strides, int64_t rows)
+{
+    if(rows == 1 && strides.seq == 0)
+    {
+        strides.seq = 1;
+    }
+    return strides;
+}
+
 /// The `varlen_bits` of one side: the individual lengths of the `seq_len` tensor with the
 /// token positions the side's element offsets give (`VARLEN_SEQUSED_PACKED_SIDE`, 0x15), or
 /// the lengths alone with implied positions (`VARLEN_SEQUSED_CACHE_SIDE`, 0x04). Bits 0..7
