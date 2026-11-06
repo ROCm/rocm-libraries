@@ -44,6 +44,9 @@ const std::vector<IngestorPack>& ingestorPacks()
         {GFX950_ATTENTION_DENSE_ENGINE_NAME,
          &registerGfx950AttentionDenseSymbols,
          &resetGfx950AttentionDenseModuleCache},
+        {GFX942_ATTENTION_UNIFIED_3D_ENGINE_NAME,
+         &registerGfx942AttentionUnified3dSymbols,
+         &resetGfx942AttentionUnified3dModuleCache},
         {GFX950_ATTENTION_UNIFIED_2D_ENGINE_NAME,
          &registerGfx950AttentionUnified2DSymbols,
          &resetGfx950AttentionUnified2DModuleCache},
@@ -56,6 +59,9 @@ const std::vector<IngestorPack>& ingestorPacks()
         {"hipkernel:Gfx1151WmmaAttentionDecode",
          &registerGfx1151WmmaAttentionDecodeSymbols,
          &resetGfx1151WmmaAttentionDecodeModuleCache},
+        {"hipkernel:Gfx950ConvDgradAot",
+         &registerGfx950ConvDgradAotSymbols,
+         &resetGfx950ConvDgradAotModuleCache},
     };
     return s_packs;
 }

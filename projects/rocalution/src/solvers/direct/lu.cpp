@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -114,6 +114,7 @@ namespace rocalution
 
         if(this->build_ == true)
         {
+            DISPATCH_OPERATOR_ANALYSE_STRATEGY(this->solver_descr_, this->lu_, LUAnalyseClear);
             this->lu_.MoveToHost();
             DISPATCH_OPERATOR_ANALYSE_STRATEGY(this->solver_descr_, this->lu_, LUAnalyse);
         }
@@ -126,6 +127,7 @@ namespace rocalution
 
         if(this->build_ == true)
         {
+            DISPATCH_OPERATOR_ANALYSE_STRATEGY(this->solver_descr_, this->lu_, LUAnalyseClear);
             this->lu_.MoveToAccelerator();
             DISPATCH_OPERATOR_ANALYSE_STRATEGY(this->solver_descr_, this->lu_, LUAnalyse);
         }
