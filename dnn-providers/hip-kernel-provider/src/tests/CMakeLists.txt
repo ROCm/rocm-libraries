@@ -495,6 +495,49 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
         )
     endif()
 
+    # Census for the gfx942 attention production packs, the same two calls per engine as
+    # gfx950's above. Each item is "<snake slug>|<engine local name>|<companion cases>".
+    foreach(_gfx942_engine IN ITEMS
+            "unified_2d|Gfx942AttentionUnified2D|EveryShippedKernelsGeometryIsOneTheEngineLaunches,EveryCellShipsItsHeadSizesDefaultGeometry,EveryShippedKernelIsBottomRightCausalWithoutAWindow")
+        string(REPLACE "|" ";" _gfx942_engine "${_gfx942_engine}")
+        list(GET _gfx942_engine 0 _snake)
+        list(GET _gfx942_engine 1 _local)
+        list(GET _gfx942_engine 2 _companion_cases)
+        string(REPLACE "," ";" _companion_cases "${_companion_cases}")
+
+        hkp_product_ships_engine_for_arch(_hkp_gfx942_attention_${_snake}
+                                          "hipkernel:${_local}" gfx942)
+        if(_hkp_gfx942_attention_${_snake})
+            hkp_register_census_tests(
+                TARGET hip_kernel_provider_census_tests
+                PACK_NAME product
+                ARCHES gfx942
+                SUITES Test${_local}Packs
+                EXPECTED_CASES
+                    LoadsExactlyTheEmittedPacks
+                    LoadsExactlyTheEmittedKernels
+                    EveryLoadedDescriptorCoversTheRequestedArch
+                    EveryKernelDeclaresTheEmittedRuntimeSourceKind
+                    DeclaresTheConfiguredSdkVersion
+                    ExposesTheConfiguredKnobs
+                    RanksThroughItsRegisteredScoreSymbol
+                    CarriesNoGraphScopedMatcher
+                    CarriesExactlyOneSharedKernelScopedMatcher
+            )
+            hkp_register_census_tests(
+                TARGET hip_kernel_provider_census_tests
+                PACK_NAME product
+                ARCHES gfx942
+                SUITES Test${_local}CatalogTiles
+                EXPECTED_CASES ${_companion_cases}
+            )
+        else()
+            message(STATUS
+                "hkp: this configuration does not ship hipkernel:${_local} for "
+                "gfx942, so its census is not registered.")
+        endif()
+    endforeach()
+
     # One generic kernel set per RDNA family ships in every RDNA3/3.5 and RDNA4 shard,
     # as two engines: the prefill objects and the split-KV decode objects (the wide-Q
     # prefill and D256 decode geometries differ per family). The census checks each wired

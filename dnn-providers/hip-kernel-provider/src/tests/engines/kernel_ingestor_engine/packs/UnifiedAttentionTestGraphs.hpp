@@ -30,13 +30,13 @@
 
 /**
  * @file UnifiedAttentionTestGraphs.hpp
- * @brief The SDPA graphs the hipkernel:Gfx950AttentionUnified2D and
- *        hipkernel:Gfx950AttentionUnified3D suites build, shared by both engines' test
- *        headers.
+ * @brief The SDPA graphs the unified-attention suites build
+ *        (hipkernel:Gfx950AttentionUnified2D, hipkernel:Gfx950AttentionUnified3D and
+ *        hipkernel:Gfx942AttentionUnified2D), shared by every engine's test header.
  *
- * Both engines match the same single dense SDPA-forward node, so the graph builder, the
+ * The engines match the same single dense SDPA-forward node, so the graph builder, the
  * uids and the mask spellings live here once. Symbols, tokens, candidate records and ABIs
- * are each engine's contract and stay in Gfx950AttentionUnified{2D,3D}TestGraphs.hpp.
+ * are each engine's contract and stay in its own <Engine>TestGraphs.hpp.
  */
 namespace hip_kernel_provider::kernel_ingestor_engine::testing::unified_attention
 {
@@ -315,11 +315,12 @@ template <typename Spec>
 class BasicGraph
 {
 public:
-    explicit BasicGraph(const Spec& spec = Spec{})
+    /// @p gcnArchName is the device the MatchContext reports.
+    explicit BasicGraph(const Spec& spec = Spec{}, const char* gcnArchName = "gfx950")
         : _builder(buildSdpaGraph(spec))
         , _graph(_builder.GetBufferPointer(), _builder.GetSize())
     {
-        _properties.gcnArchName = "gfx950";
+        _properties.gcnArchName = gcnArchName;
         _properties.warpSize = 64;
     }
 
