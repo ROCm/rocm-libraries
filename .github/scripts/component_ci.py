@@ -7,6 +7,8 @@ Outputs boolean flags per component via GITHUB_OUTPUT:
   - geko=true/false
   - miopen=true/false
   - tensilelite_coverage=true/false
+  - tensilelite_unit=true/false
+  - tensilelite_gtest=true/false
   - hipblaslt_library_uniqueness=true/false
 
 Each component defines a set of path patterns. If any changed file matches,
@@ -44,6 +46,24 @@ COMPONENTS = {
     "tensilelite_coverage": [
         "projects/hipblaslt/tensilelite/**",
         ".github/workflows/component-ci-tensilelite-coverage.yml",
+    ],
+    "tensilelite_unit": [
+        "projects/hipblaslt/tensilelite/**",
+        # rocisa, which the unit tests build, includes these.
+        "shared/origami/**",
+        "shared/stinkytofu/**",
+        "cmake/**",
+        ".github/workflows/component-ci-tensilelite-unit.yml",
+    ],
+    "tensilelite_gtest": [
+        "projects/hipblaslt/tensilelite/**",
+        # Built into tensilelite-tests (see the workflow's sparse checkout).
+        "shared/origami/**",
+        "shared/rocroller/**",
+        "shared/mxdatagenerator/**",
+        "shared/stinkytofu/**",
+        "cmake/**",
+        ".github/workflows/component-ci-tensilelite-gtest.yml",
     ],
     "hipblaslt_library_uniqueness": [
         "projects/hipblaslt/library/src/amd_detail/rocblaslt/src/Tensile/Logic/**",

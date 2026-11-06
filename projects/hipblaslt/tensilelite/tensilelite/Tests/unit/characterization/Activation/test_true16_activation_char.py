@@ -35,6 +35,7 @@ import rocisa
 from rocisa.code import Module
 from rocisa.container import sgpr, vgpr, VCC
 from rocisa.instruction import VCmpGTF16, VExpF16, VMinF16
+from tensilelite.Tests.rocisa_test_state import preserve_rocisa_kernel_state
 
 # NoSDWA (true16) archs are gfx11/gfx12; legacy SDWA archs are gfx9/gfx10.
 LEGACY_ISA = (9, 4, 2)
@@ -54,9 +55,12 @@ def _use_isa(isa):
     return ri
 
 
-# Register both ISAs once at import time.
-_use_isa(LEGACY_ISA)
-_use_isa(TRUE16_ISA)
+# Register both ISAs at import without changing the active one: collection imports every
+# module first, so selecting gfx1200 here leaked into later tests that don't pick an ISA.
+# Each test below selects its own.
+with preserve_rocisa_kernel_state():
+    _use_isa(LEGACY_ISA)
+    _use_isa(TRUE16_ISA)
 
 
 @pytest.fixture(autouse=True)
