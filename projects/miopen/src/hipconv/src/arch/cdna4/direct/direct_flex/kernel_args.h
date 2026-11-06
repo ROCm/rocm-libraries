@@ -138,22 +138,24 @@ public:
     }
     // One use of every value, so the loads share one s_waitcnt.
     //
-    // Called after the work on preloaded arguments, which then overlaps the loads.
+    // Called after the work on preloaded arguments, which then overlaps the loads. The asm takes
+    // SGPRs, as pin_sgpr's does, so it is emitted under the same condition.
     __device__ static void wait_front(const Front& f)
     {
-        asm volatile("" ::"s"(f.v[0]),
-                     "s"(f.v[1]),
-                     "s"(f.v[2]),
-                     "s"(f.v[3]),
-                     "s"(f.v[4]),
-                     "s"(f.v[5]),
-                     "s"(f.v[6]),
-                     "s"(f.v[7]),
-                     "s"(f.v[8]),
-                     "s"(f.p0),
-                     "s"(f.p2),
-                     "s"(f.th),
-                     "s"(f.tw));
+        if constexpr(bunnies::enable_pin_sgpr)
+            asm volatile("" ::"s"(f.v[0]),
+                         "s"(f.v[1]),
+                         "s"(f.v[2]),
+                         "s"(f.v[3]),
+                         "s"(f.v[4]),
+                         "s"(f.v[5]),
+                         "s"(f.v[6]),
+                         "s"(f.v[7]),
+                         "s"(f.v[8]),
+                         "s"(f.p0),
+                         "s"(f.p2),
+                         "s"(f.th),
+                         "s"(f.tw));
     }
 
     __device__ int seg_idx() const { return __builtin_amdgcn_readfirstlane(seg_reg_); }

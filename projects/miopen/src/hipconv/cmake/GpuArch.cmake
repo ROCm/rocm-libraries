@@ -181,7 +181,16 @@ function(hipconv_autoshard)
         ${autoshard_cpp}
         @ONLY
     )
-    add_executable(${autoshard_target} ${autoshard_cpp} ${ARG_MATCHER_CPP})
+    # Compile the matcher as C++ through a wrapper that includes it.
+    #
+    # hipconv_add_arch_lib marks the matcher LANGUAGE HIP in this directory. Listing it here
+    # would make CMake link the generator as HIP, whose link line omits CMAKE_CXX_FLAGS_<CONFIG>
+    # and so drops a sanitizer runtime that the C++ objects need.
+    set(matcher_cpp ${ARG_NAMESPACE}_matcher.cpp)
+    cmake_path(ABSOLUTE_PATH ARG_MATCHER_CPP OUTPUT_VARIABLE matcher_cpp_path)
+    file(CONFIGURE OUTPUT ${matcher_cpp}
+         CONTENT "#include \"${matcher_cpp_path}\"\n")
+    add_executable(${autoshard_target} ${autoshard_cpp} ${matcher_cpp})
     target_link_libraries(${autoshard_target} libautoshard)
     target_include_directories(${autoshard_target} PRIVATE
         "${HIPCONV_ROOT}/src"

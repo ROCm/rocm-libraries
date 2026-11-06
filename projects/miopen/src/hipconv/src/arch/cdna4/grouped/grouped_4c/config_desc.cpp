@@ -17,7 +17,7 @@ hipconv::KVDescriptor config_fields(const Config& cfg)
     d.int_field("kw", cfg.kw, /*default=*/3);
     d.int_field("kd", cfg.kd, /*default=*/1);
     d.int_field("n_fold", cfg.n_fold, /*default=*/8);
-    d.int_field("per_row", cfg.per_row, /*default=*/0);
+    d.bool_field("per_row", cfg.per_row, /*default=*/false);
     return d;
 }
 

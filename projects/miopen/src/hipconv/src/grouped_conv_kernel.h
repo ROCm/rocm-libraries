@@ -61,6 +61,9 @@ public:
             return false;
         if(par.pad_h > par.kh - 1 || par.pad_w > par.kw - 1)
             return false;
+        // grouped_image_past_2gib, which every config checks, divides by the batch size.
+        if(par.n <= 0)
+            return false;
         // Descriptors span an image of X, or of dY in dgrad, or past 2 GiB a row of one, and the
         // weights one descriptor. Row, row-band and plane counts are ints; a dgrad upsample and
         // the bands' rounding take rows past the image's, so rows stop at 2^29.

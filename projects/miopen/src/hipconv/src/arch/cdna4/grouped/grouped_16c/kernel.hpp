@@ -183,6 +183,8 @@ __device__ void conv2d_grouped_16c_cdna4_nhwc_impl(const ToType<DT>* __restrict_
     // Vectors to store (uint4 elements per workgroup along output channels).
     constexpr int STORE_VECS = OUTPUT_BLOCK_Q * BLOCK_C_UINT4;
 
+    constexpr bool ONE_WAVE = cfg.block_size() == WAVE_SIZE;
+
     constexpr int NUM_INPUT_LDS_BUFFERS = 2;
 
     // Size of one input LDS buffer in uint4 units.
@@ -361,7 +363,7 @@ __device__ void conv2d_grouped_16c_cdna4_nhwc_impl(const ToType<DT>* __restrict_
         constexpr int TAP_UINT4 = cfg.kh * cfg.kw * GROUP_UINT4;
         static_for<cfg.kd>([&]<int J>() {
             if constexpr(J > 0)
-                __syncthreads();
+                sync_before_lds_dma<ONE_WAVE>();
             for(int j = tid; j < WEIGHT_LDS_SIZE_UINT4; j += cfg.block_size())
             {
 #ifdef __gfx950__
@@ -453,7 +455,7 @@ __device__ void conv2d_grouped_16c_cdna4_nhwc_impl(const ToType<DT>* __restrict_
 
     // Ensure all threads have finished reading weights from LDS before
     // the input buffer_load_lds overwrites the same lds_buf region.
-    __syncthreads();
+    sync_before_lds_dma<ONE_WAVE>();
 
     // Issue a multi-pass async input load for dilated row index y_local.
     auto issue_input_load = [&](int y_local, int slot, int tic_phase) {
