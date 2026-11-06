@@ -80,7 +80,7 @@ and omitting it raises.
 ```llvm
 attributes #0 = {
   "uniform-work-group-size"="true"
-  "amdgpu-flat-work-group-size"="64,N"     ; N = kernel.attrs["max_workgroup_size"]
+  "amdgpu-flat-work-group-size"="64,N"     ; N = kernel.max_workgroup_size (workgroup_size, else max_workgroup_size)
   ...
   ; optional, only emitted when kernel.attrs["waves_per_eu"] is set:
   "amdgpu-waves-per-eu"="lo,hi"

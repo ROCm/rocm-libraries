@@ -506,6 +506,8 @@ if(ROCKE_INSTALL_TESTS)
     # Test-only implementation for the installed arch-domain reproduction gate.
     # Keep it outside the production package: CTest owns the external compiler
     # sweep, while package resources provide the committed columns being checked.
+    # tests/conftest.py also points rocke.tests.ir_validity at this copy, so the
+    # installed pytest runs compile lowered IR with the same tool.
     install(FILES
             "${CMAKE_CURRENT_SOURCE_DIR}/tools/gen_arch_domain.py"
             "${CMAKE_CURRENT_SOURCE_DIR}/tools/check_ir_validity.py"
@@ -634,7 +636,12 @@ if(ROCKE_INSTALL_TESTS)
       # portable-IR replay CLI and ROCKE_PROVENANCE_MANIFEST its provenance
       # manifest; ROCKE_UNSIGNED_INT_OPS_CLI is the C API program whose
       # --print-llvm output test_unsigned_int_ops.py compares with the Python
-      # builder's text.
+      # builder's text; ROCKE_INTEXPR_CLI is the C++ integer-expression
+      # evaluator whose --eval output test_intexpr.py compares with Python's;
+      # ROCKE_PARAM_FACTS_CLI prints the C++ print_ir, verifier messages and
+      # canonicalize that test_param_facts.py compares with Python's;
+      # ROCKE_GPU_CHECKED_VALUE_CLI prints the C++ builder's GPU-check cases
+      # and marker verifier messages that test_gpu_checked_value.py compares.
       set(_ROCKE_PYTEST_ENVIRONMENT
           "PYTHONPATH=."
           "ROCKE_REPLAY_CLI=${ROCKE_TEST_CTEST_REL}tests/portable_ir/rocke_portable_ir_replay_cli${CMAKE_EXECUTABLE_SUFFIX}"
@@ -644,6 +651,9 @@ if(ROCKE_INSTALL_TESTS)
               "ROCKE_IR_TYPES_TEST=rocke_ir_types"
               "ROCKE_NONTEMPORAL_HIP_TEST=rocke_nontemporal_hip"
               "ROCKE_UNSIGNED_INT_OPS_CLI=rocke_unsigned_int_ops"
+              "ROCKE_INTEXPR_CLI=rocke_intexpr"
+              "ROCKE_PARAM_FACTS_CLI=rocke_param_facts"
+              "ROCKE_GPU_CHECKED_VALUE_CLI=rocke_gpu_checked_value"
               "ROCKE_ARCH_TARGET_TEST_EXE=rocke_arch_target_identity"
               "ROCKE_BUFFER_RSRC_HIP_TEST=rocke_buffer_rsrc_hip")
         string(REPLACE "=" ";" _rocke_native_parity "${_rocke_native_parity}")
@@ -663,6 +673,31 @@ if(ROCKE_INSTALL_TESTS)
              "set_tests_properties(rocke_pytest PROPERTIES\n"
              "  LABELS \"ckc\\;python\\;quick\"\n"
              "  ENVIRONMENT \"\${_rocke_platform_pytest_environment}\"\n"
+             "  TIMEOUT 300)\n")
+
+      # The tensor_transforms tests live inside the package
+      # (rocke/tests/helpers/tiling/tensor_transforms), so rocke_pytest above, which
+      # collects the installed tests/ tree, never sees them. Run them from the
+      # installed package. Without a usable GPU the GPU tests skip; the source
+      # scans of the dsl_docs and library trees skip here too, since the installed
+      # tree holds neither (rocke.tests.source_tree). Like rocke_pytest, the entry
+      # gets the compiler tool locations but not the compiler requirement policy.
+      #
+      # No directory above the installed package holds a rocke pytest
+      # configuration, so without -c pytest would take one from any pytest.ini or
+      # pyproject.toml above the install (a CI workspace has one whose
+      # python_files collects nothing here). -c names the installed
+      # tests/pytest.ini, the configuration rocke_pytest runs under.
+      set(_ROCKE_TENSOR_TRANSFORMS_TESTS
+          "${_ROCKE_INSTALLED_PYTHONPATH}/rocke/tests/helpers/tiling/tensor_transforms")
+      string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+             "set(_rocke_tensor_transforms_pytest_environment \"PYTHONPATH=${_ROCKE_INSTALLED_PYTHONPATH}\")\n"
+             "list(APPEND _rocke_tensor_transforms_pytest_environment \${_rocke_compiler_tool_environment})\n"
+             "add_test(rocke_tensor_transforms_pytest python -m pytest -c \"${ROCKE_TEST_CTEST_REL}tests/pytest.ini\" \"${_ROCKE_TENSOR_TRANSFORMS_TESTS}\" -v -rs --timeout=60)\n")
+      string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+             "set_tests_properties(rocke_tensor_transforms_pytest PROPERTIES\n"
+             "  LABELS \"ckc\\;python\\;quick\"\n"
+             "  ENVIRONMENT \"\${_rocke_tensor_transforms_pytest_environment}\"\n"
              "  TIMEOUT 300)\n")
     endif()
 
@@ -705,7 +740,8 @@ if(ROCKE_INSTALL_TESTS)
         "tests/library/tests/test_conv_fill.py"
         "tests/library/tests/test_capability_keys.py"
         "tests/library/tests/test_module_cache.py"
-        "tests/library/tests/test_run_conv_shards.py")
+        "tests/library/tests/test_run_conv_shards.py"
+        "tests/library/tests/test_convolution_backward_data_aot_packaging.py")
     set(_ROCKE_LIBRARY_CONV_TESTS "")
     foreach(_rocke_conv_test ${_ROCKE_LIBRARY_CONV_TEST_RELPATHS})
       string(APPEND _ROCKE_LIBRARY_CONV_TESTS
@@ -728,17 +764,20 @@ if(ROCKE_INSTALL_TESTS)
     # and K/V cache policy, the scalar fallback's cache key and block-table
     # stride kernarg, the unified attention running-max carry and keyless
     # guards on the emitted IR, the tiled 2D LSE store on the emitted IR, the
+    # gfx942 cfvst V loader's i64 K/V addressing on the emitted IR, the
     # host-side SDPA sequence-length and padding-mask adapters/specs, the
     # fmha_mfma free-stride ABI and layout contracts, the 2D/3D mask_type spec
     # fields, the 3D segment+reduce module's pairing, the reduce's LDS segment
     # bound against the compiled code object, the tiled C++ entries' head-count
-    # and arch refusals, the dense segment-combine launch ABI, and the
+    # and arch refusals, the dense segment-combine launch ABI, the drift guard
+    # that pins the shared dense spec's C++ mirror to the Python, and the
     # backward-test memo bound in tests/conftest.py.
     # File-list style (same pattern as conv_pytest) so PYTHONPATH resolves rocke/
     # correctly from the installed tree.
     set(_ROCKE_LIBRARY_ATTENTION_CPU_TEST_RELPATHS
         "tests/library/tests/test_attention_dense_decode.py"
         "tests/library/tests/test_attention_dense_gfx950_lds.py"
+        "tests/library/tests/test_attention_dense_spec_vectors.py"
         "tests/library/tests/test_attention_scalar_cache_key.py"
         "tests/library/tests/test_attention_spec_predicate_parity.py"
         "tests/library/tests/test_attention_tiled_2d_mask_type.py"
@@ -749,9 +788,11 @@ if(ROCKE_INSTALL_TESTS)
         "tests/library/tests/test_attention_dense_kv_split_combine_abi.py"
         "tests/library/tests/test_attention_tiled_3d_mask_type.py"
         "tests/library/tests/test_attention_tiled_3d_module.py"
+        "tests/library/tests/test_attention_tiled_3d_module_gfx942.py"
         "tests/library/tests/test_attention_tiled_3d_reduce_lds.py"
         "tests/library/tests/test_attention_unified_masked_tile_ir.py"
         "tests/library/tests/test_attention_unified_2d_lse_ir.py"
+        "tests/library/tests/test_gfx942_cfvst_i64_kv_addr.py"
         "tests/library/tests/test_d256_gfx942_fast_routing.py"
         "tests/library/tests/test_sdpa_seqlen.py"
         "tests/library/tests/test_sdpa_padding_mask.py"
@@ -1039,6 +1080,7 @@ if(ROCKE_INSTALL_TESTS)
         "tests/library/tests/test_kda_decode_gfx950_numeric.py"
         "tests/library/tests/test_gfx1250_attention.py"
         "tests/library/tests/test_gfx942_gqa_head_fold_numeric.py"
+        "tests/library/tests/test_gfx942_cfvst_i64_kv_addr_numeric.py"
         "tests/library/tests/test_gfx942_4wgqa_bounds_numeric.py"
         "tests/library/tests/test_attention_gfx942_kv_pages.py"
         "tests/library/tests/test_attention_tiled_runtime_shape_numeric.py"

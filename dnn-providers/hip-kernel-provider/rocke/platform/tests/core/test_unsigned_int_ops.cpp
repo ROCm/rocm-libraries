@@ -15,6 +15,8 @@
  * Run with --print-llvm it prints the LLVM text of the two-op function built
  * through rocke_b_add_nuw / rocke_b_cmp_ult, so the Python test can compare it
  * with the same function built by the Python builder.
+ *
+ * Any other argument list prints the usage to stderr and exits 2.
  */
 #include <cstdint>
 #include <cstdio>
@@ -87,16 +89,16 @@ std::string lower_hip(rocke_ir_builder_t* b)
 }
 
 /* A range marker op built directly (the C API has no builder entry for it):
- * operands [v] or [v, hi_value]; attrs set by `set_attrs`. */
+ * operands [v] or [v, lt]; attrs set by `set_attrs`. */
 template <typename SetAttrs>
 rocke_value_t*
-    marker(rocke_ir_builder_t* b, rocke_value_t* v, rocke_value_t* hi_value, SetAttrs set_attrs)
+    marker(rocke_ir_builder_t* b, rocke_value_t* v, rocke_value_t* lt, SetAttrs set_attrs)
 {
-    rocke_value_t* operands[2] = {v, hi_value};
+    rocke_value_t* operands[2] = {v, lt};
     rocke_attr_map_t attrs = rocke_i_attrs(b);
     set_attrs(&attrs);
     return rocke_i_op1(
-        b, ROCKE_OP_ARITH_ASSUME_RANGE, operands, hi_value ? 2 : 1, v->type, &attrs, "range");
+        b, ROCKE_OP_ARITH_ASSUME_RANGE, operands, lt ? 2 : 1, v->type, &attrs, "range");
 }
 
 std::string verify_errors(rocke_ir_builder_t* b)
@@ -194,14 +196,14 @@ void case_verifier_accepts()
     marker(&b, a, n, [&](rocke_attr_map_t* m) {
         rocke_attr_set_int(&b, m, "multiple_of", 4);
         rocke_attr_set_int(&b, m, "residue", 3);
-        rocke_attr_set_int(&b, m, "lo", 0);
-        rocke_attr_set_int(&b, m, "hi_plus", 1);
+        rocke_attr_set_int(&b, m, "ge", 0);
+        rocke_attr_set_int(&b, m, "lt_plus", 1);
     });
     marker(&b, a, nullptr, [&](rocke_attr_map_t* m) {
         rocke_attr_set_int(&b, m, "multiple_of", 1);
         rocke_attr_set_int(&b, m, "residue", 0);
-        rocke_attr_set_int(&b, m, "lo", 0);
-        rocke_attr_set_int(&b, m, "hi", 64);
+        rocke_attr_set_int(&b, m, "ge", 0);
+        rocke_attr_set_int(&b, m, "lt", 64);
     });
     rocke_b_ret(&b);
     const std::string errors = verify_errors(&b);
@@ -246,19 +248,20 @@ void case_verifier_rejects_marker_attrs()
         [](rocke_ir_builder_t* b, rocke_attr_map_t* m) {
             rocke_attr_set_int(b, m, "multiple_of", 1);
             rocke_attr_set_int(b, m, "residue", 0);
-            rocke_attr_set_int(b, m, "hi", 8);
-            rocke_attr_set_int(b, m, "hi_plus", 0);
+            rocke_attr_set_int(b, m, "lt", 8);
+            rocke_attr_set_int(b, m, "lt_plus", 0);
         },
-        "arith.assume_range: hi and hi_value are both given; state at most one end");
+        "arith.assume_range: lt is given both as an attr and as an operand; "
+        "state one upper end");
     expect_marker_rejected(
         false,
         [](rocke_ir_builder_t* b, rocke_attr_map_t* m) {
             rocke_attr_set_int(b, m, "multiple_of", 1);
             rocke_attr_set_int(b, m, "residue", 0);
-            rocke_attr_set_int(b, m, "lo", 8);
-            rocke_attr_set_int(b, m, "hi", 8);
+            rocke_attr_set_int(b, m, "ge", 8);
+            rocke_attr_set_int(b, m, "lt", 8);
         },
-        "arith.assume_range: lo (8) must be below hi (8)");
+        "arith.assume_range: ge (8) must be below lt (8)");
     /* A value that is not an integer is refused before any value rule reads it. */
     expect_marker_rejected(
         false,
@@ -272,25 +275,25 @@ void case_verifier_rejects_marker_attrs()
         [](rocke_ir_builder_t* b, rocke_attr_map_t* m) {
             rocke_attr_set_int(b, m, "multiple_of", 1);
             rocke_attr_set_int(b, m, "residue", 0);
-            rocke_attr_set_bool(b, m, "lo", true);
+            rocke_attr_set_bool(b, m, "ge", true);
         },
-        "arith.assume_range: lo must be an integer");
+        "arith.assume_range: ge must be an integer");
     expect_marker_rejected(
         false,
         [](rocke_ir_builder_t* b, rocke_attr_map_t* m) {
             rocke_attr_set_int(b, m, "multiple_of", 1);
             rocke_attr_set_int(b, m, "residue", 0);
-            rocke_attr_set_float(b, m, "hi", 8.5);
+            rocke_attr_set_float(b, m, "lt", 8.5);
         },
-        "arith.assume_range: hi must be an integer");
+        "arith.assume_range: lt must be an integer");
     expect_marker_rejected(
         true,
         [](rocke_ir_builder_t* b, rocke_attr_map_t* m) {
             rocke_attr_set_int(b, m, "multiple_of", 1);
             rocke_attr_set_int(b, m, "residue", 0);
-            rocke_attr_set_bool(b, m, "hi_plus", false);
+            rocke_attr_set_bool(b, m, "lt_plus", false);
         },
-        "arith.assume_range: hi_plus must be an integer");
+        "arith.assume_range: lt_plus must be an integer");
 }
 
 /* nuw and ult take i32 or i64 operands (add_nuw's and cmp_ult's forms); the
@@ -508,7 +511,7 @@ void case_constant_folding()
     rocke_value_t* range = marker(&b, rocke_b_const_i32(&b, 5), n_param, [&](rocke_attr_map_t* m) {
         rocke_attr_set_int(&b, m, "multiple_of", 1);
         rocke_attr_set_int(&b, m, "residue", 0);
-        rocke_attr_set_int(&b, m, "hi_plus", 0);
+        rocke_attr_set_int(&b, m, "lt_plus", 0);
     });
     rocke_b_global_store(&b, out, rocke_b_const_i32(&b, 0), range, 1);
     int64_t got = -2;
@@ -520,7 +523,7 @@ void case_constant_folding()
 
 int main(int argc, char** argv)
 {
-    if(argc > 1 && strcmp(argv[1], "--print-llvm") == 0)
+    if(argc == 2 && strcmp(argv[1], "--print-llvm") == 0)
     {
         rocke_ir_builder_t b;
         rocke_ir_builder_init(&b, "unsigned_int_ops");
@@ -531,6 +534,12 @@ int main(int argc, char** argv)
             return 1;
         fputs(ll.c_str(), stdout);
         return 0;
+    }
+    if(argc != 1)
+    {
+        /* A mistyped mode must not fall through to the self-test and pass. */
+        fprintf(stderr, "usage: %s [--print-llvm]\n", argv[0]);
+        return 2;
     }
     case_llvm_text();
     case_hip_text();

@@ -256,6 +256,26 @@ void rocke_coalesced_tile_loader_issue_slots(rocke_ir_builder_t* b,
                                              rocke_value_t* const* offsets,
                                              rocke_ctl_staged_t* staged);
 
+/* CoalescedTileLoader.load_async_to_lds() -- gfx1250 async variant of load().
+ *
+ * Same slot partition and descriptor contract as load() in vector_axis="col"
+ * mode, but each in-range chunk is one per-lane global_load_async_to_lds of
+ * load_vec 16-bit elements from `ptr` to smem_dst[row, col]. The copy has no
+ * buffer-resource range check, so the one the resource would make (byte offset
+ * below `num_bytes`, compared unsigned) is ANDed into the descriptor's valid; a
+ * chunk failing either is zero-filled with an ordinary LDS store of the
+ * destination tile's element type (f16 or bf16) instead. The caller drains
+ * the copies with s_wait_asynccnt (and the zero stores with an LDS barrier). */
+void rocke_coalesced_tile_loader_load_async_to_lds(rocke_ir_builder_t* b,
+                                                   const rocke_coalesced_tile_loader_t* self,
+                                                   rocke_value_t* tid,
+                                                   rocke_value_t* smem_dst,
+                                                   rocke_loads_descriptor_fn descriptor,
+                                                   void* descriptor_user,
+                                                   rocke_value_t* ptr,
+                                                   rocke_value_t* num_bytes,
+                                                   int coherency);
+
 /* ============================================================================
  * AsyncTileLoader / AsyncTileLoaderSlot
  * ========================================================================== */

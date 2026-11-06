@@ -969,6 +969,19 @@ int main(int argc, const char* argv[])
         });
     }
 
+    // I-cache rotation (explicit --icache-rotate-copies=N): the main --code-object
+    // rotation copies were loaded above (before lazy-load init), but the helper
+    // bundle (Kernels.so) only becomes available in m_modules after
+    // initializeLazyLoading. Mirror it into the rotation slots now so helper
+    // kernels (PostGSU / betaOnly / reduction / conversion) resolve under rotation.
+    {
+        int icacheRotateCopies = args["icache-rotate-copies"].as<int>();
+        if(icacheRotateCopies > 0)
+            forEachDevice(devices, [&](DeviceContext& ctx) {
+                HIP_CHECK_EXC(ctx.adapter->loadHelperKernelExtraCopies(icacheRotateCopies));
+            });
+    }
+
     bool        gpuTimer         = args["use-gpu-timer"].as<bool>();
     bool        runKernels       = !args["selection-only"].as<bool>();
     bool        exitOnError      = args["exit-on-error"].as<bool>();
@@ -1186,6 +1199,12 @@ int main(int argc, const char* argv[])
                                 for(auto const& filename : filenames)
                                     HIP_CHECK_EXC(ctx.adapter->loadCodeObjectFileExtraCopies(
                                         filename, extras));
+                                // Mirror the helper bundle (Kernels.so) into every
+                                // rotation slot so helper kernels (PostGSU / betaOnly /
+                                // reduction / conversion) resolve under rotation instead
+                                // of only from copy 0. The helper is already loaded into
+                                // m_modules by initializeLazyLoading at this point.
+                                HIP_CHECK_EXC(ctx.adapter->loadHelperKernelExtraCopies(extras));
                             });
                         }
 #if defined(__linux__)
