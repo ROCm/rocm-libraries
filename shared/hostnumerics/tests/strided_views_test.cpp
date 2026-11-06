@@ -31,9 +31,9 @@ void testStridedAndOffsetViews() {
         matmul(operandA, operandB, ScalarType::Float32, MatmulOptions(ScalarType::Float32),
                outputLayout, GemmBackend::Automatic);
     const Tensor scaledProduct =
-        multiply(product, 2.0f, ScalarType::Float32, ScalarType::Float32, outputLayout);
+        multiply(product, Tensor(2.0f), ScalarType::Float32, ScalarType::Float32, outputLayout);
     const Tensor scaledC =
-        multiply(inputC, 3.0f, ScalarType::Float32, ScalarType::Float32, outputLayout);
+        multiply(inputC, Tensor(3.0f), ScalarType::Float32, ScalarType::Float32, outputLayout);
     addInto(scaledProduct, scaledC, d, ScalarType::Float32, IndexRange::all(d.elementCount()),
             LastDimensionFastest{});
 
