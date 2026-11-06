@@ -21,6 +21,9 @@ from pathlib import Path, PurePosixPath
 # --------------------------------------------------------------------------
 
 TENSOR_ALWAYS = ("dims", "strides", "data_type")
+# Per-case fields of a tensor with a ragged offset link. A token-major ragged tensor's offset
+# multiplier is its sequence stride, so it changes with the dims of each case.
+TENSOR_RAGGED = ("ragged_offset_multiplier",)
 TENSOR_IF_VARIES = ("value", "value_type")
 TOP_LEVEL_IF_VARIES = ("io_data_type", "intermediate_data_type", "compute_data_type")
 TENSOR_STRUCTURAL = ("uid", "virtual", "name")
@@ -638,6 +641,13 @@ def tensors_by_uid(graph: dict) -> dict:
 # --------------------------------------------------------------------------
 
 
+def per_case_tensor_fields(tensor: dict) -> tuple:
+    """The fields of a tensor that a template takes from each case."""
+    if tensor.get("ragged_offset_tensor_uid") is None:
+        return TENSOR_ALWAYS
+    return TENSOR_ALWAYS + TENSOR_RAGGED
+
+
 def expand(node, case_values, tensor_uid=None):
     """Resolve ${case.<path>} placeholders against case_values."""
     if isinstance(node, str):
@@ -655,7 +665,10 @@ def expand(node, case_values, tensor_uid=None):
 
 
 def _resolve(path, case_values, tensor_uid):
-    if tensor_uid is not None and path in TENSOR_ALWAYS + TENSOR_IF_VARIES:
+    if (
+        tensor_uid is not None
+        and path in TENSOR_ALWAYS + TENSOR_IF_VARIES + TENSOR_RAGGED
+    ):
         for tv in case_values.get("tensors", []):
             if tv.get("uid") == tensor_uid and path in tv:
                 return tv[path]

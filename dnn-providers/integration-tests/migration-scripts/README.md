@@ -335,6 +335,7 @@ python3 migration-scripts/diff_coverage.py \
 | Tensor dims | `TensorAttributes` | sweep `values.tensors[uid].dims` | Per-case |
 | Tensor strides | `generateStrides()` | sweep `values.tensors[uid].strides` | Per-case |
 | data_type | `getDataTypeEnumFromType<T>()` | sweep `values.tensors[uid].data_type` | Per-case |
+| Ragged offset multiplier | `TensorAttributes` | sweep `values.tensors[uid].ragged_offset_multiplier` | Per-case, only on a tensor with a ragged offset |
 | Node attrs | `ConvFpropAttributes` etc. | sweep `values.attributes.<key>` | Per-case, only if varies |
 | Seed | `inputFillRecipes().setGlobalSeed()` | sweep `case.metadata.seed` | Per-case metadata |
 | Distribution/range | `InputFillRecipes.fills()` | sweep `case.metadata.inputs.{uid}` | Per-case metadata |
