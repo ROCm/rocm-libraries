@@ -62,6 +62,14 @@ def _own_host_lock(tmp_path, monkeypatch):
     monkeypatch.setattr(AS, "HOST_LOCK_DIR", str(tmp_path))
 
 
+@pytest.fixture(autouse=True)
+def _ample_host_memory(monkeypatch):
+    """The host memory guard sees 1 TiB available, whatever this host has free."""
+    import adaptive_search as AS
+
+    monkeypatch.setattr(AS, "host_memory", lambda: 1 << 40)
+
+
 def _ms(name):
     return 1.0 + (sum(map(ord, name)) % 97) / 100.0
 

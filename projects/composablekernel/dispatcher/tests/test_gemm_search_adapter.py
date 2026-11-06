@@ -214,12 +214,22 @@ def _own_host_lock(tmp_path, monkeypatch):
     monkeypatch.setattr(worker, "OOM_SCORE_ADJ", str(tmp_path / "oom_score_adj"))
 
 
+HOST_MEMORY = AS.host_memory  # the reader itself, which _ample_host_memory replaces
+
+
+@pytest.fixture(autouse=True)
+def _ample_host_memory(monkeypatch):
+    """The host memory guard sees 1 TiB available, whatever this host has
+    free; a test of the guard sets its own reading."""
+    monkeypatch.setattr(AS, "host_memory", lambda: 1 << 40)
+
+
 def _memory(tmp_path, total_gib, avail_gib):
     """``adaptive_search.host_memory`` on a /proc/meminfo with these sizes."""
     path = tmp_path / "meminfo"
     path.write_text(f"MemTotal: {int(total_gib * 2**20)} kB\n"
                     f"MemAvailable: {int(avail_gib * 2**20)} kB\n")
-    return functools.partial(AS.host_memory, str(path), str(tmp_path / "no-cgroup"))
+    return functools.partial(HOST_MEMORY, str(path), str(tmp_path / "no-cgroup"))
 
 
 def _args(**kw):
