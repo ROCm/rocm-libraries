@@ -157,7 +157,9 @@ FAKE_FRONTEND = textwrap.dedent(
 
     class Handle:
         def __init__(self, stream=0):
-            pass
+            if os.environ.get("FAKE_INIT_FAIL"):
+                print("Hip error: 'no ROCm-capable device is detected'(100) at hipblaslt.cpp:414", flush=True)
+                os._exit(1)
 
         def get(self):
             return 1
@@ -202,6 +204,8 @@ FAKE_FRONTEND = textwrap.dedent(
         def execute(self, handle, variant_pack, workspace):
             if os.environ.get("FAKE_CRASH"):
                 os.kill(os.getpid(), signal.SIGSEGV)
+            if os.environ.get("FAKE_EXEC_EXIT"):
+                os._exit(int(os.environ["FAKE_EXEC_EXIT"]))
             results = torch.load(os.environ["FAKE_RESULTS"])[self.direction]
             for uid, src in results.items():
                 ctypes.memmove(variant_pack[uid], src.data_ptr(), src.numel() * src.element_size())
@@ -230,6 +234,8 @@ def fake_frontend(tmp_path, monkeypatch):
     monkeypatch.setenv("FAKE_LOG", str(tmp_path / "pins.log"))
     monkeypatch.setenv("FAKE_KNOBS", str(tmp_path / "knobs.log"))
     monkeypatch.delenv("FAKE_CRASH", raising=False)
+    monkeypatch.delenv("FAKE_INIT_FAIL", raising=False)
+    monkeypatch.delenv("FAKE_EXEC_EXIT", raising=False)
     return tmp_path
 
 
@@ -314,6 +320,42 @@ def test_a_replay_that_crashes_is_reported_as_reproduced(
     assert (
         f"reproduced: died with signal {int(signal.SIGSEGV)}" in capsys.readouterr().out
     )
+
+
+def test_a_replay_without_a_device_is_a_setup_error_and_spawns_no_child(
+    fake_frontend, monkeypatch, capsys, replay
+):
+    repro_of_attention(fake_frontend / "repro", {"fwd": 0, "bwd": 0})
+    monkeypatch.setattr(replay.torch.cuda, "device_count", lambda: 0)
+
+    def no_spawn(*args, **kwargs):
+        raise AssertionError("a child was spawned")
+
+    monkeypatch.setattr(replay.subprocess, "run", no_spawn)
+    status = replay.main([str(fake_frontend / "repro"), "--device", "cuda"])
+    assert status == 70
+    assert "no ROCm-capable device" in capsys.readouterr().out
+
+
+def test_a_child_that_fails_device_initialisation_is_a_setup_error(
+    fake_frontend, monkeypatch, capsys, replay
+):
+    repro_of_attention(fake_frontend / "repro", {"fwd": 0, "bwd": 0})
+    monkeypatch.setenv("FAKE_INIT_FAIL", "1")
+    status = replay.main([str(fake_frontend / "repro"), "--device", "cpu"])
+    shown = capsys.readouterr().out
+    assert status == 70, shown
+    assert "reproduced" not in shown
+
+
+def test_a_child_that_exits_nonzero_after_executing_is_reproduced(
+    fake_frontend, monkeypatch, capsys, replay
+):
+    repro_of_attention(fake_frontend / "repro", {"fwd": 0, "bwd": 0})
+    monkeypatch.setenv("FAKE_EXEC_EXIT", "3")
+    status = replay.main([str(fake_frontend / "repro"), "--device", "cpu"])
+    assert status == 1
+    assert "reproduced: exited with status 3" in capsys.readouterr().out
 
 
 def test_a_capture_directory_replays_without_a_saved_output(
