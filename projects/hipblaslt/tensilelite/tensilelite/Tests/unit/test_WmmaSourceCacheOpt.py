@@ -7,7 +7,7 @@ import re
 import pytest
 from types import SimpleNamespace
 from unittest.mock import MagicMock
-from tensilelite.Tests.rocisa_test_state import preserve_rocisa_kernel_state
+from rocisa_test_state import preserve_rocisa_kernel_state
 
 from tensilelite.Components.Subtile.LogicalScheduler import (
     MFMATileRange, ReadGranularity, SchedulerConfig, MFMAPlacement,

@@ -50,7 +50,7 @@ from rocisa.enum import RegisterType
 from tensilelite.Components.Subtile.Kernel import TileInfo, AB_B16, AB_B8
 from tensilelite.Components.Subtile.SubtileGREmit import graTileAssignment, globalReadDTLInitCommonSgpr, globalReadDoSubtile
 from tensilelite.Components.Subtile.SubtileLREmit import lraTileAssignment, localReadDoSubtile
-from tensilelite.Tests.rocisa_test_state import preserve_rocisa_kernel_state
+from rocisa_test_state import preserve_rocisa_kernel_state
 
 # ---- GPU target detection ----
 def _detect_gfx_target():

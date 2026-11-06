@@ -48,7 +48,7 @@ from collections import Counter
 
 import pytest
 
-from tensilelite.Tests.rocisa_test_state import preserve_rocisa_kernel_state
+from rocisa_test_state import preserve_rocisa_kernel_state
 from toolchain_test_helpers import shared_assembler, toolchain_for
 
 # Reuse the logic-driven harness for: assembler/toolchain construction, the
