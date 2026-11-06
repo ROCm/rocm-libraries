@@ -79,6 +79,9 @@ def test_customKernelNameOf_reads_both_shapes():
     name = _firstKernelIn("rocroller")
     assert customKernelNameOf({"CustomKernel": {"name": name}}) == name
     assert customKernelNameOf({"CustomKernelName": name}) == name
+    # A fork-parameter entry is the CustomKernel block itself.
+    assert customKernelNameOf({"name": name}) == name
+    assert customKernelNameOf({"name": name, "generated": True}) == ""
     # A CustomKernel block Tensile synthesized for one of its own kernels is not
     # a hand-written custom kernel and must not be mistaken for one.
     assert customKernelNameOf({"CustomKernel": {"name": name, "generated": True}}) == ""
