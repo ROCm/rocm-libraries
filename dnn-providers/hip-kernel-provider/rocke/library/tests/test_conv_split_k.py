@@ -628,7 +628,6 @@ def test_explicit_atomic_that_cannot_be_built_raises():
 def test_wmma_auto_without_a_reduction_runs_unsplit(dtype):
     # gfx1250 16-bit dW with an odd row (wg_N = 27): no packed pair, and WMMA
     # has no workspace. An auto request runs unsplit; a forced degree raises.
-    # fp16 is never split automatically, so only bf16 asks for a split here.
     p = ConvProblem(N=64, Hi=64, Wi=64, C=3, K=16, Y=3, X=3, pH=1, pW=1)
     kw = {
         "arch": "gfx1250",
@@ -646,12 +645,30 @@ def test_wmma_auto_without_a_reduction_runs_unsplit(dtype):
         resolve_conv_split_k("wgrad", p, split_k=8, **kw)
     with pytest.raises(ValueError, match="packed atomic"):
         resolve_conv_split_k("wgrad", p, override=8, **kw)
-    if dtype == "fp16":
-        assert r.requested == 1
-        return
     assert r.requested > 1  # the policy did ask for a split
     with pytest.raises(ValueError, match="packed atomic"):
         resolve_conv_split_k("wgrad", p, allow_unsplit=False, **kw)
+
+
+def test_wmma_fp16_atomic_degree_is_capped_for_accuracy():
+    # gfx1250 fp16 dW, pointwise C=K=16 over a deep reduction (N*Ho*Wo =
+    # 262144) on one tile: the fill and slice terms ask for far more than the
+    # packed fp16 atomic's accuracy cap (97, see atomic_rounding_degree_cap),
+    # so the automatic atomic degree stops there. The f32 workspace reduction
+    # resolves as fp32 dW and keeps the general cap of 128.
+    p = ConvProblem(N=64, Hi=64, Wi=64, C=16, K=16, Y=1, X=1)
+    kw = {
+        "arch": "gfx1250",
+        "dtype": "fp16",
+        "tile_m": 64,
+        "tile_n": 128,
+        "tile_k": 64,
+        "block_size": 256,
+    }
+    atomic = resolve_conv_split_k("wgrad", p, reduction="atomic", **kw)
+    assert (atomic.split_k, atomic.two_stage) == (97, False)
+    ws = resolve_conv_split_k("wgrad", p, reduction="workspace", **kw)
+    assert (ws.split_k, ws.two_stage) == (128, True)
 
 
 @pytest.mark.parametrize("arch", ["gfx1151", "gfx1201"])
