@@ -3,6 +3,8 @@
 
 #include "detail/mx_packing.hpp"
 
+#include <cstddef>
+#include <iterator>
 #include <roc/hostnumerics/scalar_storage.hpp>
 
 #include "detail/checked_arithmetic.hpp"
@@ -15,11 +17,14 @@ std::vector<std::byte> packRawValues(std::span<const uint8_t> rawValues, uint16_
     std::vector<std::byte> storage(ceilDivide(totalBits, size_t{8}), std::byte{0});
     if (bitsPerValue == 8) {
 #pragma omp parallel for schedule(static) num_threads(threadCount)
-        for (size_t index = 0; index < rawValues.size(); ++index)
+        for (ptrdiff_t signedIndex = 0; signedIndex < std::ssize(rawValues); ++signedIndex) {
+            const auto index = static_cast<size_t>(signedIndex);
             storage[index] = static_cast<std::byte>(rawValues[index]);
+        }
     } else if (bitsPerValue == 4) {
 #pragma omp parallel for schedule(static) num_threads(threadCount)
-        for (size_t byteIndex = 0; byteIndex < storage.size(); ++byteIndex) {
+        for (ptrdiff_t signedByte = 0; signedByte < std::ssize(storage); ++signedByte) {
+            const auto byteIndex = static_cast<size_t>(signedByte);
             const size_t firstIndex = byteIndex * 2;
             const uint8_t first = rawValues[firstIndex] & 0x0fU;
             const uint8_t second =
@@ -27,9 +32,10 @@ std::vector<std::byte> packRawValues(std::span<const uint8_t> rawValues, uint16_
             storage[byteIndex] = static_cast<std::byte>(first | (second << 4));
         }
     } else if (bitsPerValue == 6) {
-        const size_t groups = (rawValues.size() + 3U) / 4U;
+        const auto groups = static_cast<ptrdiff_t>((rawValues.size() + 3U) / 4U);
 #pragma omp parallel for schedule(static) num_threads(threadCount)
-        for (size_t group = 0; group < groups; ++group) {
+        for (ptrdiff_t signedGroup = 0; signedGroup < groups; ++signedGroup) {
+            const auto group = static_cast<size_t>(signedGroup);
             const size_t firstIndex = group * 4U;
             uint32_t word = 0;
             for (size_t offset = 0; offset < 4U && firstIndex + offset < rawValues.size(); ++offset)

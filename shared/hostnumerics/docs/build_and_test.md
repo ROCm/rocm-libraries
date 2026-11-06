@@ -4,8 +4,7 @@
 
 
 The standalone build requires CMake 3.25.2 or newer, a C++20 compiler with
-OpenMP, and Ninja. With MSVC, CMake 3.30 or newer is needed to select the LLVM
-OpenMP runtime.
+OpenMP, and Ninja.
 The Python module also needs Python 3.10 or newer with development headers and
 nanobind. The Python test suite also requires NumPy and `ml_dtypes`. From the
 repository root, the following creates a virtual environment and build directory
