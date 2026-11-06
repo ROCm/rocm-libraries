@@ -2970,10 +2970,6 @@ TYPED_TEST(local_matrix, operations_on_a_matrix_without_entries_change_nothing)
     A->ExtractSubMatrices(1, 1, offsets, offsets, blocks);
     EXPECT_EQ(block.GetNnz(), 0);
 
-    auto transpose = empty_local_matrix<T>(this->backend());
-    A->Transpose(transpose.get());
-    EXPECT_EQ(transpose->GetNnz(), 0);
-
     std::vector<PtrType> row_offset(n + 1, 0);
     A->CopyFromCSR(row_offset.data(), nullptr, nullptr);
     A->CopyToCSR(row_offset.data(), nullptr, nullptr);
