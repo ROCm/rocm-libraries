@@ -57,6 +57,8 @@ from kernels.common._attention_bwd_frag import (
     tr16_read_plan,
 )
 
+pytestmark = pytest.mark.exhaustive
+
 ROWS = 64
 COLS = 64
 WAVE = 64

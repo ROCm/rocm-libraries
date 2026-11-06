@@ -31,6 +31,8 @@ from kernels.common.attention_bwd import (
 
 from . import _attention_bwd_resources as R
 
+pytestmark = pytest.mark.exhaustive
+
 BARRIERS = ("tile.sync", "tile.sync_lds_only", "tile.s_barrier_bare")
 CLOB = '  call void asm sideeffect "", "~{memory}"()'
 BAR = " call void @llvm.amdgcn.s.barrier()"

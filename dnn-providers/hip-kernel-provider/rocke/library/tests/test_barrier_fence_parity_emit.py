@@ -37,6 +37,8 @@ from pathlib import Path
 
 import pytest
 
+pytestmark = pytest.mark.exhaustive
+
 _TESTS = Path(__file__).resolve().parent
 _PARITY = _TESTS / "parity"
 _LIB = _TESTS.parent

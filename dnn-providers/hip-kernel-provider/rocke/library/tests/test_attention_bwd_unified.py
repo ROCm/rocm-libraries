@@ -66,6 +66,8 @@ from kernels.common.attention_bwd_unified_plan import attn_bwd_unified_tile_conf
 from ._attention_bwd_test_utils import kernel_signature
 from .test_attention_bwd_ir import _walk, q_loops, step_bodies
 
+pytestmark = pytest.mark.exhaustive
+
 ARCHS = ("gfx942", "gfx950", "gfx1151", "gfx1201")
 CDNA = ("gfx942", "gfx950")
 FLAVORS = ("llvm20", "llvm22", "llvm23")

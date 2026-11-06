@@ -255,6 +255,27 @@ def test_installed_ctest_entries_get_scoped_environment_contracts(
             in tensor_transforms_command
         )
         expected_tensor_transforms_environment = {"PYTHONPATH": package_root}
+        expected_counted_ir_environment = {
+            "PYTHONPATH": f"{test_ctest_rel}tests/library",
+            "PYTEST_ADDOPTS": "",
+            "ROCKE_EXPLICIT_GATE_RUN": "1",
+            "ROCKE_EXPLICIT_GATE_PARTIAL": "0",
+            "ROCKE_EXPLICIT_GATE_PREFLIGHT": "",
+        }
+        expected_counted_isa_environment = {
+            "PYTHONPATH": f"{test_ctest_rel}tests/library",
+            "ROCKE_COUNTED_ISA_OPTIONAL": "0",
+            "PYTEST_ADDOPTS": "",
+            "ROCKE_EXPLICIT_GATE_RUN": "1",
+            "ROCKE_EXPLICIT_GATE_PARTIAL": "0",
+            "ROCKE_EXPLICIT_GATE_PREFLIGHT": "",
+            "ROCKE_BWD_NO_COMGR_PIN": "1",
+            "ROCKE_BWD_ISA_ARCH": "",
+            "ROCKE_COUNTED_ISA_PARTIAL": "0",
+            "ROCKE_ISA_INSPECT_PROBE": (
+                f"{test_ctest_rel}tests/support/probe_isa_inspect.py"
+            ),
+        }
         if sys.platform == "linux" and rocm_path is not None:
             compiler_environment = {
                 "PATH": os.pathsep.join(
@@ -270,6 +291,7 @@ def test_installed_ctest_entries_get_scoped_environment_contracts(
             expected_tensor_transforms_environment.update(compiler_environment)
             expected_mla_environment.update(compiler_environment)
             expected_mla_environment["ROCKE_REQUIRE_COMPILER_TOOLS"] = "1"
+            expected_counted_isa_environment.update(compiler_environment)
 
         assert environment_for(tests, "rocke_pytest") == expected_platform_environment
         assert (
@@ -280,6 +302,22 @@ def test_installed_ctest_entries_get_scoped_environment_contracts(
             environment_for(tests, "rocke_library_mla_pytest")
             == expected_mla_environment
         )
+        assert (
+            environment_for(tests, "rocke_library_counted_ir_gate")
+            == expected_counted_ir_environment
+        )
+        assert (
+            environment_for(tests, "rocke_library_counted_isa_gate")
+            == expected_counted_isa_environment
+        )
+        counted = next(
+            test for test in tests if test["name"] == "rocke_library_counted_isa_gate"
+        )
+        counted_properties = {
+            prop["name"]: prop["value"] for prop in counted["properties"]
+        }
+        assert counted_properties["PROCESSORS"] == 4
+        assert counted_properties["RESOURCE_LOCK"] == ["rocke_counted_sync_gate"]
 
 
 def test_relocated_cmake_consumer_links_lowerer(tmp_path):

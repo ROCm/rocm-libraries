@@ -64,6 +64,8 @@ from .test_attention_bwd_ir import (
     traced_spec,
 )
 
+pytestmark = pytest.mark.exhaustive
+
 _PADDABLE = ("q", "do", "ds", "pt", "k_stage", "v_stage", "k_res", "v_res", "dkv_out")
 
 KNOBS = {

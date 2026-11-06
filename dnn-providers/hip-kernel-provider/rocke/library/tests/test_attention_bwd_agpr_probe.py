@@ -50,6 +50,8 @@ from kernels.common._attention_bwd_caps import (
 )
 from ._attention_bwd_test_utils import device_arch
 
+pytestmark = pytest.mark.exhaustive
+
 ARCH = os.environ.get("ROCKE_BWD_ARCH") or os.environ.get("ROCKE_TEST_ARCH")
 
 

@@ -86,6 +86,8 @@ from .test_attention_bwd_sched_body import (
 )
 from .sdpa.bwd_kernel_cases import config_knobs
 
+pytestmark = pytest.mark.exhaustive
+
 _SPLIT = dict(dq_mode="split")
 # The bodies of the split-dQ main kernel: name -> (archs, spec knobs).
 BODIES = {

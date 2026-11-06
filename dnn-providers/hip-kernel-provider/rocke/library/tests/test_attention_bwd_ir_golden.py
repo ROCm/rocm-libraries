@@ -48,6 +48,8 @@ from typing import Any, Callable, Mapping
 
 import pytest
 
+pytestmark = pytest.mark.exhaustive
+
 _TESTS = Path(__file__).resolve().parent
 _LIB_ROOT = str(_TESTS.parent)
 if sys.path and sys.path[0] != _LIB_ROOT:
