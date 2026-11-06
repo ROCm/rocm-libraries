@@ -548,6 +548,21 @@ ConvSolution CkImplLibLoader::GetSolution(CKSolverType solver,
     return ExtractSolution(status, ptr, "get_solution");
 }
 
+bool CkImplLibLoader::IsArgsSupportedTf32Aware(CKSolverType solver,
+                                               const conv::ProblemDescription& problem,
+                                               const std::string& kernel_id) const
+{
+    const auto dtype = problem.GetInDataType();
+    const bool tf32  = (dtype == miopenFloat) && problem.UseTF32();
+    // Try TF32 first when requested, then fall back to FP32: a restored config carries only
+    // kernel_id, so a TF32-only id must still validate, and an id chosen via the FP32 fallback
+    // (no TF32 instance) must validate as FP32. IsArgsSupported handles the "<type>+<split_k>"
+    // kernel_id form, so no suffix stripping is needed here.
+    if(tf32 && IsArgsSupported(solver, problem, kernel_id, dtype, true))
+        return true;
+    return IsArgsSupported(solver, problem, kernel_id, dtype, false);
+}
+
 ConvSolution CkImplLibLoader::GetSolutionTf32Aware(CKSolverType solver,
                                                    const ExecutionContext& ctx,
                                                    const conv::ProblemDescription& problem,

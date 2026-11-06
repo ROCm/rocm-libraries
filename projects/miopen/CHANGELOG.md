@@ -6,9 +6,10 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
 ## MIOpen 3.6.3 for ROCm 10.3.0
 
 ### Resolved Issues
-* [Conv] Fixed TF32 grouped convolutions silently running in FP32 (~2x slower) when the perf config
-  came from the perf-db or a heuristic instead of an in-process search; TF32 is now recovered from
-  the problem at solution-build time, with a fallback to FP32 where no TF32 instance exists.
+* [Conv] Fixed TF32 grouped convolutions silently running in FP32 (up to ~2x slower) when the perf
+  config was restored from the perf-db, which drops the config's use_tf32 flag; TF32 is now
+  recovered from the problem when validating and building the solution, with a fallback to FP32
+  where no TF32 instance exists.
 * [Conv] Fixed the 3D grouped backward-weights CK xdlops convolution solver skipping
   `valid_kernels[0]` during exhaustive tuning: the populate branch fell through instead of emitting
   the seeded first config, so GenericSearch began enumeration at `valid_kernels[1]` and the first
