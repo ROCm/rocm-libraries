@@ -1806,6 +1806,62 @@ TYPED_TEST(solvers, an_exact_step_below_the_minimum_iteration_count_stops_the_so
     }
 }
 
+// Far past convergence, below the minimum iteration count or with zero tolerances, the
+// residuals shrink until sigma_j = (r_j+1, r_j+1) in the Gram-Schmidt step underflows, or
+// until (r_0, r_l) does, so that omega = 0 breaks the next cycle down. Which one a case
+// reaches depends on rounding. The residual is measured in the 1-norm: the squares in the
+// euclidean norm of r_0 underflow as early and stop such small solves as an exact step.
+TYPED_TEST(solvers, bicgstabl_stops_when_its_residuals_underflow_far_past_convergence)
+{
+    using T = typename TypeParam::value_type;
+    struct System
+    {
+        std::string name;
+        Csr<T>      A;
+    };
+    struct Stop
+    {
+        std::string name;
+        double      rel;
+        int         min_iter;
+    };
+    for(const System& s : {System{"nonsymmetric 8", nonsymmetric<T>(8)},
+                           System{"nonsymmetric 16", nonsymmetric<T>(16)},
+                           System{"spd 16", spd<T>(16)}})
+    {
+        const Vec<T> b  = rhs<T>(s.A.n);
+        const Vec<T> x0 = start<T>(s.A.n);
+        auto         A  = this->make(s.A);
+        for(const Stop& stop : {Stop{"minimum iteration count", solver_tol<T>(1e-12), 1000},
+                                Stop{"zero tolerances", 0.0, 0}})
+        {
+            for(int l : {1, 2, 4})
+            {
+                const Method<T> m = bicgstabl<T>(l);
+                for(bool precond : {false, true})
+                {
+                    SCOPED_TRACE(trace(m, precond, s.name + ", " + stop.name));
+                    Jacobi<T> jacobi;
+                    auto      solver = m.make();
+                    solver->Init(0.0, stop.rel, 1e8, stop.min_iter, 1000);
+                    solver->SetResidualNorm(1);
+                    set_up(*solver, m, *A, precond ? &jacobi : nullptr);
+
+                    const Outcome<T> out = quietly([&] { return solve(*solver, *A, b, x0); });
+                    // Neither the minimum iteration count nor zero tolerances let the
+                    // residual checks reach a tolerance
+                    EXPECT_EQ(out.status, 0);
+                    EXPECT_LT(out.iterations, 1000);
+                    EXPECT_TRUE(std::isfinite(out.residual)) << out.residual;
+                    expect_near(out.x,
+                                dense_solve(dense(s.A), b),
+                                solution_tol(dense(s.A), b, x0, solver_tol<T>(1e-12), 1, precond));
+                }
+            }
+        }
+    }
+}
+
 TYPED_TEST(solvers, current_residual_is_measured_in_the_chosen_norm)
 {
     using T          = typename TypeParam::value_type;

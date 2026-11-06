@@ -342,6 +342,13 @@ namespace rocalution
         {
             rho_old *= -omega;
 
+            // Check for breakdown, omega = 0 or rho_old = -omega * rho underflowed
+            if(rho_old == static_cast<ValueType>(0))
+            {
+                LOG_INFO("BiCGStab(l) omega == 0 !!!");
+                break;
+            }
+
             // BiCG part
             for(int j = 0; j < l; ++j)
             {
@@ -431,8 +438,22 @@ namespace rocalution
                 // sigma_j = (r_j+1, r_j+1)
                 sigma[j] = r[j + 1]->Dot(*r[j + 1]);
 
+                // r_j+1 vanished or its squares underflowed, e.g. far past convergence
+                // below the minimum iteration count, and leaves no coefficient to update with
+                if(sigma[j] == static_cast<ValueType>(0))
+                {
+                    converged = true;
+                    break;
+                }
+
                 // gamma' = (r_0, r_j+1) / sigma_j
                 gamma1[j] = r[0]->Dot(*r[j + 1]) / sigma[j];
+            }
+
+            // Check for a vanished sigma_j in the minimal residual part
+            if(converged == true)
+            {
+                break;
             }
 
             // omega = gamma'_l-1; gamma_l-1 = gamma'_l-1
@@ -553,6 +574,13 @@ namespace rocalution
         {
             rho_old *= -omega;
 
+            // Check for breakdown, omega = 0 or rho_old = -omega * rho underflowed
+            if(rho_old == static_cast<ValueType>(0))
+            {
+                LOG_INFO("BiCGStab(l) omega == 0 !!!");
+                break;
+            }
+
             // BiCG part
             for(int j = 0; j < l; ++j)
             {
@@ -648,8 +676,22 @@ namespace rocalution
                 // sigma_j = (r_j+1, r_j+1)
                 sigma[j] = r[j + 1]->Dot(*r[j + 1]);
 
+                // r_j+1 vanished or its squares underflowed, e.g. far past convergence
+                // below the minimum iteration count, and leaves no coefficient to update with
+                if(sigma[j] == static_cast<ValueType>(0))
+                {
+                    converged = true;
+                    break;
+                }
+
                 // gamma' = (r_0, r_j+1) / sigma_j
                 gamma1[j] = r[0]->Dot(*r[j + 1]) / sigma[j];
+            }
+
+            // Check for a vanished sigma_j in the minimal residual part
+            if(converged == true)
+            {
+                break;
             }
 
             // omega = gamma'_l-1; gamma_l-1 = gamma'_l-1
