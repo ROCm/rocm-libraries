@@ -1,0 +1,62 @@
+/* Copyright (C) 2026 Advanced Micro Devices, Inc. SPDX-License-Identifier: MIT */
+
+:root {
+  --raw: #d62728;
+  --war: #ff7f0e;
+  --waw: #9467bd;
+  --line: #d0d4da;
+  --muted: #6b7280;
+  font-family: system-ui, sans-serif;
+  font-size: 13px;
+}
+
+body { margin: 0; display: flex; flex-direction: column; height: 100vh; }
+header, nav { display: flex; align-items: center; gap: 6px; padding: 6px 10px;
+  border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+header h1 { font-size: 15px; margin: 0 8px 0 0; }
+header select { max-width: 48ch; }
+.sep { width: 10px; }
+#summary { margin-left: auto; color: var(--muted); }
+button { font: inherit; padding: 2px 10px; }
+.tab.active { font-weight: 600; border-bottom: 2px solid #2563eb; }
+#legend { margin-left: auto; display: flex; gap: 10px; }
+.chip { display: inline-block; padding: 0 5px; margin: 1px 2px; border-radius: 3px;
+  color: #fff; font-size: 11px; white-space: nowrap; }
+
+#status { padding: 4px 10px; min-height: 18px; background: #f6f7f9;
+  border-bottom: 1px solid var(--line); overflow-wrap: anywhere; }
+#status.error { background: #fde8e8; color: #9b1c1c; }
+#status.ok { background: #e7f6ec; color: #14532d; }
+#check { padding: 6px 10px; background: #fff7ed; border-bottom: 1px solid var(--line);
+  max-height: 25vh; overflow: auto; }
+#check li { font-family: ui-monospace, monospace; font-size: 12px; }
+
+main { flex: 1; overflow: auto; }
+.pane { padding: 6px 10px; }
+footer { padding: 4px 10px; color: var(--muted); border-top: 1px solid var(--line); }
+
+.block { margin-bottom: 14px; }
+.block h2 { font-size: 13px; margin: 8px 0 2px; font-family: ui-monospace, monospace; }
+table.rows { border-collapse: collapse; width: 100%; }
+.rows td { padding: 1px 6px; border-bottom: 1px solid #eef0f3; vertical-align: top;
+  font-family: ui-monospace, monospace; font-size: 12px; }
+.rows td.num { text-align: right; color: var(--muted); width: 7ch; white-space: nowrap; }
+.rows td.cyc { text-align: right; width: 9ch; white-space: nowrap; }
+.rows td.deps { width: 32ch; }
+.rows td.inst { white-space: pre; overflow: hidden; text-overflow: ellipsis; max-width: 0; }
+.rows tr { cursor: grab; border-left: 4px solid transparent; }
+.rows tr.pinned { cursor: not-allowed; background: #f3f4f6; }
+.rows tr.pinned td.num::after { content: " \1F512"; }
+.rows tr.selected { background: #dbeafe; }
+.rows tr.moved td.num { color: #2563eb; font-weight: 700; }
+.rows tr.rel-pred, .rows tr.rel-succ { background: #fafafa; }
+.rows tr.out-of-range { opacity: 0.35; }
+.rows tr.limit { outline: 1px dashed #9ca3af; }
+.rows tr.drop-above { box-shadow: inset 0 3px 0 #2563eb; }
+.rows tr.drop-below { box-shadow: inset 0 -3px 0 #2563eb; }
+.rows tr.drop-refused { box-shadow: inset 0 0 0 2px #dc2626; }
+
+#tab-raw textarea { width: 100%; height: 70vh; font-family: ui-monospace, monospace;
+  font-size: 12px; white-space: pre; }
+.raw-actions { margin: 6px 0; display: flex; gap: 6px; }
+.diff td { font-family: ui-monospace, monospace; font-size: 12px; padding: 1px 8px; }

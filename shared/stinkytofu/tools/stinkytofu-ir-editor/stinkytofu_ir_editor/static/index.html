@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<!-- Copyright (C) 2026 Advanced Micro Devices, Inc. SPDX-License-Identifier: MIT -->
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>StinkyTofu IR editor</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <h1>StinkyTofu IR editor</h1>
+    <select id="bundle" title="Checkpoint bundle"></select>
+    <button id="open-saved" title="Open the edit saved in the load dir">Open saved edit</button>
+    <span class="sep"></span>
+    <button id="undo" title="Undo (Ctrl+Z)">Undo</button>
+    <button id="redo" title="Redo (Ctrl+Shift+Z)">Redo</button>
+    <span class="sep"></span>
+    <button id="validate" title="Check the order against the dumped one">Validate</button>
+    <button id="save" title="Validate, then write the edit to the load dir">Save</button>
+    <span id="summary"></span>
+  </header>
+
+  <nav>
+    <button class="tab active" data-tab="blocks">Blocks</button>
+    <button class="tab" data-tab="diff">Diff</button>
+    <button class="tab" data-tab="raw">Raw text</button>
+    <span id="legend"></span>
+  </nav>
+
+  <div id="status" role="status"></div>
+  <div id="check" hidden></div>
+
+  <main>
+    <section id="tab-blocks" class="pane"></section>
+    <section id="tab-diff" class="pane" hidden></section>
+    <section id="tab-raw" class="pane" hidden>
+      <p>Any edit here is applied by a full re-analysis. The comparison with the dumped order is
+        dropped then; Save still validates against it.</p>
+      <div class="raw-actions">
+        <button id="raw-apply">Re-analyze</button>
+        <button id="raw-reset">Discard text changes</button>
+      </div>
+      <textarea id="raw" spellcheck="false"></textarea>
+    </section>
+  </main>
+
+  <footer>
+    Click selects; Ctrl+click adds; Shift+click selects a range. Drag the selection inside its
+    block, or move it with Alt+Up / Alt+Down. Shaded rows are out of reach; a refused drop names
+    the edge it would break.
+  </footer>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>
