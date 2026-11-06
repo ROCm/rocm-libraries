@@ -665,6 +665,10 @@ TEST(TestKernelIngestorEngine, EveryHandlerReportsSupportsSavingExactlyWhenItSav
         "hipkernel.flydsl_sdpa_cdna_dualwave.dispatch",
         "hipkernel.flydsl_sdpa_cdna_decode.dispatch",
 #endif
+#ifdef HIPDNN_ENGINE_CONV
+        // The conv engine group's packs, compiled in with HIPKERNELPROVIDER_ENABLE_CONV.
+        "hipkernel.conv_naive.dispatch",
+#endif
     };
     EXPECT_EQ(packDispatchSymbols.size(), ingestorPacks().size())
         << "add the dispatch symbol of each new pack to this list";

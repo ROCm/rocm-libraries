@@ -380,7 +380,7 @@ INSTANTIATE_TEST_SUITE_P(,
                                     + std::to_string(static_cast<int>(std::get<1>(info.param)));
                          });
 
-TEST(TestConvNaiveRefuses, AGraphOfAnotherDirection)
+TEST(TestConvNaiveDirection, RefusesAGraphOfAnotherDirection)
 {
     for(const auto built : ALL_DIRECTIONS)
     {
