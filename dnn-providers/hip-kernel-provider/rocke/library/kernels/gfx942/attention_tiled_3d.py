@@ -43,7 +43,7 @@ from kernels.common._attention_strided_kv import (
 from kernels.common._lse_store import lse_row_has_mass, lse_store
 from kernels.common.attention_split_kv_reduce import (
     split_kv_reduce_spec,
-    tiled_reduce_unsupported_reason,
+    supports_split_kv_reduce,
 )
 
 from rocke.core.ir import (
@@ -1548,17 +1548,16 @@ def build_unified_attention_reduce_tiled(
 def supports_tiled_reduce_spec(
     spec: UnifiedAttentionReduceTiledSpec, *, arch: str = "gfx942"
 ) -> Tuple[bool, str]:
-    """Spec-first predicate for the split-KV reduce kernel (functional limits only).
+    """Spec-first predicate for the split-KV reduce kernel.
 
-    Applies the one copy of the reduce rules in
-    ``kernels.common.attention_split_kv_reduce.tiled_reduce_unsupported_reason``
-    (wave64 arch, fp16/bf16, ``head_size`` a positive multiple of 64, segment-factor
-    cache fits LDS); the gfx950 module adds a head-grouping check on top, this one
-    has none. Typed with this module's reduce spec class, which ``hkp_pack`` matches
+    The name ``hkp_pack``'s predicate alias for the reduce builder expects; the rules
+    are :func:`kernels.common.attention_split_kv_reduce.supports_split_kv_reduce`,
+    shared with every arch's reduce (wave64 arch, fp16/bf16, ``head_size`` a positive
+    multiple of 64, the head-grouping check, and the segment-factor cache fitting
+    LDS). Typed with this module's reduce spec class, which ``hkp_pack`` matches
     predicates by.
     """
-    reason = tiled_reduce_unsupported_reason(spec, arch=arch)
-    return (False, reason) if reason is not None else (True, "supported")
+    return supports_split_kv_reduce(spec, arch=arch)
 
 
 def supports_tiled_3d_spec(
