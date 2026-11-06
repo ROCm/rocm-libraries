@@ -4,9 +4,16 @@ Full documentation for hipCUB is available at [https://rocm.docs.amd.com/project
 
 ## hipCUB-5.1.0 for ROCm 10.3.0
 
+### Changed
+
+* Renamed the CMake option `BUILD_CODE_COVERAGE` to `HIPCUB_ENABLE_COVERAGE`.
+
+### Removed
+
+* Deprecated `BUILD_CODE_COVERAGE`, use `HIPCUB_ENABLE_COVERAGE` instead.
+
 ### Resolved issues
 
-* Fixed summary issue where `BUILD_CODE_COVERAGE` was reading from `CODE_COVERAGE` instead of `BUILD_CODE_COVERAGE`.
 * Fixed a build failure when libhipcxx is not on the include path. `radix_rank_sort_operations.hpp` included the libhipcxx `bit` header unconditionally, which does not exist in the standard library fallback.
 
 ## hipCUB-5.0.0 for ROCm 10.2.0
