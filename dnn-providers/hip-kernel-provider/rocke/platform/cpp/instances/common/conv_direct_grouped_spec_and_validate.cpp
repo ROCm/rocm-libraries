@@ -2561,13 +2561,300 @@ bool rocke_direct_depthwise_dgrad_is_valid_spec(const rocke_direct_depthwise_dgr
     "direct wgrad is a stride-1 algorithm (input-row iteration + shifted S-row " \
     "strip); got stride=%d"
 
-/* The lane->fragment mapping is the wave64 MFMA one (c4 = lane / 16 picks the
- * accumulator row group, lane % 16 the column) and ds_read_tr16_b64 hands back
- * a 64-lane fragment. There is no wave32 variant of either.
- * Python: _WGRAD_WAVE64_WHY. */
-#define ROCKE_WGRAD_WAVE64_WHY                                                  \
-    "direct wgrad needs wave_size 64 (wave64 MFMA fragment + ds_read_tr16_b64 " \
-    "lane mapping); got wave_size=%d"
+/* Two lane->fragment regimes: wave64 MFMA with ds_read_tr16_b64 (gfx950), and
+ * wave32 WMMA 16x16x32 with ds_load_tr16_b128 (gfx1250). The arch picks one.
+ * Python: _WGRAD_WAVE_WHY. */
+#define ROCKE_WGRAD_WAVE_WHY                                                 \
+    "direct wgrad needs wave_size 64 (MFMA + ds_read_tr16_b64) or 32 (WMMA " \
+    "16x16x32 + ds_load_tr16_b128); got wave_size=%d"
+/* The wave32 regime has one atom, WMMA 16x16x32: its K is the 32-wide spatial
+ * tile, so there is no 16-wide (mfma_k=16) variant. Python: _WGRAD_WAVE32_MK_WHY. */
+#define ROCKE_WGRAD_WAVE32_MK_WHY \
+    "direct wgrad on wave32 needs mfma_k=32 (WMMA 16x16x32); got mfma_k=%d"
+/* Register budget for the image-per-block body, in VGPRs. Python:
+ * _WGRAD_IMG_VGPR_BUDGET. */
+#define ROCKE_WGRAD_IMG_VGPR_BUDGET 224
+/* Deepest TDM ring the image-per-block wgrad builds. Python:
+ * _WGRAD_TDM_MAX_STAGES. */
+#define ROCKE_WGRAD_TDM_MAX_STAGES 4
+
+/* The arches whose transpose read and MMA atom the builder implements, each
+ * pinned to its wave size. Python: _WGRAD_ARCH_WAVE = {"gfx950": 64,
+ * "gfx1250": 32}. Returns 0 for an arch outside the table. */
+static int rocke_wgrad_arch_wave(const char* arch)
+{
+    if(arch != NULL && strcmp(arch, "gfx950") == 0)
+        return 64;
+    if(arch != NULL && strcmp(arch, "gfx1250") == 0)
+        return 32;
+    return 0;
+}
+
+/* _wgrad_image_reason(spec): why the image-per-block / register-blocking knobs
+ * cannot be honoured. Writes the reason and returns true when they cannot. */
+static bool rocke_wgrad_image_reason(const rocke_direct_conv_wgrad_spec_t* spec,
+                                     char* reason,
+                                     size_t reason_cap)
+{
+    const rocke_direct_conv_problem_t* p = &spec->problem;
+    bool blocked;
+    long regs;
+    int n_waves;
+
+#define ROCKE_WGRAD_IMG_WHY(...)                                 \
+    do                                                           \
+    {                                                            \
+        rocke_spec_set_reasonf(reason, reason_cap, __VA_ARGS__); \
+        return true;                                             \
+    } while(0)
+
+    if(spec->wave_tiles_k < 1 || spec->wave_tiles_c < 1)
+    {
+        ROCKE_WGRAD_IMG_WHY("wave_tiles_k and wave_tiles_c must be >= 1 (got %d, %d)",
+                            spec->wave_tiles_k,
+                            spec->wave_tiles_c);
+    }
+    if(spec->sub_steps != 1 || spec->vec_x || spec->uniform_wave)
+    {
+        ROCKE_WGRAD_IMG_WHY("sub_steps / vec_x / uniform_wave need small_c=True (got sub_steps=%d, "
+                            "vec_x=%d, uniform_wave=%s)",
+                            spec->sub_steps,
+                            spec->vec_x,
+                            spec->uniform_wave ? "True" : "False");
+    }
+    blocked = spec->wave_tiles_k > 1 || spec->wave_tiles_c > 1;
+    if(!spec->image_per_block)
+    {
+        if(blocked)
+        {
+            ROCKE_WGRAD_IMG_WHY(
+                "wave_tiles_k / wave_tiles_c > 1 need image_per_block=True (got %d, %d)",
+                spec->wave_tiles_k,
+                spec->wave_tiles_c);
+        }
+        if(spec->rows_per_sync != 1)
+        {
+            ROCKE_WGRAD_IMG_WHY("rows_per_sync > 1 needs image_per_block=True (got %d)",
+                                spec->rows_per_sync);
+        }
+        if(spec->row_blocks != 1)
+        {
+            ROCKE_WGRAD_IMG_WHY("row_blocks > 1 needs image_per_block=True (got %d)",
+                                spec->row_blocks);
+        }
+        if(spec->tdm_stages)
+        {
+            ROCKE_WGRAD_IMG_WHY("tdm_stages needs image_per_block=True (got %d)", spec->tdm_stages);
+        }
+        if(spec->ws_replicas != 1)
+        {
+            ROCKE_WGRAD_IMG_WHY("ws_replicas > 1 needs image_per_block=True (got %d)",
+                                spec->ws_replicas);
+        }
+        if(spec->lds_epilogue)
+        {
+            ROCKE_WGRAD_IMG_WHY("lds_epilogue needs image_per_block=True");
+        }
+        return false;
+    }
+    if(spec->ws_replicas < 1)
+    {
+        ROCKE_WGRAD_IMG_WHY("ws_replicas must be >= 1 (got %d)", spec->ws_replicas);
+    }
+    if(spec->lds_epilogue)
+    {
+        const long epi_bytes = 4L * rocke_direct_conv_wgrad_block_k(spec) * p->KH * p->KW
+                               * (rocke_direct_conv_wgrad_block_c(spec) + ROCKE_WGRAD_LDS_EPI_PAD);
+        if(epi_bytes > ROCKE_WGRAD_LDS_EPI_MAX_BYTES)
+        {
+            ROCKE_WGRAD_IMG_WHY("lds_epilogue stages %ld B of dW in LDS (> %d)",
+                                epi_bytes,
+                                ROCKE_WGRAD_LDS_EPI_MAX_BYTES);
+        }
+    }
+    if(spec->row_blocks < 1)
+    {
+        ROCKE_WGRAD_IMG_WHY("row_blocks must be >= 1 (got %d)", spec->row_blocks);
+    }
+    if(spec->tdm_stages
+       && !(2 <= spec->tdm_stages && spec->tdm_stages <= ROCKE_WGRAD_TDM_MAX_STAGES))
+    {
+        ROCKE_WGRAD_IMG_WHY(
+            "tdm_stages must be 0 or 2..%d (got %d)", ROCKE_WGRAD_TDM_MAX_STAGES, spec->tdm_stages);
+    }
+    n_waves = spec->waves_k * spec->waves_c;
+    if(spec->tdm_stages > 2 && n_waves < 2 * spec->rows_per_sync)
+    {
+        ROCKE_WGRAD_IMG_WHY("tdm_stages > 2 needs a wave per TDM transfer of a step "
+                            "(%d), got %d waves",
+                            2 * spec->rows_per_sync,
+                            n_waves);
+    }
+    if(spec->rows_per_sync != 1 && spec->rows_per_sync != p->KH)
+    {
+        ROCKE_WGRAD_IMG_WHY(
+            "rows_per_sync must be 1 or KH=%d (got %d)", p->KH, spec->rows_per_sync);
+    }
+    if(spec->wave_size != 32)
+    {
+        ROCKE_WGRAD_IMG_WHY(
+            "image_per_block is implemented for wave32 (gfx1250) only (got wave_size=%d)",
+            spec->wave_size);
+    }
+    if(spec->waves_q != 1)
+    {
+        ROCKE_WGRAD_IMG_WHY(
+            "image_per_block walks every wo tile itself; waves_q must be 1 (got %d)",
+            spec->waves_q);
+    }
+    regs = 8L
+           * ((long)p->KH * p->KW * spec->wave_tiles_k * spec->wave_tiles_c
+              + (long)p->KH * spec->wave_tiles_k
+              + (long)spec->rows_per_sync * p->KW * spec->wave_tiles_c);
+    if(regs > ROCKE_WGRAD_IMG_VGPR_BUDGET)
+    {
+        ROCKE_WGRAD_IMG_WHY("image_per_block body needs ~%ld VGPRs for accumulators and "
+                            "fragments (> %d)",
+                            regs,
+                            ROCKE_WGRAD_IMG_VGPR_BUDGET);
+    }
+    return false;
+
+#undef ROCKE_WGRAD_IMG_WHY
+}
+
+/* Small-C register budget (f32 accumulators, 8 VGPRs per 16x16 tile) and
+ * staging-depth cap. Python: _WGRAD_SMALL_C_ACC_BUDGET /
+ * _WGRAD_SMALL_C_MAX_SUB_STEPS. */
+#define ROCKE_WGRAD_SMALL_C_ACC_BUDGET 128
+#define ROCKE_WGRAD_SMALL_C_MAX_SUB_STEPS 8
+/* Small-C uniform_wave spill limit. Python: _WGRAD_SMALL_C_UNIFORM_MAX_WAVES. */
+#define ROCKE_WGRAD_SMALL_C_UNIFORM_MAX_WAVES 8
+
+/* _wgrad_small_c_reason(spec): why a small_c spec cannot be built. Writes the
+ * reason and returns true when it cannot. */
+static bool rocke_wgrad_small_c_reason(const rocke_direct_conv_wgrad_spec_t* spec,
+                                       char* reason,
+                                       size_t reason_cap)
+{
+    const rocke_direct_conv_problem_t* p = &spec->problem;
+    int acc, waves, tiles;
+
+#define ROCKE_WGRAD_SC_WHY(...)                                  \
+    do                                                           \
+    {                                                            \
+        rocke_spec_set_reasonf(reason, reason_cap, __VA_ARGS__); \
+        return true;                                             \
+    } while(0)
+
+    if(spec->image_per_block)
+    {
+        ROCKE_WGRAD_SC_WHY("small_c and image_per_block are separate variants");
+    }
+    if(spec->wave_size != 32)
+    {
+        ROCKE_WGRAD_SC_WHY("small_c is implemented for wave32 (gfx1250) only (got wave_size=%d)",
+                           spec->wave_size);
+    }
+    if(spec->mfma_k != 32)
+    {
+        ROCKE_WGRAD_SC_WHY(ROCKE_WGRAD_WAVE32_MK_WHY, spec->mfma_k);
+    }
+    if(p->groups != 1)
+    {
+        ROCKE_WGRAD_SC_WHY("small_c needs groups=1 (got %d)", p->groups);
+    }
+    if(p->kpg % 8)
+    {
+        ROCKE_WGRAD_SC_WHY(
+            "small_c loads dY as 8-channel vectors; kpg must be a multiple of 8 (got %d)", p->kpg);
+    }
+    if(p->KH < 1 || p->KW < 1)
+    {
+        ROCKE_WGRAD_SC_WHY("KH and KW must be >= 1 (got %d, %d)", p->KH, p->KW);
+    }
+    if(spec->wave_tile_k != 16 || spec->wave_tile_c != 16)
+    {
+        ROCKE_WGRAD_SC_WHY("wave_tile_k and wave_tile_c must be 16 (got %d, %d)",
+                           spec->wave_tile_k,
+                           spec->wave_tile_c);
+    }
+    if(spec->waves_k < 1 || spec->waves_c < 1)
+    {
+        ROCKE_WGRAD_SC_WHY(
+            "waves_k and waves_c must be >= 1 (got %d, %d)", spec->waves_k, spec->waves_c);
+    }
+    if(spec->waves_k * spec->waves_c > 16)
+    {
+        ROCKE_WGRAD_SC_WHY("waves_k * waves_c must be <= 16 (got %d * %d = %d)",
+                           spec->waves_k,
+                           spec->waves_c,
+                           spec->waves_k * spec->waves_c);
+    }
+    if(spec->waves_q != 1)
+    {
+        ROCKE_WGRAD_SC_WHY("small_c walks its pixel range itself; waves_q must be 1 (got %d)",
+                           spec->waves_q);
+    }
+    if(spec->wave_tiles_k < 1 || spec->wave_tiles_c < 1)
+    {
+        ROCKE_WGRAD_SC_WHY("wave_tiles_k and wave_tiles_c must be >= 1 (got %d, %d)",
+                           spec->wave_tiles_k,
+                           spec->wave_tiles_c);
+    }
+    if(spec->rows_per_sync != 1 || spec->tdm_stages || spec->lds_epilogue)
+    {
+        ROCKE_WGRAD_SC_WHY("rows_per_sync / tdm_stages / lds_epilogue are image_per_block knobs "
+                           "(got rows_per_sync=%d, tdm_stages=%d, lds_epilogue=%s)",
+                           spec->rows_per_sync,
+                           spec->tdm_stages,
+                           spec->lds_epilogue ? "True" : "False");
+    }
+    if(spec->runtime_channels)
+    {
+        ROCKE_WGRAD_SC_WHY("small_c bakes its channel counts; runtime_channels is not supported");
+    }
+    if(spec->row_blocks < 1)
+    {
+        ROCKE_WGRAD_SC_WHY("row_blocks must be >= 1 (got %d)", spec->row_blocks);
+    }
+    if(spec->ws_replicas < 1)
+    {
+        ROCKE_WGRAD_SC_WHY("ws_replicas must be >= 1 (got %d)", spec->ws_replicas);
+    }
+    if(spec->sub_steps < 1 || spec->sub_steps > ROCKE_WGRAD_SMALL_C_MAX_SUB_STEPS)
+    {
+        ROCKE_WGRAD_SC_WHY("sub_steps must be in 1..%d (got %d)",
+                           ROCKE_WGRAD_SMALL_C_MAX_SUB_STEPS,
+                           spec->sub_steps);
+    }
+    if(spec->vec_x != 0 && spec->vec_x != 4 && spec->vec_x != 8)
+    {
+        ROCKE_WGRAD_SC_WHY("vec_x must be 0, 4 or 8 (got %d)", spec->vec_x);
+    }
+    acc = 8 * spec->wave_tiles_k * spec->wave_tiles_c;
+    if(acc > ROCKE_WGRAD_SMALL_C_ACC_BUDGET)
+    {
+        ROCKE_WGRAD_SC_WHY(
+            "small_c accumulators need %d VGPRs (> %d)", acc, ROCKE_WGRAD_SMALL_C_ACC_BUDGET);
+    }
+    waves = spec->waves_k * spec->waves_c;
+    tiles = spec->wave_tiles_k * spec->wave_tiles_c;
+    if(spec->uniform_wave && waves > ROCKE_WGRAD_SMALL_C_UNIFORM_MAX_WAVES && spec->vec_x == 4
+       && spec->sub_steps >= 4 && tiles >= 4)
+    {
+        ROCKE_WGRAD_SC_WHY("uniform_wave with more than %d waves, vec_x=4, sub_steps >= 4 and >= 4 "
+                           "wave tiles spills SGPRs into VGPR lanes and returns an all-zero dW "
+                           "(got %d waves, sub_steps=%d, %d wave tiles)",
+                           ROCKE_WGRAD_SMALL_C_UNIFORM_MAX_WAVES,
+                           waves,
+                           spec->sub_steps,
+                           tiles);
+    }
+    return false;
+
+#undef ROCKE_WGRAD_SC_WHY
+}
 
 rocke_direct_conv_wgrad_spec_t rocke_direct_conv_wgrad_spec_default(void)
 {
@@ -2583,17 +2870,42 @@ rocke_direct_conv_wgrad_spec_t rocke_direct_conv_wgrad_spec_default(void)
     spec.wave_size = 64;
     spec.ho_per_block = 4;
     spec.mfma_k = 32;
+    spec.image_per_block = 0;
+    spec.wave_tiles_k = 1;
+    spec.wave_tiles_c = 1;
+    spec.rows_per_sync = 1;
+    spec.row_blocks = 1;
+    spec.tdm_stages = 0;
+    spec.ws_replicas = 1;
+    spec.lds_epilogue = 0;
+    spec.small_c = 0;
+    spec.sub_steps = 1;
+    spec.vec_x = 0;
+    spec.uniform_wave = 0;
     return spec;
+}
+
+int rocke_direct_conv_wgrad_small_c_run(const rocke_direct_conv_wgrad_spec_t* spec)
+{
+    int run = spec->problem.KW * spec->problem.cpg;
+    if(spec->vec_x)
+        return (run + spec->vec_x - 1) / spec->vec_x * spec->vec_x;
+    return run;
+}
+
+int rocke_direct_conv_wgrad_small_c_n(const rocke_direct_conv_wgrad_spec_t* spec)
+{
+    return spec->problem.KH * rocke_direct_conv_wgrad_small_c_run(spec);
 }
 
 int rocke_direct_conv_wgrad_block_k(const rocke_direct_conv_wgrad_spec_t* spec)
 {
-    return spec->waves_k * spec->wave_tile_k;
+    return spec->waves_k * spec->wave_tile_k * spec->wave_tiles_k;
 }
 
 int rocke_direct_conv_wgrad_block_c(const rocke_direct_conv_wgrad_spec_t* spec)
 {
-    return spec->waves_c * spec->wave_tile_c;
+    return spec->waves_c * spec->wave_tile_c * spec->wave_tiles_c;
 }
 
 int rocke_direct_conv_wgrad_threads_per_block(const rocke_direct_conv_wgrad_spec_t* spec)
@@ -2610,7 +2922,11 @@ int rocke_direct_conv_wgrad_n_ho_blocks(const rocke_direct_conv_wgrad_spec_t* sp
 {
     /* INPUT height: the builder decodes `by` as an input-row block
      * (hi_block_start = by * HPB) and the row loop walks hi. Mirrors
-     * DirectConvWgradSpec.n_ho_blocks. */
+     * DirectConvWgradSpec.n_ho_blocks. One block per image under
+     * image_per_block (row_blocks of them): the workgroup walks every row
+     * of its block itself. */
+    if(spec->image_per_block || spec->small_c)
+        return spec->row_blocks;
     return (spec->problem.H + spec->ho_per_block - 1) / spec->ho_per_block;
 }
 
@@ -2623,7 +2939,10 @@ int rocke_direct_conv_wgrad_n_wo_tiles(const rocke_direct_conv_wgrad_spec_t* spe
 
 int rocke_direct_conv_wgrad_n_q_blocks(const rocke_direct_conv_wgrad_spec_t* spec)
 {
-    int n_wo_tiles = rocke_direct_conv_wgrad_n_wo_tiles(spec);
+    int n_wo_tiles;
+    if(spec->image_per_block || spec->small_c)
+        return 1;
+    n_wo_tiles = rocke_direct_conv_wgrad_n_wo_tiles(spec);
     return (n_wo_tiles + spec->waves_q - 1) / spec->waves_q;
 }
 
@@ -2637,9 +2956,18 @@ rocke_status_t rocke_direct_conv_wgrad_kernel_name(const rocke_direct_conv_wgrad
     char bc_buf[24];
     char hpb_buf[24];
     char mk_buf[24];
-    const char* flag_names[3];
-    int flag_on[3];
+    const char* flag_names[16];
+    int flag_on[16];
+    char tk_buf[24];
+    char tc_buf[24];
+    char rps_buf[24];
+    char rb_buf[24];
+    char tdm_buf[24];
+    char wsr_buf[24];
+    char ss_buf[24];
+    char vx_buf[24];
     const char* dtype;
+    int nf = 0;
 
     if(spec == NULL || out == NULL || out_cap == 0)
     {
@@ -2653,25 +2981,60 @@ rocke_status_t rocke_direct_conv_wgrad_kernel_name(const rocke_direct_conv_wgrad
     snprintf(bc_buf, sizeof(bc_buf), "bc%d", rocke_direct_conv_wgrad_block_c(spec));
     snprintf(hpb_buf, sizeof(hpb_buf), "hpb%d", spec->ho_per_block);
     snprintf(mk_buf, sizeof(mk_buf), "mk%d", spec->mfma_k);
+    snprintf(tk_buf, sizeof(tk_buf), "tk%d", spec->wave_tiles_k);
+    snprintf(tc_buf, sizeof(tc_buf), "tc%d", spec->wave_tiles_c);
+    snprintf(rps_buf, sizeof(rps_buf), "rps%d", spec->rows_per_sync);
+    snprintf(rb_buf, sizeof(rb_buf), "rb%d", spec->row_blocks);
+    snprintf(tdm_buf, sizeof(tdm_buf), "tdm%d", spec->tdm_stages);
+    snprintf(wsr_buf, sizeof(wsr_buf), "wsr%d", spec->ws_replicas);
+    snprintf(ss_buf, sizeof(ss_buf), "ss%d", spec->sub_steps);
+    snprintf(vx_buf, sizeof(vx_buf), "vx%d", spec->vec_x);
     parts[0] = prob_short;
     parts[1] = bk_buf;
     parts[2] = bc_buf;
     parts[3] = hpb_buf;
     parts[4] = mk_buf;
-    /* Python: flags={"wq": waves_q} if waves_q > 1 else {}, then flags["bf16"]
-     * when p.dtype == "bf16". kernel_name_join appends the NAME (not the value)
-     * for a truthy entry, and waves_q > 1 is exactly when the entry exists and
-     * is truthy -- so a false entry and an absent one name the same kernel.
-     * Order matches the Python dict's insertion order: wq, bf16, then rtc
-     * (runtime_channels). */
+    /* Python: flags={"wq": waves_q} if waves_q > 1 else {}, then w32, img,
+     * tk<n>, tc<n>, rps<n>, rb<n>, tdm<n>, wsr<n>, ldsepi, sc, ss<n>, vx<n>, uw, bf16 and
+     * rtc, each only when set.
+     * kernel_name_join appends the NAME (not the value) for a truthy entry, so
+     * a false entry and an absent one name the same kernel. Order matches the
+     * Python dict's insertion order. */
     dtype = spec->problem.dtype ? spec->problem.dtype : "fp16";
-    flag_names[0] = "wq";
-    flag_on[0] = (spec->waves_q > 1) ? 1 : 0;
-    flag_names[1] = "bf16";
-    flag_on[1] = (strcmp(dtype, "bf16") == 0) ? 1 : 0;
-    flag_names[2] = "rtc";
-    flag_on[2] = spec->runtime_channels ? 1 : 0;
-    return rocke_kernel_name_join(spec->name, parts, 5, flag_names, flag_on, 3, out, out_cap, NULL);
+    flag_names[nf] = "wq";
+    flag_on[nf++] = (spec->waves_q > 1) ? 1 : 0;
+    flag_names[nf] = "w32";
+    flag_on[nf++] = (spec->wave_size == 32) ? 1 : 0;
+    flag_names[nf] = "img";
+    flag_on[nf++] = spec->image_per_block ? 1 : 0;
+    flag_names[nf] = tk_buf;
+    flag_on[nf++] = (spec->wave_tiles_k > 1) ? 1 : 0;
+    flag_names[nf] = tc_buf;
+    flag_on[nf++] = (spec->wave_tiles_c > 1) ? 1 : 0;
+    flag_names[nf] = rps_buf;
+    flag_on[nf++] = (spec->rows_per_sync > 1) ? 1 : 0;
+    flag_names[nf] = rb_buf;
+    flag_on[nf++] = (spec->row_blocks > 1) ? 1 : 0;
+    flag_names[nf] = tdm_buf;
+    flag_on[nf++] = spec->tdm_stages ? 1 : 0;
+    flag_names[nf] = wsr_buf;
+    flag_on[nf++] = (spec->ws_replicas > 1) ? 1 : 0;
+    flag_names[nf] = "ldsepi";
+    flag_on[nf++] = spec->lds_epilogue ? 1 : 0;
+    flag_names[nf] = "sc";
+    flag_on[nf++] = spec->small_c ? 1 : 0;
+    flag_names[nf] = ss_buf;
+    flag_on[nf++] = (spec->sub_steps > 1) ? 1 : 0;
+    flag_names[nf] = vx_buf;
+    flag_on[nf++] = spec->vec_x ? 1 : 0;
+    flag_names[nf] = "uw";
+    flag_on[nf++] = spec->uniform_wave ? 1 : 0;
+    flag_names[nf] = "bf16";
+    flag_on[nf++] = (strcmp(dtype, "bf16") == 0) ? 1 : 0;
+    flag_names[nf] = "rtc";
+    flag_on[nf++] = spec->runtime_channels ? 1 : 0;
+    return rocke_kernel_name_join(
+        spec->name, parts, 5, flag_names, flag_on, nf, out, out_cap, NULL);
 }
 
 rocke_status_t rocke_direct_conv_wgrad_validate(const rocke_direct_conv_wgrad_spec_t* spec,
@@ -2699,6 +3062,15 @@ rocke_status_t rocke_direct_conv_wgrad_validate(const rocke_direct_conv_wgrad_sp
         {
             ROCKE_DCONV_WGRAD_RAISE("DirectConvWgradSpec: unsupported dtype '%s'", dt);
         }
+    }
+    if(spec->small_c)
+    {
+        if(rocke_wgrad_small_c_reason(spec, reason, reason_cap))
+        {
+            return ROCKE_ERR_VALUE;
+        }
+        rocke_spec_set_reason(reason, reason_cap, "ok");
+        return ROCKE_OK;
     }
     if(p->kpg < spec->wave_tile_k)
     {
@@ -2742,9 +3114,13 @@ rocke_status_t rocke_direct_conv_wgrad_validate(const rocke_direct_conv_wgrad_sp
     {
         ROCKE_DCONV_WGRAD_RAISE("waves_q must be >= 1");
     }
-    if(spec->wave_size != 64)
+    if(spec->wave_size != 64 && spec->wave_size != 32)
     {
-        ROCKE_DCONV_WGRAD_RAISE(ROCKE_WGRAD_WAVE64_WHY, spec->wave_size);
+        ROCKE_DCONV_WGRAD_RAISE(ROCKE_WGRAD_WAVE_WHY, spec->wave_size);
+    }
+    if(spec->wave_size == 32 && spec->mfma_k != 32)
+    {
+        ROCKE_DCONV_WGRAD_RAISE(ROCKE_WGRAD_WAVE32_MK_WHY, spec->mfma_k);
     }
     if(spec->ho_per_block <= 0)
     {
@@ -2757,6 +3133,10 @@ rocke_status_t rocke_direct_conv_wgrad_validate(const rocke_direct_conv_wgrad_sp
     if(p->stride != 1)
     {
         ROCKE_DCONV_WGRAD_RAISE(ROCKE_WGRAD_STRIDE_WHY, p->stride);
+    }
+    if(rocke_wgrad_image_reason(spec, reason, reason_cap))
+    {
+        return ROCKE_ERR_VALUE;
     }
     rocke_spec_set_reason(reason, reason_cap, "ok");
     return ROCKE_OK;
@@ -2807,6 +3187,38 @@ bool rocke_direct_conv_wgrad_is_valid_spec(const rocke_direct_conv_wgrad_spec_t*
                 reason, reason_cap, "unsupported dtype '%s'; expected 'fp16' or 'bf16'", dt);
         }
     }
+    if(spec->small_c)
+    {
+        const char* ab = (p->dtype && strcmp(p->dtype, "bf16") == 0) ? "bf16" : "f16";
+        if(rocke_wgrad_small_c_reason(spec, reason, reason_cap))
+        {
+            return false;
+        }
+        if(rocke_wgrad_arch_wave(arch) != 32 || spec->wave_size != target->wave_size)
+        {
+            ROCKE_SPEC_FAIL(reason,
+                            reason_cap,
+                            "small_c direct wgrad is implemented for wave32 gfx1250 (got %s)",
+                            arch);
+        }
+        if(rocke_direct_conv_wgrad_threads_per_block(spec)
+           > rocke_archtarget_max_threads_per_block(target))
+        {
+            ROCKE_SPEC_FAIL(reason,
+                            reason_cap,
+                            "threads_per_block %d > %d (hardware cap) on %s",
+                            rocke_direct_conv_wgrad_threads_per_block(spec),
+                            rocke_archtarget_max_threads_per_block(target),
+                            arch);
+        }
+        if(!rocke_mma_catalog_has_shape(
+               rocke_archtarget_mma(target), "wmma", ab, ab, "fp32", 16, 16, 32))
+        {
+            ROCKE_SPEC_FAIL(reason, reason_cap, "missing wmma 16x16x32 %s on %s", ab, arch);
+        }
+        rocke_spec_set_reason(reason, reason_cap, "ok");
+        return true;
+    }
     if(p->kpg < spec->wave_tile_k)
     {
         ROCKE_SPEC_FAIL(
@@ -2856,9 +3268,13 @@ bool rocke_direct_conv_wgrad_is_valid_spec(const rocke_direct_conv_wgrad_spec_t*
                         arch,
                         target->wave_size);
     }
-    if(spec->wave_size != 64)
+    if(spec->wave_size != 64 && spec->wave_size != 32)
     {
-        ROCKE_SPEC_FAIL(reason, reason_cap, ROCKE_WGRAD_WAVE64_WHY, spec->wave_size);
+        ROCKE_SPEC_FAIL(reason, reason_cap, ROCKE_WGRAD_WAVE_WHY, spec->wave_size);
+    }
+    if(spec->wave_size == 32 && spec->mfma_k != 32)
+    {
+        ROCKE_SPEC_FAIL(reason, reason_cap, ROCKE_WGRAD_WAVE32_MK_WHY, spec->mfma_k);
     }
     if(rocke_direct_conv_wgrad_threads_per_block(spec)
        > rocke_archtarget_max_threads_per_block(target))
@@ -2882,10 +3298,33 @@ bool rocke_direct_conv_wgrad_is_valid_spec(const rocke_direct_conv_wgrad_spec_t*
     {
         ROCKE_SPEC_FAIL(reason, reason_cap, ROCKE_WGRAD_STRIDE_WHY, p->stride);
     }
+    if(rocke_wgrad_image_reason(spec, reason, reason_cap))
+    {
+        return false;
+    }
     mma = rocke_archtarget_mma(target);
     {
         /* ab_dtype: "f16" or "bf16" based on problem.dtype */
         const char* ab = (p->dtype && strcmp(p->dtype, "bf16") == 0) ? "bf16" : "f16";
+        if(spec->wave_size == 32)
+        {
+            /* gfx1250: WMMA 16x16x32 and the ds_load_tr16_b128 transpose read,
+             * which the catalog does not advertise through has_ds_read_tr (that
+             * flag is the gfx950 instruction), so the arch table gates it. */
+            if(rocke_wgrad_arch_wave(arch) != 32)
+            {
+                ROCKE_SPEC_FAIL(reason,
+                                reason_cap,
+                                "wave32 direct wgrad is implemented for ['gfx1250'] (got %s)",
+                                arch);
+            }
+            if(!rocke_mma_catalog_has_shape(mma, "wmma", ab, ab, "fp32", 16, 16, 32))
+            {
+                ROCKE_SPEC_FAIL(reason, reason_cap, "missing wmma 16x16x32 %s on %s", ab, arch);
+            }
+            rocke_spec_set_reason(reason, reason_cap, "ok");
+            return true;
+        }
         if(!rocke_mma_catalog_has_shape(mma, "mma", ab, ab, "fp32", 16, 16, 16))
         {
             ROCKE_SPEC_FAIL(reason, reason_cap, "missing mfma_f32_16x16x16_%s on %s", ab, arch);
@@ -3832,5 +4271,268 @@ bool rocke_direct_conv_is_valid_spec(const rocke_direct_conv_spec_t* spec,
     }
     if(reason != NULL && reason_cap > 0)
         snprintf(reason, reason_cap, "ok");
+    return true;
+}
+
+/* ===================================================================== *
+ *  DirectDepthwiseWgradSpec
+ * ===================================================================== */
+
+/* Python: _DW_WGRAD_ACC_BUDGET. */
+#define ROCKE_DW_WGRAD_ACC_BUDGET 128
+
+rocke_direct_depthwise_wgrad_spec_t rocke_direct_depthwise_wgrad_spec_default(void)
+{
+    rocke_direct_depthwise_wgrad_spec_t spec;
+    memset(&spec, 0, sizeof(spec));
+    spec.problem = rocke_direct_conv_problem_default();
+    spec.name = "direct_depthwise_wgrad";
+    spec.wave_size = 64;
+    spec.chan_per_lane = 2;
+    spec.waves = 8;
+    spec.rows_per_wave = 4;
+    spec.wo_chunk = 8;
+    spec.r_split = 1;
+    spec.ws_replicas = 16;
+    spec.prefetch = 1;
+    spec.carry = 1;
+    return spec;
+}
+
+int rocke_direct_depthwise_wgrad_threads_per_block(const rocke_direct_depthwise_wgrad_spec_t* spec)
+{
+    return spec->waves * spec->wave_size;
+}
+
+int rocke_direct_depthwise_wgrad_block_ch(const rocke_direct_depthwise_wgrad_spec_t* spec)
+{
+    return spec->wave_size * spec->chan_per_lane;
+}
+
+int rocke_direct_depthwise_wgrad_row_waves(const rocke_direct_depthwise_wgrad_spec_t* spec)
+{
+    return spec->waves / spec->r_split;
+}
+
+int rocke_direct_depthwise_wgrad_rows_per_group(const rocke_direct_depthwise_wgrad_spec_t* spec)
+{
+    return (spec->problem.KH + spec->r_split - 1) / spec->r_split;
+}
+
+long rocke_direct_depthwise_wgrad_lds_bytes(const rocke_direct_depthwise_wgrad_spec_t* spec)
+{
+    return 4L * spec->waves * spec->problem.KH * spec->problem.KW
+           * rocke_direct_depthwise_wgrad_block_ch(spec);
+}
+
+rocke_status_t rocke_direct_depthwise_wgrad_kernel_name(
+    const rocke_direct_depthwise_wgrad_spec_t* spec, char* out, size_t out_cap)
+{
+    char prob_short[128];
+    const char* parts[7];
+    char f_buf[48];
+    char cpl_buf[24];
+    char wv_buf[24];
+    char rpw_buf[24];
+    char woc_buf[24];
+    char w_buf[24];
+    char rs_buf[24];
+    char wsr_buf[24];
+    const char* flag_names[6];
+    int flag_on[6];
+    const char* dt;
+    const rocke_direct_conv_problem_t* p;
+
+    if(spec == NULL || out == NULL || out_cap == 0)
+    {
+        return ROCKE_ERR_VALUE;
+    }
+    p = &spec->problem;
+    if(rocke_direct_conv_problem_short(p, prob_short, sizeof(prob_short)) != ROCKE_OK)
+    {
+        return ROCKE_ERR_VALUE;
+    }
+    /* kernel_name_join(name, p.short(), f"f{KH}x{KW}s{stride}p{PAD}",
+     *     f"cpl{..}", f"wv{waves}", f"rpw{..}", f"woc{..}", flags={w<n>: True,
+     *     rs<n>: r_split > 1, wsr<n>: ws_replicas > 1, pf, cy, bf16}) */
+    snprintf(f_buf, sizeof(f_buf), "f%dx%ds%dp%d", p->KH, p->KW, p->stride, p->PAD);
+    snprintf(cpl_buf, sizeof(cpl_buf), "cpl%d", spec->chan_per_lane);
+    snprintf(wv_buf, sizeof(wv_buf), "wv%d", spec->waves);
+    snprintf(rpw_buf, sizeof(rpw_buf), "rpw%d", spec->rows_per_wave);
+    snprintf(woc_buf, sizeof(woc_buf), "woc%d", spec->wo_chunk);
+    snprintf(w_buf, sizeof(w_buf), "w%d", spec->wave_size);
+    snprintf(rs_buf, sizeof(rs_buf), "rs%d", spec->r_split);
+    snprintf(wsr_buf, sizeof(wsr_buf), "wsr%d", spec->ws_replicas);
+    parts[0] = prob_short;
+    parts[1] = f_buf;
+    parts[2] = cpl_buf;
+    parts[3] = wv_buf;
+    parts[4] = rpw_buf;
+    parts[5] = woc_buf;
+    dt = p->dtype ? p->dtype : "fp16";
+    flag_names[0] = w_buf;
+    flag_on[0] = 1;
+    flag_names[1] = rs_buf;
+    flag_on[1] = spec->r_split > 1 ? 1 : 0;
+    flag_names[2] = wsr_buf;
+    flag_on[2] = spec->ws_replicas > 1 ? 1 : 0;
+    flag_names[3] = "pf";
+    flag_on[3] = spec->prefetch ? 1 : 0;
+    flag_names[4] = "cy";
+    flag_on[4] = spec->carry ? 1 : 0;
+    flag_names[5] = "bf16";
+    flag_on[5] = (strcmp(dt, "bf16") == 0) ? 1 : 0;
+    return rocke_kernel_name_join(spec->name, parts, 6, flag_names, flag_on, 6, out, out_cap, NULL);
+}
+
+/* _depthwise_wgrad_reason(spec): writes the reason and returns true when the
+ * spec cannot be built. */
+static bool rocke_depthwise_wgrad_reason(const rocke_direct_depthwise_wgrad_spec_t* spec,
+                                         char* reason,
+                                         size_t reason_cap)
+{
+    const rocke_direct_conv_problem_t* p = &spec->problem;
+    const char* dt = p->dtype ? p->dtype : "fp16";
+    int acc;
+
+#define ROCKE_DW_WGRAD_WHY(...)                                  \
+    do                                                           \
+    {                                                            \
+        rocke_spec_set_reasonf(reason, reason_cap, __VA_ARGS__); \
+        return true;                                             \
+    } while(0)
+
+    if(strcmp(dt, "fp16") != 0 && strcmp(dt, "bf16") != 0)
+    {
+        ROCKE_DW_WGRAD_WHY("unsupported dtype '%s'; expected fp16 or bf16", dt);
+    }
+    if(p->cpg != 1 || p->kpg != 1)
+    {
+        ROCKE_DW_WGRAD_WHY("requires cpg=kpg=1 (got %d, %d)", p->cpg, p->kpg);
+    }
+    if(p->KH < 1 || p->KW < 1)
+    {
+        ROCKE_DW_WGRAD_WHY("KH and KW must be >= 1 (got %d, %d)", p->KH, p->KW);
+    }
+    if(spec->wave_size != 32 && spec->wave_size != 64)
+    {
+        ROCKE_DW_WGRAD_WHY("wave_size must be 32 or 64 (got %d)", spec->wave_size);
+    }
+    if(spec->chan_per_lane != 2 && spec->chan_per_lane != 4 && spec->chan_per_lane != 8)
+    {
+        ROCKE_DW_WGRAD_WHY("chan_per_lane must be 2, 4 or 8 (got %d)", spec->chan_per_lane);
+    }
+    if(p->groups % spec->chan_per_lane)
+    {
+        ROCKE_DW_WGRAD_WHY("channels %d must be a multiple of chan_per_lane %d (one vector load "
+                           "per lane)",
+                           p->groups,
+                           spec->chan_per_lane);
+    }
+    if(spec->waves < 1 || spec->rows_per_wave < 1 || spec->wo_chunk < 1)
+    {
+        ROCKE_DW_WGRAD_WHY("waves, rows_per_wave and wo_chunk must be >= 1 (got %d, %d, %d)",
+                           spec->waves,
+                           spec->rows_per_wave,
+                           spec->wo_chunk);
+    }
+    if(spec->r_split < 1 || spec->r_split > p->KH || spec->waves % spec->r_split)
+    {
+        ROCKE_DW_WGRAD_WHY("r_split must be in 1..KH=%d and divide waves=%d (got %d)",
+                           p->KH,
+                           spec->waves,
+                           spec->r_split);
+    }
+    if(spec->ws_replicas < 1)
+    {
+        ROCKE_DW_WGRAD_WHY("ws_replicas must be >= 1 (got %d)", spec->ws_replicas);
+    }
+    acc = rocke_direct_depthwise_wgrad_rows_per_group(spec) * p->KW * spec->chan_per_lane;
+    if(acc > ROCKE_DW_WGRAD_ACC_BUDGET)
+    {
+        ROCKE_DW_WGRAD_WHY("accumulators need %d VGPRs (> %d)", acc, ROCKE_DW_WGRAD_ACC_BUDGET);
+    }
+    return false;
+
+#undef ROCKE_DW_WGRAD_WHY
+}
+
+rocke_status_t rocke_direct_depthwise_wgrad_validate(
+    const rocke_direct_depthwise_wgrad_spec_t* spec, char* reason, size_t reason_cap)
+{
+    char why[256];
+    if(spec == NULL)
+    {
+        return ROCKE_ERR_VALUE;
+    }
+    if(rocke_depthwise_wgrad_reason(spec, why, sizeof why))
+    {
+        rocke_spec_set_reasonf(reason, reason_cap, "DirectDepthwiseWgradSpec: %s", why);
+        return ROCKE_ERR_VALUE;
+    }
+    return ROCKE_OK;
+}
+
+bool rocke_direct_depthwise_wgrad_is_valid_spec(const rocke_direct_depthwise_wgrad_spec_t* spec,
+                                                const char* arch,
+                                                char* reason,
+                                                size_t reason_cap)
+{
+    const rocke_archtarget_t* target;
+
+    if(spec == NULL)
+    {
+        ROCKE_SPEC_FAIL(reason, reason_cap, "spec is NULL");
+    }
+    if(arch == NULL)
+    {
+        arch = "gfx950";
+    }
+    target = rocke_archtarget_from_gfx(arch);
+    if(target == NULL)
+    {
+        rocke_set_unknown_arch_reason(reason, reason_cap, arch);
+        return false;
+    }
+    {
+        char dil_why[256];
+        if(rocke_direct_dilation_reason(&spec->problem, dil_why, sizeof dil_why))
+        {
+            ROCKE_SPEC_FAIL(reason, reason_cap, "%s", dil_why);
+        }
+    }
+    if(rocke_depthwise_wgrad_reason(spec, reason, reason_cap))
+    {
+        return false;
+    }
+    if(spec->wave_size != target->wave_size)
+    {
+        ROCKE_SPEC_FAIL(reason,
+                        reason_cap,
+                        "wave_size %d does not match the %s wave size %d",
+                        spec->wave_size,
+                        arch,
+                        target->wave_size);
+    }
+    if(rocke_direct_depthwise_wgrad_threads_per_block(spec)
+       > rocke_archtarget_max_threads_per_block(target))
+    {
+        ROCKE_SPEC_FAIL(reason,
+                        reason_cap,
+                        "threads_per_block %d > %d (hardware cap) on %s",
+                        rocke_direct_depthwise_wgrad_threads_per_block(spec),
+                        rocke_archtarget_max_threads_per_block(target),
+                        arch);
+    }
+    if(rocke_direct_depthwise_wgrad_lds_bytes(spec) > target->lds_capacity_bytes)
+    {
+        ROCKE_SPEC_FAIL(reason,
+                        reason_cap,
+                        "epilogue LDS %ld B > %d on %s",
+                        rocke_direct_depthwise_wgrad_lds_bytes(spec),
+                        target->lds_capacity_bytes,
+                        arch);
+    }
+    rocke_spec_set_reason(reason, reason_cap, "ok");
     return true;
 }

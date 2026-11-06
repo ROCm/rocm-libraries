@@ -101,8 +101,10 @@ extern "C" {
  *    changes its size.
  * 10: rocke_param_opts_t gained nocapture, nonnull and dereferenceable (each
  *     with a *_set flag) and the integer facts (rocke_int_facts_t) at its
- *     end, which changes its size. */
-#define ROCKE_ABI_VERSION 10
+ *     end, which changes its size.
+ * 11: rocke_direct_conv_wgrad_spec_t gained image_per_block through
+ *     uniform_wave at its end, which changes its size. */
+#define ROCKE_ABI_VERSION 11
 
 /* Wire ABI: the CBOR recipe/bundle/guard vocabulary this engine understands.
  * 2: list-tagged ("l") kernel attrs such as cluster_dims; level-1 engines drop them.

@@ -887,6 +887,8 @@ rocke_kernel_def_t* rocke_dconv32c_stream_h_loop(rocke_dconv_32c_ctx_t* ctx);
  * (WO_BLOCK >= 16, KW <= 8) combination, and STRIP_PASSES_PER_WAVE <=
  * STRIP_PASSES; 8 is generous headroom. */
 #define ROCKE_DCONV_WGRAD_MAX_STRIP_PASSES 8
+/* dY load passes per tile: 1 on wave64, 2 on wave32 (WO_BLOCK / 16). */
+#define ROCKE_DCONV_WGRAD_MAX_DY_PASSES 4
 
 typedef struct rocke_dconv_wgrad_ctx
 {
@@ -910,6 +912,14 @@ typedef struct rocke_dconv_wgrad_ctx
     int HPB; /* spec.ho_per_block                          */
     int WO_BLOCK; /* spec.mfma_k                                */
     int VEC_CH; /* spec.mfma_k / 4                            */
+    /* wave32 (WMMA 16x16x32) splits VEC_CH's three wave64 roles: */
+    int W32; /* 1 when WAVE == 32                          */
+    int LD_VEC; /* channels per lane per load (8 | VEC_CH)    */
+    int FRAG; /* MMA operand elements per lane (16 | VEC_CH) */
+    int ROWS_PER_PASS; /* WAVE * LD_VEC / WAVE_K (== WO_BLOCK on w64) */
+    int DY_PASSES; /* WO_BLOCK / ROWS_PER_PASS (1 | 2)            */
+    int C_FRAG; /* f32 accumulator length per lane (4 | 8)     */
+    const char* wmma_op_id; /* wave32 WMMA 16x16x32 atom op_id, else NULL */
 
     /* dY/X element type; dW stays fp32 (the split-K reduction is fp32 atomics). */
     const rocke_type_t* io_type; /* rocke_f16() or rocke_bf16() per p.dtype */
@@ -949,7 +959,7 @@ typedef struct rocke_dconv_wgrad_ctx
     rocke_value_t* c_H; /* INPUT height  (p_Hi)    */
     rocke_value_t* c_Ho; /* output height (p_Ho)    */
     rocke_value_t* c_Wo; /* output width  (p_Wo)    */
-    rocke_value_t* zero_acc; /* zero_vec_f32(4)         */
+    rocke_value_t* zero_acc; /* zero_vec_f32(C_FRAG)    */
 
     /* ---- thread / wave / lane decode -- */
     rocke_value_t* tid;
@@ -988,9 +998,10 @@ typedef struct rocke_dconv_wgrad_ctx
     rocke_value_t* c_tile_origin;
     rocke_value_t* k_wave_base;
 
-    /* ---- buffer rsrcs (dW has none: plain atomics) -- */
+    /* ---- buffer rsrcs (dW: plain atomics on wave64, a resource on wave32) -- */
     rocke_value_t* a_rsrc;
     rocke_value_t* b_rsrc;
+    rocke_value_t* d_rsrc; /* wave32 only: dW buffer atomics, else NULL */
 
     /* ---- descriptors -- */
     const rocke_tensor_descriptor_t* dy_desc; /* A[N,Ho,Wo,total_k], runtime strides */
@@ -1012,6 +1023,7 @@ typedef struct rocke_dconv_wgrad_ctx
     rocke_value_t* c_TR_N;
     rocke_value_t* c_WO_BLOCK;
     rocke_value_t* c_STRIP_COLS;
+    rocke_value_t* c_rows_per_pass; /* const(ROWS_PER_PASS) on w32, c_WO_BLOCK on w64 */
     rocke_value_t* tr_row;
     rocke_value_t* tr_flat;
 
@@ -1023,7 +1035,7 @@ typedef struct rocke_dconv_wgrad_ctx
     /* ---- iter-state carried across the unrolled row loop -- */
     rocke_value_t* acc[ROCKE_DCONV_WGRAD_MAX_KH][ROCKE_DCONV_WGRAD_MAX_KW];
     rocke_value_t* delta_ring[ROCKE_DCONV_WGRAD_MAX_KH];
-    rocke_value_t* pending_dy;
+    rocke_value_t* pending_dy[ROCKE_DCONV_WGRAD_MAX_DY_PASSES];
     rocke_value_t* pending_x[ROCKE_DCONV_WGRAD_MAX_STRIP_PASSES];
 } rocke_dconv_wgrad_ctx_t;
 
@@ -1049,6 +1061,20 @@ void rocke_dconv_wgrad_row_loop(rocke_dconv_wgrad_ctx_t* ctx);
 /* Epilogue: KH*KW*4 guarded global_atomic_add into the fp32 dW. Returns the
  * kernel (ctx->b->kernel) on success, NULL on error. */
 rocke_kernel_def_t* rocke_dconv_wgrad_epilogue(rocke_dconv_wgrad_ctx_t* ctx);
+
+/* _build_direct_conv_wgrad_image(spec, arch): the image-per-block wave32
+ * variant (spec->image_per_block). The caller has already run validate() and
+ * is_valid_wgrad_spec. Returns the kernel, or NULL with the builder error set. */
+rocke_kernel_def_t* rocke_dconv_wgrad_build_image(rocke_ir_builder_t* b,
+                                                  const rocke_direct_conv_wgrad_spec_t* spec,
+                                                  const char* arch);
+
+/* _build_direct_conv_wgrad_small_c(spec, arch): the small-channel wave32
+ * variant (spec->small_c). The caller has already run validate() and
+ * is_valid_wgrad_spec. Returns the kernel, or NULL with the builder error set. */
+rocke_kernel_def_t* rocke_dconv_wgrad_build_small_c(rocke_ir_builder_t* b,
+                                                    const rocke_direct_conv_wgrad_spec_t* spec,
+                                                    const char* arch);
 
 /* ===================================================================== *
  *  Depthwise PHASE FUNCTIONS
