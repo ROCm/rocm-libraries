@@ -221,10 +221,10 @@ class GbdtModel(object):
     # Early-exit schedule for ranking a whole catalog: stages strictly increasing in
     # `trees` and strictly decreasing in `keep`. Absent or empty scores every candidate with
     # every tree. It changes only which candidates get a full score, never a full score: a
-    # pruned candidate ranks below every candidate scored by the whole model and carries no
-    # estimate. Single-layer models only; a grouped model's schedule is ignored. A runtime
-    # that predates this field ignores it and scores every candidate fully, which is still
-    # correct.
+    # pruned candidate ranks below every fully scored candidate with a usable score (and above
+    # unusable ones) and carries no estimate. Single-layer models only; a grouped model's
+    # schedule is ignored. A runtime that predates this field ignores it and scores every
+    # candidate fully, which is still correct.
     # GbdtModel
     def EarlyExit(self, j):
         o = flatbuffers.number_types.UOffsetTFlags.py_type(self._tab.Offset(34))

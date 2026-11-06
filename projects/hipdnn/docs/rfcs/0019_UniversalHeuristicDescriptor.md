@@ -2,8 +2,8 @@
 
 - Contributors: Jason Campbell, Chris Erb
 - **Status**: In progress
-- **Status notes**: The UHD runtime ships (#13028): the UHD parser, the UED role maps, feature extraction, the `static_order`, `native`, `tree_data`, `table`, `linear_data`, and `custom_library` adapters, ranking metrics, engine estimates, and the winner cache (`plugin_sdk/include/hipdnn_plugin_sdk/heuristics/`, `ingestor/DescriptorLoader.hpp`, `ingestor/UhdKernelHeuristic.hpp`). The `onnx` adapter, a consumer for `predict_applicable_kernels`, a persistent cache of model rankings, and the generation tool are not built. Every in-tree engine ships a `native` UHD; none ships a trained model.
-- **Last verified**: 2026-10-15 against `develop` (2501d0b28cc)
+- **Status notes**: The UHD runtime ships (#13028): the UHD parser, the UED role maps, feature extraction, the `static_order`, `native`, `tree_data`, `table`, `linear_data`, and `custom_library` adapters, ranking metrics, engine estimates, and the winner cache (`plugin_sdk/include/hipdnn_plugin_sdk/heuristics/`, `ingestor/DescriptorLoader.hpp`, `ingestor/UhdKernelHeuristic.hpp`). The generation tool, `uhd_gen` (`tools/uhd_gen/`, [RFC 0019.13](0019.13_TrainingMethodology.md)), trains `tree_data` and `linear_data` models and installs them into a descriptor tree. The `onnx` adapter, a consumer for `predict_applicable_kernels`, and a persistent cache of model rankings are not built. Every in-tree engine ships a `native` UHD; the FlyDSL engines also ship trained `tree_data` UHDs, generated with `uhd_gen` (#14831).
+- **Last verified**: 2026-11-06 against `develop` (2e8e72951db)
 - Parent: [RFC 0017 Universal Kernel Descriptor](0017_UniversalKernelDescriptor.md) — the "UHD + kernel selection" follow-up named in [RFC 0017 §14.2](0017_UniversalKernelDescriptor.md#142-follow-up-rfcs).
 - Siblings:
   - [RFC 0020 Universal Engine Descriptor](0020_UniversalEngineDescriptor.md) — owns engine identity, the UED's `nodes` pattern, and the **symbol table matching it publishes**. That table is the binding this RFC's `features_signature` reads, and the set every UHD is validated against ([Section 6.1](#61-feature-sources), [Section 6.3](#63-contract-enforcement)).
@@ -940,6 +940,11 @@ the model is trained to rank exactly that catalog. Kernel selection then proceed
    infinity — orders last and is reported as 0, so `+infinity` is never a "must pick" sentinel.
    Offline evaluation applies the same admission, so the regret it reports for a model is the regret
    the runtime incurs with it.
+   A `tree_data` model may carry an early-exit schedule, which makes `scoreBatch` prune the catalog in
+   stages. A pruned candidate is ranked behind every admitted, fully scored candidate and ahead of those
+   failing admission — later stage first, then by its partial sum in the objective's direction — and
+   reports no estimate (the `uhd_gen` README's
+   [Early exit](../../tools/uhd_gen/README.md#early-exit) section).
 5. **Tie-break deterministically.** On equal scores — or when no model ranks at all (steps 6 and 8) —
    fall through to explicit UKD `priority`, then stable `id` — the same deterministic arbitration
    [RFC 0017 §5](0017_UniversalKernelDescriptor.md#5-matching-the-ueds-pattern-and-the-umds-criteria) defines. Declaration order
@@ -2657,7 +2662,8 @@ Items 1 and 2 are built. `IEngine::getPrediction()` answers A and B for one name
 `SelectionHeuristic::ModeA` and `SelectionHeuristic::ModeB`. A caller names the metric through
 `HIPDNN_ATTR_ENGINEHEUR_RANKING_METRIC_EXT`, `Graph::set_ranking_metric()`, or
 `HIPDNN_HEUR_RANKING_METRIC` ([Environment variables](../Environment.md)). Item 3 is the models' to meet:
-no in-tree engine ships a calibrated model.
+the FlyDSL engines ship `predict_engine` models whose score is declared calibrated (#14831), and no
+other in-tree engine ships a model.
 
 ### 11.4 Selecting a UHD by Metric
 
@@ -2821,11 +2827,13 @@ refitting manufactures any.
 
 ### 13.2 Benchmarking via the hipDNN Bench CLI
 
-Not yet built. `hipdnn_bench` and the generation tool are the plan. The sweep tooling in the tree
+The generation tool is `tools/uhd_gen` and its timing substrate is `hipdnn_bench` (`tools/bench`);
+[RFC 0019.13](0019.13_TrainingMethodology.md) specifies both. The sweep tooling in the tree
 (`tools/IngestorGenerator/tools/sweep.py`, documented in
 [`README-sweeps.md`](../../tools/IngestorGenerator/tools/README-sweeps.md)) drives `dnn-benchmark`
 from the separate dnn-benchmarking project. The generator (`tools/IngestorGenerator/codegen/generator.py`)
-emits only `adapter: "native"` UHDs. No tool trains a model into a UHD. rocKE trains LightGBM models
+emits only `adapter: "native"` UHDs; `uhd_gen train` writes the `tree_data` and `linear_data` ones.
+rocKE trains LightGBM models
 outside the descriptor path, in `dnn-providers/hip-kernel-provider/rocke/platform/python/rocke/heuristics/`.
 
 The timing substrate is **`hipdnn_bench`**, hipDNN's own benchmark tool, driving hipDNN's timing loop
@@ -3307,7 +3315,8 @@ pack (all knobs) → benchmark → heuristic → prune knobs → regenerate pack
 
 ## 15. Phased Delivery
 
-Phases 1 to 4, 6 to 7a, and 8 are built. Not yet built: phase 5 (the generation tool), phase 9, and
+Phases 1 to 4, 6 to 7a, and 8 are built, and phase 5 (the generation tool) ships as `tools/uhd_gen`
+([RFC 0019.13](0019.13_TrainingMethodology.md)). Not yet built: phase 9 and
 phase 10.
 
 Each phase is independently shippable and validated against the SDPA path and the reference tooling,

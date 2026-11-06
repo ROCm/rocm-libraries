@@ -1774,10 +1774,10 @@ struct GbdtModel FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
   /// Early-exit schedule for ranking a whole catalog: stages strictly increasing in
   /// `trees` and strictly decreasing in `keep`. Absent or empty scores every candidate with
   /// every tree. It changes only which candidates get a full score, never a full score: a
-  /// pruned candidate ranks below every candidate scored by the whole model and carries no
-  /// estimate. Single-layer models only; a grouped model's schedule is ignored. A runtime
-  /// that predates this field ignores it and scores every candidate fully, which is still
-  /// correct.
+  /// pruned candidate ranks below every fully scored candidate with a usable score (and above
+  /// unusable ones) and carries no estimate. Single-layer models only; a grouped model's
+  /// schedule is ignored. A runtime that predates this field ignores it and scores every
+  /// candidate fully, which is still correct.
   const ::flatbuffers::Vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::EarlyExitStage>> *early_exit() const {
     return GetPointer<const ::flatbuffers::Vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::EarlyExitStage>> *>(VT_EARLY_EXIT);
   }

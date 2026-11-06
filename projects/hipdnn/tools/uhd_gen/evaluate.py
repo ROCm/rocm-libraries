@@ -1697,7 +1697,8 @@ def load_model(
         # The descriptor's `min` orients the runtime's score, not the measured target: a
         # report ranks against the target, whose direction `train` recorded as the
         # manifest's `objective`. An installed model has no manifest, so without
-        # --objective the direction is unknown and `run_evaluate` refuses to guess it.
+        # --objective the direction is unknown and `_linear_scorer` (reached through
+        # `load_model`) refuses to guess it.
         objective = objective_override or manifest.get("objective")
 
     group_feature = manifest.get("group_by_feature")

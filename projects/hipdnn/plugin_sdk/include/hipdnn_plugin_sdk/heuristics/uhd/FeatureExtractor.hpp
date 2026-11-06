@@ -110,7 +110,7 @@ private:
 /// prepare() evaluates non-kernel entries once; extractKernelInto() re-evaluates every
 /// `$kernel` entry per candidate (RFC 0019 §9.3). A ranking over many candidates instead
 /// reads a kernel-only entry once per kernel (kernelOnlyValues()) and re-evaluates only the
-/// entries that mix `$kernel` with other symbols (extractMixedInto()). The Workspace is per
+/// entries that mix `$kernel` with other symbols (evaluateMixed()). The Workspace is per
 /// selection, so one extractor may be used concurrently.
 class FeatureExtractor
 {

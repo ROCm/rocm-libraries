@@ -523,8 +523,9 @@ def add_adapter_arguments(parser: argparse.ArgumentParser) -> None:
         "linear_data: a per-configuration linear ranker (RelLin) of the log slowdown against "
         "the best candidate of each problem, for a small catalog; it needs problem identity "
         "(--group-by or a benchmark column), serves no --metric or --calibrated score and no "
-        "predict_engine role, and ignores the tree-only options (--num-boost-round, "
-        "--early-stopping, --model-encoding, --leaf-precision, --group-by-feature).",
+        "predict_engine role, refuses --group-by-feature (a tree_data option), and ignores "
+        "the other tree-only options (--num-boost-round, --early-stopping, --model-encoding, "
+        "--leaf-precision, --early-exit).",
     )
 
 

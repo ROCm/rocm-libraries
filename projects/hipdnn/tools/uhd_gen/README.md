@@ -456,7 +456,7 @@ is.
 |----------|----------|-------------|
 | `--input` | Yes | Benchmark CSV/JSON to evaluate on |
 | `--model-dir` | Yes | A `train --output-dir` result |
-| `--model` | No | Artifact to rank with (default: `model.lgbm` if kept, else the descriptor's `tree_data.artifact` — the file the engine itself loads) |
+| `--model` | No | Artifact to rank with (default: `model.lgbm` if kept, else the descriptor's `tree_data.artifact`, or `linear_data.artifact` for a `linear_data` UHD — the file the engine itself loads) |
 | `--output` | No | Report path (default: `<model-dir>/eval_report.json`) |
 | `--eval-fraction` | No | Fraction of **problems** held out and scored (default: 0.2; `1.0` scores everything and says loudly that the figure is optimistic) |
 | `--seed` | No | Seed for the problem-level split (default: 0), recorded in the report |
@@ -476,6 +476,10 @@ that offers neither is an error rather than a guess. A descriptor naming a `scor
 fixes the direction (`tflops` max, `time` min), so regret is always computed in the
 metric's direction. Regret is asserted non-negative; a negative one means the direction
 is backwards, and `evaluate` fails instead of printing a plausible small number.
+A `linear_data` UHD is the exception: its descriptor always says `min`, which orients the
+runtime score and not the measured target, so its report direction is `--objective`, else
+the manifest's `objective`; an installed model has no manifest, so without `--objective`
+`evaluate` refuses.
 
 ### `eval_report.json`
 
@@ -1158,9 +1162,9 @@ skip there and run only locally.
 `python -m uhd_gen train --adapter linear_data ...` fits one ridge regression per kernel
 configuration instead of a tree ensemble. It is a cheap alternative for a small catalog:
 about 220 ns per candidate at run time (one hash lookup and one dot product over 31 basis
-terms, catalogs of 17-255 candidates sharing their problem features). Whether it ranks as
-well as a tree model depends on the catalog; compare the two with `evaluate` before
-choosing it.
+terms, with 866 configurations in the model, for catalogs whose candidates share their
+problem features). Whether it ranks as well as a tree model depends on the catalog;
+compare the two with `evaluate` before choosing it.
 
 What it predicts. A candidate's score is its **log slowdown against the best candidate of
 the same problem**, `log t - log min t` (or `log max v - log v` for a rate such as TFLOPS),
@@ -1173,6 +1177,8 @@ UHD that declares otherwise (RFC 0019 §7.5). Consequences for `train`:
   direction.
 - `--metric`, `--calibrated`, `--group-by-feature` and `--role predict_engine` are refused:
   the score is in no physical unit and is not comparable across engines.
+- The tree-only options (`--num-boost-round`, `--early-stopping`, `--model-encoding`,
+  `--leaf-precision` and `--early-exit`) are ignored.
 - The target is relative to the best candidate of a problem, so the corpus needs problem
   identity: `--group-by`, or a `benchmark` column.
 
@@ -1198,9 +1204,13 @@ own bounds (every index in range, coefficient and key lengths, finiteness, `scal
 `lo <= hi`, unique keys, a global entry). `artifact.load_linear_artifact` repeats those checks
 offline with the runtime's reasons, `promote` runs it before installing, and `evaluate`
 scores the shipped bytes through `evaluate._linear_scorer`, which `TestLinearDataAdapter`
-pins against the C++ adapter on a shared fixture. A linear model can be installed for
-`sort_kernel_catalog` only, and an installed one is never replaced in place by another id's
-promotion (only a `predict_engine` model has that path, and a linear model cannot be one).
+pins against the C++ adapter on a shared fixture. `promote` is meant for a linear model in
+the `sort_kernel_catalog` role (a log slowdown is no candidate estimate of a metric, and a
+`predict_engine` model must name its metric, so a linear model cannot be one), but it does not
+check the role against the adapter: for an unslotted engine it also accepts
+`predict_applicable_kernels`, which the runtime does not consume. An installed linear model
+is never replaced in place by another id's promotion (only a `predict_engine` model has
+that path).
 
 ```bash
 python -m uhd_gen train --adapter linear_data \
@@ -1222,8 +1232,8 @@ output_dir/
 
 `<stem>` comes from `--descriptor-name` (default `heuristic`).
 
-`DescriptorLoader` globs `<stem>.uhd.json` and reads `tree_data.artifact` as a
-path relative to that file, so the directory relocates as a unit.
+`DescriptorLoader` globs `<stem>.uhd.json` and reads its artifact (`tree_data.artifact`, or
+`linear_data.artifact`) as a path relative to that file, so the directory relocates as a unit.
 
 For a descriptor-backed engine, the UED names the heuristic by id. `train` prints
 the id and records it in `train_manifest.json`; `promote` updates the UED and
@@ -1249,8 +1259,9 @@ each is referenced from its own entry in the UED role map.
 
 ### The artifact is content-addressed, and reproducible
 
-`train` writes `tree_data.hash` — the SHA-256 of `model.bin`, bare hex, which is the form
-`TreeDataAdapter` recomputes before parsing and refuses on mismatch (RFC 0019 §7.2). That
+`train` writes `tree_data.hash` (`linear_data.hash` for a `linear_data` model) — the SHA-256
+of `model.bin`, bare hex, which is the form
+`TreeDataAdapter` (or `LinearDataAdapter`) recomputes before parsing and refuses on mismatch (RFC 0019 §7.2). That
 answers the question `features_hash` does not: `features_hash` fingerprints the *input
 contract*, so two models over one signature and different training hash identically.
 `train_manifest.json` records both halves RFC 0019.13 §10.5 asks for, `model_sha256` and
@@ -1323,8 +1334,8 @@ repeats), and every split then compares two integers: `x <= t[r]` exactly when f
 below it. NaN and features past a short row's end take the split's default direction.
 Decisions, leaf values and summation order are a direct walk's, so scores are bit for bit
 the same. A compiled split is 16 bytes. On the shipped gfx942 conv fwd model (500 trees ×
-127 leaves), ranking catalogs of 17-400 candidates took 1.8-2.0× less time than the walk
-it replaced, with identical scores.
+127 leaves), ranking 88-candidate catalogs took 2,096 µs against the walk's 3,851 µs
+(1.8× less time), with identical scores.
 
 ### Early exit
 
@@ -1348,7 +1359,8 @@ if no schedule saves at least 20% of the walks. The candidates' figures are reco
 `--early-exit 30:16` or `10:32,40:8` writes a schedule as given. It is refused for a
 calibrated model (a pruned candidate carries no estimate), a grouped one (whose runtime
 ignores the schedule) and `predict_engine` (which scores one row with every tree).
-`--early-exit none` (the default for those models) writes none.
+`--early-exit none` writes none, and `auto` writes none for those models too; a
+`linear_data` model has no trees, so it ignores the flag.
 `evaluate` applies the stored schedule exactly as the runtime does, so its regret is
 the shipped model's.
 
@@ -1357,8 +1369,10 @@ A schedule is part of `model.bin`, so adding, changing or removing one changes
 (`engineSelectorRevision`; RFC 0019 [Section 8.1](../../docs/rfcs/0019_UniversalHeuristicDescriptor.md#81-descriptor-versions-and-uhd-coupling)).
 A `predict_engine` estimate that records the old revision in `trained_against` is then
 unavailable until it is retrained against the new one. `auto` is the default, so
-regenerating an eligible catalog ranker has this effect even when its trees come out the
-same: pass `--early-exit none` when the engine's estimates are not retrained alongside it.
+regenerating an eligible catalog ranker has this effect whenever `auto` chooses a
+schedule (it chooses none unless one saves at least 20% of the tree walks within the
+regret tolerances): pass `--early-exit none` when the engine's estimates are not
+retrained alongside it.
 
 ## Generated FlatBuffers bindings
 
@@ -1378,8 +1392,9 @@ hipdnn_flatbuffers_sdk.data_objects.GbdtModel` resolves to the bindings that
 match the schema shipping beside this tool rather than to any other copy
 installed on the system.
 
-Regenerate after editing the schema — a build with `HIPDNN_GENERATE_SDK_HEADERS=ON`
-does it automatically, and so does the `flatc-hipdnn` pre-commit hook:
+Regenerate after editing the schema — a build with `HIPDNN_GENERATE_SDK_HEADERS=ON` and
+`HIPDNN_ENABLE_KERNEL_INGESTOR=ON` does it automatically, and so does the `flatc-hipdnn`
+pre-commit hook:
 
 ```bash
 python projects/hipdnn/scripts/run_flatc.py \
@@ -1431,6 +1446,9 @@ recorded in `train_manifest.json` (as `{}` when there is none) and is the one
 
 ## Training Details
 
+These describe the default `tree_data` model; a `linear_data` model is a closed-form ridge
+fit ([above](#the-linear_data-adapter-rellin)).
+
 - **Target transform**: `log(target)` for scale-invariant training; its inverse `exp` is
   positive for every finite prediction, so the runtime never orders a physical score last
   as non-positive (`log1p`'s `expm1` could). Targets must be strictly positive
@@ -1451,7 +1469,7 @@ pytest tests/ -v
 The output files are loaded by hipDNN's UHD system:
 
 `DescriptorLoader` parses `<stem>.uhd.json` while walking a descriptor tree, and
-`makeKernelHeuristic` builds the scorer from it: `TreeDataAdapter` loads
-`tree_data.artifact` relative to the descriptor, and `FeatureExtractor`
+`makeKernelHeuristic` builds the scorer from it: `TreeDataAdapter` (or `LinearDataAdapter`)
+loads the descriptor's artifact relative to the descriptor, and `FeatureExtractor`
 recomputes `features_hash` from `features_signature` and refuses the pair if the
 two disagree.

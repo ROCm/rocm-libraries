@@ -363,21 +363,23 @@ private:
 
     /// Keyed by (KernelDefinition::kernelId, the definition's address), so a cached value is
     /// reused only for the very definition it was derived from. Neither half is enough alone:
-    ///  - An id is not unique to one definition. KernelIngestorStateManager.hpp:875-883
-    ///    refuses a repeated id only where the two declarations' arches overlap, so one id can
-    ///    name differently-parameterized definitions (metadata, priority) on disjoint arches,
-    ///    and one heuristic serves several arches (an arch-prefix model entry covers more than
-    ///    one device).
+    ///  - An id is not unique to one definition. KernelIngestorStateManager's `archesClaimingId`
+    ///    check refuses a repeated id only where the two declarations' arches overlap, so one
+    ///    id can name differently-parameterized definitions (metadata, priority) on disjoint
+    ///    arches, and one heuristic serves several arches (an arch-prefix model entry covers
+    ///    more than one device).
     ///  - An address alone could be recycled by a different definition.
     /// What makes the pair exact is the lifetime of definitions, which this relies on:
-    ///  - Every definition a production heuristic ranks lives in its manager's `_definitions`
-    ///    (KernelIngestorStateManager.hpp:1578-1581, :1175-1176 - "never mutated after"
-    ///    construction, catalogs point into it) and is never moved, because the manager is
-    ///    pinned (:248-252) and KernelDefinition.hpp:20-22 gives pointers that lifetime.
-    ///  - The heuristic is built for exactly one manager: MakeEngine.hpp:294 creates it and
-    ///    :300-305 moves it into the manager, the only non-test construction of either. It cannot
-    ///    outlive its use of those definitions, so while it exists no address is freed and
-    ///    reused, and an (id, address) pair always names the same definition content.
+    ///  - Every definition a production heuristic ranks lives in one of its manager's
+    ///    `SlotState::definitions` vectors ("completed once at construction and never mutated
+    ///    after"; catalogs point into them) and is never moved, because the manager's copy and
+    ///    move constructors and assignments are deleted and KernelDefinition's doc comment
+    ///    gives pointers that lifetime.
+    ///  - The heuristic is built for exactly one manager: makeStateManager (MakeEngine.hpp)
+    ///    creates it with makeKernelHeuristic and moves it into the manager, the only non-test
+    ///    construction of either. It cannot outlive its use of those definitions, so while it
+    ///    exists no address is freed and reused, and an (id, address) pair always names the same
+    ///    definition content.
     /// A caller that ranks catalogs over definitions it frees and re-creates at the same
     /// address with the same id but other metadata, using one heuristic throughout, is outside
     /// that contract and would read stale values.

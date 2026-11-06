@@ -37,8 +37,9 @@ struct FeatureRows
 /// `stages` was scored by the whole model and its `raw` is a full score. Any smaller entry
 /// marks a row pruned at that stage: its `raw` is a partial sum over the trees it saw, in no
 /// unit, comparable only with rows pruned at the same stage, in the objective's direction.
-/// A ranker places every fully scored row ahead of every pruned row, and later stages ahead
-/// of earlier ones.
+/// A ranker places every fully scored row with a usable score ahead of every pruned row (an
+/// unusable score ranks below the pruned rows) and later stages ahead of earlier ones; a
+/// pruned row carries no estimate.
 struct BatchScores
 {
     std::vector<double> raw;
@@ -86,9 +87,9 @@ public:
         return -1;
     }
 
-    /// Number of features a row must carry. Artifact-backed adapters (`tree_data`, `table`)
-    /// read it from the artifact; `native` and `custom_library` report the descriptor's
-    /// signature length, so for them it attests nothing (RFC 0019 OQ11).
+    /// Number of features a row must carry. Artifact-backed adapters (`tree_data`, `table`,
+    /// `linear_data`) read it from the artifact; `native` and `custom_library` report the
+    /// descriptor's signature length, so for them it attests nothing (RFC 0019 OQ11).
     virtual size_t expectedFeatureCount() const = 0;
 
     /// Features hash the model was trained on. Artifact-backed adapters read it from the
