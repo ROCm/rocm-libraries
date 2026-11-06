@@ -154,7 +154,11 @@ it against the real reference (gfx942, 3 seeds):
 
 No per-element tolerance detects an output truncated instead of rounded:
 that error is half a rounding step. half cannot tell an io-type accumulator
-apart from the kernels the `lambda` term allows for.
+apart from the kernels the `lambda` term allows for. For half at `K` above
+16,000 the absolute term (`12 * eps * sigma`, about 0.5) is larger than the
+fixed 0.1, so a missing filter tap there is caught in 29 % of outputs against
+62 % for the fixed 0.1 (21 outputs); a missing input channel is still caught
+in all of them.
 
 ### When an engine needs more
 
