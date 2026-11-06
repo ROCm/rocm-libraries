@@ -231,7 +231,8 @@ void testExactIntegerGemm() {
         matmul(operandA, operandB, ScalarType::Int32, MatmulOptions(ScalarType::Int32),
                std::nullopt, GemmBackend::Blocked);
     const Tensor d = add(
-        product, multiply(inputC, int32_t{2}, ScalarType::Int32, ScalarType::Int32, std::nullopt),
+        product,
+        multiply(inputC, Tensor(int32_t{2}), ScalarType::Int32, ScalarType::Int32, std::nullopt),
         ScalarType::Int32, ScalarType::Int32, std::nullopt);
 
     const auto wrapMultiply = [](int32_t left, int32_t right) {
