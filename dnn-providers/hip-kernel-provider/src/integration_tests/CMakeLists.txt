@@ -106,6 +106,20 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
             kernel_ingestor_engine/IntegrationGpuGfx950AttentionUnifiedKnobs.cpp
         )
     endif()
+    # The gfx942 unified 3D (split-KV decode) knob suite: forced block_size/num_segments
+    # select one shipped kernel, launched on a gfx942 device against the CPU reference.
+    # Gated like the census and the engine's external integration target, so a build that
+    # does not ship the engine compiles no case for it; it GTEST_SKIPs on other devices.
+    hkp_gfx942_attention_unified_3d_available(_hkp_gfx942_unified_3d_suite)
+    if(_hkp_gfx942_unified_3d_suite AND NOT HIPDNN_ENABLE_SDPA)
+        message(WARNING
+                "HIPDNN_ENABLE_KERNEL_INGESTOR is ON but hipDNN was built with HIPDNN_ENABLE_SDPA=OFF. "
+                "Skipping gfx942 unified 3D knob integration tests. Rebuild hipDNN with -DHIPDNN_ENABLE_SDPA=ON to enable them.")
+    elseif(_hkp_gfx942_unified_3d_suite)
+        target_sources(hip_kernel_provider_integration_tests PRIVATE
+            kernel_ingestor_engine/IntegrationGpuGfx942AttentionUnified3dKnobs.cpp
+        )
+    endif()
     target_sources(hip_kernel_provider_integration_tests PRIVATE
         kernel_ingestor_engine/IntegrationGpuKernelIngestor.cpp
         kernel_ingestor_engine/IntegrationGpuKernelIngestorKpack.cpp
@@ -254,46 +268,32 @@ foreach(_gfx950_engine IN ITEMS
     endif()
 endforeach()
 
-# The FlyDSL SDPA backward engines, one gpu-reference target per (engine, architecture)
-# the product ships. Split ships gfx950 content and gfx11-generic content, which the pack
-# expands to every gfx11 member this build targets; merged ships gfx950 only. Gated and
-# routed per architecture exactly as the gfx950 dense target above: the predicate is the
-# one the census uses, and the entry installs into that architecture's shard so a package
-# without the architecture carries no entry for an engine it no longer ships. The backward
-# bundles include bf16 cases, so the target takes the engine's tolerance config, as its
-# tiered checks do.
-foreach(_hkp_bwd_engine IN ITEMS split merged)
-    foreach(_hkp_bwd_arch IN LISTS HKP_FLYDSL_SDPA_BWD_ARCHS)
-        set(_hkp_bwd_ships FALSE)
-        if(HIPDNN_ENABLE_KERNEL_INGESTOR)
-            hkp_product_ships_engine_for_arch(_hkp_bwd_ships
-                "hipkernel:flydsl_sdpa_bwd_${_hkp_bwd_engine}" ${_hkp_bwd_arch})
-        endif()
-        if(NOT (HIPKERNELPROVIDER_FLYDSL_ACTIVE AND HIPDNN_ENABLE_KERNEL_INGESTOR
-                AND HIPDNN_ENABLE_SDPA AND _hkp_bwd_ships
-                AND TARGET hipdnn_integration_tests AND COMMAND add_external_integration_test_target))
-            continue()
-        endif()
+# hipkernel:Gfx942AttentionUnified3d (gfx942 split-KV decode), engine-pinned against the
+# GPU reference and routed into the gfx942 shard, for the reasons the gfx950 registration
+# above gives.
+set(_hkp_gfx942_attention_unified_3d FALSE)
+if(HIPDNN_ENABLE_KERNEL_INGESTOR)
+    hkp_gfx942_attention_unified_3d_available(_hkp_gfx942_attention_unified_3d)
+endif()
+if(HIPDNN_ENABLE_KERNEL_INGESTOR AND HIPDNN_ENABLE_SDPA
+   AND _hkp_gfx942_attention_unified_3d
+   AND TARGET hipdnn_integration_tests AND COMMAND add_external_integration_test_target)
+    hkp_reserve_census_shard(_hkp_gfx942_shard_dest gfx942)
+    set(_gfx942_shard_args
+        INSTALL_DESTINATION "${_hkp_gfx942_shard_dest}"
+        INSTALL_STAGING_KEY hkp_census_gfx942)
 
-        # The shard names this TOML, so it is reserved with the shard as well as passed as
-        # TEST_CONFIG; hkp_reserve_census_shard() says why. It is the per-architecture file
-        # the external-integration registration shares.
-        hkp_flydsl_sdpa_bwd_arch_toml(_hkp_bwd_toml ${_hkp_bwd_engine} ${_hkp_bwd_arch})
-        hkp_reserve_census_shard(_hkp_bwd_shard_dest ${_hkp_bwd_arch} FILES "${_hkp_bwd_toml}")
-        add_external_integration_test_target(
-            TARGET_NAME hip_kernel_provider_flydsl_sdpa_bwd_${_hkp_bwd_engine}_${_hkp_bwd_arch}_gpu_ref_integration_tests
-            PLUGIN_TARGET hip_kernel_provider
-            ENGINE_NAME   "hipkernel:flydsl_sdpa_bwd_${_hkp_bwd_engine}"
-            INSTALL_SUBDIR hip_kernel_provider
-            INSTALL_DESTINATION "${_hkp_bwd_shard_dest}"
-            INSTALL_STAGING_KEY hkp_census_${_hkp_bwd_arch}
-            REFERENCE_EXECUTOR gpu
-            TEST_CONFIG "${_hkp_bwd_toml}"
-            GTEST_FILTER "quick_SdpaBackward_*:standard_SdpaBackward_*:comprehensive_SdpaBackward_*:full_SdpaBackward_*:-*_fwd_pair*"
-            ENVIRONMENT_MODIFICATION ${TEST_ENVIRONMENT_MODIFICATION}
-        )
-    endforeach()
-endforeach()
+    add_external_integration_test_target(
+        TARGET_NAME hip_kernel_provider_gfx942_attention_unified_3d_gpu_ref_integration_tests
+        PLUGIN_TARGET hip_kernel_provider
+        ENGINE_NAME   "hipkernel:Gfx942AttentionUnified3d"
+        INSTALL_SUBDIR hip_kernel_provider
+        ${_gfx942_shard_args}
+        REFERENCE_EXECUTOR gpu
+        GTEST_FILTER "quick_SdpaFwd_Default.*:standard_SdpaFwd_Default.*:comprehensive_SdpaFwd_Default.*:full_SdpaFwd_Default.*"
+        ENVIRONMENT_MODIFICATION ${TEST_ENVIRONMENT_MODIFICATION}
+    )
+endif()
 
 if(ENABLE_ASM_SDPA_ENGINE AND HIPDNN_ENABLE_SDPA
    AND TARGET hipdnn_integration_tests AND COMMAND add_external_integration_test_target)

@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -24,21 +24,28 @@
 
 #pragma once
 
+#include "rocsparse_csrmv_alg.hpp"
+#include "rocsparse_csrmv_partition.hpp"
 #include "rocsparse_handle.hpp"
 
 namespace rocsparse
 {
-    typedef enum csrmv_alg_
-    {
-        csrmv_alg_default = 0,
-        csrmv_alg_rowsplit,
-        csrmv_alg_adaptive,
-        csrmv_alg_lrb,
-        csrmv_alg_nnzsplit
-    } csrmv_alg;
-
-    rocsparse_status csrmv_alg_default2csrmv_alg(rocsparse::csrmv_alg& alg,
-                                                 rocsparse_operation   operation);
+    // Resolves csrmv_alg_default to the algorithm to analyse.
+    //
+    // *alg is left unchanged when it already names a specific algorithm, and
+    // *p_partition is left null. Default with a transpose becomes row-split
+    // and leaves *p_partition null. Otherwise the partition is allocated, and
+    // *alg is nnz-split when it is a poor fit and adaptive when it is not.
+    // A default request does not stay csrmv_alg_default. The caller deletes
+    // *p_partition.
+    template <typename I, typename J>
+    rocsparse_status csrmv_select_algorithm(rocsparse_handle        handle,
+                                            rocsparse_operation     trans,
+                                            J                       m,
+                                            I                       nnz,
+                                            const I*                csr_row_ptr,
+                                            rocsparse::csrmv_alg*   alg,
+                                            csrmv_partition<I, J>** p_partition);
 
     // Helper function to extract gamma arrays and z vectors for batched operations
     // gamma_device_array and z_array must be preallocated device buffers
@@ -50,30 +57,9 @@ namespace rocsparse
                                                       T*        gamma_device_array,
                                                       const Y** z_array);
 
-    template <typename I, typename J, typename A>
-    rocsparse_status csrmv_analysis_adaptive_template_dispatch(rocsparse_handle          handle,
-                                                               rocsparse_operation       trans,
-                                                               J                         m,
-                                                               J                         n,
-                                                               I                         nnz,
-                                                               const rocsparse_mat_descr descr,
-                                                               const A*                  csr_val,
-                                                               const I*              csr_row_ptr,
-                                                               const J*              csr_col_ind,
-                                                               rocsparse_csrmv_info* p_csrmv_info);
-
-    template <typename I, typename J, typename A>
-    rocsparse_status csrmv_analysis_lrb_template_dispatch(rocsparse_handle          handle,
-                                                          rocsparse_operation       trans,
-                                                          J                         m,
-                                                          J                         n,
-                                                          I                         nnz,
-                                                          const rocsparse_mat_descr descr,
-                                                          const A*                  csr_val,
-                                                          const I*                  csr_row_ptr,
-                                                          const J*                  csr_col_ind,
-                                                          rocsparse_csrmv_info*     p_csrmv_info);
-
+    // When p_csrmv_info[0] is already set and its max_nnz_per_row is known,
+    // that value is the longest row. Otherwise this allocates the descriptor
+    // and computes the longest row.
     template <typename I, typename J, typename A>
     rocsparse_status csrmv_analysis_nnzsplit_template_dispatch(rocsparse_handle          handle,
                                                                rocsparse_operation       trans,
@@ -84,7 +70,8 @@ namespace rocsparse
                                                                const A*                  csr_val,
                                                                const I*              csr_row_ptr,
                                                                const J*              csr_col_ind,
-                                                               rocsparse_csrmv_info* p_csrmv_info);
+                                                               rocsparse_csrmv_info* p_csrmv_info,
+                                                               bool use_starting_block_ids);
 
     template <typename I, typename J, typename A>
     rocsparse_status csrmv_analysis_template(rocsparse_handle          handle,
@@ -97,7 +84,8 @@ namespace rocsparse
                                              const void*               csr_val,
                                              const void*               csr_row_ptr,
                                              const void*               csr_col_ind,
-                                             rocsparse_csrmv_info*     p_csrmv_info);
+                                             rocsparse_csrmv_info*     p_csrmv_info,
+                                             bool use_starting_block_ids = false);
 
     template <typename T, typename I, typename J, typename A, typename X, typename Y>
     rocsparse_status csrmv_rowsplit_template_dispatch(rocsparse_handle          handle,
@@ -286,7 +274,8 @@ namespace rocsparse
                                     const void*               csr_row_ptr,
                                     rocsparse_indextype       csr_col_ind_indextype,
                                     const void*               csr_col_ind,
-                                    rocsparse_csrmv_info*     p_csrmv_info);
+                                    rocsparse_csrmv_info*     p_csrmv_info,
+                                    bool                      use_starting_block_ids = false);
 
     rocsparse_status csrmv(rocsparse_handle             handle,
                            rocsparse_operation          trans,

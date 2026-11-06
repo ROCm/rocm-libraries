@@ -201,6 +201,15 @@ FlydslSdpaBwdSplitLaunchDump describeFlydslSdpaBwdSplitLaunchForTesting(
 void registerGfx950AttentionDenseSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
 void resetGfx950AttentionDenseModuleCache();
 
+/// The engine name gfx942_attention_unified3d.ued.json declares. Read here by the pack
+/// table, the pack's own log lines and the census, like GFX950_ATTENTION_DENSE_ENGINE_NAME.
+inline constexpr std::string_view GFX942_ATTENTION_UNIFIED_3D_ENGINE_NAME
+    = "hipkernel:Gfx942AttentionUnified3d";
+
+/// @see packs/Gfx942AttentionUnified3dNative.cpp
+void registerGfx942AttentionUnified3dSymbols(
+    hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
+void resetGfx942AttentionUnified3dModuleCache();
 /// The engine name gfx950_attention_unified_2d.ued.json declares, shared the same way.
 inline constexpr std::string_view GFX950_ATTENTION_UNIFIED_2D_ENGINE_NAME
     = "hipkernel:Gfx950AttentionUnified2D";
