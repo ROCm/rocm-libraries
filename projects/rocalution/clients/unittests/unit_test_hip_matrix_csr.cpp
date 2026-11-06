@@ -235,7 +235,8 @@ TYPED_TEST(hip_matrix_csr_backend, set_data_ptr_without_entries)
 }
 
 // The operations on the values and the extractions leave a matrix without
-// entries as it is. The row and column extractions zero their outputs.
+// entries as it is. The row and column extractions zero their outputs, and
+// ExtractDiagonal leaves its output as it is.
 TYPED_TEST(hip_matrix_csr_backend, operations_on_a_matrix_without_entries)
 {
     using T       = typename TypeParam::value_type;
@@ -338,10 +339,9 @@ TYPED_TEST(hip_matrix_csr_backend, operations_on_a_matrix_without_entries)
         auto v = make_vector(Backend::Accelerator, std::vector<T>(n, from_int<T>(7)));
         EXPECT_TRUE(extraction.second(*A, v.get()));
         expect_empty(*A, n, n);
-        if(extraction.first != "ExtractDiagonal")
-        {
-            EXPECT_EQ(values_of(*v), std::vector<T>(n, static_cast<T>(0)));
-        }
+        const T expected
+            = extraction.first == "ExtractDiagonal" ? from_int<T>(7) : static_cast<T>(0);
+        EXPECT_EQ(values_of(*v), std::vector<T>(n, expected));
     }
 }
 

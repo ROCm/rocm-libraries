@@ -8698,6 +8698,7 @@ namespace rocalution
 
         assert(vec.GetSize() == this->GetM());
         assert(idx >= 0);
+        assert(idx < this->GetN());
 
         assert(((this->matrix_ == this->matrix_host_) && (vec.vector_ == vec.vector_host_))
                || ((this->matrix_ == this->matrix_accel_) && (vec.vector_ == vec.vector_accel_)));
@@ -8776,6 +8777,7 @@ namespace rocalution
         assert(vec != NULL);
         assert(vec->GetSize() == this->GetM());
         assert(idx >= 0);
+        assert(idx < this->GetN());
 
         assert(((this->matrix_ == this->matrix_host_) && (vec->vector_ == vec->vector_host_))
                || ((this->matrix_ == this->matrix_accel_) && (vec->vector_ == vec->vector_accel_)));
@@ -8840,6 +8842,7 @@ namespace rocalution
 
         assert(vec.GetSize() == this->GetN());
         assert(idx >= 0);
+        assert(idx < this->GetM());
 
         assert(((this->matrix_ == this->matrix_host_) && (vec.vector_ == vec.vector_host_))
                || ((this->matrix_ == this->matrix_accel_) && (vec.vector_ == vec.vector_accel_)));
@@ -8918,6 +8921,7 @@ namespace rocalution
         assert(vec != NULL);
         assert(vec->GetSize() == this->GetN());
         assert(idx >= 0);
+        assert(idx < this->GetM());
 
         assert(((this->matrix_ == this->matrix_host_) && (vec->vector_ == vec->vector_host_))
                || ((this->matrix_ == this->matrix_accel_) && (vec->vector_ == vec->vector_accel_)));

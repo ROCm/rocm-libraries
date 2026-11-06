@@ -1377,6 +1377,54 @@ TEST_P(local_matrix_formats, extracts_and_replaces_rows_and_columns)
     });
 }
 
+// The rows and columns of a matrix without entries are zero, and a replaced row
+// or column becomes its only entries. Most formats go through the fallbacks.
+TEST_P(local_matrix_formats, extracts_and_replaces_rows_and_columns_without_entries)
+{
+    for_each_type<RealTypes>([&](auto type) {
+        using T = typename decltype(type)::type;
+
+        const int                  n = 4;
+        const std::vector<PtrType> no_entries(n + 1, 0);
+        const std::vector<T>       values = {1, 0, 2, 3};
+        const std::vector<T>       zeros(n, T(0));
+
+        auto without_entries = [&] {
+            auto A = empty_local_matrix<T>(backend());
+            A->CopyFromHostCSR(no_entries.data(), nullptr, nullptr, "E", 0, n, n);
+            A->ConvertTo(format().id, format().blockdim);
+            return A;
+        };
+
+        auto A = without_entries();
+        expect_kept(*A, from_dense(n, n, std::vector<T>(n * n, T(0))));
+
+        auto x = vector_of(std::vector<T>(n, T(7)));
+        A->ExtractColumnVector(1, x.get());
+        expect_vector(*x, zeros, backend(), 0);
+
+        x = vector_of(std::vector<T>(n, T(7)));
+        A->ExtractRowVector(1, x.get());
+        expect_vector(*x, zeros, backend(), 0);
+
+        // MCSR needs every diagonal entry, and DIA and ELL reject matrices with
+        // fewer entries than rows, so these results stay in CSR
+        std::vector<T> D(n * n, T(0));
+        for(int i = 0; i < n; ++i)
+        {
+            D[i * n + 1] = values[i];
+        }
+        std::string log = logged([&] { A->ReplaceColumnVector(1, *vector_of(values)); });
+        expect_kept_or_csr(*A, from_dense(n, n, D), log);
+
+        auto B = without_entries();
+        std::fill(D.begin(), D.end(), T(0));
+        std::copy(values.begin(), values.end(), D.begin() + 2 * n);
+        log = logged([&] { B->ReplaceRowVector(2, *vector_of(values)); });
+        expect_kept_or_csr(*B, from_dense(n, n, D), log);
+    });
+}
+
 // Factorizations and triangular solves
 
 TEST_P(local_matrix_formats, lu_factorizations_solve_a_banded_system)
@@ -3094,6 +3142,10 @@ TEST(local_matrix_preconditions, violations_end_the_program)
     EXPECT_ASSERT_DEATH(A->ILUpFactorize(-1), "p >= 0");
     EXPECT_ASSERT_DEATH(A->FSAI(0, nullptr), "power > 0");
     EXPECT_ASSERT_DEATH(A->ItLSolve(0, 0, false, *y, y.get()), "max_iter > 0");
+    EXPECT_ASSERT_DEATH(A->ExtractColumnVector(4, y.get()), "idx < this->GetN");
+    EXPECT_ASSERT_DEATH(A->ReplaceColumnVector(4, *y), "idx < this->GetN");
+    EXPECT_ASSERT_DEATH(A->ExtractRowVector(4, y.get()), "idx < this->GetM");
+    EXPECT_ASSERT_DEATH(A->ReplaceRowVector(4, *y), "idx < this->GetM");
 
     LocalMatrix<double> S;
     EXPECT_ASSERT_DEATH(A->ExtractSubMatrix(5, 0, 1, 1, &S), "row_offset");
