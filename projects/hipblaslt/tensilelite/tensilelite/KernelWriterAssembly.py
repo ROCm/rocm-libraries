@@ -5724,18 +5724,13 @@ class KernelWriterAssembly(KernelWriter):
     vLo, vHi, vSrc, vScale = tmp, tmp + 1, tmp + 2, tmp + 3
     vNegZS = tmp + 4 if wantBias or fp16Pk else None
 
-    vRnd = vBf16Inc = vFp32Nan = None
-    tmpSgprNan = None
+    vRndLo = vRndHi = vBf16Inc = None
     if needRneScratch:
       base = tmp + (5 if wantBias else 4)
-      vRnd, vBf16Inc, vFp32Nan = base, base + 1, base + 2
-      tmpSgprNan = self.sgprPool.checkOut(self.states.laneSGPRCount,
-                                          tag="blockScaleADequant_nan",
-                                          preventOverflow=False)
+      # One rounding scratch per element of the pair, so the two chains interleave.
+      vRndLo, vRndHi, vBf16Inc = base, base + 1, base + 2
       module.add(VMovB32(dst=vgpr(vBf16Inc), src="0x7fff",
                          comment="w4a16: round-to-nearest-even bias for bf16"))
-      module.add(VMovB32(dst=vgpr(vFp32Nan), src="0x7fff0000",
-                         comment="w4a16: bf16 Nan pattern"))
 
     def packPair(dst, srcLo, srcHi):
       """dst = the packed MacDataTypeA pair {hi:srcHi, lo:srcLo}, RNE.
@@ -5757,19 +5752,20 @@ class KernelWriterAssembly(KernelWriter):
       8, so <=13 of f32's 24 -- which makes this pack the only rounding in the
       whole dequantize. Truncating here instead would bias every weight toward
       zero and that bias accumulates over K, so round to nearest even.
+
+      Unlike the epilogue's f32 -> bf16, this needs no Nan check: a Nan here
+      comes from the scale, a bf16 widened to f32, or is the default Nan of
+      0*inf, so its low 16 bits are zero and adding at most 0x8000 to them
+      leaves the high half -- the bf16 Nan -- unchanged. Inf likewise.
       """
       insts = []
-      for src in (srcLo, srcHi):
-        # Same sequence the bias/global-write epilogue uses for f32 -> bf16.
-        insts.append(VCmpUF32(dst=sgpr(tmpSgprNan, self.states.laneSGPRCount),
-                              src0=vgpr(src), src1=vgpr(src), comment="w4a16: check Nan"))
-        insts.append(VBfeU32(dst=vgpr(vRnd), src0=vgpr(src), src1=16, src2=1,
+      pairs = ((srcLo, vRndLo), (srcHi, vRndHi))
+      for src, rnd in pairs:
+        insts.append(VBfeU32(dst=vgpr(rnd), src0=vgpr(src), src1=16, src2=1,
                              comment="w4a16: lsb of the bf16 mantissa"))
-        insts.append(VAdd3U32(dst=vgpr(vRnd), src0=vgpr(src), src1=vgpr(vRnd),
+      for src, rnd in pairs:
+        insts.append(VAdd3U32(dst=vgpr(src), src0=vgpr(src), src1=vgpr(rnd),
                               src2=vgpr(vBf16Inc), comment="w4a16: add lsb + rounding bias"))
-        insts.append(VCndMaskB32(dst=vgpr(src), src0=vgpr(vRnd), src1=vgpr(vFp32Nan),
-                                 src2=sgpr(tmpSgprNan, self.states.laneSGPRCount),
-                                 comment="w4a16: keep Nan"))
       insts.append(VPermB32(dst=vgpr(dst), src0=vgpr(srcHi), src1=vgpr(srcLo),
                                  src2="0x07060302",
                                  comment="w4a16: pack 2 bf16"))
@@ -5871,8 +5867,6 @@ class KernelWriterAssembly(KernelWriter):
         for inst in packPair(destVgprPrefix + "+%u+%u" % (g2lIdx, d * 4 + pair), vLo, vHi):
           module.add(inst)
     self.vgprPool.checkIn(tmp)
-    if tmpSgprNan is not None:
-      self.sgprPool.checkIn(tmpSgprNan)
     return module
 
   ##############################################################################

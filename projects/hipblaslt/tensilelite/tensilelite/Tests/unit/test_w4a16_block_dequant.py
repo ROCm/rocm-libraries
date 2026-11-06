@@ -496,6 +496,31 @@ def test_client_config_carries_block_scale(toolchain, tmp_path):
     assert "param('scale-a-type', problemType.bType.toName())" in src
 
 
+def test_bf16_dequant_keeps_scale_increment_register(toolchain):
+    """ScheduleIterAlg 3 with two LDS buffers interleaves the bf16 dequantize into
+    the scale-pointer increment. The increment is computed into a temporary SGPR and
+    added to SrdScaleA a few instructions later; nothing in between may write that
+    register. The dequantize's NaN mask used to be a pool temporary that got the
+    same SGPR, so the scale pointer advanced by the mask (0) and every K-group after
+    the first used the wrong scale."""
+    _, src = _emit(
+        toolchain, blockSize=32, depthU=64,
+        problemType={"ScaleBlockSizesA": [32, 64, 128], "Int4EncodingA": "UnsignedBias8"},
+        MatrixInstruction=[16, 16, 16, 1, 1, 2, 2, 2, 2], WorkGroup=[32, 4, 1],
+        PrefetchGlobalRead=1, ScheduleIterAlg=3, PrefetchLocalRead=0, ClusterLocalRead=0,
+        TransposeLDS=1, LdsPadA=8, LdsPadB=8, LdsBlockSizePerPadA=128, LdsBlockSizePerPadB=128,
+        VectorWidthA=1, VectorWidthB=1, StoreVectorWidth=1, GlobalReadVectorWidthB=8,
+        SourceSwap=True, WorkGroupMapping=1, ExpandPointerSwap=False, **{"1LDSBuffer": 0})
+    loop = src.split("label_LoopBeginL:")[1].split("label_LoopEndL:")[0].splitlines()
+    code = [line.split("//")[0].strip() for line in loop]
+    start = next(i for i, c in enumerate(code) if c.startswith("s_cselect_b32") and "ScaleAInc" in c)
+    inc = re.match(r"s_cselect_b32\s+([^,]+),", code[start]).group(1)
+    end = next(i for i in range(start, len(code)) if re.match(r"s_add_u32\s+s\[sgprSrdScaleA\+0\]", code[i]))
+    assert inc in code[end], "the increment is no longer applied from the register it was computed into"
+    writers = [c for c in code[start + 1:end] if c and re.match(r"[sv]_\S+\s+" + re.escape(inc) + r"\s*,", c)]
+    assert not writers, f"{inc} is overwritten before SrdScaleA += {inc}: {writers[:3]}"
+
+
 @pytest.mark.parametrize("ldsb", [0, 1])
 def test_pgr2_sia3_loop_issues_every_global_read(toolchain, ldsb):
     """With PrefetchGlobalRead 2, ScheduleIterAlg 3 pairs each global read with a
