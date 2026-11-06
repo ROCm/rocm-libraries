@@ -58,6 +58,18 @@ struct ResolvedMatcher
     MatchDescriptor descriptor;
     GraphCriterionFn graphFn = nullptr;
     KernelMatcherFn kernelFn = nullptr;
+    /// A kernel-scoped matcher's optional KernelPrepareFn, registered under its symbol.
+    KernelPrepareFn prepareFn = nullptr;
+};
+
+/// A kernel-scoped matcher's CandidateFilterFn, resolved once with the matcher, and the
+/// packs whose admitted kernels it refines as one set: every pack listing the matcher.
+struct ResolvedCandidateFilter
+{
+    DescriptorId matcherId;
+    std::string description;
+    CandidateFilterFn filter = nullptr;
+    std::unordered_set<DescriptorId, DescriptorIdHash> listingPacks;
 };
 
 /// A UDD plus the handler its dispatchSymbol resolved to at construction.
@@ -168,47 +180,24 @@ constexpr size_t alignSharedWorkspace(size_t sharedBytes)
 /// shared size rounded up to SHARED_WORKSPACE_ALIGNMENT.
 inline constexpr const char* SCRATCH_OFFSET_TOKEN = "ws.scratch_offset";
 
-/// The engine's view of its own kernels: which apply to a graph, in what order, and
-/// how to launch one. Answers isApplicable (unsortedDefinitions non-empty), getDetails
-/// (sortedDefinitions), getMaxWorkspaceSize (dispatchHandlerFor per survivor, max), and
-/// initializeExecutionContext (sortedDefinitions().front(), getDispatchDetails).
+/// The part of an engine's kernel-ingestor state that never changes once built: its
+/// schema, resolved matchers and dispatches, packs, every kernel's precomputed
+/// definition, heuristic, and graph_match. Building it is O(kernels) -- every kernel's
+/// metadata is completed and its tuple checked for uniqueness -- so it is built once
+/// per descriptor set and shared, through `std::shared_ptr<const ...>`, by every
+/// KernelIngestorStateManager serving that set. Each manager keeps its own mutable
+/// caches beside it.
 ///
-/// Slots (RFC 0021 §3). An unslotted engine is one implicit slot with an empty name; the
-/// accessors that take no slot answer for it only, and throw std::logic_error on a slotted
-/// engine, because no single catalog answers for several slots.
-///
-/// Pinned in place. Catalogs hold pointers into each slot's definitions, which are built once at
-/// construction and never mutated, so the manager can be neither copied nor moved.
-///
-/// Thread safety. `_catalogCache`, `_calibratedCache`, `_verdictCache`, `_winnerCache`,
-/// `_programCache` and `_slotCatalogIds` are `LruCache`s that synchronize internally;
-/// `_winnerCacheMutex` guards the per-shard "loaded" set and the one-shot failure-log set.
-///
-/// `_winnerCacheMutex` may be held across a `_winnerCache` call, never the reverse (an
-/// `LruCache` calls no user code), so they cannot deadlock. Matchers, the heuristic, and the
-/// accessors below run outside every lock.
-///
-/// `finishCatalog` is the staged form of the per-variant loop and may run on a worker
-/// thread, concurrently with other engines' `finishCatalog` calls and with the caller
-/// thread. A matcher or graph criterion is a plain function of its const arguments and
-/// must stay callable from any thread at once: any state it reaches beyond those
-/// arguments needs its own synchronization. For a slotted engine the finish builds every
-/// slot's catalog and the engine's verdict, and touches only `_catalogCache`, `_verdictCache`,
-/// `_slotCatalogIds` and the matchers. It never calls a slot's `rank`, `winnerFor` or
-/// `adoptCoveringRecord`, which read the winner cache and may read a shard from disk.
-///
-/// Everything between a lookup and a store is thread-local: `catalogFor` returns a
-/// `Catalog` by value and callers mutate that copy, so ordering a catalog touches no
-/// shared state. Returning a reference into `_catalogCache` instead would make those
-/// mutations a data race. `winnerFor` returns a copy for the same reason. The shared
-/// `Catalog::measuredRecord` points to const and is never written after creation.
-///
-/// Concurrent callers can therefore duplicate work -- two threads may rank the same
-/// catalog, or record a ranking for the same key -- and the last store wins. Both
-/// stores are equally valid, so the cost is the redundant work, never a wrong answer.
+/// Thread safety: immutable after construction and read only through const members,
+/// so any number of managers on any number of threads may share one instance.
 template <typename THandle>
-class KernelIngestorStateManager
+class KernelIngestorStateManager;
+
+template <typename THandle>
+class KernelIngestorSharedState
 {
+    friend class KernelIngestorStateManager<THandle>;
+
     /// How many kernels a pack holds under one resolved arch list.
     struct ArchKernelCount
     {
@@ -235,6 +224,651 @@ class KernelIngestorStateManager
         std::vector<std::vector<ArchKernelCount>> kernelsByArch;
     };
 
+public:
+    /// An unslotted engine: one implicit slot.
+    /// @throws std::invalid_argument bad pack reference, or two kernels sharing a metadata tuple
+    ///         that compete at the same arch tier on a device.
+    /// @throws std::runtime_error a UMD or the engine's graph_match names a symbol this
+    /// build does not ship.
+    ///
+    /// Matcher, dispatch, and graph_match symbols resolve here, eagerly, so a missing
+    /// one excludes this engine at construction instead of throwing later from
+    /// isApplicable().
+    /// @param describedBy Names the engine in the graph_match resolution failure, which
+    ///        is the only one of the three that has no descriptor of its own to name:
+    ///        the symbol lives on the UED, so without this the diagnostic would carry
+    ///        the symbol string alone.
+    KernelIngestorSharedState(MetadataSchema schema,
+                              std::vector<MatchDescriptor> matchers,
+                              std::vector<DispatchDescriptor> dispatches,
+                              std::vector<KernelDescriptorPack> packs,
+                              std::shared_ptr<IKernelHeuristic> heuristic,
+                              const std::string& graphMatchSymbol,
+                              const std::string& describedBy = {})
+        : KernelIngestorSharedState(
+              false,
+              implicitSlot(std::move(schema), std::move(packs), std::move(heuristic)),
+              {},
+              std::move(matchers),
+              std::move(dispatches),
+              graphMatchSymbol,
+              describedBy)
+    {
+    }
+
+    /// A slotted engine: @p slots in launch order. As the unslotted constructor, except that a
+    /// pack breaking a per-slot uniqueness rule (a metadata tuple repeated within a slot, a
+    /// kernel id repeated on overlapping arches within a slot) is dropped with an ERROR instead
+    /// of thrown (RFC 0021 §8). A kernel id shared by two slots is the loader's to refuse.
+    /// @param matchers, dispatches Shared by every slot's packs.
+    /// @param sharedWorkspaceToken The bound token holding the shared region's size (RFC 0021
+    ///        §6); empty when the engine declares none.
+    /// @throws std::invalid_argument as the unslotted constructor, and a slot list that is
+    ///         empty or repeats a name.
+    KernelIngestorSharedState(std::vector<KernelSlotInput> slots,
+                              std::vector<MatchDescriptor> matchers,
+                              std::vector<DispatchDescriptor> dispatches,
+                              const std::string& graphMatchSymbol,
+                              std::string sharedWorkspaceToken = {},
+                              const std::string& describedBy = {})
+        : KernelIngestorSharedState(true,
+                                    slotStates(std::move(slots)),
+                                    std::move(sharedWorkspaceToken),
+                                    std::move(matchers),
+                                    std::move(dispatches),
+                                    graphMatchSymbol,
+                                    describedBy)
+    {
+    }
+
+    KernelIngestorSharedState(const KernelIngestorSharedState&) = delete;
+    KernelIngestorSharedState& operator=(const KernelIngestorSharedState&) = delete;
+    KernelIngestorSharedState(KernelIngestorSharedState&&) = delete;
+    KernelIngestorSharedState& operator=(KernelIngestorSharedState&&) = delete;
+    ~KernelIngestorSharedState() = default;
+
+    bool isSlotted() const
+    {
+        return _slotted;
+    }
+
+    const std::vector<SlotState>& slots() const
+    {
+        return _slots;
+    }
+
+    const std::string& sharedWorkspaceToken() const
+    {
+        return _sharedWorkspaceToken;
+    }
+
+    const std::unordered_map<DescriptorId, ResolvedMatcher, DescriptorIdHash>& matchers() const
+    {
+        return _matchers;
+    }
+
+    const std::unordered_map<DescriptorId, ResolvedDispatch<THandle>, DescriptorIdHash>&
+        dispatches() const
+    {
+        return _dispatches;
+    }
+
+    GraphMatchFn graphMatchFn() const
+    {
+        return _graphMatchFn;
+    }
+
+    /// Every kernel-scoped matcher whose symbol also names a CandidateFilterFn, in the
+    /// order the packs first list them.
+    const std::vector<ResolvedCandidateFilter>& candidateFilters() const
+    {
+        return _candidateFilters;
+    }
+
+private:
+    /// @p matchers and @p dispatches resolve here, eagerly, for the unslotted and slotted
+    /// constructors alike.
+    KernelIngestorSharedState(bool slotted,
+                              std::vector<SlotState> slots,
+                              std::string sharedWorkspaceToken,
+                              std::vector<MatchDescriptor> matchers,
+                              std::vector<DispatchDescriptor> dispatches,
+                              const std::string& graphMatchSymbol,
+                              const std::string& describedBy)
+        : _slotted(slotted)
+        , _slots(std::move(slots))
+        , _sharedWorkspaceToken(std::move(sharedWorkspaceToken))
+        , _graphMatchFn(graphMatchSymbol.empty()
+                            ? nullptr
+                            : GraphMatchRegistry::resolve(graphMatchSymbol, describedBy))
+    {
+        if(_slots.empty())
+        {
+            throw std::invalid_argument("kernel ingestor requires at least one slot");
+        }
+        std::unordered_set<std::string> slotNames;
+        for(const auto& slot : _slots)
+        {
+            if(slot.heuristic == nullptr)
+            {
+                throw std::invalid_argument("kernel ingestor requires a heuristic");
+            }
+            if(_slotted && (slot.name.empty() || !slotNames.insert(slot.name).second))
+            {
+                throw std::invalid_argument("slot name '" + slot.name
+                                            + "' is empty or declared twice");
+            }
+        }
+
+        for(auto& matcher : matchers)
+        {
+            const auto id = matcher.id;
+            const auto description = describeDescriptor("matcher", matcher.name, matcher.id);
+            ResolvedMatcher resolved{std::move(matcher), nullptr, nullptr, nullptr};
+            if(resolved.descriptor.scope == MatchScope::GRAPH)
+            {
+                resolved.graphFn
+                    = GraphCriterionRegistry::resolve(resolved.descriptor.matchSymbol, description);
+            }
+            else
+            {
+                resolved.kernelFn
+                    = KernelMatcherRegistry::resolve(resolved.descriptor.matchSymbol, description);
+                resolved.prepareFn
+                    = KernelPrepareRegistry::tryResolve(resolved.descriptor.matchSymbol);
+            }
+
+            if(const auto [it, inserted] = _matchers.emplace(id, std::move(resolved)); !inserted)
+            {
+                throw std::invalid_argument("duplicate match descriptor id '" + toString(id)
+                                            + "' collides with '" + it->second.descriptor.name
+                                            + "'");
+            }
+        }
+        for(auto& dispatch : dispatches)
+        {
+            const auto id = dispatch.id;
+            ResolvedDispatch<THandle> resolved{std::move(dispatch), nullptr};
+            resolved.handler = DispatchRegistry<THandle>::resolve(
+                resolved.descriptor.dispatchSymbol,
+                describeDescriptor("dispatch", resolved.descriptor.name, id));
+
+            if(const auto [it, inserted] = _dispatches.emplace(id, std::move(resolved)); !inserted)
+            {
+                throw std::invalid_argument("duplicate dispatch descriptor id '" + toString(id)
+                                            + "' collides with '" + it->second.descriptor.name
+                                            + "'");
+            }
+        }
+
+        for(auto& slot : _slots)
+        {
+            indexSlot(slot);
+        }
+        prepareDefinitions();
+        resolveCandidateFilters();
+    }
+
+    static std::vector<SlotState> implicitSlot(MetadataSchema schema,
+                                               std::vector<KernelDescriptorPack> packs,
+                                               std::shared_ptr<IKernelHeuristic> heuristic)
+    {
+        std::vector<SlotState> slots;
+        slots.push_back(
+            SlotState{{}, std::move(schema), std::move(packs), {}, {}, std::move(heuristic), {}});
+        return slots;
+    }
+
+    static std::vector<SlotState> slotStates(std::vector<KernelSlotInput> inputs)
+    {
+        std::vector<SlotState> slots;
+        slots.reserve(inputs.size());
+        for(auto& input : inputs)
+        {
+            slots.push_back(SlotState{std::move(input.name),
+                                      std::move(input.schema),
+                                      std::move(input.packs),
+                                      {},
+                                      {},
+                                      std::move(input.heuristic),
+                                      {}});
+        }
+        return slots;
+    }
+
+    void indexSlot(SlotState& slot) const
+    {
+        // Two kernels may share a tuple when no single device sees both at the same arch
+        // tier (per-arch shards, or a more specific kernel that buildCatalog shadows
+        // per device). Uniqueness is per competing-arch group, keyed by the tuple's values
+        // in a hash map rather than scanned, which would be quadratic.
+        size_t kernelCount = 0;
+        for(const auto& pack : slot.packs)
+        {
+            kernelCount += pack.kernels.size();
+        }
+        std::unordered_map<MetadataTupleValues,
+                           std::vector<std::vector<std::string>>,
+                           MetadataTupleValuesHash>
+            archesClaimingTuple;
+        archesClaimingTuple.reserve(kernelCount);
+        // Rankings and enumeration name a candidate by kernel id, so an id is unique per
+        // overlapping-arch group too.
+        std::unordered_map<DescriptorId, std::vector<std::vector<std::string>>, DescriptorIdHash>
+            archesClaimingId;
+        archesClaimingId.reserve(kernelCount);
+        // Records @p arch unless @p conflicts finds a claimant it collides with: any shared
+        // device for an id, the same arch tier on a shared device for a tuple.
+        const auto claim = [](std::vector<std::vector<std::string>>& claimants,
+                              const std::vector<std::string>& arch,
+                              const auto& conflicts) {
+            const bool taken = std::any_of(
+                claimants.begin(), claimants.end(), [&arch, &conflicts](const auto& claimed) {
+                    return conflicts(claimed, arch);
+                });
+            if(!taken)
+            {
+                claimants.push_back(arch);
+            }
+            return !taken;
+        };
+
+        slot.definitions.reserve(slot.packs.size());
+        slot.kernelsByArch.reserve(slot.packs.size());
+        for(const auto& pack : slot.packs)
+        {
+            for(const auto& matcherId : pack.matcherIds)
+            {
+                if(_matchers.find(matcherId) == _matchers.end())
+                {
+                    throw std::invalid_argument("pack '" + toString(pack.id)
+                                                + "' names unknown matcher '" + toString(matcherId)
+                                                + "'");
+                }
+            }
+            if(_dispatches.find(pack.dispatchId) == _dispatches.end())
+            {
+                throw std::invalid_argument("pack '" + toString(pack.id)
+                                            + "' names unknown dispatch descriptor '"
+                                            + toString(pack.dispatchId) + "'");
+            }
+
+            std::vector<KernelDefinition> packDefinitions;
+            packDefinitions.reserve(pack.kernels.size());
+            // What this pack's native handler launches, read once per pack. The empty set is
+            // a single-launch handler, which reads `kernel_source`.
+            const std::set<std::string> handlerLaunches
+                = _dispatches.find(pack.dispatchId)->second.handler->launchNames();
+            // What this pack has claimed so far, so a slotted engine can release it when a
+            // later kernel of the pack is refused. Left empty for an unslotted engine, which
+            // throws instead.
+            std::vector<DescriptorId> claimedIds;
+            std::vector<MetadataTupleValues> claimedTuples;
+            std::string refusal;
+            // A violation throws for an unslotted engine; a slotted engine records it and
+            // drops the pack.
+            const auto refuse = [this, &refusal](std::string message) {
+                if(!_slotted)
+                {
+                    throw std::invalid_argument(message);
+                }
+                refusal = std::move(message);
+            };
+
+            for(const auto& kernel : pack.kernels)
+            {
+                const auto isAdaptable = [](const KernelSource& source) {
+                    return source.kind == KernelSourceKind::EMBEDDED_SOURCE
+                           || source.kind == KernelSourceKind::KPACK;
+                };
+                // A multi-launch kernel keeps no `source`: every launch entry answers for
+                // itself, and one this build cannot adapt costs the whole kernel.
+                if(!allLaunchSources(kernel, isAdaptable))
+                {
+                    // Dropped, not thrown: an unadaptable kernel costs only itself, so its
+                    // pack keeps serving whichever siblings this build can dispatch.
+                    HIPDNN_PLUGIN_LOG_ERROR(
+                        "ingestor: " << describeDescriptor("kernel", kernel.name, kernel.id)
+                                     << " declares a source kind this build has no adapter for;"
+                                        " only EMBEDDED_SOURCE and KPACK are implemented,"
+                                        " dropping it");
+                    continue;
+                }
+
+                // RFC 0017 §8.6: an accepted kernel is always launchable. A handler launches
+                // exactly the launches it declares, so a kernel carrying any other set --
+                // fewer, more, or the same number under other names -- is dropped here,
+                // before applicability, rather than failing at plan build. It claims no
+                // metadata tuple, so it cannot hide a sibling that can launch.
+                const std::set<std::string> kernelLaunches = launchNamesOf(kernel.sources);
+                if(kernelLaunches != handlerLaunches)
+                {
+                    const auto spell = [](const std::set<std::string>& names) {
+                        if(names.empty())
+                        {
+                            return std::string("{} (one launch, 'kernel_source')");
+                        }
+                        std::string text = "{";
+                        for(const auto& name : names)
+                        {
+                            text += (text.size() > 1 ? ", " : "") + name;
+                        }
+                        return text + "}";
+                    };
+                    HIPDNN_PLUGIN_LOG_ERROR(
+                        "ingestor: " << describeDescriptor("kernel", kernel.name, kernel.id)
+                                     << " carries the launches " << spell(kernelLaunches)
+                                     << ", but the dispatch handler of "
+                                     << describeDescriptor("pack", pack.name, pack.id)
+                                     << " launches " << spell(handlerLaunches)
+                                     << "; a variant with a different launch set belongs in its"
+                                        " own pack, dropping it");
+                    continue;
+                }
+
+                auto key = completeMetadata(slot.schema, kernel);
+                // A kernel that declared no arch of its own runs wherever its pack does;
+                // one that declared a narrower list claims only that. Claiming by the
+                // kernel rather than the pack is what lets two kernels of ONE pack share a
+                // tuple under disjoint arch -- one implementation per capability -- while
+                // still catching two that compete at the same arch tier on a device.
+                // Kernels at different tiers do not collide: the better tier wins.
+                std::vector<std::string> kernelArch = kernel.arch.empty() ? pack.arch : kernel.arch;
+                MetadataTupleValues tuple;
+                tuple.reserve(key.size());
+                for(const auto& entry : key)
+                {
+                    tuple.push_back(entry.second);
+                }
+                // try_emplace, not operator[], only because misc-const-correctness
+                // misreads the operator[] form here and demands a const map.
+                if(!claim(archesClaimingId.try_emplace(kernel.id).first->second,
+                          kernelArch,
+                          archOverlaps))
+                {
+                    refuse("kernel '" + toString(kernel.id)
+                           + "' is declared twice on an arch both declarations reach; a kernel id "
+                           + "names one candidate and must be unique per device");
+                    break;
+                }
+                if(_slotted)
+                {
+                    claimedIds.push_back(kernel.id);
+                }
+                MetadataTupleValues claimedTuple;
+                if(_slotted)
+                {
+                    claimedTuple = tuple;
+                }
+                if(!claim(archesClaimingTuple.try_emplace(std::move(tuple)).first->second,
+                          kernelArch,
+                          archesCompete))
+                {
+                    refuse("kernel '" + toString(kernel.id)
+                           + "' duplicates the metadata tuple of another kernel under schema '"
+                           + slot.schema.name
+                           + "' at the same arch tier on a device both reach; a better tier "
+                           + "shadows a worse one, so equal tiers cannot be told apart");
+                    break;
+                }
+                if(_slotted)
+                {
+                    claimedTuples.push_back(std::move(claimedTuple));
+                }
+
+                packDefinitions.push_back(KernelDefinition{kernel.id,
+                                                           pack.id,
+                                                           pack.dispatchId,
+                                                           kernel.source,
+                                                           std::move(key),
+                                                           kernel.priority,
+                                                           std::move(kernelArch),
+                                                           kernel.originDirectory,
+                                                           kernel.name,
+                                                           kernel.treeRoot,
+                                                           kernel.sources,
+                                                           // prepareDefinitions() fills these
+                                                           // in once every slot is indexed.
+                                                           nullptr,
+                                                           nullptr});
+            }
+
+            if(!refusal.empty())
+            {
+                // Newest claim first: a key claimed twice by this pack holds both entries, and
+                // the later one is last.
+                for(auto it = claimedIds.rbegin(); it != claimedIds.rend(); ++it)
+                {
+                    archesClaimingId.at(*it).pop_back();
+                }
+                for(auto it = claimedTuples.rbegin(); it != claimedTuples.rend(); ++it)
+                {
+                    archesClaimingTuple.at(*it).pop_back();
+                }
+                packDefinitions.clear();
+                HIPDNN_PLUGIN_LOG_ERROR("ingestor: slot '" << slot.name << "' drops pack "
+                                                           << toString(pack.id) << ": " << refusal);
+            }
+            // Pushed even when every kernel was dropped: `definitions` is indexed by pack
+            // position, so skipping one entry would bind every later pack's definitions to
+            // the wrong pack and run the last index out of range.
+            slot.definitions.push_back(std::move(packDefinitions));
+
+            std::vector<ArchKernelCount> counts;
+            for(const auto& definition : slot.definitions.back())
+            {
+                const auto group
+                    = std::find_if(counts.begin(), counts.end(), [&definition](const auto& count) {
+                          return count.arch == definition.arch;
+                      });
+                if(group == counts.end())
+                {
+                    counts.push_back({definition.arch, 1});
+                }
+                else
+                {
+                    ++group->kernels;
+                }
+            }
+            slot.kernelsByArch.push_back(std::move(counts));
+        }
+
+        buildOrdinalDomains(slot);
+    }
+
+    /// The value set of every non-integer metadata field of @p slot, in the order that numbers
+    /// it (RFC 0019 §13.2: a knob is an int64, so non-`INT` fields are addressed by index).
+    ///
+    /// Spans every pack of the slot, not one device's catalog, so an index means the same
+    /// kernel on every graph. Ordered by `std::variant`'s `<`; `uhd_gen/addressing.py` must
+    /// derive the same indices.
+
+    static void buildOrdinalDomains(SlotState& slot)
+    {
+        for(const auto& field : slot.schema.fields)
+        {
+            if(field.type == MetadataType::INT)
+            {
+                continue;
+            }
+
+            std::set<MetadataValue> observed;
+            for(const auto& packDefinitions : slot.definitions)
+            {
+                for(const auto& definition : packDefinitions)
+                {
+                    const auto it = definition.metadata.find(field.name);
+                    if(it != definition.metadata.end())
+                    {
+                        observed.insert(it->second);
+                    }
+                }
+            }
+            if(!observed.empty())
+            {
+                slot.ordinalDomains.emplace(
+                    field.name, std::vector<MetadataValue>(observed.begin(), observed.end()));
+            }
+        }
+    }
+
+    /// A kernel's metadata values with @p schema's defaults filled in; the completed
+    /// tuple, not the descriptor id, is the catalog key.
+
+    static MetadataValues completeMetadata(const MetadataSchema& schema,
+                                           const KernelDescriptor& kernel)
+    {
+        MetadataValues complete;
+
+        for(const auto& field : schema.fields)
+        {
+            auto it = kernel.metadata.find(field.name);
+
+            if(it == kernel.metadata.end())
+            {
+                if(!field.defaultValue.has_value())
+                {
+                    throw std::invalid_argument("kernel '" + toString(kernel.id)
+                                                + "' omits metadata field '" + field.name
+                                                + "', which declares no default");
+                }
+                complete.emplace(field.name, *field.defaultValue);
+                continue;
+            }
+
+            if(metadataTypeOf(it->second) != field.type)
+            {
+                throw std::invalid_argument("kernel '" + toString(kernel.id)
+                                            + "' supplies metadata field '" + field.name
+                                            + "' with a value of the wrong type");
+            }
+            complete.emplace(field.name, it->second);
+        }
+
+        for(const auto& [name, value] : kernel.metadata)
+        {
+            if(complete.find(name) == complete.end())
+            {
+                throw std::invalid_argument("kernel '" + toString(kernel.id)
+                                            + "' supplies metadata field '" + name
+                                            + "', which its engine's metadata schema does "
+                                              "not declare");
+            }
+        }
+
+        return complete;
+    }
+
+    /// Pack pruning and matchers both read the device, so nothing can be answered without one.
+    /// Checked once here rather than in every provider's matchers, where an omission is
+    /// invisible.
+
+    /// Runs each pack's KernelPrepareFn, if one of its kernel-scoped matchers registers
+    /// one, over every definition of the pack, once. A pack may have at most one: its
+    /// kernels carry a single payload.
+    /// @throws std::invalid_argument a pack lists two matchers with different preparers.
+    void prepareDefinitions()
+    {
+        for(auto& slot : _slots)
+        {
+            for(size_t packIndex = 0; packIndex < slot.packs.size(); ++packIndex)
+            {
+                const auto& pack = slot.packs[packIndex];
+                KernelPrepareFn prepare = nullptr;
+                for(const auto& matcherId : pack.matcherIds)
+                {
+                    const auto candidate = _matchers.at(matcherId).prepareFn;
+                    if(candidate == nullptr || candidate == prepare)
+                    {
+                        continue;
+                    }
+                    if(prepare != nullptr)
+                    {
+                        throw std::invalid_argument("pack '" + toString(pack.id)
+                                                    + "' lists two kernel-scoped matchers with "
+                                                      "different kernel preparers; a kernel "
+                                                      "carries one prepared payload");
+                    }
+                    prepare = candidate;
+                }
+                if(prepare == nullptr)
+                {
+                    continue;
+                }
+                for(auto& definition : slot.definitions[packIndex])
+                {
+                    definition.prepared = prepare(definition);
+                    definition.preparedBy = prepare;
+                }
+            }
+        }
+    }
+
+    /// Every kernel-scoped matcher of every slot whose symbol also names a
+    /// CandidateFilterFn, resolved once, like the matchers: the registry is immutable
+    /// once the provider loaded, and absence means no refinement.
+    void resolveCandidateFilters()
+    {
+        std::unordered_set<DescriptorId, DescriptorIdHash> visited;
+        for(const auto& slot : _slots)
+        {
+            for(const auto& pack : slot.packs)
+            {
+                for(const auto& matcherId : pack.matcherIds)
+                {
+                    const auto& matcher = _matchers.at(matcherId);
+                    if(matcher.descriptor.scope != MatchScope::KERNEL
+                       || !visited.insert(matcherId).second)
+                    {
+                        continue;
+                    }
+                    const auto filter
+                        = CandidateFilterRegistry::tryResolve(matcher.descriptor.matchSymbol);
+                    if(filter == nullptr)
+                    {
+                        continue;
+                    }
+                    ResolvedCandidateFilter resolved{matcherId,
+                                                     describeDescriptor("matcher",
+                                                                        matcher.descriptor.name,
+                                                                        matcher.descriptor.id),
+                                                     filter,
+                                                     {}};
+                    for(const auto& otherSlot : _slots)
+                    {
+                        for(const auto& other : otherSlot.packs)
+                        {
+                            if(std::find(
+                                   other.matcherIds.begin(), other.matcherIds.end(), matcherId)
+                               != other.matcherIds.end())
+                            {
+                                resolved.listingPacks.insert(other.id);
+                            }
+                        }
+                    }
+                    _candidateFilters.push_back(std::move(resolved));
+                }
+            }
+        }
+    }
+
+    bool _slotted;
+    /// In launch order; exactly one, unnamed, for an unslotted engine.
+    std::vector<SlotState> _slots;
+    /// The bound token holding the shared workspace size; empty when none is declared.
+    std::string _sharedWorkspaceToken;
+    std::unordered_map<DescriptorId, ResolvedMatcher, DescriptorIdHash> _matchers;
+    std::unordered_map<DescriptorId, ResolvedDispatch<THandle>, DescriptorIdHash> _dispatches;
+    GraphMatchFn _graphMatchFn = nullptr;
+    /// Every kernel-scoped matcher whose symbol also names a CandidateFilterFn, in the
+    /// order the packs first list them. Resolved at construction, like the matchers: the
+    /// registry is immutable once the provider loaded, and absence means no refinement.
+    std::vector<ResolvedCandidateFilter> _candidateFilters;
+};
+
+template <typename THandle>
+class KernelIngestorStateManager
+{
 public:
     /// How many (graph, device) catalogs to retain; eviction costs a rematch, never a
     /// wrong answer.
@@ -270,23 +904,18 @@ public:
                                EngineIdentity engine = {},
                                size_t winnerCacheCapacity = DEFAULT_WINNER_CACHE_CAPACITY)
         : KernelIngestorStateManager(
-              false,
-              implicitSlot(std::move(schema), std::move(packs), std::move(heuristic)),
-              {},
-              std::move(matchers),
-              std::move(dispatches),
-              graphMatchSymbol,
-              describedBy,
+              std::make_shared<const KernelIngestorSharedState<THandle>>(std::move(schema),
+                                                                         std::move(matchers),
+                                                                         std::move(dispatches),
+                                                                         std::move(packs),
+                                                                         std::move(heuristic),
+                                                                         graphMatchSymbol,
+                                                                         describedBy),
               catalogCacheCapacity,
               std::move(engine),
               winnerCacheCapacity)
     {
     }
-
-    KernelIngestorStateManager(const KernelIngestorStateManager&) = delete;
-    KernelIngestorStateManager& operator=(const KernelIngestorStateManager&) = delete;
-    KernelIngestorStateManager(KernelIngestorStateManager&&) = delete;
-    KernelIngestorStateManager& operator=(KernelIngestorStateManager&&) = delete;
 
     /// A slotted engine: @p slots in launch order. As the unslotted constructor, except that a
     /// pack breaking a per-slot uniqueness rule (a metadata tuple repeated within a slot, a
@@ -306,17 +935,72 @@ public:
                                size_t catalogCacheCapacity = DEFAULT_CATALOG_CACHE_CAPACITY,
                                EngineIdentity engine = {},
                                size_t winnerCacheCapacity = DEFAULT_WINNER_CACHE_CAPACITY)
-        : KernelIngestorStateManager(true,
-                                     slotStates(std::move(slots)),
-                                     std::move(sharedWorkspaceToken),
-                                     std::move(matchers),
-                                     std::move(dispatches),
-                                     graphMatchSymbol,
-                                     describedBy,
+        : KernelIngestorStateManager(std::make_shared<const KernelIngestorSharedState<THandle>>(
+                                         std::move(slots),
+                                         std::move(matchers),
+                                         std::move(dispatches),
+                                         graphMatchSymbol,
+                                         std::move(sharedWorkspaceToken),
+                                         describedBy),
                                      catalogCacheCapacity,
                                      std::move(engine),
                                      winnerCacheCapacity)
     {
+    }
+
+    /// A manager over @p state, which another manager may already be serving: nothing is
+    /// resolved, completed or validated again, so this is O(1) in the number of kernels. The
+    /// caches (catalog, calibrated rankings, verdicts, winner records, program records, shard
+    /// latches) are this manager's own.
+    /// @param engine As above; an empty name disables the on-disk winner cache.
+    /// @throws std::invalid_argument @p state is null.
+    explicit KernelIngestorStateManager(
+        std::shared_ptr<const KernelIngestorSharedState<THandle>> state,
+        size_t catalogCacheCapacity = DEFAULT_CATALOG_CACHE_CAPACITY,
+        EngineIdentity engine = {},
+        size_t winnerCacheCapacity = DEFAULT_WINNER_CACHE_CAPACITY)
+        : _state(requireState(std::move(state)))
+        , _slotted(_state->isSlotted())
+        , _slots(_state->slots())
+        , _sharedWorkspaceToken(_state->sharedWorkspaceToken())
+        , _matchers(_state->matchers())
+        , _dispatches(_state->dispatches())
+        , _graphMatchFn(_state->graphMatchFn())
+        , _catalogCache(catalogCacheCapacity)
+        // Same key and capacity as _catalogCache: both answer for (graph, device, engine
+        // version). Kept outside `Catalog` because no matcher, scorer or formula reads it.
+        , _calibratedCache(catalogCacheCapacity)
+        , _verdictCache(catalogCacheCapacity)
+        , _engine(std::move(engine))
+        , _logPrefix("ingestor: engine '" + _engine.name + "' ")
+        , _winnerCache(winnerCacheCapacity)
+        , _programCache(winnerCacheCapacity)
+        , _slotCatalogIds(catalogCacheCapacity)
+    {
+    }
+
+    /// Not relocatable: the members below alias into *_state, and the engine's plan
+    /// builder holds a reference to this manager.
+    KernelIngestorStateManager(const KernelIngestorStateManager&) = delete;
+    KernelIngestorStateManager& operator=(const KernelIngestorStateManager&) = delete;
+    KernelIngestorStateManager(KernelIngestorStateManager&&) = delete;
+    KernelIngestorStateManager& operator=(KernelIngestorStateManager&&) = delete;
+    ~KernelIngestorStateManager() = default;
+
+    /// The immutable state this manager serves, for building another manager over it.
+    const std::shared_ptr<const KernelIngestorSharedState<THandle>>& sharedState() const
+    {
+        return _state;
+    }
+
+    static std::shared_ptr<const KernelIngestorSharedState<THandle>>
+        requireState(std::shared_ptr<const KernelIngestorSharedState<THandle>> state)
+    {
+        if(state == nullptr)
+        {
+            throw std::invalid_argument("kernel ingestor state manager requires a shared state");
+        }
+        return state;
     }
 
     /// Whether the engine declares slots (RFC 0021); an unslotted engine has one implicit slot.
@@ -1014,124 +1698,7 @@ public:
     }
 
 private:
-    /// @p matchers and @p dispatches resolve here, eagerly, for the unslotted and slotted
-    /// constructors alike.
-    KernelIngestorStateManager(bool slotted,
-                               std::vector<SlotState> slots,
-                               std::string sharedWorkspaceToken,
-                               std::vector<MatchDescriptor> matchers,
-                               std::vector<DispatchDescriptor> dispatches,
-                               const std::string& graphMatchSymbol,
-                               const std::string& describedBy,
-                               size_t catalogCacheCapacity,
-                               EngineIdentity engine,
-                               size_t winnerCacheCapacity)
-        : _slotted(slotted)
-        , _slots(std::move(slots))
-        , _sharedWorkspaceToken(std::move(sharedWorkspaceToken))
-        , _graphMatchFn(graphMatchSymbol.empty()
-                            ? nullptr
-                            : GraphMatchRegistry::resolve(graphMatchSymbol, describedBy))
-        , _catalogCache(catalogCacheCapacity)
-        // Same key and capacity as _catalogCache: both answer for (graph, device, engine
-        // version). Kept outside `Catalog` because no matcher, scorer or formula reads it.
-        , _calibratedCache(catalogCacheCapacity)
-        , _verdictCache(catalogCacheCapacity)
-        , _engine(std::move(engine))
-        , _logPrefix("ingestor: engine '" + _engine.name + "' ")
-        , _winnerCache(winnerCacheCapacity)
-        , _programCache(winnerCacheCapacity)
-        , _slotCatalogIds(catalogCacheCapacity)
-    {
-        if(_slots.empty())
-        {
-            throw std::invalid_argument("kernel ingestor requires at least one slot");
-        }
-        std::unordered_set<std::string> slotNames;
-        for(const auto& slot : _slots)
-        {
-            if(slot.heuristic == nullptr)
-            {
-                throw std::invalid_argument("kernel ingestor requires a heuristic");
-            }
-            if(_slotted && (slot.name.empty() || !slotNames.insert(slot.name).second))
-            {
-                throw std::invalid_argument("slot name '" + slot.name
-                                            + "' is empty or declared twice");
-            }
-        }
-
-        for(auto& matcher : matchers)
-        {
-            const auto id = matcher.id;
-            const auto description = describeDescriptor("matcher", matcher.name, matcher.id);
-            ResolvedMatcher resolved{std::move(matcher), nullptr, nullptr};
-            if(resolved.descriptor.scope == MatchScope::GRAPH)
-            {
-                resolved.graphFn
-                    = GraphCriterionRegistry::resolve(resolved.descriptor.matchSymbol, description);
-            }
-            else
-            {
-                resolved.kernelFn
-                    = KernelMatcherRegistry::resolve(resolved.descriptor.matchSymbol, description);
-            }
-
-            if(const auto [it, inserted] = _matchers.emplace(id, std::move(resolved)); !inserted)
-            {
-                throw std::invalid_argument("duplicate match descriptor id '" + toString(id)
-                                            + "' collides with '" + it->second.descriptor.name
-                                            + "'");
-            }
-        }
-        for(auto& dispatch : dispatches)
-        {
-            const auto id = dispatch.id;
-            ResolvedDispatch<THandle> resolved{std::move(dispatch), nullptr};
-            resolved.handler = DispatchRegistry<THandle>::resolve(
-                resolved.descriptor.dispatchSymbol,
-                describeDescriptor("dispatch", resolved.descriptor.name, id));
-
-            if(const auto [it, inserted] = _dispatches.emplace(id, std::move(resolved)); !inserted)
-            {
-                throw std::invalid_argument("duplicate dispatch descriptor id '" + toString(id)
-                                            + "' collides with '" + it->second.descriptor.name
-                                            + "'");
-            }
-        }
-
-        for(auto& slot : _slots)
-        {
-            indexSlot(slot);
-        }
-    }
-
-    static std::vector<SlotState> implicitSlot(MetadataSchema schema,
-                                               std::vector<KernelDescriptorPack> packs,
-                                               std::shared_ptr<IKernelHeuristic> heuristic)
-    {
-        std::vector<SlotState> slots;
-        slots.push_back(
-            SlotState{{}, std::move(schema), std::move(packs), {}, {}, std::move(heuristic), {}});
-        return slots;
-    }
-
-    static std::vector<SlotState> slotStates(std::vector<KernelSlotInput> inputs)
-    {
-        std::vector<SlotState> slots;
-        slots.reserve(inputs.size());
-        for(auto& input : inputs)
-        {
-            slots.push_back(SlotState{std::move(input.name),
-                                      std::move(input.schema),
-                                      std::move(input.packs),
-                                      {},
-                                      {},
-                                      std::move(input.heuristic),
-                                      {}});
-        }
-        return slots;
-    }
+    using SlotState = typename KernelIngestorSharedState<THandle>::SlotState;
 
     const SlotState& slotAt(size_t slot) const
     {
@@ -1162,6 +1729,7 @@ private:
     /// winner key's too, so reusing it spares a second verified copy and hash of the graph.
     /// A graph with no key has no bytes to key a record on, and such graphs never match
     /// each other either.
+
     bool adoptCoveringRecord(Catalog& catalog,
                              const MatchContext& context,
                              const std::optional<CatalogKey>& catalogKey,
@@ -1302,326 +1870,7 @@ private:
     ///
     /// Uniqueness is per slot. A pack that breaks it is dropped whole, with an ERROR, in a
     /// slotted engine (RFC 0021 §8) and throws in an unslotted one.
-    void indexSlot(SlotState& slot) const
-    {
-        // Two kernels may share a tuple when no single device sees both at the same arch
-        // tier (per-arch shards, or a more specific kernel that buildCatalog shadows
-        // per device). Uniqueness is per competing-arch group, keyed by the tuple's values
-        // in a hash map rather than scanned, which would be quadratic.
-        size_t kernelCount = 0;
-        for(const auto& pack : slot.packs)
-        {
-            kernelCount += pack.kernels.size();
-        }
-        std::unordered_map<MetadataTupleValues,
-                           std::vector<std::vector<std::string>>,
-                           MetadataTupleValuesHash>
-            archesClaimingTuple;
-        archesClaimingTuple.reserve(kernelCount);
-        // Rankings and enumeration name a candidate by kernel id, so an id is unique per
-        // overlapping-arch group too.
-        std::unordered_map<DescriptorId, std::vector<std::vector<std::string>>, DescriptorIdHash>
-            archesClaimingId;
-        archesClaimingId.reserve(kernelCount);
-        // Records @p arch unless @p conflicts finds a claimant it collides with: any shared
-        // device for an id, the same arch tier on a shared device for a tuple.
-        const auto claim = [](std::vector<std::vector<std::string>>& claimants,
-                              const std::vector<std::string>& arch,
-                              const auto& conflicts) {
-            const bool taken = std::any_of(
-                claimants.begin(), claimants.end(), [&arch, &conflicts](const auto& claimed) {
-                    return conflicts(claimed, arch);
-                });
-            if(!taken)
-            {
-                claimants.push_back(arch);
-            }
-            return !taken;
-        };
 
-        slot.definitions.reserve(slot.packs.size());
-        slot.kernelsByArch.reserve(slot.packs.size());
-        for(const auto& pack : slot.packs)
-        {
-            for(const auto& matcherId : pack.matcherIds)
-            {
-                if(_matchers.find(matcherId) == _matchers.end())
-                {
-                    throw std::invalid_argument("pack '" + toString(pack.id)
-                                                + "' names unknown matcher '" + toString(matcherId)
-                                                + "'");
-                }
-            }
-            if(_dispatches.find(pack.dispatchId) == _dispatches.end())
-            {
-                throw std::invalid_argument("pack '" + toString(pack.id)
-                                            + "' names unknown dispatch descriptor '"
-                                            + toString(pack.dispatchId) + "'");
-            }
-
-            std::vector<KernelDefinition> packDefinitions;
-            packDefinitions.reserve(pack.kernels.size());
-            // What this pack's native handler launches, read once per pack. The empty set is
-            // a single-launch handler, which reads `kernel_source`.
-            const std::set<std::string> handlerLaunches
-                = _dispatches.find(pack.dispatchId)->second.handler->launchNames();
-            // What this pack has claimed so far, so a slotted engine can release it when a
-            // later kernel of the pack is refused. Left empty for an unslotted engine, which
-            // throws instead.
-            std::vector<DescriptorId> claimedIds;
-            std::vector<MetadataTupleValues> claimedTuples;
-            std::string refusal;
-            // A violation throws for an unslotted engine; a slotted engine records it and
-            // drops the pack.
-            const auto refuse = [this, &refusal](std::string message) {
-                if(!_slotted)
-                {
-                    throw std::invalid_argument(message);
-                }
-                refusal = std::move(message);
-            };
-
-            for(const auto& kernel : pack.kernels)
-            {
-                const auto isAdaptable = [](const KernelSource& source) {
-                    return source.kind == KernelSourceKind::EMBEDDED_SOURCE
-                           || source.kind == KernelSourceKind::KPACK;
-                };
-                // A multi-launch kernel keeps no `source`: every launch entry answers for
-                // itself, and one this build cannot adapt costs the whole kernel.
-                if(!allLaunchSources(kernel, isAdaptable))
-                {
-                    // Dropped, not thrown: an unadaptable kernel costs only itself, so its
-                    // pack keeps serving whichever siblings this build can dispatch.
-                    HIPDNN_PLUGIN_LOG_ERROR(
-                        "ingestor: " << describeDescriptor("kernel", kernel.name, kernel.id)
-                                     << " declares a source kind this build has no adapter for;"
-                                        " only EMBEDDED_SOURCE and KPACK are implemented,"
-                                        " dropping it");
-                    continue;
-                }
-
-                // RFC 0017 §8.6: an accepted kernel is always launchable. A handler launches
-                // exactly the launches it declares, so a kernel carrying any other set --
-                // fewer, more, or the same number under other names -- is dropped here,
-                // before applicability, rather than failing at plan build. It claims no
-                // metadata tuple, so it cannot hide a sibling that can launch.
-                const std::set<std::string> kernelLaunches = launchNamesOf(kernel.sources);
-                if(kernelLaunches != handlerLaunches)
-                {
-                    const auto spell = [](const std::set<std::string>& names) {
-                        if(names.empty())
-                        {
-                            return std::string("{} (one launch, 'kernel_source')");
-                        }
-                        std::string text = "{";
-                        for(const auto& name : names)
-                        {
-                            text += (text.size() > 1 ? ", " : "") + name;
-                        }
-                        return text + "}";
-                    };
-                    HIPDNN_PLUGIN_LOG_ERROR(
-                        "ingestor: " << describeDescriptor("kernel", kernel.name, kernel.id)
-                                     << " carries the launches " << spell(kernelLaunches)
-                                     << ", but the dispatch handler of "
-                                     << describeDescriptor("pack", pack.name, pack.id)
-                                     << " launches " << spell(handlerLaunches)
-                                     << "; a variant with a different launch set belongs in its"
-                                        " own pack, dropping it");
-                    continue;
-                }
-
-                auto key = completeMetadata(slot.schema, kernel);
-                // A kernel that declared no arch of its own runs wherever its pack does;
-                // one that declared a narrower list claims only that. Claiming by the
-                // kernel rather than the pack is what lets two kernels of ONE pack share a
-                // tuple under disjoint arch -- one implementation per capability -- while
-                // still catching two that compete at the same arch tier on a device.
-                // Kernels at different tiers do not collide: the better tier wins.
-                std::vector<std::string> kernelArch = kernel.arch.empty() ? pack.arch : kernel.arch;
-                MetadataTupleValues tuple;
-                tuple.reserve(key.size());
-                for(const auto& entry : key)
-                {
-                    tuple.push_back(entry.second);
-                }
-                // try_emplace, not operator[], only because misc-const-correctness
-                // misreads the operator[] form here and demands a const map.
-                if(!claim(archesClaimingId.try_emplace(kernel.id).first->second,
-                          kernelArch,
-                          archOverlaps))
-                {
-                    refuse("kernel '" + toString(kernel.id)
-                           + "' is declared twice on an arch both declarations reach; a kernel id "
-                           + "names one candidate and must be unique per device");
-                    break;
-                }
-                if(_slotted)
-                {
-                    claimedIds.push_back(kernel.id);
-                }
-                MetadataTupleValues claimedTuple;
-                if(_slotted)
-                {
-                    claimedTuple = tuple;
-                }
-                if(!claim(archesClaimingTuple.try_emplace(std::move(tuple)).first->second,
-                          kernelArch,
-                          archesCompete))
-                {
-                    refuse("kernel '" + toString(kernel.id)
-                           + "' duplicates the metadata tuple of another kernel under schema '"
-                           + slot.schema.name
-                           + "' at the same arch tier on a device both reach; a better tier "
-                           + "shadows a worse one, so equal tiers cannot be told apart");
-                    break;
-                }
-                if(_slotted)
-                {
-                    claimedTuples.push_back(std::move(claimedTuple));
-                }
-
-                packDefinitions.push_back(KernelDefinition{kernel.id,
-                                                           pack.id,
-                                                           pack.dispatchId,
-                                                           kernel.source,
-                                                           std::move(key),
-                                                           kernel.priority,
-                                                           std::move(kernelArch),
-                                                           kernel.originDirectory,
-                                                           kernel.name,
-                                                           kernel.treeRoot,
-                                                           kernel.sources});
-            }
-
-            if(!refusal.empty())
-            {
-                // Newest claim first: a key claimed twice by this pack holds both entries, and
-                // the later one is last.
-                for(auto it = claimedIds.rbegin(); it != claimedIds.rend(); ++it)
-                {
-                    archesClaimingId.at(*it).pop_back();
-                }
-                for(auto it = claimedTuples.rbegin(); it != claimedTuples.rend(); ++it)
-                {
-                    archesClaimingTuple.at(*it).pop_back();
-                }
-                packDefinitions.clear();
-                HIPDNN_PLUGIN_LOG_ERROR("ingestor: slot '" << slot.name << "' drops pack "
-                                                           << toString(pack.id) << ": " << refusal);
-            }
-            // Pushed even when every kernel was dropped: `definitions` is indexed by pack
-            // position, so skipping one entry would bind every later pack's definitions to
-            // the wrong pack and run the last index out of range.
-            slot.definitions.push_back(std::move(packDefinitions));
-
-            std::vector<ArchKernelCount> counts;
-            for(const auto& definition : slot.definitions.back())
-            {
-                const auto group
-                    = std::find_if(counts.begin(), counts.end(), [&definition](const auto& count) {
-                          return count.arch == definition.arch;
-                      });
-                if(group == counts.end())
-                {
-                    counts.push_back({definition.arch, 1});
-                }
-                else
-                {
-                    ++group->kernels;
-                }
-            }
-            slot.kernelsByArch.push_back(std::move(counts));
-        }
-
-        buildOrdinalDomains(slot);
-    }
-
-    /// The value set of every non-integer metadata field of @p slot, in the order that numbers
-    /// it (RFC 0019 §13.2: a knob is an int64, so non-`INT` fields are addressed by index).
-    ///
-    /// Spans every pack of the slot, not one device's catalog, so an index means the same
-    /// kernel on every graph. Ordered by `std::variant`'s `<`; `uhd_gen/addressing.py` must
-    /// derive the same indices.
-    static void buildOrdinalDomains(SlotState& slot)
-    {
-        for(const auto& field : slot.schema.fields)
-        {
-            if(field.type == MetadataType::INT)
-            {
-                continue;
-            }
-
-            std::set<MetadataValue> observed;
-            for(const auto& packDefinitions : slot.definitions)
-            {
-                for(const auto& definition : packDefinitions)
-                {
-                    const auto it = definition.metadata.find(field.name);
-                    if(it != definition.metadata.end())
-                    {
-                        observed.insert(it->second);
-                    }
-                }
-            }
-            if(!observed.empty())
-            {
-                slot.ordinalDomains.emplace(
-                    field.name, std::vector<MetadataValue>(observed.begin(), observed.end()));
-            }
-        }
-    }
-
-    /// A kernel's metadata values with @p schema's defaults filled in; the completed
-    /// tuple, not the descriptor id, is the catalog key.
-    static MetadataValues completeMetadata(const MetadataSchema& schema,
-                                           const KernelDescriptor& kernel)
-    {
-        MetadataValues complete;
-
-        for(const auto& field : schema.fields)
-        {
-            auto it = kernel.metadata.find(field.name);
-
-            if(it == kernel.metadata.end())
-            {
-                if(!field.defaultValue.has_value())
-                {
-                    throw std::invalid_argument("kernel '" + toString(kernel.id)
-                                                + "' omits metadata field '" + field.name
-                                                + "', which declares no default");
-                }
-                complete.emplace(field.name, *field.defaultValue);
-                continue;
-            }
-
-            if(metadataTypeOf(it->second) != field.type)
-            {
-                throw std::invalid_argument("kernel '" + toString(kernel.id)
-                                            + "' supplies metadata field '" + field.name
-                                            + "' with a value of the wrong type");
-            }
-            complete.emplace(field.name, it->second);
-        }
-
-        for(const auto& [name, value] : kernel.metadata)
-        {
-            if(complete.find(name) == complete.end())
-            {
-                throw std::invalid_argument("kernel '" + toString(kernel.id)
-                                            + "' supplies metadata field '" + name
-                                            + "', which its engine's metadata schema does "
-                                              "not declare");
-            }
-        }
-
-        return complete;
-    }
-
-    /// Pack pruning and matchers both read the device, so nothing can be answered without one.
-    /// Checked once here rather than in every provider's matchers, where an omission is
-    /// invisible.
     static bool deviceResolved(const MatchContext& context)
     {
         return context.deviceId != NO_DEVICE && !context.deviceProperties.gcnArchName.empty();
@@ -2145,6 +2394,7 @@ private:
         }
 
         shadowByArchTier(catalog, context);
+        applyCandidateFilters(context, bound, catalog);
 
         HIPDNN_PLUGIN_LOG_INFO(
             _logPrefix << (_slotted ? "slot '" + slot.name + "' catalog" : "catalog")
@@ -2211,6 +2461,78 @@ private:
         for(size_t i = 0; i < entries.size(); ++i)
         {
             if(tiers[i] != SHADOWED)
+            {
+                entries[kept++] = entries[i];
+            }
+        }
+        entries.resize(kept);
+    }
+
+    /// Each kernel-scoped matcher whose symbol also names a CandidateFilterFn narrows, as
+    /// one set, every kernel admitted from the packs listing it. Runs once a slot's packs
+    /// have all been matched (after shadowByArchTier), so a set sharded across packs is
+    /// refined whole; what stays keeps its order. The filters and their packs were resolved
+    /// when the shared state was built.
+    void applyCandidateFilters(const MatchContext& context,
+                               const BoundTokens& bound,
+                               Catalog& catalog) const
+    {
+        if(catalog.entries.empty())
+        {
+            return;
+        }
+        std::vector<bool> keep(catalog.entries.size(), true);
+        for(const auto& resolved : _state->candidateFilters())
+        {
+            std::vector<size_t> indices;
+            std::vector<const KernelDefinition*> candidates;
+            for(size_t i = 0; i < catalog.entries.size(); ++i)
+            {
+                if(keep[i] && resolved.listingPacks.count(catalog.entries[i]->packId) != 0)
+                {
+                    indices.push_back(i);
+                    candidates.push_back(catalog.entries[i]);
+                }
+            }
+            if(candidates.empty())
+            {
+                continue;
+            }
+
+            const auto kept = resolved.filter(context, bound, candidates);
+            if(kept.size() != candidates.size())
+            {
+                throw std::runtime_error("the candidate filter of " + resolved.description
+                                         + " returned " + std::to_string(kept.size())
+                                         + " flag(s) for " + std::to_string(candidates.size())
+                                         + " kernel(s)");
+            }
+            size_t survivors = 0;
+            for(size_t i = 0; i < kept.size(); ++i)
+            {
+                if(kept[i])
+                {
+                    ++survivors;
+                }
+                else
+                {
+                    keep[indices[i]] = false;
+                }
+            }
+            HIPDNN_PLUGIN_LOG_INFO(_logPrefix << "the candidate filter of " << resolved.description
+                                              << " kept " << survivors << " of "
+                                              << candidates.size() << " kernel(s)");
+        }
+
+        if(std::all_of(keep.begin(), keep.end(), [](bool k) { return k; }))
+        {
+            return;
+        }
+        size_t kept = 0;
+        auto& entries = catalog.entries;
+        for(size_t i = 0; i < entries.size(); ++i)
+        {
+            if(keep[i])
             {
                 entries[kept++] = entries[i];
             }
@@ -2704,13 +3026,15 @@ private:
         }
     }
 
+    /// Shared, immutable, and aliased below: every reference member binds into it.
+    std::shared_ptr<const KernelIngestorSharedState<THandle>> _state;
     bool _slotted;
-    /// In launch order; exactly one, unnamed, for an unslotted engine.
-    std::vector<SlotState> _slots;
+    const std::vector<SlotState>& _slots;
     /// The bound token holding the shared workspace size; empty when none is declared.
-    std::string _sharedWorkspaceToken;
-    std::unordered_map<DescriptorId, ResolvedMatcher, DescriptorIdHash> _matchers;
-    std::unordered_map<DescriptorId, ResolvedDispatch<THandle>, DescriptorIdHash> _dispatches;
+    const std::string& _sharedWorkspaceToken;
+    const std::unordered_map<DescriptorId, ResolvedMatcher, DescriptorIdHash>& _matchers;
+    const std::unordered_map<DescriptorId, ResolvedDispatch<THandle>, DescriptorIdHash>&
+        _dispatches;
     GraphMatchFn _graphMatchFn = nullptr;
     /// Keyed by slot: an unslotted engine's catalogs under the empty slot, a slotted engine's
     /// one entry per slot name.

@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -228,6 +228,7 @@ typedef struct csru2csrInfo* csru2csrInfo_t;
 
 // clang-format off
 
+#if(!defined(CUDART_VERSION))
 /*! \ingroup types_module
  *  \brief List of hipSPARSE status code definitions.
  *
@@ -235,7 +236,6 @@ typedef struct csru2csrInfo* csru2csrInfo_t;
  *  This is a list of the \ref hipsparseStatus_t types that are used by the hipSPARSE
  *  library.
  */
-#if(!defined(CUDART_VERSION))
 typedef enum {
     HIPSPARSE_STATUS_SUCCESS                   = 0, /**< Function succeeded */
     HIPSPARSE_STATUS_NOT_INITIALIZED           = 1, /**< hipSPARSE was not initialized */
@@ -425,6 +425,7 @@ typedef enum {
     HIPSPARSE_DIRECTION_COLUMN = 1 /**< Parse the matrix by columns */
 } hipsparseDirection_t;
 
+#if(!defined(CUDART_VERSION))
 /*! \ingroup types_module
  *  \brief List of hipsparse csr2csc algorithms.
  *
@@ -432,7 +433,6 @@ typedef enum {
  *  This is a list of the \ref hipsparseCsr2CscAlg_t algorithms that can be used by the hipSPARSE
  *  library routines \ref hipsparseCsr2cscEx2_bufferSize and \ref hipsparseCsr2cscEx2.
  */
-#if(!defined(CUDART_VERSION))
 typedef enum
 {
     HIPSPARSE_CSR2CSC_ALG_DEFAULT = 0,

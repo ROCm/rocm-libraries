@@ -384,10 +384,12 @@ long long rocke_align_up(long long n, long long mult);
  *
  * Copy a NUL-terminated reject/validation reason `msg` into the caller's
  * `reason` buffer of capacity `cap`, truncating to fit and always
- * NUL-terminating. A NULL buffer or zero capacity is a no-op. These reason
- * strings surface only through host-side ValueError-style diagnostics; they
- * never enter the emitted IR, so they have no effect on generated code. Shared
- * so the family validators do not each carry an identical local copy. */
+ * NUL-terminating; a reason that had to be cut ends in "..." (when cap >= 4)
+ * so it is never mistaken for a complete one. A NULL buffer or zero capacity is
+ * a no-op. These reason strings surface only through host-side
+ * ValueError-style diagnostics; they never enter the emitted IR, so they have
+ * no effect on generated code. Shared so the family validators do not each
+ * carry an identical local copy. */
 void rocke_spec_set_reason(char* reason, size_t cap, const char* msg);
 
 /* printf-style twin of rocke_spec_set_reason: format straight into the

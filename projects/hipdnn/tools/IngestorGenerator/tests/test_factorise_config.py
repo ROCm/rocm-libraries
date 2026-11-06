@@ -636,3 +636,45 @@ class TestTheReductionCarriersSurvive:
             False,
             True,
         ]
+
+
+class TestSlottedPacks:
+    """A slotted config is factorised pack by pack; its round trip also holds the slot
+    declarations and each pack's header."""
+
+    SLOTTED = Path(__file__).parent / "fixtures" / "slotted_three_slot.yaml"
+    KNOBS = {"prep": [], "dkdv": ["block_m", "num_warps"], "dq": ["block_m"]}
+
+    def _compact(self):
+        from codegen.config_loader import read_yaml
+
+        original = read_yaml(self.SLOTTED)
+        compact = copy.deepcopy({k: v for k, v in original.items() if k != "packs"})
+        compact["packs"] = [
+            factorise_config.factorise_pack(pack, self.KNOBS[pack["slot"]], {})
+            for pack in original["packs"]
+        ]
+        return original, compact
+
+    def test_each_pack_keeps_its_header_and_the_round_trip_holds(self):
+        original, compact = self._compact()
+        for before, after in zip(original["packs"], compact["packs"]):
+            for key in ("name", "slot", "arch", "discriminator"):
+                assert after.get(key) == before.get(key)
+        factorise_config._round_trip(original, compact)
+
+    def test_a_changed_slot_declaration_is_refused(self):
+        original, compact = self._compact()
+        (dkdv,) = [s for s in compact["slots"] if s["name"] == "dkdv"]
+        dkdv["ranker"] = False
+        with pytest.raises(
+            factorise_config.FactoriseError, match="'slots' declaration"
+        ):
+            factorise_config._round_trip(original, compact)
+
+    def test_a_changed_pack_header_is_refused(self):
+        original, compact = self._compact()
+        (dq_full,) = [p for p in compact["packs"] if p["name"] == "dq_full"]
+        dq_full["discriminator"] = "partial"
+        with pytest.raises(factorise_config.FactoriseError, match="a pack's header"):
+            factorise_config._round_trip(original, compact)

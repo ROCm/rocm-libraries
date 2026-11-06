@@ -124,7 +124,7 @@ compiled.
 
 ```bash
 build/bin/hipdnn_integration_tests --capture-bundles /tmp/captured \
-    --gtest_filter='Smoke/IntegrationGpuResampleBackwardFp16.Correctness/*'
+    --gtest_filter='Smoke/IntegrationGpuMoeGroupedMatmulFp16.Correctness/*'
 
 find /tmp/captured -name '*.json' ! -name '*.meta.json' | while read -r graph; do
     python3 dnn-providers/integration-tests/migration-scripts/import_graph.py \
@@ -561,10 +561,10 @@ python3 scripts/harvest_support_claims.py --run <id> --arch gfx942 --platform li
   to its own bytes. If any sidecar or log is refused, it writes nothing.
 - `claim_failures` and `failed_in_use` are listed for you to read. They are never
   written as claims.
-- **`--write` also re-renders `SUPPORT_MATRIX_OVERVIEW.md`** (with
-  `support_features/feature_matrix.py`), so commit it with
-  the sidecars. If that render fails, the sidecars stay written, the script
-  exits 1 and prints the command that regenerates the overview.
+- **`--write` does not touch `SUPPORT_MATRIX_OVERVIEW.md`**, and neither should
+  you: the overview is refreshed on its own, so that open claim PRs do not all
+  conflict on it. After your harvest PR merges, refresh it in a PR of its own
+  (see [Support Matrix](support-matrix.md)).
 
 Then continue with [Confirm, review, commit](#confirm-review-commit).
 

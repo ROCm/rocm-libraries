@@ -550,6 +550,22 @@ class WgradConvSpec:
     # byte-identical IR and keeps its kernel name.
     prefetch_addr: bool = False
 
+    # Under pipeline="compv3" with prefetch_addr, go one step further (CK's
+    # compv3: one LDS buffer, the next tile prefetched into registers): a
+    # prologue stages the first tile, and each iteration issues the next
+    # tile's loads into registers while the current tile's MFMAs run out of
+    # LDS, then barriers and overwrites LDS. Unlike plain ``prefetch_addr``
+    # this DOES change the data dependency -- LDS is published a full
+    # iteration later than the plain loop -- so it gets its own flag rather
+    # than reusing pipeline="compv3" + prefetch_addr's existing identity.
+    # Ignored (and untagged) off pipeline="compv3"; "mem"/compv4/basic keep
+    # the plain prefetch_addr loop regardless of this flag.
+    #
+    # Default False: strictly additive, so every existing config -- including
+    # pipeline="compv3" + prefetch_addr=True -- emits byte-identical IR and
+    # keeps its kernel name.
+    register_prefetch: bool = False
+
     chiplet_swizzle: bool = False
     chiplet_wgm: int = 8
     chiplet_num_xcds: int = 8
@@ -767,6 +783,10 @@ class WgradConvSpec:
                 "unroll": self.unroll_k,
                 # A different K-loop body; only tagged when set.
                 "pfa": self.prefetch_addr,
+                # validate()/is_valid_wgrad_spec() reject register_prefetch=True
+                # unless prefetch_addr and pipeline="compv3" both hold, so the
+                # flag alone is enough to tag it here.
+                "rpf": self.register_prefetch,
                 # Stream-K changes the grid decode, the K ranges and the
                 # epilogue, and the launch mode and the reduction both change
                 # the emitted body. The CTA pool does not: like the split-K
@@ -954,6 +974,9 @@ class WgradConvSpec:
         _pfa_why = _prefetch_addr_conflict(self)
         if _pfa_why:
             raise ValueError(_pfa_why)
+        _rpf_why = _register_prefetch_conflict(self)
+        if _rpf_why:
+            raise ValueError(_rpf_why)
         layout = self.effective_lds_layout()
         if self.async_dma:
             layout.validate_for_async()
@@ -1247,6 +1270,26 @@ def _prefetch_addr_conflict(spec: "WgradConvSpec") -> str:
         return (
             "prefetch_addr is not supported with unroll_k: the double-buffered "
             "K loop has its own address schedule"
+        )
+    return ""
+
+
+def _register_prefetch_conflict(spec: "WgradConvSpec") -> str:
+    """Why ``spec.register_prefetch`` cannot be honoured, or ``""`` if it can.
+
+    The flag only changes the ``pipeline="compv3"`` body, and only together
+    with ``prefetch_addr``; accepting it anywhere else would tag a
+    byte-identical kernel under a new name. Shared by ``validate`` and
+    ``is_valid_wgrad_spec`` so the hard and soft gates cannot drift apart.
+    """
+    if not spec.register_prefetch:
+        return ""
+    if not spec.prefetch_addr:
+        return "register_prefetch requires prefetch_addr=True"
+    if spec.pipeline != "compv3":
+        return (
+            f"register_prefetch requires pipeline='compv3'; got "
+            f"pipeline={spec.pipeline!r}"
         )
     return ""
 
@@ -2059,6 +2102,9 @@ def is_valid_wgrad_spec(spec: WgradConvSpec, arch: str = "gfx950") -> Tuple[bool
     _pfa_why = _prefetch_addr_conflict(spec)
     if _pfa_why:
         return False, _pfa_why
+    _rpf_why = _register_prefetch_conflict(spec)
+    if _rpf_why:
+        return False, _rpf_why
     # The wgrad builder has no load/math wave split, so a "wavelet" spec built
     # silently as "mem" under another name. Reject it instead of benchmarking
     # one kernel twice.
@@ -2114,7 +2160,8 @@ def is_valid_wgrad_spec(spec: WgradConvSpec, arch: str = "gfx950") -> Tuple[bool
     # unroll_k hand-rolls a ping-pong. "compv4" on its own shares the plain
     # single-buffer scf.for_iter body with "mem"/"compv3" -- it differs only in
     # scheduling hints -- so charging it for a second A/B tile rejected specs for
-    # LDS the kernel never allocates.
+    # LDS the kernel never allocates. (compv3 with register_prefetch stages the
+    # next tile in registers, not in a second LDS tile.)
     _double = spec.async_dma or spec.unroll_k
     _ab_lds = _ab_bytes * (2 if _double else 1)
     _c_dtype_bytes = 4 if spec.data.dtype_d == "fp32" else 2
@@ -3404,6 +3451,15 @@ def build_implicit_gemm_conv_wgrad(
         # (row, col) slot decode is loop-invariant and emitted once up front.
         # The last iteration computes offsets for a tile past _k_upper that no
         # load ever consumes.
+        #
+        # pipeline="compv3" with register_prefetch goes one step further (CK's
+        # compv3: one LDS buffer, the next tile prefetched into registers):
+        # the loads of tile k+1 are issued before tile k's MFMAs and only
+        # written to LDS after them, so the global latency overlaps the math
+        # instead of preceding it. Its last iteration loads a tile past
+        # _k_upper into LDS that no MFMA reads -- a buffer load, so past the
+        # tensor it reads zero. Off register_prefetch, pipeline="compv3" takes
+        # the same loop as every other pipeline here.
         _a_fn, _b_fn = _split_desc_fns()
         _a_slots = a_sync_loader.plan_slots(b, tid=tid)
         _b_slots = b_sync_loader.plan_slots(b, tid=tid)
@@ -3417,24 +3473,58 @@ def build_implicit_gemm_conv_wgrad(
         _offs0 = _tile_offsets(k_lo)
         _n_acc = len(accs)
         _n_a = len(_a_slots)
-        _iter = list(accs) + [(f"pfa_off{i}", v) for i, v in enumerate(_offs0)]
-        for_op = b.scf_for_iter(k_lo, _k_upper, c_block_k, _iter, iv_name="k0")
-        with for_op as (k0, iter_vars):
-            _cur = list(iter_vars[_n_acc:])
-            _a_staged = a_sync_loader.issue_slots(
-                b, rsrc=dy_rsrc, slots=_a_slots, offsets=_cur[:_n_a]
+        if spec.register_prefetch:
+            # validate()/is_valid_wgrad_spec() reject register_prefetch=True
+            # unless pipeline="compv3" (and we are already inside the
+            # prefetch_addr branch), so the flag alone decides the body here.
+            # Prologue: stage tile k_lo into LDS and publish it.
+            _st_a = a_sync_loader.issue_slots(
+                b, rsrc=dy_rsrc, slots=_a_slots, offsets=_offs0[:_n_a]
             )
-            _b_staged = b_sync_loader.issue_slots(
-                b, rsrc=x_rsrc, slots=_b_slots, offsets=_cur[_n_a:]
+            _st_b = b_sync_loader.issue_slots(
+                b, rsrc=x_rsrc, slots=_b_slots, offsets=_offs0[_n_a:]
             )
-            _next = _tile_offsets(b.add(k0, c_block_k))
-            a_sync_loader.store_lds(b, smem_dst=A_smem, staged=_a_staged)
-            b_sync_loader.store_lds(b, smem_dst=B_smem, staged=_b_staged)
+            _offs1 = _tile_offsets(b.add(k_lo, c_block_k))
+            a_sync_loader.store_lds(b, smem_dst=A_smem, staged=_st_a)
+            b_sync_loader.store_lds(b, smem_dst=B_smem, staged=_st_b)
             b.sync()
-            new_accs = emit_mfma_phase(A_smem, B_smem, list(iter_vars[:_n_acc]))
-            b.sync()
-            b.scf_yield(*new_accs, *_next)
-        final_accs = list(for_op.results)[:_n_acc]
+            _iter = list(accs) + [(f"pfa_off{i}", v) for i, v in enumerate(_offs1)]
+            for_op = b.scf_for_iter(k_lo, _k_upper, c_block_k, _iter, iv_name="k0")
+            with for_op as (k0, iter_vars):
+                _cur = list(iter_vars[_n_acc:])
+                _a_staged = a_sync_loader.issue_slots(
+                    b, rsrc=dy_rsrc, slots=_a_slots, offsets=_cur[:_n_a]
+                )
+                _b_staged = b_sync_loader.issue_slots(
+                    b, rsrc=x_rsrc, slots=_b_slots, offsets=_cur[_n_a:]
+                )
+                _next = _tile_offsets(b.add(k0, b.const_i32(2 * block_k)))
+                new_accs = emit_mfma_phase(A_smem, B_smem, list(iter_vars[:_n_acc]))
+                b.sync()
+                a_sync_loader.store_lds(b, smem_dst=A_smem, staged=_a_staged)
+                b_sync_loader.store_lds(b, smem_dst=B_smem, staged=_b_staged)
+                b.sync()
+                b.scf_yield(*new_accs, *_next)
+            final_accs = list(for_op.results)[:_n_acc]
+        else:
+            _iter = list(accs) + [(f"pfa_off{i}", v) for i, v in enumerate(_offs0)]
+            for_op = b.scf_for_iter(k_lo, _k_upper, c_block_k, _iter, iv_name="k0")
+            with for_op as (k0, iter_vars):
+                _cur = list(iter_vars[_n_acc:])
+                _a_staged = a_sync_loader.issue_slots(
+                    b, rsrc=dy_rsrc, slots=_a_slots, offsets=_cur[:_n_a]
+                )
+                _b_staged = b_sync_loader.issue_slots(
+                    b, rsrc=x_rsrc, slots=_b_slots, offsets=_cur[_n_a:]
+                )
+                _next = _tile_offsets(b.add(k0, c_block_k))
+                a_sync_loader.store_lds(b, smem_dst=A_smem, staged=_a_staged)
+                b_sync_loader.store_lds(b, smem_dst=B_smem, staged=_b_staged)
+                b.sync()
+                new_accs = emit_mfma_phase(A_smem, B_smem, list(iter_vars[:_n_acc]))
+                b.sync()
+                b.scf_yield(*new_accs, *_next)
+            final_accs = list(for_op.results)[:_n_acc]
     elif _wmma_async:
         # gfx1250 async ping-pong, one barrier per tile. Each phase waits for its
         # own tile's copies (asynccnt 0: nothing else is in flight then), and the
