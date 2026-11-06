@@ -156,9 +156,8 @@ ConvFwdLaunchInputs convFwdInputs()
         ConvFwdBinding{21, 22, 23}, ConvFwdExtents{31, 32, 33, 34, 35, 3, 4}, 64};
 }
 
-// A shape the gfx950 match serves, with distinct values. The window is one the match never
-// binds, but the reader holds a saved window only to the mask rules, as gfx950's frozen
-// samples need.
+// A shape the gfx950 match serves, with distinct values, and a saved window the reader admits
+// (see attention_dense::readLaunchInputs).
 Gfx950AttentionDenseLaunchInputs gfx950AttentionDenseInputs()
 {
     Gfx950AttentionDenseLaunchInputs launch;
@@ -840,9 +839,8 @@ class TestAttentionDenseSavedValues : public ::testing::TestWithParam<const Atte
 };
 
 // causal and sliding_window are baked into the code object, so the launch never reads them;
-// a plan holding a causal flag or window outside the graph match's mask rules is refused
-// rather than launched. gfx950's match binds no window, but its reader holds a saved one only
-// to these rules, as its frozen samples need.
+// a plan holding a causal flag or window outside attention_dense::readLaunchInputs' mask
+// rules (gfx950's window exception included) is refused rather than launched.
 TEST_P(TestAttentionDenseSavedValues, RefusesAMaskOutsideTheMaskRules)
 {
     const auto read = GetParam()->read;

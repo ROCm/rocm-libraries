@@ -46,8 +46,7 @@ inline constexpr std::string_view GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V2
     = "hipkernel.gfx950_attention_dense.dispatch.v2";
 
 /// The values of the `hipkernel.gfx950_attention_dense.dispatch.v1` and `.v2` contracts,
-/// which share one value set (attention_dense::launchValues). `scale` is stored as a
-/// double, which holds every float exactly. `data_type` is the DataType enumerator name.
+/// which share one value set (attention_dense::launchValues): the sixteen both arches save.
 hipdnn_plugin_sdk::ingestor::MetadataValues gfx950AttentionDenseLaunchValues(
     const AttentionDenseBinding& binding, const AttentionDenseProblem& problem, int64_t blockM);
 
@@ -56,11 +55,8 @@ using Gfx950AttentionDenseLaunchInputs = AttentionDenseLaunchInputs;
 
 /// Reads the values of the `hipkernel.gfx950_attention_dense.dispatch.v1` or `.v2`
 /// contract (one value set; the versions differ only in the kernel arguments the launch
-/// passes). `batch`, `seqlen_q` and `seqlen_kv` must be in [1, INT32_MAX], because the kernel takes
-/// them as 32-bit integers. The head counts and `head_size` must be in [1, INT32_MAX].
-/// `block_m` must be a tile the kernel is built with. `scale` must convert to a float
-/// and back without change, within [2^-64, 2^4]. `data_type` must be a type the kernel is
-/// built for, and `stride_layout` must be `bshd`.
+/// passes). `block_m` must be 128 or 256, the two gfx950 builds. For every other rule, and
+/// the one gfx950 exception to them, see attention_dense::readLaunchInputs.
 ///
 /// @throws HipdnnPluginException with a load refusal when the dispatch name is neither
 ///         contract, or when a value is missing, extra, of another type or out of range.

@@ -1503,9 +1503,10 @@ private:
                                           + inputs.dispatchSymbol + "' " + reason);
 }
 
-// Refuses a saved causal flag or window outside maskFor's rules. Both are baked into the code
-// object and the launch does not read them, so these are checks of the plan's integrity, not
-// of the launch.
+// Refuses a saved causal flag or window outside maskFor's rules, without asking whether the
+// arch serves a window (see readLaunchInputs for gfx950's exception). Both are baked into the
+// code object and the launch does not read them, so these are checks of the plan's integrity,
+// not of the launch.
 void requireServedSavedMask(const SavedLaunchInputs& inputs,
                             const AttentionDenseLaunchInputs& launch)
 {

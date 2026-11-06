@@ -33,8 +33,8 @@
  * @brief The graph contract every FlyDSL SDPA engine applies identically, RDNA and CDNA:
  *        operand lookup, the node and compute-type checks, the softmax-scale tensor, output
  *        aliasing, the dtype vocabulary, metadata reads, the attention sink's stride and the
- *        mask's bounds. The compute-type rule is sdpa_graph's, shared with the other SDPA
- *        packs.
+ *        mask's bounds. The compute-type rule is sdpa_graph's, shared with the dense
+ *        attention packs.
  *
  * FlydslSdpaRdnaCommon.hpp and FlydslSdpaCdnaCommon.hpp each pull this namespace into their
  * own, so a rule both families must apply lives here once and cannot drift between them.

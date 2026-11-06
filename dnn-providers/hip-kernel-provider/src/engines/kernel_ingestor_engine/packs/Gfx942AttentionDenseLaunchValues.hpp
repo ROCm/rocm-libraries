@@ -45,12 +45,8 @@ inline constexpr std::string_view GFX942_ATTENTION_DENSE_DISPATCH_SYMBOL_V1
     = "hipkernel.gfx942_attention_dense.dispatch.v1";
 
 /// The values of the `hipkernel.gfx942_attention_dense.dispatch.v1` contract
-/// (attention_dense::launchValues): the sixteen gfx950's v2 saves; `stats.uid`, the stats
-/// output's uid or ATTENTION_DENSE_NO_STATS; and the launch grid, `grid_order` (qb_minor,
-/// bt_hkv_minor, hq_minor_swz or persistent) with, on the persistent grid, its
-/// `persist_decode` and `num_persistent` (empty and 0 off it). `scale` is stored as a
-/// double, which holds every float exactly. `data_type` is the DataType enumerator name.
-/// The fast-division magic numbers and the grid are recomputed on restore, never saved.
+/// (attention_dense::launchValues): the sixteen both arches save, and, as gfx942 serves
+/// stats and grids, `stats.uid`, `grid_order`, `persist_decode` and `num_persistent`.
 hipdnn_plugin_sdk::ingestor::MetadataValues
     gfx942AttentionDenseLaunchValues(const AttentionDenseBinding& binding,
                                      const AttentionDenseProblem& problem,
@@ -61,26 +57,9 @@ hipdnn_plugin_sdk::ingestor::MetadataValues
 using Gfx942AttentionDenseLaunchInputs = AttentionDenseLaunchInputs;
 
 /// Reads the values of the `hipkernel.gfx942_attention_dense.dispatch.v1` contract.
-/// `batch`, `seqlen_q` and `seqlen_kv` must be in [1, INT32_MAX], because the kernel takes
-/// them as 32-bit integers. The head counts and `head_size` must be in [1, INT32_MAX].
-/// `block_m` must be one gfx942 builds: a positive multiple of 32 within a 1024-thread CTA
-/// (block_n is not saved, so the full tile rule cannot be re-run). `scale` must convert to
-/// a float and back without change, within [2^-64, 2^4]. `data_type` must be a type the
-/// kernel is built for, and `stride_layout` must be `bshd`. `causal` must be 0 or 1,
-/// and `sliding_window` non-negative, 0 unless `causal` is 1, and not so narrow that the
-/// last query rows see no key (seqlen_q - seqlen_kv >= sliding_window). As the graph and
-/// kernel match require, `num_query_heads` must be a multiple of `num_kv_heads`,
-/// `head_size` 64 or 128, K/V below 2^31 bytes, Q/O below 2^31 elements, and `seqlen_q` a
-/// multiple of `block_m`: the kernel addresses Q and O without a bounds check.
-/// `stats.uid` must be ATTENTION_DENSE_NO_STATS (-1) or a non-negative uid. `grid_order`
-/// must name a grid; on the persistent grid `persist_decode` must be qb_major, hkv_major,
-/// bt_hkv_minor or hq_minor_swz (never `auto` or gqa_pair*) and `num_persistent` in
-/// [1, INT32_MAX], and off it they must be empty and 0. The grid must be legal at the
-/// saved shape: hq_minor_swz needs Hq (and on the persistent grid num_persistent) a
-/// multiple of 8 and an even query-block count under causal balancing, and a persistent
-/// decode's fast-division dividends must stay below 2^30. Restore selects the argument
-/// list from `stats.uid`, `grid_order` and `persist_decode` before this reader runs, so its
-/// signature check refuses a kernel whose LSE output or grid disagrees with the plan.
+/// `block_m` must be one gfx942 builds: a positive multiple of 32 within a 1024-thread CTA.
+/// For every other rule, including those for the stats and grid values, see
+/// attention_dense::readLaunchInputs.
 ///
 /// @throws HipdnnPluginException with a load refusal when the dispatch name is not the
 ///         contract, or when a value is missing, extra, of another type or out of range.
