@@ -51,7 +51,8 @@ payload). TF32 is a precision *floor*, not a target: gfx950's emulation is
 close to fp32. Kernel names gain a trailing `fp32` / `tf32` flag (16-bit names
 are unchanged), plus `p<pad>` when an fp32-storage spec uses a non-default
 `lds_pad`. The C++ engine twin is 16-bit only; fp32 / tf32 specs lower through
-the Python engine.
+the Python engine (named debt:
+[`known_gaps.md` §9](../../../platform/dsl_docs/development/known_gaps.md)).
 
 fp32 / tf32 storage runs the plain kernel only: `split_c > 1` and
 `grouped=True` stage and reduce 16-bit data, so `validate()` rejects them for
@@ -384,7 +385,8 @@ heuristic, not a validity rule: the per-shape
 
 `rocke.core.backend.lower_conv_direct_nongrouped(spec, backend="python"|"cpp"|"both")`
 reaches the C++ builder directly through the `rocke_engine.conv_direct_nongrouped_*`
-binding.
+binding. An fp32 / tf32 spec never does: `cpp` lowers it through Python with a
+recorded fallback and `both` raises `BackendCoverageGap`.
 
 When changing the builder, change `conv_direct_nongrouped.cpp` in the same change and
 keep one IR op per C++ statement in Python order: C++ leaves argument evaluation

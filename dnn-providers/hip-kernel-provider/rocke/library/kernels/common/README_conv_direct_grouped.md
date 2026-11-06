@@ -475,6 +475,10 @@ weight-copy kernels).
 arch. Use the generic `DirectConvSpec` for `cpg = 4`: it runs the group as a
 partial 16x16 K-atom.
 
+**Python only.** The C++ builders have no fp32-storage path, here or in the
+scalar-FMA kernels below; see [Dual-Engine Parity](#dual-engine-parity) and
+[`known_gaps.md` §9](../../../platform/dsl_docs/development/known_gaps.md).
+
 ### How it works
 
 Nothing in the addressing changes. Every kernel builds the same K-contiguous
@@ -865,10 +869,16 @@ For a backward-weights pass on gfx942 use the implicit-GEMM wgrad kernel
 
 ## Dual-Engine Parity
 
-Every kernel in this file exists in both the Python engine (this module) and the
-C++ engine (`cpp/instances/common/conv_direct_grouped_*.cpp`), and the two
-**must emit the same LLVM-IR bytes**.  A change to any builder here has to be
-mirrored into its C++ peer in the same change, and proven with:
+Every 16-bit (`fp16` / `bf16`) kernel in this file exists in both the Python
+engine (this module) and the C++ engine
+(`cpp/instances/common/conv_direct_grouped_*.cpp`), and the two **must emit
+the same LLVM-IR bytes** for every such spec. The fp32 / tf32 problems are the
+exception: the C++ builders have no fp32-storage path, so those specs are built
+by Python only and the backend never hands them to the engine (`cpp` falls back
+to Python, `both` raises `BackendCoverageGap`). That is named debt, in
+[`known_gaps.md` §9](../../../platform/dsl_docs/development/known_gaps.md). A
+change to any builder here has to be mirrored into its C++ peer in the same
+change, and proven with:
 
 ```bash
 cd platform && export ROCKE=$(pwd) PYTHONPATH=$ROCKE/python

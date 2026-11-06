@@ -78,12 +78,13 @@ one, since the caller still gets plausible IR and the suite still goes green.
 So a cpp-side failure always propagates. There is one classification, not an
 escape hatch: if the arch is named in `core/backend.py::CPP_UNPORTED_ARCHES`
 the error is re-raised as `BackendCoverageGap`, which `tests/conftest.py` turns
-into a **skip** so the gap is counted and named in the run summary. Anything
-else stays a failure.
+into a **skip** so the gap is counted and named in the run summary (the builder
+axis has its own declared gap, `CPP_PARTIAL_FAMILIES`, below). Anything else
+stays a failure.
 
-`CPP_UNPORTED_ARCHES` is the single place a gap is declared, and it is **empty**:
-every arch the Python engine lowers, the C++ engine lowers too, so no kernel can
-reach the skip path. gfx1250 was the last entry and came off when
+`CPP_UNPORTED_ARCHES` is the single place an arch gap is declared, and it is
+**empty**: every arch the Python engine lowers, the C++ engine lowers too, so no
+kernel can reach the skip path. gfx1250 was the last entry and came off when
 `LL_BACKEND_GFX1250` landed in `cpp/core/lower_llvm/core.cpp`. Deleting an entry
 is what "ported" means — the lane then holds that arch to full byte-identity.
 Never add an entry to quiet a failure on an arch the C++ engine is supposed to
@@ -94,6 +95,15 @@ builders* under `cpp/instances/` still have no `gfx1250/` directory, so the
 gfx1250 kernels are authored in Python and lowered by the C++ engine — a
 different axis from the instance-builder families, which compare a C++ builder
 against its Python twin.
+
+The builder axis has its own table, `core/backend.py::CPP_PARTIAL_FAMILIES`: a
+family whose C++ builder serves only part of its Python builder's spec space
+(today the conv TF32 / fp32-storage specs, `known_gaps.md` §9). The family's
+spec answers `cpp_builder_gap()` (the reason, or `None`), so the backend never
+reads library spec fields. A spec in the gap never reaches the engine: `cpp`
+lowers it through Python as a recorded fallback, and `both` raises
+`BackendCoverageGap` before comparing anything. Deleting a family's entry is
+what "ported" means for that axis.
 
 The lowerer axis is anchored in the byte-identity gate on its own terms. A
 parity family does not have to come from an instance builder: any

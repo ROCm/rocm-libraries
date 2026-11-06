@@ -25,7 +25,8 @@ interchangeable engines:
                   engines are being kept in lock-step. ``both`` NEVER falls
                   back to Python: if the C++ engine cannot lower the kernel
                   the call raises (:class:`BackendCoverageGap` for an arch on
-                  the named unported list, the engine's own error otherwise).
+                  the named unported list or a spec in a named builder gap,
+                  the engine's own error otherwise).
                   Returning the Python result there would report an
                   uncompared kernel as parity-verified.
 
@@ -110,15 +111,17 @@ class BackendMismatch(AssertionError):
 
 
 class BackendCoverageGap(BackendError):
-    """Raised by ``"both"`` mode for a kernel the C++ engine cannot lower yet.
+    """Raised by ``"both"`` mode for a kernel the C++ engine cannot lower or
+    build yet.
 
     Distinct from :class:`BackendMismatch` (the engines produced different IR)
     and from a plain engine error (an unexpected failure): this names a gap we
-    already know about and track in :data:`CPP_UNPORTED_ARCHES`. ``both`` still
-    refuses to return the Python result -- the caller gets an exception, not
-    silently-unverified IR. The test layer turns this into a visible *skip* so
-    the gap is counted in the run summary instead of passing as a green
-    parity check.
+    already know about and track in :data:`CPP_UNPORTED_ARCHES` (an arch the
+    engine has no ISA backend for) or :data:`CPP_PARTIAL_FAMILIES` (a spec the
+    family's C++ builder cannot build). ``both`` still refuses to return the
+    Python result -- the caller gets an exception, not silently-unverified IR.
+    The test layer turns this into a visible *skip* so the gap is counted in
+    the run summary instead of passing as a green parity check.
     """
 
 
@@ -133,7 +136,27 @@ class BackendCoverageGap(BackendError):
 # entry and came off when ``LL_BACKEND_GFX1250`` landed in
 # cpp/core/lower_llvm/core.cpp. Do not add an arch here to quiet a divergence
 # on one the engine already supports -- that is a regression, not a gap.
+# The other gap axis, specs a family's C++ builder cannot build, is
+# CPP_PARTIAL_FAMILIES below.
 CPP_UNPORTED_ARCHES: Tuple[str, ...] = ()
+
+# Families whose C++ builder serves only part of the spec space the Python
+# builder does, each with the part it lacks (the named debt in
+# dsl_docs/development/known_gaps.md). This is the ONE place the builder gap is
+# named. The family's spec decides whether it is in the gap through its
+# ``cpp_builder_gap() -> Optional[str]`` hook (the reason, or None), so the
+# backend never reads library spec fields. A spec in the gap never reaches the
+# engine: ``python`` lowers it as always, ``cpp`` lowers it through Python as a
+# recorded fallback, and ``both`` raises BackendCoverageGap rather than compare
+# two different kernels. Removing an entry here is what "ported" means: every
+# spec of the family then goes to the engine and ``both`` holds it to
+# byte-identity. The value is a description for readers only; the reason a
+# caller sees comes from the spec's hook, so keep the two in step.
+CPP_PARTIAL_FAMILIES: Dict[str, str] = {
+    "conv_implicit_gemm": "mma_dtype='tf32' (TF32 compute)",
+    "conv_direct_grouped": "fp32 / tf32 problems (fp32 storage)",
+    "conv_direct_nongrouped": "fp32 / tf32 problems (fp32 storage)",
+}
 
 
 def resolve_backend(backend: Optional[str] = None) -> str:
@@ -1837,29 +1860,30 @@ def lower_gemm_multi_abd(
     )
 
 
-def _cpp_conv_dtype_gap(family: str, spec: Any) -> Optional[str]:
-    """Why the C++ ``family`` builder cannot build ``spec``'s dtype, or None.
+def _cpp_builder_gap(family: str, spec: Any) -> Optional[str]:
+    """Why the C++ ``family`` builder cannot build ``spec``, or None.
 
-    The C++ conv builders have no TF32 path and no fp32-storage direct path:
-    the implicit-GEMM spec dict carries no ``mma_dtype``, and the direct
-    builders take no fp32 / tf32 problem (16c builds an fp16 kernel under the
-    spec's name, the others refuse it). Handed one, the engine would return a
-    different kernel than the Python engine, or a different refusal.
+    Only a family in :data:`CPP_PARTIAL_FAMILIES` is asked, through its spec's
+    ``cpp_builder_gap()`` hook; every other family's specs all go to the
+    engine. Handed a spec in the gap, the engine would return a different
+    kernel than the Python engine, or a different refusal.
     """
-    mma_dtype = getattr(getattr(spec, "data", None), "mma_dtype", None)
-    if mma_dtype is not None:
-        return f"the C++ {family} builder has no mma_dtype={mma_dtype!r} path"
-    dtype = getattr(getattr(spec, "problem", None), "dtype", None)
-    if family.startswith("conv_direct") and dtype in ("fp32", "tf32"):
-        return f"the C++ {family} builder has no {dtype} (fp32-storage) path"
-    return None
+    if family not in CPP_PARTIAL_FAMILIES:
+        return None
+    why = spec.cpp_builder_gap()
+    if why is None:
+        return None
+    return (
+        f"the C++ {family} builder cannot build this spec: {why} "
+        f"(backend.CPP_PARTIAL_FAMILIES)"
+    )
 
 
-def _lower_cpp_conv_dtype_gap(
+def _lower_cpp_builder_gap(
     family: str, spec: Any, backend: Optional[str], want_ir: bool, py_fn
 ) -> Optional["GemmLowerResult"]:
-    """Lower a spec the C++ conv builder cannot serve (see
-    :func:`_cpp_conv_dtype_gap`) without handing it to the engine, or None.
+    """Lower a spec the C++ ``family`` builder cannot serve (see
+    :func:`_cpp_builder_gap`) without handing it to the engine, or None.
 
     ``python`` lowers it as always, before the engine is imported; ``cpp``
     lowers through Python as a loud, recorded fallback (``ROCKE_CPP_STRICT=1``
@@ -1867,7 +1891,7 @@ def _lower_cpp_conv_dtype_gap(
     falls back, reports the known gap instead of comparing two different
     kernels.
     """
-    reason = _cpp_conv_dtype_gap(family, spec)
+    reason = _cpp_builder_gap(family, spec)
     if reason is None:
         return None
     chosen = resolve_backend(backend)
@@ -1910,7 +1934,7 @@ def lower_conv_implicit_gemm(
 
         spec = resolve_fwd_split_k_spec(spec, arch)
 
-    gap = _lower_cpp_conv_dtype_gap("conv_implicit_gemm", spec, backend, want_ir, py_fn)
+    gap = _lower_cpp_builder_gap("conv_implicit_gemm", spec, backend, want_ir, py_fn)
     if gap is not None:
         return gap
 
@@ -1962,9 +1986,7 @@ def lower_conv_direct_grouped(
             ir = serialize(k)
         return ll, ir
 
-    gap = _lower_cpp_conv_dtype_gap(
-        "conv_direct_grouped", spec, backend, want_ir, py_fn
-    )
+    gap = _lower_cpp_builder_gap("conv_direct_grouped", spec, backend, want_ir, py_fn)
     if gap is not None:
         return gap
 
@@ -2005,7 +2027,7 @@ def lower_conv_direct_nongrouped(
             ir = serialize(k)
         return ll, ir
 
-    gap = _lower_cpp_conv_dtype_gap(
+    gap = _lower_cpp_builder_gap(
         "conv_direct_nongrouped", spec, backend, want_ir, py_fn
     )
     if gap is not None:

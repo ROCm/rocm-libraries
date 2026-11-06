@@ -234,7 +234,8 @@ def direct_row_loop_unroll(kh: int, *, lds_ping_pong: bool = True) -> int:
 # Problem dtype -> storage dtype. ``"tf32"`` is fp32 tensors with the MMA fed
 # TF32 operands (native XF32 on gfx942, BF16x3 emulation on gfx950); ``"fp32"``
 # is fp32 tensors with exact fp32 math. Scalar-FMA kernels serve both with
-# fp32 math, which is at least TF32 precision.
+# fp32 math, which is at least TF32 precision. The one copy: the direct AOT
+# cache (kernels.conv.direct_aot_jobs.direct_storage_dtype) reads it too.
 _DIRECT_STORAGE = {"fp16": "fp16", "bf16": "bf16", "fp32": "fp32", "tf32": "fp32"}
 
 
@@ -259,16 +260,7 @@ def _io_type(dtype: str):
 
     ``"fp16"`` -> F16, ``"bf16"`` -> BF16, ``"fp32"`` / ``"tf32"`` -> F32.
     """
-    if dtype == "bf16":
-        return BF16
-    if dtype == "fp16":
-        return F16
-    if dtype in ("fp32", "tf32"):
-        return F32
-    raise ValueError(
-        f"unsupported direct_conv dtype: {dtype!r}; expected 'fp16', 'bf16', "
-        "'fp32' or 'tf32'"
-    )
+    return {"fp16": F16, "bf16": BF16, "fp32": F32}[_storage_dtype(dtype)]
 
 
 def _buf_load_half(
@@ -449,6 +441,21 @@ def _store_elems(
 def _is_f32_storage(dtype: str) -> bool:
     """True for the fp32-storage dtypes (``"fp32"`` and ``"tf32"``)."""
     return _storage_dtype(dtype) == "fp32"
+
+
+def direct_cpp_builder_gap(dtype: str) -> Optional[str]:
+    """Why the C++ direct-conv builders cannot build a problem of ``dtype``, or
+    None: the ``cpp_builder_gap`` hook of the direct specs the backend lowers.
+
+    The C++ builders have no fp32-storage path (fp32 / tf32): handed one, 16c
+    builds an fp16 kernel under the spec's name and the others refuse it with
+    a different reason than Python's. The backend therefore lowers these
+    through Python only (named debt: ``dsl_docs/development/known_gaps.md``
+    §9, "Conv TF32 / fp32-storage").
+    """
+    if dtype in ("fp32", "tf32"):
+        return f"no {dtype} (fp32-storage) path"
+    return None
 
 
 #: The channel-packed (``cpl > 1``) depthwise kernels move 16-bit channel
@@ -835,6 +842,10 @@ class DirectConv16cSpec:
                 **_mfma_dtype_flags(p.dtype),
             },
         )
+
+    def cpp_builder_gap(self) -> Optional[str]:
+        """See :func:`direct_cpp_builder_gap`."""
+        return direct_cpp_builder_gap(self.problem.dtype)
 
     def validate(self) -> None:
         p = self.problem
@@ -1697,6 +1708,10 @@ class DirectConv4cSpec:
                 f"sr{self.waves_q}": self.stage_rows,
             },
         )
+
+    def cpp_builder_gap(self) -> Optional[str]:
+        """See :func:`direct_cpp_builder_gap`."""
+        return direct_cpp_builder_gap(self.problem.dtype)
 
     def validate(self) -> None:
         p = self.problem
@@ -3804,6 +3819,10 @@ class DirectConvSpec:
             "rx" if self.row_exit else "",
             flags=_mfma_dtype_flags(p.dtype),
         )
+
+    def cpp_builder_gap(self) -> Optional[str]:
+        """See :func:`direct_cpp_builder_gap`."""
+        return direct_cpp_builder_gap(self.problem.dtype)
 
     def validate(self) -> None:
         p = self.problem

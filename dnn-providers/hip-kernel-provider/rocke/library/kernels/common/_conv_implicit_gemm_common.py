@@ -30,6 +30,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
+from rocke.core.dtypes import normalize_dtype
 from rocke.core.ir import (
     BF16,
     F16,
@@ -66,7 +67,7 @@ def _ir_dtype(dtype: str) -> Type:
     """Map a dtype string (``"fp16"``, ``"bf16"``, ``"fp32"``) to an IR ``Type``."""
     t = _DTYPE_TO_IR.get(dtype)
     if t is None:
-        if dtype in _TF32_SPELLINGS:
+        if _is_tf32_spelling(dtype):
             raise ValueError(
                 f"{dtype!r} is a compute mode, not a storage dtype: use "
                 "dtype_a='fp32', dtype_b='fp32' with mma_dtype='tf32'"
@@ -86,9 +87,10 @@ def _smem_dtype_for(dtype: str) -> Optional[Type]:
     return BF16 if dtype == "bf16" else F32 if dtype == "fp32" else None
 
 
-# Spellings of the logical TF32 compute mode (``rocke.core.dtypes`` aliases
-# ``xf32`` to ``tf32``).
-_TF32_SPELLINGS = ("tf32", "xf32")
+def _is_tf32_spelling(dtype) -> bool:
+    """Does ``dtype`` spell the logical TF32 compute mode (``tf32``, ``xf32``,
+    any case)? The aliases are ``rocke.core.dtypes``'s."""
+    return isinstance(dtype, str) and normalize_dtype(dtype) == "tf32"
 
 
 # ---------------------------------------------------------------------
@@ -142,7 +144,7 @@ class ConvDataSpec:
         they key on ``dtype_a == "fp32"`` and would size a ``"tf32"`` storage
         dtype as a 2-byte type.
         """
-        if self.dtype_a in _TF32_SPELLINGS or self.dtype_b in _TF32_SPELLINGS:
+        if _is_tf32_spelling(self.dtype_a) or _is_tf32_spelling(self.dtype_b):
             return (
                 "tf32 is a compute mode, not a storage dtype: use "
                 "dtype_a='fp32', dtype_b='fp32' with mma_dtype='tf32'"
@@ -716,7 +718,9 @@ def _tf32_conv_spec_reason(
     The one TF32 gate for the dgrad and wgrad kernels, used by both their
     ``validate`` (``arch=None``) and their ``is_valid_*_spec`` (with the arch),
     so no family's rules or messages can drift from another's. Every non-TF32
-    spec returns ``""`` unless it spells TF32 as a storage dtype.
+    spec returns ``""`` unless it spells TF32 as a storage dtype. The forward
+    kernel's gate (``conv_implicit_gemm._fwd_tf32_reason``) shares the atom and
+    stride rules (:func:`_tf32_mfma_reason`).
 
     TF32 keeps fp32 tiles in LDS and reads each operand fragment as plain
     contiguous fp32 vectors before reinterpreting it as ``vec<tf32xN>``. That
@@ -756,6 +760,19 @@ def _tf32_conv_spec_reason(
             "mma_dtype='tf32': a swizzled lds_layout is not supported -- the "
             "fragment is read as contiguous fp32 vectors"
         )
+    return _tf32_mfma_reason(spec, arch)
+
+
+def _tf32_mfma_reason(spec, arch: Optional[str] = None) -> str:
+    """Why TF32 ``spec`` cannot issue its TF32 atom (on ``arch``, if given), or
+    ``""``: the rules every implicit-GEMM direction shares.
+
+    A wave64 spec, a warp tile that is a TF32 atom (on ``arch``; arch-free, on
+    any arch -- :func:`_tf32_any_arch_frag_len`), the register ceiling when the
+    arch is known (:func:`_tf32_reason`), and an LDS row stride the fragment
+    read stays aligned on (:func:`_tf32_lds_stride_reason`). ``spec`` must be a
+    TF32 spec with ``wave_size``, the warp tile and ``effective_lds_layout()``.
+    """
     if spec.wave_size != 64:
         return (
             f"mma_dtype='tf32' is MFMA-only; wave_size={spec.wave_size} is a "

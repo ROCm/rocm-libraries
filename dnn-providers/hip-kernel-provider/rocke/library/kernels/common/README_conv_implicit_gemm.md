@@ -231,8 +231,15 @@ The AMDGPU LLVM backend may replace a `load <8 x half>, ptr addrspace(3)` that f
   alignment.
 - `is_valid_spec` rejects WMMA targets, arches without TF32 atoms, non-TF32 warp
   tiles and misaligning LDS row strides.
+- `validate()` applies the same TF32 gate (`_fwd_tf32_reason`) without an
+  arch: it rejects what no arch can build, and `is_valid_spec` adds the arch's
+  own refusals.
 - The compv3/compv4 hint counts are scaled for TF32 only.
 - Specs without TF32 emit byte-identical IR.
+- **C++ engine.** The C++ conv instances have no TF32 path, so TF32 specs are
+  built by Python only: `backend.lower_conv_implicit_gemm` falls back to Python
+  under `cpp` and raises `BackendCoverageGap` under `both`. Named debt:
+  [`known_gaps.md` §9](../../../platform/dsl_docs/development/known_gaps.md).
 - See [Data types](#data-types).
 
 ### Python-level K-loop unroll (`unroll_k`)

@@ -120,7 +120,7 @@ loads clamp rather than fault, so no masking is needed on that path.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Iterator, List, Tuple
+from typing import Iterator, List, Optional, Tuple
 
 from rocke.core.ir import (
     F32,
@@ -142,6 +142,7 @@ from kernels.common.conv_direct_grouped import (
     _mma_f32_logical,
     _store_from_f32,
     _trunc_f32,
+    direct_cpp_builder_gap,
     emit_direct_params,
 )
 
@@ -437,6 +438,10 @@ class DirectNongroupedConvSpec:
             ),
             _DTYPE_FLAG.get(p.dtype, p.dtype),
         )
+
+    def cpp_builder_gap(self) -> Optional[str]:
+        """See :func:`~kernels.common.conv_direct_grouped.direct_cpp_builder_gap`."""
+        return direct_cpp_builder_gap(self.problem.dtype)
 
     def validate(self) -> None:
         p = self.problem

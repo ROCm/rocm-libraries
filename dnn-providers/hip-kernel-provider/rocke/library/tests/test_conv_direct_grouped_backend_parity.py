@@ -13,8 +13,17 @@ returns a different kernel than the Python engine. The byte-identity gate covers
 pair, not this binding path, so this test lowers those specs through both
 backends and compares the ``.ll``.
 
-CPU only (no kernel launch). The binding half skips when the ``rocke_engine``
-extension is not importable.
+The fp32 / tf32 problems are the exception: the C++ builders have no
+fp32-storage path (and the C++ implicit-GEMM spec no ``mma_dtype``), so no
+cross-engine *builder* comparison exists for them (named debt:
+``platform/dsl_docs/development/known_gaps.md`` §9). ``TestCppBuilderGap``
+pins how the backend routes those specs in every mode, for every spec kind
+it lowers; ``TestCppLowererOnF32Ir`` holds the family-agnostic C++ *lowerer*
+to byte-identity on the Python-built fp32 / tf32 kernels. Python IR drift of
+those kernels is the representative-IR goldens' job, not this file's.
+
+CPU only (no kernel launch). The binding and lowerer halves skip when the
+``rocke_engine`` extension is not importable.
 
 Run:
   PYTHONPATH=<engine build>/cpp/bindings:rocke/platform/python:rocke/library \\
@@ -25,13 +34,20 @@ from __future__ import annotations
 
 import dataclasses
 import importlib.util
+import os
+import re
 import unittest
+from unittest import mock
 
 from kernels.common import conv_direct_grouped as G
+from kernels.common._conv_implicit_gemm_common import ConvDataSpec, ConvProblem
 from kernels.common.conv_direct_grouped import (
     DirectConv4cSpec,
+    DirectConv16cSpec,
     DirectConvProblem,
     DirectConvSpec,
+    build_direct_conv,
+    build_direct_conv_16c,
     is_valid_spec,
     is_valid_spec_4c,
     make_dgrad_4c_spec,
@@ -40,6 +56,15 @@ from kernels.common.conv_direct_grouped_wgrad_mfma import (
     GroupedWgradMfmaSpec,
     is_valid_grouped_wgrad_mfma_spec,
 )
+from kernels.common.conv_direct_nongrouped import (
+    DirectNongroupedConvSpec,
+    build_direct_conv_nongrouped,
+)
+from kernels.common.conv_implicit_gemm import (
+    ImplicitGemmConvSpec,
+    build_implicit_gemm_conv,
+)
+from rocke.core import backend as bk
 from rocke.core.backend import (
     conv_direct_grouped_spec_to_dict,
     lower_conv_direct_grouped,
@@ -456,6 +481,225 @@ class TestBackendBoth(unittest.TestCase):
             with self.subTest(arch=arch, needle=needle):
                 self.assertIn(needle, msgs[0])
                 self.assertTrue(msgs[1].endswith(msgs[0]), msgs)
+
+
+# ---------------------------------------------------------------------------
+# fp32 / tf32: no C++ builder path (known_gaps.md §9)
+# ---------------------------------------------------------------------------
+
+#: (arch, TF32 warp tile m=n, k) of the implicit-GEMM TF32 atoms.
+_TF32_ATOMS = (("gfx950", 16, 32), ("gfx942", 16, 8))
+
+
+def _igemm_tf32(m, k, mma_dtype="tf32"):
+    dtype = "fp32" if mma_dtype else "fp16"
+    return ImplicitGemmConvSpec(
+        problem=ConvProblem(N=2, Hi=14, Wi=14, C=32, K=64, Y=3, X=3, pH=1, pW=1),
+        data=ConvDataSpec(dtype, dtype, dtype, mma_dtype=mma_dtype),
+        tile_m=64,
+        tile_n=64,
+        tile_k=32,
+        warp_m=2,
+        warp_n=2,
+        warp_tile_m=m,
+        warp_tile_n=m,
+        warp_tile_k=k,
+        epilogue="cshuffle",
+    )
+
+
+def _nongrouped(dtype):
+    return DirectNongroupedConvSpec(
+        problem=DirectConvProblem(
+            N=1, H=8, W=32, groups=1, cpg=32, kpg=64, dtype=dtype
+        ),
+        tile_h=4,
+        tile_w=32,
+        tile_k=64,
+        ck=16,
+        waves_m=2,
+        waves_n=2,
+        lds_pad=4 if dtype in ("fp32", "tf32") else 8,
+    )
+
+
+def _lower(family, spec, arch, backend):
+    """The public backend entry point of ``family`` (a CPP_PARTIAL_FAMILIES
+    key, or a ``conv_direct_grouped`` kind)."""
+    if family == "conv_implicit_gemm":
+        return bk.lower_conv_implicit_gemm(spec, arch=arch, backend=backend)
+    if family == "conv_direct_nongrouped":
+        return bk.lower_conv_direct_nongrouped(spec, arch=arch, backend=backend)
+    return bk.lower_conv_direct_grouped(spec, kind=family, arch=arch, backend=backend)
+
+
+def _gap_cases():
+    """(label, family, spec, arch, needle) of every spec kind the backend
+    lowers, in the dtypes its C++ builder has no path for; ``needle`` is in
+    the gap reason."""
+    out = []
+    for arch, m, k in _TF32_ATOMS:
+        out.append(
+            (f"igemm_tf32_{arch}", "conv_implicit_gemm", _igemm_tf32(m, k), arch,
+             "mma_dtype='tf32'")
+        )  # fmt: skip
+        for dt in ("fp32", "tf32"):
+            needle = f"{dt} (fp32-storage)"
+            out += [
+                (f"16c_{dt}_{arch}", "16c", DirectConv16cSpec(problem=_pg(dt)), arch, needle),
+                (f"generic_{dt}_{arch}", "generic", DirectConvSpec(problem=_pg(dt), block_groups=2), arch, needle),
+                (f"4c_{dt}_{arch}", "4c", DirectConv4cSpec(problem=_p4(dt)), arch, needle),
+            ]  # fmt: skip
+    for dt in ("fp32", "tf32"):
+        out.append(
+            (f"nongrouped_{dt}", "conv_direct_nongrouped", _nongrouped(dt),
+             "gfx950", f"{dt} (fp32-storage)")
+        )  # fmt: skip
+    return out
+
+
+def _no_engine():
+    raise bk.BackendError("rocke_engine is not importable")
+
+
+def _gap_fallbacks():
+    """The recorded cpp fallbacks that are builder-gap routings. The Python
+    builder's own lowering resolves the default backend, so with no engine it
+    records lowerer fallbacks too; those are not what is under test."""
+    return [why for _, why in bk.cpp_fallbacks() if "CPP_PARTIAL_FAMILIES" in why]
+
+
+class TestCppBuilderGap(unittest.TestCase):
+    """How the backend routes a spec its family's C++ builder cannot build.
+
+    There is no C++ twin to compare against, so this pins the routing rather
+    than parity: ``python`` lowers it without importing the engine, ``cpp``
+    lowers it through Python and records the fallback (``ROCKE_CPP_STRICT=1``
+    raises), and ``both`` raises ``BackendCoverageGap`` instead of comparing
+    two different kernels. The 16-bit twins of the same specs still go to the
+    engine. CPU only; the engine is replaced by one that cannot be imported, so
+    a spec that reaches it fails loudly."""
+
+    def test_specs_report_the_gap(self):
+        for label, family, spec, _arch, needle in _gap_cases():
+            with self.subTest(case=label):
+                self.assertIn(needle, spec.cpp_builder_gap())
+        # 16-bit (and unknown) dtypes are not in the gap: the engine serves
+        # them, or refuses them with the same reason as Python.
+        for dt in ("fp16", "bf16", "fp64"):
+            with self.subTest(dtype=dt):
+                self.assertIsNone(DirectConv16cSpec(problem=_pg(dt)).cpp_builder_gap())
+                self.assertIsNone(DirectConvSpec(problem=_pg(dt)).cpp_builder_gap())
+                self.assertIsNone(DirectConv4cSpec(problem=_p4(dt)).cpp_builder_gap())
+                self.assertIsNone(_nongrouped(dt).cpp_builder_gap())
+        self.assertIsNone(_igemm_tf32(16, 32, mma_dtype=None).cpp_builder_gap())
+
+    def test_routing_in_every_mode(self):
+        # The Python builder's own lowering resolves the default backend; pin
+        # it to python so an inherited ROCKE_BACKEND=both/cpp does not send it
+        # to the missing engine.
+        env = {"ROCKE_CPP_QUIET_FALLBACK": "1", "ROCKE_BACKEND": "python"}
+        with mock.patch.object(bk, "_import_engine", _no_engine):
+            for label, family, spec, arch, needle in _gap_cases():
+                with self.subTest(case=label, backend="python/cpp"):
+                    bk.reset_cpp_fallbacks()
+                    with mock.patch.dict(os.environ, env):
+                        if family == "4c":
+                            # Python refuses fp32 / tf32 4c (no 4x4 atom); cpp
+                            # reaches that refusal only through the fallback.
+                            for backend in ("python", "cpp"):
+                                with self.assertRaisesRegex(ValueError, "4x4"):
+                                    _lower(family, spec, arch, backend)
+                        else:
+                            py = _lower(family, spec, arch, "python")
+                            self.assertEqual(py.backend, bk.BACKEND_PYTHON)
+                            self.assertEqual(_gap_fallbacks(), [])
+                            cpp = _lower(family, spec, arch, "cpp")
+                            self.assertEqual(cpp.backend, bk.BACKEND_PYTHON)
+                            self.assertEqual(cpp.llvm_text, py.llvm_text)
+                    fell_back = _gap_fallbacks()
+                    self.assertEqual(len(fell_back), 1, bk.cpp_fallbacks())
+                    self.assertIn(needle, fell_back[0])
+                strict = {"ROCKE_CPP_STRICT": "1"}
+                with (
+                    self.subTest(case=label, backend="cpp strict"),
+                    mock.patch.dict(os.environ, strict),
+                    self.assertRaisesRegex(bk.BackendError, re.escape(needle)) as cm,
+                ):
+                    _lower(family, spec, arch, "cpp")
+                self.assertNotIsInstance(cm.exception, bk.BackendCoverageGap)
+                with (
+                    self.subTest(case=label, backend="both"),
+                    self.assertRaisesRegex(bk.BackendCoverageGap, re.escape(needle)),
+                ):
+                    _lower(family, spec, arch, "both")
+
+    def test_16bit_specs_reach_the_engine(self):
+        cases = [
+            ("conv_implicit_gemm", _igemm_tf32(16, 32, mma_dtype=None)),
+            ("16c", DirectConv16cSpec(problem=_pg("fp16"))),
+            ("generic", DirectConvSpec(problem=_pg("bf16"), block_groups=2)),
+            ("4c", DirectConv4cSpec(problem=_p4("fp16"))),
+            ("conv_direct_nongrouped", _nongrouped("bf16")),
+        ]
+        with mock.patch.object(bk, "_import_engine", _no_engine):
+            for family, spec in cases:
+                with (
+                    self.subTest(family=family),
+                    self.assertRaisesRegex(bk.BackendError, "not importable"),
+                ):
+                    _lower(family, spec, "gfx950", "both")
+
+    def test_unlisted_family_is_not_asked(self):
+        # Deleting a family's CPP_PARTIAL_FAMILIES entry is what "ported"
+        # means: its specs then all go to the engine.
+        spec = DirectConv16cSpec(problem=_pg("tf32"))
+        with (
+            mock.patch.object(bk, "_import_engine", _no_engine),
+            mock.patch.dict(bk.CPP_PARTIAL_FAMILIES),
+        ):
+            del bk.CPP_PARTIAL_FAMILIES["conv_direct_grouped"]
+            with self.assertRaisesRegex(bk.BackendError, "not importable"):
+                _lower("16c", spec, "gfx950", "both")
+
+
+@unittest.skipIf(bool(_SKIP), _SKIP)
+class TestCppLowererOnF32Ir(unittest.TestCase):
+    """The cross-engine gate the fp32 / tf32 paths do have: the C++ lowerer
+    is family-agnostic, so it must lower the Python-built kernels to the same
+    ``.ll`` as the Python lowerer -- the XF32 MFMAs on gfx942, the BF16x3
+    split on gfx950 and the exact fp32 atoms. ``ROCKE_CPP_STRICT=1`` keeps a
+    C++ refusal from passing as a silent Python fallback."""
+
+    def test_lowerers_agree(self):
+        from rocke.helpers.compile import _lower_llvm_via_backend
+
+        cases = []
+        for arch, m, k in _TF32_ATOMS:
+            cases.append(
+                (f"igemm_tf32_{arch}", arch,
+                 lambda a=arch, m=m, k=k: build_implicit_gemm_conv(_igemm_tf32(m, k), arch=a))
+            )  # fmt: skip
+            for dt in ("fp32", "tf32"):
+                cases += [
+                    (f"16c_{dt}_{arch}", arch,
+                     lambda a=arch, d=dt: build_direct_conv_16c(DirectConv16cSpec(problem=_pg(d)), arch=a)),
+                    (f"generic_{dt}_{arch}", arch,
+                     lambda a=arch, d=dt: build_direct_conv(DirectConvSpec(problem=_pg(d), block_groups=2), arch=a)),
+                    (f"nongrouped_{dt}_{arch}", arch,
+                     lambda a=arch, d=dt: build_direct_conv_nongrouped(_nongrouped(d), arch=a)),
+                ]  # fmt: skip
+        with mock.patch.dict(os.environ, {"ROCKE_CPP_STRICT": "1"}):
+            for label, arch, build in cases:
+                with self.subTest(case=label):
+                    kernel = build()
+                    py = _lower_llvm_via_backend(
+                        kernel, arch=arch, backend="python", spec=None
+                    )
+                    cpp = _lower_llvm_via_backend(
+                        kernel, arch=arch, backend="cpp", spec=None
+                    )
+                    self.assertEqual(cpp, py)
 
 
 if __name__ == "__main__":

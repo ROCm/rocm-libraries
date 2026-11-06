@@ -281,7 +281,8 @@ budget and epilogues are the fp32 kernel's. Only the MMA changes:
   native gfx942 atom is not affected.
 - **Kernel name** gets a trailing `_tf32` flag. It is needed because the name
   carries no dtype, and a gfx950 TF32 atom has the same shape as the bf16 one.
-- **C++ engine.** The C++ dgrad instance has no TF32 mirror yet.
+- **C++ engine.** The C++ dgrad instance has no TF32 mirror yet (named debt:
+  [`known_gaps.md` §9](../../../platform/dsl_docs/development/known_gaps.md)).
 
 ## Per-tile K decode (`uniform_k_decode`)
 

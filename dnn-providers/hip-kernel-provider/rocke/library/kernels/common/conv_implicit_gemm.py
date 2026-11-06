@@ -100,8 +100,7 @@ from kernels.common._conv_implicit_gemm_common import (  # noqa: F401 — re-exp
     _TF32_LDS_LOAD_MAX,
     _load_mma_operand,
     _mfma_issues_per_mma,
-    _tf32_lds_stride_reason,
-    _tf32_reason,
+    _tf32_mfma_reason,
     _build_wavelet_loaders,
     compute_wavelet_epi_barriers,
     emit_param_block,
@@ -464,6 +463,16 @@ class ImplicitGemmConvSpec:
             },
         )
 
+    def cpp_builder_gap(self) -> Optional[str]:
+        """Why the C++ builder cannot build this spec, or None (the backend's
+        ``cpp_builder_gap`` hook). The C++ spec has no ``mma_dtype``, so the
+        engine would build a non-TF32 kernel; the backend lowers these through
+        Python only (named debt: ``dsl_docs/development/known_gaps.md`` §9).
+        """
+        if self.data.mma_dtype is not None:
+            return f"no mma_dtype={self.data.mma_dtype!r} path"
+        return None
+
     def validate(self) -> None:
         # ``ImplicitGemmConvSpec.groups`` (the legacy P86 field) must not
         # contradict the authoritative ``problem.groups``. The kernel body reads
@@ -491,9 +500,9 @@ class ImplicitGemmConvSpec:
             )
         if self.block_size > 1024:
             raise ValueError(f"block_size {self.block_size} > 1024")
-        _mma_why = self.data.mma_dtype_reason()
-        if _mma_why is not None:
-            raise ValueError(_mma_why)
+        _tf32_why = _fwd_tf32_reason(self)
+        if _tf32_why:
+            raise ValueError(_tf32_why)
         layout = self.effective_lds_layout()
         if self.async_dma:
             layout.validate_for_async()
@@ -861,9 +870,10 @@ def is_valid_spec(spec: ImplicitGemmConvSpec, arch: str = "gfx950") -> Tuple[boo
     except KeyError as e:
         return False, str(e)
 
-    _mma_why = spec.data.mma_dtype_reason()
-    if _mma_why is not None:
-        return False, _mma_why
+    # The TF32 gate validate() applies arch-free, here on the arch.
+    _tf32_why = _fwd_tf32_reason(spec, arch)
+    if _tf32_why:
+        return False, _tf32_why
 
     # Geometry divisibility (mirrors ``spec.validate``).
     if spec.tile_m % (spec.warp_m * spec.warp_tile_m):
@@ -927,12 +937,8 @@ def is_valid_spec(spec: ImplicitGemmConvSpec, arch: str = "gfx950") -> Tuple[boo
 
     # MMA atom must be in the target's catalog for the requested dtype. The
     # catalog is asked for the MMA dtype, which differs from the storage dtype
-    # only under TF32 compute.
+    # only under TF32 compute (whose atom the gate above already checked).
     atom = (spec.warp_tile_m, spec.warp_tile_n, spec.warp_tile_k)
-    if spec.data.is_tf32:
-        _tf32_why = _tf32_reason(spec, target, family, arch)
-        if _tf32_why is not None:
-            return False, _tf32_why
     if not target.mma.has_shape(
         family=family,
         a_dtype=spec.data.mma_a,
@@ -943,10 +949,6 @@ def is_valid_spec(spec: ImplicitGemmConvSpec, arch: str = "gfx950") -> Tuple[boo
         k=spec.warp_tile_k,
     ):
         return False, f"unsupported {spec.data.mma_a} warp_tile {atom} on {arch}"
-    if spec.data.is_tf32:
-        _tf32_why = _fwd_tf32_lds_stride_reason(spec, target)
-        if _tf32_why is not None:
-            return False, _tf32_why
 
     _total_lds, _ab_bytes, _c_lds, _double = implicit_gemm_lds_bytes(spec)
     if not target.fits_lds(_total_lds):
@@ -1076,21 +1078,23 @@ def is_valid_spec(spec: ImplicitGemmConvSpec, arch: str = "gfx950") -> Tuple[boo
     return True, "ok"
 
 
-def _fwd_tf32_lds_stride_reason(spec: ImplicitGemmConvSpec, target):
-    """The shared TF32 row-stride rule for this spec's TF32 atom on ``target``."""
-    op = target.mma.op_for_shape(
-        family="mma",
-        a_dtype="tf32",
-        b_dtype="tf32",
-        c_dtype="fp32",
-        m=spec.warp_tile_m,
-        n=spec.warp_tile_n,
-        k=spec.warp_tile_k,
-    )
-    if op is None:
-        return None
-    _row = spec.effective_lds_layout().storage_shape(spec.tile_m)[1]
-    return _tf32_lds_stride_reason(_row, op.a_frag_len)
+def _fwd_tf32_reason(spec: ImplicitGemmConvSpec, arch: Optional[str] = None) -> str:
+    """Why ``spec``'s dtypes cannot build (on ``arch``, if given), or ``""``.
+
+    The forward kernel's TF32 gate, used by both ``validate`` (``arch=None``)
+    and :func:`is_valid_spec` (with the arch), as dgrad and wgrad share
+    ``_tf32_conv_spec_reason``. Every non-TF32 spec returns ``""`` unless it
+    spells TF32 as a storage dtype. The atom, register and LDS-stride rules are
+    the ones every direction shares (``_tf32_mfma_reason``); without an arch the
+    atom is checked against every arch's catalog, so ``validate`` rejects what
+    no arch can build and ``is_valid_spec`` adds the arch's own refusals.
+    """
+    why = spec.data.mma_dtype_reason()
+    if why:
+        return why
+    if not spec.data.is_tf32:
+        return ""
+    return _tf32_mfma_reason(spec, arch)
 
 
 def _conv_mma_family(arch: str) -> str:
