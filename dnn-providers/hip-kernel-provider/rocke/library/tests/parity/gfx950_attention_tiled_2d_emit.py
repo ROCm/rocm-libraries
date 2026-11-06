@@ -1072,8 +1072,8 @@ _CONFIGS = {
         use_qblock_reverse=True,
     ),
     # cfg68: bf16 D64/b16 GQA-4 multi-batch: the shipping spec, whose one K/V copy per
-    # tile (32 tokens) spans two pages, so the bf16 loaders keep the paged-KV
-    # descriptor. Every other bf16/fp16 case takes the per-page copy offsets.
+    # tile (32 tokens) spans two pages, so the bf16 loaders take the lane-free page
+    # lookups. Every other bf16/fp16 case takes the per-page copy offsets.
     68: dict(
         head_size=64,
         block_size=16,
@@ -1130,7 +1130,7 @@ _CONFIGS = {
     ),
     # cfg71: bf16 D192/b16 one warp, the spec dispatch picks for short D192
     # prefill. One copy is 512 halves, 2 2/3 rows, so it is not a whole number
-    # of tokens and the bf16 loaders must keep the paged-KV descriptor.
+    # of tokens and the bf16 loaders take the lane-free page lookups.
     71: dict(
         head_size=192,
         block_size=16,
@@ -1158,6 +1158,21 @@ _CONFIGS[64] = {**_CONFIGS[55], "emit_lse": True}
 _CONFIGS[65] = {**_CONFIGS[32], "emit_lse": True}
 _CONFIGS[66] = {**_CONFIGS[3], "emit_lse": True}
 _CONFIGS[67] = {**_CONFIGS[5], "use_alibi": True, "emit_lse": True}
+# i64 K/V, two pages per tile, one page per copy (page copies, i64 page base).
+_CONFIGS[72] = dict(
+    head_size=128,
+    block_size=16,
+    num_query_heads=32,
+    num_kv_heads=8,
+    dtype="bf16",
+    use_sinks=False,
+    sliding_window=0,
+    has_softcap=False,
+    tile_size=32,
+    use_i64_kv_addr=True,
+)
+# cfg71 with i64 K/V (lane-free page lookups, i64 page base).
+_CONFIGS[73] = {**_CONFIGS[71], "use_i64_kv_addr": True}
 
 
 def _spec(idx: int) -> UnifiedAttention2DTiledSpec:

@@ -31,6 +31,8 @@ import pytest
 from kernels import UnifiedAttentionProblem
 from kernels.common import attention_unified as au
 
+from _gpu_gate import requires_gpu
+
 
 def _load_windowed_harness():
     """Load the gfx950 prefill parity harness (its ``ref_paged_attn`` supports
@@ -56,22 +58,7 @@ def _load_windowed_harness():
     return mod
 
 
-def _gpu_ready():
-    try:
-        import torch
-    except Exception:  # noqa: BLE001
-        return False
-    # gcnArchName exists only on ROCm builds of torch.
-    if not torch.cuda.is_available() or torch.version.hip is None:
-        return False
-    # Gate on ``gcnArchName`` (the ISA target), not the marketing name, which
-    # varies across gfx942 parts.
-    return "gfx942" in torch.cuda.get_device_properties(0).gcnArchName.lower()
-
-
-requires_gfx942_gpu = pytest.mark.skipif(
-    not _gpu_ready(), reason="needs a gfx942 GPU with ROCm torch"
-)
+requires_gfx942_gpu = requires_gpu("gfx942")
 
 
 def _fold_problem(dtype="bf16", sq=4096, hq=32, hk=8, d=128, bs=32, window=4096):

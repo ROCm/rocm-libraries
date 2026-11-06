@@ -299,6 +299,20 @@ static int make_spec(int idx, rocke_attention_tiled_2d_spec_t* s)
         s->use_q_major_grid = true;
         s->emit_lse = true;
         break;
+    case 18: /* Fast paged-KV descriptor (bounded V tail per call). */
+        s->head_size = 64;
+        s->block_size = 32;
+        s->num_query_heads = 64;
+        s->num_kv_heads = 8;
+        s->dtype = "bf16";
+        s->use_sinks = false;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->num_warps = 4;
+        s->has_tile_size = true;
+        s->tile_size = 64;
+        s->use_fast_paged_kv_desc = true;
+        break;
     default:
         return -1;
     }

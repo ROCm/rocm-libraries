@@ -286,7 +286,9 @@ typedef struct rocke_gfx942_attn2d_build_ctx
     rocke_tensor_descriptor_t* q_desc; /* output/query [token,head,dim]   */
     rocke_tensor_descriptor_t* kv_desc; /* paged K/V byte descriptor       */
     rocke_value_t* seq_base; /* to_sgpr_u32(seq_idx*bt_stride)  */
-    rocke_value_t* block_table_max_idx; /* to_sgpr_u32(num_seqs*bt_stride) */
+    rocke_value_t* block_table_max_idx; /* to_sgpr_u32(seq_base + ceil(seq_len/BS)) */
+    rocke_tensor_descriptor_t* kv_page_desc; /* paged_kv_page_desc (page-relative) */
+    bool LANE_FREE_PAGES; /* per-tile wave-uniform page lookups (_tile_page_ids) */
     rocke_value_t* kv_block_bytes_c_v; /* one-block bound: kv_stride_blk_b_v, or its const */
     rocke_value_t* kv_stride_tok_b_v; /* num_kv_p*HD*KV_BYTES */
     rocke_value_t* kv_stride_blk_b_v; /* kv_stride_tok_b_v*BS */

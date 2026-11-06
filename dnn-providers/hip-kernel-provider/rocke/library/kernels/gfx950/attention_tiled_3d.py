@@ -35,6 +35,12 @@ from kernels.common._attention_additive_bias import (
     add_additive_bias,
     declare_additive_bias_params,
 )
+from kernels.common._attention_kv_seq_tail import (
+    buffer_offset_in_rows_left,
+    buffer_offset_in_sequence,
+    last_row_in_sequence,
+    rows_in_sequence,
+)
 from kernels.common._attention_strided_kv import (
     declare_strided_kv_params,
     strided_kv_offset,
@@ -972,10 +978,25 @@ def build_unified_attention_3d_tiled(
         return ids
 
     def _issue_paged_tile(
-        src: Value, src_rsrc: Value, lds_base: Value, buf_idx: Value, page_ids
+        src: Value,
+        src_rsrc: Value,
+        lds_base: Value,
+        buf_idx: Value,
+        page_ids,
+        v_tile: Value | None = None,
     ) -> None:
+        """``v_tile``: the tile's index when it is V, whose rows past the sequence load
+        zero (_attention_kv_seq_tail)."""
         buf_off_i64 = b.zext(b.mul(buf_idx, b.const_i32(bytes_per_buf)), I64)
         buf_base = b.smem_ptr_add(lds_base, buf_off_i64)
+        whole_rows = KV_HALVES_PER_CALL % HD == 0
+        if v_tile is not None:
+            v_rows = rows_in_sequence(b, seq_len, v_tile, T)
+            if whole_rows:
+                # A copy covers whole rows: one subtraction per tile, then one compare
+                # with an immediate per copy. The swizzle permutes columns within a
+                # row only.
+                rows_left = b.sub(v_rows, lane_tok)
         for call in range(kv_calls_per_tile):
             blk = call // calls_per_block
             tok0 = (call % calls_per_block) * tokens_per_call
@@ -984,14 +1005,21 @@ def build_unified_attention_3d_tiled(
                 # The call covers a partial row (head_size 192), so each lane
                 # takes its own (row, dim); the tile is one page (spec check).
                 lin = b.add(b.const_i32(call * KV_HALVES_PER_CALL), lane_half_base)
-                tok_b = b.mul(b.div(lin, b.const_i32(HD)), kv_stride_tok_b)
+                lin_row = b.div(lin, b.const_i32(HD))
+                tok_b = b.mul(lin_row, kv_stride_tok_b)
                 head_b = b.mul(kv_head_idx, b.const_i32(kv_stride_h_b))
                 dim_b = b.mul(b.mod(lin, b.const_i32(HD)), b.const_i32(KV_BYTES))
                 voff = b.add(b.add(tok_b, head_b), dim_b)
+                if v_tile is not None:
+                    voff = buffer_offset_in_sequence(b, voff, lin_row, v_rows)
             else:
                 voff = lane_within_b[ph]
                 if tok0:
                     voff = b.add(voff, call_tok_b[tok0])
+                if v_tile is not None:
+                    voff = buffer_offset_in_rows_left(
+                        b, voff, rows_left, call * tokens_per_call
+                    )
             if I64_KV_ADDR:
                 base_i64 = b.mul(b.zext(page_ids[blk], I64), kv_stride_blk_i64)
                 call_rsrc = b.buffer_rsrc(
@@ -1068,6 +1096,8 @@ def build_unified_attention_3d_tiled(
             f"{fp8_elems_per_chunk}); the packed-cvt path needs the chunk "
             f"to split cleanly into 2× <4 x fp8> sub-chunks."
         )
+        if lds_token == "V":  # V rows past the sequence read its last row instead
+            v_last_row = last_row_in_sequence(b, seq_len, kv_tile_idx, T)
         for call in range(fp8_chunks_per_thread):
             chunk_id = b.add(b.mul(b.const_i32(call), b.const_i32(THREADS)), tid)
             row = b.div(chunk_id, b.const_i32(HD // fp8_elems_per_chunk))
@@ -1075,7 +1105,9 @@ def build_unified_attention_3d_tiled(
                 b.mod(chunk_id, b.const_i32(HD // fp8_elems_per_chunk)),
                 b.const_i32(fp8_elems_per_chunk),
             )
-            linear_half_first = b.add(b.mul(row, b.const_i32(HD)), col)
+            # V: the global row it is read from; the LDS row stays ``row``.
+            src_row = b.smin(row, v_last_row) if lds_token == "V" else row
+            linear_half_first = b.add(b.mul(src_row, b.const_i32(HD)), col)
             if I64_KV_ADDR:
                 # Flat per-lane global load: full i64 byte/element offset so
                 # the per-thread physical_block * stride cannot overflow the
@@ -1118,7 +1150,9 @@ def build_unified_attention_3d_tiled(
         elif spec.kv_layout == "strided":
             _issue_strided_tile(value_rsrc, v_strides, V_lds_addr, tile_idx, buf_idx)
         else:
-            _issue_paged_tile(value, value_rsrc, V_lds_addr, buf_idx, page_ids)
+            _issue_paged_tile(
+                value, value_rsrc, V_lds_addr, buf_idx, page_ids, v_tile=tile_idx
+            )
 
     first_page_ids = None
     if WAVE_PAGE_ID_LOAD:
