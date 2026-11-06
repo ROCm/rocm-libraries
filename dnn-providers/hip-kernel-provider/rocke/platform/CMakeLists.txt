@@ -763,6 +763,7 @@ if(ROCKE_INSTALL_TESTS)
     # and K/V cache policy, the scalar fallback's cache key and block-table
     # stride kernarg, the unified attention running-max carry and keyless
     # guards on the emitted IR, the tiled 2D LSE store on the emitted IR, the
+    # gfx942 cfvst V loader's i64 K/V addressing on the emitted IR, the
     # host-side SDPA sequence-length and padding-mask adapters/specs, the
     # fmha_mfma free-stride ABI and layout contracts, the 2D/3D mask_type spec
     # fields, the 3D segment+reduce module's pairing, the reduce's LDS segment
@@ -788,6 +789,7 @@ if(ROCKE_INSTALL_TESTS)
         "tests/library/tests/test_attention_tiled_3d_reduce_lds.py"
         "tests/library/tests/test_attention_unified_masked_tile_ir.py"
         "tests/library/tests/test_attention_unified_2d_lse_ir.py"
+        "tests/library/tests/test_gfx942_cfvst_i64_kv_addr.py"
         "tests/library/tests/test_d256_gfx942_fast_routing.py"
         "tests/library/tests/test_sdpa_seqlen.py"
         "tests/library/tests/test_sdpa_padding_mask.py"
@@ -1075,6 +1077,7 @@ if(ROCKE_INSTALL_TESTS)
         "tests/library/tests/test_kda_decode_gfx950_numeric.py"
         "tests/library/tests/test_gfx1250_attention.py"
         "tests/library/tests/test_gfx942_gqa_head_fold_numeric.py"
+        "tests/library/tests/test_gfx942_cfvst_i64_kv_addr_numeric.py"
         "tests/library/tests/test_gfx942_4wgqa_bounds_numeric.py"
         "tests/library/tests/test_attention_gfx942_kv_pages.py"
         "tests/library/tests/test_attention_tiled_runtime_shape_numeric.py"
