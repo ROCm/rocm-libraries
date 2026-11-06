@@ -1191,6 +1191,12 @@ wins by default. The rule this provider follows:
 The measurements behind each decision are kept outside the repository; what is
 recorded here is the decision and the gate it passed.
 
+No trained UHD model is installed for any FlyDSL engine. Each engine orders its kernels
+by descriptor `priority` (the native ranker), its engine estimate is the `default` slot
+the loader disables, and autotune measures the order. Models trained on this catalog
+are a follow-up: `gen_descriptors.py` binds each one per arch once it is installed under
+`heuristics/` ([README](README.md)).
+
 ### 6.1 Runtime features audited against compiled-out builds
 
 | Feature (SDPA) | Where its cost would be | Result | Decision |
