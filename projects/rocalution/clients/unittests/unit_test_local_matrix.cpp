@@ -2295,8 +2295,8 @@ TEST_P(local_matrix_formats, transposes)
     });
 }
 
-// The transpose of an n x m matrix without entries is an m x n one, also into a matrix
-// that held entries
+// The transpose of an n x m matrix without entries is an m x n one in the format of the
+// input, also into a matrix that held entries in this format
 TEST_P(local_matrix_formats, transpose_of_a_matrix_without_entries)
 {
     for_each_type<RealTypes>([&](auto type) {
@@ -2309,19 +2309,22 @@ TEST_P(local_matrix_formats, transpose_of_a_matrix_without_entries)
         }
         const Csr<T> expected = transposed(ref);
 
-        const auto expect_transposed = [&](const LocalMatrix<T>& A) {
-            EXPECT_EQ(A.GetM(), 6);
-            EXPECT_EQ(A.GetN(), 4);
-            expect_matrix(A, expected, Format{A.GetFormat(), A.GetBlockDimension()}, backend());
+        // make() leaves the input in CSR if the format cannot hold it
+        auto         A = make(ref);
+        const Format input{A->GetFormat(), A->GetBlockDimension()};
+
+        const auto expect_transposed = [&](const LocalMatrix<T>& B) {
+            EXPECT_EQ(B.GetM(), 6);
+            EXPECT_EQ(B.GetN(), 4);
+            expect_matrix(B, expected, input, backend());
         };
 
-        auto A = make(ref);
+        auto transpose = make(banded<T>());
+        A->Transpose(transpose.get());
+        expect_transposed(*transpose);
+
         A->Transpose();
         expect_transposed(*A);
-
-        auto transpose = make_local_matrix(backend(), banded<T>());
-        make(ref)->Transpose(transpose.get());
-        expect_transposed(*transpose);
     });
 }
 

@@ -6103,6 +6103,13 @@ namespace rocalution
         this->Check();
 #endif
 
+        // The backends transpose into a CSR matrix, and T is overwritten
+        if(T->GetFormat() != CSR)
+        {
+            T->Clear();
+            T->ConvertToCSR();
+        }
+
         bool err = this->matrix_->Transpose(T->matrix_);
 
         // LCOV_EXCL_START
