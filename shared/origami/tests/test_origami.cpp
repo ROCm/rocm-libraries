@@ -27,6 +27,7 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_string.hpp>
+#include <algorithm>
 #include <limits>
 #include "common.hpp"
 
@@ -759,6 +760,58 @@ TEST_CASE("Origami: rank_configs non-temporal availability", "[origami][cache-hi
       REQUIRE(saw_other_tile);
       REQUIRE(saw_nt_a);
     }
+  }
+}
+
+// gfx950 bf16, M=64 N=4096 K=4096, B not transposed. Every tile hits the
+// small-M short circuit (non-temporal on B), and none is non-temporal.
+// Rejecting all three reports DBL_MAX and rank_configs falls back to input
+// order, so the latency ranking disappears. Availability stays false here,
+// and the order must match compute_total_latency.
+TEST_CASE("Origami: rank_configs keeps latency order with no non-temporal kernel",
+          "[origami][cache-hints]") {
+  ScopedEnvVar variance_env("ANALYTICAL_GEMM_HEURISTICS_VARIANCE", "0.0");
+  const double rejected = std::numeric_limits<double>::max();
+
+  auto hardware = make_hardware(950);
+  auto problem  = make_problem(64, 4096, 4096, origami::transpose_t::T, origami::transpose_t::N);
+  std::vector<origami::config_t> configs;
+  configs.push_back(make_config(64, 64, 64));
+  configs.push_back(make_config(128, 128, 64));
+  configs.push_back(make_config(256, 256, 64));
+  origami::memoize_non_temporal_availability(configs);
+
+  for (const auto& config : configs) {
+    REQUIRE(config.cache_hints_b == 0);
+    REQUIRE_FALSE(config.non_temporal_a_available);
+    REQUIRE_FALSE(config.non_temporal_b_available);
+  }
+
+  struct ranked_tile {
+    double latency;
+    size_t mt_m;
+    size_t mt_n;
+  };
+  std::vector<ranked_tile> expected;
+  expected.reserve(configs.size());
+  for (const auto& config : configs) {
+    const double latency = origami::gemm::compute_total_latency(problem, hardware, config);
+    REQUIRE(latency < rejected);
+    expected.push_back({latency, config.mt.m, config.mt.n});
+  }
+  std::stable_sort(expected.begin(), expected.end(), [](const ranked_tile& a, const ranked_tile& b) {
+    return a.latency < b.latency;
+  });
+  REQUIRE(expected.front().latency < expected.back().latency);
+
+  auto results = origami::rank_configs(problem, hardware, configs);
+  REQUIRE(results.size() == expected.size());
+  for (size_t i = 0; i < results.size(); ++i) {
+    REQUIRE(results[i].latency == expected[i].latency);
+    REQUIRE(results[i].latency < rejected);
+    REQUIRE(results[i].config.mt.m == expected[i].mt_m);
+    REQUIRE(results[i].config.mt.n == expected[i].mt_n);
+    REQUIRE(results[i].config.cache_hints_b == 0);
   }
 }
 
