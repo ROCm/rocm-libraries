@@ -730,7 +730,8 @@ if(ROCKE_INSTALL_TESTS)
     # guards on the emitted IR, the tiled 2D LSE store on the emitted IR, the
     # host-side SDPA sequence-length and padding-mask adapters/specs, the
     # fmha_mfma free-stride ABI and layout contracts, the 2D/3D mask_type spec
-    # fields, the 3D segment+reduce module's pairing, the reduce's LDS segment
+    # fields, the gfx942 2D head counts and batch being IR-neutral at a fixed GQA
+    # ratio, the 3D segment+reduce module's pairing, the reduce's LDS segment
     # bound against the compiled code object, the tiled C++ entries' head-count
     # and arch refusals, the dense segment-combine launch ABI, and the
     # backward-test memo bound in tests/conftest.py.
@@ -742,6 +743,7 @@ if(ROCKE_INSTALL_TESTS)
         "tests/library/tests/test_attention_scalar_cache_key.py"
         "tests/library/tests/test_attention_spec_predicate_parity.py"
         "tests/library/tests/test_attention_tiled_2d_mask_type.py"
+        "tests/library/tests/test_attention_tiled_2d_head_counts_gfx942.py"
         "tests/library/tests/test_attention_tiled_3d_decode_split.py"
         "tests/library/tests/test_attention_tiled_3d_kv_cache_policy.py"
         "tests/library/tests/test_attention_tiled_launch_signature.py"
