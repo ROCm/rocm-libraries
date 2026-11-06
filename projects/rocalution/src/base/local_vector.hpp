@@ -578,6 +578,10 @@ namespace rocalution
         /**@}*/
 
         /** \brief Compute absolute value sum of vector components
+      * \details
+      * In the case of complex types, this is the sum of the moduli |z| of the components,
+      * returned with a zero imaginary part, and not the sum of |re| + |im| of BLAS scasum.
+      *
       * \par Example
       * \code{.cpp}
       * // rocALUTION structures
