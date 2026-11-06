@@ -506,6 +506,8 @@ if(ROCKE_INSTALL_TESTS)
     # Test-only implementation for the installed arch-domain reproduction gate.
     # Keep it outside the production package: CTest owns the external compiler
     # sweep, while package resources provide the committed columns being checked.
+    # tests/conftest.py also points rocke.tests.ir_validity at this copy, so the
+    # installed pytest runs compile lowered IR with the same tool.
     install(FILES
             "${CMAKE_CURRENT_SOURCE_DIR}/tools/gen_arch_domain.py"
             "${CMAKE_CURRENT_SOURCE_DIR}/tools/check_ir_validity.py"
@@ -749,6 +751,7 @@ if(ROCKE_INSTALL_TESTS)
         "tests/library/tests/test_attention_dense_kv_split_combine_abi.py"
         "tests/library/tests/test_attention_tiled_3d_mask_type.py"
         "tests/library/tests/test_attention_tiled_3d_module.py"
+        "tests/library/tests/test_attention_tiled_3d_module_gfx942.py"
         "tests/library/tests/test_attention_tiled_3d_reduce_lds.py"
         "tests/library/tests/test_attention_unified_masked_tile_ir.py"
         "tests/library/tests/test_attention_unified_2d_lse_ir.py"
@@ -949,8 +952,13 @@ if(ROCKE_INSTALL_TESTS)
              "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
              "  TIMEOUT 180)\n")
 
-      # Each installed architecture retains its own GPU CTest result.
+      # Each installed architecture retains its own GPU CTest result, which
+      # covers every variant installed for it, so its timeout scales with them.
+      # library/tests/reference_common/docs/gpu-reference-workflow.md records
+      # this trade-off and when to register one CTest per variant instead.
       foreach(_arch IN LISTS _ROCKE_${_operation_upper}_INSTALLED_ARCHITECTURES)
+        list(LENGTH _ROCKE_${_operation_upper}_${_arch}_INSTALLED_VARIANTS _variant_count)
+        math(EXPR _timeout "300 * ${_variant_count}")
         string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
                "add_test(rocke_${_operation}_gpu_${_arch}_pytest python -m pytest \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_${_operation}_pinned_reference.py\" --rocke-reference-operation ${_operation} --rocke-reference-arch ${_arch} -v -rs)\n")
         string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
@@ -958,7 +966,7 @@ if(ROCKE_INSTALL_TESTS)
                "  LABELS \"ckc\\;python\\;${_operation}\\;gpu\\;quick\"\n"
                "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
                "  SKIP_RETURN_CODE 77\n"
-               "  TIMEOUT 300)\n")
+               "  TIMEOUT ${_timeout})\n")
       endforeach()
     endforeach()
 
