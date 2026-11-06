@@ -23,7 +23,9 @@
 // engine's own config file, so they say how far that engine may drift — never how
 // far our checked-in golden data may. Reference validation calls defaultTolerance()
 // and can never be loosened by an engine's config. See ALMIOPEN-2216 for the
-// DynamicTolerances upgrade path.
+// DynamicTolerances upgrade path. The bundle harness already grades half and bfloat16
+// convolution-forward outputs with a dynamic tolerance (ConvFwdDynamicTolerance.hpp)
+// before falling back to these defaults.
 
 namespace hipdnn_integration_tests::tolerance
 {
