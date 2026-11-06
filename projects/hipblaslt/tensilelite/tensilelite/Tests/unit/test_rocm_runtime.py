@@ -107,6 +107,15 @@ def test_validate_distribution_uses_base_info_version_without_python_core(tmp_pa
         root / "lib" / "llvm" / "bin",
         root / "libexec" / "hipblaslt" / "tensilelite",
     )
+
+def test_validate_distribution_compares_system_rocm_base_version(tmp_path, monkeypatch):
+    root = _root(tmp_path, "10.1.0-123")
+    monkeypatch.setattr(_rocm, "_python_sdk_version", lambda: None)
+    monkeypatch.setattr(_rocm, "_resolve_system_rocm", lambda: _system_rocm(root))
+
+    result = _rocm.validate_distribution("tensilelite", "5.0.0+rocm10.1.0")
+
+    assert result.version == "10.1.0.123"
 def test_validate_distribution_reports_mismatch(tmp_path, monkeypatch):
     root = _root(tmp_path, "7.3.0")
     monkeypatch.setattr(_rocm, "_python_sdk_version", lambda: None)
@@ -539,5 +548,4 @@ def test_system_rocm_client_request_uses_prefix_client(tmp_path, monkeypatch):
 
 @pytest.fixture(autouse=True)
 def enable_runtime_validation(monkeypatch):
-    monkeypatch.setattr(_rocm, "_ENABLE_ROCM_VERSION_VALIDATION", True)
     monkeypatch.setattr(_rocm, "_ENABLE_PYTHON_ROCM_RUNTIME", True)
