@@ -24,6 +24,7 @@
  *
  *******************************************************************************/
 #include <gtest/gtest.h>
+#include "gtest_common.hpp" // IsTestSupportedByDevice, Gpu
 #include <miopen/conv/heuristics/ai_candidate_selection.hpp>
 #include <miopen/conv/heuristics/ai_conv_nd_kernel_tuning_utils.hpp>
 #include <miopen/conv/heuristics/ai_heuristics.hpp> // common::EngineeredConvFeatures
@@ -132,7 +133,14 @@ protected:
     {
         const auto& params      = GetParam();
         const auto current_arch = handle.GetDeviceName();
-        const auto missing      = GetMissingModelFiles(params);
+        // Candidate-selection (KTN) models and the CK-IGEMM path ship only for gfx942/gfx950. On
+        // any other device (e.g. RDNA gfx110X) there is nothing to exercise, so skip rather than
+        // run the foreign-arch models on an unsupported device (they are shipped for every build
+        // target).
+        if(!IsTestSupportedByDevice(Gpu::gfx94X | Gpu::gfx950))
+            GTEST_SKIP() << "Candidate selection ships for gfx942/gfx950 only; current device "
+                         << current_arch << " is unsupported.";
+        const auto missing = GetMissingModelFiles(params);
 
         if(missing.empty())
             return;
