@@ -104,6 +104,8 @@ target_sources(origami-headers
         "${CMAKE_CURRENT_SOURCE_DIR}/include/origami/origami.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/include/origami/streamk.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/include/origami/types.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/include/origami/nn/types.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/include/origami/nn/nn.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/include/origami/simulator/tensilelite/formocast.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/include/origami/simulator/tensilelite/formocast_simulator.hpp"
         "${PROJECT_BINARY_DIR}/include/origami/origami_export.h"
@@ -132,6 +134,14 @@ target_sources(
             "${CMAKE_CURRENT_SOURCE_DIR}/src/origami/types.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/src/simulator/tensilelite/formocast_simulator.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/src/simulator/tensilelite/formocast.cpp"
+)
+
+# origami::nn: the model registry (origami_nn_index), backend dispatch and the analytical fallback.
+target_sources(
+    origami
+    PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src/nn/types.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/src/nn/model_registry.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/src/nn/dispatch.cpp"
 )
 
 target_link_libraries(origami PRIVATE hip::host)

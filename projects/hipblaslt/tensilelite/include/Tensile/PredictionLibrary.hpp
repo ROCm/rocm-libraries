@@ -56,6 +56,9 @@ namespace TensileLite
         std::vector<std::pair<int, std::shared_ptr<MySolution>>> solution_list;
         std::vector<origami::config_t>                           origami_config_list;
 
+        /// The origami::nn models of this row's logic file (origami_nn_index), if any.
+        origami::nn::library_models_t nn_models;
+
         static std::string Type()
         {
             return "Prediction";
@@ -227,8 +230,10 @@ namespace TensileLite
                     = problem.getParams().uniformSummationOrder() != 0,
                 };
 
-                auto prediction_result = origami::rank_configs(
-                    origami_problem, *(pAMDGPU->analyticalHardware), origami_config_list);
+                origami::rank_options_t rank_options;
+                rank_options.library_models = &nn_models;
+                auto prediction_result      = origami::rank_configs(
+                    origami_problem, *(pAMDGPU->analyticalHardware), origami_config_list, rank_options);
 
                 for(const auto& r : prediction_result)
                 {
