@@ -2297,8 +2297,7 @@ Backward rows exist only for gfx950 and gfx11-generic; the forward engines also 
 | `seq_len` tensors without `padding_mask`; `seq_len_kv` alone over ragged Q (PV-2) | no | no | no | yes / no / untested |
 | Attention sink, dSink | no: the backward node has no sink input | no | no | sink at head dims 64, 128 / ? / untested |
 
-Neither engine's plans can be serialized: the merged engine's dispatch handler does not
-implement plan saving, and the split engine is slotted (RFC 0021). A
+Plans of both engines can be saved and loaded (RFC 0009). A
 broadcast dBias is summed by the dBias reduce kernel, launched as the `dbias_reduce` entry of
 the row's `sources` (RFC 0017 §15.1). On gfx950 that entry names the row's own object and the
 reduce symbol, a second kernel of the same code object; on gfx11 it names a standalone object
@@ -2429,12 +2428,9 @@ ship their pins. Residual resource cells, none with a correctness effect:
 
 ### 9.3 Known issues
 
-- **Neither engine's plans can be serialized.** The merged engine's dispatch handler does
-  not implement plan saving (SDK default `supportsSaving()` is false), and an object computing a
-  broadcast dBias uses a second (reduce) launch. The split engine is slotted, and RFC 0021 defers saving a
-  slot program, so a save of its plan is refused.
-- **gfx11-generic is verified on device on gfx1101 (V710) only.** The support claims keyed to
-  gfx1100 have not run on a gfx1100 device. The other members it ships to (gfx1100, gfx1102,
+- **gfx11-generic is verified on device on gfx1101 (V710) and gfx1100.** On gfx1100 the
+  provider's device tests, the split engine's reference integration entry and its quick external
+  entry ran, the last two with inputs filled on the host. The other members it ships to (gfx1102,
   gfx1103, gfx1150 to gfx1153) run the same object and have no device run of their own.
 - **Padded graphs.** With `padding_mask`, a launch after the gradient launches zeroes the
   dense dQ rows at or past `seq_len_q` and the dense dK/dV rows at or past `seq_len_kv`, on

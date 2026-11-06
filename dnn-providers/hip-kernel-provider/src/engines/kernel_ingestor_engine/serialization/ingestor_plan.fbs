@@ -17,6 +17,7 @@
 //   - Add a member at the end of a union.
 //   - Add a value at the end of an enum.
 //   - Declare a new table or enum that only a new field or a new union member uses.
+//   - Add a new plan kind with its own root table and its own file identifier.
 //   - Retire a field: mark it `(deprecated)`. Keep its id.
 //   The reader of the new minor version accepts an absent field and a file of an older minor.
 // - In a minor version, never:
@@ -79,6 +80,43 @@ table ExecutionPlan {
   runtime_pass_by_value_uids: [long] (required, id: 2);
   dispatch_data: DispatchData (required, id: 3);
   kernel_image: KernelImage (required, id: 4);
+  provider_version: string (required, id: 5);
+}
+
+// One code object of a kind 2 body. A code object appears once, however many kernels use it;
+// kernels name it by index.
+table CodeObject {
+  source_kind: SourceKind (id: 0);
+  target: string (required, id: 1);
+  sha256: string (required, id: 2);
+  code_object: [ubyte] (required, force_align: 16, id: 3);
+}
+
+table StageKernel {
+  launch_name: string (required, id: 0);
+  symbol: string (required, id: 1);
+  signature: [KernelArgument] (required, id: 2);
+  // The index of this kernel's code object in MultiKernelPlan.code_objects.
+  code_object_index: uint (id: 3);
+}
+
+table Stage {
+  slot: string (required, id: 0);
+  kernel_descriptor_id: Uuid (required, id: 1);
+  dispatch_data: DispatchData (required, id: 2);
+  kernels: [StageKernel] (required, id: 3);
+}
+
+// A multi-kernel plan (plan kind 2): ordered stages, each holding the kernels one dispatch
+// handler launches. It is the root of a kind 2 body, written with the file identifier "HKMP"
+// and read with GetRoot<MultiKernelPlan> and VerifyBuffer<MultiKernelPlan>("HKMP"); a kind 1
+// body keeps "HKSP". A header kind that disagrees with its body therefore fails verification.
+table MultiKernelPlan {
+  stages: [Stage] (required, id: 0);
+  code_objects: [CodeObject] (required, id: 1);
+  shared_workspace_bytes: ulong = null (id: 2);
+  workspace_bytes: ulong = null (id: 3);
+  runtime_pass_by_value_uids: [long] (required, id: 4);
   provider_version: string (required, id: 5);
 }
 

@@ -164,6 +164,12 @@ public:
         return _stages;
     }
 
+    /// The size of the aligned shared region that every stage's workspace follows.
+    size_t alignedSharedBytes() const
+    {
+        return _alignedSharedBytes;
+    }
+
 private:
     std::vector<SlotStage<THandle>> _stages;
     size_t _alignedSharedBytes;

@@ -174,8 +174,8 @@ TEST_F(TestSlottedEngineDefault, ASlottedPlanIsNotSaveableThoughEachSlotsPickIsA
 {
     const auto context = build(_fixture, _graph);
 
-    // RFC 0021 §11: a slot program is not serialized (RFC 0009); its picks are, on their own,
-    // saveable GenericPlans.
+    // IPlan::saveablePlan() stays null for a slot program: a provider reaches the program
+    // through the plan types, and its picks are, on their own, saveable GenericPlans.
     EXPECT_EQ(context.plan().saveablePlan(), nullptr);
 }
 

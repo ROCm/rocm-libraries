@@ -572,9 +572,13 @@ plan is rebuilt from the engine ID, workspace size, a bare tensor-UID
 list, and the provider's opaque `plugin_payload` alone. These obligations
 apply only to a provider that supports runtime pass-by-value (reports
 `1.2.0`) **and implements compiled-plan save/load**; a provider that never
-serializes plans has no deserialized path and carries none of them. No
-in-tree provider implements compiled-plan save/load. A provider that does
-must:
+serializes plans has no deserialized path and carries none of them. The
+hip-kernel-provider implements compiled-plan save/load
+([RFC 0009](0009_CompiledPlanSerialization.md#hip-kernel-provider-ingestor-implementation)):
+its payload persists the UIDs of the user-supplied runtime pass-by-value
+tensors and the baked values of the other scalars, and its restore refuses a
+payload whose UID list differs from the UIDs the restored handlers bind. A
+provider that implements save/load must:
 
 1. **Persist** the runtime pass-by-value UID set (`runtimeUids`
    above) into its serialized `plugin_payload` and restore it on
@@ -1045,8 +1049,9 @@ device pointer — a memory-unsafe failure.
 provider versions its `plugin_payload` and rejects a version/kind it cannot
 interpret before reading any slot — makes a defensively-versioned provider
 fail the deserialize cleanly; the build-time version filter does not run on
-this path. The risk is latent today: no in-tree provider implements the
-RFC 0009 payload round-trip, so the skew window opens only once one does.
+this path. The hip-kernel-provider implements the
+RFC 0009 payload round-trip, so the skew window is open for it, and its
+versioned payload is the guard.
 
 ---
 

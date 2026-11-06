@@ -432,7 +432,7 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
                 EveryKernelDeclaresTheMergedSignature
                 DeclaresASchemaAtLeastTheRaggedOffsetMultiplierFloor
                 ServesStampedRaggedGraphsAndDeclinesTheFieldsTheMatcherRejects
-                RefusesPlanSerialization
+                ReportsThePlanSerializationNote
         )
     endif()
     # The split engine's slots are ops of their own (prep, dkdv, dq); its descriptor-only
@@ -461,7 +461,7 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
                 EveryServedRowsSlotCatalogsHaveUniqueEnrolledKnobTuples
                 DeclaresASchemaAtLeastTheRaggedOffsetMultiplierFloor
                 ServesStampedRaggedGraphsAndDeclinesTheFieldsTheMatcherRejects
-                RefusesPlanSerialization
+                ReportsThePlanSerializationNote
                 TheChunkContractKeepsAnAlignedBiasOffDirectRowsWithAStagedAlternative
                 EveryProbeGraphIsServedByTheRowsTheModelNames
                 TheCoverageConstantsAreTheHeadDimsTheShippedParityRowsServe
