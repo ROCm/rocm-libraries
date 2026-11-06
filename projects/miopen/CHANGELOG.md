@@ -19,10 +19,13 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
   single-pass and in multi-block reductions, and blended the prior output in the output type. With
   a floating compute type this truncated a fractional `alpha` for INT8 or INT32 input (0.5 became
   0) and a fractional `beta` for an INT8 or INT32 output, and rounded both for FP16. The blend is
-  now done in the compute type and rounded to the output type once: with an output type wider than
-  the compute type the prior output and `beta` are rounded to the compute type, and an FP16 output
-  with `beta` = 1 (the RNN bias gradient) can differ by one FP16 ulp. An integer compute type
-  still truncates a fractional `alpha` or `beta`.
+  now done in the compute type and rounded to the output type once. When the compute type cannot
+  hold every value of the output type (for example FP32 output with FP16 compute, INT32 output
+  with FP32 compute) the prior output and `beta` are first converted to the compute type. An
+  output type narrower than the compute type is rounded once instead of twice, so its last bits
+  can differ (for an FP16 output with `beta` = 1, the RNN bias gradient, by more than one ulp when
+  the sum cancels). An integer compute type truncates a fractional `alpha`, `beta` and prior
+  output.
 * [Conv] Fixed the 3D grouped backward-weights CK xdlops convolution solver skipping
   `valid_kernels[0]` during exhaustive tuning: the populate branch fell through instead of emitting
   the seeded first config, so GenericSearch began enumeration at `valid_kernels[1]` and the first
