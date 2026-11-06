@@ -2112,6 +2112,12 @@ namespace rocalution
         assert((matrix_format == DENSE) || (matrix_format == CSR) || (matrix_format == MCSR)
                || (matrix_format == BCSR) || (matrix_format == COO) || (matrix_format == DIA)
                || (matrix_format == ELL) || (matrix_format == HYB));
+
+        if((matrix_format == BCSR) && (blockdim <= 1) && (this->GetFormat() == BCSR))
+        {
+            blockdim = this->GetBlockDimension();
+        }
+
         assert((matrix_format != BCSR) || (blockdim > 1));
 
         LOG_VERBOSE_INFO(5,

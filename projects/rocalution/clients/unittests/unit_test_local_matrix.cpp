@@ -631,6 +631,8 @@ TYPED_TEST(local_matrix, allocate_sets_the_format_and_the_sizes)
     B->AllocateBCSR("B", 0, 2, 2, 3);
     EXPECT_EQ(B->GetBlockDimension(), 3);
     EXPECT_EQ(B->GetNnz(), 0);
+    B->ConvertTo(BCSR);
+    EXPECT_EQ(B->GetBlockDimension(), 3);
 }
 
 // Only a GlobalMatrix has a ghost part. As an Operator, a LocalMatrix is all local.
@@ -983,6 +985,10 @@ TEST_P(local_matrix_formats, converts_between_formats_on_its_backend)
         B->ConvertToBCSR(3);
         expect_matrix(*B, ref, Format{BCSR, 3}, backend());
         B->ConvertTo(format().id, format().blockdim);
+        expect_kept(*B, ref);
+
+        // Without a block dimension, a BCSR matrix keeps its own
+        B->ConvertTo(B->GetFormat());
         expect_kept(*B, ref);
     });
 }
@@ -3088,8 +3094,7 @@ TEST(local_matrix_preconditions, violations_end_the_program)
                         "GetFormat");
     EXPECT_ASSERT_DEATH(A->MatrixAdd(*make_local_matrix(Backend::Host, ref, Format{COO, 1})),
                         "GetFormat");
-    EXPECT_ASSERT_DEATH(make_local_matrix(Backend::Host, ref, Format{BCSR, 2})->ConvertTo(BCSR),
-                        "matrix_format != BCSR");
+    EXPECT_ASSERT_DEATH(A->ConvertTo(BCSR), "matrix_format != BCSR");
     EXPECT_ASSERT_DEATH(E.ConvertTo(BCSR, 0), "matrix_format != BCSR");
     EXPECT_ASSERT_DEATH(A->ILUpFactorize(-1), "p >= 0");
     EXPECT_ASSERT_DEATH(A->FSAI(0, nullptr), "power > 0");
