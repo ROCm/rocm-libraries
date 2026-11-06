@@ -329,6 +329,10 @@ void testing_csrilu02(Arguments argus)
 
         CHECK_HIPSPARSE_ERROR(hipsparseSetPointerMode(handle, HIPSPARSE_POINTER_MODE_HOST));
 
+        // The numeric factorization needs the analysis to have filled `info`.
+        CHECK_HIPSPARSE_ERROR(hipsparseXcsrilu02_analysis(
+            handle, m, nnz, descr, dval1, dptr, dcol, info, policy, dbuffer));
+
         // Warm up
         for(int iter = 0; iter < number_cold_calls; ++iter)
         {
@@ -353,7 +357,7 @@ void testing_csrilu02(Arguments argus)
             gpu_time_used += (get_time_us() - temp);
         }
 
-        gpu_time_used = (get_time_us() - gpu_time_used) / number_hot_calls;
+        gpu_time_used = gpu_time_used / number_hot_calls;
 
         double gbyte_count = csrilu0_gbyte_count<T>(m, nnz);
         double gpu_gbyte   = get_gpu_gbyte(gpu_time_used, gbyte_count);
