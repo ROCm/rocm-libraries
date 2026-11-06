@@ -16,6 +16,7 @@
 #include <hipdnn_data_sdk/types.hpp>
 #include <hipdnn_frontend/Error.hpp>
 #include <hipdnn_frontend/Types.hpp>
+#include <hipdnn_frontend/detail/RaggedLayoutValidation.hpp>
 #include <hipdnn_frontend/detail/TensorConstants.hpp>
 #include <memory>
 #include <optional>
@@ -650,6 +651,11 @@ public:
                               ErrorCode::INVALID_VALUE,
                               "Tensor " + _name
                                   + " ragged offset multiplier requires a ragged offset");
+
+        if(has_ragged_offset())
+        {
+            HIPDNN_CHECK_ERROR(detail::validateRaggedLayout(_name, _dim, _stride));
+        }
 
         return {ErrorCode::OK, ""};
     }
