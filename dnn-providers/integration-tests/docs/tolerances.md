@@ -175,15 +175,25 @@ largest-error elements (by absolute error and by rounding steps) and 48
 random elements of each output; the failure counts use every element.
 
 The C++ implementation was then run through the harness, on every half and
-bfloat16 conv-fwd case MIOpen runs, at all four levels:
+bfloat16 conv-fwd case MIOpen runs, at all four levels. The MI325X runs and the
+first three MI250 runs scanned the input tensors for their statistics. The
+recipe path that ships (see "What the harness feeds it") ran on a fourth
+MI250 run, which repeats one of its seed sets, and on the final revision on an
+MI308X:
 
-| Hardware | Input seed sets | Failures the dynamic tolerance adds |
-|---|---|---|
-| MI325X (gfx942) | 4 | 0 |
-| MI250 (gfx90a) | 3 | 0 |
+| Hardware | Input seed sets | Statistics from | Failures the dynamic tolerance adds |
+|---|---|---|---|
+| MI325X (gfx942) | 4 | tensor scan | 0 |
+| MI250 (gfx90a) | 3, and a fourth run repeating one | tensor scan; the repeat from the recipe | 0 |
+| MI308X (gfx942) | 1 (the bundles' own seeds) | recipe, final revision | 0 |
+
+The MI308X run (filter `*_ConvolutionFwd*.*_bf16_*:*_ConvolutionFwd*.*_fp16_*-*.X3_*`,
+MIOpen engine) selected 2,826 cases: 1,803 passed, 7 failed and 1,016 were
+skipped (848 the engine does not rank, 168 quarantined in the TOML).
 
 Every failure in those runs is an output MIOpen computes wrongly (values with
-the wrong sign), which also fails the fixed 0.1. One correct gfx90a half output
+the wrong sign), which also fails the fixed 0.1: the 3D channels-last
+`F16fast` and `F16chan` cases of the comprehensive and full levels. One correct gfx90a half output
 that the fixed 0.1 failed (one element 0.12 off at `|ref|` of about 0.1, with
 `K` = 18,432) passes.
 
