@@ -1201,7 +1201,9 @@ std::optional<KernelDefinition> findStagedKernel(const std::string& dtype,
                                         kernel.originDirectory,
                                         kernel.name,
                                         kernel.treeRoot,
-                                        kernel.sources};
+                                        kernel.sources,
+                                        nullptr,
+                                        nullptr};
             if(exact)
             {
                 return definition;
@@ -1372,7 +1374,9 @@ std::optional<KernelDefinition> findStagedAiwKernel(const std::string& dtype,
                                         kernel.originDirectory,
                                         kernel.name,
                                         kernel.treeRoot,
-                                        kernel.sources};
+                                        kernel.sources,
+                                        nullptr,
+                                        nullptr};
             if(exact)
             {
                 return definition;
