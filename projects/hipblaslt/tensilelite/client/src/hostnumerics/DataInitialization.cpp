@@ -43,8 +43,10 @@ namespace TensileLite::Client
 
     namespace
     {
+        using roc::hostnumerics::FixedStructuredSparsitySelection;
         using roc::hostnumerics::GenerationRecipe;
         using roc::hostnumerics::Layout;
+        using roc::hostnumerics::RandomStructuredSparsitySelection;
         using roc::hostnumerics::ScalarType;
         using roc::hostnumerics::Shape;
         using roc::hostnumerics::StructuredSparseTensor;
@@ -297,37 +299,37 @@ namespace TensileLite::Client
         StructuredSparsityPattern
             sparsePatternLastDimensionFastest(PruneSparseMode mode, size_t sparseAxis, size_t rank)
         {
-            StructuredSparsityPattern pattern;
-            pattern.indexOrder = roc::hostnumerics::Permutation::identity(rank);
-            pattern.axis       = sparseAxis;
-            switch(mode)
-            {
-            case PruneSparseMode::PruneRandom:
-                pattern.selection = StructuredSparsitySelection::Random;
-                pattern.seed      = sparsePruningSeed;
-                break;
-            case PruneSparseMode::PruneXX00:
-                pattern.fixedPositions = {0, 1};
-                break;
-            case PruneSparseMode::PruneX0X0:
-                pattern.fixedPositions = {0, 2};
-                break;
-            case PruneSparseMode::Prune0XX0:
-                pattern.fixedPositions = {1, 2};
-                break;
-            case PruneSparseMode::PruneX00X:
-                pattern.fixedPositions = {0, 3};
-                break;
-            case PruneSparseMode::Prune0X0X:
-                pattern.fixedPositions = {1, 3};
-                break;
-            case PruneSparseMode::Prune00XX:
-                pattern.fixedPositions = {2, 3};
-                break;
-            default:
-                throw std::runtime_error("Unsupported TensileLite sparse pruning mode.");
-            }
-            return pattern;
+            const auto fixed = [](size_t first, size_t second) -> StructuredSparsitySelection {
+                return FixedStructuredSparsitySelection{{first, second}};
+            };
+            const auto selection = [&]() -> StructuredSparsitySelection {
+                switch(mode)
+                {
+                case PruneSparseMode::PruneRandom:
+                    return RandomStructuredSparsitySelection{sparsePruningSeed};
+                case PruneSparseMode::PruneXX00:
+                    return fixed(0, 1);
+                case PruneSparseMode::PruneX0X0:
+                    return fixed(0, 2);
+                case PruneSparseMode::Prune0XX0:
+                    return fixed(1, 2);
+                case PruneSparseMode::PruneX00X:
+                    return fixed(0, 3);
+                case PruneSparseMode::Prune0X0X:
+                    return fixed(1, 3);
+                case PruneSparseMode::Prune00XX:
+                    return fixed(2, 3);
+                default:
+                    throw std::runtime_error("Unsupported TensileLite sparse pruning mode.");
+                }
+            }();
+            return {
+                .axis             = sparseAxis,
+                .groupSize        = 4,
+                .retainedElements = 2,
+                .selection        = selection,
+                .indexOrder       = roc::hostnumerics::Permutation::identity(rank),
+            };
         }
 
         void initializeStorageWithHostNumerics(ScalarType            type,

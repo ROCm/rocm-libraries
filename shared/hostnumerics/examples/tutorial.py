@@ -225,10 +225,13 @@ class HostNumericsTutorial(unittest.TestCase):
         )
         self.assertEqual(normalized.mean.shape, [2])
 
-        pattern = hn.StructuredSparsityPattern()
-        pattern.index_order = hn.Permutation([0, 1])
-        pattern.axis = 1
-        pattern.fixed_positions = [0, 2]
+        pattern = hn.StructuredSparsityPattern(
+            axis=1,
+            group_size=4,
+            retained_elements=2,
+            selection=hn.FixedStructuredSparsitySelection([0, 2]),
+            index_order=hn.Permutation([0, 1]),
+        )
         sparse = hn.apply_structured_sparsity(
             hn.from_numpy(np.asarray([[1.0, 2.0, 3.0, 4.0]], dtype=np.float32)),
             pattern,

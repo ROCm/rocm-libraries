@@ -6,41 +6,45 @@
 #include <cstddef>
 #include <cstdint>
 #include <optional>
-#include <roc/hostnumerics/permutation.hpp>
+#include <roc/hostnumerics/index_order.hpp>
 #include <roc/hostnumerics/tensor.hpp>
 #include <utility>
+#include <variant>
 #include <vector>
 
 namespace roc::hostnumerics {
-// Selects fixed positions or a reproducible pseudo-random set for each N:M
-// group.
-enum class StructuredSparsitySelection {
-    Fixed,   // Uses fixedPositions for every group.
-    Random,  // Selects a sorted set from the seed and group index.
+// Retains the same positions, each less than the group size, in every group.
+struct FixedStructuredSparsitySelection {
+    std::vector<size_t> positions;
 };
+
+// Retains a pseudo-random sorted set in each group, chosen from the seed and
+// the group's linear index.
+struct RandomStructuredSparsitySelection {
+    uint64_t seed;
+};
+
+using StructuredSparsitySelection =
+    std::variant<FixedStructuredSparsitySelection, RandomStructuredSparsitySelection>;
 
 // Describes logical N:M pruning along one tensor axis. Each groupSize-element
 // group contributes retainedElements encoded values to the compressed output;
 // the remaining values are zeroed in the full-size pruned output. This
 // operation is independent of MX data generation and GPU-specific layouts.
+// Every field is required; a 2:4 pattern sets groupSize 4 and
+// retainedElements 2.
 struct StructuredSparsityPattern {
     // Tensor axis partitioned into N:M groups.
-    size_t axis = 0;
+    size_t axis;
 
-    // Group width and retained count. The defaults describe a 2:4 pattern.
-    size_t groupSize = 4;
-    size_t retainedElements = 2;
+    size_t groupSize;
+    size_t retainedElements;
 
-    StructuredSparsitySelection selection = StructuredSparsitySelection::Fixed;
+    StructuredSparsitySelection selection;
 
-    // Positions retained in every group when selection is Fixed.
-    std::vector<size_t> fixedPositions{0, 1};
-
-    // Counter-random seed used when selection is Random.
-    uint64_t seed = 0;
-
-    // Defines how groups on the non-sparsity axes receive linear random indices.
-    Permutation indexOrder = Permutation::identity(0);
+    // Numbers the lines, which fix every coordinate except axis. Slice ranges
+    // and random group indices follow this numbering.
+    IndexOrder indexOrder;
 };
 
 struct StructuredSparsityOutputOptions {

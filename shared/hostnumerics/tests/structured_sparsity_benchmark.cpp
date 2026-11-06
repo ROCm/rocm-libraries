@@ -74,10 +74,13 @@ int main(int argc, char** argv) {
     const Layout compressedLayout(Shape{rows, columns / 2}, {1, static_cast<ptrdiff_t>(rows)}, 0);
     const Layout metadataLayout(Shape{rows, columns / 8}, {static_cast<ptrdiff_t>(columns / 8), 1},
                                 0);
-    StructuredSparsityPattern pattern;
-    pattern.indexOrder = Permutation{0, 1};
-    pattern.axis = 1;
-    pattern.fixedPositions = {0, 1};
+    StructuredSparsityPattern pattern{
+        .axis = 1,
+        .groupSize = 4,
+        .retainedElements = 2,
+        .selection = FixedStructuredSparsitySelection{{0, 1}},
+        .indexOrder = Permutation{0, 1},
+    };
     Tensor prunedTensor =
         Tensor::copyNativeStorage<float>(inputLayout, std::span<const float>(pruned));
     Tensor compressedTensor =

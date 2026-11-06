@@ -530,10 +530,13 @@ TEST(HostNumericsStructuredSparsity, TensileAdapterMatchesStandaloneComponent)
         {metadataLayout.stride(1), metadataLayout.stride(0), metadataLayout.stride(2)},
         0);
 
-    StructuredSparsityPattern pattern;
-    pattern.indexOrder           = roc::hostnumerics::Permutation{0, 1, 2};
-    pattern.axis                 = sparseAxis;
-    pattern.fixedPositions       = {0, 1};
+    const StructuredSparsityPattern pattern{
+        .axis             = sparseAxis,
+        .groupSize        = 4,
+        .retainedElements = 2,
+        .selection        = roc::hostnumerics::FixedStructuredSparsitySelection{{0, 1}},
+        .indexOrder       = roc::hostnumerics::Permutation{0, 1, 2},
+    };
     Tensor componentPrunedTensor = Tensor::copyEncodedBackingStorage(
         scalarType,
         layout(denseDescriptor),

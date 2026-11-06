@@ -9,9 +9,13 @@ void testStructuredSparsity() {
 
     for (ScalarType type :
          {ScalarType::E4M3, ScalarType::E5M3, ScalarType::E8M0, ScalarType::E8M0Zero}) {
-        StructuredSparsityPattern pattern;
-        pattern.indexOrder = Permutation{0};
-        pattern.fixedPositions = {0, 2};
+        StructuredSparsityPattern pattern{
+            .axis = 0,
+            .groupSize = 4,
+            .retainedElements = 2,
+            .selection = FixedStructuredSparsitySelection{{0, 2}},
+            .indexOrder = Permutation{0},
+        };
         for (size_t elements : {size_t{0}, size_t{4}}) {
             requireError(
                 [&] { (void)applyStructuredSparsity(Tensor(type, Shape{elements}), pattern, {}); },
@@ -40,10 +44,13 @@ void testStructuredSparsity() {
     Tensor retainedIndices = Tensor::copyNativeStorage<uint8_t>(
         Layout::contiguousLastDimensionFastest(Shape{2, 4}), std::span<uint8_t>(indexStorage));
 
-    StructuredSparsityPattern pattern;
-    pattern.indexOrder = Permutation{0, 1};
-    pattern.axis = 1;
-    pattern.fixedPositions = {1, 3};
+    StructuredSparsityPattern pattern{
+        .axis = 1,
+        .groupSize = 4,
+        .retainedElements = 2,
+        .selection = FixedStructuredSparsitySelection{{1, 3}},
+        .indexOrder = Permutation{0, 1},
+    };
     applyStructuredSparsityInto(
         input, {.pruned = pruned, .compressed = compressed, .retainedIndices = retainedIndices},
         pattern, {});
@@ -113,7 +120,7 @@ void testStructuredSparsity() {
     Tensor inPlaceIndices(ScalarType::UInt8, Shape{4});
     pattern.indexOrder = Permutation{0};
     pattern.axis = 0;
-    pattern.fixedPositions = {0, 2};
+    pattern.selection = FixedStructuredSparsitySelection{{0, 2}};
     applyStructuredSparsityInto(
         inPlace,
         {.pruned = inPlace, .compressed = inPlaceCompressed, .retainedIndices = inPlaceIndices},
@@ -123,10 +130,13 @@ void testStructuredSparsity() {
             "In-place structured sparsity mismatch.");
 
     const std::array<float, 12> ownedValues{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12};
-    StructuredSparsityPattern ownedPattern;
-    ownedPattern.indexOrder = Permutation{0};
-    ownedPattern.axis = 0;
-    ownedPattern.fixedPositions = {0, 2};
+    StructuredSparsityPattern ownedPattern{
+        .axis = 0,
+        .groupSize = 4,
+        .retainedElements = 2,
+        .selection = FixedStructuredSparsitySelection{{0, 2}},
+        .indexOrder = Permutation{0},
+    };
     const Tensor ownedInput =
         Tensor::copyNativeValues<float>(Shape{12}, std::span<const float>(ownedValues));
     const StructuredSparseTensor owned = applyStructuredSparsity(
@@ -145,7 +155,7 @@ void testStructuredSparsity() {
 
     StructuredSparsityPattern invalidMetadataPattern = ownedPattern;
     invalidMetadataPattern.retainedElements = 1;
-    invalidMetadataPattern.fixedPositions = {0};
+    invalidMetadataPattern.selection = FixedStructuredSparsitySelection{{0}};
     bool rejectedBeforeAllocation = false;
     try {
         (void)applyStructuredSparsity(ownedInput, invalidMetadataPattern,
@@ -163,9 +173,13 @@ void testStructuredSparsity() {
 
     for (const auto& [shape, axis] :
          std::array<std::pair<Shape, size_t>, 2>{{{Shape{0, 8}, 0}, {Shape{2, 0}, 1}}}) {
-        StructuredSparsityPattern emptyPattern;
-        emptyPattern.indexOrder = Permutation::identity(shape.rank());
-        emptyPattern.axis = axis;
+        StructuredSparsityPattern emptyPattern{
+            .axis = axis,
+            .groupSize = 4,
+            .retainedElements = 2,
+            .selection = FixedStructuredSparsitySelection{{0, 1}},
+            .indexOrder = Permutation::identity(shape.rank()),
+        };
         const StructuredSparseTensor empty =
             applyStructuredSparsity(Tensor(ScalarType::Float32, shape), emptyPattern,
                                     {.retainedIndices = true, .twoOfFourMetadata = true});
@@ -187,9 +201,13 @@ void testStructuredSparsity() {
             .retainedIndices = Tensor(ScalarType::UInt8, layout),
             .twoOfFourMetadata = Tensor(ScalarType::UInt8, layout),
         };
-        StructuredSparsityPattern emptyPattern;
-        emptyPattern.indexOrder = Permutation::identity(shape.rank());
-        emptyPattern.axis = axis;
+        StructuredSparsityPattern emptyPattern{
+            .axis = axis,
+            .groupSize = 4,
+            .retainedElements = 2,
+            .selection = FixedStructuredSparsitySelection{{0, 1}},
+            .indexOrder = Permutation::identity(shape.rank()),
+        };
         applyStructuredSparsityInto(emptyInput, outputs, emptyPattern, {});
         encodeTwoOfFourMetadataInto(*outputs.retainedIndices, *outputs.twoOfFourMetadata, axis);
         require(outputs.pruned.elementCount() == 0 &&
@@ -201,7 +219,7 @@ void testStructuredSparsity() {
                                             {.firstSlice = 0, .sliceCount = 1});
             },
             "Oversized empty structured sparsity accepted a nonempty slice range.");
-        emptyPattern.fixedPositions = {0, 4};
+        emptyPattern.selection = FixedStructuredSparsitySelection{{0, 4}};
         requireError([&] { applyStructuredSparsityInto(emptyInput, outputs, emptyPattern, {}); },
                      "Oversized empty structured sparsity skipped pattern validation.");
     }
@@ -218,12 +236,13 @@ void testStructuredSparsity() {
     require(rejectedBeforeAllocation,
             "Owning two-of-four metadata accepted invalid retained positions.");
 
-    StructuredSparsityPattern widePattern;
-    widePattern.indexOrder = Permutation{0};
-    widePattern.axis = 0;
-    widePattern.groupSize = 257;
-    widePattern.retainedElements = 1;
-    widePattern.fixedPositions = {0};
+    StructuredSparsityPattern widePattern{
+        .axis = 0,
+        .groupSize = 257,
+        .retainedElements = 1,
+        .selection = FixedStructuredSparsitySelection{{0}},
+        .indexOrder = Permutation{0},
+    };
     const StructuredSparseTensor wide =
         applyStructuredSparsity(Tensor(ScalarType::Float32, Shape{257}), widePattern, {});
     require(wide.compressed.shape() == Shape{1} && !wide.retainedIndices,
@@ -233,10 +252,13 @@ void testStructuredSparsity() {
     Tensor overlappingPrunedB(ScalarType::Float32, Layout(Shape{2, 8}, {1, 1}, 0));
     Tensor independentCompressedA(ScalarType::Float32, Shape{2, 4});
     Tensor independentCompressedB(ScalarType::Float32, Shape{2, 4});
-    StructuredSparsityPattern overlappingPattern;
-    overlappingPattern.indexOrder = Permutation{0, 1};
-    overlappingPattern.axis = 1;
-    overlappingPattern.fixedPositions = {1, 3};
+    StructuredSparsityPattern overlappingPattern{
+        .axis = 1,
+        .groupSize = 4,
+        .retainedElements = 2,
+        .selection = FixedStructuredSparsitySelection{{1, 3}},
+        .indexOrder = Permutation{0, 1},
+    };
     applyStructuredSparsityInto(
         input, {.pruned = overlappingPrunedA, .compressed = independentCompressedA},
         overlappingPattern, {});

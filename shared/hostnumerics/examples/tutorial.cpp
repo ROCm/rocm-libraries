@@ -172,10 +172,13 @@ void higherLevelOperations() {
     check(normalized.mean && normalized.mean->shape() == Shape{2},
           "LayerNorm statistics mismatch.");
 
-    StructuredSparsityPattern pattern;
-    pattern.indexOrder = Permutation{0, 1};
-    pattern.axis = 1;
-    pattern.fixedPositions = {0, 2};
+    StructuredSparsityPattern pattern{
+        .axis = 1,
+        .groupSize = 4,
+        .retainedElements = 2,
+        .selection = FixedStructuredSparsitySelection{{0, 2}},
+        .indexOrder = Permutation{0, 1},
+    };
     const StructuredSparseTensor sparse = applyStructuredSparsity(
         Tensor::copyNativeValues<float>(Shape{1, 4}, std::array<float, 4>{1, 2, 3, 4}), pattern,
         {.retainedIndices = true, .twoOfFourMetadata = true});

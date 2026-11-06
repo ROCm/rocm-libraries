@@ -64,10 +64,6 @@ StructuredSparsityPlan validateStructuredSparsityProblem(
     if (inputType == ScalarType::E4M3 || inputType == ScalarType::E5M3 ||
         inputType == ScalarType::E8M0 || inputType == ScalarType::E8M0Zero)
         throw std::runtime_error("Structured sparsity input has an unsupported scalar type.");
-    if (problem.pattern.selection != StructuredSparsitySelection::Fixed &&
-        problem.pattern.selection != StructuredSparsitySelection::Random)
-        throw std::runtime_error("Structured sparsity selection is invalid.");
-    (void)validatedIndexOrder(inputShape.rank(), problem.pattern.indexOrder.entries());
 
     std::vector<size_t> compressedDimensions(inputShape.dimensions().begin(),
                                              inputShape.dimensions().end());
@@ -96,11 +92,12 @@ StructuredSparsityPlan validateStructuredSparsityProblem(
                          ? 0
                          : projectWithoutAxis(inputShape, problem.pattern.axis).elementCount();
 
-    if (problem.pattern.selection == StructuredSparsitySelection::Fixed) {
-        if (problem.pattern.fixedPositions.size() != problem.pattern.retainedElements)
+    if (const auto* fixed =
+            std::get_if<FixedStructuredSparsitySelection>(&problem.pattern.selection)) {
+        if (fixed->positions.size() != problem.pattern.retainedElements)
             throw std::runtime_error(
                 "Structured sparsity fixed-position count does not match retained elements.");
-        std::vector<size_t> positions = problem.pattern.fixedPositions;
+        std::vector<size_t> positions = fixed->positions;
         std::sort(positions.begin(), positions.end());
         if (std::adjacent_find(positions.begin(), positions.end()) != positions.end())
             throw std::runtime_error("Structured sparsity fixed positions must be unique.");
@@ -252,10 +249,11 @@ void zeroEncodedElement(ScalarType type, std::span<std::byte> destination,
 size_t retainedPositionSetIndexForGroup(const StructuredSparsityInvocation& problem,
                                         const StructuredSparsityPlan& plan,
                                         size_t groupLinearIndex) {
-    if (problem.pattern.selection == StructuredSparsitySelection::Fixed) return 0;
+    const auto* random = std::get_if<RandomStructuredSparsitySelection>(&problem.pattern.selection);
+    if (random == nullptr) return 0;
     constexpr uint64_t selectionDomain = 0;
     const int selected =
-        indexedUniformInteger<false>(problem.pattern.seed, selectionDomain, groupLinearIndex, 0,
+        indexedUniformInteger<false>(random->seed, selectionDomain, groupLinearIndex, 0,
                                      static_cast<int>(plan.retainedPositionSets.size()) - 1);
     return static_cast<size_t>(selected);
 }

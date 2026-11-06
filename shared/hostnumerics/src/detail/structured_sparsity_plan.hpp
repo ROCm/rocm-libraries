@@ -25,10 +25,12 @@ struct StructuredSparsitySpecification {
                                     StructuredSparsityOutputOptions requestedOutputs)
         : input(std::move(inputTensor)),
           pattern(std::move(sparsityPattern)),
+          indexOrder(pattern.indexOrder.forRank(input.shape().rank())),
           outputs(requestedOutputs) {}
 
     Tensor input;
     StructuredSparsityPattern pattern;
+    Permutation indexOrder;  // pattern.indexOrder resolved for the input rank.
     StructuredSparsityOutputOptions outputs;
 };
 
