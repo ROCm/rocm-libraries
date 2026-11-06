@@ -66,12 +66,24 @@ bool IsApplicableFor(miopen::ExecutionContext& ctx,
 
 } // namespace
 
-using GPU_UnitTestConvSolverHipImplicitGemmFmaBwdData1d_FP32 = GPU_UnitTestConvSolverBwd_FP32;
+using GPU_UnitTestConvSolverHipImplicitGemmFmaBwdData1d_FP32  = GPU_UnitTestConvSolverBwd_FP32;
+using GPU_UnitTestConvSolverHipImplicitGemmFmaBwdData1d_FP16  = GPU_UnitTestConvSolverBwd_FP16;
+using GPU_UnitTestConvSolverHipImplicitGemmFmaBwdData1d_BFP16 = GPU_UnitTestConvSolverBwd_BFP16;
 
 using CPU_UnitTestConvSolverHipImplicitGemmFmaBwdData1dDevApplicabilityBwd_NONE =
     CPU_UnitTestConvSolverDevApplicabilityBwd_NONE;
 
 TEST_P(GPU_UnitTestConvSolverHipImplicitGemmFmaBwdData1d_FP32, ConvHipImplicitGemmFmaBwdData1d)
+{
+    this->RunTest(miopen::solver::conv::ConvHipImplicitGemmFmaBwdData1d{});
+};
+
+TEST_P(GPU_UnitTestConvSolverHipImplicitGemmFmaBwdData1d_FP16, ConvHipImplicitGemmFmaBwdData1d)
+{
+    this->RunTest(miopen::solver::conv::ConvHipImplicitGemmFmaBwdData1d{});
+};
+
+TEST_P(GPU_UnitTestConvSolverHipImplicitGemmFmaBwdData1d_BFP16, ConvHipImplicitGemmFmaBwdData1d)
 {
     this->RunTest(miopen::solver::conv::ConvHipImplicitGemmFmaBwdData1d{});
 };
@@ -98,7 +110,7 @@ TEST(CPU_UnitTestConvSolverHipImplicitGemmFmaBwdData1dBounds_NONE, ConvHipImplic
 
     const auto f32 = miopenFloat;
 
-    // RDNA only, fp32 only.
+    // RDNA only; fp32, fp16 and bf16 (gfx101X / gfx103X included).
     EXPECT_TRUE(
         IsApplicableFor(ctx, {1, 64, 1, 4096}, {64, 64, 1, 8}, {0, 2}, {1, 4}, {1, 1}, 1, f32));
     EXPECT_TRUE(
@@ -109,10 +121,12 @@ TEST(CPU_UnitTestConvSolverHipImplicitGemmFmaBwdData1dBounds_NONE, ConvHipImplic
         IsApplicableFor(ctx1010, {1, 64, 1, 4096}, {64, 64, 1, 8}, {0, 2}, {1, 4}, {1, 1}, 1, f32));
     EXPECT_FALSE(
         IsApplicableFor(ctx942, {1, 64, 1, 4096}, {64, 64, 1, 8}, {0, 2}, {1, 4}, {1, 1}, 1, f32));
+    EXPECT_TRUE(IsApplicableFor(
+        ctx1030, {1, 64, 1, 4096}, {64, 64, 1, 8}, {0, 2}, {1, 4}, {1, 1}, 1, miopenHalf));
+    EXPECT_TRUE(IsApplicableFor(
+        ctx1010, {1, 64, 1, 4096}, {64, 64, 1, 8}, {0, 2}, {1, 4}, {1, 1}, 1, miopenBFloat16));
     EXPECT_FALSE(IsApplicableFor(
-        ctx, {1, 64, 1, 4096}, {64, 64, 1, 8}, {0, 2}, {1, 4}, {1, 1}, 1, miopenHalf));
-    EXPECT_FALSE(IsApplicableFor(
-        ctx, {1, 64, 1, 4096}, {64, 64, 1, 8}, {0, 2}, {1, 4}, {1, 1}, 1, miopenBFloat16));
+        ctx942, {1, 64, 1, 4096}, {64, 64, 1, 8}, {0, 2}, {1, 4}, {1, 1}, 1, miopenHalf));
 
     // Filter width <= 64, stride <= 8.
     EXPECT_TRUE(
@@ -137,6 +151,18 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
                          testing::Combine(testing::Values(GetTestParams()),
                                           testing::Values(miopenConvolutionAlgoImplicitGEMM),
                                           testing::ValuesIn(GetConvTestCases(miopenFloat))));
+
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_UnitTestConvSolverHipImplicitGemmFmaBwdData1d_FP16,
+                         testing::Combine(testing::Values(GetTestParams()),
+                                          testing::Values(miopenConvolutionAlgoImplicitGEMM),
+                                          testing::ValuesIn(GetConvTestCases(miopenHalf))));
+
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_UnitTestConvSolverHipImplicitGemmFmaBwdData1d_BFP16,
+                         testing::Combine(testing::Values(GetTestParams()),
+                                          testing::Values(miopenConvolutionAlgoImplicitGEMM),
+                                          testing::ValuesIn(GetConvTestCases(miopenBFloat16))));
 
 // Device applicability test
 INSTANTIATE_TEST_SUITE_P(Smoke,

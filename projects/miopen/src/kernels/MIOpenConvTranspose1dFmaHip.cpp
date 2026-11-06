@@ -1,7 +1,8 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-// Backward data of a 1D convolution (ConvTranspose1d forward), groups == 1, fp32, FMA only.
+// Backward data of a 1D convolution (ConvTranspose1d forward), groups == 1, FMA only. fp32, fp16
+// and bf16 inputs; accumulation is always fp32.
 //
 // With o + P = S * q + r (0 <= r < S), output phase r receives the taps t = r + S * m, each reading
 // dy[q - m]: dx[co, S * q + r - P] = sum over (ci, m) of w[ci, co, r + S * m] * dy[ci, q - m].
@@ -10,11 +11,18 @@
 // CT_CO_W channels, so its weights are wave-uniform and are read with scalar loads straight from
 // w[ci][co][k]; lane l owns CT_QR consecutive q, i.e. S * CT_QR consecutive outputs per channel.
 // dy is staged in LDS CT_CI_T input channels at a time.
+//
+// fp16 / bf16 weights are first converted to fp32 into the workspace by
+// MIOpenConvTranspose1dFmaHipWeights: scalar loads are 32-bit, so 16-bit weights read in the main
+// kernel would become per-lane vector loads.
 
 #ifndef MIOPEN_HIP_RUNTIME_COMPILE
 #include <hip/hip_runtime.h>
 #endif
 
+#ifndef CT_DTYPE
+#define CT_DTYPE 0 // 0 fp32, 1 fp16, 2 bf16
+#endif
 #ifndef CT_K
 #define CT_K 4
 #endif
@@ -38,10 +46,41 @@
 #define CT_XW (CT_Q_T + CT_T - 1)                                     // dy window per input channel
 #define CT_XL ((CT_CI_T * CT_XW + CT_BLOCK_SIZE - 1) / CT_BLOCK_SIZE) // dy loads per thread
 
+#if CT_DTYPE == 0
+typedef float data_t;
+__device__ static inline float to_float(data_t v) { return v; }
+__device__ static inline data_t from_float(float v) { return v; }
+#elif CT_DTYPE == 1
+typedef _Float16 data_t;
+__device__ static inline float to_float(data_t v) { return static_cast<float>(v); }
+__device__ static inline data_t from_float(float v) { return static_cast<data_t>(v); }
+#else
+typedef unsigned short data_t;
+__device__ static inline float to_float(data_t v)
+{
+    return __builtin_bit_cast(float, static_cast<unsigned int>(v) << 16);
+}
+// Round to nearest even; NaN stays NaN.
+__device__ static inline data_t from_float(float v)
+{
+    const unsigned int u = __builtin_bit_cast(unsigned int, v);
+    if((u & 0x7fffffffu) > 0x7f800000u)
+        return static_cast<data_t>((u >> 16) | 0x40u);
+    return static_cast<data_t>((u + 0x7fffu + ((u >> 16) & 1u)) >> 16);
+}
+#endif
+
 extern "C" __global__ void __launch_bounds__(CT_BLOCK_SIZE)
-    MIOpenConvTranspose1dFmaHip(const float* __restrict__ dy,
-                                const float* __restrict__ w,
-                                float* __restrict__ dx,
+    MIOpenConvTranspose1dFmaHipWeights(const data_t* __restrict__ w, float* __restrict__ wf, int n)
+{
+    for(int i = blockIdx.x * CT_BLOCK_SIZE + threadIdx.x; i < n; i += gridDim.x * CT_BLOCK_SIZE)
+        wf[i] = to_float(w[i]);
+}
+
+extern "C" __global__ void __launch_bounds__(CT_BLOCK_SIZE)
+    MIOpenConvTranspose1dFmaHip(const data_t* __restrict__ dy,
+                                const float* __restrict__ w, // fp32; the workspace for fp16 / bf16
+                                data_t* __restrict__ dx,
                                 int ci_n,
                                 int co_n,
                                 int len_dy,
@@ -77,7 +116,7 @@ extern "C" __global__ void __launch_bounds__(CT_BLOCK_SIZE)
             const int ci = cb + i / CT_XW;
             const int q  = qb - (CT_T - 1) + i % CT_XW;
             xr[u]        = (i < CT_CI_T * CT_XW && ci < ci_n && q >= 0 && q < len_dy)
-                               ? dy[static_cast<size_t>(ci) * len_dy + q]
+                               ? to_float(dy[static_cast<size_t>(ci) * len_dy + q])
                                : 0.f;
         }
         __syncthreads();
@@ -122,7 +161,7 @@ extern "C" __global__ void __launch_bounds__(CT_BLOCK_SIZE)
     {
         if(co0 + c >= co_n)
             break;
-        float* yp = dx + static_cast<size_t>(co0 + c) * len_dx;
+        data_t* yp = dx + static_cast<size_t>(co0 + c) * len_dx;
 #pragma unroll
         for(int j = 0; j < CT_QR; ++j)
         {
@@ -132,7 +171,7 @@ extern "C" __global__ void __launch_bounds__(CT_BLOCK_SIZE)
             {
                 const int o = CT_S * q + r - pad;
                 if(o >= 0 && o < len_dx)
-                    yp[o] = acc[r][c][j];
+                    yp[o] = from_float(acc[r][c][j]);
             }
         }
     }

@@ -4633,7 +4633,7 @@ struct MIOPEN_INTERNALS_EXPORT ConvDirectDepthwiseFwd2D final : ConvSolver
 };
 
 /// Backward-data 1D convolution with groups == 1 (the forward of a ConvTranspose1d) as an implicit
-/// GEMM on FMA instructions, fp32, for RDNA.
+/// GEMM on FMA instructions, fp32 / fp16 / bf16 with fp32 accumulation, for RDNA.
 struct MIOPEN_INTERNALS_EXPORT ConvHipImplicitGemmFmaBwdData1d final : ConvSolver
 {
     const std::string& SolverDbId() const override
@@ -4648,6 +4648,9 @@ struct MIOPEN_INTERNALS_EXPORT ConvHipImplicitGemmFmaBwdData1d final : ConvSolve
     {
         return 0.02f;
     }
+    size_t GetWorkspaceSize(const ExecutionContext&,
+                            const miopen::conv::ProblemDescription&) const override;
+    bool MayNeedWorkspace() const override { return true; }
     ConvSolution GetSolution(const ExecutionContext&,
                              const miopen::conv::ProblemDescription&) const override;
 };
