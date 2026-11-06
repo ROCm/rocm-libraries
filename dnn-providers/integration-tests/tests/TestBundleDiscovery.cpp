@@ -10,6 +10,7 @@
 #include <fstream>
 #include <functional>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <utility>
 #include <variant>
@@ -2124,21 +2125,22 @@ nlohmann::json aliasMetadata(const nlohmann::json& aliases)
     return nlohmann::json{{"format_version", 2}, {"aliases", aliases}};
 }
 
-// The FailedLoad message of the one bundle under `root`; an empty string, with a
-// test failure, for any other outcome.
+// The FailedLoad message of the one bundle under `root`. Any other outcome is a
+// problem with the test itself, not the thing it's checking, so it throws instead
+// of returning a placeholder a caller's own assertion would then fail against a
+// second time.
 std::string failedLoadMessage(const std::filesystem::path& root, SweepManifestCache& sweeps)
 {
     const auto discovered = discoverBundles(root);
     if(discovered.size() != 1)
     {
-        ADD_FAILURE() << "expected one bundle under " << root << ", found " << discovered.size();
-        return {};
+        throw std::runtime_error("expected one bundle under " + root.string() + ", found "
+                                 + std::to_string(discovered.size()));
     }
     auto outcome = detail::classifyBundle(discovered.front(), sweeps);
     if(!std::holds_alternative<detail::FailedLoad>(outcome))
     {
-        ADD_FAILURE() << "expected a FailedLoad for " << root;
-        return {};
+        throw std::runtime_error("expected a FailedLoad for " + root.string());
     }
     return std::get<detail::FailedLoad>(outcome).message;
 }

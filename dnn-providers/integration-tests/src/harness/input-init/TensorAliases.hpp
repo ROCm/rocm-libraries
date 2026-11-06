@@ -5,15 +5,18 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <initializer_list>
 #include <limits>
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
 #include <hipdnn_flatbuffers_sdk/data_objects/tensor_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/utilities/FlatbufferUtils.hpp>
 #include <nlohmann/json.hpp>
 
 namespace hipdnn_integration_tests
@@ -57,13 +60,111 @@ inline std::optional<int64_t> integerValue(const nlohmann::json& value)
     return value.get<int64_t>();
 }
 
-inline TensorAlias parseEntry(const nlohmann::json& entry, std::size_t index)
+// Throws if `entry` has a key outside `allowedKeys`, naming `where` and the key.
+inline void rejectUnknownKeys(const nlohmann::json& entry,
+                              const std::string& where,
+                              std::initializer_list<std::string_view> allowedKeys)
 {
-    std::string where = "aliases[" + std::to_string(index) + "]";
-    if(!entry.is_object())
+    for(const auto& item : entry.items())
     {
-        throw std::invalid_argument(where + " is not an object");
+        const auto& key = item.key();
+        bool known = false;
+        for(const auto allowed : allowedKeys)
+        {
+            if(key == allowed)
+            {
+                known = true;
+                break;
+            }
+        }
+        if(!known)
+        {
+            std::string message = where;
+            message.append(" has unknown key \"").append(key).append("\"");
+            throw std::invalid_argument(message);
+        }
     }
+}
+
+// Reads `key` as a 64-bit signed integer, throwing (naming `where`) when it is absent
+// or not one.
+inline int64_t
+    readRequiredInteger(const nlohmann::json& entry, const char* key, const std::string& where)
+{
+    if(!entry.contains(key))
+    {
+        throw std::invalid_argument(where + " lacks \"" + key + "\"");
+    }
+    const auto value = integerValue(entry.at(key));
+    if(!value.has_value())
+    {
+        throw std::invalid_argument(where + ": \"" + key + "\" is not a 64-bit signed integer");
+    }
+    return *value;
+}
+
+// Reads `key` as a 64-bit signed integer: nullopt when absent, throwing (naming
+// `where`) only when present and not one.
+inline std::optional<int64_t>
+    readOptionalInteger(const nlohmann::json& entry, const char* key, const std::string& where)
+{
+    if(!entry.contains(key))
+    {
+        return std::nullopt;
+    }
+    const auto value = integerValue(entry.at(key));
+    if(!value.has_value())
+    {
+        throw std::invalid_argument(where + ": \"" + key + "\" is not a 64-bit signed integer");
+    }
+    return value;
+}
+
+// Parses `json` as a non-empty array of objects, one T per entry via `buildEntry(entry,
+// where)` (`where` already names the array and index, e.g. "aliases[2]"), then rejects
+// a uid (read by `uidOf`) that repeats across entries, naming it with
+// `duplicateMessage`. Shared outer shape of the aliases/start_offsets/live_rows
+// metadata-array parsers; each keeps its own field list and per-entry rules in
+// `buildEntry`.
+template <typename T, typename BuildEntry, typename UidOf, typename DuplicateMessage>
+inline std::vector<T> parseUidKeyedArray(const nlohmann::json& json,
+                                         const char* arrayName,
+                                         BuildEntry buildEntry,
+                                         UidOf uidOf,
+                                         DuplicateMessage duplicateMessage)
+{
+    if(!json.is_array())
+    {
+        throw std::invalid_argument(std::string(arrayName) + " is not an array");
+    }
+    if(json.empty())
+    {
+        throw std::invalid_argument(std::string(arrayName) + " is empty");
+    }
+
+    std::vector<T> entries;
+    std::unordered_set<int64_t> uids;
+    for(std::size_t i = 0; i < json.size(); ++i)
+    {
+        const auto& entry = json[i];
+        const std::string where = std::string(arrayName) + "[" + std::to_string(i) + "]";
+        if(!entry.is_object())
+        {
+            throw std::invalid_argument(where + " is not an object");
+        }
+        T parsed = buildEntry(entry, where);
+        if(!uids.insert(uidOf(parsed)).second)
+        {
+            throw std::invalid_argument(duplicateMessage(parsed));
+        }
+        entries.push_back(std::move(parsed));
+    }
+    return entries;
+}
+
+inline TensorAlias parseEntry(const nlohmann::json& entry, const std::string& baseWhere)
+{
+    std::string where = baseWhere;
     const auto known = [&](const char* key) {
         return entry.contains(key) ? integerValue(entry.at(key)) : std::nullopt;
     };
@@ -78,34 +179,12 @@ inline TensorAlias parseEntry(const nlohmann::json& entry, std::size_t index)
         where += ")";
     }
 
-    for(const auto& item : entry.items())
-    {
-        const auto& key = item.key();
-        if(key != "uid" && key != "of" && key != "byte_offset")
-        {
-            std::string message = where;
-            message.append(" has unknown key \"").append(key).append("\"");
-            throw std::invalid_argument(message);
-        }
-    }
-
-    const auto readInteger = [&](const char* key) {
-        if(!entry.contains(key))
-        {
-            throw std::invalid_argument(where + " lacks \"" + key + "\"");
-        }
-        const auto value = integerValue(entry.at(key));
-        if(!value.has_value())
-        {
-            throw std::invalid_argument(where + ": \"" + key + "\" is not a 64-bit signed integer");
-        }
-        return *value;
-    };
+    rejectUnknownKeys(entry, where, {"uid", "of", "byte_offset"});
 
     TensorAlias alias;
-    alias.uid = readInteger("uid");
-    alias.ofUid = readInteger("of");
-    alias.byteOffset = readInteger("byte_offset");
+    alias.uid = readRequiredInteger(entry, "uid", where);
+    alias.ofUid = readRequiredInteger(entry, "of", where);
+    alias.byteOffset = readRequiredInteger(entry, "byte_offset", where);
 
     if(alias.byteOffset < 0)
     {
@@ -176,15 +255,6 @@ inline std::optional<int64_t> checkedMultiply(int64_t a, int64_t b)
     return a * b;
 }
 
-inline std::vector<int64_t> toVector(const flatbuffers::Vector<int64_t>* values)
-{
-    if(values == nullptr)
-    {
-        return {};
-    }
-    return {values->begin(), values->end()};
-}
-
 // Bytes from the start of the allocation to the end of the last element:
 // (1 + sum of (dim - 1) * stride) * element size. Every dim is at least 1 and every
 // stride is at least 0. Nullopt when the count does not fit in an int64_t.
@@ -252,8 +322,10 @@ inline Layout checkedLayout(const TensorAlias& alias,
                                     + ", which has no element size");
     }
 
-    const auto dims = toVector(tensor->dims());
-    const auto strides = toVector(tensor->strides());
+    const auto dims
+        = hipdnn_flatbuffers_sdk::utilities::convertFlatBufferVectorToStdVector(tensor->dims());
+    const auto strides
+        = hipdnn_flatbuffers_sdk::utilities::convertFlatBufferVectorToStdVector(tensor->strides());
     if(dims.size() != strides.size())
     {
         throw std::invalid_argument(prefix + "has " + std::to_string(dims.size()) + " dims but "
@@ -376,27 +448,15 @@ inline void checkAlias(
 // when a view is also an owner.
 inline std::vector<TensorAlias> parseTensorAliases(const nlohmann::json& json)
 {
-    if(!json.is_array())
-    {
-        throw std::invalid_argument("aliases is not an array");
-    }
-    if(json.empty())
-    {
-        throw std::invalid_argument("aliases is empty");
-    }
-
-    std::vector<TensorAlias> aliases;
-    std::unordered_set<int64_t> views;
-    for(std::size_t i = 0; i < json.size(); ++i)
-    {
-        const auto alias = tensor_alias_detail::parseEntry(json[i], i);
-        if(!views.insert(alias.uid).second)
-        {
-            throw std::invalid_argument(tensor_alias_detail::describe(alias)
-                                        + ": the view appears in more than one entry");
-        }
-        aliases.push_back(alias);
-    }
+    const auto aliases = tensor_alias_detail::parseUidKeyedArray<TensorAlias>(
+        json,
+        "aliases",
+        &tensor_alias_detail::parseEntry,
+        [](const TensorAlias& alias) { return alias.uid; },
+        [](const TensorAlias& alias) {
+            return tensor_alias_detail::describe(alias)
+                   + ": the view appears in more than one entry";
+        });
 
     for(const auto& alias : aliases)
     {
