@@ -288,7 +288,8 @@ size_t rocke_wgrad_conv_workspace_bytes(const rocke_implicit_gemm_conv_wgrad_spe
 /* Python wgrad_streamk_default_pool(reduction, arch): the CTA pool an auto
  * (streamk_ctas == -1) launch uses -- one CTA per CU for linear/tree, four per
  * CU for atomic/workspace. CU counts come from a static per-arch table that
- * mirrors rocke.helpers.split_k._ARCH_NUM_CUS (256 for an unknown arch).
+ * mirrors rocke.helpers.split_k.ARCH_NUM_CUS (DEFAULT_NUM_CUS, 256, for an
+ * unknown arch).
  * A NULL arch is gfx950, Python's default. */
 int rocke_wgrad_conv_streamk_default_pool(const char* reduction, const char* arch);
 

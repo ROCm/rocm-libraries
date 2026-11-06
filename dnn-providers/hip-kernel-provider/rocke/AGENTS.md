@@ -46,7 +46,7 @@ rocke/
 │   ├── cpp/           C++20 engine (librocke_core.a) + pybind bindings
 │   ├── dsl_docs/      the field manual (see platform/dsl_docs/README.md)
 │   └── tools/ tests/ cmake/
-└── library/         # the SDPA product — build-time-only Python (NOT installed, no wheel)
+└── library/         # the kernel library (SDPA/MHA, conv, ...): build-time Python + C++ mirrors (archive ships as ckc::rocke_library)
     ├── kernels/ builders/ dispatch/ benchmarks/ tests/
     └── cpp/           C++ mirrors of library families (librocke_library.a + rocke_library_engine)
 ```

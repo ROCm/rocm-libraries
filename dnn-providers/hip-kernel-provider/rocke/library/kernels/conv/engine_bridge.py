@@ -124,9 +124,9 @@ def conv_implicit_gemm_spec_to_dict(spec: Any) -> Dict[str, Any]:
         v = getattr(data, f, None)
         if v is not None:
             d[f] = v
-    # The vector-size/optional knobs are merge-target additions (#8624);
-    # forward them only when set so the binding falls back to the engine
-    # default otherwise.
+    # The vector-size/optional knobs are later spec additions; forward them
+    # only when set so the binding falls back to the engine default
+    # otherwise.
     for f in (
         "lds_k_pad",
         "waves_per_eu",

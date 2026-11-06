@@ -432,7 +432,7 @@ class TestHipLoweringCoverage(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------
-# From platform/tests/core/test_cshuffle_reuse_barrier.py (PR #8844 guard)
+# From platform/tests/core/test_cshuffle_reuse_barrier.py (CShuffle LDS-reuse guard)
 # ---------------------------------------------------------------------
 
 _BARRIERS = ("tile.sync", "tile.sync_lds_only", "tile.s_barrier_bare")
@@ -512,7 +512,7 @@ def test_conv_cshuffle_no_alias_lds_budget_is_per_case():
     """is_valid_spec must size the LDS budget per ``cshuffle_no_alias``: aliased
     uses max(ab, c); no-alias uses ab + c. A spec whose max(ab, c) fits gfx950's
     LDS but whose ab + c overflows it must be accepted aliased and rejected
-    no-alias (regression for yraparti's PR #8844 review comment)."""
+    no-alias, so the no-alias budget cannot fall back to max(ab, c)."""
     from kernels.common.conv_implicit_gemm import (
         ConvProblem,
         ImplicitGemmConvSpec,

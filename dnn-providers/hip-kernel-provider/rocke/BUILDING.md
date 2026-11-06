@@ -5,7 +5,7 @@
 | Root | Packages | Installed in product? |
 |------|----------|-----------------------|
 | `platform/python` | `rocke` (authoring SDK + engine frontend) | yes (wheel / CMake) |
-| `library`         | `kernels`, `builders`, `dispatch` (SDPA/MHA) | **no** — build-time only |
+| `library`         | `kernels`, `builders`, `dispatch` (SDPA/MHA, conv, ...) | **no** for the Python (build-time only); the C++ mirrors in `library/cpp` ship in the `ckc` package (see "C++ engine") |
 
 The package import name is `rocke`; the SDPA product lives under separate
 top-level packages. Because the two halves sit under different roots, every

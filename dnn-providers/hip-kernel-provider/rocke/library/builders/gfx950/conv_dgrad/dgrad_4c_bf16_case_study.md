@@ -11,7 +11,7 @@ decisions, what the AOT port changed, and the commands to replay them.
 
 Knob reference (`dgrad_fused_weights`, `dgrad_weights_lds`, `stage_rows`,
 `waves_q`, name flags, the cached image):
-[`dsl_docs/instances/convolution.md`](../../../kernels/conv/docs/convolution.md),
+[`kernels/conv/docs/convolution.md`](../../../kernels/conv/docs/convolution.md),
 section "4c dgrad". The fused weight transform:
 [`dgrad_fused_weights_case_study.md`](dgrad_fused_weights_case_study.md).
 
@@ -198,8 +198,7 @@ cd ../platform && export ROCKE=$(pwd) PYTHONPATH=$(pwd)/python:$(pwd)/../library
 python3 -m pytest -q tests/core/test_mfma_4x4x4_numerics.py
 python3 tools/check_byte_identity.py \
     --only conv_direct_grouped,conv_direct_dgrad_ext,target_intrinsics
-python3 tests/instances/rocke_ir_parity_harness.py \
-    --check tests/golden/rocke_representative_ir_sha256/ --flavor llvm22
+(cd ../library && python3 tests/test_conv_ir_golden.py --check --flavor llvm22)
 ```
 
 Give concurrent worktrees their own `TMPDIR` and `--build-root` for

@@ -270,8 +270,8 @@ default off, so every forward kernel is unchanged; the C++ engine's
 `block_h` must be > 0 on every AOT binary: the image height is a kernarg, and
 the "whole image" of a JIT build is a cached tile height
 (`dgrad_fused_block_h`) with `row_guard` / `row_exit`. Full semantics:
-`platform/dsl_docs/instances/convolution.md` ("Generic Kernel dgrad: fused
-weights").
+[`../conv/docs/convolution.md`](../conv/docs/convolution.md) ("Generic Kernel
+dgrad: fused weights").
 
 ### Dgrad AOT cache variants (gfx950)
 
@@ -297,7 +297,7 @@ cache next to them. The case studies are in
 For **depthwise** (`cpg = 1`) use `DirectDepthwiseSpec` and `build_direct_depthwise`
 (backward data: `DirectDepthwiseDgradWindowedSpec` /
 `build_direct_depthwise_dgrad_windowed` at stride 1, see
-`platform/dsl_docs/instances/convolution.md`):
+[`../conv/docs/convolution.md`](../conv/docs/convolution.md)):
 
 ```python
 from kernels.common.conv_direct_grouped import (

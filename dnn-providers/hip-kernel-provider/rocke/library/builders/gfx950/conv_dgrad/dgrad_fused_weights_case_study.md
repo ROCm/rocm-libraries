@@ -13,7 +13,7 @@ commands to replay them.
 Knob reference (`preload_weights`, `dgrad_fused_weights`, `dgrad_weights_lds`,
 `waves_per_eu`, `row_guard`, `row_exit`, the row-stream knobs, name flags and
 the cached images):
-[`dsl_docs/instances/convolution.md`](../../../kernels/conv/docs/convolution.md),
+[`kernels/conv/docs/convolution.md`](../../../kernels/conv/docs/convolution.md),
 sections "4c dgrad" and "Generic Kernel dgrad: fused weights". The 4c kernel:
 [`dgrad_4c_bf16_case_study.md`](dgrad_4c_bf16_case_study.md).
 
@@ -235,8 +235,7 @@ python3 -m pytest -q tests/test_conv_dgrad_fused_weights.py \
     tests/test_direct_mfma_dgrad_correctness.py tests/test_direct_kernel_cache.py
 cd ../platform && export ROCKE=$(pwd) PYTHONPATH=$(pwd)/python:$(pwd)/../library
 python3 tools/check_byte_identity.py --only conv_direct_dgrad_ext,conv_direct_grouped
-python3 tests/instances/rocke_ir_parity_harness.py \
-    --check tests/golden/rocke_representative_ir_sha256/ --flavor llvm22
+(cd ../library && python3 tests/test_conv_ir_golden.py --check --flavor llvm22)
 ```
 
 Host-event timing includes launch overhead, which favours a single kernel;

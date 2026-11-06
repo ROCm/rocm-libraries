@@ -570,5 +570,6 @@ a non-square filter, groups; 55 without the tap-outer loop and 56 with
 `Wo > halo_max_wo` are rejected). The C++ tile loader stages through f16-typed
 LDS stores, so bf16 configs cannot be byte-compared and these configs are fp16.
 Representative goldens in `platform/tests/golden/rocke_representative_ir_sha256/`
-moved for the stride-1 `conv_dgrad` cases (the record fold), the grouped gfx950
-stride-1 cases (the XCD order), and gained a `_tapk` and a halo case.
+(now `library/tests/golden/conv_representative_ir/`) moved for the stride-1
+`conv_dgrad` cases (the record fold), the grouped gfx950 stride-1 cases (the XCD
+order), and gained a `_tapk` and a halo case.

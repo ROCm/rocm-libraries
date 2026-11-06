@@ -108,7 +108,7 @@ dW rows, and the extra memory transactions outweigh the halved atomic count.
   Both engines admit WMMA split-K only where the arch catalog sets
   `memory.has_global_float_atomic_add`, and only inside the WMMA wgrad subset
   (`default` or `cshuffle` epilogue, 16x16x16 or 16x16x32 atom).
-- Degree (`WgradSplitPolicy` in `rocke/helpers/split_k.py`): the smaller of a
+- Degree (`WgradSplitPolicy` in `kernels/common/conv_split_k.py`): the smaller of a
   CTA-fill term and a slice-depth term, under a per-dtype cap. Each packed
   16-bit atomic rounds the running sum in dW, so with same-sign partials the
   error grows with the degree, up to about `degree * 2**-8` for bf16 (7
