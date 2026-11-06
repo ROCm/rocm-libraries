@@ -1021,10 +1021,9 @@ namespace
     template <typename T>
     using Entry = std::tuple<int, int, T>;
 
-    // The entries of a COO matrix of any backend, sorted, because Permute leaves
-    // them in their old order (a known bug)
+    // The entries of a COO matrix of any backend, in their stored order
     template <typename T>
-    std::vector<Entry<T>> sorted_coo_entries(const BaseMatrix<T>& A)
+    std::vector<Entry<T>> coo_entries_of(const BaseMatrix<T>& A)
     {
         auto host = host_copy(A);
         auto coo  = dynamic_cast<rocalution::HostMatrixCOO<T>*>(host.get());
@@ -1044,7 +1043,6 @@ namespace
         {
             entries.emplace_back(row[k], col[k], val[k]);
         }
-        std::sort(entries.begin(), entries.end());
         return entries;
     }
 
@@ -1141,7 +1139,7 @@ TYPED_TEST(matrix_kernels_hip_coo, permute_with_a_capped_grid_moves_every_entry)
         A->CopyFromHost(*host);
 
         ASSERT_IN_LOOP(std::get<1>(permutation)(*A));
-        EXPECT_EQ(sorted_coo_entries(*A), entries_of(permuted(ref, std::get<2>(permutation))));
+        EXPECT_EQ(coo_entries_of(*A), entries_of(permuted(ref, std::get<2>(permutation))));
     }
 }
 
