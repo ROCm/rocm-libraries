@@ -47,8 +47,12 @@ HIP_CHECK(hipStreamEndCapture(stream, &graph));
 hipGraphExec_t instance;
 HIP_CHECK(hipGraphInstantiate(&instance, graph, nullptr, nullptr, 0));
 
-HIP_CHECK(hipGraphLaunch(instance, stream));
-HIP_CHECK(hipStreamSynchronize(stream));
+// The graph can be launched any number of times
+for(int i = 0; i < 2; ++i)
+{
+    HIP_CHECK(hipGraphLaunch(instance, stream));
+    HIP_CHECK(hipStreamSynchronize(stream));
+}
 
 HIP_CHECK(hipGraphExecDestroy(instance));
 rocrand_destroy_generator(generator);

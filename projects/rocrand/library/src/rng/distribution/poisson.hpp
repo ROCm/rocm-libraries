@@ -335,10 +335,12 @@ public:
         const bool changed = lambda != m_lambda;
         if(changed)
         {
-            auto arg = std::make_unique<update_discrete_distribution_arg>(
-                update_discrete_distribution_arg{lambda, this});
             const rocrand_status status
-                = System::launch_host_func(m_stream, update_discrete_distribution, arg.release());
+                = System::template launch_host_func<update_discrete_distribution_arg,
+                                                    update_discrete_distribution>(
+                    m_stream,
+                    std::make_unique<update_discrete_distribution_arg>(
+                        update_discrete_distribution_arg{lambda, this}));
             if(status != ROCRAND_STATUS_SUCCESS)
             {
                 return status;
@@ -402,45 +404,43 @@ private:
         poisson_distribution_manager* manager;
     };
 
-    static void update_discrete_distribution(void* user_data)
+    static void update_discrete_distribution(update_discrete_distribution_arg& arg)
     {
-        std::unique_ptr<update_discrete_distribution_arg> arg(
-            reinterpret_cast<update_discrete_distribution_arg*>(user_data));
-        std::unique_lock lock(arg->manager->m_mutex, std::defer_lock_t{});
-        if(!arg->manager->m_is_host_func_blocking)
+        std::unique_lock lock(arg.manager->m_mutex, std::defer_lock_t{});
+        if(!arg.manager->m_is_host_func_blocking)
         {
             lock.lock();
         }
         unsigned int        size;
         unsigned int        offset;
         std::vector<double> poisson_probabilities
-            = calculate_poisson_probabilities(arg->lambda, size, offset);
-        assert(size <= arg->manager->m_distribution.size);
+            = calculate_poisson_probabilities(arg.lambda, size, offset);
+        assert(size <= arg.manager->m_distribution.size);
         factory_t::normalize(poisson_probabilities, size);
         if constexpr((Method & DISCRETE_METHOD_ALIAS) != 0)
         {
             factory_t::create_alias_table(poisson_probabilities,
                                           size,
-                                          arg->manager->m_probability,
-                                          arg->manager->m_alias);
+                                          arg.manager->m_probability,
+                                          arg.manager->m_alias);
         }
         if constexpr((Method & DISCRETE_METHOD_CDF) != 0)
         {
-            factory_t::create_cdf(poisson_probabilities, size, arg->manager->m_cdf);
+            factory_t::create_cdf(poisson_probabilities, size, arg.manager->m_cdf);
         }
-        arg->manager->m_lambda = arg->lambda;
+        arg.manager->m_lambda = arg.lambda;
         if constexpr(!System::is_device())
         {
             if constexpr((Method & DISCRETE_METHOD_ALIAS) != 0)
             {
-                std::copy_n(arg->manager->m_probability,
+                std::copy_n(arg.manager->m_probability,
                             size,
-                            arg->manager->m_distribution.probability);
-                std::copy_n(arg->manager->m_alias, size, arg->manager->m_distribution.alias);
+                            arg.manager->m_distribution.probability);
+                std::copy_n(arg.manager->m_alias, size, arg.manager->m_distribution.alias);
             }
             if constexpr((Method & DISCRETE_METHOD_CDF) != 0)
             {
-                std::copy_n(arg->manager->m_cdf, size, arg->manager->m_distribution.cdf);
+                std::copy_n(arg.manager->m_cdf, size, arg.manager->m_distribution.cdf);
             }
         }
     }

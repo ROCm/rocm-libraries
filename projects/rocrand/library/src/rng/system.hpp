@@ -43,6 +43,7 @@
     #include <execution>
 #endif
 #include <cstring>
+#include <memory>
 #include <new>
 
 #include <stdint.h>
@@ -69,6 +70,63 @@ inline rocrand_status is_stream_blocking(hipStream_t stream, bool& is_blocking)
         is_blocking = true;
     }
     return ROCRAND_STATUS_SUCCESS;
+}
+
+/// Enqueues `Fn(*arg)` in `stream` and takes ownership of `arg`.
+///
+/// A host node captured into a graph passes the same argument to every launch of the graph, so
+/// the callback cannot free it. When `stream` is capturing, the argument is handed to the graph
+/// instead, which frees it when the graph and every executable instantiated from it are destroyed.
+/// Otherwise, the argument is freed after `Fn` returns.
+template<typename T, void (*Fn)(T&)>
+hipError_t launch_host_func(hipStream_t stream, std::unique_ptr<T> arg)
+{
+    hipStreamCaptureStatus capture_status;
+    hipGraph_t             capture_graph;
+    hipError_t error = hipStreamGetCaptureInfo_v2(stream, &capture_status, nullptr, &capture_graph);
+    if(error != hipSuccess)
+    {
+        return error;
+    }
+
+    if(capture_status == hipStreamCaptureStatusActive)
+    {
+        hipUserObject_t user_object;
+        error = hipUserObjectCreate(
+            &user_object,
+            arg.get(),
+            [](void* user_data) { delete static_cast<T*>(user_data); },
+            1,
+            hipUserObjectNoDestructorSync);
+        if(error != hipSuccess)
+        {
+            return error;
+        }
+        T* const user_data = arg.release();
+        error = hipGraphRetainUserObject(capture_graph, user_object, 1, hipGraphUserObjectMove);
+        if(error != hipSuccess)
+        {
+            (void)hipUserObjectRelease(user_object, 1);
+            return error;
+        }
+        return hipLaunchHostFunc(
+            stream,
+            [](void* user_data) { Fn(*static_cast<T*>(user_data)); },
+            user_data);
+    }
+
+    // If this fails and the callback has not been invoked, the argument is leaked. It is unclear
+    // whether hipLaunchHostFunc can return an error after the callback has already been invoked,
+    // but in such case there would be a double free (crash) instead of a memory leak, so we will
+    // just leak it.
+    return hipLaunchHostFunc(
+        stream,
+        [](void* user_data)
+        {
+            std::unique_ptr<T> arg(static_cast<T*>(user_data));
+            Fn(*arg);
+        },
+        arg.release());
 }
 
 } // namespace detail
@@ -143,11 +201,10 @@ struct host_system
 #pragma clang diagnostic pop
 
     template<typename Kernel, typename... Args>
-    static void run_kernel(void* userdata)
+    static void run_kernel(KernelArgs<Args...>& kernel_args)
     {
-        auto*      kernel_args   = reinterpret_cast<KernelArgs<Args...>*>(userdata);
-        const auto num_blocks    = kernel_args->num_blocks;
-        const auto num_threads   = kernel_args->num_threads;
+        const auto num_blocks    = kernel_args.num_blocks;
+        const auto num_threads   = kernel_args.num_threads;
         const auto execute_block = [&](const dim3 block_idx)
         {
             for(uint32_t tz = 0; tz < num_threads.z; ++tz)
@@ -162,7 +219,7 @@ struct host_system
                             num_blocks,
                             num_threads,
                             std::make_index_sequence<sizeof...(Args)>(),
-                            kernel_args->user_args);
+                            kernel_args.user_args);
                     }
                 }
             }
@@ -175,19 +232,6 @@ struct host_system
             cpp_utils::threedim_iterator::begin(num_blocks),
             cpp_utils::threedim_iterator::end(num_blocks),
             execute_block);
-    }
-
-    template<typename... Args>
-    static void delete_kernel_args(void* userdata)
-    {
-        delete reinterpret_cast<KernelArgs<Args...>*>(userdata);
-    }
-
-    template<typename Kernel, typename... Args>
-    static void run_kernel_and_delete_args(void* userdata)
-    {
-        run_kernel<Kernel, Args...>(userdata);
-        delete_kernel_args<Args...>(userdata);
     }
 
     template<typename Kernel,
@@ -206,78 +250,35 @@ struct host_system
         (void)IsDynamic; // Not relevant on host launches
         (void)shared_bytes; // shared memory not supported on host
 
-        KernelArgs<Args...> stack_args{num_blocks, num_threads, std::tuple<Args...>(args...)};
+        KernelArgs<Args...> kernel_args{num_blocks, num_threads, std::tuple<Args...>(args...)};
 
         if constexpr(UseHostFunc)
         {
-            auto* kernel_args = new KernelArgs<Args...>(std::move(stack_args));
-
-            hipStreamCaptureStatus capture_status;
-            hipGraph_t             capture_graph;
-            if(hipStreamGetCaptureInfo_v2(stream, &capture_status, nullptr, &capture_graph)
-               != hipSuccess)
+            const hipError_t error
+                = detail::launch_host_func<KernelArgs<Args...>, run_kernel<Kernel, Args...>>(
+                    stream,
+                    std::make_unique<KernelArgs<Args...>>(std::move(kernel_args)));
+            if(error != hipSuccess)
             {
-                delete kernel_args;
-                return ROCRAND_STATUS_LAUNCH_FAILURE;
-            }
-
-            if(capture_status == hipStreamCaptureStatusActive)
-            {
-                // A captured host node passes the same arguments to every launch of the graph, so
-                // the callback cannot free them. Instead, hand them to the graph, which frees
-                // them when the graph and every executable instantiated from it are destroyed.
-                hipUserObject_t user_object;
-                if(hipUserObjectCreate(&user_object,
-                                       kernel_args,
-                                       delete_kernel_args<Args...>,
-                                       1,
-                                       hipUserObjectNoDestructorSync)
-                   != hipSuccess)
-                {
-                    delete kernel_args;
-                    return ROCRAND_STATUS_LAUNCH_FAILURE;
-                }
-                if(hipGraphRetainUserObject(capture_graph, user_object, 1, hipGraphUserObjectMove)
-                   != hipSuccess)
-                {
-                    (void)hipUserObjectRelease(user_object, 1);
-                    return ROCRAND_STATUS_LAUNCH_FAILURE;
-                }
-                if(hipLaunchHostFunc(stream, run_kernel<Kernel, Args...>, kernel_args)
-                   != hipSuccess)
-                {
-                    return ROCRAND_STATUS_LAUNCH_FAILURE;
-                }
-                return ROCRAND_STATUS_SUCCESS;
-            }
-
-            hipError_t status = hipLaunchHostFunc(stream,
-                                                  run_kernel_and_delete_args<Kernel, Args...>,
-                                                  kernel_args);
-
-            if(status != hipSuccess)
-            {
-                // At this point, if the callback has not been invoked, there will be a memory
-                // leak. It is unclear whether hipLaunchHostFunc can return an error after the
-                // callback has already been invoked, but in such case there would be a double
-                // free (crash) instead of a memory leak, so we will just leak it.
                 return ROCRAND_STATUS_LAUNCH_FAILURE;
             }
         }
         else
         {
-            run_kernel<Kernel, Args...>(&stack_args);
+            run_kernel<Kernel, Args...>(kernel_args);
         }
 
         return ROCRAND_STATUS_SUCCESS;
     }
 
-    static rocrand_status
-        launch_host_func([[maybe_unused]] hipStream_t stream, hipHostFn_t fn, void* userData)
+    /// Calls `Fn(*arg)`, enqueued in `stream` if `UseHostFunc` is true.
+    template<typename T, void (*Fn)(T&)>
+    static rocrand_status launch_host_func([[maybe_unused]] hipStream_t stream,
+                                           std::unique_ptr<T>           arg)
     {
         if constexpr(UseHostFunc)
         {
-            const hipError_t error = hipLaunchHostFunc(stream, fn, userData);
+            const hipError_t error = detail::launch_host_func<T, Fn>(stream, std::move(arg));
             if(error != hipSuccess)
             {
                 return ROCRAND_STATUS_INTERNAL_ERROR;
@@ -287,7 +288,7 @@ struct host_system
         {
             try
             {
-                fn(userData);
+                Fn(*arg);
             }
             catch(...)
             {
@@ -409,9 +410,11 @@ struct device_system
         return ROCRAND_STATUS_SUCCESS;
     }
 
-    static rocrand_status launch_host_func(hipStream_t stream, hipHostFn_t fn, void* userData)
+    /// Enqueues `Fn(*arg)` in `stream`.
+    template<typename T, void (*Fn)(T&)>
+    static rocrand_status launch_host_func(hipStream_t stream, std::unique_ptr<T> arg)
     {
-        const hipError_t error = hipLaunchHostFunc(stream, fn, userData);
+        const hipError_t error = detail::launch_host_func<T, Fn>(stream, std::move(arg));
         if(error != hipSuccess)
         {
             return ROCRAND_STATUS_INTERNAL_ERROR;

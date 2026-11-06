@@ -2,6 +2,8 @@
 #include <stdio.h>
 
 #include <algorithm>
+#include <string>
+#include <tuple>
 #include <vector>
 
 #include <hip/hip_runtime.h>
@@ -11,15 +13,58 @@
 #include "test_rocrand_common.hpp"
 #include "test_utils_hipgraphs.hpp"
 
-class rocrand_hipgraph_generate_tests : public ::testing::TestWithParam<rocrand_rng_type>
+// The rng type, and whether the generator is created with rocrand_create_generator_host.
+using generate_test_params = std::tuple<rocrand_rng_type, bool>;
+
+class rocrand_hipgraph_generate_tests : public ::testing::TestWithParam<generate_test_params>
 {};
+
+std::string generate_test_name(const ::testing::TestParamInfo<generate_test_params>& info)
+{
+    return rocrand_rng_name(std::get<0>(info.param))
+           + (std::get<1>(info.param) ? "_Host" : "_Device");
+}
+
+void create_generator(rocrand_generator* generator, const generate_test_params& params)
+{
+    const auto [rng_type, host_generator] = params;
+    if(host_generator)
+    {
+        ROCRAND_CHECK(rocrand_create_generator_host(generator, rng_type));
+    }
+    else
+    {
+        ROCRAND_CHECK(rocrand_create_generator(generator, rng_type));
+    }
+}
+
+// Host generators write the output on the host, so they need memory that the host can access.
+template<typename T>
+hipError_t allocate_output(T** data, size_t size, const generate_test_params& params)
+{
+    return std::get<1>(params) ? hipHostMalloc(data, size * sizeof(T))
+                               : hipMallocHelper(data, size * sizeof(T));
+}
+
+template<typename T>
+hipError_t free_output(T* data, const generate_test_params& params)
+{
+    return std::get<1>(params) ? hipHostFree(data) : hipFree(data);
+}
+
+// Launch every graph twice: a graph must stay valid after its first launch.
+void create_and_launch_graph(test_utils::GraphHelper& gHelper, hipStream_t& stream)
+{
+    gHelper.createAndLaunchGraph(stream);
+    gHelper.launchGraphHelper(stream, true);
+}
 
 void test_float(
     std::function<rocrand_status(rocrand_generator, float*, size_t, float, float)> generate_fn,
-    rocrand_rng_type                                                               rng_type)
+    const generate_test_params&                                                    params)
 {
     rocrand_generator generator;
-    ROCRAND_CHECK(rocrand_create_generator(&generator, rng_type));
+    create_generator(&generator, params);
 
     ROCRAND_CHECK(rocrand_initialize_generator(generator));
 
@@ -27,7 +72,7 @@ void test_float(
     float        mean   = 5.0f;
     float        stddev = 2.0f;
     float*       data;
-    HIP_CHECK(hipMallocHelper(&data, size * sizeof(float)));
+    HIP_CHECK(allocate_output(&data, size, params));
     HIP_CHECK(hipDeviceSynchronize());
 
     // Default stream does not support hipGraph stream capture, so create a non-blocking one
@@ -41,20 +86,20 @@ void test_float(
 
     // Any sizes
     ROCRAND_CHECK(generate_fn(generator, data, 1, mean, stddev));
-    gHelper.createAndLaunchGraph(stream);
+    create_and_launch_graph(gHelper, stream);
     gHelper.resetGraphHelper(stream);
 
     // Any alignment
     ROCRAND_CHECK(generate_fn(generator, data + 1, 2, mean, stddev));
 
-    gHelper.createAndLaunchGraph(stream);
+    create_and_launch_graph(gHelper, stream);
     gHelper.resetGraphHelper(stream);
 
     ROCRAND_CHECK(generate_fn(generator, data, size, mean, stddev));
 
-    gHelper.createAndLaunchGraph(stream);
+    create_and_launch_graph(gHelper, stream);
 
-    HIP_CHECK(hipFree(data));
+    HIP_CHECK(free_output(data, params));
     ROCRAND_CHECK(rocrand_destroy_generator(generator));
     gHelper.cleanupGraphHelper();
     HIP_CHECK(hipStreamDestroy(stream));
@@ -80,16 +125,16 @@ TEST_P(rocrand_hipgraph_generate_tests, log_normal_float_test)
 
 TEST_P(rocrand_hipgraph_generate_tests, uniform_float_test)
 {
-    const rocrand_rng_type rng_type = GetParam();
+    const generate_test_params params = GetParam();
 
     rocrand_generator generator;
-    ROCRAND_CHECK(rocrand_create_generator(&generator, rng_type));
+    create_generator(&generator, params);
 
     ROCRAND_CHECK(rocrand_initialize_generator(generator));
 
     const size_t size = 12563;
     float*       data;
-    HIP_CHECK(hipMallocHelper(&data, size * sizeof(float)));
+    HIP_CHECK(allocate_output(&data, size, params));
     HIP_CHECK(hipDeviceSynchronize());
 
     // Default stream does not support hipGraph stream capture, so create a non-blocking one
@@ -103,20 +148,20 @@ TEST_P(rocrand_hipgraph_generate_tests, uniform_float_test)
     // Any sizes
     ROCRAND_CHECK(rocrand_generate_uniform(generator, data, 1));
 
-    gHelper.createAndLaunchGraph(stream);
+    create_and_launch_graph(gHelper, stream);
     gHelper.resetGraphHelper(stream);
 
     // Any alignment
     ROCRAND_CHECK(rocrand_generate_uniform(generator, data + 1, 2));
 
-    gHelper.createAndLaunchGraph(stream);
+    create_and_launch_graph(gHelper, stream);
     gHelper.resetGraphHelper(stream);
 
     ROCRAND_CHECK(rocrand_generate_uniform(generator, data, size));
 
-    gHelper.createAndLaunchGraph(stream);
+    create_and_launch_graph(gHelper, stream);
 
-    HIP_CHECK(hipFree(data));
+    HIP_CHECK(free_output(data, params));
     ROCRAND_CHECK(rocrand_destroy_generator(generator));
     gHelper.cleanupGraphHelper();
     HIP_CHECK(hipStreamDestroy(stream));
@@ -124,16 +169,16 @@ TEST_P(rocrand_hipgraph_generate_tests, uniform_float_test)
 
 TEST_P(rocrand_hipgraph_generate_tests, poisson_test)
 {
-    const rocrand_rng_type rng_type = GetParam();
+    const generate_test_params params = GetParam();
 
     rocrand_generator generator;
-    ROCRAND_CHECK(rocrand_create_generator(&generator, rng_type));
+    create_generator(&generator, params);
 
     ROCRAND_CHECK(rocrand_initialize_generator(generator));
 
     constexpr size_t size = 12563;
     unsigned int*    data;
-    HIP_CHECK(hipMallocHelper(&data, size * sizeof(*data)));
+    HIP_CHECK(allocate_output(&data, size, params));
     HIP_CHECK(hipDeviceSynchronize());
 
     // Default stream does not support hipGraph stream capture, so create a non-blocking one
@@ -147,20 +192,20 @@ TEST_P(rocrand_hipgraph_generate_tests, poisson_test)
     // Any sizes
     ROCRAND_CHECK(rocrand_generate_poisson(generator, data, 1, 10.0));
 
-    gHelper.createAndLaunchGraph(stream);
+    create_and_launch_graph(gHelper, stream);
     gHelper.resetGraphHelper(stream);
 
     // Any alignment
     ROCRAND_CHECK(rocrand_generate_poisson(generator, data + 1, 2, 500.0));
 
-    gHelper.createAndLaunchGraph(stream);
+    create_and_launch_graph(gHelper, stream);
     gHelper.resetGraphHelper(stream);
 
     ROCRAND_CHECK(rocrand_generate_poisson(generator, data, size, 5000.0));
 
-    gHelper.createAndLaunchGraph(stream);
+    create_and_launch_graph(gHelper, stream);
 
-    HIP_CHECK(hipFree(data));
+    HIP_CHECK(free_output(data, params));
     ROCRAND_CHECK(rocrand_destroy_generator(generator));
     gHelper.cleanupGraphHelper();
     HIP_CHECK(hipStreamDestroy(stream));
@@ -179,8 +224,8 @@ TEST(rocrand_hipgraph_generate_tests, hipgraphs_doc_sample)
 
 INSTANTIATE_TEST_SUITE_P(rocrand_hipgraph_generate_tests,
                          rocrand_hipgraph_generate_tests,
-                         ::testing::ValuesIn(rng_types),
-                         rocrand_rng_type_test_name);
+                         ::testing::Combine(::testing::ValuesIn(rng_types), ::testing::Bool()),
+                         generate_test_name);
 
 class rocrand_hipgraph_host_generator_tests : public ::testing::TestWithParam<rocrand_rng_type>
 {};
