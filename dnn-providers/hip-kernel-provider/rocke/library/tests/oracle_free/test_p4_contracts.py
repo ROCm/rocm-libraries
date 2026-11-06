@@ -15,9 +15,11 @@ the prediction is re-derived for the new path, never widened to absorb it.
 from __future__ import annotations
 
 import re
+import struct
 from collections import Counter
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+from decimal import Decimal, localcontext
 from fractions import Fraction
 from functools import cache
 
@@ -25,11 +27,41 @@ import numpy as np
 import pytest
 from rocke.numeric.bf16 import f32_to_bf16
 
-from ._p4_shared_analytical import UNIFORM_QUICK_CASES, UniformCase
+from ._p4_shared_analytical import (
+    UNIFORM_QUICK_CASES,
+    UniformCase,
+    encode_bits,
+    legal_interval,
+    target_bits,
+    uniform_expected_bits,
+)
 from ._p4_shared_subject import _resolve_tuning_spec
 from ._p4_analytical import (
     F32_SMALLEST_SUBNORMAL,
+    MASKED_SCORE,
+    P4_EXPOSURES,
+    P4_HEAD_LOGITS,
+    P4_HEAD_SCALE_MARGIN,
+    P4_HEAD_SCALES,
+    P4_QUICK_CASES,
+    P4_SEARCH_BASES,
+    SCORE_SCALE,
     F32Interval,
+    P4Case,
+    P4Fixture,
+    certified_target_bits,
+    coordinate_class,
+    emulate_row,
+    head_scale_margin,
+    p4_inputs,
+    p4_query_key,
+    row_logit,
+    row_trace,
+    score_numerator,
+    target_value,
+    tier_a_exposure,
+    tier_b_exposure,
+    visited_tiles,
     add_faithful,
     add_rn,
     cast_bits_hull,
@@ -751,3 +783,278 @@ def test_exp2_candidates_off_powers_of_two_are_consecutive_and_complete(
 def test_exp2_candidates_refuse_non_f32_arguments() -> None:
     with pytest.raises(ValueError, match="FP32"):
         exp2_candidates(Fraction(1, 3))
+
+
+# ---------------------------------------------------------------------------
+# Fixtures, targets, Tier A and Tier B over the quick matrix.
+# ---------------------------------------------------------------------------
+
+
+def _quick_id(case: P4Case) -> str:
+    return f"{case.dtype}-{case.mask}-{case.fixture.value}"
+
+
+def _llvm_hex(value: Fraction) -> str:
+    return "0x" + struct.pack(">d", float(value)).hex().upper()
+
+
+def test_score_constants_match_the_kernel_and_the_ir_contract() -> None:
+    from kernels.gfx942 import attention_dense
+
+    log2e = f32(attention_dense.LOG2E)
+    assert _llvm_hex(log2e) == _F32_LOG2E
+    assert _llvm_hex(MASKED_SCORE) == _F32_MASKED
+    # scale = RN(1/sqrt(64)) = 1/8 exactly, so the product is exact too.
+    assert SCORE_SCALE == log2e / 8
+
+
+def test_quick_matrix_covers_every_fixture_on_both_kernels() -> None:
+    ids = [case.case_id for case in P4_QUICK_CASES]
+    assert len(ids) == len(set(ids)) == 2 * len(P4Fixture)
+    for case in P4_QUICK_CASES:
+        family = "walsh" if case.fixture is P4Fixture.WALSH else "periodic"
+        # The distinguished key of this row is 64 (even): the Walsh sign is +1.
+        query = case.residue_shift + 64
+        logits = tuple(row_logit(case, head, query) for head in range(4))
+        assert logits == P4_HEAD_LOGITS[family]
+
+
+@pytest.mark.parametrize(
+    "kwargs,match",
+    [
+        ({"q_scales": (3, 1, 1, 1)}, "power of two"),
+        ({"fixture": "cyclic", "shift": 0}, "0 < shift"),
+        ({"shift": 5}, "cyclic fixture only"),
+        ({"fixture": "late_max"}, "0 < late"),
+        ({"block_n": 32}, "block_n == 64"),
+    ],
+)
+def test_p4_case_rejects_inexact_or_unsupported_configurations(kwargs, match) -> None:
+    arguments = {
+        "base": UNIFORM_QUICK_CASES[0],
+        "fixture": "identity",
+        "q_scales": (1, 1, 1, 1),
+        "k_scales": (1, 1, 1, 1),
+    }
+    arguments.update(kwargs)
+    with pytest.raises(ValueError, match=match):
+        P4Case(**arguments)
+
+
+@pytest.mark.parametrize("case", P4_QUICK_CASES, ids=_quick_id)
+def test_generators_are_exact_and_match_the_score_model(case: P4Case) -> None:
+    q, k = p4_query_key(case)
+    for values in (q, k):
+        encode_bits(values, case.dtype)  # raises if any value would round
+    dots = np.einsum("bqhd,bkhd->bhqk", q.astype(np.float64), k.astype(np.float64))
+    for head in range(case.base.nhead_q):
+        expected = np.array(
+            [
+                [float(score_numerator(case, head, row, key)) for key in range(256)]
+                for row in range(256)
+            ]
+        )
+        np.testing.assert_array_equal(dots[0, head], expected)
+    for exposure in P4_EXPOSURES:
+        encode_bits(p4_inputs(case, exposure)[2], case.dtype)
+
+
+def test_visited_tiles_follow_the_kernel_block_schedule() -> None:
+    causal = next(case for case in P4_QUICK_CASES if case.mask == "causal")
+    window = next(case for case in P4_QUICK_CASES if case.mask == "window")
+    assert [tuple(visited_tiles(causal, q)) for q in (0, 127, 128, 255)] == [
+        (0, 1),
+        (0, 1),
+        (0, 1, 2, 3),
+        (0, 1, 2, 3),
+    ]
+    assert [tuple(visited_tiles(window, q)) for q in (0, 63, 64, 127, 255)] == [
+        (0,),
+        (0,),
+        (0, 1),
+        (0, 1),
+        (2, 3),
+    ]
+    for case in (causal, window):
+        for row in range(256):
+            first, last = legal_interval(case.base, row)
+            tiles = visited_tiles(case, row)
+            assert tiles[0] * 64 <= first and last < (tiles[-1] + 1) * 64
+    # Row 64t+63 of the window kernel starts on a fully masked tile (case B).
+    first, _ = legal_interval(window.base, 127)
+    assert first == 64 == visited_tiles(window, 127)[1] * 64
+
+
+@pytest.mark.parametrize("dtype", ["fp16", "bf16"])
+def test_target_rounding_geometry_is_exhaustive(dtype: str) -> None:
+    """DT1a: format-only rounding geometry over every positive finite value.
+
+    Just inside each midpoint rounds to the near side; the midpoint itself
+    rounds to the even pattern. Subnormals and binade edges are included."""
+    largest = 0x7BFF if dtype == "fp16" else 0x7F7F
+    for bits in range(0, largest):
+        low, high = target_value(bits, dtype), target_value(bits + 1, dtype)
+        midpoint = (low + high) / 2
+        nudge = (high - low) / 1024
+        for value, expected in (
+            (midpoint - nudge, bits),
+            (midpoint + nudge, bits + 1),
+            (midpoint, bits if bits % 2 == 0 else bits + 1),
+        ):
+            assert target_bits(value.numerator, value.denominator, dtype) == expected
+
+
+def _within(bits: np.ndarray, low: np.ndarray, high: np.ndarray) -> np.ndarray:
+    return (bits >= low) & (bits <= high)
+
+
+@pytest.mark.parametrize("case", P4_QUICK_CASES, ids=_quick_id)
+def test_tier_b_is_one_or_two_adjacent_values(case: P4Case) -> None:
+    """DT6 / I1: Tier B is nonempty everywhere and, on the quick matrix, at most
+    two adjacent values; this is checked, not assumed by the construction."""
+    for exposure in P4_EXPOSURES:
+        low, high = tier_b_exposure(case, exposure)
+        width = high.astype(np.int64) - low.astype(np.int64)
+        assert np.all(width >= 0)
+        assert np.all(width <= 1), exposure
+
+
+@pytest.mark.parametrize("case", P4_QUICK_CASES, ids=_quick_id)
+def test_tier_b_lies_inside_tier_a(case: P4Case) -> None:
+    """DT1b / T3: every Tier B value is within 1 target ULP of the certified
+    target at row-max coordinates, within 2 elsewhere, and exactly the target
+    (+0) at structural zeros. Values are nonnegative, so bit distance is ULP
+    distance."""
+    for exposure in P4_EXPOSURES:
+        low, high = tier_b_exposure(case, exposure)
+        center, radius, _ = tier_a_exposure(case, exposure)
+        center = center.astype(np.int64)
+        for edge in (low, high):
+            distance = np.abs(edge.astype(np.int64) - center)
+            assert np.all(distance <= radius), exposure
+
+
+# Block, tile, window and subnormal-threshold edges of both quick kernels.
+_EMULATED_ROWS = (
+    *(0, 5, 6, 7, 31, 62, 63, 64, 65, 100),
+    *(126, 127, 128, 129, 190, 191, 192, 230, 254, 255),
+)
+
+
+@pytest.mark.parametrize("case", P4_QUICK_CASES, ids=_quick_id)
+def test_emulated_paths_lie_inside_tier_b(case: P4Case) -> None:
+    """DT2 / I2: the pinned emulation and randomized members of the modeled
+    path (summation tree, E candidate per call, MFMA rounding direction) all
+    land inside Tier B. The emulator is a test device, never a verdict."""
+    rng = np.random.default_rng(_RNG_SEED)
+    for exposure in P4_EXPOSURES:
+        low, high = tier_b_exposure(case, exposure)
+        for row in _EMULATED_ROWS:
+            for head in range(case.base.nhead_q):
+                bounds = (low[0, row, head], high[0, row, head])
+                for generator in (None, rng):
+                    bits = emulate_row(case, exposure, row, head, rng=generator)
+                    assert np.all(_within(bits, *bounds)), (exposure, row, head)
+
+
+def test_targets_are_certified_identically_at_50_and_70_digits() -> None:
+    """DT3: every distinct target of the quick matrix rounds the same at 50 and
+    70 digits, each with its midpoint margin."""
+    classes = {
+        (case.dtype, exponent, item)
+        for case in P4_QUICK_CASES
+        for exposure in P4_EXPOSURES
+        for exponent, item in tier_a_exposure(case, exposure)[2]
+    }
+    assert len(classes) > 100
+    for dtype, exponent, item in classes:
+        assert certified_target_bits(dtype, exponent, item, 50) == (
+            certified_target_bits(dtype, exponent, item, 70)
+        )
+
+
+@pytest.mark.parametrize("base", UNIFORM_QUICK_CASES, ids=lambda base: base.case_id)
+def test_zero_logits_reproduce_the_uniform_targets(base: UniformCase) -> None:
+    """DT5: with every logit zero, P4's targets are P3's, and Tier B holds them."""
+    quick = next(case for case in P4_QUICK_CASES if case.base == base)
+    zero = P4Case(base, "identity", (0,) * 4, (0,) * 4, block_m=quick.block_m)
+    for exposure in P4_EXPOSURES:
+        center = tier_a_exposure(zero, exposure)[0]
+        np.testing.assert_array_equal(center, uniform_expected_bits(base, exposure))
+        low, high = tier_b_exposure(zero, exposure)
+        assert np.all(_within(center, low, high)), exposure
+
+
+def test_fp16_head_scale_does_not_commute_with_the_cast() -> None:
+    """DT7: in the FP16 subnormal range ``q_T(2**h p) != 2**h q_T(p)`` for some
+    quick-matrix coordinate, so head predictions must not be shifted copies
+    of head 0. One counterexample is kept here."""
+    case = next(
+        c for c in P4_QUICK_CASES if c.dtype == "fp16" and c.fixture is P4Fixture.IDENTITY
+    )
+    found = []
+    for row in range(256):
+        item = coordinate_class(case, "basis@0", row, 1, row % 64)
+        if item.m_c and item.logit == -8:
+            scaled = target_value(certified_target_bits("fp16", 1, item), "fp16")
+            shifted = 2 * target_value(certified_target_bits("fp16", 0, item), "fp16")
+            if scaled != shifted:
+                found.append(row)
+    assert found, "no FP16 coordinate where the head scale fails to commute"
+
+
+def _decimal_exp(value: int) -> Decimal:
+    with localcontext() as context:
+        context.prec = 40
+        return Decimal(value).exp()
+
+
+def test_fp16_subnormal_threshold_for_one_distinguished_key() -> None:
+    """T1: with one distinguished key at c = -8 in a basis exposure, the first
+    row length whose stored value is FP16-subnormal is 7, 12, 23, 45 for head
+    exponents 0..3 (not 6: at N = 6 the value is 6.71e-5 > 2**-14)."""
+    tiny = _decimal_exp(-8)
+    limit = Decimal(2) ** -14
+    thresholds = []
+    for exponent in range(4):
+        rows = 1
+        while Decimal(2) ** exponent * tiny / (rows - 1 + tiny) >= limit:
+            rows += 1
+        thresholds.append(rows)
+    assert thresholds == [7, 12, 23, 45]
+
+
+@pytest.mark.parametrize("case", P4_QUICK_CASES, ids=_quick_id)
+def test_range_lemma_holds_on_the_quick_matrix(case: P4Case) -> None:
+    """DT8 / T1: every weight and rescale factor is either masked-small
+    (at most 2**-149) or at least 2**-12; every nonstructural stored value is
+    at least 2**-20; FP16-subnormal outputs occur only at c = -8
+    distinguished coordinates."""
+    floor_weight, ceiling_masked = Fraction(1, 1 << 12), F32_SMALLEST_SUBNORMAL
+    for row in range(256):
+        for head in range(case.base.nhead_q):
+            for step in row_trace(case, head, row).steps:
+                for item in (step.alpha, *step.weights):
+                    assert item.hi <= ceiling_masked or item.lo >= floor_weight
+    for exposure in P4_EXPOSURES:
+        low, high = tier_b_exposure(case, exposure)
+        center, radius, _ = tier_a_exposure(case, exposure)
+        nonstructural = radius > 0
+        assert np.all(low[nonstructural] > 0)
+        smallest = min(target_value(int(bits), case.dtype) for bits in low[nonstructural])
+        assert smallest >= Fraction(1, 1 << 20)
+        if case.dtype != "fp16":
+            continue
+        for index in zip(*np.nonzero(nonstructural & (low < 0x0400))):
+            _, row, head, dim = (int(value) for value in index)
+            item = coordinate_class(case, exposure, row, head, dim)
+            assert item.m_c > 0 and item.logit == -8, (exposure, row, head, dim)
+
+
+@pytest.mark.parametrize("family", sorted(P4_HEAD_SCALES))
+def test_head_scales_keep_their_committed_separation(family: str) -> None:
+    """DT10: every wrong single Q-head or K-head read moves some coordinate by
+    at least the committed margin in target ULPs, on both quick kernels."""
+    q_scales, k_scales = P4_HEAD_SCALES[family]
+    margin = head_scale_margin(P4_SEARCH_BASES, family, q_scales, k_scales)
+    assert margin == P4_HEAD_SCALE_MARGIN[family] > 0
