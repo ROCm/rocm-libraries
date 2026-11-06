@@ -26,9 +26,10 @@
 #
 #   cmake -DPROFRAW_DIR=<dir> -P CheckCoverageProfile.cmake
 
-# The unit-test profiles are named rocalution-coverage_unit_* and
-# rocalution-coverage_lifecycle_*; %m expands to a number
-file(GLOB profiles "${PROFRAW_DIR}/rocalution-coverage_[0-9]*.profraw")
+# rocalution-test writes rocalution-coverage_integration_*. The unit-test
+# profiles are rocalution-coverage_unit_* and rocalution-coverage_lifecycle_*,
+# so this does not match them.
+file(GLOB profiles "${PROFRAW_DIR}/rocalution-coverage_integration_*.profraw")
 if(NOT profiles)
   message(FATAL_ERROR "rocalution-test wrote no coverage profile to ${PROFRAW_DIR}")
 endif()
