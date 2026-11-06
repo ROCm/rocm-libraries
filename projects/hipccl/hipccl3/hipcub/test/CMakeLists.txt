@@ -54,7 +54,7 @@ function(add_relative_test test_name test_target resource_group)
     else()
         add_test(NAME "${test_name}" COMMAND "./${rel_path}")
     endif()
-    if(HIPCUB_ENABLE_COVERAGE)
+    if(HIPCUB_ENABLE_COVERAGE AND NOT DEFINED ENV{LLVM_PROFILE_FILE})
       set_tests_properties(${test_name} PROPERTIES
         ENVIRONMENT "LLVM_PROFILE_FILE=${PROFILE_DIR}/profraw/hipcub-coverage_%m.profraw"
       )
