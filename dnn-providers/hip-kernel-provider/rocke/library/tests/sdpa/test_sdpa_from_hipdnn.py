@@ -31,6 +31,8 @@ _INPUT_UIDS = (
     "page_table_v_tensor_uid",
     "block_mask_tensor_uid",
     "sink_token_tensor_uid",
+    "cu_seq_len_q_tensor_uid",
+    "cu_seq_len_kv_tensor_uid",
     "descale_q_tensor_uid",
     "descale_k_tensor_uid",
     "descale_v_tensor_uid",
@@ -632,6 +634,19 @@ def test_frontend_operand_rules_match_sdpa_fwd_node(inputs, attributes, tensors,
     if "page_table_k_tensor_uid" in inputs:
         graph["tensors"][1] = _tensor(1, (9, H, S // 2, D))
     with pytest.raises(ValueError, match=match):
+        from_hipdnn_graph(graph, "gfx950")
+
+
+@pytest.mark.parametrize("key", ["cu_seq_len_q_tensor_uid", "cu_seq_len_kv_tensor_uid"])
+def test_cumulative_sequence_lengths_are_declined_not_dropped(key):
+    """hipDNN's writer emits both cu_seq_len keys on every node: null is a plain
+    request, a set uid must fail because SdpaRequest cannot honor it."""
+    assert _request().q.dims == (B, H, S, D)
+    graph = _graph(
+        inputs={key: 10},
+        tensors=[_tensor(10, (B, 1, 1, 1), "int32")],
+    )
+    with pytest.raises(ValueError, match="cu_seq_len"):
         from_hipdnn_graph(graph, "gfx950")
 
 

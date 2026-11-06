@@ -131,6 +131,8 @@ struct SdpaAttributesT : public ::flatbuffers::NativeTable {
   hipdnn_flatbuffers_sdk::data_objects::DiagonalAlignment diagonal_alignment = hipdnn_flatbuffers_sdk::data_objects::DiagonalAlignment::TOP_LEFT;
   hipdnn_flatbuffers_sdk::data_objects::DataType mma_core_mode = hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET;
   hipdnn_flatbuffers_sdk::data_objects::AttentionImplementation implementation = hipdnn_flatbuffers_sdk::data_objects::AttentionImplementation::AUTO;
+  ::flatbuffers::Optional<int64_t> cu_seq_len_q_tensor_uid = ::flatbuffers::nullopt;
+  ::flatbuffers::Optional<int64_t> cu_seq_len_kv_tensor_uid = ::flatbuffers::nullopt;
 };
 
 struct SdpaAttributes FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
@@ -177,7 +179,9 @@ struct SdpaAttributes FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
     VT_MAX_SEQ_LEN_KV = 78,
     VT_DIAGONAL_ALIGNMENT = 80,
     VT_MMA_CORE_MODE = 82,
-    VT_IMPLEMENTATION = 84
+    VT_IMPLEMENTATION = 84,
+    VT_CU_SEQ_LEN_Q_TENSOR_UID = 86,
+    VT_CU_SEQ_LEN_KV_TENSOR_UID = 88
   };
   int64_t q_tensor_uid() const {
     return GetField<int64_t>(VT_Q_TENSOR_UID, 0);
@@ -425,6 +429,18 @@ struct SdpaAttributes FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
   bool mutate_implementation(hipdnn_flatbuffers_sdk::data_objects::AttentionImplementation _implementation = static_cast<hipdnn_flatbuffers_sdk::data_objects::AttentionImplementation>(0)) {
     return SetField<int8_t>(VT_IMPLEMENTATION, static_cast<int8_t>(_implementation), 0);
   }
+  ::flatbuffers::Optional<int64_t> cu_seq_len_q_tensor_uid() const {
+    return GetOptional<int64_t, int64_t>(VT_CU_SEQ_LEN_Q_TENSOR_UID);
+  }
+  bool mutate_cu_seq_len_q_tensor_uid(int64_t _cu_seq_len_q_tensor_uid) {
+    return SetField<int64_t>(VT_CU_SEQ_LEN_Q_TENSOR_UID, _cu_seq_len_q_tensor_uid);
+  }
+  ::flatbuffers::Optional<int64_t> cu_seq_len_kv_tensor_uid() const {
+    return GetOptional<int64_t, int64_t>(VT_CU_SEQ_LEN_KV_TENSOR_UID);
+  }
+  bool mutate_cu_seq_len_kv_tensor_uid(int64_t _cu_seq_len_kv_tensor_uid) {
+    return SetField<int64_t>(VT_CU_SEQ_LEN_KV_TENSOR_UID, _cu_seq_len_kv_tensor_uid);
+  }
   bool Verify(::flatbuffers::Verifier &verifier) const {
     return VerifyTableStart(verifier) &&
            VerifyField<int64_t>(verifier, VT_Q_TENSOR_UID, 8) &&
@@ -468,6 +484,8 @@ struct SdpaAttributes FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
            VerifyField<int8_t>(verifier, VT_DIAGONAL_ALIGNMENT, 1) &&
            VerifyField<int8_t>(verifier, VT_MMA_CORE_MODE, 1) &&
            VerifyField<int8_t>(verifier, VT_IMPLEMENTATION, 1) &&
+           VerifyField<int64_t>(verifier, VT_CU_SEQ_LEN_Q_TENSOR_UID, 8) &&
+           VerifyField<int64_t>(verifier, VT_CU_SEQ_LEN_KV_TENSOR_UID, 8) &&
            verifier.EndTable();
   }
   SdpaAttributesT *UnPack(const ::flatbuffers::resolver_function_t *_resolver = nullptr) const;
@@ -602,6 +620,12 @@ struct SdpaAttributesBuilder {
   void add_implementation(hipdnn_flatbuffers_sdk::data_objects::AttentionImplementation implementation) {
     fbb_.AddElement<int8_t>(SdpaAttributes::VT_IMPLEMENTATION, static_cast<int8_t>(implementation), 0);
   }
+  void add_cu_seq_len_q_tensor_uid(int64_t cu_seq_len_q_tensor_uid) {
+    fbb_.AddElement<int64_t>(SdpaAttributes::VT_CU_SEQ_LEN_Q_TENSOR_UID, cu_seq_len_q_tensor_uid);
+  }
+  void add_cu_seq_len_kv_tensor_uid(int64_t cu_seq_len_kv_tensor_uid) {
+    fbb_.AddElement<int64_t>(SdpaAttributes::VT_CU_SEQ_LEN_KV_TENSOR_UID, cu_seq_len_kv_tensor_uid);
+  }
   explicit SdpaAttributesBuilder(::flatbuffers::FlatBufferBuilder &_fbb)
         : fbb_(_fbb) {
     start_ = fbb_.StartTable();
@@ -655,8 +679,12 @@ inline ::flatbuffers::Offset<SdpaAttributes> CreateSdpaAttributes(
     ::flatbuffers::Optional<int32_t> max_seq_len_kv = ::flatbuffers::nullopt,
     hipdnn_flatbuffers_sdk::data_objects::DiagonalAlignment diagonal_alignment = hipdnn_flatbuffers_sdk::data_objects::DiagonalAlignment::TOP_LEFT,
     hipdnn_flatbuffers_sdk::data_objects::DataType mma_core_mode = hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET,
-    hipdnn_flatbuffers_sdk::data_objects::AttentionImplementation implementation = hipdnn_flatbuffers_sdk::data_objects::AttentionImplementation::AUTO) {
+    hipdnn_flatbuffers_sdk::data_objects::AttentionImplementation implementation = hipdnn_flatbuffers_sdk::data_objects::AttentionImplementation::AUTO,
+    ::flatbuffers::Optional<int64_t> cu_seq_len_q_tensor_uid = ::flatbuffers::nullopt,
+    ::flatbuffers::Optional<int64_t> cu_seq_len_kv_tensor_uid = ::flatbuffers::nullopt) {
   SdpaAttributesBuilder builder_(_fbb);
+  if(cu_seq_len_kv_tensor_uid) { builder_.add_cu_seq_len_kv_tensor_uid(*cu_seq_len_kv_tensor_uid); }
+  if(cu_seq_len_q_tensor_uid) { builder_.add_cu_seq_len_q_tensor_uid(*cu_seq_len_q_tensor_uid); }
   if(right_bound) { builder_.add_right_bound(*right_bound); }
   if(left_bound) { builder_.add_left_bound(*left_bound); }
   if(amax_o_tensor_uid) { builder_.add_amax_o_tensor_uid(*amax_o_tensor_uid); }
@@ -746,7 +774,9 @@ inline bool operator==(const SdpaAttributesT &lhs, const SdpaAttributesT &rhs) {
       (lhs.max_seq_len_kv == rhs.max_seq_len_kv) &&
       (lhs.diagonal_alignment == rhs.diagonal_alignment) &&
       (lhs.mma_core_mode == rhs.mma_core_mode) &&
-      (lhs.implementation == rhs.implementation);
+      (lhs.implementation == rhs.implementation) &&
+      (lhs.cu_seq_len_q_tensor_uid == rhs.cu_seq_len_q_tensor_uid) &&
+      (lhs.cu_seq_len_kv_tensor_uid == rhs.cu_seq_len_kv_tensor_uid);
 }
 
 inline bool operator!=(const SdpaAttributesT &lhs, const SdpaAttributesT &rhs) {
@@ -804,6 +834,8 @@ inline void SdpaAttributes::UnPackTo(SdpaAttributesT *_o, const ::flatbuffers::r
   { auto _e = diagonal_alignment(); _o->diagonal_alignment = _e; }
   { auto _e = mma_core_mode(); _o->mma_core_mode = _e; }
   { auto _e = implementation(); _o->implementation = _e; }
+  { auto _e = cu_seq_len_q_tensor_uid(); _o->cu_seq_len_q_tensor_uid = _e; }
+  { auto _e = cu_seq_len_kv_tensor_uid(); _o->cu_seq_len_kv_tensor_uid = _e; }
 }
 
 inline ::flatbuffers::Offset<SdpaAttributes> SdpaAttributes::Pack(::flatbuffers::FlatBufferBuilder &_fbb, const SdpaAttributesT* _o, const ::flatbuffers::rehasher_function_t *_rehasher) {
@@ -855,6 +887,8 @@ inline ::flatbuffers::Offset<SdpaAttributes> CreateSdpaAttributes(::flatbuffers:
   auto _diagonal_alignment = _o->diagonal_alignment;
   auto _mma_core_mode = _o->mma_core_mode;
   auto _implementation = _o->implementation;
+  auto _cu_seq_len_q_tensor_uid = _o->cu_seq_len_q_tensor_uid;
+  auto _cu_seq_len_kv_tensor_uid = _o->cu_seq_len_kv_tensor_uid;
   return hipdnn_flatbuffers_sdk::data_objects::CreateSdpaAttributes(
       _fbb,
       _q_tensor_uid,
@@ -897,7 +931,9 @@ inline ::flatbuffers::Offset<SdpaAttributes> CreateSdpaAttributes(::flatbuffers:
       _max_seq_len_kv,
       _diagonal_alignment,
       _mma_core_mode,
-      _implementation);
+      _implementation,
+      _cu_seq_len_q_tensor_uid,
+      _cu_seq_len_kv_tensor_uid);
 }
 
 }  // namespace data_objects

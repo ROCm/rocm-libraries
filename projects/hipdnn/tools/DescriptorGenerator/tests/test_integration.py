@@ -2732,7 +2732,8 @@ class TestWorkModelFragments:
         assert (
             "// Work-data-dependent operands: seq_len_q_tensor_uid, "
             "seq_len_kv_tensor_uid, page_table_k_tensor_uid, "
-            "page_table_v_tensor_uid, block_mask_tensor_uid.\n"
+            "page_table_v_tensor_uid, block_mask_tensor_uid, "
+            "cu_seq_len_q_tensor_uid, cu_seq_len_kv_tensor_uid.\n"
         ) in rendered
 
     @pytest.mark.parametrize("config_name", ON_DISK_CONFIG_NAMES)

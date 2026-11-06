@@ -588,3 +588,21 @@ TEST(TestSdpaAttributes, NativeSetUnfuseFmaSetsHintNotUnsupported)
     EXPECT_FALSE(attrs.unfuse_fma_hint);
     EXPECT_FALSE(attrs.hasUnsupportedUsage());
 }
+
+// -- cu_seq_len_q / cu_seq_len_kv: the setters store the tensor as given; the node promotes a 1-D
+// (B+1) tensor during validation (see TestSdpaFwdNode) --
+
+TEST(TestSdpaAttributes, CuSeqLenSettersStoreTheTensorUntouched)
+{
+    SdpaAttributes attrs;
+    auto cuQ = std::make_shared<TensorAttributes>();
+    cuQ->set_dim({5});
+    auto cuKv = std::make_shared<TensorAttributes>();
+    attrs.set_cu_seq_len_q(cuQ);
+    attrs.set_cu_seq_len_kv(std::move(cuKv));
+
+    EXPECT_EQ(attrs.get_cu_seq_len_q(), cuQ);
+    EXPECT_EQ(cuQ->get_dim(), (std::vector<int64_t>{5}));
+    ASSERT_NE(attrs.get_cu_seq_len_kv(), nullptr);
+    EXPECT_TRUE(attrs.get_cu_seq_len_kv()->get_dim().empty());
+}

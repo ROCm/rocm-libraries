@@ -117,6 +117,12 @@ protected:
         addTensor(K_SDPA_TENSOR_AMAX_O_UID,
                   toVec(K_SDPA_TENSOR_SCALAR_DIMS),
                   toVec(K_SDPA_TENSOR_SCALAR_STRIDES));
+        addTensor(K_SDPA_TENSOR_CU_SEQ_LEN_Q_UID,
+                  toVec(K_SDPA_TENSOR_CU_SEQ_LEN_DIMS),
+                  toVec(K_SDPA_TENSOR_CU_SEQ_LEN_STRIDES));
+        addTensor(K_SDPA_TENSOR_CU_SEQ_LEN_KV_UID,
+                  toVec(K_SDPA_TENSOR_CU_SEQ_LEN_DIMS),
+                  toVec(K_SDPA_TENSOR_CU_SEQ_LEN_STRIDES));
     }
 
     static hipdnn_flatbuffers_sdk::data_objects::SdpaAttributesT createStandardSdpaFwdAttrs()
@@ -163,6 +169,36 @@ protected:
         return node;
     }
 };
+
+TEST_F(TestSdpaFwdOperationFromNode, RestoresCuSeqLenTensorsAndRoundTrips)
+{
+    auto attrs = createStandardSdpaFwdAttrs();
+    // cu_seq_len is exclusive with seq_len_*; build a graph that carries only the cu form.
+    attrs.seq_len_q_tensor_uid = flatbuffers::nullopt;
+    attrs.seq_len_kv_tensor_uid = flatbuffers::nullopt;
+    attrs.padding_mask = true;
+    attrs.cu_seq_len_q_tensor_uid = K_SDPA_TENSOR_CU_SEQ_LEN_Q_UID;
+    attrs.cu_seq_len_kv_tensor_uid = K_SDPA_TENSOR_CU_SEQ_LEN_KV_UID;
+
+    NodeT node;
+    node.compute_data_type = DataType::FLOAT;
+    node.attributes.Set(attrs);
+
+    auto desc = SdpaFwdOperationDescriptor::fromNode(node, _tensorMap);
+    ASSERT_NE(desc, nullptr);
+    ASSERT_NE(desc->getCuSeqLenQDesc(), nullptr);
+    ASSERT_NE(desc->getCuSeqLenKVDesc(), nullptr);
+    EXPECT_EQ(desc->getCuSeqLenQDesc(), _tensorMap[K_SDPA_TENSOR_CU_SEQ_LEN_Q_UID]);
+    EXPECT_EQ(desc->getCuSeqLenKVDesc(), _tensorMap[K_SDPA_TENSOR_CU_SEQ_LEN_KV_UID]);
+    EXPECT_EQ(desc->getSeqLenQDesc(), nullptr);
+    EXPECT_EQ(desc->getSeqLenKvDesc(), nullptr);
+
+    auto rebuilt = desc->buildNode();
+    const auto* rebuiltAttrs = rebuilt->attributes.AsSdpaAttributes();
+    ASSERT_NE(rebuiltAttrs, nullptr);
+    EXPECT_EQ(rebuiltAttrs->cu_seq_len_q_tensor_uid, K_SDPA_TENSOR_CU_SEQ_LEN_Q_UID);
+    EXPECT_EQ(rebuiltAttrs->cu_seq_len_kv_tensor_uid, K_SDPA_TENSOR_CU_SEQ_LEN_KV_UID);
+}
 
 TEST_F(TestSdpaFwdOperationFromNode, CreatesValidFinalizedDescriptor)
 {

@@ -1068,6 +1068,14 @@ void attributesBindings(nb::module_& m)
              static_cast<TensorSetter<graph::SdpaAttributes>>(
                  &graph::SdpaAttributes::set_seq_len_kv),
              nb::rv_policy::reference_internal)
+        .def("set_cu_seq_len_q",
+             static_cast<TensorSetter<graph::SdpaAttributes>>(
+                 &graph::SdpaAttributes::set_cu_seq_len_q),
+             nb::rv_policy::reference_internal)
+        .def("set_cu_seq_len_kv",
+             static_cast<TensorSetter<graph::SdpaAttributes>>(
+                 &graph::SdpaAttributes::set_cu_seq_len_kv),
+             nb::rv_policy::reference_internal)
         .def("set_seed",
              static_cast<TensorSetter<graph::SdpaAttributes>>(&graph::SdpaAttributes::set_seed),
              nb::rv_policy::reference_internal)
@@ -1198,6 +1206,8 @@ void attributesBindings(nb::module_& m)
         .def("get_attn_scale", &graph::SdpaAttributes::get_attn_scale)
         .def("get_seq_len_q", &graph::SdpaAttributes::get_seq_len_q)
         .def("get_seq_len_kv", &graph::SdpaAttributes::get_seq_len_kv)
+        .def("get_cu_seq_len_q", &graph::SdpaAttributes::get_cu_seq_len_q)
+        .def("get_cu_seq_len_kv", &graph::SdpaAttributes::get_cu_seq_len_kv)
         .def("get_seed", &graph::SdpaAttributes::get_seed)
         .def("get_offset", &graph::SdpaAttributes::get_offset)
         .def("get_dropout_mask", &graph::SdpaAttributes::get_dropout_mask)

@@ -135,6 +135,7 @@ inline hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT unpackRaggedOffse
 ///  - seq_len_q/kv, when present, are both present, INT32, one value per batch (as
 ///    isSupportedSdpaPadding); they bound the per-batch lengths. A padding_mask without them is
 ///    declined.
+///  - cu_seq_len_q/kv must be absent. The ragged references have no cumulative-length input.
 ///  - No alibi, additive attention bias, dropout, paged KV cache or block-sparse attention. The
 ///    ragged references have no inputs for them.
 ///  - Only Q/K/V descales, which must be FLOAT. A pass-by-value descale must be one element.
@@ -162,7 +163,9 @@ inline bool isSupportedRaggedSdpaFwdNode(
         }
     }
 
-    if(!isSupportedSdpaPadding(attributes, tensorMap))
+    if(attributes.cu_seq_len_q_tensor_uid().has_value()
+       || attributes.cu_seq_len_kv_tensor_uid().has_value()
+       || !isSupportedSdpaPadding(attributes, tensorMap))
     {
         return false;
     }
