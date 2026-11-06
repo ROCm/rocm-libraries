@@ -433,6 +433,23 @@ endforeach()
                     2 if receipt == 600 else 1,
                 )
 
+    def test_tdm_unpadded_v_checks_the_v_row(self):
+        # (192, 128) stages a 192-column Q/K row but 128-column V rows: the unpadded-V
+        # kernels must accept hdim_v = 128, not require a multiple of the Q/K row.
+        _, kernels = _generate(100)
+        tdm = [
+            kernel
+            for kernel in kernels
+            if kernel.F_pipeline.tag in ("qr_tdm", "qr_tdm_pingpong")
+            and kernel.F_hdim == 192
+            and kernel.F_pipeline.F_dvpad == "f"
+        ]
+        self.assertTrue(tdm)
+        for kernel in tdm:
+            with self.subTest(kernel=kernel.filename):
+                self.assertEqual(kernel.F_tile.F_bn1, 128)
+                self.assertEqual(kernel.api_trait().dvcheck, "a.hdim_v % 128 == 0")
+
     def test_d128_retains_short_query_fallback_tiles(self):
         for receipt in (100, 200, 600):
             with self.subTest(receipt=receipt):
@@ -662,7 +679,7 @@ class TestCompiledGfx125D192Dispatch(unittest.TestCase):
         )
 
     @staticmethod
-    def fallback_id(dispatch, mode, mask="s_no", lse="f", sink="f", bm0=128):
+    def fallback_id(dispatch, mode, mask="s_no", lse="f", sink="f", bm0=128, dpad="f"):
         return dispatch.expected_id(
             mode=mode,
             hdim=192,
@@ -671,7 +688,8 @@ class TestCompiledGfx125D192Dispatch(unittest.TestCase):
             mask=mask,
             lse=lse,
             spad="t" if mode == "group" else "f",
-            dpad="t",
+            # the d192 tiles' Q/K (192) and V (128) rows take hdim 192/128 unpadded
+            dpad=dpad,
             sink=sink,
         )
 
@@ -692,7 +710,6 @@ class TestCompiledGfx125D192Dispatch(unittest.TestCase):
         dispatch, _ = self.compile()
         for mode, group in (("batch", 0), ("group", 1)):
             candidate = self.candidate_id(dispatch, mode)
-            fallback = self.fallback_id(dispatch, mode)
             self.assertEqual(dispatch.run(group=group), [candidate])
             for length in (128, 129, 257):
                 self.assertEqual(
@@ -704,7 +721,8 @@ class TestCompiledGfx125D192Dispatch(unittest.TestCase):
                     [self.fallback_id(dispatch, mode, bm0=64)],
                 )
             self.assertEqual(
-                dispatch.run(group=group, hdim_q=160, hdim_v=128), [fallback]
+                dispatch.run(group=group, hdim_q=160, hdim_v=128),
+                [self.fallback_id(dispatch, mode, dpad="t")],
             )
             for q, v in ((191, 128), (192, 127)):
                 with self.subTest(mode=mode, shape=(q, v)):
@@ -1721,7 +1739,7 @@ class TestCompiledGfx125V128Dispatch(unittest.TestCase):
                             hdim=dim,
                             bm0=64 if max_q < 128 else 128,
                             pipeline="qr_tdm",
-                            dpad="f" if dim == 128 else "t",
+                            dpad="f",
                             spad="t",
                             **features,
                         )
