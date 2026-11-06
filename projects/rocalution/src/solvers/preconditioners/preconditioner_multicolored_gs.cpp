@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -60,6 +60,9 @@ namespace rocalution
     void MultiColoredSGS<OperatorType, VectorType, ValueType>::SetRelaxation(ValueType omega)
     {
         log_debug(this, "MultiColoredSGS::SetRelaxation()", omega);
+
+        // Without decomposition, Build applies omega to the matrix
+        assert(this->build_ == false || this->decomp_ == true);
 
         this->omega_ = omega;
     }
@@ -123,8 +126,7 @@ namespace rocalution
         // Without decomposition, the triangular solves run on D + omega (L + U)
         if(this->decomp_ == false && this->omega_ != static_cast<ValueType>(1))
         {
-            this->preconditioner_->Scale(this->omega_);
-            this->preconditioner_->ScaleDiagonal(static_cast<ValueType>(1) / this->omega_);
+            this->preconditioner_->ScaleOffDiagonal(this->omega_);
         }
     }
 

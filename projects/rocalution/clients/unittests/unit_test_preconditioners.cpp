@@ -2264,6 +2264,19 @@ TYPED_TEST(preconditioners, multicolored_gs_without_decomposition_is_not_impleme
         "preconditioner_multicolored_gs\\.cpp");
 }
 
+// Without decomposition, the build applies the relaxation to the matrix
+TYPED_TEST(preconditioners, multicolored_relaxation_without_decomposition_is_set_before_the_build)
+{
+    using T = typename TypeParam::value_type;
+    auto A  = this->make(nonsymmetric<T>(12));
+
+    rocalution::MultiColoredSGS<Matrix<T>, Vector<T>, T> p;
+    p.SetDecomposition(false);
+    p.SetOperator(*A);
+    p.Build();
+    EXPECT_ASSERT_DEATH(p.SetRelaxation(static_cast<T>(1.5)), "decomp_ == true");
+}
+
 TYPED_TEST(preconditioners, multicolored_relaxation_is_ssor)
 {
     using T                     = typename TypeParam::value_type;
@@ -2315,8 +2328,8 @@ TYPED_TEST(preconditioners, multicolored_relaxation_is_ssor)
 
 // GMRES(30) solves a system of 12 unknowns with any invertible preconditioner, so the
 // solves cannot see a stale or unmoved preconditioner. Its action after the build is
-// compared after the solve, a rebuild and the moves instead, which compares the library
-// with itself and holds also for the buggy relaxed sweeps.
+// compared after the solve, a rebuild and the moves instead; multicolored_relaxation_is_ssor
+// checks the action itself.
 TYPED_TEST(preconditioners, relaxed_multicolored_gauss_seidel_preconditions_gmres)
 {
     using T                  = typename TypeParam::value_type;
