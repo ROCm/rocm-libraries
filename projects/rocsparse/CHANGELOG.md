@@ -21,6 +21,7 @@ Documentation for rocSPARSE is available at
 * Fixed intermittently wrong results in `rocsparse_spmv`, `rocsparse_spmm`, and `rocsparse_spgemm` with `_Float16` or `rocsparse_bfloat16` output when the output has an odd number of elements or an odd batch stride. One concurrent update to the last element could occasionally be lost.
 * Fixed a memory access fault in `rocsparse_Xcsritilu0_compute` and `rocsparse_Xcsritilu0_compute_ex` with `rocsparse_itilu0_alg_async_split` when `rocsparse_itilu0_option_compute_nrm_residual` is not set. Each sweep launched the kernel that also reduces the residual norm, which wrote through null norm pointers. Without the option the sweeps now use the kernel without the norm, and the convergence history logs the residual only when it is computed.
 * Fixed `rocsparse_Xcsrsm_solve`, `rocsparse_spsm`, and `rocsparse_sptrsm` (CSR, CSC, and COO formats) returning incorrect results for complex types when `trans_B` is `rocsparse_operation_conjugate_transpose` and there is a single right-hand side.
+* Fixed `rocsparse_v2_spmv` ignoring the `rocsparse_spmv_input_nnz_use_starting_block_ids` input. The CSR nnz-split analysis never received the value set with `rocsparse_spmv_set_input`, so it always ran without starting block IDs. The analysis now uses the value from the SpMV descriptor.
 
 ### Upcoming changes
 * Deprecated the `rocsparse_sddmm_alg_dense` enum value. It will be removed in a future release, along with its rocBLAS dependency. Use `rocsparse_sddmm_alg_default` instead.

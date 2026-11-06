@@ -152,8 +152,8 @@ Design, the full feature table for both references, and how they are tested:
 
 | Feature | Dense SDPA Forward | Ragged SDPA Forward |
 |---------|--------------------|---------------------|
-| Log-sum-exp `stats` output | Supported | Supported (`FP32`): dense `[B, H, Sq, 1]`, or packed when it has its own `INT32` `ragged_offset` with the same layout rules as the primaries. Any other offset is rejected. |
-| Variable sequence lengths (`seq_len_q` / `seq_len_kv`, padding) | Supported: both INT32 tensors, one value per batch; matches the CPU reference | Lengths come from `ragged_offset`; supplied seq_len tensors go through the dense rewrite (below) |
+| Log-sum-exp `stats` output | Supported | Supported (`FP32`): dense `[B, H, Sq, 1]`, or ragged with its own `INT32` `ragged_offset` in any layout the ragged container accepts (`[H, T]` or `[T, H]`), with Q's per-batch lengths |
+| Variable sequence lengths (`seq_len_q` / `seq_len_kv`, padding) | Supported: both INT32 tensors, one value per batch; matches the CPU reference | Supported, both or neither: they bound the per-batch lengths. Without them each `ragged_offset` block, clamped to `S_max`, is the length |
 | FP8 (descale) inputs | `FP8_E4M3`, `FP8_E5M2` and their FNUZ forms, with `BFP16` output; requires all three `FLOAT` Q/K/V descales (scalar or `[B, H_kv, 1, 1]`; a paged K or V needs a scalar), rejected for other inputs. Q/K/V are dequantized on the device first, as in the CPU reference. cuDNN `sdpa_fp8` softmax and output scaling (`scale_s` with `descale_s`, `scale_o`, `amax_s`, `amax_o`; one-element `FLOAT`; not with dropout) as in the CPU reference (SEM-024); `BFP16` or input-format FP8 output | `FP8_E4M3` with `BFP16` output. Optional `FLOAT` Q/K/V descales (scalar `[1]` or per KV head `[B, H_kv, 1, 1]`) for any registered dtype; softmax descale, softmax/output scales and amax go through the dense rewrite |
 | Paged KV cache (cuDNN layout; requires both seq_len tensors) | Supported: K/V read in place through INT32 page tables, as the CPU reference (SEM-009) | Through the dense rewrite (ragged Q over paged K/V) |
 | ALiBi (`alibi_mask`) | Supported: cuDNN slopes, `(skv - sq) * slope(h)` added after the bias; needs top-left causal (`right_bound = 0`) (SEM-021) | Through the dense rewrite |
@@ -166,8 +166,11 @@ Design, the full feature table for both references, and how they are tested:
 | Softmax max / sum-exp stats outputs (cuDNN `Max`, `Sum_exp`) | Supported, as in the CPU reference | Through the dense rewrite (below) |
 | Additive attention bias (`attn_mask`) | Supported, as in the CPU reference | Through the dense rewrite |
 
-The ragged plan requires RFC-0014 tensors with logical `[B, H, S, D]` dims with token-major (BSHD)
-strides and an `INT32` `ragged_offset` aux on every primary. A node is keyed as ragged when any of
+The ragged plan requires RFC-0014 tensors with logical `[B, H, S, D]` dims, an `INT32` `ragged_offset`
+aux on every primary, and strides the ragged container accepts: token-major, head-major, a padded token
+stride, and shifted or non-monotonic origins with `seq_len`. The container rejects layouts that alias. Applicability sees only graph attributes, not offset values: layouts that depend on the values are rejected when the tensor is built (bundle load), or with `std::invalid_argument` at execute for callers passing raw pointers.
+Per-batch lengths come from `seq_len_q/kv` when bound (both or neither; a `padding_mask` only with
+both), else from the `ragged_offset` blocks clamped to `S_max`. A node is keyed as ragged when any of
 its Q/K/V/O tensors has a `ragged_offset`. The ragged plan needs all four to be ragged, and the dense
 plan rejects any ragged tensor. So a partly ragged node is declined by both plans and goes to the dense
 rewrite. The CPU reference keys and gates ragged nodes the same way. "Through the dense rewrite" in the
@@ -177,9 +180,10 @@ rewrite (below) under the dense column's rules.
 Ragged graphs the native ragged plan declines, and ragged backward graphs, run through the dense
 rewrite (`RaggedSdpaDensify.hpp`, shared with the CPU reference; the GPU executor stages the packed buffers
 through the host): the packed tensors are unpacked into dense padded ones with the
-per-batch lengths as `seq_len_q/kv`, the dense plan runs, and the outputs are packed back. They
-therefore support everything the dense forward column and the SDPA Backward row list. Supplied `seq_len` tensors
-(cuDNN's ragged + padding form) must not exceed the packed lengths.
+per-batch lengths (`seq_len` when supplied, else the offset blocks) as `seq_len_q/kv`, the dense plan runs,
+and the outputs are packed back. They therefore support everything the dense forward column and the SDPA
+Backward row list. The rewrite serves `Max` and `Sum_exp` (bound by `seq_len_q`), `INT64` offsets and
+ragged Q over non-ragged paged K/V; it declines a `ragged_offset` on a paged K/V container.
 
 ## Validators
 
