@@ -41,7 +41,6 @@ using flydsl_sdpa_bwd::ScaleSource;
 using flydsl_sdpa_bwd::SdpaBwdProblem;
 using flydsl_sdpa_bwd::SeedForm;
 using flydsl_sdpa_bwd::SeedWidth;
-using flydsl_sdpa_bwd::StatsLayout;
 using flydsl_sdpa_bwd::Strides;
 
 constexpr float TWO_POW_20 = 1048576.0F;
@@ -134,7 +133,6 @@ TEST(TestFlydslSdpaBwdMatcher, BaselineSdkGraphIsAccepted)
     EXPECT_FALSE(problem->paddingMask);
     EXPECT_EQ(problem->biasUid, NO_UID);
     EXPECT_EQ(problem->dropoutP, 0.0F);
-    EXPECT_EQ(problem->statsLayout, StatsLayout::HT);
 }
 
 TEST(TestFlydslSdpaBwdMatcher, BaselineDefaultSpecMatchesTheSdkGraph)
@@ -149,7 +147,6 @@ TEST(TestFlydslSdpaBwdMatcher, BaselineDefaultSpecMatchesTheSdkGraph)
     EXPECT_EQ(problem->batch, sdkProblem->batch);
     EXPECT_EQ(problem->seqLenQ, sdkProblem->seqLenQ);
     EXPECT_EQ(problem->q.seq, sdkProblem->q.seq);
-    EXPECT_EQ(problem->statsLayout, sdkProblem->statsLayout);
 }
 
 // ---------------------------------------------------------------------------
@@ -768,26 +765,68 @@ TEST(TestFlydslSdpaBwdMatcher, LY6ZeroSequenceStrideOnAMultiRowAxisDeclines)
 // Stats
 // ---------------------------------------------------------------------------
 
-TEST(TestFlydslSdpaBwdMatcher, SS1PackedStatsInEitherOrderAcceptAndOtherStridesDecline)
+TEST(TestFlydslSdpaBwdMatcher, SS1DenseStatsAcceptPackedAndPaddedStridesAndRecordThem)
 {
-    auto problem = accepted(baseline());
-    ASSERT_TRUE(problem.has_value());
-    EXPECT_EQ(problem->statsLayout, StatsLayout::HT);
+    const auto withStrides = [](std::vector<int64_t> strides) {
+        return baseline().withEdit(
+            [strides](SdpaBwdGraph& g) { g.tensor("stats").strides = strides; });
+    };
+    // Packed (B*H, Sq) and packed (B, Sq, H), and the same two with padded batch strides.
+    for(const auto& strides : {std::vector<int64_t>{128, 16, 1, 1},
+                               std::vector<int64_t>{int64_t{16} * 8, 1, 8, 1},
+                               std::vector<int64_t>{139, 17, 1, 1},
+                               std::vector<int64_t>{int64_t{16} * 8 + 5, 1, 8, 1},
+                               std::vector<int64_t>{256, 32, 2, 1}})
+    {
+        SCOPED_TRACE(flydsl_sdpa_bwd::detail::listOf(strides));
+        const auto problem = accepted(withStrides(strides));
+        ASSERT_TRUE(problem.has_value());
+        expectStrides(problem->stats, strides[0], strides[1], strides[2]);
+    }
 
-    problem = accepted(baseline().withEdit(
-        [](SdpaBwdGraph& g) { g.tensor("stats").strides = {int64_t{16} * 8, 1, 8, 1}; }));
+    // The padded example of a (2, 4, 128, 1) stats tensor with 544-element batches.
+    SdpaBwdSpec padded;
+    padded.batch = 2;
+    padded.heads = 4;
+    padded.kvHeads = 4;
+    padded.seqQ = 128;
+    const auto problem = accepted(
+        padded.withEdit([](SdpaBwdGraph& g) { g.tensor("stats").strides = {544, 136, 1, 1}; }));
     ASSERT_TRUE(problem.has_value());
-    EXPECT_EQ(problem->statsLayout, StatsLayout::TH);
+    expectStrides(problem->stats, 544, 136, 1);
 
-    declined(
-        baseline().withEdit([](SdpaBwdGraph& g) { g.tensor("stats").strides = {129, 16, 1, 1}; }),
-        "layout",
-        "stats (uid 6) strides [129,16,1,1]");
+    // A unit axis is exempt whatever its stride.
+    SdpaBwdSpec singleHead;
+    singleHead.heads = 1;
+    singleHead.kvHeads = 1;
+    EXPECT_TRUE(accepted(
+        singleHead.withEdit([](SdpaBwdGraph& g) { g.tensor("stats").strides = {16, 0, 1, 1}; })));
+
     declined(baseline().withEdit([](SdpaBwdGraph& g) {
         g.tensor("stats").dtype = data_objects::DataType::BFLOAT16;
     }),
              "layout",
              "stats (uid 6) is BFLOAT16, not FLOAT");
+}
+
+TEST(TestFlydslSdpaBwdMatcher, SS1DenseStatsThatAliasOrRunBackwardDecline)
+{
+    const auto withStrides = [](std::vector<int64_t> strides) {
+        return baseline().withEdit(
+            [strides](SdpaBwdGraph& g) { g.tensor("stats").strides = strides; });
+    };
+    // A zero stride on an axis of more than one element aliases its elements.
+    declined(withStrides({128, 0, 1, 1}), "layout", "stats (uid 6) elements overlap");
+    declined(withStrides({128, 16, 0, 1}), "layout", "stats (uid 6) elements overlap");
+    declined(withStrides({0, 16, 1, 1}), "layout", "stats (uid 6) elements overlap");
+    // Pitched heads that step less than a head's rows overlap, as do batches inside a batch.
+    declined(withStrides({128, 8, 1, 1}), "layout", "stats (uid 6) elements overlap");
+    declined(withStrides({127, 16, 1, 1}), "layout", "stats (uid 6) elements overlap");
+    // A negative stride on a non-unit axis.
+    declined(withStrides({128, -16, 1, 1}),
+             "layout",
+             "stats (uid 6) strides [128,-16,1,1] have a negative stride");
+    declined(withStrides({128, 16, -1, 1}), "layout", "have a negative stride");
 }
 
 TEST(TestFlydslSdpaBwdMatcher, SS3StatsAlignmentBelow16BytesDeclines)
@@ -813,13 +852,13 @@ TEST(TestFlydslSdpaBwdMatcher, SS3StatsAlignmentBelow16BytesDeclines)
              ACCEPT_FLOAT);
 }
 
-TEST(TestFlydslSdpaBwdMatcher, SS1StatsSpanOfABatchAbove32BitByteOffsetsDeclines)
+TEST(TestFlydslSdpaBwdMatcher, SS1StatsRowsOfAHeadAbove32BitByteOffsetsDecline)
 {
     // Nine query heads of head dim 16: each per-head slab of every data tensor fits 32 bits at
-    // these lengths, so only the stats span (query heads * Sq FLOAT rows per batch) can decline.
-    // 536870911 rows is the most 32-bit byte offsets address. The grouped-query case shows the
-    // span counts query heads, not key/value heads.
-    const auto withSeqQ = [](int64_t seqQ, int64_t kvHeads) {
+    // these lengths, so only the stats can decline. Stats packed (B, Sq, H) have token stride
+    // H, so a head's Sq rows span Sq * 9 FLOAT elements: 59652323 * 9 * 4 bytes is the most
+    // 32-bit byte offsets address. The grouped-query case shows the span counts query heads.
+    const auto tokenMajor = [](int64_t seqQ, int64_t kvHeads) {
         SdpaBwdSpec spec;
         spec.batch = 1;
         spec.heads = 9;
@@ -827,15 +866,26 @@ TEST(TestFlydslSdpaBwdMatcher, SS1StatsSpanOfABatchAbove32BitByteOffsetsDeclines
         spec.headDimQk = 16;
         spec.headDimV = 16;
         spec.seqQ = seqQ;
-        return spec;
+        return spec.withEdit(
+            [](SdpaBwdGraph& g) { g.tensor("stats").strides = {g.seqQ * g.heads, 1, g.heads, 1}; });
     };
     for(const int64_t kvHeads : {9, 3})
     {
         SCOPED_TRACE(kvHeads);
-        EXPECT_TRUE(accepted(withSeqQ(59652323, kvHeads)));
-        declined(
-            withSeqQ(59652324, kvHeads), "layout", "stats (uid 6) spans 536870916 rows per batch");
+        EXPECT_TRUE(accepted(tokenMajor(59652323, kvHeads)));
+        declined(tokenMajor(59652324, kvHeads),
+                 "layout",
+                 "stats (uid 6) strides [536870916,1,9,1] put one head's rows beyond");
     }
+    // Packed (B*H, Sq) has token stride 1, so the same lengths stay inside.
+    SdpaBwdSpec headMajor;
+    headMajor.batch = 1;
+    headMajor.heads = 9;
+    headMajor.kvHeads = 9;
+    headMajor.headDimQk = 16;
+    headMajor.headDimV = 16;
+    headMajor.seqQ = 59652324;
+    EXPECT_TRUE(accepted(headMajor));
 }
 
 // ---------------------------------------------------------------------------
@@ -1165,22 +1215,212 @@ TEST(TestFlydslSdpaBwdMatcher, PV2PaddingFlagAndLengthTensorsMustComeTogether)
     EXPECT_TRUE(accepted(baseline().withEdit([](SdpaBwdGraph& g) { addSeqLens(g); })));
 }
 
-TEST(TestFlydslSdpaBwdMatcher, PV3RaggedOffsetOnADataTensorDeclines)
+/// A padded graph whose tensors named in @p names are ragged, each with an offset tensor of its
+/// own and the multiplier @p multiplier. A ragged Q brings ragged stats packed (H, T), as the
+/// matcher pairs them.
+SdpaBwdSpec raggedSpec(const std::vector<std::string>& names, int64_t multiplier = 1)
 {
-    for(const auto& operand : OPERANDS)
-    {
-        if(std::string_view(operand.tensor) == "stats")
+    return baseline().withEdit([names, multiplier](SdpaBwdGraph& g) {
+        addSeqLens(g);
+        for(const auto& name : names)
         {
-            continue;
+            addRagged(g, name, multiplier);
+            if(name == "q")
+            {
+                addRagged(g, "stats");
+                g.tensor("stats").strides = {int64_t{1} << 20, g.batch * g.seqQ, 1, 1};
+            }
         }
-        SCOPED_TRACE(operand.tensor);
-        const std::string tensor = operand.tensor;
-        declined(baseline().withEdit(
-                     [tensor](SdpaBwdGraph& g) { g.tensor(tensor).raggedOffsetUid = 99; }),
-                 "varlen",
-                 std::string(operand.label) + " (uid ");
+    });
+}
+
+TEST(TestFlydslSdpaBwdMatcher, PV3EveryDataTensorMayBeRaggedWithAnOffsetTensorOfItsOwn)
+{
+    const auto dense = accepted(baseline());
+    ASSERT_TRUE(dense.has_value());
+    EXPECT_FALSE(dense->ragged.any());
+
+    const auto problem = accepted(raggedSpec({"q", "k", "v", "o", "do", "dq", "dk", "dv"}, 8));
+    ASSERT_TRUE(problem.has_value());
+    const auto& ragged = problem->ragged;
+    EXPECT_EQ(ragged.q.uid, sdpa_bwd_uid::RAGGED_OFFSET_Q);
+    EXPECT_EQ(ragged.k.uid, sdpa_bwd_uid::RAGGED_OFFSET_K);
+    EXPECT_EQ(ragged.v.uid, sdpa_bwd_uid::RAGGED_OFFSET_V);
+    EXPECT_EQ(ragged.o.uid, sdpa_bwd_uid::RAGGED_OFFSET_O);
+    EXPECT_EQ(ragged.dO.uid, sdpa_bwd_uid::RAGGED_OFFSET_DO);
+    EXPECT_EQ(ragged.dQ.uid, sdpa_bwd_uid::RAGGED_OFFSET_DQ);
+    EXPECT_EQ(ragged.dK.uid, sdpa_bwd_uid::RAGGED_OFFSET_DK);
+    EXPECT_EQ(ragged.dV.uid, sdpa_bwd_uid::RAGGED_OFFSET_DV);
+    EXPECT_EQ(ragged.stats.uid, sdpa_bwd_uid::RAGGED_OFFSET_STATS);
+    for(const auto* offset : {&ragged.q,
+                              &ragged.k,
+                              &ragged.v,
+                              &ragged.o,
+                              &ragged.dO,
+                              &ragged.dQ,
+                              &ragged.dK,
+                              &ragged.dV})
+    {
+        EXPECT_EQ(offset->multiplier, 8);
     }
-    EXPECT_TRUE(accepted(baseline().withEdit([](SdpaBwdGraph& g) { addSeqLens(g); })));
+    // A ragged tensor's batch stride is never read: the problem records 0.
+    expectStrides(problem->q, 0, 1024, 64);
+    expectStrides(problem->dV, 0, 1024, 64);
+    EXPECT_TRUE(problem->paddingMask);
+}
+
+TEST(TestFlydslSdpaBwdMatcher, PV3RaggedTensorsAreIndependentOfEachOtherAndOfDenseOnes)
+{
+    // Only the gradients of K and V are ragged; Q is dense, so the stats are too.
+    const auto gradients = accepted(raggedSpec({"dk", "dv"}));
+    ASSERT_TRUE(gradients.has_value());
+    EXPECT_FALSE(gradients->ragged.q.ragged());
+    EXPECT_FALSE(gradients->ragged.k.ragged());
+    EXPECT_FALSE(gradients->ragged.dQ.ragged());
+    EXPECT_TRUE(gradients->ragged.dK.ragged());
+    EXPECT_TRUE(gradients->ragged.dV.ragged());
+    EXPECT_FALSE(gradients->ragged.stats.ragged());
+    expectStrides(gradients->dQ, 8192, 1024, 64);
+    expectStrides(gradients->dK, 0, 1024, 64);
+
+    // Q, O, dO and dQ ragged with K and V dense.
+    const auto queries = accepted(raggedSpec({"q", "o", "do", "dq"}));
+    ASSERT_TRUE(queries.has_value());
+    EXPECT_TRUE(queries->ragged.q.ragged());
+    EXPECT_FALSE(queries->ragged.k.ragged());
+    EXPECT_FALSE(queries->ragged.v.ragged());
+    EXPECT_TRUE(queries->ragged.stats.ragged());
+    expectStrides(queries->k, 8192, 1024, 64);
+
+    // Offset tensors may be shared: the same uid on two tensors.
+    EXPECT_TRUE(accepted(raggedSpec({"k"}).withEdit(
+        [](SdpaBwdGraph& g) { g.tensor("v").raggedOffsetUid = sdpa_bwd_uid::RAGGED_OFFSET_K; })));
+}
+
+TEST(TestFlydslSdpaBwdMatcher, PV3RaggedOffsetMultiplierIsAtLeastOneAndRecorded)
+{
+    const auto problem = accepted(raggedSpec({"k"}, 64));
+    ASSERT_TRUE(problem.has_value());
+    EXPECT_EQ(problem->ragged.k.multiplier, 64);
+    for(const int64_t multiplier : {int64_t{0}, int64_t{-3}})
+    {
+        SCOPED_TRACE(multiplier);
+        declined(raggedSpec({"k"}).withEdit([multiplier](SdpaBwdGraph& g) {
+            g.tensor("k").raggedOffsetMultiplier = multiplier;
+        }),
+                 "varlen",
+                 "K (uid 2) ragged_offset_multiplier " + std::to_string(multiplier)
+                     + " is below 1");
+    }
+}
+
+TEST(TestFlydslSdpaBwdMatcher, PV3RaggedTensorWithoutPaddingMaskAndLengthTensorsDeclines)
+{
+    declined(baseline().withEdit([](SdpaBwdGraph& g) { addRagged(g, "dk"); }),
+             "varlen",
+             "padding_mask and the seq_len tensors are not set");
+    EXPECT_TRUE(accepted(raggedSpec({"dk"})));
+}
+
+TEST(TestFlydslSdpaBwdMatcher, PV4RaggedOffsetTensorIsADenseDeviceInt32ArrayOfBatchPlusOne)
+{
+    const auto offsetUid = std::to_string(sdpa_bwd_uid::RAGGED_OFFSET_K);
+    const auto edited = [](auto edit) {
+        return raggedSpec({"k"}).withEdit([edit](SdpaBwdGraph& g) { edit(g.tensor("k_offset")); });
+    };
+    declined(edited([](SdpaBwdTensor& t) { t.dtype = data_objects::DataType::INT64; }),
+             "varlen",
+             "ragged_offset (uid " + offsetUid + ") of K (uid 2) is INT64, not INT32");
+    declined(edited([](SdpaBwdTensor& t) { t.dims = {2, 1, 1, 1}; }),
+             "varlen",
+             "dims [2,1,1,1] != [3,1,1,1]");
+    declined(edited([](SdpaBwdTensor& t) { t.isVirtual = true; }),
+             "varlen",
+             "ragged_offset (uid " + offsetUid + ") is virtual");
+    declined(edited([](SdpaBwdTensor& t) { t.runtimePassByValue = true; }),
+             "varlen",
+             "ragged_offset (uid " + offsetUid + ") is pass-by-value");
+    declined(edited([](SdpaBwdTensor& t) { t.alignment = 2; }),
+             "varlen",
+             "declares alignment 2 bytes, below its element size 4");
+    declined(edited([](SdpaBwdTensor& t) { t.strides = {2, 1, 1, 1}; }),
+             "varlen",
+             "strides [2,1,1,1] are not dense");
+    declined(
+        raggedSpec({"k"}).withEdit([](SdpaBwdGraph& g) { g.tensor("k").raggedOffsetUid = 99; }),
+        "varlen",
+        "ragged_offset (uid 99) is not in the graph");
+    EXPECT_TRUE(accepted(edited([](SdpaBwdTensor& t) { t.alignment = 4; })));
+}
+
+TEST(TestFlydslSdpaBwdMatcher, SS4StatsAreRaggedExactlyWhenQIs)
+{
+    // Dense stats beside a ragged Q decline: cuDNN accepts the pair, AOTriton and this engine
+    // do not.
+    declined(raggedSpec({"q"}).withEdit([](SdpaBwdGraph& g) {
+        g.tensor("stats").raggedOffsetUid.reset();
+        g.tensor("stats").strides = {128, 16, 1, 1};
+    }),
+             "varlen",
+             "stats (uid 6) is dense but Q is ragged");
+    // Packed stats with an offset of their own beside a dense Q decline.
+    declined(raggedSpec({"k"}).withEdit([](SdpaBwdGraph& g) { addRagged(g, "stats"); }),
+             "varlen",
+             "stats (uid 6) has a ragged offset but Q does not");
+    EXPECT_TRUE(accepted(raggedSpec({"q"})));
+    EXPECT_TRUE(accepted(raggedSpec({"k"})));
+}
+
+TEST(TestFlydslSdpaBwdMatcher, SS5RaggedStatsArePackedOverTokensInEitherOrder)
+{
+    const auto withStrides = [](std::vector<int64_t> strides) {
+        return raggedSpec({"q"}).withEdit(
+            [strides](SdpaBwdGraph& g) { g.tensor("stats").strides = strides; });
+    };
+    // (H, T): sequence stride 1, head stride the token count; the batch stride is unread.
+    auto problem = accepted(withStrides({7, 100, 1, 1}));
+    ASSERT_TRUE(problem.has_value());
+    expectStrides(problem->stats, 0, 100, 1);
+    // (T, H): head stride 1, sequence stride H.
+    problem = accepted(withStrides({7, 1, 8, 1}));
+    ASSERT_TRUE(problem.has_value());
+    expectStrides(problem->stats, 0, 1, 8);
+    declined(withStrides({7, 5, 2, 1}),
+             "layout",
+             "stats (uid 6) strides [7,5,2,1] are neither packed (H, T) nor packed (T, H)");
+    declined(withStrides({7, 0, 1, 1}), "layout", "neither packed (H, T) nor packed (T, H)");
+}
+
+TEST(TestFlydslSdpaBwdMatcher, LY5RaggedOutputsIgnoreTheirBatchStrideDenseOnesDoNot)
+{
+    // A ragged dQ places its batches by its offsets, so a batch stride that would make the
+    // batches overlap, or that breaks the vector multiple, is never read.
+    EXPECT_TRUE(accepted(
+        raggedSpec({"dq"}).withEdit([](SdpaBwdGraph& g) { g.tensor("dq").strides[0] = 0; })));
+    EXPECT_TRUE(accepted(
+        raggedSpec({"dq"}).withEdit([](SdpaBwdGraph& g) { g.tensor("dq").strides[0] = 3; })));
+    declined(baseline().withEdit([](SdpaBwdGraph& g) { g.tensor("dq").strides[0] = 0; }),
+             "layout",
+             "elements overlap");
+    declined(baseline().withEdit([](SdpaBwdGraph& g) { g.tensor("dq").strides[0] = 3; }),
+             "layout",
+             "stride 3 on axis 0");
+    // The head and sequence axes of a ragged tensor are still checked.
+    declined(raggedSpec({"dq"}).withEdit([](SdpaBwdGraph& g) { g.tensor("dq").strides[1] = 3; }),
+             "layout",
+             "stride 3 on axis 1");
+}
+
+TEST(TestFlydslSdpaBwdMatcher, ST5DistinctOutputsSharingAUidStillDecline)
+{
+    declined(baseline().withEdit([](SdpaBwdGraph& g) { g.attributes.dK = g.attributes.dQ; }),
+             "operand",
+             "shares its uid");
+    declined(raggedSpec({"dk", "dv"}).withEdit([](SdpaBwdGraph& g) {
+        g.attributes.dV = g.attributes.dK;
+    }),
+             "operand",
+             "shares its uid");
 }
 
 TEST(TestFlydslSdpaBwdMatcher, PV4SeqLenOtherThanInt32Declines)
@@ -1272,7 +1512,7 @@ TEST(TestFlydslSdpaBwdMatcher, PV7SeqLenMustBeADeviceTensorWithoutRaggedOffsets)
     EXPECT_TRUE(accepted(baseline().withEdit([](SdpaBwdGraph& g) { addSeqLens(g); })));
 }
 
-TEST(TestFlydslSdpaBwdMatcher, PV8RaggedOffsetOnBiasDbiasSeedOffsetOrStatsDeclines)
+TEST(TestFlydslSdpaBwdMatcher, PV8RaggedOffsetOnBiasDbiasOrSeedOffsetDeclines)
 {
     const auto withBias = [](SdpaBwdGraph& g) {
         addBias(g);
@@ -1299,7 +1539,7 @@ TEST(TestFlydslSdpaBwdMatcher, PV8RaggedOffsetOnBiasDbiasSeedOffsetOrStatsDeclin
              "offset (uid 16) has a ragged offset tensor");
     declined(baseline().withEdit([](SdpaBwdGraph& g) { g.tensor("stats").raggedOffsetUid = 99; }),
              "varlen",
-             "stats (uid 6) has a ragged offset tensor");
+             "ragged_offset (uid 99) is not in the graph");
     EXPECT_TRUE(accepted(baseline().withEdit(withBias).withEdit(withDropout)));
 }
 

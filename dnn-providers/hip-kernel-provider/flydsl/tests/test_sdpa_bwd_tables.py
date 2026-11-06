@@ -117,7 +117,7 @@ def test_dq_rows_name_the_reduce_kernel_of_their_dtype(tables) -> None:
         i.knobs["reduce_symbol"].startswith("fmha_bwd_dbias_reduce_f32")
         for i in fp32_bias
     )
-    assert sum(bool(i.knobs["reduce_symbol"]) for i in rows) == 320
+    assert sum(bool(i.knobs["reduce_symbol"]) for i in rows) == 293
 
 
 def test_only_the_merged_and_dq_rows_may_carry_a_reduce_symbol(tables) -> None:
@@ -156,50 +156,53 @@ def test_the_superseded_pins_are_replaced_in_the_tables_and_the_reference(
 ) -> None:
     """Asserted against literals, not against the generator's own filter: a regression there would feed both sides."""
     in_tables = {to_spec(i).hash() for rows in tables.values() for i in rows}
-    assert sum(len(rows) for rows in tables.values()) == 2729
+    assert sum(len(rows) for rows in tables.values()) == 2612
     assert {op: len(rows) for op, rows in tables.items()} == {
         "sdpa_bwd_prep": 86,
-        "sdpa_bwd_dkdv": 1319,
-        "sdpa_bwd_dq": 1010,
+        "sdpa_bwd_dkdv": 1289,
+        "sdpa_bwd_dq": 923,
         "sdpa_bwd_merged": 309,
         "sdpa_bwd_dbias_reduce": 3,
         "sdpa_bwd_dsink_reduce": 2,
     }
     for held in (in_tables, _reference().keys()):
-        assert len(held) == 2729
+        assert len(held) == 2612
         assert not held & SUPERSEDED.keys()
         assert set(SUPERSEDED.values()) <= held
 
 
-def test_known_flaky_hashes_are_pinned_objects() -> None:
-    with (DATA / "sdpa_bwd_known_flaky.csv").open(newline="", encoding="utf-8") as fh:
-        flaky = {row["hash"]: row for row in csv.DictReader(fh)}
-    reference = _reference()
-    assert flaky and flaky.keys() <= reference.keys()
-    for digest, row in flaky.items():
-        assert row["spec"] == reference[digest]["spec"]
+PACKS = FLYDSL.parent / "src/engines/kernel_ingestor_engine/packs"
+MERGED_NATIVE = PACKS / "FlydslSdpaBwdMergedNative.cpp"
+SPLIT_NATIVE = PACKS / "FlydslSdpaBwdSplitNative.cpp"
+NATIVE_SHARED = PACKS / "FlydslSdpaBwdNativeShared.hpp"
 
 
-MERGED_NATIVE = (
-    FLYDSL.parent
-    / "src/engines/kernel_ingestor_engine/packs/FlydslSdpaBwdMergedNative.cpp"
-)
+def _pack_max_block_q() -> int:
+    """`PACK_MAX_BLOCK_Q`, defined once in `FlydslSdpaBwdNativeShared.hpp`; neither engine source defines it."""
+    header = re.findall(
+        r"\bPACK_MAX_BLOCK_Q\s*=\s*(\d+)\s*;", NATIVE_SHARED.read_text("utf-8")
+    )
+    assert len(header) == 1, "the bound must have one definition: the shared header's"
+    for engine in (MERGED_NATIVE, SPLIT_NATIVE):
+        assert not re.search(
+            r"\bPACK_MAX_BLOCK_Q\s*=", engine.read_text("utf-8")
+        ), f"{engine.name} defines its own PACK_MAX_BLOCK_Q"
+    return int(header[0])
 
 
 def _engine_constants() -> tuple[tuple[int, ...], range, int]:
-    """(LADDER, the exact-tile head dims, PACK_MAX_BLOCK_Q) as `FlydslSdpaBwdMergedNative.cpp` spells them."""
+    """(LADDER, the exact-tile head dims, PACK_MAX_BLOCK_Q) as the engine sources spell them."""
     cpp = MERGED_NATIVE.read_text(encoding="utf-8")
     ladder = re.search(r"LADDER\{([\d, ]+)\}", cpp)
     exact = re.search(
         r"largest >= (\d+) && largest <= (\d+)\s*&& largest % (\d+) == 0", cpp
     )
-    pack = re.search(r"PACK_MAX_BLOCK_Q = (\d+);", cpp)
-    assert ladder and exact and pack, "the engine's constants moved; update this reader"
+    assert ladder and exact, "the engine's constants moved; update this reader"
     low, high, step = (int(g) for g in exact.groups())
     return (
         tuple(int(x) for x in ladder.group(1).split(",")),
         range(low, high + 1, step),
-        int(pack.group(1)),
+        _pack_max_block_q(),
     )
 
 
@@ -314,3 +317,29 @@ def test_gfx11_row_values_follow_the_kmd_contract() -> None:
                 "auto",
                 "",
             )
+
+
+def test_the_split_engines_ladders_are_the_generators() -> None:
+    """The split engine restates the 16-bit ladder and the fp32 ladder (no 384) that the padded floors scan."""
+    from generators._sdpa_bwd_spec import FP32_LADDER  # noqa: PLC0415
+
+    cpp = SPLIT_NATIVE.read_text(encoding="utf-8")
+    sixteen = re.search(r"\bLADDER\{([\d, ]+)\}", cpp)
+    thirty_two = re.search(r"\bFP32_LADDER\{([\d, ]+)\}", cpp)
+    assert (
+        sixteen and thirty_two
+    ), "the split engine's ladders moved; update this reader"
+    assert tuple(int(x) for x in sixteen.group(1).split(",")) == LADDER
+    assert tuple(int(x) for x in thirty_two.group(1).split(",")) == FP32_LADDER
+    for ladder in (sixteen, thirty_two):
+        count = re.search(
+            rf"std::array<int64_t, (\d+)> {'FP32_' if ladder is thirty_two else ''}LADDER",
+            cpp,
+        )
+        assert count and int(count.group(1)) == len(ladder.group(1).split(","))
+
+
+def test_the_engines_header_bound_is_the_one_the_generator_reads() -> None:
+    import gen_descriptors  # noqa: PLC0415
+
+    assert gen_descriptors.pack_max_block_q() == _pack_max_block_q()

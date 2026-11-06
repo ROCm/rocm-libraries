@@ -3,12 +3,12 @@
 
 """Compare a rebuild of the SDPA backward objects with the sweep's pins.
 
-    python tools/sdpa_bwd_compare.py REFERENCE_CSV REFERENCE_OBJECTS OUT_DIR [--flaky CSV] [--only-built]
+    python tools/sdpa_bwd_compare.py REFERENCE_CSV REFERENCE_OBJECTS OUT_DIR [--nondeterministic CSV] [--only-built]
 
 ``REFERENCE_CSV`` is ``tests/data/sdpa_bwd_reference.csv``; ``REFERENCE_OBJECTS`` holds the
 pinned ``<hash>.hsaco`` files; ``OUT_DIR`` is the content root the ``gen_sdpa_bwd_<kind>``
 generators wrote (``<op>/gfx950/manifest.json`` and the objects), each from an empty
-directory. ``--flaky`` defaults to ``sdpa_bwd_known_flaky.csv`` beside the reference CSV.
+directory. ``--nondeterministic`` defaults to ``sdpa_bwd_nondeterministic.csv`` beside the reference CSV.
 
 A report-only sweep compare, not the shipped-tree check of ``REGEN.md``. It prints the
 generator's ``rocm_version`` and the reference's (``unknown``: the sweep manifests
@@ -18,10 +18,9 @@ record none), ``N/M byte-identical``, then one line per reference row that diffe
 * ``resource row differs``  its resource row is not the pin's (the columns are named);
 * ``missing``               the generator produced no object for the row.
 
-Each line carries the kind, tile, class and whether the hash is known-flaky (rebuilds
-are nondeterministic). A ``dual_object`` row that is known nondeterministic (its hash is in the
-flaky set, or its spec is the ``dq`` causal family) is reported as ``missing`` (listed
-hash) or ``known nondeterministic (dq-causal family)``, never red. The next line names the ops
+Each line carries the kind, tile, class and whether the hash is in the nondeterministic list
+(``generators/_sdpa_bwd_cdna_build.py``, "Nondeterministic builds"). A listed ``dual_object`` row
+is reported as ``missing``, never red. The next line names the ops
 compared and the ops with no manifest. A reference row whose op has no manifest is
 ``missing`` and red (a generator that aborted writes none); ``--only-built`` instead
 narrows ``M`` to the rows a generator built (a ``--only`` run), so absent ops are
@@ -32,13 +31,13 @@ pin by construction, so it is judged by its per-kernel gate: the object must has
 sha256 and its merged function must equal the pin's, and the recorded verdict (``gates.pin_gate``)
 must be ``ok``; any of these failing is red. A missing object of such a row is red. A line ``N combined object(s): M pass the per-kernel gate`` follows the ops line.
 
-A ``ship=pin`` row (a row of ``tests/data/sdpa_bwd_pinned_exceptions.csv``) ships the pin, so the shipped object is
+A ``ship=pin`` row (a listed standalone row or a row of ``tests/data/sdpa_bwd_pinned_exceptions.csv``) ships the pin, so the shipped object is
 compared with the pin (a different one is red, ``shipped``), and the rebuild is compared through the manifest's
 ``rebuilt_sha256``: equal counts as byte-identical, otherwise ``sha differs`` (report-only).
 
 Exit status 0 when there are differences only. Nonzero (red) on: a spill finding of the
 R-MIR gate (``rmRedundantSpills``); a row built as ``error``; a ``dual_object`` that is
-neither in the known-flaky set nor ``dq`` causal; a reference row whose op has no
+not listed; a reference row whose op has no
 manifest (without ``--only-built``); a reference object that is not the pin its CSV row
 names; a shipped object that is not the pin of a ``ship=pin`` row.
 """
@@ -56,6 +55,7 @@ FLYDSL = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(FLYDSL))
 sys.path.insert(0, str(FLYDSL / "tools"))
 import analyze  # noqa: E402
+from generators import _sdpa_bwd_nondet as nondet  # noqa: E402
 from generators._sdpa_bwd_spec import Spec  # noqa: E402
 
 RESOURCE_COLUMNS = (
@@ -109,14 +109,13 @@ def compare(
     reference: Path,
     reference_objects: Path,
     out_dir: Path,
-    flaky_csv: Path,
+    nondeterministic_csv: Path,
     only_built: bool,
 ) -> tuple[list[str], int]:
     """(report lines, exit status)."""
     with reference.open(newline="", encoding="utf-8") as fh:
         rows = list(csv.DictReader(fh))
-    with flaky_csv.open(newline="", encoding="utf-8") as fh:
-        flaky = {row["hash"] for row in csv.DictReader(fh)}
+    listed = nondet.read(nondeterministic_csv).keys()
     records, ops, versions = _read_manifests(out_dir)
     if not ops:
         return [f"error: no sdpa_bwd_*/{TARGET}/manifest.json under {out_dir}"], 2
@@ -143,7 +142,7 @@ def compare(
         red += is_red
         diffs.append(
             f"{'RED ' if is_red else ''}{kind}: {spec.kernel} tile={spec.tile} cls={spec.cls} "
-            f"hash={row['hash']} flaky={'yes' if row['hash'] in flaky else 'no'}"
+            f"hash={row['hash']} nondeterministic={'yes' if row['hash'] in listed else 'no'}"
             + (f" ({note})" if note else "")
         )
 
@@ -188,21 +187,12 @@ def compare(
                 continue
         if status != "ok":
             detail = record.get("detail", "")
-            if status == "dual_object" and h in flaky:
+            if status == "dual_object" and h in listed:
                 report(
                     "missing",
                     row,
                     spec,
-                    f"dual_object, known nondeterministic: {detail}",
-                )
-            elif (
-                status == "dual_object" and spec.kernel == "dq" and spec.cls == "causal"
-            ):
-                report(
-                    "known nondeterministic (dq-causal family)",
-                    row,
-                    spec,
-                    f"dual_object: {detail}",
+                    f"dual_object, listed nondeterministic: {detail}",
                 )
             else:
                 report("missing", row, spec, f"{status}: {detail}", True)
@@ -294,12 +284,14 @@ def main(argv: list[str] | None = None) -> int:
         "reference_objects", type=Path, help="directory of <hash>.hsaco"
     )
     parser.add_argument("out_dir", type=Path, help="the generators' content root")
-    parser.add_argument("--flaky", type=Path, default=None)
+    parser.add_argument("--nondeterministic", type=Path, default=None)
     parser.add_argument("--only-built", action="store_true")
     args = parser.parse_args(argv)
-    flaky = args.flaky or args.reference.with_name("sdpa_bwd_known_flaky.csv")
+    listed = args.nondeterministic or args.reference.with_name(
+        "sdpa_bwd_nondeterministic.csv"
+    )
     lines, status = compare(
-        args.reference, args.reference_objects, args.out_dir, flaky, args.only_built
+        args.reference, args.reference_objects, args.out_dir, listed, args.only_built
     )
     print("\n".join(lines))
     return status

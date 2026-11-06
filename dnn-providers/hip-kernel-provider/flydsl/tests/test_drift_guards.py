@@ -46,6 +46,8 @@ sys.path.insert(0, str(PROVIDER / "descriptor-packaging" / "python"))
 from hkp_pack import provenance_sidecar  # noqa: E402
 
 MANIFEST_NAME = "manifest.json"
+# The companion role that has no pin (``generators/gen_sdpa_bwd_tailzero.py`` is its provenance).
+TAILZERO_ROLE = "tailzero"
 REFERENCE_CSV = Path(__file__).resolve().parent / "data" / "sdpa_bwd_reference.csv"
 GFX11_REFERENCE_CSV = (
     Path(__file__).resolve().parent / "data" / "sdpa_bwd_gfx11_reference.csv"
@@ -325,11 +327,18 @@ def test_split_rows_are_the_reference_rows(op: str) -> None:
 def _gfx11_pin_problems(manifest_path: Path, reference: dict[str, str]) -> list[str]:
     """Where a gfx11-generic manifest differs from the S1 reference: every row and companion is a reference spec, ships the
     reference's sha256 (a gfx11 object is its pin byte for byte), and no reference spec of the op's kinds is missing.
+
+    The tail-zero companions are exempt: they have no pin, their generator is their provenance (``generators/gen_sdpa_bwd_tailzero.py``).
     """
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     problems = []
     shipped = set()
-    for record in [*manifest["instances"], *manifest.get("companions", [])]:
+    pinned_companions = [
+        c
+        for c in manifest.get("companions", [])
+        if c["spec"].split(",")[0] != TAILZERO_ROLE
+    ]
+    for record in [*manifest["instances"], *pinned_companions]:
         spec = record["spec"]
         shipped.add(spec)
         if spec not in reference:
@@ -377,6 +386,39 @@ def test_a_gfx11_row_that_is_not_its_pin_is_refused(tmp_path: Path) -> None:
     assert _gfx11_pin_problems(path, reference) == [
         f"dq,bf16,16: ships {'a' * 64}, the pin is {'c' * 64}",
         "ships no row for dq,bf16,32",
+    ]
+
+
+def test_a_gfx11_tailzero_companion_needs_no_pin_and_a_tuned_row_still_does(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / MANIFEST_NAME
+    reference = {"dq,bf16,16": "c" * 64, "dbias_reduce,bf16": "b" * 64}
+    companions = [
+        {"spec": "dbias_reduce,bf16", "sha256": "b" * 64},
+        {"spec": "tailzero,bf16;arch=gfx11-generic", "sha256": "e" * 64},
+    ]
+
+    def manifest(instances: list[dict]) -> None:
+        path.write_text(
+            json.dumps({"instances": instances, "companions": companions}),
+            encoding="utf-8",
+        )
+
+    manifest([{"spec": "dq,bf16,16", "sha256": "c" * 64}])
+    assert _gfx11_pin_problems(path, reference) == []
+    # The exemption is the tail-zero role's: a dBias reduce companion without a reference row, or a tuned row without one, is refused.
+    manifest(
+        [
+            {"spec": "dq,bf16,16", "sha256": "c" * 64},
+            {"spec": "dq,bf16,32", "sha256": "d" * 64},
+        ]
+    )
+    assert _gfx11_pin_problems(path, reference) == ["dq,bf16,32: not a reference row"]
+    companions.append({"spec": "dbias_reduce,f16", "sha256": "f" * 64})
+    manifest([{"spec": "dq,bf16,16", "sha256": "c" * 64}])
+    assert _gfx11_pin_problems(path, reference) == [
+        "dbias_reduce,f16: not a reference row"
     ]
 
 

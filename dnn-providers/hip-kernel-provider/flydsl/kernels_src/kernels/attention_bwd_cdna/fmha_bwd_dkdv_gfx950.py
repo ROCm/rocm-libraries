@@ -183,21 +183,6 @@ _waitcnt_vm_n = dualwave._waitcnt_vm_n
 _COMPILED = weakref.WeakKeyDictionary()
 
 
-def _pin_sgpr(value):
-    """An opaque scalar copy of `value`, so it is computed here, in the prologue, and not sunk to its use.
-
-    `gqa_pack` carries the dK/dV store scalars (two descriptors, two row strides, two out-of-range offsets) to the
-    epilogue across the whole tile walk. Left as the `i64` kernarg strides they derive from, those strides keep a
-    `s_load_dwordx16` tuple (kernarg bytes 248..311) live across the loop, and the backend's lane-spill of that tuple
-    can lose a staging copy (ROCm/FlyDSL#1087): the epilogue then multiplies a row by a stale register. A side-effecting
-    inline asm cannot be sunk, so the tuple dies in the prologue.
-    """
-    ir_val = as_mlir_value(value)
-    return dualwave.llvm.inline_asm(
-        ir_val.type, [ir_val], "", "=s,0", has_side_effects=True
-    )
-
-
 _COMPILE_HINTS = {
     "fast_fp_math": True,
     "unsafe_fp_math": True,
@@ -739,14 +724,9 @@ class BwdDkDvKernelContext(ParityKernelContext):
         """
         super().init_descriptors(**kwargs)
         traits = self.traits
-        # **Each side owns its own row origin and its own batch index.** Under
-        # `0x040B` -- packed Q against a *batched* KV cache -- Q is stacked
-        # (batch 0, large row offset) and K is batched (batch z, no row offset)
-        # in the same call. Four of the five modes agree, so reusing Q's index
-        # for K reads batch 0 of the cache for every sequence and only that one
-        # mode exposes it.
-        self.q_row_off = self.varlen_q_row_off
-        self.kv_row_off = self.varlen_kv_row_off
+        # **Every tensor owns its origin** (`tensor_origin`): packed Q against a
+        # batched KV cache, or a dK that is dense beside a ragged dV, are each
+        # a different pair of (offsets, multiplier) or `z * stride_batch`.
         # The staged tiles address from token 0 of the slab; the tile offset
         # rides in the DMA's `soffset`, which is what `_kv_tile_addr` produces.
         self.q_gmem_elem_offset = fx.Index(0)
@@ -765,56 +745,30 @@ class BwdDkDvKernelContext(ParityKernelContext):
         # the slab, not the row stride; see `_slab_span_elems`.
         self.k_res_div = self._slab_view(
             self.K,
-            self.stride_k_batch,
             self.stride_k_head,
             self.stride_k_seq,
-            self.kv_row_off,
+            self.tensor_origin("K", self.stride_k_batch),
             self.kv_head_idx,
             self.seqlen_kv_v,
             self.hdim_qk,
-            batch_idx=self.kv_batch_idx,
         )
         self.v_res_div = self._slab_view(
             self.V,
-            self.stride_v_batch,
             self.stride_v_head,
             self.stride_v_seq,
-            self.kv_row_off,
+            self.tensor_origin("V", self.stride_v_batch),
             self.kv_head_idx,
             self.seqlen_kv_v,
             self.hdim_vo,
-            batch_idx=self.kv_batch_idx,
         )
-        self.dk_div = self._slab_view(
-            self.DK,
-            self.stride_dk_batch,
-            self.stride_dk_head,
-            self.stride_dk_seq,
-            self.kv_row_off,
-            self.kv_head_idx,
-            self.seqlen_kv_v,
-            self.hdim_qk,
-            batch_idx=self.kv_batch_idx,
-        )
-        self.dv_div = self._slab_view(
-            self.DV,
-            self.stride_dv_batch,
-            self.stride_dv_head,
-            self.stride_dv_seq,
-            self.kv_row_off,
-            self.kv_head_idx,
-            self.seqlen_kv_v,
-            self.hdim_vo,
-            batch_idx=self.kv_batch_idx,
-        )
-
-        # Raw bounded resources over the same four slabs, for the 16-row
+        # Raw bounded resources over the same slabs, for the 16-row
         # family's 64-bit loads and stores. A `_slab_view` carries a copy atom
         # whose width is fixed at 128 bits; these take an element offset and a
         # width per access, and they bound identically, so a row past the
         # sequence reads zero and a store to one is dropped.
         self.k_res_rsrc = self._slab_rsrc(
             self.K,
+            "K",
             self.stride_k_batch,
             self.stride_k_head,
             self.stride_k_seq,
@@ -822,27 +776,29 @@ class BwdDkDvKernelContext(ParityKernelContext):
         )
         self.v_res_rsrc = self._slab_rsrc(
             self.V,
+            "V",
             self.stride_v_batch,
             self.stride_v_head,
             self.stride_v_seq,
             self.hdim_vo,
         )
-        _pin = bool(self.GQA_PACK)
-        self.dk_rsrc = self._slab_rsrc(
+        # dK and dV leave the kernel after the tile walk: each output's base and extent are folded into opaque scalars here, so
+        # its pointer, origin and head stride do not stay live across the walk.
+        self.dk_div, self.dk_rsrc = self._out_slab(
             self.DK,
+            "DK",
             self.stride_dk_batch,
             self.stride_dk_head,
             self.stride_dk_seq,
             self.hdim_qk,
-            pin=_pin,
         )
-        self.dv_rsrc = self._slab_rsrc(
+        self.dv_div, self.dv_rsrc = self._out_slab(
             self.DV,
+            "DV",
             self.stride_dv_batch,
             self.stride_dv_head,
             self.stride_dv_seq,
             self.hdim_vo,
-            pin=_pin,
         )
 
         self.k_res_elem_base = self.kv_start * self.stride_k_seq_v
@@ -855,15 +811,10 @@ class BwdDkDvKernelContext(ParityKernelContext):
         # `_slab_rsrc` over the same slab.
         self.dk_oob_off = self.seqlen_kv_v * self.stride_dk_seq_v
         self.dv_oob_off = self.seqlen_kv_v * self.stride_dv_seq_v
-        if const_expr(_pin):
-            self.stride_dk_seq_v = fx.Index(
-                fx.Int64(_pin_sgpr(fx.Int64(self.stride_dk_seq_v)))
-            )
-            self.stride_dv_seq_v = fx.Index(
-                fx.Int64(_pin_sgpr(fx.Int64(self.stride_dv_seq_v)))
-            )
-            self.dk_oob_off = fx.Index(fx.Int64(_pin_sgpr(fx.Int64(self.dk_oob_off))))
-            self.dv_oob_off = fx.Index(fx.Int64(_pin_sgpr(fx.Int64(self.dv_oob_off))))
+        self.stride_dk_seq_v = self.pin_index(self.stride_dk_seq_v)
+        self.stride_dv_seq_v = self.pin_index(self.stride_dv_seq_v)
+        self.dk_oob_off = self.pin_index(self.dk_oob_off)
+        self.dv_oob_off = self.pin_index(self.dv_oob_off)
 
     def _init_q_head_invariants(self):
         """Everything `bind_q_head` needs that does **not** move with the head.
@@ -881,8 +832,8 @@ class BwdDkDvKernelContext(ParityKernelContext):
         strides there kept nine `i64` kernargs live across the whole tile walk.
 
         What makes the hoist possible is that all of it is affine in the head:
-        `_slab_byte_base` moves by `stride_head` per head, `lse_row_addressing`'s
-        base by `lse_row_step_per_head`, and the spans and bounds -- which read
+        `_slab_byte_base` moves by `stride_head` per head, the row-stats base by
+        the head step of `row_stats_addressing`, and the spans and bounds -- which read
         the *seq* strides, the wide ones -- do not move at all. So the loop needs
         one add per tensor and none of the strides.
 
@@ -912,34 +863,36 @@ class BwdDkDvKernelContext(ParityKernelContext):
         self.q_slab_span_elems = _slab_span_elems(
             self.seqlen_q_v, self.stride_q_seq, self.hdim_qk
         )
-        self.q_slab_base0_bytes = self._slab_byte_base(
-            self.stride_q_batch,
-            self.stride_q_head,
-            self.stride_q_seq,
-            self.q_row_off,
-            head0,
+        self.q_anchor = self.slab_anchor(
+            self.Q,
+            self._slab_byte_base(
+                self.stride_q_head, self.tensor_origin("Q", self.stride_q_batch), head0
+            ),
         )
-        self.q_head_step_bytes = fx.Index(self.stride_q_head) * elem_bytes
+        self.q_head_step_bytes = self.pin_index(
+            fx.Index(self.stride_q_head) * elem_bytes
+        )
 
         self.do_slab_span_elems = _slab_span_elems(
             self.seqlen_q_v, self.stride_do_seq, self.hdim_vo
         )
-        self.do_slab_base0_bytes = self._slab_byte_base(
-            self.stride_do_batch,
-            self.stride_do_head,
-            self.stride_do_seq,
-            self.q_row_off,
-            head0,
+        self.do_anchor = self.slab_anchor(
+            self.DO,
+            self._slab_byte_base(
+                self.stride_do_head,
+                self.tensor_origin("DO", self.stride_do_batch),
+                head0,
+            ),
         )
-        self.do_head_step_bytes = fx.Index(self.stride_do_head) * elem_bytes
+        self.do_head_step_bytes = self.pin_index(
+            fx.Index(self.stride_do_head) * elem_bytes
+        )
 
-        # LSE and delta, through **the same function the forward writes LSE
-        # with**. Both are always compact -- their strides are a function of
-        # VarlenBits, the head count and the token pitch rather than a free
-        # variable -- so re-deriving the layout here would be a second source
-        # of truth for one fact. `lse_tokens_i32` is
-        # `lse_token_pitch`'s answer, which is `max_seqlen_q` for a batched
-        # layout and the batch total for a stacked one.
+        # LSE and delta, through `row_stats_addressing`: in a split kernel both
+        # are the workspace the prep kernel wrote, compact `(z, head, row)` with
+        # pitch 1; in the merged kernel LSE is the caller's Stats, whose
+        # strides set the pitch and the head step (the pitch is then not
+        # necessarily 1, and Delta is computed in the kernel).
         #
         # The resource is rebased at that `base` and bounded at this sequence's
         # own rows, which is what keeps a q row past `seqlen_q` reading **zero**
@@ -948,18 +901,10 @@ class BwdDkDvKernelContext(ParityKernelContext):
         # very negative LSE would make it `+inf` -- then `inf * 0` from the
         # zero-staged dO is a NaN in dV, where a zero gives `P = 1` and a clean
         # zero contribution.
-        lse_base, self.lse_pitch = fmha.lse_row_addressing(
-            self.varlen_bits_arg,
-            self.batch_idx,
-            head0,
-            fx.Index(self.num_head_q),
-            fx.Index(self.lse_tokens_i32),
-            self.q_row_off,
-        )
-        self.lse_base0_bytes = lse_base * fx.Index(4)
-        self.lse_head_step_bytes = fmha.lse_row_step_per_head(
-            self.varlen_bits_arg, fx.Index(self.lse_tokens_i32)
-        ) * fx.Index(4)
+        lse_base, self.lse_pitch, lse_head_step = self.row_stats_addressing(head0)
+        self.lse_anchor = self.slab_anchor(self.LSE, lse_base * fx.Index(4))
+        self.delta_anchor = self.slab_anchor(self.Delta, lse_base * fx.Index(4))
+        self.lse_head_step_bytes = self.pin_index(lse_head_step * fx.Index(4))
         self.lse_row_span_bytes = self.seqlen_q_v * self.lse_pitch * fx.Index(4)
 
         # The bias is `(batch, q head, q row, kv col)`, so it moves with the
@@ -973,14 +918,15 @@ class BwdDkDvKernelContext(ParityKernelContext):
                 self.stride_b_seq_q,
                 self.traits.BF16_BYTES,
             )
-            self.bias_base0_bytes = self._slab_byte_base(
-                self.stride_b_batch,
-                self.stride_b_head,
-                self.stride_b_seq_q,
-                self.q_row_off,
-                head0,
+            self.bias_anchor = self.slab_anchor(
+                self.Bias,
+                self._slab_byte_base(
+                    self.stride_b_head, self.bias_origin(self.stride_b_batch), head0
+                ),
             )
-            self.bias_head_step_bytes = fx.Index(self.stride_b_head) * elem_bytes
+            self.bias_head_step_bytes = self.pin_index(
+                fx.Index(self.stride_b_head) * elem_bytes
+            )
 
         if const_expr(self.GQA_PACK):
             # The packed axis addresses the whole group from head 0's base, so every descriptor spans `G - 1` more head steps than
@@ -1028,36 +974,31 @@ class BwdDkDvKernelContext(ParityKernelContext):
 
         self.k_div = self._slab_view_at(
             self.Q,
-            self.q_slab_base0_bytes + g * self.q_head_step_bytes,
+            g * self.q_head_step_bytes,
             self.q_slab_span_elems,
+            anchor=self.q_anchor,
         )
         self.v_div = self._slab_view_at(
             self.DO,
-            self.do_slab_base0_bytes + g * self.do_head_step_bytes,
+            g * self.do_head_step_bytes,
             self.do_slab_span_elems,
+            anchor=self.do_anchor,
         )
         self.q_div = self.k_div
 
-        base_bytes = self.lse_base0_bytes + g * self.lse_head_step_bytes
-        self.lse_rsrc = dualwave._make_ws_rsrc(
-            fx.Int64(fx.ptrtoint(fx.get_iter(self.LSE))),
-            base_bytes,
-            self.lse_row_span_bytes,
+        step_bytes = g * self.lse_head_step_bytes
+        self.lse_rsrc = self.anchored_rsrc(
+            self.lse_anchor, step_bytes, self.lse_row_span_bytes
         )
-        self.delta_rsrc = dualwave._make_ws_rsrc(
-            fx.Int64(fx.ptrtoint(fx.get_iter(self.Delta))),
-            base_bytes,
-            self.lse_row_span_bytes,
+        self.delta_rsrc = self.anchored_rsrc(
+            self.delta_anchor, step_bytes, self.lse_row_span_bytes
         )
 
         if const_expr(self.traits.BIAS_TYPE):
-            self.bias_rsrc = buffer_ops.create_buffer_resource(
-                self.Bias,
-                max_size=False,
-                num_records_bytes=self.bias_num_records_bytes,
-                base_byte_offset=as_mlir_value(
-                    self.bias_base0_bytes + g * self.bias_head_step_bytes
-                ),
+            self.bias_rsrc = self.anchored_rsrc(
+                self.bias_anchor,
+                g * self.bias_head_step_bytes,
+                self.bias_num_records_bytes,
             )
 
         self._bind_philox_plane()
@@ -1095,50 +1036,46 @@ class BwdDkDvKernelContext(ParityKernelContext):
         """
         self.bind_q_head(g)
 
-    def _slab_rsrc(self, tensor, s0, s1, s2, hdim, pin=False):
+    def _slab_rsrc(self, tensor, name, s_batch, s_head, s_seq, hdim):
         """A raw buffer resource over this workgroup's KV slab, bounded at its rows.
 
-        Only the four KV-side tensors need one, so the head, the row origin and
-        the batch index are the KV ones rather than parameters -- which is also
-        what stops Q's batch index reaching them under `0x040B`.
+        The head is the KV head rather than a parameter and the origin is the
+        tensor's own (`name`).
 
         Bounded through `_slab_span_elems`, the same as the `_slab_view` over
         the same slab: these are two access shapes over one region, and a
         region cannot have two ends.
         """
-        span_bytes = _slab_span_elems(self.seqlen_kv_v, s2, hdim) * fx.Index(
+        span_bytes = _slab_span_elems(self.seqlen_kv_v, s_seq, hdim) * fx.Index(
             self.traits.BF16_BYTES
         )
-        if const_expr(pin):
-            addr_i64 = as_mlir_value(
-                fx.Int64(fx.ptrtoint(fx.get_iter(tensor)))
-                + fx.Int64(
-                    self._slab_byte_base(
-                        s0,
-                        s1,
-                        s2,
-                        self.kv_row_off,
-                        self.kv_head_idx,
-                        batch_idx=self.kv_batch_idx,
-                    )
-                )
-            )
-            return buffer_ops.create_buffer_resource_from_addr(
-                _pin_sgpr(addr_i64),
-                num_records_bytes=_pin_sgpr(as_mlir_value(fx.Int64(span_bytes))),
-            )
+        base_bytes = self._slab_byte_base(
+            s_head, self.tensor_origin(name, s_batch), self.kv_head_idx
+        )
         return dualwave._make_ws_rsrc(
             fx.Int64(fx.ptrtoint(fx.get_iter(tensor))),
-            self._slab_byte_base(
-                s0,
-                s1,
-                s2,
-                self.kv_row_off,
-                self.kv_head_idx,
-                batch_idx=self.kv_batch_idx,
-            ),
+            base_bytes,
             span_bytes,
         )
+
+    def _out_slab(self, tensor, name, s_batch, s_head, s_seq, hdim):
+        """`(view, raw resource)` over the slab of one KV-side output, bounded as `_slab_view` and `_slab_rsrc` bound it.
+
+        Base address and extent are computed here in the prologue, opaque when `PIN_BASES`. Both accessors build from
+        the same pair, and the one a build does not store through is dead.
+        """
+        span_elems = self.pin_index(_slab_span_elems(self.seqlen_kv_v, s_seq, hdim))
+        anchor = self.slab_anchor(
+            tensor,
+            self._slab_byte_base(
+                s_head, self.tensor_origin(name, s_batch), self.kv_head_idx
+            ),
+        )
+        view = self._slab_view_at(tensor, fx.Index(0), span_elems, anchor=anchor)
+        rsrc = self.anchored_rsrc(
+            anchor, fx.Index(0), span_elems * fx.Index(self.traits.BF16_BYTES)
+        )
+        return view, rsrc
 
     # -- bounds ------------------------------------------------------------
 
@@ -1521,34 +1458,18 @@ class BwdDkDvSoftmaxHelper(ParitySoftmaxHelper):
         dense build covers each group with one `buffer_load_dwordx4`.
         `_ROW_RUNS` is where that grouping is stated.
 
-        **Under the `_TH` logsumexp layout the four rows are `num_heads`
-        apart**, so the wide load does not apply and it is sixteen scalars
-        instead.
+        **When the token pitch is not 1 the four rows are `pitch` apart**, so
+        the wide load does not apply and it is sixteen scalars instead. Only
+        the merged kernel can see that: it reads the caller's Stats through
+        their own strides, and a `[T, H]` Stats has a token stride of `H`. The
+        split kernels read the workspace, whose pitch is 1.
 
-        **The choice is made at runtime, and it has to be.** `lse_row_addressing`
-        decodes the layout from `VarlenBits` at *runtime*, so `base` and `pitch`
-        are right for either layout; a build that fixed the arm at build time
-        and was handed the other layout's bits read the wrong elements,
-        silently, and a host-side wrapper is no defence because AOTriton's C++
-        launcher never calls it. Measured by bypassing such a wrapper, packed
-        varlen, two sequences, head_dim 64 (columns are the build's layout and
-        the bits' layout):
-
-            num_head_q    build=HT/bits=HT   build=TH/bits=TH   build=HT/bits=TH
-                 4            2.36e-03           2.36e-03          3.34e-01
-                 8            2.36e-03           2.36e-03          3.33e-01
-                 1            2.35e-03           2.35e-03          2.35e-03
-
-        -- the same defect shape as the GQA trip count, and unreachable at
-        `num_head_q == 1`, where the two layouts coincide exactly
-        (`base_ht == base_th`, both pitches 1). AOTriton pins `num_heads=1` at
-        build but passes the real count as a kernarg, which is what made this
-        reachable.
-
-        **The predicate is `pitch != 1`, not the bits.** It comes from the one
-        decode rather than a second reading of `VarlenBits`, so the two cannot
-        drift -- and it is the sharper test: the wide load is valid exactly
-        when the pitch is 1, which includes TH at `num_head_q == 1`.
+        **The choice is made at runtime, and it has to be.** The pitch is a
+        kernel argument (the Stats token stride), so the same object serves
+        either layout. The predicate is `pitch != 1`, which is the sharper
+        test: the wide load is valid exactly when the pitch is 1, including a
+        `[T, H]` Stats at `num_head_q == 1`. A split kernel's pitch is the
+        constant 1, so its strided arm folds away.
 
         **The branch is outside the tile loop, and it has to be.** `LSE_STRIDED`
         is a *Python* bool here: the kernel body is traced twice, once per arm,
@@ -2180,8 +2101,8 @@ def build_fmha_bwd_dkdv_gfx950_module_primary(meta, knobs, runtime_axes=()):
     # Which MFMA family this build is. See `fmha_bwd_dkdv_m16_gfx950`.
     M16 = traits.MFMA_ROWS == 16
     # `(T, H)` logsumexp/delta. See `BwdDkDvInputMetadata.lse_layout_th`.
-    # `lse_layout_th` does not reach the emitted code: the row read decodes
-    # the layout at runtime and a varlen build carries both arms. It is in
+    # `lse_layout_th` does not reach the emitted code: the row read takes the
+    # pitch at runtime and the merged build carries both arms. It is in
     # the cache key so a caller who does pass it gets a distinct entry
     # rather than a silently shared one, and in the metadata so the
     # signature is stable; nothing else reads it.
@@ -2227,7 +2148,7 @@ def build_fmha_bwd_dkdv_gfx950_module_primary(meta, knobs, runtime_axes=()):
         `parts` names the context and tile-body classes (the merged kernel substitutes subclasses) and `ctx_kwargs`
         are extra context constructor arguments. Defaults reproduce this kernel exactly.
         """
-        ctx_kwargs = {} if ctx_kwargs is None else ctx_kwargs
+        ctx_kwargs = {} if ctx_kwargs is None else dict(ctx_kwargs)
         Q = a.Q
         K = a.K
         V = a.V
@@ -2241,6 +2162,16 @@ def build_fmha_bwd_dkdv_gfx950_module_primary(meta, knobs, runtime_axes=()):
         seqinfo_q1 = a.seqinfo_q1
         seqinfo_k0 = a.seqinfo_k0
         seqinfo_k1 = a.seqinfo_k1
+        mul_Q = a.mul_Q
+        mul_K = a.mul_K
+        off_V = a.off_V
+        mul_V = a.mul_V
+        off_DO = a.off_DO
+        mul_DO = a.mul_DO
+        off_DK = a.off_DK
+        mul_DK = a.mul_DK
+        off_DV = a.off_DV
+        mul_DV = a.mul_DV
         varlen_bits = a.varlen_bits
         num_seqlens = a.num_seqlens
         max_seqlen_q = a.max_seqlen_q
@@ -2284,6 +2215,15 @@ def build_fmha_bwd_dkdv_gfx950_module_primary(meta, knobs, runtime_axes=()):
         # is unchanged by the move, because every extent the kernel bounds a
         # descriptor with was already built from the strides and seqlens on the
         # wire rather than read off a tensor.
+        ragged = {
+            "Q": (seqinfo_q1, mul_Q),
+            "K": (seqinfo_k1, mul_K),
+            "V": (off_V, mul_V),
+            "DO": (off_DO, mul_DO),
+            "DK": (off_DK, mul_DK),
+            "DV": (off_DV, mul_DV),
+        }
+        ragged.update(ctx_kwargs.pop("ragged_extra", {}))
         Q = wire_view(Q)
         K = wire_view(K)
         V = wire_view(V)
@@ -2325,6 +2265,7 @@ def build_fmha_bwd_dkdv_gfx950_module_primary(meta, knobs, runtime_axes=()):
             window_left=window_left,
             window_right=window_right,
             seqinfo=(seqinfo_q0, seqinfo_q1, seqinfo_k0, seqinfo_k1),
+            ragged=ragged,
             varlen_bits=varlen_bits,
             num_seqlens=num_seqlens,
             Bias=B,
@@ -2629,8 +2570,8 @@ def build_fmha_bwd_dkdv_gfx950_module_primary(meta, knobs, runtime_axes=()):
             # branch (the predicate is workgroup-uniform), so EXEC is untouched
             # across the transpose reads inside, which requires EXEC all 1s.
             # **One runtime branch, outside the tile loop, picking a whole body.**
-            # `lse_row_addressing` decodes the logsumexp layout from `VarlenBits`
-            # at runtime, so the kernel must serve either -- and putting the choice
+            # The merged kernel reads the caller's Stats through their own strides, so it
+            # must serve either token pitch -- and putting the choice
             # inside `load_row_values` costs the wide arm its throughput, because
             # an `scf.if` there is a scheduling barrier the row loads cannot be
             # hoisted across (0.67x at head_dim 64, measured; the docstring on
@@ -2638,14 +2579,11 @@ def build_fmha_bwd_dkdv_gfx950_module_primary(meta, knobs, runtime_axes=()):
             # is exactly the specialised code, at the price of
             # emitting the body twice.
             #
-            # `pitch != 1` rather than the bits: one decode, no second reading, and
-            # it is the sharper test -- at `num_head_q == 1` the two layouts
-            # coincide and the wide arm is correct for both.
-            # **A build without the varlen decode has no bits and cannot be TH**:
-            # `varlen_bits` is 0, the layout is `_HT` and the pitch is 1, so there
-            # is nothing to choose. Gating on the trait keeps such a build to one
-            # body and confines the cost of the two arms to the builds that can
-            # actually be handed the other layout.
+            # `pitch != 1` is the sharper test -- the wide arm is correct exactly
+            # when the pitch is 1.
+            # **A split kernel reads the workspace, whose pitch is 1**, so there is
+            # nothing to choose: only a kernel that takes the caller's Stats
+            # (`ctx.stats`, the merged kernel) emits the two arms.
             lse_strided = ctx.lse_pitch != fx.Index(1)
             active = ctx.active
 
@@ -2657,7 +2595,7 @@ def build_fmha_bwd_dkdv_gfx950_module_primary(meta, knobs, runtime_axes=()):
                     _dkdv_body(tile_wide)
 
             def _run_body():
-                if const_expr(not traits.VARLEN or GQA_PACK):
+                if const_expr(not traits.VARLEN or GQA_PACK or ctx.stats is None):
                     _dkdv_body(tile_wide)
                 else:
                     _run_body_varlen()
@@ -2748,6 +2686,16 @@ def build_fmha_bwd_dkdv_gfx950_module_primary(meta, knobs, runtime_axes=()):
         seqinfo_q1: fx.Pointer,
         seqinfo_k0: fx.Pointer,
         seqinfo_k1: fx.Pointer,
+        mul_Q: fx.Int64,
+        mul_K: fx.Int64,
+        off_V: fx.Pointer,
+        mul_V: fx.Int64,
+        off_DO: fx.Pointer,
+        mul_DO: fx.Int64,
+        off_DK: fx.Pointer,
+        mul_DK: fx.Int64,
+        off_DV: fx.Pointer,
+        mul_DV: fx.Int64,
         varlen_bits: fx.Int32,
         num_seqlens: fx.Int32,
         max_seqlen_q: fx.Int32,
@@ -2802,6 +2750,16 @@ def build_fmha_bwd_dkdv_gfx950_module_primary(meta, knobs, runtime_axes=()):
                 seqinfo_q1=seqinfo_q1,
                 seqinfo_k0=seqinfo_k0,
                 seqinfo_k1=seqinfo_k1,
+                mul_Q=mul_Q,
+                mul_K=mul_K,
+                off_V=off_V,
+                mul_V=mul_V,
+                off_DO=off_DO,
+                mul_DO=mul_DO,
+                off_DK=off_DK,
+                mul_DK=mul_DK,
+                off_DV=off_DV,
+                mul_DV=mul_DV,
                 varlen_bits=varlen_bits,
                 num_seqlens=num_seqlens,
                 max_seqlen_q=max_seqlen_q,
@@ -2859,6 +2817,16 @@ def build_fmha_bwd_dkdv_gfx950_module_primary(meta, knobs, runtime_axes=()):
         seqinfo_q1: fx.Pointer,
         seqinfo_k0: fx.Pointer,
         seqinfo_k1: fx.Pointer,
+        mul_Q: fx.Int64,
+        mul_K: fx.Int64,
+        off_V: fx.Pointer,
+        mul_V: fx.Int64,
+        off_DO: fx.Pointer,
+        mul_DO: fx.Int64,
+        off_DK: fx.Pointer,
+        mul_DK: fx.Int64,
+        off_DV: fx.Pointer,
+        mul_DV: fx.Int64,
         varlen_bits: fx.Int32,
         num_seqlens: fx.Int32,
         max_seqlen_q: fx.Int32,
@@ -2932,6 +2900,16 @@ def build_fmha_bwd_dkdv_gfx950_module_primary(meta, knobs, runtime_axes=()):
             seqinfo_q1,
             seqinfo_k0,
             seqinfo_k1,
+            mul_Q,
+            mul_K,
+            off_V,
+            mul_V,
+            off_DO,
+            mul_DO,
+            off_DK,
+            mul_DK,
+            off_DV,
+            mul_DV,
             varlen_bits,
             num_seqlens,
             max_seqlen_q,
@@ -3183,24 +3161,23 @@ def build_fmha_bwd_dkdv_gfx950_module_primary(meta, knobs, runtime_axes=()):
         # for the kernel to address them with one offset computation. Its return
         # is discarded: this kernel takes them as tensors, because it builds
         # buffer descriptors rather than dereferencing a raw pointer.
-        abi.row_tensor_arg(LSE, "logsumexp", num_head_q, seqlen_q, varlen)
-        abi.row_tensor_arg(Delta, "delta", num_head_q, seqlen_q, varlen)
+        abi.row_tensor_arg(LSE, "logsumexp", seqlen_q)
+        abi.row_tensor_arg(Delta, "delta", seqlen_q)
         if Delta.shape != LSE.shape:
             raise ValueError(
                 f"delta must have logsumexp's shape {tuple(LSE.shape)}, got {tuple(Delta.shape)}"
             )
-        if varlen is None and LSE.shape[0] != int(batch_size) * num_head_q:
+        rows_expected = int(num_seqlens or batch_size) * num_head_q
+        if LSE.shape[0] != rows_expected:
             raise ValueError(
-                f"logsumexp must be ({int(batch_size) * num_head_q}, {seqlen_q}); got {tuple(LSE.shape)}"
+                f"logsumexp must be ({rows_expected}, {seqlen_q}); got {tuple(LSE.shape)}"
             )
         # There is no build without the varlen decode: `make_traits` pins
         # `VARLEN=True` because the decode is unconditional, so a varlen
         # descriptor is never refused on that ground.
-        # **There is no layout check.** The kernel decodes the logsumexp layout
-        # from `VarlenBits` at runtime and serves either, so no call can disagree
-        # with the build; a host-side check would in any case be no defence,
-        # because AOTriton launches from C++ and never calls `_args`.
-        # `lse_layout_th` is a build hint with no effect on correctness.
+        # **There is no layout check.** The workspace layout does not depend on
+        # the caller's, and `lse_layout_th` is a build hint with no effect on
+        # correctness.
         # **There is no "requires a descriptor" check.** A caller who passes
         # nothing is the ordinary *dense* caller, and must be served.
         # They are, exactly: `varlen_args` gives `bits == 0`, and at zero bits
@@ -3215,6 +3192,11 @@ def build_fmha_bwd_dkdv_gfx950_module_primary(meta, knobs, runtime_axes=()):
         # length array.
         _vl = abi.varlen_args(
             STRIDES_CONSTEXPR, varlen, seqlen_q, seqlen_k, Q, batch_size, num_seqlens
+        )
+        # Per-tensor ragged binding (Q, K, V, dO, then the outputs): offsets and multiplier of each tensor of a STACKED side, null and 0 of a dense one.
+        _rg = abi.ragged_args(
+            _vl,
+            [(0, st[2]), (1, st[5]), (1, st[8]), (0, st[11]), (1, st[14]), (1, st[17])],
         )
         # **The seed and the counter are the ones the *forward* reported**, not
         # the ones its caller passed: under graph capture the effective offset
@@ -3250,14 +3232,12 @@ def build_fmha_bwd_dkdv_gfx950_module_primary(meta, knobs, runtime_axes=()):
                 "this build was not compiled for bias; pass bias=True in BwdDkDvInputMetadata"
             )
         if bias is not None:
-            # **The bias follows Q on the query axis**, which is what the
-            # addressing already does: the descriptor folds in `q_row_off` and
-            # the head exactly as Q's slab does, so the shape rule is "match Q"
-            # rather than a second layout to keep in step. Dense that reads as
-            # `(b, h, seqlen_q, seqlen_k)`; under a packed varlen it reads as
-            # `(1, h, total_q, max_seqlen_k)`, and under `varlen_padded` -- a
-            # real batch axis -- it is the dense shape again. All three fall
-            # out of one check, which is why it is written this way.
+            # **Bias is never ragged**: its descriptor starts at `z *
+            # stride_b_batch` plus the head, so a stacked Q side is refused.
+            # Dense and `varlen_padded` -- a real batch axis -- read as
+            # `(b, h, seqlen_q, seqlen_k)`.
+            if _rg[0][0] is not abi.NULL_PTR:
+                raise ValueError("bias is not supported with a ragged (STACKED) Q side")
             #
             # The KV axis is *not* packed: it has no stride of its own (slot 3
             # is contiguous by contract), so each sequence's row spans
@@ -3340,9 +3320,12 @@ def build_fmha_bwd_dkdv_gfx950_module_primary(meta, knobs, runtime_axes=()):
                 wire_ptr(Delta, fx.Float32),
                 int(batch_size),
                 _vl[1],
-                _vl[2],
+                _rg[0][0],
                 _vl[3],
-                _vl[4],
+                _rg[1][0],
+                _rg[0][1],
+                _rg[1][1],
+                *(x for pair in _rg[2:] for x in pair),
                 _vl[0],
                 int(num_seqlens),
                 *_vl[5:],  # max_seqlen_q, max_seqlen_k -- the decode's MAX fallback

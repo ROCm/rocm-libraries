@@ -26,13 +26,36 @@ Per spec the outcome is:
 * ``dual_object`` the dump holds two different objects and the extractor refused to choose;
 * ``error``       anything else (an invalid spec, a build, compile, check or gate failure).
 
-Rebuilding from identical sources can yield a different object, or a dump holding two
-different objects: LLVM's AMDGPU backend is not deterministic for some kernels
-(the dq-causal family and the specs of ``tests/data/sdpa_bwd_known_flaky.csv``). ``generate`` ships the objects it builds, so a
-row whose dump holds two objects is rebuilt in a fresh process, at most three builds in all; a row that still has no
-object stops the run. The rows of ``tests/data/sdpa_bwd_pinned_exceptions.csv`` are the exception: their rebuild is nondeterministic or
-known bad, so they ship the sweep's pin and the manifest says so (``ship: pin``). ``tools/sdpa_bwd_compare.py`` compares the shipped objects with the sweep's pins
-(``tests/data/sdpa_bwd_reference.csv``) and decides which differences are red.
+Nondeterministic builds
+-----------------------
+
+LLVM's optimisation of some kernels' IR is not deterministic: identical MLIR can give different optimised IR in a fresh
+process, so rebuilding identical sources can give a different object than the sweep's pin. The 16-bit dQ and dK/dV modules
+are also compiled for a second target (``gfx950`` with ``{fast, unsafe_math}``, from their ``_COMPILE_HINTS``), so the same bug
+surfaces as ``dual_object`` when the two embedded objects differ: the extractor refuses them and nothing chooses one (the runtime
+loads the first). One list and one policy cover both arches and both symptoms.
+
+The list is ``tests/data/sdpa_bwd_nondeterministic.csv`` (``_sdpa_bwd_nondet``, its schema and loader). A row is listed when
+sampling (N = 6 fresh-process builds of every tuned row, under the regeneration conditions: ``FLYDSL_GEN_JOBS=28``, gfx950 dQ at 8)
+showed more than one whole-object sha (the pin counted) or any ``dual_object``. Its ``kind`` says which symptom was seen
+(``variants``, ``dual_object``, ``both``). The pin of a listed row is its existing pin: the sweep keeps its own ``KNOWN_NONDET``, the
+renderer installs no list, and the in-tree list is the authority. The policy, applied by ``generate`` (and ``tools/sdpa_bwd_gate.py``
+for the combined rows):
+
+* A listed standalone row ships its pin (``ship: pin``, ``pin_reason: nondeterministic``). Its build runs once, for the manifest
+  (``rebuilt_sha256``), is never retried, and a ``dual_object`` build is no error.
+* A listed combined row (the dB-storing ``bias`` rows below) passes ``pin_gate`` when its main-function sha is the pin's or one of its
+  ``variant_function_sha256s`` and its resource rows equal the pin's. A ``dual_object`` build, or a red per-kernel gate, is rebuilt in a
+  fresh process up to ``_ATTEMPTS`` builds in all.
+* An unlisted row whose build differs from its pin (a standalone object that is not the pin, or a combined row whose gate is red), or
+  that is still ``dual_object`` after ``_ATTEMPTS`` builds, stops the run: the list is incomplete. The fix is to sample the row and list it
+  (``python -m generators._sdpa_bwd_nondet merge``), never to retry harder.
+* ``tests/data/sdpa_bwd_pinned_exceptions.csv`` keeps only rows pinned for another reason (``known-bad-fresh-build``); a row in both lists
+  ships its pin with the exception's reason.
+* ``tools/sdpa_bwd_compare.py`` reads the same list: a listed ``dual_object`` is reported, not red.
+
+Membership is by sampling only (the dQ-causal family is the usual suspect, not a rule). ``tools/sdpa_bwd_compare.py`` compares the
+shipped objects with the sweep's pins (``tests/data/sdpa_bwd_reference.csv``) and decides which differences are red.
 
 The dB-storing ``bias`` rows of ``sdpa_bwd_merged`` and ``sdpa_bwd_dq`` (``store_db`` unset; every fp32 bias dQ row)
 build one object with two kernels: the merged or dQ kernel and the dBias reduce kernel (``reduce_symbol``); a
@@ -44,6 +67,11 @@ standalone fp32 reduce's, so its reduce is gated against a standalone fp32 reduc
 options (``_fp32_reduce_reference``). Every op takes ``--reference-dir``, the directory of the sweep's pins. A row that
 ships its build and does not build (``error``, or ``dual_object`` after the rebuilds), a red R-MIR verdict
 or a red per-kernel gate stops the run, and nothing is shipped.
+
+The dQ and merged ops also list the tail-zero objects (one per dtype) under ``companions`` of their manifest (``write_companions``): the dQ
+build keeps them (``gen_sdpa_bwd_dq.py`` builds them), the merged build lists the dQ folder's (``dq_tailzero_companions``; dQ is generated
+first). They have no pin and no reference row: ``gen_sdpa_bwd_tailzero.py`` is their provenance, so the pin and reference requirements above
+do not reach them.
 
 The kernels are the ones under ``kernels_src/kernels/attention_bwd_cdna/``. Each is
 traced with no tensors: the launchers take raw pointers and integers, so the arguments
@@ -84,8 +112,17 @@ from ._codeobject import (
 )
 from ._extract_hsaco import HsacoExtractionError, extract_bin_attr
 from ._instances import SDPA_BWD_REDUCE_SYMBOL, instances_for
-from ._manifest import FLYDSL_DIR, refresh_source_md, sha256, write_op_manifest
+from ._manifest import (
+    FLYDSL_DIR,
+    MANIFEST_NAME,
+    _dumps,
+    refresh_source_md,
+    sha256,
+    source_md_path,
+    write_op_manifest,
+)
 from . import _parallel
+from . import _sdpa_bwd_nondet as nondet
 from ._sdpa_bwd_spec import (  # noqa: F401  (LADDER is part of this module's surface)
     FP32,
     KERNELS,
@@ -147,6 +184,13 @@ def _signature(params: tuple[tuple[str, str], ...]) -> tuple[tuple, tuple]:
 # `fmha_bwd_prep_sink_gfx950_kernel`, which adds `sink` and `sinkterm`. The native
 # dispatch marshals by position, so a parameter list that changes is a change of the
 # declaration here, of the dispatch and of the descriptors together.
+#
+# Each kernel addresses its tensors through per-tensor bases: after the `seqinfo` arguments come
+# `mul_Q` and `mul_K` (Q and K take their INT32 `[B+1]` offsets from `seqinfo_q1` / `seqinfo_k1`),
+# then an `off_t` (INT32 pointer) and `mul_t` (i64) pair for each other tensor the kernel addresses,
+# in the order V, O, dO, dQ, dK, dV. A dense tensor binds a null pointer and multiplier 0. The prep
+# and merged kernels, which read the caller's Stats, then take `off_Stats`, `mul_Stats` and its
+# `stride_stats_{batch,head,token}`; the split dK/dV and dQ read the Delta / LSE' workspace only.
 _PARAMS: dict[str, tuple[tuple[str, str], ...]] = {
     "prep": (
         ("O", "ptr"),
@@ -156,6 +200,15 @@ _PARAMS: dict[str, tuple[tuple[str, str], ...]] = {
         ("Delta", "ptr"),
         ("seqinfo_q0", "ptr"),
         ("seqinfo_q1", "ptr"),
+        ("off_O", "ptr"),
+        ("mul_O", "i64"),
+        ("off_DO", "ptr"),
+        ("mul_DO", "i64"),
+        ("off_Stats", "ptr"),
+        ("mul_Stats", "i64"),
+        ("stride_stats_batch", "i64"),
+        ("stride_stats_head", "i64"),
+        ("stride_stats_token", "i64"),
         ("varlen_bits", "i32"),
         ("num_seqlens", "i32"),
         ("max_seqlen_q", "i32"),
@@ -176,6 +229,15 @@ _PARAMS: dict[str, tuple[tuple[str, str], ...]] = {
         ("Delta", "ptr"),
         ("seqinfo_q0", "ptr"),
         ("seqinfo_q1", "ptr"),
+        ("off_O", "ptr"),
+        ("mul_O", "i64"),
+        ("off_DO", "ptr"),
+        ("mul_DO", "i64"),
+        ("off_Stats", "ptr"),
+        ("mul_Stats", "i64"),
+        ("stride_stats_batch", "i64"),
+        ("stride_stats_head", "i64"),
+        ("stride_stats_token", "i64"),
         ("varlen_bits", "i32"),
         ("num_seqlens", "i32"),
         ("max_seqlen_q", "i32"),
@@ -231,6 +293,16 @@ _PARAMS: dict[str, tuple[tuple[str, str], ...]] = {
         ("seqinfo_q1", "ptr"),
         ("seqinfo_k0", "ptr"),
         ("seqinfo_k1", "ptr"),
+        ("mul_Q", "i64"),
+        ("mul_K", "i64"),
+        ("off_V", "ptr"),
+        ("mul_V", "i64"),
+        ("off_DO", "ptr"),
+        ("mul_DO", "i64"),
+        ("off_DK", "ptr"),
+        ("mul_DK", "i64"),
+        ("off_DV", "ptr"),
+        ("mul_DV", "i64"),
         ("varlen_bits", "i32"),
         ("num_seqlens", "i32"),
         ("max_seqlen_q", "i32"),
@@ -284,6 +356,14 @@ _PARAMS: dict[str, tuple[tuple[str, str], ...]] = {
         ("seqinfo_q1", "ptr"),
         ("seqinfo_k0", "ptr"),
         ("seqinfo_k1", "ptr"),
+        ("mul_Q", "i64"),
+        ("mul_K", "i64"),
+        ("off_V", "ptr"),
+        ("mul_V", "i64"),
+        ("off_DO", "ptr"),
+        ("mul_DO", "i64"),
+        ("off_DQ", "ptr"),
+        ("mul_DQ", "i64"),
         ("varlen_bits", "i32"),
         ("num_seqlens", "i32"),
         ("max_seqlen_q", "i32"),
@@ -340,6 +420,25 @@ _PARAMS: dict[str, tuple[tuple[str, str], ...]] = {
         ("seqinfo_q1", "ptr"),
         ("seqinfo_k0", "ptr"),
         ("seqinfo_k1", "ptr"),
+        ("mul_Q", "i64"),
+        ("mul_K", "i64"),
+        ("off_V", "ptr"),
+        ("mul_V", "i64"),
+        ("off_O", "ptr"),
+        ("mul_O", "i64"),
+        ("off_DO", "ptr"),
+        ("mul_DO", "i64"),
+        ("off_DQ", "ptr"),
+        ("mul_DQ", "i64"),
+        ("off_DK", "ptr"),
+        ("mul_DK", "i64"),
+        ("off_DV", "ptr"),
+        ("mul_DV", "i64"),
+        ("off_Stats", "ptr"),
+        ("mul_Stats", "i64"),
+        ("stride_stats_batch", "i64"),
+        ("stride_stats_head", "i64"),
+        ("stride_stats_token", "i64"),
         ("varlen_bits", "i32"),
         ("num_seqlens", "i32"),
         ("max_seqlen_q", "i32"),
@@ -436,6 +535,8 @@ def geometry_of(built: Built) -> dict:
     """The launch geometry the engine reads from a row: ``block_threads`` and ``block_kv`` (dK/dV), ``block_m`` (dQ), all three (merged).
 
     The resolved values: the fields replace the rows' ``-1`` knobs. The prep and reduce kernels have a fixed block; the engine derives it.
+    A packed dK/dV row (``gqa_pack``) and a merged row also carry ``block_q``, the dK/dV role's resolved q tile: the packed tile the
+    engine and the descriptor generator bound by ``PACK_MAX_BLOCK_Q``.
     """
     spec = built.spec
     if built.traits is not None:
@@ -444,6 +545,7 @@ def geometry_of(built: Built) -> dict:
             "block_threads": kt.BLOCK_SIZE,
             "block_kv": kt.BLOCK_KV,
             "block_m": qt.BLOCK_M,
+            "block_q": kt.BLOCK_Q,
         }
     if spec.kernel not in ("dkdv", "dq"):
         return {}
@@ -454,7 +556,13 @@ def geometry_of(built: Built) -> dict:
         return {"block_threads": family.block, "block_m": family.bq}
     traits = built.knobs.build_traits(built.meta)
     if spec.kernel == "dkdv":
-        return {"block_threads": traits.BLOCK_SIZE, "block_kv": traits.BLOCK_KV}
+        geometry = {
+            "block_threads": traits.BLOCK_SIZE,
+            "block_kv": traits.BLOCK_KV,
+        }
+        if spec.gqa_pack:
+            geometry["block_q"] = traits.BLOCK_Q
+        return geometry
     return {"block_threads": traits.BLOCK_SIZE, "block_m": traits.BLOCK_M}
 
 
@@ -829,6 +937,13 @@ def alignment_for(name):
         "seqinfo_q1",
         "seqinfo_k0",
         "seqinfo_k1",
+        "off_V",
+        "off_O",
+        "off_DO",
+        "off_DQ",
+        "off_DK",
+        "off_DV",
+        "off_Stats",
     }:
         return 16
     return None
@@ -1025,11 +1140,10 @@ def _compile_all(compile_one, tasks, arch: str, label) -> list:
 
     ``_parallel.compile_all`` with one compile per worker: FlyDSL restores a scoped LLVM option to its default value, which
     LLVM reads as an explicit setting, so a reused worker would carry the previous compile's options (the fp32 dQ module's
-    ``unroll-max-count``) into the next object. ``FLYDSL_GEN_JOBS`` sets the worker count; 1 compiles in this process.
+    ``unroll-max-count``) into the next object. ``FLYDSL_GEN_JOBS`` sets the worker count; a single task, and a count of 1, still run
+    in a worker: the generator process has imported ``kernels`` and cannot ``prepare`` another compile.
     """
     jobs = _parallel._jobs(len(tasks))
-    if jobs == 1:
-        return _parallel.compile_all(compile_one, tasks, arch, label)
     print(f"compiling {len(tasks)} object(s) on {jobs} worker(s)", flush=True)
     results: list = [None] * len(tasks)
     with ProcessPoolExecutor(
@@ -1140,7 +1254,7 @@ def _fp32_reduce_reference(arch: str, out: Path) -> Path:
     return out
 
 
-# Builds a shipped row may take: the first, then fresh-process rebuilds while it has no object or, for a combined row, its per-kernel gate is red (LLVM backend nondeterminism).
+# Builds an unpinned-build row may take (module docstring, "Nondeterministic builds"): the first, then fresh-process rebuilds while it has no object or, for a combined row, its per-kernel gate is red.
 _ATTEMPTS = 3
 
 
@@ -1161,11 +1275,13 @@ def compile_specs(
     reference_dir: Path | None = None,
     reference_csv: Path = _REFERENCE_CSV,
     rebuild_unstable: bool = False,
+    shipped_pins: frozenset[str] = frozenset(),
 ) -> list[Outcome]:
     """One build per spec, in order (``FLYDSL_GEN_JOBS`` workers); a dead worker raises ``GeneratorError``.
 
     With @p reference_dir, a combined object is gated against the pins there (rows of @p reference_csv). With @p rebuild_unstable, a row whose
     build is unstable (``_unstable``) is rebuilt in a fresh worker process, up to ``_ATTEMPTS`` builds in all; its outcome is the last.
+    A row whose Spec hash is in @p shipped_pins ships the sweep's pin, not this build: it is built once and never rebuilt.
     """
     reference = str(reference_dir) if reference_dir else ""
     csv_path = str(reference_csv) if reference_dir else ""
@@ -1187,7 +1303,9 @@ def compile_specs(
             again = [
                 i
                 for i, (spec, outcome) in enumerate(zip(entries, outcomes))
-                if rebuild_unstable and _unstable(spec, outcome)
+                if rebuild_unstable
+                and spec.hash() not in shipped_pins
+                and _unstable(spec, outcome)
             ]
             if not again:
                 break
@@ -1419,9 +1537,11 @@ _SHIPPED_OPS = (
     "sdpa_bwd_merged",
 )
 
-# Rows that ship the sweep's pin, not their build: ``tests/data/sdpa_bwd_pinned_exceptions.csv`` (hash, spec, pin_sha256, reason, evidence), append-only.
+# Rows that ship the sweep's pin for a reason other than nondeterminism: ``tests/data/sdpa_bwd_pinned_exceptions.csv`` (hash, spec, pin_sha256, reason, evidence), append-only.
 _EXCEPTIONS_CSV = FLYDSL_DIR / "tests" / "data" / "sdpa_bwd_pinned_exceptions.csv"
-_PIN_REASONS = ("flaky", "known-bad-fresh-build", "no-build")
+_PIN_REASONS = ("known-bad-fresh-build",)
+# The ``pin_reason`` of a listed standalone row (``nondet.NONDETERMINISTIC_CSV``).
+_NONDETERMINISTIC_REASON = "nondeterministic"
 
 
 @dataclass(frozen=True)
@@ -1450,7 +1570,7 @@ def _complete_source_md(
         text += (
             "\n## Pinned objects\n\n"
             "These objects are the sweep's pinned bytes, not built with the toolchain above; the rebuild of each is\n"
-            "nondeterministic or known bad (`flydsl/tests/data/sdpa_bwd_pinned_exceptions.csv`).\n\n"
+            "nondeterministic (`flydsl/tests/data/sdpa_bwd_nondeterministic.csv`) or known bad (`flydsl/tests/data/sdpa_bwd_pinned_exceptions.csv`).\n\n"
             "| Instance | Reason | SHA256 |\n| --- | --- | --- |\n"
             + "".join(
                 f"| `{r['name']}` | {r['pin_reason']} | `{r['sha256'][:16]}` |\n"
@@ -1479,24 +1599,51 @@ def read_exceptions(path: Path = _EXCEPTIONS_CSV) -> dict[str, dict]:
     return rows
 
 
+def read_nondeterministic(
+    arch: str,
+    reference: dict[str, dict],
+    specs: list[Spec] | None = None,
+    path: Path = nondet.NONDETERMINISTIC_CSV,
+) -> dict[str, nondet.Row]:
+    """The rows of the nondeterministic list for @p arch by Spec hash, checked against @p reference (``nondet.check``).
+
+    With @p specs, only the rows of those specs are checked (a run builds one op's rows; the reference of a test holds a few).
+    """
+    rows = nondet.read(path, arch)
+    wanted = None if specs is None else {spec.hash() for spec in specs}
+    nondet.check(
+        (row for row in rows.values() if wanted is None or row.hash in wanted),
+        reference,
+        lambda spec: arch == "gfx950" and bool(reduce_symbol_of(spec)),
+    )
+    return rows
+
+
 def load_pin(
     spec: Spec,
     reference_dir: Path,
     reference: dict[str, dict],
     exceptions: dict[str, dict],
-) -> Pin | None:
-    """The pin of @p spec, by its reference row; none for a row that ships its build and is not combined.
+    listed: dict[str, nondet.Row] | None = None,
+) -> Pin:
+    """The pin of @p spec, by its reference row.
 
-    A combined row's pin is the standalone pin it is gated against (its bytes are not read). A row of @p exceptions ships its pin:
-    the object is read and checked against its reference row.
+    A combined row's pin is the standalone pin it is gated against (its bytes are not read). A standalone row of @p exceptions or
+    of the nondeterministic list @p listed ships its pin: the object is read and checked against its reference row.
     """
     row = reference.get(spec.hash())
     if row is None or row["spec"] != spec.key():
         raise GeneratorError(f"the reference has no row for {spec.key()}")
     exception = exceptions.get(spec.hash())
-    if exception is None:
-        return Pin(row["sha256"]) if reduce_symbol_of(spec) else None
-    if (exception["spec"], exception["pin_sha256"]) != (spec.key(), row["sha256"]):
+    if exception is None and (
+        reduce_symbol_of(spec) or spec.hash() not in (listed or {})
+    ):
+        return Pin(row["sha256"])
+    reason = exception["reason"] if exception else _NONDETERMINISTIC_REASON
+    if exception and (exception["spec"], exception["pin_sha256"]) != (
+        spec.key(),
+        row["sha256"],
+    ):
         raise GeneratorError(
             f"the pinned exception {exception['hash']} is not the pin its reference row names"
         )
@@ -1511,7 +1658,7 @@ def load_pin(
         raise GeneratorError(f"{path}: {exc.strerror}") from exc
     if sha256(blob) != row["sha256"]:
         raise GeneratorError(f"{path} is not the pin its reference row names")
-    return Pin(row["sha256"], blob, exception["reason"])
+    return Pin(row["sha256"], blob, reason)
 
 
 def _record(
@@ -1625,15 +1772,26 @@ def _record(
     return record
 
 
-def _stop_reasons(records: list[dict]) -> list[str]:
-    """Why a run ships nothing: a row that ships its build and did not build ``ok``, a red R-MIR verdict, or a combined row with a red per-kernel gate."""
+def _stop_reasons(records: list[dict], pins: list[Pin | None]) -> list[str]:
+    """Why a run ships nothing (@p pins parallel to @p records): a row that ships its build and did not build ``ok`` or
+    is not its pin (an unlisted nondeterministic row), a red R-MIR verdict, or a combined row with a red per-kernel gate.
+    """
     reasons = []
-    for record in records:
+    for record, pin in zip(records, pins):
         status = record["build_status"]
         if record.get("ship") == "pin":
             continue
         if status != "ok":
             reasons.append(f"{record['name']}: {status}: {record.get('detail', '')}")
+        elif (
+            record.get("ship") is None
+            and pin is not None
+            and record["sha256"] != pin.sha256
+        ):
+            reasons.append(
+                f"{record['name']}: the build {record['sha256'][:8]} is not its pin {pin.sha256[:8]} and the row is not in "
+                "tests/data/sdpa_bwd_nondeterministic.csv: sample and list it"
+            )
         elif record["gates"]["rmir"]["verdict"] == "red":
             reasons.append(f"{record['name']}: R-MIR spill finding")
         elif (
@@ -1645,6 +1803,74 @@ def _stop_reasons(records: list[dict]) -> list[str]:
     return reasons
 
 
+# The tail-zero companions (``generators/gen_sdpa_bwd_tailzero.py``) are kept once per arch family, in the dQ arch folder.
+_TAILZERO_HOME_OP = "sdpa_bwd_dq"
+_TAILZERO_ROLE = "tailzero"
+
+# Builds the unpinned companions of an op into its folder and returns their manifest entries: ``(arch, op_dir) -> entries``.
+CompanionBuilder = Callable[[str, Path], list[dict]]
+
+
+def write_companions(op_dir: Path, companions: list[dict]) -> None:
+    """List the companion objects in the manifest of @p op_dir (``companions``, after ``instances``) and in its SOURCE.md."""
+    path = op_dir / MANIFEST_NAME
+    manifest = json.loads(path.read_text(encoding="utf-8"))
+    manifest["companions"] = companions
+    path.write_text(_dumps(manifest) + "\n", encoding="utf-8")
+    source_md = source_md_path(op_dir)
+    lines = [
+        "",
+        "## Companion objects",
+        "",
+        "Objects the instances launch beside their own, named by Spec hash.",
+        "",
+        "| Object | Symbol | SHA256 |",
+        "| --- | --- | --- |",
+    ]
+    lines += [
+        f"| `{c['file']}` (`{c['spec']}`) | `{c['symbol']}` | `{c['sha256'][:16]}` |"
+        for c in companions
+    ]
+    text = source_md.read_text(encoding="utf-8").rstrip("\n")
+    source_md.write_text(text + "\n" + "\n".join(lines) + "\n", encoding="utf-8")
+
+
+def dq_tailzero_companions(arch: str, op_dir: Path) -> list[dict]:
+    """The tail-zero ``companions`` entries of the op in @p op_dir (a sibling of ``sdpa_bwd_dq``), read from the dQ manifest of @p arch.
+
+    Each entry is the dQ manifest's, with ``file`` pointing at the dQ arch folder: ``../../sdpa_bwd_dq/<arch>/<name>``. Nothing is
+    built or copied. ``GeneratorError`` when the dQ manifest, an entry or its object is missing, or the object is not the entry's sha256.
+    """
+    home = op_dir.parent.parent / _TAILZERO_HOME_OP / arch
+    manifest_path = home / MANIFEST_NAME
+    first = f"generate {_TAILZERO_HOME_OP} {arch} first, into the same content root"
+    if not manifest_path.is_file():
+        raise GeneratorError(f"{manifest_path} is missing: {first}")
+    entries = [
+        c
+        for c in json.loads(manifest_path.read_text(encoding="utf-8")).get(
+            "companions", []
+        )
+        if c["spec"].split(",")[0] == _TAILZERO_ROLE
+    ]
+    if not entries:
+        raise GeneratorError(
+            f"{manifest_path} lists no {_TAILZERO_ROLE} companion: {first}"
+        )
+    for entry in entries:
+        path = home / entry["file"]
+        if not path.is_file():
+            raise GeneratorError(f"{path} is missing: {first}")
+        if sha256(path.read_bytes()) != entry["sha256"]:
+            raise GeneratorError(
+                f"{path} is not the {entry['spec']} object {manifest_path} records: {first}"
+            )
+    return [
+        {**entry, "file": f"../../{_TAILZERO_HOME_OP}/{arch}/{entry['file']}"}
+        for entry in entries
+    ]
+
+
 def generate(
     op: str,
     arch: str,
@@ -1653,15 +1879,21 @@ def generate(
     reference_dir: Path | None = None,
     reference_csv: Path = _REFERENCE_CSV,
     exceptions_csv: Path = _EXCEPTIONS_CSV,
+    nondeterministic_csv: Path = nondet.NONDETERMINISTIC_CSV,
+    build_tailzero: CompanionBuilder | None = None,
 ) -> int:
     """Build every row of @p op (or the rows whose Spec hash is in @p only) for @p arch.
+
+    @p build_tailzero, when given, supplies the op's tail-zero companions (``(arch, op_dir) -> manifest entries``, objects written into
+    ``op_dir`` if it builds them); they have no pin and no reference row, so they are no row of this run. A failure ships nothing.
 
     Writes ``<out_root>/<op>/<arch>/``; returns the number of ``error`` rows. The
     directory must not hold files already. The manifest records the toolchain, ROCm version
     included (``ROCM_PATH`` or ``ROCM_VERSION`` must name it).
 
     An op in ``_SHIPPED_OPS`` ships the objects it builds (a row with two objects is rebuilt, ``compile_specs``), except the rows of
-    ``tests/data/sdpa_bwd_pinned_exceptions.csv`` (@p exceptions_csv), which ship the sweep's pin; it raises ``GeneratorError``,
+    ``tests/data/sdpa_bwd_pinned_exceptions.csv`` (@p exceptions_csv) and the standalone rows of the nondeterministic list
+    (@p nondeterministic_csv), which ship the sweep's pin (module docstring, "Nondeterministic builds"); it raises ``GeneratorError``,
     with nothing left in the op directory, when a row has to stop the run (``_stop_reasons``). It needs @p reference_dir (the sweep's
     pins, ``<hash>.hsaco``, checked against the rows of @p reference_csv, ``tests/data/sdpa_bwd_reference.csv``): the
     pins of the exception rows are shipped from it and the combined rows are gated against it. No other op takes one.
@@ -1694,11 +1926,22 @@ def generate(
     if reference_dir is not None:
         reference = read_reference(reference_csv)
         exceptions = read_exceptions(exceptions_csv)
-        pins = [load_pin(spec, reference_dir, reference, exceptions) for spec in specs]
+        listed = read_nondeterministic(arch, reference, specs, nondeterministic_csv)
+        pins = [
+            load_pin(spec, reference_dir, reference, exceptions, listed)
+            for spec in specs
+        ]
     env.assert_flydsl_version()
     env.prepare(arch)
     outcomes = compile_specs(
-        specs, arch, reference_dir, reference_csv, rebuild_unstable=shipped
+        specs,
+        arch,
+        reference_dir,
+        reference_csv,
+        rebuild_unstable=shipped,
+        shipped_pins=frozenset(
+            spec.hash() for spec, pin in zip(specs, pins) if pin and pin.blob
+        ),
     )
 
     op_dir.mkdir(parents=True, exist_ok=True)
@@ -1714,7 +1957,7 @@ def generate(
             )
             records.append(_record(instance, spec, failed, op_dir, arch))
     if shipped:
-        reasons = _stop_reasons(records)
+        reasons = _stop_reasons(records, pins)
         if reasons:
             for written in op_dir.iterdir():
                 written.unlink()
@@ -1722,11 +1965,21 @@ def generate(
                 f"{len(reasons)} row(s) stop the run, nothing is shipped:\n  "
                 + "\n  ".join(reasons)
             )
+    companions = []
+    if build_tailzero is not None:
+        try:
+            companions = build_tailzero(arch, op_dir)
+        except GeneratorError:
+            for written in op_dir.iterdir():
+                written.unlink()
+            raise
     # None of these kernels comes from AITER, so its pin is no part of how the bytes came to be.
     provenance = env.provenance(arch)
     provenance.pop("aiter_kernels_commit", None)
     write_op_manifest(op_dir, arch, op, provenance, records)
     source_md = _complete_source_md(refresh_source_md(op_dir), op, arch, records)
+    if companions:
+        write_companions(op_dir, companions)
 
     status = {
         s: sum(r["build_status"] == s for r in records)
@@ -1748,10 +2001,12 @@ def run_op(
     description: str,
     argv: list[str] | None = None,
     other_arches: dict[str, Callable] | None = None,
+    build_tailzero: CompanionBuilder | None = None,
 ) -> int:
     """The command line of one backward op's generator (``gen_<op>.py``).
 
     @p other_arches maps an arch this module does not build to ``generate(op, out_root, only, reference_dir)`` of the module that does.
+    @p build_tailzero is the op's tail-zero companion supplier for the arches this module builds (``generate``).
     """
     other_arches = other_arches or {}
     parser = argparse.ArgumentParser(description=description)
@@ -1787,7 +2042,14 @@ def run_op(
         if args.arch in other_arches:
             errors = other_arches[args.arch](op, args.out_dir, only, reference_dir)
         else:
-            errors = generate(op, args.arch, args.out_dir, only, reference_dir)
+            errors = generate(
+                op,
+                args.arch,
+                args.out_dir,
+                only,
+                reference_dir,
+                build_tailzero=build_tailzero,
+            )
     except (GeneratorError, env.FlydslEnvError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1

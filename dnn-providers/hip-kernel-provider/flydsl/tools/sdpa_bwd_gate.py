@@ -24,7 +24,9 @@ one that is not the reduce).
   standalone reduce pin of the dtype. ``verdict`` is ``red`` unless the merged kernel's
   function bytes (by ELF symbol) and resource row equal its pin's and the reduce kernel's
   resource row equals its pin's. The reduce bytes are not compared: they differ from the pin
-  by 4 bytes under the merged kernel's process-wide ``llvm_options``.
+  by 4 bytes under the merged kernel's process-wide ``llvm_options``. A row of
+  ``tests/data/sdpa_bwd_nondeterministic.csv`` also passes on the main-function sha of any of its
+  ``variant_function_sha256s`` (the resource rows must still equal the pin's).
 * ``rmir``: ``rmir.py``'s lane scan of the first SGPR greedy dump of each kernel.
   ``verdict`` is ``red`` iff a finding sits on a register restored from a spill slot
   (the ``rmRedundantSpills`` signature) and ``--spec`` is not in ``rmir_known.csv``,
@@ -57,10 +59,10 @@ import rmir  # noqa: E402
 os.environ.setdefault("LLVM_BIN", analyze.llvm_bin())
 
 sys.path.insert(0, str(HERE.parent))
+from generators import _sdpa_bwd_nondet as nondet  # noqa: E402
 from generators._sdpa_bwd_spec import Spec, dbias_reduce_spec  # noqa: E402
 
 REFERENCE_CSV = HERE.parent / "tests" / "data" / "sdpa_bwd_reference.csv"
-
 RESOURCE_COLUMNS = (
     "vgpr",
     "agpr",
@@ -104,18 +106,25 @@ def pin_gate(
     reduce: str,
     merged_pin: dict,
     reduce_pin: dict,
+    variants: tuple[str, ...] = (),
 ) -> dict:
     """The per-kernel verdict of a two-kernel object.
 
     @p kernels maps each symbol to ``function_sha256`` and ``resources``; @p merged_pin carries
     ``hash``, ``function_sha256`` and ``resources`` of the merged pin, @p reduce_pin ``hash`` and
     ``resources`` of the reduce pin. ``verdict`` is ``red`` iff ``problems`` is not empty.
+
+    A listed row (``sdpa_bwd_nondeterministic.csv``) carries @p variants, the main-function shas of its recorded variants: the
+    merged function bytes then equal the pin's or one of them.
     """
     problems = []
-    function_equal = kernels[merged]["function_sha256"] == merged_pin["function_sha256"]
-    if not function_equal:
+    function = kernels[merged]["function_sha256"]
+    function_equal = function == merged_pin["function_sha256"]
+    variant_equal = function in variants and not function_equal
+    if not (function_equal or variant_equal):
         problems.append(
             f"merged function bytes differ from the pin {merged_pin['hash']}"
+            + (" and from its recorded variants" if variants else "")
         )
     merged_diff = _row_differences(
         kernels[merged]["resources"], merged_pin["resources"]
@@ -138,7 +147,8 @@ def pin_gate(
         "problems": problems,
         "merged_pin": merged_pin["hash"],
         "reduce_pin": reduce_pin["hash"],
-        "merged_function_equal": function_equal,
+        "merged_function_equal": function_equal or variant_equal,
+        "merged_function_variant": variant_equal,
         "merged_row_equal": not merged_diff,
         "reduce_row_equal": not reduce_diff,
     }
@@ -252,8 +262,14 @@ def gate(
             merged_pin, reduce_pin = pin_facts(
                 reference_dir, reference_csv, Spec.parse(spec)
             )
+            listed = nondet.read(arch="gfx950").get(merged_pin["hash"])
             result["pin_gate"] = pin_gate(
-                per_kernel, primary, reduce_symbol, merged_pin, reduce_pin
+                per_kernel,
+                primary,
+                reduce_symbol,
+                merged_pin,
+                reduce_pin,
+                listed.variant_function_sha256s if listed else (),
             )
     finally:
         shutil.rmtree(work, ignore_errors=True)

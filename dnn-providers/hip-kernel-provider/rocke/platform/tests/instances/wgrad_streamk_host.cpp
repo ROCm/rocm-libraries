@@ -366,8 +366,10 @@ void check_validator()
     s.tile_m = 96;
     CHECK(rejects(s,
                   "gfx9999",
-                  "\"unknown gfx target 'gfx9999'; known: ['gfx11-generic', 'gfx1151', "
-                  "'gfx12-generic', 'gfx1201', 'gfx1250', 'gfx90a', 'gfx942', 'gfx950']. "
+                  "\"unknown gfx target 'gfx9999'; known: ['gfx11-generic', 'gfx1100', "
+                  "'gfx1101', 'gfx1102', 'gfx1103', 'gfx1150', 'gfx1151', 'gfx1152', "
+                  "'gfx1153', 'gfx1154', 'gfx12-generic', 'gfx1200', 'gfx1201', 'gfx1250', "
+                  "'gfx908', 'gfx90a', 'gfx942', 'gfx950']. "
                   "Add a row to "
                   "arch_specs.json.\""));
 

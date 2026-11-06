@@ -20,14 +20,14 @@ What differs from gfx950:
 * the gfx950 gates (resource row, #1087 detectors, R-MIR scan) read gfx950 objects, so a row records ``gates: n/a``
   and its pinned resource row instead. What replaces them is the pin check: the build must be the S1 object, byte for byte;
 * the dBias reduce kernel is not part of a dQ object. A bias dQ row names the standalone reduce kernel of its dtype
-  (``reduce_symbol``) and the manifest lists the three standalone reduce objects under ``companions`` of ``sdpa_bwd_dq``.
+  (``reduce_symbol``) and the manifest lists the three standalone reduce objects under ``companions`` of ``sdpa_bwd_dq``, then the
+  three tail-zero objects (``build_tailzero``, ``gen_sdpa_bwd_dq.py``): they have no pin and no reference row, the tail-zero generator is their provenance.
 
 A row that does not build ``ok`` or is not its pin stops the run, and nothing is shipped.
 """
 
 from __future__ import annotations
 
-import json
 import os
 import shutil
 import tempfile
@@ -36,6 +36,7 @@ from pathlib import Path
 
 from . import _flydsl_env as env
 from . import _sdpa_bwd_cdna_build as cdna
+from . import _sdpa_bwd_nondet as nondet
 from ._codeobject import (
     GeneratorError,
     arg_records,
@@ -53,10 +54,7 @@ from ._instances import (
 )
 from ._manifest import (
     FLYDSL_DIR,
-    MANIFEST_NAME,
-    _dumps,
     refresh_source_md,
-    source_md_path,
     sha256,
     write_op_manifest,
 )
@@ -440,28 +438,33 @@ def _record(
     return record
 
 
-def _write_companions(op_dir: Path, companions: list[dict]) -> None:
-    """List the companion objects in the manifest of @p op_dir (``companions``, after ``instances``) and in its SOURCE.md."""
-    path = op_dir / MANIFEST_NAME
-    manifest = json.loads(path.read_text(encoding="utf-8"))
-    manifest["companions"] = companions
-    path.write_text(_dumps(manifest) + "\n", encoding="utf-8")
-    source_md = source_md_path(op_dir)
-    lines = [
-        "",
-        "## Companion objects",
-        "",
-        "Objects the instances launch beside their own, named by Spec hash.",
-        "",
-        "| Object | Symbol | SHA256 |",
-        "| --- | --- | --- |",
-    ]
-    lines += [
-        f"| `{c['file']}` (`{c['spec']}`) | `{c['symbol']}` | `{c['sha256'][:16]}` |"
-        for c in companions
-    ]
-    text = source_md.read_text(encoding="utf-8").rstrip("\n")
-    source_md.write_text(text + "\n" + "\n".join(lines) + "\n", encoding="utf-8")
+def _pinned_record(
+    instance,
+    spec: Spec,
+    outcome: cdna.Outcome,
+    pin: dict,
+    op_dir: Path,
+    reference_dir: Path,
+) -> dict:
+    """The record of a row of the nondeterministic list: it ships its pin, whatever its build did; the build is recorded as ``rebuilt_sha256``."""
+    blob = (reference_dir / f"{spec.hash()}.hsaco").read_bytes()
+    record = _record(
+        instance,
+        spec,
+        cdna.Outcome("ok", blob, geometry=outcome.geometry),
+        pin,
+        op_dir,
+    )
+    record.update(
+        {
+            "build_status": outcome.status,
+            "pin_sha256": pin["sha256"],
+            "ship": "pin",
+            "pin_reason": cdna._NONDETERMINISTIC_REASON,
+            "rebuilt_sha256": sha256(outcome.blob) if outcome.blob else "",
+        }
+    )
+    return record
 
 
 def _companion(spec: Spec, outcome: cdna.Outcome, pin: dict, op_dir: Path) -> dict:
@@ -493,14 +496,19 @@ def generate(
     only: set[str] | None = None,
     reference_dir: Path | None = None,
     reference_csv: Path = _REFERENCE_CSV,
+    build_tailzero: cdna.CompanionBuilder | None = None,
+    nondeterministic_csv: Path = nondet.NONDETERMINISTIC_CSV,
 ) -> int:
     """Build every row of @p op (or the rows whose Spec hash is in @p only) for gfx11-generic.
 
     Writes ``<out_root>/<op>/gfx11-generic/``; returns the number of ``error`` rows. The directory must not hold files already.
     @p reference_dir holds the S1 objects (``<hash>.hsaco``): every built object must be its sha256, which the rows of @p reference_csv
-    record, and the run raises ``GeneratorError`` with nothing left in the op directory when one is not or does not build. The dQ op
+    record, and the run raises ``GeneratorError`` with nothing left in the op directory when one is not or does not build, except a
+    row of the nondeterministic list (``_sdpa_bwd_cdna_build``, "Nondeterministic builds"), which ships its pin whatever its build does
+    (``ship: pin``); a ``dual_object`` build of any other row is rebuilt up to ``_ATTEMPTS`` builds in all. The dQ op
     also builds the standalone dBias reduce objects of every dtype (its companions, ``manifest.json`` ``companions``) and checks
-    that every bias row names the reduce symbol of its dtype's companion.
+    that every bias row names the reduce symbol of its dtype's companion. @p build_tailzero supplies the op's tail-zero companions
+    (``(arch, op_dir) -> manifest entries``); they have no pin and no reference row.
     """
     if op not in OPS:
         raise GeneratorError(
@@ -548,24 +556,53 @@ def generate(
         path = reference_dir / f"{spec.hash()}.hsaco"
         if not path.is_file() or sha256(path.read_bytes()) != row["sha256"]:
             raise GeneratorError(f"{path} is not the pin its reference row names")
+    everything = [*specs, *companions]
+    listed = cdna.read_nondeterministic(
+        ARCH, reference, everything, nondeterministic_csv
+    )
     env.assert_flydsl_version()
     env.prepare(ARCH)
-    everything = [*specs, *companions]
-    outcomes = cdna._compile_all(
-        _compile_one,
-        [(spec.key(),) for spec in everything],
-        ARCH,
-        lambda task: Spec.parse(task[0]).hash(),
-    )
+
+    def compile_rows(rows: list[Spec]) -> list[cdna.Outcome]:
+        return cdna._compile_all(
+            _compile_one,
+            [(spec.key(),) for spec in rows],
+            ARCH,
+            lambda task: Spec.parse(task[0]).hash(),
+        )
+
+    outcomes = compile_rows(everything)
+    for _ in range(2, cdna._ATTEMPTS + 1):
+        again = [
+            i
+            for i, (spec, outcome) in enumerate(zip(everything, outcomes))
+            if outcome.status == "dual_object" and spec.hash() not in listed
+        ]
+        if not again:
+            break
+        for i, outcome in zip(again, compile_rows([everything[i] for i in again])):
+            outcomes[i] = outcome
 
     op_dir.mkdir(parents=True, exist_ok=True)
     records = []
     reasons = []
     for instance, spec, outcome in zip(instances, specs, outcomes):
         try:
-            records.append(
-                _record(instance, spec, outcome, reference[spec.hash()], op_dir)
-            )
+            if spec.hash() in listed:
+                records.append(
+                    _pinned_record(
+                        instance,
+                        spec,
+                        outcome,
+                        reference[spec.hash()],
+                        op_dir,
+                        reference_dir,
+                    )
+                )
+            else:
+                records.append(
+                    _record(instance, spec, outcome, reference[spec.hash()], op_dir)
+                )
         except GeneratorError as exc:
             failed = cdna.Outcome(
                 "error",
@@ -575,12 +612,17 @@ def generate(
             records.append(
                 _record(instance, spec, failed, reference[spec.hash()], op_dir)
             )
-        if records[-1]["build_status"] != "ok":
+        if records[-1]["build_status"] != "ok" and records[-1].get("ship") != "pin":
             reasons.append(
                 f"{instance.name}: {records[-1]['build_status']}: {records[-1].get('detail', '')}"
             )
     entries = []
     for spec, outcome in zip(companions, outcomes[len(specs) :]):
+        if spec.hash() in listed:
+            # A listed companion ships its pin like a listed row.
+            outcome = cdna.Outcome(
+                "ok", (reference_dir / f"{spec.hash()}.hsaco").read_bytes()
+            )
         try:
             entries.append(_companion(spec, outcome, reference[spec.hash()], op_dir))
         except GeneratorError as exc:
@@ -596,6 +638,13 @@ def generate(
                 reasons.append(
                     f"{record['name']}: names reduce symbol {wanted!r}, the {dtype} companion is {symbols.get(dtype)!r}"
                 )
+    # The tail-zero objects are no row of this op: they have no pin and no reference row (the generator is their provenance).
+    tailzero = []
+    if not reasons and build_tailzero is not None:
+        try:
+            tailzero = build_tailzero(ARCH, op_dir)
+        except GeneratorError as exc:
+            reasons.append(" ".join(str(exc).split())[:500])
     if reasons:
         for written in op_dir.iterdir():
             written.unlink()
@@ -607,8 +656,10 @@ def generate(
     provenance.pop("aiter_kernels_commit", None)
     write_op_manifest(op_dir, ARCH, op, provenance, records)
     source_md = cdna._complete_source_md(refresh_source_md(op_dir), op, ARCH, records)
-    if companions:
-        _write_companions(op_dir, entries)
-    print(f"{op}: {len(records)} ok, {len(entries)} companion(s); wrote {op_dir}")
+    if entries or tailzero:
+        cdna.write_companions(op_dir, [*entries, *tailzero])
+    print(
+        f"{op}: {len(records)} ok, {len(entries) + len(tailzero)} companion(s); wrote {op_dir}"
+    )
     print(f"refreshed {source_md}")
     return 0

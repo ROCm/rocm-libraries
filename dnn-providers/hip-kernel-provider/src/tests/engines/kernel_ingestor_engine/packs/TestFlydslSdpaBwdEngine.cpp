@@ -13,6 +13,7 @@
 #include <limits>
 #include <map>
 #include <optional>
+#include <set>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -151,6 +152,7 @@ struct RowSpec
     int64_t blockThreads = 256;
     int64_t blockKv = 64;
     int64_t blockM = 64;
+    int64_t blockQ = 32;
     std::string reduceSymbol;
     int64_t priority = 100;
 };
@@ -176,6 +178,7 @@ KernelDefinition makeRow(const RowSpec& row)
                        {"block_threads", row.blockThreads},
                        {"block_kv", row.blockKv},
                        {"block_m", row.blockM},
+                       {"block_q", row.blockQ},
                        {"reduce_symbol", row.reduceSymbol}};
     return kernel;
 }
@@ -284,7 +287,7 @@ void* asPointer(uint64_t address)
 std::vector<hipdnnPluginDeviceBuffer_t> buffersFor(float* hostScale = nullptr)
 {
     std::vector<hipdnnPluginDeviceBuffer_t> buffers;
-    for(int64_t uid = sdpa_bwd_uid::Q; uid <= sdpa_bwd_uid::DROPOUT_SCALE_INV; ++uid)
+    for(int64_t uid = sdpa_bwd_uid::Q; uid <= sdpa_bwd_uid::RAGGED_OFFSET_STATS; ++uid)
     {
         buffers.push_back({uid, asPointer(ptrOf(uid))});
     }
@@ -349,6 +352,14 @@ const std::vector<Slot>& mergedSlots()
         add('p', {"Q", "K", "V", "B", "O", "DO", "DK", "DV", "DQ", "DB", "LSE"});
         add('i', {"batch_size"});
         add('p', {"seqinfo_q0", "seqinfo_q1", "seqinfo_k0", "seqinfo_k1"});
+        add('l', {"mul_Q", "mul_K"});
+        for(const char* tensor : {"V", "O", "DO", "DQ", "DK", "DV"})
+        {
+            slots.push_back({std::string("off_") + tensor, 'p'});
+            slots.push_back({std::string("mul_") + tensor, 'l'});
+        }
+        add('p', {"off_Stats"});
+        add('l', {"mul_Stats", "stride_stats_batch", "stride_stats_head", "stride_stats_token"});
         add('i',
             {"varlen_bits",
              "num_seqlens",
@@ -393,6 +404,32 @@ const std::vector<Slot>& reduceSlots()
                                               {"stride_out_batch", 'l'},
                                               {"stride_out_head", 'l'},
                                               {"stride_out_seq", 'l'}};
+    return s_slots;
+}
+
+/// `_PARAMS["tailzero"]`, in order.
+const std::vector<Slot>& tailzeroSlots()
+{
+    static const std::vector<Slot> s_slots = [] {
+        std::vector<Slot> slots;
+        for(const char* name : {"DQ", "DK", "DV", "seq_len_q", "seq_len_kv"})
+        {
+            slots.push_back({name, 'p'});
+        }
+        for(const char* name : {"B", "Hq", "Hkv", "Sq", "Skv", "Dqk", "Dv"})
+        {
+            slots.push_back({name, 'i'});
+        }
+        for(const char* tensor : {"dq", "dk", "dv"})
+        {
+            for(const char* axis : {"batch", "head", "seq"})
+            {
+                slots.push_back({std::string("stride_") + tensor + "_" + axis, 'l'});
+            }
+        }
+        slots.push_back({"mask", 'i'});
+        return slots;
+    }();
     return s_slots;
 }
 
@@ -478,7 +515,8 @@ public:
         set("Q", ptrOf(Q));
         set("K", ptrOf(K));
         set("V", ptrOf(V));
-        // A graph without bias passes O for B, DB and every seqinfo, seed and offset pointer.
+        // A graph without bias passes O for B, DB, the lengths and the seed and offset
+        // pointers; a dense tensor passes a null offset array and multiplier 0.
         set("B", ptrOf(O));
         set("O", ptrOf(O));
         set("DO", ptrOf(DO));
@@ -488,7 +526,7 @@ public:
         set("DB", ptrOf(O));
         set("LSE", ptrOf(STATS));
         set("batch_size", static_cast<int32_t>(shape.batch));
-        for(const char* name : {"seqinfo_q0", "seqinfo_q1", "seqinfo_k0", "seqinfo_k1"})
+        for(const char* name : {"seqinfo_q0", "seqinfo_k0"})
         {
             set(name, ptrOf(O));
         }
@@ -510,6 +548,10 @@ public:
         set3("dk", shape.kvHeads, shape.seqKv, shape.headDimQk);
         set3("dv", shape.kvHeads, shape.seqKv, shape.headDimV);
         set3("dq", shape.heads, shape.seqQ, shape.headDimQk);
+        // The stats' strides: the matcher records 0 on a unit axis.
+        set("stride_stats_batch", stride(shape.batch, shape.heads * shape.seqQ));
+        set("stride_stats_head", stride(shape.heads, shape.seqQ));
+        set("stride_stats_token", stride(shape.seqQ, 1));
         const bool padded = shape.headDimQk != tile || shape.headDimV != tile;
         set("rt_flags", static_cast<int32_t>(padded ? 1 : 0));
     }
@@ -541,8 +583,8 @@ private:
 
 void expectKernarg(const std::vector<unsigned char>& image, const Golden& golden)
 {
-    ASSERT_EQ(image.size(), 452U);
-    ASSERT_EQ(imageBytes(mergedSlots()), 452U);
+    ASSERT_EQ(image.size(), 604U);
+    ASSERT_EQ(imageBytes(mergedSlots()), 604U);
     const auto actual = decode(image, mergedSlots());
     for(const auto& slot : mergedSlots())
     {
@@ -595,6 +637,25 @@ size_t workspaceBytesOf(const SdpaBwdSpec& spec, const RowSpec& row)
         throw std::logic_error("test graph is declined by graph_match");
     }
     return dispatchHandler(MERGED).workspaceBytes(fixture.context(), *bound, makeRow(row));
+}
+
+/// @p spec padded, with the tensors named in @p names ragged (multiplier @p multiplier), each
+/// with an offset tensor of its own; a ragged Q brings ragged stats packed (H, T).
+SdpaBwdSpec
+    raggedOf(const SdpaBwdSpec& spec, const std::vector<std::string>& names, int64_t multiplier = 1)
+{
+    return spec.withEdit([names, multiplier](SdpaBwdGraph& g) {
+        addSeqLens(g);
+        for(const auto& name : names)
+        {
+            addRagged(g, name, multiplier);
+            if(name == "q")
+            {
+                addRagged(g, "stats");
+                g.tensor("stats").strides = {int64_t{1} << 20, g.batch * g.seqQ, 1, 1};
+            }
+        }
+    });
 }
 
 // ---------------------------------------------------------------------------
@@ -815,6 +876,34 @@ TEST(TestFlydslSdpaBwdMergedKernel, EN3ServesAGqaPackedObjectOnlyAGroupedQueryGr
     EXPECT_TRUE(serves(paddedVarlen, plainRow()));
 }
 
+TEST(TestFlydslSdpaBwdMergedKernel, C2PackedRowServesOnlyATileWithinThePackBound)
+{
+    Shape grouped;
+    grouped.kvHeads = 2;
+    const auto servedWith = [&](int64_t blockQ) {
+        RowSpec packed = plainRow();
+        packed.gqaPack = 1;
+        packed.blockQ = blockQ;
+        return serves(specOf(grouped), packed);
+    };
+    // The tile is resolved at generation: a row that records none, a non-positive one or one
+    // above the bound the span arithmetic assumes (PACK_MAX_BLOCK_Q) serves nothing.
+    EXPECT_FALSE(servedWith(-1));
+    EXPECT_FALSE(servedWith(0));
+    EXPECT_FALSE(servedWith(65));
+    EXPECT_TRUE(servedWith(64));
+    EXPECT_TRUE(servedWith(32));
+    // An unpacked row has no packed tile to bound.
+    RowSpec unpacked = plainRow();
+    unpacked.blockQ = -1;
+    EXPECT_TRUE(serves(specOf(grouped), unpacked));
+}
+
+TEST(TestFlydslSdpaBwdMergedDispatch, LaunchesTheMergedKernelAndTheTailZeroKernel)
+{
+    EXPECT_EQ(dispatchHandler(MERGED).launchNames(), (std::set<std::string>{"merged", "tailzero"}));
+}
+
 TEST(TestFlydslSdpaBwdMergedKernel, EN3DeclinesAPackedObjectOnceTheGroupPassesThePackSplitBound)
 {
     RowSpec packed = plainRow(128);
@@ -924,6 +1013,39 @@ TEST(TestFlydslSdpaBwdMergedKernel, EN3DeclinesAPackedObjectWhoseStatsSpanMoreTh
     EXPECT_FALSE(serves(stats(true), packed));
     EXPECT_TRUE(serves(stats(false), packed));
     EXPECT_TRUE(serves(stats(true), plainRow()));
+}
+
+TEST(TestFlydslSdpaBwdMergedKernel,
+     EN3DeclinesAPackedObjectWhenThePaddedStatsGroupSpansMoreThan32Bits)
+{
+    // The same graph as above with the stats heads padded to four floats apart: one head's rows
+    // still fit a 32-bit descriptor, so the matcher serves the graph, but the group's heads
+    // reach (268435454 * 4 + 2) * 4 bytes, past it. Only the packed object, whose descriptor
+    // covers the group, declines; the unpacked row rebases per head and is served.
+    constexpr int64_t HEADS = 268435455;
+    constexpr int64_t SEQ = 2;
+    constexpr int64_t PAD = 4;
+    RowSpec packed = plainRow();
+    packed.gqaPack = 1;
+    const auto stats = [&](int64_t headStride) {
+        Shape shape;
+        shape.batch = 1;
+        shape.heads = HEADS;
+        shape.kvHeads = 1;
+        shape.seqQ = SEQ;
+        shape.seqKv = 16;
+        return specOf(shape).withEdit([=](SdpaBwdGraph& g) {
+            for(const char* tensor : {"q", "do", "o"})
+            {
+                g.tensor(tensor).strides[1] = 0;
+            }
+            g.tensor("stats").strides = {HEADS * headStride, headStride, 1, 1};
+        });
+    };
+    ASSERT_TRUE(graphMatch(stats(PAD)).has_value());
+    EXPECT_FALSE(serves(stats(PAD), packed));
+    EXPECT_TRUE(serves(stats(PAD), plainRow()));
+    EXPECT_TRUE(serves(stats(SEQ), packed));
 }
 
 TEST(TestFlydslSdpaBwdMergedKernel, EN3ServesAPackedObjectOnlyWhenThePackSplitIsExact)
@@ -1239,12 +1361,31 @@ TEST(TestFlydslSdpaBwdMergedKernarg, DenseOfAnotherShapeAndATileWithAPaddedHead)
     EXPECT_EQ(dump.block, 512U);
 }
 
-TEST(TestFlydslSdpaBwdMergedKernarg, StatsInTheTokenMajorLayoutSetTheLseLayoutBit)
+TEST(TestFlydslSdpaBwdMergedKernarg, StatsInTheTokenMajorLayoutPassTheirStrides)
 {
     const auto spec = baseSpec().withEdit(
         [](SdpaBwdGraph& g) { g.tensor("stats").strides = {g.seqQ * g.heads, 1, g.heads, 1}; });
     const auto dump = dumpOf(spec, plainRow());
-    expectKernarg(dump.kernarg, Golden().set("varlen_bits", int32_t{1} << 16));
+    // No layout bit: the kernel addresses the stats by their strides.
+    expectKernarg(dump.kernarg,
+                  Golden()
+                      .set("stride_stats_batch", int64_t{128})
+                      .set("stride_stats_head", int64_t{1})
+                      .set("stride_stats_token", int64_t{8}));
+}
+
+TEST(TestFlydslSdpaBwdMergedKernarg, PaddedStatsPassTheirActualStrides)
+{
+    // B = 2, H = 8, Sq = 16 with 8 padding floats behind every head's rows and 3 behind every
+    // batch's: the kernel is handed the three element strides as the graph declares them.
+    const auto spec = baseSpec().withEdit(
+        [](SdpaBwdGraph& g) { g.tensor("stats").strides = {8 * 24 + 3, 24, 1, 1}; });
+    const auto dump = dumpOf(spec, plainRow());
+    expectKernarg(dump.kernarg,
+                  Golden()
+                      .set("stride_stats_batch", int64_t{195})
+                      .set("stride_stats_head", int64_t{24})
+                      .set("stride_stats_token", int64_t{1}));
 }
 
 TEST(TestFlydslSdpaBwdMergedKernarg, PaddedVarlenPassesTheLengthTensorsAsTheLengthArrays)
@@ -1260,6 +1401,131 @@ TEST(TestFlydslSdpaBwdMergedKernarg, PaddedVarlenPassesTheLengthTensorsAsTheLeng
                       .set("varlen_bits", int32_t{0x0404}));
 }
 
+TEST(TestFlydslSdpaBwdMergedKernarg, EveryRaggedTensorPassesItsOffsetArrayAndMultiplier)
+{
+    const auto spec = raggedOf(baseSpec(), {"q", "k", "v", "o", "do", "dq", "dk", "dv"}, 8);
+    const auto dump = dumpOf(spec, plainRow());
+    const auto values = decode(dump.kernarg, mergedSlots());
+    namespace uid = sdpa_bwd_uid;
+    // Q and K reuse the position arrays as their offsets; both sides are array-positioned.
+    EXPECT_EQ(values.at("seqinfo_q0"), ptrOf(uid::SEQ_LEN_Q));
+    EXPECT_EQ(values.at("seqinfo_k0"), ptrOf(uid::SEQ_LEN_KV));
+    EXPECT_EQ(values.at("seqinfo_q1"), ptrOf(uid::RAGGED_OFFSET_Q));
+    EXPECT_EQ(values.at("seqinfo_k1"), ptrOf(uid::RAGGED_OFFSET_K));
+    EXPECT_EQ(values.at("varlen_bits"), 0x1515U);
+    EXPECT_EQ(values.at("mul_Q"), 8U);
+    EXPECT_EQ(values.at("mul_K"), 8U);
+    const std::pair<const char*, int64_t> offsets[] = {{"V", uid::RAGGED_OFFSET_V},
+                                                       {"O", uid::RAGGED_OFFSET_O},
+                                                       {"DO", uid::RAGGED_OFFSET_DO},
+                                                       {"DQ", uid::RAGGED_OFFSET_DQ},
+                                                       {"DK", uid::RAGGED_OFFSET_DK},
+                                                       {"DV", uid::RAGGED_OFFSET_DV}};
+    for(const auto& [tensor, id] : offsets)
+    {
+        SCOPED_TRACE(tensor);
+        EXPECT_EQ(values.at(std::string("off_") + tensor), ptrOf(id));
+        EXPECT_EQ(values.at(std::string("mul_") + tensor), 8U);
+    }
+    // The stats' offset is in the stats' own units; its batch stride is unread (0).
+    EXPECT_EQ(values.at("off_Stats"), ptrOf(uid::RAGGED_OFFSET_STATS));
+    EXPECT_EQ(values.at("mul_Stats"), 1U);
+    EXPECT_EQ(values.at("stride_stats_batch"), 0U);
+    EXPECT_EQ(values.at("stride_stats_head"), 32U);
+    EXPECT_EQ(values.at("stride_stats_token"), 1U);
+    for(const char* tensor : {"q", "k", "v", "o", "do", "dk", "dv", "dq"})
+    {
+        EXPECT_EQ(values.at(std::string("stride_") + tensor + "_batch"), 0U) << tensor;
+    }
+    // Every output is ragged: nothing past a length is ours to zero.
+    EXPECT_FALSE(dump.tailzero);
+}
+
+TEST(TestFlydslSdpaBwdMergedKernarg, DenseTensorsBesideRaggedOnesPassNullOffsetsAndMultiplierZero)
+{
+    // Q, O, dO and dQ ragged; K, V, dK and dV dense, with the K side length-only.
+    const auto spec = raggedOf(baseSpec(), {"q", "o", "do", "dq"});
+    const auto values = decode(dumpOf(spec, plainRow()).kernarg, mergedSlots());
+    namespace uid = sdpa_bwd_uid;
+    EXPECT_EQ(values.at("varlen_bits"), 0x0415U);
+    EXPECT_EQ(values.at("seqinfo_q1"), ptrOf(uid::RAGGED_OFFSET_Q));
+    EXPECT_EQ(values.at("seqinfo_k1"), 0U);
+    EXPECT_EQ(values.at("mul_Q"), 1U);
+    EXPECT_EQ(values.at("mul_K"), 0U);
+    EXPECT_EQ(values.at("off_V"), 0U);
+    EXPECT_EQ(values.at("mul_V"), 0U);
+    EXPECT_EQ(values.at("off_DK"), 0U);
+    EXPECT_EQ(values.at("mul_DK"), 0U);
+    EXPECT_EQ(values.at("off_DV"), 0U);
+    EXPECT_EQ(values.at("off_DQ"), ptrOf(uid::RAGGED_OFFSET_DQ));
+    // A dense tensor keeps its batch stride; a ragged one does not read it.
+    EXPECT_EQ(values.at("stride_k_batch"), 8192U);
+    EXPECT_EQ(values.at("stride_q_batch"), 0U);
+}
+
+TEST(TestFlydslSdpaBwdMergedKernarg, AKeyOnlyRaggedGraphKeepsTheQuerySideDense)
+{
+    const auto values = decode(
+        dumpOf(raggedOf(baseSpec(), {"k", "v", "dk", "dv"}), plainRow()).kernarg, mergedSlots());
+    EXPECT_EQ(values.at("varlen_bits"), 0x1504U);
+    EXPECT_EQ(values.at("seqinfo_q1"), 0U);
+    EXPECT_EQ(values.at("off_Stats"), 0U);
+    EXPECT_EQ(values.at("mul_Stats"), 0U);
+    EXPECT_EQ(values.at("stride_stats_batch"), 128U);
+    EXPECT_EQ(values.at("stride_stats_head"), 16U);
+    EXPECT_EQ(values.at("stride_stats_token"), 1U);
+}
+
+TEST(TestFlydslSdpaBwdMergedKernarg, TailZeroFollowsAPaddedGraphWithDenseGradients)
+{
+    const auto padded = baseSpec().withEdit([](SdpaBwdGraph& g) { addSeqLens(g); });
+    const auto dump = dumpOf(padded, plainRow());
+    ASSERT_TRUE(dump.tailzero);
+    EXPECT_EQ(dump.tailzeroBlock, 256U);
+    // One 8-element vector per thread: 16 rows of 8 vectors is 128 items, one block of 256;
+    // the planes are 2 batches of 8 + 8 + 8 heads.
+    EXPECT_EQ(dump.tailzeroGrid, (std::array<unsigned int, 3>{1, 48, 1}));
+    ASSERT_EQ(dump.tailzeroKernarg.size(), 148U);
+    namespace uid = sdpa_bwd_uid;
+    const auto values = decode(dump.tailzeroKernarg, tailzeroSlots());
+    EXPECT_EQ(values.at("DQ"), ptrOf(uid::DQ));
+    EXPECT_EQ(values.at("DK"), ptrOf(uid::DK));
+    EXPECT_EQ(values.at("DV"), ptrOf(uid::DV));
+    EXPECT_EQ(values.at("seq_len_q"), ptrOf(uid::SEQ_LEN_Q));
+    EXPECT_EQ(values.at("seq_len_kv"), ptrOf(uid::SEQ_LEN_KV));
+    EXPECT_EQ(values.at("B"), 2U);
+    EXPECT_EQ(values.at("Hq"), 8U);
+    EXPECT_EQ(values.at("Hkv"), 8U);
+    EXPECT_EQ(values.at("Sq"), 16U);
+    EXPECT_EQ(values.at("Skv"), 16U);
+    EXPECT_EQ(values.at("Dqk"), 64U);
+    EXPECT_EQ(values.at("Dv"), 64U);
+    EXPECT_EQ(values.at("stride_dq_batch"), 8192U);
+    EXPECT_EQ(values.at("stride_dq_head"), 1024U);
+    EXPECT_EQ(values.at("stride_dq_seq"), 64U);
+    EXPECT_EQ(values.at("stride_dv_head"), 1024U);
+    EXPECT_EQ(values.at("mask"), 7U);
+    // No workspace is touched: the launch is the kernel's own, plus the zeroing.
+    EXPECT_FALSE(dump.reduces);
+}
+
+TEST(TestFlydslSdpaBwdMergedKernarg, TailZeroMaskNamesTheDenseOutputsOnly)
+{
+    const auto maskOf = [](const std::vector<std::string>& ragged) {
+        const auto dump = dumpOf(raggedOf(baseSpec(), ragged), plainRow());
+        return dump.tailzero ? decode(dump.tailzeroKernarg, tailzeroSlots()).at("mask") : 0U;
+    };
+    // Dense dQ beside ragged dK and dV: bit 0 only.
+    EXPECT_EQ(maskOf({"dk", "dv"}), 1U);
+    EXPECT_EQ(maskOf({"dq", "dv"}), 2U);
+    EXPECT_EQ(maskOf({"dq", "dk"}), 4U);
+    EXPECT_EQ(maskOf({"q", "dq"}), 6U);
+    // Every output ragged: no launch.
+    EXPECT_EQ(maskOf({"dq", "dk", "dv"}), 0U);
+    // Without padding_mask there is no padded row.
+    EXPECT_FALSE(dumpOf(baseSpec(), plainRow()).tailzero);
+}
+
 TEST(TestFlydslSdpaBwdMergedKernarg, Dropout)
 {
     const auto spec = withDropout(baseSpec(), 0.2F, DataType::INT64, false);
@@ -1268,7 +1534,7 @@ TEST(TestFlydslSdpaBwdMergedKernarg, Dropout)
                   Golden()
                       .set("philox_seed_ptr", ptrOf(sdpa_bwd_uid::SEED))
                       .set("philox_offset1", ptrOf(sdpa_bwd_uid::OFFSET))
-                      .set("idropout_p", int32_t{-1288490175})
+                      .set("idropout_p", int32_t{-1288490240})
                       .set("dropout_scale", 1.25F)
                       .set("rt_flags", int32_t{2}));
     EXPECT_FALSE(dump.seedUploaded);
@@ -1674,15 +1940,18 @@ TEST(TestFlydslSdpaBwdMergedSeed, APassByValueSeedIsWrittenAsFourWords)
     };
     using Words = std::vector<uint32_t>;
     EXPECT_EQ(bakedWords(DataType::INT32, int32_t{7}, int32_t{9}), (Words{7, 0, 9, 0}));
-    // A negative int32 is zero-extended: its unsigned bit pattern, then a zero high word.
+    // A negative int32 is sign-extended, as the forward engine does: its bit pattern, then an
+    // all-ones high word.
     EXPECT_EQ(bakedWords(DataType::INT32, int32_t{-3}, int32_t{-1}),
-              (Words{0xFFFFFFFDU, 0, 0xFFFFFFFFU, 0}));
+              (Words{0xFFFFFFFDU, 0xFFFFFFFFU, 0xFFFFFFFFU, 0xFFFFFFFFU}));
+    EXPECT_EQ(bakedWords(DataType::INT32, int32_t{-2147483647 - 1}, int32_t{7}),
+              (Words{0x80000000U, 0xFFFFFFFFU, 7, 0}));
     EXPECT_EQ(bakedWords(DataType::INT64, int64_t{0x100000005LL}, int64_t{-2}),
               (Words{5, 1, 0xFFFFFFFEU, 0xFFFFFFFFU}));
 }
 
 // ---------------------------------------------------------------------------
-// dropout_threshold: the C++ port against philox.py
+// dropout threshold and scale: the f32 form AOTriton and the forward engine use
 // ---------------------------------------------------------------------------
 
 struct ThresholdCase
@@ -1692,33 +1961,33 @@ struct ThresholdCase
     double scale;
 };
 
-// The Python values, computed from a FlyDSL environment with
+// AOTriton's `((p - 0.5) * 0xFFFFFFFF).to(tl.int32)` and `1.0 / (1 - p)` as its kernels
+// evaluate them, in f32 with p rounded to f32 first (a graph carries p as a float):
 //
-//   cd dnn-providers/hip-kernel-provider/flydsl/kernels_src
 //   python -c '
 //   import struct
-//   from kernels.attention_bwd_cdna.philox import dropout_threshold
 //   f32 = lambda x: struct.unpack("f", struct.pack("f", x))[0]
 //   for p in (1e-7, 1e-3, 0.1, 0.2, 0.25, 0.3, 0.4999, 0.5, 0.7, 0.9, 0.999, 0.99999994):
-//       q = f32(p)
-//       print(p, dropout_threshold(q), repr(f32(1.0 / (1.0 - q))))'
+//       q = f32(p); s = f32(f32(q - 0.5) * 4294967296.0)
+//       print(p, int(s), repr(f32(1.0 / f32(1.0 - q))))'
 //
-// A graph carries p as a float, so each is rounded to f32 first; the scale is 1 / (1 - p)
-// in double, rounded once to f32.
-const std::vector<ThresholdCase> THRESHOLDS{{1e-7F, -2147483218, 1.0000001192092896},
-                                            {1e-3F, -2143188680, 1.001001000404358},
-                                            {0.1F, -1717986911, 1.1111111640930176},
-                                            {0.2F, -1288490175, 1.25},
-                                            {0.25F, -1073741823, 1.3333333730697632},
-                                            {0.3F, -858993407, 1.4285714626312256},
-                                            {0.4999F, -429439, 1.9996001720428467},
+// Every operation is a single f32 operation, so evaluating it in double and rounding after
+// each step gives the same value. Python's philox.dropout_threshold computes the threshold in
+// double and differs by up to 2^7 (0.1: -1717986911).
+const std::vector<ThresholdCase> THRESHOLDS{{1e-7F, -2147483264, 1.0000001192092896},
+                                            {1e-3F, -2143188736, 1.001001000404358},
+                                            {0.1F, -1717986944, 1.1111111640930176},
+                                            {0.2F, -1288490240, 1.25},
+                                            {0.25F, -1073741824, 1.3333333730697632},
+                                            {0.3F, -858993408, 1.4285714626312256},
+                                            {0.4999F, -429440, 1.9996000528335571},
                                             {0.5F, 0, 2.0},
-                                            {0.7F, 858993407, 3.3333332538604736},
-                                            {0.9F, 1717986815, 9.999998092651367},
-                                            {0.999F, 2143188735, 1000.0128784179688},
-                                            {0.99999994F, 2147483391, 16777216.0}};
+                                            {0.7F, 858993408, 3.3333332538604736},
+                                            {0.9F, 1717986816, 9.999998092651367},
+                                            {0.999F, 2143188736, 1000.0128784179688},
+                                            {0.99999994F, 2147483392, 16777216.0}};
 
-TEST(TestFlydslSdpaBwdMergedDropout, ThresholdAndScaleEqualThePythonValues)
+TEST(TestFlydslSdpaBwdMergedDropout, ThresholdAndScaleAreAOTritonsF32Form)
 {
     for(const auto& test : THRESHOLDS)
     {

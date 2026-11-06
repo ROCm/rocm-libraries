@@ -104,7 +104,7 @@ __all__ = [
     "pointer_to_llvm_ptr",
     "load_geom",
     "acc_elem_column",
-    "lse_row_addressing",
+    "ptr_is_set",
     "lds_load_v8",
     "lds_store_vx",
     "global_load_tr_v8",
@@ -129,7 +129,8 @@ __all__ = [
     "cond_load",
     "seqinfo_addr",
     "decode_addressing",
-    "lse_token_pitch",
+    "tensor_origin",
+    "ws_row_base",
     "WINDOW_TOPLEFT",
     "WINDOW_BOTRIGHT",
     "resolve_window",
@@ -227,64 +228,6 @@ def pointer_to_llvm_ptr(ptr) -> ir.Value:
     this.
     """
     return fx.to_llvm_ptr(ptr)
-
-
-def lse_row_addressing(varlen_bits, batch, head, num_head_q, tokens, row_off):
-    """`(base, pitch)` for a row-wise f32 side input -- logsumexp, and delta.
-
-    The element for absolute query row `r` is at `base + r * pitch`. Factored
-    that way because `base` is loop-invariant while `r` is not: the four
-    callers that had open-coded this each recomputed the whole offset per row.
-
-    Two layouts, one select, decoded from VarlenBits bits 17:16:
-
-        _HT   (H, T), T contiguous -- AOTriton's and this kernel's default.
-              base = (batch * H + head) * tokens + row_off,   pitch = 1
-        _TH   (T, H), H contiguous -- Transformer Engine's.
-              base = (batch * tokens + row_off) * H + head,   pitch = H
-
-    `tokens` is `lse_token_pitch`'s answer, not `max_seqlen_q`: a stacked
-    layout runs to the batch total rather than padding each row-group.
-
-    **Delta is required to share LSE's layout.** It is produced beside it by
-    the same caller, and giving it its own decode would double the work for no
-    expressiveness -- so both side inputs use this one function.
-
-    Four callers of one fact: the forward *writes* LSE through it, and all
-    three backward kernels *read* LSE and delta through it. It was two
-    spellings and a third that had already factored out the base, which is the
-    form kept here.
-    """
-    tok = fx.Index(tokens)
-    nhq = fx.Index(num_head_q)
-    base_ht = (batch * nhq + head) * tok + row_off
-    base_th = (batch * tok + row_off) * nhq + head
-    is_th = ((fx.Int32(varlen_bits) >> fx.Int32(16)) & fx.Int32(3)) != fx.Int32(0)
-    base = fx.Index(is_th.select(fx.Index(base_th), fx.Index(base_ht)))
-    pitch = fx.Index(is_th.select(nhq, fx.Index(1)))
-    return base, pitch
-
-
-def lse_row_step_per_head(varlen_bits, tokens):
-    """How far `lse_row_addressing`'s `base` moves when `head` rises by one.
-
-    `base` is affine in `head` under both layouts -- `_HT` has it inside the
-    `* tokens` product, `_TH` outside it -- so a caller walking a GQA group can
-    add this per head instead of re-running the decode. That is not a peephole:
-    it is what stops `varlen_bits`, `batch` and `row_off` from being live across
-    the walk, and on gfx950 that liveness is what drives the backward kernel's
-    scalar spilling. See `BwdDkDvKernelContext._init_q_head_invariants`.
-
-    Exactly the mirror of the `pitch` select above -- `_HT` pitches by 1 and
-    steps by `tokens`, `_TH` pitches by `H` and steps by 1 -- so the two are
-    written the same way, from the same bits, and cannot drift apart.
-
-    `num_head_q` is deliberately not a parameter: it does not appear in either
-    step, and taking it would suggest the caller must keep it live.
-    """
-    tok = fx.Index(tokens)
-    is_th = ((fx.Int32(varlen_bits) >> fx.Int32(16)) & fx.Int32(3)) != fx.Int32(0)
-    return fx.Index(is_th.select(fx.Index(1), tok))
 
 
 def acc_elem_column(i):
@@ -1369,16 +1312,16 @@ def seqinfo_addr(ptr, index):
 
 
 def decode_addressing(varlen_bits, bits_shift, max_seqlen, s0, s1, z):
-    """One side of VarlenBits: where this workgroup's sequence lives.
+    """One side of VarlenBits: how long this workgroup's sequence is.
 
     Returns `(seqlen, row_off, batch)` -- how long this sequence is, which row
     it starts at, and which batch index to use. Called once for Q and once for
     K. See section 3.1 of `sdpa-varlen-plan.md`; the axes are STACKED (bit 0),
     LENGTH (bits 2:1) and POSITION (bits 4:3).
 
-    The LSE token pitch is *not* here, though it decodes from the same bits: it
-    describes the logsumexp output rather than where Q or K live, and only the
-    Q side needs it. See `lse_token_pitch`.
+    The backward kernels take `seqlen` from here and address each tensor with
+    `tensor_origin`; `row_off` and `batch` serve the token-valued layouts
+    (cumulative, REUSE) that no engine binds.
 
     Every load goes through `cond_load`, so the shape is flat -- fetch what
     each mode might need, then select. `s0[z]` serves both length modes and,
@@ -1441,39 +1384,40 @@ def decode_addressing(varlen_bits, bits_shift, max_seqlen, s0, s1, z):
     return seqlen, row_off, batch
 
 
-def lse_token_pitch(varlen_bits, bits_shift, max_seqlen, s0, s1, num_seqlens):
-    """Row pitch of the logsumexp output, in tokens. Q side only.
+def ptr_is_set(ptr):
+    """True when a pointer kernel argument is bound; an optional input that is off is a null pointer."""
+    return fx.Int64(fx.ptrtoint(ptr)) != fx.Int64(0)
 
-    Batched layouts pad every row-group to `max_seqlen`; stacked ones run to
-    the batch total, which lives in slot [N] of whichever array supplies
-    positions -- the prefix-sum assumption of plan section 9.4, asserted host
-    side.
 
-    Derived from the bits rather than passed because the logsumexp tensor,
-    alone among the tensors here, is always compact: its strides are a function
-    of the bits, and passing them would be a second source of truth for one
-    fact (plan section 4.2).
+def tensor_origin(off, mul, z, s_batch, seqlen):
+    """Element offset of batch `z` in one tensor (or in the caller's Stats): where its sequence starts.
+
+    A ragged tensor binds `off` (INT32 `[B+1]`, element offsets) and `mul`; its sequence `z` starts at
+    `off[z] * mul`, in 64 bits. A dense tensor binds a null `off` and starts at `z * s_batch`. The decode
+    bits play no part: each tensor is its own authority, so ragged and dense tensors mix freely and gaps
+    between sequences cost nothing.
+
+    **An empty ragged sequence starts at element 0**, a legal address whenever any workgroup runs: its
+    `off[z]` may be one past the end of the tensor, and the prologue preloads read before the lengths mask
+    anything. The offset is not loaded for it at all. A dense tensor needs no clamp; batch `z` exists.
     """
-    bits = fx.Int32(varlen_bits) >> fx.Int32(bits_shift)
-    stacked = (bits & fx.Int32(1)) != fx.Int32(0)
-    posmode = (bits >> fx.Int32(3)) & fx.Int32(3)
-    reuse = posmode == fx.Int32(1)
-    array = posmode == fx.Int32(2)
-    zero = fx.Int32(0)
-
-    total_s0 = cond_load(stacked & reuse, seqinfo_addr(s0, num_seqlens), zero)
-    total_s1 = cond_load(stacked & array, seqinfo_addr(s1, num_seqlens), zero)
-    return common_utils.ssel(
-        stacked,
-        common_utils.ssel(
-            reuse,
-            total_s0,
-            common_utils.ssel(
-                array, total_s1, fx.Int32(num_seqlens) * fx.Int32(max_seqlen)
-            ),
-        ),
-        fx.Int32(max_seqlen),
+    ragged = ptr_is_set(off)
+    start = cond_load(
+        ragged & (seqlen > fx.Int32(0)), seqinfo_addr(off, z), fx.Int32(0)
     )
+    return ragged.select(
+        fx.Index(start) * fx.Index(mul), fx.Index(z) * fx.Index(s_batch)
+    )
+
+
+def ws_row_base(z, head, num_head_q, max_seqlen_q):
+    """Element index of row 0 of `(batch z, head)` in the Delta and LSE' workspace.
+
+    The workspace is compact and ours: `[B, H, max_seqlen_q]`, rows contiguous, whatever the layout of the
+    tensors and of the caller's Stats. Prep writes it and dK/dV and dQ read it at `base + row`, `row` being the
+    row within the sequence.
+    """
+    return (fx.Index(z) * fx.Index(num_head_q) + head) * fx.Index(max_seqlen_q)
 
 
 # --------------------------------------------------------------------------
@@ -1645,9 +1589,7 @@ def decompose_causal_regions(
     )
 
 
-def make_addr_pair(
-    strides, head, batch_index, row_off, *, seqlen_k, seq_last, hoist, clamp
-):
+def make_addr_pair(strides, head, origin, *, seqlen_k, seq_last, hoist, clamp):
     """Address builders for one tensor: `(tbase, toff, kv_addr)`.
 
     Q, K, V and O each get their own. They genuinely differ: K and V are
@@ -1656,17 +1598,19 @@ def make_addr_pair(
     construction. Assuming one shared layout is not a simplification, it is
     wrong.
 
+    `origin` is `tensor_origin`'s answer for this tensor. It belongs in the
+    **64-bit base** rather than the 32-bit per-lane offset: on a ragged
+    tensor it is a whole-batch quantity and overflows 32 bits at realistic
+    token counts (sdpa-varlen-plan.md section 5).
+
     `hoist` and `clamp` are `const_expr` -- they select which code is emitted,
     not which branch runs.
     """
-    # `row_off` is the varlen row offset, and it belongs in the
-    # **64-bit base** rather than the 32-bit per-lane offset: on a
-    # packed tensor it is a whole-batch quantity and overflows 32 bits
-    # at realistic token counts (sdpa-varlen-plan.md section 5).
     # BHSD slot order: batch, head, sequence. See `_strides_of` in the kernel
-    # for why the order is the ABI rather than a convenience.
-    s_batch, s_head, s_seq = strides
-    bh = batch_index * s_batch + head * s_head + row_off * s_seq
+    # for why the order is the ABI rather than a convenience. The batch stride
+    # is consumed by `tensor_origin`.
+    _, s_head, s_seq = strides
+    bh = origin + head * s_head
 
     def tbase(seq_start):
         """Uniform 64-bit element base for (batch, head, seq_start).

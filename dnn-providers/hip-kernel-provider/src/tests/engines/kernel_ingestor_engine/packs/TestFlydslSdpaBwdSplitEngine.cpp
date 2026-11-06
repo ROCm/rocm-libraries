@@ -145,6 +145,25 @@ SdpaBwdSpec withPaddedVarlen(const SdpaBwdSpec& spec)
     return spec.withEdit([](SdpaBwdGraph& g) { addSeqLens(g); });
 }
 
+/// @p spec padded, with the tensors named in @p names ragged (multiplier @p multiplier), each
+/// with an offset tensor of its own; a ragged Q brings ragged stats packed (H, T).
+SdpaBwdSpec
+    raggedOf(const SdpaBwdSpec& spec, const std::vector<std::string>& names, int64_t multiplier = 1)
+{
+    return spec.withEdit([names, multiplier](SdpaBwdGraph& g) {
+        addSeqLens(g);
+        for(const auto& name : names)
+        {
+            addRagged(g, name, multiplier);
+            if(name == "q")
+            {
+                addRagged(g, "stats");
+                g.tensor("stats").strides = {int64_t{1} << 20, g.batch * g.seqQ, 1, 1};
+            }
+        }
+    });
+}
+
 SdpaBwdSpec withHeadDims(const SdpaBwdSpec& spec, int64_t qk, int64_t v)
 {
     auto copy = spec;
@@ -323,7 +342,7 @@ void* asPointer(uint64_t address)
 std::vector<hipdnnPluginDeviceBuffer_t> buffersFor()
 {
     std::vector<hipdnnPluginDeviceBuffer_t> buffers;
-    for(int64_t uid = sdpa_bwd_uid::Q; uid <= sdpa_bwd_uid::DROPOUT_SCALE_INV; ++uid)
+    for(int64_t uid = sdpa_bwd_uid::Q; uid <= sdpa_bwd_uid::RAGGED_OFFSET_STATS; ++uid)
     {
         buffers.push_back({uid, asPointer(ptrOf(uid))});
     }
@@ -415,10 +434,39 @@ void addStrides(ParamList& list, std::initializer_list<const char*> tensors)
     }
 }
 
-/// The scalar block every dkdv and dq argument list shares, from `varlen_bits` to `sm_scale`.
-void addScalarBlock(ParamList& list)
+/// The offset arguments a kernel takes after its seqinfo pointers: the multipliers of Q and K
+/// when @p queryKey (their offsets are `seqinfo_q1` / `seqinfo_k1`), an offset array and a
+/// multiplier for each of @p tensors, and, with @p stats, the stats' offset, multiplier and
+/// strides.
+void addOffsetBlock(ParamList& list,
+                    bool queryKey,
+                    std::initializer_list<const char*> tensors,
+                    bool stats)
+{
+    if(queryKey)
+    {
+        addParams(list, 'l', {"mul_Q", "mul_K"});
+    }
+    for(const char* tensor : tensors)
+    {
+        list.push_back({std::string("off_") + tensor, 'p'});
+        list.push_back({std::string("mul_") + tensor, 'l'});
+    }
+    if(stats)
+    {
+        addParams(list, 'p', {"off_Stats"});
+        addParams(list,
+                  'l',
+                  {"mul_Stats", "stride_stats_batch", "stride_stats_head", "stride_stats_token"});
+    }
+}
+
+/// The scalar block every dkdv, dq and merged argument list shares, from `seqinfo_q0` to
+/// `sm_scale`, with the offset block @p offsets after `seqinfo_k1`.
+void addScalarBlock(ParamList& list, const std::function<void(ParamList&)>& offsets)
 {
     addParams(list, 'p', {"seqinfo_q0", "seqinfo_q1", "seqinfo_k0", "seqinfo_k1"});
+    offsets(list);
     addParams(list,
               'i',
               {"varlen_bits",
@@ -441,6 +489,7 @@ const ParamList& prepParams()
     static const ParamList s_params = [] {
         ParamList list;
         addParams(list, 'p', {"O", "DO", "LSE", "LSE_ws", "Delta", "seqinfo_q0", "seqinfo_q1"});
+        addOffsetBlock(list, false, {"O", "DO"}, true);
         addParams(
             list, 'i', {"varlen_bits", "num_seqlens", "max_seqlen_q", "num_head_q", "hdim_vo"});
         addStrides(list, {"o", "do"});
@@ -455,7 +504,9 @@ const ParamList& dkdvParams()
     static const ParamList s_params = [] {
         ParamList list;
         addParams(list, 'p', {"Q", "K", "V", "B", "DO", "DK", "DV", "LSE", "Delta"});
-        addScalarBlock(list);
+        addScalarBlock(list, [](ParamList& offsets) {
+            addOffsetBlock(offsets, true, {"V", "DO", "DK", "DV"}, false);
+        });
         addStrides(list, {"q", "k", "v", "do", "dk", "dv", "b"});
         addParams(list, 'i', {"rt_flags"});
         return list;
@@ -469,7 +520,9 @@ const ParamList& dqParams()
     static const ParamList s_params = [] {
         ParamList list;
         addParams(list, 'p', {"Q", "K", "V", "B", "DO", "DQ", "DB", "LSE", "Delta"});
-        addScalarBlock(list);
+        addScalarBlock(list, [](ParamList& offsets) {
+            addOffsetBlock(offsets, true, {"V", "DO", "DQ"}, false);
+        });
         addStrides(list, {"q", "k", "v", "do", "dq", "b", "db"});
         addParams(list, 'i', {"rt_flags"});
         return list;
@@ -484,7 +537,9 @@ const ParamList& mergedParams()
         ParamList list;
         addParams(list, 'p', {"Q", "K", "V", "B", "O", "DO", "DK", "DV", "DQ", "DB", "LSE"});
         addParams(list, 'i', {"batch_size"});
-        addScalarBlock(list);
+        addScalarBlock(list, [](ParamList& offsets) {
+            addOffsetBlock(offsets, true, {"V", "O", "DO", "DQ", "DK", "DV"}, true);
+        });
         addStrides(list, {"q", "k", "v", "o", "do", "dk", "dv", "dq", "b", "db"});
         addParams(list, 'i', {"rt_flags"});
         return list;
@@ -503,6 +558,20 @@ const ParamList& reduceParams()
                   {"num_batch", "num_head", "seqlen_q", "seqlen_k", "reduce_batch", "reduce_head"});
         addStrides(list, {"ws"});
         addStrides(list, {"out"});
+        return list;
+    }();
+    return s_params;
+}
+
+/// `_PARAMS["tailzero"]`, in order.
+const ParamList& tailzeroParams()
+{
+    static const ParamList s_params = [] {
+        ParamList list;
+        addParams(list, 'p', {"DQ", "DK", "DV", "seq_len_q", "seq_len_kv"});
+        addParams(list, 'i', {"B", "Hq", "Hkv", "Sq", "Skv", "Dqk", "Dv"});
+        addStrides(list, {"dq", "dk", "dv"});
+        addParams(list, 'i', {"mask"});
         return list;
     }();
     return s_params;
@@ -904,9 +973,21 @@ TEST(TestFlydslSdpaBwdSplitKernel, APackedDkdvObjectServesDenseGqaOnly)
     // Packing is dense only: padded varlen is served unpacked.
     EXPECT_FALSE(serves(Slot::DKDV, withPaddedVarlen(grouped), packed));
     EXPECT_TRUE(serves(Slot::DKDV, withPaddedVarlen(grouped), plainRow()));
-    // A query tile past the span bound is not served.
-    packed.blockQ = 128;
-    EXPECT_FALSE(serves(Slot::DKDV, grouped, packed));
+    // A query tile past the span bound is not served, and a packed row must record its tile
+    // (C2): none, a non-positive one and one above the bound serve nothing, the bound itself
+    // is served.
+    for(const int64_t blockQ : {int64_t{-1}, int64_t{0}, int64_t{65}, int64_t{128}})
+    {
+        SCOPED_TRACE(blockQ);
+        packed.blockQ = blockQ;
+        EXPECT_FALSE(serves(Slot::DKDV, grouped, packed));
+    }
+    packed.blockQ = 64;
+    EXPECT_TRUE(serves(Slot::DKDV, grouped, packed));
+    // An unpacked row has no packed tile to bound.
+    RowSpec unpacked = plainRow();
+    unpacked.blockQ = -1;
+    EXPECT_TRUE(serves(Slot::DKDV, grouped, unpacked));
 }
 
 /// A 16-bit bias whose row stride of 17 is not a multiple of 8 elements: outside the LDS
@@ -1139,7 +1220,12 @@ std::vector<SharedCell> sharedCells()
             {"oddShape", dimsSpec(3, 5, 77, 91, 64), plainRow()},
             {"unitAxes", dimsSpec(1, 1, 1, 1, 64), plainRow()},
             {"paddedVarlen", withPaddedVarlen(baseSpec()), plainRow()},
-            {"paddedVarlenCausal", withPaddedVarlen(withCausal(baseSpec())), causalRow()}};
+            {"paddedVarlenCausal", withPaddedVarlen(withCausal(baseSpec())), causalRow()},
+            {"raggedAll",
+             raggedOf(baseSpec(), {"q", "k", "v", "o", "do", "dq", "dk", "dv"}, 8),
+             plainRow()},
+            {"raggedQueries", raggedOf(baseSpec(), {"q", "o", "do", "dq"}), plainRow()},
+            {"raggedKeys", raggedOf(baseSpec(), {"k", "v", "dk", "dv"}), plainRow()}};
 }
 
 TEST(TestFlydslSdpaBwdSplitLaunch, SharedBuffersStridesAndScalarsEqualTheMergedEngines)
@@ -1179,21 +1265,229 @@ TEST(TestFlydslSdpaBwdSplitLaunch, PaddedVarlenPassesTheLengthTensorsAndBothSide
     {
         const auto values = valuesOf(slot, dumpOf(slot, spec, plainRow()));
         EXPECT_EQ(values.at("seqinfo_q0"), lengthsQ);
-        EXPECT_EQ(values.at("seqinfo_q1"), unused);
+        // Dense tensors: no offset array, and length-only bits on both sides.
+        EXPECT_EQ(values.at("seqinfo_q1"), 0U);
         EXPECT_EQ(values.at("varlen_bits"), 0x0404U);
         EXPECT_EQ(values.at("num_seqlens"), 0U);
         EXPECT_EQ(values.at("max_seqlen_q"), 16U);
         if(slot != Slot::PREP)
         {
             EXPECT_EQ(values.at("seqinfo_k0"), lengthsKv);
-            EXPECT_EQ(values.at("seqinfo_k1"), unused);
+            EXPECT_EQ(values.at("seqinfo_k1"), 0U);
             EXPECT_EQ(values.at("max_seqlen_k"), 16U);
+            EXPECT_EQ(values.at("mul_K"), 0U);
         }
     }
     // A dense graph reads no lengths.
     const auto dense = valuesOf(Slot::DKDV, dumpOf(Slot::DKDV, baseSpec(), plainRow()));
     EXPECT_EQ(dense.at("seqinfo_q0"), unused);
     EXPECT_EQ(dense.at("varlen_bits"), 0U);
+}
+
+TEST(TestFlydslSdpaBwdSplitLaunch,
+     EveryRaggedTensorPassesItsOffsetArrayAndMultiplierToTheSlotsThatAddressIt)
+{
+    const auto spec = raggedOf(baseSpec(), {"q", "k", "v", "o", "do", "dq", "dk", "dv"}, 8);
+    namespace uid = sdpa_bwd_uid;
+    const auto prep = valuesOf(Slot::PREP, dumpOf(Slot::PREP, spec, plainRow()));
+    EXPECT_EQ(prep.at("varlen_bits"), 0x1515U);
+    EXPECT_EQ(prep.at("seqinfo_q1"), ptrOf(uid::RAGGED_OFFSET_Q));
+    EXPECT_EQ(prep.at("off_O"), ptrOf(uid::RAGGED_OFFSET_O));
+    EXPECT_EQ(prep.at("mul_O"), 8U);
+    EXPECT_EQ(prep.at("off_DO"), ptrOf(uid::RAGGED_OFFSET_DO));
+    EXPECT_EQ(prep.at("mul_DO"), 8U);
+    // The caller's stats: their own offset and units, read through their own strides.
+    EXPECT_EQ(prep.at("off_Stats"), ptrOf(uid::RAGGED_OFFSET_STATS));
+    EXPECT_EQ(prep.at("mul_Stats"), 1U);
+    EXPECT_EQ(prep.at("stride_stats_batch"), 0U);
+    EXPECT_EQ(prep.at("stride_stats_head"), 32U);
+    EXPECT_EQ(prep.at("stride_stats_token"), 1U);
+    EXPECT_EQ(prep.at("stride_o_batch"), 0U);
+
+    const auto dkdv = valuesOf(Slot::DKDV, dumpOf(Slot::DKDV, spec, plainRow()));
+    EXPECT_EQ(dkdv.at("varlen_bits"), 0x1515U);
+    EXPECT_EQ(dkdv.at("seqinfo_q1"), ptrOf(uid::RAGGED_OFFSET_Q));
+    EXPECT_EQ(dkdv.at("seqinfo_k1"), ptrOf(uid::RAGGED_OFFSET_K));
+    EXPECT_EQ(dkdv.at("mul_Q"), 8U);
+    EXPECT_EQ(dkdv.at("mul_K"), 8U);
+    EXPECT_EQ(dkdv.at("off_V"), ptrOf(uid::RAGGED_OFFSET_V));
+    EXPECT_EQ(dkdv.at("off_DO"), ptrOf(uid::RAGGED_OFFSET_DO));
+    EXPECT_EQ(dkdv.at("off_DK"), ptrOf(uid::RAGGED_OFFSET_DK));
+    EXPECT_EQ(dkdv.at("off_DV"), ptrOf(uid::RAGGED_OFFSET_DV));
+    // dkdv reads Delta and LSE' from the workspace: no stats arguments, no O.
+    EXPECT_EQ(dkdv.count("off_Stats"), 0U);
+    EXPECT_EQ(dkdv.count("off_O"), 0U);
+
+    const auto dq = valuesOf(Slot::DQ, dumpOf(Slot::DQ, spec, plainRow()));
+    EXPECT_EQ(dq.at("seqinfo_q1"), ptrOf(uid::RAGGED_OFFSET_Q));
+    EXPECT_EQ(dq.at("off_V"), ptrOf(uid::RAGGED_OFFSET_V));
+    EXPECT_EQ(dq.at("off_DO"), ptrOf(uid::RAGGED_OFFSET_DO));
+    EXPECT_EQ(dq.at("off_DQ"), ptrOf(uid::RAGGED_OFFSET_DQ));
+    EXPECT_EQ(dq.at("mul_DQ"), 8U);
+    EXPECT_EQ(dq.count("off_Stats"), 0U);
+}
+
+TEST(TestFlydslSdpaBwdSplitLaunch, DenseTensorsBesideRaggedOnesPassNullOffsetsAndMultiplierZero)
+{
+    // Only the key side is ragged: the query side is length-only.
+    const auto spec = raggedOf(baseSpec(), {"k", "v", "dk", "dv"});
+    const auto dkdv = valuesOf(Slot::DKDV, dumpOf(Slot::DKDV, spec, plainRow()));
+    EXPECT_EQ(dkdv.at("varlen_bits"), 0x1504U);
+    EXPECT_EQ(dkdv.at("seqinfo_q1"), 0U);
+    EXPECT_EQ(dkdv.at("mul_Q"), 0U);
+    EXPECT_EQ(dkdv.at("off_DO"), 0U);
+    EXPECT_EQ(dkdv.at("mul_DO"), 0U);
+    EXPECT_EQ(dkdv.at("off_DK"), ptrOf(sdpa_bwd_uid::RAGGED_OFFSET_DK));
+    // The dense tensors keep their batch strides; the ragged ones do not read theirs.
+    EXPECT_EQ(dkdv.at("stride_q_batch"), 8192U);
+    EXPECT_EQ(dkdv.at("stride_k_batch"), 0U);
+    // Dense stats stay dense: no offset, the graph's own strides.
+    const auto prep = valuesOf(Slot::PREP, dumpOf(Slot::PREP, spec, plainRow()));
+    EXPECT_EQ(prep.at("off_Stats"), 0U);
+    EXPECT_EQ(prep.at("mul_Stats"), 0U);
+    EXPECT_EQ(prep.at("stride_stats_batch"), 128U);
+}
+
+TEST(TestFlydslSdpaBwdSplitLaunch, StatsStridesFollowTheGraphsLayoutWithNoLayoutBit)
+{
+    const auto head = valuesOf(Slot::PREP, dumpOf(Slot::PREP, baseSpec(), plainRow()));
+    EXPECT_EQ(head.at("stride_stats_batch"), 128U);
+    EXPECT_EQ(head.at("stride_stats_head"), 16U);
+    EXPECT_EQ(head.at("stride_stats_token"), 1U);
+    EXPECT_EQ(head.at("varlen_bits"), 0U);
+
+    const auto token = baseSpec().withEdit(
+        [](SdpaBwdGraph& g) { g.tensor("stats").strides = {g.seqQ * g.heads, 1, g.heads, 1}; });
+    const auto values = valuesOf(Slot::PREP, dumpOf(Slot::PREP, token, plainRow()));
+    EXPECT_EQ(values.at("stride_stats_batch"), 128U);
+    EXPECT_EQ(values.at("stride_stats_head"), 1U);
+    EXPECT_EQ(values.at("stride_stats_token"), 8U);
+    EXPECT_EQ(values.at("varlen_bits"), 0U);
+}
+
+TEST(TestFlydslSdpaBwdSplitLaunch, PaddedDenseStatsPassTheirActualStrides)
+{
+    // 8 padding floats behind every head's rows and 3 behind every batch's.
+    const auto padded = baseSpec().withEdit(
+        [](SdpaBwdGraph& g) { g.tensor("stats").strides = {8 * 24 + 3, 24, 1, 1}; });
+    const auto values = valuesOf(Slot::PREP, dumpOf(Slot::PREP, padded, plainRow()));
+    EXPECT_EQ(values.at("off_Stats"), 0U);
+    EXPECT_EQ(values.at("stride_stats_batch"), 195U);
+    EXPECT_EQ(values.at("stride_stats_head"), 24U);
+    EXPECT_EQ(values.at("stride_stats_token"), 1U);
+    // The compact workspace is unchanged: Delta and LSE' do not follow the caller's padding.
+    const GraphFixture fixture(buildSdpaBwdGraph(padded));
+    const auto bound = matchesGraph(splitSymbols(Slot::DQ), fixture.context());
+    ASSERT_TRUE(bound.has_value());
+    EXPECT_EQ(tokenOf(*bound, "ws.bytes"), 1024 + 1024);
+}
+
+TEST(TestFlydslSdpaBwdSplitKernel,
+     APackedDkdvObjectDeclinesWhenThePaddedStatsGroupSpansMoreThan32Bits)
+{
+    // Eight query heads over two key heads: a packed group is four heads. Padding the stats
+    // heads 2^29 floats apart puts the group's last head at 3 * 2^31 bytes, past a 32-bit
+    // descriptor, though each head's rows and the matcher's per-head bound fit. Only the packed
+    // object declines; the unpacked row is served.
+    RowSpec packed = plainRow();
+    packed.gqaPack = 1;
+    packed.blockQ = 32;
+    auto grouped = baseSpec();
+    grouped.kvHeads = 2;
+    const auto far = grouped.withEdit([](SdpaBwdGraph& g) {
+        const int64_t headStride = int64_t{1} << 29;
+        g.tensor("stats").strides = {g.heads * headStride, headStride, 1, 1};
+    });
+    EXPECT_TRUE(serves(Slot::DKDV, grouped, packed));
+    EXPECT_FALSE(serves(Slot::DKDV, far, packed));
+    EXPECT_TRUE(serves(Slot::DKDV, far, plainRow()));
+    EXPECT_TRUE(serves(Slot::PREP, far, plainRow()));
+}
+
+TEST(TestFlydslSdpaBwdSplitLaunch, PackedStatsInEitherOrderPassTheirOwnOffsetAndStrides)
+{
+    const auto packedStats = [](std::vector<int64_t> strides) {
+        return raggedOf(baseSpec(), {"q", "o", "do", "dq"}).withEdit([strides](SdpaBwdGraph& g) {
+            g.tensor("stats").strides = strides;
+        });
+    };
+    // (H, T): the head stride is the token count; the batch stride is never read.
+    const auto head
+        = valuesOf(Slot::PREP, dumpOf(Slot::PREP, packedStats({7, 100, 1, 1}), plainRow()));
+    EXPECT_EQ(head.at("off_Stats"), ptrOf(sdpa_bwd_uid::RAGGED_OFFSET_STATS));
+    EXPECT_EQ(head.at("stride_stats_batch"), 0U);
+    EXPECT_EQ(head.at("stride_stats_head"), 100U);
+    EXPECT_EQ(head.at("stride_stats_token"), 1U);
+    // (T, H): the token stride is H.
+    const auto token
+        = valuesOf(Slot::PREP, dumpOf(Slot::PREP, packedStats({7, 1, 8, 1}), plainRow()));
+    EXPECT_EQ(token.at("off_Stats"), ptrOf(sdpa_bwd_uid::RAGGED_OFFSET_STATS));
+    EXPECT_EQ(token.at("stride_stats_batch"), 0U);
+    EXPECT_EQ(token.at("stride_stats_head"), 1U);
+    EXPECT_EQ(token.at("stride_stats_token"), 8U);
+}
+
+TEST(TestFlydslSdpaBwdSplitWorkspace, RaggedAndDenseGraphsShareOneCompactStatisticsWorkspace)
+{
+    const auto bytesOf = [](const SdpaBwdSpec& spec) {
+        const GraphFixture fixture(buildSdpaBwdGraph(spec));
+        const auto bound = matchesGraph(splitSymbols(Slot::DQ), fixture.context());
+        EXPECT_TRUE(bound.has_value());
+        return std::array<int64_t, 3>{tokenOf(*bound, "ws.bytes"),
+                                      tokenOf(*bound, "ws.delta.offset"),
+                                      tokenOf(*bound, "ws.lse.offset")};
+    };
+    // Delta and LSE' are (batch, head, in-sequence row) at pitch Sq: B * H * Sq floats each,
+    // whatever the layout of the caller's stats.
+    const auto dense = bytesOf(baseSpec());
+    EXPECT_EQ(dense[0], 1024 + 1024);
+    EXPECT_EQ(bytesOf(raggedOf(baseSpec(), {"q", "o", "do", "dq"})), dense);
+    EXPECT_EQ(bytesOf(baseSpec().withEdit([](SdpaBwdGraph& g) {
+                  g.tensor("stats").strides = {g.seqQ * g.heads, 1, g.heads, 1};
+              })),
+              dense);
+}
+
+TEST(TestFlydslSdpaBwdSplitLaunch, OnlyTheDqLaunchZeroesTheTailsOfAPaddedGraphsDenseGradients)
+{
+    const auto padded = withPaddedVarlen(baseSpec());
+    for(const Slot slot : {Slot::PREP, Slot::DKDV})
+    {
+        EXPECT_FALSE(dumpOf(slot, padded, plainRow()).tailzero);
+    }
+    const auto dq = dumpOf(Slot::DQ, padded, plainRow());
+    ASSERT_TRUE(dq.tailzero);
+    EXPECT_EQ(dq.tailzeroBlock, 256U);
+    EXPECT_EQ(dq.tailzeroGrid, (std::array<unsigned int, 3>{1, 48, 1}));
+    ASSERT_EQ(dq.tailzeroKernarg.size(), imageBytes(tailzeroParams()));
+    const auto values = decode(dq.tailzeroKernarg, tailzeroParams());
+    EXPECT_EQ(values.at("DQ"), ptrOf(sdpa_bwd_uid::DQ));
+    EXPECT_EQ(values.at("DK"), ptrOf(sdpa_bwd_uid::DK));
+    EXPECT_EQ(values.at("DV"), ptrOf(sdpa_bwd_uid::DV));
+    EXPECT_EQ(values.at("seq_len_q"), ptrOf(sdpa_bwd_uid::SEQ_LEN_Q));
+    EXPECT_EQ(values.at("seq_len_kv"), ptrOf(sdpa_bwd_uid::SEQ_LEN_KV));
+    EXPECT_EQ(values.at("mask"), 7U);
+    // The merged engine's launch of the same graph is the same one.
+    const auto merged = mergedDumpOf(padded, plainRow());
+    ASSERT_TRUE(merged.tailzero);
+    EXPECT_EQ(dq.tailzeroKernarg, merged.tailzeroKernarg);
+    EXPECT_EQ(dq.tailzeroGrid, merged.tailzeroGrid);
+    // No padding, no launch.
+    EXPECT_FALSE(dumpOf(Slot::DQ, baseSpec(), plainRow()).tailzero);
+}
+
+TEST(TestFlydslSdpaBwdSplitLaunch, TheTailZeroMaskNamesTheDenseGradientsOnly)
+{
+    const auto maskOf = [](const std::vector<std::string>& ragged) {
+        const auto dump = dumpOf(Slot::DQ, raggedOf(baseSpec(), ragged), plainRow());
+        return dump.tailzero ? decode(dump.tailzeroKernarg, tailzeroParams()).at("mask") : 0U;
+    };
+    EXPECT_EQ(maskOf({"dk", "dv"}), 1U);
+    EXPECT_EQ(maskOf({"dq", "dv"}), 2U);
+    EXPECT_EQ(maskOf({"dq", "dk"}), 4U);
+    EXPECT_EQ(maskOf({"q", "dq"}), 6U);
+    // Every gradient ragged: their storage past a length is not ours.
+    EXPECT_EQ(maskOf({"dq", "dk", "dv"}), 0U);
 }
 
 TEST(TestFlydslSdpaBwdSplitLaunch, SeedWordsAndPointersEqualTheMergedEnginesAndOnlyPrepUploads)
@@ -1498,13 +1792,16 @@ std::vector<KernelArgument> recordedSignature(const ParamList& params)
 
 const char* const DQ_ENTRY_SYMBOL = "dq_entry_symbol";
 const char* const REDUCE_ENTRY_SYMBOL = "reduce_entry_symbol";
+const char* const TAILZERO_ENTRY_SYMBOL = "tailzero_entry_symbol";
 
 /// A dq row of @p row whose launches are the `sources` entries "dq" and, with @p reduce, the
-/// "dbias_reduce" one, in archives that do not exist: prepare() gets as far as loading the
-/// first launch's code object and no further.
+/// "dbias_reduce" one and, with @p tailzero, the "tailzero" one, in archives that do not
+/// exist: prepare() gets as far as loading the first launch's code object and no further.
 KernelDefinition sourcesRow(const RowSpec& row,
                             std::optional<std::vector<KernelArgument>> reduce
-                            = recordedSignature(reduceParams()))
+                            = recordedSignature(reduceParams()),
+                            std::optional<std::vector<KernelArgument>> tailzero
+                            = recordedSignature(tailzeroParams()))
 {
     auto kernel = makeRow(Slot::DQ, row);
     const auto tree = std::filesystem::temp_directory_path().string();
@@ -1523,6 +1820,13 @@ KernelDefinition sourcesRow(const RowSpec& row,
         reduceSource.symbol = REDUCE_ENTRY_SYMBOL;
         reduceSource.signature = std::move(*reduce);
         kernel.sources["dbias_reduce"] = std::move(reduceSource);
+    }
+    if(tailzero.has_value())
+    {
+        KernelSource tailzeroSource = dq;
+        tailzeroSource.symbol = TAILZERO_ENTRY_SYMBOL;
+        tailzeroSource.signature = std::move(*tailzero);
+        kernel.sources["tailzero"] = std::move(tailzeroSource);
     }
     return kernel;
 }
@@ -1562,11 +1866,13 @@ RowSpec bareDqRow()
     return row;
 }
 
-TEST(TestFlydslSdpaBwdSplitDispatch, OnlyTheDqReduceHandlerDeclaresLaunches)
+TEST(TestFlydslSdpaBwdSplitDispatch, TheDqHandlersDeclareTheirLaunchesAndTheOthersNone)
 {
-    const std::set<std::string> launches{"dq", "dbias_reduce"};
-    EXPECT_EQ(dispatchHandler(DQ_REDUCE).launchNames(), launches);
-    for(const Slot slot : SLOTS)
+    EXPECT_EQ(dispatchHandler(DQ_REDUCE).launchNames(),
+              (std::set<std::string>{"dq", "dbias_reduce", "tailzero"}));
+    EXPECT_EQ(dispatchHandler(splitSymbols(Slot::DQ)).launchNames(),
+              (std::set<std::string>{"dq", "tailzero"}));
+    for(const Slot slot : {Slot::PREP, Slot::DKDV})
     {
         EXPECT_TRUE(dispatchHandler(splitSymbols(slot)).launchNames().empty());
     }
@@ -1624,20 +1930,67 @@ TEST(TestFlydslSdpaBwdSplitDispatch, TheReduceLaunchIsBuiltOnlyForABroadcastDbia
     }
 }
 
-TEST(TestFlydslSdpaBwdSplitDispatch, ASourcesRowNeverTakesTheBySymbolPath)
+TEST(TestFlydslSdpaBwdSplitDispatch, ASourcesRowTakesTheReduceBySymbolFromItsDqLaunchOnTheDqHandler)
 {
     const auto broadcast = withBias(baseSpec(), true, {1, 1, 16, 16});
-    // By symbol, the reduce launch would carry the pack's own argument list and the row's
-    // reduce_symbol; here it is the entry's, whose list the pack refuses.
+    // By symbol, the reduce launch carries the pack's own argument list and the row's
+    // reduce_symbol, so the `dbias_reduce` entry of a multi-launch row is never consulted:
+    // a list that disagrees with the pack's is not refused for it.
     auto dropped = recordedSignature(reduceParams());
     dropped.pop_back();
-    const auto failure = prepareFailure(DQ_REDUCE, broadcast, sourcesRow(bareDqRow(), dropped));
-    EXPECT_TRUE(contains(failure, "is packaged with arguments")) << failure;
-    EXPECT_TRUE(contains(failure, REDUCE_ENTRY_SYMBOL)) << failure;
-    EXPECT_FALSE(contains(failure, "fmha_reduce_by_symbol")) << failure;
-    // The single-launch dq dispatch reads `source`, which a multi-launch row does not have.
-    const auto single = prepareFailure(splitSymbols(Slot::DQ), broadcast, sourcesRow(bareDqRow()));
-    EXPECT_TRUE(contains(single, "several launches")) << single;
+    const auto bySymbol
+        = prepareFailure(splitSymbols(Slot::DQ), broadcast, sourcesRow(bareDqRow(), dropped));
+    EXPECT_FALSE(contains(bySymbol, "is packaged with arguments")) << bySymbol;
+    EXPECT_FALSE(contains(bySymbol, "no launch")) << bySymbol;
+    EXPECT_FALSE(bySymbol.empty());
+    // The dq_reduce dispatch consumes that entry instead, and refuses the list.
+    const auto refused = prepareFailure(DQ_REDUCE, broadcast, sourcesRow(bareDqRow(), dropped));
+    EXPECT_TRUE(contains(refused, "is packaged with arguments")) << refused;
+    EXPECT_TRUE(contains(refused, REDUCE_ENTRY_SYMBOL)) << refused;
+    EXPECT_FALSE(contains(refused, "fmha_reduce_by_symbol")) << refused;
+}
+
+TEST(TestFlydslSdpaBwdSplitDispatch, EveryDqRowIsMultiLaunchSoASingleLaunchRowIsRefused)
+{
+    auto single = makeRow(Slot::DQ, plainRow());
+    const auto failure = prepareFailure(splitSymbols(Slot::DQ), baseSpec(), single);
+    EXPECT_TRUE(contains(failure, "is a single-launch kernel, so it has no launch 'dq'"))
+        << failure;
+}
+
+TEST(TestFlydslSdpaBwdSplitDispatch, TheTailZeroLaunchIsRequiredAndCheckedOnlyForAPaddedGraph)
+{
+    const auto padded = withPaddedVarlen(baseSpec());
+    // A padded graph with a dense gradient needs the launch: a row without it is refused...
+    const auto missing = prepareFailure(
+        splitSymbols(Slot::DQ), padded, sourcesRow(plainRow(), std::nullopt, std::nullopt));
+    EXPECT_TRUE(contains(missing, "no launch 'tailzero'")) << missing;
+    // ...and its entry's argument list is checked against the pack's.
+    auto dropped = recordedSignature(tailzeroParams());
+    dropped.pop_back();
+    const auto refused = prepareFailure(
+        splitSymbols(Slot::DQ), padded, sourcesRow(plainRow(), std::nullopt, dropped));
+    EXPECT_TRUE(contains(refused, "is packaged with arguments")) << refused;
+    EXPECT_TRUE(contains(refused, TAILZERO_ENTRY_SYMBOL)) << refused;
+    // The dq_reduce dispatch has the same launch.
+    const auto reduceMissing
+        = prepareFailure(DQ_REDUCE, padded, sourcesRow(plainRow(), std::nullopt, std::nullopt));
+    EXPECT_TRUE(contains(reduceMissing, "no launch 'tailzero'")) << reduceMissing;
+    // A graph that zeroes nothing neither requires nor looks at it.
+    for(const auto& kernel : {sourcesRow(plainRow(), std::nullopt, std::nullopt),
+                              sourcesRow(plainRow(), std::nullopt, dropped)})
+    {
+        const auto failure = prepareFailure(splitSymbols(Slot::DQ), baseSpec(), kernel);
+        EXPECT_FALSE(contains(failure, "no launch")) << failure;
+        EXPECT_FALSE(contains(failure, "is packaged with arguments")) << failure;
+        EXPECT_FALSE(failure.empty());
+    }
+    // Every gradient ragged: nothing to zero either.
+    const auto raggedGradients = raggedOf(baseSpec(), {"dq", "dk", "dv"});
+    const auto none = prepareFailure(splitSymbols(Slot::DQ),
+                                     raggedGradients,
+                                     sourcesRow(plainRow(), std::nullopt, std::nullopt));
+    EXPECT_FALSE(contains(none, "no launch")) << none;
 }
 
 // ---------------------------------------------------------------------------

@@ -32,12 +32,3 @@ rtol = 5e-3
 filters = ["*_SdpaBackward_*.*_bfp16_*", "*_SdpaBackward_*.*_bf16_*", "*_SdpaBackward_*_bf16_*.*"]
 atol = 1e-2
 rtol = 1e-2
-
-# -- Test Skips --
-# Known gap: with padding_mask and seq_len tensors, the engine computes every gradient
-# row inside each batch's lengths, but leaves the dQ rows past seq_len_q and the dK/dV
-# rows past seq_len_kv unwritten. The references and the golden data hold zeros there.
-# These graphs skip until the engine writes those rows.
-[[test_skips]]
-filters = ["*_SdpaBackward_bhsd_*_padneq_*"]
-reason  = "hipkernel:flydsl_sdpa_bwd_merged leaves gradient rows past seq_len unwritten (known gap)"

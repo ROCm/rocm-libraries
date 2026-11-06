@@ -10,29 +10,36 @@ manifest are shared with the other backward ops in ``_sdpa_bwd_cdna_build``. The
 the sweep's pins (``_instances``); each is built once and recorded as ``ok``,
 ``dual_object`` or ``error`` with its resource row and gate verdicts. Rebuilt objects are
 compared with the pins by ``tools/sdpa_bwd_compare.py``. ``--arch gfx11-generic`` builds the gfx11 objects
-(``_sdpa_bwd_rdna_build``), each of which must be its S1 pin.
+(``_sdpa_bwd_rdna_build``), each of which must be its S1 pin. The run also builds the tail-zero objects of the arch family
+(``gen_sdpa_bwd_tailzero.companion_entries``) into the dQ folder and lists them under ``companions``: no pin, the tail-zero generator is
+their provenance. The merged generator lists these same objects, so dQ is generated before merged.
 """
 
 from __future__ import annotations
 
 from . import _sdpa_bwd_rdna_build as _rdna
+from .gen_sdpa_bwd_tailzero import companion_entries as _tailzero
 from ._sdpa_bwd_cdna_build import generate as _generate, run_op
 
 OP = "sdpa_bwd_dq"
 
 
 # The arches the CDNA build does not own: gfx11-generic is built by ``_sdpa_bwd_rdna_build``.
-_OTHER_ARCHES = {_rdna.ARCH: _rdna.generate}
+_OTHER_ARCHES = {
+    _rdna.ARCH: lambda op, out_root, only, reference_dir: _rdna.generate(
+        op, out_root, only, reference_dir, build_tailzero=_tailzero
+    )
+}
 
 
 def generate(arch, out_root, only=None, reference_dir=None):
     if arch in _OTHER_ARCHES:
         return _OTHER_ARCHES[arch](OP, out_root, only, reference_dir)
-    return _generate(OP, arch, out_root, only, reference_dir)
+    return _generate(OP, arch, out_root, only, reference_dir, build_tailzero=_tailzero)
 
 
 def main(argv: list[str] | None = None) -> int:
-    return run_op(OP, __doc__.splitlines()[0], argv, _OTHER_ARCHES)
+    return run_op(OP, __doc__.splitlines()[0], argv, _OTHER_ARCHES, _tailzero)
 
 
 if __name__ == "__main__":

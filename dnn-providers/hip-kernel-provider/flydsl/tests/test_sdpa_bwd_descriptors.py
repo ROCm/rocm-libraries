@@ -42,6 +42,7 @@ MERGED_KNOBS = {
     "block_threads": 512,
     "block_kv": 128,
     "block_m": 64,
+    "block_q": 64,
     "reduce_symbol": "fmha_bwd_dbias_reduce_gfx950_kernel_1",
 }
 CONTRACT_FIELDS = {
@@ -61,6 +62,7 @@ CONTRACT_FIELDS = {
     "block_threads": "int",
     "block_kv": "int",
     "block_m": "int",
+    "block_q": "int",
     "reduce_symbol": "string",
 }
 SIBLING_KNOBS = {"head_dim": 128, "causal": 0, "block_threads": 256, "block_m": 64}
@@ -86,6 +88,18 @@ def _write_manifest(content: Path, op: str, knobs: dict, symbol: str) -> None:
         "toolchain": {"inputs_sha256": "synthetic"},
         "instances": [record],
     }
+    if op in gd.MAIN_LAUNCH:
+        # The tail-zero companion every dQ and merged row launches last.
+        (folder / "tz.hsaco").write_bytes(b"tailzero")
+        manifest["companions"] = [
+            {
+                "hash": "a3287842cb25",
+                "spec": "tailzero,bf16",
+                "file": "tz.hsaco",
+                "symbol": "fmha_bwd_tailzero_gfx950_kernel_0",
+                "sha256": hashlib.sha256(b"tailzero").hexdigest(),
+            }
+        ]
     (folder / gd.MANIFEST_NAME).write_text(json.dumps(manifest), encoding="utf-8")
 
 
@@ -124,6 +138,7 @@ def test_ued_knobs_are_the_tuning_fields_and_the_alternatives(documents):
         "block_threads",
         "block_kv",
         "block_m",
+        "block_q",
     }
 
 
@@ -143,10 +158,26 @@ def test_op_level_documents_have_a_sibling_ops_shape(documents):
     ued = _doc(documents, merged, "ued")
     assert ued["name"] == "hipkernel:flydsl_sdpa_bwd_merged"
     assert ued["sort_kernel_catalog"] == {"default": uhd["id"]}
-    assert ued["sdk_version"] == _doc(documents, sibling, "ued")["sdk_version"]
+    # The backward engines read ragged operands and offset multipliers, so they declare the
+    # schema of the last of them (1.4.0).
+    assert ued["sdk_version"] == "1.4.0"
 
 
 def test_kernel_metadata_carries_every_manifest_knob(documents):
     kdp = documents[Path("sdpa_bwd_merged") / ARCH]["flydsl_sdpa_bwd_merged.kdp.json"]
     (kernel,) = kdp["kernelDescriptors"]
     assert kernel["metadata"] == {"dtype": "bf16", **MERGED_KNOBS}
+
+
+def test_a_merged_row_is_launched_through_sources_with_its_tailzero_companion(
+    documents,
+):
+    (pack,) = [
+        d
+        for n, d in documents[Path("sdpa_bwd_merged") / ARCH].items()
+        if n.endswith(".kdp.json")
+    ]
+    (kernel,) = pack["kernelDescriptors"]
+    assert list(kernel["sources"]) == ["merged", "tailzero"]
+    assert kernel["sources"]["tailzero"]["file"] == "tz.hsaco"
+    assert kernel["metadata"]["block_q"] == 64

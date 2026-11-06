@@ -399,14 +399,13 @@ def resolve_scale(q, scale, padded_head, default_scale):
     return float(default_scale)
 
 
-def row_tensor_arg(t, name, num_head_q, seq_len, varlen):
-    """Check a rank-2 f32 row tensor -- logsumexp, or delta -- and take its pointer.
+def row_tensor_arg(t, name, seq_len):
+    """Check a rank-2 f32 row tensor -- LSE', or Delta -- and take its pointer.
 
-    The two share one offset computation in the kernel, so they must share a
-    layout, and checking them the same way here is what makes that safe.
-    Unlike Q/K/V the kernel derives their pitches from VarlenBits rather than
-    reading strides, so contiguity is required rather than merely convenient --
-    and the host is the only place the caller's actual layout can be verified.
+    Both are the backward's own workspace: contiguous `(sequences * heads,
+    max_seqlen_q)`, indexed `(sequence, head, row)` with `max_seqlen_q` rows
+    reserved per head, whatever the layout of the caller's tensors. The two
+    share one offset computation in the kernel, so they must share a layout.
     """
     from torch import float32 as torch_f32  # lazy: the build venv has no torch
 
@@ -418,19 +417,10 @@ def row_tensor_arg(t, name, num_head_q, seq_len, varlen):
         raise ValueError(f"{name} must be rank 2, got shape {tuple(t.shape)}")
     if not t.is_contiguous():
         raise ValueError(
-            f"{name} must be contiguous: the kernel derives its pitches from VarlenBits"
+            f"{name} must be contiguous: the kernel addresses it as (sequence, head, row)"
         )
-    layout = 0 if varlen is None else (int(varlen["bits"]) >> 16) & 3
-    if layout == 0:
-        want_last = int(seq_len) if varlen is None else varlen.get("lse_tokens")
-        if want_last is not None and t.shape[1] != int(want_last):
-            raise ValueError(
-                f"{name} with LSE_LAYOUT_HT wants (*, {int(want_last)}), got {tuple(t.shape)}"
-            )
-    elif t.shape[1] != num_head_q:
-        raise ValueError(
-            f"{name} with LSE_LAYOUT_TH wants (*, {num_head_q}), got {tuple(t.shape)}"
-        )
+    if t.shape[1] != int(seq_len):
+        raise ValueError(f"{name} wants (*, {int(seq_len)}), got {tuple(t.shape)}")
     return ptr_arg(t)
 
 
@@ -735,9 +725,8 @@ def varlen_args(
     # `varlen_bits` rejects the combinations that are not *meaningful*
     # (reserved codes, REUSE without cumulative lengths).
     bits = int(varlen["bits"])
-    # A STACKED Q side is the packed one, and the only one the kernel reads
-    # `num_seqlens` for (`lse_token_pitch`, to reach slot [N] of the array
-    # holding the batch total). A non-stacked varlen side -- `varlen_padded`,
+    # A STACKED Q side is the packed one, and the only one that counts its
+    # sequences through `num_seqlens`. A non-stacked varlen side -- `varlen_padded`,
     # BHSD tensors with short sequences -- has a real batch axis and packs
     # nothing, so its count is 0 like the dense case.
     if bits & VARLEN_STACKED:
@@ -760,6 +749,38 @@ def varlen_args(
         for k in ("seqinfo_q0", "seqinfo_q1", "seqinfo_k0", "seqinfo_k1")
     )
     return (bits,) + got + (int(varlen["max_seqlen_q"]), int(varlen["max_seqlen_k"]))
+
+
+def ragged_args(vl, tensors):
+    """Per-tensor ragged binding of a launch: `[(offsets, multiplier)]` for `tensors`, a list of `(side, seq_stride)`.
+
+    `vl` is `varlen_args`' result and `side` is 0 (Q) or 1 (K). A tensor of a
+    STACKED side is ragged: its offsets are the side's position array (the
+    cumulative lengths under REUSE, `seqinfo_?1` under ARRAY), in tokens, so
+    its multiplier is its own sequence stride. A tensor of any other side is
+    dense: a null pointer and multiplier 0, addressed `batch * stride_batch`.
+
+    The kernel takes Q's and K's offsets from `seqinfo_q1` / `seqinfo_k1`, so a
+    caller binds the first two pointers there (`vl[2]`, `vl[4]` are replaced by
+    them).
+    """
+    bits = int(vl[0])
+    pos = []
+    for side, (s0, s1) in enumerate(((vl[1], vl[2]), (vl[3], vl[4]))):
+        sb = (bits >> (8 * side)) & 0xFF
+        if not sb & VARLEN_STACKED:
+            pos.append(NULL_PTR)
+            continue
+        posmode = (sb >> 3) & 3
+        if posmode == 0:
+            raise ValueError(
+                f"side {side}={sb:#04x}: a STACKED side needs a position array (REUSE or ARRAY)"
+            )
+        pos.append(s0 if posmode == 1 else s1)
+    return [
+        (NULL_PTR, 0) if pos[side] is NULL_PTR else (pos[side], int(stride))
+        for side, stride in tensors
+    ]
 
 
 def run_compiled(cache, exe, *args):

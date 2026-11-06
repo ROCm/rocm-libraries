@@ -65,13 +65,18 @@ constexpr size_t SEED_REGION_BYTES = 16;
 constexpr size_t SEED_WORD_BYTES = 8;
 constexpr size_t WORKSPACE_ALIGNMENT = 256;
 constexpr int64_t WORKSPACE_ELEMENT_BYTES = 2; // bf16 and f16 only
-/// Delta and LSE' are fp32 `[B, Hq, Sq]`.
+/// Delta and LSE' are fp32 `[B, Hq, Sq]`, indexed (batch, head, in-sequence row) at pitch Sq
+/// whatever the layout of the caller's stats.
 constexpr int64_t ROW_STATISTIC_BYTES = 4;
 
 /// The reduce kernel's launch: 256 threads, each owning 8 consecutive columns of one row
 /// (`fmha_bwd_dbias_reduce_gfx950.py`, BLOCK_THREADS and VEC).
 constexpr unsigned int REDUCE_THREADS = 256;
 constexpr int64_t REDUCE_VECTOR = 8;
+
+/// The packed GQA query tile that `packedSpansFit` assumes: the largest block_q of the dK/dV
+/// role among the shipped gqa_pack == 1 objects.
+constexpr int64_t PACK_MAX_BLOCK_Q = 64;
 
 [[noreturn]] inline void failBadParam(const std::string& message)
 {
@@ -102,14 +107,30 @@ inline int32_t toInt32(int64_t value, const char* what)
 // Launch values
 // ---------------------------------------------------------------------------
 
-/// The drop threshold of probability @p p: a uniform u32 read as i32 is kept when above
-/// `(p - 0.5) * 2^32`. A port of `philox.dropout_threshold`, which truncates toward zero
-/// and clamps to int32; the same value AOTriton computes.
-inline int32_t dropoutThreshold(double p)
+/// The drop threshold of probability @p p: a uniform u32 read as i32 is kept when above it.
+/// AOTriton's `((dropout_p - 0.5) * 0xFFFFFFFF).to(tl.int32)` as its kernel evaluates it, in
+/// f32 (where the constant rounds to 2^32) and truncated toward zero; PyTorch-ROCm and the
+/// forward SDPA engine's keep mask apply the same value. Clamped to int32, which no p in
+/// [0, 1) leaves. Python's host `philox.dropout_threshold` computes it in double and differs
+/// by up to 2^7.
+inline int32_t dropoutThreshold(float p)
 {
-    const auto threshold = static_cast<int64_t>((p - 0.5) * 4294967295.0);
-    return static_cast<int32_t>(std::clamp<int64_t>(
-        threshold, std::numeric_limits<int32_t>::min(), std::numeric_limits<int32_t>::max()));
+    const float scaled = (p - 0.5F) * 4294967296.0F;
+    if(!(scaled < 2147483648.0F))
+    {
+        return std::numeric_limits<int32_t>::max();
+    }
+    if(!(scaled > -2147483648.0F))
+    {
+        return std::numeric_limits<int32_t>::min();
+    }
+    return static_cast<int32_t>(scaled);
+}
+
+/// The scale a kept probability takes: AOTriton's `1.0 / (1 - dropout_p)`, in f32.
+inline float dropoutScale(float p)
+{
+    return 1.0F / (1.0F - p);
 }
 
 /// The kernel's window bounds: `column j is kept for row i iff i - left <= j <= i + right`.
@@ -170,6 +191,62 @@ inline bwd::Strides rowPitchStrides(bwd::Strides strides,
         strides.seq = bwd::detail::ceilToVector(headDim, vector);
     }
     return strides;
+}
+
+/// The `varlen_bits` of one side: the individual lengths of the `seq_len` tensor with the
+/// token positions the side's element offsets give (`VARLEN_SEQUSED_PACKED_SIDE`, 0x15), or
+/// the lengths alone with implied positions (`VARLEN_SEQUSED_CACHE_SIDE`, 0x04). Bits 0..7
+/// are the Q side, bits 8..15 the K side; the lengths go in `seqinfo_q0` / `seqinfo_k0` and
+/// the offsets of a ragged side in `seqinfo_q1` / `seqinfo_k1`. A graph without padding_mask
+/// passes 0. The stats' layout is not a bit: the kernels take its strides.
+constexpr int32_t VARLEN_SIDE_ARRAY = 0x15;
+constexpr int32_t VARLEN_SIDE_LENGTHS = 0x04;
+
+inline int32_t varlenBitsOf(const bwd::SdpaBwdProblem& problem)
+{
+    if(!problem.paddingMask)
+    {
+        return 0;
+    }
+    const int32_t qSide = problem.ragged.q.ragged() ? VARLEN_SIDE_ARRAY : VARLEN_SIDE_LENGTHS;
+    const int32_t kSide = problem.ragged.k.ragged() ? VARLEN_SIDE_ARRAY : VARLEN_SIDE_LENGTHS;
+    return qSide | (kSide << 8);
+}
+
+/// One tensor's offset arguments: the INT32 `[B + 1]` offset array and its multiplier, the
+/// base of batch b being offset[b] * multiplier elements. A dense tensor passes a null
+/// pointer and multiplier 0, and is addressed at b * its batch stride.
+struct OffsetArgs
+{
+    void* offset = nullptr;
+    int64_t multiplier = 0;
+};
+
+/// The offset arguments of @p ragged, resolving its offset tensor with @p buffer.
+template <typename Buffer>
+OffsetArgs offsetArgsOf(const bwd::RaggedOffset& ragged, const Buffer& buffer)
+{
+    if(!ragged.ragged())
+    {
+        return {};
+    }
+    return {buffer(ragged.uid), ragged.multiplier};
+}
+
+/// The arguments of the caller's stats a kernel reads: its offset and multiplier (null and 0
+/// when the stats are dense) and its element strides. The address of (batch b, head h, row
+/// r) is offset[b] * multiplier + h * head + r * seq when ragged, b * batch + h * head + r *
+/// seq when dense.
+struct StatsArgs
+{
+    OffsetArgs offset;
+    bwd::Strides strides;
+};
+
+template <typename Buffer>
+StatsArgs statsArgsOf(const bwd::SdpaBwdProblem& problem, const Buffer& buffer)
+{
+    return {offsetArgsOf(problem.ragged.stats, buffer), problem.stats};
 }
 
 // ---------------------------------------------------------------------------
@@ -376,13 +453,15 @@ struct SeedBinding
 };
 
 /// A pass-by-value integer as the low and high words of its 64-bit extension. A 32-bit value
-/// is zero-extended, so a negative int32 seed is its unsigned bit pattern.
+/// is sign-extended, as the forward SDPA engine does: a negative int32 seed has an all-ones
+/// high word.
 inline std::array<uint32_t, 2> wordsOf(const hipdnn_plugin_sdk::ScalarValue& value,
                                        const char* what)
 {
     if(const auto* narrow = std::get_if<int32_t>(&value))
     {
-        return {static_cast<uint32_t>(*narrow), 0U};
+        const auto bits = static_cast<uint64_t>(static_cast<int64_t>(*narrow));
+        return {static_cast<uint32_t>(bits), static_cast<uint32_t>(bits >> 32)};
     }
     if(const auto* wide = std::get_if<int64_t>(&value))
     {
@@ -603,7 +682,7 @@ inline bool stagesBias(const bwd::SdpaBwdProblem& problem)
 }
 
 /// Whether every span a gqa_pack dK/dV object binds, from head 0 of the group over its G
-/// heads, fits the 32-bit buffer descriptor: Q, dO and O, the statistics and, when present,
+/// heads, fits the 32-bit buffer descriptor: Q, dO and O, the statistics (through their actual head and token strides) and, when present,
 /// the bias; and whether the kernel's pack_split multiply-high is exact for every packed row
 /// it can address: (Sq * G + 2 * block_q) * Sq < 2^31, the rows Sq * G plus the pad to an
 /// even tile count, at the largest query tile @p maxBlockQ of the packed objects. A graph
@@ -656,19 +735,16 @@ inline bool packedSpansFit(const bwd::SdpaBwdProblem& problem, int64_t maxBlockQ
     {
         return false;
     }
-    // The statistics: HT packs the group's heads contiguously, TH interleaves them one
-    // element apart.
-    const auto statsElements
-        = problem.statsLayout == bwd::StatsLayout::HT
-              ? bwd::detail::checkedProduct({group, problem.seqLenQ})
-              : bwd::detail::checkedProduct({problem.seqLenQ, problem.numHeads});
-    if(!statsElements)
+    // The statistics, through their actual strides: the group's heads at problem.stats.head
+    // apart, then the Sq rows of the last head at problem.stats.seq (both 0 on a unit axis).
+    const auto statsHeads = bwd::detail::checkedProduct({group - 1, problem.stats.head});
+    const auto statsRows = bwd::detail::checkedProduct({problem.seqLenQ, problem.stats.seq});
+    int64_t statsElements = 0;
+    if(!statsHeads || !statsRows || __builtin_add_overflow(*statsHeads, *statsRows, &statsElements))
     {
         return false;
     }
-    const int64_t statsExtra = problem.statsLayout == bwd::StatsLayout::HT ? 0 : group - 1;
-    const auto statsBytes
-        = bwd::detail::checkedProduct({*statsElements + statsExtra, ROW_STATISTIC_BYTES});
+    const auto statsBytes = bwd::detail::checkedProduct({statsElements, ROW_STATISTIC_BYTES});
     if(!statsBytes || *statsBytes > INT32_LIMIT)
     {
         return false;
@@ -725,6 +801,147 @@ inline const std::vector<hipdnn_plugin_sdk::ingestor::KernelArgument>& reduceSig
 {
     static const auto s_signature = signatureOf<ReduceKernargs>();
     return s_signature;
+}
+
+// ---------------------------------------------------------------------------
+// The tail-zero launch
+// ---------------------------------------------------------------------------
+
+/// The tail-zero kernel's threads per block. One thread owns one vector (16 bytes) of one
+/// tail row of one (batch, head) plane of dQ, dK or dV
+/// (`fmha_bwd_tailzero_gfx950.py`, `fmha_bwd_tailzero_gfx11.py`).
+constexpr unsigned int TAILZERO_THREADS = 256;
+
+/// `mask` bits: the outputs the launch zeroes, those the graph holds dense.
+constexpr int32_t TAILZERO_DQ = 1;
+constexpr int32_t TAILZERO_DK = 2;
+constexpr int32_t TAILZERO_DV = 4;
+
+/// The outputs whose rows past `seq_len` the tail-zero launch zeroes: with padding_mask, each
+/// output that is dense. A ragged output's storage past its length belongs to the gap or the
+/// next sequence and is never written. 0 means no launch.
+inline int32_t tailzeroMaskOf(const bwd::SdpaBwdProblem& problem)
+{
+    if(!problem.paddingMask)
+    {
+        return 0;
+    }
+    return (problem.ragged.dQ.ragged() ? 0 : TAILZERO_DQ)
+           | (problem.ragged.dK.ragged() ? 0 : TAILZERO_DK)
+           | (problem.ragged.dV.ragged() ? 0 : TAILZERO_DV);
+}
+
+/// The tail-zero kernel's arguments (`PARAMS` in `flydsl/generators/gen_sdpa_bwd_tailzero.py`): 22 arguments.
+struct TailzeroKernargs
+{
+    void* dQ = nullptr;
+    void* dK = nullptr;
+    void* dV = nullptr;
+    void* seqLenQ = nullptr;
+    void* seqLenKv = nullptr;
+    int32_t numBatch = 0;
+    int32_t numHeadQ = 0;
+    int32_t numHeadK = 0;
+    int32_t maxSeqlenQ = 0;
+    int32_t maxSeqlenK = 0;
+    int32_t hdimQk = 0;
+    int32_t hdimV = 0;
+    bwd::Strides strideDQ;
+    bwd::Strides strideDK;
+    bwd::Strides strideDV;
+    int32_t mask = 0;
+
+    auto tie() const
+    {
+        return std::tie(dQ,
+                        dK,
+                        dV,
+                        seqLenQ,
+                        seqLenKv,
+                        numBatch,
+                        numHeadQ,
+                        numHeadK,
+                        maxSeqlenQ,
+                        maxSeqlenK,
+                        hdimQk,
+                        hdimV,
+                        strideDQ.batch,
+                        strideDQ.head,
+                        strideDQ.seq,
+                        strideDK.batch,
+                        strideDK.head,
+                        strideDK.seq,
+                        strideDV.batch,
+                        strideDV.head,
+                        strideDV.seq,
+                        mask);
+    }
+};
+
+inline const std::vector<hipdnn_plugin_sdk::ingestor::KernelArgument>& tailzeroSignature()
+{
+    static const auto s_signature = signatureOf<TailzeroKernargs>();
+    return s_signature;
+}
+
+/// The tail-zero launch's grid: x covers the largest tail-row extent in vectors, y the
+/// planes (batch x (Hq + Hkv + Hkv)), z is 1. nullopt past a grid limit.
+struct TailzeroGrid
+{
+    unsigned int x = 0;
+    unsigned int y = 0;
+};
+
+inline std::optional<TailzeroGrid> tailzeroGridOf(const bwd::SdpaBwdProblem& problem)
+{
+    const int64_t vector
+        = bwd::detail::REQUIRED_ALIGNMENT_BYTES / static_cast<int64_t>(problem.elementBytes);
+    const int64_t vectorsQk = (problem.headDimQk + vector - 1) / vector;
+    const int64_t vectorsV = (problem.headDimV + vector - 1) / vector;
+    const auto dq = bwd::detail::checkedProduct({problem.seqLenQ, vectorsQk});
+    const auto dk = bwd::detail::checkedProduct({problem.seqLenKv, vectorsQk});
+    const auto dv = bwd::detail::checkedProduct({problem.seqLenKv, vectorsV});
+    const auto heads = bwd::detail::checkedProduct({problem.numKvHeads, int64_t{2}});
+    const auto planes
+        = heads ? bwd::detail::checkedProduct({problem.batch, problem.numHeads + *heads})
+                : std::optional<int64_t>{};
+    if(!dq || !dk || !dv || !planes)
+    {
+        return std::nullopt;
+    }
+    const int64_t items = std::max({*dq, *dk, *dv});
+    const int64_t gridX = (items + TAILZERO_THREADS - 1) / TAILZERO_THREADS;
+    if(gridX > INT32_LIMIT || *planes > GRID_YZ_LIMIT)
+    {
+        return std::nullopt;
+    }
+    return TailzeroGrid{static_cast<unsigned int>(gridX), static_cast<unsigned int>(*planes)};
+}
+
+/// The tail-zero arguments over the outputs at @p dQ, @p dK and @p dV and the lengths at
+/// @p seqLenQ and @p seqLenKv. The strides are the graph's own, so a view shared between
+/// outputs is addressed as the graph declares it.
+inline TailzeroKernargs tailzeroKernargsOf(
+    const bwd::SdpaBwdProblem& problem, void* dQ, void* dK, void* dV, void* seqLenQ, void* seqLenKv)
+{
+    TailzeroKernargs tail;
+    tail.dQ = dQ;
+    tail.dK = dK;
+    tail.dV = dV;
+    tail.seqLenQ = seqLenQ;
+    tail.seqLenKv = seqLenKv;
+    tail.numBatch = toInt32(problem.batch, "batch");
+    tail.numHeadQ = toInt32(problem.numHeads, "num_head_q");
+    tail.numHeadK = toInt32(problem.numKvHeads, "num_head_k");
+    tail.maxSeqlenQ = toInt32(problem.seqLenQ, "seqlen_q");
+    tail.maxSeqlenK = toInt32(problem.seqLenKv, "seqlen_k");
+    tail.hdimQk = toInt32(problem.headDimQk, "hdim_qk");
+    tail.hdimV = toInt32(problem.headDimV, "hdim_vo");
+    tail.strideDQ = problem.dQ;
+    tail.strideDK = problem.dK;
+    tail.strideDV = problem.dV;
+    tail.mask = tailzeroMaskOf(problem);
+    return tail;
 }
 
 /// The bytes of a kernel argument struct, each argument at its natural offset.

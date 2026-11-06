@@ -371,11 +371,12 @@ class DSplitDq(_Exchange):
         ]
         return Q, DO
 
-    def row_stats(self, ops, L, q0, q_last, base, pitch):
-        """(lse, delta) of the lane's q row `q0 + q_row(L)` (clamped to `q_last`): the B-operand column of the dS operands. `base` / `pitch`:
-        `fmha.lse_row_addressing`'s (element offset, row pitch)."""
+    def row_stats(self, ops, L, q0, q_last, base):
+        """(lse, delta) of the lane's q row `q0 + q_row(L)` (clamped to `q_last`): the B-operand column of the dS operands. `base`: the element offset of
+        row 0 of this (sequence, head) in the workspace (`fmha.stats_ws_base`; rows are contiguous).
+        """
         row = ops.imin(q0 + self.q_row(L), q_last)
-        off = ops.i64(base) + ops.i64(row) * ops.i64(pitch)
+        off = ops.i64(base) + ops.i64(row)
         return ops.ldg("LSE", off, 1), ops.ldg("DELTA", off, 1)
 
     def stage_kv(

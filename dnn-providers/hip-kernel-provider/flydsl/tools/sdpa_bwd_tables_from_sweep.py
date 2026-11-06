@@ -5,8 +5,7 @@
 
     python tools/sdpa_bwd_tables_from_sweep.py <S1 dir>
 
-``<S1 dir>`` is the output of ``tools/sdpa_bwd_s1.py`` (``manifest.csv`` and
-``known-flaky.csv``); nothing else is read: no sweep tree and no git. Every Spec of the
+``<S1 dir>`` is the output of ``tools/sdpa_bwd_s1.py`` (its ``manifest.csv``); nothing else is read: no sweep tree and no git. Every Spec of the
 catalogue names one arch (``arch=`` in the key; none is gfx950), and the tool rewrites
 that arch's outputs only, each whole, so it is idempotent and leaves the other arches'
 alone:
@@ -15,11 +14,19 @@ alone:
   ``generators/_instances.py`` (``ARCH_OUTPUTS``);
 * the arch's reference CSV in ``tests/data``: per pinned object its hash, Spec key, sha256
   and resource row, which the compare tool and the generators' pin checks read;
-* gfx950 only, ``tests/data/sdpa_bwd_known_flaky.csv``: the hashes whose rebuild is known
-  to be nondeterministic (LLVM's AMDGPU backend), with the source of each. A generic arch
-  has no flaky handling, so its catalogue must list none.
 
-Every manifest row's hash must be the hash of its Spec key.
+The nondeterministic list (``tests/data/sdpa_bwd_nondeterministic.csv``) is not installed: the
+in-tree list is the authority (``generators/_sdpa_bwd_cdna_build.py``, "Nondeterministic builds").
+
+Every manifest row's hash must be the hash of its Spec key. A bf16 dkdv or dq row of an arch with the ``rne`` knob
+must spell ``rne=1`` (``gen_descriptors.rne_pin_problem``); the tool refuses the catalogue otherwise.
+
+A pin another pin makes redundant is not installed (``prune_floor_twins``): within one arch
+and kernel, a row is dropped when another row has the same object sha256, a Spec equal to
+its own apart from ``floor``, and a served head-dim range containing its own. Equal ranges
+keep the smaller hash. Nothing else is pruned: rows that differ in a knob stay even when
+the objects are identical. The dropped rows are printed, and the pruned catalogue is what
+the counts describe.
 """
 
 from __future__ import annotations
@@ -43,13 +50,10 @@ from generators._sdpa_bwd_spec import (  # noqa: E402
     UNSET_INT,
     UNSET_WORD,
     Spec,
+    rung_below,
 )
-from sdpa_bwd_s1 import (
-    FLAKY_COLUMNS,
-    PIN_COLUMNS,
-    read_resolved,
-    write_csv,
-)  # noqa: E402
+from gen_descriptors import rne_pin_problem  # noqa: E402
+from sdpa_bwd_s1 import PIN_COLUMNS, read_resolved, write_csv  # noqa: E402
 
 
 @dataclass(frozen=True)
@@ -62,7 +66,6 @@ class ArchOutputs:
         str, tuple[str, ...]
     ]  # kernel -> the perf columns after the head fields
     reference_csv: str
-    flaky_csv: str | None  # None: the arch has no flaky handling
 
 
 ARCH_OUTPUTS = {
@@ -71,14 +74,12 @@ ARCH_OUTPUTS = {
         KERNELS,
         KNOBS,
         "sdpa_bwd_reference.csv",
-        "sdpa_bwd_known_flaky.csv",
     ),
     "gfx11-generic": ArchOutputs(
         "SDPA_BWD_GFX11_TABLES",
         GENERIC_KERNELS,
         GENERIC_TABLE_KNOBS,
         "sdpa_bwd_gfx11_reference.csv",
-        None,
     ),
 }
 
@@ -94,9 +95,13 @@ def markers(arch: str) -> tuple[str, str]:
 
 def read_pins(
     s1_dir: Path,
-) -> tuple[str, dict[str, dict], dict[str, int], list[dict]]:
-    """(arch, {hash: manifest row}, {kernel: count}, known-flaky rows) of a resolved S1 dir."""
-    manifest, flaky = read_resolved(s1_dir)
+) -> tuple[str, dict[str, dict], dict[str, int], list[tuple[dict, dict]]]:
+    """(arch, {hash: manifest row}, {kernel: count}, dropped twins) of a resolved S1 dir.
+
+    The pins and counts are those left after ``prune_floor_twins``; the dropped
+    list holds each dropped row with the row that serves its range.
+    """
+    manifest, _ = read_resolved(s1_dir)
     pins: dict[str, dict] = {}
     arches = set()
     for row in manifest:
@@ -106,6 +111,8 @@ def read_pins(
         if pins.setdefault(row["hash"], row) is not row:
             raise SystemExit(f"{row['hash']}: listed twice")
         arches.add(spec.arch)
+        if (problem := rne_pin_problem(spec)) is not None:
+            raise SystemExit(f"{row['hash']}: {problem}")
     if len(arches) != 1:
         raise SystemExit(
             f"the catalogue names arches {sorted(arches)}; it must name one"
@@ -113,18 +120,71 @@ def read_pins(
     (arch,) = arches
     if arch not in ARCH_OUTPUTS:
         raise SystemExit(f"no instance table for arch {arch!r}")
-    kernels = ARCH_OUTPUTS[arch].kernels
-    counts = {kernel: 0 for kernel in kernels}
+    pins, dropped = prune_floor_twins(pins)
+    counts = {kernel: 0 for kernel in ARCH_OUTPUTS[arch].kernels}
     for row in pins.values():
         counts[Spec.parse(row["spec"]).kernel] += 1
-    for row in flaky:
-        if row["hash"] not in pins:
-            raise SystemExit(f"known-flaky {row['hash']} is not a pinned object")
-    if flaky and ARCH_OUTPUTS[arch].flaky_csv is None:
-        raise SystemExit(
-            f"{arch} has no known-flaky handling; its catalogue lists {len(flaky)}"
+    return arch, pins, counts, dropped
+
+
+def served_dims(spec: Spec) -> tuple[int, int]:
+    """The inclusive head-dim range @p spec's object serves (the engine's ``servesHeadDims``).
+
+    An exact object serves its tile only; a padded one the dims above its floor up to the
+    tile, where ``g1`` is floor 0 and ``tail`` the rung below the tile on the dtype's ladder.
+    """
+    if not spec.padded:
+        return spec.tile, spec.tile
+    if spec.floor == "g1":
+        floor = 0
+    elif spec.floor == "tail":
+        floor = rung_below(spec.tile, spec.dtype, spec.arch)
+    else:
+        floor = int(spec.floor)
+    return floor + 1, spec.tile
+
+
+def prune_floor_twins(
+    pins: dict[str, dict],
+) -> tuple[dict[str, dict], list[tuple[dict, dict]]]:
+    """(the pins left, [(dropped row, the row that serves its range)]) once floor twins are dropped.
+
+    Twins share the arch, kernel, object sha256 and every Spec field but ``floor``. A row
+    is dropped when a twin's served range contains its own; of two equal ranges the smaller
+    hash stays. The relation is a strict order, so a row that survives is never dropped
+    for a row that is itself dropped.
+    """
+    groups: dict[tuple, list[tuple[tuple[int, int], dict]]] = {}
+    for row in pins.values():
+        spec = Spec.parse(row["spec"])
+        # The key with the floor blanked, so no Spec is built from a floor it would refuse.
+        head = spec.functional
+        twin_key = (
+            row["sha256"],
+            head[:7] + head[8:],
+            tuple(spec.knobs.items()),
         )
-    return arch, pins, counts, flaky
+        groups.setdefault(twin_key, []).append((served_dims(spec), row))
+    dropped: list[tuple[dict, dict]] = []
+    for members in groups.values():
+        for (low, high), row in members:
+            keepers = [
+                ((other_low - other_high, other["hash"]), other)
+                for (other_low, other_high), other in members
+                if other is not row
+                and other_low <= low
+                and high <= other_high
+                and (
+                    (other_low, other_high) != (low, high)
+                    or other["hash"] < row["hash"]
+                )
+            ]
+            if keepers:
+                # The widest keeper, then the smallest hash, so the report is deterministic.
+                dropped.append((row, min(keepers, key=lambda k: k[0])[1]))
+    gone = {row["hash"] for row, _ in dropped}
+    kept = {h: row for h, row in pins.items() if h not in gone}
+    return kept, sorted(dropped, key=lambda d: d[0]["hash"])
 
 
 def table_row(spec: Spec, columns: tuple[str, ...]) -> str:
@@ -175,9 +235,9 @@ def install(
     s1_dir: Path,
     instances: Path = FLYDSL / "generators" / "_instances.py",
     data_dir: Path = FLYDSL / "tests" / "data",
-) -> tuple[int, int]:
-    """Rewrite the arch's outputs from ``s1_dir``; (pins, known-flaky) counts."""
-    arch, pins, counts, flaky = read_pins(s1_dir)
+) -> int:
+    """Rewrite the arch's outputs from ``s1_dir``; the number of pins."""
+    arch, pins, counts, dropped = read_pins(s1_dir)
     out = ARCH_OUTPUTS[arch]
     begin, end = markers(arch)
     text = instances.read_text(encoding="utf-8")
@@ -191,14 +251,16 @@ def install(
         PIN_COLUMNS,
         sorted(pins.values(), key=lambda r: r["spec"]),
     )
-    if out.flaky_csv is not None:
-        write_csv(data_dir / out.flaky_csv, FLAKY_COLUMNS, flaky)
     print(
         f"{len(pins)} {arch} rows from the S1 catalogue: "
         + ", ".join(f"{k} {v}" for k, v in counts.items())
     )
-    print(f"{len(flaky)} known-flaky hashes")
-    return len(pins), len(flaky)
+    print(
+        f"{len(dropped)} floor twins dropped (hash -> the row that serves its range):"
+    )
+    for row, keeper in dropped:
+        print(f"  {row['hash']} -> {keeper['hash']}  {row['spec']}")
+    return len(pins)
 
 
 def main(argv: list[str] | None = None) -> int:

@@ -9,6 +9,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <map>
 #include <set>
 #include <string>
 #include <utility>
@@ -17,9 +18,13 @@
 
 #include <gtest/gtest.h>
 
+#include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
+#include <hipdnn_plugin_sdk/PluginVersionConstants.hpp>
 #include <hipdnn_plugin_sdk/ingestor/Descriptors.hpp>
 
+#include "engines/kernel_ingestor_engine/packs/FlydslSdpaBwdNativeShared.hpp"
 #include "engines/kernel_ingestor_engine/packs/FlydslSdpaBwdNoSerialization.hpp"
+#include "engines/kernel_ingestor_engine/packs/FlydslSdpaBwdSchemaGate.hpp"
 #include "engines/kernel_ingestor_engine/packs/IngestorPackTestSupport.hpp"
 
 /**
@@ -29,14 +34,17 @@
  *
  * The merged table is 309 objects: 189 without a bias and 120 with one. The 44 bias objects
  * that store dB carry the dBias reduce kernel as a second symbol of the same code object; a
- * store_db=0 object never writes dB and carries no reduce kernel. Every case
- * opens by reading loadedSet(), none skips and none touches a device, so an empty shard fails
- * here instead of passing silently. The seam suite, over rows written in the test, is
- * TestFlydslSdpaBwdEngine.cpp.
+ * store_db=0 object never writes dB and carries no reduce kernel. Every object is a
+ * multi-launch pack: its `sources` hold the merged kernel and the tail-zero kernel, one of
+ * three tail-zero objects shared by dtype, and a packed object records a resolved dK/dV query
+ * tile within the pack bound. Every case opens by reading loadedSet(), none skips and none
+ * touches a device, so an empty shard fails here instead of passing silently. The seam suite,
+ * over rows written in the test, is TestFlydslSdpaBwdEngine.cpp.
  *
- * A descriptor carries the argument list of the merged symbol only. The reduce kernel's
- * 88-byte list (`_PARAMS["dbias_reduce"]`) is checked when the object is generated and, as the
- * engine launches it, by the seam suite; here every dB-storing bias row names the reduce symbol.
+ * A descriptor carries the argument lists of the merged and tail-zero symbols only. The reduce
+ * kernel's 88-byte list (`_PARAMS["dbias_reduce"]`) is checked when the object is generated
+ * and, as the engine launches it, by the seam suite; here every dB-storing bias row names the
+ * reduce symbol.
  *
  * Registered with hkp_register_census_tests() in src/tests/CMakeLists.txt, over the
  * architectures the op ships for.
@@ -52,6 +60,9 @@ using namespace hip_kernel_provider::kernel_ingestor_engine::testing;
 constexpr const char* ENGINE_NAME = "hipkernel:flydsl_sdpa_bwd_merged";
 constexpr const char* GRAPH_MATCHER = "hipkernel.flydsl_sdpa_bwd_merged.graph_match";
 constexpr const char* REDUCE_SYMBOL = "fmha_bwd_dbias_reduce_gfx950_kernel_1";
+constexpr const char* TAILZERO_SYMBOL = "fmha_bwd_tailzero_gfx950_kernel_0";
+constexpr const char* MERGED_LAUNCH = "merged";
+constexpr const char* TAILZERO_LAUNCH = "tailzero";
 
 constexpr size_t MERGED_ROWS = 309;
 constexpr size_t BIAS_ROWS = 120;
@@ -94,13 +105,30 @@ TEST(TestFlydslSdpaBwdPacks, ShipsEveryMergedRowOnce)
     size_t kernels = 0;
     size_t biasRows = 0;
     size_t reduceRows = 0;
+    std::map<std::string, std::set<std::string>> tailzeroByDtype;
     for(const auto& pack : set.packs)
     {
         for(const auto& kernel : pack.kernels)
         {
             ++kernels;
             names.insert(kernel.name);
-            EXPECT_EQ(kernel.source.kind, KernelSourceKind::KPACK) << kernel.name;
+            // A multi-launch pack: `source` is left default beside `sources`.
+            EXPECT_EQ(kernel.sources.size(), 2U) << kernel.name;
+            for(const char* launch : {MERGED_LAUNCH, TAILZERO_LAUNCH})
+            {
+                const auto entry = kernel.sources.find(launch);
+                ASSERT_NE(entry, kernel.sources.end())
+                    << kernel.name << " lacks the launch " << launch;
+                EXPECT_EQ(entry->second.kind, KernelSourceKind::KPACK)
+                    << kernel.name << " " << launch;
+                EXPECT_FALSE(entry->second.sha256.empty()) << kernel.name << " " << launch;
+            }
+            std::string tailzeroSha;
+            if(const auto zero = kernel.sources.find(TAILZERO_LAUNCH); zero != kernel.sources.end())
+            {
+                EXPECT_EQ(zero->second.symbol, TAILZERO_SYMBOL) << kernel.name;
+                tailzeroSha = zero->second.sha256;
+            }
 
             const auto integer = [&](const char* field) {
                 const auto* value = tryGetMetadataField<int64_t>(kernel.metadata, field);
@@ -113,6 +141,7 @@ TEST(TestFlydslSdpaBwdPacks, ShipsEveryMergedRowOnce)
                 return value == nullptr ? std::string() : *value;
             };
             EXPECT_EQ(dtypes.count(text("dtype")), 1U) << kernel.name;
+            tailzeroByDtype[text("dtype")].insert(tailzeroSha);
             EXPECT_EQ(tiles.count(integer("head_dim")), 1U) << kernel.name;
             EXPECT_GT(integer("head_dim_v"), 0) << kernel.name;
             EXPECT_EQ(dforms.count(text("dform")), 1U) << kernel.name;
@@ -127,6 +156,11 @@ TEST(TestFlydslSdpaBwdPacks, ShipsEveryMergedRowOnce)
             EXPECT_TRUE(storeDb == -1 || storeDb == 0) << kernel.name;
             const auto gqaPack = integer("gqa_pack");
             EXPECT_TRUE(gqaPack == -1 || gqaPack == 1) << kernel.name;
+            // A packed row records the resolved tile the pack bound applies to (C2).
+            const auto blockQ = integer("block_q");
+            EXPECT_TRUE(gqaPack != 1
+                        || (blockQ > 0 && blockQ <= flydsl_sdpa_bwd_native::PACK_MAX_BLOCK_Q))
+                << kernel.name << " block_q " << blockQ;
             for(const char* geometry : {"block_threads", "block_kv", "block_m"})
             {
                 EXPECT_GT(integer(geometry), 0) << kernel.name << " " << geometry;
@@ -148,49 +182,91 @@ TEST(TestFlydslSdpaBwdPacks, ShipsEveryMergedRowOnce)
     EXPECT_EQ(names.size(), MERGED_ROWS) << "a name is shipped twice";
     EXPECT_EQ(biasRows, BIAS_ROWS);
     EXPECT_EQ(reduceRows, REDUCE_ROWS);
+    EXPECT_EQ(tailzeroByDtype.size(), dtypes.size()) << "one tail-zero entry per row dtype";
+    for(const auto& [dtype, objects] : tailzeroByDtype)
+    {
+        // The f16 and bf16 objects are byte-identical (they store 16-bit zeros): entries of
+        // two dtypes may resolve to one object, so objects are not counted.
+        EXPECT_EQ(objects.size(), 1U) << dtype << ": one tail-zero object per dtype entry";
+        EXPECT_EQ(objects.count(std::string()), 0U) << dtype << ": the entry names no object";
+    }
 }
 
 TEST(TestFlydslSdpaBwdPacks, EveryKernelDeclaresTheMergedSignature)
 {
     const auto& set = loadedSet(ENGINE_NAME);
 
-    // `_PARAMS["merged"]`: eleven pointers (Q K V B O DO DK DV DQ DB LSE), batch_size, four
-    // seqinfo pointers, six i32 (varlen_bits .. window_right), the two philox pointers, the i64
-    // offset, i32 threshold, f32 scale, four i32 (heads, head dims), f32 sm_scale, thirty i64
-    // strides and i32 rt_flags: 63 arguments, 452 bytes, each at its natural offset.
     struct Run
     {
         const char* kind;
         uint32_t size;
         size_t count;
     };
-    const std::array<Run, 12> runs{{{"global_buffer", 8, 11},
-                                    {"by_value", 4, 1},
-                                    {"global_buffer", 8, 4},
-                                    {"by_value", 4, 6},
-                                    {"global_buffer", 8, 2},
-                                    {"by_value", 8, 1},
-                                    {"by_value", 4, 1},
-                                    {"by_value", 4, 1},
-                                    {"by_value", 4, 4},
-                                    {"by_value", 4, 1},
-                                    {"by_value", 8, 30},
-                                    {"by_value", 4, 1}}};
-    std::vector<std::pair<const char*, uint32_t>> slots;
-    std::vector<uint32_t> offsets;
-    uint32_t offset = 0;
-    for(const auto& run : runs)
-    {
-        for(size_t item = 0; item < run.count; ++item)
+    // Each argument at its natural offset.
+    using Layout = std::pair<std::vector<std::pair<const char*, uint32_t>>, std::vector<uint32_t>>;
+    const auto layoutOf = [](const std::vector<Run>& runs) {
+        Layout layout;
+        uint32_t offset = 0;
+        for(const auto& run : runs)
         {
-            offset = (offset + run.size - 1) / run.size * run.size;
-            slots.emplace_back(run.kind, run.size);
-            offsets.push_back(offset);
-            offset += run.size;
+            for(size_t item = 0; item < run.count; ++item)
+            {
+                offset = (offset + run.size - 1) / run.size * run.size;
+                layout.first.emplace_back(run.kind, run.size);
+                layout.second.push_back(offset);
+                offset += run.size;
+            }
         }
+        return std::pair{layout, offset};
+    };
+    // `_PARAMS["merged"]`: eleven pointers (Q K V B O DO DK DV DQ DB LSE), batch_size, four
+    // seqinfo pointers, the i64 multipliers of Q and K, an (offset pointer, i64 multiplier)
+    // pair for each of V, O, dO, dQ, dK and dV, the stats' offset pointer, multiplier and three
+    // i64 strides, six i32 (varlen_bits .. window_right), the two philox pointers, the i64
+    // offset, i32 threshold, f32 scale, four i32 (heads, head dims), f32 sm_scale, thirty i64
+    // strides and i32 rt_flags: 82 arguments, 604 bytes.
+    std::vector<Run> merged{
+        {"global_buffer", 8, 11}, {"by_value", 4, 1}, {"global_buffer", 8, 4}, {"by_value", 8, 2}};
+    for(size_t pair = 0; pair < 6; ++pair)
+    {
+        merged.push_back({"global_buffer", 8, 1});
+        merged.push_back({"by_value", 8, 1});
     }
-    ASSERT_EQ(slots.size(), 63U);
-    ASSERT_EQ(offset, 452U);
+    for(const Run& run : {Run{"global_buffer", 8, 1},
+                          Run{"by_value", 8, 4},
+                          Run{"by_value", 4, 6},
+                          Run{"global_buffer", 8, 2},
+                          Run{"by_value", 8, 1},
+                          Run{"by_value", 4, 1},
+                          Run{"by_value", 4, 1},
+                          Run{"by_value", 4, 4},
+                          Run{"by_value", 4, 1},
+                          Run{"by_value", 8, 30},
+                          Run{"by_value", 4, 1}})
+    {
+        merged.push_back(run);
+    }
+    const auto [mergedLayout, mergedBytes] = layoutOf(merged);
+    ASSERT_EQ(mergedLayout.first.size(), 82U);
+    ASSERT_EQ(mergedBytes, 604U);
+    // `_PARAMS["tailzero"]`: the dQ, dK and dV pointers, the two length pointers, seven i32
+    // extents, nine i64 strides and the i32 mask: 22 arguments, 148 bytes.
+    const auto [tailzeroLayout, tailzeroBytes] = layoutOf(
+        {{"global_buffer", 8, 5}, {"by_value", 4, 7}, {"by_value", 8, 9}, {"by_value", 4, 1}});
+    ASSERT_EQ(tailzeroLayout.first.size(), 22U);
+    ASSERT_EQ(tailzeroBytes, 148U);
+
+    const auto expectLayout = [](const std::string& name,
+                                 const std::vector<KernelArgument>& signature,
+                                 const Layout& layout) {
+        ASSERT_EQ(signature.size(), layout.first.size()) << name;
+        for(size_t slot = 0; slot < layout.first.size(); ++slot)
+        {
+            EXPECT_EQ(signature[slot].kind, layout.first[slot].first) << name << " slot " << slot;
+            EXPECT_EQ(signature[slot].size, layout.first[slot].second) << name << " slot " << slot;
+            EXPECT_EQ(signature[slot].offset, layout.second[slot]) << name << " slot " << slot;
+        }
+    };
 
     size_t kernels = 0;
     for(const auto& pack : set.packs)
@@ -198,19 +274,47 @@ TEST(TestFlydslSdpaBwdPacks, EveryKernelDeclaresTheMergedSignature)
         for(const auto& kernel : pack.kernels)
         {
             ++kernels;
-            const auto& signature = kernel.source.signature;
-            ASSERT_EQ(signature.size(), slots.size()) << kernel.name;
-            for(size_t slot = 0; slot < slots.size(); ++slot)
-            {
-                EXPECT_EQ(signature[slot].kind, slots[slot].first)
-                    << kernel.name << " slot " << slot;
-                EXPECT_EQ(signature[slot].size, slots[slot].second)
-                    << kernel.name << " slot " << slot;
-                EXPECT_EQ(signature[slot].offset, offsets[slot]) << kernel.name << " slot " << slot;
-            }
+            expectLayout(kernel.name, kernel.sources.at(MERGED_LAUNCH).signature, mergedLayout);
+            expectLayout(kernel.name + " tailzero",
+                         kernel.sources.at(TAILZERO_LAUNCH).signature,
+                         tailzeroLayout);
         }
     }
     EXPECT_EQ(kernels, MERGED_ROWS);
+}
+
+// The ingestor declines a graph whose schema floor is above the engine's `sdk_version` before
+// the matcher runs. The matcher serves ragged tensors, non-default alignment and ragged offset
+// multipliers, so the engine declares the schema that introduced the last of them: an SDK that
+// raises the multiplier floor again fails here until the matcher has been reviewed for it.
+TEST(TestFlydslSdpaBwdPacks, DeclaresASchemaAtLeastTheRaggedOffsetMultiplierFloor)
+{
+    const auto& set = loadedSet(ENGINE_NAME);
+    const auto& floor
+        = hipdnn_plugin_sdk::computeMinimumEnginePluginApiVersion(false, false, false, false, true);
+    EXPECT_FALSE(set.engine.sdkVersion < floor) << set.engine.sdkVersion.str();
+}
+
+// Graphs stamped as the backend stamps them reach the matcher through GenericPlanBuilder, and
+// the matcher's verdicts hold there: ragged tensors with and without a multiplier and an
+// aligned operand are served; a misaligned operand, ragged stats beside a dense Q, a ragged
+// bias and a multiplier below 1 are declined by the matcher, not by the schema gate.
+TEST(TestFlydslSdpaBwdPacks, ServesStampedRaggedGraphsAndDeclinesTheFieldsTheMatcherRejects)
+{
+    const auto& set = loadedSet(ENGINE_NAME);
+    const auto failures = schema_gate::failures(
+        set, hipdnn_data_sdk::utilities::getEnv("HIPDNN_TEST_EXPECTED_ARCH"));
+    std::string report;
+    for(const auto& failure : failures)
+    {
+        report += "\n  " + failure;
+    }
+    EXPECT_TRUE(failures.empty()) << report;
+    // The cases only matter if they can see the gate: an engine of the schema these engines
+    // shipped with declines the same graph.
+    const auto invisible = schema_gate::gateIsInvisible(
+        set, hipdnn_data_sdk::utilities::getEnv("HIPDNN_TEST_EXPECTED_ARCH"));
+    EXPECT_FALSE(invisible.has_value()) << invisible.value_or("");
 }
 
 // Pins that neither engine advertises or performs plan saving. Remove or invert when RFC 0021

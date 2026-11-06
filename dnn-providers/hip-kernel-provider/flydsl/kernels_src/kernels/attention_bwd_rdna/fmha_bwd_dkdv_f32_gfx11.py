@@ -16,7 +16,7 @@ LDS; owner accumulators in registers; fixed-order fp32 accumulation; `sm_scale` 
 
 Scope: classes `plain`, `causal` and `bias`, each with baked dropout (`bk,1`) or without, exact head dims (hdim_qk = hdim_vo = tile) or padded
 (`padded=1`: the runtime `hdim_qk` / `hdim_vo` <= tile), any sequence lengths (ragged Q and KV tiles), MHA / GQA and varlen addressing through the shared
-decoders (`fmha.decode_addressing`: CUMULATIVE / INDIVIDUAL lengths (`seqused_k`), ARRAY positions, stacked layouts; LSE and Delta HT or TH). Other classes
+decoders (`fmha.decode_addressing`: CUMULATIVE / INDIVIDUAL lengths (`seqused_k`), ARRAY positions); each tensor starts at its own origin (`fmha.tensor_origin`), LSE' and Delta come from the compact `[B, H, max_seqlen_q]` workspace. Other classes
 and `dform=rt` raise `ValueError`. There is no dump object.
 
 Padded head: a column at or past its runtime extent (Q, K and dK: `hdim_qk`; dO, V and dV: `hdim_vo`) is zero on every load (the address is clamped to
@@ -149,6 +149,16 @@ def build_fmha_bwd_dkdv_f32_gfx11_module_primary(meta, knobs, runtime_axes=()):
         seqinfo_q1: fx.Pointer,
         seqinfo_k0: fx.Pointer,
         seqinfo_k1: fx.Pointer,
+        mul_Q: fx.Int64,
+        mul_K: fx.Int64,
+        off_V: fx.Pointer,
+        mul_V: fx.Int64,
+        off_DO: fx.Pointer,
+        mul_DO: fx.Int64,
+        off_DK: fx.Pointer,
+        mul_DK: fx.Int64,
+        off_DV: fx.Pointer,
+        mul_DV: fx.Int64,
         varlen_bits: fx.Int32,
         num_seqlens: fx.Int32,
         max_seqlen_q: fx.Int32,
@@ -197,14 +207,11 @@ def build_fmha_bwd_dkdv_f32_gfx11_module_primary(meta, knobs, runtime_axes=()):
 
         # ---- Varlen prologue (the forward's, through the shared decoders) ----
         z_i32 = fx.Int32(gpu.block_idx.z)
-        seqlen_q_i32, q_row_off, q_batch = fmha.decode_addressing(
+        seqlen_q_i32, _, _ = fmha.decode_addressing(
             varlen_bits, 0, max_seqlen_q, seqinfo_q0, seqinfo_q1, z_i32
         )
-        seqlen_k_i32, k_row_off, k_batch = fmha.decode_addressing(
+        seqlen_k_i32, _, _ = fmha.decode_addressing(
             varlen_bits, 8, max_seqlen_k, seqinfo_k0, seqinfo_k1, z_i32
-        )
-        lse_tokens = fmha.lse_token_pitch(
-            varlen_bits, 0, max_seqlen_q, seqinfo_q0, seqinfo_q1, num_seqlens
         )
 
         tid = fx.Int32(gpu.thread_idx.x)
@@ -221,35 +228,34 @@ def build_fmha_bwd_dkdv_f32_gfx11_module_primary(meta, knobs, runtime_axes=()):
         # MQA/GQA: the KV head is shared by `group` query heads and dK/dV sum over all of them, folded into the Q-tile loop.
         group_i32 = num_head_q // num_head_k
 
-        _q_batch_v = fx.Index(q_batch)
-        _k_batch_v = fx.Index(k_batch)
-        _q_row_off_v = fx.Index(q_row_off)
-        _k_row_off_v = fx.Index(k_row_off)
+        # Each tensor starts where its own offsets say (ragged) or at its batch stride (dense); see `fmha.tensor_origin`.
+        _q_origin = fmha.tensor_origin(
+            seqinfo_q1, mul_Q, z_i32, stride_q_batch, seqlen_q_i32
+        )
+        _do_origin = fmha.tensor_origin(
+            off_DO, mul_DO, z_i32, stride_do_batch, seqlen_q_i32
+        )
+        _k_origin = fmha.tensor_origin(
+            seqinfo_k1, mul_K, z_i32, stride_k_batch, seqlen_k_i32
+        )
+        _v_origin = fmha.tensor_origin(
+            off_V, mul_V, z_i32, stride_v_batch, seqlen_k_i32
+        )
+        _dk_origin = fmha.tensor_origin(
+            off_DK, mul_DK, z_i32, stride_dk_batch, seqlen_k_i32
+        )
+        _dv_origin = fmha.tensor_origin(
+            off_DV, mul_DV, z_i32, stride_dv_batch, seqlen_k_i32
+        )
         sm_log2e = sm_scale * fx.Float32(_LOG2E)
         hdq_i32 = fx.Int32(hdim_qk)
         hdv_i32 = fx.Int32(hdim_vo)
 
         # Tile bases (element offsets of row 0 of this sequence at head `head_k`) of K, V, dK, dV.
-        k_base = (
-            _k_batch_v * fx.Index(stride_k_batch)
-            + head_k * fx.Index(stride_k_head)
-            + _k_row_off_v * fx.Index(stride_k_seq)
-        )
-        v_base = (
-            _k_batch_v * fx.Index(stride_v_batch)
-            + head_k * fx.Index(stride_v_head)
-            + _k_row_off_v * fx.Index(stride_v_seq)
-        )
-        dk_base = (
-            _k_batch_v * fx.Index(stride_dk_batch)
-            + head_k * fx.Index(stride_dk_head)
-            + _k_row_off_v * fx.Index(stride_dk_seq)
-        )
-        dv_base = (
-            _k_batch_v * fx.Index(stride_dv_batch)
-            + head_k * fx.Index(stride_dv_head)
-            + _k_row_off_v * fx.Index(stride_dv_seq)
-        )
+        k_base = _k_origin + head_k * fx.Index(stride_k_head)
+        v_base = _v_origin + head_k * fx.Index(stride_v_head)
+        dk_base = _dk_origin + head_k * fx.Index(stride_dk_head)
+        dv_base = _dv_origin + head_k * fx.Index(stride_dv_head)
 
         def lds_ld(word):
             return fx.ptr_load(lds + fx.Int32(word), fx.Float32)
@@ -370,31 +376,20 @@ def build_fmha_bwd_dkdv_f32_gfx11_module_primary(meta, knobs, runtime_axes=()):
             head_q_i32 = fx.Int32(head_k) * group_i32 + _g
             head_q = fx.Index(head_q_i32)
             q0 = _bi * fx.Int32(BM)  # first Q row of this tile
-            q_base = (
-                _q_batch_v * fx.Index(stride_q_batch)
-                + head_q * fx.Index(stride_q_head)
-                + _q_row_off_v * fx.Index(stride_q_seq)
-            )
-            do_base = (
-                _q_batch_v * fx.Index(stride_do_batch)
-                + head_q * fx.Index(stride_do_head)
-                + _q_row_off_v * fx.Index(stride_do_seq)
-            )
+            q_base = _q_origin + head_q * fx.Index(stride_q_head)
+            do_base = _do_origin + head_q * fx.Index(stride_do_head)
             q_rs, do_rs, k_rs, v_rs = (
                 fx.Index(stride_q_seq),
                 fx.Index(stride_do_seq),
                 fx.Index(stride_k_seq),
                 fx.Index(stride_v_seq),
             )
-            lse_base, lse_pitch = fmha.lse_row_addressing(
-                varlen_bits, _q_batch_v, head_q, num_head_q, lse_tokens, _q_row_off_v
-            )
+            ws_base = fmha.ws_row_base(z_i32, head_q, num_head_q, max_seqlen_q)
             if const_expr(BIAS):
-                bias_base = (
-                    _q_batch_v * fx.Index(stride_b_batch)
-                    + head_q * fx.Index(stride_b_head)
-                    + _q_row_off_v * fx.Index(stride_b_seq_q)
-                )
+                # A bias is dense: ragged graphs with a bias decline.
+                bias_base = fx.Index(z_i32) * fx.Index(
+                    stride_b_batch
+                ) + head_q * fx.Index(stride_b_head)
             if const_expr(DROPOUT):
                 _ph_plane = z_i32 * fx.Int32(num_head_q) + head_q_i32
                 _ph_base = _ph_off + fx.Int64(_ph_plane) * fx.Int64(
@@ -427,7 +422,7 @@ def build_fmha_bwd_dkdv_f32_gfx11_module_primary(meta, knobs, runtime_axes=()):
                 q_row = q0 + pair_m[i]
                 q_ok = q_row < seqlen_q_i32
                 q_c = fmha.common_utils.smin(q_row, q_last_i32)
-                row_off = lse_base + fx.Index(q_c) * lse_pitch
+                row_off = ws_base + fx.Index(q_c)
                 if const_expr(BIAS):
                     # natural: the bias exponent scales by log2 e last
                     lse2 = fx.ptr_load(l_p + fx.Int64(row_off), fx.Float32)
@@ -542,16 +537,10 @@ def build_fmha_bwd_dkdv_f32_gfx11_module_primary(meta, knobs, runtime_axes=()):
                         ),
                     )
 
+    _value_attrs = {"rocdl.waves_per_eu": int(WAVES_PER_EU)} if WAVES_PER_EU else {}
+
     def _run(launcher, stream, num_kv_tiles, num_head_k_idx, nseq_idx):
         ctx = CompilationContext.get_current()
-        if const_expr(WAVES_PER_EU is not None):
-            _wpe = int(WAVES_PER_EU)
-            if const_expr(_wpe >= 1):
-                for op in ctx.gpu_module_body.operations:
-                    if const_expr(getattr(op, "OPERATION_NAME", None) == "gpu.func"):
-                        op.attributes["rocdl.WAVES_PER_EU"] = ir.IntegerAttr.get(
-                            T.i32, _wpe
-                        )
         flat_wg_attr = ir.StringAttr.get(f"{T_},{T_}")
         for op in ctx.gpu_module_body.operations:
             if const_expr(getattr(op, "OPERATION_NAME", None) == "gpu.func"):
@@ -590,6 +579,16 @@ def build_fmha_bwd_dkdv_f32_gfx11_module_primary(meta, knobs, runtime_axes=()):
         seqinfo_q1: fx.Pointer,
         seqinfo_k0: fx.Pointer,
         seqinfo_k1: fx.Pointer,
+        mul_Q: fx.Int64,
+        mul_K: fx.Int64,
+        off_V: fx.Pointer,
+        mul_V: fx.Int64,
+        off_DO: fx.Pointer,
+        mul_DO: fx.Int64,
+        off_DK: fx.Pointer,
+        mul_DK: fx.Int64,
+        off_DV: fx.Pointer,
+        mul_DV: fx.Int64,
         varlen_bits: fx.Int32,
         num_seqlens: fx.Int32,
         max_seqlen_q: fx.Int32,
@@ -647,6 +646,16 @@ def build_fmha_bwd_dkdv_f32_gfx11_module_primary(meta, knobs, runtime_axes=()):
                 seqinfo_q1,
                 seqinfo_k0,
                 seqinfo_k1,
+                mul_Q,
+                mul_K,
+                off_V,
+                mul_V,
+                off_DO,
+                mul_DO,
+                off_DK,
+                mul_DK,
+                off_DV,
+                mul_DV,
                 varlen_bits,
                 num_seqlens,
                 max_seqlen_q,
@@ -685,6 +694,7 @@ def build_fmha_bwd_dkdv_f32_gfx11_module_primary(meta, knobs, runtime_axes=()):
                 stride_b_head,
                 stride_b_seq_q,
                 rt_flags,
+                value_attrs=_value_attrs,
             ),
             stream,
             num_kv_tiles,

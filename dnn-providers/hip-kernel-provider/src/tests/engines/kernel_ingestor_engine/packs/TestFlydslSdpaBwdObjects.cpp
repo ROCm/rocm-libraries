@@ -114,7 +114,44 @@ protected:
     }
 };
 
+/// Bottom-right causal graphs with more queries than keys, so the leading query rows see no key.
+/// gfx950 only, as the lowest-finite bias cases: the gfx11 split kernels' keyless-row cases are in the
+/// parity suite (TestFlydslSdpaBwdParity.cpp).
+class TestGpuFlydslSdpaBwdMergedKeylessRows : public FlydslSdpaBwdDevice
+{
+protected:
+    TestGpuFlydslSdpaBwdMergedKeylessRows()
+        : FlydslSdpaBwdDevice(MERGED_OPS)
+    {
+    }
+
+    void SetUp() override
+    {
+        FlydslSdpaBwdDevice::SetUp();
+        skipUnlessGfx950();
+    }
+};
+
+class TestGpuFlydslSdpaBwdSplitKeylessRows : public FlydslSdpaBwdDevice
+{
+protected:
+    TestGpuFlydslSdpaBwdSplitKeylessRows()
+        : FlydslSdpaBwdDevice(SPLIT_OPS)
+    {
+    }
+
+    void SetUp() override
+    {
+        FlydslSdpaBwdDevice::SetUp();
+        skipUnlessGfx950();
+    }
+};
+
 // One suite per dtype: the datatype token ends the suite name.
+using TestGpuFlydslSdpaBwdMergedKeylessRowsBfp16 = TestGpuFlydslSdpaBwdMergedKeylessRows;
+using TestGpuFlydslSdpaBwdSplitKeylessRowsBfp16 = TestGpuFlydslSdpaBwdSplitKeylessRows;
+using TestGpuFlydslSdpaBwdSplitKeylessRowsFp16 = TestGpuFlydslSdpaBwdSplitKeylessRows;
+using TestGpuFlydslSdpaBwdSplitKeylessRowsFp32 = TestGpuFlydslSdpaBwdSplitKeylessRows;
 using TestGpuFlydslSdpaBwdMergedLowestFiniteBiasBfp16 = TestGpuFlydslSdpaBwdMergedLowestFiniteBias;
 using TestGpuFlydslSdpaBwdMergedLowestFiniteBiasFp16 = TestGpuFlydslSdpaBwdMergedLowestFiniteBias;
 using TestGpuFlydslSdpaBwdSplitLowestFiniteBiasBfp16 = TestGpuFlydslSdpaBwdSplitLowestFiniteBias;
@@ -218,6 +255,20 @@ BwdCase lowestFiniteBiasCase(DataType dtype)
     c.seqQ = 200;
     c.seqKv = 300;
     c.biasFill = BwdBiasFill::LOWEST_ROWS;
+    return c;
+}
+
+/// A bottom-right causal graph with Sq > Skv: query row r sees keys up to r + Skv - Sq, so the first
+/// Sq - Skv = 160 rows (two and a half 64-row tiles) see no key and the next ones see 1..96. The head dim and
+/// class are those of causalCase: the object selection does not depend on the diagonal, so the
+/// same shipped rows serve both.
+BwdCase keylessRowsCase(DataType dtype)
+{
+    BwdCase c = causalCase(dtype);
+    c.mask = BwdMask::BOTTOM_RIGHT;
+    c.seqQ = 256;
+    c.seqKv = 96;
+    c.keylessDqExactlyZero = true;
     return c;
 }
 
@@ -409,6 +460,26 @@ TEST_F(TestGpuFlydslSdpaBwdSplitLowestFiniteBiasFp16, MatchesTheReference)
 TEST_F(TestGpuFlydslSdpaBwdSplitLowestFiniteBiasFp32, MatchesTheReference)
 {
     expectCase(SPLIT_ENGINE, lowestFiniteBiasCase(DataType::FLOAT));
+}
+
+TEST_F(TestGpuFlydslSdpaBwdMergedKeylessRowsBfp16, DqIsZeroAndGradientsMatchTheReference)
+{
+    expectCase(MERGED_ENGINE, keylessRowsCase(DataType::BFLOAT16));
+}
+
+TEST_F(TestGpuFlydslSdpaBwdSplitKeylessRowsBfp16, DqIsZeroAndGradientsMatchTheReference)
+{
+    expectCase(SPLIT_ENGINE, keylessRowsCase(DataType::BFLOAT16));
+}
+
+TEST_F(TestGpuFlydslSdpaBwdSplitKeylessRowsFp16, DqIsZeroAndGradientsMatchTheReference)
+{
+    expectCase(SPLIT_ENGINE, keylessRowsCase(DataType::HALF));
+}
+
+TEST_F(TestGpuFlydslSdpaBwdSplitKeylessRowsFp32, DqIsZeroAndGradientsMatchTheReference)
+{
+    expectCase(SPLIT_ENGINE, keylessRowsCase(DataType::FLOAT));
 }
 
 } // namespace

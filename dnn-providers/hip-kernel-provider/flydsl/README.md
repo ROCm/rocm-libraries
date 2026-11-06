@@ -176,7 +176,10 @@ split engine's slot ops are `sdpa_bwd_prep`, `sdpa_bwd_dkdv` and `sdpa_bwd_dq`;
 engine-level (it models the whole program); trained estimates install under
 `sdpa_bwd_split/heuristics/`, and the slots have no rankers. The dBias and dSink reduce kernels have no
 op of their own: on gfx950 they ride inside the objects that launch them, on gfx11-generic
-the three dBias reduce objects are companions of the dQ op. bf16, f16 and f32 data;
+the three dBias reduce objects are companions of the dQ op. A graph with `padding_mask` also launches a
+tail-zero object (`sdpa_bwd_tailzero`, one per arch family and dtype) after the gradient launches: it
+zeroes the rows past `seq_len` of every dense gradient output, which the backward kernels leave unwritten.
+It is a companion of the dQ rows, shared with the merged rows (REGEN.md, *Companions*). bf16, f16 and f32 data;
 what a graph must be, and the declines, are in [COVERAGE.md §9](COVERAGE.md).
 
 ## How it reaches hipDNN
@@ -289,9 +292,10 @@ provider tree; everything else is relative to this directory.
 | `generators/_codeobject.py` | reads and verifies a compiled object (target, ELF generic machine), shared by every generator |
 | `generators/arch_families.json`, `_arch_families.py` | the generic targets and their member arches; read by the generators and `CMakeLists.txt` |
 | `generators/_generic_targets.py` | the FlyDSL 0.3.4 shim that lets MLIR lower for a generic target |
-| `generators/gen_<op>.py` | compile one op's (one engine's) rows into objects + manifest + `<target>.SOURCE.md`: `gen_rmsnorm`, `gen_rmsnorm_bwd`, `gen_sdpa_rdna`, `gen_sdpa_rdna_decode`, `gen_sdpa_aiw`, `gen_sdpa_cdna`, `gen_sdpa_cdna_dualwave`, `gen_sdpa_cdna_decode`, `gen_sdpa_bwd_prep`, `gen_sdpa_bwd_dkdv`, `gen_sdpa_bwd_dq`, `gen_sdpa_bwd_merged`, `gen_sdpa_bwd_dbias_reduce`, `gen_sdpa_bwd_dsink_reduce` |
+| `generators/gen_<op>.py` | compile one op's (one engine's) rows into objects + manifest + `<target>.SOURCE.md`: `gen_rmsnorm`, `gen_rmsnorm_bwd`, `gen_sdpa_rdna`, `gen_sdpa_rdna_decode`, `gen_sdpa_aiw`, `gen_sdpa_cdna`, `gen_sdpa_cdna_dualwave`, `gen_sdpa_cdna_decode`, `gen_sdpa_bwd_prep`, `gen_sdpa_bwd_dkdv`, `gen_sdpa_bwd_dq`, `gen_sdpa_bwd_merged`, `gen_sdpa_bwd_dbias_reduce`, `gen_sdpa_bwd_dsink_reduce`, `gen_sdpa_bwd_tailzero` |
 | `generators/_parallel.py` | compiles a generator's objects in a pool of worker processes (`FLYDSL_GEN_JOBS`) |
 | `generators/_sdpa_rdna_build.py`, `_sdpa_cdna_build.py`, `_sdpa_bwd_cdna_build.py`, `_sdpa_bwd_rdna_build.py` | what each architecture's SDPA generators share |
+| `generators/_sdpa_bwd_nondet.py`, `tests/data/sdpa_bwd_nondeterministic.csv` | the list of SDPA backward rows whose build is nondeterministic, its loader and its merge command; the policy is in the `_sdpa_bwd_cdna_build.py` docstring (REGEN.md) |
 | `gen_descriptors.py` | derives descriptors from the objects and binds the trained models installed under `heuristics/`; `--check` re-verifies |
 | `tools/diff_upstream.py` | vendored sources vs. their upstream checkouts, black-normalized |
 | `tools/check_shards.py` | after the pack: every member's shard ships exactly the checked-in objects |
@@ -360,7 +364,7 @@ Each link is checkable by a command, and [REGEN.md](REGEN.md) gives each command
 upstream FlyDSL @ 89ad52fbbb9e, AITER @ 8253efc40595
    │  tools/diff_upstream.py          — vendored copy == upstream, but for recorded modifications
 kernels_src/
-   │  gen_<op>.py (flydsl 0.3.4)      — byte-reproducible: 738/738 gfx11-generic, 381/381 gfx12-generic, 2,977/2,977 gfx950,
+   │  gen_<op>.py (flydsl 0.3.4)      — byte-reproducible: 738/738 gfx11-generic, 381/381 gfx12-generic, 2,860/2,860 gfx950,
    │                                    255/255 gfx942, 255/255 gfx90a (SDPA backward rows that ship a pin: REGEN.md)
 <content>/<op>/<arch>/*.hsaco + manifest.json
    │  gen_descriptors.py --check      — objects match manifest SHA256 and target; descriptors agree

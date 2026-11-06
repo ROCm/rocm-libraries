@@ -11,23 +11,28 @@ the sweep's pins (``_instances``); each is built once and recorded with its reso
 gate verdicts. ``--reference-dir`` holds the pinned objects (``<hash>.hsaco``): a row that never
 writes dB ships its pin's bytes and its rebuild only verifies it (``tools/sdpa_bwd_compare.py``
 reports a difference); a dB-storing bias row ships its rebuild, an object with the merged kernel and the dBias reduce
-kernel, whose per-kernel gate must be green. A row that does not build or a red gate exits
+kernel, whose per-kernel gate must be green. The tail-zero companions are the dQ folder's (``sdpa_bwd_dq``, generated first into the same
+content root): the manifest lists them by path (``../../sdpa_bwd_dq/<arch>/<name>``) and the run stops if they are missing or altered. A row that does not build or a red gate exits
 nonzero and ships nothing.
 """
 
 from __future__ import annotations
 
-from ._sdpa_bwd_cdna_build import generate as _generate, run_op
+from ._sdpa_bwd_cdna_build import dq_tailzero_companions, generate as _generate, run_op
 
 OP = "sdpa_bwd_merged"
 
 
 def generate(arch, out_root, reference_dir, only=None):
-    return _generate(OP, arch, out_root, only, reference_dir)
+    return _generate(
+        OP, arch, out_root, only, reference_dir, build_tailzero=dq_tailzero_companions
+    )
 
 
 def main(argv: list[str] | None = None) -> int:
-    return run_op(OP, __doc__.splitlines()[0], argv)
+    return run_op(
+        OP, __doc__.splitlines()[0], argv, build_tailzero=dq_tailzero_companions
+    )
 
 
 if __name__ == "__main__":

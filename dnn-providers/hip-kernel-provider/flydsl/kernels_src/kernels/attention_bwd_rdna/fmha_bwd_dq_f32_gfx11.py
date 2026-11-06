@@ -44,7 +44,7 @@ zero never touches the DB pointer). One thread owns each (q, kv) pair of a workg
 Dropout (`meta.dropout`): `dP <- keep ? dP * dropout_scale : 0` on the f32 dP before dS (P stays undropped; Delta already carries the mask through the forward's O).
 The mask is the shared stream of `philox.py` (`Philox.for_arch(arch)`; plane = `block_idx.z * num_head_q + head_q`, grid extents the max lengths, element (q, kv) at
 counter `grid_offset(.., q, kv)` slot `kv % 4`), as the 16-bit kernels and the forward: a varlen mask is a function of the element coordinates and the two maxima.
-Varlen and GQA are as the 16-bit dQ: the Q and K sides decode independently, LSE and Delta share one HT or TH layout, query head `h` reads KV head `h // (Hq / Hk)`.
+Varlen and GQA are as the 16-bit dQ: the Q and K sides take their lengths from the decoder, each tensor starts at its own origin, LSE' and Delta come from the compact workspace, query head `h` reads KV head `h // (Hq / Hk)`.
 
 Dump (`dump=1`, debug; version 2, the fp32 pair-ordered layout, not the version-1 WMMA lane layout): workgroup (0, 0, 0) stores, at its kv iterations 0, 1 and last,
 S, P, dP, dS as `[block_m][block_n]` f32 and the dQ accumulators after the iteration as `[block_m][tile]` f32 (columns past `hdim_qk` are unspecified) into `dump`:
@@ -219,14 +219,11 @@ def build_fmha_bwd_dq_f32_gfx11_module_primary(meta, knobs, runtime_axes=()):
 
         # ---- varlen prologue: VarlenBits -> sequence scalars ----
         z_i32 = fx.Int32(gpu.block_idx.z)
-        seqlen_q, q_row_off, q_batch = fmha.decode_addressing(
+        seqlen_q, _, _ = fmha.decode_addressing(
             varlen_bits, 0, max_seqlen_q, a.seqinfo_q0, a.seqinfo_q1, z_i32
         )
-        seqlen_k, k_row_off, k_batch = fmha.decode_addressing(
+        seqlen_k, _, _ = fmha.decode_addressing(
             varlen_bits, 8, max_seqlen_k, a.seqinfo_k0, a.seqinfo_k1, z_i32
-        )
-        lse_tokens = fmha.lse_token_pitch(
-            varlen_bits, 0, max_seqlen_q, a.seqinfo_q0, a.seqinfo_q1, num_seqlens
         )
 
         head_q = fx.Index(gpu.block_idx.x)
@@ -243,40 +240,33 @@ def build_fmha_bwd_dq_f32_gfx11_module_primary(meta, knobs, runtime_axes=()):
         alive = start_q < seqlen_q
         head_k = head_q // (fx.Index(num_head_q) // fx.Index(num_head_k))
 
-        # ---- element bases: (batch, head, row_off) of each tensor, 64-bit ----
-        q_batch_v, k_batch_v = fx.Index(q_batch), fx.Index(k_batch)
-        q_row_off_v, k_row_off_v = fx.Index(q_row_off), fx.Index(k_row_off)
+        # ---- element bases: each tensor's origin (`fmha.tensor_origin`: its own offsets when ragged, its batch stride when dense) plus head, 64-bit ----
+        q_origin = fmha.tensor_origin(
+            a.seqinfo_q1, a.mul_Q, z_i32, a.stride_q_batch, seqlen_q
+        )
+        do_origin = fmha.tensor_origin(
+            a.off_DO, a.mul_DO, z_i32, a.stride_do_batch, seqlen_q
+        )
+        dq_origin = fmha.tensor_origin(
+            a.off_DQ, a.mul_DQ, z_i32, a.stride_dq_batch, seqlen_q
+        )
+        k_origin = fmha.tensor_origin(
+            a.seqinfo_k1, a.mul_K, z_i32, a.stride_k_batch, seqlen_k
+        )
+        v_origin = fmha.tensor_origin(
+            a.off_V, a.mul_V, z_i32, a.stride_v_batch, seqlen_k
+        )
         q_sseq, k_sseq, v_sseq = (
             fx.Index(a.stride_q_seq),
             fx.Index(a.stride_k_seq),
             fx.Index(a.stride_v_seq),
         )
         do_sseq, dq_sseq = fx.Index(a.stride_do_seq), fx.Index(a.stride_dq_seq)
-        q_base = (
-            q_batch_v * fx.Index(a.stride_q_batch)
-            + head_q * fx.Index(a.stride_q_head)
-            + q_row_off_v * q_sseq
-        )
-        do_base = (
-            q_batch_v * fx.Index(a.stride_do_batch)
-            + head_q * fx.Index(a.stride_do_head)
-            + q_row_off_v * do_sseq
-        )
-        dq_base = (
-            q_batch_v * fx.Index(a.stride_dq_batch)
-            + head_q * fx.Index(a.stride_dq_head)
-            + q_row_off_v * dq_sseq
-        )
-        k_base = (
-            k_batch_v * fx.Index(a.stride_k_batch)
-            + head_k * fx.Index(a.stride_k_head)
-            + k_row_off_v * k_sseq
-        )
-        v_base = (
-            k_batch_v * fx.Index(a.stride_v_batch)
-            + head_k * fx.Index(a.stride_v_head)
-            + k_row_off_v * v_sseq
-        )
+        q_base = q_origin + head_q * fx.Index(a.stride_q_head)
+        do_base = do_origin + head_q * fx.Index(a.stride_do_head)
+        dq_base = dq_origin + head_q * fx.Index(a.stride_dq_head)
+        k_base = k_origin + head_k * fx.Index(a.stride_k_head)
+        v_base = v_origin + head_k * fx.Index(a.stride_v_head)
 
         sm_log2e = fastmath.mul(sm_scale, fx.Float32(_LOG2E))
         c_zero = fx.Float32(0.0)
@@ -326,12 +316,14 @@ def build_fmha_bwd_dq_f32_gfx11_module_primary(meta, knobs, runtime_axes=()):
         # LSE' and Delta of each pair's row: an out-of-range row is an empty row (LSE' = +inf, Delta = 0), so P = dS = 0
         lse2 = []
         delta = []
+        ws_base = fmha.ws_row_base(z_i32, head_q, num_head_q, max_seqlen_q)
         for i in range_constexpr(NPAIR):
-            tok = common_utils.smin(q_row_off + pair_q[i], lse_tokens - fx.Int32(1))
-            tok_row = fx.Index(common_utils.smax(tok, fx.Int32(0)))
-            lse_off, _ = fmha.lse_row_addressing(
-                varlen_bits, q_batch_v, head_q, num_head_q, lse_tokens, tok_row
+            tok_row = fx.Index(
+                common_utils.smax(
+                    common_utils.smin(pair_q[i], seqlen_q - fx.Int32(1)), fx.Int32(0)
+                )
             )
+            lse_off = ws_base + tok_row
             lse_v = fx.ptr_load(lse_p + fx.Int64(lse_off), fx.Float32)
             delta_v = fx.ptr_load(delta_p + fx.Int64(lse_off), fx.Float32)
             if const_expr(BIAS):
@@ -348,18 +340,15 @@ def build_fmha_bwd_dq_f32_gfx11_module_primary(meta, knobs, runtime_axes=()):
 
         if const_expr(BIAS):
             b_p = _gptr(a.B)
-            b_base = (
-                q_batch_v * fx.Index(a.stride_b_batch)
-                + head_q * fx.Index(a.stride_b_head)
-                + q_row_off_v * fx.Index(a.stride_b_seq_q)
+            # A bias is dense: ragged graphs with a bias decline.
+            b_base = fx.Index(z_i32) * fx.Index(a.stride_b_batch) + head_q * fx.Index(
+                a.stride_b_head
             )
             b_sseq = fx.Index(a.stride_b_seq_q)
         if const_expr(STORE_DB):
             db_p = _gptr(a.DB)
-            db_base = (
-                q_batch_v * fx.Index(a.stride_db_batch)
-                + head_q * fx.Index(a.stride_db_head)
-                + q_row_off_v * fx.Index(a.stride_db_seq_q)
+            db_base = fx.Index(z_i32) * fx.Index(a.stride_db_batch) + head_q * fx.Index(
+                a.stride_db_head
             )
             db_sseq = fx.Index(a.stride_db_seq_q)
             db_requested = fx.Int64(a.stride_db_seq_q) != fx.Int64(0)
@@ -655,6 +644,14 @@ def build_fmha_bwd_dq_f32_gfx11_module_primary(meta, knobs, runtime_axes=()):
         seqinfo_q1: fx.Pointer,
         seqinfo_k0: fx.Pointer,
         seqinfo_k1: fx.Pointer,
+        mul_Q: fx.Int64,
+        mul_K: fx.Int64,
+        off_V: fx.Pointer,
+        mul_V: fx.Int64,
+        off_DO: fx.Pointer,
+        mul_DO: fx.Int64,
+        off_DQ: fx.Pointer,
+        mul_DQ: fx.Int64,
         varlen_bits: fx.Int32,
         num_seqlens: fx.Int32,
         max_seqlen_q: fx.Int32,
@@ -707,6 +704,14 @@ def build_fmha_bwd_dq_f32_gfx11_module_primary(meta, knobs, runtime_axes=()):
                 seqinfo_q1=seqinfo_q1,
                 seqinfo_k0=seqinfo_k0,
                 seqinfo_k1=seqinfo_k1,
+                mul_Q=mul_Q,
+                mul_K=mul_K,
+                off_V=off_V,
+                mul_V=mul_V,
+                off_DO=off_DO,
+                mul_DO=mul_DO,
+                off_DQ=off_DQ,
+                mul_DQ=mul_DQ,
                 varlen_bits=varlen_bits,
                 num_seqlens=num_seqlens,
                 max_seqlen_q=max_seqlen_q,
@@ -765,6 +770,14 @@ def build_fmha_bwd_dq_f32_gfx11_module_primary(meta, knobs, runtime_axes=()):
         seqinfo_q1: fx.Pointer,
         seqinfo_k0: fx.Pointer,
         seqinfo_k1: fx.Pointer,
+        mul_Q: fx.Int64,
+        mul_K: fx.Int64,
+        off_V: fx.Pointer,
+        mul_V: fx.Int64,
+        off_DO: fx.Pointer,
+        mul_DO: fx.Int64,
+        off_DQ: fx.Pointer,
+        mul_DQ: fx.Int64,
         varlen_bits: fx.Int32,
         num_seqlens: fx.Int32,
         max_seqlen_q: fx.Int32,
@@ -822,6 +835,14 @@ def build_fmha_bwd_dq_f32_gfx11_module_primary(meta, knobs, runtime_axes=()):
             seqinfo_q1,
             seqinfo_k0,
             seqinfo_k1,
+            mul_Q,
+            mul_K,
+            off_V,
+            mul_V,
+            off_DO,
+            mul_DO,
+            off_DQ,
+            mul_DQ,
             varlen_bits,
             num_seqlens,
             max_seqlen_q,
@@ -884,6 +905,14 @@ def build_fmha_bwd_dq_f32_gfx11_module_primary(meta, knobs, runtime_axes=()):
             seqinfo_q1: fx.Pointer,
             seqinfo_k0: fx.Pointer,
             seqinfo_k1: fx.Pointer,
+            mul_Q: fx.Int64,
+            mul_K: fx.Int64,
+            off_V: fx.Pointer,
+            mul_V: fx.Int64,
+            off_DO: fx.Pointer,
+            mul_DO: fx.Int64,
+            off_DQ: fx.Pointer,
+            mul_DQ: fx.Int64,
             varlen_bits: fx.Int32,
             num_seqlens: fx.Int32,
             max_seqlen_q: fx.Int32,
@@ -937,6 +966,14 @@ def build_fmha_bwd_dq_f32_gfx11_module_primary(meta, knobs, runtime_axes=()):
                     seqinfo_q1=seqinfo_q1,
                     seqinfo_k0=seqinfo_k0,
                     seqinfo_k1=seqinfo_k1,
+                    mul_Q=mul_Q,
+                    mul_K=mul_K,
+                    off_V=off_V,
+                    mul_V=mul_V,
+                    off_DO=off_DO,
+                    mul_DO=mul_DO,
+                    off_DQ=off_DQ,
+                    mul_DQ=mul_DQ,
                     varlen_bits=varlen_bits,
                     num_seqlens=num_seqlens,
                     max_seqlen_q=max_seqlen_q,
@@ -996,6 +1033,14 @@ def build_fmha_bwd_dq_f32_gfx11_module_primary(meta, knobs, runtime_axes=()):
             seqinfo_q1: fx.Pointer,
             seqinfo_k0: fx.Pointer,
             seqinfo_k1: fx.Pointer,
+            mul_Q: fx.Int64,
+            mul_K: fx.Int64,
+            off_V: fx.Pointer,
+            mul_V: fx.Int64,
+            off_DO: fx.Pointer,
+            mul_DO: fx.Int64,
+            off_DQ: fx.Pointer,
+            mul_DQ: fx.Int64,
             varlen_bits: fx.Int32,
             num_seqlens: fx.Int32,
             max_seqlen_q: fx.Int32,
@@ -1054,6 +1099,14 @@ def build_fmha_bwd_dq_f32_gfx11_module_primary(meta, knobs, runtime_axes=()):
                 seqinfo_q1,
                 seqinfo_k0,
                 seqinfo_k1,
+                mul_Q,
+                mul_K,
+                off_V,
+                mul_V,
+                off_DO,
+                mul_DO,
+                off_DQ,
+                mul_DQ,
                 varlen_bits,
                 num_seqlens,
                 max_seqlen_q,

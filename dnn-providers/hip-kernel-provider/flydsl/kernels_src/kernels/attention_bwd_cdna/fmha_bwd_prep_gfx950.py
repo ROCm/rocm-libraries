@@ -12,10 +12,12 @@ Port of AOTriton `kernel/bwd_preprocess.py` (`bwd_preprocess`), with one additio
 The dK/dV and dQ kernels read `exp2(s - lse * log2e)`: an empty row (LSE = -inf, what hipDNN writes) would give
 `exp2(+inf)`, so they need +inf. The input LSE is never written; LSE' goes to its own workspace.
 
-**Layout.** Delta and LSE' are written through `fmha.lse_row_addressing` / `fmha.lse_token_pitch`, the decode the dK/dV
-and dQ kernels read with, so dense (H,T), CUMULATIVE and INDIVIDUAL+ARRAY varlen, and TH (T,H) LSE need nothing else.
-The input LSE is read with the same addressing (it has LSE's layout by definition). Rows past a sequence's length are
-neither read nor written; grid = (cdiv(max_seqlen_q, ROWS), num_head_q, num_seqlens or batch_size).
+**Layout.** Delta and LSE' are written to the compact workspace `(z, head, row)` (`fmha.stats_ws_base`, pitch 1, `max_seqlen_q`
+rows per head), the one the dK/dV and dQ kernels read. The input LSE is the caller's Stats, read at `off_Stats[z] * mul_Stats`
+(or `z * stride_stats_batch`) `+ head * stride_stats_head + row * stride_stats_token`, so dense `[B,H,Sq]`, packed `[H,T]` and
+packed `[T,H]` Stats need nothing else. O and dO start at their own `off_t[z] * mul_t` or `z * stride_batch`
+(`fmha.tensor_origin`). Rows past a sequence's length are neither read nor written; grid = (cdiv(max_seqlen_q, ROWS),
+num_head_q, num_seqlens or batch_size).
 
 **Reduction.** The softmax-bwd pattern (`kernels/norm/softmax_bwd_kernel.py`): 128-bit vector loads, fp32 products,
 in-register `reduce(ADD)`, then `shuffle_xor` across the lanes of a row group. A row owns `TPR` lanes (a power of two
@@ -26,8 +28,9 @@ in-register `reduce(ADD)`, then `shuffle_xor` across the lanes of a row group. A
 O and dO are `(batch, head, row, col)` with unit column stride.
 
 ABI (the kernel argument names; `vals` below is keyed by them):
-    O, DO, LSE (in), LSE_ws (out), Delta (out), batch_size, seqinfo_q0, seqinfo_q1, varlen_bits, num_seqlens,
-    max_seqlen_q, num_head_q, hdim_vo, stride_o_{batch,head,seq}, stride_do_{batch,head,seq}
+    O, DO, LSE (in), LSE_ws (out), Delta (out), batch_size, seqinfo_q0, seqinfo_q1, off_O, mul_O, off_DO, mul_DO, off_Stats,
+    mul_Stats, stride_stats_{batch,head,token}, varlen_bits, num_seqlens, max_seqlen_q, num_head_q, hdim_vo,
+    stride_o_{batch,head,seq}, stride_do_{batch,head,seq}
 """
 
 import math
@@ -52,19 +55,6 @@ _COMPILE_HINTS = {}
 def prep_threads_per_row(tile):
     """Lanes per row: gcd(tile / 8, 16). A power of two <= 16, so a row group stays inside one wave."""
     return math.gcd(tile // VEC, 16)
-
-
-def prep_arg_values(vals, O, LSE_ws, delta=None):
-    """`vals` for the prep launcher: the dict of launch values keyed by kernel argument name (it already holds DO,
-    LSE, Delta, varlen descriptors, strides). Adds `O`, `LSE_ws` and `stride_o_*` (O shares dO's layout).
-    """
-    out = dict(vals)
-    out["O"], out["LSE_ws"] = O, LSE_ws
-    if delta is not None:
-        out["Delta"] = delta
-    for a in ("batch", "head", "seq"):
-        out[f"stride_o_{a}"] = vals[f"stride_do_{a}"]
-    return out
 
 
 def _elem(dtype_str):
@@ -98,6 +88,15 @@ def build_fmha_bwd_prep_gfx950_module_primary(dtype_str, tile, padded):
         Delta: fx.Pointer,
         seqinfo_q0: fx.Pointer,
         seqinfo_q1: fx.Pointer,
+        off_O: fx.Pointer,
+        mul_O: fx.Int64,
+        off_DO: fx.Pointer,
+        mul_DO: fx.Int64,
+        off_Stats: fx.Pointer,
+        mul_Stats: fx.Int64,
+        stride_stats_batch: fx.Int64,
+        stride_stats_head: fx.Int64,
+        stride_stats_token: fx.Int64,
         varlen_bits: fx.Int32,
         num_seqlens: fx.Int32,
         max_seqlen_q: fx.Int32,
@@ -117,29 +116,27 @@ def build_fmha_bwd_prep_gfx950_module_primary(dtype_str, tile, padded):
         head = fx.Index(fx.block_idx.y)
         z = fx.Int32(fx.block_idx.z)
 
-        seqlen, row_off, batch = fmha.decode_addressing(
+        seqlen, _, _ = fmha.decode_addressing(
             varlen_bits, 0, max_seqlen_q, seqinfo_q0, seqinfo_q1, z
         )
-        tokens = fmha.lse_token_pitch(
-            varlen_bits, 0, max_seqlen_q, seqinfo_q0, seqinfo_q1, num_seqlens
-        )
-        lse_base, lse_pitch = fmha.lse_row_addressing(
-            varlen_bits, batch, head, fx.Index(num_head_q), fx.Index(tokens), row_off
-        )
+        # The workspace is compact `(z, head, row)`; the caller's Stats are read through their own offsets and strides.
+        ws_base = fmha.stats_ws_base(z, head, num_head_q, max_seqlen_q)
+        stats_base = fmha.tensor_origin(
+            off_Stats, mul_Stats, z, stride_stats_batch, seqlen
+        ) + head * fx.Index(stride_stats_head)
 
         valid = row < seqlen
         # An out-of-range row reads row 0 of its sequence (always in bounds) and stores nothing.
         row_c = valid.select(row, fx.Int32(0))
-        abs_row = fx.Index(row_off) + fx.Index(row_c)
         o_row = (
-            fx.Index(batch) * fx.Index(stride_o_batch)
+            fmha.tensor_origin(off_O, mul_O, z, stride_o_batch, seqlen)
             + head * fx.Index(stride_o_head)
-            + abs_row * fx.Index(stride_o_seq)
+            + fx.Index(row_c) * fx.Index(stride_o_seq)
         )
         do_row = (
-            fx.Index(batch) * fx.Index(stride_do_batch)
+            fmha.tensor_origin(off_DO, mul_DO, z, stride_do_batch, seqlen)
             + head * fx.Index(stride_do_head)
-            + abs_row * fx.Index(stride_do_seq)
+            + fx.Index(row_c) * fx.Index(stride_do_seq)
         )
 
         o_p = fx.recast_iter(_ptr_ty(elem, 2), O)
@@ -175,9 +172,12 @@ def build_fmha_bwd_prep_gfx950_module_primary(dtype_str, tile, padded):
             acc = acc + gpu.shuffle_xor(acc, TPR >> (sh + 1), WARP_SIZE)
 
         if (lane == fx.Int32(0)) & valid:
-            off = lse_base + fx.Index(row) * lse_pitch
+            off = ws_base + fx.Index(row)
             f32 = _ptr_ty(fx.Float32, 4)
-            lse_v = fx.ptr_load(fx.recast_iter(f32, LSE) + fx.Int64(off), fx.Float32)
+            lse_off = stats_base + fx.Index(row) * fx.Index(stride_stats_token)
+            lse_v = fx.ptr_load(
+                fx.recast_iter(f32, LSE) + fx.Int64(lse_off), fx.Float32
+            )
             inf = fx.Float32(float("inf"))
             neg_inf = lse_v == fx.Float32(float("-inf"))
             fx.ptr_store(
@@ -195,6 +195,15 @@ def build_fmha_bwd_prep_gfx950_module_primary(dtype_str, tile, padded):
         batch_size: fx.Int32,
         seqinfo_q0: fx.Pointer,
         seqinfo_q1: fx.Pointer,
+        off_O: fx.Pointer,
+        mul_O: fx.Int64,
+        off_DO: fx.Pointer,
+        mul_DO: fx.Int64,
+        off_Stats: fx.Pointer,
+        mul_Stats: fx.Int64,
+        stride_stats_batch: fx.Int64,
+        stride_stats_head: fx.Int64,
+        stride_stats_token: fx.Int64,
         varlen_bits: fx.Int32,
         num_seqlens: fx.Int32,
         max_seqlen_q: fx.Int32,
@@ -219,6 +228,15 @@ def build_fmha_bwd_prep_gfx950_module_primary(dtype_str, tile, padded):
             Delta,
             seqinfo_q0,
             seqinfo_q1,
+            off_O,
+            mul_O,
+            off_DO,
+            mul_DO,
+            off_Stats,
+            mul_Stats,
+            stride_stats_batch,
+            stride_stats_head,
+            stride_stats_token,
             varlen_bits,
             num_seqlens,
             max_seqlen_q,
@@ -261,13 +279,6 @@ from flydsl.expr import (
 )  # noqa: E402  (sink twin only; kept below the plain prep)
 
 
-def prep_sink_arg_values(vals, O, LSE_ws, sink, sinkterm, delta=None):
-    """`prep_arg_values` plus `sink` and `sinkterm` (device addresses) for the sink twin's launcher."""
-    out = prep_arg_values(vals, O, LSE_ws, delta)
-    out["sink"], out["sinkterm"] = sink, sinkterm
-    return out
-
-
 def _build_prep_sink_twin(dtype_str, tile, padded):
     if dtype_str not in ("f16", "bf16"):
         raise ValueError(dtype_str)
@@ -295,6 +306,15 @@ def _build_prep_sink_twin(dtype_str, tile, padded):
         Delta: fx.Pointer,
         seqinfo_q0: fx.Pointer,
         seqinfo_q1: fx.Pointer,
+        off_O: fx.Pointer,
+        mul_O: fx.Int64,
+        off_DO: fx.Pointer,
+        mul_DO: fx.Int64,
+        off_Stats: fx.Pointer,
+        mul_Stats: fx.Int64,
+        stride_stats_batch: fx.Int64,
+        stride_stats_head: fx.Int64,
+        stride_stats_token: fx.Int64,
         varlen_bits: fx.Int32,
         num_seqlens: fx.Int32,
         max_seqlen_q: fx.Int32,
@@ -316,29 +336,27 @@ def _build_prep_sink_twin(dtype_str, tile, padded):
         head = fx.Index(fx.block_idx.y)
         z = fx.Int32(fx.block_idx.z)
 
-        seqlen, row_off, batch = fmha.decode_addressing(
+        seqlen, _, _ = fmha.decode_addressing(
             varlen_bits, 0, max_seqlen_q, seqinfo_q0, seqinfo_q1, z
         )
-        tokens = fmha.lse_token_pitch(
-            varlen_bits, 0, max_seqlen_q, seqinfo_q0, seqinfo_q1, num_seqlens
-        )
-        lse_base, lse_pitch = fmha.lse_row_addressing(
-            varlen_bits, batch, head, fx.Index(num_head_q), fx.Index(tokens), row_off
-        )
+        # The workspace is compact `(z, head, row)`; the caller's Stats are read through their own offsets and strides.
+        ws_base = fmha.stats_ws_base(z, head, num_head_q, max_seqlen_q)
+        stats_base = fmha.tensor_origin(
+            off_Stats, mul_Stats, z, stride_stats_batch, seqlen
+        ) + head * fx.Index(stride_stats_head)
 
         valid = row < seqlen
         # An out-of-range row reads row 0 of its sequence (always in bounds) and stores nothing.
         row_c = valid.select(row, fx.Int32(0))
-        abs_row = fx.Index(row_off) + fx.Index(row_c)
         o_row = (
-            fx.Index(batch) * fx.Index(stride_o_batch)
+            fmha.tensor_origin(off_O, mul_O, z, stride_o_batch, seqlen)
             + head * fx.Index(stride_o_head)
-            + abs_row * fx.Index(stride_o_seq)
+            + fx.Index(row_c) * fx.Index(stride_o_seq)
         )
         do_row = (
-            fx.Index(batch) * fx.Index(stride_do_batch)
+            fmha.tensor_origin(off_DO, mul_DO, z, stride_do_batch, seqlen)
             + head * fx.Index(stride_do_head)
-            + abs_row * fx.Index(stride_do_seq)
+            + fx.Index(row_c) * fx.Index(stride_do_seq)
         )
 
         o_p = fx.recast_iter(_ptr_ty(elem, 2), O)
@@ -374,9 +392,12 @@ def _build_prep_sink_twin(dtype_str, tile, padded):
             acc = acc + gpu.shuffle_xor(acc, TPR >> (sh + 1), WARP_SIZE)
 
         if (lane == fx.Int32(0)) & valid:
-            off = lse_base + fx.Index(row) * lse_pitch
+            off = ws_base + fx.Index(row)
             f32 = _ptr_ty(fx.Float32, 4)
-            lse_v = fx.ptr_load(fx.recast_iter(f32, LSE) + fx.Int64(off), fx.Float32)
+            lse_off = stats_base + fx.Index(row) * fx.Index(stride_stats_token)
+            lse_v = fx.ptr_load(
+                fx.recast_iter(f32, LSE) + fx.Int64(lse_off), fx.Float32
+            )
             inf = fx.Float32(float("inf"))
             neg_inf = lse_v == fx.Float32(float("-inf"))
             lse_p = neg_inf.select(inf, lse_v)
@@ -404,6 +425,15 @@ def _build_prep_sink_twin(dtype_str, tile, padded):
         batch_size: fx.Int32,
         seqinfo_q0: fx.Pointer,
         seqinfo_q1: fx.Pointer,
+        off_O: fx.Pointer,
+        mul_O: fx.Int64,
+        off_DO: fx.Pointer,
+        mul_DO: fx.Int64,
+        off_Stats: fx.Pointer,
+        mul_Stats: fx.Int64,
+        stride_stats_batch: fx.Int64,
+        stride_stats_head: fx.Int64,
+        stride_stats_token: fx.Int64,
         varlen_bits: fx.Int32,
         num_seqlens: fx.Int32,
         max_seqlen_q: fx.Int32,
@@ -430,6 +460,15 @@ def _build_prep_sink_twin(dtype_str, tile, padded):
             Delta,
             seqinfo_q0,
             seqinfo_q1,
+            off_O,
+            mul_O,
+            off_DO,
+            mul_DO,
+            off_Stats,
+            mul_Stats,
+            stride_stats_batch,
+            stride_stats_head,
+            stride_stats_token,
             varlen_bits,
             num_seqlens,
             max_seqlen_q,

@@ -1044,7 +1044,7 @@ belongs to one engine (tile routing, bias staging, workspace bounds) is that eng
 | Engine | Launches | Ops (objects) |
 |---|---|---|
 | `hipkernel:flydsl_sdpa_bwd_merged` | one: dK, dV, dQ and, on a bias graph, dBias in one grid, with no prep kernel | `sdpa_bwd_merged` (309) |
-| `hipkernel:flydsl_sdpa_bwd_split` | three, in order, one per slot: prep (Delta and the statistics), dK/dV, dQ (and dBias) | `sdpa_bwd_prep` (86), `sdpa_bwd_dkdv` (1,319), `sdpa_bwd_dq` (1,010); `sdpa_bwd_split` carries the descriptors only |
+| `hipkernel:flydsl_sdpa_bwd_split` | three, in order, one per slot: prep (Delta and the statistics), dK/dV, dQ (and dBias) | `sdpa_bwd_prep` (86), `sdpa_bwd_dkdv` (1,289), `sdpa_bwd_dq` (923); `sdpa_bwd_split` carries the descriptors only |
 
 Neither engine's plans can be serialized: the merged engine's dispatch handler does not
 implement plan saving, and the split engine is slotted (RFC 0021). A

@@ -359,6 +359,24 @@ TEST(IsMXProblem, FloatABIsFalse)
     EXPECT_FALSE(isMXProblem(p));
 }
 
+TEST(IsRandomLike, AcceptsOnlyRandomModes)
+{
+    using TensileLite::Client::InitMode;
+    using TensileLite::Client::IsRandomLike;
+    for(auto mode : {InitMode::Random,
+                     InitMode::RandomNarrow,
+                     InitMode::RandomNegPosLimited,
+                     InitMode::UniformLowPrecision})
+        EXPECT_TRUE(IsRandomLike(mode)) << mode;
+    for(auto mode : {InitMode::Zero,
+                     InitMode::One,
+                     InitMode::SerialIdx,
+                     InitMode::Identity,
+                     InitMode::TrigSin,
+                     InitMode::TrigIndSin})
+        EXPECT_FALSE(IsRandomLike(mode)) << mode;
+}
+
 // =============================================================================
 //   Section 3 — Byte-stride formula
 //

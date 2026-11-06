@@ -29,4 +29,4 @@ The deliberate additions (each normalized source diff against the sweep shows th
 
 ## Build nondeterminism
 
-LLVM AMDGPU codegen can turn identical sources into different objects, or a dump holding two different objects. `tests/data/sdpa_bwd_known_flaky.csv` lists the 31 `dq` specs that were nondeterministic in the sweep (a `source` column says how: `bimodal`, `rmir-retry`, `attempts`, `known-nondet`, `t2-fp32`, `fp32-dq-combined`, joined by `+` where several apply; `t2-fp32` and `fp32-dq-combined` are labels carried over from the sweep for its fp32 dQ runs, the second-tier fp32 run and the combined dQ and reduce object). Five of them carry `bimodal`: `1a114be37069`, `4691c39657a8`, `5f6f40c7b88a`, `065be7bccb37`, `d86ab8bde882`. A shipped object is pinned by hash; it is not rebuilt blindly.
+LLVM AMDGPU codegen can turn identical sources into different objects, or a dump holding two different objects. `tests/data/sdpa_bwd_nondeterministic.csv` lists the rows sampled as nondeterministic, and the policy for them is the "Nondeterministic builds" section of `generators/_sdpa_bwd_cdna_build.py`. A shipped object is pinned by hash; it is not rebuilt blindly.

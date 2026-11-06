@@ -113,6 +113,12 @@ struct FlydslSdpaBwdMergedLaunchDump
     std::vector<unsigned char> reduceKernarg;
     std::array<unsigned int, 3> reduceGrid{};
     unsigned int reduceBlock = 0;
+    /// Set when the graph needs the padded-row tail-zero launch after the kernel (and the
+    /// reduce): its arguments and launch.
+    bool tailzero = false;
+    std::vector<unsigned char> tailzeroKernarg;
+    std::array<unsigned int, 3> tailzeroGrid{};
+    unsigned int tailzeroBlock = 0;
     size_t workspaceBytes = 0;
     /// Set when the seed and offset are written into the workspace ahead of the launch: either
     /// as the four words in seedWords (seed low, seed high, offset low, offset high), or, with
@@ -162,6 +168,12 @@ struct FlydslSdpaBwdSplitLaunchDump
     std::vector<unsigned char> reduceKernarg;
     std::array<unsigned int, 3> reduceGrid{};
     unsigned int reduceBlock = 0;
+    /// Set on the dq slot when the graph needs the padded-row tail-zero launch after the
+    /// kernel (and the reduce): its arguments and launch.
+    bool tailzero = false;
+    std::vector<unsigned char> tailzeroKernarg;
+    std::array<unsigned int, 3> tailzeroGrid{};
+    unsigned int tailzeroBlock = 0;
     /// The slot handler's workspaceBytes(): the scratch this slot needs, shared region excluded.
     size_t scratchBytes = 0;
     /// Set when the launch writes the seed and offset into the shared region ahead of the
@@ -188,6 +200,24 @@ FlydslSdpaBwdSplitLaunchDump describeFlydslSdpaBwdSplitLaunchForTesting(
 /// @see packs/Gfx950AttentionDenseNative.cpp
 void registerGfx950AttentionDenseSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
 void resetGfx950AttentionDenseModuleCache();
+
+/// The engine name gfx950_attention_unified_2d.ued.json declares, shared the same way.
+inline constexpr std::string_view GFX950_ATTENTION_UNIFIED_2D_ENGINE_NAME
+    = "hipkernel:Gfx950AttentionUnified2D";
+
+/// @see packs/Gfx950AttentionUnified2DNative.cpp
+void registerGfx950AttentionUnified2DSymbols(
+    hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
+void resetGfx950AttentionUnified2DModuleCache();
+
+/// The engine name gfx950_attention_unified_3d.ued.json declares, shared the same way.
+inline constexpr std::string_view GFX950_ATTENTION_UNIFIED_3D_ENGINE_NAME
+    = "hipkernel:Gfx950AttentionUnified3D";
+
+/// @see packs/Gfx950AttentionUnified3DNative.cpp
+void registerGfx950AttentionUnified3DSymbols(
+    hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
+void resetGfx950AttentionUnified3DModuleCache();
 
 /// @see packs/Gfx1151WmmaAttentionNative.cpp, which serves both engines
 void registerGfx1151WmmaAttentionSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);

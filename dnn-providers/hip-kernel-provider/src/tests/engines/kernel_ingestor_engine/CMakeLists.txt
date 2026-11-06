@@ -17,6 +17,15 @@ target_sources(hip_kernel_provider_tests PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx950AttentionDenseGeometry.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx950AttentionDenseSignature.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx950AttentionDenseDispatch.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx950AttentionUnified2DMatchers.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx950AttentionUnified2DGeometry.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx950AttentionUnified2DSignature.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx950AttentionUnified2DDispatch.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx950AttentionUnified3DMatchers.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx950AttentionUnified3DGeometry.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx950AttentionUnified3DSignature.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx950AttentionUnified3DDispatch.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestUnifiedAttentionGeometry.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx1151WmmaAttentionMatchers.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestFlydslSdpaBwdMatcher.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestIngestorDispatchAliases.cpp
@@ -50,6 +59,10 @@ target_sources(hip_kernel_provider_census_tests PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestPointwisePacks.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx950AttentionDensePacks.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx950AttentionDenseCatalogTiles.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx950AttentionUnified2DPacks.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx950AttentionUnified2DCatalogTiles.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx950AttentionUnified3DPacks.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx950AttentionUnified3DCatalogTiles.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx1151WmmaAttentionPacks.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx1151WmmaAttentionDecodePacks.cpp
 )
@@ -77,17 +90,19 @@ if(HIPKERNELPROVIDER_FLYDSL_ACTIVE)
     )
     # The architectures each op has objects for, so a device case that finds none
     # staged on one of them fails instead of skipping (FlydslNormDeviceTestSupport.hpp).
-    # The content list, not what this build packs: this binary is a host artifact that a
-    # multi-arch build (TheRock RFC 0008) compiles in one architecture's shard and runs on
-    # every other, so the test asks at run time whether the device's shard is staged.
+    # The content list, not what this build packs: both test binaries are host artifacts that
+    # a multi-arch build (TheRock RFC 0008) compiles in one architecture's shard and runs on
+    # every other, so the tests ask at run time whether the device's shard is staged.
     foreach(_flydsl_op rmsnorm rmsnorm_bwd sdpa_cdna sdpa_cdna_dualwave sdpa_cdna_decode
                        sdpa_rdna sdpa_rdna_decode sdpa_aiw sdpa_bwd_merged sdpa_bwd_prep
                        sdpa_bwd_dkdv sdpa_bwd_dq)
         string(REPLACE ";" "," _flydsl_archs
                        "${HIPKERNELPROVIDER_FLYDSL_CONTENT_ARCHS_${_flydsl_op}}")
         string(TOUPPER "${_flydsl_op}" _flydsl_op_upper)
-        target_compile_definitions(hip_kernel_provider_tests PRIVATE
-            HIPKERNELPROVIDER_FLYDSL_ARCHS_${_flydsl_op_upper}="${_flydsl_archs}")
+        foreach(_hkp_target hip_kernel_provider_tests hip_kernel_provider_census_tests)
+            target_compile_definitions(${_hkp_target} PRIVATE
+                HIPKERNELPROVIDER_FLYDSL_ARCHS_${_flydsl_op_upper}="${_flydsl_archs}")
+        endforeach()
     endforeach()
     # The gfx11 verdict table and the manifests whose hashes it names, staged beside the
     # descriptor trees so a relocated or staged build tree carries them: the split SDPA
