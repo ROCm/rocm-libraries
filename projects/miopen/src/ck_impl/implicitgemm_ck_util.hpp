@@ -8,6 +8,12 @@
 #include <miopen/kernel_tuning_mode.hpp>
 
 #include <limits>
+#include <memory>
+#include <shared_mutex>
+#include <string>
+#include <typeindex>
+#include <unordered_map>
+#include <vector>
 
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
 #include <ck/utility/data_type.hpp>
@@ -161,15 +167,6 @@ using DeviceOpGBwdWeightScalePtrs =
 
 #endif
 
-template <typename ConvPtrsType>
-typename ConvPtrsType::iterator FindConvPtrByID(ConvPtrsType& conv_ptrs,
-                                                const std::string& kernel_id)
-{
-    return std::find_if(conv_ptrs.begin(), conv_ptrs.end(), [&kernel_id](const auto& ptr) {
-        return ptr->GetTypeString() == kernel_id;
-    });
-}
-
 // Returns true when any tensor stride/dim exceeds INT_MAX, or when a grouped
 // backward-weights tensor's addressable element extent exceeds INT_MAX, so the problem
 // must be dispatched to a CK instance whose argument types are int64 end-to-end.
@@ -210,31 +207,96 @@ inline bool RequiresLargeTensorCKInstance(const ProblemDescriptionType& problem)
 
 // Large-tensor xdl impls embed "Large_Tensor" in their GetTypeString() (see
 // device_grouped_conv_fwd_multiple_d_xdl_large_tensor_cshuffle.hpp:1260).
+// CK DeviceOps have no data members, so the type string, and with it the answer, depends only on
+// the instance's class. The answer is memoized per class because GetTypeString() formats the
+// whole instance description, and every MakeArgPtr call asks this.
 template <typename ConvPtr>
 inline bool IsLargeTensorCKInstance(const ConvPtr& ptr)
 {
-    return ptr->GetTypeString().find("Large_Tensor") != std::string::npos;
+    static std::shared_mutex mutex;
+    static std::unordered_map<std::type_index, bool> by_class;
+    const auto& op = *ptr;
+    const std::type_index cls{typeid(op)};
+    {
+        std::shared_lock lock{mutex};
+        if(const auto it = by_class.find(cls); it != by_class.end())
+            return it->second;
+    }
+    const bool large = op.GetTypeString().find("Large_Tensor") != std::string::npos;
+    std::unique_lock lock{mutex};
+    by_class.emplace(cls, large);
+    return large;
 }
+
+/// The instances of a CK DeviceOp factory and their type strings, built once per process.
+/// CK DeviceOps have no data members and each call makes its own Argument and Invoker, so one set
+/// of instances is shared by all queries, invokers and threads.
+template <typename DeviceOpType>
+class CKInstances
+{
+public:
+    using Op = typename decltype(DeviceOpType::GetInstances())::value_type::element_type;
+
+    static const CKInstances& Get()
+    {
+        static const CKInstances instances;
+        return instances;
+    }
+
+    std::size_t Size() const { return ops.size(); }
+    const std::shared_ptr<Op>& operator[](std::size_t i) const { return ops[i]; }
+    const std::string& TypeString(std::size_t i) const { return type_strings[i]; }
+    bool IsLargeTensor(std::size_t i) const { return large_tensor[i]; }
+
+    /// Index of the first instance with the type string, or Size() if there is none.
+    std::size_t Find(const std::string& type_string) const
+    {
+        const auto it = index.find(type_string);
+        return it == index.end() ? Size() : it->second;
+    }
+
+private:
+    CKInstances()
+    {
+        auto instances = DeviceOpType::GetInstances();
+        ops.reserve(instances.size());
+        type_strings.reserve(instances.size());
+        large_tensor.reserve(instances.size());
+        index.reserve(instances.size());
+        for(auto& instance : instances)
+        {
+            type_strings.push_back(instance->GetTypeString());
+            large_tensor.push_back(type_strings.back().find("Large_Tensor") != std::string::npos);
+            index.emplace(type_strings.back(), ops.size());
+            ops.emplace_back(std::move(instance));
+        }
+    }
+
+    std::vector<std::shared_ptr<Op>> ops;
+    std::vector<std::string> type_strings;
+    std::vector<bool> large_tensor;
+    std::unordered_map<std::string, std::size_t> index;
+};
 
 template <typename DeviceOpType,
           typename CKArgsType,
           typename ProblemDescriptionType = miopen::conv::ProblemDescription>
 std::vector<std::string> FillValidKernelsIDs(const ProblemDescriptionType& problem)
 {
-    const auto args      = CKArgsType{problem};
-    const auto conv_ptrs = DeviceOpType::GetInstances();
-    assert(!conv_ptrs.empty());
+    const auto args       = CKArgsType{problem};
+    const auto& instances = CKInstances<DeviceOpType>::Get();
+    assert(instances.Size() != 0);
 
     const bool require_large_tensor = RequiresLargeTensorCKInstance(problem);
 
     std::vector<std::string> valid_kernels;
-    valid_kernels.reserve(conv_ptrs.size());
-    for(size_t idx = 0; idx < conv_ptrs.size(); ++idx)
+    valid_kernels.reserve(instances.Size());
+    for(size_t idx = 0; idx < instances.Size(); ++idx)
     {
-        if(require_large_tensor && !IsLargeTensorCKInstance(conv_ptrs[idx]))
+        if(require_large_tensor && !instances.IsLargeTensor(idx))
             continue;
-        if(args.IsSupportedBy(conv_ptrs[idx]))
-            valid_kernels.emplace_back(std::move(conv_ptrs[idx]->GetTypeString()));
+        if(args.IsSupportedBy(instances[idx]))
+            valid_kernels.push_back(instances.TypeString(idx));
     }
     // When require_large_tensor is true and no large-tensor instances are
     // registered for this DeviceOp, returning an empty list is the intended
@@ -473,7 +535,7 @@ bool IsCKArgsSupported(const ProblemDescriptionType& problem, const std::string&
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
     if(!kernel_id.empty())
     {
-        auto conv_ptrs                  = DeviceOpType::GetInstances();
+        const auto& instances           = CKInstances<DeviceOpType>::Get();
         const bool require_large_tensor = RequiresLargeTensorCKInstance(problem);
         if constexpr(IsSplitKNeeded<DeviceOpType>() || CheckSplitK)
         {
@@ -496,17 +558,17 @@ bool IsCKArgsSupported(const ProblemDescriptionType& problem, const std::string&
                 return false;
             }
 
-            auto ptr_iter = FindConvPtrByID(conv_ptrs, kernel_id.substr(0, pos));
-            return (ptr_iter != conv_ptrs.end()) &&
-                   (!require_large_tensor || IsLargeTensorCKInstance(*ptr_iter)) &&
-                   CKArgsType{problem}.IsSupportedBySplitK(*ptr_iter, split_k);
+            const auto idx = instances.Find(kernel_id.substr(0, pos));
+            return (idx != instances.Size()) &&
+                   (!require_large_tensor || instances.IsLargeTensor(idx)) &&
+                   CKArgsType{problem}.IsSupportedBySplitK(instances[idx], split_k);
         }
         else
         {
-            auto ptr_iter = FindConvPtrByID(conv_ptrs, kernel_id);
-            return (ptr_iter != conv_ptrs.end()) &&
-                   (!require_large_tensor || IsLargeTensorCKInstance(*ptr_iter)) &&
-                   CKArgsType{problem}.IsSupportedBy(*ptr_iter);
+            const auto idx = instances.Find(kernel_id);
+            return (idx != instances.Size()) &&
+                   (!require_large_tensor || instances.IsLargeTensor(idx)) &&
+                   CKArgsType{problem}.IsSupportedBy(instances[idx]);
         }
     }
 #else
@@ -523,13 +585,16 @@ bool IsCKApplicable(const ProblemDescriptionType& problem)
 {
     const auto args = CKArgsType{problem};
 
-    const auto ptrs                 = DeviceOpType::GetInstances();
+    const auto& instances           = CKInstances<DeviceOpType>::Get();
     const bool require_large_tensor = RequiresLargeTensorCKInstance(problem);
-    return std::any_of(ptrs.begin(), ptrs.end(), [&](auto& ptr) {
-        if(require_large_tensor && !IsLargeTensorCKInstance(ptr))
-            return false;
-        return args.IsSupportedBy(ptr);
-    });
+    for(std::size_t idx = 0; idx < instances.Size(); ++idx)
+    {
+        if(require_large_tensor && !instances.IsLargeTensor(idx))
+            continue;
+        if(args.IsSupportedBy(instances[idx]))
+            return true;
+    }
+    return false;
 }
 
 /**
@@ -562,19 +627,19 @@ bool IsCKSplitKSupported(const ProblemDescriptionType& problem,
                          int split_k)
 {
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
-    auto conv_ptrs = DeviceOpType::GetInstances();
-    auto ptr_iter  = FindConvPtrByID(conv_ptrs, kernel_id);
+    const auto& instances = CKInstances<DeviceOpType>::Get();
+    const auto idx        = instances.Find(kernel_id);
 
-    if(ptr_iter == conv_ptrs.end())
+    if(idx == instances.Size())
     {
         return false;
     }
 
-    if(RequiresLargeTensorCKInstance(problem) && !IsLargeTensorCKInstance(*ptr_iter))
+    if(RequiresLargeTensorCKInstance(problem) && !instances.IsLargeTensor(idx))
         return false;
 
     const auto args = CKArgsType{problem};
-    return args.IsSupportedBySplitK(*ptr_iter, split_k);
+    return args.IsSupportedBySplitK(instances[idx], split_k);
 #else
     (void)problem;
     (void)kernel_id;
@@ -648,12 +713,13 @@ size_t GetCKSplitkMaxWorkspaceSize(const ProblemDescriptionType& problem)
     const auto args                = CKArgsType{problem};
     std::size_t max_workspace_size = 0;
 
-    const auto ptrs                 = DeviceOpType::GetInstances();
+    const auto& instances           = CKInstances<DeviceOpType>::Get();
     const bool require_large_tensor = RequiresLargeTensorCKInstance(problem);
-    for(auto& ptr : ptrs)
+    for(std::size_t idx = 0; idx < instances.Size(); ++idx)
     {
-        if(require_large_tensor && !IsLargeTensorCKInstance(ptr))
+        if(require_large_tensor && !instances.IsLargeTensor(idx))
             continue;
+        const auto& ptr = instances[idx];
         // Cycle `split_k` over {1,2,4,...,128} then `CkSplitkAutoDeduce`.
         // The loop then restarts from 1 for the next conv instance.
         auto split_k = 1;
@@ -696,10 +762,10 @@ template <typename DeviceOpType,
 ConvSolution InitAnyInvokerFactory(const ProblemDescriptionType& problem,
                                    const std::string& kernel_id)
 {
-    auto conv_ptrs = DeviceOpType::GetInstances();
-    auto ptr_iter  = FindConvPtrByID(conv_ptrs, kernel_id);
+    const auto& instances = CKInstances<DeviceOpType>::Get();
+    const auto idx        = instances.Find(kernel_id);
 
-    if(ptr_iter == conv_ptrs.end())
+    if(idx == instances.Size())
     {
         MIOPEN_LOG_E("Kernel does not exist.");
         return {miopenStatusInvalidValue};
@@ -707,7 +773,7 @@ ConvSolution InitAnyInvokerFactory(const ProblemDescriptionType& problem,
 
     ConvSolution result;
 #ifdef CK_EXPERIMENTAL_BUILDER
-    std::string description = (*ptr_iter)->describe()->detailed();
+    std::string description = instances[idx]->describe()->detailed();
 
     if(!description.empty())
     {
@@ -715,30 +781,29 @@ ConvSolution InitAnyInvokerFactory(const ProblemDescriptionType& problem,
     }
 #endif
 
-    result.invoker_factory =
-        [kernel_id_   = kernel_id,
-         ck_args_     = CKArgsType{problem},
-         sh_conv_ptr_ = std::shared_ptr{std::move(*ptr_iter)}](const std::vector<Kernel>&) mutable {
-            return [kernel_id2   = std::move(kernel_id_),
-                    ck_args2     = std::move(ck_args_),
-                    sh_conv_ptr2 = std::move(sh_conv_ptr_)](
-                       const Handle& handle, const AnyInvokeParams& primitive_parameters) {
-                const auto& data_ctx = primitive_parameters.CastTo<CastType>();
-                auto argument_ptr    = ck_args2.MakeArgPtr(sh_conv_ptr2, data_ctx);
-                auto invoker_ptr     = sh_conv_ptr2->MakeInvokerPointer();
-                {
-                    WorkAroundHipEventProfiler prf(handle);
-                    invoker_ptr->Run(argument_ptr.get(), {handle.GetStream(), false});
-                }
-                if(handle.IsProfilingEnabled())
-                {
-                    float elapsed_time = handle.GetKernelTime();
-                    AddKernelToJsonAccumulator(kernel_id2, elapsed_time, false);
-                    handle.ResetKernelTime();
-                    handle.AccumKernelTime(elapsed_time);
-                }
-            };
+    result.invoker_factory = [kernel_id_   = kernel_id,
+                              ck_args_     = CKArgsType{problem},
+                              sh_conv_ptr_ = instances[idx]](const std::vector<Kernel>&) mutable {
+        return [kernel_id2   = std::move(kernel_id_),
+                ck_args2     = std::move(ck_args_),
+                sh_conv_ptr2 = std::move(sh_conv_ptr_)](
+                   const Handle& handle, const AnyInvokeParams& primitive_parameters) {
+            const auto& data_ctx = primitive_parameters.CastTo<CastType>();
+            auto argument_ptr    = ck_args2.MakeArgPtr(sh_conv_ptr2, data_ctx);
+            auto invoker_ptr     = sh_conv_ptr2->MakeInvokerPointer();
+            {
+                WorkAroundHipEventProfiler prf(handle);
+                invoker_ptr->Run(argument_ptr.get(), {handle.GetStream(), false});
+            }
+            if(handle.IsProfilingEnabled())
+            {
+                float elapsed_time = handle.GetKernelTime();
+                AddKernelToJsonAccumulator(kernel_id2, elapsed_time, false);
+                handle.ResetKernelTime();
+                handle.AccumKernelTime(elapsed_time);
+            }
         };
+    };
     return result;
 }
 
@@ -969,7 +1034,7 @@ ConvSolution InitInvokerFactoryNCHW(const ExecutionContext& ctx,
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
     auto ck_args = CKArgsType{problem};
 
-    auto conv_ptrs = DeviceOpType::GetInstances();
+    const auto& instances = CKInstances<DeviceOpType>::Get();
 
     std::optional<int> split_k = std::nullopt;
     std::string id_string      = kernel_id;
@@ -982,8 +1047,8 @@ ConvSolution InitInvokerFactoryNCHW(const ExecutionContext& ctx,
 
     std::optional<CKBWDWeightBufferDescriptor> _ck_buff_des;
 
-    auto ptr_iter = FindConvPtrByID(conv_ptrs, id_string);
-    if(ptr_iter == conv_ptrs.end())
+    const auto idx = instances.Find(id_string);
+    if(idx == instances.Size())
     {
         MIOPEN_LOG_E("PerformanceConfig kernel '" + kernel_id + "' does not exist.");
         result = ConvSolution{miopenStatusInvalidValue};
@@ -991,7 +1056,7 @@ ConvSolution InitInvokerFactoryNCHW(const ExecutionContext& ctx,
     }
 
 #ifdef CK_EXPERIMENTAL_BUILDER
-    std::string description = (*ptr_iter)->describe()->detailed();
+    std::string description = instances[idx]->describe()->detailed();
 
     if(!description.empty())
     {
@@ -1001,7 +1066,7 @@ ConvSolution InitInvokerFactoryNCHW(const ExecutionContext& ctx,
 
     if constexpr(std::is_same_v<CastType, miopen::conv::WrWInvokeParams>)
     {
-        auto ck_ws_size = ck_args.GetCKSplitkWorkspaceSize(*ptr_iter, split_k.value_or(1));
+        auto ck_ws_size = ck_args.GetCKSplitkWorkspaceSize(instances[idx], split_k.value_or(1));
         _ck_buff_des.emplace(ck_ws_size, 0);
         result.workspace_sz = GetWorkspaceSizeLayoutTransformConv(problem, ck_ws_size);
     }
@@ -1017,7 +1082,7 @@ ConvSolution InitInvokerFactoryNCHW(const ExecutionContext& ctx,
     result.invoker_factory = [kernel_id_           = kernel_id,
                               split_k_             = split_k,
                               ck_args_             = std::move(ck_args),
-                              sh_conv_ptr_         = std::shared_ptr{std::move(*ptr_iter)},
+                              sh_conv_ptr_         = instances[idx],
                               input1_tr_inst_      = std::move(_input1_tr_inst),
                               input2_tr_inst_      = std::move(_input2_tr_inst),
                               output_tr_inst_      = std::move(_output_tr_inst),
@@ -1143,7 +1208,7 @@ ConvSolution InitInvokerFactoryNHWC(const ExecutionContext&,
                                     const std::string& kernel_id)
 {
     ConvSolution result;
-    auto conv_ptrs             = DeviceOpType::GetInstances();
+    const auto& instances      = CKInstances<DeviceOpType>::Get();
     std::optional<int> split_k = std::nullopt;
     std::string id_string      = kernel_id;
     auto pos                   = kernel_id.find_last_of('+');
@@ -1153,9 +1218,9 @@ ConvSolution InitInvokerFactoryNHWC(const ExecutionContext&,
         id_string = kernel_id.substr(0, pos);
     }
 
-    auto ptr_iter = FindConvPtrByID(conv_ptrs, id_string);
+    const auto idx = instances.Find(id_string);
 
-    if(ptr_iter == conv_ptrs.end())
+    if(idx == instances.Size())
     {
         MIOPEN_LOG_E("PerformanceConfig kernel '" + kernel_id + "' does not exist.");
         result = ConvSolution{miopenStatusInvalidValue};
@@ -1163,7 +1228,7 @@ ConvSolution InitInvokerFactoryNHWC(const ExecutionContext&,
     }
 
 #ifdef CK_EXPERIMENTAL_BUILDER
-    std::string description = (*ptr_iter)->describe()->detailed();
+    std::string description = instances[idx]->describe()->detailed();
 
     if(!description.empty())
     {
@@ -1175,7 +1240,7 @@ ConvSolution InitInvokerFactoryNHWC(const ExecutionContext&,
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
         miopenAlphaBetaCase_t alpha_beta_case = problem.GetAlphaBetaCase();
         auto ck_args                          = CKArgsType{problem};
-        auto ck_ws_size = ck_args.GetCKSplitkWorkspaceSize(*ptr_iter, split_k.value_or(1));
+        auto ck_ws_size = ck_args.GetCKSplitkWorkspaceSize(instances[idx], split_k.value_or(1));
         [[maybe_unused]] bool should_allocated_wrw_buffer = ck_ws_size > 0;
 
         result.invoker_factory = [kernel_id_                   = kernel_id,
@@ -1183,8 +1248,8 @@ ConvSolution InitInvokerFactoryNHWC(const ExecutionContext&,
                                   ck_args_                     = CKArgsType{problem},
                                   alpha_beta_case_             = alpha_beta_case,
                                   should_allocated_wrw_buffer_ = should_allocated_wrw_buffer,
-                                  sh_conv_ptr_ = std::shared_ptr{std::move(*ptr_iter)}](
-                                     const std::vector<Kernel>&) mutable {
+                                  sh_conv_ptr_ =
+                                      instances[idx]](const std::vector<Kernel>&) mutable {
             return [kernel_id2                   = kernel_id_,
                     split_k2                     = split_k_,
                     ck_args2                     = std::move(ck_args_),
@@ -1250,11 +1315,11 @@ ConvSolution InitInvokerFactoryNHWC(const ExecutionContext&,
     else
     {
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
-        result.invoker_factory = [kernel_id_   = kernel_id,
-                                  split_k_     = split_k,
-                                  ck_args_     = CKArgsType{problem},
-                                  sh_conv_ptr_ = std::shared_ptr{std::move(*ptr_iter)}](
-                                     const std::vector<Kernel>&) mutable {
+        result.invoker_factory = [kernel_id_ = kernel_id,
+                                  split_k_   = split_k,
+                                  ck_args_   = CKArgsType{problem},
+                                  sh_conv_ptr_ =
+                                      instances[idx]](const std::vector<Kernel>&) mutable {
             return [kernel_id2   = kernel_id_,
                     split_k2     = split_k_,
                     ck_args2     = std::move(ck_args_),
