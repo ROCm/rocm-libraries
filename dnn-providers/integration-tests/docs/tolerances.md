@@ -24,22 +24,27 @@ applies:
 | The per-op default | Everything else; the loosest node of the graph wins, and the same value is used for `atol` and `rtol` | `TestTolerances.hpp` through `src/harness/tolerance/ToleranceResolver.hpp` |
 
 TOML overrides describe how far one engine may drift. They are never applied
-when golden data is checked against a reference executor.
+when golden data is checked against a reference executor, and neither is the
+dynamic tolerance: only the engine's output is graded with it, and golden data
+is checked against a reference executor with the per-op default.
 
 ## The convolution-forward dynamic tolerance
 
 ### Why a fixed number does not work
 
 The per-op default for half and bfloat16 convolution forward is 0.1 for both
-`atol` and `rtol`: about 10 % of a typical output at every size. That is
-10 to 25 bfloat16 rounding steps, and over 100 half steps.
+`atol` and `rtol`. At a typical output that is 17.5 % of the output at
+`K` = 16 (`K` is the number of products summed per output), 11 % at 1,152
+and about 10 % from `K` of about 1,000 on: 10 to 25 bfloat16 rounding steps,
+and over 100 half steps.
 
-The older bound in the test SDK, `calculateConvFpropTolerance()`, scales with
-the problem, but assumes an output can be as large as
-`K * max|x| * max|w|`, where `K` is the number of products summed per output.
-With inputs of both signs a real output grows only as `sqrt(K)`. Relative to
-the output the bound therefore grows as `sqrt(K)`: for bfloat16 it is wider
-than a typical output from `K` of about 1,300 on, and passes almost anything.
+The worst-case bound in the test SDK, `calculateConvFpropTolerance()`, scales
+with the problem, but assumes an output can be as large as
+`K * max|x| * max|w|`. Its callers use the one number as both `atol` and
+`rtol`. With inputs of both signs a real output grows only as `sqrt(K)`, so
+relative to the output the bound grows as `sqrt(K)`: for bfloat16 it is wider
+than a typical output from `K` of about 100 on (about 800 for half), and
+passes almost anything.
 
 ### The model
 
@@ -66,7 +71,8 @@ Each term is one way two correct implementations differ:
 - **Output rounding** (`2 * eps * |ref_i|`). Both sides round their float
   result once to the output type. Two correct roundings of nearly equal values
   differ by at most one unit in the last place, and `eps * |ref_i|` is one to
-  two of those units.
+  two of those units. The factor 2 is a margin over that bound, 2 to 4 units;
+  the largest bfloat16 error in the calibration data was one rounding step.
 - **Summation order** (`sqrt(K) * u32 * sigma`). Two float sums of the same `K`
   products in a different order differ by a random walk of rounding errors,
   about `u32 * sqrt(K) * sigma`. This is what decides an output near zero,
@@ -86,20 +92,22 @@ shapes, not a rounding law, so the tolerance does not model it.
 
 `sigma` grows as `sqrt(K)` exactly as the output does, so the band is a fixed
 fraction of the output at every reduction length. For inputs uniform in
-[-1, 1], the band at a typical output (`|ref| = sigma`), divided by `sigma`:
+[-1, 1], the band at a typical output (`|ref| = sigma`), divided by `sigma`,
+that is `atol / sigma + rtol`, for each way of setting the tolerance (the
+worst-case bound is used as both `atol` and `rtol`, as its callers do):
 
-| Output | K | fixed 0.1 | older bound | dynamic |
+| Output | K | fixed 0.1 | worst-case bound | dynamic |
 |---|---|---|---|---|
-| bfloat16 | 16 | 0.175 | 0.094 | 0.016 |
-| bfloat16 | 1,152 | 0.109 | 0.82 | 0.016 |
-| bfloat16 | 65,536 | 0.101 | 6.2 | 0.016 |
-| half | 16 | 0.175 | 0.012 | 0.014 |
-| half | 1,152 | 0.109 | 0.13 | 0.014 |
-| half | 65,536 | 0.101 | 0.95 | 0.014 |
+| bfloat16 | 16 | 0.175 | 0.22 | 0.016 |
+| bfloat16 | 1,152 | 0.109 | 10.1 | 0.016 |
+| bfloat16 | 65,536 | 0.101 | 535 | 0.016 |
+| half | 16 | 0.175 | 0.027 | 0.014 |
+| half | 1,152 | 0.109 | 1.6 | 0.014 |
+| half | 65,536 | 0.101 | 82 | 0.014 |
 
-The older bound is tighter only for half at very short reductions, where it
-also fails correct output (one half and one bfloat16 output on gfx942, 18 on
-gfx90a).
+The worst-case bound is tighter than the dynamic tolerance only for half at
+`K` of 6 or less. In the calibration data it also failed correct output (one
+half and one bfloat16 output on gfx942, 18 on gfx90a).
 
 The function is `calculateConvFpropOutputTolerance<T>()` in
 `projects/hipdnn/test_sdk/include/hipdnn_test_sdk/utilities/DynamicTolerancesConv.hpp`.
@@ -108,16 +116,33 @@ The function is `calculateConvFpropOutputTolerance<T>()` in
 
 `convFwdErrorScale()` applies the model only when the graph has exactly one
 `ConvolutionFwd` node, with float compute type, and its `x` and `w` are graph
-inputs. A `MUL` node whose second operand is a graph input scales `sigma` by
-that operand's largest magnitude. Other pointwise nodes (bias add,
-activations) change an error by at most their slope, which is about 1 for
-every supported activation, so they leave `sigma` unchanged. Any other graph,
-and every float output, uses the per-op default.
+inputs: not virtual, and not written by another node. A `MUL` node with one
+operand from the convolution and the other a graph input (in either operand
+order) scales `sigma` by that input's largest magnitude; a `MUL` of anything
+else (the result with itself, two inputs) leaves the model. Other pointwise
+nodes (bias add, activations) change an error by at most their slope, which is
+about 1 for every supported activation, so they leave `sigma` unchanged. Any
+other graph, an input whose statistics are not available (a NaN or an
+infinity in golden data, an unreadable baked value) and every float output use
+the per-op default.
 
-The mean squares cost nothing for inputs the harness fills: they come from the
-fill recipe (`(lo^2 + lo*hi + hi^2) / 3` for a uniform draw on `[lo, hi]`, `v^2`
-for a fixed value), so no tensor is read. Inputs loaded from golden blobs are
-already on the host and are scanned once.
+A graph input's statistics come from, in this order:
+
+- the value baked into the graph, for a scalar constant (the Variant3 bundles
+  bake their scale as 0.5): `v^2` and `|v|`;
+- the fill recipe, for a tensor the harness fills: `(lo^2 + lo*hi + hi^2) / 3`
+  for a uniform draw on `[lo, hi]`, `v^2` for a fixed value, so no tensor is
+  read;
+- a scan on the host, for an input loaded from golden blobs, which is
+  already there.
+
+`sigma` is the typical output only for inputs with a zero mean. Then partial
+sums cancel and the output grows as `sqrt(K)`. For a nonzero mean (a constant
+fill, or uniform on `[0, a]`) the output is larger than `sigma` (the root mean
+square is 3, 25 and 190 times `sigma` for uniform on `[0, 1]` at `K` = 16,
+1,152 and 65,536), so `atol` is a smaller fraction of it and the `rtol` term,
+which scales with the output, carries the tolerance. The calibration covered
+the fills of the shipped bundles, which are mostly zero-mean.
 
 ### Calibration
 
@@ -179,11 +204,13 @@ it against the real reference (gfx942, 3 seeds):
 
 No per-element tolerance detects an output truncated instead of rounded:
 that error is half a rounding step. half cannot tell an io-type accumulator
-apart from the kernels the `lambda` term allows for. For half at `K` above
-16,000 the absolute term (`12 * eps * sigma`, about 0.5) is larger than the
-fixed 0.1, so a missing filter tap there is caught in 29 % of outputs against
-62 % for the fixed 0.1 (21 outputs); a missing input channel is still caught
-in all of them.
+apart from the kernels the `lambda` term allows for. For half the absolute
+term (`12 * eps * sigma`) passes the fixed 0.1 from `K` of about 660 on for
+inputs uniform in [-1, 1], and is about 0.5 at `K` = 16,000. Among the 21
+calibration outputs of half with `K` above 16,000, a missing filter tap (the
+products of one filter position over all input channels) is caught in 29 %
+against 62 % for the fixed 0.1; a missing input channel is still caught in
+all of them.
 
 ### When an engine needs more
 

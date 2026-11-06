@@ -297,7 +297,7 @@ TEST(TestConvFwdDynamicTolerance, WeightsWithAZeroDimensionAreNotModeled)
     flatbuffers::FlatBufferBuilder b;
     GraphSpec spec;
     spec.wDims = {32, 0, 3, 3};
-    auto in = defaultInputs(spec);
+    auto in = defaultInputs(GraphSpec{}); // a tensor cannot have a zero dimension
     EXPECT_FALSE(tol::convFwdErrorScale(buildGraph(b, spec), in.lookup()).has_value());
 }
 

@@ -82,7 +82,7 @@ The framework builds on infrastructure that other tests also use.
 ### What this RFC adds
 
 1. **Two generic harnesses** -- one runs bundles through an engine, one checks golden data against the reference executors. Bundles are discovered recursively at GTest startup; adding an operation requires no new C++. See [Generic Test Runner](#generic-test-runner).
-2. **A tolerance lookup chain** for bundle tests: TOML override, then bundle metadata, then the per-operation default. Dynamic tolerances stay future work. See [Tolerance Framework](#tolerance-framework).
+2. **A tolerance lookup chain** for bundle tests: TOML override, then bundle metadata, then the per-operation default. Dynamic tolerances are in use for half and bfloat16 convolution forward and stay future work for the rest. See [Tolerance Framework](#tolerance-framework).
 3. **Integrity checks** at generation time, at load time, and in a bundle verifier. See [Data Integrity](#data-integrity).
 4. **A folder convention** with the same tier cascade as the rest of the integration suite. See [Folder Convention](#folder-convention).
 5. **One location for all bundle data**: `dnn-providers/integration-tests/integration-test-bundles/`.
@@ -100,11 +100,11 @@ The functional changes are described in the relevant Detailed Design subsections
 | [`src/harness/bundle/IntegrationBundleVerificationHarness.cpp`](../../../../dnn-providers/integration-tests/src/harness/bundle/IntegrationBundleVerificationHarness.cpp) | `hipdnn_integration_tests`: runs a bundle through the engine and compares the output with an oracle |
 | [`src/harness/reference-validation/BundleReferenceValidationHarness.cpp`](../../../../dnn-providers/integration-tests/src/harness/reference-validation/BundleReferenceValidationHarness.cpp) | `hipdnn_golden_data_tests`: compares golden data with the CPU and GPU reference executors |
 | [`src/harness/BundleMetadata.hpp`](../../../../dnn-providers/integration-tests/src/harness/BundleMetadata.hpp) | Parses `.meta.json` and sweep-case metadata; holds the VRAM and arch guards |
-| [`src/harness/tolerance/ToleranceResolver.hpp`](../../../../dnn-providers/integration-tests/src/harness/tolerance/ToleranceResolver.hpp) | Computes the per-operation default tolerance for each output tensor |
+| [`src/harness/tolerance/ToleranceResolver.hpp`](../../../../dnn-providers/integration-tests/src/harness/tolerance/ToleranceResolver.hpp) | Computes the per-operation default tolerance for each output tensor; the engine harness replaces it for half and bfloat16 convolution-forward outputs ([`ConvFwdDynamicTolerance.hpp`](../../../../dnn-providers/integration-tests/src/harness/tolerance/ConvFwdDynamicTolerance.hpp)) |
 | [`LoadGraphAndTensors.hpp`](../../test_sdk/include/hipdnn_test_sdk/utilities/LoadGraphAndTensors.hpp) | `tensorFromFileAndAttributes()` reads one `.bin` file ([Data Integrity #1](#data-integrity)) |
 | [`TestTolerances.hpp`](../../test_sdk/include/hipdnn_test_sdk/utilities/TestTolerances.hpp) | Per-operation default tolerances |
 | [`TestSettings.hpp`](../../../../dnn-providers/integration-tests/src/harness/TestSettings.hpp), engine `.toml` files | `[[tolerance_overrides]]` and `[[validator_overrides]]` for engine output |
-| [`DynamicTolerances.hpp`](../../test_sdk/include/hipdnn_test_sdk/utilities/DynamicTolerances.hpp) | Future: the per-operation default, computed from graph properties |
+| [`DynamicTolerances.hpp`](../../test_sdk/include/hipdnn_test_sdk/utilities/DynamicTolerances.hpp) | The per-operation default, computed from graph properties: in use for half and bfloat16 convolution forward (engine output only), future for the rest |
 | [`reference-data-scripts/`](../../../../dnn-providers/integration-tests/reference-data-scripts/) | Golden data generators and `verify_golden_bundles.py` |
 | [`migration-scripts/`](../../../../dnn-providers/integration-tests/migration-scripts/) | `import_graph.py` and the capture pipeline that place bundles in the tree |
 
@@ -600,7 +600,7 @@ Comparison FAILED
   Bundle: <data root>/quick/ConvolutionFwd/Default/sweep.json#<CaseId>
   Tensor: <name> (UID 2, output)
   Shape:  [1, 16, 16, 16]  BFLOAT16
-  Tolerance: atol=0.1 rtol=0.1
+  Tolerance: atol=7.15256e-07 rtol=0.015625
   Tensor diff for "<name>":
     Total elements: 4096
     Mismatched:     42 (1.03%)
@@ -688,7 +688,7 @@ Tolerance for engine output is determined by a **three-level priority chain**. T
 | 2 | Bundle tolerance (`meta.json`) | Generation/calibration tool | Steady state -- each bundle carries its own calibrated tolerance, set at generation time by measuring expected variance |
 | 3 | Per-operation default (code) | Compile-time constant | Safety net for bundles without calibrated tolerance (e.g., bundles captured from C++ graph tests) |
 
-If a TOML override matches, it wins. Otherwise the bundle's `meta.json` tolerance applies. If the bundle has no tolerance metadata, the per-operation default applies. Without level 2, the harness takes the per-operation default from [`ToleranceResolver.hpp`](../../../../dnn-providers/integration-tests/src/harness/tolerance/ToleranceResolver.hpp) and then applies a matching TOML override.
+If a TOML override matches, it wins. Otherwise the bundle's `meta.json` tolerance applies. If the bundle has no tolerance metadata, the per-operation default applies. Without level 2, the harness takes the per-operation default from [`ToleranceResolver.hpp`](../../../../dnn-providers/integration-tests/src/harness/tolerance/ToleranceResolver.hpp) and then applies a matching TOML override. The exception is the engine output of a half or bfloat16 convolution-forward graph, whose default is the dynamic tolerance of [`ConvFwdDynamicTolerance.hpp`](../../../../dnn-providers/integration-tests/src/harness/tolerance/ConvFwdDynamicTolerance.hpp); the golden-data-versus-reference check keeps the fixed default.
 
 Each engine's config (e.g., [`MIOPEN_ENGINE.toml`](../../../../dnn-providers/miopen-provider/config/MIOPEN_ENGINE.toml)) can declare `[[tolerance_overrides]]` entries with glob-pattern filters and atol/rtol values. A `[[validator_overrides]]` entry selects a different validator for one output tensor, matched by tensor name. TOML overrides apply only to engine output. `hipdnn_golden_data_tests` uses the per-operation default only, so an engine config can never loosen the check on the golden data.
 

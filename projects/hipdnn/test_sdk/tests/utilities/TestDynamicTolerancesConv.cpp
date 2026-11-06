@@ -1380,7 +1380,7 @@ TYPED_TEST(ConvFpropOutputToleranceFixture, NearZeroOutputsNeedTheSummationOrder
 // Half kernels that keep partial sums in half differ from the float reference by about
 // 0.3 * eps * sigma near zero. The lambda term allows that for half; without it (lambda 0, as
 // bfloat16 has) the same implementation fails.
-TEST(ConvFpropOutputToleranceHalf, HalfPrecisionPartialSumsPass)
+TEST(TestConvFpropOutputToleranceFp16, HalfPrecisionPartialSumsPass)
 {
     // K/2 is not a multiple of the block, so the blocks of the cancelling half do not mirror
     // those of the first and their rounding errors do not cancel.
@@ -1484,8 +1484,8 @@ TYPED_TEST(ConvFpropOutputToleranceFixture, ToleranceBeyondTheOutputRangeThrows)
     using T = TypeParam;
     ConvFpropErrorScale s;
     s.accumulationLength = uint64_t{1} << 40;
-    s.inputMeanSquare = 1e30;
-    s.weightMeanSquare = 1e30;
+    s.inputMeanSquare = 1e36;
+    s.weightMeanSquare = 1e36;
     EXPECT_THROW(calculateConvFpropOutputTolerance<T>(s), std::overflow_error);
 
     // The mean squares are finite, but their product overflows a double.
