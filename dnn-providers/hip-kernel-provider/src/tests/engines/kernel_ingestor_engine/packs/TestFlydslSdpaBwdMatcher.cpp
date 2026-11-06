@@ -22,7 +22,7 @@
 
 /**
  * The shared FlyDSL SDPA backward matcher, one test per rule. A test's name begins with its
- * rule's id with the hyphen dropped (MW-9a is MW9a); FlydslSdpaBwdCommon.hpp documents each
+ * rule's id with the hyphen dropped (MW-9 is MW9); FlydslSdpaBwdCommon.hpp documents each
  * rule id beside its check. A decline test asserts the cause and a substring of the detail,
  * and sits beside an accepting control that differs from it in one field. An accept test
  * asserts what the problem records.
@@ -1083,43 +1083,25 @@ TEST(TestFlydslSdpaBwdMatcher, MW8LeftBoundIsRecordedInTheCudnnWindowConvention)
     EXPECT_EQ(bottomRight->diagonalOffset, 8);
 }
 
-TEST(TestFlydslSdpaBwdMatcher, MW9aLeftBoundZeroWithRightBoundAtLeastOneAccepts)
+TEST(TestFlydslSdpaBwdMatcher, MW9EveryLeftBoundOfZeroDeclines)
 {
-    const auto problem = accepted(baseline().withEdit([](SdpaBwdGraph& g) {
-        g.attributes.leftBound = 0;
-        g.attributes.rightBound = 1;
-    }));
-    ASSERT_TRUE(problem.has_value());
-    EXPECT_TRUE(problem->masked);
-    EXPECT_EQ(problem->windowLeft, 0);
-    EXPECT_EQ(problem->windowRight, 1);
-}
-
-TEST(TestFlydslSdpaBwdMatcher, MW9bLeftBoundZeroWithRightBoundZeroDeclines)
-{
-    declined(baseline().withEdit([](SdpaBwdGraph& g) {
-        g.attributes.leftBound = 0;
-        g.attributes.rightBound = 0;
-    }),
-             "mask",
-             "empty band");
+    const auto leftZero = [](std::optional<int64_t> right) {
+        return baseline().withEdit([right](SdpaBwdGraph& g) {
+            g.attributes.leftBound = 0;
+            g.attributes.rightBound = right;
+        });
+    };
+    // Right bound 0, unbounded, and above 0 all decline, as does a causal flag beside it.
+    declined(leftZero(0), "mask", "left_bound 0");
+    declined(leftZero(std::nullopt), "mask", "left_bound 0");
+    declined(leftZero(1), "mask", "left_bound 0");
     declined(baseline().withEdit([](SdpaBwdGraph& g) {
         g.attributes.leftBound = 0;
         g.attributes.causalMask = true;
     }),
              "mask",
-             "empty band");
-    EXPECT_TRUE(accepted(baseline().withEdit([](SdpaBwdGraph& g) {
-        g.attributes.leftBound = 0;
-        g.attributes.rightBound = 1;
-    })));
-}
-
-TEST(TestFlydslSdpaBwdMatcher, MW9cLeftBoundZeroWithUnboundedRightDeclines)
-{
-    declined(baseline().withEdit([](SdpaBwdGraph& g) { g.attributes.leftBound = 0; }),
-             "mask",
-             "left_bound 0 with an unbounded right bound");
+             "left_bound 0");
+    // The smallest valid left bound is served.
     const auto control
         = accepted(baseline().withEdit([](SdpaBwdGraph& g) { g.attributes.leftBound = 1; }));
     ASSERT_TRUE(control.has_value());

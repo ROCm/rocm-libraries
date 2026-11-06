@@ -1070,7 +1070,7 @@ the decline cause in brackets is the one a refused graph reports.
 | Data type | f16 or bf16 on every tensor (DT-1); f32 on the split engine only (DT-2) | FP8 and mixed types, and f32 on the merged engine (DT-2, DT-3) [data_type] |
 | Heads | unequal Dqk and Dv (DT-5); any GQA group size (DT-6); head dims that are not a multiple of 8 (4 for f32) when the smallest stride is at least the rounded-up dim (DT-8); on the split engine, V with a head count of its own, `Hk != Hv` (SH-1, see 9.2) | max(Dqk, Dv) above 512 (DT-4) [head_size]; a query head count that is not a multiple of the key or value heads (DT-6, SH-1) [gqa]; `Hk != Hv` on the merged engine, or with a bias, fp32 data or a ragged tensor (SH-1) [shape] |
 | Layout | packed Q/K/V views and shared dQ/dK/dV buffers (LY-4) | alignment below 16 bytes (LY-1) [operand]; overlapping outputs (LY-5), strides that are not multiples of 8 elements (LY-3) [layout] |
-| Mask | causal flags (MW-2); windows in cuDNN's convention (MW-5 to MW-8, MW-9a); top-left and bottom-right alignment (MW-4) | both deprecated causal flags (MW-1); a bound below -1 (MW-3); left bound 0 with right bound 0 or unbounded (MW-9b, MW-9c) [mask]; a window with bottom-right alignment under `padding_mask` (MW-13); ALiBi (MW-12) [alibi_mask] |
+| Mask | causal flags (MW-2); windows in cuDNN's convention (MW-5 to MW-8); top-left and bottom-right alignment (MW-4) | both deprecated causal flags (MW-1); a bound below -1 (MW-3); any `left_bound` of 0 (MW-9) [mask]; a window with bottom-right alignment under `padding_mask` (MW-13); ALiBi (MW-12) [alibi_mask] |
 | Padding and ragged | `padding_mask` with both `seq_len` tensors (PV-1; rows past the lengths are not written, see 9.3); ragged offsets on Q, K, V, O, dO, dQ, dK, dV and stats, each with an INT32 `[B + 1, 1, 1, 1]` device offset tensor and its multiplier, with `padding_mask` and both `seq_len` tensors (PV-3, SS-4, SS-5; gap rows are not iterated, see 9.3) | the flag without the tensors or the reverse (PV-2); ragged offsets without `padding_mask` (PV-3); ragged offsets on the bias or dBias (PV-8) [varlen] |
 | Bias | bias of rank 1 to 4 (BI-1); a bias broadcast over batch or head with dBias (BI-3); a bias in Q's dtype, and on the split engine an f32 bias beside f16 or bf16 Q/K/V with an f32 dBias (BI-2); a bias row pitch that is not a multiple of 16 bytes (split engine, 9.2) | dBias without a bias (BI-6) or with a row-broadcast bias (BI-4) [dbias]; a dBias stride that is not a multiple of 16 bytes (BI-9) [layout]; bias with a causal or window mask (MW-10) [mask]; bias with `padding_mask` (PV-10) [varlen]; on the merged engine, an f32 bias [attn_mask] and a bias layout outside the LDS staging contract, which includes an unaligned pitch (BI-8) [bias] |
 | Dropout | probability in [0, 1) with an INT64 seed and offset on the device or an INT32 or INT64 one pass-by-value, an INT32 one sign-extended to 64 bits (DR-1 to DR-6); with a bottom-right causal mask (MW-11) | probability outside [0, 1) (DR-2); a device INT32 seed or offset, which the kernels would read 8 bytes of, as the forward engine declines it (DR-4); a dropout mask, scale or inverse-scale tensor (DR-7) [dropout] |
@@ -1105,12 +1105,12 @@ PyTorch's forward serves also trains. Each has its own rows; no input is convert
 | 16-bit bias whose row pitch is not a multiple of 16 bytes | served by dQ rows that read the bias directly | declines [bias] (BI-8) |
 | `Hk != Hv`, `Hq` a multiple of both (SH-1), no bias, not fp32, not ragged | served by dK-only and dV-only dK/dV rows and a V-head dQ row | declines [shape] |
 | dBias whose stride is not a multiple of 16 bytes (BI-9) | declines [layout] | declines [layout] |
-| `Dqk = Dv = 192`, f16 or bf16, with a causal or window mask (any diagonal bound) | served | declines [correctness] |
+| `Dqk = Dv = 192`, f16 or bf16, with a causal or window mask (any diagonal bound) or with any bias (with or without dBias) | served | declines [correctness] |
 
-The d192 row is a correctness decline pending a kernel fix: on gfx950 the merged masked d192
-objects return a wrong, run-to-run nondeterministic dK in both dtypes (dQ and dV are right;
-unmasked d192 and every other head dim are bitwise stable), and the split engine is correct
-on the same graphs.
+The d192 row is a correctness decline pending a kernel fix: on gfx950 the merged d192 objects
+return a wrong dK on masked graphs (run-to-run nondeterministic, both dtypes) and on biased
+graphs; dQ and dV are right. Unmasked d192 without a bias and every other head dim are
+bitwise stable, and the split engine is correct on the declined graphs.
 
 **Rows and head dims.** The new rows are exact tiles on gfx950 and padded `g1` tiles on
 gfx11-generic, for f16 and bf16, with and without baked dropout.

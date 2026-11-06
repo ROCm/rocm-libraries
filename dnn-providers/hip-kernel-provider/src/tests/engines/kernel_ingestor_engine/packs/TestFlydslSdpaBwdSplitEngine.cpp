@@ -2259,7 +2259,8 @@ TEST(TestFlydslSdpaBwdSplitGraph, TheMergedEngineDeclinesAnF32BiasAndValueHeadsW
     }
 }
 
-TEST(TestFlydslSdpaBwdSplitGraph, TheMergedEngineDeclinesAMaskedHeadDim192GraphTheSplitEngineServes)
+TEST(TestFlydslSdpaBwdSplitGraph,
+     TheMergedEngineDeclinesAMaskedOrBiasedHeadDim192GraphTheSplitEngineServes)
 {
     const auto atDtype = [](DataType dtype, int64_t headDim) {
         auto spec = withHeadDims(baseSpec(), headDim, headDim);
@@ -2288,12 +2289,48 @@ TEST(TestFlydslSdpaBwdSplitGraph, TheMergedEngineDeclinesAMaskedHeadDim192GraphT
             EXPECT_TRUE(
                 std::holds_alternative<flydsl_sdpa_bwd::SdpaBwdProblem>(matchSdpaBwdSpec(spec)));
         }
-        // Unmasked d192 and masked graphs at other head dims stay served.
+        // Any bias, with and without dBias, at d192.
+        for(const bool dbias : {false, true})
+        {
+            const auto biased = withBias(d192, dbias);
+            EXPECT_FALSE(mergedServes(biased));
+            EXPECT_TRUE(splitServes(biased));
+        }
+        // Unmasked d192 without a bias, and masked or biased graphs at other head dims, stay served.
         EXPECT_TRUE(mergedServes(d192));
+        EXPECT_TRUE(mergedServes(withBias(atDtype(dtype, 128), false)));
+        EXPECT_TRUE(mergedServes(withBias(atDtype(dtype, 160), true)));
         EXPECT_TRUE(mergedServes(withCausal(atDtype(dtype, 128))));
         EXPECT_TRUE(mergedServes(withCausal(atDtype(dtype, 160))));
         EXPECT_TRUE(mergedServes(withCausal(atDtype(dtype, 256))));
     }
+}
+
+TEST(TestFlydslSdpaBwdSplitGraph, BothEnginesDeclineEveryLeftBoundOfZero)
+{
+    const auto splitServes = [](const SdpaBwdSpec& spec) {
+        const GraphFixture fixture(buildSdpaBwdGraph(spec));
+        return matchesGraph(splitSymbols(Slot::PREP), fixture.context()).has_value();
+    };
+    const auto mergedServes = [](const SdpaBwdSpec& spec) {
+        const GraphFixture fixture(buildSdpaBwdGraph(spec));
+        return matchesGraph(MERGED, fixture.context()).has_value();
+    };
+    const auto leftZero = [](std::optional<int64_t> right) {
+        return baseSpec().withEdit([right](SdpaBwdGraph& g) {
+            g.attributes.leftBound = 0;
+            g.attributes.rightBound = right;
+        });
+    };
+    for(const auto& spec : {leftZero(0), leftZero(std::nullopt), leftZero(1)})
+    {
+        EXPECT_FALSE(mergedServes(spec));
+        EXPECT_FALSE(splitServes(spec));
+    }
+    // The smallest valid left bound is served by both.
+    const auto leftOne = baseSpec().withEdit([](SdpaBwdGraph& g) { g.attributes.leftBound = 1; });
+    EXPECT_TRUE(mergedServes(leftOne));
+    EXPECT_TRUE(splitServes(leftOne));
 }
 
 TEST(TestFlydslSdpaBwdSplitKernel, ARowReadsTheBiasAtTheWidthItWasBuiltFor)

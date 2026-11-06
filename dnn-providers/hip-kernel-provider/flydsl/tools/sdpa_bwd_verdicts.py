@@ -182,8 +182,7 @@ RULE_CAUSE = {
     "LY-3": "layout",  # checkTensorLayout doc: every stride of an axis of more than one element is a multiple of 8 (4 for FLOAT)
     "LY-6": "layout",  # checkTensorLayout doc: a multi-row sequence axis has a non-zero stride
     "MW-3": "mask",  # checkMask doc: a bound below -1 declines
-    "MW-9b": "mask",  # checkMask doc: left_bound 0 with right bound 0 declines
-    "MW-9c": "mask",  # checkMask doc: left_bound 0 with an unbounded right bound declines
+    "MW-9": "mask",  # checkMask doc: every left_bound of 0 declines
     "MW-10": "mask",  # checkBias doc: bias with a mask declines
     "MW-13": "mask",  # checkMask doc: a window with bottom-right alignment under padding_mask declines
     "PV-3": "varlen",  # checkVarlen doc: a ragged tensor without padding_mask and both seq_len tensors declines
@@ -197,7 +196,7 @@ NO_ROW = "no_row"
 
 # Rules the matcher documents as accepting (served rows cite them in `basis`):
 #   LY-4 packed Q/K/V views and shared dQ/dK/dV buffers; PV-1 padding_mask with both seq_len tensors; DR-4/DR-6 INT32/INT64
-#   device or pass-by-value seed and offset; BI-3 bias broadcast over batch or head with dBias; MW-5..8, MW-9a windows;
+#   device or pass-by-value seed and offset; BI-3 bias broadcast over batch or head with dBias; MW-5..8 windows;
 #   MW-11 dropout with a bottom-right causal mask; DT-5 unequal Dqk and Dv; DT-6 any group size; DT-8 odd D at stride ceil8(D).
 
 
@@ -284,10 +283,8 @@ def matcher_rule(r):
         right = 0
     if left < -1 or right < -1:
         return "MW-3"
-    if left == 0 and right == 0:
-        return "MW-9b"
-    if left == 0 and right == -1:
-        return "MW-9c"
+    if left == 0:
+        return "MW-9"
     if (
         r["varlen"] == "padded"
         and r["mask"] == "causal_br"
@@ -652,6 +649,7 @@ def build_rows():
     add("unm-f16-gqa-6x4", "unmodelled", hq=6, hk=4)
     add("unm-f16-win-left0-right0", "unmodelled", window_left=0, window_right=0)
     add("unm-f16-win-left0-unbounded", "unmodelled", window_left=0)
+    add("unm-f16-win-left0-right1", "unmodelled", window_left=0, window_right=1)
     add("unm-f16-causal-win-left0", "unmodelled", mask="causal_tl", window_left=0)
     add("unm-f16-win-left-below-1", "unmodelled", window_left=-2, window_right=8)
     add(
