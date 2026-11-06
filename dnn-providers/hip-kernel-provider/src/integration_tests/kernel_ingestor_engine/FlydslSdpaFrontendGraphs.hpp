@@ -63,6 +63,16 @@ struct FrontendDropout
     bool withRngDump = true;
 };
 
+/// Where a case pinned to an engine (FrontendSdpaSpec::engine on engineArch) runs. The standard
+/// tier runs it on engineArch, the architecture it exists for (pinnedCasesOnTheirArch); a
+/// Comprehensive* instantiation runs it everywhere else (pinnedCasesElsewhere).
+enum class PinnedArchRun
+{
+    EVERY_ARCH,
+    ENGINE_ARCH_ONLY,
+    OTHER_ARCHS_ONLY,
+};
+
 /// One SDPA forward graph: BSHD Q/K/V/O, an optional LSE (FLOAT [B, Hq, Sq, 1]), an optional
 /// attention sink [1, Hq, 1, 1] (FLOAT, SEM-022), a diagonal band, per-batch lengths and dropout.
 struct FrontendSdpaSpec
@@ -119,6 +129,8 @@ struct FrontendSdpaSpec
     /// backend must offer it, elsewhere the first-ranked FlyDSL engine serves.
     std::optional<std::string> engine;
     std::string engineArch;
+    /// Which architectures run a pinned case; ignored without engine and engineArch.
+    PinnedArchRun pinnedArchRun = PinnedArchRun::EVERY_ARCH;
     /// Every Q, K and V element this value, in the engine's and the reference's inputs alike
     /// (AOTriton's test_large_bf16_nan_values fills them with 133,120); random when unset.
     std::optional<float> inputValue;
@@ -591,6 +603,44 @@ struct LaneNeedsFlydsl : std::true_type
 {
 };
 
+/// Whether @p spec pins an engine to an architecture.
+inline bool pinsAnEngine(const FrontendSdpaSpec& spec)
+{
+    return spec.engine.has_value() && !spec.engineArch.empty();
+}
+
+/// The standard-tier copy of @p cases: each case that pins an engine runs on its engineArch
+/// only, the rest everywhere.
+template <typename CaseType>
+std::vector<CaseType> pinnedCasesOnTheirArch(std::vector<CaseType> cases)
+{
+    for(auto& testCase : cases)
+    {
+        if(pinsAnEngine(testCase.spec))
+        {
+            testCase.spec.pinnedArchRun = PinnedArchRun::ENGINE_ARCH_ONLY;
+        }
+    }
+    return cases;
+}
+
+/// The Comprehensive* copy of @p cases: only the cases that pin an engine, on every architecture
+/// but their engineArch, where the first-ranked FlyDSL engine serves them.
+template <typename CaseType>
+std::vector<CaseType> pinnedCasesElsewhere(const std::vector<CaseType>& cases)
+{
+    std::vector<CaseType> elsewhere;
+    for(auto testCase : cases)
+    {
+        if(pinsAnEngine(testCase.spec))
+        {
+            testCase.spec.pinnedArchRun = PinnedArchRun::OTHER_ARCHS_ONLY;
+            elsewhere.push_back(testCase);
+        }
+    }
+    return elsewhere;
+}
+
 /// The lane's fixture: skips where no FlyDSL SDPA objects ship, seeds each tensor apart, and
 /// runs a frontend-built graph through validate(), the backend, the first-ranked FlyDSL engine and
 /// the CPU reference graph executor.
@@ -802,6 +852,19 @@ protected:
     void validateServeAndVerify(FrontendSdpaGraph& sdpa, hipdnn_frontend::DataType dataType)
     {
         using hipdnn_frontend::ErrorCode;
+        if(pinsAnEngine(sdpa.spec))
+        {
+            const bool onEngineArch = _arch == sdpa.spec.engineArch;
+            if(sdpa.spec.pinnedArchRun == PinnedArchRun::ENGINE_ARCH_ONLY && !onEngineArch)
+            {
+                GTEST_SKIP() << "pinned to " << sdpa.spec.engineArch
+                             << "; its Comprehensive* copy runs it on " << _arch;
+            }
+            if(sdpa.spec.pinnedArchRun == PinnedArchRun::OTHER_ARCHS_ONLY && onEngineArch)
+            {
+                GTEST_SKIP() << "the standard-tier copy runs it on " << _arch;
+            }
+        }
         auto result = sdpa.graph->validate();
         ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
         result = sdpa.graph->build_operation_graph(this->_handle);

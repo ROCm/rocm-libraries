@@ -334,12 +334,24 @@ INSTANTIATE_TEST_SUITE_P(ParityExtras,
                              return std::string(info.param.name);
                          });
 
-INSTANTIATE_TEST_SUITE_P(DualwaveHeadDim256,
-                         IntegrationGpuFlydslSdpaFrontendParity,
-                         ::testing::ValuesIn(frontendDualwaveHeadDim256Cases()),
-                         [](const ::testing::TestParamInfo<FrontendParityCase>& info) {
-                             return std::string(info.param.name);
-                         });
+// On gfx950, the dual-wave kernel it is pinned to, in every tier; on other GPUs, which serve it on
+// their first-ranked engine, in the comprehensive (nightly) tier: the two take ~30 s on a gfx11
+// CI runner.
+INSTANTIATE_TEST_SUITE_P(
+    DualwaveHeadDim256,
+    IntegrationGpuFlydslSdpaFrontendParity,
+    ::testing::ValuesIn(pinnedCasesOnTheirArch(frontendDualwaveHeadDim256Cases())),
+    [](const ::testing::TestParamInfo<FrontendParityCase>& info) {
+        return std::string(info.param.name);
+    });
+
+INSTANTIATE_TEST_SUITE_P(
+    ComprehensiveDualwaveHeadDim256,
+    IntegrationGpuFlydslSdpaFrontendParity,
+    ::testing::ValuesIn(pinnedCasesElsewhere(frontendDualwaveHeadDim256Cases())),
+    [](const ::testing::TestParamInfo<FrontendParityCase>& info) {
+        return std::string(info.param.name);
+    });
 
 INSTANTIATE_TEST_SUITE_P(OddHeadDims,
                          IntegrationGpuFlydslSdpaFrontendParity,
