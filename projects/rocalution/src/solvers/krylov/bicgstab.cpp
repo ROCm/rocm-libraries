@@ -309,7 +309,7 @@ namespace rocalution
             // omega = <t,r> / <t,t>
             omega = t->Dot(*r) / t->Dot(*t);
 
-            if((std::abs(omega) == std::numeric_limits<ValueType>::infinity()) || (omega != omega)
+            if((std::abs(omega) == std::numeric_limits<double>::infinity()) || (omega != omega)
                || (omega == static_cast<ValueType>(0)))
             {
                 LOG_INFO(
@@ -435,7 +435,7 @@ namespace rocalution
             // omega = (t,r) / (t,t)
             omega = t->Dot(*r) / t->Dot(*t);
 
-            if((std::abs(omega) == std::numeric_limits<ValueType>::infinity()) || (omega != omega)
+            if((std::abs(omega) == std::numeric_limits<double>::infinity()) || (omega != omega)
                || (omega == static_cast<ValueType>(0)))
             {
                 LOG_INFO(
