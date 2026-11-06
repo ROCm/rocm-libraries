@@ -149,7 +149,6 @@ target_sources(hostnumerics-core
             "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/hostnumerics/permutation.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/hostnumerics/shape.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/hostnumerics/detail/layout_offset.hpp"
-            "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/hostnumerics/detail/shape_access.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/hostnumerics/detail/prime.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/hostnumerics/tensor.hpp"
 )

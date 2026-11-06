@@ -3,7 +3,6 @@
 
 #include <TensileLite/Client/hostnumerics/GemmInvocationAdapter.hpp>
 #include <TensileLite/Client/hostnumerics/HostNumericsBridge.hpp>
-#include <roc/hostnumerics/detail/shape_access.hpp>
 
 #include <Tensile/TensorDescriptor_fwd.hpp>
 #include <Tensile/Utils.hpp>
@@ -607,7 +606,7 @@ namespace TensileLite::Client::hostnumerics
                 = problem.outputAmaxD()
                   || (useGradient && useBias && biasSource == ContractionProblemGemm::D);
             const auto logicalCount
-                = roc::hostnumerics::detail::ShapeAccess::getElementCount(problem.d().sizes());
+                = roc::hostnumerics::Shape::getElementCount(problem.d().sizes());
             if(!logicalCount)
                 return failure(TranslationFailureCode::InvalidDescriptor,
                                "Tensor shape element count exceeds size_t.");

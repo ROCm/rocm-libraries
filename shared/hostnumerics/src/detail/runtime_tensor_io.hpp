@@ -23,6 +23,7 @@
 #include <utility>
 
 #include "index_iteration.hpp"
+#include "layout_analysis.hpp"
 #include "prepared_scalar_storage.hpp"
 #include "reference_arithmetic.hpp"
 
@@ -66,11 +67,6 @@ void runtimeLoadMatrixBlock(std::span<const std::byte> storage, ptrdiff_t offset
         } else {
             return preparedDecodeScalarKnown<Tag, Accumulator>(storage, logicalOffset);
         }
-    };
-    const auto strideMagnitude = [](ptrdiff_t stride) {
-        using Unsigned = std::make_unsigned_t<ptrdiff_t>;
-        const Unsigned value = static_cast<Unsigned>(stride);
-        return stride >= 0 ? value : Unsigned(0) - value;
     };
     if (strideMagnitude(rowStride) < strideMagnitude(columnStride)) {
         for (size_t column = 0; column < columns; ++column) {
