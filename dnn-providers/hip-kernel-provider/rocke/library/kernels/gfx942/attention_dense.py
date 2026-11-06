@@ -211,6 +211,7 @@ from kernels.common.attention_dense_spec import (
     AttentionDenseSpec,
     DENSE_TILE_GEOMETRIES,
     attention_dense_cache_key,
+    check_dense_scale,
     check_dense_spec_preflight,
     partial_tile_reason,
 )
@@ -2891,7 +2892,8 @@ def run_attention_dense_torch(
 ):
     """High-level framework entry: compile (cached) + launch the gfx942 dense prefill
     kernel on torch tensors. ``q``/``out`` are ``[B, S, Hq, D]`` and ``k``/``v`` are
-    ``[B, Skv, Hkv, D]``, dense contiguous; ``scale`` is the softmax scale (1/sqrt(D)).
+    ``[B, Skv, Hkv, D]``, dense contiguous; ``scale`` is the softmax scale (1/sqrt(D)),
+    in ``[2**-64, 2**4]``: :func:`check_dense_scale` raises for any other.
     ``sinks`` is the per-query-head sink logit ``[Hq]`` in q's dtype, required iff
     ``spec.use_sinks``.
     Returns ``out``. torch is imported lazily by the launcher, so this module stays
@@ -2920,6 +2922,7 @@ def run_attention_dense_torch(
     ok, why = supports_attention_dense(spec, arch=arch)
     if not ok:
         raise NotImplementedError(f"attention_dense unsupported for spec: {why}")
+    check_dense_scale(scale)
     if cu_seqlens_q is not None or cu_seqlens_kv is not None:
         raise ValueError(
             "cu_seqlens_* provided but gfx942 attention_dense is dense-only (varlen "
