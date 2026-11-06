@@ -451,11 +451,12 @@ __device__ void with_row_block(F&& body)
 {
     __shared__ __align__(16) T block[Count * Size];
 
-    const auto ring = [&]<int... I>(std::integer_sequence<int, I...>) {
-        return RowRing<T, Count>{{(block + I * Size)...}};
+    // The rows reach the ring as arguments, as with_rows' do: built from block itself the ring is a
+    // constant, which -O0 emits as a global of generic LDS addresses the backend cannot encode.
+    const auto pass_rows = [&](auto*... rows) { body(RowRing<T, Count>{{rows...}}); };
+    [&]<int... I>(std::integer_sequence<int, I...>) {
+        pass_rows((block + I * Size)...);
     }(std::make_integer_sequence<int, Count>{});
-
-    body(ring);
 }
 
 } // namespace hipconv::cdna4::direct_wgrad

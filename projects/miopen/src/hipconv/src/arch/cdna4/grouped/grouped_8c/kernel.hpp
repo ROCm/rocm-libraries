@@ -193,6 +193,8 @@ __device__ void conv2d_grouped_8c_cdna4_nhwc_impl(const ToType<DT>* __restrict__
     // Vectors to store (output uint4 elements per workgroup).
     constexpr int STORE_VECS = OUTPUT_BLOCK_Q * BLOCK_C_UINT4;
 
+    constexpr bool ONE_WAVE = cfg.block_size() == WAVE_SIZE;
+
     constexpr int NUM_INPUT_LDS_BUFFERS = 2;
 
     constexpr int INPUT_LDS_BUFFER_UINT4  = BLOCK_C_UINT4 * BLOCK_W;
@@ -362,7 +364,7 @@ __device__ void conv2d_grouped_8c_cdna4_nhwc_impl(const ToType<DT>* __restrict__
         constexpr int TAP_UINT4 = cfg.kh * cfg.kw * GROUP_UINT4;
         static_for<cfg.kd>([&]<int J>() {
             if constexpr(J > 0)
-                __syncthreads();
+                sync_before_lds_dma<ONE_WAVE>();
             for(int j = tid; j < WEIGHT_LDS_SIZE_UINT4; j += cfg.block_size())
             {
 #ifdef __gfx950__
@@ -449,7 +451,7 @@ __device__ void conv2d_grouped_8c_cdna4_nhwc_impl(const ToType<DT>* __restrict__
 
     // Ensure all threads have finished reading weights from LDS before
     // the input buffer_load_lds overwrites the same lds_buf region.
-    __syncthreads();
+    sync_before_lds_dma<ONE_WAVE>();
 
     // Issue an async input load for input row y_local, splitting work over
     // LOAD_PASSES passes. fp16/bf16 has LOAD_PASSES == 1 so the for-loop

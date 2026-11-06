@@ -66,3 +66,11 @@ __device__ inline void wait_mem()
     static_assert(Lgkm >= 0 && Lgkm <= 15, "lgkmcnt must be in range [0, 15] (4-bit field)");
     __builtin_amdgcn_s_waitcnt(vmcnt(Vm) & lgkmcnt(Lgkm));
 }
+
+template <bool OneWave>
+__device__ __forceinline__ void sync_before_lds_dma()
+{
+    if constexpr(OneWave)
+        wait_lgkmcnt<0>();
+    __syncthreads();
+}

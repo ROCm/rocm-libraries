@@ -64,11 +64,11 @@ template <Config cfg,
           bool ONE_FTILE,
           bool SPLIT,
           bool DEPTH>
-__device__ void direct_flex_impl(const Hot hot,
-                                 LayerPars pars,
-                                 const ToType<DT>* __restrict__ in,
-                                 const ToType<DT>* __restrict__ wei,
-                                 ToType<DT>* __restrict__ out)
+__device__ __forceinline__ void direct_flex_impl(const Hot hot,
+                                                 LayerPars pars,
+                                                 const ToType<DT>* __restrict__ in,
+                                                 const ToType<DT>* __restrict__ wei,
+                                                 ToType<DT>* __restrict__ out)
 {
     using T = Traits<cfg, DT, DGRAD, NARROW_K, C_TAIL, CHUNKS, N, ONE_FTILE, SPLIT, DEPTH>;
     constexpr bool PHASED    = T::PHASED;

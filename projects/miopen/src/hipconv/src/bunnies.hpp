@@ -295,11 +295,23 @@ __device__ __forceinline__ auto volatile_lane_id() -> int
     return result;
 }
 
-// x in an SGPR; LICM cannot hoist the asm or what is computed from it.
+// Whether pin_sgpr pins. Its asm takes an SGPR, which holds a value only where the compiler proves
+// it uniform: at -O0 values are reloaded from the stack, which is per lane, and where lambdas stay
+// out of line, at -Oz or under -fno-inline, their arguments are VGPRs and what they capture lives
+// on the stack. -Os defines the same macros as -Oz.
+#if defined(__OPTIMIZE__) && !defined(__OPTIMIZE_SIZE__) && !defined(__NO_INLINE__)
+constexpr bool enable_pin_sgpr = true;
+#else
+constexpr bool enable_pin_sgpr = false;
+#endif
+
+// x in an SGPR; LICM cannot hoist the asm or what is computed from it. Without enable_pin_sgpr it
+// returns x as is.
 template <class T>
 __device__ __forceinline__ auto pin_sgpr(T x) -> T
 {
-    asm volatile("" : "+s"(x));
+    if constexpr(enable_pin_sgpr)
+        asm volatile("" : "+s"(x));
     return x;
 }
 

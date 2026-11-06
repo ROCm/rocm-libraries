@@ -107,6 +107,23 @@ if(HIPCONV_LINE_TABLES)
     string(APPEND CMAKE_HIP_FLAGS " -gline-tables-only")
 endif()
 
+# Optimize device code in every build type, and give it no debug info beyond line tables.
+#
+# Below -O2, values that pin_sgpr constrains to SGPRs are reloaded from scratch memory, which makes
+# them divergent, and the backend fails with "illegal VGPR to SGPR copy". Device debug info takes
+# libhipconv past the 2 GiB reach of an x86-64 PC-relative relocation. Host code keeps the build
+# type's optimization and debug info.
+set(HIPCONV_DEVICE_CODEGEN_OPTIONS "SHELL:-Xarch_device -O3")
+if(HIPCONV_LINE_TABLES)
+    list(APPEND HIPCONV_DEVICE_CODEGEN_OPTIONS "SHELL:-Xarch_device -gline-tables-only")
+else()
+    list(APPEND HIPCONV_DEVICE_CODEGEN_OPTIONS "SHELL:-Xarch_device -g0")
+endif()
+get_directory_property(_hipconv_parent_dir PARENT_DIRECTORY)
+if(_hipconv_parent_dir)
+    set(HIPCONV_DEVICE_CODEGEN_OPTIONS "${HIPCONV_DEVICE_CODEGEN_OPTIONS}" PARENT_SCOPE)
+endif()
+
 # Device LTO costs up to 8x on the kernels this library exists to provide.
 #
 # Some ROCm clangs default the AMDGCN LTO mode to full, and under that pipeline the
@@ -117,8 +134,9 @@ endif()
 # Carried on the targets rather than in CMAKE_HIP_FLAGS because a consumer may compile
 # these sources as CXX -- MIOpen does -- and then the HIP flags never reach them.
 option(HIPCONV_OFFLOAD_LTO "Leave the compiler's device LTO default alone" OFF)
+set(HIPCONV_DEVICE_COMPILE_OPTIONS ${HIPCONV_DEVICE_CODEGEN_OPTIONS})
 if(NOT HIPCONV_OFFLOAD_LTO)
-    set(HIPCONV_DEVICE_COMPILE_OPTIONS -fno-offload-lto)
+    list(APPEND HIPCONV_DEVICE_COMPILE_OPTIONS -fno-offload-lto)
 endif()
 
 # A consumer that installs only its own shared library, such as MIOpen, sets HIPCONV_FORCE_STATIC.
