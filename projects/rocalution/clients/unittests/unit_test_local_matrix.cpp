@@ -1409,18 +1409,24 @@ TEST_P(local_matrix_formats, extracts_and_replaces_rows_and_columns_without_entr
 
         // MCSR needs every diagonal entry, and DIA and ELL reject matrices with
         // fewer entries than rows, so these results stay in CSR
+        const unsigned int result_format = is(MCSR) || is(DIA) || is(ELL) ? CSR : format().id;
+
         std::vector<T> D(n * n, T(0));
         for(int i = 0; i < n; ++i)
         {
             D[i * n + 1] = values[i];
         }
         std::string log = logged([&] { A->ReplaceColumnVector(1, *vector_of(values)); });
+        EXPECT_EQ(rocalution::_matrix_format_names[A->GetFormat()],
+                  rocalution::_matrix_format_names[result_format]);
         expect_kept_or_csr(*A, from_dense(n, n, D), log);
 
         auto B = without_entries();
         std::fill(D.begin(), D.end(), T(0));
         std::copy(values.begin(), values.end(), D.begin() + 2 * n);
         log = logged([&] { B->ReplaceRowVector(2, *vector_of(values)); });
+        EXPECT_EQ(rocalution::_matrix_format_names[B->GetFormat()],
+                  rocalution::_matrix_format_names[result_format]);
         expect_kept_or_csr(*B, from_dense(n, n, D), log);
     });
 }
@@ -2798,42 +2804,6 @@ TEST_P(local_matrix_formats, amg_greedy_aggregate_runs_on_a_csr_copy)
 }
 
 // Matrices without entries
-
-// The rows and columns of a matrix without entries are zero
-TYPED_TEST(local_matrix, rows_and_columns_of_a_matrix_without_entries)
-{
-    using T = typename TypeParam::value_type;
-
-    const int                  n = 4;
-    const std::vector<PtrType> no_entries(n + 1, 0);
-    const std::vector<T>       values = {1, 0, 2, 3};
-    const std::vector<T>       zeros(n, T(0));
-
-    auto A = empty_local_matrix<T>(this->backend());
-    A->CopyFromHostCSR(no_entries.data(), nullptr, nullptr, "E", 0, n, n);
-    auto x = make_local_vector(this->backend(), std::vector<T>(n, T(7)));
-    A->ExtractColumnVector(1, x.get());
-    expect_vector(*x, zeros, this->backend(), 0);
-
-    x = make_local_vector(this->backend(), std::vector<T>(n, T(7)));
-    A->ExtractRowVector(1, x.get());
-    expect_vector(*x, zeros, this->backend(), 0);
-
-    std::vector<T> D(n * n, T(0));
-    for(int i = 0; i < n; ++i)
-    {
-        D[i * n + 1] = values[i];
-    }
-    A->ReplaceColumnVector(1, *make_local_vector(this->backend(), values));
-    expect_matrix(*A, from_dense(n, n, D), csr_format, this->backend());
-
-    auto B = empty_local_matrix<T>(this->backend());
-    B->CopyFromHostCSR(no_entries.data(), nullptr, nullptr, "E", 0, n, n);
-    std::fill(D.begin(), D.end(), T(0));
-    std::copy(values.begin(), values.end(), D.begin() + 2 * n);
-    B->ReplaceRowVector(2, *make_local_vector(this->backend(), values));
-    expect_matrix(*B, from_dense(n, n, D), csr_format, this->backend());
-}
 
 // The operations skip a matrix without entries and leave their outputs as they
 // were. For the solves of this singular system, the eigenvalue bounds, the

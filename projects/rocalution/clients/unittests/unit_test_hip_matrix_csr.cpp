@@ -235,8 +235,9 @@ TYPED_TEST(hip_matrix_csr_backend, set_data_ptr_without_entries)
 }
 
 // The operations on the values and the extractions leave a matrix without
-// entries as it is. The row and column extractions zero their outputs, and
-// ExtractDiagonal leaves its output as it is.
+// entries as it is. The row and column extractions zero their outputs.
+// ExtractDiagonal writes only the diagonal entries it finds, as on the host, so
+// it leaves its output as it is.
 TYPED_TEST(hip_matrix_csr_backend, operations_on_a_matrix_without_entries)
 {
     using T       = typename TypeParam::value_type;
@@ -330,7 +331,6 @@ TYPED_TEST(hip_matrix_csr_backend, operations_on_a_matrix_without_entries)
          [](const BaseMatrix<T>& A, BaseVector<T>* v) { return A.ExtractRowVector(2, v); }},
     };
 
-    // ExtractDiagonal writes only the diagonal entries it finds, as on the host
     for(const auto& extraction : extractions)
     {
         SCOPED_TRACE(extraction.first);
