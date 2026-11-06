@@ -2108,7 +2108,7 @@ TYPED_TEST(preconditioners, as_adds_the_weighted_block_solves)
 
     // With 4 blocks of 3 rows, an overlap of 2 puts rows 4 and 7 in three blocks, and an
     // overlap of 4 puts rows 5 and 6 in all four and clips the second block at the first
-    // row and the third at the last
+    // row and the third at the last. 12 blocks of one row are as many as the rows allow
     for(const auto& [nb, overlap] : std::vector<std::pair<int, int>>{{1, 0},
                                                                      {1, 2},
                                                                      {2, 0},
@@ -2120,7 +2120,9 @@ TYPED_TEST(preconditioners, as_adds_the_weighted_block_solves)
                                                                      {4, 0},
                                                                      {4, 1},
                                                                      {4, 2},
-                                                                     {4, 4}})
+                                                                     {4, 4},
+                                                                     {12, 0},
+                                                                     {12, 1}})
     {
         SCOPED_TRACE(std::to_string(nb) + " blocks, overlap " + std::to_string(overlap));
         ExactSolvers<T>                         local(nb);
@@ -2139,8 +2141,19 @@ TYPED_TEST(preconditioners, ras_takes_each_row_from_the_block_that_owns_it)
     const std::vector<T> r   = rhs<T>(ref.n);
     auto                 A   = this->make(ref);
 
-    for(const auto& [nb, overlap] : std::vector<std::pair<int, int>>{
-            {1, 0}, {1, 2}, {2, 0}, {2, 1}, {2, 3}, {3, 0}, {3, 1}, {3, 2}, {4, 1}, {4, 2}, {4, 4}})
+    for(const auto& [nb, overlap] : std::vector<std::pair<int, int>>{{1, 0},
+                                                                     {1, 2},
+                                                                     {2, 0},
+                                                                     {2, 1},
+                                                                     {2, 3},
+                                                                     {3, 0},
+                                                                     {3, 1},
+                                                                     {3, 2},
+                                                                     {4, 1},
+                                                                     {4, 2},
+                                                                     {4, 4},
+                                                                     {12, 0},
+                                                                     {12, 1}})
     {
         SCOPED_TRACE(std::to_string(nb) + " blocks, overlap " + std::to_string(overlap));
         ExactSolvers<T>                          local(nb);
@@ -2161,20 +2174,28 @@ TYPED_TEST(preconditioners, schwarz_blocks_cover_the_rows_beyond_a_multiple_of_t
     const std::vector<T> r   = rhs<T>(ref.n);
     auto                 A   = this->make(ref);
 
-    ExactSolvers<T>                         as_local(2);
-    rocalution::AS<Matrix<T>, Vector<T>, T> as;
-    as.Set(2, 1, as_local.get());
-    as.SetOperator(*A);
-    as.Build();
-    expect_near(apply(as, *A, r), additive_schwarz(ref, 2, 1, r), scaled_tol<T>(1e-13));
+    // The last block owns the rows beyond the multiple, also after blocks between two others,
+    // without an overlap that would reach them, and with 3 of them for 5 blocks
+    for(const auto& [nb, overlap] :
+        std::vector<std::pair<int, int>>{{2, 1}, {3, 1}, {4, 0}, {4, 2}, {5, 1}})
+    {
+        SCOPED_TRACE(std::to_string(nb) + " blocks, overlap " + std::to_string(overlap));
+        ExactSolvers<T>                         as_local(nb);
+        rocalution::AS<Matrix<T>, Vector<T>, T> as;
+        as.Set(nb, overlap, as_local.get());
+        as.SetOperator(*A);
+        as.Build();
+        expect_near(apply(as, *A, r), additive_schwarz(ref, nb, overlap, r), scaled_tol<T>(1e-13));
 
-    ExactSolvers<T>                          ras_local(2);
-    rocalution::RAS<Matrix<T>, Vector<T>, T> ras;
-    ras.Set(2, 1, ras_local.get());
-    ras.SetOperator(*A);
-    ras.Build();
-    expect_near(
-        apply(ras, *A, r, 9.0), restricted_additive_schwarz(ref, 2, 1, r), scaled_tol<T>(1e-13));
+        ExactSolvers<T>                          ras_local(nb);
+        rocalution::RAS<Matrix<T>, Vector<T>, T> ras;
+        ras.Set(nb, overlap, ras_local.get());
+        ras.SetOperator(*A);
+        ras.Build();
+        expect_near(apply(ras, *A, r, 9.0),
+                    restricted_additive_schwarz(ref, nb, overlap, r),
+                    scaled_tol<T>(1e-13));
+    }
 }
 
 // The setup runs in the child, since Set allocates what only the Clear of a built AS

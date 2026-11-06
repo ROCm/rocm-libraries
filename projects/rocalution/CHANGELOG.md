@@ -13,6 +13,7 @@ Full documentation for rocALUTION is available at [https://rocm.docs.amd.com/pro
 * ROCmCMakeBuildTools 0.11.0 or later is now required. By default, CMake configuration fails when it isn't found instead of downloading rocm-cmake from GitHub. Configure with `-DALLOW_FETCH_DEPS=ON` to download rocm-cmake 0.14.0 from ROCm 7.2.4 instead. The deprecated `ROCM` package fallback was removed.
 * GoogleTest must be installed before building the tests. Alternatively, set `FETCHCONTENT_SOURCE_DIR_GOOGLETEST` to a googletest source tree, or configure with `-DALLOW_FETCH_DEPS=ON` to download GoogleTest 1.15.2. Both build GoogleTest statically and don't install it.
 * CMake 3.19 or later is now required to build rocALUTION (previously 3.5).
+* `AS::Build()` and `RAS::Build()` now assert that there are no more blocks than rows. Before, such a split solved no rows, or with an overlap read before the first row.
 
 ### Removed
 * Removed the GoogleTest superbuild in `deps` and its `BUILD_GTEST` option, which `install.sh -d` invoked without enabling it.
@@ -45,7 +46,7 @@ Full documentation for rocALUTION is available at [https://rocm.docs.amd.com/pro
 * Fixed `Jacobi::ResetOperator()`, `GS::ResetOperator()` and `SGS::ResetOperator()` ignoring the given operator and rebuilding from the previous one.
 * Fixed `FSAI` and `LocalMatrix::FSAI()` for a row of the pattern with a single entry, which kept its pattern value unless that row of the matrix started at the diagonal. The entry is now computed from the diagonal entry of A in its column, which is what the general formula gives for a single entry. Such a row is a valid FSAI pattern only when its entry is on the diagonal.
 * Fixed `AIChebyshev` building a wrong approximate inverse: the series started from the matrix instead of the identity, the shifted matrix was scaled only on its diagonal, and all coefficients were halved.
-* Fixed `AS` and `RAS` leaving the last rows in no block when the number of rows is not a multiple of the number of blocks, `AS` weighting the overlaps of a block between two others wrongly, and a block whose overlap reaches before the first or past the last row. `AS` now weights each row by 1 / (number of blocks that hold it), and `Build()` asserts that there are no more blocks than rows.
+* Fixed `AS` and `RAS` leaving the last rows in no block when the number of rows is not a multiple of the number of blocks, `AS` weighting the overlaps of a block between two others wrongly, and not clipping to the matrix a block whose overlap reaches before the first or past the last row. `AS` now weights each row by 1 / (number of blocks that hold it).
 * Fixed `MultiColoredGS` and `MultiColoredSGS` applying a wrong relaxation for `SetRelaxation()` values other than 1, and `MultiColoredSGS` without decomposition ignoring the relaxation. Relaxation values tuned before this fix need to be tuned again: the old `MultiColoredGS` applied SOR with 1 / omega, and the old `MultiColoredSGS` with decomposition applied SSOR with 1 / omega up to a scalar factor. Without decomposition, `SetRelaxation()` must now be called before `Build()`.
 
 ## (Unreleased) rocALUTION 4.1.1
