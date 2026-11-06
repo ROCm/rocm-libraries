@@ -1792,6 +1792,14 @@ def test_nonpersistent_vector_epilogue_keeps_its_existing_lds_layout(
     assert sol["LdsNumBytes"] == baseline["LdsNumBytes"]
 
 
+def _assert_every_vector_preload_barriers(asm):
+    """Each vector preload barriers between its last label_Load_Bias and its first store."""
+    preloads = [s for s in re.split(r"store (?:bias|scaleAlpha)\b", asm)[:-1] if "buffer_load" in s]
+    assert preloads
+    for preload in preloads:
+        assert "s_barrier_wait" in preload[preload.rindex("label_Load_Bias"):]
+
+
 @pytest.mark.parametrize("streamk", [0, 3])
 def test_tdm_store_puts_the_vector_epilogue_after_the_staged_tile(
         _gp_gfx1250, gfx1250_iim, assembler, capsys, streamk):
@@ -1806,10 +1814,18 @@ def test_tdm_store_puts_the_vector_epilogue_after_the_staged_tile(
     assert sol["LdsOffsetBiasGSU"] == sol["LdsOffsetBias"]
     assert sol["LdsNumBytes"] >= sol["LdsOffsetBias"] + 256 * 4 * 2
     # The moved vectors can still overlap the main-loop LDS, so every preload barriers before its stores.
-    preloads = [s for s in re.split(r"store (?:bias|scaleAlpha)\b", asm)[:-1] if "buffer_load" in s]
-    assert preloads
-    for preload in preloads:
-        assert "s_barrier_wait" in preload[preload.rindex("label_Load_Bias"):]
+    _assert_every_vector_preload_barriers(asm)
+
+
+def test_factor_dim_3_vector_preload_barriers_both_factor_dims(
+        _gp_gfx1250, gfx1250_iim, assembler, capsys):
+    # TDMStore takes the vectors only along M, so this kernel keeps them over main-loop LDS buffer 0.
+    sol, asm = _emit_asm(gfx1250_iim, assembler, mi=_BF16_VECTOR_MI, DepthU=64, StreamK=0, StreamKForceDPOnly=0,
+                         ProblemType=dict(_BF16_VECTOR_EPILOGUE, UseBias=3, UseScaleAlphaVec=3))
+    assert sol.get("Valid"), capsys.readouterr().out
+    assert sol["LdsOffsetBias"] == 0
+    assert "label_Load_FactorDim_1" in asm
+    _assert_every_vector_preload_barriers(asm)
 
 
 # PAP and RAP on TDMFuse 1-3.
