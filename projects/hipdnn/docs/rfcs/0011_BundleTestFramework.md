@@ -733,7 +733,7 @@ The per-operation default is the safety net. It starts simple and gets smarter:
 
 - **Fixed tolerances**: The harness reads the operation type of each node and the output data type from the graph and uses them as a lookup key into [`TestTolerances.hpp`](../../test_sdk/include/hipdnn_test_sdk/utilities/TestTolerances.hpp), which defines compile-time constants per operation and data type (e.g., batchnorm inference fp32 = `2e-4`, conv fwd fp32 = `1e-5`). For a graph with several nodes, it takes the loosest per-node value. An unknown operation gets `1e-3`. The same value is used for atol and rtol. The graph does not compute tolerances — it provides the key, the lookup table provides the value.
 
-- **Future -- dynamic tolerances**: [`DynamicTolerances.hpp`](../../test_sdk/include/hipdnn_test_sdk/utilities/DynamicTolerances.hpp) will replace fixed lookup values with tolerances computed from graph properties (operation, data type, tensor dimensions). This is the intended long-term solution but requires validation before it can replace fixed values (see [Future Work](#future-work)).
+- **Dynamic tolerances**: [`DynamicTolerances.hpp`](../../test_sdk/include/hipdnn_test_sdk/utilities/DynamicTolerances.hpp) replaces fixed lookup values with tolerances computed from graph properties (operation, data type, tensor dimensions) and the input tensors. Each one needs validation against measured engine error before it replaces a fixed value (see [Future Work](#future-work)). The first in use grades half and bfloat16 convolution-forward outputs; its model and calibration are in the integration-test [Tolerances](../../../../dnn-providers/integration-tests/docs/tolerances.md) document.
 
 This evolution changes *how* the default is computed -- it does not change the three-level chain.
 
@@ -960,7 +960,7 @@ The following architectural forks were considered during design. Each records th
 
 ## Future Work
 
-1. **Dynamic tolerance integration**: Wire the existing `DynamicTolerances` functions (matmul, conv, batchnorm, layernorm, RMS norm, pointwise, SDPA) into the bundle harnesses as the per-operation default.
+1. **Dynamic tolerance integration**: Wire the `DynamicTolerances` functions (matmul, conv, batchnorm, layernorm, RMS norm, pointwise, SDPA) into the bundle harnesses as the per-operation default. Half and bfloat16 convolution forward is done (`calculateConvFpropOutputTolerance`); its calibration method, measuring the engine's error against a float64 recomputation and scoring injected bugs, is the template for the rest.
 2. **Engine-as-bundle-producer**: Any engine can take a graph-only bundle, execute the graph, and write the results back as a full bundle -- enabling cross-engine comparison without a shared reference source.
 3. **Bundle-to-bundle comparison**: A standalone tool that loads two bundles and diffs their output tensors directly, matched by graph content rather than filename.
 4. **Auto-tier classification**: The generator suggests the appropriate tier folder based on tensor element counts, matching the existing size conventions.
