@@ -1160,27 +1160,27 @@ RppStatus rppt_color_temperature(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr
             return color_temperature_u8_u8_host_tensor(
                 static_cast<Rpp8u*>(srcPtr) + srcDescPtr->offsetInBytes, srcDescPtr,
                 static_cast<Rpp8u*>(dstPtr) + dstDescPtr->offsetInBytes, dstDescPtr,
-                adjustmentValueTensor, roiTensorPtrSrc, roiType, layoutParams);
+                adjustmentValueTensor, roiTensorPtrSrc, roiType, layoutParams, handle);
         } else if ((srcDescPtr->dataType == RpptDataType::F16) &&
                    (dstDescPtr->dataType == RpptDataType::F16)) {
             return color_temperature_f16_f16_host_tensor(
                 reinterpret_cast<Rpp16f*>(static_cast<Rpp8u*>(srcPtr) + srcDescPtr->offsetInBytes),
                 srcDescPtr,
                 reinterpret_cast<Rpp16f*>(static_cast<Rpp8u*>(dstPtr) + dstDescPtr->offsetInBytes),
-                dstDescPtr, adjustmentValueTensor, roiTensorPtrSrc, roiType, layoutParams);
+                dstDescPtr, adjustmentValueTensor, roiTensorPtrSrc, roiType, layoutParams, handle);
         } else if ((srcDescPtr->dataType == RpptDataType::F32) &&
                    (dstDescPtr->dataType == RpptDataType::F32)) {
             return color_temperature_f32_f32_host_tensor(
                 reinterpret_cast<Rpp32f*>(static_cast<Rpp8u*>(srcPtr) + srcDescPtr->offsetInBytes),
                 srcDescPtr,
                 reinterpret_cast<Rpp32f*>(static_cast<Rpp8u*>(dstPtr) + dstDescPtr->offsetInBytes),
-                dstDescPtr, adjustmentValueTensor, roiTensorPtrSrc, roiType, layoutParams);
+                dstDescPtr, adjustmentValueTensor, roiTensorPtrSrc, roiType, layoutParams, handle);
         } else if ((srcDescPtr->dataType == RpptDataType::I8) &&
                    (dstDescPtr->dataType == RpptDataType::I8)) {
             return color_temperature_i8_i8_host_tensor(
                 static_cast<Rpp8s*>(srcPtr) + srcDescPtr->offsetInBytes, srcDescPtr,
                 static_cast<Rpp8s*>(dstPtr) + dstDescPtr->offsetInBytes, dstDescPtr,
-                adjustmentValueTensor, roiTensorPtrSrc, roiType, layoutParams);
+                adjustmentValueTensor, roiTensorPtrSrc, roiType, layoutParams, handle);
         } else
             return RPP_ERROR_NOT_IMPLEMENTED;
 
