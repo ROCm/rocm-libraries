@@ -36,7 +36,10 @@ _GFX950_DENSE_FEATURES = {
     "sinks",
     "sliding_window",
 }
-_GFX950_DENSE_GRID_FEATURES = _GFX950_DENSE_FEATURES | {"causal_bottom_right"}
+_GFX950_DENSE_GRID_FEATURES = _GFX950_DENSE_FEATURES | {
+    "causal_bottom_right",
+    "layout_paged",
+}
 _RDNA_WMMA_FEATURES = {
     "causal",
     "causal_bottom_right",
@@ -70,6 +73,7 @@ EXPECTED_FEATURES = {
         "causal",
         "causal_bottom_right",
         "layout_dense",
+        "layout_paged",
         "lse",
         "sinks",
         "sliding_window",

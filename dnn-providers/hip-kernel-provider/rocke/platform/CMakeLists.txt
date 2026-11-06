@@ -726,21 +726,22 @@ if(ROCKE_INSTALL_TESTS)
             "  TIMEOUT 180)\n")
 
     # Library attention CPU tests (no GPU required): gfx950 LDS budget model,
-    # dense block-order decodes, spec-wrapper parity gate, the 3D decode split rule
-    # and K/V cache policy, the scalar fallback's cache key and block-table
-    # stride kernarg, the unified attention running-max carry and keyless
-    # guards on the emitted IR, the tiled 2D LSE store on the emitted IR, the
-    # host-side SDPA sequence-length and padding-mask adapters/specs, the
-    # fmha_mfma free-stride ABI and layout contracts, the 2D/3D mask_type spec
-    # fields, the 3D segment+reduce module's pairing, the reduce's LDS segment
-    # bound against the compiled code object, the tiled C++ entries' head-count
-    # and arch refusals, the dense segment-combine launch ABI, and the
+    # dense block-order decodes, the dense paged launch checks, spec-wrapper parity
+    # gate, the 3D decode split rule and K/V cache policy, the scalar fallback's
+    # cache key and block-table stride kernarg, the unified attention running-max
+    # carry and keyless guards on the emitted IR, the tiled 2D LSE store on the
+    # emitted IR, the host-side SDPA sequence-length and padding-mask
+    # adapters/specs, the fmha_mfma free-stride ABI and layout contracts, the 2D/3D
+    # mask_type spec fields, the 3D segment+reduce module's pairing, the reduce's
+    # LDS segment bound against the compiled code object, the tiled C++ entries'
+    # head-count and arch refusals, the dense segment-combine launch ABI, and the
     # backward-test memo bound in tests/conftest.py.
     # File-list style (same pattern as conv_pytest) so PYTHONPATH resolves rocke/
     # correctly from the installed tree.
     set(_ROCKE_LIBRARY_ATTENTION_CPU_TEST_RELPATHS
         "tests/library/tests/test_attention_dense_decode.py"
         "tests/library/tests/test_attention_dense_gfx950_lds.py"
+        "tests/library/tests/test_attention_dense_paged_launch.py"
         "tests/library/tests/test_attention_scalar_cache_key.py"
         "tests/library/tests/test_attention_spec_predicate_parity.py"
         "tests/library/tests/test_attention_tiled_2d_mask_type.py"
@@ -761,6 +762,13 @@ if(ROCKE_INSTALL_TESTS)
         "tests/library/tests/test_fmha_mfma_free_stride.py"
         "tests/library/tests/test_sdpa_free_stride_layouts.py"
         "tests/library/tests/test_bwd_memo_bound.py")
+    # gfx942 dense prefill host tests and their IR golden. Not on Windows: its
+    # shard runs close to the time limit and tests no gfx942.
+    if(NOT WIN32)
+      list(APPEND _ROCKE_LIBRARY_ATTENTION_CPU_TEST_RELPATHS
+           "tests/library/tests/test_attention_dense_gfx942.py"
+           "tests/library/tests/test_attention_dense_gfx942_golden.py")
+    endif()
     set(_ROCKE_LIBRARY_ATTENTION_CPU_TESTS "")
     foreach(_t ${_ROCKE_LIBRARY_ATTENTION_CPU_TEST_RELPATHS})
       string(APPEND _ROCKE_LIBRARY_ATTENTION_CPU_TESTS

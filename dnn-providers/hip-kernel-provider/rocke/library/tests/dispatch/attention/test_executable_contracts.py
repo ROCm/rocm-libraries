@@ -429,6 +429,31 @@ class TestRegistrySplit(unittest.TestCase):
             binding.launch()
         self.assertFalse(any(k.startswith("additive_bias") for k in captured))
 
+    def test_explicit_binding_refuses_a_non_bool_skip_option(self):
+        """``bool("False")`` is True, so a coerced string would skip the checks."""
+        candidate = next(
+            c
+            for c in attention_execution_candidates()
+            if c.name.startswith("attention_gfx950_u2d_narrow_nw2_mw16_t4xb_llvm")
+        )
+        req = _req(algorithm=candidate.algorithm, spec_id=candidate.spec_id)
+        spec = candidate.select_spec(req)
+        tensors = _paged_tensors()
+        tensors["block_table"] = _Tensor(
+            (1, 64), "torch.int32", [[999] + list(range(1, 64))]
+        )
+        for value in ("False", 0, None):
+            with self.subTest(value=value):
+                with self.assertRaisesRegex(ValueError, "must be a bool"):
+                    candidate.bound_torch(
+                        req, spec, tensors, unsafe_skip_paged_value_validation=value
+                    )
+        with self.assertRaisesRegex(ValueError, "block"):
+            candidate.bound_torch(req, spec, tensors)
+        candidate.bound_torch(
+            req, spec, tensors, unsafe_skip_paged_value_validation=True
+        )
+
     def test_runner_rejects_tuning_spec_bias_mismatch(self):
         """``run_unified_attention_torch(tuning_spec=...)`` is a public entry too.
         A spec and problem that disagree on ``use_additive_bias`` would misalign
