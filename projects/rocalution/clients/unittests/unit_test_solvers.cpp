@@ -1967,16 +1967,23 @@ TYPED_TEST(solvers, solvers_return_at_once_when_the_initial_residual_is_nan_or_w
             EXPECT_EQ(out.iterations, 0);
             EXPECT_EQ(out.status, 0);
         }
-        SCOPED_TRACE(trace(p.method, p.method.needs_preconditioner, "within the tolerance"));
-        Jacobi<T> jacobi;
-        auto      solver = p.method.make();
-        solver->Init(1.0, 1e-10, 1e8, 100);
-        set_up(*solver, p.method, *A, p.method.needs_preconditioner ? &jacobi : nullptr);
+        for(bool precond : {false, true})
+        {
+            if(p.method.needs_preconditioner && !precond)
+            {
+                continue;
+            }
+            SCOPED_TRACE(trace(p.method, precond, "within the tolerance"));
+            Jacobi<T> jacobi;
+            auto      solver = p.method.make();
+            solver->Init(1.0, 1e-10, 1e8, 100);
+            set_up(*solver, p.method, *A, precond ? &jacobi : nullptr);
 
-        const Outcome<T> out = solve(*solver, *A, b, close);
-        EXPECT_EQ(out.x, close);
-        EXPECT_EQ(out.iterations, 0);
-        EXPECT_EQ(out.status, 1);
+            const Outcome<T> out = solve(*solver, *A, b, close);
+            EXPECT_EQ(out.x, close);
+            EXPECT_EQ(out.iterations, 0);
+            EXPECT_EQ(out.status, 1);
+        }
     }
 }
 
