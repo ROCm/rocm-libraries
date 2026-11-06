@@ -3,12 +3,15 @@
 
 // Error paths of algorithm selection and use, which must return a status rather than crash.
 
+#include "scoped_env.hpp"
+
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
 #include <hipblaslt/hipblaslt-ext.hpp>
 
 #include <array>
 #include <cstdint>
+#include <cstdlib>
 #include <functional>
 #include <limits>
 #include <memory>
@@ -17,6 +20,8 @@
 
 namespace
 {
+    using test_env::ScopedEnv;
+
     // Square, so one buffer size and one layout serve A, B, C and D.
     constexpr int64_t     kSize = 128;
     constexpr hipDataType kType = HIP_R_16F;
@@ -99,6 +104,27 @@ namespace
             in.setAlpha(&alpha);
             in.setBeta(&beta);
             return in;
+        }
+
+        hipblasStatus_t matmulWithUnknownIndex()
+        {
+            const hipblasLtMatmulAlgo_t algo = algoWithUnknownIndex();
+            return hipblasLtMatmul(handle,
+                                   desc,
+                                   &alpha,
+                                   a,
+                                   layout,
+                                   b,
+                                   layout,
+                                   &beta,
+                                   c,
+                                   layout,
+                                   d,
+                                   layout,
+                                   &algo,
+                                   nullptr,
+                                   0,
+                                   nullptr);
         }
     };
 
@@ -220,24 +246,28 @@ namespace
 
     TEST_F(AlgoErrors, smoke_MatmulRejectsUnknownIndex)
     {
-        const hipblasLtMatmulAlgo_t algo = algoWithUnknownIndex();
-        EXPECT_NE(hipblasLtMatmul(handle,
-                                  desc,
-                                  &alpha,
-                                  a,
-                                  layout,
-                                  b,
-                                  layout,
-                                  &beta,
-                                  c,
-                                  layout,
-                                  d,
-                                  layout,
-                                  &algo,
-                                  nullptr,
-                                  0,
-                                  nullptr),
-                  HIPBLAS_STATUS_SUCCESS);
+        EXPECT_NE(matmulWithUnknownIndex(), HIPBLAS_STATUS_SUCCESS);
+    }
+
+    // Extended-profile logging looks up the kernel and solution names of the unknown index
+    // before the matmul rejects it. The logger reads its environment once per process, so
+    // the call runs in a newly started copy of this binary.
+    TEST_F(AlgoErrors, smoke_MatmulRejectsUnknownIndexWithAllLogging)
+    {
+        GTEST_FLAG_SET(death_test_style, "threadsafe");
+        ScopedEnv level("HIPBLASLT_LOG_LEVEL", nullptr);
+        ScopedEnv mask("HIPBLASLT_LOG_MASK", "255");
+        ScopedEnv file("HIPBLASLT_LOG_FILE", nullptr);
+
+        EXPECT_EXIT(
+            {
+                const auto status = matmulWithUnknownIndex();
+                // std::exit skips GoogleTest's fixture teardown, so invoke it manually.
+                TearDown();
+                std::exit(status != HIPBLAS_STATUS_SUCCESS ? 0 : 1);
+            },
+            ::testing::ExitedWithCode(0),
+            "");
     }
 
     // No kernel applies an aux scale, so both APIs refuse a non-null one.

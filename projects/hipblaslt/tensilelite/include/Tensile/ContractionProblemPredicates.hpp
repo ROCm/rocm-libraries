@@ -31,20 +31,18 @@
 #include <Tensile/KernelLanguageTypes.hpp>
 #include <Tensile/PredicateDebugger.hpp>
 #include <Tensile/Predicates.hpp>
+#include <Tensile/ScaleAlphaVec.hpp>
 
 #include <Tensile/AMDGPU.hpp>
 #include <Tensile/hip/HipHardware.hpp>
 
 #include <algorithm>
 #include <array>
-#include <atomic>
 #include <cmath>
 #include <cstddef>
 #include <limits>
 #include <mutex>
 #include <sstream>
-#include <stdexcept>
-#include <unordered_map>
 #include <vector>
 
 #include <tensilelitehost/export.h>
@@ -2708,8 +2706,9 @@ namespace TensileLite
 
                 virtual bool operator()(ContractionProblemGemm const& problem) const override
                 {
-                    if(problem.useBias() && problem.useScaleAlphaVec()
-                       && problem.useBias() != problem.useScaleAlphaVec())
+                    const int vectorAlphaMode = scaleAlphaVectorMode(problem.useScaleAlphaVec());
+                    if(problem.useBias() && vectorAlphaMode
+                       && problem.useBias() != vectorAlphaMode)
                         return false;
 
                     int factorDim = (problem.useBias() == 1) ? 0
@@ -3076,14 +3075,26 @@ namespace TensileLite
                     HasIndex = false,
                     HasValue = true
                 };
-                // value = [XCC, XCCG]
-                std::array<int, 2> value;
-                // Target device CU count and processor, queried on first use (queryDevice()) so
-                // deserialization needs no live GPU. Atomic: solution selection can evaluate one
-                // predicate from several threads; racing first calls store the same values.
-                // cuCountCache 0 = not queried yet (no device has 0 CUs).
-                mutable std::atomic<size_t>            cuCountCache{0};
-                mutable std::atomic<AMDGPU::Processor> processorCache{};
+                // value = [XCC, XCCG]. This is the only serialized field.
+                //
+                // cuCount and processor are the device the predicate is evaluated
+                // against. They are not written. They are captured on the first
+                // evaluation that reads them, not when the predicate is constructed.
+                // Loading or writing a library parses predicates and does not
+                // evaluate them, so that path does not need a GPU. Evaluating this
+                // predicate does, unless value[0] is -1, in which case the check
+                // is skipped and no device is queried.
+                //
+                // The library object is shared by every handle. CachingLibrary
+                // evaluates predicates outside its lock, so two threads can enter
+                // here together. call_once runs the query on one thread and
+                // publishes cuCount and processor to the others. A plain flag
+                // let a second thread observe the flag before cuCount was stored
+                // and then accept the kernel, because 0 % XCC == 0.
+                std::array<int, 2>        value{};
+                mutable size_t            cuCount = 0;
+                mutable AMDGPU::Processor processor{};
+                mutable std::once_flag    deviceQueryOnce;
 
                 /// Generic gfx942 solutions are CU-fallbacks on MI300A (228 CUs, vs 304 for
                 /// MI300X) and always launch at WGMXCC=1, but this runs before
@@ -3091,7 +3102,7 @@ namespace TensileLite
                 bool isMI300A() const
                 {
                     static constexpr size_t MI300ACuCount = 228;
-                    return processor() == AMDGPU::Processor::gfx942 && cuCount() == MI300ACuCount;
+                    return processor == AMDGPU::Processor::gfx942 && cuCount == MI300ACuCount;
                 }
 
                 /// True when this solution will be launched at WGMXCC=1 regardless of the
@@ -3104,7 +3115,7 @@ namespace TensileLite
                 }
 
                 WorkgroupMappingXCCCheck() = default;
-                WorkgroupMappingXCCCheck(std::array<int, 2> value)
+                explicit WorkgroupMappingXCCCheck(std::array<int, 2> value)
                     : value(value)
                 {
                 }
@@ -3112,71 +3123,14 @@ namespace TensileLite
                 /// Constructor for testing: inject cuCount so selection logic can be
                 /// unit-tested without a GPU (e.g. ROCM-2963: 38-CU partition alignment).
                 /// Assumes gfx942, so injecting MI300ACuCount exercises isMI300A().
+                /// Completes deviceQueryOnce so a later evaluation does not replace
+                /// the injected count with the machine's GPU.
                 WorkgroupMappingXCCCheck(std::array<int, 2> value, size_t cuCountForTest)
                     : value(value)
-                    , cuCountCache(cuCountForTest)
-                    , processorCache(AMDGPU::Processor::gfx942)
+                    , cuCount(cuCountForTest)
+                    , processor(AMDGPU::Processor::gfx942)
                 {
-                }
-
-                struct DeviceInfo
-                {
-                    size_t            cuCount;
-                    AMDGPU::Processor processor;
-                };
-
-                // The current device's CU count and processor, queried once per device
-                // for all instances.
-                static DeviceInfo currentDeviceInfo()
-                {
-                    int deviceId = 0;
-                    if(hipGetDevice(&deviceId) != hipSuccess)
-                        throw std::runtime_error("WorkgroupMappingXCCCheck: no current HIP device");
-
-                    static std::mutex                          mutex;
-                    static std::unordered_map<int, DeviceInfo> infos;
-                    std::lock_guard<std::mutex>                lock(mutex);
-                    auto                                       it = infos.find(deviceId);
-                    if(it == infos.end())
-                    {
-                        auto          pHardware = hip::GetDevice(deviceId);
-                        AMDGPU const* pAMDGPU   = dynamic_cast<AMDGPU const*>(pHardware.get());
-                        if(pAMDGPU == nullptr)
-                            throw std::runtime_error(
-                                "WorkgroupMappingXCCCheck: the current device is not an AMDGPU");
-                        it = infos.emplace(deviceId,
-                                           DeviceInfo{size_t(pAMDGPU->computeUnitCount), pAMDGPU->processor})
-                                 .first;
-                    }
-                    return it->second;
-                }
-
-                // Queried at the first evaluation (always on a GPU), not in the ctor, so
-                // solutions deserialize GPU-free. The processor is stored before the count,
-                // so a reader that sees a non-zero count also sees the processor.
-                void queryDevice() const
-                {
-                    DeviceInfo info = currentDeviceInfo();
-                    processorCache.store(info.processor, std::memory_order_relaxed);
-                    cuCountCache.store(info.cuCount, std::memory_order_release);
-                }
-
-                size_t cuCount() const
-                {
-                    size_t count = cuCountCache.load(std::memory_order_acquire);
-                    if(count == 0)
-                    {
-                        queryDevice();
-                        count = cuCountCache.load(std::memory_order_acquire);
-                    }
-                    return count;
-                }
-
-                AMDGPU::Processor processor() const
-                {
-                    if(cuCountCache.load(std::memory_order_acquire) == 0)
-                        queryDevice();
-                    return processorCache.load(std::memory_order_relaxed);
+                    std::call_once(deviceQueryOnce, [] {});
                 }
 
                 static std::string Type()
@@ -3184,18 +3138,49 @@ namespace TensileLite
                     return "WorkgroupMappingXCCCheck";
                 }
 
+            private:
+                /// Current device, queried only when an evaluation needs it.
+                /// value[0] == -1 never reaches here.
+                void captureCuCount() const
+                {
+                    auto pHardware = hip::GetCurrentDevice();
+                    assert(pHardware != nullptr);
+                    Hardware const& hardware = *pHardware;
+                    AMDGPU const*   pAMDGPU  = dynamic_cast<AMDGPU const*>(&hardware);
+                    cuCount   = pAMDGPU->computeUnitCount;
+                    processor = pAMDGPU->processor;
+                }
+
+                void ensureDeviceState() const
+                {
+                    std::call_once(deviceQueryOnce, [this] { captureCuCount(); });
+                }
+
+                /// A count of 0 is not a device this check can accept. 0 % XCC == 0,
+                /// so running the modulo would select a kernel the predicate is
+                /// there to reject. The caller skips the solution instead.
+                bool deviceHasNoComputeUnits() const
+                {
+                    return cuCount == 0;
+                }
+
+            public:
+
                 virtual bool operator()(ContractionProblemGemm const& problem) const override
                 {
                     // If XCC == -1, we automatically set it to the number XCCs.
-                    // In this case, no predicate is needed.
+                    // In this case, no predicate is needed and no device is read.
                     if(value[0] == -1)
                         return true;
+                    ensureDeviceState();
+                    if(deviceHasNoComputeUnits())
+                        return false;
                     // NB: If this solution is a cu-fallback for current hardware.
                     // We overwrite the XCC to 1 to make sure this can pass.
                     // But we also have to notice we are passing the correct XCC to kernel.
                     // (i.e. Remember to do param.setWGMXCC(1) when running the kernel)
                     size_t XCC  = fallbackXCC(problem) ? 1 : value[0];
-                    size_t XCCG = (value[1] == -1) ? cuCount() : value[1];
+                    size_t XCCG = (value[1] == -1) ? cuCount : value[1];
                     return ((XCC & (XCC - 1)) == 0) && XCCG % XCC == 0;
                 }
 
@@ -3204,10 +3189,23 @@ namespace TensileLite
                 {
                     if(value[0] == -1)
                         return true;
+                    ensureDeviceState();
+                    if(deviceHasNoComputeUnits())
+                    {
+                        PredicateDebugger::printRow(stream, false, Type(), "cuCount == 0");
+                        return false;
+                    }
                     size_t XCC  = fallbackXCC(problem) ? 1 : value[0];
-                    size_t XCCG = (value[1] == -1) ? cuCount() : value[1];
-                    return debugEvalCmp(
-                        problem, stream, "WGMXCCG", XCCG, "%", "WGMXCC", XCC, "==", 0);
+                    size_t XCCG = (value[1] == -1) ? cuCount : value[1];
+                    return debugEvalCmp(problem,
+                                        stream,
+                                        "WGMXCCG",
+                                        XCCG,
+                                        "%",
+                                        "WGMXCC",
+                                        XCC,
+                                        "==",
+                                        0);
                 }
             };
 
