@@ -26,11 +26,11 @@
 # name: test_mxf4_fp32_control_golden
   list([
     dict({
-      'basename': 'Cijk_Alik_Bljk_F4SS_MXAE8B32_MXBE8B32_BH_UserArgDpwsWgfWGgLHEQKI_YF6G4Litfz5PC32jngxKuXraFo=',
+      'basename': 'Cijk_Alik_Bljk_F4SS_MXAE8B32_MXBE8B32_BH_UserArgYwXRnZkpBh_FOyZ92SlK89rS77xVa5ZwriPrAZNzvqI=',
       'err': 0,
     }),
     dict({
-      'basename': 'Cijk_Alik_Bljk_F4SS_MXAE8B32_MXBE8B32_BH_UserArgg_5OWXlJn6IxcLutY1tszEQWQZtPJn9k_FazJpKuk6o=',
+      'basename': 'Cijk_Alik_Bljk_F4SS_MXAE8B32_MXBE8B32_BH_UserArgxm4epmxXDWw54JfvZj-y7unK2A966ToORIfL_k4-ztg=',
       'err': 0,
     }),
   ])
