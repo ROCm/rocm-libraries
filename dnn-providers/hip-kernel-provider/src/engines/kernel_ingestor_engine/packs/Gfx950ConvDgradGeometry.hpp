@@ -619,7 +619,12 @@ inline std::optional<std::vector<std::pair<int64_t, int64_t>>> batchChunks(const
 }
 
 /// Whether the (offset, stride, count, width) runs -- width positions from each of
-/// offset + stride * t, t < count -- cover every position of [0, extent).
+/// offset + stride * t, t < count -- cover every position of [0, extent): _covered.
+/// Decided from the runs alone, in time and memory independent of extent. Inside its
+/// span [offset, offset + stride * (count - 1) + width) a run covers exactly the
+/// positions p with (p - offset) % stride < width. The span ends cut [0, extent) into
+/// segments, each under a fixed set of runs whose union repeats with the lcm of their
+/// strides, so one period of a segment (or the whole segment, if shorter) decides it.
 struct CoverageRun
 {
     int64_t offset;
@@ -630,21 +635,75 @@ struct CoverageRun
 
 inline bool coversExtent(int64_t extent, const std::vector<CoverageRun>& runs)
 {
-    std::vector<char> hit(static_cast<size_t>(extent), 0);
-    for(const auto& run : runs)
+    struct Span
     {
-        for(int64_t t = 0; t < run.count; ++t)
+        int64_t lo;
+        int64_t hi;
+        int64_t offset;
+        int64_t period;
+        int64_t width;
+    };
+    std::vector<Span> spans;
+    for(auto run : runs)
+    {
+        if(run.count <= 0 || run.width <= 0)
         {
-            const auto start = run.offset + run.stride * t;
-            const auto first = std::max<int64_t>(start, 0);
-            const auto last = std::min(start + run.width, extent);
-            for(auto pos = first; pos < last; ++pos)
+            continue;
+        }
+        if(run.stride < 0)
+        {
+            run.offset += run.stride * (run.count - 1);
+            run.stride = -run.stride;
+        }
+        const auto hi = run.offset + run.stride * (run.count - 1) + run.width;
+        if(run.count == 1 || run.stride <= run.width)
+        {
+            spans.push_back({run.offset, hi, run.offset, 1, 1});
+        }
+        else
+        {
+            spans.push_back({run.offset, hi, run.offset, run.stride, run.width});
+        }
+    }
+    std::vector<int64_t> cuts{0, extent};
+    for(const auto& span : spans)
+    {
+        cuts.push_back(std::clamp<int64_t>(span.lo, 0, extent));
+        cuts.push_back(std::clamp<int64_t>(span.hi, 0, extent));
+    }
+    std::sort(cuts.begin(), cuts.end());
+    cuts.erase(std::unique(cuts.begin(), cuts.end()), cuts.end());
+    std::vector<Span> active;
+    for(size_t i = 0; i + 1 < cuts.size(); ++i)
+    {
+        const auto a = cuts[i];
+        const auto b = cuts[i + 1];
+        active.clear();
+        int64_t period = 1;
+        for(const auto& span : spans)
+        {
+            if(span.lo <= a && b <= span.hi)
             {
-                hit[static_cast<size_t>(pos)] = 1;
+                active.push_back(span);
+                if(period < b - a)
+                {
+                    period = std::lcm(period, span.period);
+                }
+            }
+        }
+        const auto last = std::min(b, a + std::min(period, b - a));
+        for(auto pos = a; pos < last; ++pos)
+        {
+            const auto hit = std::any_of(active.begin(), active.end(), [pos](const Span& span) {
+                return (pos - span.offset) % span.period < span.width;
+            });
+            if(!hit)
+            {
+                return false;
             }
         }
     }
-    return std::all_of(hit.begin(), hit.end(), [](char value) { return value != 0; });
+    return true;
 }
 
 /// _dx_fully_written: whether the implicit-GEMM kernel stores every dX element. A tilde
