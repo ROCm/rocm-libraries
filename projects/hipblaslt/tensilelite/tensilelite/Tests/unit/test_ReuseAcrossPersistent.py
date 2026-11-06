@@ -707,7 +707,12 @@ _AUDITED = dict(UseSgprForGRO=0, InitCIterWmma=1, ForceDisableShadowInit=True)
 
 
 def _kernelSource(sol, assembler):
-    """The kernel's assembly source; raises if the kernel fails to generate."""
+    """The kernel's assembly source.
+
+    Raises RuntimeError if the kernel fails to generate, a label defined twice
+    included: the writer refuses that before the CFG builder, which would abort
+    the whole test process instead.
+    """
     import shutil
     import rocisa
     from tensilelite.Common.Types import DebugConfig
@@ -762,8 +767,9 @@ def test_rap_splats_each_resident_mx128_scale_before_it_is_read(
 # ---------------------------------------------------------------------------
 # Parameters off rap_gfx1250.yaml's audited configuration, which a tuning run
 # reaches. RAP emits the compute section twice, so a label built there from a
-# literal is defined twice unless rapLabel suffixes it, and the CFG builder
-# aborts the whole process on a duplicate rather than failing the kernel.
+# literal is defined twice unless rapLabel suffixes it. The CFG builder would
+# abort the whole process on the duplicate, so the writer fails the kernel
+# first.
 # ---------------------------------------------------------------------------
 def _labels(source):
     return re.findall(r"^(label_\w+):", source, re.M)
@@ -777,6 +783,32 @@ def test_rap_kernel_generates_with_the_gl2_prefetch(_gp_gfx1250, gfx1250_iim, as
     labels = _labels(_kernelSource(sol, assembler))
     assert {"label_Skip_GL2", "label_Skip_GL2_RAPIterN"} <= set(labels)
     assert len(labels) == len(set(labels))
+
+
+def test_duplicate_labels_names_each_label_defined_twice():
+    from tensilelite.KernelWriter import duplicateLabels
+
+    inner = Module("inner")
+    inner.add(Label("Skip_GL2", ""))
+    inner.add(Label("Once", ""))
+    module = Module("kernel")
+    module.add(Label("Skip_GL2", ""))
+    module.add(inner)
+    module.add(Label("Skip_GL2", ""))
+    assert duplicateLabels(module) == ["label_Skip_GL2"]
+    assert duplicateLabels(inner) == []
+
+
+def test_rap_kernel_with_a_duplicate_label_fails_instead_of_aborting(
+    _gp_gfx1250, gfx1250_iim, assembler, monkeypatch
+):
+    # Undo the suffix, as a regression would: both copies define label_Skip_GL2.
+    monkeypatch.setattr(PersistentKernelState, "rapLabel", lambda self, name: name)
+    sol = Solution(_make_params(gfx1250_iim, PrefetchGL2=1, **_AUDITED),
+                   False, False, False, assembler, gfx1250_iim)
+    assert sol.get("Valid") is True
+    with pytest.raises(RuntimeError, match="defines a label more than once: .*label_Skip_GL2"):
+        _kernelSource(sol, assembler)
 
 
 def test_rap_gives_each_iteration_of_a_resident_k_tile_its_own_buffer_set(

@@ -27,7 +27,7 @@ from rocisa import rocIsa, countInstruction, countGlobalRead, \
             countLocalRead, countLocalWrite, countWeightedLocalRead, countWeightedLocalWrite, countMFMA, getMFMAs
 from rocisa.instruction import SBitcmp1B32
 
-from rocisa.code import Module, TextBlock, StructuredModule, KernelBody, RegSet
+from rocisa.code import Module, TextBlock, StructuredModule, KernelBody, RegSet, Label
 from rocisa.container import RegisterContainer, replaceHolder, HWRegContainer, VCC, MemTokenData, sgpr, vgpr
 from rocisa.label import LabelManager
 from rocisa.asmpass import rocIsaPass, rocIsaPassOption
@@ -108,6 +108,18 @@ def clusterBarrierSplitWaveLoop(kernel):
   # loop has to stay off or that clone cannot cover the accumulators.
   return bool(kernel.get("HalfPLR", 0) and kernel.get("ClusterBarrier", False)
               and kernel.get("InitCIterWmma", 0) != 1)
+
+
+def duplicateLabels(module):
+  """Names of the labels module defines more than once, in first-seen order."""
+  seen, duplicates = set(), []
+  for item in module.flatitems():
+    if isinstance(item, Label):
+      name = item.getLabelName()
+      if name in seen and name not in duplicates:
+        duplicates.append(name)
+      seen.add(name)
+  return duplicates
 
 
 # Make const values immutable
@@ -7578,6 +7590,12 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
 
       stinky_module_options.update(kernel.get("_StinkyTofuParameters") or {})
       print2(f"StinkyTofu module options: {stinky_module_options}")
+      # The CFG builder aborts the whole process on a label defined twice, taking
+      # every other kernel of the run, or a test session, down with it. Fail only
+      # this kernel: getSourceFileString reports a RuntimeError and moves on.
+      duplicates = duplicateLabels(moduleKernelBody.body)
+      if duplicates:
+        raise RuntimeError("Kernel defines a label more than once: %s" % ", ".join(duplicates))
       # Convert rocisa module to stinkytofu with signature
       # Returns a KernelBody wrapper that includes signature and instruction module
       # - runOptimizationPipeline() optimizes the instruction body
