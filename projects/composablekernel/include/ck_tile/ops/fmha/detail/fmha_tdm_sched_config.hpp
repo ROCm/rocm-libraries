@@ -241,13 +241,14 @@ struct FmhaTdmSchedSupportedGeometry
                       std::is_same_v<typename Geometry::VDataType, Q> &&
                       std::is_same_v<typename Geometry::PDataType, Q>,
                   "qr_tdm_sched requires homogeneous native BF16 or FP16 Q/K/V/P");
-    static_assert(Geometry::kM == 128 &&
-                      ((Geometry::kHeadDimQK == 64 && Geometry::kDv == 64 && Geometry::kN == 64) ||
-                       (Geometry::kHeadDimQK == 128 && Geometry::kDv == 128 &&
-                        Geometry::kN == 128) ||
-                       (Geometry::kHeadDimQK == 192 && Geometry::kDv == 128 &&
-                        (Geometry::kN == 64 || Geometry::kN == 128))),
-                  "qr_tdm_sched supports D64/V64 N64, D128/V128 N128, or D192/V128 N64/N128");
+    static_assert(Geometry::kM == 128 && ((Geometry::kHeadDimQK == 64 && Geometry::kDv == 64 &&
+                                           (Geometry::kN == 64 || Geometry::kN == 128)) ||
+                                          (Geometry::kHeadDimQK == 128 && Geometry::kDv == 128 &&
+                                           Geometry::kN == 128) ||
+                                          (Geometry::kHeadDimQK == 192 && Geometry::kDv == 128 &&
+                                           (Geometry::kN == 64 || Geometry::kN == 128))),
+                  "qr_tdm_sched supports D64/V64 N64/N128, D128/V128 N128, or D192/V128 "
+                  "N64/N128");
     static_assert(Geometry::kWaves == 4 && Geometry::kWaveSize == 32,
                   "qr_tdm_sched requires four wave32 waves");
     static_assert(Geometry::kQkWmmaK == 32 && Geometry::kPvWmmaK == 32,

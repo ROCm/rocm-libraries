@@ -6,6 +6,7 @@
 
 #include "gtest/gtest.h"
 
+#include <array>
 #include <vector>
 
 namespace {
@@ -105,6 +106,9 @@ __global__ void capture_mapping(typename Kernel::Kargs args, int* output)
         output[linear * 4 + 1] = v;
         output[linear * 4 + 2] = head;
         output[linear * 4 + 3] = batch;
+        if(linear == 0)
+            // Record the device configuration; its default differs from the host's.
+            output[gridDim.x * gridDim.y * gridDim.z * 4] = CK_TILE_XCD_REMAP_NUM_XCDS;
     }
 }
 
@@ -120,7 +124,10 @@ std::vector<int> capture(int heads,
                          int left    = -1,
                          int extra_k = 0,
                          int hdim_q  = 128,
-                         int hdim_v  = 128)
+                         int hdim_v  = 128,
+                         ck_tile::GenericAttentionMaskEnum mask_type =
+                             ck_tile::GenericAttentionMaskEnum::MASK_FROM_TOP_LEFT,
+                         int* xcd_remap_count = nullptr)
 {
     using Kernel = MappingKernel<M, Mask, StoreLSE, DataType, BiasEnum, HasSink>;
     typename Kernel::Kargs args{};
@@ -134,10 +141,11 @@ std::vector<int> capture(int heads,
     {
         args.window_size_left  = left;
         args.window_size_right = 0;
-        args.mask_type         = ck_tile::GenericAttentionMaskEnum::MASK_FROM_TOP_LEFT;
+        args.mask_type         = mask_type;
     }
     const auto grid = Kernel::GridSize(batches, heads, args.seqlen_q, args.hdim_v);
-    std::vector<int> result(grid.x * grid.y * grid.z * 4);
+    // The final cell records the actual device configuration independently of the tuples.
+    std::vector<int> result(grid.x * grid.y * grid.z * 4 + 1);
     ck_tile::DeviceMem device(result.size() * sizeof(int));
     hipLaunchKernelGGL(capture_mapping<Kernel>,
                        grid,
@@ -148,7 +156,38 @@ std::vector<int> capture(int heads,
                        static_cast<int*>(device.GetDeviceBuffer()));
     EXPECT_EQ(hipGetLastError(), hipSuccess);
     device.FromDevice(result.data());
+    if(xcd_remap_count != nullptr)
+        *xcd_remap_count = result.back();
+    result.pop_back();
     return result;
+}
+
+// Build the expected physical dispatch by materializing contiguous head-major
+// segments and reading their columns round-robin. This does not call the
+// production remap_xcd or GetTileIndex arithmetic.
+std::vector<int> expected_xcd_dispatch(const std::vector<int>& head_major, int num_xcds)
+{
+    if(num_xcds == 0)
+        return head_major;
+    const std::size_t blocks = head_major.size() / 4;
+    const auto xcds          = static_cast<std::size_t>(num_xcds);
+    std::vector<std::vector<std::array<int, 4>>> segments(xcds);
+    std::size_t first = 0;
+    for(std::size_t xcd = 0; xcd < xcds; ++xcd)
+    {
+        const std::size_t count = blocks / xcds + (xcd < blocks % xcds ? 1 : 0);
+        for(std::size_t slot = 0; slot < count; ++slot, ++first)
+            segments[xcd].push_back({head_major[first * 4],
+                                     head_major[first * 4 + 1],
+                                     head_major[first * 4 + 2],
+                                     head_major[first * 4 + 3]});
+    }
+    std::vector<int> expected;
+    for(std::size_t slot = 0; slot < (blocks + xcds - 1) / xcds; ++slot)
+        for(const auto& segment : segments)
+            if(slot < segment.size())
+                expected.insert(expected.end(), segment[slot].begin(), segment[slot].end());
+    return expected;
 }
 
 TEST(QrTdmCausalMapping, CausalLongTilesComeFirstAcrossHeads)
@@ -173,14 +212,25 @@ TEST(QrTdmCausalMapping, DenseRetainsHeadMajorOrder)
     EXPECT_EQ(actual, expected);
 }
 
-TEST(QrTdmCausalMapping, OtherMasksAndRectangularInputsRetainTheirSchedule)
+TEST(QrTdmCausalMapping, SquareFiniteWindowUsesQMajorAndOtherMasksRetainHeadMajor)
 {
     if(!ck_tile::is_gfx125_supported())
         GTEST_SKIP();
-    const std::vector<int> expected{2, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0,
-                                    2, 0, 1, 0, 1, 0, 1, 0, 0, 0, 1, 0};
-    EXPECT_EQ((capture<128, true>(2, 1, 3, 127)), expected);
-    EXPECT_EQ((capture<128, true>(2, 1, 3, -1, 128)), expected);
+    const std::vector<int> q_major{2, 0, 0, 0, 2, 0, 1, 0, 1, 0, 0, 0,
+                                   1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0};
+    const std::vector<int> head_major{2, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0,
+                                      2, 0, 1, 0, 1, 0, 1, 0, 0, 0, 1, 0};
+    EXPECT_EQ((capture<128, true>(2, 1, 3, 127)), q_major);
+    EXPECT_EQ(
+        (capture<128, true>(
+            2, 1, 3, 127, 0, 128, 128, ck_tile::GenericAttentionMaskEnum::MASK_FROM_BOTTOM_RIGHT)),
+        q_major);
+    // A generic finite mask is not the square-causal order opt-in. This checks
+    // mapping only, not support for the generic mc finite-left forward API.
+    EXPECT_EQ((capture<128, true>(
+                  2, 1, 3, 127, 0, 128, 128, ck_tile::GenericAttentionMaskEnum::MASK_GENERIC)),
+              head_major);
+    EXPECT_EQ((capture<128, true>(2, 1, 3, -1, 128)), head_major);
 }
 
 TEST(QrTdmCausalMapping, M64CoversEachBatchHeadAndTileExactlyOnce)
@@ -240,10 +290,15 @@ TEST(QrTdmCausalMapping, MultipleOutputTilesRetainHeadMajorOrder)
 {
     if(!ck_tile::is_gfx125_supported())
         GTEST_SKIP();
-    const std::vector<int> expected{2, 0, 0, 0, 2, 1, 0, 0, 1, 0, 0, 0, 1, 1, 0, 0,
-                                    0, 0, 0, 0, 0, 1, 0, 0, 2, 0, 1, 0, 2, 1, 1, 0,
-                                    1, 0, 1, 0, 1, 1, 1, 0, 0, 0, 1, 0, 0, 1, 1, 0};
-    EXPECT_EQ((capture<128, true>(2, 1, 3, -1, 0, 128, 256)), expected);
+    const std::vector<int> head_major{2, 0, 0, 0, 2, 1, 0, 0, 1, 0, 0, 0, 1, 1, 0, 0,
+                                      0, 0, 0, 0, 0, 1, 0, 0, 2, 0, 1, 0, 2, 1, 1, 0,
+                                      1, 0, 1, 0, 1, 1, 1, 0, 0, 0, 1, 0, 0, 1, 1, 0};
+    int num_xcds      = -1;
+    const auto actual = capture<128, true>(
+        2, 1, 3, -1, 0, 128, 256, ck_tile::GenericAttentionMaskEnum::MASK_FROM_TOP_LEFT, &num_xcds);
+    ASSERT_GE(num_xcds, 0);
+    RecordProperty("device_xcd_remap_count", num_xcds);
+    EXPECT_EQ(actual, expected_xcd_dispatch(head_major, num_xcds));
 }
 
 } // namespace
