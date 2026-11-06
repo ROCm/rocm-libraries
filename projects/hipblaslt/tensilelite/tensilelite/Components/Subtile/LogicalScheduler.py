@@ -4618,23 +4618,28 @@ class LogicalScheduler:
             if self.config.numSubIterK >= 2 and has_ab_holes:
                 return {}, self._operandLendVgprs(dead_ids)
             return None, self._operandLendVgprs(None)
-        # Small tile (MT<=256x256): normally no lend (the loop has headroom).  But the
-        # DPP store-coalesce needs a >=4-entry fused-store batch (two M-pairs) to coalesce,
-        # and availableBlockMaxVgpr only reaches that once the dead operand tiles are
-        # freed.  Small tiles have no woven tail (every MFMA already retired), so lending
-        # all operand tiles is safe; the batch sizer then grows to a coalesce-capable size.
-        # Gate the lend to EXACTLY the coalesce-firing conditions (see
-        # GlobalWriteBatch.plsinStorePermlane16Active and the isSubtileCoalesce admission):
-        # gfx950, MXF4->bf16 TN subtile, MI16, MT256x256 (MIWT8).  Elsewhere (non-gfx950 /
-        # non-MXF4 / non-MIWT8 subtile, e.g. bf16 or gfx1250) the coalesce never fires, so
-        # keep develop's no-lend policy -- lending there changes the fused-store register
-        # allocation for no benefit.
+        # Small tile (MT<=256x256): default is the planner weave with no lend (the loop has
+        # headroom). But the DPP store-coalesce needs a >=4-entry fused-store batch (two M-pairs),
+        # and that extra element (batch 3->4) costs ~12 VGPRs: with the weave keeping every operand
+        # tile live, the MT256x256 OptNLL store overflows (268 VGPRs > 256 cap). Lending EVERY
+        # operand tile clears the overflow but only by forcing weaveGroups=None, which kills the
+        # store/MFMA overlap (~5-8% on MI355X @8192^3). Instead keep the weave ({}) and lend ONLY
+        # the dead K=0 operand holes -- the same overlap-preserving partial lend the large-tile
+        # path uses: the woven last-K MFMAs keep their live sources while the dead holes (far more
+        # than the +12 we need) back the floor-4 coalesce batch. Gate to the coalesce-firing
+        # conditions (gfx950, MXF4->bf16 TN subtile, MI16, MIWT8); elsewhere the coalesce never
+        # fires, so keep develop's no-lend policy. Single-K tiles (no A/B holes) fall back to the
+        # full lend -- same as before, correct, just without the overlap there is nothing to weave.
         _miwt = kernel.get("MIWaveTile", [0, 0])
         if (isMxf4SubtilePath(kernel)
                 and tuple(kernel.get("ISA", ())) == (9, 5, 0)
                 and kernel.get("MatrixInstM") == 16
                 and len(_miwt) >= 2 and _miwt[0] == 8):
-            return None, self._operandLendVgprs(None)
+            dead_ids = self._deadOperandTileIds(unroll_iter)
+            has_ab_holes = bool(dead_ids.get("A") or dead_ids.get("B"))
+            if self.config.numSubIterK >= 2 and has_ab_holes:
+                return {}, self._operandLendVgprs(dead_ids)   # weave kept, partial (dead-hole) lend
+            return None, self._operandLendVgprs(None)          # no holes: fall back to full lend
         return {}, []
 
     def _plsinStagedStoreCount(self, weaveGroups, lendTiles, storeCfg=None):
