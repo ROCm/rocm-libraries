@@ -30,6 +30,8 @@
 # cases are skipped by the harness rather than filtered out here.
 _common_excludes: &common_excludes
   - "*DISABLED*"
+  # The SDPA forward plan bundles run in the SDPA engine lanes only.
+  - "*_SdpaFwdPlan_*"
 
 test_categories:
   quick:
