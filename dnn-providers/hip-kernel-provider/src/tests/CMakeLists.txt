@@ -488,7 +488,17 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
                 "hkp: this configuration does not ship hipkernel:${_local} for "
                 "${_arch}, so its census is not registered.")
         endif()
+        unset(_hkp_catalog_tiles_cases_${_arch}_${_snake})
     endwhile()
+    # The loop unsets each row's entry, so one left set names no row and its census would
+    # silently never register.
+    get_directory_property(_hkp_unmatched VARIABLES)
+    list(FILTER _hkp_unmatched INCLUDE REGEX "^_hkp_catalog_tiles_cases_")
+    if(_hkp_unmatched)
+        message(FATAL_ERROR
+            "hkp: ${_hkp_unmatched} names no HKP_PINNED_ATTENTION_ENGINES row's <arch> and "
+            "<snake slug>, so its CatalogTiles census would never register.")
+    endif()
 
     # Unified2D hands decode to Unified3D by a static rule, so with both engines shipped,
     # every 2D cell that rule hands off must have a 3D kernel.

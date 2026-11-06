@@ -666,10 +666,15 @@ A new lane also needs its engine TOML and tier YAML
 ([formats](file-formats.md#per-engine-test-config--configengine_nametoml)).
 Copy the files of an existing provider and keep the same tier shape.
 
-A hip-kernel-provider attention engine does not call the function itself. Add
-a row to `HKP_PINNED_ATTENTION_ENGINES` in
+A single-arch hip-kernel-provider rocKE attention engine pinned against the
+`SdpaFwd` bundles does not call the function itself. Add a row to
+`HKP_PINNED_ATTENTION_ENGINES` in
 `dnn-providers/hip-kernel-provider/src/CMakeLists.txt`; the row registers the
-lane, its GPU-reference target and its census.
+lane, its GPU-reference target and its census for the one arch it names. A
+hand-written `Test<Engine>CatalogTiles` census suite also needs its
+`_hkp_catalog_tiles_cases_<arch>_<snake slug>` entry in
+`dnn-providers/hip-kernel-provider/src/tests/CMakeLists.txt`. `ASM_SDPA_ENGINE`
+and the FlyDSL SDPA engines still call the function directly.
 
 ## C++ tests: the CMake rule
 

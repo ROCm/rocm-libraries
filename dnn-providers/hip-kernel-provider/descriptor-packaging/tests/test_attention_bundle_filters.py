@@ -26,6 +26,7 @@ pytestmark = pytest.mark.quick
 PROVIDER = Path(__file__).resolve().parents[2]
 PROVIDER_CMAKE = PROVIDER / "CMakeLists.txt"
 SRC_CMAKE = PROVIDER / "src/CMakeLists.txt"
+PACKS = PROVIDER / "src/tests/engines/kernel_ingestor_engine/packs"
 TABLE = "HKP_PINNED_ATTENTION_ENGINES"
 ROW_FIELDS = 6
 
@@ -89,6 +90,22 @@ def selection(patterns, where):
         tiers = TIERS if match["tier"] == "*" else (match["tier"],)
         pairs.update((tier, match["bundle"]) for tier in tiers)
     return pairs
+
+
+@pytest.mark.parametrize("row", pinned_engines(), ids=lambda row: f"{row[0]}_{row[1]}")
+def test_each_row_names_an_arch_its_toml_and_its_packs_suite(row):
+    """A misspelt arch or engine local name ships nothing for the row, so its census,
+    external integration check and GPU-reference target drop out silently; fail here."""
+    arch, _slug, local, _filter_var, toml, _yaml_var = row
+    assert re.fullmatch(r"gfx[0-9a-f]+", arch), f"{SRC_CMAKE}: {TABLE} arch {arch!r}"
+    config = PROVIDER / "config" / toml
+    assert config.is_file(), f"{SRC_CMAKE}: {TABLE} {local}: no {config}"
+    suite = PACKS / f"Test{local}Packs.cpp"
+    assert suite.is_file(), f"{SRC_CMAKE}: {TABLE} {local}: no {suite}"
+    # The census keys its expected inventory by arch, so a wrong arch pins none.
+    assert f'{{"{arch}",' in suite.read_text(
+        encoding="utf-8"
+    ), f"{SRC_CMAKE}: {TABLE} {local}: {suite.name} pins no {arch} inventory"
 
 
 def test_rows_sharing_a_categories_yaml_share_a_filter():
