@@ -717,3 +717,38 @@ TYPED_TEST(hip_blas_wrapper, dense_mat_mat_mult_is_the_product)
     ASSERT_TRUE(C->MatMatMult(*A, *B));
     expect_all_near(dense(csr_of(*C)), dense_product(dense(a), dense(b), 3, 4, 2), tol<T>());
 }
+
+// The HIP DENSE Apply is a gemv. The matrices are wide and tall, so that swapped
+// dimensions or a wrong leading dimension change the result.
+TYPED_TEST(hip_blas_wrapper, dense_apply_is_the_product)
+{
+    using T = typename TypeParam::value_type;
+
+    for(const auto& [m, n] : {std::pair{3, 4}, std::pair{4, 3}})
+    {
+        SCOPED_TRACE(std::to_string(m) + " x " + std::to_string(n));
+
+        Csr<T> a(m, n);
+        for(int i = 0; i < m; ++i)
+        {
+            for(int j = 0; j < n; ++j)
+            {
+                a.add(j, from_int<T>(i * n + j + 1));
+            }
+            a.end_row();
+        }
+
+        auto A = make_matrix(Backend::Accelerator, Format{rocalution::DENSE, 1}, *a.host_csr());
+        ASSERT_IN_LOOP(A != nullptr);
+
+        std::vector<T> x(n);
+        for(int j = 0; j < n; ++j)
+        {
+            x[j] = from_int<T>(j % 2 == 0 ? j + 1 : -2 * j);
+        }
+
+        auto out = make_vector(Backend::Accelerator, std::vector<T>(m, from_int<T>(-7)));
+        A->Apply(*make_vector(Backend::Accelerator, x), out.get());
+        expect_all_near(values_of(*out), a.apply(x), tol<T>());
+    }
+}
