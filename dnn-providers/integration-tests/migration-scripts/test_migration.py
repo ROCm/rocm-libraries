@@ -3298,6 +3298,53 @@ def test_retier_version_consistency():
         )
         assert merged["version"] == 2, merged
         assert sorted(c["id"] for c in merged["cases"]) == ["a", "c"], merged
+
+    # The reverse merge order: the case that stays in the destination tier
+    # (and so sorts first) is the one from the lower-version sweep, and the
+    # case needing absent_tensors arrives from a different, higher-version
+    # sweep. The first-sorted sweep's own version must not simply be kept --
+    # the merge still has to force version 2.
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp) / "integration-test-bundles"
+        _retier_write(root, "full", template, [_retier_case("c")], {})
+        absent_case = _retier_case("a")
+        absent_case["absent_tensors"] = [0]
+        absent_case["metadata"]["format_version"] = 2
+        _retier_write(root, "quick", template, [absent_case], {})
+        for tier, version in (("full", 1), ("quick", 2)):
+            path = root / tier / "Op" / "Default" / "sweep.json"
+            sweep = json.loads(path.read_text())
+            sweep["version"] = version
+            path.write_text(json.dumps(sweep, indent=2))
+        asg = Path(tmp) / "asg.json"
+        asg.write_text(
+            json.dumps(
+                [
+                    dict(
+                        current_tier="quick", key="Op/Default/a", proposed_tier="full"
+                    ),
+                    dict(current_tier="full", key="Op/Default/c", proposed_tier="full"),
+                ]
+            )
+        )
+        r = run(
+            [
+                sys.executable,
+                script,
+                "--bundle-dir",
+                root,
+                "--assignments",
+                asg,
+                "--apply",
+            ],
+            check=False,
+        )
+        assert r.returncode == 0, r.stderr
+        merged = json.loads(
+            (root / "full" / "Op" / "Default" / "sweep.json").read_text()
+        )
+        assert merged["version"] == 2, merged
+        assert sorted(c["id"] for c in merged["cases"]) == ["a", "c"], merged
     print("  PASS: retier_version_consistency")
 
 

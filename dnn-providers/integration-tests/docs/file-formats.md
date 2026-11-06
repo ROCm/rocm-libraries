@@ -360,6 +360,9 @@ A `kind` that is not one of the names above rejects the metadata. A `kind` that 
 not a string rejects the metadata too. The error message names the input uid and
 the problem. The bundle then registers as a failing test.
 
+Every form also rejects any key outside the ones listed for it above: the absent form
+takes only `seed`; `free` and `fixed` take only their own keys plus `seed`.
+
 #### The `values` kind
 
 - Element *i* of the tensor gets `values[i % n]`, where *n* is the list length.

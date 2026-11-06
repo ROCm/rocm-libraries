@@ -19,6 +19,7 @@
 #include <vector>
 
 #include "harness/input-init/FillRecipe.hpp"
+#include "harness/input-init/TensorAliases.hpp"
 
 namespace hipdnn_integration_tests
 {
@@ -113,14 +114,7 @@ inline InputFillSpec parseInputFillSpec(const nlohmann::json& spec)
 
     if(!spec.contains("kind"))
     {
-        for(const auto& item : spec.items())
-        {
-            if(item.key() != "seed")
-            {
-                throw std::invalid_argument("fill spec without a kind has unknown key \""
-                                            + item.key() + "\"");
-            }
-        }
+        tensor_alias_detail::rejectUnknownKeys(spec, "fill spec without a kind", {"seed"});
         return parsed;
     }
     if(!spec["kind"].is_string())
@@ -149,19 +143,8 @@ inline InputFillSpec parseInputFillSpec(const nlohmann::json& spec)
         throw std::invalid_argument("unknown fill kind \"" + kind + "\"");
     }
 
-    for(const auto& item : spec.items())
-    {
-        const auto& key = item.key();
-        if(key != "kind" && key != "lo" && key != "hi" && key != "value" && key != "seed")
-        {
-            std::string message = "kind ";
-            message += kind;
-            message += " has unknown key \"";
-            message += key;
-            message += "\"";
-            throw std::invalid_argument(message);
-        }
-    }
+    tensor_alias_detail::rejectUnknownKeys(
+        spec, "kind " + kind, {"kind", "lo", "hi", "value", "seed"});
 
     if(spec.contains("lo") && spec["lo"].is_number())
     {
