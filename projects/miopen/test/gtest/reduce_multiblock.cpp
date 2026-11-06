@@ -81,6 +81,9 @@ struct MultiBlockCase
     bool propagateNan = false;
     // compare with the expected value rounded to the output type, with no slack
     bool exactOutput = false;
+    // the blend with the prior output is made in the compute type: the reference rounds the prior
+    // output and beta to it
+    bool computeBlend = false;
 
     friend std::ostream& operator<<(std::ostream& os, const MultiBlockCase& c)
     {
@@ -184,6 +187,8 @@ double PatternValue(Pattern p, std::size_t j, std::size_t k)
     return 0.0;
 }
 
+double RoundToType(double v, miopenDataType_t t);
+
 struct Reference
 {
     std::vector<double> values;
@@ -257,8 +262,11 @@ Reference ComputeReference(const MultiBlockCase& c,
             ref.indices[o] = idxAmax[o];
             break;
         }
-        ref.values[o] =
-            static_cast<double>(c.alpha) * r + static_cast<double>(c.beta) * outputInit[o];
+        const double prior =
+            c.computeBlend ? RoundToType(outputInit[o], c.compType) : outputInit[o];
+        const double beta =
+            c.computeBlend ? RoundToType(static_cast<double>(c.beta), c.compType) : c.beta;
+        ref.values[o] = static_cast<double>(c.alpha) * r + beta * prior;
     }
     return ref;
 }
@@ -283,8 +291,8 @@ std::pair<double, double> Tolerance(miopenDataType_t t)
     return {2e-5, 1e-8};
 }
 
-// The expected value rounded to the nearest value of the output type (ties to even)
-double RoundToOutputType(double v, miopenDataType_t t)
+// The value rounded to the nearest value of the type (ties to even)
+double RoundToType(double v, miopenDataType_t t)
 {
     if(t == miopenHalf)
     {
@@ -402,7 +410,7 @@ void RunCase(const MultiBlockCase& c)
     {
         const double got = ToDouble(gpu[o]);
         const double exp =
-            c.exactOutput ? RoundToOutputType(ref.values[o], c.inType) : ref.values[o];
+            c.exactOutput ? RoundToType(ref.values[o], c.inType) : ref.values[o];
         EXPECT_LE(std::abs(got - exp), rel * std::abs(exp) + abs)
             << "output " << o << ": got " << got << ", expected " << exp;
     }
@@ -742,6 +750,40 @@ std::vector<MultiBlockCase> BetaConversionInt8Indices()
     return cases;
 }
 
+// The prior output and beta are converted to the compute type before the blend, so with an output
+// type wider than the compute type they are rounded to it: FP32 output and FP16 compute, a prior
+// output of 100.4 is 100.375 in FP16 and the maximum 100 plus 100.375 is 200.375 (develop blended
+// in FP32 and gave 200.4). The values are exact in FP16; the maximum is used because a sum of the
+// larger shapes would overflow FP16.
+std::vector<MultiBlockCase> BetaWiderOutput()
+{
+    std::vector<MultiBlockCase> cases;
+    for(const auto* s : betaShapes)
+    {
+        cases.push_back(MakeCase("BetaFp32Fp16CompMax",
+                                 miopenFloat,
+                                 miopenHalf,
+                                 MIOPEN_REDUCE_TENSOR_MAX,
+                                 *s,
+                                 Pattern::ExtremeIndices));
+        cases.push_back(MakeCase("BetaFp32Fp16CompMaxIdx",
+                                 miopenFloat,
+                                 miopenHalf,
+                                 MIOPEN_REDUCE_TENSOR_MAX,
+                                 *s,
+                                 Pattern::ExtremeIndices,
+                                 MIOPEN_REDUCE_TENSOR_FLATTENED_INDICES));
+    }
+    for(auto& c : cases)
+    {
+        c.beta         = 1.0f;
+        c.outputInit   = 100.4f;
+        c.exactOutput  = true;
+        c.computeBlend = true;
+    }
+    return cases;
+}
+
 std::vector<MultiBlockCase> Fp32Standard()
 {
     return {
@@ -909,7 +951,12 @@ INSTANTIATE_TEST_SUITE_P(Standard,
                          MIOPEN_REDUCE_MULTIBLOCK_NAME);
 INSTANTIATE_TEST_SUITE_P(Standard,
                          GPU_ReduceMultiBlock_FP32,
-                         ::testing::ValuesIn(Fp32Standard()),
+                         ::testing::ValuesIn([] {
+                             auto cases      = Fp32Standard();
+                             const auto wide = BetaWiderOutput();
+                             cases.insert(cases.end(), wide.begin(), wide.end());
+                             return cases;
+                         }()),
                          MIOPEN_REDUCE_MULTIBLOCK_NAME);
 INSTANTIATE_TEST_SUITE_P(Standard,
                          GPU_ReduceMultiBlock_I8,
