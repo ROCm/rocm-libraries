@@ -330,8 +330,6 @@ void testing_csrilu02(Arguments argus)
         CHECK_HIPSPARSE_ERROR(hipsparseSetPointerMode(handle, HIPSPARSE_POINTER_MODE_HOST));
 
         // The numeric factorization needs the analysis to have filled `info`.
-        CHECK_HIP_ERROR(
-            hipMemcpy(dval1, hcsr_val_orig.data(), sizeof(T) * nnz, hipMemcpyHostToDevice));
         CHECK_HIPSPARSE_ERROR(hipsparseXcsrilu02_analysis(
             handle, m, nnz, descr, dval1, dptr, dcol, info, policy, dbuffer));
 
