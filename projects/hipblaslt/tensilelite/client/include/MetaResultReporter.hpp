@@ -84,6 +84,12 @@ namespace TensileLite
                     r->reportValue_vecOfSizes(key, value);
             }
 
+            virtual void setRowValueProvider(RowValueProvider const& provider) override
+            {
+                for(auto const& r : m_reporters)
+                    r->setRowValueProvider(provider);
+            }
+
             virtual bool logAtLevel(LogLevel level) override
             {
                 for(auto r : m_reporters)

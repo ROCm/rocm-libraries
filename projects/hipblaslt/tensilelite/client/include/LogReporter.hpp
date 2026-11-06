@@ -203,6 +203,11 @@ namespace TensileLite
                 reportValue_string(key, msg.str());
             }
 
+            virtual void setRowValueProvider(RowValueProvider const& provider) override
+            {
+                m_rowValueProvider = provider;
+            }
+
             void acceptValidation(std::string const& value)
             {
                 if(value == "PASSED" || value == "NO_CHECK")
@@ -394,6 +399,22 @@ namespace TensileLite
             virtual void postSolution() override
             {
                 ScopedTimer timer("post_solution_log");
+                // The provider is only valid for this solution.
+                RowValueProvider rowValueProvider = std::move(m_rowValueProvider);
+                m_rowValueProvider                = nullptr;
+
+                if(m_rowLevel > m_level)
+                {
+                    // The row is not printed at this log level: skip copying it. The header
+                    // is still written on the first solution, as readCurrentRow does.
+                    m_csvOutput.writeHeaderIfFirstRow();
+                    m_csvOutput.pop();
+                    return;
+                }
+
+                if(rowValueProvider)
+                    rowValueProvider(*this);
+
                 std::unordered_map<std::string, std::string> curRow;
                 m_csvOutput.readCurrentRow(curRow);
                 bool  validation    = !(curRow[ResultKey::Validation] == "FAILED"
@@ -443,6 +464,8 @@ namespace TensileLite
             double m_winner           = std::numeric_limits<double>::infinity();
 
             LogLevel m_rowLevel;
+
+            RowValueProvider m_rowValueProvider;
 
             CSVStackFile m_csvOutput;
         };
