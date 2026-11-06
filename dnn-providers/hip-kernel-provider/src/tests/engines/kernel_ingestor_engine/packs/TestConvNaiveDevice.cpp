@@ -82,7 +82,7 @@ hipdnn_plugin_sdk::ingestor::KernelDefinition naiveKernel(DataType dataType,
     hipdnn_plugin_sdk::ingestor::KernelDefinition kernel;
     kernel.name = "conv_naive_test";
     kernel.source.kind = hipdnn_plugin_sdk::ingestor::KernelSourceKind::EMBEDDED_SOURCE;
-    kernel.source.sourceFile = "conv/naive/ConvNaive.cpp";
+    kernel.source.sourceFile = "kernels/ConvNaive.cpp";
     kernel.source.entryPoint
         = "ConvNaive"
           + std::string(direction == ConvDirection::FORWARD

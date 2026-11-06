@@ -13,7 +13,7 @@
 #include <hipdnn_plugin_sdk/ingestor/DeviceProperties.hpp>
 #include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
 
-#include "conv/naive/ConvNaiveArgs.h"
+#include "engines/kernel_ingestor_engine/descriptors/conv/naive/kernels/ConvNaiveArgs.h"
 
 /**
  * @file ConvNaiveProblem.hpp

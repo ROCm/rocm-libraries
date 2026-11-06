@@ -15,7 +15,7 @@
       "name": "conv_naive_fwd.f32",
       "kernel_source": {
         "kind": "embedded_source",
-        "source_file": "conv/naive/ConvNaive.cpp",
+        "source_file": "kernels/ConvNaive.cpp",
         "entry_point": "ConvNaiveFwd"
       },
       "metadata": {
@@ -30,7 +30,7 @@
       "name": "conv_naive_fwd.f16",
       "kernel_source": {
         "kind": "embedded_source",
-        "source_file": "conv/naive/ConvNaive.cpp",
+        "source_file": "kernels/ConvNaive.cpp",
         "entry_point": "ConvNaiveFwd"
       },
       "metadata": {
@@ -45,7 +45,7 @@
       "name": "conv_naive_fwd.bf16",
       "kernel_source": {
         "kind": "embedded_source",
-        "source_file": "conv/naive/ConvNaive.cpp",
+        "source_file": "kernels/ConvNaive.cpp",
         "entry_point": "ConvNaiveFwd"
       },
       "metadata": {

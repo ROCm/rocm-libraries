@@ -225,9 +225,10 @@ if(HIPKERNELPROVIDER_FLYDSL_ACTIVE)
     target_compile_definitions(hip_kernel_provider_impl PUBLIC HIPDNN_ENGINE_FLYDSL=1)
 endif()
 
-# The conv engine group (provider-root conv/): its packs ride their own gate on top of the
-# ingestor's. Its kernels are compiled at runtime through HIPRTC, so the plugin embeds their
-# sources, under the keys its descriptors (descriptors/conv/) name; the shipped root's
+# The conv engine group (descriptors/conv/): its packs ride their own gate on top of the
+# ingestor's. Its kernels are compiled at runtime through HIPRTC, so the plugin embeds each
+# source under the key its descriptors name -- the path relative to the descriptor, beside
+# which the source lives -- and each header under its bare file name. The shipped root's
 # conv/ family folder is packed only while the same option is ON (HKP_DESCRIPTOR_FAMILIES).
 if(HIPKERNELPROVIDER_ENABLE_CONV)
     target_sources(hip_kernel_provider_impl PRIVATE
@@ -235,17 +236,14 @@ if(HIPKERNELPROVIDER_ENABLE_CONV)
         ${CMAKE_CURRENT_SOURCE_DIR}/packs/ConvNaiveProblem.cpp
     )
     target_compile_definitions(hip_kernel_provider_impl PUBLIC HIPDNN_ENGINE_CONV=1)
-    # The host pack fills the same argument block the kernels read: conv/naive/ConvNaiveArgs.h.
-    target_include_directories(hip_kernel_provider_impl PUBLIC ${PROJECT_SOURCE_DIR})
-
     include("${PROJECT_SOURCE_DIR}/src/cmake/KernelEmbedding.cmake")
     set(HKP_CONV_KERNEL_SOURCES
-        "${PROJECT_SOURCE_DIR}/conv/naive/ConvNaive.cpp"
-        "${PROJECT_SOURCE_DIR}/conv/naive/ConvNaiveArgs.h"
+        "${CMAKE_CURRENT_SOURCE_DIR}/descriptors/conv/naive/kernels/ConvNaive.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/descriptors/conv/naive/kernels/ConvNaiveArgs.h"
         CACHE INTERNAL "Kernel sources of the conv engine group, embedded for HIPRTC")
     set(HKP_CONV_KERNEL_KEYS
-        conv/naive/ConvNaive.cpp
-        conv/naive/ConvNaiveArgs.h
+        kernels/ConvNaive.cpp
+        ConvNaiveArgs.h
         CACHE INTERNAL "Embedding keys of HKP_CONV_KERNEL_SOURCES, in the same order")
     add_kernels_for_embedding(
         TARGET hip_kernel_provider_impl

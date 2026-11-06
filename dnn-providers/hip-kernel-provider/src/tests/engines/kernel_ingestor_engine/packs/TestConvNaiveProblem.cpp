@@ -502,7 +502,7 @@ hipdnn_plugin_sdk::ingestor::KernelDefinition naiveKernel(const std::string& dty
                                                           const std::string& direction)
 {
     hipdnn_plugin_sdk::ingestor::KernelDefinition kernel;
-    kernel.source.sourceFile = "conv/naive/ConvNaive.cpp";
+    kernel.source.sourceFile = "kernels/ConvNaive.cpp";
     kernel.source.entryPoint = "ConvNaive" + direction;
     kernel.metadata = {{"dtype", dtype}, {"direction", direction}};
     return kernel;
