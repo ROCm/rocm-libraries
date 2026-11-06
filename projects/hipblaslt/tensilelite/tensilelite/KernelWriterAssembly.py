@@ -19717,20 +19717,39 @@ class KernelWriterAssembly(KernelWriter):
     if ss.cfg.numElementsPerBatchLimitedBySgprs < numElementsPerBatch:
       numElementsPerBatch = ss.cfg.numElementsPerBatchLimitedBySgprs
 
-    # Coalesce-aware batch floor for the wide "320" tiles (MT256x320, MT320x256). The DPP
-    # coalesce's marginal cost is only +2 fresh VGPRs (vVoff/vBlend) -- batchB's pack and the blend
-    # reuse dead ValuC, the read window is reused across batchA->batchB -- so two M-pairs fit in one
-    # batch at vgpr 250+2<=256. The generic sizer prices elements at the non-coalesce rate and, on
-    # these register-tight weave tiles, caps the batch at one pair (3) -- below the coalesce's
-    # 4-element (two-M-pair) minimum, so the coalesce never forms. Floor to 4 so the clean
-    # pair-of-pairs is co-resident. Verified: vgpr_count<=256, norm_error 0.
+    # Coalesce-aware batch floor for the subtile-coalesce tiles (MT256x256 and the wide "320"
+    # tiles MT256x320 / MT320x256). The DPP coalesce's marginal cost is only +2 fresh VGPRs
+    # (vVoff/vBlend) -- batchB's pack and the blend reuse dead ValuC, the read window is reused
+    # across batchA->batchB -- so two M-pairs fit in one batch at vgpr 250+2<=256. The generic
+    # sizer prices elements at the non-coalesce rate and, on these register-tight weave tiles,
+    # caps the batch at one pair (3) -- below the coalesce's 4-element (two-M-pair) minimum, so
+    # the coalesce never forms. Floor to 4 so the clean pair-of-pairs is co-resident.
+    #
+    # For MT256x256 this floor REPLACES the former weave-off full-lend strategy (see
+    # _selectPlsinFusedStorePolicy): lending every operand tile grew the batch to a coalesce-able
+    # size but turned off the store/MFMA overlap (weaveGroups=None), stretching the last-MFMA->
+    # wave-end tail (~1.5k->5.9k cycles @8192^3, ~5-8% on MI355X). Keeping the weave and only
+    # flooring the batch recovers that overlap while still coalescing. Verified: vgpr_count<=256,
+    # norm_error 0.
+    _mt0 = kernel.get("MacroTile0")
+    _mt1 = kernel.get("MacroTile1")
     if (getattr(self.states, "subtileCoalesceActive", False)
             and getattr(self.states, "subtileFusedFullTileStore", False)
-            and ((kernel.get("MacroTile0") == 256 and kernel.get("MacroTile1") == 320)
-                 or (kernel.get("MacroTile0") == 320 and kernel.get("MacroTile1") == 256))):
-      _floor = min(len(element), 4)  # coalesce minimum = 2 M-pairs
-      if numElementsPerBatch < _floor:
-        numElementsPerBatch = _floor
+            and ((_mt0 == 256 and _mt1 == 256)
+                 or (_mt0 == 256 and _mt1 == 320)
+                 or (_mt0 == 320 and _mt1 == 256))):
+      # The DPP coalesce joins 4 M-adjacent blocks (two pairs) that must ALL live in the same store
+      # batch -- _samePair rejects any 4-block group split across a batch boundary. So the batch must
+      # (a) be >= 4 (one full group) AND (b) be a MULTIPLE of 4: otherwise the trailing <4 remainder
+      # of every batch strands a pair that coalesces with nothing. The occupancy sizer otherwise
+      # lands on e.g. 6 (= one group + a stranded pair) -> only 67% of that kernel's stores coalesce
+      # (measured: MT256x256 kernels at batchLen 6 -> overall WA 1.15, vs 1.00 at batchLen 4/8/16).
+      # Align DOWN to the nearest multiple of 4 (>=4). Rounding down never raises VGPR pressure, so
+      # it cannot overflow -- it trades a slightly smaller batch for full coalesce coverage.
+      if numElementsPerBatch < 4:
+        numElementsPerBatch = min(len(element), 4)   # coalesce minimum = 2 M-pairs (one group)
+      else:
+        numElementsPerBatch = (numElementsPerBatch // 4) * 4   # align to the 4-block group
 
     # TODO: Which of DataType or DestDataType is in a better sense? 0114: Check Using DestDataType + HSS
     destType = kernel["ProblemType"]["DestDataType"]
@@ -20077,7 +20096,22 @@ class KernelWriterAssembly(KernelWriter):
               _j += 1
             _k = _i
             while _k < _j:
-              _stop = min(_k + numElementsPerBatch, _j)
+              # DPP-aware sub-batch split: within each N-col, separate complete DPP groups
+              # (multiples of 4 M-tiles) from the orphan tail so the orphan gets its own
+              # sub-batch. This keeps batch boundaries at mult-of-4 M-tile positions
+              # regardless of numElementsPerBatch — the upstream coalesce floor already
+              # aligns nepb to mult-of-4, but this makes the split robust to future
+              # changes and explicitly isolates the orphan (e.g. M-tiles 8-9 out of 10
+              # for MIWT[0]=10) so it doesn't dilute the VGPR window of clean batches.
+              _ncol_complete = _k + ((_j - _k) // 4) * 4   # end of last complete DPP group
+              if _ncol_complete > _k and _ncol_complete < _j:
+                # Complete groups followed by an orphan tail: cap the current sub-batch
+                # at the DPP group boundary (or numElementsPerBatch, whichever is smaller).
+                _stop = min(_k + numElementsPerBatch, _ncol_complete)
+              else:
+                # Either the whole remainder is < 4 (pure orphan) or exactly mult-of-4
+                # (no orphan tail), so use the normal numElementsPerBatch cap.
+                _stop = min(_k + numElementsPerBatch, _j)
               _coalesceBatchBounds.append((_k, _stop))
               _k = _stop
             _i = _j
