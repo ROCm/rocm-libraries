@@ -1015,6 +1015,14 @@ namespace
         void clearSwizzledScaleCache()
         {
             m_mxSwizzledDescriptor.clear();
+            // gfx950 keeps its derived scale and upload in separate caches.
+            for(int tensor :
+                {ContractionProblemGemm::TENSOR::MXSA, ContractionProblemGemm::TENSOR::MXSB})
+                for(auto& [type, pristine] : m_vdata[tensor].pristine)
+                {
+                    pristine.mxSwizzledScale.clear();
+                    pristine.gpuMXSwizzledCurrent = false;
+                }
         }
         void initializeNonMXB(ContractionProblemGemm const& problem)
         {
@@ -1193,34 +1201,271 @@ TEST_P(DataInitializationMXUploadTest, CanonicalAndSwizzledTransitionsReplaceWho
             HIP_CHECK_EXC(
                 hipMemcpy(gpu.data(), p.gpuInput.current.get(), bytes, hipMemcpyDeviceToHost));
             std::vector<uint8_t> pristine(bytes);
-            HIP_CHECK_EXC(
-                hipMemcpy(pristine.data(), p.gpuInput.valid.get(), bytes, hipMemcpyDeviceToHost));
+            void* selected = solution.problemType.mxScaleFormat == 0 ? p.gpuInput.valid.get()
+                                                                     : p.gpuMXSwizzled.get();
+            EXPECT_NE(selected, nullptr);
+            HIP_CHECK_EXC(hipMemcpy(pristine.data(), selected, bytes, hipMemcpyDeviceToHost));
             EXPECT_EQ(gpu, pristine); // MX copies preserve the whole currently selected layout
+            std::vector<uint8_t> canonicalGPU(bytes);
+            HIP_CHECK_EXC(hipMemcpy(
+                canonicalGPU.data(), p.gpuInput.valid.get(), bytes, hipMemcpyDeviceToHost));
+            EXPECT_EQ(std::memcmp(canonicalGPU.data(), p.cpuInput.valid.get(), bytes), 0);
+            EXPECT_EQ(p.gpuValidEpoch, epoch);
+            EXPECT_EQ(p.gpuValidElements, p.maxElements);
             if(solution.problemType.mxScaleFormat == 0)
             {
                 EXPECT_EQ(std::memcmp(gpu.data(), p.cpuInput.valid.get(), bytes), 0);
                 EXPECT_EQ(std::memcmp(p.cpuInput.current.get(), p.cpuInput.valid.get(), bytes), 0);
-                EXPECT_EQ(p.gpuValidEpoch, epoch);
-                EXPECT_EQ(p.gpuValidElements, p.maxElements);
             }
             else
-                EXPECT_EQ(p.gpuValidElements, 0u);
-            // The next problem's unused tail is outside this layout and may retain canonical
-            // bytes after a format change. Compare only the current scale layout across runs.
+                EXPECT_TRUE(p.gpuMXSwizzledCurrent);
+            // Full-buffer equality above covers the unused tail. Compare only the current
+            // descriptor's active layout when switching between the two formats.
             gpu.resize(desc.totalAllocatedBytes());
             result.push_back(std::move(gpu));
         }
         EXPECT_EQ(init.inputEpoch(), epoch);
         return result;
     };
+    // Establish the canonical upload before selecting the separate swizzled source.
+    auto const unpermuted   = run(canonical);
+    auto       uploadCounts = [&]() {
+        std::vector<std::pair<size_t, size_t>> counts;
+        for(auto tensor : {Tensor::MXSA, Tensor::MXSB})
+        {
+            auto const& p = init.pristine(tensor, gemm.tensors()[tensor]);
+            counts.emplace_back(p.gpuValidUploadCount, p.gpuMXSwizzledUploadCount);
+        }
+        return counts;
+    };
+    auto const canonicalCounts = uploadCounts();
     auto const swizzled = run(swizzle);
+    auto const bothCounts      = uploadCounts();
+    for(size_t i = 0; i < bothCounts.size(); ++i)
+    {
+        EXPECT_EQ(bothCounts[i].first, canonicalCounts[i].first);
+        EXPECT_EQ(bothCounts[i].second, canonicalCounts[i].second + 1);
+    }
+    ASSERT_NE(unpermuted, swizzled) << "scale layouts must differ for the cache test";
+    EXPECT_EQ(run(swizzle), swizzled); // same instruction K skips initialization
+    EXPECT_EQ(uploadCounts(), bothCounts);
+    EXPECT_EQ(run(canonical), unpermuted);
+    EXPECT_EQ(uploadCounts(), bothCounts);
     EXPECT_EQ(run(swizzle), swizzled);
-    auto const unpermuted = run(canonical);
-    ASSERT_NE(unpermuted, swizzled) << "scale layouts must differ for the invalidation test";
-    EXPECT_EQ(run(canonical), unpermuted); // canonical upload cache hit
-    EXPECT_EQ(run(swizzle), swizzled); // canonical tag must be invalidated
-    EXPECT_EQ(run(canonical), unpermuted); // swizzled bytes must be replaced
+    EXPECT_EQ(uploadCounts(), bothCounts);
+    EXPECT_EQ(run(canonical), unpermuted);
+    EXPECT_EQ(uploadCounts(), bothCounts);
     init.postProblem();
+}
+
+TEST_P(DataInitializationMXUploadTest, SameInstructionKRejectsAndRepairsCorruptedSwizzledScale)
+{
+    auto args = makeMXLaunchArgs({{128, 128, 1, 512}});
+    setOption(args, "mx-data-generator", GetParam());
+    setOption(args, "verify-upload-skip", true);
+    TensileLite::Client::ClientProblemFactory factory(args);
+    MXReuseProbe                              init(args, factory);
+    init.useGfx950ScaleLayout();
+    auto*               problem = factory.problems()[0].get();
+    auto const&         gemm    = dynamic_cast<ContractionProblemGemm const&>(*problem);
+    ContractionSolution first, next;
+    setMXSolution(first, 1, 128);
+    setMXSolution(next, 1, 128);
+    init.preProblem(problem);
+    init.prepareCPUInputs(problem);
+    init.prepareGPUInputs(problem);
+    init.preSolution(&first);
+    init.prepareGPUInputs(problem);
+    init.postSolution();
+    auto const epoch = init.inputEpoch();
+    using Tensor     = ContractionProblemGemm::TENSOR;
+    for(auto tensor : {Tensor::MXSA, Tensor::MXSB})
+    {
+        auto const& desc = gemm.tensors()[tensor];
+        auto&       p    = init.pristine(tensor, desc);
+        ASSERT_TRUE(p.gpuMXSwizzledCurrent);
+        auto const uploads  = p.gpuMXSwizzledUploadCount;
+        auto const expected = p.mxSwizzledScale;
+        uint8_t    corrupt  = expected[0] ^ 0xff;
+        HIP_CHECK_EXC(hipMemcpy(p.gpuMXSwizzled.get(), &corrupt, 1, hipMemcpyHostToDevice));
+        init.preSolution(&next); // same K: initializeMXData is skipped
+        try
+        {
+            init.prepareGPUInputs(problem);
+            FAIL() << "corrupted swizzled upload was reused";
+        }
+        catch(std::runtime_error const& error)
+        {
+            EXPECT_NE(std::string(error.what()).find(desc.getName()), std::string::npos);
+            EXPECT_NE(std::string(error.what()).find("GFX950-swizzled scale"), std::string::npos);
+        }
+        EXPECT_FALSE(p.gpuMXSwizzledCurrent);
+        EXPECT_EQ(p.gpuMXSwizzledUploadCount, uploads);
+        init.postSolution();
+        init.preSolution(&next);
+        init.prepareGPUInputs(problem); // invalid tag requires repair, even with the same K
+        init.postSolution();
+        EXPECT_TRUE(p.gpuMXSwizzledCurrent);
+        EXPECT_EQ(p.gpuMXSwizzledUploadCount, uploads + 1);
+        std::vector<uint8_t> gpu(expected.size());
+        HIP_CHECK_EXC(
+            hipMemcpy(gpu.data(), p.gpuMXSwizzled.get(), gpu.size(), hipMemcpyDeviceToHost));
+        EXPECT_EQ(gpu, expected);
+        init.preSolution(&next);
+        EXPECT_NO_THROW(init.prepareGPUInputs(problem)); // repaired cache can be verified again
+        init.postSolution();
+        EXPECT_EQ(p.gpuMXSwizzledUploadCount, uploads + 1);
+        EXPECT_EQ(init.inputEpoch(), epoch);
+    }
+}
+
+TEST_P(DataInitializationMXUploadTest, PaddedLeadingDimensionStaysWithinCanonicalAllocations)
+{
+    using Tensor = ContractionProblemGemm::TENSOR;
+    // Both a single last batch and earlier batches need bounded writes. The generator
+    // emits 2,560 scales per batch, while each canonical slot contains only 2,048.
+    for(size_t batches : {1u, 3u})
+    {
+        SCOPED_TRACE(batches);
+        auto args = makeMXLaunchArgs({{256, 256, batches, 256}});
+        setOption(args, "a-strides", std::vector<std::vector<size_t>>{{1, 320, 81920}});
+        setOption(args, "b-strides", std::vector<std::vector<size_t>>{{1, 320, 81920}});
+        setOption(args, "mx-data-generator", GetParam());
+        setOption(args, "verify-upload-skip", true);
+        TensileLite::Client::ClientProblemFactory factory(args);
+        MXReuseProbe                              init(args, factory);
+        init.useGfx950ScaleLayout();
+        auto*            problem    = factory.problems()[0].get();
+        auto const&      gemm       = dynamic_cast<ContractionProblemGemm const&>(*problem);
+        constexpr size_t guardBytes = 64;
+        for(auto tensor : {Tensor::A, Tensor::B, Tensor::MXSA, Tensor::MXSB})
+        {
+            auto const& desc = gemm.tensors()[tensor];
+            auto&       p    = init.pristine(tensor, desc);
+            size_t bytes     = TensileLite::multiplyElementSize(p.maxElements, desc.elementBytes());
+            p.cpuInput.valid = std::shared_ptr<void>(malloc(bytes + guardBytes), free);
+            ASSERT_NE(p.cpuInput.valid, nullptr);
+            std::memset(p.cpuInput.valid.get(), 0xcc, bytes + guardBytes);
+        }
+        init.preProblem(problem);
+        init.prepareCPUInputs(problem);
+        for(auto tensor : {Tensor::A, Tensor::B, Tensor::MXSA, Tensor::MXSB})
+        {
+            auto const& desc = gemm.tensors()[tensor];
+            auto&       p    = init.pristine(tensor, desc);
+            size_t bytes     = TensileLite::multiplyElementSize(p.maxElements, desc.elementBytes());
+            auto*  end       = static_cast<uint8_t*>(p.cpuInput.valid.get()) + bytes;
+            EXPECT_EQ(std::vector<uint8_t>(end, end + guardBytes),
+                      std::vector<uint8_t>(guardBytes, 0xcc))
+                << desc.getName();
+        }
+        if(GetParam() == 1)
+        {
+            // The bounded copy must preserve the generated bytes, not merely avoid
+            // crossing the allocation boundary. Check all active batches on both sides.
+            for(auto tensor : {Tensor::A, Tensor::B})
+            {
+                bool const  isA   = tensor == Tensor::A;
+                auto const& desc  = gemm.tensors()[tensor];
+                auto&       p     = init.pristine(tensor, desc);
+                auto&       scale = init.pristine(isA ? Tensor::MXSA : Tensor::MXSB,
+                                            isA ? gemm.mxsa() : gemm.mxsb());
+                std::vector<uint8_t> data(81920), generated(2560);
+                generateMXInput(HIP_R_8F_E4M3,
+                                HIP_R_8F_UE8M0,
+                                data.data(),
+                                generated.data(),
+                                256,
+                                256,
+                                320,
+                                isA ? gemm.transA() : gemm.transB(),
+                                isA ? 32 : 1,
+                                isA ? 1 : 32,
+                                isA,
+                                MXScaleLayout::None,
+                                "Bounded",
+                                -1.0f,
+                                1.0f,
+                                "Bounded",
+                                /*seedIndex=*/0,
+                                false);
+                for(size_t b = 0; b < batches; ++b)
+                {
+                    auto const* actualData
+                        = static_cast<uint8_t const*>(p.cpuInput.valid.get()) + b * 81920;
+                    EXPECT_EQ(std::memcmp(actualData, data.data(), 81856), 0);
+                    auto const* actualScale
+                        = static_cast<uint8_t const*>(scale.cpuInput.valid.get()) + b * 2048;
+                    EXPECT_EQ(std::memcmp(actualScale, generated.data(), 2048), 0);
+                    EXPECT_EQ(std::vector<uint8_t>(scale.mxCompactScale.begin() + b * 2560,
+                                                   scale.mxCompactScale.begin() + (b + 1) * 2560),
+                              generated);
+                }
+            }
+        }
+        // Compare each uploaded batch against an independently sized staging call.
+        // Mode 0 uses logical scales, regardless of the data's padded leading dimension.
+        init.prepareGPUInputs(problem);
+        ContractionSolution swizzle;
+        setMXSolution(swizzle, 1, 128);
+        ASSERT_NO_THROW(init.preSolution(&swizzle));
+        init.prepareGPUInputs(problem);
+        for(auto tensor : {Tensor::MXSA, Tensor::MXSB})
+        {
+            bool const   isA  = tensor == Tensor::MXSA;
+            auto const&  desc = gemm.tensors()[tensor];
+            auto&        p    = init.pristine(tensor, desc);
+            size_t const slot = batches > 1 ? desc.strides()[2] : desc.totalAllocatedBytes();
+            std::vector<uint8_t> expected(p.mxSwizzledScale.size(), 0);
+            std::vector<uint8_t> data(81920), generated(81920);
+            for(size_t b = 0; b < batches; ++b)
+            {
+                if(GetParam() == 1)
+                {
+                    generateMXInput(HIP_R_8F_E4M3,
+                                    HIP_R_8F_UE8M0,
+                                    data.data(),
+                                    generated.data(),
+                                    256,
+                                    256,
+                                    320,
+                                    isA ? gemm.transA() : gemm.transB(),
+                                    isA ? 32 : 1,
+                                    isA ? 1 : 32,
+                                    isA,
+                                    MXScaleLayout::GFX950,
+                                    "Bounded",
+                                    -1.0f,
+                                    1.0f,
+                                    "Bounded",
+                                    /*seedIndex=*/0,
+                                    false);
+                    std::copy_n(generated.begin(), slot, expected.begin() + b * slot);
+                }
+                else
+                {
+                    auto const* canonical
+                        = static_cast<uint8_t const*>(p.cpuInput.valid.get()) + b * slot;
+                    std::vector<uint8_t> natural(canonical, canonical + 2048);
+                    auto const grid = mxScaleGridGFX950(256,
+                                                       256,
+                                                       256,
+                                                       isA ? gemm.transA() : gemm.transB(),
+                                                       isA ? 32 : 1,
+                                                       isA ? 1 : 32,
+                                                       isA);
+                    auto swizzled = swizzleScaleGFX950(natural, grid);
+                    std::copy_n(swizzled.begin(), slot, expected.begin() + b * slot);
+                }
+            }
+            EXPECT_EQ(p.mxSwizzledScale, expected);
+            std::vector<uint8_t> gpu(expected.size());
+            HIP_CHECK_EXC(
+                hipMemcpy(gpu.data(), p.gpuInput.current.get(), gpu.size(), hipMemcpyDeviceToHost));
+            EXPECT_EQ(gpu, expected);
+        }
+        init.postSolution();
+    }
 }
 
 INSTANTIATE_TEST_SUITE_P(GeneratorModes, DataInitializationMXUploadTest, ::testing::Values(0, 1));
@@ -1493,7 +1738,7 @@ TEST(NaturalMXScaleFromCanonical, CopiesPrefixWhenNotRestrided)
 }
 
 // -----------------------------------------------------------------------------
-// 4.11 detail::swizzleNaturalMXScale
+// 4.11 Natural scale swizzling: shared gfx950 permutation and client gfx1250 helper.
 //      Swizzling the natural scales must give exactly what generateMXInput
 //      emits when asked for the layout, for every operand orientation. The
 //      client calls generateMXInput with the data tensor's sizes: {K, MN}
@@ -1551,12 +1796,20 @@ TEST_P(SwizzleNaturalMXScaleTest, MatchesGenerateMXInputWithLayout)
     ASSERT_EQ(dataNatural, dataSwizzled);
     natural.resize(naturalBytes);
 
-    auto const swizzled
-        = dt::swizzleNaturalMXScale(natural, p.layout, rows, cols, mxBlock, kIsRows);
+    auto const swizzled = p.layout == MXScaleLayout::GFX950
+                             ? swizzleScaleGFX950(natural,
+                                                  mxScaleGridGFX950(rows,
+                                                                    cols,
+                                                                    rows,
+                                                                    p.transposed,
+                                                                    p.isMatrixA ? mxBlock : 1,
+                                                                    p.isMatrixA ? 1 : mxBlock,
+                                                                    p.isMatrixA))
+                             : dt::swizzleNaturalMXScale(natural, p.layout, rows, cols, mxBlock);
     ASSERT_LT(swizzled.size(), expected.size());
     EXPECT_EQ(swizzled, std::vector<uint8_t>(expected.begin(), expected.begin() + swizzled.size()));
     EXPECT_EQ(expected[swizzled.size()], sentinel)
-        << "generateMXInput wrote more swizzled bytes than swizzleNaturalMXScale returned";
+        << "generateMXInput wrote more swizzled bytes than the scale permutation returned";
 }
 INSTANTIATE_TEST_SUITE_P(
     MXScaleLayouts,
