@@ -24,7 +24,6 @@ GlobalParameters:
   KeepBuildTmp: True
   #PrintSolutionRejectionReason: True
   #GenerateSourcesAndExit: False
-  CpuThreads: 1
   RotatingBufferSize: 0
 
 BenchmarkProblems:

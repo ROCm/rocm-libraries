@@ -16,7 +16,6 @@ GlobalParameters:
   RotatingBufferSize: 512
   PrintSolutionRejectionReason: True
   PrintWinnersOnly: True
-  CpuThreads: 1
   DataInitTypeA: 12
   DataInitTypeB: 13
   SleepPercent: 0
