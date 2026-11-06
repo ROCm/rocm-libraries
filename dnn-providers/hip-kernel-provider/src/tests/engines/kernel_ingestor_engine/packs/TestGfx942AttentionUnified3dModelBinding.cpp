@@ -3,7 +3,6 @@
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
-#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -15,6 +14,7 @@
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
 
+#include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_flatbuffers_sdk/utilities/Uuid.hpp>
 #include <hipdnn_plugin_sdk/ingestor/Descriptors.hpp>
 #include <hipdnn_plugin_sdk/ingestor/MakeEngine.hpp>
@@ -102,8 +102,8 @@ std::vector<std::string>
 /// out of the pack (its `model.bin` never pulled) has no UHD there.
 bool packedTreeHoldsUhd(const std::string& id)
 {
-    const char* root = std::getenv("HIPDNN_DESCRIPTOR_DIR");
-    if(root == nullptr || *root == '\0')
+    const std::string root = hipdnn_data_sdk::utilities::getEnv("HIPDNN_DESCRIPTOR_DIR");
+    if(root.empty())
     {
         return true; // no explicit root to inspect: treat the model as shipped
     }
@@ -129,8 +129,8 @@ bool packedTreeHoldsUhd(const std::string& id)
 /// the packer lost for any other reason is in no record.
 bool packedTreeRecordsUnpulled(const std::string& id)
 {
-    const char* root = std::getenv("HIPDNN_DESCRIPTOR_DIR");
-    if(root == nullptr || *root == '\0')
+    const std::string root = hipdnn_data_sdk::utilities::getEnv("HIPDNN_DESCRIPTOR_DIR");
+    if(root.empty())
     {
         return false;
     }
