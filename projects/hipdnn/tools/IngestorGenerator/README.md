@@ -931,6 +931,9 @@ engine:
   heuristics:                     # optional; per-arch model UHDs `uhd_gen promote` bound,
     sort_kernel_catalog:          # role -> arch -> [UHD id]. See "Shipping a trained
       gfx942: [<uhd-uuid>]        # model". Not allowed beside `slots`.
+  trained_catalog_sha256:         # optional; per arch bound under sort_kernel_catalog (all
+    gfx942: <64 hex>              # of them), the catalog its models were trained on. See
+                                  # "Trained rankers and catalog changes".
 
 kmd_fields:                       # the KMD's fields[] -- one per axis this engine's
   - name: block_size              # kernels vary along
@@ -976,6 +979,26 @@ packs:
         priority: 0
         arch: []                   # optional; must be a subset of the pack's arch
 ```
+
+### Trained rankers and catalog changes: `engine.trained_catalog_sha256`
+
+The descriptor loader ties a model only to its engine's UED/KMD/UMD ids, so a catalog edit
+that keeps those ids (a kernel added, removed or renamed) would leave a model bound under
+`engine.heuristics.sort_kernel_catalog` ranking a catalog it never saw, silently.
+`engine.trained_catalog_sha256` records, per bound arch, the catalog the models were trained
+on (`codegen/catalog_fingerprint.py`: each kernel's name, metadata and spec, independent of
+ids and order). It is optional, but when set its keys must equal the arch keys under
+`heuristics.sort_kernel_catalog`, and like `heuristics` it goes in both the manifest and the
+selection. Set it whenever you bind a trained ranker.
+`tests/test_trained_rankers.py` fails when the shipped KDP no longer matches. After a
+catalog change, retrain on the new catalog and record the new fingerprint:
+
+```bash
+python3 tools/catalog_fingerprint.py <bundle>/artifacts/<pack>.kdp.json
+```
+
+The same test checks that the shipped UED binds exactly the configured ids and, with the
+heuristics pulled from DVC, that each is installed.
 
 ### The engine manifest and `reduction:`
 

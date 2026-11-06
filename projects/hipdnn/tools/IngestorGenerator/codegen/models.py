@@ -454,6 +454,12 @@ class EngineSpec:
     #: Per-arch heuristic bindings `uhd_gen promote` writes into the UED: role ->
     #: arch (or `default`) -> UHD ids, in config order. Empty emits nothing.
     heuristics: dict[str, dict[str, list[str]]] = field(default_factory=dict)
+    #: ``engine.trained_catalog_sha256``: arch -> `tools/catalog_fingerprint.py`'s hash of the
+    #: catalog the ``heuristics.sort_kernel_catalog`` models bound under that arch were
+    #: trained on. The loader ties a model to the UED/KMD/UMD ids only, so a catalog edit
+    #: that keeps them would leave a stale model ranking silently; the regeneration gates
+    #: (tests/test_trained_rankers.py) fail instead.
+    trained_catalog_sha256: dict[str, str] = field(default_factory=dict)
 
     @property
     def namespace(self) -> str:
