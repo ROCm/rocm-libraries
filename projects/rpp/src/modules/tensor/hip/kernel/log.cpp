@@ -51,9 +51,15 @@ __global__ void log_1d_hip_tensor(T* srcPtr, uint srcStrides, U* dstPtr, uint ds
     uint dstIdx = (id_z * dstStrides) + id_x;
 
     d_float8 src_f8, dst_f8;
-    rpp_hip_load8_and_unpack_to_float8(srcPtr + srcIdx, &src_f8);
-    log_hip_compute(srcPtr, &src_f8, &dst_f8);
-    rpp_hip_pack_float8_and_store8(dstPtr + dstIdx, &dst_f8);
+    if (width - id_x >= 8) {
+        rpp_hip_load8_and_unpack_to_float8(srcPtr + srcIdx, &src_f8);
+        log_hip_compute(srcPtr, &src_f8, &dst_f8);
+        rpp_hip_pack_float8_and_store8(dstPtr + dstIdx, &dst_f8);
+    } else {
+        rpp_hip_load_n_and_unpack_to_float8(srcPtr + srcIdx, &src_f8, width - id_x);
+        log_hip_compute(srcPtr, &src_f8, &dst_f8);
+        rpp_hip_pack_float8_and_store_n(dstPtr + dstIdx, &dst_f8, width - id_x);
+    }
 }
 
 template <typename T, typename U>
@@ -75,17 +81,23 @@ __global__ void log_2d_hip_tensor(T* srcPtr, uint2 srcStridesNH, U* dstPtr, uint
     uint dstIdx = (id_z * dstStridesNH.x) + (id_y * dstStridesNH.y) + id_x;
 
     d_float8 src_f8, dst_f8;
-    rpp_hip_load8_and_unpack_to_float8(srcPtr + srcIdx, &src_f8);
-    log_hip_compute(srcPtr, &src_f8, &dst_f8);
-    rpp_hip_pack_float8_and_store8(dstPtr + dstIdx, &dst_f8);
+    if (width - id_x >= 8) {
+        rpp_hip_load8_and_unpack_to_float8(srcPtr + srcIdx, &src_f8);
+        log_hip_compute(srcPtr, &src_f8, &dst_f8);
+        rpp_hip_pack_float8_and_store8(dstPtr + dstIdx, &dst_f8);
+    } else {
+        rpp_hip_load_n_and_unpack_to_float8(srcPtr + srcIdx, &src_f8, width - id_x);
+        log_hip_compute(srcPtr, &src_f8, &dst_f8);
+        rpp_hip_pack_float8_and_store_n(dstPtr + dstIdx, &dst_f8, width - id_x);
+    }
 }
 
 template <typename T, typename U>
 __global__ void log_3d_hip_tensor(T* srcPtr, uint2 srcStridesDH, U* dstPtr, uint2 dstStridesDH,
                                   uint* roiTensor) {
-    uint id_x = hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x;  // lengthX
-    uint id_y = hipBlockIdx_y * hipBlockDim_y + hipThreadIdx_y;  // lengthY
-    uint id_z = hipBlockIdx_z * hipBlockDim_z + hipThreadIdx_z;  // lengthZ
+    uint id_x = (hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x) * 8;  // lengthX
+    uint id_y = hipBlockIdx_y * hipBlockDim_y + hipThreadIdx_y;        // lengthY
+    uint id_z = hipBlockIdx_z * hipBlockDim_z + hipThreadIdx_z;        // lengthZ
 
     uint* roi = roiTensor;
     uint beginZ = roi[0];
@@ -102,9 +114,15 @@ __global__ void log_3d_hip_tensor(T* srcPtr, uint2 srcStridesDH, U* dstPtr, uint
     uint dstIdx = (id_z * dstStridesDH.x) + (id_y * dstStridesDH.y) + id_x;
 
     d_float8 src_f8, dst_f8;
-    rpp_hip_load8_and_unpack_to_float8(srcPtr + srcIdx, &src_f8);
-    log_hip_compute(srcPtr, &src_f8, &dst_f8);
-    rpp_hip_pack_float8_and_store8(dstPtr + dstIdx, &dst_f8);
+    if (lengthX - id_x >= 8) {
+        rpp_hip_load8_and_unpack_to_float8(srcPtr + srcIdx, &src_f8);
+        log_hip_compute(srcPtr, &src_f8, &dst_f8);
+        rpp_hip_pack_float8_and_store8(dstPtr + dstIdx, &dst_f8);
+    } else {
+        rpp_hip_load_n_and_unpack_to_float8(srcPtr + srcIdx, &src_f8, lengthX - id_x);
+        log_hip_compute(srcPtr, &src_f8, &dst_f8);
+        rpp_hip_pack_float8_and_store_n(dstPtr + dstIdx, &dst_f8, lengthX - id_x);
+    }
 }
 
 template <typename T, typename U>
@@ -113,7 +131,8 @@ __global__ void log_nd_hip_tensor(T* srcPtr, uint* srcStrides, uint* srcDims, ui
     int id_x = (hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x) * 8;
     int id_z = hipBlockIdx_z * hipBlockDim_z + hipThreadIdx_z;  // batchsize
 
-    if (id_x >= srcStrides[0]) return;
+    uint sampleSize = srcStrides[0];
+    if (id_x >= sampleSize) return;
 
     uint* roi = roiTensor + id_z * numDims * 2;
     uint* begin = roi;
@@ -121,21 +140,45 @@ __global__ void log_nd_hip_tensor(T* srcPtr, uint* srcStrides, uint* srcDims, ui
     uint dstIdx = (id_z * *dstStrides++);
     uint srcIdx = (id_z * *srcStrides++);
     uint coords[RPPT_MAX_DIMS];
+    bool inRoi = true;
 
     for (int i = 0; i < numDims; i++) {
         coords[i] = (id_x / srcStrides[i]) % srcDims[i];
-        if (coords[i] >= length[i]) return;
-    }
-
-    for (int i = 0; i < numDims; i++) {
-        dstIdx += (coords[i] * dstStrides[i]);
-        srcIdx += (begin[i] + (coords[i] * srcStrides[i]));
+        inRoi = inRoi && (coords[i] < length[i]);
     }
 
     d_float8 src_f8, dst_f8;
-    rpp_hip_load8_and_unpack_to_float8(srcPtr + srcIdx, &src_f8);
+    // All 8 elements lie in one ROI row: vector load/store
+    if (inRoi && (coords[numDims - 1] + 8 <= length[numDims - 1])) {
+        for (int i = 0; i < numDims; i++) {
+            dstIdx += (coords[i] * dstStrides[i]);
+            srcIdx += ((begin[i] + coords[i]) * srcStrides[i]);
+        }
+        rpp_hip_load8_and_unpack_to_float8(srcPtr + srcIdx, &src_f8);
+        log_hip_compute(srcPtr, &src_f8, &dst_f8);
+        rpp_hip_pack_float8_and_store8(dstPtr + dstIdx, &dst_f8);
+        return;
+    }
+
+    // Row end, ROI edge or sample end: map each element on its own
+    uint srcIdxLane[8], dstIdxLane[8];
+    bool valid[8];
+    for (int lane = 0; lane < 8; lane++) {
+        uint flatIdx = id_x + lane;
+        valid[lane] = (flatIdx < sampleSize);
+        srcIdxLane[lane] = srcIdx;
+        dstIdxLane[lane] = dstIdx;
+        for (int i = 0; i < numDims && valid[lane]; i++) {
+            uint coord = (flatIdx / srcStrides[i]) % srcDims[i];
+            valid[lane] = (coord < length[i]);
+            dstIdxLane[lane] += (coord * dstStrides[i]);
+            srcIdxLane[lane] += ((begin[i] + coord) * srcStrides[i]);
+        }
+        src_f8.f1[lane] = valid[lane] ? static_cast<float>(srcPtr[srcIdxLane[lane]]) : 0.0f;
+    }
     log_hip_compute(srcPtr, &src_f8, &dst_f8);
-    rpp_hip_pack_float8_and_store8(dstPtr + dstIdx, &dst_f8);
+    for (int lane = 0; lane < 8; lane++)
+        if (valid[lane]) rpp_hip_pack_float_and_store1(dstPtr + dstIdxLane[lane], dst_f8.f1[lane]);
 }
 
 // -------------------- Set 3 - executor kernels --------------------
@@ -176,7 +219,7 @@ RppStatus hip_exec_log_generic_tensor(T* srcPtr, RpptGenericDescPtr srcGenericDe
         HIP_CHECK_LAUNCH_RETURN();
     } else if (numDims == 3) {
         // NDHW
-        int globalThreads_x = dstGenericDescPtr->dims[3];
+        int globalThreads_x = (dstGenericDescPtr->dims[3] + 7) >> 3;
         int globalThreads_y = dstGenericDescPtr->dims[2];
         int globalThreads_z = dstGenericDescPtr->dims[1];
 

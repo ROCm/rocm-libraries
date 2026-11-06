@@ -476,6 +476,48 @@ def test_packets_drift_lane_follows_the_trigger(part, tmp_path):
     assert "drift.txt" in (rd / "packets" / "DRIFT.md").read_text()
 
 
+def test_impact_scope_is_the_ingestor_paths_and_plugin_sdk_headers(part):
+    inside = (
+        "dnn-providers/hip-kernel-provider/rocke/library/kernels/gfx950/attention_dense.py",
+        "projects/hipdnn/plugin_sdk/include/hipdnn_plugin_sdk/ingestor/Descriptors.hpp",
+        "projects/hipdnn/plugin_sdk/data/gpu_generic_targets.json",
+        "projects/hipdnn/plugin_sdk/include/hipdnn_plugin_sdk/GpuGenericTargets.hpp",
+        "projects/hipdnn/plugin_sdk/include/hipdnn_plugin_sdk/EnginePluginApi.h",
+        "projects/hipdnn/plugin_sdk/cmake/GpuGenericTargetsTable.hpp.in",
+        "projects/hipdnn/tools/IngestorGenerator/configs/gfx950_attention_dense.engine.yaml",
+    )
+    outside = (
+        "projects/hipdnn/plugin_sdk/tests/a.cpp",
+        "dnn-providers/miopen-provider/src/a.cpp",
+        "projects/hipdnn/tools/DescriptorGenerator/gen.py",
+    )
+    rows = [(p, 1, "") for p in inside + outside]
+    assert {r[0] for r in part.concern_scope("IMPACT", rows)} == set(inside)
+
+
+def test_packets_impact_lane_takes_ingestor_files_only(part, tmp_path, capsys):
+    # catches: IMPACT not registered as a concern lane, or scoped to every changed file
+    for sub in ("a", "b"):
+        (tmp_path / sub).mkdir()
+    header = (
+        "projects/hipdnn/plugin_sdk/include/hipdnn_plugin_sdk/GpuGenericTargets.hpp"
+    )
+    other = "projects/hipdnn/backend/a.cpp"
+    rd = make_round(tmp_path / "a", [(3, 1, header), (2, 0, other)])
+    run(part, "areas", rd)
+    run(part, "plan", rd)
+    run(part, "packets", rd, "--lanes", "IMPACT")
+    packet = (rd / "packets" / "IMPACT.md").read_text()
+    assert header in packet and other not in packet
+    rd = make_round(tmp_path / "b", [(2, 0, other)])
+    run(part, "areas", rd)
+    run(part, "plan", rd)
+    capsys.readouterr()
+    run(part, "packets", rd, "--lanes", "IMPACT")
+    assert not (rd / "packets" / "IMPACT.md").exists()
+    assert "IMPACT: no changed file in scope, N/A" in capsys.readouterr().out
+
+
 def test_orient_gate_accepts_added_files_and_flags_paths_absent_at_base(
     part, tmp_path, capsys
 ):
@@ -507,3 +549,33 @@ def test_orient_gate_accepts_added_files_and_flags_paths_absent_at_base(
     (rd / "CONTEXT.md").write_text("Area `src/old.cpp:1` and dir `src`.\n")
     run(part, "orient-gate", rd)
     assert capsys.readouterr().out == ""
+
+
+def test_impact_lane_id_is_a_provisional_id(part):
+    """A finding ID from the IMPACT lane is recognised, like every other report lane."""
+    # catches: IMPACT dropped from CONCERN_LANES/REPORT_LANES, so IMPACT findings are
+    # invisible to the ledger and comment-reference checks.
+    assert part.PROVISIONAL_ID.findall("see IMPACT1-p2 and CORR1-p2") == [
+        "IMPACT1-p2",
+        "CORR1-p2",
+    ]
+
+
+def test_every_ingestor_impact_surface_pattern_triggers_the_impact_lane(part):
+    """IMPACT_PREFIXES must cover each non-outside SURFACE_TABLE pattern's literal prefix,
+    or a change to that surface never reaches the IMPACT lane."""
+    # catches: a SURFACE_TABLE entry added under a path IMPACT_PREFIXES does not list.
+    impact = SCRIPT.parent.parent.parent / "hipdnn-ingestor-impact" / "scripts"
+    spec = importlib.util.spec_from_file_location(
+        "hipdnn_ingestor_impact", impact / "impact.py"
+    )
+    assert spec and spec.loader, f"could not load {impact / 'impact.py'}"
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    uncovered = [
+        (tag, pattern)
+        for tag, pattern in module.SURFACE_TABLE
+        if tag not in module.OUTSIDE_TAGS
+        and not pattern.split("*", 1)[0].startswith(part.IMPACT_PREFIXES)
+    ]
+    assert uncovered == []

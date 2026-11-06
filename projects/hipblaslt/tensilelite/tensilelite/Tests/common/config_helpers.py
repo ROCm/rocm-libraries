@@ -122,7 +122,7 @@ def _usingStinkytofuBackend(availableArchs):
     return "rocisa_stinkytofu_adaptor" in (getattr(rocisa, "__file__", "") or "")
 
 
-def configMarks(filepath, rootDir, availableArchs):
+def configMarks(filepath, rootDir, availableArchs, deviceTags=()):
     """
     Returns a list of marks to add to a particular YAML config path.  Currently gets a mark for:
 
@@ -130,6 +130,9 @@ def configMarks(filepath, rootDir, availableArchs):
      - Expected failures. Include 'xfail' in the name of the YAML file.
      - Anything in yaml["TestParameters"]["marks"]
      - Architecture from GlobalParameters.Architecture (e.g. gfx1250)
+     - skip-<deviceTag> (e.g. skip-mi300a) when the machine has that device. This is for
+       a product that shares its gfx architecture with others, so skip-<arch> would also
+       skip the tests where they pass. See gpu_detection.get_available_device_tags.
      - Architecture from filename (e.g. bf16_gfx1250.yaml -> gfx1250)
      - validate / validateAll - whether the test validates (all?) results.
      - Data type(s) used in the YAML
@@ -194,6 +197,13 @@ def configMarks(filepath, rootDir, availableArchs):
         ArchSkip = "skip-%s" % arch
         if markNamed(ArchSkip) in marks:
             marks.append(pytest.mark.skip)
+
+    # Device-specific skip, for a known bug on one product of an architecture (e.g.
+    # skip-mi300a). It is a skip, not an xfail: such a bug can be a hang, which xfail
+    # would still run, and xfail_strict would fail the run if it started passing.
+    for tag in deviceTags:
+        if markNamed("skip-%s" % tag) in marks:
+            marks.append(pytest.mark.skip(reason="Known bug on %s; see the ROCM ticket in the YAML" % tag))
 
     # Backend-specific skip (e.g. subtile tests not yet supported on stinkytofu)
     if markNamed("skip-stinkytofu") in marks and _usingStinkytofuBackend(availableArchs):
@@ -272,7 +282,16 @@ def findAvailableArchs(gpu_targets=None):
     return get_available_archs()
 
 
-def findConfigs(rootDir=None, availableArchs=None, splitWorlds=True):
+def findDeviceTags():
+    """Detect device tags (e.g. ["mi300a"]) for the GPUs on this machine.
+
+    TENSILE_TEST_DEVICE_TAGS (semicolon-separated) replaces detection.
+    """
+    from tensilelite.Tests.gpu_detection import get_available_device_tags
+    return get_available_device_tags()
+
+
+def findConfigs(rootDir=None, availableArchs=None, deviceTags=None, splitWorlds=True):
     """
     Walks rootDir (defaults to trying to find tensilelite/Tests) and returns a
     list of test parameters, one for each YAML file.
@@ -281,6 +300,8 @@ def findConfigs(rootDir=None, availableArchs=None, splitWorlds=True):
         rootDir: Directory to walk for YAML configs. Defaults to tensilelite/Tests.
         availableArchs: Pre-resolved list of GPU architectures.
             When None, calls findAvailableArchs() to auto-detect.
+        deviceTags: Pre-resolved list of device tags (e.g. ["mi300a"]).
+            When None, calls findDeviceTags() to auto-detect.
         splitWorlds: Return one parameter per world for a YAML whose
             problems use several worlds, each marked with that world alone.
     """
@@ -292,6 +313,8 @@ def findConfigs(rootDir=None, availableArchs=None, splitWorlds=True):
 
     if availableArchs is None:
         availableArchs = findAvailableArchs()
+    if deviceTags is None:
+        deviceTags = findDeviceTags()
     globalParamArchsStr = ';'.join(availableArchs)
     os.environ["PyTestBuildArchNames"] = globalParamArchsStr
 
@@ -312,7 +335,7 @@ def findConfigs(rootDir=None, availableArchs=None, splitWorlds=True):
             elif filename.endswith('.yaml') and "logic_yaml" not in dirpath:
                 filepath = os.path.join(rootDir, dirpath, filename)
                 if not "test_data" in filepath:
-                    marks = configMarks(filepath, rootDir, availableArchs)
+                    marks = configMarks(filepath, rootDir, availableArchs, deviceTags)
                     if marks is None:
                         # Not a TensileLite config (e.g. a library logic YAML); skip.
                         continue
