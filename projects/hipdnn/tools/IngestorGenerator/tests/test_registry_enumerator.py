@@ -169,6 +169,27 @@ def test_a_pin_lists_kernels_trace_to_the_pin_that_supplied_them(probe):
     }
 
 
+def test_base_spec_is_the_named_pins_select_spec(probe):
+    """The first pin's by default; a later pin's own, unwrapped; a pin the manifest
+    does not list is refused."""
+    probe.manifest["enumerate"]["pin"] = [
+        {"algorithm": "probe", "spec_id": "grid"},
+        {"algorithm": "persist", "spec_id": "a"},
+    ]
+    registry = re_.Registry(probe.manifest)
+    cell = registry.cells()[0]
+    later_pin, later = registry.extra_pins[0]
+    first = registry.space(cell)[0]
+    own = dataclasses.replace(first, tile_m=256)
+    later.select_spec = lambda request: _Tuned(own, "a@own")
+    later.sweep_space = lambda request: [own]
+
+    assert registry.base_spec(cell) == registry.base_spec(cell, registry.pin) == first
+    assert registry.base_spec(cell, later_pin) == own
+    with pytest.raises(re_.EnumerationError, match="not one of"):
+        registry.base_spec(cell, {"algorithm": "persist", "spec_id": "b"})
+
+
 def test_each_pin_of_a_list_must_match_one_candidate(probe, capsys):
     probe.manifest["enumerate"]["pin"] = [
         {"algorithm": "probe", "spec_id": "grid"},

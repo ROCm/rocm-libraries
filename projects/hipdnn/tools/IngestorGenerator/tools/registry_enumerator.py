@@ -594,6 +594,17 @@ class Registry:
                 specs += added
         return base, specs
 
+    def base_spec(self, cell: dict, pin: dict | None = None):
+        """The unwrapped ``select_spec`` spec for one cell under one of the manifest's
+        pins (default the first, whose base spec is the cell's default kernel)."""
+        pin = self.pin if pin is None else pin
+        pairs = [(self.pin, self.candidate), *self.extra_pins]
+        candidate = next((c for p, c in pairs if p == pin), None)
+        if candidate is None:
+            raise EnumerationError(f"{pin} is not one of the manifest's enumerate.pin.")
+        base, _, _ = self._candidate_space(cell, pin, candidate)
+        return base
+
     def _candidate_space(self, cell: dict, pin: dict, candidate) -> tuple:
         """``(base, specs, {spec: tuning_id})`` for one pinned candidate."""
         request = self.request(cell, pin)

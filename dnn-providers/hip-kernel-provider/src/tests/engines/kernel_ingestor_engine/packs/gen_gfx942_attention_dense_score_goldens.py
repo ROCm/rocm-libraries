@@ -76,14 +76,14 @@ def score_rows():
     kernels = config["packs"][0]["kernels"]
     assert len(kernels) == len(enumeration.rows)
 
-    persist = [(p, c) for p, c in registry.extra_pins if p["spec_id"] == PERSIST_PIN]
+    persist = [p for p, _ in registry.extra_pins if p["spec_id"] == PERSIST_PIN]
     assert len(persist) == 1, registry.extra_pins
     cells = registry.cells()
-    persist_base = {}
-    for index, cell in enumerate(cells):
-        if cell["hdim_q"] == 128:
-            base, _, _ = registry._candidate_space(cell, *persist[0])
-            persist_base[index] = base
+    persist_base = {
+        index: registry.base_spec(cell, persist[0])
+        for index, cell in enumerate(cells)
+        if cell["hdim_q"] == 128
+    }
 
     def cell_index(cell):
         return next(i for i, c in enumerate(cells) if c == cell)
