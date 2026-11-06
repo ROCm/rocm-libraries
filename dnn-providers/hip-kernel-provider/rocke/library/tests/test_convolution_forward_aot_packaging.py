@@ -19,6 +19,7 @@ import itertools
 import json
 import os
 import random
+from collections import OrderedDict
 from dataclasses import replace
 from pathlib import Path
 
@@ -563,6 +564,11 @@ def test_runtime_candidates_are_rockes_runtime_selection(full_sweep):
     narrowed = kept_default = 0
     for dtype, identities in full_sweep.items():
         cache = KernelCache.__new__(KernelCache)
+        # compatible() needs the in-memory state __init__ sets up; _entries is the
+        # only thing it reads through, so no disk-backed state is needed here.
+        cache._groups = {}
+        cache._compatible = OrderedDict()
+        cache._compatible_rows = 0
         cache._entries = lambda direction, ids=identities: [(i, None, {}) for i in ids]
         specs = [_spec(identity) for identity in identities]
         for values in _SELECTION_GRID:
@@ -873,11 +879,19 @@ class _PlanCache(KernelCache):
     """A cache holding every helper ``plan_for`` asks for (the split-C fold), so a
     plan is built without a cache on disk."""
 
-    def __init__(self):  # pylint: disable=super-init-not-called
-        pass
+    def __init__(self):
+        # The real __init__ touches no disk; it only sets the in-memory state
+        # (_groups, _compatible, ...) that compatible()/_groups_for() need. "unused"
+        # is never read since get()/hsaco_path() below are overridden.
+        super().__init__(root=Path("unused"), arch="gfx950")
 
     def get(self, identity):
         return Path("unused.hsaco"), {"kernel_name": "fold"}
+
+    def entry_meta(self, identity):
+        # plan_for looks up a split-C/wgrad-fold helper's entry point here rather
+        # than through get(), to build a launch plan without reading its HSACO.
+        return {"kernel_name": "fold"}
 
     def hsaco_path(self, identity):
         return Path("unused.hsaco")

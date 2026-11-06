@@ -1156,6 +1156,29 @@ inline std::optional<LaunchGeometry> nongroupedDirectLaunch(const Problem& probl
 /// conv_direct_grouped.py).
 constexpr int64_t DIRECT_WINDOWED_MFMA_CH = 8;
 
+/// Every in-range byte offset plus the windowed kernel's sentinel
+/// (DW_DGRAD_WIN_OOB_LANE / DW_DGRAD_WIN_OOB_UNIFORM, both 1<<30) must stay a valid
+/// unsigned 32-bit offset (DW_DGRAD_WIN_MAX_TENSOR_BYTES in conv_direct_grouped.py).
+constexpr int64_t DW_DGRAD_WIN_MAX_TENSOR_BYTES = (int64_t{1} << 30) - 1;
+
+/// Whether the product of @p factors is at most @p limit, computed by dividing down rather
+/// than multiplying up: the problem fields windowedDirectLaunch checks this against are
+/// untrusted and can be large enough that their product overflows int64 before it is ever
+/// compared against a ~1 GiB limit.
+inline bool fitsWithinBytes(int64_t limit, std::initializer_list<int64_t> factors)
+{
+    int64_t product = 1;
+    for(const int64_t factor : factors)
+    {
+        if(factor <= 0 || factor > limit / product)
+        {
+            return false;
+        }
+        product *= factor;
+    }
+    return true;
+}
+
 /// The windowed depthwise/grouped forward kernel (DirectDepthwiseDgradWindowedSpec with
 /// ``fwd=True``, the Toeplitz MFMA form run on the rotated filter):
 /// is_valid_depthwise_dgrad_win_spec and dw_win_fwd_problem in conv_direct_grouped.py on
@@ -1196,7 +1219,17 @@ inline std::optional<LaunchGeometry> windowedDirectLaunch(const Problem& problem
        || instance.blockWaves > DIRECT_MAX_BLOCK_WAVES
        || (instance.wFold != 1 && instance.wFold != 2 && instance.wFold != 4)
        || instance.blockH % compiled.strideH != 0 || instance.prefetchRows < 1 || geometry.ho < 1
-       || geometry.wo < 1 || problem.n > DIRECT_MAX_GRID_DIM)
+       || geometry.wo < 1
+       || problem.n > DIRECT_MAX_GRID_DIM
+       // Every in-range byte offset plus the windowed kernel's sentinel must stay a valid
+       // unsigned 32-bit offset (is_valid_depthwise_dgrad_win_spec in conv_direct_grouped.py),
+       // on both the transposed problem's dY (the forward input, Hi x Wi) and its dX (the
+       // forward output's stride-1 grid, (stride*Ho) x (stride*Wo)).
+       || !fitsWithinBytes(DW_DGRAD_WIN_MAX_TENSOR_BYTES,
+                           {2, problem.n, problem.c, problem.hi, problem.wi})
+       || !fitsWithinBytes(
+           DW_DGRAD_WIN_MAX_TENSOR_BYTES,
+           {2, problem.n, problem.c, compiled.strideH, geometry.ho, compiled.strideH, geometry.wo}))
     {
         return std::nullopt;
     }

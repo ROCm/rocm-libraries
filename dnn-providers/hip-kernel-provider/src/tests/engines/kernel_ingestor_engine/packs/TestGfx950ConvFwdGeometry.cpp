@@ -788,6 +788,46 @@ TEST(TestGfx950ConvFwdGeometry, WindowedDirectRequiresGroupsAMultipleOfTheMfmaCh
         launches(Problem{2, 16 * 3, 16 * 3, 14, 14, 3, 3, 1, 1, 1, 1, 1, 1, 3}, groupedWin));
 }
 
+TEST(TestGfx950ConvFwdGeometry, WindowedDirectRefusesSentinelAddressingOverflow)
+{
+    // The windowed kernel steers masked lanes to a sentinel byte offset 1<<30 past the real
+    // data (conv_direct_grouped.py's DW_DGRAD_WIN_OOB_LANE); a tensor whose transposed-problem
+    // dY or dX reaches that range makes the sentinel alias a real offset, so padding taps read
+    // real data and masked stores corrupt it. N=160, C=K=G=64, 256x256, stride 1, 3x3 makes
+    // both terms exactly 1,342,177,280 bytes -- well past the (1<<30)-1 bound -- and N=128
+    // crosses it by exactly one byte; N=127 stays under.
+    const DirectInstance pureDepthwiseWin{{3, 3, 1, 1, 1, 1, 1, 1},
+                                          DirectVariant::WIN,
+                                          0,
+                                          8,
+                                          12,
+                                          0,
+                                          0,
+                                          1,
+                                          1,
+                                          0,
+                                          0,
+                                          0,
+                                          0,
+                                          0,
+                                          0,
+                                          0,
+                                          0,
+                                          1,
+                                          1,
+                                          2,
+                                          2};
+    const auto launches = [](const Problem& problem, const DirectInstance& instance) {
+        const auto geometry = deriveGeometry(problem);
+        return geometry && directInstanceLaunch(problem, *geometry, instance).has_value();
+    };
+    const auto overSizedDepthwise
+        = [](int64_t n) { return Problem{n, 64, 64, 256, 256, 3, 3, 1, 1, 1, 1, 1, 1, 64}; };
+    EXPECT_FALSE(launches(overSizedDepthwise(160), pureDepthwiseWin));
+    EXPECT_FALSE(launches(overSizedDepthwise(128), pureDepthwiseWin));
+    EXPECT_TRUE(launches(overSizedDepthwise(127), pureDepthwiseWin));
+}
+
 /// One (instance, problem) case of the AOT direct variants and what
 /// gfx950_conv_fwd_aot_serves, Gfx950ConvFwdAotSpec.grid() and .block() in
 /// convolution_forward.py give for it: whether the instance serves the problem, and then

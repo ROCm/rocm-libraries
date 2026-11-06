@@ -1271,6 +1271,13 @@ private:
                             + std::to_string(selection.alignedSharedBytes) + " bytes)");
                 }
             }
+            // Only the ranked path feeds plan selection (buildSlottedPlan, predictSlotted):
+            // getMaxWorkspaceSize calls this unranked and must keep reporting the largest
+            // scratch any surviving kernel could need, not just the top-`limit` ranked ones.
+            if(ranked)
+            {
+                applyCandidateLimit(kept, settings.candidateLimit);
+            }
             if(slot == 0)
             {
                 selection.bound = std::move(catalog.bound);

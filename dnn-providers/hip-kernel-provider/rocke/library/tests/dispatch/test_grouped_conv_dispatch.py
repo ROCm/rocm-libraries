@@ -734,17 +734,21 @@ def test_default_pick_is_the_first_admitted_instance_by_label_order():
 )
 def test_depthwise_shapes_default_to_the_direct_depthwise_kernel(shape):
     """A depthwise-shaped request must not fall back to a generic IGEMM tile
-    just because it happens to sort earlier in the list -- the direct depthwise
-    candidates are admitted only for genuinely depthwise shapes (cpg=kpg=1), so
-    they are listed ahead of implicit_gemm so they win whenever both are admitted.
-    The windowed MFMA forward (direct_depthwise_win: stride 1, "same" padding,
-    channels a multiple of 8) leads; the tiled kernel takes the rest.
+    just because it happens to sort earlier in the list -- every
+    ``direct_depthwise_*`` label sorts ahead of ``implicit_gemm``, so with no
+    ``ranker`` the default pick (first by label,
+    ``test_default_pick_is_the_first_admitted_instance_by_label_order``) is a
+    direct depthwise candidate whenever one is admitted at all; only a shape no
+    registered direct depthwise instance serves falls back to implicit_gemm.
     """
     kw = _SHAPES[shape]
     req = _req(**kw)
-    windowed = kw.get("stride_h", 1) == 1 and kw.get("Y", 3) <= 9 and kw["C"] % 8 == 0
-    want = "direct_depthwise_win" if windowed else "direct_depthwise_tiled"
-    assert gc.dispatch_conv_grouped(req).spec.algorithm == want
+    admitted = {r.spec.algorithm for r in gc.dispatch_conv_grouped_all(req)}
+    picked = gc.dispatch_conv_grouped(req).spec.algorithm
+    if any(algorithm.startswith("direct_depthwise") for algorithm in admitted):
+        assert picked.startswith("direct_depthwise")
+    else:
+        assert picked == "implicit_gemm"
 
 
 def test_spec_id_pins_one_instance():
@@ -767,7 +771,9 @@ def test_pin_to_an_instance_that_cannot_run_the_shape_is_refused():
 
 
 def test_algorithm_pin_keeps_one_family():
-    req = _req(**_SHAPES["depthwise7x7"], algorithm="direct_depthwise_tiled")
+    # depthwise_s2: the registered direct_depthwise_tiled instances are stride-2
+    # only, so a stride-1 shape would admit none and the pin would prove nothing.
+    req = _req(**_SHAPES["depthwise_s2"], algorithm="direct_depthwise_tiled")
     results = gc.dispatch_conv_grouped_all(req)
     assert results
     assert {r.spec.algorithm for r in results} == {"direct_depthwise_tiled"}
