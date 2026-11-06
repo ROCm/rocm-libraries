@@ -773,10 +773,14 @@ struct fmha_bwd_launcher
     }
 
     private:
+    // What run returns when it launches nothing. A timed launch can also read slightly
+    // negative on a short kernel, so only this exact value means "skipped".
+    static constexpr float kRunSkipped = -1.0f;
+
     std::function<float(fmha_bwd_args, const ck_tile::stream_config&)> run{
         [](fmha_bwd_args, const ck_tile::stream_config&) {
             std::cerr << "fmha_bwd: no kernel found for given traits, skipping run\n";
-            return -1.0f;
+            return kRunSkipped;
         }};
     fmha_bwd_traits traits_{};
     ck_tile::index_t selected_max_seqlen_q_ = 0;
@@ -909,7 +913,7 @@ struct fmha_bwd_launcher
                 std::cerr << "fmha_bwd: deterministic d_sink needs a workspace of this "
                              "launcher's workspace_size, built from traits that cover the run "
                              "(batch, nhead_q, max_seqlen_q); skipping run\n";
-                return -1.0f;
+                return kRunSkipped;
             }
             return fmha_bwd_<T0, T1, T2, Arch>(s, a);
         };
@@ -1064,10 +1068,13 @@ struct fmha_bwd_launcher
 
                 const_cast<fmha_bwd_launcher*>(this)->prepare_workspace_async(
                     a.workspace_ptr, nullptr, nullptr, s);
+                // Every chunk has the same sizes, so a skip happens on the first one. Any other
+                // negative value is timer noise, and stopping on it would leave the remaining
+                // chunks' gradients unwritten.
                 const float t = run(c, s);
-                if(t < 0)
+                if(t == kRunSkipped)
                     return t;
-                total += t;
+                total += (t > 0.f) ? t : 0.f;
             }
         }
         return total;
