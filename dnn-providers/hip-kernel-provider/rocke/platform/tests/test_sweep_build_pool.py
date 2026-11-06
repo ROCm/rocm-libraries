@@ -43,7 +43,7 @@ def _fake_build(item):
     if spec["name"] == "suicide":
         os.kill(os.getpid(), signal.SIGKILL)
     if spec["name"] == "slow":
-        time.sleep(1.5)
+        time.sleep(0.8)
     time.sleep(0.02)
     return sw.asdict(sw.BuildRecord(name=spec["name"], spec_dict=spec, ok=True))
 
@@ -67,9 +67,16 @@ class TestSweepBuildPool(unittest.TestCase):
             sw._build_one = original
 
     def test_dead_worker_does_not_hang_the_stage(self):
+        """The stage finishes with every record, in the order of its specs.
+
+        One run checks both, since the watchdog's stall_timeout is most of its
+        time. 2 s is about a hundred times a fake build; a healthy build that
+        made no progress for that long on a loaded machine would be written
+        off, which the 7-of-8 count below would catch.
+        """
         work = _work(8, suicide_at=3)
         t0 = time.monotonic()
-        out = self._collect(work, stall_timeout=5.0)
+        out = self._collect(work, stall_timeout=2.0)
         elapsed = time.monotonic() - t0
 
         self.assertEqual(len(out), len(work), "records were lost")
@@ -81,11 +88,7 @@ class TestSweepBuildPool(unittest.TestCase):
         self.assertEqual(len(ok), 7)
         self.assertEqual(len(bad), 1)
         self.assertIn("no result", bad[0]["error"])
-
-    def test_order_is_preserved_across_a_dead_worker(self):
-        """Results must stay aligned with the specs that produced them."""
-        work = _work(8, suicide_at=3)
-        out = self._collect(work, stall_timeout=5.0)
+        # Results stay aligned with the specs that produced them.
         self.assertEqual(out[3]["name"], "suicide")
         self.assertFalse(out[3]["ok"])
         for i in (0, 1, 2, 4, 5, 6, 7):
@@ -109,7 +112,7 @@ class TestSweepBuildPool(unittest.TestCase):
         slow = (work[2][0], {"name": "slow", "tile": {}}, *work[2][2:])
         work[2] = slow
         # With a watchdog shorter than the build, the slow build is lost ...
-        out = self._collect(work, stall_timeout=0.3)
+        out = self._collect(work, stall_timeout=0.2)
         self.assertFalse(out[2]["ok"])
         # ... and without one it completes.
         out = self._collect(work, stall_timeout=None)

@@ -254,6 +254,10 @@ class TestInertSweepDetection(unittest.TestCase):
         """Backend-level inertness: the IR differs, the machine code does not."""
         m = _sweep()
         cfg, fin = self._big_finalists()
+        # Two values are a comparison; each extra one is one more COMGR compile.
+        # null and 4 are the pair that compiles to the same code on this tile
+        # (1 and 2 change the register budget).
+        m.apply_set_overrides(cfg, ["traits.waves_per_eu=[null,4]"])
         warns = self._warnings_for(m, cfg, fin, "waves_per_eu")
         self.assertTrue(warns, "waves_per_eu is a no-op where LDS pins occupancy")
         self.assertIn("SAME kernel", warns[0])
@@ -291,6 +295,8 @@ class TestInertSweepDetection(unittest.TestCase):
         """Guards against a detector that simply warns about everything."""
         m = _sweep()
         cfg, fin = self._big_finalists()
+        # Two values are a comparison; each extra one is one more COMGR compile.
+        m.apply_set_overrides(cfg, ["traits.lds_k_pad=[16,48]"])
         warns = self._warnings_for(m, cfg, fin, "lds_k_pad")
         self.assertEqual(warns, [], "lds_k_pad changes the kernel; it is live")
 
