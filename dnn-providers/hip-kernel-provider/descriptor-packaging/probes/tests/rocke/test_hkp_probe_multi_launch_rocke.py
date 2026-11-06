@@ -67,14 +67,16 @@ def test_the_probe_expects_every_launch_and_the_pack_meets_it(
 
 
 def test_the_probe_derives_every_slot_pack_and_the_pack_meets_it(
-    tmp_path, rocm_kpack_dir, hipcc, comgr_lib
+    tmp_path, rocm_kpack_dir, hip_compiler, hip_path, device_lib_path, comgr_lib
 ):
     out, expect = derive_and_pack(
         SLOTTED_MULTI_LAUNCH_FIXTURE,
         tmp_path,
         rocm_kpack_dir,
-        hipcc,
+        hip_compiler,
         comgr_lib,
+        hip_path=hip_path,
+        device_lib_path=device_lib_path,
         rocke=True,
         arch=ARCH,
     )
