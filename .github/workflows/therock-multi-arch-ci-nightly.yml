@@ -115,7 +115,7 @@ jobs:
 #    # Run once linux_build_and_test finishes regardless of pass/fail (tests can
 #    # fail), but skip if that job was skipped or the run was cancelled.
 #    if: ${{ !cancelled() && needs.linux_build_and_test.result != 'skipped' }}
-	needs: [setup]
+    needs: [setup]
     uses: ROCm/TheRock/.github/workflows/multi_arch_ci_coverage_linux.yml@users/jainprad/codecoverage-workflows-therock
     secrets: inherit
     with:
