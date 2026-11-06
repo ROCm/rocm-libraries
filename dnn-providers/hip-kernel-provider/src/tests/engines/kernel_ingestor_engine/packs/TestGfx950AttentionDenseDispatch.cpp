@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <cstring>
 #include <exception>
+#include <filesystem>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -26,6 +27,8 @@
 #include <hipdnn_plugin_sdk/ingestor/KernelDefinition.hpp>
 #include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
 #include <hipdnn_plugin_sdk/ingestor/NativeHooks.hpp>
+#include <hipdnn_test_sdk/utilities/FileUtilities.hpp>
+#include <hipdnn_test_sdk/utilities/ScratchDirectory.hpp>
 
 #include "core/Handle.hpp"
 #include "engines/kernel_ingestor_engine/KernelIngestorEngine.hpp"
@@ -64,9 +67,13 @@ using hipdnn_plugin_sdk::ingestor::KernelDefinition;
 using hipdnn_plugin_sdk::ingestor::KernelSourceKind;
 using hipdnn_plugin_sdk::ingestor::MatchContext;
 using hipdnn_plugin_sdk::ingestor::tryGetBoundInt;
+using hipdnn_test_sdk::utilities::claimScratchDirectory;
+using hipdnn_test_sdk::utilities::ScopedDirectory;
 
 constexpr std::string_view GRAPH_MATCHER_SYMBOL = "hipkernel.gfx950_attention_dense.graph_match";
 constexpr std::string_view DISPATCH_SYMBOL = "hipkernel.gfx950_attention_dense.dispatch";
+
+constexpr const char* SCRATCH_LABEL = "gfx950attentiondensedispatch";
 
 // ---------------------------------------------------------------------------
 // The token names, restated
@@ -309,6 +316,19 @@ std::vector<KernelArgument> recordedSignature()
             KernelArgument{"by_value", SCALAR_BYTES, 0, "num_kv_heads"}};
 }
 
+/// The descriptor tree every kernel below is loaded from: an empty directory this binary
+/// owns, removed at exit. The cases only read it, so they share one.
+///
+/// Owned rather than a fixed path such as /nonexistent, whose state is the host's: where
+/// it exists and cannot be searched, the containment check refuses it before the loader
+/// runs, and the positive control below fails for a reason that has nothing to do with
+/// the pack.
+const std::filesystem::path& descriptorTree()
+{
+    static const ScopedDirectory s_tree = claimScratchDirectory(SCRATCH_LABEL);
+    return s_tree.path();
+}
+
 /// A KPACK descriptor for this engine naming an archive that is not there, carrying the
 /// completed metadata prepare() reads: head_size and the (block_m, block_n) tile.
 ///
@@ -330,8 +350,8 @@ KernelDefinition makeKernel(int64_t blockM = 256, int64_t blockN = 64)
     kernel.source.tocKey = "toc#0";
     kernel.source.symbol = "attention_dense";
     kernel.source.signature = recordedSignature();
-    kernel.originDirectory = "/nonexistent";
-    kernel.treeRoot = "/nonexistent";
+    kernel.originDirectory = descriptorTree();
+    kernel.treeRoot = descriptorTree();
     kernel.metadata = {
         {std::string("head_size"), HEAD_SIZE},
         {std::string("block_m"), blockM},
