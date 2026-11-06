@@ -1622,9 +1622,9 @@ namespace TensileLite::Client::hostnumerics
     std::variant<GemmInvocationAdapter, TranslationFailure>
         translateGemmInvocation(ContractionProblemGemm const& problem,
                                 ContractionInputs const&      inputs,
-                                size_t                        elementsToValidate)
+                                ReferenceElements             elements)
     {
-        auto selection = getReferenceIndexRange(problem.d(), elementsToValidate);
+        auto selection = getReferenceIndexRange(problem.d(), elements);
         if(!selection)
             return detail::failure(TranslationFailureCode::InvalidDescriptor,
                                    std::string(message(selection.error())));

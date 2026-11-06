@@ -7,6 +7,7 @@
 // product-independent HostNumerics operations.
 
 #include <Tensile/ContractionProblem.hpp>
+#include <TensileLite/Client/hostnumerics/ReferenceElements.hpp>
 
 #include <roc/hostnumerics/epilogue.hpp>
 #include <roc/hostnumerics/freivalds.hpp>
@@ -230,5 +231,5 @@ namespace TensileLite::Client::hostnumerics
     std::variant<GemmInvocationAdapter, TranslationFailure>
         translateGemmInvocation(ContractionProblemGemm const& problem,
                                 ContractionInputs const&      inputs,
-                                size_t                        elementsToValidate);
+                                ReferenceElements             elements);
 } // namespace TensileLite::Client::hostnumerics

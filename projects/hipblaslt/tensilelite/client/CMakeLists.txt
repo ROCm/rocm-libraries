@@ -114,6 +114,7 @@ target_sources(tensilelite-hostnumerics-adapter
         "${CMAKE_CURRENT_SOURCE_DIR}/include/TensileLite/Client/hostnumerics/GemmInvocationAdapter.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/include/TensileLite/Client/hostnumerics/HostNumericsBridge.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/include/TensileLite/Client/hostnumerics/Reference.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/include/TensileLite/Client/hostnumerics/ReferenceElements.hpp"
 )
 
 target_include_directories(tensilelite-hostnumerics-adapter

@@ -76,11 +76,11 @@ namespace TensileLite
 
         void executeReferenceGemm(ContractionProblemGemm const&  problem,
                                   ContractionInputs const&       inputs,
-                                  size_t                         elementsToValidate,
+                                  ReferenceElements              elements,
                                   roc::hostnumerics::GemmBackend backend)
         {
             executeReferenceGemm(
-                problem, inputs, referenceIndexRange(problem.d(), elementsToValidate), backend);
+                problem, inputs, referenceIndexRange(problem.d(), elements), backend);
         }
 
         void SolveGemmCPU(ContractionProblemGemm const& problem,
@@ -96,9 +96,9 @@ namespace TensileLite
 
         void SolveGemmCPU(ContractionProblemGemm const& problem,
                           ContractionInputs const&      inputs,
-                          size_t                        elementsToValidate)
+                          ReferenceElements             elements)
         {
-            SolveGemmCPU(problem, inputs, referenceIndexRange(problem.d(), elementsToValidate));
+            SolveGemmCPU(problem, inputs, referenceIndexRange(problem.d(), elements));
         }
 
         void SolveCPU(ContractionProblem const*                      problem,
