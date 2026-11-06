@@ -115,18 +115,27 @@ def cross_check(
     }
 
 
-def main() -> None:
-    """Audit reference agreement without a baseline GPU run or bundle promotion."""
-    from .architectures import ARCHITECTURES, get_architecture
+def main(argv: list[str] | None = None) -> None:
+    """Audit one variant's cases without a baseline GPU run or bundle promotion."""
+    from .architectures import ARCHITECTURES, get_adapter, resolve_variant
 
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--arch", choices=ARCHITECTURES, required=True)
+    parser.add_argument(
+        "--variant",
+        help="enrolled variant of the architecture (default: its only variant; "
+        "required when it has several)",
+    )
     parser.add_argument("--device", choices=("cpu", "cuda"), default="cpu")
     parser.add_argument("--output", type=Path, required=True)
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
+    try:
+        variant = resolve_variant(args.arch, args.variant)
+    except ValueError as error:
+        parser.error(f"argument --variant: {error}")
     validate_device(args.device, args.arch)
     results = {}
-    for case in get_architecture(args.arch).CASES:
+    for case in get_adapter(args.arch, variant).CASES:
         inputs = make_inputs(case)
         results[case.id] = {
             "input_digests": {
@@ -141,6 +150,7 @@ def main() -> None:
         {
             "scope": "reference-agreement-only",
             "architecture": args.arch,
+            "variant": variant,
             "cases": results,
         },
     )
