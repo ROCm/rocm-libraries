@@ -41,22 +41,22 @@ class GemmMxOracleTests(unittest.TestCase):  # noqa: F405
         # E8M0 stores powers of two as exponent+bias, with bias 127.
         scale_a = hv.Tensor.from_storage(
             hv.ScalarType.E8M0,
-            list(scale_a_values.shape),
+            hv.Layout.contiguous_last_dimension_fastest(
+                hv.Shape(list(scale_a_values.shape))
+            ),
             bytes([126, 128, 127, 129, 127, 126, 129, 128]),
-            strides=None,
-            offset=0,
         )
         scale_b = hv.Tensor.from_storage(
             hv.ScalarType.E8M0,
-            list(scale_b_values.shape),
+            hv.Layout.contiguous_last_dimension_fastest(
+                hv.Shape(list(scale_b_values.shape))
+            ),
             bytes([128, 127, 126, 127, 129, 128, 126, 128, 129]),
-            strides=None,
-            offset=0,
         )
         selected = [0, 4, 5]
 
-        operand_a = hv.from_numpy(left, hv.ScalarType.Float4E2M1)
-        operand_b = hv.from_numpy(right, hv.ScalarType.Float4E2M1)
+        operand_a = hv.from_numpy_converted(left, hv.ScalarType.Float4E2M1)
+        operand_b = hv.from_numpy_converted(right, hv.ScalarType.Float4E2M1)
         output = hv.Tensor(hv.ScalarType.Float32, hv.Shape([2, 3]))
         result = reference_gemm_into(
             operand_a,
@@ -85,7 +85,7 @@ class GemmMxOracleTests(unittest.TestCase):  # noqa: F405
         )
         expected = np.zeros_like(expected_complete)
         expected.reshape(-1)[selected] = expected_complete.reshape(-1)[selected]
-        np.testing.assert_array_equal(hv.to_numpy(output, dtype=None), expected)
+        np.testing.assert_array_equal(hv.to_numpy(output), expected)
         self.assertIsNone(result)
 
     def test_mxfp4_scale_is_applied_after_the_complete_segment(self):
@@ -95,16 +95,14 @@ class GemmMxOracleTests(unittest.TestCase):  # noqa: F405
         right[reductions // 2 :] = -1.0
         scale_a = hv.Tensor.from_storage(
             hv.ScalarType.E8M0,
-            [1, 1],
-            bytes([254]),  # 2**127: scaling either half separately overflows float32.
-            strides=None,
-            offset=0,
+            hv.Layout.contiguous_last_dimension_fastest(hv.Shape([1, 1])),
+            bytes([254]),
         )
         output = hv.Tensor(hv.ScalarType.Float32, hv.Shape([1, 1]))
 
         result = reference_gemm_into(
-            hv.from_numpy(left, hv.ScalarType.Float4E2M1),
-            hv.from_numpy(right, hv.ScalarType.Float4E2M1),
+            hv.from_numpy_converted(left, hv.ScalarType.Float4E2M1),
+            hv.from_numpy_converted(right, hv.ScalarType.Float4E2M1),
             hv.Tensor(hv.ScalarType.Float32, hv.Shape([1, 1])),
             output,
             accumulator_type=hv.ScalarType.Float32,
@@ -123,9 +121,9 @@ class GemmMxOracleTests(unittest.TestCase):  # noqa: F405
             conjugate_b=False,
         )
 
-        self.assertTrue(np.isfinite(hv.to_numpy(output, dtype=None)[0, 0]))
+        self.assertTrue(np.isfinite(hv.to_numpy(output)[0, 0]))
         np.testing.assert_array_equal(
-            hv.to_numpy(output, dtype=None), np.zeros((1, 1), dtype=np.float32)
+            hv.to_numpy(output), np.zeros((1, 1), dtype=np.float32)
         )
         self.assertIsNone(result)
 
@@ -158,7 +156,7 @@ class GemmMxOracleTests(unittest.TestCase):  # noqa: F405
             output_layout=None,
         )
         np.testing.assert_array_equal(
-            hv.to_numpy(only_a, dtype=None),
+            hv.to_numpy(only_a),
             np.asarray([[10.0, 10.0], [18.0, 18.0]], dtype=np.float32),
         )
 
@@ -184,6 +182,6 @@ class GemmMxOracleTests(unittest.TestCase):  # noqa: F405
             output_layout=None,
         )
         np.testing.assert_array_equal(
-            hv.to_numpy(only_b, dtype=None),
+            hv.to_numpy(only_b),
             np.asarray([[10.0, 18.0], [10.0, 18.0]], dtype=np.float32),
         )

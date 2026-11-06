@@ -27,11 +27,11 @@ class ComparisonCoreTests(unittest.TestCase):  # noqa: F405
             dtype=np.float32,
         ).reshape((2, 3), order="C")
         np.testing.assert_array_equal(
-            hv.to_numpy(first, dtype=None),
+            hv.to_numpy(first),
             expected,
         )
 
-        changed_values = hv.to_numpy(second, dtype=None).copy()
+        changed_values = hv.to_numpy(second).copy()
         changed_values[1, 2] += 1
         changed = hv.from_numpy(changed_values)
         options = hv.ComparisonOptions()
@@ -160,10 +160,8 @@ class ComparisonCoreTests(unittest.TestCase):  # noqa: F405
         sentinel_values = np.full(5, np.inf, dtype=np.float32)
         sentinel = hv.Tensor.from_storage(
             hv.ScalarType.Float32,
-            [2, 2],
+            hv.Layout(hv.Shape([2, 2]), [1, 3], 0),
             sentinel_values.tobytes(),
-            strides=[1, 3],
-            offset=0,
         )
         self.assertTrue(
             hv.check_unused_tensor_storage(
@@ -176,10 +174,8 @@ class ComparisonCoreTests(unittest.TestCase):  # noqa: F405
         sentinel_values[2] = 0.0
         sentinel = hv.Tensor.from_storage(
             hv.ScalarType.Float32,
-            [2, 2],
+            hv.Layout(hv.Shape([2, 2]), [1, 3], 0),
             sentinel_values.tobytes(),
-            strides=[1, 3],
-            offset=0,
         )
         sentinel_report = hv.check_unused_tensor_storage(
             sentinel,

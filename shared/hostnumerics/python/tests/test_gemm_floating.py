@@ -27,7 +27,6 @@ class GemmFloatingTests(unittest.TestCase):  # noqa: F405
                     output_layout=None,
                     backend=hv.GemmBackend.Automatic,
                 ),
-                dtype=None,
             ),
             a_values @ b_values,
         )
@@ -50,9 +49,7 @@ class GemmFloatingTests(unittest.TestCase):  # noqa: F405
                 backend=hv.GemmBackend.Automatic,
             )
         )
-        np.testing.assert_array_equal(
-            hv.to_numpy(output, dtype=None), a_values @ b_values
-        )
+        np.testing.assert_array_equal(hv.to_numpy(output), a_values @ b_values)
 
         empty_a = hv.from_numpy(np.empty((2, 0), dtype=np.float32))
         empty_b = hv.from_numpy(np.empty((0, 3), dtype=np.float32))
@@ -72,7 +69,7 @@ class GemmFloatingTests(unittest.TestCase):  # noqa: F405
         )
         self.assertEqual(empty_product.shape, [2, 3])
         np.testing.assert_array_equal(
-            hv.to_numpy(empty_product, dtype=None), np.zeros((2, 3), dtype=np.float32)
+            hv.to_numpy(empty_product), np.zeros((2, 3), dtype=np.float32)
         )
 
     def test_float32_gemm_matches_numpy(self):
@@ -100,7 +97,7 @@ class GemmFloatingTests(unittest.TestCase):  # noqa: F405
             output_layout=None,
         )
         expected = 2.0 * (a @ b) - c
-        np.testing.assert_array_equal(hv.to_numpy(observed, dtype=None), expected)
+        np.testing.assert_array_equal(hv.to_numpy(observed), expected)
         blocked = reference_gemm(
             hv.from_numpy(a),
             hv.from_numpy(b),
@@ -121,7 +118,7 @@ class GemmFloatingTests(unittest.TestCase):  # noqa: F405
             conjugate_b=False,
             output_layout=None,
         )
-        np.testing.assert_array_equal(hv.to_numpy(blocked, dtype=None), expected)
+        np.testing.assert_array_equal(hv.to_numpy(blocked), expected)
 
     def test_zero_gemm_scalars_suppress_non_finite_operands(self):
         finite_c = np.asarray([[1.0, 2.0], [3.0, 4.0]], dtype=np.float32)
@@ -147,9 +144,7 @@ class GemmFloatingTests(unittest.TestCase):  # noqa: F405
             conjugate_b=False,
             output_layout=None,
         )
-        np.testing.assert_array_equal(
-            hv.to_numpy(alpha_zero, dtype=None), 2.0 * finite_c
-        )
+        np.testing.assert_array_equal(hv.to_numpy(alpha_zero), 2.0 * finite_c)
 
         beta_zero = reference_gemm(
             hv.from_numpy(finite_a),
@@ -171,9 +166,7 @@ class GemmFloatingTests(unittest.TestCase):  # noqa: F405
             conjugate_b=False,
             output_layout=None,
         )
-        np.testing.assert_array_equal(
-            hv.to_numpy(beta_zero, dtype=None), finite_a @ finite_b
-        )
+        np.testing.assert_array_equal(hv.to_numpy(beta_zero), finite_a @ finite_b)
 
     def test_gemm_finalization_matches_numpy(self):
         a = np.asarray([[1.0, -2.0], [3.0, 4.0]], dtype=np.float32)
@@ -231,7 +224,7 @@ class GemmFloatingTests(unittest.TestCase):  # noqa: F405
             indices=hv.IndexRange.all(c.size),
             index_order=hv.LastDimensionFastest(),
         ).output
-        np.testing.assert_array_equal(hv.to_numpy(observed, dtype=None), expected)
+        np.testing.assert_array_equal(hv.to_numpy(observed), expected)
 
     def test_float64_gemm_matches_numpy(self):
         a = np.asarray([[0.25, -1.5], [2.0, 3.25]], dtype=np.float64)
@@ -259,7 +252,7 @@ class GemmFloatingTests(unittest.TestCase):  # noqa: F405
         )
         expected = 1.25 * (a @ b) + 0.5 * c
         np.testing.assert_allclose(
-            hv.to_numpy(observed, dtype=None), expected, rtol=1e-15, atol=0.0
+            hv.to_numpy(observed), expected, rtol=1e-15, atol=0.0
         )
 
     def test_complex_gemm_matches_numpy(self):
@@ -293,5 +286,5 @@ class GemmFloatingTests(unittest.TestCase):  # noqa: F405
         )
         expected = alpha * (a @ b) + beta * c
         np.testing.assert_allclose(
-            hv.to_numpy(observed, dtype=None), expected, rtol=1e-6, atol=1e-6
+            hv.to_numpy(observed), expected, rtol=1e-6, atol=1e-6
         )

@@ -18,16 +18,16 @@ class SymmetricComparisonOracleTests(unittest.TestCase):
             else np.float32
         )
         for name, a, b, passed in cases:
-            observed = hv.from_numpy(np.asarray([a]), scalar_type)
-            expected = hv.from_numpy(np.asarray([b]), scalar_type)
+            observed = hv.from_numpy_converted(np.asarray([a]), scalar_type)
+            expected = hv.from_numpy_converted(np.asarray([b]), scalar_type)
             decoded_dtype = (
                 np.complex128
                 if scalar_type
                 in (hv.ScalarType.ComplexFloat32, hv.ScalarType.ComplexFloat64)
                 else np.float64
             )
-            decoded_a = hv.to_numpy(observed, decoded_dtype)[0]
-            decoded_b = hv.to_numpy(expected, decoded_dtype)[0]
+            decoded_a = hv.to_numpy_as(observed, decoded_dtype)[0]
+            decoded_b = hv.to_numpy_as(expected, decoded_dtype)[0]
 
             def component_close(x, y):
                 x, y, tol = precision(x), precision(y), precision(tolerance)

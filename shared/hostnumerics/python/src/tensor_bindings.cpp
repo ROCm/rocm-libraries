@@ -279,16 +279,13 @@ size_t checkedStorageBytes(size_t elementCount, size_t itemSize) {
     return elementCount * itemSize;
 }
 
-Tensor tensorFromNumpy(nb::object array, std::optional<ScalarType> requestedType) {
+Tensor tensorFromNumpy(nb::object array) {
     const nb::object numpyArrayType = nb::module_::import_("numpy").attr("ndarray");
     if (!nb::isinstance(array, numpyArrayType))
         throw nb::type_error("Tensor.from_numpy requires a NumPy ndarray.");
 
     const NumpyStorageType storageType = numpyStorageType(array);
-    if (requestedType && *requestedType != storageType.type)
-        throw std::runtime_error(
-            "Tensor.from_numpy scalar_type must exactly match the NumPy storage dtype.");
-    const ScalarType type = requestedType.value_or(storageType.type);
+    const ScalarType type = storageType.type;
 
     const ReadOnlyPythonBuffer buffer(array);
     const Py_buffer& view = buffer.view();
@@ -357,17 +354,9 @@ Tensor tensorFromNumpy(nb::object array, std::optional<ScalarType> requestedType
                                    storageBytes));
 }
 
-Tensor tensorFromStorage(ScalarType type, std::vector<size_t> dimensions, nb::bytes rawStorage,
-                         std::optional<std::vector<ptrdiff_t>> tensorStrides, ptrdiff_t offset) {
+Tensor tensorFromStorage(ScalarType type, Layout layout, nb::bytes rawStorage) {
     std::vector<std::byte> storage(rawStorage.size());
     if (!storage.empty()) std::memcpy(storage.data(), rawStorage.c_str(), rawStorage.size());
-    Shape shape(std::move(dimensions));
-    Layout layout = Layout::contiguousLastDimensionFastest(shape);
-    if (tensorStrides || offset != 0) {
-        std::vector<ptrdiff_t> selectedStrides =
-            tensorStrides ? std::move(*tensorStrides) : strides(layout);
-        layout = Layout(std::move(shape), std::move(selectedStrides), offset);
-    }
     return Tensor::takeOwnershipOfEncodedBackingStorage(type, std::move(layout),
                                                         std::move(storage));
 }
@@ -382,7 +371,7 @@ Tensor scalarFromPython(nb::handle value) {
         return tensor.deepCopy();
     }
     nb::object array = nb::module_::import_("numpy").attr("asarray")(value);
-    Tensor tensor = tensorFromNumpy(std::move(array), std::nullopt);
+    Tensor tensor = tensorFromNumpy(std::move(array));
     (void)tensor.item<std::complex<double>>();
     return tensor;
 }
@@ -398,8 +387,7 @@ void registerTensorBindings(nb::module_& module) {
     nb::class_<Tensor>(module, "Tensor")
         .def(nb::init<ScalarType, Shape>())
         .def(nb::init<ScalarType, Layout>())
-        .def_static("from_numpy", &tensorFromNumpy, "array"_a,
-                    "scalar_type"_a = std::optional<ScalarType>{})
+        .def_static("from_numpy", &tensorFromNumpy, "array"_a)
         .def_static(
             "from_values",
             [](ScalarType type, std::vector<size_t> shape, const std::vector<double>& values) {
@@ -425,8 +413,7 @@ void registerTensorBindings(nb::module_& module) {
                             type, Shape(std::move(shape)),
                             std::span<const std::complex<double>>(values));
                     })
-        .def_static("from_storage", &tensorFromStorage, "type"_a, "shape"_a, "storage"_a,
-                    "strides"_a, "offset"_a)
+        .def_static("from_storage", &tensorFromStorage, "type"_a, "layout"_a, "storage"_a)
         .def_prop_ro("type", &Tensor::type)
         .def_prop_ro("shape", [](const Tensor& tensor) { return dimensions(tensor.shape()); })
         .def_prop_ro("strides", [](const Tensor& tensor) { return strides(tensor.layout()); })

@@ -76,18 +76,26 @@ def default_decoded_dtype(scalar_type) -> np.dtype:
         ) from error
 
 
-def from_numpy(array: np.ndarray, scalar_type=None):
-    """Create an owning HostNumerics tensor by quantizing NumPy values."""
+def from_numpy(array: np.ndarray):
+    """Create an owning tensor whose ScalarType matches the NumPy dtype exactly.
+
+    Use from_numpy_converted to store the values in a different ScalarType.
+    """
 
     values = np.asarray(array)
-    if scalar_type is None:
-        try:
-            scalar_type = _SCALAR_TYPES_FROM_NUMPY[values.dtype]
-        except KeyError as error:
-            raise RuntimeError(
-                f"NumPy dtype {values.dtype} has no automatic ScalarType mapping"
-            ) from error
+    try:
+        scalar_type = _SCALAR_TYPES_FROM_NUMPY[values.dtype]
+    except KeyError as error:
+        raise RuntimeError(
+            f"NumPy dtype {values.dtype} has no exact ScalarType; use from_numpy_converted"
+        ) from error
+    return from_numpy_converted(values, scalar_type)
 
+
+def from_numpy_converted(array: np.ndarray, scalar_type):
+    """Create an owning tensor of scalar_type by converting NumPy values."""
+
+    values = np.asarray(array)
     flat = values.reshape(-1)
     shape = list(values.shape)
     if np.issubdtype(values.dtype, np.complexfloating):
@@ -107,15 +115,19 @@ def from_numpy(array: np.ndarray, scalar_type=None):
     )
 
 
-def to_numpy(tensor, dtype) -> np.ndarray:
-    """Decode tensor values into an owning NumPy array.
+def to_numpy(tensor) -> np.ndarray:
+    """Decode tensor values into an owning array of default_decoded_dtype(tensor.type)."""
+
+    return to_numpy_as(tensor, default_decoded_dtype(tensor.type))
+
+
+def to_numpy_as(tensor, dtype) -> np.ndarray:
+    """Decode tensor values into an owning NumPy array of dtype.
 
     dtype selects the decoded output container. It does not reinterpret the
     encoded bytes exposed by tensor.storage.
     """
 
-    if dtype is None:
-        dtype = default_decoded_dtype(tensor.type)
     return np.asarray(tensor.values, dtype=dtype).reshape(tensor.shape)
 
 

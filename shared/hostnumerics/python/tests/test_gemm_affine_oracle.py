@@ -35,9 +35,7 @@ class GemmAffineOracleTests(unittest.TestCase):  # noqa: F405
                     output_layout=None,
                 )
                 self.assertEqual(observed.shape, [rows, columns])
-                np.testing.assert_array_equal(
-                    hv.to_numpy(observed, dtype=None), expected
-                )
+                np.testing.assert_array_equal(hv.to_numpy(observed), expected)
 
     def test_selected_affine_reduced_precision_accumulation_rounds_each_step(self):
         left = np.asarray(
@@ -93,9 +91,7 @@ class GemmAffineOracleTests(unittest.TestCase):  # noqa: F405
 
                 self.assertEqual(observed.strides, [7, 2])
                 self.assertEqual(observed.offset, 1)
-                np.testing.assert_array_equal(
-                    hv.to_numpy(observed, dtype=None), expected
-                )
+                np.testing.assert_array_equal(hv.to_numpy(observed), expected)
 
     def test_selected_affine_zero_coefficients_suppress_poisoned_inputs(self):
         selected = [0, 3]
@@ -139,7 +135,7 @@ class GemmAffineOracleTests(unittest.TestCase):  # noqa: F405
             conjugate_b=False,
         )
         np.testing.assert_array_equal(
-            hv.to_numpy(alpha_zero, dtype=None),
+            hv.to_numpy(alpha_zero),
             selected_values(2.0 * finite_initial, selected),
         )
 
@@ -169,7 +165,7 @@ class GemmAffineOracleTests(unittest.TestCase):  # noqa: F405
             conjugate_b=False,
         )
         np.testing.assert_array_equal(
-            hv.to_numpy(beta_zero, dtype=None),
+            hv.to_numpy(beta_zero),
             selected_values(finite_left @ finite_right, selected),
         )
 
@@ -206,7 +202,7 @@ class GemmAffineOracleTests(unittest.TestCase):  # noqa: F405
         )
         expected = np.float32(0.75) * (left @ right) + np.float32(-0.25) * initial
         np.testing.assert_allclose(
-            hv.to_numpy(observed, dtype=None), expected, rtol=1e-6, atol=1e-6
+            hv.to_numpy(observed), expected, rtol=1e-6, atol=1e-6
         )
 
     def test_selected_int32_outputs_wrap_in_affine_storage(self):
@@ -255,7 +251,7 @@ class GemmAffineOracleTests(unittest.TestCase):  # noqa: F405
         )
         expected = np.zeros_like(complete_expected)
         expected.reshape(-1)[selected] = complete_expected.reshape(-1)[selected]
-        np.testing.assert_array_equal(hv.to_numpy(output, dtype=None), expected)
+        np.testing.assert_array_equal(hv.to_numpy(output), expected)
 
         expected_storage = np.zeros(11, dtype=np.int32)
         expected_storage[[3, 8]] = complete_expected.reshape(-1)[selected]

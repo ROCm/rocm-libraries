@@ -195,7 +195,7 @@ def unpack_little_endian(storage, count, bits_per_value):
 
 
 def encode_codes(format_spec, values):
-    tensor = hv.from_numpy(
+    tensor = hv.from_numpy_converted(
         np.asarray(values, dtype=np.float32), format_spec.scalar_type
     )
     storage = tensor.storage
@@ -236,7 +236,7 @@ class ScalarEncodingOracleTests(unittest.TestCase):
         # exponent code, which also represents 2**-127.
         minimum = np.float32(math.ldexp(1.0, -127))
         next_value = np.float32(math.ldexp(1.0, -126))
-        tensor = hv.from_numpy(
+        tensor = hv.from_numpy_converted(
             np.asarray([0.0, -0.0, minimum, next_value], dtype=np.float32),
             hv.ScalarType.E8M0,
         )
@@ -293,7 +293,7 @@ class ScalarEncodingOracleTests(unittest.TestCase):
                     lower_raw + 1,
                 ]
             )
-        encoded = hv.from_numpy(
+        encoded = hv.from_numpy_converted(
             np.asarray(values, dtype=np.float32), hv.ScalarType.E8M0
         )
         self.assertEqual(encoded.storage, bytes(expected))
@@ -358,7 +358,7 @@ class ScalarEncodingOracleTests(unittest.TestCase):
                             with self.assertRaises(RuntimeError):
                                 encode_codes(format_spec, [invalid])
 
-        e8m0 = hv.from_numpy(
+        e8m0 = hv.from_numpy_converted(
             np.asarray(
                 [
                     math.ldexp(1.0, 127),
@@ -375,7 +375,7 @@ class ScalarEncodingOracleTests(unittest.TestCase):
         for invalid in (-1.0, -np.inf):
             with self.subTest(format="e8m0", invalid=invalid):
                 with self.assertRaises(RuntimeError):
-                    hv.from_numpy(
+                    hv.from_numpy_converted(
                         np.asarray([invalid], dtype=np.float32),
                         hv.ScalarType.E8M0,
                     )
@@ -400,7 +400,7 @@ class ScalarEncodingOracleTests(unittest.TestCase):
             values = np.asarray(
                 [finite_value(format_spec, raw) for raw in codes], dtype=np.float32
             )
-            observed = hv.from_numpy(values, format_spec.scalar_type)
+            observed = hv.from_numpy_converted(values, format_spec.scalar_type)
             with self.subTest(format=format_spec.name):
                 self.assertEqual(
                     observed.storage,

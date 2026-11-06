@@ -82,10 +82,8 @@ def affine_tensor(values, scalar_type, strides, offset):
         storage[storage_index] = values[coordinates]
     return hv.Tensor.from_storage(
         scalar_type,
-        list(values.shape),
+        hv.Layout(hv.Shape(list(values.shape)), list(strides), offset),
         storage.tobytes(),
-        strides=list(strides),
-        offset=offset,
     )
 
 

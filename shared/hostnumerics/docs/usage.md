@@ -237,10 +237,11 @@ of the tensor and reference-operation layers.
 Numerical operations require explicit arithmetic types, traversal axes,
 comparison tolerances, generation seeds, execution policies, and selection or
 reporting limits. C++ callers pass option objects; Python callers supply the
-corresponding arguments. Optional input tensors can be omitted, and NumPy
-imports infer the storage type from the array dtype.
-`to_numpy` requires a dtype argument; passing `None` selects the decoded mapping
-returned by `default_decoded_dtype`.
+corresponding arguments. Optional input tensors can be omitted.
+`from_numpy` stores values in the ScalarType that matches the array dtype
+exactly; `from_numpy_converted` converts them to a named ScalarType.
+`to_numpy` decodes into the dtype returned by `default_decoded_dtype`;
+`to_numpy_as` decodes into a named dtype.
 
 Shape defines an ordered set of coordinates to visit from either an IndexRange or an explicit sequence of flat indices, with an axis order passed separately as a Permutation. A Permutation lists every axis once, from slowest to fastest; its constructors validate the entries and are explicit, so a list of indices or extents is never accepted as an order. `Permutation::identity(rank)` makes the last axis fastest and `Permutation::reverse(rank)` the first. IndexRange requires a start, exclusive stop and nonzero stride, in that order; `IndexRange::all(stop)` supplies the contiguous range `[0, stop)`. A range whose stop exceeds the shape's element count is rejected, as is an explicit index outside the shape. Explicit indices are visited in the order given, including repeats. Shape checks the order's rank and every bound before traversal, even for empty work. Range traversal streams coordinates without materializing an index list. Layout converts coordinates to storage offsets.
 
