@@ -90,7 +90,7 @@ __global__ void emboss_3x3_pkd_tensor(T* srcPtr, uint2 srcStridesNH, T* dstPtr, 
     else {
         // Nearest-neighbor padding
         for (int i = 0; i < 8; i++) {
-            int clampedX = max(roiBeginX, min(id_x_i + i, (roiBeginX + roiWidth - 1)));
+            int clampedX = roiBeginX + max(0, min(id_x_i + i, roiWidth - 1));
             int clampedIdx = (id_z * srcStridesNH.x) + (clampedY * srcStridesNH.y) + (clampedX * 3);
 
             src_smem[hipThreadIdx_y_channel.x][hipThreadIdx_x8 + i] = srcPtr[clampedIdx];      // R
@@ -287,7 +287,7 @@ __global__ void emboss_7x7_pkd_tensor(T* srcPtr, uint2 srcStridesNH, T* dstPtr, 
     else {
         // Nearest-neighbor padding
         for (int i = 0; i < 8; i++) {
-            int clampedX = max(roiBeginX, min(id_x_i + i, (roiBeginX + roiWidth - 1)));
+            int clampedX = roiBeginX + max(0, min(id_x_i + i, roiWidth - 1));
             int clampedIdx = (id_z * srcStridesNH.x) + (clampedY * srcStridesNH.y) + (clampedX * 3);
 
             src_smem[hipThreadIdx_y_channel.x][hipThreadIdx_x8 + i] = srcPtr[clampedIdx];      // R
