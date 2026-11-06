@@ -96,19 +96,20 @@ def _populateCache(cacheDir, cacheKey, hsacoFiles):
         shutil.rmtree(tmpDir, ignore_errors=True)
 
 
-def _evictStale(cacheDir, maxAgeDays):
-    """Remove cache entries whose directories are older than maxAgeDays."""
+def _evictStale(cacheDir, maxAgeDays, tmpMaxAgeDays=None):
+    """Remove cache entries whose directories are older than maxAgeDays, and with tmpMaxAgeDays,
+    temporary (.tmp_*) directories older than that (left by a killed process)."""
     cacheDir = Path(cacheDir)
     if not cacheDir.is_dir():
         return
-    maxAgeSecs = maxAgeDays * 24 * 60 * 60
     now = time.time()
     for entry in cacheDir.iterdir():
-        if not entry.is_dir() or entry.name.startswith(".tmp_"):
+        ageDays = tmpMaxAgeDays if entry.name.startswith(".tmp_") else maxAgeDays
+        if not entry.is_dir() or ageDays is None:
             continue
         try:
             age = now - entry.stat().st_mtime
-            if age > maxAgeSecs:
+            if age > ageDays * 24 * 60 * 60:
                 shutil.rmtree(entry, ignore_errors=True)
         except OSError:
             pass
