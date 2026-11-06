@@ -456,7 +456,7 @@ inline std::string solution_description(hipblasLtHandle_t      handle,
     return s.str();
 }
 
-std::vector<roc::hostnumerics::ComparisonTolerance>
+std::vector<std::optional<roc::hostnumerics::ComparisonTolerance>>
     matmulValidationTolerances(const Arguments&                                  arg,
                                std::span<const hipblaslt::client::MatmulProblem> matmulProblems,
                                hipDataType                                       inputTypeA,
@@ -464,8 +464,10 @@ std::vector<roc::hostnumerics::ComparisonTolerance>
                                hipDataType                                       outputType,
                                hipDataType                                       computeType)
 {
-    std::vector<roc::hostnumerics::ComparisonTolerance> tolerances(matmulProblems.size());
-    const bool                                          bfloat16Output = outputType == HIP_R_16BF;
+    // Unset tolerances select the unit check.
+    std::vector<std::optional<roc::hostnumerics::ComparisonTolerance>> tolerances(
+        matmulProblems.size());
+    const bool bfloat16Output = outputType == HIP_R_16BF;
 
     if(arg.unit_check && hipblaslt_get_arch_major() == 11 && realDataTypeSize(inputTypeA) == 2
        && realDataTypeSize(inputTypeB) == 2)
@@ -474,14 +476,15 @@ std::vector<roc::hostnumerics::ComparisonTolerance>
         {
             const double coefficient = gfx11_low_precision_accumulation_tolerance_coefficient(
                 computeType, matmulProblems[i].k);
-            tolerances[i].absolute = coefficient;
-            tolerances[i].relative = 2.0 * coefficient;
+            roc::hostnumerics::ComparisonTolerance tolerance{.absolute = coefficient,
+                                                             .relative = 2.0 * coefficient};
             if(bfloat16Output)
             {
                 const double outputCoefficient = bfloat16_output_rounding_tolerance_coefficient();
-                tolerances[i].absolute = std::max(tolerances[i].absolute, outputCoefficient);
-                tolerances[i].relative = std::max(tolerances[i].relative, 2.0 * outputCoefficient);
+                tolerance.absolute             = std::max(tolerance.absolute, outputCoefficient);
+                tolerance.relative = std::max(tolerance.relative, 2.0 * outputCoefficient);
             }
+            tolerances[i] = tolerance;
         }
     }
 
@@ -489,10 +492,7 @@ std::vector<roc::hostnumerics::ComparisonTolerance>
        || arg.initialization == hipblaslt_initialization::norm_dist_one_special)
     {
         for(auto& tolerance : tolerances)
-        {
-            tolerance          = {};
-            tolerance.absolute = 1e-2;
-        }
+            tolerance = roc::hostnumerics::ComparisonTolerance{.absolute = 1e-2};
     }
     return tolerances;
 }
@@ -4162,7 +4162,8 @@ void testing_matmul_with_bias(const Arguments&                                  
         .inputTypeB      = hipblaslt::hostnumerics::scalarType(arg.b_type),
     };
 
-    auto makeValidationCases = [&](const std::vector<roc::hostnumerics::ComparisonTolerance>&
+    auto makeValidationCases = [&](const std::vector<
+                                   std::optional<roc::hostnumerics::ComparisonTolerance>>&
                                        allCloseTolerances) {
         using hipblaslt::hostnumerics::MatmulValidationCase;
         using roc::hostnumerics::Layout;

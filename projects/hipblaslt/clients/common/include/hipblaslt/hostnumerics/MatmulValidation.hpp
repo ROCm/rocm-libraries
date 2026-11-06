@@ -36,10 +36,13 @@ namespace hipblaslt::hostnumerics
             TensorPair norm;
             bool       useComputeNormPolicy = false;
         };
-        std::optional<SideOutput>              maximum;
-        std::optional<SideOutput>              auxiliary;
-        std::optional<SideOutput>              bias;
-        roc::hostnumerics::ComparisonTolerance allCloseTolerance;
+        std::optional<SideOutput> maximum;
+        std::optional<SideOutput> auxiliary;
+        std::optional<SideOutput> bias;
+        // The element tolerance of the all-close check. Unset selects the unit
+        // check: exact equality, or at most 4 ULP for FP32, FP64 and their
+        // complex types.
+        std::optional<roc::hostnumerics::ComparisonTolerance> allCloseTolerance;
     };
 
     struct MatmulAllCloseFailure
