@@ -509,6 +509,7 @@ class Stub:
                      "_dcpTokenSide", "_dcpCurrentToken", "_dcpTdmIssueTokens",
                      "tdmPairOnEveryWave", "removeStaggerCopies", "tdmHalfPlrReenableSgprs",
                      "removeStaggerIncs", "graIncrementMask", "releaseGlobalReadIncsSgprsAfterTdmWaveSep",
+                     "hplrMasksLoopIncrement", "hplrLastIterCompare",
                      "_emitTdmWaveSetSkipSCC"):
             fn = getattr(KernelWriterAssembly, name, None)
             if fn is not None:
@@ -1990,10 +1991,11 @@ def test_halfplr_masks_the_own_increment_of_every_set_without_a_shadow(fuse, mx,
     if not halfPLR:
         want = ()
     elif numWaves == 1:
-        # One wave takes TDMFuse=0 only, declining rows 1-3 to its row: a Group0 per tensor,
-        # and the mask zeroes each one's own increment.
+        # One wave takes TDMFuse=0 only, declining rows 1-3 to its row: a Group0 per tensor.
+        # tdmIncrementAB masks the last-iteration increment in a temporary, so no own
+        # increment is zeroed.
         assert _groupingAccepted(state) is (fuse == 0)
-        want = ("A", "B") + ("MXSA",) * mxA + ("MXSB",) * mxB
+        want = ()
     elif fuse in (2, 3) and mxA and mxB and numWaves == 2:
         want += ("MXSB",)  # MXSB shares wave 1 with MXSA on a set of its own
     assert TF.tdmHalfPlrMaskedIncs(state) == want

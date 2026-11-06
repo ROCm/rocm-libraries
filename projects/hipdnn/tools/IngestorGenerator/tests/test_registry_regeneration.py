@@ -67,14 +67,16 @@ def selection_path(manifest_path) -> Path:
 
 
 @pytest.fixture(scope="module")
-def shipped(manifest, manifest_path) -> tuple:
-    """(directory, KDP, KMD) the provider ships for this manifest's pack."""
-    pack = manifest["pack"]
+def shipped(manifest, selection) -> tuple:
+    """(directory, KDP, KMD) the provider ships for this manifest's pack. The files are
+    named by the engine's slug, which is not always the pack name
+    (``gfx942_attention_unified3d`` in ``gfx942_attention_unified_3d/``)."""
+    slug = selection.engine.slug
     directory = _DESCRIPTORS / manifest["authored_subpath"]
-    kdp = directory / "artifacts" / f"{pack}.kdp.json"
+    kdp = directory / "artifacts" / f"{slug}.kdp.json"
     if not kdp.is_file():
         pytest.skip(f"shipped KDP not in this checkout: {kdp}")
-    return directory, kdp, directory / f"{pack}.kmd.json"
+    return directory, kdp, directory / f"{slug}.kmd.json"
 
 
 @pytest.fixture(scope="module")
@@ -562,7 +564,9 @@ def test_g6_every_shipped_spec_hydrates_and_passes_the_builders_predicate(
 _PREDICATE_DECLINES = {
     # gfx950 dense ships block_m 128 and 256 only.
     "build_attention_dense": {"block_m": 64},
-    # The tiled 2D/3D kernels are built for head_size 64, 128 and 256.
+    # The tiled 2D/3D kernels and the gfx950 and gfx942 split-KV modules (segment +
+    # reduce; both builders are named build_unified_attention_3d_tiled_module) are
+    # built for head_size 64, 128 and 256.
     "build_unified_attention_2d_tiled": {"head_size": 96},
     "build_unified_attention_3d_tiled": {"head_size": 96},
     "build_unified_attention_3d_tiled_module": {"head_size": 96},

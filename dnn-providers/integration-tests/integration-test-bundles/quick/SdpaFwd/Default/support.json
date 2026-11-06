@@ -1,5 +1,22 @@
 {
   "claims": {
+    "hipkernel:Gfx942AttentionUnified3d": [
+      {
+        "cases": [
+          "1_8_32768_64_bfp16_nhwc_attn_scale_value0p125_diagonal_alignmentbottom_right_right_bound0",
+          "1_8_8192_128_bfp16_nhwc_attn_scale_value0p08839_diagonal_alignmentbottom_right_right_bound0",
+          "1_8_8192_128_fp16_nhwc_attn_scale_value0p08839_diagonal_alignmentbottom_right_right_bound0",
+          "2_8_1_128_fp16_nhwc_attn_scale_value0p08839_diagonal_alignmentbottom_right_right_bound0",
+          "4_1_256_128_bfp16_nchw_attn_scale_value0p08839_diagonal_alignmentbottom_right_right_bound0",
+          "4_1_4096_128_fp16_nchw_attn_scale_value0p08839_diagonal_alignmentbottom_right_right_bound0"
+        ],
+        "support": {
+          "gfx942": [
+            "linux"
+          ]
+        }
+      }
+    ],
     "hipkernel:Gfx950AttentionDense": [
       {
         "cases": [

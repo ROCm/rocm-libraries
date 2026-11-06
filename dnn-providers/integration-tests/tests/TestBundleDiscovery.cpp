@@ -595,6 +595,20 @@ TEST(TestSanitizeForGtest, ReplacesInvalidChars)
     EXPECT_EQ(sanitizeForGtest("already_ok"), "already_ok");
 }
 
+// Ops without an "outputs" sub-object name their output with a flat key. The flat
+// inputs beside it, such as resample backward's dy and index, are not outputs.
+TEST(TestExtractOutputUidsFromJson, ReadsFlatOutputKeys)
+{
+    const auto graphJson = nlohmann::json::parse(R"({"nodes": [
+        {"type": "ReductionAttributes", "in_tensor_uid": 0, "out_tensor_uid": 1},
+        {"type": "ResampleFwdAttributes", "x_tensor_uid": 2, "y_tensor_uid": 3},
+        {"type": "ResampleBwdAttributes", "dy_tensor_uid": 4, "index_tensor_uid": 5,
+         "dx_tensor_uid": 6}
+    ]})");
+
+    EXPECT_EQ(detail::extractOutputUidsFromJson(graphJson), (std::vector<int64_t>{1, 3, 6}));
+}
+
 TEST_F(TestBundleDiscoveryFixture, UnparseableJsonIsDiscoveredButLoadThrows)
 {
     auto badDir = _tempDir / "BadOp" / "Malformed";
@@ -1005,8 +1019,102 @@ TEST_F(TestBundleDiscoveryFixture, LoadRaggedBundleLoadsInputsAndGoldenOutputs)
                 tensors.at(uid).get());
         ASSERT_NE(ragged, nullptr) << "uid " << uid;
         EXPECT_EQ(ragged->raggedOffset(), offsetTensor) << "uid " << uid;
-        EXPECT_EQ(ragged->raggedIterationInfo()->rowOffsets, (std::vector<int64_t>{0, 40, 60}))
+        EXPECT_EQ(ragged->raggedIterationInfo()->origins, (std::vector<int64_t>{0, 40}))
             << "uid " << uid;
+        EXPECT_EQ(ragged->raggedIterationInfo()->lengths, (std::vector<int64_t>{2, 1}))
+            << "uid " << uid;
+    }
+}
+
+// Every ragged tensor of a ragged SDPA bundle reads from a blob sized to its elementSpace
+// and takes its per-batch origins and lengths from its offsets and, when the node has
+// them, the seq_len tensors: Stats stored [H,T] (L7a, L7c, L7d), a head-major primary
+// (L6), a shifted origin (L8), non-monotonic origins (L9) and a trailing gap (L14).
+TEST_F(TestBundleDiscoveryFixture, LoadRaggedSdpaBundlesReadsBlobsSizedToElementSpace)
+{
+    for(const auto& layout : fixtures::raggedSdpaLoadableCases())
+    {
+        SCOPED_TRACE(layout.name);
+        const auto dir = _tempDir / "op" / layout.name;
+        fixtures::writeRaggedSdpaCase(dir, layout);
+
+        auto result = loadIntegrationTestBundle(dir / (layout.name + ".json"));
+        ASSERT_TRUE(std::holds_alternative<IntegrationTestBundle>(result));
+        const auto tensors = std::get<IntegrationTestBundle>(result).loadTensors();
+
+        for(const int64_t uid : {fixtures::K_SDPA_Q_UID,
+                                 fixtures::K_SDPA_K_UID,
+                                 fixtures::K_SDPA_V_UID,
+                                 fixtures::K_SDPA_O_UID,
+                                 fixtures::K_SDPA_STATS_UID})
+        {
+            SCOPED_TRACE("uid " + std::to_string(uid));
+            const auto* ragged
+                = dynamic_cast<const hipdnn_data_sdk::utilities::RaggedTensorBase<float>*>(
+                    tensors.at(uid).get());
+            ASSERT_NE(ragged, nullptr);
+            EXPECT_EQ(ragged->elementSpace(),
+                      uid == fixtures::K_SDPA_STATS_UID ? layout.statsSpace : layout.qkvoSpace);
+            ASSERT_TRUE(ragged->raggedIterationInfo().has_value());
+            EXPECT_EQ(ragged->raggedIterationInfo()->lengths, layout.lengths);
+        }
+
+        EXPECT_EQ(tensors.count(fixtures::K_SDPA_SEQ_LEN_Q_UID), layout.seqLen.empty() ? 0u : 1u);
+        EXPECT_EQ(tensors.count(fixtures::K_SDPA_SEQ_LEN_KV_UID), layout.seqLen.empty() ? 0u : 1u);
+    }
+}
+
+// A trailing gap leaves offset[B] past the last row, so a blob sized to offset[B] is larger
+// than the elementSpace: it is rejected, naming the size rule, rather than read.
+TEST_F(TestBundleDiscoveryFixture, LoadRaggedSdpaBundleWithBlobSizedToOffsetBIsRejected)
+{
+    auto layout = fixtures::raggedSdpaTrailingGapCase();
+    ASSERT_EQ(layout.qkvo.offsets.back(), 12);
+    ASSERT_EQ(layout.qkvoSpace, 10u);
+    layout.qkvo.blobElems = static_cast<size_t>(layout.qkvo.offsets.back());
+
+    const auto dir = _tempDir / "op" / "offsetb";
+    fixtures::writeRaggedSdpaCase(dir, layout);
+    auto result = loadIntegrationTestBundle(dir / (layout.name + ".json"));
+    ASSERT_TRUE(std::holds_alternative<IntegrationTestBundle>(result));
+
+    try
+    {
+        std::get<IntegrationTestBundle>(result).loadTensors();
+        FAIL() << "a blob sized to offset[B] must not load";
+    }
+    catch(const std::exception& e)
+    {
+        EXPECT_NE(std::string(e.what()).find("elementSpace"), std::string::npos) << e.what();
+    }
+}
+
+// Without seq_len, a block longer than S_max is capped, so offsets written with the multiplier
+// applied twice still build a layout. The blob, sized to the element space of the intended
+// layout, no longer matches the element space of the one those offsets describe: rejected.
+TEST_F(TestBundleDiscoveryFixture, LoadRaggedSdpaBundleWithDoubledOffsetsIsRejected)
+{
+    auto layout = fixtures::raggedSdpaHeadTokenStatsCase();
+    ASSERT_TRUE(layout.seqLen.empty());
+    ASSERT_EQ(layout.qkvo.offsets, (std::vector<int32_t>{0, 16, 40}));
+    for(auto& offset : layout.qkvo.offsets)
+    {
+        offset *= 2;
+    }
+
+    const auto dir = _tempDir / "op" / "doubled";
+    fixtures::writeRaggedSdpaCase(dir, layout);
+    auto result = loadIntegrationTestBundle(dir / (layout.name + ".json"));
+    ASSERT_TRUE(std::holds_alternative<IntegrationTestBundle>(result));
+
+    try
+    {
+        std::get<IntegrationTestBundle>(result).loadTensors();
+        FAIL() << "offsets written with a doubled multiplier must not load";
+    }
+    catch(const std::exception& e)
+    {
+        EXPECT_NE(std::string(e.what()).find("elementSpace"), std::string::npos) << e.what();
     }
 }
 

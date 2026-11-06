@@ -264,7 +264,8 @@ def main():
     reset_reported_failures()
     jobs, isaInfoMap, logicPath, files, check, args = _setup()
 
-    # Cross-file invariants (sibling DeviceNames) run only when --check-all is
+    # Cross-file invariants (sibling DeviceNames, Range files matching their
+    # Equality sibling's placeholder) run only when --check-all is
     # given, and only over the already --architecture-filtered `files` -- the
     # same scope the per-solution validators below use -- so a build for one
     # architecture can't be failed by unrelated data in another. `files`

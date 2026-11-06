@@ -40,6 +40,7 @@ from .ir import (
     _buffer_op_bytes,
     _global_ptr_offset_op_error,
     _global_ptr_to_i64_op_error,
+    _gpu_check_failed_op_error,
     _if_else_branch_yield,
     _refuse_non_u8_source,
     _refuse_unsigned_operands,
@@ -47,6 +48,7 @@ from .ir import (
     _trap_op_error,
     dpp_ctrl_attr,
     dpp_xor_ctrl,
+    gpu_check_word_symbol,
     require_streaming_arch,
 )
 from .isa.backend import backend_for
@@ -468,6 +470,8 @@ class _Lowerer:
         self.kernel = kernel
         self.lines: List[str] = []
         self.smem_decls: List[str] = []
+        # The GPU-check word's symbol once a tile.gpu_check_failed stores to it.
+        self.gpu_check_word: str | None = None
         self._indent = 1
         self._smem_counter = 0
         # Resolve the architecture seam. The HIP path has no separate ISA
@@ -1570,6 +1574,19 @@ class _Lowerer:
         if error:
             raise ValueError(error)
         self._emit("__builtin_trap();")
+
+    def _op_tile_gpu_check_failed(self, op: Op) -> None:
+        """Store 1 to the kernel's GPU-check word, then return from the kernel
+        (the LLVM lowering's ``_op_tile_gpu_check_failed``)."""
+        error = _gpu_check_failed_op_error(op)
+        if error:
+            raise ValueError(error)
+        self.gpu_check_word = gpu_check_word_symbol(self.kernel.name)
+        self._emit(
+            f"__hip_atomic_store(&{self.gpu_check_word}, 1, __ATOMIC_RELAXED, "
+            "__HIP_MEMORY_SCOPE_AGENT);"
+        )
+        self._emit("return;")
 
     def _op_tile_sched_group_barrier(self, op: Op) -> None:
         m = int(op.attrs["mask"])
@@ -3114,6 +3131,8 @@ def lower_kernel_to_hip(
     if include_prologue:
         parts.append(HIP_PROLOGUE)
     parts.extend(_extra_vector_declarations(kernel))
+    if lowerer.gpu_check_word is not None:
+        parts.append(f"__device__ int {lowerer.gpu_check_word};")
     parts.append(head)
     if smem_block:
         parts.append(smem_block)

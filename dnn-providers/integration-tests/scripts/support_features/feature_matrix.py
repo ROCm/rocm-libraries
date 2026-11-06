@@ -21,8 +21,13 @@ says nothing about bf16 *with* causal. ``coverage.py`` prints the per-feature
 graph counts behind every cell, and ``coverage.py --graphs OP FEATURE --arch
 ARCH`` lists the graphs themselves.
 
-This document is the committed ``SUPPORT_MATRIX_OVERVIEW.md``, and CI and
-pre-commit fail if it differs from a fresh render (``--check``).
+This document is the committed ``SUPPORT_MATRIX_OVERVIEW.md``. It is refreshed
+on its own, not with each claim change, so it can lag the sidecars; ``--check``
+says whether it does.
+
+Running it without arguments overwrites the committed file. To look at the
+current overview without changing the tree, use ``--output -``, or download
+the ``hipdnn-support-matrix`` artifact of a CI run.
 
 Usage:
 
@@ -60,6 +65,12 @@ from support_matrix_units import (  # noqa: E402
 SCRIPT_PATH = pathlib.Path(__file__).resolve()
 REPO_ROOT = SCRIPT_PATH.parents[4]
 REGEN_COMMAND = f"python3 {SCRIPT_PATH.relative_to(REPO_ROOT).as_posix()}"
+# The overview is refreshed on its own, not with the claims, so a claim PR
+# must not regenerate it.
+REFRESH_HINT = (
+    "       do not commit it with a claim change; refresh it in a PR of its own "
+    f"with {REGEN_COMMAND} (see dnn-providers/integration-tests/docs/support-matrix.md)"
+)
 DEFAULT_OVERVIEW_PATH = SCRIPT_PATH.parents[2] / "SUPPORT_MATRIX_OVERVIEW.md"
 
 NOT_CLAIMED = "❌"
@@ -493,6 +504,10 @@ def render(claims: FeatureClaims) -> str:
         "Percentages are shares of each op's API options, not of its graphs. "
         "Options count singly, not in combination.",
         "",
+        "This file is refreshed on its own, not with each claim change, so it "
+        "can lag the claims on develop. Every `hipdnn-superbuild-ci` Linux run "
+        "uploads a current copy in its `hipdnn-support-matrix` artifact.",
+        "",
         f"**Jump to:** {jump}",
         "",
         *render_dashboard(claims),
@@ -528,8 +543,8 @@ def main(argv: list[str] | None = None) -> int:
         "--check",
         action="store_true",
         help="Do not write. Re-render and compare against --output; exit 1 if "
-        "they differ or it is missing. The CI and pre-commit check on the "
-        "committed overview.",
+        "they differ or it is missing: whether the committed overview needs a "
+        "refresh.",
     )
     args = parser.parse_args(argv)
 
@@ -552,15 +567,15 @@ def main(argv: list[str] | None = None) -> int:
             committed = args.output.read_text(encoding="utf-8")
         except OSError as exc:
             print(f"error: cannot read {args.output} ({exc})", file=sys.stderr)
-            print(f"       regenerate it with: {REGEN_COMMAND}", file=sys.stderr)
+            print(REFRESH_HINT, file=sys.stderr)
             return 1
         if committed != document:
             print(
-                f"error: {args.output} is stale -- it does not match a re-render "
-                "of the current sidecars",
+                f"{args.output} is behind -- it does not match a re-render of "
+                "the current sidecars",
                 file=sys.stderr,
             )
-            print(f"       regenerate it with: {REGEN_COMMAND}", file=sys.stderr)
+            print(REFRESH_HINT, file=sys.stderr)
             return 1
         return 0
     if str(args.output) == "-":

@@ -195,9 +195,9 @@ batch when `seq_len_q/kv` are set).
 - **Status:** Aligned.
 - **cuDNN:** natural log, fp32, `[B, H, Sq, 1]`.
 - **Other use cases:** FlashInfer uses log2. vLLM uses packed `[Hq, T]` for varlen.
-- **hipDNN today:** natural log, fp32, `[B, H, Sq, 1]` dense. The ragged GPU reference also accepts packed
-  LSE.
-- **Contract:** cuDNN. The packed layout follows the ragged-offset model.
+- **hipDNN today:** natural log, fp32, `[B, H, Sq, 1]` dense. The ragged CPU and GPU references accept a ragged
+  LSE with its own offsets and lengths.
+- **Contract:** cuDNN. A ragged LSE follows the ragged-offset model.
 
 ### SEM-012: Softmax probability precision in the reference
 
@@ -343,6 +343,27 @@ batch when `seq_len_q/kv` are set).
   SEM-010. The plans check the dtype and shape; the golden generator's `--block-mask` expansion is identical to
   cuDNN's code.
 - **Contract:** cuDNN.
+
+## Ragged layouts
+
+### SEM-026: Ragged layout validation
+
+- **Status:** Diverges (reference container; deliberately stricter).
+- **cuDNN:** a ragged tensor is addressed from its per-batch offsets and strides. The frontend checks only graph
+  attributes (ragged needs padding, backend and architecture gates, paged plus ragged from backend 9.7); it never
+  reads offset values, so it does not validate overlapping layouts and defines no behaviour for them.
+  - Source: cudnn-frontend v1.24.0 `include/cudnn_frontend/node/sdpa_support_surface.h:27-30, 90-92, 281-283`,
+    `scaled_dot_product_flash_attention.h:486-507` (ragged offsets added to the node).
+- **hipDNN:** the Data SDK `RaggedTensor` rejects, at construction, layouts whose non-empty batches share a token
+  row, dense views that break the sorted-stride rule, negative strides, origins that are not whole tokens, and
+  `seq_len` values outside `[0, S_max]`. Zero-stride broadcast axes are accepted. The frontend and the
+  `isApplicable` gates see graph attributes only, so the rule applies where offset values are on the host: bundle
+  loading and the CPU and GPU references (RFC 0014, Known limitations item 8). Pinned by `TestRaggedLayoutRows`
+  (`AliasingRowsAreRejectedByRule`, `OverlapRuleBoundaryIsOneSharedRow`, `SortedStrideRuleExemptsSizeOneAxes`) and
+  `TestRaggedLayoutRejections`.
+- **Contract:** every logical element has exactly one address, so outputs are written once and the element count
+  and footprint are well defined. A use case that needs aliased read-only inputs (for example a shared prefix)
+  would relax the rule for inputs only.
 
 ## Process
 
