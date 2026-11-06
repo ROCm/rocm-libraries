@@ -38,6 +38,7 @@
 #include <limits>
 #include <map>
 #include <memory>
+#include <numeric>
 #include <string>
 #include <type_traits>
 #include <utility>
@@ -1849,6 +1850,122 @@ TYPED_TEST(solvers, gmres_and_fgmres_switch_to_the_euclidean_norm)
         EXPECT_NEAR(out.residual, s.res[3], loose_tol<T>(1e-10) * s.res[3]);
     }
 }
+
+#ifdef SUPPORT_COMPLEX
+namespace
+{
+    // nonsymmetric with an imaginary part on every entry, so that the residuals are complex
+    template <typename T>
+    Csr<T> complex_nonsymmetric(int n)
+    {
+        using R              = real_t<T>;
+        const Csr<double> re = nonsymmetric<double>(n);
+        Csr<T>            A(n);
+        for(int i = 0; i < n; ++i)
+        {
+            for(auto k = re.row_offset[i]; k < re.row_offset[i + 1]; ++k)
+            {
+                const int j = re.col[k];
+                A.add(j,
+                      T(static_cast<R>(re.val[k]), static_cast<R>(0.5 * ((i + 2 * j) % 4) - 0.75)));
+            }
+            A.end_row();
+        }
+        return A;
+    }
+
+    template <typename T>
+    Vec<T> complex_rhs(int n)
+    {
+        Vec<T> b(n);
+        for(int i = 0; i < n; ++i)
+        {
+            b[i] = from_int<T>(i % 7 - 3);
+        }
+        return b;
+    }
+
+    // The solvers on complex systems. The real-only references above, such as dot and
+    // norm_of_type, are not used: the checks compute the residual b - A x directly.
+    template <typename P>
+    class complex_solvers : public solvers<P>
+    {
+    };
+
+    using ComplexTypes = testing::Types<cfloat, cdouble>;
+}
+
+TYPED_TEST_SUITE(complex_solvers, WithBackends<ComplexTypes>, TypedName);
+
+// The L1 and Linf residual norms of a complex solve are the sum and the largest of the moduli
+// |r_i|, which the solvers compute with Asum and Amax
+TYPED_TEST(complex_solvers, current_residual_is_measured_in_the_chosen_norm)
+{
+    using T          = typename TypeParam::value_type;
+    const int    n   = 12;
+    const Csr<T> ref = complex_nonsymmetric<T>(n);
+    const Vec<T> b   = complex_rhs<T>(n);
+    auto         A   = this->make(ref);
+
+    for(int type : {1, 3})
+    {
+        SCOPED_TRACE("norm " + std::to_string(type));
+        BiCGStab<T> solver;
+        solver.Init(0.0, 0.0, 1e8, 2);
+        solver.SetResidualNorm(type);
+        set_up(solver, method<BiCGStab<T>>("BiCGStab"), *A, nullptr);
+
+        const Outcome<T> out = solve(solver, *A, b, Vec<T>(n, 0));
+        EXPECT_EQ(out.iterations, 2);
+        EXPECT_EQ(out.status, 4);
+
+        const Vec<T>        Ax = ref.apply(out.x);
+        std::vector<double> moduli(n);
+        for(int i = 0; i < n; ++i)
+        {
+            moduli[i] = std::abs(std::complex<double>(b[i] - Ax[i]));
+        }
+        const auto    largest = std::max_element(moduli.begin(), moduli.end());
+        const int64_t index   = largest - moduli.begin();
+        const double  expected
+            = type == 1 ? std::accumulate(moduli.begin(), moduli.end(), 0.0) : *largest;
+        EXPECT_NEAR(out.residual, expected, scaled_tol<T>(1e-12) * expected);
+
+        if(type == 3)
+        {
+            // The largest modulus is unique, so that rounding does not move its index
+            for(int i = 0; i < n; ++i)
+            {
+                ASSERT_TRUE(i == index || moduli[i] < 0.99 * *largest);
+            }
+            EXPECT_EQ(solver.GetAmaxResidualIndex(), index);
+        }
+    }
+}
+
+TYPED_TEST(complex_solvers, converge_with_the_l1_and_linf_residual_norms)
+{
+    using T          = typename TypeParam::value_type;
+    const int    n   = 12;
+    const Csr<T> ref = complex_nonsymmetric<T>(n);
+    const Vec<T> b   = complex_rhs<T>(n);
+    const double rel = loose_tol<T>(1e-10);
+    auto         A   = this->make(ref);
+
+    for(int type : {1, 3})
+    {
+        SCOPED_TRACE("norm " + std::to_string(type));
+        BiCGStab<T> solver;
+        solver.Init(0.0, rel, 1e8, 100);
+        solver.SetResidualNorm(type);
+        set_up(solver, method<BiCGStab<T>>("BiCGStab"), *A, nullptr);
+
+        const Outcome<T> out = solve(solver, *A, b, Vec<T>(n, 0));
+        EXPECT_EQ(out.status, 2);
+        expect_all_near(ref.apply(out.x), b, 100 * rel);
+    }
+}
+#endif
 
 TYPED_TEST(solvers, residual_history_file_holds_the_residuals_of_the_last_solve)
 {
