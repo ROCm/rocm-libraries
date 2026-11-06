@@ -1182,8 +1182,8 @@ TYPED_TEST(preconditioners, sgs_is_the_symmetric_gauss_seidel_sweep)
     rocalution::SGS<Matrix<T>, Vector<T>, T> p;
     p.SetOperator(*A);
     p.Build();
+    expect_near(apply(p, *A, r), symmetric_gauss_seidel(ref, r), scaled_tol<T>(1e-14));
 
-    // ResetOperator extracts the diagonal, Build its inverse
     p.ResetOperator(*A);
     expect_near(apply(p, *A, r), symmetric_gauss_seidel(ref, r), scaled_tol<T>(1e-14));
 
@@ -1440,10 +1440,6 @@ TYPED_TEST(preconditioners, iterative_triangular_solves_reach_the_direct_solve)
 
     for(auto& c : direct_cases(ref))
     {
-        if(c.name == "SGS")
-        {
-            continue;
-        }
         SCOPED_TRACE(c.name);
         c.p->SetSolverDescriptor(descr);
         c.p->SetOperator(*A);
@@ -1461,10 +1457,6 @@ TYPED_TEST(preconditioners, build_of_a_built_preconditioner_takes_the_new_values
 
     for(auto& c : direct_cases(changed))
     {
-        if(c.name == "SGS")
-        {
-            continue;
-        }
         SCOPED_TRACE(c.name);
         auto A = this->make(ref);
         c.p->SetOperator(*A);
@@ -1476,7 +1468,8 @@ TYPED_TEST(preconditioners, build_of_a_built_preconditioner_takes_the_new_values
     }
 }
 
-// ResetOperator, unlike Build, scales by the diagonal
+// ResetOperator analyses its copy of the operator again for the iterative triangular
+// solves
 TYPED_TEST(preconditioners, iterative_sgs_reaches_the_direct_solve)
 {
     using T                  = typename TypeParam::value_type;
@@ -1509,7 +1502,7 @@ TYPED_TEST(preconditioners, built_preconditioners_move_to_the_other_backend)
         SCOPED_TRACE(alg);
         for(auto& c : direct_cases(ref))
         {
-            if(c.name == "SGS" || c.name == "ILUT" || c.name == "IC")
+            if(c.name == "ILUT" || c.name == "IC")
             {
                 continue;
             }
@@ -1578,8 +1571,6 @@ TYPED_TEST(preconditioners, built_ilu_moves_to_its_own_backend)
     expect_near(apply(p, *A, r), lu_solve(ilu_levels(ref, 0), r), loose_tol<T>(1e-11));
 }
 
-// ResetOperator scales by the diagonal, unlike the buggy Build, so it is the
-// starting point of the moves
 TYPED_TEST(preconditioners, sgs_moves_with_its_factors_and_its_diagonal)
 {
     using T                  = typename TypeParam::value_type;
@@ -1597,20 +1588,29 @@ TYPED_TEST(preconditioners, sgs_moves_with_its_factors_and_its_diagonal)
         p.SetOperator(*A);
         p.Build();
         p.Build();
-        p.ResetOperator(*A);
-        expect_near(apply(p, *A, r), symmetric_gauss_seidel(ref, r), tolerance);
 
-        for(Backend to : {this->backend(), other(this->backend()), this->backend()})
+        // The moves start from the state of a Build and of a ResetOperator
+        for(bool reset : {false, true})
         {
-            SCOPED_TRACE("moved to the " + backend_name(to));
-            move(to, p, *A);
+            SCOPED_TRACE(reset ? "after ResetOperator" : "after Build");
+            if(reset)
+            {
+                p.ResetOperator(*A);
+            }
             expect_near(apply(p, *A, r), symmetric_gauss_seidel(ref, r), tolerance);
+
+            for(Backend to : {this->backend(), other(this->backend()), this->backend()})
+            {
+                SCOPED_TRACE("moved to the " + backend_name(to));
+                move(to, p, *A);
+                expect_near(apply(p, *A, r), symmetric_gauss_seidel(ref, r), tolerance);
+            }
         }
     }
 }
 
 // A move to the backend the preconditioner is on, and of ILUT from the accelerator to
-// the host. SGS has its own test.
+// the host
 TYPED_TEST(preconditioners, built_preconditioners_move_to_their_own_backend)
 {
     using T                  = typename TypeParam::value_type;
@@ -1622,10 +1622,6 @@ TYPED_TEST(preconditioners, built_preconditioners_move_to_their_own_backend)
         SCOPED_TRACE(alg);
         for(auto& c : direct_cases(ref))
         {
-            if(c.name == "SGS")
-            {
-                continue;
-            }
             SCOPED_TRACE(c.name);
             auto A = this->make(ref);
             c.p->SetSolverDescriptor(descr);
