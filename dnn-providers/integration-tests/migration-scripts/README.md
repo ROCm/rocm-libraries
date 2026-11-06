@@ -155,7 +155,12 @@ output, see
 ### Grouped import for generated cases (opt-in)
 
 Use these flags to put many generated graphs into a small number of sweeps.
-Without them, `import_graph.py` behaves as described above.
+A **sweep** is one graph template (`graph.template.json`) plus a list of cases
+(`sweep.json`). The **skeleton hash** is the structural fingerprint of a graph
+(node types, wiring, tensor set and tensor links such as
+`ragged_offset_tensor_uid`); graphs with the same skeleton hash can share a
+sweep. Without these flags, `import_graph.py` behaves as described
+above.
 
 ```bash
 python3 migration-scripts/import_graph.py \
@@ -386,8 +391,10 @@ the pointers move). Grep for the case ids you moved and re-run
 ### Structure-hash grouping
 
 Every graph gets a canonical skeleton fingerprint: node types in order,
-tensor UID wiring (canonically renumbered), and the tensor set. Graphs
-with the same fingerprint share a topology.
+tensor UID wiring (canonically renumbered), the tensor set, and the
+tensor-level UID links (`ragged_offset_tensor_uid`). Graphs with the same
+fingerprint share a topology. A UID remap changes the wiring, each tensor
+`uid` and each tensor-level link together.
 
 ### Derive, don't classify
 

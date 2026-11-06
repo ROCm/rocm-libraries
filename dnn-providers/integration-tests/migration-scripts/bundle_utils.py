@@ -163,6 +163,9 @@ def canonical_uid_map(graph: dict) -> dict:
     for t in graph.get("tensors", []):
         if "uid" in t:
             visit(t["uid"])
+    for t in graph.get("tensors", []):
+        for _, v in uid_keys(t):
+            visit(v)
     return canon
 
 
@@ -171,11 +174,18 @@ def _remap_uid(u, m):
         return [_remap_uid(x, m) for x in u]
     if u is None:
         return None
-    return m.get(u, u)
+    if u not in m:
+        raise ValueError(f"uid {u!r} has no entry in the uid map")
+    return m[u]
 
 
 def remap_graph(graph: dict, m: dict) -> dict:
-    """Deep copy of graph with all uids remapped and tensors sorted by uid."""
+    """Deep copy of graph with all uids remapped and tensors sorted by uid.
+
+    The remapped uids are the node ports, each tensor ``uid`` and each
+    tensor-level ``*_tensor_uid`` link (such as ``ragged_offset_tensor_uid``).
+    Raises ValueError for a uid that has no entry in ``m``.
+    """
     g = copy.deepcopy(graph)
     for node in g.get("nodes", []):
         for section in ("inputs", "outputs"):
@@ -190,6 +200,9 @@ def remap_graph(graph: dict, m: dict) -> dict:
     for t in g.get("tensors", []):
         if "uid" in t:
             t["uid"] = _remap_uid(t["uid"], m)
+        for k in list(t):
+            if k.endswith("_tensor_uid"):
+                t[k] = _remap_uid(t[k], m)
     g["tensors"] = sorted(g.get("tensors", []), key=lambda t: t.get("uid", 0))
     return g
 
@@ -301,7 +314,10 @@ def aliases_by_name(meta: dict, graph: dict) -> list:
 
 
 def skeleton_hash(graph: dict, value_form: bool = False) -> str:
-    """Structural fingerprint: node types + wiring + tensor set.
+    """Structural fingerprint: node types + wiring + tensor set + tensor links.
+
+    The tensor links are the tensor-level ``*_tensor_uid`` keys, such as
+    ``ragged_offset_tensor_uid``.
 
     With ``value_form``, the fingerprint also records the value form of each
     tensor: whether it has a baked ``value``, its ``value_type`` and its
@@ -330,6 +346,15 @@ def skeleton_hash(graph: dict, value_form: bool = False) -> str:
             wiring.append(("flat", k, canon_uid(v)))
         parts.append({"type": node.get("type", ""), "wiring": sorted(wiring)})
 
+    # Number each linked tensor in the canonical order of the tensors that link
+    # to it. Then the fingerprint does not depend on the uid values.
+    for t in sorted(
+        (t for t in graph.get("tensors", []) if t.get("uid") in canon),
+        key=lambda t: canon[t["uid"]],
+    ):
+        for _, v in uid_keys(t):
+            canon_uid(v)
+
     tensor_set = sorted(
         (canon_uid(t["uid"]), bool(t.get("virtual", False)))
         for t in graph.get("tensors", [])
@@ -337,6 +362,15 @@ def skeleton_hash(graph: dict, value_form: bool = False) -> str:
     )
 
     skeleton = {"nodes": parts, "tensors": tensor_set}
+    tensor_links = sorted(
+        [canon_uid(t["uid"]), k, canon_uid(v)]
+        for t in graph.get("tensors", [])
+        if "uid" in t
+        for k, v in uid_keys(t)
+        if v is not None
+    )
+    if tensor_links:
+        skeleton["tensor_links"] = tensor_links
     if value_form:
         skeleton["value_forms"] = sorted(
             [
