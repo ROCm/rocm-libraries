@@ -25,6 +25,8 @@ add_executable(
     TestHipblasltPluginApi.cpp
     engines/rocblas/TestMatmulProblem.cpp
     $<$<BOOL:${HIPBLASLTPROVIDER_ENABLE_ROCBLAS}>:engines/rocblas/TestGpuRocblasMatmulPlan.cpp>
+    $<$<BOOL:${HIPBLASLTPROVIDER_ENABLE_CONV}>:engines/conv/TestConvGemmFormulation.cpp>
+    $<$<BOOL:${HIPBLASLTPROVIDER_ENABLE_CONV}>:engines/conv/TestGpuConvGemm.cpp>
 )
 
 # The hipBLASLt engine's own tests, and the plugin API cases that drive it.

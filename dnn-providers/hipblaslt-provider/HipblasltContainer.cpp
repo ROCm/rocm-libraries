@@ -14,7 +14,14 @@
 #endif
 #endif
 #ifdef HIPBLASLTPROVIDER_ENABLE_ROCBLAS
+#include "engines/rocblas/RocblasGemmPlan.hpp"
 #include "engines/rocblas/RocblasMatmulPlanBuilder.hpp"
+#endif
+#ifdef HIPBLASLTPROVIDER_ENABLE_CONV
+#include "engines/conv/ConvGemmPlanBuilder.hpp"
+#ifdef HIPBLASLTPROVIDER_ENABLE_HIPBLASLT
+#include "engines/hipblaslt/HipblasltGemmPlan.hpp"
+#endif
 #endif
 
 namespace hipblaslt_plugin
@@ -46,6 +53,27 @@ HipblasltContainer::HipblasltContainer()
         = std::make_unique<PlanBuilderEngine>(hipdnn_data_sdk::utilities::ROCBLAS_MATMUL_ENGINE_ID);
     rocblasMatmulEngine->addPlanBuilder(std::make_unique<RocblasMatmulPlanBuilder>());
     _engineManager->addEngine(std::move(rocblasMatmulEngine));
+#endif
+
+#ifdef HIPBLASLTPROVIDER_ENABLE_CONV
+#ifdef HIPBLASLTPROVIDER_ENABLE_HIPBLASLT
+    auto hipblasltConvEngine
+        = std::make_unique<PlanBuilderEngine>(hipdnn_data_sdk::utilities::HIPBLASLT_CONV_ENGINE_ID);
+    hipblasltConvEngine->addPlanBuilder(std::make_unique<ConvGemmPlanBuilder>(
+        [](const HipdnnEnginePluginHandle& handle, std::vector<GemmCall> calls) {
+            return std::make_unique<HipblasltGemmPlan>(handle, std::move(calls));
+        }));
+    _engineManager->addEngine(std::move(hipblasltConvEngine));
+#endif
+#ifdef HIPBLASLTPROVIDER_ENABLE_ROCBLAS
+    auto rocblasConvEngine
+        = std::make_unique<PlanBuilderEngine>(hipdnn_data_sdk::utilities::ROCBLAS_CONV_ENGINE_ID);
+    rocblasConvEngine->addPlanBuilder(std::make_unique<ConvGemmPlanBuilder>(
+        [](const HipdnnEnginePluginHandle& /*handle*/, std::vector<GemmCall> calls) {
+            return std::make_unique<RocblasGemmPlan>(std::move(calls));
+        }));
+    _engineManager->addEngine(std::move(rocblasConvEngine));
+#endif
 #endif
 }
 

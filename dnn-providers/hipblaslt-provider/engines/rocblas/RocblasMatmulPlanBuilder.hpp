@@ -5,7 +5,6 @@
 
 #include "common/GemmCall.hpp"
 #include "engines/plans/PlanBuilderInterface.hpp"
-#include "engines/plans/PlanInterface.hpp"
 
 namespace hipblaslt_plugin
 {
@@ -31,28 +30,6 @@ public:
     void buildPlan(const HipdnnEnginePluginHandle& handle,
                    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
                    HipdnnEnginePluginExecutionContext& executionContext) const override;
-};
-
-/// The GEMM a matched matmul graph resolved to, run on each execute.
-class RocblasMatmulPlan : public IPlan
-{
-public:
-    explicit RocblasMatmulPlan(GemmCall call);
-
-    size_t getWorkspaceSize(const HipdnnEnginePluginHandle& handle) const override;
-
-    void execute(const HipdnnEnginePluginHandle& handle,
-                 const hipdnnPluginDeviceBuffer_t* deviceBuffers,
-                 uint32_t numDeviceBuffers,
-                 void* workspace = nullptr) const override;
-
-    const GemmCall& call() const
-    {
-        return _call;
-    }
-
-private:
-    GemmCall _call;
 };
 
 } // namespace hipblaslt_plugin

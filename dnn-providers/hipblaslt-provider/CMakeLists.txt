@@ -32,6 +32,9 @@ option(HIPBLASLTPROVIDER_ENABLE_ROCBLAS "Build the rocBLAS engines" OFF)
 # hipBLASLt is not built for every target (TheRock excludes it for gfx906 and gfx103X), so a
 # rocBLAS-only provider must build without it.
 option(HIPBLASLTPROVIDER_ENABLE_HIPBLASLT "Build the hipBLASLt engines" ON)
+# Explicit-GEMM convolution engines, one per enabled backend: HIPBLASLT_CONV_ENGINE and
+# ROCBLAS_CONV_ENGINE. OFF while they are built out.
+option(HIPBLASLTPROVIDER_ENABLE_CONV "Build the explicit-GEMM convolution engines" OFF)
 if(NOT HIPBLASLTPROVIDER_ENABLE_HIPBLASLT AND NOT HIPBLASLTPROVIDER_ENABLE_ROCBLAS)
     message(FATAL_ERROR "hipblaslt-provider: enable HIPBLASLTPROVIDER_ENABLE_HIPBLASLT, "
                         "HIPBLASLTPROVIDER_ENABLE_ROCBLAS or both; with neither it serves nothing")
@@ -201,6 +204,7 @@ if(HIPBLASLTPROVIDER_ENABLE_HIPBLASLT)
         HipblasltMatmulDesc.cpp
         HipblasltMatrixLayout.cpp
         HipblasltMatrixTransformDesc.cpp
+        $<$<BOOL:${HIPBLASLTPROVIDER_ENABLE_CONV}>:engines/hipblaslt/HipblasltGemmPlan.cpp>
     )
     target_link_libraries(hipblaslt_plugin_private PUBLIC roc::hipblaslt)
     target_compile_definitions(hipblaslt_plugin_private PUBLIC HIPBLASLTPROVIDER_ENABLE_HIPBLASLT=1)
@@ -208,13 +212,20 @@ endif()
 target_sources(hipblaslt_plugin_private PRIVATE
     common/GemmFormulation.cpp
     common/MatmulProblem.cpp
+    $<$<BOOL:${HIPBLASLTPROVIDER_ENABLE_CONV}>:common/ConvProblem.cpp>
+    $<$<BOOL:${HIPBLASLTPROVIDER_ENABLE_CONV}>:common/ConvGemmFormulation.cpp>
+    $<$<BOOL:${HIPBLASLTPROVIDER_ENABLE_CONV}>:engines/conv/ConvGemmPlanBuilder.cpp>
     $<$<BOOL:${HIPBLASLTPROVIDER_ENABLE_ROCBLAS}>:engines/rocblas/RocblasGemm.cpp>
     $<$<BOOL:${HIPBLASLTPROVIDER_ENABLE_ROCBLAS}>:engines/rocblas/RocblasMatmulPlanBuilder.cpp>
+    $<$<BOOL:${HIPBLASLTPROVIDER_ENABLE_ROCBLAS}>:engines/rocblas/RocblasGemmPlan.cpp>
 )
 target_include_directories(hipblaslt_plugin_private PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 if(HIPBLASLTPROVIDER_ENABLE_ROCBLAS)
     target_link_libraries(hipblaslt_plugin_private PUBLIC roc::rocblas)
     target_compile_definitions(hipblaslt_plugin_private PUBLIC HIPBLASLTPROVIDER_ENABLE_ROCBLAS=1)
+endif()
+if(HIPBLASLTPROVIDER_ENABLE_CONV)
+    target_compile_definitions(hipblaslt_plugin_private PUBLIC HIPBLASLTPROVIDER_ENABLE_CONV=1)
 endif()
 dnn_provider_generate_version_header(hipblaslt_provider hipblaslt_plugin_private ${CMAKE_CURRENT_LIST_DIR})
 target_link_libraries(hipblaslt_plugin_private PUBLIC hipdnn_data_sdk hipdnn_flatbuffers_sdk hipdnn_plugin_sdk hip::host)

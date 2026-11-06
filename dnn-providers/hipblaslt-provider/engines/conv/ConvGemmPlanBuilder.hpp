@@ -1,0 +1,57 @@
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier:  MIT
+
+#pragma once
+
+#include <functional>
+#include <memory>
+#include <optional>
+#include <vector>
+
+#include "common/ConvGemmFormulation.hpp"
+#include "engines/plans/PlanBuilderInterface.hpp"
+#include "engines/plans/PlanInterface.hpp"
+
+namespace hipblaslt_plugin
+{
+
+/**
+ * @brief Explicit-GEMM convolution, forward, backward data and backward weights, over one BLAS
+ *        backend.
+ *
+ * Backend-neutral: the convolution resolves to GEMM calls (common/ConvGemmFormulation.hpp)
+ * and the backend only runs them, through the plan factory it is constructed with. Built in
+ * the shape of a kernel-ingestor native pack -- graph match (parseConvProblem), applicability
+ * (the catalog row and the backend's own plan), a catalog of variants (the rows) and a dispatch
+ * (the plan) -- so it can move onto universal descriptors without restructuring.
+ */
+class ConvGemmPlanBuilder : public IPlanBuilder
+{
+public:
+    /// Builds the backend's plan for @p calls, or throws when the backend cannot run them.
+    using PlanFactory = std::function<std::unique_ptr<IPlan>(const HipdnnEnginePluginHandle&,
+                                                             std::vector<GemmCall>)>;
+
+    explicit ConvGemmPlanBuilder(PlanFactory factory);
+
+    bool isApplicable(
+        const HipdnnEnginePluginHandle& handle,
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph) const override;
+
+    size_t getWorkspaceSize(
+        const HipdnnEnginePluginHandle& handle,
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph) const override;
+
+    void buildPlan(const HipdnnEnginePluginHandle& handle,
+                   const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
+                   HipdnnEnginePluginExecutionContext& executionContext) const override;
+
+private:
+    /// The calls for @p opGraph in whichever direction it is, or nullopt.
+    static std::optional<ConvGemmPlanCalls>
+        callsFor(const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph);
+
+    PlanFactory _factory;
+};
+
+} // namespace hipblaslt_plugin

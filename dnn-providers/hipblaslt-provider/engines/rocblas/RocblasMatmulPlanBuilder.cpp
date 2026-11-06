@@ -4,15 +4,15 @@
 #include "engines/rocblas/RocblasMatmulPlanBuilder.hpp"
 
 #include <memory>
+#include <vector>
 
-#include <hipdnn_plugin_sdk/PluginDeviceBuffers.hpp>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 
 #include "HipdnnEnginePluginExecutionContext.hpp"
 #include "HipdnnEnginePluginHandle.hpp"
 #include "common/MatmulProblem.hpp"
-#include "engines/rocblas/RocblasGemm.hpp"
+#include "engines/rocblas/RocblasGemmPlan.hpp"
 
 namespace hipblaslt_plugin
 {
@@ -44,42 +44,7 @@ void RocblasMatmulPlanBuilder::buildPlan(
     }
     HIPDNN_PLUGIN_LOG_INFO(
         "Building rocBLAS matmul plan for node: " << opGraph.getNodeWrapper(0).name());
-    executionContext.setPlan(std::make_unique<RocblasMatmulPlan>(*call));
-}
-
-RocblasMatmulPlan::RocblasMatmulPlan(GemmCall call)
-    : _call(call)
-{
-}
-
-size_t RocblasMatmulPlan::getWorkspaceSize(const HipdnnEnginePluginHandle& /*handle*/) const
-{
-    return 0;
-}
-
-void RocblasMatmulPlan::execute(const HipdnnEnginePluginHandle& handle,
-                                const hipdnnPluginDeviceBuffer_t* deviceBuffers,
-                                uint32_t numDeviceBuffers,
-                                void* /*workspace*/) const
-{
-    const auto a
-        = hipdnn_plugin_sdk::findDeviceBuffer(_call.a.uid, deviceBuffers, numDeviceBuffers);
-    const auto b
-        = hipdnn_plugin_sdk::findDeviceBuffer(_call.b.uid, deviceBuffers, numDeviceBuffers);
-    const auto d
-        = hipdnn_plugin_sdk::findDeviceBuffer(_call.d.uid, deviceBuffers, numDeviceBuffers);
-
-    const rocblas_handle rocblasHandle = handle.rocblasHandle();
-    if(rocblas_set_stream(rocblasHandle, handle.getStream()) != rocblas_status_success)
-    {
-        throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
-                                                       "rocblas_set_stream failed");
-    }
-    rocblas_backend::runGemm(rocblasHandle,
-                             _call,
-                             operandAddress(a.ptr, _call.a),
-                             operandAddress(b.ptr, _call.b),
-                             operandAddress(d.ptr, _call.d));
+    executionContext.setPlan(std::make_unique<RocblasGemmPlan>(std::vector<GemmCall>{*call}));
 }
 
 } // namespace hipblaslt_plugin

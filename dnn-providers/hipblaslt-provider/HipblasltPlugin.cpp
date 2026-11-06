@@ -127,6 +127,14 @@ hipdnnPluginStatus_t hipdnnEnginePluginGetAllEngineIdsImpl(int64_t* engineIds,
 #ifdef HIPBLASLTPROVIDER_ENABLE_ROCBLAS
         allEngineIds.push_back(hipdnn_data_sdk::utilities::ROCBLAS_MATMUL_ENGINE_ID);
 #endif
+#ifdef HIPBLASLTPROVIDER_ENABLE_CONV
+#ifdef HIPBLASLTPROVIDER_ENABLE_HIPBLASLT
+        allEngineIds.push_back(hipdnn_data_sdk::utilities::HIPBLASLT_CONV_ENGINE_ID);
+#endif
+#ifdef HIPBLASLTPROVIDER_ENABLE_ROCBLAS
+        allEngineIds.push_back(hipdnn_data_sdk::utilities::ROCBLAS_CONV_ENGINE_ID);
+#endif
+#endif
         if(allEngineIds.size() > std::numeric_limits<uint32_t>::max())
         {
             throw HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,

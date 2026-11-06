@@ -46,6 +46,14 @@ TEST(TestHipblasltEnginePluginApi, GetAllEngineIdsValid)
 #ifdef HIPBLASLTPROVIDER_ENABLE_ROCBLAS
     expected.push_back(ROCBLAS_MATMUL_ENGINE_ID);
 #endif
+#ifdef HIPBLASLTPROVIDER_ENABLE_CONV
+#ifdef HIPBLASLTPROVIDER_ENABLE_HIPBLASLT
+    expected.push_back(HIPBLASLT_CONV_ENGINE_ID);
+#endif
+#ifdef HIPBLASLTPROVIDER_ENABLE_ROCBLAS
+    expected.push_back(ROCBLAS_CONV_ENGINE_ID);
+#endif
+#endif
 
     std::vector<int64_t> engineIds(expected.size(), 0);
     uint32_t numEngines = 0;
