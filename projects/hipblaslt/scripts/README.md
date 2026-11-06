@@ -37,6 +37,12 @@ This script and the CMake pre-build gate explicitly enable TensileLogic's bundle
 
 Documented known bugs are still re-validated on every run instead of being blindly skipped. If a listed solution **now passes** validation (the underlying bug was fixed), the run prints a `Stale known-bugs` warning naming the entry to remove. Pass **`--strict-known-bugs`** to make the run exit non-zero on any stale entry; use that in CI or in the PR that lands the fix, so the fixing PR also removes the listing.
 
+### In CI
+
+`Component CI: hipBLASLt Logic Corpus` ([`component-ci-logic-corpus.yml`](../../../.github/workflows/component-ci-logic-corpus.yml)) runs this script with `--strict-known-bugs` on every pull request that touches the library logic, `known_bugs.yaml` or the other `TensileLogic` sources, or this script. A failure blocks the merge through the required `Component CI Summary`. It runs through `tox -e logic-corpus` in `tensilelite/`, which pip-installs rocisa instead of building hipBLASLt; the script accepts an installed rocisa when no build tree is present.
+
+On a pull request the lane passes `--changed-files=FILE`, the paths the pull request changed, one per line. The script then checks only the architectures that the changed logic YAMLs declare, which keeps the lane to minutes; the whole tree takes about half an hour on four workers. A change to the `TensileLogic` validators, `known_bugs.yaml`, the YAML loader or this script can affect every architecture, so it checks the whole tree, as does an empty value (`--changed-files=`), which is what a manual run of the workflow uses. A change list with none of those in it checks nothing.
+
 ### Exit code
 
 - **0** – All solutions passed (Reject = 0).

@@ -1337,4 +1337,274 @@ TEST(TestFillInputs, BlockScaleDequantizeRangesRecordedInMetadata)
     EXPECT_FLOAT_EQ(inputs.at("2").at("hi").get<float>(), 0.5f);
 }
 
+// ── Resample backward: the max-pooling index is the forward's argmax ─────────
+// uids: dy=1, index=2, dx=3. The scratch x the derivation pools is filled
+// uniformly in [-1, 1] from the index's seed, so with the seed pinned the test
+// rebuilds the same x and checks each index against an argmax computed here.
+
+namespace
+{
+
+constexpr unsigned int kResampleIndexSeed = 1234;
+
+struct ResampleBwdOptions
+{
+    std::vector<int64_t> dxDims = {1, 2, 5, 6};
+    std::vector<int64_t> dyDims = {1, 2, 3, 3};
+    std::vector<int64_t> prePadding = {1, 1};
+    std::vector<int64_t> postPadding = {1, 1};
+    std::vector<int64_t> stride = {2, 2};
+    std::vector<int64_t> window = {3, 3};
+    ResampleMode mode = ResampleMode::MAXPOOL;
+    PaddingMode paddingMode = PaddingMode::ZERO_PAD;
+    DataType indexType = DataType::INT32;
+};
+
+GraphResult buildResampleBwdGraph(const ResampleBwdOptions& opts)
+{
+    using hipdnn_data_sdk::utilities::generateStrides;
+
+    GraphResult r;
+    auto& b = r.builder;
+
+    const auto dyStrides = generateStrides(opts.dyDims);
+    const auto dxStrides = generateStrides(opts.dxDims);
+
+    std::vector<flatbuffers::Offset<TensorAttributes>> tensors;
+    tensors.push_back(
+        CreateTensorAttributesDirect(b, 1, "dy", DataType::FLOAT, &dyStrides, &opts.dyDims));
+    tensors.push_back(
+        CreateTensorAttributesDirect(b, 2, "index", opts.indexType, &dyStrides, &opts.dyDims));
+    tensors.push_back(
+        CreateTensorAttributesDirect(b, 3, "dx", DataType::FLOAT, &dxStrides, &opts.dxDims));
+
+    auto bwd = CreateResampleBwdAttributesDirect(b,
+                                                 1,
+                                                 3,
+                                                 2,
+                                                 &opts.prePadding,
+                                                 &opts.postPadding,
+                                                 &opts.stride,
+                                                 &opts.window,
+                                                 opts.mode,
+                                                 opts.paddingMode);
+
+    std::vector<flatbuffers::Offset<Node>> nodes;
+    nodes.push_back(CreateNodeDirect(
+        b, "resample_bwd", DataType::FLOAT, NodeAttributes::ResampleBwdAttributes, bwd.Union()));
+
+    auto graph = CreateGraphDirect(
+        b, "test", DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, &tensors, &nodes);
+    b.Finish(graph);
+
+    r.graph = GetGraph(b.GetBufferPointer());
+    return r;
+}
+
+// The index is filled with a fixed 7, which a forward over these shapes never
+// writes everywhere, so a derived index is told apart from a filled one.
+FillResult fillResampleBwd(const GraphResult& gr,
+                           InputTensorMap& inputs,
+                           const std::vector<int64_t>& ownedUids)
+{
+    InputFillRecipes recipes;
+    recipes.setGlobalSeed(42);
+    recipes.setSeed(2, kResampleIndexSeed);
+    recipes.set(2, FillRecipe::fixed(7.0f));
+    return fillInputs(*gr.graph, inputs, ownedUids, recipes, nullptr);
+}
+
+InputTensorMap fillResampleBwdInputs(const GraphResult& gr)
+{
+    const auto leafUids = gr.leafInputUids({3});
+    auto inputs = makeTensorsFromGraph(gr, leafUids);
+    const auto result = fillResampleBwd(gr, inputs, leafUids);
+    EXPECT_TRUE(result.filled) << result.reason;
+    return inputs;
+}
+
+// Checks every index against the argmax of the x the derivation pooled: the first
+// maximum in window order, -1 when it is a zero-padding element, and with
+// NEG_INF_PAD only in-bounds elements competing.
+void expectIndexIsForwardArgmax(InputTensorMap& inputs, const ResampleBwdOptions& opts)
+{
+    using hipdnn_data_sdk::utilities::generateStrides;
+
+    hipdnn_data_sdk::utilities::Tensor<float> x(opts.dxDims, generateStrides(opts.dxDims));
+    x.fillWithRandomValues(-1.0f, 1.0f, kResampleIndexSeed);
+    auto& index = typedTensor<int32_t>(inputs, 2);
+
+    const std::size_t spatialRank = opts.dxDims.size() - 2;
+    int64_t spatialSize = 1;
+    for(std::size_t i = 2; i < opts.dxDims.size(); ++i)
+    {
+        spatialSize *= opts.dxDims[i];
+    }
+
+    std::size_t checked = 0;
+    std::size_t padded = 0;
+    hipdnn_data_sdk::utilities::iterateAlongDimensions(
+        opts.dyDims, [&](const std::vector<int64_t>& dyIndices) {
+            bool selected = false;
+            float best = 0.0f;
+            int32_t bestIndex = -1;
+            hipdnn_data_sdk::utilities::iterateAlongDimensions(
+                opts.window, [&](const std::vector<int64_t>& windowIndices) {
+                    std::vector<int64_t> xIndices = {dyIndices[0], dyIndices[1]};
+                    bool inBounds = true;
+                    int64_t flat = 0;
+                    for(std::size_t i = 0; i < spatialRank; ++i)
+                    {
+                        const int64_t at = (dyIndices[i + 2] * opts.stride[i]) + windowIndices[i]
+                                           - opts.prePadding[i];
+                        inBounds = inBounds && at >= 0 && at < opts.dxDims[i + 2];
+                        xIndices.push_back(at);
+                        flat = (flat * opts.dxDims[i + 2]) + at;
+                    }
+                    if(!inBounds && opts.paddingMode == PaddingMode::NEG_INF_PAD)
+                    {
+                        return;
+                    }
+                    const float value = inBounds ? x.getHostValue(xIndices) : 0.0f;
+                    if(!selected || value > best)
+                    {
+                        selected = true;
+                        best = value;
+                        bestIndex = inBounds ? static_cast<int32_t>(flat) : -1;
+                    }
+                });
+
+            const int32_t actual = index.getHostValue(dyIndices);
+            EXPECT_EQ(actual, bestIndex);
+            EXPECT_GE(actual, -1);
+            EXPECT_LT(actual, spatialSize);
+            padded += actual == -1 ? 1 : 0;
+            ++checked;
+        });
+
+    int64_t dyElements = 1;
+    for(const int64_t d : opts.dyDims)
+    {
+        dyElements *= d;
+    }
+    EXPECT_EQ(checked, static_cast<std::size_t>(dyElements));
+    if(opts.paddingMode == PaddingMode::NEG_INF_PAD)
+    {
+        EXPECT_EQ(padded, 0u);
+    }
+}
+
+void expectIndexAllEqual(InputTensorMap& inputs, int32_t value)
+{
+    auto& index = typedTensor<int32_t>(inputs, 2);
+    const std::vector<int64_t> dims = index.dims();
+    hipdnn_data_sdk::utilities::iterateAlongDimensions(
+        dims, [&](const std::vector<int64_t>& at) { EXPECT_EQ(index.getHostValue(at), value); });
+}
+
+} // namespace
+
+TEST(TestFillInputs, ResampleBwdMaxpoolIndexIsForwardArgmax2dZeroPad)
+{
+    const ResampleBwdOptions opts;
+    const auto gr = buildResampleBwdGraph(opts);
+    auto inputs = fillResampleBwdInputs(gr);
+    expectIndexIsForwardArgmax(inputs, opts);
+}
+
+TEST(TestFillInputs, ResampleBwdMaxpoolIndexIsForwardArgmax2dNegInfPad)
+{
+    ResampleBwdOptions opts;
+    opts.paddingMode = PaddingMode::NEG_INF_PAD;
+    const auto gr = buildResampleBwdGraph(opts);
+    auto inputs = fillResampleBwdInputs(gr);
+    expectIndexIsForwardArgmax(inputs, opts);
+}
+
+TEST(TestFillInputs, ResampleBwdMaxpoolIndexIsForwardArgmax3d)
+{
+    ResampleBwdOptions opts;
+    opts.dxDims = {1, 2, 3, 4, 4};
+    opts.dyDims = {1, 2, 2, 2, 2};
+    opts.prePadding = {0, 0, 0};
+    opts.postPadding = {0, 0, 0};
+    opts.stride = {1, 2, 2};
+    opts.window = {2, 2, 2};
+    const auto gr = buildResampleBwdGraph(opts);
+    auto inputs = fillResampleBwdInputs(gr);
+    expectIndexIsForwardArgmax(inputs, opts);
+}
+
+// The device and reference bundles are filled separately; both must hold the
+// same indices.
+TEST(TestFillInputs, ResampleBwdIndexIsDeterministicAcrossFills)
+{
+    const ResampleBwdOptions opts;
+    const auto gr = buildResampleBwdGraph(opts);
+    const auto leafUids = gr.leafInputUids({3});
+
+    auto fillOnce = [&]() {
+        auto inputs = makeTensorsFromGraph(gr, leafUids);
+        InputFillRecipes recipes;
+        recipes.setGlobalSeed(42);
+        EXPECT_TRUE(fillInputs(*gr.graph, inputs, leafUids, recipes, nullptr).filled);
+        return inputs;
+    };
+    auto first = fillOnce();
+    auto second = fillOnce();
+
+    auto& a = typedTensor<int32_t>(first, 2);
+    auto& b = typedTensor<int32_t>(second, 2);
+    const std::vector<int64_t> dims = a.dims();
+    hipdnn_data_sdk::utilities::iterateAlongDimensions(dims, [&](const std::vector<int64_t>& at) {
+        EXPECT_EQ(a.getHostValue(at), b.getHostValue(at));
+    });
+}
+
+TEST(TestFillInputs, ResampleBwdAvgpoolLeavesIndexFilled)
+{
+    ResampleBwdOptions opts;
+    opts.mode = ResampleMode::AVGPOOL_INCLUDE_PADDING;
+    const auto gr = buildResampleBwdGraph(opts);
+    auto inputs = fillResampleBwdInputs(gr);
+    expectIndexAllEqual(inputs, 7);
+}
+
+// In a fused forward-backward graph the forward node computes the index.
+TEST(TestFillInputs, ResampleBwdComputedIndexIsNotDerived)
+{
+    const ResampleBwdOptions opts;
+    const auto gr = buildResampleBwdGraph(opts);
+    const std::vector<int64_t> owned = {1};
+    auto inputs = makeTensorsFromGraph(gr, owned);
+    const auto result = fillResampleBwd(gr, inputs, owned);
+    EXPECT_TRUE(result.filled) << result.reason;
+    EXPECT_EQ(inputs.count(2), 0u);
+}
+
+TEST(TestFillInputs, ResampleBwdNonInt32IndexIsUnsupported)
+{
+    ResampleBwdOptions opts;
+    opts.indexType = DataType::INT64;
+    const auto gr = buildResampleBwdGraph(opts);
+    const auto leafUids = gr.leafInputUids({3});
+    auto inputs = makeTensorsFromGraph(gr, leafUids);
+    const auto result = fillResampleBwd(gr, inputs, leafUids);
+    EXPECT_FALSE(result.filled);
+    EXPECT_NE(result.reason.find("resample_bwd"), std::string::npos) << result.reason;
+    EXPECT_NE(result.reason.find("INT64"), std::string::npos) << result.reason;
+}
+
+// The CPU forward rejects a window whose rank does not match the tensors; the
+// index keeps its fill so the CPU backward reference, which rejects it too,
+// fails the graph instead of it being skipped.
+TEST(TestFillInputs, ResampleBwdRejectedShapeKeepsFill)
+{
+    ResampleBwdOptions opts;
+    opts.window = {3};
+    const auto gr = buildResampleBwdGraph(opts);
+    auto inputs = fillResampleBwdInputs(gr);
+    expectIndexAllEqual(inputs, 7);
+}
+
 // NOLINTEND(readability-identifier-naming)
