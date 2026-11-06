@@ -844,6 +844,129 @@ TEST(TestGpuOutputComparison, DeviceSiteAcceptsMatchingDeviceValues)
             .has_value());
 }
 
+// The device site grades a floating-point allclose tensor by the host rule: two infinities
+// of the same sign match. Both kinds are checked, because an engine TOML can select either.
+TEST(TestGpuOutputComparison, DeviceSiteMatchesSameSignedInfinities)
+{
+    SKIP_IF_NO_DEVICES();
+
+    const auto buffer = makeGraphBuffer();
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper wrapper{buffer.data(),
+                                                                             buffer.size()};
+    const auto& attrs = *wrapper.getTensorMap().at(K_UID_B);
+
+    for(const auto& tolerance : {exact(), exactMatchingInfinities()})
+    {
+        for(const float inf : {-K_INF, K_INF})
+        {
+            auto expected = floatTensor3(attrs, inf, 1.0f, inf);
+            auto actual = floatTensor3(attrs, inf, 1.0f, inf);
+            EXPECT_FALSE(
+                compareTensor(
+                    K_UID_B, attrs, *expected, *actual, tolerance, ValidationSite::DEVICE, "b")
+                    .has_value())
+                << "both sides hold " << inf << " and both are right";
+        }
+    }
+
+    const auto halfBuffer = makeGraphBufferWithStatsType("half");
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper halfWrapper{halfBuffer.data(),
+                                                                                 halfBuffer.size()};
+    const auto& halfAttrs = *halfWrapper.getTensorMap().at(K_UID_STATS);
+    auto expected = floatTensor(halfAttrs, -K_INF);
+    auto actual = floatTensor(halfAttrs, -K_INF);
+    EXPECT_FALSE(
+        compareTensor(
+            K_UID_STATS, halfAttrs, *expected, *actual, exact(), ValidationSite::DEVICE, "b")
+            .has_value())
+        << "a HALF output follows the same rule";
+}
+
+TEST(TestGpuOutputComparison, DeviceSiteStillRejectsWhatTheHostRejects)
+{
+    SKIP_IF_NO_DEVICES();
+
+    const auto buffer = makeGraphBuffer();
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper wrapper{buffer.data(),
+                                                                             buffer.size()};
+    const auto& attrs = *wrapper.getTensorMap().at(K_UID_B);
+
+    struct Case
+    {
+        const char* name;
+        float expected0;
+        float actual0;
+        float actual1;
+    };
+    const std::vector<Case> cases = {
+        {"opposite-signed infinities", -K_INF, K_INF, 1.0f},
+        {"NaN on both sides", K_NAN, K_NAN, 1.0f},
+        {"finite versus infinite", -K_INF, -1e30f, 1.0f},
+        {"infinite versus finite", 1.0f, K_INF, 1.0f},
+        {"a drifted finite element beside matched infinities", -K_INF, -K_INF, 1.1f},
+    };
+    for(const auto& c : cases)
+    {
+        for(const auto& tolerance : {exact(), exactMatchingInfinities()})
+        {
+            auto expected = floatTensor3(attrs, c.expected0, 1.0f, 2.0f);
+            auto actual = floatTensor3(attrs, c.actual0, c.actual1, 2.0f);
+            EXPECT_TRUE(
+                compareTensor(
+                    K_UID_B, attrs, *expected, *actual, tolerance, ValidationSite::DEVICE, "b")
+                    .has_value())
+                << c.name;
+        }
+    }
+
+    auto expected = floatTensor3(attrs, -K_INF, 1.0f, 2.0f);
+    auto actual = floatTensor3(attrs, -K_INF, 1.1f, 2.0f);
+    EXPECT_FALSE(compareTensor(K_UID_B,
+                               attrs,
+                               *expected,
+                               *actual,
+                               ComparisonTolerance::allClose(0.2f, 0.0f),
+                               ValidationSite::DEVICE,
+                               "b")
+                     .has_value())
+        << "atol still decides the finite elements";
+}
+
+// The host grading at the device site reads the values the engine and the reference left
+// on the device, not the stale host fill.
+TEST(TestGpuOutputComparison, DeviceSiteInfinityMatchReadsTheDeviceValues)
+{
+    SKIP_IF_NO_DEVICES();
+
+    const auto buffer = makeGraphBuffer();
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper wrapper{buffer.data(),
+                                                                             buffer.size()};
+    const auto& attrs = *wrapper.getTensorMap().at(K_UID_A);
+
+    auto differingOnDevice = floatTensor(attrs, -K_INF);
+    auto differingOnDeviceToo = floatTensor(attrs, -K_INF);
+    ASSERT_NO_FATAL_FAILURE(overwriteOnDevice(*differingOnDevice, 1.0f));
+    ASSERT_NO_FATAL_FAILURE(overwriteOnDevice(*differingOnDeviceToo, 9.25f));
+    EXPECT_TRUE(compareTensor(K_UID_A,
+                              attrs,
+                              *differingOnDevice,
+                              *differingOnDeviceToo,
+                              exact(),
+                              ValidationSite::DEVICE,
+                              "b")
+                    .has_value())
+        << "the device values differ; only the stale host fill holds matching infinities";
+
+    auto expected = floatTensor(attrs, 3.5f);
+    auto actual = floatTensor(attrs, 9.25f);
+    ASSERT_NO_FATAL_FAILURE(overwriteOnDevice(*expected, -K_INF));
+    ASSERT_NO_FATAL_FAILURE(overwriteOnDevice(*actual, -K_INF));
+    EXPECT_FALSE(
+        compareTensor(K_UID_A, attrs, *expected, *actual, exact(), ValidationSite::DEVICE, "b")
+            .has_value())
+        << "the device values are matching infinities; only the stale host fill differs";
+}
+
 // ---------------------------------------------------------------------------
 // ALLCLOSE_MATCHING_INFINITIES. An output whose correct value is infinite on both
 // sides — a fully masked SDPA forward log-sum-exp row — cannot be graded by
@@ -1044,47 +1167,25 @@ TEST(TestOutputComparison, AllcloseMatchingInfinitiesOnAnUnsupportedDataTypeIsRe
     EXPECT_NE(mismatch->report.find("Narrow that entry's 'tensors' glob"), std::string::npos);
 }
 
-// This kind exists only as a host validator. A GPU reference leaves its output on the
-// device, so the comparison runs there: identical data passes on the host and is refused
-// on the device. Serving the device request from the host validator would read device
-// memory through host pointers.
-TEST(TestOutputComparison, AllcloseMatchingInfinitiesOnTheDeviceIsRefusedNotHostGraded)
+// makeValidator() has no device validator for this kind. The C++ graph harness builds its
+// validators through it, so a device request is refused with a report.
+TEST(TestOutputComparison, AllcloseMatchingInfinitiesValidatorIsRefusedOnTheDevice)
 {
-    const auto buffer = makeGraphBuffer();
-    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper wrapper{buffer.data(),
-                                                                             buffer.size()};
-    const auto& attrs = *wrapper.getTensorMap().at(K_UID_B);
+    using hipdnn_flatbuffers_sdk::data_objects::DataType;
 
-    auto expected = floatTensor3(attrs, -K_INF, 1.0f, -K_INF);
-    auto actual = floatTensor3(attrs, -K_INF, 1.0f, -K_INF);
+    EXPECT_NE(
+        makeValidator(DataType::FLOAT, "y_out", exactMatchingInfinities(), ValidationSite::HOST)
+            .validator,
+        nullptr);
 
-    // The control. Without it, a refusal that fired on every site would still pass.
-    EXPECT_FALSE(compareTensor(K_UID_B,
-                               attrs,
-                               *expected,
-                               *actual,
-                               exactMatchingInfinities(),
-                               ValidationSite::HOST,
-                               "b")
-                     .has_value())
-        << "on the host this kind accepts the matched infinities";
-
-    std::optional<hipdnn_integration_tests::bundle::TensorMismatch> mismatch;
-    ASSERT_NO_THROW(mismatch = compareTensor(K_UID_B,
-                                             attrs,
-                                             *expected,
-                                             *actual,
-                                             exactMatchingInfinities(),
-                                             ValidationSite::DEVICE,
-                                             "Bundle: b"));
-
-    ASSERT_TRUE(mismatch.has_value())
-        << "a device-site request must not be served by the host validator";
-    EXPECT_NE(mismatch->report.find("allclose_matching_infinities"), std::string::npos)
+    const auto selection = makeValidator(
+        DataType::FLOAT, "y_out", exactMatchingInfinities(), ValidationSite::DEVICE);
+    EXPECT_EQ(selection.validator, nullptr);
+    EXPECT_NE(selection.error.find("allclose_matching_infinities"), std::string::npos)
         << "the operator has to be told which validator could not be honoured";
-    EXPECT_NE(mismatch->report.find("--validator cpu"), std::string::npos)
+    EXPECT_NE(selection.error.find("--validator cpu"), std::string::npos)
         << "and the one flag that makes the run grade on the host instead";
-    EXPECT_EQ(mismatch->report.find("does not support this data type"), std::string::npos)
+    EXPECT_EQ(selection.error.find("does not support this data type"), std::string::npos)
         << "the report must not blame the data type for a site refusal";
 }
 

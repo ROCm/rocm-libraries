@@ -210,7 +210,7 @@ void BundleReferenceValidationHarness::TestBody()
     // An SDPA forward stats (LSE) output matches same-signed infinities: a row with no live
     // key (fully masked, or padding past seq_len_q) has LSE = -inf by contract
     // (SdpaSemanticsRegister.md SEM-010), so -inf on both sides is agreement, not a defect.
-    // On the host, compareTensor() matches them for every floating-point allclose output.
+    // compareTensor() matches them for every floating-point allclose output.
     std::set<std::string> sdpaStatsLabels;
     const auto& tensorMap = wrapper.getTensorMap();
     for(uint32_t i = 0; i < wrapper.nodeCount(); ++i)
