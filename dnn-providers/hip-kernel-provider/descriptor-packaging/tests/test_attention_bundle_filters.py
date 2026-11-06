@@ -6,7 +6,8 @@ src/integration_tests/) passes, and the ../CMakeLists.txt variable holding its
 hipkernel_*_test_categories_integration.yaml, from which the check's CTest suites take
 theirs under YAML categorization, one per category. Both must name the same bundles, so
 editing one without the other fails here. Rows sharing a YAML must share a filter, and
-every attention categories YAML must be some row's.
+every attention categories YAML must be some row's. Each attention knob suite in
+src/integration_tests/CMakeLists.txt pins engines the table names.
 
 A pattern is "<tier>_<bundle>", <tier> one of the four bundle tier directories or "*"
 for all of them. Each category selects every bundle the CMake filter does at each tier
@@ -26,6 +27,8 @@ pytestmark = pytest.mark.quick
 PROVIDER = Path(__file__).resolve().parents[2]
 PROVIDER_CMAKE = PROVIDER / "CMakeLists.txt"
 SRC_CMAKE = PROVIDER / "src/CMakeLists.txt"
+INTEGRATION_CMAKE = PROVIDER / "src/integration_tests/CMakeLists.txt"
+KNOB_SUITES_DIR = PROVIDER / "src/integration_tests/kernel_ingestor_engine"
 PACKS = PROVIDER / "src/tests/engines/kernel_ingestor_engine/packs"
 TABLE = "HKP_PINNED_ATTENTION_ENGINES"
 ROW_FIELDS = 6
@@ -106,6 +109,30 @@ def test_each_row_names_an_arch_its_toml_and_its_packs_suite(row):
     assert f'{{"{arch}",' in suite.read_text(
         encoding="utf-8"
     ), f"{SRC_CMAKE}: {TABLE} {local}: {suite.name} pins no {arch} inventory"
+
+
+def knob_suites():
+    """The _knob_suites rows of src/integration_tests/CMakeLists.txt: (source, engines)."""
+    text = INTEGRATION_CMAKE.read_text(encoding="utf-8")
+    calls = re.findall(r"\bset\(\s*_knob_suites\s([^)]*)\)", text)
+    assert len(calls) == 1, f"{INTEGRATION_CMAKE}: _knob_suites set {len(calls)} times"
+    fields = re.sub(r"#[^\n]*", "", calls[0]).split()
+    assert (
+        fields and len(fields) % 2 == 0
+    ), f"{INTEGRATION_CMAKE}: _knob_suites {fields}"
+    return [(fields[i], fields[i + 1].split(",")) for i in range(0, len(fields), 2)]
+
+
+@pytest.mark.parametrize(
+    "source, engines",
+    [pytest.param(source, engines, id=source) for source, engines in knob_suites()],
+)
+def test_each_knob_suite_pins_engines_the_table_names(source, engines):
+    """A misspelt engine is offered by no product, so its suite compiles silently out."""
+    assert (KNOB_SUITES_DIR / source).is_file(), f"{INTEGRATION_CMAKE}: no {source}"
+    pinned = {local for _arch, _slug, local, *_ in pinned_engines()}
+    unknown = sorted(set(engines) - pinned)
+    assert not unknown, f"{INTEGRATION_CMAKE}: {source} pins {unknown}, not in {TABLE}"
 
 
 def test_rows_sharing_a_categories_yaml_share_a_filter():
