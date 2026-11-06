@@ -110,44 +110,18 @@ namespace rocRoller::Client::GEMMClient
 
     template <typename A, typename B, typename D>
     std::pair<bool, double>
-        validate(hostnumerics::GeneratedGEMMInputs const&                generatedInputs,
-                 const roc::hostnumerics::Tensor&                        hostD,
-                 std::vector<uint8_t> const&                             hostScaleA,
-                 std::vector<uint8_t> const&                             hostScaleB,
-                 rocRoller::Client::GEMMClient::ProblemParameters const& problemParams,
-                 GPUArchitecture const&                                  arch)
+        validate(hostnumerics::GeneratedGEMMInputs const&                  generatedInputs,
+                 const roc::hostnumerics::Tensor&                          hostD,
+                 std::optional<roc::hostnumerics::MatmulBlockScale> const& scaleA,
+                 std::optional<roc::hostnumerics::MatmulBlockScale> const& scaleB,
+                 rocRoller::Client::GEMMClient::ProblemParameters const&   problemParams,
+                 GPUArchitecture const&                                    arch)
     {
-        const bool hasScales = generatedInputs.scaleA || generatedInputs.scaleB
-                               || !hostScaleA.empty() || !hostScaleB.empty();
-        const size_t scaleBlockSize
-            = hasScales ? (problemParams.types.scaleBlockSize > 0
-                               ? static_cast<size_t>(problemParams.types.scaleBlockSize)
-                               : problemParams.k)
-                        : 0;
-
-        std::optional<roc::hostnumerics::Tensor> runtimeScaleA;
-        std::optional<roc::hostnumerics::Tensor> runtimeScaleB;
-        if(!generatedInputs.scaleA && !hostScaleA.empty())
-        {
-            runtimeScaleA = hostnumerics::hostScaleTensor(problemParams.types.scaleTypeA,
-                                                          std::span<const uint8_t>(hostScaleA),
-                                                          problemParams.m,
-                                                          problemParams.k,
-                                                          scaleBlockSize);
-        }
-        if(!generatedInputs.scaleB && !hostScaleB.empty())
-        {
-            runtimeScaleB = hostnumerics::hostScaleTensor(problemParams.types.scaleTypeB,
-                                                          std::span<const uint8_t>(hostScaleB),
-                                                          problemParams.n,
-                                                          problemParams.k,
-                                                          scaleBlockSize);
-        }
-
-        const auto floatReference = hostnumerics::computeHostReference(generatedInputs,
-                                                                       runtimeScaleA,
-                                                                       runtimeScaleB,
-                                                                       scaleBlockSize,
+        const auto floatReference = hostnumerics::computeHostReference(generatedInputs.a,
+                                                                       generatedInputs.b,
+                                                                       generatedInputs.c,
+                                                                       scaleA,
+                                                                       scaleB,
                                                                        problemParams.alpha,
                                                                        problemParams.beta);
         const auto hostReference  = hostnumerics::convertHostReferenceTensor<D>(floatReference);
@@ -206,16 +180,14 @@ namespace rocRoller::Client::GEMMClient
             hostnumerics::hostOutputLayout(problemParams.m, problemParams.n));
         std::vector<uint8_t> hostScaleA, hostScaleB;
 
-        constexpr auto seed           = 31415u;
-        auto           scaleTypeA     = DataType::None;
-        auto           scaleTypeB     = DataType::None;
-        auto           scaleBlockSize = size_t{1};
+        constexpr auto                                seed = 31415u;
+        std::optional<hostnumerics::BlockScaleFormat> scaleFormatA, scaleFormatB;
         if(problemParams.types.scaleA == Operations::ScaleMode::Separate
            || problemParams.types.scaleB == Operations::ScaleMode::Separate)
         {
             AssertFatal(problemParams.types.scaleBlockSize > 0,
                         "scaleBlockSize must be set to scale A or B.");
-            scaleBlockSize = static_cast<size_t>(problemParams.types.scaleBlockSize);
+            const auto scaleBlockSize = static_cast<size_t>(problemParams.types.scaleBlockSize);
             AssertFatal(arch.isSupportedScaleBlockSize(scaleBlockSize),
                         fmt::format("Architecture {} does not support block scaling (size: {}).",
                                     arch.target().toString(),
@@ -225,9 +197,9 @@ namespace rocRoller::Client::GEMMClient
                                     problemParams.k,
                                     scaleBlockSize));
             if(problemParams.types.scaleA == Operations::ScaleMode::Separate)
-                scaleTypeA = problemParams.types.scaleTypeA;
+                scaleFormatA = {problemParams.types.scaleTypeA, scaleBlockSize};
             if(problemParams.types.scaleB == Operations::ScaleMode::Separate)
-                scaleTypeB = problemParams.types.scaleTypeB;
+                scaleFormatB = {problemParams.types.scaleTypeB, scaleBlockSize};
         }
 
         auto generatedInputs = hostnumerics::generateGEMMInputs(descA,
@@ -236,9 +208,8 @@ namespace rocRoller::Client::GEMMClient
                                                                 problemParams.initModeA,
                                                                 problemParams.initModeB,
                                                                 problemParams.initModeC,
-                                                                scaleTypeA,
-                                                                scaleTypeB,
-                                                                scaleBlockSize,
+                                                                scaleFormatA,
+                                                                scaleFormatB,
                                                                 -1.f,
                                                                 1.f,
                                                                 seed);
@@ -246,9 +217,13 @@ namespace rocRoller::Client::GEMMClient
         hostB                = hostnumerics::copyTensorStorage<PackedTypeB>(generatedInputs.b);
         hostC                = hostnumerics::copyTensorStorage<C>(generatedInputs.c);
         if(generatedInputs.scaleA)
-            hostScaleA = hostnumerics::copyTensorStorage<uint8_t>(*generatedInputs.scaleA);
+            hostScaleA = hostnumerics::copyTensorStorage<uint8_t>(generatedInputs.scaleA->scales);
         if(generatedInputs.scaleB)
-            hostScaleB = hostnumerics::copyTensorStorage<uint8_t>(*generatedInputs.scaleB);
+            hostScaleB = hostnumerics::copyTensorStorage<uint8_t>(generatedInputs.scaleB->scales);
+        // The scales the host reference applies: generated block scales here,
+        // or the uniform scales chosen with the kernel arguments below.
+        auto referenceScaleA = generatedInputs.scaleA;
+        auto referenceScaleB = generatedInputs.scaleB;
 
         // Pre-tile B on the host when pretileB is set (kernel expects pre-tiled layout)
         std::vector<PackedTypeB> hostBForKernel(hostB);
@@ -347,6 +322,7 @@ namespace rocRoller::Client::GEMMClient
                     ShowValue(problemParams.types.scaleB));
         if(problemParams.types.scaleA == Operations::ScaleMode::Separate)
         {
+            const size_t scaleBlockSize = scaleFormatA->blockSize;
             if((problemParams.types.scaleSkipPermlane != ScaleSkipPermlaneMode::None)
                || (not problemParams.types.scalePretileA.empty()))
             {
@@ -416,6 +392,7 @@ namespace rocRoller::Client::GEMMClient
         }
         if(problemParams.types.scaleB == Operations::ScaleMode::Separate)
         {
+            const size_t scaleBlockSize = scaleFormatB->blockSize;
             if((problemParams.types.scaleSkipPermlane != ScaleSkipPermlaneMode::None)
                || (not problemParams.types.scalePretileB.empty()))
             {
@@ -512,7 +489,8 @@ namespace rocRoller::Client::GEMMClient
             auto [aScaleTag, bScaleTag] = gemm->getABScaleTags();
             commandArgs.setArgument(aScaleTag.value(), ArgumentType::Value, scaleValue);
 
-            hostScaleA = {scaleValue};
+            referenceScaleA = hostnumerics::hostUniformScale(
+                problemParams.types.scaleTypeA, scaleValue, problemParams.m, problemParams.k);
         }
 
         if(problemParams.types.scaleB == Operations::ScaleMode::Separate)
@@ -533,7 +511,8 @@ namespace rocRoller::Client::GEMMClient
             auto [aScaleTag, bScaleTag] = gemm->getABScaleTags();
             commandArgs.setArgument(bScaleTag.value(), ArgumentType::Value, scaleValue);
 
-            hostScaleB = {scaleValue};
+            referenceScaleB = hostnumerics::hostUniformScale(
+                problemParams.types.scaleTypeB, scaleValue, problemParams.n, problemParams.k);
         }
 
         gemm->validateRunParameters(
@@ -659,7 +638,7 @@ namespace rocRoller::Client::GEMMClient
                             == (hipError_t)HIP_SUCCESS);
 
             auto [correct, rnorm] = validate<A, B, D>(
-                generatedInputs, hostD, hostScaleA, hostScaleB, problemParams, arch);
+                generatedInputs, hostD, referenceScaleA, referenceScaleB, problemParams, arch);
 
             // Verify ZeroedBeforeAndAfter scratch is all zeros after kernel
             auto zeroedIdx = static_cast<size_t>(Operations::ScratchPolicy::ZeroedBeforeAndAfter);

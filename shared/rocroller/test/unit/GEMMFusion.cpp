@@ -129,9 +129,8 @@ namespace GEMMDriverTest
                                                                     bounded,
                                                                     bounded,
                                                                     bounded,
-                                                                    DataType::None,
-                                                                    DataType::None,
-                                                                    1,
+                                                                    std::nullopt,
+                                                                    std::nullopt,
                                                                     -1.0f,
                                                                     1.0f,
                                                                     31415u);
@@ -365,7 +364,6 @@ namespace GEMMDriverTest
                         descC, hostC, hostnumerics::DataTypeInterpretation::Unscaled),
                     std::nullopt,
                     std::nullopt,
-                    0,
                     alpha,
                     beta));
             // Host leaky relu

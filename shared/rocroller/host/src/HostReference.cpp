@@ -3,6 +3,7 @@
 
 #include <rocRoller/hostnumerics/HostReference.hpp>
 
+#include <algorithm>
 #include <sstream>
 #include <utility>
 
@@ -22,18 +23,18 @@ namespace rocRoller::hostnumerics
             return type == DataType::E4M3 || type == DataType::E5M3 || type == DataType::E8M0;
         }
 
-        void validateBlockScaleShape(Tensor const& values,
-                                     size_t        freeExtent,
-                                     size_t        reductionExtent,
-                                     size_t        blockSize,
-                                     char const*   name)
+        void validateBlockScaleShape(roc::hostnumerics::MatmulBlockScale const& scale,
+                                     size_t                                     freeExtent,
+                                     size_t                                     reductionExtent,
+                                     char const*                                name)
         {
+            const size_t blockSize = scale.blockSize;
             if(blockSize == 0)
                 throw std::runtime_error("rocRoller scale block size must be nonzero.");
 
             const size_t blockCount = reductionExtent / blockSize
                                       + static_cast<size_t>(reductionExtent % blockSize != 0);
-            if(values.shape() != Shape{freeExtent, blockCount})
+            if(scale.scales.shape() != Shape{freeExtent, blockCount})
                 throw std::runtime_error(std::string("rocRoller ") + name
                                          + " scales must have shape [free extent, K block].");
         }
@@ -61,61 +62,54 @@ namespace rocRoller::hostnumerics
         return statistics.passed();
     }
 
-    roc::hostnumerics::Tensor hostScaleTensor(DataType                 type,
-                                              std::span<const uint8_t> values,
-                                              size_t                   freeExtent,
-                                              size_t                   reductionExtent,
-                                              size_t                   blockSize)
+    roc::hostnumerics::MatmulBlockScale hostBlockScale(DataType                 type,
+                                                       std::span<const uint8_t> values,
+                                                       TensorDescriptor const&  dataDescriptor,
+                                                       size_t                   blockedDimension,
+                                                       size_t                   blockSize)
+    {
+        using roc::hostnumerics::storageBytesForLayout;
+        using roc::hostnumerics::Tensor;
+
+        if(!isSupportedScaleType(type))
+            throw std::runtime_error("rocRoller block scales require a scale data type.");
+        auto const layout     = hostScaleLayout(dataDescriptor, blockedDimension, blockSize);
+        auto const scalarType = hostScalarType(type, DataTypeInterpretation::Unscaled);
+        if(values.size_bytes() != storageBytesForLayout(scalarType, layout))
+            throw std::runtime_error(
+                "rocRoller block-scale storage does not match its data descriptor.");
+        return {Tensor::copyEncodedBackingStorage(scalarType, layout, std::as_bytes(values)),
+                blockSize};
+    }
+
+    roc::hostnumerics::MatmulBlockScale
+        hostUniformScale(DataType type, uint8_t value, size_t freeExtent, size_t reductionExtent)
     {
         using roc::hostnumerics::Layout;
         using roc::hostnumerics::Shape;
         using roc::hostnumerics::Tensor;
-        auto const scalarType = hostScalarType(type, DataTypeInterpretation::Unscaled);
+
         if(!isSupportedScaleType(type))
-            throw std::runtime_error("rocRoller runtime scale requires a scale data type.");
-        if(values.size() != 1)
-            throw std::runtime_error("rocRoller runtime scale storage must contain one scalar.");
-        if(blockSize == 0)
-            throw std::runtime_error("rocRoller runtime scale block size must be nonzero.");
-        const size_t blockCount
-            = reductionExtent / blockSize + static_cast<size_t>(reductionExtent % blockSize != 0);
-        return Tensor::copyEncodedBackingStorage(
-            scalarType, Layout(Shape{freeExtent, blockCount}, {0, 0}, 0), std::as_bytes(values));
+            throw std::runtime_error("rocRoller uniform scale requires a scale data type.");
+        // An empty reduction still needs a nonzero block size; it then has no blocks.
+        const size_t blockSize  = std::max<size_t>(reductionExtent, 1);
+        const size_t blockCount = reductionExtent == 0 ? 0 : 1;
+        const auto   bytes      = std::as_bytes(std::span(&value, 1));
+        return {Tensor::copyEncodedBackingStorage(
+                    hostScalarType(type, DataTypeInterpretation::Unscaled),
+                    Layout(Shape{freeExtent, blockCount}, {0, 0}, 0),
+                    bytes),
+                blockSize};
     }
 
-    roc::hostnumerics::Tensor hostScaleTensor(DataType                 type,
-                                              std::span<const uint8_t> values,
-                                              TensorDescriptor const&  dataDescriptor,
-                                              size_t                   blockedDimension,
-                                              size_t                   blockSize)
-    {
-        using roc::hostnumerics::Layout;
-        using roc::hostnumerics::storageBytesForLayout;
-        using roc::hostnumerics::Tensor;
-
-        auto const layout     = hostScaleLayout(dataDescriptor, blockedDimension, blockSize);
-        auto const scalarType = hostScalarType(type, DataTypeInterpretation::Unscaled);
-        if(!isSupportedScaleType(type))
-            throw std::runtime_error("rocRoller block scales require a scale data type.");
-        if(values.size() == 1)
-            return Tensor::copyEncodedBackingStorage(
-                scalarType, Layout(layout.shape(), {0, 0}, 0), std::as_bytes(values));
-
-        auto const requiredBytes = storageBytesForLayout(scalarType, layout);
-        if(values.size_bytes() != requiredBytes)
-            throw std::runtime_error(
-                "rocRoller block-scale storage does not match its data descriptor.");
-        return Tensor::copyEncodedBackingStorage(scalarType, layout, std::as_bytes(values));
-    }
-
-    roc::hostnumerics::Tensor computeHostReference(roc::hostnumerics::Tensor                a,
-                                                   roc::hostnumerics::Tensor                b,
-                                                   roc::hostnumerics::Tensor                c,
-                                                   std::optional<roc::hostnumerics::Tensor> scaleA,
-                                                   std::optional<roc::hostnumerics::Tensor> scaleB,
-                                                   size_t scaleBlockSize,
-                                                   float  alpha,
-                                                   float  beta)
+    roc::hostnumerics::Tensor
+        computeHostReference(roc::hostnumerics::Tensor                          a,
+                             roc::hostnumerics::Tensor                          b,
+                             roc::hostnumerics::Tensor                          c,
+                             std::optional<roc::hostnumerics::MatmulBlockScale> scaleA,
+                             std::optional<roc::hostnumerics::MatmulBlockScale> scaleB,
+                             float                                              alpha,
+                             float                                              beta)
     {
         using roc::hostnumerics::add;
         using roc::hostnumerics::Layout;
@@ -135,17 +129,11 @@ namespace rocRoller::hostnumerics
 
         MatmulOptions options(ScalarType::Float32);
         if(scaleA)
-        {
-            validateBlockScaleShape(*scaleA, a.shape()[0], a.shape()[1], scaleBlockSize, "A");
-            options.blockScaleA
-                = roc::hostnumerics::MatmulBlockScale{std::move(*scaleA), scaleBlockSize};
-        }
+            validateBlockScaleShape(*scaleA, a.shape()[0], a.shape()[1], "A");
         if(scaleB)
-        {
-            validateBlockScaleShape(*scaleB, b.shape()[1], b.shape()[0], scaleBlockSize, "B");
-            options.blockScaleB
-                = roc::hostnumerics::MatmulBlockScale{std::move(*scaleB), scaleBlockSize};
-        }
+            validateBlockScaleShape(*scaleB, b.shape()[1], b.shape()[0], "B");
+        options.blockScaleA = std::move(scaleA);
+        options.blockScaleB = std::move(scaleB);
 
         const size_t rows = a.shape()[0];
         if(rows > static_cast<size_t>(std::numeric_limits<ptrdiff_t>::max()))
@@ -170,21 +158,10 @@ namespace rocRoller::hostnumerics
     }
 
     roc::hostnumerics::Tensor
-        computeHostReference(GeneratedGEMMInputs const&               inputs,
-                             std::optional<roc::hostnumerics::Tensor> runtimeScaleA,
-                             std::optional<roc::hostnumerics::Tensor> runtimeScaleB,
-                             size_t                                   scaleBlockSize,
-                             float                                    alpha,
-                             float                                    beta)
+        computeHostReference(GeneratedGEMMInputs const& inputs, float alpha, float beta)
     {
-        return computeHostReference(inputs.a,
-                                    inputs.b,
-                                    inputs.c,
-                                    runtimeScaleA ? std::move(runtimeScaleA) : inputs.scaleA,
-                                    runtimeScaleB ? std::move(runtimeScaleB) : inputs.scaleB,
-                                    scaleBlockSize,
-                                    alpha,
-                                    beta);
+        return computeHostReference(
+            inputs.a, inputs.b, inputs.c, inputs.scaleA, inputs.scaleB, alpha, beta);
     }
 
     HostComparisonResult compareHostReference(roc::hostnumerics::Tensor observed,

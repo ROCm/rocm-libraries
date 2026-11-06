@@ -418,14 +418,14 @@ namespace MatrixMultiplyTest
 
                 float alpha = 1.0f;
 
-                std::optional<roc::hostnumerics::Tensor> referenceScaleA;
-                std::optional<roc::hostnumerics::Tensor> referenceScaleB;
+                std::optional<roc::hostnumerics::MatmulBlockScale> referenceScaleA;
+                std::optional<roc::hostnumerics::MatmulBlockScale> referenceScaleB;
                 if(scaleA)
                 {
                     ASSERT_TRUE(scaleB);
-                    referenceScaleA = hostnumerics::hostScaleTensor(
+                    referenceScaleA = hostnumerics::hostBlockScale(
                         scaleTypeA, hostScaleA, descA, 1, scaleBlockSize);
-                    referenceScaleB = hostnumerics::hostScaleTensor(
+                    referenceScaleB = hostnumerics::hostBlockScale(
                         scaleTypeB, hostScaleB, descB, 0, scaleBlockSize);
                 }
                 else
@@ -448,7 +448,6 @@ namespace MatrixMultiplyTest
                             descD, c_C, hostnumerics::DataTypeInterpretation::Unscaled),
                         std::move(referenceScaleA),
                         std::move(referenceScaleB),
-                        scaleA ? scaleBlockSize : 0,
                         alpha,
                         0.0f));
 
@@ -692,7 +691,6 @@ namespace MatrixMultiplyTest
                             descD, c_C, hostnumerics::DataTypeInterpretation::Unscaled),
                         std::nullopt,
                         std::nullopt,
-                        0,
                         1.0f,
                         0.0f));
 
@@ -848,7 +846,6 @@ namespace MatrixMultiplyTest
                         descC, C, hostnumerics::DataTypeInterpretation::Unscaled),
                     std::nullopt,
                     std::nullopt,
-                    0,
                     1.0f,
                     1.0f));
 

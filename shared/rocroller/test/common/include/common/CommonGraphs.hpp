@@ -249,18 +249,16 @@ namespace rocRollerTest
                 TensorDescriptor descC(dataTypeC, {size_t(M), size_t(N)}, "N");
                 TensorDescriptor descD(dataTypeD, {size_t(M), size_t(N)}, "N");
 
-                auto const seed           = 31415u;
-                auto const bounded        = hostnumerics::DataInitialization{};
-                auto       scaleTypeA     = DataType::None;
-                auto       scaleTypeB     = DataType::None;
-                size_t     scaleBlockSize = 1;
+                auto const seed    = 31415u;
+                auto const bounded = hostnumerics::DataInitialization{};
+                std::optional<hostnumerics::BlockScaleFormat> scaleFormatA, scaleFormatB;
                 if(m_problem.scaleAMode == Operations::ScaleMode::Separate
                    || m_problem.scaleBMode == Operations::ScaleMode::Separate)
                 {
                     auto const& arch = context->targetArchitecture();
                     AssertFatal(m_problem.scaleBlockSize > 0,
                                 "scaleBlockSize must be set to scale A or B.");
-                    scaleBlockSize = static_cast<size_t>(m_problem.scaleBlockSize);
+                    const auto scaleBlockSize = static_cast<size_t>(m_problem.scaleBlockSize);
                     AssertFatal(
                         arch.isSupportedScaleBlockSize(scaleBlockSize),
                         fmt::format("Architecture {} does not support block scaling (size: {}).",
@@ -271,8 +269,11 @@ namespace rocRollerTest
                                             m_problem.k,
                                             scaleBlockSize));
 
-                    scaleTypeA = m_problem.scaleTypeA;
-                    scaleTypeB = m_problem.scaleTypeB;
+                    // GEMMProblem leaves the scale type of an unscaled operand as None.
+                    if(m_problem.scaleTypeA != DataType::None)
+                        scaleFormatA = {m_problem.scaleTypeA, scaleBlockSize};
+                    if(m_problem.scaleTypeB != DataType::None)
+                        scaleFormatB = {m_problem.scaleTypeB, scaleBlockSize};
                 }
 
                 auto generatedInputs = hostnumerics::generateGEMMInputs(descA,
@@ -281,9 +282,8 @@ namespace rocRollerTest
                                                                         bounded,
                                                                         bounded,
                                                                         bounded,
-                                                                        scaleTypeA,
-                                                                        scaleTypeB,
-                                                                        scaleBlockSize,
+                                                                        scaleFormatA,
+                                                                        scaleFormatB,
                                                                         -1.0f,
                                                                         1.0f,
                                                                         seed);
@@ -291,9 +291,11 @@ namespace rocRollerTest
                 hostB = hostnumerics::copyTensorStorage<PackedTypeB>(generatedInputs.b);
                 hostC = hostnumerics::copyTensorStorage<TC>(generatedInputs.c);
                 if(generatedInputs.scaleA)
-                    hostScaleA = hostnumerics::copyTensorStorage<uint8_t>(*generatedInputs.scaleA);
+                    hostScaleA
+                        = hostnumerics::copyTensorStorage<uint8_t>(generatedInputs.scaleA->scales);
                 if(generatedInputs.scaleB)
-                    hostScaleB = hostnumerics::copyTensorStorage<uint8_t>(*generatedInputs.scaleB);
+                    hostScaleB
+                        = hostnumerics::copyTensorStorage<uint8_t>(generatedInputs.scaleB->scales);
 
                 auto deviceA = make_shared_device<TA>(hostA);
                 auto deviceB = make_shared_device<TB>(hostB);
