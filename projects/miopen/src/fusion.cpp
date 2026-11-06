@@ -975,6 +975,10 @@ std::vector<miopenConvSolution_t> GetSolutions(const FusionContext& ctx,
 
     for(const auto& pair : fdb_record)
     {
+        // Solvers Find skipped for lack of workspace have no measured time.
+        if(!pair.second.IsMeasured())
+            continue;
+
         const auto solver_id = solver::Id{pair.first};
 
         // Wrong IDs can't be used to call IsApplicable(), so let's

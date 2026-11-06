@@ -15,6 +15,11 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
   Find for each problem measures again, and the user waits for it. Deterministic immediate mode no
   longer reads the shipped find-db times. Those times can come from split-K > 1 kernels, so they
   do not apply to deterministic mode.
+* [Conv] Find results are now written to the user find-db when a solver is skipped because the
+  provided workspace is too small. The skipped solver is stored as a not-measured entry with the
+  workspace it needs: the record is reused while callers provide the same workspace, and Find runs
+  again once they provide enough for that solver. Previously nothing was written, so Hybrid and
+  Dynamic Hybrid Find (the default) ran Find again for such problems in every process.
 * [Conv] Fixed the 3D grouped backward-weights CK xdlops convolution solver skipping
   `valid_kernels[0]` during exhaustive tuning: the populate branch fell through instead of emitting
   the seeded first config, so GenericSearch began enumeration at `valid_kernels[1]` and the first

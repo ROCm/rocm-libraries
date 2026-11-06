@@ -101,6 +101,23 @@ std::vector<miopenConvSolution_t> GetSolutions(const ExecutionContext& ctx,
 
     for(const auto& pair : fdb_record)
     {
+        // A solver Find skipped for lack of workspace has no measured time. If it fits the
+        // workspace provided now, the record is not the best solution for this call: report none,
+        // so that Hybrid Find runs Normal Find (TryLoad() then runs Find again).
+        if(!pair.second.IsMeasured())
+        {
+            if(invokeParams != nullptr && conv::IsEnoughWorkspace("GetSolutions",
+                                                                  solver::Id{pair.first},
+                                                                  pair.second.workspace,
+                                                                  invokeParams,
+                                                                  false))
+            {
+                MIOPEN_LOG_I("Find-db record was found with less workspace than provided now.");
+                return {};
+            }
+            continue;
+        }
+
         const auto algo = static_cast<miopenConvAlgorithm_t>(algo_resolver(pair.second.algorithm));
         if(conv::IsAlgorithmDisabled(algo, problem))
             continue;
@@ -914,7 +931,10 @@ static std::size_t GetSolutionCount(const Handle& handle, const conv::ProblemDes
     const FindDbRecord fdb_record{handle, problem};
     if(fdb_record.empty())
         return 0;
-    return std::distance(fdb_record.begin(), fdb_record.end());
+    // Solvers Find skipped for lack of workspace are not solutions.
+    return std::count_if(fdb_record.begin(), fdb_record.end(), [](const auto& pair) {
+        return pair.second.IsMeasured();
+    });
 }
 
 static const char immFallbackFailed[] =
