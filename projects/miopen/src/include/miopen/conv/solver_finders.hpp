@@ -160,6 +160,9 @@ const std::vector<std::unique_ptr<ISolversFinder>>& GetConvSolverFinders();
 struct FindCoreResult
 {
     std::vector<Solution> solutions;
+    /// Applicable solvers that were not evaluated because the provided workspace was too small,
+    /// with the workspace each needs. Written to the find-db as not-measured entries.
+    std::vector<Solution> skipped_for_workspace;
     float find_search_best_time = std::numeric_limits<float>::max();
     bool is_optimal;
 };
