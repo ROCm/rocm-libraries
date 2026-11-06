@@ -48,8 +48,12 @@ jobs:
       AMDGPU_FAMILIES: ${{ inputs.amdgpu_families }}
       SCRIPTS_DIR: ${{ github.workspace }}/rocm-libraries/.github/scripts
       REPORT_DIR: ${{ github.workspace }}/rocjitsu-tensilelite-reports
-      # Some configs need well over an hour under emulation.
-      PER_TEST_TIMEOUT: "10800"
+      # The FFM gfx1250 lane's per-test limit (ffm-quick in test_categories.yaml),
+      # so the two emulators are compared on the same terms.
+      PER_TEST_TIMEOUT: "2700"
+      # Keep pytest's collection order, as FFM does. "true" starts the longest
+      # recorded tests first (rocjitsu_tensilelite_durations.json).
+      LONGEST_FIRST: "false"
       # Leave time within the 345-minute step for cleanup and report generation.
       SUITE_TIMEOUT_SECONDS: "19800"
       # Oldest rocm-systems commit this lane passes with (it has #13534, the lost
@@ -187,6 +191,14 @@ jobs:
           config["num_threads"] = 1
           json.dump(config, open(destination, "w"), indent=2)
           PY
+          # Ductile reads the CU count from rocminfo, which cannot see the
+          # emulated device; HSA reports SIMDs / SIMDs per CU.
+          cu_count="$(python - "${config}" <<'PY'
+          import json, sys
+          device = json.load(open(sys.argv[1]))["vm"]["gpu"]["device"]
+          print(device["simd_count"] // device["simd_per_cu"])
+          PY
+          )"
 
           # The compiler runtime is flat or under a host-triple directory.
           llvm_lib="${ROCM_PATH}/lib/llvm/lib"
@@ -205,6 +217,7 @@ jobs:
             echo "OMP_THREAD_LIMIT=${budget}"
             echo "TENSILELITE_ROOT=${tensilelite_root}"
             echo "TENSILELITE_CLIENT=${client}"
+            echo "CU=${cu_count}"
             echo "LD_LIBRARY_PATH=${ROCM_PATH}/lib:${ROCM_PATH}/lib/rocm_sysdeps/lib:${llvm_lib_path}${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
             echo "PYTHONPATH=${SCRIPTS_DIR}:${tensilelite_root}${PYTHONPATH:+:${PYTHONPATH}}"
           } >> "${GITHUB_ENV}"
@@ -212,7 +225,7 @@ jobs:
           echo "${ROCM_PATH}/lib/llvm/bin" >> "${GITHUB_PATH}"
 
           echo "target=${target} profile=${profile} config=${config}"
-          echo "host_cores=${cores} xdist_workers=${workers} cpu_thread_budget=${budget} omp_thread_limit=${budget}"
+          echo "host_cores=${cores} xdist_workers=${workers} cpu_thread_budget=${budget} omp_thread_limit=${budget} cu=${cu_count}"
           grep MemTotal /proc/meminfo
           "${ROCM_PATH}/bin/mirage" --version
           echo "rocjitsu library: ${rocjitsu_lib}"
@@ -234,12 +247,16 @@ jobs:
       - name: Run rocjitsu tensilelite tests
         id: tests
         # The suite supervisor stops earlier, leaving time to reap and report.
-        # Recorded durations start the longest tests first; refresh them from
-        # a run's uploaded durations.json. Tests still running 5 minutes before
-        # their timeout leave process states and stacks in stalls/.
+        # With LONGEST_FIRST, recorded durations start the longest tests first;
+        # refresh them from a run's uploaded durations.json. Tests still running
+        # 5 minutes before their timeout leave process states and stacks in stalls/.
         timeout-minutes: 345
         run: |
           set -o pipefail
+          order=()
+          if [[ "${LONGEST_FIRST}" == "true" ]]; then
+            order=(--rocjitsu-durations="${SCRIPTS_DIR}/rocjitsu_tensilelite_durations.json")
+          fi
           cd "${REPORT_DIR}"
           python "${SCRIPTS_DIR}/rocjitsu_pytest.py" \
             --report-dir "${REPORT_DIR}" --timeout "${SUITE_TIMEOUT_SECONDS}" -- \
@@ -247,7 +264,7 @@ jobs:
               --config "${REPORT_DIR}/rocjitsu-config.json" -- \
             python -m pytest "${TENSILELITE_ROOT}/tensilelite/Tests/common/test_config.py" \
               -p rocjitsu_pytest --rocjitsu-report-dir="${REPORT_DIR}" \
-              --rocjitsu-durations="${SCRIPTS_DIR}/rocjitsu_tensilelite_durations.json" \
+              "${order[@]}" \
               --rocjitsu-stall-dump-after="$(( PER_TEST_TIMEOUT - 300 ))" \
               -m "${ROCJITSU_TARGET}" --gpu-targets="${ROCJITSU_TARGET}" \
               -v -s -n "${PYTEST_WORKERS}" --client-lock-scope=worker \
@@ -273,34 +290,6 @@ jobs:
       - name: Check suite completeness
         if: ${{ !cancelled() && steps.tests.conclusion != 'skipped' }}
         run: python "${SCRIPTS_DIR}/rocjitsu_check_suite.py" --report-dir "${REPORT_DIR}"
-
-      # TEMPORARY diagnostic: the ductile tests fail here but pass locally, and
-      # Tensile prints its fatal message to stdout, which xdist workers drop.
-      # Rerun the failed ones without xdist so the message reaches the log.
-      - name: Rerun failed ductile tests without xdist
-        if: ${{ !cancelled() && steps.tests.conclusion == 'failure' }}
-        continue-on-error: true
-        timeout-minutes: 30
-        run: |
-          set -o pipefail
-          mapfile -t failed < <(python - "${REPORT_DIR}/progress.json" <<'PY'
-          import json, sys
-          tests = json.load(open(sys.argv[1])).get("tests", {})
-          print("\n".join(n for n, t in tests.items()
-                          if "/ductile/" in n and t.get("outcome") == "failed"))
-          PY
-          )
-          if (( ${#failed[@]} == 0 )); then echo "No failed ductile tests"; exit 0; fi
-          cd "${TENSILELITE_ROOT}"
-          mirage run --profile "${MIRAGE_PROFILE}" --in-process \
-              --config "${REPORT_DIR}/rocjitsu-config.json" -- \
-            python -m pytest "${failed[@]}" \
-              --gpu-targets="${ROCJITSU_TARGET}" -v -s --timeout=600 \
-              -p no:cacheprovider --basetemp="${RUNNER_TEMP}/ductile-rerun" \
-              --prebuilt-client="${TENSILELITE_CLIENT}" \
-              --global-parameters="LibraryFormat='msgpack'" \
-              "--tensile-options=--cxx-compiler,${ROCM_PATH}/bin/amdclang++,--gpu-targets,${ROCJITSU_TARGET}" \
-            2>&1 | tee "${REPORT_DIR}/ductile-rerun.log"
 
       - name: Upload test reports
         if: ${{ always() }}
