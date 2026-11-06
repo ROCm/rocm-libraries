@@ -239,6 +239,19 @@ class KernelCodeGenResult(NamedTuple):
     pgr: int
     mathclk: int
     customKernelDef: Optional[dict] = None
+    # The four fields below are values codegen sets on the kernel (LdsNumBytes and LoopIters
+    # from the subtile LDS layout / ForceUnrollSubIter, then _subtileUnitScaleVgpr and
+    # LdsOffsetBias). A worker process's kernel is a copy, so passPostKernelInfoToSolution
+    # copies them back. Each is None when the kernel has no such key: custom kernels read from
+    # a file set none of LdsNumBytes, LoopIters, _subtileUnitScaleVgpr or LdsOffsetBias.
+    ldsNumBytes: Optional[int] = None
+    loopIters: Optional[int] = None
+    # Unit-scale VGPR of plain-FP8 subtile kernels (Components/Subtile/Kernel.py); None when
+    # codegen did not set it, so the solution gets the key only when in-process codegen would.
+    subtileUnitScaleVgpr: Optional[int] = None
+    # The epilogue codegen switches LdsOffsetBias between its GSU / non-GSU values and leaves
+    # the last one on the kernel (KernelWriterAssembly); returned so worker codegen records it too.
+    ldsOffsetBias: Optional[int] = None
 
 class KernelMinResult(NamedTuple):
     err: int
@@ -530,7 +543,8 @@ def _emitKernel(kernelWriterAssembly, splitGSU, kernel, compress=False) -> Kerne
         err, src, header, asmFilename, objFilename, tuple(kernel["ISA"]),
         kernel["WavefrontSize"], cuocc,
         pgr, kernel["MathClocksUnrolledLoop"],
-        customKernelDef
+        customKernelDef, kernel._state.get("LdsNumBytes"), kernel._state.get("LoopIters"),
+        kernel._state.get("_subtileUnitScaleVgpr"), kernel._state.get("LdsOffsetBias")
     )
 
 
@@ -704,15 +718,28 @@ def passPostKernelInfoToSolution(results, kernels, solutions, splitGSU: bool):
     resultDict = {}
     for kernIdx, r in enumerate(results):
         kName = getKernelCompileKey(kernels[kernIdx], splitGSU)
-        resultDict["%s"%kName] = r
+        resultDict["%s"%kName] = (r, kernels[kernIdx])
     for solution in solutions:
         solutionKernels = solution.getKernels()
         for kernel in solutionKernels:
             kName = getKernelCompileKey(kernel, splitGSU)
-            result = resultDict["%s"%kName]
+            result, generated = resultDict["%s"%kName]
             solution._state["CUOccupancy"] = result.cuoccupancy
             solution._state["PrefetchGlobalRead"] = result.pgr
             solution._state["MathClocksUnrolledLoop"] = result.mathclk
+            # Copied only when the generated kernel has them, so a solution never gets a key
+            # in-process codegen would not leave on it.
+            if result.ldsNumBytes is not None:
+                solution._state["LdsNumBytes"] = result.ldsNumBytes
+            if result.loopIters is not None:
+                solution._state["LoopIters"] = result.loopIters
+            # Codegen leaves these on the kernel it generated only (in-process, that is this
+            # solution itself); placement aliases keep their own values, as they do in-process.
+            if kernel is generated:
+                if result.ldsOffsetBias is not None:
+                    solution._state["LdsOffsetBias"] = result.ldsOffsetBias
+                if result.subtileUnitScaleVgpr is not None:
+                    solution._state["_subtileUnitScaleVgpr"] = result.subtileUnitScaleVgpr
             if result.customKernelDef is not None:
                 solution._state["CustomKernel"] = result.customKernelDef
 
