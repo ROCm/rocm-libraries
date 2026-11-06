@@ -244,28 +244,9 @@ def worker_lock_instance(worker_lock_path):
 
 @pytest.fixture
 def tensile_args(request, pytestconfig, builddir, worker_lock_path):
-    rv = []
-    if worker_lock_path:
-        rv += ["--client-lock", str(worker_lock_path)]
-
-    extraOptions = pytestconfig.getoption("--tensile-options")
-    if extraOptions is not None:
-        rv += extraOptions.split(",")
-    if pytestconfig.getoption("--global-parameters"):
-        rv += ["--global-parameters", pytestconfig.getoption("--global-parameters")]
+    from tensilelite.Tests.tensile_args import tensileArgs
     world = request.node.get_closest_marker("world")
-    if world:
-        rv += ["--global-parameters", f"WorldFilter={list(world.args)}"]
-    if not pytestconfig.getoption("--no-common-build"):
-        if pytestconfig.getoption("--prebuilt-client"):
-            rv += ["--prebuilt-client", pytestconfig.getoption("--prebuilt-client")]
-
-    # Forward --gpu-targets to tensilelite. Do NOT forward --build-only or
-    # --use-cache here — those are hardcoded in each test function's args.
-    if pytestconfig.getoption("--gpu-targets"):
-        rv += ["--gpu-targets", pytestconfig.getoption("--gpu-targets")]
-
-    return rv
+    return tensileArgs(pytestconfig.getoption, worker_lock_path, world.args if world else None)
 
 def visibleDeviceCount():
     """
