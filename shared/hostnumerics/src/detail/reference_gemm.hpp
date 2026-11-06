@@ -15,6 +15,7 @@
 #include <vector>
 
 #include "gemm_invocation.hpp"
+#include "layout_analysis.hpp"
 #include "reference_common.hpp"
 #include "threading.hpp"
 

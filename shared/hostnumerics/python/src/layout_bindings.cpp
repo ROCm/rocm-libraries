@@ -75,11 +75,12 @@ the traversal reaches a zero extent.
             [](const Layout& layout) {
                 const auto result = layout.getElementBounds();
                 if (!result) throw std::runtime_error(result.error().message());
-                return nb::make_tuple(result->first, result->second);
+                if (!*result) return nb::object(nb::none());
+                return nb::object(nb::make_tuple((*result)->lowest, (*result)->highest));
             },
             "Return inclusive minimum and maximum reachable element offsets. Empty shapes "
-            "return (0, -1), and scalars return (offset, offset). Raises RuntimeError if "
-            "an intermediate product or sum does not fit ptrdiff_t.")
+            "address no element and return None; scalars return (offset, offset). Raises "
+            "RuntimeError if an intermediate product or sum does not fit ptrdiff_t.")
         .def(
             "element_offset",
             [](const Layout& layout, const std::vector<size_t>& indices) {

@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "detail/index_iteration.hpp"
+#include "detail/layout_analysis.hpp"
 #include "detail/prepared_scalar_storage.hpp"
 #include "detail/tensor_conversion.hpp"
 #include "detail/tensor_storage.hpp"
@@ -53,10 +54,10 @@ detail::Expected<size_t, detail::StorageFailure> detail::getStorageBytesForLayou
     if (!isConcreteScalarType(type)) {
         return detail::Unexpected(detail::StorageFailure(detail::StorageError::InvalidScalarType));
     }
-    const auto bounds = detail::getElementBounds(layout);
+    const auto bounds = layout.getElementBounds();
     if (!bounds) return detail::Unexpected(detail::StorageFailure(bounds.error()));
-    const auto [lower, upper] = *bounds;
-    if (upper < lower) return 0;
+    if (!*bounds) return 0;
+    const auto [lower, upper] = **bounds;
     if (lower < 0) {
         return detail::Unexpected(detail::StorageFailure(detail::StorageError::BeforeStorageBase));
     }

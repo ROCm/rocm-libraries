@@ -6,6 +6,7 @@
 #include <stdexcept>
 #include <string>
 
+#include "detail/layout_analysis.hpp"
 #include "detail/tensor_storage.hpp"
 
 namespace roc::hostnumerics::detail {

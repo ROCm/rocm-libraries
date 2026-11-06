@@ -49,6 +49,14 @@ inline std::string LayoutFailure::message() const {
 }
 }  // namespace detail
 
+// Inclusive range of element offsets reachable through a Layout.
+struct ElementOffsetBounds {
+    ptrdiff_t lowest;
+    ptrdiff_t highest;
+
+    bool operator==(const ElementOffsetBounds&) const noexcept = default;
+};
+
 // Maps logical coordinates to element offsets using a shape, strides and a
 // starting offset. Offsets count elements. Strides may be negative or zero, so
 // offsets can be negative and distinct coordinates can share one; Layout does
@@ -177,14 +185,15 @@ class Layout {
 
     // Inclusive minimum and maximum reachable element offsets, for validating
     // storage once before an internal loop. Scalars return {offset, offset}; an
-    // empty shape returns {0, -1}. Every intermediate product and sum must fit
-    // ptrdiff_t. This query does not allocate or inspect a storage buffer.
-    detail::Expected<std::pair<ptrdiff_t, ptrdiff_t>, detail::LayoutFailure> getElementBounds()
+    // empty shape addresses no element and returns std::nullopt. Every
+    // intermediate product and sum must fit ptrdiff_t. This query does not
+    // allocate or inspect a storage buffer.
+    detail::Expected<std::optional<ElementOffsetBounds>, detail::LayoutFailure> getElementBounds()
         const noexcept {
         using namespace detail;
         const auto dimensions = m_shape.dimensions();
         if (std::find(dimensions.begin(), dimensions.end(), size_t{0}) != dimensions.end())
-            return std::pair<ptrdiff_t, ptrdiff_t>{0, -1};
+            return std::optional<ElementOffsetBounds>{};
         ptrdiff_t lower = m_offset;
         ptrdiff_t upper = lower;
         for (size_t axis = 0; axis < dimensions.size(); ++axis) {
@@ -199,7 +208,7 @@ class Layout {
                                                 std::nullopt});
             (*delta < 0 ? lower : upper) = *sum;
         }
-        return std::pair{lower, upper};
+        return std::optional<ElementOffsetBounds>{ElementOffsetBounds{lower, upper}};
     }
 
     bool operator==(const Layout&) const noexcept = default;
@@ -210,48 +219,4 @@ class Layout {
     ptrdiff_t m_offset;
 };
 
-namespace detail {
-inline Expected<std::pair<ptrdiff_t, ptrdiff_t>, LayoutFailure> getElementBounds(
-    const Layout& layout) noexcept {
-    return layout.getElementBounds();
-}
-
-inline std::pair<ptrdiff_t, ptrdiff_t> elementBounds(const Layout& layout) {
-    const auto result = layout.getElementBounds();
-    if (!result) throw std::runtime_error(result.error().message());
-    return *result;
-}
-
-inline uint64_t strideMagnitude(ptrdiff_t stride) {
-    if (stride >= 0) return static_cast<uint64_t>(stride);
-    return static_cast<uint64_t>(-(stride + 1)) + 1;
-}
-
-inline bool hasProvablyDistinctElementOffsets(const Layout& layout) {
-    if (layout.shape().elementCount() == 0) return true;
-
-    std::vector<std::pair<uint64_t, size_t>> dimensions;
-    dimensions.reserve(layout.shape().rank());
-    for (size_t dimension = 0; dimension < layout.shape().rank(); ++dimension) {
-        const size_t extent = layout.shape()[dimension];
-        if (extent <= 1) continue;
-
-        const uint64_t stride = strideMagnitude(layout.strides()[dimension]);
-        if (stride == 0) return false;
-        dimensions.emplace_back(stride, extent);
-    }
-    std::ranges::sort(dimensions);
-
-    uint64_t addressedSpan = 1;
-    for (const auto& [stride, extent] : dimensions) {
-        if (stride < addressedSpan) return false;
-        const uint64_t additionalExtent = static_cast<uint64_t>(extent - 1);
-        if (additionalExtent > (std::numeric_limits<uint64_t>::max() - addressedSpan) / stride)
-            return false;
-        addressedSpan += additionalExtent * stride;
-    }
-    return true;
-}
-
-}  // namespace detail
 }  // namespace roc::hostnumerics

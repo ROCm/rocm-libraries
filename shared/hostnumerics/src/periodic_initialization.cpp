@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "detail/index_iteration.hpp"
+#include "detail/layout_analysis.hpp"
 #include "detail/prepared_scalar_storage.hpp"
 
 namespace roc::hostnumerics {
