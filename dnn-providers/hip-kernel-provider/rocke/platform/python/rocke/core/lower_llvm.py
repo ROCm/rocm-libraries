@@ -67,6 +67,7 @@ from .ir import (
     _buffer_op_bytes,
     _global_ptr_offset_op_error,
     _global_ptr_to_i64_op_error,
+    _gpu_check_failed_op_error,
     _if_else_branch_yield,
     _is_unsigned,
     _refuse_non_u8_source,
@@ -76,6 +77,7 @@ from .ir import (
     check_cluster_dims,
     dpp_ctrl_attr,
     dpp_xor_ctrl,
+    gpu_check_word_symbol,
     require_streaming_arch,
     split_loc,
 )
@@ -1761,6 +1763,8 @@ class _Lowerer:
             _DebugInfo(kernel.name) if kernel.attrs.get("debug_info") else None
         )
         self._smem_globals: List[Tuple[str, SmemType]] = []
+        # The GPU-check word's symbol once a tile.gpu_check_failed stores to it.
+        self._gpu_check_word: str | None = None
         self._smem_storage_name: Dict[str, str] = {}  # IR value name -> @global name
         # Byte size of each allocation placed in the pool.
         self._smem_sizes: Dict[str, int] = {}
@@ -3508,11 +3512,14 @@ class _Lowerer:
         ptr, idx = op.operands
         _, ptr_ty = self._anyptr_space("global_load", ptr, _GLOBAL_LOAD_PTR_TYPES)
         elem_ty = _llvm_type(op.result.type)
+        # The GEP index takes the operand's own width, as in global_load_vN, so
+        # an i64 element offset (paged caches past 2 GiB) stays valid IR.
+        idx_ty = _llvm_type(idx.type)
         gep = self._fresh("gep")
         align = int(op.attrs.get("align", 1))
         self._current().emit(
             f"  {gep} = getelementptr inbounds {elem_ty}, {ptr_ty} "
-            f"{self._operand(ptr)}, i32 {self._operand(idx)}"
+            f"{self._operand(ptr)}, {idx_ty} {self._operand(idx)}"
         )
         self._current().emit(
             f"  {op.result.name} = load {elem_ty}, {ptr_ty} {gep}, align {align}"
@@ -6037,6 +6044,22 @@ class _Lowerer:
         self._need("trap")
         self._current().emit("  call void @llvm.trap()")
 
+    def _op_tile_gpu_check_failed(self, op: Op) -> None:
+        """Store 1 to the kernel's GPU-check word, then return from the kernel,
+        which ends the block like ``cf.return``. Not a trap: on Windows the
+        trap handler parks a trapped wave and the launch never returns, while
+        a returned lane lets the launch complete."""
+        error = _gpu_check_failed_op_error(op)
+        if error:
+            raise ValueError(error)
+        self._gpu_check_word = gpu_check_word_symbol(self.kernel.name)
+        self._current().emit(
+            f"  store atomic i32 1, ptr addrspace(1) @{self._gpu_check_word} "
+            'syncscope("agent") monotonic, align 4'
+        )
+        self._current().emit(" ret void")
+        self._current().terminated = True
+
     # ----- buffer-rsrc + async DRAM->LDS -----
 
     def _op_tile_buffer_rsrc(self, op: Op) -> None:
@@ -7411,6 +7434,15 @@ class _Lowerer:
             out.append(
                 f"{self._smem_pool_name} = internal unnamed_addr addrspace(3) "
                 f"global [{self._smem_pool_size} x i8] poison, align 16"
+            )
+            out.append("")
+
+        # The GPU-check word, when a gpu_checked_value failure path stores to
+        # it: zero at load, read and cleared by the host after the launch.
+        if self._gpu_check_word is not None:
+            out.append(
+                f"@{self._gpu_check_word} = protected addrspace(1) "
+                "externally_initialized global i32 0, align 4"
             )
             out.append("")
 
