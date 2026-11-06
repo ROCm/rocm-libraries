@@ -29,7 +29,6 @@ file(WRITE "${INSTALL_TEST_FILE}"
 
 # This variable is defined here to be accessible to other test sub-modules
 set(COMMON_TEST_HEADER_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
-set(PROFILE_DIR "${CMAKE_BINARY_DIR}/coverage-report")
 set_property(GLOBAL PROPERTY LLVM_COV_OBJECT_ARGS "")
 
 function(add_relative_test test_name test_target resource_group)
@@ -51,11 +50,6 @@ function(add_relative_test test_name test_target resource_group)
     endif()
     file(RELATIVE_PATH rel_path "${CMAKE_CURRENT_BINARY_DIR}" "${EXE_PATH}/${EXE_NAME}")
     add_test(NAME "${test_name}" COMMAND "./${rel_path}")
-    if(ROCPRIM_ENABLE_COVERAGE)
-      set_tests_properties(${test_name} PROPERTIES
-        ENVIRONMENT "LLVM_PROFILE_FILE=${PROFILE_DIR}/profraw/rocprim-coverage_%m.profraw"
-      )
-    endif()
     file(APPEND "${INSTALL_TEST_FILE}" "add_test(${test_name} \"../${EXE_NAME}\")\n")
     # Set the resource group for the test. This must correspond to a GPU resource present in resources.json.
     file(APPEND "${INSTALL_TEST_FILE}" "set_tests_properties(${test_name} PROPERTIES RESOURCE_GROUPS \"1,${resource_group}:1\")\n")

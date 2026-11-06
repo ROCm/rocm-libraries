@@ -13,6 +13,10 @@
 #        and examples. Until that's not fixed, we have to save/restore them.
 foreach(SHARED_OPTION BUILD_TEST BUILD_BENCHMARK BUILD_EXAMPLE)
   set(USER_${SHARED_OPTION} ${${SHARED_OPTION}})
+  unset(USER_CACHED_${SHARED_OPTION})
+  if(DEFINED CACHE{${SHARED_OPTION}})
+    get_property(USER_CACHED_${SHARED_OPTION} CACHE ${SHARED_OPTION} PROPERTY VALUE)
+  endif()
   set(${SHARED_OPTION} OFF)
 endforeach()
 
@@ -445,7 +449,7 @@ if(USER_BUILD_BENCHMARK)
     set(_ROCTHRUST_SAVED_BUILD_TEST "${BUILD_TEST}")
     set(BUILD_BENCHMARK OFF)
     set(BUILD_TEST OFF)
-    
+
     FetchContent_Declare(
       rocrand
       SOURCE_DIR    ${ROCRAND_PATH}
@@ -471,4 +475,7 @@ endif()
 # Restore user global state
 foreach(SHARED_OPTION BUILD_TEST BUILD_BENCHMARK BUILD_EXAMPLE)
   set(${SHARED_OPTION} ${USER_${SHARED_OPTION}})
+  if(DEFINED USER_CACHED_${SHARED_OPTION})
+    set_property(CACHE ${SHARED_OPTION} PROPERTY VALUE "${USER_CACHED_${SHARED_OPTION}}")
+  endif()
 endforeach()

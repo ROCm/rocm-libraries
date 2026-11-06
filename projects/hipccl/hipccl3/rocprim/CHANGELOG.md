@@ -8,6 +8,7 @@ Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projec
 
 * Renamed the CMake option `BUILD_CODE_COVERAGE` to `ROCPRIM_ENABLE_COVERAGE`. The test-only preprocessor define `BUILD_CODE_COVERAGE` is now `ROCPRIM_ENABLE_COVERAGE`.
 * The configuration summary now prints the coverage setting when `BUILD_TEST` is enabled.
+* Tests no longer set `LLVM_PROFILE_FILE` through CTest. A value set in the environment when running `ctest` is now used. The `coverage_analysis` target still writes profiles to `coverage-report/profraw`.
 
 ### Removed
 
