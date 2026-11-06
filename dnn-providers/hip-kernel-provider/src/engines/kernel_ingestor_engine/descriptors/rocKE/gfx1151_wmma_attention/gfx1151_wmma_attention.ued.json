@@ -12,7 +12,6 @@
   },
   "knobs": [
     "head_size",
-    "head_size_v",
-    "block_m"
+    "head_size_v"
   ]
 }

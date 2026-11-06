@@ -24,6 +24,13 @@ rocKE enabled (`HIPKERNELPROVIDER_ENABLE_ROCKE=ON`, which keeps the `rocKE/` fol
 walk) and whose GPU targets include an arch its KDP declares; for gfx950 and gfx942 the
 DVC KDPs must also have been pulled.
 
+The two gfx1151 engines declare engine knobs in their UEDs (set in the IngestorGenerator
+configs, not by hand): the prefill bundle `rocKE/gfx1151_wmma_attention/` declares
+`head_size` and `head_size_v`, and the decode bundle `rocKE/gfx1151_wmma_attention_decode/`
+declares `head_size`. A knob value is the bucket width a kernel serves, not an exact size,
+which keeps the knob tuple of every co-admitted kernel distinct. A pin that matches no
+kernel is refused. The tile size (`block_m`) is not a knob.
+
 `FlyDSL/<op>/`, one bundle per op, whose kernels are **pre-built** and stored beside
 their descriptors under `FlyDSL/<op>/<target>/`, as `kind: "hsaco"` UKDs inline in
 that target's KDP. Each `<target>/` directory is a DVC output on the same `ingestor`
