@@ -1,6 +1,9 @@
 #include <gtest/gtest.h>
 #include <stdio.h>
 
+#include <algorithm>
+#include <vector>
+
 #include <hip/hip_runtime.h>
 #include <rocrand/rocrand.h>
 
@@ -177,4 +180,95 @@ TEST(rocrand_hipgraph_generate_tests, hipgraphs_doc_sample)
 INSTANTIATE_TEST_SUITE_P(rocrand_hipgraph_generate_tests,
                          rocrand_hipgraph_generate_tests,
                          ::testing::ValuesIn(rng_types),
+                         rocrand_rng_type_test_name);
+
+class rocrand_hipgraph_host_generator_tests : public ::testing::TestWithParam<rocrand_rng_type>
+{};
+
+// A non-blocking host generator enqueues generation as a host function, so capturing it
+// creates a host node. The graph must be launchable more than once, and must keep working
+// after the graph it was instantiated from is destroyed.
+TEST_P(rocrand_hipgraph_host_generator_tests, relaunch)
+{
+    const rocrand_rng_type rng_type     = GetParam();
+    constexpr size_t       size         = 4096;
+    constexpr int          launch_count = 3;
+
+    if(rng_type == ROCRAND_RNG_PSEUDO_MT19937)
+    {
+        ROCRAND_SKIP_SLOW_TEST_IF_NOT_ENABLED();
+    }
+
+    std::vector<float> expected(size);
+    {
+        rocrand_generator generator;
+        ROCRAND_CHECK(rocrand_create_generator_host_blocking(&generator, rng_type));
+        ROCRAND_CHECK(rocrand_generate_uniform(generator, expected.data(), size));
+        ROCRAND_CHECK(rocrand_destroy_generator(generator));
+    }
+
+    rocrand_generator generator;
+    ROCRAND_CHECK(rocrand_create_generator_host(&generator, rng_type));
+
+    hipStream_t stream;
+    HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
+    ROCRAND_CHECK(rocrand_set_stream(generator, stream));
+    ROCRAND_CHECK(rocrand_initialize_generator(generator));
+
+    std::vector<float> output(size);
+
+    hipGraph_t graph;
+    HIP_CHECK(hipStreamBeginCapture(stream, hipStreamCaptureModeGlobal));
+    ROCRAND_CHECK(rocrand_generate_uniform(generator, output.data(), size));
+    HIP_CHECK(hipStreamEndCapture(stream, &graph));
+
+    hipGraphExec_t graph_exec;
+    HIP_CHECK(hipGraphInstantiate(&graph_exec, graph, nullptr, nullptr, 0));
+    HIP_CHECK(hipGraphDestroy(graph));
+
+    for(int launch = 0; launch < launch_count; ++launch)
+    {
+        SCOPED_TRACE(testing::Message() << "with launch = " << launch);
+
+        std::fill(output.begin(), output.end(), -1.0f);
+        HIP_CHECK(hipGraphLaunch(graph_exec, stream));
+        HIP_CHECK(hipStreamSynchronize(stream));
+
+        if(launch == 0)
+        {
+            ASSERT_EQ(output, expected);
+        }
+        else
+        {
+            // Stateful engines advance with every launch, so only check that values were written
+            ASSERT_TRUE(std::all_of(output.begin(),
+                                    output.end(),
+                                    [](float value) { return value > 0.0f && value <= 1.0f; }));
+        }
+    }
+
+    HIP_CHECK(hipGraphExecDestroy(graph_exec));
+    ROCRAND_CHECK(rocrand_destroy_generator(generator));
+    HIP_CHECK(hipStreamDestroy(stream));
+}
+
+constexpr rocrand_rng_type host_generator_rng_types[] = {ROCRAND_RNG_PSEUDO_PHILOX4_32_10,
+                                                         ROCRAND_RNG_PSEUDO_MRG31K3P,
+                                                         ROCRAND_RNG_PSEUDO_MRG32K3A,
+                                                         ROCRAND_RNG_PSEUDO_XORWOW,
+                                                         ROCRAND_RNG_PSEUDO_MTGP32,
+                                                         ROCRAND_RNG_PSEUDO_LFSR113,
+                                                         ROCRAND_RNG_PSEUDO_MT19937,
+                                                         ROCRAND_RNG_PSEUDO_THREEFRY2_32_20,
+                                                         ROCRAND_RNG_PSEUDO_THREEFRY2_64_20,
+                                                         ROCRAND_RNG_PSEUDO_THREEFRY4_32_20,
+                                                         ROCRAND_RNG_PSEUDO_THREEFRY4_64_20,
+                                                         ROCRAND_RNG_QUASI_SOBOL32,
+                                                         ROCRAND_RNG_QUASI_SCRAMBLED_SOBOL32,
+                                                         ROCRAND_RNG_QUASI_SOBOL64,
+                                                         ROCRAND_RNG_QUASI_SCRAMBLED_SOBOL64};
+
+INSTANTIATE_TEST_SUITE_P(rocrand_hipgraph_host_generator_tests,
+                         rocrand_hipgraph_host_generator_tests,
+                         ::testing::ValuesIn(host_generator_rng_types),
                          rocrand_rng_type_test_name);

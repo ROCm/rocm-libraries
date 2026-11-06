@@ -12,6 +12,7 @@ Documentation for rocRAND is available at
 ### Resolved Issues
 
 * Fixed race condition inside `poisson` distribution.
+* Fixed a double free when a HIP graph that captured generation with a generator created by `rocrand_create_generator_host` was launched more than once.
 
 
 ## rocRAND 5.2.0 for ROCm 10.2.0

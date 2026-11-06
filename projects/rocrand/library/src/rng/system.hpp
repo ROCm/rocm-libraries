@@ -142,6 +142,54 @@ struct host_system
     }
 #pragma clang diagnostic pop
 
+    template<typename Kernel, typename... Args>
+    static void run_kernel(void* userdata)
+    {
+        auto*      kernel_args   = reinterpret_cast<KernelArgs<Args...>*>(userdata);
+        const auto num_blocks    = kernel_args->num_blocks;
+        const auto num_threads   = kernel_args->num_threads;
+        const auto execute_block = [&](const dim3 block_idx)
+        {
+            for(uint32_t tz = 0; tz < num_threads.z; ++tz)
+            {
+                for(uint32_t ty = 0; ty < num_threads.y; ++ty)
+                {
+                    for(uint32_t tx = 0; tx < num_threads.x; ++tx)
+                    {
+                        invoke_kernel<host::target_arch{}, Kernel>(
+                            block_idx,
+                            dim3(tx, ty, tz),
+                            num_blocks,
+                            num_threads,
+                            std::make_index_sequence<sizeof...(Args)>(),
+                            kernel_args->user_args);
+                    }
+                }
+            }
+        };
+
+        std::for_each(
+#ifdef ROCRAND_USE_PARALLEL_STL
+            std::execution::par_unseq,
+#endif
+            cpp_utils::threedim_iterator::begin(num_blocks),
+            cpp_utils::threedim_iterator::end(num_blocks),
+            execute_block);
+    }
+
+    template<typename... Args>
+    static void delete_kernel_args(void* userdata)
+    {
+        delete reinterpret_cast<KernelArgs<Args...>*>(userdata);
+    }
+
+    template<typename Kernel, typename... Args>
+    static void run_kernel_and_delete_args(void* userdata)
+    {
+        run_kernel<Kernel, Args...>(userdata);
+        delete_kernel_args<Args...>(userdata);
+    }
+
     template<typename Kernel,
              typename ConfigProvider
              = host::static_block_size_config_provider<ROCRAND_DEFAULT_MAX_BLOCK_SIZE>,
@@ -158,50 +206,54 @@ struct host_system
         (void)IsDynamic; // Not relevant on host launches
         (void)shared_bytes; // shared memory not supported on host
 
-        using KernelArgsType = KernelArgs<Args...>;
-
-        const auto kernel_callback = [](void* userdata)
-        {
-            auto*      kernel_args   = reinterpret_cast<KernelArgsType*>(userdata);
-            const auto num_blocks    = kernel_args->num_blocks;
-            const auto num_threads   = kernel_args->num_threads;
-            const auto execute_block = [&](const dim3 block_idx)
-            {
-                for(uint32_t tz = 0; tz < num_threads.z; ++tz)
-                {
-                    for(uint32_t ty = 0; ty < num_threads.y; ++ty)
-                    {
-                        for(uint32_t tx = 0; tx < num_threads.x; ++tx)
-                        {
-                            invoke_kernel<host::target_arch{}, Kernel>(
-                                block_idx,
-                                dim3(tx, ty, tz),
-                                num_blocks,
-                                num_threads,
-                                std::make_index_sequence<sizeof...(Args)>(),
-                                kernel_args->user_args);
-                        }
-                    }
-                }
-            };
-
-            std::for_each(
-#ifdef ROCRAND_USE_PARALLEL_STL
-                std::execution::par_unseq,
-#endif
-                cpp_utils::threedim_iterator::begin(num_blocks),
-                cpp_utils::threedim_iterator::end(num_blocks),
-                execute_block);
-
-            delete kernel_args;
-        };
-
-        auto* kernel_args
-            = new KernelArgsType{num_blocks, num_threads, std::tuple<Args...>(args...)};
+        KernelArgs<Args...> stack_args{num_blocks, num_threads, std::tuple<Args...>(args...)};
 
         if constexpr(UseHostFunc)
         {
-            hipError_t status = hipLaunchHostFunc(stream, kernel_callback, kernel_args);
+            auto* kernel_args = new KernelArgs<Args...>(std::move(stack_args));
+
+            hipStreamCaptureStatus capture_status;
+            hipGraph_t             capture_graph;
+            if(hipStreamGetCaptureInfo_v2(stream, &capture_status, nullptr, &capture_graph)
+               != hipSuccess)
+            {
+                delete kernel_args;
+                return ROCRAND_STATUS_LAUNCH_FAILURE;
+            }
+
+            if(capture_status == hipStreamCaptureStatusActive)
+            {
+                // A captured host node passes the same arguments to every launch of the graph, so
+                // the callback cannot free them. Instead, hand them to the graph, which frees
+                // them when the graph and every executable instantiated from it are destroyed.
+                hipUserObject_t user_object;
+                if(hipUserObjectCreate(&user_object,
+                                       kernel_args,
+                                       delete_kernel_args<Args...>,
+                                       1,
+                                       hipUserObjectNoDestructorSync)
+                   != hipSuccess)
+                {
+                    delete kernel_args;
+                    return ROCRAND_STATUS_LAUNCH_FAILURE;
+                }
+                if(hipGraphRetainUserObject(capture_graph, user_object, 1, hipGraphUserObjectMove)
+                   != hipSuccess)
+                {
+                    (void)hipUserObjectRelease(user_object, 1);
+                    return ROCRAND_STATUS_LAUNCH_FAILURE;
+                }
+                if(hipLaunchHostFunc(stream, run_kernel<Kernel, Args...>, kernel_args)
+                   != hipSuccess)
+                {
+                    return ROCRAND_STATUS_LAUNCH_FAILURE;
+                }
+                return ROCRAND_STATUS_SUCCESS;
+            }
+
+            hipError_t status = hipLaunchHostFunc(stream,
+                                                  run_kernel_and_delete_args<Kernel, Args...>,
+                                                  kernel_args);
 
             if(status != hipSuccess)
             {
@@ -214,7 +266,7 @@ struct host_system
         }
         else
         {
-            kernel_callback(kernel_args);
+            run_kernel<Kernel, Args...>(&stack_args);
         }
 
         return ROCRAND_STATUS_SUCCESS;
