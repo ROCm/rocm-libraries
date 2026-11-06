@@ -54,6 +54,19 @@ _KEY_READ = re.compile(
 )
 
 
+# A C/C++ comment, or a string literal kept as it is (a "//" inside a string is
+# not a comment).
+_COMMENT_OR_STRING = re.compile(r'"(?:\\.|[^"\\\n])*"|/\*.*?\*/|//[^\n]*', re.S)
+
+
+def _strip_comments(src: str) -> str:
+    """``src`` without its comments, so a read that is commented out is not
+    counted as a read. Each comment becomes one space; strings stay."""
+    return _COMMENT_OR_STRING.sub(
+        lambda m: m.group(0) if m.group(0).startswith('"') else " ", src
+    )
+
+
 def _function_body(src: str, signature: str) -> str:
     """The brace-balanced body of the one function whose definition matches
     ``signature`` (a regex for the text before its opening brace)."""
@@ -82,30 +95,49 @@ def _tile() -> TileSpec:
     return TileSpec(tile_m=64, tile_n=64, tile_k=32, warp_m=2, warp_n=2)
 
 
-# reader function -> (signature regex, one dict its Python builder writes).
-# The family readers fill the shared tile/trait pair through
+# reader function -> (signature regex, a spec, the dict its Python builder
+# writes for it). The family readers fill the shared tile/trait pair through
 # fill_universal_spec and then read their own keys.
-def _cases() -> dict[str, tuple[str, dict]]:
+def _specs() -> dict[str, tuple[str, object, object]]:
     return {
         "fill_universal_spec": (
             r"\bvoid fill_universal_spec\(",
-            universal_gemm_spec_to_dict(UniversalGemmSpec(name="parity", tile=_tile())),
+            UniversalGemmSpec(name="parity", tile=_tile()),
+            universal_gemm_spec_to_dict,
         ),
         "bg_build_spec": (
             r"\brocke_batched_gemm_spec_t bg_build_spec\(",
-            batched_gemm_spec_to_dict(BatchedGemmSpec(name="parity", tile=_tile())),
+            BatchedGemmSpec(name="parity", tile=_tile()),
+            batched_gemm_spec_to_dict,
         ),
         "gg_build_spec": (
             r"\brocke_grouped_gemm_spec_t gg_build_spec\(",
-            grouped_gemm_spec_to_dict(
-                GroupedGemmSpec(name="parity", tile=_tile(), trait=TraitSpec())
-            ),
+            GroupedGemmSpec(name="parity", tile=_tile(), trait=TraitSpec()),
+            grouped_gemm_spec_to_dict,
         ),
         "fm_build_spec": (
             r"\brocke_flatmm_spec_t fm_build_spec\(",
-            flatmm_spec_to_dict(FlatMMSpec(tile=_tile())),
+            FlatMMSpec(tile=_tile()),
+            flatmm_spec_to_dict,
         ),
     }
+
+
+def _cases() -> dict[str, tuple[str, dict]]:
+    return {r: (sig, to_dict(spec)) for r, (sig, spec, to_dict) in _specs().items()}
+
+
+def _spec_fields(spec: object) -> set[str]:
+    """Every field a spec carries: the fields of its nested specs (tile, trait,
+    data) and its own top-level fields."""
+    out = set()
+    for f in dataclasses.fields(spec):
+        value = getattr(spec, f.name)
+        if dataclasses.is_dataclass(value):
+            out |= {g.name for g in dataclasses.fields(value)}
+        else:
+            out.add(f.name)
+    return out
 
 
 def _reader_keys(src: str, reader: str, signature: str) -> set[str]:
@@ -145,7 +177,16 @@ def _mismatch(src: str) -> dict[str, tuple[list[str], list[str]]]:
 class TestGemmSpecDictBindingParity(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
-        cls.src = _BINDING.read_text(encoding="utf-8")
+        cls.src = _strip_comments(_BINDING.read_text(encoding="utf-8"))
+
+    def test_each_dict_carries_every_field_of_its_spec(self):
+        # The top-level keys (name, wave_size, block_size, dtype, batch_size ...)
+        # are written by hand, so a new top-level spec field would be missing
+        # from the dict, and then from the comparison below, without a word.
+        for reader, (_, spec, to_dict) in _specs().items():
+            with self.subTest(reader=reader):
+                missing = sorted(_spec_fields(spec) - set(to_dict(spec)))
+                self.assertEqual(missing, [], f"the {reader} dict omits {missing}")
 
     def test_each_reader_reads_every_key_its_dict_writes(self):
         for reader, (unread, _) in _mismatch(self.src).items():
@@ -188,6 +229,20 @@ class TestGemmSpecDictBindingParity(unittest.TestCase):
                 mutated = self.src.replace(f'"{key}"', '"withheld_key"')
                 unread, _ = _mismatch(mutated)["fill_universal_spec"]
                 self.assertIn(key, unread)
+
+    def test_a_commented_out_read_is_not_a_read(self):
+        raw = _BINDING.read_text(encoding="utf-8")
+        line = next(
+            ln for ln in raw.splitlines() if 'dict_bool(tr, "cshuffle_no_alias"' in ln
+        )
+        for style, commented in (
+            ("line", "// " + line),
+            ("block", "/* " + line + " */"),
+        ):
+            with self.subTest(style=style):
+                src = _strip_comments(raw.replace(line, commented))
+                unread, _ = _mismatch(src)["fill_universal_spec"]
+                self.assertIn("cshuffle_no_alias", unread)
 
 
 if __name__ == "__main__":
