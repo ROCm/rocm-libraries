@@ -35,6 +35,7 @@ set(GROUPED_CONV2D_BWD_DATA_NHWGC
    xdl/device_grouped_conv2d_bwd_data_xdl_v3_nhwgc_gkyxc_nhwgk_bf16_large_tensors_instance.cpp
    xdl/device_grouped_conv2d_bwd_data_xdl_v3_nhwgc_gkyxc_nhwgk_f16_large_tensors_instance.cpp
    xdl/device_grouped_conv2d_bwd_data_xdl_v3_nhwgc_gkyxc_nhwgk_f32_large_tensors_instance.cpp
+   xdl/device_grouped_conv2d_bwd_data_xdl_v3_nhwgc_gkyxc_nhwgk_f32_large_tensors_gfx1250_instance.cpp
 )
 if((GPU_TARGETS MATCHES "gfx1250"))
 set_source_files_properties(wmma/device_grouped_conv2d_bwd_data_wmma_v3_nhwgc_gkyxc_nhwgk_bf16_large_tiles_instance.cpp PROPERTIES COMPILE_OPTIONS ";-mllvm;-enable-post-misched=1;-mllvm;--amdgpu-mfma-vgpr-form")
