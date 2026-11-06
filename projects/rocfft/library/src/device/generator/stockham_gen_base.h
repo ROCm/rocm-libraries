@@ -151,13 +151,15 @@ struct StockhamKernel : public StockhamGeneratorSpecs
     Variable lds_complex{"lds_complex", "scalar_type", true, true};
     Variable lds_row_padding{"lds_row_padding", rtc_kint_type(KIntType::U32)};
 
-    // hip thread grid dim, flattened over x and y if the launch is split over grid y
-    Variable grid_dim{grid_y ? "(gridDim.x * gridDim.y)" : "gridDim.x",
-                      rtc_kint_type(KIntType::U32)};
+    // hip thread grid dim, flattened over x and y if the launch is split over grid y.
+    // A split launch can have 2^32 or more transforms, so its index math is widened.
+    Variable grid_dim{grid_y ? "(static_cast<integer_type>(gridDim.x) * gridDim.y)" : "gridDim.x",
+                      grid_y ? "integer_type" : rtc_kint_type(KIntType::U32)};
 
     // hip thread block id, flattened over x and y if the launch is split over grid y
-    Variable block_id{grid_y ? "(blockIdx.x + blockIdx.y * gridDim.x)" : "blockIdx.x",
-                      rtc_kint_type(KIntType::U32)};
+    Variable block_id{grid_y ? "(blockIdx.x + static_cast<integer_type>(blockIdx.y) * gridDim.x)"
+                             : "blockIdx.x",
+                      grid_y ? "integer_type" : rtc_kint_type(KIntType::U32)};
 
     // hip thread id
     Variable thread_id{"threadIdx.x", rtc_kint_type(KIntType::U32)};

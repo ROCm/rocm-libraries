@@ -89,7 +89,8 @@ protected:
         need_twd_table = true;
     }
 
-    void SetupGridParam_internal(GridParam& gp) override;
+    void                            SetupGridParam_internal(GridParam& gp) override;
+    std::pair<size_t, unsigned int> StockhamLaunchSize() const override;
 
 public:
     bool                CreateDeviceResources() override;
