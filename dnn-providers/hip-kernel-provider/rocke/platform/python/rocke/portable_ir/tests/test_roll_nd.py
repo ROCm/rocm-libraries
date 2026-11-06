@@ -16,6 +16,7 @@ import json
 import math
 import unittest
 
+from rocke.core.intexpr import eval_intexpr, magic_division_constants
 from rocke.core.ir import F32, IRBuilder, PtrType
 from rocke.portable_ir.src.recording_builder import record_kernel
 from rocke.portable_ir.src.roll_nd import roll_nd
@@ -27,9 +28,7 @@ from rocke.portable_ir.src.roller import (
 )
 from rocke.portable_ir.utils.recipe_expand import (
     equiv_reason,
-    eval_intexpr,
     expand_recipe,
-    magic_division_constants,
     recipes_equiv,
 )
 
@@ -308,7 +307,7 @@ class TestRollNdShapeAxes(unittest.TestCase):
 class TestBinarySearchTripCount(unittest.TestCase):
     """`ceil(log2(n+1))` -- the trip count of a binary search over `n` items.
 
-    Found by sweeping kernels/gfx950: all three tiled attention kernels size their
+    Found by sweeping the production kernels: all three tiled attention kernels size their
     sequence-lookup loop this way, and `num_seqs` refused for want of the model
     even though the recipe schema could already express it. `magic_shift` computes
     `ceil(log2 x)` and both evaluators recurse into its operand, so the fix was to

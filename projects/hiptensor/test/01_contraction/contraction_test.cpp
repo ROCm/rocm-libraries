@@ -126,6 +126,7 @@ namespace hiptensor
     void ContractionTest::reset()
     {
         handle    = nullptr;
+        plan      = nullptr;
         workspace = nullptr;
 
         worksize = 0u;
@@ -838,8 +839,14 @@ namespace hiptensor
              */
             ScalarData alphaBuf;
             ScalarData betaBuf;
-            writeVal(&alphaBuf, computeType, ScalarData(computeType, alpha[0], alpha[1]));
-            writeVal(&betaBuf, computeType, ScalarData(computeType, beta[0], beta[1]));
+            writeVal(&alphaBuf,
+                     computeType,
+                     ScalarData(computeType, alpha[0], alpha.size() > 1 ? alpha[1] : 0.0));
+            writeVal(&betaBuf,
+                     computeType,
+                     ScalarData(computeType,
+                                beta.empty() ? 0.0 : beta[0],
+                                beta.size() > 1 ? beta[1] : 0.0));
 
             /**************************
             * Disable Plan Cache for tests
@@ -855,6 +862,12 @@ namespace hiptensor
                                                         sizeof(hiptensorCacheMode_t)));
             }
 
+            // RunKernel may be called more than once per test (e.g. plan cache tests)
+            if(plan)
+            {
+                CHECK_HIPTENSOR_ERROR(hiptensorDestroyPlan(plan));
+                plan = nullptr;
+            }
             CHECK_HIPTENSOR_ERROR(hiptensorCreatePlan(handle, &plan, desc, planPref, worksize));
 
             auto resource = getResource();
@@ -1145,10 +1158,14 @@ namespace hiptensor
     {
         if(mRunFlag)
         {
-            CHECK_HIPTENSOR_ERROR(hiptensorDestroy(handle));
+            if(plan)
+            {
+                CHECK_HIPTENSOR_ERROR(hiptensorDestroyPlan(plan));
+                plan = nullptr;
+            }
             CHECK_HIPTENSOR_ERROR(hiptensorDestroyPlanPreference(planPref));
-            CHECK_HIPTENSOR_ERROR(hiptensorDestroyPlan(plan));
             CHECK_HIPTENSOR_ERROR(hiptensorDestroyOperationDescriptor(desc));
+            CHECK_HIPTENSOR_ERROR(hiptensorDestroy(handle));
 
             if(a_ms_ks)
             {
