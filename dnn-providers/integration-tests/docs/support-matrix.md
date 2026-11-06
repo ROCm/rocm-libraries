@@ -54,9 +54,11 @@ renders it on an up-to-date develop and opens a PR with only that file:
 python3 dnn-providers/integration-tests/scripts/support_features/feature_matrix.py
 ```
 
-`feature_matrix.py --check` exits 1 when the committed copy is behind. The
-graph-count `--overview-only` render of `render_support_matrix.py` is
-git-ignored, like the full matrix.
+`feature_matrix.py --check` exits 1 when the committed copy is behind. Run
+without arguments, the script overwrites the committed file; to only look at
+the current overview, use `--output -` or the CI artifact. The graph-count
+`--overview-only` render of `render_support_matrix.py` is git-ignored, like
+the full matrix.
 
 Bundle data is checked in CI, not at commit time. The top-level exclude in
 `.pre-commit-config.yaml` hides `integration-test-bundles/` from every hook,

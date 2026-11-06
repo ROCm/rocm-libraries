@@ -25,6 +25,10 @@ This document is the committed ``SUPPORT_MATRIX_OVERVIEW.md``. It is refreshed
 on its own, not with each claim change, so it can lag the sidecars; ``--check``
 says whether it does.
 
+Running it without arguments overwrites the committed file. To look at the
+current overview without changing the tree, use ``--output -``, or download
+the ``hipdnn-support-matrix`` artifact of a CI run.
+
 Usage:
 
     python3 dnn-providers/integration-tests/scripts/support_features/feature_matrix.py \\
@@ -61,6 +65,12 @@ from support_matrix_units import (  # noqa: E402
 SCRIPT_PATH = pathlib.Path(__file__).resolve()
 REPO_ROOT = SCRIPT_PATH.parents[4]
 REGEN_COMMAND = f"python3 {SCRIPT_PATH.relative_to(REPO_ROOT).as_posix()}"
+# The overview is refreshed on its own, not with the claims, so a claim PR
+# must not regenerate it.
+REFRESH_HINT = (
+    "       do not commit it with a claim change; refresh it in a PR of its own "
+    f"with {REGEN_COMMAND} (see dnn-providers/integration-tests/docs/support-matrix.md)"
+)
 DEFAULT_OVERVIEW_PATH = SCRIPT_PATH.parents[2] / "SUPPORT_MATRIX_OVERVIEW.md"
 
 NOT_CLAIMED = "❌"
@@ -557,15 +567,15 @@ def main(argv: list[str] | None = None) -> int:
             committed = args.output.read_text(encoding="utf-8")
         except OSError as exc:
             print(f"error: cannot read {args.output} ({exc})", file=sys.stderr)
-            print(f"       regenerate it with: {REGEN_COMMAND}", file=sys.stderr)
+            print(REFRESH_HINT, file=sys.stderr)
             return 1
         if committed != document:
             print(
-                f"error: {args.output} is stale -- it does not match a re-render "
-                "of the current sidecars",
+                f"{args.output} is behind -- it does not match a re-render of "
+                "the current sidecars",
                 file=sys.stderr,
             )
-            print(f"       regenerate it with: {REGEN_COMMAND}", file=sys.stderr)
+            print(REFRESH_HINT, file=sys.stderr)
             return 1
         return 0
     if str(args.output) == "-":
