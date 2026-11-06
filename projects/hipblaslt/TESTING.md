@@ -259,6 +259,7 @@ in [`clients/tests/src/`](clients/tests/src/). The last three rows are in
 | `ulp_gtest.cpp` | `UlpMantissaBits`, `UlpAsDouble`, `UlpDistance`, `UlpAccumulate`, `UlpCheckGeneral` | Units-in-the-last-place error-measurement helpers, pure math with no GPU dependency |
 | `unit_gtest.cpp` | `UnitCheckIdentical` | Exact-storage checks used to skip element-by-element output comparisons when the addressed values have identical bytes |
 | `fast_check_gtest.cpp` | `FastCheck_pre_checkin`, `FastCheckDevice_pre_checkin` | The `fast_check` verifier: fault injection into host-computed results and the per-solution failure summary (`FastCheck_pre_checkin`, no GPU), and the device padding, poison and probe-sum kernels plus 4 GiB-boundary buffer placement on small buffers (`FastCheckDevice_pre_checkin`, no hipBLASLt kernels) |
+| `host_memory_gtest.cpp` | `HostMemory_pre_checkin` | How the client holds pinned host memory: an idle buffer of 1 GiB or more stays cached only while consecutive tests reuse it (released after a test that does not, or when a test of another shape needs new memory), a smaller one until 100 consecutive tests have not reused it, large buffers get no 20% reuse slack, and a failed host allocation is reported instead of used. The `query_*` tests point the host-memory query (`host_memory.hpp`) at temporary copies of `/proc/meminfo` and the cgroup files, and check that it takes the smaller of `MemAvailable` and the tightest container memory limit (cgroup v1 or v2, up to the root). The `limit_*` tests check that `HIPBLASLT_CLIENT_HOST_MEMORY_LIMIT` caps that budget and never raises it, and that it makes the memory preflight skip. Pins at most about 3.3 GiB; no hipBLASLt kernels |
 | `arch_revision_gtest.cpp` | `ArchRevisionSmoke` | ASIC-revision-to-library-arch mapping, a pure function reached by relative `#include` of an internal header (see point 1 below) |
 | `cotenant_gtest.cpp` | `CotenantOptions`, `CotenantLds`, `CotenantScoped` | In-process cotenant helper (Linux only): option validation and LDS-reservation sizing (host-only), plus `Scoped` start/stop and argument-error cases that need a GPU and skip without one |
 | `unit/parser_gtest.cpp` | `HostUnitInitParser`, `HostUnitActivationParser`, `HostUnitBiasSourceParser` | The client's string parsers for initialization, activation and bias source, with round-trips through their `*_to_string` helpers |
@@ -341,7 +342,27 @@ kernels on CPU and hands an artifact to a GPU stage for the run phase.
 | `standard` | smoke + quick + pre_checkin | ~30 min | 3600 s |
 | `comprehensive` | standard + nightly | ~2 h | 7200 s |
 | `full` | comprehensive + HMM (needs a managed-memory capable host) | up to 24 h | 86400 s |
-| `stress` | stress only: size-threshold and address-overflow cases needing up to about 33 GiB of device memory (the 2^32 C and D batch-stride case); for large-memory runners or a weekly run. The fast_check cases among them skip in a run with no gtest filter, such as TheRock's | ~10 min on gfx90a for the fast_check cases, longer with more solutions; the older stress cases add their host-reference time | 14400 s |
+| `stress` | stress only: size-threshold and address-overflow cases needing up to about 33 GiB of device memory (the 2^32 C and D batch-stride case) and, for the unit_check cases, up to about 48 GiB of host memory on gfx90a; for large-memory runners or a weekly run. A case that does not fit skips with the amounts (see below). The fast_check cases among them skip in a run with no gtest filter, such as TheRock's | ~10 min on gfx90a for the fast_check cases, longer with more solutions; the older stress cases add their host-reference time | 14400 s |
+
+The clients check host memory before pinning a host buffer, against the smaller of `MemAvailable`
+and the headroom under the container's memory limit. On a machine with no container limit, set
+`HIPBLASLT_CLIENT_HOST_MEMORY_LIMIT` (a byte count such as `64G`) to cap that budget; it can only
+lower it. The cap applies to each check on its own: it does not limit what a process allocates in
+total, and it reserves nothing against other test processes on the same host.
+
+Before allocating, every `hipblaslt-test` matmul case estimates the device and host memory it
+needs, including the CPU reference's float or double copies of A and B, and skips with both amounts
+when either does not fit. A case that runs out anyway, at a pinned host allocation or a device
+allocation, also skips. Every such skip begins "Not enough memory:", and the end of the run lists
+them under `[ MEMORY   ]`. Two environment variables help a large-memory lane:
+
+- `HIPBLASLT_TEST_FAIL_ON_MEMORY_SKIP=1` turns those skips into failures, so a run can require
+  that every case ran.
+- `HIPBLASLT_TEST_CHECK_MEMORY_ESTIMATE=1` (Linux) compares each estimate of 256 MiB or more with
+  the rise in the process's peak resident memory, and fails a case that used more than its
+  estimate plus 10% and 256 MiB. The first case in a process is left out, because it also loads
+  the kernel library. `MatmulMemory_pre_checkin` in `matmul_gtest.cpp` runs this check on two
+  shapes, pinning up to about 1.9 GiB for about 3 s.
 
 All tiers exclude `*known_bug*`. Multi-GPU coverage is narrow: the `*multi_gpu*` cases are built
 only with the fused GEMM plus all-to-all feature (`HIPBLASLT_ENABLE_GEMM_A2A_FUSION`, off by

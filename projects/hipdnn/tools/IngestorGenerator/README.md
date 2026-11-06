@@ -416,6 +416,10 @@ The descriptor directory mirrors the authored root, so the emitted tree copies a
 verbatim. `direct_load` emits under `test_descriptors/<set>/<slug>/`, `<set>` being the
 `authored_subpath` the config must name; `packaged` emits under
 `descriptors/<producer>/<bundle>/`, defaulting the subpath to `<kernel_source_kind>/<slug>`.
+`<slug>` is the engine slug, the snake_case of the engine's local name; it names the files.
+The folder is the `authored_subpath` and may differ from it:
+`hipkernel:Gfx942AttentionUnified3d` writes `gfx942_attention_unified3d.*` files into
+`rocKE/gfx942_attention_unified_3d/`.
 
 ```
 <output-dir>/
@@ -672,10 +676,12 @@ is `space: slice`):
 
 ```bash
 PY="$PWD/.venv/bin/python"
-SLUG=gfx950_attention_dense
+SLUG=gfx950_attention_dense   # bundle folder and config stem (configs/$SLUG.yaml)
+STEM=gfx950_attention_dense   # descriptor file stem: the engine slug. Not always $SLUG:
+                              # gfx942_attention_unified_3d's files are gfx942_attention_unified3d.*
 SHIPPED="$PWD/../../../../dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/descriptors/rocKE/$SLUG"
 SCRATCH=$(mktemp -d)
-D="descriptors/rocKE/$SLUG/$SLUG"
+D="descriptors/rocKE/$SLUG/$STEM"
 "$PY" -m pytest tests/test_registry_regeneration.py -q
 # Both generate runs below reuse the installed bundle's ids (the gfx950 KDP is a DVC
 # object: fetch it into artifacts/ first, or generation refuses).
@@ -685,14 +691,14 @@ D="descriptors/rocKE/$SLUG/$SLUG"
 # hkp_pack would hydrate differently.  Use it whenever the shipped catalog and
 # the regenerated one come from the same enumerate.spec_fields declaration.
 "$PY" tools/catalog_diff.py --ignore-ids --strict-spec \
-    --shipped "$SHIPPED/artifacts/$SLUG.kdp.json" --shipped-kmd "$SHIPPED/$SLUG.kmd.json" \
+    --shipped "$SHIPPED/artifacts/$STEM.kdp.json" --shipped-kmd "$SHIPPED/$STEM.kmd.json" \
     --regenerated "$SCRATCH/selection/$D.kdp.json" --regenerated-kmd "$SCRATCH/selection/$D.kmd.json"
 "$PY" tools/registry_enumerator.py --manifest "configs/$SLUG.engine.yaml" --out "$SCRATCH/registry.yaml"
 "$PY" generate.py --config "$SCRATCH/registry.yaml" --output-dir "$SCRATCH/registry"
 # --subset only: shipped ⊆ regenerated is the right check for the full registry
 # (the registry may contain more tiles than the shipped selection). Its header
 # names the regenerated-only spec fields it did not compare.
-"$PY" tools/catalog_diff.py --subset --ignore-ids --shipped "$SHIPPED/artifacts/$SLUG.kdp.json" --shipped-kmd "$SHIPPED/$SLUG.kmd.json" \
+"$PY" tools/catalog_diff.py --subset --ignore-ids --shipped "$SHIPPED/artifacts/$STEM.kdp.json" --shipped-kmd "$SHIPPED/$STEM.kmd.json" \
     --regenerated "$SCRATCH/registry/$D.kdp.json" --regenerated-kmd "$SCRATCH/registry/$D.kmd.json"
 ```
 
@@ -984,6 +990,8 @@ provider_root: dnn-providers/hip-kernel-provider   # rocke/library is imported f
 source: kernels/gfx950/attention_dense.py   # the builder; no candidate exposes it
 builder: build_attention_dense
 kernel_name_template: attention_dense.{dtype}_d{head_size}_bm{block_m}_bn{block_n}.gfx950
+# launches: {segment: {}, reduce: {role: reduce}}  # optional; copied into every kernel_source.
+#   attention_dense has one launch; configs/gfx942_attention_unified_3d.engine.yaml sets this.
 
 enumerate:
   candidates: dispatch.attention:attention_candidates  # module:function -> KernelCandidate tuple
@@ -1002,9 +1010,16 @@ enumerate:
   free_fields: [block_m, block_n] # slice only: fields that may differ from select_spec
   spec_fields: [dtype, head_size] # slice only: spec fields the KDP carries
   max_kernels: 840                # slice only: more is an error
+  # The two keys below serve a rule-driven candidate (attention_dense is not one); see
+  # configs/gfx942_attention_unified_3d.engine.yaml and the text below.
+  # selector_fields: [batch, seqlen_k, kv_block_size]  # optional: cell fields that only steer select_spec
+  # neutral_fields: [num_seqs]    # optional: spec fields proven not to change the kernel
+  # spec_overrides: {kv_cache_policy: stream}  # optional: pin a spec field the candidate picks
+  # cell_keyed_by: [num_queries_per_kv]  # optional: spec attributes of the pick that key a merged cell
   also:                           # optional: more sections in the same pack, each its own
     - pin: {...}                  #   pin/fixed/cells/free_fields/spec_fields/max_kernels;
-      space: full                 #   candidates/request/sweep_level/space inherited unless set
+      space: full                 #   candidates/request/sweep_level/space inherited unless set;
+                                  #   selector_fields/cell_keyed_by inherited, a different list exits 2
 launches:                         # optional: copied onto every kernel's kernel_source
   segment: {}                     #   a KernelModule builder's primary kernel
   reduce: {role: reduce}          #   and each companion, by role
@@ -1034,7 +1049,58 @@ fields and name slots the spec lacks are read from the request. A field sits in 
 one `reduction.fields` list; in `space: full`, a varying field in none is held at its
 registry default with a WARN. `reduction:` never reaches a descriptor; a selection's arm
 or flat kernel may carry `default: true`, the variant its cell always keeps. An optional
-`launch_surface:` block feeds `tools/launch_surface.py`.
+`launch_surface:` block feeds `tools/launch_surface.py`. An optional
+`launches: {<name>: {<overrides>}}` mapping is copied verbatim into every generated
+kernel's `kernel_source`, making each one a multi-launch descriptor; its rules are the
+config's `launches` rules below, checked when the generated config loads.
+
+Four optional `enumerate` keys serve a rule-driven candidate, one that returns one spec per
+request and picks a knob from request fields (rocKE's strided split-KV decode picks
+`num_segments` from `batch` and `seqlen_k`, and its spec `block_size` from the request
+field `kv_block_size`, the KV keys per inner-loop step). Without them each request combo
+is a cell, so many cells name the same kernel and `--out` fails on duplicate names.
+
+- `selector_fields` lists cell fields that only steer the candidate's choice. Combos
+  equal in every other cell field merge into one cell, without the selector fields, at
+  the position of its first combo. Its specs are the union of each combo's `select_spec`
+  then `sweep_space` specs, combo by combo in catalog order, first occurrence kept; its
+  default spec is the first combo's `select_spec`. The `space` rules then apply as usual,
+  so a knob the combos vary (`num_segments`) must be a `performance` knob to reach the
+  name. Every combo's own `select_spec` must survive into its cell, or the run exits 2
+  naming the combo. A selector field must be a cell field and must not be a `feature` or
+  `performance` field. `--shapes` keys a shape's cell without the selector fields too: a
+  graph need not set them (a dense hipDNN graph has no `kv_block_size`) nor take a listed
+  value.
+- `neutral_fields` lists spec fields that do not change the compiled kernel. Before
+  merging, each spec's neutral fields take the cell's default spec's value, so specs
+  differing only there are one kernel. The manifest author owns that claim: a field is
+  neutral only if a test proves it IR-neutral. `num_seqs` on the gfx942 split-KV decode
+  grid is proven by rocKE's `test_num_seqs_is_ir_neutral_on_the_decode_grid`
+  (`dnn-providers/hip-kernel-provider/rocke/library/tests/test_attention_tiled_3d_module_gfx942.py`).
+  A neutral field must be a spec field and must not be a `feature` or `performance` field.
+- `spec_overrides` maps spec fields to one value every spec takes, applied first, before
+  `neutral_fields` and the merge. It is a deliberate departure from the candidate's own
+  pick, for a field that changes the kernel but whose other values the catalog chooses not
+  to ship: the gfx942 split-KV decode pins `kv_cache_policy: stream` (why: the header of
+  `configs/gfx942_attention_unified_3d.engine.yaml`). The spec's own validation decides whether
+  the value builds; a value it refuses exits 2 naming the request. An overridden field must
+  be a spec field, and must not be a `feature`, `performance` or neutral field. The g3
+  regeneration gate compares the shipped catalog against the overridden picks.
+- `cell_keyed_by` lists attributes of each combo's `select_spec` (a property is fine)
+  that also key the merged cell, so combos merge only when they agree on them. It serves
+  a kernel that reads some shape values at run time but bakes a value derived from
+  them: the gfx942 split-KV decode reads the head counts as kernel arguments and bakes
+  only the GQA ratio, so `nhead_q`/`nhead_k` are selector fields, `num_query_heads`/
+  `num_kv_heads` neutral (rocKE's `test_head_counts_are_ir_neutral_at_a_fixed_gqa_ratio`),
+  and `cell_keyed_by: [num_queries_per_kv]` keeps one cell per ratio. The merged cell
+  carries the attribute, so the name template and metadata can use it, and `--shapes`
+  keys a shape by its own pick's value. A keyed attribute must not be a cell field, and
+  every spec a cell holds must keep the cell's values, or the run exits 2: a neutral
+  field or sweep spec that moves one would silently file a kernel in the wrong cell.
+
+Without any of the four keys (or with all empty) the output is byte-identical to a manifest
+that never had them. `--plan-space` counts merged cells and prints the combo count beside
+them; duplicate kernel names after merging still exit 2.
 
 A `space: full` section (the primary or an `also`) projects its own varying performance
 knobs; the catalog's projected knobs are the union over sections, and `--plan-space`

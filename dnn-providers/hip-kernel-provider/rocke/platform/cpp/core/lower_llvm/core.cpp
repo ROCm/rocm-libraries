@@ -2370,6 +2370,7 @@ static rocke_status_t ll_lower_kernel_to_llvm_ex_impl(const rocke_kernel_def_t* 
     rocke_vec_init(&L.smem_offsets);
     rocke_vec_init(&L.smem_sizes);
     rocke_vec_init(&L.lds_prov);
+    rocke_vec_init(&L.loop_header_names);
     L.lds_aa = rocke_attr_get_bool(&kernel->attrs, "lds_alias_scopes", false);
     L.lds_aa_used = false;
     L.smem_pool_size = 0;
