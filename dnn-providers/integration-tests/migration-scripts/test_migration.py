@@ -3207,6 +3207,100 @@ def test_retier_refuses_mixed_sweep_formats():
         print("  PASS: retier_refuses_mixed_sweep_formats")
 
 
+def test_retier_version_consistency():
+    """build_plan checks the sweep-level ``version`` like it checks import_mode/format.
+
+    Merging sweeps that disagree on ``version`` is refused, unless a merged
+    case has ``absent_tensors`` (which needs sweep version 2): then the output
+    is reconciled to version 2 regardless of what the source sweeps declared,
+    instead of silently keeping whichever sweep happened to be listed first.
+    """
+    script = SCRIPT_DIR / "retier_bundles.py"
+    template = _retier_graph_template(None)
+
+    # No merged case needs absent_tensors: a version mismatch must be refused,
+    # exactly like the import_mode/sweep-format checks.
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp) / "integration-test-bundles"
+        _retier_write(root, "quick", template, [_retier_case("a")], {})
+        _retier_write(root, "full", template, [_retier_case("c")], {})
+        path = root / "full" / "Op" / "Default" / "sweep.json"
+        sweep = json.loads(path.read_text())
+        sweep["version"] = 2
+        path.write_text(json.dumps(sweep, indent=2))
+        before = _inventory(root)
+        asg = Path(tmp) / "asg.json"
+        asg.write_text(
+            json.dumps(
+                [
+                    dict(
+                        current_tier="quick", key="Op/Default/a", proposed_tier="full"
+                    ),
+                    dict(current_tier="full", key="Op/Default/c", proposed_tier="full"),
+                ]
+            )
+        )
+        r = run(
+            [
+                sys.executable,
+                script,
+                "--bundle-dir",
+                root,
+                "--assignments",
+                asg,
+                "--apply",
+            ],
+            check=False,
+        )
+        assert r.returncode != 0 and "sweep versions" in r.stderr, r.stderr
+        assert _inventory(root) == before, "refused retier changed the tree"
+
+    # A merged case with absent_tensors forces version 2, even though the
+    # sweep that would otherwise come first (by tier order) declares version 1.
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp) / "integration-test-bundles"
+        _retier_write(root, "quick", template, [_retier_case("a")], {})
+        absent_case = _retier_case("c")
+        absent_case["absent_tensors"] = [0]
+        absent_case["metadata"]["format_version"] = 2
+        _retier_write(root, "full", template, [absent_case], {})
+        for tier, version in (("quick", 1), ("full", 2)):
+            path = root / tier / "Op" / "Default" / "sweep.json"
+            sweep = json.loads(path.read_text())
+            sweep["version"] = version
+            path.write_text(json.dumps(sweep, indent=2))
+        asg = Path(tmp) / "asg.json"
+        asg.write_text(
+            json.dumps(
+                [
+                    dict(
+                        current_tier="quick", key="Op/Default/a", proposed_tier="full"
+                    ),
+                    dict(current_tier="full", key="Op/Default/c", proposed_tier="full"),
+                ]
+            )
+        )
+        r = run(
+            [
+                sys.executable,
+                script,
+                "--bundle-dir",
+                root,
+                "--assignments",
+                asg,
+                "--apply",
+            ],
+            check=False,
+        )
+        assert r.returncode == 0, r.stderr
+        merged = json.loads(
+            (root / "full" / "Op" / "Default" / "sweep.json").read_text()
+        )
+        assert merged["version"] == 2, merged
+        assert sorted(c["id"] for c in merged["cases"]) == ["a", "c"], merged
+    print("  PASS: retier_version_consistency")
+
+
 def test_default_mode_sweep_bytes_unchanged():
     """Default mode writes json.dumps(indent=2) with no import_mode, and refuses --sweep-format."""
     with tempfile.TemporaryDirectory() as tmp:
@@ -3769,6 +3863,7 @@ def main() -> int:
         test_sweep_format_key_does_not_split_sweeps,
         test_retier_keeps_sweep_format,
         test_retier_refuses_mixed_sweep_formats,
+        test_retier_version_consistency,
         test_default_mode_sweep_bytes_unchanged,
         test_import_remove_patch_round_trip,
         test_superset_import_nested_cases,
