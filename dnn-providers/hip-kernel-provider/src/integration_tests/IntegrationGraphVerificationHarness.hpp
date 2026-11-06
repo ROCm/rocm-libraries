@@ -13,9 +13,10 @@
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_test_sdk/utilities/SdkFrontendTypeConversions.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
-#include <hipdnn_test_sdk/utilities/cpu_graph_executor/CpuReferenceGraphExecutor.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/GraphTensorBundle.hpp>
 
+#include <cstddef>
+#include <cstdint>
 #include <limits>
 #include <memory>
 #include <string>
@@ -75,6 +76,13 @@ struct VerificationRun
     // The first executeAndValidate call computes the CPU reference and sets this flag.
     bool referenceReady = false;
 };
+
+/// Runs the CPU reference executor on a serialized graph. Defined in
+/// IntegrationGraphVerificationReference.cpp so the executor's templates are compiled
+/// once per executable rather than in every translation unit that includes this header.
+void executeCpuReferenceGraph(void* graphBuffer,
+                              size_t size,
+                              const std::unordered_map<int64_t, void*>& variantPack);
 
 // NOLINTBEGIN (portability-template-virtual-member-function)
 template <typename DataType, typename TestCaseType>
@@ -380,6 +388,13 @@ protected:
         return _stream;
     }
 
+    /// Called with the workspace the plan executes with, before execute(). hipDNN hands an
+    /// engine its workspace uninitialized; a suite whose engine must not depend on its
+    /// contents overrides this to fill it with garbage. The default leaves it as allocated.
+    virtual void prepareWorkspace([[maybe_unused]] void* workspace, [[maybe_unused]] size_t bytes)
+    {
+    }
+
     // Exposed to subclasses driving Graph staging calls directly (build_operation_graph,
     // create_execution_plans, get_ranked_engine_ids, etc.), not only via verifyGraph().
     hipdnnHandle_t _handle = nullptr;
@@ -396,6 +411,11 @@ private:
         ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
         ASSERT_GE(workspaceSize, 0) << result.err_msg;
         hipdnn_data_sdk::utilities::Workspace workspace(static_cast<size_t>(workspaceSize));
+        if(workspaceSize > 0)
+        {
+            ASSERT_NO_FATAL_FAILURE(
+                prepareWorkspace(workspace.get(), static_cast<size_t>(workspaceSize)));
+        }
 
         auto variantPack = bundle.toDeviceVariantPack();
         result = graph.execute(handle, variantPack, workspace.get());
@@ -412,7 +432,7 @@ private:
         auto [serializedGraph, serErr] = graph.to_binary();
         ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
 
-        hipdnn_test_sdk::utilities::CpuReferenceGraphExecutor().execute(
+        executeCpuReferenceGraph(
             serializedGraph.data(), serializedGraph.size(), bundle.toHostVariantPack());
     }
 

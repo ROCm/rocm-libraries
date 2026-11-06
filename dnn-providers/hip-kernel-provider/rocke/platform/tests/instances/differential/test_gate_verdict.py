@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import subprocess
 import sys
 import threading
@@ -774,7 +775,11 @@ class TestMainReturnsTheGateVerdict(unittest.TestCase):
                     return_value=({"kept": {"0": "new"}}, []),
                 ):
                     with mock.patch.object(sys, "argv", argv):
-                        self.assertEqual(run_diff.main(), 0)
+                        with mock.patch.dict(
+                            os.environ, {"ROCKE_LLVM_FLAVOR": "llvm24"}
+                        ):
+                            self.assertEqual(run_diff.main(), 0)
+                            self.assertEqual(os.environ["ROCKE_LLVM_FLAVOR"], "llvm24")
             recorded = run_diff.GoldenStore.load(golden).section(run_diff.LL, "llvm20")
             self.assertEqual(recorded, {"kept": {"0": "new"}, "left_out": {"0": "x"}})
 

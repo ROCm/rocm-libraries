@@ -60,7 +60,7 @@ jobs:
           predicate-quantifier: every
           filters: |
             code:
-              - '{projects/hipdnn/**,dnn-providers/**,.github/workflows/hipdnn-superbuild-ci.yml}'
+              - '{projects/hipdnn/**,dnn-providers/**,.github/workflows/hipdnn-superbuild-ci.yml,.github/requirements-hipdnn-superbuild-ci.txt}'
               - '!**/*.md'
               - '!**/*.rst'
               - '!projects/hipdnn/docs/**'
@@ -114,6 +114,7 @@ jobs:
             dnn-providers
             projects/hipdnn
             projects/miopen
+            shared/ctest
             test
 
       # Shared CI constants, kpack-ref among them, defined in one place.
@@ -253,8 +254,9 @@ jobs:
           dvc pull --recursive dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/descriptors
 
       # Must precede configure: configuration fails if pytest is not importable
-      # by the interpreter descriptor-packaging registers its tests under. The
-      # interpreter is named explicitly because it must be the one passed as
+      # by the interpreter descriptor-packaging registers its tests under, and,
+      # with HIPDNN_REQUIRE_UHD_GEN_TESTS=ON, if uhd_gen's requirements are not.
+      # The interpreter is named explicitly because it must be the one passed as
       # -DPython3_EXECUTABLE below -- a bare `pip` here would install into the
       # setup-python tool-cache interpreter instead.
       - name: Install Python dependencies
@@ -271,9 +273,11 @@ jobs:
             -DENABLE_CLANG_FORMAT=OFF \
             -DHIPKERNELPROVIDER_REQUIRE_DVC_DESCRIPTORS=ON \
             -DHIPKERNELPROVIDER_ENABLE_ROCKE=ON \
+            -DHIPKERNELPROVIDER_ENABLE_FLYDSL=ON \
             -DHIPDNN_ENABLE_CUDNN_COMPATIBILITY=ON \
             -DHIPDNN_ENABLE_KERNEL_INGESTOR=ON \
             -DHIPDNN_ENABLE_TOOLING_TESTS=ON \
+            -DHIPDNN_REQUIRE_UHD_GEN_TESTS=ON \
             -DHIPKERNELPROVIDER_GENERATE_SERIALIZE_HEADERS=ON \
             -DHIPDNN_ENABLE_SDPA=ON \
             -DHIPKERNELPROVIDER_KPACK_PYTHON_DIR="$KPACK_PYTHON_DIR" \
@@ -302,8 +306,19 @@ jobs:
       - name: Add ROCm bin to PATH
         run: echo "$ROCM_SDK_PATH/bin" >> "$GITHUB_PATH"
 
+      # See the Linux lane for why there are two ctest calls. Serial this step was 14-20 min
+      # on Windows.
       - name: Run tests
-        run: ctest --test-dir build --output-on-failure --no-tests=error
+        env:
+          # shared_ctest_optional_args_scope configures a nested CMake project whose
+          # find_package(Python3) must find the venv with PyYAML. actions/setup-python exports
+          # Python3_ROOT_DIR for its own Python, which has no PyYAML, so override it.
+          Python3_ROOT_DIR: ${{ env.VENV_PATH }}
+        run: |
+          rc=0
+          ctest --test-dir build --output-on-failure --no-tests=error --parallel 16 -L '^full$' || rc=$?
+          ctest --test-dir build --output-on-failure --no-tests=error --parallel 16 -LE '^(quick|standard|comprehensive|ffm-quick|full)$' || rc=$?
+          exit $rc
 
       - name: Patch ROCm SDK with superbuild outputs
         shell: pwsh
@@ -373,6 +388,7 @@ jobs:
             dnn-providers
             projects/hipdnn
             projects/miopen
+            shared/ctest
             test
 
       # Shared CI constants, kpack-ref among them, defined in one place.
@@ -516,8 +532,9 @@ jobs:
           echo "Fetched $count rocKE KDP(s)"
 
       # Must precede configure: configuration fails if pytest is not importable
-      # by the interpreter descriptor-packaging registers its tests under. The
-      # interpreter is named explicitly because it must be the one passed as
+      # by the interpreter descriptor-packaging registers its tests under, and,
+      # with HIPDNN_REQUIRE_UHD_GEN_TESTS=ON, if uhd_gen's requirements are not.
+      # The interpreter is named explicitly because it must be the one passed as
       # -DPython3_EXECUTABLE below -- a bare `pip` here would install into the
       # setup-python tool-cache interpreter instead.
       - name: Install Python dependencies
@@ -534,9 +551,11 @@ jobs:
             -DENABLE_CLANG_FORMAT=OFF \
             -DENABLE_CLANG_TIDY=ON \
             -DHIPKERNELPROVIDER_ENABLE_ROCKE=ON \
+            -DHIPKERNELPROVIDER_ENABLE_FLYDSL=ON \
             -DHIPDNN_ENABLE_CUDNN_COMPATIBILITY=ON \
             -DHIPDNN_ENABLE_KERNEL_INGESTOR=ON \
             -DHIPDNN_ENABLE_TOOLING_TESTS=ON \
+            -DHIPDNN_REQUIRE_UHD_GEN_TESTS=ON \
             -DHIPKERNELPROVIDER_GENERATE_SERIALIZE_HEADERS=ON \
             -DHIPDNN_ENABLE_SDPA=ON \
             -DHIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT="$GITHUB_WORKSPACE/dnn-providers/hip-kernel-provider/descriptor-packaging/examples/descriptors" \
@@ -572,11 +591,29 @@ jobs:
           test "${#kpacks[@]}" -gt 0 || { echo "no .kpack archives produced" >&2; exit 1; }
           printf '%s\n' "${kpacks[@]}"
 
+      # ctest runs in parallel: the suites are independent processes, and the ones that share
+      # state are marked RUN_SERIAL / FIXTURES_* in CMake, which ctest honors. Serial this step
+      # was 7.7-11.3 min, dominated by a few long Python suites running back to back.
+      #
+      # shared/ctest registers each gtest binary once per tier (quick, standard, comprehensive,
+      # ffm-quick, full) with the same or a narrower filter, and `full` runs a superset, so the
+      # `full` label selects each binary once. Entries with no tier label (rocke_*, hkp-probe-*,
+      # shared_ctest_*, ...) are selected by the second call. Both calls always run.
       - name: Run tests
         env:
           # Native rocKE AUTO detection must see the wheel COMGR used by packaging.
           ROCKE_COMGR_LIB: ${{ env.HKP_ROCKE_COMGR_LIB }}
-        run: ctest --test-dir build --output-on-failure --no-tests=error
+          # The shared_ctest_* tests configure a nested CMake project: give it Ninja (the
+          # runner has no make), and point its find_package(Python3) at the venv with PyYAML.
+          # actions/setup-python exports Python3_ROOT_DIR for its own Python, which has no
+          # PyYAML and takes precedence over VIRTUAL_ENV.
+          CMAKE_GENERATOR: Ninja
+          Python3_ROOT_DIR: ${{ env.VENV_PATH }}
+        run: |
+          rc=0
+          ctest --test-dir build --output-on-failure --no-tests=error --parallel 16 -L '^full$' || rc=$?
+          ctest --test-dir build --output-on-failure --no-tests=error --parallel 16 -LE '^(quick|standard|comprehensive|ffm-quick|full)$' || rc=$?
+          exit $rc
 
       # The full support matrix is too large to commit (only its overview is,
       # in dnn-providers/integration-tests/), so publish it from every run.
