@@ -120,7 +120,7 @@ target_sources(hip_kernel_provider_census_tests PRIVATE
 if(HIPKERNELPROVIDER_ENABLE_CONV)
     target_sources(hip_kernel_provider_tests PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestConvNaiveProblem.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestConvNaiveDevice.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGpuConvNaive.cpp
     )
 endif()
 

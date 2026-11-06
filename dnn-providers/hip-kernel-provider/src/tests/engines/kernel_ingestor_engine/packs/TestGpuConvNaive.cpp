@@ -22,7 +22,7 @@
 #include "engines/kernel_ingestor_engine/packs/IngestorPackTestSupport.hpp"
 
 /**
- * @file TestConvNaiveDevice.cpp
+ * @file TestGpuConvNaive.cpp
  * @brief The naive convolution kernels on the device, through the engines' own match,
  *        prepare and launch, against hipDNN's CPU reference convolution.
  *
@@ -394,30 +394,30 @@ void runCase(ConvShape shape, ConvDirection direction)
     EXPECT_EQ(mismatches, 0);
 }
 
-class TestConvNaiveDevice : public ::testing::TestWithParam<std::tuple<DeviceCase, ConvDirection>>
+class TestGpuConvNaive : public ::testing::TestWithParam<std::tuple<DeviceCase, ConvDirection>>
 {
 };
 
-TEST_P(TestConvNaiveDevice, Float)
+TEST_P(TestGpuConvNaive, Float)
 {
     SKIP_IF_NO_DEVICES();
     runCase<float>(std::get<0>(GetParam()).shape, std::get<1>(GetParam()));
 }
 
-TEST_P(TestConvNaiveDevice, Half)
+TEST_P(TestGpuConvNaive, Half)
 {
     SKIP_IF_NO_DEVICES();
     runCase<Half>(std::get<0>(GetParam()).shape, std::get<1>(GetParam()));
 }
 
-TEST_P(TestConvNaiveDevice, BFloat16)
+TEST_P(TestGpuConvNaive, BFloat16)
 {
     SKIP_IF_NO_DEVICES();
     runCase<BFloat16>(std::get<0>(GetParam()).shape, std::get<1>(GetParam()));
 }
 
 INSTANTIATE_TEST_SUITE_P(,
-                         TestConvNaiveDevice,
+                         TestGpuConvNaive,
                          ::testing::Combine(::testing::ValuesIn(deviceCases()),
                                             ::testing::Values(ConvDirection::FORWARD,
                                                               ConvDirection::BACKWARD_DATA,
