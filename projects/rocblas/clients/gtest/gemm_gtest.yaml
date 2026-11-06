@@ -3682,7 +3682,7 @@ Tests:
   matrix_size: *medium_matrix_size_range
   use_hipblaslt: 1
   os_flags: LINUX
-  gpu_arch: ['90?'] # non default gfx test for forced hipblaslt
+  #gpu_arch: ['90?'] # non default gfx test for forced hipblaslt
 
 - name: hipblaslt_force_off_f16
   category: pre_checkin
@@ -3693,7 +3693,7 @@ Tests:
   matrix_size: *medium_matrix_size_range
   use_hipblaslt: 0
   os_flags: LINUX
-  gpu_arch: ['90?'] # non default gfx test for forced hipblaslt
+  #gpu_arch: ['90?'] # non default gfx test for forced hipblaslt
  
 - name: gemm_ex_h2f #SWDEV-560127
   category: pre_checkin
