@@ -141,6 +141,17 @@ namespace TensileLite
             std::vector<std::shared_ptr<ProblemInputs>> m_referenceInputs;
             std::vector<std::vector<uint8_t>>           m_referenceRecvs;
 
+            // Per device: DataInitialization::inputEpoch() the reference result was last computed with.
+            // The reference is recomputed only when the epoch has moved.
+            std::vector<DataInitialization::InputEpoch> m_referenceInputEpoch;
+
+            // Debug/CI self-check: when the epoch says the inputs are unchanged, recompute the
+            // reference anyway and require a bitwise-identical result. Catches a missed epoch
+            // bump (stale reference) instead of letting it pass silently.
+            bool m_verifyReferenceReuse = false;
+
+            void verifyReferenceReuse(ContractionProblemGemm const& problem, size_t device);
+
             size_t                   m_cpuResultBufferSize = 0;
             std::shared_ptr<uint8_t> m_cpuResultBuffer;
 

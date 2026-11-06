@@ -165,6 +165,23 @@ TIMING_HIERARCHY = {
             "solution_selection": {},
             "pre_solution": {
                 "pre_solution_listener.ReferenceValidator": {
+                    # DataInitialization's input epoch did not move, so the reference is reused
+                    # (count-only marker).
+                    "pre_solution_ref_skipped": {},
+                    # Per-solution recompute because the input epoch moved (inputs were really
+                    # regenerated). "inputs_unchanged" only appears with
+                    # --verify-reference-reuse / TENSILELITE_VERIFY_REFERENCE_REUSE=1, which
+                    # recomputes anyway to check the reuse is exact; it is the old behaviour's
+                    # redundant work and also what older client builds always did.
+                    "cpu_reference_gemm_per_solution_inputs_changed": {
+                        "solve_cpu_fast_per_solution_inputs_changed": {},
+                        "solve_cpu_slow_per_solution_inputs_changed": {},
+                    },
+                    "cpu_reference_gemm_per_solution_inputs_unchanged": {
+                        "solve_cpu_fast_per_solution_inputs_unchanged": {},
+                        "solve_cpu_slow_per_solution_inputs_unchanged": {},
+                    },
+                    # Older logs (before the changed/unchanged split).
                     "cpu_reference_gemm_per_solution": {
                         "solve_cpu_fast_per_solution": {},
                         "solve_cpu_slow_per_solution": {},
@@ -172,7 +189,21 @@ TIMING_HIERARCHY = {
                 },
                 "pre_solution_listener.DataInitialization": {
                     "pre_solution_mx_check": {},
-                    "pre_solution_mx_init_data": {},
+                    # initOneMXSide runs once per side (A, B) per call: it either reuses its
+                    # cache or really regenerates data + scales.
+                    "pre_solution_mx_init_data": {
+                        "pre_solution_mx_side_cache_hit": {},
+                        "pre_solution_mx_side_regenerate": {},
+                    },
+                    # These run for every gated solution; the suffix says whether the MX data
+                    # was actually regenerated in that same call.
+                    "pre_solution_mx_copy_valid_to_gpu_after_regen": {},
+                    "pre_solution_mx_copy_valid_to_gpu_no_regen": {},
+                    "pre_solution_mx_copy_inputs_d2d_after_regen": {},
+                    "pre_solution_mx_copy_inputs_d2d_no_regen": {},
+                    "pre_solution_mx_cpu_sync_after_regen": {},
+                    "pre_solution_mx_cpu_sync_no_regen": {},
+                    # Older logs (before the regen split).
                     "pre_solution_mx_copy_valid_to_gpu": {},
                     "pre_solution_mx_copy_inputs_d2d": {},
                     "pre_solution_mx_cpu_sync": {},
