@@ -273,7 +273,7 @@ def _lower_via_cpp_engine(
 
     Raises :class:`BackendError` if the engine extension is unavailable.
     """
-    engine = _import_engine()
+    engine = import_engine()
     flavor = llvm_flavor
     if flavor is None:
         from .lower_llvm import _resolve_llvm_flavor
@@ -528,11 +528,6 @@ def import_engine(module: str = "rocke_engine"):
         ) from e
 
 
-def _import_engine():
-    """Import and return the ``rocke_engine`` extension module."""
-    return import_engine()
-
-
 # ------------------------------------------------- spec dict serialization
 
 
@@ -679,7 +674,7 @@ def _lower_python(spec: Any, arch: str, want_ir: bool) -> Tuple[str, str]:
 
 def _lower_cpp(spec: Any, arch: str, want_ir: bool) -> Tuple[str, str]:
     """C++-engine lowering of a universal-GEMM spec via ``rocke_engine``."""
-    engine = _import_engine()
+    engine = import_engine()
     sd = universal_gemm_spec_to_dict(spec)
     ll = engine.gemm_lower_llvm(sd, arch=arch)
     ir = ""
@@ -894,22 +889,23 @@ def _diff_and_pick(
 
 
 def lower_family(
+    *,
     family: str,
-    spec: Any,
     arch: str,
     backend: Optional[str],
     want_ir: bool,
-    py_fn,
-    cpp_ll_fn,
-    cpp_ir_fn,
+    py_fn: Callable[[bool], Tuple[str, str]],
+    cpp_ll_fn: Callable[[], str],
+    cpp_ir_fn: Callable[[], str],
     spec_name: str,
 ) -> "GemmLowerResult":
     """The family-agnostic python/cpp/both driver.
 
     ``py_fn(want_ir) -> (ll, ir)`` runs the native Python engine.
     ``cpp_ll_fn() -> ll`` / ``cpp_ir_fn() -> ir`` reach the C++ binding for
-    this family. The selection precedence and the differential comparison are
-    identical to :func:`lower_universal_gemm`.
+    this family. ``family`` and ``spec_name`` only label a mismatch report.
+    The selection precedence and the differential comparison are identical to
+    :func:`lower_universal_gemm`.
 
     Public so a library-owned family's bridge (``library/kernels``) drives its
     ``rocke_library_engine`` binding through the same selection and diff.
@@ -934,15 +930,9 @@ def lower_family(
     )
 
 
-_lower_family = lower_family
-
-
 def name_of(spec: Any) -> str:
     """The spec's kernel name, for backend mismatch reports."""
     return getattr(spec, "name", "?")
-
-
-_name_of = name_of
 
 
 def lower_batched_gemm(
@@ -967,18 +957,17 @@ def lower_batched_gemm(
             ir = serialize(k)
         return ll, ir
 
-    eng = _import_engine()
+    eng = import_engine()
     sd = batched_gemm_spec_to_dict(spec)
-    return _lower_family(
-        "batched GEMM",
-        spec,
-        arch,
-        backend,
-        want_ir,
-        py_fn,
-        lambda: eng.batched_gemm_lower_llvm(sd, arch=arch),
-        lambda: eng.batched_gemm_serialize_ir(sd, arch=arch),
-        _name_of(spec),
+    return lower_family(
+        family="batched GEMM",
+        arch=arch,
+        backend=backend,
+        want_ir=want_ir,
+        py_fn=py_fn,
+        cpp_ll_fn=lambda: eng.batched_gemm_lower_llvm(sd, arch=arch),
+        cpp_ir_fn=lambda: eng.batched_gemm_serialize_ir(sd, arch=arch),
+        spec_name=name_of(spec),
     )
 
 
@@ -1004,18 +993,17 @@ def lower_grouped_gemm(
             ir = serialize(k)
         return ll, ir
 
-    eng = _import_engine()
+    eng = import_engine()
     sd = grouped_gemm_spec_to_dict(spec)
-    return _lower_family(
-        "grouped GEMM",
-        spec,
-        arch,
-        backend,
-        want_ir,
-        py_fn,
-        lambda: eng.grouped_gemm_lower_llvm(sd, arch=arch),
-        lambda: eng.grouped_gemm_serialize_ir(sd, arch=arch),
-        _name_of(spec),
+    return lower_family(
+        family="grouped GEMM",
+        arch=arch,
+        backend=backend,
+        want_ir=want_ir,
+        py_fn=py_fn,
+        cpp_ll_fn=lambda: eng.grouped_gemm_lower_llvm(sd, arch=arch),
+        cpp_ir_fn=lambda: eng.grouped_gemm_serialize_ir(sd, arch=arch),
+        spec_name=name_of(spec),
     )
 
 
@@ -1041,18 +1029,17 @@ def lower_flatmm(
             ir = serialize(k)
         return ll, ir
 
-    eng = _import_engine()
+    eng = import_engine()
     sd = flatmm_spec_to_dict(spec)
-    return _lower_family(
-        "flatmm",
-        spec,
-        arch,
-        backend,
-        want_ir,
-        py_fn,
-        lambda: eng.flatmm_lower_llvm(sd, arch=arch),
-        lambda: eng.flatmm_serialize_ir(sd, arch=arch),
-        _name_of(spec),
+    return lower_family(
+        family="flatmm",
+        arch=arch,
+        backend=backend,
+        want_ir=want_ir,
+        py_fn=py_fn,
+        cpp_ll_fn=lambda: eng.flatmm_lower_llvm(sd, arch=arch),
+        cpp_ir_fn=lambda: eng.flatmm_serialize_ir(sd, arch=arch),
+        spec_name=name_of(spec),
     )
 
 
@@ -1078,18 +1065,17 @@ def lower_streamk_gemm(
             ir = serialize(k)
         return ll, ir
 
-    eng = _import_engine()
+    eng = import_engine()
     sd = streamk_gemm_spec_to_dict(spec)
-    return _lower_family(
-        "stream-K GEMM",
-        spec,
-        arch,
-        backend,
-        want_ir,
-        py_fn,
-        lambda: eng.streamk_gemm_lower_llvm(sd, arch=arch),
-        lambda: eng.streamk_gemm_serialize_ir(sd, arch=arch),
-        _name_of(spec),
+    return lower_family(
+        family="stream-K GEMM",
+        arch=arch,
+        backend=backend,
+        want_ir=want_ir,
+        py_fn=py_fn,
+        cpp_ll_fn=lambda: eng.streamk_gemm_lower_llvm(sd, arch=arch),
+        cpp_ir_fn=lambda: eng.streamk_gemm_serialize_ir(sd, arch=arch),
+        spec_name=name_of(spec),
     )
 
 
@@ -1115,18 +1101,17 @@ def lower_block_scale_gemm(
             ir = serialize(k)
         return ll, ir
 
-    eng = _import_engine()
+    eng = import_engine()
     sd = block_scale_gemm_spec_to_dict(spec)
-    return _lower_family(
-        "block-scale GEMM",
-        spec,
-        arch,
-        backend,
-        want_ir,
-        py_fn,
-        lambda: eng.block_scale_gemm_lower_llvm(sd, arch=arch),
-        lambda: eng.block_scale_gemm_serialize_ir(sd, arch=arch),
-        _name_of(spec),
+    return lower_family(
+        family="block-scale GEMM",
+        arch=arch,
+        backend=backend,
+        want_ir=want_ir,
+        py_fn=py_fn,
+        cpp_ll_fn=lambda: eng.block_scale_gemm_lower_llvm(sd, arch=arch),
+        cpp_ir_fn=lambda: eng.block_scale_gemm_serialize_ir(sd, arch=arch),
+        spec_name=name_of(spec),
     )
 
 
@@ -1152,18 +1137,17 @@ def lower_mx_gemm(
             ir = serialize(k)
         return ll, ir
 
-    eng = _import_engine()
+    eng = import_engine()
     sd = mx_gemm_spec_to_dict(spec)
-    return _lower_family(
-        "mx GEMM",
-        spec,
-        arch,
-        backend,
-        want_ir,
-        py_fn,
-        lambda: eng.mx_gemm_lower_llvm(sd, arch=arch),
-        lambda: eng.mx_gemm_serialize_ir(sd, arch=arch),
-        _name_of(spec),
+    return lower_family(
+        family="mx GEMM",
+        arch=arch,
+        backend=backend,
+        want_ir=want_ir,
+        py_fn=py_fn,
+        cpp_ll_fn=lambda: eng.mx_gemm_lower_llvm(sd, arch=arch),
+        cpp_ir_fn=lambda: eng.mx_gemm_serialize_ir(sd, arch=arch),
+        spec_name=name_of(spec),
     )
 
 
@@ -1189,18 +1173,17 @@ def lower_mfma_gemm(
             ir = serialize(k)
         return ll, ir
 
-    eng = _import_engine()
+    eng = import_engine()
     sd = mfma_gemm_spec_to_dict(spec)
-    return _lower_family(
-        "mfma GEMM",
-        spec,
-        arch,
-        backend,
-        want_ir,
-        py_fn,
-        lambda: eng.mfma_gemm_lower_llvm(sd, arch=arch),
-        lambda: eng.mfma_gemm_serialize_ir(sd, arch=arch),
-        _name_of(spec),
+    return lower_family(
+        family="mfma GEMM",
+        arch=arch,
+        backend=backend,
+        want_ir=want_ir,
+        py_fn=py_fn,
+        cpp_ll_fn=lambda: eng.mfma_gemm_lower_llvm(sd, arch=arch),
+        cpp_ir_fn=lambda: eng.mfma_gemm_serialize_ir(sd, arch=arch),
+        spec_name=name_of(spec),
     )
 
 
@@ -1227,18 +1210,17 @@ def lower_matmul_nbits(
             ir = serialize(k)
         return ll, ir
 
-    eng = _import_engine()
+    eng = import_engine()
     sd = matmul_nbits_spec_to_dict(spec)
-    return _lower_family(
-        "matmul_nbits",
-        spec,
-        arch,
-        backend,
-        want_ir,
-        py_fn,
-        lambda: eng.matmul_nbits_lower_llvm(sd, arch=arch),
-        lambda: eng.matmul_nbits_serialize_ir(sd, arch=arch),
-        _name_of(spec),
+    return lower_family(
+        family="matmul_nbits",
+        arch=arch,
+        backend=backend,
+        want_ir=want_ir,
+        py_fn=py_fn,
+        cpp_ll_fn=lambda: eng.matmul_nbits_lower_llvm(sd, arch=arch),
+        cpp_ir_fn=lambda: eng.matmul_nbits_serialize_ir(sd, arch=arch),
+        spec_name=name_of(spec),
     )
 
 
@@ -1264,18 +1246,17 @@ def lower_gemm_multi_d(
             ir = serialize(k)
         return ll, ir
 
-    eng = _import_engine()
+    eng = import_engine()
     sd = gemm_multi_d_spec_to_dict(spec)
-    return _lower_family(
-        "gemm_multi_d",
-        spec,
-        arch,
-        backend,
-        want_ir,
-        py_fn,
-        lambda: eng.gemm_multi_d_lower_llvm(sd, arch=arch),
-        lambda: eng.gemm_multi_d_serialize_ir(sd, arch=arch),
-        _name_of(spec.base),
+    return lower_family(
+        family="gemm_multi_d",
+        arch=arch,
+        backend=backend,
+        want_ir=want_ir,
+        py_fn=py_fn,
+        cpp_ll_fn=lambda: eng.gemm_multi_d_lower_llvm(sd, arch=arch),
+        cpp_ir_fn=lambda: eng.gemm_multi_d_serialize_ir(sd, arch=arch),
+        spec_name=name_of(spec.base),
     )
 
 
@@ -1301,16 +1282,15 @@ def lower_gemm_multi_abd(
             ir = serialize(k)
         return ll, ir
 
-    eng = _import_engine()
+    eng = import_engine()
     sd = gemm_multi_abd_spec_to_dict(spec)
-    return _lower_family(
-        "gemm_multi_abd",
-        spec,
-        arch,
-        backend,
-        want_ir,
-        py_fn,
-        lambda: eng.gemm_multi_abd_lower_llvm(sd, arch=arch),
-        lambda: eng.gemm_multi_abd_serialize_ir(sd, arch=arch),
-        _name_of(spec.base),
+    return lower_family(
+        family="gemm_multi_abd",
+        arch=arch,
+        backend=backend,
+        want_ir=want_ir,
+        py_fn=py_fn,
+        cpp_ll_fn=lambda: eng.gemm_multi_abd_lower_llvm(sd, arch=arch),
+        cpp_ir_fn=lambda: eng.gemm_multi_abd_serialize_ir(sd, arch=arch),
+        spec_name=name_of(spec.base),
     )

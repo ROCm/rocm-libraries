@@ -66,7 +66,7 @@ def _spec(problem=_DENSE, *, dtype_d="fp16", edge=32, **kw) -> WgradConvSpec:
 
 def _engine():
     """The ``rocke_library_engine`` binding, or skip the calling test."""
-    from rocke.core.backend import BackendError, import_engine
+    from rocke.core import BackendError, import_engine
 
     from kernels.conv.engine_bridge import ENGINE_MODULE
 

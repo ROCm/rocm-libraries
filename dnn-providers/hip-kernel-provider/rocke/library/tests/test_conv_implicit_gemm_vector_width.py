@@ -207,7 +207,7 @@ class TestCppTwinAgrees(_SharedGeometry, unittest.TestCase):
 
     def setUp(self):
         try:
-            from rocke.core.backend import import_engine
+            from rocke.core import import_engine
 
             from kernels.conv.engine_bridge import ENGINE_MODULE
 

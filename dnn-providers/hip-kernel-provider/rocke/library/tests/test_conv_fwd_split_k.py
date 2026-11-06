@@ -740,13 +740,20 @@ class TestSplitKAutoBuild(unittest.TestCase):
         from kernels.conv import engine_bridge as backend
 
         seen = []
+        real_to_dict = backend.conv_implicit_gemm_spec_to_dict
 
-        def _fake_lower_family(family, spec, *a, **kw):
+        def _record(spec):
             seen.append(spec.split_k)
+            return real_to_dict(spec)
 
+        # The no-op lower_family takes keywords only, as the bridge must pass.
         with mock.patch.object(
-            backend, "lower_family", _fake_lower_family
-        ), mock.patch.object(backend, "import_engine", lambda module: None):
+            backend, "conv_implicit_gemm_spec_to_dict", _record
+        ), mock.patch.object(
+            backend, "lower_family", lambda **kw: None
+        ), mock.patch.object(
+            backend, "import_engine", lambda module: None
+        ):
             backend.lower_conv_implicit_gemm(_spec(split_k=-1), arch="gfx1250")
             backend.lower_conv_implicit_gemm(_spec(split_k=-1), arch="gfx950")
         self.assertEqual(seen, [4, 1])

@@ -7,7 +7,7 @@ Each conv family is built twice: by its Python builder in ``kernels/`` and by
 its C++ mirror in ``library/cpp``, bound into the ``rocke_library_engine``
 extension. This module turns a Python spec into the flat dict that extension's
 ``<family>_lower_llvm`` / ``<family>_serialize_ir`` entry points take, and
-drives both engines through :func:`rocke.core.backend.lower_family`: the same
+drives both engines through :func:`rocke.core.lower_family`: the same
 ``python`` / ``cpp`` / ``both`` selection and differential diff as the engine's
 own families.
 
@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, Optional, Tuple
 
-from rocke.core.backend import GemmLowerResult, import_engine, lower_family, name_of
+from rocke.core import GemmLowerResult, import_engine, lower_family, name_of
 
 #: The extension that binds the conv families' C++ mirrors.
 ENGINE_MODULE = "rocke_library_engine"
@@ -604,15 +604,14 @@ def lower_conv_implicit_gemm(
     eng = import_engine(ENGINE_MODULE)
     sd = conv_implicit_gemm_spec_to_dict(spec)
     return lower_family(
-        "conv_implicit_gemm",
-        spec,
-        arch,
-        backend,
-        want_ir,
-        py_fn,
-        lambda: eng.conv_implicit_gemm_lower_llvm(sd, arch=arch),
-        lambda: eng.conv_implicit_gemm_serialize_ir(sd, arch=arch),
-        name_of(spec),
+        family="conv_implicit_gemm",
+        arch=arch,
+        backend=backend,
+        want_ir=want_ir,
+        py_fn=py_fn,
+        cpp_ll_fn=lambda: eng.conv_implicit_gemm_lower_llvm(sd, arch=arch),
+        cpp_ir_fn=lambda: eng.conv_implicit_gemm_serialize_ir(sd, arch=arch),
+        spec_name=name_of(spec),
     )
 
 
@@ -652,15 +651,14 @@ def lower_conv_direct_grouped(
     eng = import_engine(ENGINE_MODULE)
     sd = conv_direct_grouped_spec_to_dict(spec, kind)
     return lower_family(
-        "conv_direct_grouped",
-        spec,
-        arch,
-        backend,
-        want_ir,
-        py_fn,
-        lambda: eng.conv_direct_grouped_lower_llvm(sd, arch=arch),
-        lambda: eng.conv_direct_grouped_serialize_ir(sd, arch=arch),
-        name_of(spec),
+        family="conv_direct_grouped",
+        arch=arch,
+        backend=backend,
+        want_ir=want_ir,
+        py_fn=py_fn,
+        cpp_ll_fn=lambda: eng.conv_direct_grouped_lower_llvm(sd, arch=arch),
+        cpp_ir_fn=lambda: eng.conv_direct_grouped_serialize_ir(sd, arch=arch),
+        spec_name=name_of(spec),
     )
 
 
@@ -689,15 +687,14 @@ def lower_conv_direct_nongrouped(
     eng = import_engine(ENGINE_MODULE)
     sd = conv_direct_nongrouped_spec_to_dict(spec)
     return lower_family(
-        "conv_direct_nongrouped",
-        spec,
-        arch,
-        backend,
-        want_ir,
-        py_fn,
-        lambda: eng.conv_direct_nongrouped_lower_llvm(sd, arch=arch),
-        lambda: eng.conv_direct_nongrouped_serialize_ir(sd, arch=arch),
-        name_of(spec),
+        family="conv_direct_nongrouped",
+        arch=arch,
+        backend=backend,
+        want_ir=want_ir,
+        py_fn=py_fn,
+        cpp_ll_fn=lambda: eng.conv_direct_nongrouped_lower_llvm(sd, arch=arch),
+        cpp_ir_fn=lambda: eng.conv_direct_nongrouped_serialize_ir(sd, arch=arch),
+        spec_name=name_of(spec),
     )
 
 
@@ -726,15 +723,14 @@ def lower_conv_direct_fwd_smallc_wmma(
     eng = import_engine(ENGINE_MODULE)
     sd = conv_direct_fwd_smallc_wmma_spec_to_dict(spec)
     return lower_family(
-        "conv_direct_fwd_smallc_wmma",
-        spec,
-        arch,
-        backend,
-        want_ir,
-        py_fn,
-        lambda: eng.conv_direct_fwd_smallc_wmma_lower_llvm(sd, arch=arch),
-        lambda: eng.conv_direct_fwd_smallc_wmma_serialize_ir(sd, arch=arch),
-        name_of(spec),
+        family="conv_direct_fwd_smallc_wmma",
+        arch=arch,
+        backend=backend,
+        want_ir=want_ir,
+        py_fn=py_fn,
+        cpp_ll_fn=lambda: eng.conv_direct_fwd_smallc_wmma_lower_llvm(sd, arch=arch),
+        cpp_ir_fn=lambda: eng.conv_direct_fwd_smallc_wmma_serialize_ir(sd, arch=arch),
+        spec_name=name_of(spec),
     )
 
 
@@ -763,15 +759,14 @@ def lower_conv_direct_fwd_smallk_wmma(
     eng = import_engine(ENGINE_MODULE)
     sd = conv_direct_fwd_smallk_wmma_spec_to_dict(spec)
     return lower_family(
-        "conv_direct_fwd_smallk_wmma",
-        spec,
-        arch,
-        backend,
-        want_ir,
-        py_fn,
-        lambda: eng.conv_direct_fwd_smallk_wmma_lower_llvm(sd, arch=arch),
-        lambda: eng.conv_direct_fwd_smallk_wmma_serialize_ir(sd, arch=arch),
-        name_of(spec),
+        family="conv_direct_fwd_smallk_wmma",
+        arch=arch,
+        backend=backend,
+        want_ir=want_ir,
+        py_fn=py_fn,
+        cpp_ll_fn=lambda: eng.conv_direct_fwd_smallk_wmma_lower_llvm(sd, arch=arch),
+        cpp_ir_fn=lambda: eng.conv_direct_fwd_smallk_wmma_serialize_ir(sd, arch=arch),
+        spec_name=name_of(spec),
     )
 
 
@@ -800,15 +795,14 @@ def lower_conv_direct_dw_fwd_wmma(
     eng = import_engine(ENGINE_MODULE)
     sd = conv_direct_dw_fwd_wmma_spec_to_dict(spec)
     return lower_family(
-        "conv_direct_dw_fwd_wmma",
-        spec,
-        arch,
-        backend,
-        want_ir,
-        py_fn,
-        lambda: eng.conv_direct_dw_fwd_wmma_lower_llvm(sd, arch=arch),
-        lambda: eng.conv_direct_dw_fwd_wmma_serialize_ir(sd, arch=arch),
-        name_of(spec),
+        family="conv_direct_dw_fwd_wmma",
+        arch=arch,
+        backend=backend,
+        want_ir=want_ir,
+        py_fn=py_fn,
+        cpp_ll_fn=lambda: eng.conv_direct_dw_fwd_wmma_lower_llvm(sd, arch=arch),
+        cpp_ir_fn=lambda: eng.conv_direct_dw_fwd_wmma_serialize_ir(sd, arch=arch),
+        spec_name=name_of(spec),
     )
 
 
@@ -837,15 +831,14 @@ def lower_conv_direct_fwd_gstream_wmma(
     eng = import_engine(ENGINE_MODULE)
     sd = conv_direct_fwd_gstream_wmma_spec_to_dict(spec)
     return lower_family(
-        "conv_direct_fwd_gstream_wmma",
-        spec,
-        arch,
-        backend,
-        want_ir,
-        py_fn,
-        lambda: eng.conv_direct_fwd_gstream_wmma_lower_llvm(sd, arch=arch),
-        lambda: eng.conv_direct_fwd_gstream_wmma_serialize_ir(sd, arch=arch),
-        name_of(spec),
+        family="conv_direct_fwd_gstream_wmma",
+        arch=arch,
+        backend=backend,
+        want_ir=want_ir,
+        py_fn=py_fn,
+        cpp_ll_fn=lambda: eng.conv_direct_fwd_gstream_wmma_lower_llvm(sd, arch=arch),
+        cpp_ir_fn=lambda: eng.conv_direct_fwd_gstream_wmma_serialize_ir(sd, arch=arch),
+        spec_name=name_of(spec),
     )
 
 
@@ -876,15 +869,14 @@ def lower_conv_direct_fwd_tapouter_wmma(
     eng = import_engine(ENGINE_MODULE)
     sd = conv_direct_fwd_tapouter_wmma_spec_to_dict(spec)
     return lower_family(
-        "conv_direct_fwd_tapouter_wmma",
-        spec,
-        arch,
-        backend,
-        want_ir,
-        py_fn,
-        lambda: eng.conv_direct_fwd_tapouter_wmma_lower_llvm(sd, arch=arch),
-        lambda: eng.conv_direct_fwd_tapouter_wmma_serialize_ir(sd, arch=arch),
-        name_of(spec),
+        family="conv_direct_fwd_tapouter_wmma",
+        arch=arch,
+        backend=backend,
+        want_ir=want_ir,
+        py_fn=py_fn,
+        cpp_ll_fn=lambda: eng.conv_direct_fwd_tapouter_wmma_lower_llvm(sd, arch=arch),
+        cpp_ir_fn=lambda: eng.conv_direct_fwd_tapouter_wmma_serialize_ir(sd, arch=arch),
+        spec_name=name_of(spec),
     )
 
 
@@ -913,15 +905,14 @@ def lower_conv_dgrad_patch_wmma(
     eng = import_engine(ENGINE_MODULE)
     sd = conv_dgrad_patch_wmma_spec_to_dict(spec)
     return lower_family(
-        "conv_dgrad_patch_wmma",
-        spec,
-        arch,
-        backend,
-        want_ir,
-        py_fn,
-        lambda: eng.conv_dgrad_patch_wmma_lower_llvm(sd, arch=arch),
-        lambda: eng.conv_dgrad_patch_wmma_serialize_ir(sd, arch=arch),
-        name_of(spec),
+        family="conv_dgrad_patch_wmma",
+        arch=arch,
+        backend=backend,
+        want_ir=want_ir,
+        py_fn=py_fn,
+        cpp_ll_fn=lambda: eng.conv_dgrad_patch_wmma_lower_llvm(sd, arch=arch),
+        cpp_ir_fn=lambda: eng.conv_dgrad_patch_wmma_serialize_ir(sd, arch=arch),
+        spec_name=name_of(spec),
     )
 
 
@@ -950,15 +941,14 @@ def lower_conv_dgrad_smallc_wmma(
     eng = import_engine(ENGINE_MODULE)
     sd = conv_dgrad_smallc_wmma_spec_to_dict(spec)
     return lower_family(
-        "conv_dgrad_smallc_wmma",
-        spec,
-        arch,
-        backend,
-        want_ir,
-        py_fn,
-        lambda: eng.conv_dgrad_smallc_wmma_lower_llvm(sd, arch=arch),
-        lambda: eng.conv_dgrad_smallc_wmma_serialize_ir(sd, arch=arch),
-        name_of(spec),
+        family="conv_dgrad_smallc_wmma",
+        arch=arch,
+        backend=backend,
+        want_ir=want_ir,
+        py_fn=py_fn,
+        cpp_ll_fn=lambda: eng.conv_dgrad_smallc_wmma_lower_llvm(sd, arch=arch),
+        cpp_ir_fn=lambda: eng.conv_dgrad_smallc_wmma_serialize_ir(sd, arch=arch),
+        spec_name=name_of(spec),
     )
 
 
@@ -987,15 +977,14 @@ def lower_conv_direct_dgrad_wmma(
     eng = import_engine(ENGINE_MODULE)
     sd = conv_direct_dgrad_wmma_spec_to_dict(spec)
     return lower_family(
-        "conv_direct_dgrad_wmma",
-        spec,
-        arch,
-        backend,
-        want_ir,
-        py_fn,
-        lambda: eng.conv_direct_dgrad_wmma_lower_llvm(sd, arch=arch),
-        lambda: eng.conv_direct_dgrad_wmma_serialize_ir(sd, arch=arch),
-        name_of(spec),
+        family="conv_direct_dgrad_wmma",
+        arch=arch,
+        backend=backend,
+        want_ir=want_ir,
+        py_fn=py_fn,
+        cpp_ll_fn=lambda: eng.conv_direct_dgrad_wmma_lower_llvm(sd, arch=arch),
+        cpp_ir_fn=lambda: eng.conv_direct_dgrad_wmma_serialize_ir(sd, arch=arch),
+        spec_name=name_of(spec),
     )
 
 
@@ -1024,15 +1013,14 @@ def lower_conv_direct_fwd_wmma(
     eng = import_engine(ENGINE_MODULE)
     sd = conv_direct_fwd_wmma_spec_to_dict(spec)
     return lower_family(
-        "conv_direct_fwd_wmma",
-        spec,
-        arch,
-        backend,
-        want_ir,
-        py_fn,
-        lambda: eng.conv_direct_fwd_wmma_lower_llvm(sd, arch=arch),
-        lambda: eng.conv_direct_fwd_wmma_serialize_ir(sd, arch=arch),
-        name_of(spec),
+        family="conv_direct_fwd_wmma",
+        arch=arch,
+        backend=backend,
+        want_ir=want_ir,
+        py_fn=py_fn,
+        cpp_ll_fn=lambda: eng.conv_direct_fwd_wmma_lower_llvm(sd, arch=arch),
+        cpp_ir_fn=lambda: eng.conv_direct_fwd_wmma_serialize_ir(sd, arch=arch),
+        spec_name=name_of(spec),
     )
 
 
@@ -1122,15 +1110,14 @@ def lower_conv_winograd_fwd(
     eng = import_engine(ENGINE_MODULE)
     sd = conv_winograd_fwd_spec_to_dict(spec, stages)
     return lower_family(
-        "conv_winograd_fwd",
-        spec,
-        arch,
-        backend,
-        want_ir,
-        py_fn,
-        lambda: eng.conv_winograd_fwd_lower_llvm(sd, arch=arch),
-        lambda: eng.conv_winograd_fwd_serialize_ir(sd, arch=arch),
-        name_of(spec),
+        family="conv_winograd_fwd",
+        arch=arch,
+        backend=backend,
+        want_ir=want_ir,
+        py_fn=py_fn,
+        cpp_ll_fn=lambda: eng.conv_winograd_fwd_lower_llvm(sd, arch=arch),
+        cpp_ir_fn=lambda: eng.conv_winograd_fwd_serialize_ir(sd, arch=arch),
+        spec_name=name_of(spec),
     )
 
 
@@ -1183,15 +1170,14 @@ def lower_conv_winograd_gemm_wmma(
     eng = import_engine(ENGINE_MODULE)
     sd = conv_winograd_gemm_wmma_spec_to_dict(spec)
     return lower_family(
-        "conv_winograd_gemm_wmma",
-        spec,
-        arch,
-        backend,
-        want_ir,
-        py_fn,
-        lambda: eng.conv_winograd_gemm_wmma_lower_llvm(sd, arch=arch),
-        lambda: eng.conv_winograd_gemm_wmma_serialize_ir(sd, arch=arch),
-        name_of(spec),
+        family="conv_winograd_gemm_wmma",
+        arch=arch,
+        backend=backend,
+        want_ir=want_ir,
+        py_fn=py_fn,
+        cpp_ll_fn=lambda: eng.conv_winograd_gemm_wmma_lower_llvm(sd, arch=arch),
+        cpp_ir_fn=lambda: eng.conv_winograd_gemm_wmma_serialize_ir(sd, arch=arch),
+        spec_name=name_of(spec),
     )
 
 
@@ -1221,15 +1207,14 @@ def lower_conv_winograd_gemm_reduce(
     eng = import_engine(ENGINE_MODULE)
     sd = dict(dtype=spec.dtype)
     return lower_family(
-        "conv_winograd_gemm_wmma",
-        spec,
-        arch,
-        backend,
-        want_ir,
-        py_fn,
-        lambda: eng.conv_winograd_gemm_reduce_lower_llvm(sd, arch=arch),
-        lambda: eng.conv_winograd_gemm_reduce_serialize_ir(sd, arch=arch),
-        "wino_gemm_reduce",
+        family="conv_winograd_gemm_wmma",
+        arch=arch,
+        backend=backend,
+        want_ir=want_ir,
+        py_fn=py_fn,
+        cpp_ll_fn=lambda: eng.conv_winograd_gemm_reduce_lower_llvm(sd, arch=arch),
+        cpp_ir_fn=lambda: eng.conv_winograd_gemm_reduce_serialize_ir(sd, arch=arch),
+        spec_name="wino_gemm_reduce",
     )
 
 
@@ -1313,15 +1298,14 @@ def lower_conv_winograd_gen(
 
     eng = import_engine(ENGINE_MODULE)
     return lower_family(
-        "conv_winograd_gen",
-        spec,
-        arch,
-        backend,
-        want_ir,
-        py_fn,
-        lambda: eng.conv_winograd_gen_lower_llvm(sd, arch=arch),
-        lambda: eng.conv_winograd_gen_serialize_ir(sd, arch=arch),
-        name_of(spec),
+        family="conv_winograd_gen",
+        arch=arch,
+        backend=backend,
+        want_ir=want_ir,
+        py_fn=py_fn,
+        cpp_ll_fn=lambda: eng.conv_winograd_gen_lower_llvm(sd, arch=arch),
+        cpp_ir_fn=lambda: eng.conv_winograd_gen_serialize_ir(sd, arch=arch),
+        spec_name=name_of(spec),
     )
 
 
@@ -1396,15 +1380,14 @@ def lower_conv_winograd_fused_1d_wmma(
     eng = import_engine(ENGINE_MODULE)
     sd = conv_winograd_fused_1d_spec_to_dict(spec)
     return lower_family(
-        "conv_winograd_fused_1d_wmma",
-        spec,
-        arch,
-        backend,
-        want_ir,
-        py_fn,
-        lambda: eng.conv_winograd_fused_1d_wmma_lower_llvm(sd, arch=arch),
-        lambda: eng.conv_winograd_fused_1d_wmma_serialize_ir(sd, arch=arch),
-        name_of(spec),
+        family="conv_winograd_fused_1d_wmma",
+        arch=arch,
+        backend=backend,
+        want_ir=want_ir,
+        py_fn=py_fn,
+        cpp_ll_fn=lambda: eng.conv_winograd_fused_1d_wmma_lower_llvm(sd, arch=arch),
+        cpp_ir_fn=lambda: eng.conv_winograd_fused_1d_wmma_serialize_ir(sd, arch=arch),
+        spec_name=name_of(spec),
     )
 
 
@@ -1433,15 +1416,14 @@ def lower_img2col(
     eng = import_engine(ENGINE_MODULE)
     sd = img2col_spec_to_dict(spec)
     return lower_family(
-        "img2col",
-        spec,
-        arch,
-        backend,
-        want_ir,
-        py_fn,
-        lambda: eng.img2col_lower_llvm(sd, arch=arch),
-        lambda: eng.img2col_serialize_ir(sd, arch=arch),
-        name_of(spec),
+        family="img2col",
+        arch=arch,
+        backend=backend,
+        want_ir=want_ir,
+        py_fn=py_fn,
+        cpp_ll_fn=lambda: eng.img2col_lower_llvm(sd, arch=arch),
+        cpp_ir_fn=lambda: eng.img2col_serialize_ir(sd, arch=arch),
+        spec_name=name_of(spec),
     )
 
 
@@ -1472,13 +1454,12 @@ def lower_deep_fused_conv_pool(
     eng = import_engine(ENGINE_MODULE)
     sd = deep_fused_conv_pool_spec_to_dict(spec)
     return lower_family(
-        "deep_fused_conv_pool",
-        spec,
-        arch,
-        backend,
-        want_ir,
-        py_fn,
-        lambda: eng.deep_fused_conv_pool_lower_llvm(sd, arch=arch),
-        lambda: eng.deep_fused_conv_pool_serialize_ir(sd, arch=arch),
-        name_of(spec),
+        family="deep_fused_conv_pool",
+        arch=arch,
+        backend=backend,
+        want_ir=want_ir,
+        py_fn=py_fn,
+        cpp_ll_fn=lambda: eng.deep_fused_conv_pool_lower_llvm(sd, arch=arch),
+        cpp_ir_fn=lambda: eng.deep_fused_conv_pool_serialize_ir(sd, arch=arch),
+        spec_name=name_of(spec),
     )

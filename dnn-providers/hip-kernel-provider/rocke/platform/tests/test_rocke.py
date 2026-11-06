@@ -1799,9 +1799,9 @@ class TestLlvmFlavorEnumeration(unittest.TestCase):
             (),
             {"lower_serialized_ir": staticmethod(lambda *a, **k: "lowered")},
         )()
-        orig = backend_mod._import_engine
-        backend_mod._import_engine = lambda: engine
-        try:
+        with patch.object(
+            backend_mod, "import_engine", lambda module="rocke_engine": engine
+        ):
             for flavor in LLVM_FLAVORS:
                 with self.subTest(flavor=flavor):
                     self.assertEqual(
@@ -1814,8 +1814,6 @@ class TestLlvmFlavorEnumeration(unittest.TestCase):
                 backend_mod._lower_via_cpp_engine(
                     "ir", arch="gfx950", llvm_flavor="not-a-real-flavor"
                 )
-        finally:
-            backend_mod._import_engine = orig
 
     def test_comgr_guard_compares_datalayout_generation_not_flavor(self):
         """The comgr mismatch guard keys on generation, so llvm22/llvm23 mix.

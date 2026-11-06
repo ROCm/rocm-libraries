@@ -396,7 +396,7 @@ class TestPrefetchGlobalRegsCrossEngine(unittest.TestCase):
     """The C++ engine emits the Python IR byte for byte and rejects alike."""
 
     def setUp(self):
-        from rocke.core.backend import BackendError, import_engine
+        from rocke.core import BackendError, import_engine
 
         from kernels.conv.engine_bridge import ENGINE_MODULE
 
