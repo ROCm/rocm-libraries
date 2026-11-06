@@ -99,20 +99,43 @@ __device__ static inline int d_row(int lane, int i)
     return CT_WMMA_GFX12 ? i + 8 * (lane / 16) : 2 * i + lane / 16;
 }
 
-// wt[r][m][co][ci] (Co_pad x Ci_pad per (r, m)) from w[ci][co][t].
+// wt[r][m][co][ci] (Co_pad x Ci_pad per (r, m)) from w[ci][co][t], transposed through LDS: a block
+// reads CT_WT_CI input channels x CT_WT_CO output channels, i.e. CT_WT_CO * K contiguous values per
+// input channel, and writes CT_WT_CI contiguous channels per (r, m, co).
+#define CT_WT_CI 64
+#ifndef CT_WT_CO
+#define CT_WT_CO 16 // fewer for small weights, to keep enough blocks
+#endif
+#define CT_WT_ROW (CT_WT_CO * CT_K + 1) // LDS row, padded against bank conflicts
+
 extern "C" __global__ void __launch_bounds__(CT_BLOCK_SIZE) MIOpenConvTranspose1dWmmaHipWeights(
     const u16* __restrict__ w, u16* __restrict__ wt, int Ci, int Co, int Ci_pad, int Co_pad)
 {
-    const long total = static_cast<long>(CT_S) * CT_T * Co_pad * Ci_pad;
-    for(long e = static_cast<long>(blockIdx.x) * CT_BLOCK_SIZE + threadIdx.x; e < total;
-        e += static_cast<long>(gridDim.x) * CT_BLOCK_SIZE)
+    __shared__ u16 tile[CT_WT_CI * CT_WT_ROW];
+    const int ci0 = blockIdx.x * CT_WT_CI;
+    const int co0 = blockIdx.y * CT_WT_CO;
+
+    for(int i = threadIdx.x; i < CT_WT_CI * CT_WT_CO * CT_K; i += CT_BLOCK_SIZE)
     {
-        const int ci = static_cast<int>(e % Ci_pad);
-        const int co = static_cast<int>((e / Ci_pad) % Co_pad);
-        const int rm = static_cast<int>(e / (static_cast<long>(Ci_pad) * Co_pad));
+        const int c             = i / (CT_WT_CO * CT_K);
+        const int j             = i % (CT_WT_CO * CT_K); // (co - co0) * K + t
+        const int ci            = ci0 + c;
+        tile[c * CT_WT_ROW + j] = (ci < Ci && co0 + j / CT_K < Co)
+                                      ? w[(static_cast<long>(ci) * Co + co0) * CT_K + j]
+                                      : static_cast<u16>(0);
+    }
+    __syncthreads();
+
+    // Co_pad is a multiple of CT_WT_CO; Ci_pad may end inside the last block.
+    for(int i = threadIdx.x; i < CT_S * CT_T * CT_WT_CO * CT_WT_CI; i += CT_BLOCK_SIZE)
+    {
+        const int c  = i % CT_WT_CI;
+        const int cl = (i / CT_WT_CI) % CT_WT_CO;
+        const int rm = i / (CT_WT_CI * CT_WT_CO);
         const int t  = (rm / CT_T) + CT_S * (rm % CT_T); // r + S * m
-        wt[e] = (ci < Ci && co < Co && t < CT_K) ? w[(static_cast<long>(ci) * Co + co) * CT_K + t]
-                                                 : static_cast<u16>(0);
+        if(ci0 + c < Ci_pad)
+            wt[(static_cast<long>(rm) * Co_pad + co0 + cl) * Ci_pad + ci0 + c] =
+                t < CT_K ? tile[c * CT_WT_ROW + cl * CT_K + t] : static_cast<u16>(0);
     }
 }
 
