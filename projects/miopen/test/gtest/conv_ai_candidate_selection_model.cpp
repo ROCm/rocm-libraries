@@ -27,6 +27,7 @@
 #include <miopen/conv/heuristics/ai_candidate_selection.hpp>
 #include <miopen/conv/heuristics/ai_conv_nd_kernel_tuning_utils.hpp>
 #include <miopen/conv/heuristics/ai_heuristics.hpp> // common::EngineeredConvFeatures
+#include <miopen/env_debug.hpp>                     // debug::env::UpdateEnvVariable (table toggle)
 #include <miopen/db_path.hpp>
 #include <miopen/filesystem.hpp>
 #include <miopen/handle.hpp>
@@ -377,6 +378,38 @@ TEST_P(GPU_CandidateSelection_FP32, ModelSelectBestCandidate_Test)
             << "Candidate index " << idx << " out of range [0, " << valid_kernel_params.size() - 1
             << "]";
     }
+}
+
+// End-to-end miss -> non-AI fallback. With the config table disabled, every EncodeKernelConfigs
+// lookup misses and throws; ModelSelectBestCandidate must catch it and return an EMPTY result --
+// which is what makes RunAIHeuristics return false and the solver drop to its non-AI heuristic --
+// rather than throwing or crashing. (The per-call throw is covered by EncodeKernelConfigsEdgeCases;
+// this proves the catch/empty contract the fallback relies on.)
+TEST_P(GPU_CandidateSelection_FP32, ModelSelectBestCandidateTableMissFallsBack_Test)
+{
+    const auto& params = GetParam();
+    CandidateSelectionMetadata meta(params.arch, params.solver);
+    std::map<std::string, float> features;
+    for(const auto& name : meta.input_params())
+        features[name] = 1.0f;
+    auto valid_kernel_params = GenerateValidKernelParams(meta, params.kernel_name, 3);
+
+    constexpr std::string_view kDisable = "MIOPEN_DEBUG_AI_DISABLE_PRECOMPUTED_CONFIG_EMB";
+    miopen::debug::env::UpdateEnvVariable(kDisable, "1");
+    CandidateSelectionResult result;
+    const auto ran = [&] {
+        result = ModelSelectBestCandidate(params.arch,
+                                          params.solver,
+                                          features,
+                                          valid_kernel_params,
+                                          /*use_split_k=*/false,
+                                          accept_all_combinations);
+    };
+    EXPECT_NO_THROW(ran());
+    miopen::debug::env::ClearEnvVariable(
+        kDisable); // restore before asserting, so leaks can't occur
+    EXPECT_TRUE(result.IsEmpty())
+        << "A config-table miss must yield an empty result (non-AI fallback), not a pick";
 }
 
 TEST_P(GPU_CandidateSelection_FP32, ExpandKernelParamsWithSplitK_Test)
