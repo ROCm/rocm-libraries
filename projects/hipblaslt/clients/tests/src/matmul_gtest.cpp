@@ -826,8 +826,8 @@ namespace
         }
 
         // Packed scales either find a kernel that reads them, and then must match
-        // the reference, or find none. Today every gfx950 TensileLite MX kernel is
-        // HostPreSwizzle, so they find none.
+        // the reference, or find none. Today every gfx950 kernel for these FP8 and
+        // FP4 types is HostPreSwizzle, so they find none.
         ::testing::TestPartResultArray results;
         {
             ::testing::ScopedFakeTestPartResultReporter reporter(

@@ -7,9 +7,11 @@
 // support check, the launch, the tuning candidates or the tuning-file
 // override, in the C API or the hipblaslt_ext Gemm and GroupedGemm APIs.
 //
-// Every gfx950 TensileLite MX kernel is HostPreSwizzle: logic files leave
-// MXScaleFormat at Auto, which gfx950 resolves to HostPreSwizzle. Off the
-// rocRoller path, packed scales therefore have no kernel on gfx950.
+// Every gfx950 kernel for the FP8 and FP4 MX types these tests use is
+// HostPreSwizzle: their logic files leave MXScaleFormat at Auto, which gfx950
+// resolves to HostPreSwizzle, and the rocRoller custom kernels, which are
+// NoSwizzle, cover only FP6 and mixed-type pairs. Off the rocRoller path,
+// packed scales therefore have no kernel for these types.
 
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>

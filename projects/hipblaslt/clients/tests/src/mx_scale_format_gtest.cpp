@@ -149,8 +149,8 @@ namespace
         EXPECT_EQ(search.requests, (std::vector<int>{3, 5}));
     }
 
-    // gfx950 today: every MX kernel is HostPreSwizzle, so packed scales stop
-    // after the first search instead of scanning the library.
+    // The gfx950 FP8 and FP4 MX types: every kernel is HostPreSwizzle, so packed
+    // scales stop after the first search instead of scanning the library.
     TEST(MXScaleFormat_smoke, no_compatible_kernel_stops_after_one_search)
     {
         RankedSearch search{std::vector<int>(1500, kHostPreSwizzle)};
