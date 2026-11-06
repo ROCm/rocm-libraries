@@ -35,6 +35,7 @@ from __future__ import annotations
 import enum
 import os
 import warnings
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from typing import Dict, List, NamedTuple, Optional, Set, Tuple
 
@@ -580,11 +581,6 @@ _INTRINSIC_DECLS: Dict[str, str] = {
     "update.dpp.i32": (
         "declare i32 @llvm.amdgcn.update.dpp.i32("
         "i32, i32, i32 immarg, i32 immarg, i32 immarg, i1 immarg)"
-    ),
-    # Packed fp16 atomic add (gfx940+). Two fp16 lanes per atomic transaction.
-    "global.atomic.fadd.v2f16": (
-        "declare <2 x half> @llvm.amdgcn.global.atomic.fadd.v2f16.p1("
-        "ptr addrspace(1), <2 x half>)"
     ),
     "mbcnt.lo": ("declare i32 @llvm.amdgcn.mbcnt.lo(i32, i32)"),
     "mbcnt.hi": ("declare i32 @llvm.amdgcn.mbcnt.hi(i32, i32)"),
@@ -1246,6 +1242,39 @@ def _llvm_loop_carried_type(t: Type) -> str:
         ) from exc
 
 
+def _ops_in_region(region: Region) -> Iterator[Op]:
+    """Yield every op of ``region`` in order, each followed by the ops of the
+    regions nested in it (an ``scf.if`` body, an if/else branch, an inner loop
+    body), to any depth."""
+    for op in region.ops:
+        yield op
+        for nested in op.regions:
+            yield from _ops_in_region(nested)
+
+
+def _loop_block_values(loop: Op) -> tuple[Value | None, list[Value]]:
+    """Return the induction variable and the carried values of the ``scf.for``
+    ``loop`` that its body reads, nested regions included.
+
+    The loop does not hold these values; they are found as operands of the
+    body's ops. A value the body never reads is not returned (the induction
+    variable is then ``None``).
+    """
+    iv_name = loop.attrs["iv"]
+    carried_names = {meta["name"] for meta in loop.attrs.get("iter_args", [])}
+    iv: Value | None = None
+    carried: list[Value] = []
+    for body_op in _ops_in_region(loop.regions[0]):
+        for operand in body_op.operands:
+            if operand.op is not loop:
+                continue
+            if operand.name == iv_name:
+                iv = operand
+            elif operand.name in carried_names and operand not in carried:
+                carried.append(operand)
+    return iv, carried
+
+
 def _scf_iter_llvm_types(op: Op, num_iter: int) -> List[str]:
     """Validate serialized loop metadata and render the real carry types."""
     iter_inits = op.operands[3:]
@@ -1760,6 +1789,9 @@ class _Lowerer:
         # For scf.for nesting we record the body-region's recorded
         # yield-operand stack so the latch block can read it back.
         self._yield_stack: List[List[str]] = []
+        # The names the headers of the rolled scf.for loops lowered so far
+        # define (see _claim_loop_header_names).
+        self._loop_header_names: set[str] = set()
 
     # ----- helpers -----
 
@@ -3645,22 +3677,29 @@ class _Lowerer:
     def _op_memref_global_atomic_add_pk_f16(self, op: Op) -> None:
         """Lower the packed-fp16 atomic add to its AMDGCN intrinsic.
 
-        Mirrors ``_op_memref_global_atomic_add_pk_bf16`` for fp16.
-        GEPs into the fp16 buffer at ``idx`` and calls
-        ``llvm.amdgcn.global.atomic.fadd.v2f16.p1`` (gfx940+).
+        Mirrors ``_op_memref_global_atomic_add_pk_bf16`` for fp16: a generic
+        ``atomicrmw fadd <2 x half>`` (agent scope, monotonic) with the
+        device-local memory-model metadata, which the backend selects as the
+        native ``global_atomic_pk_add_f16``. The legacy
+        ``llvm.amdgcn.global.atomic.fadd.v2f16`` intrinsic it replaces is
+        lowered on gfx1250 as a fenced atomic: a ``global_wb`` / ``global_inv``
+        pair and full counter drains around every single add, which
+        serialised the split-K epilogues.
         """
         ptr, idx, val = op.operands
         self._require_global_header_ptr("global_atomic_add_pk_f16", ptr)
-        self._need("global.atomic.fadd.v2f16")
         gep = self._fresh("gep")
         self._current().emit(
             f"  {gep} = getelementptr inbounds half, ptr addrspace(1) "
             f"{self._operand(ptr)}, i32 {self._operand(idx)}"
         )
+        self._needs_fp_atomic_md = True
         self._current().emit(
-            f"  {op.result.name} = call <2 x half> "
-            f"@llvm.amdgcn.global.atomic.fadd.v2f16.p1("
-            f"ptr addrspace(1) {gep}, <2 x half> {self._operand(val)})"
+            f"  {op.result.name} = atomicrmw fadd ptr addrspace(1) {gep}, "
+            f'<2 x half> {self._operand(val)} syncscope("agent") monotonic'
+            ", !amdgpu.no.fine.grained.memory !1"
+            ", !amdgpu.no.remote.memory !1"
+            ", !amdgpu.ignore.denormal.mode !1"
         )
 
     def _op_memref_global_load_vN(self, op: Op) -> None:
@@ -6964,14 +7003,45 @@ class _Lowerer:
         else:
             self._lower_normal_for(op)
 
+    def _claim_loop_header_names(self, op: Op, header_label: str) -> str:
+        """Return the suffix the rolled ``scf.for`` ``op`` adds to the names its
+        header defines (its induction variable and carried values), and record
+        the names it defines.
+
+        A loop names these values itself, so two loops of one kernel may share
+        a name: loops side by side, or a loop lowered once per trip of an
+        unrolled loop around it. LLVM needs every name defined once, so the
+        first loop to define a name keeps it, and a loop that would define a
+        name again adds ``.<header_label>`` (unique in the kernel) to all of
+        its names. An earlier loop may have named a value like that itself
+        (``%acc.for.header.5``), so while a suffixed name is still taken the loop
+        adds ``.<header_label>.<n>`` instead, for the first ``n = 1, 2, ...``
+        that leaves all of its names free.
+        """
+        names = [op.attrs["iv"]] + [
+            meta["name"] for meta in op.attrs.get("iter_args", [])
+        ]
+        suffix = ""
+        attempt = 0
+        while not self._loop_header_names.isdisjoint(name + suffix for name in names):
+            suffix = f".{header_label}" + (f".{attempt}" if attempt else "")
+            attempt += 1
+        self._loop_header_names.update(name + suffix for name in names)
+        return suffix
+
     def _lower_normal_for(self, op: Op) -> None:
-        """Lower scf.for to normal LLVM loop (header, body, latch, exit)."""
+        """Lower scf.for to normal LLVM loop (header, body, latch, exit).
+
+        When an earlier loop already defined one of this loop's names, the
+        header's induction variable and carried values take a suffix (see
+        :meth:`_claim_loop_header_names`); the body's reads of them are renamed
+        to match while it lowers.
+        """
         num_iter = int(op.attrs.get("num_iter_args", 0))
         lower, upper, step = op.operands[:3]
         iter_inits = op.operands[3 : 3 + num_iter]
         iter_meta = op.attrs.get("iter_args", [])
         iter_llvm_types = _scf_iter_llvm_types(op, num_iter)
-        iv_name = op.attrs["iv"]
         iv_ty = _llvm_type(lower.type)
 
         # Capture the predecessor block (for the from-entry edge of phis).
@@ -6982,6 +7052,10 @@ class _Lowerer:
         self._blocks[-2].emit(f"  br label %{header.label}")
         self._blocks[-2].terminated = True
 
+        suffix = self._claim_loop_header_names(op, header.label)
+        iv_name = op.attrs["iv"] + suffix
+        iter_names = [meta["name"] + suffix for meta in iter_meta]
+
         # Emit phi nodes in header (filled in for the latch edge after the
         # body region is lowered).
         header.emit(
@@ -6989,11 +7063,11 @@ class _Lowerer:
             f"[ %iv.next.{header.label}, %FOR_LATCH ]"
         )
         iter_phi_lines: List[int] = []
-        for meta, init, ll_ty in zip(iter_meta, iter_inits, iter_llvm_types):
+        for name, init, ll_ty in zip(iter_names, iter_inits, iter_llvm_types):
             header.emit(
-                f"  {meta['name']} = phi {ll_ty} "
+                f"  {name} = phi {ll_ty} "
                 f"[ {self._operand(init)}, %{pred_block} ], "
-                f"[ {meta['name']}.next.{header.label}, %FOR_LATCH ]"
+                f"[ {name}.next.{header.label}, %FOR_LATCH ]"
             )
             iter_phi_lines.append(len(header.lines) - 1)
 
@@ -7006,9 +7080,19 @@ class _Lowerer:
         header.emit(f"  br i1 {cmp}, label %{body.label}, label %FOR_EXIT")
         header.terminated = True
 
-        # Lower body region into body block (and any sub-blocks it spawns).
+        # Lower body region into body block (and any sub-blocks it spawns),
+        # its reads of the header's values renamed to the names defined above.
+        iv_value, carried_values = _loop_block_values(op)
+        block_values = ([iv_value] if iv_value is not None else []) + carried_values
+        saved_names = [(value, value.name) for value in block_values] if suffix else []
+        for value, name in saved_names:
+            value.name = name + suffix
         self._yield_stack.append([])
-        self.lower_region(op.regions[0])
+        try:
+            self.lower_region(op.regions[0])
+        finally:
+            for value, name in saved_names:
+                value.name = name
 
         # Body may have terminated itself if there was a scf.yield;
         # otherwise we expect the last op to be scf.yield emitted into the
@@ -7026,9 +7110,9 @@ class _Lowerer:
 
         iv_next = f"%iv.next.{header.label}"
         latch.emit(f"  {iv_next} = add nsw {iv_ty} {iv_name}, {self._operand(step)}")
-        for meta, yld, ll_ty in zip(iter_meta, yielded, iter_llvm_types):
+        for name, yld, ll_ty in zip(iter_names, yielded, iter_llvm_types):
             latch.emit(
-                f"  {meta['name']}.next.{header.label} = bitcast {ll_ty} {yld} to {ll_ty}"
+                f"  {name}.next.{header.label} = bitcast {ll_ty} {yld} to {ll_ty}"
             )
         latch.emit(f"  br label %{header.label}")
         latch.terminated = True
@@ -7042,10 +7126,8 @@ class _Lowerer:
         # Bind the for op's results: in LLVM IR, the header phi values
         # (which include the yielded values from the last latch iteration)
         # are the loop results. We add aliases via bitcast in the exit.
-        for meta, result, ll_ty in zip(iter_meta, op.results, iter_llvm_types):
-            exit_blk.emit(
-                f"  {result.name} = bitcast {ll_ty} {meta['name']} to {ll_ty}"
-            )
+        for name, result, ll_ty in zip(iter_names, op.results, iter_llvm_types):
+            exit_blk.emit(f"  {result.name} = bitcast {ll_ty} {name} to {ll_ty}")
 
     def _lower_unrolled_for(self, op: Op) -> None:
         """Lower scf.for to unrolled straight-line code (no control flow).
@@ -7056,6 +7138,12 @@ class _Lowerer:
         Strategy: Create synthetic SSA values for IV and iter args for each iteration,
         lower the body region which references these values, collect yielded values,
         and use them as inputs for the next iteration.
+
+        The renaming reaches every region nested in the body (an ``scf.if``
+        body, an if/else branch, an inner loop), so a trip reads its own
+        values and defines its own names there too. A shared-memory allocation
+        keeps its name: it is one module-level buffer that every trip shares,
+        found by that name (see :meth:`_collect_smem`).
         """
         # Extract loop parameters
         num_iter = int(op.attrs.get("num_iter_args", 0))
@@ -7063,7 +7151,6 @@ class _Lowerer:
         iter_inits = op.operands[3 : 3 + num_iter]
         iter_meta = op.attrs.get("iter_args", [])
         iter_llvm_types = _scf_iter_llvm_types(op, num_iter)
-        iv_name = op.attrs["iv"]
 
         # Evaluate constant bounds
         lower_val = self._eval_constant(lower)
@@ -7079,25 +7166,14 @@ class _Lowerer:
         for meta, init in zip(iter_meta, iter_inits):
             current_iter_values[meta["name"]] = self._operand(init)
 
-        # Create a fake op to hold IV and iter arg SSA values for each iteration
-        # We'll temporarily replace the original op in each Value's op field
-
-        # Find the Value objects for IV and iter args
-        # These are created when the scf.for was built and stored in the op
-        iv_value_obj = None
-        iter_value_objs: List[Value] = []
-
-        # The IV and iter arg Values are referenced by ops in the body region
-        # We need to find them by scanning the region
-        for body_op in op.regions[0].ops:
-            if hasattr(body_op, "operands"):
-                for operand in body_op.operands:
-                    if operand.name == iv_name and operand.op == op:
-                        iv_value_obj = operand
-                    for meta in iter_meta:
-                        if operand.name == meta["name"] and operand.op == op:
-                            if operand not in iter_value_objs:
-                                iter_value_objs.append(operand)
+        # The IV and iter arg Values the body reads, nested regions included.
+        iv_value_obj, iter_value_objs = _loop_block_values(op)
+        body_results = [
+            result
+            for body_op in _ops_in_region(op.regions[0])
+            if body_op.name != "tile.smem_alloc"
+            for result in body_op.results
+        ]
 
         # Phase 4a: Detect if loop body has trailing sync() that could be elided
         # Only if elide_trailing_barrier flag is True
@@ -7138,13 +7214,12 @@ class _Lowerer:
                         val_obj.name = current_iter_values[meta["name"]]
                         break
 
-            # Rename all op results in the body to have unique names
-            for body_op in op.regions[0].ops:
-                if len(body_op.results) > 0:
-                    for result in body_op.results:
-                        values_to_rename.append((result, result.name))
-                        base_name = result.name.lstrip("%")
-                        result.name = f"%{base_name}{iteration_suffix}"
+            # Rename the op results in the body, nested regions included, to
+            # have unique names (shared-memory allocations keep theirs)
+            for result in body_results:
+                values_to_rename.append((result, result.name))
+                base_name = result.name.lstrip("%")
+                result.name = f"%{base_name}{iteration_suffix}"
 
             # Phase 4a: Mark trailing sync for elision in non-final iterations
             # Rationale: sync before yield ensures current iter's LDS writes are
@@ -7160,15 +7235,16 @@ class _Lowerer:
 
             # Lower the body region - it will now produce unique LLVM SSA names
             self._yield_stack.append([])
-            self.lower_region(op.regions[0])
+            try:
+                self.lower_region(op.regions[0])
+            finally:
+                # Restore all original names
+                for val_obj, saved_name in values_to_rename:
+                    val_obj.name = saved_name
             yielded = self._yield_stack.pop()
 
             # Clear elision marker
             self._unroll_elide_sync_op = None
-
-            # Restore all original names
-            for val_obj, saved_name in values_to_rename:
-                val_obj.name = saved_name
 
             # Verify yield count
             if len(yielded) != num_iter:
