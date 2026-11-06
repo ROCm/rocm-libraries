@@ -21,6 +21,9 @@ import os
 import pickle
 import sys
 import unittest
+from unittest import mock
+
+from _adaptor_testcase import AdaptorTestCase
 
 
 # ---------------------------------------------------------------------------
@@ -47,7 +50,7 @@ from rocisa_stinkytofu_adaptor.code import Module, TextBlock  # noqa: E402
 # ===========================================================================
 
 
-class TestIsaToGfx(unittest.TestCase):
+class TestIsaToGfx(AdaptorTestCase):
     def test_tuple_isa_gfx1250(self):
         self.assertEqual(_base.isaToGfx((12, 5, 0)), "gfx1250")
 
@@ -68,7 +71,7 @@ class TestIsaToGfx(unittest.TestCase):
 # ===========================================================================
 
 
-class _StateSaveRestore(unittest.TestCase):
+class _StateSaveRestore(AdaptorTestCase):
     """Snapshot/restore ``base.py`` state so tests cannot leak into one another.
 
     We grab the live references at setUp time and restore them in
@@ -115,7 +118,7 @@ class _StateSaveRestore(unittest.TestCase):
 # ===========================================================================
 
 
-class TestClassLocationParity(unittest.TestCase):
+class TestClassLocationParity(AdaptorTestCase):
     """``rocisa::IsaInfo`` lives in ``base.hpp``; the Python mirror must too."""
 
     def test_isainfo_defined_in_base_module(self):
@@ -131,7 +134,7 @@ class TestClassLocationParity(unittest.TestCase):
         self.assertEqual(OutputOptions.__module__, _base.__name__)
 
     def test_top_level_reexport_for_isainfo(self):
-        # ``from rocisa import IsaInfo`` must keep working (Tensile API).
+        # ``from rocisa import IsaInfo`` must keep working (TensileLite API).
         from rocisa_stinkytofu_adaptor import IsaInfo as TopLevelIsaInfo
         self.assertIs(TopLevelIsaInfo, _base.IsaInfo)
 
@@ -141,7 +144,7 @@ class TestClassLocationParity(unittest.TestCase):
 # ===========================================================================
 
 
-class TestRocIsaIsThinShell(unittest.TestCase):
+class TestRocIsaIsThinShell(AdaptorTestCase):
     """``rocIsa`` instance must hold no state -- state lives in ``base.py``."""
 
     def test_init_does_not_set_state_fields(self):
@@ -184,6 +187,29 @@ class TestRocIsaForwarding(_StateSaveRestore):
         self.assertTrue(_base.isInit())
         self.assertIn((12, 5, 0), live_data)
         self.assertEqual(_base._assembler_path, "/fake/path")
+
+    def test_initmany_forwards(self):
+        with mock.patch.object(_base, "initMany") as initMany:
+            rocIsa.getInstance().initMany([(12, 5, 0)], "/fake/path", False)
+        initMany.assert_called_once_with([(12, 5, 0)], "/fake/path", False)
+
+    def test_initmany_probes_native_isas_in_one_fallback(self):
+        live_data = _base.getData()
+        live_data.clear()
+        _base._is_init = False
+
+        def fallback(keys, assemblerPath, debug):
+            for key in keys:
+                live_data[key] = _base.IsaInfo({"SupportedISA": 1}, {}, {}, {})
+
+        with mock.patch.object(_base, "_init_native_fallback", side_effect=fallback) as native:
+            _base.initMany((x for x in [(9, 4, 2), (12, 5, 0), (9, 5, 0), (9, 4, 2)]),
+                           "/fake/path", False)
+        native.assert_called_once_with([(9, 4, 2), (9, 5, 0)], "/fake/path", False)
+        self.assertEqual(set(live_data), {(9, 4, 2), (9, 5, 0), (12, 5, 0)})
+        self.assertTrue(_base.isInit())
+        # Like init() for each arch, the last arch is the selected one.
+        self.assertEqual(_base._current_isa, (9, 4, 2))
 
     def test_isinit_forwards(self):
         _base._is_init = True
@@ -342,7 +368,7 @@ class TestBackwardCompatPrivateFields(_StateSaveRestore):
 
 
 class TestParallelMap2RoundTrip(_StateSaveRestore):
-    """Tensile spawns workers via ``ParallelMap2`` and re-hydrates state with
+    """TensileLite spawns workers via ``ParallelMap2`` and re-hydrates state with
     ``rocIsa.getInstance().setData(pickled_data)`` /
     ``.setOutputOptions(pickled_opts)``. Verify both round-trip cleanly."""
 
@@ -459,7 +485,7 @@ class TestBaseAccessorsAreSourceOfTruth(_StateSaveRestore):
 # overridden by the ``_dummy.py`` ``__getattr__`` no-op.
 
 
-class TestItemConstruction(unittest.TestCase):
+class TestItemConstruction(AdaptorTestCase):
     """Item is a regular (concrete) class -- the C++ ``Item`` is also
     concrete (``Item("foo")`` compiles and ``.toString()`` returns
     "foo"), so we mirror that. Only ``clone()`` is semi-abstract
@@ -483,7 +509,7 @@ class TestItemConstruction(unittest.TestCase):
         self.assertFalse(hasattr(Item(), "__dict__"))
 
 
-class TestItemInheritanceShape(unittest.TestCase):
+class TestItemInheritanceShape(AdaptorTestCase):
     """``isinstance(x, Item)`` parity for ``code.py`` subclasses.
 
     Mirror of rocisa C++ ``TextBlock`` / ``Module`` inheriting from
@@ -526,7 +552,7 @@ class TestItemInheritanceShape(unittest.TestCase):
         self.assertNotIn("parent", TextBlock.__slots__)
 
 
-class TestItemDefaultMethods(unittest.TestCase):
+class TestItemDefaultMethods(AdaptorTestCase):
     """Default ``toString`` / ``prettyPrint`` / ``__str__`` / counters
     on the bare ``Item`` -- subclasses (Module / TextBlock) override
     them but the base behaviour is what dummies fall back to."""
@@ -632,7 +658,7 @@ class TestItemCapabilityProxies(_StateSaveRestore):
         self.assertEqual(ki.wavefrontSize, 32)
 
 
-class TestDummyItem(unittest.TestCase):
+class TestDummyItem(AdaptorTestCase):
     """``DummyItem`` is the inert sentinel KernelWriter sticks into
     Module trees as a marker without polluting countType totals.
     Mirror of rocisa C++ ``DummyItem`` (base.hpp:299-310)."""

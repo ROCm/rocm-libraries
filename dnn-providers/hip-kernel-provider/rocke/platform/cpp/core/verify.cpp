@@ -96,6 +96,13 @@ typedef struct verifier
     vscope_entry_t* scope; /* growable name->type table */
     int scope_count;
     int scope_cap;
+    /* Python _enclosing_loop_names: the induction-variable and carried-value
+     * names of the scf.for loops whose body is being checked, outermost first,
+     * then those of the loop being entered. Truncated on leaving a loop, like
+     * the scope table. */
+    const char** loop_names;
+    int loop_name_count;
+    int loop_name_cap;
 } verifier_t;
 
 static void v_errf(verifier_t* v, const rocke_op_t* op, const char* fmt, ...)
@@ -152,6 +159,30 @@ static void scope_put(verifier_t* v, const char* name, const rocke_type_t* t)
     v->scope[v->scope_count].name = name;
     v->scope[v->scope_count].type = t;
     v->scope_count++;
+}
+
+/* Push the names of the scf.for `loop` being entered (its induction variable
+ * and carried values, rocke_i_scf_for_value_names) onto v->loop_names. */
+static void loop_names_push(verifier_t* v, const rocke_op_t* loop)
+{
+    const int count = rocke_i_scf_for_value_names(loop, NULL);
+    if(v->loop_name_count + count > v->loop_name_cap)
+    {
+        int nc = v->loop_name_cap ? v->loop_name_cap : 16;
+        while(nc < v->loop_name_count + count)
+        {
+            nc *= 2;
+        }
+        const char** grown = (const char**)realloc(v->loop_names, (size_t)nc * sizeof(*grown));
+        if(!grown)
+        {
+            v->db.oom = 1;
+            return;
+        }
+        v->loop_names = grown;
+        v->loop_name_cap = nc;
+    }
+    v->loop_name_count += rocke_i_scf_for_value_names(loop, v->loop_names + v->loop_name_count);
 }
 
 /* legal pointer address spaces */
@@ -631,6 +662,27 @@ static void check_contract(verifier_t* v, const rocke_op_t* op)
                    op->num_operands);
         }
     }
+    else if(o == ROCKE_OP_SCF_IF_ELSE)
+    {
+        char err[ROCKE_ERR_MSG_CAP];
+        const rocke_op_t* yld = NULL;
+        for(int branch = 0; branch < 2; ++branch)
+        {
+            if(!rocke_i_if_else_branch_yield(op, branch, &yld, err, sizeof err))
+            {
+                v_errf(v, op, "%s", err);
+                break;
+            }
+        }
+    }
+    else if(o == ROCKE_OP_TILE_BUFFER_LOAD_VN || o == ROCKE_OP_TILE_BUFFER_STORE_VN)
+    {
+        char err[256];
+        if(rocke_i_buffer_op_bytes(op, err, sizeof err) == 0)
+        {
+            v_errf(v, op, "%s", err);
+        }
+    }
     else if(o == ROCKE_OP_CF_RETURN)
     {
         if(op->num_operands || op->num_results)
@@ -676,6 +728,30 @@ static void check_contract(verifier_t* v, const rocke_op_t* op)
         }
         check_sync_attrs(
             v, op, o == ROCKE_OP_MEMREF_GLOBAL_FLAG_STORE ? k_flag_store_orderings : NULL);
+    }
+    else if(o == ROCKE_OP_TILE_GLOBAL_PTR_OFFSET)
+    {
+        char err[256];
+        if(const char* error = rocke_i_global_ptr_offset_op_error(op, err, sizeof err))
+        {
+            v_errf(v, op, "%s", error);
+        }
+    }
+    else if(o == ROCKE_OP_TILE_GLOBAL_PTR_TO_I64)
+    {
+        char err[256];
+        if(const char* error = rocke_i_global_ptr_to_i64_op_error(op, err, sizeof err))
+        {
+            v_errf(v, op, "%s", error);
+        }
+    }
+    else if(o == ROCKE_OP_TILE_TRAP)
+    {
+        char err[64];
+        if(const char* error = rocke_i_trap_op_error(op, err, sizeof err))
+        {
+            v_errf(v, op, "%s", error);
+        }
     }
 }
 
@@ -748,9 +824,17 @@ static void check_scf_for(verifier_t* v, const rocke_op_t* op)
             }
         }
     }
+    {
+        char descriptor_error[ROCKE_ERR_MSG_CAP];
+        if(rocke_i_scf_for_carried_descriptor_error(op, descriptor_error, sizeof descriptor_error))
+        {
+            v_errf(v, op, "%s", descriptor_error);
+        }
+    }
 
     /* body scope: snapshot + iv + iter-arg block values */
     int saved = v->scope_count;
+    const int enclosing_loop_names = v->loop_name_count;
     const char* iv = rocke_attr_get_str(&op->attrs, "iv");
     if(iv)
     {
@@ -781,8 +865,26 @@ static void check_scf_for(verifier_t* v, const rocke_op_t* op)
         }
     }
 
+    /* Hand-built IR can reuse a loop name the builder and parsers refuse. This
+     * loop's names go onto v->loop_names above the enclosing loops'. */
+    loop_names_push(v, op);
+    if(!v->db.oom)
+    {
+        const char* reused
+            = rocke_i_first_reused_loop_name(v->loop_names,
+                                             (size_t)enclosing_loop_names,
+                                             v->loop_names + enclosing_loop_names,
+                                             (size_t)(v->loop_name_count - enclosing_loop_names));
+        if(reused)
+        {
+            char msg[ROCKE_ERR_MSG_CAP];
+            v_errf(v, op, "%s", rocke_i_reused_loop_name_message(reused, msg, sizeof msg));
+        }
+    }
+
     const rocke_region_t* body = op->regions[0];
     check_region(v, body, 0);
+    v->loop_name_count = enclosing_loop_names;
 
     /* body should end in scf.yield matching iter-arg types (if any iter-args) */
     if(num_iter_inits > 0)
@@ -1016,6 +1118,7 @@ rocke_status_t rocke_verify(const rocke_kernel_def_t* k, rocke_diag_t** out, siz
         }
     }
     free(v.scope);
+    free(v.loop_names);
 
     if(v.db.oom)
     {

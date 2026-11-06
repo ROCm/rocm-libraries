@@ -2,7 +2,7 @@
 
 ## For Users
 
-- [Global Parameters](user/global-parameters.md) -- Control StinkyTofu via Tensile's GlobalParameters
+- [Global Parameters](user/global-parameters.md) -- Control StinkyTofu via TensileLite's GlobalParameters
 - [IR Converter](user/ir-converter.md) -- Convert instruction strings to IRList
 - [Assembly Emitter](user/asm-emitter.md) -- Convert IR to GPU assembly
 - [Virtual Registers](user/virtual-registers.md) -- Template-based code generation with register remapping
@@ -23,6 +23,7 @@
 - [Lift Asm Registers to SSA Pass](developer/lift-asm-registers-to-ssa-pass.md) -- Physical VGPR/SGPR lift to attached SSA on Function
 - [Register Allocation](developer/register-allocation.md) -- Allocator interface, live intervals, region scope, arch-dependent rules, and verification on attached SSA
 - [The Greedy Allocator](developer/register-allocation-GreedyAllocator.md) -- The greedy and greedy-compact colouring policies in detail, including how they honour the rules table
+- [XNACK Hazard Protection](developer/xnack-hazard-protection.md) -- gfx1250 replay-safety rules for protecting live memory sources
 
 ## [Known Issues](known-issues.md)
 

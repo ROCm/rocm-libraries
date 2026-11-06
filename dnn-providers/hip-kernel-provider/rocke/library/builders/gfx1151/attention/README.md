@@ -12,16 +12,9 @@ generic processor:
 
 Both have byte-identical C mirrors (`instance_gfx1151_wmma_fmha_fwd_v2.h`,
 `instance_gfx1151_wmma_fmha_decode.h`) gated by the parity pairs
-`gfx1151_wmma_fmha_fwd_v2_emit` and `gfx1151_wmma_fmha_decode_emit`. rocKE
-dispatch now routes every RDNA request to them instead of the earlier
-single-wave `wmma_fmha_fwd` kernel and its gfx11-only transposed-QK body
-(`wmma_swapqk`).
-
-The single-wave kernel (`kernels/gfx1151/wmma_fmha_fwd.py`, its C mirror
-`instance_gfx1151_wmma_fmha_fwd.h` and its parity pairs) remains in the tree,
-unselected by dispatch, because the shipped hipDNN catalog
-(`hipkernel:Gfx1151WmmaAttention`) still builds from it. It is retired once the
-catalog packaging moves to the two kernels above.
+`gfx1151_wmma_fmha_fwd_v2_emit` and `gfx1151_wmma_fmha_decode_emit`. They
+replaced the earlier single-wave `wmma_fmha_fwd` kernel and its gfx11-only
+transposed-QK body (`wmma_swapqk`), which have been removed.
 
 ## Inference coverage benchmark
 
@@ -104,7 +97,8 @@ python -m benchmarks.gfx1151.attention.benchmark_sdpa [--arch gfx1151]
 ## Selection
 
 Routes, priorities, the decode/prefill rule (`rdna_attention_use_decode`),
-head-width buckets and the bindings are documented in the dispatcher's
+head-width buckets, the bindings and the shipped hipDNN catalog
+(`hipkernel:Gfx1151WmmaAttention`) are documented in the dispatcher's
 [RDNA WMMA inference](../../../dispatch/attention/README.md#rdna-wmma-inference-gfx11-and-gfx12)
 section.
 
@@ -160,17 +154,17 @@ The sections below are a historical campaign, not results for this benchmark.
 The sections below record the design lessons of an earlier optimization campaign
 on gfx1151 (RDNA3.5, wave32, a single 16x16x16 WMMA atom). They are qualitative.
 They are not results for the kernels above, and this document deliberately
-carries no absolute performance figures. Part 1 ran on the single-wave kernel
-(`kernels/gfx1151/wmma_fmha_fwd.py`); re-measure with the vehicles listed under
-"Files" before acting on any ordering below.
+carries no absolute performance figures. Part 1 ran on the removed production
+kernel and can no longer be replayed; re-measure Parts 2 and 3 with the vehicles
+listed under "Files" before acting on any ordering below.
 [`ALGORITHM.md`](ALGORITHM.md) derives the kernel from the math and is the place
 to start if flash attention is new to you.
 
 The study applies the
 [optimization runbook](../../../../platform/dsl_docs/optimization/optimization_runbook.md)
-to the single-wave gfx1151 WMMA flash-attention forward kernel
-(`kernels.gfx1151.wmma_fmha_fwd`) that preceded the current kernels. Every
-variant was correctness-gated against a reference before it was timed.
+to the single-wave gfx1151 WMMA flash-attention forward kernel that preceded
+the current kernels (since removed). Every variant was correctness-gated
+against a reference before it was timed.
 
 - **Part 1** applies the runbook loop to one lever (V-LDS staging). The
   "optimization" regressed and was reverted.
@@ -214,7 +208,7 @@ memory with one scalar load per `(d, k)`. Staging each K-tile's V rows into LDS
 once with wide loads, then reading the B operand from LDS, should cut global
 traffic and speed the kernel up.
 
-**One lever.** `WmmaFmhaFwdSpec.v_lds_stage`: `False` is
+**One lever.** The removed production kernel's `v_lds_stage` knob: `False` is
 the per-element global gather; `True` vector-loads each k-row into an LDS tile,
 shares the existing P-staging barrier, and reads the B operand from LDS.
 
@@ -232,8 +226,8 @@ hypothesis about global loads (far fewer) and refuted everything else:
    once, so the gather's global traffic was already close to optimal.
 
 **Decision.** Reverted: the knob stayed off by default and was enabled only
-for profiles where a fresh measurement favored it. The knob remains on the
-single-wave kernel, and `bench_v_staging.py` replays the A/B.
+for profiles where a fresh measurement favored it. The knob and its driver
+were removed with that kernel.
 
 Lessons:
 
@@ -404,13 +398,11 @@ Part 2 and Part 3 experiments on a gfx11 device.
 
 - `ALGORITHM.md`: a from-the-math-up guide to the campaign's single-wave kernel
   for readers new to flash attention.
-- `bench_v_staging.py`: Part 1 A/B harness for V staging on the single-wave
-  kernel; gates each variant on a numpy reference, times with HIP events, and
-  disassembles for the memory-instruction mix.
 - `fmha_singlewave.py` / `tune.py`: the Part 2 vehicle (`SingleWaveCfg`:
   `bm_tiles`, `p_mode`, `v_mode`, `prefetch_k`, `q_preload`, `fuse_k`) and its
   driver, which verifies against numpy, times, and reports instruction mix and
-  VGPR/SGPR/spill/LDS resources.
+  VGPR/SGPR/spill/LDS resources. `tune.py` also holds the numpy reference and
+  `llvm-objdump` lookup the other drivers share.
 - `fmha_multiwave.py` / `mw_tune.py`: the multi-wave structural lever.
 - `fmha_regblocked.py` / `prod_tune.py`: the register-blocked multi-wave rewrite
   (`RegBlockedCfg`: `num_warps`, `m_repeat`, `block_n`).
@@ -421,9 +413,6 @@ Part 2 and Part 3 experiments on a gfx11 device.
 - `combo.py`: the cartesian-product sweep across the single-wave levers.
 - `survey.py`: the shape survey, which runs the best single-wave kernels per
   shape and compares against PyTorch SDPA.
-- `wmma_fmha_fwd_bench.py`, `wmma_fmha_fwd_sweep_profile.py`: benchmark and
-  sweep-profile drivers for the single-wave kernel. Its numeric checks live in
-  `library/tests/test_wmma_fmha_fwd_numeric.py`.
 
 The production kernels' tests are `library/tests/test_wmma_fmha_fwd_v2_*.py` and
 `library/tests/test_wmma_fmha_decode_*.py`; their inference benchmark is

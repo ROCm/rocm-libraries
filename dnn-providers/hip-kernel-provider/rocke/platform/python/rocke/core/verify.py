@@ -39,9 +39,17 @@ from .ir import (
     _FENCE_SCOPES,
     _FLAG_STORE_ORDERINGS,
     _assume_range_errors,
+    _buffer_op_bytes,
+    _if_else_branch_yield,
+    _global_ptr_offset_op_error,
+    _global_ptr_to_i64_op_error,
     _int_add_wrap_error,
     _int_cmp_pred_error,
     _is_flag_ptr,
+    _first_reused_loop_name,
+    _reused_loop_name_message,
+    _scf_for_carried_descriptor_error,
+    _scf_for_value_names,
     KernelDef,
     Op,
     Region,
@@ -50,6 +58,7 @@ from .ir import (
     VectorType,
     PtrType,
     SmemType,
+    _trap_op_error,
 )
 
 ERROR = "error"
@@ -143,6 +152,9 @@ class _Verifier:
     def __init__(self, kernel: KernelDef) -> None:
         self.kernel = kernel
         self.diags: List[Diagnostic] = []
+        # The induction-variable and carried-value names of the scf.for loops
+        # whose body is being checked, outermost first.
+        self._enclosing_loop_names: tuple[str, ...] = ()
 
     def err(self, msg: str, op: Optional[Op] = None) -> None:
         self.diags.append(
@@ -427,6 +439,17 @@ class _Verifier:
                     f"{len(op.operands)}",
                     op,
                 )
+        elif name == "scf.if_else":
+            try:
+                for branch in range(2):
+                    _if_else_branch_yield(op, branch)
+            except ValueError as error:
+                self.err(str(error), op)
+        elif name in ("tile.buffer_load_vN", "tile.buffer_store_vN"):
+            try:
+                _buffer_op_bytes(op)
+            except (TypeError, ValueError) as error:
+                self.err(str(error), op)
         elif name == "cf.return":
             if op.operands or op.results:
                 self.err(f"{name}: must have no operands and no results", op)
@@ -454,6 +477,18 @@ class _Verifier:
                 _FLAG_STORE_ORDERINGS if name == "memref.global_flag_store" else None
             )
             self._check_sync_attrs(op, orderings)
+        elif name == "tile.global_ptr_offset":
+            error = _global_ptr_offset_op_error(op)
+            if error:
+                self.err(error, op)
+        elif name == "tile.global_ptr_to_i64":
+            error = _global_ptr_to_i64_op_error(op)
+            if error:
+                self.err(error, op)
+        elif name == "tile.trap":
+            error = _trap_op_error(op)
+            if error:
+                self.err(error, op)
 
     def _check_sync_attrs(self, op: Op, orderings) -> None:
         """Scope / ordering values of a fence or flag op (presence is checked
@@ -508,6 +543,9 @@ class _Verifier:
                         f"type {init.type.name}",
                         op,
                     )
+        descriptor_error = _scf_for_carried_descriptor_error(op)
+        if descriptor_error is not None:
+            self.err(descriptor_error, op)
 
         # body scope: copy + iv + iter-arg block values
         body_scope = dict(scope)
@@ -526,9 +564,17 @@ class _Verifier:
                     bv = Value(name=entry["name"], type=init.type)
                     body_scope[entry["name"]] = bv
                     body_block_values.append(bv)
+        # Hand-built IR can reuse a loop name the builder and parsers refuse.
+        loop_names = _scf_for_value_names(op)
+        reused = _first_reused_loop_name(self._enclosing_loop_names, loop_names)
+        if reused is not None:
+            self.err(_reused_loop_name_message(reused), op)
 
         body = op.regions[0]
+        enclosing = self._enclosing_loop_names
+        self._enclosing_loop_names = enclosing + tuple(loop_names)
         self._check_region(body, body_scope)
+        self._enclosing_loop_names = enclosing
 
         # body should end in scf.yield matching iter-arg types (if any iter-args)
         if iter_inits:

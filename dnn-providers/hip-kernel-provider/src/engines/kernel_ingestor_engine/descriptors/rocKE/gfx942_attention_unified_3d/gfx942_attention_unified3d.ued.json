@@ -1,0 +1,17 @@
+{
+  "version": "1.0",
+  "id": "4208dcf6-3128-4146-ab2a-affa5b6ab4eb",
+  "name": "hipkernel:Gfx942AttentionUnified3d",
+  "sdk_version": "1.0.0",
+  "graph_match": {
+    "native": "hipkernel.gfx942_attention_unified3d.graph_match"
+  },
+  "metadata": "fa42fab2-67a1-4154-b45f-55b25c1f5265",
+  "sort_kernel_catalog": {
+    "default": "c3569304-2234-4570-b3ab-d3e007ebe52a"
+  },
+  "knobs": [
+    "block_size",
+    "num_segments"
+  ]
+}
