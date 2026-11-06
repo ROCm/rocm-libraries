@@ -23,6 +23,20 @@ target_sources(
                           "${CMAKE_CURRENT_SOURCE_DIR}/test_formocast.cpp"
                           "${CMAKE_CURRENT_SOURCE_DIR}/test_logger.cpp"
                           "${CMAKE_CURRENT_SOURCE_DIR}/test_streamk.cpp"
+                          "${CMAKE_CURRENT_SOURCE_DIR}/test_nn.cpp"
+)
+
+set(_origami_tw_weights_dir
+    "${CMAKE_CURRENT_SOURCE_DIR}/../data/nn/tilewright/gfx950"
+)
+set(_origami_tw_logic_stem
+    "TensileLibrary_BB_BB_HA_Bias_SAV_UA_Type_BB_HPA_Contraction_l_Alik_Bljk_Cijk_Dijk_ID75a0_gfx950"
+)
+
+target_compile_definitions(
+    origami-tests
+    PRIVATE ORIGAMI_TEST_TW_WEIGHTS_DIR="${_origami_tw_weights_dir}"
+            ORIGAMI_TEST_TW_LOGIC_STEM="${_origami_tw_logic_stem}"
 )
 
 target_include_directories(origami-tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include")

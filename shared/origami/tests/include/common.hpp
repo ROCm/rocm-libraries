@@ -26,6 +26,7 @@
 
 #pragma once
 #include <cstdlib>
+#include <string>
 #include <vector>
 #include "origami/gemm.hpp"
 #include "origami/hardware.hpp"
@@ -51,6 +52,42 @@ inline int portable_unsetenv(const char* name) {
   return unsetenv(name);
 #endif
 }
+
+// Restores the previous process environment (and Origami's runtime_options
+// singleton) when it goes out of scope. Catch2 shuffles tests by default, so
+// mutating ANALYTICAL_GEMM_* without this leaks into later rank_configs calls.
+class ScopedEnvVar {
+ public:
+  ScopedEnvVar(const char* name, const char* value) : name_(name) {
+    if (const char* prev = std::getenv(name)) {
+      had_value_ = true;
+      previous_  = prev;
+    }
+    set(value);
+  }
+
+  ScopedEnvVar(const ScopedEnvVar&)            = delete;
+  ScopedEnvVar& operator=(const ScopedEnvVar&) = delete;
+
+  ~ScopedEnvVar() {
+    if (had_value_) {
+      portable_setenv(name_.c_str(), previous_.c_str(), 1);
+    } else {
+      portable_unsetenv(name_.c_str());
+    }
+    origami::runtime_options::get().update_from_env();
+  }
+
+  void set(const char* value) {
+    portable_setenv(name_.c_str(), value, 1);
+    origami::runtime_options::get().update_from_env();
+  }
+
+ private:
+  std::string name_;
+  std::string previous_;
+  bool        had_value_ = false;
+};
 
 // List of GPU architectures to test
 inline const std::vector<int> test_architectures = {942, 950, 1250};
