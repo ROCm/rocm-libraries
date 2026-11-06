@@ -276,6 +276,9 @@ globalParameters["PrintTensorAmaxD"] = 0  # Print AmaxD after validation
 # Print final matrix-staging LDS addresses and the gfx1250 segment map during kernel generation.
 globalParameters["PrintLDSLayout"] = False
 globalParameters["PrintWinnersOnly"] = False  # Only print the solutions which become the fastest
+globalParameters["PrintRejectedPredicates"] = (
+    False  # client logs the evaluation of every predicate of solutions rejected by their predicates; needs ClientLogLevel >= 2
+)
 globalParameters["PrintCodeCommands"] = (
     False  # print the commands used to generate the code objects (asm,link,hip-clang, etc)
 )
