@@ -6,6 +6,7 @@
 #include <hipdnn_data_sdk/types.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_test_sdk/utilities/DynamicTolerances.hpp>
+#include <random>
 #include <vector>
 
 using namespace hipdnn_test_sdk::utilities;
@@ -1125,4 +1126,191 @@ TEST(TestCalculateConvFpropTolerance, ThrowsOnOutputOverflow)
 
     EXPECT_THROW((calculateConvFpropTolerance<half, float, float>(-val, val, -val, val, dims)),
                  std::overflow_error);
+}
+
+// =================================================================================================
+// TestCalculateConvFpropOutputTolerance
+//
+// One output element of a convolution is a dot product of K input-weight pairs. These tests
+// build such dot products directly and grade two correct implementations, and a wrong one,
+// against each other with the tolerance.
+// =================================================================================================
+
+namespace
+{
+
+struct DotProblem
+{
+    std::vector<float> x;
+    std::vector<float> w;
+};
+
+// x and w uniform in [-1, 1], already representable in T, as the bundle fill produces them.
+template <typename T>
+DotProblem makeDotProblem(uint64_t k, unsigned seed)
+{
+    std::mt19937 rng(seed);
+    std::uniform_real_distribution<float> dist(-1.0f, 1.0f);
+    DotProblem p;
+    p.x.resize(k);
+    p.w.resize(k);
+    for(uint64_t i = 0; i < k; ++i)
+    {
+        p.x[i] = static_cast<float>(static_cast<T>(dist(rng)));
+        p.w[i] = static_cast<float>(static_cast<T>(dist(rng)));
+    }
+    return p;
+}
+
+// Float accumulation in index order, as the CPU reference does.
+float sequentialDot(const DotProblem& p, uint64_t skip = UINT64_MAX)
+{
+    float acc = 0.0f;
+    for(uint64_t i = 0; i < p.x.size(); ++i)
+    {
+        if(i != skip)
+        {
+            acc += p.x[i] * p.w[i];
+        }
+    }
+    return acc;
+}
+
+// Float accumulation in a tree, as a GPU reduction does.
+float pairwiseDot(const DotProblem& p, uint64_t begin, uint64_t end, uint64_t skip)
+{
+    if(end - begin <= 8)
+    {
+        float acc = 0.0f;
+        for(uint64_t i = begin; i < end; ++i)
+        {
+            if(i != skip)
+            {
+                acc += p.x[i] * p.w[i];
+            }
+        }
+        return acc;
+    }
+    const uint64_t mid = begin + (end - begin) / 2;
+    return pairwiseDot(p, begin, mid, skip) + pairwiseDot(p, mid, end, skip);
+}
+
+double exactDot(const DotProblem& p)
+{
+    double acc = 0.0;
+    for(uint64_t i = 0; i < p.x.size(); ++i)
+    {
+        acc += static_cast<double>(p.x[i]) * static_cast<double>(p.w[i]);
+    }
+    return acc;
+}
+
+ConvFpropErrorScale scaleOf(const DotProblem& p)
+{
+    double xx = 0.0;
+    double ww = 0.0;
+    for(uint64_t i = 0; i < p.x.size(); ++i)
+    {
+        xx += static_cast<double>(p.x[i]) * static_cast<double>(p.x[i]);
+        ww += static_cast<double>(p.w[i]) * static_cast<double>(p.w[i]);
+    }
+    ConvFpropErrorScale s;
+    s.accumulationLength = p.x.size();
+    s.inputMeanSquare = xx / static_cast<double>(p.x.size());
+    s.weightMeanSquare = ww / static_cast<double>(p.x.size());
+    return s;
+}
+
+template <typename T>
+bool withinTolerance(double impl, double ref, const AbsRelTolerance& tol)
+{
+    const auto implT
+        = static_cast<double>(static_cast<float>(static_cast<T>(static_cast<float>(impl))));
+    const auto refT
+        = static_cast<double>(static_cast<float>(static_cast<T>(static_cast<float>(ref))));
+    return std::abs(implT - refT) <= tol.atol + tol.rtol * std::abs(refT);
+}
+
+} // namespace
+
+template <typename T>
+class TestCalculateConvFpropOutputTolerance : public ::testing::Test
+{
+};
+
+using ConvFpropOutputTypes = ::testing::Types<half, bfloat16>;
+TYPED_TEST_SUITE(TestCalculateConvFpropOutputTolerance, ConvFpropOutputTypes);
+
+// A tree-ordered sum and the exact sum, each rounded once to the output type, stay within the
+// tolerance of the reference's sequential sum at every reduction length.
+TYPED_TEST(TestCalculateConvFpropOutputTolerance, CorrectSumsInAnyOrderPass)
+{
+    using T = TypeParam;
+    for(const uint64_t k : {uint64_t{16}, uint64_t{1152}, uint64_t{65536}})
+    {
+        for(unsigned seed = 0; seed < 32; ++seed)
+        {
+            const auto p = makeDotProblem<T>(k, seed);
+            const auto tol = calculateConvFpropOutputTolerance<T>(scaleOf(p));
+            const double ref = sequentialDot(p);
+            EXPECT_TRUE(withinTolerance<T>(pairwiseDot(p, 0, k, UINT64_MAX), ref, tol))
+                << "K=" << k << " seed=" << seed;
+            EXPECT_TRUE(withinTolerance<T>(exactDot(p), ref, tol)) << "K=" << k << " seed=" << seed;
+        }
+    }
+}
+
+// Leaving out the largest of 1152 products is a missing filter tap: the old fixed 0.1 and the
+// old worst-case bound both pass it, the dynamic tolerance does not.
+TYPED_TEST(TestCalculateConvFpropOutputTolerance, MissingTermFails)
+{
+    using T = TypeParam;
+    const uint64_t k = 1152;
+    int detected = 0;
+    for(unsigned seed = 0; seed < 32; ++seed)
+    {
+        const auto p = makeDotProblem<T>(k, seed);
+        uint64_t largest = 0;
+        for(uint64_t i = 0; i < k; ++i)
+        {
+            if(std::abs(p.x[i] * p.w[i]) > std::abs(p.x[largest] * p.w[largest]))
+            {
+                largest = i;
+            }
+        }
+        const auto tol = calculateConvFpropOutputTolerance<T>(scaleOf(p));
+        detected
+            += withinTolerance<T>(pairwiseDot(p, 0, k, largest), sequentialDot(p), tol) ? 0 : 1;
+    }
+    EXPECT_EQ(detected, 32);
+}
+
+// The tolerance at a typical output, relative to that output, does not grow with the reduction
+// length: the property the worst-case bound lacks.
+TYPED_TEST(TestCalculateConvFpropOutputTolerance, WidthRelativeToOutputIndependentOfK)
+{
+    using T = TypeParam;
+    const auto widthAt = [](uint64_t k) {
+        ConvFpropErrorScale s;
+        s.accumulationLength = k;
+        s.inputMeanSquare = 1.0 / 3.0;
+        s.weightMeanSquare = 1.0 / 3.0;
+        const double sigma = std::sqrt(static_cast<double>(k)) / 3.0;
+        const auto tol = calculateConvFpropOutputTolerance<T>(s);
+        return (tol.atol + tol.rtol * sigma) / sigma;
+    };
+    EXPECT_LT(widthAt(uint64_t{1} << 20), 1.05 * widthAt(16));
+}
+
+// With zero inputs only a difference below the smallest normal number passes: hardware that
+// flushes denormals is not failed, any other difference is.
+TYPED_TEST(TestCalculateConvFpropOutputTolerance, ZeroInputsGradeOnlyDenormals)
+{
+    using T = TypeParam;
+    ConvFpropErrorScale s;
+    s.accumulationLength = 144;
+    const auto tol = calculateConvFpropOutputTolerance<T>(s);
+    const auto minNormal = static_cast<double>(std::numeric_limits<T>::min());
+    EXPECT_TRUE(withinTolerance<T>(0.5 * minNormal, 0.0, tol));
+    EXPECT_FALSE(withinTolerance<T>(2.0 * minNormal, 0.0, tol));
 }

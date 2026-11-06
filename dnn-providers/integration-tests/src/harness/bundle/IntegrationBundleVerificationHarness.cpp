@@ -37,6 +37,7 @@
 #include "harness/bundle/SupportVerdict.hpp"
 #include "harness/bundle/VariantPackBuilder.hpp"
 #include "harness/input-init/FillInputs.hpp"
+#include "harness/tolerance/ConvFwdDynamicTolerance.hpp"
 #include "harness/tolerance/ToleranceResolver.hpp"
 
 namespace hipdnn_integration_tests::bundle
@@ -1210,8 +1211,34 @@ VerificationOutcome
     // defaultTolerance() rather than resolveTolerance(): the TOML tolerance override is
     // applied by gradingForTensor(), which reads the validator override first and so is
     // the only place that can log the check that actually graded this tensor.
+    //
+    // A half or bfloat16 output of a convolution-forward graph is graded with the dynamic
+    // tolerance computed from the graph and its inputs instead of the fixed per-op default.
+    // The error scale reads the inputs on the host, so it is computed once and only when an
+    // output needs it.
+    std::optional<std::optional<hipdnn_test_sdk::utilities::conv::ConvFpropErrorScale>> convScale;
     const auto toleranceFor
         = [&](const std::string& label, hipdnn_flatbuffers_sdk::data_objects::DataType dataType) {
+              using hipdnn_flatbuffers_sdk::data_objects::DataType;
+              if(dataType == DataType::HALF || dataType == DataType::BFLOAT16)
+              {
+                  if(!convScale.has_value())
+                  {
+                      convScale = tolerance::convFwdErrorScale(
+                          wrapper, [&](int64_t uid) -> hipdnn_data_sdk::utilities::ITensor* {
+                              const auto it = _inputs.find(uid);
+                              return it == _inputs.end() ? nullptr : it->second.get();
+                          });
+                  }
+                  if(convScale->has_value())
+                  {
+                      const auto dynamic = tolerance::convFwdOutputTolerance(**convScale, dataType);
+                      return gradingForTensor(currentTestName(),
+                                              label,
+                                              static_cast<float>(dynamic->atol),
+                                              static_cast<float>(dynamic->rtol));
+                  }
+              }
               const float value = tolerance::defaultTolerance(wrapper, dataType);
               return gradingForTensor(currentTestName(), label, value, value);
           };
