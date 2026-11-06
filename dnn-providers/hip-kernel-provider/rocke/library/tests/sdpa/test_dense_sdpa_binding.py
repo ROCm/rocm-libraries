@@ -22,7 +22,7 @@ torch = pytest.importorskip("torch")
 
 from rocke.numeric.sdpa_reference import hipdnn_left_to_window, sdpa_reference
 
-from dispatch.sdpa.bind_dense import _DensePlan, sdpa_dense_admits
+from dispatch.sdpa.bind_dense import _DensePlan, sdpa_dense_admits, sdpa_dense_bind
 from tests.sdpa import cases as C
 from tests.sdpa import helpers as H
 from tests.sdpa.binding_harness import bind_tensors, outputs
@@ -135,3 +135,39 @@ def test_a_tensor_that_disagrees_with_the_request_is_refused():
     )
     with pytest.raises(ValueError, match="strides"):
         _DensePlan(req, tensors)
+
+
+def _misaligned_dense(req, name):
+    """Like ``_dense``, but the tensor starts one fp16 element (2 bytes) into
+    its allocation, so it is contiguous but not 16-byte aligned."""
+    desc = getattr(req, name)
+    total = 1 + sum((n - 1) * s for n, s in zip(desc.dims, desc.strides))
+    buf = torch.randn(1 + total).half()[1:]
+    assert buf.data_ptr() % 16 != 0
+    return torch.as_strided(buf, desc.dims, desc.strides)
+
+
+def test_misaligned_contiguous_bshd_operands_fall_back_to_a_workspace_copy():
+    """The dense kernels declare 16-byte-aligned Q/K/V/O pointers. A
+    contiguous BSHD operand that starts at an unaligned element must not be
+    used in place -- it has to copy through the allocated workspace buffer
+    instead."""
+    req = make_request(d=64)
+    tensors = {n: _misaligned_dense(req, n) for n in ("q", "k", "v", "o")}
+    plan = _DensePlan(req, tensors)
+    assert plan.copied == {"q", "k", "v", "o"}
+    for name in ("q", "k", "v", "o"):
+        assert plan.views[name].data_ptr() % 16 == 0
+
+
+def test_launch_rejects_a_stream_other_than_the_current_one():
+    """``launch``'s workspace buffers are allocated once, at bind time,
+    against the then-current stream, and `pack()`/`unpack()` always run on
+    the ambient current stream; honoring the inner ``binding.launch`` alone
+    on a different caller stream would race on those buffers, so a
+    non-current stream is refused rather than silently ignored."""
+    req = make_request(d=64)
+    tensors = {n: _dense(req, n) for n in ("q", "k", "v", "o")}
+    binding = sdpa_dense_bind(req, tensors)
+    with pytest.raises(NotImplementedError, match="cannot honor stream"):
+        binding.launch(stream=123456)

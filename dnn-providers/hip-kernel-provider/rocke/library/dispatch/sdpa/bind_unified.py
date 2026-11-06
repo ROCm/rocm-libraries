@@ -22,6 +22,7 @@ the production route (``run_unified_attention_torch`` with no tuning spec).
 
 from __future__ import annotations
 
+import math
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any
 
@@ -162,6 +163,26 @@ def _band_reject(req: SdpaRequest) -> tuple[bool, str] | None:
     )
 
 
+def _scale_reject(req: SdpaRequest) -> tuple[bool, str] | None:
+    """Decline a scale the unified kernels' online-softmax math cannot honor.
+
+    The gfx942/gfx950 tiled 2D bodies mask declined score positions with
+    ``-1e30`` in ``_online_softmax_rescale`` *before* multiplying by the
+    caller's scale: with a zero scale the masked positions go back to 0 (a
+    finite, non-`-inf` logit) and regain nonzero softmax weight, and with a
+    negative scale they are multiplied into the largest logits and dominate
+    it. So only a finite, strictly positive scale computes the request's
+    band; anything else is declined at admission rather than silently
+    mis-scored.
+    """
+    scale = float(req.scale)
+    if not math.isfinite(scale) or scale <= 0:
+        return False, (
+            f"scale: the unified kernels need a finite, positive scale, got {scale}"
+        )
+    return None
+
+
 def _sdpa_unified_rejects(req: SdpaRequest) -> tuple[bool, str] | None:
     """Return ``(False, reason)`` if this request cannot be served, else ``None``.
 
@@ -184,6 +205,9 @@ def _sdpa_unified_rejects(req: SdpaRequest) -> tuple[bool, str] | None:
             return False, reason
 
     rejected = value_rejects(req, "unified")
+    if rejected is not None:
+        return rejected
+    rejected = _scale_reject(req)
     if rejected is not None:
         return rejected
     return _band_reject(req)
@@ -428,6 +452,9 @@ def sdpa_unified_bind(req: SdpaRequest, tensors: Mapping[str, Any]) -> TorchBind
 
     Lengths and offsets are read once, here; rebind after changing them.
     Raises ``ValueError`` with the admission reason for a declined request.
+    ``launch`` cannot honor a caller ``stream`` other than the current one
+    (see the ``stream`` note on ``launch`` below) and rejects it instead of
+    silently ignoring it.
     """
     ok, reason = sdpa_unified_admits(req)
     if not ok:
@@ -441,7 +468,29 @@ def sdpa_unified_bind(req: SdpaRequest, tensors: Mapping[str, Any]) -> TorchBind
         validate_tuning_attention_tensors(plan.problem, plan.kernel_tensors())
     scale = float(req.scale)
 
-    def launch(**_kw: Any) -> None:
+    def launch(*, stream: Any = None, **_kw: Any) -> None:
+        """Pack, launch and unpack, all on Torch's current stream.
+
+        ``plan.pack()``/``plan.unpack()`` are plain Torch tensor copies that
+        always run on the ambient current stream, while ``plan.q_packed`` /
+        ``plan.o_packed`` / ``plan.k_cache`` / ``plan.v_cache`` / ``plan.lse``
+        are workspace buffers allocated once, at bind time, against whatever
+        was current then (see ``resolve_stream``'s caching-allocator note).
+        Honoring a caller-supplied ``stream`` for the kernel launch alone,
+        while the packing copies stay on a different stream, would race on
+        those buffers, so a ``stream`` other than the current one (``None``
+        or ``0``) is rejected rather than silently ignored; set it with
+        ``torch.cuda.set_stream(...)`` (or ``with torch.cuda.stream(s):``)
+        around the call instead.
+        """
+        if stream is not None and int(stream) != 0:
+            raise NotImplementedError(
+                "sdpa_unified_bind's launch cannot honor stream="
+                f"{stream!r}: its workspace buffers are allocated once, at "
+                "bind time, against the then-current stream, and pack()/"
+                "unpack() always run on the ambient current stream; use "
+                "`with torch.cuda.stream(s):` around launch() instead"
+            )
         plan.pack()
         if plan.problem.total_q:
             device = plan.q_packed.device

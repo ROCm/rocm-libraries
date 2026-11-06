@@ -109,6 +109,30 @@ def test_packed_bshd_q_and_o_are_used_in_place(layout, inplace):
         assert plan.q_packed.data_ptr() == tensors["q"].data_ptr()
 
 
+def _misaligned_dense(req, name):
+    """Like ``_dense``, but the tensor starts one fp16 element (2 bytes) into
+    its allocation, so it is contiguous but not 16-byte aligned."""
+    desc = getattr(req, name)
+    total = 1 + sum((n - 1) * s for n, s in zip(desc.dims, desc.strides))
+    buf = torch.randn(1 + total).half()[1:]
+    assert buf.data_ptr() % 16 != 0
+    return torch.as_strided(buf, desc.dims, desc.strides)
+
+
+def test_misaligned_packed_bshd_q_and_o_fall_back_to_a_workspace_copy():
+    """The gfx942/gfx950 tiled 2D kernels declare ``query_ptr`` / ``output_ptr``
+    with ``align=16``. A packed-BSHD Q/O view that is contiguous but starts at
+    an unaligned element must not be handed to the kernel in place -- it has
+    to copy through the allocated workspace instead, as the dense twin's
+    ``_DensePlan`` already does for its BSHD views."""
+    req = make_request(d=64)
+    tensors = {n: _misaligned_dense(req, n) for n in ("q", "k", "v", "o")}
+    plan = _LaunchPlan(req, tensors)
+    assert plan.q_inplace is False and plan.o_inplace is False
+    assert plan.q_packed.data_ptr() % 16 == 0
+    assert plan.o_packed.data_ptr() % 16 == 0
+
+
 def test_padded_rows_are_zero_and_neg_inf():
     lens = torch.tensor([1, 0], dtype=torch.int32).view(2, 1, 1, 1)
     req = replace(
@@ -232,3 +256,45 @@ def test_a_tensor_that_disagrees_with_the_request_is_refused():
     )
     with pytest.raises(ValueError, match="strides"):
         _LaunchPlan(req, tensors)
+
+
+# The gfx942/gfx950 tiled 2D bodies mask declined positions with -1e30 and
+# *then* multiply by scale in `_online_softmax_rescale`: a zero scale brings
+# masked positions back to a finite (non -inf) logit and a negative scale
+# makes them the largest logit, so only a finite, strictly positive scale is
+# admitted.
+_BAD_SCALES = [0.0, -1.0, float("nan"), float("inf"), float("-inf")]
+
+
+@pytest.mark.parametrize("scale", _BAD_SCALES, ids=[str(s) for s in _BAD_SCALES])
+def test_non_positive_or_non_finite_scale_is_declined(scale):
+    req = replace(make_request(d=64), scale_source="value", scale=scale)
+    ok, reason = sdpa_unified_admits(req)
+    assert not ok and reason.startswith("scale:")
+
+
+def test_positive_finite_scale_is_not_declined_on_scale_grounds():
+    req = make_request(d=64)
+    ok, reason = sdpa_unified_admits(req)
+    assert ok, reason
+
+
+def test_launch_rejects_a_stream_other_than_the_current_one(monkeypatch):
+    """``launch``'s workspace buffers are allocated once, at bind time,
+    against the then-current stream, and `pack()`/`unpack()` always run on
+    the ambient current stream; honoring the kernel launch alone on a
+    different caller stream would race on those buffers, so a non-current
+    stream is refused rather than silently ignored."""
+    from dispatch.attention import bindings
+
+    # The real validator requires a HIP/CUDA device; this test only checks
+    # that `launch` itself rejects a foreign stream, on CPU, before ever
+    # touching the kernel.
+    monkeypatch.setattr(
+        bindings, "validate_tuning_attention_tensors", lambda problem, t, **kw: 1
+    )
+    req = make_request(d=64)
+    tensors = {n: _dense(req, n) for n in ("q", "k", "v", "o")}
+    binding = sdpa_unified_bind(req, tensors)
+    with pytest.raises(NotImplementedError, match="cannot honor stream"):
+        binding.launch(stream=123456)

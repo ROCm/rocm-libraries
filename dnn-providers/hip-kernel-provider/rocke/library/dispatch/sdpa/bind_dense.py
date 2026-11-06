@@ -330,6 +330,9 @@ def sdpa_dense_bind(req: SdpaRequest, tensors: Mapping[str, Any]) -> TorchBindin
     launch runs the first dense candidate that serves the request, at its
     default spec, on Torch's current stream, with the request's scale.
     Raises ``ValueError`` with the admission reason for a declined request.
+    ``launch`` cannot honor a caller ``stream`` other than the current one
+    (see the ``stream`` note on ``launch`` below) and rejects it instead of
+    silently ignoring it.
     """
     served, reason = _dense_served(req)
     if not served:
@@ -344,7 +347,28 @@ def sdpa_dense_bind(req: SdpaRequest, tensors: Mapping[str, Any]) -> TorchBindin
     )
     device = plan.views["q"].device
 
-    def launch(**_kw: Any) -> None:
+    def launch(*, stream: Any = None, **_kw: Any) -> None:
+        """Pack, launch and unpack, all on Torch's current stream.
+
+        ``plan.pack()``/``plan.unpack()`` are plain Torch tensor copies that
+        always run on the ambient current stream, while ``_DensePlan``'s
+        workspace views are allocated once, at bind time, against whatever
+        was current then (see ``resolve_stream``'s caching-allocator note).
+        Honoring a caller-supplied ``stream`` for the inner
+        ``binding.launch`` alone, while the packing copies stay on a
+        different stream, would race on those buffers, so a ``stream``
+        other than the current one (``None`` or ``0``) is rejected rather
+        than silently ignored; set it with ``torch.cuda.set_stream(...)``
+        (or ``with torch.cuda.stream(s):``) around the call instead.
+        """
+        if stream is not None and int(stream) != 0:
+            raise NotImplementedError(
+                "sdpa_dense_bind's launch cannot honor stream="
+                f"{stream!r}: its workspace buffers are allocated once, at "
+                "bind time, against the then-current stream, and pack()/"
+                "unpack() always run on the ambient current stream; use "
+                "`with torch.cuda.stream(s):` around launch() instead"
+            )
         plan.pack()
         binding.launch(stream=resolve_stream(0, device=device))
         plan.unpack()

@@ -321,16 +321,28 @@ class Operand:
 
     def packed_view(self, cu: list[int]):
         """A ``(total, heads, d)`` view when the rows already sit packed in
-        token order (packed BSHD at full length, or contiguous ragged), else
-        ``None``."""
+        token order (packed BSHD at full length, or contiguous ragged) and the
+        view's base pointer is 16-byte aligned, else ``None``.
+
+        Alignment matters as much as contiguity: the gfx942/gfx950 tiled 2D
+        kernels declare ``query_ptr`` / ``output_ptr`` with ``align=16``, so a
+        contiguous view starting at an unaligned element (e.g. one FP16
+        element into a larger allocation) would still break the kernel's ABI
+        if handed to it in place. As ``_DensePlan`` already does for its BSHD
+        views, fall back to ``None`` here too, so the caller copies through
+        its allocated workspace instead.
+        """
         total, h, d = cu[-1], self.heads, self.width
         if self.starts is None:
             if any(b - a != self.extent for a, b in pairwise(cu)):
                 return None
             bshd = self.tensor.transpose(1, 2)
-            return bshd.reshape(total, h, d) if bshd.is_contiguous() else None
+            if not bshd.is_contiguous() or bshd.data_ptr() % 16 != 0:
+                return None
+            return bshd.reshape(total, h, d)
         if self.row_strides != (h * d, d, 1) or any(
             s != c * h * d for s, c in zip(self.starts, cu)
         ):
             return None
-        return self.flat[: total * h * d].view(total, h, d)
+        view = self.flat[: total * h * d].view(total, h, d)
+        return view if view.data_ptr() % 16 == 0 else None
