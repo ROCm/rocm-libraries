@@ -33,7 +33,10 @@
 
 #define CT_T ((CT_K + CT_S - 1) / CT_S) // taps per phase
 #define CT_CO_T 64                      // output channels per block
-#define CT_Q_T 64                       // q per block (S * CT_Q_T outputs per channel)
+#ifndef CT_Q_T
+#define CT_Q_T 64 // q per block (S * CT_Q_T outputs per channel): 64, or 32 for wide strides
+#endif
+#define CT_QB (CT_Q_T / 32) // 16-q WMMA columns per wave
 #ifndef CT_CI_T
 #define CT_CI_T 32 // input channels per stage, a multiple of 16 (one WMMA K step each)
 #endif
@@ -122,7 +125,7 @@ extern "C" __global__ void __launch_bounds__(CT_BLOCK_SIZE) MIOpenConvTranspose1
 #define CT_NW ((CT_NWI + CT_BLOCK_SIZE - 1) / CT_BLOCK_SIZE)
 
 // Grid: x over q blocks, y over output channel blocks, z over the batch. 8 waves: wave -> 16
-// output channels (wave % 4) x 32 q (wave / 4), accumulating all S phases.
+// output channels (wave % 4) x CT_Q_T / 2 q (wave / 4), accumulating all S phases.
 extern "C" __global__ void __launch_bounds__(CT_BLOCK_SIZE)
     MIOpenConvTranspose1dWmmaHip(const u16* __restrict__ dy,
                                  const u16* __restrict__ wt,
@@ -148,7 +151,7 @@ extern "C" __global__ void __launch_bounds__(CT_BLOCK_SIZE)
     const int co0  = static_cast<int>(blockIdx.y) * CT_CO_T;
     const u16* in  = dy + static_cast<long>(blockIdx.z) * Ci * Li;
 
-    f32x8 acc[CT_S][2] = {};
+    f32x8 acc[CT_S][CT_QB] = {};
 
     // Global -> register prefetch of the next stage; register -> LDS after the current compute.
     u32x4 px[CT_NX], pw[CT_NW];
@@ -224,18 +227,18 @@ extern "C" __global__ void __launch_bounds__(CT_BLOCK_SIZE)
                 // B: column q, channels of dy[., q - m]; A: row co, channels of w. A and B take the
                 // same channels per lane.
                 const int k0 = kk + frag_k0(lane);
-                frag_t b[2];
+                frag_t b[CT_QB];
 #pragma unroll
-                for(int qb = 0; qb < 2; ++qb)
+                for(int qb = 0; qb < CT_QB; ++qb)
                     b[qb] = *reinterpret_cast<const frag_t*>(
-                        &xs[(16 * (2 * wq + qb) + lane % 16 + (CT_T - 1) - m) * CT_ROW + k0]);
+                        &xs[(16 * (CT_QB * wq + qb) + lane % 16 + (CT_T - 1) - m) * CT_ROW + k0]);
 #pragma unroll
                 for(int r = 0; r < CT_S; ++r)
                 {
                     const frag_t a = *reinterpret_cast<const frag_t*>(
                         &ws[((r * CT_T + m) * CT_CO_T + 16 * wco + lane % 16) * CT_ROW + k0]);
 #pragma unroll
-                    for(int qb = 0; qb < 2; ++qb)
+                    for(int qb = 0; qb < CT_QB; ++qb)
                         acc[r][qb] = wmma(a, b[qb], acc[r][qb]);
                 }
             }
@@ -248,12 +251,12 @@ extern "C" __global__ void __launch_bounds__(CT_BLOCK_SIZE)
 #pragma unroll
     for(int r = 0; r < CT_S; ++r)
 #pragma unroll
-        for(int qb = 0; qb < 2; ++qb)
+        for(int qb = 0; qb < CT_QB; ++qb)
 #pragma unroll
             for(int i = 0; i < 8; ++i)
             {
                 const int co                     = 16 * wco + d_row(lane, i);
-                const int q                      = 16 * (2 * wq + qb) + lane % 16;
+                const int q                      = 16 * (CT_QB * wq + qb) + lane % 16;
                 ys[co * CT_OUT_W + CT_S * q + r] = to_storage(acc[r][qb][i]);
             }
     __syncthreads();

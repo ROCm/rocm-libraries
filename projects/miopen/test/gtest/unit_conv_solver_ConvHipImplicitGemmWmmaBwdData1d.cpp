@@ -21,6 +21,8 @@ auto GetConvTestCases(miopenDataType_t datatype)
         TestCase{{1, 37, 1, 801}, {50, 37, 1, 12}, {0, 5}, {1, 2}, {1, 1}, 1, datatype},
         // Stride 5 with k = 9 (taps per phase differ between phases).
         TestCase{{1, 96, 1, 647}, {32, 96, 1, 9}, {0, 2}, {1, 5}, {1, 1}, 1, datatype},
+        // Stride 8 at k = 16 (32-q tile).
+        TestCase{{1, 70, 1, 1203}, {40, 70, 1, 16}, {0, 4}, {1, 8}, {1, 1}, 1, datatype},
         // Stride 1: the input gradient of a conv1d.
         TestCase{{2, 8, 1, 1000}, {16, 8, 1, 3}, {0, 1}, {1, 1}, {1, 1}, 1, datatype},
         // clang-format on
@@ -108,12 +110,14 @@ TEST(CPU_UnitTestConvSolverHipImplicitGemmWmmaBwdData1dBounds_NONE,
     EXPECT_FALSE(IsApplicableFor(
         ctx1030, {1, 64, 1, 4096}, {64, 64, 1, 8}, {0, 2}, {1, 4}, {1, 1}, 1, bf16));
 
-    // LDS bound: stride 7 at k = 14 fits, stride 8 (the output tile alone fills LDS) does not, nor
-    // does stride 4 at k = 24 (stride x taps per phase = 24 > 20).
+    // LDS bound (stride x taps per phase <= 20): stride 7 at k = 14 and stride 8 at k = 16 (with a
+    // 32-q tile) fit; stride 8 at k = 24 and stride 4 at k = 24 (24 > 20) do not.
     EXPECT_TRUE(
         IsApplicableFor(ctx, {1, 64, 1, 4096}, {64, 64, 1, 14}, {0, 0}, {1, 7}, {1, 1}, 1, bf16));
-    EXPECT_FALSE(
+    EXPECT_TRUE(
         IsApplicableFor(ctx, {1, 64, 1, 4096}, {64, 64, 1, 16}, {0, 4}, {1, 8}, {1, 1}, 1, bf16));
+    EXPECT_FALSE(
+        IsApplicableFor(ctx, {1, 64, 1, 4096}, {64, 64, 1, 24}, {0, 8}, {1, 8}, {1, 1}, 1, bf16));
     EXPECT_FALSE(
         IsApplicableFor(ctx, {1, 64, 1, 4096}, {64, 64, 1, 24}, {0, 0}, {1, 4}, {1, 1}, 1, bf16));
 

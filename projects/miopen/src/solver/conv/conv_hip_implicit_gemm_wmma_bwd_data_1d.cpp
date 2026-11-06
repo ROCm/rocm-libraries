@@ -24,7 +24,6 @@ namespace {
 // Must match MIOpenConvTranspose1dWmmaHip.cpp.
 constexpr std::size_t kBlockSize = 256;
 constexpr std::size_t kCoTile    = 64;
-constexpr std::size_t kQTile     = 64;
 constexpr std::size_t kMaxLds    = 65536;
 
 // Input channels per stage (CT_CI_T). 32 halves the stage count and was 1.03x to 1.7x faster than
@@ -32,8 +31,13 @@ constexpr std::size_t kMaxLds    = 65536;
 constexpr std::size_t kCiTileLarge = 32;
 constexpr std::size_t kCiTileSmall = 16;
 
-// Filter width and stride are bounded by LDS (LdsBytes below), which leaves stride <= 7 and
-// stride x taps per phase <= 20. Compiled for gfx1100 to gfx1103 and gfx1150 to gfx1153 (gfx11
+// q per block (CT_Q_T). 64 wherever its tiles fit in LDS; 32 halves the dx tile, which alone fills
+// LDS at stride 8 with 64.
+constexpr std::size_t kQTileLarge = 64;
+constexpr std::size_t kQTileSmall = 32;
+
+// Filter width and stride are bounded by LDS (LdsBytes below), which leaves stride x taps per
+// phase <= 20. Compiled for gfx1100 to gfx1103 and gfx1150 to gfx1153 (gfx11
 // layout) and for gfx1200 and gfx1201 (gfx12 layout), every such filter needs at most 255 VGPRs
 // and no scratch in fp16 and bf16, with either stage size.
 constexpr int kMaxFilterWidth = 64;
@@ -60,20 +64,26 @@ std::size_t TapsPerPhase(const miopen::conv::ProblemDescription& problem)
 
 // dy window [q][ci] plus the larger of the weight tile [r][m][co][ci] and the dx tile [co][S q];
 // LDS rows hold ci_tile channels plus 8 of padding.
-std::size_t LdsBytes(const miopen::conv::ProblemDescription& problem, std::size_t ci_tile)
+std::size_t
+LdsBytes(const miopen::conv::ProblemDescription& problem, std::size_t ci_tile, std::size_t q_tile)
 {
     const std::size_t row = ci_tile + 8;
     const std::size_t s   = problem.GetKernelStrideW();
     const std::size_t t   = TapsPerPhase(problem);
-    const std::size_t xs  = (kQTile + t - 1) * row;
+    const std::size_t xs  = (q_tile + t - 1) * row;
     const std::size_t ws  = s * t * kCoTile * row;
-    const std::size_t out = kCoTile * s * kQTile;
+    const std::size_t out = kCoTile * s * q_tile;
     return 2 * (xs + std::max(ws, out));
+}
+
+std::size_t QTile(const miopen::conv::ProblemDescription& problem)
+{
+    return LdsBytes(problem, kCiTileSmall, kQTileLarge) <= kMaxLds ? kQTileLarge : kQTileSmall;
 }
 
 std::size_t CiTile(const miopen::conv::ProblemDescription& problem)
 {
-    return LdsBytes(problem, kCiTileLarge) <= kMaxLds ? kCiTileLarge : kCiTileSmall;
+    return LdsBytes(problem, kCiTileLarge, QTile(problem)) <= kMaxLds ? kCiTileLarge : kCiTileSmall;
 }
 
 // Backward data: In is dy (ConvTranspose1d input), Out is dx (its output).
@@ -94,9 +104,10 @@ std::size_t WeightsWorkspaceElems(const miopen::conv::ProblemDescription& proble
 
 std::size_t GridX(const miopen::conv::ProblemDescription& problem)
 {
-    const std::size_t s = problem.GetKernelStrideW();
-    const std::size_t q = (problem.GetOutWidth() + problem.GetPadW() + s - 1) / s;
-    return ((q + kQTile - 1) / kQTile) * kBlockSize;
+    const std::size_t s   = problem.GetKernelStrideW();
+    const std::size_t q   = (problem.GetOutWidth() + problem.GetPadW() + s - 1) / s;
+    const std::size_t q_t = QTile(problem);
+    return ((q + q_t - 1) / q_t) * kBlockSize;
 }
 
 } // namespace
@@ -148,7 +159,7 @@ bool ConvHipImplicitGemmWmmaBwdData1d::IsApplicable(
     const int stride_w = problem.GetKernelStrideW();
     if(filter_w > kMaxFilterWidth || stride_w > kMaxStride || problem.GetPadW() < 0)
         return false;
-    if(LdsBytes(problem, kCiTileSmall) > kMaxLds)
+    if(LdsBytes(problem, kCiTileSmall, kQTileSmall) > kMaxLds)
         return false;
 
     return CoPad(problem) / kCoTile <= kMaxGridYZ && problem.GetBatchSize() <= kMaxGridYZ &&
@@ -171,6 +182,7 @@ ConvHipImplicitGemmWmmaBwdData1d::GetSolution(const ExecutionContext& ctx,
                                 " -DCT_K=" + std::to_string(problem.GetWeightsWidth()) +
                                 " -DCT_S=" + std::to_string(problem.GetKernelStrideW()) +
                                 " -DCT_CI_T=" + std::to_string(CiTile(problem)) +
+                                " -DCT_Q_T=" + std::to_string(QTile(problem)) +
                                 " -DCT_WMMA_GFX12=" + std::to_string(WmmaGfx12Layout(ctx) ? 1 : 0);
 
     const std::size_t wt_elems = WeightsWorkspaceElems(problem);
