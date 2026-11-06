@@ -66,9 +66,19 @@ class TestGfx1250Arch(unittest.TestCase):
         )
         cdna_async = dict(none, has_async_lds=True, has_async_global_lds=True)
         expected = {
+            "gfx908": MemoryCapabilities(**none),
             "gfx11-generic": MemoryCapabilities(**none),
+            "gfx1100": MemoryCapabilities(**none),
+            "gfx1101": MemoryCapabilities(**none),
+            "gfx1102": MemoryCapabilities(**none),
+            "gfx1103": MemoryCapabilities(**none),
+            "gfx1150": MemoryCapabilities(**none),
             "gfx1151": MemoryCapabilities(**none),
+            "gfx1152": MemoryCapabilities(**none),
+            "gfx1153": MemoryCapabilities(**none),
+            "gfx1154": MemoryCapabilities(**none),
             "gfx12-generic": MemoryCapabilities(**none),
+            "gfx1200": MemoryCapabilities(**none),
             "gfx1201": MemoryCapabilities(**none),
             "gfx1250": MemoryCapabilities(
                 **dict(none, has_async_global_lds=True, has_tdm=True),
@@ -76,6 +86,7 @@ class TestGfx1250Arch(unittest.TestCase):
                 has_global_prefetch=True,
                 has_cluster_launch=True,
                 has_multicast_load=True,
+                has_global_float_atomic_add=True,
             ),
             "gfx90a": MemoryCapabilities(**none),
             "gfx942": MemoryCapabilities(**dict(cdna_async, async_lds_max_dwords=1)),

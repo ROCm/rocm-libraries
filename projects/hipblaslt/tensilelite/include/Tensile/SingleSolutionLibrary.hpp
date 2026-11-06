@@ -92,6 +92,13 @@ namespace TensileLite
         {
         }
 
+        /// The index of the solution this leaf stands for, without resolving a
+        /// lazy leaf. -1 if it stands for none.
+        int solutionIndex() const
+        {
+            return solution ? solution->index : m_index;
+        }
+
         virtual std::shared_ptr<MySolution> getSolutionByIndex(MyProblem const& problem,
                                                                Hardware const&  hardware,
                                                                const int index) const override
@@ -157,6 +164,8 @@ namespace TensileLite
             bool debug = Debug::Instance().printPredicateEvaluation();
 
             auto solution = resolved();
+            if(solution && !solution->deviceScalarAlphaSupported(problems))
+                return {};
             if(solution)
             {
                 if(debug)
@@ -193,7 +202,7 @@ namespace TensileLite
                     // SynchronizerSizeCheck / LeadingFree1SizesGreaterOrEqual on this local
                     // problem copy, so it stays behind the USO check with softwarePredicate().
                     bool swMatch;
-                    if(problem.getParams().uniformSummationOrder())
+                    if(problem.getParams().uniformSummationOrder() != 0)
                     {
                         problem.setGroupedGemm(true);
                         swMatch = softwarePredicate(SolutionLibrarySearchType::DEFAULT,
@@ -284,6 +293,9 @@ namespace TensileLite
             bool debug = Debug::Instance().printPredicateEvaluation();
 
             auto solution    = resolved();
+            if(solution && searchType == SolutionLibrarySearchType::DEFAULT
+               && !solution->deviceScalarAlphaSupported(problems))
+                return {};
             bool useSolution = false;
             if(solution)
             {
@@ -307,7 +319,7 @@ namespace TensileLite
                         // softwarePredicate() widening stay behind the USO check, so with USO off
                         // this stays the problemPredicate && taskPredicate filter.
                         bool swMatch;
-                        if(problem.getParams().uniformSummationOrder())
+                        if(problem.getParams().uniformSummationOrder() != 0)
                         {
                             problem.setGroupedGemm(true);
                             swMatch

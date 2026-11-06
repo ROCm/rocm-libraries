@@ -107,7 +107,7 @@ class ProblemType:
                  'highPrecisionAccumulate', 'useInitialStridesAB', 'useInitialStridesCD', 'stridedBatched', 'groupedGemm',
                  'useGradient', 'activationType', 'activationArgLength', 'activationComputeDataType', 'activationNoGuard',
                  'sparse', 'f32XdlMathOp', 'supportDeviceUserArguments', 'outputAmaxD', 'swizzleTensorA', 'swizzleTensorB', 'metadataLayout',
-                 'mxBlockA', 'mxBlockB', 'mxTypeA', 'mxTypeB', 'mxScaleFormat', 'fusedGemmA2A', 'stochasticRounding']
+                 'mxBlockA', 'mxBlockB', 'mxBlockFreeA', 'mxBlockFreeB', 'mxTypeA', 'mxTypeB', 'mxScaleFormat', 'fusedGemmA2A', 'stochasticRounding']
     @classmethod
     def FromOriginalState(cls, d):
         indices = [None]*d['TotalIndices']
@@ -349,6 +349,9 @@ class ProblemType:
 
         rv.mxBlockA = d.get('MXBlockA', 0)
         rv.mxBlockB = d.get('MXBlockB', 0)
+        # Free-dimension extent of the scaling tile; 1 == the original 1xMXBlock.
+        rv.mxBlockFreeA = d.get('MXBlockFreeA', 1)
+        rv.mxBlockFreeB = d.get('MXBlockFreeB', 1)
         rv.mxTypeA = DataType(d['DataTypeMXSA']) if 'DataTypeMXSA' in d else DataType(0)
         rv.mxTypeB = DataType(d['DataTypeMXSB']) if 'DataTypeMXSB' in d else DataType(0)
         # mxScaleFormat is a Solution-level parameter and is populated by
@@ -496,9 +499,11 @@ class ProblemType:
             predicates.append(ProblemPredicate("MXBlockA", value=self.mxBlockA))
             if self.mxBlockA:
                 predicates.append(ProblemPredicate("DataTypeMXSA", value=self.mxTypeA))
+                predicates.append(ProblemPredicate("MXBlockFreeA", value=self.mxBlockFreeA))
             predicates.append(ProblemPredicate("MXBlockB", value=self.mxBlockB))
             if self.mxBlockB:
                 predicates.append(ProblemPredicate("DataTypeMXSB", value=self.mxTypeB))
+                predicates.append(ProblemPredicate("MXBlockFreeB", value=self.mxBlockFreeB))
         return predicates
 
 # Dict-valued Assert* keys and the runtime predicate each one emits per index.
@@ -687,7 +692,7 @@ class ProblemPredicate(Properties.Predicate):
             rv += [cls('SwizzleTensorB', value=state['ProblemType']['SwizzleTensorB'])]
 
         if state['ProblemType']['FusedGemmA2A']:
-            rv += [cls('FusedA2ATileDivisible', value=state['MacroTile0'])]
+            rv += [cls('GemmA2AShape', value=state['MacroTile0'])]
 
         # Exact-size custom kernels record the M/N/K window they won. Without
         # it, a multi-solution lookup also accepts the neighboring tile.
@@ -697,40 +702,21 @@ class ProblemPredicate(Properties.Predicate):
                 rv += [cls(bound["tag"], index=bound["index"], value=bound["value"])]
 
         if state.get('ReuseAcrossPersistent', 0):
-            # A lives in VGPRs for the whole persistent loop, so the kernel is only
-            # correct for problems where every tile a workgroup visits reads the
-            # same A, and where K is a whole number of resident k-tiles.
-            #   M == MacroTile0     - one M-tile only, and no masked store in M. A
-            #                         half-filled tile would take the edge path,
-            #                         which v0 does not budget registers for.
-            #   N % MacroTile1 == 0 - no edge tile in N either.
+            # A stays in VGPRs for the whole persistent loop, so the kernel is only
+            # correct where every tile a workgroup visits reads the same A. K is the
+            # only dim needing a predicate for that: the entry guard handles M by
+            # comparing (M-tile, batch), A does not depend on N, and a partial
+            # M-tile is safe because row m of C depends only on row m of A and the
+            # edge store masks the rows past M.
             #
-            # K is a range, not a point. The loop shell owns every resident k-tile
-            # and leaves as soon as the counter runs out, so any K from the floor up
-            # to the count the kernel holds works and the k-tiles above it simply go
-            # unused. K must still land on a k-tile boundary, because a section's
-            # registers are picked by a codegen-time k-tile number.
-            #
-            # The floor is one k-tile, and the reason is the loop-entry guard: it
-            # skips the loop when the counter reaches zero, and the InitCIterWmma
-            # clone that zeroes C lives inside the loop, so at zero k-tiles C would
-            # never be initialised. One is enough even at PrefetchGlobalRead 2 --
-            # the pre-loop prefetch skips its second stage when the counter is 1
-            # (label_skipPGR2_1), so nothing is fetched past this K, and the single
-            # section computes and then leaves through its own early exit. The
-            # toPGR1 escape that carries this case in a non-RAP kernel is not needed
-            # here: it exists to hand the work to the NGLL drain, which RAP does not
-            # emit because its sections do the work themselves.
-            #
-            # SizeGreaterThan and SizeLessThan are strict, hence the -1 and +1.
+            # K is a range: the loop runs ceil(K / DepthU) resident k-tiles, a
+            # partial last one included because TDM clamps it at K, so any K up to
+            # the block the kernel holds works and ASEM's BoundSizeMultiple sets the
+            # granularity. K = 0 is out: the InitCIterWmma clone that zeroes C lives
+            # inside the loop. SizeLessThan is strict, hence the +1.
             kIdx = state['ProblemType']['NumIndicesC']
             kTiles = state['_RAPNumResidentKTiles']
-            floorTiles = 1
-            rv += [cls('SizeEqual', index=0, value=state['MacroTile0'])]
-            rv += [cls('SizeMultiple', index=1, value=state['MacroTile1'])]
-            rv += [cls('SizeMultiple', index=kIdx, value=state['DepthU'])]
-            rv += [cls('SizeGreaterThan', index=kIdx,
-                       value=floorTiles * state['DepthU'] - 1)]
+            rv += [cls('SizeGreaterThan', index=kIdx, value=0)]
             rv += [cls('SizeLessThan', index=kIdx,
                        value=kTiles * state['DepthU'] + 1)]
 
@@ -754,7 +740,8 @@ class CustomKernel:
                  'workspaceType',
                  'workspaceSizePerElemC',
                  'workspaceSizePerElemBias',
-                 'generated']
+                 'generated',
+                 'uniformSummationOrder']
 
     @classmethod
     def FromOriginalState(cls, d):
@@ -766,7 +753,8 @@ class CustomKernel:
                    workspaceType=d.get('workspaceType', 'None'),
                    workspaceSizePerElemC=d.get('workspaceSizePerElemC', 0),
                    workspaceSizePerElemBias=d.get('workspaceSizePerElemBias', 0),
-                   generated=d.get('generated', False))
+                   generated=d.get('generated', False),
+                   uniformSummationOrder=d.get('uniformSummationOrder', False))
 
     def __init__(self, **kwargs):
         for (key, value) in list(kwargs.items()):
@@ -992,8 +980,16 @@ class InternalArgsSupport:
                    wgm = isp['SupportCustomWGM'],
                    staggerU = isp['SupportCustomStaggerU'],
                    perTileExtraIters = isp.get('SupportStreamKPerTileExtraIters', False),
+                   occupancyProbe = isp.get('SupportOccupancyProbe', False),
                    useUniversalArgs = isp['UseUniversalArgs'],
                    useSFC = useSFC)
+
+    def state(self):
+        rv = {key: getattr(self, key) for key in self.StateKeys}
+        # Emitted only when set so libraries built without the probe are unchanged.
+        if getattr(self, 'occupancyProbe', False):
+            rv['occupancyProbe'] = True
+        return rv
 
     def __init__(self, **kwargs):
         for (key, value) in list(kwargs.items()):
