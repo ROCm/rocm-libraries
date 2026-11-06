@@ -138,11 +138,3 @@ BenchmarkProblems:
           # ===== Control sizes (PR 7767 PASS smokes) =====
           - Exact: [    2048,   4480, 1,   768]   # validator PASS smoke (K=3*DU)
           - Exact: [    7680,   5760, 1,   256]   # validator PASS smoke (K=1*DU)
-
-LibraryLogic:
-    ScheduleName: "gfx950"
-    DeviceNames: ["Device 75a0"]
-    ArchitectureName: "gfx950"
-    LibraryType: "Prediction"
-
-LibraryClient:

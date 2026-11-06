@@ -114,9 +114,3 @@ BenchmarkProblems:
           # Token rows off a 16-byte boundary: staged without LDS DMA.
           - Exact: [4096, 2, 1, 2048, 4096, 4096, 2048, 2052]
           - Exact: [2048, 2, 1, 43008, 2048, 2048, 43008, 43012]
-
-LibraryLogic:
-    ScheduleName: "gfx950"
-    DeviceNames: ["Device 0049", "Device 0050"]
-    ArchitectureName: "gfx950"
-    LibraryType: "GridBased"

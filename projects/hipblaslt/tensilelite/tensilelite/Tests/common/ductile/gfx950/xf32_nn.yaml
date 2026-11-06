@@ -105,11 +105,6 @@ BenchmarkProblems:
       - Exact: [ 1024, 16, 1, 32 ]
       - Exact: [ 960, 16, 1, 32 ]
     - BiasTypeArgs: [S]
-LibraryLogic:
-  ScheduleName: "gfx950"
-  ArchitectureName: "gfx950"
-  DeviceNames: ["Device 75a0"]
-#LibraryClient: 
 Backend:
   Name: Ductile
   Config:
