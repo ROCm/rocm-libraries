@@ -137,13 +137,16 @@ def _base_spec(req: AttentionRequest):
 
     The gfx942 twin of ``gfx950_dense._base_spec``. The persistent grid turns on
     at D128, and non-tile-multiple self-attention lengths take the on-chip
-    ragged path.
+    ragged path. A chunked bottom-right request whose work items fill their last
+    wave poorly splits each item's KV range across CTAs.
     ``waves_per_eu`` comes from the kernel's own per-config policy
     (``_tuned_waves_per_eu``): any value the kernel bakes into its
     ``kernel_name`` must be resolved by the kernel's policy, or the name tag and
     the compiled binary can disagree. Every gfx942-private codegen knob stays at
     the concrete spec's default; the knob space varies them.
     """
+    from dataclasses import replace
+
     # Exact compare, deliberately: ``AttentionRequest.__post_init__`` has already
     # canonicalized ``arch``, so a case- or suffix-insensitive compare here would
     # be defending against an input shape that cannot reach this function.
@@ -160,6 +163,32 @@ def _base_spec(req: AttentionRequest):
         _DENSE_BLOCK_N,
         persistent=head_size == 128,
     )
+    if (
+        spec.causal_bottom_right
+        and not spec.ragged
+        and spec.seqlen_q % spec.block_m == 0
+        and not spec.use_sinks
+        and not spec.emit_lse
+        and not spec.sliding_window
+    ):
+        from kernels.common.attention_dense_kv_split import (
+            max_kv_segments_for_extent,
+        )
+
+        from .dense_rules import dense_wave_segments
+
+        cus = int(req.num_cus) if int(req.num_cus) > 0 else _GFX942_NUM_PERSISTENT
+        work = -(-spec.seqlen_q // spec.block_m) * int(req.nhead_q) * int(req.batch)
+        segments = dense_wave_segments(
+            work,
+            cus,
+            max_segments=max_kv_segments_for_extent(
+                req.batch, spec.seqlen_q, req.nhead_q, head_size, max_segments=8
+            ),
+        )
+        if segments > 1:
+            # The split runs on the one-CTA-per-block grid.
+            spec = replace(spec, persistent=False, kv_segments=segments)
     if 0 < int(req.sliding_window) <= _NARROW_WINDOW:
         bm, bn, skip = _narrow_window_geometry(head_size, req.dtype.lower())
         narrow = _make_spec(req, bm, bn, persistent=False, window_wave_skip=skip)
@@ -208,7 +237,7 @@ def _ingestor_base_spec(
             f"the ingestor's gfx942 persistent grid is D128 only, got D{req.hdim_q}"
         )
     bm = int(DENSE_TILE_GEOMETRIES["default"]["block_m"])
-    spec = _make_spec(req, bm, _DENSE_BLOCK_N, persistent=persistent, split_kv=False)
+    spec = _make_spec(req, bm, _DENSE_BLOCK_N, persistent=persistent)
     spec = replace(spec, nonpersist_decode=nonpersist_decode)
     if persistent:
         spec = replace(spec, persist_decode=spec.resolved_persist_decode)
@@ -222,13 +251,9 @@ def _make_spec(
     *,
     persistent: bool,
     window_wave_skip: bool = False,
-    split_kv: bool = True,
 ):
-    """The ``Gfx942AttentionDenseSpec`` for ``req`` at one tile geometry.
-
-    ``split_kv=False`` keeps one KV segment and the requested grid: a split
-    turns ``persistent`` off, so a caller that fixes the grid must not get one.
-    """
+    """The ``Gfx942AttentionDenseSpec`` for ``req`` at one tile geometry and
+    grid, with one KV segment."""
     from kernels.gfx942.attention_dense import (
         Gfx942AttentionDenseSpec,
         _tuned_waves_per_eu,
@@ -255,38 +280,9 @@ def _make_spec(
             "gfx942 dense: cross-length NO_MASK requests are not served by the "
             "dense kernel"
         )
-    diag_split = False
-    kv_segments = 1
-    if bottom_right and not ragged:
-        # Chunked prefill: the unmasked body loop skips the mask on every tile
-        # below the shifted diagonal. When the work items fill their last wave
-        # poorly (short chunks, or a head count just past the CU count), the
-        # non-persistent grid splits each work item's KV range across CTAs.
-        from kernels.common.attention_dense_kv_split import (
-            max_kv_segments_for_extent,
-        )
-
-        from .dense_rules import dense_wave_segments
-
-        diag_split = True
-        cus = int(req.num_cus) if int(req.num_cus) > 0 else _GFX942_NUM_PERSISTENT
-        work = -(-sq // bm) * int(req.nhead_q) * int(req.batch)
-        if (
-            split_kv
-            and sq % bm == 0
-            and not req.use_sinks
-            and not req.emit_lse
-            and not int(req.sliding_window)
-        ):
-            kv_segments = dense_wave_segments(
-                work,
-                cus,
-                max_segments=max_kv_segments_for_extent(
-                    req.batch, sq, req.nhead_q, head_size, max_segments=8
-                ),
-            )
-            if kv_segments > 1:
-                persistent = False
+    # Chunked prefill: the unmasked body loop skips the mask on every tile below
+    # the shifted diagonal.
+    diag_split = bottom_right and not ragged
     return Gfx942AttentionDenseSpec(
         batch=int(req.batch),
         seqlen_q=sq,
@@ -308,7 +304,6 @@ def _make_spec(
         emit_lse=bool(req.emit_lse),
         causal_bottom_right=bottom_right,
         causal_diag_split=diag_split,
-        kv_segments=kv_segments,
         window_wave_skip=window_wave_skip,
     )
 

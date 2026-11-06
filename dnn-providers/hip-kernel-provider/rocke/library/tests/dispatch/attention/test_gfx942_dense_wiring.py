@@ -538,9 +538,10 @@ class TestGfx942DenseIngestorGrids(unittest.TestCase):
             "mask_type": AttentionMaskType.BOTTOM_RIGHT_CAUSAL,
         }
         with _Gfx942Arch():
-            tuned = _spec(_req(**chunk))
-            self.assertGreater(tuned.kv_segments, 1)
-            self.assertFalse(tuned.persistent)
+            # The default spec itself too: the tuned config re-picks the grid.
+            for tuned in (_base_spec(_req(**chunk)), _spec(_req(**chunk))):
+                self.assertGreater(tuned.kv_segments, 1)
+                self.assertFalse(tuned.persistent)
             grids = {
                 self._PERSIST: (True, "qb_minor"),
                 "gfx942_dense_qbminor": (False, "qb_minor"),
