@@ -13,6 +13,7 @@ import random
 import signal
 import subprocess
 import sys
+import threading
 import time
 import types
 from concurrent.futures.process import BrokenProcessPool
@@ -496,6 +497,8 @@ def install_fake_smi(monkeypatch, fail: bool, level: str = "AUTO") -> FakeAmdSmi
             module=fake, pid=os.getpid(), handles=["h0", "h1"], handle=lambda g: f"h{g}"
         ),
     )
+    # The existing tests lock in-process, as root does.
+    monkeypatch.setattr(smi, "make_sudo_session", lambda: None)
     return fake
 
 
@@ -616,6 +619,327 @@ def test_failed_restore_and_reset_name_the_manual_command(monkeypatch, capsys):
     assert "amd-smi reset -g 0 --clocks" in capsys.readouterr().err
     fake.fail_levels = set()
     stabilizer.close()
+
+
+AMD_SMI = "/opt/rocm/bin/amd-smi"
+BDF1 = "0000:95:00.0"
+
+
+class FakeSudoRunner:
+    """A stand-in for subprocess.run that plays sudo and amd-smi: it records every
+    call and applies the sets to the FakeAmdSmi."""
+
+    def __init__(self, fake: FakeAmdSmi):
+        self.fake = fake
+        self.calls: list[tuple[list[str], dict]] = []
+        # The result of sudo -n -v.
+        self.cached = True
+        # The result of sudo -v and whether it leaves credentials behind.
+        self.prompt_rc = 0
+        self.prompt_raises: BaseException | None = None
+        self.keeps_credentials = True
+        # The exit code of amd-smi.
+        self.set_rc = 0
+
+    def __call__(self, argv, **kwargs):
+        self.calls.append((list(argv), kwargs))
+        if argv == ["sudo", "-n", "-v"]:
+            return self.done(argv, 0 if self.cached else 1)
+        if argv == ["sudo", "-v"]:
+            return self.prompt(argv)
+        return self.amd_smi(argv)
+
+    def done(self, argv, rc, stderr=""):
+        return subprocess.CompletedProcess(argv, rc, stdout="", stderr=stderr)
+
+    def prompt(self, argv):
+        if self.prompt_raises is not None:
+            raise self.prompt_raises
+        if self.prompt_rc == 0 and self.keeps_credentials:
+            self.cached = True
+        return self.done(argv, self.prompt_rc)
+
+    def amd_smi(self, argv):
+        assert argv[:3] == ["sudo", "-n", AMD_SMI]
+        if self.set_rc != 0:
+            return self.done(argv, self.set_rc, "Permission denied\n\n")
+        if argv[3] == "set" and argv[6] == "-l":
+            self.fake.level = argv[7]
+        if argv[3] == "set" and argv[6] == "-d":
+            self.fake.level = "DETERMINISM"
+        return self.done(argv, 0)
+
+    def argvs(self) -> list[list[str]]:
+        return [argv for argv, _ in self.calls]
+
+
+def install_sudo(monkeypatch, fake, runner, has_tty=True, interval=3600):
+    """Makes the stabilizer lock through the fake sudo runner; the atexit
+    registrations are recorded in fake.registered instead of made."""
+    fake.bdf = {"h0": "0000:85:00.0", "h1": BDF1}
+    session = smi.SudoSession(
+        AMD_SMI, runner=runner, has_tty=lambda: has_tty, interval=interval
+    )
+    monkeypatch.setattr(smi, "make_sudo_session", lambda: session)
+    fake.registered = []
+    monkeypatch.setattr(smi.atexit, "register", fake.registered.append)
+    monkeypatch.setattr(smi.atexit, "unregister", lambda f: None)
+    # Nothing but the fake runner may run a process.
+    monkeypatch.setattr(smi.subprocess, "run", pytest.fail)
+    return session
+
+
+def sudo_setup(monkeypatch, cached=True, **options):
+    fake = install_fake_smi(monkeypatch, fail=False)
+    runner = FakeSudoRunner(fake)
+    runner.cached = cached
+    session = install_sudo(monkeypatch, fake, runner, **options)
+    return fake, runner, session
+
+
+def set_argv(*args):
+    return ["sudo", "-n", AMD_SMI, "set", "-g", BDF1, *args]
+
+
+def test_sudo_prompts_then_locks_and_restores_through_sudo(monkeypatch):
+    fake, runner, _ = sudo_setup(monkeypatch, cached=False)
+    with smi.GpuStabilizer([1], require_stable=True) as stabilizer:
+        assert stabilizer.summary()["status"] == "locked"
+    argvs = runner.argvs()
+    assert argvs[:3] == [["sudo", "-n", "-v"], ["sudo", "-v"], ["sudo", "-n", "-v"]]
+    assert runner.calls[1][1] == {}
+    sets = [argv for argv in argvs if argv[:3] == ["sudo", "-n", AMD_SMI]]
+    assert sets == [set_argv("-d", "2400"), set_argv("-l", "AUTO")]
+    assert not fake.calls
+
+
+def test_no_password_is_ever_passed(monkeypatch):
+    fake, runner, _ = sudo_setup(monkeypatch, cached=False)
+    with smi.GpuStabilizer([1], require_stable=True):
+        pass
+    with pytest.raises(smi.SweepAbort):
+        with smi.GpuStabilizer([1], require_stable=True):
+            runner.cached = False
+    assert runner.calls
+    for argv, kwargs in runner.calls:
+        assert "-S" not in argv
+        assert "input" not in kwargs
+        assert kwargs.get("stdin") in (None, subprocess.DEVNULL)
+        assert argv == ["sudo", "-v"] or argv[1] == "-n"
+
+
+def test_root_sets_in_process_without_sudo(monkeypatch):
+    fake = FakeAmdSmi(fail=False)
+    monkeypatch.setattr(
+        smi,
+        "_smi",
+        types.SimpleNamespace(
+            module=fake, pid=os.getpid(), handles=["h0", "h1"], handle=lambda g: f"h{g}"
+        ),
+    )
+    monkeypatch.setattr(smi.os, "geteuid", lambda: 0)
+    monkeypatch.setattr(smi.subprocess, "run", pytest.fail)
+    assert smi.make_sudo_session() is None
+    with smi.GpuStabilizer([1], require_stable=True):
+        pass
+    assert fake.calls == [("determinism", "h1", 2400), ("level", "h1", "auto")]
+
+
+def test_not_root_makes_a_session_with_an_absolute_amd_smi(monkeypatch):
+    monkeypatch.setattr(smi.os, "geteuid", lambda: 1000)
+    monkeypatch.setattr(smi, "find_amd_smi", lambda: AMD_SMI)
+    session = smi.make_sudo_session()
+    assert isinstance(session, smi.SudoSession)
+    assert os.path.isabs(session.amd_smi)
+
+
+def test_refused_password_aborts_before_anything_is_locked(monkeypatch):
+    fake, runner, _ = sudo_setup(monkeypatch, cached=False)
+    runner.prompt_rc = 1
+    sigterm = signal.getsignal(signal.SIGTERM)
+    with pytest.raises(smi.SweepAbort) as info:
+        with smi.GpuStabilizer([1], require_stable=True):
+            pass
+    message = str(info.value)
+    assert "sudo -v" in message and "! sudo -v" in message
+    assert "nothing was locked" in message
+    assert all(argv[:2] in (["sudo", "-n"], ["sudo", "-v"]) for argv in runner.argvs())
+    assert not any(argv[2:3] == [AMD_SMI] for argv in runner.argvs())
+    assert not fake.calls
+    assert fake.registered == []
+    assert signal.getsignal(signal.SIGTERM) is sigterm
+
+
+def test_no_terminal_aborts_without_prompting(monkeypatch):
+    fake, runner, _ = sudo_setup(monkeypatch, cached=False, has_tty=False)
+    with pytest.raises(smi.SweepAbort, match="no terminal"):
+        with smi.GpuStabilizer([1], require_stable=True):
+            pass
+    assert ["sudo", "-v"] not in runner.argvs()
+
+
+def test_cancelled_prompt_aborts(monkeypatch):
+    fake, runner, _ = sudo_setup(monkeypatch, cached=False)
+    runner.prompt_raises = KeyboardInterrupt()
+    with pytest.raises(smi.SweepAbort, match="cancelled"):
+        with smi.GpuStabilizer([1], require_stable=True):
+            pass
+
+
+def test_credentials_that_are_not_kept_abort(monkeypatch):
+    fake, runner, _ = sudo_setup(monkeypatch, cached=False)
+    runner.keeps_credentials = False
+    with pytest.raises(smi.SweepAbort, match="timestamp_timeout"):
+        with smi.GpuStabilizer([1], require_stable=True):
+            pass
+    assert not fake.calls
+
+
+def test_cached_credentials_are_not_prompted_for(monkeypatch):
+    fake, runner, _ = sudo_setup(monkeypatch, cached=True)
+    with smi.GpuStabilizer([1], require_stable=True):
+        pass
+    assert ["sudo", "-v"] not in runner.argvs()
+
+
+def wait_for(condition, timeout: float = 5.0) -> bool:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if condition():
+            return True
+        time.sleep(0.01)
+    return False
+
+
+def test_heartbeat_refreshes_until_stopped(monkeypatch):
+    runner = FakeSudoRunner(FakeAmdSmi(fail=False))
+    session = smi.SudoSession(AMD_SMI, runner=runner, interval=0.01)
+    session.start_heartbeat()
+    assert wait_for(lambda: len(runner.calls) >= 2)
+    session.stop_heartbeat()
+    assert not session.thread.is_alive()
+    assert all(argv == ["sudo", "-n", "-v"] for argv in runner.argvs())
+    count = len(runner.calls)
+    time.sleep(0.05)
+    assert len(runner.calls) == count
+
+
+def test_heartbeat_warns_once_and_exits_when_the_credentials_expire(capsys):
+    runner = FakeSudoRunner(FakeAmdSmi(fail=False))
+    runner.cached = False
+    session = smi.SudoSession(AMD_SMI, runner=runner, interval=0.01)
+    session.start_heartbeat()
+    session.thread.join(5)
+    assert not session.thread.is_alive()
+    assert capsys.readouterr().err.count("the sudo credentials expired") == 1
+
+
+def test_expired_credentials_at_restore_print_the_commands_and_fail(
+    monkeypatch, capsys
+):
+    fake, runner, _ = sudo_setup(monkeypatch)
+    stabilizer = smi.GpuStabilizer([1], require_stable=True)
+    with pytest.raises(smi.SweepAbort, match="still locked"):
+        with stabilizer:
+            runner.cached = False
+    err = capsys.readouterr().err
+    assert f"run: sudo {AMD_SMI} set -g {BDF1} -l AUTO" in err
+    assert runner.argvs().count(["sudo", "-v"]) == 0
+    assert set_argv("-l", "AUTO") not in runner.argvs()
+    assert not stabilizer.locks[1].restored
+
+
+def test_expired_credentials_do_not_mask_an_exception(monkeypatch, capsys):
+    fake, runner, _ = sudo_setup(monkeypatch)
+    with pytest.raises(RuntimeError, match="boom"):
+        with smi.GpuStabilizer([1], require_stable=True):
+            runner.cached = False
+            raise RuntimeError("boom")
+    assert f"run: sudo {AMD_SMI} set -g {BDF1} -l AUTO" in capsys.readouterr().err
+
+
+def test_sudo_is_not_used_by_another_process():
+    runner = FakeSudoRunner(FakeAmdSmi(fail=False))
+    session = smi.SudoSession(AMD_SMI, runner=runner)
+    session.pid = os.getpid() + 1
+    assert not session.run_amd_smi("set", "-g", BDF1, "-l", "AUTO").ok
+    assert not runner.calls
+
+
+def test_failed_sudo_restore_names_the_reset_command_and_fails(monkeypatch, capsys):
+    fake, runner, _ = sudo_setup(monkeypatch)
+    stabilizer = smi.GpuStabilizer([1], require_stable=True)
+    with pytest.raises(smi.SweepAbort, match="still locked"):
+        with stabilizer:
+            runner.set_rc = 1
+    err = capsys.readouterr().err
+    assert f"sudo {AMD_SMI} reset -g {BDF1} --clocks" in err
+    assert "exited with 1: Permission denied" in err
+    assert not stabilizer.locks[1].restored
+
+
+def test_smi_failure_aborts_before_the_password_prompt(monkeypatch):
+    fake, runner, _ = sudo_setup(monkeypatch, cached=False)
+
+    def fail():
+        raise smi.SweepAbort("cannot initialize amd-smi")
+
+    monkeypatch.setattr(smi, "get_smi", fail)
+    threads = threading.active_count()
+    with pytest.raises(smi.SweepAbort, match="cannot initialize"):
+        with smi.GpuStabilizer([1], require_stable=True):
+            pass
+    assert not runner.calls
+    assert threading.active_count() == threads
+
+
+def test_manual_restore_without_a_pci_address_does_not_guess(monkeypatch, capsys):
+    fake, runner, session = sudo_setup(monkeypatch, cached=False)
+    stabilizer = smi.GpuStabilizer([1], require_stable=True)
+    stabilizer.pid = os.getpid()
+    stabilizer.sudo = session
+    stabilizer.locks[1] = smi.GpuLock(1, "AUTO", mode="perfdeterminism")
+    stabilizer.restore()
+    err = capsys.readouterr().err
+    assert "the PCI address of" in err and "is unknown" in err
+    assert "sudo " + AMD_SMI not in err
+    assert not any(argv[2:3] == [AMD_SMI] for argv in runner.argvs())
+
+
+def test_lock_records_the_pci_address_in_sudo_mode(monkeypatch):
+    sudo_setup(monkeypatch)
+    with smi.GpuStabilizer([1], require_stable=True) as stabilizer:
+        assert stabilizer.locks[1].bdf == BDF1
+
+
+def test_sudo_is_not_made_without_the_flag(monkeypatch):
+    fake = install_fake_smi(monkeypatch, fail=False)
+
+    def fail():
+        raise AssertionError("no sudo without the flag")
+
+    monkeypatch.setattr(smi, "make_sudo_session", fail)
+    with smi.GpuStabilizer([1], require_stable=False):
+        pass
+    assert not fake.calls
+
+
+def test_find_amd_smi_searches_rocm_path_then_aborts(monkeypatch, tmp_path):
+    monkeypatch.setattr(smi.shutil, "which", lambda name: None)
+    binary = tmp_path / "bin" / "amd-smi"
+    binary.parent.mkdir()
+    binary.write_text("#!/bin/sh\n")
+    binary.chmod(0o755)
+    monkeypatch.setenv("ROCM_PATH", str(tmp_path))
+    assert smi.find_amd_smi() == str(binary)
+    binary.chmod(0o644)
+    monkeypatch.setattr(smi.os, "access", lambda path, mode: False)
+    with pytest.raises(smi.SweepAbort, match="cannot find the amd-smi"):
+        smi.find_amd_smi()
+
+
+def test_terminal_available_never_raises():
+    assert isinstance(smi.terminal_available(), bool)
 
 
 def test_use_is_averaged_and_not_a_number_is_skipped(monkeypatch):
@@ -1381,12 +1705,6 @@ def test_selector_retargets_to_the_kernel_without_split_k_when_it_cannot_split()
     assert problem.use_split_k and problem.spk == 1024 and not degraded
 
 
-def test_selector_validate_rounds_needs_two():
-    with pytest.raises(argparse.ArgumentTypeError):
-        from_sweep.at_least_two_int("1")
-    assert from_sweep.at_least_two_int("2") == 2
-
-
 def test_selector_validation_settings_floor():
     def settings_document(iters, warmup):
         settings = {"iters": iters, "warmup": warmup, "verify_full_max_elems": 100}
@@ -1753,6 +2071,26 @@ def test_select_library_leaves_cases_without_timings_uncovered():
     record = from_sweep.uncovered_record(cases[0], {}, set(result.library), 0.1)
     assert record["reason"] == selection.REASON_NO_TIMINGS_USE_BETA
     assert record["bestUs"] is None
+
+
+def test_uncovered_record_reports_the_library_time_beyond_the_tolerance():
+    cases = load(knob_case_results([[(1, 1.0), (2, 3.0)]]))
+    slow = selection.identity_of(sweep_config_record(bm=2))
+    qualified = from_sweep.qualified_per_case(cases[0], 0.1)
+    record = from_sweep.uncovered_record(cases[0], qualified, {slow}, 0.1)
+    assert record["reason"] == "sweep best not in library; no library config within tolerance"
+    assert record["bestInLibrary"]["timeUs"] == 3.0
+    assert record["bestInLibrary"]["ratio"] == 3.0
+    assert record["bestInLibrary"]["withinTolerance"] is False
+    assert record["bestInLibrary"]["config"]["bm"] == 2
+    assert record["sweepBest"]["timeUs"] == 1.0
+
+
+def test_uncovered_record_without_a_library_entry_has_no_library_time():
+    cases = load(knob_case_results([[(1, 1.0)]]))
+    qualified = from_sweep.qualified_per_case(cases[0], 0.1)
+    record = from_sweep.uncovered_record(cases[0], qualified, set(), 0.1)
+    assert record["bestInLibrary"] is None
 
 
 def test_representatives_keep_the_best_ranked_config():

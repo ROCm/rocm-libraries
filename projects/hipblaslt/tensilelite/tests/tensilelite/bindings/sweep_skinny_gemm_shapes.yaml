@@ -39,8 +39,8 @@
 # is an estimate, not a measurement. Use --only/--limit-shapes to run a slice.
 
 settings:
-  iters: 30
-  warmup: 10
+  iters: 50
+  warmup: 15
   refine_top: 0
   refine_iters: 0
   top: 0

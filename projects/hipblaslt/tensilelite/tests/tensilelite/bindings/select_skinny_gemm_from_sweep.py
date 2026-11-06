@@ -74,7 +74,6 @@ from sweep_skinny_gemm_flush import FastLlcFlush
 from sweep_skinny_gemm_inputs import OperandCache, Verifier, make_case_inputs
 
 DEFAULT_TOLERANCE = 0.10
-DEFAULT_VALIDATE_ROUNDS = 3
 # Sweep settings may be too small for a stable replay.
 MIN_VALIDATE_WARMUP = 10
 MIN_VALIDATE_ITERS = 30
@@ -473,7 +472,6 @@ def validate_selection(
     verify_full_max_elems: int,
     code_object_version: int,
     emitted: dict[str, tuple[str, bytes]],
-    rounds: int,
     margin: float,
 ) -> dict[int, Validation]:
     """Checks selected performance against a same-session replayed sweep best.
@@ -545,35 +543,12 @@ def validate_selection(
                     best_kernel = kernel_for(best["kernel"], best_problem)
                     buffers = (d, a, b, scl_a, scl_b, ws, c)
                     same = selected_problem == best_problem
-                    reference_samples: list[float] = []
-                    time_samples: list[float] = []
-                    # Alternating the order each round keeps slow clock drift
-                    # from favoring whichever kernel is timed first. Every
-                    # round contributes the same iters, so the mean across
-                    # rounds is the mean across all its launches, matching
-                    # the sweep's own mean-of-launches timeUs.
-                    for round_index in range(rounds):
-                        order = ("best", "selected")
-                        if round_index % 2:
-                            order = order[::-1]
-                        for which in order:
-                            if which == "best":
-                                reference_samples.append(
-                                    measure(
-                                        best_problem, best_kernel, buffers, flush
-                                    )
-                                )
-                            elif not same:
-                                time_samples.append(
-                                    measure(
-                                        selected_problem,
-                                        selected_kernel,
-                                        buffers,
-                                        flush,
-                                    )
-                                )
-                    reference_us = mean(reference_samples)
-                    time_us = reference_us if same else mean(time_samples)
+                    reference_us = measure(best_problem, best_kernel, buffers, flush)
+                    time_us = (
+                        reference_us
+                        if same
+                        else measure(selected_problem, selected_kernel, buffers, flush)
+                    )
 
                     d.upload(d_host)
                     ws.upload(ws_host)
@@ -734,6 +709,27 @@ def validate_selected_rows(selected: list[dict]) -> None:
                 )
 
 
+def fastest_in_library(
+    case: SweepCase, library: set[ConfigIdentity]
+) -> tuple[ConfigIdentity, QualifiedEntry] | None:
+    """The fastest top entry of the case whose identity is in the library, at
+    any slowdown; None if the library has no entry in the case's top list."""
+    options: dict[ConfigIdentity, QualifiedEntry] = {}
+    for item in case.top:
+        identity = identity_of(item["config"])
+        if identity not in library:
+            continue
+        entry = QualifiedEntry(
+            item["timeUs"], item["config"], item["kernel"], item["rank"]
+        )
+        known = options.get(identity)
+        if known is None or entry.time_us < known.time_us:
+            options[identity] = entry
+    if not options:
+        return None
+    return fastest_winner(options)
+
+
 def uncovered_record(
     case: SweepCase,
     qualified: dict[ConfigIdentity, QualifiedEntry],
@@ -755,18 +751,25 @@ def uncovered_record(
         "withinTolerance": entry.time_us <= case.best_us * (1 + tolerance),
         "inLibrary": identity in library,
     }
-    in_lib = {i: e for i, e in qualified.items() if i in library}
-    if in_lib:
-        lib_id, lib_entry = fastest_winner(in_lib)
+    # The qualified entries stop at the tolerance, so the library's best time is
+    # read from the whole top list: a case whose library kernels are all slower
+    # than the tolerance still reports how slow they are.
+    best_in_library = fastest_in_library(case, library)
+    record["bestInLibrary"] = None
+    in_library_within_tolerance = False
+    if best_in_library is not None:
+        lib_id, lib_entry = best_in_library
+        in_library_within_tolerance = lib_entry.time_us <= case.best_us * (
+            1 + tolerance
+        )
         record["bestInLibrary"] = {
             "config": identity_record(lib_id),
+            "kernel": lib_entry.kernel,
             "timeUs": rounded(lib_entry.time_us),
             "ratio": rounded(lib_entry.time_us / case.best_us),
-            "withinTolerance": lib_entry.time_us <= case.best_us * (1 + tolerance),
+            "withinTolerance": in_library_within_tolerance,
         }
-    else:
-        record["bestInLibrary"] = None
-    if in_lib:
+    if in_library_within_tolerance:
         record["reason"] = "within tolerance but lost disjoint assignment"
     elif record["sweepBest"]["withinTolerance"]:
         record["reason"] = (
@@ -791,7 +794,6 @@ def selection_document(
     validation_warmup: int,
     kernels_path: str,
     code_object_version: int,
-    validation_rounds: int,
     validation_margin: float,
 ) -> dict:
     """The selection as a document, checked before anything is written."""
@@ -835,7 +837,6 @@ def selection_document(
                 "warmup": validation_warmup,
                 "codeObjectVersion": code_object_version,
                 "performanceReference": "replayed case-best kernel",
-                "rounds": validation_rounds,
                 "margin": validation_margin,
                 "correct": all(v.correct for v in validations.values()),
                 "withinTolerance": all(
@@ -853,15 +854,6 @@ def write_selection_yaml(path: str, document: dict) -> None:
         yaml.safe_dump(
             document, stream, sort_keys=False, width=1000, default_flow_style=None
         )
-
-
-def at_least_two_int(text: str) -> int:
-    value = int(text)
-    if value < 2:
-        raise argparse.ArgumentTypeError(
-            f"must be at least 2 so the timing order alternates, got {value}"
-        )
-    return value
 
 
 def make_parser() -> argparse.ArgumentParser:
@@ -927,14 +919,6 @@ def make_parser() -> argparse.ArgumentParser:
         f"(default: max(sweep settings.warmup, {MIN_VALIDATE_WARMUP}))",
     )
     parser.add_argument(
-        "--validate-rounds",
-        type=at_least_two_int,
-        default=DEFAULT_VALIDATE_ROUNDS,
-        help="alternating timing rounds of the selected and the replayed best "
-        "kernel per case, averaged over all their launches "
-        f"(default {DEFAULT_VALIDATE_ROUNDS})",
-    )
-    parser.add_argument(
         "--validate-margin",
         type=non_negative_finite_float,
         default=DEFAULT_VALIDATE_MARGIN,
@@ -990,7 +974,6 @@ def main() -> int:
             verify_full_max_elems,
             args.code_object_version,
             emitted,
-            args.validate_rounds,
             args.validate_margin,
         )
         selected = selection_document(
@@ -1007,7 +990,6 @@ def main() -> int:
             validation_warmup,
             args.kernels,
             args.code_object_version,
-            args.validate_rounds,
             args.validate_margin,
         )
     except (AssertionError, OSError, RuntimeError, ValueError) as err:

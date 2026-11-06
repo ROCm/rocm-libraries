@@ -124,13 +124,19 @@ serialized per GPU and parallel across GPUs by case; builds overlap the timing.
 
 The clocks of the GPUs are locked for the whole run, builds included, only with
 --require-stable-clocks (see GpuStabilizer), and the sweep aborts if a lock is
-refused. Without the flag nothing is set and no elevated rights are needed;
-amd-smi is still read for the GPU use and process list at selection, for the
-PCI address of every GPU (the GPU ids are HIP ordinals, as in
-HIP_VISIBLE_DEVICES, and are mapped to the amd-smi devices by PCI address, as
-the numbering of amd-smi itself can differ), and for the sclk, mclk and throttle status sampled
-around and during every case. A case with a throttler active is marked
-throttled in its record and counted in casesThrottled.
+refused. The lock needs root: when not root the sweep runs `sudo -v` first, so
+sudo asks for your password on the terminal before anything is built or locked
+(without a terminal, e.g. under an agent, run `sudo -v` first in the same
+terminal: in Claude Code `! sudo -v`), keeps the credentials fresh during the
+run, and restores the prior levels with sudo; if it cannot restore, it prints
+the commands to run and exits nonzero. Without the flag nothing is set and no
+elevated rights are needed; amd-smi is still read for the GPU use and process
+list at selection, for the PCI address of every GPU (the GPU ids are HIP
+ordinals, as in HIP_VISIBLE_DEVICES, and are mapped to the amd-smi devices by
+PCI address, as the numbering of amd-smi itself can differ), and for the sclk,
+mclk and throttle status sampled around and during every case. A case with a
+throttler active is marked throttled in its record and counted in
+casesThrottled.
 """
 
 import argparse
@@ -1222,7 +1228,11 @@ def make_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--require-stable-clocks",
         action="store_true",
-        help="lock the GPU clocks for the run; abort if any GPU cannot be locked",
+        help=(
+            "lock the GPU clocks for the run, through sudo (which asks for your "
+            "password on the terminal first) unless run as root; abort if any "
+            "GPU cannot be locked"
+        ),
     )
     for name in ("iters", "warmup", "refine_top", "refine_iters", "top"):
         parser.add_argument("--" + name.replace("_", "-"), dest=name, type=int)

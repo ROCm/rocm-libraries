@@ -11,7 +11,9 @@ ordinals, as they do on some machines. Without a mapping the ids are the
 indices of the amd-smi processor handles. Reading (use, process list, clocks,
 metrics, PCI address) needs no elevated rights; only setting the performance
 level or determinism mode, which happens only with --require-stable-clocks,
-may.
+needs root. When not root it is done with the amd-smi command through sudo,
+which asks the user for the password on the terminal before anything is
+locked.
 """
 
 import atexit
@@ -19,6 +21,7 @@ import importlib
 import multiprocessing
 import os
 import re
+import shutil
 import signal
 import statistics
 import subprocess
@@ -45,6 +48,9 @@ UNKNOWN_LEVEL = "UNKNOWN"
 # Where the ROCm installs ship the amdsmi python package when it is not on the
 # path of the interpreter.
 AMDSMI_SEARCH_DIRS = ("share/amd_smi",)
+# The sudo timestamp is refreshed this often; well below the default
+# timestamp_timeout of sudo, 5 minutes.
+SUDO_REFRESH_S = 60.0
 
 
 class SweepAbort(Exception):
@@ -450,16 +456,185 @@ def check_same_device(gpu: int, hip_address: str | None) -> None:
         )
 
 
-def set_perf_level(gpu: int, level: str) -> SmiResult:
+def terminal_available() -> bool:
+    """Whether this process has a controlling terminal on which sudo can prompt."""
+    try:
+        fd = os.open("/dev/tty", os.O_RDWR | os.O_NOCTTY)
+    except OSError:
+        return False
+    os.close(fd)
+    return True
+
+
+def find_amd_smi() -> str:
+    """The absolute path of the amd-smi command; absolute because the secure_path
+    of sudo may not contain the bin directory of ROCm."""
+    found = shutil.which("amd-smi")
+    if found:
+        return os.path.abspath(found)
+    roots = [os.environ.get("ROCM_PATH"), "/opt/rocm"]
+    for root in filter(None, roots):
+        path = os.path.join(root, "bin", "amd-smi")
+        if os.access(path, os.X_OK):
+            return os.path.abspath(path)
+    raise SweepAbort("cannot find the amd-smi command; add <rocm>/bin to PATH")
+
+
+def sudo_abort_message(reason: str) -> str:
+    return (
+        "--require-stable-clocks sets the GPU clocks through sudo, which cannot "
+        f"get your credentials ({reason}); nothing was locked. Run `sudo -v` in "
+        "this terminal (in Claude Code: `! sudo -v`), then run the sweep again, "
+        "or drop --require-stable-clocks"
+    )
+
+
+class SudoSession:
+    """The sudo credentials of the user for the privileged amd-smi calls of the
+    clock lock. Only sudo itself prompts for the password, on the terminal; this
+    process never reads, stores or passes it, and every other call is sudo -n,
+    which fails instead of prompting. Only the process that made it uses it."""
+
+    def __init__(
+        self,
+        amd_smi: str,
+        runner=subprocess.run,
+        has_tty=terminal_available,
+        interval: float = SUDO_REFRESH_S,
+    ):
+        self.amd_smi = amd_smi
+        self.runner = runner
+        self.has_tty = has_tty
+        self.interval = interval
+        self.pid = os.getpid()
+        self.stopped = threading.Event()
+        self.thread: threading.Thread | None = None
+
+    def cached(self) -> bool:
+        """Whether sudo has valid credentials, checked without prompting."""
+        try:
+            proc = self.runner(
+                ["sudo", "-n", "-v"],
+                stdin=subprocess.DEVNULL,
+                capture_output=True,
+                text=True,
+                timeout=SMI_TIMEOUT_S,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            return False
+        return proc.returncode == 0
+
+    def acquire(self) -> None:
+        """Makes sure sudo has credentials, asking for the password on the
+        terminal if it has none; aborts if it cannot get them. Never retries."""
+        if self.cached():
+            return
+        if not self.has_tty():
+            raise SweepAbort(sudo_abort_message("no terminal to ask for the password"))
+        log(
+            "--require-stable-clocks: setting the GPU clocks needs root; sudo "
+            "asks for your password"
+        )
+        try:
+            # No stdin, input or capture: sudo inherits the terminal and prompts.
+            proc = self.runner(["sudo", "-v"])
+        except KeyboardInterrupt:
+            raise SweepAbort(sudo_abort_message("the password prompt was cancelled"))
+        except OSError as err:
+            raise SweepAbort(sudo_abort_message(f"cannot run sudo: {err}"))
+        if proc.returncode != 0:
+            raise SweepAbort(sudo_abort_message(f"sudo -v exited with {proc.returncode}"))
+        if not self.cached():
+            raise SweepAbort(
+                sudo_abort_message(
+                    "sudo does not keep the credentials, timestamp_timeout may be 0"
+                )
+            )
+
+    def start_heartbeat(self) -> None:
+        self.thread = threading.Thread(target=self.refresh, daemon=True)
+        self.thread.start()
+
+    def refresh(self) -> None:
+        while not self.stopped.wait(self.interval):
+            if not self.cached():
+                log(
+                    "warning: the sudo credentials expired; the clocks may have "
+                    "to be restored by hand at exit"
+                )
+                return
+
+    def stop_heartbeat(self) -> None:
+        self.stopped.set()
+        if self.thread is not None:
+            self.thread.join(SMI_TIMEOUT_S)
+
+    def command(self, *args: str) -> list[str]:
+        """The command for the user to run, which is printed in messages."""
+        return ["sudo", self.amd_smi, *args]
+
+    def run_amd_smi(self, *args: str) -> SmiResult:
+        """Runs amd-smi through sudo -n; never raises."""
+        if os.getpid() != self.pid:
+            return SmiResult(False, "sudo is used only by the process that acquired it")
+        argv = ["sudo", "-n", self.amd_smi, *args]
+        try:
+            proc = self.runner(
+                argv,
+                stdin=subprocess.DEVNULL,
+                capture_output=True,
+                text=True,
+                timeout=SMI_TIMEOUT_S,
+            )
+        except (OSError, subprocess.TimeoutExpired) as err:
+            return SmiResult(False, f"{type(err).__name__}: {err}")
+        if proc.returncode == 0:
+            return SmiResult(True, "")
+        return SmiResult(
+            False,
+            f"{' '.join(argv)} exited with {proc.returncode}: {last_line(proc)}",
+        )
+
+
+def last_line(proc) -> str:
+    """The last non-empty line of the stderr of a process, else of its stdout."""
+    for text in (proc.stderr, proc.stdout):
+        lines = [line.strip() for line in (text or "").splitlines() if line.strip()]
+        if lines:
+            return lines[-1]
+    return "no output"
+
+
+def make_sudo_session() -> SudoSession | None:
+    """The sudo session for the sets, None as root, which sets in-process."""
+    if os.geteuid() == 0:
+        return None
+    return SudoSession(find_amd_smi())
+
+
+def run_sudo_set(gpu: int, sudo: SudoSession, *args: str) -> SmiResult:
+    bdf = device_bdf(gpu)
+    if bdf is None:
+        return SmiResult(False, f"cannot read the PCI address of {describe(gpu)}")
+    return sudo.run_amd_smi("set", "-g", bdf, *args)
+
+
+def set_perf_level(gpu: int, level: str, sudo: SudoSession | None = None) -> SmiResult:
     smi = get_smi()
     try:
         value = smi.module.AmdSmiDevPerfLevel[level.upper()]
     except KeyError:
         return SmiResult(False, f"unknown performance level {level!r}")
+    if sudo is not None:
+        return run_sudo_set(gpu, sudo, "-l", level.upper())
     return run_smi(smi.module.amdsmi_set_gpu_perf_level, smi.handle(gpu), value)
 
 
-def set_perf_determinism(gpu: int, sclk_mhz: int) -> SmiResult:
+def set_perf_determinism(
+    gpu: int, sclk_mhz: int, sudo: SudoSession | None = None
+) -> SmiResult:
+    if sudo is not None:
+        return run_sudo_set(gpu, sudo, "-d", str(sclk_mhz))
     smi = get_smi()
     return run_smi(
         smi.module.amdsmi_set_gpu_perf_determinism_mode, smi.handle(gpu), sclk_mhz
@@ -525,6 +700,8 @@ class GpuLock:
     mode: str | None = None
     failures: list[str] = field(default_factory=list)
     restored: bool = False
+    # The PCI address, recorded in sudo mode, where the manual commands need it.
+    bdf: str | None = None
 
     @property
     def locked(self) -> bool:
@@ -544,12 +721,26 @@ def raise_exit(signum, frame) -> None:
     sys.exit(128 + signum)
 
 
-def restore_level(lock: GpuLock) -> bool:
+def manual_hint(lock: GpuLock, sudo: SudoSession, *args: str) -> str:
+    """What the user must run, through sudo and by PCI address, which unlike the
+    HIP ordinal always names the device; says so if the address is unknown."""
+    if lock.bdf is None:
+        return f"the PCI address of {describe(lock.gpu)} is unknown, restore it by hand"
+    return "run: " + " ".join(sudo.command(args[0], "-g", lock.bdf, *args[1:]))
+
+
+def reset_hint(lock: GpuLock, sudo: SudoSession | None) -> str:
+    if sudo is None:
+        return f"run: amd-smi reset -g {lock.gpu} --clocks"
+    return manual_hint(lock, sudo, "reset", "--clocks")
+
+
+def restore_level(lock: GpuLock, sudo: SudoSession | None = None) -> bool:
     """Sets the prior performance level of the lock and verifies it by read-back;
     on failure falls back to a reset to auto. True only if the prior level is
     back."""
     gpu, prior = lock.gpu, lock.prior_level
-    result = set_perf_level(gpu, prior)
+    result = set_perf_level(gpu, prior, sudo)
     reason = result.message[:200]
     if result.ok:
         actual = read_perf_level(gpu)
@@ -559,15 +750,15 @@ def restore_level(lock: GpuLock) -> bool:
         reason = f"read back {actual}"
     if prior == AUTO_LEVEL:
         log(
-            f"warning: GPU {gpu}: restoring {prior} failed ({reason}); run "
-            f"amd-smi reset -g {gpu} --clocks"
+            f"warning: GPU {gpu}: restoring {prior} failed ({reason}); "
+            f"{reset_hint(lock, sudo)}"
         )
         return False
     log(f"warning: GPU {gpu}: restoring {prior} failed ({reason}); reset to auto")
-    if not set_perf_level(gpu, AUTO_LEVEL).ok:
+    if not set_perf_level(gpu, AUTO_LEVEL, sudo).ok:
         log(
-            f"warning: GPU {gpu}: the reset failed; run "
-            f"amd-smi reset -g {gpu} --clocks"
+            f"warning: GPU {gpu}: the reset failed; "
+            f"{reset_hint(lock, sudo)}"
         )
     return False
 
@@ -580,7 +771,13 @@ class GpuStabilizer:
 
     Locking is opt-in through require_stable (--require-stable-clocks). Without
     it nothing is set and no elevated rights are needed; amd-smi is still read
-    for the GPU use and for the clock samples of the timed cases.
+    for the GPU use and for the clock samples of the timed cases. With it, when
+    not root, the sets go through sudo -n amd-smi set -g <PCI address>, after
+    sudo -v asked the user for the password on the terminal before anything is
+    locked (the sweep aborts if it cannot); a heartbeat refreshes the sudo
+    timestamp every SUDO_REFRESH_S, and if the credentials expired by the
+    restore, the manual commands are printed and the sweep exits nonzero. As
+    root the amdsmi bindings set in-process.
 
     The lock refuses a GPU whose prior performance level cannot be read, then
     tries the performance determinism mode with the highest sclk and the
@@ -596,18 +793,29 @@ class GpuStabilizer:
         self.locks: dict[int, GpuLock] = {}
         self.previous_sigterm = None
         self.pid: int | None = None
+        self.sudo: SudoSession | None = None
+        self.credentials_expired = False
 
     def __enter__(self):
         if not self.gpus:
             return self
         self.pid = os.getpid()
         if self.require_stable:
-            # Initialized first: atexit runs the handlers last in first out, so
-            # the restore must come after the registration of the shut down.
+            # Initialized first, as it needs no sudo: a failure aborts before
+            # the password is asked.
             get_smi()
-            atexit.register(self.restore)
-        self.previous_sigterm = signal.signal(signal.SIGTERM, raise_exit)
+            self.sudo = make_sudo_session()
+            if self.sudo is not None:
+                # Asked before anything is locked, so that a refusal leaves
+                # nothing to undo; nothing is started if it raises.
+                self.sudo.acquire()
+                self.sudo.start_heartbeat()
         try:
+            if self.require_stable:
+                # atexit runs the handlers last in first out, so the restore
+                # must come after the registration of the shut down in get_smi.
+                atexit.register(self.restore)
+            self.previous_sigterm = signal.signal(signal.SIGTERM, raise_exit)
             self.lock_all()
         except BaseException:
             self.close()
@@ -615,16 +823,27 @@ class GpuStabilizer:
         return self
 
     def __exit__(self, *exception) -> None:
-        self.close()
+        self.close(raise_on_failure=exception[0] is None)
 
-    def close(self) -> None:
+    def close(self, raise_on_failure: bool = False) -> None:
         self.restore()
-        # A failed restore stays registered, so that exit retries it once more.
-        if all(lock.restored or not lock.locked for lock in self.locks.values()):
+        if self.sudo is not None:
+            self.sudo.stop_heartbeat()
+        unrestored = [
+            gpu for gpu, lock in self.locks.items() if lock.locked and not lock.restored
+        ]
+        # A failed restore stays registered, so that exit retries it once more;
+        # with expired sudo credentials a retry cannot succeed.
+        if not unrestored or self.credentials_expired:
             atexit.unregister(self.restore)
         if self.previous_sigterm is not None:
             signal.signal(signal.SIGTERM, self.previous_sigterm)
             self.previous_sigterm = None
+        if unrestored and self.sudo is not None and raise_on_failure:
+            raise SweepAbort(
+                f"the clocks of GPU(s) {unrestored} are still locked; run the "
+                "commands above to restore them"
+            )
 
     def lock_all(self) -> None:
         if not self.require_stable:
@@ -641,6 +860,8 @@ class GpuStabilizer:
     def lock(self, gpu: int) -> GpuLock:
         prior = read_perf_level(gpu)
         lock = GpuLock(gpu, prior)
+        if self.sudo is not None:
+            lock.bdf = device_bdf(gpu)
         # Registered before the first set, so that an interrupt in the middle of
         # the lock still leaves something for restore to undo.
         self.locks[gpu] = lock
@@ -651,9 +872,9 @@ class GpuStabilizer:
         sclk = read_max_sclk(gpu)
         attempts = []
         if sclk is not None:
-            determinism = partial(set_perf_determinism, gpu, sclk)
+            determinism = partial(set_perf_determinism, gpu, sclk, self.sudo)
             attempts.append(("perfdeterminism", DETERMINISM_LEVEL, determinism))
-        high = partial(set_perf_level, gpu, HIGH_LEVEL)
+        high = partial(set_perf_level, gpu, HIGH_LEVEL, self.sudo)
         attempts.append(("perflevel-high", HIGH_LEVEL, high))
         for mode, expected, attempt in attempts:
             if self.try_mode(lock, mode, expected, attempt):
@@ -676,7 +897,7 @@ class GpuStabilizer:
         if actual == expected:
             return True
         lock.failures.append(f"{mode}: the level reads back {actual}, not {expected}")
-        restore_level(lock)
+        restore_level(lock, self.sudo)
         lock.mode = None
         return False
 
@@ -692,10 +913,28 @@ class GpuStabilizer:
         restore failed is retried by the next call."""
         if os.getpid() != self.pid:
             return
-        for lock in reversed(list(self.locks.values())):
-            if not lock.locked or lock.restored:
-                continue
-            lock.restored = restore_level(lock)
+        pending = [
+            lock
+            for lock in reversed(list(self.locks.values()))
+            if lock.locked and not lock.restored
+        ]
+        if not pending:
+            return
+        if self.sudo is not None and not self.sudo.cached():
+            self.credentials_expired = True
+            self.log_manual_restore(pending)
+            return
+        for lock in pending:
+            lock.restored = restore_level(lock, self.sudo)
+
+    def log_manual_restore(self, pending: list[GpuLock]) -> None:
+        """Prints the commands to restore by hand; sudo is never prompted here."""
+        for lock in pending:
+            hint = manual_hint(lock, self.sudo, "set", "-l", str(lock.prior_level))
+            log(
+                f"warning: {describe(lock.gpu)}: cannot restore performance level "
+                f"{lock.prior_level}, the sudo credentials expired; {hint}"
+            )
 
     def summary(self) -> dict:
         records = {gpu: lock.record() for gpu, lock in self.locks.items()}
