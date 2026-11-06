@@ -15,7 +15,6 @@ GlobalParameters:
   DataInitTypeBeta: 2
   BoundsCheck: 0
   KeepBuildTmp: True
-  CpuThreads: 1
   RotatingBufferSize: 0
   Architecture: gfx1250
   ISA: [[12, 5, 0]]
