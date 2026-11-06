@@ -294,7 +294,11 @@ def check_tree(bundle_dir, op_dir, placed, export_dir):
                     f"{sweep_path}:{c['id']} has a tensor name the template lacks"
                 )
                 continue
-            graph_t = remap_graph(graph, uid_map)
+            try:
+                graph_t = remap_graph(graph, uid_map)
+            except ValueError as e:
+                problems.append(f"{sweep_path}:{c['id']} does not remap: {e}")
+                continue
             used = {t["uid"] for t in graph_t.get("tensors", []) if "uid" in t}
             if used & set(c.get(ABSENT_TENSORS_KEY) or []):
                 problems.append(

@@ -246,6 +246,7 @@ def test_lane_over_budget_and_over_working_target():
 
 CLASS_VALUES = {
     "ragged_tensors": {"padded": []},
+    "ragged_stats": {"dense": [], "packed_with_q": ["Stats"]},
     "paged_sides": {"present": ["K", "V"]},
     "page_tables": {"separate": 2, "shared": 1},
     "packed_page_table": {"dense": False, "packed": True},

@@ -550,30 +550,29 @@ A **bundle** is a graph test in `integration-test-bundles/`. A **sweep** is a
 ### 9.1 Which rows a bundle can express
 
 A bundle holds a graph and, for each case, a few fixed values. Some tensor
-contents are also bundle contents: dense page tables, `seq_len` values, block
-masks, descale lists, a caller's dropout mask, and dropout seeds and offsets
-held in device memory. Other exact contents cannot be in a bundle. So a row that
-needs them cannot be a bundle yet. It stays in the generated CSV, and the
+contents are also bundle contents: page tables and the offsets of a packed page
+table, ragged offsets, `seq_len` values, block masks, descale lists, a caller's
+dropout mask, and dropout seeds and offsets held in device memory. A row that
+a bundle cannot express or compare stays in the generated CSV, and the
 selection step (`scripts/sdpa_case_flow_poc/bundles/select_rows.py`) skips it for
 the reasons below.
 
-The first four reasons say that a bundle cannot express the row. The last one
-is an extra exclusion: the row could be a bundle, but the selection step leaves it
-out. The Rows column counts every row that has the reason. A row can have several
+The first three reasons say that a bundle cannot express or compare the row. The
+last one is an extra exclusion: the row could be a bundle, but the selection step
+leaves it out. The Rows column counts every row that has the reason. A row can have several
 reasons, so the counts overlap and do not add up to the number of excluded rows.
 
 | Reason | Why the row is not a bundle | Rows |
 |---|---|---|
-| `ragged_offsets` | Ragged offsets are tensor contents. | 676 |
-| `tensor_overlap` | An output written over an input, or inputs that share memory on a row with paged K and V, need control of the pointers that a bundle does not have. Inputs that share memory on a padded, non-paged row are bundle contents (metadata `aliases`); a view that does not fit inside its owner leaves through the export outcomes. | 126 |
+| `tensor_overlap` | An output written over an input, inputs that share memory on a row with paged K and V, and inputs that share memory on a ragged row need control of the pointers that a bundle does not have. Inputs that share memory on a padded, non-paged row are bundle contents (metadata `aliases`); a view that does not fit inside its owner leaves through the export outcomes. | 310 |
+| `ragged_query_without_tokens` | A ragged Q gives no query token to compare: every sequence length is 0, or the lengths come from the Q offsets and a zero sequence stride makes every offset 0. Its outputs have no element to compare, and a comparison that compares no element fails. | 132 |
 | `arch_dtype` | The number format depends on the GPU (for example fp8 E4M3 becomes E4M3 FNUZ on gfx942), and one graph has one format. | 103 |
-| `page_table_contents` | A packed page table carries a ragged offset, and the harness does not verify ragged graphs. Dense page tables are bundle contents. | 98 |
-| `dropout_without_rng_dump` | Random dropout without an `rng_dump` output has no oracle: the references check random dropout only through the dumped mask. | 58 (10 otherwise expressible) |
+| `dropout_without_rng_dump` | Random dropout without an `rng_dump` output has no oracle: the references check random dropout only through the dumped mask. | 58 (18 otherwise expressible) |
 
 These are the rows that the selection step chooses from the current
-`levels.csv`, which has 35,255 rows. 34,550 rows become bundles and 705 rows
-are excluded. Of the excluded rows, 695 have at least one of the first four
-reasons. The other 10 could be bundles but have only dropout without
+`levels.csv`, which has 35,255 rows. 34,852 rows become bundles and 403 rows
+are excluded. Of the excluded rows, 385 have at least one of the first three
+reasons. The other 18 could be bundles but have only dropout without
 `rng_dump`. A data start past an aligned allocation start (`element_aligned`, `sub_element`) is a bundle
 content: the case's metadata `start_offsets` gives the offset of each such
 tensor. When the case has per-sequence query lengths in a `seq_len_q` tensor,
@@ -586,11 +585,11 @@ filters. To bring a row back, change the filter and regenerate the bundles.
 
 | Tier | All rows | Bundle rows | Sweeps | Largest sweep | Summed `est_seconds` of the bundle rows, gfx942 / gfx950 |
 |---|---|---|---|---|---|
-| quick | 1,461 | 1,412 | 91 | 400 | 49.9 / 38.6 |
-| standard | 8,631 | 8,440 | 270 | 2,142 | 453.2 / 337.9 |
-| comprehensive | 4,070 | 3,966 | 221 | 969 | 1,470.4 / 1,047.4 |
-| full | 21,093 | 20,732 | 647 | 3,755 | 7,265.9 / 5,184.4 |
-| total | 35,255 | 34,550 | 1,229 | | |
+| quick | 1,461 | 1,445 | 120 | 400 | 50.9 / 39.4 |
+| standard | 8,631 | 8,560 | 314 | 2,142 | 457.8 / 341.3 |
+| comprehensive | 4,070 | 4,033 | 264 | 969 | 1,487.4 / 1,059.5 |
+| full | 21,093 | 20,814 | 702 | 3,755 | 7,292.0 / 5,203.0 |
+| total | 35,255 | 34,852 | 1,400 | | |
 
 ### 9.2 How a graph is made from a row
 
@@ -808,8 +807,8 @@ these defects need no skip.
   `support.json` file beside a sweep. It says that an engine supports a case on
   a given GPU ([Support Matrix](../support-matrix.md)). Claims come in a later
   change.
-- 705 rows are not bundles. 695 of them need contents or settings a bundle
-  cannot express (§ 9.1), mostly ragged offsets. The other 10 have random
+- 403 rows are not bundles. 385 of them need settings a bundle cannot express
+  or compare (§ 9.1), mostly tensors that share memory. The other 18 have random
   dropout without `rng_dump`. They are rows of the generated CSV, but no bundle
   holds them.
 - `ASM_SDPA_ENGINE` declines every graph that declares a tensor alignment

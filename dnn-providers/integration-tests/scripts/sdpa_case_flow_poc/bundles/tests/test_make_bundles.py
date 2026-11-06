@@ -87,3 +87,25 @@ def test_main_stops_before_any_import_when_a_graph_differs(tmp_path, monkeypatch
         make_bundles.main()
     assert "unlisted: graph lacks [], signature lacks" in str(stop.value.code)
     assert not work_dir.exists()
+
+
+def test_check_tree_reports_a_link_to_an_unknown_uid(tmp_path):
+    export_dir = tmp_path / "export"
+    tensors = BASE + [{"name": "ragged_offset_q"}]
+    export(export_dir, "linked", tensors)
+    graph_path = export_dir / "linked" / "linked.json"
+    graph = json.loads(graph_path.read_text())
+    graph["tensors"][0]["ragged_offset_tensor_uid"] = 99
+    graph_path.write_text(json.dumps(graph))
+    (export_dir / "linked" / "linked.meta.json").write_text("{}")
+
+    placed = dict(row("linked", "ragged_offset_q"), _topology="RgQ")
+    sweep_dir = tmp_path / "tree" / "full" / "op" / "RgQ"
+    sweep_dir.mkdir(parents=True)
+    template = {"tensors": [dict(t, uid=i) for i, t in enumerate(tensors)]}
+    (sweep_dir / "graph.template.json").write_text(json.dumps(template))
+    sweep = {"import_mode": "grouped", "cases": [{"id": placed["_case_id"]}]}
+    (sweep_dir / "sweep.json").write_text(json.dumps(sweep))
+
+    problems = make_bundles.check_tree(tmp_path / "tree", "op", [placed], export_dir)
+    assert any("does not remap" in p for p in problems), problems

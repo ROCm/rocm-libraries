@@ -9,9 +9,10 @@ Reads levels.csv and never edits it. Writes:
   summary.json    counts per reason and per tier
 
 Exclusion reasons:
-  content reasons     a bundle cannot express the row (exact input contents, an output
-                      written over an input, inputs that share memory in a way the case
-                      builder keeps as separate buffers, arch-dependent dtypes)
+  content reasons     a bundle cannot express the row (an output written over an input,
+                      inputs that share memory in a way the case builder keeps as separate
+                      buffers, arch-dependent dtypes), or its outputs have no element to
+                      compare (a ragged Q that gives no query token)
   dropout_without_rng_dump, reference_declines_descale_non_fp8
                       the extra exclusions. The second one is off by default (--descale-non-fp8-filter
                       turns it on). It takes the clauses of the model's answer-key rule
@@ -56,25 +57,24 @@ DESCALE_AXES = ("descale_q", "descale_k", "descale_v")
 EXPECTED = {
     "rows": 35255,
     "content_reasons": {
-        "ragged_offsets": 676,
-        "page_table_contents": 98,
-        "tensor_overlap": 126,
+        "tensor_overlap": 310,
+        "ragged_query_without_tokens": 132,
         "arch_dtype": 103,
     },
     "extra_of_expressible": {
-        "dropout_without_rng_dump": 10,
+        "dropout_without_rng_dump": 18,
     },
     "per_tier": {
         # rows, bundle rows, strict sweeps, alignment-split sweeps, largest, 1-case, then the summed
         # est_seconds on gfx942 and gfx950 of the expressible rows before the extra exclusions
-        "quick": (1461, 1412, 91, 155, 400, 29, 49.9, 38.6),
-        "standard": (8631, 8440, 270, 490, 2142, 20, 453.2, 337.9),
-        "comprehensive": (4070, 3966, 221, 380, 969, 77, 1470.4, 1047.4),
-        "full": (21093, 20732, 663, 1023, 3755, 61, 7268.4, 5186.2),
+        "quick": (1461, 1445, 120, 184, 400, 56, 50.9, 39.4),
+        "standard": (8631, 8560, 314, 534, 2142, 33, 457.8, 341.3),
+        "comprehensive": (4070, 4033, 264, 423, 969, 116, 1487.4, 1059.5),
+        "full": (21093, 20814, 702, 1062, 3755, 83, 7294.8, 5205.0),
     },
-    "bundle_rows": 34550,
-    "sweeps": 1245,
-    "sweeps_alignment_split": 2048,
+    "bundle_rows": 34852,
+    "sweeps": 1400,
+    "sweeps_alignment_split": 2203,
 }
 
 
@@ -123,18 +123,41 @@ class Model:
     def __init__(self, class_values_path):
         values = json.loads(Path(class_values_path).read_text())
         self.ragged = values["ragged_tensors"]
+        self.ragged_stats = values["ragged_stats"]
         self.paged = values["paged_sides"]
         self.page_tables = values["page_tables"]
         self.packed_table = values["packed_page_table"]
         self.head_dim = values["head_dim"]
+
+    def ragged_offsets(self, row):
+        """The ragged offset tensors of a row's graph, named as the case builder names them."""
+        letters = [
+            letter
+            for letter in self.ragged[row["batch_packing"]]
+            if not (letter == "O" and row["o_packing"] == "padded")
+            and not (letter == "V" and row["v_packing"] == "padded")
+        ]
+        if not letters:
+            return []
+        if (
+            "Q" in letters
+            and row["stats_output"] == "requested"
+            and active(row, "stats_packing")
+        ):
+            letters += self.ragged_stats[row["stats_packing"]]
+        if row["ragged_offset_form"] == "shared_tokens":
+            sides = {
+                "kv_side" if letter in ("K", "V") else "q_side" for letter in letters
+            }
+            return ["ragged_offset_" + side for side in sorted(sides)]
+        return ["ragged_offset_" + letter.lower() for letter in letters]
 
     def tensors(self, row, strict=True):
         """Sorted tuple of the tensor roles of a row's graph, with value-form tags when strict."""
         t = ["q", "k", "v", "o"]
         bv = (lambda n: n + "[by_value]") if strict else (lambda n: n)
 
-        for letter in self.ragged[row["batch_packing"]]:
-            t.append("ragged_offset_" + letter.lower())
+        t += self.ragged_offsets(row)
 
         paged = (
             set() if row["paged_kv"] == "absent" else set(self.paged[row["paged_kv"]])
@@ -229,7 +252,8 @@ def overlap_not_expressible(row, model):
 
     The view is V when head_dim_v <= head_dim_qk, else K; its owner is K, else Q (as in the
     case builder). A view whose dims do not fit inside its owner leaves through the export
-    outcomes. A ragged row whose inputs share memory has its own reason.
+    outcomes. The case builder keeps inputs that share memory on a ragged row as separate
+    buffers.
     """
     overlap = row["tensor_overlap"]
     if overlap == "separate":
@@ -237,7 +261,7 @@ def overlap_not_expressible(row, model):
     if overlap != "inputs_overlap":
         return True
     if active(row, "ragged_offsets"):
-        return False
+        return True
     if row["paged_kv"] != "absent":
         return True
     dqk, dv = head_dims(row, model)
@@ -253,15 +277,30 @@ def overlap_not_expressible(row, model):
     )
 
 
+def ragged_query_without_tokens(row, model):
+    """True when a ragged Q gives no query token to compare.
+
+    Every sequence length is 0, or the lengths come from the Q offsets and a zero sequence
+    stride makes every offset 0.
+    """
+    if "Q" not in model.ragged[row["batch_packing"]]:
+        return False
+    if row["per_seq_len_q"] == "all_zero":
+        return True
+    has_seq_len = (
+        row["sequence_lengths"] in ("variable", "variable_no_flag")
+        or row["paged_kv"] != "absent"
+    )
+    return row["strides_q"] == "zero_broadcast" and not has_seq_len
+
+
 def content_reasons(row, model):
     """Why a bundle cannot express the row; empty when it can."""
     why = []
-    if active(row, "ragged_offsets"):
-        why.append("ragged_offsets")
-    if row["paged_kv"] != "absent" and row["page_table_storage"] == "packed":
-        why.append("page_table_contents")
     if overlap_not_expressible(row, model):
         why.append("tensor_overlap")
+    if ragged_query_without_tokens(row, model):
+        why.append("ragged_query_without_tokens")
     if (
         row["dtype_q"] in ("fp16", "bf16")
         and "differs" in (row["dtype_k_vs_q"], row["dtype_v_vs_q"])

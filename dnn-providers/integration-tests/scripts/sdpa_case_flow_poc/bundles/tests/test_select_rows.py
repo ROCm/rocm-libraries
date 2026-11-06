@@ -24,6 +24,7 @@ CLASS_VALUES = {
         "ragged_q_side": ["Q", "O"],
         "ragged_kv_side": ["K", "V"],
     },
+    "ragged_stats": {"dense": [], "packed_with_q": ["Stats"]},
     "paged_sides": {"present": ["K", "V"], "k_only": ["K"], "v_only": ["V"]},
     "page_tables": {"separate": 2, "shared": 1},
     "packed_page_table": {"dense": False, "packed": True},
@@ -86,10 +87,112 @@ def test_zero_stride_row_is_selected(model, axis):
 
 def test_zero_stride_row_keeps_its_content_reasons(model):
     reasons = select_rows.classify(
-        [row(strides_q="zero_broadcast", ragged_offsets="prefix_sum_of_lengths")],
+        [row(strides_q="zero_broadcast", tensor_overlap="output_overlaps_input")],
         model,
     )
-    assert reasons == [["ragged_offsets"]]
+    assert reasons == [["tensor_overlap"]]
+
+
+RAGGED_ROW = {
+    "batch_packing": "ragged",
+    "ragged_offsets": "gapped",
+    "ragged_offset_form": "per_tensor_elements",
+    "o_packing": "as_q",
+    "v_packing": "as_k",
+    "stats_packing": "-",
+    "per_seq_len_q": "all_full",
+}
+
+
+@pytest.mark.parametrize("layout", ["contiguous", "gapped", "out_of_order"])
+def test_ragged_row_is_selected(model, layout):
+    assert select_rows.classify(
+        [row(**dict(RAGGED_ROW, ragged_offsets=layout))], model
+    ) == [[]]
+
+
+def test_ragged_row_without_query_tokens_is_excluded(model):
+    reasons = select_rows.classify(
+        [row(**dict(RAGGED_ROW, per_seq_len_q="all_zero"))], model
+    )
+    assert reasons == [["ragged_query_without_tokens"]]
+    kv_side = dict(RAGGED_ROW, batch_packing="ragged_kv_side", per_seq_len_q="all_zero")
+    assert select_rows.classify([row(**kv_side)], model) == [[]]
+
+
+def test_zero_stride_ragged_q_without_seq_len_gives_no_query_token(model):
+    zero_q = dict(
+        RAGGED_ROW, strides_q="zero_broadcast", sequence_lengths="lengths_in_offsets"
+    )
+    assert select_rows.classify([row(**zero_q)], model) == [
+        ["ragged_query_without_tokens"]
+    ]
+    with_seq_len = dict(zero_q, sequence_lengths="variable")
+    assert select_rows.classify([row(**with_seq_len)], model) == [[]]
+
+
+def test_ragged_row_whose_inputs_share_memory_is_excluded(model):
+    reasons = select_rows.classify(
+        [row(**dict(RAGGED_ROW, tensor_overlap="inputs_overlap"))], model
+    )
+    assert reasons == [["tensor_overlap"]]
+
+
+def test_packed_page_table_row_is_selected_with_its_offset_tensors(model):
+    paged = row(
+        paged_kv="present",
+        page_table_storage="packed",
+        page_table_sharing="separate",
+        sequence_lengths="variable",
+    )
+    assert select_rows.classify([paged], model) == [[]]
+    roles = model.tensors(paged)
+    assert "page_table_k_offset" in roles and "page_table_v_offset" in roles
+
+
+@pytest.mark.parametrize(
+    "changes, offsets",
+    [
+        (
+            {},
+            [
+                "ragged_offset_k",
+                "ragged_offset_o",
+                "ragged_offset_q",
+                "ragged_offset_v",
+            ],
+        ),
+        (
+            {"o_packing": "padded", "v_packing": "padded"},
+            ["ragged_offset_k", "ragged_offset_q"],
+        ),
+        (
+            {"stats_output": "requested", "stats_packing": "packed_with_q"},
+            [
+                "ragged_offset_k",
+                "ragged_offset_o",
+                "ragged_offset_q",
+                "ragged_offset_stats",
+                "ragged_offset_v",
+            ],
+        ),
+        (
+            {"ragged_offset_form": "shared_tokens"},
+            ["ragged_offset_kv_side", "ragged_offset_q_side"],
+        ),
+        (
+            {"batch_packing": "ragged_kv_side", "ragged_offset_form": "shared_tokens"},
+            ["ragged_offset_kv_side"],
+        ),
+        (
+            {"batch_packing": "ragged_q_side", "o_packing": "padded"},
+            ["ragged_offset_q"],
+        ),
+    ],
+)
+def test_ragged_offset_roles_follow_the_case_builder_names(model, changes, offsets):
+    roles = model.tensors(row(**dict(RAGGED_ROW, **changes)))
+    assert sorted(r for r in roles if r.startswith("ragged_offset_")) == offsets
 
 
 def test_random_dropout_without_rng_dump_is_still_excluded(model):
@@ -146,5 +249,5 @@ def test_every_expressible_zero_stride_row_of_the_committed_csv_is_selected(
         if not select_rows.content_reasons(r, model)
         and not select_rows.extra_reasons(r)
     ]
-    assert len(expressible) == 54
+    assert len(expressible) == 106
     assert all(not w for _, w in expressible)

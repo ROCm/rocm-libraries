@@ -61,7 +61,7 @@ def main():
 
     ka, kb = cases(args.a), cases(args.b)
     common = sorted(ka & kb)
-    raw_diff, canon_diff = [], []
+    raw_diff, canon_diff, remap_errors = [], [], []
     for key in common:
         same_raw = all(
             (args.a / key / n).read_bytes() == (args.b / key / n).read_bytes()
@@ -69,7 +69,12 @@ def main():
         )
         if not same_raw:
             raw_diff.append(key)
-            if canonical(args.a, key) != canonical(args.b, key):
+            try:
+                same_canonical = canonical(args.a, key) == canonical(args.b, key)
+            except ValueError as e:
+                remap_errors.append(f"{key}: {e}")
+                same_canonical = False
+            if not same_canonical:
                 canon_diff.append(key)
     report = {
         "a": str(args.a),
@@ -85,6 +90,7 @@ def main():
         "canonical_different": len(canon_diff),
         "raw_different_examples": raw_diff[:20],
         "canonical_different_examples": canon_diff[:20],
+        "remap_errors": remap_errors[:20],
     }
     if args.outcomes:
         oa, ob = outcomes(args.outcomes[0]), outcomes(args.outcomes[1])
@@ -95,7 +101,8 @@ def main():
     ok = not canon_diff and ka == kb and not report.get("outcome_differences")
     print(
         f"compare_exports: {len(common)} compared; raw identical {report['raw_identical']},"
-        f" raw different {len(raw_diff)}; canonical different {len(canon_diff)};"
+        f" raw different {len(raw_diff)}; canonical different {len(canon_diff)}"
+        f" ({len(remap_errors)} do not remap);"
         f" only in a {len(ka - kb)}, only in b {len(kb - ka)}; {'OK' if ok else 'DIFFERENT'}",
         file=sys.stderr,
     )

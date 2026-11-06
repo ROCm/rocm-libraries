@@ -25,6 +25,7 @@ CLASS_VALUES = {
         "ragged_q_side": ["Q", "O"],
         "ragged_kv_side": ["K", "V"],
     },
+    "ragged_stats": {"dense": [], "packed_with_q": ["Stats"]},
     "paged_sides": {"present": ["K", "V"], "k_only": ["K"], "v_only": ["V"]},
     "page_tables": {"separate": 2, "shared": 1},
     "packed_page_table": {"dense": False, "packed": True},
@@ -35,6 +36,11 @@ CLASS_VALUES = {
 BASE_ROW = {
     "level": "standard",
     "batch_packing": "padded",
+    "ragged_offset_form": "-",
+    "o_packing": "-",
+    "v_packing": "-",
+    "stats_packing": "-",
+    "per_seq_len_q": "-",
     "paged_kv": "absent",
     "page_table_storage": "-",
     "page_table_sharing": "-",
@@ -393,3 +399,17 @@ def test_larger_signatures_are_placed_first_whatever_their_roles_sort_as():
     large = ("k", "o", "q", "v", "w_extra")
     assert small < large
     assert topology.superset_map([small, large]) == {small: large, large: large}
+
+
+def test_every_ragged_offset_role_has_a_token():
+    sig = (
+        "k",
+        "o",
+        "q",
+        "ragged_offset_kv_side",
+        "ragged_offset_q_side",
+        "v",
+    )
+    assert topology.topology_name(sig) == "RgQs_RgKvs"
+    sig = ("k", "o", "q", "ragged_offset_q", "ragged_offset_stats", "stats", "v")
+    assert topology.topology_name(sig) == "RgQ_RgSt_Stats"

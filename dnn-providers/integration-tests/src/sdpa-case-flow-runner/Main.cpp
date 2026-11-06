@@ -12,7 +12,7 @@
 // With --export-graphs DIR --arch X the runner loads no plugin, creates no handle and runs
 // nothing. It writes each row's graph JSON and a bundle metadata sidecar under DIR, and one
 // JSON line per row with the export outcome. With --arch X,Y a row whose graph differs between
-// the archs is written once per arch, and the metadata of each copy names its arch.
+// the archs is an export error.
 
 #include <algorithm>
 #include <array>
@@ -168,8 +168,7 @@ void printUsage(std::ostream& os)
           "Export mode (no plugin, no handle, no execution):\n"
           "  --export-graphs DIR           write DIR/<case_key>/<case_key>.json and .meta.json\n"
           "  --arch GFX[,GFX...]           base archs the graphs are built for (required); a row\n"
-          "                                whose graph differs between them is written once per\n"
-          "                                arch as DIR/<case_key>_<arch>/, with archs [<arch>]\n"
+          "                                whose graph differs between them is an export error\n"
           "  --source-sha256 HEX           sha256 of the case CSV the input rows come from "
           "(required)\n";
 }
@@ -1059,6 +1058,8 @@ struct GraphTensors
     std::set<int64_t> outputs;
 };
 
+// Each tensor's ragged offset tensor is collected with the tensor itself. Before serialisation,
+// outputs that the frontend created can share one uid, so the map keeps only one of them.
 GraphTensors collectGraphTensors(hipdnn_frontend::graph::Graph& graph)
 {
     GraphTensors found;
@@ -1066,6 +1067,11 @@ GraphTensors collectGraphTensors(hipdnn_frontend::graph::Graph& graph)
         if(attr != nullptr && !attr->get_is_virtual())
         {
             found.attrs.emplace(attr->get_uid(), attr);
+            const auto& offset = attr->get_ragged_offset();
+            if(offset != nullptr && !offset->get_is_virtual())
+            {
+                found.attrs.emplace(offset->get_uid(), offset);
+            }
         }
     };
     graph.visit([&](const hipdnn_frontend::graph::INode& node) {
@@ -1082,10 +1088,6 @@ GraphTensors collectGraphTensors(hipdnn_frontend::graph::Graph& graph)
             add(attr);
         }
     });
-    for(const auto& [uid, attr] : std::map<int64_t, TensorPtr>(found.attrs))
-    {
-        add(attr->get_ragged_offset());
-    }
     return found;
 }
 
@@ -1428,11 +1430,10 @@ std::vector<it::OutputLiveRows>
     return rows;
 }
 
-// The matching-infinities validator has no device implementation, so stats outputs are
-// compared on the host whatever `site` is. A ragged output is compared through a ragged view on
-// the host: rows past each sequence's live tokens are not compared, as in the bundle harness. So
-// is each output of `liveRows` that the harness can resolve against the run's tensors; the others
-// are compared whole and named in `live_rows_unapplied`.
+// Stats outputs are compared on the host whatever `site` is. A ragged output is compared through a
+// ragged view on the host: rows past each sequence's live tokens are not compared, as in the bundle
+// harness. So is each output of `liveRows` that the harness can resolve against the run's tensors;
+// the others are compared whole and named in `live_rows_unapplied`.
 Comparison compareBundles(const std::string& against,
                           const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper& wrapper,
                           const std::vector<int64_t>& outputUids,
@@ -2379,15 +2380,24 @@ constexpr const char* EXPORT_REFERENCE_SOURCE
       "test-plans/sdpa-fwd/cases.csv";
 
 // The contents a bundle carries for these graphs: a fixed attn_scale, integer sequence lengths,
-// block masks, dense page tables and device-memory dropout seeds and offsets, and real descale
-// lists and dropout masks. Every other content keeps the row out of bundles; a packed page table
-// has a ragged offset, which is such a content.
+// block masks, page tables, device-memory dropout seeds and offsets, ragged offsets and packed
+// page-table offsets, and real descale lists and dropout masks. Every other content keeps the
+// row out of bundles. A bundle writes each offset list as exact values, so it must not repeat.
 bool isBundleContent(const std::string& name, const sdpa_case_flow::Contents& contents)
 {
     const auto* reals = std::get_if<std::vector<double>>(&contents.values);
     if(name == FIXED_CONTENT_NAME)
     {
         return reals != nullptr && reals->size() == 1;
+    }
+    const auto endsWith = [&name](const std::string& suffix) {
+        return name.size() >= suffix.size()
+               && name.compare(name.size() - suffix.size(), suffix.size(), suffix) == 0;
+    };
+    if(name.rfind("ragged_offset_", 0) == 0
+       || (name.rfind("page_table_", 0) == 0 && endsWith("_offset")))
+    {
+        return reals == nullptr && !contents.repeat;
     }
     if(name == "seq_len_q" || name == "seq_len_kv" || name == "block_mask" || name == "page_table_k"
        || name == "page_table_v" || name == "page_table_kv" || name == "dropout_seed"
@@ -2437,6 +2447,42 @@ bool liveLengthsUsable(const sdpa_case_flow::BuiltCase& built,
         anyLive = anyLive || length > 0;
     }
     return anyLive;
+}
+
+// True when the graph's Q is ragged and gives no query token to compare: the seq_len_q contents
+// are all 0, or, without seq_len_q, every offset of Q is the same (the lengths come from the
+// offset differences; a zero sequence stride also makes every offset 0). A ragged output or a
+// live-row output of such a case has no element to compare, and a comparison that compares no
+// element fails.
+bool raggedQueryHasNoToken(const sdpa_case_flow::BuiltCase& built, const GraphTensors& tensors)
+{
+    const auto allEqual = [&built](const std::string& name, std::optional<int64_t> value) {
+        const auto found = built.contents.find(name);
+        if(found == built.contents.end())
+        {
+            return false;
+        }
+        const auto* integers = std::get_if<std::vector<int64_t>>(&found->second.values);
+        if(integers == nullptr || integers->empty())
+        {
+            return false;
+        }
+        const int64_t first = value.value_or(integers->front());
+        return std::all_of(
+            integers->begin(), integers->end(), [first](int64_t v) { return v == first; });
+    };
+    for(const auto& [uid, attr] : tensors.attrs)
+    {
+        if(attr->get_name() == "q" && attr->get_ragged_offset() != nullptr)
+        {
+            if(built.contents.count("seq_len_q") != 0)
+            {
+                return allEqual("seq_len_q", 0);
+            }
+            return allEqual(attr->get_ragged_offset()->get_name(), std::nullopt);
+        }
+    }
+    return false;
 }
 
 struct ExportResult
@@ -2537,14 +2583,11 @@ ExportResult prepareCase(const CaseInput& input,
 
         result.stage = "contents";
         const auto graphTensors = collectGraphTensors(graph);
-        for(const auto& [uid, attr] : graphTensors.attrs)
+        if(raggedQueryHasNoToken(built, graphTensors))
         {
-            if(attr->get_ragged_offset() != nullptr)
-            {
-                return fail("content-not-expressible",
-                            "ragged tensor " + attr->get_name()
-                                + ": the harness does not verify ragged graphs");
-            }
+            return fail("content-not-expressible",
+                        "ragged Q gives no query token: its seq_len_q values are all 0 or its "
+                        "offsets are all equal, so no output element is compared");
         }
         const auto leafInputs = leafInputUids(graphTensors);
         it::InputFillRecipes recipes;
@@ -2819,8 +2862,8 @@ bool writeCase(const std::string& exportDir,
            && writeText(caseDir / (caseId + ".meta.json"), prepared.meta.dump(2) + "\n");
 }
 
-// Builds the row for every export arch. A row whose graph or metadata differs between the archs
-// is written once per arch as <case_key>_<arch>, and its metadata limits it to that arch.
+// Builds the row for every export arch and writes it once. A row whose graph or metadata differs
+// between the archs is an export error.
 ExportResult exportCase(const CaseInput& input,
                         const Options& opts,
                         const sdpa_case_flow::ClassValues& values)
@@ -2853,39 +2896,24 @@ ExportResult exportCase(const CaseInput& input,
         // Compare the serialised text: a NaN value is not equal to itself as a JSON number.
         const auto firstGraph = graphByTensorName(prepared.front().graph).dump();
         const auto firstMeta = metaByTensorName(prepared.front()).dump();
-        const bool perArch
-            = std::any_of(prepared.begin() + 1, prepared.end(), [&](const PreparedCase& other) {
-                  return metaByTensorName(other).dump() != firstMeta
-                         || graphByTensorName(other.graph).dump() != firstGraph;
-              });
-
-        std::vector<std::string> caseIds;
-        if(perArch)
+        for(size_t i = 1; i < prepared.size(); ++i)
         {
-            for(size_t i = 0; i < prepared.size(); ++i)
+            if(metaByTensorName(prepared[i]).dump() != firstMeta
+               || graphByTensorName(prepared[i].graph).dump() != firstGraph)
             {
-                auto& meta = prepared[i].meta;
-                meta["format_version"] = std::max(meta["format_version"].get<int>(), 2);
-                meta["archs"] = nlohmann::json::array({opts.exportArchs[i]});
-                caseIds.push_back(caseKey + "_" + opts.exportArchs[i]);
-            }
-        }
-        else
-        {
-            prepared.resize(1);
-            caseIds.push_back(caseKey);
-        }
-        for(size_t i = 0; i < prepared.size(); ++i)
-        {
-            if(!writeCase(opts.exportDir, caseIds[i], prepared[i]))
-            {
-                result.outcome = "write-error";
-                result.message
-                    = "cannot write the files of " + caseIds[i] + " under " + opts.exportDir;
+                result.outcome = "export-error";
+                result.message = "the graph or metadata of " + opts.exportArchs[i]
+                                 + " differs from that of " + opts.exportArchs.front();
                 return result;
             }
         }
-        result.caseIds = std::move(caseIds);
+        if(!writeCase(opts.exportDir, caseKey, prepared.front()))
+        {
+            result.outcome = "write-error";
+            result.message = "cannot write the files of " + caseKey + " under " + opts.exportDir;
+            return result;
+        }
+        result.caseIds = {caseKey};
     }
     catch(const std::exception& e)
     {
