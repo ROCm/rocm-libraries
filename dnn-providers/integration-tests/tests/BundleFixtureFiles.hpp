@@ -9,16 +9,9 @@
 #include <filesystem>
 #include <fstream>
 #include <memory>
+#include <nlohmann/json.hpp>
 #include <optional>
 #include <set>
-#include <string>
-#include <utility>
-#include <variant>
-#include <vector>
-
-#include <gtest/gtest.h>
-#include <hipdnn_test_sdk/utilities/detail/FlatbufferTensorAttributesUtils.hpp>
-#include <nlohmann/json.hpp>
 
 #include "harness/VariantPack.hpp"
 #include "harness/bundle/IntegrationTestBundle.hpp"

@@ -10,6 +10,8 @@
  */
 #include "rocke/helper_rocke.helpers.loads.h"
 
+#include <string.h>
+
 #include "rocke/ir_internal.h" /* rocke_i_set_err */
 
 /* ============================================================================
@@ -630,6 +632,87 @@ void rocke_coalesced_tile_loader_issue_slots(rocke_ir_builder_t* b,
         staged->vecs[e].v = v;
     }
     staged->count = count;
+}
+
+void rocke_coalesced_tile_loader_load_async_to_lds(rocke_ir_builder_t* b,
+                                                   const rocke_coalesced_tile_loader_t* self,
+                                                   rocke_value_t* tid,
+                                                   rocke_value_t* smem_dst,
+                                                   rocke_loads_descriptor_fn descriptor,
+                                                   void* descriptor_user,
+                                                   rocke_value_t* ptr,
+                                                   rocke_value_t* num_bytes,
+                                                   int coherency)
+{
+    if(b != NULL && b->status != ROCKE_OK)
+        return;
+    if(self == NULL || descriptor == NULL || ptr == NULL || smem_dst == NULL || num_bytes == NULL)
+    {
+        rocke_i_set_err(b, ROCKE_ERR_VALUE, "load_async_to_lds: NULL argument");
+        return;
+    }
+    if(self->vector_axis_row)
+    {
+        rocke_i_set_err(b,
+                        ROCKE_ERR_VALUE,
+                        "CoalescedTileLoader.load_async_to_lds supports only vector_axis='col' "
+                        "(the copy cannot transpose on store)");
+        return;
+    }
+    /* This port loads 16-bit elements (see slot_offsets). */
+    const int width = self->load_vec * 2;
+    if(width != 4 && width != 8 && width != 16)
+    {
+        rocke_i_set_err(b,
+                        ROCKE_ERR_VALUE,
+                        "global_load_async_to_lds moves 4, 8 or 16 bytes per lane; a "
+                        "%d x 2 B chunk is %d B",
+                        self->load_vec,
+                        width);
+        return;
+    }
+
+    /* Python: zero = b.zero_vec(self.elem_dtype, self.load_vec). The C loader
+     * carries no elem_dtype, so the zero takes the destination LDS tile's
+     * element type (f16 or bf16: the 16-bit elements this port loads). */
+    const rocke_type_t* lds_elem
+        = (smem_dst->type != NULL && smem_dst->type->kind == ROCKE_TYPE_SMEM) ? smem_dst->type->elem
+                                                                              : NULL;
+    if(lds_elem == NULL
+       || (strcmp(lds_elem->name, "f16") != 0 && strcmp(lds_elem->name, "bf16") != 0))
+    {
+        rocke_i_set_err(b,
+                        ROCKE_ERR_VALUE,
+                        "load_async_to_lds: the LDS tile must hold f16 or bf16 (got %s)",
+                        lds_elem != NULL ? lds_elem->name : "a non-LDS value");
+        return;
+    }
+    rocke_value_t* zero = rocke_b_zero_vec(b, lds_elem, self->load_vec);
+    rocke_value_t* c_elem_bytes = rocke_b_const_i32(b, 2);
+    rocke_ctl_staged_t slots;
+    rocke_coalesced_tile_loader_plan_slots(b, self, tid, &slots);
+    for(int e = 0; e < slots.count; ++e)
+    {
+        rocke_value_t* idx[2];
+        idx[0] = slots.vecs[e].row;
+        idx[1] = slots.vecs[e].col;
+        /* Python: off_elems, valid = descriptor(b, row, col) */
+        rocke_value_t* valid = NULL;
+        rocke_value_t* off_elems = descriptor(b, idx[0], idx[1], &valid, descriptor_user);
+        /* Python: in_bounds = b.cmp_ult(b.mul(off_elems, c_elem_bytes), num_bytes)
+         * -- unsigned, as the buffer resource's range check: a byte offset
+         * at or past 2 GiB (negative as i32) is out of range, not below. */
+        rocke_value_t* off_bytes = rocke_b_mul(b, off_elems, c_elem_bytes);
+        rocke_value_t* in_bounds = rocke_b_cmp_ult(b, off_bytes, num_bytes);
+        valid = (valid == NULL) ? in_bounds : rocke_b_land(b, valid, in_bounds);
+        rocke_if_else_t ie = rocke_b_scf_if_else(b, valid);
+        rocke_b_region_enter(b, ie.then_region);
+        rocke_b_global_load_async_to_lds(b, ptr, off_elems, smem_dst, idx, 2, width, coherency, 0);
+        rocke_b_region_leave(b);
+        rocke_b_region_enter(b, ie.else_region);
+        rocke_b_smem_store_vN_f16(b, smem_dst, idx, 2, zero, self->load_vec);
+        rocke_b_region_leave(b);
+    }
 }
 
 /* ============================================================================
