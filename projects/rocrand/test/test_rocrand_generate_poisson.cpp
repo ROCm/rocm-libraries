@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -26,11 +26,20 @@
 #include "test_common.hpp"
 #include "test_rocrand_common.hpp"
 
+#include <cstring>
+#include <limits>
 #include <random>
 #include <vector>
 
 class rocrand_generate_poisson_tests : public ::testing::TestWithParam<rocrand_rng_type>
 {};
+
+const double invalid_lambdas[] = {0.0,
+                                  -0.0,
+                                  -1.0,
+                                  -std::numeric_limits<double>::infinity(),
+                                  std::numeric_limits<double>::infinity(),
+                                  std::numeric_limits<double>::quiet_NaN()};
 
 template<typename T, typename GenerateFunc>
 void test_generate(GenerateFunc generate_func)
@@ -78,13 +87,24 @@ void test_out_of_range(GenerateFunc generate_func)
     rocrand_generator generator;
     ROCRAND_CHECK(rocrand_create_generator(&generator, rng_type));
 
-    const size_t size   = 256;
-    double       lambda = 0.0;
+    const size_t size = 256;
     T*           data;
     HIP_CHECK(hipMallocHelper(&data, size * sizeof(T)));
+    HIP_CHECK(hipMemset(data, 0xAB, size * sizeof(T)));
     HIP_CHECK(hipDeviceSynchronize());
 
-    EXPECT_EQ(generate_func(generator, data, size, lambda), ROCRAND_STATUS_OUT_OF_RANGE);
+    for(const double lambda : invalid_lambdas)
+    {
+        SCOPED_TRACE(testing::Message() << "with lambda = " << lambda);
+        EXPECT_EQ(generate_func(generator, data, size, lambda), ROCRAND_STATUS_OUT_OF_RANGE);
+    }
+
+    // The output must be left untouched
+    std::vector<T> h_data(size);
+    HIP_CHECK(hipMemcpy(h_data.data(), data, size * sizeof(T), hipMemcpyDeviceToHost));
+    std::vector<T> expected(size);
+    std::memset(expected.data(), 0xAB, size * sizeof(T));
+    EXPECT_EQ(h_data, expected);
 
     HIP_CHECK(hipFree(data));
     ROCRAND_CHECK(rocrand_destroy_generator(generator));
@@ -175,6 +195,32 @@ TEST(rocrand_generate_poisson_tests, neg_test)
 
     EXPECT_EQ(rocrand_generate_poisson(generator, static_cast<unsigned int*>(data), size, lambda),
               ROCRAND_STATUS_NOT_CREATED);
+}
+
+TEST(rocrand_generate_poisson_tests, create_poisson_distribution_out_of_range_test)
+{
+    EXPECT_EQ(rocrand_create_poisson_distribution(100.0, nullptr), ROCRAND_STATUS_OUT_OF_RANGE);
+
+    for(const double lambda : invalid_lambdas)
+    {
+        SCOPED_TRACE(testing::Message() << "with lambda = " << lambda);
+        rocrand_discrete_distribution distribution = nullptr;
+        EXPECT_EQ(rocrand_create_poisson_distribution(lambda, &distribution),
+                  ROCRAND_STATUS_OUT_OF_RANGE);
+    }
+}
+
+TEST(rocrand_generate_poisson_tests, create_discrete_distribution_out_of_range_test)
+{
+    const double probabilities[] = {0.1, 0.2, 0.3, 0.4};
+
+    rocrand_discrete_distribution distribution = nullptr;
+    EXPECT_EQ(rocrand_create_discrete_distribution(nullptr, 4, 0, &distribution),
+              ROCRAND_STATUS_OUT_OF_RANGE);
+    EXPECT_EQ(rocrand_create_discrete_distribution(probabilities, 0, 0, &distribution),
+              ROCRAND_STATUS_OUT_OF_RANGE);
+    EXPECT_EQ(rocrand_create_discrete_distribution(probabilities, 4, 0, nullptr),
+              ROCRAND_STATUS_OUT_OF_RANGE);
 }
 
 TEST_P(rocrand_generate_poisson_tests, out_of_range_test)

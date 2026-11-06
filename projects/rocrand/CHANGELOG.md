@@ -12,6 +12,9 @@ Documentation for rocRAND is available at
 ### Resolved Issues
 
 * Fixed race condition inside `poisson` distribution.
+* `rocrand_generate_poisson` and `rocrand_create_poisson_distribution` now return `ROCRAND_STATUS_OUT_OF_RANGE` for NaN and infinite `lambda` instead of crashing or returning success.
+* `rocrand_create_discrete_distribution` now returns `ROCRAND_STATUS_OUT_OF_RANGE` for a null `probabilities` pointer instead of crashing.
+* Fixed a crash in `rocrand_destroy_generator` for non-blocking host generators with queued Poisson generation. Destroying the generator now waits for the queued work.
 
 
 ## rocRAND 5.2.0 for ROCm 10.2.0

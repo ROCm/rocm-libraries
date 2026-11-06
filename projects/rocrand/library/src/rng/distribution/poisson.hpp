@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -244,6 +244,16 @@ public:
 
     ~poisson_distribution_manager()
     {
+        if constexpr(!System::is_device())
+        {
+            // Host-side tables are freed with delete[], which does not wait for queued
+            // host functions (update_discrete_distribution and generation kernels) that
+            // still use them.
+            if(m_initialized)
+            {
+                ROCRAND_HIP_FATAL_ASSERT(hipDeviceSynchronize());
+            }
+        }
         factory_t::deallocate(m_distribution);
         if constexpr((Method & DISCRETE_METHOD_ALIAS) != 0)
         {

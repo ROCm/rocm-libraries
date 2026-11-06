@@ -546,7 +546,7 @@ rocrand_status ROCRANDAPI rocrand_generate_log_normal_half(
  * \return
  * - ROCRAND_STATUS_NOT_CREATED if the generator wasn't created \n
  * - ROCRAND_STATUS_LAUNCH_FAILURE if a HIP kernel launch failed \n
- * - ROCRAND_STATUS_OUT_OF_RANGE if lambda is non-positive \n
+ * - ROCRAND_STATUS_OUT_OF_RANGE if lambda is non-positive, infinite or NaN \n
  * - ROCRAND_STATUS_LENGTH_NOT_MULTIPLE if \p n is not a multiple of the dimension
  * of used quasi-random generator \n
  * - ROCRAND_STATUS_SUCCESS if random numbers were successfully generated \n
@@ -740,7 +740,7 @@ rocrand_status ROCRANDAPI rocrand_get_version(int* version);
  * \return
  * - ROCRAND_STATUS_ALLOCATION_FAILED if memory could not be allocated \n
  * - ROCRAND_STATUS_OUT_OF_RANGE if \p discrete_distribution pointer was null \n
- * - ROCRAND_STATUS_OUT_OF_RANGE if lambda is non-positive \n
+ * - ROCRAND_STATUS_OUT_OF_RANGE if lambda is non-positive, infinite or NaN \n
  * - ROCRAND_STATUS_SUCCESS if the histogram was constructed successfully \n
  */
 rocrand_status ROCRANDAPI rocrand_create_poisson_distribution(
@@ -761,6 +761,7 @@ rocrand_status ROCRANDAPI rocrand_create_poisson_distribution(
  * \return
  * - ROCRAND_STATUS_ALLOCATION_FAILED if memory could not be allocated \n
  * - ROCRAND_STATUS_OUT_OF_RANGE if \p discrete_distribution pointer was null \n
+ * - ROCRAND_STATUS_OUT_OF_RANGE if \p probabilities pointer was null \n
  * - ROCRAND_STATUS_OUT_OF_RANGE if \p size was zero \n
  * - ROCRAND_STATUS_SUCCESS if the histogram was constructed successfully \n
  */

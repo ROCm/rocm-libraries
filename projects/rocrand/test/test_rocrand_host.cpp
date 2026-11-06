@@ -174,6 +174,30 @@ TEST_P(rocrand_generate_host_test, int_test)
     test_int(get_generator(), 11111);
 }
 
+TEST_P(rocrand_generate_host_test, destroy_without_sync_test)
+{
+    // Queue work and destroy the generator immediately; destroy must wait for the queued
+    // work instead of freeing state that it still uses.
+    const size_t              test_size = 1 << 20;
+    std::vector<float>        normal_results(test_size);
+    std::vector<unsigned int> poisson_results(test_size);
+    for(const double lambda : {10.0, 1000.0})
+    {
+        SCOPED_TRACE(testing::Message() << "with lambda = " << lambda);
+        rocrand_generator generator = get_generator();
+        ROCRAND_CHECK(rocrand_generate_normal(generator,
+                                              normal_results.data(),
+                                              normal_results.size(),
+                                              0.0f,
+                                              1.0f));
+        ROCRAND_CHECK(rocrand_generate_poisson(generator,
+                                               poisson_results.data(),
+                                               poisson_results.size(),
+                                               lambda));
+        ROCRAND_CHECK(rocrand_destroy_generator(generator));
+    }
+}
+
 TEST_P(rocrand_generate_host_test, int_test_large)
 {
     ROCRAND_SKIP_SLOW_TEST_IF_NOT_ENABLED();
