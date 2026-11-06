@@ -606,6 +606,31 @@ inline std::map<std::string, int> initArchCaps(const IsaVersion& isaVersion)
     rv["TransOpWait"]        = checkInList(isaVersion, {{9, 4, 2}, {9, 5, 0}, {12, 5, 0}});
     rv["SDWAWait"]           = checkInList(isaVersion, {{9, 4, 2}, {9, 5, 0}, {12, 5, 0}});
     rv["VgprBank"]           = checkInList(isaVersion[0], {10, 11, 12});
+
+    // VOPD dual issue as modelled by VDualOp (RDNA3/3.5 ISA 7.6, RDNA4 ISA 7.8).
+    // An explicit list. CDNA5 (gfx1250) also has VOPD but is not modelled yet.
+    rv["HasVOPD"] = checkInList(isaVersion,
+                                {{11, 0, 0},
+                                 {11, 0, 1},
+                                 {11, 0, 2},
+                                 {11, 0, 3},
+                                 {11, 5, 0},
+                                 {11, 5, 1},
+                                 {11, 5, 2},
+                                 {11, 5, 3},
+                                 {12, 0, 0},
+                                 {12, 0, 1}});
+    // Family rules, keyed to the modelled families only.
+    bool vopdRdna3 = rv["HasVOPD"] && isaVersion[0] == 11;
+    bool vopdRdna4 = rv["HasVOPD"] && isaVersion[0] == 12 && isaVersion[1] == 0;
+    // RDNA4: SRC0X/SRC0Y (or VSRC1X/VSRC1Y) may be the same VGPR.
+    rv["VOPDSharedSrcVgpr"] = vopdRdna4;
+    // RDNA3/3.5: both halves read old values, so X may write a source of Y.
+    // RDNA4 forbids it (Y may still write a source of X).
+    rv["VOPDXMayWriteYSrc"] = vopdRdna3;
+    // RDNA4 spells the VOPD max/min as v_dual_max_num_f32/v_dual_min_num_f32.
+    rv["VOPDMaxMinNum"] = vopdRdna4;
+
     rv["DSLow16NotPreserve"] = isaVersion[0] == 12 || checkInList(isaVersion, {{11, 7, 0}, {11, 7, 1}});
     rv["WorkGroupIdFromTTM"] = isaVersion[0] == 12;
     rv["NoSDWA"]             = checkInList(isaVersion[0], {11, 12});

@@ -27,6 +27,7 @@
 #include <nanobind/stl/shared_ptr.h>
 #include <nanobind/stl/string.h>
 #include <nanobind/stl/variant.h>
+#include <nanobind/stl/vector.h>
 
 namespace nb = nanobind;
 
@@ -1461,6 +1462,49 @@ void common_inst(nb::module_ m_common)
              nb::arg("comment") = "")
         .def("__deepcopy__",
              [](const rocisa::VDualFMACF32& self, nb::dict&) { return new rocisa::VDualFMACF32(self); });
+
+    nb::class_<rocisa::VDualOp, rocisa::CommonInstruction>(m_common, "VDualOp")
+        .def(nb::init<const std::string&,
+                      const std::shared_ptr<rocisa::Container>&,
+                      const InstructionInput&,
+                      const InstructionInput&,
+                      const std::string&,
+                      const std::shared_ptr<rocisa::Container>&,
+                      const InstructionInput&,
+                      const InstructionInput&,
+                      const std::string&>(),
+             nb::arg("opX"),
+             nb::arg("dstX"),
+             nb::arg("src0X"),
+             nb::arg("src1X"),
+             nb::arg("opY"),
+             nb::arg("dstY"),
+             nb::arg("src0Y"),
+             nb::arg("src1Y"),
+             nb::arg("comment") = "")
+        .def("checkVOPD", &rocisa::VDualOp::checkVOPD)
+        .def_ro("opX", &rocisa::VDualOp::opX)
+        .def_ro("opY", &rocisa::VDualOp::opY)
+        .def("__deepcopy__",
+             [](const rocisa::VDualOp& self, nb::dict&) { return new rocisa::VDualOp(self); });
+
+    m_common.def("vopdCheck",
+                 &rocisa::vopd::check,
+                 nb::arg("opX"),
+                 nb::arg("dstX"),
+                 nb::arg("src0X"),
+                 nb::arg("src1X"),
+                 nb::arg("opY"),
+                 nb::arg("dstY"),
+                 nb::arg("src0Y"),
+                 nb::arg("src1Y"),
+                 "Why the pair is not a legal VOPD on the current ISA, or \"\".");
+    m_common.def("dualOrSingle",
+                 &rocisa::dualOrSingle,
+                 nb::arg("first"),
+                 nb::arg("second"),
+                 "[VDualOp] if first and second (in program order) can issue as one VOPD "
+                 "on the current ISA, else [first, second].");
 
     nb::class_<rocisa::VDot2CF32F16, rocisa::CommonInstruction>(m_common, "VDot2CF32F16")
         .def(nb::init<const std::shared_ptr<rocisa::Container>&,

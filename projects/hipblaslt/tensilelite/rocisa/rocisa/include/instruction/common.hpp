@@ -23,6 +23,7 @@
 #pragma once
 #include "enum.hpp"
 #include "instruction.hpp"
+#include "vopd.hpp"
 
 #include <string>
 #include <vector>
@@ -4450,6 +4451,101 @@ namespace rocisa
         }
     };
 
+    // RDNA3/3.5/4 VOPD dual issue of two independent two-source VALU ops, e.g.
+    //   v_dual_subrev_f32 dX, s0X, s1X :: v_dual_mul_f32 dY, s0Y, s1Y
+    // opX/opY are the VOPD mnemonics without the "v_dual_" prefix. Both halves
+    // read old values. The pair is checked against the current ISA's VOPD rules
+    // (vopd.hpp) on construction and again on emission, since operands and
+    // modifiers can change in between. Kernel writers use dualOrSingle(), which
+    // pairs two ordinary instructions only when the target allows it.
+    struct VDualOp : public CommonInstruction
+    {
+        VDualOp(const std::string&                opX,
+                const std::shared_ptr<Container>& dstX,
+                const InstructionInput&           src0X,
+                const InstructionInput&           src1X,
+                const std::string&                opY,
+                const std::shared_ptr<Container>& dstY,
+                const InstructionInput&           src0Y,
+                const InstructionInput&           src1Y,
+                const std::string&                comment = "")
+            : CommonInstruction(InstType::INST_F32,
+                                dstX,
+                                {src0X, src1X, src0Y, src1Y},
+                                std::nullopt,
+                                std::nullopt,
+                                std::nullopt,
+                                comment)
+            , opX(opX)
+            , opY(opY)
+        {
+            this->dst1 = dstY; // second VOPD destination (tracked as written by passes)
+            setInst("v_dual_" + opX);
+            validate();
+        }
+
+        VDualOp(const VDualOp& other)
+            : CommonInstruction(other)
+            , opX(other.opX)
+            , opY(other.opY)
+        {
+        }
+
+        // Why this pair is not a legal VOPD on the current ISA, or "".
+        std::string checkVOPD() const
+        {
+            if(dpp || sdwa || vop3)
+                return "VOPD has no DPP, SDWA or VOP3 modifiers";
+            return vopd::check(opX, dst, srcs[0], srcs[1], opY, dst1, srcs[2], srcs[3]);
+        }
+
+        std::string getArgStr() const override
+        {
+            std::string kStr = dst->toString();
+            kStr += ", " + InstructionInputToString(srcs[0]);
+            kStr += ", " + InstructionInputToString(srcs[1]);
+            kStr += " :: v_dual_" + opY + " " + dst1->toString();
+            kStr += ", " + InstructionInputToString(srcs[2]);
+            kStr += ", " + InstructionInputToString(srcs[3]);
+            return kStr;
+        }
+
+        std::string toString() const override
+        {
+            validate();
+            return formatWithComment(preStr() + " " + getArgStr());
+        }
+
+        std::vector<InstructionInput> getSrcParams() const override
+        {
+            // fmac/dot2acc read their dst; v_dual_cndmask_b32 reads VCC.
+            auto params = CommonInstruction::getSrcParams();
+            if(vopd::accumulates(opX))
+                params.push_back(dst);
+            if(vopd::accumulates(opY))
+                params.push_back(dst1);
+            if(opX == "cndmask_b32" || opY == "cndmask_b32")
+                params.push_back(std::make_shared<VCC>());
+            return params;
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<VDualOp>(*this);
+        }
+
+        std::string opX;
+        std::string opY;
+
+    private:
+        void validate() const
+        {
+            auto reason = checkVOPD();
+            if(!reason.empty())
+                throw std::runtime_error(preStr() + " :: v_dual_" + opY + ": " + reason);
+        }
+    };
+
     struct VDot2CF32F16 : public CommonInstruction
     {
         VDot2CF32F16(const std::shared_ptr<Container>& dst,
@@ -6572,4 +6668,121 @@ namespace rocisa
             return std::make_shared<VPermB32>(*this);
         }
     };
+
+    namespace vopd
+    {
+        struct Half
+        {
+            std::string                op;
+            std::shared_ptr<Container> dst;
+            InstructionInput           src0;
+            InstructionInput           src1;
+        };
+
+        // The VOPD forms of a single instruction: one per legal operand order
+        // (commuted, or sub <-> subrev). Empty if it has no VOPD form.
+        inline std::vector<Half> halvesOf(const std::shared_ptr<Instruction>& inst)
+        {
+            auto c = std::dynamic_pointer_cast<CommonInstruction>(inst);
+            if(!c || c->dpp || c->sdwa || c->vop3 || !c->dst)
+                return {};
+            const auto& s   = c->srcs;
+            auto        two = [&](const std::string& op, bool commutes) -> std::vector<Half> {
+                if(s.size() != 2)
+                    return {};
+                std::vector<Half> h = {{op, c->dst, s[0], s[1]}};
+                if(commutes)
+                    h.push_back({op, c->dst, s[1], s[0]});
+                return h;
+            };
+            bool num = capOrDefault(rocIsa::getInstance().getArchCaps(), "VOPDMaxMinNum");
+            if(std::dynamic_pointer_cast<VMulF32>(c))
+                return two("mul_f32", true);
+            if(std::dynamic_pointer_cast<VAddF32>(c))
+                return two("add_f32", true);
+            if(std::dynamic_pointer_cast<VSubF32>(c))
+            {
+                auto h = two("sub_f32", false);
+                if(!h.empty())
+                    h.push_back({"subrev_f32", c->dst, s[1], s[0]});
+                return h;
+            }
+            if(std::dynamic_pointer_cast<VMaxF32>(c))
+                return two(num ? "max_num_f32" : "max_f32", true);
+            if(std::dynamic_pointer_cast<VMinF32>(c))
+                return two(num ? "min_num_f32" : "min_f32", true);
+            if(std::dynamic_pointer_cast<VAddU32>(c) && c->preStr() == "v_add_nc_u32" && !c->dst1)
+                return two("add_nc_u32", true);
+            if(std::dynamic_pointer_cast<VAndB32>(c))
+                return two("and_b32", true);
+            if(std::dynamic_pointer_cast<VLShiftLeftB32>(c))
+                return two("lshlrev_b32", false);
+            if(std::dynamic_pointer_cast<VMacF32>(c) && c->preStr() == "v_fmac_f32"
+               && capOrDefault(rocIsa::getInstance().getAsmCaps(), "v_fmac_f32"))
+                return two("fmac_f32", true);
+            if(s.size() == 3)
+            {
+                auto third = std::get_if<std::shared_ptr<Container>>(&s[2]);
+                if(!third || !*third)
+                    return {};
+                std::vector<Half> h;
+                auto              add = [&](const std::string& op, bool commutes) {
+                    h.push_back({op, c->dst, s[0], s[1]});
+                    if(commutes)
+                        h.push_back({op, c->dst, s[1], s[0]});
+                };
+                if(std::dynamic_pointer_cast<VCndMaskB32>(c)
+                   && std::dynamic_pointer_cast<VCC>(*third))
+                    add("cndmask_b32", false);
+                // v_dot2_f32_* with src2 == dst is the accumulate form.
+                bool acc = (*third)->toString() == c->dst->toString();
+                if(acc && std::dynamic_pointer_cast<VDot2F32F16>(c))
+                    add("dot2acc_f32_f16", true);
+                if(acc && std::dynamic_pointer_cast<VDot2F32BF16>(c))
+                    add("dot2acc_f32_bf16", true);
+                return h;
+            }
+            return {};
+        }
+    } // namespace vopd
+
+    // Two instructions in program order, first then second. Returns one VDualOp
+    // when the current ISA can issue them as a VOPD with the same result, else
+    // the two instructions unchanged. Tries both X/Y slot assignments and every
+    // operand order each instruction allows, so each ISA family pairs as much
+    // as its rules permit.
+    inline std::vector<std::shared_ptr<Instruction>>
+        dualOrSingle(const std::shared_ptr<Instruction>& first,
+                     const std::shared_ptr<Instruction>& second)
+    {
+        std::vector<std::shared_ptr<Instruction>> single  = {first, second};
+        auto                                      hFirst  = vopd::halvesOf(first);
+        auto                                      hSecond = vopd::halvesOf(second);
+        if(hFirst.empty() || hSecond.empty())
+            return single;
+
+        // A VOPD reads old values, so second must not read (or rewrite) what
+        // first writes. An accumulating second reads its own dst, covered here.
+        std::string written = hFirst[0].dst->toString();
+        if(hSecond[0].dst->toString() == written)
+            return single;
+        for(const auto& h : hSecond)
+            for(const auto* src : {&h.src0, &h.src1})
+                if(InstructionInputToString(*src) == written)
+                    return single;
+
+        std::string comment = first->comment;
+        if(!first->comment.empty() && !second->comment.empty())
+            comment += " :: ";
+        comment += second->comment;
+        for(const auto& [hx, hy] :
+            {std::make_pair(&hFirst, &hSecond), std::make_pair(&hSecond, &hFirst)})
+            for(const auto& x : *hx)
+                for(const auto& y : *hy)
+                    if(vopd::check(x.op, x.dst, x.src0, x.src1, y.op, y.dst, y.src0, y.src1)
+                           .empty())
+                        return {std::make_shared<VDualOp>(
+                            x.op, x.dst, x.src0, x.src1, y.op, y.dst, y.src0, y.src1, comment)};
+        return single;
+    }
 } // namespace rocisa

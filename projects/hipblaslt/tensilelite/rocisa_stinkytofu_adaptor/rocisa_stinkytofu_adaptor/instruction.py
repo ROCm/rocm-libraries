@@ -2984,6 +2984,55 @@ class VDualFMACF32(CommonInstruction):
         return params
 
 
+# The VOPD rules live in rocisa C++ (instruction/vopd.hpp). StinkyTofu only
+# targets gfx1250, where VDualOp does not pair yet, so this backend never pairs.
+# VDualOp mirrors the native text only.
+_VOPD_NOT_MODELLED = "VOPD is not modelled in the stinkytofu backend"
+
+_VOPD_ACCUMULATES = ("fmac_f32", "dot2acc_f32_f16", "dot2acc_f32_bf16")
+
+
+class VDualOp(CommonInstruction):
+    """VOPD dual issue of two two-source ops (text mirror of rocisa VDualOp)."""
+
+    def __init__(self, opX, dstX, src0X, src1X, opY, dstY, src0Y, src1Y, comment=""):
+        super().__init__(InstType.INST_F32, dstX, [src0X, src1X, src0Y, src1Y], comment=comment)
+        self.dst1 = dstY
+        self.opX = opX
+        self.opY = opY
+        self.setInst("v_dual_" + opX)
+
+    def checkVOPD(self) -> str:
+        return _VOPD_NOT_MODELLED
+
+    def getArgStr(self) -> str:
+        s = [_input_to_str(x) for x in (self.dst, self.srcs[0], self.srcs[1],
+                                        self.dst1, self.srcs[2], self.srcs[3])]
+        return f"{s[0]}, {s[1]}, {s[2]} :: v_dual_{self.opY} {s[3]}, {s[4]}, {s[5]}"
+
+    def getSrcParams(self):
+        params = list(self.srcs)
+        if self.opX in _VOPD_ACCUMULATES:
+            params.append(self.dst)
+        if self.opY in _VOPD_ACCUMULATES:
+            params.append(self.dst1)
+        if "cndmask_b32" in (self.opX, self.opY):
+            from .container import VCC  # noqa: WPS433
+
+            params.append(VCC())
+        return params
+
+
+def vopdCheck(opX, dstX, src0X, src1X, opY, dstY, src0Y, src1Y) -> str:
+    """Why the pair is not a legal VOPD here: this backend never pairs."""
+    return _VOPD_NOT_MODELLED
+
+
+def dualOrSingle(first, second):
+    """[first, second] unchanged: this backend never pairs."""
+    return [first, second]
+
+
 # logicalIR: VDot2CF32F16
 VDot2CF32F16 = _make_ternary_class("VDot2CF32F16", "v_dot2_c_f32_f16", InstType.INST_F32)
 # logicalIR: VDot2CF32BF16
