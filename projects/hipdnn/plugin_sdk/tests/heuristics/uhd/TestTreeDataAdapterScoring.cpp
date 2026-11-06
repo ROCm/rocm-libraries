@@ -410,6 +410,37 @@ TEST(TestTreeDataAdapterScoring, MalformedSchedulesAreRefused)
     }
 }
 
+/// scoreBatch reports a row's stage in a byte, so a schedule of 256 stages could not be
+/// told from one of none. The model has more trees than either schedule takes, so only the
+/// stage count can decide.
+TEST(TestTreeDataAdapterScoring, AScheduleOf255StagesIsAcceptedAndOf256IsRefused)
+{
+    const auto scheduleOf = [](uint32_t stages) {
+        std::vector<std::pair<uint32_t, uint32_t>> schedule;
+        for(uint32_t stage = 0; stage < stages; ++stage)
+        {
+            // Trees 1..stages, keeping stages..1 candidates.
+            schedule.emplace_back(stage + 1, stages - stage);
+        }
+        return schedule;
+    };
+    Builder builder;
+    builder.setNumFeatures(1).setFeaturesHash(HASH).setThresholdTable({0.0});
+    for(int tree = 0; tree < 257; ++tree)
+    {
+        builder.addSplitLeafTree(stump(0.0, 1.0));
+    }
+
+    builder.setEarlyExit(scheduleOf(255));
+    const auto accepted = load(builder.build());
+    ASSERT_NE(accepted, nullptr);
+    EXPECT_EQ(accepted->earlyExit().size(), 255u);
+    EXPECT_EQ(scoreRows(*accepted, STUMP_ROWS).stages, 255);
+
+    builder.setEarlyExit(scheduleOf(256));
+    EXPECT_EQ(load(builder.build()), nullptr);
+}
+
 /// A grouped model's layer 1 ranks groups, so its schedule is ignored, not refused.
 TEST(TestTreeDataAdapterScoring, GroupedModelsIgnoreTheSchedule)
 {

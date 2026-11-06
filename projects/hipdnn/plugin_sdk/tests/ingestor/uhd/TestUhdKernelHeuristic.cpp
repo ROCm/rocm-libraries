@@ -29,6 +29,7 @@
 
 #include <hipdnn_test_sdk/utilities/FileUtilities.hpp>
 #include <hipdnn_test_sdk/utilities/GbdtModelTestBuilder.hpp>
+#include <hipdnn_test_sdk/utilities/LinearModelTestBuilder.hpp>
 
 #include <nlohmann/json.hpp>
 
@@ -2357,18 +2358,23 @@ hipdnn_test_sdk::utilities::GbdtModelTestBuilder::TreeSpec
     return spec;
 }
 
-/// A three-tree model whose schedule keeps the best two candidates after its first tree.
+/// `{trees, keep}` per stage: after `trees` trees only the best `keep` candidates go on.
+using EarlyExitSchedule = std::vector<std::pair<uint32_t, uint32_t>>;
+
+/// A model whose early-exit schedule defaults to keeping the best two candidates after its
+/// first tree.
 Fixture writeEarlyExitFixture(
     const std::filesystem::path& dir,
     const std::vector<hipdnn_test_sdk::utilities::GbdtModelTestBuilder::TreeSpec>& trees,
-    const std::string& objective)
+    const std::string& objective,
+    const EarlyExitSchedule& schedule = {{1, 2}})
 {
     const std::string signatureHash = uhd::FeatureExtractor::computeHash(SIGNATURE);
     hipdnn_test_sdk::utilities::GbdtModelTestBuilder model;
     model.setFeaturesHash(signatureHash)
         .setNumFeatures(static_cast<int32_t>(SIGNATURE.size()))
         .setTrainingArches({"gfx942"})
-        .setEarlyExit({{1, 2}});
+        .setEarlyExit(schedule);
     for(const auto& tree : trees)
     {
         model.addTree(tree);
@@ -2386,7 +2392,124 @@ std::vector<KernelDefinition> earlyExitKernels()
             kernelWith(0x03, 128, 1),
             kernelWith(0x04, 256, 1)};
 }
+
+/// The kernels of the two-stage cases: A..G with tile_m 10, 20, ..., 70. Declared priority runs
+/// A first, so declared order cannot be what the tests below see.
+std::vector<KernelDefinition> twoStageKernels()
+{
+    std::vector<KernelDefinition> kernels;
+    for(uint8_t index = 0; index < 7; ++index)
+    {
+        kernels.push_back(kernelWith(static_cast<uint8_t>(index + 1), 10 * (index + 1), 7 - index));
+    }
+    return kernels;
+}
+
+/// A tree over slot 0 giving candidate A..G (tile_m 10..70) the value `values[i]`, so one tree
+/// can order the seven candidates arbitrarily.
+hipdnn_test_sdk::utilities::GbdtModelTestBuilder::TreeSpec
+    valueOfEachTwoStageKernel(const std::vector<double>& values)
+{
+    // A chain: node 2i splits tile_m <= 10(i+1)+5 and sends it to leaf 2i+1; the rest go on.
+    const size_t count = values.size();
+    const size_t nodes = (2 * count) - 1;
+    hipdnn_test_sdk::utilities::GbdtModelTestBuilder::TreeSpec spec;
+    spec.featureIndices.assign(nodes, 0);
+    spec.thresholds.assign(nodes, 0.0);
+    spec.leftChildren.assign(nodes, -1);
+    spec.rightChildren.assign(nodes, -1);
+    spec.leafValues.assign(nodes, 0.0);
+    spec.defaultLeft.assign(nodes, 1);
+    for(size_t i = 0; i + 1 < count; ++i)
+    {
+        spec.thresholds[2 * i] = (10.0 * static_cast<double>(i + 1)) + 5.0;
+        spec.leftChildren[2 * i] = static_cast<int32_t>((2 * i) + 1);
+        spec.rightChildren[2 * i] = static_cast<int32_t>((2 * i) + 2);
+        spec.leafValues[(2 * i) + 1] = values[i];
+    }
+    spec.leafValues[nodes - 1] = values[count - 1];
+    return spec;
+}
+
+/// Ranks A..G under a two-stage schedule (7 candidates -> 5 after tree 1 -> 3 after tree 2,
+/// then tree 3 finishes the three). Whatever the objective, the model is built so that
+///   - A and B are pruned at stage 0 (partial sums after tree 1 in the objective's order:
+///     B ahead of A),
+///   - C and D at stage 1, with partial sums that are WORSE than A's and B's (D ahead of C),
+///   - E, F and G are fully scored, G's score being one the metric cannot take,
+/// so the one right order is E, F, D, C, B, A, G: scored by score, then the later stage
+/// first (despite its worse partial sums), then the partial sum in the objective's direction,
+/// then the unusable candidate.
+void expectTwoStageOrder(const std::string& objective,
+                         const std::vector<std::vector<double>>& valuesPerTree,
+                         double expectedBestScore,
+                         double expectedSecondScore)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("uhd_two_stage"));
+    std::vector<hipdnn_test_sdk::utilities::GbdtModelTestBuilder::TreeSpec> trees;
+    for(const auto& values : valuesPerTree)
+    {
+        trees.push_back(valueOfEachTwoStageKernel(values));
+    }
+    const auto fixture = writeEarlyExitFixture(dir.path(), trees, objective, {{1, 5}, {2, 3}});
+    const auto heuristic = UhdKernelHeuristic::tryCreate(
+        modelDescriptor(dir.path(), fixture), "test", KNOBS, FIELDS);
+    ASSERT_NE(heuristic, nullptr);
+
+    const testing::TestGraph graph;
+    const auto properties = gfx942();
+    const MatchContext context{graph, 0, properties, objective == "min" ? "time" : "tflops"};
+    const auto definitions = twoStageKernels();
+    const auto scored = heuristic->rankScored(catalogOver(definitions, 2048), context);
+
+    ASSERT_EQ(scored.size(), 7U);
+    // E, F: fully scored and usable, ordered by their whole-model scores (E's partial sum was
+    // behind F's, so a ranking by partial sums would swap them).
+    EXPECT_EQ(scored[0].kernelId, testId(0x05));
+    EXPECT_DOUBLE_EQ(scored[0].score, expectedBestScore);
+    EXPECT_EQ(scored[1].kernelId, testId(0x06));
+    EXPECT_DOUBLE_EQ(scored[1].score, expectedSecondScore);
+    // Pruned after stage 1 (D, C), then after stage 0 (B, A), best partial sum first.
+    EXPECT_EQ(scored[2].kernelId, testId(0x04));
+    EXPECT_EQ(scored[3].kernelId, testId(0x03));
+    EXPECT_EQ(scored[4].kernelId, testId(0x02));
+    EXPECT_EQ(scored[5].kernelId, testId(0x01));
+    // The unusable score ranks last, below the pruned.
+    EXPECT_EQ(scored[6].kernelId, testId(0x07));
+    for(size_t index = 2; index < scored.size(); ++index)
+    {
+        EXPECT_EQ(scored[index].score, 0.0) << "candidate " << index << " reported an estimate";
+    }
+
+    // Only the three fully scored candidates count, and only G of them is out of range.
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "for 1 of 3 fully scored candidates"))
+        << recorder.getRecordedLogsAsString();
+}
 } // namespace
+
+TEST(TestIngestorUhdKernelHeuristic, ATwoStageScheduleRanksAllThreeTiersWhenMaximizing)
+{
+    // Higher is better. Partial sums: after tree 1 A=1 B=2 (pruned) C=5 D=6 E=7 F=8 G=9; after
+    // tree 2 C=-7 D=-5 (pruned) E=7 F=8 G=9; whole model E=17 F=8 G=-11.
+    expectTwoStageOrder(
+        "max",
+        {{1, 2, 5, 6, 7, 8, 9}, {0, 0, -12, -11, 0, 0, 0}, {0, 0, 0, 0, 10, 0, -20}},
+        17.0,
+        8.0);
+}
+
+TEST(TestIngestorUhdKernelHeuristic, ATwoStageScheduleRanksAllThreeTiersWhenMinimizing)
+{
+    // Lower is better. Partial sums: after tree 1 A=9 B=8 (pruned) C=5 D=4 E=3 F=2 G=1; after
+    // tree 2 C=17 D=15 (pruned) E=3 F=2 G=1; whole model E=3 F=6 G=-4. A min objective reports
+    // the negated time.
+    expectTwoStageOrder("min",
+                        {{9, 8, 5, 4, 3, 2, 1}, {0, 0, 12, 11, 0, 0, 0}, {0, 0, 0, 0, 0, 4, -5}},
+                        -3.0,
+                        -6.0);
+}
 
 TEST(TestIngestorUhdKernelHeuristic, PrunedCandidatesRankAfterTheFullyScoredAndReportNoEstimate)
 {
@@ -2478,6 +2601,50 @@ TEST(TestIngestorUhdKernelHeuristic, TheOutOfRangeReportCountsOnlyFullyScoredCan
     EXPECT_FALSE(recorder.hasLogContaining("the model contributed nothing"));
     EXPECT_EQ(scored[0].kernelId, testId(0x01));
     EXPECT_EQ(scored[1].kernelId, testId(0x02));
+}
+
+/// A linear_data model scores a log slowdown against the catalog's best candidate: lowest wins,
+/// whatever the declared priority says. The descriptor is what the loader produces for one.
+TEST(TestIngestorUhdKernelHeuristic, ALinearDataModelRanksTheLowestPredictedSlowdownFirst)
+{
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("uhd_linear_data"));
+    // slowdown = -1 * clamp((tile_m - 64) / 64): the larger the tile, the lower the slowdown.
+    ASSERT_TRUE(hipdnn_test_sdk::utilities::LinearModelTestBuilder()
+                    .setNumFeatures(static_cast<int32_t>(ENGINE_SIGNATURE.size()))
+                    .setFeaturesHash(uhd::FeatureExtractor::computeHash(ENGINE_SIGNATURE))
+                    .setTrainingArches({"gfx942"})
+                    .addTerm({0, 0, 64.0, 64.0, -3.0, 3.0})
+                    .setGlobal({{}, {0.0, -1.0}, -100.0})
+                    .buildToFile((dir.path() / "model.bin").string()));
+    auto descriptor = modelDescriptor(dir.path(),
+                                      "model.bin",
+                                      "min",
+                                      /*calibrated=*/false,
+                                      "identity",
+                                      {},
+                                      ENGINE_SIGNATURE);
+    descriptor.adapter = UhdAdapter::LINEAR_DATA;
+    descriptor.score.metric.clear();
+
+    const auto heuristic = UhdKernelHeuristic::tryCreate(descriptor, "test", KNOBS, FIELDS);
+    ASSERT_NE(heuristic, nullptr);
+
+    const testing::TestGraph graph;
+    const auto properties = gfx942();
+    const MatchContext context{graph, 0, properties};
+    // Declared order is the reverse of what the model prefers.
+    const std::vector<KernelDefinition> definitions
+        = {kernelWith(0x01, 64, 100), kernelWith(0x02, 128, 50), kernelWith(0x03, 256, 1)};
+    const auto scored = heuristic->rankScored(catalogOver(definitions, 2048), context);
+
+    // Slowdowns 0, -1 and -3, reported negated by `min`.
+    ASSERT_EQ(scored.size(), 3U);
+    EXPECT_EQ(scored[0].kernelId, testId(0x03));
+    EXPECT_DOUBLE_EQ(scored[0].score, 3.0);
+    EXPECT_EQ(scored[1].kernelId, testId(0x02));
+    EXPECT_DOUBLE_EQ(scored[1].score, 1.0);
+    EXPECT_EQ(scored[2].kernelId, testId(0x01));
+    EXPECT_DOUBLE_EQ(scored[2].score, 0.0);
 }
 
 } // namespace hipdnn_plugin_sdk::ingestor

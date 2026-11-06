@@ -318,55 +318,78 @@ struct Refusal
 {
     const char* name;
     LinearModelTestBuilder builder;
+    /// What the logged ERROR must say, so a model is refused for the rule it breaks and not
+    /// for some other inconsistency it also happens to have.
+    const char* reason;
 };
 
 TEST(TestLinearDataAdapter, AModelThatIsInconsistentWithItselfIsRefusedWithOneError)
 {
     using Term = LinearModelTestBuilder::Term;
+    // No configs, so only the basis rule under test can refuse it (a config's coefficient
+    // count follows the basis, which would refuse the model for another reason).
+    const auto basisOnly = [](Term term) {
+        return LinearModelTestBuilder()
+            .setNumFeatures(3)
+            .setFeaturesHash(TEST_HASH)
+            .addTerm(term)
+            .setGlobal({{}, {0.0, 0.0}, 0.0});
+    };
     const std::vector<Refusal> refusals = {
-        {"key feature out of range", validModel().setKeyFeatures({3})},
-        {"negative key feature", validModel().setKeyFeatures({-1})},
-        {"family feature out of range", validModel().setFamilyFeatures({3})},
-        {"basis feature out of range", validModel().addTerm(Term{3, 0, 0.0, 1.0, -1.0, 1.0})},
+        {"key feature out of range",
+         validModel().setKeyFeatures({3}),
+         "key_features entry 0 reads feature 3 of a model with 3"},
+        {"negative key feature",
+         validModel().setKeyFeatures({-1}),
+         "key_features entry 0 reads feature -1 of a model with 3"},
+        {"family feature out of range",
+         validModel().setFamilyFeatures({3}),
+         "family_features entry 0 reads feature 3 of a model with 3"},
+        {"basis feature out of range",
+         basisOnly(Term{3, 0, 0.0, 1.0, -1.0, 1.0}),
+         "basis term 0 reads feature 3 of a model with 3"},
+        {"negative basis feature",
+         basisOnly(Term{-1, 0, 0.0, 1.0, -1.0, 1.0}),
+         "basis term 0 reads feature -1 of a model with 3"},
         {"unknown transform",
-         LinearModelTestBuilder(validModel()).addTerm(Term{1, 2, 0, 1, -1, 1})},
-        {"zero scale",
-         LinearModelTestBuilder()
-             .setNumFeatures(3)
-             .setFeaturesHash(TEST_HASH)
-             .addTerm(Term{1, 0, 0.0, 0.0, -1.0, 1.0})
-             .setGlobal({{}, {0.0, 0.0}, 0.0})},
-        {"negative scale",
-         LinearModelTestBuilder()
-             .setNumFeatures(3)
-             .setFeaturesHash(TEST_HASH)
-             .addTerm(Term{1, 0, 0.0, -1.0, -1.0, 1.0})
-             .setGlobal({{}, {0.0, 0.0}, 0.0})},
-        {"lo above hi",
-         LinearModelTestBuilder()
-             .setNumFeatures(3)
-             .setFeaturesHash(TEST_HASH)
-             .addTerm(Term{1, 0, 0.0, 1.0, 1.0, -1.0})
-             .setGlobal({{}, {0.0, 0.0}, 0.0})},
+         basisOnly(Term{1, 2, 0.0, 1.0, -1.0, 1.0}),
+         "basis term 0 has unknown transform 2"},
+        {"zero scale", basisOnly(Term{1, 0, 0.0, 0.0, -1.0, 1.0}), "scale is not positive"},
+        {"negative scale", basisOnly(Term{1, 0, 0.0, -1.0, -1.0, 1.0}), "scale is not positive"},
+        {"lo above hi", basisOnly(Term{1, 0, 0.0, 1.0, 1.0, -1.0}), "lo is above its hi"},
         {"infinite hi",
-         LinearModelTestBuilder()
-             .setNumFeatures(3)
-             .setFeaturesHash(TEST_HASH)
-             .addTerm(Term{1, 0, 0.0, 1.0, -1.0, INF})
-             .setGlobal({{}, {0.0, 0.0}, 0.0})},
+         basisOnly(Term{1, 0, 0.0, 1.0, -1.0, INF}),
+         "mean, scale, lo or hi that is not finite"},
+        {"infinite lo",
+         basisOnly(Term{1, 0, 0.0, 1.0, -INF, 1.0}),
+         "mean, scale, lo or hi that is not finite"},
+        {"infinite scale",
+         basisOnly(Term{1, 0, 0.0, INF, -1.0, 1.0}),
+         "mean, scale, lo or hi that is not finite"},
         {"nan mean",
-         LinearModelTestBuilder()
-             .setNumFeatures(3)
-             .setFeaturesHash(TEST_HASH)
-             .addTerm(Term{1, 0, NAN_VALUE, 1.0, -1.0, 1.0})
-             .setGlobal({{}, {0.0, 0.0}, 0.0})},
-        {"short coefficients", validModel().addConfig({{3.0}, {1.0}, 0.0})},
-        {"long coefficients", validModel().addConfig({{3.0}, {1.0, 2.0, 3.0}, 0.0})},
-        {"nonfinite coefficient", validModel().addConfig({{3.0}, {1.0, INF}, 0.0})},
-        {"nonfinite floor", validModel().addConfig({{3.0}, {1.0, 1.0}, NAN_VALUE})},
-        {"short key", validModel().addConfig({{}, {1.0, 1.0}, 0.0})},
-        {"long key", validModel().addConfig({{3.0, 4.0}, {1.0, 1.0}, 0.0})},
-        {"duplicate config key", validModel().addConfig({{1.0}, {1.0, 1.0}, 0.0})},
+         basisOnly(Term{1, 0, NAN_VALUE, 1.0, -1.0, 1.0}),
+         "mean, scale, lo or hi that is not finite"},
+        {"short coefficients",
+         validModel().addConfig({{3.0}, {1.0}, 0.0}),
+         "config 2 has 1 coefficients, expected 2"},
+        {"long coefficients",
+         validModel().addConfig({{3.0}, {1.0, 2.0, 3.0}, 0.0}),
+         "config 2 has 3 coefficients, expected 2"},
+        {"nonfinite coefficient",
+         validModel().addConfig({{3.0}, {1.0, INF}, 0.0}),
+         "config 2's coefficient 1 is not finite"},
+        {"nonfinite floor",
+         validModel().addConfig({{3.0}, {1.0, 1.0}, NAN_VALUE}),
+         "config 2's floor is not finite"},
+        {"short key",
+         validModel().addConfig({{}, {1.0, 1.0}, 0.0}),
+         "config 2's key has 0 values, expected 1"},
+        {"long key",
+         validModel().addConfig({{3.0, 4.0}, {1.0, 1.0}, 0.0}),
+         "config 2's key has 2 values, expected 1"},
+        {"duplicate config key",
+         validModel().addConfig({{1.0}, {1.0, 1.0}, 0.0}),
+         "config 2 repeats an earlier config's key"},
         {"duplicate nan config key",
          LinearModelTestBuilder()
              .setNumFeatures(1)
@@ -374,7 +397,8 @@ TEST(TestLinearDataAdapter, AModelThatIsInconsistentWithItselfIsRefusedWithOneEr
              .setKeyFeatures({0})
              .addConfig({{NAN_VALUE}, {1.0}, 0.0})
              .addConfig({{-NAN_VALUE}, {2.0}, 0.0})
-             .setGlobal({{}, {0.0}, 0.0})},
+             .setGlobal({{}, {0.0}, 0.0}),
+         "config 1 repeats an earlier config's key"},
         {"duplicate zero config key",
          LinearModelTestBuilder()
              .setNumFeatures(1)
@@ -382,18 +406,25 @@ TEST(TestLinearDataAdapter, AModelThatIsInconsistentWithItselfIsRefusedWithOneEr
              .setKeyFeatures({0})
              .addConfig({{0.0}, {1.0}, 0.0})
              .addConfig({{-0.0}, {2.0}, 0.0})
-             .setGlobal({{}, {0.0}, 0.0})},
-        {"families without a family key", validModel().addFamily({{}, {1.0, 1.0}, 0.0})},
+             .setGlobal({{}, {0.0}, 0.0}),
+         "config 1 repeats an earlier config's key"},
+        {"families without a family key",
+         validModel().addFamily({{}, {1.0, 1.0}, 0.0}),
+         "families but no family_features"},
         {"duplicate family key",
          validModel()
              .setFamilyFeatures({2})
              .addFamily({{1.0}, {1.0, 1.0}, 0.0})
-             .addFamily({{1.0}, {2.0, 2.0}, 0.0})},
+             .addFamily({{1.0}, {2.0, 2.0}, 0.0}),
+         "family 1 repeats an earlier family's key"},
         {"family key of the wrong width",
-         validModel().setFamilyFeatures({2}).addFamily({{1.0, 2.0}, {1.0, 1.0}, 0.0})},
-        {"no global entry", validModel().omitGlobal()},
-        {"global with a key", validModel().setGlobal({{1.0}, {1.0, 1.0}, 0.0})},
-        {"negative feature count", validModel().setNumFeatures(-1)},
+         validModel().setFamilyFeatures({2}).addFamily({{1.0, 2.0}, {1.0, 1.0}, 0.0}),
+         "family 0's key has 2 values, expected 1"},
+        {"no global entry", validModel().omitGlobal(), "the global entry is missing"},
+        {"global with a key",
+         validModel().setGlobal({{1.0}, {1.0, 1.0}, 0.0}),
+         "the global entry's key has 1 values, expected 0"},
+        {"negative feature count", validModel().setNumFeatures(-1), "declares -1 features"},
     };
 
     for(const auto& refusal : refusals)
@@ -406,6 +437,9 @@ TEST(TestLinearDataAdapter, AModelThatIsInconsistentWithItselfIsRefusedWithOneEr
         EXPECT_EQ(LinearDataAdapter::loadFromBuffer(buffer.data(), buffer.size(), TEST_HASH),
                   nullptr);
         EXPECT_EQ(recorder.countLogsAtLevel(HIPDNN_SEV_ERROR), 1U)
+            << recorder.getRecordedLogsAsString();
+        EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, refusal.reason))
+            << "expected the reason '" << refusal.reason << "' in "
             << recorder.getRecordedLogsAsString();
     }
 }

@@ -1048,3 +1048,160 @@ def test_a_training_table_the_manifest_does_not_describe_is_not_read(tmp_path):
 
     loaded = generate.load_dataset(dataset, role="sort_kernel_catalog", sources=[None])
     assert sorted(r["benchmark"] for r in loaded["rows"][None]) == ["g0", "g1", "g2"]
+
+
+def _catalog_dataset(world, with_tflops, problems=60, kernels=3):
+    """A recorded sort_kernel_catalog collection (kernels differing in `tile`) as a dataset,
+    for the engine of `world`; each kernel's time grows with its tile. Without `tflops` the
+    ranker is trained on robustMeanMs, uncalibrated."""
+    from uhd_gen.dataset import store
+
+    # The kernel field and the knob the feature recipe reads, as the engine declares them.
+    (world["tree"] / "engine.ued.json").write_text(
+        json.dumps(
+            {
+                "version": "1.0",
+                "id": UED,
+                "name": "provider:engine7",
+                "metadata": KMD,
+                "knobs": ["tile"],
+            }
+        ),
+        encoding="utf-8",
+    )
+    (world["tree"] / "metadata.kmd.json").write_text(
+        json.dumps(
+            {"version": "1.0", "id": KMD, "fields": [{"name": "tile", "type": "int"}]}
+        ),
+        encoding="utf-8",
+    )
+    rows = []
+    for problem in range(problems):
+        for kernel in range(kernels):
+            time = 1.0 + kernel * 0.5 + (problem % 3) * 0.1 * (kernel + 1)
+            rows.append(
+                {
+                    "benchmark": f"g{problem}",
+                    "device": "d0",
+                    "arch": "gfx942",
+                    "kernel": f"k{kernel}",
+                    "knob_settings": "{}",
+                    "q.size": 100.0 + 10 * problem,
+                    "kernel.tile": float(kernel + 1),
+                    "avgTimeMs": time,
+                    "robustMeanMs": time,
+                    **({"tflops": 1.0 / time} if with_tflops else {}),
+                }
+            )
+    directory = world["root"] / "catalog"
+    directory.mkdir()
+    (directory / "corpus.json").write_text(json.dumps(rows), encoding="utf-8")
+    (directory / store.COLLECTION_MANIFEST).write_text(
+        json.dumps(
+            {
+                "schema": store.COLLECTION_SCHEMA,
+                "collected_at": "2026-10-01T00:00:00+00:00",
+                "role": "sort_kernel_catalog",
+                "engine": "provider:engine7",
+                "engine_id": 7,
+                "engine_name": "provider:engine7",
+                "sources": [None],
+                "trained_against": {
+                    "ued": {"id": UED, "revision": "1.0"},
+                    "kmd": {"id": KMD, "revision": "1.0"},
+                    "umd": [],
+                },
+                "selector_revision": "provider-1",
+                "arches": ["gfx942"],
+                "devices": ["d0"],
+                "graph_count": problems,
+                "row_counts": {"None": len(rows)},
+                "published": ["q.size", "kernel.tile"],
+                "kernel_fields": ["kernel.tile"],
+                "knob_encodings": {},
+                "shipping_knobs": ["tile"],
+                "collection_knobs": [],
+                "graphs": [],
+                "commands": [],
+                "failed_graphs": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    dataset = world["root"] / "catalog.dataset"
+    store.add(dataset, *store.from_collection(directory))
+    return dataset
+
+
+def _train_catalog(world, name, evaluator, *extra, with_tflops=True):
+    from uhd_gen.__main__ import main
+
+    output = world["root"] / name
+    code = main(
+        [
+            "generate",
+            "--dataset",
+            str(_catalog_dataset(world, with_tflops)),
+            "--descriptor-tree",
+            str(world["tree"]),
+            "--engine-id",
+            "7",
+            "--role",
+            "sort_kernel_catalog",
+            "--features",
+            "q.size",
+            "kernel.tile",
+            "--num-boost-round",
+            "20",
+            "--early-stopping",
+            "5",
+            "--eval-fraction",
+            "0.25",
+            "--arch",
+            "gfx942",
+            "--no-promote",
+            "--feature-evaluator",
+            evaluator,
+            "--output-dir",
+            str(output),
+            *extra,
+        ]
+    )
+    return code, output / "model"
+
+
+def test_a_catalog_ranker_is_trained_in_the_adapter_and_label_direction_asked_for(
+    world, evaluator
+):
+    code, model = _train_catalog(
+        world, "linear", evaluator, "--metric", "tflops", "--adapter", "linear_data"
+    )
+    assert code == 0
+    uhd = json.loads((model / "heuristic.uhd.json").read_text(encoding="utf-8"))
+    # The score is a log slowdown, lower is better, whatever the label's direction.
+    assert (uhd["adapter"], uhd["objective"]) == ("linear_data", "min")
+    assert "score" not in uhd and "tree_data" not in uhd
+    manifest = json.loads((model / "train_manifest.json").read_text(encoding="utf-8"))
+    # It trains on the metric's own label, tflops, where higher is better.
+    assert (manifest["target"], manifest["objective"]) == ("tflops", "max")
+
+
+def test_a_catalog_ranker_is_written_with_the_early_exit_schedule_asked_for(
+    world, evaluator
+):
+    from uhd_gen.tests.model_bin import schedule_of
+
+    # A calibrated catalog ranker takes no schedule, so this one has no tflops to calibrate;
+    # it keeps boosting past the first rounds, so the schedule has trees to prune at.
+    code, model = _train_catalog(
+        world,
+        "scheduled",
+        evaluator,
+        "--early-exit",
+        "3:4",
+        "--early-stopping",
+        "50",
+        with_tflops=False,
+    )
+    assert code == 0
+    assert schedule_of(model / "model.bin") == [(3, 4)]

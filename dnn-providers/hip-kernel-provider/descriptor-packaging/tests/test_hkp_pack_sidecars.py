@@ -412,6 +412,9 @@ def _canonical_uhd_validator():
         "linear_data_max_objective",
         "linear_data_metric",
         "linear_data_transform",
+        "linear_data_missing_signature",
+        "linear_data_missing_hash",
+        "linear_data_missing_provenance",
     ],
 )
 def test_packaging_and_canonical_schema_agree_on_uhd_headers(tmp_path, mutation):
@@ -483,6 +486,12 @@ def test_packaging_and_canonical_schema_agree_on_uhd_headers(tmp_path, mutation)
         doc["score"] = {"metric": "time"}
     elif mutation == "linear_data_transform":
         doc["score"] = {"transform": "log1p"}
+    elif mutation == "linear_data_missing_signature":
+        del doc["features_signature"]
+    elif mutation == "linear_data_missing_hash":
+        del doc["features_hash"]
+    elif mutation == "linear_data_missing_provenance":
+        del doc["trained_against"]
     elif mutation == "uppercase_ids":
         doc["id"] = doc["id"].upper()
         doc["trained_against"]["ued"]["id"] = doc["trained_against"]["ued"][

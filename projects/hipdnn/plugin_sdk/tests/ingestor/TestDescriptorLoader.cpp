@@ -40,6 +40,7 @@
 #include <hipdnn_plugin_sdk/ingestor/UhdKernelHeuristic.hpp>
 #include <hipdnn_test_sdk/utilities/FileUtilities.hpp>
 #include <hipdnn_test_sdk/utilities/GbdtModelTestBuilder.hpp>
+#include <hipdnn_test_sdk/utilities/LinearModelTestBuilder.hpp>
 #include <hipdnn_test_sdk/utilities/LogRecorder.hpp>
 #include <hipdnn_test_sdk/utilities/ScopedEnvironmentVariableSetter.hpp>
 
@@ -2494,22 +2495,24 @@ TEST(TestDescriptorLoader, MissingDefaultModelPreservesDeclaredOrderSelection)
 namespace
 {
 
-/// Turns the set's UHD into a tree_data one naming @p artifact and writes the tree; the
-/// artifact itself is left to the caller.
+/// Turns the set's UHD into one of @p adapter (`tree_data`, or `linear_data`, whose score is a
+/// minimised cost) naming @p artifact and writes the tree; the artifact itself is left to the
+/// caller.
 std::filesystem::path writeModelHeuristicSet(const std::filesystem::path& root,
                                              const std::string& engineName,
-                                             const std::string& artifact)
+                                             const std::string& artifact,
+                                             const std::string& adapter = "tree_data")
 {
     auto documents = makeSetDocuments('1', engineName);
     auto& heuristic = documentOfType(documents, ".uhd.json");
-    heuristic["adapter"] = "tree_data";
+    heuristic["adapter"] = adapter;
     heuristic.erase("native");
     heuristic["features_signature"] = nlohmann::json::array({"$kernel.block_size"});
     heuristic["features_hash"]
         = hipdnn_plugin_sdk::uhd::FeatureExtractor::computeHash({"$kernel.block_size"});
     heuristic["trained_against"] = provenanceOf(documents);
-    heuristic["objective"] = "max";
-    heuristic["tree_data"] = {{"artifact", artifact}};
+    heuristic["objective"] = adapter == "linear_data" ? "min" : "max";
+    heuristic[adapter] = {{"artifact", artifact}};
     writeDocuments(root, documents);
     return root;
 }
@@ -2543,6 +2546,71 @@ TEST(TestDescriptorLoader, LoadsAnEngineWhoseModelArtifactIsPresent)
     // absolute.
     EXPECT_EQ(std::filesystem::path(sets.front().heuristic->modelArtifactPath).filename().string(),
               "model.bin");
+}
+
+/// A linear_data UHD is its own adapter after the load: nothing in the descriptor says
+/// otherwise, and a loader that did not know the spelling would drop the whole engine.
+TEST(TestDescriptorLoader, LoadsALinearDataHeuristicAsLinearData)
+{
+    const ScopedSymbols symbols;
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("linear_present"));
+    writeModelHeuristicSet(dir.path(), "test:linear_present", "model.bin", "linear_data");
+    ASSERT_TRUE(hipdnn_test_sdk::utilities::LinearModelTestBuilder()
+                    .setNumFeatures(1)
+                    .setFeaturesHash(hipdnn_plugin_sdk::uhd::FeatureExtractor::computeHash(
+                        {"$kernel.block_size"}))
+                    .addTerm({0, 0, 64.0, 64.0, -3.0, 3.0})
+                    .setGlobal({{}, {0.0, -1.0}, -100.0})
+                    .buildToFile((dir.path() / "model.bin").string()));
+
+    const auto sets = validatedSetsFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    ASSERT_TRUE(sets.front().heuristic.has_value());
+    EXPECT_EQ(sets.front().heuristic->adapter, UhdAdapter::LINEAR_DATA);
+    EXPECT_EQ(sets.front().heuristic->objective, "min");
+    EXPECT_EQ(std::filesystem::path(sets.front().heuristic->modelArtifactPath).filename().string(),
+              "model.bin");
+}
+
+/// Two rankers that differ only in the adapter score differently, so a model hash cached for
+/// one must not be taken for the other's selector.
+TEST(TestDescriptorLoader, TheAdapterIsPartOfTheSelectorRevision)
+{
+    const ScopedSymbols symbols;
+    const auto revisionOver = [&](const std::string& adapter) {
+        const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("adapter_revision"));
+        writeModelHeuristicSet(dir.path(), "test:adapter_revision", "model.bin", adapter);
+        // The same bytes for both, so the model hash cannot be what tells them apart.
+        writeArtifact(dir.path() / "model.bin");
+        const auto set = loadFrom(dir.path()).at(0);
+        return std::make_pair(set.heuristic->modelHash, engineSelectorRevision(set));
+    };
+
+    const auto tree = revisionOver("tree_data");
+    const auto linear = revisionOver("linear_data");
+
+    EXPECT_EQ(tree.first, linear.first);
+    EXPECT_NE(tree.second, linear.second);
+}
+
+/// The codes are recorded in every shipped model hash and selector revision, so each adapter
+/// and source kind keeps its code forever; reordering the enumerators, or a new member taking
+/// a used code, would change what a deployed cache entry means.
+TEST(TestDescriptorLoader, SelectorCodesAreFixedAtTheirShippedValues)
+{
+    using hipdnn_plugin_sdk::ingestor::detail::selectorCode;
+    EXPECT_EQ(selectorCode(UhdAdapter::STATIC_ORDER), 0);
+    EXPECT_EQ(selectorCode(UhdAdapter::NATIVE), 1);
+    EXPECT_EQ(selectorCode(UhdAdapter::TREE_DATA), 2);
+    EXPECT_EQ(selectorCode(UhdAdapter::TABLE), 3);
+    EXPECT_EQ(selectorCode(UhdAdapter::CUSTOM_LIBRARY), 4);
+    EXPECT_EQ(selectorCode(UhdAdapter::LINEAR_DATA), 5);
+
+    EXPECT_EQ(selectorCode(KernelSourceKind::EMBEDDED_SOURCE), 0);
+    EXPECT_EQ(selectorCode(KernelSourceKind::KPACK), 1);
+    EXPECT_EQ(selectorCode(KernelSourceKind::HSACO_FILE), 2);
+    EXPECT_EQ(selectorCode(KernelSourceKind::ROCKE_BUILDER), 3);
 }
 
 /// The packer copies a shared model UHD and its artifact into every arch shard. Each copy

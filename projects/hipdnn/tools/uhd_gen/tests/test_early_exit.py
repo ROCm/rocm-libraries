@@ -14,9 +14,14 @@ lgb = pytest.importorskip("lightgbm")
 pytest.importorskip("flatbuffers")
 
 import uhd_gen  # noqa: E402,F401  puts _generated/ on sys.path
+from hipdnn_flatbuffers_sdk.data_objects.EarlyExitStage import (  # noqa: E402
+    EarlyExitStageT,
+)
 from hipdnn_flatbuffers_sdk.data_objects.GbdtModel import GbdtModelT  # noqa: E402
 from uhd_gen.artifact import verify_tree_artifact  # noqa: E402
 from uhd_gen.early_exit import (  # noqa: E402
+    PREFIXES,
+    candidate_schedules,
     check_schedule,
     choose_schedule,
     out_of_fold_catalogs,
@@ -49,6 +54,18 @@ from uhd_gen.tests.model_bin import write_model  # noqa: E402
 def test_malformed_schedules_are_refused_with_the_runtimes_reason(schedule, reason):
     with pytest.raises(ValueError, match=reason):
         check_schedule(schedule, 10)
+
+
+def _stages(count: int) -> list[tuple[int, int]]:
+    """`count` valid stages: trees 1..count, keep count..1."""
+    return [(index, count + 1 - index) for index in range(1, count + 1)]
+
+
+def test_a_schedule_may_have_255_stages_and_no_more():
+    # The runtime reports a row's stage in a uint8, so 256 stages would wrap.
+    check_schedule(_stages(255), 300)
+    with pytest.raises(ValueError, match="more than 255 stages"):
+        check_schedule(_stages(256), 300)
 
 
 def test_schedules_parse_from_the_command_line_form():
@@ -143,6 +160,110 @@ def test_the_cheapest_schedule_within_tolerance_is_chosen():
     assert manifest["candidates"]
 
 
+def _candidate(choice, schedule):
+    (found,) = [
+        record
+        for record in choice.candidates
+        if record["schedule"] == [list(stage) for stage in schedule]
+    ]
+    return found
+
+
+def _lossy_catalogs(regret: float, lossy: int, count: int = 40, size: int = 20):
+    """Catalogs under max that full scoring ranks perfectly. In `lossy` of them every prefix
+    ranks the winner last, so any schedule keeping fewer than `size` rows picks a candidate
+    `regret` short of it."""
+    rng = np.random.default_rng(11)
+    catalogs = []
+    for index in range(count):
+        measured = rng.permutation(
+            np.concatenate(([1.0, 1.0 - regret], rng.uniform(0.2, 0.9, size - 2)))
+        )
+        prefix = measured.copy()
+        if index < lossy:
+            prefix[np.argmax(measured)] = -1.0
+        catalogs.append(({p: prefix for p in PREFIXES}, measured.copy(), measured))
+    return catalogs
+
+
+# Of 200 trees every schedule keeping 16 or 32 of 20 rows walks more than 0.8 of the
+# trees, so a schedule is either (5, 8) -- the cheapest -- or none.
+@pytest.mark.parametrize("regret, schedule", [(0.00019, [(5, 8)]), (0.00021, [])])
+def test_a_schedule_is_chosen_only_within_the_mean_regret_tolerance(regret, schedule):
+    choice = choose_schedule(_lossy_catalogs(regret, lossy=40), 200, "max")
+    assert choice.full["mean_regret"] == 0.0
+    assert _candidate(choice, [(5, 8)])["mean_regret"] == pytest.approx(regret)
+    assert choice.schedule == schedule
+
+
+@pytest.mark.parametrize("regret, schedule", [(0.0019, [(5, 8)]), (0.0021, [])])
+def test_a_schedule_is_chosen_only_within_the_p95_regret_tolerance(regret, schedule):
+    # Three catalogs of 40 lose `regret`: the mean stays inside its own tolerance and the
+    # 95th percentile is `regret`.
+    choice = choose_schedule(_lossy_catalogs(regret, lossy=3), 200, "max")
+    record = _candidate(choice, [(5, 8)])
+    assert record["mean_regret"] < 0.0002
+    assert record["p95_regret"] == pytest.approx(regret)
+    assert choice.schedule == schedule
+
+
+def _perfect_catalogs(size: int, count: int = 20):
+    rng = np.random.default_rng(5)
+    catalogs = []
+    for _ in range(count):
+        measured = rng.uniform(1.0, 2.0, size)
+        catalogs.append(({5: measured}, measured.copy(), measured))
+    return catalogs
+
+
+# A model of 10 trees has one prefix, 5: (5, 8) walks 5 trees on every row and 5 more on 8
+# of them, and the other two schedules keep every row of these catalogs.
+@pytest.mark.parametrize(
+    "size, work, schedule",
+    [(14, 110 / 140, [(5, 8)]), (13, 105 / 130, [])],
+)
+def test_a_schedule_is_chosen_only_when_it_saves_enough_work(size, work, schedule):
+    choice = choose_schedule(_perfect_catalogs(size), 10, "max")
+    assert _candidate(choice, [(5, 8)])["work_fraction"] == pytest.approx(work)
+    assert choice.schedule == schedule
+
+
+def _min_catalogs(prune_the_picks: bool, count: int = 40, size: int = 20):
+    """Catalogs of run times (min): the best 1.0, then 1.25, then 2.0, 2.1, .... Full scoring
+    swaps the best two, so it picks the 1.25 and ends 0.25 over the best. Prefixes rank as the
+    full model does, or (`prune_the_picks`) put those two rows last."""
+    rng = np.random.default_rng(13)
+    catalogs = []
+    for _ in range(count):
+        measured = np.concatenate(([1.0, 1.25], 2.0 + 0.1 * np.arange(size - 2)))
+        order = rng.permutation(size)
+        measured = measured[order]
+        full = measured.copy()
+        full[measured == 1.0], full[measured == 1.25] = 1.25, 1.0
+        prefix = full.copy()
+        if prune_the_picks:
+            prefix[measured <= 1.25] = 99.0
+        catalogs.append(({p: prefix for p in PREFIXES}, full, measured))
+    return catalogs
+
+
+def test_a_min_objective_catalog_is_scored_in_the_direction_of_lower_is_better():
+    choice = choose_schedule(_min_catalogs(prune_the_picks=False), 200, "min")
+    assert choice.full == pytest.approx(
+        {"mean_regret": 0.25, "p95_regret": 0.25, "work_fraction": 1.0}
+    )
+    assert choice.schedule == [(5, 8)]
+    assert _candidate(choice, [(5, 8)])["mean_regret"] == pytest.approx(0.25)
+
+
+def test_a_min_schedule_that_prunes_the_pick_costs_the_regret_of_the_next_candidate():
+    choice = choose_schedule(_min_catalogs(prune_the_picks=True), 200, "min")
+    assert choice.full["mean_regret"] == pytest.approx(0.25)
+    # The survivors' best is the 2.0 against a best of 1.0.
+    assert _candidate(choice, [(5, 8)])["mean_regret"] == pytest.approx(1.0)
+    assert choice.schedule == []
+
+
 def _ranking_frame(rows: int = 60, problems: int = 6, seed: int = 3) -> pd.DataFrame:
     rng = np.random.default_rng(seed)
     frame = pd.DataFrame(
@@ -234,6 +355,93 @@ def test_offline_scoring_applies_the_schedule_as_the_runtime_does(tmp_path):
     )
 
 
+def _scores(path: Path, **options):
+    scorer = _flatbuffer_scorer(
+        path, ["q.size", "kernel.tile"], objective="min", physical=False, **options
+    )
+    return scorer(_ranking_frame().iloc[:10])
+
+
+def test_a_schedule_is_ignored_when_the_model_scores_one_row(tmp_path):
+    (tmp_path / "scheduled").mkdir()
+    (tmp_path / "plain").mkdir()
+    scheduled, _, _ = _model_with_schedule(tmp_path / "scheduled", [(4, 3)])
+    plain, _, _ = _model_with_schedule(tmp_path / "plain", [])
+    # EnginePredictor scores a row with every tree, whatever the artifact stores.
+    assert isinstance(_scores(scheduled), StagedPredictions)
+    scores = _scores(scheduled, engine_prediction=True)
+    assert not isinstance(scores, StagedPredictions)
+    np.testing.assert_array_equal(scores, _scores(plain, engine_prediction=True))
+
+
+def _grouped_model_with_schedule(directory: Path, schedule) -> Path:
+    """A two-layer model (groups by kernel.tile) that also stores `schedule`, which the
+    converter would refuse to write."""
+    directory.mkdir()
+    frame = _ranking_frame(rows=120, problems=6)
+    params = {
+        "objective": "regression",
+        "num_leaves": 7,
+        "verbose": -1,
+        "min_data_in_leaf": 2,
+    }
+
+    def booster(rows) -> lgb.Booster:
+        return lgb.train(
+            params,
+            lgb.Dataset(
+                rows[["q.size", "kernel.tile"]].to_numpy(),
+                label=np.log(rows["minTimeMs"].to_numpy()),
+            ),
+            num_boost_round=12,
+        )
+
+    groups = [
+        (tile, booster(frame[frame["kernel.tile"] == tile]).dump_model())
+        for tile in (2.0, 6.0)
+    ]
+    model = GbdtModelT.InitFromPackedBuf(
+        bytearray(
+            build_gbdt_model(
+                booster(frame).dump_model(),
+                "sha256:test",
+                group_by_feature_index=1,
+                groups=groups,
+            )
+        ),
+        0,
+    )
+    model.earlyExit = []
+    for trees, keep in schedule:
+        stage = EarlyExitStageT()
+        stage.trees, stage.keep = trees, keep
+        model.earlyExit.append(stage)
+    return write_model(model, directory / "model.bin")
+
+
+def test_a_schedule_is_ignored_when_the_model_is_grouped(tmp_path):
+    scheduled = _grouped_model_with_schedule(tmp_path / "scheduled", [(4, 3)])
+    plain = _grouped_model_with_schedule(tmp_path / "plain", [])
+    frame = pd.DataFrame(
+        [
+            {"q.size": size, "kernel.tile": tile}
+            for size in (1.5, 3.0)
+            for tile in (2.0, 6.0, 2.0, 6.0)
+        ]
+    )
+
+    def scores(path: Path):
+        return _flatbuffer_scorer(
+            path, ["q.size", "kernel.tile"], objective="min", physical=False
+        )(frame)
+
+    result = scores(scheduled)
+    assert not isinstance(result, StagedPredictions)
+    # The group decision is per catalog: this frame's rows outside it score -inf.
+    assert np.isneginf(result).any() and np.isfinite(result).any()
+    np.testing.assert_array_equal(result, scores(plain))
+
+
 def test_evaluation_ranks_pruned_rows_after_usable_survivors_and_before_unusable_ones():
     frame = pd.DataFrame(
         {
@@ -272,6 +480,38 @@ def test_evaluation_ranks_pruned_rows_after_usable_survivors_and_before_unusable
     assert pick(staged([-np.inf] * 4, [2, 0, 0, 0], [0, 5.0, 3.0, 4.0])) == 2.0
 
 
+def test_evaluation_breaks_a_tie_between_pruned_rows_toward_the_earlier_row_under_max():
+    frame = pd.DataFrame(
+        {
+            "benchmark": "g",
+            "device": "d",
+            "kernel": ["a", "b", "c", "d"],
+            "pack": "p",
+            "dispatch": "d",
+            "tflops": [4.0, 1.0, 2.0, 3.0],
+            "is_valid": "True",
+        }
+    )
+
+    def pick(partial) -> float:
+        scorer = lambda _: StagedPredictions(  # noqa: E731
+            predictions=np.full(4, -np.inf),
+            stage=np.zeros(4, dtype=int),
+            partial=np.asarray(partial, dtype=float),
+            stages=1,
+        )
+        result = evaluate_corpus(
+            frame, scorer, target="tflops", objective="max", eval_fraction=1.0
+        )
+        return result.problems[0].picked_value
+
+    # Nothing survived: the largest partial sum leads under max, and of the two rows tied
+    # for it (b, d) the earlier one in the corpus is picked.
+    assert pick([1.0, 5.0, 3.0, 5.0]) == 1.0
+    assert pick([1.0, 5.0, 3.0, 6.0]) == 3.0
+    assert pick([7.0, 5.0, 3.0, 6.0]) == 4.0
+
+
 def test_out_of_fold_catalogs_feed_the_choice():
     frame = _ranking_frame(rows=200, problems=20)
     record: list = []
@@ -295,9 +535,19 @@ def test_out_of_fold_catalogs_feed_the_choice():
         record[0], frame["benchmark"].to_numpy(), frame["minTimeMs"].to_numpy()
     )
     assert len(catalogs) == 20
-    choice = choose_schedule(catalogs, record[0]["trees"], "min")
-    assert choice.full["mean_regret"] >= 0.0
-    assert all(stage[0] < record[0]["trees"] for stage in choice.schedule)
+    trees = record[0]["trees"]
+    choice = choose_schedule(catalogs, trees, "min")
+    # Full scoring's top-1 regret under min, from the catalogs alone.
+    regrets = [
+        float(measured[np.argmin(full)] / measured.min() - 1.0)
+        for _, full, measured in catalogs
+    ]
+    assert choice.full["mean_regret"] > 0.0
+    assert choice.full["mean_regret"] == pytest.approx(np.mean(regrets))
+    assert choice.full["p95_regret"] == pytest.approx(np.quantile(regrets, 0.95))
+    assert len(choice.candidates) == len(candidate_schedules(trees))
+    for stage in choice.schedule:
+        assert stage[0] < trees
 
 
 _PROVENANCE = {
@@ -307,13 +557,17 @@ _PROVENANCE = {
 }
 
 
-def _train(tmp_path: Path, *extra: str) -> tuple[int, Path]:
+def _train(
+    tmp_path: Path, *extra: str, rows: int = 1200, problems: int = 40
+) -> tuple[int, Path]:
     import json
 
     from uhd_gen.__main__ import main
 
     corpus = tmp_path / "corpus.csv"
-    _ranking_frame(rows=400, problems=40).to_csv(corpus, index=False)
+    frame = _ranking_frame(rows=rows, problems=problems)
+    frame["avgTimeMs"] = frame["minTimeMs"]
+    frame.to_csv(corpus, index=False)
     snapshot = tmp_path / "provenance.json"
     snapshot.write_text(json.dumps(_PROVENANCE), encoding="utf-8")
     output = tmp_path / "model"
@@ -364,21 +618,70 @@ def test_train_writes_a_requested_schedule(tmp_path, evaluator):
 
 
 def test_train_chooses_a_schedule_and_records_the_candidates(tmp_path, evaluator):
+    # 30 candidates per problem: enough that a prefix of the trees saves work.
     code, output = _train(tmp_path)
     assert code == 0
     record = _manifest(output)["early_exit"]
     assert record["chosen"] is True
     assert record["candidates"]
+    assert record["schedule"]
     assert _stored_schedule(output) == [tuple(stage) for stage in record["schedule"]]
 
 
+def test_train_ranks_the_held_out_catalogs_in_the_corpus_direction(
+    tmp_path, evaluator, monkeypatch
+):
+    import uhd_gen.early_exit as early_exit
+
+    objectives = []
+    choose = early_exit.choose_schedule
+
+    def spy(catalogs, tree_count, objective):
+        objectives.append(objective)
+        return choose(catalogs, tree_count, objective)
+
+    monkeypatch.setattr(early_exit, "choose_schedule", spy)
+    code, _ = _train(tmp_path)  # `--objective min`
+    assert code == 0
+    assert objectives == ["min"]
+
+
 def test_train_writes_no_schedule_when_asked_for_none(tmp_path, evaluator):
+    # The corpus on which auto writes a schedule.
     code, output = _train(tmp_path, "--early-exit", "none")
     assert code == 0
     assert _stored_schedule(output) == []
+    assert _manifest(output)["early_exit"] == {"schedule": [], "chosen": False}
 
 
-def test_an_explicit_schedule_on_a_calibrated_model_is_refused():
+def test_train_chooses_no_schedule_for_a_calibrated_model(tmp_path, evaluator):
+    # A calibrated ranking reads every candidate's estimate, which a pruned one lacks.
+    code, output = _train(
+        tmp_path,
+        "--metric",
+        "time",
+        "--calibrated",
+        "--timing-statistic",
+        "avgTimeMs",
+        "--target",
+        "avgTimeMs",
+    )
+    assert code == 0
+    assert _stored_schedule(output) == []
+    assert _manifest(output)["early_exit"] == {"schedule": [], "chosen": False}
+
+
+@pytest.mark.parametrize(
+    "unsupported, reason",
+    [
+        ({"calibrated": True}, "--calibrated"),
+        ({"role": "predict_engine"}, "single-layer sort_kernel_catalog"),
+        ({"group_by_feature": "size"}, "single-layer sort_kernel_catalog"),
+    ],
+)
+def test_an_explicit_schedule_the_runtime_would_not_apply_is_refused(
+    unsupported, reason
+):
     import argparse
 
     from uhd_gen.__main__ import _early_exit_request
@@ -387,10 +690,11 @@ def test_an_explicit_schedule_on_a_calibrated_model_is_refused():
         early_exit="30:16",
         role="sort_kernel_catalog",
         group_by_feature=None,
-        calibrated=True,
+        calibrated=False,
     )
-    # A pruned candidate carries no estimate, and a calibrated ranking reads every one.
-    with pytest.raises(ValueError, match="--calibrated"):
-        _early_exit_request(args, groups=[0])
-    args.calibrated = False
     assert _early_exit_request(args, groups=[0]) == [(30, 16)]
+    # A pruned candidate carries no estimate, a calibrated ranking reads every one,
+    # predict_engine scores one row, and a grouped model's runtime ignores the schedule.
+    vars(args).update(unsupported)
+    with pytest.raises(ValueError, match=reason):
+        _early_exit_request(args, groups=[0])

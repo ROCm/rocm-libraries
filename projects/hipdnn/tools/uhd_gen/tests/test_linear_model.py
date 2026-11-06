@@ -497,6 +497,9 @@ def test_an_infinite_training_value_still_writes_a_model_the_runtime_loads(tmp_p
     # The finite rows set the standardization the clean corpus would have had.
     term = list(ranker.basis_features).index(2)
     assert ranker.mean[term] == pytest.approx(clean.mean[term], rel=0.05)
+    # And the range: an infinite value must not stand in as an end of it.
+    np.testing.assert_allclose(ranker.lo[term], clean.lo[term], rtol=0.2, atol=0.2)
+    np.testing.assert_allclose(ranker.hi[term], clean.hi[term], rtol=0.2, atol=0.2)
 
 
 def test_a_term_is_clamped_to_its_training_range_and_a_floor_is_each_configs_best():
@@ -703,6 +706,51 @@ def test_train_emits_a_valid_linear_data_uhd(tmp_path, evaluator):
     assert manifest["key_features"] == ["kernel.tile", "kernel.stages"]
     assert manifest["score_metric"] is None and manifest["score_calibrated"] is False
     assert not (output / "model.lgbm").exists()
+
+
+def test_train_fits_the_families_ridge_and_row_threshold_it_is_given(
+    tmp_path, evaluator
+):
+    def fit(name, *extra):
+        directory = tmp_path / name
+        directory.mkdir()
+        code, output = _train(directory, evaluator, *extra)
+        assert code == 0
+        manifest = json.loads(
+            (output / "train_manifest.json").read_text(encoding="utf-8")
+        )
+        descriptor = json.loads(
+            (output / "heuristic.uhd.json").read_text(encoding="utf-8")
+        )
+        ranker = load_linear_artifact(
+            output / "model.bin", descriptor["linear_data"]["hash"], feature_count=4
+        )
+        return manifest, ranker
+
+    default, base = fit("default")
+    given = ("--family-features", "kernel.tile", "--ridge", "5.0")
+    asked, family = fit("asked", *given, "--min-rows", "100")
+    _, thin = fit("thin", *given)
+
+    assert [default[key] for key in ("num_families", "ridge", "min_rows")] == [
+        0,
+        0.01,
+        10,
+    ]
+    assert default["family_features"] == [] and base.family_features == []
+    assert [asked[key] for key in ("num_families", "ridge", "min_rows")] == [
+        2,
+        5.0,
+        100,
+    ]
+    assert asked["family_features"] == ["kernel.tile"]
+    # The stored model is what was asked: its families, and the shrinkage of each fit.
+    assert family.family_features == [0] and len(family.family_floors) == 2
+    assert not np.allclose(family.global_coefficients, base.global_coefficients)
+    # Of the same fit with the default threshold, every config has fewer rows than 100
+    # and is shrunk harder.
+    np.testing.assert_allclose(family.global_coefficients, thin.global_coefficients)
+    assert not np.allclose(family.config_coefficients, thin.config_coefficients)
 
 
 def test_the_trained_model_ranks_the_fastest_candidate_first_when_evaluated(

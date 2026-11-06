@@ -52,3 +52,12 @@ def encoding_of(path: Path) -> tuple[str, str | None]:
     stored = {names[tree.leavesType] for tree in trees}
     assert len(stored) == 1, stored
     return stored.pop()
+
+
+def schedule_of(path: Path) -> list[tuple[int, int]]:
+    """The (trees, keep) early-exit stages a written `model.bin` stores."""
+    import uhd_gen  # noqa: F401  puts _generated/ on sys.path
+    from hipdnn_flatbuffers_sdk.data_objects.GbdtModel import GbdtModelT
+
+    model = GbdtModelT.InitFromPackedBuf(bytearray(Path(path).read_bytes()), 0)
+    return [(stage.trees, stage.keep) for stage in model.earlyExit or []]

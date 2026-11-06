@@ -18,7 +18,11 @@ pytest.importorskip("pyarrow")
 pytest.importorskip("lightgbm")
 pytest.importorskip("flatbuffers")
 
-from uhd_gen.tests.model_bin import ENCODING_FLAGS, encoding_of  # noqa: E402
+from uhd_gen.tests.model_bin import (  # noqa: E402
+    ENCODING_FLAGS,
+    encoding_of,
+    schedule_of,
+)
 
 PROBLEMS = 40
 
@@ -270,3 +274,42 @@ def test_a_published_dataset_is_written_in_the_encoding_asked_for(
     )
     assert code == 0
     assert encoding_of(output / "model" / "model.bin") == written
+
+
+def test_a_published_dataset_is_written_with_the_early_exit_schedule_asked_for(
+    published, evaluator
+):
+    code, output = _generate(
+        published,
+        evaluator,
+        "scheduled",
+        *FEATURES,
+        "--target",
+        "tflops",
+        "--objective",
+        "max",
+        "--early-exit",
+        "3:4",
+    )
+    assert code == 0
+    assert schedule_of(output / "model" / "model.bin") == [(3, 4)]
+
+
+def test_a_published_dataset_trains_the_adapter_asked_for(published, evaluator):
+    code, output = _generate(
+        published,
+        evaluator,
+        "linear",
+        *FEATURES,
+        "--target",
+        "tflops",
+        "--objective",
+        "max",
+        "--adapter",
+        "linear_data",
+    )
+    assert code == 0
+    uhd = json.loads((output / "model" / "heuristic.uhd.json").read_text())
+    # A linear_data score is a log slowdown, lower is better, in no registered unit.
+    assert (uhd["adapter"], uhd["objective"]) == ("linear_data", "min")
+    assert "score" not in uhd and "tree_data" not in uhd
