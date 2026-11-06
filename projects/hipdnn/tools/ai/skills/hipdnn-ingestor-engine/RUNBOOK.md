@@ -974,6 +974,13 @@ among variants sharing its other knobs, which divide every shape a larger tile d
      --report "$EVIDENCE/variant_reduce.md"
    ```
 
+   A slotted engine reduces per slot and passes `--kdp` once per pack (each slot's KDPs under
+   `$FINAL_DESCRIPTOR_ROOT`). `--budget` and `reduction.aot_budget_per_arch` bound each pack
+   per arch. A timing phase with no records for a slot is exit 3. Rule ids are per slot, and
+   the loss they report bounds each slot with the other slots at their reference picks, not
+   the whole program; stage 7's full-corpus run is the program-level check. See the
+   IngestorGenerator README, *Reducing a slotted engine*.
+
 5. **Apply what the user picks.** Set `RULES` to the comma-separated rule ids the user
    chose from the report's rule table (`R` and six hex digits, derived from the rule
    text, so an id is stable while the rule's text is; a `keep X=v only for <cells>` rule
