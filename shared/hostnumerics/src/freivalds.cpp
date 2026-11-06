@@ -202,11 +202,8 @@ uint64_t freivaldsResidue(int64_t value) {
     return residue < 0 ? static_cast<uint64_t>(residue + static_cast<int64_t>(p))
                        : static_cast<uint64_t>(residue);
 }
-namespace {
-template <FreivaldsProbeAlgorithm Algorithm>
-uint64_t preparedProbe(uint64_t seed, uint64_t index) {
+uint64_t freivaldsProbe(uint64_t seed, uint64_t index) {
     uint64_t word = splitmix(splitmix(seed) ^ index);
-    if constexpr (Algorithm == FreivaldsProbeAlgorithm::SplitMix64Legacy) return 1 + word % (p - 1);
     // Mapping uniform words to 61 bits and rejecting endpoints avoids modulo
     // bias. The seeded PRNG is reproducible, not a proof of independent probes.
     for (uint64_t attempt = 1;; ++attempt) {
@@ -214,21 +211,6 @@ uint64_t preparedProbe(uint64_t seed, uint64_t index) {
         if (residue != 0 && residue != p) return residue;
         word = splitmix(word + attempt);
     }
-}
-using ProbeFunction = uint64_t (*)(uint64_t, uint64_t);
-ProbeFunction probeFunction(FreivaldsProbeAlgorithm algorithm) {
-    switch (algorithm) {
-        case FreivaldsProbeAlgorithm::SplitMix64Legacy:
-            return preparedProbe<FreivaldsProbeAlgorithm::SplitMix64Legacy>;
-        case FreivaldsProbeAlgorithm::SplitMix64Rejection:
-            return preparedProbe<FreivaldsProbeAlgorithm::SplitMix64Rejection>;
-        default:
-            throw std::runtime_error("Invalid Freivalds probe algorithm.");
-    }
-}
-}  // namespace
-uint64_t freivaldsProbe(uint64_t seed, uint64_t index, FreivaldsProbeAlgorithm algorithm) {
-    return probeFunction(algorithm)(seed, index);
 }
 
 Tensor reduceFreivaldsProjections(const Tensor& partials) {
@@ -297,8 +279,7 @@ Tensor FreivaldsPlan::copyExpectedColumnSums() const {
 FreivaldsPreparation prepareFreivalds(const Tensor& a, const Tensor& b,
                                       const MatmulOptions& operation,
                                       const EpilogueOptions& epilogue, ScalarType outputType,
-                                      const FreivaldsProbeOptions& probes,
-                                      const FreivaldsLimits& limits) {
+                                      uint64_t probeSeed, const FreivaldsLimits& limits) {
     if (a.shape().rank() != 2 || b.shape().rank() != 2 || a.shape()[1] != b.shape()[0])
         throw std::runtime_error("Freivalds requires compatible rank-two operands.");
     const size_t m = a.shape()[0], n = b.shape()[1], k = a.shape()[1];
@@ -320,9 +301,6 @@ FreivaldsPreparation prepareFreivalds(const Tensor& a, const Tensor& b,
            outputType == ScalarType::Int8)))
         return unsupported(
             "Freivalds requires supported exact-integer matmul and linear epilogue semantics.");
-    if (probes.algorithm != FreivaldsProbeAlgorithm::SplitMix64Legacy &&
-        probes.algorithm != FreivaldsProbeAlgorithm::SplitMix64Rejection)
-        throw std::runtime_error("Invalid Freivalds probe algorithm.");
     auto data = std::make_shared<FreivaldsPlan::Data>();
     data->limits = limits;
     data->computeType = operation.accumulatorType;
@@ -482,14 +460,13 @@ FreivaldsPreparation prepareFreivalds(const Tensor& a, const Tensor& b,
                                            data->statistics};
     request.rightProbe.resize(n);
     request.leftProbe.resize(m);
-    const auto probe = probeFunction(probes.algorithm);
     std::vector<uint64_t> right(n), left(m);
     for (size_t j = 0; j < n; ++j) {
-        request.rightProbe[j] = probe(2 * probes.seed, j);
+        request.rightProbe[j] = freivaldsProbe(2 * probeSeed, j);
         right[j] = multiplyResidues(request.rightProbe[j], freivaldsResidue(data->columnScale[j]));
     }
     for (size_t i = 0; i < m; ++i) {
-        request.leftProbe[i] = probe(2 * probes.seed + 1, i);
+        request.leftProbe[i] = freivaldsProbe(2 * probeSeed + 1, i);
         left[i] = multiplyResidues(request.leftProbe[i], freivaldsResidue(data->rowScale[i]));
     }
     auto br = project(*data->b, right, false);

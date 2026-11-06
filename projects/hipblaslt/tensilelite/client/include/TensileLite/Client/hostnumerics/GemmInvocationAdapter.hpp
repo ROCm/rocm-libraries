@@ -174,9 +174,9 @@ namespace TensileLite::Client::hostnumerics
 
         // Reuses the numerical translation without allocating reference outputs.
         roc::hostnumerics::FreivaldsPreparation
-                                  prepareFreivalds(size_t                                          batch,
-                                                   const roc::hostnumerics::FreivaldsProbeOptions& probes,
-                                                   const roc::hostnumerics::FreivaldsLimits&       limits) const;
+                                  prepareFreivalds(size_t                                    batch,
+                                                   uint64_t                                  probeSeed,
+                                                   const roc::hostnumerics::FreivaldsLimits& limits) const;
         roc::hostnumerics::Layout outputLayout(size_t batch) const;
 
     private:

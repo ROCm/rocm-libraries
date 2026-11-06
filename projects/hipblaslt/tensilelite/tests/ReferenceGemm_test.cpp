@@ -326,7 +326,7 @@ TEST(ReferenceInvocationAdapter, BatchBoundsUseResultsForRecoverableAPIs)
     ASSERT_TRUE(std::holds_alternative<hostnumerics::TranslationFailure>(batch));
     EXPECT_EQ(std::get<hostnumerics::TranslationFailure>(batch).code,
               hostnumerics::TranslationFailureCode::InvalidBatchIndex);
-    const auto prepared = adapter.prepareFreivalds(1, {}, {});
+    const auto prepared = adapter.prepareFreivalds(1, 0, {});
     EXPECT_TRUE(std::holds_alternative<roc::hostnumerics::FreivaldsPreparationFailure>(prepared));
     EXPECT_THROW(adapter.outputLayout(1), std::runtime_error);
     EXPECT_EQ(d, -99);
@@ -2305,7 +2305,7 @@ TEST(ReferenceInvocationAdapter, FreivaldsUsesScaledStridedBatchesAndPreservesOu
     std::vector<hn::FreivaldsPlan> plans;
     for(size_t batch = 0; batch < batches; ++batch)
     {
-        auto prepared = adapter.prepareFreivalds(batch, {}, {});
+        auto prepared = adapter.prepareFreivalds(batch, 0, {});
         ASSERT_TRUE(std::holds_alternative<hn::FreivaldsPlan>(prepared))
             << std::get<hn::FreivaldsPreparationFailure>(prepared).reason;
         plans.push_back(std::get<hn::FreivaldsPlan>(std::move(prepared)));
@@ -2337,7 +2337,7 @@ TEST(ReferenceInvocationAdapter, FreivaldsUsesScaledStridedBatchesAndPreservesOu
         roc::hostnumerics::LastDimensionFastest{});
     ASSERT_TRUE(std::holds_alternative<hostnumerics::GemmInvocationAdapter>(changed));
     auto refused
-        = std::get<hostnumerics::GemmInvocationAdapter>(changed).prepareFreivalds(0, {}, {});
+        = std::get<hostnumerics::GemmInvocationAdapter>(changed).prepareFreivalds(0, 0, {});
     ASSERT_TRUE(std::holds_alternative<hn::FreivaldsPreparationFailure>(refused));
     EXPECT_EQ(std::get<hn::FreivaldsPreparationFailure>(refused).status,
               hn::VerificationStatus::Unsupported);

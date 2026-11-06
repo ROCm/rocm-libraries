@@ -155,14 +155,13 @@ is nonzero. Error magnitudes in the certified fast range cannot alias to zero
 modulo P. The second direction supplies column diagnostics as well as another
 check.
 
-The supplied SplitMix algorithms produce reproducible seeded vectors. They
-are not independent random field samples, cryptographic challenges, or a
-guarantee against errors chosen after seeing the probes. The default maps to
-61 bits and rejects endpoints; this mapping is unbiased given independent
-uniform source words. `SplitMix64Legacy` preserves hipBLASLt's established
-modulo mapping and deterministic cases. Do not apply the ideal probability
-bound as a proved guarantee for either seeded generator. Different seeds are
-useful test coverage, rather than an adversarial-security mechanism.
+The probe seed passed to `prepareFreivalds` selects reproducible SplitMix64
+vectors. They are not independent random field samples, cryptographic
+challenges, or a guarantee against errors chosen after seeing the probes. Each
+word maps to 61 bits and rejects the endpoints 0 and P; this mapping is
+unbiased given independent uniform source words. Do not apply the ideal
+probability bound as a proved guarantee for the seeded generator. Different
+seeds are useful test coverage, rather than an adversarial-security mechanism.
 
 ## Resource limits
 

@@ -265,7 +265,7 @@ namespace TensileLite
                 std::vector<FreivaldsBatch> batches;
                 for(size_t batch = 0; batch < adapter.batchCount(); ++batch)
                 {
-                    auto prepared = adapter.prepareFreivalds(batch, {}, {});
+                    auto prepared = adapter.prepareFreivalds(batch, 0, {});
                     if(const auto* failure = std::get_if<FreivaldsPreparationFailure>(&prepared))
                         throw std::invalid_argument("Freivalds: " + failure->reason);
                     batches.emplace_back(std::get<FreivaldsPlan>(std::move(prepared)),

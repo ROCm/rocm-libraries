@@ -82,7 +82,7 @@ namespace
                     hn::MatmulOptions{roc::hostnumerics::ScalarType::Float32},
                     hn::EpilogueOptions{roc::hostnumerics::ScalarType::Float32},
                     type,
-                    {},
+                    0,
                     {});
                 ASSERT_TRUE(std::holds_alternative<hn::FreivaldsPlan>(prepared));
                 plans.push_back(std::get<hn::FreivaldsPlan>(std::move(prepared)));
@@ -128,7 +128,7 @@ namespace
                                                        hn::MatmulOptions{hn::ScalarType::Float32},
                                                        hn::EpilogueOptions{hn::ScalarType::Float32},
                                                        hn::ScalarType::BFloat16,
-                                                       {},
+                                                       0,
                                                        {});
             ASSERT_TRUE(std::holds_alternative<hn::FreivaldsPlan>(prepared));
             const std::array plans{std::get<hn::FreivaldsPlan>(prepared)};
@@ -171,7 +171,7 @@ namespace
                                                    hn::MatmulOptions{hn::ScalarType::Int32},
                                                    hn::EpilogueOptions{hn::ScalarType::Int32},
                                                    hn::ScalarType::Int8,
-                                                   {},
+                                                   0,
                                                    {});
         ASSERT_TRUE(std::holds_alternative<hn::FreivaldsPlan>(prepared));
         const std::array plans{std::get<hn::FreivaldsPlan>(prepared)};
@@ -220,7 +220,7 @@ namespace
                     hn::MatmulOptions{roc::hostnumerics::ScalarType::Float32},
                     hn::EpilogueOptions{roc::hostnumerics::ScalarType::Float32},
                     hipblaslt::hostnumerics::scalarType(apiType),
-                    {},
+                    0,
                     {});
                 ASSERT_TRUE(std::holds_alternative<hn::FreivaldsPlan>(prepared));
                 const std::vector plans{std::get<hn::FreivaldsPlan>(std::move(prepared))};
@@ -363,7 +363,7 @@ namespace
                     hn::MatmulOptions{roc::hostnumerics::ScalarType::Float32},
                     epilogue,
                     type,
-                    {},
+                    0,
                     {});
                 ASSERT_TRUE(std::holds_alternative<hn::FreivaldsPlan>(prepared));
                 const auto&     plan   = std::get<hn::FreivaldsPlan>(prepared);
@@ -404,7 +404,7 @@ namespace
                                    hn::MatmulOptions{roc::hostnumerics::ScalarType::Float32},
                                    hn::EpilogueOptions{roc::hostnumerics::ScalarType::Float32},
                                    hn::ScalarType::Int8,
-                                   {},
+                                   0,
                                    {});
         ASSERT_TRUE(std::holds_alternative<hn::FreivaldsPlan>(prepared));
         const std::array plans{std::get<hn::FreivaldsPlan>(prepared)};
