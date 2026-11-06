@@ -100,6 +100,9 @@ def test_get_rocm_version_rejects_info_version_only(monkeypatch, tmp_path):
     (info_dir / "version").write_text("6.4.0")
     monkeypatch.delenv("ROCM_VERSION", raising=False)
     monkeypatch.setenv("ROCM_PATH", str(tmp_path))
+    # HIP_PATH is the second root the chain tries; a real one set in the environment
+    # would answer before the chain could reach its failure.
+    monkeypatch.delenv("HIP_PATH", raising=False)
     import shutil as _shutil
     monkeypatch.setattr(_shutil, "which", lambda name: None)
     monkeypatch.setattr(C, "_DEFAULT_ROCM_ROOT", tmp_path / "nonexistent")

@@ -3452,10 +3452,13 @@ def test_the_generators_build_for_the_architecture_the_device_reported(
     change what an ordinary architecture builds."""
     script = _TENSILELITE / generator
     out = tmp_path / "kernel.s"
+    # PREPEND, do not replace: the generator also imports rocisa, which an uninstalled
+    # tree supplies through the caller's PYTHONPATH. Erasing it hides rocisa from the child.
     env = dict(
         os.environ,
         ROCM_PATH=str(_rocmShimReporting(tmp_path, reported)),
-        PYTHONPATH=str(_TENSILELITE),
+        PYTHONPATH=os.pathsep.join(
+            p for p in (str(_TENSILELITE), os.environ.get("PYTHONPATH", "")) if p),
     )
 
     result = subprocess.run(

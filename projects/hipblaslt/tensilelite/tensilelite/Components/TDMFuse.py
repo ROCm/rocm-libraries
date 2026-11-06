@@ -4,9 +4,11 @@
 
   TDMFuse=0  {A,B} + {MXSA,MXSB}   default two-way parity
   TDMFuse=1  {A,MXSA} + {MXSB,B}   paired: each scale on a data tensor
+             {A} + {B}             unfused: the same row with no scale to pair, nothing shares
   TDMFuse=2  {A,MXSA,MXSB} + {B}   block split; with both scales 2/1/1 on 4 waves,
                                    and on 2 waves MXSA and MXSB share wave 1
   TDMFuse=3  {B,MXSA,MXSB} + {A}   the mirror of 2, same split and wave counts
+  TDMFuse=4  {A,B},{A},{B} + {MXSA,MXSB}   0's sets, region 0 fused then one at a time
 
 A set splits its waves over the members the problem carries (tdmWaveShares), so
 the waves of a missing MX scale go to the rest of its set. Without MX scales
@@ -16,7 +18,8 @@ split by wave parity. With one scale, that scale takes every wave of the
 TDMFuse=0 scale set, shares its data tensor's set with it on TDMFuse 1-3, and
 the other data tensor of TDMFuse 1-3 rides every wave of a set of its own.
 TDMFuse 1-3 need more than one wave: a one-wave kernel, like a subtile kernel at
-every wave count, keeps one descriptor per tensor.
+every wave count, keeps one descriptor per tensor. TDMFuse=4 keeps 0's sets and
+stages the region walk instead, so it needs UseLoopModel and a matching split.
 
 TDM_FUSE_GROUPING maps stable, name-bearing integers to TDM_GROUPS rows.
 """
@@ -28,7 +31,10 @@ import itertools
 class TdmGrouping:
     """One row of the grouping table.
 
-    groups  member tuples, one per descriptor set; member order is wave order.
+    groups  member tuples, one per MOVEMENT, in issue order; member order is wave order.
+            A tuple repeating a tensor already seated is a LATER step of that set's region
+            walk -- the region it moves on its own, the rest of the set NULLed across it.
+            Everything that asks who shares a descriptor takes the first tuple naming it.
     layout  "parity" splits a k-member group by wave index modulo k; "block"
             gives contiguous shares, remainder to the leading members.
     """
@@ -46,10 +52,14 @@ TDM_GROUPS = {
     "paired": TdmGrouping("paired", (("A", "MXSA"), ("MXSB", "B"))),
     "A_MX": TdmGrouping("A_MX", (("A", "MXSA", "MXSB"), ("B",)), layout="block"),
     "B_MX": TdmGrouping("B_MX", (("B", "MXSA", "MXSB"), ("A",)), layout="block"),
+    "AB_first": TdmGrouping("AB_first", (("A", "B"), ("A",), ("B",), ("MXSA", "MXSB"))),
+    # Paired with nothing to pair: the scales keep their SEATS so a dead member still
+    # answers tdmWavePartition; liveGroups is what drops them, leaving {A} + {B}.
+    "unfused": TdmGrouping("paired", (("A", "MXSA"), ("MXSB", "B"))),
 }
 
 # Baked into shipped solution names, so these integers cannot move.
-TDM_FUSE_GROUPING = {0: "MX_AB", 1: "paired", 2: "A_MX", 3: "B_MX"}
+TDM_FUSE_GROUPING = {0: "MX_AB", 1: "paired", 2: "A_MX", 3: "B_MX", 4: "AB_first"}
 
 
 def tdmBothTensors(ks):
@@ -58,15 +68,22 @@ def tdmBothTensors(ks):
     return bool(tdmInst & 0x01) and bool(tdmInst & 0x02)
 
 
+def _noScaleToPair(ks):
+    """True when NEITHER tensor carries a scale; one live scale still rides its data set."""
+    pt = ks.get("ProblemType") or {}
+    return not (pt.get("MXBlockA") or pt.get("MXBlockB"))
+
+
 def _tdmFuseCanShareDescriptors(ks):
     """Preconditions of every row but the default, with or without MX scales.
 
-    Includes writer-visible TDMSplit states; the sets need more than one wave
-    to split over.
+    The split does not refuse here: `TDMSplitA`/`TDMSplitB` are per operand, and a fused
+    group's members agreeing on region count is Solution.py's rule. The sets still need
+    more than one wave to split over.
     """
     if not tdmBothTensors(ks):
         return False
-    if ks.get("TDMSplit") or ks.get("UseSubtileImpl"):
+    if ks.get("UseSubtileImpl"):
         return False
     return ks.get("NumWaves", 1) > 1
 
@@ -87,12 +104,27 @@ def _acceptAlways(ks):
     return True
 
 
+def _acceptStaggeredRegions(ks):
+    """AB_first needs a later region to stagger, so both data tensors must be split alike.
+
+    An unsplit member already rides region 0 and is NULLed for the rest, which IS the default
+    row's behaviour -- staggering adds nothing until both members own the same later regions.
+    Only GIR brackets a solo load; off UseLoopModel the row would silently be TDMFuse=0.
+    """
+    from .TDMSplit import split_of
+    if not (ks.get("UseLoopModel") and tdmBothTensors(ks) and ks.get("NumWaves", 1) > 1):
+        return False
+    return split_of(ks, "A")[0] > 1 and split_of(ks, "A")[0] == split_of(ks, "B")[0]
+
+
 # Every mapped row needs an acceptance predicate; tdmGroupingName rejects omissions.
 _GROUPING_ACCEPTED = {
     "MX_AB": _acceptAlways,
     "paired": _acceptPairedSets,
     "A_MX": _acceptSharedScaleSet,
     "B_MX": _acceptSharedScaleSet,
+    "AB_first": _acceptStaggeredRegions,
+    "unfused": _acceptPairedSets,
 }
 
 # The row a declined grouping falls back to, which is also TDMFuse=0's row.
@@ -115,11 +147,18 @@ def tdmGroupingName(ks):
     return name
 
 
+def tdmGroupingAccepted(ks):
+    """True when the requested grouping can be produced."""
+    return bool(_GROUPING_ACCEPTED[tdmGroupingName(ks)](ks))
+
+
 def tdmGrouping(ks):
     """Return the accepted grouping, or the default when declined."""
     name = tdmGroupingName(ks)
     if not _GROUPING_ACCEPTED[name](ks):
         return TDM_GROUPS[TDM_GROUPING_DEFAULT]
+    if name == "paired" and _noScaleToPair(ks):
+        return TDM_GROUPS["unfused"]
     return TDM_GROUPS[name]
 
 
@@ -167,6 +206,17 @@ def liveGroups(ks, grouping=None):
         if members:
             live.append(members)
     return tuple(live)
+
+
+def tdmFusedGroups(ks):
+    """The groups that actually ride one cooperative tensor_load_to_lds.
+
+    A one-member set moves on its own descriptor with every wave cooperating, which is what an
+    unfused operand already does, so only the sets with a member to select between are here.
+    """
+    if not tdmWaveSeparated(ks):
+        return ()
+    return tuple(group for group in liveGroups(ks) if len(group) > 1)
 
 
 # Descriptor ownership expected by PrefetchAcrossPersistent.
@@ -221,6 +271,33 @@ def tdmSetOwner(ks, tc):
         if member in TDM_DATA_TENSORS:
             return member
     return group[0]
+
+
+def tdmSetOwners(ks):
+    """`{member: owner}` over the live members -- the aliasing that IS the fuse.
+
+    Every member of a fused set but its owner is a RegSet onto the owner, so the set is one
+    physical descriptor. An operand in no fused set owns its own. Subtile keeps per-wave
+    descriptors, so it asks the writer's `tdmDescriptorSetOwner` instead.
+    """
+    owners = {member: member for group in liveGroups(ks) for member in group}
+    for group in tdmFusedGroups(ks):
+        for member in group:
+            owners[member] = tdmSetOwner(ks, member)
+    return owners
+
+
+def tdmSetIncsSgpr(ks, tc):
+    """The SGPR holding one advance of `tc`'s descriptor set.
+
+    The two set registers keep their historical names whatever the row seats on them: the first
+    set advances through `tdmABIncs` and the second through `tdmMXSAMXSBIncs`. An operand on no
+    fused set advances by its own `GlobalReadIncs`.
+    """
+    for index, group in enumerate(tdmFusedGroups(ks)):
+        if tc in group:
+            return "tdmABIncs" if index == 0 else "tdmMXSAMXSBIncs"
+    return "GlobalReadIncs%s" % tc
 
 
 def tdmSharedScaleSet(ks):
@@ -375,10 +452,13 @@ def tdmWaveShares(grouping, numWaves, isLive):
     Reads nothing but its arguments: `isLive(tc)` says which members the
     problem carries.
     """
-    return {tc: (numComp, waves)
-            for group in grouping.groups
-            for tc, (waves, numComp) in zip(
-                group, _setWaveShares(group, grouping.layout, numWaves, isLive))}
+    shares = {}
+    for group in grouping.groups:
+        for tc, (waves, numComp) in zip(
+                group, _setWaveShares(group, grouping.layout, numWaves, isLive)):
+            # A later tuple repeating a member is a region step; the first names its seat.
+            shares.setdefault(tc, (numComp, waves))
+    return shares
 
 
 def tdmWavePartition(ks, tc):
@@ -473,6 +553,32 @@ def tdmWaveComponents(ks, tc):
         "tensor %s rides waves %s over %d components, and no offset and right-shift of "
         "WaveIdx maps that onto components 0..%d: shifting by one gives %s"
         % (tc, waves, numComp, numComp - 1, tuple(w >> 1 for w in waves)))
+
+
+def tdmGroupWaveRanges(ks, group):
+    """`[(member index, first wave, wave count)]` for one set, or None where parity selects.
+
+    None is the even/odd split of a two-member parity set, the one every shipped fused kernel
+    emits; a contiguous range is what lets a set divide its waves unevenly.
+    """
+    if len(group) == 2 and tdmGrouping(ks).layout == "parity":
+        return None
+    ranges = []
+    for index, tc in enumerate(group):
+        waves = tdmWavePartition(ks, tc)[1]
+        if waves != tuple(range(waves[0], waves[0] + len(waves))):
+            raise TdmArrangementNotEmittable(
+                "the range selector takes contiguous shares; %s rides waves %s" % (tc, waves))
+        ranges.append((index, waves[0], len(waves)))
+    return ranges
+
+
+def tdmParityOrder(ks, group):
+    """`(even member, odd member)` of a two-member parity set, from the wave partition."""
+    if len(group) != 2:
+        raise TdmArrangementNotEmittable(
+            "a parity order needs exactly two members; %s has %d" % (group, len(group)))
+    return tuple(group) if 0 in tdmWavePartition(ks, group[0])[1] else (group[1], group[0])
 
 
 def tdmRidesEveryWave(ks, tc):

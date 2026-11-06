@@ -421,11 +421,10 @@ class TestMaskAxisPerGrouping:
                     % (group1, group1, tc)) in mod, (tc, mod)
             assert "OddWave" not in mod, (tc, mod)
 
-    def test_declined_grouping_keeps_combined_mask(self):
-        # TDMSplit declines TDMFuse=1, which falls back to the MX_AB row.
-        k = _kernel(clusterDim=(2, 4), tdmFuse=1, mx=True)
-        k["TDMSplit"] = True
-        assert _c().usesCombinedMask(k)
+    def test_scaleless_pairing_splits_the_mask(self):
+        # With no scale to pair, TDMFuse=1 resolves to the unfused row: A and B hold separate
+        # descriptors, so each needs its own mask rather than one selected by wave parity.
+        assert not _c().usesCombinedMask(_kernel(clusterDim=(2, 4), tdmFuse=1, mx=False))
 
 
 if __name__ == "__main__":
