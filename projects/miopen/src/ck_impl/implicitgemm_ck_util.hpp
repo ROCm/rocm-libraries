@@ -8,11 +8,13 @@
 #include <miopen/kernel_tuning_mode.hpp>
 
 #include <limits>
+#include <map>
 #include <memory>
 #include <shared_mutex>
 #include <string>
 #include <typeindex>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
@@ -277,6 +279,32 @@ private:
     std::vector<bool> large_tensor;
     std::unordered_map<std::string, std::size_t> index;
 };
+
+template <typename CKArgsType, typename = void>
+struct HasSupportKey : std::false_type
+{
+};
+
+template <typename CKArgsType>
+struct HasSupportKey<CKArgsType, std::void_t<decltype(std::declval<const CKArgsType&>().Key())>>
+    : std::true_type
+{
+};
+
+/// Whether any instance supports the problem's arguments; stops at the first that does.
+template <typename DeviceOpType, typename CKArgsType>
+bool AnyCKInstanceSupports(const CKArgsType& args, bool require_large_tensor)
+{
+    const auto& instances = CKInstances<DeviceOpType>::Get();
+    for(std::size_t idx = 0; idx < instances.Size(); ++idx)
+    {
+        if(require_large_tensor && !instances.IsLargeTensor(idx))
+            continue;
+        if(args.IsSupportedBy(instances[idx]))
+            return true;
+    }
+    return false;
+}
 
 template <typename DeviceOpType,
           typename CKArgsType,
@@ -578,23 +606,36 @@ bool IsCKArgsSupported(const ProblemDescriptionType& problem, const std::string&
     return false;
 }
 
+/// For arguments that provide Key(), everything IsSupportedBy() depends on, the answer is
+/// memoized per process and never evicted: every solution query asks it, and otherwise each query
+/// re-runs CK's argument check on instance after instance. Only the yes/no answer is kept; a new
+/// problem is checked outside the lock, and threads racing on it compute the same answer.
 template <typename DeviceOpType,
           typename CKArgsType,
           typename ProblemDescriptionType = miopen::conv::ProblemDescription>
 bool IsCKApplicable(const ProblemDescriptionType& problem)
 {
-    const auto args = CKArgsType{problem};
-
-    const auto& instances           = CKInstances<DeviceOpType>::Get();
+    const auto args                 = CKArgsType{problem};
     const bool require_large_tensor = RequiresLargeTensorCKInstance(problem);
-    for(std::size_t idx = 0; idx < instances.Size(); ++idx)
+    if constexpr(HasSupportKey<CKArgsType>::value)
     {
-        if(require_large_tensor && !instances.IsLargeTensor(idx))
-            continue;
-        if(args.IsSupportedBy(instances[idx]))
-            return true;
+        using Key = std::pair<bool, decltype(args.Key())>;
+        static std::shared_mutex mutex;
+        static std::map<Key, bool> memo;
+        Key key{require_large_tensor, args.Key()};
+        {
+            std::shared_lock lock{mutex};
+            if(const auto it = memo.find(key); it != memo.end())
+                return it->second;
+        }
+        const bool applicable = AnyCKInstanceSupports<DeviceOpType>(args, require_large_tensor);
+        std::unique_lock lock{mutex};
+        return memo.try_emplace(std::move(key), applicable).first->second;
     }
-    return false;
+    else
+    {
+        return AnyCKInstanceSupports<DeviceOpType>(args, require_large_tensor);
+    }
 }
 
 /**

@@ -14,6 +14,7 @@
 #include <cassert>
 #include <cstddef>
 #include <string>
+#include <tuple>
 #include <type_traits>
 #include <vector>
 
@@ -219,6 +220,26 @@ struct CKArgsSplitK
     CKArgsSplitK(const CKArgsSplitK&)            = default;
     CKArgsSplitK(CKArgsSplitK&&)                 = default;
     CKArgsSplitK& operator=(const CKArgsSplitK&) = default;
+
+    /// Everything IsSupportedBy() depends on, so that its answer can be memoized per problem
+    /// (implicitgemm_ck_util.hpp, IsCKApplicable). It must list every member the derived
+    /// MakeArgPtr() reads (directly or through GetNarrowedArrays()); a member missing here would
+    /// make problems that differ only in it share an answer.
+    auto Key() const
+    {
+        return std::tuple{data_type,
+                          alpha_beta_case,
+                          input,
+                          in_strides,
+                          output,
+                          out_strides,
+                          weight,
+                          wei_strides,
+                          strides,
+                          dilation,
+                          lPadding,
+                          rPadding};
+    }
 
     template <typename ConvPtr>
     bool IsSupportedBy(const ConvPtr& conv_ptr) const
