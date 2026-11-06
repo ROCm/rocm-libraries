@@ -83,7 +83,7 @@ class TestIngestorConfigDerivation:
     def test_native_symbols_from_names_another_engines_symbols(self):
         config = make_minimal_config(
             engine=make_engine(
-                name="hipkernel:ConvFwdSeed", native_symbols_from="hipkernel:ConvFwd"
+                name="hipkernel:ConvFwdSeed", native_symbols_from="hipkernel.conv_fwd"
             )
         )
         assert config.native_symbol_namespace == "hipkernel.conv_fwd"
@@ -112,15 +112,28 @@ class TestIngestorConfigDerivation:
         assert config.engine.slug == "attn-v2"
         assert config.native_symbol_namespace == "hipkernel.attn_v2"
 
-    def test_a_hyphenated_native_symbols_from_slug_folds_to_underscores(self):
+    @pytest.mark.parametrize("dims", ["2D", "3D"])
+    def test_a_borrower_names_a_slug_overridden_engines_namespace(self, dims):
+        """``native_symbols_from`` states the namespace whole, so a borrower of an
+        engine whose slug_override departs from its local name's naive snake_case
+        (``unified2_d``) names exactly what that engine registers."""
+        target = make_engine(
+            name=f"hipkernel:Gfx950AttentionUnified{dims}",
+            slug_override=f"gfx950_attention_unified_{dims.lower()}",
+        )
         config = make_minimal_config(
             engine=make_engine(
-                name="hipkernel:AttnV2Seed",
-                native_symbols_from="hipkernel:AttnV2",
-                native_symbols_from_slug="attn-v2",
+                name=f"hipkernel:Gfx950AttentionUnified{dims}Seed",
+                native_symbols_from=target.own_native_symbol_namespace,
             )
         )
-        assert config.native_symbol_namespace == "hipkernel.attn_v2"
+        assert config.native_symbol_namespace == (
+            f"hipkernel.gfx950_attention_unified_{dims.lower()}"
+        )
+        assert config.native_symbol_namespace == target.own_native_symbol_namespace
+        assert config.engine.own_native_symbol_namespace == (
+            f"hipkernel.gfx950_attention_unified{dims[0]}_d_seed"
+        )
 
     def test_graph_match_symbol(self):
         config = make_minimal_config(engine=make_engine(name="hipkernel:ConvFwd"))

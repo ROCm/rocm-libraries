@@ -43,6 +43,7 @@ from .models import (
     KNOWN_ARCH_BASE_IDS,
     LAUNCH_NAME_PATTERN,
     MIN_LAUNCHES,
+    NATIVE_SYMBOL_NAMESPACE_PATTERN,
     PATH_STEM_PATTERN,
     RESERVED_SLOT_NAME,
     ROCKE_TARGETS,
@@ -228,7 +229,6 @@ def load_config(path: Path) -> IngestorConfig:
         heuristic="none" if slotted else engine_raw.get("heuristic", "native"),
         census_name_symbol=engine_raw.get("census_name_symbol"),
         native_symbols_from=engine_raw.get("native_symbols_from", ""),
-        native_symbols_from_slug=engine_raw.get("native_symbols_from_slug"),
         shared_workspace=engine_raw.get("shared_workspace", ""),
         slug_override=engine_raw.get("slug"),
         heuristics=_load_heuristics(engine_raw, slotted),
@@ -1448,7 +1448,6 @@ _KNOWN_ENGINE = frozenset(
         "heuristic",
         "census_name_symbol",
         "native_symbols_from",
-        "native_symbols_from_slug",
         "shared_workspace",
         "slug",
         "heuristics",
@@ -1838,20 +1837,15 @@ def _check_engine_name_scoped(config: IngestorConfig) -> None:
     borrowed = config.engine.native_symbols_from
     if borrowed and (
         not isinstance(borrowed, str)
-        or not ENGINE_NAME_PATTERN.match(borrowed)
-        or borrowed == config.engine.name
+        or not NATIVE_SYMBOL_NAMESPACE_PATTERN.match(borrowed)
+        or borrowed == config.engine.own_native_symbol_namespace
     ):
         raise ConfigError(
-            f"engine.native_symbols_from {borrowed!r} must name ANOTHER engine, "
-            f"scoped 'namespace:local' like engine.name: the engine whose registered "
-            f"native symbols this engine's descriptors name. Omit it to name this "
-            f"engine's own."
-        )
-    if config.engine.native_symbols_from_slug and not borrowed:
-        raise ConfigError(
-            "engine.native_symbols_from_slug is only meaningful alongside "
-            "engine.native_symbols_from: it states the borrowed engine's own "
-            "slug_override, which only matters when symbols are borrowed."
+            f"engine.native_symbols_from {borrowed!r} must state ANOTHER engine's "
+            f"dotted native-symbol namespace, exactly as that engine registers it "
+            f"(e.g. 'hipkernel.gfx950_attention_unified_2d', following its slug), "
+            f"matching ^[A-Za-z0-9_.-]+\\.[A-Za-z0-9_]+$. Omit it to name this "
+            f"engine's own ({config.engine.own_native_symbol_namespace!r})."
         )
     if config.engine.heuristic not in ("native", "none"):
         raise ConfigError(
