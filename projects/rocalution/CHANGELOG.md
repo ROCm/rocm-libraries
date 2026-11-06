@@ -50,7 +50,7 @@ Full documentation for rocALUTION is available at [https://rocm.docs.amd.com/pro
 * Fixed GMRES and FGMRES returning NaN when a cycle solves the system exactly below the minimum iteration count. They now stop with the exact solution and status 0, as no tolerance is reached below the minimum.
 * Fixed the residual history file dropping the last residual and, after a second solve, holding the residuals of the first solve.
 * Fixed `ReBuildNumeric()` of the IDR solver clearing its shadow space and of the Chebyshev iteration un-building it, so that the next solve failed.
-* Fixed the IDR solver ending the program at a breakdown. It now stops and returns the last iterate.
+* Fixed the IDR solver ending the program at a breakdown. It now stops and returns the last iterate and its residual. The breakdown checks also catch an M(k,k) or omega of -inf, and infinite values of complex types.
 * Fixed the LU solver ending the program for a DENSE operator.
 
 ## (Unreleased) rocALUTION 4.1.1

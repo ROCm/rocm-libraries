@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -471,8 +471,8 @@ namespace rocalution
                     break;
                 }
 
-                // Check M_kk for zero
-                if(M[DENSE_IND(k, k, s, s)] == std::numeric_limits<ValueType>::infinity())
+                // Check M_kk for inf
+                if(std::abs(M[DENSE_IND(k, k, s, s)]) == std::numeric_limits<double>::infinity())
                 {
                     LOG_INFO("IDR(s) break down ; M(k,k) == inf");
                     breakdown = true;
@@ -508,6 +508,9 @@ namespace rocalution
 
             if(breakdown)
             {
+                // Only a completed cycle counts as an iteration. A breakdown at k == 0 has
+                // not checked the residual of the last x yet
+                this->iter_ctrl_.CheckResidualNoCount(std::abs(res_norm));
                 break;
             }
 
@@ -551,7 +554,7 @@ namespace rocalution
             }
 
             // Check omega for inf
-            if(omega == std::numeric_limits<ValueType>::infinity())
+            if(std::abs(omega) == std::numeric_limits<double>::infinity())
             {
                 LOG_INFO("IDR(s) break down ; w == inf");
                 break;
@@ -712,8 +715,8 @@ namespace rocalution
                     break;
                 }
 
-                // Check M_kk for zero
-                if(M[DENSE_IND(k, k, s, s)] == std::numeric_limits<ValueType>::infinity())
+                // Check M_kk for inf
+                if(std::abs(M[DENSE_IND(k, k, s, s)]) == std::numeric_limits<double>::infinity())
                 {
                     LOG_INFO("IDR(s) break down ; M(k,k) == inf");
                     breakdown = true;
@@ -749,6 +752,9 @@ namespace rocalution
 
             if(breakdown)
             {
+                // Only a completed cycle counts as an iteration. A breakdown at k == 0 has
+                // not checked the residual of the last x yet
+                this->iter_ctrl_.CheckResidualNoCount(std::abs(res_norm));
                 break;
             }
 
@@ -795,7 +801,7 @@ namespace rocalution
             }
 
             // Check omega for inf
-            if(omega == std::numeric_limits<ValueType>::infinity())
+            if(std::abs(omega) == std::numeric_limits<double>::infinity())
             {
                 LOG_INFO("IDR(s) break down ; w == inf");
                 break;

@@ -2245,12 +2245,16 @@ TYPED_TEST(solvers, idr_stops_when_the_shadow_space_breaks_down)
     EXPECT_EQ(out.x, Vec<T>(4, 0));
     EXPECT_EQ(out.iterations, 0);
     EXPECT_EQ(out.status, 0);
+    // The breakdown comes before the first residual check and still reports the residual
+    EXPECT_NEAR(out.residual, norm(rhs<T>(4)), loose_tol<T>(1e-12) * norm(rhs<T>(4)));
 }
 
 // The first step of IDR(1) takes U = r = b and M = (P, A b). On the zero matrix M is
 // zero. On the matrix with off-diagonal entries max / 2, the signs of b against those
-// of P make M = |P_0| inf or |P_0| inf - |P_1| inf. On the rotation, (A r, r) = 0
-// makes omega = 0 * (kappa / 0) in the dimension reduction step.
+// of P make M = |P_0| inf, -|P_0| inf or |P_0| inf - |P_1| inf. On the rotation, b = (1, 0)
+// gives M = -P_1, x = (beta, 0) and r = (1, beta) with beta = -P_0 / P_1, so that
+// (A r, r) = beta - beta = 0 exactly makes omega = 0 * (kappa / 0) in the dimension
+// reduction step.
 TYPED_TEST(solvers, idr_reports_the_breakdown_and_stops)
 {
     using T = typename TypeParam::value_type;
@@ -2275,28 +2279,46 @@ TYPED_TEST(solvers, idr_reports_the_breakdown_and_stops)
     const T      sign0 = p[0] < 0 ? -1 : 1;
     const T      sign1 = p[1] < 0 ? -1 : 1;
 
+    // The breakdowns of M stop before the first update, the one of omega after the
+    // first iteration
+    const T beta = -p[0] / p[1];
     struct Case
     {
         const Csr<T>* A;
         Vec<T>        b;
         const char*   message;
+        Vec<T>        x;
+        int           iterations;
+        Vec<T>        r;
     };
-    const Case cases[] = {{&zero, {1, 2}, "M(k,k) == 0"},
-                          {&huge, {0, 10 * sign0}, "M(k,k) == inf"},
-                          {&huge, {-10 * sign1, 10 * sign0}, "M(k,k) == NaN"},
-                          {&rotation, {1, 2}, "w == NaN"}};
+    const Case cases[]
+        = {{&zero, {1, 2}, "M(k,k) == 0", Vec<T>(2, 0), 0, {1, 2}},
+           {&huge, {0, 10 * sign0}, "M(k,k) == inf", Vec<T>(2, 0), 0, {0, 10 * sign0}},
+           {&huge, {0, -10 * sign0}, "M(k,k) == inf", Vec<T>(2, 0), 0, {0, -10 * sign0}},
+           {&huge,
+            {-10 * sign1, 10 * sign0},
+            "M(k,k) == NaN",
+            Vec<T>(2, 0),
+            0,
+            {-10 * sign1, 10 * sign0}},
+           {&rotation, {1, 0}, "w == NaN", {beta, 0}, 1, {1, beta}}};
 
     for(const Case& c : cases)
     {
         for(bool precond : {false, true})
         {
-            SCOPED_TRACE(std::string(c.message) + (precond ? " with Jacobi" : ""));
+            SCOPED_TRACE(std::string(c.message) + " for b = (" + std::to_string(c.b[0]) + ", "
+                         + std::to_string(c.b[1]) + ")" + (precond ? " with Jacobi" : ""));
             auto      A = this->make(*c.A);
             Jacobi<T> jacobi;
             IDR<T>    solver;
             solver.Init(0.0, 0.0, 1e8, 10);
             quietly([&] { set_up(solver, idr<T>(1), *A, precond ? &jacobi : nullptr); });
-            EXPECT_EQ(solve_reporting(solver, *A, c.b, c.message).status, 0);
+            const Outcome<T> out = solve_reporting(solver, *A, c.b, c.message);
+            expect_near(out.x, c.x, loose_tol<T>(1e-12));
+            EXPECT_EQ(out.iterations, c.iterations);
+            EXPECT_EQ(out.status, 0);
+            EXPECT_NEAR(out.residual, norm(c.r), loose_tol<T>(1e-12) * norm(c.r));
         }
     }
 }
