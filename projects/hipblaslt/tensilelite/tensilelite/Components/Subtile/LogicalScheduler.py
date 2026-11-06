@@ -4050,7 +4050,15 @@ class LogicalScheduler:
             'A': MFMATileRange(0, numK, 0, cfg.numMFMATilesM),
             'B': MFMATileRange(0, numK, 0, cfg.numMFMATilesN),
         }
-        preamble.extend(self._make_gr_all_tensors(0, all_tiles))
+        # A multi-DU tensor splits its K across numUnroll LDS buffers, and both
+        # the buffer a GR writes and the global offset it reads come from
+        # pointers that GRIncOp advances. Without one between the uids, every
+        # uid re-reads the first K-slice into the first buffer, and the later
+        # K-steps below then read that same slice back.
+        for gr in self._make_gr_all_tensors(0, all_tiles):
+            if gr.unrollId > 0 and cfg.numUnroll.get(gr.tensor, 1) > 1:
+                preamble.append(GRIncOp(tensor=gr.tensor, unrollId=gr.unrollId))
+            preamble.append(gr)
         # bf16-only: an OOB dwordx4 load can corrupt the trailing 16-bit
         # element at the K-boundary (buffer instructions enforce dword
         # granularity on OOB). We patch it with a 16-bit DTL load. Wider
@@ -4098,6 +4106,7 @@ class LogicalScheduler:
                 for ui, m in enumerate(src):
                     dst[ui].update(m)
 
+        last_lr_uid: dict = {}
         for k in range(numK):
             ops = []
             # Dedup LRs across partitions by tileId range — with flat tile
@@ -4120,6 +4129,15 @@ class LogicalScheduler:
                                      tiles=tiles,
                                      subIterK_slot=k, partition=pi)
                     lr.vgpr_tile_map = copy.deepcopy(tile_maps[pi].get(tensor, []))
+                    # Follow the write pointer across the uid boundary, so the
+                    # read lands in the buffer this K-step's GR filled.
+                    if cfg.numUnroll.get(tensor, 1) > 1:
+                        uid = tiles.subIterK_start // self._per_uid_k(tensor)
+                        if last_lr_uid.get(tensor, uid) != uid:
+                            ops.append(LRIncOp(tensor=tensor,
+                                               isUnrollSwap=True,
+                                               unrollId=uid))
+                        last_lr_uid[tensor] = uid
                     ops.append(lr)
             ops.append(WaitLROp())
             ops.append(MaskKOp(subIterK=k,

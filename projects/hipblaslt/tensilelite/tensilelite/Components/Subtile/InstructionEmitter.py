@@ -753,10 +753,17 @@ class InstructionEmitter:
             # host zero-padding leaves OOB scale bytes at 0x00 (0x00
             # AND 0 = 0x00) but kept to stay explicit under any input
             # pattern.
+            # One scale dword serves scaleStride K-steps, which read it back
+            # through op_sel rather than reloading it, but each K-step takes a
+            # different lane mask because laneK_n grows with n. Masking only on
+            # the step that loads the dword therefore leaves the later steps'
+            # out-of-range lanes carrying live scale bytes. The masks nest -- a
+            # lane past the end at step n is past it at every later step -- so
+            # re-ANDing per step only ever clears more lanes.
             scaleStride = self.config.lrSA.k if self.hasScale else 0
             if (not isBF16) and self.hasScale \
                     and (self.vgprTilesSA or self.vgprTilesSB) \
-                    and scaleStride > 0 and (subIterK % scaleStride == 0):
+                    and scaleStride > 0:
                 scaleVgprs = []
                 for tensor, tilesList in (('SA', self.vgprTilesSA),
                                           ('SB', self.vgprTilesSB)):
@@ -777,7 +784,10 @@ class InstructionEmitter:
                 # owns byte 2. op_sel is encoded in the instruction, so shift
                 # the dword down by one phase instead -- byte 2 lands in byte 0
                 # for both subtiles the group packs.
-                if scaleVgprs and getattr(self.config, 'dualPeriodScale', False):
+                # Unlike the mask above, this rewrites the dword itself, so it
+                # belongs to the step that loaded it and must not repeat.
+                if scaleVgprs and (subIterK % scaleStride == 0) \
+                        and getattr(self.config, 'dualPeriodScale', False):
                     phaseBit = kernel["DepthU"].bit_length() - 1
                     aligned = Label("SubtileTailScalePhase0_k%u" % subIterK, "")
                     module.add(SBitcmp1B32(
