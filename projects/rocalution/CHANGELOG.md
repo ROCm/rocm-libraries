@@ -45,7 +45,7 @@ Full documentation for rocALUTION is available at [https://rocm.docs.amd.com/pro
 * Fixed `LocalVector::Check()` rejecting integer and complex vectors with a zero entry, and accepting complex vectors with an infinite entry.
 * Fixed `LocalVector::SetRandomUniform()` on the host setting every entry of an integer vector to the lower bound and of a bool vector to the upper bound. Integer and bool vectors now get values uniformly distributed from the lower to the upper bound.
 * Fixed `LocalMatrix::ItLUSolve()` and `LocalMatrix::ItLLSolve()` on the host limiting the second triangular solve to the iterations of the first one, and `LocalMatrix::ItLLSolve()` stopping the transposed solve before it reaches the tolerance.
-* Fixed `LocalMatrix::CreateFromMap()` doing nothing when the matrix has no entries yet, and on the host losing entries and leaving values at zero for maps with unassigned nodes, which also affected the restriction of `PairwiseAMG` on the host.
+* Fixed `LocalMatrix::CreateFromMap()` doing nothing when the matrix has no entries yet, and losing entries and leaving values at zero for maps with unassigned nodes, which also affected the restriction of `PairwiseAMG`.
 * Fixed `LocalMatrix::Transpose()` not swapping the sizes of a matrix without entries.
 * Fixed `LocalStencil::ApplyAdd()` overwriting the output instead of adding to it, and the Laplace stencil on the host ignoring the scalar.
 

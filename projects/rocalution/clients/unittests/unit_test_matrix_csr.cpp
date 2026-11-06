@@ -1285,20 +1285,7 @@ TYPED_TEST(matrix_csr, create_from_map)
     }
 
     SCOPED_TRACE("unassigned nodes");
-    const std::vector<int> map         = {0, 2, -1, 1, 0, 2, 1, -1, 0};
-    const int              n           = static_cast<int>(map.size());
-    const Csr<T>           restriction = restriction_of(map);
-
-    // The rows are counted over all nodes, so the sizes and the row offsets are right
-    auto R = this->empty();
-    ASSERT_TRUE(R->CreateFromMap(*make_vector(TypeParam::backend, map), n, m));
-    const Csr<T> created = csr_of(*R);
-    EXPECT_EQ(created.n, m);
-    EXPECT_EQ(created.m, n);
-    EXPECT_EQ(created.row_offset, restriction.row_offset);
-
-    expect_same(created, restriction);
-    expect_created(map);
+    expect_created({0, 2, -1, 1, 0, 2, 1, -1, 0});
 }
 
 // Into an empty matrix and into one of the same size
