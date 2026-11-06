@@ -1204,9 +1204,25 @@ void IntegrationBundleVerificationHarness::benchmarkIfVerified(GraphSession& ses
     try
     {
         auto variantPack = buildVariantPack(engineOutputs, _deps.policy.useDevice());
-        const auto staging
-            = stageStartOffsets(variantPack, engineOutputs, _deps.policy.useDevice());
+        auto staging = stageStartOffsets(variantPack, engineOutputs, _deps.policy.useDevice());
         _benchmark = _deps.engineRunner->benchmark(session, variantPack, *_deps.policy.benchmark);
+
+        // The benchmark may run asynchronously, so a fault in its work on the moved
+        // copies can first show here -- same as runEngine(). This also covers the
+        // path where every candidate declines: unlike a successful autotune pass,
+        // that path does not wait on its own, so this wait is the only thing
+        // standing between the staged copies and the engine's still-running work
+        // when `staging` goes out of scope below.
+        if(const hipError_t status = staging.waitForEngine(); status != hipSuccess)
+        {
+            hipdnn_frontend::AutotuneResult failed;
+            failed.errorMessage
+                = std::string("engine device work failed: ") + hipGetErrorString(status);
+            _benchmark = failed;
+            return;
+        }
+        staging.copyOutputsBack();
+        markOutputsModified(engineOutputs);
     }
     catch(const std::exception& e)
     {

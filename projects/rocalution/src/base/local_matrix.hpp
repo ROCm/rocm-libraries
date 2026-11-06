@@ -809,13 +809,19 @@ namespace rocalution
         /** \brief Move all data (i.e. move the matrix) to the accelerator */
         ROCALUTION_EXPORT
         virtual void MoveToAccelerator(void);
-        /** \brief Move all data (i.e. move the matrix) to the accelerator asynchronously */
+        /** \brief Move all data (i.e. move the matrix) to the accelerator asynchronously
+      * \note
+      * Until \p Sync is called, further calls do nothing, and the matrix must not be modified.
+      */
         ROCALUTION_EXPORT
         virtual void MoveToAcceleratorAsync(void);
         /** \brief Move all data (i.e. move the matrix) to the host */
         ROCALUTION_EXPORT
         virtual void MoveToHost(void);
-        /** \brief Move all data (i.e. move the matrix) to the host asynchronously */
+        /** \brief Move all data (i.e. move the matrix) to the host asynchronously
+      * \note
+      * Until \p Sync is called, further calls do nothing, and the matrix must not be modified.
+      */
         ROCALUTION_EXPORT
         virtual void MoveToHostAsync(void);
         /** \brief Synchronize the matrix */

@@ -43,6 +43,10 @@ How a move is applied:
     The ``format`` key of ``import_mode`` sets the file layout of the written
     ``sweep.json``. Cases from sweeps with different layouts may not land in
     one sweep either.
+  * Likewise for the sweep-level ``version``: cases from sweeps with
+    different versions may not land in one sweep, unless one of the merged
+    cases has ``absent_tensors``, which needs sweep version 2 and gets it
+    regardless of what the source sweeps declared.
 
 Usage::
 
@@ -63,6 +67,8 @@ import sys
 from pathlib import Path
 
 from bundle_utils import (
+    ABSENT_TENSORS_KEY,
+    ABSENT_TENSORS_SWEEP_VERSION,
     SWEEP_FORMATS,
     canon,
     dump_sweep,
@@ -358,12 +364,25 @@ def build_plan(root: Path, assignments: dict):
                 f"error: {items[0][0].dir / 'sweep.json'}: unknown sweep.json"
                 f" format {sweep_format(first_sweep)!r}"
             )
+        versions = {sw.sweep.get("version", 1) for sw, _, _ in items}
+        if existing is not None:
+            versions.add(existing.sweep.get("version", 1))
+        needs_v2 = any(case.get(ABSENT_TENSORS_KEY) for case in cases)
+        if not needs_v2 and len(versions) > 1:
+            raise SystemExit(
+                f"error: cases from sweeps with different sweep versions"
+                f" ({', '.join(str(v) for v in sorted(versions))}) would land in"
+                f" {new_tier}/{op}/{topology}"
+            )
+        sweep_out = {
+            **{k: v for k, v in first_sweep.items() if k != "cases"},
+            "cases": cases,
+        }
+        if needs_v2:
+            sweep_out["version"] = ABSENT_TENSORS_SWEEP_VERSION
         out[(new_tier, op, topology)] = {
             "template": template,
-            "sweep": {
-                **{k: v for k, v in first_sweep.items() if k != "cases"},
-                "cases": cases,
-            },
+            "sweep": sweep_out,
             "support": support_text,
             "goldens": goldens,
             "unchanged": unchanged,

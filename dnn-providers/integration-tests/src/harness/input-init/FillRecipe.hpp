@@ -5,6 +5,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <stdexcept>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -75,6 +76,12 @@ struct FillRecipe
 private:
     static FillRecipe valuesOf(ValueList numbers, bool repeat)
     {
+        const auto count = std::visit([](const auto& list) { return list.size(); }, numbers);
+        if(count == 0)
+        {
+            throw std::invalid_argument("FillRecipe values needs a non-empty list");
+        }
+
         FillRecipe f;
         f.kind = Kind::VALUES;
         f.list = std::make_shared<const ValueList>(std::move(numbers));

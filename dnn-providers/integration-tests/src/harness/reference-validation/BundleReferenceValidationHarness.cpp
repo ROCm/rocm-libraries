@@ -264,6 +264,7 @@ void BundleReferenceValidationHarness::TestBody()
 
     // Golden data is loaded on the host, so by default the comparison runs there
     // whichever reference produced the output being judged; --validator can move it.
+    // liveRowSite is left at its default, which falls back to the site above.
     for(const auto& mismatch :
         bundle::compareOutputs(wrapper,
                                _bundle->outputTensorUids,
@@ -272,8 +273,7 @@ void BundleReferenceValidationHarness::TestBody()
                                toleranceFor,
                                resolveValidationSite(_validator, ValidationSite::HOST),
                                contextLine,
-                               liveRows,
-                               resolveValidationSite(_validator, ValidationSite::HOST)))
+                               liveRows))
     {
         ADD_FAILURE() << mismatch.report;
     }

@@ -316,7 +316,9 @@ TEST(TestInputFillRecipes, ParseInputFillSpecRejectsAMalformedSpec)
                             R"({"kind": 1})",
                             R"({"kind": null})",
                             R"({"kind": "FREE"})",
-                            R"({"kind": ""})"})
+                            R"({"kind": ""})",
+                            R"({"sedd": 9})",
+                            R"({"kind": "fixed", "value": 1, "mistake": true})"})
     {
         EXPECT_THROW(parseInputFillSpec(nlohmann::json::parse(text)), std::invalid_argument)
             << text;
@@ -426,6 +428,13 @@ TEST(TestInputFillRecipes, RequiredFormatVersionIsTwoOnlyWithValues)
 }
 
 // ── FillRecipe value semantics with a VALUES list ───────────────────────────
+
+TEST(TestInputFillRecipes, ValuesRejectsAnEmptyList)
+{
+    EXPECT_THROW(FillRecipe::values(std::vector<int64_t>{}, /*repeat=*/true),
+                 std::invalid_argument);
+    EXPECT_THROW(FillRecipe::values(std::vector<double>{}, /*repeat=*/true), std::invalid_argument);
+}
 
 TEST(TestInputFillRecipes, ValuesRecipesCompareByContent)
 {

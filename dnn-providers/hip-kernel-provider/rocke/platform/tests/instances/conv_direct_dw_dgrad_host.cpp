@@ -41,6 +41,9 @@
  *   - a zero or negative extent (N, H, W, groups, cpg, kpg, KH, KW) given to
  *     the dw fwd and forward WMMA validators, which must refuse it first with
  *     conv_direct_grouped.problem_dims_reason's text.
+ *   - the specs the Toeplitz form of the windowed depthwise dgrad refuses
+ *     (parity configs 68..72 of conv_direct_dgrad_ext_emit): the CI goldens
+ *     run the Python engine only, so the C++ reasons are checked here.
  */
 #include <initializer_list>
 #include <stdint.h>
@@ -467,6 +470,92 @@ static void test_stem_wmma_kernels_refuse_per_axis_padding(void)
     smallc.out_h = 16;
     smallc.out_w = 16;
     check_wmma_padding("dgrad_smallc_wmma", smallc, rocke_dgrad_smallc_wmma_is_valid_spec);
+}
+
+/* The Toeplitz windowed depthwise dgrad on the wave32 WMMA (gfx1250), in the
+ * shape of conv_direct_dgrad_ext_emit config 62 (7x7, 8 waves, 28-row tile). */
+static rocke_direct_depthwise_dgrad_win_spec_t win_wmma(int KH, int PAD, const char* dtype)
+{
+    rocke_direct_depthwise_dgrad_win_spec_t s = rocke_direct_depthwise_dgrad_win_spec_default();
+    s.problem = rocke_direct_conv_problem_default();
+    s.problem.N = 2;
+    s.problem.H = 14;
+    s.problem.W = 14;
+    s.problem.groups = 64;
+    s.problem.cpg = 1;
+    s.problem.kpg = 1;
+    s.problem.KH = KH;
+    s.problem.KW = KH;
+    s.problem.PAD = PAD;
+    s.problem.dtype = dtype;
+    s.block_waves = 8;
+    s.block_h = 14;
+    s.mfma = true;
+    s.w_fold = 2;
+    s.prefetch_rows = 2;
+    s.wave_size = 32;
+    return s;
+}
+
+static void check_win_refused(const char* what,
+                              const rocke_direct_depthwise_dgrad_win_spec_t* s,
+                              const char* arch,
+                              const char* expected)
+{
+    char reason[ERR_CAP];
+    reason[0] = '\0';
+    CHECK(!rocke_direct_depthwise_dgrad_win_is_valid_spec(s, arch, reason, sizeof(reason)),
+          "%s accepted on %s",
+          what,
+          arch);
+    CHECK(strstr(reason, expected) != NULL, "%s reason: %s", what, reason);
+}
+
+static void test_toeplitz_wmma_refusals(void)
+{
+    char reason[ERR_CAP];
+    rocke_direct_depthwise_dgrad_win_spec_t s = win_wmma(7, 3, "bf16");
+    CHECK(rocke_direct_depthwise_dgrad_win_is_valid_spec(&s, "gfx1250", reason, sizeof(reason)),
+          "the wave32 Toeplitz form refused on gfx1250: %s",
+          reason);
+
+    /* 68: a 9x9 filter's wave32 fragments exceed the VGPR cap. */
+    s = win_wmma(9, 4, "bf16");
+    s.block_waves = 2;
+    s.w_fold = 4;
+    s.prefetch_rows = 1;
+    s.block_h = 5;
+    check_win_refused("9x9 at wave32", &s, "gfx1250", "VGPRs (> 224)");
+    /* 69: the wave32 form on the wave64 MFMA target. */
+    s = win_wmma(7, 3, "bf16");
+    check_win_refused(
+        "wave32 on gfx950", &s, "gfx950", "wave32 mfma needs one of ('gfx1250',) (got gfx950)");
+    /* 70: the wave64 MFMA form on gfx1250, with the wave32 hint. */
+    s.wave_size = 64;
+    check_win_refused("wave64 on gfx1250",
+                      &s,
+                      "gfx1250",
+                      "mfma needs one of ('gfx950',) (got gfx1250); set wave_size=32");
+    /* No wave32 hint on a target without the WMMA form. */
+    CHECK(!rocke_direct_depthwise_dgrad_win_is_valid_spec(&s, "gfx942", reason, sizeof(reason)),
+          "wave64 accepted on gfx942");
+    CHECK(strcmp(reason, "mfma needs one of ('gfx950',) (got gfx942)") == 0,
+          "gfx942 reason: %s",
+          reason);
+    /* 71 / 72: fwd at stride 1 and 2; the forward mode is wave64 only. */
+    s = win_wmma(3, 1, "fp16");
+    s.fwd = true;
+    check_win_refused(
+        "fwd at wave32", &s, "gfx1250", "fwd needs the wave64 MFMA form (got wave_size=32)");
+    s.problem.dtype = "bf16";
+    s.out_stride = 2;
+    check_win_refused(
+        "fwd s2 at wave32", &s, "gfx1250", "fwd needs the wave64 MFMA form (got wave_size=32)");
+    /* The same forward spec at wave64 stays valid on gfx950. */
+    s.wave_size = 64;
+    CHECK(rocke_direct_depthwise_dgrad_win_is_valid_spec(&s, "gfx950", reason, sizeof(reason)),
+          "the wave64 forward form refused on gfx950: %s",
+          reason);
 }
 
 /* The validator tail (rocke_wmma_fwd_limits_ok) refuses an unknown scheduler
@@ -925,6 +1014,7 @@ int main(void)
     test_tiled_dgrad_refuses_cpl();
     test_wmma_kernels_refuse_per_axis_padding();
     test_stem_wmma_kernels_refuse_per_axis_padding();
+    test_toeplitz_wmma_refusals();
     test_fwd_wmma_strided_view_refusals();
     test_fwd_wmma_poly_view_refusals();
     test_fwd_wmma_padded_poly_view_chunk();

@@ -15,7 +15,6 @@
 #include <string>
 #include <string_view>
 #include <unordered_map>
-#include <unordered_set>
 #include <vector>
 
 #include <hipdnn_data_sdk/logging/Logger.hpp>
@@ -205,13 +204,10 @@ inline std::string describeStartOffset(int64_t uid)
     return "start offset of tensor " + std::to_string(uid);
 }
 
-inline TensorStartOffset parseStartOffsetEntry(const nlohmann::json& entry, std::size_t index)
+inline TensorStartOffset parseStartOffsetEntry(const nlohmann::json& entry,
+                                               const std::string& baseWhere)
 {
-    std::string where = "start_offsets[" + std::to_string(index) + "]";
-    if(!entry.is_object())
-    {
-        throw std::invalid_argument(where + " is not an object");
-    }
+    std::string where = baseWhere;
     const auto uid
         = entry.contains("uid") ? tensor_alias_detail::integerValue(entry.at("uid")) : std::nullopt;
     if(uid.has_value())
@@ -219,33 +215,11 @@ inline TensorStartOffset parseStartOffsetEntry(const nlohmann::json& entry, std:
         where += " (tensor " + std::to_string(*uid) + ")";
     }
 
-    for(const auto& item : entry.items())
-    {
-        const auto& key = item.key();
-        if(key != "uid" && key != "start_offset")
-        {
-            std::string message = where;
-            message.append(" has unknown key \"").append(key).append("\"");
-            throw std::invalid_argument(message);
-        }
-    }
-
-    const auto readInteger = [&](const char* key) {
-        if(!entry.contains(key))
-        {
-            throw std::invalid_argument(where + " lacks \"" + key + "\"");
-        }
-        const auto value = tensor_alias_detail::integerValue(entry.at(key));
-        if(!value.has_value())
-        {
-            throw std::invalid_argument(where + ": \"" + key + "\" is not a 64-bit signed integer");
-        }
-        return *value;
-    };
+    tensor_alias_detail::rejectUnknownKeys(entry, where, {"uid", "start_offset"});
 
     TensorStartOffset parsed;
-    parsed.uid = readInteger("uid");
-    parsed.startOffset = readInteger("start_offset");
+    parsed.uid = tensor_alias_detail::readRequiredInteger(entry, "uid", where);
+    parsed.startOffset = tensor_alias_detail::readRequiredInteger(entry, "start_offset", where);
     if(parsed.startOffset <= 0 || parsed.startOffset >= K_START_OFFSET_BASE_ALIGNMENT)
     {
         throw std::invalid_argument(
@@ -261,27 +235,14 @@ inline TensorStartOffset parseStartOffsetEntry(const nlohmann::json& entry, std:
 // appears twice.
 inline std::vector<TensorStartOffset> parseStartOffsets(const nlohmann::json& json)
 {
-    if(!json.is_array())
-    {
-        throw std::invalid_argument("start_offsets is not an array");
-    }
-    if(json.empty())
-    {
-        throw std::invalid_argument("start_offsets is empty");
-    }
-    std::vector<TensorStartOffset> startOffsets;
-    std::unordered_set<int64_t> uids;
-    for(std::size_t i = 0; i < json.size(); ++i)
-    {
-        const auto parsed = parseStartOffsetEntry(json[i], i);
-        if(!uids.insert(parsed.uid).second)
-        {
-            throw std::invalid_argument(describeStartOffset(parsed.uid)
-                                        + ": the tensor appears in more than one entry");
-        }
-        startOffsets.push_back(parsed);
-    }
-    return startOffsets;
+    return tensor_alias_detail::parseUidKeyedArray<TensorStartOffset>(
+        json,
+        "start_offsets",
+        &parseStartOffsetEntry,
+        [](const TensorStartOffset& parsed) { return parsed.uid; },
+        [](const TensorStartOffset& parsed) {
+            return describeStartOffset(parsed.uid) + ": the tensor appears in more than one entry";
+        });
 }
 
 inline std::string describeLiveRows(int64_t uid)
@@ -289,13 +250,9 @@ inline std::string describeLiveRows(int64_t uid)
     return "live rows of output " + std::to_string(uid);
 }
 
-inline OutputLiveRows parseLiveRowsEntry(const nlohmann::json& entry, std::size_t index)
+inline OutputLiveRows parseLiveRowsEntry(const nlohmann::json& entry, const std::string& baseWhere)
 {
-    std::string where = "live_rows[" + std::to_string(index) + "]";
-    if(!entry.is_object())
-    {
-        throw std::invalid_argument(where + " is not an object");
-    }
+    std::string where = baseWhere;
     const auto uid
         = entry.contains("uid") ? tensor_alias_detail::integerValue(entry.at("uid")) : std::nullopt;
     if(uid.has_value())
@@ -303,40 +260,18 @@ inline OutputLiveRows parseLiveRowsEntry(const nlohmann::json& entry, std::size_
         where += " (output " + std::to_string(*uid) + ")";
     }
 
-    for(const auto& item : entry.items())
-    {
-        const auto& key = item.key();
-        if(key != "uid" && key != "axis" && key != "lengths" && key != "like")
-        {
-            std::string message = where;
-            message.append(" has unknown key \"").append(key).append("\"");
-            throw std::invalid_argument(message);
-        }
-    }
+    tensor_alias_detail::rejectUnknownKeys(entry, where, {"uid", "axis", "lengths", "like"});
 
-    const auto readInteger = [&](const char* key) -> std::optional<int64_t> {
-        if(!entry.contains(key))
-        {
-            return std::nullopt;
-        }
-        const auto value = tensor_alias_detail::integerValue(entry.at(key));
-        if(!value.has_value())
-        {
-            throw std::invalid_argument(where + ": \"" + key + "\" is not a 64-bit signed integer");
-        }
-        return value;
-    };
-
-    const auto parsedUid = readInteger("uid");
+    const auto parsedUid = tensor_alias_detail::readOptionalInteger(entry, "uid", where);
     if(!parsedUid.has_value())
     {
         throw std::invalid_argument(where + R"( lacks "uid")");
     }
     OutputLiveRows parsed;
     parsed.uid = *parsedUid;
-    parsed.axis = readInteger("axis");
-    parsed.lengthsUid = readInteger("lengths");
-    parsed.likeUid = readInteger("like");
+    parsed.axis = tensor_alias_detail::readOptionalInteger(entry, "axis", where);
+    parsed.lengthsUid = tensor_alias_detail::readOptionalInteger(entry, "lengths", where);
+    parsed.likeUid = tensor_alias_detail::readOptionalInteger(entry, "like", where);
 
     if(parsed.lengthsUid.has_value() == parsed.likeUid.has_value())
     {
@@ -360,27 +295,14 @@ inline OutputLiveRows parseLiveRowsEntry(const nlohmann::json& entry, std::size_
 // twice.
 inline std::vector<OutputLiveRows> parseLiveRows(const nlohmann::json& json)
 {
-    if(!json.is_array())
-    {
-        throw std::invalid_argument("live_rows is not an array");
-    }
-    if(json.empty())
-    {
-        throw std::invalid_argument("live_rows is empty");
-    }
-    std::vector<OutputLiveRows> liveRows;
-    std::unordered_set<int64_t> uids;
-    for(std::size_t i = 0; i < json.size(); ++i)
-    {
-        const auto parsed = parseLiveRowsEntry(json[i], i);
-        if(!uids.insert(parsed.uid).second)
-        {
-            throw std::invalid_argument(describeLiveRows(parsed.uid)
-                                        + ": the output appears in more than one entry");
-        }
-        liveRows.push_back(parsed);
-    }
-    return liveRows;
+    return tensor_alias_detail::parseUidKeyedArray<OutputLiveRows>(
+        json,
+        "live_rows",
+        &parseLiveRowsEntry,
+        [](const OutputLiveRows& parsed) { return parsed.uid; },
+        [](const OutputLiveRows& parsed) {
+            return describeLiveRows(parsed.uid) + ": the output appears in more than one entry";
+        });
 }
 
 } // namespace bundle_metadata_detail

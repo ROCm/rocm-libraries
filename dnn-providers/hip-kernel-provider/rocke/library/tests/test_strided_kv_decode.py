@@ -428,7 +428,7 @@ def test_dense_decode_route_keeps_strided_limits(arch):
 
 
 def _dense_decode_tensors(order, *, batch=3, heads_q=8, heads_k=2, seqlen=65, dim=128):
-    import torch
+    torch = pytest.importorskip("torch")
 
     def make(heads, rows):
         shape = (
@@ -446,7 +446,7 @@ def _dense_decode_tensors(order, *, batch=3, heads_q=8, heads_k=2, seqlen=65, di
 
 @pytest.mark.parametrize("order", ["bshd", "bhsd"])
 def test_dense_decode_binding_passes_strided_views(order, monkeypatch):
-    import torch
+    torch = pytest.importorskip("torch")
 
     from dispatch.attention import dispatch_attention
     from kernels.common import attention_unified as au
@@ -630,6 +630,13 @@ def test_strided_runtime_rejects_incoherent_specs(
     spec = replace(
         result.spec, **{component: replace(getattr(result.spec, component), **changes)}
     )
+
+    class DeviceAccessMustComeLater:
+        @property
+        def device(self):
+            raise AssertionError("q.device inspected before strided spec validation")
+
+    tensors["q"] = DeviceAccessMustComeLater()
     # Validate before inspecting device tensors or compiling/launching a kernel.
     with pytest.raises(ValueError, match="disagrees"):
         au.run_unified_attention_torch(
@@ -639,6 +646,52 @@ def test_strided_runtime_rejects_incoherent_specs(
             softcap=0,
             tuning_spec=spec,
             kv_layout="strided",
+        )
+
+
+def test_strided_lse_refusal_precedes_q_device_access(
+    strided_binding_case, monkeypatch
+):
+    from kernels.common import attention_unified as au
+
+    _, _, tensors = strided_binding_case
+    tensors["problem"] = replace(tensors["problem"], emit_lse=True)
+
+    class DeviceAccessMustComeLater:
+        @property
+        def device(self):
+            raise AssertionError("q.device inspected before strided LSE refusal")
+
+    tensors["q"] = DeviceAccessMustComeLater()
+    monkeypatch.setattr(au, "_resolve_attention_arch", lambda: "gfx942")
+    with pytest.raises(NotImplementedError, match="LSE output"):
+        au.run_unified_attention_torch(
+            **tensors,
+            block_table=None,
+            softmax_scale=0.125,
+            softcap=0,
+            lse=object(),
+            kv_layout="strided",
+        )
+
+
+def test_additive_bias_does_not_normalize_q_without_device(
+    strided_binding_case, monkeypatch
+):
+    from kernels.common import attention_unified as au
+
+    _, _, tensors = strided_binding_case
+    tensors["problem"] = replace(tensors["problem"], use_additive_bias=True)
+    monkeypatch.setattr(au, "_resolve_attention_arch", lambda: "gfx942")
+    with pytest.raises(AttributeError, match="device"):
+        au.run_unified_attention_torch(
+            **tensors,
+            block_table=None,
+            softmax_scale=0.125,
+            softcap=0,
+            additive_bias=object(),
+            additive_bias_sq_stride=0,
+            kv_layout="paged",
         )
 
 

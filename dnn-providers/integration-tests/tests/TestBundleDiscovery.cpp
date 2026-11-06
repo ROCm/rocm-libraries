@@ -10,6 +10,7 @@
 #include <fstream>
 #include <functional>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <utility>
 #include <variant>
@@ -2124,21 +2125,22 @@ nlohmann::json aliasMetadata(const nlohmann::json& aliases)
     return nlohmann::json{{"format_version", 2}, {"aliases", aliases}};
 }
 
-// The FailedLoad message of the one bundle under `root`; an empty string, with a
-// test failure, for any other outcome.
+// The FailedLoad message of the one bundle under `root`. Any other outcome is a
+// problem with the test itself, not the thing it's checking, so it throws instead
+// of returning a placeholder a caller's own assertion would then fail against a
+// second time.
 std::string failedLoadMessage(const std::filesystem::path& root, SweepManifestCache& sweeps)
 {
     const auto discovered = discoverBundles(root);
     if(discovered.size() != 1)
     {
-        ADD_FAILURE() << "expected one bundle under " << root << ", found " << discovered.size();
-        return {};
+        throw std::runtime_error("expected one bundle under " + root.string() + ", found "
+                                 + std::to_string(discovered.size()));
     }
     auto outcome = detail::classifyBundle(discovered.front(), sweeps);
     if(!std::holds_alternative<detail::FailedLoad>(outcome))
     {
-        ADD_FAILURE() << "expected a FailedLoad for " << root;
-        return {};
+        throw std::runtime_error("expected a FailedLoad for " + root.string());
     }
     return std::get<detail::FailedLoad>(outcome).message;
 }
@@ -2474,6 +2476,35 @@ TEST_F(TestBundleDiscoveryFixture, AliasInABundleWithSomeInputBlobsFailsTheLoad)
     writeJsonFile(
         dir / "aliased.meta.json",
         aliasMetadata(nlohmann::json::parse(R"([{"uid": 3, "of": 2, "byte_offset": 0}])")));
+
+    const auto message = failedLoadMessage(_tempDir, _sweeps);
+    EXPECT_NE(message.find("alias view 3 of owner 2: the bundle has golden data or tensor blobs"),
+              std::string::npos)
+        << message;
+}
+
+// Mirrors AliasInABundleWithSomeInputBlobsFailsTheLoad, for a sweep case: the view's
+// own blob and the output's blob are both absent, but the owner's blob (and others)
+// are still present, so the sweep case still stores some tensor apart from the alias.
+TEST_F(TestBundleDiscoveryFixture, AliasInASweepCaseWithSomeInputBlobsFailsTheLoad)
+{
+    const auto sweepDir = _tempDir / "quick" / "BatchnormFwdInference" / "Inference";
+    createTemplateSweep(sweepDir,
+                        {{"aliased_fp32_nchw",
+                          "float",
+                          {2, 3, 4, 5},
+                          {60, 20, 5, 1},
+                          {1, 3, 1, 1},
+                          {3, 1, 1, 1},
+                          /*includeGolden=*/true,
+                          /*goldenHasPath=*/true,
+                          /*includeMetadata=*/false}});
+    auto sweepJson = readJsonFile(sweepDir / "sweep.json");
+    sweepJson["cases"][0]["metadata"]
+        = aliasMetadata(nlohmann::json::parse(R"([{"uid": 3, "of": 2, "byte_offset": 0}])"));
+    writeJsonFile(sweepDir / "sweep.json", sweepJson);
+    std::filesystem::remove(sweepDir / "golden" / "aliased_fp32_nchw" / "tensor3.bin");
+    std::filesystem::remove(sweepDir / "golden" / "aliased_fp32_nchw" / "tensor5.bin");
 
     const auto message = failedLoadMessage(_tempDir, _sweeps);
     EXPECT_NE(message.find("alias view 3 of owner 2: the bundle has golden data or tensor blobs"),
@@ -3242,7 +3273,7 @@ std::vector<AbsentRuleCase> absentRuleCases()
          "removing [5] leaves no output to compare"},
         {"malformed_tensor_patch",
          caseField("tensor_patches", nlohmann::json::array({{{"uid", "zero"}}})),
-         "type must be number"},
+         "tensor_patch entry is missing an integer uid"},
     };
 }
 

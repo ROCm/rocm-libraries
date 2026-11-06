@@ -819,12 +819,14 @@ def absent_tensor_problems(template: dict, uids) -> list:
     return problems
 
 
-def apply_tensor_patches(graph: dict, case: dict):
+def apply_tensor_patches(graph: dict, case: dict, *, error_cls=ValueError):
     """Apply a sweep case's ``tensor_patches`` to an expanded graph, as the C++ loader does.
 
     ``set`` upserts fields, then ``remove`` erases fields, of the tensor with the
-    patch uid. Raises ValueError for a patch without an integer uid or with a uid
-    that no tensor holds.
+    patch uid. Raises ``error_cls`` (``ValueError`` by default) for a patch
+    without an integer uid or with a uid that no tensor holds; a caller that
+    wants its own exception type for this, such as a subclass it already
+    catches elsewhere, may pass it.
     """
     patches = case.get(TENSOR_PATCHES_KEY)
     tensors = graph.get("tensors")
@@ -833,12 +835,12 @@ def apply_tensor_patches(graph: dict, case: dict):
     for patch in patches:
         uid = patch.get("uid") if isinstance(patch, dict) else None
         if isinstance(uid, bool) or not isinstance(uid, int):
-            raise ValueError("tensor_patch entry is missing an integer uid")
+            raise error_cls("tensor_patch entry is missing an integer uid")
         target = next(
             (t for t in tensors if isinstance(t, dict) and t.get("uid") == uid), None
         )
         if target is None:
-            raise ValueError(f"tensor_patch uid {uid} not found in expanded graph")
+            raise error_cls(f"tensor_patch uid {uid} not found in expanded graph")
         if isinstance(patch.get("set"), dict):
             target.update(patch["set"])
         if isinstance(patch.get("remove"), list):

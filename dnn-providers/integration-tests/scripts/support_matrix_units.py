@@ -63,6 +63,7 @@ from bundle_discovery import (  # noqa: E402
 from bundle_utils import (  # noqa: E402
     ABSENT_TENSORS_KEY,
     absent_case_problems,
+    apply_tensor_patches as _apply_tensor_patches,
     prune_absent_tensors,
 )
 from support_claim_schema import (  # noqa: E402
@@ -414,33 +415,11 @@ def apply_tensor_patches(graph: dict, case: dict) -> None:
     erases its ``remove`` keys. This is how a case makes a scalar runtime
     pass-by-value, so without it the graph read here is not the graph the
     harness runs. Raises ``SweepCaseError`` where the harness throws: a patch
-    without an integer uid, or one whose uid no tensor holds.
+    without an integer uid, or one whose uid no tensor holds. Delegates to the
+    shared ``bundle_utils`` implementation, asking it for this module's own
+    exception type so ``except SweepCaseError`` call sites keep working.
     """
-    patches = case.get("tensor_patches")
-    tensors = graph.get("tensors")
-    if not isinstance(patches, list) or not isinstance(tensors, list):
-        return
-    for patch in patches:
-        if not isinstance(patch, dict) or not _is_uid(patch.get("uid")):
-            raise SweepCaseError("tensor_patch entry is missing an integer uid")
-        target = next(
-            (
-                tensor
-                for tensor in tensors
-                if isinstance(tensor, dict) and tensor.get("uid") == patch["uid"]
-            ),
-            None,
-        )
-        if target is None:
-            raise SweepCaseError(
-                f"tensor_patch uid {patch['uid']} not found in expanded graph"
-            )
-        if isinstance(patch.get("set"), dict):
-            target.update(patch["set"])
-        if isinstance(patch.get("remove"), list):
-            for key in patch["remove"]:
-                if isinstance(key, str):
-                    target.pop(key, None)
+    _apply_tensor_patches(graph, case, error_cls=SweepCaseError)
 
 
 # --------------------------------------------------------------------------

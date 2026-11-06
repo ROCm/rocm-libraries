@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "harness/input-init/FillInputs.hpp"
+#include "harness/DeviceCallCheck.hpp"
 #include "harness/input-init/SdpaBackwardInputs.hpp"
 
 #include <algorithm>
@@ -601,12 +602,7 @@ void DeviceInputFiller::waitForFills()
     }
     _impl->fillPending = false;
 
-    const hipError_t status = hipDeviceSynchronize();
-    if(status != hipSuccess)
-    {
-        throw DeviceInputError(std::string("device input fill failed: ")
-                               + hipGetErrorString(status));
-    }
+    checkDeviceCall<DeviceInputError>(hipDeviceSynchronize(), "device input fill");
 #endif
 }
 

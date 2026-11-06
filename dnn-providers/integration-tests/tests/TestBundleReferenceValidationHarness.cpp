@@ -185,6 +185,31 @@ TEST_F(TestBundleReferenceValidationHarness, SetUpFailsForABundleRegisteredWithN
     EXPECT_NE(testing_support::allMessages(results).find("no tensor data"), std::string::npos);
 }
 
+// A bundle cannot declare both an alias and golden/output tensor data at once: the
+// normal loader already blocks that combination earlier (checkAliasRules), so the only
+// way to reach this guard is a hand-built bundle that bypasses it, the same way the
+// test above reaches the neighboring no-tensor-data guard.
+TEST_F(TestBundleReferenceValidationHarness, BodyFailsForABundleWithAnAliasAndGoldenData)
+{
+    auto bundle = std::make_shared<IntegrationTestBundle>();
+    bundle->hasGoldenOutputs = true; // clears SetUp()'s first guard
+    bundle->blobs.emplace(); // clears SetUp()'s second guard
+    bundle->metadata.aliases.push_back(TensorAlias{1, 0, 0});
+
+    BundleReferenceValidationHarness harness(
+        ReferenceExecutorType::CPU, /*requiresDevice=*/false, executors());
+    harness.setBundle(bundle, "alias-and-golden-data-bundle", /*expectedGap=*/std::nullopt);
+
+    ::testing::TestPartResultArray results;
+    drive(harness, &results);
+
+    EXPECT_TRUE(testing_support::anyFailed(results));
+    EXPECT_NE(testing_support::allMessages(results).find(
+                  "aliases cannot be used with golden tensor data"),
+              std::string::npos)
+        << testing_support::allMessages(results);
+}
+
 // The regression this rework fixes: useDevice() used to read _referenceType ==
 // GPU, which is a property of how the harness was registered, not of what the
 // executor it was actually handed can take. A registered-GPU harness driving an

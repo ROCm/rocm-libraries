@@ -8,6 +8,7 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -705,6 +706,54 @@ TEST_F(TestGoldenHarnessFixture, RaggedInBlockMismatchYieldsFail)
     EXPECT_FALSE(testing_support::anySkipped(results));
 }
 
+// An SDPA bundle whose Stats sits [H,T] with a gap between its batches (L7d) gives its
+// outputs the elementSpace of the dense view only when the sentinel outputs are built with the
+// node's seq_len lengths; the engine is then handed buffers that size and the golden
+// comparison reads them.
+TEST_F(TestGoldenHarnessFixture, RaggedSdpaSentinelOutputsTakeTheirLengthsFromSeqLen)
+{
+    const auto layout = fixtures::raggedSdpaGappedStatsCase();
+    const auto dir = _tempDir / layout.name;
+    fixtures::writeRaggedSdpaCase(dir, layout);
+    const auto bundle = fixtures::loadWrittenBundle(dir, layout.name);
+    const auto loadedTensors = bundle->loadTensors();
+    const auto wrapper = bundle->graphWrapper();
+
+    const auto outputs = detail::allocateSentinelOutputs(
+        wrapper.getTensorMap(),
+        bundle->outputTensorUids,
+        loadedTensors,
+        hipdnn_test_sdk::utilities::raggedLengthUids(wrapper.getGraph()),
+        /*onDevice=*/false);
+
+    for(const int64_t uid : {fixtures::K_SDPA_O_UID, fixtures::K_SDPA_STATS_UID})
+    {
+        SCOPED_TRACE("uid " + std::to_string(uid));
+        const auto& output = outputs.at(uid);
+        ASSERT_TRUE(output->raggedIterationInfo().has_value());
+        EXPECT_EQ(output->raggedIterationInfo()->lengths, layout.lengths);
+        EXPECT_EQ(output->elementSpace(),
+                  uid == fixtures::K_SDPA_STATS_UID ? layout.statsSpace : layout.qkvoSpace);
+    }
+}
+
+TEST_F(TestGoldenHarnessFixture, RaggedSdpaMatchingOutputYieldsPass)
+{
+    testing_support::HarnessMocks mocks;
+    testing_support::engineWrites(
+        mocks.engineRunner, &fixtures::writeRaggedSdpaGappedOutputs, 0.0f);
+
+    const auto layout = fixtures::raggedSdpaGappedStatsCase();
+    const auto dir = _tempDir / layout.name;
+    fixtures::writeRaggedSdpaCase(dir, layout);
+
+    ::testing::TestPartResultArray results;
+    runCapturing(mocks, fixtures::loadWrittenBundle(dir, layout.name), &results);
+
+    EXPECT_FALSE(testing_support::anyFailed(results)) << testing_support::allMessages(results);
+    EXPECT_FALSE(testing_support::anySkipped(results));
+}
+
 // A VALUES recipe that cannot fill its tensor is an error in the bundle. The test fails
 // before the engine runs and does not skip.
 TEST_F(TestGoldenHarnessFixture, InvalidValuesFillFailsTheTest)
@@ -776,6 +825,29 @@ TEST_F(TestGoldenHarnessFixture, UnsupportedFillStaysUnverifiable)
         << testing_support::allMessages(results);
 }
 
+TEST_F(TestGoldenHarnessFixture, SetUpSkipsACaseBuiltForAnotherGpu)
+{
+    testing_support::HarnessMocks mocks;
+    EXPECT_CALL(mocks.engineRunner, execute(::testing::_, ::testing::_, ::testing::_)).Times(0);
+
+    auto bundle = makeRuntimePbvFillBundle();
+    bundle->metadata.archs = std::vector<std::string>{"gfx000"};
+
+    IntegrationBundleVerificationHarness harness(
+        mocks.dependencies(testing_support::hostPolicy(VerificationMode::AUTO)));
+    harness.setBundle(bundle, "unit-test-bundle");
+
+    ::testing::TestPartResultArray results;
+    testing_support::driveHarness(harness, &results);
+
+    EXPECT_TRUE(testing_support::anySkipped(results));
+    EXPECT_FALSE(testing_support::anyFailed(results));
+    EXPECT_NE(
+        testing_support::allMessages(results).find("case built for gfx000; current GPU is gfx942"),
+        std::string::npos)
+        << testing_support::allMessages(results);
+}
+
 // A sub-byte graph is filled twice, unpacked and packed. A VALUES fill of one of its
 // other tensors gives the same contents in both sets.
 TEST_F(TestGoldenHarnessFixture, ValuesFillOfASubByteGraphMatchesInBothInputSets)
@@ -808,54 +880,6 @@ TEST_F(TestGoldenHarnessFixture, ValuesFillOfASubByteGraphMatchesInBothInputSets
                           packed.rawHostData(),
                           unpacked.elementSpace() * unpacked.elementSize()),
               0);
-}
-
-// An SDPA bundle whose Stats sits [H,T] with a gap between its batches (L7d) gives its
-// outputs the elementSpace of the dense view only when the sentinel outputs are built with the
-// node's seq_len lengths; the engine is then handed buffers that size and the golden
-// comparison reads them.
-TEST_F(TestGoldenHarnessFixture, RaggedSdpaSentinelOutputsTakeTheirLengthsFromSeqLen)
-{
-    const auto layout = fixtures::raggedSdpaGappedStatsCase();
-    const auto dir = _tempDir / layout.name;
-    fixtures::writeRaggedSdpaCase(dir, layout);
-    const auto bundle = fixtures::loadWrittenBundle(dir, layout.name);
-    const auto loadedTensors = bundle->loadTensors();
-    const auto wrapper = bundle->graphWrapper();
-
-    const auto outputs = detail::allocateSentinelOutputs(
-        wrapper.getTensorMap(),
-        bundle->outputTensorUids,
-        loadedTensors,
-        hipdnn_test_sdk::utilities::raggedLengthUids(wrapper.getGraph()),
-        /*onDevice=*/false);
-
-    for(const int64_t uid : {fixtures::K_SDPA_O_UID, fixtures::K_SDPA_STATS_UID})
-    {
-        SCOPED_TRACE("uid " + std::to_string(uid));
-        const auto& output = outputs.at(uid);
-        ASSERT_TRUE(output->raggedIterationInfo().has_value());
-        EXPECT_EQ(output->raggedIterationInfo()->lengths, layout.lengths);
-        EXPECT_EQ(output->elementSpace(),
-                  uid == fixtures::K_SDPA_STATS_UID ? layout.statsSpace : layout.qkvoSpace);
-    }
-}
-
-TEST_F(TestGoldenHarnessFixture, RaggedSdpaMatchingOutputYieldsPass)
-{
-    testing_support::HarnessMocks mocks;
-    testing_support::engineWrites(
-        mocks.engineRunner, &fixtures::writeRaggedSdpaGappedOutputs, 0.0f);
-
-    const auto layout = fixtures::raggedSdpaGappedStatsCase();
-    const auto dir = _tempDir / layout.name;
-    fixtures::writeRaggedSdpaCase(dir, layout);
-
-    ::testing::TestPartResultArray results;
-    runCapturing(mocks, fixtures::loadWrittenBundle(dir, layout.name), &results);
-
-    EXPECT_FALSE(testing_support::anyFailed(results)) << testing_support::allMessages(results);
-    EXPECT_FALSE(testing_support::anySkipped(results));
 }
 
 // ---- aliases ---------------------------------------------------------------
@@ -1458,6 +1482,86 @@ TEST_F(TestGoldenHarnessFixture, StartOffsetBenchmarkGetsTheEnginePointers)
 
     EXPECT_EQ(benchmarkOffsets,
               (std::vector<int64_t>{K_SHIFTED_INPUT_OFFSET, K_SHIFTED_OUTPUT_OFFSET}));
+}
+
+// CORR-2 regression: benchmarkIfVerified() used to return right after calling the
+// engine runner's benchmark(), without the waitForEngine()/copyOutputsBack() sequence
+// runEngine() does. This exercises that exact path on real gfx942 device memory with a
+// forced-to-fail benchmark (every candidate engine declining, the case the fix matters
+// on per finding-decisions.md -- a real autotune pass only waits internally when some
+// candidate succeeds), with start offsets in play so the benchmark's own staged device
+// copies are real, not mocked.
+//
+// NOTE ON COVERAGE: an earlier version of this test tried to prove the missing wait via
+// a StallGate-held stream, expecting the unfixed code to observably return before the
+// stream drained. That signal turned out to be masked: StartOffsetStaging's device
+// copies are freed by hipFree() when `staging` goes out of scope at the end of
+// benchmarkIfVerified() either way, and hipFree() performs its own implicit device-wide
+// synchronization before freeing (see hipdnn_data_sdk::utilities::StallGate's own
+// destructor comment) -- so by the time benchmarkIfVerified() returns, the device is
+// synchronized whether or not the explicit wait ran. The fix's real, currently
+// unobservable-from-outside effect is copyOutputsBack() propagating the benchmark's
+// write back into the real output tensor (benchmarkIfVerified() builds a fresh staged
+// copy of it); nothing in the current public harness API exposes that tensor's
+// post-benchmark value to a test. What this test still verifies directly: the exact
+// code path runs on real device memory with a forced failure and leaves the device
+// clean -- no crash, no leaked HIP error state.
+TEST_F(TestGoldenHarnessFixture, BenchmarkFailureDoesNotCrashOrLeaveTheDeviceErrored)
+{
+    SKIP_IF_NO_DEVICES();
+
+    testing_support::HarnessMocks mocks;
+    ON_CALL(mocks.engineRunner, execute(::testing::_, ::testing::_, ::testing::_))
+        .WillByDefault([](GraphSession&, const std::optional<LoadedEngine>&, VariantPack& pack) {
+            const std::vector<float> output(fixtures::K_OUTPUT_ELEMS, fixtures::K_OUTPUT_VALUE);
+            const auto status = hipMemcpy(pack.at(fixtures::K_OUTPUT_UID),
+                                          output.data(),
+                                          output.size() * sizeof(float),
+                                          hipMemcpyHostToDevice);
+            return status == hipSuccess ? EngineOpResult::succeeded()
+                                        : EngineOpResult::failed(hipGetErrorString(status));
+        });
+    ON_CALL(mocks.engineRunner, benchmark(::testing::_, ::testing::_, ::testing::_))
+        .WillByDefault([](GraphSession&, VariantPack& pack, const BenchmarkSettings&) {
+            // A real candidate still does device work before declining; write through
+            // the (possibly moved) output pointer so there is something for
+            // waitForEngine()/copyOutputsBack() to actually act on.
+            const std::vector<float> output(fixtures::K_OUTPUT_ELEMS, fixtures::K_OUTPUT_VALUE + 1);
+            EXPECT_EQ(hipMemcpy(pack.at(fixtures::K_OUTPUT_UID),
+                                output.data(),
+                                output.size() * sizeof(float),
+                                hipMemcpyHostToDevice),
+                      hipSuccess);
+            hipdnn_frontend::AutotuneResult failed;
+            failed.errorMessage = "forced failure: every candidate engine declined";
+            failed.succeeded = false;
+            return failed;
+        });
+
+    auto policy = testing_support::hostPolicy(VerificationMode::AUTO);
+    policy.placement = TensorPlacement::DEVICE;
+    policy.benchmark = BenchmarkSettings{};
+    IntegrationBundleVerificationHarness harness(mocks.dependencies(policy));
+    auto bundle = loadRunnableBundle("shifted_benchmark_forced_fail");
+    shiftGoldenBundle(*bundle);
+    harness.setBundle(bundle, "unit-test-bundle");
+
+    ::testing::TestPartResultArray results;
+    testing_support::driveHarness(harness, &results);
+
+    // reportBenchmark() fails the test on an unsuccessful AutotuneResult; that is
+    // expected and unrelated to what this test pins.
+    EXPECT_TRUE(testing_support::anyFailed(results)) << testing_support::allMessages(results);
+    EXPECT_FALSE(testing_support::anySkipped(results)) << testing_support::allMessages(results);
+    EXPECT_NE(testing_support::allMessages(results).find("benchmark failed: forced failure"),
+              std::string::npos)
+        << testing_support::allMessages(results);
+
+    // The device must come out of this clean: no crash reaching here at all, and no
+    // HIP error left pending from freeing the staged start-offset buffers while the
+    // mocked candidate's device write might still have been in flight.
+    EXPECT_EQ(hipDeviceSynchronize(), hipSuccess);
+    EXPECT_EQ(hipGetLastError(), hipSuccess);
 }
 
 // A staging fault happens before the engine runs, so it fails the run in the harness and

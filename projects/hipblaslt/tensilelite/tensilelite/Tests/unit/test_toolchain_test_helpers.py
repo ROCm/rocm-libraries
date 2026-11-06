@@ -1,17 +1,59 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""Contracts for the shared toolchain helpers."""
+"""Contracts for shared capability data, the skip policy and cache priming."""
 
 import copy
 import pickle
 from types import SimpleNamespace
 
 import pytest
+import rocisa
 
 import toolchain_test_helpers as helpers
+from tensilelite.Common.Architectures import SUPPORTED_ISA
 from tensilelite.Common.Types import IsaInfo
 
-pytestmark = pytest.mark.unit
+
+def test_full_map_is_shared_with_single_isa_helpers(isa_info_map):
+    assert isa_info_map is helpers.shared_full_isa_info_map()
+    assert list(isa_info_map) == SUPPORTED_ISA
+    for isa, info in isa_info_map.items():
+        assert info is helpers.shared_isa_info_map(isa)[isa]
+        with pytest.raises(TypeError, match="read-only"):
+            info.asmCaps["SupportedISA"] = False
+        with pytest.raises(TypeError, match="read-only"):
+            info.archCaps = {}
+    with pytest.raises(TypeError, match="read-only"):
+        isa_info_map.clear()
+
+
+@pytest.mark.parametrize(
+    "copy_map", [helpers.copy_isa_info_map, lambda iim: pickle.loads(pickle.dumps(iim))]
+)
+def test_copy_is_mutable_without_changing_shared_map(isa_info_map, copy_map):
+    copied = copy_map(isa_info_map)
+    isa = SUPPORTED_ISA[0]
+    original = dict(isa_info_map[isa].asmCaps)
+    copied[isa].asmCaps["SupportedISA"] = "changed"
+    copied[isa].archCaps = {}
+    copied.pop(isa)
+    assert dict(isa_info_map[isa].asmCaps) == original
+    assert isa in isa_info_map
+
+
+def test_prime_is_one_init_many_call(monkeypatch):
+    # initMany owns skipping cached ISAs and probing the rest concurrently
+    # (rocisa/test/test_asm_caps_init_many.py); the helper must hand it the
+    # whole list in one call rather than probing ISAs one at a time.
+    calls = []
+    ri = SimpleNamespace(
+        initMany=lambda *args: calls.append(args),
+        init=lambda *args: pytest.fail("ISAs must not be probed one at a time"),
+    )
+    monkeypatch.setattr(rocisa.rocIsa, "getInstance", lambda: ri)
+    isas = [(9, 4, 2), (9, 5, 0)]
+    helpers._prime_isa_cache(isas, "/compiler")
+    assert calls == [(isas, "/compiler", False)]
 
 
 def _map_reporting_unsupported(monkeypatch):
