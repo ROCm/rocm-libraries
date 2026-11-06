@@ -35,6 +35,7 @@ test_categories:
       - "hipdnn_golden_sdpa_fwd_generator_python_tests"
       - "hipdnn_golden_sdpa_bwd_generator_python_tests"
       - "hipdnn_golden_sdpa_fwd_paged_generator_python_tests"
+      - "hipdnn_sdpa_bwd_bundle_generator_python_tests"
     labels:
       - "quick"
       - "pre-commit"
@@ -54,5 +55,6 @@ test_categories:
       - "hipdnn_golden_sdpa_fwd_generator_python_tests"
       - "hipdnn_golden_sdpa_bwd_generator_python_tests"
       - "hipdnn_golden_sdpa_fwd_paged_generator_python_tests"
+      - "hipdnn_sdpa_bwd_bundle_generator_python_tests"
     labels:
       - "ffm-full"

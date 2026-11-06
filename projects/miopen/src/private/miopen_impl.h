@@ -1,30 +1,25 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 //
-// Declarations of the _impl-form public C entry points exported by the private
-// implementation library (libMIOpen_private.so) when the MIOpen public/private
-// split is enabled. The private library's definitions are renamed to their
-// _impl form at build time by force-including miopen_private_rename.h into
-// every private source; this header is the matching declaration set for code
-// that calls those renamed entry points.
+// GENERATED FILE. Do not edit.
+// Source: projects/miopen/include/miopen/miopen.h
+// Regenerate: python3 projects/miopen/script/generate_wrapper_sources.py
 //
-// It is the single declaration source for the public wrapper's forwarding
-// stubs (wrapper.cpp) and, once the hipDNN MIOpen provider is rewired for
-// direct private linkage, for that provider as well. Keeping one copy is what
-// stops the wrapper and the provider from drifting apart: the _impl names have
-// C linkage, so a signature divergence would link cleanly and corrupt at
-// runtime rather than failing the build.
+// Declarations of the _impl-form public C entry points that the private library
+// (libMIOpen_private.so) exports when the public/private split is enabled. Its
+// definitions are renamed to _impl at build time by force-including
+// miopen_private_rename.h; this is the matching declaration set for callers.
 //
-// This header is not installed today. Installing it under the private include
-// subtree, and adding it to MIOpen_private's INTERFACE_INCLUDE_DIRECTORIES, is
-// tracked separately alongside the provider rewire.
+// It is the single declaration source for the wrapper's stubs (wrapper.cpp,
+// wrapper_passthrough.cpp) and for the hipDNN code that reads MIOpen state
+// through the _impl getters (hipdnn_conv.cpp, hipdnn_graph.cpp). The _impl names
+// have C linkage, so a signature that differed from the definition would link
+// cleanly and corrupt arguments at run time. Each declaration is generated from
+// the miopen.h declaration the definition is compiled from, so the two cannot
+// differ.
 //
-// HAND-MAINTAINED. Add a declaration here whenever a new MIOPEN_EXPORT function
-// is added to include/miopen/miopen.h, together with a matching
-// `#define miopenNewFn miopenNewFn_impl` line in miopen_private_rename.h and a
-// forwarding stub in wrapper.cpp. The public-ABI gate
-// (script/check_public_abi.py) fails the build when these drift apart in a way
-// that changes the exported symbol set; it cannot see signature drift.
+// This header is not installed, and the hipDNN provider does not use it; it
+// force-includes its own copy of the rename list instead.
 #pragma once
 
 #ifdef MIOPEN_BUILDING_PRIVATE
