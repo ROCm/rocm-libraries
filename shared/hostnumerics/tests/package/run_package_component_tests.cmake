@@ -114,7 +114,7 @@ function(_install_project build_dir install_dir label)
         RELATIVE "${install_dir}/include/roc/hostnumerics/detail"
         "${install_dir}/include/roc/hostnumerics/detail/*"
     )
-    if(NOT _installed_detail_headers STREQUAL "layout_offset.hpp;prime.hpp;shape_access.hpp")
+    if(NOT _installed_detail_headers STREQUAL "layout_offset.hpp;prime.hpp")
         message(FATAL_ERROR
             "${label} installed unexpected internal headers: "
             "${_installed_detail_headers}."

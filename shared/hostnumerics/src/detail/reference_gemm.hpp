@@ -7,7 +7,6 @@
 #include <complex>
 #include <cstddef>
 #include <optional>
-#include <roc/hostnumerics/detail/shape_access.hpp>
 #include <roc/hostnumerics/gemm.hpp>
 #include <stdexcept>
 #include <string>
