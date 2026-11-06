@@ -27,12 +27,6 @@ set(_ROCKE_LIBRARY_CONV_TEST_RELPATHS
     "tests/library/tests/test_conv_wgrad_prefetch_addr.py"
     "tests/library/tests/test_conv_wgrad_prefetch_global_regs.py"
     "tests/library/tests/test_conv_dgrad_spec_policy.py"
-    "tests/library/tests/test_conv_ir_golden.py"
-    "tests/library/tests/test_conv_platform_regressions.py"
-    "tests/library/tests/test_conv_split_k.py"
-    "tests/library/tests/test_conv_split_k_planner.py"
-    "tests/library/tests/test_conv_split_k_wgrad.py"
-    "tests/library/tests/test_ceil_div_callers.py"
     "tests/library/tests/test_streamk_sweep_launch.py"
     "tests/library/tests/test_conv_build_signatures.py"
     "tests/library/tests/test_conv_aot_grid_limits.py"
@@ -84,6 +78,32 @@ string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "  LABELS \"ckc\\;python\\;conv\\;host\\;quick\"\n"
        "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
         "  TIMEOUT 180)\n")
+
+# Library conv IR golden, platform-regression, split-K planner, ceil_div and
+# conv doc-example (the conv part of dsl_docs' verify_dsl_docs.py) CPU tests
+# (no GPU). Their own entry, with the conv entry's arguments, labels and
+# PYTHONPATH, so they do not share rocke_library_conv_pytest's CTest budget,
+# which is already close to its limit on Windows runners.
+set(_ROCKE_LIBRARY_CONV_IR_TEST_RELPATHS
+    "tests/library/tests/test_conv_ir_golden.py"
+    "tests/library/tests/test_conv_platform_regressions.py"
+    "tests/library/tests/test_conv_split_k.py"
+    "tests/library/tests/test_conv_split_k_planner.py"
+    "tests/library/tests/test_conv_split_k_wgrad.py"
+    "tests/library/tests/test_ceil_div_callers.py"
+    "tests/library/tests/test_verify_dsl_docs_conv.py")
+set(_ROCKE_LIBRARY_CONV_IR_TESTS "")
+foreach(_rocke_conv_ir_test ${_ROCKE_LIBRARY_CONV_IR_TEST_RELPATHS})
+  string(APPEND _ROCKE_LIBRARY_CONV_IR_TESTS
+         " \"${ROCKE_TEST_CTEST_REL}${_rocke_conv_ir_test}\"")
+endforeach()
+string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+       "add_test(rocke_library_conv_ir_pytest python -m pytest${_ROCKE_LIBRARY_CONV_IR_TESTS} -v -rs --timeout=30)\n")
+string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+       "set_tests_properties(rocke_library_conv_ir_pytest PROPERTIES\n"
+       "  LABELS \"ckc\\;python\\;conv\\;host\\;quick\"\n"
+       "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
+       "  TIMEOUT 180)\n")
 
 # Library conv TF32 tests (no GPU required), as two entries:
 #
