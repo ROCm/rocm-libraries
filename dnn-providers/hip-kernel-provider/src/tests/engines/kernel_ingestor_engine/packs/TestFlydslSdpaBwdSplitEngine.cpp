@@ -2259,8 +2259,7 @@ TEST(TestFlydslSdpaBwdSplitGraph, TheMergedEngineDeclinesAnF32BiasAndValueHeadsW
     }
 }
 
-TEST(TestFlydslSdpaBwdSplitGraph,
-     TheMergedEngineDeclinesAMaskedF16HeadDim192GraphTheSplitEngineServes)
+TEST(TestFlydslSdpaBwdSplitGraph, TheMergedEngineDeclinesAMaskedHeadDim192GraphTheSplitEngineServes)
 {
     const auto atDtype = [](DataType dtype, int64_t headDim) {
         auto spec = withHeadDims(baseSpec(), headDim, headDim);
@@ -2275,23 +2274,26 @@ TEST(TestFlydslSdpaBwdSplitGraph,
         const GraphFixture fixture(buildSdpaBwdGraph(spec));
         return matchesGraph(MERGED, fixture.context()).has_value();
     };
-    const auto f16 = atDtype(DataType::HALF, 192);
-    // Any diagonal bound: top-left causal, a window, and bottom-right causal.
-    const auto bottomRight
-        = f16.withEdit([](SdpaBwdGraph& g) { g.attributes.causalMaskBottomRight = true; });
-    for(const auto& spec : {withCausal(f16), withWindow(f16), bottomRight})
+    for(const DataType dtype : {DataType::BFLOAT16, DataType::HALF})
     {
-        EXPECT_FALSE(mergedServes(spec));
-        EXPECT_TRUE(splitServes(spec));
-        // The shared matcher accepts it: the decline is the merged engine's own.
-        EXPECT_TRUE(
-            std::holds_alternative<flydsl_sdpa_bwd::SdpaBwdProblem>(matchSdpaBwdSpec(spec)));
+        const auto d192 = atDtype(dtype, 192);
+        // Any diagonal bound: top-left causal, a window, and bottom-right causal.
+        const auto bottomRight
+            = d192.withEdit([](SdpaBwdGraph& g) { g.attributes.causalMaskBottomRight = true; });
+        for(const auto& spec : {withCausal(d192), withWindow(d192), bottomRight})
+        {
+            EXPECT_FALSE(mergedServes(spec));
+            EXPECT_TRUE(splitServes(spec));
+            // The shared matcher accepts it: the decline is the merged engine's own.
+            EXPECT_TRUE(
+                std::holds_alternative<flydsl_sdpa_bwd::SdpaBwdProblem>(matchSdpaBwdSpec(spec)));
+        }
+        // Unmasked d192 and masked graphs at other head dims stay served.
+        EXPECT_TRUE(mergedServes(d192));
+        EXPECT_TRUE(mergedServes(withCausal(atDtype(dtype, 128))));
+        EXPECT_TRUE(mergedServes(withCausal(atDtype(dtype, 160))));
+        EXPECT_TRUE(mergedServes(withCausal(atDtype(dtype, 256))));
     }
-    // Unmasked f16 d192, masked bf16 d192 and masked f16 at other head dims stay served.
-    EXPECT_TRUE(mergedServes(f16));
-    EXPECT_TRUE(mergedServes(withCausal(atDtype(DataType::BFLOAT16, 192))));
-    EXPECT_TRUE(mergedServes(withCausal(atDtype(DataType::HALF, 128))));
-    EXPECT_TRUE(mergedServes(withCausal(atDtype(DataType::HALF, 160))));
 }
 
 TEST(TestFlydslSdpaBwdSplitKernel, ARowReadsTheBiasAtTheWidthItWasBuiltFor)
