@@ -2,26 +2,37 @@
 
 This root holds the descriptors the provider **ships**. Its sibling `test_descriptors/`
 stages into the build tree for the unit and integration binaries and is installed only
-under `HIPKERNELPROVIDER_ENABLE_TESTS`. It holds two producers' bundles:
+under `HIPKERNELPROVIDER_ENABLE_TESTS`. It holds the rocKE bundles below, plus
+`FlyDSL/<op>/` bundles.
 
-- Five rocKE bundles: `rocKE/gfx950_attention_dense/`, `rocKE/gfx950_attention_unified_2d/`
-  and `rocKE/gfx950_attention_unified_3d/`, whose KDPs are stored in DVC (see
-  [Large rocKE files live in DVC](#large-rocke-files-live-in-dvc) below) and declare gfx950
-  only; `rocKE/gfx942_attention_unified_3d/`, whose KDP is also in DVC and declares gfx942
-  only; and `rocKE/gfx1151_wmma_attention/`, whose KDP is in git and declares the gfx11 and
-  gfx12 RDNA targets. They pack for a build that has rocKE enabled
-  (`HIPKERNELPROVIDER_ENABLE_ROCKE=ON`, which keeps the `rocKE/` folder in the walk) and whose
-  GPU targets include an arch one of those KDPs declares; for gfx950 and gfx942 the DVC KDPs
-  must also have been pulled.
-- `FlyDSL/<op>/`, one bundle per op, whose kernels are **pre-built** and stored beside
-  their descriptors under `FlyDSL/<op>/<target>/`, as `kind: "hsaco"` UKDs inline in
-  that target's KDP. Each `<target>/` directory is a DVC output on the same `ingestor`
-  remote (`<target>.dvc` in git), fetched and checked like rocKE's (below). The
-  target is a concrete arch or an LLVM generic target such as `gfx11-generic`, whose UKDs
-  list every member arch, so the same objects pack into each member's shard. A bundle
-  packs for a build whose GPU targets include one of its arches and that has FlyDSL
-  enabled (`HIPKERNELPROVIDER_ENABLE_FLYDSL`, OFF by default; TheRock turns it on). The objects and descriptors are
-  generated, not hand-written: see `flydsl/REGEN.md` in the provider tree.
+| Bundle | Engine | Native pack |
+|---|---|---|
+| `rocKE/gfx950_attention_dense/` | `hipkernel:Gfx950AttentionDense` | `packs/Gfx950AttentionDenseNative.cpp` |
+| `rocKE/gfx950_attention_unified_2d/` | `hipkernel:Gfx950AttentionUnified2D` | `packs/Gfx950AttentionUnified2DNative.cpp` |
+| `rocKE/gfx950_attention_unified_3d/` | `hipkernel:Gfx950AttentionUnified3D` | `packs/Gfx950AttentionUnified3DNative.cpp` |
+| `rocKE/gfx942_attention_unified_3d/` | `hipkernel:Gfx942AttentionUnified3D` | `packs/Gfx942AttentionUnified3DNative.cpp` |
+| `rocKE/gfx1151_wmma_attention/` | `hipkernel:Gfx1151WmmaAttention` | `packs/Gfx1151WmmaAttentionNative.cpp` |
+| `rocKE/gfx1151_wmma_attention_decode/` | `hipkernel:Gfx1151WmmaAttentionDecode` | `packs/Gfx1151WmmaAttentionNative.cpp` |
+| `rocKE/gfx950_conv_dgrad_aot/` | `hipkernel:Gfx950ConvDgradAot` | `packs/Gfx950ConvDgradNative.cpp` |
+
+The `gfx950_attention_dense`, `gfx950_attention_unified_2d`, `gfx950_attention_unified_3d`,
+`gfx942_attention_unified_3d` and `gfx950_conv_dgrad_aot` KDPs are stored in DVC (see
+[Large rocKE files live in DVC](#large-rocke-files-live-in-dvc) below) and declare gfx950
+or gfx942 only; `gfx1151_wmma_attention` and `gfx1151_wmma_attention_decode` KDPs are in
+git and declare the gfx11 and gfx12 RDNA targets. Each bundle packs for a build that has
+rocKE enabled (`HIPKERNELPROVIDER_ENABLE_ROCKE=ON`, which keeps the `rocKE/` folder in the
+walk) and whose GPU targets include an arch its KDP declares; for gfx950 and gfx942 the
+DVC KDPs must also have been pulled.
+
+`FlyDSL/<op>/`, one bundle per op, whose kernels are **pre-built** and stored beside
+their descriptors under `FlyDSL/<op>/<target>/`, as `kind: "hsaco"` UKDs inline in
+that target's KDP. Each `<target>/` directory is a DVC output on the same `ingestor`
+remote (`<target>.dvc` in git), fetched and checked like rocKE's (below). The
+target is a concrete arch or an LLVM generic target such as `gfx11-generic`, whose UKDs
+list every member arch, so the same objects pack into each member's shard. A bundle
+packs for a build whose GPU targets include one of its arches and that has FlyDSL
+enabled (`HIPKERNELPROVIDER_ENABLE_FLYDSL`, OFF by default; TheRock turns it on). The objects and descriptors are
+generated, not hand-written: see `flydsl/REGEN.md` in the provider tree.
 
 For any other build the root has nothing to pack and production packaging is dormant,
 unless the cache variable below is pointed elsewhere.

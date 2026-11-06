@@ -113,15 +113,24 @@ inline bool isReservedFeatureName(const std::string& name, bool reserveWorkspace
     return reserveWorkspace && isWorkspaceToken(name);
 }
 
+/// True for a token a graph matcher binds only for its own kernel matchers: a name
+/// starting with `_` (after an optional `$`) is never a feature, in a ranker or a corpus.
+inline bool isPrivateToken(const std::string& name)
+{
+    const std::string_view bare
+        = !name.empty() && name.front() == '$' ? std::string_view(name).substr(1) : name;
+    return !bare.empty() && bare.front() == '_';
+}
+
 /// Binds graph-match tokens as features. Reserved names are skipped so a matcher cannot
-/// override a canonical feature such as `graph.flops`.
+/// override a canonical feature such as `graph.flops`, and private tokens are skipped.
 inline void bindGraphMatchBindings(uhd::FeatureExtractionContext& features,
                                    const BoundTokens& bound,
                                    bool reserveWorkspace = false)
 {
     for(const auto& entry : queryVarsFrom(bound))
     {
-        if(!isReservedFeatureName(entry.first, reserveWorkspace))
+        if(!isReservedFeatureName(entry.first, reserveWorkspace) && !isPrivateToken(entry.first))
         {
             features.bind(entry.first, entry.second);
         }
