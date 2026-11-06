@@ -12,8 +12,8 @@ import math
 from typing import List, Tuple, Optional
 from rocisa.code import Module, TextBlock
 from rocisa.instruction import SWaitCnt, SBarrier, MFMAInstruction, MXMFMAInstruction, \
-    LocalReadInstruction, GlobalReadInstruction, GlobalWriteInstruction, CommonInstruction, \
-    VXorB32
+    LocalReadInstruction, LocalWriteInstruction, GlobalReadInstruction, GlobalWriteInstruction, \
+    CommonInstruction, SMemLoadInstruction, VXorB32
 
 
 class _SlotPlacer:
@@ -2301,6 +2301,188 @@ def _orderReadsAroundLiveSourceWrites(pathInsts, earliestWriteShadow, mfmaBase):
     return prefix + unconstrained + deferred + tail
 
 
+_DATA_TENSORS = ("A", "B")
+
+
+def _commentTensor(inst):
+    """Operand tensor named by a local-read or direct-to-LDS comment."""
+    comment = (getattr(inst, "comment", "") or "").lstrip()
+    for marker in ("TrSubtile", "Subtile"):
+        if comment.startswith(marker):
+            rest = comment[len(marker):]
+            for tensor in ("MXSA", "MXSB", "SA", "SB", "A", "B"):
+                if rest.startswith(tensor):
+                    return tensor
+            return None
+    token = comment.split(" ", 1)[0]
+    if token in ("MXSA", "MXSB", "SA", "SB", "A", "B"):
+        return token
+    return None
+
+
+def _isScalarAlu(inst) -> bool:
+    """Scalar ALU that does not touch LDS, VMEM, or a wait."""
+    if (isinstance(inst, TextBlock) or _isMfma(inst) or _isVALU(inst)
+            or _isDsRead(inst) or _isBufferLoad(inst) or _isBarrier(inst)
+            or _isM0Update(inst) or _isWaitCnt(inst)):
+        return False
+    if isinstance(inst, (SMemLoadInstruction, LocalWriteInstruction)):
+        return False
+    return isinstance(inst, CommonInstruction)
+
+
+def _precededByVmemWait(items, index: int) -> bool:
+    """Whether this barrier publishes LDS a vmcnt just made visible.
+
+    The overwrite handshake is preceded by an lgkmcnt or a local read.
+    The publish barrier sits on the vmcnt that retires the stores the
+    following ds_reads consume, with only math between the two.
+    """
+    for cursor in range(index - 1, -1, -1):
+        inst = items[cursor]
+        if (isinstance(inst, TextBlock) or _isMfma(inst)
+                or _isVALU(inst) or _isScalarAlu(inst)):
+            continue
+        return _isWaitCnt(inst) and inst.vlcnt >= 0
+    return False
+
+
+def _canCrossBeforeStore(inst, storeTensor) -> bool:
+    """Whether inst may issue before the barrier that guards a store."""
+    if isinstance(inst, TextBlock) or _isMfma(inst) or _isVALU(inst) or _isScalarAlu(inst):
+        return True
+    if _isDsRead(inst):
+        readTensor = _commentTensor(inst)
+        return (readTensor is not None and storeTensor is not None
+                and readTensor != storeTensor)
+    return False
+
+
+def _storeInsertSlot(items, barrierIndex: int):
+    """Slot of the m0 that feeds the first A/B store after this barrier.
+
+    Returns None when the barrier publishes a completed store, or when a
+    same-tensor local read, another barrier, or a vmcnt sits in front of
+    that store.
+    """
+    loadIndex = None
+    storeTensor = None
+    for cursor in range(barrierIndex + 1, len(items)):
+        inst = items[cursor]
+        if isinstance(inst, TextBlock):
+            continue
+        if _isBufferLoad(inst) and _commentTensor(inst) in _DATA_TENSORS:
+            loadIndex = cursor
+            storeTensor = _commentTensor(inst)
+            break
+        if _isBarrier(inst) or (_isWaitCnt(inst) and inst.vlcnt >= 0):
+            return None
+    if loadIndex is None:
+        return None
+    insertAt = loadIndex
+    if loadIndex > 0 and _isM0Update(items[loadIndex - 1]):
+        insertAt = loadIndex - 1
+    for cursor in range(barrierIndex + 1, insertAt):
+        if not _canCrossBeforeStore(items[cursor], storeTensor):
+            return None
+    return insertAt
+
+
+def _isCodeModule(inst) -> bool:
+    return hasattr(inst, "setItems") and hasattr(inst, "flatitems")
+
+
+def _slideOverwriteBarriersToVmem(module) -> None:
+    """Move an overwrite barrier to the store it guards.
+
+    The barrier stalls a wave until the others arrive. Math and local
+    reads of the other tensor do not depend on that handshake, so they
+    stay in front and cover the skew. The direct-to-LDS store issues on
+    the first cycle after every wave is in. A barrier that publishes
+    LDS for the reads after a vmcnt stays where it is.
+    """
+    items = list(module.items())
+    index = 0
+    changed = False
+    while index < len(items):
+        inst = items[index]
+        if _isCodeModule(inst):
+            _slideOverwriteBarriersToVmem(inst)
+            index += 1
+            continue
+        if not _isBarrier(inst) or _precededByVmemWait(items, index):
+            index += 1
+            continue
+        dest = _storeInsertSlot(items, index)
+        if dest is None or dest <= index + 1:
+            index += 1
+            continue
+        barrier = items.pop(index)
+        items.insert(dest - 1, barrier)
+        changed = True
+        index = dest
+    if changed:
+        module.setItems(items)
+
+
+def _isFullLgkmDrain(inst) -> bool:
+    """Whether inst waits until no ds_read or scalar load is outstanding."""
+    if not isinstance(inst, SWaitCnt):
+        return False
+    if getattr(inst, "waitAll", False):
+        return True
+    if inst.dscnt < 0 and inst.kmcnt < 0:
+        return False
+    lgkm = ((0 if inst.dscnt < 0 else inst.dscnt)
+            + (0 if inst.kmcnt < 0 else inst.kmcnt))
+    return lgkm == 0
+
+
+def _incrementsLgkm(inst) -> bool:
+    return isinstance(inst, (LocalReadInstruction, LocalWriteInstruction, SMemLoadInstruction))
+
+
+def dropDominatedLgkmWaits(module):
+    """Remove an lgkmcnt(0) that follows another with no new LDS or scalar load.
+
+    A count of 0 drains every outstanding ds_read and s_load. The next
+    full drain is redundant until one of those issues again. A wait that
+    also carries vmcnt keeps that half.
+    """
+    state = {"zero": False}
+
+    def walk(container) -> None:
+        kept = []
+        for inst in list(container.items()):
+            if _isCodeModule(inst):
+                walk(inst)
+                kept.append(inst)
+                continue
+            if _isFullLgkmDrain(inst):
+                if getattr(inst, "waitAll", False):
+                    state["zero"] = True
+                    kept.append(inst)
+                    continue
+                if state["zero"]:
+                    if inst.vlcnt >= 0 or inst.vscnt >= 0:
+                        inst.dscnt = -1
+                        inst.kmcnt = -1
+                        kept.append(inst)
+                    continue
+                state["zero"] = True
+                kept.append(inst)
+                continue
+            if _isWaitCnt(inst) and (inst.dscnt > 0 or inst.kmcnt > 0):
+                state["zero"] = False
+            elif _incrementsLgkm(inst):
+                state["zero"] = False
+            kept.append(inst)
+        container.setItems(kept)
+
+    walk(module)
+    return module
+
+
 def _schedulePartitionZeroIssueOrder(
         emittedModules, pathOrders, preMfmaOrders, mfmas,
         minGapDsReadToWait, uniformPgrEpoch,
@@ -2309,8 +2491,9 @@ def _schedulePartitionZeroIssueOrder(
     """Issue partition-zero reads by consumer in five follower slots.
 
     Local reads and global-read bundles are ordered by first-consumer rank.
-    The earliest cohort issues before the rest. The partition barrier moves
+    The earliest cohort issues before the rest.     The partition barrier moves
     out of the pre-MFMA prefix when this epoch's wait owns the ordering.
+    An overwrite barrier then slides to the first A/B direct-to-LDS store.
     Each slot holds one instruction. A ds_read or VALU stays out of the
     first slot, and an interval holds at most one direct-to-LDS load and
     two ds_reads. Local-read spreading stays off.
@@ -2558,7 +2741,9 @@ def _schedulePartitionZeroIssueOrder(
 
     scheduled = Module()
     _emitPreMfma(scheduled, deferSync=canUseThreePhase)
-    scheduled.add(placer.assemble(mfmas))
+    body = placer.assemble(mfmas)
+    _slideOverwriteBarriersToVmem(body)
+    scheduled.add(body)
 
     bufLoadCount = 0
     sawOverwritePrerequisite = False

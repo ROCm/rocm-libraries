@@ -5635,6 +5635,158 @@ class TestPartitionZeroIssueOrder:
         assert located["mid-b"] == width + 4
         assert located["stop"] == 2 * width
 
+    def _gfx950(self):
+        import shutil
+        from rocisa import rocIsa
+        ri = rocIsa.getInstance()
+        asm = shutil.which("amdclang++") or "/usr/bin/amdclang++"
+        ri.init((9, 5, 0), asm)
+        ri.setKernel((9, 5, 0), 64)
+
+    def test_overwrite_barrier_slides_to_the_first_store(self):
+        from rocisa.code import Module
+        from rocisa.container import DSModifiers, MUBUFModifiers, mgpr, sgpr, vgpr
+        from rocisa.enum import InstType
+        from rocisa.instruction import (
+            BufferLoadB128, DSLoadB128, MXMFMAInstruction, SAddU32, SBarrier,
+            SWaitCnt, VXorB32)
+        from tensilelite.Components.Subtile.InstructionScheduler import (
+            _slideOverwriteBarriersToVmem)
+
+        self._gfx950()
+        dtl = MUBUFModifiers(offen=True, lds=True)
+
+        def mfma(comment):
+            return MXMFMAInstruction(
+                instType=InstType.INST_F32, accType=InstType.INST_F32,
+                variant=[16, 16, 128], acc=vgpr(0, 4),
+                a=vgpr(8, 8), b=vgpr(84, 8),
+                mxsa=vgpr(17), mxsb=vgpr(18), comment=comment)
+
+        def bread(tile):
+            return DSLoadB128(
+                dst=vgpr(20, 4), src=vgpr(7),
+                ds=DSModifiers(offset=0),
+                comment=f"B MT=n tile={tile} K=0 read=0")
+
+        body = Module()
+        body.add(SWaitCnt(dscnt=0, comment="drain"))
+        body.add(mfma("m0"))
+        body.add(bread(4))
+        body.add(SBarrier(comment="barrier"))
+        body.add(mfma("m1"))
+        body.add(bread(5))
+        body.add(VXorB32(dst=vgpr(2), src0=vgpr(2), src1=vgpr(3), comment="scale"))
+        body.add(SAddU32(
+            dst=mgpr(0), src0=sgpr("LocalWriteBaseAddrA"), src1=0,
+            comment="m0-setup"))
+        body.add(BufferLoadB128(
+            dst=None, vaddr=vgpr(0), saddr=sgpr("SrdA", 4),
+            soffset=0, mubuf=dtl, comment="A MT=n+2 tile=0 K=0 i=0"))
+
+        _slideOverwriteBarriersToVmem(body)
+
+        assert [inst.comment for inst in body.items()] == [
+            "drain", "m0", "B MT=n tile=4 K=0 read=0",
+            "m1", "B MT=n tile=5 K=0 read=0", "scale",
+            "barrier", "m0-setup", "A MT=n+2 tile=0 K=0 i=0",
+        ]
+
+    def test_publish_barrier_stays_on_the_vmcnt(self):
+        from rocisa.code import Module
+        from rocisa.container import DSModifiers, MUBUFModifiers, mgpr, sgpr, vgpr
+        from rocisa.enum import InstType
+        from rocisa.instruction import (
+            BufferLoadB128, DSLoadB128, MXMFMAInstruction, SAddU32, SBarrier,
+            SWaitCnt, VXorB32)
+        from tensilelite.Components.Subtile.InstructionScheduler import (
+            _slideOverwriteBarriersToVmem)
+
+        self._gfx950()
+        body = Module()
+        body.add(SWaitCnt(vlcnt=15, comment="vmcnt"))
+        body.add(MXMFMAInstruction(
+            instType=InstType.INST_F32, accType=InstType.INST_F32,
+            variant=[16, 16, 128], acc=vgpr(0, 4),
+            a=vgpr(8, 8), b=vgpr(84, 8),
+            mxsa=vgpr(17), mxsb=vgpr(18), comment="mfma"))
+        body.add(SBarrier(comment="barrier"))
+        body.add(VXorB32(dst=vgpr(2), src0=vgpr(2), src1=vgpr(3), comment="xor"))
+        body.add(DSLoadB128(
+            dst=vgpr(20, 4), src=vgpr(7), ds=DSModifiers(offset=0),
+            comment="A MT=n+1 tile=0 K=0 read=0"))
+        body.add(SAddU32(
+            dst=mgpr(0), src0=sgpr("LocalWriteBaseAddrB"), src1=0,
+            comment="m0-setup"))
+        body.add(BufferLoadB128(
+            dst=None, vaddr=vgpr(0), saddr=sgpr("SrdB", 4), soffset=0,
+            mubuf=MUBUFModifiers(offen=True, lds=True),
+            comment="B MT=n+2 tile=5 K=0 i=0"))
+
+        _slideOverwriteBarriersToVmem(body)
+
+        assert [inst.comment for inst in body.items()] == [
+            "vmcnt", "mfma", "barrier", "xor",
+            "A MT=n+1 tile=0 K=0 read=0", "m0-setup",
+            "B MT=n+2 tile=5 K=0 i=0",
+        ]
+
+    def test_same_tensor_read_blocks_the_barrier_slide(self):
+        from rocisa.code import Module
+        from rocisa.container import DSModifiers, MUBUFModifiers, mgpr, sgpr, vgpr
+        from rocisa.instruction import BufferLoadB128, DSLoadB128, SAddU32, SBarrier
+        from tensilelite.Components.Subtile.InstructionScheduler import (
+            _slideOverwriteBarriersToVmem)
+
+        self._gfx950()
+        body = Module()
+        body.add(SBarrier(comment="barrier"))
+        body.add(DSLoadB128(
+            dst=vgpr(20, 4), src=vgpr(7), ds=DSModifiers(offset=0),
+            comment="A MT=n tile=6 K=0 read=0"))
+        body.add(SAddU32(
+            dst=mgpr(0), src0=sgpr("LocalWriteBaseAddrA"), src1=0,
+            comment="m0-setup"))
+        body.add(BufferLoadB128(
+            dst=None, vaddr=vgpr(0), saddr=sgpr("SrdA", 4), soffset=0,
+            mubuf=MUBUFModifiers(offen=True, lds=True),
+            comment="A MT=n+2 tile=6 K=0 i=0"))
+
+        _slideOverwriteBarriersToVmem(body)
+
+        assert [inst.comment for inst in body.items()][0] == "barrier"
+
+    def test_dominated_lgkmcnt_is_dropped(self):
+        from rocisa.code import Module
+        from rocisa.container import DSModifiers, vgpr
+        from rocisa.instruction import DSLoadB128, SWaitCnt
+        from tensilelite.Components.Subtile.InstructionScheduler import (
+            dropDominatedLgkmWaits)
+
+        self._gfx950()
+        inner = Module()
+        inner.add(SWaitCnt(dscnt=0, comment="first"))
+        inner.add(DSLoadB128(
+            dst=vgpr(20, 4), src=vgpr(7), ds=DSModifiers(offset=0),
+            comment="B MT=n tile=4 K=0 read=0"))
+        inner.add(SWaitCnt(dscnt=0, comment="second"))
+        outer = Module()
+        outer.add(inner)
+        outer.add(SWaitCnt(dscnt=0, comment="third"))
+        outer.add(SWaitCnt(dscnt=2, comment="partial"))
+        outer.add(SWaitCnt(dscnt=0, comment="after-partial"))
+        both = SWaitCnt(dscnt=0, vlcnt=4, comment="lgkm-and-vm")
+        outer.add(both)
+
+        dropDominatedLgkmWaits(outer)
+
+        assert [inst.comment for inst in outer.flatitems()] == [
+            "first", "B MT=n tile=4 K=0 read=0", "second",
+            "partial", "after-partial", "lgkm-and-vm",
+        ]
+        assert both.dscnt == -1
+        assert both.vlcnt == 4
+
 
 class TestLateScalePrefetch:
     """Staging VGPRs for scales that partition zero does not consume."""

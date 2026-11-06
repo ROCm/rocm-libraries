@@ -5111,6 +5111,7 @@ class LogicalScheduler:
             instructionSchedule,
             placeLateScalePrefetchSpills,
             restoreCanonicalScaleReads,
+            dropDominatedLgkmWaits,
             relaxWaitGrForOutstandingStores,
             spillC0ScaleRefreshes,
             _MIN_MFMA_GAP_DS_READ_TO_WAIT_DEFAULT,
@@ -5354,6 +5355,10 @@ class LogicalScheduler:
         if label.startswith("NGLL") or label.startswith("NLL"):
             module = guardExitOverwriteReread(
                 module, getattr(self, "_earlyOverwriteVgprs", ()))
+        if (label.startswith("MAINLOOP")
+                and self.config.uniformPgrEpoch
+                and self.config.dualPeriodScale):
+            dropDominatedLgkmWaits(module)
         return module
 
     def _emit_pgr2_tail_lw_align(self, kernel):
