@@ -490,6 +490,7 @@ _INTRINSIC_DECLS: Dict[str, str] = {
     "exp.f32": "declare float @llvm.exp.f32(float)",
     "amdgcn.exp2.f32": "declare float @llvm.amdgcn.exp2.f32(float)",
     "log2.f32": "declare float @llvm.log2.f32(float)",
+    "log.f32": "declare float @llvm.log.f32(float)",
     "sqrt.f32": "declare float @llvm.sqrt.f32(float)",
     "sqrt.f64": "declare double @llvm.sqrt.f64(double)",
     "rsqrt.f32": "declare float @llvm.amdgcn.rsq.f32(float)",
@@ -896,6 +897,9 @@ _INTRINSIC_DECLS: Dict[str, str] = {
     # gfx950 MX decode GEMV: the scaled fp4 -> bf16 convert and the 16-lane row swap.
     "amdgcn.cvt.scalef32.pk.bf16.fp4": (
         "declare <2 x bfloat> @llvm.amdgcn.cvt.scalef32.pk.bf16.fp4(i32, float, i32 immarg)"
+    ),
+    "amdgcn.cvt.scalef32.pk.bf16.fp8": (
+        "declare <2 x bfloat> @llvm.amdgcn.cvt.scalef32.pk.bf16.fp8(i32, float, i1 immarg)"
     ),
     "amdgcn.permlane16.swap": (
         "declare { i32, i32 } @llvm.amdgcn.permlane16.swap("
@@ -3145,6 +3149,16 @@ class _Lowerer:
             f"@llvm.amdgcn.exp2.f32(float {self._operand(v)})"
         )
 
+    def _op_math_log(self, op: Op) -> None:
+        """``math.log`` (Python engine only): ``llvm.log.f32``."""
+        (v,) = op.operands
+        if v.type.name != "f32":
+            raise NotImplementedError("math.log currently supports f32")
+        self._need("log.f32")
+        self._current().emit(
+            f"  {op.result.name} = call float @llvm.log.f32(float {self._operand(v)})"
+        )
+
     def _op_math_log2(self, op: Op) -> None:
         (v,) = op.operands
         if v.type.name != "f32":
@@ -5112,6 +5126,17 @@ class _Lowerer:
             f"  {op.result.name} = call <2 x bfloat> "
             f"@llvm.amdgcn.cvt.scalef32.pk.bf16.fp4(i32 {self._operand(src)}, "
             f"float {self._operand(scale)}, i32 {int(op.attrs['byte'])})"
+        )
+
+    def _op_arith_cvt_scalef32_pk_bf16_fp8(self, op: Op) -> None:
+        """``v_cvt_scalef32_pk_bf16_fp8`` (Python engine only)."""
+        src, scale = op.operands
+        self._need("amdgcn.cvt.scalef32.pk.bf16.fp8")
+        hi = "true" if op.attrs["hi"] else "false"
+        self._current().emit(
+            f"  {op.result.name} = call <2 x bfloat> "
+            f"@llvm.amdgcn.cvt.scalef32.pk.bf16.fp8(i32 {self._operand(src)}, "
+            f"float {self._operand(scale)}, i1 {hi})"
         )
     def _op_tile_perm_b32(self, op: Op) -> None:
         """``v_perm_b32`` — in-lane byte select across two VGPRs (pure VALU)."""

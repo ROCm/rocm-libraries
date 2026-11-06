@@ -40,9 +40,6 @@ import argparse
 import json
 import sys
 from dataclasses import dataclass, field
-from types import SimpleNamespace
-
-from rocke.core.ir import I32, I64, IRBuilder
 
 from .device_function import (
     DeviceFunctionKnobs,
@@ -50,6 +47,7 @@ from .device_function import (
     write_device_function,
 )
 from .mono_layout import LAYER_ARGS, MonoLayout
+from ..stage_fn_common import StageFamily, build_stage_kernel as _build_stage_kernel
 
 __all__ = [
     "ABI_PARAMS",
@@ -62,18 +60,26 @@ __all__ = [
     "variant_name",
 ]
 
-ABI_PARAMS = (
-    ("tag", "i32"),
-    ("task", "i32"),
-    ("step", "i64"),
-    ("layer", "i32"),
-    *((n, "i64") for n in LAYER_ARGS),
-    ("l0", "i32"),
-    ("l1", "i32"),
-    ("l2", "i32"),
-    ("l3", "i32"),
+QWEN_FAMILY = StageFamily(
+    name="qwen38",
+    abi_params=(
+        ("tag", "i32"),
+        ("task", "i32"),
+        ("step", "i64"),
+        ("layer", "i32"),
+        *((n, "i64") for n in LAYER_ARGS),
+        ("l0", "i32"),
+        ("l1", "i32"),
+        ("l2", "i32"),
+        ("l3", "i32"),
+    ),
+    symbol_prefix="rocke_q38_",
+    uniform_args=("tag", "task", "layer", "l0", "l1", "l2", "l3"),
+    layout_loader=None,
 )
-SYMBOL_PREFIX = "rocke_q38_"
+
+ABI_PARAMS = QWEN_FAMILY.abi_params
+SYMBOL_PREFIX = QWEN_FAMILY.symbol_prefix
 
 
 def variant_name(rows: int, seq: bool = False, group: int = 0) -> str:
@@ -164,7 +170,7 @@ class StageSpec:
 
     @property
     def symbol(self) -> str:
-        return f"{SYMBOL_PREFIX}{self.stage}_{self.variant}"
+        return QWEN_FAMILY.symbol(self.stage, self.variant)
 
 
 # stage -> (body(b, a, layout, spec), supported(spec) -> bool)
@@ -179,34 +185,13 @@ def register_stage(name: str, body, supported):
 def build_stage_kernel(spec: StageSpec, layout: MonoLayout):
     """The stage function's ``KernelDef`` (the ABI's parameters, then the
     stage body)."""
-    if spec.stage not in STAGES:
-        _load_stages(spec.stage)
-    if spec.stage not in STAGES:
-        raise KeyError(f"no rocKE stage function {spec.stage!r}; have {sorted(STAGES)}")
-    body, supported = STAGES[spec.stage]
-    if not supported(spec, layout):
-        raise ValueError(f"{spec.stage} has no rocKE function for variant {spec.variant}")
-    b = IRBuilder(spec.symbol)
-    b.kernel.attrs["max_workgroup_size"] = layout.threads
-    b.fence_barriers = "compiler"
-    vals = {}
-    for name, t in ABI_PARAMS:
-        vals[name] = b.param(name, I32 if t == "i32" else I64)
-    tid = b.thread_id_x()
-    # Wave-uniform inputs: SGPRs once inlined into the mono (a no-op there);
-    # a real call (``inline="never"``) passes arguments in VGPRs.
-    for name in ("tag", "task", "layer", "l0", "l1", "l2", "l3"):
-        vals[name] = b.readfirstlane(vals[name])
-    a = SimpleNamespace(
-        **vals,
-        tid=tid,
-        lane=b.land(tid, b.const_i32(63)),
-        wave=b.readfirstlane(b.lshr(tid, b.const_i32(6))),
-        ls=[vals["l0"], vals["l1"], vals["l2"], vals["l3"]],
+    return _build_stage_kernel(
+        spec,
+        layout,
+        family=QWEN_FAMILY,
+        stages=STAGES,
+        load_stages=_load_stages,
     )
-    body(b, a, layout, spec)
-    b.ret()
-    return b.kernel
 
 
 def lower_stage(spec: StageSpec, layout: MonoLayout, *, arch="gfx950", flavor=None):

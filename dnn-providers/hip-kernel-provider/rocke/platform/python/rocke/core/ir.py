@@ -487,9 +487,11 @@ PYTHON_ONLY_OPCODES = frozenset(
         "arith.cvt_scalef32_pk_bf8_f32",
         # gfx950 MX decode GEMV (``cvt_scalef32_pk_bf16_fp4`` / ``permlane16_swap``).
         "arith.cvt_scalef32_pk_bf16_fp4",
+        "arith.cvt_scalef32_pk_bf16_fp8",
         "tile.permlane16_swap",
-        # Natural exp (``IRBuilder.exp``, ``llvm.exp.f32``).
+        # Natural exp / log (``IRBuilder.exp`` / ``log``, ``llvm.exp.f32`` / ``llvm.log.f32``).
         "math.exp",
+        "math.log",
     }
 )
 
@@ -1328,6 +1330,12 @@ class IRBuilder:
         ``expf`` / MLIR ``math.exp`` compile to). f32 only. Python engine only
         (``PYTHON_ONLY_OPCODES``): the C++ engine does not lower it."""
         return self._op("math.exp", [a], [a.type], result_name_hint="exp").result
+
+    def log(self, a: Value) -> Value:
+        """Natural log: ``llvm.log.f32`` (the backend's accurate expansion; what
+        ``logf`` / MLIR ``math.log`` compile to). f32 only. Python engine only
+        (``PYTHON_ONLY_OPCODES``)."""
+        return self._op("math.log", [a], [a.type], result_name_hint="log").result
 
     def log2(self, a: Value) -> Value:
         return self._op("math.log2", [a], [a.type], result_name_hint="log2").result
@@ -4102,6 +4110,28 @@ class IRBuilder:
             [VectorType(BF16, 2)],
             attrs={"byte": int(byte)},
             result_name_hint="dq4",
+        ).result
+
+    def cvt_scalef32_pk_bf16_fp8(self, src: Value, scale: Value, hi: bool = False) -> Value:
+        """Two E4M3 (fp8) bytes -> ``<2 x bf16>`` scaled by an E8M0 exponent.
+
+        gfx950 ``v_cvt_scalef32_pk_bf16_fp8``: bytes 0, 1 (``hi=False``) or
+        2, 3 (``hi=True``) of ``src`` (i32), each multiplied by
+        ``2^(exponent field of scale - 127)``. With ``scale`` 1.0 it is the
+        exact E4M3 -> bf16 widening. Lowers to
+        ``llvm.amdgcn.cvt.scalef32.pk.bf16.fp8``. **Python engine only.**
+        """
+        if src.type.name != "i32" or scale.type.name != "f32":
+            raise ValueError(
+                "cvt_scalef32_pk_bf16_fp8 expects (i32 src, f32 scale), got "
+                f"({src.type.name}, {scale.type.name})"
+            )
+        return self._op(
+            "arith.cvt_scalef32_pk_bf16_fp8",
+            [src, scale],
+            [VectorType(BF16, 2)],
+            attrs={"hi": bool(hi)},
+            result_name_hint="dq8",
         ).result
     def perm_b32(self, src0: Value, src1: Value, sel: Value) -> Value:
         """`__builtin_amdgcn_perm(src0, src1, sel)` = ``v_perm_b32`` — an
