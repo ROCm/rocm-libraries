@@ -42,9 +42,11 @@
 #   - miopenConvolutionBackwardDataGetWorkSpaceSizeRange
 #   - miopenConvolutionBackwardWeightsGetWorkSpaceSizeRange
 #       Query-only workspace-range APIs defined with MIOPEN_EXPORT in
-#       src/convolution_api.cpp but never declared in include/miopen/miopen.h
-#       (consumers and tests forward-declare them locally). Not renamed in the
-#       private lib, so they stay exported under their original names.
+#       src/convolution_api.cpp but never declared in include/miopen/miopen.h.
+#       MIOpen declares them in src/include/miopen/miopen_internal.h; the hipDNN
+#       provider, which cannot include that header, declares them locally. Not
+#       renamed in the private lib, so they stay exported under their original
+#       names.
 #
 # Adding a symbol here is NOT a way to silence a red check-wrapper gate. The
 # gate re-derives the criterion above mechanically: it fails if any listed

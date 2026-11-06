@@ -200,7 +200,9 @@ namespace TensileLite
                                         lhs.scaleZeroPointA(),
                                         rhs.scaleZeroPointA(),
                                         lhs.int4EncodingA(),
-                                        rhs.int4EncodingA());
+                                        rhs.int4EncodingA(),
+                                        lhs.getParams().deviceScalarAlpha(),
+                                        rhs.getParams().deviceScalarAlpha());
         }
     };
 } // namespace TensileLite
@@ -264,7 +266,8 @@ namespace std
                                           problem.getParams().fallbackStatus(),
                                           problem.scaleBlockSizeA(),
                                           problem.scaleZeroPointA(),
-                                          problem.int4EncodingA()));
+                                          problem.int4EncodingA(),
+                                          problem.getParams().deviceScalarAlpha()));
         }
     };
 
