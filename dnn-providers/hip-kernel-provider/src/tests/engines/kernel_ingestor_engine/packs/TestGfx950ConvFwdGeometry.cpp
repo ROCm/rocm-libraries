@@ -784,8 +784,7 @@ TEST(TestGfx950ConvFwdGeometry, WindowedDirectRequiresGroupsAMultipleOfTheMfmaCh
                                     1,
                                     2,
                                     2};
-    EXPECT_TRUE(
-        launches(Problem{2, 16 * 3, 16 * 3, 14, 14, 3, 3, 1, 1, 1, 1, 1, 1, 3}, groupedWin));
+    EXPECT_TRUE(launches(Problem{2, 48, 48, 14, 14, 3, 3, 1, 1, 1, 1, 1, 1, 3}, groupedWin));
 }
 
 TEST(TestGfx950ConvFwdGeometry, WindowedDirectRefusesSentinelAddressingOverflow)

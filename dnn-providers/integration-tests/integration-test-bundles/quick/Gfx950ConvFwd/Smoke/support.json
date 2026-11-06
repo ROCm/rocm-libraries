@@ -1,12 +1,12 @@
 {
   "claims": {
-    "hipkernel:Gfx950ConvFwd": [
+    "hipkernel:Gfx950ConvFwdAot": [
       {
         "cases": [
-          "smoke_half",
-          "smoke_bfloat16",
+          "depthwise_c32_3x3_bfloat16",
           "depthwise_c32_3x3_half",
-          "depthwise_c32_3x3_bfloat16"
+          "smoke_bfloat16",
+          "smoke_half"
         ],
         "support": {
           "gfx950": [
