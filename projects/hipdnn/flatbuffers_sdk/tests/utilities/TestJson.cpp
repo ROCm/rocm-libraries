@@ -296,6 +296,31 @@ TEST(TestJson, SdpaCuSeqLenRoundTripsPerSide)
     }
 }
 
+// Graphs serialized before cu_seq_len existed omit both keys; the reader must treat them as absent.
+TEST(TestJson, SdpaGraphWithoutCuSeqLenKeysStillLoads)
+{
+    auto sourceBuilder = hipdnn_test_sdk::utilities::createValidSdpaFwdGraph();
+    const auto* source = GetGraph(sourceBuilder.GetBufferPointer());
+    nlohmann::json graphJson = *source;
+
+    auto& inputs = graphJson.at("nodes").at(0).at("inputs");
+    ASSERT_EQ(inputs.erase("cu_seq_len_q_tensor_uid"), 1U);
+    ASSERT_EQ(inputs.erase("cu_seq_len_kv_tensor_uid"), 1U);
+
+    flatbuffers::FlatBufferBuilder builder;
+    builder.Finish(hipdnn_flatbuffers_sdk::json::to<Graph>(builder, graphJson));
+    const auto* loaded = GetGraph(builder.GetBufferPointer());
+
+    const auto* sdpa = loaded->nodes()->Get(0)->attributes_as_SdpaAttributes();
+    ASSERT_NE(sdpa, nullptr);
+    EXPECT_FALSE(sdpa->cu_seq_len_q_tensor_uid().has_value());
+    EXPECT_FALSE(sdpa->cu_seq_len_kv_tensor_uid().has_value());
+
+    const auto* sourceSdpa = source->nodes()->Get(0)->attributes_as_SdpaAttributes();
+    EXPECT_EQ(sdpa->q_tensor_uid(), sourceSdpa->q_tensor_uid());
+    EXPECT_EQ(sdpa->o_tensor_uid(), sourceSdpa->o_tensor_uid());
+}
+
 TEST(TestJson, GraphVersionSerializesToJson)
 {
     flatbuffers::FlatBufferBuilder builder;
