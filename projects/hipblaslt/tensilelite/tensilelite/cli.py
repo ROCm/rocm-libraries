@@ -79,7 +79,9 @@ def _parser() -> argparse.ArgumentParser:
         prog="tensilelite",
         description="TensileLite generator, validation, and tuning tools.",
     )
-    parser.add_argument("--version", action="store_true", help="show the TensileLite version")
+    parser.add_argument(
+        "--version", action="store_true", help="show the generator compatibility version"
+    )
     parser.add_argument("command", nargs="?", choices=tuple(_COMMAND_HELP), help="command to run")
     return parser
 
@@ -101,9 +103,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args[0] == "--version":
         if len(args) != 1:
             parser.error("--version does not accept additional arguments")
-        from . import __version__
+        from . import GENERATOR_VERSION
 
-        print(__version__)
+        print(GENERATOR_VERSION)
         return 0
     command = args.pop(0)
     if command not in _COMMAND_HELP:
