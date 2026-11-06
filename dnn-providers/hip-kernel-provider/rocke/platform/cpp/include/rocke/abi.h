@@ -99,17 +99,25 @@ extern "C" {
  *    signature.
  * 9: rocke_block_scale_gemm_spec_t lost per_input_row at its end, which
  *    changes its size.
- * 10: rocke_gemm_trait_spec_t gained the gfx1250 TDM and K-loop fields (tdm,
+ * 10: rocke_param_opts_t gained nocapture, nonnull and dereferenceable (each
+ *     with a *_set flag) and the integer facts (rocke_int_facts_t) at its
+ *     end, which changes its size.
+ * 11: rocke_gemm_trait_spec_t gained the gfx1250 TDM and K-loop fields (tdm,
  *     tdm_depth, ab_load_elem_bytes and its _set flag, split_barrier,
  *     tdm_alternate_issuers, tdm_early_refill), which changes its size and the
  *     layout of every GEMM spec that embeds it. */
-#define ROCKE_ABI_VERSION 10
+#define ROCKE_ABI_VERSION 11
 
 /* Wire ABI: the CBOR recipe/bundle/guard vocabulary this engine understands.
  * 2: list-tagged ("l") kernel attrs such as cluster_dims; level-1 engines drop them.
  * 3: the scf_if_else instruction (converging runtime if/else, scf.if_else);
- *    older engines reject it as an unknown instruction op. */
-#define ROCKE_RECIPE_ABI 3
+ *    older engines reject it as an unknown instruction op.
+ * 4: the workgroup_size kernel attr (the exact launch block size); an older
+ *    lowerer ignores it and sizes the kernel for max_workgroup_size instead.
+ *    And the integer facts on a param instruction (ge, gt, le, lt, eq,
+ *    multiple_of); an older reader drops a param attr it does not know, so it
+ *    would replay the kernel and plan a launch that checks none of them. */
+#define ROCKE_RECIPE_ABI 4
 
 /* The values the LOADED library was compiled with. A caller compares these
  * against the ROCKE_* macros it was itself compiled with; they differ exactly
