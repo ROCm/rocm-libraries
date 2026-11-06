@@ -677,20 +677,15 @@ std::vector<MultiBlockCase> AlphaConversionInt8Indices()
 }
 
 // beta is converted to the compute type as well, and the blend with the prior output is done in
-// the compute type; the result is rounded to the output type once. Unlike alpha, beta is also
-// applied by the second pass of a multi-block reduction, whose output type differs from the
-// compute type: the shapes add the three second-pass classes (2, 20 and 512 partials).
+// the compute type; the result is rounded to the output type once. The second pass of a multi-block
+// reduction blends too, and there the output type differs from the compute type: the shapes add
+// the second-pass classes (2 partials threadwise, 20 warpwise, 512 blockwise) and the all-dims
+// wrappers (one output: 512 elements in a single pass, 8 and 32 partials, 512 partials).
+const Shape singlePass512All{"SinglePass512All", {1, 512}, {1}};
 const std::vector<const Shape*> betaShapes = [] {
     auto shapes = alphaShapes;
-    shapes.push_back(&warp2Partial);
-    shapes.push_back(&block2All);
-    return shapes;
-}();
-const std::vector<const Shape*> betaIndicesShapes = [] {
-    auto shapes = singlePassShapes;
-    shapes.push_back(&thread2Partial);
-    shapes.push_back(&warp2Partial);
-    shapes.push_back(&block2All);
+    for(const auto* s : {&warp2Partial, &block2All, &thread2All, &warp2All, &singlePass512All})
+        shapes.push_back(s);
     return shapes;
 }();
 
@@ -710,7 +705,8 @@ std::vector<MultiBlockCase> BetaConversionFp16()
     return cases;
 }
 
-// 0.5 * 100 + 0.5 * 10 is 55; a beta converted to INT8 first would be 0 and the result 50
+// 0.5 * 100 + 0.25 * 20 is 55; a beta converted to INT8 first would be 0 and the result 50, and a
+// beta and an alpha taken one for the other would give 0.25 * 100 + 0.5 * 20 = 35
 std::vector<MultiBlockCase> BetaConversionInt8()
 {
     std::vector<MultiBlockCase> cases;
@@ -719,8 +715,8 @@ std::vector<MultiBlockCase> BetaConversionInt8()
         cases.push_back(MakeCase(
             "BetaInt8", miopenInt8, miopenFloat, MIOPEN_REDUCE_TENSOR_AVG, *s, Pattern::Const100));
         cases.back().alpha      = 0.5f;
-        cases.back().beta       = 0.5f;
-        cases.back().outputInit = 10.0f;
+        cases.back().beta       = 0.25f;
+        cases.back().outputInit = 20.0f;
     }
     return cases;
 }
@@ -730,7 +726,7 @@ std::vector<MultiBlockCase> BetaConversionInt8()
 std::vector<MultiBlockCase> BetaConversionInt8Indices()
 {
     std::vector<MultiBlockCase> cases;
-    for(const auto* s : betaIndicesShapes)
+    for(const auto* s : betaShapes)
     {
         cases.push_back(MakeCase("BetaInt8MaxIdx",
                                  miopenInt8,
@@ -740,8 +736,8 @@ std::vector<MultiBlockCase> BetaConversionInt8Indices()
                                  Pattern::ExtremeIndices,
                                  MIOPEN_REDUCE_TENSOR_FLATTENED_INDICES));
         cases.back().alpha      = 0.5f;
-        cases.back().beta       = 0.5f;
-        cases.back().outputInit = 10.0f;
+        cases.back().beta       = 0.25f;
+        cases.back().outputInit = 20.0f;
     }
     return cases;
 }

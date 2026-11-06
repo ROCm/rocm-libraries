@@ -35,8 +35,6 @@ using namespace ck;
 
 using srcDataType =
     typename get_datatype_from_enum<static_cast<DataTypeEnum_t>(CK_PARAM_SRC_DATATYPE)>::type;
-using dstDataType =
-    typename get_datatype_from_enum<static_cast<DataTypeEnum_t>(CK_PARAM_DST_DATATYPE)>::type;
 using compType =
     typename get_datatype_from_enum<static_cast<DataTypeEnum_t>(CK_PARAM_REDUCE_COMPTYPE)>::type;
 
@@ -286,7 +284,6 @@ extern "C" __global__ void gridwise_generic_reduce_1(int origReduceLen,
 
     using gridwise_2d_reduce = GridwiseReduction_xy_to_x_multiblock<BlockSize,
                                                                     srcDataType,
-                                                                    dstDataType,
                                                                     wsDataType,
                                                                     compType,
                                                                     decltype(src2dDesc),
