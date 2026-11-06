@@ -2264,7 +2264,7 @@ def _emit_mfma_acc_scatter(
     This is the single source of the MFMA accumulator -> (row, col) scatter
     that the *default* (direct global store) and the *cshuffle* (LDS staging)
     epilogues both need. It reproduces the canonical AMD MFMA output layout
-    (``MfmaAtom.lane_to_output`` / the ``c_layout`` map in
+    (``MfmaAtom.lane_to_output`` / the ``dst_layout`` map in
     :mod:`rocke.core.arch`) with the same hoisting the two epilogues used to
     open-code in four near-identical blocks (default-16/32, cshuffle-16/32):
 
@@ -2441,7 +2441,7 @@ def _emit_epilogue_default(
 
     # ---- WMMA (RDNA) accumulator scatter: fully MMA-contract driven. ----
     # The WMMA accumulator distributes the M x N tile across wave32 lanes
-    # differently from MFMA, so we ask the op's accumulator layout map for the
+    # differently from MFMA, so we ask the op's destination layout map for the
     # (row, col) of every per-lane slot rather than hard-coding the lane math.
     # One slot -> one f16 store. (The supported WMMA subset is the single
     # 16x16x16 atom -> mfmas_m == mfmas_n == 1.)

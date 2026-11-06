@@ -1,6 +1,6 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""All MMA register bridges reject malformed counts before type equality."""
+"""MMA result/padded bridges reject malformed counts before type equality."""
 
 from types import SimpleNamespace
 
@@ -8,13 +8,10 @@ import pytest
 from rocke.core.arch import ArchTarget
 from rocke.core.ir import I32, Op, Value, VectorType
 from rocke.core.isa.matrix_operand_forms import ZeroPadded
-from rocke.core.mma_operand import (
-    mma_operand_needs_reinterpret,
-    mma_result_needs_reinterpret,
-)
+from rocke.core.mma_operand import mma_result_needs_reinterpret
 
 
-@pytest.mark.parametrize("bridge", ["operand", "result", "padded"])
+@pytest.mark.parametrize("bridge", ["result", "padded"])
 @pytest.mark.parametrize("count", [4.0, True, False, "4", None])
 @pytest.mark.parametrize("field", ["value", "register", "both"])
 def test_bridges_share_integer_count_admission(bridge, count, field):
@@ -35,9 +32,7 @@ def test_bridges_share_integer_count_admission(bridge, count, field):
         else f"MMA operand a of {op_id!r}"
     )
     with pytest.raises(ValueError) as caught:
-        if bridge == "operand":
-            mma_operand_needs_reinterpret(op_id, "a", actual, register, arch)
-        elif bridge == "result":
+        if bridge == "result":
             mma_result_needs_reinterpret(op_id, actual, register, arch)
         else:
             # Construct a valid form, then inject malformed register metadata

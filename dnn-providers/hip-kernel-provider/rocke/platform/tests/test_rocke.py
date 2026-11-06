@@ -583,7 +583,7 @@ class TestHelpers(unittest.TestCase):
         self.assertEqual(loads[0].attrs["vec"], 16)
         self.assertEqual(loads[0].attrs["align"], 32)
 
-        # store_wmma_acc scatters c_per_lane scalars via the c_layout map.
+        # store_wmma_acc scatters c_per_lane scalars via the destination map.
         b3 = IRBuilder("wmma_store")
         o = b3.param("O", PtrType(F16, "global"))
         so = b3.param("so", I32)
@@ -659,7 +659,7 @@ class TestHelpers(unittest.TestCase):
         muls = [o for o in self._kernel_ops(b3.kernel) if o.name == "vector.mul"]
         self.assertEqual(len(muls), 1)
 
-        # store_wmma_tile -> c_per_lane scalar stores via the c_layout map.
+        # store_wmma_tile -> c_per_lane scalar stores via the destination map.
         b4 = IRBuilder("wmma_tile_store")
         o = b4.param("O", PtrType(F16, "global"))
         so = b4.param("so", I32)
