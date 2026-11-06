@@ -1592,6 +1592,7 @@ def _split_merge(b, ws_o, ws_lse, row_ns, ns, dv, cols):
     sloop = b.scf_for_iter(c0, n_grp, c1, iter_args=iter_args, iv_name="sg")
     with sloop as (sg, st):
         lses, parts = [], []
+        zero = b.zero_vec_f32(_MERGE_COLS)
         for i in range(U):
             s = b.add(b.mul(sg, ci(U)), ci(i))
             ok = b.cmp_lt(s, ns)
@@ -1600,7 +1601,6 @@ def _split_merge(b, ws_o, ws_lse, row_ns, ns, dv, cols):
             base = b.mul(prow, dv)
             # A padded slot (s >= ns) re-reads split 0's partial, which may be Inf; its
             # zero weight would then give Inf * 0 = NaN, so it contributes a zero vector.
-            zero = b.zero_vec_f32(_MERGE_COLS)
             parts.append(
                 [
                     b.select(

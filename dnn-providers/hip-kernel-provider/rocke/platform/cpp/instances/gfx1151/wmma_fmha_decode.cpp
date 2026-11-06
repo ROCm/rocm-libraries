@@ -641,6 +641,7 @@ void dec_split_merge(const Em& e,
         Val* st = loop.iter_vars;
         Vals lses;
         std::vector<Vals> parts;
+        Val zero = rocke_b_zero_vec_f32(b, DEC_MERGE_COLS);
         for(int i = 0; i < U; ++i)
         {
             Val s;
@@ -663,7 +664,6 @@ void dec_split_merge(const Em& e,
             Val base = e.mul(prow, dv);
             /* A padded slot (s >= ns) re-reads split 0's partial, which may be Inf; its
                zero weight would then give Inf * 0 = NaN, so it contributes zero. */
-            Val zero = rocke_b_zero_vec_f32(b, DEC_MERGE_COLS);
             Vals pr;
             for(Val cv : cols)
             {
