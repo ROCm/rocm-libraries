@@ -1,0 +1,6 @@
+START build 2026-11-04T00:21:39Z
+END build rc=1 seconds=634 2026-11-04T00:32:13Z
+380M	/home/alvasile/tl_gfx942_timing/post/split_art
+START run 2026-11-04T00:32:14Z
+END run rc=0 seconds=742 2026-11-04T00:44:36Z
+ALLDONE
