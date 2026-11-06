@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <functional>
 #include <limits>
 #include <random>
 #include <stdexcept>
@@ -17,6 +18,7 @@
 #include <hipdnn_data_sdk/types.hpp>
 #include <hipdnn_data_sdk/types/Bfloat16.hpp>
 #include <hipdnn_data_sdk/types/Half.hpp>
+#include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 
 #if defined(USE_ROCRAND)
 #include <hip/hip_runtime.h>
@@ -569,8 +571,13 @@ FillResult fillInputs(const hipdnn_flatbuffers_sdk::data_objects::Graph& graph,
     std::size_t deviceFilled = 0;
     for(const int64_t uid : sortedUids)
     {
+        // Tolerance study (scratch): HIPDNN_TEST_TOLSTUDY_SEED_SALT reseeds every input so the
+        // same cases can be re-run on fresh data.
+        const auto salt = hipdnn_data_sdk::utilities::getEnv("HIPDNN_TEST_TOLSTUDY_SEED_SALT");
+        const unsigned int saltBits
+            = salt.empty() ? 0U : static_cast<unsigned int>(std::hash<std::string>{}(salt));
         const unsigned int seed
-            = recipes.resolveSeed(uid).value_or(static_cast<unsigned int>(rng()));
+            = recipes.resolveSeed(uid).value_or(static_cast<unsigned int>(rng())) ^ saltBits;
         auto fillResult = fill(*inputs.at(uid), recipes.fill(uid), seed, device);
         if(!fillResult.filled)
         {

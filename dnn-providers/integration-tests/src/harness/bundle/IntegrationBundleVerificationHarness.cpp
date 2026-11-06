@@ -5,6 +5,8 @@
 #include "harness/bundle/RngDumpHandoff.hpp"
 
 #include <algorithm>
+#include <filesystem>
+#include <fstream>
 #include <initializer_list>
 #include <optional>
 #include <ostream>
@@ -15,6 +17,7 @@
 #include <utility>
 
 #include "harness/BundleMetadata.hpp"
+#include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_flatbuffers_sdk/utilities/ApplicabilityUtils.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
@@ -58,6 +61,94 @@ const char* modeName(VerificationMode mode)
     default:
         return "unknown";
     }
+}
+
+// ---- tolerance study instrumentation (scratch, not for merge) --------------
+// With HIPDNN_TEST_TOLSTUDY_DIR set, every compared case writes its inputs, the engine's
+// outputs and the expected outputs as raw host buffers plus a meta.json describing them,
+// under <dir>/<test name>/. Cases whose largest tensor exceeds
+// HIPDNN_TEST_TOLSTUDY_MAX_ELEMS (default 4194304) write meta.json only.
+std::string jsonDims(const std::vector<int64_t>& v)
+{
+    std::string s = "[";
+    for(size_t i = 0; i < v.size(); ++i)
+    {
+        s += (i ? "," : "") + std::to_string(v[i]);
+    }
+    return s + "]";
+}
+
+void dumpForToleranceStudy(
+    const std::string& testName,
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper& wrapper,
+    const TensorMap& inputs,
+    const std::vector<int64_t>& outputUids,
+    OutputTensors& engineOutputs,
+    const ExpectedTensorLookup& expectedFor,
+    const std::string& verifier)
+{
+    const auto root = hipdnn_data_sdk::utilities::getEnv("HIPDNN_TEST_TOLSTUDY_DIR");
+    if(root.empty())
+    {
+        return;
+    }
+    const auto maxEnv = hipdnn_data_sdk::utilities::getEnv("HIPDNN_TEST_TOLSTUDY_MAX_ELEMS");
+    const size_t maxElems = maxEnv.empty() ? size_t{4194304} : std::stoull(maxEnv);
+
+    std::string dirName = testName;
+    std::replace(dirName.begin(), dirName.end(), '/', '_');
+    const auto dir = std::filesystem::path(root) / dirName;
+    std::filesystem::create_directories(dir);
+
+    struct Entry
+    {
+        std::string role;
+        int64_t uid;
+        hipdnn_data_sdk::utilities::ITensor* tensor;
+    };
+    std::vector<Entry> entries;
+    for(const auto& [uid, tensor] : inputs)
+    {
+        entries.push_back({"input", uid, tensor.get()});
+    }
+    for(const int64_t uid : outputUids)
+    {
+        entries.push_back({"engine", uid, engineOutputs.at(uid).get()});
+        entries.push_back({"expected", uid, &expectedFor(uid)});
+    }
+    size_t largest = 0;
+    for(const auto& e : entries)
+    {
+        largest = std::max(largest, e.tensor->elementSpace());
+    }
+    const bool writeData = largest <= maxElems;
+
+    const auto& attrs = wrapper.getTensorMap();
+    std::ofstream meta(dir / "meta.json");
+    meta << "{\"test\":\"" << testName << "\",\"verifier\":\"" << verifier << "\",\"seed_salt\":\""
+         << hipdnn_data_sdk::utilities::getEnv("HIPDNN_TEST_TOLSTUDY_SEED_SALT")
+         << "\",\"data_written\":" << (writeData ? "true" : "false") << ",\"tensors\":[";
+    bool first = true;
+    for(const auto& e : entries)
+    {
+        const auto file = e.role + "_" + std::to_string(e.uid) + ".bin";
+        if(writeData)
+        {
+            std::ofstream out(dir / file, std::ios::binary);
+            out.write(
+                static_cast<const char*>(e.tensor->rawHostData()),
+                static_cast<std::streamsize>(e.tensor->elementSpace() * e.tensor->elementSize()));
+        }
+        meta << (first ? "" : ",") << "{\"role\":\"" << e.role << "\",\"uid\":" << e.uid
+             << ",\"dtype\":\""
+             << hipdnn_flatbuffers_sdk::data_objects::EnumNameDataType(attrs.at(e.uid)->data_type())
+             << "\",\"dims\":" << jsonDims(e.tensor->dims())
+             << ",\"strides\":" << jsonDims(e.tensor->strides())
+             << ",\"element_size\":" << e.tensor->elementSize() << ",\"file\":\""
+             << (writeData ? file : "") << "\"}";
+        first = false;
+    }
+    meta << "]}\n";
 }
 
 } // namespace
@@ -1145,6 +1236,13 @@ VerificationOutcome
                                  toleranceFor,
                                  resolveValidationSite(_deps.policy.validator, site),
                                  "Bundle: " + _bundlePath.string() + inputFillNote());
+    dumpForToleranceStudy(currentTestName(),
+                          wrapper,
+                          _inputs,
+                          bundle::comparedOutputUids(_bundle->outputTensorUids, dump),
+                          engineOutputs,
+                          expectedFor,
+                          std::to_string(static_cast<int>(verifier)));
 
     // Reported one per tensor so each diff lands next to the tensor it describes;
     // the outcome carries no message because of it.
