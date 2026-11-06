@@ -47,6 +47,7 @@
 
 BEGIN_HIPCUB_NAMESPACE
 
+#if HIPCUB_USE_LEGACY_API
 // Restored for backward compatibility with code written against older hipCUB (e.g. PyTorch).
 // Deprecated: new code should use _HIPCUB_STD::equal_to<> instead.
 struct HIPCUB_DEPRECATED_BECAUSE("Use hip::std::equal_to instead") Equality
@@ -69,6 +70,7 @@ struct HIPCUB_DEPRECATED_BECAUSE("Use hip::maximum instead") Max
         return (((u) > (t)) ? (u) : (t));
     }
 };
+#endif // HIPCUB_USE_LEGACY_API
 
 struct ArgMax
 {

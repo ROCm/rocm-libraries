@@ -22,6 +22,9 @@
 
 # hipCUB header-only library
 
+# Expose the USE_LEGACY_API option to the configured version header
+set(HIPCUB_USE_LEGACY_API ${USE_LEGACY_API})
+
 # Configure a header file to pass the hipCUB version. Changing the out path as it conflict with header wrapper
 configure_file(
   "${CMAKE_CURRENT_SOURCE_DIR}/include/hipcub/hipcub_version.hpp.in"

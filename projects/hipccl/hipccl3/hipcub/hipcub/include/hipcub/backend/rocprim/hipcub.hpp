@@ -77,10 +77,12 @@
 #include "iterator/arg_index_input_iterator.hpp"
 #include "iterator/cache_modified_input_iterator.hpp"
 #include "iterator/cache_modified_output_iterator.hpp"
-#include "iterator/constant_input_iterator.hpp"
-#include "iterator/counting_input_iterator.hpp"
 #include "iterator/tex_obj_input_iterator.hpp"
-#include "iterator/transform_input_iterator.hpp"
+#if HIPCUB_USE_LEGACY_API
+    #include "iterator/constant_input_iterator.hpp"
+    #include "iterator/counting_input_iterator.hpp"
+    #include "iterator/transform_input_iterator.hpp"
+#endif
 
 // Thread
 #include "thread/thread_load.hpp"
