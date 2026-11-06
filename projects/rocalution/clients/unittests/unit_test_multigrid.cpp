@@ -579,6 +579,19 @@ namespace
         cg.Verbose(0);
     }
 
+    // A coarse solver that counts the solves of the multigrid cycles
+    template <typename T>
+    struct CountingCG : CG<T>
+    {
+        void SolveZeroSol(const Vector<T>& rhs, Vector<T>* x) override
+        {
+            ++this->solves;
+            CG<T>::SolveZeroSol(rhs, x);
+        }
+
+        int solves = 0;
+    };
+
     // A hierarchy on a backend, with the pointer arrays that MultiGrid takes
     template <typename T>
     struct UserLevels
@@ -694,18 +707,24 @@ TYPED_TEST(multigrid, cycles_match_the_dense_cycle)
     using T = typename TypeParam::value_type;
     using rocalution::Kcycle;
     using rocalution::Vcycle;
+    using rocalution::Wcycle;
     const std::vector<CycleCase> cases
         = {{"V", 4, options(Vcycle, 1, 1, false)},
            {"V of two levels", 2, options(Vcycle, 1, 1, false)},
            {"V with 2 pre- and 3 post-smoothing steps", 4, options(Vcycle, 2, 3, false)},
            {"V without post-smoothing", 4, options(Vcycle, 1, 0, false)},
            {"V of three levels with scaling", 3, options(Vcycle, 2, 1, true)},
+           {"W", 4, options(Wcycle, 1, 1, false)},
+           {"W of two levels", 2, options(Wcycle, 1, 1, false)},
+           {"W with 2 pre- and 3 post-smoothing steps", 4, options(Wcycle, 2, 3, false)},
+           {"W of three levels with scaling", 3, options(Wcycle, 2, 1, true)},
            {"K", 4, options(Kcycle, 1, 1, false)},
            {"K on the first coarse level only", 4, options(Kcycle, 1, 1, false, false)},
            {"K of two levels", 2, options(Kcycle, 1, 1, false)}};
     // With four levels the first coarse level scales its correction too
     const std::vector<CycleCase> coarse_scaling
         = {{"V with scaling", 4, options(Vcycle, 1, 1, true)},
+           {"W with scaling", 4, options(Wcycle, 1, 1, true)},
            {"K with scaling", 4, options(Kcycle, 1, 2, true)}};
 
     const auto expect = [](const CycleCase& c) {
@@ -747,6 +766,25 @@ TYPED_TEST(multigrid, w_cycle_continues_from_the_first_coarse_cycle)
     const Vec<T> x0 = initial_guess<T>(15);
     const Vec<T> x  = solve(s.mg, *s.user.A, b, x0, 1);
     expect_near(x, cycled(DenseCycle<T>(s.h, o), b, x0, 1), tol<T>());
+}
+
+// Each visit of the second coarsest level runs two cycles, so a W-cycle of L levels
+// solves the coarsest level 2^(L - 2) times
+TYPED_TEST(multigrid, w_cycle_solves_the_coarsest_level_once_per_visit)
+{
+    using T = typename TypeParam::value_type;
+    for(int levels : {2, 4})
+    {
+        SCOPED_TRACE(std::to_string(levels) + " levels");
+        CountingCG<T> coarse;
+        init_exact(coarse);
+        UserSetup<T> s(TypeParam::backend, levels, options(rocalution::Wcycle, 1, 1, false));
+        s.mg.SetSolver(coarse);
+        s.mg.Build();
+
+        solve(s.mg, *s.user.A, rhs<T>(15), initial_guess<T>(15), 1);
+        EXPECT_EQ(coarse.solves, 1 << (levels - 2));
+    }
 }
 
 TYPED_TEST(multigrid, coarse_levels_start_from_zero_without_pre_smoothing)

@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -716,6 +716,13 @@ namespace rocalution
 
     template <class OperatorType, class VectorType, typename ValueType>
     void BaseMultiGrid<OperatorType, VectorType, ValueType>::Vcycle_(const VectorType& rhs,
+                                                                     VectorType*       x)
+    {
+        this->Vcycle_(rhs, x, false);
+    }
+
+    template <class OperatorType, class VectorType, typename ValueType>
+    void BaseMultiGrid<OperatorType, VectorType, ValueType>::Vcycle_(const VectorType& rhs,
                                                                      VectorType*       x,
                                                                      bool              continue_x)
     {
@@ -920,9 +927,14 @@ namespace rocalution
     void BaseMultiGrid<OperatorType, VectorType, ValueType>::Wcycle_(const VectorType& rhs,
                                                                      VectorType*       x)
     {
-        // gamma = 2 hardcoded, the second cycle continues from the first
+        // gamma = 2 hardcoded, the second cycle continues from the first. The coarsest
+        // level is solved once
         this->Vcycle_(rhs, x);
-        this->Vcycle_(rhs, x, true);
+
+        if(this->current_level_ < this->levels_ - 1)
+        {
+            this->Vcycle_(rhs, x, true);
+        }
     }
 
     // LCOV_EXCL_START
