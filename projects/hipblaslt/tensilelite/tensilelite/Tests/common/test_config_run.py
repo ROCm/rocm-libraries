@@ -46,9 +46,13 @@ subprocesses to exercise the same artifact round-trip.
 """
 
 import os
+import re
+import subprocess
+import sys
 
 import py
 import pytest
+import yaml
 
 from tensilelite import Tensile as tensilelite
 
@@ -65,7 +69,50 @@ def _run(config: str, output_dir: str, artifact_dir: str, tensile_args: list[str
     tarball = os.path.join(artifact_dir, artifact_name + ".tar.gz")
     assert os.path.isfile(tarball), f"Artifact tarball not found: {tarball}"
     extract_artifact(tarball, output_dir)
-    tensilelite.Tensile([config, output_dir, "--use-cache", *tensile_args])
+    args = [config, output_dir, "--use-cache", *tensile_args]
+    with open(config) as source:
+        schedules = yaml.safe_load(source).get("TestParameters", {}).get("streamk_schedules", [])
+    if not schedules:
+        tensilelite.Tensile(args)
+        return
+    for index, schedule in enumerate(schedules):
+        mode = schedule["reduction"]
+        assert mode in ("tree", "parallel", "whole"), mode
+        env = {**os.environ, "PYTHONPATH": os.pathsep.join(sys.path), "TENSILE_DB": "0x200000",
+               "TENSILE_PERSISTENT_FIXED_GRID": str(schedule["grid"]),
+               "TENSILE_PERSISTENT_DYNAMIC_GRID": "6" if mode == "parallel" else "0"}
+        parameters = {"ParallelGpuExecution": 1, "ForceRedoBenchmarkProblems": True,
+                      "ExitOnFails": 1, **schedule.get("parameters", {})}
+        overrides = [f"{key}={value!r}" for key, value in parameters.items()]
+        run_args = [*args, *(["--global-parameters", *overrides] if overrides else [])]
+        log_path = os.path.join(output_dir, f"streamk-schedule-{index}.log")
+        # Each client run uses a fresh process and the same compiled artifact.
+        with open(log_path, "w+") as log:
+            result = subprocess.run(
+                [sys.executable, "-c", "import sys; from tensilelite.Tensile import Tensile; "
+                 "Tensile(sys.argv[1:])", *run_args], env=env, stdout=log, stderr=subprocess.STDOUT)
+            assert result.returncode == 0, f"Numerical run failed: {log_path}"
+            log.seek(0)
+            records = {}
+            for block in log.read().split("TensileLite::"):
+                if not block.startswith("StreamK LAUNCH SUMMARY"):
+                    continue
+                fields = dict(re.findall(r"^ +(\w+) += (\S+)", block, re.MULTILINE))
+                if "physicalPartialSlots" in fields:
+                    kernel = re.search(r"kernel='([^']+)'", block).group(1)
+                    records.setdefault(kernel, []).append(fields)
+        assert records, f"No clustered StreamK launches observed: {log_path}"
+        for kernel, launches in records.items():
+            if mode == "whole":
+                assert all(int(row["physicalPartialSlots"]) == 0 for row in launches), kernel
+                matched = any(row["fallback"] == "insufficient-workspace" for row in launches)
+            else:
+                matched = any(
+                    row["reduction"].startswith(mode) and int(row["physicalPartialSlots"]) > 0
+                    and (int(row["flagEntries"]) > 0 if mode == "tree"
+                         else int(row["parallelSplits"]) > 1)
+                    for row in launches)
+            assert matched, f"{kernel} never exercised {mode}: {log_path}"
 
 
 def test_config_run(tensile_args: list[str], config: str, tmpdir: py.path.local, pytestconfig: pytest.Config) -> None:

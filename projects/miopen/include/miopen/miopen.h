@@ -247,7 +247,7 @@ MIOPEN_EXPORT miopenStatus_t miopenEnableProfiling(miopenHandle_t handle, bool e
 /** @} */
 // CLOSEOUT HANDLE DOXYGEN GROUP
 
-/*! @ingroup fusion
+/*! @ingroup FUSION
  * @brief Creates the miopenFusionOpDescriptor_t type
  *
  * Fusion Operator Descriptor contains the meta-data associated with an operator
@@ -318,7 +318,7 @@ MIOPEN_DECLARE_OBJECT(miopenRNNDescriptor);
  */
 MIOPEN_DECLARE_OBJECT(miopenCTCLossDescriptor);
 
-/*! @ingroup Dropout
+/*! @ingroup dropout
  * @brief Creates the miopenDropoutDescriptor_t type
  */
 MIOPEN_DECLARE_OBJECT(miopenDropoutDescriptor);
@@ -328,7 +328,7 @@ MIOPEN_DECLARE_OBJECT(miopenDropoutDescriptor);
  */
 MIOPEN_DECLARE_OBJECT(miopenReduceTensorDescriptor);
 
-/*! @ingroup mha
+/*! @ingroup find2
  * @brief Creates the miopenMhaDescriptor_t type
  */
 MIOPEN_DECLARE_OBJECT(miopenMhaDescriptor);
@@ -339,7 +339,6 @@ MIOPEN_DECLARE_OBJECT(miopenMhaDescriptor);
 MIOPEN_DECLARE_OBJECT(miopenSoftmaxDescriptor);
 
 /*! @ingroup tensor
- * @enum miopenDataType_t
  * MIOpen floating point datatypes. Both 32-bit and 16-bit floats are supported in MIOpen.
  */
 typedef enum
@@ -358,7 +357,6 @@ typedef enum
 } miopenDataType_t;
 
 /*! @ingroup tensor
- * @enum miopenTensorLayout_t
  * Tensor layouts supported by MIOpen.
  * miopenTensorCHWNc4 and miopenTensorCHWNc8 layout only support weight tensor.
  */
@@ -376,7 +374,6 @@ typedef enum
 } miopenTensorLayout_t;
 
 /*! @ingroup pooling
- * @enum miopenIndexType_t
  * MIOpen index datatypes.
  */
 typedef enum
@@ -388,7 +385,6 @@ typedef enum
 } miopenIndexType_t;
 
 /*! @ingroup tensor
- * @enum miopenTensorOp_t
  * Element-wise tensor operation modes
  */
 typedef enum
@@ -400,7 +396,6 @@ typedef enum
 } miopenTensorOp_t;
 
 /*! @ingroup convolutions
- *  @enum miopenConvolutionMode_t
  * Convolution mode selection for convolution layer preference.
  */
 typedef enum
@@ -411,8 +406,9 @@ typedef enum
     miopenDepthwise   = 3, /*!< Deprecated Depthwise convolution legacy, ToBe Removed */
 } miopenConvolutionMode_t;
 
+/*! @defgroup padding Padding */
+
 /*! @ingroup padding
- *  @enum miopenPaddingMode_t
  * Padding mode selection for convolution/Pooling layer preference
  */
 typedef enum
@@ -423,7 +419,6 @@ typedef enum
 } miopenPaddingMode_t;
 
 /*! @ingroup pooling
- * @enum miopenPoolingMode_t
  * Pooling layer mode
  */
 typedef enum
@@ -434,7 +429,6 @@ typedef enum
 } miopenPoolingMode_t;
 
 /*! @ingroup pooling
- * @enum miopenPoolingWorkspaceIndexMode_t
  * Pooling layer workspace index mode. miopenPoolingWorkspaceIndexMask mode records indices
  * indicating the max values' positions in the filter/mask. miopenPoolingWorkspaceIndexImage mode
  * records indices indicating the max values' positions in the image.
@@ -446,7 +440,6 @@ typedef enum
 } miopenPoolingWorkspaceIndexMode_t;
 
 /*! @ingroup LRN
- * @enum miopenLRNMode_t
  * Local Response Normalization layer mode
  */
 typedef enum
@@ -456,7 +449,6 @@ typedef enum
 } miopenLRNMode_t;
 #ifdef MIOPEN_BETA_API
 /*! @ingroup layernorm
- * @enum miopenNormMode_t
  * LayerNorm mode
  */
 typedef enum
@@ -475,7 +467,6 @@ typedef enum
 } miopenNormMode_t;
 #endif
 /*! @ingroup batchnorm
- * @enum miopenBatchNormMode_t
  * Batch Normalization layer mode
  */
 typedef enum
@@ -485,7 +476,6 @@ typedef enum
 } miopenBatchNormMode_t;
 
 /*! @ingroup activation
- * @enum miopenActivationMode_t
  * Activation layer modes
  */
 typedef enum
@@ -508,7 +498,6 @@ typedef enum
 } miopenActivationMode_t;
 
 /*! @ingroup softmax
- * @enum miopenSoftmaxAlgorithm_t
  * Softmax implementation algorithms
  */
 typedef enum
@@ -519,7 +508,6 @@ typedef enum
 } miopenSoftmaxAlgorithm_t;
 
 /*! @ingroup softmax
- * @enum miopenSoftmaxMode_t
  * Softmax modes
  */
 typedef enum
@@ -539,7 +527,6 @@ typedef enum
 #define MIOPEN_API_VERSION_REDUCE_TENSOR 1
 
 /*! @ingroup TensorReduce
- * @enum miopenReduceTensorOp_t
  * Tensor Reduction operation types
  */
 typedef enum
@@ -564,7 +551,6 @@ typedef enum
 } miopenReduceTensorOp_t;
 
 /*! @ingroup TensorReduce
- * @enum miopenReduceTensorOp_t
  * Nan numbers propagation modes
  */
 typedef enum
@@ -574,7 +560,6 @@ typedef enum
 } miopenNanPropagation_t;
 
 /*! @ingroup TensorReduce
- * @enum miopenReduceTensorIndices_t
  * Reduction Indices computation modes
  */
 typedef enum
@@ -584,7 +569,6 @@ typedef enum
 } miopenReduceTensorIndices_t;
 
 /*! @ingroup TensorReduce
- * @enum miopenIndicesType_t
  * Reduction Indices types
  */
 typedef enum
@@ -596,7 +580,6 @@ typedef enum
 } miopenIndicesType_t;
 
 /*! @ingroup convolutions
- *  @enum miopenConvolutionAttrib_t
  * Attribute for convolution descriptor, used for alternating the convolution behavior
  */
 typedef enum
@@ -623,7 +606,6 @@ typedef enum
 } miopenConvolutionAttrib_t;
 
 /*! @ingroup convolutions
- *  @enum miopenConvolutionFindMode_t
  * Findmode for convolution descriptor, used for changing the find behavior when calling
  * miopenFindConvolutionForwardAlgorithm(), miopenFindConvolutionBackwardDataAlgorithm(), or
  * miopenFindConvolutionBackwardWeightsAlgorithm().
@@ -3801,7 +3783,6 @@ MIOPEN_EXPORT miopenStatus_t miopenSoftmaxBackward_V2(miopenHandle_t handle,
  * @brief MIOpen fusion interface
  */
 MIOPEN_DECLARE_OBJECT(miopenFusionPlanDescriptor);
-MIOPEN_DECLARE_OBJECT(miopenOperatorDescriptor);
 MIOPEN_DECLARE_OBJECT(miopenOperatorArgs);
 
 /** @addtogroup FUSION
@@ -6218,7 +6199,7 @@ typedef enum
 #endif
 } miopenTensorArgumentId_t;
 
-/*! @enum miopenTensorArgumentId_t
+/*! @enum miopenFindResultsOrder_t
  * Different ways to sort results of the find call.
  */
 typedef enum
@@ -6559,7 +6540,9 @@ MIOPEN_EXPORT miopenStatus_t miopenGetSolverIdConvAlgorithm(uint64_t solverId,
 #ifdef MIOPEN_BETA_API
 
 /*! @brief Initializes a problem object describing an activation operation.
- * @note As of now there is no way to actually get any solution for this kind of problems.
+ * @note This problem can only be solved as part of a fused problem. Fuse it with
+ * miopenFuseProblems() before calling miopenFindSolutions(). Calling miopenFindSolutions() on a
+ * standalone activation problem returns miopenStatusNotImplemented.
  *
  * @param problem      Pointer to the problem to initialize
  * @param operatorDesc Descriptor of the operator to be used
@@ -6571,13 +6554,17 @@ miopenCreateActivationProblem(miopenProblem_t* problem,
                               miopenActivationDescriptor_t operatorDesc,
                               miopenProblemDirection_t direction);
 
-/*! @brief Initializes a problem object describing an activation operation.
- * @note As of now there is no way to actually get any solution for this kind of problems.
+/*! @brief Initializes a problem object describing a batchnorm operation.
+ * @note This problem can only be solved as part of a fused problem. Fuse it with
+ * miopenFuseProblems() before calling miopenFindSolutions(). Calling miopenFindSolutions() on a
+ * standalone batchnorm problem returns miopenStatusNotImplemented.
  *
- * @param problem   Pointer to the problem to initialize
- * @param mode      Batchnorm mode
- * @param direction Direction of the operation
- * @return          miopenStatus_t
+ * @param problem             Pointer to the problem to initialize
+ * @param mode                Batchnorm mode
+ * @param runningMeanVariance Toggles whether or not to save population statistics for inference;
+ * used only with miopenProblemDirectionForward
+ * @param direction           Direction of the operation
+ * @return                    miopenStatus_t
  */
 MIOPEN_EXPORT miopenStatus_t miopenCreateBatchnormProblem(miopenProblem_t* problem,
                                                           miopenBatchNormMode_t mode,
@@ -6597,7 +6584,6 @@ MIOPEN_EXPORT miopenStatus_t miopenCreateBatchnormProblem(miopenProblem_t* probl
  * // Now problem contains {problem1, problem2, problem3}\n
  * miopenDestroyProblem(problem2);\n
  * miopenDestroyProblem(problem3);
- * @note As of now there is no way to actually get any solution for this kind of problem.
  *
  * @param problem1     The first problem to fuse. The result would be stored here.
  * @param problem2     The second problem to fuse.
@@ -6606,7 +6592,9 @@ MIOPEN_EXPORT miopenStatus_t miopenCreateBatchnormProblem(miopenProblem_t* probl
 MIOPEN_EXPORT miopenStatus_t miopenFuseProblems(miopenProblem_t problem1, miopenProblem_t problem2);
 
 /*! @brief Initializes a problem object describing an bias operation.
- * @note As of now there is no way to actually get any solution for this kind of problems.
+ * @note This problem can only be solved as part of a fused problem. Fuse it with
+ * miopenFuseProblems() before calling miopenFindSolutions(). Calling miopenFindSolutions() on a
+ * standalone bias problem returns miopenStatusNotImplemented.
  *
  * @param problem        Pointer to the problem to initialize
  * @param direction      Direction of the operation
@@ -6634,8 +6622,7 @@ MIOPEN_EXPORT miopenStatus_t miopenCreateSoftmaxProblem(miopenProblem_t* problem
 
 #ifdef MIOPEN_BETA_API
 
-/*! @ingroup ReduceCalculation
- * @enum miopenReduceCalculationNanPropagation_t
+/*! @ingroup reducecalculation
  * Nan numbers propagation modes for reduce calculation
  */
 typedef enum
@@ -6711,7 +6698,6 @@ miopenReduceCalculationForward(miopenHandle_t handle,
 #ifdef MIOPEN_BETA_API
 
 /*! @ingroup ReduceExtreme
- * @enum miopenReduceExtremeOp_t
  * Reduction Extreme operation types
  */
 typedef enum
@@ -6956,24 +6942,6 @@ MIOPEN_EXPORT miopenStatus_t miopenT5LayerNormBackward(miopenHandle_t handle,
 /** @} */
 // CLOSEOUT LAYERNORM DOXYGEN GROUP
 #endif // MIOPEN_BETA_API
-
-/*! @brief Enum for specifying the alpha-beta case for convolution operations.
- *
- * Describes how alpha and beta scaling factors are applied in convolution operations.
- */
-typedef enum
-{
-    /* IDENTITY      alpha = 1.0 and beta = 0.0 */
-    /* SCALE         alpha = 4.2 and beta = 0.0 */
-    /* BILINEAR      alpha = 3.2 and beta = 1.1 */
-    /* ERROR_STATE   alpha = 0.0 and beta = 3.1 */
-
-    DEFAULT     = 0, /* alpha = 1.0 and beta = 0.0.*/
-    SCALE       = 1, /* alpha with some value and beta 0.0*/
-    BILINEAR    = 2, /* both alpha and beta with some value*/
-    ERROR_STATE = 3  /* alpha 0.0 and beta with some value, this should not occur.
-                        But used to check for errors.*/
-} miopenAlphaBetaCase_t;
 
 #ifdef MIOPEN_BETA_API
 // FusedAdam APIs
@@ -7822,7 +7790,6 @@ MIOPEN_EXPORT miopenStatus_t miopenPReLUBackward(miopenHandle_t handle,
 #ifdef MIOPEN_BETA_API
 
 /*! @ingroup LossFunction
- * @enum miopenLossReductionMode_t
  * Reduction mode for loss function
  */
 typedef enum
@@ -7998,7 +7965,6 @@ MIOPEN_EXPORT miopenStatus_t miopenMultiMarginLossForward(miopenHandle_t handle,
 #endif // MIOPEN_BETA_API
 
 /*! @ingroup handle
- * @enum miopenTuningPolicy_t
  * Tuning policy for MIOpen Find-related calls.
  * Supports the following policies of MIOPEN_FIND_ENFORCE:
  * 1. None: Do not enforce anything.

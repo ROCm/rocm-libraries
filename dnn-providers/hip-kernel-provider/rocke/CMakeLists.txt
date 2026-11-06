@@ -80,9 +80,12 @@ if(ROCKE_BUILD_PYENV)
     # repack) is inert in exactly the case it exists for: someone editing a
     # kernel. There are two wheels and they need separate globs -- the kernel
     # bodies live under library/, so wiring only the platform wheel would leave
-    # the real case broken.
+    # the real case broken. The platform glob takes the package's JSON data too:
+    # the arch-domain columns ship in that wheel and drive the lowerer, so
+    # regenerating one has to rebuild it like any source edit.
     file(GLOB_RECURSE _rocke_platform_sources CONFIGURE_DEPENDS
-         "${CMAKE_CURRENT_SOURCE_DIR}/platform/python/*.py")
+         "${CMAKE_CURRENT_SOURCE_DIR}/platform/python/*.py"
+         "${CMAKE_CURRENT_SOURCE_DIR}/platform/python/*.json")
     file(GLOB_RECURSE _rocke_library_sources CONFIGURE_DEPENDS
          "${CMAKE_CURRENT_SOURCE_DIR}/library/*.py")
 
