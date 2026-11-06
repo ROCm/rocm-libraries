@@ -91,7 +91,6 @@ namespace
     {
         std::vector<int> ranked;
         std::vector<int> requests;
-        int              anyKeptCalls = 0;
 
         std::vector<int> operator()(int count)
         {
@@ -106,23 +105,10 @@ namespace
         return [need](int layout) { return !rocblaslt_mx_scale_layout_ok(need, layout); };
     }
 
-    // Whether any kernel of the ranked library survives, as a full enumeration of
-    // the problem type would say.
-    auto anyKeptIn(RankedSearch& search, Need need)
-    {
-        return [&search, need] {
-            search.anyKeptCalls++;
-            return std::any_of(search.ranked.begin(), search.ranked.end(), [need](int layout) {
-                return rocblaslt_mx_scale_layout_ok(need, layout);
-            });
-        };
-    }
-
     TEST(MXScaleFormat_smoke, top_one_reaches_past_a_dropped_first_rank)
     {
         RankedSearch search{{kHostPreSwizzle, kNoSwizzle, kNoSwizzle}};
-        auto         kept = rocblaslt_find_top_kept(
-            search, 1, dropFor(Need::Natural), anyKeptIn(search, Need::Natural));
+        auto         kept = rocblaslt_find_top_kept(search, 1, dropFor(Need::Natural));
         EXPECT_EQ(kept, (std::vector<int>{kNoSwizzle}));
         EXPECT_EQ(search.requests, (std::vector<int>{1, 2}));
     }
@@ -132,52 +118,38 @@ namespace
     TEST(MXScaleFormat_smoke, widening_doubles_and_trims_to_the_request)
     {
         RankedSearch search{{kHostPreSwizzle, kHostPreSwizzle, kNoSwizzle, kInMemorySwizzle}};
-        auto         kept = rocblaslt_find_top_kept(
-            search, 1, dropFor(Need::Natural), anyKeptIn(search, Need::Natural));
+        auto         kept = rocblaslt_find_top_kept(search, 1, dropFor(Need::Natural));
         EXPECT_EQ(kept, (std::vector<int>{kNoSwizzle}));
         EXPECT_EQ(search.requests, (std::vector<int>{1, 2, 4}));
-        EXPECT_EQ(search.anyKeptCalls, 1);
     }
 
     TEST(MXScaleFormat_smoke, widening_keeps_rank_order)
     {
         RankedSearch search{
             {kHostPreSwizzle, kNoSwizzle, kHostPreSwizzle, kInMemorySwizzle, kNoSwizzle}};
-        auto kept = rocblaslt_find_top_kept(
-            search, 3, dropFor(Need::Natural), anyKeptIn(search, Need::Natural));
+        auto kept = rocblaslt_find_top_kept(search, 3, dropFor(Need::Natural));
         EXPECT_EQ(kept, (std::vector<int>{kNoSwizzle, kInMemorySwizzle, kNoSwizzle}));
         EXPECT_EQ(search.requests, (std::vector<int>{3, 5}));
     }
 
-    // The gfx950 FP8 and FP4 MX types: every kernel is HostPreSwizzle, so packed
-    // scales stop after the first search instead of scanning the library.
-    TEST(MXScaleFormat_smoke, no_compatible_kernel_stops_after_one_search)
+    // With no compatible kernel, the search doubles until the library runs out:
+    // 1,500 kernels take 12 searches.
+    TEST(MXScaleFormat_smoke, no_compatible_kernel_ends_when_the_library_runs_out)
     {
         RankedSearch search{std::vector<int>(1500, kHostPreSwizzle)};
-        auto         kept = rocblaslt_find_top_kept(
-            search, 1, dropFor(Need::Natural), anyKeptIn(search, Need::Natural));
+        auto         kept = rocblaslt_find_top_kept(search, 1, dropFor(Need::Natural));
         EXPECT_TRUE(kept.empty());
-        EXPECT_EQ(search.requests, (std::vector<int>{1}));
-        EXPECT_EQ(search.anyKeptCalls, 1);
-    }
-
-    // A compatible kernel the problem's predicates rule out still ends the
-    // search when the library runs out.
-    TEST(MXScaleFormat_smoke, widening_stops_when_the_library_runs_out)
-    {
-        RankedSearch search{{kHostPreSwizzle, kHostPreSwizzle, kHostPreSwizzle}};
-        auto kept = rocblaslt_find_top_kept(search, 1, dropFor(Need::Natural), [] { return true; });
-        EXPECT_TRUE(kept.empty());
-        EXPECT_EQ(search.requests, (std::vector<int>{1, 2, 4}));
+        std::vector<int> expected;
+        for(int request = 1; request <= 2048; request *= 2)
+            expected.push_back(request);
+        EXPECT_EQ(search.requests, expected);
     }
 
     TEST(MXScaleFormat_smoke, nothing_dropped_searches_once)
     {
         RankedSearch search{{kHostPreSwizzle, kNoSwizzle}};
-        auto         kept
-            = rocblaslt_find_top_kept(search, 1, dropFor(Need::Any), anyKeptIn(search, Need::Any));
+        auto         kept = rocblaslt_find_top_kept(search, 1, dropFor(Need::Any));
         EXPECT_EQ(kept, (std::vector<int>{kHostPreSwizzle}));
         EXPECT_EQ(search.requests, (std::vector<int>{1}));
-        EXPECT_EQ(search.anyKeptCalls, 0);
     }
 }

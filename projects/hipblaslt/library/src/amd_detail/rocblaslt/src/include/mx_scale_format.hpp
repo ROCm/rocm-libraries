@@ -94,14 +94,12 @@ inline const char* rocblaslt_mx_scale_mismatch_message(rocblaslt_mx_scale_need n
 // candidates. While fewer than requested survive and the search returned all
 // it was asked for, the request grows by the number dropped from that result,
 // so it doubles when every candidate is dropped: a search that keeps nothing
-// costs about log2(library size) calls. Before widening, anyKept() says
-// whether any candidate of the problem type would survive; if none would, the
-// search stops there. Returns at most requested candidates, in rank order.
-template <typename Search, typename Drop, typename AnyKept>
-auto rocblaslt_find_top_kept(Search&& search, int requested, Drop&& drop, AnyKept&& anyKept)
+// costs about log2(library size) calls, all for the problem's own type.
+// Returns at most requested candidates, in rank order.
+template <typename Search, typename Drop>
+auto rocblaslt_find_top_kept(Search&& search, int requested, Drop&& drop)
 {
     auto kept = search(requested);
-    bool checkedAny = false;
     for(int request = requested;;)
     {
         size_t const found = kept.size();
@@ -110,12 +108,6 @@ auto rocblaslt_find_top_kept(Search&& search, int requested, Drop&& drop, AnyKep
         if(dropped == 0 || kept.size() >= static_cast<size_t>(requested)
            || found < static_cast<size_t>(request))
             break;
-        if(!checkedAny)
-        {
-            checkedAny = true;
-            if(!anyKept())
-                break;
-        }
         request += static_cast<int>(dropped);
         kept = search(request);
     }

@@ -3771,50 +3771,6 @@ namespace
                || rocblaslt_mx_scale_layout_ok(need, s.problemType.mxScaleFormat);
     }
 
-    // Whether any kernel of the problem's GEMM type has a layout the need
-    // accepts. The answer does not depend on the problem size, so one scan
-    // serves each library, hardware, GEMM type and need.
-    template <typename Problem, typename FindAll>
-    bool mxScaleLayoutAvailable(const void*                  library,
-                                const TensileLite::Hardware& hardware,
-                                const Problem&               problem,
-                                rocblaslt_mx_scale_need      need,
-                                FindAll&&                    findAll)
-    {
-        auto const key = std::make_tuple(library,
-                                         static_cast<const void*>(&hardware),
-                                         problem.transA(),
-                                         problem.transB(),
-                                         problem.a().dataType(),
-                                         problem.b().dataType(),
-                                         problem.c().dataType(),
-                                         problem.d().dataType(),
-                                         problem.computeType(),
-                                         problem.groupedGemm(),
-                                         problem.mxBlockA(),
-                                         problem.mxBlockB(),
-                                         problem.mxBlockFreeA(),
-                                         problem.mxBlockFreeB(),
-                                         need);
-
-        static std::mutex                                  mtx;
-        static std::map<std::decay_t<decltype(key)>, bool> cache;
-        {
-            std::lock_guard<std::mutex> lock(mtx);
-            if(auto it = cache.find(key); it != cache.end())
-                return it->second;
-        }
-        // GEMM_TYPE_ONLY can return kernels of other types; only this
-        // problem's type counts.
-        auto const all       = findAll();
-        bool const available = std::any_of(all.begin(), all.end(), [&](auto const& s) {
-            return TensileLite::isGemmTypeSame(*s, problem) && mxScaleLayoutFits(need, *s);
-        });
-        std::lock_guard<std::mutex> lock(mtx);
-        cache.emplace(key, available);
-        return available;
-    }
-
     // The refusal every support check and launch path returns for a kernel
     // whose MX scale layout the scale modes cannot use.
     rocblaslt_status checkMxScaleLayout(const char*                             caller,
@@ -5977,13 +5933,29 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
         }
         updateTensileData(prob, *data);
 
+        // The solution at the index looked up last, so an index that re-selection
+        // and tuning leave alone is looked up once.
+        int                                               knownIndex = -1;
+        std::shared_ptr<TensileLite::ContractionSolution> known;
+        auto                                              solutionAt = [&](int index) {
+            if(!known || index != knownIndex)
+            {
+                known      = library->getSolutionByIndex(data->problem, *hardware, index);
+                knownIndex = index;
+            }
+            return known;
+        };
+
         // Before re-selection, tuning or logging act on it. Every index they can
         // switch to comes from a search or support check that applies this rule.
-        if(auto chosen = library->getSolutionByIndex(data->problem, *hardware, *(int*)algo->data))
+        if(data->mxScaleNeed != rocblaslt_mx_scale_need::Any)
         {
-            if(auto st = checkMxScaleLayout(__func__, data->mxScaleNeed, *chosen);
-               st != rocblaslt_status_success)
-                return st;
+            if(auto chosen = solutionAt(*(int*)algo->data))
+            {
+                if(auto st = checkMxScaleLayout(__func__, data->mxScaleNeed, *chosen);
+                   st != rocblaslt_status_success)
+                    return st;
+            }
         }
 
         // A re-selected solution runs through a copy of the caller's algo with
@@ -6339,7 +6311,7 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
         // never coincide in one kernel, so a single pointer serves both and the
         // choice is made here, where the solution is finally known.
         {
-            auto picked = library->getSolutionByIndex(data->problem, *hardware, *solutionIndex);
+            auto picked = solutionAt(*solutionIndex);
             if(picked)
                 data->inputs.Synchronizer
                     = synchronizerForSolution(*picked, prob.streamKFlags, prob.Synchronizer);
@@ -6391,7 +6363,7 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
                                                   false);
         }
 
-        auto solution = library->getSolutionByIndex(data->problem, *hardware, *solutionIndex);
+        auto solution = solutionAt(*solutionIndex);
         if(!solution)
             return rocblaslt_status_not_implemented;
         if(prob.workspaceSize < solution->requiredWorkspaceSize(data->problem, *hardware))
@@ -7510,19 +7482,7 @@ inline auto getSolutions(
         solutions = rocblaslt_find_top_kept(
             [&](int count) { return library->findTopSolutions(tensile_prob, *hardware, count); },
             requestedAlgoCount,
-            drop,
-            [&] {
-                // Other drops, such as pointer-array custom kernels, widen as before.
-                if(!layoutDropped)
-                    return true;
-                return mxScaleLayoutAvailable(
-                    library.get(), *hardware, tensile_prob, mxScaleNeed, [&] {
-                        return library->findAllSolutions(
-                            tensile_prob,
-                            *hardware,
-                            TensileLite::SolutionLibrarySearchType::GEMM_TYPE_ONLY);
-                    });
-            });
+            drop);
 
     if(solutions.empty() && layoutDropped)
         log_info(__func__, rocblaslt_mx_scale_mismatch_message(mxScaleNeed));
@@ -8639,16 +8599,7 @@ rocblaslt_status getBestSolutions(rocblaslt_handle       handle,
                         data->problem.gemms, *hardware, count);
                 },
                 requestedAlgoCount,
-                drop,
-                [&] {
-                    return mxScaleLayoutAvailable(
-                        library.get(), *hardware, data->problem.gemms[0], data->mxScaleNeed, [&] {
-                            return library->findAllSolutionsGroupedGemm(
-                                data->problem.gemms,
-                                *hardware,
-                                TensileLite::SolutionLibrarySearchType::GEMM_TYPE_ONLY);
-                        });
-                });
+                drop);
         if(solutions.empty() && layoutDropped)
             log_info(__func__, rocblaslt_mx_scale_mismatch_message(data->mxScaleNeed));
 

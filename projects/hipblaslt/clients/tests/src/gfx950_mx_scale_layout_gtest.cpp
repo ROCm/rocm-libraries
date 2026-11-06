@@ -11,7 +11,9 @@
 // HostPreSwizzle: their logic files leave MXScaleFormat at Auto, which gfx950
 // resolves to HostPreSwizzle, and the rocRoller custom kernels, which are
 // NoSwizzle, cover only FP6 and mixed-type pairs. Off the rocRoller path,
-// packed scales therefore have no kernel for these types.
+// packed scales therefore have no kernel for these types today. The tests
+// check the rule, so a kernel that reads packed scales is launched once one
+// ships.
 
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
@@ -64,6 +66,12 @@ namespace
     bool isPreswizzled(const std::string& kernelName)
     {
         return kernelName.find("MXSFHPS") != std::string::npos;
+    }
+
+    void expectNonePreswizzled(const std::vector<std::string>& kernelNames)
+    {
+        for(const auto& name : kernelNames)
+            EXPECT_FALSE(isPreswizzled(name)) << name;
     }
 
     // Destroyed on every exit from a test, including a skip or a failed assertion.
@@ -312,7 +320,8 @@ namespace
                 ASSERT_FALSE(preResults.empty()) << "scale 1001 returned no kernel";
                 for(const auto& name : names(handle, preResults))
                     EXPECT_TRUE(isPreswizzled(name)) << name;
-                EXPECT_TRUE(heuristic(packed, count).empty());
+                auto packedResults = heuristic(packed, count);
+                expectNonePreswizzled(names(handle, packedResults));
             }
 
             auto preResults = heuristic(preswizzled, kAlgoCount);
@@ -328,8 +337,19 @@ namespace
             EXPECT_EQ(matmul(preswizzled, nullptr), HIPBLAS_STATUS_SUCCESS);
             EXPECT_EQ(hipDeviceSynchronize(), hipSuccess);
             EXPECT_EQ(matmul(packed, &algo->algo), HIPBLAS_STATUS_INVALID_VALUE);
-            // No kernel at all, which hipblasLtMatmul reports as for any problem.
-            EXPECT_EQ(matmul(packed, nullptr), HIPBLAS_STATUS_INTERNAL_ERROR);
+
+            auto packedResults = heuristic(packed, 1);
+            if(packedResults.empty())
+            {
+                // No kernel at all, which hipblasLtMatmul reports as for any problem.
+                EXPECT_EQ(matmul(packed, nullptr), HIPBLAS_STATUS_INTERNAL_ERROR);
+            }
+            else
+            {
+                EXPECT_EQ(matmul(packed, &packedResults[0].algo), HIPBLAS_STATUS_SUCCESS);
+                EXPECT_EQ(matmul(packed, nullptr), HIPBLAS_STATUS_SUCCESS);
+                EXPECT_EQ(hipDeviceSynchronize(), hipSuccess);
+            }
         }
     }
 
@@ -467,8 +487,13 @@ namespace
                 ASSERT_EQ(preResults.size(), 1u);
                 EXPECT_EQ(hipblaslt_ext::getIndexFromAlgo(preResults[0].algo), rowIndex)
                     << "the tuning-file row was not used";
-                EXPECT_TRUE(heuristic(packed, 1).empty());
-                EXPECT_TRUE(heuristic(packed, kAlgoCount).empty());
+                for(int count : {1, kAlgoCount})
+                {
+                    auto packedResults = heuristic(packed, count);
+                    expectNonePreswizzled(names(handle, packedResults));
+                    for(auto& result : packedResults)
+                        EXPECT_NE(hipblaslt_ext::getIndexFromAlgo(result.algo), rowIndex);
+                }
             }
         }
     }
@@ -527,7 +552,8 @@ namespace
                 ASSERT_FALSE(preResults.empty()) << "scale 1001 returned no kernel";
                 for(const auto& name : names(handle, preResults))
                     EXPECT_TRUE(isPreswizzled(name)) << name;
-                EXPECT_TRUE(extHeuristic(packedGemm, count).empty());
+                auto packedResults = extHeuristic(packedGemm, count);
+                expectNonePreswizzled(names(handle, packedResults));
             }
 
             hipblasLtMatmulAlgo_t algo      = extHeuristic(preGemm, 1)[0].algo;
@@ -541,6 +567,15 @@ namespace
             EXPECT_EQ(preGemm.run(nullptr), HIPBLAS_STATUS_SUCCESS);
             EXPECT_EQ(hipDeviceSynchronize(), hipSuccess);
             EXPECT_EQ(packedGemm.initialize(algo, packed.ws), HIPBLAS_STATUS_INVALID_VALUE);
+
+            auto packedResults = extHeuristic(packedGemm, 1);
+            if(!packedResults.empty())
+            {
+                EXPECT_EQ(packedGemm.initialize(packedResults[0].algo, packed.ws),
+                          HIPBLAS_STATUS_SUCCESS);
+                EXPECT_EQ(packedGemm.run(nullptr), HIPBLAS_STATUS_SUCCESS);
+                EXPECT_EQ(hipDeviceSynchronize(), hipSuccess);
+            }
         }
     }
 
@@ -565,7 +600,8 @@ namespace
                 GTEST_SKIP() << "no grouped MX kernel in the loaded library";
             for(const auto& name : names(handle, preResults))
                 EXPECT_TRUE(isPreswizzled(name)) << name;
-            EXPECT_TRUE(extHeuristic(packedGemm, kAlgoCount).empty());
+            auto packedResults = extHeuristic(packedGemm, kAlgoCount);
+            expectNonePreswizzled(names(handle, packedResults));
 
             hipblasLtMatmulAlgo_t algo      = preResults[0].algo;
             size_t                workspace = 0;
@@ -576,6 +612,14 @@ namespace
             packedGemm.setMaxWorkspaceBytes(kWorkspace);
             EXPECT_EQ(preGemm.initialize(algo, preswizzled.ws, false), HIPBLAS_STATUS_SUCCESS);
             EXPECT_EQ(packedGemm.initialize(algo, packed.ws, false), HIPBLAS_STATUS_INVALID_VALUE);
+
+            if(!packedResults.empty())
+            {
+                EXPECT_EQ(packedGemm.initialize(packedResults[0].algo, packed.ws, false),
+                          HIPBLAS_STATUS_SUCCESS);
+                EXPECT_EQ(packedGemm.run(nullptr), HIPBLAS_STATUS_SUCCESS);
+                EXPECT_EQ(hipDeviceSynchronize(), hipSuccess);
+            }
         }
     }
 }
