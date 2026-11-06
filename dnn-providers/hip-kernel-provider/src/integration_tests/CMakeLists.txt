@@ -131,6 +131,25 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
             kernel_ingestor_engine/IntegrationGpuGfx942AttentionUnified3dKnobs.cpp
         )
     endif()
+    # The hipkernel:AttentionGeneralBwd device suites: compiled whenever the product carries
+    # the bundle, GTEST_SKIP on a device of the other arch (see the dense block above). They
+    # compare with hipDNN's GPU SDPA reference, which the integration-tests component builds.
+    hkp_product_offers_engine(_hkp_general_bwd_bundle "hipkernel:AttentionGeneralBwd")
+    if(_hkp_general_bwd_bundle AND HIPDNN_ENABLE_SDPA AND TARGET hipdnn_gpu_ref)
+        if(NOT TARGET hiprtc::hiprtc)
+            find_package(hiprtc REQUIRED)
+        endif()
+        target_sources(hip_kernel_provider_integration_tests PRIVATE
+            kernel_ingestor_engine/IntegrationGpuGfx942AttentionGeneralBwd.cpp
+            kernel_ingestor_engine/IntegrationGpuGfx950AttentionGeneralBwd.cpp
+        )
+        target_link_libraries(hip_kernel_provider_integration_tests PRIVATE hipdnn_gpu_ref)
+    elseif(_hkp_general_bwd_bundle)
+        message(WARNING
+                "hipkernel:AttentionGeneralBwd is packaged, but HIPDNN_ENABLE_SDPA is OFF or the "
+                "hipDNN integration-tests component (hipdnn_gpu_ref) is not built. Skipping its "
+                "device integration tests.")
+    endif()
     target_sources(hip_kernel_provider_integration_tests PRIVATE
         kernel_ingestor_engine/IntegrationGpuKernelIngestor.cpp
         kernel_ingestor_engine/IntegrationGpuKernelIngestorKpack.cpp

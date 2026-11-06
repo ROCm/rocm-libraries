@@ -241,6 +241,7 @@ __all__ = [
     "lds_request",
     "register_estimates",
     "static_unit_mults",
+    "supports_attn_bwd_main",
     "validate_attn_bwd_spec",
 ]
 
@@ -3455,6 +3456,18 @@ def _store_dkv_quads(b, s, a, slab, quads, *, k0, seq_kv, io) -> None:
         with b.scf_if(store):
             v = b.vec_cast_f32_to(b.vec_pack(vals, F32), io)
             slab.store_vec(k, col0, b.select(row_live, v, zero))
+
+
+def supports_attn_bwd_main(spec: AttnBwdSpec, *, arch: str) -> tuple[bool, str]:
+    """``(ok, reason)``: whether :func:`build_attn_bwd_main` builds ``spec``
+    on ``arch`` (the validator's rules and the not-built knob values)."""
+    try:
+        missing = _not_built(validate_attn_bwd_spec(spec, arch))
+    except ValueError as exc:
+        return False, str(exc)
+    if missing:
+        return False, "not built for " + ", ".join(missing)
+    return True, ""
 
 
 def build_attn_bwd_main(spec: AttnBwdSpec, *, arch: str):

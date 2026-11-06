@@ -55,6 +55,18 @@
           ]
         }
       }
+    ],
+    "hipkernel:AttentionGeneralBwd": [
+      {
+        "cases": [
+          "x06_b1h1k1v1_64x65536_d128_fp16_none_dom128to128_told"
+        ],
+        "support": {
+          "gfx942": [
+            "linux"
+          ]
+        }
+      }
     ]
   },
   "version": 1

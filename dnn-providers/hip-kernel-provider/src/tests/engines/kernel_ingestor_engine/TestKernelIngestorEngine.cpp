@@ -654,6 +654,7 @@ TEST(TestKernelIngestorEngine, EveryHandlerReportsSupportsSavingExactlyWhenItSav
         "hipkernel.gfx950_attention_unified_3d.dispatch",
         "hipkernel.gfx1151_wmma_attention.dispatch",
         "hipkernel.gfx1151_wmma_attention_decode.dispatch",
+        "hipkernel.attention_general_bwd.main_dispatch",
 #ifdef HIPDNN_ENGINE_FLYDSL
         // FlyDSL's packs, compiled in whenever the production root has FlyDSL content.
         "hipkernel.flydsl_rmsnorm.dispatch",

@@ -184,6 +184,26 @@ def test_thd_offsets():
         check_attn_bwd_lengths(mult, offsets_q=[0, 65 * q, 66 * q])
 
 
+def test_thd_offsets_per_side_multipliers():
+    """Token offsets with the hipDNN multipliers of each side (Q: 8 heads *
+    64, K / V: 2 * 64): each table is scaled by its own side's multiplier."""
+    q, kv = 512, 128
+    mults = {n: q for n in ("q", "o", "do", "dq")}
+    mults.update({n: kv for n in ("k", "v", "dk", "dv")})
+    req = _req(layout="thd", ragged_offset_multipliers=mults)
+    check_attn_bwd_lengths(req, offsets_q=[0, 100, 228], offsets_kv=[0, 96, 96],
+                           tokens_q=228, tokens_kv=96)  # fmt: skip
+    with pytest.raises(ValueError, match="offsets_q: sequence 1 spans 129"):
+        check_attn_bwd_lengths(req, offsets_q=[0, 100, 229])
+    with pytest.raises(ValueError, match="offsets_kv: sequence 0 spans 97"):
+        check_attn_bwd_lengths(req, offsets_kv=[0, 97, 98])
+    # a K multiplier that is not a whole number of tokens per offset unit
+    half = _req(layout="thd", ragged_offset_multipliers={"q": q, "k": kv // 2})
+    with _code("RAGGED_RANGE"):
+        check_attn_bwd_lengths(half, offsets_kv=[0, 3, 4])
+    check_attn_bwd_lengths(half, offsets_kv=[0, 4, 6])
+
+
 def test_tensor_meta_of_a_torch_like_tensor():
     class Storage:
         def nbytes(self):

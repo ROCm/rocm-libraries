@@ -1,0 +1,7 @@
+{
+  "version": "1.0",
+  "id": "894b32dd-3edf-4d50-9f57-10135ae81339",
+  "name": "graph operation is main_gfx950",
+  "scope": "graph",
+  "match_symbol": "hipkernel.attention_general_bwd.main_gfx950_match"
+}
