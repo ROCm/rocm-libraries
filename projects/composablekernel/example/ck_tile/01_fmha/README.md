@@ -330,7 +330,7 @@ arguments match `tile_example_fmha_fwd`, with these differences:
 | `-scale` | named `-scale_s` in the forward example |
 | `-dbias` | `1` also produces the bias gradient (requires elementwise bias) |
 | `-p_drop` | dropout probability; the forward example has no dropout argument |
-| `-deterministic` | `1` reduces `dQ` through per-block buffers instead of atomics, making the result bit-reproducible. The algorithm depends on the arch: gfx1250 uses tile split (one buffer per kv tile), every other arch uses the persistent kernel (one buffer per worker). Group mode, decode shapes, runs with bias, dbias or dropout, and runs too long for the tile-split workspace cap always use the persistent algorithm (see [deterministic workspace](#deterministic-workspace)). The two sum in a different order, so their results differ in the low bits |
+| `-deterministic` | `1` reduces `dQ` through per-block buffers instead of atomics, making the result bit-reproducible |
 | `-sink_grad` | `1` computes and validates the attention-sink gradient (see below) |
 | absent | `-vlayout`, `-lse`, `-qscale`, `-num_splits`, `-q_eff_lens`, `-kv_eff_lens` |
 
@@ -340,24 +340,6 @@ seqlen 4096, hdim 128, fp16.
 Example 2: `./bin/tile_example_fmha_bwd -mode=1 -b=2 -h=8 -h_k=2 -s=1024,2048 -d=64 -mask=1`
 runs group mode with GQA (8 query heads over 2 kv heads), per-batch seqlens, and a top-left causal
 mask.
-
-### deterministic workspace
-
-A deterministic run reduces `dQ` through fp32 buffers ("slots") in the workspace, each one a full
-`[batch, nhead, seqlen_q, hdim]` copy of `dQ`, summed in a fixed order at the end. The persistent
-kernel needs `CUs / (batch * nhead)` slots, so its workspace grows with `seqlen_q` only. Tile split
-needs one slot per kv tile, `seqlen_k / kN0`, so its workspace grows with `seqlen_q * seqlen_k`:
-for `b=2 h=32 d=128` it is 16 GiB at 8K and 256 GiB at 32K.
-
-The launcher keeps it in check by splitting a tile-split run into batch/head chunks that take
-turns on one workspace (bit-identical to the unsplit run). It aims for a budget of 4 GiB per 128 of
-hdim, and goes over it only as far as needed to give every CU two workgroups per launch: with one,
-a causal mask leaves CUs idle and the run is up to 1.7x slower. It never exceeds the cap of 16 GiB
-per 128 of hdim; when a single batch and head alone would, which is around 64K tokens at hdim 128,
-the dispatch picks the persistent kernel instead. The environment variable `CK_DET_WS_CAP_MB`
-sets the cap in MiB, for instance to leave more memory to the rest of the application.
-
-The example prints the choice after `deterministic:`, for instance `1(tile_split,chunk:b1h2)`.
 
 ### attention sink gradient
 

@@ -6,8 +6,6 @@
 
 #include "gtest/gtest.h"
 
-#include <cstdlib>
-#include <optional>
 #include <string>
 #include <vector>
 
@@ -1426,46 +1424,8 @@ TEST_P(SinkGradSaturated, DataTypeConfig)
 }
 
 // ============================================================================
-// Deterministic tile split: chunking, the workspace cap, and d_sink
-// ----------------------------------------------------------------------------
-// On gfx1250 a deterministic batch-mode run keeps one dq_acc slot per kv tile. When that
-// workspace is too large, fmha_bwd_launcher splits the run into batch/head chunks that take
-// turns on one workspace, rebasing every pointer per chunk. A chunk computes exactly what the
-// whole run computes for its batches and heads, so the gradients must match the unsplit run
-// bit for bit. On archs without tile split nothing is chunked, and these suites still check
-// that deterministic runs reproduce bit for bit.
+// Deterministic runs: bit-for-bit reproducibility and d_sink
 // ============================================================================
-
-// Sets an environment variable for one scope; the launcher reads these when it is built.
-class ScopedEnv
-{
-    public:
-    ScopedEnv(const char* name, const std::optional<std::string>& value) : name_(name)
-    {
-        if(const char* old = std::getenv(name))
-            old_ = old;
-        set(name_, value);
-    }
-    ~ScopedEnv() { set(name_, old_); }
-    ScopedEnv(const ScopedEnv&)            = delete;
-    ScopedEnv& operator=(const ScopedEnv&) = delete;
-
-    private:
-    static void set(const std::string& name, const std::optional<std::string>& value)
-    {
-#ifdef _WIN32
-        _putenv_s(name.c_str(), value ? value->c_str() : ""); // an empty value removes it
-#else
-        if(value)
-            setenv(name.c_str(), value->c_str(), 1);
-        else
-            unsetenv(name.c_str());
-#endif
-    }
-
-    std::string name_;
-    std::optional<std::string> old_;
-};
 
 static bool is_gfx125() { return ck_tile::get_device_name().compare(0, 6, "gfx125") == 0; }
 
@@ -1514,84 +1474,45 @@ static bwd_result fmha_bwd_det_run(mode_enum mode,
         &capture);
 }
 
-// batch, nhead, nhead_k, seqlen_q, seqlen_k, mask, heads and batches per chunk (0: all)
-using DetChunkCase  = std::tuple<int, int, int, int, int, std::string, int, int>;
-using DetChunkParam = std::tuple<std::tuple<int, int>,   // hdim_q, hdim_v
-                                 std::tuple<bool, bool>, // io perm
-                                 DetChunkCase,
-                                 bool>; // sink_grad
+// hdim_q, batch, nhead, nhead_k, seqlen_q, seqlen_k, mask
+using DetRepeatParam = std::tuple<int, int, int, int, int, int, std::string>;
 
-class DeterministicChunking : public TestWithParam<DetChunkParam>
+class DeterministicRepeat : public TestWithParam<std::tuple<DetRepeatParam, bool>>
 {
 };
-INSTANTIATE_TEST_SUITE_P(
-    TestCkTileFmhaBwd,
-    DeterministicChunking,
-    Combine(Values(std::tuple{64, -1}, std::tuple{128, -1}),
-            Values(std::tuple{true, true}, std::tuple{false, false}),
-            Values(DetChunkCase{2, 8, 2, 256, 320, "0", 2, 0},  // GQA 4:1, chunk inside a group
-                   DetChunkCase{2, 12, 3, 200, 384, "t", 3, 0}, // chunks straddle kv heads
-                   DetChunkCase{2, 12, 3, 200, 384, "b", 6, 0}, // straddle, two chunks
-                   DetChunkCase{4, 4, 4, 256, 256, "0", 0, 2},  // batches only
-                   DetChunkCase{3, 2, 1, 300, 260, "t", 0, 1},  // one batch per launch
-                   DetChunkCase{4, 8, 2, 128, 512, "b", 2, 2}), // batches and heads
-            Bool()));
-TEST_P(DeterministicChunking, DataTypeConfig)
+INSTANTIATE_TEST_SUITE_P(TestCkTileFmhaBwd,
+                         DeterministicRepeat,
+                         Combine(Values(DetRepeatParam{64, 2, 8, 2, 256, 320, "0"}, // GQA 4:1
+                                        DetRepeatParam{128, 2, 12, 3, 200, 384, "t"},
+                                        DetRepeatParam{128, 4, 8, 2, 128, 512, "b"},
+                                        DetRepeatParam{96, 2, 4, 4, 300, 260, "t"}, // padded hdim
+                                        DetRepeatParam{256, 1, 4, 2, 257, 300, "0"},
+                                        DetRepeatParam{32, 3, 2, 1, 1024, 900, "0"}),
+                                 Bool())); // io perm
+TEST_P(DeterministicRepeat, DataTypeConfig)
 {
-    const auto& [hdims, perm, chunk_case, sink_grad]                                  = GetParam();
-    const auto& [batch, nhead, nhead_k, seqlen_q, seqlen_k, mask_str, heads, batches] = chunk_case;
-    const int hdim = std::get<0>(hdims);
+    const auto& [shape, iperm]                                              = GetParam();
+    const auto& [hdim, batch, nhead, nhead_k, seqlen_q, seqlen_k, mask_str] = shape;
 
-    fmha_bwd_capture whole, split;
-    whole.runs              = 2;
-    whole.force_head_chunk  = 0;
-    whole.force_batch_chunk = 0;
-    split.runs              = 2;
-    split.force_head_chunk  = heads;
-    split.force_batch_chunk = batches;
-
-    bwd_result result = fmha_bwd_det_run(mode_enum::batch,
+    fmha_bwd_capture capture;
+    capture.runs      = 3;
+    capture.reprepare = false; // later runs reuse the workspace wherever the launcher allows
+    const auto result = fmha_bwd_det_run(mode_enum::batch,
                                          hdim,
-                                         perm,
+                                         {iperm, iperm},
                                          batch,
                                          nhead,
                                          nhead_k,
                                          {seqlen_q},
                                          {seqlen_k},
                                          mask_str,
-                                         sink_grad,
-                                         whole);
+                                         false,
+                                         capture);
     if(result == bwd_result::no_instance)
         GTEST_SKIP() << "No deterministic instance";
+    // success covers the gradients against the reference and every run matching the first
     ASSERT_EQ(result, bwd_result::success);
-    result = fmha_bwd_det_run(mode_enum::batch,
-                              hdim,
-                              perm,
-                              batch,
-                              nhead,
-                              nhead_k,
-                              {seqlen_q},
-                              {seqlen_k},
-                              mask_str,
-                              sink_grad,
-                              split);
-    ASSERT_EQ(result, bwd_result::success);
-
-    EXPECT_EQ(whole.head_chunk, 0);
-    EXPECT_EQ(whole.batch_chunk, 0);
-    if(split.tile_split)
-    {
-        EXPECT_EQ(split.head_chunk, heads);
-        EXPECT_EQ(split.batch_chunk, batches);
-        EXPECT_LT(split.workspace_size, whole.workspace_size);
-    }
-    EXPECT_TRUE(split.dq == whole.dq) << "dQ of the split run differs from the whole run";
-    EXPECT_TRUE(split.dk == whole.dk) << "dK of the split run differs from the whole run";
-    EXPECT_TRUE(split.dv == whole.dv) << "dV of the split run differs from the whole run";
-    // A launch folds the d_sink partials of its own batches, so splitting the batches changes
-    // the order they are summed in; the runner has checked that d_sink against the reference.
-    if(sink_grad && batches == 0)
-        EXPECT_TRUE(split.d_sink == whole.d_sink) << "d_sink of the split run differs";
+    EXPECT_TRUE(capture.runs_identical);
 }
 
 // mode, hdim, batch, nhead, nhead_k, seqlen_qs, seqlen_ks, mask. Group-mode lengths missing
@@ -1652,43 +1573,4 @@ TEST_P(DeterministicSink, DataTypeConfig)
     // threshold on gfx1250; other archs run them through ConvertQGrad instead.
     if(is_gfx125() && hdim == 64 && seqlen_qs.front() <= 32)
         EXPECT_GT(capture.decode_max_seq, 0) << "expected a decode kernel set";
-}
-
-// A tile-split run whose smallest chunk (one batch, one head) is over the workspace cap must
-// get the persistent kernel; one that fits must split itself to stay within the cap.
-class DeterministicWorkspaceCap : public TestWithParam<std::tuple<int, std::string>>
-{
-};
-INSTANTIATE_TEST_SUITE_P(TestCkTileFmhaBwd,
-                         DeterministicWorkspaceCap,
-                         Combine(Values(64, 128), Values("0", "t")));
-TEST_P(DeterministicWorkspaceCap, DataTypeConfig)
-{
-    const auto& [hdim, mask_str] = GetParam();
-    // b2 h8 s1024: one batch-head needs 2-4 MiB of slots at hdim <= 128, the whole run 16
-    // times that. An 8 MiB cap fits the former and not the latter, a 1 MiB cap fits neither.
-    fmha_bwd_capture fits, over;
-    bwd_result result;
-    {
-        ScopedEnv cap("CK_DET_WS_CAP_MB", std::string("8"));
-        result = fmha_bwd_det_run(
-            mode_enum::batch, hdim, {true, true}, 2, 8, 2, {1024}, {1024}, mask_str, false, fits);
-    }
-    if(result == bwd_result::no_instance)
-        GTEST_SKIP() << "No deterministic instance";
-    ASSERT_EQ(result, bwd_result::success);
-    {
-        ScopedEnv cap("CK_DET_WS_CAP_MB", std::string("1"));
-        result = fmha_bwd_det_run(
-            mode_enum::batch, hdim, {true, true}, 2, 8, 2, {1024}, {1024}, mask_str, false, over);
-    }
-    ASSERT_EQ(result, bwd_result::success);
-
-    if(!is_gfx125())
-        return; // no tile split here: both runs are persistent
-    EXPECT_TRUE(fits.tile_split);
-    EXPECT_TRUE(fits.head_chunk > 0 || fits.batch_chunk > 0);
-    // the cap bounds dq_acc; the d_sink partials and the split metadata come on top
-    EXPECT_LE(fits.workspace_size, size_t{9} << 20);
-    EXPECT_FALSE(over.tile_split);
 }

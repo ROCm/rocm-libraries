@@ -79,15 +79,9 @@ struct fmha_bwd_capture
 {
     int runs       = 1;
     bool reprepare = true;
-    // Passed on as fmha_bwd_traits::det_head_chunk / det_batch_chunk.
-    int force_head_chunk  = -1;
-    int force_batch_chunk = -1;
 
     size_t workspace_size           = 0;
     ck_tile::index_t decode_max_seq = 0; // > 0: a decode (QrQtrDor) kernel set was selected
-    bool tile_split                 = false;
-    int head_chunk                  = 0;
-    int batch_chunk                 = 0;
     bool runs_identical             = true;
     std::vector<uint8_t> dq, dk, dv, d_sink;
 };
@@ -437,8 +431,6 @@ bwd_result fmha_bwd_run(mode_enum mode,
         s_randval,
         deterministic,
         sink_grad,
-        capture ? capture->force_head_chunk : -1,
-        capture ? capture->force_batch_chunk : -1,
     });
     const auto t1_launcher = std::chrono::high_resolution_clock::now();
     const double launcher_ctor_ms =
@@ -449,9 +441,6 @@ bwd_result fmha_bwd_run(mode_enum mode,
     {
         capture->workspace_size = ws_size;
         capture->decode_max_seq = launcher.selected_max_seqlen_q();
-        capture->tile_split     = launcher.uses_tile_split();
-        capture->head_chunk     = launcher.head_chunk();
-        capture->batch_chunk    = launcher.batch_chunk();
     }
 
     // Stage seqstart to device before prepare_workspace_async (read on-device in group mode).
@@ -505,17 +494,6 @@ bwd_result fmha_bwd_run(mode_enum mode,
     const std::size_t workspace_size_in_megabytes =
         ck_tile::integer_divide_ceil(ws_size, 1024 * 1024);
 
-    const std::string det_desc = [&]() -> std::string {
-        if(!deterministic)
-            return "";
-        std::string s = launcher.uses_tile_split() ? "(tile_split" : "(persistent";
-        if(launcher.head_chunk() > 0 || launcher.batch_chunk() > 0)
-            s += ",chunk:b" +
-                 std::to_string(launcher.batch_chunk() > 0 ? launcher.batch_chunk() : batch) + "h" +
-                 std::to_string(launcher.head_chunk() > 0 ? launcher.head_chunk() : nhead);
-        return s + ")";
-    }();
-
     std::cout << "[" << data_type << "|" << mode << "|" << io_layout(i_perm, o_perm)
               << "] b:" << batch << ", h:" << nhead << "/" << nhead_k << ", s:" << seqlen_qs[0]
               << "/" << seqlen_ks[0] << ", d:" << hdim_q << "/" << hdim_v << ", scale:" << scale
@@ -526,7 +504,7 @@ bwd_result fmha_bwd_run(mode_enum mode,
                                           ? ", sink:(rand[30,60] saturated, grad)"
                                           : ", sink:(rand[-1,1], grad)"))
                             : "")
-              << ", s_randval:" << s_randval << ", deterministic:" << deterministic << det_desc
+              << ", s_randval:" << s_randval << ", deterministic:" << deterministic
               << ", workspace:" << std::to_string(workspace_size_in_megabytes) << "MiB"
               << ", mask:" << mask << ", init:" << launcher_ctor_ms << "ms"
               << ", prws:" << prepare_ws_timer.duration() << "ms" << std::flush;
