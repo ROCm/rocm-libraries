@@ -38,6 +38,7 @@ from ._p4_shared_analytical import (
     UNIFORM_CALIBRATION,
     UNIFORM_QUICK_CASES,
     UniformCase,
+    UniformMutation,
     _basis_offset,
     legal_interval,
     target_bits,
@@ -497,6 +498,49 @@ class P4Case:
         return f"{self.base.case_id}-p4{detail}-{scales}"
 
 
+class P4Mutation(str, Enum):
+    """Wrong kernel semantics whose Tier B must be disjoint from the correct one
+    at some coordinate (T5). Each is a closed-form change of the score, the
+    legal key set or the softmax recurrence; none needs a reference attention."""
+
+    OMIT_SQRT_D = "omit_sqrt_d"  # scale 1 instead of 1/sqrt(D)
+    EXP_ENCODING = "exp_encoding"  # exp2 of a natural-log score: LOG2E dropped
+    K_ROW_PLUS_ONE = "k_row_plus_one"  # key k reads K row k + 1
+    K_ROW_MINUS_ONE = "k_row_minus_one"  # key k reads K row k - 1
+    INVERSE_SHIFT = "inverse_shift"  # transposed cyclic K: shift r becomes -r
+    OMIT_WALSH_BLOCK_0 = "omit_walsh_block_0"  # QK skips dimensions 0..15
+    OMIT_WALSH_BLOCK_1 = "omit_walsh_block_1"  # QK skips dimensions 16..31
+    OMIT_WALSH_BLOCK_3 = "omit_walsh_block_3"  # QK skips dimensions 48..63
+    WALSH_SIGN = "walsh_sign"  # the (-1)**k K row sign is lost
+    Q_HEAD_ROTATE = "q_head_rotate"  # output head h reads Q head h + 1
+    K_HEAD_ROTATE = "k_head_rotate"  # output head h reads K head h + 1
+    INCLUDE_FUTURE_KEY = "include_future_key"
+    EXCLUDE_LAST_KEY = "exclude_last_key"
+    INCLUDE_OLD_WINDOW_KEY = "include_old_window_key"
+    EXCLUDE_OLDEST_WINDOW_KEY = "exclude_oldest_window_key"
+    OMIT_RESCALE = "omit_rescale"  # alpha = 1: l and o are never rescaled
+    DENOMINATOR_PLUS_ONE = "denominator_plus_one"  # one phantom logit-0 key in l
+
+
+_K_ROW_OFFSET = {P4Mutation.K_ROW_PLUS_ONE: 1, P4Mutation.K_ROW_MINUS_ONE: -1}
+_OMITTED_WALSH_BLOCK = {
+    P4Mutation.OMIT_WALSH_BLOCK_0: 0,
+    P4Mutation.OMIT_WALSH_BLOCK_1: 1,
+    P4Mutation.OMIT_WALSH_BLOCK_3: 3,
+}
+_WALSH_BLOCK = 16
+# The one-key mask-boundary mutations share P3's legal-interval semantics.
+_BOUNDARY_MUTATION = {
+    mutation: UniformMutation(mutation.value)
+    for mutation in (
+        P4Mutation.INCLUDE_FUTURE_KEY,
+        P4Mutation.EXCLUDE_LAST_KEY,
+        P4Mutation.INCLUDE_OLD_WINDOW_KEY,
+        P4Mutation.EXCLUDE_OLDEST_WINDOW_KEY,
+    )
+}
+
+
 def is_distinguished(case: P4Case, query: int, key: int) -> bool:
     """Whether ``key`` carries the row's nonzero score (legality aside)."""
     if (key + case.residue_shift - query) % P4_PERIOD:
@@ -504,13 +548,41 @@ def is_distinguished(case: P4Case, query: int, key: int) -> bool:
     return not (case.fixture is P4Fixture.LATE_MAX and key < case.late)
 
 
-def score_numerator(case: P4Case, head: int, query: int, key: int) -> Fraction:
-    """The exact QK dot product ``acc`` (lemma B1: every partial sum is exact)."""
-    if not is_distinguished(case, query, key):
-        return Fraction(0)
-    product = case.q_scales[head] * case.k_scales[head]
+def score_numerator(
+    case: P4Case,
+    head: int,
+    query: int,
+    key: int,
+    mutation: P4Mutation | None = None,
+) -> Fraction:
+    """The exact QK dot product ``acc`` (lemma B1: every partial sum is exact).
+
+    Under ``mutation`` it is the dot product the mutated kernel forms. K rows
+    outside ``[0, Sk)`` (an off-by-one read) follow the fixture's formula. With
+    one 16-dimension block of the Walsh contraction omitted, the ``Q[q] K[k]``
+    dot product loses ``sum_{d in block} H[z, d]``, ``z = q ^ (k + 1)``, which is
+    ``16 (-1)**popcount(z & 16 b)`` when ``z % 16 == 0`` and zero otherwise."""
+    heads = case.base.nhead_q
+    q_head = (head + 1) % heads if mutation is P4Mutation.Q_HEAD_ROTATE else head
+    k_head = (head + 1) % heads if mutation is P4Mutation.K_HEAD_ROTATE else head
+    product = case.q_scales[q_head] * case.k_scales[k_head]
+    row = key + _K_ROW_OFFSET.get(mutation, 0)
     if case.fixture is P4Fixture.WALSH:
-        return P4_PERIOD * product * (-1 if key & 1 else 1)
+        overlap = (query % P4_PERIOD) ^ ((row + 1) % P4_PERIOD)
+        total = P4_PERIOD if overlap == 0 else 0
+        block = _OMITTED_WALSH_BLOCK.get(mutation)
+        if block is not None and overlap % _WALSH_BLOCK == 0:
+            parity = bin(overlap & (_WALSH_BLOCK * block)).count("1") & 1
+            total -= _WALSH_BLOCK * (-1 if parity else 1)
+        negative = row & 1 and mutation is not P4Mutation.WALSH_SIGN
+        return product * total * (-1 if negative else 1)
+    shift = case.residue_shift
+    if mutation is P4Mutation.INVERSE_SHIFT:
+        shift = -shift
+    if (row + shift - query) % P4_PERIOD:
+        return Fraction(0)
+    if case.fixture is P4Fixture.LATE_MAX and row < case.late:
+        return Fraction(0)
     return product
 
 
@@ -572,13 +644,16 @@ def p4_inputs(
 # ---------------------------------------------------------------------------
 
 
-def visited_tiles(case: P4Case, query: int) -> range:
+def visited_tiles(
+    case: P4Case, query: int, mutation: P4Mutation | None = None
+) -> tuple[int, ...]:
     """KV tiles the dense kernel visits for ``query``, in loop order.
 
     All rows of a ``block_m`` query block share one KV loop: top-left causal
     clamps it at the block's diagonal tile, and a sliding window starts it
     ``W / block_n`` tiles before the block's first diagonal tile. A row can
-    therefore visit fully masked tiles before or after its legal keys."""
+    therefore visit fully masked tiles before or after its legal keys. A
+    mask-boundary mutation also visits the tile of a key it makes legal."""
     per_block = case.block_m // case.block_n
     block = query // case.block_m
     tiles = case.base.seqlen_k // case.block_n
@@ -586,20 +661,41 @@ def visited_tiles(case: P4Case, query: int) -> range:
     lower = 0
     if case.mask == "window":
         lower = max(block * per_block - case.window // case.block_n, 0)
-    return range(lower, upper)
+    visited = set(range(lower, upper))
+    if mutation in _BOUNDARY_MUTATION:
+        first, last = legal_interval(case.base, query, _BOUNDARY_MUTATION[mutation])
+        if first <= last:
+            visited.update(range(first // case.block_n, last // case.block_n + 1))
+    return tuple(sorted(visited))
+
+
+# ``scale`` is 1 instead of 1/8, or LOG2E is not applied.
+_MUTATED_SCORE_SCALE = {
+    P4Mutation.OMIT_SQRT_D: round_f32(f32(1.0) * f32(_KERNEL_LOG2E)),
+    P4Mutation.EXP_ENCODING: f32(_SCALE_ARGUMENT),
+}
 
 
 @cache
-def _score_of(numerator: Fraction) -> Fraction:
-    return round_f32(numerator * SCORE_SCALE, "rn")
+def _score_of(numerator: Fraction, scale: Fraction = SCORE_SCALE) -> Fraction:
+    return round_f32(numerator * scale, "rn")
 
 
-def score(case: P4Case, head: int, query: int, key: int) -> Fraction:
+def score(
+    case: P4Case,
+    head: int,
+    query: int,
+    key: int,
+    mutation: P4Mutation | None = None,
+) -> Fraction:
     """The FP32 score in the log2 domain, or the masked value."""
-    first, last = legal_interval(case.base, query)
+    first, last = legal_interval(case.base, query, _BOUNDARY_MUTATION.get(mutation))
     if not first <= key <= last:
         return MASKED_SCORE
-    return _score_of(score_numerator(case, head, query, key))
+    return _score_of(
+        score_numerator(case, head, query, key, mutation),
+        _MUTATED_SCORE_SCALE.get(mutation, SCORE_SCALE),
+    )
 
 
 @dataclass(frozen=True)
@@ -621,22 +717,36 @@ class RowTrace:
 
 
 @cache
-def row_trace(case: P4Case, head: int, query: int) -> RowTrace:
+def row_trace(
+    case: P4Case, head: int, query: int, mutation: P4Mutation | None = None
+) -> RowTrace:
     """Propagate the row's running max, weights and denominator.
 
     The running max is exact (``max`` does not round). Each ``v_exp_f32`` is its
     candidate interval; each tile's 64 weights are summed in any order
-    (``gamma_63``), then ``l = RN(RN(l alpha) + l_tile)``."""
+    (``gamma_63``), then ``l = RN(RN(l alpha) + l_tile)``. ``OMIT_RESCALE``
+    fixes ``alpha = 1``; ``DENOMINATOR_PLUS_ONE`` adds a logit-0 key's weight to
+    the last tile's sum, never to the accumulator."""
     running_max = MASKED_SCORE
     denominator = F32Interval.point(Fraction(0))
     steps: list[TileStep] = []
-    for tile in visited_tiles(case, query):
+    tiles = visited_tiles(case, query, mutation)
+    for tile in tiles:
         start = tile * case.block_n
-        scores = [score(case, head, query, key) for key in range(start, start + case.block_n)]
+        scores = [
+            score(case, head, query, key, mutation)
+            for key in range(start, start + case.block_n)
+        ]
         new_max = max(running_max, max(scores))
-        alpha = exp2_interval(round_f32(running_max - new_max, "rn"))
+        if mutation is P4Mutation.OMIT_RESCALE:
+            alpha = F32Interval.point(Fraction(1))
+        else:
+            alpha = exp2_interval(round_f32(running_max - new_max, "rn"))
         weights = tuple(exp2_interval(round_f32(value - new_max, "rn")) for value in scores)
-        denominator = add_rn(mul_rn(denominator, alpha), sum_any_order(weights))
+        terms = weights
+        if mutation is P4Mutation.DENOMINATOR_PLUS_ONE and tile == tiles[-1]:
+            terms += (exp2_interval(round_f32(-new_max, "rn")),)
+        denominator = add_rn(mul_rn(denominator, alpha), sum_any_order(terms))
         steps.append(TileStep(tile, alpha, weights))
         running_max = new_max
     return RowTrace(tuple(steps), denominator, rcp_rn(denominator))
@@ -669,6 +779,7 @@ def _output_interval(
     query: int,
     products: tuple[F32Interval | None, ...],
     mfma: str,
+    mutation: P4Mutation | None,
 ) -> F32Interval:
     """``RN(o R(l))`` over the reachable accumulator ``o``.
 
@@ -677,7 +788,7 @@ def _output_interval(
     when the accumulator is zero, else faithful (or RN when pinned)."""
     if mfma not in MFMA_ROUNDING:
         raise ValueError(f"mfma must be one of {MFMA_ROUNDING}")
-    trace = row_trace(case, head, query)
+    trace = row_trace(case, head, query, mutation)
     accumulator = F32Interval.point(Fraction(0))
     for step, product in zip(trace.steps, products):
         accumulator = mul_rn(accumulator, step.alpha)
@@ -693,10 +804,17 @@ def _output_interval(
 
 
 def tier_b_row(
-    case: P4Case, exposure: str, query: int, head: int, *, mfma: str = "faithful"
+    case: P4Case,
+    exposure: str,
+    query: int,
+    head: int,
+    *,
+    mfma: str = "faithful",
+    mutation: P4Mutation | None = None,
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Lowest and highest reachable output bits of one row and query head."""
-    trace = row_trace(case, head, query)
+    """Lowest and highest reachable output bits of one row and query head,
+    under the correct or a ``mutation``'s semantics."""
+    trace = row_trace(case, head, query, mutation)
     exponent = case.head_scale_exponents[head]
     low = np.zeros(case.base.head_dim, dtype=np.uint16)
     high = np.zeros(case.base.head_dim, dtype=np.uint16)
@@ -709,7 +827,7 @@ def tier_b_row(
             else:
                 weight = step.weights[key - step.tile * case.block_n]
                 products.append(_scaled_cast(case.dtype, weight, exponent))
-        output = _output_interval(case, head, query, tuple(products), mfma)
+        output = _output_interval(case, head, query, tuple(products), mfma, mutation)
         low[dim], high[dim] = cast_bits_hull(output, case.dtype)
     return low, high
 
@@ -721,6 +839,7 @@ def tier_b_bounds(
     rows: Iterable[int] | None = None,
     heads: Iterable[int] | None = None,
     mfma: str = "faithful",
+    mutation: P4Mutation | None = None,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Tier B for one exposure: every reachable stored value of each coordinate
     lies, in bit order, between the two returned arrays (inclusive)."""
@@ -728,7 +847,9 @@ def tier_b_bounds(
     high = np.zeros(case.output_shape, dtype=np.uint16)
     for query in range(case.base.seqlen_q) if rows is None else rows:
         for head in range(case.base.nhead_q) if heads is None else heads:
-            row_low, row_high = tier_b_row(case, exposure, query, head, mfma=mfma)
+            row_low, row_high = tier_b_row(
+                case, exposure, query, head, mfma=mfma, mutation=mutation
+            )
             low[:, query, head, :] = row_low
             high[:, query, head, :] = row_high
     return low, high
@@ -881,6 +1002,7 @@ def emulate_row(
     head: int,
     *,
     rng: np.random.Generator | None = None,
+    mutation: P4Mutation | None = None,
 ) -> np.ndarray:
     """Output bits of one row from an FP32 emulation of the dense path.
 
@@ -888,7 +1010,8 @@ def emulate_row(
     ``E = RN(2**x)`` and an RN MFMA accumulate. With ``rng`` it draws a random
     summation tree per tile, an ``E`` candidate per call and a directed
     rounding per MFMA addition: a member of the reachable set, used to test
-    that Tier B encloses it."""
+    that Tier B encloses it. ``mutation`` emulates the mutated kernel, whose
+    realizations its own Tier B must enclose."""
     exponent = case.head_scale_exponents[head]
     scale = np.float32(2.0**exponent)
 
@@ -902,15 +1025,25 @@ def emulate_row(
     running_max = np.float32(float(MASKED_SCORE))
     denominator = np.float32(0.0)
     accumulator = np.zeros(case.base.head_dim, dtype=np.float32)
-    for tile in visited_tiles(case, query):
+    tiles = visited_tiles(case, query, mutation)
+    for tile in tiles:
         start = tile * case.block_n
         scores = np.array(
-            [float(score(case, head, query, key)) for key in range(start, start + case.block_n)],
+            [
+                float(score(case, head, query, key, mutation))
+                for key in range(start, start + case.block_n)
+            ],
             dtype=np.float32,
         )
         new_max = np.float32(max(running_max, np.max(scores)))
-        alpha = exp2(np.float32(running_max - new_max))
+        if mutation is P4Mutation.OMIT_RESCALE:
+            alpha = np.float32(1.0)
+        else:
+            alpha = exp2(np.float32(running_max - new_max))
         weights = [exp2(np.float32(value - new_max)) for value in scores]
+        phantom = []
+        if mutation is P4Mutation.DENOMINATOR_PLUS_ONE and tile == tiles[-1]:
+            phantom.append(exp2(np.float32(-new_max)))
         if rng is None:
             halves = []
             for order in _LANE_ORDER:
@@ -919,8 +1052,10 @@ def emulate_row(
                     total = np.float32(total + weights[index])
                 halves.append(total)
             tile_sum = np.float32(halves[0] + halves[1])
+            for extra in phantom:
+                tile_sum = np.float32(tile_sum + extra)
         else:
-            items = list(weights)
+            items = list(weights) + phantom
             while len(items) > 1:
                 left = items.pop(int(rng.integers(len(items))))
                 right = items.pop(int(rng.integers(len(items))))
@@ -1130,9 +1265,11 @@ P4_QUICK_CASES = tuple(
 
 
 @cache
-def tier_b_exposure(case: P4Case, exposure: str) -> tuple[np.ndarray, np.ndarray]:
+def tier_b_exposure(
+    case: P4Case, exposure: str, mutation: P4Mutation | None = None
+) -> tuple[np.ndarray, np.ndarray]:
     """Cached, read-only :func:`tier_b_bounds` for a whole exposure."""
-    low, high = tier_b_bounds(case, exposure)
+    low, high = tier_b_bounds(case, exposure, mutation=mutation)
     low.setflags(write=False)
     high.setflags(write=False)
     return low, high
@@ -1149,3 +1286,120 @@ def tier_a_exposure(
     center.setflags(write=False)
     radius.setflags(write=False)
     return center, radius, frozenset(classes)
+
+
+# ---------------------------------------------------------------------------
+# Mutation separation (T5).
+# ---------------------------------------------------------------------------
+
+_EVERY_FIXTURE = (
+    P4Mutation.OMIT_SQRT_D,
+    P4Mutation.EXP_ENCODING,
+    P4Mutation.K_ROW_PLUS_ONE,
+    P4Mutation.K_ROW_MINUS_ONE,
+    P4Mutation.Q_HEAD_ROTATE,
+    P4Mutation.K_HEAD_ROTATE,
+    P4Mutation.OMIT_RESCALE,
+    P4Mutation.DENOMINATOR_PLUS_ONE,
+)
+_FIXTURE_MUTATIONS = {
+    P4Fixture.CYCLIC: (P4Mutation.INVERSE_SHIFT,),
+    P4Fixture.WALSH: (*_OMITTED_WALSH_BLOCK, P4Mutation.WALSH_SIGN),
+}
+_MASK_MUTATIONS = {
+    "causal": (P4Mutation.INCLUDE_FUTURE_KEY, P4Mutation.EXCLUDE_LAST_KEY),
+    "window": (
+        P4Mutation.INCLUDE_OLD_WINDOW_KEY,
+        P4Mutation.EXCLUDE_OLDEST_WINDOW_KEY,
+    ),
+}
+
+
+def applicable_mutations(case: P4Case) -> tuple[P4Mutation, ...]:
+    """The mutations ``case`` can express: transposing K is a shift only for the
+    cyclic fixture, Walsh blocks and signs exist only in the Walsh fixture, and
+    each mask has its own one-key boundary."""
+    return (
+        *_EVERY_FIXTURE,
+        *_FIXTURE_MUTATIONS.get(case.fixture, ()),
+        *_MASK_MUTATIONS[case.mask],
+    )
+
+
+@dataclass(frozen=True)
+class Separation:
+    """``G(m)``: the largest target-ULP distance between the correct and the
+    mutated Tier B over the evaluated coordinates, and where it is attained
+    (``exposure`` and ``b:q:h:d``). ``gap > 0`` proves the mutation is caught."""
+
+    mutation: P4Mutation
+    gap: int
+    exposure: str | None
+    coordinate: tuple[int, int, int, int] | None
+
+
+# Block, tile, window and causal-diagonal edges of both quick kernels. A gap on
+# a subset of rows lower-bounds the full gap, which is enough to prove I5.
+P4_SEPARATION_ROWS = (0, 1, 6, 7, 31, 63, 64, 65, 127, 128, 191, 192, 255)
+
+SEPARATION_LABELS = (
+    "owned by P3",
+    "owned by another P4 fixture",
+    "needs a stronger fixture",
+    "out of scope",
+)
+# Quick cells whose correct and mutated Tier B overlap at every coordinate,
+# keyed by ``(case_id, mutation)``. Tier B is never loosened to separate them.
+# On the causal kernel the identity, cyclic and Walsh rows all reach their max
+# in the first visited tile, so every later ``alpha = E(0)`` admits 1 and the
+# omitted rescale is a member of the correct reachable set; late max, whose
+# max arrives in a later tile, separates it on the same kernel.
+P4_UNSEPARATED: Mapping[tuple[str, P4Mutation], str] = MappingProxyType(
+    {
+        (case.case_id, P4Mutation.OMIT_RESCALE): "owned by another P4 fixture"
+        for case in P4_QUICK_CASES
+        if case.mask == "causal" and case.fixture is not P4Fixture.LATE_MAX
+    }
+)
+
+
+def mutation_separation(
+    case: P4Case,
+    mutation: P4Mutation,
+    *,
+    rows: Iterable[int] | None = P4_SEPARATION_ROWS,
+) -> Separation:
+    """Evaluate T5 for one mutation over every exposure; ``rows=None`` uses
+    every row."""
+    mutation = P4Mutation(mutation)
+    if mutation not in applicable_mutations(case):
+        raise ValueError(f"mutation {mutation.value} does not apply to {case.case_id}")
+    best = Separation(mutation, 0, None, None)
+    queries = range(case.base.seqlen_q) if rows is None else tuple(rows)
+    for exposure in P4_EXPOSURES:
+        for query in queries:
+            for head in range(case.base.nhead_q):
+                correct = tier_b_row(case, exposure, query, head)
+                mutated = tier_b_row(case, exposure, query, head, mutation=mutation)
+                low, high = (bits.astype(np.int64) for bits in correct)
+                mutated_low, mutated_high = (bits.astype(np.int64) for bits in mutated)
+                gaps = np.maximum(np.maximum(mutated_low - high, low - mutated_high), 0)
+                dim = int(np.argmax(gaps))
+                if gaps[dim] > best.gap:
+                    best = Separation(
+                        mutation, int(gaps[dim]), exposure, (0, query, head, dim)
+                    )
+    return best
+
+
+def format_separation(case: P4Case, separation: Separation) -> str:
+    where = (
+        "n/a"
+        if separation.coordinate is None
+        else f"{separation.exposure} b:q:h:d="
+        + ":".join(str(value) for value in separation.coordinate)
+    )
+    return (
+        f"{case.dtype}-{case.mask}-{case.fixture.value} "
+        f"{separation.mutation.value}: G={separation.gap} at {where}"
+    )
