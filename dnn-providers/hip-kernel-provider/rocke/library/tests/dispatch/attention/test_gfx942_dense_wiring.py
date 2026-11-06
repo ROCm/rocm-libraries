@@ -542,6 +542,13 @@ class TestGfx942DenseIngestorGrids(unittest.TestCase):
             for tuned in (_base_spec(_req(**chunk)), _spec(_req(**chunk))):
                 self.assertGreater(tuned.kv_segments, 1)
                 self.assertFalse(tuned.persistent)
+            # The KV split has no segment rule for sinks or LSE output
+            # (check_kv_segments), so those requests keep one segment and build.
+            for feature in ("emit_lse", "use_sinks"):
+                with self.subTest(feature=feature):
+                    whole = _base_spec(_req(**chunk, **{feature: True}))
+                    self.assertEqual(whole.kv_segments, 1)
+                    self.assertTrue(supports_attention_dense(whole, arch="gfx942")[0])
             grids = {
                 self._PERSIST: (True, "qb_minor"),
                 "gfx942_dense_qbminor": (False, "qb_minor"),
