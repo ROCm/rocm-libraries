@@ -3589,6 +3589,78 @@ def test_superset_import_nested_cases():
         print("  PASS: superset_import_nested_cases")
 
 
+def test_import_cache_matches_separate_runs():
+    """Imports that share an ImportCache write the bytes that separate runs write."""
+    import contextlib
+    import io
+    from unittest import mock
+
+    import import_graph
+
+    def flags(topology, case_id=None, strict=True):
+        out = [*_SUPERSET_FLAGS, "--topology", topology]
+        out += ["--case-id", case_id] if case_id is not None else []
+        return out + (["--strict"] if strict else [])
+
+    steps = [
+        ("full", _optional_graph(), 100, flags("Opt", "full")),
+        ("no_sink", _optional_graph(sink=False, seq=8), 200, flags("Opt", "no_sink")),
+        ("no_stats", _optional_graph(stats=False, seq=16), 300, flags("Opt", None)),
+        ("full_seq8", _optional_graph(seq=8), 400, flags("Opt", "full_seq8")),
+        ("dup", _optional_graph(sink=False, seq=8), 200, flags("Opt", "dup")),
+        (
+            "dup_skip",
+            _optional_graph(sink=False, seq=8),
+            200,
+            flags("Opt", strict=False),
+        ),
+        ("id_taken", _optional_graph(seq=32), 500, flags("Opt", "full")),
+        ("bias", _optional_graph(bias=True), 600, flags("Bias", "bias")),
+        ("bias_seq8", _optional_graph(bias=True, seq=8), 700, flags("Bias", None)),
+        ("no_sink_32", _optional_graph(sink=False, seq=32), 800, flags("Opt", "ns32")),
+    ]
+    flush_after = {"no_stats", "dup_skip"}
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        separate, shared = tmp / "separate", tmp / "shared"
+        separate.mkdir()
+        shared.mkdir()
+        cache = import_graph.ImportCache()
+        rcs_separate, rcs_shared = [], []
+        sweep_loads = []
+        json_load = json.load
+
+        def counting_load(f, *args, **kwargs):
+            if Path(getattr(f, "name", "")).name == "sweep.json":
+                sweep_loads.append(f.name)
+            return json_load(f, *args, **kwargs)
+
+        for name, graph, seed, step_flags in steps:
+            graph_path = _capture(
+                tmp / "capture", name, graph, _optional_sidecar(graph, seed)
+            )
+            rcs_separate.append(
+                _import_capture(graph_path, separate, *step_flags).returncode
+            )
+            argv = ["--graph", str(graph_path), "--bundle-dir", str(shared)]
+            with contextlib.redirect_stderr(io.StringIO()), mock.patch.object(
+                import_graph.json, "load", counting_load
+            ):
+                rcs_shared.append(import_graph.main(argv + step_flags, cache))
+            if name in flush_after:
+                cache.flush()
+                assert _inventory(shared) == _inventory(separate), name
+        cache.flush()
+        assert rcs_separate == [0, 0, 0, 0, 1, 0, 1, 0, 0, 0], rcs_separate
+        assert rcs_shared == rcs_separate, rcs_shared
+        assert _inventory(shared) == _inventory(separate)
+        assert _sweep_dirs(shared) == ["quick/GroupedOp/Bias", "quick/GroupedOp/Opt"]
+        assert len(_cases(shared)) == 7
+        assert len(sweep_loads) == 2, sweep_loads
+        assert all(e.get("memo") for e in cache._entries.values())
+        print("  PASS: import_cache_matches_separate_runs")
+
+
 def test_superset_import_needs_a_containing_template():
     """A graph joins only a template that holds every tensor of it, by the loader's rules."""
     with tempfile.TemporaryDirectory() as tmp:
@@ -3921,6 +3993,7 @@ def main() -> int:
         test_import_refuses_metadata_uid_moves,
         test_superset_index_of_a_sweep_with_only_absent_cases,
         test_superset_import_keeps_aliases_by_name,
+        test_import_cache_matches_separate_runs,
     ]
 
     for t in tests:

@@ -119,7 +119,104 @@ from bundle_utils import (
 # --------------------------------------------------------------------------
 
 
-def _existing_sweeps(bundle_dir: Path) -> list:
+class ImportCache:
+    """Parsed sweeps and expanded cases, shared by a series of :func:`main` calls.
+
+    Use one cache for imports into one bundle tree that no other writer changes
+    while the cache is in use. An append changes the sweep in memory and marks it
+    dirty. :meth:`flush` writes each dirty sweep.json. The cache reads a sweep
+    that is not dirty again when its files change on disk.
+    """
+
+    def __init__(self):
+        self._entries = {}
+        self._dirty = set()
+
+    @staticmethod
+    def _stamp(sweep_path: Path, template_path: Path) -> tuple:
+        out = ()
+        for path in (sweep_path, template_path):
+            st = path.stat()
+            out += (st.st_ino, st.st_size, st.st_mtime_ns)
+        return out
+
+    def load(self, sweep_path: Path, template_path: Path):
+        """(template, sweep) of a sweep folder, or None when it cannot read a file."""
+        entry = self._entries.get(sweep_path)
+        if sweep_path in self._dirty:
+            return entry["template"], entry["sweep"]
+        try:
+            stamp = self._stamp(sweep_path, template_path)
+            if entry is not None and entry["stamp"] == stamp:
+                return entry["template"], entry["sweep"]
+            with open(template_path) as f:
+                template = json.load(f)
+            with open(sweep_path) as f:
+                sweep = json.load(f)
+        except (json.JSONDecodeError, OSError):
+            self._entries.pop(sweep_path, None)
+            return None
+        self._entries[sweep_path] = {
+            "template": template,
+            "sweep": sweep,
+            "stamp": stamp,
+            "canons": [],
+        }
+        return template, sweep
+
+    def case_canons(self, sweep_path: Path, template: dict, sweep: dict):
+        """Yield canon(expand_case(template, case)) per case.
+
+        Yield None for a case that does not expand.
+        """
+        entry = self._entries.get(sweep_path)
+        known = entry["canons"] if entry is not None and entry["sweep"] is sweep else []
+        for i, case in enumerate(sweep.get("cases", [])):
+            if i < len(known) and known[i][0] is case:
+                yield known[i][1]
+                continue
+            del known[i:]
+            try:
+                text = canon(expand_case(template, case))
+            except ValueError:
+                text = None
+            known.append((case, text))
+            yield text
+
+    def memo(self, sweep_path: Path, template: dict):
+        """A function (key, compute) -> value that keeps compute() per key.
+
+        Use it only for values that depend on nothing but this template and the
+        objects that the key names.
+        """
+        entry = self._entries.get(sweep_path)
+        if entry is None or entry["template"] is not template:
+            return lambda key, compute: compute()
+        values = entry.setdefault("memo", {})
+
+        def lookup(key, compute):
+            if key not in values:
+                values[key] = compute()
+            return values[key]
+
+        return lookup
+
+    def mark_dirty(self, sweep_path: Path):
+        self._dirty.add(sweep_path)
+
+    def flush(self):
+        """Write each dirty sweep.json."""
+        for sweep_path in sorted(self._dirty):
+            sweep = self._entries[sweep_path]["sweep"]
+            with open(sweep_path, "w", newline="\n") as f:
+                f.write(dump_sweep(sweep, sweep_format(sweep)))
+            self._dirty.discard(sweep_path)
+            self._entries[sweep_path]["stamp"] = self._stamp(
+                sweep_path, sweep_path.parent / "graph.template.json"
+            )
+
+
+def _existing_sweeps(bundle_dir: Path, cache: ImportCache = None) -> list:
     """[(template, sweep, sweep_path)] for each readable sweep with a template and a case."""
     sweeps = []
     if not bundle_dir.is_dir():
@@ -128,20 +225,28 @@ def _existing_sweeps(bundle_dir: Path) -> list:
         template_path = sweep_path.parent / "graph.template.json"
         if not template_path.exists():
             continue
-        try:
-            with open(template_path) as f:
-                template = json.load(f)
-            with open(sweep_path) as f:
-                sweep = json.load(f)
-        except (json.JSONDecodeError, OSError):
-            continue
+        if cache is not None:
+            loaded = cache.load(sweep_path, template_path)
+            if loaded is None:
+                continue
+            template, sweep = loaded
+        else:
+            try:
+                with open(template_path) as f:
+                    template = json.load(f)
+                with open(sweep_path) as f:
+                    sweep = json.load(f)
+            except (json.JSONDecodeError, OSError):
+                continue
         if not sweep.get("cases", []):
             continue
         sweeps.append((template, sweep, sweep_path))
     return sweeps
 
 
-def _index_existing(bundle_dir: Path, value_form: bool = False, sweeps=None) -> dict:
+def _index_existing(
+    bundle_dir: Path, value_form: bool = False, sweeps=None, cache: ImportCache = None
+) -> dict:
     """Build {skeleton_hash: [(template, sweep, sweep_path)]} from the tree.
 
     A sweep is hashed by the skeleton of its whole template: the graph of its
@@ -156,25 +261,39 @@ def _index_existing(bundle_dir: Path, value_form: bool = False, sweeps=None) -> 
     for template, sweep, sweep_path in sweeps:
         cases = sweep["cases"]
         rep = next((c for c in cases if not c.get(ABSENT_TENSORS_KEY)), None)
-        try:
-            if rep is not None:
-                expanded_rep = expand_case(template, rep)
-            else:
-                expanded_rep = expand(template, cases[0].get("values", {}))
-        except ValueError:
+
+        def rep_hash():
+            try:
+                if rep is not None:
+                    expanded_rep = expand_case(template, rep)
+                else:
+                    expanded_rep = expand(template, cases[0].get("values", {}))
+            except ValueError:
+                return None
+            return skeleton_hash(expanded_rep, value_form=value_form)
+
+        if cache is not None:
+            obj = rep if rep is not None else cases[0]
+            key = ("index", value_form, rep is None, id(obj))
+            held, h = cache.memo(sweep_path, template)(key, lambda: (obj, rep_hash()))
+            if held is not obj:
+                h = rep_hash()
+        else:
+            h = rep_hash()
+        if h is None:
             continue
-        h = skeleton_hash(expanded_rep, value_form=value_form)
         index.setdefault(h, []).append((template, sweep, sweep_path))
     return index
 
 
-def _superset_join(template: dict, graph: dict, value_form: bool):
+def _superset_join(template: dict, graph: dict, value_form: bool, memo=None):
     """(uid map onto the template, absent template uids) when the graph is the template
     without some of its tensors; else None.
 
     Tensors match by name. The absent uids must satisfy the C++ loader's template
     rules (:func:`absent_tensor_problems`), and the template without them must have
-    the graph's skeleton.
+    the graph's skeleton. ``memo``, from :meth:`ImportCache.memo`, keeps the
+    template-side result per set of absent uids.
     """
     uid_map = uid_map_onto(graph, template)
     if uid_map is None:
@@ -185,10 +304,21 @@ def _superset_join(template: dict, graph: dict, value_form: bool):
         for t in template.get("tensors", [])
         if "uid" in t and t["uid"] not in present
     )
-    if not absent or absent_tensor_problems(template, absent):
+    if not absent:
         return None
-    pruned = prune_absent_tensors(template, absent)
-    if skeleton_hash(pruned, value_form=value_form) != skeleton_hash(
+
+    def pruned_hash():
+        if absent_tensor_problems(template, absent):
+            return None
+        return skeleton_hash(
+            prune_absent_tensors(template, absent), value_form=value_form
+        )
+
+    if memo is not None:
+        want = memo(("superset", value_form, tuple(absent)), pruned_hash)
+    else:
+        want = pruned_hash()
+    if want is None or want != skeleton_hash(
         remap_graph(graph, uid_map), value_form=value_form
     ):
         return None
@@ -521,19 +651,28 @@ def _is_grouped(args) -> bool:
     )
 
 
-def _report_duplicate(args, candidates, graph_json: str, meta: dict):
+def _expanded_canons(template, sweep, sweep_path, cache):
+    """Yield canon(expand_case(template, case)) per case; None if it does not expand."""
+    if cache is not None:
+        yield from cache.case_canons(sweep_path, template, sweep)
+        return
+    for case in sweep.get("cases", []):
+        try:
+            yield canon(expand_case(template, case))
+        except ValueError:
+            yield None
+
+
+def _report_duplicate(args, candidates, graph_json: str, meta: dict, cache=None):
     """The exit code when a case of ``candidates`` duplicates the graph; else None.
 
     ``candidates`` holds (template, sweep, sweep_path, ...) entries whose uids
     match those of ``graph_json``.
     """
     for template, sweep, sweep_path, *_ in candidates:
-        for case in sweep.get("cases", []):
-            try:
-                expanded = expand_case(template, case)
-            except ValueError:
-                continue
-            if canon(expanded) != graph_json:
+        texts = _expanded_canons(template, sweep, sweep_path, cache)
+        for case, text in zip(sweep.get("cases", []), texts):
+            if text != graph_json:
                 continue
             existing_meta = case.get("metadata", {})
             # An unknown seed is not a wildcard: the case would run with the
@@ -553,8 +692,13 @@ def _report_duplicate(args, candidates, graph_json: str, meta: dict):
     return None
 
 
-def _append_case(args, template, sweep, sweep_path, new_case, graph, selected) -> int:
-    """Give ``new_case`` an id, check that it re-expands to ``graph``, and write the sweep."""
+def _append_case(
+    args, template, sweep, sweep_path, new_case, graph, selected, cache=None
+) -> int:
+    """Give ``new_case`` an id, check that it re-expands to ``graph``, and write the sweep.
+
+    With ``cache``, the sweep changes in memory and the cache marks it dirty.
+    """
     existing_cases = sweep.get("cases", [])
     saved_ids = [c["id"] for c in existing_cases]
     taken = set(saved_ids)
@@ -591,10 +735,6 @@ def _append_case(args, template, sweep, sweep_path, new_case, graph, selected) -
             )
             return 1
 
-    # Only the cases and, for a case with absent tensors, the sweep version change.
-    sweep["cases"] = existing_cases + [new_case]
-    if new_case.get(ABSENT_TENSORS_KEY):
-        sweep["version"] = ABSENT_TENSORS_SWEEP_VERSION
     fmt = sweep_format(sweep)
     if fmt not in SWEEP_FORMATS:
         print(
@@ -604,8 +744,15 @@ def _append_case(args, template, sweep, sweep_path, new_case, graph, selected) -
         return 1
     support_created = _ensure_support_json(sweep_path.parent, args.dry_run)
     if not args.dry_run:
-        with open(sweep_path, "w", newline="\n") as f:
-            f.write(dump_sweep(sweep, fmt))
+        # Only the cases and, for a case with absent tensors, the sweep version change.
+        sweep["cases"] = existing_cases + [new_case]
+        if new_case.get(ABSENT_TENSORS_KEY):
+            sweep["version"] = ABSENT_TENSORS_SWEEP_VERSION
+        if cache is not None:
+            cache.mark_dirty(sweep_path)
+        else:
+            with open(sweep_path, "w", newline="\n") as f:
+                f.write(dump_sweep(sweep, fmt))
     print(f"  appended case '{new_case['id']}' to {sweep_path}", file=sys.stderr)
     print(
         "  gtest name: "
@@ -629,7 +776,7 @@ def _named_tensors(named: dict) -> set:
     return out
 
 
-def _append_superset_case(args, join, n_joins, graph, meta) -> int:
+def _append_superset_case(args, join, n_joins, graph, meta, cache=None) -> int:
     """Append ``graph`` to the sweep of ``join`` as a case with absent tensors.
 
     The graph and the metadata ``inputs`` take the template's uids, matched by
@@ -666,7 +813,7 @@ def _append_superset_case(args, join, n_joins, graph, meta) -> int:
     ):
         meta_t["format_version"] = ABSENT_TENSORS_FORMAT_VERSION
 
-    dup = _report_duplicate(args, [join], canon(graph_t), meta_t)
+    dup = _report_duplicate(args, [join], canon(graph_t), meta_t, cache)
     if dup is not None:
         return dup
 
@@ -688,6 +835,7 @@ def _append_superset_case(args, join, n_joins, graph, meta) -> int:
         new_case,
         graph_t,
         f"{sweep_path} (of {n_joins} superset template(s))",
+        cache,
     )
 
 
@@ -700,9 +848,15 @@ def _missed_merges(sweeps, graph: dict, value_form: bool) -> list:
     ]
 
 
-def main() -> int:
+def main(argv=None, cache: ImportCache = None) -> int:
+    """Run one import with the command-line arguments ``argv`` (default: sys.argv).
+
+    With ``cache``, appends stay in memory until ``cache.flush()``.
+    """
     ap = argparse.ArgumentParser(
-        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+        prog=Path(__file__).name,
+        description=__doc__,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     ap.add_argument(
         "--graph", type=Path, required=True, help="path to the graph JSON to import"
@@ -813,7 +967,7 @@ def main() -> int:
         help="file layout of a new sweep.json (default: compact). Needs another"
         " grouped-import flag. An append keeps the layout of the sweep",
     )
-    args = ap.parse_args()
+    args = ap.parse_args(argv)
 
     for flag, name in (("--op-dir", args.op_dir), ("--topology", args.topology)):
         if name is not None and not _is_folder_name(name):
@@ -937,7 +1091,7 @@ def main() -> int:
     print(f"  skeleton hash: {h}", file=sys.stderr)
     print(f"  operation:     {op}", file=sys.stderr)
 
-    sweeps = _existing_sweeps(args.bundle_dir)
+    sweeps = _existing_sweeps(args.bundle_dir, cache)
     if args.only_op_dir:
         op_prefix = str(args.bundle_dir / args.tier / op) + os.sep
         sweeps = [m for m in sweeps if str(m[2]).startswith(op_prefix)]
@@ -949,12 +1103,12 @@ def main() -> int:
             if import_mode_grouping(sweep_import_mode(m[1])) == grouping
         ]
     index = _index_existing(
-        args.bundle_dir, value_form=args.skeleton_value_form, sweeps=sweeps
+        args.bundle_dir, value_form=args.skeleton_value_form, sweeps=sweeps, cache=cache
     )
     matches = index.get(h, [])
 
     # --- Check for exact duplicates ---
-    dup = _report_duplicate(args, matches, graph_json, meta)
+    dup = _report_duplicate(args, matches, graph_json, meta, cache)
     if dup is not None:
         return dup
 
@@ -993,13 +1147,15 @@ def main() -> int:
             f"{sweep_path}"
             f" (of {len(matches)} structural match(es),"
             f" {len(tier_matches)} in tier '{args.tier}')",
+            cache,
         )
 
     # --- Superset match: append with absent tensors ---
     if args.superset_templates:
         joins = []
         for template, sweep, sweep_path in sweeps:
-            found = _superset_join(template, graph, args.skeleton_value_form)
+            memo = cache.memo(sweep_path, template) if cache is not None else None
+            found = _superset_join(template, graph, args.skeleton_value_form, memo)
             if found is not None:
                 joins.append((template, sweep, sweep_path) + found)
         if topology_dir is not None:
@@ -1022,7 +1178,7 @@ def main() -> int:
                     str(j[2]),
                 )
             )
-            return _append_superset_case(args, joins[0], len(joins), graph, meta)
+            return _append_superset_case(args, joins[0], len(joins), graph, meta, cache)
 
     if matched_elsewhere:
         print(
