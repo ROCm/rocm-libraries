@@ -46,7 +46,7 @@ Full documentation for rocALUTION is available at [https://rocm.docs.amd.com/pro
 * Fixed the MixedPrecisionDC solver counting a residual check as an iteration, so that a maximum of one iteration made no correction, and `ReBuildNumeric()` keeping the values of the old matrix in its low precision copy, also after `ResetOperator()`.
 * Fixed the BiCGStab(l) solver iterating when the initial residual is already within the tolerance.
 * Fixed `FixedPoint::SolveZeroSol()` returning the previous solution instead of zero when it does not iterate. This also fixes the multigrid cycles without pre-smoothing, where the coarse levels started from their previous correction.
-* Fixed the minimum iteration count being ignored at the restarts of GMRES and FGMRES and in the BiCG part of BiCGStab(l).
+* Fixed the minimum iteration count being ignored at the restarts of GMRES and FGMRES, in the BiCG part of BiCGStab(l) and in the inner steps of IDR. At these checks, `GetCurrentResidual()` now returns the residual just checked, and reaching the maximum iteration count takes precedence over the divergence tolerance, as at the other checks.
 * Fixed GMRES and FGMRES returning NaN when a cycle solves the system exactly below the minimum iteration count. They now stop with the exact solution and status 0, as no tolerance is reached below the minimum.
 * Fixed the residual history file dropping the last residual and, after a second solve, holding the residuals of the first solve.
 * Fixed `ReBuildNumeric()` of the IDR solver clearing its shadow space and of the Chebyshev iteration un-building it, so that the next solve failed.
