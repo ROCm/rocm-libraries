@@ -1324,6 +1324,36 @@ namespace
         EXPECT_EQ(A->GetN(), ncol);
         EXPECT_EQ(A->GetMatBlockDimension(), f.blockdim);
     }
+
+    template <typename T>
+    void test_copies_after_clear_and_leave(Backend b, Format f)
+    {
+        SCOPED_TRACE(type_name<T>());
+        const Csr<T> ref = band<T>(12, 2);
+
+        auto A = make_matrix(b, f, *ref.host_csr());
+        ASSERT_NE(A, nullptr);
+        A->Clear();
+        {
+            SCOPED_TRACE("Clear");
+            test_copies_without_entries<T>(b, f, A.get());
+        }
+
+        auto L = make_matrix(b, f, *ref.host_csr());
+        ASSERT_NE(L, nullptr);
+        Arrays<T> arrays = leave(*L);
+        EXPECT_EQ(arrays.extra, f.blockdim);
+        {
+            SCOPED_TRACE("LeaveDataPtrBCSR");
+            EXPECT_EQ(L->GetMatBlockDimension(), f.blockdim);
+            test_copies_without_entries<T>(b, f, L.get());
+        }
+
+        // Hands the arrays to a matrix that frees them
+        auto B = empty_matrix<T>(b, f);
+        set(*B, arrays);
+        expect_matrix(*B, f, ref);
+    }
 }
 
 TEST_P(matrix_kernels_bcsr, lu_solve_of_an_unfactorized_matrix)
@@ -1390,6 +1420,12 @@ TEST_P(matrix_kernels_bcsr, conversion_of_an_empty_matrix_keeps_the_dimensions)
 {
     test_empty_conversion<float>(backend(), format());
     test_empty_conversion<double>(backend(), format());
+}
+
+TEST_P(matrix_kernels_bcsr, copies_after_clear_and_leave_data_ptr_are_empty)
+{
+    test_copies_after_clear_and_leave<float>(backend(), format());
+    test_copies_after_clear_and_leave<double>(backend(), format());
 }
 
 INSTANTIATE_TEST_SUITE_P(formats,

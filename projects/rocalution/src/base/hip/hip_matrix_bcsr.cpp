@@ -231,11 +231,13 @@ namespace rocalution
 
         blockdim = this->mat_.blockdim;
 
-        this->mat_.blockdim = 0;
-
         this->nrow_ = 0;
         this->ncol_ = 0;
         this->nnz_  = 0;
+
+        this->mat_.nrowb = 0;
+        this->mat_.ncolb = 0;
+        this->mat_.nnzb  = 0;
     }
 
     template <typename ValueType>

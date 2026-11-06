@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -187,11 +187,13 @@ namespace rocalution
 
         blockdim = this->mat_.blockdim;
 
-        this->mat_.blockdim = 0;
-
         this->nrow_ = 0;
         this->ncol_ = 0;
         this->nnz_  = 0;
+
+        this->mat_.nrowb = 0;
+        this->mat_.ncolb = 0;
+        this->mat_.nnzb  = 0;
     }
 
     template <typename ValueType>
