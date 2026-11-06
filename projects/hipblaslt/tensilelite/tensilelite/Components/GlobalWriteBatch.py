@@ -1906,8 +1906,9 @@ class GlobalWriteBatchWriter:
     return module
 
   def _emitTDMStoreBoundC(self) -> Module:
-    """Set SrdC num_records to the bytes from the tile to the end of C.
+    """Set SrdC num_records to the bytes from SrdC to the end of C.
 
+    SrdC points at row 0 of the first column of the tile; the load offsets include wg0*MT0.
     The block reads C without per-element masks, so a load past the end of C must return zero
     instead of reading memory after C; tensor_dim drops the elements that use those values.
     """
@@ -1921,11 +1922,13 @@ class GlobalWriteBatchWriter:
       module.add(SSubU32(dst=sgpr(n), src0=sgpr(n), src1=1, comment="columns before the last column of C"))
       module.add(SMulHIU32(dst=sgpr(hi), src0=sgpr(n), src1=sgpr(strideC1), comment="hi(columns*StrideC)"))
       module.add(SMulI32(dst=sgpr(lo), src0=sgpr(n), src1=sgpr(strideC1), comment="lo(columns*StrideC)"))
-      module.add(SMulI32(dst=sgpr(n), src0=sgpr("WorkGroup0"), src1=self.kernel["MacroTile0"], comment="wg0*MT0"))
-      module.add(SSubU32(dst=sgpr(n), src0=kw.sizeRef(self.kernel["ProblemType"]["Index0"]), src1=sgpr(n), comment="SizeI - wg0*MT0"))
-      module.add(SAddU32(dst=sgpr(lo), src0=sgpr(lo), src1=sgpr(n), comment="elements from the tile to the end of C"))
+      module.add(SAddU32(dst=sgpr(lo), src0=sgpr(lo), src1=kw.sizeRef(self.kernel["ProblemType"]["Index0"]), comment="elements from SrdC to the end of C"))
       module.add(SAddCU32(dst=sgpr(hi), src0=sgpr(hi), src1=0, comment="carry"))
       module.add(SLShiftLeftB64(dst=sgpr(lo, 2), src=sgpr(lo, 2), shiftHex=int(log2(kw.states.bpeCexternal)), comment="bytes"))
+      if kw.states.bpeCexternal % 4:
+        module.add(SAddU32(dst=sgpr(lo), src0=sgpr(lo), src1=3, comment="round up to a dword: the range check drops a partial dword"))
+        module.add(SAddCU32(dst=sgpr(hi), src0=sgpr(hi), src1=0, comment="carry"))
+        module.add(SAndB32(dst=sgpr(lo), src0=sgpr(lo), src1=hex(0xFFFFFFFC), comment="round up to a dword"))
       module.add(SCmpEQU32(src0=sgpr(hi), src1=0, comment="below 4 GiB?"))
       module.add(SCSelectB32(dst=sgpr(lo), src0=sgpr(lo), src1="BufferOOB"))
       module.add(SMinU32(dst=sgpr("SrdC+2"), src0=sgpr(lo), src1="BufferOOB", comment="num_records"))

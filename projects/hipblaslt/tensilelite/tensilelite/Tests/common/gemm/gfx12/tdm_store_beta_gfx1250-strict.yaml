@@ -30,7 +30,9 @@ BenchmarkProblems:
   ########################################
   # beta != 0: the edge tiles of the beta != 0 epilogue go through the TDM block,
   # which reads C without masks: the last tile of each size reads past the end of
-  # C, and the second size has a leading dimension larger than M.
+  # C, and the second size has a leading dimension larger than M. The last two
+  # leave one column in N: at M = 511 the last tile has a WorkGroup0 offset, and
+  # at M = 253 C ends inside a 16-byte load.
   ########################################
   -
     - &problem_type_bf16 # ProblemType TN
@@ -62,6 +64,8 @@ BenchmarkProblems:
         - ProblemSizes:
           - Exact: [511, 512, 1, 128]
           - Exact: [511, 509, 2, 128, 520, 520, 128, 128]
+          - Exact: [511, 257, 1, 128]
+          - Exact: [253, 257, 1, 128]
   ########################################
   # The beta != 0 epilogue of a TDMStore kernel reads the bias and ScaleAlphaVec vectors after
   # the staged tile too; with GlobalSplitU=-1 the K=512 size runs GSU 2.
