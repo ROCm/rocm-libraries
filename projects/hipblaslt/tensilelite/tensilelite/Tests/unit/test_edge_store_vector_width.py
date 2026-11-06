@@ -101,7 +101,7 @@ def _gp_gfx1250(gfx1250_iim):
         x.update(s)
 
 
-def _solution(gfx1250_iim, assembler, af0em):
+def _solution(gfx1250_iim, assembler, af0em, **extra):
     from tensilelite.Common.Architectures import gfxToIsa
     from tensilelite.SolutionStructs.Validators.MatrixInstruction import matrixInstructionToMIParameters
 
@@ -118,6 +118,7 @@ def _solution(gfx1250_iim, assembler, af0em):
         "VectorWidthA": -1, "VectorWidthB": -1, "MaxLDS": 327680, "1LDSBuffer": 0,
         "AssertFree0ElementMultiple": af0em,
     }
+    params.update(extra)
     params.update(matrixInstructionToMIParameters(mi, isa, 32, pt, params["WorkGroup"], gfx1250_iim))
     return Solution(params, False, True, False, assembler, gfx1250_iim)
 
@@ -127,6 +128,18 @@ def test_af0em_auto_resolves_to_store_vector_width(_gp_gfx1250, gfx1250_iim, ass
     assert sol.get("Valid") is True
     assert sol["StoreVectorWidth"] > 1
     assert sol["AssertFree0ElementMultiple"] == sol["StoreVectorWidth"]
+
+
+def test_af0em_auto_with_gsu_atomic_dest(_gp_gfx1250, gfx1250_iim, assembler):
+    # AtomicDest keeps its packed-pair width: -1 resolves to 2 (BF16 AtomicDest rejects an
+    # odd AF0EM), and the edge store stays at 2.
+    sol = _solution(gfx1250_iim, assembler, -1, GlobalSplitU=2, GlobalSplitUAlgorithm="AtomicDest",
+                    GlobalSplitUCoalesced=True, GlobalSplitUWorkGroupMappingRoundRobin=True)
+    assert sol.get("Valid") is True
+    assert sol["AssertFree0ElementMultiple"] == 2
+    writer = types.SimpleNamespace(maxGwvw=lambda k: 1000)
+    widths, _ = NotLocalFullTileElementsMFMA().getElements(writer, sol._state)
+    assert widths[-1] == 2
 
 
 def test_af0em_explicit_value_is_kept(_gp_gfx1250, gfx1250_iim, assembler):

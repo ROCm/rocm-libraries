@@ -2222,9 +2222,16 @@ class Solution(collections.abc.Mapping):
       RuntimeError: If a macrotile component is supplied by neither the
         CustomKernel block nor the consuming logic file, or if the solution
         can split K (GlobalSplitU other than 0 or 1) but its grid launches one
-        GSU slice per tile.
+        GSU slice per tile, or if AssertFree0ElementMultiple is -1 (auto).
     """
     ck = state["CustomKernel"]
+
+    # AF0EM -1 is resolved by derivation, which handwritten kernels skip. Checked on
+    # the merged state: the consuming logic can supply -1 when custom.config omits it.
+    if state.get("AssertFree0ElementMultiple", 1) == -1:
+      raise RuntimeError(
+        f"Custom kernel '{ck.get('name', '?')}': AssertFree0ElementMultiple must be a "
+        f"concrete multiple, not -1 (auto)")
 
     # CustomKernels.py derives the macrotile from MatrixInstruction / MIWaveTile
     # in custom.config, then from an MTxxx token in the kernel name. Any kernel
