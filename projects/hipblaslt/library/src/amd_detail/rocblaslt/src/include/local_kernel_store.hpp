@@ -206,7 +206,10 @@ namespace rocblaslt
 
             /**
              * A cheap description of a payload's saved objects as they are
-             * now, which changes when either is written, replaced or removed.
+             * now, which changes whenever anything verifyObjects checks may
+             * have: when either is written, replaced or removed, or when the
+             * owner or mode of one of them or of the library's directories
+             * changes.
              */
             std::string objectState(PayloadRecord const& record) const;
 
@@ -217,11 +220,14 @@ namespace rocblaslt
 
             /**
              * Appends an E record unless the journal's last mapping at this
-             * shape is this one, which applying again would not change.
+             * shape is this one, which applying again would not change. The
+             * R record of `payload`, which `record` names, is appended first,
+             * in the same write, if the journal does not have it.
              */
-            bool appendExact(std::string const& scope,
-                             ExactRecord const& record,
-                             std::string*       error) const;
+            bool appendExact(std::string const&   scope,
+                             PayloadRecord const& payload,
+                             ExactRecord const&   record,
+                             std::string*         error) const;
 
             /**
              * Reads the records of the journal for `scope` after `cursor`, and

@@ -45,7 +45,7 @@ namespace TensileLite
                       int                    deviceId,
                       std::optional<int>     pciChipId = std::nullopt);
 
-            hipDeviceProp_t properties{};
+            hipDeviceProp_t properties;
 
             // HIP device ID this instance was constructed from. Retained so
             // multi-handle apps can recover which physical device an

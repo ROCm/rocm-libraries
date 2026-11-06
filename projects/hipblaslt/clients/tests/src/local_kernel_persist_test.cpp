@@ -148,6 +148,36 @@ namespace
         return std::string((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
     }
 
+    // The store's name for an object with these contents, for tests that save
+    // objects themselves.
+    std::string objectName(std::string const& bytes)
+    {
+        uint64_t a = 0xcbf29ce484222325ull, b = 0x9e3779b97f4a7c15ull;
+        for(unsigned char c : bytes)
+        {
+            a = (a ^ c) * 0x100000001b3ull;
+            b = (b ^ c) * 0xff51afd7ed558ccdull;
+        }
+        char text[33];
+        std::snprintf(text,
+                      sizeof(text),
+                      "%016llx%016llx",
+                      static_cast<unsigned long long>(a),
+                      static_cast<unsigned long long>(b));
+        return text;
+    }
+
+    // A journal record with the store's checksum, for tests that append records.
+    std::string journalRecord(std::string const& body)
+    {
+        uint32_t sum = 0x811c9dc5u;
+        for(unsigned char c : body)
+            sum = (sum ^ c) * 0x01000193u;
+        char text[9];
+        std::snprintf(text, sizeof(text), "%08x", sum);
+        return body + " " + text;
+    }
+
     size_t countObjects(fs::path const& library, std::string const& extension)
     {
         size_t          count = 0;
@@ -1123,6 +1153,7 @@ TEST(LocalKernelPersist, TemporaryFilesDoNotCollide)
     EXPECT_GE(countRecords(journalLines(library), 'R'), 1u);
 }
 
+#ifdef HIPBLASLT_ENABLE_LOCAL_KERNEL_TEST
 // A payload registered through device 0 and then through device 1, of another
 // scope, keeps its indices, and is recorded in both journals. Mappings made
 // through device 1, also of a kernel registered only through device 0, are
@@ -1192,6 +1223,7 @@ TEST(LocalKernelPersist, SavesForTheHandlesDevice)
               0)
         << "a later process on a device of that scope loads its mappings";
 }
+#endif
 
 // A journal locked by a process that is stopped makes readers and writers
 // fail after a bounded wait instead of waiting with it.
@@ -1358,9 +1390,16 @@ TEST(LocalKernelPersist, DISABLED_RestoredObjectWorker)
     ASSERT_EQ(buildProblem(p), HIPBLAS_STATUS_SUCCESS);
     ASSERT_LT(topIndex(handle, p), LOCAL_INDEX_BASE) << "the payload was skipped";
 
+    // Puts back code objects the test moved away, and takes away the group
+    // write bit the test gave others; objects it left alone are not touched.
     for(auto const& entry : fs::directory_iterator(fs::path(library) / "objects"))
+    {
         if(entry.path().extension() == ".away")
             fs::rename(entry.path(), fs::path(entry.path()).replace_extension());
+        else if((fs::status(entry.path()).permissions() & fs::perms::group_write)
+                != fs::perms::none)
+            ASSERT_EQ(::chmod(entry.path().c_str(), 0644), 0) << entry.path();
+    }
 
     size_t added = 0;
     ASSERT_EQ(hipblasLtLocalKernelRefresh(handle, &added), HIPBLAS_STATUS_SUCCESS);
@@ -1382,6 +1421,112 @@ TEST(LocalKernelPersist, RefreshRetriesSkippedPayload)
 
     EXPECT_EQ(runWorker("LocalKernelPersist.DISABLED_RestoredObjectWorker", {libraryEnv(library)}),
               0);
+}
+
+// The same for a payload skipped because its code object was group-writable,
+// once its mode is repaired, which changes neither its contents nor its size.
+TEST(LocalKernelPersist, RefreshRetriesPayloadAfterModeRepair)
+{
+    TempDir tmp;
+    ASSERT_FALSE(tmp.path.empty());
+    const fs::path library = tmp.path / "lib";
+
+    ASSERT_EQ(runWorker(SAVE_WORKER, {libraryEnv(library)}), 0);
+    for(auto const& entry : fs::directory_iterator(library / "objects"))
+        if(entry.path().extension() == ".co")
+            ASSERT_EQ(::chmod(entry.path().c_str(), 0664), 0);
+
+    EXPECT_EQ(runWorker("LocalKernelPersist.DISABLED_RestoredObjectWorker", {libraryEnv(library)}),
+              0);
+}
+
+// A saved payload that verifies but cannot be registered, here a shard that is
+// not one, is warned about once: reading the journal again from an earlier
+// record, as the Refresh after a skipped payload's repair does, passes it
+// quietly.
+TEST(LocalKernelPersist, RejectedSavedPayloadIsPassedQuietly)
+{
+    TempDir tmp;
+    ASSERT_FALSE(tmp.path.empty());
+    const fs::path library = tmp.path / "lib";
+    const fs::path objects = library / "objects";
+
+    ASSERT_EQ(runWorker(SAVE_WORKER, {libraryEnv(library)}), 0);
+    std::vector<fs::path> saved;
+    for(auto const& entry : fs::directory_iterator(objects))
+        if(entry.path().extension() == ".co")
+            saved.push_back(entry.path());
+    ASSERT_FALSE(saved.empty());
+
+    // The rejected payload: a shard that does not parse, with a code object
+    // of its own.
+    const std::string shard      = "not a shard";
+    const std::string codeObject = readFile(saved[0]) + std::string(16, '\0');
+    const std::string shardName = objectName(shard), codeObjectName = objectName(codeObject);
+    std::ofstream((objects / (shardName + ".dat")).string(), std::ios::binary) << shard;
+    std::ofstream((objects / (codeObjectName + ".co")).string(), std::ios::binary) << codeObject;
+    for(auto const& name : {shardName + ".dat", codeObjectName + ".co"})
+        ASSERT_EQ(::chmod((objects / name).c_str(), 0644), 0);
+    std::ofstream(journalPath(library).string(), std::ios::app)
+        << journalRecord("R " + shardName + " " + codeObjectName + " dat") << '\n';
+
+    // The skipped payloads whose repair makes the next Refresh read again
+    // from before the rejected one.
+    for(auto const& path : saved)
+        fs::rename(path, path.string() + ".away");
+
+    const fs::path errors = tmp.path / "stderr";
+    ASSERT_EQ(runWorker("LocalKernelPersist.DISABLED_RestoredObjectWorker",
+                        {libraryEnv(library)},
+                        errors.string()),
+              0);
+    const std::string log     = readFile(errors);
+    const std::string warning = "skipping saved local kernel payload " + shardName;
+    size_t            count   = 0;
+    for(size_t at = log.find(warning); at != std::string::npos; at = log.find(warning, at + 1))
+        ++count;
+    EXPECT_EQ(count, 1u) << log;
+}
+
+// A payload this process registered is recorded again when the journal is
+// replaced: by Register, and by SetExactMatch with the mapping.
+TEST(LocalKernelPersist, DISABLED_RecreatedJournalWorker)
+{
+    char const* library = std::getenv(LIBRARY_ENV);
+    ASSERT_NE(library, nullptr);
+    const std::vector<std::string> candidates = candidatePayloads();
+    ASSERT_FALSE(candidates.empty()) << "no payload shard in this build's library";
+
+    hipblasLtHandle_t handle;
+    ASSERT_EQ(hipblasLtCreate(&handle), HIPBLAS_STATUS_SUCCESS);
+    Problem p;
+    ASSERT_EQ(buildProblem(p), HIPBLAS_STATUS_SUCCESS);
+    Registered r = registerUsable(handle, p, candidates);
+    ASSERT_GE(r.index, 0);
+
+    ASSERT_TRUE(fs::remove(journalPath(library)));
+    EXPECT_FALSE(registerPayload(handle, r.stem + ".dat", r.stem + ".co").empty());
+    EXPECT_EQ(countRecords(journalLines(library), 'R'), 1u) << "Register recorded it again";
+
+    ASSERT_TRUE(fs::remove(journalPath(library)));
+    ASSERT_EQ(hipblasLtLocalKernelSetExactMatch(handle, r.index, M, N, 1, K),
+              HIPBLAS_STATUS_SUCCESS);
+    auto lines = journalLines(library);
+    EXPECT_EQ(countRecords(lines, 'R'), 1u) << "SetExactMatch recorded its payload";
+    EXPECT_EQ(countRecords(lines, 'E'), 1u);
+    EXPECT_EQ(hipblasLtDestroy(handle), HIPBLAS_STATUS_SUCCESS);
+}
+
+TEST(LocalKernelPersist, RecordsPayloadInAReplacedJournal)
+{
+    TempDir tmp;
+    ASSERT_FALSE(tmp.path.empty());
+    const fs::path library = tmp.path / "lib";
+
+    ASSERT_EQ(
+        runWorker("LocalKernelPersist.DISABLED_RecreatedJournalWorker", {libraryEnv(library)}), 0);
+    EXPECT_EQ(runWorker(LOAD_WORKER, {libraryEnv(library)}), 0)
+        << "a later process loads the mapping from the new journal";
 }
 
 // Device 0 cannot read the journal when it is initialized, because the test

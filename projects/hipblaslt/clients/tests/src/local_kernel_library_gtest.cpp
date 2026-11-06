@@ -37,7 +37,7 @@ namespace
     hip::HipAMDGPU makeGpu()
     {
         using arch_t = origami::hardware_t::architecture_t;
-        hip::HipAMDGPU device;
+        hip::HipAMDGPU device{};
         device.processor        = AMDGPU::Processor::gfx950;
         device.computeUnitCount = 256;
         device.deviceName       = "gfx950";
@@ -626,14 +626,14 @@ TEST(LocalKernelLibrary, smoke_MappingIsForOneDeviceClass)
 // takes a mapping made on another gfx1250.
 TEST(LocalKernelLibrary, smoke_DeviceClassTellsGfx1250TargetsApart)
 {
-    hip::HipAMDGPU a0, b0, strict;
+    hip::HipAMDGPU a0{}, b0{}, strict{};
     for(auto [gpu, name, revision] : {std::make_tuple(&a0, "gfx1250", 0),
                                       std::make_tuple(&b0, "gfx1250:xnack-", 1),
                                       std::make_tuple(&strict, "gfx1250-strict", 0)})
     {
         gpu->processor        = AMDGPU::Processor::gfx1250;
         gpu->computeUnitCount = 128;
-        gpu->asicRevision     = revision;
+        gpu->properties.asicRevision = revision;
         std::snprintf(gpu->properties.gcnArchName, sizeof(gpu->properties.gcnArchName), "%s", name);
     }
     EXPECT_EQ(LocalDeviceClass::of(a0).target, "gfx1250v0");

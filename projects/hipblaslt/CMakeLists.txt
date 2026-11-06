@@ -81,6 +81,12 @@ option(HIPBLASLT_ENABLE_LOCAL_KERNELS "Build experimental runtime local kernel r
 if(HIPBLASLT_ENABLE_LOCAL_KERNELS AND NOT HIPBLASLT_ENABLE_HOST)
     message(FATAL_ERROR "HIPBLASLT_ENABLE_LOCAL_KERNELS requires HIPBLASLT_ENABLE_HOST=ON")
 endif()
+# Testing only: HIPBLASLT_LOCAL_KERNEL_TEST_SCOPE then gives one device its own
+# local kernel journal, for tests on machines whose devices are all alike.
+option(HIPBLASLT_ENABLE_LOCAL_KERNEL_TEST "Testing only: honor HIPBLASLT_LOCAL_KERNEL_TEST_SCOPE." OFF)
+if(HIPBLASLT_ENABLE_LOCAL_KERNEL_TEST AND NOT HIPBLASLT_ENABLE_LOCAL_KERNELS)
+    message(FATAL_ERROR "HIPBLASLT_ENABLE_LOCAL_KERNEL_TEST requires HIPBLASLT_ENABLE_LOCAL_KERNELS=ON")
+endif()
 
 option(TENSILELITE_ENABLE_HOST "Build the tensilelite host library." ON)
 option(TENSILELITE_BUILD_TESTING "Build client when building tests" OFF)

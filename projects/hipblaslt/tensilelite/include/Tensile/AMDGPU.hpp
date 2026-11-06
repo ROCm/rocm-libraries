@@ -288,9 +288,6 @@ namespace TensileLite
         size_t      fixedStaggerUStrideShift = std::numeric_limits<size_t>::max();
         mutable int isStandardCUs            = -1; // -1: unset, 0:false, 1:true
         std::string deviceName;
-        // The runtime's asicRevision, or -1 where unknown. Not part of
-        // operator==: the shipped library tells revisions apart by file name.
-        int asicRevision = -1;
 
         virtual bool   isStandardCU() const;
         virtual bool   runsKernelTargeting(Processor p) const;
