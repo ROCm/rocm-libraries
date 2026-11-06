@@ -18,6 +18,13 @@ gate admits the request to -- nothing for a request both gates decline. The ABI 
 arrives with the first candidate, whose ``KernelCandidate.abi_version`` carries
 it.
 
+Those combos and dispatch results describe the attention kernels; they do
+not run an SDPA request. A result's ``bind_torch()`` is the attention binding:
+it takes attention-format operands and defaults the scale to ``1/sqrt(d)``,
+where SDPA's default is 1.0. To run an SDPA request on its own tensors, use
+:func:`sdpa_unified_bind` or :func:`sdpa_dense_bind`, which translate the
+operands and pass the request's scale.
+
 See ``KERNEL_AUTHORING.md`` sections E and F for the request-contract and
 operand-routing rules this module follows, and its attention appendix
 ("Route a family over ``dispatch.attention``") for the binding-layer checklist
@@ -42,9 +49,13 @@ from rocke.dispatch.core import (
 from dispatch.attention import dispatch_attention_all, registered_attention_combos
 from dispatch.attention.unified_rules import TUNING_ALGORITHM
 
-from .bind_dense import sdpa_dense_candidates
+from .bind_dense import sdpa_dense_admits, sdpa_dense_bind, sdpa_dense_candidates
 from .bind_shared import to_attention_request
-from .bind_unified import sdpa_unified_candidates
+from .bind_unified import (
+    sdpa_unified_admits,
+    sdpa_unified_bind,
+    sdpa_unified_candidates,
+)
 from .common import (
     SDPA_DIM_VOCABULARY,
     SDPA_DTYPES,
@@ -134,7 +145,13 @@ def sdpa_sweep_space(req: OperatorRequest) -> Sequence[Any]:
 
 
 def dispatch_sdpa_all(req: OperatorRequest) -> Tuple[DispatchResult, ...]:
-    """Every eligible SDPA kernel for ``req``, including opt-in variants."""
+    """Every eligible SDPA kernel for ``req``, including opt-in variants.
+
+    For ranking and triage. Each attention result binds an
+    ``AttentionRequest``, so its ``bind_torch()`` does not take the SDPA
+    tensors or carry the request's scale; launch an SDPA request through
+    :func:`sdpa_unified_bind` or :func:`sdpa_dense_bind` instead.
+    """
     if _request_errors(req):
         return ()
     serves = _serves(req)
@@ -167,5 +184,9 @@ __all__ = [
     "from_hipdnn",
     "from_hipdnn_graph",
     "registered_sdpa_combos",
+    "sdpa_dense_admits",
+    "sdpa_dense_bind",
     "sdpa_sweep_space",
+    "sdpa_unified_admits",
+    "sdpa_unified_bind",
 ]

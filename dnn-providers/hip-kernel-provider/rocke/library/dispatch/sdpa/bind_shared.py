@@ -9,13 +9,14 @@ checks on carried hints, and the per-operand views the bindings copy through.
 
 from __future__ import annotations
 
+import math
 from collections.abc import Mapping, Sequence
 from itertools import pairwise
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
-from rocke.runtime.torch_interop import torch_dtype
+from rocke.runtime.torch_interop import resolve_stream, torch_dtype
 
 from dispatch.attention import AttentionMaskType, AttentionRequest
 from dispatch.attention.common import Alignment, AttentionBand
@@ -28,19 +29,34 @@ __all__ = [
     "Operand",
     "asked_band",
     "band_text",
+    "check_dtype",
     "declined_table",
     "host_ints",
     "keeps_asked_keys",
     "kept_keys",
+    "launch_stream",
+    "nonfinite_scale_reject",
     "to_attention_request",
+    "usable_in_place",
     "value_rejects",
 ]
 
 # ``SdpaRequest`` dispatch selectors; only ``"auto"`` is served.
 _DISPATCH_PINS = ("algorithm", "spec_id", "tuning_id")
 
-# Torch dtype names, resolved through ``rocke.runtime.torch_interop.torch_dtype``.
-TORCH_DTYPES = {"fp16": "float16", "bf16": "bfloat16"}
+# Torch dtype names, resolved through ``rocke.runtime.torch_interop.torch_dtype``:
+# the I/O dtypes, FP32 stats, and the integer lengths and ragged offsets.
+TORCH_DTYPES = {
+    "fp16": "float16",
+    "bf16": "bfloat16",
+    "fp32": "float32",
+    "int32": "int32",
+    "int64": "int64",
+}
+
+# Base-pointer alignment, in bytes, the unified and dense kernels declare for
+# the operands a binding hands them in place.
+_KERNEL_ALIGNMENT = 16
 
 
 def to_attention_request(req: SdpaRequest) -> AttentionRequest:
@@ -217,6 +233,14 @@ def declined_table(
 # --- carried hints -------------------------------------------------------------
 
 
+def nonfinite_scale_reject(req: SdpaRequest, family: str) -> tuple[bool, str] | None:
+    """Decline a NaN or infinite scale; each gate adds its kernels' own range."""
+    scale = float(req.scale)
+    if not math.isfinite(scale):
+        return False, f"scale: the {family} kernels need a finite scale, got {scale}"
+    return None
+
+
 def value_rejects(req: SdpaRequest, family: str) -> tuple[bool, str] | None:
     """Declines for carried features whose value the ``family`` launch cannot
     honor: an MMA mode other than the I/O dtype, a composite implementation
@@ -246,11 +270,62 @@ def value_rejects(req: SdpaRequest, family: str) -> tuple[bool, str] | None:
     return None
 
 
+# --- launch --------------------------------------------------------------------
+
+
+def launch_stream(stream: Any, device: Any, family: str) -> int:
+    """The stream a binding's ``launch(stream=...)`` runs on: Torch's current
+    stream, whether the caller leaves ``stream`` unset (``None`` or ``0``) or
+    names it by handle, as graph capture does.
+
+    Any other stream is refused. The binding's ``pack()`` / ``unpack()`` are
+    Torch copies on the current stream, and its workspace buffers were
+    allocated against the stream current at bind time (see
+    ``resolve_stream``), so launching only the kernel on another stream would
+    race on those buffers.
+    """
+    current = resolve_stream(0, device=device)
+    if stream is None or int(stream) in (0, current):
+        return current
+    raise NotImplementedError(
+        f"the {family} SDPA binding cannot honor stream={stream!r}: it packs "
+        "and unpacks on the current stream, and its workspace buffers belong "
+        "to it; make the stream current (`with torch.cuda.stream(s):`) around "
+        "launch() instead"
+    )
+
+
 # --- operands ------------------------------------------------------------------
 
 
 def host_ints(tensor) -> list[int]:
     return [int(x) for x in tensor.detach().reshape(-1).cpu().tolist()]
+
+
+def check_dtype(name: str, tensor, desc: SdpaTensor) -> None:
+    """Refuse a tensor whose dtype is not the one its descriptor names.
+
+    The one dtype rule for every tensor a binding reads: operands, stats,
+    ``seq_len_*`` and ragged offsets. A lenient read would bind the wrong
+    data silently: ``int()`` truncates a float offset (0.5 -> 0), and a copy
+    into an FP32 workspace casts FP16 stats.
+    """
+    want = TORCH_DTYPES.get(desc.dtype)
+    if want is None:
+        raise ValueError(f"{name}: no torch dtype for the request's {desc.dtype}")
+    want = torch_dtype(want)
+    if tensor.dtype != want:
+        raise ValueError(
+            f"{name} must be {want} as the request describes, got {tensor.dtype}"
+        )
+
+
+def usable_in_place(view) -> bool:
+    """Whether a binding may hand ``view`` to a kernel as is: contiguous, with
+    the 16-byte-aligned base pointer the kernels declare (a contiguous view
+    one FP16 element into its allocation is not). Anything else is copied
+    through a workspace buffer."""
+    return view.is_contiguous() and view.data_ptr() % _KERNEL_ALIGNMENT == 0
 
 
 class Operand:
@@ -264,6 +339,7 @@ class Operand:
 
     def __init__(self, name: str, desc: SdpaTensor, tensor, offsets=None) -> None:
         batch, heads, extent, width = desc.dims
+        check_dtype(name, tensor, desc)
         self.name, self.desc, self.tensor = name, desc, tensor
         self.heads, self.extent, self.width = heads, extent, width
         self.starts: list[int] | None = None
@@ -287,14 +363,7 @@ class Operand:
             raise ValueError(f"{name}: a ragged buffer must be contiguous")
         _, s_h, s_s, s_d = desc.strides
         mult = int(desc.ragged_offset_multiplier)
-        # ``int()`` in ``host_ints`` would truncate a float offset (0.5 -> 0)
-        # and bind it as if it were the integer the request describes.
-        want = torch_dtype(desc.ragged_offset.dtype)
-        if offsets.dtype != want:
-            raise ValueError(
-                f"{name}: ragged offsets must be {want} as the request's "
-                f"ragged_offset describes, got {offsets.dtype}"
-            )
+        check_dtype(f"{name}: ragged offsets", offsets, desc.ragged_offset)
         self.flat = tensor.reshape(-1)
         self.starts = [o * mult for o in host_ints(offsets)]
         self.row_strides = (s_s, s_h, s_d)
@@ -321,28 +390,19 @@ class Operand:
 
     def packed_view(self, cu: list[int]):
         """A ``(total, heads, d)`` view when the rows already sit packed in
-        token order (packed BSHD at full length, or contiguous ragged) and the
-        view's base pointer is 16-byte aligned, else ``None``.
-
-        Alignment matters as much as contiguity: the gfx942/gfx950 tiled 2D
-        kernels declare ``query_ptr`` / ``output_ptr`` with ``align=16``, so a
-        contiguous view starting at an unaligned element (e.g. one FP16
-        element into a larger allocation) would still break the kernel's ABI
-        if handed to it in place. As ``_DensePlan`` already does for its BSHD
-        views, fall back to ``None`` here too, so the caller copies through
-        its allocated workspace instead.
+        token order (packed BSHD at full length, or contiguous ragged) and
+        :func:`usable_in_place` allows it, else ``None`` (the caller copies
+        through its workspace).
         """
         total, h, d = cu[-1], self.heads, self.width
         if self.starts is None:
             if any(b - a != self.extent for a, b in pairwise(cu)):
                 return None
             bshd = self.tensor.transpose(1, 2)
-            if not bshd.is_contiguous() or bshd.data_ptr() % 16 != 0:
-                return None
-            return bshd.reshape(total, h, d)
+            return bshd.reshape(total, h, d) if usable_in_place(bshd) else None
         if self.row_strides != (h * d, d, 1) or any(
             s != c * h * d for s, c in zip(self.starts, cu)
         ):
             return None
         view = self.flat[: total * h * d].view(total, h, d)
-        return view if view.data_ptr() % 16 == 0 else None
+        return view if usable_in_place(view) else None

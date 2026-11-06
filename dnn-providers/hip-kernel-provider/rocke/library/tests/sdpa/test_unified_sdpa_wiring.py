@@ -177,6 +177,25 @@ def test_implementation_composite_is_declined():
     )
 
 
+# The gfx942 4-warp bodies mask declined positions with -1e30 and *then*
+# multiply by the scale: a zero scale brings masked positions back to logit 0
+# and a negative one makes them the largest, so the gate admits only a finite,
+# positive scale. Torch-free, so CI runs it.
+_BAD_SCALES = (0.0, -1.0, float("nan"), float("inf"), float("-inf"))
+
+
+@pytest.mark.parametrize("arch", ARCHES)
+@pytest.mark.parametrize("scale", _BAD_SCALES, ids=[str(s) for s in _BAD_SCALES])
+def test_non_positive_or_non_finite_scale_is_declined(arch, scale):
+    req = _unified_request(arch=arch, right_bound=0, scale=scale)
+    assert _declined(req).startswith("scale:")
+
+
+@pytest.mark.parametrize("arch", ARCHES)
+def test_positive_finite_scale_is_admitted(arch):
+    _admitted(_unified_request(arch=arch, right_bound=0, scale=0.5))
+
+
 def test_padding_mask_without_seq_len_tensors_is_declined():
     assert _declined(replace(_BASE, padding_mask=True)).startswith("padded:")
 

@@ -30,7 +30,7 @@ from dispatch.sdpa.bind_unified import (
 )
 from tests.sdpa import cases as C
 from tests.sdpa import helpers as H
-from tests.sdpa.binding_harness import bind_tensors, outputs
+from tests.sdpa.binding_harness import bind_tensors, outputs, strided_tensor
 from tests.sdpa.request_bridge import request_from_case
 from tests.sdpa.request_cases import bhsd, make_request, packed, ragged_offset
 
@@ -93,30 +93,14 @@ def test_binding_moves_data_faithfully(case):
     assert H.compare(case, o, lse, H.evaluate(inputs)) == []
 
 
-def _dense(req, name):
-    desc = getattr(req, name)
-    buf = torch.randn(1 + sum((n - 1) * s for n, s in zip(desc.dims, desc.strides)))
-    return torch.as_strided(buf.half(), desc.dims, desc.strides)
-
-
 @pytest.mark.parametrize("layout,inplace", [(None, True), (bhsd, False)])
 def test_packed_bshd_q_and_o_are_used_in_place(layout, inplace):
     req = make_request(d=64, **({"layout": layout} if layout else {}))
-    tensors = {n: _dense(req, n) for n in ("q", "k", "v", "o")}
+    tensors = {n: strided_tensor(getattr(req, n)) for n in ("q", "k", "v", "o")}
     plan = _LaunchPlan(req, tensors)
     assert plan.q_inplace is inplace and plan.o_inplace is inplace
     if inplace:
         assert plan.q_packed.data_ptr() == tensors["q"].data_ptr()
-
-
-def _misaligned_dense(req, name):
-    """Like ``_dense``, but the tensor starts one fp16 element (2 bytes) into
-    its allocation, so it is contiguous but not 16-byte aligned."""
-    desc = getattr(req, name)
-    total = 1 + sum((n - 1) * s for n, s in zip(desc.dims, desc.strides))
-    buf = torch.randn(1 + total).half()[1:]
-    assert buf.data_ptr() % 16 != 0
-    return torch.as_strided(buf, desc.dims, desc.strides)
 
 
 def test_misaligned_packed_bshd_q_and_o_fall_back_to_a_workspace_copy():
@@ -126,7 +110,10 @@ def test_misaligned_packed_bshd_q_and_o_fall_back_to_a_workspace_copy():
     to copy through the allocated workspace instead, as the dense twin's
     ``_DensePlan`` already does for its BSHD views."""
     req = make_request(d=64)
-    tensors = {n: _misaligned_dense(req, n) for n in ("q", "k", "v", "o")}
+    tensors = {
+        n: strided_tensor(getattr(req, n), misaligned=True)
+        for n in ("q", "k", "v", "o")
+    }
     plan = _LaunchPlan(req, tensors)
     assert plan.q_inplace is False and plan.o_inplace is False
     assert plan.q_packed.data_ptr() % 16 == 0
@@ -142,7 +129,7 @@ def test_padded_rows_are_zero_and_neg_inf():
         seq_len_kv=packed((2, 1, 1, 1), "int32"),
         stats=packed((2, 4, 1, 1), "fp32"),
     )
-    tensors = {n: _dense(req, n) for n in ("q", "k", "v", "o")}
+    tensors = {n: strided_tensor(getattr(req, n)) for n in ("q", "k", "v", "o")}
     tensors["o"].fill_(7)
     tensors.update(
         seq_len_q=lens,
@@ -186,7 +173,7 @@ def test_invalid_seq_len_is_refused_before_launch(key, values, match):
         seq_len_kv=packed((2, 1, 1, 1), "int32"),
     )
     assert sdpa_unified_admits(req)[0]
-    tensors = {n: _dense(req, n) for n in ("q", "k", "v", "o")}
+    tensors = {n: strided_tensor(getattr(req, n)) for n in ("q", "k", "v", "o")}
     tensors["seq_len_q"] = torch.tensor([1, 1], dtype=torch.int32)
     tensors["seq_len_kv"] = torch.tensor([16, 16], dtype=torch.int32)
     tensors[key] = torch.tensor(values, dtype=torch.int32)
@@ -204,10 +191,10 @@ def test_float_seq_len_is_refused_not_truncated():
         seq_len_kv=packed((2, 1, 1, 1), "int32"),
     )
     assert sdpa_unified_admits(req)[0]
-    tensors = {n: _dense(req, n) for n in ("q", "k", "v", "o")}
+    tensors = {n: strided_tensor(getattr(req, n)) for n in ("q", "k", "v", "o")}
     tensors["seq_len_q"] = torch.tensor([1.5, 1.0], dtype=torch.float32)
     tensors["seq_len_kv"] = torch.tensor([16, 16], dtype=torch.int32)
-    with pytest.raises(ValueError, match="seq_len_q: lengths must be an integer dtype"):
+    with pytest.raises(ValueError, match="seq_len_q must be torch.int32"):
         sdpa_unified_bind(req, tensors)
 
 
@@ -250,7 +237,7 @@ def test_ragged_offsets_of_another_dtype_are_refused(offsets, dtype):
 
 def test_a_tensor_that_disagrees_with_the_request_is_refused():
     req = make_request(d=64)  # BSHD
-    tensors = {n: _dense(req, n) for n in ("q", "k", "v", "o")}
+    tensors = {n: strided_tensor(getattr(req, n)) for n in ("q", "k", "v", "o")}
     tensors["q"] = torch.empty_strided(
         req.q.dims, bhsd(2, 4, 8, 64).strides, dtype=torch.float16
     )
@@ -258,43 +245,94 @@ def test_a_tensor_that_disagrees_with_the_request_is_refused():
         _LaunchPlan(req, tensors)
 
 
-# The gfx942/gfx950 tiled 2D bodies mask declined positions with -1e30 and
-# *then* multiply by scale in `_online_softmax_rescale`: a zero scale brings
-# masked positions back to a finite (non -inf) logit and a negative scale
-# makes them the largest logit, so only a finite, strictly positive scale is
-# admitted.
-_BAD_SCALES = [0.0, -1.0, float("nan"), float("inf"), float("-inf")]
-
-
-@pytest.mark.parametrize("scale", _BAD_SCALES, ids=[str(s) for s in _BAD_SCALES])
-def test_non_positive_or_non_finite_scale_is_declined(scale):
-    req = replace(make_request(d=64), scale_source="value", scale=scale)
-    ok, reason = sdpa_unified_admits(req)
-    assert not ok and reason.startswith("scale:")
-
-
-def test_positive_finite_scale_is_not_declined_on_scale_grounds():
-    req = make_request(d=64)
-    ok, reason = sdpa_unified_admits(req)
-    assert ok, reason
-
-
-def test_launch_rejects_a_stream_other_than_the_current_one(monkeypatch):
-    """``launch``'s workspace buffers are allocated once, at bind time,
-    against the then-current stream, and `pack()`/`unpack()` always run on
-    the ambient current stream; honoring the kernel launch alone on a
-    different caller stream would race on those buffers, so a non-current
-    stream is refused rather than silently ignored."""
+def _bind_with_a_fake_launch(monkeypatch, current=4242):
+    """``sdpa_unified_bind`` on CPU, with Torch's current stream faked as
+    ``current`` and the kernel replaced by a recorder of the stream it got."""
     from dispatch.attention import bindings
+    from dispatch.sdpa import bind_shared
+    from kernels.common import attention_unified
 
-    # The real validator requires a HIP/CUDA device; this test only checks
-    # that `launch` itself rejects a foreign stream, on CPU, before ever
-    # touching the kernel.
+    # The real validator needs a GPU; these tests stop at the launch call.
     monkeypatch.setattr(
         bindings, "validate_tuning_attention_tensors", lambda problem, t, **kw: 1
     )
+    monkeypatch.setattr(bind_shared, "resolve_stream", lambda s, device=None: current)
+    streams = []
+    monkeypatch.setattr(
+        attention_unified,
+        "run_unified_attention_torch",
+        lambda **kw: streams.append(kw["stream"]),
+    )
     req = make_request(d=64)
-    tensors = {n: _dense(req, n) for n in ("q", "k", "v", "o")}
-    binding = sdpa_unified_bind(req, tensors)
-    with pytest.raises(NotImplementedError, match="cannot honor stream"):
+    tensors = {n: strided_tensor(getattr(req, n)) for n in ("q", "k", "v", "o")}
+    return sdpa_unified_bind(req, tensors), streams
+
+
+@pytest.mark.parametrize("stream", [None, 0, 4242], ids=["unset", "zero", "named"])
+def test_launch_runs_on_the_current_stream(monkeypatch, stream):
+    """Graph capture names the current stream by handle; that is the stream
+    the binding packs on, so it is honored, not refused."""
+    binding, streams = _bind_with_a_fake_launch(monkeypatch)
+    binding.launch(stream=stream)
+    assert streams == [4242]
+
+
+def test_launch_rejects_a_stream_other_than_the_current_one(monkeypatch):
+    """Pack and unpack run on the current stream and the workspace belongs to
+    it, so launching the kernel alone on another stream would race."""
+    binding, streams = _bind_with_a_fake_launch(monkeypatch)
+    with pytest.raises(NotImplementedError, match="cannot honor stream=123456"):
         binding.launch(stream=123456)
+    assert streams == []
+
+
+def test_launch_rejects_an_unknown_keyword(monkeypatch):
+    binding, streams = _bind_with_a_fake_launch(monkeypatch)
+    with pytest.raises(TypeError):
+        binding.launch(grid=(1, 1, 1))
+    assert streams == []
+
+
+def test_misaligned_ragged_q_and_o_fall_back_to_a_workspace_copy():
+    """The ragged twin of the BSHD test above: contiguous packed rows used in
+    place only from a 16-byte-aligned base."""
+    req, _ = _ragged_request()
+    offsets = {
+        "ragged_offset_q": torch.tensor([0, 4, 8], dtype=torch.int32),
+        "ragged_offset_k": torch.tensor([0, 4, 8], dtype=torch.int32),
+    }
+    for misaligned in (False, True):
+        tensors = {
+            n: strided_tensor(
+                packed((getattr(req, n).volume,), "fp16"), misaligned=misaligned
+            )
+            for n in ("q", "k", "v", "o")
+        }
+        plan = _LaunchPlan(req, {**tensors, **offsets})
+        assert plan.q_inplace is plan.o_inplace is (not misaligned)
+        assert plan.q_packed.data_ptr() % 16 == 0
+        assert plan.o_packed.data_ptr() % 16 == 0
+
+
+def test_seq_len_of_another_integer_dtype_is_refused():
+    """The request names int32 lengths; int64 ones are refused, not narrowed."""
+    req = replace(
+        make_request(d=64, s_q=1, s_kv=16),
+        padding_mask=True,
+        seq_len_q=packed((2, 1, 1, 1), "int32"),
+        seq_len_kv=packed((2, 1, 1, 1), "int32"),
+    )
+    tensors = {n: strided_tensor(getattr(req, n)) for n in ("q", "k", "v", "o")}
+    tensors["seq_len_q"] = torch.tensor([1, 1], dtype=torch.int64)
+    tensors["seq_len_kv"] = torch.tensor([16, 16], dtype=torch.int32)
+    with pytest.raises(ValueError, match="seq_len_q must be torch.int32"):
+        _LaunchPlan(req, tensors)
+
+
+def test_stats_of_another_dtype_are_refused():
+    """FP32 stats requested: FP16 ones would get the LSE silently narrowed."""
+    req = replace(make_request(d=64), stats=packed((2, 4, 8, 1), "fp32"))
+    tensors = {n: strided_tensor(getattr(req, n)) for n in ("q", "k", "v", "o")}
+    tensors["stats"] = torch.zeros(req.stats.dims, dtype=torch.float16)
+    with pytest.raises(ValueError, match="stats must be torch.float32"):
+        _LaunchPlan(req, tensors)

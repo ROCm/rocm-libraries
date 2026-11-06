@@ -25,7 +25,7 @@ from rocke.numeric.sdpa_reference import hipdnn_left_to_window, sdpa_reference
 from dispatch.sdpa.bind_dense import _DensePlan, sdpa_dense_admits, sdpa_dense_bind
 from tests.sdpa import cases as C
 from tests.sdpa import helpers as H
-from tests.sdpa.binding_harness import bind_tensors, outputs
+from tests.sdpa.binding_harness import bind_tensors, outputs, strided_tensor
 from tests.sdpa.request_bridge import request_from_case
 from tests.sdpa.request_cases import bhsd, make_request, packed
 
@@ -95,16 +95,10 @@ def test_binding_moves_data_faithfully(case):
     assert H.compare(case, o, lse, H.evaluate(inputs)) == []
 
 
-def _dense(req, name):
-    desc = getattr(req, name)
-    buf = torch.randn(1 + sum((n - 1) * s for n, s in zip(desc.dims, desc.strides)))
-    return torch.as_strided(buf.half(), desc.dims, desc.strides)
-
-
 @pytest.mark.parametrize("layout,inplace", [(None, True), (bhsd, False)])
 def test_contiguous_bshd_operands_are_used_in_place(layout, inplace):
     req = make_request(d=64, **({"layout": layout} if layout else {}))
-    tensors = {n: _dense(req, n) for n in ("q", "k", "v", "o")}
+    tensors = {n: strided_tensor(getattr(req, n)) for n in ("q", "k", "v", "o")}
     plan = _DensePlan(req, tensors)
     assert (not plan.copied) is inplace
     if inplace:
@@ -114,7 +108,7 @@ def test_contiguous_bshd_operands_are_used_in_place(layout, inplace):
 
 def test_non_contiguous_stats_are_written_back():
     req = replace(make_request(d=64), stats=packed((2, 4, 8, 1), "fp32"))
-    tensors = {n: _dense(req, n) for n in ("q", "k", "v", "o")}
+    tensors = {n: strided_tensor(getattr(req, n)) for n in ("q", "k", "v", "o")}
     base = torch.full((2, 4, 8, 2), 7.0)
     tensors["stats"] = base[..., :1]  # the request's shape, but not contiguous
     req = replace(req, stats=replace(req.stats, strides=tuple(base[..., :1].stride())))
@@ -129,22 +123,12 @@ def test_non_contiguous_stats_are_written_back():
 
 def test_a_tensor_that_disagrees_with_the_request_is_refused():
     req = make_request(d=64)  # BSHD
-    tensors = {n: _dense(req, n) for n in ("q", "k", "v", "o")}
+    tensors = {n: strided_tensor(getattr(req, n)) for n in ("q", "k", "v", "o")}
     tensors["q"] = torch.empty_strided(
         req.q.dims, bhsd(2, 4, 8, 64).strides, dtype=torch.float16
     )
     with pytest.raises(ValueError, match="strides"):
         _DensePlan(req, tensors)
-
-
-def _misaligned_dense(req, name):
-    """Like ``_dense``, but the tensor starts one fp16 element (2 bytes) into
-    its allocation, so it is contiguous but not 16-byte aligned."""
-    desc = getattr(req, name)
-    total = 1 + sum((n - 1) * s for n, s in zip(desc.dims, desc.strides))
-    buf = torch.randn(1 + total).half()[1:]
-    assert buf.data_ptr() % 16 != 0
-    return torch.as_strided(buf, desc.dims, desc.strides)
 
 
 def test_misaligned_contiguous_bshd_operands_fall_back_to_a_workspace_copy():
@@ -153,21 +137,70 @@ def test_misaligned_contiguous_bshd_operands_fall_back_to_a_workspace_copy():
     used in place -- it has to copy through the allocated workspace buffer
     instead."""
     req = make_request(d=64)
-    tensors = {n: _misaligned_dense(req, n) for n in ("q", "k", "v", "o")}
+    tensors = {
+        n: strided_tensor(getattr(req, n), misaligned=True)
+        for n in ("q", "k", "v", "o")
+    }
     plan = _DensePlan(req, tensors)
     assert plan.copied == {"q", "k", "v", "o"}
     for name in ("q", "k", "v", "o"):
         assert plan.views[name].data_ptr() % 16 == 0
 
 
-def test_launch_rejects_a_stream_other_than_the_current_one():
-    """``launch``'s workspace buffers are allocated once, at bind time,
-    against the then-current stream, and `pack()`/`unpack()` always run on
-    the ambient current stream; honoring the inner ``binding.launch`` alone
-    on a different caller stream would race on those buffers, so a
-    non-current stream is refused rather than silently ignored."""
+def _bind_with_a_fake_launch(monkeypatch, current=4242):
+    """``sdpa_dense_bind`` on CPU, with Torch's current stream faked as
+    ``current`` and the inner dense binding replaced by a recorder of the
+    stream it got."""
+    from rocke.dispatch.core import TorchBinding
+
+    from dispatch.attention import bindings
+    from dispatch.sdpa import bind_shared
+
+    streams = []
+    monkeypatch.setattr(
+        bindings,
+        "bind_dense_attention_torch",
+        lambda *a, **kw: TorchBinding(
+            launch=lambda *, stream: streams.append(stream),
+            grid=(1, 1, 1),
+            block=(1, 1, 1),
+        ),
+    )
+    monkeypatch.setattr(bind_shared, "resolve_stream", lambda s, device=None: current)
     req = make_request(d=64)
-    tensors = {n: _dense(req, n) for n in ("q", "k", "v", "o")}
-    binding = sdpa_dense_bind(req, tensors)
-    with pytest.raises(NotImplementedError, match="cannot honor stream"):
+    tensors = {n: strided_tensor(getattr(req, n)) for n in ("q", "k", "v", "o")}
+    return sdpa_dense_bind(req, tensors), streams
+
+
+@pytest.mark.parametrize("stream", [None, 0, 4242], ids=["unset", "zero", "named"])
+def test_launch_runs_on_the_current_stream(monkeypatch, stream):
+    """Graph capture names the current stream by handle; that is the stream
+    the binding packs on, so it is honored, not refused."""
+    binding, streams = _bind_with_a_fake_launch(monkeypatch)
+    binding.launch(stream=stream)
+    assert streams == [4242]
+
+
+def test_launch_rejects_a_stream_other_than_the_current_one(monkeypatch):
+    """Pack and unpack run on the current stream and the workspace belongs to
+    it, so launching the kernel alone on another stream would race."""
+    binding, streams = _bind_with_a_fake_launch(monkeypatch)
+    with pytest.raises(NotImplementedError, match="cannot honor stream=123456"):
         binding.launch(stream=123456)
+    assert streams == []
+
+
+def test_launch_rejects_an_unknown_keyword(monkeypatch):
+    binding, streams = _bind_with_a_fake_launch(monkeypatch)
+    with pytest.raises(TypeError):
+        binding.launch(grid=(1, 1, 1))
+    assert streams == []
+
+
+def test_stats_of_another_dtype_are_refused():
+    """FP32 stats requested: FP16 ones would get the LSE silently narrowed."""
+    req = replace(make_request(d=64), stats=packed((2, 4, 8, 1), "fp32"))
+    tensors = {n: strided_tensor(getattr(req, n)) for n in ("q", "k", "v", "o")}
+    tensors["stats"] = torch.zeros(req.stats.dims, dtype=torch.float16)
+    with pytest.raises(ValueError, match="stats must be torch.float32"):
+        _DensePlan(req, tensors)

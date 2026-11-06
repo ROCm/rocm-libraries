@@ -11,7 +11,21 @@ from __future__ import annotations
 
 import numpy as np
 
-__all__ = ["bind_tensors", "outputs"]
+__all__ = ["bind_tensors", "outputs", "strided_tensor"]
+
+
+def strided_tensor(desc, *, misaligned: bool = False):
+    """A random FP16 CPU tensor with ``desc``'s dims and strides.
+
+    ``misaligned`` starts it one element (2 bytes) into its allocation, so a
+    contiguous view of it is not 16-byte aligned.
+    """
+    import torch
+
+    total = 1 + sum((n - 1) * s for n, s in zip(desc.dims, desc.strides))
+    buf = torch.randn(total + int(misaligned)).half()[int(misaligned) :]
+    assert (buf.data_ptr() % 16 != 0) is misaligned
+    return torch.as_strided(buf, desc.dims, desc.strides)
 
 
 def bind_tensors(case, dev, req):

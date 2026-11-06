@@ -22,19 +22,13 @@ the production route (``run_unified_attention_torch`` with no tuning spec).
 
 from __future__ import annotations
 
-import math
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any
 
 from kernels.common._sdpa_seqlen import validate_lengths
 from rocke.core.arch import known_arches
 from rocke.dispatch.core import TorchBinding
-from rocke.runtime.torch_interop import (
-    device_tensor,
-    empty_workspace,
-    resolve_stream,
-    torch_dtype,
-)
+from rocke.runtime.torch_interop import device_tensor, empty_workspace, torch_dtype
 
 from dispatch.attention import (
     ATTENTION_ROUTE_REGISTRY,
@@ -50,8 +44,11 @@ from .bind_shared import (
     Operand,
     asked_band,
     band_text,
+    check_dtype,
     declined_table,
     keeps_asked_keys,
+    launch_stream,
+    nonfinite_scale_reject,
     to_attention_request,
     value_rejects,
 )
@@ -164,21 +161,24 @@ def _band_reject(req: SdpaRequest) -> tuple[bool, str] | None:
 
 
 def _scale_reject(req: SdpaRequest) -> tuple[bool, str] | None:
-    """Decline a scale the unified kernels' online-softmax math cannot honor.
+    """Decline a scale the unified kernels cannot honor: non-finite, or not
+    positive.
 
-    The gfx942/gfx950 tiled 2D bodies mask declined score positions with
-    ``-1e30`` in ``_online_softmax_rescale`` *before* multiplying by the
-    caller's scale: with a zero scale the masked positions go back to 0 (a
-    finite, non-`-inf` logit) and regain nonzero softmax weight, and with a
-    negative scale they are multiplied into the largest logits and dominate
-    it. So only a finite, strictly positive scale computes the request's
-    band; anything else is declined at admission rather than silently
-    mis-scored.
+    The gfx942 4-warp bodies (``_online_softmax_rescale`` in
+    ``kernels/gfx942/attention_tiled_2d.py``) mask declined score positions
+    with ``-1e30`` *before* multiplying by the scale: a zero scale brings the
+    masked positions back to logit 0, and a negative scale makes them the
+    largest logits, so either attends to keys outside the band. The other
+    unified kernels mask after scaling, but the gate cannot tell which body
+    the launch will pick, so it declines for every arch.
     """
-    scale = float(req.scale)
-    if not math.isfinite(scale) or scale <= 0:
-        return False, (
-            f"scale: the unified kernels need a finite, positive scale, got {scale}"
+    rejected = nonfinite_scale_reject(req, "unified")
+    if rejected is not None:
+        return rejected
+    if float(req.scale) <= 0:
+        return (
+            False,
+            f"scale: the unified kernels need a positive scale, got {req.scale}",
         )
     return None
 
@@ -265,10 +265,11 @@ def sdpa_unified_candidates(req: SdpaRequest) -> tuple[str, ...]:
 
 
 def _host_lengths(req_tensor, tensors, key: str):
-    """The caller's ``seq_len_*`` as a host array, dtype kept so
-    ``validate_lengths`` can refuse a non-integer tensor."""
+    """The caller's ``seq_len_*`` as a host array, once its dtype is the
+    request's (int32)."""
     if req_tensor is None:
         return None
+    check_dtype(key, tensors[key], req_tensor)
     return tensors[key].detach().reshape(-1).cpu().numpy()
 
 
@@ -303,11 +304,10 @@ class _LaunchPlan:
 
         dtype = torch_dtype(TORCH_DTYPES[req.dtype])
         device = tensors["q"].device
-        for name in ("q", "k", "v", "o"):
-            t = tensors[name]
-            if t.dtype != dtype or t.device != device:
+        for name in ("k", "v", "o", "stats"):
+            if name in tensors and tensors[name].device != device:
                 raise ValueError(
-                    f"{name}: expected {dtype} on {device}, got {t.dtype} on {t.device}"
+                    f"{name}: expected a tensor on {device}, got {tensors[name].device}"
                 )
 
         def offsets(name: str, fallback: str | None = None):
@@ -444,7 +444,8 @@ def sdpa_unified_bind(req: SdpaRequest, tensors: Mapping[str, Any]) -> TorchBind
     them, ``stats``, ``seq_len_q`` / ``seq_len_kv`` and
     ``ragged_offset_<operand>`` (V, O and stats fall back to K's, Q's and Q's
     offsets). A dense operand is its logical BHSD tensor with the request's
-    strides; a ragged one is its contiguous packed buffer. The launch runs on
+    strides; a ragged one is its contiguous packed buffer. Every tensor's
+    dtype must be the one its request descriptor names. The launch runs on
     Torch's current stream through the production route
     (``run_unified_attention_torch`` with no tuning spec, ``backend="auto"``):
     tiled 2D and split-KV (3D) both write LSE on gfx942/gfx950, so the launch
@@ -452,9 +453,8 @@ def sdpa_unified_bind(req: SdpaRequest, tensors: Mapping[str, Any]) -> TorchBind
 
     Lengths and offsets are read once, here; rebind after changing them.
     Raises ``ValueError`` with the admission reason for a declined request.
-    ``launch`` cannot honor a caller ``stream`` other than the current one
-    (see the ``stream`` note on ``launch`` below) and rejects it instead of
-    silently ignoring it.
+    ``launch(stream=...)`` accepts only the current stream; see
+    :func:`~dispatch.sdpa.bind_shared.launch_stream`.
     """
     ok, reason = sdpa_unified_admits(req)
     if not ok:
@@ -467,40 +467,20 @@ def sdpa_unified_bind(req: SdpaRequest, tensors: Mapping[str, Any]) -> TorchBind
     if plan.problem.total_q:
         validate_tuning_attention_tensors(plan.problem, plan.kernel_tensors())
     scale = float(req.scale)
+    device = plan.q_packed.device
 
-    def launch(*, stream: Any = None, **_kw: Any) -> None:
-        """Pack, launch and unpack, all on Torch's current stream.
-
-        ``plan.pack()``/``plan.unpack()`` are plain Torch tensor copies that
-        always run on the ambient current stream, while ``plan.q_packed`` /
-        ``plan.o_packed`` / ``plan.k_cache`` / ``plan.v_cache`` / ``plan.lse``
-        are workspace buffers allocated once, at bind time, against whatever
-        was current then (see ``resolve_stream``'s caching-allocator note).
-        Honoring a caller-supplied ``stream`` for the kernel launch alone,
-        while the packing copies stay on a different stream, would race on
-        those buffers, so a ``stream`` other than the current one (``None``
-        or ``0``) is rejected rather than silently ignored; set it with
-        ``torch.cuda.set_stream(...)`` (or ``with torch.cuda.stream(s):``)
-        around the call instead.
-        """
-        if stream is not None and int(stream) != 0:
-            raise NotImplementedError(
-                "sdpa_unified_bind's launch cannot honor stream="
-                f"{stream!r}: its workspace buffers are allocated once, at "
-                "bind time, against the then-current stream, and pack()/"
-                "unpack() always run on the ambient current stream; use "
-                "`with torch.cuda.stream(s):` around launch() instead"
-            )
+    def launch(*, stream: Any = None) -> None:
+        """Pack, launch and unpack, all on Torch's current stream."""
+        launch_on = launch_stream(stream, device, "unified")
         plan.pack()
         if plan.problem.total_q:
-            device = plan.q_packed.device
             run_unified_attention_torch(
                 problem=plan.problem,
                 **plan.kernel_tensors(),
                 softmax_scale=scale,
                 softcap=0.0,
                 backend="auto",
-                stream=resolve_stream(0, device=device),
+                stream=launch_on,
                 lse=plan.lse,
             )
         plan.unpack()

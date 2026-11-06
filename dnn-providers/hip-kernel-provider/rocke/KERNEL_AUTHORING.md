@@ -621,6 +621,15 @@ contract, plus this binding-layer checklist for the gate that sits in front of
       only the automatic route, so a pin would be silently ignored.
 - [ ] **The never-overclaim test**: nothing is admitted and then dropped. For
       every admitted request, a kernel is actually reachable with it.
+- [ ] **Bind only what the request describes** (`bind_shared.py`): every
+      tensor's dtype is its descriptor's (`check_dtype`, operands, stats,
+      `seq_len_*` and ragged offsets alike); an operand is handed to the kernel
+      in place only when contiguous and 16-byte aligned (`usable_in_place`),
+      else copied through a workspace; `launch(*, stream=None)` runs on the
+      current stream and refuses any other (`launch_stream`), since the
+      pack/unpack copies and the workspace belong to it. The family's
+      `dispatch_<family>_all` results are attention results; a family request
+      launches through its `<family>_bind`.
 - [ ] **Four test layers**: wiring (one decline case per declined feature, the
       value checks, the band comparison), a case-table test (every entry in
       the family's shared case table gets a verdict), a CPU binding test (the

@@ -23,13 +23,12 @@ order, through ``bind_dense_attention_torch``.
 
 from __future__ import annotations
 
-import math
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any
 
 from rocke.core.arch import known_arches
 from rocke.dispatch.core import TorchBinding, opt_in_probe
-from rocke.runtime.torch_interop import empty_workspace, resolve_stream, torch_dtype
+from rocke.runtime.torch_interop import empty_workspace, torch_dtype
 
 from dispatch.attention import (
     ATTENTION_ROUTE_REGISTRY,
@@ -46,7 +45,10 @@ from .bind_shared import (
     band_text,
     declined_table,
     keeps_asked_keys,
+    launch_stream,
+    nonfinite_scale_reject,
     to_attention_request,
+    usable_in_place,
     value_rejects,
 )
 
@@ -156,9 +158,10 @@ def _spec_band(kernel_spec) -> AttentionBand:
 
 def _scale_reject(req: SdpaRequest) -> tuple[bool, str] | None:
     """The kernel's own scale range, where its module declares one."""
+    rejected = nonfinite_scale_reject(req, "dense")
+    if rejected is not None:
+        return rejected
     scale = float(req.scale)
-    if not math.isfinite(scale):
-        return False, f"scale: the dense kernels need a finite scale, got {scale}"
     scale_range = dense_scale_range(req.arch)
     if scale_range is not None:
         low, high = scale_range
@@ -261,11 +264,10 @@ class _DensePlan:
     def __init__(self, req: SdpaRequest, tensors: Mapping[str, Any]) -> None:
         dtype = torch_dtype(TORCH_DTYPES[req.dtype])
         device = tensors["q"].device
-        for name in ("q", "k", "v", "o"):
-            t = tensors[name]
-            if t.dtype != dtype or t.device != device:
+        for name in ("k", "v", "o", "stats"):
+            if name in tensors and tensors[name].device != device:
                 raise ValueError(
-                    f"{name}: expected {dtype} on {device}, got {t.dtype} on {t.device}"
+                    f"{name}: expected a tensor on {device}, got {tensors[name].device}"
                 )
         self.operands = {
             name: Operand(name, getattr(req, name), tensors[name])
@@ -275,7 +277,7 @@ class _DensePlan:
         self.copied = set()
         for name, op in self.operands.items():
             bshd = op.tensor.transpose(1, 2)
-            if bshd.is_contiguous() and bshd.data_ptr() % 16 == 0:
+            if usable_in_place(bshd):
                 self.views[name] = bshd
             else:
                 self.views[name] = empty_workspace(
@@ -286,13 +288,11 @@ class _DensePlan:
         self.stats = None
         self.lse = None
         if req.stats is not None:
+            # ``Operand`` refuses stats whose dtype is not the request's, so
+            # the copy back from the FP32 LSE never narrows silently.
             self.stats = Operand("stats", req.stats, tensors["stats"]).tensor
             fp32 = torch_dtype("float32")
-            in_place = (
-                self.stats.dtype == fp32
-                and self.stats.device == device
-                and self.stats.is_contiguous()
-            )
+            in_place = self.stats.dtype == fp32 and usable_in_place(self.stats)
             self.lse = (
                 self.stats
                 if in_place
@@ -329,10 +329,10 @@ def sdpa_dense_bind(req: SdpaRequest, tensors: Mapping[str, Any]) -> TorchBindin
     with the request's strides) and ``stats`` when the request sets it. The
     launch runs the first dense candidate that serves the request, at its
     default spec, on Torch's current stream, with the request's scale.
+    Every tensor's dtype must be the one its request descriptor names.
     Raises ``ValueError`` with the admission reason for a declined request.
-    ``launch`` cannot honor a caller ``stream`` other than the current one
-    (see the ``stream`` note on ``launch`` below) and rejects it instead of
-    silently ignoring it.
+    ``launch(stream=...)`` accepts only the current stream; see
+    :func:`~dispatch.sdpa.bind_shared.launch_stream`.
     """
     served, reason = _dense_served(req)
     if not served:
@@ -347,30 +347,11 @@ def sdpa_dense_bind(req: SdpaRequest, tensors: Mapping[str, Any]) -> TorchBindin
     )
     device = plan.views["q"].device
 
-    def launch(*, stream: Any = None, **_kw: Any) -> None:
-        """Pack, launch and unpack, all on Torch's current stream.
-
-        ``plan.pack()``/``plan.unpack()`` are plain Torch tensor copies that
-        always run on the ambient current stream, while ``_DensePlan``'s
-        workspace views are allocated once, at bind time, against whatever
-        was current then (see ``resolve_stream``'s caching-allocator note).
-        Honoring a caller-supplied ``stream`` for the inner
-        ``binding.launch`` alone, while the packing copies stay on a
-        different stream, would race on those buffers, so a ``stream``
-        other than the current one (``None`` or ``0``) is rejected rather
-        than silently ignored; set it with ``torch.cuda.set_stream(...)``
-        (or ``with torch.cuda.stream(s):``) around the call instead.
-        """
-        if stream is not None and int(stream) != 0:
-            raise NotImplementedError(
-                "sdpa_dense_bind's launch cannot honor stream="
-                f"{stream!r}: its workspace buffers are allocated once, at "
-                "bind time, against the then-current stream, and pack()/"
-                "unpack() always run on the ambient current stream; use "
-                "`with torch.cuda.stream(s):` around launch() instead"
-            )
+    def launch(*, stream: Any = None) -> None:
+        """Pack, launch and unpack, all on Torch's current stream."""
+        launch_on = launch_stream(stream, device, "dense")
         plan.pack()
-        binding.launch(stream=resolve_stream(0, device=device))
+        binding.launch(stream=launch_on)
         plan.unpack()
 
     return TorchBinding(launch=launch, grid=binding.grid, block=binding.block)
