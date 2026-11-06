@@ -394,9 +394,13 @@ namespace rocalution
         {
             if constexpr(std::is_integral_v<ValueType>)
             {
-                // Uniform over the integers a to b
+                // Uniform over the integers a to b. The offset is an integer, since a cast
+                // of a fraction to bool gives true, and the range is computed in double,
+                // since b - a can overflow ValueType
                 const double u = static_cast<double>(rand()) / (static_cast<double>(RAND_MAX) + 1);
-                this->vec_[i]  = a + static_cast<ValueType>(u * (static_cast<double>(b - a) + 1));
+                const double range = static_cast<double>(b) - static_cast<double>(a) + 1;
+                this->vec_[i]      = static_cast<ValueType>(static_cast<int64_t>(a)
+                                                       + static_cast<int64_t>(u * range));
             }
             else
             {

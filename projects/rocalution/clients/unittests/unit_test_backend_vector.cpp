@@ -1141,6 +1141,22 @@ TYPED_TEST(host_vector_random, uniform_integers_cover_the_range)
     EXPECT_EQ(std::unique(values.begin(), values.end()) - values.begin(), 11);
 }
 
+TEST(host_vector_random_bool, uniform_values_stay_in_the_range)
+{
+    const int n = 1000;
+
+    auto v = make_vector(Backend::Host, std::vector<bool>(n, true));
+    v->SetRandomUniform(1234, false, false);
+    const std::vector<bool> zeros = values_of(*v);
+    EXPECT_EQ(std::count(zeros.begin(), zeros.end(), true), 0);
+
+    v->SetRandomUniform(1234, false, true);
+    const std::vector<bool> values = values_of(*v);
+    const auto              ones   = std::count(values.begin(), values.end(), true);
+    EXPECT_GT(ones, 0);
+    EXPECT_LT(ones, n);
+}
+
 template <typename T>
 std::vector<T> file_values()
 {
