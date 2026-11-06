@@ -211,7 +211,8 @@ void PerformanceConfigHipImplicitGemm3DGroupFwdXdlops::HeuristicInit(
     // 2. Hard-coded heuristics for BF16/FP16 on gfx942 and gfx950 only
     //    (set MIOPEN_DEBUG_..._HARDCODE=0 to skip and fall through to the AI model)
     if((problem.GetInDataType() == miopenBFloat16 || problem.GetInDataType() == miopenHalf) &&
-       (ctx.GetStream().GetDeviceName() == "gfx942" || ctx.GetStream().GetDeviceName() == "gfx950") &&
+       (ctx.GetStream().GetDeviceName() == "gfx942" ||
+        ctx.GetStream().GetDeviceName() == "gfx950") &&
        !env::disabled(MIOPEN_DEBUG_3D_CONV_IMPLICIT_GEMM_HIP_FWD_XDLOPS_HARDCODE))
     {
         MIOPEN_LOG_I2("Step 2: Attempting hard-coded heuristics for "
