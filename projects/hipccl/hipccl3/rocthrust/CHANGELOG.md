@@ -7,7 +7,11 @@ Documentation for rocThrust available at
 
 ### Changed
 
-* updated cmake option `CODE_COVERAGE` to `BUILD_CODE_COVERAGE` to match `rocprim` and `hipcub`.
+* Renamed the CMake option `CODE_COVERAGE` to `ROCTHRUST_ENABLE_COVERAGE`.
+
+### Removed
+
+* Deprecated `BUILD_CODE_COVERAGE`, use `ROCTHRUST_ENABLE_COVERAGE` instead.
 
 ### Resolved issues
 
@@ -17,7 +21,7 @@ Documentation for rocThrust available at
 
 ### Added
 * rocThrust is now largely in feature parity with CCCL/thrust v3.0.3. If there isn't a libhipcxx corresponding to CCCL/libcudacxx version 3.0.3 or later, `thrust::tuple`, `thrust::pair` and `thrust::zip_iterator` will fall back to rocThrust 4.4.0 implementations.
- 
+
 ### Removed
 
 * rocThrust compatibility with PyTorch v2.9 and v2.10 has been removed in this release.  Use PyTorch v2.11 or later.
