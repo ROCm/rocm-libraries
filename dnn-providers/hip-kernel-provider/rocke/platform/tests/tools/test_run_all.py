@@ -10,10 +10,10 @@ default-on step needs its ``--no-...`` flag added to the argv lists below.
 import importlib.util
 import inspect
 import json
-from pathlib import Path
-import subprocess
 import shutil
+import subprocess
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -208,11 +208,14 @@ def test_ctest_readiness_and_failure_propagation(
             "Debug",
         ],
     )
-    assert runner.main() == (0 if built == "none" else ctest_rc)
+    assert runner.main() == (0 if built == "none" or ctest_rc == 0 else 1)
     executions = [cmd for cmd in calls if cmd[:3] == ["ctest", "-C", "Debug"]]
     assert len(executions) == (0 if built == "none" else 1)
+    out = capsys.readouterr().out
     if built == "none":
-        assert "ctest: SKIPPED" in capsys.readouterr().out
+        # --no-pytest is what left the suite unbuilt: a narrowing, not a skip.
+        assert "ctest: SKIPPED" in out
+        assert out.rstrip().endswith("RESULT: PARTIAL")
 
 
 @pytest.mark.parametrize(
@@ -236,7 +239,7 @@ def test_only_a_successful_unfiltered_arch_domain_gate_suppresses_pytest_delegat
         "native_pytest_env",
         lambda *_args: {},
     )
-    monkeypatch.setattr(runner, "ctest_ready", lambda *_args: False)
+    monkeypatch.setattr(runner, "ctest_unready", lambda *_args: None)
     argv = [
         "run_all.py",
         "--no-guard",
@@ -292,7 +295,7 @@ def test_pytest_targets_accept_paths_and_node_ids_but_reject_escapes(runner, tmp
         runner.pytest_targets(["tools/not_a_test.py"])
 
 
-def test_focused_pytest_selection_changes_both_passes_and_labels_the_result(
+def test_focused_pytest_selection_changes_both_passes_and_labels_the_result_partial(
     runner, monkeypatch, tmp_path, capsys
 ):
     selected = "tools/test_run_all.py::test_ctest_discovery_failure_is_an_error"
@@ -306,7 +309,7 @@ def test_focused_pytest_selection_changes_both_passes_and_labels_the_result(
     monkeypatch.setattr(runner.subprocess, "run", run)
     monkeypatch.setattr(runner, "configure_pytest_build", lambda *_args: None)
     monkeypatch.setattr(runner, "native_pytest_env", lambda *_args: {})
-    monkeypatch.setattr(runner, "ctest_ready", lambda *_args: False)
+    monkeypatch.setattr(runner, "ctest_unready", lambda *_args: None)
     monkeypatch.setattr(
         runner.sys,
         "argv",
@@ -332,7 +335,11 @@ def test_focused_pytest_selection_changes_both_passes_and_labels_the_result(
     pytest_calls = [command for command in calls if command[1:3] == ["-m", "pytest"]]
     assert len(pytest_calls) == 2
     assert all(expected in command for command in pytest_calls)
-    assert "RESULT: FOCUSED GREEN" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert "== pytest (PARTIAL) ==" in out
+    assert "== pytest (PARTIAL, ROCKE_BACKEND=both) ==" in out
+    assert f"--pytest-target {selected}" in out
+    assert out.rstrip().endswith("RESULT: PARTIAL")
 
 
 @pytest.mark.parametrize(
@@ -342,10 +349,9 @@ def test_focused_pytest_selection_changes_both_passes_and_labels_the_result(
         ["--only-ir", "gemm/gfx950/base"],
     ],
 )
-def test_corpus_selectors_label_the_overall_result_focused(
+def test_corpus_selectors_label_the_overall_result_partial(
     runner, monkeypatch, tmp_path, capsys, selector
 ):
-    monkeypatch.setattr(runner, "ctest_ready", lambda *_args: False)
     monkeypatch.setattr(
         runner.sys,
         "argv",
@@ -363,11 +369,13 @@ def test_corpus_selectors_label_the_overall_result_focused(
     )
 
     assert runner.main() == 0
-    assert "RESULT: FOCUSED GREEN" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert " ".join(selector) in out
+    assert out.rstrip().endswith("RESULT: PARTIAL")
 
 
 def test_source_script_alone_does_not_claim_the_native_suite_is_ready(
-    runner, monkeypatch, tmp_path, capsys
+    runner, monkeypatch, tmp_path
 ):
     (tmp_path / "CTestTestfile.cmake").touch()
 
@@ -383,11 +391,12 @@ def test_source_script_alone_does_not_claim_the_native_suite_is_ready(
         return subprocess.CompletedProcess(command, 0, stdout=json.dumps(listing))
 
     monkeypatch.setattr(runner.subprocess, "run", run)
-    assert not runner.ctest_ready(tmp_path, "Release")
-    assert "no built registered tests" in capsys.readouterr().out
+    assert runner.ctest_unready(tmp_path, "Release") == (
+        "no built registered tests for Release"
+    )
 
 
-def test_ctest_discovery_failure_is_an_error(runner, monkeypatch, tmp_path):
+def test_ctest_discovery_failure_is_an_error(runner, monkeypatch, tmp_path, capsys):
     (tmp_path / "CTestTestfile.cmake").touch()
 
     def run(command, **kwargs):
@@ -409,6 +418,180 @@ def test_ctest_discovery_failure_is_an_error(runner, monkeypatch, tmp_path):
         ],
     )
     assert runner.main() == 1
+    out = capsys.readouterr().out
+    assert "ctest (discovery failed:" in out
+    assert out.rstrip().endswith("RESULT: RED")
+
+
+def _write_junit(command, executed, skipped):
+    """Write the JUnit report a fake pytest command asked for."""
+    (report,) = [arg for arg in command if arg.startswith("--junitxml=")]
+    cases = "<testcase/>" * executed + "<testcase><skipped/></testcase>" * skipped
+    Path(report.split("=", 1)[1]).write_text(
+        f"<testsuites><testsuite>{cases}</testsuite></testsuites>"
+    )
+
+
+@pytest.fixture
+def full_run(runner, monkeypatch, tmp_path):
+    """Drive every stage against fakes; return ``main()``'s exit code and calls.
+
+    ``executed`` is the count the fake pytest writes to its JUnit report (None:
+    no report), ``probe_rc`` the ``rocke_engine`` import probe's status, and
+    ``unready`` what CTest readiness reports (None: the suite is runnable).
+    """
+
+    def drive(
+        *argv,
+        guard_rc=0,
+        pytest_rc=0,
+        executed=2,
+        probe_rc=0,
+        unready=None,
+        ctest_rc=0,
+    ):
+        calls = []
+
+        def run(command, **kwargs):
+            calls.append(command)
+            if command[1:3] == ["-m", "pytest"]:
+                if executed is not None:
+                    _write_junit(command, executed, skipped=1)
+                return subprocess.CompletedProcess(command, pytest_rc)
+            if command[1:3] == ["-c", "import rocke_engine"]:
+                return subprocess.CompletedProcess(command, probe_rc)
+            if command[0] == "ctest":
+                return subprocess.CompletedProcess(command, ctest_rc)
+            return subprocess.CompletedProcess(command, 0)
+
+        monkeypatch.setattr(runner.subprocess, "run", run)
+        monkeypatch.setattr(runner, "relative_path_guard", lambda: guard_rc)
+        monkeypatch.setattr(runner, "configure_pytest_build", lambda *_args: None)
+        monkeypatch.setattr(runner, "native_pytest_env", lambda *_args: {})
+        monkeypatch.setattr(runner, "ctest_unready", lambda *_args: unready)
+        monkeypatch.setattr(
+            runner.sys, "argv", ["run_all.py", "--build-root", str(tmp_path), *argv]
+        )
+        return runner.main(), calls
+
+    return drive
+
+
+@pytest.mark.parametrize("executed", [2, None])
+def test_complete_passing_run_is_green(full_run, capsys, executed):
+    # An unreadable JUnit report is an unknown count, never "executed zero".
+    code, calls = full_run(executed=executed)
+    assert code == 0
+    out = capsys.readouterr().out
+    assert out.rstrip().endswith("RESULT: GREEN")
+    for stage in (
+        "relative-path guard",
+        "byte-identity gate",
+        "emitted-IR validity gate",
+        "arch-domain gate",
+        "pytest",
+        "pytest (ROCKE_BACKEND=both)",
+        "ctest",
+    ):
+        assert f"passed            {stage}\n" in out
+    pytest_calls = [command for command in calls if command[1:3] == ["-m", "pytest"]]
+    assert len(pytest_calls) == 2
+    assert all(
+        any(arg.startswith("--junitxml=") for arg in command)
+        for command in pytest_calls
+    )
+
+
+@pytest.mark.parametrize(
+    "flag",
+    ["--no-guard", "--no-gate", "--no-ir-validity", "--no-arch-domain", "--no-both"],
+)
+def test_opting_out_of_a_stage_is_partial_not_green(full_run, capsys, flag):
+    code, _ = full_run(flag)
+    assert code == 0
+    out = capsys.readouterr().out
+    assert f"narrowed by: {flag}" in out
+    assert out.rstrip().endswith("RESULT: PARTIAL")
+
+
+@pytest.mark.parametrize(
+    ("case", "kwargs", "stage"),
+    [
+        (
+            "no engine",
+            {"probe_rc": 1},
+            "skipped           pytest (ROCKE_BACKEND=both)",
+        ),
+        ("empty", {"executed": 0}, "executed no tests pytest\n"),
+        (
+            "no ctest build",
+            {"unready": "no configured test build"},
+            "skipped           ctest (no configured test build)",
+        ),
+    ],
+)
+@pytest.mark.parametrize("allow", [False, True])
+def test_a_stage_that_proved_nothing_is_incomplete(
+    full_run, capsys, case, kwargs, stage, allow
+):
+    argv = ["--allow-incomplete"] if allow else []
+    code, _ = full_run(*argv, **kwargs)
+    out = capsys.readouterr().out
+    assert stage in out
+    if allow:
+        assert code == 0
+        assert out.rstrip().endswith(
+            "RESULT: INCOMPLETE (allowed by --allow-incomplete)"
+        )
+    else:
+        assert code == 3
+        assert out.rstrip().endswith("RESULT: INCOMPLETE")
+
+
+@pytest.mark.parametrize("kwargs", [{"guard_rc": 1}, {"pytest_rc": 1}, {"ctest_rc": 8}])
+def test_a_failure_is_red_even_when_incomplete_is_allowed(full_run, capsys, kwargs):
+    # The both pass is also skipped; RED still wins and --allow-incomplete
+    # never hides it.
+    code, _ = full_run("--allow-incomplete", probe_rc=1, **kwargs)
+    assert code == 1
+    assert capsys.readouterr().out.rstrip().endswith("RESULT: RED")
+
+
+def test_pytest_selecting_no_tests_is_red(full_run, capsys):
+    code, _ = full_run(pytest_rc=5, executed=None)
+    assert code == 1
+    out = capsys.readouterr().out
+    assert "failed            pytest (selected no tests)" in out
+    assert out.rstrip().endswith("RESULT: RED")
+
+
+def test_run_checks_guard_invocation_is_partial(runner, monkeypatch, tmp_path, capsys):
+    # tools/run_checks.py's guard stage: every other stage off and an empty
+    # build root. The missing CTest build follows from --no-pytest, so this
+    # must be PARTIAL exit 0, not INCOMPLETE exit 3.
+    def run(command, **kwargs):
+        raise AssertionError(f"guard-only run launched {command}")
+
+    monkeypatch.setattr(runner.subprocess, "run", run)
+    monkeypatch.setattr(runner, "relative_path_guard", lambda: 0)
+    monkeypatch.setattr(
+        runner.sys,
+        "argv",
+        [
+            "run_all.py",
+            "--no-gate",
+            "--no-ir-validity",
+            "--no-arch-domain",
+            "--no-pytest",
+            "--build-root",
+            str(tmp_path),
+        ],
+    )
+    assert runner.main() == 0
+    out = capsys.readouterr().out
+    assert "passed            relative-path guard" in out
+    assert "ctest: no configured test build (--no-pytest)" in out
+    assert out.rstrip().endswith("RESULT: PARTIAL")
 
 
 def test_explicit_fixture_override_is_resolved_before_pytest_changes_directory(
@@ -430,9 +613,19 @@ def test_installed_runner_bootstraps_staged_hostcaps(runner, tmp_path):
     shutil.copy2(
         Path(inspect.getfile(runner.available_cpus)), arch_domain / "_hostcaps.py"
     )
+    # The verdict module is stdlib-only; stage it alone under an empty package
+    # so `-I` proves the runner reaches it through its own sys.path bootstrap.
+    verdict_pkg = tmp_path / "installed" / "python" / "rocke" / "tests"
+    verdict_pkg.mkdir(parents=True)
+    (verdict_pkg.parent / "__init__.py").touch()
+    (verdict_pkg / "__init__.py").touch()
+    shutil.copy2(
+        Path(inspect.getfile(runner.RunRecord)), verdict_pkg / "runner_verdict.py"
+    )
 
     proc = subprocess.run(
         [sys.executable, "-I", str(installed_tests / "run_all.py"), "--help"],
+        check=False,
         capture_output=True,
         text=True,
     )
@@ -689,7 +882,7 @@ def test_fresh_build_prepares_entire_ctest_suite(
     assert Path(env["ROCKE_BUFFER_RSRC_HIP_TEST"]).is_file()
     if override:
         assert env["ROCKE_STORAGE_TEST"] == str(executable)
-    assert runner.ctest_ready(build, "Release")
+    assert runner.ctest_unready(build, "Release") is None
     subprocess.run(
         ["ctest", "--test-dir", str(build), "-C", "Release", "--output-on-failure"],
         check=True,

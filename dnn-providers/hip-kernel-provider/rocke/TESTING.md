@@ -503,7 +503,7 @@ performing comparisons**:
 
 | Execution class | Environment and oracle | Verdict |
 |---|---|---|
-| **Developer pre-merge gate** | Unfiltered `run_all.py`: relative-path guard → byte identity → emitted-IR validity → arch-domain warning gate → platform pytest → conditional differential pytest → all configured build-tree CTests | Blocking. This is a complete gate, not a fast smoke; differential pytest runs only when `rocke_engine` is importable, and the CTest phase includes the standard-tier arch-domain reproduction sweep once native tests are built. `--only`, `--only-ir`, and `--pytest-target` are focused iteration selectors and do not produce this complete verdict. |
+| **Developer pre-merge gate** | Unfiltered `run_all.py`: relative-path guard → byte identity → emitted-IR validity → arch-domain warning gate → platform pytest → conditional differential pytest → all configured build-tree CTests | Blocking. This is a complete gate, not a fast smoke; the CTest phase includes the standard-tier arch-domain reproduction sweep once native tests are built. A differential pytest pass that cannot run because `rocke_engine` is not importable makes the run `INCOMPLETE`, not `GREEN`. `--only`, `--only-ir`, `--pytest-target`, and every `--no-*` opt-out narrow the run, which reports `PARTIAL` (see [§5.0.2](#502-runner-verdicts-and-exit-codes)). |
 | **Installed host CI** | Selected CTests from the relocated provider artifact, including platform and explicitly enrolled library pytest cohorts | Blocking when selected. Registration alone is not enrollment. |
 | **Installed pinned-reference GPU CI** | One independently qualified reference CTest per published operation/architecture pair | Blocking on its matching required lane; missing hardware, qualification, bundle, or comparisons fails. Other processors' entries skip. |
 | **Legacy/manual GPU numeric** | Live NumPy/Torch reference tests and diagnostic harnesses not covered by a required pinned lane | Opt-in or capability-skipped; a skip proves no kernel correctness. |
@@ -577,12 +577,39 @@ imported and parameterized during collection, so G9 remains open until each
 cohort moves behind a non-discovered explicit gate like counted sync. Pass
 `--require-compiler-gate` for a complete
 required host verdict. An unavailable optional compiler gate reports
-`INCOMPLETE` with a zero exit status for local iteration, not plain `GREEN`.
-[`tools/run_checks.py`](tools/run_checks.py) coordinates selected
-checks from both trees: platform pytest runs directly, while library units and
-the required library gates delegate to the library runner so tier and process
-policy have one owner. It does not replace the platform runner's
-emitted-IR-validity and arch-domain stages.
+`INCOMPLETE` (exit 3; `--allow-incomplete` for local iteration), never `GREEN`.
+[`tools/run_checks.py`](tools/run_checks.py) is the single complete repo-wide
+entry point. It coordinates checks from both trees: platform pytest runs
+directly, while the relative-path guard and the library units and required
+library gates delegate to the per-tree runners, so tier and process policy have
+one owner each. It does not replace the platform runner's emitted-IR-validity
+and arch-domain stages.
+
+### 5.0.2 Runner verdicts and exit codes
+
+Every runner — `platform/tests/run_all.py`, `library/tests/run_all.py`,
+`python -m rocke.examples.run_all`, and `tools/run_checks.py` — records its
+stages in one shared contract,
+[`rocke.tests.runner_verdict`](platform/python/rocke/tests/runner_verdict.py),
+and ends with a table of every stage and one `RESULT:` line. A runner never
+computes its own exit status.
+
+| Verdict | Meaning | Exit |
+|---|---|---|
+| `RED` | a stage failed, or a required stage selected nothing to run | 1 |
+| `INCOMPLETE` | nothing failed, but a stage could not run here, executed no tests, or was not started after an earlier failure | 3, or 0 with `--allow-incomplete` |
+| `PARTIAL` | nothing failed, but the caller narrowed the run (a filter, a `--no-*` opt-out, a subset of steps) | 0 |
+| `GREEN` | every stage ran, executed tests, and passed | 0 |
+
+Precedence is `RED` > `INCOMPLETE` > `PARTIAL` > `GREEN`; a usage error exits 2.
+"Executed no tests" means zero tests ran in a stage, counted from pytest's JUnit
+report — skipping other architectures' cases is normal and does not count.
+`--allow-incomplete` changes only the exit status for local iteration; the
+printed verdict stays `INCOMPLETE`, and it never hides a failure. Child stages
+that cannot run report exit 77 (CTest's `SKIP_RETURN_CODE` convention), and a
+delegated runner's `INCOMPLETE` makes its parent `INCOMPLETE`. Default build
+roots are per user (`<tempdir>/rocke_verify-<user>`,
+`<tempdir>/rocke_checks-<user>`).
 
 **The tree/gating reality (a second axis, orthogonal to the two questions).**
 The developer pytest step collects `platform/tests`. The installed platform
@@ -664,8 +691,8 @@ fixture, and runtime overrides before configuring a lane. In particular, a
 developer's `ROCKE_CPP_STRICT=1` must not leak into the default fallback run.
 Use a unique temporary directory for each validation run (`TMPDIR` on POSIX,
 `TEMP`/`TMP` on Windows). Some tests discover native artifacts under the system
-temporary directory; an old `rocke_online` or `rocke_verify` build can otherwise
-change which tests run and which library they load.
+temporary directory; an old `rocke_online` or `rocke_verify-<user>` build can
+otherwise change which tests run and which library they load.
 
 Native rejection tests must account for strict mode as well as the requested
 backend. `resolve_backend() == "cpp"` does not establish which engine produced
@@ -910,10 +937,10 @@ Read coverage from the emitter configs ([`platform/tests/README.md`](platform/te
 A green **developer pre-merge gate** proves: the two engine implementations agree
 byte-for-byte across the enumerated parity corpus (both trees), emitted IR passes
 the host-toolchain validity gate where available, arch-domain warnings match the
-allowlist, platform pytest passes, configured build-tree CTests pass or report an
-accepted named skip, and the copyability contract holds. If `rocke_engine` was
-not importable, GREEN also does not prove that the differential pytest pass ran;
-its explicit skip must be reviewed. A green developer gate does not prove that
+allowlist, platform pytest passes, configured build-tree CTests pass, and the
+copyability contract holds. A stage that could not run — a differential pytest
+pass without `rocke_engine`, a CTest phase without a build — makes the run
+`INCOMPLETE`, so GREEN means every stage ran. A green developer gate does not prove that
 kernels are numerically correct on hardware, that they are fast (G8), that every
 `library/tests/` file is enrolled (G6), or that an architecture absent from the
 enumerated configs works.

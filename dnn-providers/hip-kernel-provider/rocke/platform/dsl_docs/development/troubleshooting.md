@@ -105,7 +105,7 @@ You didn't build it (or built it elsewhere). Build into the default location, or
 pass `--archive`:
 ```bash
 cmake -S cpp -B /tmp/rocke_verify -DCMAKE_BUILD_TYPE=Release && cmake --build /tmp/rocke_verify -j
-# default archive path is $TMPDIR/rocke_verify/librocke_core.a
+# default archive path is $TMPDIR/rocke_verify-<user>/librocke_core.a
 ```
 `tools/check_byte_identity.py` does the build + gate together.
 

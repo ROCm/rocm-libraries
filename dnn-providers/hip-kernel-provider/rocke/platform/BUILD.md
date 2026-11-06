@@ -33,7 +33,7 @@ the second needs comgr.
 (`librocke_core.a`) and then proves its LLVM-IR emission is byte-identical to the
 Python engine across every kernel family. A green run means the dual-engine
 contract holds. It writes everything under a build root (default
-`$TMPDIR/rocke_verify`); nothing is written back into the source tree.
+`$TMPDIR/rocke_verify-<user>`); nothing is written back into the source tree.
 
 Common options:
 

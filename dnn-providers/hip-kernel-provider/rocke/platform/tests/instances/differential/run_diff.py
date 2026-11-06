@@ -1060,6 +1060,15 @@ def _run_families(
     return [ordered[index] for index in range(len(families))]
 
 
+def _default_build_root() -> str:
+    """The per-user build root the platform runner also defaults to."""
+    if str(PYROOT) not in sys.path:
+        sys.path.insert(0, str(PYROOT))
+    from rocke.tests.runner_verdict import user_scratch_dir
+
+    return str(user_scratch_dir("rocke_verify"))
+
+
 def main():
     """Run the CLI without leaking its pinned flavor to in-process callers."""
     previous_flavor = os.environ.get("ROCKE_LLVM_FLAVOR")
@@ -1083,7 +1092,7 @@ def _main():
     )
     ap.add_argument(
         "--archive",
-        default=str(Path(tempfile.gettempdir()) / "rocke_verify" / "librocke_core.a"),
+        default=str(Path(_default_build_root()) / "librocke_core.a"),
     )
     ap.add_argument(
         "--only", default="", help="comma-separated family substrings to include"
@@ -1221,7 +1230,7 @@ def _main():
     archive = Path(args.archive)
     if not archive.exists():
         sys.exit(
-            f"archive not found: {archive}  (build: cmake -S {CKC} -B /tmp/rocke_verify && cmake --build /tmp/rocke_verify -j)"
+            f"archive not found: {archive}  (build: cmake -S {CKC} -B {archive.parent} && cmake --build {archive.parent} -j)"
         )
     print(
         f"mode={args.mode}  flavor={flavor}  families={len(fams)}  jobs={jobs}  "

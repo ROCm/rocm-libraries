@@ -2,10 +2,12 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 #
-# run_checks.py -- ONE command to run before a PR merge for sanity (guard +
-# byte-identity gate + parity + pytest + on-GPU numeric). NOT comprehensive: the
-# on-GPU numeric lane only exercises the arch of whatever GPU is visible on this
-# machine, so it does not cover every supported arch. Run it on each arch you can.
+# run_checks.py -- the single complete repo-wide check entry point. The per-tree
+# runners (platform/tests/run_all.py, library/tests/run_all.py) own their stage
+# policy; this script delegates to them instead of restating it. The verdict and
+# exit codes follow rocke.tests.runner_verdict (GREEN/PARTIAL 0, RED 1, usage 2,
+# INCOMPLETE 3 or 0 with --allow-incomplete). The on-GPU numeric lane covers only
+# the visible device's arch, so run it on each arch you can.
 #
 # AUTO-DISCOVERS ordinary unit tests and parity pairs: adding a new test_*.py
 # or <family>_emit.{py,c} needs no edit here. Resource-bound explicit gates are
@@ -41,6 +43,7 @@
 #   python tools/run_checks.py --op fmha_bwd          # one operator, all stages
 #   python tools/run_checks.py --steps numeric --op fmha_bwd  # one operator, correctness only
 #   python tools/run_checks.py --flavor llvm22       # pin one LLVM flavor
+#   python tools/run_checks.py --allow-incomplete    # exit 0 when INCOMPLETE
 #   python tools/run_checks.py --list                # list what WOULD run, then exit
 
 from __future__ import annotations
@@ -64,6 +67,11 @@ EMIT_COMMON_DIR = PLATFORM / "tests" / "instances" / "parity"
 # gate or rejected by --flavor.
 sys.path.insert(0, str(PLATFORM_PYROOT))
 from rocke.core.llvm_profile import LLVM_FLAVORS as FLAVORS  # noqa: E402
+from rocke.tests.runner_verdict import (
+    RunRecord,
+    line_buffered_stdout,
+    user_scratch_dir,
+)
 
 STAGES = (
     "guard",
@@ -145,18 +153,19 @@ def _run(label: str, cmd: list[str], env: dict, cwd: Path | None = None) -> int:
     return rc
 
 
-def _parse_steps(raw: str) -> list[str]:
+def _parse_steps(ap: argparse.ArgumentParser, raw: str) -> list[str]:
     if not raw:
         return list(STAGES)
     picked = [s.strip() for s in raw.split(",") if s.strip()]
     bad = [s for s in picked if s not in STAGES]
     if bad:
-        raise SystemExit(f"unknown --steps {bad}; valid: {', '.join(STAGES)}")
+        ap.error(f"unknown --steps {bad}; valid: {', '.join(STAGES)}")
     # preserve canonical order regardless of how the user listed them
     return [s for s in STAGES if s in picked]
 
 
 def main() -> int:
+    line_buffered_stdout()
     ap = argparse.ArgumentParser(
         description="rocke check runner (auto-discovering, stage-selectable)"
     )
@@ -178,15 +187,18 @@ def main() -> int:
         help="pin byte-identity/corpus checks to one LLVM flavor; the counted "
         "compiler gate validates its active COMGR flavor",
     )
-    ap.add_argument(
-        "--build-root", default=str(Path(tempfile.gettempdir()) / "rocke_checks")
-    )
+    ap.add_argument("--build-root", default=str(user_scratch_dir("rocke_checks")))
     ap.add_argument(
         "--list", action="store_true", help="list what would run, then exit"
     )
+    ap.add_argument(
+        "--allow-incomplete",
+        action="store_true",
+        help="exit 0 when the verdict is INCOMPLETE (still printed as INCOMPLETE)",
+    )
     args = ap.parse_args()
 
-    steps = _parse_steps(args.steps)
+    steps = _parse_steps(ap, args.steps)
     steps_explicit = bool(args.steps)  # did the user hand-pick stages?
     op = args.op.strip()
     env = _env()
@@ -260,15 +272,22 @@ def main() -> int:
             print("  numeric lane : skip")
         return 0
 
-    status = 0
+    record = RunRecord(allow_incomplete=args.allow_incomplete)
+    if steps != list(STAGES):
+        record.partial(f"--steps {','.join(steps)}")
+    if op:
+        record.partial(f"--op {op}")
+    if args.flavor:
+        record.partial(f"--flavor {args.flavor}")
 
     # guard -- relative-path guard (fast, no build). Disable every other
     # run_all stage and point CTest discovery at an empty temporary directory,
     # so a stale default build cannot turn this stage into a toolchain sweep.
     if "guard" in steps:
         with tempfile.TemporaryDirectory(prefix="rocke_guard_") as guard_root:
-            status |= _run(
-                "relative-path guard",
+            label = "relative-path guard"
+            rc = _run(
+                label,
                 [
                     sys.executable,
                     str(PLATFORM / "tests" / "run_all.py"),
@@ -282,6 +301,7 @@ def main() -> int:
                 env,
                 cwd=PLATFORM,
             )
+            record.returncode(label, rc, delegated_runner=True)
 
     # gate -- byte-identity gate at each flavor (builds the C++ engine)
     if "gate" in steps:
@@ -295,34 +315,41 @@ def main() -> int:
             ]
             if op:
                 cmd += ["--only", op]
-            status |= _run(f"byte-identity gate [{fl}]", cmd, genv, cwd=PLATFORM)
+            label = f"byte-identity gate [{fl}]"
+            record.returncode(label, _run(label, cmd, genv, cwd=PLATFORM))
 
     # Corpus gates -- these used to ride on run_all.py's default-on behavior in
     # the guard stage. Keep guard cheap without silently deleting either check
     # from the default complete host gate.
     if "ir-validity" in steps:
-        status |= _run(
-            "emitted-IR validity gate",
+        label = "emitted-IR validity gate"
+        rc = _run(
+            label,
             [sys.executable, str(PLATFORM / "tools" / "check_ir_validity.py")],
             env,
             cwd=PLATFORM,
         )
+        record.returncode(label, rc)
 
     if "arch-domain" in steps:
-        status |= _run(
-            "arch-domain warning gate",
+        label = "arch-domain warning gate"
+        rc = _run(
+            label,
             [sys.executable, str(PLATFORM / "tools" / "check_arch_domain.py")],
             env,
             cwd=PLATFORM,
         )
+        record.returncode(label, rc)
 
     # Artifact reproduction owns external compiler processes, a long timeout,
     # serial execution, and an explicit CTest skip result. Configure its real
     # registration and select that test alone; do not fold it back into pytest
     # or make the entire native CTest suite a prerequisite.
     if "reproduction" in steps:
+        configure_label = "configure arch-domain reproducibility CTest"
+        ctest_label = "arch-domain reproducibility CTest"
         configure_rc = _run(
-            "configure arch-domain reproducibility CTest",
+            configure_label,
             [
                 "cmake",
                 "-S",
@@ -335,10 +362,10 @@ def main() -> int:
             ],
             env,
         )
-        status |= configure_rc
+        record.returncode(configure_label, configure_rc)
         if configure_rc == 0:
-            status |= _run(
-                "arch-domain reproducibility CTest",
+            rc = _run(
+                ctest_label,
                 [
                     "ctest",
                     "--test-dir",
@@ -352,17 +379,21 @@ def main() -> int:
                 ],
                 env,
             )
+            record.returncode(ctest_label, rc)
+        else:
+            record.not_run(ctest_label, "configure failed")
 
     # parity -- platform instance .py/.c pairs (covers a fixed set of platform
     # microkernels; has no operator filter, so it is skipped when scoping to --op).
     if "parity" in steps:
         if op:
-            print(
-                f"\n== parity: SKIPPED (--op {op}; platform instance parity has no operator filter) =="
-            )
+            reason = f"--op {op}: platform instance parity has no operator filter"
+            print(f"\n== parity: NOT RUN ({reason}) ==")
+            record.partial(reason)
         else:
-            status |= _run(
-                "platform instance parity",
+            label = "platform instance parity"
+            rc = _run(
+                label,
                 [
                     sys.executable,
                     str(EMIT_COMMON_DIR / "run_parity.py"),
@@ -372,10 +403,10 @@ def main() -> int:
                 env,
                 cwd=PLATFORM,
             )
+            record.returncode(label, rc)
 
     # pytest -- platform units run directly; the library runner owns its unit
     # markers, fresh-process isolation, and per-file timeout policy.
-    unexercised: list[str] = []
     if "pytest" in steps:
         platform_present = (PLATFORM / "tests") in pytest_dirs
         library_present = (LIBRARY / "tests") in pytest_dirs
@@ -385,9 +416,11 @@ def main() -> int:
             if op:
                 cmd += ["-k", op]
             cmd += [str(PLATFORM / "tests")]
-            status |= _run("pytest [platform units]", cmd, env, cwd=ROCKE)
+            label = "pytest [platform units]"
+            record.returncode(label, _run(label, cmd, env, cwd=ROCKE))
         else:
             print("\n== pytest [platform units]: NO test dir discovered ==")
+            record.skipped("pytest [platform units]", "no test dir discovered")
 
         if library_present:
             cmd = [
@@ -401,14 +434,17 @@ def main() -> int:
                 cmd += ["--only", op]
             cmd += ["--", "-q", "-p", "no:cacheprovider"]
             cmd += [f"--ignore={path}" for path in pinned_tests]
-            status |= _run("pytest [library units]", cmd, env, cwd=LIBRARY)
+            label = "pytest [library units]"
+            rc = _run(label, cmd, env, cwd=LIBRARY)
+            record.returncode(label, rc, delegated_runner=True)
             if op:
-                print(
-                    f"\n== library explicit gates: SKIPPED (--op {op}; focused unit iteration) =="
-                )
+                reason = f"--op {op}: library explicit gates not run (focused unit iteration)"
+                print(f"\n== library explicit gates: NOT RUN ({reason}) ==")
+                record.partial(reason)
             else:
-                status |= _run(
-                    "pytest [library explicit gates]",
+                label = "pytest [library explicit gates]"
+                rc = _run(
+                    label,
                     [
                         sys.executable,
                         str(LIBRARY / "tests" / "run_all.py"),
@@ -425,8 +461,10 @@ def main() -> int:
                     env,
                     cwd=LIBRARY,
                 )
+                record.returncode(label, rc, delegated_runner=True)
         else:
             print("\n== pytest [library units]: NO test dir discovered ==")
+            record.skipped("pytest [library units]", "no test dir discovered")
 
         # Pinned GPU references are never -k scoped; -rs prints why they skipped.
         if pinned_tests:
@@ -434,8 +472,16 @@ def main() -> int:
                 junit = Path(tmp) / "pinned.xml"
                 cmd = base + ["-rs", f"--junitxml={junit}"]
                 cmd += [str(path) for path in pinned_tests]
-                status |= _run("pytest [pinned GPU references]", cmd, env, cwd=ROCKE)
+                label = "pytest [pinned GPU references]"
+                record.returncode(label, _run(label, cmd, env, cwd=ROCKE))
                 unexercised = _unexercised_pinned(junit, pinned_tests)
+            if unexercised:
+                # Skipping other processors' cases is normal, but an operation
+                # with zero pinned comparisons is coverage this host did not give.
+                record.skipped(
+                    "pinned GPU references",
+                    f"did not run for: {', '.join(unexercised)}; see TESTING.md",
+                )
 
     # numeric -- on-GPU numeric correctness (honors --op via the harness's --only)
     if "numeric" in steps:
@@ -444,7 +490,8 @@ def main() -> int:
             cmd = [sys.executable, str(numeric)]
             if op:
                 cmd += ["--only", op]
-            status |= _run("on-GPU numeric", cmd, env, cwd=LIBRARY)
+            label = "on-GPU numeric"
+            record.returncode(label, _run(label, cmd, env, cwd=LIBRARY))
             # gfx950 fp8 KV-decode 3D numeric gate. The dense FMHA lane above is
             # fp16 2D only, so this covers the fp8 long-KV decode -> 3D split-KV
             # cohort. Self-skips (exit 0) off gfx950. Only run it on an unscoped
@@ -461,30 +508,20 @@ def main() -> int:
                 / "fp8_decode_3d_verify.py"
             )
             if decode3d.exists() and not op:
-                status |= _run(
-                    "on-GPU numeric (gfx950 fp8 decode 3D)",
-                    [sys.executable, str(decode3d)],
-                    env,
-                    cwd=LIBRARY,
-                )
-        elif steps_explicit:
-            # numeric was explicitly requested; no device is an error, not a skip.
-            print("\n== numeric: NO HIP device visible (explicitly requested) ==")
-            return 1
+                label = "on-GPU numeric (gfx950 fp8 decode 3D)"
+                rc = _run(label, [sys.executable, str(decode3d)], env, cwd=LIBRARY)
+                record.returncode(label, rc)
         else:
-            print("\n== numeric: SKIPPED (no HIP device visible) ==")
+            reason = f"{numeric.name} not found" if gpu else "no HIP device visible"
+            if steps_explicit:
+                # numeric was explicitly requested; not running it is a failure.
+                print(f"\n== numeric: {reason} (explicitly requested) ==")
+                record.failed("on-GPU numeric", f"{reason} (explicitly requested)")
+            else:
+                print(f"\n== numeric: SKIPPED ({reason}) ==")
+                record.skipped("on-GPU numeric", reason)
 
-    print(
-        f"\n{'=' * 48}\nrocke checks: {'ALL PASSED' if status == 0 else 'FAILURES PRESENT'}"
-    )
-    if unexercised:
-        # A skip is not a failure, but a green run must not read as pinned coverage.
-        print(
-            f"pinned GPU reference comparisons did NOT run for {', '.join(unexercised)} "
-            "(reasons above); see TESTING.md to run them"
-        )
-    print("=" * 48)
-    return 1 if status else 0
+    return record.report("run_checks")
 
 
 if __name__ == "__main__":

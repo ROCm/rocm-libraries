@@ -101,16 +101,38 @@ def runner(monkeypatch):
     return module
 
 
-def _run_default(runner, monkeypatch, failing_label=""):
+def _main(runner, monkeypatch, *argv, rcs=None):
+    """Run main() with every stage stubbed; ``rcs`` maps a stage label to its rc."""
     calls = []
 
     def run(label, command, env, cwd=None):
         calls.append((label, command, cwd))
-        return 9 if label == failing_label else 0
+        return (rcs or {}).get(label, 0)
 
     monkeypatch.setattr(runner, "_run", run)
-    monkeypatch.setattr(runner.sys, "argv", ["run_checks.py"])
+    monkeypatch.setattr(runner.sys, "argv", ["run_checks.py", *argv])
     return runner.main(), calls
+
+
+@pytest.fixture
+def complete_host(runner, monkeypatch, tmp_path):
+    """A host where every stage can run: a device, both test trees, the numeric lane."""
+    library = tmp_path / "library"
+    numeric = library / "tests" / "differential" / "numeric_attention.py"
+    numeric.parent.mkdir(parents=True)
+    numeric.touch()
+    monkeypatch.setattr(runner, "LIBRARY", library)
+    monkeypatch.setattr(runner, "_has_gpu", lambda: True)
+    monkeypatch.setattr(
+        runner,
+        "_discover_pytest_dirs",
+        lambda: [runner.PLATFORM / "tests", runner.LIBRARY / "tests"],
+    )
+    return runner
+
+
+def _run_default(runner, monkeypatch, failing_label=""):
+    return _main(runner, monkeypatch, rcs={failing_label: 9})
 
 
 def test_runner_uses_every_qualified_compiler_lane(runner):
@@ -163,7 +185,9 @@ def test_pytest_stage_includes_library_gpu_files_when_a_device_is_visible(
     monkeypatch.setattr(runner, "_run", run)
     monkeypatch.setattr(runner, "_has_gpu", lambda: True)
     monkeypatch.setattr(
-        runner, "_discover_pytest_dirs", lambda: [runner.LIBRARY / "tests"]
+        runner,
+        "_discover_pytest_dirs",
+        lambda: [runner.PLATFORM / "tests", runner.LIBRARY / "tests"],
     )
     monkeypatch.setattr(runner.sys, "argv", ["run_checks.py", "--steps", "pytest"])
     assert runner.main() == 0
@@ -173,9 +197,12 @@ def test_pytest_stage_includes_library_gpu_files_when_a_device_is_visible(
     assert "--gpu" in library
 
 
-def test_default_runs_every_host_validation_gate_once(runner, monkeypatch):
-    rc, calls = _run_default(runner, monkeypatch)
+def test_default_runs_every_host_validation_gate_once(
+    complete_host, monkeypatch, capsys
+):
+    rc, calls = _run_default(complete_host, monkeypatch)
     assert rc == 0
+    assert capsys.readouterr().out.rstrip().endswith("RESULT: GREEN")
 
     by_label = {}
     for label, command, cwd in calls:
@@ -214,7 +241,205 @@ def test_default_runs_every_host_validation_gate_once(runner, monkeypatch):
         "arch-domain reproducibility CTest",
     ),
 )
-def test_default_propagates_each_host_gate_failure(runner, monkeypatch, failing_label):
-    rc, calls = _run_default(runner, monkeypatch, failing_label)
+def test_default_propagates_each_host_gate_failure(
+    complete_host, monkeypatch, failing_label
+):
+    rc, calls = _run_default(complete_host, monkeypatch, failing_label)
     assert rc == 1
     assert sum(label == failing_label for label, _command, _cwd in calls) == 1
+
+
+def _result(capsys) -> str:
+    return capsys.readouterr().out.rstrip().splitlines()[-1]
+
+
+def test_step_subset_is_partial_not_green(runner, monkeypatch, capsys):
+    rc, calls = _main(runner, monkeypatch, "--steps", "guard")
+    assert rc == 0
+    assert [label for label, _command, _cwd in calls] == ["relative-path guard"]
+    assert _result(capsys) == "RESULT: PARTIAL"
+
+
+def test_naming_every_stage_is_not_narrowing(complete_host, monkeypatch, capsys):
+    rc, _calls = _main(
+        complete_host, monkeypatch, "--steps", ",".join(reversed(complete_host.STAGES))
+    )
+    assert rc == 0
+    assert _result(capsys) == "RESULT: GREEN"
+
+
+@pytest.mark.parametrize(
+    "argv", (("--op", "fmha_bwd"), ("--flavor", "llvm22")), ids=("op", "flavor")
+)
+def test_filters_are_partial_not_green(complete_host, monkeypatch, capsys, argv):
+    rc, _calls = _main(complete_host, monkeypatch, *argv)
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert f"narrowed by: {' '.join(argv)}" in out
+    assert out.rstrip().endswith("RESULT: PARTIAL")
+
+
+def test_op_skipped_stages_are_narrowing_not_skips(complete_host, monkeypatch, capsys):
+    rc, calls = _main(complete_host, monkeypatch, "--op", "fmha_bwd")
+    assert rc == 0
+    labels = {label for label, _command, _cwd in calls}
+    assert "platform instance parity" not in labels
+    assert "pytest [library explicit gates]" not in labels
+    out = capsys.readouterr().out
+    assert "parity has no operator filter" in out
+    assert "library explicit gates not run" in out
+    assert "skipped" not in out.split("run_checks stages:")[1]
+    assert out.rstrip().endswith("RESULT: PARTIAL")
+
+
+def test_implicit_numeric_without_a_device_is_incomplete(
+    complete_host, monkeypatch, capsys
+):
+    monkeypatch.setattr(complete_host, "_has_gpu", lambda: False)
+    rc, calls = _main(complete_host, monkeypatch)
+    assert rc == 3
+    assert "on-GPU numeric" not in {label for label, _command, _cwd in calls}
+    out = capsys.readouterr().out
+    assert "skipped           on-GPU numeric (no HIP device visible)" in out
+    assert out.rstrip().endswith("RESULT: INCOMPLETE")
+
+
+def test_explicit_numeric_without_a_device_is_red(runner, monkeypatch, capsys):
+    rc, calls = _main(runner, monkeypatch, "--steps", "numeric", "--allow-incomplete")
+    assert rc == 1
+    assert calls == []
+    assert _result(capsys) == "RESULT: RED"
+
+
+def test_allow_incomplete_exits_zero_but_still_reports_incomplete(
+    complete_host, monkeypatch, capsys
+):
+    monkeypatch.setattr(complete_host, "_has_gpu", lambda: False)
+    rc, _calls = _main(complete_host, monkeypatch, "--allow-incomplete")
+    assert rc == 0
+    assert _result(capsys) == "RESULT: INCOMPLETE (allowed by --allow-incomplete)"
+
+
+def test_failure_is_red_even_with_allow_incomplete(complete_host, monkeypatch, capsys):
+    monkeypatch.setattr(complete_host, "_has_gpu", lambda: False)
+    rc, _calls = _main(
+        complete_host,
+        monkeypatch,
+        "--allow-incomplete",
+        rcs={"emitted-IR validity gate": 1},
+    )
+    assert rc == 1
+    assert _result(capsys) == "RESULT: RED"
+
+
+def test_pytest_selecting_nothing_is_red(complete_host, monkeypatch, capsys):
+    rc, _calls = _main(complete_host, monkeypatch, rcs={"pytest [platform units]": 5})
+    assert rc == 1
+    out = capsys.readouterr().out
+    assert "failed            pytest [platform units] (selected no tests)" in out
+    assert out.rstrip().endswith("RESULT: RED")
+
+
+@pytest.mark.parametrize(
+    "label",
+    (
+        "relative-path guard",
+        "pytest [library units]",
+        "pytest [library explicit gates]",
+    ),
+)
+def test_delegated_runner_incomplete_makes_the_run_incomplete(
+    complete_host, monkeypatch, capsys, label
+):
+    rc, _calls = _main(complete_host, monkeypatch, rcs={label: 3})
+    assert rc == 3
+    out = capsys.readouterr().out
+    assert f"skipped           {label} (the delegated runner" in out
+    assert out.rstrip().endswith("RESULT: INCOMPLETE")
+
+
+def test_exit_three_from_a_non_runner_stage_is_a_failure(complete_host, monkeypatch):
+    rc, _calls = _main(complete_host, monkeypatch, rcs={"pytest [platform units]": 3})
+    assert rc == 1
+
+
+def test_undiscovered_test_tree_is_incomplete(complete_host, monkeypatch, capsys):
+    monkeypatch.setattr(
+        complete_host,
+        "_discover_pytest_dirs",
+        lambda: [complete_host.PLATFORM / "tests"],
+    )
+    rc, calls = _main(complete_host, monkeypatch)
+    assert rc == 3
+    assert "pytest [library units]" not in {label for label, _command, _cwd in calls}
+    out = capsys.readouterr().out
+    assert "skipped           pytest [library units] (no test dir discovered)" in out
+
+
+def test_unexercised_pinned_references_are_incomplete(
+    complete_host, monkeypatch, capsys
+):
+    suite = complete_host.LIBRARY / "tests" / "test_conv_pinned_reference.py"
+    monkeypatch.setattr(
+        complete_host, "_discover_pinned_reference_tests", lambda: [suite]
+    )
+    monkeypatch.setattr(
+        complete_host, "_unexercised_pinned", lambda junit, suites: ["conv"]
+    )
+    rc, calls = _main(complete_host, monkeypatch)
+    assert rc == 3
+    assert "pytest [pinned GPU references]" in {label for label, _c, _cwd in calls}
+    out = capsys.readouterr().out
+    assert "skipped           pinned GPU references (did not run for: conv" in out
+    assert out.rstrip().endswith("RESULT: INCOMPLETE")
+
+
+def test_exercised_pinned_references_stay_green(complete_host, monkeypatch, capsys):
+    suite = complete_host.LIBRARY / "tests" / "test_conv_pinned_reference.py"
+    monkeypatch.setattr(
+        complete_host, "_discover_pinned_reference_tests", lambda: [suite]
+    )
+    monkeypatch.setattr(complete_host, "_unexercised_pinned", lambda junit, suites: [])
+    rc, _calls = _main(complete_host, monkeypatch)
+    assert rc == 0
+    assert _result(capsys) == "RESULT: GREEN"
+
+
+def test_failed_configure_marks_reproduction_not_run(
+    complete_host, monkeypatch, capsys
+):
+    rc, calls = _main(
+        complete_host,
+        monkeypatch,
+        "--allow-incomplete",
+        rcs={"configure arch-domain reproducibility CTest": 1},
+    )
+    assert rc == 1
+    labels = [label for label, _command, _cwd in calls]
+    assert "arch-domain reproducibility CTest" not in labels
+    out = capsys.readouterr().out
+    assert (
+        "not run           arch-domain reproducibility CTest (configure failed)" in out
+    )
+
+
+def test_unknown_step_is_a_usage_error(runner, monkeypatch):
+    with pytest.raises(SystemExit) as exc:
+        _main(runner, monkeypatch, "--steps", "bogus")
+    assert exc.value.code == 2
+
+
+def test_list_exits_zero_without_a_verdict(runner, monkeypatch, capsys):
+    rc, calls = _main(runner, monkeypatch, "--list")
+    assert rc == 0
+    assert calls == []
+    assert "RESULT:" not in capsys.readouterr().out
+
+
+def test_default_build_root_is_per_user(runner, monkeypatch):
+    from rocke.tests.runner_verdict import user_scratch_dir
+
+    rc, calls = _main(runner, monkeypatch, "--steps", "reproduction")
+    assert rc == 0
+    configure = next(c for label, c, _cwd in calls if label.startswith("configure"))
+    assert configure[configure.index("-B") + 1] == str(user_scratch_dir("rocke_checks"))

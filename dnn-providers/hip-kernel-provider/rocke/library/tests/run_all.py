@@ -17,19 +17,40 @@
 #   python library/tests/run_all.py --gpu           # units + GPU tests + host gates
 #   python library/tests/run_all.py --gpu-only      # only the GPU-marked unit lane
 #   python library/tests/run_all.py --only dense    # focused units; gates omitted
+#   python library/tests/run_all.py --allow-incomplete  # INCOMPLETE exits 0
+#
+# The verdict and exit code come from rocke.tests.runner_verdict: GREEN and
+# PARTIAL (any narrowing flag) exit 0, RED 1, INCOMPLETE (a skipped gate, a
+# stage that executed no tests, or stages not run after a failure) 3.
 
 from __future__ import annotations
 
 import argparse
 import concurrent.futures
+import functools
 import os
 import shlex
 import subprocess
 import sys
 import tempfile
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+
+# This script runs from source and is not a package module: put the platform
+# Python root on sys.path the way library/tests/conftest.py does (library ->
+# platform is the allowed direction).
+_PYROOT = Path(__file__).resolve().parents[2] / "platform" / "python"
+if str(_PYROOT) not in sys.path:
+    sys.path.insert(0, str(_PYROOT))
+
+from rocke.tests.runner_verdict import (
+    Outcome,
+    RunRecord,
+    junit_counts,
+    line_buffered_stdout,
+)
 
 TESTS = Path(__file__).resolve().parent
 EXPLICIT_GATES = {
@@ -193,10 +214,8 @@ def _gate_environment(
     return environment
 
 
-@dataclass(frozen=True)
-class _StageResult:
-    code: int
-    skipped: bool = False
+_UNIT_FILES_STAGE = "rocke library affordable pytest files"
+_UNIT_STAGE = "rocke library unit pytest"
 
 
 @dataclass(frozen=True)
@@ -206,6 +225,8 @@ class _FileResult:
     elapsed: float
     log: Path
     timed_out: bool = False
+    # Tests the file's JUnit report says ran; ``None`` when unknown.
+    executed: int | None = None
 
 
 def _unit_marker(*, gpu: bool, gpu_only: bool, exhaustive: bool) -> str | None:
@@ -253,6 +274,40 @@ def _collect_unit_files(
     return 0, files, ""
 
 
+def _forwarded_junit(arguments: list[str]) -> Path | None:
+    """The JUnit report path a caller forwarded to pytest, if any (last wins)."""
+    report = None
+    for index, argument in enumerate(arguments):
+        for option in ("--junitxml", "--junit-xml"):
+            if argument == option and index + 1 < len(arguments):
+                report = arguments[index + 1]
+            elif argument.startswith(option + "="):
+                report = argument.split("=", 1)[1]
+    if report is None:
+        return None
+    # pytest resolves a relative report path against its working directory.
+    return TESTS.parent / report
+
+
+def _junit_report(arguments: list[str], default: Path) -> tuple[list[str], Path]:
+    """Arguments that make pytest write a JUnit report, and that report's path.
+
+    A report the caller already forwarded is read instead of adding another.
+    """
+    forwarded = _forwarded_junit(arguments)
+    if forwarded is not None:
+        return [], forwarded
+    return [f"--junitxml={default}"], default
+
+
+def _executed(report: Path | None) -> int | None:
+    """Tests a JUnit report says ran, or ``None`` when unknown."""
+    if report is None:
+        return None
+    counts = junit_counts(report)
+    return None if counts is None else counts[0]
+
+
 def _run_unit_file(
     path: Path,
     marker: str | None,
@@ -261,7 +316,10 @@ def _run_unit_file(
     timeout: float,
     log: Path,
 ) -> _FileResult:
-    command = [sys.executable, "-m", "pytest", str(path)]
+    # The runner's own per-file report, beside the log. The caller's
+    # --junitxml is rejected for file workers before this lane starts.
+    report = log.with_suffix(".xml")
+    command = [sys.executable, "-m", "pytest", str(path), f"--junitxml={report}"]
     if marker is not None:
         command += ["-m", marker]
     if only:
@@ -278,22 +336,29 @@ def _run_unit_file(
                 text=True,
                 timeout=timeout,
             )
-            return _FileResult(path, result.returncode, time.monotonic() - start, log)
+            return _FileResult(
+                path,
+                result.returncode,
+                time.monotonic() - start,
+                log,
+                executed=_executed(report),
+            )
         except subprocess.TimeoutExpired:
             stream.write(f"\nTIMEOUT: exceeded {timeout:g}s\n")
             return _FileResult(path, 124, time.monotonic() - start, log, True)
 
 
 def _run_unit_file_stage(
+    record: RunRecord,
     *,
     marker: str | None,
     only: str,
     extra: list[str],
     jobs: int,
     timeout: float,
-) -> _StageResult:
+) -> Outcome:
     """Run each selected test file in a fresh process with bounded concurrency."""
-    print("\n== rocke library affordable pytest files ==", flush=True)
+    print(f"\n== {_UNIT_FILES_STAGE} ==", flush=True)
     started = time.monotonic()
     with tempfile.TemporaryDirectory(prefix="rocke-library-tests-") as directory:
         root = Path(directory)
@@ -302,7 +367,7 @@ def _run_unit_file_stage(
         )
         if code:
             print(diagnostic, flush=True)
-            return _StageResult(code)
+            return record.returncode(_UNIT_FILES_STAGE, code)
         print(
             f" selected {len(files)} files; jobs={jobs}; file-timeout={timeout:g}s",
             flush=True,
@@ -347,35 +412,48 @@ def _run_unit_file_stage(
                 flush=True,
             )
             print(result.log.read_text(errors="replace"), flush=True)
+        counts = [result.executed for result in results]
+        executed = None if None in counts else sum(counts)
+        tests = "" if executed is None else f"; {executed} tests executed"
         print(
             f"unit-file summary: {len(files) - len(failed)} passed, "
-            f"{len(failed)} failed in {time.monotonic() - started:.2f}s",
+            f"{len(failed)} failed{tests} in {time.monotonic() - started:.2f}s",
             flush=True,
         )
-        return _StageResult(1 if failed else 0)
+        return record.returncode(
+            _UNIT_FILES_STAGE, 1 if failed else 0, executed=executed
+        )
 
 
 def _run(
     label: str,
     command: list[str],
+    record: RunRecord,
     *,
     env: dict[str, str] | None = None,
     allow_skip: bool = False,
-) -> _StageResult:
+    junit: Path | None = None,
+) -> Outcome:
+    """Run one pytest process as a stage; ``junit`` is its report, if it writes one."""
     print(f"\n== {label} ==", flush=True)
     print(" ", " ".join(command), flush=True)
     started = time.monotonic()
     result = subprocess.run(command, cwd=str(TESTS.parent), env=env).returncode
     elapsed = time.monotonic() - started
-    if result == 77 and allow_skip:
-        print(f"{label}: SKIPPED in {elapsed:.2f}s", flush=True)
-        return _StageResult(0, skipped=True)
-    state = "PASS" if result == 0 else f"FAIL({result})"
+    outcome = record.returncode(
+        label, result, skip_allowed=allow_skip, executed=_executed(junit)
+    )
+    state = {
+        Outcome.PASSED: "PASS",
+        Outcome.SKIPPED: "SKIPPED",
+        Outcome.EMPTY: "EMPTY (executed no tests)",
+    }.get(outcome, f"FAIL({result})")
     print(f"{label}: {state} in {elapsed:.2f}s", flush=True)
-    return _StageResult(result)
+    return outcome
 
 
 def main() -> int:
+    line_buffered_stdout()
     parser = argparse.ArgumentParser(description="rocKE library validation runner")
     parser.add_argument(
         "--gpu",
@@ -445,6 +523,12 @@ def main() -> int:
         "--only",
         default="",
         help="pytest -k expression for focused unit iteration; explicit gates omitted",
+    )
+    parser.add_argument(
+        "--allow-incomplete",
+        action="store_true",
+        help="exit 0 when the verdict is INCOMPLETE (still printed as INCOMPLETE); "
+        "never hides RED",
     )
     parser.add_argument(
         "pytest_args",
@@ -527,40 +611,20 @@ def main() -> int:
             "not a gate verdict"
         )
 
-    status = 0
-    skipped = False
+    record = RunRecord(allow_incomplete=args.allow_incomplete)
     run_units = not args.gate
-    if run_units:
-        marker = _unit_marker(
-            gpu=args.gpu,
-            gpu_only=args.gpu_only,
-            exhaustive=args.exhaustive,
-        )
-        if jobs:
-            unit_result = _run_unit_file_stage(
-                marker=marker,
-                only=args.only,
-                extra=extra,
-                jobs=jobs,
-                timeout=file_timeout,
-            )
-        else:
-            command = [sys.executable, "-m", "pytest", str(TESTS)]
-            if marker is not None:
-                command += ["-m", marker]
-            if args.only:
-                command += ["-k", args.only]
-            command += extra
-            unit_result = _run("rocke library unit pytest", command)
-        status |= unit_result.code
-        skipped |= unit_result.skipped
-        if status and not args.keep_going:
-            print(
-                "\nRESULT: RED (resource gates not run after unit failure) "
-                f"in {time.monotonic() - run_started:.2f}s",
-                flush=True,
-            )
-            return status
+    for flag, narrowed in (
+        ("--unit-only", args.unit_only),
+        ("--gpu-only", args.gpu_only),
+        ("--only", bool(args.only)),
+        # Explicit gates omit the unit lane and every gate not named.
+        ("--gate", bool(args.gate)),
+        ("pytest selection arguments", filtered),
+        ("PYTEST_ADDOPTS selection", run_units and _selection_is_partial(inherited)),
+        ("--gate-arch", args.gate_arch is not None),
+    ):
+        if narrowed:
+            record.partial(flag)
 
     if args.gate:
         gates = args.gate
@@ -569,39 +633,87 @@ def main() -> int:
     else:
         gates = list(EXPLICIT_GATES)
 
-    for name in gates:
-        environment = _gate_environment(
-            name,
-            require_compiler=args.require_compiler_gate,
-            gate_arch=args.gate_arch if name == "counted-isa" else None,
-            partial=filtered or args.gate_arch is not None,
-        )
-        command = [sys.executable, "-m", "pytest", str(EXPLICIT_GATES[name])]
-        command += extra
-        gate_result = _run(
-            f"rocke library gate: {name}",
-            command,
-            env=environment,
-            allow_skip=name == "counted-isa" and not args.require_compiler_gate,
-        )
-        status |= gate_result.code
-        skipped |= gate_result.skipped
-        if status and not args.keep_going:
-            break
+    with tempfile.TemporaryDirectory(prefix="rocke-library-reports-") as directory:
+        reports = Path(directory)
+        stages: list[tuple[str, Callable[[], Outcome]]] = []
+        if run_units:
+            marker = _unit_marker(
+                gpu=args.gpu,
+                gpu_only=args.gpu_only,
+                exhaustive=args.exhaustive,
+            )
+            if jobs:
+                stages.append(
+                    (
+                        _UNIT_FILES_STAGE,
+                        functools.partial(
+                            _run_unit_file_stage,
+                            record,
+                            marker=marker,
+                            only=args.only,
+                            extra=extra,
+                            jobs=jobs,
+                            timeout=file_timeout,
+                        ),
+                    )
+                )
+            else:
+                junit_args, junit = _junit_report(
+                    worker_arguments, reports / "unit.xml"
+                )
+                command = [sys.executable, "-m", "pytest", str(TESTS), *junit_args]
+                if marker is not None:
+                    command += ["-m", marker]
+                if args.only:
+                    command += ["-k", args.only]
+                command += extra
+                stages.append(
+                    (
+                        _UNIT_STAGE,
+                        functools.partial(
+                            _run, _UNIT_STAGE, command, record, junit=junit
+                        ),
+                    )
+                )
 
-    if status:
-        verdict = "RED"
-    elif filtered or args.gate_arch:
-        verdict = "PARTIAL"
-    elif skipped:
-        verdict = "INCOMPLETE"
-    else:
-        verdict = "GREEN"
+        for name in gates:
+            label = f"rocke library gate: {name}"
+            environment = _gate_environment(
+                name,
+                require_compiler=args.require_compiler_gate,
+                gate_arch=args.gate_arch if name == "counted-isa" else None,
+                partial=filtered or args.gate_arch is not None,
+            )
+            junit_args, junit = _junit_report(extra, reports / f"{name}.xml")
+            command = [sys.executable, "-m", "pytest", str(EXPLICIT_GATES[name])]
+            command += junit_args + extra
+            stages.append(
+                (
+                    label,
+                    functools.partial(
+                        _run,
+                        label,
+                        command,
+                        record,
+                        env=environment,
+                        allow_skip=name == "counted-isa"
+                        and not args.require_compiler_gate,
+                        junit=junit,
+                    ),
+                )
+            )
+
+        for index, (_, run) in enumerate(stages):
+            if run() is Outcome.FAILED and not args.keep_going:
+                for later, _ in stages[index + 1 :]:
+                    record.not_run(later, "an earlier stage failed")
+                break
+
     print(
-        f"\nRESULT: {verdict} in {time.monotonic() - run_started:.2f}s",
+        f"\nlibrary run_all finished in {time.monotonic() - run_started:.2f}s",
         flush=True,
     )
-    return status
+    return record.report("library run_all")
 
 
 if __name__ == "__main__":

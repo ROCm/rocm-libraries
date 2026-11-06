@@ -76,12 +76,19 @@ def _sha(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def _default_build_root() -> str:
+    """The per-user build root the platform runner also defaults to."""
+    if str(PYROOT) not in sys.path:
+        sys.path.insert(0, str(PYROOT))
+    from rocke.tests.runner_verdict import user_scratch_dir
+
+    return str(user_scratch_dir("rocke_verify"))
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="micro-kernel C-vs-Python .ll parity")
     ap.add_argument("--archive", default="")
-    ap.add_argument(
-        "--build-root", default=str(Path(tempfile.gettempdir()) / "rocke_verify")
-    )
+    ap.add_argument("--build-root", default=_default_build_root())
     args = ap.parse_args()
 
     out = Path(tempfile.gettempdir()) / "rocke_parity"
