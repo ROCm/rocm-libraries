@@ -1375,6 +1375,7 @@ TYPED_TEST(solvers, qmrcgstab_solves_a_system_that_its_first_half_step_solves)
     set_up(*solver, m, *A, nullptr);
     const Outcome<T> out = quietly([&] { return solve(*solver, *A, b, Vec<T>(8, 0)); });
     expect_near(out.x, scaled(0.5, b), scaled_tol<T>(1e-14));
+    EXPECT_EQ(out.iterations, 1);
 }
 
 // The orthogonal and bidiagonal similarity transformations keep the matrices exact
@@ -2127,16 +2128,20 @@ TYPED_TEST(solvers, qmrcgstab_stops_at_a_breakdown_of_its_second_iteration)
         Vec<T>      D;
         Vec<T>      b;
         Vec<T>      x;
+        int         iterations;
     };
+    // At omega == 0 the first half step has moved x and counts as an iteration
     const Case cases[]
         = {{"rho_old == 0",
             shadow_breakdown,
             {-1, 0, -1},
-            qmrcgstab_iterate(shadow_breakdown, {-1, 0, -1}, Vec<T>(3, 0), 1, identity<T>)},
+            qmrcgstab_iterate(shadow_breakdown, {-1, 0, -1}, Vec<T>(3, 0), 1, identity<T>),
+            1},
            {"omega == 0",
             step_breakdown,
             {2, 0, -2},
-            qmrcgstab_iterate(step_breakdown, {2, 0, -2}, Vec<T>(3, 0), 2, identity<T>, true)}};
+            qmrcgstab_iterate(step_breakdown, {2, 0, -2}, Vec<T>(3, 0), 2, identity<T>, true),
+            2}};
 
     for(const Case& c : cases)
     {
@@ -2152,7 +2157,7 @@ TYPED_TEST(solvers, qmrcgstab_stops_at_a_breakdown_of_its_second_iteration)
 
             const Outcome<T> out = solve_reporting(*solver, *A, c.b, c.name);
             expect_near(out.x, c.x, loose_tol<T>(1e-12));
-            EXPECT_EQ(out.iterations, 1);
+            EXPECT_EQ(out.iterations, c.iterations);
             EXPECT_EQ(out.status, 0);
         }
     }

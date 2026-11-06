@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -364,6 +364,12 @@ namespace rocalution
             if(omega == static_cast<ValueType>(0))
             {
                 LOG_INFO("QMRCGStab omega == 0 !!!");
+
+                // x has moved along d, so the first half step counts as an iteration
+                // residual <= sqrt(#iter+1) * |tau1|
+                res_norm = sqrt(static_cast<double>(this->iter_ctrl_.GetIterationCount() + 1))
+                           * std::abs(tau1);
+                this->iter_ctrl_.CheckResidual(res_norm, this->index_);
                 break;
             }
 
@@ -542,6 +548,12 @@ namespace rocalution
             if(omega == static_cast<ValueType>(0))
             {
                 LOG_INFO("QMRCGStab omega == 0 !!!");
+
+                // x has moved along d, so the first half step counts as an iteration
+                // residual <= sqrt(#iter+1) * |tau1|
+                res_norm = sqrt(static_cast<double>(this->iter_ctrl_.GetIterationCount() + 1))
+                           * std::abs(tau1);
+                this->iter_ctrl_.CheckResidual(res_norm, this->index_);
                 break;
             }
 
