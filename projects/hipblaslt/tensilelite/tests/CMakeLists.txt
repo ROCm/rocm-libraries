@@ -383,7 +383,7 @@ foreach(PATH fast slow)
 endforeach()
 
 add_cpu_gemm_test(validation_InjectedFailure_Rejected
-    WILL_FAIL
+    EXPECTED_ERROR "FAILED! (max diff:"
     ARGS -M 8 -N 8 -K 8 --type f32 --validate --tryFastPath --injectValidationFailure
 )
 
@@ -548,12 +548,12 @@ foreach(PATH fast slow)
 endforeach()
 
 add_cpu_gemm_test(tf32_MixedA_Rejected
-    WILL_FAIL
+    EXPECTED_ERROR "tf32 is an F32 math-op mode and must be used for both inputs or neither (typeA=tf32, typeB=f32)"
     ARGS -M 16 -N 16 -K 16 --typeA tf32 --typeB f32 --validate
 )
 
 add_cpu_gemm_test(tf32_MixedB_Rejected
-    WILL_FAIL
+    EXPECTED_ERROR "tf32 is an F32 math-op mode and must be used for both inputs or neither (typeA=f32, typeB=tf32)"
     ARGS -M 16 -N 16 -K 16 --typeA f32 --typeB tf32 --validate
 )
 
@@ -561,7 +561,7 @@ add_cpu_gemm_test(tf32_MixedB_Rejected
 #        FP4 / MX Scale tests (fast & slow)     #
 #################################################
 if(NOT WIN32)
-    # M/N similar to f32 tests; K must be a multiple of mxBlock (32).
+    # M/N similar to f32 tests; block-aligned K complements the tail cases below.
     set(F4_SIZES_32 -M 133 -N 147 -K 160)
     set(F4_SIZES_64 -M 133 -N 147 -K 192)
 
@@ -634,11 +634,9 @@ if(NOT WIN32)
         endforeach()
     endforeach()
 
-    # Asymmetric MX (mxBlockA != mxBlockB). K must be a multiple of
-    # lcm(mxBlockA, mxBlockB) — here lcm(32, 64) = 64, which F4_SIZES_64
-    # already satisfies (K=192). Fast path only: the production slow path
-    # collapses the smaller side's per-segment scales (see driver rejection
-    # in runGemm).
+    # Asymmetric MX (mxBlockA != mxBlockB) uses the fast path because the
+    # production slow path collapses the smaller side's per-segment scales
+    # (see driver rejection in runGemm).
     add_cpu_gemm_test(fast_f4_MX_A32_B64_NN
         ARGS ${F4_SIZES_64} --type f4 --mxBlockA 32 --mxBlockB 64 --validate --tryFastPath
     )
@@ -648,13 +646,13 @@ if(NOT WIN32)
 
     # Negative test: slow path must reject asymmetric MX.
     add_cpu_gemm_test(slow_f4_MX_A32_B64_Rejected
-        WILL_FAIL
+        EXPECTED_ERROR "asymmetric MX (mxBlockA=32 != mxBlockB=64) is only supported on the fast path"
         ARGS ${F4_SIZES_64} --type f4 --mxBlockA 32 --mxBlockB 64 --validate
     )
 
     # Negative test: one-sided MX (only A or only B) must be rejected.
     add_cpu_gemm_test(f4_MX_OneSided_Rejected
-        WILL_FAIL
+        EXPECTED_ERROR "--mxBlockA and --mxBlockB must both be > 0"
         ARGS ${F4_SIZES_32} --type f4 --mxBlockA 32 --validate
     )
 
@@ -685,26 +683,76 @@ if(NOT WIN32)
         ARGS -M 3 -N 5 -K 7 --type f4 --validate --tryFastPath
     )
 
-    # Negative tests: invalid K/mxBlock combos should fail with clear error
-    add_cpu_gemm_test(slow_f4_MX32_BadK_Unaligned
-        WILL_FAIL
+    # Partial last MX block, as in mxfp4_mxfp4_bf16_tn_act (K = 333 / 255 / 63,
+    # block 32). Both reference paths stop at K for equal block sizes.
+    foreach(PATH fast slow)
+        if("${PATH}" STREQUAL "fast")
+            set(PATH_FLAGS --tryFastPath)
+        else()
+            set(PATH_FLAGS "")
+        endif()
+        foreach(TRANS NN TN NT TT)
+            get_trans_flags(${TRANS} TFLAGS)
+            add_cpu_gemm_test(${PATH}_f4_MX32_KTail333_${TRANS}
+                ARGS -M 133 -N 147 -K 333 ${TFLAGS} --type f4 --mxBlockA 32 --mxBlockB 32 --validate ${PATH_FLAGS}
+            )
+            # K smaller than the block and not a multiple of the fast path's K tile
+            add_cpu_gemm_test(${PATH}_f4_MX32_KTail7_${TRANS}
+                ARGS -M 33 -N 31 -K 7 ${TFLAGS} --type f4 --mxBlockA 32 --mxBlockB 32 --validate ${PATH_FLAGS}
+            )
+        endforeach()
+        foreach(K 255 63)
+            add_cpu_gemm_test(${PATH}_f4_MX32_KTail${K}_TN
+                ARGS -M 133 -N 147 -K ${K} --transA --type f4 --mxBlockA 32 --mxBlockB 32 --validate ${PATH_FLAGS}
+            )
+        endforeach()
+        add_cpu_gemm_test(${PATH}_f4_MX32_KTail_AllFeatures_TN
+            ARGS -M 133 -N 147 -K 333 --transA --type f4 --mxBlockA 32 --mxBlockB 32 --validate --beta 1.0 --bias --activation relu --scaleAlphaVec ${PATH_FLAGS}
+        )
+        add_cpu_gemm_test(${PATH}_f4_MX32_KTail_ScaleAB_Vector_TN
+            ARGS -M 133 -N 147 -K 333 --transA --type f4 --mxBlockA 32 --mxBlockB 32 --validate --useScaleAB Vector ${PATH_FLAGS}
+        )
+        foreach(TRANS NN TT)
+            get_trans_flags(${TRANS} TFLAGS)
+            add_cpu_gemm_test(${PATH}_f4_MX32_KTail_Batched_${TRANS}
+                ARGS -M 133 -N 147 -K 333 ${TFLAGS} --type f4 --mxBlockA 32 --mxBlockB 32 --validate --batchCount 2 ${PATH_FLAGS}
+            )
+        endforeach()
+        add_cpu_gemm_test(${PATH}_f4_MX16_KTail_NN
+            ARGS -M 133 -N 147 -K 333 --type f4 --mxBlockA 16 --mxBlockB 16 --validate ${PATH_FLAGS}
+        )
+    endforeach()
+    # Asymmetric blocks are supported only on the fast path. K = 160 is a
+    # multiple of 32 but not of 64, so only the 64 side has a partial last block;
+    # K = 333 gives both sides one.
+    add_cpu_gemm_test(fast_f4_MX_A32_B64_KTailB_NN
+        ARGS ${F4_SIZES_32} --type f4 --mxBlockA 32 --mxBlockB 64 --validate --tryFastPath
+    )
+    add_cpu_gemm_test(fast_f4_MX_A64_B32_KTailA_NN
+        ARGS ${F4_SIZES_32} --type f4 --mxBlockA 64 --mxBlockB 32 --validate --tryFastPath
+    )
+    add_cpu_gemm_test(fast_f4_MX_A32_B64_KTail333_TN
+        ARGS -M 133 -N 147 -K 333 --transA --type f4 --mxBlockA 32 --mxBlockB 64 --validate --tryFastPath
+    )
+
+    # Equal MX blocks support a short final segment on the slow path.
+    add_cpu_gemm_test(slow_f4_MX32_KTail33_NN
         ARGS -M 16 -N 16 -K 33 --type f4 --mxBlockA 32 --mxBlockB 32 --validate
     )
 
-    add_cpu_gemm_test(slow_f4_MX32_BadK_TooSmall
-        WILL_FAIL
+    add_cpu_gemm_test(slow_f4_MX32_KTail16_NN
         ARGS -M 16 -N 16 -K 16 --type f4 --mxBlockA 32 --mxBlockB 32 --validate
     )
 
     # Negative test: non-power-of-2 mxBlock should be rejected
     add_cpu_gemm_test(slow_f4_MX6_BadPow2
-        WILL_FAIL
+        EXPECTED_ERROR "mxBlockA (6) must be a power of 2"
         ARGS -M 4 -N 4 -K 12 --type f4 --mxBlockA 6 --mxBlockB 6 --validate
     )
 
     # Negative test: mxBlock with non-FP4 types should be rejected
     add_cpu_gemm_test(slow_f32_MX32_Rejected
-        WILL_FAIL
+        EXPECTED_ERROR "mxBlockA/mxBlockB is only supported for type f4, not f32"
         ARGS -M 16 -N 16 -K 32 --type f32 --mxBlockA 32 --mxBlockB 32 --validate
     )
 endif()
@@ -715,7 +763,7 @@ endif()
 # --outputAmaxD makes the reference also write AMAX-D (max |D| over every
 # batch); the driver checks it against max |D| of the golden GEMM, so the
 # check does not depend on which CPU path ran. The fast path does not support
-# AMAX-D (isFastPathEligible rejects "amaxD"), so these run without
+# AMAX-D (isFastPathEligible rejects it), so these run without
 # --tryFastPath, on the slow path.
 foreach(TYPE f32 f16 bf16)
     get_test_sizes(${TYPE} SIZES)
@@ -953,7 +1001,7 @@ if(NOT WIN32)
                     ${COMPUTE_FLAGS} --alpha 0.01 --useScaleAB Scalar --validate ${PATH_FLAGS})
                 if("${PATH}" STREQUAL "fast")
                     add_cpu_gemm_test(${PATH}_${NAME}_ScaleAB_Scalar_Rejected
-                        EXPECTED_ERROR "--tryFastPath was requested but the problem is not eligible for the fast CPU GEMM path."
+                        EXPECTED_ERROR "Scalar scaling before Half-to-Float8 input narrowing requires the slow path"
                         ARGS ${SCALAR_NARROWING_ARGS}
                     )
                 else()
@@ -995,11 +1043,10 @@ if(NOT WIN32)
         endforeach()
 
         # A perturbed (here saturated) Float8 D element must fail validation.
-        add_test(
-            NAME "CPUGemm.${PATH}_F8_F8_S_InjectedFailure_Rejected"
-            COMMAND cpu-gemm-driver ${F16_SIZES} --type f8 --typeCD f8 --useScaleAB Scalar --validate --injectValidationFailure ${PATH_FLAGS}
+        add_cpu_gemm_test(${PATH}_F8_F8_S_InjectedFailure_Rejected
+            EXPECTED_ERROR "FAILED! (max diff:"
+            ARGS ${F16_SIZES} --type f8 --typeCD f8 --useScaleAB Scalar --validate --injectValidationFailure ${PATH_FLAGS}
         )
-        set_tests_properties("CPUGemm.${PATH}_F8_F8_S_InjectedFailure_Rejected" PROPERTIES WILL_FAIL TRUE)
 
         # Alpha overflows float to infinity; the Float8 output is NaN.
         # Matching NaNs pass, but replacing one with finite 16 must fail.
@@ -1066,11 +1113,10 @@ foreach(PATH fast slow)
         )
     endforeach()
 
-    add_test(
-        NAME "CPUGemm.${PATH}_c_InjectedFailure_Rejected"
-        COMMAND cpu-gemm-driver ${F32_SIZES} --type c --conjA --validate --injectValidationFailure ${PATH_FLAGS}
+    add_cpu_gemm_test(${PATH}_c_InjectedFailure_Rejected
+        EXPECTED_ERROR "FAILED! (max diff:"
+        ARGS ${F32_SIZES} --type c --conjA --validate --injectValidationFailure ${PATH_FLAGS}
     )
-    set_tests_properties("CPUGemm.${PATH}_c_InjectedFailure_Rejected" PROPERTIES WILL_FAIL TRUE)
 endforeach()
 
 #################################################
@@ -1235,6 +1281,19 @@ endforeach()
 add_cpu_gemm_test(slow_I8_I32_I32_Int32BetaBoundary
     ARGS -M 1 -N 1 -K 0 --type i8 --typeCD i32 --typeAlpha i32 --alpha 0 --beta 2147483647 --validate
 )
+
+# A valid GEMM can still require the slow path; explain why forcing fast fails.
+add_cpu_gemm_test(fast_AmaxD_Rejected
+    EXPECTED_ERROR "AMAX-D output is not supported by the fast path"
+    ARGS -M 1 -N 1 -K 1 --type f32 --outputAmaxD --tryFastPath --validate
+)
+
+if(NOT WIN32)
+    add_cpu_gemm_test(fast_f4_MX4_Rejected
+        EXPECTED_ERROR "mxBlockA must be a multiple of the 8-element K tile"
+        ARGS -M 1 -N 1 -K 16 --type f4 --mxBlockA 4 --mxBlockB 4 --tryFastPath --validate
+    )
+endif()
 
 if(COMMAND apply_ctest_category_labels)
     apply_ctest_category_labels(
