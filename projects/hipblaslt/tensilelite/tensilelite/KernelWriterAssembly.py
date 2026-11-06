@@ -21681,22 +21681,28 @@ class KernelWriterAssembly(KernelWriter):
 
     # TODO- select inst
     ds = DSModifiers(offset=amax_lds_start)
+    # Every wave passes two barriers per step: after the upper waves' stores,
+    # and after the lower waves' loads, so that the next step's stores cannot
+    # overwrite a slot before it has been read.
     mod.add(DSStoreB32(vgpr("Tmp"), vgpr("AmaxOut"), ds))
     mod.add(SWaitCnt(dscnt=0))
-    mod.add(SBarrier())
+    mod.add(SBarrier(comment="stores done"))
+    mod.add(SBarrier(comment="loads done"))
     mod.add(SBranch(label_wave_inter.getLabelName()))
     mod.add(label_wave_lower)
-    mod.add(SBarrier())
+    mod.add(SBarrier(comment="stores done"))
     mod.add(VLShiftLeftB32(vgpr("Tmp"), int(log2(amaxOutType.numBytes())), vgpr("Widx")))
 
     # TODO- select inst
     mod.add(DSLoadB32(vgpr("AmaxOutB"), vgpr("Tmp"), ds))
     mod.add(SWaitCnt(dscnt=0))
+    mod.add(SBarrier(comment="loads done"))
     # TODO- F16
     mod.add(VMaxF32(vgpr("AmaxOut"), vgpr("AmaxOut"), vgpr("AmaxOutB")))
     mod.add(SBranch(label_wave_inter.getLabelName()))
     mod.add(label_wave_empty)
-    mod.add(SBarrier())
+    mod.add(SBarrier(comment="stores done"))
+    mod.add(SBarrier(comment="loads done"))
     mod.add(SBranch(label_wave_inter.getLabelName()))
     mod.add(label_wave_end)
     mod.addSpaceLine()
