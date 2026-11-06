@@ -4141,6 +4141,73 @@ def test_superset_import_ragged_offset_values_per_case():
         print("  PASS: superset_import_ragged_offset_values_per_case")
 
 
+def test_superset_import_ragged_offset_multiplier_per_case():
+    """Ragged graphs whose offset multipliers differ share one sweep and keep their own.
+
+    The serialiser writes a multiplier of 1 on every tensor; only linked tensors take it per case.
+    """
+    from bundle_utils import canon, expand_case, remap_graph, uid_map_onto
+
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        bundle_dir = tmp / "bundles"
+        bundle_dir.mkdir()
+        graphs = []
+        for i, multiplier in enumerate((8, 24)):
+            graph = _ragged_graph(seq=4 * (i + 1))
+            for t in graph["tensors"]:
+                linked = t.get("ragged_offset_tensor_uid") is not None
+                t["ragged_offset_multiplier"] = multiplier if linked else 1
+            graphs.append((f"m{multiplier}", graph, multiplier))
+        for i, (name, graph, _) in enumerate(graphs):
+            r = _import_optional(
+                tmp,
+                bundle_dir,
+                name,
+                graph,
+                _ragged_sidecar(graph, 100 * (i + 1), 32, 24),
+                *_SUPERSET_FLAGS,
+                "--topology",
+                "Ragged",
+                "--case-id",
+                name,
+                "--strict",
+            )
+            assert r.returncode == 0, r.stderr
+        (rel,) = _sweep_dirs(bundle_dir)
+        sweep, template = _sweep_and_template(bundle_dir, rel)
+        assert all(
+            t["ragged_offset_multiplier"] == "${case.ragged_offset_multiplier}"
+            for t in template["tensors"]
+            if t.get("ragged_offset_tensor_uid") is not None
+        ), template["tensors"]
+        cases = {c["id"]: c for c in sweep["cases"]}
+        for name, graph, multiplier in graphs:
+            built = expand_case(template, cases[name])
+            assert canon(built) == canon(
+                remap_graph(graph, uid_map_onto(graph, template))
+            ), name
+            assert {
+                t["ragged_offset_multiplier"]
+                for t in built["tensors"]
+                if t.get("ragged_offset_tensor_uid") is not None
+            } == {multiplier}, name
+        plain = [
+            t
+            for t in template["tensors"]
+            if t.get("ragged_offset_tensor_uid") is None
+            and "ragged_offset_multiplier" in t
+        ]
+        assert plain and all(t["ragged_offset_multiplier"] == 1 for t in plain), plain
+        assert all(
+            "ragged_offset_multiplier" not in v
+            for c in sweep["cases"]
+            for v in c["values"]["tensors"]
+            if v["uid"] in {t["uid"] for t in plain}
+        ), sweep["cases"]
+        print("  PASS: superset_import_ragged_offset_multiplier_per_case")
+
+
 def main() -> int:
     verbose = "-v" in sys.argv
     failures = 0
@@ -4212,6 +4279,7 @@ def main() -> int:
         test_remap_graph_remaps_tensor_links,
         test_import_ragged_graph_keeps_offset_links,
         test_superset_import_ragged_offset_values_per_case,
+        test_superset_import_ragged_offset_multiplier_per_case,
     ]
 
     for t in tests:

@@ -74,6 +74,7 @@ from bundle_utils import (
     GROUPED_TOP_LEVEL,
     TENSOR_PATCHES_KEY,
     TENSOR_ALWAYS,
+    TENSOR_RAGGED,
     TENSOR_IF_VARIES,
     IMPORT_MODE_KEY,
     TOP_LEVEL_IF_VARIES,
@@ -108,6 +109,7 @@ from bundle_utils import (
     template_tensor_alignment,
     template_tensor_values,
     template_top_level_fields,
+    per_case_tensor_fields,
     tensors_by_uid,
     tier_for_suite,
     uid_map_onto,
@@ -499,7 +501,7 @@ def _extract_values(graph: dict, template: dict) -> dict:
         uid = tt.get("uid")
         src = tgraph.get(uid, {})
         entry = {"uid": uid}
-        for fld in TENSOR_ALWAYS + TENSOR_IF_VARIES:
+        for fld in TENSOR_ALWAYS + TENSOR_IF_VARIES + TENSOR_RAGGED:
             if isinstance(tt.get(fld), str) and tt[fld].startswith("${case."):
                 if fld in src:
                     entry[fld] = src[fld]
@@ -511,7 +513,10 @@ def _extract_values(graph: dict, template: dict) -> dict:
     for tt in template.get("tensors", []):
         src = tgraph.get(tt.get("uid"), {})
         for fld, tval in tt.items():
-            if fld in TENSOR_ALWAYS + TENSOR_IF_VARIES or fld not in src:
+            if (
+                fld in TENSOR_ALWAYS + TENSOR_IF_VARIES + TENSOR_RAGGED
+                or fld not in src
+            ):
                 continue
             for loc, case_path in _extract_placeholders(tval):
                 if loc == "":
@@ -1202,7 +1207,7 @@ def main(argv=None, cache: ImportCache = None) -> int:
         if fld in template:
             template[fld] = f"${{case.{fld}}}"
     for t in template.get("tensors", []):
-        for fld in TENSOR_ALWAYS:
+        for fld in per_case_tensor_fields(t):
             if fld in t:
                 t[fld] = f"${{case.{fld}}}"
     if args.template_attributes:
