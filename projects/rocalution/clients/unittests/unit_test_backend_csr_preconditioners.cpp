@@ -697,9 +697,7 @@ TYPED_TEST(backend_csr_preconditioners,
 
 // With L = [B 0 0; 0 B 0; 0 B 1], the first sweep of the L^T solve leaves the
 // residual 1 in row 1 and 2^-10 in row 2, so a tolerance of 2^-9 needs more
-// sweeps. The L solve converges in 3 sweeps, which bounds the L^T solve on the host
-// (a known bug), but 3 suffice here. B is 2^20, or 2^12 in float, where B + 2^-10 must be
-// exact.
+// sweeps. B is 2^20, or 2^12 in float, where B + 2^-10 must be exact.
 TYPED_TEST(backend_csr_preconditioners,
            iterative_ll_solve_stops_once_every_residual_is_below_the_tolerance)
 {

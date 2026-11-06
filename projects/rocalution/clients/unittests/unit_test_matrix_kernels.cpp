@@ -1440,8 +1440,7 @@ namespace
 
 TYPED_TEST_SUITE(matrix_kernels_iterative_solves, WithBackends<RealTypes>, TypedName);
 
-// Without a tolerance every solve runs max_iter iterations, so the known bug of the
-// iteration limit does not apply
+// Without a tolerance every solve runs max_iter iterations
 TYPED_TEST(matrix_kernels_iterative_solves, ll_solve_without_a_tolerance)
 {
     using T = typename TypeParam::value_type;
