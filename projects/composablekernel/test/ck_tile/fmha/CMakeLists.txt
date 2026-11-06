@@ -1,15 +1,39 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-# Keep in sync with example/ck_tile/01_fmha/CMakeLists.txt
+set(FMHA_FWD_INSTANCES "tile_fmha_fwd_instances")
+set(FMHA_BWD_INSTANCES "tile_fmha_bwd_instances")
+set(TEST_NAME "test_ck_tile_fmha")
+
+set(FMHA_FWD_SPLITKV_CODEGEN_PY_TEST test_ck_tile_fmha_fwd_splitkv_codegen)
+add_test(
+    NAME ${FMHA_FWD_SPLITKV_CODEGEN_PY_TEST}
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_fmha_fwd_splitkv_codegen.py -v
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+)
+set_tests_properties(${FMHA_FWD_SPLITKV_CODEGEN_PY_TEST}
+    PROPERTIES LABELS "${TEST_NAME};CK_TILE_FMHA_TESTS")
+
+# No FMHA_FWD_ENABLE_APIS check: example/ sets it to "all" under BUILD_TESTING,
+# but only in its own scope, so here it still reads the cache default "fwd".
+# gfx11-generic builds carry the gfx1100 tile too; the test skips itself on any
+# device other than gfx1100.
+if(SUPPORTED_GPU_TARGETS MATCHES "gfx1100|gfx11-generic" AND
+   TARGET ${FMHA_FWD_INSTANCES})
+    set(FMHA_FWD_SPLITKV_GFX1100_TEST test_ck_tile_fmha_fwd_splitkv_gfx1100)
+    add_gtest_executable(${FMHA_FWD_SPLITKV_GFX1100_TEST}
+        test_fmha_fwd_splitkv_gfx1100.cpp)
+    get_test_property(${FMHA_FWD_SPLITKV_GFX1100_TEST} LABELS COMMON_LABELS)
+    set_tests_properties(${FMHA_FWD_SPLITKV_GFX1100_TEST} PROPERTIES
+        LABELS "${COMMON_LABELS};${TEST_NAME};CK_TILE_FMHA_TESTS")
+    target_link_libraries(${FMHA_FWD_SPLITKV_GFX1100_TEST}
+        PRIVATE ${FMHA_FWD_INSTANCES})
+endif()
+
+# Keep the full test matrix in sync with example/ck_tile/01_fmha/CMakeLists.txt.
 if(NOT SUPPORTED_GPU_TARGETS MATCHES "gfx9|gfx12")
     return()
 endif()
-
-set(FMHA_BWD_INSTANCES "tile_fmha_bwd_instances")
-set(FMHA_FWD_INSTANCES "tile_fmha_fwd_instances")
-
-set(TEST_NAME "test_ck_tile_fmha")
 
 function(add_gtest_fwd test_group)
     set(V_TYPES "fp16" "bf16" "fp8bf16" "fp32" "mxfp8" "mxfp4")
