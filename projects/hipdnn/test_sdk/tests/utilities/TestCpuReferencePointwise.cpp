@@ -3835,3 +3835,43 @@ TEST(TestCpuReferencePointwiseCancellation, SoftplusKeepsTheNegativeTail)
 
     EXPECT_NEAR(output.getHostValue(0, 0, 0, 0), 0.0424835f, 1e-7f);
 }
+
+TEST(TestCpuReferencePointwiseCancellation, SoftplusDoesNotUnderflowInFloatCompute)
+{
+    // beta * x = -105, so exp stays representable in double (2.5e-46) but not in float;
+    // log1p(exp(-105)) / 1e-30 = 2.50656e-16. Expected value computed independently in double.
+    Tensor<float> input({1, 1, 1, 1});
+    Tensor<float> output({1, 1, 1, 1});
+    input.fillWithValue(-1.05e32f);
+
+    hipdnn_test_sdk::utilities::ReferencePointwiseBase<
+        hipdnn_test_sdk::utilities::CpuDeviceExecutor<float, float>,
+        float,
+        float>::pointwiseCompute<float, float, float>(PointwiseMode::SOFTPLUS_FWD,
+                                                      output,
+                                                      input,
+                                                      0.0f,
+                                                      std::numeric_limits<float>::max(),
+                                                      0.0f,
+                                                      1.0f,
+                                                      1.0f,
+                                                      1e-30f);
+
+    EXPECT_NEAR(output.getHostValue(0, 0, 0, 0), 2.50655548e-16f, 1e-22f);
+}
+
+TEST(TestCpuReferencePointwiseCancellation, GeluBwdKeepsTheNegativeTail)
+{
+    // 1 + erf(x / sqrt(2)) rounds to 0 for x = -9, which loses the CDF term. The expected gradient
+    // dy * (Phi(x) + x * phi(x)) = -913.8937557 was computed independently with erfc in double.
+    Tensor<float> dy({1, 1, 1, 1});
+    Tensor<float> x({1, 1, 1, 1});
+    Tensor<float> output({1, 1, 1, 1});
+    dy.fillWithValue(1e20f);
+    x.fillWithValue(-9.0f);
+
+    CpuReferencePointwiseImpl<float, float, float>::pointwiseCompute(
+        PointwiseMode::GELU_BWD, output, dy, x);
+
+    EXPECT_NEAR(output.getHostValue(0, 0, 0, 0), -913.8937557f, 1e-2f);
+}

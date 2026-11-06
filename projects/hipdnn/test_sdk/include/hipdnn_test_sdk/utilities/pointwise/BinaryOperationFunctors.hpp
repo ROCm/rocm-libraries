@@ -282,7 +282,6 @@ struct GeluBackward
     template <typename Dy, typename X>
     OutputType operator()(const Dy& dy, const X& x) const
     {
-        using hipdnn_data_sdk::types::erf;
         using hipdnn_data_sdk::types::exp;
         using hipdnn_data_sdk::types::sqrt;
         auto dyCompute = static_cast<ComputeType>(dy);
@@ -291,7 +290,11 @@ struct GeluBackward
         // d/dx [x * Phi(x)] = Phi(x) + x * phi(x), with Phi the standard normal CDF and phi its PDF
         static const ComputeType s_kInvSqrt2Pi
             = ComputeType{1} / sqrt(ComputeType{2} * static_cast<ComputeType>(PI));
-        auto cdf = ComputeType{0.5} * (ComputeType{1} + erf(xCompute / sqrt(ComputeType{2})));
+        // Phi(x) = 0.5 * erfc(-x / sqrt(2)); unlike 1 + erf(...), erfc keeps the negative tail
+        // when erf rounds to -1.
+        auto cdf = ComputeType{0.5}
+                   * hipdnn_test_sdk::detail::safeConvert<ComputeType>(
+                       std::erfc(-static_cast<double>(xCompute) / std::sqrt(2.0)));
         auto pdf = exp(ComputeType{-0.5} * xCompute * xCompute) * s_kInvSqrt2Pi;
         return static_cast<OutputType>(dyCompute * (cdf + xCompute * pdf));
     }

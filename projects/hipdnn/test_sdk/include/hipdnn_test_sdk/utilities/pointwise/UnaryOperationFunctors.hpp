@@ -14,7 +14,7 @@ namespace hipdnn_test_sdk::utilities::pointwise
 {
 
 // Defined here because M_PI is not portable across compilers.
-inline constexpr double PI = 3.14159265;
+inline constexpr double PI = 3.14159265358979323846;
 
 // Unary operations with explicit ComputeType and OutputType
 // ComputeType: The type used for intermediate calculations
@@ -320,19 +320,17 @@ struct SoftplusForward
     template <typename X>
     OutputType operator()(const X& x) const
     {
-        using hipdnn_data_sdk::types::exp;
         auto xCompute = static_cast<ComputeType>(x);
-        auto scaled = beta * xCompute;
-        // Softplus(x) = log1p(exp(beta * x)) / beta. log1p avoids rounding 1 + exp(...) to 1 for
-        // very negative beta * x. Fall back to x above a threshold of 20, where log1p(exp(s)) / beta
-        // is indistinguishable from x. This also avoids overflow in exp (the same value is used in
-        // PyTorch's Softplus).
-        ComputeType result = scaled > ComputeType{20}
-                                 ? xCompute
-                                 : hipdnn_test_sdk::detail::safeConvert<ComputeType>(
-                                       std::log1p(static_cast<double>(exp(scaled))))
-                                       / beta;
-        return static_cast<OutputType>(result);
+        // Softplus(x) = log1p(exp(beta * x)) / beta, evaluated in double until the final result so
+        // neither exp nor the division by beta underflows in a narrower compute type. log1p avoids
+        // rounding 1 + exp(...) to 1 for very negative beta * x. Fall back to x above a threshold of
+        // 20, where log1p(exp(s)) / beta is indistinguishable from x. This also avoids overflow in
+        // exp (the same value is used in PyTorch's Softplus).
+        const auto betaDouble = static_cast<double>(beta);
+        const auto xDouble = static_cast<double>(xCompute);
+        const double scaled = betaDouble * xDouble;
+        const double result = scaled > 20.0 ? xDouble : std::log1p(std::exp(scaled)) / betaDouble;
+        return static_cast<OutputType>(hipdnn_test_sdk::detail::safeConvert<ComputeType>(result));
     }
 };
 
