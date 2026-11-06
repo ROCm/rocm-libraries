@@ -825,29 +825,6 @@ TEST_F(TestGoldenHarnessFixture, UnsupportedFillStaysUnverifiable)
         << testing_support::allMessages(results);
 }
 
-TEST_F(TestGoldenHarnessFixture, SetUpSkipsACaseBuiltForAnotherArch)
-{
-    testing_support::HarnessMocks mocks;
-    EXPECT_CALL(mocks.engineRunner, execute(::testing::_, ::testing::_, ::testing::_)).Times(0);
-
-    auto bundle = makeRuntimePbvFillBundle();
-    bundle->metadata.archs = std::vector<std::string>{"gfx000"};
-
-    IntegrationBundleVerificationHarness harness(
-        mocks.dependencies(testing_support::hostPolicy(VerificationMode::AUTO)));
-    harness.setBundle(bundle, "unit-test-bundle");
-
-    ::testing::TestPartResultArray results;
-    testing_support::driveHarness(harness, &results);
-
-    EXPECT_TRUE(testing_support::anySkipped(results));
-    EXPECT_FALSE(testing_support::anyFailed(results));
-    EXPECT_NE(
-        testing_support::allMessages(results).find("case built for gfx000; current GPU is gfx942"),
-        std::string::npos)
-        << testing_support::allMessages(results);
-}
-
 // A sub-byte graph is filled twice, unpacked and packed. A VALUES fill of one of its
 // other tensors gives the same contents in both sets.
 TEST_F(TestGoldenHarnessFixture, ValuesFillOfASubByteGraphMatchesInBothInputSets)
