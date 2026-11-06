@@ -253,6 +253,8 @@ TensorSpec& written(ConvGraphSpec& spec)
         return spec.x;
     case ConvDirection::BACKWARD_WEIGHTS:
         return spec.w;
+    default:
+        break;
     }
     return spec.y;
 }
@@ -494,6 +496,8 @@ PackSymbols packFor(ConvDirection direction)
                 "conv_naive.x.uid",
                 "conv_naive.w.uid",
                 "conv_naive.y.uid"};
+    default:
+        break;
     }
     return {};
 }

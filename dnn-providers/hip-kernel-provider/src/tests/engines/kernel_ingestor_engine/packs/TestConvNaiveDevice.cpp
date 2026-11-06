@@ -56,6 +56,8 @@ std::string directionTag(ConvDirection direction)
         return "BWD";
     case ConvDirection::BACKWARD_WEIGHTS:
         return "WRW";
+    default:
+        break;
     }
     return "";
 }
@@ -299,6 +301,8 @@ void runCase(ConvShape shape, ConvDirection direction)
         w.fillWithSentinelValue();
         writtenTensor = &w;
         break;
+    default:
+        break;
     }
 
     const std::array<hipdnnPluginDeviceBuffer_t, 3> buffers{
@@ -350,6 +354,8 @@ void runCase(ConvShape shape, ConvDirection direction)
             // The cross-correlation gradient of the reflected filter, reflected back.
             reflectFilter(reference, reflectedW);
         }
+        break;
+    default:
         break;
     }
     Tensor<T>& expectedTensor

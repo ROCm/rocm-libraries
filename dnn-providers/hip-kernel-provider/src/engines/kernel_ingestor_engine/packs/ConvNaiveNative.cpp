@@ -86,6 +86,8 @@ std::string_view directionName(ConvDirection direction)
         return "BWD";
     case ConvDirection::BACKWARD_WEIGHTS:
         return "WRW";
+    default:
+        break;
     }
     return "";
 }

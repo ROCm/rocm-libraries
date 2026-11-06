@@ -230,6 +230,8 @@ inline flatbuffers::FlatBufferBuilder buildGraph(const ConvGraphSpec& spec)
                                                                         spec.mode)
                          .Union();
         break;
+    default:
+        break;
     }
 
     std::vector<::flatbuffers::Offset<data_objects::Node>> nodes;

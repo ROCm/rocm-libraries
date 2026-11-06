@@ -91,6 +91,8 @@ std::optional<ConvFields> convFields(const MatchContext& context, ConvDirection 
             = {attributes.x_tensor_uid(), attributes.w_tensor_uid(), attributes.y_tensor_uid()};
         fields.writtenUid = attributes.y_tensor_uid();
         return fields;
+    default:
+        break;
     }
     case ConvDirection::BACKWARD_DATA:
     {
@@ -277,7 +279,8 @@ void fillStrides(const Operand& operand,
     const int64_t missing = CONV_NAIVE_SPATIAL_DIMS - spatialRank;
     for(int64_t axis = 0; axis < CONV_NAIVE_SPATIAL_DIMS; ++axis)
     {
-        strides[2 + axis] = axis < missing ? 0 : operand.strides[2 + axis - missing];
+        strides[2 + axis]
+            = axis < missing ? 0 : operand.strides[static_cast<size_t>(2 + axis - missing)];
     }
 }
 
@@ -304,6 +307,8 @@ std::string_view engineName(ConvDirection direction)
         return "hipkernel:CONV_NAIVE_BWD";
     case ConvDirection::BACKWARD_WEIGHTS:
         return "hipkernel:CONV_NAIVE_WRW";
+    default:
+        break;
     }
     return "";
 }
@@ -465,6 +470,8 @@ std::optional<ConvNaiveProblem> parseConvNaiveProblem(const MatchContext& contex
         break;
     case ConvDirection::BACKWARD_WEIGHTS:
         total = pack_features::checkedProduct({k, cPerGroup, *filterElements});
+        break;
+    default:
         break;
     }
     const auto macs
