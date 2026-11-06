@@ -1,17 +1,26 @@
 {
-    "generated_on": "14 Sep 2026, 06:02:26",
+    "generated_on": "05 Nov 2026, 11:45:37",
     "gpu": {
         "num_cu": 256,
         "arch": "gfx950_gfx1250"
     },
     "version_info": {
-        "miopen_version": "91815205"
+        "miopen_version": [
+            "3261e604",
+            "39f12521",
+            "47ea60e6",
+            "67d0cddf",
+            "a6581bb0",
+            "c6f41a64",
+            "f0a5d266",
+            "inf"
+        ]
     },
     "source": "perf_db",
     "device_run_id": 335,
     "num_inputs": 27,
-    "num_solvers": 12,
-    "num_outputs": 12,
+    "num_solvers": 13,
+    "num_outputs": 13,
     "encodings": {
         "in_layout": {
             "NCDHW": 0,
@@ -40,15 +49,16 @@
             "ConvDirectNaiveConvBwd": 0,
             "ConvDirectNaiveConvFwd": 1,
             "ConvDirectNaiveConvWrw": 2,
-            "ConvHipImplicitGemm3DGroupBwdXdlops": 3,
-            "ConvHipImplicitGemm3DGroupFwdXdlops": 4,
-            "ConvHipImplicitGemm3DGroupWrwXdlops": 5,
-            "GemmBwd1x1_stride1": 6,
-            "GemmBwdRest": 7,
-            "GemmFwd1x1_0_1": 8,
-            "GemmFwdRest": 9,
-            "GemmWrw1x1_stride1": 10,
-            "GemmWrwUniversal": 11
+            "ConvHipConv": 3,
+            "ConvHipImplicitGemm3DGroupBwdXdlops": 4,
+            "ConvHipImplicitGemm3DGroupFwdXdlops": 5,
+            "ConvHipImplicitGemm3DGroupWrwXdlops": 6,
+            "GemmBwd1x1_stride1": 7,
+            "GemmBwdRest": 8,
+            "GemmFwd1x1_0_1": 9,
+            "GemmFwdRest": 10,
+            "GemmWrw1x1_stride1": 11,
+            "GemmWrwUniversal": 12
         }
     },
     "conv_params_used_as_features": [
@@ -91,15 +101,16 @@
             "0": "ConvDirectNaiveConvBwd",
             "1": "ConvDirectNaiveConvFwd",
             "2": "ConvDirectNaiveConvWrw",
-            "3": "ConvHipImplicitGemm3DGroupBwdXdlops",
-            "4": "ConvHipImplicitGemm3DGroupFwdXdlops",
-            "5": "ConvHipImplicitGemm3DGroupWrwXdlops",
-            "6": "GemmBwd1x1_stride1",
-            "7": "GemmBwdRest",
-            "8": "GemmFwd1x1_0_1",
-            "9": "GemmFwdRest",
-            "10": "GemmWrw1x1_stride1",
-            "11": "GemmWrwUniversal"
+            "3": "ConvHipConv",
+            "4": "ConvHipImplicitGemm3DGroupBwdXdlops",
+            "5": "ConvHipImplicitGemm3DGroupFwdXdlops",
+            "6": "ConvHipImplicitGemm3DGroupWrwXdlops",
+            "7": "GemmBwd1x1_stride1",
+            "8": "GemmBwdRest",
+            "9": "GemmFwd1x1_0_1",
+            "10": "GemmFwdRest",
+            "11": "GemmWrw1x1_stride1",
+            "12": "GemmWrwUniversal"
         }
     },
     "input_params": [
