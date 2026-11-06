@@ -56,7 +56,11 @@ namespace
             hn::Tensor stored(type, hn::Layout(hn::Shape{batches, m, n}, {stride, 1, ld}, 0));
             std::vector<hn::FreivaldsPlan>    plans;
             const hn::ScalarConversionOptions conversion{hn::IntegerRounding::TowardZero,
-                                                         hn::IntegerOverflow::Saturate};
+                                                         hn::IntegerOverflow::Saturate,
+                                                         hn::BFloat16Rounding::NearestEven,
+                                                         hn::FloatingSourcePrecision::Float32,
+                                                         hn::FloatingOverflow::FormatDefault,
+                                                         hn::E8M0Underflow::Nearest};
             for(size_t batch = 0; batch < batches; ++batch)
             {
                 hn::Tensor a(hn::ScalarType::Float32, hn::Shape{m, k});

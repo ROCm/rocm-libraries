@@ -6,15 +6,15 @@
 namespace scalar_codec_test {
 void testNearestEvenIgnoresHostRoundingMode() {
     const RoundingModeRestore restore;
-    const ScalarConversionOptions nearestEvenIdentity{
+    const IntegerConversionOptions nearestEvenIdentity{
         IntegerRounding::NearestEven,
         IntegerOverflow::Identity,
     };
-    const ScalarConversionOptions nearestEvenSaturate{
+    const IntegerConversionOptions nearestEvenSaturate{
         IntegerRounding::NearestEven,
         IntegerOverflow::Saturate,
     };
-    const ScalarConversionOptions nearestEvenWrap{
+    const IntegerConversionOptions nearestEvenWrap{
         IntegerRounding::NearestEven,
         IntegerOverflow::ModuloWrap,
     };
