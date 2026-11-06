@@ -49,7 +49,6 @@ import pytest
 _HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(_HERE))
 from test_portable_ir import _env, _online_lib, _replay_cli, _run  # noqa: E402
-from rocke.tests.arch_marks import arch_specific  # noqa: E402
 from rocke.tests.subprocess_launcher import rocke_python_command  # noqa: E402
 
 _DRIVER = "rocke.portable_ir.drivers.roll_hsaco_parity"
@@ -97,11 +96,8 @@ def _run_driver(*extra):
 
 
 @pytest.mark.integration
-@arch_specific(
-    ("gfx950",),
-    reason="the rolled sample set includes the gfx950 attention family; gfx942 needs its own axis count",
-)
-def test_roll_sha_parity():
+@pytest.mark.parametrize("arch", ARCHS)
+def test_roll_sha_parity(arch, roll_arch):
     """Rolled .ll digest == Python .ll digest, sampled and held-out.
 
     The primary rolled-path gate: four families, seven axes, 22 points. Stops at
@@ -118,11 +114,8 @@ def test_roll_sha_parity():
 
 
 @pytest.mark.integration
-@arch_specific(
-    ("gfx950",),
-    reason="the HSACO lane rolls the gfx950 attention family; gfx942 needs its own baseline",
-)
-def test_roll_hsaco_parity():
+@pytest.mark.parametrize("arch", ARCHS)
+def test_roll_hsaco_parity(arch, roll_arch):
     """The rolled recipe compiles to a byte-identical HSACO.
 
     The digest lane above compares IR text; this compares the object code the
@@ -439,11 +432,8 @@ def test_regimes_do_not_oversplit_a_uniform_real_axis(arch, roll_arch):
     assert r.regimes[0].sampled == vals[:2]
 
 
-@arch_specific(
-    ("gfx950",),
-    reason="the axis counts come from the gfx950 attention_dense spec validation",
-)
-def test_axis_domains_come_from_the_kernels_own_validation():
+@pytest.mark.parametrize("arch", ARCHS)
+def test_axis_domains_come_from_the_kernels_own_validation(arch):
     """What an axis is worth is a property of the kernel, not of a driver table.
 
     Rolling an axis saves one concrete recipe per value the axis legally takes, so
@@ -451,7 +441,11 @@ def test_axis_domains_come_from_the_kernels_own_validation():
     order of magnitude, not an exact set) because the point is the ranking: the
     axes already rolled have large domains, while `block_n` is capped by having to
     divide `seqlen_kv` and `head_size` accepts two values in total."""
-    from kernels.gfx950.attention_dense import AttentionDenseSpec
+    import importlib
+
+    AttentionDenseSpec = importlib.import_module(
+        f"kernels.{arch}.attention_dense"
+    ).AttentionDenseSpec
 
     from rocke.portable_ir.src.roll_regimes import legal_values
 
