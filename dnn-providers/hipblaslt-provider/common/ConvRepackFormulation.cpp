@@ -157,10 +157,26 @@ std::vector<int64_t> packedStrides(const std::vector<int64_t>& dims)
     return strides;
 }
 
+/// True when @p operand's channel axis is outside every spatial axis it actually walks: a
+/// channels-first layout.
+bool channelsOutermost(const ConvOperand& operand)
+{
+    for(size_t axis = 2; axis < operand.dims.size(); ++axis)
+    {
+        if(operand.dims[axis] > 1 && operand.strides[axis] > operand.strides[1])
+        {
+            return false;
+        }
+    }
+    return operand.dims[1] > 1;
+}
+
 /// Everything about a problem's IM2COL plan that does not depend on how its images are sliced.
 struct ColumnForm
 {
     bool channelsInner = false;
+    /// The column matrix is laid out like a channels-first tensor (positions innermost).
+    bool columnsFirst = false;
     int64_t filterUnitStride = 0;
     int64_t taps = 0;
     int64_t outputs = 0;
@@ -191,7 +207,11 @@ std::optional<ConvGemmStage> sliceStage(const ConvProblem& problem,
     // positions of `count` images.
     std::vector<int64_t> colDims{count, form.columns};
     colDims.insert(colDims.end(), problem.output.begin(), problem.output.end());
-    ConvOperand col{form.colUid, colDims, channelsLastStrides(colDims), std::nullopt, 0};
+    ConvOperand col{form.colUid,
+                    colDims,
+                    form.columnsFirst ? packedStrides(colDims) : channelsLastStrides(colDims),
+                    std::nullopt,
+                    0};
     if(form.colType != problem.dataType)
     {
         col.dataType = form.colType;
@@ -218,6 +238,7 @@ std::optional<ConvGemmStage> sliceStage(const ConvProblem& problem,
     ConvGemmStage stage;
     auto geometry = geometryFor(problem, form.channelsInner);
     geometry.n = count;
+    geometry.columnsFirst = form.columnsFirst ? 1 : 0;
     const int64_t xByteOffset = first * problem.x.strides[0] * bytes;
     if(problem.direction == ConvDirection::BACKWARD_DATA)
     {
@@ -264,15 +285,31 @@ std::optional<ConvGemmStage> sliceStage(const ConvProblem& problem,
         columnProblem.y = staged;
     }
 
-    auto calls = directGemmCalls(columnProblem);
-    if(!calls.has_value() || calls->stages.size() != 1)
+    // Channels-first backward weights reduces over images, which no single channels-first GEMM
+    // reads: one GEMM per image, each adding to the one before.
+    const bool perImage = problem.direction == ConvDirection::BACKWARD_WEIGHTS && form.columnsFirst
+                          && count > 1 && !stageY;
+    for(int64_t image = 0; image < (perImage ? count : 1); ++image)
     {
-        return std::nullopt;
-    }
-    stage.calls = std::move(calls->stages[0].calls);
-    for(auto& call : stage.calls)
-    {
-        call.accumulate = accumulate;
+        ConvProblem imageProblem = columnProblem;
+        if(perImage)
+        {
+            imageProblem.n = 1;
+            imageProblem.x.dims[0] = 1;
+            imageProblem.x.offset = image * col.strides[0];
+            imageProblem.y.dims[0] = 1;
+            imageProblem.y.offset = ySlice.offset + image * problem.y.strides[0];
+        }
+        auto calls = directGemmCalls(imageProblem);
+        if(!calls.has_value() || calls->stages.size() != 1)
+        {
+            return std::nullopt;
+        }
+        for(auto& call : calls->stages[0].calls)
+        {
+            call.accumulate = accumulate || image > 0;
+            stage.calls.push_back(call);
+        }
     }
     return stage;
 }
@@ -378,13 +415,21 @@ std::optional<ConvGemmPlanCalls> im2colGemmCalls(const ConvProblem& problem,
                                              : std::min(problem.n, (cap - fixed) / perImage);
     };
 
-    // Whether y has to be staged does not depend on the slice size except through the number of
-    // images, so probe at the largest slice the cap allows without staging.
+    // The column matrix takes y's layout, so the GEMM reads both along the same axis: for
+    // channels-first y, positions innermost, which keeps a long reduction over positions
+    // contiguous in both operands. Whether that layout, or y as given, can be read does not
+    // depend on the slice size except through the number of images, so probe at the largest
+    // slice the cap allows; fall back to a channels-last column matrix, then to staging y.
     bool stageY = false;
     int64_t slice = imagesWithin(*colImageBytes, 0);
     if(slice == 0)
     {
         return std::nullopt;
+    }
+    form.columnsFirst = channelsOutermost(problem.y);
+    if(form.columnsFirst && !sliceStage(problem, form, 0, slice, false, filter, false).has_value())
+    {
+        form.columnsFirst = false;
     }
     if(!sliceStage(problem, form, 0, slice, false, filter, false).has_value())
     {

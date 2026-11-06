@@ -134,7 +134,26 @@ TEST(TestConvRepackFormulation, BackwardWeightsChannelsLastNeedsNoStaging)
     EXPECT_EQ(calls->workspace.size(), 1u);
 }
 
-TEST(TestConvRepackFormulation, ChannelsFirstBackwardWeightsStagesDyChannelsLast)
+TEST(TestConvRepackFormulation, ColumnMatrixTakesTheLayoutOfY)
+{
+    for(const bool last : {false, true})
+    {
+        for(const auto direction : ALL_DIRECTIONS)
+        {
+            const auto calls = plan(last ? channelsLast(padded3x3()) : padded3x3(), direction);
+            ASSERT_TRUE(calls.has_value());
+            const auto& stage = calls->stages[0];
+            const auto& step
+                = direction == ConvDirection::BACKWARD_DATA ? stage.after[0] : stage.before[0];
+            const auto& geometry = direction == ConvDirection::BACKWARD_DATA
+                                       ? stepArgs<Col2ImArgs>(step)->geometry
+                                       : stepArgs<Im2ColArgs>(step)->geometry;
+            EXPECT_EQ(geometry.columnsFirst, last ? 0 : 1) << "channels last " << last;
+        }
+    }
+}
+
+TEST(TestConvRepackFormulation, ChannelsFirstBackwardWeightsIsOneGemmPerImage)
 {
     for(const auto& shape : {padded3x3(), ConvGemmShape{}})
     {
@@ -142,24 +161,53 @@ TEST(TestConvRepackFormulation, ChannelsFirstBackwardWeightsStagesDyChannelsLast
         ASSERT_TRUE(calls.has_value());
         EXPECT_EQ(calls->row, ConvGemmRow::IM2COL);
         ASSERT_EQ(calls->stages.size(), 1u);
-        const auto& before = calls->stages[0].before;
-        ASSERT_EQ(before.size(), 2u);
-        EXPECT_NE(stepArgs<Im2ColArgs>(before[0]), nullptr);
-        const auto* copy = stepArgs<StridedCopyArgs>(before[1]);
-        ASSERT_NE(copy, nullptr);
-        EXPECT_EQ(before[1].srcUid, CONV_Y_UID);
-        ASSERT_EQ(calls->workspace.size(), 2u);
-        EXPECT_EQ(before[1].dstUid, calls->workspace[1].uid);
-        // dy (n, k, h, w) lands channels-last: k innermost.
-        EXPECT_EQ(copy->dstStrides[1], 1);
-        EXPECT_EQ(copy->dstStrides[3], shape.k);
+        const auto& stage = calls->stages[0];
+        // Only im2col: dy is read as given, no staging copy.
+        ASSERT_EQ(stage.before.size(), 1u);
+        EXPECT_NE(stepArgs<Im2ColArgs>(stage.before[0]), nullptr);
+        EXPECT_EQ(calls->workspace.size(), 1u);
+        // One GEMM per image (2), the second adding to the first.
+        ASSERT_EQ(stage.calls.size(), static_cast<size_t>(shape.n));
+        EXPECT_FALSE(stage.calls[0].accumulate);
+        EXPECT_TRUE(stage.calls[1].accumulate);
+        EXPECT_NE(stage.calls[0].a.offset + stage.calls[0].b.offset,
+                  stage.calls[1].a.offset + stage.calls[1].b.offset);
+    }
+}
+
+TEST(TestConvRepackFormulation, ImagesThatDoNotNestStageDyForBackwardWeights)
+{
+    // Forward and backward data still read y one image at a time; backward weights reduces
+    // over every image's pixels, which needs them in one stride, so dy is staged.
+    ConvGemmShape shape = channelsLast(padded3x3());
+    shape.n = 3;
+    shape.imagePadding = 5;
+    for(const auto direction : ALL_DIRECTIONS)
+    {
+        const auto calls = plan(shape, direction);
+        ASSERT_TRUE(calls.has_value());
+        ASSERT_EQ(calls->stages.size(), 1u);
+        const auto& stage = calls->stages[0];
+        long copies = 0;
+        for(const auto* steps : {&stage.before, &stage.after})
+        {
+            copies += std::count_if(steps->begin(), steps->end(), [](const RepackStep& step) {
+                return std::holds_alternative<StridedCopyArgs>(step.args);
+            });
+        }
+        const bool staged = direction == ConvDirection::BACKWARD_WEIGHTS;
+        EXPECT_EQ(copies, staged ? 1 : 0);
+        EXPECT_EQ(calls->workspace.size(), staged ? 2u : 1u);
     }
 }
 
 TEST(TestConvRepackFormulation, WorkspaceTensorsAreAlignedAndDisjoint)
 {
-    const auto calls = plan(padded3x3(), ConvDirection::BACKWARD_WEIGHTS);
+    ConvGemmShape staged = channelsLast(padded3x3());
+    staged.imagePadding = 5;
+    const auto calls = plan(staged, ConvDirection::BACKWARD_WEIGHTS);
     ASSERT_TRUE(calls.has_value());
+    ASSERT_EQ(calls->workspace.size(), 2u);
     size_t end = 0;
     for(const auto& tensor : calls->workspace)
     {
@@ -322,7 +370,7 @@ TEST(TestConvRepackFormulation, UnslicedPlansWriteTheirOutputOnce)
 {
     for(const auto direction : ALL_DIRECTIONS)
     {
-        const auto calls = plan(padded3x3(), direction);
+        const auto calls = plan(channelsLast(padded3x3()), direction);
         ASSERT_TRUE(calls.has_value());
         ASSERT_EQ(calls->stages.size(), 1u);
         for(const auto& call : calls->stages[0].calls)

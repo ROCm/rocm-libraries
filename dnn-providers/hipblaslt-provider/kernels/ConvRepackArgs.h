@@ -42,11 +42,14 @@ struct StridedCastArgs
 /// The convolution geometry im2col and col2im share. Every problem is described as 3-D: missing
 /// leading spatial axes have extent 1, pad 0, stride 1, dilation 1 and tensor stride 0.
 ///
-/// The column matrix is packed row-major: one row per (image, output position), r = n *
-/// outputSize + o, and one column per (group, channel, filter element), column = g * cPerGroup
-/// * filterSize + (channelsInner ? e * cPerGroup + c : c * filterSize + e) -- the order of the
-/// filter's own layout (KRSC or KCRS) so the GEMM reads the filter in place. Filter element e
-/// reads the input through tap e, or through tap filter - 1 - e for true convolution.
+/// The column matrix has one row per (image, output position) and one column per (group,
+/// channel, filter element), column = g * cPerGroup * filterSize + (channelsInner ? e *
+/// cPerGroup + c : c * filterSize + e) -- the order of the filter's own layout (KRSC or KCRS) so
+/// the GEMM reads the filter in place. It is packed per image, positions innermost when
+/// columnsFirst (element at (n * columns + column) * outputSize + o, like a channels-first
+/// tensor) and columns innermost otherwise (at (n * outputSize + o) * columns + column, like a
+/// channels-last one). Filter element e reads the input through tap e, or through tap
+/// filter - 1 - e for true convolution.
 struct ConvColumnGeometry
 {
     long long n;
@@ -62,6 +65,8 @@ struct ConvColumnGeometry
     long long xStrides[5];
     int channelsInner;
     int flipFilter;
+    int columnsFirst;
+    int padding0;
 };
 
 /// col[r, column] = the input element row r's output position reads through the column's filter

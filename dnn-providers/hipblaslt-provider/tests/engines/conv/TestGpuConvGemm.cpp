@@ -240,6 +240,12 @@ std::vector<ConvCase> convCases()
 
     ConvGemmShape pointGroupedNhwc = channelsLast(pointGrouped);
     add("PointOutputNhwcGrouped", pointGroupedNhwc);
+
+    // Images that do not nest into one stride: y is staged channels-last for the GEMM.
+    ConvGemmShape gappedImages = channelsLast(padded);
+    gappedImages.n = 3;
+    gappedImages.imagePadding = 5;
+    add("Padded3x3NhwcGappedImages", gappedImages);
     return cases;
 }
 
@@ -402,9 +408,13 @@ void runCase(ConvCase convCase, Backend backend, bool sliced = false)
     builder.buildPlan(*handle, graph.graph(), context);
     const size_t workspaceBytes = context.plan().getWorkspaceSize(*handle);
 
-    Tensor<T> x(shape.xDims(), convPackedStrides(shape.xDims(), shape.xChannelsLast));
+    auto xStrides = convPackedStrides(shape.xDims(), shape.xChannelsLast);
+    auto yStrides = convPackedStrides(shape.yDims(), shape.yChannelsLast);
+    xStrides[0] += shape.imagePadding;
+    yStrides[0] += shape.imagePadding;
+    Tensor<T> x(shape.xDims(), xStrides);
     Tensor<T> w(shape.wDims(), convPackedStrides(shape.wDims(), shape.wChannelsLast));
-    Tensor<T> y(shape.yDims(), convPackedStrides(shape.yDims(), shape.yChannelsLast));
+    Tensor<T> y(shape.yDims(), yStrides);
     Tensor<T>* written = nullptr;
     switch(convCase.direction)
     {
@@ -572,7 +582,8 @@ std::vector<ConvCase> slicedCases()
                                 "Grouped3x3Nchw",
                                 "StridedDilatedAsymmetricNchw",
                                 "ConvolutionModeNhwc",
-                                "Conv3dNcdhw"})
+                                "Conv3dNcdhw",
+                                "Padded3x3NhwcGappedImages"})
         {
             if(convCase.name.rfind(name, 0) == 0
                && convCase.name.size() == std::string(name).size() + 3)

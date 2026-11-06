@@ -41,6 +41,9 @@ struct ConvGemmShape
     /// The filter's own layout: KCRS (false) or KRSC (true).
     bool wChannelsLast = false;
     bool yChannelsLast = false;
+    /// Unused elements between consecutive images of x and y, so their images do not nest
+    /// into one stride with the rest of the tensor.
+    int64_t imagePadding = 0;
     conv_data_objects::DataType dataType = conv_data_objects::DataType::FLOAT;
     conv_data_objects::ConvMode mode = conv_data_objects::ConvMode::CROSS_CORRELATION;
 
@@ -111,9 +114,11 @@ inline flatbuffers::FlatBufferBuilder buildConvGemmGraph(const ConvGemmShape& sh
     const auto xDims = shape.xDims();
     const auto wDims = shape.wDims();
     const auto yDims = shape.yDims();
-    const auto xStrides = convPackedStrides(xDims, shape.xChannelsLast);
+    auto xStrides = convPackedStrides(xDims, shape.xChannelsLast);
     const auto wStrides = convPackedStrides(wDims, shape.wChannelsLast);
-    const auto yStrides = convPackedStrides(yDims, shape.yChannelsLast);
+    auto yStrides = convPackedStrides(yDims, shape.yChannelsLast);
+    xStrides[0] += shape.imagePadding;
+    yStrides[0] += shape.imagePadding;
 
     flatbuffers::FlatBufferBuilder builder;
     std::vector<flatbuffers::Offset<conv_data_objects::TensorAttributes>> tensors{

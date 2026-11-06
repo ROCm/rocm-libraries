@@ -105,8 +105,12 @@ __device__ void im2col(const Im2ColArgs& args)
 
     for(long long index = firstThread(); index < args.total; index += threadStride())
     {
-        const long long column = index % columns;
-        const long long row = index / columns;
+        // Threads walk the column matrix in its own storage order, so writes are contiguous.
+        const long long column
+            = g.columnsFirst != 0 ? (index / outputs) % columns : index % columns;
+        const long long row = g.columnsFirst != 0
+                                  ? (index / (outputs * columns)) * outputs + index % outputs
+                                  : index / columns;
 
         const long long group = column / (g.cPerGroup * taps);
         const long long inGroup = column % (g.cPerGroup * taps);
@@ -183,8 +187,10 @@ __device__ void col2im(const Col2ImArgs& args)
                         = ((s0 / g.stride[0]) * g.output[1] + s1 / g.stride[1]) * g.output[2]
                           + s2 / g.stride[2];
                     const long long element = (e0 * g.filter[1] + e1) * g.filter[2] + e2;
-                    sum += args.col[(n * outputs + position) * columns
-                                    + columnOf(g, group, channel, element)];
+                    const long long column = columnOf(g, group, channel, element);
+                    sum += args.col[g.columnsFirst != 0
+                                        ? (n * columns + column) * outputs + position
+                                        : (n * outputs + position) * columns + column];
                 }
             }
         }
