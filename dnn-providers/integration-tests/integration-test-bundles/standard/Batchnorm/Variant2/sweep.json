@@ -8140,6 +8140,1084 @@
         "notes": "Derived from bundle case 1_3_14_14_fp32_nchw with dims 1x64x65x65",
         "reference_source": "hipDNN regression: HIP_MLOPS_ENGINE BatchNorm port of MIOpen #13998 (NHWC stash parity) / #6765 (NCHW bwd vector width)"
       }
+    },
+    {
+      "id": "1_32_65_65_fp32_nchw",
+      "values": {
+        "io_data_type": "float",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              32,
+              1,
+              1
+            ],
+            "strides": [
+              32,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              32,
+              1,
+              1
+            ],
+            "strides": [
+              32,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              32,
+              65,
+              65
+            ],
+            "strides": [
+              135200,
+              4225,
+              65,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              32,
+              65,
+              65
+            ],
+            "strides": [
+              135200,
+              4225,
+              65,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              1,
+              32,
+              1,
+              1
+            ],
+            "strides": [
+              32,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 5,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "double"
+          },
+          {
+            "uid": 6,
+            "dims": [
+              1,
+              32,
+              1,
+              1
+            ],
+            "strides": [
+              32,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator_version": "1.0.0",
+        "inputs": {
+          "3": {
+            "hi": 6.0,
+            "kind": "free",
+            "lo": 4.0,
+            "seed": 1
+          },
+          "6": {
+            "hi": 2.0,
+            "kind": "free",
+            "lo": -2.0,
+            "seed": 2
+          },
+          "4": {
+            "hi": 2.0,
+            "kind": "free",
+            "lo": -2.0,
+            "seed": 3
+          },
+          "0": {
+            "hi": 2.0,
+            "kind": "free",
+            "lo": -2.0,
+            "seed": 1001
+          },
+          "2": {
+            "hi": 2.0,
+            "kind": "free",
+            "lo": -2.0,
+            "seed": 2001
+          }
+        },
+        "seed": 42,
+        "generator": "hand-authored (derived from bundle case)",
+        "notes": "Derived from bundle case 1_3_14_14_fp32_nchw with dims 1x32x65x65; X drawn from [4, 6] so a non-zero mean makes cross-channel reads visible",
+        "reference_source": "hipDNN regression: HIP_MLOPS_ENGINE BatchNorm forward-training NCHW vec4 statistics read crossing channel boundaries when HxW % 4 != 0"
+      }
+    },
+    {
+      "id": "1_32_65_65_fp16_nchw",
+      "values": {
+        "io_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              32,
+              1,
+              1
+            ],
+            "strides": [
+              32,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              32,
+              1,
+              1
+            ],
+            "strides": [
+              32,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              32,
+              65,
+              65
+            ],
+            "strides": [
+              135200,
+              4225,
+              65,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              32,
+              65,
+              65
+            ],
+            "strides": [
+              135200,
+              4225,
+              65,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              1,
+              32,
+              1,
+              1
+            ],
+            "strides": [
+              32,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 5,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "double"
+          },
+          {
+            "uid": 6,
+            "dims": [
+              1,
+              32,
+              1,
+              1
+            ],
+            "strides": [
+              32,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator_version": "1.0.0",
+        "inputs": {
+          "3": {
+            "hi": 6.0,
+            "kind": "free",
+            "lo": 4.0,
+            "seed": 1
+          },
+          "6": {
+            "hi": 2.0,
+            "kind": "free",
+            "lo": -2.0,
+            "seed": 2
+          },
+          "4": {
+            "hi": 2.0,
+            "kind": "free",
+            "lo": -2.0,
+            "seed": 3
+          },
+          "1": {
+            "hi": 2.0,
+            "kind": "free",
+            "lo": -2.0,
+            "seed": 1001
+          },
+          "0": {
+            "hi": 2.0,
+            "kind": "free",
+            "lo": -2.0,
+            "seed": 2001
+          }
+        },
+        "seed": 42,
+        "generator": "hand-authored (derived from bundle case)",
+        "notes": "Derived from bundle case 1_3_14_14_fp16_nchw with dims 1x32x65x65; X drawn from [4, 6] so a non-zero mean makes cross-channel reads visible",
+        "reference_source": "hipDNN regression: HIP_MLOPS_ENGINE BatchNorm forward-training NCHW vec4 statistics read crossing channel boundaries when HxW % 4 != 0"
+      }
+    },
+    {
+      "id": "1_32_65_65_bfp16_nchw",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              32,
+              1,
+              1
+            ],
+            "strides": [
+              32,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              32,
+              1,
+              1
+            ],
+            "strides": [
+              32,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              32,
+              65,
+              65
+            ],
+            "strides": [
+              135200,
+              4225,
+              65,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              32,
+              65,
+              65
+            ],
+            "strides": [
+              135200,
+              4225,
+              65,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              1,
+              32,
+              1,
+              1
+            ],
+            "strides": [
+              32,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 5,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "double"
+          },
+          {
+            "uid": 6,
+            "dims": [
+              1,
+              32,
+              1,
+              1
+            ],
+            "strides": [
+              32,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator_version": "1.0.0",
+        "inputs": {
+          "3": {
+            "hi": 6.0,
+            "kind": "free",
+            "lo": 4.0,
+            "seed": 1
+          },
+          "6": {
+            "hi": 2.0,
+            "kind": "free",
+            "lo": -2.0,
+            "seed": 2
+          },
+          "4": {
+            "hi": 2.0,
+            "kind": "free",
+            "lo": -2.0,
+            "seed": 3
+          },
+          "0": {
+            "hi": 2.0,
+            "kind": "free",
+            "lo": -2.0,
+            "seed": 1001
+          },
+          "2": {
+            "hi": 2.0,
+            "kind": "free",
+            "lo": -2.0,
+            "seed": 2001
+          }
+        },
+        "seed": 42,
+        "generator": "hand-authored (derived from bundle case)",
+        "notes": "Derived from bundle case 1_3_14_14_bfp16_nchw with dims 1x32x65x65; X drawn from [4, 6] so a non-zero mean makes cross-channel reads visible",
+        "reference_source": "hipDNN regression: HIP_MLOPS_ENGINE BatchNorm forward-training NCHW vec4 statistics read crossing channel boundaries when HxW % 4 != 0"
+      }
+    },
+    {
+      "id": "2_16_65_65_fp32_nchw",
+      "values": {
+        "io_data_type": "float",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              16,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              16,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              2,
+              16,
+              65,
+              65
+            ],
+            "strides": [
+              67600,
+              4225,
+              65,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              2,
+              16,
+              65,
+              65
+            ],
+            "strides": [
+              67600,
+              4225,
+              65,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              1,
+              16,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 5,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "double"
+          },
+          {
+            "uid": 6,
+            "dims": [
+              1,
+              16,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator_version": "1.0.0",
+        "inputs": {
+          "3": {
+            "hi": 6.0,
+            "kind": "free",
+            "lo": 4.0,
+            "seed": 1
+          },
+          "6": {
+            "hi": 2.0,
+            "kind": "free",
+            "lo": -2.0,
+            "seed": 2
+          },
+          "4": {
+            "hi": 2.0,
+            "kind": "free",
+            "lo": -2.0,
+            "seed": 3
+          },
+          "0": {
+            "hi": 2.0,
+            "kind": "free",
+            "lo": -2.0,
+            "seed": 1001
+          },
+          "2": {
+            "hi": 2.0,
+            "kind": "free",
+            "lo": -2.0,
+            "seed": 2001
+          }
+        },
+        "seed": 42,
+        "generator": "hand-authored (derived from bundle case)",
+        "notes": "Derived from bundle case 1_3_14_14_fp32_nchw with dims 2x16x65x65; X drawn from [4, 6] so a non-zero mean makes cross-channel reads visible",
+        "reference_source": "hipDNN regression: HIP_MLOPS_ENGINE BatchNorm forward-training NCHW vec4 statistics read crossing channel boundaries when HxW % 4 != 0"
+      }
+    },
+    {
+      "id": "1_32_66_63_fp32_nchw",
+      "values": {
+        "io_data_type": "float",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              32,
+              1,
+              1
+            ],
+            "strides": [
+              32,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              32,
+              1,
+              1
+            ],
+            "strides": [
+              32,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              32,
+              66,
+              63
+            ],
+            "strides": [
+              133056,
+              4158,
+              63,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              32,
+              66,
+              63
+            ],
+            "strides": [
+              133056,
+              4158,
+              63,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              1,
+              32,
+              1,
+              1
+            ],
+            "strides": [
+              32,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 5,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "double"
+          },
+          {
+            "uid": 6,
+            "dims": [
+              1,
+              32,
+              1,
+              1
+            ],
+            "strides": [
+              32,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator_version": "1.0.0",
+        "inputs": {
+          "3": {
+            "hi": 6.0,
+            "kind": "free",
+            "lo": 4.0,
+            "seed": 1
+          },
+          "6": {
+            "hi": 2.0,
+            "kind": "free",
+            "lo": -2.0,
+            "seed": 2
+          },
+          "4": {
+            "hi": 2.0,
+            "kind": "free",
+            "lo": -2.0,
+            "seed": 3
+          },
+          "0": {
+            "hi": 2.0,
+            "kind": "free",
+            "lo": -2.0,
+            "seed": 1001
+          },
+          "2": {
+            "hi": 2.0,
+            "kind": "free",
+            "lo": -2.0,
+            "seed": 2001
+          }
+        },
+        "seed": 42,
+        "generator": "hand-authored (derived from bundle case)",
+        "notes": "Derived from bundle case 1_3_14_14_fp32_nchw with dims 1x32x66x63; X drawn from [4, 6] so a non-zero mean makes cross-channel reads visible",
+        "reference_source": "hipDNN regression: HIP_MLOPS_ENGINE BatchNorm forward-training NCHW vec4 statistics read crossing channel boundaries when HxW % 4 != 0"
+      }
+    },
+    {
+      "id": "1_32_64_64_fp32_nchw",
+      "values": {
+        "io_data_type": "float",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              32,
+              1,
+              1
+            ],
+            "strides": [
+              32,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              32,
+              1,
+              1
+            ],
+            "strides": [
+              32,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              32,
+              64,
+              64
+            ],
+            "strides": [
+              131072,
+              4096,
+              64,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              32,
+              64,
+              64
+            ],
+            "strides": [
+              131072,
+              4096,
+              64,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              1,
+              32,
+              1,
+              1
+            ],
+            "strides": [
+              32,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 5,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "double"
+          },
+          {
+            "uid": 6,
+            "dims": [
+              1,
+              32,
+              1,
+              1
+            ],
+            "strides": [
+              32,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator_version": "1.0.0",
+        "inputs": {
+          "3": {
+            "hi": 6.0,
+            "kind": "free",
+            "lo": 4.0,
+            "seed": 1
+          },
+          "6": {
+            "hi": 2.0,
+            "kind": "free",
+            "lo": -2.0,
+            "seed": 2
+          },
+          "4": {
+            "hi": 2.0,
+            "kind": "free",
+            "lo": -2.0,
+            "seed": 3
+          },
+          "0": {
+            "hi": 2.0,
+            "kind": "free",
+            "lo": -2.0,
+            "seed": 1001
+          },
+          "2": {
+            "hi": 2.0,
+            "kind": "free",
+            "lo": -2.0,
+            "seed": 2001
+          }
+        },
+        "seed": 42,
+        "generator": "hand-authored (derived from bundle case)",
+        "notes": "Derived from bundle case 1_3_14_14_fp32_nchw with dims 1x32x64x64; X drawn from [4, 6] so a non-zero mean makes cross-channel reads visible",
+        "reference_source": "hipDNN regression: HIP_MLOPS_ENGINE BatchNorm forward-training NCHW vec4 statistics read crossing channel boundaries when HxW % 4 != 0"
+      }
+    },
+    {
+      "id": "1_32_63_63_fp32_nchw",
+      "values": {
+        "io_data_type": "float",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              32,
+              1,
+              1
+            ],
+            "strides": [
+              32,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              32,
+              1,
+              1
+            ],
+            "strides": [
+              32,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              32,
+              63,
+              63
+            ],
+            "strides": [
+              127008,
+              3969,
+              63,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              32,
+              63,
+              63
+            ],
+            "strides": [
+              127008,
+              3969,
+              63,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              1,
+              32,
+              1,
+              1
+            ],
+            "strides": [
+              32,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 5,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "double"
+          },
+          {
+            "uid": 6,
+            "dims": [
+              1,
+              32,
+              1,
+              1
+            ],
+            "strides": [
+              32,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator_version": "1.0.0",
+        "inputs": {
+          "3": {
+            "hi": 6.0,
+            "kind": "free",
+            "lo": 4.0,
+            "seed": 1
+          },
+          "6": {
+            "hi": 2.0,
+            "kind": "free",
+            "lo": -2.0,
+            "seed": 2
+          },
+          "4": {
+            "hi": 2.0,
+            "kind": "free",
+            "lo": -2.0,
+            "seed": 3
+          },
+          "0": {
+            "hi": 2.0,
+            "kind": "free",
+            "lo": -2.0,
+            "seed": 1001
+          },
+          "2": {
+            "hi": 2.0,
+            "kind": "free",
+            "lo": -2.0,
+            "seed": 2001
+          }
+        },
+        "seed": 42,
+        "generator": "hand-authored (derived from bundle case)",
+        "notes": "Derived from bundle case 1_3_14_14_fp32_nchw with dims 1x32x63x63; X drawn from [4, 6] so a non-zero mean makes cross-channel reads visible",
+        "reference_source": "hipDNN regression: HIP_MLOPS_ENGINE BatchNorm forward-training NCHW vec4 statistics read crossing channel boundaries when HxW % 4 != 0"
+      }
     }
   ]
 }
