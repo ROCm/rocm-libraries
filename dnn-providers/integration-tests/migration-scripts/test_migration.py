@@ -599,6 +599,76 @@ def test_round_trip_expansion():
     print("  PASS: round_trip_expansion")
 
 
+def test_resolve_plain_tensor_scoped_field_from_its_own_entry():
+    """_resolve() must let a non-whitelisted, non-dotted field (e.g. alignment, as
+    used by develop's SdpaBackward bundles) resolve from a tensor's own values.tensors[]
+    entry -- it has no field-name whitelist, mirroring the C++ loader's lookupJsonPath(),
+    which walks any placeholder path through the tensor's own entry with no restriction.
+    """
+    sys.path.insert(0, str(SCRIPT_DIR))
+    from bundle_utils import canon, expand
+
+    g = _make_graph("Relu", [0, 1], [2, 3, 4, 5], [60, 20, 5, 1], "float")
+    g["tensors"][0]["alignment"] = 16
+
+    template = {
+        "nodes": [
+            {
+                "type": "ReluAttributes",
+                "name": "",
+                "inputs": {"x_tensor_uid": 0},
+                "outputs": {"y_tensor_uid": 1},
+            }
+        ],
+        "tensors": [
+            {
+                "uid": 0,
+                "name": "",
+                "dims": "${case.dims}",
+                "strides": "${case.strides}",
+                "data_type": "${case.data_type}",
+                "alignment": "${case.alignment}",
+                "virtual": False,
+            },
+            {
+                "uid": 1,
+                "name": "",
+                "dims": "${case.dims}",
+                "strides": "${case.strides}",
+                "data_type": "${case.data_type}",
+                "virtual": False,
+            },
+        ],
+        "io_data_type": "${case.io_data_type}",
+        "compute_data_type": "float",
+        "intermediate_data_type": "float",
+        "name": "",
+    }
+
+    values = {
+        "io_data_type": "float",
+        "tensors": [
+            {
+                "uid": 0,
+                "dims": [2, 3, 4, 5],
+                "strides": [60, 20, 5, 1],
+                "data_type": "float",
+                "alignment": 16,
+            },
+            {
+                "uid": 1,
+                "dims": [2, 3, 4, 5],
+                "strides": [60, 20, 5, 1],
+                "data_type": "float",
+            },
+        ],
+    }
+
+    expanded = expand(template, values)
+    assert canon(expanded) == canon(g), "plain tensor-scoped field did not resolve"
+    print("  PASS: resolve_plain_tensor_scoped_field_from_its_own_entry")
+
+
 def test_case_ids():
     """Case ids are stable, bounded, and unique even for input-range-only diffs."""
     sys.path.insert(0, str(SCRIPT_DIR))
@@ -4215,6 +4285,7 @@ def main() -> int:
     tests = [
         test_skeleton_grouping,
         test_round_trip_expansion,
+        test_resolve_plain_tensor_scoped_field_from_its_own_entry,
         test_case_ids,
         test_place_and_verify,
         test_place_keeps_manual_cases,

@@ -664,21 +664,33 @@ def expand(node, case_values, tensor_uid=None):
     return node
 
 
-def _resolve(path, case_values, tensor_uid):
-    if (
-        tensor_uid is not None
-        and path in TENSOR_ALWAYS + TENSOR_IF_VARIES + TENSOR_RAGGED
-    ):
-        for tv in case_values.get("tensors", []):
-            if tv.get("uid") == tensor_uid and path in tv:
-                return tv[path]
-    cur = case_values
+UNRESOLVED = object()
+
+
+def walk_dotted_path(obj, path):
+    """Walk a '.'-separated path through nested dicts, mirroring the C++ loader's
+    lookupJsonPath(). Returns ``UNRESOLVED`` if any segment fails to resolve."""
+    cur = obj
     for tok in path.split("."):
         if isinstance(cur, dict) and tok in cur:
             cur = cur[tok]
         else:
-            return f"${{UNRESOLVED:{path}}}"
+            return UNRESOLVED
     return cur
+
+
+def _resolve(path, case_values, tensor_uid):
+    if tensor_uid is not None:
+        for tv in case_values.get("tensors", []):
+            if tv.get("uid") != tensor_uid:
+                continue
+            resolved = walk_dotted_path(tv, path)
+            if resolved is not UNRESOLVED:
+                return resolved
+    resolved = walk_dotted_path(case_values, path)
+    if resolved is UNRESOLVED:
+        return f"${{UNRESOLVED:{path}}}"
+    return resolved
 
 
 def canon(obj):
