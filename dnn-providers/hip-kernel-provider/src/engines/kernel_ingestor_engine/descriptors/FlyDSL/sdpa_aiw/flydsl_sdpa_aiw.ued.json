@@ -7,7 +7,12 @@
     "native": "hipkernel.flydsl_sdpa_aiw.graph_match"
   },
   "sort_kernel_catalog": {
-    "default": "0e5fcbbc-c60b-5ee6-99b2-1908e1084328"
+    "default": "0e5fcbbc-c60b-5ee6-99b2-1908e1084328",
+    "gfx1201": "317eadb5-e767-4c84-8319-da235dd0f171"
+  },
+  "predict_engine": {
+    "default": "41b032fe-2ed7-5dda-9518-0324ca564af0",
+    "gfx1201": "680c1a03-4b28-4686-879b-57f72ba20bad"
   },
   "metadata": "1d65d36b-ced8-5d48-8fd9-8747969e0d2b",
   "knobs": [

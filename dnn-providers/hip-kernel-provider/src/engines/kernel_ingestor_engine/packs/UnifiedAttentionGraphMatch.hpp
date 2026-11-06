@@ -62,6 +62,7 @@ using sdpa_graph::isWellFormedOperand;
 using sdpa_graph::problemFor;
 using sdpa_graph::sdpaNode;
 using sdpa_graph::SEQ_AXIS;
+using sdpa_graph::UnifiedAttentionProblem;
 
 /// Why @p tensor is not one the kernels can address: they read Q and write O as
 /// `[total_q, Hq, D]` rows and read K/V as a paged cache `[blocks, block_size, Hkv, D]`,
@@ -190,10 +191,6 @@ inline std::optional<std::string> stringMetadata(const KernelDefinition& kernel,
 // ---------------------------------------------------------------------------
 // The shared graph match
 // ---------------------------------------------------------------------------
-
-/// The graph facts the matchers and prepare() need, derived once from the tensors by
-/// problemFor().
-using UnifiedAttentionProblem = sdpa_graph::SdpaShape;
 
 /// A graph's SDPA-forward node and its shape, once matchOperands() has accepted them.
 struct MatchedOperands

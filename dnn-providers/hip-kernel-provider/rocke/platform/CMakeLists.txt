@@ -506,6 +506,8 @@ if(ROCKE_INSTALL_TESTS)
     # Test-only implementation for the installed arch-domain reproduction gate.
     # Keep it outside the production package: CTest owns the external compiler
     # sweep, while package resources provide the committed columns being checked.
+    # tests/conftest.py also points rocke.tests.ir_validity at this copy, so the
+    # installed pytest runs compile lowered IR with the same tool.
     install(FILES
             "${CMAKE_CURRENT_SOURCE_DIR}/tools/gen_arch_domain.py"
             "${CMAKE_CURRENT_SOURCE_DIR}/tools/check_ir_validity.py"
@@ -749,6 +751,7 @@ if(ROCKE_INSTALL_TESTS)
         "tests/library/tests/test_attention_dense_kv_split_combine_abi.py"
         "tests/library/tests/test_attention_tiled_3d_mask_type.py"
         "tests/library/tests/test_attention_tiled_3d_module.py"
+        "tests/library/tests/test_attention_tiled_3d_module_gfx942.py"
         "tests/library/tests/test_attention_tiled_3d_reduce_lds.py"
         "tests/library/tests/test_attention_unified_masked_tile_ir.py"
         "tests/library/tests/test_attention_unified_2d_lse_ir.py"

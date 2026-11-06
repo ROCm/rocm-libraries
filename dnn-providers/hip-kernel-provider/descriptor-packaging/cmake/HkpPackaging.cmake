@@ -1377,6 +1377,15 @@ function(hkp_gfx950_attention_dense_available out_var)
 endfunction()
 
 # ---------------------------------------------------------------------------
+# hkp_gfx942_attention_unified_3d_available(<out>)
+#   hkp_product_ships_engine_for_arch() for hipkernel:Gfx942AttentionUnified3d on gfx942.
+# ---------------------------------------------------------------------------
+function(hkp_gfx942_attention_unified_3d_available out_var)
+    hkp_product_ships_engine_for_arch(_available "hipkernel:Gfx942AttentionUnified3d" gfx942)
+    set(${out_var} "${_available}" PARENT_SCOPE)
+endfunction()
+
+# ---------------------------------------------------------------------------
 # hkp_gfx942_attention_dense_available(<out>)
 #   hkp_product_ships_engine_for_arch() for hipkernel:Gfx942AttentionDense on gfx942.
 # ---------------------------------------------------------------------------

@@ -131,6 +131,9 @@ struct SdpaShape
     data_objects::DataType dataType = data_objects::DataType::UNSET;
 };
 
+/// The unified attention packs' name for it.
+using UnifiedAttentionProblem = SdpaShape;
+
 /// The graph's shape, read from Q and K. Callers must have checked both with
 /// isWellFormedOperand().
 inline SdpaShape problemFor(const data_objects::TensorAttributes& q,

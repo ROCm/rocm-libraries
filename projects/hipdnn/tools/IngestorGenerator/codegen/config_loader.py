@@ -209,6 +209,7 @@ def load_config(path: Path) -> IngestorConfig:
         census_name_symbol=engine_raw.get("census_name_symbol"),
         shared_workspace=engine_raw.get("shared_workspace", ""),
         slug_override=engine_raw.get("slug"),
+        heuristics=_load_heuristics(engine_raw, slotted),
     )
 
     kmd_fields = _read_kmd_fields(raw.get("kmd_fields", []), "kmd_fields")
@@ -733,6 +734,83 @@ def _require_sequence(value, scope: str, what: str = "field names") -> list:
             f"characters, which silently does nothing."
         )
     return list(value)
+
+
+#: The UED roles `uhd_gen promote --role` binds per arch, in the order it accepts them.
+HEURISTIC_ROLES = (
+    "sort_kernel_catalog",
+    "predict_engine",
+    "predict_applicable_kernels",
+)
+
+#: One concrete architecture name. Mirrors `device_probe.ARCH_SHAPE` and its family-word
+#: refusal (tools/device_probe.py), which `codegen` cannot import; a test pins the two.
+_ARCH_TOKEN = re.compile(r"gfx[0-9a-f]{3,}(?:-[a-z]+)*")
+_ARCH_FAMILY_WORD = re.compile(r"-(?:generic|all|dcgpu|dgpu|igpu)(?:-|$)")
+_UUID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
+
+
+def _is_arch_token(text) -> bool:
+    return (
+        isinstance(text, str)
+        and _ARCH_TOKEN.fullmatch(text) is not None
+        and not _ARCH_FAMILY_WORD.search(text)
+    )
+
+
+def _load_heuristics(engine_raw: dict, slotted: bool) -> dict:
+    """Read ``engine.heuristics``: role -> arch -> UHD ids, as `uhd_gen promote`
+    writes them into the UED. Absent is ``{}``, which emits nothing."""
+    raw = engine_raw.get("heuristics")
+    if raw is None:
+        return {}
+    scope = "engine.heuristics"
+    if slotted:
+        raise ConfigError(
+            f"{scope} is set on a slotted engine; a slotted engine binds its rankers "
+            f"per slot (slots[].ranker), so per-arch engine bindings are not supported."
+        )
+    _require_mapping(raw, scope)
+    heuristics = {}
+    for role, arches in raw.items():
+        if role not in HEURISTIC_ROLES:
+            raise ConfigError(
+                f"{scope} names role {role!r}; expected one of {list(HEURISTIC_ROLES)} "
+                f"(the roles `uhd_gen promote --role` accepts)."
+            )
+        _require_mapping(arches, f"{scope}.{role}")
+        if not arches:
+            raise ConfigError(f"{scope}.{role} is empty; bind at least one arch.")
+        if role == "sort_kernel_catalog" and engine_raw.get("heuristic") == "none":
+            raise ConfigError(
+                f"{scope}.sort_kernel_catalog is set but engine.heuristic is 'none'; "
+                f"the arch entries follow the native 'default' UHD, which 'none' omits."
+            )
+        bound = {}
+        for arch, ids in arches.items():
+            key = f"{scope}.{role}.{arch}"
+            if arch == "default":
+                if role == "sort_kernel_catalog":
+                    raise ConfigError(
+                        f"{key}: the generator owns sort_kernel_catalog.default (the "
+                        f"native UHD from engine.heuristic); bind arch keys only."
+                    )
+            elif not _is_arch_token(arch):
+                raise ConfigError(
+                    f"{scope}.{role} key {arch!r} is not one concrete gfx architecture "
+                    f"name (e.g. gfx942) or 'default'."
+                )
+            ids = _require_sequence(ids, key, "UHD ids")
+            if not ids:
+                raise ConfigError(f"{key} is an empty list; bind at least one UHD id.")
+            for uhd in ids:
+                if not isinstance(uhd, str) or not _UUID.fullmatch(uhd):
+                    raise ConfigError(f"{key} holds {uhd!r}, which is not a UUID.")
+            if len(set(ids)) != len(ids):
+                raise ConfigError(f"{key} repeats a UHD id: {ids!r}.")
+            bound[arch] = ids
+        heuristics[role] = bound
+    return heuristics
 
 
 def _drop_tag_slot(match) -> str:
@@ -1337,6 +1415,7 @@ _KNOWN_ENGINE = frozenset(
         "census_name_symbol",
         "shared_workspace",
         "slug",
+        "heuristics",
     }
 )
 #: RFC 0021 §4's per-slot selection members, plus the slot's own ``specialization``.
