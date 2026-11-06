@@ -47,6 +47,8 @@ constexpr int64_t RAGGED_OFFSET_Q_UID = 20;
 constexpr int64_t RAGGED_OFFSET_KV_UID = 21;
 constexpr int64_t STATS_UID = 14;
 constexpr int64_t RAGGED_OFFSET_STATS_UID = 22;
+constexpr int64_t SEQ_LEN_Q_UID = 30;
+constexpr int64_t SEQ_LEN_KV_UID = 31;
 
 // Not in the tensor map. Setting an unsupported-mode uid to it is enough to reject the node.
 constexpr int64_t UNUSED_UID = 99;
@@ -168,7 +170,7 @@ void checkPlanLseAgainstCpu(RaggedStatsLayout statsLayout, bool tokenOffsets = f
     v.fillWithRandomValues(-1.0f, 1.0f, /*seed=*/33);
     auto offQ = makeRaggedOffset(seqQ, tokenOffsets ? 1 : seqStride);
     auto offKv = makeRaggedOffset(seqKv, tokenOffsets ? 1 : seqStride);
-    auto offLse = makeRaggedOffset(seqQ, tokenOffsets ? 1 : numHeads); // packed LSE stride is H
+    auto offLse = makeRaggedOffset(seqQ, tokenOffsets ? 1 : numHeads); // ragged LSE stride is H
 
     constexpr float SENTINEL = -99.0f;
     const auto makeLse = [&]() {
@@ -279,21 +281,59 @@ flatbuffers::DetachedBuffer withShape(const void* graphBuffer,
     return builder.Release();
 }
 
+// Re-serializes a graph (batch 1) with INT32 seq_len tensors bound to the SDPA node.
+flatbuffers::DetachedBuffer
+    withSeqLens(const void* graphBuffer, bool seqLenQ, bool seqLenKv, bool paddingMask)
+{
+    auto graphT = std::unique_ptr<GraphT>(GetGraph(graphBuffer)->UnPack());
+    auto* attrs = graphT->nodes.at(0)->attributes.AsSdpaAttributes();
+    const auto addSeqLen = [&](int64_t uid) {
+        auto tensor = std::make_unique<TensorAttributesT>();
+        tensor->uid = uid;
+        tensor->data_type = DataType::INT32;
+        tensor->dims = {1, 1, 1, 1};
+        tensor->strides = {1, 1, 1, 1};
+        graphT->tensors.push_back(std::move(tensor));
+    };
+    if(seqLenQ)
+    {
+        addSeqLen(SEQ_LEN_Q_UID);
+        attrs->seq_len_q_tensor_uid = SEQ_LEN_Q_UID;
+    }
+    if(seqLenKv)
+    {
+        addSeqLen(SEQ_LEN_KV_UID);
+        attrs->seq_len_kv_tensor_uid = SEQ_LEN_KV_UID;
+    }
+    attrs->padding_mask = paddingMask;
+    flatbuffers::FlatBufferBuilder builder;
+    builder.Finish(CreateGraph(builder, graphT.get()));
+    return builder.Release();
+}
+
 } // namespace
 
-// A primary or packed LSE in [B, S, H, D] order (contiguous strides) is not ragged-legal under
-// RFC-0014, so the plan declines it instead of misreading heads as tokens.
-TEST(TestGpuSdpaRaggedFwdPlanBuilder, IsNotApplicableForSequenceBeforeHeadsLayout)
+// The gate sees the attributes only, so it accepts every layout the ragged container can
+// address for some origins and lengths (head-major primaries and [H, T] Stats included) and
+// declines layouts whose head and feature axes alias. Layouts that fail only against the actual
+// origins (a BHSD block taller than the head pitch) are rejected when fpropRagged runs.
+TEST(TestGpuSdpaRaggedFwdPlanBuilder, IsApplicableForHeadMajorAndNotForAliasingLayouts)
 {
     const Bf16Builder bf16Builder;
-    // DIMS is [1, H = 2, S = 8, D = 16]; the same memory as [B, S, H, D] has strides
-    // [256, 32, 16, 1].
+    // DIMS is [1, H = 2, S = 8, D = 16]. Head-major: head stride S * D.
     auto graphBuilder = makeRaggedGraph();
-    const auto qSeqBeforeHeads
-        = withShape(graphBuilder.GetBufferPointer(), Q_UID, {1, 8, 2, 16}, {256, 32, 16, 1});
-    auto qWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(qSeqBeforeHeads.data(),
-                                                                            qSeqBeforeHeads.size());
-    EXPECT_FALSE(bf16Builder.isApplicable(qWrap.getNode(0), qWrap.getTensorMap()));
+    const auto qHeadMajor = withShape(
+        graphBuilder.GetBufferPointer(), Q_UID, DIMS, std::vector<int64_t>{256, 128, 16, 1});
+    auto qWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(qHeadMajor.data(),
+                                                                            qHeadMajor.size());
+    EXPECT_TRUE(bf16Builder.isApplicable(qWrap.getNode(0), qWrap.getTensorMap()));
+
+    // Head stride 8 inside a 16-element feature span: heads alias features.
+    const auto qAliasing = withShape(
+        graphBuilder.GetBufferPointer(), Q_UID, DIMS, std::vector<int64_t>{256, 8, 32, 1});
+    auto aliasingWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+        qAliasing.data(), qAliasing.size());
+    EXPECT_FALSE(bf16Builder.isApplicable(aliasingWrap.getNode(0), aliasingWrap.getTensorMap()));
 
     RaggedSdpaFwdGraphOptions options;
     options.statsUid = STATS_UID;
@@ -315,11 +355,14 @@ TEST(TestGpuSdpaRaggedFwdPlanBuilder, IsNotApplicableForSequenceBeforeHeadsLayou
     auto statsWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         statsGraph.GetBufferPointer(), statsGraph.GetSize());
     ASSERT_TRUE(bf16Builder.isApplicable(statsWrap.getNode(0), statsWrap.getTensorMap()));
-    const auto lseSeqBeforeHeads
-        = withShape(statsGraph.GetBufferPointer(), STATS_UID, {1, 8, 2, 1}, {16, 2, 1, 1});
-    auto lseWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
-        lseSeqBeforeHeads.data(), lseSeqBeforeHeads.size());
-    EXPECT_FALSE(bf16Builder.isApplicable(lseWrap.getNode(0), lseWrap.getTensorMap()));
+    // [H, T] Stats: sequence stride 1, head stride = rows.
+    const auto lseHeadMajor = withShape(statsGraph.GetBufferPointer(),
+                                        STATS_UID,
+                                        std::vector<int64_t>{1, 2, 8, 1},
+                                        std::vector<int64_t>{16, 8, 1, 1});
+    auto lseWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(lseHeadMajor.data(),
+                                                                              lseHeadMajor.size());
+    EXPECT_TRUE(bf16Builder.isApplicable(lseWrap.getNode(0), lseWrap.getTensorMap()));
 }
 
 TEST(TestGpuSdpaRaggedFwdPlanBuilder, IsNotApplicableForDtypeMismatch)
@@ -355,20 +398,8 @@ TEST(TestGpuSdpaRaggedFwdPlanBuilder, IsNotApplicableForUnsupportedModes)
     };
 
     {
-        // ragged_offset with seq_len (the padded variant) is not supported.
-        SdpaAttributesT attrs;
-        attrs.seq_len_q_tensor_uid = UNUSED_UID;
-        attrs.seq_len_kv_tensor_uid = UNUSED_UID;
-        EXPECT_FALSE(isApplicableWith(attrs));
-    }
-    {
         SdpaAttributesT attrs;
         attrs.alibi_mask = true;
-        EXPECT_FALSE(isApplicableWith(attrs));
-    }
-    {
-        SdpaAttributesT attrs;
-        attrs.padding_mask = true;
         EXPECT_FALSE(isApplicableWith(attrs));
     }
     {
@@ -404,6 +435,26 @@ TEST(TestGpuSdpaRaggedFwdPlanBuilder, IsNotApplicableForUnsupportedModes)
         attrs.max_tensor_uid = UNUSED_UID;
         EXPECT_FALSE(isApplicableWith(attrs));
     }
+}
+
+// seq_len_q/kv bound the per-batch lengths: the pair is accepted (with or without padding_mask),
+// padding_mask or one seq_len alone is declined.
+TEST(TestGpuSdpaRaggedFwdPlanBuilder, AcceptsSeqLenPairAndDeclinesPartialPadding)
+{
+    const Bf16Builder bf16Builder;
+    auto graphBuilder = makeRaggedGraph();
+    const auto isApplicableWith = [&](bool seqLenQ, bool seqLenKv, bool paddingMask) {
+        const auto graph
+            = withSeqLens(graphBuilder.GetBufferPointer(), seqLenQ, seqLenKv, paddingMask);
+        auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(graph.data(),
+                                                                                    graph.size());
+        return bf16Builder.isApplicable(graphWrap.getNode(0), graphWrap.getTensorMap());
+    };
+    EXPECT_TRUE(isApplicableWith(true, true, true));
+    EXPECT_TRUE(isApplicableWith(true, true, false));
+    EXPECT_FALSE(isApplicableWith(false, false, true));
+    EXPECT_FALSE(isApplicableWith(true, false, true));
+    EXPECT_FALSE(isApplicableWith(false, true, false));
 }
 
 TEST(TestGpuSdpaRaggedFwdPlanBuilder, PlanConstruction)
