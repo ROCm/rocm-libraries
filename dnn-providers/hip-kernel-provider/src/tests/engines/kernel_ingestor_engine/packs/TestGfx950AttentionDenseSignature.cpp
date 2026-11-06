@@ -6,6 +6,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <exception>
+#include <filesystem>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -24,6 +25,8 @@
 #include <hipdnn_plugin_sdk/ingestor/KernelDefinition.hpp>
 #include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
 #include <hipdnn_plugin_sdk/ingestor/NativeHooks.hpp>
+#include <hipdnn_test_sdk/utilities/FileUtilities.hpp>
+#include <hipdnn_test_sdk/utilities/ScratchDirectory.hpp>
 
 #include "core/Handle.hpp"
 #include "engines/kernel_ingestor_engine/KernelIngestorEngine.hpp"
@@ -66,9 +69,13 @@ using hipdnn_plugin_sdk::ingestor::KernelArgument;
 using hipdnn_plugin_sdk::ingestor::KernelDefinition;
 using hipdnn_plugin_sdk::ingestor::KernelSourceKind;
 using hipdnn_plugin_sdk::ingestor::MatchContext;
+using hipdnn_test_sdk::utilities::claimScratchDirectory;
+using hipdnn_test_sdk::utilities::ScopedDirectory;
 
 constexpr std::string_view GRAPH_MATCHER_SYMBOL = "hipkernel.gfx950_attention_dense.graph_match";
 constexpr std::string_view DISPATCH_SYMBOL = "hipkernel.gfx950_attention_dense.dispatch";
+
+constexpr const char* SCRATCH_LABEL = "gfx950attentiondensesignature";
 
 // ---------------------------------------------------------------------------
 // The ABI, as the Python declares it
@@ -202,14 +209,19 @@ flatbuffers::FlatBufferBuilder buildAcceptedSdpaGraph()
 /// renders both argument lists and is not stable enough to match on.
 constexpr const char* MISMATCH_MARKER = "is packaged with arguments";
 
-/// A KPACK descriptor for this engine whose recorded argument list is @p recorded.
+/// A KPACK descriptor for this engine, loaded from @p tree, whose recorded argument list
+/// is @p recorded.
 ///
-/// The archive it names is not there, which is the point: the containment and link checks
-/// pass, the signature comparison runs, and only if it agrees does the loader get as far
-/// as reporting the absence. The metadata is the completed baseline tile prepare() reads
-/// before the comparison; the tile is not what these cases are about, and
-/// TestGfx950AttentionDenseDispatch.cpp owns its refusal.
-KernelDefinition makeKernel(const std::vector<KernelArgument>& recorded)
+/// @p tree is an empty directory this test owns, so the archive it names is absent by
+/// construction, which is the point: the containment and link checks pass, the signature
+/// comparison runs, and only if it agrees does the loader get as far as reporting the
+/// absence. A fixed path such as /nonexistent depends on the host: where it exists and
+/// cannot be searched, the containment check refuses it before the comparison runs. The
+/// metadata is the completed baseline tile prepare() reads before the comparison; the tile
+/// is not what these cases are about, and TestGfx950AttentionDenseDispatch.cpp owns its
+/// refusal.
+KernelDefinition makeKernel(const std::filesystem::path& tree,
+                            const std::vector<KernelArgument>& recorded)
 {
     KernelDefinition kernel;
     kernel.kernelId
@@ -224,8 +236,8 @@ KernelDefinition makeKernel(const std::vector<KernelArgument>& recorded)
     kernel.source.tocKey = "toc#0";
     kernel.source.symbol = "attention_dense";
     kernel.source.signature = recorded;
-    kernel.originDirectory = "/nonexistent";
-    kernel.treeRoot = "/nonexistent";
+    kernel.originDirectory = tree;
+    kernel.treeRoot = tree;
     kernel.metadata = {
         {std::string("head_size"), HEAD_SIZE},
         {std::string("block_m"), int64_t{256}},
@@ -268,9 +280,10 @@ std::string prepareFailure(const std::vector<KernelArgument>& recorded)
         return {};
     }
 
+    const ScopedDirectory tree = claimScratchDirectory(SCRATCH_LABEL);
     try
     {
-        handler->prepare(context, *bound, makeKernel(recorded));
+        handler->prepare(context, *bound, makeKernel(tree.path(), recorded));
     }
     catch(const std::exception& error)
     {
@@ -299,7 +312,9 @@ void expectRefused(const std::vector<KernelArgument>& recorded, const char* what
 /// argument list would pass all of them and launch nothing.
 ///
 /// Failure is still expected -- the archive is absent -- but it must arrive from the
-/// loader, past the comparison, rather than from the comparison itself.
+/// loader, past the comparison, rather than from the comparison itself or from any check
+/// ahead of it. Asserting only that the failure is not a mismatch would accept a refusal
+/// raised before the comparison ever ran.
 TEST(TestGfx950AttentionDenseSignature, AcceptsTheAbiThePythonDeclares)
 {
     const std::string failure = prepareFailure(pythonAbi());
@@ -307,6 +322,8 @@ TEST(TestGfx950AttentionDenseSignature, AcceptsTheAbiThePythonDeclares)
                                      "prepare() cannot have succeeded";
     EXPECT_EQ(failure.find(MISMATCH_MARKER), std::string::npos)
         << "the pack refused the argument list the rocKE builder declares: " << failure;
+    EXPECT_NE(failure.find("does not exist"), std::string::npos)
+        << "prepare() failed before the loader reported the absent archive: " << failure;
 }
 
 // =============================================================================
