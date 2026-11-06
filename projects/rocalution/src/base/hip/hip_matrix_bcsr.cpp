@@ -364,12 +364,12 @@ namespace rocalution
             // Copy only if initialized
             if(hip_cast_mat->mat_.row_offset != NULL)
             {
-                copy_h2d(
+                copy_d2d(
                     this->mat_.nrowb + 1, hip_cast_mat->mat_.row_offset, this->mat_.row_offset);
             }
 
-            copy_h2d(this->mat_.nnzb, hip_cast_mat->mat_.col, this->mat_.col);
-            copy_h2d(this->mat_.nnzb * this->mat_.blockdim * this->mat_.blockdim,
+            copy_d2d(this->mat_.nnzb, hip_cast_mat->mat_.col, this->mat_.col);
+            copy_d2d(this->mat_.nnzb * this->mat_.blockdim * this->mat_.blockdim,
                      hip_cast_mat->mat_.val,
                      this->mat_.val);
         }

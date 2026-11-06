@@ -3089,7 +3089,8 @@ TEST(local_matrix_preconditions, violations_end_the_program)
     EXPECT_ASSERT_DEATH(A->MatrixAdd(*make_local_matrix(Backend::Host, ref, Format{COO, 1})),
                         "GetFormat");
     EXPECT_ASSERT_DEATH(make_local_matrix(Backend::Host, ref, Format{BCSR, 2})->ConvertTo(BCSR),
-                        "blockdim > 1");
+                        "matrix_format != BCSR");
+    EXPECT_ASSERT_DEATH(E.ConvertTo(BCSR, 0), "matrix_format != BCSR");
     EXPECT_ASSERT_DEATH(A->ILUpFactorize(-1), "p >= 0");
     EXPECT_ASSERT_DEATH(A->FSAI(0, nullptr), "power > 0");
     EXPECT_ASSERT_DEATH(A->ItLSolve(0, 0, false, *y, y.get()), "max_iter > 0");
