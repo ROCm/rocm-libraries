@@ -85,11 +85,20 @@ inline void compute_fisheye_src_loc(Rpp32f dstY, Rpp32f dstX, Rpp32f& srcY, Rpp3
     }
 }
 
+// The fisheye map yields ROI-local source coordinates (srcPtrChannel is already advanced to the
+// ROI origin), so they are validated against the ROI in that same frame, not the absolute one.
+inline void compute_fisheye_roi_ltrb_local(RpptROI* roi, RpptROI* roiLTRB) {
+    roiLTRB->ltrbROI.lt.x = 0;
+    roiLTRB->ltrbROI.lt.y = 0;
+    roiLTRB->ltrbROI.rb.x = roi->xywhROI.roiWidth - 1;
+    roiLTRB->ltrbROI.rb.y = roi->xywhROI.roiHeight - 1;
+}
+
 inline void fisheye_u8_u8_host_impl(Rpp8u* srcPtrImage, RpptDescPtr srcDescPtr, Rpp8u* dstPtrImage,
                                     RpptDescPtr dstDescPtr, RpptROI roi,
                                     RppLayoutParams layoutParams, Rpp32u intraThreads) {
     RpptROI roiLTRB;
-    compute_ltrb_from_xywh_host(&roi, &roiLTRB);
+    compute_fisheye_roi_ltrb_local(&roi, &roiLTRB);
     Rpp32u bufferLength = roi.xywhROI.roiWidth;
 
     Rpp8u *srcPtrChannel, *dstPtrChannel;
@@ -340,7 +349,7 @@ inline void fisheye_f16_f16_host_impl(Rpp16f* srcPtrImage, RpptDescPtr srcDescPt
                                       Rpp16f* dstPtrImage, RpptDescPtr dstDescPtr, RpptROI roi,
                                       RppLayoutParams layoutParams, Rpp32u intraThreads) {
     RpptROI roiLTRB;
-    compute_ltrb_from_xywh_host(&roi, &roiLTRB);
+    compute_fisheye_roi_ltrb_local(&roi, &roiLTRB);
     Rpp32u bufferLength = roi.xywhROI.roiWidth;
 
     Rpp16f *srcPtrChannel, *dstPtrChannel;
@@ -587,7 +596,7 @@ inline void fisheye_f32_f32_host_impl(Rpp32f* srcPtrImage, RpptDescPtr srcDescPt
                                       Rpp32f* dstPtrImage, RpptDescPtr dstDescPtr, RpptROI roi,
                                       RppLayoutParams layoutParams, Rpp32u intraThreads) {
     RpptROI roiLTRB;
-    compute_ltrb_from_xywh_host(&roi, &roiLTRB);
+    compute_fisheye_roi_ltrb_local(&roi, &roiLTRB);
     Rpp32u bufferLength = roi.xywhROI.roiWidth;
 
     Rpp32f *srcPtrChannel, *dstPtrChannel;
@@ -834,7 +843,7 @@ inline void fisheye_i8_i8_host_impl(Rpp8s* srcPtrImage, RpptDescPtr srcDescPtr, 
                                     RpptDescPtr dstDescPtr, RpptROI roi,
                                     RppLayoutParams layoutParams, Rpp32u intraThreads) {
     RpptROI roiLTRB;
-    compute_ltrb_from_xywh_host(&roi, &roiLTRB);
+    compute_fisheye_roi_ltrb_local(&roi, &roiLTRB);
     Rpp32u bufferLength = roi.xywhROI.roiWidth;
 
     Rpp8s *srcPtrChannel, *dstPtrChannel;
