@@ -37,7 +37,7 @@ from dispatch.attention.axes import (
 )
 from dispatch.attention.common import _problem
 from dispatch.attention.dense_rules import (
-    _dense_axes_for,
+    dense_axes_for,
     resolve_dense_num_persistent,
 )
 from dispatch.attention.gfx950_unified import GFX950_TUNING_VARIANTS
@@ -1196,7 +1196,7 @@ class TestGfx942DenseTuningSpace(unittest.TestCase):
         for persistent in (False, True):
             with self.subTest(persistent=persistent):
                 split = replace(base, persistent=persistent, causal_diag_split=True)
-                axes = {axis.name for axis in _dense_axes_for(split, "gfx942")}
+                axes = {axis.name for axis in dense_axes_for(split, "gfx942")}
                 self.assertTrue({"use_cfvst", "use_v_swizzle", "v_row_pad"} <= axes)
                 selected = tuning_spec_with_knobs(
                     req,

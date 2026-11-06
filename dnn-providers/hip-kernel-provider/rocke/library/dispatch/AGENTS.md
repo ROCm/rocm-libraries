@@ -19,11 +19,11 @@ passed from Python, it does not recompute it.
 **Standalone candidates are a bounded exception.** A candidate that owns its own
 kernel module builds that kernel's own spec here, tuning included:
 `gfx950_dense.py::_base_spec` resolves the default tile plus the candidate's persist /
-wide-DMA, and `gfx942_dense.py::_base_spec` resolves those plus `waves_per_eu`. Those specs
-are consumed only by their own builder and never enter the C++ parity identity. One
-rule governs the exception: **any value the kernel bakes into its `kernel_name` must
-be resolved into the concrete spec before build**. The default must come from the
-kernel's policy function; a swept knob value may replace it only when the
+wide-DMA, and `gfx942_dense.py::tuned_base_spec` resolves those plus `waves_per_eu`.
+Those specs are consumed only by their own builder and never enter the C++ parity
+identity. One rule governs the exception: **any value the kernel bakes into its
+`kernel_name` must be resolved into the concrete spec before build**. The default must
+come from the kernel's policy function; a swept knob value may replace it only when the
 body, symbol, and cache all read that same spec field. `gfx942_dense.py` calls
 `kernels.gfx942.attention_dense._tuned_waves_per_eu` for the default, and the
 sweep's WPE loop varies it from there. The gfx942 symbol always carries WPE;

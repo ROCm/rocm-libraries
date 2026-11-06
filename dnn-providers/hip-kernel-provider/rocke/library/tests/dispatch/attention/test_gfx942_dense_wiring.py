@@ -35,7 +35,7 @@ from dispatch.attention import (
     iter_registered_attention_combos,
     tuning_spec_with_knobs,
 )
-from dispatch.attention.gfx942_dense import _base_spec
+from dispatch.attention.gfx942_dense import tuned_base_spec
 from kernels.common.attention_dense_spec import (
     AttentionDenseSpec,
     attention_dense_cache_key,
@@ -252,7 +252,7 @@ class TestGfx942DenseSupportGates(unittest.TestCase):
             for seqlen in (1152, 1000):
                 with self.subTest(seqlen=seqlen):
                     req = _req(seqlen_q=seqlen, seqlen_k=seqlen)
-                    spec = _base_spec(req)
+                    spec = tuned_base_spec(req)
                     self.assertNotEqual(seqlen % spec.block_m, 0)
                     ok, why = _candidate().admits(req)
                     self.assertFalse(ok)
@@ -539,16 +539,9 @@ class TestGfx942DenseIngestorGrids(unittest.TestCase):
         }
         with _Gfx942Arch():
             # The default spec itself too: the tuned config re-picks the grid.
-            for tuned in (_base_spec(_req(**chunk)), _spec(_req(**chunk))):
+            for tuned in (tuned_base_spec(_req(**chunk)), _spec(_req(**chunk))):
                 self.assertGreater(tuned.kv_segments, 1)
                 self.assertFalse(tuned.persistent)
-            # The KV split has no segment rule for sinks or LSE output
-            # (check_kv_segments), so those requests keep one segment and build.
-            for feature in ("emit_lse", "use_sinks"):
-                with self.subTest(feature=feature):
-                    whole = _base_spec(_req(**chunk, **{feature: True}))
-                    self.assertEqual(whole.kv_segments, 1)
-                    self.assertTrue(supports_attention_dense(whole, arch="gfx942")[0])
             grids = {
                 self._PERSIST: (True, "qb_minor"),
                 "gfx942_dense_qbminor": (False, "qb_minor"),

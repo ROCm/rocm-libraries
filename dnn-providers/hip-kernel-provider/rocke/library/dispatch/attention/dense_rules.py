@@ -17,6 +17,7 @@ from functools import lru_cache
 from itertools import product
 from typing import Callable, Iterable, Mapping, Optional, Tuple
 
+from kernels.common.attention_dense_kv_split import kv_split_admits
 from rocke.dispatch.tuning import WavesPerEuSpace
 from rocke.dispatch.tuning.walk import one_knob_at_a_time
 
@@ -113,7 +114,7 @@ _DENSE_ARCH: Mapping[str, _DenseTuningArch] = {
             "causal_diag_split": lambda s: (
                 bool(s.causal) and int(s.sliding_window) == 0
             ),
-            "kv_segments": lambda s: _kv_segments_in_scope(s),
+            "kv_segments": kv_split_admits,
         },
         policy_knobs=(
             "exp_per_pv_step",
@@ -153,7 +154,7 @@ _DENSE_ARCH: Mapping[str, _DenseTuningArch] = {
                 bool(s.causal) and int(s.sliding_window) == 0
             ),
             "kv_segments": lambda s: (
-                _kv_segments_in_scope(s) and s.nonpersist_decode == "auto"
+                kv_split_admits(s) and s.nonpersist_decode == "auto"
             ),
             "window_wave_skip": lambda s: bool(s.causal) and int(s.sliding_window) > 0,
         },
@@ -161,19 +162,6 @@ _DENSE_ARCH: Mapping[str, _DenseTuningArch] = {
         inert=_gfx942_dense_inert_knobs,
     ),
 }
-
-
-def _kv_segments_in_scope(spec) -> bool:
-    """The KV-segment split exists only on the plain default grid."""
-    return not (
-        spec.persistent
-        or int(spec.sliding_window)
-        or spec.use_sinks
-        or spec.emit_lse
-        or spec.ragged
-        or spec.varlen
-        or spec.paged
-    )
 
 
 def dense_kv_segments(work_items: int, num_cus: int, max_segments: int = 8) -> int:
@@ -256,7 +244,7 @@ def resolve_dense_num_persistent(
 
 
 @lru_cache(maxsize=256)
-def _dense_axes_for(base, arch: str) -> Tuple[KnobAxis, ...]:
+def dense_axes_for(base, arch: str) -> Tuple[KnobAxis, ...]:
     """The declared dense axes that apply to ``base``, with concrete values."""
     rules = _dense_arch(arch)
     declared = tuning_axes(arch, "dense")
@@ -399,7 +387,7 @@ class DenseSpace(WavesPerEuSpace):
         return fields
 
     def axes(self, base):
-        axes = _dense_axes_for(base, self.arch)
+        axes = dense_axes_for(base, self.arch)
         if self.axis_names is None:
             return axes
         return tuple(a for a in axes if a.name in self.axis_names)

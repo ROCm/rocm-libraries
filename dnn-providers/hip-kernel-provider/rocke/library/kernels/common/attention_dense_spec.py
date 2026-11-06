@@ -77,7 +77,7 @@ def check_dense_scale(scale: float) -> None:
 def partial_tile_reason(spec: "AttentionDenseSpec") -> str:
     """Say which sequence length leaves a partial tile on a ``ragged`` spec.
 
-    The dense ``_base_spec`` factories set ``ragged`` for an ordinary graph whose
+    The dense base-spec factories set ``ragged`` for an ordinary graph whose
     lengths are not tile multiples (Sq == Skv == 384 at block_m 256, say), so a
     refusal that only says "ragged" reads as a varlen problem. This names the
     length and the tile instead.

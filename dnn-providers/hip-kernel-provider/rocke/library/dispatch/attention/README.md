@@ -161,7 +161,7 @@ tuning knobs, so its variant has no axes.
 The base spec is what the candidate would launch unswept, and what
 `tuning_id="auto"` selects. Unified tuning candidates build it with
 `tuning_specs.py` from the request and the variant. Dense candidates build it
-in the arch module's `_base_spec` from the request and the variant's geometry;
+in the arch module's base-spec factory from the request and the variant's geometry;
 `candidate.make_dense_candidate` wraps it in an `AttentionTuningSpec` with
 `path="dense"`, so dense and unified specs carry the same `tuning_id`, build,
 cache key and launch methods.

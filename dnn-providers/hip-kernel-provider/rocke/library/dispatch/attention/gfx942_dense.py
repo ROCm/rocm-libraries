@@ -132,13 +132,14 @@ def _narrow_window_geometry(head_size, dtype):
     return 128, _DENSE_BLOCK_N, False
 
 
-def _base_spec(req: AttentionRequest):
+def tuned_base_spec(req: AttentionRequest):
     """The default ``Gfx942AttentionDenseSpec`` for ``req``.
 
     The gfx942 twin of ``gfx950_dense._base_spec``. The persistent grid turns on
     at D128, and non-tile-multiple self-attention lengths take the on-chip
     ragged path. A chunked bottom-right request whose work items fill their last
-    wave poorly splits each item's KV range across CTAs.
+    wave poorly splits each item's KV range across CTAs, where the kernel admits
+    the split.
     ``waves_per_eu`` comes from the kernel's own per-config policy
     (``_tuned_waves_per_eu``): any value the kernel bakes into its
     ``kernel_name`` must be resolved by the kernel's policy, or the name tag and
@@ -163,14 +164,7 @@ def _base_spec(req: AttentionRequest):
         _DENSE_BLOCK_N,
         persistent=head_size == 128,
     )
-    if (
-        spec.causal_bottom_right
-        and not spec.ragged
-        and spec.seqlen_q % spec.block_m == 0
-        and not spec.use_sinks
-        and not spec.emit_lse
-        and not spec.sliding_window
-    ):
+    if spec.causal_bottom_right:
         from kernels.common.attention_dense_kv_split import (
             max_kv_segments_for_extent,
         )
@@ -186,9 +180,11 @@ def _base_spec(req: AttentionRequest):
                 req.batch, spec.seqlen_q, req.nhead_q, head_size, max_segments=8
             ),
         )
-        if segments > 1:
-            # The split runs on the one-CTA-per-block grid.
-            spec = replace(spec, persistent=False, kv_segments=segments)
+        # The split runs on the one-CTA-per-block grid. Keep it only where the
+        # kernel admits it (check_kv_segments).
+        split = replace(spec, persistent=False, kv_segments=segments)
+        if segments > 1 and _supports(split, arch="gfx942")[0]:
+            spec = split
     if 0 < int(req.sliding_window) <= _NARROW_WINDOW:
         bm, bn, skip = _narrow_window_geometry(head_size, req.dtype.lower())
         narrow = _make_spec(req, bm, bn, persistent=False, window_wave_skip=skip)
@@ -208,10 +204,10 @@ def _qbminor_base_spec(req: AttentionRequest):
     than :func:`_default_block_m`, whose work count is the build-time shape's;
     the knob space varies it.
     """
-    return _ingestor_base_spec(req, persistent=False, nonpersist_decode="qb_minor")
+    return ingestor_base_spec(req, persistent=False, nonpersist_decode="qb_minor")
 
 
-def _ingestor_base_spec(
+def ingestor_base_spec(
     req: AttentionRequest, *, persistent: bool, nonpersist_decode: str
 ):
     """The default spec of one grid the hipDNN kernel ingestor launches.
@@ -338,7 +334,7 @@ def _make_gfx942_attention_dense_candidate() -> KernelCandidate:
         name=CANDIDATE_NAME,
         spec_id=SPEC_ID,
         variant_id=_VARIANT_ID,
-        base_spec=_base_spec,
+        base_spec=tuned_base_spec,
         supports=_supports,
         # Dense: causal (top-left or bottom-right), sliding-window and sinks (alone
         # or combined), optional LSE output. Head size stays out: D64/D128 coverage
@@ -346,7 +342,7 @@ def _make_gfx942_attention_dense_candidate() -> KernelCandidate:
         features=frozenset(
             {"causal", "causal_bottom_right", "sliding_window", "sinks", "lse"}
         ),
-        # _base_spec picks these from the dtype, head size, work count and window.
+        # tuned_base_spec picks these from the dtype, head size, work count and window.
         recorded=frozenset(
             {"persistent", "waves_per_eu", "block_m", "block_n", "window_wave_skip"}
         ),
@@ -374,7 +370,7 @@ def _make_gfx942_attention_dense_qbminor_candidate() -> KernelCandidate:
 def _make_gfx942_attention_dense_aot_candidate(
     name: str, spec_id: str, variant_id: str, persistent: bool, nonpersist_decode: str
 ) -> KernelCandidate:
-    """One more grid the ingestor launches (see :func:`_ingestor_base_spec`).
+    """One more grid the ingestor launches (see :func:`ingestor_base_spec`).
 
     The persistent grid walks the whole dense knob space bar the CTA count,
     which the dense rules scope out of a base whose decode is pinned. A grid
@@ -389,7 +385,7 @@ def _make_gfx942_attention_dense_aot_candidate(
         spec_id=spec_id,
         variant_id=variant_id,
         base_spec=partial(
-            _ingestor_base_spec,
+            ingestor_base_spec,
             persistent=persistent,
             nonpersist_decode=nonpersist_decode,
         ),
