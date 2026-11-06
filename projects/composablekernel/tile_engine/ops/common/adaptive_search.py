@@ -1783,19 +1783,24 @@ def prepare_host_data(argv, env, payloads: Mapping[str, str],
                         continue
                 todo.pop(0)
                 files = []  # the worker's stdin, stdout and stderr
-                try:
-                    while len(files) < 3:
-                        files.append(tempfile.TemporaryFile())
-                    files[0].write(payloads[key].encode())
-                    files[0].seek(0)
-                    t0 = time.monotonic()
-                    # In running as Popen returns: an interrupt from then on kills it.
-                    running[key] = (subprocess.Popen(argv, stdin=files[0], stdout=files[1],
-                                                     stderr=files[2], env=env), files, t0)
-                except OSError as e:
-                    for f in files:
-                        f.close()
-                    out[key] = _prepared(None, "", 0.0, f"could not start: {e}")
+                # A search run's interrupt arriving while Popen starts the
+                # worker is raised once the worker is in running, where the
+                # cleanup below kills it.
+                with interrupts_held():
+                    try:
+                        while len(files) < 3:
+                            files.append(tempfile.TemporaryFile())
+                        files[0].write(payloads[key].encode())
+                        files[0].seek(0)
+                        t0 = time.monotonic()
+                        running[key] = (subprocess.Popen(argv, stdin=files[0],
+                                                         stdout=files[1],
+                                                         stderr=files[2], env=env),
+                                        files, t0)
+                    except OSError as e:
+                        for f in files:
+                            f.close()
+                        out[key] = _prepared(None, "", 0.0, f"could not start: {e}")
             time.sleep(poll_s)
             for key, (proc, files, t0) in list(running.items()):
                 took = time.monotonic() - t0
@@ -1899,6 +1904,29 @@ def check_search_options(args, conflicts=(), required=()) -> SearchSettings:
     return settings
 
 
+# The signal _interrupt_handler held back in the main thread inside
+# interrupts_held (the first one), and how deep that nests.
+_HELD = {"depth": 0, "signum": None}
+
+
+@contextlib.contextmanager
+def interrupts_held():
+    """Hold back the KeyboardInterrupt that ``_interrupt_handler`` raises
+    (a search run's SIGTERM, and its SIGINT while that has Python's default
+    handler) inside the block, and raise it when the block ends. Main thread
+    only, where the handler runs. A process started inside, between the
+    system call and the return of Popen, is then in the caller's bookkeeping
+    before the interrupt unwinds it."""
+    _HELD["depth"] += 1
+    try:
+        yield
+    finally:
+        _HELD["depth"] -= 1
+        if not _HELD["depth"] and _HELD["signum"] is not None:
+            signum, _HELD["signum"] = _HELD["signum"], None
+            raise KeyboardInterrupt(f"signal {signum}")
+
+
 def _interrupt_handler(pid: int):
     """A signal handler raising KeyboardInterrupt in process ``pid`` only. A
     process forked from it (a build pool's worker) inherits the handler; there
@@ -1912,6 +1940,10 @@ def _interrupt_handler(pid: int):
         if os.getpid() != pid:
             signal.signal(signum, signal.SIG_DFL)
             os.kill(os.getpid(), signum)
+            return
+        if _HELD["depth"]:
+            if _HELD["signum"] is None:
+                _HELD["signum"] = signum
             return
         raise KeyboardInterrupt(f"signal {signum}")
 
