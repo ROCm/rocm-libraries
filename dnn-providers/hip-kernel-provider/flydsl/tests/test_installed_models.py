@@ -4,8 +4,8 @@
 """The generator binds the trained models installed beside an op, as ``uhd_gen promote`` does.
 
 ``uhd_gen promote`` files a model at ``heuristics/<ued-id>/<role>/<arch>/<metric>/`` (a
-metric-less one directly under ``<role>/<arch>/``) and binds it in the UED: a list per arch
-key for a scoring role, one id for ``predict_applicable_kernels``. ``gen_descriptors.py`` owns
+metric-less one directly under ``<role>/<arch>/``) and binds it in the UED as a list per arch
+key, for every role. ``gen_descriptors.py`` owns
 the UED, so it must bind every such model the same way -- otherwise a regeneration drops the
 model, rewrites promote's binding, or ``--check`` refuses a tree that ships one. Host-only, no
 ``dvc pull``.
@@ -110,8 +110,8 @@ def test_a_metric_less_model_binds_from_its_arch_folder(tmp_path: Path) -> None:
     ued = _ued(tmp_path)
     native = gen_descriptors.OpDescriptors(OP, FIELDS).uhd_id
     assert ued["sort_kernel_catalog"] == {"default": native, "gfx942": ["ranker"]}
-    # Not a metric-keyed role: promote binds the one id, not a list.
-    assert ued["predict_applicable_kernels"] == {"gfx950": "applicable"}
+    # The candidate generators (future JIT) are a list like every role.
+    assert ued["predict_applicable_kernels"] == {"gfx950": ["applicable"]}
 
 
 @pytest.mark.parametrize(
@@ -145,10 +145,12 @@ def test_two_models_for_one_metric_on_one_key_are_refused(tmp_path: Path) -> Non
         gen_descriptors.installed_models(tmp_path, UED_ID)
 
 
-def test_two_models_on_a_single_model_role_are_refused(tmp_path: Path) -> None:
+def test_two_metric_less_models_on_one_key_are_refused(tmp_path: Path) -> None:
     _install(tmp_path, "predict_applicable_kernels", "gfx950", "first", metric=None)
     _install(tmp_path, "predict_applicable_kernels", "gfx950", "second", metric=None)
-    with pytest.raises(gen_descriptors.HkpPackError, match="which binds one"):
+    with pytest.raises(
+        gen_descriptors.HkpPackError, match=r"second \(metric-less\) model"
+    ):
         gen_descriptors.installed_models(tmp_path, UED_ID)
 
 
@@ -176,8 +178,7 @@ def _promote():
             "tflops",
         ),  # joins the metric-less native ranker
         ("sort_kernel_catalog", "default", None),  # replaces the native ranker
-        ("predict_applicable_kernels", "gfx950", None),  # single-valued: the runtime
-        # reads it with requireId, so a list would drop the whole engine
+        ("predict_applicable_kernels", "gfx950", None),  # the candidate generators
     ],
 )
 def test_a_binding_is_what_promote_writes(

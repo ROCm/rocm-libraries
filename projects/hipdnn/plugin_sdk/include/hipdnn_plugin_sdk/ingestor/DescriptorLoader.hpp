@@ -1015,8 +1015,9 @@ inline EngineDescriptor parseEngineDescriptor(const nlohmann::json& root, const 
             readValue(*found, entry.key());
         }
     };
-    // RFC 0019 §3.1: a scoring role maps an arch to one UHD per metric, so the value is
-    // a list; a single id reads as a one-element list.
+    // RFC 0019 §3.1: every role maps an arch to a list of UHDs -- the scoring roles one per
+    // metric, the candidate generators for the JIT spaces that will consume them. A single id
+    // reads as a one-element list.
     const auto readList = [](const char* key,
                              std::map<std::string, std::vector<DescriptorId>>& into,
                              const std::string& label) {
@@ -1081,14 +1082,10 @@ inline EngineDescriptor parseEngineDescriptor(const nlohmann::json& root, const 
              readList("sort_kernel_catalog", engine.sortKernelCatalog, where));
     readRole(
         root, "predict_engine", where, readList("predict_engine", engine.predictEngine, where));
-    // Single-valued: a candidate generator produces the set a ranker then scores, so it has
-    // no metric to key a list on (RFC 0019 §3.1).
     readRole(root,
              "predict_applicable_kernels",
              where,
-             [&engine, &where](const nlohmann::json& role, const std::string& arch) {
-                 engine.predictApplicableKernels.emplace(arch, requireId(role, arch, where));
-             });
+             readList("predict_applicable_kernels", engine.predictApplicableKernels, where));
 
     if(slotted)
     {
@@ -3476,14 +3473,18 @@ inline std::vector<DescriptorSet> resolveDescriptorSets(DescriptorCatalog catalo
             continue;
         }
         // Validated for its diagnostics only; nothing consumes a candidate generator yet.
-        for(const auto& [arch, id] : engine.predictApplicableKernels)
+        for(const auto& [arch, ids] : engine.predictApplicableKernels)
         {
-            const auto* model = detail::findDescriptor(catalog.heuristics, id);
-            const auto reason = model == nullptr ? std::string("missing or invalid UHD descriptor")
-                                                 : provenanceError(*model, arch, nullptr);
-            if(!reason.empty())
+            for(const auto& id : ids)
             {
-                disabled("predict_applicable_kernels", arch, id, reason);
+                const auto* model = detail::findDescriptor(catalog.heuristics, id);
+                const auto reason = model == nullptr
+                                        ? std::string("missing or invalid UHD descriptor")
+                                        : provenanceError(*model, arch, nullptr);
+                if(!reason.empty())
+                {
+                    disabled("predict_applicable_kernels", arch, id, reason);
+                }
             }
         }
         detail::refreshDefaultRanker(set);

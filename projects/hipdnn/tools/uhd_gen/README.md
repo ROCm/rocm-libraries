@@ -210,12 +210,13 @@ fitted on it models the wrong engine behaviour without any number looking wrong.
 
 `promote` copies the descriptor and artifact into the UED's directory — under
 `heuristics/<ued-id>/<role>/<arch>/<metric>/`, or directly under `<arch>/` for a
-metric-less ranker — and binds it under `<role>.<arch>`. `sort_kernel_catalog` and
-`predict_engine` bind a **list** per arch, one UHD per `score.metric` (RFC 0019 §3.1):
-the incoming UHD replaces only the bound UHD of its own metric (read from the bound UHD
-itself, which must therefore be installed in the tree) and otherwise joins the list; a
-single id is converted to a list. `predict_applicable_kernels` stays a single id. It
-preserves other model references and authored knobs.
+metric-less ranker — and binds it under `<role>.<arch>`. Every role binds a **list** per
+arch (RFC 0019 §3.1): `sort_kernel_catalog` and `predict_engine` hold one UHD per
+`score.metric`, and `predict_applicable_kernels`, the candidate generators for future JIT
+spaces, follows the same rule. The incoming UHD replaces only the bound UHD of its own
+metric (a metric-less one replaces the metric-less one; the metric is read from the bound
+UHD itself, which must therefore be installed in the tree) and otherwise joins the list; a
+single id is converted to a list. It preserves other model references and authored knobs.
 
 **One UUID is one model, under every arch key that binds it.** Promoting a model already
 installed elsewhere in the tree for another arch binds the installed copy (no second

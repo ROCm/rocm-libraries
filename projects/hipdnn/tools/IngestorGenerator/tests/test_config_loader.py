@@ -3109,12 +3109,8 @@ class TestEngineHeuristics:
             ({"predict_engine": {}}, r"heuristics\.predict_engine is empty"),
             ({"predict_engine": [MODEL]}, "predict_engine"),
             (
-                {"predict_applicable_kernels": {"gfx942": [MODEL]}},
-                r"predict_applicable_kernels\.gfx942 must be one UHD id",
-            ),
-            (
-                {"predict_applicable_kernels": {"gfx942": "not-a-uuid"}},
-                r"predict_applicable_kernels\.gfx942 must be one UHD id",
+                {"predict_applicable_kernels": {"gfx942": MODEL}},
+                r"predict_applicable_kernels\.gfx942",
             ),
             ([MODEL], "engine.heuristics"),
         ],
@@ -3123,14 +3119,15 @@ class TestEngineHeuristics:
         with pytest.raises(ConfigError, match=match):
             self._load(tmp_path, configs_dir, heuristics)
 
-    def test_predict_applicable_kernels_binds_one_id(self, tmp_path, configs_dir):
+    def test_predict_applicable_kernels_binds_a_list(self, tmp_path, configs_dir):
+        # The candidate generators, for future JIT spaces: a list like every role.
         config = self._load(
             tmp_path,
             configs_dir,
-            {"predict_applicable_kernels": {"gfx942": self.MODEL}},
+            {"predict_applicable_kernels": {"gfx942": [self.MODEL, self.OTHER]}},
         )
         assert config.engine.heuristics == {
-            "predict_applicable_kernels": {"gfx942": self.MODEL}
+            "predict_applicable_kernels": {"gfx942": [self.MODEL, self.OTHER]}
         }
 
     def test_arch_entries_need_the_native_default(self, tmp_path, configs_dir):

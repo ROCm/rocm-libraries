@@ -3498,7 +3498,7 @@ class TestHeuristicBindings:
         config = copy.deepcopy(scale_add_config)
         config.engine.heuristics = {
             "predict_engine": {"gfx950": [self.MODEL, self.OTHER]},
-            "predict_applicable_kernels": {"default": self.OTHER},
+            "predict_applicable_kernels": {"default": [self.OTHER]},
         }
         ued = build_ued(config, mint_ids(config))
         assert list(ued)[-4:] == [
@@ -3508,8 +3508,7 @@ class TestHeuristicBindings:
             "predict_applicable_kernels",
         ]
         assert ued["predict_engine"] == {"gfx950": [self.MODEL, self.OTHER]}
-        # Single-valued, as the runtime reads it (requireId) and promote writes it.
-        assert ued["predict_applicable_kernels"] == {"default": self.OTHER}
+        assert ued["predict_applicable_kernels"] == {"default": [self.OTHER]}
         assert ued["sort_kernel_catalog"] == {
             "default": ued["sort_kernel_catalog"]["default"]
         }

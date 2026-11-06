@@ -720,17 +720,16 @@ def _validate_unique_strings(values, key, where):
 
 
 def _validate_role_map(entries, role, where):
-    """An arch-to-UUID map; a scoring role may list one UHD per metric."""
+    """An arch-to-UUID map; every role may list one UHD per metric (RFC 0019 §3.1)."""
     if not isinstance(entries, dict) or not entries:
         raise HkpPackError(f"{where}.{role} must be a nonempty arch-to-UUID map")
     for arch, value in entries.items():
         if arch != "default":
             _reject_nonbare_arch([arch], where)
         entry_where = f"{where}.{role}.{arch}"
-        if isinstance(value, str) or role not in _METRIC_ROLES:
+        if isinstance(value, str):
             _validate_uuid(value, entry_where)
             continue
-        # RFC 0019 §3.1: a scoring role may list one UHD per metric.
         if not isinstance(value, list) or not value:
             raise HkpPackError(
                 f"{entry_where} must be a UUID or a nonempty list of UUIDs"
@@ -813,9 +812,6 @@ _BEHAVIOR_NOTES = ("runtime_compilation",)
 # ScoreTransform.hpp SUPPORTED_TRANSFORMS, less the empty name `text()` refuses.
 _SCORE_TRANSFORMS = ("identity", "log1p", "log", "exp", "sqrt")
 _UHD_ROLES = ("sort_kernel_catalog", "predict_engine", "predict_applicable_kernels")
-# Roles mapping an arch to one UHD per ranking metric. A candidate generator has no
-# metric, so predict_applicable_kernels stays single.
-_METRIC_ROLES = ("sort_kernel_catalog", "predict_engine")
 _UED_KEYS = (
     "version",
     "revision",
@@ -1698,13 +1694,13 @@ def _validate_slot_packs(flat):
 
 
 def _validate_role_metrics(ued, uhd_by_id):
-    """At most one model per metric for each architecture a scoring role names.
+    """At most one model per metric for each architecture a role names.
 
     RFC 0019 §3.1: the loader disables a metric with two models. A `predict_engine`
     model must declare a metric. A slot ranker must not (RFC 0021 §7): a slot has
     no time of its own, so the loader rejects an engine whose slot ranker names one.
     """
-    scopes = [(f"UED {ued.path.name}", ued.doc, _METRIC_ROLES, False)]
+    scopes = [(f"UED {ued.path.name}", ued.doc, _UHD_ROLES, False)]
     scopes += [
         (who, slot, ("sort_kernel_catalog",), True)
         for who, slot in _selection_scopes(ued)
