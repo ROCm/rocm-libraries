@@ -120,6 +120,50 @@ struct StubbedCKArgs
     }
 };
 
+// A DeviceOpType whose GetInstances() returns two instances that share one
+// GetTypeString(). The cache (CachedCKInstanceIndex) must resolve the kernel_id
+// to the first instance (lowest index), the same one FindConvPtrByID returns.
+// ordinal records insertion order so a test can tell which instance was picked.
+struct DuplicateTypeDeviceOp
+{
+    DuplicateTypeDeviceOp(const std::string& op, int order) : typeString(op), ordinal(order) {}
+
+    std::string typeString;
+    int ordinal;
+
+    std::string GetTypeString() { return typeString; }
+};
+
+struct DuplicateTypeDeviceOps
+{
+    static std::vector<std::unique_ptr<DuplicateTypeDeviceOp>> GetInstances()
+    {
+        std::vector<std::unique_ptr<DuplicateTypeDeviceOp>> ops;
+        ops.push_back(std::make_unique<DuplicateTypeDeviceOp>("duplicate_type", 0));
+        ops.push_back(std::make_unique<DuplicateTypeDeviceOp>("duplicate_type", 1));
+        return ops;
+    }
+};
+
+// Only the first-enumerated "duplicate_type" instance (ordinal 0) is supported, so
+// the validator returns true iff the cache resolved the id to the first instance.
+struct DuplicateTypeCKArgs
+{
+    DuplicateTypeCKArgs(const ProblemDescription& /*problem*/) {}
+
+    template <typename ConvPtr>
+    bool IsSupportedBy(const ConvPtr& conv_ptr) const
+    {
+        return conv_ptr->ordinal == 0;
+    }
+
+    template <typename ConvPtr>
+    bool IsSupportedBySplitK(const ConvPtr& conv_ptr, int) const
+    {
+        return conv_ptr->ordinal == 0;
+    }
+};
+
 template <typename CKArgsType, typename DeviceOpType>
 class CKArgParsingTest : public ::testing::TestWithParam<ParsingTestCase>
 {
@@ -163,6 +207,25 @@ TEST_P(CPU_UnitTestImplicitGemmCKUtil_NONE, TestParsing)
 INSTANTIATE_TEST_SUITE_P(Smoke,
                          CPU_UnitTestImplicitGemmCKUtil_NONE,
                          testing::ValuesIn(GetTestCases()));
+
+// Regression guard for the instance cache's first-index invariant. When a
+// DeviceOpType enumerates two instances with the same GetTypeString(), the cache
+// must resolve the kernel_id to the first instance -- the one FindConvPtrByID
+// returns -- because invoker construction and workspace sizing still call
+// FindConvPtrByID and the two must agree. Only the first "duplicate_type" instance
+// is supported here, so replacing the index's emplace with a last-index-wins
+// insert would select the unsupported second instance and flip this to false.
+TEST(CPU_UnitTestImplicitGemmCKUtilDuplicateType_NONE, FirstIndexWins)
+{
+#if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
+    const bool success =
+        miopen::solver::IsCKArgsSupported<DuplicateTypeDeviceOps, DuplicateTypeCKArgs>(
+            ProblemDescription{}, "duplicate_type");
+    EXPECT_TRUE(success);
+#else
+    GTEST_SKIP();
+#endif
+}
 
 // =============================================================================
 // Tests for IsCKSplitKSupportedGeneric
