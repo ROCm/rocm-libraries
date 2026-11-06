@@ -1271,6 +1271,42 @@ def _validate_shape(desc, source_root, log=print):
         _validate_kmd(desc)
 
 
+def _excluded_prefixes(exclude_folders):
+    """Each `exclude_folders` entry as a tuple of lower-cased path segments."""
+    prefixes = set()
+    for name in exclude_folders:
+        parts = tuple(
+            part.lower() for part in name.replace("\\", "/").split("/") if part
+        )
+        if parts:
+            prefixes.add(parts)
+    return prefixes
+
+
+def _under_excluded(rel_path, excluded):
+    """Whether a file at `rel_path` (relative to the root) is inside an excluded folder."""
+    parts = tuple(part.lower() for part in rel_path.parts)
+    return any(
+        len(parts) > len(prefix) and parts[: len(prefix)] == prefix
+        for prefix in excluded
+    )
+
+
+def _find_folder(root, prefix):
+    """The folder of `root` whose segments match `prefix` case-insensitively, or None."""
+    folder = root
+    for segment in prefix:
+        matches = sorted(
+            child
+            for child in folder.iterdir()
+            if child.is_dir() and child.name.lower() == segment
+        )
+        if not matches:
+            return None
+        folder = matches[0]
+    return folder
+
+
 def load_flat_input(
     root, generic_targets, log=print, *, exclude_folders=(), disabled_kinds=()
 ):
@@ -1289,10 +1325,13 @@ def load_flat_input(
     HkpPackError on any malformed / missing-field / unknown-type /
     dangling-reference descriptor that IS type-tagged.
 
-    `exclude_folders` names top-level child folders of the root that are not
-    content in this build: nothing under one is read, validated or shipped.
-    A name matches case-insensitively, as the reserved `kpack/` folder does,
-    and one naming no folder is ignored (a root need not carry every family).
+    `exclude_folders` names folders of the root that are not content in this
+    build: nothing under one is read, validated or shipped. An entry is a
+    top-level child (a disabled family, `rocKE`) or a `/`-separated path under
+    the root (a bundle whose large files were not fetched,
+    `rocKE/<bundle>`). It matches case-insensitively, as the reserved `kpack/`
+    folder does, and one naming no folder is ignored (a root need not carry
+    every family).
     `disabled_kinds` names `kernel_source` kinds this build has no producer
     for: those UKDs are still read and validated, then pruned like an
     arch-pruned UKD once validation passes. An unknown kind raises HkpPackError.
@@ -1316,17 +1355,19 @@ def load_flat_input(
 
     # Case-insensitive for the same reason as the `kpack/` guard below: the packed
     # tree is also consumed on Windows, where `rocKE` and `rocke` are one directory.
-    excluded = {name.lower() for name in exclude_folders}
-    for name in sorted(p.name for p in root.iterdir() if p.is_dir()):
-        if name.lower() in excluded:
-            log(f"excluding disabled family folder {name}/")
+    excluded = _excluded_prefixes(exclude_folders)
+    for prefix in sorted(excluded):
+        folder = _find_folder(root, prefix)
+        if folder is not None:
+            log(f"excluding folder {folder.relative_to(root).as_posix()}/")
 
     descriptors = []
     for jp in sorted(root.rglob("*.json")):
         rel_path = jp.relative_to(root)
-        # A disabled family folder is not content in this build: its files are never
-        # read, so they can neither ship nor fail validation.
-        if len(rel_path.parts) > 1 and rel_path.parts[0].lower() in excluded:
+        # An excluded folder (a disabled family, or a bundle whose DVC files were not
+        # pulled) is not content in this build: its files are never read, so they can
+        # neither ship nor fail validation.
+        if _under_excluded(rel_path, excluded):
             continue
         # A dot-prefixed segment at any depth, or a dot-prefixed filename. The
         # source root is user-supplied and plausibly a checkout, so `.git/`,
