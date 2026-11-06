@@ -44,25 +44,22 @@ the selection's `authored_subpath`.
 
 ## Models
 
-Two trained models (UHDs) are bound in the UED for gfx942, each tracked per model as
-`heuristics/4208dcf6-3128-4146-ab2a-affa5b6ab4eb/<role>/gfx942/tflops/` (the UED id, role,
-arch and metric): `heuristic.uhd.json`, `model.bin.dvc` and `.gitignore` in git,
-`model.bin` from DVC.
+One trained model (UHD), the L2 `sort_kernel_catalog` kernel ranker `ced4e2d1-e66a-4ab5-bfb2-fa3626f881d8`
+(ranks this catalog's kernels), is bound in the UED for gfx942. It is tracked at
+`heuristics/4208dcf6-3128-4146-ab2a-affa5b6ab4eb/sort_kernel_catalog/gfx942/tflops/` (the UED id,
+role, arch and metric): `heuristic.uhd.json`, `model.bin.dvc` and `.gitignore` in git, `model.bin`
+from DVC.
 
-| Role | UHD id | Folder |
-|---|---|---|
-| L2 `sort_kernel_catalog`: ranks this catalog's kernels | `ced4e2d1-e66a-4ab5-bfb2-fa3626f881d8` | `.../sort_kernel_catalog/gfx942/tflops/` |
-| L1 `predict_engine`: predicts the engine's TFLOPS | `78307a48-0f80-4166-aad0-59ab91585e87` | `.../predict_engine/gfx942/tflops/` |
-
-The L1 is measured under the L2: it predicts the throughput of the kernel the L2 picks, and
-its selector revision digests the code objects packed at build time. Retrain the L1 whenever
-the L2 or the catalog (the KDP) changes.
+The L1 `predict_engine` (predicts the engine's TFLOPS) is held: its selector revision was recorded on
+an older build, so the runtime refuses it on a build of the current source. It follows in a separate
+change, once re-measured on a build of current source. It is measured under the L2 and its selector
+revision digests the code objects packed at build time, so retrain it whenever the L2 or the catalog
+(the KDP) changes.
 
 A build without `dvc pull -r ingestor` on a `model.bin.dvc` packs the bundle without that
 model: the pack warns, the model's UHD does not ship, and the loader logs the dangling id
-and runs the engine with that role off (declared kernel order for the L2, no engine
-estimate for the L1). Release builds set `HIPKERNELPROVIDER_REQUIRE_DVC_DESCRIPTORS=ON`,
-which makes it an error.
+and runs the engine with that role off (declared kernel order for the L2). Release builds set
+`HIPKERNELPROVIDER_REQUIRE_DVC_DESCRIPTORS=ON`, which makes it an error.
 
 ## Provenance
 

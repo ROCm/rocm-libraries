@@ -56,15 +56,13 @@ engine:
   - block_size
   - num_segments
   heuristic: native
-  # AICK-2545: trained gfx942 models, installed by `uhd_gen promote` (other arches keep native).
-  # The L2 ranks this catalog, so retrain it when the catalog's kernels change. The L1 predicts the
-  # throughput of the L2's pick, so retrain the L1 whenever the L2 or the catalog changes; its
-  # selector revision digests the packed code objects and must match the build's.
+  # AICK-2545: the trained gfx942 kernel ranker (L2), installed by `uhd_gen promote` (other arches
+  # keep native). It ranks this catalog, so retrain it when the catalog's kernels change. An engine
+  # predictor (L1, `predict_engine`) follows separately: it predicts the L2's pick, so it must be
+  # retrained whenever the L2 or the catalog changes, and its selector revision must match the build's.
   heuristics:
     sort_kernel_catalog:
       gfx942: [ced4e2d1-e66a-4ab5-bfb2-fa3626f881d8]
-    predict_engine:
-      gfx942: [78307a48-0f80-4166-aad0-59ab91585e87]
 kmd_fields:
 - name: dtype
   type: string
