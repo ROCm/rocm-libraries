@@ -24,8 +24,8 @@
  * lengths from `seq_lens` and ragged Q offsets from `query_start_len`, and a contiguous BSHD
  * K/V tensor IS that cache with an identity block table. What differs per architecture is
  * the wave width, whether the grid is kv-major or q-major, and the geometry the builder
- * accepts. Those are the traits; a pack for another architecture (e.g. a future gfx942
- * pack) supplies its own traits and its own builder-legality check and reuses everything here.
+ * accepts. Those are the traits; each architecture's pack supplies its own traits and its
+ * own builder-legality check and reuses everything here.
  *
  * Pure functions of KMD fields and graph dimensions: testable with no HIP context.
  */
@@ -58,6 +58,11 @@ struct UnifiedAttentionArchTraits
 
 /// gfx950 (CDNA4): wave64, kv-major grid.
 inline constexpr UnifiedAttentionArchTraits GFX950_UNIFIED_ATTENTION_TRAITS{"gfx950"};
+
+/// gfx942 (CDNA3): wave64, kv-major grid. The 2D builder takes the same block sizes, warp
+/// counts and rows per warp as gfx950; the q-major grid (`use_q_major_grid`) is a codegen
+/// stack no shipped kernel enables.
+inline constexpr UnifiedAttentionArchTraits GFX942_UNIFIED_ATTENTION_TRAITS{"gfx942"};
 
 /// Each workspace section starts on this boundary.
 inline constexpr std::size_t UNIFIED_ATTENTION_WORKSPACE_ALIGNMENT = 256;
@@ -93,6 +98,17 @@ inline bool isSupportedUnifiedAttentionBlockSize(const UnifiedAttentionArchTrait
                                                  int64_t blockSize)
 {
     return detail::isOneOf(traits.blockSizes, blockSize);
+}
+
+/// The smallest `block_size` any candidate of the architecture is built with.
+constexpr int64_t unifiedAttentionSmallestBlockSize(const UnifiedAttentionArchTraits& traits)
+{
+    int64_t smallest = traits.blockSizes[0];
+    for(const auto blockSize : traits.blockSizes)
+    {
+        smallest = blockSize < smallest ? blockSize : smallest;
+    }
+    return smallest;
 }
 
 /// The grid and block a candidate must launch with.

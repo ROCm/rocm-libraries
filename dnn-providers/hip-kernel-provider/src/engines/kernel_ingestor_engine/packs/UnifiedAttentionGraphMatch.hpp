@@ -22,16 +22,17 @@
 #include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
 
 #include "engines/asm_sdpa_engine/plans/SdpaPlanUtils.hpp"
-#include "engines/kernel_ingestor_engine/packs/Gfx950AttentionUnified2DGeometry.hpp"
 #include "engines/kernel_ingestor_engine/packs/PackFeatures.hpp"
 #include "engines/kernel_ingestor_engine/packs/SdpaGraphMatch.hpp"
+#include "engines/kernel_ingestor_engine/packs/UnifiedAttentionGeometry.hpp"
 
 /**
  * @file UnifiedAttentionGraphMatch.hpp
- * @brief The graph match and record-reading helpers the gfx950 unified-attention packs
- *        (hipkernel:Gfx950AttentionUnified2D and hipkernel:Gfx950AttentionUnified3D) share.
+ * @brief The graph match and record-reading helpers the unified-attention packs share
+ *        (hipkernel:Gfx950AttentionUnified2D, hipkernel:Gfx950AttentionUnified3D and
+ *        hipkernel:Gfx942AttentionUnified2D).
  *
- * Both packs serve a single dense BSHD SDPA-forward node through the same paged-KV kernel
+ * The packs serve a single dense BSHD SDPA-forward node through the same paged-KV kernel
  * family, so their graph matches run the same steps around a few engine rules:
  *
  *   matchOperands()   node, operands, layout, dtype and shape consistency
@@ -354,11 +355,6 @@ inline std::optional<MatchedOperands> matchOperands(const MatchContext& context,
     return MatchedOperands{attributes, problem};
 }
 
-/// The smallest paged-KV block any candidate of either engine is built with: a Skv no block
-/// divides cannot be served by any candidate, so graph_match declines it instead of emptying
-/// nothing.
-inline constexpr int64_t SMALLEST_BLOCK_SIZE = GFX950_UNIFIED_2D_BLOCK_SIZE_SMALL;
-
 /// What matchAttributes() derives from the node for the bind.
 struct MatchedAttributes
 {
@@ -368,20 +364,23 @@ struct MatchedAttributes
 
 /**
  * @brief Whole paged-KV blocks, 32-bit addressing, the mask, every optional attribute these
- *        kernels cannot honour, and the scale. Logs each decline under @p engine.
+ *        kernels cannot honour, and the scale. Logs each decline under @p engine; the block
+ *        sizes and the 32-bit bound are @p traits'.
  */
 inline std::optional<MatchedAttributes>
     matchAttributes(const data_objects::SdpaAttributes& attributes,
                     const UnifiedAttentionProblem& problem,
-                    std::string_view engine)
+                    std::string_view engine,
+                    const UnifiedAttentionArchTraits& traits)
 {
-    // The identity cache is cut into whole blocks, and the smallest block is 16: a Skv that
-    // 16 does not divide is not a whole number of blocks at any block size.
-    if(problem.seqLenKv % SMALLEST_BLOCK_SIZE != 0)
+    // The identity cache is cut into whole blocks: a Skv the smallest block does not divide
+    // is not a whole number of blocks at any block size, so no candidate can serve it.
+    const int64_t smallestBlock = unifiedAttentionSmallestBlockSize(traits);
+    if(problem.seqLenKv % smallestBlock != 0)
     {
         HIPDNN_PLUGIN_LOG_INFO((DeclinedBy{engine, "seqlen_kv"})
                                << "seqlen_kv " << problem.seqLenKv << " is not a multiple of "
-                               << SMALLEST_BLOCK_SIZE
+                               << smallestBlock
                                << ", so K/V cannot be addressed as whole paged-KV blocks");
         return std::nullopt;
     }
@@ -391,10 +390,10 @@ inline std::optional<MatchedAttributes>
     constexpr int64_t BYTES_PER_ELEMENT = 2; // bf16 and fp16 only
     const auto kvBytes = pack_features::checkedProduct(
         {problem.batch, problem.seqLenKv, problem.numKvHeads, problem.headSize, BYTES_PER_ELEMENT});
-    if(!kvBytes.has_value() || *kvBytes > GFX950_UNIFIED_2D_KV_BUFFER_BYTES)
+    if(!kvBytes.has_value() || *kvBytes > traits.kvBufferBytes)
     {
         HIPDNN_PLUGIN_LOG_INFO((DeclinedBy{engine, "size_limit"})
-                               << "K or V is larger than " << GFX950_UNIFIED_2D_KV_BUFFER_BYTES
+                               << "K or V is larger than " << traits.kvBufferBytes
                                << " bytes; the kernel addresses K/V with 32-bit byte offsets");
         return std::nullopt;
     }
@@ -403,10 +402,10 @@ inline std::optional<MatchedAttributes>
                                                        problem.numQueryHeads,
                                                        problem.headSize,
                                                        BYTES_PER_ELEMENT});
-    if(!qBytes.has_value() || *qBytes > GFX950_UNIFIED_2D_KV_BUFFER_BYTES)
+    if(!qBytes.has_value() || *qBytes > traits.kvBufferBytes)
     {
         HIPDNN_PLUGIN_LOG_INFO((DeclinedBy{engine, "size_limit"})
-                               << "Q or O is larger than " << GFX950_UNIFIED_2D_KV_BUFFER_BYTES
+                               << "Q or O is larger than " << traits.kvBufferBytes
                                << " bytes; the kernel addresses them with 32-bit offsets");
         return std::nullopt;
     }

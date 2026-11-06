@@ -249,8 +249,10 @@ std::optional<BoundTokens> gfx950AttentionUnified3DGraphMatches(const MatchConte
         return std::nullopt;
     }
 
-    const auto matched = unified_attention::matchAttributes(
-        *operands->attributes, problem, GFX950_ATTENTION_UNIFIED_3D_ENGINE_NAME);
+    const auto matched = unified_attention::matchAttributes(*operands->attributes,
+                                                            problem,
+                                                            GFX950_ATTENTION_UNIFIED_3D_ENGINE_NAME,
+                                                            GFX950_UNIFIED_ATTENTION_TRAITS);
     if(!matched.has_value())
     {
         return std::nullopt;
