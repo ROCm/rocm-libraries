@@ -1,0 +1,72 @@
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier:  MIT
+
+// Argument blocks of the explicit-GEMM convolution repack kernels (ConvRepack.cpp). Shared
+// verbatim by the host, which fills them, and the kernels, which HIPRTC compiles with this file
+// as an embedded include -- so builtin types only, no standard headers.
+
+#pragma once
+
+#define CONV_REPACK_MAX_RANK 6
+#define CONV_REPACK_SPATIAL_DIMS 3
+
+/// dst[i] = src[i] for every multi-index i of `dims`, each side addressed through its own
+/// element strides. Moves bytes, not values: one kernel per element size, none per type.
+/// Covers permutes (layout transposes) and subsampling (a stride larger than packed).
+struct StridedCopyArgs
+{
+    const void* src;
+    void* dst;
+    long long dims[CONV_REPACK_MAX_RANK];
+    long long srcStrides[CONV_REPACK_MAX_RANK];
+    long long dstStrides[CONV_REPACK_MAX_RANK];
+    long long total;
+    int rank;
+    int padding0;
+};
+
+/// The convolution geometry im2col and col2im share. Every problem is described as 3-D: missing
+/// leading spatial axes have extent 1, pad 0, stride 1, dilation 1 and tensor stride 0.
+///
+/// The column matrix is packed row-major: one row per (image, output position), r = n *
+/// outputSize + o, and one column per (group, channel, filter element), column = g * cPerGroup
+/// * filterSize + (channelsInner ? e * cPerGroup + c : c * filterSize + e) -- the order of the
+/// filter's own layout (KRSC or KCRS) so the GEMM reads the filter in place. Filter element e
+/// reads the input through tap e, or through tap filter - 1 - e for true convolution.
+struct ConvColumnGeometry
+{
+    long long n;
+    long long groups;
+    long long cPerGroup;
+    long long input[CONV_REPACK_SPATIAL_DIMS];
+    long long output[CONV_REPACK_SPATIAL_DIMS];
+    long long filter[CONV_REPACK_SPATIAL_DIMS];
+    long long prePadding[CONV_REPACK_SPATIAL_DIMS];
+    long long stride[CONV_REPACK_SPATIAL_DIMS];
+    long long dilation[CONV_REPACK_SPATIAL_DIMS];
+    // Element strides of x, ordered (n, c, d, h, w).
+    long long xStrides[5];
+    int channelsInner;
+    int flipFilter;
+};
+
+/// col[r, column] = the input element row r's output position reads through the column's filter
+/// element, or 0 in the padding. One thread per column-matrix element; moves bytes.
+struct Im2ColArgs
+{
+    const void* x;
+    void* col;
+    ConvColumnGeometry geometry;
+    long long total;
+};
+
+/// dx[n, c, i] = the sum, over every (output position, filter element) that reads input position
+/// i, of the fp32 column matrix entry for them, converted once to dx's type; 0 when none does.
+/// One thread per dx element, so no atomics and a deterministic sum.
+struct Col2ImArgs
+{
+    const float* col;
+    void* x;
+    ConvColumnGeometry geometry;
+    long long total;
+};

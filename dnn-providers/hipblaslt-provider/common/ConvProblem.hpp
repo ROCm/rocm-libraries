@@ -27,6 +27,9 @@ struct ConvOperand
     int64_t uid = 0;
     std::vector<int64_t> dims;
     std::vector<int64_t> strides;
+    /// The operand's element type when it differs from the problem's: set only on a workspace
+    /// operand a repack plan stages, such as the fp32 column matrix of backward data.
+    std::optional<hipdnn_flatbuffers_sdk::data_objects::DataType> dataType;
 };
 
 /**

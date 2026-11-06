@@ -12,6 +12,8 @@
 
 #include "HipdnnEnginePluginExecutionContext.hpp"
 #include "HipdnnEnginePluginHandle.hpp"
+#include "common/ConvRepackFormulation.hpp"
+#include "engines/conv/ConvRepackPlan.hpp"
 
 namespace hipblaslt_plugin
 {
@@ -30,7 +32,7 @@ std::optional<ConvGemmPlanCalls> ConvGemmPlanBuilder::callsFor(
         const auto problem = parseConvProblem(opGraph, direction);
         if(problem.has_value())
         {
-            return directGemmCalls(*problem);
+            return convGemmCalls(*problem);
         }
     }
     return std::nullopt;
@@ -48,7 +50,7 @@ bool ConvGemmPlanBuilder::isApplicable(
     // The backend has the last word: hipBLASLt, say, may find no algorithm for a call.
     try
     {
-        return _factory(handle, std::move(calls->calls)) != nullptr;
+        return planFor(handle, std::move(*calls)) != nullptr;
     }
     catch(const std::exception& e)
     {
@@ -66,7 +68,7 @@ size_t ConvGemmPlanBuilder::getWorkspaceSize(
     {
         return 0;
     }
-    return _factory(handle, std::move(calls->calls))->getWorkspaceSize(handle);
+    return planFor(handle, std::move(*calls))->getWorkspaceSize(handle);
 }
 
 void ConvGemmPlanBuilder::buildPlan(
@@ -81,9 +83,22 @@ void ConvGemmPlanBuilder::buildPlan(
             HIPDNN_PLUGIN_STATUS_BAD_PARAM,
             "explicit-GEMM convolution does not apply to this graph");
     }
-    HIPDNN_PLUGIN_LOG_INFO("Building explicit-GEMM convolution plan, row " << toString(
-                               calls->row) << ", " << calls->calls.size() << " GEMM call(s)");
-    executionContext.setPlan(_factory(handle, std::move(calls->calls)));
+    HIPDNN_PLUGIN_LOG_INFO("Building explicit-GEMM convolution plan, row "
+                           << toString(calls->row) << ", " << calls->calls.size()
+                           << " GEMM call(s), " << calls->before.size() + calls->after.size()
+                           << " repack step(s)");
+    executionContext.setPlan(planFor(handle, std::move(*calls)));
+}
+
+std::unique_ptr<IPlan> ConvGemmPlanBuilder::planFor(const HipdnnEnginePluginHandle& handle,
+                                                    ConvGemmPlanCalls calls) const
+{
+    auto gemmPlan = _factory(handle, std::move(calls.calls));
+    if(!calls.hasRepack())
+    {
+        return gemmPlan;
+    }
+    return std::make_unique<ConvRepackPlan>(std::move(calls), std::move(gemmPlan));
 }
 
 } // namespace hipblaslt_plugin

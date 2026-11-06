@@ -10,8 +10,10 @@
 #endif
 #include <memory>
 #include <unordered_map>
-#ifdef HIPBLASLTPROVIDER_ENABLE_ROCBLAS
+#if defined(HIPBLASLTPROVIDER_ENABLE_ROCBLAS) || defined(HIPBLASLTPROVIDER_ENABLE_CONV)
 #include <mutex>
+#endif
+#ifdef HIPBLASLTPROVIDER_ENABLE_ROCBLAS
 #include <rocblas/rocblas.h>
 #endif
 
@@ -21,6 +23,9 @@
 #include "HipblasltContainer.hpp"
 #ifdef HIPBLASLTPROVIDER_ENABLE_HIPBLASLT
 #include "HipblasltUtils.hpp"
+#endif
+#ifdef HIPBLASLTPROVIDER_ENABLE_CONV
+#include "engines/conv/RepackProgram.hpp"
 #endif
 
 // NOLINTBEGIN
@@ -58,6 +63,18 @@ public:
                                                            "Failed to create rocBLAS handle");
         }
         return _rocblasHandle;
+    }
+#endif
+
+#ifdef HIPBLASLTPROVIDER_ENABLE_CONV
+    /// The convolution repack kernels, compiled for the current device on first use: only a
+    /// convolution that repacks pays for the compile.
+    const hipblaslt_plugin::RepackProgram& repackProgram() const
+    {
+        std::call_once(_repackOnce, [this] {
+            _repackProgram = std::make_unique<hipblaslt_plugin::RepackProgram>();
+        });
+        return *_repackProgram;
     }
 #endif
 
@@ -108,6 +125,10 @@ private:
 #ifdef HIPBLASLTPROVIDER_ENABLE_ROCBLAS
     mutable std::once_flag _rocblasOnce;
     mutable rocblas_handle _rocblasHandle = nullptr;
+#endif
+#ifdef HIPBLASLTPROVIDER_ENABLE_CONV
+    mutable std::once_flag _repackOnce;
+    mutable std::unique_ptr<hipblaslt_plugin::RepackProgram> _repackProgram;
 #endif
     hipStream_t _stream = nullptr;
     std::unordered_map<const void*, std::unique_ptr<flatbuffers::DetachedBuffer>>

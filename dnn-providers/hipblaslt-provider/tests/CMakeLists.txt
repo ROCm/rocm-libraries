@@ -26,6 +26,8 @@ add_executable(
     engines/rocblas/TestMatmulProblem.cpp
     $<$<BOOL:${HIPBLASLTPROVIDER_ENABLE_ROCBLAS}>:engines/rocblas/TestGpuRocblasMatmulPlan.cpp>
     $<$<BOOL:${HIPBLASLTPROVIDER_ENABLE_CONV}>:engines/conv/TestConvGemmFormulation.cpp>
+    $<$<BOOL:${HIPBLASLTPROVIDER_ENABLE_CONV}>:engines/conv/TestConvRepackFormulation.cpp>
+    $<$<BOOL:${HIPBLASLTPROVIDER_ENABLE_CONV}>:engines/conv/TestGpuRepackKernels.cpp>
     $<$<BOOL:${HIPBLASLTPROVIDER_ENABLE_CONV}>:engines/conv/TestGpuConvGemm.cpp>
 )
 

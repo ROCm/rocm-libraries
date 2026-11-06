@@ -31,7 +31,12 @@
  * @file TestGpuConvGemm.cpp
  * @brief The explicit-GEMM convolution on the device, through each enabled backend, against
  *        hipDNN's CPU reference convolution: every direction, the 1x1 and point-output rows,
- *        channels-first and channels-last, groups and 3-D.
+ *        and the im2col/col2im plans for everything else -- padding, stride, dilation,
+ *        asymmetric padding, groups, depthwise, mixed layouts, true convolution, 1-D to 3-D.
+ *
+ * The reference is cross-correlation only, so true convolution is checked against it with the
+ * filter reflected on the host: the reference's input for forward and backward data, its
+ * result for backward weights.
  */
 namespace
 {
@@ -160,6 +165,79 @@ std::vector<ConvCase> convCases()
     add("PointOutputNchwGrouped", pointGrouped);
 
     add("PointOutputNhwc", channelsLast(point));
+
+    // Repacked: im2col (col2im for backward data) around the GEMM.
+    cases.push_back({"OneByOneNchwWrw", nchw, ConvDirection::BACKWARD_WEIGHTS});
+    cases.push_back({"OneByOneNchwGroupedWrw", nchwGrouped, ConvDirection::BACKWARD_WEIGHTS});
+
+    ConvGemmShape padded;
+    padded.c = 5;
+    padded.k = 7;
+    padded.filter = {3, 3};
+    padded.prePadding = padded.postPadding = {1, 1};
+    add("Padded3x3Nchw", padded);
+    add("Padded3x3Nhwc", channelsLast(padded));
+
+    ConvGemmShape mixed = padded;
+    mixed.wChannelsLast = true;
+    mixed.yChannelsLast = true;
+    add("Padded3x3MixedLayouts", mixed);
+
+    ConvGemmShape irregular;
+    irregular.n = 3;
+    irregular.c = 3;
+    irregular.k = 4;
+    irregular.input = {7, 8};
+    irregular.filter = {3, 2};
+    irregular.stride = {2, 1};
+    irregular.dilation = {1, 2};
+    irregular.prePadding = {1, 0};
+    irregular.postPadding = {0, 2};
+    add("StridedDilatedAsymmetricNchw", irregular);
+    add("StridedDilatedAsymmetricNhwc", channelsLast(irregular));
+
+    ConvGemmShape grouped = padded;
+    grouped.c = 6;
+    grouped.k = 4;
+    grouped.groups = 2;
+    add("Grouped3x3Nchw", grouped);
+    add("Grouped3x3Nhwc", channelsLast(grouped));
+
+    ConvGemmShape depthwise = channelsLast(padded);
+    depthwise.c = depthwise.k = depthwise.groups = 4;
+    add("Depthwise3x3Nhwc", depthwise);
+
+    ConvGemmShape strided1x1 = nchw;
+    strided1x1.stride = {2, 2};
+    add("Strided1x1Nchw", strided1x1);
+
+    ConvGemmShape convolution = irregular;
+    convolution.mode = conv_data_objects::ConvMode::CONVOLUTION;
+    add("ConvolutionModeNchw", convolution);
+    add("ConvolutionModeNhwc", channelsLast(convolution));
+
+    ConvGemmShape oneD;
+    oneD.input = {11};
+    oneD.filter = {3};
+    oneD.prePadding = {2};
+    oneD.postPadding = {1};
+    oneD.stride = {2};
+    oneD.dilation = {1};
+    add("Conv1dNcw", oneD);
+
+    ConvGemmShape threeD;
+    threeD.c = 3;
+    threeD.k = 4;
+    threeD.input = {3, 4, 5};
+    threeD.filter = {3, 3, 3};
+    threeD.prePadding = threeD.postPadding = {1, 1, 1};
+    threeD.stride = {1, 2, 1};
+    threeD.dilation = {1, 1, 1};
+    add("Conv3dNcdhw", threeD);
+    add("Conv3dNdhwc", channelsLast(threeD));
+
+    ConvGemmShape pointGroupedNhwc = channelsLast(pointGrouped);
+    add("PointOutputNhwcGrouped", pointGroupedNhwc);
     return cases;
 }
 
@@ -195,6 +273,37 @@ float storageEpsilon()
     {
         return 7.9e-3f;
     }
+}
+
+int64_t offsetOf(const std::vector<int64_t>& index, const std::vector<int64_t>& strides)
+{
+    int64_t offset = 0;
+    for(size_t axis = 0; axis < index.size(); ++axis)
+    {
+        offset += index[axis] * strides[axis];
+    }
+    return offset;
+}
+
+std::vector<std::vector<int64_t>> allIndices(const std::vector<int64_t>& dims);
+
+/// @p filter's elements reflected along every spatial axis, into @p reflected.
+template <typename T>
+void reflectFilter(Tensor<T>& filter, Tensor<T>& reflected)
+{
+    const auto& dims = filter.dims();
+    const auto* source = static_cast<const T*>(filter.rawHostData());
+    auto* target = static_cast<T*>(reflected.rawHostData());
+    for(const auto& index : allIndices(dims))
+    {
+        auto mirror = index;
+        for(size_t axis = 2; axis < dims.size(); ++axis)
+        {
+            mirror[axis] = dims[axis] - 1 - index[axis];
+        }
+        target[offsetOf(mirror, reflected.strides())] = source[offsetOf(index, filter.strides())];
+    }
+    reflected.markHostModified();
 }
 
 std::vector<std::vector<int64_t>> allIndices(const std::vector<int64_t>& dims)
@@ -297,20 +406,47 @@ void runCase(ConvCase convCase, Backend backend)
         static_cast<void>(tensor->rawHostData());
     }
 
+    const bool reflect = shape.mode == conv_data_objects::ConvMode::CONVOLUTION;
+    Tensor<T> reflectedW(w.dims(), w.strides());
+    if(reflect && convCase.direction != ConvDirection::BACKWARD_WEIGHTS)
+    {
+        reflectFilter(w, reflectedW);
+    }
+    Tensor<T>& referenceW = reflect ? reflectedW : w;
     Tensor<T> reference(written->dims(), written->strides());
     switch(convCase.direction)
     {
     case ConvDirection::FORWARD:
-        CpuFpReferenceConvolution::fprop(
-            x, w, reference, shape.stride, shape.dilation, shape.prePadding, shape.postPadding);
+        CpuFpReferenceConvolution::fprop(x,
+                                         referenceW,
+                                         reference,
+                                         shape.stride,
+                                         shape.dilation,
+                                         shape.prePadding,
+                                         shape.postPadding);
         break;
     case ConvDirection::BACKWARD_DATA:
-        CpuFpReferenceConvolution::dgrad(
-            reference, w, y, shape.stride, shape.dilation, shape.prePadding, shape.postPadding);
+        CpuFpReferenceConvolution::dgrad(reference,
+                                         referenceW,
+                                         y,
+                                         shape.stride,
+                                         shape.dilation,
+                                         shape.prePadding,
+                                         shape.postPadding);
         break;
     case ConvDirection::BACKWARD_WEIGHTS:
-        CpuFpReferenceConvolution::wgrad(
-            x, reference, y, shape.stride, shape.dilation, shape.prePadding, shape.postPadding);
+        // True convolution's dw is cross-correlation's reflected.
+        CpuFpReferenceConvolution::wgrad(x,
+                                         reflect ? reflectedW : reference,
+                                         y,
+                                         shape.stride,
+                                         shape.dilation,
+                                         shape.prePadding,
+                                         shape.postPadding);
+        if(reflect)
+        {
+            reflectFilter(reflectedW, reference);
+        }
         break;
     default:
         break;

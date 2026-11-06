@@ -19,8 +19,9 @@ namespace hipblaslt_plugin
  * @brief Explicit-GEMM convolution, forward, backward data and backward weights, over one BLAS
  *        backend.
  *
- * Backend-neutral: the convolution resolves to GEMM calls (common/ConvGemmFormulation.hpp)
- * and the backend only runs them, through the plan factory it is constructed with. Built in
+ * Backend-neutral: the convolution resolves to GEMM calls, directly on its tensors or around
+ * repack kernels (common/ConvRepackFormulation.hpp), and the backend only runs the GEMMs,
+ * through the plan factory it is constructed with. Built in
  * the shape of a kernel-ingestor native pack -- graph match (parseConvProblem), applicability
  * (the catalog row and the backend's own plan), a catalog of variants (the rows) and a dispatch
  * (the plan) -- so it can move onto universal descriptors without restructuring.
@@ -47,9 +48,13 @@ public:
                    HipdnnEnginePluginExecutionContext& executionContext) const override;
 
 private:
-    /// The calls for @p opGraph in whichever direction it is, or nullopt.
+    /// The plan calls for @p opGraph in whichever direction it is, or nullopt.
     static std::optional<ConvGemmPlanCalls>
         callsFor(const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph);
+
+    /// The backend's plan for @p calls' GEMMs, wrapped in their repack steps when there are any.
+    std::unique_ptr<IPlan> planFor(const HipdnnEnginePluginHandle& handle,
+                                   ConvGemmPlanCalls calls) const;
 
     PlanFactory _factory;
 };

@@ -15,36 +15,6 @@ namespace
 
 namespace data_objects = hipdnn_flatbuffers_sdk::data_objects;
 
-/// Extent and innermost stride of @p axes of @p operand read as one index, outermost axis
-/// first, or nullopt when they do not nest into a single stride. Axes of extent 1 are free.
-std::optional<std::pair<int64_t, int64_t>> collapse(const ConvOperand& operand,
-                                                    const std::vector<size_t>& axes)
-{
-    int64_t extent = 1;
-    std::optional<int64_t> innerStride;
-    int64_t expected = 0;
-    for(size_t i = axes.size(); i-- > 0;)
-    {
-        const auto axis = axes[i];
-        const int64_t dim = operand.dims[axis];
-        if(dim == 1)
-        {
-            continue;
-        }
-        if(innerStride.has_value() && operand.strides[axis] != expected)
-        {
-            return std::nullopt;
-        }
-        if(!innerStride.has_value())
-        {
-            innerStride = operand.strides[axis];
-        }
-        expected = operand.strides[axis] * dim;
-        extent *= dim;
-    }
-    return std::make_pair(extent, innerStride.value_or(1));
-}
-
 std::vector<size_t> spatialAxes(const ConvOperand& operand)
 {
     std::vector<size_t> axes;
@@ -64,8 +34,14 @@ MatrixView view(const ConvProblem& problem,
                 int64_t batchStride,
                 int64_t offset = 0)
 {
-    return MatrixView{
-        operand.uid, problem.dataType, rows, cols, rowStride, colStride, batchStride, offset};
+    return MatrixView{operand.uid,
+                      operand.dataType.value_or(problem.dataType),
+                      rows,
+                      cols,
+                      rowStride,
+                      colStride,
+                      batchStride,
+                      offset};
 }
 
 std::optional<std::vector<GemmCall>> single(const std::optional<GemmCall>& call)
@@ -86,8 +62,8 @@ std::optional<std::vector<GemmCall>> oneByOnePixelRows(const ConvProblem& proble
     {
         pixelAxes.push_back(axis);
     }
-    const auto xPixels = collapse(problem.x, pixelAxes);
-    const auto yPixels = collapse(problem.y, pixelAxes);
+    const auto xPixels = collapseAxes(problem.x, pixelAxes);
+    const auto yPixels = collapseAxes(problem.y, pixelAxes);
     if(!xPixels.has_value() || !yPixels.has_value())
     {
         return std::nullopt;
@@ -132,8 +108,8 @@ std::optional<std::vector<GemmCall>> oneByOnePixelRows(const ConvProblem& proble
 std::optional<std::vector<GemmCall>> oneByOneChannelRows(const ConvProblem& problem)
 {
     const auto axes = spatialAxes(problem.x);
-    const auto xSpatial = collapse(problem.x, axes);
-    const auto ySpatial = collapse(problem.y, axes);
+    const auto xSpatial = collapseAxes(problem.x, axes);
+    const auto ySpatial = collapseAxes(problem.y, axes);
     if(!xSpatial.has_value() || !ySpatial.has_value())
     {
         return std::nullopt;
@@ -231,8 +207,8 @@ std::optional<std::vector<GemmCall>> pointOutput(const ConvProblem& problem)
         {
             continue;
         }
-        const auto xColumns = collapse(problem.x, *order);
-        const auto wColumns = collapse(problem.w, *order);
+        const auto xColumns = collapseAxes(problem.x, *order);
+        const auto wColumns = collapseAxes(problem.w, *order);
         if(!xColumns.has_value() || !wColumns.has_value())
         {
             continue;
@@ -286,6 +262,34 @@ bool allEqual(const std::vector<int64_t>& values, int64_t expected)
 
 } // namespace
 
+std::optional<std::pair<int64_t, int64_t>> collapseAxes(const ConvOperand& operand,
+                                                        const std::vector<size_t>& axes)
+{
+    int64_t extent = 1;
+    std::optional<int64_t> innerStride;
+    int64_t expected = 0;
+    for(size_t i = axes.size(); i-- > 0;)
+    {
+        const auto axis = axes[i];
+        const int64_t dim = operand.dims[axis];
+        if(dim == 1)
+        {
+            continue;
+        }
+        if(innerStride.has_value() && operand.strides[axis] != expected)
+        {
+            return std::nullopt;
+        }
+        if(!innerStride.has_value())
+        {
+            innerStride = operand.strides[axis];
+        }
+        expected = operand.strides[axis] * dim;
+        extent *= dim;
+    }
+    return std::make_pair(extent, innerStride.value_or(1));
+}
+
 std::string_view toString(ConvGemmRow row)
 {
     switch(row)
@@ -294,6 +298,8 @@ std::string_view toString(ConvGemmRow row)
         return "one_by_one";
     case ConvGemmRow::POINT_OUTPUT:
         return "point_output";
+    case ConvGemmRow::IM2COL:
+        return "im2col";
     default:
         break;
     }
@@ -325,7 +331,10 @@ std::optional<ConvGemmPlanCalls> directGemmCalls(const ConvProblem& problem)
         }
         if(calls.has_value())
         {
-            return ConvGemmPlanCalls{ConvGemmRow::ONE_BY_ONE, std::move(*calls)};
+            ConvGemmPlanCalls plan;
+            plan.row = ConvGemmRow::ONE_BY_ONE;
+            plan.calls = std::move(*calls);
+            return plan;
         }
     }
 
@@ -336,7 +345,10 @@ std::optional<ConvGemmPlanCalls> directGemmCalls(const ConvProblem& problem)
         auto calls = pointOutput(problem);
         if(calls.has_value())
         {
-            return ConvGemmPlanCalls{ConvGemmRow::POINT_OUTPUT, std::move(*calls)};
+            ConvGemmPlanCalls plan;
+            plan.row = ConvGemmRow::POINT_OUTPUT;
+            plan.calls = std::move(*calls);
+            return plan;
         }
     }
     return std::nullopt;

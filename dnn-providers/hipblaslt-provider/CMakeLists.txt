@@ -214,7 +214,10 @@ target_sources(hipblaslt_plugin_private PRIVATE
     common/MatmulProblem.cpp
     $<$<BOOL:${HIPBLASLTPROVIDER_ENABLE_CONV}>:common/ConvProblem.cpp>
     $<$<BOOL:${HIPBLASLTPROVIDER_ENABLE_CONV}>:common/ConvGemmFormulation.cpp>
+    $<$<BOOL:${HIPBLASLTPROVIDER_ENABLE_CONV}>:common/ConvRepackFormulation.cpp>
     $<$<BOOL:${HIPBLASLTPROVIDER_ENABLE_CONV}>:engines/conv/ConvGemmPlanBuilder.cpp>
+    $<$<BOOL:${HIPBLASLTPROVIDER_ENABLE_CONV}>:engines/conv/ConvRepackPlan.cpp>
+    $<$<BOOL:${HIPBLASLTPROVIDER_ENABLE_CONV}>:engines/conv/RepackProgram.cpp>
     $<$<BOOL:${HIPBLASLTPROVIDER_ENABLE_ROCBLAS}>:engines/rocblas/RocblasGemm.cpp>
     $<$<BOOL:${HIPBLASLTPROVIDER_ENABLE_ROCBLAS}>:engines/rocblas/RocblasMatmulPlanBuilder.cpp>
     $<$<BOOL:${HIPBLASLTPROVIDER_ENABLE_ROCBLAS}>:engines/rocblas/RocblasGemmPlan.cpp>
@@ -226,6 +229,28 @@ if(HIPBLASLTPROVIDER_ENABLE_ROCBLAS)
 endif()
 if(HIPBLASLTPROVIDER_ENABLE_CONV)
     target_compile_definitions(hipblaslt_plugin_private PUBLIC HIPBLASLTPROVIDER_ENABLE_CONV=1)
+    # The convolution repack kernels are compiled at runtime by HIPRTC from source embedded in
+    # the plugin: kernels/ConvRepack.cpp and the argument header it shares with the host.
+    find_package(hiprtc REQUIRED)
+    target_link_libraries(hipblaslt_plugin_private PUBLIC hiprtc::hiprtc)
+    set(_conv_repack_files
+        "${CMAKE_CURRENT_SOURCE_DIR}/kernels/ConvRepack.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/kernels/ConvRepackArgs.h"
+        "${CMAKE_CURRENT_SOURCE_DIR}/kernels/ConvRepackSources.hpp.in"
+    )
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${_conv_repack_files})
+    file(READ "${CMAKE_CURRENT_SOURCE_DIR}/kernels/ConvRepackSources.hpp.in" _conv_repack_header)
+    file(READ "${CMAKE_CURRENT_SOURCE_DIR}/kernels/ConvRepack.cpp" _conv_repack_source)
+    file(READ "${CMAKE_CURRENT_SOURCE_DIR}/kernels/ConvRepackArgs.h" _conv_repack_args)
+    # Plain replacement rather than configure_file: the sources are not CMake templates.
+    string(REPLACE "@CONV_REPACK_SOURCE@" "${_conv_repack_source}" _conv_repack_header "${_conv_repack_header}")
+    string(REPLACE "@CONV_REPACK_ARGS_SOURCE@" "${_conv_repack_args}" _conv_repack_header "${_conv_repack_header}")
+    # Written through a COPYONLY configure_file, which leaves an unchanged output untouched, so
+    # an unchanged kernel recompiles nothing.
+    set(_conv_repack_generated "${CMAKE_CURRENT_BINARY_DIR}/generated/kernels/ConvRepackSources.hpp")
+    file(WRITE "${_conv_repack_generated}.tmp" "${_conv_repack_header}")
+    configure_file("${_conv_repack_generated}.tmp" "${_conv_repack_generated}" COPYONLY)
+    target_include_directories(hipblaslt_plugin_private PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated")
 endif()
 dnn_provider_generate_version_header(hipblaslt_provider hipblaslt_plugin_private ${CMAKE_CURRENT_LIST_DIR})
 target_link_libraries(hipblaslt_plugin_private PUBLIC hipdnn_data_sdk hipdnn_flatbuffers_sdk hipdnn_plugin_sdk hip::host)

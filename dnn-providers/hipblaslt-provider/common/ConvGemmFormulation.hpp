@@ -3,12 +3,16 @@
 
 #pragma once
 
+#include <cstddef>
 #include <optional>
 #include <string_view>
+#include <utility>
+#include <variant>
 #include <vector>
 
 #include "common/ConvProblem.hpp"
 #include "common/GemmCall.hpp"
+#include "kernels/ConvRepackArgs.h"
 
 namespace hipblaslt_plugin
 {
@@ -20,16 +24,51 @@ enum class ConvGemmRow
     ONE_BY_ONE,
     /// The filter covers the whole input with no padding: one output pixel, a GEMM over images.
     POINT_OUTPUT,
+    /// Anything else: im2col (col2im for backward data) turns the convolution into a ONE_BY_ONE
+    /// one over a column matrix in the workspace.
+    IM2COL,
 };
 
 std::string_view toString(ConvGemmRow row);
 
-/// The GEMM calls that compute a convolution, run in order, each writing its own part of the
-/// output once. No repack and no workspace.
+/// A region of the plan's workspace that the steps address as a tensor with a uid of its own.
+/// Its uid is not one of the graph's, so a step resolves it the way it resolves a graph tensor.
+struct WorkspaceTensor
+{
+    int64_t uid = 0;
+    /// Bytes from the start of the workspace.
+    size_t offset = 0;
+    size_t bytes = 0;
+};
+
+/// One launch of a repack kernel (kernels/ConvRepack.cpp). The pointers in `args` are left null
+/// and filled at execution from `srcUid` and `dstUid`.
+struct RepackStep
+{
+    std::variant<StridedCopyArgs, Im2ColArgs, Col2ImArgs> args;
+    /// The element type moved (strided copy, im2col) or written (col2im).
+    hipdnn_flatbuffers_sdk::data_objects::DataType dataType
+        = hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET;
+    int64_t srcUid = 0;
+    int64_t dstUid = 0;
+};
+
+/// How a convolution runs: repack steps, then the GEMM calls in order, each writing its own part
+/// of its output once, then more repack steps. The direct rows have no steps and no workspace.
 struct ConvGemmPlanCalls
 {
     ConvGemmRow row = ConvGemmRow::ONE_BY_ONE;
     std::vector<GemmCall> calls;
+    std::vector<WorkspaceTensor> workspace;
+    /// Bytes of workspace the steps and calls address, before any the GEMM backend needs.
+    size_t workspaceBytes = 0;
+    std::vector<RepackStep> before;
+    std::vector<RepackStep> after;
+
+    bool hasRepack() const
+    {
+        return !before.empty() || !after.empty();
+    }
 };
 
 /**
@@ -41,6 +80,11 @@ struct ConvGemmPlanCalls
  * matches a row but is laid out in a way it cannot read is declined rather than misread.
  */
 std::optional<ConvGemmPlanCalls> directGemmCalls(const ConvProblem& problem);
+
+/// Extent and innermost stride of @p axes of @p operand read as one index, outermost axis
+/// first, or nullopt when they do not nest into a single stride. Axes of extent 1 are free.
+std::optional<std::pair<int64_t, int64_t>> collapseAxes(const ConvOperand& operand,
+                                                        const std::vector<size_t>& axes);
 
 /// @p problem's shape satisfies the ONE_BY_ONE row: every filter extent 1, every stride 1, no
 /// padding (dilation is irrelevant to a 1x1 filter).
