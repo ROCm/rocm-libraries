@@ -49,6 +49,8 @@ class ConfigurableEventListener : public TestEventListener
 {
     TestEventListener* const eventListener;
     std::atomic_size_t       skipped_tests{0}; // Number of skipped tests.
+    MemoryShortageLog        memory_shortages;
+    std::string              current_test; // suite.name of the running test
 
 public:
     bool showTestCases      = true; // Show the names of each test case.
@@ -98,19 +100,17 @@ public:
 
     void OnTestStart(const TestInfo& test_info) override
     {
+        // OnTestPartResult runs under the lock that UnitTest::current_test_info() takes, so the
+        // name is kept here.
+        current_test = std::string(test_info.test_suite_name()) + "." + test_info.name();
         if(showTestNames)
             eventListener->OnTestStart(test_info);
     }
 
     void OnTestPartResult(const TestPartResult& result) override
     {
-        if(!strcmp(result.message(), LIMITED_MEMORY_STRING_GTEST))
-        {
-            if(showInlineSkips)
-                hipblaslt_cout << "Skipped test due to limited memory environment." << std::endl;
-            ++skipped_tests;
-        }
-        else if(!strcmp(result.message(), TOO_MANY_DEVICES_STRING_GTEST))
+        memory_shortages.record(current_test, result.message());
+        if(!strcmp(result.message(), TOO_MANY_DEVICES_STRING_GTEST))
         {
             if(showInlineSkips)
                 hipblaslt_cout << "Skipped test due to too few GPUs." << std::endl;
@@ -152,6 +152,7 @@ public:
     {
         if(skipped_tests)
             hipblaslt_cout << "[ SKIPPED  ] " << skipped_tests << " tests." << std::endl;
+        hipblaslt_cout << memory_shortages.summary() << std::flush;
         eventListener->OnTestProgramEnd(unit_test);
     }
 };

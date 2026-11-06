@@ -29,6 +29,7 @@
 #include "testing_matmul.hpp"
 #include "testing_matmul_batch_offset.hpp"
 #include <cctype>
+#include <cstdlib>
 #include <cstring>
 #include <type_traits>
 #include <utility>
@@ -457,6 +458,152 @@ namespace
                     EXPECT_NE(why.find("transA=T and transB=N"), std::string::npos)
                         << a << b << ": " << why;
             }
+    }
+
+    // ----------------------------------------------------------------------------
+    // Memory preflight (AIHPBLAS-5352)
+    // ----------------------------------------------------------------------------
+
+    // Sets an environment variable for one scope, and then restores the value the run started
+    // with, which a CI lane may have set for every test.
+    class ScopedVariable
+    {
+    public:
+        ScopedVariable(const char* name, const char* value)
+            : m_name(name)
+        {
+            if(const char* old = std::getenv(name))
+                m_saved = old;
+            set(value);
+        }
+        ~ScopedVariable()
+        {
+            set(m_saved ? m_saved->c_str() : nullptr);
+        }
+        ScopedVariable(const ScopedVariable&)            = delete;
+        ScopedVariable& operator=(const ScopedVariable&) = delete;
+
+    private:
+        // nullptr unsets the variable.
+        void set(const char* value) const
+        {
+#ifdef _WIN32
+            _putenv_s(m_name, value ? value : "");
+#else
+            if(value)
+                setenv(m_name, value, 1);
+            else
+                unsetenv(m_name);
+#endif
+        }
+
+        const char*                m_name;
+        std::optional<std::string> m_saved;
+    };
+
+    // An M x N x K NN GEMM, in and out of the same type, that the CPU reference checks with
+    // unit_check.
+    Arguments unit_check_case(int64_t m, int64_t n, int64_t k, hipDataType type)
+    {
+        Arguments arg{};
+        arg.init();
+        arg.a_type = arg.b_type = arg.c_type = arg.d_type = type;
+        arg.initialization                                = hipblaslt_initialization::rand_int;
+        arg.unit_check                                    = 1;
+        arg.fast_check                                    = 0;
+        arg.transA = arg.transB = 'N';
+        arg.M[0]                = m;
+        arg.N[0]                = n;
+        arg.K[0]                = k;
+        arg.lda[0]              = m;
+        arg.ldb[0]              = k;
+        arg.ldc[0] = arg.ldd[0] = m;
+        return arg;
+    }
+
+    void run_short_unit_check_case()
+    {
+        static const Arguments arg = unit_check_case(4096, 4096, 16, HIP_R_32F);
+        testing_matmul(arg);
+    }
+
+    TEST(MatmulMemory_pre_checkin, preflight_stops_a_unit_check_case_that_does_not_fit)
+    {
+        // The case needs about 384 MiB of host memory. Under a 64 MiB budget the preflight must
+        // stop it before any allocation, and under HIPBLASLT_TEST_FAIL_ON_MEMORY_SKIP it fails.
+        ScopedVariable limit("HIPBLASLT_CLIENT_HOST_MEMORY_LIMIT", "64M");
+        ScopedVariable fail("HIPBLASLT_TEST_FAIL_ON_MEMORY_SKIP", "1");
+        EXPECT_FATAL_FAILURE(run_short_unit_check_case(), MEMORY_SHORTAGE_STRING "this case needs");
+    }
+
+    // A pointer-array f16 GEMM whose batches start at the given element offsets, as in the
+    // matmul_batch_offset cases.
+    Arguments batch_offset_case(int64_t offset_a, int64_t offset_b, int64_t offset_c)
+    {
+        Arguments arg = unit_check_case(1024, 1024, 256, HIP_R_16F);
+        strcpy(arg.function, "matmul_batch_offset");
+        arg.batch_mode     = 1;
+        arg.batch_count    = 2;
+        arg.batch_offset_a = offset_a;
+        arg.batch_offset_b = offset_b;
+        arg.batch_offset_c = offset_c;
+        arg.batch_offset_d = 4097;
+        return arg;
+    }
+
+    void run_short_batch_offset_case()
+    {
+        static const Arguments arg = batch_offset_case(4096, 4097, 4098);
+        testing_matmul_batch_offset(arg);
+    }
+
+    TEST(MatmulMemory_pre_checkin, preflight_stops_a_batch_offset_case_that_does_not_fit)
+    {
+        // matmul_batch_offset cases have their own test function; it needs the same preflight.
+        // This one needs about 14 MiB of host memory.
+        ScopedVariable limit("HIPBLASLT_CLIENT_HOST_MEMORY_LIMIT", "1M");
+        ScopedVariable fail("HIPBLASLT_TEST_FAIL_ON_MEMORY_SKIP", "1");
+        EXPECT_FATAL_FAILURE(run_short_batch_offset_case(),
+                             MEMORY_SHORTAGE_STRING "this case needs");
+    }
+
+    // Runs one case with the estimate check on and returns what it measured.
+    MemoryEstimateMeasurement measure_estimate(const Arguments& arg)
+    {
+        ScopedVariable check("HIPBLASLT_TEST_CHECK_MEMORY_ESTIMATE", "1");
+        last_memory_estimate_measurement() = {};
+        testing_matmul(arg);
+        return last_memory_estimate_measurement();
+    }
+
+    TEST(MatmulMemory_pre_checkin, host_estimate_matches_what_a_unit_check_case_uses)
+    {
+#ifndef __linux__
+        GTEST_SKIP() << "the estimate check reads the peak resident memory from /proc";
+#endif
+        // In the f32 case six 256 MiB host buffers make up the estimate, each with the pool's 20%
+        // extra. In the f16 case the CPU reference's 1 GiB float copy of A is most of it. The
+        // bound on the overestimate keeps the preflight from skipping cases that would fit.
+        struct Shape
+        {
+            const char* name;
+            int64_t     m, n, k;
+            hipDataType type;
+        };
+        // A small case first, since the check leaves out the first case in the process.
+        testing_matmul(unit_check_case(64, 64, 16, HIP_R_32F));
+        for(const Shape& s : {Shape{"f32, 8192 x 8192 x 16", 8192, 8192, 16, HIP_R_32F},
+                              Shape{"f16, 16384 x 16 x 16384", 16384, 16, 16384, HIP_R_16F}})
+        {
+            SCOPED_TRACE(s.name);
+            auto m = measure_estimate(unit_check_case(s.m, s.n, s.k, s.type));
+            if(HasFatalFailure() || IsSkipped())
+                return;
+            ASSERT_TRUE(m.measured) << "the peak resident memory could not be reset";
+            EXPECT_LE(m.used, MemoryEstimateCheck::allowed(m.estimate));
+            EXPECT_LE(m.estimate, m.used + m.used / 5 + (size_t(256) << 20))
+                << "estimate " << m.estimate << ", used " << m.used;
+        }
     }
 
     // ----------------------------------------------------------------------------
