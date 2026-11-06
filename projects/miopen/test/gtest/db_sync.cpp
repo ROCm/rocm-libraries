@@ -179,6 +179,7 @@ void ParseProblemKey(const std::string& key_, conv::ProblemDescription& prob_des
         const auto det = std::remove(std::next(opt.begin()), opt.end(), std::string{"det"});
         deterministic  = det != opt.end();
         opt.erase(det, opt.end());
+        key = opt[0];
     }
     int group_cnt = 1;
     conv::Direction dir;
