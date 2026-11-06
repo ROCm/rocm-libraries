@@ -841,6 +841,11 @@ REFUSALS = [
         r"slots\[dq\].knobs names 'num_warps', which no kmd_fields entry declares",
     ),
     (
+        "string_knob",
+        lambda raw: raw["slots"][1].update(knobs=["dtype"]),
+        r"slots\[dkdv\].knobs names 'dtype', declared in kmd_fields with type 'string'",
+    ),
+    (
         "duplicate_knob",
         lambda raw: raw["slots"][1].update(knobs=["block_m", "block_m"]),
         r"slots\[dkdv\].knobs lists \['block_m'\] more than once",
@@ -954,13 +959,6 @@ def test_reduction_divides_may_name_a_field_only_one_slot_declares(tmp_path):
 )
 def test_a_slotted_config_is_refused(tmp_path, mutate, message):
     _expect(tmp_path, mutate, message)
-
-
-def test_a_slot_takes_a_string_knob_addressed_by_ordinal(tmp_path):
-    """A slot's string field is a knob: GenericPlanBuilder pins it by its ordinal in the
-    slot's value set, as for an unslotted engine."""
-    config = _load(tmp_path, lambda raw: raw["slots"][1].update(knobs=["dtype"]))
-    assert config.slots[1].knobs == ["dtype"]
 
 
 def test_an_unslotted_config_refuses_a_pack_slot_and_a_shared_workspace(

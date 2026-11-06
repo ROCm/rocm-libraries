@@ -26,8 +26,9 @@ public:
         launchImpl(stream, kernelParams.data());
     }
 
-    /// Launches with @p kernelParams, one argument address per kernel argument in kernarg
-    /// order: for a launch whose argument list is only known at run time.
+    /// Launch with an already-built argument array: one pointer per kernel argument, in
+    /// ABI order, as hipModuleLaunchKernel takes it. For a caller whose argument list is
+    /// data rather than a fixed signature.
     void launchWithParams(hipStream_t stream, void** kernelParams) const
     {
         launchImpl(stream, kernelParams);
