@@ -506,6 +506,8 @@ if(ROCKE_INSTALL_TESTS)
     # Test-only implementation for the installed arch-domain reproduction gate.
     # Keep it outside the production package: CTest owns the external compiler
     # sweep, while package resources provide the committed columns being checked.
+    # tests/conftest.py also points rocke.tests.ir_validity at this copy, so the
+    # installed pytest runs compile lowered IR with the same tool.
     install(FILES
             "${CMAKE_CURRENT_SOURCE_DIR}/tools/gen_arch_domain.py"
             "${CMAKE_CURRENT_SOURCE_DIR}/tools/check_ir_validity.py"
