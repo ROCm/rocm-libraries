@@ -434,7 +434,7 @@ TEST(TestGfx950AttentionDenseGraphMatch, DeclinesBhsdLayout)
     // The kernel bakes BSHD strides and takes no stride kernargs; BHSD is wrong elements.
     // One operand at a time runs on both arches in TestAttentionDenseMatchers.cpp.
     GraphSpec spec;
-    spec.setEveryLayout(StrideLayout::BHSD);
+    spec.setEveryLayout(SdpaLayout::BHSD);
     EXPECT_FALSE(matchGraph(spec).has_value());
 }
 
@@ -448,7 +448,7 @@ TEST(TestGfx950AttentionDenseGraphMatch, AcceptsSingleHeadUnderEitherStrideSpell
     EXPECT_TRUE(matchGraph(bshd).has_value());
 
     GraphSpec bhsd = bshd;
-    bhsd.setEveryLayout(StrideLayout::BHSD);
+    bhsd.setEveryLayout(SdpaLayout::BHSD);
     EXPECT_TRUE(matchGraph(bhsd).has_value());
 }
 
@@ -466,7 +466,7 @@ TEST(TestGfx950AttentionDenseGraphMatch, DeclinesPaddedSequenceStride)
     EXPECT_TRUE(matchGraph(packed).has_value());
 
     GraphSpec padded = packed;
-    padded.operand(Q_UID).layout = StrideLayout::PADDED_BSHD;
+    padded.operand(Q_UID).layout = SdpaLayout::PADDED_BSHD;
     EXPECT_FALSE(matchGraph(padded).has_value());
 }
 
@@ -485,7 +485,7 @@ LoggedDecline loggedDecline(const GraphSpec& spec)
 TEST(TestGfx950AttentionDenseGraphMatch, LogsTheOperandAndTheBakedStridesWhenQIsNotBshd)
 {
     GraphSpec spec;
-    spec.operand(Q_UID).layout = StrideLayout::BHSD;
+    spec.operand(Q_UID).layout = SdpaLayout::BHSD;
     const auto decline = loggedDecline(spec);
     EXPECT_EQ(decline.cause, "layout");
     EXPECT_NE(decline.detail.find("Q (uid 1)"), std::string::npos) << decline.detail;
@@ -496,7 +496,7 @@ TEST(TestGfx950AttentionDenseGraphMatch, LogsTheOperandAndTheBakedStridesWhenQIs
 TEST(TestGfx950AttentionDenseGraphMatch, LogsTheOutputWhenOnlyOIsNotBshd)
 {
     GraphSpec spec;
-    spec.operand(O_UID).layout = StrideLayout::BHSD;
+    spec.operand(O_UID).layout = SdpaLayout::BHSD;
     const auto decline = loggedDecline(spec);
     EXPECT_EQ(decline.cause, "layout");
     EXPECT_NE(decline.detail.find("O (uid 4)"), std::string::npos) << decline.detail;
@@ -584,7 +584,7 @@ TEST(TestGfx950AttentionDenseGraphMatch, DeclinesPaddedOutputSequenceStride)
     EXPECT_TRUE(matchGraph(spec).has_value());
 
     GraphSpec padded = spec;
-    padded.operand(O_UID).layout = StrideLayout::PADDED_BSHD;
+    padded.operand(O_UID).layout = SdpaLayout::PADDED_BSHD;
     EXPECT_FALSE(matchGraph(padded).has_value());
 }
 
@@ -603,7 +603,7 @@ constexpr std::size_t ELEMENT_STRIDE = 3;
 /// The packed BSHD strides of the base shape with the stride at @p axis replaced.
 std::vector<int64_t> packedStridesWith(std::size_t axis, int64_t stride)
 {
-    auto strides = bshdStrides(HEADS, SEQ, HEAD_SIZE);
+    auto strides = sdpaStrides(SdpaLayout::BSHD, HEADS, SEQ, HEAD_SIZE);
     strides.at(axis) = stride;
     return strides;
 }
@@ -691,7 +691,7 @@ TEST(TestGfx950AttentionDenseGraphMatch, DeclinesBsdhLayout)
     // Token-major like BSHD but head fastest-varying: same row and batch pitch, with the
     // head and element strides exchanged.
     GraphSpec spec;
-    spec.operand(Q_UID).layout = StrideLayout::BSDH;
+    spec.operand(Q_UID).layout = SdpaLayout::BSDH;
     EXPECT_FALSE(matchGraph(spec).has_value());
 }
 
@@ -853,7 +853,7 @@ TEST(TestGfx950AttentionDenseGraphMatch, DeclinesAnOperandOfAnotherRank)
     // Every axis index the matcher reads assumes rank 4. A rank-5 K carries all four of
     // them and more, so only the rank check stands between it and a match; rank 3 would
     // have its missing axis read out of bounds.
-    const auto packed = bshdStrides(HEADS, SEQ, HEAD_SIZE);
+    const auto packed = sdpaStrides(SdpaLayout::BSHD, HEADS, SEQ, HEAD_SIZE);
     const std::vector<int64_t> rank4Dims{BATCH, HEADS, SEQ, HEAD_SIZE};
     const std::vector<int64_t> rank5Dims{BATCH, HEADS, SEQ, HEAD_SIZE, 1};
     const std::vector<int64_t> rank5Strides{packed.at(0), packed.at(1), packed.at(2), 1, 1};
@@ -945,7 +945,7 @@ TEST(TestGfx950AttentionDenseGraphMatch, DeclinesOverflowingOutputExtents)
     GraphSpec overflowing = spec;
     overflowing.operand(O_UID).dims
         = std::vector<int64_t>{BATCH, int64_t{1} << 16, int64_t{1} << 31, int64_t{1} << 16};
-    overflowing.operand(O_UID).strides = bshdStrides(HEADS, SEQ, HEAD_SIZE);
+    overflowing.operand(O_UID).strides = sdpaStrides(SdpaLayout::BSHD, HEADS, SEQ, HEAD_SIZE);
     EXPECT_FALSE(matchGraph(overflowing).has_value());
 }
 

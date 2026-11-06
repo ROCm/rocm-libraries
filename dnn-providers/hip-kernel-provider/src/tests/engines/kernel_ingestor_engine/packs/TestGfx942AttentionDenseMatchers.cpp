@@ -644,7 +644,7 @@ TEST(TestGfx942AttentionDenseGraphMatch, DeclinesAnUnsupportedOperandOrLayout)
     EXPECT_FALSE(matchGraph(fp32).has_value());
 
     auto bhsd = baseGraph();
-    bhsd.operand(Q_UID).layout = StrideLayout::BHSD;
+    bhsd.operand(Q_UID).layout = SdpaLayout::BHSD;
     EXPECT_FALSE(matchGraph(bhsd).has_value());
 
     auto gqa = baseGraph();

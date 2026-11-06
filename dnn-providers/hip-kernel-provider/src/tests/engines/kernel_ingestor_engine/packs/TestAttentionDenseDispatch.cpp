@@ -155,7 +155,7 @@ GraphSpec withUnnamedTensors(const AttentionDenseTestArch& arch, GraphSpec spec)
     TensorSpec bhsd;
     bhsd.uid = BHSD_UID;
     bhsd.dims = {BATCH, HEADS, SEQ, HEAD_SIZE};
-    bhsd.strides = attention_dense_graphs::bhsdStrides(HEADS, SEQ, HEAD_SIZE);
+    bhsd.strides = sdpaStrides(SdpaLayout::BHSD, HEADS, SEQ, HEAD_SIZE);
     bhsd.dataType = data_objects::DataType::BFLOAT16;
     spec.unnamedTensors.push_back(bhsd);
     if(arch.bindsStats)

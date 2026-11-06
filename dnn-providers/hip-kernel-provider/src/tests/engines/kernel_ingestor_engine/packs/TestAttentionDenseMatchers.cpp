@@ -372,7 +372,7 @@ TEST_P(TestAttentionDenseMatch, DeclinesEachOperandThatIsNotDenseBshd)
     {
         SCOPED_TRACE("uid " + std::to_string(uid));
         auto spec = baseGraph();
-        spec.operand(uid).layout = StrideLayout::BHSD;
+        spec.operand(uid).layout = SdpaLayout::BHSD;
         EXPECT_EQ(loggedDecline(arch(), spec).cause, "layout");
 
         // One padded batch: dense in every other axis.

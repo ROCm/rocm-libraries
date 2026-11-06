@@ -34,6 +34,7 @@
 #include "core/Handle.hpp"
 #include "engines/kernel_ingestor_engine/KernelIngestorEngine.hpp"
 #include "tests/engines/kernel_ingestor_engine/packs/AttentionDenseTestArch.hpp"
+#include "tests/engines/kernel_ingestor_engine/packs/SdpaLayoutTestSupport.hpp"
 
 /**
  * @file AttentionDenseTestGraphs.hpp
@@ -71,37 +72,6 @@ inline constexpr int64_t HEAD_SIZE = 128;
 /// 1 / sqrt(128).
 inline constexpr float SCALE = 0.08838834764831843F;
 
-/// BSHD strides for (B, H, S, D) LOGICAL dims -- token-major, head varying fastest.
-inline std::vector<int64_t> bshdStrides(int64_t heads, int64_t sequence, int64_t headSize)
-{
-    return {sequence * heads * headSize, headSize, heads * headSize, 1};
-}
-
-/// BHSD strides for the same dims: head-major, which the kernel cannot read.
-inline std::vector<int64_t> bhsdStrides(int64_t heads, int64_t sequence, int64_t headSize)
-{
-    return {heads * sequence * headSize, sequence * headSize, headSize, 1};
-}
-
-/// Elements of slack a real allocator leaves between token rows.
-inline constexpr int64_t ROW_PAD = 8;
-
-/// BSHD axis order with the per-token row stride padded past `heads * headSize`. The
-/// tensor is still token-major and still dense in the frontend's sense, but the matcher
-/// compares strides by exact equality, so the padding alone is disqualifying.
-inline std::vector<int64_t> paddedBshdStrides(int64_t heads, int64_t sequence, int64_t headSize)
-{
-    const int64_t rowStride = heads * headSize + ROW_PAD;
-    return {sequence * rowStride, headSize, rowStride, 1};
-}
-
-/// BSDH strides for the same LOGICAL dims -- token-major like BSHD, but with head_size
-/// outer to head, so the head axis is the unit-stride one.
-inline std::vector<int64_t> bsdhStrides(int64_t heads, int64_t sequence, int64_t headSize)
-{
-    return {sequence * headSize * heads, 1, headSize * heads, heads};
-}
-
 /// Packed row-major strides over @p dims, the frontend's default at any rank.
 inline std::vector<int64_t> packedStrides(const std::vector<int64_t>& dims)
 {
@@ -113,33 +83,6 @@ inline std::vector<int64_t> packedStrides(const std::vector<int64_t>& dims)
     return strides;
 }
 
-/// The stride spelling one operand carries, chosen per operand so a graph can mix them:
-/// the mixed-layout graph is the hazard the matcher's per-operand clauses exist to catch.
-enum class StrideLayout
-{
-    BSHD,
-    BHSD,
-    PADDED_BSHD,
-    BSDH
-};
-
-inline std::vector<int64_t>
-    stridesFor(StrideLayout layout, int64_t heads, int64_t sequence, int64_t headSize)
-{
-    switch(layout)
-    {
-    case StrideLayout::BHSD:
-        return bhsdStrides(heads, sequence, headSize);
-    case StrideLayout::PADDED_BSHD:
-        return paddedBshdStrides(heads, sequence, headSize);
-    case StrideLayout::BSDH:
-        return bsdhStrides(heads, sequence, headSize);
-    case StrideLayout::BSHD:
-    default:
-        return bshdStrides(heads, sequence, headSize);
-    }
-}
-
 /// One operand's departures from the dense BSHD tensor the shape gives it.
 struct OperandSpec
 {
@@ -149,7 +92,9 @@ struct OperandSpec
     /// not fit. Unset, they are `layout` over the operand's own dims, so an operand whose
     /// dims disagree is still dense for its own extents.
     std::optional<std::vector<int64_t>> strides;
-    StrideLayout layout = StrideLayout::BSHD;
+    /// Chosen per operand so a graph can mix layouts: the mixed-layout graph is the hazard
+    /// the matcher's per-operand clauses exist to catch.
+    SdpaLayout layout = SdpaLayout::BSHD;
     std::optional<data_objects::DataType> dataType;
 };
 
@@ -297,10 +242,10 @@ struct GraphSpec
         {
             return packedStrides(dims);
         }
-        return stridesFor(spec.layout, dims[1], dims[2], dims[3]);
+        return sdpaStrides(spec.layout, dims[1], dims[2], dims[3]);
     }
 
-    void setEveryLayout(StrideLayout layout)
+    void setEveryLayout(SdpaLayout layout)
     {
         for(auto& spec : operands)
         {
