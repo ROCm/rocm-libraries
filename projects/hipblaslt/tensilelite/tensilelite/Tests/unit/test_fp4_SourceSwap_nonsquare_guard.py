@@ -54,6 +54,7 @@ def test_fp4_ss_nonsquare_survives_validation(tensile_args, tmp_path):
 
     # Benchmark data proves the group actually ran with surviving solutions, rather
     # than the run being vacuously skipped (e.g. an arch filter dropping the group),
-    # which would let this pass without ever reaching MI validation.
-    benchmark_data = list((output_dir / "2_BenchmarkData").glob("*.csv"))
-    assert benchmark_data, "no 2_BenchmarkData CSV; SourceSwap 32x16 never benchmarked"
+    # which would let this pass without ever reaching MI validation. Without a
+    # LibraryLogic section no results CSV is written, so check the solutions YAML.
+    benchmark_data = list((output_dir / "2_BenchmarkData").glob("*.yaml"))
+    assert benchmark_data, "no 2_BenchmarkData solutions YAML; SourceSwap 32x16 never benchmarked"

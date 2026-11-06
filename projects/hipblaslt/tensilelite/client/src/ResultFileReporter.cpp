@@ -37,6 +37,9 @@ namespace TensileLite
         std::shared_ptr<ResultFileReporter>
             ResultFileReporter::Default(po::variables_map const& args)
         {
+            if(args["no-results-file"].as<bool>())
+                return std::shared_ptr<ResultFileReporter>();
+
             return std::make_shared<ResultFileReporter>(
                 args["results-file"].as<std::string>(),
                 args["csv-export-extra-cols"].as<bool>(),
