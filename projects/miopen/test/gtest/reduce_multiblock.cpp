@@ -750,10 +750,10 @@ std::vector<MultiBlockCase> BetaConversionInt8Indices()
 }
 
 // The prior output and beta are converted to the compute type before the blend, so with an output
-// type wider than the compute type they are rounded to it: FP32 output and FP16 compute, a prior
-// output of 100.4 is 100.375 in FP16 and the maximum 100 plus 100.375 is 200.375 (develop blended
-// in FP32 and gave 200.4). The values are exact in FP16; the maximum is used because a sum of the
-// larger shapes would overflow FP16.
+// type wider than the compute type they are rounded to it: FP32 output and FP16 compute, beta of
+// 1.0004 is 1 in FP16 and the maximum 100 plus 700 * 1 is 800 (develop blended in FP32 and gave
+// 800.28; a beta left unrounded would give 800.5 in FP16). The values are exact in FP16; the
+// maximum is used because a sum of the larger shapes would overflow FP16.
 std::vector<MultiBlockCase> BetaWiderOutput()
 {
     std::vector<MultiBlockCase> cases;
@@ -775,8 +775,8 @@ std::vector<MultiBlockCase> BetaWiderOutput()
     }
     for(auto& c : cases)
     {
-        c.beta         = 1.0f;
-        c.outputInit   = 100.4f;
+        c.beta         = 1.0004f;
+        c.outputInit   = 700.0f;
         c.exactOutput  = true;
         c.computeBlend = true;
     }
