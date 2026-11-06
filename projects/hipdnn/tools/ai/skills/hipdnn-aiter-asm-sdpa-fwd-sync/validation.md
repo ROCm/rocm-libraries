@@ -8,15 +8,20 @@ Build the hip-kernel-provider with the `hipdnn-superbuild` skill (`../hipdnn-sup
 
 ## 2. Unit tests
 
-Run the hip-kernel-provider unit tests with the `hipdnn-superbuild-test` skill (`../hipdnn-superbuild-test/SKILL.md`), at least the `TestSdpaFwd*`, `TestAsmKpack*`, `TestAsmKernelPath` and `TestAsmSdpaEngine` suites.
+Run the hip-kernel-provider unit tests with the `hipdnn-superbuild-test` skill (`../hipdnn-superbuild-test/SKILL.md`), at least the `TestSdpaFwd*`, `TestAsmKpack*`, `TestAsmKernelPath`, `TestSdpaModuleCache`, `TestSdpaKernargRanges` and `TestAsmSdpaEngine` suites.
 
-Some of these need a GPU of the arch they test. `TestSdpaFwdPlanBuilder.IsApplicableAvailableKernels` and `TestAsmKpackLoading` skip or check only the device's own arch. Check the GPU with `rocminfo` before saying a machine has no AMD GPU.
+`TestAsmKpackLoading` needs no GPU: it opens the built archive of every arch in `ASM_SDPA_GPU_ARCHS`, so it checks packing for all of them on any machine. `TestSdpaFwdPlanBuilder.IsApplicableAvailableKernels` and the other device tests check only the device's own arch, or skip. Check the GPU with `rocminfo` before saying a machine has no AMD GPU.
 
 ## 3. GPU validation per arch
 
-Every arch whose objects changed needs `IntegrationGpuSdpaForward` (`dnn-providers/hip-kernel-provider/src/integration_tests/asm_sdpa_engine/`) to pass on a GPU of that arch. Its cases come from the kernel registry, so it covers every kept row.
+Every arch whose objects changed needs the forward GPU tests in `dnn-providers/hip-kernel-provider/src/integration_tests/asm_sdpa_engine/IntegrationGpuSdpaForward.cpp` to pass on a GPU of that arch: `IntegrationGpuSdpaFwdBf16` (instances `Smoke`, `SmokeFp8` and `SmokeStats`, built from the kernel registry) and `IntegrationGpuSdpaFwdShapeSweepBf16`. Filter on `*IntegrationGpuSdpaFwd*`.
 
-- If the local GPU is one of the updated archs, run it locally with `hipdnn-superbuild-test`.
+- The registry cases validate every kept batch-mode row numerically, with equal query and key-value head counts and FNUZ fp8 inputs. They skip numerical validation of group-mode rows, so a new or changed group-mode kernel needs another check, such as a cross-provider bundle with ragged tensors. Say so in the report when there is none.
+- A rule the diff added for a case the registry does not exercise, such as GQA, needs a shape-sweep case.
+
+Where to run them:
+
+- If the local GPU is one of the updated archs, run them locally with `hipdnn-superbuild-test`.
 - For the others, use the `hipdnn-trigger-ci` skill (`../hipdnn-trigger-ci/SKILL.md`) with the matching GPU families. It dry-runs first; dispatch only after the user approves the exact command. The branch must be pushed first, which needs the user's approval too.
 - Report each arch as passed, failed, or not run. Never call a kernel validated on an arch where it was not run.
 

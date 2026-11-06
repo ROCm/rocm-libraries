@@ -30,7 +30,7 @@ Include:
 - **Exclusions**: each exclusion and inclusion with its reason, as recorded in `aiter_fwd_pins.json`.
 - **ASM only**: a statement that `verify` passed, that every object is an AITER ASM kernel with no CK symbols, and that no upstream source was vendored. List each CK fallback case of `fmha_fwd_v3()` that became a decline.
 - **Lost coverage**: graphs the engine no longer serves because AITER dropped an ASM kernel.
-- **Validation**: per arch, the GPU tests run and their result, or "not run".
+- **Validation**: per arch, the GPU tests run and their result, or "not run", and the group-mode kernels no test checked numerically.
 - **Not ported**: the forward modules the report lists as not ported.
 
 The Libraries PR Bot needs a tracking reference in the PR body. Ask the user for it; it goes in the PR body only, never in code or provenance files.

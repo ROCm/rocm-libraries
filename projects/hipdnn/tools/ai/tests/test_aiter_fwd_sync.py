@@ -50,6 +50,10 @@ struct p1
 {
     unsigned int _p0;
 };
+static bool is_mi308_device()
+{
+    return false;
+}
 """
 
 MHA_FWD_H = """\
@@ -420,7 +424,7 @@ def test_upstream_abi_and_dispatch_changes_are_diffed(sync, env):
     dispatch_change = changed["csrc/cpp_itfs/mha_fwd.cu:fmha_fwd_v3"]
     assert struct_change["tier"] == 3 and "+    int nsplit;" in struct_change["diff"]
     assert (
-        dispatch_change["tier"] == 2
+        dispatch_change["tier"] == 3
         and "nhead_q != a.nhead_k" in dispatch_change["diff"]
     )
     assert len(changed) == 2  # the declaration and fmha_fwd_ck() are not compared
@@ -626,6 +630,113 @@ def test_host_code_baseline_lags_until_marked_ported(sync, env):
     )
     pin = json.loads((kernels / "aiter_fwd_pins.json").read_text())["modules"]
     assert pin["gfx942/fmha_v3_fwd"]["abi_commit"] == target
+
+
+def test_codegen_change_stays_reported_until_marked_ported(sync, env):
+    """Applying new objects must not hide an unported change to AITER's codegen."""
+    aiter, tree, kernels, cache, report = env
+    base = base_upstream(aiter)
+    vendor(kernels, "gfx942", [ROW_HD128, ROW_FP8], roots=("MI300", "MI308"))
+    aiter.write("hsa/codegen.py", "# codegen\nstrip_comments = True\n")
+    aiter.commit("v0.2.0")
+    plan_args = ("plan", "--ref", "v0.2.0", "--arch", "gfx942", "--report", str(report))
+
+    run(sync, tree, aiter, cache, *plan_args, "--baseline", base)
+    run(sync, tree, aiter, cache, "apply", "--report", str(report))
+    run(sync, tree, aiter, cache, *plan_args)
+    codegen = [
+        f
+        for f in findings(report, "gfx942/fmha_v3_fwd")
+        if f["kind"] == "reference_changed" and "hsa/codegen.py" in f["detail"]
+    ]
+    assert len(codegen) == 1 and "+strip_comments = True" in codegen[0]["diff"]
+
+    run(sync, tree, aiter, cache, "mark-ported", "--module", "gfx942/fmha_v3_fwd")
+    run(sync, tree, aiter, cache, *plan_args)
+    assert "reference_changed" not in kinds(report, "gfx942/fmha_v3_fwd")
+
+
+def test_header_change_on_one_arch_is_structural(sync, env):
+    """The vendored codegen needs one header per CSV name across every arch on
+    disk, including archs the plan does not update."""
+    aiter, tree, kernels, cache, report = env
+    base_upstream(aiter)
+    aiter.module("gfx950", [ROW_HD128])
+    base = aiter.commit("v0.1.1")
+    vendor(kernels, "gfx942", [ROW_HD128], roots=("MI300", "MI308"))
+    vendor(kernels, "gfx950", [ROW_HD128])
+    aiter.write(
+        "hsa/gfx950/fmha_v3_fwd/fmha_fwd.csv",
+        HEADER.replace("ts_kv,", "ts_kv,flat,")
+        + "\n"
+        + ROW_HD128.replace("32,_Z", "32,0,_Z")
+        + "\n",
+    )
+    aiter.commit("v0.2.0")
+
+    run(
+        sync,
+        tree,
+        aiter,
+        cache,
+        "plan",
+        "--ref",
+        "v0.2.0",
+        "--arch",
+        "gfx950",
+        "--baseline",
+        base,
+        "--report",
+        str(report),
+    )
+    mismatch = [
+        f
+        for f in findings(report, "gfx950/fmha_v3_fwd")
+        if f["kind"] == "header_mismatch_across_archs"
+    ]
+    assert [(f["tier"], "gfx942" in f["detail"]) for f in mismatch] == [(3, True)]
+
+
+def test_csv_comments_are_parsed_like_upstream_and_not_vendored(sync, env, capsys):
+    aiter, tree, kernels, cache, report = env
+    base = base_upstream(aiter)
+    vendor(kernels, "gfx942", [ROW_HD128, ROW_FP8], roots=("MI300", "MI308"))
+    aiter.write(
+        "hsa/gfx942/fmha_v3_fwd/fmha_fwd.csv",
+        "/* forward kernels\n   for gfx942 */\n"
+        + HEADER
+        + "\n# bf16\n"
+        + ROW_HD128
+        + " # round to nearest even\n"
+        + ROW_HD128_RTNA
+        + "\n"
+        + ROW_FP8
+        + " // fp8\n",
+    )
+    aiter.commit("v0.2.0")
+
+    run(
+        sync,
+        tree,
+        aiter,
+        cache,
+        "plan",
+        "--ref",
+        "v0.2.0",
+        "--arch",
+        "gfx942",
+        "--baseline",
+        base,
+        "--report",
+        str(report),
+    )
+    assert not {"row_changed", "row_added", "header_changed"} & kinds(
+        report, "gfx942/fmha_v3_fwd"
+    )
+    assert run(sync, tree, aiter, cache, "apply", "--report", str(report)) == 0
+    vendored = (kernels / "gfx942/fmha_v3_fwd/fmha_fwd.csv").read_text()
+    assert vendored == csv_text(ROW_HD128, ROW_FP8)
+    assert run(sync, tree, aiter, cache, "verify") == 0
 
 
 def test_known_values_in_a_new_combination_need_review(sync, env):
