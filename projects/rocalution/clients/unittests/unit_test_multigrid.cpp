@@ -1863,6 +1863,7 @@ TYPED_TEST(multigrid_amg, coarsening_stops_at_a_level_without_strong_connections
     };
 
     expect({"SA greedy", [] { return make_sa<T>(Greedy, AddWeakConnections); }, CycleOptions()});
+    expect({"UA greedy", [] { return make_ua<T>(Greedy, 1.0); }, CycleOptions()});
     expect({"RS", [] { return make_rs<T>(PMIS, Direct); }, CycleOptions()});
 
     const auto        A  = make_local_matrix(TypeParam::backend, ref);
@@ -1871,26 +1872,6 @@ TYPED_TEST(multigrid_amg, coarsening_stops_at_a_level_without_strong_connections
     KNOWN_BUG("PMIS makes two strongly connected nodes of a path roots");
     expect_independent_roots(ref, in.connections, in.roots);
     expect({"SA PMIS", [] { return make_sa<T>(PMIS, AddWeakConnections); }, CycleOptions()});
-}
-
-TYPED_TEST(multigrid_amg, unsmoothed_coarsening_stops_at_a_level_without_strong_connections)
-{
-    using T               = typename TypeParam::value_type;
-    const Csr<T>      ref = paths<T>(4);
-    const Aggregation in  = aggregate(*make_local_matrix(TypeParam::backend, ref), Greedy, 0.01);
-    expect_aggregation(ref, in);
-    EXPECT_EQ(*std::max_element(in.aggregates.begin(), in.aggregates.end()), 3);
-
-    auto A   = make_local_matrix(TypeParam::backend, ref);
-    auto amg = make_ua<T>(Greedy, 1.0);
-    amg->SetOperator(*A);
-    amg->SetCoarsestLevel(2);
-    amg->Verbose(0);
-    amg->Build();
-    const Hierarchy<T> h = hierarchy_of(*amg, ref);
-    EXPECT_EQ(h.levels(), 2);
-    EXPECT_EQ(h.A.back().n, 4);
-    EXPECT_TRUE(diagonal(h.A.back()));
 }
 
 TYPED_TEST(multigrid_amg, cycle_matches_the_dense_cycle_on_the_built_hierarchy)
