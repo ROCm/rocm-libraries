@@ -606,6 +606,7 @@ def _install_wrappers(fake):
 
 _WRAPPED = "_sdpa_conformance_inner"
 _FLIP_NAME = "storage_flip"
+_SHAPE_NAMES = ("BATCH", "N_HEADS", "seqlen_q", "seqlen_k")
 
 
 def layout_mode():
@@ -618,21 +619,47 @@ def layout_mode():
     return mode
 
 
+def canonical_perm(perm, dims):
+    """The layout ``layout_of`` reads back from a tensor of logical extents ``dims[:3]`` allocated
+    in ``perm``: ``perm`` itself unless an outer axis has extent 1. Such an axis has no place in
+    memory, so ``layout_of`` breaks the tie by axis index and reads back an equivalent perm;
+    AOTriton's own ``assert_layout`` compares against that read-back, so a requested perm that is
+    not canonical at its shape fails the check although the memory order is the one asked for.
+    """
+    import torch
+    from _common_test import alloc_with_layout, layout_of
+
+    # width 8: the head dim's extent decides no tie among the outer axes
+    return layout_of(
+        alloc_with_layout(
+            tuple(dims[:3]) + (8,), perm, dtype=torch.float32, device="meta"
+        )
+    )
+
+
 def output_layouts(mode, q, k, v, b):
     """``{tname: perm}`` for O and the gradients that ``mode`` asks of a call on these inputs.
 
     ``pytorch``: O in Q's layout, dQ/dK/dV/dB in their inputs' layouts. ``efficient``: O, dQ, dK
-    and dV BSHD, dB in the bias's layout. The inputs' layouts are read off their strides.
+    and dV BSHD, dB in the bias's layout. The inputs' layouts are read off their strides. Each
+    perm is ``canonical_perm`` at its output's shape.
     """
     from _common_test import BSHD, layout_of
 
-    like = {"dq": layout_of(q), "dk": layout_of(k), "dv": layout_of(v)}
-    if b is not None:
-        like["db"] = layout_of(b)
     if mode == "efficient":
-        like.update(dq=BSHD, dk=BSHD, dv=BSHD)
-        return {"o": BSHD, **like}
-    return {"o": layout_of(q), **like}
+        perms = {"o": BSHD, "dq": BSHD, "dk": BSHD, "dv": BSHD}
+    else:
+        perms = {
+            "o": layout_of(q),
+            "dq": layout_of(q),
+            "dk": layout_of(k),
+            "dv": layout_of(v),
+        }
+    shapes = {"o": q.shape, "dq": q.shape, "dk": k.shape, "dv": v.shape}
+    if b is not None:
+        perms["db"] = layout_of(b)
+        shapes["db"] = b.shape
+    return {t: canonical_perm(p, shapes[t]) for t, p in perms.items()}
 
 
 def make_attention(inner, mode, extra_args_type):
@@ -650,10 +677,12 @@ def make_attention(inner, mode, extra_args_type):
     return attention
 
 
-def storage_layout_for(mode, storage_flip):
+def storage_layout_for(mode, storage_flip, shapes):
     """The ``StorageLayout`` that lays q/k/v/b out as ``storage_flip`` always did, and dO, O and
     the gradients as ``mode`` asks (``output_layouts`` gives the same dQ/dK/dV/dB the
-    forward wrapper would)."""
+    forward wrapper would). ``shapes`` maps each tensor name to its logical extents; every perm
+    is ``canonical_perm`` at its tensor's shape, because the vendored test checks each tensor
+    against the layout ``layout_of`` reads back."""
     from _common_test import BSHD, StorageLayout
 
     if isinstance(storage_flip, tuple):
@@ -674,16 +703,35 @@ def storage_layout_for(mode, storage_flip):
             db=perms["b"],
             dout=perms["q"],
         )
-    return StorageLayout(perms)
+    return StorageLayout({t: canonical_perm(p, shapes[t]) for t, p in perms.items()})
 
 
-def flip_index(func):
-    """Position of ``storage_flip`` in the ``args`` tuple ``func`` takes: the index of that name in
-    the tuple-unpacking assignment of ``args`` in its source (the vendored function takes
-    ``(request, args, device_str)`` and unpacks ``args`` by name). Raises ``RuntimeError``
-    naming ``func`` when it has no ``args`` parameter or does not unpack ``storage_flip`` from it,
-    so a vendored refresh that moves or renames the argument fails loudly instead of rewriting
-    the wrong one."""
+def bwd_shapes(batch, n_heads, seqlen_q, seqlen_k):
+    """Logical outer extents ``(B, H, S)`` of every tensor of ``_do_test_op_bwd``'s call, from
+    its ``BATCH``, ``N_HEADS`` (int or ``(Hq, Hk)``) and sequence lengths. The head dim is the
+    last axis and never permutes, so it is not needed."""
+    hq, hk = (n_heads, n_heads) if isinstance(n_heads, int) else n_heads
+    q, kv = (batch, hq, seqlen_q), (batch, hk, seqlen_k)
+    return {
+        "q": q,
+        "k": kv,
+        "v": kv,
+        "b": q,
+        "o": q,
+        "dout": q,
+        "dq": q,
+        "dk": kv,
+        "dv": kv,
+        "db": q,
+    }
+
+
+def unpack_names(func):
+    """Names of the tuple-unpacking assignment of ``args`` in ``func``'s source that holds
+    ``storage_flip`` (the vendored function takes ``(request, args, device_str)`` and unpacks
+    ``args`` by name). Raises ``RuntimeError`` naming ``func`` when it has no ``args`` parameter
+    or does not unpack ``storage_flip`` from it, so a vendored refresh that moves or renames
+    the argument fails loudly instead of rewriting the wrong one."""
     name = getattr(func, "__qualname__", repr(func))
     if "args" not in inspect.signature(func).parameters:
         raise RuntimeError(f"{name} has no `args` parameter to find {_FLIP_NAME!r} in")
@@ -705,27 +753,43 @@ def flip_index(func):
                 e.id if isinstance(e, ast.Name) else None for e in node.targets[0].elts
             ]
             if _FLIP_NAME in names:
-                return names.index(_FLIP_NAME)
+                return names
     raise RuntimeError(
         f"{name} does not unpack {_FLIP_NAME!r} from its `args` tuple; the layout modes cannot "
         f"find the storage_flip argument (vendored AOTriton changed?)"
     )
 
 
+def flip_index(func):
+    """Position of ``storage_flip`` in the ``args`` tuple ``func`` takes (``unpack_names``)."""
+    return unpack_names(func).index(_FLIP_NAME)
+
+
 def make_do_test_op_bwd(inner, mode):
     """``_do_test_op_bwd`` that turns a bool/tuple ``storage_flip`` into ``storage_layout_for``;
-    a ``StorageLayout`` already in ``args`` is left alone. The argument is found by name
-    (``flip_index``) when the wrapper is made."""
+    a ``StorageLayout`` already in ``args`` is left alone. The arguments are found by name
+    (``unpack_names``) when the wrapper is made; ``RuntimeError`` if one of
+    ``_SHAPE_NAMES`` is not unpacked."""
     from _common_test import StorageLayout
 
-    index = flip_index(inner)
+    names = unpack_names(inner)
+    missing = [n for n in _SHAPE_NAMES if n not in names]
+    if missing:
+        raise RuntimeError(
+            f"{getattr(inner, '__qualname__', repr(inner))} does not unpack "
+            f"{', '.join(map(repr, missing))} from its `args` tuple; the layout modes need them "
+            f"to size each tensor's layout (vendored AOTriton changed?)"
+        )
+    index = names.index(_FLIP_NAME)
+    at = {n: names.index(n) for n in _SHAPE_NAMES}
 
     def _do_test_op_bwd(request, args, device_str="cuda"):
         flip = args[index]
         if not isinstance(flip, StorageLayout):
+            shapes = bwd_shapes(*(args[at[n]] for n in _SHAPE_NAMES))
             args = (
                 *args[:index],
-                storage_layout_for(mode, flip),
+                storage_layout_for(mode, flip, shapes),
                 *args[index + 1 :],
             )
         return inner(request, args, device_str)

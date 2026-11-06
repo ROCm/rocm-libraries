@@ -99,6 +99,43 @@ def test_outputs_are_allocated_in_the_modes_layouts(vendored, mode, case):
     assert got == expected
 
 
+def storage_order(t):
+    """`t`'s strides on the axes that have more than one element; an extent-1 axis has no place in memory."""
+    return [t.stride(i) for i in range(4) if t.shape[i] > 1]
+
+
+@pytest.mark.parametrize(
+    "dims",
+    [(1, 1, 16, 16), (2, 1, 16, 24), (1, 3, 1, 24), (1, 3, 16, 1), (2, 3, 16, 24)],
+)
+def test_efficient_allocates_o_and_gradients_at_any_shape(vendored, dims):
+    c, atf = vendored.common, vendored.atf
+    bsz, heads, sq, sk = dims
+    q, k, v, b = (
+        c.alloc_with_layout(d, c.BSHD, dtype=DTYPE, device="cpu", rand=True)
+        for d in (
+            (bsz, heads, sq, D),
+            (bsz, heads, sk, D),
+            (bsz, heads, sk, D),
+            (bsz, heads, sq, sk),
+        )
+    )
+    seen = []
+    wrapped_attention(vendored, "efficient", seen)(q, k, v, b, False, 1.0, 0.0)
+    alloc = dict(dtype=DTYPE, device="cpu", attn_extra_args=seen[0], narrow_to=None)
+    # AOTriton's own layout assertion runs inside these allocations
+    o = atf._alloc_output("o", (bsz, heads, sq, D), like=None, **alloc)
+    grads = [
+        atf._alloc_like(t, n, seen[0], None)
+        for t, n in ((q, "dq"), (k, "dk"), (v, "dv"))
+    ]
+    bshd = lambda shape: c.alloc_with_layout(shape, c.BSHD, dtype=DTYPE, device="cpu")
+    for t in (o, *grads):
+        assert storage_order(t) == storage_order(bshd(tuple(t.shape)))
+    if min(bsz, heads, sq) > 1:
+        assert [c.layout_of(t) for t in (o, *grads)] == [c.BSHD] * 4
+
+
 @pytest.mark.parametrize("mode", ["pytorch", "efficient"])
 def test_a_missing_bias_gets_no_gradient_layout(vendored, mode):
     c = vendored.common
@@ -128,8 +165,8 @@ def test_the_callers_extra_args_are_not_mutated(vendored):
     assert seen[0].fillnan is True and seen[0].output_layouts is not None
 
 
-def bwd_args(flip):
-    return (B, H, D, SQ, SK, False, "l1", 0.0, DTYPE, flip, "matrix")
+def bwd_args(flip, batch=B, heads=H, sq=SQ, sk=SK):
+    return (batch, heads, D, sq, sk, False, "l1", 0.0, DTYPE, flip, "matrix")
 
 
 def recording_do_test_op_bwd(got):
@@ -142,8 +179,8 @@ def recording_do_test_op_bwd(got):
             BATCH,
             N_HEADS,
             D_HEAD,
-            sq,
-            sk,
+            seqlen_q,
+            seqlen_k,
             causal,
             scale,
             dropout,
@@ -156,13 +193,13 @@ def recording_do_test_op_bwd(got):
     return _do_test_op_bwd
 
 
-def converted(vendored, mode, flip):
+def converted(vendored, mode, flip, **dims):
     got = []
     wrapper = plugin.make_do_test_op_bwd(recording_do_test_op_bwd(got), mode)
-    wrapper("request", bwd_args(flip), "cpu")
+    wrapper("request", bwd_args(flip, **dims), "cpu")
     ((args, device_str),) = got
     assert device_str == "cpu"
-    assert args[:9] == bwd_args(flip)[:9] and args[10:] == ("matrix",)
+    assert args[:9] == bwd_args(flip, **dims)[:9] and args[10:] == ("matrix",)
     return args[9]
 
 
@@ -208,6 +245,55 @@ def test_dout_and_outputs_follow_the_mode_while_inputs_keep_their_flip(
         "db": input_perm,
     }
     # the same output layouts the forward wrapper derives from these inputs
+    assert sl.outputs() == plugin.output_layouts(mode, q, k, v, b)
+
+
+@pytest.mark.parametrize(
+    "dims",
+    [
+        dict(heads=1),
+        dict(sq=1),
+        dict(sk=1),
+        dict(batch=1),
+        dict(batch=1, heads=1, sq=1, sk=1),
+        dict(heads=(2, 1)),
+    ],
+    ids=str,
+)
+@pytest.mark.parametrize("flip", [False, True, (1, 2), (0, 1)])
+@pytest.mark.parametrize("mode", ["pytorch", "efficient"])
+def test_every_tensor_passes_aotriton_layout_check_with_an_extent_one_axis(
+    vendored, mode, flip, dims
+):
+    """What `_do_test_op_bwd`'s `_check_layout` and AOTriton's output allocation assert, on CPU."""
+    c, atf = vendored.common, vendored.atf
+    full = dict(batch=B, heads=H, sq=SQ, sk=SK) | dims
+    sl = converted(vendored, mode, flip, **full)
+    heads = full["heads"]
+    hq, _ = (heads, heads) if isinstance(heads, int) else heads
+    ctx = c.SdpaContext(
+        full["batch"],
+        heads,
+        D,
+        full["sq"],
+        full["sk"],
+        DTYPE,
+        bias_type="matrix",
+        device="cpu",
+        storage_layout=sl,
+    )
+    q, k, v, b = ctx.dev_tensors
+    for name, t in zip("qkvb", (q, k, v, b)):
+        c.assert_layout(t, sl[name], 0, name)
+    odims = (full["batch"], hq, full["sq"], D)
+    dout = c.alloc_with_layout(odims, sl["dout"], dtype=DTYPE, device="cpu", rand=True)
+    c.assert_layout(dout, sl["dout"], 0, "dout")
+    ext = atf.AttentionExtraArgs(output_layouts=sl.outputs())
+    alloc = dict(dtype=DTYPE, device="cpu", attn_extra_args=ext, narrow_to=None)
+    atf._alloc_output("o", odims, like=None, **alloc)
+    for t, name in ((q, "dq"), (k, "dk"), (v, "dv"), (b, "db")):
+        atf._alloc_like(t, name, ext, None)
+    # the wrapper hands AOTriton what the forward wrapper would for the same inputs
     assert sl.outputs() == plugin.output_layouts(mode, q, k, v, b)
 
 
@@ -259,6 +345,14 @@ def test_a_wrapped_function_without_storage_flip_fails_loudly(vendored):
         plugin.make_do_test_op_bwd(no_flip, "pytorch")
     with pytest.raises(RuntimeError, match=r"no_args.*args"):
         plugin.make_do_test_op_bwd(no_args, "pytorch")
+
+
+def test_a_wrapped_function_without_the_extents_fails_loudly(vendored):
+    def no_extents(request, args, device_str="cuda"):
+        BATCH, N_HEADS, D_HEAD, sq, sk, storage_flip = args
+
+    with pytest.raises(RuntimeError, match=r"no_extents.*seqlen_q.*seqlen_k"):
+        plugin.make_do_test_op_bwd(no_extents, "efficient")
 
 
 def test_aotriton_mode_installs_nothing_and_removes_earlier_wrappers(

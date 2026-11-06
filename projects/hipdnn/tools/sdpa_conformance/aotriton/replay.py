@@ -8,12 +8,20 @@ holds, a child process rebuilds the graph (``Graph()`` then ``from_json(handle, 
 engine named in ``meta.json`` (and, for a call of an ``--exhaustive`` candidate pass, the pinned
 candidate: its saved knobs, else its index resolved through ``hipdnn_bench enumerate`` under
 ``HIPDNN_SDPA_PREFIX``; never the engine's default kernel), binds the saved tensors by
-``meta.json``'s role-to-uid map and executes. The child runs apart so a hardware fault ends it, not this report: a crash prints
-``reproduced: died with signal N`` (``reproduced: exited with status N`` for a plain exit) and the
-exit status is 1. A completed replay prints, per output role, the maximum absolute error against
-the hipDNN output the repro saved and against the FP32 reference attention (backward through
-autograd), and exits 0. Exit status 70 means the replay failed before the graph executed (a
-``from_json``, engine or candidate selection error; the child's traceback is printed above).
+``meta.json``'s role-to-uid map and executes. The child runs apart so a hardware fault ends it, not
+this report.
+
+Exit status:
+
+* 0: the replay completed and the fault did not reproduce. It prints, per output role, the maximum
+  absolute error against the hipDNN output the repro saved and against the FP32 reference attention
+  (backward through autograd).
+* 1: the fault reproduced: the child died with a signal (``reproduced: died with signal N``) or
+  exited nonzero after the graph began executing (``reproduced: exited with status N``).
+* 70: setup error, the replay failed before the graph executed. That covers a ``from_json``,
+  engine or candidate selection error (the child's traceback is printed above) and, with
+  ``--device cuda``, no HIP device or a device or handle initialisation failure. A child that
+  exits nonzero before it reached the graph's execute call is a setup error too.
 
 The repro layout is documented in ``hipdnn_sdpa/_repro.py``.
 """
@@ -41,6 +49,9 @@ import torch  # noqa: E402
 
 REPRODUCED_EXIT = 1
 SETUP_ERROR_EXIT = 70
+EXECUTING_SUFFIX = (
+    ".executing"  # marker the child creates just before the first execute
+)
 
 
 def _dtype(name):
@@ -77,12 +88,21 @@ def _bind(meta, tensors, outputs, direction, device):
     return bound
 
 
+def _cuda_available():
+    try:
+        return torch.cuda.device_count() > 0
+    except Exception:
+        return False
+
+
 def replay_child(directory, out_path, device):
     """Execute every saved direction on hipDNN; write ``{direction: {role: output}}``."""
     import hipdnn_frontend as hipdnn
     from hipdnn_sdpa import _runtime
 
     _, meta, tensors, outputs = _load(directory)
+    if device == "cuda" and not _cuda_available():
+        raise RuntimeError("no ROCm-capable device is available")
     stream = torch.cuda.current_stream().cuda_stream if device == "cuda" else 0
     handle = hipdnn.Handle(stream)
     results = {}
@@ -110,6 +130,7 @@ def replay_child(directory, out_path, device):
             else None
         )
         variant_pack = {call["uids"][role]: t.data_ptr() for role, t in bound.items()}
+        Path(out_path + EXECUTING_SUFFIX).touch()
         err = graph.execute(
             handle, variant_pack, workspace.data_ptr() if workspace is not None else 0
         )
@@ -237,6 +258,9 @@ def main(argv=None):
             traceback.print_exc()
             return SETUP_ERROR_EXIT
         return 0
+    if args.device == "cuda" and not _cuda_available():
+        print("replay failed before the graph executed: no ROCm-capable device")
+        return SETUP_ERROR_EXIT
     with tempfile.TemporaryDirectory() as scratch:
         out_path = os.path.join(scratch, "results.pt")
         status = subprocess.run(
@@ -253,8 +277,10 @@ def main(argv=None):
         if status < 0:
             print(f"reproduced: died with signal {-status}")
             return REPRODUCED_EXIT
-        if status == SETUP_ERROR_EXIT:
-            print("replay failed before the graph executed; see the traceback above")
+        if status == SETUP_ERROR_EXIT or (
+            status != 0 and not os.path.exists(out_path + EXECUTING_SUFFIX)
+        ):
+            print("replay failed before the graph executed; see the output above")
             return SETUP_ERROR_EXIT
         if status != 0:
             print(f"reproduced: exited with status {status}")

@@ -74,6 +74,9 @@ header, and `--all-engines` pass 2 inherits it. Varlen cases are unaffected.
 Layout coverage differs by mode: the default `pytorch` never runs AOTriton's own mix (BSHD Q/K/V with BHSD
 O/dO), because O and dO follow Q; `aotriton` runs that mix but never BSHD O/dO; `efficient` always runs BSHD
 O/dO and never BHSD O/dO. A full sweep runs both `pytorch` and `aotriton`.
+A requested layout is replaced by its equivalent at the case's shape (`canonical_perm`): an axis of extent 1 (one
+head, unit seqlen, batch 1) has no place in memory, so AOTriton's own layout check would read the allocation back as
+another permutation; `efficient` still never runs BHSD O/dO in memory order, and `aotriton` mode is unchanged.
 The layout wrappers find the `storage_flip` argument of the vendored `_do_test_op_bwd` by name (`flip_index`); a
 vendored refresh that drops or renames it fails with a `RuntimeError` naming the function instead of changing a
 wrong argument.
@@ -171,9 +174,11 @@ otherwise (1: tests failed; a crashed worker is a `crash` row, not a runner fail
 collection, `--fwd-no-stats` meeting non-forward cases, a usage error or a `--resume` refusal; 1 for the other refusals (no hipDNN prefix, no GPU, a
 non-empty `--out` without `--resume`, pre-set pins, `--exhaustive` without `hipdnn_bench`).
 `completion.py`: 0 once it has listed the shards (an empty list means nothing left to resume), 2 for a missing results
-directory. `replay.py`: 0 a completed replay, 1 a reproduced fault (the child died or exited nonzero), 70 a
-setup error (the replay failed before the graph executed: `from_json`, engine or candidate selection; traceback
-printed). `reconcile.py`: 0, or 2 for a missing run directory. `sync.py --check`: 1 when it reports a problem.
+directory. `replay.py`: 0 the replay completed and the fault did not reproduce; 1 the fault reproduced (the child died
+with a signal, or exited nonzero after the graph began executing); 70 a setup error, failed before the graph executed:
+a `from_json`, engine or candidate selection error, no HIP device (checked before any child starts with `--device cuda`),
+a device or handle initialisation failure, or a child that exits nonzero before graph execute (traceback printed).
+`reconcile.py`: 0, or 2 for a missing run directory. `sync.py --check`: 1 when it reports a problem.
 
 AOTriton's calibration and backend knobs (`USE_ADIFFS_TXT`, `RECORD_ADIFFS_TO`, `SKIP_BWD`,
 `FWD_IMPL`, `BWD_IMPL`, ...) are refused; `FOR_RELEASE`, `SMALL_VRAM` and
