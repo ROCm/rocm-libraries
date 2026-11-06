@@ -36,7 +36,7 @@ Examples:
     >>> reversed_rows.element_offset([1, 2])
     2
 
-Layout() is a scalar with zero offset. Orders are Permutations. Invalid ranks,
+A scalar layout is Layout(Shape(), [], offset). Orders are Permutations. Invalid ranks,
 coordinates, order ranks, and arithmetic overflow raise RuntimeError. Negative
 axes or coordinates, and other values that do not fit size_t or ptrdiff_t,
 raise TypeError. Layouts are immutable and compare and hash by shape, strides,
@@ -45,7 +45,6 @@ Contiguous factories require each extent and running stride product, including
 the final element count, to fit ptrdiff_t. Even empty shapes can overflow before
 the traversal reaches a zero extent.
 )doc")
-        .def(nb::init<>())
         .def(nb::init<Shape, std::vector<ptrdiff_t>, ptrdiff_t>(), "shape"_a, "strides"_a,
              "offset"_a)
         .def_static(

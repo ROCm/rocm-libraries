@@ -24,26 +24,26 @@ namespace detail {
 inline std::string LayoutFailure::message() const {
     switch (error) {
         case LayoutError::OrderRankMismatch:
-            return "Tensor layout order rank " + std::to_string(value) +
-                   " does not match shape rank " + std::to_string(limit) + ".";
+            return "Tensor layout order rank " + std::to_string(*value) +
+                   " does not match shape rank " + std::to_string(*limit) + ".";
         case LayoutError::ExtentOutOfRange:
-            return "Tensor extent " + std::to_string(value) + " in dimension " +
-                   std::to_string(dimension) + " exceeds ptrdiff_t.";
+            return "Tensor extent " + std::to_string(*value) + " in dimension " +
+                   std::to_string(*dimension) + " exceeds ptrdiff_t.";
         case LayoutError::ContiguousStrideOverflow:
-            return "Tensor contiguous stride overflow in dimension " + std::to_string(dimension) +
+            return "Tensor contiguous stride overflow in dimension " + std::to_string(*dimension) +
                    ".";
         case LayoutError::OffsetMultiplyOverflow:
             return "Tensor layout offset multiplication overflow in dimension " +
-                   std::to_string(dimension) + ".";
+                   std::to_string(*dimension) + ".";
         case LayoutError::OffsetAddOverflow:
             return "Tensor layout offset addition overflow in dimension " +
-                   std::to_string(dimension) + ".";
+                   std::to_string(*dimension) + ".";
         case LayoutError::CoordinateRankMismatch:
-            return "Tensor coordinate rank " + std::to_string(value) +
-                   " does not match shape rank " + std::to_string(limit) + ".";
+            return "Tensor coordinate rank " + std::to_string(*value) +
+                   " does not match shape rank " + std::to_string(*limit) + ".";
         case LayoutError::CoordinateOutOfRange:
-            return "Tensor coordinate " + std::to_string(value) + " in dimension " +
-                   std::to_string(dimension) + " is outside [0, " + std::to_string(limit) + ").";
+            return "Tensor coordinate " + std::to_string(*value) + " in dimension " +
+                   std::to_string(*dimension) + " is outside [0, " + std::to_string(*limit) + ").";
     }
     return "Unknown LayoutError failure.";
 }
@@ -55,7 +55,6 @@ inline std::string LayoutFailure::message() const {
 // not know the extent of the underlying storage.
 class Layout {
    public:
-    Layout() = default;
     Layout(const Layout&) = default;
 
     // Moving leaves the source as a scalar with zero offset.
@@ -101,8 +100,8 @@ class Layout {
         const Shape& shape, const Permutation& order) {
         using namespace detail;
         if (order.size() != shape.rank())
-            return Unexpected(
-                LayoutFailure{LayoutError::OrderRankMismatch, 0, order.size(), shape.rank()});
+            return Unexpected(LayoutFailure{LayoutError::OrderRankMismatch, std::nullopt,
+                                            order.size(), shape.rank()});
 
         const auto dimensions = shape.dimensions();
         std::vector<ptrdiff_t> strides(shape.rank());
@@ -117,7 +116,8 @@ class Layout {
             }
             const auto next = detail::LayoutOffset::getOffsetMultiply(dimensions[axis], stride);
             if (!next) {
-                return Unexpected(LayoutFailure{LayoutError::ContiguousStrideOverflow, axis});
+                return Unexpected(LayoutFailure{LayoutError::ContiguousStrideOverflow, axis,
+                                                std::nullopt, std::nullopt});
             }
             stride = *next;
         }
@@ -190,9 +190,13 @@ class Layout {
         for (size_t axis = 0; axis < dimensions.size(); ++axis) {
             const auto delta =
                 detail::LayoutOffset::getOffsetMultiply(dimensions[axis] - 1, m_strides[axis]);
-            if (!delta) return Unexpected(LayoutFailure{LayoutError::OffsetMultiplyOverflow, axis});
+            if (!delta)
+                return Unexpected(LayoutFailure{LayoutError::OffsetMultiplyOverflow, axis,
+                                                std::nullopt, std::nullopt});
             const auto sum = detail::LayoutOffset::getOffsetAdd(*delta < 0 ? lower : upper, *delta);
-            if (!sum) return Unexpected(LayoutFailure{LayoutError::OffsetAddOverflow, axis});
+            if (!sum)
+                return Unexpected(LayoutFailure{LayoutError::OffsetAddOverflow, axis, std::nullopt,
+                                                std::nullopt});
             (*delta < 0 ? lower : upper) = *sum;
         }
         return std::pair{lower, upper};
@@ -203,7 +207,7 @@ class Layout {
    private:
     Shape m_shape;
     std::vector<ptrdiff_t> m_strides;
-    ptrdiff_t m_offset = 0;
+    ptrdiff_t m_offset;
 };
 
 namespace detail {

@@ -23,14 +23,14 @@ enum class LayoutError {
     CoordinateOutOfRange,
 };
 
-// Rank failures carry the supplied and expected ranks in value and limit.
-// Other failures identify an axis in dimension. Coordinate and extent failures
-// also carry value and limit.
+// dimension names the failing axis; rank failures have none. value and limit
+// carry the supplied and permitted rank, extent or coordinate; overflow
+// failures have neither.
 struct LayoutFailure {
     LayoutError error;
-    size_t dimension = 0;
-    size_t value = 0;
-    size_t limit = 0;
+    std::optional<size_t> dimension;
+    std::optional<size_t> value;
+    std::optional<size_t> limit;
 
     std::string message() const;
 };
@@ -70,8 +70,8 @@ class LayoutOffset {
         std::span<const size_t> indices) noexcept {
         assert(dimensions.size() == strides.size() && "Extent and stride ranks must match.");
         if (indices.size() != dimensions.size())
-            return Unexpected(LayoutFailure{LayoutError::CoordinateRankMismatch, 0, indices.size(),
-                                            dimensions.size()});
+            return Unexpected(LayoutFailure{LayoutError::CoordinateRankMismatch, std::nullopt,
+                                            indices.size(), dimensions.size()});
 
         for (size_t dimension = 0; dimension < indices.size(); ++dimension) {
             if (indices[dimension] >= dimensions[dimension])
@@ -82,9 +82,12 @@ class LayoutOffset {
         for (size_t dimension = 0; dimension < indices.size(); ++dimension) {
             const auto delta = getOffsetMultiply(indices[dimension], strides[dimension]);
             if (!delta)
-                return Unexpected(LayoutFailure{LayoutError::OffsetMultiplyOverflow, dimension});
+                return Unexpected(LayoutFailure{LayoutError::OffsetMultiplyOverflow, dimension,
+                                                std::nullopt, std::nullopt});
             const auto sum = getOffsetAdd(result, *delta);
-            if (!sum) return Unexpected(LayoutFailure{LayoutError::OffsetAddOverflow, dimension});
+            if (!sum)
+                return Unexpected(LayoutFailure{LayoutError::OffsetAddOverflow, dimension,
+                                                std::nullopt, std::nullopt});
             result = *sum;
         }
         return result;
