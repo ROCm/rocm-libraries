@@ -805,6 +805,38 @@ def _spec(idx: int) -> UniversalGemmSpec:
             ),
             "gfx950",
         )
+    if idx in _GFX1201_COMPV4_CONFIGS:
+        # gfx1201 compv4: the double-buffered WMMA K loop, whose fragment reads
+        # follow the LDS parity the loop filled. 34 adds lds_swizzle, whose
+        # WMMA read applies the store's XOR on the parity-free row.
+        name, tm, tn, wm, wn, swizzle = _GFX1201_COMPV4_CONFIGS[idx]
+        return (
+            UniversalGemmSpec(
+                name=name,
+                tile=TileSpec(
+                    tile_m=tm,
+                    tile_n=tn,
+                    tile_k=32,
+                    warp_m=wm,
+                    warp_n=wn,
+                    warp_k=1,
+                    warp_tile_m=16,
+                    warp_tile_n=16,
+                    warp_tile_k=16,
+                ),
+                trait=TraitSpec(
+                    pipeline="compv4",
+                    scheduler="intrawave",
+                    epilogue="default",
+                    lds_swizzle=swizzle,
+                ),
+                data=DataSpec(dtype_a="fp16", dtype_b="fp16", dtype_c="fp16"),
+                wave_size=32,
+                block_size=32 * wm * wn,
+                batched=False,
+            ),
+            "gfx1201",
+        )
     raise SystemExit(f"unknown config index {idx}")
 
 
@@ -838,12 +870,19 @@ _TDM_SYNC_CONFIGS = {
 # Config 28 with ``batched=True``, appended after config 31.
 _TDM_BATCHED_CONFIG = 32
 
+# idx -> (name, tile_m, tile_n, warp_m, warp_n, lds_swizzle). Appended after
+# config 32 so no existing index moves.
+_GFX1201_COMPV4_CONFIGS = {
+    33: ("test_gfx1201_compv4", 128, 128, 2, 2, False),
+    34: ("test_gfx1201_compv4_swizzle", 128, 64, 2, 1, True),
+}
+
 
 def main() -> int:
     return run_emit(
         _spec,
         build_universal_gemm,
-        usage="usage: gemm_emit.py <config_index 0..32>\n",
+        usage="usage: gemm_emit.py <config_index 0..34>\n",
     )
 
 
