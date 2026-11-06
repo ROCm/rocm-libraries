@@ -202,6 +202,7 @@ struct CKArgsSplitK
     // BWD/WRW CKArgs is constructed unconditionally in FillValidKernelsIDs
     // before filtering, so narrowing in the constructor would assert on
     // >INT_MAX shapes even though no kernel is ultimately selected.
+    // Every member passed here must also be in Key().
     const NarrowedCKArrays2D& GetNarrowedArrays() const
     {
         narrowed = MakeNarrowedCKArrays<NarrowedCKArrays2D>(input,
@@ -224,7 +225,10 @@ struct CKArgsSplitK
     /// Everything IsSupportedBy() depends on, so that its answer can be memoized per problem
     /// (implicitgemm_ck_util.hpp, IsCKApplicable). It must list every member the derived
     /// MakeArgPtr() reads (directly or through GetNarrowedArrays()); a member missing here would
-    /// make problems that differ only in it share an answer.
+    /// make problems that differ only in it share an answer, so IsCKApplicable could give one of
+    /// them the other's answer. Adding a member to the CK arguments
+    /// means adding it here and a single-field case to CPU_CKArgsSplitKKey_NONE
+    /// (test/gtest/unit_ck_problem_cache.cpp).
     auto Key() const
     {
         return std::tuple{data_type,

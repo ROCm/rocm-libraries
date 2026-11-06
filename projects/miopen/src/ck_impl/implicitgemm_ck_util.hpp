@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <miopen/solver/ck_problem_cache.hpp>
 #include <miopen/solver/implicitgemm_ck_util_common.hpp>
 #include <miopen/solver/zero_tensor.hpp>
 #include <miopen/kernel_tuning_mode.hpp>
@@ -238,7 +239,8 @@ inline bool IsLargeTensorCKInstance(const ConvPtr& ptr)
 
 /// The instances of a CK DeviceOp factory and their type strings, built once per process.
 /// CK DeviceOps have no data members and each call makes its own Argument and Invoker, so one set
-/// of instances is shared by all queries, invokers and threads.
+/// of instances is shared by all queries, invokers and threads. Invokers hold these shared
+/// instances, whose code lives in this plugin, so the plugin must outlive every invoker it made.
 template <typename DeviceOpType>
 class CKInstances
 {
@@ -619,9 +621,13 @@ bool IsCKArgsSupported(const ProblemDescriptionType& problem, const std::string&
 }
 
 /// For arguments that provide Key(), everything IsSupportedBy() depends on, the answer is
-/// memoized per process and never evicted: every solution query asks it, and otherwise each query
-/// re-runs CK's argument check on instance after instance. Only the yes/no answer is kept; a new
-/// problem is checked outside the lock, and threads racing on it compute the same answer.
+/// memoized per process (CKProblemCache: bounded, and bypassed with
+/// MIOPEN_DEBUG_CK_PROBLEM_CACHE=0): every solution query asks it, and otherwise each query
+/// re-runs CK's argument check on instance after instance. Only the yes/no answer is kept.
+///
+/// The key has no device field. That is correct while each plugin serves exactly one arch and
+/// CK's argument check at split_k = 1 reads nothing about the device beyond its arch (no CU count,
+/// no device properties). If CK's check starts to depend on the device, the key needs it.
 template <typename DeviceOpType,
           typename CKArgsType,
           typename ProblemDescriptionType = miopen::conv::ProblemDescription>
@@ -632,17 +638,11 @@ bool IsCKApplicable(const ProblemDescriptionType& problem)
     if constexpr(HasSupportKey<CKArgsType>::value)
     {
         using Key = std::pair<bool, decltype(args.Key())>;
-        static std::shared_mutex mutex;
-        static std::map<Key, bool> memo;
-        Key key{require_large_tensor, args.Key()};
-        {
-            std::shared_lock lock{mutex};
-            if(const auto it = memo.find(key); it != memo.end())
-                return it->second;
-        }
-        const bool applicable = AnyCKInstanceSupports<DeviceOpType>(args, require_large_tensor);
-        std::unique_lock lock{mutex};
-        return memo.try_emplace(std::move(key), applicable).first->second;
+        static CKProblemCache<std::map<Key, bool>> memo;
+        return *memo.GetOrCompute(Key{require_large_tensor, args.Key()}, [&] {
+            return std::optional<bool>{
+                AnyCKInstanceSupports<DeviceOpType>(args, require_large_tensor)};
+        });
     }
     else
     {
