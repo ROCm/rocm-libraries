@@ -447,8 +447,12 @@ namespace
             return;
         }
 
-        SCOPED_TRACE("wide");
-        expect_leave_and_set(b, f, full<T>(6, 12));
+        {
+            SCOPED_TRACE("wide");
+            expect_leave_and_set(b, f, full<T>(6, 12));
+        }
+        SCOPED_TRACE("tall");
+        expect_leave_and_set(b, f, full<T>(12, 6));
     }
 }
 

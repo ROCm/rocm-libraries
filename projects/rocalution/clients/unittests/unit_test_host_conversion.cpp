@@ -217,7 +217,7 @@ TYPED_TEST(host_conversion, round_trip_of_wide_and_tall_matrices)
     {
         SCOPED_TRACE(matrix.first);
         auto A = make_matrix(Backend::Host, Format{rocalution::DIA, 1}, *matrix.second.host_csr());
-        ASSERT_NE(A, nullptr);
+        ASSERT_IN_LOOP(A != nullptr);
         EXPECT_EQ(A->GetNnz(), 3 * std::max(matrix.second.n, matrix.second.m));
         expect_round_trip(Format{rocalution::DIA, 1}, matrix.second);
     }

@@ -29,6 +29,7 @@
 #include <complex>
 #include <cstdio>
 #include <functional>
+#include <limits>
 #include <memory>
 #include <numeric>
 #include <set>
@@ -209,6 +210,14 @@ namespace
             A.end_row();
         }
         return A;
+    }
+
+    // The wide one has entries in the columns from nrow on, the tall one in the rows from ncol on,
+    // and both have few enough diagonals for DIA
+    template <typename T>
+    std::vector<Csr<T>> wide_and_tall()
+    {
+        return {rectangular<T>(8, 10), rectangular<T>(12, 8)};
     }
 
     // Entries (i, i - 2) and (i, i), so that the union with banded has more diagonals
@@ -1117,7 +1126,7 @@ TEST_P(local_matrix_formats, apply_of_a_rectangular_matrix)
     for_each_type<RealTypes>([&](auto type) {
         using T = typename decltype(type)::type;
 
-        for(const Csr<T>& ref : {rectangular<T>(8, 12), rectangular<T>(12, 8)})
+        for(const Csr<T>& ref : wide_and_tall<T>())
         {
             SCOPED_TRACE(std::to_string(ref.n) + " x " + std::to_string(ref.m));
             const std::vector<T> x  = rhs<T>(ref.m);
@@ -1125,10 +1134,42 @@ TEST_P(local_matrix_formats, apply_of_a_rectangular_matrix)
             auto                 vx = vector_of(x);
             auto                 vy = vector_of(std::vector<T>(ref.n, 0.0));
 
+            EXPECT_EQ(rocalution::_matrix_format_names[A->GetFormat()], format_name(format()));
             A->Apply(*vx, vy.get());
             expect_vector(*vy, ref.apply(x), backend(), scaled_tol<T>(1e-14));
         }
     });
+
+    const auto apply_add_checks = [&](auto type) {
+        using T = typename decltype(type)::type;
+
+        for(const Csr<T>& ref : wide_and_tall<T>())
+        {
+            SCOPED_TRACE(std::to_string(ref.n) + " x " + std::to_string(ref.m));
+            const std::vector<T> x        = rhs<T>(ref.m);
+            std::vector<T>       expected = ref.apply(x);
+            for(int i = 0; i < ref.n; ++i)
+            {
+                expected[i] = static_cast<T>(0.5) + 3 * expected[i];
+            }
+            auto vy = vector_of(std::vector<T>(ref.n, 0.5));
+
+            make(ref)->ApplyAdd(*vector_of(x), 3.0, vy.get());
+            expect_vector(*vy, expected, backend(), scaled_tol<T>(1e-14));
+        }
+    };
+
+    if(backend() == Backend::Host && is(BCSR))
+    {
+        KNOWN_BUG("host BCSR ApplyAdd asserts that the matrix is square");
+        expect_in_child([&] { for_each_type<RealTypes>(apply_add_checks); });
+        return;
+    }
+    if(backend() == Backend::Accelerator && (is(HYB) || is(DENSE)))
+    {
+        KNOWN_BUG("HIP HYB and DENSE ApplyAdd ignore the output");
+    }
+    for_each_type<RealTypes>(apply_add_checks);
 }
 
 // Values
@@ -3067,6 +3108,54 @@ TYPED_TEST(local_matrix, set_data_ptr_dia_of_a_wide_matrix)
     expect_matrix(*A, ref, Format{DIA, 1}, this->backend());
 
     const std::vector<T> x = {1, 2, 3, 4, 5, 6};
+    auto                 y = make_local_vector(this->backend(), std::vector<T>(nrow, 0.0));
+    A->Apply(*make_local_vector(this->backend(), x), y.get());
+    expect_vector(*y, ref.apply(x), this->backend(), 0);
+}
+
+// The slots of the entries outside the matrix hold NaN, so a product that reads them fails
+TYPED_TEST(local_matrix, set_data_ptr_dia_of_a_tall_matrix)
+{
+    using T = typename TypeParam::value_type;
+
+    const int nrow   = 6;
+    const int ncol   = 4;
+    const int ndiag  = 2;
+    int*      offset = nullptr;
+    T*        val    = nullptr;
+    rocalution::allocate_host(ndiag, &offset);
+    rocalution::allocate_host(nrow * ndiag, &val);
+    std::fill(val, val + nrow * ndiag, std::numeric_limits<T>::quiet_NaN());
+    offset[0] = -1;
+    offset[1] = 2;
+
+    Csr<T> ref(nrow, ncol);
+    for(int i = 0; i < nrow; ++i)
+    {
+        for(int d = 0; d < ndiag; ++d)
+        {
+            const int j = i + offset[d];
+            if(j >= 0 && j < ncol)
+            {
+                const T v = static_cast<T>(10 * i + d + 1);
+                ref.add(j, v);
+                val[d * nrow + i] = v;
+            }
+        }
+        ref.end_row();
+    }
+
+    auto A = empty_local_matrix<T>(Backend::Host);
+    A->SetDataPtrDIA(&offset, &val, "tall", nrow * ndiag, nrow, ncol, ndiag);
+    EXPECT_EQ(offset, nullptr);
+    EXPECT_EQ(val, nullptr);
+    if(this->backend() == Backend::Accelerator)
+    {
+        A->MoveToAccelerator();
+    }
+    expect_matrix(*A, ref, Format{DIA, 1}, this->backend());
+
+    const std::vector<T> x = {1, 2, 3, 4};
     auto                 y = make_local_vector(this->backend(), std::vector<T>(nrow, 0.0));
     A->Apply(*make_local_vector(this->backend(), x), y.get());
     expect_vector(*y, ref.apply(x), this->backend(), 0);
