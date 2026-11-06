@@ -40,6 +40,8 @@
 
 #include <iterator>
 
+#if HIPCUB_USE_LEGACY_API
+
 BEGIN_HIPCUB_NAMESPACE
 
 #ifndef DOXYGEN_SHOULD_SKIP_THIS // Do not document
@@ -73,5 +75,7 @@ public:
 #endif
 
 END_HIPCUB_NAMESPACE
+
+#endif // HIPCUB_USE_LEGACY_API
 
 #endif // HIPCUB_ROCPRIM_ITERATOR_COUNTING_INPUT_ITERATOR_HPP_

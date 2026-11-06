@@ -53,6 +53,7 @@ BEGIN_ROCPRIM_NAMESPACE
 namespace detail
 {
 
+#if ROCPRIM_USE_LEGACY_API
 template<class T, class = void>
 constexpr bool has_offset_iterator_plus_v = false;
 
@@ -90,6 +91,13 @@ inline auto advance_offset_iterator(OffsetIterator it, size_t offset)
         return offset_iterator_subscript_adaptor<OffsetIterator>{it, offset};
     }
 }
+#else
+template<class OffsetIterator>
+inline auto advance_offset_iterator(OffsetIterator it, size_t offset)
+{
+    return it + offset;
+}
+#endif // ROCPRIM_USE_LEGACY_API
 
 struct Partitioner
 {
