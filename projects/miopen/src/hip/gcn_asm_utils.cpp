@@ -152,7 +152,7 @@ std::string AmdgcnAssemble(std::string_view source,
 
     std::istringstream clang_stdin(source.data());
     const auto clang_path = GetGcnAssemblerPath();
-    const auto clang_rc = miopen::Process{clang_path}(
+    const auto clang_rc   = miopen::Process{clang_path}(
         options.str(), outfile.Path().parent_path().string(), nullptr, {}, &clang_stdin);
     if(clang_rc != 0)
     {
