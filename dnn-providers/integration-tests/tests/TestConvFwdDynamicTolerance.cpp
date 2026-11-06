@@ -59,7 +59,7 @@ struct GraphSpec
     std::vector<int64_t> wDims = {32, 8, 3, 3};
     DataType convCompute = DataType::FLOAT;
     bool withConv = true;
-    bool secondConv = false; ///< conv(y) -> y2, a second convolution
+    bool secondConv = false; ///< a second convolution of the same x with its own weights
     bool convOutputVirtual = true; ///< as the bundle graphs have it, unless the conv result is read
     bool preConvRelu = false; ///< x is relu(raw x): x is not a graph input
     Mul mul = Mul::NONE;
@@ -160,7 +160,7 @@ fb::GraphWrapper buildGraph(flatbuffers::FlatBufferBuilder& b, const GraphSpec& 
     }
     if(spec.secondConv)
     {
-        addConv(Y_UID, W2_UID, Y2_UID);
+        addConv(X_UID, W2_UID, Y2_UID);
     }
     int64_t last = Y_UID;
     switch(spec.mul)
