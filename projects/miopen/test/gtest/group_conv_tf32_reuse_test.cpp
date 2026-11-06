@@ -285,6 +285,40 @@ struct GroupConvTF32Reuse : GroupConvTestFix<NDIM, float, DIR>
             << "perf-db-restored TF32 result diverged from the forced-TF32 reference";
     }
 
+    // FillValidKernels returns bare type strings, but the bwd-data/wrw solvers only accept a
+    // kernel_id with a "+<split_k>" suffix (fwd needs none). Return the first candidate the loader
+    // accepts under the requested compute mode -- bare if that is accepted, else with a split_k
+    // suffix -- or "" if none is usable. Mirrors how a real perf-db id is formed for these solvers.
+    std::string SupportedKernelId(const miopen::solver::CkImplLibLoader& loader,
+                                  const miopen::conv::ProblemDescription& problem,
+                                  const std::vector<std::string>& candidates,
+                                  bool use_tf32)
+    {
+        for(const auto& bare : candidates)
+        {
+            if(loader.IsArgsSupported(CkSolver(), problem, bare, miopenFloat, use_tf32))
+                return bare;
+            for(int split_k : {1, 2, 4, 8, 16})
+            {
+                const auto id = bare + "+" + std::to_string(split_k);
+                if(loader.IsArgsSupported(CkSolver(), problem, id, miopenFloat, use_tf32))
+                    return id;
+            }
+        }
+        return {};
+    }
+
+    // FillValidKernels(tf32=true) minus the fp32 set: kernel ids with a TF32 instance only.
+    std::vector<std::string> KernelsOnlyIn(const std::vector<std::string>& set,
+                                           const std::vector<std::string>& other)
+    {
+        std::vector<std::string> only;
+        for(const auto& k : set)
+            if(std::find(other.begin(), other.end(), k) == other.end())
+                only.push_back(k);
+        return only;
+    }
+
     // Exercises the FP32-availability fallback in CkImplLibLoader::GetSolutionTf32Aware: a
     // kernel_id valid under FP32 but not TF32 (as chosen by FillValidKernelsWithTf32Fallback) must
     // build as FP32, not be forced into a missing TF32 instance. Skips on builds with no such
@@ -307,25 +341,66 @@ struct GroupConvTF32Reuse : GroupConvTestFix<NDIM, float, DIR>
         ASSERT_TRUE(loader.IsLoaded());
         const auto tf32 = loader.FillValidKernels(CkSolver(), problem, miopenFloat, true);
         const auto fp32 = loader.FillValidKernels(CkSolver(), problem, miopenFloat, false);
-        std::string fp32_only;
-        for(const auto& k : fp32)
-            if(std::find(tf32.begin(), tf32.end(), k) == tf32.end())
-            {
-                fp32_only = k;
-                break;
-            }
-        if(fp32_only.empty())
+        const auto id   = SupportedKernelId(loader, problem, KernelsOnlyIn(fp32, tf32), false);
+        if(id.empty())
         {
             test_skipped = true;
             GTEST_SKIP() << "no FP32-only grouped kernel on this build; fallback not reproducible";
         }
 
         // Precondition: forcing TF32 on this id fails to build (it has no TF32 instance).
-        ASSERT_FALSE(loader.GetSolution(CkSolver(), ctx, problem, fp32_only, true).Succeeded())
-            << "expected TF32 build of an FP32-only id to fail";
+        ASSERT_FALSE(loader.GetSolution(CkSolver(), ctx, problem, id, true).Succeeded())
+            << "expected TF32 build of an FP32-only id to fail: " << id;
         // The fallback-aware path must recover and build it as FP32.
-        EXPECT_TRUE(loader.GetSolutionTf32Aware(CkSolver(), ctx, problem, fp32_only).Succeeded())
-            << "GetSolutionTf32Aware did not fall back to FP32 for an FP32-only id";
+        EXPECT_TRUE(loader.GetSolutionTf32Aware(CkSolver(), ctx, problem, id).Succeeded())
+            << "GetSolutionTf32Aware did not fall back to FP32 for an FP32-only id: " << id;
+    }
+
+    // Guards the IsValid fix: a perf-db-restored config whose kernel_id has a TF32 instance only
+    // (use_tf32 dropped on restore) must still pass IsValidPerformanceConfig. Before the fix,
+    // IsValid validated against the FP32 set with the stale use_tf32=false and dropped these
+    // records. 2D bwd-data is the direction with TF32-only kernels; the others skip (no such id on
+    // this shape).
+    template <class Solver>
+    void RunRestoreTf32OnlyId()
+    {
+        auto& handle = get_handle();
+        auto ctx     = miopen::ExecutionContext{};
+        ctx.SetStream(&handle);
+
+        auto problem = MakeProblem(conv_desc);
+        problem.SetupComputeType(ctx);
+        if(!problem.UseTF32())
+        {
+            test_skipped = true;
+            GTEST_SKIP() << "TF32 compute is not enabled on this device";
+        }
+
+        const auto& loader = miopen::solver::CkImplLibLoader::Get(handle.GetDeviceName());
+        ASSERT_TRUE(loader.IsLoaded());
+        const auto tf32 = loader.FillValidKernels(CkSolver(), problem, miopenFloat, true);
+        const auto fp32 = loader.FillValidKernels(CkSolver(), problem, miopenFloat, false);
+        const auto id   = SupportedKernelId(loader, problem, KernelsOnlyIn(tf32, fp32), true);
+        if(id.empty())
+        {
+            test_skipped = true;
+            GTEST_SKIP() << "no TF32-only kernel id on this build/device (expected except 2D bwd)";
+        }
+
+        // It is genuinely TF32-only: the FP32 instance set does not accept it.
+        EXPECT_FALSE(loader.IsArgsSupported(CkSolver(), problem, id, miopenFloat, false))
+            << "id expected to be TF32-only but is also supported as FP32: " << id;
+
+        // A restored config carrying this id has use_tf32 dropped; IsValid must recompute TF32 and
+        // still accept it, instead of validating against the FP32 set only.
+        Solver solv{};
+        auto proto = solv.GetDefaultPerformanceConfig(ctx, problem);
+        std::decay_t<decltype(proto)> restored;
+        ASSERT_TRUE(restored.Deserialize(id));
+        ASSERT_EQ(restored.kernel_id, id);
+        ASSERT_FALSE(restored.UseTF32()) << "test precondition: restored config must drop use_tf32";
+        EXPECT_TRUE(solv.IsValidPerformanceConfig(ctx, problem, restored))
+            << "restored TF32-only config wrongly rejected by IsValidPerformanceConfig: " << id;
     }
 
     // TF32 and strict-FP32 versions of a problem must serialize to different perf-db keys (the
@@ -383,9 +458,11 @@ miopenTensorLayout_t Tf32ReuseLayout()
 
 // One suite per CK grouped solver the fix touches (2D/3D x fwd/bwd-data/bwd-weights). Suite
 // names are spelled out rather than macro-pasted so the MIOpen gtest-naming linter can parse
-// them. Every suite carries DbRestoredConfigStaysTF32; the forward suites additionally carry the
-// FP32-availability fallback test (its id has no split_k suffix, so it needs no direction-specific
-// handling). TF32AndFp32GetDistinctDbKeys is solver-independent, so it is instantiated once.
+// them. Every suite carries the numeric DbRestoredConfigStaysTF32 reuse test, the FP32-availability
+// fallback (Fp32OnlyIdBuildsAsFp32), and the TF32-only-id IsValid guard
+// (RestoreTf32OnlyIdValidates)
+// -- the latter two skip on solvers/shapes without such a kernel (only 2D bwd-data has TF32-only
+// ids here). TF32AndFp32GetDistinctDbKeys is solver-independent, so it is instantiated once.
 
 struct GPU_GroupConv2D_Forward_TF32Reuse_FP32 : GroupConvTF32Reuse<2u, Direction::Forward>
 {
@@ -395,6 +472,10 @@ TEST_P(GPU_GroupConv2D_Forward_TF32Reuse_FP32, DbRestoredConfigStaysTF32)
     RunReuse<miopen::solver::conv::ConvHipImplicitGemmGroupFwdXdlops>();
 }
 TEST_P(GPU_GroupConv2D_Forward_TF32Reuse_FP32, Fp32OnlyIdBuildsAsFp32) { RunFp32Fallback(); }
+TEST_P(GPU_GroupConv2D_Forward_TF32Reuse_FP32, RestoreTf32OnlyIdValidates)
+{
+    RunRestoreTf32OnlyId<miopen::solver::conv::ConvHipImplicitGemmGroupFwdXdlops>();
+}
 TEST_P(GPU_GroupConv2D_Forward_TF32Reuse_FP32, TF32AndFp32GetDistinctDbKeys) { RunKeyDistinct(); }
 INSTANTIATE_TEST_SUITE_P(Full,
                          GPU_GroupConv2D_Forward_TF32Reuse_FP32,
@@ -409,6 +490,11 @@ struct GPU_GroupConv2D_BackwardData_TF32Reuse_FP32 : GroupConvTF32Reuse<2u, Dire
 TEST_P(GPU_GroupConv2D_BackwardData_TF32Reuse_FP32, DbRestoredConfigStaysTF32)
 {
     RunReuse<miopen::solver::conv::ConvHipImplicitGemmGroupBwdXdlops>();
+}
+TEST_P(GPU_GroupConv2D_BackwardData_TF32Reuse_FP32, Fp32OnlyIdBuildsAsFp32) { RunFp32Fallback(); }
+TEST_P(GPU_GroupConv2D_BackwardData_TF32Reuse_FP32, RestoreTf32OnlyIdValidates)
+{
+    RunRestoreTf32OnlyId<miopen::solver::conv::ConvHipImplicitGemmGroupBwdXdlops>();
 }
 INSTANTIATE_TEST_SUITE_P(Full,
                          GPU_GroupConv2D_BackwardData_TF32Reuse_FP32,
@@ -425,6 +511,14 @@ TEST_P(GPU_GroupConv2D_BackwardWeights_TF32Reuse_FP32, DbRestoredConfigStaysTF32
 {
     RunReuse<miopen::solver::conv::ConvHipImplicitGemmGroupWrwXdlops>();
 }
+TEST_P(GPU_GroupConv2D_BackwardWeights_TF32Reuse_FP32, Fp32OnlyIdBuildsAsFp32)
+{
+    RunFp32Fallback();
+}
+TEST_P(GPU_GroupConv2D_BackwardWeights_TF32Reuse_FP32, RestoreTf32OnlyIdValidates)
+{
+    RunRestoreTf32OnlyId<miopen::solver::conv::ConvHipImplicitGemmGroupWrwXdlops>();
+}
 INSTANTIATE_TEST_SUITE_P(Full,
                          GPU_GroupConv2D_BackwardWeights_TF32Reuse_FP32,
                          testing::Combine(testing::ValuesIn(Tf32ReuseConfigs<2u>()),
@@ -440,6 +534,10 @@ TEST_P(GPU_GroupConv3D_Forward_TF32Reuse_FP32, DbRestoredConfigStaysTF32)
     RunReuse<miopen::solver::conv::ConvHipImplicitGemm3DGroupFwdXdlops>();
 }
 TEST_P(GPU_GroupConv3D_Forward_TF32Reuse_FP32, Fp32OnlyIdBuildsAsFp32) { RunFp32Fallback(); }
+TEST_P(GPU_GroupConv3D_Forward_TF32Reuse_FP32, RestoreTf32OnlyIdValidates)
+{
+    RunRestoreTf32OnlyId<miopen::solver::conv::ConvHipImplicitGemm3DGroupFwdXdlops>();
+}
 INSTANTIATE_TEST_SUITE_P(Full,
                          GPU_GroupConv3D_Forward_TF32Reuse_FP32,
                          testing::Combine(testing::ValuesIn(Tf32ReuseConfigs<3u>()),
@@ -453,6 +551,11 @@ struct GPU_GroupConv3D_BackwardData_TF32Reuse_FP32 : GroupConvTF32Reuse<3u, Dire
 TEST_P(GPU_GroupConv3D_BackwardData_TF32Reuse_FP32, DbRestoredConfigStaysTF32)
 {
     RunReuse<miopen::solver::conv::ConvHipImplicitGemm3DGroupBwdXdlops>();
+}
+TEST_P(GPU_GroupConv3D_BackwardData_TF32Reuse_FP32, Fp32OnlyIdBuildsAsFp32) { RunFp32Fallback(); }
+TEST_P(GPU_GroupConv3D_BackwardData_TF32Reuse_FP32, RestoreTf32OnlyIdValidates)
+{
+    RunRestoreTf32OnlyId<miopen::solver::conv::ConvHipImplicitGemm3DGroupBwdXdlops>();
 }
 INSTANTIATE_TEST_SUITE_P(Full,
                          GPU_GroupConv3D_BackwardData_TF32Reuse_FP32,
@@ -468,6 +571,14 @@ struct GPU_GroupConv3D_BackwardWeights_TF32Reuse_FP32
 TEST_P(GPU_GroupConv3D_BackwardWeights_TF32Reuse_FP32, DbRestoredConfigStaysTF32)
 {
     RunReuse<miopen::solver::conv::ConvHipImplicitGemm3DGroupWrwXdlops>();
+}
+TEST_P(GPU_GroupConv3D_BackwardWeights_TF32Reuse_FP32, Fp32OnlyIdBuildsAsFp32)
+{
+    RunFp32Fallback();
+}
+TEST_P(GPU_GroupConv3D_BackwardWeights_TF32Reuse_FP32, RestoreTf32OnlyIdValidates)
+{
+    RunRestoreTf32OnlyId<miopen::solver::conv::ConvHipImplicitGemm3DGroupWrwXdlops>();
 }
 INSTANTIATE_TEST_SUITE_P(Full,
                          GPU_GroupConv3D_BackwardWeights_TF32Reuse_FP32,
