@@ -56,10 +56,9 @@ if(NOT CMAKE_CXX_STANDARD EQUAL 17)
   message(FATAL_ERROR "Only C++17 is supported")
 endif()
 
+set(ROCPRIM_PROJECT_IS_TOP_LEVEL FALSE)
 if (CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR)
   set(ROCPRIM_PROJECT_IS_TOP_LEVEL TRUE)
-else()
-  set(ROCPRIM_PROJECT_IS_TOP_LEVEL FALSE)
 endif()
 
 #Adding CMAKE_PREFIX_PATH
@@ -97,34 +96,10 @@ option(BUILD_CODE_COVERAGE "Build with code coverage enabled" OFF)
 option(ROCPRIM_INSTALL "Enable installation of rocPRIM (projects embedding rocPRIM may want to turn this OFF)" ON)
 option(ROCPRIM_ENABLE_ASSERTS "Enable asserts in release build)" OFF)
 cmake_dependent_option(ROCPRIM_ENABLE_TOPK "Enable the device level topk and segmented topk algorithms" OFF BUILD_TEST ON)
-option(BUILD_OFFLOAD_COMPRESS "Build rocPRIM with offload compression" ON)
 cmake_dependent_option(USE_SYSTEM_LIB "Use installed ROCm libs when building tests" OFF BUILD_TEST OFF)
 
 check_language(HIP)
 cmake_dependent_option(USE_HIPCXX "Use CMake HIP language support" OFF CMAKE_HIP_COMPILER OFF)
-
-include(CheckCXXCompilerFlag)
-
-if(BUILD_OFFLOAD_COMPRESS)
-  check_cxx_compiler_flag("--offload-compress -x hip" CXX_COMPILER_SUPPORTS_OFFLOAD_COMPRESS)
-  if(CXX_COMPILER_SUPPORTS_OFFLOAD_COMPRESS)
-    # NOTE(hipccl3): switched from `set(CMAKE_CXX_FLAGS ...)` to
-    # add_compile_options() to silence ROCMChecks' "set on a target where
-    # possible" warning.
-    #
-    # The COMPILE_LANGUAGE:CXX guard is REQUIRED, not cosmetic: unlike
-    # CMAKE_CXX_FLAGS, a bare add_compile_options() applies to *every*
-    # language, including ASM. Dependencies pulled in later via FetchContent
-    # (rocRAND) inherit these directory options and compile .S files with the
-    # plain system ASM compiler, which fails with
-    # "cc: error: unrecognized command-line option '--offload-compress'".
-    # The guard restores the original CXX-only scope. Matches hipCUB's own
-    # (pre-existing) pattern, which guards with COMPILE_LANGUAGE:HIP.
-    add_compile_options($<$<COMPILE_LANGUAGE:CXX>:--offload-compress>)
-  else()
-    message(STATUS "Warning: BUILD_OFFLOAD_COMPRESS=ON but flag not supported by compiler. Ignoring option.")
-  endif()
-endif()
 
 if (CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR)
   set(ROCPRIM_PROJECT_IS_TOP_LEVEL TRUE)
@@ -139,10 +114,14 @@ else()
   set(ROCM_ROOT "/opt/rocm" CACHE PATH "Root directory of the ROCm installation")
 endif()
 
-# CMake modules
+# Add project and ROCm-related CMake module paths.
 list(APPEND CMAKE_MODULE_PATH
-  ${CMAKE_CURRENT_SOURCE_DIR}/cmake
-  ${ROCM_PATH}/lib/cmake/hip ${HIP_PATH}/cmake ${ROCM_ROOT}/lib/cmake/hip ${ROCM_ROOT}/hip/cmake # FindHIP.cmake
+  # Shared within monorepo:
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../../../shared/cmake
+  # ROCm related:
+  $ENV{ROCM_PATH}
+  $ENV{ROCM_PATH}/share
+  $ENV{ROCM_PATH}/lib/cmake
 )
 
 # Set a default build type if none was specified
@@ -185,8 +164,8 @@ else()
 endif()
 set(BUILD_SHARED_LIBS OFF) # don't build client dependencies as shared
 
-# Get dependencies (required here to get rocm-cmake)
-include(cmake/Dependencies.cmake)
+# rocm-cmake must be included before processing 'GPU_TARGETS'.
+include(primlibs/dependencies/rocm-cmake)
 
 # Use target ID syntax if supported for GPU_TARGETS
 if(USE_HIPCXX)
@@ -214,12 +193,25 @@ else()
   endif()
 endif()
 
+# HIP must be included before checking for 'OFFLOAD_COMPRESS'. This is because
+# adding '--offload-compress' to a CXX target (i.e. non -xhip), causes compiler
+# warnings that may be treated as error, and thus failing detection of certain
+# depedencies in subsequent 'find_package'-calls.
+include(primlibs/dependencies/hip)
+
+# TODO: this should be moved to toolchain-*.cmake, but this requires a hard
+# depedency of CMake HIP language support due to '--offload-compress' only
+# working with '-xhip'.
+include(primlibs/flags/offload_compress)
+
+# Other depedencies must be included after adding in offload compress to
+# reduce the size of kernels contained in depedencies.
+include(cmake/Dependencies.cmake)
+
 # TODO: Fix VerifyCompiler for HIP on Windows
 if (NOT WIN32)
   include(cmake/VerifyCompiler.cmake)
 endif()
-list(APPEND CMAKE_PREFIX_PATH ${ROCM_PATH} ${ROCM_PATH}/hip ${ROCM_PATH}/llvm ${ROCM_ROOT}/llvm ${ROCM_ROOT} ${ROCM_ROOT}/hip)
-find_package(hip REQUIRED CONFIG PATHS ${HIP_DIR} ${ROCM_PATH} /opt/rocm)
 
 # Setup VERSION
 # NOTE(hipccl3): deliberately independent of the root's HIPCCL_VERSION. The
