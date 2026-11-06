@@ -35,6 +35,7 @@
 #endif
 #include <miopen/filesystem.hpp>
 
+#include <algorithm>
 #include <optional>
 #include <string>
 #include <vector>
@@ -303,14 +304,12 @@ bool FindDbRecord_t<TDb>::HasSkippedSolverThatFits(const AnyInvokeParams* invoke
     if(invokeParams == nullptr || !content.has_value())
         return false;
 
-    for(const auto& pair : content->As<FindDbData>())
-    {
-        if(!pair.second.IsMeasured() &&
-           conv::IsEnoughWorkspace(
-               "TryLoad", solver::Id{pair.first}, pair.second.workspace, invokeParams, false))
-            return true;
-    }
-    return false;
+    const auto range = content->As<FindDbData>();
+    return std::any_of(range.begin(), range.end(), [&](const auto& pair) {
+        return !pair.second.IsMeasured() &&
+               conv::IsEnoughWorkspace(
+                   "TryLoad", solver::Id{pair.first}, pair.second.workspace, invokeParams, false);
+    });
 }
 
 template <class TDb>
