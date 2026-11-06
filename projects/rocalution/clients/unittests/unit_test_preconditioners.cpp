@@ -1991,8 +1991,8 @@ TYPED_TEST(preconditioners, aichebyshev_approximates_the_inverse)
 
 // GMRES(30) solves a system of 12 unknowns with any invertible preconditioner, so the
 // solves cannot see a stale or unmoved preconditioner. Its action after the build is
-// compared after every step instead, which compares the library with itself and holds
-// also for the buggy AIChebyshev series.
+// compared after every step instead; aichebyshev_approximates_the_inverse checks the
+// action itself.
 TYPED_TEST(preconditioners, aichebyshev_preconditions_gmres_after_a_rebuild_and_moves)
 {
     using T                  = typename TypeParam::value_type;

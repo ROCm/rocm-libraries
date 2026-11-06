@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -114,7 +114,7 @@ namespace rocalution
         Z.Scale(static_cast<ValueType>(2) / (this->lambda_max_ - this->lambda_min_));
 
         // Chebyshev formula/series of 1/x on [alpha, beta]
-        // ai = I c_0 / 2 + sum c_k T_k, with c_k = 2 c (-q)^k
+        // ai = I c_0 / 2 + sum_{k = 1}^{p + 1} c_k T_k, with c_k = 2 c (-q)^k
         // Tk = 2 Z T_k-1 - T_k-2
 
         // 1st and 2nd term
