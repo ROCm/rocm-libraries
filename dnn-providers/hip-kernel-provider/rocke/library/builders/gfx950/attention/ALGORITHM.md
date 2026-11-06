@@ -473,10 +473,11 @@ the shape into the kernel and reshapes the schedule around a 256-row query tile.
 - **Compile-time-sized ABI.** `batch / seqlen / heads / head_size / causal /
   dtype` are constants baked at build time (dense, statically-sized). The only
   runtime args are the `q/k/v/o` pointers and the `f32` softmax scale $\tau$.
-  The scale is supported in $[2^{-64}, 2^4]$: `run_attention_dense_torch` raises
-  `ValueError` for a NaN or infinite scale and `NotImplementedError` for a
-  finite one outside the range (including $\tau \le 0$), and the hipDNN matcher
-  declines such graphs. The range is a chosen safety margin for the default
+  The supported scale range is `DENSE_MIN_SCALE`..`DENSE_MAX_SCALE` in
+  `kernels/common/attention_dense_spec.py`: `check_dense_scale` there makes
+  `run_attention_dense_torch` raise `ValueError` for a NaN or infinite scale and
+  `NotImplementedError` for a finite one outside the range (including
+  $\tau \le 0$), and the hipDNN matcher declines such graphs. The range is a chosen safety margin for the default
   grid's exp2 argument (§8.1), not a hardware limit. `block_n`
   (KV tile), `waves_per_eu`, and the persistent knobs are the tuning parameters;
   every algorithmic lever below is always-on.

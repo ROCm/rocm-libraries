@@ -156,6 +156,19 @@ def test_kernel_and_tuning_scope_bar_the_same_splits(arch, make, barred):
     assert (supports(spec)[0], in_scope) == (False, False)
 
 
+@pytest.mark.parametrize("barred", [{"ragged": True}, {"varlen": True}])
+@pytest.mark.parametrize("arch,make", _ARCH_SPECS)
+def test_ragged_and_varlen_splits_are_barred(arch, make, barred):
+    # gfx942's supports() refuses these layouts on other grounds, so the shared rule
+    # (check_kv_segments) and the knob's scope are checked directly.
+    from kernels.common.attention_dense_kv_split import check_kv_segments
+
+    spec = replace(make(1024, 1024, 32), persistent=False, kv_segments=2, **barred)
+    assert check_kv_segments(replace(spec, kv_segments=1))[0]
+    assert not check_kv_segments(spec)[0]
+    assert "kv_segments" not in {a.name for a in dense_axes_for(spec, arch)}
+
+
 def test_gfx942_equal_length_keeps_default_geometry():
     spec = _gfx942_spec(2048, 2048, 32, mask_type=1)
     assert not spec.causal_bottom_right and not spec.causal_diag_split
