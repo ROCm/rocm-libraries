@@ -1123,11 +1123,91 @@ static int make_spec(int idx, rocke_attention_tiled_2d_spec_t* s)
         s->use_alibi = true;
         s->emit_lse = true;
         break;
-
-    /* --- idx68-71: ALiBi at the slope sites idx16/17 miss (lockstep with the
-     *     Python _CONFIGS[68..71]): 68 per-row hoist (GQA, 24 heads); 69-71 the
-     *     transposed 32x32 per-iter (mask-once), hoisted and inline slopes. */
+    /* cfg68: bf16 D64/b16 GQA-4 multi-batch: the shipping spec, whose one K/V copy per
+     * tile (32 tokens) spans two pages, so the bf16 loaders keep the paged-KV
+     * descriptor. Every other bf16/fp16 case takes the per-page copy offsets. */
     case 68:
+        s->head_size = 64;
+        s->block_size = 16;
+        s->num_query_heads = 32;
+        s->num_kv_heads = 8;
+        s->dtype = "bf16";
+        s->use_sinks = false;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->num_seqs = 2;
+        s->num_warps = 4;
+        s->has_waves_per_eu = true;
+        s->waves_per_eu = 2;
+        s->has_tile_size = true;
+        s->tile_size = 32;
+        s->block_m_per_warp = 32;
+        s->use_mfma_32x32 = true;
+        s->use_transposed_qk_32x32 = true;
+        s->use_transposed_scalar_state = true;
+        s->use_transposed_mask_once = true;
+        s->use_transposed_half_local_pv = true;
+        s->use_mfma32_skip_legacy_qreg = true;
+        s->use_transposed_mask_limit = true;
+        break;
+    /* cfg69/70: page copies at the 16-page prefetch bound (page ids carried)
+     * and past it (page ids read in place). */
+    case 69:
+        s->head_size = 64;
+        s->block_size = 16;
+        s->num_query_heads = 32;
+        s->num_kv_heads = 8;
+        s->dtype = "bf16";
+        s->use_sinks = false;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->num_seqs = 2;
+        s->has_tile_size = true;
+        s->tile_size = 256;
+        s->block_m_per_warp = 32;
+        s->use_mfma_32x32 = true;
+        s->use_transposed_qk_32x32 = true;
+        break;
+    case 70:
+        s->head_size = 64;
+        s->block_size = 16;
+        s->num_query_heads = 32;
+        s->num_kv_heads = 8;
+        s->dtype = "bf16";
+        s->use_sinks = false;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->num_seqs = 2;
+        s->has_tile_size = true;
+        s->tile_size = 288;
+        s->block_m_per_warp = 32;
+        s->use_mfma_32x32 = true;
+        s->use_transposed_qk_32x32 = true;
+        break;
+    /* cfg71: bf16 D192/b16 one warp, the spec dispatch picks for short D192
+     * prefill. One copy is 512 halves, 2 2/3 rows, so it is not a whole number
+     * of tokens and the bf16 loaders must keep the paged-KV descriptor. */
+    case 71:
+        s->head_size = 192;
+        s->block_size = 16;
+        s->num_query_heads = 16;
+        s->num_kv_heads = 2;
+        s->dtype = "bf16";
+        s->use_sinks = false;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->num_seqs = 4;
+        s->has_waves_per_eu = true;
+        s->waves_per_eu = 2;
+        s->use_register_pv = true;
+        s->has_tile_size = true;
+        s->tile_size = 32;
+        break;
+
+    /* --- idx72-75: ALiBi at the slope sites idx16/17 miss (lockstep with the
+     *     Python _CONFIGS[72..75]): 72 per-row hoist (GQA, 24 heads); 73-75 the
+     *     transposed 32x32 per-iter (mask-once), hoisted and inline slopes. */
+    case 72:
         s->head_size = 64;
         s->block_size = 32;
         s->num_query_heads = 24;
@@ -1138,9 +1218,9 @@ static int make_spec(int idx, rocke_attention_tiled_2d_spec_t* s)
         s->has_softcap = false;
         s->use_alibi = true;
         break;
-    case 69:
-    case 70:
-    case 71:
+    case 73:
+    case 74:
+    case 75:
         s->head_size = 64;
         s->block_size = 32;
         s->num_query_heads = 32;
@@ -1155,9 +1235,10 @@ static int make_spec(int idx, rocke_attention_tiled_2d_spec_t* s)
         s->block_m_per_warp = 32;
         s->has_tile_size = true;
         s->tile_size = 64;
-        s->use_transposed_mask_once = (idx == 69);
-        s->use_transposed_invariant_hoist = (idx == 70);
+        s->use_transposed_mask_once = (idx == 73);
+        s->use_transposed_invariant_hoist = (idx == 74);
         break;
+
     default:
         return -1;
     }

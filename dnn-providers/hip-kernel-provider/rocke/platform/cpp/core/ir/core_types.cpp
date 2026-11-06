@@ -822,6 +822,67 @@ const char* rocke_i_loop_carried_descriptor_message(int index, char* buf, size_t
     return buf;
 }
 
+const char* rocke_i_reused_loop_name_message(const char* name, char* buf, size_t cap)
+{
+    snprintf(buf,
+             cap,
+             "scf.for: the name '%s' is already taken by an induction variable or carried value "
+             "of this loop or of a loop it is nested in; give it a name of its own",
+             name);
+    return buf;
+}
+
+int rocke_i_scf_for_value_names(const rocke_op_t* loop, const char** out)
+{
+    int count = 0;
+    const char* iv = rocke_attr_get_str(&loop->attrs, "iv");
+    if(iv)
+    {
+        if(out)
+            out[count] = iv;
+        ++count;
+    }
+    const rocke_attr_value_t* meta = rocke_attr_get(&loop->attrs, "iter_args");
+    if(!meta || meta->kind != ROCKE_ATTR_LIST)
+        return count;
+    for(int i = 0; i < meta->u.list.count; ++i)
+    {
+        const char* carried
+            = meta->u.list.items[i] ? rocke_attr_get_str(meta->u.list.items[i], "name") : NULL;
+        if(!carried)
+            continue;
+        if(out)
+            out[count] = carried;
+        ++count;
+    }
+    return count;
+}
+
+const char* rocke_i_first_reused_loop_name(const char* const* taken,
+                                           size_t n_taken,
+                                           const char* const* names,
+                                           size_t n_names)
+{
+    for(size_t i = 0; i < n_names; ++i)
+    {
+        for(size_t t = 0; t < n_taken; ++t)
+        {
+            if(strcmp(taken[t], names[i]) == 0)
+            {
+                return names[i];
+            }
+        }
+        for(size_t earlier = 0; earlier < i; ++earlier)
+        {
+            if(strcmp(names[earlier], names[i]) == 0)
+            {
+                return names[i];
+            }
+        }
+    }
+    return NULL;
+}
+
 const char* rocke_i_scf_for_carried_descriptor_error(const rocke_op_t* op, char* buf, size_t cap)
 {
     int i;

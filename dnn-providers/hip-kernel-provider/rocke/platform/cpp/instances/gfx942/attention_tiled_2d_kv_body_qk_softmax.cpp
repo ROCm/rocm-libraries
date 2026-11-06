@@ -385,7 +385,7 @@ void rocke_gfx942_attn2d_emit_kv_body(rocke_gfx942_attn2d_build_ctx_t* ctx)
         /* row_ok = land(qp<cur_batch_q_len, qh<NUM_QH[, st_q_row_iter<VALID_ROWS]).
          * Skip the VALID_ROWS guard when VALID_ROWS == BLOCK_M (NQK divides BLOCK_M). */
         rocke_value_t* st_ok_qp = rocke_b_cmp_lt(b, st_qp_iter, ctx->cur_batch_q_len);
-        rocke_value_t* st_ok_qh = rocke_b_cmp_lt(b, st_qh_iter, rocke_b_const_i32(b, ctx->NUM_QH));
+        rocke_value_t* st_ok_qh = rocke_b_cmp_lt(b, st_qh_iter, ctx->num_qh_p);
         rocke_value_t* st_ok_inner = rocke_b_land(b, st_ok_qp, st_ok_qh);
         if(ctx->VALID_ROWS < ctx->BLOCK_M)
         {
@@ -401,7 +401,7 @@ void rocke_gfx942_attn2d_emit_kv_body(rocke_gfx942_attn2d_build_ctx_t* ctx)
         if(ctx->USE_ALIBI)
         {
             st_alibi_slope_iter
-                = rocke_attn_alibi_slope(b, st_qh_iter, ctx->NUM_QH, ctx->alibi_slopes_ptr);
+                = rocke_attn_alibi_slope(b, st_qh_iter, ctx->num_qh_p, ctx->alibi_slopes_ptr);
         }
     }
 
@@ -589,8 +589,7 @@ void rocke_gfx942_attn2d_emit_kv_body(rocke_gfx942_attn2d_build_ctx_t* ctx)
                         /* row_ok = land(qp<q_len, qh<NUM_QH[, q_row_t<VALID_ROWS]).
                          * Skip the VALID_ROWS guard when VALID_ROWS == BLOCK_M. */
                         rocke_value_t* ok_pos = rocke_b_cmp_lt(b, qp_r, ctx->cur_batch_q_len);
-                        rocke_value_t* ok_qh
-                            = rocke_b_cmp_lt(b, qh_r, rocke_b_const_i32(b, ctx->NUM_QH));
+                        rocke_value_t* ok_qh = rocke_b_cmp_lt(b, qh_r, ctx->num_qh_p);
                         rocke_value_t* ok_inner = rocke_b_land(b, ok_pos, ok_qh);
                         if(ctx->VALID_ROWS < ctx->BLOCK_M)
                         {

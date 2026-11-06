@@ -31,7 +31,7 @@ choice is uniform and costs a few prologue instructions, and hipDNN (which has
 no slopes tensor) binds a null pointer to the same binary.
 
 The dense kernels have no hand-written C++ twin (the C++ engine lowers their IR
-generically); the unified tiled kernels do, so :func:`alibi_slope` with a baked
+generically); the unified tiled kernels do, so :func:`alibi_slope` with a runtime
 head count is mirrored in ``cpp/instances/common/_attention_alibi.cpp``.
 """
 
