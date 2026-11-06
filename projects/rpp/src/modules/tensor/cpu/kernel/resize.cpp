@@ -1455,10 +1455,8 @@ static inline RppStatus resize_bilinear_u8_u8_host_impl(Rpp8u* srcPtrImage, Rppt
     compute_dst_size_cap_host(&dstImgSize, dstDescPtr);
     Rpp32f wRatio = ((Rpp32f)(roi.xywhROI.roiWidth)) / ((Rpp32f)(dstImgSize.width));
     Rpp32f hRatio = ((Rpp32f)(roi.xywhROI.roiHeight)) / ((Rpp32f)(dstImgSize.height));
-    // Bilinear interpolation reads the right/bottom neighbor, so leave a 2-pixel margin to stay in
-    // bounds.
-    Rpp32s maxHeightLimit = roi.xywhROI.roiHeight - 2;
-    Rpp32s maxWidthLimit = (roi.xywhROI.roiWidth - 2) * srcDescPtr->strides.wStride;
+    Rpp32s maxHeightLimit = roi.xywhROI.roiHeight - 1;
+    Rpp32s maxWidthLimit = (roi.xywhROI.roiWidth - 1) * srcDescPtr->strides.wStride;
     Rpp32s maxWidthLimitMinusStride = maxWidthLimit - srcDescPtr->strides.wStride;
     Rpp32s kernelSize = 2;
     Rpp32f kernelRadius = 1.0f;  // kernelSize / 2
@@ -1776,10 +1774,8 @@ static inline RppStatus resize_bilinear_f32_f32_host_impl(
     compute_dst_size_cap_host(&dstImgSize, dstDescPtr);
     Rpp32f wRatio = ((Rpp32f)(roi.xywhROI.roiWidth)) / ((Rpp32f)(dstImgSize.width));
     Rpp32f hRatio = ((Rpp32f)(roi.xywhROI.roiHeight)) / ((Rpp32f)(dstImgSize.height));
-    // Bilinear interpolation reads the right/bottom neighbor, so leave a 2-pixel margin to stay in
-    // bounds.
-    Rpp32s maxHeightLimit = roi.xywhROI.roiHeight - 2;
-    Rpp32s maxWidthLimit = (roi.xywhROI.roiWidth - 2) * srcDescPtr->strides.wStride;
+    Rpp32s maxHeightLimit = roi.xywhROI.roiHeight - 1;
+    Rpp32s maxWidthLimit = (roi.xywhROI.roiWidth - 1) * srcDescPtr->strides.wStride;
     Rpp32s maxWidthLimitMinusStride = maxWidthLimit - srcDescPtr->strides.wStride;
     Rpp32s kernelSize = 2;
     Rpp32f kernelRadius = 1.0f;  // kernelSize / 2
