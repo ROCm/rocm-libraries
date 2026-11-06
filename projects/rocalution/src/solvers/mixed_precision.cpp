@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -263,6 +263,13 @@ namespace rocalution
 
             this->iter_ctrl_.Clear();
 
+            // The operator may have been reset to a matrix of the same structure
+            this->op_h_ = this->op_;
+
+            assert(this->op_h_->GetLocalM() == this->op_l_->GetLocalM());
+            assert(this->op_h_->GetLocalN() == this->op_l_->GetLocalN());
+            assert(this->op_h_->GetLocalNnz() == this->op_l_->GetLocalNnz());
+
             // Copy the new values into the low precision matrix
             PtrType*    row_offset = NULL;
             int*        col        = NULL;
@@ -276,12 +283,12 @@ namespace rocalution
 
             this->op_h_->CopyToCSR(row_offset, col, val_h);
 
-            for(int64_t i = 0; i < this->op_h_->GetNnz(); ++i)
+            for(int64_t i = 0; i < this->op_h_->GetLocalNnz(); ++i)
             {
                 val_l[i] = static_cast<ValueTypeL>(val_h[i]);
             }
 
-            this->op_l_->CopyFromCSR(row_offset, col, val_l);
+            this->op_l_->UpdateValuesCSR(val_l);
 
             free_host(&row_offset);
             free_host(&col);

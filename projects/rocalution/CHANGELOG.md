@@ -43,7 +43,7 @@ Full documentation for rocALUTION is available at [https://rocm.docs.amd.com/pro
 * Fixed ILUT and IC failing to solve after they are moved to another backend. IC now moves its inverse diagonal, and the IC factorization on the accelerator now computes it.
 * Fixed the preconditioned BiCGStab solver returning a wrong solution after a breakdown in the second half of an iteration.
 * Fixed the QMRCGStab solver starting a second solve from the search direction of the previous solve, returning NaN when the first half step solves the system exactly, and reporting one iteration more than it performed.
-* Fixed the MixedPrecisionDC solver counting a residual check as an iteration, so that a maximum of one iteration made no correction, and `ReBuildNumeric()` keeping the values of the old matrix in its low precision copy.
+* Fixed the MixedPrecisionDC solver counting a residual check as an iteration, so that a maximum of one iteration made no correction, and `ReBuildNumeric()` keeping the values of the old matrix in its low precision copy, also after `ResetOperator()`.
 * Fixed the BiCGStab(l) solver iterating when the initial residual is already within the tolerance.
 * Fixed `FixedPoint::SolveZeroSol()` returning the previous solution instead of zero when it does not iterate. This also fixes the multigrid cycles without pre-smoothing, where the coarse levels started from their previous correction.
 * Fixed the minimum iteration count being ignored at the restarts of GMRES and FGMRES and in the BiCG part of BiCGStab(l).

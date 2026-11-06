@@ -3334,6 +3334,53 @@ TEST(solvers_mixed_precision, rebuild_numeric_takes_new_matrix_values)
                 1e-11);
 }
 
+TEST(solvers_mixed_precision, rebuild_numeric_takes_the_values_of_a_reset_operator)
+{
+    const Csr<double> ref = nonsymmetric<double>(16);
+    const Csr<double> changed
+        = transformed(ref, [](int i, int j, double v) { return i == j ? 2.0 * v : v; });
+    const Vec<double> b = rhs(16);
+    auto              A = make_local_matrix(Backend::Host, ref);
+    auto              B = make_local_matrix(Backend::Host, changed);
+
+    rocalution::LU<LocalMatrix<float>, LocalVector<float>, float> inner;
+    inner.Verbose(0);
+
+    MixedPrecision solver;
+    solver.Verbose(0);
+    solver.Init(0.0, 1e-13, 1e8, 20);
+    solver.SetOperator(*A);
+    solver.Set(inner);
+    quietly([&] { solver.Build(); });
+
+    solver.ResetOperator(*B);
+    quietly([&] { solver.ReBuildNumeric(); });
+    const Outcome<double> out = quiet_solve(solver, *B, b, Vec<double>(16, 0.0));
+    EXPECT_EQ(out.status, 2);
+    expect_near(out.x, dense_solve(dense(changed), b), 1e-11);
+}
+
+// The low precision matrix keeps its structure, so ReBuildNumeric() takes only the
+// values of an operator of the same sizes and number of entries
+TEST(solvers_mixed_precision_DeathTest,
+     rebuild_numeric_of_an_operator_with_another_number_of_entries_ends_the_program)
+{
+    auto A = make_local_matrix(Backend::Host, nonsymmetric<double>(16));
+    auto B = make_local_matrix(Backend::Host, diagonal(Vec<double>(16, 1.0)));
+
+    rocalution::LU<LocalMatrix<float>, LocalVector<float>, float> inner;
+    inner.Verbose(0);
+
+    MixedPrecision solver;
+    solver.Verbose(0);
+    solver.SetOperator(*A);
+    solver.Set(inner);
+    quietly([&] { solver.Build(); });
+
+    solver.ResetOperator(*B);
+    EXPECT_ASSERT_DEATH(solver.ReBuildNumeric(), "GetLocalNnz");
+}
+
 TEST(solvers_mixed_precision, one_iteration_is_one_defect_correction)
 {
     const Csr<double> ref = nonsymmetric<double>(16);
