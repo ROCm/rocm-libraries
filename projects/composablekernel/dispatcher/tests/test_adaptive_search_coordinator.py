@@ -44,7 +44,7 @@ from _py38_check import py38_problems  # noqa: E402
 KERNELS = "ABCDEFGHIJKL"
 # The modules this change adds (also ASCII only) or edits, besides ck_search.
 NEW_MODULES = (COMMON_DIR / "adaptive_search.py", COMMON_DIR / "host_cache.py",
-               TE_OPS / "gemm" / "gemm_search.py")
+               TE_OPS / "gemm" / "gemm_search.py", TE_OPS / "gemm" / "compare_search.py")
 EDITED_MODULES = (
     TE_OPS / "gemm" / "gemm_full_benchmark.py",
     TE_OPS / "gemm" / "run_one_gemm_kernel.py",

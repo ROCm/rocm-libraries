@@ -42,6 +42,13 @@ config files + problems file + dtype + layout + arch      (identical in every st
 Steps A and B are needed once per model; C and D run for every new problem set.
 E needs A on the same problems.
 
+For adaptive-search ablations, `select_kernels.py --ranked_top_k 0` exports all
+ranked candidates without increasing the `--top_k` warm shortlist.
+`--family_cap 1` prefers distinct geometry/pipeline families before ranked
+backfill; CSV predictions/ranks are unchanged. Both are opt-in. See the
+[search comparison workflow](../../tile_engine/ops/gemm/README.md#experimental-tuning-comparison-opt-in)
+for independent and combined controls, bounded confirmation and the comparison CSV.
+
 ## Prerequisites
 
 - The dispatcher built for the target arch (see `dispatcher/README.md`), so the

@@ -13,13 +13,17 @@ Pick kernels for tile_engine/ops/gemm/gemm_full_benchmark.py with a trained mode
 pairs a run would measure, each kernel's configuration, and the run's arch,
 dtype and layout. Each problem's candidates are ranked by
 ``Predictor.rank_kernels``; the top K go to ``--out_pairs``, a ``--pairs`` file
-for the driver, and to ``--out_ranked``, a CSV with one row per pick.
+for the driver, and, by default, to ``--out_ranked``. ``--ranked_top_k 0``
+exports the full ranking independently of warm-start count. ``--family_cap``
+diversifies the warm shortlist without changing CSV ranks.
 
 The candidates come from the driver's own pairing (vector-width and tile rules
 applied), so every pick is a pair the driver can launch. Ties in the predicted
 value break on the kernel name, so the output depends only on the inputs.
 See HEURISTIC_BENCHMARKING.md for the workflow around it.
 """
+
+from __future__ import annotations
 
 import argparse
 import csv
@@ -84,8 +88,22 @@ def check_model_fits(spec: dict, candidates: dict) -> None:
         )
 
 
-def select(candidates: dict, predictor, top_k: int):
-    """Rank every problem's candidates; return ({problem: [top_k names]}, rows)."""
+FAMILY_FIELDS = (
+    "tile_m", "tile_n", "tile_k", "wave_m", "wave_n", "wave_k",
+    "warp_tile_m", "warp_tile_n", "warp_tile_k", "pipeline", "scheduler",
+    "epilogue", "persistent",
+)
+
+
+def select(candidates: dict, predictor, top_k: int, *, ranked_top_k=None, family_cap=0):
+    """Return warm picks and independently truncated predictor rankings.
+
+    ``ranked_top_k=None`` keeps the old top-K CSV; 0 exports the full prior.
+    Diversity groups geometry/pipeline siblings regardless of vector width or
+    padding. If the family cap leaves slots, backfill in predictor order.
+    """
+    if top_k < 1 or (ranked_top_k is not None and ranked_top_k < 0) or family_cap < 0:
+        raise ValueError("top_k must be positive; ranked_top_k and family_cap nonnegative")
     kernels = candidates["kernels"]
     base = {
         "dtype": candidates["dtype"],
@@ -100,8 +118,22 @@ def select(candidates: dict, predictor, top_k: int):
             {**base, "m": m, "n": n, "k": k},
             [feature_kernel(name, kernels[name]) for name in names],
         )
-        ranked = sorted(ranked, key=lambda t: (-t[1], t[0]))[:top_k]
-        picks[key] = [name for name, _ in ranked]
+        ranked = sorted(ranked, key=lambda t: (-t[1], t[0]))
+        chosen = []
+        if family_cap:
+            counts = {}
+            for name, _ in ranked:
+                family = tuple(kernels[name][f] for f in FAMILY_FIELDS)
+                if counts.get(family, 0) < family_cap:
+                    chosen.append(name)
+                    counts[family] = counts.get(family, 0) + 1
+                if len(chosen) == top_k:
+                    break
+        selected = set(chosen)
+        chosen.extend(name for name, _ in ranked if name not in selected)
+        picks[key] = chosen[:top_k]
+        limit = top_k if ranked_top_k is None else ranked_top_k
+        exported = ranked if limit == 0 else ranked[:limit]
         rows.extend(
             {
                 "problem": key,
@@ -110,7 +142,7 @@ def select(candidates: dict, predictor, top_k: int):
                 "predicted_tflops": tflops,
                 "candidates": len(names),
             }
-            for rank, (name, tflops) in enumerate(ranked, 1)
+            for rank, (name, tflops) in enumerate(exported, 1)
         )
     return picks, rows
 
@@ -131,6 +163,15 @@ def main(argv=None):
         "--top_k", type=int, default=5, help="Kernels per problem (default 5)"
     )
     parser.add_argument(
+        "--ranked_top_k", type=int, default=None,
+        help="CSV rows per problem: default top_k; 0 exports a full-coverage prior",
+    )
+    parser.add_argument(
+        "--family_cap", type=int, default=0,
+        help="Prefer at most N warm picks per geometry/pipeline family, then "
+             "backfill by rank (default 0: ordinary top-K)",
+    )
+    parser.add_argument(
         "--out_pairs",
         required=True,
         help="Picks as a gemm_full_benchmark.py --pairs file",
@@ -138,18 +179,25 @@ def main(argv=None):
     parser.add_argument(
         "--out_ranked",
         default=None,
-        help="CSV with one row per pick: problem, rank, kernel, predicted_tflops",
+        help="Ranked CSV: problem, rank, kernel, predicted_tflops, candidates",
     )
     args = parser.parse_args(argv)
     if args.top_k < 1:
         parser.error("--top_k must be >= 1")
+    if args.ranked_top_k is not None and args.ranked_top_k < 0:
+        parser.error("--ranked_top_k must be >= 0")
+    if args.ranked_top_k is not None and not args.out_ranked:
+        parser.error("--ranked_top_k requires --out_ranked")
+    if args.family_cap < 0:
+        parser.error("--family_cap must be >= 0")
 
     from predict import Predictor
 
     candidates = json.loads(Path(args.candidates).read_text())
     predictor = Predictor(args.model_dir)
     check_model_fits(predictor.spec, candidates)
-    picks, rows = select(candidates, predictor, args.top_k)
+    picks, rows = select(candidates, predictor, args.top_k,
+                         ranked_top_k=args.ranked_top_k, family_cap=args.family_cap)
 
     Path(args.out_pairs).write_text(json.dumps(picks, indent=1) + "\n")
     if args.out_ranked:
@@ -159,7 +207,8 @@ def main(argv=None):
             writer.writerows(rows)
     n_kernels = len({name for names in picks.values() for name in names})
     print(
-        f"{len(picks)} problems, {len(rows)} picks, {n_kernels} distinct kernels "
+        f"{len(picks)} problems, {sum(map(len, picks.values()))} picks, "
+        f"{n_kernels} distinct kernels "
         f"(from {len(candidates['kernels'])} candidates) -> {args.out_pairs}"
     )
     return 0

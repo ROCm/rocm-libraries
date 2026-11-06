@@ -320,6 +320,7 @@ class _ModelStrategy(Strategy):
         self.failed: dict[str, list[int]] = {}
         self._exhausted = False
         self._prior_top: list[list[int]] = []
+        self.build_preference = None  # ck_search patch 6
 
     def _build_startup(self) -> None:
         picks: list[Genome] = []
@@ -551,7 +552,7 @@ class TPE(_ModelStrategy):
                     for s, v in zip(scores, pv)
                 ]
         best = max(range(len(uniq)), key=lambda i: (scores[i], -i))
-        return uniq[best]
+        return uniq[best] if self.build_preference is None else self.build_preference.choose(self.space, self.rng, uniq, scores, best)  # ck_search patch 6
 
     def _genome_of(self, key: str):
         for g in self.pending.values():
@@ -704,7 +705,7 @@ class GPEI(_ModelStrategy):
         pdf = np.exp(-0.5 * z * z) / math.sqrt(2.0 * math.pi)
         ei = imp * cdf + sd * pdf
         i = int(np.argmax(ei))
-        return cands[i]
+        return cands[i] if self.build_preference is None else self.build_preference.choose(self.space, self.rng, cands, ei, i)  # ck_search patch 6
 
     def _extra_state(self) -> dict:
         return {"ell": self._ell, "fits": self._fits}

@@ -388,6 +388,23 @@ def test_confirmation_keeps_each_problem_on_one_device(monkeypatch, capsys, tmp_
     assert devices == {k: {"01"[i % 2]} for i, k in enumerate(KEYS)}
 
 
+def test_experimental_portfolio_and_race_use_verified_pinned_calls(monkeypatch, capsys, tmp_path):
+    monkeypatch.setenv("CK_TILE_BENCH_REPEAT", "17")
+    rc, cap, _, _, out = _search(
+        monkeypatch, capsys, tmp_path, devices=("0", "1"), strategy="portfolio",
+        portfolio_members=["hill", "gp", "de", "tpe"], build_aware={},
+        confirm={"mode": "race", "fresh_calls": 5, "min_calls": 3},
+    )
+    assert rc == 0, cap.out
+    meta, summary = _read(out, "run.json"), _read(out, "summary.json")
+    assert meta["context"]["measurement"]["verify"] is True
+    assert meta["context"]["timing_environment"]["CK_TILE_BENCH_REPEAT"] == "17"
+    assert set(summary["winners"]) == set(KEYS)
+    for i, key in enumerate(KEYS):
+        assert summary["confirmation"][key]["device"] == "01"[i % 2]
+        assert 3 <= len(summary["winners"][key]["calls_ms"]) <= 5
+
+
 def test_ranked_csv_is_the_search_prior(monkeypatch, capsys, tmp_path):
     eligible = _listing(monkeypatch, capsys, tmp_path)
     rows = [f"{KEYS[0]},{i + 1},{name},{10.0 - i}"
