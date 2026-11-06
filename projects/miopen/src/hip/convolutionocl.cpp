@@ -138,9 +138,11 @@ std::vector<miopenConvSolution_t> GetSolutions(const ExecutionContext& ctx,
     /// with wrong values, and the record may come from another library version. The solver's own
     /// requirement is used instead:
     /// - IsEnoughWorkspace() checks the workspace of the configuration that would run. For a
-    ///   tunable solver that is the perf-db (or default) configuration, resolved the same way as
-    ///   in CompileSolution(). Checking the maximum over configurations instead would drop a
-    ///   solver whose tuned configuration fits the buffer.
+    ///   tunable solver whose workspace depends on the configuration (WorkspaceDependsOnConfig()),
+    ///   that is the perf-db (or default) configuration, resolved the same way as in
+    ///   CompileSolution(). Checking the maximum over configurations instead would drop a solver
+    ///   whose tuned configuration fits the buffer. Every other solver's GetWorkspaceSize() is
+    ///   what its configuration needs, so no configuration is resolved for it.
     /// - The reported size is the same, except in Find (non-zero InvokeParams), which reports
     ///   the solver's GetWorkspaceSize(), i.e. the maximum over its configurations, like GWSS.
     /// - With perf-db access disabled (GWSS), the configuration is not resolved and
@@ -152,7 +154,8 @@ std::vector<miopenConvSolution_t> GetSolutions(const ExecutionContext& ctx,
     out.reserve(maxSolutionCount);
     auto n_copied              = 0;
     const auto resolves_config = [&](const solver::AnySolver& solver) {
-        return solver.IsTunable() && !ctx.disable_perfdb_access;
+        return solver.IsTunable() && solver.WorkspaceDependsOnConfig() &&
+               !ctx.disable_perfdb_access;
     };
     const auto run_workspace = [&](const solver::AnySolver& solver) -> std::size_t {
         if(!solver.MayNeedWorkspace())
@@ -434,7 +437,8 @@ std::vector<Solution> VerifiedFDBSolution(const ExecutionContext& ctx,
                     const auto id       = solver::Id{s.solution_id};
                     const auto& solver  = id.GetSolver();
                     auto workspace_size = s.workspace_size;
-                    if(solver.MayNeedWorkspace() && solver.IsTunable())
+                    if(solver.MayNeedWorkspace() && solver.IsTunable() &&
+                       solver.WorkspaceDependsOnConfig())
                     {
                         const auto run = FindRunSolution(ctx, problem, solver);
                         if(run.Succeeded())
