@@ -176,6 +176,16 @@ set_target_properties(hip_kernel_provider PROPERTIES
 # ============================================================================
 if(HIPKERNELPROVIDER_ENABLE_TESTS)
 
+    # Bundle filters for the attention engines' external integration checks below and
+    # their GPU-reference targets in integration_tests/.
+    string(JOIN ":" HKP_SDPA_FWD_DEFAULT_GTEST_FILTER
+        "quick_SdpaFwd_Default.*" "standard_SdpaFwd_Default.*"
+        "comprehensive_SdpaFwd_Default.*" "full_SdpaFwd_Default.*")
+    # Plus the dense BSHD stats (LSE) bundles: no other SdpaFwd bundle binds a stats
+    # output Gfx942AttentionDense serves.
+    set(HKP_GFX942_ATTENTION_DENSE_GTEST_FILTER
+        "${HKP_SDPA_FWD_DEFAULT_GTEST_FILTER}:*_SdpaFwd_bshd_*_stats_*")
+
     add_subdirectory(tests)
     add_subdirectory(integration_tests)
 
@@ -428,7 +438,7 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
                 INSTALL_DESTINATION "${_hkp_gfx950_shard_dest}"
                 INSTALL_STAGING_KEY hkp_census_gfx950
                 TEST_CONFIG    ${_config}
-                GTEST_FILTER   "quick_SdpaFwd_Default.*:standard_SdpaFwd_Default.*:comprehensive_SdpaFwd_Default.*:full_SdpaFwd_Default.*"
+                GTEST_FILTER   "${HKP_SDPA_FWD_DEFAULT_GTEST_FILTER}"
                 ENVIRONMENT    ${TEST_ENVIRONMENT}
                 ENVIRONMENT_MODIFICATION ${TEST_ENVIRONMENT_MODIFICATION}
                 ${_category_args}
@@ -476,9 +486,7 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
             INSTALL_DESTINATION "${_hkp_gfx942_shard_dest}"
             INSTALL_STAGING_KEY hkp_census_gfx942
             TEST_CONFIG    ${_gfx942_attention_dense_config}
-            # The shared Default sweeps, and the dense BSHD stats (LSE) bundles: no other
-            # SdpaFwd bundle binds a stats output this engine serves.
-            GTEST_FILTER   "quick_SdpaFwd_Default.*:standard_SdpaFwd_Default.*:comprehensive_SdpaFwd_Default.*:full_SdpaFwd_Default.*:*_SdpaFwd_bshd_*_stats_*"
+            GTEST_FILTER   "${HKP_GFX942_ATTENTION_DENSE_GTEST_FILTER}"
             ENVIRONMENT    ${TEST_ENVIRONMENT}
             ENVIRONMENT_MODIFICATION ${TEST_ENVIRONMENT_MODIFICATION}
             ${_gfx942_attention_dense_category_args}
