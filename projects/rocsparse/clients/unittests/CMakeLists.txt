@@ -297,6 +297,8 @@ set(ROCSPARSE_UNIT_TEST_DEVICE_SOURCES
   # rocsparse_format_ell and rocsparse_v2_spmv on rocsparse_format_sell
   # through the public generic descriptor API; no compile-in TUs.
   unit_test_internal_level2_ell_sell.cpp
+  # bsrxmv / bsrmv block-row grid clamp, through the public entry points.
+  unit_test_internal_level2_bsrxmv_grid.cpp
   # --- csr2ell strided-batched grid.y clamp regression [AISPARSE-683] -------
   # Distinct anchor at the end of the list so this leaf does not conflict with
   # sibling branches appending elsewhere. Needs the defining library TU in
