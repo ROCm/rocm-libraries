@@ -16,8 +16,8 @@ TEST(Package, CoreOnly) {
     roc::hostnumerics::Tensor mxTensor(roc::hostnumerics::ScalarType::Float4E2M1, Shape{8});
     const roc::hostnumerics::Tensor reshaped = tensor.reshapeSharingStorage(Shape{3, 2});
     const roc::hostnumerics::Tensor padded = tensor.copyWithZeroPadding(Shape{3, 4});
-    const std::array<size_t, 2> permutation{1, 0};
-    const roc::hostnumerics::Tensor permuted = tensor.copyWithPermutedDimensions(permutation);
+    const roc::hostnumerics::Tensor permuted =
+        tensor.copyWithPermutedDimensions(roc::hostnumerics::Permutation{1, 0});
     roc::hostnumerics::Tensor scalarTensor(roc::hostnumerics::ScalarType::Float32, Shape{});
     scalarTensor.storeFrom({}, 2.0f);
     const roc::hostnumerics::Tensor broadcast = scalarTensor.broadcastTo(Shape{2, 3});

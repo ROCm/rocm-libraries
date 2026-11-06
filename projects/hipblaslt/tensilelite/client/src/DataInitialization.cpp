@@ -124,9 +124,9 @@ namespace TensileLite
             return RoundUpToMultiple<size_t>(bytes, 256);
         }
 
-        constexpr std::array<size_t, 5> dataSwizzlePermutation{0, 2, 3, 1, 4};
-        constexpr std::array<size_t, 4> unrollMajorMXSwizzlePermutation{0, 2, 1, 3};
-        constexpr std::array<size_t, 4> tiledMajorMXSwizzlePermutation{0, 1, 3, 2};
+        const roc::hostnumerics::Permutation dataSwizzlePermutation{0, 2, 3, 1, 4};
+        const roc::hostnumerics::Permutation unrollMajorMXSwizzlePermutation{0, 2, 1, 3};
+        const roc::hostnumerics::Permutation tiledMajorMXSwizzlePermutation{0, 1, 3, 2};
 
         enum class SwizzleTensorKind
         {
@@ -2036,7 +2036,7 @@ namespace TensileLite
                         // reference keeps the operand's canonical scale orientation.
                         const auto scalesForDevice
                             = swizzleLayout == MxScaleStorageLayout::Gfx950 && !kFast
-                                  ? canonicalScales.copyWithPermutedDimensions({1, 0})
+                                  ? canonicalScales.copyWithPermutedDimensions(roc::hostnumerics::Permutation{1, 0})
                                   : canonicalScales;
                         const auto scalePlan
                             = roc::hostnumerics::amd_gpu_layout::MxScaleStoragePlan(

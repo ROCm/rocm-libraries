@@ -91,7 +91,7 @@ void swizzleTensor(T* dst, const T* src, size_t m, size_t k, bool colMaj)
         = Tensor::copyNativeStorage(Layout::contiguousLastDimensionFastest(sourceShape),
                                     std::span<const Storage>(nativeStorage));
     if(colMaj)
-        tmpTensor = tmpTensor.copyWithPermutedDimensions({1, 0});
+        tmpTensor = tmpTensor.copyWithPermutedDimensions(roc::hostnumerics::Permutation{1, 0});
 
     const auto   MultipleM = MiM;
     const auto   MultipleK = MiK * PackK;
@@ -101,7 +101,7 @@ void swizzleTensor(T* dst, const T* src, size_t m, size_t k, bool colMaj)
         = tmpTensor.copyWithZeroPadding(Shape{paddedM, paddedK})
               .reshapeSharingStorage(
                   Shape{paddedM / MiM, MiM, paddedK / (MiK * PackK), MiK / MiKv, MiKv * PackK})
-              .copyWithPermutedDimensions({0, 2, 3, 1, 4});
+              .copyWithPermutedDimensions(roc::hostnumerics::Permutation{0, 2, 3, 1, 4});
     const std::span<const std::byte> swizzledBytes = permuted.rawEncodedBackingStorage();
     auto destinationBytes = std::as_writable_bytes(std::span(dst, paddedM * paddedK));
     std::copy(swizzledBytes.begin(), swizzledBytes.end(), destinationBytes.begin());

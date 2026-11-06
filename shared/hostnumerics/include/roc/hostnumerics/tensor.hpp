@@ -300,9 +300,7 @@ class Tensor {
     Tensor copyWithZeroPadding(Shape shape) const;
 
     // destinationToSource[d] names the source dimension copied to destination dimension d.
-    Tensor copyWithPermutedDimensions(std::span<const size_t> destinationToSource) const;
-
-    Tensor copyWithPermutedDimensions(std::initializer_list<size_t> destinationToSource) const;
+    Tensor copyWithPermutedDimensions(const Permutation& destinationToSource) const;
 
     Tensor copyConvertedTo(ScalarType type) const;
 
