@@ -232,49 +232,49 @@ with neither torch nor a GPU installed.
 
 ### ROCm library discovery (libamd_comgr / libamdhip64)
 
-The runtime resolves the ROCm shared libs WITHOUT importing torch
-(`runtime/runtime_coexistence._candidate_lib_paths` / `_rocm_root_libdirs`), in
-priority order:
+One thread-safe runtime session owns retained compiler/HIP handles and compiler
+evidence. Selection never imports torch or initializes HIP to discover a compiler.
+The warm compilation path returns the retained handle/evidence without process
+scans, metadata discovery or subprocesses.
 
-1. explicit full-path override env var (`ROCKE_COMGR_LIB`, `ROCKE_HIP_LIB`);
-2. the lib torch uses, an opportunistic fast-path **only if torch is already
-   imported** (never imports torch to get it): an unambiguous mapped copy,
-   else `<torch>/lib/lib*.so`, else TheRock's
-   `_rocm_sdk_core/lib/lib*.so*` (only when `rocm_sdk` is imported, i.e. the
-   torch is TheRock's). Exception for comgr only: a stale torch comgr moves
-   below every step 3 candidate (see below);
-3. a real ROCm install discovered without torch: `$ROCM_PATH` / `$ROCM_HOME` →
-   `<root>/lib`, then globbed `/opt/rocm*/core-*/lib` and `/opt/rocm*/lib`,
-   newest version first;
-4. bare `lib<name>.so` on the dynamic linker's search path (last resort).
+COMGR has exactly two choices:
 
-With multiple distinct copies in `/proc/self/maps`, the mapped tier prefers
-the sole copy under imported torch or the active `_rocm_sdk_core`. It skips
-ambiguous mappings rather than treating address order as load order.
+1. A nonempty `ROCKE_COMGR_LIB` selects that explicit library. A missing or
+   unloadable override fails; it does not fall back to another compiler.
+2. Otherwise, the installed `rocm-sdk-core` distribution's file metadata
+   selects its COMGR payload. This supports both `_rocm_sdk_core` and package
+   names carrying TheRock's suffix nonce. The optional `rocke[sdk-core]` extra
+   installs it from an AMD wheel index; see
+   [compiler installation and release support](dsl_docs/runtime/comgr_and_hipmodule.md#installing-the-compiler).
 
-Stale torch comgr (`_torch_comgr_is_stale`, comgr only, never HIP): the release
-of torch's comgr is read from its location (in `_rocm_sdk_core`: the wheel's
-release, `rocm_sdk.__version__` or the installed `rocm-sdk-core` version;
-elsewhere: `torch.version.hip`), the same way `resolved_lib_rocm_version` does,
-and compared with the release of the first step 3 install whose version is
-readable. If both are known and torch's is older, torch's comgr is tried after
-every step 3 candidate (still before step 4), because an older comgr rejects
-ISAs newer than its ROCm. A `_rocm_sdk_core` comgr already mapped into the
-process is never demoted: TheRock's `rocm_sdk.initialize_process` loaded it
-`RTLD_GLOBAL`, and a second comgr beside it aborts the process with `LLVM
-ERROR: support is already registered for analysis`. It stays first; if it
-cannot handle the target ISA, the compile fails at `set_isa`.
+The desired compiler uses only the explicit override or SDK metadata, never a
+system/Torch fallback. Cold admission inventories actual COMGR symbol owners,
+not filenames, on Linux and Windows. Same-file aliases reuse the loaded handle.
+An explicit override cannot substitute a distinct file even when versions match.
+For automatic selection, a distinct already-loaded compiler can be reused only
+after its full LLVM version matches a fresh-process query of the desired SDK file.
+Unknown, changed-file or ambiguous evidence fails; no second compiler is trial-loaded
+into the live process. Successful handles and version evidence remain retained.
 
-On Linux, if exactly one distinct COMGR path is mapped and `ROCKE_COMGR_LIB`
-names another existing file with an ELF header, the Python loader raises
-`ComgrError` before `dlopen` can load a second LLVM. An alias of the same file
-still works. Missing or non-ELF overrides keep the existing load-failure
-fallback. With multiple mapped paths or unreadable maps, this check does not
-change override precedence or mapped-library selection. To use a different
-COMGR, compile in a separate process before importing torch.
+Native C++ IR lowering does not acquire a compiler. Its owner must pass the queried
+LLVM flavor or set `ROCKE_LLVM_FLAVOR`; native AUTO without that evidence fails.
+There is no native SDK-prefix/RECORD discovery or build sidecar/enrollment protocol.
+Source CTest explicitly marks native AUTO-lowering commands that require the
+selected Python interpreter to forward the build compiler's flavor; compiler-free
+host tests do not acquire COMGR. Installed launchers supply deployment-valid evidence. Explicit offline
+flavors bypass compiler/session acquisition.
 
-If you hit `cannot load libamd_comgr.so` in a torch-less process, set
-`ROCM_PATH` (or `ROCKE_COMGR_LIB`) to point at your ROCm install.
+HIP honors `ROCKE_HIP_LIB`, then an already-imported framework runtime, then the
+SDK distribution's owned HIP payload on both platforms, and finally existing system
+roots when no owned SDK runtime is available. Compiler-active HIP acquisition must
+use a coherent SDK or unambiguous same-directory compiler/runtime pair. Artifact
+validation explicitly selects the artifact's pair; silently using SDK HIP does not
+validate artifact HIP. The session guards its own loads, not arbitrary later
+third-party library acquisition. Metadata-only `prefer_bundled_lib()` is not a
+bootstrap and must not be used to implicitly import Torch or pin HIP.
+
+If COMGR is unavailable in a torch-free process, install `rocke[sdk-core]`
+from an AMD wheel index or point `ROCKE_COMGR_LIB` at the intended compiler.
 
 ## Hardware requirements for numeric tests
 
@@ -531,7 +531,7 @@ byte-identity in the same PR, the same rule the kernel already follows.
 | `ROCKE_LLVM_FLAVOR` | `llvm20` \| `llvm22` \| `llvm23` \| `llvm24` (AUTO queries loaded COMGR: LLVM <=20, 21/22, 23, or 24; newer majors and unavailable evidence raise; explicit lanes support offline emission) |
 | `ROCKE_PLATFORM_TOOLS_DIR` | directory holding the platform `tools/` scripts (`rocke.assets.platform_tools_dir()`); the installed test payload's `conftest.py` sets it to its staged copy, so `rocke.tests.ir_validity` compiles with the same tool as a checkout. A directory without `check_ir_validity.py` raises rather than skipping the compile checks |
 | `ROCKE_TEST_VERIFY_IR` | `1` = assemble emitted IR with `llvm-as` in `TestNewTargetIntrinsics`; needs an LLVM as new as the newest flavor |
-| `ROCM_PATH` / `ROCM_HOME` | ROCm install root; `<root>/lib` is searched for `comgr`/HIP before the globbed `/opt/rocm*` trees |
+| `ROCM_PATH` / `ROCM_HOME` | ROCm install root for HIP discovery; COMGR uses only the explicit override or the installed SDK |
 | `ROCKE_COMGR_LIB` / `ROCKE_HIP_LIB` | explicit full path to `libamd_comgr` / `libamdhip64`; wins over all discovery |
 | `ROCKE_ONLINE_LIB` / `ROCKE_REPLAY_CLI` | explicit portable-IR shared engine / standalone replay CLI; explicit paths never fall back |
 | `ROCKE_PROVENANCE_MANIFEST` | build-generated expected version/build ID for validating explicit native artifacts in a source-less installed test tree |

@@ -525,6 +525,21 @@ remains in [`platform/CMakeLists.txt`](platform/CMakeLists.txt). The provider's
 external test-category YAML and TheRock's tier selection determine which
 registered tests actually execute. Check the selected list in the job log or
 with CTest's verbose listing. Registration alone does not establish CI coverage.
+The hipDNN source superbuild CI also runs build-tree CTest. With provider tests
+enabled, `rocke_compiler_discovery_source` runs four pytest files covering
+owner-forwarded native lowering and the source CTest compiler default, the Python
+compiler session, Windows loaded-module inventory, and SDK metadata paths and
+ownership. Unicode DLL admission runs on Windows after fixture compilation in a
+separate build directory. Metadata spelling and ordinary parent traversal are
+cross-platform; physical symlink-parent traversal asserts POSIX semantics only
+on POSIX hosts. Source-only configure checks run against the freshly built archive. The source arch-domain CTest also
+receives the build compiler default while preserving caller override precedence
+and querying its own Python owner; native lowering never discovers a compiler.
+
+The wheel-based hipDNN superbuild lane installs the built platform wheel with
+its `sdk-core` extra before CTest. It uses the shared SDK dependency for COMGR
+discovery, with no CI-specific compiler path override. The SDK is already present
+for configure-time packaging probes through that lane's ROCm dependencies.
 
 **The tree/gating reality (a second axis, orthogonal to the two questions).**
 The developer pytest step collects `platform/tests`. The installed platform

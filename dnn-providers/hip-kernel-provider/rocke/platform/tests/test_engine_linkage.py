@@ -32,8 +32,9 @@ def test_raw_archive_link_dependencies(monkeypatch, tmp_path, platform, consumer
     def complete_compile(command, **_kwargs):
         if "-o" in command:
             Path(command[command.index("-o") + 1]).touch()
-        return SimpleNamespace(returncode=0, stdout=b"", stderr="")
+        return SimpleNamespace(returncode=0, stdout=b"matching fixture IR", stderr="")
 
+    monkeypatch.setenv("ROCKE_LLVM_FLAVOR", "llvm20")
     run = Mock(side_effect=complete_compile)
     monkeypatch.setattr(subprocess, "run", run)
     monkeypatch.setattr(sys, "platform", platform)
@@ -77,6 +78,83 @@ def test_raw_archive_link_dependencies(monkeypatch, tmp_path, platform, consumer
             assert command.index(flag) > archive_index
         else:
             assert flag not in command
+
+
+@pytest.mark.parametrize("profile", [None, "llvm20"])
+def test_micro_parity_forwards_one_profile_to_both_emitters(
+    monkeypatch, tmp_path, profile
+):
+    from rocke.runtime import comgr
+
+    driver = load_driver(
+        "profile_micro_parity", PLATFORM / "tests/instances/parity/run_parity.py"
+    )
+    monkeypatch.setattr(driver.tempfile, "gettempdir", lambda: str(tmp_path))
+    monkeypatch.setattr(driver, "_cxx", lambda: "c++")
+    archive = tmp_path / "librocke_core.a"
+    archive.touch()
+    monkeypatch.setattr(sys, "argv", ["run_parity", "--archive", str(archive)])
+    monkeypatch.delenv("ROCKE_LLVM_FLAVOR", raising=False)
+    query = Mock(
+        return_value=comgr.CompilerInfo(
+            (24, 0, 0), "fixture", None, "selected", "selected"
+        )
+    )
+    monkeypatch.setattr(comgr, "_loaded_compiler_info", query)
+    if profile:
+        monkeypatch.setenv("ROCKE_LLVM_FLAVOR", profile)
+    seen = []
+
+    def run(command, **kwargs):
+        if "-o" in command:
+            return SimpleNamespace(returncode=0, stdout="", stderr="")
+        seen.append(kwargs["env"]["ROCKE_LLVM_FLAVOR"])
+        return SimpleNamespace(returncode=0, stdout=b"matching IR", stderr=b"")
+
+    monkeypatch.setattr(driver.subprocess, "run", run)
+    assert driver.main() == 0
+    assert seen == [profile or "llvm24"] * 8
+    assert os.environ.get("ROCKE_LLVM_FLAVOR") == profile
+    if profile:
+        query.assert_not_called()
+    else:
+        query.assert_called_once_with(required=True)
+
+
+@pytest.mark.parametrize("failure", ["native", "reference", "empty", "drift"])
+def test_micro_parity_does_not_pass_failed_or_empty_emitters(
+    monkeypatch, tmp_path, failure
+):
+    driver = load_driver(
+        "failure_micro_parity", PLATFORM / "tests/instances/parity/run_parity.py"
+    )
+    monkeypatch.setattr(driver.tempfile, "gettempdir", lambda: str(tmp_path))
+    monkeypatch.setattr(driver, "_cxx", lambda: "c++")
+    archive = tmp_path / "librocke_core.a"
+    archive.touch()
+    monkeypatch.setattr(sys, "argv", ["run_parity", "--archive", str(archive)])
+    monkeypatch.setenv("ROCKE_LLVM_FLAVOR", "llvm20")
+
+    def run(command, **kwargs):
+        if "-o" in command:
+            return SimpleNamespace(returncode=0, stdout="", stderr="")
+        native = len(command) == 2
+        failed = (failure == "native" and native) or (
+            failure == "reference" and not native
+        )
+        output = (
+            b""
+            if failure == "empty"
+            else b"different" if failure == "drift" and native else b"IR"
+        )
+        return SimpleNamespace(
+            returncode=1 if failed else 0,
+            stdout=output,
+            stderr=b"diagnostic" if failed else b"",
+        )
+
+    monkeypatch.setattr(driver.subprocess, "run", run)
+    assert driver.main() == 1
 
 
 @pytest.mark.parametrize(
@@ -254,6 +332,54 @@ def test_installed_ctest_entries_get_scoped_environment_contracts(
             environment_for(tests, "rocke_library_mla_pytest")
             == expected_mla_environment
         )
+
+
+def test_relocated_launcher_suite_has_its_test_assets(tmp_path):
+    """Exercise installed tests without borrowing helpers from the source tree."""
+    build = os.environ.get("ROCKE_LINK_TEST_BUILD_DIR")
+    if not build:
+        pytest.skip("set ROCKE_LINK_TEST_BUILD_DIR to a fresh engine build")
+    prefix = tmp_path / "install"
+    subprocess.run(
+        ["cmake", "--install", build, "--prefix", str(prefix)],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    relocated = tmp_path / "relocated"
+    prefix.rename(relocated)
+    modules = list(relocated.rglob("tests/test_comgr_test_launcher.py"))
+    assert len(modules) == 1
+    test_file = modules[0]
+    helper = test_file.parent / "tools" / "run_with_comgr.py"
+    assert helper.read_bytes() == (PLATFORM / "tools/run_with_comgr.py").read_bytes()
+    launchers = list(relocated.rglob("rocke/tests/subprocess_launcher.py"))
+    assert len(launchers) == 1
+    # Invoke the relocated launcher, not the parent package's helper: this lane
+    # deliberately tests a separately selected, source-less package identity.
+    environment = {
+        key: value
+        for key, value in os.environ.items()
+        if not key.startswith(("PYTHON", "ROCKE_"))
+    }
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-I",
+            "-S",
+            str(launchers[0]),
+            "-m",
+            "pytest",
+            str(test_file),
+            "-q",
+        ],
+        cwd=tmp_path,
+        env=environment,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "9 passed" in result.stdout
 
 
 def test_relocated_cmake_consumer_links_lowerer(tmp_path):

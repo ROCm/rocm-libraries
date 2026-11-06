@@ -1,8 +1,10 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""Exercise the production archive's detector against loadable compiler fixtures."""
+"""Native IR lowering consumes owner evidence; it never discovers a compiler."""
+from __future__ import annotations
 
+import ctypes
 import json
 import os
 import shutil
@@ -12,30 +14,21 @@ from pathlib import Path
 
 import pytest
 
-from rocke.tests.subprocess_launcher import (
-    rocke_python_command,
-    rocke_subprocess_env,
-)
-
 PLATFORM = Path(__file__).resolve().parents[1]
 
 
 def detector_archive(build_root):
-    """Use the test artifact's archive, an explicit build, or a fresh source build."""
     override = os.environ.get("ROCKE_TEST_ENGINE_ARCHIVE")
-    archive = Path(override) if override else Path(__file__).parent / "librocke_core.a"
-    if override or archive.exists():
-        if not archive.is_file():
-            pytest.fail(f"native detector archive not found: {archive}")
+    installed = Path(__file__).parent / "librocke_core.a"
+    if override or installed.is_file():
+        archive = Path(override) if override else installed
+        assert archive.is_file(), archive
         return archive.resolve()
     if not (PLATFORM / "cpp").is_dir():
-        pytest.fail(f"installed native detector test requires {archive}")
-    cmake = shutil.which("cmake")
-    if not cmake:
-        pytest.skip("source native detector tests require CMake to build the archive")
+        pytest.fail("installed native boundary test requires its matching archive")
     subprocess.run(
         [
-            cmake,
+            "cmake",
             "-S",
             str(PLATFORM),
             "-B",
@@ -50,110 +43,36 @@ def detector_archive(build_root):
         text=True,
     )
     subprocess.run(
-        [cmake, "--build", str(build_root), "--target", "rocke_core", "-j", "2"],
+        ["cmake", "--build", str(build_root), "--target", "rocke_core", "-j", "2"],
         check=True,
         capture_output=True,
         text=True,
     )
-    archive = build_root / "librocke_core.a"
-    if not archive.is_file():
-        pytest.fail(f"native detector build did not produce {archive}")
-    return archive
+    for name in ("librocke_core.a", "rocke_core.lib", "Release/rocke_core.lib"):
+        if (build_root / name).is_file():
+            return build_root / name
+    pytest.fail("source build did not produce an engine archive")
 
 
-PROBE = r"""
-import ctypes, json, os, sys
-from dataclasses import asdict
-from rocke.runtime.comgr import loaded_compiler_info
-
-class Info(ctypes.Structure):
-    _fields_ = [(n, ctypes.c_uint) for n in ('major', 'minor', 'patch')] + [
-        (n, ctypes.c_char_p) for n in ('source', 'requested_comgr', 'comgr_path', 'query_library_path')]
-
-native = ctypes.CDLL(sys.argv[1])
-native.rocke_loaded_compiler_info.argtypes = []
-native.rocke_loaded_compiler_info.restype = ctypes.POINTER(Info)
-ptr = native.rocke_loaded_compiler_info()
-assert ptr
-info = ptr.contents
-result = {'llvm_version': [info.major, info.minor, info.patch] if info.major else None}
-for name in ('source', 'requested_comgr', 'comgr_path', 'query_library_path'):
-    value = getattr(info, name)
-    result[name] = value.decode() if value is not None else None
-print(json.dumps({'native': result, 'python': asdict(loaded_compiler_info())}))
-"""
-
-
-@pytest.fixture(scope="module")
-def native_detector(tmp_path_factory):
-    compiler = shutil.which("c++")
-    if sys.platform != "linux" or not compiler or not shutil.which("cc"):
-        pytest.skip("ELF loader fixtures require Linux and C/C++ compilers")
-    root = tmp_path_factory.mktemp("native-detector")
-    archive = detector_archive(root / "engine")
-    output = root / "detector.so"
-    # The return type is opaque here; ctypes below mirrors the private record.
-    # Link the production implementation without installing its private headers.
-    wrapper = (
-        "namespace ckc { struct CompilerInfo; "
-        "const CompilerInfo* candidate_compiler_info(); }\n"
-        "static bool block_loads = false;\n"
-        "static unsigned load_calls = 0;\n"
-        "static unsigned invalid_path_calls = 0;\n"
-        "static const char* fixture_root = nullptr;\n"
-        "#include <cstring>\n"
-        'extern "C" void* __real_dlopen(const char*, int);\n'
-        'extern "C" void* __wrap_dlopen(const char* path, int mode) {\n'
-        "    ++load_calls;\n"
-        "    if(!*path || (*path != '/' && strchr(path, '/')))\n"
-        "        ++invalid_path_calls;\n"
-        "    if(fixture_root && *path == '/' &&\n"
-        "       strncmp(path, fixture_root, strlen(fixture_root)) != 0)\n"
-        "        return nullptr;\n"
-        "    return block_loads ? nullptr : __real_dlopen(path, mode);\n"
-        "}\n"
-        'extern "C" void fixture_block_loads(int block) { block_loads = block; }\n'
-        'extern "C" unsigned fixture_load_calls() { return load_calls; }\n'
-        'extern "C" unsigned fixture_invalid_path_calls() { return invalid_path_calls; }\n'
-        'extern "C" void fixture_limit_roots(const char* root) { fixture_root = root; }\n'
-        'extern "C" const ckc::CompilerInfo* rocke_loaded_compiler_info() {\n'
-        "    return ckc::candidate_compiler_info();\n"
-        "}\n"
-    )
+def build_library(root, text, name="libamd_comgr.so.3", extra=()):
+    root.mkdir(parents=True, exist_ok=True)
+    windows = sys.platform == "win32"
+    if windows and name == "libamd_comgr.so.3":
+        name = "amd_comgr.dll"
+    output = root / name
+    compiler = os.environ.get("CXX") or ("clang" if windows else "cc")
+    if windows:
+        text = (
+            "#include <stddef.h>\n"
+            "__declspec(dllexport) void amd_comgr_get_version(size_t*,size_t*);\n"
+            "__declspec(dllexport) int amd_comgr_do_action(int,void*,void*,void*);\n"
+            "__declspec(dllexport) void LLVMGetVersion(unsigned*,unsigned*,unsigned*);\n"
+        ) + text
     subprocess.run(
         [
             compiler,
-            "-std=c++20",
             "-shared",
-            "-fPIC",
-            "-Wl,--wrap=dlopen",
-            "-x",
-            "c++",
-            "-",
-            "-x",
-            "none",
-            str(archive),
-            "-ldl",
-            "-pthread",
-            "-o",
-            str(output),
-        ],
-        input=wrapper,
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-    return output
-
-
-def build_library(root, text, name="libamd_comgr.so", extra=()):
-    root.mkdir(parents=True, exist_ok=True)
-    output = root / name
-    subprocess.run(
-        [
-            "cc",
-            "-shared",
-            "-fPIC",
+            *([] if windows else ["-fPIC"]),
             "-x",
             "c",
             "-",
@@ -171,288 +90,262 @@ def build_library(root, text, name="libamd_comgr.so", extra=()):
     return output
 
 
-def run_probe(native, library, **overrides):
-    env = dict(os.environ)
-    for name in ("ROCKE_LLVM_FLAVOR", "ROCM_PATH", "ROCM_HOME"):
-        env.pop(name, None)
-    env.update(
-        ROCKE_COMGR_LIB=str(library),
-        PYTHONPATH=os.pathsep.join(str(path) for path in sys.path if path),
+@pytest.fixture(scope="module")
+def native_lowerer(tmp_path_factory):
+    if sys.platform != "linux":
+        pytest.skip("raw archive boundary fixtures use the Linux C++ linker")
+    include = PLATFORM / "cpp/include"
+    if not include.is_dir():
+        pytest.skip("source public headers required for boundary executable")
+    root = tmp_path_factory.mktemp("native-owner-boundary")
+    archive = detector_archive(root / "engine")
+    source = root / "main.cpp"
+    source.write_text(
+        '#include "rocke/ir.h"\n#include "rocke/lower_llvm.h"\n'
+        "#include <cstdio>\n#include <cstdlib>\n"
+        "int main(int argc,char**argv){\n"
+        'rocke_ir_builder_t b{};if(rocke_ir_builder_init(&b,"native_owner_probe")!=ROCKE_OK)return 2;\n'
+        "char* text=nullptr;char error[4096]{};\n"
+        "auto flavor=static_cast<rocke_llvm_flavor_t>(argc>1?std::atoi(argv[1]):0);\n"
+        'auto status=rocke_lower_kernel_to_llvm_ex(rocke_ir_builder_kernel(&b),flavor,"gfx950",&text,error,sizeof(error));\n'
+        'std::printf("STATUS=%d\\nDIAG=%s\\nIR:\\n%s",int(status),error,text?text:"");\n'
+        "std::free(text);rocke_ir_builder_free(&b);return 0;}\n"
     )
-    env.update(overrides)
-    env = rocke_subprocess_env(env)
-    result = subprocess.run(
-        rocke_python_command("-c", PROBE, str(native)),
-        env=env,
+    binary = root / "lower"
+    subprocess.run(
+        [
+            "c++",
+            "-std=c++20",
+            "-I",
+            str(include),
+            str(source),
+            str(archive),
+            "-ldl",
+            "-pthread",
+            "-o",
+            str(binary),
+        ],
+        check=True,
         capture_output=True,
         text=True,
-        check=True,
     )
-    info = json.loads(result.stdout)
-    assert info["native"] == info["python"]
-    return info["native"]
+    return binary
 
 
-def test_dependency_query_reports_the_library_that_supplied_version(
-    native_detector, tmp_path
-):
-    root = tmp_path / "rocm-99.0" / "lib"
-    dependency = build_library(
-        root,
-        "void LLVMGetVersion(unsigned*a,unsigned*b,unsigned*c){*a=23;*b=2;*c=1;}\n"
-        "void fixture_dependency(void){}\n",
-        "libfixtureLLVM.so",
-    )
-    library = build_library(
-        root,
-        "#include <stddef.h>\n"
-        "extern void fixture_dependency(void);\n"
-        "void amd_comgr_get_version(size_t*a,size_t*b){fixture_dependency();*a=3;*b=3;}\n",
-        extra=(str(dependency), "-Wl,-rpath,$ORIGIN"),
-    )
-    metadata = root.parent / ".info"
-    metadata.mkdir()
-    (metadata / "version").write_text("99.0.0\n")
-    info = run_probe(native_detector, library)
-    assert info["llvm_version"] == [23, 2, 1]
-    assert info["source"] == "LLVMGetVersion"
-    assert info["comgr_path"] == str(library)
-    assert info["query_library_path"] == str(dependency)
-
-
-def test_unloadable_override_uses_first_loadable_library(native_detector, tmp_path):
-    broken = tmp_path / "broken.so"
-    broken.write_text("not a shared library")
-    root = tmp_path / "versionless-install"
-    library = build_library(
-        root / "lib",
-        "void LLVMGetVersion(unsigned*a,unsigned*b,unsigned*c){*a=21;*b=0;*c=0;}\n",
-    )
-    info = run_probe(native_detector, broken, ROCM_PATH=str(root))
-    assert info["llvm_version"] == [21, 0, 0]
-    assert info["requested_comgr"] == str(library)
-
-
-@pytest.mark.parametrize("variable", ["ROCKE_COMGR_LIB", "ROCM_PATH", "ROCM_HOME"])
-def test_empty_discovery_values_match_unset(native_detector, tmp_path, variable):
-    library = build_library(
-        tmp_path / "fallback" / "lib",
-        "void amd_comgr_get_version(void){}\n"
-        "void LLVMGetVersion(unsigned*a,unsigned*b,unsigned*c){*a=23;*b=0;*c=1;}\n",
-    )
-    cwd = tmp_path / "cwd"
-    build_library(
-        cwd / "lib",
-        "void LLVMGetVersion(unsigned*a,unsigned*b,unsigned*c){*a=20;*b=0;*c=2;}\n",
-    )
-    # Limit system-install tiers in both engines so the fallback is independent
-    # of the host's /opt installations. Relative candidates stay observable.
-    script = (
-        PROBE.replace(
-            "ptr = native.rocke_loaded_compiler_info()",
-            "native.fixture_limit_roots.argtypes = [ctypes.c_char_p]\n"
-            "fixture_root = os.fsencode(sys.argv[2])\n"
-            "native.fixture_limit_roots(fixture_root)\n"
-            "from rocke.runtime import runtime_coexistence as coexistence\n"
-            "real_glob = coexistence.glob.glob\n"
-            "coexistence.glob.glob = lambda pattern: (\n"
-            "    [] if pattern.startswith('/opt/rocm') else real_glob(pattern))\n"
-            "ptr = native.rocke_loaded_compiler_info()",
-        )
-        + "\nnative.fixture_invalid_path_calls.restype = ctypes.c_uint\nassert native.fixture_invalid_path_calls() == 0\n"
-    )
+def clean_env():
     env = dict(os.environ)
-    for name in ("ROCKE_LLVM_FLAVOR", "ROCKE_COMGR_LIB", "ROCM_PATH", "ROCM_HOME"):
-        env.pop(name, None)
-    env.update(
-        PYTHONPATH=os.pathsep.join(str(path) for path in sys.path if path),
-        # Keep the fixture first while preserving shared-Python dependencies.
-        LD_LIBRARY_PATH=os.pathsep.join(
-            [str(library.parent)]
-            + [
-                path
-                for path in env.get("LD_LIBRARY_PATH", "").split(os.pathsep)
-                if path
-            ]
+    for key in (
+        "ROCKE_LLVM_FLAVOR",
+        "ROCKE_COMGR_LIB",
+        "ROCM_PATH",
+        "ROCM_HOME",
+        "PYTHONPATH",
+    ):
+        env.pop(key, None)
+    return env
+
+
+def lower(binary, flavor, env):
+    result = subprocess.run(
+        [str(binary), str(flavor)], env=env, check=True, capture_output=True, text=True
+    )
+    header, ir = result.stdout.split("IR:\n", 1)
+    return int(header.splitlines()[0].split("=", 1)[1]), header, ir
+
+
+@pytest.mark.parametrize(
+    "flavor,number", [("llvm20", 1), ("llvm22", 2), ("llvm23", 3), ("llvm24", 4)]
+)
+def test_native_explicit_owner_flavor_matches_python(native_lowerer, flavor, number):
+    from rocke.core.ir import IRBuilder
+    from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
+
+    expected = _lower_kernel_to_llvm_python(
+        IRBuilder("native_owner_probe").kernel, arch="gfx950", llvm_flavor=flavor
+    )
+    status, _, text = lower(native_lowerer, number, clean_env())
+    assert status == 0 and text == expected
+    env = clean_env()
+    env["ROCKE_LLVM_FLAVOR"] = flavor
+    status, _, text = lower(native_lowerer, 0, env)
+    assert status == 0 and text == expected
+
+
+def test_native_auto_does_not_load_or_discover_comgr(native_lowerer, tmp_path):
+    compiler = build_library(
+        tmp_path / "compiler",
+        "#include <unistd.h>\n__attribute__((constructor))static void trip(){_exit(86);}\n",
+    )
+    build = tmp_path / "build"
+    deployed = build / "deployment/bin/lower"
+    deployed.parent.mkdir(parents=True)
+    shutil.copy2(native_lowerer, deployed)
+    (build / "CMakeCache.txt").write_text("source\n")
+    (build / "rocke_sdk_site.txt").write_text(
+        "rocke-sdk-site-absolute-v1\n" + str(compiler.parent) + "\n"
+    )
+    env = clean_env()
+    env["ROCKE_COMGR_LIB"] = str(compiler)
+    status, diagnostic, _ = lower(deployed, 0, env)
+    assert status != 0
+    assert "does not select or load a compiler" in diagnostic
+    status, _, _ = lower(deployed, 1, env)
+    assert status == 0
+
+
+@pytest.mark.parametrize(
+    "selection", ["package", "provider", "environment", "relative-environment"]
+)
+def test_source_native_ctest_uses_effective_build_comgr(tmp_path, selection):
+    if not (PLATFORM / "CMakeLists.txt").is_file():
+        pytest.skip("source CMake needed for owner forwarding test")
+    library = build_library(
+        tmp_path / "compiler",
+        (
+            "#include <stddef.h>\nvoid amd_comgr_get_version(size_t*a,size_t*b){*a=3;*b=4;}\n"
+            "int amd_comgr_do_action(int a,void*b,void*c,void*d){return 0;}\n"
+            "void LLVMGetVersion(unsigned*a,unsigned*b,unsigned*c){*a=23;*b=0;*c=1;}\n"
         ),
     )
-    if variable == "ROCKE_COMGR_LIB":
-        env["ROCM_PATH"] = str(library.parent.parent)
-    results = []
-    for value in (None, ""):
-        child_env = dict(env)
-        if value is not None:
-            child_env[variable] = value
-        child_env = rocke_subprocess_env(child_env)
-        result = subprocess.run(
-            rocke_python_command("-c", script, str(native_detector), str(tmp_path)),
-            env=child_env,
-            cwd=cwd,
+    package = tmp_path / "package"
+    package.mkdir()
+    (package / "amd_comgr-config.cmake").write_text(
+        "add_library(amd_comgr SHARED IMPORTED)\n"
+        f'set_target_properties(amd_comgr PROPERTIES IMPORTED_LOCATION "{library.as_posix()}")\n'
+    )
+    build = tmp_path / "build"
+    env = clean_env()
+    command = [
+        "cmake",
+        "-S",
+        str(PLATFORM),
+        "-B",
+        str(build),
+        "-DHIPKERNELPROVIDER_ENABLE_ROCKE=ON",
+        "-DHIPKERNELPROVIDER_ENABLE_TESTS=ON",
+        "-DBUILD_TESTING=ON",
+        "-DCMAKE_BUILD_TYPE=Release",
+        "-DROCKE_INSTALL_TESTS=OFF",
+        "-DROCKE_BUILD_PYBIND=OFF",
+        f"-DPython3_EXECUTABLE={sys.executable}",
+        f"-Damd_comgr_DIR={package}",
+    ]
+    if selection == "provider":
+        command.append(f"-DHIPKERNELPROVIDER_ROCKE_COMGR_LIB={library}")
+    elif selection in ("environment", "relative-environment"):
+        env["ROCKE_COMGR_LIB"] = (
+            os.path.relpath(library)
+            if selection == "relative-environment"
+            else str(library)
+        )
+    configured = subprocess.run(command, env=env, capture_output=True, text=True)
+    assert configured.returncode == 0, configured.stdout + configured.stderr
+    assert not list(build.rglob("rocke_sdk_*.txt"))
+    inventory = json.loads(
+        subprocess.run(
+            ["ctest", "--test-dir", str(build), "--show-only=json-v1"],
+            env=env,
             check=True,
             capture_output=True,
             text=True,
+        ).stdout
+    )["tests"]
+    source_test = next(
+        test for test in inventory if test["name"] == "rocke_compiler_discovery_source"
+    )
+    for module in (
+        "test_compiler_detection_native.py",
+        "runtime/test_compiler_session.py",
+        "runtime/test_loaded_compilers_windows.py",
+        "runtime/test_sdk_comgr_discovery.py",
+    ):
+        assert (
+            sum(
+                Path(argument) == PLATFORM / "tests" / module
+                for argument in source_test["command"]
+            )
+            == 1
         )
-        info = json.loads(result.stdout)
-        assert info["native"] == info["python"]
-        assert info["native"]["llvm_version"] == [23, 0, 1]
-        assert info["native"]["source"] == "LLVMGetVersion"
-        assert info["native"]["comgr_path"] == str(library)
-        assert info["native"]["query_library_path"] == str(library)
-        expected = str(library) if variable == "ROCKE_COMGR_LIB" else library.name
-        assert info["native"]["requested_comgr"] == expected
-        results.append(info)
-    assert results[0] == results[1]
-
-
-def test_loaded_unqueryable_library_does_not_fall_through(native_detector, tmp_path):
-    library = build_library(tmp_path, "void amd_comgr_get_version(void){}\n")
-    info = run_probe(native_detector, library)
-    assert info["llvm_version"] is None
-    assert info["source"] == "unavailable"
-    assert info["requested_comgr"] == str(library)
-
-
-PREPROCESSOR = r"""
-#include <stddef.h>
-#include <stdint.h>
-#include <string.h>
-typedef struct { uint64_t value; } handle;
-static const char output[] = "# 1 \"version.cl\"\nROCKE_LLVM_VERSION 20 0 7\n";
-void amd_comgr_get_version(size_t*a,size_t*b){*a=3;*b=3;}
-int amd_comgr_create_data_set(handle*h){h->value=1;return 0;}
-int amd_comgr_destroy_data_set(handle h){return 0;}
-int amd_comgr_create_data(int kind,handle*h){h->value=2;return 0;}
-int amd_comgr_release_data(handle h){return 0;}
-int amd_comgr_set_data(handle h,size_t n,const char*p){return 0;}
-int amd_comgr_set_data_name(handle h,const char*p){return 0;}
-int amd_comgr_data_set_add(handle a,handle b){return 0;}
-int amd_comgr_create_action_info(handle*h){h->value=3;return 0;}
-int amd_comgr_destroy_action_info(handle h){return 0;}
-int amd_comgr_get_isa_name(size_t i,const char**p){*p="amdgcn-amd-amdhsa--gfx900";return 0;}
-int amd_comgr_action_info_set_isa_name(handle h,const char*p){return 0;}
-int amd_comgr_action_info_set_language(handle h,int language){return language==1?0:1;}
-int amd_comgr_do_action(int action,handle info,handle in,handle out){return action==0?0:1;}
-int amd_comgr_action_data_get_data(handle set,int kind,size_t i,handle*h){h->value=4;return 0;}
-int amd_comgr_get_data(handle h,size_t*n,char*p){if(p)memcpy(p,output,sizeof(output));*n=sizeof(output);return 0;}
-"""
-
-
-def test_preprocessing_fallback_and_provenance_agree(native_detector, tmp_path):
-    library = build_library(tmp_path, PREPROCESSOR)
-    info = run_probe(native_detector, library)
-    assert info["llvm_version"] == [20, 0, 7]
-    assert info["source"] == "COMGR preprocessing"
-    assert info["query_library_path"] == info["comgr_path"] == str(library)
-
-
-@pytest.mark.parametrize("queryable", [True, False])
-def test_native_recovers_then_retains_loaded_candidate(
-    native_detector, tmp_path, queryable
-):
-    text = "unsigned fixture_queries = 0;\n"
-    if queryable:
-        text += (
-            "void LLVMGetVersion(unsigned*a,unsigned*b,unsigned*c)"
-            "{++fixture_queries;*a=23;*b=0;*c=0;}\n"
-        )
-    library = build_library(tmp_path, text)
-    script = r"""
-import ctypes, os, sys
-class Info(ctypes.Structure):
-    _fields_ = [(n, ctypes.c_uint) for n in ('major', 'minor', 'patch')] + [
-        (n, ctypes.c_char_p) for n in
-        ('source', 'requested_comgr', 'comgr_path', 'query_library_path')]
-native = ctypes.CDLL(sys.argv[1])
-native.rocke_loaded_compiler_info.restype = ctypes.POINTER(Info)
-native.fixture_block_loads.argtypes = [ctypes.c_int]
-native.fixture_load_calls.restype = ctypes.c_uint
-native.fixture_block_loads(1)
-assert not native.rocke_loaded_compiler_info()
-failed_calls = native.fixture_load_calls()
-assert failed_calls > 0
-native.fixture_block_loads(0)
-first = native.rocke_loaded_compiler_info()
-assert first
-assert first.contents.major == (23 if sys.argv[3] == 'True' else 0)
-assert first.contents.requested_comgr.decode() == sys.argv[2]
-successful_calls = native.fixture_load_calls()
-assert successful_calls > failed_calls
-os.environ['ROCKE_COMGR_LIB'] = 'replacement-that-must-not-be-loaded.so'
-for _ in range(3):
-    current = native.rocke_loaded_compiler_info()
-    assert ctypes.addressof(current.contents) == ctypes.addressof(first.contents)
-assert native.fixture_load_calls() == successful_calls
-fixture = ctypes.CDLL(sys.argv[2])
-assert ctypes.c_uint.in_dll(fixture, 'fixture_queries').value == (
-    1 if sys.argv[3] == 'True' else 0)
-"""
-    env = dict(os.environ, ROCKE_COMGR_LIB=str(library))
-    subprocess.run(
+    arch_test = next(
+        test
+        for test in inventory
+        if test["name"] == "rocke_arch_domain_reproducibility"
+    )
+    assert "--default-comgr" in arch_test["command"]
+    assert "--needs-llvm-flavor" not in arch_test["command"]
+    assert os.path.samefile(
+        arch_test["command"][arch_test["command"].index("--default-comgr") + 1], library
+    )
+    compiled = subprocess.run(
         [
-            sys.executable,
-            "-c",
-            script,
-            str(native_detector),
-            str(library),
-            str(queryable),
+            "cmake",
+            "--build",
+            str(build),
+            "--config",
+            "Release",
+            "--target",
+            "rocke_ir_serialize_roundtrip",
+            "-j",
+            "2",
         ],
         env=env,
+        capture_output=True,
+        text=True,
+    )
+    assert compiled.returncode == 0, compiled.stdout + compiled.stderr
+    env.pop("ROCKE_COMGR_LIB", None)
+    ctest = [
+        "ctest",
+        "--build-config",
+        "Release",
+        "--test-dir",
+        str(build),
+        "-R",
+        "^rocke_ir_serialize_roundtrip$",
+        "--output-on-failure",
+        "--no-tests=error",
+    ]
+    result = subprocess.run(ctest, env=env, capture_output=True, text=True)
+    assert result.returncode == 0, result.stdout + result.stderr
+
+    # A deliberately different tool profile reaches the generator's existing
+    # UNVALIDATED exit after owner resolution, without running its full sweep.
+    tools = tmp_path / "tools"
+    tools.mkdir()
+    clang = tools / ("clang.exe" if os.name == "nt" else "clang")
+    compiler = os.environ.get("CXX") or ("clang" if os.name == "nt" else "cc")
+    subprocess.run(
+        [compiler, "-x", "c", "-", "-o", str(clang)],
+        input='#include <stdio.h>\nint main(void){puts("AMD clang version 20.0.0");return 0;}\n',
         check=True,
         capture_output=True,
         text=True,
     )
-
-
-REJECTION_PROBE = r"""
-import os
-from rocke.core.ir import IRBuilder
-from rocke.core.ir_serialize import serialize
-from rocke.core import lower_llvm
-from rocke.runtime import comgr
-import rocke_engine
-
-kernel = IRBuilder("compiler_requirement").kernel
-serialized = serialize(kernel)
-for lower in (
-    lambda: lower_llvm.lower_kernel_to_llvm(kernel, arch="gfx950"),
-    lambda: rocke_engine.lower_serialized_ir(serialized, arch="gfx950"),
-):
-    try:
-        lower()
-    except RuntimeError as error:
-        assert "Cannot determine LLVM flavor" in str(error), str(error)
-    else:
-        raise AssertionError("AUTO emitted IR without compiler evidence")
-
-for flavor in lower_llvm.LLVM_FLAVORS:
-    py = lower_llvm.lower_kernel_to_llvm(kernel, arch="gfx950", llvm_flavor=flavor)
-    native = rocke_engine.lower_serialized_ir(serialized, arch="gfx950", flavor=flavor)
-    assert py == native
-
-os.environ["ROCKE_LLVM_FLAVOR"] = "llvm20"
-assert lower_llvm.lower_kernel_to_llvm(kernel, arch="gfx950") == rocke_engine.lower_serialized_ir(
-    serialized, arch="gfx950")
-try:
-    comgr.build_hsaco_from_llvm_ir(py)
-except comgr.ComgrError as error:
-    assert "Cannot determine LLVM flavor" in str(error), str(error)
-else:
-    raise AssertionError("explicit emission bypassed compiler evidence requirement")
-"""
-
-
-def test_unqueryable_compiler_rejects_auto_but_allows_explicit_emission(tmp_path):
-    pytest.importorskip("rocke_engine")
-    if sys.platform != "linux" or not shutil.which("cc"):
-        pytest.skip("ELF loader fixture requires Linux and a C compiler")
-    library = build_library(tmp_path, "void amd_comgr_get_version(void){}\n")
-    env = dict(os.environ, ROCKE_COMGR_LIB=str(library), ROCKE_BACKEND="python")
-    env.pop("ROCKE_LLVM_FLAVOR", None)
-    env["PYTHONPATH"] = os.pathsep.join(sys.path)
+    shutil.copy2(clang, tools / ("opt.exe" if os.name == "nt" else "opt"))
+    env["ROCKE_LLVM_BIN"] = str(tools)
     result = subprocess.run(
-        rocke_python_command("-c", REJECTION_PROBE),
-        env=rocke_subprocess_env(env),
-        capture_output=True,
-        text=True,
+        arch_test["command"], cwd=PLATFORM, env=env, capture_output=True, text=True
     )
-    assert result.returncode == 0, result.stderr
+    assert result.returncode == 77, result.stdout + result.stderr
+    assert "flavor : llvm23" in result.stdout
+    assert "clang reports llvm20 but rocke resolved llvm23" in result.stdout
+
+    override = build_library(
+        tmp_path / "caller",
+        "#include <stddef.h>\nvoid amd_comgr_get_version(size_t*a,size_t*b){*a=3;*b=4;}\nint amd_comgr_do_action(int a,void*b,void*c,void*d){return 0;}\nvoid LLVMGetVersion(unsigned*a,unsigned*b,unsigned*c){*a=24;*b=0;*c=0;}\n",
+    )
+    env["ROCKE_COMGR_LIB"] = str(override)
+    result = subprocess.run(
+        arch_test["command"], cwd=PLATFORM, env=env, capture_output=True, text=True
+    )
+    assert result.returncode == 77, result.stdout + result.stderr
+    assert "flavor : llvm24" in result.stdout
+
+    env["ROCKE_COMGR_LIB"] = str(tmp_path / "missing.so")
+    result = subprocess.run(ctest, env=env, capture_output=True, text=True)
+    assert result.returncode != 0
+    result = subprocess.run(
+        arch_test["command"], cwd=PLATFORM, env=env, capture_output=True, text=True
+    )
+    assert result.returncode not in (0, 77)
+    assert "missing.so" in result.stderr

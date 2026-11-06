@@ -519,6 +519,17 @@ def _bind(lib: ctypes.CDLL) -> None:
         fn = getattr(lib, name)
         fn.argtypes = argtypes
         fn.restype = c_int
+        if name.startswith("rocke_online_"):
+            try:
+                explicit = getattr(lib, name + "_ex")
+            except AttributeError as error:
+                raise RuntimeError(
+                    "portable engine lacks owner-flavor exports; rebuild or reinstall matching native artifacts"
+                ) from error
+            explicit.argtypes = argtypes[:-5] + [c_int] + argtypes[-5:]
+            explicit.restype = c_int
+    lib.rocke_llvm_flavor_from_name.argtypes = [c_char_p]
+    lib.rocke_llvm_flavor_from_name.restype = c_int
     lib.rocke_online_free.argtypes = [c_char_p]
     lib.rocke_online_free.restype = None
     lib.rocke_bundle_contains.argtypes = [
@@ -744,12 +755,27 @@ def _take_ll(lib, out_ll: c_char_p) -> str:
     return text
 
 
+def _owner_flavor(lib, flavor):
+    from rocke.core.llvm_profile import LLVM_FLAVORS
+
+    if flavor is None or flavor == "auto":
+        from rocke.core.lower_llvm import _resolve_llvm_flavor
+
+        flavor = _resolve_llvm_flavor()
+    if flavor not in LLVM_FLAVORS:
+        raise ValueError(
+            f"invalid LLVM flavor {flavor!r}; expected one of {LLVM_FLAVORS}"
+        )
+    return lib.rocke_llvm_flavor_from_name(flavor.encode())
+
+
 def recipe_cbor_to_llvm(
     cbor: bytes,
     *,
     arch: str = "gfx950",
     ints: Optional[Dict[str, int]] = None,
     strs: Optional[Dict[str, str]] = None,
+    llvm_flavor: Optional[str] = None,
 ) -> Tuple[str, Dict[str, float]]:
     """Expand+lower a CBOR recipe in C. Returns (.ll, {build_ms, lower_ms})."""
     lib = load()
@@ -758,7 +784,7 @@ def recipe_cbor_to_llvm(
     out_ll = c_char_p()
     bms, lms = c_double(0), c_double(0)
     err = ctypes.create_string_buffer(_ERR_CAP)
-    st = lib.rocke_online_recipe_cbor_to_llvm(
+    st = lib.rocke_online_recipe_cbor_to_llvm_ex(
         buf,
         len(cbor),
         ia,
@@ -766,6 +792,7 @@ def recipe_cbor_to_llvm(
         sa,
         ns,
         arch.encode(),
+        _owner_flavor(lib, llvm_flavor),
         byref(out_ll),
         byref(bms),
         byref(lms),
@@ -784,6 +811,7 @@ def bundle_cbor_to_llvm(
     arch: str = "gfx950",
     ints: Optional[Dict[str, int]] = None,
     strs: Optional[Dict[str, str]] = None,
+    llvm_flavor: Optional[str] = None,
 ) -> Tuple[str, Dict[str, float]]:
     lib = load()
     buf = (c_ubyte * len(cbor)).from_buffer_copy(cbor)
@@ -791,7 +819,7 @@ def bundle_cbor_to_llvm(
     out_ll = c_char_p()
     bms, lms = c_double(0), c_double(0)
     err = ctypes.create_string_buffer(_ERR_CAP)
-    st = lib.rocke_online_bundle_cbor_to_llvm(
+    st = lib.rocke_online_bundle_cbor_to_llvm_ex(
         buf,
         len(cbor),
         key.encode(),
@@ -800,6 +828,7 @@ def bundle_cbor_to_llvm(
         ni,
         sa,
         ns,
+        _owner_flavor(lib, llvm_flavor),
         byref(out_ll),
         byref(bms),
         byref(lms),
@@ -988,14 +1017,17 @@ def bundle_contains(cbor: bytes, key: str, *, arch: Optional[str] = "gfx950") ->
     )
 
 
-def ir_json_to_llvm(text: str, *, arch: str = "gfx950") -> Tuple[str, Dict[str, float]]:
+def ir_json_to_llvm(
+    text: str, *, arch: str = "gfx950", llvm_flavor: Optional[str] = None
+) -> Tuple[str, Dict[str, float]]:
     lib = load()
     out_ll = c_char_p()
     bms, lms = c_double(0), c_double(0)
     err = ctypes.create_string_buffer(_ERR_CAP)
-    st = lib.rocke_online_ir_json_to_llvm(
+    st = lib.rocke_online_ir_json_to_llvm_ex(
         text.encode(),
         arch.encode(),
+        _owner_flavor(lib, llvm_flavor),
         byref(out_ll),
         byref(bms),
         byref(lms),

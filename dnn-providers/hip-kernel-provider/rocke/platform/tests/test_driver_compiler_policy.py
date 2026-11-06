@@ -57,7 +57,7 @@ def test_auto_selection_requires_evidence_and_preserves_override_precedence(
             (major, 0, 0) if major else None, "fixture", None, None, None
         )
     )
-    monkeypatch.setattr(comgr, "loaded_compiler_info", lambda: info)
+    monkeypatch.setattr(comgr, "_loaded_compiler_info", lambda *, required: info)
     if override is None:
         monkeypatch.delenv("ROCKE_LLVM_FLAVOR", raising=False)
     else:
@@ -80,7 +80,7 @@ def test_auto_selection_requires_evidence_and_preserves_override_precedence(
 
 def test_explicit_driver_flavor_does_not_query(monkeypatch, hsaco_driver):
     query = Mock(side_effect=AssertionError("explicit flavor queried compiler"))
-    monkeypatch.setattr(comgr, "loaded_compiler_info", query)
+    monkeypatch.setattr(comgr, "_loaded_compiler_info", query)
     assert gpu_replay._resolve_flavor("llvm20") == "llvm20"
     assert hsaco_driver("llvm20") == "llvm20"
     query.assert_not_called()
@@ -89,7 +89,9 @@ def test_explicit_driver_flavor_does_not_query(monkeypatch, hsaco_driver):
 def test_query_errors_propagate_instead_of_selecting_a_default(monkeypatch):
     monkeypatch.delenv("ROCKE_LLVM_FLAVOR", raising=False)
     monkeypatch.setattr(
-        comgr, "loaded_compiler_info", Mock(side_effect=comgr.ComgrError("unavailable"))
+        comgr,
+        "_loaded_compiler_info",
+        Mock(side_effect=comgr.ComgrError("unavailable")),
     )
     for select in (
         lower_llvm._resolve_llvm_flavor,
@@ -100,6 +102,18 @@ def test_query_errors_propagate_instead_of_selecting_a_default(monkeypatch):
     ):
         with pytest.raises(comgr.ComgrError, match="unavailable"):
             select()
+
+
+def test_required_driver_preserves_loader_diagnostics(monkeypatch):
+    failure = comgr.ComgrError("selected compiler.so: missing dependency")
+    load = Mock(side_effect=failure)
+    monkeypatch.setattr(comgr, "_resolve_lib", load)
+    assert comgr.loaded_compiler_info() is None
+    with pytest.raises(comgr.ComgrError, match="missing dependency") as error:
+        parity_matrix._auto_flavor()
+    assert "compiler.so" in str(error.value)
+    assert error.value.__cause__ is failure
+    assert load.call_count == 2
 
 
 def test_legacy_package_metadata_retains_system_fallback(monkeypatch, tmp_path):

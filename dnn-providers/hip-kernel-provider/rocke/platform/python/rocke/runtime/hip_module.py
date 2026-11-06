@@ -20,13 +20,15 @@ We expose only what the GEMM kernel needs:
 from __future__ import annotations
 
 import ctypes
+import os
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from ..core.arch import base_arch_from_target_id
 from ._ctypes_bind import _LazyFn
 from ._hip_device_properties import HipDevicePropR0600
-from .runtime_coexistence import _IS_WINDOWS, _add_dll_dir, _candidate_lib_paths
+from . import _session
+from .runtime_coexistence import _add_dll_dir, _candidate_lib_paths
 
 HIP_LAUNCH_PARAM_BUFFER_POINTER = ctypes.c_void_p(1)
 HIP_LAUNCH_PARAM_BUFFER_SIZE = ctypes.c_void_p(2)
@@ -88,30 +90,114 @@ class _HipLaunchConfig(ctypes.Structure):
 
 
 def _load_lib() -> ctypes.CDLL:
-    err = None
-    for p in _candidate_lib_paths("amdhip64", "ROCKE_HIP_LIB", ["7"]):
+    from pathlib import Path
+    from . import _loaded_libraries
+    from ._compiler_query import ComgrError, file_signature
+
+    owner = _session.session
+    values = owner.environment
+    paths = _candidate_lib_paths("amdhip64", "ROCKE_HIP_LIB", ["7"], values)
+    explicit = (values if values is not None else os.environ).get("ROCKE_HIP_LIB")
+    selected = (
+        paths[0]
+        if explicit and paths
+        else next((p for p in paths if os.path.isfile(p)), paths[-1] if paths else None)
+    )
+    if not selected:
+        raise HipError("no HIP runtime candidate; provision SDK HIP or ROCKE_HIP_LIB")
+    if os.path.isfile(selected):
+        selected = str(Path(selected).resolve())
+    mapped = []
+    retained = None
+    compilers = []
+    accepted = False
+    try:
+        mapped = _loaded_libraries.loaded_runtimes()
+        if len(mapped) > 1:
+            raise HipError(
+                f"multiple mapped HIP providers are ambiguous: {[item.path for item in mapped]!r}"
+            )
+        matches = []
+        for item in mapped:
+            try:
+                if os.path.samefile(selected, item.path):
+                    matches.append(item)
+            except OSError:
+                pass
+        if matches:
+            retained = matches[0]
+        elif mapped:
+            if explicit or len(mapped) != 1:
+                raise HipError(
+                    f"HIP already mapped at {[item.path for item in mapped]!r}; cannot introduce {selected!r}"
+                )
+            retained = mapped[
+                0
+            ]  # Existing runtime ownership wins over an automatic candidate.
+        if retained is not None:
+            selected = retained.path
+        compiler = owner.compiler
+        requested = (
+            getattr(compiler, "_rocke_actual_path", getattr(compiler, "_name", None))
+            if compiler is not None
+            else (values if values is not None else os.environ).get("ROCKE_COMGR_LIB")
+        )
+        if requested:
+            signature = (
+                getattr(compiler, "_rocke_signature", None)
+                if compiler is not None
+                else None
+            )
+            if isinstance(signature, tuple) and file_signature(requested) != signature:
+                raise HipError(
+                    "admitted compiler identity changed before HIP acquisition"
+                )
+            _session.check_pair(selected, requested)
+        if retained is not None:
+            accepted = True
+            return retained.library
+        if compiler is None:
+            # An external consumer may already own COMGR even when this session
+            # has never acquired it. Check before HIP can load its dependencies;
+            # do not bootstrap a compiler for precompiled code-object launches.
+            compilers = _loaded_libraries.loaded_compilers()
+            if len(compilers) > 1:
+                raise HipError("multiple mapped compiler providers are ambiguous")
+            if compilers:
+                existing = compilers[0]
+                try:
+                    unchanged = file_signature(existing.path) == existing.signature
+                except OSError as error:
+                    raise HipError(
+                        f"mapped compiler identity unavailable: {error}"
+                    ) from error
+                if not unchanged:
+                    raise HipError(
+                        "mapped compiler identity changed before HIP acquisition"
+                    )
+                _session.check_pair(selected, existing.path)
+        directory = _add_dll_dir(selected)
         try:
-            _add_dll_dir(p)
-            return ctypes.CDLL(p)
-        except OSError as e:
-            err = e
-    name = "amdhip64.dll" if _IS_WINDOWS else "libamdhip64.so"
-    raise HipError(f"cannot load {name} ({err!r})")
-
-
-# Holds the resolved ``libamdhip64`` handle. Stays ``None`` until the
-# first HIP call actually goes through the runtime; this lets the user
-# import rocke before importing torch (or vice versa) and still end
-# up sharing torch's bundled HIP runtime instead of double-loading the
-# system one.
-_hip: Optional[ctypes.CDLL] = None
+            library = ctypes.CDLL(selected)
+            if directory is not None:
+                owner.dll_directories.append(directory)
+            return library
+        except OSError as error:
+            if directory is not None:
+                directory.close()
+            raise HipError(f"cannot load HIP {selected!r}: {error}") from error
+    except ComgrError as error:
+        raise HipError(str(error)) from error
+    finally:
+        for item in compilers:
+            _loaded_libraries.release(item)
+        for item in mapped:
+            if not accepted or item is not retained:
+                _loaded_libraries.release(item)
 
 
 def _resolve_hip() -> ctypes.CDLL:
-    global _hip
-    if _hip is None:
-        _hip = _load_lib()
-    return _hip
+    return _session.session.resolve("hip", _load_lib)
 
 
 def _b(name: str, *argtypes, restype=ctypes.c_int) -> _LazyFn:

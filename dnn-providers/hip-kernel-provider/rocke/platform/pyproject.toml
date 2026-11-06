@@ -24,6 +24,13 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# COMGR is supplied by the shared SDK, never copied into the rocke wheel.
+# Use an AMD wheel index; PyPI's placeholder does not provide the compiler.
+# Earlier SDK wheels exist, but can predate rocKE's LLVM 20 emission baseline.
+# See dsl_docs/runtime/comgr_and_hipmodule.md for platform/release details.
+sdk-core = [
+    "rocm-sdk-core>=7.9.0rc1; sys_platform == 'linux' or sys_platform == 'win32'",
+]
 # torch must be the ROCm build for your system (install from the ROCm wheel
 # index, not here); see requirements.txt / BUILD.md.
 dev = [

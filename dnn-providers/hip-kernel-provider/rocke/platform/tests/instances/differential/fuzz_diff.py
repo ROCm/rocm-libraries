@@ -469,6 +469,17 @@ def fuzz_family(cli, name, count, base_seed, lower, serialize, verbose):
 
 
 def main():
+    previous_flavor = os.environ.get("ROCKE_LLVM_FLAVOR")
+    try:
+        return _main()
+    finally:
+        if previous_flavor is None:
+            os.environ.pop("ROCKE_LLVM_FLAVOR", None)
+        else:
+            os.environ["ROCKE_LLVM_FLAVOR"] = previous_flavor
+
+
+def _main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument(
         "--seed",
@@ -521,6 +532,9 @@ def main():
         if not fams:
             sys.exit(f"--only matched no families (have: {', '.join(FAMILIES)})")
 
+    from rocke.core.lower_llvm import _resolve_llvm_flavor
+
+    os.environ["ROCKE_LLVM_FLAVOR"] = _resolve_llvm_flavor()
     print(f"random-spec differential fuzz  seed={args.seed}  count/family={args.count}")
     print("oracle: Python build IR -> serialize -> C-lower (CLI) vs Python-lower")
     print(f"cli={cli}  families={fams}")

@@ -141,6 +141,24 @@ def test_wrong_target_rejection(arch):
         engine.lower_serialized_ir(serialize(k), arch, "llvm23")
 
 
+@pytest.mark.parametrize("major,flavor", [(23, "llvm23"), (24, "llvm24")])
+def test_native_auto_consumes_owner_flavor(monkeypatch, major, flavor):
+    from rocke.runtime import comgr
+
+    engine = pytest.importorskip("rocke_engine")
+    monkeypatch.delenv("ROCKE_LLVM_FLAVOR", raising=False)
+    info = comgr.CompilerInfo(
+        (major, 0, 0), "owner fixture", None, "selected", "selected"
+    )
+    query = lambda *, required: info
+    monkeypatch.setattr(comgr, "_loaded_compiler_info", query)
+    spec = asdict(BlockScaledGemmSpec("owner_flavor", 32, 32, 64))
+    text = engine.gfx950_block_scaled_gemm_serialize_ir(spec, "gfx950")
+    expected = engine.lower_serialized_ir(text, "gfx950", flavor)
+    assert engine.gfx950_block_scaled_gemm_lower_llvm(spec, "gfx950") == expected
+    assert "ROCKE_LLVM_FLAVOR" not in os.environ
+
+
 def test_native_lowering_preserves_diagnostic(tmp_path):
     pytest.importorskip("rocke_engine")
     compiler = shutil.which("cc")

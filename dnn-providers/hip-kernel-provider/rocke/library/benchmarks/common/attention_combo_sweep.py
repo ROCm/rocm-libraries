@@ -631,9 +631,6 @@ def init_torch_first() -> None:
             "ROCm-compatible torch from the container image or wheel index; "
             "rocke-library does not depend on it at install time."
         ) from exc
-    from rocke.runtime.comgr import prefer_bundled_lib
-
-    prefer_bundled_lib()
     if not torch.cuda.is_available():
         raise SystemExit(
             "no HIP device visible to torch; check the allocation and "

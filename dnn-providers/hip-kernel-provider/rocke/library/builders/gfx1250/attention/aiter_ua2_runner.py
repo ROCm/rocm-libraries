@@ -392,9 +392,6 @@ def gpu_run(rows: List[Dict], *, warmup: int, attempts: int) -> int:
 
 
 def main() -> int:
-    from rocke.runtime.comgr import prefer_bundled_lib
-
-    prefer_bundled_lib()  # pin newest comgr/LLVM flavor before lowering (gfx1250 needs ROCm>=7.2)
     ap = argparse.ArgumentParser()
     ap.add_argument("--shapes", type=Path, default=_DEFAULT_SHAPES)
     ap.add_argument("--limit", type=int, default=None)

@@ -76,6 +76,19 @@ def _sha(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def _emitter_env() -> dict[str, str]:
+    if str(PYROOT) not in sys.path:
+        sys.path.insert(0, str(PYROOT))
+    from rocke.core.lower_llvm import _resolve_llvm_flavor
+
+    env = dict(os.environ)
+    env["ROCKE_LLVM_FLAVOR"] = _resolve_llvm_flavor()
+    env["PYTHONPATH"] = str(PYROOT) + (
+        os.pathsep + env["PYTHONPATH"] if env.get("PYTHONPATH") else ""
+    )
+    return env
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="micro-kernel C-vs-Python .ll parity")
     ap.add_argument("--archive", default="")
@@ -112,21 +125,33 @@ def main() -> int:
         print("C emitter compile FAILED:\n" + cc.stderr, file=sys.stderr)
         return 1
 
-    env = dict(os.environ)
-    env["PYTHONPATH"] = str(PYROOT) + (
-        os.pathsep + env["PYTHONPATH"] if env.get("PYTHONPATH") else ""
-    )
+    env = _emitter_env()
 
     rc = 0
     for k in KERNELS:
         c_ll = out / f"c_{k}.ll"
         py_ll = out / f"py_{k}.ll"
-        c_ll.write_bytes(subprocess.run([str(binexe), k], capture_output=True).stdout)
-        py_ll.write_bytes(
-            subprocess.run(
-                [sys.executable, str(HERE / "emit.py"), k], capture_output=True, env=env
-            ).stdout
+        native = subprocess.run([str(binexe), k], capture_output=True, env=env)
+        reference = subprocess.run(
+            [sys.executable, str(HERE / "emit.py"), k], capture_output=True, env=env
         )
+        if (
+            native.returncode
+            or reference.returncode
+            or not native.stdout
+            or not reference.stdout
+        ):
+            print(
+                f"FAIL  {k}  emitter failure: C={native.returncode} PY={reference.returncode}",
+                file=sys.stderr,
+            )
+            for result in (native, reference):
+                if result.stderr:
+                    print(result.stderr.decode("utf-8", "replace"), file=sys.stderr)
+            rc = 1
+            continue
+        c_ll.write_bytes(native.stdout)
+        py_ll.write_bytes(reference.stdout)
         cs, ps = _sha(c_ll), _sha(py_ll)
         if cs == ps:
             print(f"PASS  {k}  {cs}")

@@ -402,9 +402,6 @@ def verify_moe_smoothquant(rt) -> tuple:
 
 
 def main() -> int:
-    from rocke.runtime.comgr import prefer_bundled_lib
-
-    prefer_bundled_lib()  # pin newest comgr/LLVM flavor before lowering (gfx1250 needs ROCm>=7.2)
     rt = Runtime()
     checks = [
         verify_add_rmsnorm2d_bf16,

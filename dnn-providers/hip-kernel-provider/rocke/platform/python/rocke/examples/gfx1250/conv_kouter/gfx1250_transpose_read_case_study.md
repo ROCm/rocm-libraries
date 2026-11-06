@@ -167,24 +167,19 @@ WMMA wgrad requires `split_k=1` and the direct-store epilogue, so do not pass
 
 ## Environment note
 
-gfx1250 needs ROCm >= 7.2. If the venv's torch bundles an older ROCm than the
-system install, comgr resolution matters: a stale bundled comgr does not know
-the target ISA and every compile dies with `set_isa: INVALID_ARGUMENT`, a long
-way from its cause. Check before trusting a failure:
+Check the compiler actually selected by the process before interpreting a
+compilation failure. COMGR uses a nonempty `ROCKE_COMGR_LIB` override or the
+installed shared SDK; torch and system release metadata do not change selection.
 
 ```bash
 python3 -c "
-import torch
-import rocke.runtime.comgr as c
-from rocke.runtime import runtime_coexistence as rc
-print('torch rocm    :', rc._torch_rocm_version(rc._torch_bundled_lib('amd_comgr')))
-print('newest system :', rc._newest_rocm_root_version())
-print('resolved comgr:', c.resolved_lib_path())
-print('comgr vintage :', c.resolved_lib_rocm_version())
+from rocke.runtime.comgr import loaded_compiler_info
+print(loaded_compiler_info())
 "
 ```
 
-You should not need to set `ROCKE_COMGR_LIB`. If you do, that is a finding.
+If the compiler is outside the interpreter's SDK installation, provide its full
+path with `ROCKE_COMGR_LIB`; a missing or unloadable override fails.
 
 ## Still open
 

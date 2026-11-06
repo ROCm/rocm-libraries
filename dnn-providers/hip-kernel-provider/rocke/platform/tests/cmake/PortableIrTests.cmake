@@ -18,7 +18,7 @@ foreach(_pir_test dom_decoders recipe_vm_replay)
     if(UNIX)
       target_link_libraries(${_pir_target} PRIVATE m)
     endif()
-    add_test(NAME ${_pir_target} COMMAND ${_pir_target})
+    add_test(NAME ${_pir_target} COMMAND ${_ROCKE_TEST_LAUNCH} $<TARGET_FILE:${_pir_target}>)
     set_tests_properties(${_pir_target} PROPERTIES LABELS "ckc;unit;host")
     rocke_cxx_test_installed_name(_rocke_installed_name ${_pir_target})
     set_target_properties(${_pir_target}

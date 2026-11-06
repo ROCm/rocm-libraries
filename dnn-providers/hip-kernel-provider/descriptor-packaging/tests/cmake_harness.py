@@ -52,7 +52,7 @@ class SuppliedPython:
             key: value
             for key, value in os.environ.items()
             if not key.startswith(("PYTHON", "PIP_", "CMAKE_", "ROCKE_"))
-            and key not in ("VIRTUAL_ENV", "CONDA_PREFIX")
+            and key not in ("VIRTUAL_ENV", "CONDA_PREFIX", "ROCM_SDK_PATH")
         }
         self.env.update(
             {

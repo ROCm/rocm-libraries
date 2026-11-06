@@ -29,6 +29,7 @@
 # the lowering target varies.
 
 import argparse
+from functools import partial
 import os
 import subprocess
 import sys
@@ -80,12 +81,10 @@ def arch_candidates(family):
     return order
 
 
-def run_py(family, idx, mode):
-    env = dict(os.environ)
-    env["PYTHONPATH"] = str(PYROOT) + (
-        os.pathsep + env["PYTHONPATH"] if env.get("PYTHONPATH") else ""
-    )
-    args = [sys.executable, str(PARITY / f"{family}_emit.py"), str(idx)]
+def run_py(family, idx, mode, src_dir=None):
+    source = PARITY if src_dir is None else Path(src_dir)
+    env = run_diff._python_emitter_env(source)
+    args = [sys.executable, str(source / f"{family}_emit.py"), str(idx)]
     if mode != "ll":
         args.append(mode)
     try:
@@ -210,11 +209,12 @@ def lower_artifact(cli, family, ir_text, ll_ref):
     return primary
 
 
-def run_family(cli, family):
+def run_family(cli, family, src_dir=None):
+    emit = run_py if src_dir is None else partial(run_py, src_dir=src_dir)
     rows = []
     for idx in range(run_diff.config_limit(family)):
-        pr_ir, ir_text, ir_err = run_py(family, idx, "ir")
-        pr_ll, ll_ref, ll_err = run_py(family, idx, "ll")
+        pr_ir, ir_text, ir_err = emit(family, idx, "ir")
+        pr_ll, ll_ref, ll_err = emit(family, idx, "ll")
 
         # End-of-range: Python rejects with "unknown config" on both modes.
         if is_end(pr_ir, ir_text, ir_err) and is_end(pr_ll, ll_ref, ll_err):
@@ -310,8 +310,8 @@ def _run_pass(cli, fams, arch_label):
 
     results = []
     tot_id = tot_dr = tot_er = tot_sk = tot_na = 0
-    for family in fams:
-        rows = run_family(cli, family)
+    for family, source in fams:
+        rows = run_family(cli, family, source)
         status, n_id, n_dr, n_er, n_sk, n_na = family_status(rows)
         results.append((family, status, rows))
         tot_id += n_id
@@ -362,6 +362,17 @@ def _run_pass(cli, fams, arch_label):
 
 
 def main():
+    previous_flavor = os.environ.get("ROCKE_LLVM_FLAVOR")
+    try:
+        return _main()
+    finally:
+        if previous_flavor is None:
+            os.environ.pop("ROCKE_LLVM_FLAVOR", None)
+        else:
+            os.environ["ROCKE_LLVM_FLAVOR"] = previous_flavor
+
+
+def _main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument(
         "--cli",
@@ -387,13 +398,14 @@ def main():
     fams = run_diff.find_families()
     if args.only:
         subs = [s for s in args.only.split(",") if s]
-        fams = [f for f in fams if any(s in f for s in subs)]
+        fams = [(name, source) for name, source in fams if any(s in name for s in subs)]
 
     # Each family is built+lowered at its own (spec, arch); byte-identity is a
     # per-(spec, arch) property and arch-incompatible configs reject on both
     # sides (counted SKIP). Arch coverage comes from the configs the emitters
     # enumerate (the gfx-prefixed families + any gfx942/gfx1151 configs), not
     # from a global arch override.
+    run_diff.pin_llvm_flavor("")
     return _run_pass(cli, fams, "per-family")
 
 

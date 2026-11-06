@@ -24,8 +24,6 @@
 #include "rocke/lower_llvm_internal.h"
 #include "rocke/tf32_internal.h"
 
-#include "compiler_version.h"
-
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -42,21 +40,18 @@
 namespace ckc
 {
 
-/* Resolve from the compiler loaded by COMGR. Explicit flavors keep offline
- * emission independent of a runtime installation. If no compiler can be
- * queried, reject AUTO; offline callers must supply an explicit flavor.
- * Python-driven C++ lowering passes its resolved flavor explicitly. */
+/* The compiler owner supplies the queried flavor. Native IR emission never
+ * acquires a compiler or infers an SDK installation; an explicit environment
+ * flavor supports offline callers. Python-driven lowering passes its flavor. */
 static rocke_llvm_flavor_t ll_resolve_flavor(void)
 {
     rocke_llvm_flavor_t explicit_flavor = rocke_ll_explicit_flavor(getenv("ROCKE_LLVM_FLAVOR"));
     if(explicit_flavor != ROCKE_LLVM_FLAVOR_AUTO)
         return explicit_flavor;
-    const ckc::CompilerInfo* info = ckc::candidate_compiler_info();
-    if(!info || !info->llvm_major)
-        throw ckc::ValueError(
-            "Cannot determine LLVM flavor: COMGR could not be loaded or queried. "
-            "Select a queryable COMGR library or an explicit LLVM flavor for offline IR emission.");
-    return rocke_ll_flavor_for_llvm_major(info->llvm_major);
+    throw ckc::ValueError(
+        "Cannot determine LLVM flavor: native IR lowering does not select or load a compiler. "
+        "Pass the compiler owner's queried LLVM flavor or set ROCKE_LLVM_FLAVOR for offline "
+        "emission.");
 }
 
 /* ====================================================================== */
