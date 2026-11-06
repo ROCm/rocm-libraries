@@ -965,6 +965,11 @@ manually dispatched runs.
 
 **Runtime configuration.** The lane sets a large ASAN quarantine, a LeakSanitizer suppression file
 at `test/therock/lsan.supp` in the repository root, an explicit symbolizer path, and `HSA_XNACK=0`.
+Both libraries use `OMP_NUM_THREADS` and `OPENBLAS_NUM_THREADS` derived from the
+runner's `KUBE_CPU_REQUEST`: the integer part, with a minimum of one. If the allocation
+is absent or invalid, the workflow preserves inherited thread settings. Host-ASAN
+hipBLASLt preserves this budget; full device ASAN retains its one-thread OpenMP override.
+The hipSPARSELt quick selection includes the 128x128 strided-batched smoke cases under ASAN.
 Host-only AddressSanitizer does not require GPU page-fault retry (XNACK), so this workflow disables
 it. The shared test launcher preserves the caller's XNACK setting for host-ASAN artifacts and sets
 `HSA_XNACK=1` for full-ASAN artifacts. The suppression file is the thing to look at first when a
