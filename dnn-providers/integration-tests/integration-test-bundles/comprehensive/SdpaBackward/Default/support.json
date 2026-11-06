@@ -108,6 +108,20 @@
           ]
         }
       }
+    ],
+    "hipkernel:AttentionGeneralBwd": [
+      {
+        "cases": [
+          "h30_b1h1k1v1_64x4096_d128_fp16_none_tols",
+          "l34_b2h3k3v3_1x4096_d128_bfp16_none_dom256to256_tolp",
+          "m31pr_b1h2k2v2_64x1500_d64_bfp16_none_bshd_tols"
+        ],
+        "support": {
+          "gfx942": [
+            "linux"
+          ]
+        }
+      }
     ]
   },
   "version": 1
