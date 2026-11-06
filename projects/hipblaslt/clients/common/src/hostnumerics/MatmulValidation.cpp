@@ -145,9 +145,9 @@ namespace hipblaslt::hostnumerics
                        *offset));
         }
 
-        ComparisonEvidence compareMatmulOutput(const MatmulValidationCase::TensorPair& tensors,
-                                               const ComparisonTolerance&              tolerance,
-                                               const MatmulValidationOptions&          validation,
+        ComparisonEvidence compareMatmulOutput(const MatmulValidationCase::TensorPair&   tensors,
+                                               const std::optional<ComparisonTolerance>& tolerance,
+                                               const MatmulValidationOptions&            validation,
                                                bool specialValueConsistency,
                                                bool searchAllClose,
                                                bool computeUlp)
@@ -160,10 +160,9 @@ namespace hipblaslt::hostnumerics
             {
                 ComparisonOptions options;
                 if(validation.compareAllClose)
-                    options = tolerance.absolute != 0.0 || tolerance.relative != 0.0
-                                  ? allCloseComparisonOptions(
-                                      tolerance.absolute, tolerance.relative, true)
-                                  : unitComparisonOptions(expected.type());
+                    options = tolerance ? allCloseComparisonOptions(
+                                  tolerance->absolute, tolerance->relative, true)
+                                        : unitComparisonOptions(expected.type());
                 else
                     options.allClose = false;
                 options.computeElementwiseStatistics = specialValueConsistency;
