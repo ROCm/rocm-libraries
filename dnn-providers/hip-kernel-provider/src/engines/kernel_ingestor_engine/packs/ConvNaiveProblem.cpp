@@ -91,8 +91,6 @@ std::optional<ConvFields> convFields(const MatchContext& context, ConvDirection 
             = {attributes.x_tensor_uid(), attributes.w_tensor_uid(), attributes.y_tensor_uid()};
         fields.writtenUid = attributes.y_tensor_uid();
         return fields;
-    default:
-        break;
     }
     case ConvDirection::BACKWARD_DATA:
     {
@@ -120,6 +118,8 @@ std::optional<ConvFields> convFields(const MatchContext& context, ConvDirection 
         fields.writtenUid = attributes.dw_tensor_uid();
         return fields;
     }
+    default:
+        break;
     }
     return std::nullopt;
 }
