@@ -134,7 +134,11 @@ from sdpa_common import (  # noqa: E402  (needs the sys.path entry above)
 #         record 1.5.0; bundles from 1.4.0 keep recording 1.4.0.
 #         --ragged-offsets with --stats is rejected: the dense LSE reference holds -inf
 #         past each batch's valid length, which the bundle verifier rejects.
-GENERATOR_VERSION = "1.13.0"
+# 1.14.0 — A ragged .bin holds exactly the elements the sequences address (RFC 0014
+#          elementSpace): the rows past the last valid row are not written, so the last
+#          batch's trailing pad is dropped. The interior pad rows and ragged_offset
+#          tensors are unchanged; ragged bundles with --seq-lens-* change in size.
+GENERATOR_VERSION = "1.14.0"
 
 # FP8 operation: OCP fp8 inputs (Q/K/V, E4M3 by default), BF16 output (or fp8 with --fp8-scaling).
 # AITER's fmha fp8 path uses OCP e4m3 (float8_e4m3fn) with a per-tensor scalar descale; mirror it.
@@ -209,6 +213,17 @@ def pack_ragged(tensor_bhsd, seq_lens):
         for b in range(tensor_bhsd.shape[0])
     ]
     return torch.cat(slices, dim=0).contiguous()  # [total_tokens, H, D]
+
+
+def live_token_rows(physical_lens, valid_lens):
+    """Token rows a packed ragged buffer must hold: up to the last valid row of any
+    batch (RFC 0014 elementSpace); the pad rows after it are not stored."""
+    rows, start = 0, 0
+    for physical, valid in zip(physical_lens, valid_lens):
+        if valid > 0:
+            rows = start + valid
+        start += physical
+    return rows
 
 
 def ragged_offsets(physical_lens):
@@ -471,7 +486,7 @@ def build_graph_json(
     ]
     for uid, name, dims, dt, ragged_offset_uid in primaries:
         # Ragged primaries declare padded logical dims [B, H, S_max, D] with BSHD
-        # strides; the packed .bin is sized by ragged_offset[B].
+        # strides; the packed .bin holds the rows up to the last valid row (RFC 0014 elementSpace).
         strides = compute_strides(dims, layout)
         entry = {
             "uid": uid,
@@ -1225,9 +1240,10 @@ def generate_forward_bundle(
     assert not torch.isinf(O.float()).any(), "Inf in O"
 
     # Physical (packed) block rows per batch drive both pack_ragged and the
-    # ragged_offset aux tensors so ragged_offset[B] matches the packed buffer
-    # size. With seq-lens the blocks add small trailing padding (capped at
-    # S_max); without them the blocks are exactly the varied valid lengths.
+    # ragged_offset aux tensors. With seq-lens the blocks add small trailing padding
+    # (capped at S_max), so ragged_offset[B] counts the last batch's trailing pad,
+    # which the written .bin omits; without them the blocks are exactly the varied
+    # valid lengths.
     valid_q = ref_lens_q if ref_lens_q is not None else [S_q] * B
     valid_kv = ref_lens_kv if ref_lens_kv is not None else [S_kv] * B
     # Without seq_len tensors the kernel reads lengths from ragged_offset spacing, so a
@@ -1256,8 +1272,11 @@ def generate_forward_bundle(
     tensor_list = []
     for name, tensor, uid, physical_lens in primary_inputs:
         logical_shape = list(tensor.shape)
+        valid_lens = valid_q if uid in (UID_Q, UID_O) else valid_kv
         stored = (
-            pack_ragged(tensor, physical_lens)
+            pack_ragged(tensor, physical_lens)[
+                : live_token_rows(physical_lens, valid_lens)
+            ]
             if ragged
             else to_physical_layout(tensor, layout)
         )
