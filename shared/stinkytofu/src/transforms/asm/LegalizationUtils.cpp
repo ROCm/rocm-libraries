@@ -285,6 +285,9 @@ Legalized legalizeBarrier(StinkyInstruction* inst, AsmIRBuilder& irBuilder, GfxA
     }
 
     if (!comment.empty()) lastInst->addModifier<CommentData>(CommentData{comment});
+    // A partial completion contract belongs before the first barrier operation.
+    if (const auto* tensorWait = inst->getModifier<SWaitTensorCntData>())
+        firstInst->addModifier<SWaitTensorCntData>(*tensorWait);
 
     // Remove the original s_barrier instruction
     inst->erase();
