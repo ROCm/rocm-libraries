@@ -110,7 +110,7 @@ TEST(MxGemmSplitKSupport, TdmV2RejectsSplitK)
     EXPECT_TRUE(supports(1));
 }
 
-// comp_tdm_v3 declares kSupportsMxTdmSplitK: with CShuffle each split adds into C atomically and
+// comp_tdm_v3 declares kSupportsTdmSplitK: with CShuffle each split adds into C atomically and
 // its TDM loads are clipped to its K range, so it takes k_batch > 1.
 TEST(MxGemmSplitKSupport, TdmV3CShuffleAcceptsSplitK)
 {
