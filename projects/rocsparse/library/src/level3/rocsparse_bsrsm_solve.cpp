@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2021-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2021-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -204,10 +204,13 @@ namespace rocsparse
         ROCSPARSE_CHECKARG(12, block_dim, (block_dim == 0), rocsparse_status_invalid_size);
         ROCSPARSE_CHECKARG_POINTER(13, info);
         ROCSPARSE_CHECKARG_POINTER(14, B);
+
+        const int64_t m_rows = static_cast<int64_t>(mb) * block_dim;
+
         ROCSPARSE_CHECKARG_SIZE(15, ldb);
         ROCSPARSE_CHECKARG(15,
                            ldb,
-                           ((trans_X == rocsparse_operation_none) && (ldb < mb * block_dim)),
+                           ((trans_X == rocsparse_operation_none) && (ldb < m_rows)),
                            rocsparse_status_invalid_size);
         ROCSPARSE_CHECKARG(15,
                            ldb,
@@ -217,7 +220,7 @@ namespace rocsparse
         ROCSPARSE_CHECKARG_SIZE(17, ldx);
         ROCSPARSE_CHECKARG(17,
                            ldx,
-                           ((trans_X == rocsparse_operation_none) && (ldx < mb * block_dim)),
+                           ((trans_X == rocsparse_operation_none) && (ldx < m_rows)),
                            rocsparse_status_invalid_size);
         ROCSPARSE_CHECKARG(17,
                            ldx,
