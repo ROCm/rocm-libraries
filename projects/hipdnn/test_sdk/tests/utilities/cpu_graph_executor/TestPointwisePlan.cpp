@@ -1966,3 +1966,39 @@ TEST(TestPointwisePlanBuilder, RejectsParameterizedTernary)
     EXPECT_THROW(planBuilder.buildNodePlan(graphWrapper, graphWrapper.getNode(0)),
                  std::runtime_error);
 }
+
+TEST(TestPointwisePlanBuilder, IsApplicableGenIndexAxisOutsideOutputRankIsDeclined)
+{
+    for(const int64_t axis : {int64_t{4}, int64_t{-1}})
+    {
+        auto [graph, tensorBundle, variantPack]
+            = buildPointwiseUnaryGraph({1, 3, 4, 4},
+                                       {1, 3, 4, 4},
+                                       DataType::FLOAT,
+                                       DataType::FLOAT,
+                                       DataType::INT32,
+                                       hipdnn_frontend::PointwiseMode::GEN_INDEX,
+                                       1,
+                                       TensorLayout::NCHW,
+                                       std::nullopt,
+                                       std::nullopt,
+                                       std::nullopt,
+                                       std::nullopt,
+                                       std::nullopt,
+                                       std::nullopt,
+                                       axis);
+
+        auto [serializedGraph, serErr] = graph->to_binary();
+        ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
+        const GraphWrapper graphWrapper(serializedGraph.data(), serializedGraph.size());
+        const PointwisePlanBuilder<DataType::FLOAT,
+                                   DataType::FLOAT,
+                                   DataType::FLOAT,
+                                   DataType::FLOAT,
+                                   DataType::INT32>
+            planBuilder;
+
+        EXPECT_FALSE(planBuilder.isApplicable(graphWrapper.getNode(0), graphWrapper.getTensorMap()))
+            << "axis " << axis;
+    }
+}
