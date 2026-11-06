@@ -25,6 +25,10 @@ namespace scalar_codec_test {
 namespace {
 using roc::hostnumerics::BFloat16Rounding;
 using roc::hostnumerics::convertScalar;
+using roc::hostnumerics::E8M0Underflow;
+using roc::hostnumerics::FloatingOverflow;
+using roc::hostnumerics::FloatingSourcePrecision;
+using roc::hostnumerics::IntegerConversionOptions;
 using roc::hostnumerics::IntegerOverflow;
 using roc::hostnumerics::IntegerRounding;
 using roc::hostnumerics::isConcreteScalarType;

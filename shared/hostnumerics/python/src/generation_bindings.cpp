@@ -47,11 +47,8 @@ void registerGenerationBindings(nb::module_& module) {
     nb::class_<ScalarConversionOptions>(module, "ScalarConversionOptions")
         .def(nb::init<IntegerRounding, IntegerOverflow, BFloat16Rounding, FloatingSourcePrecision,
                       FloatingOverflow, E8M0Underflow>(),
-             "integer_rounding"_a, "integer_overflow"_a,
-             "bfloat16_rounding"_a = BFloat16Rounding::NearestEven,
-             "floating_source_precision"_a = FloatingSourcePrecision::Float32,
-             "floating_overflow"_a = FloatingOverflow::FormatDefault,
-             "e8m0_underflow"_a = E8M0Underflow::Nearest)
+             "integer_rounding"_a, "integer_overflow"_a, "bfloat16_rounding"_a,
+             "floating_source_precision"_a, "floating_overflow"_a, "e8m0_underflow"_a)
         .def_rw("floating_source_precision", &ScalarConversionOptions::floatingSourcePrecision)
         .def_rw("floating_overflow", &ScalarConversionOptions::floatingOverflow)
         .def_rw("bfloat16_rounding", &ScalarConversionOptions::bfloat16Rounding)

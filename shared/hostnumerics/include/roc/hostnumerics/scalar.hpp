@@ -13,8 +13,8 @@ namespace roc::hostnumerics {
 // integer of at most 64 bits, float, double, long double, or std::complex of
 // one of those floating types.
 //
-// An integer Target receives the value rounded by options.integerRounding, with
-// the range handled by options.integerOverflow. Other targets ignore the options:
+// An integer Target receives the value rounded by options.rounding, with the
+// range handled by options.overflow. Other targets ignore the options:
 // floating and Boolean targets behave like static_cast, and complex values
 // convert each component.
 //
@@ -31,7 +31,7 @@ namespace roc::hostnumerics {
 //   convertScalar<bool>(double{0.25}, options) == true
 //   convertScalar<int32_t>(std::complex<double>{3.5, 0.0}, options) == 4
 template <typename Target, typename Source>
-Target convertScalar(Source source, const ScalarConversionOptions& options) noexcept {
+Target convertScalar(Source source, const IntegerConversionOptions& options) noexcept {
     using Destination = std::remove_cv_t<Target>;
     using Value = std::remove_cvref_t<Source>;
     static_assert(!std::is_reference_v<Target>);
@@ -50,8 +50,7 @@ Target convertScalar(Source source, const ScalarConversionOptions& options) noex
     } else if constexpr (std::is_same_v<Destination, bool>) {
         return source != Value{0};
     } else if constexpr (std::is_integral_v<Destination>) {
-        return convertToInteger<Destination>(source, options.integerRounding,
-                                             options.integerOverflow);
+        return convertToInteger<Destination>(source, options.rounding, options.overflow);
     } else {
         static_assert(std::is_floating_point_v<Destination>);
         return static_cast<Destination>(source);

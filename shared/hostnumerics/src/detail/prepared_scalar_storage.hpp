@@ -68,11 +68,11 @@ Target preparedDecodeScalarKnown(std::span<const std::byte> storage, ptrdiff_t o
         return decodeScalarValueKnown<Tag, Target>(encoded, options);
     } else if constexpr (type == ScalarType::Int4) {
         return convertScalar<Target>(signExtend(preparedReadPackedBits(storage, bits, 4), 4),
-                                     options);
+                                     options.integerConversion());
     } else {
         return convertScalar<Target>(decodeBinaryFloatKnown<type>(preparedReadPackedBits(
                                          storage, bits, scalarTypeInfo(type).storageBits)),
-                                     options);
+                                     options.integerConversion());
     }
 }
 template <typename Tag, typename Target>

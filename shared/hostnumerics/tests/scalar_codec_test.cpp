@@ -50,8 +50,10 @@ TEST(ScalarCodecs, ScalarEncodings) {
 
 TEST(ScalarCodecs, DirectDoubleAndExplicitFloatIntermediate) {
     using namespace roc::hostnumerics;
-    ScalarConversionOptions options{IntegerRounding::NearestEven, IntegerOverflow::Saturate,
-                                    BFloat16Rounding::NearestEven, FloatingSourcePrecision::Direct};
+    ScalarConversionOptions options{
+        IntegerRounding::NearestEven,    IntegerOverflow::Saturate,
+        BFloat16Rounding::NearestEven,   FloatingSourcePrecision::Direct,
+        FloatingOverflow::FormatDefault, E8M0Underflow::Nearest};
     const auto encode = [&](ScalarType type, double value) {
         Tensor result(type, Shape{1});
         result.storeFrom({0}, value, options);

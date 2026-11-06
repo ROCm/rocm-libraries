@@ -75,8 +75,10 @@ TEST(Freivalds, DenseIntegerOracleWithScalesBiasRoundingAndSaturation) {
         auto plan = requirePlan(
             prepareFreivalds(a, b, MatmulOptions{ScalarType::Float32}, e, type, {}, {}));
         Tensor d(type, Layout(Shape{m, n}, {1, ptrdiff_t(m + 7)}, 3));
-        const ScalarConversionOptions conversion{IntegerRounding::TowardZero,
-                                                 IntegerOverflow::Saturate};
+        const ScalarConversionOptions conversion{
+            IntegerRounding::TowardZero,     IntegerOverflow::Saturate,
+            BFloat16Rounding::NearestEven,   FloatingSourcePrecision::Float32,
+            FloatingOverflow::FormatDefault, E8M0Underflow::Nearest};
         for (size_t i = 0; i < m; ++i)
             for (size_t j = 0; j < n; ++j) {
                 int64_t sum = 0;

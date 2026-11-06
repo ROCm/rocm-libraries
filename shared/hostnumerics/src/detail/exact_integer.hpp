@@ -48,7 +48,9 @@ inline double exactObservationLimit(ScalarType type) {
 }
 
 inline ScalarConversionOptions exactOutputConversion() {
-    return {IntegerRounding::NearestEven, IntegerOverflow::Saturate};
+    return {IntegerRounding::NearestEven,    IntegerOverflow::Saturate,
+            BFloat16Rounding::NearestEven,   FloatingSourcePrecision::Float32,
+            FloatingOverflow::FormatDefault, E8M0Underflow::Nearest};
 }
 
 class PreparedExactOutput {
