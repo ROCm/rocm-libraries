@@ -986,10 +986,17 @@ namespace rocalution
             // (x,q)
             ValueType xq = x->DotNonConj(*q);
 
-            // The CG step breaks down if (r,x) or (x,Ax) is zero, as for a zero rhs, whose
-            // cycle gives the zero correction. Keep the correction of the cycle then
-            if(rho == static_cast<ValueType>(0) || xq == static_cast<ValueType>(0))
+            // The CG step breaks down if (x,Ax) is zero, as for a zero rhs, whose cycle gives
+            // the zero correction. Keep the correction of the cycle then
+            if(xq == static_cast<ValueType>(0))
             {
+                return;
+            }
+
+            // The CG step is zero if (r,x) is zero
+            if(rho == static_cast<ValueType>(0))
+            {
+                x->Zeros();
                 return;
             }
 
