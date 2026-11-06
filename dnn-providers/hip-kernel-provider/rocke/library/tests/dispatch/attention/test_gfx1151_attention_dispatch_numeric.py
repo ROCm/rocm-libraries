@@ -2646,22 +2646,30 @@ class TestMetadataSafety:
             with pytest.raises(ValueError, match="finite and positive"):
                 _bind(kind, request, spec, _dense_tensors(), softcap=cap)
 
-    def test_sinks_require_query_dtype_per_head_tensor(self, kind):
+    def test_sinks_require_a_served_dtype_per_head_tensor(self, kind):
         spec = _meta_spec(kind, sinks=True)
         request = _dense_request(use_sinks=True)
         with pytest.raises(ValueError, match=r"tensors\['sinks'\]"):
             _collect(request, spec, _dense_tensors())
-        for sinks in (
-            _fake_tensor((4,), dtype="float32"),
-            _fake_tensor((2,), dtype="float16"),
-        ):
+        bad = [_fake_tensor((2,), dtype="float16"), _fake_tensor((4,), dtype="int32")]
+        if kind == "decode":
+            # The decode kernel reads the sink in the Q dtype only.
+            bad.append(_fake_tensor((4,), dtype="float32"))
+        for sinks in bad:
             with pytest.raises(ValueError, match="sinks"):
                 _collect(request, spec, {**_dense_tensors(), "sinks": sinks})
         good = _fake_tensor((4,), dtype="float16")
-        assert (
-            _collect(request, spec, {**_dense_tensors(), "sinks": good})["sink_ptr"]
-            is good
-        )
+        values = _collect(request, spec, {**_dense_tensors(), "sinks": good})
+        assert values["sink_ptr"] is good
+        if kind == "prefill":
+            # The prefill kernel also reads hipDNN's FLOAT sink, told by sink_is_f32.
+            assert values["sink_is_f32"] == 0
+            f32 = _fake_tensor((4,), dtype="float32")
+            values = _collect(request, spec, {**_dense_tensors(), "sinks": f32})
+            assert values["sink_ptr"] is f32
+            assert values["sink_is_f32"] == 1
+        else:
+            assert "sink_is_f32" not in values
 
     def test_ragged_requires_cu_seqlens_k(self, kind):
         tensors = _ragged_tensors()

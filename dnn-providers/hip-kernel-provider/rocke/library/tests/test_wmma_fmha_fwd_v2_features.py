@@ -43,10 +43,10 @@ _GPTOSS = dict(Hq=16, Hkv=2, dq=64, mask="causal", wl=127, wr=0)
 
 # name -> options. Common keys: layout (dense / ragged / paged), B + Sq + Sk
 # (dense) or lens_q + lens_k (packed), Hq, Hkv, Hv, dq, dv, mask, br, wl, wr,
-# flags (c softcap, s sinks, a ALiBi, q QQ-bias, 8 FP8 K/V, d dense Q (paged),
-# u seqused_q, t separate K and V block tables (paged), n NaN in every
-# sequence's first V row: only the padding rows are checked), cap, scale, ps
-# (page size), bias ((kind, (b, h, q, k) full
+# flags (c softcap, s sinks, f the sinks as f32 (sink_is_f32), a ALiBi, q QQ-bias, 8 FP8
+# K/V, d dense Q (paged), u seqused_q, t separate K and V block tables (paged), n NaN
+# in every sequence's first V row: only the padding rows are checked), cap,
+# scale, ps (page size), bias ((kind, (b, h, q, k) full
 # flags)), qq (rows, cols, pad), bn (block_n), unsplit (gfx12 wave_pair=False),
 # ninf ((n, fill): the first n keys' bias / QQ-bias entries become fill, "inf"
 # -> -inf, "finfo" -> the dtype's most negative finite value), gaps (u: rows
@@ -224,6 +224,21 @@ CASES = {
     "denseq_used_paged32_sinks_window": dict(
         layout="paged", ps=32, lens_q=(4, 0, 2), gaps=(0, 4, 2), lens_k=(70, 0, 33),
         Hq=4, Hkv=2, dq=128, mask="causal", br=1, wl=31, wr=0, flags="dsu",
+        dtypes=("fp16",),
+    ),
+    # hipDNN's FLOAT sink_token (sink_is_f32): a dense Q, a ragged Q through per-row
+    # lookups and one through per-tile lookups.
+    "f32_sinks_denseq_paged16_decode": dict(
+        layout="paged", ps=16, lens_q=(1, 1, 1), lens_k=(37, 0, 300), br=1,
+        flags="dsf", dtypes=("fp16",), **_GPTOSS,
+    ),
+    "f32_sinks_used_paged16_rows": dict(
+        layout="paged", ps=16, lens_q=(5, 3, 70), gaps=(0, 1, 0), lens_k=(20, 0, 300),
+        Hq=8, Hkv=1, dq=64, mask="causal", br=1, wr=0, flags="suf", dtypes=("bf16",),
+    ),
+    "f32_sinks_used_paged64_window": dict(
+        layout="paged", ps=64, lens_q=(4, 40), gaps=(2, 0), lens_k=(70, 200),
+        Hq=4, Hkv=2, dq=128, mask="causal", br=1, wl=31, wr=0, flags="suf",
         dtypes=("fp16",),
     ),
     # A stale seqused_k past seqlen_k (the longest sequence's keys) is clamped
@@ -442,7 +457,11 @@ def test_prefill_feature_matches_reference(case, dtype):
             for x in vs_dev:
                 x[:1] = np.nan
         ks, vs = ks_dev, vs_dev
-    sinks = (rng.standard_normal(Hq) * 2).astype(npdt) if "s" in flags else None
+    sinks = (
+        (rng.standard_normal(Hq) * 2).astype(np.float32 if "f" in flags else npdt)
+        if "s" in flags
+        else None
+    )
     slopes = (
         np.array([2.0 ** (-8.0 * (i + 1) / Hq) for i in range(Hq)], np.float32)
         if "a" in flags
@@ -620,6 +639,7 @@ def test_prefill_feature_matches_reference(case, dtype):
             values["softcap"] = opt["cap"]
         if sinks is not None:
             values["sink_ptr"] = dev.put(sinks)
+            values["sink_is_f32"] = int("f" in flags)
         if slopes is not None:
             values["alibi_slopes_ptr"] = dev.put(slopes)
         if qq_dev is not None:

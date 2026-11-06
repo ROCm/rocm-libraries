@@ -57,6 +57,7 @@ constexpr std::string_view SEQ_LEN_Q_UID_TOKEN = "gfx1151_wmma_attention.seq_len
 constexpr std::string_view Q_OFFSET_UID_TOKEN = "gfx1151_wmma_attention.q_offset.uid";
 constexpr std::string_view MAX_SEQ_LEN_KV_TOKEN = "gfx1151_wmma_attention.max_seq_len_kv";
 constexpr std::string_view SINK_UID_TOKEN = "gfx1151_wmma_attention.sink.uid";
+constexpr std::string_view SINK_F32_TOKEN = "gfx1151_wmma_attention.sink.f32";
 
 // GraphLayout in the pack.
 constexpr int64_t LAYOUT_PAGED_DENSE_Q = 1;
@@ -798,7 +799,7 @@ TEST(TestGfx1151WmmaAttentionPaged, LogsTheCauseOfEachDecline)
 }
 
 // The kernels load Q / K / V / O rows as 16-byte vectors, the INT32 operands and the stats
-// as 4-byte words and the sink with 16-bit loads. A graph may
+// as 4-byte words and the sink with 16-bit loads (two for a FLOAT sink). A graph may
 // declare a lower pointer alignment (engine API 1.3.0, which the engine's 1.4.0 admits);
 // the matcher declines it with its cause, so hipDNN can pick another engine at plan time
 // instead of the plan failing at execute.
@@ -825,6 +826,10 @@ TEST(TestGfx1151WmmaAttentionPaged, DeclinesOperandsDeclaringLessThanTheKernelsL
     stats.returnLse = true;
     stats.alignment[LSE_UID] = 4;
     EXPECT_TRUE(matches(stats));
+    auto floatSink = withSinks(PagedSpec{});
+    floatSink.sinkDtype = data_objects::DataType::FLOAT;
+    floatSink.alignment[SINK_UID] = 4;
+    EXPECT_TRUE(matches(floatSink));
     const auto declining = [](PagedSpec spec, int64_t uid, int64_t bytes) {
         spec.alignment[uid] = bytes;
         return spec;
@@ -867,7 +872,8 @@ TEST(TestGfx1151WmmaAttentionPaged, DeclinesOperandsDeclaringLessThanTheKernelsL
                       "alignment",
                       "Stats declares a " + std::to_string(bytes) + "-byte alignment");
     }
-    // The sink loads as 16-bit words: it must declare a multiple of 2 bytes.
+    // A Q-dtype sink loads as one 16-bit word, a FLOAT one as two: a multiple of 2 or 4
+    // bytes.
     for(const int64_t bytes : {1, 3})
     {
         SCOPED_TRACE("sink_token, " + std::to_string(bytes) + " bytes");
@@ -878,6 +884,14 @@ TEST(TestGfx1151WmmaAttentionPaged, DeclinesOperandsDeclaringLessThanTheKernelsL
                           "alignment",
                           "sink_token declares a " + std::to_string(bytes) + "-byte alignment");
         }
+    }
+    for(const int64_t bytes : {1, 2})
+    {
+        SCOPED_TRACE("FLOAT sink_token, " + std::to_string(bytes) + " bytes");
+        expectDecline(loggedDecline(declining(floatSink, SINK_UID, bytes)),
+                      PREFILL_ENGINE,
+                      "alignment",
+                      "sink_token declares a " + std::to_string(bytes) + "-byte alignment");
     }
 }
 
@@ -911,8 +925,9 @@ TEST(TestGfx1151WmmaAttentionPaged, OnlyTheObjectOfThePageSizeAndQueryFormServes
 }
 
 // -----------------------------------------------------------------------------
-// Attention sinks: sink_token [1, Hq, 1, 1] in the Q data type selects the paged sinks
-// objects, which take sink_ptr before the query form's operands.
+// Attention sinks: sink_token [1, Hq, 1, 1], FLOAT or in the Q data type, selects the
+// paged sinks objects, which take sink_ptr and sink_is_f32 before the query form's
+// operands.
 // -----------------------------------------------------------------------------
 
 TEST(TestGfx1151WmmaAttentionPaged, BindsAttentionSinksInEveryQueryForm)
@@ -925,10 +940,20 @@ TEST(TestGfx1151WmmaAttentionPaged, BindsAttentionSinksInEveryQueryForm)
         const auto plain = fixtureFor(graph).bound();
         ASSERT_TRUE(plain.has_value());
         EXPECT_FALSE(tryGetBoundInt(*plain, SINK_UID_TOKEN).has_value());
+        EXPECT_FALSE(tryGetBoundInt(*plain, SINK_F32_TOKEN).has_value());
         const auto bound = fixtureFor(withSinks(graph)).bound();
         ASSERT_TRUE(bound.has_value());
         EXPECT_EQ(boundInt(*bound, SINK_UID_TOKEN), SINK_UID);
+        EXPECT_EQ(boundInt(*bound, SINK_F32_TOKEN), 0);
         EXPECT_EQ(boundInt(*bound, LAYOUT_TOKEN), boundInt(*plain, LAYOUT_TOKEN));
+        // hipDNN's FLOAT sink_token binds the same object with sink_is_f32 set.
+        auto floatSink = withSinks(graph);
+        floatSink.sinkDtype = data_objects::DataType::FLOAT;
+        const auto f32 = fixtureFor(floatSink).bound();
+        ASSERT_TRUE(f32.has_value());
+        EXPECT_EQ(boundInt(*f32, SINK_UID_TOKEN), SINK_UID);
+        EXPECT_EQ(boundInt(*f32, SINK_F32_TOKEN), 1);
+        EXPECT_EQ(boundInt(*f32, LAYOUT_TOKEN), boundInt(*plain, LAYOUT_TOKEN));
     }
 }
 
@@ -946,11 +971,11 @@ TEST(TestGfx1151WmmaAttentionPaged, DeclinesSinksTheKernelsCannotRead)
         edit(spec);
         cases.push_back({what, spec, reason});
     };
-    // The kernels load the sink in the I/O data type.
-    add("a FLOAT sink", "a FLOAT sink_token", [](PagedSpec& s) {
-        s.sinkDtype = data_objects::DataType::FLOAT;
+    // The kernels read the sink as FLOAT or in the I/O data type.
+    add("an INT32 sink", "FLOAT or in the Q data type", [](PagedSpec& s) {
+        s.sinkDtype = data_objects::DataType::INT32;
     });
-    add("a HALF sink for a BFLOAT16 query", "not the Q data type", [](PagedSpec& s) {
+    add("a HALF sink for a BFLOAT16 query", "FLOAT or in the Q data type", [](PagedSpec& s) {
         s.sinkDtype = data_objects::DataType::HALF;
     });
     add("one sink per K/V head", "[1, Hq, 1, 1]", [](PagedSpec& s) { s.sinkHeads = s.kvHeads; });
@@ -1070,6 +1095,7 @@ std::vector<KernelArgument> rockePagedAbi(int64_t denseQ, bool sinks = false)
     if(sinks)
     {
         abi.push_back(pointerArgument("sink_ptr"));
+        appendScalars(abi, {"sink_is_f32"});
     }
     if(denseQ == 0)
     {
@@ -1139,13 +1165,21 @@ TEST(TestGfx1151WmmaAttentionPaged, PrepareMarshalsTheSinkBeforeTheQueryForm)
         EXPECT_NE(failure.find(", symbol 'wmma_fmha_fwd_v2':"), std::string::npos)
             << c.what << ": " << failure;
 
-        // A descriptor without sink_ptr, or with it after the page lookup, is refused.
+        // A descriptor without sink_ptr or sink_is_f32, or with the sink after the page
+        // lookup, is refused.
         EXPECT_NE(prepareFailure(graph, object, rockePagedAbi(c.denseQ))
                       .find("is packaged with arguments"),
                   std::string::npos)
             << c.what;
+        auto noFlag = rockePagedAbi(c.denseQ);
+        noFlag.insert(noFlag.begin() + static_cast<std::ptrdiff_t>(rockePrefillAbiHead().size()),
+                      pointerArgument("sink_ptr"));
+        EXPECT_NE(prepareFailure(graph, object, noFlag).find("is packaged with arguments"),
+                  std::string::npos)
+            << c.what;
         auto late = rockePagedAbi(c.denseQ);
         late.push_back(pointerArgument("sink_ptr"));
+        appendScalars(late, {"sink_is_f32"});
         EXPECT_NE(prepareFailure(graph, object, late).find("is packaged with arguments"),
                   std::string::npos)
             << c.what;

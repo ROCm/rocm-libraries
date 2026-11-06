@@ -9,6 +9,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <limits>
+#include <map>
 #include <memory>
 #include <numeric>
 #include <optional>
@@ -47,8 +48,8 @@ using namespace hipdnn_frontend::graph;
  *        page table or through separate K and V tables that place V's pages elsewhere --
  *        against hipDNN's CPU SDPA reference (CpuFpReferenceSdpa, double compute), and one
  *        plan captured into a HIP graph and replayed with different sequence lengths, block
- *        ids and data; with and without attention sinks (sink_token [1, Hq, 1, 1] in the I/O
- *        data type, upcast exactly to the reference's FLOAT sink).
+ *        ids and data; with and without attention sinks (sink_token [1, Hq, 1, 1], FLOAT as
+ *        hipDNN takes it, or in the I/O data type, upcast exactly to the reference's).
  *
  * Every graph carries seq_len_q and seq_len_kv (hipDNN's paged contract). Unused cache
  * slots and padding are NaN, so a read of anything outside the used page-table entries or
@@ -59,8 +60,9 @@ using namespace hipdnn_frontend::graph;
  * order, ragged_offset[B] is poisoned, and the rows of an offset block past seq_len_q
  * belong to no sequence and must keep their NaN.
  *
- * The sink cases need the frontend to accept a sink_token in the Q data type; a frontend
- * that takes only cuDNN's FLOAT sink (SEM-022) rejects them, and they skip with a message.
+ * The Q-dtype sink cases need the frontend to accept a sink_token in the Q data type; a
+ * frontend that takes only cuDNN's FLOAT sink (SEM-022) rejects them, and they skip with a
+ * message. The FLOAT sink cases always run.
  */
 namespace hip_kernel_provider::kernel_ingestor_engine::integration
 {
@@ -111,13 +113,15 @@ struct PagedCase
     int64_t leftBound = -1;
     bool stats = false;
     bool interleavedCache = true;
-    // Attention sinks: one logit per query head, in the I/O data type.
+    // Attention sinks: one logit per query head, in the I/O data type (floatSink: FLOAT).
     bool sinks = false;
     // cuDNN's separate page_table_v: V's pages through their own table, in another order.
     bool separateVTable = false;
     // V in its own plane with padded rows, heads and pages: none of V's page, head and
     // token strides is K's, so V addressed through K's strides reads the wrong rows.
     bool paddedV = false;
+    // With sinks: sink_token is FLOAT (hipDNN's form) rather than in the I/O data type.
+    bool floatSink = false;
 };
 
 // NOLINTNEXTLINE(readability-identifier-naming) -- gtest customization point
@@ -196,7 +200,8 @@ struct Batch
     std::vector<uint16_t> v; // V's own plane; empty for the interleaved cache
     std::vector<int32_t> pageTable; // [B, M]
     std::vector<int32_t> pageTableV; // [B, M], separate V table only
-    std::vector<uint16_t> sinks; // [Hq], attention sinks only
+    std::vector<uint16_t> sinks; // [Hq], Q-dtype attention sinks only
+    std::vector<float> floatSinks; // [Hq], FLOAT attention sinks only
 };
 
 class PagedProblem
@@ -324,9 +329,12 @@ public:
         if(_case.sinks)
         {
             batch.sinks.resize(static_cast<size_t>(_case.queryHeads));
-            for(auto& sink : batch.sinks)
+            batch.floatSinks.resize(batch.sinks.size());
+            for(size_t h = 0; h < batch.sinks.size(); ++h)
             {
-                sink = toBits(2.0F * uniform(rng), dt);
+                const float logit = 2.0F * uniform(rng);
+                batch.sinks[h] = toBits(logit, dt);
+                batch.floatSinks[h] = logit;
             }
         }
         return batch;
@@ -418,9 +426,11 @@ private:
         {
             for(int64_t h = 0; h < heads; ++h)
             {
-                sink.setHostValue(static_cast<float>(fromBits(batch.sinks[static_cast<size_t>(h)],
-                                                              _case.dataType)),
-                                  std::vector<int64_t>{0, h, 0, 0});
+                const auto i = static_cast<size_t>(h);
+                sink.setHostValue(
+                    _case.floatSink ? batch.floatSinks[i]
+                                    : static_cast<float>(fromBits(batch.sinks[i], _case.dataType)),
+                    std::vector<int64_t>{0, h, 0, 0});
             }
             options.setSink(&sink);
         }
@@ -569,11 +579,12 @@ std::shared_ptr<Graph> buildPagedGraph(const PagedCase& paged,
         .set_generate_stats(paged.stats);
     if(paged.sinks)
     {
-        attributes.set_sink_token(makeTensor(SINK_UID,
-                                             "sink",
-                                             sinkType.value_or(paged.dataType),
-                                             {1, paged.queryHeads, 1, 1},
-                                             {paged.queryHeads, 1, 1, 1}));
+        attributes.set_sink_token(
+            makeTensor(SINK_UID,
+                       "sink",
+                       sinkType.value_or(paged.floatSink ? DataType::FLOAT : paged.dataType),
+                       {1, paged.queryHeads, 1, 1},
+                       {paged.queryHeads, 1, 1, 1}));
     }
     if(paged.leftBound >= 0)
     {
@@ -609,7 +620,7 @@ std::vector<PagedCase> pagedCases()
 {
     const auto bf16 = DataType::BFLOAT16;
     const auto fp16 = DataType::HALF;
-    return {
+    std::vector<PagedCase> cases{
         // vLLM uniform decode, GQA 32/8, CUDA-graph padding rows (no keys) included.
         {"decode_bf16_d128_p16_gqa",
          bf16,
@@ -844,6 +855,23 @@ std::vector<PagedCase> pagedCases()
          100,
          true},
     };
+    // Each sink case again with hipDNN's FLOAT sink_token, which needs no frontend change.
+    const std::map<std::string, const char*> floatNames{
+        {"sinks_decode_bf16_d64_p16_window_lse", "float_sinks_decode_bf16_d64_p16_window_lse"},
+        {"sinks_denseq_seqlenq_fp16_d128_p32_lse", "float_sinks_denseq_seqlenq_fp16_d128_p32_lse"},
+        {"sinks_ragged_bf16_d64_p64_mixed", "float_sinks_ragged_bf16_d64_p64_mixed"}};
+    const size_t authored = cases.size();
+    for(size_t i = 0; i < authored; ++i)
+    {
+        if(cases[i].sinks)
+        {
+            PagedCase floatCase = cases[i];
+            floatCase.name = floatNames.at(cases[i].name);
+            floatCase.floatSink = true;
+            cases.push_back(floatCase);
+        }
+    }
+    return cases;
 }
 
 class IntegrationGpuGfx1151WmmaAttentionPaged
@@ -865,10 +893,11 @@ protected:
         {
             GTEST_SKIP() << ENGINE_NAME << " ships no object for this device, " << arch;
         }
-        // The sink cases need the frontend to accept a sink_token in the Q data type. One
-        // that takes only cuDNN's FLOAT sink rejects them before any engine sees them.
+        // The Q-dtype sink cases need the frontend to accept a sink_token in the Q data
+        // type. One that takes only cuDNN's FLOAT sink rejects them before any engine sees
+        // them.
         const auto& paged = GetParam();
-        if(paged.sinks)
+        if(paged.sinks && !paged.floatSink)
         {
             const auto g = geometryOf(paged);
             const auto qTypeSink = buildPagedGraph(paged, g)->validate();
@@ -876,10 +905,9 @@ protected:
                && buildPagedGraph(paged, g, DataType::FLOAT)->validate().code == ErrorCode::OK)
             {
                 GTEST_SKIP() << "the hipDNN frontend accepts only a FLOAT sink_token (cuDNN, "
-                                "SdpaSemanticsRegister SEM-022); "
-                             << ENGINE_NAME
-                             << " reads the sink in the Q data type, so this case needs a "
-                                "frontend that accepts a Q-dtype sink: "
+                                "SdpaSemanticsRegister SEM-022); this case passes the sink in "
+                                "the Q data type, so it needs a frontend that accepts a "
+                                "Q-dtype sink (the float_sinks_ cases cover hipDNN's form): "
                              << qTypeSink.err_msg;
             }
         }
@@ -920,7 +948,8 @@ struct DeviceInputs
         , seqLenKv(static_cast<size_t>(g.batch) * sizeof(int32_t))
         , seqLenQ(static_cast<size_t>(g.batch) * sizeof(int32_t))
         , offsets(static_cast<size_t>(g.batch + 1) * sizeof(int32_t))
-        , sinks(static_cast<size_t>(paged.queryHeads) * sizeof(uint16_t))
+        , sinks(static_cast<size_t>(paged.queryHeads)
+                * (paged.floatSink ? sizeof(float) : sizeof(uint16_t)))
     {
         auto* cache = static_cast<char*>(k.buffer.get());
         // V is K's buffer at +D elements in the interleaved cache.
@@ -980,7 +1009,11 @@ struct DeviceInputs
         seqLenKv.buffer.upload(batch.seqLenKv);
         seqLenQ.buffer.upload(batch.seqLenQ);
         offsets.buffer.upload(batch.qOffsets);
-        if(paged.sinks)
+        if(paged.sinks && paged.floatSink)
+        {
+            sinks.buffer.upload(batch.floatSinks);
+        }
+        else if(paged.sinks)
         {
             sinks.buffer.upload(batch.sinks);
         }
