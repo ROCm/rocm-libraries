@@ -14,7 +14,14 @@ import os
 
 import pytest
 
-from config_helpers import _usingStinkytofuBackend, configMarks, findAvailableArchs
+import yaml
+
+from config_helpers import (
+    _usingStinkytofuBackend,
+    configMarks,
+    curatedArchsFromMarkers,
+    findAvailableArchs,
+)
 
 # These validate the gfx1250 xfail/ffm marking logic in-process, so tag them into the gfx1250 arch suite (-m gfx1250) alongside the
 # auto-added `common` mark, keeping them collected wherever gfx1250 marking is
@@ -239,3 +246,58 @@ def test_skip_stinkytofu_inert_on_native_fallback(monkeypatch, stinkytofu_backen
     stinkytofu_backend(adaptor=False)
     marks = configMarks(_SKIP_STINKYTOFU_CONFIG, _TESTS_ROOT, ["gfx1250"])
     assert not _has_stinkytofu_skip(marks)
+
+
+# A generic config (no Architecture, no arch in its name) that opts out of
+# several architectures through skip-<arch> marks.
+_GENERIC_CONFIG = os.path.join(_COMMON_DIR, "gemm", "fp16_tn.yaml")
+_CURATED = {"gfx90a", "gfx942", "gfx950", "gfx1250"}
+
+
+def _has_uncurated_skip(marks):
+    """Whether configMarks added its not-curated skip (matched by reason)."""
+    return any(
+        m.name == "skip" and "not curated" in m.kwargs.get("reason", "")
+        for m in marks
+    )
+
+
+def test_curated_archs_from_markers():
+    """Only skip-gfx marker names count; descriptions and other markers do not."""
+    lines = [
+        "common: Common tests",
+        "skip-gfx942:  architecture",
+        "skip-gfx1250-strict: architecture",
+        "skip-stinkytofu: backend",
+        "xfail-gfx90a: architecture",
+    ]
+    assert curatedArchsFromMarkers(lines) == {"gfx942", "gfx1250-strict"}
+
+
+def test_uncurated_arch_skips_generic_config():
+    """An architecture with no skip-<arch> marker gets no generic configs."""
+    marks = configMarks(_GENERIC_CONFIG, _TESTS_ROOT, ["gfx1151"], _CURATED)
+    assert _has_uncurated_skip(marks)
+
+
+def test_curated_arch_keeps_generic_config():
+    """A reviewed architecture keeps the opt-out behavior unchanged."""
+    marks = configMarks(_GENERIC_CONFIG, _TESTS_ROOT, ["gfx942"], _CURATED)
+    assert not _has_uncurated_skip(marks)
+
+
+def test_uncurated_check_off_without_curated_list():
+    """Callers that pass no curated list (the default) see no change."""
+    marks = configMarks(_GENERIC_CONFIG, _TESTS_ROOT, ["gfx1151"])
+    assert not _has_uncurated_skip(marks)
+
+
+def test_uncurated_arch_runs_config_that_names_it(tmp_path):
+    """A config written for the architecture still runs there."""
+    with open(_GENERIC_CONFIG) as f:
+        doc = yaml.safe_load(f)
+    doc["GlobalParameters"]["Architecture"] = "gfx1151"
+    path = tmp_path / "fp16_tn_gfx1151.yaml"
+    path.write_text(yaml.safe_dump(doc))
+    marks = configMarks(str(path), str(tmp_path), ["gfx1151"], _CURATED)
+    assert not _has_uncurated_skip(marks)

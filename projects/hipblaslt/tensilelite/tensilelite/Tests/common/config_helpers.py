@@ -122,7 +122,23 @@ def _usingStinkytofuBackend(availableArchs):
     return "rocisa_stinkytofu_adaptor" in (getattr(rocisa, "__file__", "") or "")
 
 
-def configMarks(filepath, rootDir, availableArchs):
+def curatedArchsFromMarkers(markerLines):
+    """Return the architectures that have a registered ``skip-<arch>`` marker.
+
+    ``markerLines`` is pytest's ``markers`` ini value (``config.getini("markers")``),
+    one ``name: description`` entry per line. Each config opts out of an
+    architecture with ``skip-<arch>``, so these are the architectures every
+    config has been reviewed against.
+    """
+    archs = set()
+    for line in markerLines:
+        name = line.split(":", 1)[0].strip()
+        if name.startswith("skip-gfx"):
+            archs.add(name[len("skip-"):])
+    return archs
+
+
+def configMarks(filepath, rootDir, availableArchs, curatedArchs=None):
     """
     Returns a list of marks to add to a particular YAML config path.  Currently gets a mark for:
 
@@ -136,6 +152,8 @@ def configMarks(filepath, rootDir, availableArchs):
      - Problem type(s) used in the YAML
      - Kernel language(s) used in the YAML
      - world, with every world the YAML's problems use
+     - skip, when curatedArchs is given and no available architecture is in
+       it, unless the config names that architecture
     """
     relpath = os.path.relpath(filepath, rootDir)
     components = relpath.split(os.path.sep)
@@ -194,6 +212,20 @@ def configMarks(filepath, rootDir, availableArchs):
         ArchSkip = "skip-%s" % arch
         if markNamed(ArchSkip) in marks:
             marks.append(pytest.mark.skip)
+
+    # Selection is opt-out: a config lists the architectures it skips. An
+    # architecture with no registered skip-<arch> marker has never been
+    # reviewed, so no config can opt out of it and every generic config would
+    # run there. Skip unless the config names the architecture itself.
+    if (
+        curatedArchs is not None
+        and availableArchs
+        and not any(arch in curatedArchs for arch in availableArchs)
+        and not any(markNamed(arch) in marks for arch in availableArchs)
+    ):
+        marks.append(pytest.mark.skip(
+            reason=f"{', '.join(availableArchs)}: no registered skip-<arch> marker, "
+                   "so configs are not curated for this architecture"))
 
     # Backend-specific skip (e.g. subtile tests not yet supported on stinkytofu)
     if markNamed("skip-stinkytofu") in marks and _usingStinkytofuBackend(availableArchs):
@@ -272,7 +304,7 @@ def findAvailableArchs(gpu_targets=None):
     return get_available_archs()
 
 
-def findConfigs(rootDir=None, availableArchs=None, splitWorlds=True):
+def findConfigs(rootDir=None, availableArchs=None, splitWorlds=True, curatedArchs=None):
     """
     Walks rootDir (defaults to trying to find tensilelite/Tests) and returns a
     list of test parameters, one for each YAML file.
@@ -283,6 +315,9 @@ def findConfigs(rootDir=None, availableArchs=None, splitWorlds=True):
             When None, calls findAvailableArchs() to auto-detect.
         splitWorlds: Return one parameter per world for a YAML whose
             problems use several worlds, each marked with that world alone.
+        curatedArchs: Architectures with a registered ``skip-<arch>`` marker
+            (see curatedArchsFromMarkers). When set, configs are skipped on
+            any other architecture unless they name it. None disables this.
     """
     if rootDir is None:
         rootDir = _TESTS_ROOT_DIR
@@ -312,7 +347,7 @@ def findConfigs(rootDir=None, availableArchs=None, splitWorlds=True):
             elif filename.endswith('.yaml') and "logic_yaml" not in dirpath:
                 filepath = os.path.join(rootDir, dirpath, filename)
                 if not "test_data" in filepath:
-                    marks = configMarks(filepath, rootDir, availableArchs)
+                    marks = configMarks(filepath, rootDir, availableArchs, curatedArchs)
                     if marks is None:
                         # Not a TensileLite config (e.g. a library logic YAML); skip.
                         continue
