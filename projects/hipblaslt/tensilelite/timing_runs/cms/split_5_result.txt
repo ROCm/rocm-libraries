@@ -1,3 +1,0 @@
-total groups 66
-rcs [0, 0, 0, 0, 0] wall 36.8 s
-finished
