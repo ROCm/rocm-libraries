@@ -45,22 +45,30 @@ from ._p4_analytical import (
     P4_HEAD_SCALES,
     P4_QUICK_CASES,
     P4_SEARCH_BASES,
+    P4_UNSEPARATED,
     SCORE_SCALE,
+    SEPARATION_LABELS,
     F32Interval,
     P4Case,
     P4Fixture,
+    P4Mutation,
+    applicable_mutations,
     certified_target_bits,
     coordinate_class,
     emulate_row,
+    format_separation,
     head_scale_margin,
+    mutation_separation,
     p4_inputs,
     p4_query_key,
     row_logit,
     row_trace,
+    score,
     score_numerator,
     target_value,
     tier_a_exposure,
     tier_b_exposure,
+    tier_b_row,
     visited_tiles,
     add_faithful,
     add_rn,
@@ -1058,3 +1066,188 @@ def test_head_scales_keep_their_committed_separation(family: str) -> None:
     q_scales, k_scales = P4_HEAD_SCALES[family]
     margin = head_scale_margin(P4_SEARCH_BASES, family, q_scales, k_scales)
     assert margin == P4_HEAD_SCALE_MARGIN[family] > 0
+
+
+# ---------------------------------------------------------------------------
+# Mutation separation (T5, DT4, invariant I5).
+# ---------------------------------------------------------------------------
+
+
+def test_mutation_applicability_follows_fixture_and_mask() -> None:
+    covered = set()
+    for case in P4_QUICK_CASES:
+        mutations = applicable_mutations(case)
+        assert len(mutations) == len(set(mutations))
+        covered.update(mutations)
+        assert (P4Mutation.INVERSE_SHIFT in mutations) == (
+            case.fixture is P4Fixture.CYCLIC
+        )
+        assert (P4Mutation.WALSH_SIGN in mutations) == (
+            case.fixture is P4Fixture.WALSH
+        )
+        assert (P4Mutation.EXCLUDE_LAST_KEY in mutations) == (case.mask == "causal")
+        assert (P4Mutation.INCLUDE_OLD_WINDOW_KEY in mutations) == (
+            case.mask == "window"
+        )
+    assert covered == set(P4Mutation)
+
+
+def _mutated_query_key(
+    case: P4Case, mutation: P4Mutation
+) -> tuple[np.ndarray, np.ndarray, range]:
+    """The Q and K a mutated kernel reads, and the keys they are defined for."""
+    q, k = p4_query_key(case)
+    keys = range(case.base.seqlen_k)
+    if mutation is P4Mutation.Q_HEAD_ROTATE:
+        q = np.roll(q, -1, axis=2)
+    elif mutation is P4Mutation.K_HEAD_ROTATE:
+        k = np.roll(k, -1, axis=2)
+    elif mutation is P4Mutation.K_ROW_PLUS_ONE:
+        k, keys = k[:, 1:], range(case.base.seqlen_k - 1)
+    elif mutation is P4Mutation.K_ROW_MINUS_ONE:
+        k, keys = k[:, :-1], range(1, case.base.seqlen_k)
+    elif mutation is P4Mutation.INVERSE_SHIFT:
+        # Transpose each 64 x 64 key-by-dimension block of the periodic K.
+        block = np.swapaxes(k[:, :64], 1, 3)
+        k = np.tile(block, (1, case.base.seqlen_k // 64, 1, 1))
+    elif mutation is P4Mutation.WALSH_SIGN:
+        signs = np.where(np.arange(case.base.seqlen_k) & 1, -1.0, 1.0)
+        k = k * signs[None, :, None, None].astype(np.float32)
+    elif mutation.value.startswith("omit_walsh_block_"):
+        block = int(mutation.value.rsplit("_", 1)[1])
+        q = q.copy()
+        q[..., 16 * block : 16 * (block + 1)] = 0.0
+    return q, k, keys
+
+
+_SCORE_MUTATIONS = (
+    P4Mutation.Q_HEAD_ROTATE,
+    P4Mutation.K_HEAD_ROTATE,
+    P4Mutation.K_ROW_PLUS_ONE,
+    P4Mutation.K_ROW_MINUS_ONE,
+    P4Mutation.INVERSE_SHIFT,
+    P4Mutation.WALSH_SIGN,
+    P4Mutation.OMIT_WALSH_BLOCK_0,
+    P4Mutation.OMIT_WALSH_BLOCK_1,
+    P4Mutation.OMIT_WALSH_BLOCK_3,
+)
+
+
+@pytest.mark.parametrize(
+    "case",
+    [case for case in P4_QUICK_CASES if case.dtype == "fp16"],
+    ids=lambda case: case.fixture.value,
+)
+def test_mutated_scores_are_the_mutated_dot_products(case: P4Case) -> None:
+    """The closed-form mutated scores equal the exact QK dot products of the
+    inputs a mutated kernel would read (heads rotated, K rows off by one, the
+    cyclic K transposed, the Walsh sign dropped or one 16-dimension block of
+    the contraction skipped). Scale mutations change only the score scale."""
+    for mutation in set(_SCORE_MUTATIONS) & set(applicable_mutations(case)):
+        q, k, keys = _mutated_query_key(case, mutation)
+        dots = np.einsum(
+            "bqhd,bkhd->bhqk", q.astype(np.float64), k.astype(np.float64)
+        )[0]
+        for head in range(case.base.nhead_q):
+            expected = np.array(
+                [
+                    [
+                        float(score_numerator(case, head, row, key, mutation))
+                        for key in keys
+                    ]
+                    for row in range(case.base.seqlen_q)
+                ]
+            )
+            np.testing.assert_array_equal(dots[head], expected, err_msg=mutation.value)
+
+    from kernels.gfx942 import attention_dense
+
+    scales = {
+        P4Mutation.OMIT_SQRT_D: round_f32(f32(1.0) * f32(attention_dense.LOG2E)),
+        P4Mutation.EXP_ENCODING: f32(1.0 / 8.0),
+    }
+    row = 64 + case.residue_shift
+    key = row - case.residue_shift
+    for mutation, scale in scales.items():
+        numerator = score_numerator(case, 0, row, key)
+        assert numerator != 0
+        assert score(case, 0, row, key, mutation) == round_f32(numerator * scale)
+
+
+@pytest.mark.parametrize("case", P4_QUICK_CASES, ids=_quick_id)
+def test_every_mutation_is_separated_or_classified(case: P4Case) -> None:
+    """DT4 / I5: every applicable mutation's Tier B is disjoint from the correct
+    Tier B at some coordinate (``G(m) > 0``), or the cell is listed in
+    ``P4_UNSEPARATED`` with its owner. ``G`` is taken over the sampled rows,
+    a lower bound of the full gap; ``pytest -s`` prints each ``G`` and its
+    coordinate, including the P3-owned denominator and one-key boundary gaps."""
+    unexplained = []
+    for mutation in applicable_mutations(case):
+        separation = mutation_separation(case, mutation)
+        print(format_separation(case, separation))
+        label = P4_UNSEPARATED.get((case.case_id, mutation))
+        if (separation.gap > 0) == (label is not None):
+            unexplained.append(f"{mutation.value}: G={separation.gap}, label={label}")
+    assert not unexplained, unexplained
+
+
+def test_unseparated_cells_are_proven_and_owned() -> None:
+    """Each listed cell has a proven zero gap at every coordinate and, when it
+    names another P4 fixture as owner, that fixture separates the mutation on
+    the same kernel.
+
+    For ``OMIT_RESCALE`` the zero is proven, not sampled: if every ``alpha``
+    after the first visited tile admits 1, the mutated recurrence
+    (``alpha = 1``) is a member of the correct one, and interval propagation is
+    inclusion-monotone, so the mutated Tier B lies inside the correct Tier B."""
+    assert P4_UNSEPARATED
+    cases = {case.case_id: case for case in P4_QUICK_CASES}
+    for (case_id, mutation), label in P4_UNSEPARATED.items():
+        assert label in SEPARATION_LABELS
+        case = cases[case_id]
+        assert mutation in applicable_mutations(case)
+        if mutation is P4Mutation.OMIT_RESCALE:
+            for row in range(case.base.seqlen_q):
+                for head in range(case.base.nhead_q):
+                    for step in row_trace(case, head, row).steps[1:]:
+                        assert Fraction(1) in step.alpha, (case_id, row, head)
+        else:
+            assert mutation_separation(case, mutation, rows=None).gap == 0
+        if label == "owned by another P4 fixture":
+            owners = [
+                other
+                for other in P4_QUICK_CASES
+                if other.base == case.base
+                and mutation in applicable_mutations(other)
+                and (other.case_id, mutation) not in P4_UNSEPARATED
+            ]
+            assert any(
+                mutation_separation(other, mutation).gap > 0 for other in owners
+            ), (case_id, mutation.value)
+
+
+_MUTANT_EXPOSURES = ("basis@0", "folded")
+_MUTANT_ROWS = (0, 63, 64, 127, 128, 255)
+
+
+@pytest.mark.parametrize("case", P4_QUICK_CASES, ids=_quick_id)
+def test_mutant_paths_lie_inside_their_tier_b(case: P4Case) -> None:
+    """I2 for the mutated semantics: a mutated kernel's pinned and randomized
+    realizations lie in the mutated Tier B. Without this, a disjoint pair of
+    enclosures would not imply that the mutant's output is rejected."""
+    rng = np.random.default_rng(_RNG_SEED)
+    for mutation in applicable_mutations(case):
+        for exposure in _MUTANT_EXPOSURES:
+            for row in _MUTANT_ROWS:
+                for head in range(case.base.nhead_q):
+                    low, high = tier_b_row(case, exposure, row, head, mutation=mutation)
+                    for generator in (None, rng):
+                        bits = emulate_row(
+                            case, exposure, row, head, rng=generator, mutation=mutation
+                        )
+                        assert np.all(_within(bits, low, high)), (
+                            mutation.value,
+                            exposure,
+                            row,
+                            head,
+                        )
