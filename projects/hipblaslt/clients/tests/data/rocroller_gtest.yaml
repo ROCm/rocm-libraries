@@ -96,6 +96,32 @@ Tests:
   norm_check: 0
   gpu_arch: '950'
 
+# M = 1000 is a multiple of no rocRoller tile, and no Tensile MX kernel reads
+# compact scales, so nothing serves these. Every family must report that the same
+# way, as a successful query with no algorithm, on the C and the object API: FP6,
+# BF6 and mixed pairs once returned an internal error where FP4 and FP8 did not.
+- name: rocroller_mx_unserved_m_no_solution
+  category: pre_checkin
+  function:
+    matmul:
+    - { a_type: f6_r, b_type: f6_r, c_type: f32_r, d_type: f32_r, compute_type: c_f32_r, scaleA: 3, scaleB: 3, scale_type: f32_r }
+    - { a_type: bf6_r, b_type: bf6_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scaleA: 3, scaleB: 3, scale_type: f32_r }
+    - { a_type: f8_r, b_type: f4_r, c_type: f16_r, d_type: f16_r, compute_type: c_f32_r, scaleA: 3, scaleB: 3, scale_type: f32_r }
+    - { a_type: f8_r, b_type: f8_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scaleA: 3, scaleB: 3, scale_type: f32_r }
+  M: [1000]
+  N: [256]
+  K: [256]
+  transA: T
+  transB: N
+  use_ext: [0, 1]
+  alpha: 1
+  beta: 0
+  initialization: uniform_low_precision
+  expect_no_solution: 1
+  unit_check: 0
+  norm_check: 0
+  gpu_arch: '950'
+
 # A ranked rocRoller tile has to divide M (macro tile) and K (depth unroll). It does
 # not have to divide N: the kernel edges the free dimension. The off path required
 # all three, which refused tiles that would have worked and could leave a problem
