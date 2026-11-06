@@ -17,7 +17,6 @@ from __future__ import annotations
 import os
 from pathlib import Path
 import re
-import shutil
 import subprocess
 import tempfile
 import unittest
@@ -32,6 +31,7 @@ from kernels.common.conv_implicit_gemm import (
     is_valid_spec,
 )
 from rocke.core.lower_llvm import lower_kernel_to_llvm
+from tests._llvm_tools import find_llvm_tool
 
 _TF32 = ConvDataSpec("fp32", "fp32", "fp32", mma_dtype="tf32")
 
@@ -234,7 +234,8 @@ class TestConvFwdTf32Rejections(unittest.TestCase):
             spec.validate()
 
     def test_tf32_is_not_a_storage_dtype(self):
-        for spelling in ("tf32", "xf32"):
+        # Every spelling rocke.core.dtypes resolves to tf32, any case.
+        for spelling in ("tf32", "xf32", "TF32"):
             with self.subTest(spelling=spelling):
                 spec = _spec(16, 32, data=ConvDataSpec(spelling, spelling, "fp32"))
                 self._rejected(spec, "gfx950", "compute mode")
@@ -320,12 +321,6 @@ class TestConvFwdTf32Name(unittest.TestCase):
 # ---------------------------------------------------------------------------
 
 
-def _llvm_tool(name: str):
-    """ROCm's own LLVM tool first: a distro build may not know the gfx target."""
-    candidate = Path(os.environ.get("ROCM_PATH", "/opt/rocm")) / "llvm" / "bin" / name
-    return str(candidate) if candidate.exists() else shutil.which(name)
-
-
 def _compile(ir: str, arch: str) -> bytes:
     """comgr code object; skips only when comgr cannot target ``arch``."""
     try:
@@ -347,10 +342,10 @@ def _disassemble(hsaco: bytes):
     """``(mnemonics, notes)``; skips when llvm-objdump is missing."""
     from rocke.analysis.isa import _extract_mnemonic, _instruction_lines
 
-    objdump = _llvm_tool("llvm-objdump")
+    objdump = find_llvm_tool("llvm-objdump")
     if objdump is None:
         raise unittest.SkipTest("llvm-objdump not found; cannot inspect the ISA")
-    readelf = _llvm_tool("llvm-readelf")
+    readelf = find_llvm_tool("llvm-readelf")
     with tempfile.TemporaryDirectory() as tmp:
         path = Path(tmp) / "kernel.hsaco"
         path.write_bytes(hsaco)
@@ -444,8 +439,10 @@ class TestConvFwdTf32Backend(unittest.TestCase):
         def no_engine():
             raise bk.BackendError("rocke_engine is not importable")
 
+        # ROCKE_BACKEND pins the Python builder's own lowering, which resolves
+        # the default backend, away from the missing engine.
         with mock.patch.object(bk, "_import_engine", no_engine), mock.patch.dict(
-            os.environ, {"ROCKE_CPP_QUIET_FALLBACK": "1"}
+            os.environ, {"ROCKE_CPP_QUIET_FALLBACK": "1", "ROCKE_BACKEND": "python"}
         ):
             for arch, m, k, mfma in self._CASES:
                 for backend in ("python", "cpp"):

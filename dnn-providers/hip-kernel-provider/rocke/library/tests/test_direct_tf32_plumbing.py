@@ -106,6 +106,10 @@ def test_miopen_rejects(parse, kw, extra, match):
 
 def test_dtype_lists():
     assert dks.DIRECT_DTYPES == ("fp16", "bf16", "fp32", "tf32")
+    # The cache stores what the kernels' own storage map says.
+    from kernels.common.conv_direct_grouped import _DIRECT_STORAGE
+
+    assert tuple(_DIRECT_STORAGE) == dks.DIRECT_DTYPES
     # --compile-all without --dtype builds what it always did.
     assert dks.DIRECT_COMPILE_DTYPES == ("fp16", "bf16")
 

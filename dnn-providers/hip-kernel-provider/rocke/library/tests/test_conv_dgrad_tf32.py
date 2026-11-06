@@ -16,14 +16,14 @@ counterpart is ``TestConvDgradTf32`` in ``test_conv_dgrad_correctness.py``.
 from __future__ import annotations
 
 import itertools
-import os
-from pathlib import Path
 import re
-import shutil
 import subprocess
 import tempfile
 import unittest
 from dataclasses import replace
+from pathlib import Path
+
+from tests._llvm_tools import find_llvm_tool
 
 # (arch, warp tile, tile_k): every TF32 atom the catalog carries.
 _ATOMS = (
@@ -329,15 +329,6 @@ class TestTf32Naming(unittest.TestCase):
 # ---------------------------------------------------------------------------
 
 
-def _objdump() -> str | None:
-    """ROCm's ``llvm-objdump`` first: a distro build may lack the AMDGPU target."""
-    root = os.environ.get("ROCM_PATH", "/opt/rocm")
-    candidate = Path(root) / "llvm" / "bin" / "llvm-objdump"
-    if candidate.exists():
-        return str(candidate)
-    return shutil.which("llvm-objdump")
-
-
 def _comgr(isa: str):
     try:
         from rocke.runtime import comgr
@@ -355,7 +346,7 @@ def _comgr(isa: str):
 def _mnemonics(hsaco: bytes) -> list[str]:
     from rocke.analysis.isa import _extract_mnemonic, _instruction_lines
 
-    tool = _objdump()
+    tool = find_llvm_tool("llvm-objdump")
     if tool is None:
         raise unittest.SkipTest("llvm-objdump not found; cannot inspect the ISA")
     with tempfile.TemporaryDirectory() as tmp:

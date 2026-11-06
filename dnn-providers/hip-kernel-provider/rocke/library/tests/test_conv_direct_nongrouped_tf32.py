@@ -30,7 +30,6 @@ import ctypes
 import importlib.util
 import os
 import re
-import shutil
 import subprocess
 import tempfile
 import unittest
@@ -41,7 +40,10 @@ from rocke.runtime.hip_module import get_device_arch
 
 _HAS_TORCH = importlib.util.find_spec("torch") is not None
 if _HAS_TORCH:
-    from builders.common.conv_reference import tf32_reference_inputs
+    from builders.common.conv_reference import (
+        tf32_reference_inputs,
+        tf32_reference_tol,
+    )
 if _HAS_TORCH:
     # Claim the HIP context for torch before rocke's runtime touches it (see
     # test_direct_conv_correctness.py).
@@ -64,6 +66,7 @@ from kernels.common.conv_direct_nongrouped import (  # noqa: E402
     nongrouped_split_knobs,
 )
 from rocke.core.lower_llvm import lower_kernel_to_llvm  # noqa: E402
+from tests._llvm_tools import find_llvm_tool
 
 _F32_DTYPES = ("fp32", "tf32")
 _ARCHES = ("gfx950", "gfx942")
@@ -374,11 +377,6 @@ class TestNongroupedF32Build(unittest.TestCase):
 # ---------------------------------------------------------------------------
 
 
-def _llvm_tool(name: str):
-    candidate = Path(os.environ.get("ROCM_PATH", "/opt/rocm")) / "llvm" / "bin" / name
-    return str(candidate) if candidate.exists() else shutil.which(name)
-
-
 def _compile(ir: str, arch: str) -> bytes:
     try:
         from rocke.runtime import comgr
@@ -398,10 +396,10 @@ def _compile(ir: str, arch: str) -> bytes:
 def _disassemble(hsaco: bytes):
     from rocke.analysis.isa import _extract_mnemonic, _instruction_lines
 
-    objdump = _llvm_tool("llvm-objdump")
+    objdump = find_llvm_tool("llvm-objdump")
     if objdump is None:
         raise unittest.SkipTest("llvm-objdump not found; cannot inspect the ISA")
-    readelf = _llvm_tool("llvm-readelf")
+    readelf = find_llvm_tool("llvm-readelf")
     with tempfile.TemporaryDirectory() as tmp:
         path = Path(tmp) / "kernel.hsaco"
         path.write_bytes(hsaco)
@@ -489,16 +487,18 @@ def _gpu_skip_reason() -> str:
 
 _GPU_SKIP = _gpu_skip_reason()
 
-# Max |error| relative to the output peak, against an IEEE fp32 reference.
-# BF16x3 tracks the full fp32 payload (gfx950); native XF32 drops 13 mantissa
-# bits of every operand (gfx942), so its reference is computed from inputs
-# masked the same way and held to 1e-3, as in test_conv_fwd_correctness.
-_TOL = {
-    ("fp32", "gfx950"): 1e-5,
-    ("fp32", "gfx942"): 1e-5,
-    ("tf32", "gfx950"): 1e-4,
-    ("tf32", "gfx942"): 1e-3,
-}
+
+def _tolerance(dtype: str, arch: str) -> float:
+    """Max |error| relative to the output peak, against an IEEE fp32 reference.
+
+    fp32 is exact fp32 MFMA arithmetic. TF32 is the shared bound
+    (``conv_reference.tf32_reference_tol``): BF16x3 tracks the full fp32
+    payload (gfx950); native XF32 drops 13 mantissa bits of every operand
+    (gfx942), so its reference is computed from inputs masked the same way.
+    """
+    if dtype == "tf32":
+        return tf32_reference_tol(arch)
+    return 1e-5
 
 
 def _u8(t):
@@ -590,7 +590,7 @@ def run_f32_spec(arch: str, spec, artifact=None):
     if not torch.isfinite(out).all():
         return False, float("inf")
     rel = float((out - ref).abs().max() / ref.abs().max().clamp(min=1.0))
-    return rel < _TOL[(p.dtype, arch)], rel
+    return rel < _tolerance(p.dtype, arch), rel
 
 
 def _ng_cases():
@@ -741,8 +741,10 @@ class TestNongroupedF32Backend(unittest.TestCase):
         def no_engine():
             raise bk.BackendError("rocke_engine is not importable")
 
+        # ROCKE_BACKEND pins the Python builder's own lowering, which resolves
+        # the default backend, away from the missing engine.
         with mock.patch.object(bk, "_import_engine", no_engine), mock.patch.dict(
-            os.environ, {"ROCKE_CPP_QUIET_FALLBACK": "1"}
+            os.environ, {"ROCKE_CPP_QUIET_FALLBACK": "1", "ROCKE_BACKEND": "python"}
         ):
             for dt in ("fp32", "tf32"):
                 spec = _spec(dt)

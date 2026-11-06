@@ -33,12 +33,16 @@ from typing import Callable, List, Tuple
 
 from kernels.common import conv_direct_grouped as cdg
 from kernels.common.conv_direct_grouped import DirectConvProblem as P
+from tests._llvm_tools import find_llvm_tool
 
 _ARCHS = ("gfx950", "gfx942")
 _F32_DTYPES = ("fp32", "tf32")
 _HAS_TORCH = importlib.util.find_spec("torch") is not None
 if _HAS_TORCH:
-    from builders.common.conv_reference import tf32_reference_inputs
+    from builders.common.conv_reference import (
+        tf32_reference_inputs,
+        tf32_reference_tol,
+    )
 if _HAS_TORCH:
     # Claim the HIP context for torch before rocke's runtime touches it (see
     # test_direct_conv_correctness.py). The reference itself runs on the CPU.
@@ -323,13 +327,14 @@ class TestWgradBuild(unittest.TestCase):
     def test_isa_mfma_counts(self):
         """KH*KW*HPB logical 16x16 MMAs: gfx950 tf32 = 3 bf16 MFMAs each,
         gfx942 tf32 = native xf32, fp32 = 16x16x4 f32 split."""
-        import shutil
         import subprocess
         import tempfile
 
         from rocke import compile_kernel
 
-        objdump = shutil.which("llvm-objdump") or "/opt/rocm/llvm/bin/llvm-objdump"
+        objdump = find_llvm_tool("llvm-objdump")
+        if objdump is None:
+            self.skipTest("llvm-objdump not found; cannot inspect the ISA")
         label, pkw, skw = _WGRAD_CASES[0]  # 3x3, HPB 4, mk 32 -> frag 8
         logical = 3 * 3 * 4
         expect = {
@@ -442,13 +447,6 @@ def _ref_dgrad(dY, W, p):
     return dx.permute(0, 2, 3, 1).contiguous()
 
 
-def _tf32_wgrad_tol(arch: str) -> float:
-    """TF32 wgrad bound: gfx950's BF16x3 emulation tracks the full fp32 payload;
-    gfx942's native XF32 is checked against masked inputs, as in
-    test_conv_fwd_correctness."""
-    return 1e-3 if arch == "gfx942" else 1e-4
-
-
 def _ref_wgrad(X, dY, p):
     import torch.nn.functional as F
 
@@ -508,7 +506,7 @@ class TestGpuCorrectness(unittest.TestCase):
 
     def test_wgrad(self):
         for dtype in _F32_DTYPES:
-            tol = 1e-5 if dtype == "fp32" else _tf32_wgrad_tol(_GPU)
+            tol = 1e-5 if dtype == "fp32" else tf32_reference_tol(_GPU)
             for label, pkw, skw in _WGRAD_CASES:
                 with self.subTest(dtype=dtype, case=label):
                     spec = _wgrad_spec(label, pkw, skw, dtype)

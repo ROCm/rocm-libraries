@@ -34,7 +34,6 @@ import ctypes
 import importlib.util
 import os
 import re
-import shutil
 import subprocess
 import tempfile
 import unittest
@@ -70,6 +69,7 @@ from kernels.common.conv_direct_grouped import (
     make_dgrad_fprop_spec,
 )
 from rocke.core.lower_llvm import lower_kernel_to_llvm
+from tests._llvm_tools import find_llvm_tool
 
 _HAS_TORCH = importlib.util.find_spec("torch") is not None
 if _HAS_TORCH:
@@ -468,11 +468,6 @@ class TestDirectTf32Names(unittest.TestCase):
 # ---------------------------------------------------------------------------
 
 
-def _llvm_tool(name: str):
-    candidate = Path(os.environ.get("ROCM_PATH", "/opt/rocm")) / "llvm" / "bin" / name
-    return str(candidate) if candidate.exists() else shutil.which(name)
-
-
 def _disassemble(kernel, arch: str):
     """``(instructions, notes)`` with ``instructions = [(addr, mnemonic, text)]``."""
     try:
@@ -485,8 +480,8 @@ def _disassemble(kernel, arch: str):
             raise unittest.SkipTest(f"the loaded comgr cannot target {arch}")
     except comgr.ComgrError as exc:  # pragma: no cover
         raise unittest.SkipTest(f"comgr unavailable: {exc}") from exc
-    objdump = _llvm_tool("llvm-objdump")
-    readelf = _llvm_tool("llvm-readelf")
+    objdump = find_llvm_tool("llvm-objdump")
+    readelf = find_llvm_tool("llvm-readelf")
     if objdump is None or readelf is None:
         raise unittest.SkipTest("llvm-objdump / llvm-readelf not found")
     hsaco, _ = comgr.build_hsaco_from_llvm_ir(
@@ -891,8 +886,10 @@ class TestDirectF32Backend(unittest.TestCase):
         def no_engine():
             raise bk.BackendError("rocke_engine is not importable")
 
+        # ROCKE_BACKEND pins the Python builder's own lowering, which resolves
+        # the default backend, away from the missing engine.
         with mock.patch.object(bk, "_import_engine", no_engine), mock.patch.dict(
-            os.environ, {"ROCKE_CPP_QUIET_FALLBACK": "1"}
+            os.environ, {"ROCKE_CPP_QUIET_FALLBACK": "1", "ROCKE_BACKEND": "python"}
         ):
             for name, kind in self._KINDS:
                 _, _, make, m = _FWD[name]

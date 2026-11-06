@@ -23,9 +23,7 @@ GPU numerics live in ``test_conv_wgrad_correctness.py`` (``TestConvWgradTf32``).
 
 from __future__ import annotations
 
-import os
 import re
-import shutil
 import subprocess
 import tempfile
 import unittest
@@ -38,6 +36,7 @@ from kernels.common.conv_implicit_gemm_wgrad import (
     build_implicit_gemm_conv_wgrad,
     is_valid_wgrad_spec,
 )
+from tests._llvm_tools import find_llvm_tool
 
 _TF32 = ConvDataSpec(dtype_a="fp32", dtype_b="fp32", dtype_d="fp32", mma_dtype="tf32")
 _FP32 = ConvDataSpec(dtype_a="fp32", dtype_b="fp32", dtype_d="fp32")
@@ -306,13 +305,6 @@ class TestTf32KernelName(unittest.TestCase):
 # ---------------------------------------------------------------------------
 
 
-def _objdump():
-    """ROCm's ``llvm-objdump`` first: a system one may predate gfx950."""
-    root = Path(os.environ.get("ROCM_PATH", "/opt/rocm"))
-    cand = root / "llvm" / "bin" / "llvm-objdump"
-    return str(cand) if cand.exists() else shutil.which("llvm-objdump")
-
-
 class TestTf32Isa(unittest.TestCase):
     """One config per atom compiles to a code object with the expected MFMAs.
 
@@ -341,7 +333,7 @@ class TestTf32Isa(unittest.TestCase):
             self.skipTest(f"the loaded comgr cannot target {arch}")
         hsaco, _ = comgr.build_hsaco_from_llvm_ir(ll, isa=isa)
         self.assertTrue(hsaco)
-        tool = _objdump()
+        tool = find_llvm_tool("llvm-objdump")
         if tool is None:
             self.skipTest("llvm-objdump not found")
         from rocke.analysis.isa import _extract_mnemonic, _instruction_lines
