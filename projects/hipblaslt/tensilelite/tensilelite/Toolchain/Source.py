@@ -34,6 +34,7 @@ from ..Common.TimingInstrumentation import timing_context
 
 from .Component import Compiler, Bundler
 from .HelperKernelCache import HelperKernelCache
+from .HelperKernelChunkCache import HelperKernelChunkCache
 from .HelperKernelChunks import compileHelperChunks, supportsChunkedCompile
 from .HelperKernelPch import HelperKernelPch
 
@@ -138,7 +139,8 @@ def _compileHelperChunks(
         chunkPaths: Sequence[Union[Path, str]],
         objPath: str,
     ) -> bool:
-    """Compiles the chunks of the helper-kernel source (see HelperKernelChunks) into objPath.
+    """Compiles the chunks of the helper-kernel source (see HelperKernelChunks) into objPath,
+    reusing the chunks in the chunk cache (HelperKernelChunkCache).
 
     Returns False if that fails in any way (a compile error, a stale PCH, a driver whose jobs
     are not the expected ones): the caller then compiles the whole source in one piece, which
@@ -147,7 +149,7 @@ def _compileHelperChunks(
     try:
         compileHelperChunks(
             compiler, includeDir, cmdlineArchs[0], chunkPaths, objPath,
-            None if pchPath is None else str(pchPath)
+            None if pchPath is None else str(pchPath), HelperKernelChunkCache()
         )
         return True
     except Exception as err:
