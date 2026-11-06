@@ -110,8 +110,8 @@ python tests/run_all.py \
   --pytest-target core/test_arch_domain_lane.py::test_the_corpus_gate_is_green
 ```
 
-The final line says `RESULT: FOCUSED GREEN`; this is an iteration result, not the
-complete pre-merge verdict. Run `python tests/run_all.py` without selectors
+The final line says `RESULT: PARTIAL`; this is an iteration result, not the
+complete pre-merge verdict, and it never reads as `GREEN`. Run `python tests/run_all.py` without selectors
 before submitting a change. For a seconds-scale inner loop, invoke pytest
 itself; use the focused runner when the surrounding gates are relevant.
 

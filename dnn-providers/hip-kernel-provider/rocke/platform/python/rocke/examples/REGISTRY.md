@@ -40,8 +40,9 @@ travel with the tree. Build artifacts and the run dashboard go to
 
 For each registered example `run_all.py`:
 
-1. Checks skip-gates (`needs_gpu`, `arch`) and SKIPs-with-reason if unmet --
-   the run stays green, the skip is reported.
+1. Checks skip-gates (`needs_gpu`, `arch`) and SKIPs-with-reason if unmet.
+   A skipped example makes the run `INCOMPLETE` (exit 3; `--allow-incomplete`
+   exits 0 for local iteration), never `GREEN`.
 2. Runs `python -m <module> <fixed argv>` in a subprocess with deterministic
    env (`PYTHONHASHSEED=0`, fixed `TMPDIR`).
 3. Distills stdout to a **DIGEST**: only the numeric-verdict lines

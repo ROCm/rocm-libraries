@@ -15,8 +15,9 @@
 #     prints -- max_abs_diff, bad=, PASS/FAIL -- which are seed-deterministic),
 #     and asserts that digest against a golden captured by `--bless`;
 #   * graceful SKIP-with-reason for examples that need a GPU we don't have,
-#     missing data, or a non-matching arch -- the run stays green, the skip is
-#     reported.
+#     missing data, or a non-matching arch. A skip is reported and makes the
+#     run INCOMPLETE (exit 3; 0 with --allow-incomplete); FAIL/DRIFT/ERROR or
+#     an empty selection make it RED (exit 1); `--only` makes it PARTIAL.
 #
 # This is deliberately a FRAMEWORK + a representative wired subset, not an
 # attempt to make all 40k LOC repeatable in one shot. Registering another
@@ -39,7 +40,7 @@
 #   python3 -m rocke.examples.run_all --list
 #
 # Goldens live next to this file under examples/_goldens/<name>.json so they
-# travel with the tree; build artifacts / dashboards go to /tmp.
+# travel with the tree; the dashboard JSON goes to a per-user temp file.
 
 from __future__ import annotations
 
@@ -53,6 +54,8 @@ import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import List, Optional, Tuple
+
+from rocke.tests.runner_verdict import RunRecord, line_buffered_stdout, user_scratch_dir
 
 HERE = Path(__file__).resolve().parent
 GOLDEN_DIR = HERE / "_goldens"
@@ -350,6 +353,7 @@ def run_one(ex: Example, *, bless: bool, live_arch: Optional[str]) -> RunResult:
 # Driver
 # ---------------------------------------------------------------------
 def main(argv: Optional[List[str]] = None) -> int:
+    line_buffered_stdout()
     ap = argparse.ArgumentParser(description=__doc__)
     g = ap.add_mutually_exclusive_group()
     g.add_argument(
@@ -366,10 +370,12 @@ def main(argv: Optional[List[str]] = None) -> int:
     )
     ap.add_argument(
         "--json",
-        default=os.path.join(
-            os.environ.get("TMPDIR", "/tmp"),
-            f"ck_examples_run_{os.getuid()}.json",
-        ),
+        default=str(user_scratch_dir("ck_examples_run")) + ".json",
+    )
+    ap.add_argument(
+        "--allow-incomplete",
+        action="store_true",
+        help="exit 0 (still printing INCOMPLETE) when examples were skipped",
     )
     args = ap.parse_args(argv)
 
@@ -382,19 +388,24 @@ def main(argv: Optional[List[str]] = None) -> int:
             )
         return 0
 
+    record = RunRecord(allow_incomplete=args.allow_incomplete)
     subs = [s for s in args.only.split(",") if s]
+    if subs:
+        record.partial(f"--only {args.only}")
 
     def want(ex: Example) -> bool:
         return not subs or any(s in ex.name or s in ex.family for s in subs)
+
+    selected = [ex for ex in REGISTRY if want(ex)]
+    if not selected:
+        record.failed("selection", "selected no examples")
 
     live = _live_arch()
     mode = "BLESS" if args.bless else "CHECK"
     print(f"rocke examples {mode}  live_arch={live}  registry={len(REGISTRY)}")
 
     results: List[RunResult] = []
-    for ex in REGISTRY:
-        if not want(ex):
-            continue
+    for ex in selected:
         print(f"  running {ex.name} ...", flush=True)
         results.append(run_one(ex, bless=args.bless, live_arch=live))
 
@@ -412,16 +423,21 @@ def main(argv: Optional[List[str]] = None) -> int:
                 "reason": r.reason,
             }
         )
+        stage = f"{r.family}/{r.name}"
         if r.status == "PASS":
             npass += 1
-        elif r.status == "FAIL":
-            nfail += 1
-        elif r.status == "DRIFT":
-            ndrift += 1
+            record.passed(stage, r.reason)
         elif r.status == "SKIPPED":
             nskip += 1
+            record.skipped(stage, r.reason)
         else:
-            nerr += 1
+            if r.status == "FAIL":
+                nfail += 1
+            elif r.status == "DRIFT":
+                ndrift += 1
+            else:
+                nerr += 1
+            record.failed(stage, r.status)
         line = f"  {r.status:8s} {r.family}/{r.name}"
         if r.digest:
             line += f"  digest={r.digest[:12]}"
@@ -437,8 +453,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     print(f"  PASS={npass} FAIL={nfail} DRIFT={ndrift} SKIPPED={nskip} ERROR={nerr}")
     print(f"  goldens: {GOLDEN_DIR}")
     print(f"  dashboard: {args.json}")
-    # Nonzero only on a real failure/drift/error; skips keep the run green.
-    return 1 if (nfail or ndrift or nerr) else 0
+    return record.report("examples run_all")
 
 
 if __name__ == "__main__":

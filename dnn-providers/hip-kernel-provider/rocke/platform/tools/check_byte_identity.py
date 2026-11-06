@@ -24,13 +24,13 @@ import os
 import shutil
 import subprocess
 import sys
-import tempfile
 from pathlib import Path
 
 from _hostcaps import available_cpus
 
 HERE = Path(__file__).resolve().parent
 ROCKE = HERE.parents[0] if HERE.name != "tools" else HERE.parent  # tools -> rocKE
+PYROOT = ROCKE / "python"
 RUN_DIFF = ROCKE / "tests" / "instances" / "differential" / "run_diff.py"
 # The parity family that carries the llvm23-gated gfx1250 ops.
 GFX1250_FAMILY = "gfx1250_lowering"
@@ -48,11 +48,19 @@ TARGET_OP_PROFILE_FAMILIES = (
 )
 
 
+def _default_build_root() -> str:
+    """The per-user build root the platform runner also defaults to."""
+    if str(PYROOT) not in sys.path:
+        sys.path.insert(0, str(PYROOT))
+    from rocke.tests.runner_verdict import user_scratch_dir
+
+    return str(user_scratch_dir("rocke_verify"))
+
+
 def _selected_profile_supports_target_ops() -> bool:
     """Resolve the selected lane once and query its structural profile."""
-    python_root = ROCKE / "python"
-    if str(python_root) not in sys.path:
-        sys.path.insert(0, str(python_root))
+    if str(PYROOT) not in sys.path:
+        sys.path.insert(0, str(PYROOT))
     from rocke.core.lower_llvm import (
         _resolve_llvm_flavor,
         _supports_llvm23_target_ops,
@@ -79,9 +87,7 @@ def main() -> int:
         default="",
         help="restrict to families containing SUBSTR (comma-separated)",
     )
-    ap.add_argument(
-        "--build-root", default=str(Path(tempfile.gettempdir()) / "rocke_verify")
-    )
+    ap.add_argument("--build-root", default=_default_build_root())
     ap.add_argument("--ref-pyroot", default=os.environ.get("ROCKE_REF_PYROOT", ""))
     ap.add_argument("--ref-shim", default=os.environ.get("ROCKE_REF_SHIM", ""))
     args = ap.parse_args()

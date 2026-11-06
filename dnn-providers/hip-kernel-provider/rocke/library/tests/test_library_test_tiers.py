@@ -12,6 +12,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from rocke.tests.runner_verdict import Outcome, RunRecord
 
 from . import _file_manifest_plugin as manifest_plugin
 from . import run_all
@@ -29,6 +30,7 @@ from .run_all import (
 )
 
 _GATE_DIR = Path(__file__).with_name("gates")
+_ALLOWED_INCOMPLETE = "RESULT: INCOMPLETE (allowed by --allow-incomplete)"
 _EXPECTED_GATES = {
     "counted-ir": _GATE_DIR / "attention_bwd_counted_ir_gate.py",
     "counted-isa": _GATE_DIR / "attention_bwd_counted_isa_gate.py",
@@ -275,9 +277,9 @@ def test_source_runner_zero_jobs_uses_one_traditional_pytest_process(monkeypatch
 def test_source_runner_positive_jobs_use_fresh_file_processes(monkeypatch):
     calls = []
 
-    def pass_files(**kwargs):
+    def pass_files(record, **kwargs):
         calls.append(kwargs)
-        return run_all._StageResult(0)
+        return record.passed(run_all._UNIT_FILES_STAGE)
 
     monkeypatch.setattr(run_all, "_run_unit_file_stage", pass_files)
     monkeypatch.setattr(
@@ -309,9 +311,9 @@ def test_source_runner_defaults_match_resource_class(
 ):
     calls = []
 
-    def pass_files(**kwargs):
+    def pass_files(record, **kwargs):
         calls.append(kwargs)
-        return run_all._StageResult(0)
+        return record.passed(run_all._UNIT_FILES_STAGE)
 
     monkeypatch.setattr(run_all, "_run_unit_file_stage", pass_files)
     monkeypatch.setattr(run_all.sys, "argv", ["run_all.py", *arguments])
@@ -323,9 +325,9 @@ def test_source_runner_defaults_match_resource_class(
 def test_inherited_gpu_marker_uses_gpu_resource_defaults(monkeypatch):
     calls = []
 
-    def pass_files(**kwargs):
+    def pass_files(record, **kwargs):
         calls.append(kwargs)
-        return run_all._StageResult(0)
+        return record.passed(run_all._UNIT_FILES_STAGE)
 
     monkeypatch.setenv("PYTEST_ADDOPTS", "-m gpu")
     monkeypatch.setattr(run_all, "_run_unit_file_stage", pass_files)
@@ -419,7 +421,9 @@ def test_source_runner_rejects_negative_jobs(monkeypatch):
     assert error.value.code == 2
 
 
-def test_source_runner_stops_before_resource_gates_after_unit_failure(monkeypatch):
+def test_source_runner_stops_before_resource_gates_after_unit_failure(
+    monkeypatch, capsys
+):
     calls = []
 
     def fail_units(command, **kwargs):
@@ -427,9 +431,17 @@ def test_source_runner_stops_before_resource_gates_after_unit_failure(monkeypatc
         return SimpleNamespace(returncode=1)
 
     monkeypatch.setattr(run_all.subprocess, "run", fail_units)
-    monkeypatch.setattr(run_all.sys, "argv", ["run_all.py", "--jobs", "0"])
+    monkeypatch.setattr(
+        run_all.sys, "argv", ["run_all.py", "--jobs", "0", "--allow-incomplete"]
+    )
+    # A failure is RED even when INCOMPLETE is allowed.
     assert run_all.main() == 1
     assert len(calls) == 1
+    out = capsys.readouterr().out
+    for name in EXPLICIT_GATES:
+        stage = f"rocke library gate: {name} (an earlier stage failed)"
+        assert f"{'not run':<17} {stage}" in out
+    assert out.rstrip().endswith("RESULT: RED")
 
 
 def test_source_runner_keep_going_runs_resource_gates_after_unit_failure(monkeypatch):
@@ -454,19 +466,207 @@ def test_source_runner_reports_optional_gate_skip_once(monkeypatch):
         lambda *args, **kwargs: SimpleNamespace(returncode=77),
     )
     command = ["python", "gate.py"]
-    optional = _run("optional compiler gate", command, allow_skip=True)
-    required = _run("required compiler gate", command, allow_skip=False)
-    assert optional.code == 0 and optional.skipped
-    assert required.code == 77 and not required.skipped
+    record = RunRecord()
+    optional = _run("optional compiler gate", command, record, allow_skip=True)
+    required = _run("required compiler gate", command, record, allow_skip=False)
+    assert optional is Outcome.SKIPPED
+    assert required is Outcome.FAILED
+    assert [stage.outcome for stage in record.stages] == [
+        Outcome.SKIPPED,
+        Outcome.FAILED,
+    ]
 
 
-def test_source_runner_reports_incomplete_when_optional_gate_skips(monkeypatch, capsys):
+@pytest.mark.parametrize(
+    "allow, expected", ((False, "RESULT: INCOMPLETE"), (True, _ALLOWED_INCOMPLETE))
+)
+def test_source_runner_reports_incomplete_when_optional_gate_skips(
+    allow, expected, monkeypatch, capsys
+):
     results = iter((0, 0, 77))
     monkeypatch.setattr(
         run_all.subprocess,
         "run",
         lambda *args, **kwargs: SimpleNamespace(returncode=next(results)),
     )
+    arguments = ["--jobs", "0"] + (["--allow-incomplete"] if allow else [])
+    monkeypatch.setattr(run_all.sys, "argv", ["run_all.py", *arguments])
+    assert run_all.main() == (0 if allow else 3)
+    out = capsys.readouterr().out
+    assert out.rstrip().splitlines()[-1] == expected
+    assert f"{'skipped':<17} rocke library gate: counted-isa" in out
+
+
+def _write_junit(path: Path, executed: int, skipped: int = 0) -> None:
+    cases = '<testcase name="ran"/>' * executed
+    cases += '<testcase name="skip"><skipped message="no gpu"/></testcase>' * skipped
+    path.write_text(f"<testsuites><testsuite>{cases}</testsuite></testsuites>")
+
+
+def _junit_writer(calls, executed: int, skipped: int = 0, returncode: int = 0):
+    """A ``subprocess.run`` stand-in that writes each command's JUnit report."""
+
+    def run(command, **kwargs):
+        calls.append(command)
+        for argument in command:
+            if argument.startswith("--junitxml="):
+                report = Path(kwargs["cwd"]) / argument.split("=", 1)[1]
+                _write_junit(report, executed, skipped)
+        return SimpleNamespace(returncode=returncode)
+
+    return run
+
+
+def test_source_runner_full_run_is_green(monkeypatch, capsys):
+    calls = []
+    monkeypatch.setattr(run_all.subprocess, "run", _junit_writer(calls, 2))
     monkeypatch.setattr(run_all.sys, "argv", ["run_all.py", "--jobs", "0"])
     assert run_all.main() == 0
+    assert len(calls) == 3
+    assert capsys.readouterr().out.rstrip().splitlines()[-1] == "RESULT: GREEN"
+
+
+@pytest.mark.parametrize(
+    "arguments, reason",
+    [
+        (["--unit-only"], "--unit-only"),
+        (["--gpu-only"], "--gpu-only"),
+        (["--only", "manifest"], "--only"),
+        (["--gate", "counted-ir"], "--gate"),
+        (["--gate", "counted-ir", "--gate", "counted-isa"], "--gate"),
+        (["--unit-only", "--", "-k", "manifest"], "pytest selection arguments"),
+        (
+            ["--gate", "counted-isa", "--allow-partial-gate", "--gate-arch", "gfx942"],
+            "--gate-arch",
+        ),
+    ],
+)
+def test_narrowed_run_is_partial_never_green(arguments, reason, monkeypatch, capsys):
+    calls = []
+    monkeypatch.setattr(run_all.subprocess, "run", _junit_writer(calls, 2))
+    monkeypatch.setattr(run_all.sys, "argv", ["run_all.py", "--jobs", "0", *arguments])
+    assert run_all.main() == 0
+    out = capsys.readouterr().out
+    assert out.rstrip().splitlines()[-1] == "RESULT: PARTIAL"
+    assert "GREEN" not in out
+    narrowed = next(line for line in out.splitlines() if "narrowed by:" in line)
+    assert reason in narrowed
+
+
+def test_inherited_selection_narrows_the_unit_lane(monkeypatch, capsys):
+    monkeypatch.setenv("PYTEST_ADDOPTS", "-k manifest")
+    monkeypatch.setattr(run_all.subprocess, "run", _junit_writer([], 2))
+    monkeypatch.setattr(
+        run_all.sys, "argv", ["run_all.py", "--unit-only", "--jobs", "0"]
+    )
+    assert run_all.main() == 0
+    out = capsys.readouterr().out
+    assert "PYTEST_ADDOPTS selection" in out
+    assert out.rstrip().splitlines()[-1] == "RESULT: PARTIAL"
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        ["--unit-only", "--jobs", "0"],
+        ["--gate", "counted-ir"],
+    ],
+)
+def test_stage_that_executes_no_tests_is_incomplete(arguments, monkeypatch, capsys):
+    calls = []
+    monkeypatch.setattr(run_all.subprocess, "run", _junit_writer(calls, 0, skipped=3))
+    monkeypatch.setattr(run_all.sys, "argv", ["run_all.py", *arguments])
+    assert run_all.main() == 3
+    out = capsys.readouterr().out
+    assert "executed no tests" in out
+    assert out.rstrip().splitlines()[-1] == "RESULT: INCOMPLETE"
+    assert sum(argument.startswith("--junitxml=") for argument in calls[0]) == 1
+
+
+def test_gpu_only_files_that_execute_nothing_are_incomplete(
+    tmp_path, monkeypatch, capsys
+):
+    files = [tmp_path / "test_a_gpu.py", tmp_path / "test_b_gpu.py"]
+    calls = []
+    monkeypatch.setattr(run_all, "_collect_unit_files", lambda *args: (0, files, ""))
+    monkeypatch.setattr(run_all.subprocess, "run", _junit_writer(calls, 0, skipped=2))
+    monkeypatch.setattr(run_all.sys, "argv", ["run_all.py", "--gpu-only"])
+    assert run_all.main() == 3
+    out = capsys.readouterr().out
+    # Each fresh file process gets its own report, beside its log.
+    assert len(calls) == 2
+    for command in calls:
+        reports = [a for a in command if a.startswith("--junitxml=")]
+        assert len(reports) == 1 and reports[0].endswith(".xml")
+    assert "0 tests executed" in out
+    assert f"executed no tests {run_all._UNIT_FILES_STAGE}" in out
+    assert out.rstrip().splitlines()[-1] == "RESULT: INCOMPLETE"
+
+
+def test_file_lane_with_executed_tests_is_not_empty(tmp_path, monkeypatch, capsys):
+    files = [tmp_path / "test_a.py", tmp_path / "test_b.py"]
+    monkeypatch.setattr(run_all, "_collect_unit_files", lambda *args: (0, files, ""))
+    monkeypatch.setattr(run_all.subprocess, "run", _junit_writer([], 1, skipped=1))
+    monkeypatch.setattr(
+        run_all.sys, "argv", ["run_all.py", "--unit-only", "--jobs", "2"]
+    )
+    assert run_all.main() == 0
+    out = capsys.readouterr().out
+    assert "2 tests executed" in out
+    assert out.rstrip().splitlines()[-1] == "RESULT: PARTIAL"
+
+
+def test_single_process_counts_from_a_forwarded_junit_report(
+    tmp_path, monkeypatch, capsys
+):
+    report = tmp_path / "mine.xml"
+    calls = []
+
+    def run(command, **kwargs):
+        calls.append(command)
+        _write_junit(report, 0, skipped=1)
+        return SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(run_all.subprocess, "run", run)
+    monkeypatch.setattr(
+        run_all.sys,
+        "argv",
+        ["run_all.py", "--unit-only", "--jobs", "0", "--", f"--junitxml={report}"],
+    )
+    assert run_all.main() == 3
+    assert [a for a in calls[0] if a.startswith("--junitxml")] == [
+        f"--junitxml={report}"
+    ]
     assert "RESULT: INCOMPLETE" in capsys.readouterr().out
+
+
+def test_unknown_executed_count_is_not_treated_as_empty(monkeypatch, capsys):
+    # No report is written: the count is unknown, so a pass stays a pass.
+    monkeypatch.setattr(
+        run_all.subprocess, "run", lambda *a, **k: SimpleNamespace(returncode=0)
+    )
+    monkeypatch.setattr(
+        run_all.sys, "argv", ["run_all.py", "--unit-only", "--jobs", "0"]
+    )
+    assert run_all.main() == 0
+    assert "RESULT: PARTIAL" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("collect_code", (0, 5))
+def test_unit_selection_of_no_files_is_red(collect_code, monkeypatch, capsys):
+    def collect(command, **kwargs):
+        for argument in command:
+            if argument.startswith("--rocke-selected-file-manifest="):
+                Path(argument.split("=", 1)[1]).write_text("")
+        return SimpleNamespace(returncode=collect_code, stdout="", stderr="")
+
+    monkeypatch.setattr(run_all.subprocess, "run", collect)
+    monkeypatch.setattr(
+        run_all.sys,
+        "argv",
+        ["run_all.py", "--only", "no_such_test_xyz", "--allow-incomplete"],
+    )
+    assert run_all.main() == 1
+    out = capsys.readouterr().out
+    assert "selected no tests" in out
+    assert out.rstrip().splitlines()[-1] == "RESULT: RED"

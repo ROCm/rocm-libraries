@@ -11,8 +11,15 @@
 #
 # Usage:
 #   python rocke/platform/tests/run_all.py [--no-guard] [--no-gate] [--no-pytest]
-#       [--no-both] [--only SUBSTR] [--only-ir SUBSTR] [--build-root DIR]
-#       [--config CONFIG] [--pytest-target PATH_OR_NODE_ID]
+#       [--no-ir-validity] [--no-arch-domain] [--no-both] [--only SUBSTR]
+#       [--only-ir SUBSTR] [--build-root DIR] [--config CONFIG]
+#       [--pytest-target PATH_OR_NODE_ID] [--allow-incomplete]
+#
+# Every stage is recorded in a `rocke.tests.runner_verdict.RunRecord`, which
+# prints the stage table and the final `RESULT: <VERDICT>` line and owns the
+# exit code: GREEN/PARTIAL 0 (PARTIAL = narrowed by a filter or `--no-*`), RED
+# 1, INCOMPLETE 3 (a stage could not run here or executed no tests; 0 with
+# `--allow-incomplete`), usage error 2.
 #
 # The two filters are separate by *vocabulary*, not by gate. `--only` selects
 # *families* for the byte-identity gate; `--only-ir` selects *case ids*
@@ -56,6 +63,12 @@ for helper_root in (TOOLS, TESTS / "arch_domain"):
         break
 
 from _hostcaps import available_cpus
+from rocke.tests.runner_verdict import (
+    RunRecord,
+    junit_counts,
+    line_buffered_stdout,
+    user_scratch_dir,
+)
 
 # Files that may reference an absolute repo path or a path that escapes rocke/platform/
 # break the verbatim-copy contract. Enforce on code/build files only (docs are
@@ -130,10 +143,10 @@ def ctest_tests(
 _CTEST_READINESS_EXEMPT = frozenset({"rocke_arch_domain_reproducibility"})
 
 
-def ctest_ready(build_root: Path, config: str) -> bool:
+def ctest_unready(build_root: Path, config: str) -> str | None:
+    """Why CTest cannot run the registered suite here, or ``None`` when it can."""
     if not (build_root / "CTestTestfile.cmake").is_file():
-        print("\n== ctest: SKIPPED (no configured test build) ==")
-        return False
+        return "no configured test build"
     # A configured source-script test is immediately executable, but does not
     # mean the registered native suite was built. Preserve run_all's contract:
     # only launch the entire CTest suite once at least one build product exists.
@@ -143,9 +156,8 @@ def ctest_ready(build_root: Path, config: str) -> bool:
         if test.get("name") not in _CTEST_READINESS_EXEMPT
     ]
     if any(command and Path(command[0]).is_file() for command in commands):
-        return True
-    print(f"\n== ctest: SKIPPED (no built registered tests for {config}) ==")
-    return False
+        return None
+    return f"no built registered tests for {config}"
 
 
 # Native C++ test binaries that a pytest file drives through an env var. With a
@@ -398,7 +410,30 @@ def pytest_targets(selectors: list[str]) -> list[str]:
     return targets
 
 
-def differential_pytest_pass(env: dict[str, str], targets: list[str]) -> int:
+def run_pytest(
+    targets: list[str], env: dict[str, str], junit: Path, *extra: str
+) -> tuple[int, int | None]:
+    """Run one pytest pass; return its exit status and how many tests executed.
+
+    The count comes from the pass's JUnit report and is ``None`` when the report
+    is unreadable, so an unknown count is never mistaken for zero.
+    """
+    code = subprocess.run(
+        [sys.executable, "-m", "pytest", *targets, *extra, f"--junitxml={junit}"],
+        check=False,
+        cwd=str(TESTS),
+        env=env,
+    ).returncode
+    counts = junit_counts(junit)
+    return code, None if counts is None else counts[0]
+
+
+BOTH_STAGE = "pytest (ROCKE_BACKEND=both)"
+
+
+def differential_pytest_pass(
+    record: RunRecord, env: dict[str, str], targets: list[str], junit: Path
+) -> None:
     """Re-run pytest with ``ROCKE_BACKEND=both`` (the cross-engine gate).
 
     The default pass exercises one engine per assertion, so two engines that
@@ -415,25 +450,27 @@ def differential_pytest_pass(env: dict[str, str], targets: list[str]) -> int:
     known gap, and it is printed below so it stays visible.
 
     Needs the ``rocke_engine`` extension. Without it every kernel would raise
-    and the lane would prove nothing, so it is reported as a skipped *pass*
-    with a reason rather than run.
+    and the lane would prove nothing, so it is recorded as a skipped stage
+    (the run is INCOMPLETE) rather than run.
     """
     probe = subprocess.run(
         [sys.executable, "-c", "import rocke_engine"],
+        check=False,
         capture_output=True,
         cwd=str(TESTS),
         env=env,
     )
     if probe.returncode != 0:
         print(
-            "\n== pytest (ROCKE_BACKEND=both): SKIPPED ==\n"
+            f"\n== {BOTH_STAGE}: SKIPPED ==\n"
             "   rocke_engine is not importable; build it with "
             "-DROCKE_BUILD_PYBIND=ON and put the build dir on PYTHONPATH."
         )
-        return 0
+        record.skipped(BOTH_STAGE, "rocke_engine is not importable")
+        return
     from rocke.core.backend import CPP_UNPORTED_ARCHES
 
-    scope = "FOCUSED, " if targets != [str(TESTS)] else ""
+    scope = "PARTIAL, " if targets != [str(TESTS)] else ""
     print(f"\n== pytest ({scope}ROCKE_BACKEND=both) ==")
     if CPP_UNPORTED_ARCHES:
         print(
@@ -447,13 +484,16 @@ def differential_pytest_pass(env: dict[str, str], targets: list[str]) -> int:
             "either compared byte-for-byte or fails; remaining skips are "
             "environmental (torch / GPU)"
         )
-    env = dict(env, ROCKE_BACKEND="both")
-    return subprocess.run(
-        [sys.executable, "-m", "pytest", *targets, "-rs"], cwd=str(TESTS), env=env
-    ).returncode
+    code, executed = run_pytest(targets, dict(env, ROCKE_BACKEND="both"), junit, "-rs")
+    record.returncode(BOTH_STAGE, code, executed=executed)
+
+
+RUNNER = "platform tests/run_all.py"
 
 
 def main() -> int:
+    line_buffered_stdout()
+
     ap = argparse.ArgumentParser(description="rocKE test/validation runner")
     ap.add_argument("--no-guard", action="store_true")
     ap.add_argument("--no-gate", action="store_true")
@@ -495,25 +535,44 @@ def main() -> int:
         help="run only this pytest path or node ID, relative to tests/; repeatable. "
         "Other gates and CTest remain complete",
     )
-    ap.add_argument(
-        "--build-root", default=str(Path(tempfile.gettempdir()) / "rocke_verify")
-    )
+    ap.add_argument("--build-root", default=str(user_scratch_dir("rocke_verify")))
     ap.add_argument(
         "--config", default="Release", help="native test build/CTest configuration"
+    )
+    ap.add_argument(
+        "--allow-incomplete",
+        action="store_true",
+        help="exit 0 when the verdict is INCOMPLETE (a stage could not run here "
+        "or executed no tests); the verdict line still says INCOMPLETE",
     )
     args = ap.parse_args()
     try:
         selected_pytests = pytest_targets(args.pytest_target)
     except ValueError as exc:
         ap.error(str(exc))
-    pytest_focused = bool(args.pytest_target)
-    run_focused = bool(args.only or args.only_ir or args.pytest_target)
 
-    status = 0
+    record = RunRecord(allow_incomplete=args.allow_incomplete)
+    for flag, used in (
+        ("--no-guard", args.no_guard),
+        ("--no-gate", args.no_gate),
+        ("--no-ir-validity", args.no_ir_validity),
+        ("--no-arch-domain", args.no_arch_domain),
+        ("--no-pytest", args.no_pytest),
+        ("--no-both", args.no_both),
+    ):
+        if used:
+            record.partial(flag)
+    if args.only:
+        record.partial(f"--only {args.only}")
+    if args.only_ir:
+        record.partial(f"--only-ir {args.only_ir}")
+    for target in args.pytest_target:
+        record.partial(f"--pytest-target {target}")
+
     arch_domain_complete = False
 
     if not args.no_guard:
-        status |= relative_path_guard()
+        record.returncode("relative-path guard", relative_path_guard())
 
     if not args.no_gate:
         print("\n== byte-identity gate ==")
@@ -525,7 +584,8 @@ def main() -> int:
         ]
         if args.only:
             gate += ["--only", args.only]
-        status |= subprocess.run(gate).returncode
+        gate_status = subprocess.run(gate, check=False).returncode
+        record.returncode("byte-identity gate", gate_status)
 
     if not args.no_ir_validity:
         # Complements the gate above rather than duplicating it: byte-identity
@@ -540,7 +600,8 @@ def main() -> int:
         # nothing -- a typo, which is worth a red.
         if args.only_ir:
             ir_gate += ["--only", args.only_ir]
-        status |= subprocess.run(ir_gate).returncode
+        ir_status = subprocess.run(ir_gate, check=False).returncode
+        record.returncode("emitted-IR validity gate", ir_status)
 
     if not args.no_arch_domain:
         # The gate above's question asked of committed data instead of a
@@ -552,8 +613,8 @@ def main() -> int:
         # check_ir_validity. See the note at the top of this file.
         if args.only_ir:
             ad_gate += ["--only", args.only_ir]
-        arch_domain_status = subprocess.run(ad_gate).returncode
-        status |= arch_domain_status
+        arch_domain_status = subprocess.run(ad_gate, check=False).returncode
+        record.returncode("arch-domain gate", arch_domain_status)
         arch_domain_complete = arch_domain_status == 0 and not args.only_ir
 
     if not args.no_pytest:
@@ -565,36 +626,47 @@ def main() -> int:
                 pytest_env[_ARCH_DOMAIN_COMPLETE_ENV] = "1"
         except (OSError, ValueError, subprocess.CalledProcessError) as exc:
             print(f"native parity test setup failed: {exc}", file=sys.stderr)
-            return 1
-        label = "pytest (FOCUSED)" if pytest_focused else "pytest"
-        print(f"\n== {label} ==")
-        status |= subprocess.run(
-            [sys.executable, "-m", "pytest", *selected_pytests],
-            cwd=str(TESTS),
-            env=pytest_env,
-        ).returncode
-
-    if not args.no_pytest and not args.no_both:
-        status |= differential_pytest_pass(pytest_env, selected_pytests)
+            record.failed("native parity setup", str(exc))
+            return record.report(RUNNER)
+        with tempfile.TemporaryDirectory(prefix="rocke_run_all_") as junit_dir:
+            label = "pytest (PARTIAL)" if args.pytest_target else "pytest"
+            print(f"\n== {label} ==")
+            code, executed = run_pytest(
+                selected_pytests, pytest_env, Path(junit_dir) / "pytest.xml"
+            )
+            record.returncode("pytest", code, executed=executed)
+            if not args.no_both:
+                differential_pytest_pass(
+                    record, pytest_env, selected_pytests, Path(junit_dir) / "both.xml"
+                )
 
     build_root = Path(args.build_root)
     # Run the entire registered suite once any executable is built; partial
     # builds must expose their missing tests rather than silently lose coverage.
     try:
-        ready = ctest_ready(build_root, args.config)
+        unready = ctest_unready(build_root, args.config)
     except (OSError, ValueError, subprocess.CalledProcessError) as exc:
         print(f"CTest discovery failed: {exc}", file=sys.stderr)
-        return 1
-    if ready:
+        record.failed("ctest", f"discovery failed: {exc}")
+        return record.report(RUNNER)
+    if unready is None:
         print("\n== ctest ==")
-        status |= subprocess.run(
+        ctest = subprocess.run(
             ["ctest", "-C", args.config, "--output-on-failure", "--no-tests=ignore"],
+            check=False,
             cwd=str(build_root),
-        ).returncode
+        )
+        record.returncode("ctest", ctest.returncode)
+    elif args.no_pytest:
+        # The pytest stage is what configures and builds the suite, so its
+        # absence here follows from the caller's opt-out, not from this host.
+        print(f"\n== ctest: SKIPPED ({unready}; --no-pytest) ==")
+        record.partial(f"ctest: {unready} (--no-pytest)")
+    else:
+        print(f"\n== ctest: SKIPPED ({unready}) ==")
+        record.skipped("ctest", unready)
 
-    result_scope = "FOCUSED " if run_focused else ""
-    print("\nRESULT:", result_scope + ("GREEN" if status == 0 else "RED"))
-    return status
+    return record.report(RUNNER)
 
 
 if __name__ == "__main__":
