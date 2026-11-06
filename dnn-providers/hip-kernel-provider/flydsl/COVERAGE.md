@@ -273,6 +273,20 @@ Tiers: GTest names prefixed `Full/` are excluded from the quick, standard and
 comprehensive tiers by `HIP_MLOPS_ENGINE_test_categories.yaml` and run only in the full
 tier; names prefixed `Comprehensive` are excluded from the quick and standard tiers and run
 in the comprehensive (nightly) and full tiers; every other case above runs in every tier.
+The FlyDSL SDPA cases that run in the comprehensive tier and not pre-merge:
+
+- `Comprehensive/TestGpuFlydslSdpaObjects.*/OnePerNightlyForm`: one RDNA prefill and decode
+  object per form `isNightlyForm` names (a bias with a sink, a generic tier or a V head dim of
+  its own, or on prefill a split V; exact f32; V-mask pairs; the generic decode tiers split
+  four ways). `OnePerForm` keeps one object of every other form (44 per engine per target).
+- `Comprehensive/TestGpuFlydslSdpaRdnaComprehensiveTier`: `DropsThroughABias` at `head_dim`
+  64, 96 and 256 (128 pre-merge), `DropsAtTheGenericTiersWidths` at 80, 160 and 192 (48 and 224
+  pre-merge), `DecodesZeroAndNegativeScalesAcrossSplits`,
+  `DecodesWithinAotritonsBoundAtScale1Point2` and `AppliesALeftOnlyWindowAsTheCpuReferenceDoes`.
+- `ComprehensiveDualwaveHeadDim256/IntegrationGpuFlydslSdpaFrontendParity` off gfx950 (gfx950
+  runs `DualwaveHeadDim256` in every tier) and
+  `ComprehensiveAotriton/IntegrationGpuFlydslSdpaFrontendFeatures.*/AotritonScale1Point2HeadDim512*`
+  off CDNA (CDNA runs `Aotriton/` in every tier).
 
 ---
 

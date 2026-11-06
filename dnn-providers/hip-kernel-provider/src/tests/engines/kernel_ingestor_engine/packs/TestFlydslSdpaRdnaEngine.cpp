@@ -3458,13 +3458,27 @@ void expectZeroAndNegativeScalesMatchTheReference(RdnaFamily family)
     run(spec);
 }
 
+/// The comprehensive (nightly) tier's RDNA dispatch cases: breadth sweeps whose standard-tier
+/// case is one point of the sweep, and cases whose standard-tier sibling runs the same check on
+/// another family or form (ServesZeroAndNegativeScales, HoldsAotritonsBoundAtScale1Point2,
+/// AppliesALeftOnlyWindowWithTheNonCausalObject and the frontend lane's LeftOnlyWindow cases).
+/// TestGpuFlydslSdpaObjects launches every dropout object in every tier.
+class TestGpuFlydslSdpaRdnaComprehensiveTier : public ::testing::TestWithParam<int>
+{
+};
+
+INSTANTIATE_TEST_SUITE_P(Comprehensive,
+                         TestGpuFlydslSdpaRdnaComprehensiveTier,
+                         ::testing::Values(0),
+                         [](const ::testing::TestParamInfo<int>&) { return std::string("Sweep"); });
+
 TEST(TestGpuFlydslSdpaRdnaDispatch, ServesZeroAndNegativeScales)
 {
     SKIP_IF_NO_DEVICES();
     expectZeroAndNegativeScalesMatchTheReference(RdnaFamily::PREFILL);
 }
 
-TEST(TestGpuFlydslSdpaRdnaDispatch, DecodesZeroAndNegativeScalesAcrossSplits)
+TEST_P(TestGpuFlydslSdpaRdnaComprehensiveTier, DecodesZeroAndNegativeScalesAcrossSplits)
 {
     SKIP_IF_NO_DEVICES();
     expectZeroAndNegativeScalesMatchTheReference(RdnaFamily::DECODE);
@@ -3631,7 +3645,7 @@ TEST(TestGpuFlydslSdpaRdnaDispatch, HoldsAotritonsBoundAtScale1Point2)
     expectAotritonBoundAtScale1Point2(RdnaFamily::PREFILL);
 }
 
-TEST(TestGpuFlydslSdpaRdnaDispatch, DecodesWithinAotritonsBoundAtScale1Point2)
+TEST_P(TestGpuFlydslSdpaRdnaComprehensiveTier, DecodesWithinAotritonsBoundAtScale1Point2)
 {
     SKIP_IF_NO_DEVICES();
     expectAotritonBoundAtScale1Point2(RdnaFamily::DECODE);
@@ -3828,7 +3842,7 @@ TEST(TestGpuFlydslSdpaRdnaDispatch, AppliesALeftOnlyWindowWithTheNonCausalObject
     expectSdpaMatchesReference<hipdnn_data_sdk::types::half>(spec, F16_TOLERANCE);
 }
 
-TEST(TestGpuFlydslSdpaRdnaDispatch, AppliesALeftOnlyWindowAsTheCpuReferenceDoes)
+TEST_P(TestGpuFlydslSdpaRdnaComprehensiveTier, AppliesALeftOnlyWindowAsTheCpuReferenceDoes)
 {
     SKIP_IF_NO_DEVICES();
     // The cross-family case list CDNA serves (leftOnlyWindowSpecs), on the RDNA
@@ -7573,17 +7587,6 @@ void expectDropsThroughABias(int64_t headDim)
 }
 
 } // namespace
-
-/// Breadth sweeps whose standard-tier case is one point of the sweep, run in the comprehensive
-/// (nightly) tier. TestGpuFlydslSdpaObjects launches every dropout object in every tier.
-class TestGpuFlydslSdpaRdnaComprehensiveTier : public ::testing::TestWithParam<int>
-{
-};
-
-INSTANTIATE_TEST_SUITE_P(Comprehensive,
-                         TestGpuFlydslSdpaRdnaComprehensiveTier,
-                         ::testing::Values(0),
-                         [](const ::testing::TestParamInfo<int>&) { return std::string("Sweep"); });
 
 // The harness above, reached with a named object (FlydslSdpaObjectTestSupport.hpp).
 // Dropout on the RDNA prefill objects (kernel modification 27; gfx11 objects only): the mask
