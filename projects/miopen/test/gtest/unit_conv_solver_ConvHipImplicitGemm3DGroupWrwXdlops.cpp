@@ -121,7 +121,7 @@ void ApplyFp32ShapeTolerance(miopen::unit_tests::UnitTestConvSolverParams& param
        matches(test_case.pad, padding) && matches(test_case.stride, unit) &&
        matches(test_case.dilation, unit))
     {
-        // ALMIOPEN-2553: each weight reduces 128 * 28^3 valid FP32 products. Low-split-K
+        // Each weight reduces 128 * 28^3 valid FP32 products. Low-split-K
         // CK configurations reach 1.25e-5 normalized RMS error against the FP64 reference.
         // 128 * FP32 epsilon (~1.53e-5) budgets the measured accumulation roundoff for
         // this shape in both layouts, without widening any other case's validation.

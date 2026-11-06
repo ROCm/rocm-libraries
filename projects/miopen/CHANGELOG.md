@@ -46,9 +46,6 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
   filters up to 7x7 and is selected through Find mode.
 
 ### Changed
-* [Tests] Calibrated the FP32 validation tolerance for the long-reduction 3D grouped
-  backward-weights shape in NDHWC/NCDHW (ALMIOPEN-2553). Other solver-test shapes and
-  datatypes retain their existing validation bounds; no kernel or tuning behavior changed.
 * [Conv] Enabled the 2D and 3D grouped forward CK xdlops solvers in deterministic mode. Forward
   never uses split-K, so these solvers are deterministic; previously, deterministic forward
   convolutions could only use the GEMM and naive solvers.
