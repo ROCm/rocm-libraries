@@ -102,6 +102,20 @@ std::size_t WeightsWorkspaceElems(const miopen::conv::ProblemDescription& proble
     return problem.GetKernelStrideW() * TapsPerPhase(problem) * CoPad(problem) * CiPad(problem);
 }
 
+// Weights kernel: blocks of kWeightsCiTile input channels x WeightsCoTile() output channels. The
+// output channel tile is 16, halved while that gives fewer than kWeightsMinBlocks blocks.
+constexpr std::size_t kWeightsCiTile    = 64;
+constexpr std::size_t kWeightsMinBlocks = 128;
+
+std::size_t WeightsCoTile(const miopen::conv::ProblemDescription& problem)
+{
+    const std::size_t ci_blocks = (CiPad(problem) + kWeightsCiTile - 1) / kWeightsCiTile;
+    std::size_t co_t            = 16;
+    while(co_t > 1 && ci_blocks * (CoPad(problem) / co_t) < kWeightsMinBlocks)
+        co_t /= 2;
+    return co_t;
+}
+
 std::size_t GridX(const miopen::conv::ProblemDescription& problem)
 {
     const std::size_t s   = problem.GetKernelStrideW();
@@ -183,17 +197,17 @@ ConvHipImplicitGemmWmmaBwdData1d::GetSolution(const ExecutionContext& ctx,
                                 " -DCT_S=" + std::to_string(problem.GetKernelStrideW()) +
                                 " -DCT_CI_T=" + std::to_string(CiTile(problem)) +
                                 " -DCT_Q_T=" + std::to_string(QTile(problem)) +
-                                " -DCT_WMMA_GFX12=" + std::to_string(WmmaGfx12Layout(ctx) ? 1 : 0);
-
-    const std::size_t wt_elems = WeightsWorkspaceElems(problem);
+                                " -DCT_WMMA_GFX12=" + std::to_string(WmmaGfx12Layout(ctx) ? 1 : 0) +
+                                " -DCT_WT_CO=" + std::to_string(WeightsCoTile(problem));
 
     KernelInfo weights;
     weights.kernel_file  = "MIOpenConvTranspose1dWmmaHip.cpp";
     weights.kernel_name  = "MIOpenConvTranspose1dWmmaHipWeights";
     weights.comp_options = options;
     weights.l_wk         = {kBlockSize, 1, 1};
-    weights.g_wk         = {
-        std::min<std::size_t>((wt_elems + kBlockSize - 1) / kBlockSize, 4096) * kBlockSize, 1, 1};
+    weights.g_wk         = {((CiPad(problem) + kWeightsCiTile - 1) / kWeightsCiTile) * kBlockSize,
+                            CoPad(problem) / WeightsCoTile(problem),
+                            1};
     result.construction_params.push_back(weights);
 
     KernelInfo main;
