@@ -192,7 +192,7 @@ jobs:
           sparse-checkout: |
             projects/hipblaslt
             shared/origami
-            shared/mxdatagenerator
+            shared/hostnumerics
             shared/stinkytofu
             cmake
             .github/actions/ci-env

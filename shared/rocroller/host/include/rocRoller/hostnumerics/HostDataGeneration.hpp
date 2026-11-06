@@ -14,6 +14,7 @@
 #include <type_traits>
 #include <vector>
 
+#include <roc/hostnumerics/gemm.hpp>
 #include <roc/hostnumerics/tensor.hpp>
 #include <rocRoller/DataTypes/DataTypes.hpp>
 #include <rocRoller/TensorDescriptor.hpp>
@@ -58,6 +59,14 @@ namespace rocRoller::hostnumerics
         size_t   blockSize;
     };
 
+    // The encoded scale type of a block-scaled GEMM operand and the number of
+    // consecutive K elements that share one scale.
+    struct BlockScaleFormat
+    {
+        DataType type;
+        size_t   blockSize;
+    };
+
     struct GeneratedTensor
     {
         roc::hostnumerics::Tensor                data;
@@ -68,11 +77,11 @@ namespace rocRoller::hostnumerics
 
     struct GeneratedGEMMInputs
     {
-        roc::hostnumerics::Tensor                a;
-        roc::hostnumerics::Tensor                b;
-        roc::hostnumerics::Tensor                c;
-        std::optional<roc::hostnumerics::Tensor> scaleA;
-        std::optional<roc::hostnumerics::Tensor> scaleB;
+        roc::hostnumerics::Tensor                          a;
+        roc::hostnumerics::Tensor                          b;
+        roc::hostnumerics::Tensor                          c;
+        std::optional<roc::hostnumerics::MatmulBlockScale> scaleA;
+        std::optional<roc::hostnumerics::MatmulBlockScale> scaleB;
     };
 
     roc::hostnumerics::ScalarType hostScalarType(DataType               type,
@@ -113,19 +122,19 @@ namespace rocRoller::hostnumerics
     /**
      * Generates C with seed, A with seed + 1, and B with seed + 2. These
      * offsets are part of the rocRoller client and test reproducibility contract.
+     * A and B are block-scaled when their scale format is given.
      */
-    GeneratedGEMMInputs generateGEMMInputs(TensorDescriptor const&   descriptorA,
-                                           TensorDescriptor const&   descriptorB,
-                                           TensorDescriptor const&   descriptorC,
-                                           DataInitialization const& initializationA,
-                                           DataInitialization const& initializationB,
-                                           DataInitialization const& initializationC,
-                                           DataType                  scaleTypeA,
-                                           DataType                  scaleTypeB,
-                                           size_t                    scaleBlockSize,
-                                           float                     minimum,
-                                           float                     maximum,
-                                           uint32_t                  seed);
+    GeneratedGEMMInputs generateGEMMInputs(TensorDescriptor const&         descriptorA,
+                                           TensorDescriptor const&         descriptorB,
+                                           TensorDescriptor const&         descriptorC,
+                                           DataInitialization const&       initializationA,
+                                           DataInitialization const&       initializationB,
+                                           DataInitialization const&       initializationC,
+                                           std::optional<BlockScaleFormat> scaleA,
+                                           std::optional<BlockScaleFormat> scaleB,
+                                           float                           minimum,
+                                           float                           maximum,
+                                           uint32_t                        seed);
 
     template <typename T>
     std::vector<T> copyTensorStorage(roc::hostnumerics::Tensor const& tensor)

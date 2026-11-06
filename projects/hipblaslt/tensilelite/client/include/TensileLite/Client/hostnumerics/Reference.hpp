@@ -31,6 +31,7 @@
 // TensileLite reference API owned by the shared HostNumerics component.
 
 #include <Tensile/ContractionProblem.hpp>
+#include <TensileLite/Client/hostnumerics/ReferenceElements.hpp>
 
 #include <Tensile/DataTypes.hpp>
 #include <roc/hostnumerics/gemm.hpp>
@@ -52,7 +53,7 @@ namespace TensileLite
 
         void SolveGemmCPU(ContractionProblemGemm const& problem,
                           ContractionInputs const&      inputs,
-                          size_t                        elementsToValidate);
+                          ReferenceElements             elements);
 
         // Translates and executes one ungrouped GEMM. Unsupported descriptors or
         // backends throw std::runtime_error before copying the current batch's
@@ -91,7 +92,7 @@ namespace TensileLite
 
         void executeReferenceGemm(ContractionProblemGemm const&  problem,
                                   ContractionInputs const&       inputs,
-                                  size_t                         elementsToValidate,
+                                  ReferenceElements              elements,
                                   roc::hostnumerics::GemmBackend backend);
 
     } // namespace Client

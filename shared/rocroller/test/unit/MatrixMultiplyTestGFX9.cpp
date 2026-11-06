@@ -839,9 +839,8 @@ namespace MatrixMultiplyTest
             hostnumerics::hostTensor(
                 referenceDescB, B, hostnumerics::DataTypeInterpretation::Unscaled),
             hostnumerics::hostTensor(descC, C, hostnumerics::DataTypeInterpretation::Unscaled),
-            hostnumerics::hostScaleTensor(DataType::E8M0, AX, referenceDescA, 1, scaleBlockSize),
-            hostnumerics::hostScaleTensor(DataType::E8M0, BX, referenceDescB, 0, scaleBlockSize),
-            scaleBlockSize,
+            hostnumerics::hostBlockScale(DataType::E8M0, AX, referenceDescA, 1, scaleBlockSize),
+            hostnumerics::hostBlockScale(DataType::E8M0, BX, referenceDescB, 0, scaleBlockSize),
             alpha,
             0.0f));
 
@@ -856,7 +855,6 @@ namespace MatrixMultiplyTest
                 hostnumerics::hostTensor(descC, C, hostnumerics::DataTypeInterpretation::Unscaled),
                 std::nullopt,
                 std::nullopt,
-                0,
                 alpha,
                 0.0f));
 

@@ -5,6 +5,7 @@
 
 // TensileLite client-private adapter.
 
+#include <TensileLite/Client/hostnumerics/ReferenceElements.hpp>
 #include <roc/hostnumerics/comparison.hpp>
 #include <roc/hostnumerics/detail/shape_access.hpp>
 #include <roc/hostnumerics/epilogue.hpp>
@@ -387,7 +388,7 @@ namespace TensileLite::Client
 
     inline hostnumerics::detail::Expected<roc::hostnumerics::IndexRange,
                                           hostnumerics::detail::DescriptorFailure>
-        getReferenceIndexRange(TensorDescriptor const& descriptor, size_t elementsToValidate)
+        getReferenceIndexRange(TensorDescriptor const& descriptor, ReferenceElements elements)
     {
         const auto logicalCount
             = roc::hostnumerics::detail::ShapeAccess::getElementCount(descriptor.sizes());
@@ -396,19 +397,17 @@ namespace TensileLite::Client
             return roc::hostnumerics::detail::Unexpected(hostnumerics::detail::DescriptorFailure(
                 hostnumerics::detail::DescriptorError::ElementCountOverflow));
         }
-        // --num-elements-to-validate 0 turns validation off. A reference that is
-        // still needed, for example to print tensors, covers every element, as the
-        // client always has.
-        if(elementsToValidate == 0)
+        const auto sampleCount = elements.sampleCount();
+        if(!sampleCount)
             return roc::hostnumerics::IndexRange::all(*logicalCount);
         return roc::hostnumerics::primeIndexRange(
-            {.logicalElements = *logicalCount, .requestedElements = elementsToValidate});
+            {.logicalElements = *logicalCount, .requestedElements = *sampleCount});
     }
 
     inline roc::hostnumerics::IndexRange referenceIndexRange(TensorDescriptor const& descriptor,
-                                                             size_t elementsToValidate)
+                                                             ReferenceElements       elements)
     {
-        auto selection = getReferenceIndexRange(descriptor, elementsToValidate);
+        auto selection = getReferenceIndexRange(descriptor, elements);
         if(!selection)
             throw std::runtime_error(std::string(hostnumerics::detail::message(selection.error())));
         return std::move(*selection);

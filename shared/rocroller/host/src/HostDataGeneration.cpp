@@ -510,46 +510,45 @@ namespace rocRoller::hostnumerics
                               includeReference);
     }
 
-    GeneratedGEMMInputs generateGEMMInputs(TensorDescriptor const&   descriptorA,
-                                           TensorDescriptor const&   descriptorB,
-                                           TensorDescriptor const&   descriptorC,
-                                           DataInitialization const& initializationA,
-                                           DataInitialization const& initializationB,
-                                           DataInitialization const& initializationC,
-                                           DataType                  scaleTypeA,
-                                           DataType                  scaleTypeB,
-                                           size_t                    scaleBlockSize,
-                                           float                     minimum,
-                                           float                     maximum,
-                                           uint32_t                  seed)
+    GeneratedGEMMInputs generateGEMMInputs(TensorDescriptor const&         descriptorA,
+                                           TensorDescriptor const&         descriptorB,
+                                           TensorDescriptor const&         descriptorC,
+                                           DataInitialization const&       initializationA,
+                                           DataInitialization const&       initializationB,
+                                           DataInitialization const&       initializationC,
+                                           std::optional<BlockScaleFormat> scaleA,
+                                           std::optional<BlockScaleFormat> scaleB,
+                                           float                           minimum,
+                                           float                           maximum,
+                                           uint32_t                        seed)
     {
+        // K is dimension 1 of A and dimension 0 of B.
+        auto generation = [](std::optional<BlockScaleFormat> const& format,
+                             size_t blockedDimension) -> std::optional<BlockScaleGeneration> {
+            if(!format)
+                return std::nullopt;
+            return BlockScaleGeneration{format->type, blockedDimension, format->blockSize};
+        };
+        auto blockScale
+            = [](GeneratedTensor& generated, std::optional<BlockScaleFormat> const& format)
+            -> std::optional<roc::hostnumerics::MatmulBlockScale> {
+            if(!format)
+                return std::nullopt;
+            return roc::hostnumerics::MatmulBlockScale{std::move(*generated.scales),
+                                                       format->blockSize};
+        };
+
         auto generatedA = generateHostTensor(
-            descriptorA,
-            initializationA,
-            scaleTypeA == DataType::None ? std::nullopt
-                                         : std::optional<BlockScaleGeneration>{BlockScaleGeneration{
-                                             scaleTypeA, 1, scaleBlockSize}},
-            minimum,
-            maximum,
-            seed + 1,
-            false);
+            descriptorA, initializationA, generation(scaleA, 1), minimum, maximum, seed + 1, false);
         auto generatedB = generateHostTensor(
-            descriptorB,
-            initializationB,
-            scaleTypeB == DataType::None ? std::nullopt
-                                         : std::optional<BlockScaleGeneration>{BlockScaleGeneration{
-                                             scaleTypeB, 0, scaleBlockSize}},
-            minimum,
-            maximum,
-            seed + 2,
-            false);
+            descriptorB, initializationB, generation(scaleB, 0), minimum, maximum, seed + 2, false);
         auto generatedC = generateHostTensor(
             descriptorC, initializationC, std::nullopt, minimum, maximum, seed, false);
 
         return {std::move(generatedA.data),
                 std::move(generatedB.data),
                 std::move(generatedC.data),
-                std::move(generatedA.scales),
-                std::move(generatedB.scales)};
+                blockScale(generatedA, scaleA),
+                blockScale(generatedB, scaleB)};
     }
 }

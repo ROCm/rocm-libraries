@@ -216,7 +216,6 @@ namespace rocRollerTest
             hostnumerics::hostTensor(descC, C, hostnumerics::DataTypeInterpretation::Unscaled),
             std::nullopt,
             std::nullopt,
-            0,
             1.0f,
             1.0f));
 
@@ -340,7 +339,6 @@ namespace rocRollerTest
                 referenceDescC, zeroC, hostnumerics::DataTypeInterpretation::Unscaled),
             std::nullopt,
             std::nullopt,
-            0,
             1.0f,
             1.0f));
 
