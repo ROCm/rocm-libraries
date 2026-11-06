@@ -22,8 +22,8 @@
 
 # rocPRIM header-only library
 
-# Expose the USE_LEGACY_API option to the configured version header
-set(ROCPRIM_USE_LEGACY_API ${USE_LEGACY_API})
+# Expose the HIPCCL_USE_LEGACY_API option to the configured version header
+set(ROCPRIM_USE_LEGACY_API ${HIPCCL_USE_LEGACY_API})
 
 # Configure a header file to pass the rocPRIM version
 configure_file(
