@@ -124,6 +124,9 @@
   exactly the input loads it issued.
 * `direct` (CDNA 5) closes a race on the input ring it stages in LDS.
 * `direct` (CDNA 5) no longer crashes on layers with large padding.
+* A Debug build compiles and links, with or without UBSan in `CMAKE_CXX_FLAGS_DEBUG`, and the
+  build-time generators no longer need `libamdhip64` to run. Device code compiles at `-O3` in
+  every build type, with no debug info beyond the line tables that `HIPCONV_LINE_TABLES` enables.
 
 ## v0.4.0 - 2026-10-06
 

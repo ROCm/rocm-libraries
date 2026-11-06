@@ -162,6 +162,8 @@ __device__ void conv2d_grouped_4c_cdna4_nhwc_impl(const ToType<DT>* __restrict__
     // Vectors to store (output uint4 elements per workgroup).
     constexpr int STORE_VECS = OUTPUT_BLOCK_Q * BLOCK_C_UINT4;
 
+    constexpr bool ONE_WAVE = cfg.block_size() == WAVE_SIZE;
+
     constexpr int NUM_INPUT_LDS_BUFFERS = 2;
 
     // Size of one input LDS buffer in uint4 units.
@@ -448,7 +450,7 @@ __device__ void conv2d_grouped_4c_cdna4_nhwc_impl(const ToType<DT>* __restrict__
     static_for<cfg.kd>([&]<int J>() {
         if constexpr(J > 0)
         {
-            __syncthreads();
+            sync_before_lds_dma<ONE_WAVE>();
             load_weight_tap(taps.tap[J]);
         }
         // Wait for all buffer_load_lds operations (weights + first input chunk)
