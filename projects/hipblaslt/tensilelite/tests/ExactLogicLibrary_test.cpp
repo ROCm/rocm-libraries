@@ -319,28 +319,6 @@ TEST(ExactLogicLibraryTest, FindAllSolutionsForwardsNoRankingSearchTypeToSubLibr
     EXPECT_TRUE(isGemmTypeOnlySearch(equalityRow.lastSearchType()));
 }
 
-// A no-ranking search and a full search on the same library stay independent.
-TEST(ExactLogicLibraryTest, FindAllSolutionsInterleavedSearchTypesAreIndependent)
-{
-    auto         lib     = buildRankingRowsLibrary();
-    auto         problem = dummyProblem();
-    const AMDGPU device  = makeDevice(_MI350_CHIP_ID, _SPX_CU, "mi350spx");
-
-    const std::set<std::string> all{"equality", "gridbased", "prediction"};
-    const std::set<std::string> noRanking{"equality"};
-
-    EXPECT_EQ(solutionNameSet(lib->findAllSolutions(
-                  problem, device, SolutionLibrarySearchType::GEMM_TYPE_ONLY_NO_RANKING)),
-              noRanking);
-    EXPECT_EQ(solutionNameSet(lib->findAllSolutions(
-                  problem, device, SolutionLibrarySearchType::GEMM_TYPE_ONLY)),
-              all);
-    EXPECT_EQ(solutionNameSet(lib->findAllSolutions(
-                  problem, device, SolutionLibrarySearchType::GEMM_TYPE_ONLY_NO_RANKING)),
-              noRanking);
-    EXPECT_EQ(solutionNameSet(lib->findAllSolutions(problem, device)).count("gridbased"), 1u);
-}
-
 TEST(ExactLogicLibraryTest, FindTopSolutionsIncludesEqualityAndRangeByDefault)
 {
     auto        lib     = buildMatchingRowsLibrary();

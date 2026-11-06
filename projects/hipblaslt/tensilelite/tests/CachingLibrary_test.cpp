@@ -324,6 +324,20 @@ TEST(CachingLibraryTest, ConcurrentFindTopSolutionsDoesNotPoisonAlreadyRetAllCac
     size_t aFirst = 0;
     std::thread tA([&] { aFirst = caching->findTopSolutions(problemA, device, 5).size(); });
 
+    // Releases A and joins it on every exit path, so a failed ASSERT does not
+    // leave a joinable thread behind.
+    struct Join
+    {
+        FlagSubLibrary* sub;
+        std::thread*    thread;
+        ~Join()
+        {
+            sub->markBDone();
+            if(thread->joinable())
+                thread->join();
+        }
+    } join{sub.get(), &tA};
+
     // Start B only after A has computed its (correct, false) answer.
     {
         std::unique_lock<std::mutex> lk(sub->m);

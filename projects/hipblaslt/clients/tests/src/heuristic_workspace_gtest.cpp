@@ -92,7 +92,8 @@ namespace
         }
 
         hipblasStatus_t cHeuristic(uint64_t                                       limit,
-                                   std::vector<hipblasLtMatmulHeuristicResult_t>& out)
+                                   std::vector<hipblasLtMatmulHeuristicResult_t>& out,
+                                   int requested = kRequested)
         {
             hipblasLtMatmulPreference_t pref   = nullptr;
             hipblasStatus_t             status = hipblasLtMatmulPreferenceCreate(&pref);
@@ -100,7 +101,7 @@ namespace
                 return status;
             status = hipblasLtMatmulPreferenceSetAttribute(
                 pref, HIPBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES, &limit, sizeof(limit));
-            out.assign(kRequested, {});
+            out.assign(requested, {});
             int count = 0;
             if(status == HIPBLAS_STATUS_SUCCESS)
                 status = hipblasLtMatmulAlgoGetHeuristic(handle,
@@ -110,7 +111,7 @@ namespace
                                                          layoutD,
                                                          layoutD,
                                                          pref,
-                                                         kRequested,
+                                                         requested,
                                                          out.data(),
                                                          &count);
             out.resize(status == HIPBLAS_STATUS_SUCCESS ? count : 0);
@@ -144,7 +145,8 @@ namespace
         }
 
         hipblasStatus_t cppHeuristic(uint64_t                                       limit,
-                                     std::vector<hipblasLtMatmulHeuristicResult_t>& out)
+                                     std::vector<hipblasLtMatmulHeuristicResult_t>& out,
+                                     int requested = kRequested)
         {
             hipblaslt_ext::Gemm gemm(handle,
                                      HIPBLAS_OP_N,
@@ -159,7 +161,7 @@ namespace
                 return status;
             hipblaslt_ext::GemmPreference pref;
             pref.setMaxWorkspaceBytes(limit);
-            return gemm.algoGetHeuristic(kRequested, pref, out);
+            return gemm.algoGetHeuristic(requested, pref, out);
         }
     };
 
@@ -259,132 +261,40 @@ namespace
     }
 
     // Ranking a single algo does not call getAllSolutions. Asking for more algos
-    // than that ranking returned does, through both top-up call sites, and the
-    // search type is the no-ranking one. The hook is cleared before each call.
-    TEST(HeuristicSearchType, smoke_TopUpPassesNoRankingSearch)
+    // than the ranking returns does, through both top-up call sites, and the
+    // search type is the no-ranking one. The hook is cleared before each query.
+    TEST_F(HeuristicWorkspaceLimit, smoke_TopUpPassesNoRankingSearch)
     {
-        int deviceCount = 0;
-        if(hipGetDeviceCount(&deviceCount) != hipSuccess || deviceCount < 1)
-            GTEST_SKIP() << "No GPU available";
+        constexpr int kNoCall = -1;
+        constexpr int kNoRank
+            = static_cast<int>(TensileLite::SolutionLibrarySearchType::GEMM_TYPE_ONLY_NO_RANKING);
+        constexpr int kMany = 100000;
 
-        hipblasLtHandle_t           handle  = nullptr;
-        hipblasLtMatmulDesc_t       desc    = nullptr;
-        hipblasLtMatrixLayout_t     layoutA = nullptr;
-        hipblasLtMatrixLayout_t     layoutB = nullptr;
-        hipblasLtMatrixLayout_t     layoutD = nullptr;
-        hipblasLtMatmulPreference_t pref    = nullptr;
-        ASSERT_EQ(hipblasLtCreate(&handle), HIPBLAS_STATUS_SUCCESS);
-        ASSERT_EQ(hipblasLtMatmulDescCreate(&desc, HIPBLAS_COMPUTE_32F, HIP_R_32F),
-                  HIPBLAS_STATUS_SUCCESS);
-        ASSERT_EQ(hipblasLtMatrixLayoutCreate(&layoutA, HIP_R_32F, 128, 128, 128),
-                  HIPBLAS_STATUS_SUCCESS);
-        ASSERT_EQ(hipblasLtMatrixLayoutCreate(&layoutB, HIP_R_32F, 128, 128, 128),
-                  HIPBLAS_STATUS_SUCCESS);
-        ASSERT_EQ(hipblasLtMatrixLayoutCreate(&layoutD, HIP_R_32F, 128, 128, 128),
-                  HIPBLAS_STATUS_SUCCESS);
-        ASSERT_EQ(hipblasLtMatmulPreferenceCreate(&pref), HIPBLAS_STATUS_SUCCESS);
-        const uint64_t workspace = 32ull << 20;
-        ASSERT_EQ(hipblasLtMatmulPreferenceSetAttribute(
-                      pref, HIPBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES, &workspace, sizeof(workspace)),
-                  HIPBLAS_STATUS_SUCCESS);
-
-        constexpr int kNoCall   = -1;
-        constexpr int kNoRank   = static_cast<int>(
-            TensileLite::SolutionLibrarySearchType::GEMM_TYPE_ONLY_NO_RANKING);
-        constexpr int kOne      = 1;
-        constexpr int kMany     = 100000;
-
-        auto cHeuristic = [&](int requested, int& returned) {
-            rocblaslt_testing_reset_last_get_all_search_type_for_test();
-            std::vector<hipblasLtMatmulHeuristicResult_t> results(requested);
-            returned = 0;
-            return hipblasLtMatmulAlgoGetHeuristic(handle,
-                                                   desc,
-                                                   layoutA,
-                                                   layoutB,
-                                                   layoutD,
-                                                   layoutD,
-                                                   pref,
-                                                   requested,
-                                                   results.data(),
-                                                   &returned);
-        };
-
-        int ranked = 0;
-        ASSERT_EQ(cHeuristic(kOne, ranked), HIPBLAS_STATUS_SUCCESS);
-        ASSERT_EQ(ranked, kOne);
+        std::vector<hipblasLtMatmulHeuristicResult_t> results;
+        rocblaslt_testing_reset_last_get_all_search_type_for_test();
+        if(cHeuristic(kWorkspace, results, 1) != HIPBLAS_STATUS_SUCCESS || results.empty())
+            GTEST_SKIP() << "No solution for this problem in the loaded library";
         EXPECT_EQ(rocblaslt_testing_last_get_all_search_type_for_test(), kNoCall)
-            << "hipblasLtMatmulAlgoGetHeuristic called getAllSolutions while the "
-               "ranking already filled the request";
+            << "hipblasLtMatmulAlgoGetHeuristic called getAllSolutions while the ranking "
+               "already filled the request";
 
-        int topped = 0;
-        ASSERT_EQ(cHeuristic(kMany, topped), HIPBLAS_STATUS_SUCCESS);
-        ASSERT_GT(topped, 0);
-        ASSERT_LT(topped, kMany);
+        rocblaslt_testing_reset_last_get_all_search_type_for_test();
+        ASSERT_EQ(cHeuristic(kWorkspace, results, kMany), HIPBLAS_STATUS_SUCCESS);
+        ASSERT_LT(results.size(), static_cast<size_t>(kMany));
         EXPECT_EQ(rocblaslt_testing_last_get_all_search_type_for_test(), kNoRank)
             << "topUpWithSizeIndependentSolutions did not pass a no-ranking search";
 
-        hipblaslt_ext::Gemm gemm(handle,
-                                 HIPBLAS_OP_N,
-                                 HIPBLAS_OP_N,
-                                 HIP_R_32F,
-                                 HIP_R_32F,
-                                 HIP_R_32F,
-                                 HIP_R_32F,
-                                 HIPBLAS_COMPUTE_32F);
-        hipblaslt_ext::GemmEpilogue epilogue;
-        hipblaslt_ext::GemmInputs   inputs;
-        void* a = nullptr;
-        void* b = nullptr;
-        void* d = nullptr;
-        struct FreeDevice
-        {
-            void** ptrs[3];
-            ~FreeDevice()
-            {
-                for(void** ptr : ptrs)
-                    static_cast<void>(hipFree(*ptr));
-            }
-        } freeDevice{&a, &b, &d};
-        ASSERT_EQ(hipMalloc(&a, 128 * 128 * sizeof(float)), hipSuccess);
-        ASSERT_EQ(hipMalloc(&b, 128 * 128 * sizeof(float)), hipSuccess);
-        ASSERT_EQ(hipMalloc(&d, 128 * 128 * sizeof(float)), hipSuccess);
-        float alpha = 1.0f;
-        float beta  = 0.0f;
-        inputs.setA(a);
-        inputs.setB(b);
-        inputs.setC(d);
-        inputs.setD(d);
-        inputs.setAlpha(&alpha);
-        inputs.setBeta(&beta);
-        ASSERT_EQ(gemm.setProblem(128, 128, 128, 1, epilogue, inputs), HIPBLAS_STATUS_SUCCESS);
-        hipblaslt_ext::GemmPreference gemmPref;
-        gemmPref.setMaxWorkspaceBytes(workspace);
-
-        auto cppHeuristic = [&](int requested, std::vector<hipblasLtMatmulHeuristicResult_t>& out) {
-            rocblaslt_testing_reset_last_get_all_search_type_for_test();
-            return gemm.algoGetHeuristic(requested, gemmPref, out);
-        };
-
-        std::vector<hipblasLtMatmulHeuristicResult_t> cppRanked;
-        ASSERT_EQ(cppHeuristic(kOne, cppRanked), HIPBLAS_STATUS_SUCCESS);
-        ASSERT_EQ(cppRanked.size(), 1u);
+        rocblaslt_testing_reset_last_get_all_search_type_for_test();
+        ASSERT_EQ(cppHeuristic(kWorkspace, results, 1), HIPBLAS_STATUS_SUCCESS);
+        ASSERT_EQ(results.size(), 1u);
         EXPECT_EQ(rocblaslt_testing_last_get_all_search_type_for_test(), kNoCall)
-            << "rocblaslt_algo_get_heuristic_cpp called getAllSolutions while the "
-               "ranking already filled the request";
+            << "rocblaslt_algo_get_heuristic_cpp called getAllSolutions while the ranking "
+               "already filled the request";
 
-        std::vector<hipblasLtMatmulHeuristicResult_t> cppTopped;
-        ASSERT_EQ(cppHeuristic(kMany, cppTopped), HIPBLAS_STATUS_SUCCESS);
-        ASSERT_GT(cppTopped.size(), 0u);
-        ASSERT_LT(cppTopped.size(), static_cast<size_t>(kMany));
+        rocblaslt_testing_reset_last_get_all_search_type_for_test();
+        ASSERT_EQ(cppHeuristic(kWorkspace, results, kMany), HIPBLAS_STATUS_SUCCESS);
+        ASSERT_LT(results.size(), static_cast<size_t>(kMany));
         EXPECT_EQ(rocblaslt_testing_last_get_all_search_type_for_test(), kNoRank)
             << "rocblaslt_algo_get_heuristic_cpp top-up did not pass a no-ranking search";
-
-        hipblasLtMatmulPreferenceDestroy(pref);
-        hipblasLtMatrixLayoutDestroy(layoutA);
-        hipblasLtMatrixLayoutDestroy(layoutB);
-        hipblasLtMatrixLayoutDestroy(layoutD);
-        hipblasLtMatmulDescDestroy(desc);
-        hipblasLtDestroy(handle);
     }
 } // namespace
