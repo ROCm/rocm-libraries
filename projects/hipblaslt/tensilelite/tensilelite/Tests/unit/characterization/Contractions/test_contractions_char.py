@@ -8,6 +8,7 @@ and the ``ProblemType`` / predicate / ``SizeMapping`` / ``Solution`` builders,
 driven from the vendored LibraryIO logic fixture's original-state dicts."""
 
 import importlib
+from copy import deepcopy
 from pathlib import Path
 
 import pytest
@@ -35,19 +36,12 @@ def problem_type(raw):
 
 
 @pytest.fixture(scope="module")
-def solution_state():
+def solution_state(assembler, isa_info_map):
     # The fully-derived solution state (all keys MasterSolutionLibrary needs),
     # obtained by parsing the fixture into a real Solution.
-    from tensilelite.Common.Architectures import SUPPORTED_ISA
-    from tensilelite.Common.Capabilities import makeIsaInfoMap
-    from tensilelite.Toolchain.Assembly import makeAssemblyToolchain
-    from tensilelite.Toolchain.Validators import validateToolchain, ToolchainDefaults
-
-    cxx = validateToolchain("amdclang++")
-    iim = makeIsaInfoMap(SUPPORTED_ISA, cxx)
-    bundler = validateToolchain(ToolchainDefaults.OFFLOAD_BUNDLER)
-    asm = makeAssemblyToolchain(cxx, bundler, "default").assembler
-    sol = L.parseLibraryLogicFile(str(_FIXTURE), asm, False, False, False, iim, False).solutions[0]
+    sol = L.parseLibraryLogicFile(
+        str(_FIXTURE), assembler, False, False, False, isa_info_map, False
+    ).solutions[0]
     return dict(sol._state)
 
 
@@ -91,9 +85,19 @@ def test_size_mapping(solution_state, snapshot):
     assert isinstance(state(sm), dict)
 
 
-def test_internal_args_support(solution_state):
-    ias = C.InternalArgsSupport.FromOriginalState(solution_state)
-    assert ias is not None
+@pytest.mark.parametrize("mode", [0, 1, 2, 3, 5, 6, 7])
+def test_internal_args_support_does_not_duplicate_alpha_capability(solution_state, mode):
+    from tensilelite.Common.Utilities import state
+
+    source = deepcopy(solution_state)
+    source["ProblemType"]["UseScaleAlphaVec"] = mode
+    serialized = state(C.InternalArgsSupport.FromOriginalState(source))
+    assert set(serialized) == {
+        "version", "persistentLoopArgsVersion", "gsu", "wgm", "staggerU",
+        "perTileExtraIters", "useUniversalArgs", "useSFC",
+    }
+    problem = C.ProblemType.FromOriginalState(source["ProblemType"])
+    assert problem.useScaleAlphaVec == mode
 
 
 def test_problem_predicate_compound(problem_type, solution_state, snapshot):
