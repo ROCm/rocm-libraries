@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import itertools
 from collections.abc import Iterable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 from decimal import Decimal, localcontext
 from enum import Enum
 from fractions import Fraction
@@ -39,7 +39,11 @@ from ._p4_shared_analytical import (
     UNIFORM_QUICK_CASES,
     UniformCase,
     UniformMutation,
+    UniformObservation,
+    UniformSpecFingerprint,
     _basis_offset,
+    _validate_observation,
+    decode_bits,
     legal_interval,
     target_bits,
     uniform_inputs,
@@ -302,23 +306,29 @@ def _exp2_enclosure(argument: Fraction) -> tuple[Fraction, Fraction]:
 
 
 @cache
-def exp2_candidates(argument: Fraction) -> tuple[Fraction, ...]:
-    """Every FP32 value ``z`` with ``|z - 2**x| <= f32_quantum(2**x)``.
+def exp2_candidates(argument: Fraction, ulps: int = 1) -> tuple[Fraction, ...]:
+    """Every FP32 value ``z`` with ``|z - 2**x| <= ulps * f32_quantum(2**x)``.
 
     ``argument`` is the FP32 argument ``x`` the kernel passes to ``v_exp_f32``.
+    ``ulps = 1`` is A-E; a larger bound only attributes failures (an output a
+    looser exponential explains is labeled "assumption A-E"), never the verdict.
     Membership is certified for every point of the ``2**x`` bracket; an
     undecidable candidate raises rather than being guessed."""
     argument = Fraction(argument)
     if not is_f32(argument):
         raise ValueError("exp2 argument must be an FP32 value")
+    if ulps < 1:
+        raise ValueError("ulps must be at least 1")
     low, high = _exp2_enclosure(argument)
     quantum_low, quantum_high = f32_quantum(low), f32_quantum(high)
     if quantum_low != quantum_high:
         raise ArithmeticError(f"2**{float(argument)!r} brackets a binade boundary")
-    quantum = quantum_low
+    quantum = ulps * quantum_low
 
     candidates: list[Fraction] = []
-    candidate = round_f32(low - quantum, "rd")
+    # 2**x is positive, so a negative value is never a candidate (under the
+    # 1-ULP bound none is within reach anyway).
+    candidate = max(round_f32(low - quantum, "rd"), Fraction(0))
     while candidate <= high + quantum:
         within_everywhere = high - quantum <= candidate <= low + quantum
         outside_everywhere = candidate < low - quantum or candidate > high + quantum
@@ -336,9 +346,9 @@ def exp2_candidates(argument: Fraction) -> tuple[Fraction, ...]:
 
 
 @cache
-def exp2_interval(argument: Fraction) -> F32Interval:
+def exp2_interval(argument: Fraction, ulps: int = 1) -> F32Interval:
     """Hull of :func:`exp2_candidates`; the candidates are consecutive FP32 values."""
-    return F32Interval.hull(exp2_candidates(argument))
+    return F32Interval.hull(exp2_candidates(argument, ulps))
 
 
 @cache
@@ -718,7 +728,11 @@ class RowTrace:
 
 @cache
 def row_trace(
-    case: P4Case, head: int, query: int, mutation: P4Mutation | None = None
+    case: P4Case,
+    head: int,
+    query: int,
+    mutation: P4Mutation | None = None,
+    e_ulps: int = 1,
 ) -> RowTrace:
     """Propagate the row's running max, weights and denominator.
 
@@ -726,7 +740,8 @@ def row_trace(
     candidate interval; each tile's 64 weights are summed in any order
     (``gamma_63``), then ``l = RN(RN(l alpha) + l_tile)``. ``OMIT_RESCALE``
     fixes ``alpha = 1``; ``DENOMINATOR_PLUS_ONE`` adds a logit-0 key's weight to
-    the last tile's sum, never to the accumulator."""
+    the last tile's sum, never to the accumulator. ``e_ulps`` loosens A-E for
+    failure attribution only."""
     running_max = MASKED_SCORE
     denominator = F32Interval.point(Fraction(0))
     steps: list[TileStep] = []
@@ -741,11 +756,13 @@ def row_trace(
         if mutation is P4Mutation.OMIT_RESCALE:
             alpha = F32Interval.point(Fraction(1))
         else:
-            alpha = exp2_interval(round_f32(running_max - new_max, "rn"))
-        weights = tuple(exp2_interval(round_f32(value - new_max, "rn")) for value in scores)
+            alpha = exp2_interval(round_f32(running_max - new_max, "rn"), e_ulps)
+        weights = tuple(
+            exp2_interval(round_f32(value - new_max, "rn"), e_ulps) for value in scores
+        )
         terms = weights
         if mutation is P4Mutation.DENOMINATOR_PLUS_ONE and tile == tiles[-1]:
-            terms += (exp2_interval(round_f32(-new_max, "rn")),)
+            terms += (exp2_interval(round_f32(-new_max, "rn"), e_ulps),)
         denominator = add_rn(mul_rn(denominator, alpha), sum_any_order(terms))
         steps.append(TileStep(tile, alpha, weights))
         running_max = new_max
@@ -780,6 +797,7 @@ def _output_interval(
     products: tuple[F32Interval | None, ...],
     mfma: str,
     mutation: P4Mutation | None,
+    e_ulps: int,
 ) -> F32Interval:
     """``RN(o R(l))`` over the reachable accumulator ``o``.
 
@@ -788,7 +806,7 @@ def _output_interval(
     when the accumulator is zero, else faithful (or RN when pinned)."""
     if mfma not in MFMA_ROUNDING:
         raise ValueError(f"mfma must be one of {MFMA_ROUNDING}")
-    trace = row_trace(case, head, query, mutation)
+    trace = row_trace(case, head, query, mutation, e_ulps)
     accumulator = F32Interval.point(Fraction(0))
     for step, product in zip(trace.steps, products):
         accumulator = mul_rn(accumulator, step.alpha)
@@ -811,10 +829,11 @@ def tier_b_row(
     *,
     mfma: str = "faithful",
     mutation: P4Mutation | None = None,
+    e_ulps: int = 1,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Lowest and highest reachable output bits of one row and query head,
     under the correct or a ``mutation``'s semantics."""
-    trace = row_trace(case, head, query, mutation)
+    trace = row_trace(case, head, query, mutation, e_ulps)
     exponent = case.head_scale_exponents[head]
     low = np.zeros(case.base.head_dim, dtype=np.uint16)
     high = np.zeros(case.base.head_dim, dtype=np.uint16)
@@ -827,7 +846,9 @@ def tier_b_row(
             else:
                 weight = step.weights[key - step.tile * case.block_n]
                 products.append(_scaled_cast(case.dtype, weight, exponent))
-        output = _output_interval(case, head, query, tuple(products), mfma, mutation)
+        output = _output_interval(
+            case, head, query, tuple(products), mfma, mutation, e_ulps
+        )
         low[dim], high[dim] = cast_bits_hull(output, case.dtype)
     return low, high
 
@@ -1403,3 +1424,536 @@ def format_separation(case: P4Case, separation: Separation) -> str:
         f"{case.dtype}-{case.mask}-{case.fixture.value} "
         f"{separation.mutation.value}: G={separation.gap} at {where}"
     )
+
+
+# ---------------------------------------------------------------------------
+# Analyzer: the Tier B verdict, the failure taxonomy and diagnostics.
+# ---------------------------------------------------------------------------
+
+MFMA_ASSUMPTION = "A-MFMA v1: a folded MFMA addition is RD or RU of the exact sum"
+P4_ASSUMPTIONS = ("A-E v1", "A-MFMA v1")
+# Looser v_exp_f32 bound used only to attribute a failure to A-E.
+_RELAXED_EXP2_ULPS = 2
+
+
+class P4Label(str, Enum):
+    """Strongest contract an observed coordinate satisfies, checked in this order.
+
+    A zero-gap mutation (the fixture lacks sensitivity) is a CPU-side label,
+    ``P4_UNSEPARATED``, not an output label."""
+
+    PASS = "pass"
+    INVALID = "invalid"  # NaN (including the unwritten prefill) or Inf
+    NEGATIVE = "negative"  # sign bit set, -0 included
+    STRUCTURAL = "structural"  # a required +0 coordinate stores another pattern
+    E2 = "E2: denorm/rounding mode"  # an FP16-subnormal target outside Tier B
+    A_MFMA = "assumption A-MFMA"  # a folded addition outside {RD, RU}; basis clean
+    A_E = "assumption A-E"  # explained only by a looser v_exp_f32
+    PATH_MODEL = "path model"  # outside Tier B, inside Tier A: re-pin, never widen
+    NUMERICAL = "numerical"  # outside Tier A, or outside a mutated Tier B
+
+
+P4_FAILURE_LABELS = tuple(label for label in P4Label if label is not P4Label.PASS)
+_FINITE_MASK = {"fp16": 0x7C00, "bf16": 0x7F80}
+_SIGN_BIT = 0x8000
+_FP16_SMALLEST_NORMAL_BITS = 0x0400
+
+
+@dataclass(frozen=True)
+class P4GroupStats:
+    """One exposure's evidence for the rows of one legal count and query head.
+
+    ``exact`` counts nonstructural coordinates equal to the certified target;
+    ``ambiguous`` counts two-value Tier B sets and ``ambiguous_high`` how many
+    of them stored the upper value. Row sums (folded only, probability units)
+    are diagnostics, never part of the verdict."""
+
+    coordinates: int
+    structural: int
+    compared: int
+    exact: int
+    ambiguous: int
+    ambiguous_high: int
+    labels: Mapping[str, int]
+    max_row_sum_stored: float
+    max_row_sum_real: float
+
+
+@dataclass(frozen=True)
+class P4Result:
+    """Tier B verdict of one observation, with the taxonomy of every failure."""
+
+    mutation: P4Mutation | None
+    violations: tuple[str, ...]
+    labels: Mapping[str, int]
+    first: Mapping[str, tuple[str, tuple[int, int, int, int]]]
+    compared: int
+    exact: int
+    ambiguous: int
+    ambiguous_high: int
+    groups: Mapping[str, Mapping[tuple[int, int], P4GroupStats]]
+
+    @property
+    def exact_rate(self) -> float:
+        return self.exact / self.compared if self.compared else 0.0
+
+
+def _genuine_addition(case: P4Case, query: int, head: int, dim: int) -> bool:
+    """Whether a folded coordinate's MFMA adds two nonzero values (§2.1)."""
+    trace = row_trace(case, head, query)
+    exponent = case.head_scale_exponents[head]
+    nonzero = 0
+    for step in trace.steps:
+        key = exposure_key(case, "folded", dim, step.tile)
+        weight = step.weights[key - step.tile * case.block_n]
+        if _scaled_cast(case.dtype, weight, exponent).hi > 0:
+            nonzero += 1
+    return nonzero >= 2
+
+
+def _attribute(
+    case: P4Case,
+    exposure: str,
+    query: int,
+    head: int,
+    dim: int,
+    bits: int,
+    center: int,
+    radius: int,
+    basis_clean: bool,
+) -> P4Label:
+    """Label a nonnegative finite value outside the correct Tier B."""
+    if case.dtype == "fp16" and 0 < center < _FP16_SMALLEST_NORMAL_BITS:
+        return P4Label.E2
+    if (
+        exposure == "folded"
+        and basis_clean
+        and _genuine_addition(case, query, head, dim)
+    ):
+        return P4Label.A_MFMA
+    low, high = tier_b_row(case, exposure, query, head, e_ulps=_RELAXED_EXP2_ULPS)
+    if low[dim] <= bits <= high[dim]:
+        return P4Label.A_E
+    if abs(bits - center) <= radius:
+        return P4Label.PATH_MODEL
+    return P4Label.NUMERICAL
+
+
+@dataclass
+class _GroupBuilder:
+    coordinates: int = 0
+    structural: int = 0
+    compared: int = 0
+    exact: int = 0
+    ambiguous: int = 0
+    ambiguous_high: int = 0
+    labels: dict[str, int] | None = None
+    max_row_sum_stored: float = 0.0
+    max_row_sum_real: float = 0.0
+
+    def freeze(self) -> P4GroupStats:
+        return P4GroupStats(
+            self.coordinates,
+            self.structural,
+            self.compared,
+            self.exact,
+            self.ambiguous,
+            self.ambiguous_high,
+            MappingProxyType(dict(self.labels or {})),
+            self.max_row_sum_stored,
+            self.max_row_sum_real,
+        )
+
+
+def analyze_p4_policy(
+    case: P4Case,
+    observation: UniformObservation,
+    *,
+    mutation: P4Mutation | str | None = None,
+    rows: Iterable[int] | None = None,
+    require_complete: bool = True,
+) -> P4Result:
+    """Judge raw output bits by Tier B membership, coordinate by coordinate.
+
+    A coordinate passes iff its bits lie in Tier B; a structural zero (masked
+    key, Tier B ``{+0}``) must store exactly ``+0``. Every other outcome fails
+    and carries the strongest contract it still satisfies (``P4Label``). With
+    ``mutation`` the observation is judged against the mutated Tier B and must
+    be rejected; failures are then only labeled invalid, negative, structural
+    or numerical. ``rows`` restricts the judgment to those query rows.
+
+    Observed values are only compared: nothing here can enlarge Tier B or the
+    exponential candidate sets (I6)."""
+    selected = None if mutation is None else P4Mutation(mutation)
+    if selected is not None and selected not in applicable_mutations(case):
+        raise ValueError(f"mutation {selected.value} does not apply to {case.case_id}")
+    _validate_observation(case.base, observation, require_complete=require_complete)
+    queries = tuple(range(case.base.seqlen_q)) if rows is None else tuple(rows)
+    if not queries:
+        raise ValueError("rows must select at least one query")
+    exponents = np.array(case.head_scale_exponents)
+
+    # Pass 1: membership masks per exposure.
+    judged: dict[str, tuple] = {}
+    for exposure, raw in observation.exposures:
+        if rows is None:
+            low, high = tier_b_exposure(case, exposure, selected)
+        else:
+            low, high = tier_b_bounds(case, exposure, rows=queries, mutation=selected)
+        center, radius, _ = tier_a_exposure(case, exposure)
+        index = np.asarray(queries)
+        bits = raw[:, index].astype(np.int64)
+        low, high = low[:, index].astype(np.int64), high[:, index].astype(np.int64)
+        center = center[:, index].astype(np.int64)
+        radius = radius[:, index].astype(np.int64)
+        finite = (bits & _FINITE_MASK[case.dtype]) != _FINITE_MASK[case.dtype]
+        sign = (bits & _SIGN_BIT) != 0
+        if selected is None:
+            required_zero = radius == 0
+        else:
+            required_zero = (low == 0) & (high == 0)
+        valid = finite & ~sign
+        inside = valid & ~required_zero & (bits >= low) & (bits <= high)
+        labels = np.full(bits.shape, P4Label.PASS.value, dtype=object)
+        labels[~finite] = P4Label.INVALID.value
+        labels[finite & sign] = P4Label.NEGATIVE.value
+        labels[valid & required_zero & (bits != 0)] = P4Label.STRUCTURAL.value
+        outside = valid & ~required_zero & ~inside
+        judged[exposure] = (
+            bits, low, high, center, radius, required_zero, labels, outside
+        )
+
+    basis = [name for name in judged if name != "folded"]
+
+    def basis_clean(batch: int, row: int, head: int) -> bool:
+        if len(basis) != len(UNIFORM_BASIS_OFFSETS):
+            return False
+        return all(
+            np.all(judged[name][6][batch, row, head] == P4Label.PASS.value)
+            and not np.any(judged[name][7][batch, row, head])
+            for name in basis
+        )
+
+    # Pass 2: attribute each failure outside Tier B.
+    for exposure, judgment in judged.items():
+        bits, _, _, center, radius, _, labels, outside = judgment
+        for batch, row, head, dim in zip(*np.nonzero(outside)):
+            query = queries[row]
+            if selected is not None:
+                label = P4Label.NUMERICAL
+            else:
+                label = _attribute(
+                    case,
+                    exposure,
+                    query,
+                    int(head),
+                    int(dim),
+                    int(bits[batch, row, head, dim]),
+                    int(center[batch, row, head, dim]),
+                    int(radius[batch, row, head, dim]),
+                    basis_clean(batch, row, head),
+                )
+            labels[batch, row, head, dim] = label.value
+
+    # Pass 3: counts, first failures and per-group evidence.
+    totals: dict[str, int] = {label.value: 0 for label in P4Label}
+    first: dict[str, tuple[str, tuple[int, int, int, int]]] = {}
+    groups: dict[str, dict[tuple[int, int], _GroupBuilder]] = {}
+    compared = exact = ambiguous = ambiguous_high = 0
+    for exposure, (bits, low, high, center, radius, zero, labels, _) in judged.items():
+        by_group = groups.setdefault(exposure, {})
+        decoded = None
+        if exposure == "folded" and selected is None:
+            scale = np.ldexp(1.0, exponents)[None, None, :, None]
+            valid = (bits & _FINITE_MASK[case.dtype]) != _FINITE_MASK[case.dtype]
+            stored = decode_bits(bits.astype(np.uint16), case.dtype)
+            decoded = np.where(valid, stored, 0.0) / scale
+            targets = decode_bits(center.astype(np.uint16), case.dtype) / scale
+        for row, query in enumerate(queries):
+            first_key, last_key = legal_interval(case.base, query)
+            legal = max(0, last_key - first_key + 1)
+            for head in range(case.base.nhead_q):
+                group = by_group.setdefault((legal, head), _GroupBuilder(labels={}))
+                cell = (slice(None), row, head)
+                row_labels = labels[cell]
+                group.coordinates += row_labels.size
+                group.structural += int(np.count_nonzero(zero[cell]))
+                nonzero = ~zero[cell]
+                group.compared += int(np.count_nonzero(nonzero))
+                hits = nonzero & (bits[cell] == center[cell])
+                group.exact += int(np.count_nonzero(hits))
+                two = nonzero & (high[cell] > low[cell])
+                group.ambiguous += int(np.count_nonzero(two))
+                upper = two & (bits[cell] == high[cell])
+                group.ambiguous_high += int(np.count_nonzero(upper))
+                for label in row_labels.ravel():
+                    if label != P4Label.PASS.value:
+                        group.labels[label] = group.labels.get(label, 0) + 1
+                if decoded is not None:
+                    stored = float(np.max(np.abs(
+                        decoded[cell].sum(axis=-1) - targets[cell].sum(axis=-1)
+                    )))
+                    real = float(np.max(np.abs(decoded[cell].sum(axis=-1) - 1.0)))
+                    group.max_row_sum_stored = max(group.max_row_sum_stored, stored)
+                    group.max_row_sum_real = max(group.max_row_sum_real, real)
+        for label in P4Label:
+            hits = labels == label.value
+            count = int(np.count_nonzero(hits))
+            totals[label.value] += count
+            if count and label is not P4Label.PASS and label.value not in first:
+                batch, row, head, dim = (int(value) for value in np.argwhere(hits)[0])
+                first[label.value] = (exposure, (batch, queries[row], head, dim))
+        nonzero = ~zero
+        compared += int(np.count_nonzero(nonzero))
+        exact += int(np.count_nonzero(nonzero & (bits == center)))
+        two = nonzero & (high > low)
+        ambiguous += int(np.count_nonzero(two))
+        ambiguous_high += int(np.count_nonzero(two & (bits == high)))
+
+    violations = [
+        f"{label.value}={totals[label.value]} first at {first[label.value][0]} "
+        f"b:q:h:d={':'.join(str(value) for value in first[label.value][1])}"
+        for label in P4_FAILURE_LABELS
+        if totals[label.value]
+    ]
+    if compared == 0:
+        violations.append("no_coordinate_compared")
+    return P4Result(
+        mutation=selected,
+        violations=tuple(violations),
+        labels=MappingProxyType(totals),
+        first=MappingProxyType(first),
+        compared=compared,
+        exact=exact,
+        ambiguous=ambiguous,
+        ambiguous_high=ambiguous_high,
+        groups=MappingProxyType(
+            {
+                exposure: MappingProxyType(
+                    {key: item.freeze() for key, item in sorted(by_group.items())}
+                )
+                for exposure, by_group in groups.items()
+            }
+        ),
+    )
+
+
+def format_p4_result(result: P4Result) -> str:
+    violations = "; ".join(result.violations) if result.violations else "none"
+    return (
+        f"violations={violations}; exact={result.exact}/{result.compared} "
+        f"({result.exact_rate:.6f}); two_value_B={result.ambiguous} "
+        f"(upper observed {result.ambiguous_high})"
+    )
+
+
+@dataclass(frozen=True)
+class P4Diagnostics:
+    """Records-only evidence (never a verdict) on sampled rows.
+
+    ``path_exact`` counts coordinates equal to the pinned emulation (lane
+    order, ``E = RN(2**x)``, RN MFMA): agreement everywhere is consistent with
+    E1 = the nearest exponential. ``mfma_rn`` counts folded coordinates with a
+    genuine MFMA addition that lie in the RN-accumulate Tier B (E6)."""
+
+    path_exact: int
+    path_compared: int
+    mfma_additions: int
+    mfma_rn: int
+    widths: Mapping[int, int]
+
+
+def p4_diagnostics(
+    case: P4Case,
+    observation: UniformObservation,
+    *,
+    rows: Iterable[int] = P4_SEPARATION_ROWS,
+) -> P4Diagnostics:
+    path_exact = path_compared = additions = rn = 0
+    widths: dict[int, int] = {}
+    queries = tuple(rows)
+    for exposure, raw in observation.exposures:
+        low, high = tier_b_exposure(case, exposure)
+        width = (high.astype(np.int64) - low.astype(np.int64) + 1)[:, queries]
+        for value, count in zip(*np.unique(width, return_counts=True)):
+            widths[int(value)] = widths.get(int(value), 0) + int(count)
+        for query in queries:
+            for head in range(case.base.nhead_q):
+                observed = raw[0, query, head]
+                pinned = emulate_row(case, exposure, query, head)
+                path_exact += int(np.count_nonzero(observed == pinned))
+                path_compared += observed.size
+                if exposure != "folded":
+                    continue
+                rn_low, rn_high = tier_b_row(case, exposure, query, head, mfma="rn")
+                for dim in range(case.base.head_dim):
+                    if _genuine_addition(case, query, head, dim):
+                        additions += 1
+                        rn += int(rn_low[dim] <= observed[dim] <= rn_high[dim])
+    return P4Diagnostics(
+        path_exact,
+        path_compared,
+        additions,
+        rn,
+        MappingProxyType(dict(sorted(widths.items()))),
+    )
+
+
+def p4_records(
+    case: P4Case,
+    candidate_name: str,
+    results: Mapping[str, P4Result],
+    *,
+    deterministic: bool,
+    diagnostics: P4Diagnostics,
+    separations: Mapping[str, Separation],
+) -> list[dict]:
+    """JSON-ready calibration records: per-group evidence for every analysis,
+    one summary per analysis, and one diagnostics record for the case."""
+    identity = {
+        "arch": "gfx942",
+        "candidate_name": candidate_name,
+        "case_id": case.case_id,
+        "fixture": case.fixture.value,
+        "dtype": case.dtype,
+        "mask": case.mask,
+    }
+    records: list[dict] = []
+    for name, result in results.items():
+        for exposure, by_group in result.groups.items():
+            for (legal, head), stats in by_group.items():
+                records.append(
+                    {
+                        "record_type": "rocke_p4_group",
+                        **identity,
+                        "mutation": name,
+                        "exposure": exposure,
+                        "legal_count": legal,
+                        "head": head,
+                        "head_scale_exponent": case.head_scale_exponents[head],
+                        "coordinates": stats.coordinates,
+                        "structural": stats.structural,
+                        "compared": stats.compared,
+                        "exact": stats.exact,
+                        "two_value_b": stats.ambiguous,
+                        "two_value_b_upper": stats.ambiguous_high,
+                        "labels": dict(stats.labels),
+                        "max_row_sum_stored": stats.max_row_sum_stored,
+                        "max_row_sum_real": stats.max_row_sum_real,
+                    }
+                )
+        separation = separations.get(name)
+        records.append(
+            {
+                "record_type": "rocke_p4_summary",
+                **identity,
+                "mutation": name,
+                "rejected": bool(result.violations),
+                "violations": list(result.violations),
+                "labels": dict(result.labels),
+                "compared": result.compared,
+                "exact": result.exact,
+                "two_value_b": result.ambiguous,
+                "two_value_b_upper": result.ambiguous_high,
+                "cpu_gap": None if separation is None else separation.gap,
+                "cpu_gap_at": None
+                if separation is None or separation.coordinate is None
+                else [separation.exposure, list(separation.coordinate)],
+            }
+        )
+    records.append(
+        {
+            "record_type": "rocke_p4_diagnostics",
+            **identity,
+            "deterministic": deterministic,
+            "assumptions": list(P4_ASSUMPTIONS),
+            "path_exact": diagnostics.path_exact,
+            "path_compared": diagnostics.path_compared,
+            "mfma_additions": diagnostics.mfma_additions,
+            "mfma_rn": diagnostics.mfma_rn,
+            "tier_b_widths": {
+                str(key): value for key, value in diagnostics.widths.items()
+            },
+        }
+    )
+    return records
+
+
+# ---------------------------------------------------------------------------
+# Calibration: identity and scope only (D8, invariant I6).
+# ---------------------------------------------------------------------------
+
+P4_POLICY = "tier_b"
+
+
+@dataclass(frozen=True)
+class P4CalibrationEntry:
+    """Ratifies that the Tier B contract applies to one kernel identity.
+
+    It names the policy, the assumption versions, the case ids and the dispatch
+    fingerprint, and has no width, ULP or tolerance field: no measurement can
+    enlarge Tier B. Provenance belongs in the commit that edits the table."""
+
+    policy: str
+    assumptions: tuple[str, ...]
+    case_ids: tuple[str, ...]
+    spec: UniformSpecFingerprint
+
+    def __post_init__(self) -> None:
+        if self.policy != P4_POLICY:
+            raise ValueError(f"P4 supports only policy={P4_POLICY!r}")
+        if tuple(self.assumptions) != P4_ASSUMPTIONS:
+            raise ValueError(f"assumptions must be {P4_ASSUMPTIONS}")
+        if not self.case_ids or len(set(self.case_ids)) != len(self.case_ids):
+            raise ValueError("case_ids must be nonempty and unique")
+
+    def mismatch(self, case: P4Case, spec: UniformSpecFingerprint) -> tuple[str, ...]:
+        problems: list[str] = []
+        if case.case_id not in self.case_ids:
+            problems.append(f"case {case.case_id} not in calibrated {self.case_ids}")
+        for item in fields(UniformSpecFingerprint):
+            calibrated = getattr(self.spec, item.name)
+            resolved = getattr(spec, item.name)
+            if calibrated != resolved:
+                problems.append(
+                    f"{item.name}: calibrated {calibrated!r}, resolved {resolved!r}"
+                )
+        return tuple(problems)
+
+
+# Empty until gfx942 ratification (Phase 5): the GPU lane fails closed.
+P4_CALIBRATION: Mapping[tuple[str, str, str], P4CalibrationEntry] = MappingProxyType({})
+
+_P4_RECALIBRATION_REMEDY = (
+    "re-run the case on gfx942 with ROCKE_ORACLE_FREE_CALIBRATION_OUT=<dir>, "
+    "review the records (zero coordinates outside Tier B, every mutation "
+    "rejected, deterministic), and update P4_CALIBRATION (spec, case_ids) "
+    "deliberately"
+)
+
+
+def require_p4_calibration(
+    arch: str,
+    candidate_name: str,
+    case: P4Case,
+    spec: UniformSpecFingerprint,
+    *,
+    table: Mapping[tuple[str, str, str], P4CalibrationEntry] = P4_CALIBRATION,
+    detail: str = "",
+) -> P4CalibrationEntry:
+    """Return the entry that authorizes this resolved case, or fail closed."""
+    key = (arch, candidate_name, case.dtype)
+    suffix = f"; {detail}" if detail else ""
+    entry = table.get(key)
+    if entry is None:
+        raise AssertionError(
+            f"no P4 calibration for {key}, case={case.case_id}; "
+            f"{_P4_RECALIBRATION_REMEDY}{suffix}"
+        )
+    problems = entry.mismatch(case, spec)
+    if problems:
+        raise AssertionError(
+            f"P4 calibration {key} does not cover case={case.case_id}: "
+            f"{'; '.join(problems)}; {_P4_RECALIBRATION_REMEDY}{suffix}"
+        )
+    return entry
