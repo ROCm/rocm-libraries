@@ -110,14 +110,16 @@ public:
         {
             _engine.sdkVersion = *sdkVersion;
         }
-        // Rediscovery refills the one-shot slots, so this takes a state manager nothing else
-        // owns.
-        rediscoverStateManagersForTesting();
-        _stateManager = takeDiscoveredStateManager(set.engine.id);
-        if(_stateManager == nullptr)
+        // The discovered state is immutable and shared; the manager over it, with its own
+        // caches, is this engine's alone.
+        auto state = discoveredSharedState(set.engine.id);
+        if(state == nullptr)
         {
-            throw std::runtime_error("no state manager for engine '" + set.engine.name + "'");
+            throw std::runtime_error("no shared state for engine '" + set.engine.name + "'");
         }
+        _stateManager
+            = std::make_unique<hipdnn_plugin_sdk::ingestor::KernelIngestorStateManager<Handle>>(
+                std::move(state));
         _builder = std::make_unique<Builder>(_engine, *_stateManager, _resolver);
     }
 

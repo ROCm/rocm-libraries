@@ -115,7 +115,9 @@ hipdnn_plugin_sdk::ingestor::KernelDefinition definitionOf(const Pack& pack, con
                                                          kernel.originDirectory,
                                                          kernel.name,
                                                          kernel.treeRoot,
-                                                         kernel.sources};
+                                                         kernel.sources,
+                                                         nullptr,
+                                                         nullptr};
 }
 
 /// A metadata field of type @p T, or nullptr when absent or of another type.
