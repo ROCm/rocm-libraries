@@ -227,17 +227,11 @@ The default values are:
 
 - all four tiers;
 - minimum sweep size 1;
-- the zero-stride filter on;
 - the descale filter (`--descale-non-fp8-filter`) off.
 
 With these defaults, and an input whose SHA-256 is the one in
-`levels.csv.sha256`, the script checks the counts that it records: 34,496 rows
-in 1,198 sweeps.
-
-`--no-zero-stride-filter` also selects the 54 zero-stride rows that a bundle can
-otherwise express. The data-SDK change that they need (PR #14709) is merged. But
-these rows are left out of this bundle set. Adding them is planned as a
-follow-up change.
+`levels.csv.sha256`, the script checks the counts that it records: 34,550 rows
+in 1,229 sweeps.
 
 `topology.py --input … --class-values … --out topologies.csv` checks that the
 topology names and the tensor signatures map one to one, and lists them. With

@@ -12,8 +12,8 @@ Exclusion reasons:
   content reasons     a bundle cannot express the row (exact input contents, an output
                       written over an input, inputs that share memory in a way the case
                       builder keeps as separate buffers, arch-dependent dtypes)
-  zero_stride_needs_pr14709, dropout_without_rng_dump, reference_declines_descale_non_fp8
-                      the extra exclusions. The last one is off by default (--descale-non-fp8-filter
+  dropout_without_rng_dump, reference_declines_descale_non_fp8
+                      the extra exclusions. The second one is off by default (--descale-non-fp8-filter
                       turns it on). It takes the clauses of the model's answer-key rule
                       AK-DESCALE-WITH-FP8 that forbid a present Q, K or V descale. Levels that ignore
                       the answer-key rules admit such rows, and no reference can check them.
@@ -46,7 +46,6 @@ LEVELS = ["quick", "standard", "comprehensive", "full"]
 BYTES = {"fp32": 4, "fp16": 2, "bf16": 2}
 
 EXTRA_REASONS = (
-    "zero_stride_needs_pr14709",
     "dropout_without_rng_dump",
     "reference_declines_descale_non_fp8",
 )
@@ -63,20 +62,19 @@ EXPECTED = {
         "arch_dtype": 103,
     },
     "extra_of_expressible": {
-        "zero_stride_needs_pr14709": 54,
         "dropout_without_rng_dump": 10,
     },
     "per_tier": {
         # rows, bundle rows, strict sweeps, alignment-split sweeps, largest, 1-case, then the summed
         # est_seconds on gfx942 and gfx950 of the expressible rows before the extra exclusions
         "quick": (1461, 1412, 91, 155, 400, 29, 49.9, 38.6),
-        "standard": (8631, 8409, 258, 478, 2139, 19, 453.2, 337.9),
-        "comprehensive": (4070, 3954, 209, 368, 969, 65, 1470.4, 1047.4),
-        "full": (21093, 20721, 640, 995, 3752, 52, 7268.4, 5186.2),
+        "standard": (8631, 8440, 270, 490, 2142, 20, 453.2, 337.9),
+        "comprehensive": (4070, 3966, 221, 380, 969, 77, 1470.4, 1047.4),
+        "full": (21093, 20732, 647, 1002, 3755, 58, 7268.4, 5186.2),
     },
-    "bundle_rows": 34496,
-    "sweeps": 1198,
-    "sweeps_alignment_split": 1996,
+    "bundle_rows": 34550,
+    "sweeps": 1229,
+    "sweeps_alignment_split": 2027,
 }
 
 
@@ -273,14 +271,6 @@ def content_reasons(row, model):
 
 def extra_reasons(row, descale_filter=False, model_path=PLAN_DIR / "model.yaml"):
     why = []
-    if "zero_broadcast" in (
-        row["strides_q"],
-        row["strides_k"],
-        row["strides_v"],
-        row["strides_o"],
-        row["strides_stats"],
-    ):
-        why.append("zero_stride_needs_pr14709")
     if row["dropout"] == "random" and row["dropout_pattern_output"] != "requested":
         why.append("dropout_without_rng_dump")
     if descale_filter and descale_on_non_fp8(row, model_path):
@@ -365,7 +355,6 @@ def classify(
     rows,
     model,
     *,
-    zero_stride_filter=True,
     bundle_tiers=LEVELS,
     min_sweep_size=1,
     export_outcomes=None,
@@ -375,11 +364,7 @@ def classify(
     """Reasons per row (list per row, in input order). An empty list means the row is selected."""
     reasons = []
     for r in rows:
-        why = content_reasons(r, model)
-        for x in extra_reasons(r, descale_filter, model_path):
-            if x == "zero_stride_needs_pr14709" and not zero_stride_filter:
-                continue
-            why.append(x)
+        why = content_reasons(r, model) + extra_reasons(r, descale_filter, model_path)
         if export_outcomes is not None and not why:
             outcome = export_outcomes.get(r["case_key"])
             if outcome is None:
@@ -518,11 +503,6 @@ def main():
     ap.add_argument("--min-sweep-size", type=int, default=1)
     ap.add_argument("--bundle-tiers", default=",".join(LEVELS))
     ap.add_argument(
-        "--no-zero-stride-filter",
-        action="store_true",
-        help="select zero-stride rows (needs the zero-stride data-SDK change)",
-    )
-    ap.add_argument(
         "--descale-non-fp8-filter",
         action="store_true",
         help="exclude rows with a Q/K/V descale on non-fp8 inputs (no reference checks them)",
@@ -552,7 +532,6 @@ def main():
     reasons = classify(
         rows,
         model,
-        zero_stride_filter=not args.no_zero_stride_filter,
         bundle_tiers=tiers,
         min_sweep_size=args.min_sweep_size,
         export_outcomes=outcomes,
@@ -567,7 +546,6 @@ def main():
     summary["parameters"] = {
         "min_sweep_size": args.min_sweep_size,
         "bundle_tiers": tiers,
-        "zero_stride_filter": not args.no_zero_stride_filter,
         "descale_non_fp8_filter": args.descale_non_fp8_filter,
         "export_outcomes": [str(p) for p in args.export_outcomes],
     }
@@ -575,7 +553,6 @@ def main():
     defaults = (
         args.min_sweep_size == 1
         and tiers == LEVELS
-        and not args.no_zero_stride_filter
         and not args.export_outcomes
         and not args.descale_non_fp8_filter
     )
