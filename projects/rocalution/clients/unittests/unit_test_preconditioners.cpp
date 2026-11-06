@@ -1235,9 +1235,12 @@ TYPED_TEST(preconditioners, reset_operator_switches_to_another_matrix)
     using T                      = typename TypeParam::value_type;
     const Csr<T>         ref     = nonsymmetric<T>(10);
     const Csr<T>         changed = transformed(ref, [](int, int, T v) { return 2 * v + 1; });
+    const Csr<T>         larger  = nonsymmetric<T>(12);
     const std::vector<T> r       = rhs<T>(ref.n);
+    const std::vector<T> r_large = rhs<T>(larger.n);
     auto                 A       = this->make(ref);
     auto                 B       = this->make(changed);
+    auto                 C       = this->make(larger);
 
     // The base class only replaces the operator
     rocalution::ILU<Matrix<T>, Vector<T>, T> ilu;
@@ -1264,6 +1267,11 @@ TYPED_TEST(preconditioners, reset_operator_switches_to_another_matrix)
         p->Build();
         p->ResetOperator(*B);
         expect_near(apply(*p, *B, r), reference(changed, r), scaled_tol<T>(1e-14));
+
+        // Another size and pattern, so the copy of the operator, its analysis, the
+        // diagonal and the work vector are set up again
+        p->ResetOperator(*C);
+        expect_near(apply(*p, *C, r_large), reference(larger, r_large), scaled_tol<T>(1e-14));
     }
 }
 
