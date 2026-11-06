@@ -20,6 +20,7 @@ import pytest
 from codegen.generator import (
     PLACEHOLDER_MARKER,
     _dedup_key,
+    _dump,
     build_kdp,
     build_kdp_documents,
     build_kmd,
@@ -3468,3 +3469,104 @@ class TestMultiLaunchIds:
                 ids_from=bundles.home_dir,
                 engine_ids_from=[bundles.satellite_dir],
             )
+
+
+class TestHeuristicBindings:
+    """``engine.heuristics`` lands in the UED in the key order `uhd_gen promote`
+    writes, so a promoted UED and a regenerated one are byte-identical."""
+
+    MODEL = "4b750e22-2656-46ce-89e7-be9ba588d732"
+    OTHER = "73276c7b-f432-437b-9a06-8bb62920c823"
+    PROMOTED = Path(__file__).parent / "fixtures" / "promote"
+
+    def test_arch_entries_follow_default_in_config_order(self, scale_add_config):
+        config = copy.deepcopy(scale_add_config)
+        config.engine.heuristics = {
+            "sort_kernel_catalog": {"gfx950": [self.OTHER], "gfx942": [self.MODEL]}
+        }
+        ids = mint_ids(config)
+        ued = build_ued(config, ids)
+        assert list(ued["sort_kernel_catalog"].items()) == [
+            ("default", ids["uhd"]),
+            ("gfx950", [self.OTHER]),
+            ("gfx942", [self.MODEL]),
+        ]
+        assert list(ued).index("sort_kernel_catalog") < list(ued).index("knobs")
+
+    def test_other_roles_follow_knobs_and_behavior_notes(self, scale_add_config):
+        config = copy.deepcopy(scale_add_config)
+        config.engine.heuristics = {
+            "predict_engine": {"gfx950": [self.MODEL, self.OTHER]},
+            "predict_applicable_kernels": {"default": [self.OTHER]},
+        }
+        ued = build_ued(config, mint_ids(config))
+        assert list(ued)[-4:] == [
+            "knobs",
+            "behavior_notes",
+            "predict_engine",
+            "predict_applicable_kernels",
+        ]
+        assert ued["predict_engine"] == {"gfx950": [self.MODEL, self.OTHER]}
+        assert ued["sort_kernel_catalog"] == {
+            "default": ued["sort_kernel_catalog"]["default"]
+        }
+
+    def test_a_promoted_ued_regenerates_byte_identical(self):
+        """The fixture is `uhd_gen promote --role sort_kernel_catalog` run on the
+        gfx942 unified-3d bundle (AICK-2545): `default` + one gfx942 model, knobs after.
+        """
+        # Text, not bytes: the generator writes LF, while an autocrlf checkout (Windows
+        # CI) holds this git-tracked fixture as CRLF, as test_registry_regeneration's g2
+        # notes for the shipped descriptors.
+        promoted = (self.PROMOTED / "gfx942_attention_unified3d.ued.json").read_text(
+            encoding="utf-8"
+        )
+        doc = json.loads(promoted)
+        config = make_minimal_config(
+            engine=make_engine(
+                name=doc["name"],
+                knobs=["block_size", "num_segments"],
+                heuristics={"sort_kernel_catalog": {"gfx942": [self.MODEL]}},
+            )
+        )
+        ids = {
+            "ued": doc["id"],
+            "kmd": doc["metadata"],
+            "uhd": doc["sort_kernel_catalog"]["default"],
+        }
+        assert _dump(build_ued(config, ids)) == promoted
+
+    def test_regeneration_keeps_bytes_and_ids_around_a_heuristics_tree(
+        self, generator, scale_add_config, tmp_path
+    ):
+        """A bundle holding `heuristics/**/*.uhd.json` (what promote copies in)
+        regenerates without new ids or errors, and only the UED changes."""
+        generator.render(scale_add_config, tmp_path)
+        bundle = tmp_path / scale_add_config.descriptor_dir
+        before = json_bytes(bundle)
+        ued_name = next(n for n in before if n.endswith(".ued.json"))
+        ued_id = json.loads(before[ued_name])["id"]
+        model_dir = (
+            bundle / "heuristics" / ued_id / "sort_kernel_catalog" / "gfx942" / "t"
+        )
+        model_dir.mkdir(parents=True)
+        (model_dir / "heuristic.uhd.json").write_text(
+            json.dumps({"version": "1.0", "id": self.MODEL, "adapter": "tree_data"}),
+            encoding="utf-8",
+        )
+        (model_dir / "model.bin").write_bytes(b"\0model")
+
+        bound = copy.deepcopy(scale_add_config)
+        bound.engine.heuristics = {"sort_kernel_catalog": {"gfx942": [self.MODEL]}}
+        generator.render(bound, tmp_path)
+        after = json_bytes(bundle)
+        assert {n for n in before if before[n] != after[n]} == {ued_name}
+        catalog = json.loads(after[ued_name])["sort_kernel_catalog"]
+        assert catalog["gfx942"] == [self.MODEL]
+        assert (
+            catalog["default"]
+            == json.loads(before[ued_name])["sort_kernel_catalog"]["default"]
+        )
+
+        generator.render(scale_add_config, tmp_path)
+        assert json_bytes(bundle) == before
