@@ -627,6 +627,7 @@ Tests:
     - { transA: N, transB: T, M: 67108864, N: 1, K: 32, lda: 67108864, ldb:  1, ldc: 67108864 }
     - { transA: T, transB: N, M: 67108864, N: 1, K: 32, lda:       32, ldb: 32, ldc: 67108864 }
     - { transA: T, transB: T, M: 67108864, N: 1, K: 32, lda:       32, ldb:  1, ldc: 67108864 }
+    - { transA: T, transB: T, M: 2, N: 2, K: 33, lda: 33, ldb: 16777217, ldc: 2 }
   alpha: 1
   beta: 1
   batch_count: [ 2 ]
