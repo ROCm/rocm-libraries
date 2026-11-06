@@ -38,7 +38,11 @@ elseif(HIPSPARSE_ENABLE_CUDA)
   endif()
 endif()
 
-set(_hipsparse_test_sources "${CMAKE_CURRENT_SOURCE_DIR}/hipsparse_gtest_main.cpp")
+# test_device_malloc.cpp is a standalone pre_checkin test. It does not use a
+# version-gated API, so every backend builds it.
+set(_hipsparse_test_sources
+    "${CMAKE_CURRENT_SOURCE_DIR}/hipsparse_gtest_main.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/test_device_malloc.cpp")
 foreach(_src IN LISTS HIPSPARSE_TEST_SOURCES)
   list(APPEND _hipsparse_test_sources "${CMAKE_CURRENT_SOURCE_DIR}/${_src}")
 endforeach()

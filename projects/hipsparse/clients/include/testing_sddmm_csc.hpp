@@ -31,7 +31,7 @@
 #include "hipsparse.hpp"
 #include "hipsparse_arguments.hpp"
 #include "hipsparse_graph.hpp"
-#include "hipsparse_local_csc.hpp"
+#include "hipsparse_local_spmat.hpp"
 #include "hipsparse_local_dnmat.hpp"
 #include "hipsparse_test_unique_ptr.hpp"
 #include "unit.hpp"
