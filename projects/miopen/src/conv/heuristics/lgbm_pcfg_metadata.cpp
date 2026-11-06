@@ -12,6 +12,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <fstream>
+#include <limits>
 #include <string>
 #include <utility>
 #include <vector>
@@ -33,6 +34,180 @@ namespace {
 // realistic bundle is a few KB (a dozen solvers); 1 MiB covers thousands. A
 // bundle whose directory somehow exceeds this fails to parse and abstains.
 constexpr std::uint64_t kDirPrefixCap = 1u << 20;
+
+// A column of n integers (see script/convert_lgbm_binary.py): d distinct values
+// (d == 1: the value; else ascending zigzag deltas), then, for d > 1, n packed
+// indices into them.
+bool ReadIntColumn(BinReader& reader, std::size_t n, std::vector<std::int64_t>& out)
+{
+    const std::uint64_t d = reader.ReadVarint();
+    if(!reader.Ok() || d == 0 || d > n)
+        return false;
+    std::vector<std::int64_t> values(d);
+    std::uint64_t prev = 0;
+    for(auto& v : values)
+    {
+        prev += static_cast<std::uint64_t>(reader.ReadZigzag());
+        v = static_cast<std::int64_t>(prev);
+    }
+    if(d == 1)
+    {
+        out.assign(n, values[0]);
+        return reader.Ok();
+    }
+    unsigned width = 0;
+    for(std::uint64_t m = d - 1; m != 0; m >>= 1)
+        ++width;
+    const auto index = reader.ReadPacked(n, width);
+    if(!reader.Ok())
+        return false;
+    out.resize(n);
+    for(std::size_t i = 0; i < n; ++i)
+    {
+        if(index[i] >= d)
+            return false;
+        out[i] = values[index[i]];
+    }
+    return true;
+}
+
+// `count` strings, each stored as the number of leading bytes shared with the
+// previous string, then its remaining bytes.
+bool ReadStrings(BinReader& reader, std::uint64_t count, std::vector<std::string>& out)
+{
+    std::string prev;
+    for(std::uint64_t i = 0; i < count; ++i)
+    {
+        const std::uint64_t shared = reader.ReadVarint();
+        const std::uint64_t tail   = reader.ReadVarint();
+        if(!reader.Ok() || shared > prev.size() || tail > reader.Remaining())
+            return false;
+        prev.resize(shared);
+        prev += reader.ReadChars(tail);
+        out.push_back(prev);
+    }
+    return reader.Ok();
+}
+
+// Reads one solver's catalog (layout in script/convert_lgbm_binary.py): the
+// distinct candidates, then the buckets that index into them. A descriptor is a
+// template whose kSlotMark bytes stand for decimal numbers; each number is
+// either stored per candidate or equal to one of the candidate's args.
+// Args decode to double; INT32_MIN (the exporter's "missing") decodes to NaN, as
+// the previous f64 catalog stored it.
+bool ReadCatalog(BinReader& reader,
+                 std::size_t arg_count,
+                 std::unordered_map<std::string, std::vector<Candidate>>& buckets)
+{
+    constexpr char kSlotMark               = '\x01';
+    constexpr std::uint64_t kMaxCandidates = 1u << 16;
+    constexpr std::int64_t kMissingArg     = std::numeric_limits<std::int32_t>::min();
+
+    const std::uint64_t num_unique    = reader.ReadVarint();
+    const std::uint64_t num_templates = reader.ReadVarint();
+    if(!reader.Ok() || num_unique > kMaxCandidates || num_templates > num_unique)
+        return false;
+    std::vector<std::string> templates;
+    if(!ReadStrings(reader, num_templates, templates))
+        return false;
+    std::vector<std::size_t> counts(num_templates);
+    std::uint64_t total = 0;
+    for(auto& c : counts)
+    {
+        const std::uint64_t v = reader.ReadVarint();
+        if(!reader.Ok() || v == 0 || v > num_unique)
+            return false;
+        c = static_cast<std::size_t>(v);
+        total += v;
+    }
+    if(total != num_unique)
+        return false;
+
+    // Every arg column takes at least two bytes, so this also bounds the allocation below.
+    if(num_unique > 0 && arg_count > reader.Remaining() / 2)
+        return false;
+    std::vector<Candidate> unique(num_unique);
+    if(num_unique > 0)
+    {
+        std::vector<std::vector<std::int64_t>> cols(arg_count);
+        for(auto& col : cols)
+            if(!ReadIntColumn(reader, num_unique, col))
+                return false;
+
+        std::size_t first = 0;
+        for(std::size_t t = 0; t < num_templates; ++t)
+        {
+            const std::string& tpl = templates[t];
+            const std::size_t num_slots =
+                static_cast<std::size_t>(std::count(tpl.begin(), tpl.end(), kSlotMark));
+            std::vector<std::vector<std::int64_t>> own(num_slots);
+            std::vector<const std::int64_t*> slot(num_slots);
+            for(std::size_t s = 0; s < num_slots; ++s)
+            {
+                const std::uint8_t ref = reader.ReadU8();
+                if(ref == 0)
+                {
+                    if(!ReadIntColumn(reader, counts[t], own[s]))
+                        return false;
+                    slot[s] = own[s].data();
+                }
+                else if(ref <= arg_count)
+                    slot[s] = cols[ref - 1].data() + first;
+                else
+                    return false;
+            }
+            for(std::size_t k = 0; k < counts[t]; ++k)
+            {
+                std::string& desc = unique[first + k].desc;
+                std::size_t s     = 0;
+                for(const char ch : tpl)
+                {
+                    if(ch != kSlotMark)
+                    {
+                        desc += ch;
+                        continue;
+                    }
+                    const std::int64_t v = slot[s++][k];
+                    if(v < 0)
+                        return false;
+                    desc += std::to_string(v);
+                }
+            }
+            first += counts[t];
+        }
+
+        for(std::size_t i = 0; i < unique.size(); ++i)
+        {
+            auto& args = unique[i].args;
+            args.reserve(arg_count);
+            for(const auto& col : cols)
+                args.push_back(col[i] == kMissingArg ? std::numeric_limits<double>::quiet_NaN()
+                                                     : static_cast<double>(col[i]));
+        }
+    }
+
+    const std::uint64_t num_buckets = reader.ReadVarint();
+    std::vector<std::string> keys;
+    if(!reader.Ok() || !ReadStrings(reader, num_buckets, keys))
+        return false;
+    const unsigned idx_width = reader.ReadU8();
+    for(const auto& key : keys)
+    {
+        const std::uint64_t n = reader.ReadVarint();
+        const auto index      = reader.ReadPacked(static_cast<std::size_t>(n), idx_width);
+        if(!reader.Ok())
+            return false;
+        auto& dst = buckets[key];
+        dst.reserve(index.size());
+        for(const std::uint32_t i : index)
+        {
+            if(i >= unique.size())
+                return false;
+            dst.push_back(unique[i]);
+        }
+    }
+    return reader.Ok();
+}
 
 // Read exactly [offset, offset+len) of a file. Returns empty on any short read
 // or open failure (the caller then abstains). Single named-return so NRVO
@@ -141,22 +316,10 @@ bool LgbmPcfgMetadata::LoadSection(std::uint64_t offset, std::uint64_t size, Sol
         return false;
     out.forest = std::move(forest);
 
-    const std::uint32_t num_buckets = reader.ReadU32();
-    for(std::uint32_t b = 0; b < num_buckets; ++b)
-    {
-        const std::string key         = reader.ReadString();
-        const std::uint32_t num_cands = reader.ReadU32();
-        auto& dst                     = out.buckets[key];
-        dst.reserve(num_cands);
-        for(std::uint32_t c = 0; c < num_cands; ++c)
-        {
-            Candidate cand;
-            cand.desc = reader.ReadString();
-            cand.args = reader.ReadArray<double>(static_cast<std::size_t>(out.arg_count));
-            dst.push_back(std::move(cand));
-        }
-    }
-    return reader.Ok();
+    // Catalog (v5): the distinct candidates, then the buckets that index them.
+    if(out.arg_count < 0)
+        return false;
+    return ReadCatalog(reader, static_cast<std::size_t>(out.arg_count), out.buckets);
 }
 
 const SolverModel* LgbmPcfgMetadata::Find(const std::string& solver_name) const
