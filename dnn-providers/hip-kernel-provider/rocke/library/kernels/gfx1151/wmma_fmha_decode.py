@@ -1605,7 +1605,9 @@ def _split_merge(b, ws_o, ws_lse, row_ns, ns, dv, cols):
                 [
                     b.select(
                         ok,
-                        b.global_load_vN(ws_o, b.add(base, cv), F32, _MERGE_COLS, align=16),
+                        b.global_load_vN(
+                            ws_o, b.add(base, cv), F32, _MERGE_COLS, align=16
+                        ),
                         zero,
                     )
                     for cv in cols
