@@ -438,9 +438,12 @@ std::optional<ConvGemmPlanCalls> im2colGemmCalls(const ConvProblem& problem,
     }
     // Backward weights over several slices sums them: in w itself for fp32, otherwise in an fp32
     // accumulator rounded once at the end.
+    // So does channels-first backward weights over several images, one GEMM per image: any sum
+    // of several GEMMs is kept in fp32 and rounded into a narrower w once, never per GEMM.
     const bool sliced = slice < problem.n;
-    const bool accumulator
-        = backwardWeights && sliced && problem.dataType != data_objects::DataType::FLOAT;
+    const bool perImage = form.columnsFirst && !stageY && problem.n > 1;
+    const bool accumulator = backwardWeights && (sliced || perImage)
+                             && problem.dataType != data_objects::DataType::FLOAT;
     if(accumulator)
     {
         slice = imagesWithin(*colImageBytes + (stageY ? *yImageBytes : 0),

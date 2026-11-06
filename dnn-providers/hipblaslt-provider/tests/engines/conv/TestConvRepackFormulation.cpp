@@ -160,7 +160,7 @@ TEST(TestConvRepackFormulation, ChannelsFirstBackwardWeightsIsOneGemmPerImage)
         const auto calls = plan(shape, ConvDirection::BACKWARD_WEIGHTS);
         ASSERT_TRUE(calls.has_value());
         EXPECT_EQ(calls->row, ConvGemmRow::IM2COL);
-        ASSERT_EQ(calls->stages.size(), 1u);
+        ASSERT_GE(calls->stages.size(), 1u);
         const auto& stage = calls->stages[0];
         // Only im2col: dy is read as given, no staging copy.
         ASSERT_EQ(stage.before.size(), 1u);
@@ -172,6 +172,30 @@ TEST(TestConvRepackFormulation, ChannelsFirstBackwardWeightsIsOneGemmPerImage)
         EXPECT_TRUE(stage.calls[1].accumulate);
         EXPECT_NE(stage.calls[0].a.offset + stage.calls[0].b.offset,
                   stage.calls[1].a.offset + stage.calls[1].b.offset);
+    }
+}
+
+TEST(TestConvRepackFormulation, NarrowPerImageBackwardWeightsSumsInFp32)
+{
+    // fp16 / bf16: the per-image GEMMs add into an fp32 accumulator, which one cast rounds into
+    // w, rather than rounding into w after every image.
+    for(const auto dataType :
+        {conv_data_objects::DataType::HALF, conv_data_objects::DataType::BFLOAT16})
+    {
+        auto shape = padded3x3();
+        shape.dataType = dataType;
+        const auto calls = plan(shape, ConvDirection::BACKWARD_WEIGHTS);
+        ASSERT_TRUE(calls.has_value());
+        ASSERT_EQ(calls->stages.size(), 2u);
+        for(const auto& call : calls->stages[0].calls)
+        {
+            EXPECT_EQ(call.d.dataType, conv_data_objects::DataType::FLOAT);
+            EXPECT_NE(call.d.uid, CONV_W_UID);
+        }
+        const auto& round = calls->stages[1];
+        ASSERT_EQ(round.before.size(), 1u);
+        EXPECT_NE(stepArgs<StridedCastArgs>(round.before[0]), nullptr);
+        EXPECT_EQ(round.before[0].dstUid, CONV_W_UID);
     }
 }
 
