@@ -136,7 +136,10 @@ hipblasStatus_t hipblasLtLocalKernelRegister(hipblasLtHandle_t handle,
  *  The mapping is for this shape and the kernel's own transposes and data
  *  types, on devices of the same kind as the handle's (see above); other
  *  devices in the process do not take it, even where the kernel can run on
- *  them. On those devices, heuristic selection
+ *  them. As for the shipped kernels, hipBLASLt describes the devices of one
+ *  architecture name in a process by one of them, so devices of one
+ *  architecture name that differ in compute unit count or chip ID are not
+ *  supported in one process. On those devices, heuristic selection
  *  for such a problem returns the kernel first,
  *  followed by the shipped library's choices, including for problems already
  *  queried. Other shapes and types are unaffected, so kernels for different

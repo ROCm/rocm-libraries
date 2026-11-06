@@ -858,17 +858,33 @@ namespace rocblaslt
 
         std::string Store::objectState(PayloadRecord const& record) const
         {
+            // Everything verifyObjects checks. For the objects: their contents,
+            // through size and mtime, and their owner and mode, which ctime
+            // also covers. For the directories checkLayout checks: only owner
+            // and mode, since their times move whenever any object is saved.
             std::ostringstream state;
+            for(auto const& dir : {fs::path(m_root), fs::path(m_root) / kObjectsDir})
+            {
+                struct stat st
+                {
+                };
+                if(::stat(dir.c_str(), &st) != 0)
+                    state << "missing;";
+                else
+                    state << st.st_mode << ':' << st.st_uid << ';';
+            }
             for(auto const& path : {shardPath(record), codeObjectPath(record.id)})
             {
                 struct stat st
                 {
                 };
-                if(::lstat(path.c_str(), &st) != 0)
+                if(::stat(path.c_str(), &st) != 0)
                     state << "missing;";
                 else
-                    state << st.st_dev << ':' << st.st_ino << ':' << st.st_size << ':'
-                          << st.st_mtim.tv_sec << '.' << st.st_mtim.tv_nsec << ';';
+                    state << st.st_dev << ':' << st.st_ino << ':' << st.st_size << ':' << st.st_mode
+                          << ':' << st.st_uid << ':' << st.st_mtim.tv_sec << '.'
+                          << st.st_mtim.tv_nsec << ':' << st.st_ctim.tv_sec << '.'
+                          << st.st_ctim.tv_nsec << ';';
             }
             return state.str();
         }
@@ -986,18 +1002,23 @@ namespace rocblaslt
                 error);
         }
 
-        bool Store::appendExact(std::string const& scope,
-                                ExactRecord const& record,
-                                std::string*       error) const
+        bool Store::appendExact(std::string const&   scope,
+                                PayloadRecord const& payload,
+                                ExactRecord const&   record,
+                                std::string*         error) const
         {
             return appendUnlessKnown(
                 scope,
                 [&](JournalState const& state) {
+                    std::string lines;
+                    if(!state.payloads.count(payload.id))
+                        lines = payloadLine(payload) + "\n";
                     auto last = state.lastExact.find(shapeOf(record));
-                    if(last != state.lastExact.end() && last->second.id == record.id
+                    if(lines.empty() && last != state.lastExact.end()
+                       && last->second.id == record.id
                        && last->second.payloadIndex == record.payloadIndex)
                         return std::string();
-                    return exactLine(record);
+                    return lines + exactLine(record);
                 },
                 error);
         }

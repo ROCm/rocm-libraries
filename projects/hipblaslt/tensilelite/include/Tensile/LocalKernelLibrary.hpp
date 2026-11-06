@@ -29,6 +29,7 @@
 #include <Tensile/LocalKernelIndex.hpp>
 #include <Tensile/SolutionLibrary.hpp>
 #include <Tensile/Task.hpp>
+#include <Tensile/hip/HipHardware.hpp>
 
 #include <tensilelitehost/export.h>
 
@@ -56,8 +57,15 @@ namespace TensileLite
      *
      * The target tells apart devices that Processor folds together but that
      * the shipped library serves from different files: gfx1250-strict, which
-     * the runtime names as such, and gfx1250 A0 (asicRevision 0), served from
-     * gfx1250v0.
+     * the runtime names as such, and gfx1250 A0 (asicRevision 0 in the
+     * device properties), served from gfx1250v0.
+     *
+     * findExact takes the class from the Hardware it is given. hipBLASLt
+     * gives every query the one Hardware it keeps for the device's
+     * architecture name, so devices of one architecture name are taken to be
+     * of one class, as the shipped library's compute unit count and chip ID
+     * predicates take them to be. A process whose devices of one architecture
+     * name differ in compute unit count or chip ID is not supported.
      */
     struct LocalDeviceClass
     {
@@ -72,7 +80,8 @@ namespace TensileLite
         {
             std::string target = gpu.archName();
             target             = target.substr(0, target.find(':'));
-            if(target == "gfx1250" && gpu.asicRevision == 0)
+            auto const* device = dynamic_cast<hip::HipAMDGPU const*>(&gpu);
+            if(target == "gfx1250" && device && device->properties.asicRevision == 0)
                 target += "v0";
             return LocalDeviceClass{
                 gpu.processor, gpu.computeUnitCount, gpu.pciChipId(), std::move(target)};
