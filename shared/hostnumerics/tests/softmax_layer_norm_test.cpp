@@ -70,10 +70,13 @@ void testReferenceLayerNorm() {
     Tensor mean(ScalarType::Float32, Layout(Shape{2, 2}, {3, 1}, 0));
     Tensor inverseVariance(ScalarType::Float32, Layout(Shape{2, 2}, {1, 3}, 0));
 
-    LayerNormOptions options;
-    options.axis = 1;
-    options.gamma = gamma;
-    options.beta = beta;
+    LayerNormOptions options{
+        .axis = 1,
+        .accumulatorType = ScalarType::Float32,
+        .gamma = gamma,
+        .beta = beta,
+        .epsilon = 1e-5,
+    };
     referenceLayerNormInto(
         input, {.output = output, .mean = mean, .inverseVariance = inverseVariance}, options);
     require(mean.loadAs<float>({0, 0}) == 2.0f, "Reference LayerNorm mean mismatch.");
@@ -100,20 +103,22 @@ void testReferenceLayerNorm() {
     invalidOptions.epsilon = std::numeric_limits<double>::quiet_NaN();
     bool rejectedBeforeAllocation = false;
     try {
-        (void)referenceLayerNorm(input, {}, invalidOptions);
+        (void)referenceLayerNorm(input, {.output = ScalarType::Float32}, invalidOptions);
     } catch (const std::runtime_error&) {
         rejectedBeforeAllocation = true;
     }
     require(rejectedBeforeAllocation, "Owning reference LayerNorm accepted invalid epsilon.");
 
-    const LayerNormOutputs outputOnly = referenceLayerNorm(input, {}, options);
+    const LayerNormOutputs outputOnly =
+        referenceLayerNorm(input, {.output = ScalarType::Float32}, options);
     require(!outputOnly.mean && !outputOnly.inverseVariance,
             "Owning reference LayerNorm created unrequested statistics.");
 
     const std::array<float, 3> rankOneValues{1.0f, 2.0f, 3.0f};
     const LayerNormOutputs rankOneResult = referenceLayerNorm(
         Tensor::copyNativeValues<float>(Shape{3}, std::span<const float>(rankOneValues)),
-        {.output = ScalarType::Float32, .mean = ScalarType::Float32}, {});
+        {.output = ScalarType::Float32, .mean = ScalarType::Float32},
+        {.axis = 0, .accumulatorType = ScalarType::Float32, .epsilon = 1e-5});
     require(rankOneResult.mean && rankOneResult.mean->shape() == Shape{} &&
                 !rankOneResult.inverseVariance,
             "Owning reference LayerNorm did not preserve a requested rank-zero statistic.");

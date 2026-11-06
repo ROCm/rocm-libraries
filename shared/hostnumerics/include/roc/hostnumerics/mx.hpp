@@ -16,8 +16,8 @@ enum class MxDataQuantization {
 };
 
 struct MxRepresentedValueRange {
-    double lower = -1.0;
-    double upper = 1.0;
+    double lower;
+    double upper;
 };
 
 // Couples a general source-value recipe to the MX-specific quantization
@@ -62,10 +62,11 @@ enum class MxScaleGenerationMode {
 
 // Storage and scale policy for a rank-two, block-scaled MX tensor. Data
 // generation is supplied separately so scale selection cannot alter its stream.
+// Every field is required.
 struct MxGenerationOptions {
     // Packed data encoding and per-block scale encoding.
-    ScalarType dataType = ScalarType::Float4E2M1;
-    ScalarType scaleType = ScalarType::E8M0;
+    ScalarType dataType;
+    ScalarType scaleType;
 
     // Data uses strides {1, leadingDimension}, which must be at least shape[0].
     // Without a value, columns are contiguous: leadingDimension is shape[0].
@@ -73,12 +74,12 @@ struct MxGenerationOptions {
 
     // Scales group blockSize consecutive elements along blockAxis. The other
     // axis is the free coordinate identifying independent block sequences.
-    size_t blockAxis = 0;
-    size_t blockSize = 32;
+    size_t blockAxis;
+    size_t blockSize;
 
     // Scale-selection policy. Derived computes scales from data; constant modes
     // use the same encoded scale for every block.
-    MxScaleGenerationMode scale = MxScaleGenerationMode::Derived;
+    MxScaleGenerationMode scale;
 };
 
 struct MxTensor {

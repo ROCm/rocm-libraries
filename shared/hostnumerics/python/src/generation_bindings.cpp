@@ -69,7 +69,7 @@ void registerGenerationBindings(nb::module_& module) {
         .def_rw("integer_rounding", &ScalarConversionOptions::integerRounding)
         .def_rw("integer_overflow", &ScalarConversionOptions::integerOverflow);
     nb::class_<BinomialHalfGenerationParameters>(module, "BinomialHalfGenerationParameters")
-        .def(nb::init<uint32_t>(), "trials"_a = 1)
+        .def(nb::init<uint32_t>(), "trials"_a)
         .def_rw("trials", &BinomialHalfGenerationParameters::trials);
 
     nb::class_<ConstantGenerationParameters>(module, "ConstantGenerationParameters",

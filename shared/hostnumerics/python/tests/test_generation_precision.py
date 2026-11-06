@@ -183,8 +183,14 @@ class GenerationPrecisionTests(unittest.TestCase):
     def test_independent_mx_codes_and_scales(self):
         order = hv.Permutation([1, 0])
         recipe = hv.GenerationRecipe.real_only(hv.GenerationRecipe.sine(), 0, order)
-        mx_options = hv.MxGenerationOptions()
-        mx_options.scale = hv.MxScaleGenerationMode.One
+        mx_options = hv.MxGenerationOptions(
+            data_type=hv.ScalarType.Float4E2M1,
+            scale_type=hv.ScalarType.E8M0,
+            leading_dimension=None,
+            block_axis=0,
+            block_size=32,
+            scale=hv.MxScaleGenerationMode.One,
+        )
         zero = hv.GenerationRecipe.real_only(hv.GenerationRecipe.zero(), 0, order)
         tensor = hv.generate_mx([40, 4], hv.MxDataGeneration.quantize(zero), mx_options)
         self.assertEqual(math.prod(tensor.scales.shape), 8)

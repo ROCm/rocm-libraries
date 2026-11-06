@@ -140,12 +140,14 @@ void blockScaledMxGeneration() {
         GenerationRecipe::uniformReal({.lower = -1.0, .upper = 1.0}), 47, LastDimensionFastest{});
     const MxDataGeneration data =
         MxDataGeneration::preserveRange(recipe, {.lower = -1.0, .upper = 1.0});
-    MxGenerationOptions options;
-    options.dataType = ScalarType::Float4E2M1;
-    options.scaleType = ScalarType::E8M0;
-    options.leadingDimension = 32;
-    options.blockAxis = 0;
-    options.blockSize = 32;
+    MxGenerationOptions options{
+        .dataType = ScalarType::Float4E2M1,
+        .scaleType = ScalarType::E8M0,
+        .leadingDimension = 32,
+        .blockAxis = 0,
+        .blockSize = 32,
+        .scale = MxScaleGenerationMode::Derived,
+    };
     const MxTensor mx = generateMx(Shape{32, 2}, data, options);
     check(mx.data.type() == ScalarType::Float4E2M1 && mx.scales.shape() == Shape{2, 1} &&
               mx.scaleIndices.shape() == mx.data.shape() && mx.reference.shape() == mx.data.shape(),
@@ -168,7 +170,8 @@ void higherLevelOperations() {
           "Softmax row does not sum to one.");
 
     const LayerNormOutputs normalized =
-        referenceLayerNorm(input, {.output = ScalarType::Float32, .mean = ScalarType::Float32}, {});
+        referenceLayerNorm(input, {.output = ScalarType::Float32, .mean = ScalarType::Float32},
+                           {.axis = 0, .accumulatorType = ScalarType::Float32, .epsilon = 1e-5});
     check(normalized.mean && normalized.mean->shape() == Shape{2},
           "LayerNorm statistics mismatch.");
 

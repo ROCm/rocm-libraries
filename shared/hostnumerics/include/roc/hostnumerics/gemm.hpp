@@ -33,7 +33,7 @@ enum class AccumulationRounding {
 // `blockSize` must be nonzero.
 struct MatmulBlockScale {
     Tensor scales;
-    size_t blockSize = 0;
+    size_t blockSize;
 };
 
 // Numerical and execution policy intrinsic to one matrix multiplication.

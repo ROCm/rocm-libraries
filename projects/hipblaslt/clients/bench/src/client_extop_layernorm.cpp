@@ -213,9 +213,11 @@ int main(int argc, char** argv)
     const roc::hostnumerics::Layout statisticsLayout
         = roc::hostnumerics::Layout::contiguousLastDimensionFastest(roc::hostnumerics::Shape{m});
 
-    roc::hostnumerics::LayerNormOptions options;
-    options.axis    = 1;
-    options.epsilon = 1e-5;
+    roc::hostnumerics::LayerNormOptions options{
+        .axis            = 1,
+        .accumulatorType = roc::hostnumerics::ScalarType::Float32,
+        .epsilon         = 1e-5,
+    };
     if(affine)
     {
         options.gamma = cpuGamma;

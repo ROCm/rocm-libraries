@@ -22,9 +22,18 @@ using namespace roc::hostnumerics;
 namespace {
 using roc::hostnumerics::test::require;
 
+// Starts from MXFP4 data with E8M0 scales in 32-element blocks along axis 0,
+// contiguous columns and derived scales; cases override fields as needed.
 struct MxCase : MxGenerationOptions {
     MxCase(Shape inputShape, MxDataGeneration generation)
-        : shape(std::move(inputShape)), data(std::move(generation)) {}
+        : MxGenerationOptions{.dataType = ScalarType::Float4E2M1,
+                              .scaleType = ScalarType::E8M0,
+                              .leadingDimension = std::nullopt,
+                              .blockAxis = 0,
+                              .blockSize = 32,
+                              .scale = MxScaleGenerationMode::Derived},
+          shape(std::move(inputShape)),
+          data(std::move(generation)) {}
 
     Shape shape;
     MxDataGeneration data;

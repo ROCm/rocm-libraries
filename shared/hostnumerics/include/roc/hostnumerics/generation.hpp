@@ -20,7 +20,7 @@ struct GenerationRecipeAccess;
 }  // namespace detail
 
 struct ConstantGenerationParameters {
-    double value = 0.0;
+    double value;
 };
 
 struct ChoiceGenerationParameters {
@@ -33,32 +33,32 @@ struct ChoiceGenerationParameters {
 
 struct UniformIntegerGenerationParameters {
     // Inclusive int bounds.
-    int lower = 0;
-    int upper = 1;
+    int lower;
+    int upper;
 };
 
 struct UniformRealGenerationParameters {
     // Double bounds in generated numerical units. For unequal finite bounds,
     // generated values are strictly between lower and upper.
-    double lower = 0.0;
-    double upper = 1.0;
+    double lower;
+    double upper;
 };
 
 struct NormalGenerationParameters {
     // Mean and standard deviation are in generated numerical units. Sampling
     // uses one Box-Muller output per logical index.
-    double mean = 0.0;
-    double standardDeviation = 1.0;
+    double mean;
+    double standardDeviation;
 };
 
 struct BinomialHalfGenerationParameters {
     // Number of fair trials, from zero through 64. One counter word supplies the bits.
-    uint32_t trials = 1;
+    uint32_t trials;
 };
 
 struct DimensionGenerationParameters {
     // Zero-based tensor dimension.
-    size_t dimension = 0;
+    size_t dimension;
 };
 
 struct AffineIndexRemainderGenerationParameters {
@@ -68,13 +68,13 @@ struct AffineIndexRemainderGenerationParameters {
     // dimension. The C++ remainder sign follows the dividend.
     std::vector<int64_t> dimensionCoefficients;
     int64_t offset = 0;
-    int64_t positiveDivisor = 1;
+    int64_t positiveDivisor;
 };
 
 struct RandomEncodedExponentGenerationParameters {
     // Bounds are unbiased binary exponents and are inclusive.
-    int lowerUnbiasedExponent = 0;
-    int upperUnbiasedExponent = 0;
+    int lowerUnbiasedExponent;
+    int upperUnbiasedExponent;
 
     // No value selects the destination's real component encoding.
     std::optional<ScalarType> sourceType;
@@ -82,7 +82,7 @@ struct RandomEncodedExponentGenerationParameters {
 
 struct RawConstantGenerationParameters {
     // Low destination storage bits are written without numerical conversion.
-    uint64_t bits = 0;
+    uint64_t bits;
 };
 
 struct GenerationAffineValueParameters {
@@ -95,7 +95,7 @@ struct AlternatingSignGenerationParameters {
     // Coordinate parity is the XOR of these dimensions. Repeated dimensions
     // cancel in pairs. false negates even parity; true negates odd parity.
     std::vector<size_t> dimensions;
-    bool negativeWhenOdd = false;
+    bool negativeWhenOdd;
 };
 
 // Immutable generation description. Components and recipes are copyable and

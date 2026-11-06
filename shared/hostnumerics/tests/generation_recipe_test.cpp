@@ -274,7 +274,10 @@ void testValidationFailures() {
         },
         "A numerical modifier was accepted for a raw component.");
     requireThrows<std::runtime_error>(
-        [] { (void)GenerationRecipe::constant({.value = 1.0}).withAlternatingSign({}); },
+        [] {
+            (void)GenerationRecipe::constant({.value = 1.0})
+                .withAlternatingSign({.negativeWhenOdd = false});
+        },
         "An empty alternating-sign dimension list was accepted.");
 
     const GenerationRecipe invalidDimension = GenerationRecipe::realOnly(

@@ -161,11 +161,13 @@ TEST_P(ExtOpLayerNormTest, layernormSuccess)
     const Layout tensorLayout     = Layout::contiguousLastDimensionFastest(Shape{m, n});
     const Layout statisticsLayout = Layout::contiguousLastDimensionFastest(Shape{m});
 
-    LayerNormOptions options;
-    options.axis                     = 1;
-    options.gamma                    = gamma;
-    options.beta                     = beta;
-    options.epsilon                  = 1e-5;
+    LayerNormOptions options{
+        .axis            = 1,
+        .accumulatorType = roc::hostnumerics::ScalarType::Float32,
+        .gamma           = gamma,
+        .beta            = beta,
+        .epsilon         = 1e-5,
+    };
     const LayerNormOutputs reference = referenceLayerNorm(input,
                                                           {.output          = ScalarType::Float32,
                                                            .mean            = ScalarType::Float32,

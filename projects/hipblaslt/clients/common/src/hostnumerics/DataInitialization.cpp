@@ -252,7 +252,11 @@ namespace hipblaslt::hostnumerics
                                       = ComplexGenerationPolicy::RealOnly,
                                       uint64_t seed = defaultInitializationSeed)
         {
-            return bindComponentRecipe(type, GenerationRecipe::normal({}), complexPolicy, seed);
+            return bindComponentRecipe(
+                type,
+                GenerationRecipe::normal({.mean = 0.0, .standardDeviation = 1.0}),
+                complexPolicy,
+                seed);
         }
 
         GenerationRecipe uniformZeroOneRecipe(ScalarType              type,
@@ -618,12 +622,14 @@ namespace hipblaslt::hostnumerics
             = scaleType == HIP_R_8F_E4M3 ? ScalarType::E4M3 : scalarType(scaleType);
         if(isMaf(initialization))
         {
-            MxGenerationOptions options;
-            options.dataType         = hostDataType;
-            options.scaleType        = hostScaleType;
-            options.leadingDimension = static_cast<ptrdiff_t>(leadingDimension);
-            options.blockAxis        = blockAxis;
-            options.blockSize        = blockSize;
+            MxGenerationOptions options{
+                .dataType         = hostDataType,
+                .scaleType        = hostScaleType,
+                .leadingDimension = static_cast<ptrdiff_t>(leadingDimension),
+                .blockAxis        = blockAxis,
+                .blockSize        = blockSize,
+                .scale            = roc::hostnumerics::MxScaleGenerationMode::One,
+            };
             return maf::generateMx(std::move(shape),
                                    options,
                                    mafMode(initialization),
@@ -639,14 +645,15 @@ namespace hipblaslt::hostnumerics
         MxDataGeneration dataGeneration
             = mxDataGeneration(initialization, hostDataType, seed, role);
 
-        MxGenerationOptions options;
-        options.dataType         = hostDataType;
-        options.scaleType        = hostScaleType;
-        options.leadingDimension = static_cast<ptrdiff_t>(leadingDimension);
-        options.blockAxis        = blockAxis;
-        options.blockSize        = blockSize;
-        options.scale            = mxScaleGenerationMode(initialization);
-        auto generated           = generateMx(std::move(shape), std::move(dataGeneration), options);
+        MxGenerationOptions options{
+            .dataType         = hostDataType,
+            .scaleType        = hostScaleType,
+            .leadingDimension = static_cast<ptrdiff_t>(leadingDimension),
+            .blockAxis        = blockAxis,
+            .blockSize        = blockSize,
+            .scale            = mxScaleGenerationMode(initialization),
+        };
+        auto generated = generateMx(std::move(shape), std::move(dataGeneration), options);
         if(initialization == hipblaslt_initialization::integer_exact)
         {
             const uint64_t scaleSeed = hipblaslt::hostnumerics::initialization::seedForSequence(
