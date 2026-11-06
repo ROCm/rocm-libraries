@@ -13,6 +13,7 @@
 #include <shared_mutex>
 #include <string>
 #include <typeindex>
+#include <string_view>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -209,6 +210,11 @@ inline bool RequiresLargeTensorCKInstance(const ProblemDescriptionType& problem)
 
 // Large-tensor xdl impls embed "Large_Tensor" in their GetTypeString() (see
 // device_grouped_conv_fwd_multiple_d_xdl_large_tensor_cshuffle.hpp:1260).
+inline bool IsLargeTensorTypeString(std::string_view type_string)
+{
+    return type_string.find("Large_Tensor") != std::string_view::npos;
+}
+
 // CK DeviceOps have no data members, so the type string, and with it the answer, depends only on
 // the instance's class. The answer is memoized per class because GetTypeString() formats the
 // whole instance description, and every MakeArgPtr call asks this.
@@ -224,7 +230,7 @@ inline bool IsLargeTensorCKInstance(const ConvPtr& ptr)
         if(const auto it = by_class.find(cls); it != by_class.end())
             return it->second;
     }
-    const bool large = op.GetTypeString().find("Large_Tensor") != std::string::npos;
+    const bool large = IsLargeTensorTypeString(op.GetTypeString());
     std::unique_lock lock{mutex};
     by_class.emplace(cls, large);
     return large;
@@ -245,13 +251,17 @@ public:
         return instances;
     }
 
+    // The index holds views into type_strings, so the instances are never copied or moved.
+    CKInstances(const CKInstances&)            = delete;
+    CKInstances& operator=(const CKInstances&) = delete;
+
     std::size_t Size() const { return ops.size(); }
     const std::shared_ptr<Op>& operator[](std::size_t i) const { return ops[i]; }
     const std::string& TypeString(std::size_t i) const { return type_strings[i]; }
     bool IsLargeTensor(std::size_t i) const { return large_tensor[i]; }
 
     /// Index of the first instance with the type string, or Size() if there is none.
-    std::size_t Find(const std::string& type_string) const
+    std::size_t Find(std::string_view type_string) const
     {
         const auto it = index.find(type_string);
         return it == index.end() ? Size() : it->second;
@@ -264,20 +274,22 @@ private:
         ops.reserve(instances.size());
         type_strings.reserve(instances.size());
         large_tensor.reserve(instances.size());
-        index.reserve(instances.size());
         for(auto& instance : instances)
         {
             type_strings.push_back(instance->GetTypeString());
-            large_tensor.push_back(type_strings.back().find("Large_Tensor") != std::string::npos);
-            index.emplace(type_strings.back(), ops.size());
+            large_tensor.push_back(IsLargeTensorTypeString(type_strings.back()));
             ops.emplace_back(std::move(instance));
         }
+        // After type_strings is complete, so that no view points into a string that moves.
+        index.reserve(type_strings.size());
+        for(std::size_t i = 0; i < type_strings.size(); ++i)
+            index.emplace(type_strings[i], i);
     }
 
     std::vector<std::shared_ptr<Op>> ops;
     std::vector<std::string> type_strings;
     std::vector<bool> large_tensor;
-    std::unordered_map<std::string, std::size_t> index;
+    std::unordered_map<std::string_view, std::size_t> index;
 };
 
 template <typename CKArgsType, typename = void>
