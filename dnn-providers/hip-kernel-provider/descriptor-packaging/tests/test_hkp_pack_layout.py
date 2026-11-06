@@ -2007,6 +2007,57 @@ def test_the_excluded_folder_flag_keeps_a_family_out_of_the_shipped_tree(
     assert not (shipped / "rocKE").exists()
 
 
+def _root_with_unpulled_model(tmp_path):
+    """A model UHD whose model file was never pulled: only its `.dvc` pointer exists."""
+    folder = tmp_path / "root" / "rocKE" / "bundle"
+    folder.mkdir(parents=True)
+    (folder / "model.bin.dvc").write_text("outs:\n- size: 9\n", encoding="utf-8")
+    (folder / "heuristic.uhd.json").write_text(
+        json.dumps(
+            {
+                "version": "1.0",
+                "id": "133a8b19-8e34-4f74-86d6-b6495a6483f3",
+                "name": "Trained heuristic",
+                "adapter": "tree_data",
+                "features_signature": ["$kernel.tile_m"],
+                "features_hash": "sha256:" + "0" * 16,
+                "trained_against": {"selector_revision": "hkp-2026.09"},
+                "objective": "max",
+                "tree_data": {"artifact": "model.bin"},
+            }
+        ),
+        encoding="utf-8",
+    )
+    return tmp_path / "root"
+
+
+@pytest.mark.quick
+def test_the_command_packs_an_unpulled_model_without_it_and_warns(
+    tmp_path, rocm_kpack_dir
+):
+    root = _root_with_unpulled_model(tmp_path)
+
+    result = _hkp_pack_cli(root, tmp_path, ARCH, rocm_kpack_dir)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "warning: not shipping UHD heuristic.uhd.json" in result.stdout
+    assert not list((tmp_path / "out").rglob("model.bin"))
+    assert not list((tmp_path / "out").rglob("*.uhd.json"))
+
+
+@pytest.mark.quick
+def test_the_require_dvc_flag_fails_the_command_on_an_unpulled_model(
+    tmp_path, rocm_kpack_dir
+):
+    root = _root_with_unpulled_model(tmp_path)
+
+    result = _hkp_pack_cli(root, tmp_path, ARCH, rocm_kpack_dir, "--require-dvc")
+
+    assert result.returncode != 0
+    assert "payload source not found: model.bin" in result.stderr
+    assert "dvc pull -r ingestor" in result.stderr
+
+
 @pytest.mark.quick
 def test_the_disabled_kind_flag_leaves_a_rocke_only_root_with_nothing_to_pack(
     tmp_path, rocke_fixture, rocm_kpack_dir

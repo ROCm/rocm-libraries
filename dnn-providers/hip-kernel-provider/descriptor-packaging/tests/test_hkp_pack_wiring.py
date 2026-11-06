@@ -53,10 +53,17 @@ class _Consumer(SuppliedPython):
         (self.source / "authored").mkdir()
         (self.source / "kpack with spaces" / "rocm_kpack").mkdir(parents=True)
 
-    def wire(self, rocke_keywords):
-        """One root, wired with `rocke_keywords` spliced into the call."""
+    def wire(self, rocke_keywords, *, require_dvc=None):
+        """One root, wired with `rocke_keywords` spliced into the call. `require_dvc`
+        sets the build's REQUIRE_DVC_DESCRIPTORS option before the call when given."""
+        option = (
+            ""
+            if require_dvc is None
+            else f"set(HIPKERNELPROVIDER_REQUIRE_DVC_DESCRIPTORS {require_dvc})\n"
+        )
         self._write(
-            """set(HKP_TOOL "${CMAKE_CURRENT_SOURCE_DIR}/consumer.py")
+            option
+            + """set(HKP_TOOL "${CMAKE_CURRENT_SOURCE_DIR}/consumer.py")
 hkp_wire_pack_target(
     NAME off
     SOURCE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/authored"
@@ -145,6 +152,19 @@ def test_a_root_without_rocke_packs_under_a_base_interpreter_without_pip(consume
     assert "path_list_prepend" not in (consumer.build_dir / "build.ninja").read_text(
         encoding="utf-8"
     )
+
+
+@pytest.mark.parametrize("require_dvc", [None, "OFF", "ON"])
+def test_the_pack_is_strict_about_dvc_exactly_when_the_build_requires_dvc(
+    consumer, require_dvc
+):
+    """REQUIRE_DVC_DESCRIPTORS reaches the packer as --require-dvc: without it an
+    un-pulled model is left out with a warning, with it the pack fails."""
+    consumer.wire("ENABLE_ROCKE OFF", require_dvc=require_dvc)
+    consumer.configure()
+    consumer.build()
+
+    assert ("--require-dvc" in consumer.invocation()["argv"]) == (require_dvc == "ON")
 
 
 @pytest.mark.parametrize(

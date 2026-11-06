@@ -1,7 +1,7 @@
 {
   "version": "1.0",
   "id": "78307a48-0f80-4166-aad0-59ab91585e87",
-  "name": "Generated UHD",
+  "name": "hipkernel:Gfx942AttentionUnified3d engine predictor (L1, gfx942, tflops)",
   "adapter": "tree_data",
   "features_signature": [
     "$graph.arithmetic_intensity",

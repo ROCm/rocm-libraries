@@ -1,7 +1,7 @@
 {
   "version": "1.0",
   "id": "ced4e2d1-e66a-4ab5-bfb2-fa3626f881d8",
-  "name": "Generated UHD",
+  "name": "hipkernel:Gfx942AttentionUnified3d kernel ranker (L2, gfx942, tflops)",
   "adapter": "tree_data",
   "features_signature": [
     "$kernel.block_size",

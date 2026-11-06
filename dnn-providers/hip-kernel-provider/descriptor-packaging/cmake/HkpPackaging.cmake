@@ -408,6 +408,12 @@ function(hkp_wire_pack_target)
     foreach(_folder IN LISTS ARG_EXCLUDE_FOLDERS)
         list(APPEND _exclude_args --exclude-folder "${_folder}")
     endforeach()
+    # A model file left behind by a skipped `dvc pull` ships without its UHD and warns,
+    # unless the build asks for strict DVC (release builds), where it fails the pack.
+    set(_require_dvc_arg "")
+    if(HIPKERNELPROVIDER_REQUIRE_DVC_DESCRIPTORS)
+        set(_require_dvc_arg --require-dvc)
+    endif()
 
     set(_inter_root "${CMAKE_CURRENT_BINARY_DIR}/hkp-${ARG_NAME}-intermediate")
     # Inside the output root, so the stamp shares the fate of the tree it vouches for.
@@ -497,6 +503,7 @@ function(hkp_wire_pack_target)
                 --generic-targets-json "${HIPDNN_PLUGIN_SDK_GPU_GENERIC_TARGETS_JSON}"
                 ${_producer_arg}
                 ${_exclude_args}
+                ${_require_dvc_arg}
         COMMAND "${CMAKE_COMMAND}" -E make_directory "${ARG_OUT_ROOT}"
         COMMAND "${CMAKE_COMMAND}" -E touch "${_stamp}"
         DEPENDS "${HKP_TOOL}" ${_source_inputs} ${_tool_sources}

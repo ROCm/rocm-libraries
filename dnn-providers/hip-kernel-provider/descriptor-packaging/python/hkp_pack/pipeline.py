@@ -2137,6 +2137,7 @@ def run_pipeline(
     source_label=None,
     exclude_folders=(),
     disabled_kinds=(),
+    require_dvc=False,
     log=print,
 ):
     """One invocation over the full arch list: compile, prune, pack, install.
@@ -2161,6 +2162,9 @@ def run_pipeline(
     not pack, and `disabled_kinds` the kernel_source kinds it has no producer for;
     both are pruned at load (load_flat_input) exactly as arch pruning prunes, so
     nothing downstream sees them.
+
+    `require_dvc` makes a model file that is absent but tracked by a DVC pointer an
+    error; otherwise its UHD is left out with a warning (load_flat_input).
     """
     out_root = Path(out_root)
     results = {}
@@ -2175,6 +2179,7 @@ def run_pipeline(
         log=log,
         exclude_folders=exclude_folders,
         disabled_kinds=disabled_kinds,
+        require_dvc=require_dvc,
     )
 
     if inter_root is None:
