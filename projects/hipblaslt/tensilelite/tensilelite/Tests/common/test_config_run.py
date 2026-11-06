@@ -56,7 +56,7 @@ import yaml
 
 from tensilelite import Tensile as tensilelite
 
-from artifact_helpers import artifact_name_for_config, extract_artifact
+from artifact_helpers import artifact_name_for_config, artifact_timing, extract_artifact
 
 
 def _run(config: str, output_dir: str, artifact_dir: str, tensile_args: list[str]) -> None:
@@ -68,7 +68,8 @@ def _run(config: str, output_dir: str, artifact_dir: str, tensile_args: list[str
     artifact_name = artifact_name_for_config(config)
     tarball = os.path.join(artifact_dir, artifact_name + ".tar.gz")
     assert os.path.isfile(tarball), f"Artifact tarball not found: {tarball}"
-    extract_artifact(tarball, output_dir)
+    with artifact_timing("python_artifact_extract", tensile_args):
+        extract_artifact(tarball, output_dir)
     args = [config, output_dir, "--use-cache", *tensile_args]
     with open(config) as source:
         schedules = yaml.safe_load(source).get("TestParameters", {}).get("streamk_schedules", [])
