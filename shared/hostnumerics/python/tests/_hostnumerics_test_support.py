@@ -28,14 +28,15 @@ def real_generation_recipe(
 ):
     return hv.GenerationRecipe.real_only(
         component,
-        hv.GenerationRecipeSettings(
-            seed=seed, index_order=hv.Permutation(list(index_order))
-        ),
+        seed=seed,
+        index_order=hv.Permutation(list(index_order)),
     )
 
 
 def real_generation_recipe_last_dimension_fastest(component, *, seed):
-    return hv.GenerationRecipe.real_only_last_dimension_fastest(component, seed)
+    return hv.GenerationRecipe.real_only(
+        component, seed, index_order=hv.LastDimensionFastest()
+    )
 
 
 def encode_fp4_e2m1(value):

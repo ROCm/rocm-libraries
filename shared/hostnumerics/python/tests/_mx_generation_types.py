@@ -65,10 +65,8 @@ class Recipe:
         def recipe(component):
             return hv.GenerationRecipe.real_only(
                 component,
-                hv.GenerationRecipeSettings(
-                    seed=seed,
-                    index_order=hv.Permutation([1, 0]),
-                ),
+                seed=seed,
+                index_order=hv.Permutation([1, 0]),
             )
 
         if self.kind is RecipeKind.UNBOUNDED:

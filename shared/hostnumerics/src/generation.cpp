@@ -257,37 +257,40 @@ GenerationRecipe::Component GenerationRecipe::rawSerialDimension(
     return Component(Component::RawSerialDimensionPattern{parameters});
 }
 
-GenerationRecipe::GenerationRecipe(GenerationRecipeSettings settings, ComplexPolicy complexPolicy)
-    : settings_(std::move(settings)), complexPolicy_(std::move(complexPolicy)) {}
+GenerationRecipe::GenerationRecipe(uint64_t seed, IndexOrder indexOrder,
+                                   ComplexPolicy complexPolicy)
+    : seed_(seed), indexOrder_(std::move(indexOrder)), complexPolicy_(std::move(complexPolicy)) {}
 
-GenerationRecipe GenerationRecipe::realOnly(Component component,
-                                            GenerationRecipeSettings settings) {
+GenerationRecipe GenerationRecipe::realOnly(Component component, uint64_t seed,
+                                            IndexOrder indexOrder) {
     return GenerationRecipe(
-        settings, RealOnlyPolicy{
-                      .real = {
-                          .component = std::move(component),
-                          .randomDomain = detail::generation_random_domain_version_1::realComponent,
-                      }});
+        seed, std::move(indexOrder),
+        RealOnlyPolicy{
+            .real = {
+                .component = std::move(component),
+                .randomDomain = detail::generation_random_domain_version_1::realComponent,
+            }});
 }
 
-GenerationRecipe GenerationRecipe::replicated(Component component,
-                                              GenerationRecipeSettings settings) {
+GenerationRecipe GenerationRecipe::replicated(Component component, uint64_t seed,
+                                              IndexOrder indexOrder) {
     if (component.isRaw())
         throw std::runtime_error("Replicated complex generation requires a numerical component.");
     return GenerationRecipe(
-        settings, ReplicatedPolicy{
-                      .value = {
-                          .component = std::move(component),
-                          .randomDomain = detail::generation_random_domain_version_1::realComponent,
-                      }});
+        seed, std::move(indexOrder),
+        ReplicatedPolicy{
+            .value = {
+                .component = std::move(component),
+                .randomDomain = detail::generation_random_domain_version_1::realComponent,
+            }});
 }
 
-GenerationRecipe GenerationRecipe::cartesian(Component real, Component imaginary,
-                                             GenerationRecipeSettings settings) {
+GenerationRecipe GenerationRecipe::cartesian(Component real, Component imaginary, uint64_t seed,
+                                             IndexOrder indexOrder) {
     if (real.isRaw() || imaginary.isRaw())
         throw std::runtime_error("Cartesian complex generation requires numerical components.");
     return GenerationRecipe(
-        settings,
+        seed, std::move(indexOrder),
         CartesianPolicy{
             .real =
                 {
@@ -303,60 +306,32 @@ GenerationRecipe GenerationRecipe::cartesian(Component real, Component imaginary
 }
 
 uint64_t GenerationRecipe::seed() const noexcept {
-    return settings_.seed;
+    return seed_;
 }
 
 size_t GenerationRecipe::indexOffset() const noexcept {
-    return settings_.indexOffset;
+    return indexOffset_;
 }
 
 GenerationRecipe GenerationRecipe::withIndexOffset(size_t offset) const {
     GenerationRecipe result = *this;
-    result.settings_.indexOffset = offset;
+    result.indexOffset_ = offset;
     return result;
 }
 
-GenerationRecipe GenerationRecipe::realOnlyLastDimensionFastest(Component component,
-                                                                uint64_t seed) {
-    return realOnly(std::move(component), {.seed = seed}).withLastDimensionFastestIndexOrder();
-}
-
-GenerationRecipe GenerationRecipe::replicatedLastDimensionFastest(Component component,
-                                                                  uint64_t seed) {
-    return replicated(std::move(component), {.seed = seed}).withLastDimensionFastestIndexOrder();
-}
-
-GenerationRecipe GenerationRecipe::cartesianLastDimensionFastest(Component real,
-                                                                 Component imaginary,
-                                                                 uint64_t seed) {
-    return cartesian(std::move(real), std::move(imaginary), {.seed = seed})
-        .withLastDimensionFastestIndexOrder();
-}
-
 Permutation GenerationRecipe::indexOrder(size_t rank) const {
-    if (lastDimensionFastest_) return Permutation::identity(rank);
-    if (settings_.indexOrder.size() != rank)
-        throw std::runtime_error("Generation index order rank does not match tensor rank.");
-    return settings_.indexOrder;
+    return indexOrder_.forRank(rank);
 }
 
 GenerationRecipe GenerationRecipe::withSeed(uint64_t seed) const {
     GenerationRecipe result = *this;
-    result.settings_.seed = seed;
+    result.seed_ = seed;
     return result;
 }
 
-GenerationRecipe GenerationRecipe::withIndexOrder(const Permutation& order) const {
+GenerationRecipe GenerationRecipe::withIndexOrder(IndexOrder indexOrder) const {
     GenerationRecipe result = *this;
-    result.lastDimensionFastest_ = false;
-    result.settings_.indexOrder = order;
-    return result;
-}
-
-GenerationRecipe GenerationRecipe::withLastDimensionFastestIndexOrder() const {
-    GenerationRecipe result = *this;
-    result.lastDimensionFastest_ = true;
-    result.settings_.indexOrder = Permutation::identity(0);
+    result.indexOrder_ = std::move(indexOrder);
     return result;
 }
 

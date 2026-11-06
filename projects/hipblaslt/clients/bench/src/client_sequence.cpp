@@ -188,12 +188,13 @@ void initData(hipDataType type, void* data, int m, int n, int lda, int stride, i
             static_cast<size_t>(m), static_cast<size_t>(n), static_cast<size_t>(batch_count)},
         {1, lda, stride},
         0);
-    const roc::hostnumerics::Tensor generated = roc::hostnumerics::generate(
-        scalar,
-        layout,
-        roc::hostnumerics::GenerationRecipe::realOnlyLastDimensionFastest(
-            roc::hostnumerics::GenerationRecipe::cosine(),
-            hipblaslt::hostnumerics::defaultInitializationSeed));
+    const roc::hostnumerics::Tensor generated
+        = roc::hostnumerics::generate(scalar,
+                                      layout,
+                                      roc::hostnumerics::GenerationRecipe::realOnly(
+                                          roc::hostnumerics::GenerationRecipe::cosine(),
+                                          hipblaslt::hostnumerics::defaultInitializationSeed,
+                                          roc::hostnumerics::LastDimensionFastest{}));
     const auto storage = generated.rawEncodedBackingStorage();
     if(!storage.empty())
         std::memcpy(data, storage.data(), storage.size());

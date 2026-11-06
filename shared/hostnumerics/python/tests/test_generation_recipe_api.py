@@ -11,11 +11,14 @@ import hostnumerics as hv
 
 
 class GenerationRecipeApiTests(unittest.TestCase):
-    def test_selection_and_recipe_settings_require_explicit_choices(self):
+    def test_recipes_require_seed_and_index_order(self):
+        component = hv.GenerationRecipe.zero()
         with self.assertRaises(TypeError):
-            hv.GenerationRecipeSettings()
+            hv.GenerationRecipe.real_only(component)
         with self.assertRaises(TypeError):
-            hv.GenerationRecipeSettings(seed=37)
+            hv.GenerationRecipe.real_only(component, 37)
+        with self.assertRaises(TypeError):
+            hv.IndexOrder()
         with self.assertRaises(TypeError):
             hv.IndexRange(0, 2)
 
@@ -23,25 +26,18 @@ class GenerationRecipeApiTests(unittest.TestCase):
         component = hv.GenerationRecipe.uniform_integer(
             hv.UniformIntegerGenerationParameters(lower=-7, upper=7)
         )
-        scalar = hv.GenerationRecipe.real_only(
-            component, hv.GenerationRecipeSettings(37, hv.Permutation([]))
-        )
+        scalar = hv.GenerationRecipe.real_only(component, 37, hv.Permutation([]))
         self.assertEqual(scalar.index_order(0), hv.Permutation([]))
         with self.assertRaises(RuntimeError):
-            hv.GenerationRecipe.real_only(
-                component, hv.GenerationRecipeSettings(37, hv.Permutation([0, 0]))
-            )
+            hv.GenerationRecipe.real_only(component, 37, hv.Permutation([0, 0]))
         with self.assertRaises(RuntimeError):
             hv.generate_tensor(hv.ScalarType.Float32, [2, 3], scalar)
         for factory, components in (
-            (hv.GenerationRecipe.real_only_last_dimension_fastest, [component]),
-            (hv.GenerationRecipe.replicated_last_dimension_fastest, [component]),
-            (
-                hv.GenerationRecipe.cartesian_last_dimension_fastest,
-                [component, component],
-            ),
+            (hv.GenerationRecipe.real_only, [component]),
+            (hv.GenerationRecipe.replicated, [component]),
+            (hv.GenerationRecipe.cartesian, [component, component]),
         ):
-            named = factory(*components, seed=37)
+            named = factory(*components, seed=37, index_order=hv.LastDimensionFastest())
             explicit = named.with_index_order(hv.Permutation([0, 1]))
             self.assertEqual(named.index_order(2), hv.Permutation([0, 1]))
             self.assertEqual(named.index_order(3), hv.Permutation([0, 1, 2]))
@@ -57,13 +53,18 @@ class GenerationRecipeApiTests(unittest.TestCase):
 
     def test_recipes_take_permutation_orders(self):
         order = hv.Permutation([2, 1, 0])
-        settings = hv.GenerationRecipeSettings(index_order=order, seed=0)
-        base = hv.GenerationRecipe.real_only_last_dimension_fastest(
+        base = hv.GenerationRecipe.real_only(
             hv.GenerationRecipe.serial_index(),
             seed=0,
+            index_order=hv.LastDimensionFastest(),
         )
         recipe = base.with_index_order(order)
-        self.assertEqual(settings.index_order, order)
+        self.assertEqual(hv.IndexOrder(order).for_rank(3), order)
+        self.assertEqual(
+            hv.IndexOrder(hv.LastDimensionFastest()).for_rank(2), hv.Permutation([0, 1])
+        )
+        with self.assertRaises(RuntimeError):
+            hv.IndexOrder(order).for_rank(2)
         self.assertEqual(recipe.index_order(3), order)
         tensor = hv.generate_tensor(hv.ScalarType.Float32, [2, 3, 4], recipe)
         np.testing.assert_array_equal(
@@ -73,15 +74,13 @@ class GenerationRecipeApiTests(unittest.TestCase):
         # Orders must be Permutations; plain sequences are rejected.
         for source in ([2, 1, 0], (2, 1, 0)):
             with self.assertRaises(TypeError):
-                hv.GenerationRecipeSettings(index_order=source, seed=0)
+                hv.GenerationRecipe.real_only(
+                    hv.GenerationRecipe.serial_index(), seed=0, index_order=source
+                )
             with self.assertRaises(TypeError):
                 base.with_index_order(source)
 
     def test_named_parameters_and_real_only_recipe(self):
-        settings = hv.GenerationRecipeSettings(
-            seed=37,
-            index_order=hv.Permutation([0, 1]),
-        )
         component = hv.GenerationRecipe.uniform_integer(
             hv.UniformIntegerGenerationParameters(lower=1, upper=1)
         )
@@ -94,7 +93,9 @@ class GenerationRecipeApiTests(unittest.TestCase):
                 negative_when_odd=True,
             )
         )
-        recipe = hv.GenerationRecipe.real_only(component, settings)
+        recipe = hv.GenerationRecipe.real_only(
+            component, seed=37, index_order=hv.Permutation([0, 1])
+        )
 
         observed = hv.to_numpy(
             hv.generate_tensor(hv.ScalarType.Float32, [2, 3], recipe), dtype=None
@@ -118,18 +119,22 @@ class GenerationRecipeApiTests(unittest.TestCase):
         real_only = hv.generate_tensor(
             hv.ScalarType.ComplexFloat32,
             hv.Shape([2]),
-            hv.GenerationRecipe.real_only_last_dimension_fastest(real, seed=0),
+            hv.GenerationRecipe.real_only(
+                real, seed=0, index_order=hv.LastDimensionFastest()
+            ),
         )
         replicated = hv.generate_tensor(
             hv.ScalarType.ComplexFloat32,
             [2],
-            hv.GenerationRecipe.replicated_last_dimension_fastest(real, seed=0),
+            hv.GenerationRecipe.replicated(
+                real, seed=0, index_order=hv.LastDimensionFastest()
+            ),
         )
         cartesian = hv.generate_tensor(
             hv.ScalarType.ComplexFloat32,
             [2],
-            hv.GenerationRecipe.cartesian_last_dimension_fastest(
-                real, imaginary, seed=0
+            hv.GenerationRecipe.cartesian(
+                real, imaginary, seed=0, index_order=hv.LastDimensionFastest()
             ),
         )
 
@@ -148,9 +153,10 @@ class GenerationRecipeApiTests(unittest.TestCase):
 
     def test_layout_generation_and_generate_at_use_native_recipe_api(self):
         layout = hv.Layout(hv.Shape([2, 2]), [3, 1], 1)
-        recipe = hv.GenerationRecipe.real_only_last_dimension_fastest(
+        recipe = hv.GenerationRecipe.real_only(
             hv.GenerationRecipe.serial_index(),
             seed=0,
+            index_order=hv.LastDimensionFastest(),
         )
         tensor = hv.generate_tensor(hv.ScalarType.Float32, layout, recipe)
 
@@ -164,9 +170,10 @@ class GenerationRecipeApiTests(unittest.TestCase):
             np.asarray([0.0, 0.0, 1.0, 0.0, 2.0, 3.0], dtype=np.float32),
         )
 
-        replacement = hv.GenerationRecipe.real_only_last_dimension_fastest(
+        replacement = hv.GenerationRecipe.real_only(
             hv.GenerationRecipe.constant(hv.ConstantGenerationParameters(value=9.0)),
             seed=0,
+            index_order=hv.LastDimensionFastest(),
         )
         self.assertIs(hv.generate_at(tensor, 1, replacement), tensor)
         np.testing.assert_array_equal(
@@ -182,11 +189,12 @@ class GenerationRecipeApiTests(unittest.TestCase):
                 hv.UniformRealGenerationParameters(lower=2.0, upper=-1.0)
             )
         with self.assertRaises(RuntimeError):
-            hv.GenerationRecipe.replicated_last_dimension_fastest(
+            hv.GenerationRecipe.replicated(
                 hv.GenerationRecipe.raw_constant(
                     hv.RawConstantGenerationParameters(bits=1)
                 ),
                 seed=0,
+                index_order=hv.LastDimensionFastest(),
             )
 
     def test_all_named_parameter_factories_are_bound(self):
@@ -271,7 +279,6 @@ class GenerationRecipeApiTests(unittest.TestCase):
         self.assertEqual(hv.to_numpy(tensor, dtype=None).dtype, np.dtype(np.float32))
 
     def test_only_canonical_index_order_name_is_exposed(self):
-        self.assertFalse(hasattr(hv, "IndexOrder"))
         self.assertFalse(hasattr(hv, "LogicalIndexOrder"))
         self.assertFalse(hasattr(hv, "ComparisonIndexOrder"))
 

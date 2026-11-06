@@ -74,8 +74,8 @@ namespace
         static_assert(std::is_trivially_copyable_v<T>);
         using namespace roc::hostnumerics;
 
-        const auto recipe
-            = GenerationRecipe::realOnlyLastDimensionFastest(std::move(component), seed + stream);
+        const auto recipe = GenerationRecipe::realOnly(
+            std::move(component), seed + stream, roc::hostnumerics::LastDimensionFastest{});
         Tensor generated(type, Layout::contiguousLastDimensionFastest(Shape{values.size()}));
         generate(generated, recipe);
 

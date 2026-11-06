@@ -293,10 +293,8 @@ namespace
     {
         MxDataGeneration data = MxDataGeneration::preserveGeneratedEncoding(
             GenerationRecipe::realOnly(GenerationRecipe::uniformFiniteEncodedValue(),
-                                       {
-                                           .seed       = seed,
-                                           .indexOrder = roc::hostnumerics::Permutation{1, 0},
-                                       }));
+                                       seed,
+                                       roc::hostnumerics::Permutation{1, 0}));
         MxGenerationOptions options;
         options.dataType         = dataType;
         options.scaleType        = scaleType;

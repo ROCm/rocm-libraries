@@ -339,9 +339,8 @@ struct GenerationRecipeAccess {
         const GenerationRecipe::BoundComponent& component = realComponent(recipe);
         if (component.component.isRaw())
             throw std::runtime_error("Raw generation recipe does not produce a numerical value.");
-        return generationValue(component.component, recipe.settings_.seed, randomDomain(component),
-                               indices, shape, logicalIndex + recipe.settings_.indexOffset,
-                               destinationType);
+        return generationValue(component.component, recipe.seed_, randomDomain(component), indices,
+                               shape, logicalIndex + recipe.indexOffset_, destinationType);
     }
 
     static uint64_t generatedRawValue(const GenerationRecipe& recipe,
@@ -350,9 +349,9 @@ struct GenerationRecipeAccess {
         const GenerationRecipe::BoundComponent& component = realComponent(recipe);
         if (!component.component.isRaw())
             throw std::runtime_error("Numerical generation recipe does not produce raw bits.");
-        return rawGenerationValue(component.component, recipe.settings_.seed,
-                                  randomDomain(component), indices, shape,
-                                  logicalIndex + recipe.settings_.indexOffset, destinationType);
+        return rawGenerationValue(component.component, recipe.seed_, randomDomain(component),
+                                  indices, shape, logicalIndex + recipe.indexOffset_,
+                                  destinationType);
     }
 
     static void writeRawGeneration(Tensor destination, const GenerationRecipe& recipe,
@@ -365,8 +364,8 @@ struct GenerationRecipeAccess {
         const ptrdiff_t elementOffset =
             detail::preparedElementOffset(destination.layout(), indices);
         const uint64_t raw = rawGenerationValue(
-            bound.component, recipe.settings_.seed, randomDomain(bound), indices,
-            destination.shape(), logicalIndex + recipe.settings_.indexOffset, destination.type());
+            bound.component, recipe.seed_, randomDomain(bound), indices, destination.shape(),
+            logicalIndex + recipe.indexOffset_, destination.type());
         const uint64_t offsetBits = bitOffset(destination.type(), elementOffset);
         if (bits <= 32) {
             writePackedBits(destination.rawEncodedBackingStorage(), offsetBits, bits,
@@ -399,7 +398,7 @@ struct GenerationRecipeAccess {
             return;
         }
 
-        logicalIndex += recipe.settings_.indexOffset;
+        logicalIndex += recipe.indexOffset_;
         std::visit(
             [&](const auto& policy) {
                 using Policy = std::remove_cvref_t<decltype(policy)>;
@@ -407,26 +406,25 @@ struct GenerationRecipeAccess {
                     if (policy.real.component.isRaw())
                         throw std::runtime_error("Raw generation does not support complex output.");
                     const double value = generationValue(
-                        policy.real.component, recipe.settings_.seed, randomDomain(policy.real),
-                        indices, destination.shape(), logicalIndex, destination.type());
+                        policy.real.component, recipe.seed_, randomDomain(policy.real), indices,
+                        destination.shape(), logicalIndex, destination.type());
                     destination.storeFrom(indices, std::complex<double>(value, 0.0), options);
                 } else if constexpr (std::is_same_v<Policy, GenerationRecipe::ReplicatedPolicy>) {
                     if (policy.value.component.isRaw())
                         throw std::runtime_error("Raw generation does not support complex output.");
                     const double value = generationValue(
-                        policy.value.component, recipe.settings_.seed, randomDomain(policy.value),
-                        indices, destination.shape(), logicalIndex, destination.type());
+                        policy.value.component, recipe.seed_, randomDomain(policy.value), indices,
+                        destination.shape(), logicalIndex, destination.type());
                     destination.storeFrom(indices, std::complex<double>(value, value), options);
                 } else {
                     if (policy.real.component.isRaw() || policy.imaginary.component.isRaw())
                         throw std::runtime_error("Raw generation does not support complex output.");
                     const double realValue = generationValue(
-                        policy.real.component, recipe.settings_.seed, randomDomain(policy.real),
+                        policy.real.component, recipe.seed_, randomDomain(policy.real), indices,
+                        destination.shape(), logicalIndex, destination.type());
+                    const double imaginaryValue = generationValue(
+                        policy.imaginary.component, recipe.seed_, randomDomain(policy.imaginary),
                         indices, destination.shape(), logicalIndex, destination.type());
-                    const double imaginaryValue =
-                        generationValue(policy.imaginary.component, recipe.settings_.seed,
-                                        randomDomain(policy.imaginary), indices,
-                                        destination.shape(), logicalIndex, destination.type());
                     destination.storeFrom(indices, std::complex<double>(realValue, imaginaryValue),
                                           options);
                 }
@@ -735,16 +733,16 @@ struct GenerationRecipeAccess {
                                             category == ScalarCategory::UnsignedInteger;
         if constexpr (integerDestination &&
                       std::is_same_v<Pattern, Component::UniformIntegerPattern>) {
-            return encodeGeneratedInteger<Tag>(indexedUniformInteger<false>(
-                recipe.settings_.seed, randomDomain(bound), logicalIndex, pattern.parameters.lower,
-                pattern.parameters.upper));
+            return encodeGeneratedInteger<Tag>(
+                indexedUniformInteger<false>(recipe.seed_, randomDomain(bound), logicalIndex,
+                                             pattern.parameters.lower, pattern.parameters.upper));
         } else if constexpr (integerDestination &&
                              std::is_same_v<Pattern, Component::SerialIndexPattern>) {
             return encodeGeneratedInteger<Tag>(logicalIndex);
         } else {
             return encodeScalarValueKnown<Tag>(
-                baseGenerationValueKnown<false>(pattern, recipe.settings_.seed, randomDomain(bound),
-                                                {}, shape, logicalIndex, destinationType, &values));
+                baseGenerationValueKnown<false>(pattern, recipe.seed_, randomDomain(bound), {},
+                                                shape, logicalIndex, destinationType, &values));
         }
     }
 
@@ -990,7 +988,7 @@ struct GenerationRecipeAccess {
             if (lowPrecisionFloatingPoint || onlyAlternatingSign) {
                 const auto encodedValues = prepareEncodedDiscreteValues<Tag>(pattern, false);
                 if (encodedValues.size != 0) {
-                    const uint64_t seed = recipe.settings_.seed;
+                    const uint64_t seed = recipe.seed_;
                     const uint64_t domain = randomDomain(bound);
                     if (onlyAlternatingSign) {
                         const auto negativeEncodedValues =
@@ -1024,7 +1022,7 @@ struct GenerationRecipeAccess {
                 std::isfinite(pattern.parameters.lower) &&
                 std::isfinite(pattern.parameters.upper - pattern.parameters.lower)) {
                 const auto encodedValues = prepareEncodedUniformRealLookup<Tag>(pattern);
-                const uint64_t seed = recipe.settings_.seed;
+                const uint64_t seed = recipe.seed_;
                 const uint64_t domain = randomDomain(bound);
                 return generateContiguousEncodedValues<Tag>(
                     destination, indexOrder, [&](size_t logicalIndex) {
@@ -1073,7 +1071,7 @@ struct GenerationRecipeAccess {
                           scalarTypeInfo(type).storageBits > 64) {
                 return false;
             } else {
-                const uint64_t seed = recipe.settings_.seed;
+                const uint64_t seed = recipe.seed_;
                 const uint64_t domain = randomDomain(bound);
                 if constexpr (std::is_same_v<Pattern,
                                              Component::UniformFiniteEncodedValuePattern>) {
@@ -1121,7 +1119,7 @@ struct GenerationRecipeAccess {
                         [&](std::span<const size_t> indices, size_t logicalIndex,
                             ptrdiff_t offset) {
                             write(storage, offset,
-                                  rawGenerationValueKnown<false>(pattern, recipe.settings_.seed,
+                                  rawGenerationValueKnown<false>(pattern, recipe.seed_,
                                                                  randomDomain(bound), indices,
                                                                  destination.shape(), logicalIndex,
                                                                  destination.type(), &values));
@@ -1135,7 +1133,7 @@ struct GenerationRecipeAccess {
                                 [&](std::span<std::byte> destinationStorage, ptrdiff_t offset) {
                                     write(destinationStorage, offset,
                                           generationValueKnown<false>(
-                                              bound.component, pattern, recipe.settings_.seed,
+                                              bound.component, pattern, recipe.seed_,
                                               randomDomain(bound), {}, destination.shape(), 0,
                                               destination.type(), &values));
                                 }))
@@ -1148,9 +1146,9 @@ struct GenerationRecipeAccess {
                             ptrdiff_t offset) {
                             write(storage, offset,
                                   generationValueKnown<false>(
-                                      bound.component, pattern, recipe.settings_.seed,
-                                      randomDomain(bound), indices, destination.shape(),
-                                      logicalIndex, destination.type(), &values));
+                                      bound.component, pattern, recipe.seed_, randomDomain(bound),
+                                      indices, destination.shape(), logicalIndex,
+                                      destination.type(), &values));
                         });
                 }
             },
@@ -1212,8 +1210,8 @@ struct GenerationRecipeAccess {
             [&](const auto& policy) {
                 using Policy = std::remove_cvref_t<decltype(policy)>;
                 if constexpr (std::is_same_v<Policy, GenerationRecipe::RealOnlyPolicy>) {
-                    PreparedNumericalGenerator real = prepareNumericalComponent(
-                        policy.real, recipe.settings_.seed, destination.type());
+                    PreparedNumericalGenerator real =
+                        prepareNumericalComponent(policy.real, recipe.seed_, destination.type());
                     real.indexOffset = recipe.indexOffset();
                     if (real.isConstant &&
                         fillContiguous(
@@ -1234,8 +1232,8 @@ struct GenerationRecipeAccess {
                                                  write(storage, offset, {value, 0.0});
                                              });
                 } else if constexpr (std::is_same_v<Policy, GenerationRecipe::ReplicatedPolicy>) {
-                    PreparedNumericalGenerator value = prepareNumericalComponent(
-                        policy.value, recipe.settings_.seed, destination.type());
+                    PreparedNumericalGenerator value =
+                        prepareNumericalComponent(policy.value, recipe.seed_, destination.type());
                     value.indexOffset = recipe.indexOffset();
                     if (value.isConstant &&
                         fillContiguous(
@@ -1256,11 +1254,11 @@ struct GenerationRecipeAccess {
                                                  write(storage, offset, {component, component});
                                              });
                 } else {
-                    PreparedNumericalGenerator real = prepareNumericalComponent(
-                        policy.real, recipe.settings_.seed, destination.type());
+                    PreparedNumericalGenerator real =
+                        prepareNumericalComponent(policy.real, recipe.seed_, destination.type());
                     real.indexOffset = recipe.indexOffset();
                     PreparedNumericalGenerator imaginary = prepareNumericalComponent(
-                        policy.imaginary, recipe.settings_.seed, destination.type());
+                        policy.imaginary, recipe.seed_, destination.type());
                     imaginary.indexOffset = recipe.indexOffset();
                     if (real.isConstant && imaginary.isConstant &&
                         fillContiguous(
@@ -1319,8 +1317,7 @@ struct GenerationRecipeAccess {
                                ScalarType type) {
         (void)validatedIndexOrder(shape.rank(), recipe.indexOrder(shape.rank()).entries());
         if (shape.elementCount() == 0) return;
-        if (recipe.settings_.indexOffset >
-            std::numeric_limits<size_t>::max() - (shape.elementCount() - 1))
+        if (recipe.indexOffset_ > std::numeric_limits<size_t>::max() - (shape.elementCount() - 1))
             throw std::runtime_error("Generation sample index offset overflows size_t.");
         std::visit(
             [&](const auto& policy) {

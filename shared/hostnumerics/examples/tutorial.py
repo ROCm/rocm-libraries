@@ -15,7 +15,9 @@ import hostnumerics as hn
 
 
 def real_recipe_last_dimension_fastest(component, seed):
-    return hn.GenerationRecipe.real_only_last_dimension_fastest(component, seed)
+    return hn.GenerationRecipe.real_only(
+        component, seed, index_order=hn.LastDimensionFastest()
+    )
 
 
 class HostNumericsTutorial(unittest.TestCase):
@@ -69,7 +71,8 @@ class HostNumericsTutorial(unittest.TestCase):
                 hn.GenerationRecipe.uniform_integer(
                     hn.UniformIntegerGenerationParameters(lower=-4, upper=-1)
                 ),
-                hn.GenerationRecipeSettings(seed=37, index_order=hn.Permutation([0])),
+                seed=37,
+                index_order=hn.Permutation([0]),
             ),
         )
         self.assertTrue(np.all(hn.to_numpy(complex_values, dtype=None).imag != 0))

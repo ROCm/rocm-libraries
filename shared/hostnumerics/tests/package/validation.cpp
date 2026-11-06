@@ -82,16 +82,17 @@ TEST(Package, Operations) {
         ScalarType::Float32, ScalarType::Float32);
     ASSERT_FALSE((maximumAbsolute.loadAs<float>({}) != 4));
 
-    Tensor generated = generate(ScalarType::Float32, Shape{4},
-                                GenerationRecipe::realOnlyLastDimensionFastest(
-                                    GenerationRecipe::choice({.values = {-2.0, 3.0}}), 17));
+    Tensor generated =
+        generate(ScalarType::Float32, Shape{4},
+                 GenerationRecipe::realOnly(GenerationRecipe::choice({.values = {-2.0, 3.0}}), 17,
+                                            LastDimensionFastest{}));
     for (size_t index = 0; index < generated.elementCount(); ++index) {
         const float value = generated.loadAs<float>({index});
         ASSERT_FALSE((value != -2.0f && value != 3.0f));
     }
     generateAt(generated, 2,
-               GenerationRecipe::realOnlyLastDimensionFastest(
-                   GenerationRecipe::constant({.value = 11.0}), 0));
+               GenerationRecipe::realOnly(GenerationRecipe::constant({.value = 11.0}), 0,
+                                          LastDimensionFastest{}));
     ASSERT_FALSE((generated.loadAs<float>({2}) != 11.0f));
 
     const Tensor scaledA =

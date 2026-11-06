@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <optional>
 #include <roc/hostnumerics/generation.hpp>
+#include <roc/hostnumerics/index_order.hpp>
 #include <roc/hostnumerics/permutation.hpp>
 #include <utility>
 #include <vector>
@@ -25,6 +26,15 @@ Tensor generateTensor(ScalarType type, std::vector<size_t> dimensions,
 }  // namespace
 
 void registerGenerationBindings(nb::module_& module) {
+    nb::class_<IndexOrder>(module, "IndexOrder",
+                           "Either LastDimensionFastest or an explicit Permutation of the full "
+                           "tensor rank, resolved when the order is used.")
+        .def(nb::init<LastDimensionFastest>(), "order"_a)
+        .def(nb::init<Permutation>(), "axes"_a)
+        .def("for_rank", &IndexOrder::forRank, "rank"_a);
+    nb::implicitly_convertible<LastDimensionFastest, IndexOrder>();
+    nb::implicitly_convertible<Permutation, IndexOrder>();
+
     nb::enum_<IntegerRounding>(module, "IntegerRounding")
         .value("TowardZero", IntegerRounding::TowardZero)
         .value("NearestEven", IntegerRounding::NearestEven);
@@ -61,13 +71,6 @@ void registerGenerationBindings(nb::module_& module) {
     nb::class_<BinomialHalfGenerationParameters>(module, "BinomialHalfGenerationParameters")
         .def(nb::init<uint32_t>(), "trials"_a = 1)
         .def_rw("trials", &BinomialHalfGenerationParameters::trials);
-    nb::class_<GenerationRecipeSettings>(
-        module, "GenerationRecipeSettings",
-        "Seed and logical index order shared by one immutable recipe.")
-        .def(nb::init<uint64_t, Permutation>(), "seed"_a, "index_order"_a)
-        .def_rw("seed", &GenerationRecipeSettings::seed)
-        .def_rw("index_order", &GenerationRecipeSettings::indexOrder)
-        .def_rw("index_offset", &GenerationRecipeSettings::indexOffset);
 
     nb::class_<ConstantGenerationParameters>(module, "ConstantGenerationParameters",
                                              "One numerical value for constant generation.")
@@ -196,30 +199,18 @@ void registerGenerationBindings(nb::module_& module) {
         .def_static("uniform_finite_encoded_value", &GenerationRecipe::uniformFiniteEncodedValue)
         .def_static("random_raw_bits", &GenerationRecipe::randomRawBits)
         .def_static("raw_serial_dimension", &GenerationRecipe::rawSerialDimension, "parameters"_a)
-        .def_static("real_only", &GenerationRecipe::realOnly, "component"_a, "settings"_a)
-        .def_static("replicated", &GenerationRecipe::replicated, "component"_a, "settings"_a)
-        .def_static("cartesian", &GenerationRecipe::cartesian, "real"_a, "imaginary"_a,
-                    "settings"_a)
+        .def_static("real_only", &GenerationRecipe::realOnly, "component"_a, "seed"_a,
+                    "index_order"_a)
+        .def_static("replicated", &GenerationRecipe::replicated, "component"_a, "seed"_a,
+                    "index_order"_a)
+        .def_static("cartesian", &GenerationRecipe::cartesian, "real"_a, "imaginary"_a, "seed"_a,
+                    "index_order"_a)
         .def_prop_ro("seed", &GenerationRecipe::seed)
         .def_prop_ro("index_offset", &GenerationRecipe::indexOffset)
         .def("with_index_offset", &GenerationRecipe::withIndexOffset, "offset"_a)
         .def("index_order", &GenerationRecipe::indexOrder, "rank"_a)
-        .def_static("real_only_last_dimension_fastest",
-                    &GenerationRecipe::realOnlyLastDimensionFastest, "component"_a, "seed"_a)
-        .def_static("replicated_last_dimension_fastest",
-                    &GenerationRecipe::replicatedLastDimensionFastest, "component"_a, "seed"_a)
-        .def_static("cartesian_last_dimension_fastest",
-                    &GenerationRecipe::cartesianLastDimensionFastest, "real"_a, "imaginary"_a,
-                    "seed"_a)
-        .def("with_last_dimension_fastest_index_order",
-             &GenerationRecipe::withLastDimensionFastestIndexOrder)
         .def("with_seed", &GenerationRecipe::withSeed, "seed"_a)
-        .def(
-            "with_index_order",
-            [](const GenerationRecipe& recipe, const Permutation& order) {
-                return recipe.withIndexOrder(order);
-            },
-            "index_order"_a);
+        .def("with_index_order", &GenerationRecipe::withIndexOrder, "index_order"_a);
 
     module.def("generate_tensor",
                static_cast<Tensor (*)(ScalarType, Shape, const GenerationRecipe&)>(&generate),

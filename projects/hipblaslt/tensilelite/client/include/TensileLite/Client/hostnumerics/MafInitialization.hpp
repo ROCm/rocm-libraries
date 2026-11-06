@@ -56,12 +56,12 @@ namespace hipblaslt::hostnumerics::maf
     {
         using namespace roc::hostnumerics;
         return GenerationRecipe::realOnly(
-            mode == Mode::Maf1
-                ? (operand == 0 ? GenerationRecipe::sine() : GenerationRecipe::cosine())
-                : GenerationRecipe::normal({}),
-            {.seed        = seed(operand, batch),
-             .indexOrder  = Permutation::reverse(rank),
-             .indexOffset = indexOffset});
+                   mode == Mode::Maf1
+                       ? (operand == 0 ? GenerationRecipe::sine() : GenerationRecipe::cosine())
+                       : GenerationRecipe::normal({}),
+                   seed(operand, batch),
+                   Permutation::reverse(rank))
+            .withIndexOffset(indexOffset);
     }
 
     // Both clients use dimensions zero and one as the stored matrix dimensions.
@@ -171,12 +171,12 @@ namespace hipblaslt::hostnumerics::maf
               || (mode == Mode::Maf2UnitScale && options.dataType == ScalarType::Float4E2M1);
         auto generated = roc::hostnumerics::generateMx(
             shape,
-            numericalData ? MxDataGeneration::quantize(
-                GenerationRecipe::realOnlyLastDimensionFastest(GenerationRecipe::zero(), 0))
+            numericalData ? MxDataGeneration::quantize(GenerationRecipe::realOnly(
+                GenerationRecipe::zero(), 0, roc::hostnumerics::LastDimensionFastest{}))
                           : MxDataGeneration::preserveGeneratedEncoding(GenerationRecipe::realOnly(
                               GenerationRecipe::uniformFiniteEncodedValue(),
-                              {.seed       = seed(operand, batch),
-                               .indexOrder = roc::hostnumerics::Permutation{1, 0}})),
+                              seed(operand, batch),
+                              roc::hostnumerics::Permutation{1, 0})),
             options);
         if(numericalData)
             fill(generated.data, mode, operand, batch);
@@ -192,8 +192,9 @@ namespace hipblaslt::hostnumerics::maf
                             .withExp2Transform()
                             .withAffineValueMapping({.scale = 0x1p-11});
         generate(generated.scales,
-                 GenerationRecipe::realOnlyLastDimensionFastest(scaleComponent,
-                                                                seed(operand, batch, true)),
+                 GenerationRecipe::realOnly(scaleComponent,
+                                            seed(operand, batch, true),
+                                            roc::hostnumerics::LastDimensionFastest{}),
                  conversion(mode, options.scaleType));
         generated.refreshReference();
         return generated;

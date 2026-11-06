@@ -109,11 +109,7 @@ namespace TensileLite
                 using roc::hostnumerics::ScalarType;
                 auto recipe = [&](GenerationRecipe::Component component) {
                     return GenerationRecipe::realOnly(
-                        std::move(component),
-                        {
-                            .seed       = seed,
-                            .indexOrder = roc::hostnumerics::Permutation{1, 0},
-                        });
+                        std::move(component), seed, roc::hostnumerics::Permutation{1, 0});
                 };
 
                 switch(mode)

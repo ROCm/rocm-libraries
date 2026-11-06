@@ -145,6 +145,7 @@ target_sources(hostnumerics-core
             "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/hostnumerics/scalar_type.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/hostnumerics/index_range.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/hostnumerics/sampling.hpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/hostnumerics/index_order.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/hostnumerics/permutation.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/hostnumerics/shape.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/hostnumerics/detail/layout_offset.hpp"
