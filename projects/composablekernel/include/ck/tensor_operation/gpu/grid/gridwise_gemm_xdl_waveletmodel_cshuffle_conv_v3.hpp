@@ -286,14 +286,14 @@ struct GridwiseGemm_xdl_waveletmodel_cshuffle_conv_v3
         }
     };
 
-    using NamedBarrierType = NamedBarrier<TileMathThreadGroup, UseNamedBarrier>;
+    using NamedBarrierType = NamedBarrier<TileMathThreadGroup, UseNamedBarrier || PersistentKernel>;
 
     // Persistent kernels convert and store the C tile in batches of this many (vector) stores:
     // convert a batch, issue its stores back to back, then go on with the next one. Smaller
     // batches spread the VMEM issue over the epilogue. The data and addresses of all the batches
     // are kept in registers until the last store, so smaller batches do not cost s_wait_xcnt (but
     // the registers are not recycled: raise this to >= the stores per thread if that spills).
-    static constexpr index_t EpilogueStoreBatchSize = 2;
+    static constexpr index_t EpilogueStoreBatchSize = MXdlPerWave * NXdlPerWave;
 
     // Workgroups loop over output tiles instead of processing a single tile each
     static constexpr bool IsPersistentKernel = PersistentKernel;
@@ -679,6 +679,19 @@ struct GridwiseGemm_xdl_waveletmodel_cshuffle_conv_v3
         return math::max(data_lds_bytes, c_block_size * sizeof(CShuffleDataType));
     }
 
+    template <typename DeviceArch>
+    __host__ __device__ static constexpr index_t GetSharedMemoryEpilogueNumberOfByte(DeviceArch)
+    {
+        // C shuffle LDS (reuses same memory after GEMM loop, mutually exclusive)
+        constexpr auto c_shuffle_block_desc_mblock_mperblock_nblock_nperblock =
+            Base::GetCShuffleBlockDescriptor_MBlock_MPerBlock_NBlock_NPerBlock(DeviceArch{});
+
+        constexpr auto c_block_size =
+            c_shuffle_block_desc_mblock_mperblock_nblock_nperblock.GetElementSpaceSize();
+
+        return c_block_size * sizeof(CShuffleDataType);
+    }
+
     __host__ static index_t GetSharedMemoryNumberOfByteOnHost()
     {
 #if !defined(__HIPCC_RTC__) || !defined(CK_CODE_GEN_RTC)
@@ -1051,6 +1064,7 @@ struct GridwiseGemm_xdl_waveletmodel_cshuffle_conv_v3
                                 CDataType* p_c_grid,
                                 void* p_shared_0,
                                 void* p_shared_1,
+                                void* p_shared_2,
                                 const Problem& problem,
                                 const AGridDesc_AK0_M_K1& a_grid_desc_ak0_m_ak1,
                                 const BGridDesc_BK0_N_K1& b_grid_desc_bk0_n_bk1,
@@ -1350,15 +1364,15 @@ struct GridwiseGemm_xdl_waveletmodel_cshuffle_conv_v3
                                                (NXdlPerWave / CShuffleNXdlPerWavePerShuffle);
                 static_for<0, 2 * num_access, 1>{}([&](auto) { block_sync_lds(); });
             }
-            else
-            {
-                wait_dscnt();
-                if constexpr(UseTdmB || UseTdmA)
-                {
-                    __builtin_amdgcn_s_wait_tensorcnt(0);
-                }
-                wait_async();
-            }
+            // else
+            // {
+            //     wait_dscnt();
+            //     if constexpr(UseTdmB || UseTdmA)
+            //     {
+            //         __builtin_amdgcn_s_wait_tensorcnt(0);
+            //     }
+            //     wait_async();
+            // }
         }
         else if(TileMathThreadGroup::IsBelong())
         {
@@ -1392,35 +1406,36 @@ struct GridwiseGemm_xdl_waveletmodel_cshuffle_conv_v3
                 num_k_block_main_loop,
                 barrier);
 
-            if constexpr(PersistentKernel)
-            {
-                const auto c_grid_desc_m_n = [&]() {
-                    return transform_tensor_descriptor(
-                        c_grid_desc_mblock_mperblock_nblock_nperblock,
-                        make_tuple(make_merge_transform(make_tuple(
-                                       c_grid_desc_mblock_mperblock_nblock_nperblock.GetLength(I0),
-                                       Number<MPerBlock>{})),
-                                   make_merge_transform(make_tuple(
-                                       c_grid_desc_mblock_mperblock_nblock_nperblock.GetLength(I2),
-                                       Number<NPerBlock>{}))),
-                        make_tuple(Sequence<0, 1>{}, Sequence<2, 3>{}),
-                        make_tuple(Sequence<0>{}, Sequence<1>{}));
-                }();
+            // if constexpr(PersistentKernel)
+            // {
+            //     const auto c_grid_desc_m_n = [&]() {
+            //         return transform_tensor_descriptor(
+            //             c_grid_desc_mblock_mperblock_nblock_nperblock,
+            //             make_tuple(make_merge_transform(make_tuple(
+            //                            c_grid_desc_mblock_mperblock_nblock_nperblock.GetLength(I0),
+            //                            Number<MPerBlock>{})),
+            //                        make_merge_transform(make_tuple(
+            //                            c_grid_desc_mblock_mperblock_nblock_nperblock.GetLength(I2),
+            //                            Number<NPerBlock>{}))),
+            //             make_tuple(Sequence<0, 1>{}, Sequence<2, 3>{}),
+            //             make_tuple(Sequence<0>{}, Sequence<1>{}));
+            //     }();
 
-                Base::template RunEpilogueNoShuffle<CGlobalMemoryDataOperation,
-                                                    true,
-                                                    Sequence<0, 1, 2, 3, 4, 5, 6, 7>,
-                                                    7,
-                                                    PersistentKernel ? EpilogueStoreBatchSize : 0>(
-                    blockwise_gemm,
-                    c_grid_desc_m_n,
-                    c_thread_buf,
-                    block_m_id,
-                    block_n_id,
-                    p_c_grid,
-                    c_element_op);
-            }
-            else
+            //     Base::template RunEpilogueNoShuffle<CGlobalMemoryDataOperation,
+            //                                         true,
+            //                                         Sequence<0, 1, 2, 3, 4, 5, 6, 7>,
+            //                                         7,
+            //                                         PersistentKernel ? EpilogueStoreBatchSize :
+            //                                         0>(
+            //         blockwise_gemm,
+            //         c_grid_desc_m_n,
+            //         c_thread_buf,
+            //         block_m_id,
+            //         block_n_id,
+            //         p_c_grid,
+            //         c_element_op);
+            // }
+            // else
             {
                 Base::template RunEpilogue<CGlobalMemoryDataOperation, false, true>(
                     blockwise_gemm,
@@ -1428,9 +1443,10 @@ struct GridwiseGemm_xdl_waveletmodel_cshuffle_conv_v3
                     c_thread_buf,
                     block_m_id,
                     block_n_id,
-                    p_shared_0,
+                    PersistentKernel ? p_shared_2 : p_shared_0,
                     p_c_grid,
-                    c_element_op);
+                    c_element_op,
+                    barrier);
             }
         }
     }
@@ -1447,6 +1463,7 @@ struct GridwiseGemm_xdl_waveletmodel_cshuffle_conv_v3
                                CDataType* p_c_grid,
                                void* p_shared_0,
                                void* p_shared_1,
+                               void* p_shared_2,
                                const Problem& problem,
                                const AGridDesc_AK0_M_K1& a_grid_desc_ak0_m_ak1,
                                const BGridDesc_BK0_N_K1& b_grid_desc_bk0_n_bk1,
@@ -1471,6 +1488,7 @@ struct GridwiseGemm_xdl_waveletmodel_cshuffle_conv_v3
                 p_c_grid,
                 p_shared_0,
                 p_shared_1,
+                p_shared_2,
                 problem,
                 a_grid_desc_ak0_m_ak1,
                 b_grid_desc_bk0_n_bk1,
@@ -1489,6 +1507,7 @@ struct GridwiseGemm_xdl_waveletmodel_cshuffle_conv_v3
                 p_c_grid,
                 p_shared_0,
                 p_shared_1,
+                p_shared_2,
                 problem,
                 a_grid_desc_ak0_m_ak1,
                 b_grid_desc_bk0_n_bk1,
@@ -1515,6 +1534,7 @@ struct GridwiseGemm_xdl_waveletmodel_cshuffle_conv_v3
                    CDataType* p_c_grid,
                    void* p_shared_0,
                    void* p_shared_1,
+                   void* p_shared_2,
                    const Problem& problem,
                    const AGridDesc_AK0_M_K1& a_grid_desc_ak0_m_ak1,
                    const BGridDesc_BK0_N_K1& b_grid_desc_bk0_n_bk1,
@@ -1531,6 +1551,7 @@ struct GridwiseGemm_xdl_waveletmodel_cshuffle_conv_v3
             p_c_grid,
             p_shared_0,
             p_shared_1,
+            p_shared_2,
             problem,
             a_grid_desc_ak0_m_ak1,
             b_grid_desc_bk0_n_bk1,

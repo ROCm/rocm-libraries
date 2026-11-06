@@ -2175,7 +2175,8 @@ struct GridwiseGemm_xdl_cshuffle_base
               typename BlockwiseGemmPipe,
               typename CGridDesc_MBlock_MPerBlock_NBlock_NPerBlock,
               typename CThreadBuffer,
-              typename CDEElementwiseOperation>
+              typename CDEElementwiseOperation,
+              typename NamedBarrierType = NamedBarrier<ThisThreadBlock, false>>
     __device__ static void RunEpilogue(const BlockwiseGemmPipe& blockwise_gemm_pipeline,
                                        const CGridDesc_MBlock_MPerBlock_NBlock_NPerBlock&
                                            c_grid_desc_mblock_mperblock_nblock_nperblock,
@@ -2184,7 +2185,8 @@ struct GridwiseGemm_xdl_cshuffle_base
                                        index_t block_n_id,
                                        void* p_shared,
                                        EDataType* p_c_grid,
-                                       const CDEElementwiseOperation& cde_element_op)
+                                       const CDEElementwiseOperation& cde_element_op,
+                                       const NamedBarrierType& barrier = NamedBarrierType(nullptr))
     {
         static_assert(MXdlPerWave % CShuffleMXdlPerWavePerShuffle == 0 &&
                           NXdlPerWave % CShuffleNXdlPerWavePerShuffle == 0,
@@ -2286,9 +2288,19 @@ struct GridwiseGemm_xdl_cshuffle_base
 
         static_assert(num_access == sfc_c_global.GetNumOfAccess(), "wrong!");
 
+        barrier.Join();
+
         static_for<0, num_access, 1>{}([&](auto access_id) {
             // make sure it's safe to write to LDS
-            block_sync_lds();
+            if constexpr(NamedBarrierType::IsEnabled)
+            {
+                wait_dscnt(); // reads of the previous access must have completed
+                barrier.Wait();
+            }
+            else
+            {
+                block_sync_lds();
+            }
 
             // each thread write its data from VGPR to LDS
             c_thread_copy_vgpr_to_lds.Run(c_thread_desc,
@@ -2298,7 +2310,18 @@ struct GridwiseGemm_xdl_cshuffle_base
                                           c_shuffle_block_buf);
 
             // make sure it's safe to read from LDS
-            block_sync_lds();
+            if constexpr(NamedBarrierType::IsEnabled)
+            {
+                // The named barrier does not wait for outstanding LDS writes (unlike
+                // block_sync_lds): without this the ds_store of the C tile may still be in flight
+                // when other waves read it.
+                wait_dscnt();
+                barrier.Wait();
+            }
+            else
+            {
+                block_sync_lds();
+            }
 
             // each block copy its data from LDS to global
             c_shuffle_block_copy_lds_to_global.Run(

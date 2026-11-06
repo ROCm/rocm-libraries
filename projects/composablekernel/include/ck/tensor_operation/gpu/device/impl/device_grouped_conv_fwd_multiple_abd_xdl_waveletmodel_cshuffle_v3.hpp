@@ -166,11 +166,12 @@ __launch_bounds__(GridwiseGemm::LaunchBlockSize, MinimumOccupancy)
         const long_index_t e_n_offset =
             amd_wave_read_first_lane(compute_ptr_offset_of_n.GetEPtrOffset(n_idx));
 
-        constexpr index_t LDS_size = GridwiseGemm::GetSharedMemoryNumberOfByte(get_device_arch());
+        constexpr index_t LDS_size_data =
+            GridwiseGemm::GetSharedMemoryNumberOfByte(get_device_arch());
         // Pass two lds pointer is the key to tell compiler that ds_read/write
         // operate on different lds chunk at same time without order dependency
-        __shared__ char p_shared_0[LDS_size];
-        __shared__ char p_shared_1[LDS_size];
+        __shared__ char p_shared_0[LDS_size_data];
+        __shared__ char p_shared_1[LDS_size_data];
 
         // only direct load pipeline with double buffer supported
         const auto transformed_a_desc =
@@ -195,6 +196,12 @@ __launch_bounds__(GridwiseGemm::LaunchBlockSize, MinimumOccupancy)
                     GridwiseGemm::Block2CTileMap::CalculateGridSize(karg.M, karg.N));
                 index_t tile_idx = amd_wave_read_first_lane(static_cast<index_t>(blockIdx.x));
 
+                if(GridwiseGemm::TileMathThreadGroup::IsBelong())
+                {
+                    block_sync_lds();
+                    block_sync_lds();
+                }
+
                 while(tile_idx < num_tiles)
                 {
                     run_tile(tile_idx);
@@ -204,6 +211,17 @@ __launch_bounds__(GridwiseGemm::LaunchBlockSize, MinimumOccupancy)
                     // Advance to the next work item
                     tile_idx = amd_wave_read_first_lane(tile_idx + grid_size);
                 }
+
+                if(GridwiseGemm::TileLoadThreadGroup::IsBelong())
+                {
+                    wait_dscnt();
+                    __builtin_amdgcn_s_wait_tensorcnt(0);
+                    block_sync_lds_direct_load();
+
+                    wait_dscnt();
+                    __builtin_amdgcn_s_wait_tensorcnt(0);
+                    block_sync_lds_direct_load();
+                }
             }
             else
             {
@@ -211,7 +229,37 @@ __launch_bounds__(GridwiseGemm::LaunchBlockSize, MinimumOccupancy)
             }
         };
 
-        if constexpr(GridwiseGemm::IsPersistentKernel && GridwiseGemm::NamedBarrierType::IsEnabled)
+        if constexpr(GridwiseGemm::IsPersistentKernel)
+        {
+            constexpr index_t LDS_size_epilogue =
+                GridwiseGemm::GetSharedMemoryEpilogueNumberOfByte(get_device_arch());
+            __shared__ char p_shared_2[LDS_size_epilogue];
+            // The barrier is owned by the workgroup, not by the tile: create and initialize it
+            // once, outside the tile loop
+            __shared__ typename GridwiseGemm::NamedBarrierType::barrier_t barrier_lds;
+            const typename GridwiseGemm::NamedBarrierType barrier(&barrier_lds);
+            barrier.Init();
+
+            run_tiles([&](const index_t tile_idx) {
+                GridwiseGemm::
+                    template RunWithBarrier<HasMainKBlockLoop, CGlobalMemoryDataOperation, TailNum>(
+                        karg.p_a_grid + a_group_offset + a_n_offset,
+                        karg.p_b_grid + b_group_offset,
+                        karg.p_c_grid + e_group_offset + e_n_offset,
+                        p_shared_0,
+                        p_shared_1,
+                        p_shared_2,
+                        karg,
+                        transformed_a_desc,
+                        transformed_b_desc,
+                        c_grid_desc_m_n,
+                        barrier,
+                        0,
+                        1,
+                        tile_idx);
+            });
+        }
+        else if constexpr(GridwiseGemm::NamedBarrierType::IsEnabled)
         {
             // The barrier is owned by the workgroup, not by the tile: create and initialize it
             // once, outside the tile loop
@@ -227,6 +275,7 @@ __launch_bounds__(GridwiseGemm::LaunchBlockSize, MinimumOccupancy)
                         karg.p_c_grid + e_group_offset + e_n_offset,
                         p_shared_0,
                         p_shared_1,
+                        nullptr,
                         karg,
                         transformed_a_desc,
                         transformed_b_desc,
@@ -246,6 +295,7 @@ __launch_bounds__(GridwiseGemm::LaunchBlockSize, MinimumOccupancy)
                     karg.p_c_grid + e_group_offset + e_n_offset,
                     p_shared_0,
                     p_shared_1,
+                    nullptr,
                     karg,
                     transformed_a_desc,
                     transformed_b_desc,

@@ -166,16 +166,26 @@ struct GridwiseGemmLoadWave<TileLoadThreadGroup, 1>
 
         const auto initial_compute_indices = [&]() {
             __builtin_amdgcn_sched_barrier(0);
-            if constexpr(a_first)
-            {
-                a_blockwise_copy.PrecomputeIdx(a_grid_desc);
-                b_blockwise_copy.PrecomputeIdx(b_grid_desc);
-            }
-            else
-            {
-                b_blockwise_copy.PrecomputeIdx(b_grid_desc);
-                a_blockwise_copy.PrecomputeIdx(a_grid_desc);
-            }
+            a_blockwise_copy.PrecomputeIdx(a_grid_desc);
+            b_blockwise_copy.PrecomputeIdx(b_grid_desc);
+            block_sync_func();
+            block_sync_func();
+            // if constexpr(a_first)
+            // {
+            //     a_blockwise_copy.PrecomputeIdx(a_grid_desc);
+            //     // block_sync_func();
+            //     b_blockwise_copy.PrecomputeIdx(b_grid_desc);
+            //     block_sync_func();
+            //     block_sync_func();
+            // }
+            // else
+            // {
+            //     b_blockwise_copy.PrecomputeIdx(b_grid_desc);
+            //     // block_sync_func();
+            //     a_blockwise_copy.PrecomputeIdx(a_grid_desc);
+            //     block_sync_func();
+            //     block_sync_func();
+            // }
             __builtin_amdgcn_sched_barrier(0);
         };
 
@@ -221,16 +231,14 @@ struct GridwiseGemmLoadWave<TileLoadThreadGroup, 1>
         initial_compute_indices();
 
         // First prefetch buffer A0, B0
-        load_bufs(I0);
+        // load_bufs(I0);
 
-        compute_indices();
+        // compute_indices();
 
-        block_sync_func();
+        // // Second prefetch buffer A1, B1
+        // load_bufs(I1);
 
-        // Second prefetch buffer A1, B1
-        load_bufs(I1);
-
-        compute_indices();
+        // compute_indices();
 
         if constexpr(HasMainLoop)
         {
@@ -243,7 +251,7 @@ struct GridwiseGemmLoadWave<TileLoadThreadGroup, 1>
             // invoker.
             do
             {
-                block_sync_func();
+                // block_sync_func();
 
                 // Load A0, B0. Precompute indices for A1, B1
                 load_bufs(I0);
@@ -255,15 +263,31 @@ struct GridwiseGemmLoadWave<TileLoadThreadGroup, 1>
                 load_bufs(I1);
                 compute_indices();
 
+                block_sync_func();
+
                 i += 2;
             } while(i < (num_loop - 2));
         }
 
         // tail
-        if constexpr(TailNum == TailNumber::Even)
+        if constexpr(TailNum == TailNumber::Odd)
+        {
+            load_bufs(I0);
+
+            // block_sync_func();
+        }
+        else if constexpr(TailNum == TailNumber::Even)
         {
             // Wait for last load of A1, B1 (to be processed by math waves)
+            load_bufs(I0);
+            compute_indices();
+
             block_sync_func();
+
+            // Load A1, B1. Precompute indices for A0, B0
+            load_bufs(I1);
+
+            // block_sync_func();
         }
     }
 };
@@ -343,7 +367,7 @@ struct GridwiseGemmMathWave<TileMathThreadGroup, 1>
         // Initialize C
         c_thread_buf.Clear();
 
-        block_sync_lds();
+        // block_sync_lds();
 
         // main body
         if constexpr(HasMainLoop)
@@ -352,6 +376,7 @@ struct GridwiseGemmMathWave<TileMathThreadGroup, 1>
 
             do
             {
+                block_sync_lds();
                 __builtin_amdgcn_sched_barrier(0);
                 // GEMM A0, B0
                 block_gemm.Run(a_block_buf.At(I0), b_block_buf.At(I0), c_thread_buf, barrier);
@@ -363,7 +388,7 @@ struct GridwiseGemmMathWave<TileMathThreadGroup, 1>
                 // GEMM A1, B1
                 block_gemm.Run(a_block_buf.At(I1), b_block_buf.At(I1), c_thread_buf, barrier);
 
-                block_sync_lds();
+                // block_sync_lds();
 
                 __builtin_amdgcn_sched_barrier(0);
                 i += 2;
@@ -374,17 +399,21 @@ struct GridwiseGemmMathWave<TileMathThreadGroup, 1>
         if constexpr(TailNum == TailNumber::Odd)
         {
             // GEMM A0, B0
+            block_sync_lds();
             block_gemm.Run(a_block_buf.At(I0), b_block_buf.At(I0), c_thread_buf, barrier);
+            block_sync_lds();
         }
         else if constexpr(TailNum == TailNumber::Even)
         {
             // GEMM A0, B0
+            block_sync_lds();
             block_gemm.Run(a_block_buf.At(I0), b_block_buf.At(I0), c_thread_buf, barrier);
 
             block_sync_lds();
 
             // GEMM A1, B1
             block_gemm.Run(a_block_buf.At(I1), b_block_buf.At(I1), c_thread_buf, barrier);
+            block_sync_lds();
         }
     }
 };
