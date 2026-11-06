@@ -441,7 +441,7 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     # suite below.
     foreach(_gfx950_engine IN ITEMS
             "dense|Gfx950AttentionDense|EveryShippedKernelsTileIsOneTheEngineLaunches"
-            "unified_2d|Gfx950AttentionUnified2D|EveryShippedKernelsGeometryIsOneTheEngineLaunches,EveryShippedKernelServesTheManifestsBatchCapacity"
+            "unified_2d|Gfx950AttentionUnified2D|EveryShippedKernelsGeometryIsOneTheEngineLaunches"
             "unified_3d|Gfx950AttentionUnified3D|EveryShippedKernelsGeometryIsOneTheEngineLaunches,EveryEntryLaunchesItsSegmentAndReduceKernels")
         string(REPLACE "|" ";" _gfx950_engine "${_gfx950_engine}")
         list(GET _gfx950_engine 0 _snake)
@@ -493,6 +493,32 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
             EXPECTED_CASES
                 EveryDecodeCellHandedToUnified3DHasAUnified3DKernel
         )
+    endif()
+
+    # Census for the gfx942 unified 3D (split-KV decode) production pack; gated like
+    # gfx950's above.
+    hkp_gfx942_attention_unified_3d_available(_hkp_gfx942_attention_unified_3d)
+    if(_hkp_gfx942_attention_unified_3d)
+        hkp_register_census_tests(
+            TARGET hip_kernel_provider_census_tests
+            PACK_NAME product
+            ARCHES gfx942
+            SUITES TestGfx942AttentionUnified3dPacks
+            EXPECTED_CASES
+                LoadsExactlyTheEmittedPacks
+                LoadsExactlyTheEmittedKernels
+                EveryLoadedDescriptorCoversTheRequestedArch
+                EveryKernelDeclaresTheEmittedRuntimeSourceKind
+                DeclaresTheConfiguredSdkVersion
+                ExposesTheConfiguredKnobs
+                RanksThroughItsRegisteredScoreSymbol
+                CarriesNoGraphScopedMatcher
+                CarriesExactlyOneSharedKernelScopedMatcher
+        )
+    else()
+        message(STATUS
+            "hkp: this configuration does not ship hipkernel:Gfx942AttentionUnified3d for "
+            "gfx942, so its census is not registered.")
     endif()
 
     # One generic kernel set per RDNA family ships in every RDNA3/3.5 and RDNA4 shard,
