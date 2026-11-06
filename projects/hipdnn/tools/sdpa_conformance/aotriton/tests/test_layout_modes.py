@@ -132,11 +132,33 @@ def bwd_args(flip):
     return (B, H, D, SQ, SK, False, "l1", 0.0, DTYPE, flip, "matrix")
 
 
+def recording_do_test_op_bwd(got):
+    """A stand-in for `_do_test_op_bwd` that records what it is called with and unpacks `args` by
+    the same names the vendored function does (the plugin finds `storage_flip` through them).
+    """
+
+    def _do_test_op_bwd(request, args, device_str="cuda"):
+        (
+            BATCH,
+            N_HEADS,
+            D_HEAD,
+            sq,
+            sk,
+            causal,
+            scale,
+            dropout,
+            dtype,
+            storage_flip,
+            bias,
+        ) = args
+        got.append((args, device_str))
+
+    return _do_test_op_bwd
+
+
 def converted(vendored, mode, flip):
     got = []
-    wrapper = plugin.make_do_test_op_bwd(
-        lambda request, args, device_str: got.append((args, device_str)), mode
-    )
+    wrapper = plugin.make_do_test_op_bwd(recording_do_test_op_bwd(got), mode)
     wrapper("request", bwd_args(flip), "cpu")
     ((args, device_str),) = got
     assert device_str == "cpu"
@@ -203,9 +225,40 @@ def test_converted_inputs_hold_the_values_the_storage_flip_gave(vendored, mode, 
 def test_a_storage_layout_in_args_is_left_alone(vendored, mode):
     chosen = vendored.common.StorageLayout.round_robin(2)
     got = []
-    wrapper = plugin.make_do_test_op_bwd(lambda *a: got.append(a), mode)
+    wrapper = plugin.make_do_test_op_bwd(recording_do_test_op_bwd(got), mode)
     wrapper("request", bwd_args(chosen), "cpu")
-    assert got[0][1][9] is chosen
+    assert got[0][0][9] is chosen
+
+
+def test_storage_flip_is_found_by_name_in_the_vendored_do_test_op_bwd(vendored):
+    index = plugin.flip_index(vendored.core._do_test_op_bwd)
+    flip = object()
+    assert bwd_args(flip)[index] is flip
+
+
+def test_storage_flip_is_found_wherever_the_vendored_function_unpacks_it(vendored):
+    def moved(request, args, device_str="cuda"):
+        storage_flip, BATCH, N_HEADS, D_HEAD, bias_type = args
+
+    def renamed(request, args, device_str="cuda"):
+        BATCH, N_HEADS, D_HEAD, flip, bias_type = args
+
+    assert plugin.flip_index(moved) == 0
+    with pytest.raises(RuntimeError, match=r"renamed.*storage_flip"):
+        plugin.flip_index(renamed)
+
+
+def test_a_wrapped_function_without_storage_flip_fails_loudly(vendored):
+    def no_flip(request, args, device_str="cuda"):
+        a, b, c = args
+
+    def no_args(request, arguments, device_str="cuda"):
+        storage_flip, b = arguments
+
+    with pytest.raises(RuntimeError, match=r"no_flip.*storage_flip"):
+        plugin.make_do_test_op_bwd(no_flip, "pytorch")
+    with pytest.raises(RuntimeError, match=r"no_args.*args"):
+        plugin.make_do_test_op_bwd(no_args, "pytorch")
 
 
 def test_aotriton_mode_installs_nothing_and_removes_earlier_wrappers(

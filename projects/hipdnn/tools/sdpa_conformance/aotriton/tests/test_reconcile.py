@@ -331,7 +331,8 @@ def test_a_fail_whose_failing_side_served_its_pin_stays_a_fail_in_pair_passes(tm
         got[ids[1]]["outcome"] == "declined"
     )  # the failing forward is not the pinned A
     assert got[ids[2]]["outcome"] == "declined"  # the backward served Z, not X
-    assert [f["nodeid"] for f in reconcile.failure_rows(tmp_path)] == [ids[0]]
+    # The failure list keeps every fail row, pinned engine or not.
+    assert [f["nodeid"] for f in reconcile.failure_rows(tmp_path)] == ids
 
 
 def test_a_state_of_an_erroring_call_names_its_engine_like_a_served_one(tmp_path):
@@ -842,3 +843,225 @@ def test_report_lists_a_node_id_recorded_by_two_shard_directories(tmp_path):
         "== duplicate node ids",
         "none",
     ]
+
+
+# ------------------------------------------------------- failures without an engine on the failing side
+
+
+def test_a_fail_charged_to_a_reference_forward_is_listed_against_the_hipdnn_backward(
+    tmp_path,
+):
+    # AOTriton's backward test checks the forward output after the backward ran, so a hipDNN
+    # backward that corrupts O fails on the side of the reference forward, which has no engine.
+    real_shard(
+        tmp_path, "default-1of1",
+        [row(BWD[0], "fail", mode="ref-fwd", fwd="ref:why", bwd="hipdnn:X", fail_side="fwd",
+             reason="Forward pass O mismatch"),
+         row(BWD[1], "fail", fail_side="bwd", reason="boom")],
+        BWD[:2],
+    )  # fmt: skip
+    shard_dir = tmp_path / "default-1of1"
+    got = {f["nodeid"]: f for f in reconcile.failure_rows(shard_dir)}
+    assert (got[BWD[0]]["direction"], got[BWD[0]]["engine"]) == ("fwd", "X")
+    assert got[BWD[1]]["engine"] == "-"  # no side served an engine: still listed
+    text = reconcile.run_report(tmp_path)
+    failures = text[text.index("== failures") :]
+    assert "== failures (2)" in failures and BWD[0] in failures and BWD[1] in failures
+    baseline = tmp_path / "base.txt"
+    baseline.write_text(f"{BWD[0]}\n")
+    diff = reconcile.run_report(tmp_path, baseline=baseline)
+    assert "failing here 2, still failing 1" in " ".join(diff.split())
+    assert f"  {BWD[1]}  [fail bwd -]" in diff
+
+
+# ------------------------------------------------------------------------------- baseline outcomes
+
+
+def baseline_text(run, ids, tmp_path):
+    baseline = tmp_path / "b.txt"
+    baseline.write_text("".join(f"{i}\n" for i in ids))
+    text = reconcile.run_report(run, baseline=baseline)
+    diff = text[text.index("== baseline") :]
+    fixed, unconfirmed = diff[diff.index("no longer failing") :].split(
+        "not confirmed fixed"
+    )
+    return fixed, unconfirmed
+
+
+def test_baseline_counts_only_a_pass_as_fixed_and_lists_every_other_outcome(tmp_path):
+    outcomes = ["pass", "declined", "native-skip", "no-hipdnn", "not-run"]
+    ids = [f"v/test_backward.py::{o}" for o in outcomes]
+    run = tmp_path / "run"
+    real_shard(
+        run, "default-1of1",
+        [row(i, o) for i, o in zip(ids[:4], outcomes)],
+        ids,
+    )  # fmt: skip
+    fixed, unconfirmed = baseline_text(
+        run, [*ids, "v/test_backward.py::gone"], tmp_path
+    )
+    assert f"{ids[0]}: pass" in fixed and "): 1" in fixed.splitlines()[0]
+    for i, o in zip(ids[1:], outcomes[1:]):
+        assert i not in fixed
+        assert f"{i}: {o}" in unconfirmed
+    assert "v/test_backward.py::gone: not in this run" in unconfirmed
+    assert "): 5" in unconfirmed.splitlines()[0]
+
+
+# ------------------------------------------------------------------------------- --compare
+
+
+def compare_runs(tmp_path):
+    ids = [f"v/test_backward.py::c{i}" for i in range(1, 8)]
+    old, new = tmp_path / "old", tmp_path / "new"
+    real_shard(
+        old, "default-1of1",
+        [row(ids[0], "pass", bwd="hipdnn:X"), row(ids[1], "fail", bwd="hipdnn:X", fail_side="bwd"),
+         row(ids[2], "pass", bwd="hipdnn:X"), row(ids[3], "pass", fwd="hipdnn:F", bwd="hipdnn:X"),
+         row(ids[4], "pass", bwd="hipdnn:X"), row(ids[5], "pass", bwd="hipdnn:X")],
+        ids[:6],
+    )  # fmt: skip
+    real_shard(
+        new, "default-1of1",
+        [row(ids[0], "declined"), row(ids[1], "declined"),
+         row(ids[2], "pass", bwd="hipdnn:X"), row(ids[3], "pass", fwd="hipdnn:G", bwd="hipdnn:X"),
+         row(ids[4], "declined"), row(ids[6], "pass", bwd="hipdnn:X")],
+        [ids[0], ids[1], ids[2], ids[3], ids[4], ids[6]],
+    )  # fmt: skip
+    return ids, old, new
+
+
+def test_compare_lists_every_outcome_transition_with_counts_and_examples(tmp_path):
+    ids, old, new = compare_runs(tmp_path)
+    text = reconcile.compare_runs(new, old)
+    lines = [l.strip() for l in text.splitlines()]
+    assert "pass -> declined: 2" in lines  # c1, c5: lost coverage
+    assert "fail -> declined: 1" in lines  # read as a fix by a failing-ids diff
+    assert "pass -> not in run: 1" in lines and "not in run -> pass: 1" in lines
+    at = lines.index("pass -> declined: 2")
+    assert lines[at + 1 : at + 3] == [ids[0], ids[4]]  # examples, by node id
+    assert "5 cases changed outcome" in text
+    assert "only in old" in text and "only in new" in text
+
+
+def test_compare_lists_a_served_engine_change_with_the_same_outcome(tmp_path):
+    ids, old, new = compare_runs(tmp_path)
+    text = reconcile.compare_runs(new, old)
+    tail = text[text.index("served engine changed") :]
+    assert "served engine changed, same outcome: 1" in tail
+    assert f"{ids[3]} [pass]: fwd F, bwd X -> fwd G, bwd X" in tail
+    assert ids[2] not in tail  # same outcome, same engines
+
+
+def test_compare_option_prints_the_comparison_and_a_missing_run_exits_2(
+    tmp_path, capsys
+):
+    ids, old, new = compare_runs(tmp_path)
+    assert reconcile.main([str(new), "--compare", str(old)]) == 0
+    out = capsys.readouterr().out
+    assert "== compare old -> new" in out and "pass -> declined: 2" in out
+    assert reconcile.main([str(new), "--compare", str(tmp_path / "missing")]) == 2
+    assert "missing" in capsys.readouterr().err
+
+
+# ------------------------------------------------------------------------- engine credit and split
+
+
+def test_a_backward_case_credits_its_forward_engine_and_a_failure_only_the_failing_side(
+    tmp_path,
+):
+    write_pass(
+        tmp_path, "", {},
+        [row(BWD_T, "pass", mode="hipdnn", fwd="hipdnn:F", bwd="hipdnn:B"),
+         row("v/test_backward.py::b2", "fail", mode="hipdnn", fwd="hipdnn:F", bwd="hipdnn:B",
+             fail_side="bwd")],
+        [BWD_T, "v/test_backward.py::b2"],
+    )  # fmt: skip
+    got = sorted((r["direction"], r["engine"], r["outcome"]) for r in table(tmp_path))
+    assert got == [
+        ("bwd", "B", "fail"),
+        ("bwd", "B", "pass"),
+        ("fwd", "F", "pass"),
+    ]
+    assert reconcile.engine_counts(reconcile.engine_rows(tmp_path)).splitlines() == [
+        "bwd B: pass=1 fail=1 declined=0",
+        "fwd F: pass=1 fail=0 declined=0",
+    ]
+
+
+def test_the_engine_counts_split_by_mode_and_by_test_file(tmp_path):
+    ids = ["v/test_backward.py::b1", "v/test_backward.py::b2", "v/test_forward.py::f1"]
+    real_shard(
+        tmp_path, "default-1of1",
+        [row(ids[0], mode="hipdnn", fwd="hipdnn:F", bwd="hipdnn:B"),
+         row(ids[1], mode="ref-fwd", fwd="ref:why", bwd="hipdnn:B"),
+         row(ids[2], mode="hipdnn", fwd="hipdnn:F")],
+        ids,
+    )  # fmt: skip
+    text = reconcile.run_report(tmp_path)
+    section = text[text.index("== engines by mode and test file") :].split("\n\n")[0]
+    block = section.split("\nbwd B\n")[1].split("\nfwd")[0]
+    assert block.splitlines() == [
+        "  file test_backward.py: pass=2 fail=0 declined=0",
+        "  mode hipdnn: pass=1 fail=0 declined=0",
+        "  mode ref-fwd: pass=1 fail=0 declined=0",
+    ]
+    fwd = section.split("\nfwd F\n")[1]
+    assert fwd.splitlines() == [
+        "  file test_backward.py: pass=1 fail=0 declined=0",
+        "  file test_forward.py: pass=1 fail=0 declined=0",
+        "  mode hipdnn: pass=2 fail=0 declined=0",
+    ]
+    assert "bwd B: pass=2 fail=0 declined=0" in text  # the first table keeps its lines
+
+
+# --------------------------------------------------------------------------------- skip classes
+
+
+@pytest.mark.parametrize(
+    "reason, klass",
+    [
+        ("hdim > 192 AITER ASM kernel does not exist.", "kernel-limit"),
+        ("hdim < 64 AITER ASM kernel does not exist.", "kernel-limit"),
+        ("Skip hdim > 256 on gfx11 arch due to register pressure.", "kernel-limit"),
+        ("Bias is not supported in AITER ASM backend", "kernel-limit"),
+        ("GQA is not exposed in AITER ASM backend.", "kernel-limit"),
+        ("hdim_qk != hdim_vo is not exposed by AITER ASM backend.", "kernel-limit"),
+        ("Dropout unsupported in AITER ASM backend for now. Need adjust FWD PRNG function", "kernel-limit"),
+        ("AITER ASM does not support matrix bias", "kernel-limit"),
+        ("_scaled_dot_product_attention: Explicit attn_mask should not be set when is_causal=True", "api-rule"),
+        ("Skip large UT with bias to avoid OOM", "resource"),
+        ("Skip large tests (qkd > 4096 * 8192 * 256) due to low VRAM.", "resource"),
+        ("[Adiffs] Skip due to known OOM.", "resource"),
+        ("SKIP_BWD=1 excludes backward checks", "other"),
+        ("something unforeseen", "other"),
+    ],
+)  # fmt: skip
+def test_a_native_skip_reason_is_classed_from_the_vendored_skip_messages(reason, klass):
+    assert reconcile.skip_class(reason) == klass
+
+
+def test_every_vendored_skip_message_is_classed_and_the_summary_breaks_native_skips_down():
+    import re
+    from pathlib import Path
+
+    vendor = Path(reconcile.__file__).parent / "vendor"
+    messages = {
+        m
+        for p in vendor.rglob("*.py")
+        for m in re.findall(r"pytest\.skip\(\s*[\"']([^\"']+)[\"']", p.read_text())
+    }
+    assert messages  # the vendored tests carry skip guards
+    other = {m for m in messages if reconcile.skip_class(m) == "other"}
+    assert other == {"SKIP_BWD=1 excludes backward checks"}
+    rows = [
+        row(
+            "a::1", "native-skip", reason="hdim > 192 AITER ASM kernel does not exist."
+        ),
+        row("a::2", "native-skip", reason="Skip large UT with bias to avoid OOM"),
+        row("a::3", "native-skip", reason="Skip large UT with bias to avoid OOM"),
+        row("a::4", "pass"),
+    ]
+    lines = reconcile.summarize(rows).splitlines()
+    at = lines.index("native-skip by class:")
+    assert lines[at + 1 : at + 3] == ["  kernel-limit 1", "  resource     2"]

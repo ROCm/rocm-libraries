@@ -33,11 +33,14 @@ Load it with ``-p hipdnn_aotriton_plugin`` (``aotriton/`` on PYTHONPATH). It
 * supports ``--shard i/N`` (1-based), ``--hipdnn-nodeids-file`` and ``--fake always-decline``.
 """
 
+import ast
 import dataclasses
+import inspect
 import json
 import os
 import re
 import sys
+import textwrap
 import threading
 from pathlib import Path
 
@@ -159,16 +162,42 @@ def _candidate_text(entries, direction):
 _FORWARD_COMPARISON = re.compile(r"\bForward pass\b")
 
 
+def _ran_on_hipdnn(state):
+    return bool(state) and state[0] in ("hipdnn", "error")
+
+
+def _out_of_memory(excinfo):
+    """The message of the out-of-memory error behind ``excinfo`` (through ``__cause__`` /
+    ``__context__``): a ``torch.OutOfMemoryError``, or a ``RuntimeError`` whose text says
+    ``out of memory`` or ``hipErrorOutOfMemory``; None when there is none."""
+    exc, seen = excinfo.value if excinfo else None, set()
+    while exc is not None and id(exc) not in seen:
+        seen.add(id(exc))
+        text = str(exc)
+        if any(c.__name__ == "OutOfMemoryError" for c in type(exc).__mro__) or (
+            isinstance(exc, RuntimeError)
+            and ("out of memory" in text or "hipErrorOutOfMemory" in text)
+        ):
+            return text
+        exc = exc.__cause__ or exc.__context__
+    return None
+
+
 def _fail_side(nodeid, excinfo, folded, marker=None):
     """The direction a failure is charged to: the direction whose call raised (kind ``error``);
     for a backward case whose backward was never recorded, the in-flight marker's direction when
     one was written for the case; else ``fwd`` when the failing assertion is the vendored forward
-    comparison, the case is a forward case, or the backward never ran; else ``bwd``."""
+    comparison, the case is a forward case, or the backward never ran; else ``bwd``. A backward
+    case whose backward ran on hipDNN while its forward did not (reference forward, or none) is
+    charged to ``bwd`` whatever failed: the vendored forward comparison runs after the backward,
+    and a hipDNN backward can corrupt O."""
     for direction in ("fwd", "bwd"):
         if folded[direction] and folded[direction][0] == "error":
             return direction
     if reconcile.direction_of(nodeid) == "fwd":
         return "fwd"
+    if _ran_on_hipdnn(folded["bwd"]) and not _ran_on_hipdnn(folded["fwd"]):
+        return "bwd"
     if folded["bwd"] is None:
         direction = (marker or {}).get("direction")
         return direction if direction in ("fwd", "bwd") else "fwd"
@@ -320,6 +349,14 @@ def _make_row(item, call, report):
                 if call.excinfo
                 else _one_line(report.longrepr)
             )
+            oom = _out_of_memory(call.excinfo)
+            if oom is not None and not any(_ran_on_hipdnn(s) for s in (fwd, bwd)):
+                # the pytest report stays a failure; the row says the case never ran
+                row.update(
+                    outcome="not-run",
+                    mode="",
+                    reason=_one_line(f"out of memory: {oom}"),
+                )
     if row["outcome"] == "fail":
         _describe_failure(item, call, row, folded)
     return row
@@ -568,7 +605,7 @@ def _install_wrappers(fake):
 # ---------------------------------------------------------------------------- layout modes
 
 _WRAPPED = "_sdpa_conformance_inner"
-_FLIP_ARG = 9  # position of `storage_flip` in `_do_test_op_bwd`'s `args`
+_FLIP_NAME = "storage_flip"
 
 
 def layout_mode():
@@ -640,18 +677,56 @@ def storage_layout_for(mode, storage_flip):
     return StorageLayout(perms)
 
 
+def flip_index(func):
+    """Position of ``storage_flip`` in the ``args`` tuple ``func`` takes: the index of that name in
+    the tuple-unpacking assignment of ``args`` in its source (the vendored function takes
+    ``(request, args, device_str)`` and unpacks ``args`` by name). Raises ``RuntimeError``
+    naming ``func`` when it has no ``args`` parameter or does not unpack ``storage_flip`` from it,
+    so a vendored refresh that moves or renames the argument fails loudly instead of rewriting
+    the wrong one."""
+    name = getattr(func, "__qualname__", repr(func))
+    if "args" not in inspect.signature(func).parameters:
+        raise RuntimeError(f"{name} has no `args` parameter to find {_FLIP_NAME!r} in")
+    try:
+        tree = ast.parse(textwrap.dedent(inspect.getsource(func)))
+    except (OSError, TypeError, SyntaxError) as exc:
+        raise RuntimeError(
+            f"{name}: cannot read the source to find {_FLIP_NAME!r}: {exc}"
+        ) from exc
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.Assign)
+            and isinstance(node.value, ast.Name)
+            and node.value.id == "args"
+            and len(node.targets) == 1
+            and isinstance(node.targets[0], ast.Tuple)
+        ):
+            names = [
+                e.id if isinstance(e, ast.Name) else None for e in node.targets[0].elts
+            ]
+            if _FLIP_NAME in names:
+                return names.index(_FLIP_NAME)
+    raise RuntimeError(
+        f"{name} does not unpack {_FLIP_NAME!r} from its `args` tuple; the layout modes cannot "
+        f"find the storage_flip argument (vendored AOTriton changed?)"
+    )
+
+
 def make_do_test_op_bwd(inner, mode):
     """``_do_test_op_bwd`` that turns a bool/tuple ``storage_flip`` into ``storage_layout_for``;
-    a ``StorageLayout`` already in ``args`` is left alone."""
+    a ``StorageLayout`` already in ``args`` is left alone. The argument is found by name
+    (``flip_index``) when the wrapper is made."""
     from _common_test import StorageLayout
 
+    index = flip_index(inner)
+
     def _do_test_op_bwd(request, args, device_str="cuda"):
-        flip = args[_FLIP_ARG]
+        flip = args[index]
         if not isinstance(flip, StorageLayout):
             args = (
-                *args[:_FLIP_ARG],
+                *args[:index],
                 storage_layout_for(mode, flip),
-                *args[_FLIP_ARG + 1 :],
+                *args[index + 1 :],
             )
         return inner(request, args, device_str)
 

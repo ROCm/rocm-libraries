@@ -71,6 +71,12 @@ like their inputs), `efficient` stores O, dO, dQ, dK and dV BSHD (dB like the bi
 the vendored suite's own layouts (O and dO BHSD). q/k/v/b keep the vendored cases' own layouts in every
 mode. The mode reaches the pytest workers as `HIPDNN_SDPA_CONFORMANCE_LAYOUT_MODE`, appears in the pytest
 header, and `--all-engines` pass 2 inherits it. Varlen cases are unaffected.
+Layout coverage differs by mode: the default `pytorch` never runs AOTriton's own mix (BSHD Q/K/V with BHSD
+O/dO), because O and dO follow Q; `aotriton` runs that mix but never BSHD O/dO; `efficient` always runs BSHD
+O/dO and never BHSD O/dO. A full sweep runs both `pytorch` and `aotriton`.
+The layout wrappers find the `storage_flip` argument of the vendored `_do_test_op_bwd` by name (`flip_index`); a
+vendored refresh that drops or renames it fails with a `RuntimeError` naming the function instead of changing a
+wrong argument.
 `--fwd-no-stats` (with `--suite forward`) runs the forward without Stats, so engines that decline
 when Stats are requested can be exercised; AOTriton's M buffer is filled with zeros (its wrapper rejects NaN in M) and
 `test_forward.py` compares only O. The runner refuses it for any collection that includes
@@ -89,11 +95,17 @@ The forward x backward pair passes are opt-in (`--pairs`, only together with `--
 the runner exits 2 with a usage error): by default every pass pins one direction, so a
 failure names the engine of that direction. The reference-forward passes always run.
 
+A `ref-fwd` case, and every `refwd/` pass, never tests the hand-off from hipDNN's forward to its backward: the
+backward consumes the O and Stats of a reference forward. Only `--pairs` runs a hipDNN forward engine into a
+hipDNN backward engine. The recommended run is `--all-engines --pairs`.
+
 Kernel ids are opt-in too. `--kernel-ids` exports `HIPDNN_SDPA_KERNEL_LOG=1` to every pass; the plugin then
 installs `hipdnn_sdpa`'s backend log callback and fills `fwd_kernel` / `bwd_kernel`. The callback raises the
-backend log level to INFO and forces ingestor applicability inline (`HIPDNN_APPLICABILITY_MIN_OFFLOAD_VARIANTS`),
-which changes how the product runs, so by default it is not installed and the kernel columns stay empty (nothing
-downstream needs them; the engine that faulted is recorded regardless). `--exhaustive` implies `--kernel-ids`.
+backend log level to INFO and sets `HIPDNN_APPLICABILITY_MIN_OFFLOAD_VARIANTS` to `1000000000`, which moves
+hip-kernel-provider's applicability check from its worker threads into the calling thread (the callback needs
+the GIL the calling thread holds while it waits for them). Engine choice and results are unchanged. By default
+the callback is not installed and the kernel columns stay empty (nothing downstream needs them; the engine that
+faulted is recorded regardless). `--exhaustive` implies `--kernel-ids`.
 
 `--exhaustive` tests every kernel (candidate) of an engine, not only the one it picks. Candidates come from
 `hipdnn_bench enumerate --graph <json> --engine-name <engine> --plugin-dir <prefix>/lib/hipdnn_plugins/engines`
@@ -172,9 +184,11 @@ Outputs, in `<out>/` (default `./sdpa_conformance_results/<arch>/<run>/shard-<I>
 fwd_engines,bwd_engines,fwd_kernel,bwd_kernel,fail_side,stage,repro,fwd_candidate,bwd_candidate`, flushed per row; the engine
 lists hold the applicable engines in heuristic rank order, `;`-joined, for a direction hipDNN planned
 unpinned; `*_kernel` is the ingestor kernel id; `fail_side` is `fwd` or `bwd` for a `fail` (the direction whose
-hipDNN call raised; else the vendored forward comparison, a forward case or a backward that never ran count as `fwd`)
-and the direction in flight for a `crash`; `stage` is `build` or `execute`; `repro` is the repro directory under
-`<out>`).
+hipDNN call raised; else, for a backward case whose backward ran on hipDNN while its forward did not (reference
+forward, or none), `bwd` for any failure, the vendored forward comparison included, since it runs after the
+backward and a hipDNN backward can corrupt O; else the vendored forward comparison, a forward case or a backward
+that never ran count as `fwd`) and the direction in flight for a `crash`; `stage` is `build` or `execute`; `repro`
+is the repro directory under `<out>`).
 With `--all-engines`, each pass writes the same files under `all-engines/`. After a run, or a killed one:
 
 ```
@@ -183,18 +197,36 @@ python aotriton/reconcile.py <arch>/<run> --out <arch>/<run>/reconciled.csv
 
 `<arch>/<run>` holds one `<suite>-<k>of<N>/` directory per shard (`default-3of16`; `shard-<k>of<N>` too).
 `reconcile.py <results>/<run> --report [--shards-file FILE] [--baseline FILE]` prints the whole run: per-shard
-accounting (`FILE`: `<suite> <k> <N>` per line, so a shard without a directory shows as missing), outcome totals,
-passes and per-(direction, engine) counts over every shard, the engines no case passed with their first decline
-reasons, every `fail` / `crash` with engine, side, stage and repro path, and the failing node ids new to the run or
-fixed against `--baseline` (one node id per line): "no longer failing" counts only the baseline ids whose outcome here
-is `pass`, `declined`, `native-skip` or `no-hipdnn`; the rest (`not-run`, not in this run, a `fail` without engine) are
-listed under "not confirmed fixed" with their outcome. A `== duplicate node ids` section follows the shard accounting:
+accounting (`FILE`: `<suite> <k> <N>` per line, so a shard without a directory shows as missing), outcome totals
+(with `native-skip by class:` `kernel-limit` (AOTriton kernel limits such as hdim or register pressure, a missing
+AITER ASM kernel), `api-rule` (an explicit attn_mask with is_causal), `resource` (low-VRAM and OOM guards) and
+`other`, from each skip's reason), passes and per-(direction, engine) counts over every shard (a passing row credits
+the engines of its `fwd` and `bwd` columns, a failing or crashed row only the failing side; `== engines by mode and
+test file` splits them by `mode`, `hipdnn` against `ref-fwd`, and by test file, and `--engines` prints it too), the
+engines no case passed with their first decline reasons, every `fail` / `crash` row of every pass with its engine
+(the one served on `fail_side`, else the other side's, else `-`), side, stage and repro path, and the failing node
+ids new to the run or fixed against `--baseline` (one node id per line): "no longer failing" counts only the
+baseline ids whose outcome here is `pass`; every other id (`declined`, `native-skip`, `no-hipdnn`, `not-run`, not in
+this run) is listed under "not confirmed fixed" with its outcome. `reconcile.py <run> --compare <other run>` (the
+earlier run) compares the two runs case by case: the cases in both and only in each, every outcome transition with its
+count and example node ids (`pass -> declined` and `fail -> declined` included), and the cases whose served engine
+changed with the same outcome. A `== duplicate node ids` section follows the shard accounting:
 every node id recorded by more than one shard directory, with the directories (the first row is kept; a run directory
 holds each case once), or `none`. `completion.py <results>/<run> [--shards-file FILE]` lists the
 shards whose `--resume` still has work (`<suite> <k> <N>` lines on stdout, reasons on stderr).
 
 `mode` is `hipdnn` or `ref-fwd` (hipDNN forward declined; a reference forward fed the hipDNN
 backward). A `ref-fwd` pass proves the backward only.
+
+A case that fails with an out-of-memory error (`torch.OutOfMemoryError`, or a `RuntimeError` whose text contains
+`out of memory` or `hipErrorOutOfMemory`) before any hipDNN call ran is recorded as `not-run` with reason
+`out of memory: <message>`, not `fail`; pytest still reports the failure. An out-of-memory error after a hipDNN call
+ran stays `fail`. `--resume` does not rerun a `not-run` row.
+
+Two ways the shim differs from AOTriton's own `aotriton_flash.py`: with dropout, `encoded_softmax` comes from this
+tool's own Philox mask (`hipdnn_sdpa.philox_mask`), not from an AOTriton kernel; and the stubbed
+`pyaotriton.hipGetLastError` always returns `hipSuccess`, so the vendored post-call error check and its
+illegal-address handlers never fire.
 
 When a hipDNN call raises anything but a decline, the row is a `fail` (never `declined`; mode `hipdnn`, or `ref-fwd`
 behind a reference forward), `fail_side` is the direction that raised, its `fwd`/`bwd` column reads `error:<engine>`
