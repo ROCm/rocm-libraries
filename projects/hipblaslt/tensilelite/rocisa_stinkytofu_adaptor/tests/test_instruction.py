@@ -288,6 +288,9 @@ from rocisa_stinkytofu_adaptor.instruction import (  # noqa: E402
     SWaitAlu,
     SSchedulingFence,
     _to_stinky_register,
+    VDualOp,
+    dualOrSingle,
+    vopdCheck,
 )
 
 
@@ -361,6 +364,24 @@ class TestInstructionBase(unittest.TestCase):
 # ===========================================================================
 # CommonInstruction -- minimal shape that other shims will inherit from.
 # ===========================================================================
+
+
+class TestVDualOp(unittest.TestCase):
+    """StinkyTofu only targets gfx1250, where VDualOp does not pair yet."""
+
+    def test_text_matches_native(self):
+        # Same expected text as rocisa/test/test_vopd.py::test_vdual_op_emission.
+        inst = VDualOp("mul_f32", vgpr(0), vgpr(2), vgpr(4), "add_nc_u32", vgpr(1), vgpr(3), vgpr(5))
+        self.assertEqual(str(inst).rstrip(), "v_dual_mul_f32 v0, v2, v4 :: v_dual_add_nc_u32 v1, v3, v5")
+
+    def test_never_pairs(self):
+        self.assertNotEqual(
+            vopdCheck("mul_f32", vgpr(0), vgpr(2), vgpr(4), "add_f32", vgpr(1), vgpr(3), vgpr(5)), "")
+        first, second = VMulF32(vgpr(0), vgpr(2), vgpr(4)), VAddF32(vgpr(1), vgpr(3), vgpr(5))
+        out = dualOrSingle(first, second)
+        self.assertEqual(len(out), 2)
+        self.assertIs(out[0], first)
+        self.assertIs(out[1], second)
 
 
 class TestCommonInstructionFields(unittest.TestCase):
