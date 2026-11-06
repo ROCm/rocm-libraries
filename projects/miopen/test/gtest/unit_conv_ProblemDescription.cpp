@@ -493,8 +493,9 @@ TEST(CPU_ConvProblemDescriptionKeyOrder_NONE, CastDeterministicStrides)
         miopenHalf,
         miopenTensorNCHW,
         {2, 8, 8, 8}}.GetTensorDescriptor();
-    in.SetCastType(miopenFloat8_fnuz);
-    weights.SetCastType(miopenFloat8_fnuz);
+    // TensorDescriptor::SetCastType is not exported, so use the public API.
+    ASSERT_EQ(miopenSetTensorCastType(&in, miopenFloat8_fnuz), miopenStatusSuccess);
+    ASSERT_EQ(miopenSetTensorCastType(&weights, miopenFloat8_fnuz), miopenStatusSuccess);
     const auto conv =
         miopen::unit_tests::ConvolutionDescriptorParams{{1, 1}, {1, 1}, {1, 1}, 1, true}
             .GetConvolutionDescriptor();
