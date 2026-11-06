@@ -22,8 +22,8 @@ add_executable(
     $<$<BOOL:${HIPBLASLTPROVIDER_ENABLE_MX_GEMM}>:engines/plans/TestHipblasltMxMatmulPlanBuilder.cpp>
     engines/TestPlanBuilderEngine.cpp
     main.cpp
-    TestPlanBuilderEngineManager.cpp
-    TestPlanBuilderEnginePluginApi.cpp
+    TestHipblasltEngineManager.cpp
+    TestHipblasltEnginePluginApi.cpp
     TestHipblasltHandleFactory.cpp
     TestHipblasltHipdnnEnginePluginHandle.cpp
     TestHipblasltHipdnnPluginExecutionContext.cpp
