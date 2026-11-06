@@ -29,7 +29,6 @@ include(GenerateExportHeader)
 include(CMakeDependentOption)
 
 include(fetch_rocm_cmake)
-include(hipblaslt_materialize_monorepo_paths)
 include(hipblaslt_python)
 include(hipblaslt_target_configure_sanitizers)
 include(tensilelite_supported_architectures)
@@ -377,34 +376,7 @@ if(_hipblaslt_hostnumerics_enabled
     set(_hipblaslt_hostnumerics_source
         "${CMAKE_CURRENT_SOURCE_DIR}/../../shared/hostnumerics"
     )
-    if(NOT EXISTS "${_hipblaslt_hostnumerics_source}/CMakeLists.txt")
-        set(_hipblaslt_hostnumerics_components Operations)
-        if(HIPBLASLT_ENABLE_CLIENT)
-            list(APPEND _hipblaslt_hostnumerics_components BLAS)
-        endif()
-        list(APPEND _hipblaslt_hostnumerics_components AMDGPULayout)
-        find_package(
-            HostNumerics
-            CONFIG
-            QUIET
-            COMPONENTS ${_hipblaslt_hostnumerics_components}
-        )
-    endif()
-    if(NOT TARGET roc::hostnumerics
-            AND NOT EXISTS
-                "${_hipblaslt_hostnumerics_source}/CMakeLists.txt")
-        hipblaslt_materialize_monorepo_paths(
-            _hipblaslt_materialized_root
-            shared/hostnumerics
-        )
-        if(_hipblaslt_materialized_root)
-            set(_hipblaslt_hostnumerics_source
-                "${_hipblaslt_materialized_root}/shared/hostnumerics"
-            )
-        endif()
-    endif()
-    if(NOT TARGET roc::hostnumerics
-            AND EXISTS "${_hipblaslt_hostnumerics_source}/CMakeLists.txt")
+    if(EXISTS "${_hipblaslt_hostnumerics_source}/CMakeLists.txt")
         block(SCOPE_FOR VARIABLES)
             set(HOSTNUMERICS_BUILD_TESTING OFF)
             set(HOSTNUMERICS_BUILD_BLAS_BACKEND ${HIPBLASLT_ENABLE_CLIENT})
@@ -414,13 +386,16 @@ if(_hipblaslt_hostnumerics_enabled
                 EXCLUDE_FROM_ALL
             )
         endblock()
-    endif()
-    if(NOT TARGET roc::hostnumerics)
-        message(FATAL_ERROR
-            "hipBLASLt requires the standalone HostNumerics component. "
-            "Include shared/hostnumerics in a monorepo sparse checkout, "
-            "configure from a Git checkout that can materialize that path, or "
-            "install the HostNumerics package and add it to CMAKE_PREFIX_PATH."
+    else()
+        set(_hipblaslt_hostnumerics_components Operations AMDGPULayout)
+        if(HIPBLASLT_ENABLE_CLIENT)
+            list(APPEND _hipblaslt_hostnumerics_components BLAS)
+        endif()
+        find_package(
+            HostNumerics
+            CONFIG
+            REQUIRED
+            COMPONENTS ${_hipblaslt_hostnumerics_components}
         )
     endif()
 endif()
@@ -572,7 +547,6 @@ block(SCOPE_FOR VARIABLES)
     unset(CPACK_DEBIAN_DEVEL_PACKAGE_DEPENDS)
     unset(CPACK_RPM_DEVEL_PACKAGE_REQUIRES)
     set(TENSILELITE_ENABLE_YAML "${HIPBLASLT_ENABLE_YAML}")
-    set(TENSILELITE_ENABLE_MXDATAGENERATOR "${HIPBLASLT_ENABLE_MXDATAGENERATOR}")
     set(BUILD_SHARED_LIBS "${TENSILELITE_BUILD_SHARED_LIBS}")
     add_subdirectory(tensilelite)
 endblock()
