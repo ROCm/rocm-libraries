@@ -33,23 +33,10 @@ filters = ["*_SdpaBackward_*.*_bfp16_*", "*_SdpaBackward_*.*_bf16_*", "*_SdpaBac
 atol = 1e-2
 rtol = 1e-2
 
-# bf16 dS rounding at a non-default scale exceeds the elementwise bound; not expected for typical scales. Revisit when the bound accounts for it.
-# ap019 (gfx950): observed on gfx950 (worst error 1.19e-2 of the 1e-2 bound); the harness scopes an entry by case id only.
+# Class U (plan sdpa-bwd.md §6.1: unscaled or high-spread logits; the case id ends `_tolu`): |dS| reaches 3 to 4.5, and rounding dS to bf16 before the
+# dQ/dK MFMA moves a gradient element by up to 0.026 (model, up to 0.035 by the worst-case bound), above the 1e-2 bound. atol 4e-2, rtol 1.6e-2 (two bf16 ulps).
+# The tolerance of every other bf16 case is unchanged.
 [[tolerance_overrides]]
-filters = ["*_SdpaBackward_Default.ap019_b2h3k3v3_40x72_d128_bfp16_tlw16_bshd_sunset_tolu"]
-atol = 2e-2
-rtol = 2e-2
-
-# bf16 dS rounding at a non-default scale exceeds the elementwise bound; not expected for typical scales. Revisit when the bound accounts for it.
-# s37 (gfx1100): observed on gfx1100 (worst error 2.7e-2 on 18 dQ elements); the harness scopes an entry by case id only.
-[[tolerance_overrides]]
-filters = ["*_SdpaBackward_Default.s37_b2h3k3v3_72x120_d128_bfp16_none_s1_tolu"]
-atol = 3e-2
-rtol = 3e-2
-
-# bf16 dS rounding at a non-default scale exceeds the elementwise bound; not expected for typical scales. Revisit when the bound accounts for it.
-# def06b (gfx1100): observed on gfx1100 (worst error 1.4e-2 on 1 dK element); the harness scopes an entry by case id only.
-[[tolerance_overrides]]
-filters = ["*_SdpaBackward_Default.def06b_b1h2k2v2_128x128_d128_bfp16_tlcausal_sm1p2_tolu"]
-atol = 2e-2
-rtol = 2e-2
+filters = ["*_SdpaBackward_*.*_bfp16_*_tolu"]
+atol = 4e-2
+rtol = 1.6e-2
