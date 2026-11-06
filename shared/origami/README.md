@@ -16,6 +16,7 @@
   - [C++](#build-and-install-origami-c)
   - [CMake Options](#cmake-options)
   - [Origami Tests](#origami-tests)
+  - [Neural Network (NN) Backend](#neural-network-nn-backend)
 - [Debug Logging](#debug-logging)
   - [Text Log](#text-log)
   - [CSV Log](#csv-log)
@@ -312,6 +313,14 @@ Run selector tests (requires torch):
 ```bash
 python -m pytest tests/test_selector.py -v
 ```
+
+## Neural Network (NN) Backend
+
+`origami::rank_configs` takes a `rank_options_t` that chooses how the candidates are ranked: `inference_mode_t::analytical` (the default), `nn` (an ML backend only; throws if no model resolves) or `nn_fallback` (an ML backend when a model resolves, else analytical). `nn_backend_t` picks the backend; `auto_select` resolves `nn_model`, then the caller's `library_models`, then the session default. No full-ranking ML backend is built into this tree yet, so `nn` throws and `nn_fallback` ranks analytically.
+
+Models are registered by handle (`origami/nn/nn.hpp`: `load_model_by_index`, `load_models_for_logic`, `model_info`, `set_default_model`, `default_model`, `unload_model`) and found through `origami_nn_index` files, which map a hipBLASLt logic file to its model (`data/nn/README.md`). hipBLASLt colocates `data/nn/<backend>/<arch>/` next to its kernel library and passes each `PredictionMatching` row's models in `rank_options_t::library_models`.
+
+The `[nn]` tests of `origami-tests` cover the options and the registry.
 
 ## Debug Logging
 

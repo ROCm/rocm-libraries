@@ -45,6 +45,26 @@ namespace TensileLite
             using Library = ProblemPredictionLibrary<MyProblem, MySolution>;
             using iot     = IOTraits<IO>;
 
+            static std::string logic_stem_from_path(const std::string& path)
+            {
+                std::string stem     = path;
+                const auto  slashPos = stem.find_last_of("/\\");
+                if(slashPos != std::string::npos)
+                    stem = stem.substr(slashPos + 1);
+                const auto periodPos = stem.find('.');
+                if(periodPos != std::string::npos)
+                    stem = stem.substr(0, periodPos);
+                return stem;
+            }
+
+            static std::string directory_from_path(const std::string& path)
+            {
+                const auto slashPos = path.find_last_of("/\\");
+                if(slashPos == std::string::npos)
+                    return ".";
+                return path.substr(0, slashPos);
+            }
+
             static void mapping(IO& io, Library& lib)
             {
                 auto ctx = static_cast<LibraryIOContext<MySolution>*>(iot::getContext(io));
