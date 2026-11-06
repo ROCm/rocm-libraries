@@ -876,12 +876,17 @@ bool rocke_gemm_universal_is_valid_spec(const rocke_gemm_universal_spec_t* spec,
                            atom_k,
                            arch);
         }
-        /* 'mem' only: the C++ engine does not emit the wmma_v1 schedule
-         * (Python's SchedulePolicy for 'wmma_v1'), so it rejects it rather than
-         * build a different kernel under the same name. */
-        if(strcmp(spec->trait.pipeline, "mem") != 0)
+        /* 'mem', plus 'compv4' on gfx1201 (the double-buffered K loop; its
+         * WMMA phase reads the LDS half the loop filled). The C++ engine does
+         * not emit the wmma_v1 schedule (Python's SchedulePolicy for
+         * 'wmma_v1'), so it rejects it rather than build a different kernel
+         * under the same name. */
+        bool is_gfx1201 = strcmp(arch, "gfx1201") == 0;
+        if(strcmp(spec->trait.pipeline, "mem") != 0
+           && !(is_gfx1201 && strcmp(spec->trait.pipeline, "compv4") == 0))
         {
-            CK_GEMM_REJECT("WMMA path supports only the 'mem' pipeline (got '%s') on %s",
+            CK_GEMM_REJECT("WMMA path supports only the %s pipeline (got '%s') on %s",
+                           is_gfx1201 ? "'mem' or 'compv4'" : "'mem'",
                            spec->trait.pipeline,
                            arch);
         }
@@ -917,15 +922,13 @@ bool rocke_gemm_universal_is_valid_spec(const rocke_gemm_universal_spec_t* spec,
         {
             CK_GEMM_REJECT("WMMA path does not support chiplet_swizzle on %s", arch);
         }
-        /* lds_swizzle is rejected for the whole family, not only the load paths
-         * that structurally cannot express it. It XORs the LDS column on the
-         * store side, and the inverse is applied on the MFMA read path but not
-         * the WMMA one, so where it emits at all it writes one address and
-         * reads another: fast, plausible, numerically wrong. Under TDM it emits
-         * nothing instead. It is bit-exact on the CDNA MFMA path, hence family
-         * scope rather than a global gate. Every WMMA target is affected:
-         * gfx1151 returns wrong outputs with it too. */
-        if(spec->trait.lds_swizzle)
+        /* lds_swizzle XORs the LDS column on the store side; the WMMA fragment
+         * read applies the same XOR, keyed on the same parity-free row. That
+         * pairing is verified on silicon on gfx1201 only, so the knob is
+         * admitted there and rejected on the other WMMA targets until they are
+         * verified too. gfx1201 has neither TDM nor fp8 A/B, the two cases
+         * where no element-indexed store-side XOR exists. */
+        if(spec->trait.lds_swizzle && strcmp(arch, "gfx1201") != 0)
         {
             CK_GEMM_REJECT("WMMA path does not support lds_swizzle on %s", arch);
         }
