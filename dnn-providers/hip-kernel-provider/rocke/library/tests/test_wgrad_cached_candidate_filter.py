@@ -32,26 +32,23 @@ def _candidates():
     ]
 
 
-def test_auto_and_always_preserve_every_candidate_regardless_of_parity():
+def test_auto_and_always_preserve_every_candidate():
+    # The filter takes no problem/C-groups argument -- it cannot see parity --
+    # so "auto" and "always" are expected to behave identically here.
     for mode in ("auto", "always"):
-        for cpg_groups_is_odd in (False, True):
-            candidates = _candidates()
-            filtered = _filter_wgrad_two_stage_candidates(candidates, mode)
-            assert filtered == candidates, (mode, cpg_groups_is_odd)
-            assert any(c[0].two_stage for c in filtered), (mode, cpg_groups_is_odd)
-            assert any(not c[0].two_stage for c in filtered), (
-                mode,
-                cpg_groups_is_odd,
-            )
+        candidates = _candidates()
+        filtered = _filter_wgrad_two_stage_candidates(candidates, mode)
+        assert filtered == candidates, mode
+        assert any(c[0].two_stage for c in filtered), mode
+        assert any(not c[0].two_stage for c in filtered), mode
 
 
 def test_never_drops_only_the_two_stage_candidates():
-    for cpg_groups_is_odd in (False, True):
-        candidates = _candidates()
-        filtered = _filter_wgrad_two_stage_candidates(candidates, "never")
-        assert all(not c[0].two_stage for c in filtered), cpg_groups_is_odd
-        assert len(filtered) == 1
-        assert filtered[0] is candidates[0]
+    candidates = _candidates()
+    filtered = _filter_wgrad_two_stage_candidates(candidates, "never")
+    assert all(not c[0].two_stage for c in filtered)
+    assert len(filtered) == 1
+    assert filtered[0] is candidates[0]
 
 
 def test_never_leaves_an_all_atomic_candidate_list_untouched():

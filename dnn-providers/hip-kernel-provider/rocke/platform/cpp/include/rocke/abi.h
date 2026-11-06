@@ -99,8 +99,9 @@ extern "C" {
  *    signature.
  * 9: rocke_block_scale_gemm_spec_t lost per_input_row at its end, which
  *    changes its size.
- * 10: rocke_implicit_gemm_conv_wgrad_spec_t gained register_prefetch at its
- *     end, which changes its size. */
+ * 10: rocke_implicit_gemm_conv_wgrad_spec_t gained register_prefetch in its
+ *     old tail padding: size unchanged, but an old caller leaves that byte
+ *     unset. */
 #define ROCKE_ABI_VERSION 10
 
 /* Wire ABI: the CBOR recipe/bundle/guard vocabulary this engine understands.
