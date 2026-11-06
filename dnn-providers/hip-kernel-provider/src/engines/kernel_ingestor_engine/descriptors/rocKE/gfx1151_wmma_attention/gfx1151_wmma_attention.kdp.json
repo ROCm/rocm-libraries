@@ -2382,456 +2382,6 @@
     },
     {
       "version": "1.0",
-      "id": "ecb75f8f-2ef5-4a1d-9c6b-6303336652c4",
-      "name": "wmma_prefill_paged.fp16_d96v96_p16_m128_denseq_used",
-      "kernel_source": {
-        "kind": "rocke",
-        "source": "kernels/gfx1151/wmma_fmha_fwd_v2.py",
-        "builder": "build_wmma_fmha_fwd_v2",
-        "target": "generic",
-        "spec": {
-          "dtype": "fp16",
-          "head_dim": 96,
-          "head_dim_v": 96,
-          "mask": "causal",
-          "layout": "paged",
-          "page_block_size": 16,
-          "dense_q": true,
-          "seqused_q": true
-        }
-      },
-      "metadata": {
-        "dtype": "FP16",
-        "kind": "prefill",
-        "head_size": 96,
-        "head_size_v": 96,
-        "mask_mode": "causal",
-        "bias": "none",
-        "block_size": 256,
-        "block_m": 128,
-        "dv_split": 1,
-        "layout": "paged",
-        "page_block_size": 16,
-        "dense_q": 1,
-        "seqused_q": 1,
-        "sinks": 0
-      },
-      "priority": 0
-    },
-    {
-      "version": "1.0",
-      "id": "e6c49281-e4ff-4656-8e2a-79c98f6db78b",
-      "name": "wmma_prefill_paged.fp16_d96v96_p16_m128_raggedq",
-      "kernel_source": {
-        "kind": "rocke",
-        "source": "kernels/gfx1151/wmma_fmha_fwd_v2.py",
-        "builder": "build_wmma_fmha_fwd_v2",
-        "target": "generic",
-        "spec": {
-          "dtype": "fp16",
-          "head_dim": 96,
-          "head_dim_v": 96,
-          "mask": "causal",
-          "layout": "paged",
-          "page_block_size": 16,
-          "seqused_q": true
-        }
-      },
-      "metadata": {
-        "dtype": "FP16",
-        "kind": "prefill",
-        "head_size": 96,
-        "head_size_v": 96,
-        "mask_mode": "causal",
-        "bias": "none",
-        "block_size": 256,
-        "block_m": 128,
-        "dv_split": 1,
-        "layout": "paged",
-        "page_block_size": 16,
-        "dense_q": 0,
-        "seqused_q": 1,
-        "sinks": 0
-      },
-      "priority": 0
-    },
-    {
-      "version": "1.0",
-      "id": "98fb960f-8550-4b33-9b82-ed192dd1c3c3",
-      "name": "wmma_prefill_paged.fp16_d96v96_p32_m128_denseq_used",
-      "kernel_source": {
-        "kind": "rocke",
-        "source": "kernels/gfx1151/wmma_fmha_fwd_v2.py",
-        "builder": "build_wmma_fmha_fwd_v2",
-        "target": "generic",
-        "spec": {
-          "dtype": "fp16",
-          "head_dim": 96,
-          "head_dim_v": 96,
-          "mask": "causal",
-          "layout": "paged",
-          "page_block_size": 32,
-          "dense_q": true,
-          "seqused_q": true
-        }
-      },
-      "metadata": {
-        "dtype": "FP16",
-        "kind": "prefill",
-        "head_size": 96,
-        "head_size_v": 96,
-        "mask_mode": "causal",
-        "bias": "none",
-        "block_size": 256,
-        "block_m": 128,
-        "dv_split": 1,
-        "layout": "paged",
-        "page_block_size": 32,
-        "dense_q": 1,
-        "seqused_q": 1,
-        "sinks": 0
-      },
-      "priority": 0
-    },
-    {
-      "version": "1.0",
-      "id": "9faaf783-fa03-426c-8e6c-2d35ee0a3a2e",
-      "name": "wmma_prefill_paged.fp16_d96v96_p32_m128_raggedq",
-      "kernel_source": {
-        "kind": "rocke",
-        "source": "kernels/gfx1151/wmma_fmha_fwd_v2.py",
-        "builder": "build_wmma_fmha_fwd_v2",
-        "target": "generic",
-        "spec": {
-          "dtype": "fp16",
-          "head_dim": 96,
-          "head_dim_v": 96,
-          "mask": "causal",
-          "layout": "paged",
-          "page_block_size": 32,
-          "seqused_q": true
-        }
-      },
-      "metadata": {
-        "dtype": "FP16",
-        "kind": "prefill",
-        "head_size": 96,
-        "head_size_v": 96,
-        "mask_mode": "causal",
-        "bias": "none",
-        "block_size": 256,
-        "block_m": 128,
-        "dv_split": 1,
-        "layout": "paged",
-        "page_block_size": 32,
-        "dense_q": 0,
-        "seqused_q": 1,
-        "sinks": 0
-      },
-      "priority": 0
-    },
-    {
-      "version": "1.0",
-      "id": "11a1dd66-17b7-4ab8-a9cf-362907f45b88",
-      "name": "wmma_prefill_paged.fp16_d96v96_p64_m128_denseq_used",
-      "kernel_source": {
-        "kind": "rocke",
-        "source": "kernels/gfx1151/wmma_fmha_fwd_v2.py",
-        "builder": "build_wmma_fmha_fwd_v2",
-        "target": "generic",
-        "spec": {
-          "dtype": "fp16",
-          "head_dim": 96,
-          "head_dim_v": 96,
-          "mask": "causal",
-          "layout": "paged",
-          "page_block_size": 64,
-          "dense_q": true,
-          "seqused_q": true
-        }
-      },
-      "metadata": {
-        "dtype": "FP16",
-        "kind": "prefill",
-        "head_size": 96,
-        "head_size_v": 96,
-        "mask_mode": "causal",
-        "bias": "none",
-        "block_size": 256,
-        "block_m": 128,
-        "dv_split": 1,
-        "layout": "paged",
-        "page_block_size": 64,
-        "dense_q": 1,
-        "seqused_q": 1,
-        "sinks": 0
-      },
-      "priority": 0
-    },
-    {
-      "version": "1.0",
-      "id": "abab5c90-bc2a-4c58-892f-4c49f9126a21",
-      "name": "wmma_prefill_paged.fp16_d96v96_p64_m128_raggedq",
-      "kernel_source": {
-        "kind": "rocke",
-        "source": "kernels/gfx1151/wmma_fmha_fwd_v2.py",
-        "builder": "build_wmma_fmha_fwd_v2",
-        "target": "generic",
-        "spec": {
-          "dtype": "fp16",
-          "head_dim": 96,
-          "head_dim_v": 96,
-          "mask": "causal",
-          "layout": "paged",
-          "page_block_size": 64,
-          "seqused_q": true
-        }
-      },
-      "metadata": {
-        "dtype": "FP16",
-        "kind": "prefill",
-        "head_size": 96,
-        "head_size_v": 96,
-        "mask_mode": "causal",
-        "bias": "none",
-        "block_size": 256,
-        "block_m": 128,
-        "dv_split": 1,
-        "layout": "paged",
-        "page_block_size": 64,
-        "dense_q": 0,
-        "seqused_q": 1,
-        "sinks": 0
-      },
-      "priority": 0
-    },
-    {
-      "version": "1.0",
-      "id": "3e1b0fc2-0472-4e67-92be-4f0c533a169f",
-      "name": "wmma_prefill_paged.bf16_d96v96_p16_m128_denseq_used",
-      "kernel_source": {
-        "kind": "rocke",
-        "source": "kernels/gfx1151/wmma_fmha_fwd_v2.py",
-        "builder": "build_wmma_fmha_fwd_v2",
-        "target": "generic",
-        "spec": {
-          "dtype": "bf16",
-          "head_dim": 96,
-          "head_dim_v": 96,
-          "mask": "causal",
-          "layout": "paged",
-          "page_block_size": 16,
-          "dense_q": true,
-          "seqused_q": true
-        }
-      },
-      "metadata": {
-        "dtype": "BF16",
-        "kind": "prefill",
-        "head_size": 96,
-        "head_size_v": 96,
-        "mask_mode": "causal",
-        "bias": "none",
-        "block_size": 256,
-        "block_m": 128,
-        "dv_split": 1,
-        "layout": "paged",
-        "page_block_size": 16,
-        "dense_q": 1,
-        "seqused_q": 1,
-        "sinks": 0
-      },
-      "priority": 0
-    },
-    {
-      "version": "1.0",
-      "id": "22fd37f2-265a-48c4-b4e5-4c9464734e22",
-      "name": "wmma_prefill_paged.bf16_d96v96_p16_m128_raggedq",
-      "kernel_source": {
-        "kind": "rocke",
-        "source": "kernels/gfx1151/wmma_fmha_fwd_v2.py",
-        "builder": "build_wmma_fmha_fwd_v2",
-        "target": "generic",
-        "spec": {
-          "dtype": "bf16",
-          "head_dim": 96,
-          "head_dim_v": 96,
-          "mask": "causal",
-          "layout": "paged",
-          "page_block_size": 16,
-          "seqused_q": true
-        }
-      },
-      "metadata": {
-        "dtype": "BF16",
-        "kind": "prefill",
-        "head_size": 96,
-        "head_size_v": 96,
-        "mask_mode": "causal",
-        "bias": "none",
-        "block_size": 256,
-        "block_m": 128,
-        "dv_split": 1,
-        "layout": "paged",
-        "page_block_size": 16,
-        "dense_q": 0,
-        "seqused_q": 1,
-        "sinks": 0
-      },
-      "priority": 0
-    },
-    {
-      "version": "1.0",
-      "id": "28ab9613-e470-4a14-8626-fa7e4c3039ba",
-      "name": "wmma_prefill_paged.bf16_d96v96_p32_m128_denseq_used",
-      "kernel_source": {
-        "kind": "rocke",
-        "source": "kernels/gfx1151/wmma_fmha_fwd_v2.py",
-        "builder": "build_wmma_fmha_fwd_v2",
-        "target": "generic",
-        "spec": {
-          "dtype": "bf16",
-          "head_dim": 96,
-          "head_dim_v": 96,
-          "mask": "causal",
-          "layout": "paged",
-          "page_block_size": 32,
-          "dense_q": true,
-          "seqused_q": true
-        }
-      },
-      "metadata": {
-        "dtype": "BF16",
-        "kind": "prefill",
-        "head_size": 96,
-        "head_size_v": 96,
-        "mask_mode": "causal",
-        "bias": "none",
-        "block_size": 256,
-        "block_m": 128,
-        "dv_split": 1,
-        "layout": "paged",
-        "page_block_size": 32,
-        "dense_q": 1,
-        "seqused_q": 1,
-        "sinks": 0
-      },
-      "priority": 0
-    },
-    {
-      "version": "1.0",
-      "id": "abcb7fc9-b019-4718-8b59-f8cdc8775324",
-      "name": "wmma_prefill_paged.bf16_d96v96_p32_m128_raggedq",
-      "kernel_source": {
-        "kind": "rocke",
-        "source": "kernels/gfx1151/wmma_fmha_fwd_v2.py",
-        "builder": "build_wmma_fmha_fwd_v2",
-        "target": "generic",
-        "spec": {
-          "dtype": "bf16",
-          "head_dim": 96,
-          "head_dim_v": 96,
-          "mask": "causal",
-          "layout": "paged",
-          "page_block_size": 32,
-          "seqused_q": true
-        }
-      },
-      "metadata": {
-        "dtype": "BF16",
-        "kind": "prefill",
-        "head_size": 96,
-        "head_size_v": 96,
-        "mask_mode": "causal",
-        "bias": "none",
-        "block_size": 256,
-        "block_m": 128,
-        "dv_split": 1,
-        "layout": "paged",
-        "page_block_size": 32,
-        "dense_q": 0,
-        "seqused_q": 1,
-        "sinks": 0
-      },
-      "priority": 0
-    },
-    {
-      "version": "1.0",
-      "id": "b5705d35-b8c3-49ae-8aed-ab71c4ea759b",
-      "name": "wmma_prefill_paged.bf16_d96v96_p64_m128_denseq_used",
-      "kernel_source": {
-        "kind": "rocke",
-        "source": "kernels/gfx1151/wmma_fmha_fwd_v2.py",
-        "builder": "build_wmma_fmha_fwd_v2",
-        "target": "generic",
-        "spec": {
-          "dtype": "bf16",
-          "head_dim": 96,
-          "head_dim_v": 96,
-          "mask": "causal",
-          "layout": "paged",
-          "page_block_size": 64,
-          "dense_q": true,
-          "seqused_q": true
-        }
-      },
-      "metadata": {
-        "dtype": "BF16",
-        "kind": "prefill",
-        "head_size": 96,
-        "head_size_v": 96,
-        "mask_mode": "causal",
-        "bias": "none",
-        "block_size": 256,
-        "block_m": 128,
-        "dv_split": 1,
-        "layout": "paged",
-        "page_block_size": 64,
-        "dense_q": 1,
-        "seqused_q": 1,
-        "sinks": 0
-      },
-      "priority": 0
-    },
-    {
-      "version": "1.0",
-      "id": "6e8fbf42-5262-4913-87e7-00d65ffd601a",
-      "name": "wmma_prefill_paged.bf16_d96v96_p64_m128_raggedq",
-      "kernel_source": {
-        "kind": "rocke",
-        "source": "kernels/gfx1151/wmma_fmha_fwd_v2.py",
-        "builder": "build_wmma_fmha_fwd_v2",
-        "target": "generic",
-        "spec": {
-          "dtype": "bf16",
-          "head_dim": 96,
-          "head_dim_v": 96,
-          "mask": "causal",
-          "layout": "paged",
-          "page_block_size": 64,
-          "seqused_q": true
-        }
-      },
-      "metadata": {
-        "dtype": "BF16",
-        "kind": "prefill",
-        "head_size": 96,
-        "head_size_v": 96,
-        "mask_mode": "causal",
-        "bias": "none",
-        "block_size": 256,
-        "block_m": 128,
-        "dv_split": 1,
-        "layout": "paged",
-        "page_block_size": 64,
-        "dense_q": 0,
-        "seqused_q": 1,
-        "sinks": 0
-      },
-      "priority": 0
-    },
-    {
-      "version": "1.0",
       "id": "f2a630e7-e1de-4e60-b4f7-09f150f54542",
       "name": "wmma_prefill_paged.fp16_d128v128_p16_m128_denseq_used",
       "kernel_source": {
@@ -3732,6 +3282,876 @@
     },
     {
       "version": "1.0",
+      "id": "ecb75f8f-2ef5-4a1d-9c6b-6303336652c4",
+      "name": "wmma_prefill_paged.fp16_d96v96_p16_m128_denseq_used",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx1151/wmma_fmha_fwd_v2.py",
+        "builder": "build_wmma_fmha_fwd_v2",
+        "target": "generic",
+        "spec": {
+          "dtype": "fp16",
+          "head_dim": 96,
+          "head_dim_v": 96,
+          "mask": "causal",
+          "layout": "paged",
+          "page_block_size": 16,
+          "dense_q": true,
+          "seqused_q": true
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "kind": "prefill",
+        "head_size": 96,
+        "head_size_v": 96,
+        "mask_mode": "causal",
+        "bias": "none",
+        "block_size": 256,
+        "block_m": 128,
+        "dv_split": 1,
+        "layout": "paged",
+        "page_block_size": 16,
+        "dense_q": 1,
+        "seqused_q": 1,
+        "sinks": 0
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "e6c49281-e4ff-4656-8e2a-79c98f6db78b",
+      "name": "wmma_prefill_paged.fp16_d96v96_p16_m128_raggedq",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx1151/wmma_fmha_fwd_v2.py",
+        "builder": "build_wmma_fmha_fwd_v2",
+        "target": "generic",
+        "spec": {
+          "dtype": "fp16",
+          "head_dim": 96,
+          "head_dim_v": 96,
+          "mask": "causal",
+          "layout": "paged",
+          "page_block_size": 16,
+          "seqused_q": true
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "kind": "prefill",
+        "head_size": 96,
+        "head_size_v": 96,
+        "mask_mode": "causal",
+        "bias": "none",
+        "block_size": 256,
+        "block_m": 128,
+        "dv_split": 1,
+        "layout": "paged",
+        "page_block_size": 16,
+        "dense_q": 0,
+        "seqused_q": 1,
+        "sinks": 0
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "3e1b0fc2-0472-4e67-92be-4f0c533a169f",
+      "name": "wmma_prefill_paged.bf16_d96v96_p16_m128_denseq_used",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx1151/wmma_fmha_fwd_v2.py",
+        "builder": "build_wmma_fmha_fwd_v2",
+        "target": "generic",
+        "spec": {
+          "dtype": "bf16",
+          "head_dim": 96,
+          "head_dim_v": 96,
+          "mask": "causal",
+          "layout": "paged",
+          "page_block_size": 16,
+          "dense_q": true,
+          "seqused_q": true
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "kind": "prefill",
+        "head_size": 96,
+        "head_size_v": 96,
+        "mask_mode": "causal",
+        "bias": "none",
+        "block_size": 256,
+        "block_m": 128,
+        "dv_split": 1,
+        "layout": "paged",
+        "page_block_size": 16,
+        "dense_q": 1,
+        "seqused_q": 1,
+        "sinks": 0
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "22fd37f2-265a-48c4-b4e5-4c9464734e22",
+      "name": "wmma_prefill_paged.bf16_d96v96_p16_m128_raggedq",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx1151/wmma_fmha_fwd_v2.py",
+        "builder": "build_wmma_fmha_fwd_v2",
+        "target": "generic",
+        "spec": {
+          "dtype": "bf16",
+          "head_dim": 96,
+          "head_dim_v": 96,
+          "mask": "causal",
+          "layout": "paged",
+          "page_block_size": 16,
+          "seqused_q": true
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "kind": "prefill",
+        "head_size": 96,
+        "head_size_v": 96,
+        "mask_mode": "causal",
+        "bias": "none",
+        "block_size": 256,
+        "block_m": 128,
+        "dv_split": 1,
+        "layout": "paged",
+        "page_block_size": 16,
+        "dense_q": 0,
+        "seqused_q": 1,
+        "sinks": 0
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "98fb960f-8550-4b33-9b82-ed192dd1c3c3",
+      "name": "wmma_prefill_paged.fp16_d96v96_p32_m128_denseq_used",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx1151/wmma_fmha_fwd_v2.py",
+        "builder": "build_wmma_fmha_fwd_v2",
+        "target": "generic",
+        "spec": {
+          "dtype": "fp16",
+          "head_dim": 96,
+          "head_dim_v": 96,
+          "mask": "causal",
+          "layout": "paged",
+          "page_block_size": 32,
+          "dense_q": true,
+          "seqused_q": true
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "kind": "prefill",
+        "head_size": 96,
+        "head_size_v": 96,
+        "mask_mode": "causal",
+        "bias": "none",
+        "block_size": 256,
+        "block_m": 128,
+        "dv_split": 1,
+        "layout": "paged",
+        "page_block_size": 32,
+        "dense_q": 1,
+        "seqused_q": 1,
+        "sinks": 0
+      },
+      "priority": 0,
+      "arch": [
+        "gfx1200",
+        "gfx1201"
+      ]
+    },
+    {
+      "version": "1.0",
+      "id": "9faaf783-fa03-426c-8e6c-2d35ee0a3a2e",
+      "name": "wmma_prefill_paged.fp16_d96v96_p32_m128_raggedq",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx1151/wmma_fmha_fwd_v2.py",
+        "builder": "build_wmma_fmha_fwd_v2",
+        "target": "generic",
+        "spec": {
+          "dtype": "fp16",
+          "head_dim": 96,
+          "head_dim_v": 96,
+          "mask": "causal",
+          "layout": "paged",
+          "page_block_size": 32,
+          "seqused_q": true
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "kind": "prefill",
+        "head_size": 96,
+        "head_size_v": 96,
+        "mask_mode": "causal",
+        "bias": "none",
+        "block_size": 256,
+        "block_m": 128,
+        "dv_split": 1,
+        "layout": "paged",
+        "page_block_size": 32,
+        "dense_q": 0,
+        "seqused_q": 1,
+        "sinks": 0
+      },
+      "priority": 0,
+      "arch": [
+        "gfx1200",
+        "gfx1201"
+      ]
+    },
+    {
+      "version": "1.0",
+      "id": "11a1dd66-17b7-4ab8-a9cf-362907f45b88",
+      "name": "wmma_prefill_paged.fp16_d96v96_p64_m128_denseq_used",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx1151/wmma_fmha_fwd_v2.py",
+        "builder": "build_wmma_fmha_fwd_v2",
+        "target": "generic",
+        "spec": {
+          "dtype": "fp16",
+          "head_dim": 96,
+          "head_dim_v": 96,
+          "mask": "causal",
+          "layout": "paged",
+          "page_block_size": 64,
+          "dense_q": true,
+          "seqused_q": true
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "kind": "prefill",
+        "head_size": 96,
+        "head_size_v": 96,
+        "mask_mode": "causal",
+        "bias": "none",
+        "block_size": 256,
+        "block_m": 128,
+        "dv_split": 1,
+        "layout": "paged",
+        "page_block_size": 64,
+        "dense_q": 1,
+        "seqused_q": 1,
+        "sinks": 0
+      },
+      "priority": 0,
+      "arch": [
+        "gfx1200",
+        "gfx1201"
+      ]
+    },
+    {
+      "version": "1.0",
+      "id": "abab5c90-bc2a-4c58-892f-4c49f9126a21",
+      "name": "wmma_prefill_paged.fp16_d96v96_p64_m128_raggedq",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx1151/wmma_fmha_fwd_v2.py",
+        "builder": "build_wmma_fmha_fwd_v2",
+        "target": "generic",
+        "spec": {
+          "dtype": "fp16",
+          "head_dim": 96,
+          "head_dim_v": 96,
+          "mask": "causal",
+          "layout": "paged",
+          "page_block_size": 64,
+          "seqused_q": true
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "kind": "prefill",
+        "head_size": 96,
+        "head_size_v": 96,
+        "mask_mode": "causal",
+        "bias": "none",
+        "block_size": 256,
+        "block_m": 128,
+        "dv_split": 1,
+        "layout": "paged",
+        "page_block_size": 64,
+        "dense_q": 0,
+        "seqused_q": 1,
+        "sinks": 0
+      },
+      "priority": 0,
+      "arch": [
+        "gfx1200",
+        "gfx1201"
+      ]
+    },
+    {
+      "version": "1.0",
+      "id": "28ab9613-e470-4a14-8626-fa7e4c3039ba",
+      "name": "wmma_prefill_paged.bf16_d96v96_p32_m128_denseq_used",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx1151/wmma_fmha_fwd_v2.py",
+        "builder": "build_wmma_fmha_fwd_v2",
+        "target": "generic",
+        "spec": {
+          "dtype": "bf16",
+          "head_dim": 96,
+          "head_dim_v": 96,
+          "mask": "causal",
+          "layout": "paged",
+          "page_block_size": 32,
+          "dense_q": true,
+          "seqused_q": true
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "kind": "prefill",
+        "head_size": 96,
+        "head_size_v": 96,
+        "mask_mode": "causal",
+        "bias": "none",
+        "block_size": 256,
+        "block_m": 128,
+        "dv_split": 1,
+        "layout": "paged",
+        "page_block_size": 32,
+        "dense_q": 1,
+        "seqused_q": 1,
+        "sinks": 0
+      },
+      "priority": 0,
+      "arch": [
+        "gfx1200",
+        "gfx1201"
+      ]
+    },
+    {
+      "version": "1.0",
+      "id": "abcb7fc9-b019-4718-8b59-f8cdc8775324",
+      "name": "wmma_prefill_paged.bf16_d96v96_p32_m128_raggedq",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx1151/wmma_fmha_fwd_v2.py",
+        "builder": "build_wmma_fmha_fwd_v2",
+        "target": "generic",
+        "spec": {
+          "dtype": "bf16",
+          "head_dim": 96,
+          "head_dim_v": 96,
+          "mask": "causal",
+          "layout": "paged",
+          "page_block_size": 32,
+          "seqused_q": true
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "kind": "prefill",
+        "head_size": 96,
+        "head_size_v": 96,
+        "mask_mode": "causal",
+        "bias": "none",
+        "block_size": 256,
+        "block_m": 128,
+        "dv_split": 1,
+        "layout": "paged",
+        "page_block_size": 32,
+        "dense_q": 0,
+        "seqused_q": 1,
+        "sinks": 0
+      },
+      "priority": 0,
+      "arch": [
+        "gfx1200",
+        "gfx1201"
+      ]
+    },
+    {
+      "version": "1.0",
+      "id": "b5705d35-b8c3-49ae-8aed-ab71c4ea759b",
+      "name": "wmma_prefill_paged.bf16_d96v96_p64_m128_denseq_used",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx1151/wmma_fmha_fwd_v2.py",
+        "builder": "build_wmma_fmha_fwd_v2",
+        "target": "generic",
+        "spec": {
+          "dtype": "bf16",
+          "head_dim": 96,
+          "head_dim_v": 96,
+          "mask": "causal",
+          "layout": "paged",
+          "page_block_size": 64,
+          "dense_q": true,
+          "seqused_q": true
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "kind": "prefill",
+        "head_size": 96,
+        "head_size_v": 96,
+        "mask_mode": "causal",
+        "bias": "none",
+        "block_size": 256,
+        "block_m": 128,
+        "dv_split": 1,
+        "layout": "paged",
+        "page_block_size": 64,
+        "dense_q": 1,
+        "seqused_q": 1,
+        "sinks": 0
+      },
+      "priority": 0,
+      "arch": [
+        "gfx1200",
+        "gfx1201"
+      ]
+    },
+    {
+      "version": "1.0",
+      "id": "6e8fbf42-5262-4913-87e7-00d65ffd601a",
+      "name": "wmma_prefill_paged.bf16_d96v96_p64_m128_raggedq",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx1151/wmma_fmha_fwd_v2.py",
+        "builder": "build_wmma_fmha_fwd_v2",
+        "target": "generic",
+        "spec": {
+          "dtype": "bf16",
+          "head_dim": 96,
+          "head_dim_v": 96,
+          "mask": "causal",
+          "layout": "paged",
+          "page_block_size": 64,
+          "seqused_q": true
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "kind": "prefill",
+        "head_size": 96,
+        "head_size_v": 96,
+        "mask_mode": "causal",
+        "bias": "none",
+        "block_size": 256,
+        "block_m": 128,
+        "dv_split": 1,
+        "layout": "paged",
+        "page_block_size": 64,
+        "dense_q": 0,
+        "seqused_q": 1,
+        "sinks": 0
+      },
+      "priority": 0,
+      "arch": [
+        "gfx1200",
+        "gfx1201"
+      ]
+    },
+    {
+      "version": "1.0",
+      "id": "ce8dda68-484e-47cd-8ff2-d9c47fe0a77e",
+      "name": "wmma_prefill_paged.fp16_d96v96_p32_m64_denseq_used",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx1151/wmma_fmha_fwd_v2.py",
+        "builder": "build_wmma_fmha_fwd_v2",
+        "target": "generic",
+        "spec": {
+          "dtype": "fp16",
+          "head_dim": 96,
+          "head_dim_v": 96,
+          "mask": "causal",
+          "layout": "paged",
+          "page_block_size": 32,
+          "dense_q": true,
+          "seqused_q": true,
+          "block_m": 64
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "kind": "prefill",
+        "head_size": 96,
+        "head_size_v": 96,
+        "mask_mode": "causal",
+        "bias": "none",
+        "block_size": 128,
+        "block_m": 64,
+        "dv_split": 1,
+        "layout": "paged",
+        "page_block_size": 32,
+        "dense_q": 1,
+        "seqused_q": 1,
+        "sinks": 0
+      },
+      "priority": 0,
+      "arch": [
+        "gfx1100",
+        "gfx1101",
+        "gfx1102",
+        "gfx1103",
+        "gfx1150",
+        "gfx1151",
+        "gfx1152",
+        "gfx1153"
+      ]
+    },
+    {
+      "version": "1.0",
+      "id": "6d5d47ec-f009-4c14-bfc5-b70453e20436",
+      "name": "wmma_prefill_paged.fp16_d96v96_p32_m64_raggedq",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx1151/wmma_fmha_fwd_v2.py",
+        "builder": "build_wmma_fmha_fwd_v2",
+        "target": "generic",
+        "spec": {
+          "dtype": "fp16",
+          "head_dim": 96,
+          "head_dim_v": 96,
+          "mask": "causal",
+          "layout": "paged",
+          "page_block_size": 32,
+          "seqused_q": true,
+          "block_m": 64
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "kind": "prefill",
+        "head_size": 96,
+        "head_size_v": 96,
+        "mask_mode": "causal",
+        "bias": "none",
+        "block_size": 128,
+        "block_m": 64,
+        "dv_split": 1,
+        "layout": "paged",
+        "page_block_size": 32,
+        "dense_q": 0,
+        "seqused_q": 1,
+        "sinks": 0
+      },
+      "priority": 0,
+      "arch": [
+        "gfx1100",
+        "gfx1101",
+        "gfx1102",
+        "gfx1103",
+        "gfx1150",
+        "gfx1151",
+        "gfx1152",
+        "gfx1153"
+      ]
+    },
+    {
+      "version": "1.0",
+      "id": "bb7c5a97-23f8-44a7-b179-45481cd1cc63",
+      "name": "wmma_prefill_paged.fp16_d96v96_p64_m64_denseq_used",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx1151/wmma_fmha_fwd_v2.py",
+        "builder": "build_wmma_fmha_fwd_v2",
+        "target": "generic",
+        "spec": {
+          "dtype": "fp16",
+          "head_dim": 96,
+          "head_dim_v": 96,
+          "mask": "causal",
+          "layout": "paged",
+          "page_block_size": 64,
+          "dense_q": true,
+          "seqused_q": true,
+          "block_m": 64
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "kind": "prefill",
+        "head_size": 96,
+        "head_size_v": 96,
+        "mask_mode": "causal",
+        "bias": "none",
+        "block_size": 128,
+        "block_m": 64,
+        "dv_split": 1,
+        "layout": "paged",
+        "page_block_size": 64,
+        "dense_q": 1,
+        "seqused_q": 1,
+        "sinks": 0
+      },
+      "priority": 0,
+      "arch": [
+        "gfx1100",
+        "gfx1101",
+        "gfx1102",
+        "gfx1103",
+        "gfx1150",
+        "gfx1151",
+        "gfx1152",
+        "gfx1153"
+      ]
+    },
+    {
+      "version": "1.0",
+      "id": "c2e0f962-94c2-4dd1-9974-0659ae0b1621",
+      "name": "wmma_prefill_paged.fp16_d96v96_p64_m64_raggedq",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx1151/wmma_fmha_fwd_v2.py",
+        "builder": "build_wmma_fmha_fwd_v2",
+        "target": "generic",
+        "spec": {
+          "dtype": "fp16",
+          "head_dim": 96,
+          "head_dim_v": 96,
+          "mask": "causal",
+          "layout": "paged",
+          "page_block_size": 64,
+          "seqused_q": true,
+          "block_m": 64
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "kind": "prefill",
+        "head_size": 96,
+        "head_size_v": 96,
+        "mask_mode": "causal",
+        "bias": "none",
+        "block_size": 128,
+        "block_m": 64,
+        "dv_split": 1,
+        "layout": "paged",
+        "page_block_size": 64,
+        "dense_q": 0,
+        "seqused_q": 1,
+        "sinks": 0
+      },
+      "priority": 0,
+      "arch": [
+        "gfx1100",
+        "gfx1101",
+        "gfx1102",
+        "gfx1103",
+        "gfx1150",
+        "gfx1151",
+        "gfx1152",
+        "gfx1153"
+      ]
+    },
+    {
+      "version": "1.0",
+      "id": "536704f7-42af-4cd2-a2af-48fc807782db",
+      "name": "wmma_prefill_paged.bf16_d96v96_p32_m64_denseq_used",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx1151/wmma_fmha_fwd_v2.py",
+        "builder": "build_wmma_fmha_fwd_v2",
+        "target": "generic",
+        "spec": {
+          "dtype": "bf16",
+          "head_dim": 96,
+          "head_dim_v": 96,
+          "mask": "causal",
+          "layout": "paged",
+          "page_block_size": 32,
+          "dense_q": true,
+          "seqused_q": true,
+          "block_m": 64
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "kind": "prefill",
+        "head_size": 96,
+        "head_size_v": 96,
+        "mask_mode": "causal",
+        "bias": "none",
+        "block_size": 128,
+        "block_m": 64,
+        "dv_split": 1,
+        "layout": "paged",
+        "page_block_size": 32,
+        "dense_q": 1,
+        "seqused_q": 1,
+        "sinks": 0
+      },
+      "priority": 0,
+      "arch": [
+        "gfx1100",
+        "gfx1101",
+        "gfx1102",
+        "gfx1103",
+        "gfx1150",
+        "gfx1151",
+        "gfx1152",
+        "gfx1153"
+      ]
+    },
+    {
+      "version": "1.0",
+      "id": "85db0dfb-0326-45c4-b99c-3d791b29f8ae",
+      "name": "wmma_prefill_paged.bf16_d96v96_p32_m64_raggedq",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx1151/wmma_fmha_fwd_v2.py",
+        "builder": "build_wmma_fmha_fwd_v2",
+        "target": "generic",
+        "spec": {
+          "dtype": "bf16",
+          "head_dim": 96,
+          "head_dim_v": 96,
+          "mask": "causal",
+          "layout": "paged",
+          "page_block_size": 32,
+          "seqused_q": true,
+          "block_m": 64
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "kind": "prefill",
+        "head_size": 96,
+        "head_size_v": 96,
+        "mask_mode": "causal",
+        "bias": "none",
+        "block_size": 128,
+        "block_m": 64,
+        "dv_split": 1,
+        "layout": "paged",
+        "page_block_size": 32,
+        "dense_q": 0,
+        "seqused_q": 1,
+        "sinks": 0
+      },
+      "priority": 0,
+      "arch": [
+        "gfx1100",
+        "gfx1101",
+        "gfx1102",
+        "gfx1103",
+        "gfx1150",
+        "gfx1151",
+        "gfx1152",
+        "gfx1153"
+      ]
+    },
+    {
+      "version": "1.0",
+      "id": "6258add2-a3ea-4fd5-9883-edc62b4a4f5a",
+      "name": "wmma_prefill_paged.bf16_d96v96_p64_m64_denseq_used",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx1151/wmma_fmha_fwd_v2.py",
+        "builder": "build_wmma_fmha_fwd_v2",
+        "target": "generic",
+        "spec": {
+          "dtype": "bf16",
+          "head_dim": 96,
+          "head_dim_v": 96,
+          "mask": "causal",
+          "layout": "paged",
+          "page_block_size": 64,
+          "dense_q": true,
+          "seqused_q": true,
+          "block_m": 64
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "kind": "prefill",
+        "head_size": 96,
+        "head_size_v": 96,
+        "mask_mode": "causal",
+        "bias": "none",
+        "block_size": 128,
+        "block_m": 64,
+        "dv_split": 1,
+        "layout": "paged",
+        "page_block_size": 64,
+        "dense_q": 1,
+        "seqused_q": 1,
+        "sinks": 0
+      },
+      "priority": 0,
+      "arch": [
+        "gfx1100",
+        "gfx1101",
+        "gfx1102",
+        "gfx1103",
+        "gfx1150",
+        "gfx1151",
+        "gfx1152",
+        "gfx1153"
+      ]
+    },
+    {
+      "version": "1.0",
+      "id": "52c50b7c-ce0c-4c1b-89bb-3a7c6e0cac71",
+      "name": "wmma_prefill_paged.bf16_d96v96_p64_m64_raggedq",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx1151/wmma_fmha_fwd_v2.py",
+        "builder": "build_wmma_fmha_fwd_v2",
+        "target": "generic",
+        "spec": {
+          "dtype": "bf16",
+          "head_dim": 96,
+          "head_dim_v": 96,
+          "mask": "causal",
+          "layout": "paged",
+          "page_block_size": 64,
+          "seqused_q": true,
+          "block_m": 64
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "kind": "prefill",
+        "head_size": 96,
+        "head_size_v": 96,
+        "mask_mode": "causal",
+        "bias": "none",
+        "block_size": 128,
+        "block_m": 64,
+        "dv_split": 1,
+        "layout": "paged",
+        "page_block_size": 64,
+        "dense_q": 0,
+        "seqused_q": 1,
+        "sinks": 0
+      },
+      "priority": 0,
+      "arch": [
+        "gfx1100",
+        "gfx1101",
+        "gfx1102",
+        "gfx1103",
+        "gfx1150",
+        "gfx1151",
+        "gfx1152",
+        "gfx1153"
+      ]
+    },
+    {
+      "version": "1.0",
       "id": "fecef9c9-37a5-4f36-a7fe-6079d8c949ef",
       "name": "wmma_prefill_paged.fp16_d64v64_p16_m128_denseq_used_sinks",
       "kernel_source": {
@@ -4179,468 +4599,6 @@
         "kind": "prefill",
         "head_size": 64,
         "head_size_v": 64,
-        "mask_mode": "causal",
-        "bias": "none",
-        "block_size": 256,
-        "block_m": 128,
-        "dv_split": 1,
-        "layout": "paged",
-        "page_block_size": 64,
-        "dense_q": 0,
-        "seqused_q": 1,
-        "sinks": 1
-      },
-      "priority": 0
-    },
-    {
-      "version": "1.0",
-      "id": "f25f5ab6-3cef-426e-bf9c-dfb57dbabf81",
-      "name": "wmma_prefill_paged.fp16_d96v96_p16_m128_denseq_used_sinks",
-      "kernel_source": {
-        "kind": "rocke",
-        "source": "kernels/gfx1151/wmma_fmha_fwd_v2.py",
-        "builder": "build_wmma_fmha_fwd_v2",
-        "target": "generic",
-        "spec": {
-          "dtype": "fp16",
-          "head_dim": 96,
-          "head_dim_v": 96,
-          "mask": "causal",
-          "use_sinks": true,
-          "layout": "paged",
-          "page_block_size": 16,
-          "dense_q": true,
-          "seqused_q": true
-        }
-      },
-      "metadata": {
-        "dtype": "FP16",
-        "kind": "prefill",
-        "head_size": 96,
-        "head_size_v": 96,
-        "mask_mode": "causal",
-        "bias": "none",
-        "block_size": 256,
-        "block_m": 128,
-        "dv_split": 1,
-        "layout": "paged",
-        "page_block_size": 16,
-        "dense_q": 1,
-        "seqused_q": 1,
-        "sinks": 1
-      },
-      "priority": 0
-    },
-    {
-      "version": "1.0",
-      "id": "0814a8f4-242a-402f-b789-3e45b1104aab",
-      "name": "wmma_prefill_paged.fp16_d96v96_p16_m128_raggedq_sinks",
-      "kernel_source": {
-        "kind": "rocke",
-        "source": "kernels/gfx1151/wmma_fmha_fwd_v2.py",
-        "builder": "build_wmma_fmha_fwd_v2",
-        "target": "generic",
-        "spec": {
-          "dtype": "fp16",
-          "head_dim": 96,
-          "head_dim_v": 96,
-          "mask": "causal",
-          "use_sinks": true,
-          "layout": "paged",
-          "page_block_size": 16,
-          "seqused_q": true
-        }
-      },
-      "metadata": {
-        "dtype": "FP16",
-        "kind": "prefill",
-        "head_size": 96,
-        "head_size_v": 96,
-        "mask_mode": "causal",
-        "bias": "none",
-        "block_size": 256,
-        "block_m": 128,
-        "dv_split": 1,
-        "layout": "paged",
-        "page_block_size": 16,
-        "dense_q": 0,
-        "seqused_q": 1,
-        "sinks": 1
-      },
-      "priority": 0
-    },
-    {
-      "version": "1.0",
-      "id": "3bb9ecad-9ca0-4139-b352-7e3d8aa88c31",
-      "name": "wmma_prefill_paged.fp16_d96v96_p32_m128_denseq_used_sinks",
-      "kernel_source": {
-        "kind": "rocke",
-        "source": "kernels/gfx1151/wmma_fmha_fwd_v2.py",
-        "builder": "build_wmma_fmha_fwd_v2",
-        "target": "generic",
-        "spec": {
-          "dtype": "fp16",
-          "head_dim": 96,
-          "head_dim_v": 96,
-          "mask": "causal",
-          "use_sinks": true,
-          "layout": "paged",
-          "page_block_size": 32,
-          "dense_q": true,
-          "seqused_q": true
-        }
-      },
-      "metadata": {
-        "dtype": "FP16",
-        "kind": "prefill",
-        "head_size": 96,
-        "head_size_v": 96,
-        "mask_mode": "causal",
-        "bias": "none",
-        "block_size": 256,
-        "block_m": 128,
-        "dv_split": 1,
-        "layout": "paged",
-        "page_block_size": 32,
-        "dense_q": 1,
-        "seqused_q": 1,
-        "sinks": 1
-      },
-      "priority": 0
-    },
-    {
-      "version": "1.0",
-      "id": "8e19234f-665d-4786-bad0-5d6e3d4aee8c",
-      "name": "wmma_prefill_paged.fp16_d96v96_p32_m128_raggedq_sinks",
-      "kernel_source": {
-        "kind": "rocke",
-        "source": "kernels/gfx1151/wmma_fmha_fwd_v2.py",
-        "builder": "build_wmma_fmha_fwd_v2",
-        "target": "generic",
-        "spec": {
-          "dtype": "fp16",
-          "head_dim": 96,
-          "head_dim_v": 96,
-          "mask": "causal",
-          "use_sinks": true,
-          "layout": "paged",
-          "page_block_size": 32,
-          "seqused_q": true
-        }
-      },
-      "metadata": {
-        "dtype": "FP16",
-        "kind": "prefill",
-        "head_size": 96,
-        "head_size_v": 96,
-        "mask_mode": "causal",
-        "bias": "none",
-        "block_size": 256,
-        "block_m": 128,
-        "dv_split": 1,
-        "layout": "paged",
-        "page_block_size": 32,
-        "dense_q": 0,
-        "seqused_q": 1,
-        "sinks": 1
-      },
-      "priority": 0
-    },
-    {
-      "version": "1.0",
-      "id": "8d5d2524-a8ab-4e0e-ab5c-914e9e003ea5",
-      "name": "wmma_prefill_paged.fp16_d96v96_p64_m128_denseq_used_sinks",
-      "kernel_source": {
-        "kind": "rocke",
-        "source": "kernels/gfx1151/wmma_fmha_fwd_v2.py",
-        "builder": "build_wmma_fmha_fwd_v2",
-        "target": "generic",
-        "spec": {
-          "dtype": "fp16",
-          "head_dim": 96,
-          "head_dim_v": 96,
-          "mask": "causal",
-          "use_sinks": true,
-          "layout": "paged",
-          "page_block_size": 64,
-          "dense_q": true,
-          "seqused_q": true
-        }
-      },
-      "metadata": {
-        "dtype": "FP16",
-        "kind": "prefill",
-        "head_size": 96,
-        "head_size_v": 96,
-        "mask_mode": "causal",
-        "bias": "none",
-        "block_size": 256,
-        "block_m": 128,
-        "dv_split": 1,
-        "layout": "paged",
-        "page_block_size": 64,
-        "dense_q": 1,
-        "seqused_q": 1,
-        "sinks": 1
-      },
-      "priority": 0
-    },
-    {
-      "version": "1.0",
-      "id": "02844590-eab7-48f7-ae82-1e6d733672dc",
-      "name": "wmma_prefill_paged.fp16_d96v96_p64_m128_raggedq_sinks",
-      "kernel_source": {
-        "kind": "rocke",
-        "source": "kernels/gfx1151/wmma_fmha_fwd_v2.py",
-        "builder": "build_wmma_fmha_fwd_v2",
-        "target": "generic",
-        "spec": {
-          "dtype": "fp16",
-          "head_dim": 96,
-          "head_dim_v": 96,
-          "mask": "causal",
-          "use_sinks": true,
-          "layout": "paged",
-          "page_block_size": 64,
-          "seqused_q": true
-        }
-      },
-      "metadata": {
-        "dtype": "FP16",
-        "kind": "prefill",
-        "head_size": 96,
-        "head_size_v": 96,
-        "mask_mode": "causal",
-        "bias": "none",
-        "block_size": 256,
-        "block_m": 128,
-        "dv_split": 1,
-        "layout": "paged",
-        "page_block_size": 64,
-        "dense_q": 0,
-        "seqused_q": 1,
-        "sinks": 1
-      },
-      "priority": 0
-    },
-    {
-      "version": "1.0",
-      "id": "29308f6a-d71e-4fc1-b6b2-43e7ed905e96",
-      "name": "wmma_prefill_paged.bf16_d96v96_p16_m128_denseq_used_sinks",
-      "kernel_source": {
-        "kind": "rocke",
-        "source": "kernels/gfx1151/wmma_fmha_fwd_v2.py",
-        "builder": "build_wmma_fmha_fwd_v2",
-        "target": "generic",
-        "spec": {
-          "dtype": "bf16",
-          "head_dim": 96,
-          "head_dim_v": 96,
-          "mask": "causal",
-          "use_sinks": true,
-          "layout": "paged",
-          "page_block_size": 16,
-          "dense_q": true,
-          "seqused_q": true
-        }
-      },
-      "metadata": {
-        "dtype": "BF16",
-        "kind": "prefill",
-        "head_size": 96,
-        "head_size_v": 96,
-        "mask_mode": "causal",
-        "bias": "none",
-        "block_size": 256,
-        "block_m": 128,
-        "dv_split": 1,
-        "layout": "paged",
-        "page_block_size": 16,
-        "dense_q": 1,
-        "seqused_q": 1,
-        "sinks": 1
-      },
-      "priority": 0
-    },
-    {
-      "version": "1.0",
-      "id": "14c810f0-0090-4272-aeca-a74ddc5bbc69",
-      "name": "wmma_prefill_paged.bf16_d96v96_p16_m128_raggedq_sinks",
-      "kernel_source": {
-        "kind": "rocke",
-        "source": "kernels/gfx1151/wmma_fmha_fwd_v2.py",
-        "builder": "build_wmma_fmha_fwd_v2",
-        "target": "generic",
-        "spec": {
-          "dtype": "bf16",
-          "head_dim": 96,
-          "head_dim_v": 96,
-          "mask": "causal",
-          "use_sinks": true,
-          "layout": "paged",
-          "page_block_size": 16,
-          "seqused_q": true
-        }
-      },
-      "metadata": {
-        "dtype": "BF16",
-        "kind": "prefill",
-        "head_size": 96,
-        "head_size_v": 96,
-        "mask_mode": "causal",
-        "bias": "none",
-        "block_size": 256,
-        "block_m": 128,
-        "dv_split": 1,
-        "layout": "paged",
-        "page_block_size": 16,
-        "dense_q": 0,
-        "seqused_q": 1,
-        "sinks": 1
-      },
-      "priority": 0
-    },
-    {
-      "version": "1.0",
-      "id": "59ed746e-c797-4a40-9e6e-7197696446df",
-      "name": "wmma_prefill_paged.bf16_d96v96_p32_m128_denseq_used_sinks",
-      "kernel_source": {
-        "kind": "rocke",
-        "source": "kernels/gfx1151/wmma_fmha_fwd_v2.py",
-        "builder": "build_wmma_fmha_fwd_v2",
-        "target": "generic",
-        "spec": {
-          "dtype": "bf16",
-          "head_dim": 96,
-          "head_dim_v": 96,
-          "mask": "causal",
-          "use_sinks": true,
-          "layout": "paged",
-          "page_block_size": 32,
-          "dense_q": true,
-          "seqused_q": true
-        }
-      },
-      "metadata": {
-        "dtype": "BF16",
-        "kind": "prefill",
-        "head_size": 96,
-        "head_size_v": 96,
-        "mask_mode": "causal",
-        "bias": "none",
-        "block_size": 256,
-        "block_m": 128,
-        "dv_split": 1,
-        "layout": "paged",
-        "page_block_size": 32,
-        "dense_q": 1,
-        "seqused_q": 1,
-        "sinks": 1
-      },
-      "priority": 0
-    },
-    {
-      "version": "1.0",
-      "id": "b479b520-ead8-4d5f-bf59-afcb378671ae",
-      "name": "wmma_prefill_paged.bf16_d96v96_p32_m128_raggedq_sinks",
-      "kernel_source": {
-        "kind": "rocke",
-        "source": "kernels/gfx1151/wmma_fmha_fwd_v2.py",
-        "builder": "build_wmma_fmha_fwd_v2",
-        "target": "generic",
-        "spec": {
-          "dtype": "bf16",
-          "head_dim": 96,
-          "head_dim_v": 96,
-          "mask": "causal",
-          "use_sinks": true,
-          "layout": "paged",
-          "page_block_size": 32,
-          "seqused_q": true
-        }
-      },
-      "metadata": {
-        "dtype": "BF16",
-        "kind": "prefill",
-        "head_size": 96,
-        "head_size_v": 96,
-        "mask_mode": "causal",
-        "bias": "none",
-        "block_size": 256,
-        "block_m": 128,
-        "dv_split": 1,
-        "layout": "paged",
-        "page_block_size": 32,
-        "dense_q": 0,
-        "seqused_q": 1,
-        "sinks": 1
-      },
-      "priority": 0
-    },
-    {
-      "version": "1.0",
-      "id": "69bdaa7a-f5e9-4f3f-a077-f190f8565d1a",
-      "name": "wmma_prefill_paged.bf16_d96v96_p64_m128_denseq_used_sinks",
-      "kernel_source": {
-        "kind": "rocke",
-        "source": "kernels/gfx1151/wmma_fmha_fwd_v2.py",
-        "builder": "build_wmma_fmha_fwd_v2",
-        "target": "generic",
-        "spec": {
-          "dtype": "bf16",
-          "head_dim": 96,
-          "head_dim_v": 96,
-          "mask": "causal",
-          "use_sinks": true,
-          "layout": "paged",
-          "page_block_size": 64,
-          "dense_q": true,
-          "seqused_q": true
-        }
-      },
-      "metadata": {
-        "dtype": "BF16",
-        "kind": "prefill",
-        "head_size": 96,
-        "head_size_v": 96,
-        "mask_mode": "causal",
-        "bias": "none",
-        "block_size": 256,
-        "block_m": 128,
-        "dv_split": 1,
-        "layout": "paged",
-        "page_block_size": 64,
-        "dense_q": 1,
-        "seqused_q": 1,
-        "sinks": 1
-      },
-      "priority": 0
-    },
-    {
-      "version": "1.0",
-      "id": "09acda94-00d5-48bc-aea4-c70765ef3f7d",
-      "name": "wmma_prefill_paged.bf16_d96v96_p64_m128_raggedq_sinks",
-      "kernel_source": {
-        "kind": "rocke",
-        "source": "kernels/gfx1151/wmma_fmha_fwd_v2.py",
-        "builder": "build_wmma_fmha_fwd_v2",
-        "target": "generic",
-        "spec": {
-          "dtype": "bf16",
-          "head_dim": 96,
-          "head_dim_v": 96,
-          "mask": "causal",
-          "use_sinks": true,
-          "layout": "paged",
-          "page_block_size": 64,
-          "seqused_q": true
-        }
-      },
-      "metadata": {
-        "dtype": "BF16",
-        "kind": "prefill",
-        "head_size": 96,
-        "head_size_v": 96,
         "mask_mode": "causal",
         "bias": "none",
         "block_size": 256,
@@ -5577,6 +5535,896 @@
         "sinks": 1
       },
       "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "f25f5ab6-3cef-426e-bf9c-dfb57dbabf81",
+      "name": "wmma_prefill_paged.fp16_d96v96_p16_m128_denseq_used_sinks",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx1151/wmma_fmha_fwd_v2.py",
+        "builder": "build_wmma_fmha_fwd_v2",
+        "target": "generic",
+        "spec": {
+          "dtype": "fp16",
+          "head_dim": 96,
+          "head_dim_v": 96,
+          "mask": "causal",
+          "use_sinks": true,
+          "layout": "paged",
+          "page_block_size": 16,
+          "dense_q": true,
+          "seqused_q": true
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "kind": "prefill",
+        "head_size": 96,
+        "head_size_v": 96,
+        "mask_mode": "causal",
+        "bias": "none",
+        "block_size": 256,
+        "block_m": 128,
+        "dv_split": 1,
+        "layout": "paged",
+        "page_block_size": 16,
+        "dense_q": 1,
+        "seqused_q": 1,
+        "sinks": 1
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "0814a8f4-242a-402f-b789-3e45b1104aab",
+      "name": "wmma_prefill_paged.fp16_d96v96_p16_m128_raggedq_sinks",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx1151/wmma_fmha_fwd_v2.py",
+        "builder": "build_wmma_fmha_fwd_v2",
+        "target": "generic",
+        "spec": {
+          "dtype": "fp16",
+          "head_dim": 96,
+          "head_dim_v": 96,
+          "mask": "causal",
+          "use_sinks": true,
+          "layout": "paged",
+          "page_block_size": 16,
+          "seqused_q": true
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "kind": "prefill",
+        "head_size": 96,
+        "head_size_v": 96,
+        "mask_mode": "causal",
+        "bias": "none",
+        "block_size": 256,
+        "block_m": 128,
+        "dv_split": 1,
+        "layout": "paged",
+        "page_block_size": 16,
+        "dense_q": 0,
+        "seqused_q": 1,
+        "sinks": 1
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "29308f6a-d71e-4fc1-b6b2-43e7ed905e96",
+      "name": "wmma_prefill_paged.bf16_d96v96_p16_m128_denseq_used_sinks",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx1151/wmma_fmha_fwd_v2.py",
+        "builder": "build_wmma_fmha_fwd_v2",
+        "target": "generic",
+        "spec": {
+          "dtype": "bf16",
+          "head_dim": 96,
+          "head_dim_v": 96,
+          "mask": "causal",
+          "use_sinks": true,
+          "layout": "paged",
+          "page_block_size": 16,
+          "dense_q": true,
+          "seqused_q": true
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "kind": "prefill",
+        "head_size": 96,
+        "head_size_v": 96,
+        "mask_mode": "causal",
+        "bias": "none",
+        "block_size": 256,
+        "block_m": 128,
+        "dv_split": 1,
+        "layout": "paged",
+        "page_block_size": 16,
+        "dense_q": 1,
+        "seqused_q": 1,
+        "sinks": 1
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "14c810f0-0090-4272-aeca-a74ddc5bbc69",
+      "name": "wmma_prefill_paged.bf16_d96v96_p16_m128_raggedq_sinks",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx1151/wmma_fmha_fwd_v2.py",
+        "builder": "build_wmma_fmha_fwd_v2",
+        "target": "generic",
+        "spec": {
+          "dtype": "bf16",
+          "head_dim": 96,
+          "head_dim_v": 96,
+          "mask": "causal",
+          "use_sinks": true,
+          "layout": "paged",
+          "page_block_size": 16,
+          "seqused_q": true
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "kind": "prefill",
+        "head_size": 96,
+        "head_size_v": 96,
+        "mask_mode": "causal",
+        "bias": "none",
+        "block_size": 256,
+        "block_m": 128,
+        "dv_split": 1,
+        "layout": "paged",
+        "page_block_size": 16,
+        "dense_q": 0,
+        "seqused_q": 1,
+        "sinks": 1
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "3bb9ecad-9ca0-4139-b352-7e3d8aa88c31",
+      "name": "wmma_prefill_paged.fp16_d96v96_p32_m128_denseq_used_sinks",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx1151/wmma_fmha_fwd_v2.py",
+        "builder": "build_wmma_fmha_fwd_v2",
+        "target": "generic",
+        "spec": {
+          "dtype": "fp16",
+          "head_dim": 96,
+          "head_dim_v": 96,
+          "mask": "causal",
+          "use_sinks": true,
+          "layout": "paged",
+          "page_block_size": 32,
+          "dense_q": true,
+          "seqused_q": true
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "kind": "prefill",
+        "head_size": 96,
+        "head_size_v": 96,
+        "mask_mode": "causal",
+        "bias": "none",
+        "block_size": 256,
+        "block_m": 128,
+        "dv_split": 1,
+        "layout": "paged",
+        "page_block_size": 32,
+        "dense_q": 1,
+        "seqused_q": 1,
+        "sinks": 1
+      },
+      "priority": 0,
+      "arch": [
+        "gfx1200",
+        "gfx1201"
+      ]
+    },
+    {
+      "version": "1.0",
+      "id": "8e19234f-665d-4786-bad0-5d6e3d4aee8c",
+      "name": "wmma_prefill_paged.fp16_d96v96_p32_m128_raggedq_sinks",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx1151/wmma_fmha_fwd_v2.py",
+        "builder": "build_wmma_fmha_fwd_v2",
+        "target": "generic",
+        "spec": {
+          "dtype": "fp16",
+          "head_dim": 96,
+          "head_dim_v": 96,
+          "mask": "causal",
+          "use_sinks": true,
+          "layout": "paged",
+          "page_block_size": 32,
+          "seqused_q": true
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "kind": "prefill",
+        "head_size": 96,
+        "head_size_v": 96,
+        "mask_mode": "causal",
+        "bias": "none",
+        "block_size": 256,
+        "block_m": 128,
+        "dv_split": 1,
+        "layout": "paged",
+        "page_block_size": 32,
+        "dense_q": 0,
+        "seqused_q": 1,
+        "sinks": 1
+      },
+      "priority": 0,
+      "arch": [
+        "gfx1200",
+        "gfx1201"
+      ]
+    },
+    {
+      "version": "1.0",
+      "id": "8d5d2524-a8ab-4e0e-ab5c-914e9e003ea5",
+      "name": "wmma_prefill_paged.fp16_d96v96_p64_m128_denseq_used_sinks",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx1151/wmma_fmha_fwd_v2.py",
+        "builder": "build_wmma_fmha_fwd_v2",
+        "target": "generic",
+        "spec": {
+          "dtype": "fp16",
+          "head_dim": 96,
+          "head_dim_v": 96,
+          "mask": "causal",
+          "use_sinks": true,
+          "layout": "paged",
+          "page_block_size": 64,
+          "dense_q": true,
+          "seqused_q": true
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "kind": "prefill",
+        "head_size": 96,
+        "head_size_v": 96,
+        "mask_mode": "causal",
+        "bias": "none",
+        "block_size": 256,
+        "block_m": 128,
+        "dv_split": 1,
+        "layout": "paged",
+        "page_block_size": 64,
+        "dense_q": 1,
+        "seqused_q": 1,
+        "sinks": 1
+      },
+      "priority": 0,
+      "arch": [
+        "gfx1200",
+        "gfx1201"
+      ]
+    },
+    {
+      "version": "1.0",
+      "id": "02844590-eab7-48f7-ae82-1e6d733672dc",
+      "name": "wmma_prefill_paged.fp16_d96v96_p64_m128_raggedq_sinks",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx1151/wmma_fmha_fwd_v2.py",
+        "builder": "build_wmma_fmha_fwd_v2",
+        "target": "generic",
+        "spec": {
+          "dtype": "fp16",
+          "head_dim": 96,
+          "head_dim_v": 96,
+          "mask": "causal",
+          "use_sinks": true,
+          "layout": "paged",
+          "page_block_size": 64,
+          "seqused_q": true
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "kind": "prefill",
+        "head_size": 96,
+        "head_size_v": 96,
+        "mask_mode": "causal",
+        "bias": "none",
+        "block_size": 256,
+        "block_m": 128,
+        "dv_split": 1,
+        "layout": "paged",
+        "page_block_size": 64,
+        "dense_q": 0,
+        "seqused_q": 1,
+        "sinks": 1
+      },
+      "priority": 0,
+      "arch": [
+        "gfx1200",
+        "gfx1201"
+      ]
+    },
+    {
+      "version": "1.0",
+      "id": "59ed746e-c797-4a40-9e6e-7197696446df",
+      "name": "wmma_prefill_paged.bf16_d96v96_p32_m128_denseq_used_sinks",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx1151/wmma_fmha_fwd_v2.py",
+        "builder": "build_wmma_fmha_fwd_v2",
+        "target": "generic",
+        "spec": {
+          "dtype": "bf16",
+          "head_dim": 96,
+          "head_dim_v": 96,
+          "mask": "causal",
+          "use_sinks": true,
+          "layout": "paged",
+          "page_block_size": 32,
+          "dense_q": true,
+          "seqused_q": true
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "kind": "prefill",
+        "head_size": 96,
+        "head_size_v": 96,
+        "mask_mode": "causal",
+        "bias": "none",
+        "block_size": 256,
+        "block_m": 128,
+        "dv_split": 1,
+        "layout": "paged",
+        "page_block_size": 32,
+        "dense_q": 1,
+        "seqused_q": 1,
+        "sinks": 1
+      },
+      "priority": 0,
+      "arch": [
+        "gfx1200",
+        "gfx1201"
+      ]
+    },
+    {
+      "version": "1.0",
+      "id": "b479b520-ead8-4d5f-bf59-afcb378671ae",
+      "name": "wmma_prefill_paged.bf16_d96v96_p32_m128_raggedq_sinks",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx1151/wmma_fmha_fwd_v2.py",
+        "builder": "build_wmma_fmha_fwd_v2",
+        "target": "generic",
+        "spec": {
+          "dtype": "bf16",
+          "head_dim": 96,
+          "head_dim_v": 96,
+          "mask": "causal",
+          "use_sinks": true,
+          "layout": "paged",
+          "page_block_size": 32,
+          "seqused_q": true
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "kind": "prefill",
+        "head_size": 96,
+        "head_size_v": 96,
+        "mask_mode": "causal",
+        "bias": "none",
+        "block_size": 256,
+        "block_m": 128,
+        "dv_split": 1,
+        "layout": "paged",
+        "page_block_size": 32,
+        "dense_q": 0,
+        "seqused_q": 1,
+        "sinks": 1
+      },
+      "priority": 0,
+      "arch": [
+        "gfx1200",
+        "gfx1201"
+      ]
+    },
+    {
+      "version": "1.0",
+      "id": "69bdaa7a-f5e9-4f3f-a077-f190f8565d1a",
+      "name": "wmma_prefill_paged.bf16_d96v96_p64_m128_denseq_used_sinks",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx1151/wmma_fmha_fwd_v2.py",
+        "builder": "build_wmma_fmha_fwd_v2",
+        "target": "generic",
+        "spec": {
+          "dtype": "bf16",
+          "head_dim": 96,
+          "head_dim_v": 96,
+          "mask": "causal",
+          "use_sinks": true,
+          "layout": "paged",
+          "page_block_size": 64,
+          "dense_q": true,
+          "seqused_q": true
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "kind": "prefill",
+        "head_size": 96,
+        "head_size_v": 96,
+        "mask_mode": "causal",
+        "bias": "none",
+        "block_size": 256,
+        "block_m": 128,
+        "dv_split": 1,
+        "layout": "paged",
+        "page_block_size": 64,
+        "dense_q": 1,
+        "seqused_q": 1,
+        "sinks": 1
+      },
+      "priority": 0,
+      "arch": [
+        "gfx1200",
+        "gfx1201"
+      ]
+    },
+    {
+      "version": "1.0",
+      "id": "09acda94-00d5-48bc-aea4-c70765ef3f7d",
+      "name": "wmma_prefill_paged.bf16_d96v96_p64_m128_raggedq_sinks",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx1151/wmma_fmha_fwd_v2.py",
+        "builder": "build_wmma_fmha_fwd_v2",
+        "target": "generic",
+        "spec": {
+          "dtype": "bf16",
+          "head_dim": 96,
+          "head_dim_v": 96,
+          "mask": "causal",
+          "use_sinks": true,
+          "layout": "paged",
+          "page_block_size": 64,
+          "seqused_q": true
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "kind": "prefill",
+        "head_size": 96,
+        "head_size_v": 96,
+        "mask_mode": "causal",
+        "bias": "none",
+        "block_size": 256,
+        "block_m": 128,
+        "dv_split": 1,
+        "layout": "paged",
+        "page_block_size": 64,
+        "dense_q": 0,
+        "seqused_q": 1,
+        "sinks": 1
+      },
+      "priority": 0,
+      "arch": [
+        "gfx1200",
+        "gfx1201"
+      ]
+    },
+    {
+      "version": "1.0",
+      "id": "d987f694-2535-4cf4-9bc1-8823588df8d6",
+      "name": "wmma_prefill_paged.fp16_d96v96_p32_m64_denseq_used_sinks",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx1151/wmma_fmha_fwd_v2.py",
+        "builder": "build_wmma_fmha_fwd_v2",
+        "target": "generic",
+        "spec": {
+          "dtype": "fp16",
+          "head_dim": 96,
+          "head_dim_v": 96,
+          "mask": "causal",
+          "use_sinks": true,
+          "layout": "paged",
+          "page_block_size": 32,
+          "dense_q": true,
+          "seqused_q": true,
+          "block_m": 64
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "kind": "prefill",
+        "head_size": 96,
+        "head_size_v": 96,
+        "mask_mode": "causal",
+        "bias": "none",
+        "block_size": 128,
+        "block_m": 64,
+        "dv_split": 1,
+        "layout": "paged",
+        "page_block_size": 32,
+        "dense_q": 1,
+        "seqused_q": 1,
+        "sinks": 1
+      },
+      "priority": 0,
+      "arch": [
+        "gfx1100",
+        "gfx1101",
+        "gfx1102",
+        "gfx1103",
+        "gfx1150",
+        "gfx1151",
+        "gfx1152",
+        "gfx1153"
+      ]
+    },
+    {
+      "version": "1.0",
+      "id": "f6e66a8f-ff62-4636-a7d1-b71caa372dd6",
+      "name": "wmma_prefill_paged.fp16_d96v96_p32_m64_raggedq_sinks",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx1151/wmma_fmha_fwd_v2.py",
+        "builder": "build_wmma_fmha_fwd_v2",
+        "target": "generic",
+        "spec": {
+          "dtype": "fp16",
+          "head_dim": 96,
+          "head_dim_v": 96,
+          "mask": "causal",
+          "use_sinks": true,
+          "layout": "paged",
+          "page_block_size": 32,
+          "seqused_q": true,
+          "block_m": 64
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "kind": "prefill",
+        "head_size": 96,
+        "head_size_v": 96,
+        "mask_mode": "causal",
+        "bias": "none",
+        "block_size": 128,
+        "block_m": 64,
+        "dv_split": 1,
+        "layout": "paged",
+        "page_block_size": 32,
+        "dense_q": 0,
+        "seqused_q": 1,
+        "sinks": 1
+      },
+      "priority": 0,
+      "arch": [
+        "gfx1100",
+        "gfx1101",
+        "gfx1102",
+        "gfx1103",
+        "gfx1150",
+        "gfx1151",
+        "gfx1152",
+        "gfx1153"
+      ]
+    },
+    {
+      "version": "1.0",
+      "id": "ba7e8144-ba92-428d-82ed-8d96959ba964",
+      "name": "wmma_prefill_paged.fp16_d96v96_p64_m64_denseq_used_sinks",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx1151/wmma_fmha_fwd_v2.py",
+        "builder": "build_wmma_fmha_fwd_v2",
+        "target": "generic",
+        "spec": {
+          "dtype": "fp16",
+          "head_dim": 96,
+          "head_dim_v": 96,
+          "mask": "causal",
+          "use_sinks": true,
+          "layout": "paged",
+          "page_block_size": 64,
+          "dense_q": true,
+          "seqused_q": true,
+          "block_m": 64
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "kind": "prefill",
+        "head_size": 96,
+        "head_size_v": 96,
+        "mask_mode": "causal",
+        "bias": "none",
+        "block_size": 128,
+        "block_m": 64,
+        "dv_split": 1,
+        "layout": "paged",
+        "page_block_size": 64,
+        "dense_q": 1,
+        "seqused_q": 1,
+        "sinks": 1
+      },
+      "priority": 0,
+      "arch": [
+        "gfx1100",
+        "gfx1101",
+        "gfx1102",
+        "gfx1103",
+        "gfx1150",
+        "gfx1151",
+        "gfx1152",
+        "gfx1153"
+      ]
+    },
+    {
+      "version": "1.0",
+      "id": "c57791eb-c3c4-4cae-8687-7473b4767c2b",
+      "name": "wmma_prefill_paged.fp16_d96v96_p64_m64_raggedq_sinks",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx1151/wmma_fmha_fwd_v2.py",
+        "builder": "build_wmma_fmha_fwd_v2",
+        "target": "generic",
+        "spec": {
+          "dtype": "fp16",
+          "head_dim": 96,
+          "head_dim_v": 96,
+          "mask": "causal",
+          "use_sinks": true,
+          "layout": "paged",
+          "page_block_size": 64,
+          "seqused_q": true,
+          "block_m": 64
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "kind": "prefill",
+        "head_size": 96,
+        "head_size_v": 96,
+        "mask_mode": "causal",
+        "bias": "none",
+        "block_size": 128,
+        "block_m": 64,
+        "dv_split": 1,
+        "layout": "paged",
+        "page_block_size": 64,
+        "dense_q": 0,
+        "seqused_q": 1,
+        "sinks": 1
+      },
+      "priority": 0,
+      "arch": [
+        "gfx1100",
+        "gfx1101",
+        "gfx1102",
+        "gfx1103",
+        "gfx1150",
+        "gfx1151",
+        "gfx1152",
+        "gfx1153"
+      ]
+    },
+    {
+      "version": "1.0",
+      "id": "9896f349-a329-46b7-b1c1-cb91eb4cec9c",
+      "name": "wmma_prefill_paged.bf16_d96v96_p32_m64_denseq_used_sinks",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx1151/wmma_fmha_fwd_v2.py",
+        "builder": "build_wmma_fmha_fwd_v2",
+        "target": "generic",
+        "spec": {
+          "dtype": "bf16",
+          "head_dim": 96,
+          "head_dim_v": 96,
+          "mask": "causal",
+          "use_sinks": true,
+          "layout": "paged",
+          "page_block_size": 32,
+          "dense_q": true,
+          "seqused_q": true,
+          "block_m": 64
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "kind": "prefill",
+        "head_size": 96,
+        "head_size_v": 96,
+        "mask_mode": "causal",
+        "bias": "none",
+        "block_size": 128,
+        "block_m": 64,
+        "dv_split": 1,
+        "layout": "paged",
+        "page_block_size": 32,
+        "dense_q": 1,
+        "seqused_q": 1,
+        "sinks": 1
+      },
+      "priority": 0,
+      "arch": [
+        "gfx1100",
+        "gfx1101",
+        "gfx1102",
+        "gfx1103",
+        "gfx1150",
+        "gfx1151",
+        "gfx1152",
+        "gfx1153"
+      ]
+    },
+    {
+      "version": "1.0",
+      "id": "f929c14e-8fba-4884-89dc-3d1214009a1d",
+      "name": "wmma_prefill_paged.bf16_d96v96_p32_m64_raggedq_sinks",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx1151/wmma_fmha_fwd_v2.py",
+        "builder": "build_wmma_fmha_fwd_v2",
+        "target": "generic",
+        "spec": {
+          "dtype": "bf16",
+          "head_dim": 96,
+          "head_dim_v": 96,
+          "mask": "causal",
+          "use_sinks": true,
+          "layout": "paged",
+          "page_block_size": 32,
+          "seqused_q": true,
+          "block_m": 64
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "kind": "prefill",
+        "head_size": 96,
+        "head_size_v": 96,
+        "mask_mode": "causal",
+        "bias": "none",
+        "block_size": 128,
+        "block_m": 64,
+        "dv_split": 1,
+        "layout": "paged",
+        "page_block_size": 32,
+        "dense_q": 0,
+        "seqused_q": 1,
+        "sinks": 1
+      },
+      "priority": 0,
+      "arch": [
+        "gfx1100",
+        "gfx1101",
+        "gfx1102",
+        "gfx1103",
+        "gfx1150",
+        "gfx1151",
+        "gfx1152",
+        "gfx1153"
+      ]
+    },
+    {
+      "version": "1.0",
+      "id": "182b8f0b-7307-4767-8901-ae4f48d1dc64",
+      "name": "wmma_prefill_paged.bf16_d96v96_p64_m64_denseq_used_sinks",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx1151/wmma_fmha_fwd_v2.py",
+        "builder": "build_wmma_fmha_fwd_v2",
+        "target": "generic",
+        "spec": {
+          "dtype": "bf16",
+          "head_dim": 96,
+          "head_dim_v": 96,
+          "mask": "causal",
+          "use_sinks": true,
+          "layout": "paged",
+          "page_block_size": 64,
+          "dense_q": true,
+          "seqused_q": true,
+          "block_m": 64
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "kind": "prefill",
+        "head_size": 96,
+        "head_size_v": 96,
+        "mask_mode": "causal",
+        "bias": "none",
+        "block_size": 128,
+        "block_m": 64,
+        "dv_split": 1,
+        "layout": "paged",
+        "page_block_size": 64,
+        "dense_q": 1,
+        "seqused_q": 1,
+        "sinks": 1
+      },
+      "priority": 0,
+      "arch": [
+        "gfx1100",
+        "gfx1101",
+        "gfx1102",
+        "gfx1103",
+        "gfx1150",
+        "gfx1151",
+        "gfx1152",
+        "gfx1153"
+      ]
+    },
+    {
+      "version": "1.0",
+      "id": "11a6536a-5040-44bf-ae06-f631dcb16a52",
+      "name": "wmma_prefill_paged.bf16_d96v96_p64_m64_raggedq_sinks",
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx1151/wmma_fmha_fwd_v2.py",
+        "builder": "build_wmma_fmha_fwd_v2",
+        "target": "generic",
+        "spec": {
+          "dtype": "bf16",
+          "head_dim": 96,
+          "head_dim_v": 96,
+          "mask": "causal",
+          "use_sinks": true,
+          "layout": "paged",
+          "page_block_size": 64,
+          "seqused_q": true,
+          "block_m": 64
+        }
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "kind": "prefill",
+        "head_size": 96,
+        "head_size_v": 96,
+        "mask_mode": "causal",
+        "bias": "none",
+        "block_size": 128,
+        "block_m": 64,
+        "dv_split": 1,
+        "layout": "paged",
+        "page_block_size": 64,
+        "dense_q": 0,
+        "seqused_q": 1,
+        "sinks": 1
+      },
+      "priority": 0,
+      "arch": [
+        "gfx1100",
+        "gfx1101",
+        "gfx1102",
+        "gfx1103",
+        "gfx1150",
+        "gfx1151",
+        "gfx1152",
+        "gfx1153"
+      ]
     }
   ],
   "arch": [
