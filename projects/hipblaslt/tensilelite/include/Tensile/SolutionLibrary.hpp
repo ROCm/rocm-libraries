@@ -131,7 +131,8 @@ namespace TensileLite
             // to the narrower problemPredicate && taskPredicate it subsumes.
             return (*solutions.problemPredicate)(problem) && (*solutions.taskPredicate)(task)
                    && solutions.streamKDynamicQueueSupported(problem, hardware)
-                   && solutions.uniformSummationOrderSupported(problem, hardware);
+                   && solutions.uniformSummationOrderSupported(problem, hardware)
+                   && solutions.deviceScalarAlphaSupported(problem);
             break;
         case SolutionLibrarySearchType::GEMM_TYPE_ONLY:
         case SolutionLibrarySearchType::GEMM_TYPE_ONLY_NO_RANKING:
@@ -147,7 +148,8 @@ namespace TensileLite
     }
 
     // With USO off this applies only problemPredicate && taskPredicate &&
-    // hardwarePredicate. With USO on, softwarePredicate() adds
+    // hardwarePredicate, plus the independent device-scalar capability check.
+    // With USO on, softwarePredicate() adds
     // streamKDynamicQueueSupported() and uniformSummationOrderSupported(), both
     // live filters on that arm. hardwarePredicate keeps each arm's original
     // position -- last off, first on -- because taskPredicate can warn via
@@ -164,7 +166,8 @@ namespace TensileLite
                        SolutionLibrarySearchType::DEFAULT, task, hardware, solution, problem);
 
         return (*solution.problemPredicate)(problem) && (*solution.taskPredicate)(task)
-               && (*solution.hardwarePredicate)(hardware);
+               && (*solution.hardwarePredicate)(hardware)
+               && solution.deviceScalarAlphaSupported(problem);
     }
 
     template <typename MySolution>
@@ -292,4 +295,3 @@ namespace TensileLite
     };
 
 } // namespace TensileLite
-
