@@ -325,10 +325,12 @@ def _compile_hip_source(
     source_root,
     rel_dir,
     arch,
-    hipcc,
+    hip_compiler,
     inter_arch_dir,
     variant_co,
     variant_symbol,
+    hip_path=None,
+    device_lib_path=None,
 ):
     """Compile one hip kernel_source once per variant key.
 
@@ -337,13 +339,15 @@ def _compile_hip_source(
     """
     if vk not in variant_co:
         variant_co[vk] = compile_hip_variant(
-            hipcc,
+            hip_compiler,
             source_root,
             rel_dir,
             ks["source"],
             ks["build"],
             arch,
             inter_arch_dir,
+            hip_path=hip_path,
+            device_lib_path=device_lib_path,
         )
         variant_symbol[vk] = ks["entry"]
 
@@ -407,7 +411,7 @@ def _compile_sources_ukd(
     source_root,
     rel_dir,
     arch,
-    hipcc,
+    hip_compiler,
     inter_arch_dir,
     variant_co,
     variant_symbol,
@@ -415,6 +419,8 @@ def _compile_sources_ukd(
     consumer_records,
     variant_observations,
     origins,
+    hip_path=None,
+    device_lib_path=None,
 ):
     """Compile every launch of a `sources` UKD; entries that share one compile
     share a code object.
@@ -466,10 +472,12 @@ def _compile_sources_ukd(
                     source_root,
                     rel_dir,
                     arch,
-                    hipcc,
+                    hip_compiler,
                     inter_arch_dir,
                     variant_co,
                     variant_symbol,
+                    hip_path=hip_path,
+                    device_lib_path=device_lib_path,
                 )
                 continue
             compiled[vk] = _compile_rocke_launch(
@@ -565,7 +573,7 @@ def _compile_ukd_variant(
     source_root,
     rel_dir,
     arch,
-    hipcc,
+    hip_compiler,
     inter_arch_dir,
     variant_co,
     variant_symbol,
@@ -573,6 +581,8 @@ def _compile_ukd_variant(
     consumer_records,
     variant_observations,
     origins,
+    hip_path=None,
+    device_lib_path=None,
 ):
     """Compile one UKD variant for arch, deduped into variant_co per kind.
 
@@ -594,7 +604,7 @@ def _compile_ukd_variant(
             source_root,
             rel_dir,
             arch,
-            hipcc,
+            hip_compiler,
             inter_arch_dir,
             variant_co,
             variant_symbol,
@@ -602,6 +612,8 @@ def _compile_ukd_variant(
             consumer_records,
             variant_observations,
             origins,
+            hip_path=hip_path,
+            device_lib_path=device_lib_path,
         )
     ks = entries[None]
     kind = ks["kind"]
@@ -619,10 +631,12 @@ def _compile_ukd_variant(
             source_root,
             rel_dir,
             arch,
-            hipcc,
+            hip_compiler,
             inter_arch_dir,
             variant_co,
             variant_symbol,
+            hip_path=hip_path,
+            device_lib_path=device_lib_path,
         )
         symbol = entry
         fields = {
@@ -748,7 +762,7 @@ class _VariantJob:
     """One distinct variant the prewarm compiles, as a picklable record.
 
     Every field is a str or a plain dict so the record crosses a process
-    boundary without a custom reducer. `hipcc` and `arch` travel by value
+    boundary without a custom reducer. `hip_compiler` and `arch` travel by value
     rather than through an environment variable or a module global, so the
     worker is a pure function of its argument.
     """
@@ -759,8 +773,10 @@ class _VariantJob:
     rel_dir: str
     source_root: str
     out_dir: str
-    hipcc: str
+    hip_compiler: str
     arch: str
+    hip_path: str = ""
+    device_lib_path: str = ""
     requests: dict = field(default_factory=dict)
     # The launches of `sources` UKDs that share this compile, in walk order; empty
     # for a single-launch UKD.
@@ -923,7 +939,7 @@ def _prewarm_jobs(flat, source_root, arch, observation_requests=None):
 
     Selection comes from the generator the walk consumes, and dedup on the variant
     key keeps first-seen (walk) order. A kind `_variant_key_for` declines is dropped
-    here, leaving the walk to report it; `out_dir` and `hipcc` are filled in by
+    here, leaving the walk to report it; `out_dir` and `hip_compiler` are filled in by
     `_prewarm_variants`. hsaco is declined deliberately: it has no compile, so it
     yields no job, and the walk keys it via `hsaco_variant_key`.
     """
@@ -953,7 +969,7 @@ def _prewarm_jobs(flat, source_root, arch, observation_requests=None):
                         rel_dir=Path(rel_dir).as_posix(),
                         source_root=str(source_root),
                         out_dir="",
-                        hipcc="",
+                        hip_compiler="",
                         arch=arch,
                         requests=observation_requests.get(vk, {}),
                     )
@@ -984,13 +1000,15 @@ def _compile_one_variant(job):
         ks = job.ukd["kernel_source"]
         if job.kind == "hip":
             co_path = compile_hip_variant(
-                job.hipcc,
+                job.hip_compiler,
                 job.source_root,
                 job.rel_dir,
                 ks["source"],
                 ks["build"],
                 job.arch,
                 job.out_dir,
+                hip_path=job.hip_path or None,
+                device_lib_path=job.device_lib_path or None,
             )
             # The hip symbol is authored, not captured from the artifact, which
             # is why it is read here rather than returned by the producer.
@@ -1205,13 +1223,15 @@ def _prewarm_variants(
     flat,
     source_root,
     arch,
-    hipcc,
+    hip_compiler,
     inter_arch_dir,
     variant_co,
     variant_symbol,
     variant_observations,
     observation_requests,
     log=print,
+    hip_path=None,
+    device_lib_path=None,
 ):
     """Compile this arch's distinct variants concurrently into the caches.
 
@@ -1228,7 +1248,13 @@ def _prewarm_variants(
     walk skip compiles whose artefacts were never produced.
     """
     jobs = [
-        replace(job, out_dir=str(inter_arch_dir), hipcc=str(hipcc))
+        replace(
+            job,
+            out_dir=str(inter_arch_dir),
+            hip_compiler=str(hip_compiler),
+            hip_path=str(hip_path or ""),
+            device_lib_path=str(device_lib_path or ""),
+        )
         for job in _prewarm_jobs(flat, source_root, arch, observation_requests)
     ]
 
@@ -1305,7 +1331,16 @@ def _prewarm_variants(
     return origins
 
 
-def compile_intermediate(flat, source_root, arch, hipcc, inter_arch_dir, log=print):
+def compile_intermediate(
+    flat,
+    source_root,
+    arch,
+    hip_compiler,
+    inter_arch_dir,
+    log=print,
+    hip_path=None,
+    device_lib_path=None,
+):
     """Compile every hip and rocke UKD in the KDPs targeting arch and stage a per-arch tree.
 
     Writes inter_arch_dir with: hsaco-form KDP JSON (inline UKDs rewritten
@@ -1340,13 +1375,15 @@ def compile_intermediate(flat, source_root, arch, hipcc, inter_arch_dir, log=pri
         flat,
         source_root,
         arch,
-        hipcc,
+        hip_compiler,
         inter_arch_dir,
         variant_co,
         variant_symbol,
         variant_observations,
         observation_requests,
         log,
+        hip_path=hip_path,
+        device_lib_path=device_lib_path,
     )
     for variant_origins in prewarmed_origins:
         origins.absorb(variant_origins)
@@ -1393,7 +1430,7 @@ def compile_intermediate(flat, source_root, arch, hipcc, inter_arch_dir, log=pri
                     source_root,
                     sdesc.rel_dir,
                     arch,
-                    hipcc,
+                    hip_compiler,
                     inter_arch_dir,
                     variant_co,
                     variant_symbol,
@@ -1401,6 +1438,8 @@ def compile_intermediate(flat, source_root, arch, hipcc, inter_arch_dir, log=pri
                     consumer_records,
                     variant_observations,
                     origins,
+                    hip_path=hip_path,
+                    device_lib_path=device_lib_path,
                 )
                 if key in standalone_ukds:
                     continue
@@ -1432,7 +1471,7 @@ def compile_intermediate(flat, source_root, arch, hipcc, inter_arch_dir, log=pri
                 source_root,
                 kdp.rel_dir,
                 arch,
-                hipcc,
+                hip_compiler,
                 inter_arch_dir,
                 variant_co,
                 variant_symbol,
@@ -1440,6 +1479,8 @@ def compile_intermediate(flat, source_root, arch, hipcc, inter_arch_dir, log=pri
                 consumer_records,
                 variant_observations,
                 origins,
+                hip_path=hip_path,
+                device_lib_path=device_lib_path,
             )
             # An authored code object keeps its authored form: no `.co` is staged
             # for it, its bytes are read from the authored file at pack time.
@@ -1564,7 +1605,7 @@ def _rewrite_ukd_kpack(
     document version 1.1.
 
     `toolchain_fields` carries the fields describing what actually produced the kernel
-    (hipcc version, resolved comgr, rocKE wheel digest) as opposed to what the
+    (HIP version, resolved comgr, rocKE wheel digest) as opposed to what the
     descriptor asked for. Merged into provenance rather than the variant key: in
     the key, a wheel bump would rename every rocKE artifact including ones it
     could not affect.
@@ -1720,7 +1761,7 @@ def _rewrite_passthrough_ukd(passthrough, arch, source_label=None):
     return doc
 
 
-def _toolchain_for(ukd, hipcc, rocke_wheel_stamp):
+def _toolchain_for(ukd, hip_path, rocke_wheel_stamp):
     """Toolchain provenance for one UKD, dispatched on its producer.
 
     A prebuilt hsaco object carries no toolchain claim: nothing here produced it.
@@ -1730,7 +1771,7 @@ def _toolchain_for(ukd, hipcc, rocke_wheel_stamp):
         return None
     if ukd.origin_kind == "rocke":
         return toolchain.rocke_provenance(rocke_wheel_stamp)
-    return toolchain.hip_provenance(hipcc)
+    return toolchain.hip_provenance(hip_path)
 
 
 def _launch_set(inter, entry):
@@ -1802,7 +1843,7 @@ def pack_arch(
     kpack_mod,
     comp,
     expected_sha256=None,
-    hipcc=None,
+    hip_path=None,
     rocke_wheel_stamp=None,
     group=GROUP_NAME,
     source_label=None,
@@ -2003,7 +2044,7 @@ def pack_arch(
                         arch,
                         *args,
                         **packed,
-                        toolchain_fields=_toolchain_for(e, hipcc, rocke_wheel_stamp),
+                        toolchain_fields=_toolchain_for(e, hip_path, rocke_wheel_stamp),
                         # An inline UKD ships INSIDE this KDP file, so the
                         # runtime anchors its library on the KDP's directory,
                         # not the UKD's own notion of where it came from.
@@ -2024,7 +2065,7 @@ def pack_arch(
             arch,
             *args,
             **packed,
-            toolchain_fields=_toolchain_for(ukd, hipcc, rocke_wheel_stamp),
+            toolchain_fields=_toolchain_for(ukd, hip_path, rocke_wheel_stamp),
             # A standalone UKD is its own file, so it anchors on its own dir.
             rel_dir=ukd.rel_dir,
             group=group,
@@ -2127,7 +2168,7 @@ def run_pipeline(
     source_root,
     arches,
     out_root,
-    hipcc,
+    hip_compiler,
     generic_targets_json,
     rocm_kpack_dir=None,
     inter_root=None,
@@ -2138,6 +2179,8 @@ def run_pipeline(
     exclude_folders=(),
     disabled_kinds=(),
     log=print,
+    hip_path=None,
+    device_lib_path=None,
 ):
     """One invocation over the full arch list: compile, prune, pack, install.
 
@@ -2199,7 +2242,14 @@ def run_pipeline(
             continue
         try:
             inter = compile_intermediate(
-                flat, source_root, arch, hipcc, inter_root / arch, log=log
+                flat,
+                source_root,
+                arch,
+                hip_compiler,
+                inter_root / arch,
+                log=log,
+                hip_path=hip_path,
+                device_lib_path=device_lib_path,
             )
             # Stage this arch into a sibling temp dir and rename it into place
             # only once pack_arch returns cleanly. pack_arch creates the arch
@@ -2218,7 +2268,7 @@ def run_pipeline(
                 kpack_mod,
                 comp,
                 expected_sha256=expected_sha256,
-                hipcc=hipcc,
+                hip_path=hip_path,
                 rocke_wheel_stamp=rocke_wheel_stamp,
                 group=group,
                 source_label=source_label,
@@ -2262,7 +2312,14 @@ def run_pipeline(
         generic_out = inter_root / ".generic-out" / generic
         try:
             inter = compile_intermediate(
-                flat, source_root, generic, hipcc, inter_root / generic, log=log
+                flat,
+                source_root,
+                generic,
+                hip_compiler,
+                inter_root / generic,
+                log=log,
+                hip_path=hip_path,
+                device_lib_path=device_lib_path,
             )
             if generic_out.exists():
                 shutil.rmtree(generic_out)
@@ -2273,7 +2330,7 @@ def run_pipeline(
                 kpack_mod,
                 comp,
                 expected_sha256=expected_sha256,
-                hipcc=hipcc,
+                hip_path=hip_path,
                 rocke_wheel_stamp=rocke_wheel_stamp,
                 group=group,
                 source_label=source_label,
