@@ -816,7 +816,6 @@ TEST(LayoutCpp, OwnedStridesAndArrayCoordinates) {
     EXPECT_EQ(spanCopy, layout);
     EXPECT_EQ((Layout(Shape{2, 3}, std::array<ptrdiff_t, 2>{5, -1}, 2)), layout);
     EXPECT_EQ((Layout(Shape{2, 3}, {5, -1}, 2)), layout);
-    EXPECT_EQ(Layout(Shape{}, {}, 0), Layout{});
     const auto offset = layout.elementOffset(std::array<size_t, 2>{1, 2});
     ASSERT_TRUE(offset);
     EXPECT_EQ(*offset, 5);
@@ -837,7 +836,7 @@ TEST(LayoutCpp, FactoriesAndExplicitOrders) {
     const auto offset = checked->elementOffset(coordinates);
     ASSERT_TRUE(offset);
     EXPECT_EQ(*offset, static_cast<ptrdiff_t>(shape.linearIndex(coordinates, order)));
-    EXPECT_EQ(Layout::contiguous(Shape{}, Permutation::identity(0)), Layout{});
+    EXPECT_EQ(Layout::contiguous(Shape{}, Permutation::identity(0)), Layout(Shape{}, {}, 0));
     EXPECT_EQ(Layout::contiguousLastDimensionFastest(Shape{2, 0, 3}),
               (Layout(Shape{2, 0, 3}, {0, 3, 1}, 0)));
     EXPECT_EQ(Layout::contiguousFirstDimensionFastest(Shape{2, 0, 3}),
@@ -855,7 +854,7 @@ TEST(LayoutCpp, InvalidStrideRanksAndDimensionsThrow) {
 
 TEST(LayoutCpp, CopiesAndMovesPreserveLayoutMetadata) {
     for (const Layout original :
-         {Layout{}, Layout(Shape{}, {}, -7), Layout(Shape{2, 3}, {5, -1}, 2),
+         {Layout(Shape{}, {}, 0), Layout(Shape{}, {}, -7), Layout(Shape{2, 3}, {5, -1}, 2),
           Layout(Shape{2, 0}, {0, 1}, 4)}) {
         Layout copied(original);
         EXPECT_EQ(copied, original);
@@ -863,7 +862,7 @@ TEST(LayoutCpp, CopiesAndMovesPreserveLayoutMetadata) {
         EXPECT_EQ(moved, original);
         // Layout moves reset the source to a scalar with zero offset.
         // NOLINTBEGIN(bugprone-use-after-move,clang-analyzer-cplusplus.Move)
-        EXPECT_TRUE(copied == Layout{});
+        EXPECT_TRUE(copied == Layout(Shape{}, {}, 0));
         EXPECT_EQ(copied.shape().elementCount(), 1);
         EXPECT_TRUE(copied.strides().empty());
         const auto copiedOffset = copied.elementOffset({});
@@ -871,14 +870,14 @@ TEST(LayoutCpp, CopiesAndMovesPreserveLayoutMetadata) {
         EXPECT_EQ(*copiedOffset, 0);
         // NOLINTEND(bugprone-use-after-move,clang-analyzer-cplusplus.Move)
 
-        Layout assigned;
+        Layout assigned(Shape{}, {}, 0);
         assigned = original;
         EXPECT_EQ(assigned, original);
         Layout moveAssigned(Shape{9}, {1}, 0);
         moveAssigned = std::move(assigned);
         EXPECT_EQ(moveAssigned, original);
         // NOLINTBEGIN(bugprone-use-after-move,clang-analyzer-cplusplus.Move)
-        EXPECT_TRUE(assigned == Layout{});
+        EXPECT_TRUE(assigned == Layout(Shape{}, {}, 0));
         EXPECT_EQ(assigned.shape().elementCount(), 1);
         EXPECT_TRUE(assigned.strides().empty());
         const auto assignedOffset = assigned.elementOffset({});
@@ -954,7 +953,7 @@ TEST(LayoutCpp, ReachableBoundsAndOverflowContext) {
     using namespace roc::hostnumerics::detail;
     static_assert(noexcept(std::declval<const Layout&>().getElementBounds()));
     for (const auto& [layout, expected] :
-         {std::pair{Layout{}, std::pair<ptrdiff_t, ptrdiff_t>{0, 0}},
+         {std::pair{Layout(Shape{}, {}, 0), std::pair<ptrdiff_t, ptrdiff_t>{0, 0}},
           std::pair{Layout(Shape{}, {}, -7), std::pair<ptrdiff_t, ptrdiff_t>{-7, -7}},
           std::pair{Layout(Shape{2, 3}, {-3, 1}, 3), std::pair<ptrdiff_t, ptrdiff_t>{0, 5}},
           std::pair{Layout(Shape{2, 3}, {0, 0}, 4), std::pair<ptrdiff_t, ptrdiff_t>{4, 4}},
