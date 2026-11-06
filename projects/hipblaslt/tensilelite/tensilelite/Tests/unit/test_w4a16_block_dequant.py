@@ -272,13 +272,13 @@ def test_emits_dequantize_per_local_write(toolchain):
     kernel, src = _emit(toolchain)
     numLoads = kernel["NumLoadsCoalescedA"] * kernel["NumLoadsPerpendicularA"]
 
-    # One saved source dword, 8 sign-extracts and 4 packs per A local write.
+    # One saved source dword, 8 exponent lifts and 4 packs per A local write.
     saves = re.findall(r"w4a16: save packed int4 dword", src)
-    bfes = re.findall(r"v_bfe_i32 .*w4a16: sign-extend int4", src)
+    lifts = re.findall(r"v_and_or_b32 .*w4a16: int4 #\d -> f32", src)
     # The bf16 pack is open-coded and ends in v_perm_b32.
     packs = re.findall(r"v_perm_b32 .*w4a16: pack 2 bf16", src)
     assert saves, "no dequantize block emitted"
-    assert len(bfes) == 8 * len(saves)
+    assert len(lifts) == 8 * len(saves)
     assert len(packs) == 4 * len(saves)
     assert len(saves) % numLoads == 0
 
@@ -295,26 +295,30 @@ def test_wide_a_load_dequantizes_every_source_dword(toolchain):
     numLoads = kernel["NumLoadsCoalescedA"] * kernel["NumLoadsPerpendicularA"]
     assert re.search(r"buffer_load_b128 v\[vgprG2LA\+\d+:.*sgprSrdA", src)
 
+    # Signed nibbles are saved already flipped to unsigned (v_xor), the others copied.
     saved = re.findall(
-        r"v_mov_b32 v\d+, v\[vgprG2LA\+(\d+)\+(\d+)\]\s+// w4a16: save packed int4", src)
+        r"v_(?:mov|xor)_b32 v\d+, (?:0x88888888, )?v\[vgprG2LA\+(\d+)\+(\d+)\]\s+// w4a16: save packed int4", src)
     assert set(int(base) + int(d) for base, d in saved) == {
         16 * load + 12 + d for load in range(numLoads) for d in range(4)}
 
 
-def test_dequantize_reads_source_before_overwriting_it(toolchain):
+@pytest.mark.parametrize("encoding", ["Signed", "UnsignedBias8"])
+def test_dequantize_reads_source_before_overwriting_it(toolchain, encoding):
     """The bf16 output overlaps the packed int4 source inside each G2L block, so
-    the source dword must be copied to a temp first."""
-    _, src = _emit(toolchain)
-    for m in re.finditer(
-        r"v_mov_b32 (v\d+), v\[vgprG2LA\+(\d+)\+0\]\s+// w4a16: save packed int4", src
-    ):
+    the source dword must be copied to a temp first (Signed: flipped to
+    unsigned on the way)."""
+    _, src = _emit(toolchain, problemType={"Int4EncodingA": encoding})
+    saves = list(re.finditer(
+        r"v_(?:mov|xor)_b32 (v\d+), (?:0x88888888, )?v\[vgprG2LA\+(\d+)\+0\]\s+// w4a16: save packed int4", src))
+    assert saves, "no save of the packed source"
+    for m in saves:
         tmp = m.group(1)
-        # The first bfe after the save must read the temp, not G2LA.
+        # The first nibble lift after the save must read the temp, not G2LA.
         rest = src[m.end():m.end() + 400]
-        firstBfe = re.search(r"v_bfe_i32 \S+, (\S+),", rest)
-        assert firstBfe, "no bfe after the save"
-        assert firstBfe.group(1) == tmp, (
-            f"dequantize reads {firstBfe.group(1)} instead of the saved copy {tmp}")
+        firstLift = re.search(r"v_and_or_b32 \S+, (\S+),", rest)
+        assert firstLift, "no nibble lift after the save"
+        assert firstLift.group(1) == tmp, (
+            f"dequantize reads {firstLift.group(1)} instead of the saved copy {tmp}")
 
 
 def test_scale_srd_increment_matches_group_size(toolchain):
@@ -673,21 +677,36 @@ def test_int4_encoding_rejects_unknown_name(toolchain):
     assert sol.get("Valid") is not True
 
 
-def test_signed_encoding_sign_extends_and_needs_no_bias(toolchain):
-    """The default encoding reads two's-complement nibbles and, with no
-    zero-point, scales with a plain multiply."""
+def test_signed_encoding_biases_nibbles_and_needs_no_zero_point(toolchain):
+    """The default encoding flips two's-complement nibbles to n = q + 8 and,
+    with no zero-point, subtracts the constant 2^E + 8 before the multiply."""
     _, src = _emit(toolchain)
-    assert re.search(r"v_bfe_i32 .*w4a16: sign-extend int4", src)
-    assert not re.search(r"v_bfe_u32 .*w4a16: zero-extend int4", src)
-    assert re.search(r"v_mul_f32 .*w4a16: dequantize", src)
+    assert re.search(r"v_xor_b32 .*0x88888888.*biased to unsigned", src)
+    assert re.search(r"v_dual_subrev_f32 .*w4a16: n - c, exact", src)
+    assert re.search(r"v_dual_mul_f32 .*w4a16: \(n - c\) \* s", src)
+    assert "w4a16: - zero-point" not in src
+    # 2^23 + 8, the subtrahend of nibble 0.
+    assert hex(0x4b000008) in src
 
 
-def test_unsigned_bias8_uses_signed_nibbles_after_bias_flip(toolchain):
+def test_bf16_dequantize_dual_issues_and_rounds_once(toolchain):
+    """The subtract and the multiply of two elements share one VOPD slot, and
+    the pack rounds with a single add (ties away from zero), not the
+    extract-and-add round-to-nearest-even."""
+    _, src = _emit(toolchain)
+    body = src[src.index("w4a16: save packed int4 dword"):]
+    body = body[:body.index("ds_store")]
+    assert body.count("v_dual_") >= 8
+    assert "w4a16: lsb of the bf16 mantissa" not in src
+    assert len(re.findall(r"add_nc_u32 v\d+, s\[sgprScaleALiftMagic\+5\]", body)) == 8
+
+
+def test_unsigned_bias8_lifts_raw_nibbles(toolchain):
+    """UnsignedBias8 nibbles already are n = q + 8: no flip, same subtrahend."""
     _, src = _emit(toolchain, problemType={"Int4EncodingA": "UnsignedBias8"})
-    assert "0x88888888" in src
-    assert re.search(r"v_bfe_i32 .*w4a16: sign-extend int4", src)
-    assert re.search(r"v_mul_f32 .*w4a16: dequantize", src)
-    assert "w4a16: q*s - z*s" not in src
+    assert "0x88888888" not in src
+    assert re.search(r"v_dual_subrev_f32 .*w4a16: n - c, exact", src)
+    assert "w4a16: - zero-point" not in src
 
 
 # ---------------------------------------------------------------------------
@@ -812,16 +831,15 @@ def test_emits_one_zero_point_load_per_a_load(toolchain):
         f"expected >= {numLoads} zero-point loads, found {len(loads)}")
 
 
-def test_zero_point_uses_fma_not_mul(toolchain):
-    """Folding -z*s into the FMA is what keeps the per-element cost identical to
-    the symmetric path; a regression to mul+sub would double the ALU work."""
+def test_zero_point_costs_one_subtract_per_element(toolchain):
+    """The zero-point adds exactly one exact subtract per element to the
+    symmetric sequence; everything else is shared."""
     _, sym = _emit(toolchain)
     _, asym = _emit(toolchain, zeroPoint=True)
-
-    assert "w4a16: q*s - z*s" in asym
-    assert asym.count("v_fma_f32") > sym.count("v_fma_f32")
-    # Same number of per-element dequantize ops in both.
-    assert asym.count("w4a16: sign-extend int4") == sym.count("w4a16: sign-extend int4")
+    lifts = asym.count("w4a16: int4 #")
+    assert lifts == sym.count("w4a16: int4 #")
+    assert asym.count("w4a16: - zero-point, exact") == lifts
+    assert "w4a16: - zero-point" not in sym
 
 
 def test_zero_point_srd_advances_with_the_k_loop(toolchain):
