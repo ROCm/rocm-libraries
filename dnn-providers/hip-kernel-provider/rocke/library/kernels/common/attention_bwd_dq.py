@@ -129,6 +129,7 @@ __all__ = [
     "dq_rows_per_head",
     "dq_static_scale",
     "dq_static_unit_mults",
+    "supports_attn_bwd_dq",
     "validate_attn_bwd_dq_spec",
 ]
 
@@ -1004,6 +1005,16 @@ def _emit_dq(spec: AttnBwdDqSpec, arch: str, *, sentinel: bool = True):
     )  # fmt: skip
     b.ret()
     return b.kernel
+
+
+def supports_attn_bwd_dq(spec: AttnBwdDqSpec, *, arch: str) -> tuple[bool, str]:
+    """``(ok, reason)``: whether :func:`build_attn_bwd_dq` builds ``spec`` on
+    ``arch`` (:func:`validate_attn_bwd_dq_spec`)."""
+    try:
+        validate_attn_bwd_dq_spec(spec, arch)
+    except ValueError as exc:
+        return False, str(exc)
+    return True, ""
 
 
 def build_attn_bwd_dq(spec: AttnBwdDqSpec, *, arch: str):

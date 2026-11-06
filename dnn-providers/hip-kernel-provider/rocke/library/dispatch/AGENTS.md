@@ -594,6 +594,17 @@ doc 0.3, the C++-engine waiver).
   the registered order. Entry points: `dispatch_attention_bwd`,
   `dispatch_attention_bwd_all`, `launch_attention_bwd`, `run_attention_bwd`.
 
+* **hipDNN lowering** (`hipdnn.py`, `hipdnn_catalog.py`). The reference of
+  the native hipDNN engine `hipkernel:AttentionGeneralBwd`: `from_hipdnn_graph`
+  lowers an `SdpaBackward` graph (band, THD tables with per-tensor
+  multipliers, stats forms, smallest declared alignment; a graph it cannot
+  read raises `HipdnnLoweringError`, the engine's `LOWERING` code),
+  `engine_verdict` plans it under `engine_policy()` (the per-arch tuned
+  tables, no padding group, no dense pack), and `plan_record` is the engine's
+  expected tokens, workspace and launches. `hipdnn_catalog.catalog_rows` lists
+  every kernel the engine ships per arch. Its C++ port must apply the same
+  rules in the same order. Tests: `tests/test_attention_bwd_hipdnn*.py`.
+
 **Production status: dormant.** Like the forward registry, the backward
 dispatcher is not load-bearing for production yet: no provider calls it (the
 hip-kernel-provider serves rocKE kernels through the C++ engine, which has no

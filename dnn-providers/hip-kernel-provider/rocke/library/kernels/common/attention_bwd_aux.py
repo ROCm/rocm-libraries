@@ -97,6 +97,8 @@ __all__ = [
     "build_attn_bwd_page_zero",
     "build_attn_bwd_prep",
     "build_attn_bwd_reduce",
+    "supports_attn_bwd_convert",
+    "supports_attn_bwd_prep",
 ]
 
 ATTN_BWD_ABI = "rocke.attn_bwd.v3"
@@ -605,6 +607,31 @@ def _worklist_role(b, a, threads: int) -> None:
         b.scf_yield(total)
     with b.scf_if(b.cmp_eq(tid, zero)):
         worklist_store_count(b, a["WORKLIST"], outer.results[0])
+
+
+def supports_attn_bwd_prep(spec: AttnBwdAuxSpec, *, arch: str) -> tuple[bool, str]:
+    """``(ok, reason)``: whether :func:`build_attn_bwd_prep` builds ``spec``
+    on ``arch`` (the builder's own checks, before any IR)."""
+    try:
+        _check_arch(arch)
+        _check_vec8(spec, "prep")
+        attn_bwd_aux_rows_per_cta(spec, arch=arch)
+    except ValueError as exc:
+        return False, str(exc)
+    return True, ""
+
+
+def supports_attn_bwd_convert(spec: AttnBwdAuxSpec, *, arch: str) -> tuple[bool, str]:
+    """``(ok, reason)``: whether :func:`build_attn_bwd_convert` builds ``spec``
+    on ``arch`` (the builder's own checks, before any IR)."""
+    try:
+        _check_arch(arch)
+        if spec.worklist:
+            raise ValueError("worklist=True applies to the prep kernel only")
+        attn_bwd_aux_rows_per_cta(spec, arch=arch)
+    except ValueError as exc:
+        return False, str(exc)
+    return True, ""
 
 
 def build_attn_bwd_prep(spec: AttnBwdAuxSpec, *, arch: str) -> KernelDef:
