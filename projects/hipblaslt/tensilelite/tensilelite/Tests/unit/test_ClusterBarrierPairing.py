@@ -121,6 +121,10 @@ class _Writer:
         """Delegate to KernelWriter._ldsTokenBackEdgeMap."""
         return KernelWriter._ldsTokenBackEdgeMap(self)
 
+    def setOverflowedResources(self, kernel, code):
+        """Record the code only; test_overflowed_resources_fail_fast tests stopping on it."""
+        self.states.overflowedResources = code
+
 
 def _waveParityKernel(**overrides):
     # OptLevel 3 + derived SIA 0 + TDM on both tensors + more than one wave.

@@ -513,7 +513,7 @@ class KernelWriterAssembly(KernelWriter):
       "largest store-neutral K is %u but this kernel needs %u"
       % (withheld, batches, batchesWithout, neutralKTiles * kernel["DepthU"],
          self.rapResidentKTiles(kernel) * kernel["DepthU"]))
-    self.states.overflowedResources = 9
+    self.setOverflowedResources(kernel, 9)
 
   def tailFoldingMxsKSplitOffsetExceedsOneGroup(self, kernel, tc) -> bool:
     """Can a K-split scale wave's offset outrun the last k-tile's K groups?"""
@@ -1061,6 +1061,7 @@ class KernelWriterAssembly(KernelWriter):
       self._reportTmpSgprOverflow(num, tag)
       if self.db["AssertOnSgprOverflow"]:
         raise e
+      self.stopOnOverflowedResources(self.states.kernel)
 
     tmpSgpr = allocTmpGpr(self.sgprPool, num, self.states.regCaps["MaxSgpr"], alignment, tag, overflowListener)
     return tmpSgpr
@@ -1070,6 +1071,7 @@ class KernelWriterAssembly(KernelWriter):
       self._reportTmpSgprOverflow(sum(nums), tag)
       if self.db["AssertOnSgprOverflow"]:
         raise e
+      self.stopOnOverflowedResources(self.states.kernel)
 
     tmpSgpr = allocTmpGprList(self.sgprPool, nums, self.states.regCaps["MaxSgpr"], alignments, tag, overflowListener)
     return tmpSgpr
@@ -2712,6 +2714,11 @@ class KernelWriterAssembly(KernelWriter):
   ##############################################################################
   # deferRegisterOverflowForAllocation
   ##############################################################################
+  def _overflowAwaitsAllocation(self, kernel) -> bool:
+    # The same test deferRegisterOverflowForAllocation applies at the end of codegen.
+    return self.states.overflowedResources in REGISTER_BUDGET_OVERFLOW_CODES \
+      and self.stinkyTofuRegisterAllocationMode(kernel) >= 3
+
   def deferRegisterOverflowForAllocation(self, kernel) -> None:
     """Reopen a register budget verdict, so allocation gets to settle it.
 
@@ -2754,47 +2761,60 @@ class KernelWriterAssembly(KernelWriter):
         them -- which is the one number that says how much allocation moved.
     """
     if self.states.overflowedResources:
-      if self.states.overflowedResources == 1:
-        msg = "too many vgprs"
-      elif self.states.overflowedResources == 2:
-        msg = "too many sgprs"
-      elif self.states.overflowedResources == 3:
-        msg = "half store requires at least two elements per batch"
-      elif self.states.overflowedResources == 4:
-        msg = "Occupancy limit"
-      elif self.states.overflowedResources == 5:
-        if kernel["DirectToLdsA"] or kernel["DirectToLdsB"]:
-          msg = "cannot schedule local read with DirectToLds"
-        else:
-          msg = "reading and writing LDS at same time require 2 LDS buffer"
-      elif self.states.overflowedResources == 6:
-        msg = "SIA2 better with occupancy 2"
-      elif self.states.overflowedResources == 7:
-        msg = "invalid LSU code due to assertion fail"
-      elif self.states.overflowedResources == 8:
-        msg = "not enough LDS space"
-      elif self.states.overflowedResources == 9:
-        msg = self.states.rapStoreNeutralityMsg
-      elif self.states.overflowedResources == 10:
-        msg = "no workgroup-wide position for a rebuilt LDS barrier"
-      elif self.states.overflowedResources == 11:
-        msg = "decoupled PGR thick-wait not covered in the emitted assembly"
-      elif self.states.overflowedResources == 12:
-        msg = "tail LDS reset has one block stride and a divergent pair has two"
-      else:
-        msg = "unknown"
-
-      if afterAllocation:
-        counts = "vgprs=%u, sgprs=%u after register allocation, pool estimate vgprs=%u, sgprs=%u" \
-          % (mkb.getNextFreeVgpr(), mkb.getNextFreeSgpr(), \
-          self.vgprPool.size(), self.sgprPool.size())
-      else:
-        counts = "vgprs=%u, sgprs=%u" % (self.vgprPool.size(), self.sgprPool.size())
-
-      if self.debugConfig.printSolutionRejectionReason:
-        printWarning("%s overflowed resources.  errorCode=%d, msg=\"%s\", %s" \
-          % (self.states.kernelName, self.states.overflowedResources, msg, counts))
+      self.stopOnOverflowedResources(kernel, mkb, afterAllocation)
+      self.printRejectionReason(kernel, mkb, afterAllocation)
       self.applyOverflowStub(mkb)
+
+  ##############################################################################
+  # printRejectionReason
+  ##############################################################################
+  def printRejectionReason(self, kernel, mkb=None, afterAllocation: bool = False) -> None:
+    """Print why overflowedResources rejects the kernel (PrintSolutionRejectionReason only).
+
+    mkb and afterAllocation are applyOverflowVerdict's: with afterAllocation the
+    counts come from the kernel body, next to the pool estimate.
+    """
+    if not self.debugConfig.printSolutionRejectionReason:
+      return
+    if self.states.overflowedResources == 1:
+      msg = "too many vgprs"
+    elif self.states.overflowedResources == 2:
+      msg = "too many sgprs"
+    elif self.states.overflowedResources == 3:
+      msg = "half store requires at least two elements per batch"
+    elif self.states.overflowedResources == 4:
+      msg = "Occupancy limit"
+    elif self.states.overflowedResources == 5:
+      if kernel["DirectToLdsA"] or kernel["DirectToLdsB"]:
+        msg = "cannot schedule local read with DirectToLds"
+      else:
+        msg = "reading and writing LDS at same time require 2 LDS buffer"
+    elif self.states.overflowedResources == 6:
+      msg = "SIA2 better with occupancy 2"
+    elif self.states.overflowedResources == 7:
+      msg = "invalid LSU code due to assertion fail"
+    elif self.states.overflowedResources == 8:
+      msg = "not enough LDS space"
+    elif self.states.overflowedResources == 9:
+      msg = self.states.rapStoreNeutralityMsg
+    elif self.states.overflowedResources == 10:
+      msg = "no workgroup-wide position for a rebuilt LDS barrier"
+    elif self.states.overflowedResources == 11:
+      msg = "decoupled PGR thick-wait not covered in the emitted assembly"
+    elif self.states.overflowedResources == 12:
+      msg = "tail LDS reset has one block stride and a divergent pair has two"
+    else:
+      msg = "unknown"
+
+    if afterAllocation:
+      counts = "vgprs=%u, sgprs=%u after register allocation, pool estimate vgprs=%u, sgprs=%u" \
+        % (mkb.getNextFreeVgpr(), mkb.getNextFreeSgpr(), \
+        self.vgprPool.size(), self.sgprPool.size())
+    else:
+      counts = "vgprs=%u, sgprs=%u" % (self.vgprPool.size(), self.sgprPool.size())
+
+    printWarning("%s overflowed resources.  errorCode=%d, msg=\"%s\", %s" \
+      % (self.states.kernelName, self.states.overflowedResources, msg, counts))
 
   ##############################################################################
   # applyOverflowStub
@@ -3063,6 +3083,7 @@ class KernelWriterAssembly(KernelWriter):
         if self.db["AssertOnSgprOverflow"]:
           self.sgprPool.checkIn(alphaPtrIdx)
           raise RuntimeError("device scalar alpha pointer SGPR overflow")
+        self.stopOnOverflowedResources(kernel)
       self.states.deviceScalarAlphaPtrSgpr = alphaPtrIdx
       addLoads(alphaPtrIdx, True)
     else:
@@ -20117,7 +20138,7 @@ class KernelWriterAssembly(KernelWriter):
         # It might be possible to fix globalWriteBatch to handle this case but these
         # are likely to be low-performing so likely not worth optimizing.
         print2("WARNING: half requires at least two elements per batch")
-        self.states.overflowedResources = 3
+        self.setOverflowedResources(kernel, 3)
 
     assert numElementsPerBatch > 0, "numElementsPerBatch=0 for %s"%self.states.kernelName
 
@@ -24771,7 +24792,7 @@ class KernelWriterAssembly(KernelWriter):
     # common multiple of either, so normalizing everything by LdsOffsetA_Blk would
     # land the second group inside the first group's allocation. Refuse instead.
     if self._dcpDivergent(kernel):
-      self.states.overflowedResources = 12
+      self.setOverflowedResources(kernel, 12)
       return mod
     for blk in range(self.states.numLDSBlk - 1, 0, -1):
       inBuffer0 = Label(self.labels.getNameInc("TdmTailDescriptorInBuffer0"), "")
