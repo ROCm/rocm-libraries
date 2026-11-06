@@ -31,7 +31,7 @@
 ## Files placed there by this run:
 {% for pack in config.packs %}
 ##     {{ config.kdp_stem(pack) }}.kdp.json
-{% if config.is_multi_pack %}
+{% if config.has_operation_matchers %}
 ##     operation_is_{{ pack.discriminator }}.umd.json
 {% endif %}
 {% endfor %}
@@ -61,7 +61,7 @@
 ##     kernel_dtype_matches_graph.umd.json
 {% for pack in config.packs %}
 ##     {{ config.kdp_stem(pack) }}.kdp.json
-{% if config.is_multi_pack %}
+{% if config.has_operation_matchers %}
 ##     operation_is_{{ pack.discriminator }}.umd.json
 {% endif %}
 {% endfor %}
