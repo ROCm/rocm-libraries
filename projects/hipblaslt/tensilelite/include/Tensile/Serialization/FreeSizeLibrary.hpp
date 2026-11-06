@@ -44,11 +44,23 @@ namespace TensileLite
 
             static void mapping(IO& io, Entry& entry)
             {
-                int32_t index = -1;
-                iot::mapRequired(io, "index", index);
-
                 using SSLibrary
                     = SingleSolutionLibrary<ContractionProblemGemm, ContractionSolution>;
+
+                int32_t index = -1;
+                if(iot::outputting(io))
+                {
+                    auto single = std::dynamic_pointer_cast<SSLibrary>(entry.value);
+                    if(single == nullptr)
+                        iot::setError(io, "FreeSizeLibrary entries must be single solutions.");
+                    else
+                        index = single->solutionIndex();
+                }
+
+                iot::mapRequired(io, "index", index);
+
+                if(iot::outputting(io))
+                    return;
 
                 auto ctx = static_cast<LibraryIOContext<ContractionSolution>*>(iot::getContext(io));
                 if(ctx == nullptr || (ctx->solutions == nullptr && ctx->blobCache == nullptr))
@@ -109,6 +121,9 @@ namespace TensileLite
                         std::ostringstream msg;
                         msg << "[FreeSizeLibrary] Empty table";
                         iot::setError(io, msg.str());
+                        // setError records the message; it does not unwind.
+                        // Returning keeps *table below from dereferencing null.
+                        return;
                     }
                 }
                 else
