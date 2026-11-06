@@ -1204,6 +1204,41 @@ static int make_spec(int idx, rocke_attention_tiled_2d_spec_t* s)
         s->tile_size = 32;
         break;
 
+    /* --- idx72-75: ALiBi at the slope sites idx16/17 miss (lockstep with the
+     *     Python _CONFIGS[72..75]): 72 per-row hoist (GQA, 24 heads); 73-75 the
+     *     transposed 32x32 per-iter (mask-once), hoisted and inline slopes. */
+    case 72:
+        s->head_size = 64;
+        s->block_size = 32;
+        s->num_query_heads = 24;
+        s->num_kv_heads = 6;
+        s->dtype = "bf16";
+        s->use_sinks = false;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->use_alibi = true;
+        break;
+    case 73:
+    case 74:
+    case 75:
+        s->head_size = 64;
+        s->block_size = 32;
+        s->num_query_heads = 32;
+        s->num_kv_heads = 32;
+        s->dtype = "bf16";
+        s->use_sinks = false;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->use_alibi = true;
+        s->use_mfma_32x32 = true;
+        s->use_transposed_qk_32x32 = true;
+        s->block_m_per_warp = 32;
+        s->has_tile_size = true;
+        s->tile_size = 64;
+        s->use_transposed_mask_once = (idx == 73);
+        s->use_transposed_invariant_hoist = (idx == 74);
+        break;
+
     default:
         return -1;
     }

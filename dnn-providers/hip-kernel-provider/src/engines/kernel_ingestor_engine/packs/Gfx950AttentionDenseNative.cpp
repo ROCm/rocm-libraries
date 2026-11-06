@@ -70,7 +70,7 @@ constexpr std::string_view KERNEL_MATCHER_SYMBOL = "hipkernel.gfx950_attention_d
 constexpr std::string_view SCORE_SYMBOL = "hipkernel.gfx950_attention_dense.score";
 constexpr std::string_view DISPATCH_SYMBOL = "hipkernel.gfx950_attention_dense.dispatch";
 
-// KMD fields (12-field schema). The KMD carries only what varies between candidates, so
+// KMD fields (13-field schema). The KMD carries only what varies between candidates, so
 // waves_per_eu/persistent/num_persistent/wide_lds_dma are absent: every shipped variant
 // holds them at one value. A variant that moved any of them would have to add it here
 // first, or the candidates collide on the catalog key and the loader drops one.
@@ -83,6 +83,8 @@ constexpr std::string_view SLIDING_WINDOW_FIELD = "sliding_window";
 constexpr std::string_view RAGGED_FIELD = "ragged";
 constexpr std::string_view BLOCK_M_FIELD = "block_m";
 constexpr std::string_view BLOCK_N_FIELD = "block_n";
+/// 1 for a kernel that adds ALiBi; the KMD default 0 completes a record without it.
+constexpr std::string_view USE_ALIBI_FIELD = "use_alibi";
 
 /// The tile every legacy record completes to, and the one cold selection prefers.
 constexpr int64_t BASELINE_BLOCK_M = 256;
@@ -99,6 +101,7 @@ constexpr std::string_view CAUSAL_TOKEN = "gfx950_attention_dense.causal";
 constexpr std::string_view SLIDING_WINDOW_TOKEN = "gfx950_attention_dense.sliding_window";
 /// The softmax scale, f32, bound as its bit pattern (BoundTokens carry int64_t).
 constexpr std::string_view SCALE_BITS_TOKEN = "gfx950_attention_dense.scale_bits";
+constexpr std::string_view ALIBI_TOKEN = "gfx950_attention_dense.alibi";
 
 /// hipDNN tensor axes. The LOGICAL order is always (B, H, S, D) regardless of layout.
 constexpr uint32_t BATCH_AXIS = 0;
@@ -671,10 +674,15 @@ std::optional<BoundTokens> gfx950AttentionDenseGraphMatches(const MatchContext& 
                                   "generate_stats) are not supported");
         return std::nullopt;
     }
-    // ALiBi slopes and padding masks.
-    if(attributes.alibi_mask())
+    // ALiBi: served by the use_alibi variants, which compute hipDNN's slopes from the query
+    // head count (SdpaSemanticsRegister SEM-021). hipDNN defines ALiBi only with a top-left
+    // causal mask and no right bound; maskTypeFor has already declined every window.
+    const bool alibi = attributes.alibi_mask();
+    if(alibi && *mask != MaskType::TOP_LEFT_CAUSAL)
     {
-        HIPDNN_PLUGIN_LOG_INFO(Declined{"alibi_mask"} << "alibi_mask is not supported");
+        HIPDNN_PLUGIN_LOG_INFO(Declined{"alibi_mask"}
+                               << "alibi_mask needs a top-left causal mask; hipDNN defines ALiBi "
+                                  "with no other mask");
         return std::nullopt;
     }
     if(attributes.padding_mask())
@@ -728,6 +736,7 @@ std::optional<BoundTokens> gfx950AttentionDenseGraphMatches(const MatchContext& 
     static_assert(sizeof(scaleBits) == sizeof(scale), "float must be 32-bit to round-trip");
     std::memcpy(&scaleBits, &scale, sizeof(scale));
     bound[std::string(SCALE_BITS_TOKEN)] = static_cast<int64_t>(scaleBits);
+    bound[std::string(ALIBI_TOKEN)] = int64_t{alibi ? 1 : 0};
     return bound;
 }
 
@@ -756,6 +765,7 @@ AttentionDenseBinding attentionDenseBinding(const BoundTokens& bound)
 
     const auto scaleBits = static_cast<int32_t>(read(SCALE_BITS_TOKEN));
     std::memcpy(&binding.scale, &scaleBits, sizeof(binding.scale));
+    binding.alibi = read(ALIBI_TOKEN) != 0;
     return binding;
 }
 
@@ -810,6 +820,23 @@ std::optional<AttentionDenseTile> candidateTile(const KernelDefinition& kernel)
 bool tileDivides(const AttentionDenseTile& tile, const AttentionDenseProblem& problem)
 {
     return problem.seqLenQ % tile.blockM == 0 && problem.seqLenKv % tile.blockN == 0;
+}
+
+/// nullopt for a malformed use_alibi (not an integer 0/1): it declines rather than reading
+/// as a plain kernel. An absent field is the KMD default 0.
+std::optional<bool> candidateAlibi(const KernelDefinition& kernel)
+{
+    const auto it = kernel.metadata.find(std::string(USE_ALIBI_FIELD));
+    if(it == kernel.metadata.end())
+    {
+        return false;
+    }
+    const auto* value = std::get_if<int64_t>(&it->second);
+    if(value == nullptr || (*value != 0 && *value != 1))
+    {
+        return std::nullopt;
+    }
+    return *value == 1;
 }
 
 /**
@@ -891,6 +918,16 @@ bool kernelMatches(const MatchContext& context,
         return false;
     }
 
+    // An ALiBi graph needs an ALiBi candidate and a plain graph a plain one: the scores and
+    // the argument lists differ.
+    const auto alibi = hipdnn_plugin_sdk::ingestor::tryGetBoundInt(bound, ALIBI_TOKEN);
+    const auto candidateUsesAlibi = candidateAlibi(kernel);
+    if(!alibi.has_value() || !candidateUsesAlibi.has_value()
+       || *candidateUsesAlibi != (*alibi != 0))
+    {
+        return false;
+    }
+
     return tileDivides(*tile, problem);
 }
 
@@ -940,7 +977,7 @@ double scoreKernel(const MatchContext& /*context*/,
 // Dispatch
 // ---------------------------------------------------------------------------
 
-/// The kernel signature for all variants in this engine.
+/// The kernel signature of every plain (use_alibi=0) variant in this engine.
 ///
 /// All variants are non-persistent. use_sinks=False so no sink_ptr slot.
 ///
@@ -986,24 +1023,52 @@ std::vector<KernelArgument> attentionDenseKernelSignatureV1()
     return signature;
 }
 
-/// The launch contract a dispatch handler serves. The two versions share their launch
-/// values and differ only in whether the launch passes the head counts.
+/// The dispatch.alibi.v1 form of a use_alibi variant: the v2 list, then the slopes
+/// pointer, spelled as the kernel declares it.
+std::vector<KernelArgument> attentionDenseKernelSignatureAlibi()
+{
+    auto signature = attentionDenseKernelSignature();
+    signature.push_back(KernelArgument{
+        "global_buffer", static_cast<uint32_t>(sizeof(void*)), 56, "alibi_slopes_ptr"});
+    return signature;
+}
+
+/// The launch contract a dispatch handler serves. The contracts share their launch values
+/// and differ only in the kernel arguments the launch passes: v2 adds the head counts to
+/// v1, ALIBI_V1 adds the slopes pointer to v2.
 enum class AttentionDenseContract
 {
     V1,
-    V2
+    V2,
+    ALIBI_V1
 };
 
 std::string_view contractSymbol(AttentionDenseContract contract)
 {
-    return contract == AttentionDenseContract::V1 ? GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V1
-                                                  : GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V2;
+    switch(contract)
+    {
+    case AttentionDenseContract::V1:
+        return GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V1;
+    case AttentionDenseContract::ALIBI_V1:
+        return GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_ALIBI_V1;
+    case AttentionDenseContract::V2:
+    default:
+        return GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V2;
+    }
 }
 
 std::vector<KernelArgument> contractSignature(AttentionDenseContract contract)
 {
-    return contract == AttentionDenseContract::V1 ? attentionDenseKernelSignatureV1()
-                                                  : attentionDenseKernelSignature();
+    switch(contract)
+    {
+    case AttentionDenseContract::V1:
+        return attentionDenseKernelSignatureV1();
+    case AttentionDenseContract::ALIBI_V1:
+        return attentionDenseKernelSignatureAlibi();
+    case AttentionDenseContract::V2:
+    default:
+        return attentionDenseKernelSignature();
+    }
 }
 
 /// The compiled kernel plus everything launch() needs, owning nothing that points back
@@ -1091,9 +1156,10 @@ std::unique_ptr<PreparedDispatch>
 /**
  * @brief The native dispatch behind this engine's UDD, for one launch contract.
  *
- * The v2 handler serves the catalog and saves new plans. The v1 handler is registered only
- * under the v1 name, so a plan saved before the head counts became runtime arguments
- * restores with its own 8-argument code object and launches it with 8 arguments.
+ * The v2 handler serves the catalog, and saves and restores new plans: an ALiBi graph's
+ * plan under ALIBI_V1, every other one under v2. The v1 handler is registered only under
+ * the v1 name, so a plan saved before the head counts became runtime arguments restores
+ * with its own 8-argument code object and launches it with 8 arguments.
  */
 class Gfx950AttentionDenseDispatchHandler : public IKernelDispatchHandler<Handle>
 {
@@ -1145,8 +1211,20 @@ public:
                     + "' declares no supported block_m/block_n tile");
         }
 
+        // kernel_match pairs an ALiBi graph with an ALiBi candidate only, so the binding and
+        // the candidate agree; this is the same defence in depth as the checks above.
+        const auto candidateUsesAlibi = candidateAlibi(kernel);
+        if(!candidateUsesAlibi.has_value() || *candidateUsesAlibi != binding.alibi)
+        {
+            throw hipdnn_plugin_sdk::HipdnnPluginException(
+                HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                "gfx950 attention_dense: kernel '" + toString(kernel.kernelId)
+                    + "' and the graph disagree on ALiBi");
+        }
+        const auto contract = binding.alibi ? AttentionDenseContract::ALIBI_V1 : _contract;
+
         auto code
-            = buildIngestorKernelCode(_kpackLoader, context, kernel, contractSignature(_contract));
+            = buildIngestorKernelCode(_kpackLoader, context, kernel, contractSignature(contract));
 
         const auto* q = findTensor(context, binding.q);
         const auto* k = findTensor(context, binding.k);
@@ -1156,7 +1234,7 @@ public:
             std::move(code),
             Gfx950AttentionDenseLaunchInputs{binding, problem, tile->blockM},
             toString(kernel.kernelId),
-            _contract);
+            contract);
     }
 
     std::unique_ptr<PreparedDispatch> restoreLaunch(const SavedLaunchInputs& inputs,
@@ -1164,16 +1242,23 @@ public:
                                                     int deviceOrdinal) const override
     {
         const std::string kernelName = toString(code.kernelId);
+        // The v2 handler saves ALiBi plans too (saving requires the saved name to resolve to
+        // the handler that saved), so it restores them as well.
+        const auto contract
+            = _contract == AttentionDenseContract::V2
+                      && inputs.dispatchSymbol == GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_ALIBI_V1
+                  ? AttentionDenseContract::ALIBI_V1
+                  : _contract;
         // The saved code object must take this contract's arguments (checked first, inside
         // restoreIngestorLaunch), and its values must be saved under this contract's name.
-        const auto readThisContract = [this](const SavedLaunchInputs& saved) {
-            requireLaunchContract(saved, contractSymbol(_contract));
+        const auto readThisContract = [contract](const SavedLaunchInputs& saved) {
+            requireLaunchContract(saved, contractSymbol(contract));
             return readGfx950AttentionDenseLaunchInputs(saved);
         };
         auto restored = restoreIngestorLaunch<Gfx950AttentionDenseLaunchInputs>(
-            inputs, std::move(code), contractSignature(_contract), readThisContract, deviceOrdinal);
+            inputs, std::move(code), contractSignature(contract), readThisContract, deviceOrdinal);
         return makePreparedGfx950AttentionDense(
-            std::move(restored.code), restored.launch, kernelName, _contract);
+            std::move(restored.code), restored.launch, kernelName, contract);
     }
 
     std::optional<SavedLaunchInputs>
@@ -1212,7 +1297,8 @@ public:
         const auto& p = preparedDense.problem();
         auto& kernel = preparedDense.kernelForStream(handle.getStream());
         // Exactly the arguments the code object was checked against: v1 code objects bake
-        // the head counts, v2 code objects read them as the two trailing arguments.
+        // the head counts, v2 code objects read them as the two trailing arguments, and
+        // ALIBI_V1 code objects also take the slopes pointer, null for hipDNN's slopes.
         if(preparedDense.contract() == AttentionDenseContract::V1)
         {
             kernel.launch(handle.getStream(),
@@ -1224,6 +1310,23 @@ public:
                           static_cast<int32_t>(p.batch),
                           static_cast<int32_t>(p.seqLenQ),
                           static_cast<int32_t>(p.seqLenKv));
+            return;
+        }
+        if(preparedDense.contract() == AttentionDenseContract::ALIBI_V1)
+        {
+            const void* alibiSlopes = nullptr;
+            kernel.launch(handle.getStream(),
+                          q.ptr,
+                          k.ptr,
+                          v.ptr,
+                          o.ptr,
+                          binding.scale,
+                          static_cast<int32_t>(p.batch),
+                          static_cast<int32_t>(p.seqLenQ),
+                          static_cast<int32_t>(p.seqLenKv),
+                          static_cast<int32_t>(p.numQueryHeads),
+                          static_cast<int32_t>(p.numKvHeads),
+                          alibiSlopes);
             return;
         }
         kernel.launch(handle.getStream(),
@@ -1288,12 +1391,15 @@ namespace
 Gfx950AttentionDenseLaunchInputs
     readGfx950AttentionDenseLaunchInputs(const SavedLaunchInputs& inputs)
 {
-    // v1 and v2 share this value set; anything else, including the unversioned name, is
-    // refused against v2, the current contract.
-    requireLaunchContract(inputs,
-                          inputs.dispatchSymbol == GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V1
-                              ? GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V1
-                              : GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V2);
+    // v1, v2 and alibi.v1 share this value set; anything else, including the unversioned
+    // name, is refused against v2, the current plain contract.
+    const bool alibi = inputs.dispatchSymbol == GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_ALIBI_V1;
+    std::string_view contract = GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V2;
+    if(alibi || inputs.dispatchSymbol == GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V1)
+    {
+        contract = inputs.dispatchSymbol;
+    }
+    requireLaunchContract(inputs, contract);
     requireOnlyLaunchValues(inputs,
                             {GFX950_ATTENTION_DENSE_Q_UID_VALUE,
                              GFX950_ATTENTION_DENSE_K_UID_VALUE,
@@ -1323,6 +1429,7 @@ Gfx950AttentionDenseLaunchInputs
     binding.o = requireLaunchInt(inputs, GFX950_ATTENTION_DENSE_O_UID_VALUE);
     binding.causal = requireLaunchInt(inputs, GFX950_ATTENTION_DENSE_CAUSAL_VALUE);
     binding.slidingWindow = requireLaunchInt(inputs, GFX950_ATTENTION_DENSE_SLIDING_WINDOW_VALUE);
+    binding.alibi = alibi;
 
     // The kernel takes these three as int32_t arguments.
     problem.batch = requireLaunchInt(inputs, GFX950_ATTENTION_DENSE_BATCH_VALUE, 1, INT32_LIMIT);
@@ -1424,8 +1531,8 @@ void resetGfx950AttentionDenseModuleCache()
 namespace
 {
 
-/// This engine's dispatch handler for one contract, process-lifetime. Both share one
-/// module cache and loader.
+/// This engine's dispatch handler for one contract, process-lifetime (ALIBI_V1 plans go
+/// through the v2 handler). Both share one module cache and loader.
 const Gfx950AttentionDenseDispatchHandler&
     gfx950AttentionDenseDispatchHandler(AttentionDenseContract contract)
 {
@@ -1445,7 +1552,7 @@ void registerGfx950AttentionDenseSymbols(SymbolScope<Handle>& scope)
     scope.add(std::string(GRAPH_MATCHER_SYMBOL), &gfx950AttentionDenseGraphMatches);
     scope.add(std::string(KERNEL_MATCHER_SYMBOL), &kernelMatches);
     scope.add(std::string(SCORE_SYMBOL), &scoreKernel);
-    // The UDD's unversioned name dispatches the catalog, all of which takes v2.
+    // The UDD's unversioned name dispatches the catalog: v2, and ALIBI_V1 for ALiBi graphs.
     scope.add(std::string(DISPATCH_SYMBOL),
               &gfx950AttentionDenseDispatchHandler(AttentionDenseContract::V2));
     scope.add(std::string(GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V2),
@@ -1453,6 +1560,9 @@ void registerGfx950AttentionDenseSymbols(SymbolScope<Handle>& scope)
     // Kept so plans saved under v1 still load and launch their 8-argument code object.
     scope.add(std::string(GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V1),
               &gfx950AttentionDenseDispatchHandler(AttentionDenseContract::V1));
+    // ALiBi plans: saved by the v2 handler, so their name must resolve to it.
+    scope.add(std::string(GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_ALIBI_V1),
+              &gfx950AttentionDenseDispatchHandler(AttentionDenseContract::V2));
 }
 
 } // namespace hip_kernel_provider::kernel_ingestor_engine

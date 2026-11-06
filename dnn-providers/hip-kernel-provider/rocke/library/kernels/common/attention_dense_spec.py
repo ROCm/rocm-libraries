@@ -116,6 +116,10 @@ class AttentionDenseSpec:
     # XCDs the hardware round-robins workgroups over. A wrong value keeps results
     # correct and only weakens the L2 locality of the XCD-aware block orders.
     chiplet_num_xcds: int = field(default=8, kw_only=True)
+    # ALiBi score bias (kernels.common._attention_alibi): the slopes come from the
+    # ``alibi_slopes_ptr`` kernel argument (fp32, one per query head) or, when it
+    # is null, are hipDNN's, derived from the query head count.
+    use_alibi: bool = field(default=False, kw_only=True)
 
     @classmethod
     def supported_persist_decodes(cls) -> frozenset[str]:
@@ -307,6 +311,17 @@ class AttentionDenseSpec:
                 raise ValueError(
                     "paged not yet implemented for plain-causal "
                     "(sliding_window>0 only)"
+                )
+        if self.use_alibi:
+            # A sink logit would need the per-row anchor shift of the ALiBi term.
+            for name in ("use_sinks", "paged", "varlen"):
+                if getattr(self, name):
+                    raise ValueError(f"use_alibi is not yet supported with {name}")
+            # hipDNN defines ALiBi on the top-left diagonal only; off it, the LSE
+            # depends on which query index the term uses (O does not).
+            if self.causal_bottom_right and getattr(self, "emit_lse", False):
+                raise ValueError(
+                    "use_alibi with causal_bottom_right does not support emit_lse"
                 )
         if self.use_sinks and self.paged:
             raise ValueError("use_sinks is not yet supported with paged KV")
@@ -504,6 +519,8 @@ class AttentionDenseSpec:
             parts.append(f"swa{self.sliding_window}")
         if self.use_sinks:
             parts.append("sinks")
+        if self.use_alibi:
+            parts.append("alibi")
         if self.varlen:
             parts.append("varlen")
         if self.paged:

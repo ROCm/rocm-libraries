@@ -29,6 +29,7 @@
  * mirrors the Python op-for-op so the emitted IR is byte-identical.
  */
 
+#include "rocke/helper_rocke.instances.common._attention_alibi.h"
 #include "rocke/instance_gfx942_attention_tiled_3d_internal.h"
 
 /* ============================================================ *
@@ -236,9 +237,8 @@ void rocke_gfx942_attention_tiled_3d_emit_softmax_loop(
         ctx->row_alibi = NULL;
         if(cfg->USE_ALIBI)
         {
-            rocke_value_t* qh_ok = rocke_b_cmp_lt(b, ctx->row_qh, ctx->num_qh_p);
-            ctx->row_alibi = rocke_b_masked_global_load(
-                b, ctx->alibi_slopes_ptr, ctx->row_qh, qh_ok, rocke_b_const_f32(b, 0.0), f32, 4);
+            ctx->row_alibi
+                = rocke_attn_alibi_slope(b, ctx->row_qh, ctx->num_qh_p, ctx->alibi_slopes_ptr);
         }
     }
 
@@ -420,7 +420,7 @@ void rocke_gfx942_attention_tiled_3d_emit_softmax_loop(
                 }
                 if(cfg->USE_ALIBI)
                 {
-                    rocke_value_t* pos_off = rocke_b_sub(b, col_abs, ctx->context_len);
+                    rocke_value_t* pos_off = rocke_b_sub(b, col_abs, ctx->row_causal_lim);
                     rocke_value_t* pos_f = rocke_b_sitofp_f32(b, pos_off);
                     rocke_value_t* add_term
                         = rocke_b_fmul(b, rocke_b_fmul(b, ctx->row_alibi, pos_f), ctx->rcp_ln2);

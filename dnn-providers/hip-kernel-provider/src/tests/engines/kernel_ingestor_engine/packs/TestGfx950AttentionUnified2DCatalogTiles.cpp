@@ -164,8 +164,10 @@ TEST(TestGfx950AttentionUnified2DDecodeHandoff, EveryDecodeCellHandedToUnified3D
                 << "Unified2D kernel '" << kernel.name << "' does not carry its head cell";
             const auto& [headSize, numQueryHeads, numKvHeads, dtype] = *cell;
             ASSERT_GT(numKvHeads, 0) << "kernel '" << kernel.name << "'";
-            // The same rule Unified2D's graph match applies before declining decode.
-            if(!gfx950Unified3DServesGqaGroup(numQueryHeads, numKvHeads))
+            // The same rule Unified2D's graph match applies before declining decode; ALiBi
+            // decode is never handed off.
+            if(integerField(kernel, "use_alibi").value_or(0) != 0
+               || !gfx950Unified3DServesGqaGroup(numQueryHeads, numKvHeads))
             {
                 continue;
             }

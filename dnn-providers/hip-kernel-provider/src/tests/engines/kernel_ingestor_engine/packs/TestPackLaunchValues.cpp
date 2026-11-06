@@ -120,6 +120,8 @@ TEST(TestPackLaunchValues, Gfx950AttentionDenseValuesMatchTheV1Contract)
               "hipkernel.gfx950_attention_dense.dispatch.v1");
     EXPECT_EQ(GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V2,
               "hipkernel.gfx950_attention_dense.dispatch.v2");
+    EXPECT_EQ(GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_ALIBI_V1,
+              "hipkernel.gfx950_attention_dense.dispatch.alibi.v1");
 
     // The stored double converts back to the float the kernel takes, bit for bit.
     const auto stored = values.find("scale");
@@ -312,6 +314,31 @@ TEST(TestPackLaunchValues, Gfx950AttentionDenseReadsTheSameValuesUnderV1AndV2)
     auto v3 = savedGfx950AttentionDense();
     v3.dispatchSymbol = "hipkernel.gfx950_attention_dense.dispatch.v3";
     expectReadRefusal(&readGfx950AttentionDenseLaunchInputs, v3, "names no launch-value contract");
+}
+
+// ALiBi binds no tensor (the kernel derives hipDNN's slopes from the query head count), so
+// the alibi contract stores v2's value set unchanged and only its name carries the flag.
+TEST(TestPackLaunchValues, Gfx950AttentionDenseReadsAlibiFromTheContractNameAlone)
+{
+    const auto launch = gfx950AttentionDenseInputs();
+    auto alibiBinding = launch.binding;
+    alibiBinding.alibi = true;
+    EXPECT_EQ(gfx950AttentionDenseLaunchValues(alibiBinding, launch.problem, launch.blockM),
+              gfx950AttentionDenseLaunchValues(launch.binding, launch.problem, launch.blockM));
+
+    auto alibi = savedGfx950AttentionDense();
+    alibi.dispatchSymbol = std::string(GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_ALIBI_V1);
+    const auto fromAlibi = readGfx950AttentionDenseLaunchInputs(alibi);
+    EXPECT_TRUE(fromAlibi.binding.alibi);
+    EXPECT_EQ(fromAlibi.binding.q, launch.binding.q);
+    EXPECT_EQ(fromAlibi.binding.causal, launch.binding.causal);
+    EXPECT_EQ(fromAlibi.problem.numQueryHeads, launch.problem.numQueryHeads);
+    EXPECT_EQ(fromAlibi.blockM, launch.blockM);
+
+    auto v1 = savedGfx950AttentionDense();
+    v1.dispatchSymbol = std::string(GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V1);
+    EXPECT_FALSE(readGfx950AttentionDenseLaunchInputs(v1).binding.alibi);
+    EXPECT_FALSE(readGfx950AttentionDenseLaunchInputs(savedGfx950AttentionDense()).binding.alibi);
 }
 
 TEST(TestPackLaunchValues, PointwiseRefusesMalformedValues)

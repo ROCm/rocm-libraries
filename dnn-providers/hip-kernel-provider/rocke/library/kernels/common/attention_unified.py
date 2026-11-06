@@ -61,6 +61,7 @@ from rocke.helpers.transforms import (
 )
 
 from ._attention_additive_bias import append_additive_bias_signature
+from ._attention_alibi import check_alibi_slopes
 from ._lse_store import validate_unified_lse
 
 # Alias the promoted log2-domain softcap helper under the local name used by
@@ -99,6 +100,8 @@ class UnifiedAttentionProblem:
     sliding_window: int = 0
     softcap: float = 0.0
     use_sinks: bool = False
+    # ALiBi (hipDNN SEM-021): the launch's ``alibi_slopes`` (fp32, one per query
+    # head) or, when it is None, hipDNN's built-in slopes from the head count.
     use_alibi: bool = False
     use_qq_bias: bool = False
     use_additive_bias: bool = False
@@ -544,9 +547,22 @@ def _reject_mask_semantics(
     The ALiBi / QQ-bias offsets are defined on the causal diagonal (``key - context_len``
     with the future masked); with a right bound other than 0 there is no standard
     meaning for them, so reject instead of guessing.
+
+    hipDNN defines ALiBi on the top-left diagonal only. The kernels measure it from
+    each query's own diagonal, which fixes O for any alignment, but on a bottom-right
+    diagonal the LSE and the weight of a sink would depend on which query index the
+    term uses, so those combinations are rejected too.
     """
     if problem.right_bound != 0 and (problem.use_alibi or problem.use_qq_bias):
         return False, "ALiBi / QQ-bias are only defined for causal masks"
+    if (
+        problem.use_alibi
+        and not problem.causal_top_left
+        and (problem.emit_lse or problem.use_sinks)
+    ):
+        return False, (
+            "ALiBi with LSE output or sinks is only defined on the top-left diagonal"
+        )
     return None
 
 
@@ -6248,12 +6264,12 @@ def run_unified_attention_torch(
       - `"scalar"`: force the slow correctness kernel.
       - `"auto"`: prefer tiled when supported, else scalar.
 
-    ``alibi_slopes`` is an optional `[num_query_heads]` f32 tensor; when
-    supplied, the kernel applies the ALiBi linear bias on each row.
+    ``alibi_slopes`` is the optional `[num_query_heads]` f32 tensor of ALiBi
+    slopes (``problem.use_alibi`` only); ``None`` selects hipDNN's built-in
+    slopes, which the gfx1250 kernels do not implement.
     ``qq_bias`` is an optional 2D f32 query-to-query bias; ``qq_bias_stride_0``
-    is its first-axis stride (in elements). Both follow AITER's Triton
-    semantics exactly and require the corresponding ``problem.use_alibi`` /
-    ``problem.use_qq_bias`` flags to be set.
+    is its first-axis stride (in elements). It follows AITER's Triton semantics
+    exactly and requires ``problem.use_qq_bias``.
 
     ``additive_bias`` is an f32 tensor read as
     ``bias[seq*batch_stride + q_head*head_stride + q_row*sq_stride + k]``
@@ -6281,6 +6297,7 @@ def run_unified_attention_torch(
     """
     if kv_layout == "strided" and problem.emit_lse:
         raise NotImplementedError("LSE output is not implemented for strided-KV decode")
+    check_alibi_slopes(problem, alibi_slopes)
     # Caller-owned LSE output ([total_q, Hq, 1] FP32, ``problem.emit_lse``):
     # validated before any compile so a bad buffer never reaches a launch.
     validate_unified_lse(
@@ -6311,6 +6328,9 @@ def run_unified_attention_torch(
     # arch is the explicit ``arch`` parameter threaded through
     # ``supports_native_unified_attention*``.
     _launch_arch = _resolve_attention_arch()
+    if problem.use_alibi and alibi_slopes is None and _launch_arch == "gfx1250":
+        # The gfx1250 tiled kernels always read the slopes tensor.
+        raise NotImplementedError("gfx1250 unified attention needs alibi_slopes")
     if tuning_spec is not None:
         _require_explicit_tuning_spec(tuning_spec)
         # The spec's kernel declares the bias params iff its use_additive_bias is

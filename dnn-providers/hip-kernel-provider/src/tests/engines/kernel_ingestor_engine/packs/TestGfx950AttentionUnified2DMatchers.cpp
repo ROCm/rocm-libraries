@@ -141,6 +141,41 @@ TEST(TestGfx950AttentionUnified2DMatchers, LeavesDecodeToTheSplitKvEngineWhereIt
     }
 }
 
+/// hipDNN's ALiBi (SdpaSemanticsRegister SEM-021) with the top-left causal mask it is defined
+/// for: both data types, MHA and GQA, a query as long as and shorter than the keys.
+TEST(TestGfx950AttentionUnified2DMatchers, AcceptsAlibiWithATopLeftCausalMask)
+{
+    for(const auto dataType : {data_objects::DataType::BFLOAT16, data_objects::DataType::HALF})
+    {
+        for(const auto& [hq, hkv] : std::vector<std::pair<int64_t, int64_t>>{{8, 8}, {32, 4}})
+        {
+            for(const int64_t seqLenQ : {256, 64})
+            {
+                GraphSpec spec;
+                spec.alibiMask = true;
+                spec.dataType = dataType;
+                spec.numQueryHeads = hq;
+                spec.numKvHeads = hkv;
+                spec.seqLenQ = seqLenQ;
+                EXPECT_TRUE(graphMatches(spec))
+                    << "Hq " << hq << " Hkv " << hkv << " Sq " << seqLenQ;
+            }
+        }
+    }
+}
+
+/// Unified3D ships no ALiBi kernels, so ALiBi decode is served here even where plain decode of
+/// the same shape is left to the split-KV engine; otherwise no engine would serve it.
+TEST(TestGfx950AttentionUnified2DMatchers, KeepsAlibiDecodeThatPlainDecodeLeavesToTheSplitKvEngine)
+{
+    GraphSpec decode;
+    decode.seqLenQ = 1;
+    decode.seqLenKv = 4096;
+    ASSERT_FALSE(graphMatches(decode));
+    decode.alibiMask = true;
+    EXPECT_TRUE(graphMatches(decode));
+}
+
 // =============================================================================
 // graph_match declines: silent wrong answers
 // =============================================================================
@@ -333,6 +368,21 @@ TEST(TestGfx950AttentionUnified2DMatchers, ReadsTheDeprecatedCausalBooleansAsThe
               BOTTOM_RIGHT_CAUSAL);
 }
 
+/// hipDNN defines ALiBi only with a top-left causal mask (bottom-right ALiBi is left
+/// undefined), so ALiBi with no mask or the bottom-right mask declines even though both masks
+/// are served without ALiBi.
+TEST(TestGfx950AttentionUnified2DMatchers, DeclinesAlibiWithAnyMaskButTopLeftCausal)
+{
+    for(const int64_t mask : {NO_MASK, BOTTOM_RIGHT_CAUSAL})
+    {
+        GraphSpec spec;
+        setMask(spec, mask);
+        ASSERT_TRUE(graphMatches(spec)) << "mask " << mask;
+        spec.alibiMask = true;
+        EXPECT_FALSE(graphMatches(spec)) << "mask " << mask;
+    }
+}
+
 // =============================================================================
 // graph_match declines: addressing limits
 // =============================================================================
@@ -411,9 +461,6 @@ TEST(TestGfx950AttentionUnified2DMatchers, DeclinesEveryOptionalFeatureTheKernel
     withExtra("rng_dump tensor", [](auto& b) { b.add_rng_dump_tensor_uid(EXTRA_UID); });
     withExtra("generate_stats", [](auto& b) { b.add_generate_stats(true); });
 
-    GraphSpec alibi;
-    alibi.alibiMask = true;
-    cases.push_back({"alibi_mask", alibi});
     GraphSpec padding;
     padding.paddingMask = true;
     cases.push_back({"padding_mask", padding});
@@ -523,6 +570,24 @@ TEST(TestGfx950AttentionUnified2DMatchers, KernelMatchPairsEachMaskKindWithItsOw
             kernel.maskType = kernelMask;
             EXPECT_EQ(matchesKernel(graph, kernel), graphMask == kernelMask)
                 << "graph mask " << graphMask << ", kernel mask " << kernelMask;
+        }
+    }
+}
+
+/// An ALiBi kernel adds the ALiBi term and a plain one does not, so each graph reaches only
+/// its own kind: the matrix matches on the diagonal and nowhere else.
+TEST(TestGfx950AttentionUnified2DMatchers, KernelMatchPairsAlibiGraphsWithAlibiKernelsOnly)
+{
+    for(const bool graphAlibi : {false, true})
+    {
+        for(const int64_t kernelAlibi : {0, 1})
+        {
+            GraphSpec graph;
+            graph.alibiMask = graphAlibi;
+            KernelSpec kernel;
+            kernel.useAlibi = kernelAlibi;
+            EXPECT_EQ(matchesKernel(graph, kernel), graphAlibi == (kernelAlibi == 1))
+                << "graph ALiBi " << graphAlibi << ", kernel use_alibi " << kernelAlibi;
         }
     }
 }
@@ -639,6 +704,11 @@ TEST(TestGfx950AttentionUnified2DMatchers, KernelMatchDeclinesAnIncompleteOrMist
     auto mistyped = makeKernel(KernelSpec{});
     mistyped.metadata[std::string("tile_size")] = std::string("64");
     EXPECT_FALSE(matchesKernel(graph, mistyped));
+
+    // use_alibi is 0 or 1; anything else is neither kernel.
+    KernelSpec outOfRange;
+    outOfRange.useAlibi = 2;
+    EXPECT_FALSE(matchesKernel(GraphSpec{}, outOfRange));
 }
 
 /// Geometry alternatives the catalog may grow into are served exactly like the baseline when
@@ -744,6 +814,7 @@ TEST(TestGfx950AttentionUnified2DMatchers, ScoreDependsOnlyOnTheGeometry)
     KernelSpec other = geometry(64, 4, 16);
     other.maskType = NO_MASK;
     other.dtype = "FP16";
+    other.useAlibi = 1;
     EXPECT_EQ(scoreOf(GraphSpec{}, other), scoreOf(GraphSpec{}, geometry(64, 4, 16)));
 }
 

@@ -120,6 +120,12 @@ from kernels.common.attention_dense_kv_split import (
     launch_segment_combine,
     segment_tile_range,
 )
+from kernels.common._attention_alibi import (
+    alibi_lse_shift,
+    alibi_slope_log2,
+    alibi_tile_bias,
+    check_alibi_slopes,
+)
 from kernels.common._lse_store import (
     dense_row_has_key,
     lse_store,
@@ -339,6 +345,8 @@ class Gfx950AttentionDenseSpec(_AttentionDenseSpecBase):
                 raise ValueError("right_bound > 0 is not supported with paged / varlen")
         if self.paged and not self.causal:
             raise ValueError("paged attention is causal-only")
+        if self.use_alibi and self.persistent:
+            raise ValueError("use_alibi is not yet supported with persistent=True")
         if self.causal_bottom_right:
             # The non-persistent contiguous builder is the only gfx950 path
             # that implements the compile-time shifted diagonal.
@@ -903,6 +911,16 @@ def build_attention_dense(
         sinks = b.param(
             "sink_ptr", PtrType(dtype, "global"), noalias=True, readonly=True, align=16
         )
+    ALIBI = spec.use_alibi
+    alibi_slopes = None
+    if spec.use_alibi:
+        alibi_slopes = b.param(
+            "alibi_slopes_ptr",
+            PtrType(F32, "global"),
+            noalias=True,
+            readonly=True,
+            align=4,
+        )
     if varlen:
         cu_q = b.param(
             "cu_seqlens_q", PtrType(I32, "global"), noalias=True, readonly=True, align=4
@@ -988,6 +1006,22 @@ def build_attention_dense(
         )
     hkv = b.div(hq, _gqa())
     q_tok0 = b.add(b.mul(qb, b.const_i32(BLOCK_M)), b.mul(wave, b.const_i32(32)))
+    if ALIBI:
+        alibi_slope = alibi_slope_log2(
+            b,
+            hq,
+            num_heads=hq_p if spec.runtime_shape else Hq,
+            slopes=alibi_slopes,
+        )
+        # The bias seeds the QK accumulator, so it is in raw (unscaled) score units.
+        alibi_slope_raw = b.fdiv(alibi_slope, qk_scale)
+        # Per-row anchor: the row's last visible key (see _attention_alibi).
+        alibi_query = b.add(q_tok0, _mfma_32x32_c_col(b, lane, 0))
+        if causal:
+            alibi_anchor = b.add(alibi_query, b.const_i32(DIAG_OFF + RIGHT))
+        else:
+            alibi_anchor = b.sub(seqlen_kv_p, b.const_i32(1))
+        alibi_lane_key = b.mul(lane_h, b.const_i32(4))
 
     if varlen:
         # Per-sequence token bases from cu_seqlens; early-exit q-blocks that fall
@@ -1246,14 +1280,24 @@ def build_attention_dense(
 
     # ---- per-tile compute closures ----
 
-    def do_qk(kbuf):
+    def do_qk(kbuf, tile_idx):
         """QK MFMA: S^T = K@Q^T. mfma(a=K, bv=Q) => key on the 16 per-lane accumulator
         regs (+lane^32), query on lane%32 -- the layout that keeps softmax a cheap
         in-lane reduce + one lane^32 exchange, and lets CK-1's transposed PV consume P
         with no relayout shuffle."""
         s_reg = []
+        if ALIBI:
+            bias = alibi_tile_bias(
+                b,
+                alibi_slope_raw,
+                b.mul(tile_idx, b.const_i32(BN)),
+                alibi_lane_key,
+                alibi_anchor,
+                N_SUB,
+            )
         for nsub in range(N_SUB):
-            acc = b.zero_vec_f32(16)
+            # ALiBi seeds the accumulator, so the MFMA adds the bias for free.
+            acc = b.vec_pack(bias[nsub], F32) if ALIBI else b.zero_vec_f32(16)
             if K_GROUP == 1:
                 krow = b.add(b.const_i32(nsub * 32), lane_m)
             else:
@@ -1495,7 +1539,7 @@ def build_attention_dense(
     # The window loops below never mask it: ragged + sliding_window is rejected by
     # the spec, so they cannot see a partial last KV tile.
     RAG_KBOUND = RAGGED and (Skv % BN != 0) and ((not causal) or Sq + RIGHT > Skv)
-    s0 = do_qk(start_buf)
+    s0 = do_qk(start_buf, start_tile)
     if W > 0:
         do_mask(s0, start_tile, lower=True, upper=causal)
     else:
@@ -1554,7 +1598,7 @@ def build_attention_dense(
         # overlaps compute instead of a full vmcnt(0) serialize (bit-identical).
         b.s_waitcnt(vmcnt=LOOP_VMCNT)
         b.s_barrier_bare()
-        s = do_qk(kbuf)
+        s = do_qk(kbuf, j)
         if mask_lower or mask_upper:
             do_mask(s, j, lower=mask_lower, upper=mask_upper)
         if mask_kbound:
@@ -1789,11 +1833,16 @@ def build_attention_dense(
                 qtok,
             )
             row_exists = b.cmp_lt(qtok, seqlen_q_p)
+        m_lse = res[0]
+        if ALIBI and (not causal or RIGHT):
+            m_lse = b.fadd(
+                m_lse, alibi_lse_shift(b, alibi_slope, alibi_anchor, alibi_query)
+            )
         _dense_lse_output(
             b,
             lse,
             lse_index,
-            res[0],
+            m_lse,
             l_i,
             row_exists,
             row_has_key,
@@ -3034,7 +3083,8 @@ def attention_dense_runtime_args(spec: AttentionDenseSpec) -> dict[str, int]:
 
 def attention_dense_signature(spec: AttentionDenseSpec):
     """ABI signature for :class:`KernelLauncher`. q/k/v/o pointers + f32 scale,
-    plus optional sink_ptr when ``spec.use_sinks``, and the two ``cu_seqlens``
+    plus optional sink_ptr when ``spec.use_sinks``, an f32 ``alibi_slopes_ptr``
+    (null for the built-in slopes) when ``spec.use_alibi``, and the two ``cu_seqlens``
     i32 pointers when ``spec.varlen`` (see :func:`build_attention_dense`)."""
     from rocke.helpers.spec import SignatureBuilder
 
@@ -3051,6 +3101,8 @@ def attention_dense_signature(spec: AttentionDenseSpec):
         sig = sig.scalar(field, "i32")
     if spec.use_sinks:
         sig = sig.ptr("sink_ptr", spec.dtype)
+    if spec.use_alibi:
+        sig = sig.ptr("alibi_slopes_ptr", "f32")
     if spec.varlen:
         sig = sig.ptr("cu_seqlens_q", "i32").ptr("cu_seqlens_kv", "i32")
     if spec.paged:
@@ -3122,6 +3174,7 @@ def run_attention_dense_torch(
     sinks=None,
     validate_paged: bool = True,
     lse=None,
+    alibi_slopes=None,
 ):
     """High-level framework entry: compile (cached) + launch the dense prefill
     kernel on torch tensors. ``q``/``k``/``v``/``out`` are dense contiguous
@@ -3176,7 +3229,10 @@ def run_attention_dense_torch(
     logits that participate in the softmax denominator but have no value vector.
     Pass ``sinks`` (``spec.dtype`` ``[num_query_heads]``); a ``ValueError`` is
     raised if ``sinks`` is ``None`` when ``spec.use_sinks`` is True, or if
-    ``sinks`` is provided when ``spec.use_sinks`` is False."""
+    ``sinks`` is provided when ``spec.use_sinks`` is False.
+
+    ALiBi (``spec.use_alibi``): ``alibi_slopes`` is the optional fp32 per-query-head
+    slope ``[num_query_heads]``; ``None`` selects hipDNN's built-in slopes."""
     ok, why = supports_attention_dense(spec, arch=arch)
     if not ok:
         raise NotImplementedError(f"attention_dense unsupported for spec: {why}")
@@ -3274,6 +3330,7 @@ def run_attention_dense_torch(
             raise ValueError("sinks must be contiguous")
         if not sinks.is_cuda:
             raise ValueError("sinks must be a CUDA tensor")
+    check_alibi_slopes(spec, alibi_slopes)
 
     validate_dense_lse(
         spec,
@@ -3324,6 +3381,8 @@ def run_attention_dense_torch(
         vals["block_table_stride"] = int(block_tables.stride(0))
     if spec.use_sinks:
         vals["sink_ptr"] = sinks
+    if spec.use_alibi:
+        vals["alibi_slopes_ptr"] = alibi_slopes if alibi_slopes is not None else 0
     if spec.emit_lse:
         vals["lse_ptr"] = lse
     if spec.kv_segments > 1:

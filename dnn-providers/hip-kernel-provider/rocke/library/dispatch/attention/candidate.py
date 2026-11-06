@@ -10,7 +10,6 @@ and Torch binding; admission, pin resolution and sweeping are shared.
 
 from __future__ import annotations
 
-import dataclasses
 
 from typing import Callable, Mapping, Optional
 
@@ -33,6 +32,8 @@ from .common import (
     _dense_kernel_module,
     _request_errors,
     _tuning_problem,
+    UNIFIED_ALIBI_ARCHES,
+    unified_coverage_problem,
 )
 from .dense_rules import DenseSpace, DenseSupports
 from .unified_rules import TUNING_ALGORITHM, AttentionGeometryVariant, unified_space
@@ -58,11 +59,12 @@ def _tuning_precheck(variant: AttentionGeometryVariant):
 
     def precheck(req):
         problem = _tuning_problem(req)
-        if not problem.emit_lse:
+        coverage = unified_coverage_problem(problem)
+        if coverage is problem:
             return supports_native_unified_attention(problem, arch=variant.arch)
-        ok, why = supports_native_unified_attention(
-            dataclasses.replace(problem, emit_lse=False), arch=variant.arch
-        )
+        if problem.use_alibi and variant.arch not in UNIFIED_ALIBI_ARCHES:
+            return False, f"unified ALiBi runs on {UNIFIED_ALIBI_ARCHES} only"
+        ok, why = supports_native_unified_attention(coverage, arch=variant.arch)
         if ok:
             return path_gate(problem, arch=variant.arch)
         return ok, why
@@ -129,6 +131,11 @@ def make_tuning_candidate(variant: AttentionGeometryVariant) -> KernelCandidate:
                 ATTENTION_FEATURES
                 if variant.builder_kind == "gfx942_4warp_gqa"
                 else ATTENTION_FEATURES | {"lse"}
+            )
+            | (
+                {"alibi", "alibi_external_slopes"}
+                if variant.arch in UNIFIED_ALIBI_ARCHES
+                else set()
             ),
         ),
         space=unified_space(variant),

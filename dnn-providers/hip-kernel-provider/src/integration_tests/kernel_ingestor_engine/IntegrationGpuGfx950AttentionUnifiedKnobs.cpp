@@ -59,8 +59,9 @@ using namespace hip_kernel_provider::test_utilities;
  * codepath flags); Unified3D's is num_segments. Each expected kernel id is resolved at run
  * time from the production descriptors (expectedKernelId), so a reduced catalog is checked
  * against the kernels it actually ships; the coverage cases hold the tables to exactly the
- * catalog's kernel classes. Every 3D case runs with a workspace filled with NaN bytes first:
- * hipDNN does not zero it, and the split-KV pair must not read anything it did not write.
+ * catalog's kernel classes, Unified2D's ALiBi kernels (use_alibi) among them. Every 3D case
+ * runs with a workspace filled with NaN bytes first: hipDNN does not zero it, and the split-KV
+ * pair must not read anything it did not write.
  */
 namespace hip_kernel_provider::kernel_ingestor_engine::integration
 {
@@ -117,6 +118,9 @@ struct GraphShape
     int64_t batch;
     int64_t seqQ;
     int64_t seqKv;
+    /// Sets alibi_mask: hipDNN's ALiBi, defined with a top-left causal mask only
+    /// (SdpaSemanticsRegister SEM-021).
+    bool alibi = false;
 };
 
 /// One forced knob value, as a (KMD field = knob id, value) pair.
@@ -297,6 +301,29 @@ std::vector<KnobCase> knobCases2D()
                      {DataType::BFLOAT16, 128, 8, 2, Mask::TOP_LEFT, 512, 16, 64},
                      {},
                      knobsOf(NARROW_4X16)});
+    // ALiBi (top-left causal): both dtypes, MHA and GQA, Sq < Skv and Sq == Skv; Hq 12 and 40
+    // take hipDNN's second slope series for the heads past the largest power of two. The
+    // decode case checks routing only (Unified3D ships no ALiBi kernels): a single top-left
+    // query sees key 0 alone, where the ALiBi term is 0. Then one cold case.
+    const auto addAlibi = [&cases](const std::string& name, const GraphShape& shape) {
+        cases.push_back({"Unified2D_Alibi_" + name,
+                         ENGINE_2D,
+                         shape,
+                         knobsOf(NARROW_4X16),
+                         knobsOf(NARROW_4X16)});
+    };
+    addAlibi("Bf16_Hq8Hkv2_Sq96Skv256",
+             {DataType::BFLOAT16, 128, 8, 2, Mask::TOP_LEFT, 2, 96, 256, true});
+    addAlibi("Fp16_D64Hq12_Sq256", {DataType::HALF, 64, 12, 12, Mask::TOP_LEFT, 1, 256, 256, true});
+    addAlibi("Bf16_Hq40Hkv8_Sq128Skv384",
+             {DataType::BFLOAT16, 128, 40, 8, Mask::TOP_LEFT, 2, 128, 384, true});
+    addAlibi("Bf16_Hq8Hkv2_Decode",
+             {DataType::BFLOAT16, 128, 8, 2, Mask::TOP_LEFT, 2, 1, 512, true});
+    cases.push_back({"Unified2D_Alibi_Cold_Fp16_D64Hq32Hkv4",
+                     ENGINE_2D,
+                     {DataType::HALF, 64, 32, 4, Mask::TOP_LEFT, 3, 192, 320, true},
+                     {},
+                     knobsOf(NARROW_4X16)});
     return cases;
 }
 
@@ -368,6 +395,17 @@ std::vector<DeclineCase> declineCases()
         {"Unified3D_SeqKvNotAWholeNumberOfBlocks",
          ENGINE_3D,
          {DataType::BFLOAT16, 128, 8, 2, Mask::BOTTOM_RIGHT, 2, 1, 264}},
+        // hipDNN defines ALiBi only with a top-left causal mask.
+        {"Unified2D_AlibiNoMask",
+         ENGINE_2D,
+         {DataType::BFLOAT16, 128, 8, 2, Mask::NO_MASK, 2, 96, 256, true}},
+        {"Unified2D_AlibiBottomRight",
+         ENGINE_2D,
+         {DataType::BFLOAT16, 128, 8, 2, Mask::BOTTOM_RIGHT, 2, 96, 256, true}},
+        // Unified3D ships no ALiBi kernels; Unified2D serves ALiBi decode.
+        {"Unified3D_AlibiDecode",
+         ENGINE_3D,
+         {DataType::BFLOAT16, 128, 8, 2, Mask::TOP_LEFT, 2, 1, 512, true}},
     };
 }
 
@@ -426,6 +464,10 @@ SdpaGraph buildSdpaGraph(const std::string& name, const GraphShape& shape)
         attributes.set_diagonal_alignment(shape.mask == Mask::TOP_LEFT
                                               ? DiagonalAlignment::TOP_LEFT
                                               : DiagonalAlignment::BOTTOM_RIGHT);
+    }
+    if(shape.alibi)
+    {
+        attributes.set_alibi_mask(true);
     }
 
     auto outputs = graph->sdpa(q, k, v, attributes);
@@ -544,6 +586,11 @@ std::vector<std::string> kernelIdsFor(const KnobCase& knobCase)
         {"mask_type", catalogMaskType(knobCase)},
         {"sliding_window", int64_t{0}},
     };
+    // Only Unified2D's KMD has use_alibi.
+    if(std::string_view(knobCase.engine) == ENGINE_2D)
+    {
+        key.emplace_back("use_alibi", int64_t{knobCase.shape.alibi ? 1 : 0});
+    }
     for(const auto& [field, value] : knobCase.expected)
     {
         key.emplace_back(field, value);
@@ -697,15 +744,15 @@ using IntegrationGpuGfx950AttentionUnifiedPrecedence
     = IntegrationGpuGfx950AttentionUnifiedBase<KnobCase>;
 
 /// The knob tables register before main() names the descriptor root; this holds them to the
-/// catalog. Every kernel class the catalog ships -- 2D (dtype, mask, geometry), 3D (dtype,
-/// mask, num_segments) -- must be one a forced case runs, so a class reduction keeps cannot
-/// go unexecuted; a class the catalog dropped is reported by the case that forces it.
+/// catalog. Every kernel class the catalog ships -- 2D (dtype, mask, ALiBi, geometry), 3D
+/// (dtype, mask, num_segments) -- must be one a forced case runs, so a class reduction keeps
+/// cannot go unexecuted; a class the catalog dropped is reported by the case that forces it.
 TEST_F(IntegrationGpuGfx950AttentionUnifiedKnobCoverage, CoversEveryCatalogKernelClass)
 {
     ASSERT_FALSE(hipdnn_data_sdk::utilities::getEnv("HIPDNN_DESCRIPTOR_RUNTIME_DIR").empty())
         << "HIPDNN_DESCRIPTOR_RUNTIME_DIR is not set";
 
-    using KernelClass = std::tuple<std::string, std::string, int64_t, Knobs>;
+    using KernelClass = std::tuple<std::string, std::string, int64_t, int64_t, Knobs>;
     const auto classKnobs = [](const char* engine) -> std::vector<std::string> {
         if(std::string_view(engine) == ENGINE_3D)
         {
@@ -726,6 +773,7 @@ TEST_F(IntegrationGpuGfx950AttentionUnifiedKnobCoverage, CoversEveryCatalogKerne
             tableClasses.emplace(knobCase.engine,
                                  catalogDtypeName(knobCase.shape.dataType),
                                  catalogMaskType(knobCase),
+                                 knobCase.shape.alibi ? 1 : 0,
                                  knobCase.knobs);
         }
     }
@@ -746,6 +794,9 @@ TEST_F(IntegrationGpuGfx950AttentionUnifiedKnobCoverage, CoversEveryCatalogKerne
                                             ? nullptr
                                             : std::get_if<std::string>(&dtype->second);
                 const auto* mask = intField("mask_type");
+                // Unified3D's KMD has no use_alibi: its kernels are all plain.
+                const auto* alibiField = intField("use_alibi");
+                const int64_t alibi = alibiField == nullptr ? 0 : *alibiField;
                 Knobs knobs;
                 for(const auto& knob : classKnobs(engine))
                 {
@@ -762,9 +813,10 @@ TEST_F(IntegrationGpuGfx950AttentionUnifiedKnobCoverage, CoversEveryCatalogKerne
                 ASSERT_TRUE(dtypeName != nullptr && mask != nullptr)
                     << "kernel " << hipdnn_plugin_sdk::ingestor::toString(kernel.id)
                     << " carries no string dtype and integer mask_type";
-                EXPECT_EQ(tableClasses.count({engine, *dtypeName, *mask, knobs}), 1U)
+                EXPECT_EQ(tableClasses.count({engine, *dtypeName, *mask, alibi, knobs}), 1U)
                     << engine << " ships kernel class (" << *dtypeName << ", mask_type " << *mask
-                    << ", " << describeKey(MetadataKey(knobs.begin(), knobs.end()))
+                    << ", use_alibi " << alibi << ", "
+                    << describeKey(MetadataKey(knobs.begin(), knobs.end()))
                     << ") that no forced case runs";
             });
         EXPECT_GT(served, 0U) << engine << " serves no kernel on " << SERVED_ARCH

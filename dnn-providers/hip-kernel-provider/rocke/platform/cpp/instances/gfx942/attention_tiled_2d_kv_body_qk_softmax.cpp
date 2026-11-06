@@ -45,6 +45,7 @@
 #include "rocke/helper_rocke.helpers.attention.h" /* rocke_warp_xor_reduce_sum */
 #include "rocke/helper_rocke.helpers.mfma_attention.h" /* rocke_mfma_attn_mfma_32x32x16_for_dtype */
 #include "rocke/helper_rocke.helpers.schedule.h" /* ROCKE_SCHED_DS_READ / ROCKE_SCHED_MFMA, T8 */
+#include "rocke/helper_rocke.instances.common._attention_alibi.h"
 #include "rocke/instance_gfx942_attention_tiled_2d_internal.h"
 
 /* ===================================================================== *
@@ -399,14 +400,8 @@ void rocke_gfx942_attn2d_emit_kv_body(rocke_gfx942_attn2d_build_ctx_t* ctx)
         st_causal_lim_iter = rocke_b_add(b, ctx->context_len, st_qp_iter);
         if(ctx->USE_ALIBI)
         {
-            rocke_value_t* st_qh_iter_ok = rocke_b_cmp_lt(b, st_qh_iter, ctx->num_qh_p);
-            st_alibi_slope_iter = rocke_b_masked_global_load(b,
-                                                             ctx->alibi_slopes_ptr,
-                                                             st_qh_iter,
-                                                             st_qh_iter_ok,
-                                                             rocke_b_const_f32(b, 0.0),
-                                                             rocke_f32(),
-                                                             4);
+            st_alibi_slope_iter
+                = rocke_attn_alibi_slope(b, st_qh_iter, ctx->num_qh_p, ctx->alibi_slopes_ptr);
         }
     }
 
@@ -628,8 +623,8 @@ void rocke_gfx942_attn2d_emit_kv_body(rocke_gfx942_attn2d_build_ctx_t* ctx)
                     rocke_value_t* score = rocke_b_select(b, m_ok, s_scaled, neg_inf);
                     if(ctx->USE_ALIBI)
                     {
-                        /* slope * (col_abs - context_len) * RCP_LN2 (2825-2829). */
-                        rocke_value_t* pos_off = rocke_b_sub(b, col_abs, ctx->context_len);
+                        /* slope * (col_abs - causal_lim) * RCP_LN2 (2825-2829). */
+                        rocke_value_t* pos_off = rocke_b_sub(b, col_abs, causal_lim);
                         rocke_value_t* pos_f = rocke_b_sitofp_f32(b, pos_off);
                         rocke_value_t* add_term
                             = rocke_b_fmul(b, rocke_b_fmul(b, st_alibi_slope_iter, pos_f), rcp_ln2);
@@ -877,7 +872,7 @@ void rocke_gfx942_attn2d_emit_kv_body(rocke_gfx942_attn2d_build_ctx_t* ctx)
                 rocke_value_t* score = rocke_b_select(b, m_ok, s_scaled, neg_inf);
                 if(ctx->USE_ALIBI)
                 {
-                    rocke_value_t* pos_off = rocke_b_sub(b, col_abs, ctx->context_len);
+                    rocke_value_t* pos_off = rocke_b_sub(b, col_abs, causal_lim);
                     rocke_value_t* pos_f = rocke_b_sitofp_f32(b, pos_off);
                     rocke_value_t* slope = ctx->hoist_q_head[reg];
                     rocke_value_t* add_term
@@ -1095,8 +1090,8 @@ void rocke_gfx942_attn2d_emit_kv_body(rocke_gfx942_attn2d_build_ctx_t* ctx)
                 rocke_value_t* score = rocke_b_select(b, m_ok, s_scaled, neg_inf);
                 if(ctx->USE_ALIBI)
                 {
-                    /* slope * (col_abs - context_len) * RCP_LN2 (lines 4415-4418). */
-                    rocke_value_t* pos_off = rocke_b_sub(b, col_abs, ctx->context_len);
+                    /* slope * (col_abs - causal_lim) * RCP_LN2 (lines 4415-4418). */
+                    rocke_value_t* pos_off = rocke_b_sub(b, col_abs, causal_lim);
                     rocke_value_t* pos_f = rocke_b_sitofp_f32(b, pos_off);
                     rocke_value_t* slope = ctx->hoist_q_head[reg]; /* hoist_alibi[reg] */
                     rocke_value_t* add_term

@@ -36,8 +36,9 @@
  *
  *   matchOperands()   node, operands, layout, dtype and shape consistency
  *   (engine rules)    GQA group, head size, seqlen_q, and anything else the engine adds
- *   matchAttributes() whole paged-KV blocks, 32-bit addressing, the mask, every optional
- *                     attribute the kernels cannot honour, and the scale
+ *   matchAttributes() whole paged-KV blocks, 32-bit addressing, the mask, ALiBi where the
+ *                     engine serves it, every optional attribute the kernels cannot
+ *                     honour, and the scale
  *   bindGraph()       the bound tokens, with the engine's catalog mask key
  *
  * A matcher fix is one edit here; decline lines name their engine through DeclinedBy.
@@ -334,6 +335,27 @@ inline std::optional<MatchedOperands> matchOperands(const MatchContext& context,
 /// nothing.
 inline constexpr int64_t SMALLEST_BLOCK_SIZE = GFX950_UNIFIED_2D_BLOCK_SIZE_SMALL;
 
+/// An engine's bound-token names: each engine prefixes its own, so two engines' bindings
+/// never alias. @p dispatchLabel heads the error a missing token raises.
+struct BoundTokenNames
+{
+    std::string_view q;
+    std::string_view k;
+    std::string_view v;
+    std::string_view o;
+    /// The catalog mask key (a MaskType value), so kernelMatches does not re-derive it.
+    std::string_view maskType;
+    /// The sliding window the candidate must have been built with. Always 0: maskTypeFor
+    /// declines every left bound, so no graph that reaches the bind asks for a window.
+    std::string_view slidingWindow;
+    /// The softmax scale, f32, bound as its bit pattern (BoundTokens carry int64_t).
+    std::string_view scaleBits;
+    std::string_view dispatchLabel;
+    /// 1 for an ALiBi graph, 0 otherwise. Empty for an engine that serves no ALiBi: nothing
+    /// is bound or read.
+    std::string_view alibi;
+};
+
 /// What matchAttributes() derives from the node for the bind.
 struct MatchedAttributes
 {
@@ -342,13 +364,17 @@ struct MatchedAttributes
 };
 
 /**
- * @brief Whole paged-KV blocks, 32-bit addressing, the mask, every optional attribute these
- *        kernels cannot honour, and the scale. Logs each decline under @p engine.
+ * @brief Whole paged-KV blocks, 32-bit addressing, the mask, ALiBi, every optional attribute
+ *        these kernels cannot honour, and the scale. Logs each decline under @p engine.
+ *
+ * alibi_mask is admitted, with the mask hipDNN defines it for, only by an engine that binds
+ * an ALiBi token (@p names.alibi), the one that ships use_alibi variants.
  */
 inline std::optional<MatchedAttributes>
     matchAttributes(const data_objects::SdpaAttributes& attributes,
                     const UnifiedAttentionProblem& problem,
-                    std::string_view engine)
+                    std::string_view engine,
+                    const BoundTokenNames& names)
 {
     // The identity cache is cut into whole blocks, and the smallest block is 16: a Skv that
     // 16 does not divide is not a whole number of blocks at any block size.
@@ -394,8 +420,25 @@ inline std::optional<MatchedAttributes>
         return std::nullopt;
     }
 
+    // ALiBi (SdpaSemanticsRegister SEM-021): the use_alibi variants compute hipDNN's slopes
+    // from the query head count. hipDNN defines ALiBi only with a top-left causal mask and no
+    // right bound; maskTypeFor has already declined every window.
+    const bool alibi = attributes.alibi_mask();
+    if(alibi && names.alibi.empty())
+    {
+        HIPDNN_PLUGIN_LOG_INFO((DeclinedBy{engine, "alibi_mask"}) << "alibi_mask is not supported");
+        return std::nullopt;
+    }
+    if(alibi && *mask != MaskType::TOP_LEFT_CAUSAL)
+    {
+        HIPDNN_PLUGIN_LOG_INFO((DeclinedBy{engine, "alibi_mask"})
+                               << "alibi_mask needs a top-left causal mask; hipDNN defines ALiBi "
+                                  "with no other mask");
+        return std::nullopt;
+    }
+
     // --- 8. Every optional attribute these kernels cannot honour, declined explicitly. (The
-    // kernels have softcap, ALiBi and qq-bias variants, none shipped; hipDNN's SDPA node has no
+    // kernels have softcap and qq-bias variants, none shipped; hipDNN's SDPA node has no
     // softcap attribute to decline.)
 
     // Additive attention bias.
@@ -481,12 +524,7 @@ inline std::optional<MatchedAttributes>
                                   "generate_stats) are not supported");
         return std::nullopt;
     }
-    // ALiBi slopes and padding masks.
-    if(attributes.alibi_mask())
-    {
-        HIPDNN_PLUGIN_LOG_INFO((DeclinedBy{engine, "alibi_mask"}) << "alibi_mask is not supported");
-        return std::nullopt;
-    }
+    // Padding masks.
     if(attributes.padding_mask())
     {
         HIPDNN_PLUGIN_LOG_INFO((DeclinedBy{engine, "padding_mask"})
@@ -529,24 +567,6 @@ inline std::optional<MatchedAttributes>
     return MatchedAttributes{*mask, scale};
 }
 
-/// An engine's bound-token names: each engine prefixes its own, so two engines' bindings
-/// never alias. @p dispatchLabel heads the error a missing token raises.
-struct BoundTokenNames
-{
-    std::string_view q;
-    std::string_view k;
-    std::string_view v;
-    std::string_view o;
-    /// The catalog mask key (a MaskType value), so kernelMatches does not re-derive it.
-    std::string_view maskType;
-    /// The sliding window the candidate must have been built with. Always 0: maskTypeFor
-    /// declines every left bound, so no graph that reaches the bind asks for a window.
-    std::string_view slidingWindow;
-    /// The softmax scale, f32, bound as its bit pattern (BoundTokens carry int64_t).
-    std::string_view scaleBits;
-    std::string_view dispatchLabel;
-};
-
 /// The bound tokens of a matched graph. @p maskKey is the catalog mask kind that serves the
 /// graph's mask, which the engine may map (Unified3D serves NO_MASK decode by its
 /// bottom-right causal kernel).
@@ -569,6 +589,11 @@ inline BoundTokens bindGraph(const data_objects::SdpaAttributes& attributes,
     static_assert(sizeof(scaleBits) == sizeof(scale), "float must be 32-bit to round-trip");
     std::memcpy(&scaleBits, &scale, sizeof(scale));
     bound[std::string(names.scaleBits)] = static_cast<int64_t>(scaleBits);
+    if(!names.alibi.empty())
+    {
+        // Bound for every graph, so kernelMatches can pair a plain graph with a plain kernel.
+        bound[std::string(names.alibi)] = int64_t{attributes.alibi_mask() ? 1 : 0};
+    }
     return bound;
 }
 
@@ -582,6 +607,7 @@ struct UnifiedAttentionBinding
     int64_t maskType = 0;
     int64_t slidingWindow = 0;
     float scale = 0.0F;
+    bool alibi = false;
 };
 
 /// Re-reads the bindings bindGraph() established. Throws if one is missing.
@@ -609,6 +635,10 @@ inline UnifiedAttentionBinding readBinding(const BoundTokens& bound, const Bound
 
     const auto scaleBits = static_cast<int32_t>(read(names.scaleBits));
     std::memcpy(&binding.scale, &scaleBits, sizeof(binding.scale));
+    if(!names.alibi.empty())
+    {
+        binding.alibi = read(names.alibi) != 0;
+    }
     return binding;
 }
 

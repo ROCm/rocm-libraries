@@ -82,6 +82,10 @@ constexpr size_t KERNEL_ID_LENGTH = 36;
 // The knob case that the save and load cases build. Its graph sets the scale 1/sqrt(64), so a
 // loaded plan that applies the default scale 1.0 fails the comparison.
 constexpr const char* SAVE_LOAD_CASE = "D64_Bm128Bn64";
+// The ALiBi knob case the save and load cases build: GQA with a non-power-of-two Hq and
+// Sq != Skv. Its plan saves under the alibi contract; one saved under v2 would be refused
+// on load, because its code object takes the slopes pointer v2 does not pass.
+constexpr const char* ALIBI_SAVE_LOAD_CASE = "Alibi_D128_Bf16Hq40Kv8_Sq256Skv384";
 
 constexpr int64_t Q_UID = 1;
 constexpr int64_t K_UID = 2;
@@ -115,6 +119,9 @@ struct GraphShape
     /// Sets attn_scale_value to this instead of 1/sqrt(headSize), so a kernel that hard-wires
     /// the default scale fails the comparison. Ignored when omitScale is set.
     std::optional<float> scaleOverride = std::nullopt;
+    /// Sets alibi_mask: hipDNN's ALiBi, which hipDNN defines with a top-left causal mask only
+    /// (SdpaSemanticsRegister SEM-021).
+    bool alibi = false;
 };
 
 struct Tile
@@ -180,13 +187,20 @@ GraphShape withScale(GraphShape shape, float scale)
     return shape;
 }
 
+GraphShape withAlibi(GraphShape shape)
+{
+    shape.alibi = true;
+    return shape;
+}
+
 /// Forced (tile, head size) pairs and cold cases first; then one case for each remaining
 /// catalog head configuration, in ascending (head size, Hq, Hkv) order at B=1, Sq=Skv=256;
 /// then further cases until every (head size, dtype, causal, tile) class the catalog compiles
 /// runs at least once; then cold cases of an fp16 graph with an explicit mma_core_mode; then
-/// two forced cases with no attn_scale_value and one with a non-default attn_scale_value.
-/// Within them: bounds on both corners and both deprecated flags, fp16 and bf16, MHA, GQA and
-/// MQA, and forced cases with B > 1 and Sq != Skv.
+/// two forced cases with no attn_scale_value and one with a non-default attn_scale_value;
+/// then one ALiBi case per ALiBi class. Within them: bounds on both corners and both
+/// deprecated flags, fp16 and bf16, MHA, GQA and MQA, and forced cases with B > 1 and
+/// Sq != Skv.
 std::vector<KnobCase> knobCases()
 {
     constexpr auto FP16 = DataType::HALF;
@@ -440,6 +454,24 @@ std::vector<KnobCase> knobCases()
          withScale(makeShape(FP16, 128, 8, 8, Mask::NO_MASK, MMA_UNSET, 1, 256, 256), 2.0F),
          FORCED,
          Tile{256, 64}},
+        // ALiBi: one case per (head size, dtype). Non-power-of-two Hq takes hipDNN's second
+        // slope series for the heads past the largest power of two.
+        {"Alibi_D64_Bf16Hq12_Bm128Bn64",
+         withAlibi(makeShape(BF16, 64, 12, 12, Mask::BOUNDS_TOP_LEFT, MMA_UNSET, 2, 256, 256)),
+         FORCED,
+         Tile{128, 64}},
+        {"Alibi_D64_Fp16Hq32Kv4_Sq256Skv384",
+         withAlibi(makeShape(FP16, 64, 32, 4, Mask::CAUSAL_MASK_FLAG, MMA_UNSET, 1, 256, 384)),
+         COLD,
+         Tile{128, 64}},
+        {"Alibi_D128_Bf16Hq40Kv8_Sq256Skv384",
+         withAlibi(makeShape(BF16, 128, 40, 8, Mask::BOUNDS_TOP_LEFT, MMA_UNSET, 2, 256, 384)),
+         FORCED,
+         Tile{128, 64}},
+        {"Alibi_D128_Fp16Hq9_Sq128",
+         withAlibi(makeShape(FP16, 128, 9, 9, Mask::BOUNDS_TOP_LEFT, MMA_UNSET, 1, 128, 128)),
+         COLD,
+         Tile{128, 64}},
     };
 }
 
@@ -534,6 +566,10 @@ SdpaGraph buildSdpaGraph(const std::string& name, const GraphShape& shape)
     if(shape.mmaCoreMode != DataType::NOT_SET)
     {
         attributes.set_mma_core_mode(shape.mmaCoreMode);
+    }
+    if(shape.alibi)
+    {
+        attributes.set_alibi_mask(true);
     }
 
     auto outputs = graph->sdpa(q, k, v, attributes);
@@ -660,6 +696,7 @@ std::optional<std::string> expectedKernelId(const GraphShape& shape, const Tile&
         {"sliding_window", int64_t{0}},
         {"block_m", tile.blockM},
         {"block_n", tile.blockN},
+        {"use_alibi", int64_t{shape.alibi ? 1 : 0}},
     };
 
     std::vector<std::string> ids;
@@ -880,15 +917,15 @@ TEST_F(IntegrationGpuGfx950AttentionDenseKnobCoverage, CoversEveryCatalogHeadCon
 }
 
 /// Every row runs one compiled kernel, and what the compiler specializes on is the head size,
-/// dtype, causal flag and tile. The table must run every such class the catalog carries, so a
-/// row edited or removed cannot silently leave a code path unexecuted.
+/// dtype, causal flag, tile and ALiBi. The table must run every such class the catalog
+/// carries, so a row edited or removed cannot silently leave a code path unexecuted.
 TEST_F(IntegrationGpuGfx950AttentionDenseKnobCoverage, CoversEveryCatalogKernelClass)
 {
     ASSERT_FALSE(hipdnn_data_sdk::utilities::getEnv("HIPDNN_DESCRIPTOR_RUNTIME_DIR").empty())
         << "HIPDNN_DESCRIPTOR_RUNTIME_DIR is not set, so there are no production descriptors to "
            "read the catalog's kernel classes from";
 
-    using KernelClass = std::tuple<int64_t, std::string, int64_t, int64_t, int64_t>;
+    using KernelClass = std::tuple<int64_t, std::string, int64_t, int64_t, int64_t, int64_t>;
 
     std::set<KernelClass> tableClasses;
     for(const auto& knobCase : knobCases())
@@ -897,7 +934,8 @@ TEST_F(IntegrationGpuGfx950AttentionDenseKnobCoverage, CoversEveryCatalogKernelC
                              catalogDtypeName(knobCase.shape.dataType),
                              catalogCausal(knobCase.shape.mask),
                              knobCase.tile.blockM,
-                             knobCase.tile.blockN);
+                             knobCase.tile.blockN,
+                             knobCase.shape.alibi ? 1 : 0);
     }
 
     std::set<KernelClass> catalogClasses;
@@ -914,15 +952,16 @@ TEST_F(IntegrationGpuGfx950AttentionDenseKnobCoverage, CoversEveryCatalogKernelC
         const auto* causal = intField("causal");
         const auto* blockM = intField("block_m");
         const auto* blockN = intField("block_n");
+        const auto* alibi = intField("use_alibi");
         if(dtypeName == nullptr || headSize == nullptr || causal == nullptr || blockM == nullptr
-           || blockN == nullptr)
+           || blockN == nullptr || alibi == nullptr)
         {
             ADD_FAILURE() << "kernel " << hipdnn_plugin_sdk::ingestor::toString(kernel.id)
-                          << " carries no string dtype and integer head_size, causal, block_m "
-                             "and block_n";
+                          << " carries no string dtype and integer head_size, causal, block_m, "
+                             "block_n and use_alibi";
             return;
         }
-        catalogClasses.emplace(*headSize, *dtypeName, *causal, *blockM, *blockN);
+        catalogClasses.emplace(*headSize, *dtypeName, *causal, *blockM, *blockN, *alibi);
     });
 
     const auto onlyIn = [](const std::set<KernelClass>& from, const std::set<KernelClass>& other) {
@@ -931,10 +970,10 @@ TEST_F(IntegrationGpuGfx950AttentionDenseKnobCoverage, CoversEveryCatalogKernelC
         {
             if(other.count(kernelClass) == 0)
             {
-                const auto& [headSize, dtype, causal, blockM, blockN] = kernelClass;
+                const auto& [headSize, dtype, causal, blockM, blockN, alibi] = kernelClass;
                 text += " (D" + std::to_string(headSize) + ", " + dtype + ", causal "
                         + std::to_string(causal) + ", " + std::to_string(blockM) + "/"
-                        + std::to_string(blockN) + ")";
+                        + std::to_string(blockN) + ", alibi " + std::to_string(alibi) + ")";
             }
         }
         return text.empty() ? std::string(" none") : text;
@@ -1051,17 +1090,18 @@ class IntegrationGpuGfx950AttentionDenseSaveLoad
     : public IntegrationGpuGfx950AttentionDenseBase<KnobCase>
 {
 protected:
-    // Builds the forced-tile graph of the save and load knob case, validates one run and saves
-    // the plan in form. Then it destroys the graph, loads the plan with a new handle and
+    // Builds the forced-tile graph of the knob case caseName, validates one run and saves the
+    // plan in form. Then it destroys the graph, loads the plan with a new handle and
     // validates two runs of the loaded plan. Every run uses the CPU reference of the original
     // graph.
-    void roundTripInAFreshHandle(SaveForm form)
+    void roundTripInAFreshHandle(const char* caseName, SaveForm form)
     {
         const auto cases = knobCases();
-        const auto found = std::find_if(cases.begin(), cases.end(), [](const KnobCase& candidate) {
-            return std::string(candidate.name) == SAVE_LOAD_CASE;
-        });
-        ASSERT_NE(found, cases.end()) << "no knob case is named " << SAVE_LOAD_CASE;
+        const auto found
+            = std::find_if(cases.begin(), cases.end(), [caseName](const KnobCase& candidate) {
+                  return std::string(candidate.name) == caseName;
+              });
+        ASSERT_NE(found, cases.end()) << "no knob case is named " << caseName;
         ASSERT_TRUE(found->forced);
         const KnobCase& knobCase = *found;
 
@@ -1166,12 +1206,25 @@ protected:
 
 TEST_F(IntegrationGpuGfx950AttentionDenseSaveLoad, RestoresGraphAndPlanInAFreshHandle)
 {
-    roundTripInAFreshHandle(SaveForm::GRAPH_AND_PLAN);
+    roundTripInAFreshHandle(SAVE_LOAD_CASE, SaveForm::GRAPH_AND_PLAN);
 }
 
 TEST_F(IntegrationGpuGfx950AttentionDenseSaveLoad, RestoresPlanOnlyInAFreshHandle)
 {
-    roundTripInAFreshHandle(SaveForm::PLAN_ONLY);
+    roundTripInAFreshHandle(SAVE_LOAD_CASE, SaveForm::PLAN_ONLY);
+}
+
+/// An ALiBi plan carries no ALiBi launch value; only its contract name restores the flag.
+/// A loaded plan that launched without ALiBi, or with v2's ten arguments, fails the
+/// comparison or the load.
+TEST_F(IntegrationGpuGfx950AttentionDenseSaveLoad, RestoresAnAlibiGraphAndPlanInAFreshHandle)
+{
+    roundTripInAFreshHandle(ALIBI_SAVE_LOAD_CASE, SaveForm::GRAPH_AND_PLAN);
+}
+
+TEST_F(IntegrationGpuGfx950AttentionDenseSaveLoad, RestoresAnAlibiPlanOnlyInAFreshHandle)
+{
+    roundTripInAFreshHandle(ALIBI_SAVE_LOAD_CASE, SaveForm::PLAN_ONLY);
 }
 
 INSTANTIATE_TEST_SUITE_P(Quick,

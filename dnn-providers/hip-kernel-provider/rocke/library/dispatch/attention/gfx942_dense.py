@@ -220,6 +220,7 @@ def _make_spec(
         causal_diag_split=diag_split,
         kv_segments=kv_segments,
         window_wave_skip=window_wave_skip,
+        use_alibi=bool(req.use_alibi),
     )
 
 
@@ -256,10 +257,18 @@ def _make_gfx942_attention_dense_candidate() -> KernelCandidate:
         base_spec=_base_spec,
         supports=_supports,
         # Dense: causal (top-left or bottom-right), sliding-window and sinks (alone
-        # or combined), optional LSE output. Head size stays out: D64/D128 coverage
-        # is ``supports_attention_dense``'s call.
+        # or combined), ALiBi, optional LSE output. Head size stays out: D64/D128
+        # coverage is ``supports_attention_dense``'s call.
         features=frozenset(
-            {"causal", "causal_bottom_right", "sliding_window", "sinks", "lse"}
+            {
+                "causal",
+                "causal_bottom_right",
+                "sliding_window",
+                "sinks",
+                "alibi",
+                "alibi_external_slopes",
+                "lse",
+            }
         ),
         # _base_spec picks these from the dtype, head size, work count and window.
         recorded=frozenset(

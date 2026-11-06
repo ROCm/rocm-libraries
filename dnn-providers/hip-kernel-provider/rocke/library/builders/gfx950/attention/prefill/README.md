@@ -372,6 +372,21 @@ reject a moving bottom-right diagonal.
 That rejection does not disable gfx942 dense sliding-window attention: top-left
 and equal-length bottom-right requests retain the windowed path on both grids.
 
+### Optional ALiBi
+
+`use_alibi=True` adds the ALiBi term `slope(h) * (k - q)` to the scaled scores before
+the mask (hipDNN semantics). The kernel reads a caller FP32 `[Hq]` tensor passed as
+`alibi_slopes=` to `run_attention_dense_torch`, or, when none is passed (a null
+`alibi_slopes_ptr`), computes hipDNN's slopes from the query head count; one binary
+serves both.
+`q` and `k` are top-left positions; with `emit_lse=True` the LSE includes the term.
+hipDNN defines ALiBi on the top-left diagonal only, so bottom-right causal with ALiBi
+refuses `emit_lse` (its LSE would depend on that choice; O does not). With the flag off the emitted kernel is
+unchanged. Sinks, paged and packed (varlen) inputs are refused, and so is the persistent body. The dispatcher
+exposes it as `AttentionRequest(use_alibi=True[, use_alibi_external_slopes=True])`; the
+second flag says the caller passes slopes as `tensors["alibi_slopes"]` to `bind_torch`
+and selects the same kernel.
+
 ## Tuning — lds_k_group_pad
 
 `Gfx950AttentionDenseSpec.lds_k_group_pad` pads each K row-group in LDS to break

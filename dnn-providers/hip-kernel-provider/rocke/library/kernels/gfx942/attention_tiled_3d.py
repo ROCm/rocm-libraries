@@ -34,6 +34,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import ClassVar, Optional, Tuple
 
+from kernels.common._attention_alibi import alibi_slope
 from kernels.common._fmha_common import check_head_counts, gqa_ratio
 from kernels.common._attention_strided_kv import (
     declare_strided_kv_params,
@@ -135,6 +136,8 @@ class UnifiedAttention3DTiledSpec:
     sliding_window: int
     has_softcap: bool
     num_segments: int
+    # ALiBi (hipDNN SEM-021): ``alibi_slopes_ptr`` gives the per-query-head slopes;
+    # a null pointer selects hipDNN's built-in slopes from num_query_heads.
     use_alibi: bool = False
     use_qq_bias: bool = False
     num_seqs: int = 0
@@ -477,6 +480,7 @@ def build_unified_attention_3d_tiled(
     alibi_slopes_ptr = b.param(
         "alibi_slopes_ptr", PtrType(F32, "global"), readonly=True, align=4
     )
+    # Declared either way (fixed ABI); with use_alibi, null selects the built-in slopes.
     qq_bias_ptr = b.param("qq_bias_ptr", PtrType(F32, "global"), readonly=True, align=4)
     cu_q = b.param(
         "query_start_len_ptr", PtrType(I32, "global"), readonly=True, align=4
@@ -1116,9 +1120,8 @@ def build_unified_attention_3d_tiled(
     causal_lim = b.add(context_len, qp_r)
 
     if USE_ALIBI:
-        qh_ok = b.cmp_lt(qh_r, num_qh_p)
-        alibi_slope = b.masked_global_load(
-            alibi_slopes_ptr, qh_r, qh_ok, b.const_f32(0.0), dtype=F32, align=4
+        row_alibi_slope = alibi_slope(
+            b, qh_r, num_heads=num_qh_p, slopes=alibi_slopes_ptr
         )
 
     # The QK B operand (Q^T) is read from LDS once; every tile's MFMAs take it
@@ -1203,9 +1206,9 @@ def build_unified_attention_3d_tiled(
                 if USE_SOFTCAP:
                     s_scaled = b.fmul(_apply_softcap(b, s_scaled, softcap_p), rcp_ln2)
                 if USE_ALIBI:
-                    pos_off = b.sub(col_abs, context_len)
+                    pos_off = b.sub(col_abs, causal_lim)
                     pos_f = b.sitofp_f32(pos_off)
-                    add_term = b.fmul(b.fmul(alibi_slope, pos_f), rcp_ln2)
+                    add_term = b.fmul(b.fmul(row_alibi_slope, pos_f), rcp_ln2)
                     s_scaled = b.fadd(s_scaled, add_term)
                 if USE_QQ_BIAS:
                     # See attention_tiled_2d.py for the rationale on row_ok.

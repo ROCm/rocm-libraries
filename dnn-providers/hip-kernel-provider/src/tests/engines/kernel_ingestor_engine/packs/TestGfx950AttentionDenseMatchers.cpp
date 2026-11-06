@@ -59,6 +59,7 @@ constexpr std::string_view KERNEL_MATCHER_SYMBOL = "hipkernel.gfx950_attention_d
 constexpr std::string_view SCORE_SYMBOL = "hipkernel.gfx950_attention_dense.score";
 /// The mask type graph_match derives and kernel_match compares, as the engine names it.
 constexpr std::string_view CAUSAL_TOKEN = "gfx950_attention_dense.causal";
+constexpr std::string_view ALIBI_TOKEN = "gfx950_attention_dense.alibi";
 
 constexpr int64_t Q_UID = 1;
 constexpr int64_t K_UID = 2;
@@ -563,6 +564,8 @@ struct KernelSpec
     int64_t ragged = 0;
     int64_t blockM = 256;
     int64_t blockN = 64;
+    /// Absent is a record written before the field, which the KMD default completes to 0.
+    std::optional<int64_t> useAlibi;
     /// The descriptor id's final byte. Only the ranking cases vary it.
     unsigned idByte = 0xa1;
 };
@@ -600,6 +603,10 @@ hipdnn_plugin_sdk::ingestor::KernelDefinition makeKernel(const KernelSpec& spec)
         {std::string("block_m"), spec.blockM},
         {std::string("block_n"), spec.blockN},
     };
+    if(spec.useAlibi.has_value())
+    {
+        kernel.metadata[std::string("use_alibi")] = *spec.useAlibi;
+    }
     return kernel;
 }
 
@@ -2046,13 +2053,6 @@ TEST(TestGfx950AttentionDenseGraphMatch, DeclinesEveryOtherSpellingOfEachDecline
     EXPECT_FALSE(matchGraph(maxSeqLenKv).has_value());
 }
 
-TEST(TestGfx950AttentionDenseGraphMatch, DeclinesAlibiMask)
-{
-    GraphSpec spec;
-    spec.alibiMask = true;
-    EXPECT_FALSE(matchGraph(spec).has_value());
-}
-
 TEST(TestGfx950AttentionDenseGraphMatch, DeclinesPaddingMask)
 {
     GraphSpec spec;
@@ -2735,6 +2735,106 @@ TEST(TestGfx950AttentionDenseScore, ScoresEveryTileDeterministicallyAsAPositiveF
         EXPECT_GT(score, 0.0);
         EXPECT_TRUE(std::isfinite(score));
     }
+}
+
+// ---------------------------------------------------------------------------
+// ALiBi (alibi_mask)
+// ---------------------------------------------------------------------------
+
+GraphSpec withAlibi()
+{
+    GraphSpec spec;
+    spec.alibiMask = true;
+    return spec;
+}
+
+TEST(TestGfx950AttentionDenseGraphMatch, BindsAlibiWithTopLeftCausal)
+{
+    const auto bound = matchGraph(withAlibi());
+    ASSERT_TRUE(bound.has_value());
+    EXPECT_EQ(tryGetBoundInt(*bound, ALIBI_TOKEN).value_or(-1), 1);
+    EXPECT_EQ(tryGetBoundInt(*bound, CAUSAL_TOKEN).value_or(-1), 1);
+}
+
+TEST(TestGfx950AttentionDenseGraphMatch, BindsNoAlibiForAGraphWithoutIt)
+{
+    const auto bound = matchGraph(GraphSpec{});
+    ASSERT_TRUE(bound.has_value());
+    EXPECT_EQ(tryGetBoundInt(*bound, ALIBI_TOKEN).value_or(-1), 0);
+}
+
+/// hipDNN defines ALiBi only with a top-left causal mask and no right bound
+/// (SdpaSemanticsRegister SEM-021), so every other mask is declined, even bottom-right at
+/// Sq == Skv, which the plain path serves as the same corner.
+TEST(TestGfx950AttentionDenseGraphMatch, DeclinesAlibiWithAnyOtherMask)
+{
+    auto noMask = withAlibi();
+    noMask.leftBound = std::nullopt;
+    noMask.rightBound = std::nullopt;
+
+    auto bottomRight = withAlibi();
+    bottomRight.alignment = data_objects::DiagonalAlignment::BOTTOM_RIGHT;
+    ASSERT_EQ(bottomRight.seqLenQ, bottomRight.seqLenKv);
+    auto plainBottomRight = bottomRight;
+    plainBottomRight.alibiMask = false;
+    ASSERT_TRUE(matchGraph(plainBottomRight).has_value());
+
+    for(const auto& [what, spec] :
+        {std::pair{"no mask", noMask}, std::pair{"bottom-right causal at Sq == Skv", bottomRight}})
+    {
+        SCOPED_TRACE(what);
+        const auto decline = loggedDecline(spec);
+        EXPECT_EQ(decline.cause, "alibi_mask") << decline.detail;
+    }
+}
+
+/// An ALiBi graph is served by ALiBi candidates only, and a plain graph by plain ones: their
+/// scores differ, and so do their argument lists. A record without the field is a plain
+/// candidate (the KMD default 0).
+TEST(TestGfx950AttentionDenseKernelMatch, PairsAlibiGraphsWithAlibiCandidatesOnly)
+{
+    KernelSpec alibiKernel;
+    alibiKernel.useAlibi = 1;
+    KernelSpec plainKernel;
+    plainKernel.useAlibi = 0;
+    const KernelSpec legacyKernel;
+
+    EXPECT_TRUE(matchesKernel(withAlibi(), alibiKernel));
+    EXPECT_FALSE(matchesKernel(withAlibi(), plainKernel));
+    EXPECT_FALSE(matchesKernel(withAlibi(), legacyKernel));
+
+    EXPECT_FALSE(matchesKernel(GraphSpec{}, alibiKernel));
+    EXPECT_TRUE(matchesKernel(GraphSpec{}, plainKernel));
+    EXPECT_TRUE(matchesKernel(GraphSpec{}, legacyKernel));
+}
+
+/// A use_alibi that is neither 0 nor 1, or not an integer, is a malformed record: it serves
+/// no graph, rather than reading as a plain kernel.
+TEST(TestGfx950AttentionDenseKernelMatch, RefusesAMalformedUseAlibi)
+{
+    KernelSpec outOfRange;
+    outOfRange.useAlibi = 2;
+    auto mistyped = makeKernel(KernelSpec{});
+    mistyped.metadata[std::string("use_alibi")] = std::string("1");
+
+    for(const auto& graph : {withAlibi(), GraphSpec{}})
+    {
+        SCOPED_TRACE(graph.alibiMask ? "ALiBi graph" : "plain graph");
+        EXPECT_FALSE(matchesKernel(graph, outOfRange));
+        EXPECT_FALSE(matchesKernelDefinition(graph, mistyped));
+    }
+}
+
+/// kernel_match reads the ALiBi flag from the binding instead of assuming one; a binding
+/// that lacks it (a renamed token) is refused rather than read as "no ALiBi".
+TEST(TestGfx950AttentionDenseKernelMatch, RefusesABindingWithoutTheAlibiFlag)
+{
+    auto bound = matchGraph(GraphSpec{});
+    ASSERT_TRUE(bound.has_value());
+    ASSERT_TRUE(kernelMatchesWithBinding(GraphSpec{}, *bound, KernelSpec{}));
+
+    bound->erase(std::string(ALIBI_TOKEN));
+    EXPECT_FALSE(kernelMatchesWithBinding(GraphSpec{}, *bound, KernelSpec{}));
 }
 
 } // namespace

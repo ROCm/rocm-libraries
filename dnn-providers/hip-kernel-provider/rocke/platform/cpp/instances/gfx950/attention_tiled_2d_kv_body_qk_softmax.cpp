@@ -43,6 +43,7 @@
 #include "rocke/helper_helper_rocke.helpers.attention.h" /* softcap_log2 / mfma_16x16x16 */
 #include "rocke/helper_rocke.helpers.attention.h" /* warp_xor_reduce_sum   */
 #include "rocke/helper_rocke.helpers.mfma_attention.h" /* 32x32x16_for_dtype    */
+#include "rocke/helper_rocke.instances.common._attention_alibi.h"
 #include "rocke/instance_gfx950_attention_tiled_2d.h" /* mfma_32x32_c_row/_col */
 #include "rocke/instance_gfx950_attention_tiled_2d_internal.h"
 
@@ -268,13 +269,11 @@ void rocke_gfx950_attn2d_emit_licm_hoist(rocke_gfx950_attn2d_build_ctx_t* ctx)
 
     if(ctx->USE_ALIBI)
     {
-        const rocke_type_t* f32 = rocke_f32();
+        rocke_value_t* slopes = ctx->alibi_slopes_ptr;
         for(reg = 0; reg < ctx->REGS_PER_LANE; ++reg)
         {
-            rocke_value_t* qh_r = ctx->hoist_q_head[reg];
-            rocke_value_t* qh_ok = rocke_b_cmp_lt(b, qh_r, ctx->num_qh_p);
-            rocke_value_t* slope = rocke_b_masked_global_load(
-                b, ctx->alibi_slopes_ptr, qh_r, qh_ok, rocke_b_const_f32(b, 0.0), f32, 4);
+            rocke_value_t* slope
+                = rocke_attn_alibi_slope(b, ctx->hoist_q_head[reg], ctx->num_qh_p, slopes);
             ctx->hoist_q_head[reg] = slope;
         }
     }
@@ -312,14 +311,8 @@ void rocke_gfx950_attn2d_emit_licm_hoist(rocke_gfx950_attn2d_build_ctx_t* ctx)
         ctx->st_causal_lim_hoist = rocke_b_add(b, ctx->context_len, st_qp);
         if(ctx->USE_ALIBI)
         {
-            rocke_value_t* st_qh_ok = rocke_b_cmp_lt(b, st_qh, ctx->num_qh_p);
-            ctx->st_alibi_slope_hoist = rocke_b_masked_global_load(b,
-                                                                   ctx->alibi_slopes_ptr,
-                                                                   st_qh,
-                                                                   st_qh_ok,
-                                                                   rocke_b_const_f32(b, 0.0),
-                                                                   rocke_f32(),
-                                                                   4);
+            ctx->st_alibi_slope_hoist
+                = rocke_attn_alibi_slope(b, st_qh, ctx->num_qh_p, ctx->alibi_slopes_ptr);
         }
     }
 }
@@ -545,14 +538,8 @@ void rocke_gfx950_attn2d_emit_kv_body(rocke_gfx950_attn2d_build_ctx_t* ctx)
         st_causal_lim_iter = rocke_b_add(b, ctx->context_len, st_qp_iter);
         if(ctx->USE_ALIBI)
         {
-            rocke_value_t* st_qh_iter_ok = rocke_b_cmp_lt(b, st_qh_iter, ctx->num_qh_p);
-            st_alibi_slope_iter = rocke_b_masked_global_load(b,
-                                                             ctx->alibi_slopes_ptr,
-                                                             st_qh_iter,
-                                                             st_qh_iter_ok,
-                                                             rocke_b_const_f32(b, 0.0),
-                                                             rocke_f32(),
-                                                             4);
+            st_alibi_slope_iter
+                = rocke_attn_alibi_slope(b, st_qh_iter, ctx->num_qh_p, ctx->alibi_slopes_ptr);
         }
     }
 
@@ -708,6 +695,26 @@ void rocke_gfx950_attn2d_emit_kv_body(rocke_gfx950_attn2d_build_ctx_t* ctx)
                     b, valid_tail_eff, rocke_b_const_i32(b, (reg / 4) * 8 + (reg % 4)));
         }
 
+        /* Per-lane ALiBi slope: hoisted, per-iter (mask-once), or loaded here. */
+        rocke_value_t* slope_for_lane = NULL;
+        if(ctx->USE_ALIBI)
+        {
+            if(ctx->TRANSPOSED_INVARIANT_HOIST)
+                slope_for_lane = ctx->st_alibi_slope_hoist;
+            else if(ctx->TRANSPOSED_MASK_ONCE)
+                slope_for_lane = st_alibi_slope_iter;
+            else
+            {
+                rocke_value_t* q_row_t = rocke_b_add(b, ctx->wave_row_base, fh_c32_col(ctx, 0));
+                rocke_value_t* qh_mul
+                    = rocke_b_mul(b, ctx->kv_head_idx, rocke_b_const_i32(b, ctx->NQK));
+                rocke_value_t* qh_mod = rocke_b_mod(b, q_row_t, rocke_b_const_i32(b, ctx->NQK));
+                rocke_value_t* qh_t = rocke_b_add(b, qh_mul, qh_mod);
+                slope_for_lane
+                    = rocke_attn_alibi_slope(b, qh_t, ctx->num_qh_p, ctx->alibi_slopes_ptr);
+            }
+        }
+
         for(int group_idx = 0; group_idx < n_groups; ++group_idx)
         {
             rocke_value_t* const* st_regs = (group_idx == 0) ? ST32_n : ST32_n_g1;
@@ -813,10 +820,10 @@ void rocke_gfx950_attn2d_emit_kv_body(rocke_gfx950_attn2d_build_ctx_t* ctx)
                     rocke_value_t* score = rocke_b_select(b, m_ok, s_scaled, neg_inf);
                     if(ctx->USE_ALIBI)
                     {
-                        rocke_value_t* pos_off = rocke_b_sub(b, col_abs, ctx->context_len);
+                        rocke_value_t* pos_off = rocke_b_sub(b, col_abs, causal_lim);
                         rocke_value_t* pos_f = rocke_b_sitofp_f32(b, pos_off);
                         rocke_value_t* add_term
-                            = rocke_b_fmul(b, rocke_b_fmul(b, st_alibi_slope_iter, pos_f), rcp_ln2);
+                            = rocke_b_fmul(b, rocke_b_fmul(b, slope_for_lane, pos_f), rcp_ln2);
                         score = rocke_b_fadd(b, score, add_term);
                     }
                     if(ctx->USE_QQ_BIAS)
@@ -1009,7 +1016,7 @@ void rocke_gfx950_attn2d_emit_kv_body(rocke_gfx950_attn2d_build_ctx_t* ctx)
                 score = rocke_b_select(b, m_ok, s_scaled, neg_inf);
                 if(ctx->USE_ALIBI)
                 {
-                    rocke_value_t* pos_off = rocke_b_sub(b, col_abs, ctx->context_len);
+                    rocke_value_t* pos_off = rocke_b_sub(b, col_abs, causal_lim);
                     rocke_value_t* pos_f = rocke_b_sitofp_f32(b, pos_off);
                     rocke_value_t* slope = ctx->hoist_q_head[reg];
                     rocke_value_t* add_term
@@ -1200,7 +1207,7 @@ void rocke_gfx950_attn2d_emit_kv_body(rocke_gfx950_attn2d_build_ctx_t* ctx)
                 rocke_value_t* score = rocke_b_select(b, m_ok, s_scaled, neg_inf);
                 if(ctx->USE_ALIBI)
                 {
-                    rocke_value_t* pos_off = rocke_b_sub(b, col_abs, ctx->context_len);
+                    rocke_value_t* pos_off = rocke_b_sub(b, col_abs, causal_lim);
                     rocke_value_t* pos_f = rocke_b_sitofp_f32(b, pos_off);
                     rocke_value_t* slope = ctx->hoist_q_head[reg];
                     rocke_value_t* add_term

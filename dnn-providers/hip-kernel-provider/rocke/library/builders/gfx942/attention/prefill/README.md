@@ -127,6 +127,21 @@ overlap any input or the output; supplying it with the flag off is an error. The
 dispatcher exposes it as `AttentionRequest(emit_lse=True)` pinned to `gfx942_dense`,
 with the buffer passed as `tensors["lse"]` to `bind_torch`; hipDNN does not yet.
 
+### Optional ALiBi
+
+`use_alibi=True` adds the ALiBi term `slope(h) * (k - q)` to the scaled scores before
+the mask (hipDNN semantics). The kernel reads a caller FP32 `[Hq]` tensor passed as
+`alibi_slopes=` to `run_attention_dense_torch`, or, when none is passed (a null
+`alibi_slopes_ptr`), computes hipDNN's slopes from the query head count; one binary
+serves both.
+`q` and `k` are top-left positions; with `emit_lse=True` the LSE includes the term.
+hipDNN defines ALiBi on the top-left diagonal only, so bottom-right causal with ALiBi
+refuses `emit_lse` (its LSE would depend on that choice; O does not). With the flag off the emitted kernel is
+unchanged. Sinks, paged and packed (varlen) inputs are refused. The dispatcher
+exposes it as `AttentionRequest(use_alibi=True[, use_alibi_external_slopes=True])`; the
+second flag says the caller passes slopes as `tensors["alibi_slopes"]` to `bind_torch`
+and selects the same kernel.
+
 ## Why a separate kernel (not an arch branch in the gfx950 file)
 
 The gfx950 body bakes in CDNA4-only primitives; the algorithm genuinely diverges on

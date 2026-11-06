@@ -154,7 +154,7 @@ _RDNA_FEATURES = frozenset(
         "sinks",
         "fp8",
         "softcap",
-        "alibi",
+        "alibi_external_slopes",
         "qq_bias",
         "window_right",
         "attn_bias",

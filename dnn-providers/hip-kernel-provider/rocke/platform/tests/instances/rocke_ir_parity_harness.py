@@ -4152,6 +4152,21 @@ def cases():
                 "use_sinks": True,
             },
         ),
+        # --- ALiBi on the causal grid, with the per-row LSE shift (full
+        # attention) and on the shifted diagonal.
+        ("alibi_sq512", {"use_alibi": True}),
+        (
+            "alibi_full_lse_sq512",
+            {
+                "use_alibi": True,
+                "causal": False,
+                "emit_lse": True,
+            },
+        ),
+        (
+            "alibi_bottom_right_sq256",
+            {"use_alibi": True, "seqlen_q": 256, "causal_bottom_right": True},
+        ),
     ):
         add(
             "attention_dense",
@@ -4184,6 +4199,18 @@ def cases():
                 "causal_diag_split": True,
                 "kv_segments": 4,
                 "block_m": 128,
+            },
+        ),
+        # ALiBi on both grids (the persistent one reads the runtime head count)
+        # and with the LSE shift (full attention).
+        ("alibi_sq512", {"use_alibi": True}),
+        ("persist_alibi_sq512", {**_persist942, "use_alibi": True}),
+        (
+            "alibi_full_lse_sq512",
+            {
+                "use_alibi": True,
+                "causal": False,
+                "emit_lse": True,
             },
         ),
     ):

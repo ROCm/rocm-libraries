@@ -147,7 +147,17 @@ def _cases() -> dict[str, SdpaRequest]:
         "window_left_only": replace(base, left_bound=2),
         "bias_full": replace(base, bias=SdpaBias(packed((2, 4, 8, 8)))),
         "bias_broadcast": replace(base, bias=SdpaBias(packed((8, 8)))),
-        "alibi": replace(base, alibi=True),
+        "alibi": replace(base, alibi=True, right_bound=0),
+        "alibi_window_bias": replace(
+            make_request(h_q=6, h_k=3, s_q=4, s_kv=8),
+            alibi=True,
+            right_bound=0,
+            left_bound=3,
+            bias=SdpaBias(packed((4, 8))),
+        ),
+        "alibi_bottom_right": replace(
+            base, alibi=True, right_bound=0, diagonal="bottom_right"
+        ),
         "padded": replace(base, seq_len_q=seq_lens, seq_len_kv=seq_lens),
         "padding_mask_only": replace(base, padding_mask=True),
         "ragged": replace(

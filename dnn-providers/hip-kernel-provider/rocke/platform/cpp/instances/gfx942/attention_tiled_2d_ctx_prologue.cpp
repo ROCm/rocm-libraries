@@ -36,6 +36,7 @@
 #include <string.h>
 
 #include "rocke/helper_helper_rocke.helpers.attention.h" /* rocke_binary_search_seq_idx */
+#include "rocke/helper_rocke.instances.common._attention_alibi.h"
 #include "rocke/instance_gfx942_attention_tiled_2d_internal.h"
 
 /* ---------------------------------------------------------------- helpers */
@@ -1026,13 +1027,11 @@ void rocke_gfx942_attn2d_emit_licm_hoist(rocke_gfx942_attn2d_build_ctx_t* ctx)
 
     if(ctx->USE_ALIBI)
     {
-        const rocke_type_t* f32 = rocke_f32();
+        rocke_value_t* slopes = ctx->alibi_slopes_ptr;
         for(reg = 0; reg < ctx->REGS_PER_LANE; ++reg)
         {
-            rocke_value_t* qh_r = ctx->hoist_q_head[reg];
-            rocke_value_t* qh_ok = rocke_b_cmp_lt(b, qh_r, ctx->num_qh_p);
-            rocke_value_t* slope = rocke_b_masked_global_load(
-                b, ctx->alibi_slopes_ptr, qh_r, qh_ok, rocke_b_const_f32(b, 0.0), f32, 4);
+            rocke_value_t* slope
+                = rocke_attn_alibi_slope(b, ctx->hoist_q_head[reg], ctx->num_qh_p, slopes);
             /* The softmax bucket reads the per-reg slope from hoist_q_head. */
             ctx->hoist_q_head[reg] = slope;
         }
