@@ -13,6 +13,7 @@ developer who must run the suite, read its output, or add to it.
 | [Support Claim Enforcement](support-claim-enforcement.md) | For harness maintainers: the claim verdict model, the lifecycle inside `TestBody()`, the coverage ladder, and who owns what in the harness. |
 | [GPU Reference Test Coverage Rules](gpu-ref-test-coverage.md) | Decide whether a new `hipdnn_gpu_ref_tests` case adds coverage: the cost of a case (HipRTC compiles), the datatype, layout and padding-mode rules that keep the matrix small, and the measured effect of the cut. |
 | [Support Matrix and Feature Coverage](support-matrix.md) | Render the human-readable matrix of which engine supports which graph on which GPU and OS, validate the sidecars it is built from, see the pre-commit and CI checks around it, and measure per-op feature coverage. |
+| [SDPA Forward Test Plan](test-plans/sdpa-fwd.md) | Learn how the SDPA forward plan cases (`SdpaFwdPlan` bundles) were derived: the model, the rules, the tiers, the case list, which rows became bundles and how they are grouped into sweeps, and the engine defects that the cases skip. |
 
 Tool references are next to the tools:
 [`migration-scripts/README.md`](../migration-scripts/README.md) (the bulk
