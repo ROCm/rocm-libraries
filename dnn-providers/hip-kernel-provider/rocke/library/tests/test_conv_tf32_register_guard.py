@@ -171,3 +171,118 @@ def test_dgrad_and_wgrad_share_one_tf32_gate():
                 spec = replace(spec, **misaligned)
             msgs.add(valid(spec, "gfx950")[1])
         assert len(msgs) == 1, msgs
+
+
+# ---------------------------------------------------------------------------
+# The direct MFMA dgrad's weight preload (review: fp32 weights were counted
+# at the 16-bit width, so the fp32 / tf32 grid passed the spill guard).
+# ---------------------------------------------------------------------------
+
+# The runtime-channel candidate of the review: 3x3, cpg 64 (4 M-tiles),
+# kpg 256 (8 K-32 atoms, 2 per wave), one Q subtile.
+_PRELOAD_KNOBS = dict(
+    block_q=16,
+    block_groups=1,
+    block_h=8,
+    waves_q=1,
+    waves_k=4,
+    runtime_k_loop=False,
+    persistent_grid=False,
+    fold_k32=True,
+    k_atoms=8,
+    m_tiles=4,
+)
+
+
+def _preload_problem(dtype):
+    from kernels.common.conv_direct_grouped import DirectConvProblem
+
+    return DirectConvProblem(
+        N=2, H=28, W=28, groups=1, cpg=64, kpg=256, KH=3, KW=3, PAD=1, dtype=dtype
+    )
+
+
+def test_preload_fragment_follows_storage_and_emulation():
+    from kernels.conv.direct_variants import dgrad_frag_vgprs
+
+    for fold, regs16 in ((True, 4), (False, 2)):
+        for dtype in ("fp16", "bf16"):
+            assert dgrad_frag_vgprs(fold, dtype, "gfx950") == regs16
+        # One element per register with fp32 storage; native TF32 (gfx942)
+        # adds nothing.
+        for dtype, arch in (("fp32", "gfx950"), ("tf32", "gfx942"), ("tf32", None)):
+            assert dgrad_frag_vgprs(fold, dtype, arch) == 2 * regs16
+    # BF16x3 split halves span the 8-wide emulated atom: a K-16 fragment is
+    # zero-padded to it, so its split costs twice its own registers.
+    assert dgrad_frag_vgprs(True, "tf32", "gfx950") == 8 + 8
+    assert dgrad_frag_vgprs(False, "tf32", "gfx950") == 4 + 8
+
+
+def test_review_preload_candidate_is_counted_at_fp32_width():
+    """The 16-bit estimate admits 336 registers; fp32 weights plus
+    accumulators need 624 (and gfx950's TF32 split 576 more), past the spill
+    guard, on both arches and through both estimates."""
+    from kernels.conv.direct_aot_jobs import dgrad_rtc_spills
+    from kernels.conv.direct_variants import (
+        _MFMA_PRELOAD_VGPR_BUDGET,
+        dgrad_rtc_vgprs,
+        direct_mfma_knobs_reason,
+        direct_spec_for_problem,
+    )
+
+    k = _PRELOAD_KNOBS
+    for dtype in ("fp16", "bf16"):
+        assert dgrad_rtc_vgprs(k, 3, 3, dtype, "gfx950") == 336
+        assert direct_mfma_knobs_reason(_preload_problem(dtype), k, "gfx950") is None
+    assert dgrad_rtc_vgprs(k, 3, 3, "fp32", "gfx950") == 624
+    assert dgrad_rtc_vgprs(k, 3, 3, "tf32", "gfx942") == 624
+    assert dgrad_rtc_vgprs(k, 3, 3, "tf32", "gfx950") == 624 + 576
+    assert 624 > _MFMA_PRELOAD_VGPR_BUDGET
+    for dtype in ("fp32", "tf32"):
+        problem = _preload_problem(dtype)
+        for arch in ("gfx942", "gfx950"):
+            assert "would spill" in direct_mfma_knobs_reason(problem, k, arch)
+            assert dgrad_rtc_spills(k, 3, 3, arch, dtype)
+            spec, why = direct_spec_for_problem(
+                "direct_dgrad_mfma_rtc", problem, k, arch
+            )
+            assert spec is None and "would spill" in why
+
+
+@pytest.mark.parametrize("arch", ["gfx942", "gfx950"])
+@pytest.mark.parametrize("dtype", ["fp32", "tf32"])
+def test_no_fp32_storage_preload_job_is_over_budget(arch, dtype):
+    """Every preloading MFMA dgrad binary the fp32 / tf32 cache builds fits
+    the dtype-aware budget, and the review's candidate is not among them."""
+    from benchmarks.common import direct_kernel_sweep as dks
+    from kernels.conv.direct_variants import (
+        DIRECT_MFMA_DGRAD,
+        direct_mfma_knobs_reason,
+    )
+    from rocke.core.arch import ArchTarget
+
+    jobs = dks.enumerate_direct_jobs(
+        arch=arch,
+        target=ArchTarget.from_gfx(arch),
+        directions=("dgrad",),
+        dtype=dtype,
+    )
+    preloading = [
+        j
+        for j in jobs
+        if j.identity.algorithm in DIRECT_MFMA_DGRAD and j.spec_kwargs["waves_k"] > 1
+    ]
+    assert preloading
+    for job in preloading:
+        knobs = job.spec_kwargs
+        variant = job.identity.algorithm
+        probe = dks.probe_problem(dks.DirectCaps(**job.caps), dtype, variant, knobs)
+        assert direct_mfma_knobs_reason(probe, knobs, arch) is None, job.identity
+        assert not (
+            "k_atoms" in knobs
+            and dks.dgrad_rtc_spills(knobs, probe.KH, probe.KW, arch, dtype)
+        ), job.identity
+        assert not (
+            probe.KH == 3
+            and {k: knobs.get(k) for k in _PRELOAD_KNOBS} == _PRELOAD_KNOBS
+        ), job.identity

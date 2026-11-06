@@ -69,14 +69,18 @@ DIRECT_DTYPES = ("fp16", "bf16", "fp32", "tf32")
 # (--dtype fp32 / --dtype tf32), as for implicit GEMM.
 DIRECT_COMPILE_DTYPES = ("fp16", "bf16")
 DIRECT_DTYPE = "fp16"  # the default dtype
-# Problem dtype -> tensor storage dtype.
-_DIRECT_STORAGE = {"fp16": "fp16", "bf16": "bf16", "fp32": "fp32", "tf32": "fp32"}
 # Convolution directions the direct cache holds kernels for: all of them.
 DIRECT_DIRECTIONS = DIRECTIONS
 
 
 def direct_storage_dtype(dtype: str) -> str:
-    """The element type of a direct problem's tensors: ``fp32`` for tf32."""
+    """The element type of a direct problem's tensors: ``fp32`` for tf32.
+
+    Read off the kernels' own map, so the cache and the builders cannot
+    disagree on how a dtype is stored.
+    """
+    from kernels.common.conv_direct_grouped import _DIRECT_STORAGE
+
     try:
         return _DIRECT_STORAGE[dtype]
     except KeyError:
@@ -1697,15 +1701,18 @@ def dgrad_rtc_k_atoms(waves_k: int, fold_k32: bool) -> Tuple[int, ...]:
     return tuple(range(waves_k, DGRAD_RTC_MAX_KPG // atom + 1, waves_k))
 
 
-def dgrad_rtc_spills(knobs: dict, KH: int, KW: int, arch: str) -> bool:
-    """Would this runtime-channel dgrad binary spill (see
-    :data:`DGRAD_RTC_VGPR_FILL`)?"""
+def dgrad_rtc_spills(
+    knobs: dict, KH: int, KW: int, arch: str, dtype: str = DIRECT_DTYPE
+) -> bool:
+    """Would this runtime-channel dgrad binary for problem dtype ``dtype``
+    spill on ``arch`` (see :data:`DGRAD_RTC_VGPR_FILL`)?"""
     from rocke.core.arch import ArchTarget
 
     limits = ArchTarget.from_gfx(arch).limits
     waves = knobs["block_groups"] * knobs["waves_q"] * knobs["waves_k"]
     budget = limits.vgprs // -(-waves // 4)  # waves of a block share 4 SIMDs
-    return dgrad_rtc_vgprs(knobs, KH, KW) > DGRAD_RTC_VGPR_FILL * budget
+    vgprs = dgrad_rtc_vgprs(knobs, KH, KW, dtype, arch)
+    return vgprs > DGRAD_RTC_VGPR_FILL * budget
 
 
 def _fwd_wmma_1d_knobs(kw: int = 3) -> Iterator[dict]:
@@ -2875,8 +2882,8 @@ def tf32_narrow_reason(variant: str, problem, knobs: dict, arch: str) -> Optiona
         if knobs.get("fold_k32"):
             return None
         # The fprop pass reduces over kpg: the fold covers it when the grid
-        # has the folded twin, kpg is a multiple of 32 and its atom count
-        # splits over the same waves_k.
+        # has the folded twin, kpg is a multiple of 32, its atom count
+        # splits over the same waves_k and the twin fits its registers.
         twin = (
             knobs.get("waves_q", 1),
             knobs["waves_k"],
@@ -2893,7 +2900,9 @@ def tf32_narrow_reason(variant: str, problem, knobs: dict, arch: str) -> Optiona
             ):
                 return None
             wide["k_atoms"] = problem.kpg // 32
-        if _mfma_knobs_reason(problem, wide) is None:
+            if dgrad_rtc_spills(wide, problem.KH, problem.KW, arch, problem.dtype):
+                return None
+        if _mfma_knobs_reason(problem, wide, arch) is None:
             return "tf32 K-16 atom zero-padded on an emulated arch; fold_k32 covers kpg"
         return None
     if variant == "direct_nongrouped":
@@ -2939,9 +2948,9 @@ def _caps_jobs(
         n_raw += 1
         if knob_probe:
             probe = probe_problem(caps, dtype, variant, knobs)
-        if rtc_dgrad and dgrad_rtc_spills(knobs, caps.KH, caps.KW, arch):
+        if rtc_dgrad and dgrad_rtc_spills(knobs, caps.KH, caps.KW, arch, dtype):
             continue
-        if variant in _MFMA_DGRAD and _mfma_knobs_reason(probe, knobs):
+        if variant in _MFMA_DGRAD and _mfma_knobs_reason(probe, knobs, arch):
             continue
         if variant == "direct_depthwise_dgrad_win" and _dw_win_policy_reason(
             caps, knobs, arch
