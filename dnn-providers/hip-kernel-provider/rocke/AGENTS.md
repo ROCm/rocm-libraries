@@ -63,8 +63,10 @@ One-way dependency: **`library → platform` only**; platform never imports
 `kernels`/`builders`/`dispatch` and stays standalone-installable. The
 back-edges that predate the rule (parity-harness cases, examples, tools) are
 frozen per file in
-[`platform/tests/test_library_reach.py`](platform/tests/test_library_reach.py):
-a count may only go down, and a new platform file may not add one.
+[`platform/tests/test_library_reach.py`](platform/tests/test_library_reach.py)
+(enforced by the `rocke-library-reach` hook in the root
+`.pre-commit-config.yaml`): a count may only go down, and a new platform file
+may not add one.
 
 **No cycles inside `library/` either.** The packages are layered lowest → highest
 and may only import *downward*:
