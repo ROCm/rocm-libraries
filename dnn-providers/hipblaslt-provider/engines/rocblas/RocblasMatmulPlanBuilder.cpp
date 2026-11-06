@@ -75,7 +75,11 @@ void RocblasMatmulPlan::execute(const HipdnnEnginePluginHandle& handle,
         throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
                                                        "rocblas_set_stream failed");
     }
-    rocblas_backend::runGemm(rocblasHandle, _call, a.ptr, b.ptr, d.ptr);
+    rocblas_backend::runGemm(rocblasHandle,
+                             _call,
+                             operandAddress(a.ptr, _call.a),
+                             operandAddress(b.ptr, _call.b),
+                             operandAddress(d.ptr, _call.d));
 }
 
 } // namespace hipblaslt_plugin

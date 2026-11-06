@@ -3,6 +3,8 @@
 
 #include "common/MatmulProblem.hpp"
 
+#include "common/GemmFormulation.hpp"
+
 #include <limits>
 #include <vector>
 
@@ -18,8 +20,6 @@ namespace
 {
 
 namespace data_objects = hipdnn_flatbuffers_sdk::data_objects;
-
-constexpr int64_t INT32_LIMIT = std::numeric_limits<int32_t>::max();
 
 /// A validated operand: rank 2 or more, every extent positive, every stride non-negative.
 struct Operand
@@ -71,37 +71,6 @@ std::optional<Operand>
         }
     }
     return operand;
-}
-
-/// How a rows x cols matrix is stored, as BLAS sees it.
-struct MatrixLayout
-{
-    /// The column-major view of the storage is the matrix itself (true) or its transpose.
-    bool columnMajor = false;
-    int64_t leadingDimension = 0;
-};
-
-/// The layout of the last two axes of @p operand, or nullopt when neither is unit-stride.
-std::optional<MatrixLayout> matrixLayout(const Operand& operand)
-{
-    const size_t rank = operand.dims.size();
-    const int64_t rows = operand.dims[rank - 2];
-    const int64_t cols = operand.dims[rank - 1];
-    const int64_t rowStride = operand.strides[rank - 2];
-    const int64_t colStride = operand.strides[rank - 1];
-
-    // Row-major: the column-major view is the cols x rows transpose, columns rowStride apart.
-    // A single row touches one column of that view, so its leading dimension is free.
-    if(colStride == 1 && (rows == 1 || rowStride >= cols))
-    {
-        return MatrixLayout{false, rows == 1 ? cols : rowStride};
-    }
-    // Column-major: the view is the matrix, columns colStride apart.
-    if(rowStride == 1 && (cols == 1 || colStride >= rows))
-    {
-        return MatrixLayout{true, cols == 1 ? rows : colStride};
-    }
-    return std::nullopt;
 }
 
 /// The one stride between consecutive matrices of @p operand's batch, or nullopt when its
@@ -160,9 +129,18 @@ std::optional<int64_t> operandBatchStride(const Operand& operand, const Operand&
     return batchStride(operand);
 }
 
-GemmOperand gemmOperand(const Operand& operand, const MatrixLayout& layout, int64_t stride)
+/// The matrices of @p operand's last two axes, batched by @p stride.
+MatrixView matrixView(const Operand& operand, int64_t stride)
 {
-    return GemmOperand{operand.uid, operand.dataType, layout.leadingDimension, stride};
+    const size_t rank = operand.dims.size();
+    return MatrixView{operand.uid,
+                      operand.dataType,
+                      operand.dims[rank - 2],
+                      operand.dims[rank - 1],
+                      operand.strides[rank - 2],
+                      operand.strides[rank - 1],
+                      stride,
+                      0};
 }
 
 } // namespace
@@ -219,14 +197,10 @@ std::optional<GemmCall>
         return std::nullopt;
     }
 
-    const auto aLayout = matrixLayout(*a);
-    const auto bLayout = matrixLayout(*b);
-    const auto cLayout = matrixLayout(*c);
     const auto aStride = operandBatchStride(*a, *c);
     const auto bStride = operandBatchStride(*b, *c);
     const auto cStride = batchStride(*c);
-    if(!aLayout.has_value() || !bLayout.has_value() || !cLayout.has_value() || !aStride.has_value()
-       || !bStride.has_value() || !cStride.has_value())
+    if(!aStride.has_value() || !bStride.has_value() || !cStride.has_value())
     {
         return std::nullopt;
     }
@@ -235,57 +209,14 @@ std::optional<GemmCall>
     for(size_t axis = 0; axis + 2 < rank; ++axis)
     {
         batchCount *= c->dims[axis];
-        if(batchCount > INT32_LIMIT)
+        if(batchCount > std::numeric_limits<int32_t>::max())
         {
             return std::nullopt;
         }
     }
 
-    GemmCall call;
-    call.batchCount = batchCount;
-    call.k = k;
-    if(cLayout->columnMajor)
-    {
-        // c = a b: a's column-major view is a when a is column-major, a^T otherwise.
-        call.m = m;
-        call.n = n;
-        call.transposeA = !aLayout->columnMajor;
-        call.transposeB = !bLayout->columnMajor;
-        call.a = gemmOperand(*a, *aLayout, *aStride);
-        call.b = gemmOperand(*b, *bLayout, *bStride);
-    }
-    else
-    {
-        // c^T = b^T a^T: a row-major operand's column-major view is already its transpose.
-        call.m = n;
-        call.n = m;
-        call.transposeA = bLayout->columnMajor;
-        call.transposeB = aLayout->columnMajor;
-        call.a = gemmOperand(*b, *bLayout, *bStride);
-        call.b = gemmOperand(*a, *aLayout, *aStride);
-    }
-    call.d = gemmOperand(*c, *cLayout, *cStride);
-
-    // A written batch whose matrices overlap is a race.
-    const int64_t outputSpan = call.d.leadingDimension * call.n;
-    if(batchCount > 1 && call.d.batchStride < outputSpan)
-    {
-        return std::nullopt;
-    }
-
-    for(const int64_t value : {call.m,
-                               call.n,
-                               call.k,
-                               call.a.leadingDimension,
-                               call.b.leadingDimension,
-                               call.d.leadingDimension})
-    {
-        if(value > INT32_LIMIT)
-        {
-            return std::nullopt;
-        }
-    }
-    return call;
+    return gemmForViews(
+        matrixView(*a, *aStride), matrixView(*b, *bStride), matrixView(*c, *cStride), batchCount);
 }
 
 } // namespace hipblaslt_plugin

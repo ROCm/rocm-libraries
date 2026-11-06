@@ -206,7 +206,8 @@ if(HIPBLASLTPROVIDER_ENABLE_HIPBLASLT)
     target_compile_definitions(hipblaslt_plugin_private PUBLIC HIPBLASLTPROVIDER_ENABLE_HIPBLASLT=1)
 endif()
 target_sources(hipblaslt_plugin_private PRIVATE
-    $<$<BOOL:${HIPBLASLTPROVIDER_ENABLE_ROCBLAS}>:common/MatmulProblem.cpp>
+    common/GemmFormulation.cpp
+    common/MatmulProblem.cpp
     $<$<BOOL:${HIPBLASLTPROVIDER_ENABLE_ROCBLAS}>:engines/rocblas/RocblasGemm.cpp>
     $<$<BOOL:${HIPBLASLTPROVIDER_ENABLE_ROCBLAS}>:engines/rocblas/RocblasMatmulPlanBuilder.cpp>
 )

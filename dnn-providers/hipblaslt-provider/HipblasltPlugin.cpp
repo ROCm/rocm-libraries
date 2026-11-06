@@ -119,7 +119,14 @@ hipdnnPluginStatus_t hipdnnEnginePluginGetAllEngineIdsImpl(int64_t* engineIds,
         }
         throwIfNull(numEngines);
 
-        auto allEngineIds = std::vector<int64_t>({hipdnn_data_sdk::utilities::HIPBLASLT_ENGINE_ID});
+        // One engine per backend this build has; HipblasltContainer adds the same set.
+        std::vector<int64_t> allEngineIds;
+#ifdef HIPBLASLTPROVIDER_ENABLE_HIPBLASLT
+        allEngineIds.push_back(hipdnn_data_sdk::utilities::HIPBLASLT_ENGINE_ID);
+#endif
+#ifdef HIPBLASLTPROVIDER_ENABLE_ROCBLAS
+        allEngineIds.push_back(hipdnn_data_sdk::utilities::ROCBLAS_MATMUL_ENGINE_ID);
+#endif
         if(allEngineIds.size() > std::numeric_limits<uint32_t>::max())
         {
             throw HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,

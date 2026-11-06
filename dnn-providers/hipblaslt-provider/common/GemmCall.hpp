@@ -20,7 +20,26 @@ struct GemmOperand
     int64_t leadingDimension = 0;
     /// Elements between consecutive matrices of the batch; 0 broadcasts one matrix to all.
     int64_t batchStride = 0;
+    /// Elements from the start of the tensor's buffer to the first matrix.
+    int64_t offset = 0;
 };
+
+/// Bytes per element of the element types the GEMMs move.
+inline int64_t elementBytes(hipdnn_flatbuffers_sdk::data_objects::DataType dataType)
+{
+    return dataType == hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT ? 4 : 2;
+}
+
+/// @p base advanced to @p operand's first matrix.
+inline const void* operandAddress(const void* base, const GemmOperand& operand)
+{
+    return static_cast<const char*>(base) + operand.offset * elementBytes(operand.dataType);
+}
+
+inline void* operandAddress(void* base, const GemmOperand& operand)
+{
+    return static_cast<char*>(base) + operand.offset * elementBytes(operand.dataType);
+}
 
 /**
  * @brief A strided-batched GEMM in BLAS (column-major) terms, independent of the library

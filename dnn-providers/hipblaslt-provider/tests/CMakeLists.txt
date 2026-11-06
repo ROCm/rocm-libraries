@@ -23,7 +23,7 @@ add_executable(
     TestHipblasltHipdnnEnginePluginHandle.cpp
     TestHipblasltHipdnnPluginExecutionContext.cpp
     TestHipblasltPluginApi.cpp
-    $<$<BOOL:${HIPBLASLTPROVIDER_ENABLE_ROCBLAS}>:engines/rocblas/TestMatmulProblem.cpp>
+    engines/rocblas/TestMatmulProblem.cpp
     $<$<BOOL:${HIPBLASLTPROVIDER_ENABLE_ROCBLAS}>:engines/rocblas/TestGpuRocblasMatmulPlan.cpp>
 )
 

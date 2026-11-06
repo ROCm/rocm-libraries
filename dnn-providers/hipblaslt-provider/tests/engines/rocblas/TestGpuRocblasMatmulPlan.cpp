@@ -171,6 +171,12 @@ void runCase(const MatmulCase& matmul)
     ASSERT_EQ(hipStreamDestroy(stream), hipSuccess);
     c.markDeviceModified();
 
+    // Bring every host copy current: the reads below go through const accessors, which refuse
+    // to migrate memory the device last touched.
+    static_cast<void>(a.rawHostData());
+    static_cast<void>(b.rawHostData());
+    static_cast<void>(c.rawHostData());
+
     hipdnn_test_sdk::utilities::CpuFpReferenceMatmul::matmul(a, b, reference);
 
     // Each output is a k-term sum of products bounded by 1, rounded once into TOut.
