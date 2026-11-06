@@ -119,10 +119,12 @@ endif()
 # image-per-block, small_c, depthwise) in the C++ validators, by reason. The
 # byte-identity gate never sees a refused spec; this mirrors the Python cases
 # in library/tests/test_direct_wgrad_refusals.py. Both read the refusal texts
-# from library/tests/direct_wgrad_refusal_reasons.inc.
+# from library/tests/direct_wgrad_refusal_reasons.inc. Guarded on the sibling
+# library tree, as the platform's library installs are, not on the table: a
+# moved table must fail the build rather than drop this test.
 set(_ROCKE_WGRAD_REFUSAL_REASONS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../library/tests")
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/instances/conv_direct_wgrad_refusals_host.cpp"
-   AND EXISTS "${_ROCKE_WGRAD_REFUSAL_REASONS_DIR}/direct_wgrad_refusal_reasons.inc")
+   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../../library/kernels")
   add_executable(rocke_conv_direct_wgrad_refusals_host
                  instances/conv_direct_wgrad_refusals_host.cpp)
   target_include_directories(rocke_conv_direct_wgrad_refusals_host
