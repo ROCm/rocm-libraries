@@ -40,6 +40,7 @@ from .ir import (
     _buffer_op_bytes,
     _global_ptr_offset_op_error,
     _global_ptr_to_i64_op_error,
+    _gpu_check_failed_op_error,
     _if_else_branch_yield,
     _refuse_non_u8_source,
     _refuse_unsigned_operands,
@@ -47,6 +48,7 @@ from .ir import (
     _trap_op_error,
     dpp_ctrl_attr,
     dpp_xor_ctrl,
+    gpu_check_word_symbol,
     require_streaming_arch,
 )
 from .isa.backend import backend_for
@@ -468,6 +470,8 @@ class _Lowerer:
         self.kernel = kernel
         self.lines: List[str] = []
         self.smem_decls: List[str] = []
+        # The GPU-check word's symbol once a tile.gpu_check_failed stores to it.
+        self.gpu_check_word: str | None = None
         self._indent = 1
         self._smem_counter = 0
         # Resolve the architecture seam. The HIP path has no separate ISA
@@ -1571,6 +1575,19 @@ class _Lowerer:
             raise ValueError(error)
         self._emit("__builtin_trap();")
 
+    def _op_tile_gpu_check_failed(self, op: Op) -> None:
+        """Store 1 to the kernel's GPU-check word, then return from the kernel
+        (the LLVM lowering's ``_op_tile_gpu_check_failed``)."""
+        error = _gpu_check_failed_op_error(op)
+        if error:
+            raise ValueError(error)
+        self.gpu_check_word = gpu_check_word_symbol(self.kernel.name)
+        self._emit(
+            f"__hip_atomic_store(&{self.gpu_check_word}, 1, __ATOMIC_RELAXED, "
+            "__HIP_MEMORY_SCOPE_AGENT);"
+        )
+        self._emit("return;")
+
     def _op_tile_sched_group_barrier(self, op: Op) -> None:
         m = int(op.attrs["mask"])
         c = int(op.attrs["count"])
@@ -2402,9 +2419,10 @@ class _Lowerer:
         # ``raw_buffer_load/store`` family takes as its first argument.
         # Using the opaque type keeps the bitcast pun out of the user code.
         #
-        # Signature on ROCm 7 amdclang:
+        # Signature on ROCm 7.1 amdclang:
         # ``__builtin_amdgcn_make_buffer_rsrc(void*, short stride,
-        # int num_records, int flags)``
+        # int num_records, int flags)``; later clang takes a 64-bit
+        # ``num_records``: ``int64_t`` in LLVM 22 and 23, ``uint64_t`` after.
         #
         # The flags word is the rsrc DWORD3. Its format / out-of-bounds
         # encoding is ISA-specific (the gfx9 value makes every raw buffer
@@ -2414,6 +2432,20 @@ class _Lowerer:
         # the right word, out-of-range byte offsets return 0 on load and are
         # dropped on store; without it the compiler can lower buffer loads to
         # unbounded single-dword loads with no bounds check.
+        #
+        # ``num_records`` is cast to ``(int)``, which either signature accepts;
+        # the cast would truncate an i64 byte count, so anything but i32 is
+        # refused.
+        # The C++ engine refuses with the same text. A constant-space ``ptr``
+        # is kept: the HIP signature declares every pointer parameter the same
+        # way whatever its ``addr_space``, and the builtin takes a ``void*``.
+        nb_ty = op.operands[1].type.name
+        if nb_ty != "i32":
+            raise ValueError(
+                f"buffer_rsrc num_bytes must be i32 in the HIP lowering, got "
+                f"{nb_ty}; the HIP lowering casts num_records to (int), so a wider "
+                "byte count would be truncated; pass it as i32"
+            )
         ptr, num_bytes = op.operands
         word3 = backend_for(self.arch).buffer_rsrc_word3
         self._emit(
@@ -3099,6 +3131,8 @@ def lower_kernel_to_hip(
     if include_prologue:
         parts.append(HIP_PROLOGUE)
     parts.extend(_extra_vector_declarations(kernel))
+    if lowerer.gpu_check_word is not None:
+        parts.append(f"__device__ int {lowerer.gpu_check_word};")
     parts.append(head)
     if smem_block:
         parts.append(smem_block)
