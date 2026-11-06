@@ -15,6 +15,7 @@ from dataclasses import replace
 import pytest
 
 from rocke.core.ir import F32, IRBuilder, Op, Region, Value, VectorType
+from rocke.core.ir_serialize import serialize
 
 from kernels.common._conv_implicit_gemm_common import ConvDataSpec, ConvProblem
 from kernels.common import conv_implicit_gemm as fwd
@@ -169,3 +170,40 @@ def test_streamk_tree_neutral_partials_use_result_width(
         op.name == "vector.add" and any(v.name in selected for v in op.operands)
         for op in ops
     )
+
+
+@pytest.mark.parametrize("dtype", ["fp16", "bf16"])
+@pytest.mark.parametrize(
+    "lds_k_outer,async_dma", [(False, False), (True, False), (True, True)]
+)
+@pytest.mark.parametrize("replicas", [1, 3])
+def test_wmma_two_stage_store_uses_result_layout(
+    monkeypatch: pytest.MonkeyPatch,
+    dtype: str,
+    lds_k_outer: bool,
+    async_dma: bool,
+    replicas: int,
+) -> None:
+    """A source map is not needed to store already-computed MMA results.
+
+    Keep the physical dtypes, widths and destination map unchanged; remove only
+    src2's coordinate map. The full builder must still emit the same kernel,
+    including its guarded workspace atomics. This does not qualify an
+    asymmetric hardware instruction or change its recurrence contract.
+    """
+    spec = replace(
+        _spec("wgrad", "gfx1250"),
+        data=ConvDataSpec(dtype_a=dtype, dtype_b=dtype, dtype_d=dtype),
+        split_k=2,
+        two_stage=True,
+        lds_k_outer=lds_k_outer,
+        async_dma=async_dma,
+        ws_replicas=replicas,
+    )
+    expected = wgrad.build_implicit_gemm_conv_wgrad(spec, arch="gfx1250")
+    atom = wgrad._resolve_wgrad_op(spec, "gfx1250")
+    custom = replace(atom, srcs=(*atom.srcs[:2], replace(atom.srcs[2], layout=None)))
+    monkeypatch.setattr(wgrad, "_resolve_wgrad_op", lambda spec, arch: custom)
+    actual = wgrad.build_implicit_gemm_conv_wgrad(spec, arch="gfx1250")
+    assert any(op.name == "memref.global_atomic_add" for op in _walk(actual.body))
+    assert serialize(actual) == serialize(expected)

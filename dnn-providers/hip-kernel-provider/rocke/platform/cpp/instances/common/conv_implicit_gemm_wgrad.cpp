@@ -885,7 +885,7 @@ bool rocke_implicit_gemm_conv_wgrad_is_valid_spec(const rocke_implicit_gemm_conv
     if(sk > 1)
     {
         /* The two-stage scratch-atomic epilogue decodes the C fragment through
-         * ctx->atom on MFMA and through op.c_layout() on WMMA, so every wave32 and
+         * ctx->atom on MFMA and through op.dst_layout() on WMMA, so every wave32 and
          * wave64 target has it (Python wgrad_two_stage_available). */
         /* WMMA split-K is enabled for every dW dtype where the arch catalog marks
          * the float global atomics as run on a device. Mirrors Python
@@ -1364,7 +1364,7 @@ bool rocke_implicit_gemm_conv_wgrad_is_valid_spec(const rocke_implicit_gemm_conv
                          arch);
             return false;
         }
-        /* cshuffle reads the accumulators through op.c_layout(), the WMMA path
+        /* cshuffle reads the results through op.dst_layout(), the WMMA path
          * the forward and dgrad cshuffle epilogues use. */
         const char* epilogue = s->epilogue ? s->epilogue : "default";
         if(strcmp(epilogue, "default") != 0 && strcmp(epilogue, "cshuffle") != 0)
@@ -2005,17 +2005,17 @@ static void wgrad_emit_workspace_store_epilogue(rocke_ir_builder_t* b,
     rocke_value_t* block_warp_n_off = rocke_b_add(b, ctx->block_n_off_v, warp_n_off);
 
     /* 4-7. Per-slot (row, col) within the atom. WMMA (Python op is not None):
-     * the C fragment is decoded through op.c_layout(), as the WMMA atomic
-     * epilogue does. MFMA: through the atom's C-warp distribution. */
+     * the result fragment is decoded through op.dst_layout(), as the WMMA
+     * atomic epilogue does. MFMA: through the atom's C-warp distribution. */
     rocke_value_t* slot_rows[ROCKE_CONV_MAX_ACCS * 4];
     rocke_value_t* slot_cols[ROCKE_CONV_MAX_ACCS * 4];
     if(ctx->is_wmma)
     {
-        const rocke_arch_layout_map_t* c_map = rocke_mmaop_c_layout(ctx->op, b);
-        if(c_map == NULL)
+        const rocke_arch_layout_map_t* dst_map = rocke_mma_op_dst_layout(ctx->op, b);
+        if(dst_map == NULL)
             return;
         for(int i = 0; i < c_per_lane; ++i)
-            rocke_arch_layout_map_coord(c_map, b, ctx->lane, i, &slot_rows[i], &slot_cols[i]);
+            rocke_arch_layout_map_coord(dst_map, b, ctx->lane, i, &slot_rows[i], &slot_cols[i]);
     }
     else
     {
@@ -2425,7 +2425,7 @@ static void wgrad_emit_split_k_cshuffle_epilogue(rocke_ir_builder_t* b,
             vec_c = 1;
     }
 
-    /* WMMA reads the fragment through op.c_layout() (Python _cshuffle_epilogue). */
+    /* WMMA reads the result through op.dst_layout() (Python _cshuffle_epilogue). */
     rocke_cshuffle_epilogue_t cepi
         = ctx->is_wmma ? rocke_cshuffle_epilogue_from_grid_op(ctx->op, &ctx->grid, vec_c)
                        : rocke_cshuffle_epilogue_from_grid(ctx->atom, &ctx->grid, vec_c);

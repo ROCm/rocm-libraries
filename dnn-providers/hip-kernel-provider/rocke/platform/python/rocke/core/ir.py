@@ -31,7 +31,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 from .arch import target as _arch
-from .dtypes import UNSIGNED_INTEGER_DTYPES, dtype_info, normalize_dtype
+from .dtypes import UNSIGNED_INTEGER_DTYPES, dtype_info
 from .intexpr import IntExpr, relation_json
 from .param_facts import (
     FACT_WORDS,
