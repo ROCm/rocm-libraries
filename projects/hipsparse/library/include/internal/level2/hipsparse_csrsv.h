@@ -98,6 +98,7 @@ hipsparseStatus_t
 *  pBufferSizeInBytes number of bytes of the temporary storage buffer required by
 *                     \ref hipsparseScsrsv2_analysis "hipsparseXcsrsv2_analysis()" and
 *                     \ref hipsparseScsrsv2_solve "hipsparseXcsrsv2_solve()".
+*                     \p pBufferSizeInBytes is always a host variable, regardless of the pointer mode.
 *
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p nnz, \p descrA, \p csrSortedValA,
@@ -190,6 +191,7 @@ hipsparseStatus_t hipsparseZcsrsv2_bufferSize(hipsparseHandle_t         handle,
 *  pBufferSizeInBytes number of bytes of the temporary storage buffer required by
 *                     \ref hipsparseScsrsv2_analysis "hipsparseXcsrsv2_analysis()" and
 *                     \ref hipsparseScsrsv2_solve "hipsparseXcsrsv2_solve()".
+*                     \p pBufferSizeInBytes is always a host variable, regardless of the pointer mode.
 *
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p nnz, \p descrA, \p csrSortedValA,
@@ -420,7 +422,7 @@ hipsparseStatus_t hipsparseZcsrsv2_analysis(hipsparseHandle_t         handle,
 *  @param[in]
 *  nnz         number of non-zero entries of the sparse CSR matrix.
 *  @param[in]
-*  alpha       scalar \f$\alpha\f$.
+*  alpha       scalar \f$\alpha\f$, which can be in host or device memory.
 *  @param[in]
 *  descrA      descriptor of the sparse CSR matrix.
 *  @param[in]

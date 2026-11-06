@@ -73,11 +73,11 @@ extern "C" {
 *  @param[in]
 *  handle      handle to the hipSPARSE library context queue.
 *  @param[in]
-*  alpha       scalar \f$\alpha\f$.
+*  alpha       scalar \f$\alpha\f$, which can be in host or device memory.
 *  @param[in]
 *  vecX        sparse vector descriptor.
 *  @param[in]
-*  beta        scalar \f$\beta\f$.
+*  beta        scalar \f$\beta\f$, which can be in host or device memory.
 *  @param[inout]
 *  vecY        dense vector descriptor.
 *

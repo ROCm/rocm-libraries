@@ -310,7 +310,7 @@ hipsparseStatus_t hipsparseCreateConstCsc(hipsparseConstSpMatDescr_t* spMatDescr
 /*! \ingroup generic_module
 *  \brief Create a sparse Blocked ELL matrix descriptor.
 *  \details
-*  \p hipsparseCreateCsr creates a sparse Blocked ELL matrix descriptor. It should be
+*  \p hipsparseCreateBlockedEll creates a sparse Blocked ELL matrix descriptor. It should be
 *  destroyed at the end using \p hipsparseDestroySpMat.
 */
 #if(!defined(CUDART_VERSION) || CUDART_VERSION >= 11021)

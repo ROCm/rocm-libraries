@@ -81,11 +81,11 @@ hipsparseStatus_t hipsparseSpGEAM_destroyDescr(hipsparseSpGEAMDescr_t descr);
 *  @param[in]
 *  opB              sparse matrix \f$B\f$ operation type.
 *  @param[in]
-*  alpha            scalar \f$\alpha\f$.
+*  alpha            scalar \f$\alpha\f$, which can be in host or device memory.
 *  @param[in]
 *  matA             sparse matrix \f$A\f$ descriptor.
 *  @param[in]
-*  beta             scalar \f$\beta\f$.
+*  beta             scalar \f$\beta\f$, which can be in host or device memory.
 *  @param[in]
 *  matB             sparse matrix \f$B\f$ descriptor.
 *  @param[in]
@@ -98,6 +98,7 @@ hipsparseStatus_t hipsparseSpGEAM_destroyDescr(hipsparseSpGEAMDescr_t descr);
 *  spgeamDescr      SpGEAM descriptor.
 *  @param[out]
 *  bufferSize       number of bytes of the temporary storage buffer.
+*                   \p bufferSize is always a host variable, regardless of the pointer mode.
 *
 *  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
@@ -146,11 +147,11 @@ hipsparseStatus_t hipsparseSpGEAM_bufferSize(hipsparseHandle_t          handle,
 *  @param[in]
 *  opB              sparse matrix \f$B\f$ operation type.
 *  @param[in]
-*  alpha            scalar \f$\alpha\f$.
+*  alpha            scalar \f$\alpha\f$, which can be in host or device memory.
 *  @param[in]
 *  matA             sparse matrix \f$A\f$ descriptor.
 *  @param[in]
-*  beta             scalar \f$\beta\f$.
+*  beta             scalar \f$\beta\f$, which can be in host or device memory.
 *  @param[in]
 *  matB             sparse matrix \f$B\f$ descriptor.
 *  @param[out]
@@ -227,11 +228,11 @@ hipsparseStatus_t hipsparseSpGEAM_nnz(hipsparseHandle_t          handle,
 *  @param[in]
 *  opB              sparse matrix \f$B\f$ operation type.
 *  @param[in]
-*  alpha            scalar \f$\alpha\f$.
+*  alpha            scalar \f$\alpha\f$, which can be in host or device memory.
 *  @param[in]
 *  matA             sparse matrix \f$A\f$ descriptor.
 *  @param[in]
-*  beta             scalar \f$\beta\f$.
+*  beta             scalar \f$\beta\f$, which can be in host or device memory.
 *  @param[in]
 *  matB             sparse matrix \f$B\f$ descriptor.
 *  @param[out]
