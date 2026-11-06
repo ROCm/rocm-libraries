@@ -322,11 +322,12 @@ namespace
         hipDataType type, size_t elementCount, uint64_t seed, int lowerExponent, int upperExponent)
     {
         using namespace roc::hostnumerics;
-        const auto recipe = GenerationRecipe::realOnlyLastDimensionFastest(
+        const auto recipe = GenerationRecipe::realOnly(
             GenerationRecipe::randomEncodedExponent({.lowerUnbiasedExponent = lowerExponent,
                                                      .upperUnbiasedExponent = upperExponent,
                                                      .sourceType            = ScalarType::Float32}),
-            seed);
+            seed,
+            roc::hostnumerics::LastDimensionFastest{});
         return generate(hostnumericsOperandType(type), Shape{elementCount}, recipe);
     }
 

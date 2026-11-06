@@ -407,9 +407,10 @@ TEST(HostNumericsDataInitializationBridge, GroupedGemmUsesStableRoleSequencesAnd
         const Tensor generated
             = generate(ScalarType::Float32,
                        Shape{size},
-                       GenerationRecipe::realOnlyLastDimensionFastest(
+                       GenerationRecipe::realOnly(
                            std::move(component),
-                           initialization::seedForSequence(defaultInitializationSeed, sequence)));
+                           initialization::seedForSequence(defaultInitializationSeed, sequence),
+                           roc::hostnumerics::LastDimensionFastest{}));
         generated.copyLogicalElementsToEncodedStorage(std::as_writable_bytes(std::span(values)));
         return values;
     };
@@ -698,7 +699,8 @@ TEST(HostNumericsDataInitializationBridge, RuntimeDispatchSupportsEveryFp8Encodi
         const Tensor value
             = generate(hipblaslt::hostnumerics::scalarType(type),
                        Shape{1},
-                       GenerationRecipe::realOnlyLastDimensionFastest(GenerationRecipe::zero(), 0));
+                       GenerationRecipe::realOnly(
+                           GenerationRecipe::zero(), 0, roc::hostnumerics::LastDimensionFastest{}));
         EXPECT_EQ(value.rawEncodedBackingStorage().front(), std::byte{0})
             << "hipDataType=" << static_cast<int>(type);
     }
@@ -2081,10 +2083,12 @@ TEST(HostNumericsDataInitializationBridge, MatmulValidationAcceptsScalarVectorAn
     using namespace hipblaslt::hostnumerics;
     for(const Shape& shape : {Shape{}, Shape{3}, Shape{2, 3}, Shape{2, 3, 2}})
     {
-        const Tensor         expected = generate(ScalarType::Float32,
-                                         shape,
-                                         GenerationRecipe::realOnlyLastDimensionFastest(
-                                             GenerationRecipe::constant({.value = 1.0}), 0));
+        const Tensor expected
+            = generate(ScalarType::Float32,
+                       shape,
+                       GenerationRecipe::realOnly(GenerationRecipe::constant({.value = 1.0}),
+                                                  0,
+                                                  roc::hostnumerics::LastDimensionFastest{}));
         MatmulValidationCase testCase;
         testCase.outputs.emplace_back(expected, expected.deepCopy());
         MatmulValidationOptions options;

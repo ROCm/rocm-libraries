@@ -19,10 +19,11 @@ class GenerationTests(unittest.TestCase):  # noqa: F405
             np.arange(6, dtype=np.float32).reshape((2, 3), order="C"),
         )
 
-        complex_recipe = hv.GenerationRecipe.cartesian_last_dimension_fastest(
+        complex_recipe = hv.GenerationRecipe.cartesian(
             hv.GenerationRecipe.sine(),
             hv.GenerationRecipe.cosine(),
             seed=0,
+            index_order=hv.LastDimensionFastest(),
         )
         complex_values = hv.generate_tensor(
             hv.ScalarType.ComplexFloat32, [2, 3], complex_recipe
@@ -50,10 +51,11 @@ class GenerationTests(unittest.TestCase):  # noqa: F405
         random_component = hv.GenerationRecipe.uniform_integer(
             hv.UniformIntegerGenerationParameters(lower=-3, upper=3)
         )
-        random_recipe = hv.GenerationRecipe.cartesian_last_dimension_fastest(
+        random_recipe = hv.GenerationRecipe.cartesian(
             random_component,
             random_component,
             seed,
+            index_order=hv.LastDimensionFastest(),
         )
         random_values = hv.to_numpy(
             hv.generate_tensor(
@@ -443,8 +445,8 @@ class PermutationGenerationTests(unittest.TestCase):
             for scalar_type in (hv.ScalarType.Float32, hv.ScalarType.Float6E2M3):
                 layout = hv.Layout(hv.Shape(dimensions), [-20, 5, 1], 20)
                 component = hv.GenerationRecipe.serial_index()
-                recipe = hv.GenerationRecipe.real_only_last_dimension_fastest(
-                    component, seed=0
+                recipe = hv.GenerationRecipe.real_only(
+                    component, seed=0, index_order=hv.LastDimensionFastest()
                 ).with_index_order(hv.Permutation(order))
                 whole = hv.generate_tensor(scalar_type, layout, recipe)
                 pointwise = hv.Tensor(scalar_type, layout)
@@ -477,9 +479,10 @@ class PermutationGenerationTests(unittest.TestCase):
         self.assertEqual(report.reported_mismatches[0].coordinates, point)
         for invalid in ([0, 1], [0, 0, 2], [0, 1, 3]):
             with self.assertRaises(RuntimeError):
-                recipe = hv.GenerationRecipe.real_only_last_dimension_fastest(
+                recipe = hv.GenerationRecipe.real_only(
                     hv.GenerationRecipe.serial_index(),
                     seed=0,
+                    index_order=hv.LastDimensionFastest(),
                 ).with_index_order(hv.Permutation(invalid))
                 hv.generate_tensor(hv.ScalarType.Float32, dimensions, recipe)
             with self.assertRaises(RuntimeError):
@@ -495,9 +498,10 @@ class PermutationGenerationTests(unittest.TestCase):
         dimensions = (2, 3, 4)
         order = hv.Permutation([1, 0, 2])
         layout = hv.Layout(hv.Shape(dimensions), [4, 8, 1], 0)
-        recipe = hv.GenerationRecipe.real_only_last_dimension_fastest(
+        recipe = hv.GenerationRecipe.real_only(
             hv.GenerationRecipe.serial_index(),
             seed=0,
+            index_order=hv.LastDimensionFastest(),
         ).with_index_order(order)
         source = hv.generate_tensor(hv.ScalarType.Float32, layout, recipe)
         expected = np.arange(24, dtype=np.float32).reshape(3, 2, 4).transpose(1, 0, 2)
@@ -547,18 +551,20 @@ class PermutationGenerationTests(unittest.TestCase):
             ),
         )
         for component in components:
-            recipe = hv.GenerationRecipe.real_only_last_dimension_fastest(
+            recipe = hv.GenerationRecipe.real_only(
                 component.with_zero_outside_main_diagonal(),
                 seed=0,
+                index_order=hv.LastDimensionFastest(),
             ).with_index_order(hv.Permutation([1, 0]))
             whole = hv.generate_tensor(hv.ScalarType.Float32, layout, recipe)
             pointwise = hv.Tensor(hv.ScalarType.Float32, layout)
             for index in range(6):
                 hv.generate_at(pointwise, index, recipe)
             self.assertEqual(whole.storage, pointwise.storage)
-        recipe = hv.GenerationRecipe.real_only_last_dimension_fastest(
+        recipe = hv.GenerationRecipe.real_only(
             hv.GenerationRecipe.uniform_finite_encoded_value(),
             seed=0,
+            index_order=hv.LastDimensionFastest(),
         )
         whole = hv.generate_tensor(hv.ScalarType.Float6E2M3, layout, recipe)
         pointwise = hv.Tensor(hv.ScalarType.Float6E2M3, layout)

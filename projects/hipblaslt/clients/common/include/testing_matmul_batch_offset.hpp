@@ -138,30 +138,33 @@ void testing_matmul_batch_offset_impl(const Arguments& arg)
                      aColumns,
                      lda,
                      aPlan,
-                     roc::hostnumerics::GenerationRecipe::realOnlyLastDimensionFastest(
+                     roc::hostnumerics::GenerationRecipe::realOnly(
                          roc::hostnumerics::GenerationRecipe::affineIndexRemainder(
                              {.dimensionCoefficients = {1, 1, 1}, .positiveDivisor = 7})
                              .withAffineValueMapping({.offset = 1}),
-                         0));
+                         0,
+                         roc::hostnumerics::LastDimensionFastest{}));
     generateMatrices(hostB,
                      bRows,
                      bColumns,
                      ldb,
                      bPlan,
-                     roc::hostnumerics::GenerationRecipe::realOnlyLastDimensionFastest(
+                     roc::hostnumerics::GenerationRecipe::realOnly(
                          roc::hostnumerics::GenerationRecipe::affineIndexRemainder(
                              {.dimensionCoefficients = {1, -1, 1}, .positiveDivisor = 5})
                              .withAffineValueMapping({.offset = 1}),
-                         0));
+                         0,
+                         roc::hostnumerics::LastDimensionFastest{}));
     generateMatrices(hostC,
                      M,
                      N,
                      ldc,
                      cPlan,
-                     roc::hostnumerics::GenerationRecipe::realOnlyLastDimensionFastest(
+                     roc::hostnumerics::GenerationRecipe::realOnly(
                          roc::hostnumerics::GenerationRecipe::affineIndexRemainder(
                              {.dimensionCoefficients = {1, 1, 0}, .positiveDivisor = 3}),
-                         0));
+                         0,
+                         roc::hostnumerics::LastDimensionFastest{}));
 
     device_vector<Ti> deviceA(aPlan.allocationElements * batchCount);
     device_vector<Ti> deviceB(bPlan.allocationElements * batchCount);

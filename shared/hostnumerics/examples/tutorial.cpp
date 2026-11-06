@@ -50,8 +50,8 @@ void tensorBasics() {
 // Step 2: generate reproducible real, integer, and complex tensors. A caller
 // supplies one seed per logical operand; replaying a seed reproduces its bytes.
 void deterministicGeneration() {
-    const GenerationRecipe realRecipe = GenerationRecipe::realOnlyLastDimensionFastest(
-        GenerationRecipe::uniformReal({.lower = -1.0, .upper = 1.0}), 17);
+    const GenerationRecipe realRecipe = GenerationRecipe::realOnly(
+        GenerationRecipe::uniformReal({.lower = -1.0, .upper = 1.0}), 17, LastDimensionFastest{});
     const Tensor real = generate(ScalarType::Float32, Shape{8}, realRecipe);
     const Tensor replay = generate(ScalarType::Float32, Shape{8}, realRecipe);
     check(std::equal(real.rawEncodedBackingStorage().begin(), real.rawEncodedBackingStorage().end(),
@@ -59,20 +59,20 @@ void deterministicGeneration() {
                      replay.rawEncodedBackingStorage().end()),
           "Equal generation seeds produced different storage.");
 
-    const Tensor integers =
-        generate(ScalarType::Int32, Shape{8},
-                 GenerationRecipe::realOnlyLastDimensionFastest(
-                     GenerationRecipe::uniformInteger({.lower = 1, .upper = 4}), 27));
+    const Tensor integers = generate(
+        ScalarType::Int32, Shape{8},
+        GenerationRecipe::realOnly(GenerationRecipe::uniformInteger({.lower = 1, .upper = 4}), 27,
+                                   LastDimensionFastest{}));
     bool anyNonzero = false;
     for (size_t index = 0; index < integers.elementCount(); ++index)
         anyNonzero |= integers.loadAs<int32_t>({index}) != 0;
     check(anyNonzero, "Integer generation unexpectedly produced only zeros.");
 
-    const Tensor complex =
-        generate(ScalarType::ComplexFloat32, Shape{8},
-                 GenerationRecipe::cartesianLastDimensionFastest(
-                     GenerationRecipe::uniformInteger({.lower = 1, .upper = 4}),
-                     GenerationRecipe::uniformInteger({.lower = -4, .upper = -1}), 37));
+    const Tensor complex = generate(
+        ScalarType::ComplexFloat32, Shape{8},
+        GenerationRecipe::cartesian(GenerationRecipe::uniformInteger({.lower = 1, .upper = 4}),
+                                    GenerationRecipe::uniformInteger({.lower = -4, .upper = -1}),
+                                    37, LastDimensionFastest{}));
     check(complex.loadAs<std::complex<float>>({0}).imag() != 0.0f,
           "Complex generation omitted its imaginary component.");
 }
@@ -136,8 +136,8 @@ void matrixMultiplication() {
 // Step 5: MX generation returns packed data, natural block scales, a scale map,
 // and decoded reference values together.
 void blockScaledMxGeneration() {
-    const GenerationRecipe recipe = GenerationRecipe::realOnlyLastDimensionFastest(
-        GenerationRecipe::uniformReal({.lower = -1.0, .upper = 1.0}), 47);
+    const GenerationRecipe recipe = GenerationRecipe::realOnly(
+        GenerationRecipe::uniformReal({.lower = -1.0, .upper = 1.0}), 47, LastDimensionFastest{});
     const MxDataGeneration data =
         MxDataGeneration::preserveRange(recipe, {.lower = -1.0, .upper = 1.0});
     MxGenerationOptions options;

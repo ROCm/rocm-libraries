@@ -6,6 +6,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <optional>
+#include <roc/hostnumerics/index_order.hpp>
 #include <roc/hostnumerics/permutation.hpp>
 #include <roc/hostnumerics/tensor.hpp>
 #include <span>
@@ -17,19 +18,6 @@ namespace roc::hostnumerics {
 namespace detail {
 struct GenerationRecipeAccess;
 }  // namespace detail
-
-struct GenerationRecipeSettings {
-    // The same seed and logical element index always produce the same value,
-    // regardless of traversal order or thread count.
-    uint64_t seed = 0;
-
-    // Axes from slowest to fastest. Indexed recipes and generateAt use this
-    // coordinate-to-index mapping; the default suits only rank-zero tensors.
-    Permutation indexOrder = Permutation::identity(0);
-
-    // Added to the sampling index without changing coordinates or storage offsets.
-    size_t indexOffset = 0;
-};
 
 struct ConstantGenerationParameters {
     double value = 0.0;
@@ -311,38 +299,38 @@ class GenerationRecipe {
     [[nodiscard]] static Component randomRawBits();
     [[nodiscard]] static Component rawSerialDimension(DimensionGenerationParameters parameters);
 
+    // Every recipe takes a seed and an index order. The same seed and logical
+    // element index always produce the same value, regardless of traversal
+    // order or thread count. The index order maps coordinates to logical
+    // indices for indexed recipes and generateAt.
+
     // For a complex destination, realOnly writes zero to the imaginary
     // component. For a non-complex destination, it evaluates component.
-    [[nodiscard]] static GenerationRecipe realOnly(Component component,
-                                                   GenerationRecipeSettings settings);
+    [[nodiscard]] static GenerationRecipe realOnly(Component component, uint64_t seed,
+                                                   IndexOrder indexOrder);
 
     // For a complex destination, replicated evaluates one component once and
     // writes the same value to both components. Raw components are rejected.
-    [[nodiscard]] static GenerationRecipe replicated(Component component,
-                                                     GenerationRecipeSettings settings);
+    [[nodiscard]] static GenerationRecipe replicated(Component component, uint64_t seed,
+                                                     IndexOrder indexOrder);
 
     // For a complex destination, cartesian evaluates real and imaginary in
     // distinct random domains. For a non-complex destination, it evaluates
     // only real. Raw components are rejected.
     [[nodiscard]] static GenerationRecipe cartesian(Component real, Component imaginary,
-                                                    GenerationRecipeSettings settings);
+                                                    uint64_t seed, IndexOrder indexOrder);
 
     [[nodiscard]] uint64_t seed() const noexcept;
+    // Added to the sampling index without changing coordinates or storage
+    // offsets; zero unless set by withIndexOffset.
     [[nodiscard]] size_t indexOffset() const noexcept;
     [[nodiscard]] GenerationRecipe withIndexOffset(size_t offset) const;
-    [[nodiscard]] static GenerationRecipe realOnlyLastDimensionFastest(Component component,
-                                                                       uint64_t seed);
-    [[nodiscard]] static GenerationRecipe replicatedLastDimensionFastest(Component component,
-                                                                         uint64_t seed);
-    [[nodiscard]] static GenerationRecipe cartesianLastDimensionFastest(Component real,
-                                                                        Component imaginary,
-                                                                        uint64_t seed);
 
-    // Returns the chosen order for the supplied rank, checking explicit orders.
+    // Returns the index order for a tensor of `rank` dimensions, checking an
+    // explicit permutation's size.
     [[nodiscard]] Permutation indexOrder(size_t rank) const;
     [[nodiscard]] GenerationRecipe withSeed(uint64_t seed) const;
-    [[nodiscard]] GenerationRecipe withIndexOrder(const Permutation& order) const;
-    [[nodiscard]] GenerationRecipe withLastDimensionFastestIndexOrder() const;
+    [[nodiscard]] GenerationRecipe withIndexOrder(IndexOrder indexOrder) const;
 
    private:
     struct BoundComponent {
@@ -361,10 +349,11 @@ class GenerationRecipe {
     };
     using ComplexPolicy = std::variant<RealOnlyPolicy, ReplicatedPolicy, CartesianPolicy>;
 
-    GenerationRecipe(GenerationRecipeSettings settings, ComplexPolicy complexPolicy);
+    GenerationRecipe(uint64_t seed, IndexOrder indexOrder, ComplexPolicy complexPolicy);
 
-    GenerationRecipeSettings settings_;
-    bool lastDimensionFastest_ = false;
+    uint64_t seed_;
+    IndexOrder indexOrder_;
+    size_t indexOffset_ = 0;
     ComplexPolicy complexPolicy_;
 
     friend struct detail::GenerationRecipeAccess;

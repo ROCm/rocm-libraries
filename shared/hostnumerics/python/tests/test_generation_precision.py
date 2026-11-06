@@ -51,8 +51,10 @@ def options():
 def encode_values(kind, values, conversion):
     tensor = hv.Tensor(kind, hv.Shape([len(values)]))
     for i, value in enumerate(values):
-        recipe = hv.GenerationRecipe.real_only_last_dimension_fastest(
-            hv.GenerationRecipe.constant(hv.ConstantGenerationParameters(value)), 0
+        recipe = hv.GenerationRecipe.real_only(
+            hv.GenerationRecipe.constant(hv.ConstantGenerationParameters(value)),
+            0,
+            index_order=hv.LastDimensionFastest(),
         )
         hv.generate_at(tensor, i, recipe, conversion)
     return tensor
@@ -142,8 +144,10 @@ class GenerationPrecisionTests(unittest.TestCase):
 
     def test_binomial_distribution_and_sampling_offset(self):
         trials = hv.BinomialHalfGenerationParameters(21)
-        recipe = hv.GenerationRecipe.real_only_last_dimension_fastest(
-            hv.GenerationRecipe.binomial_half(trials), 31
+        recipe = hv.GenerationRecipe.real_only(
+            hv.GenerationRecipe.binomial_half(trials),
+            31,
+            index_order=hv.LastDimensionFastest(),
         )
         values = np.asarray(
             hv.generate_tensor(hv.ScalarType.Float64, [131072], recipe).values,
@@ -158,11 +162,12 @@ class GenerationPrecisionTests(unittest.TestCase):
             hv.ScalarType.Float64, [43], recipe.with_index_offset(11)
         )
         np.testing.assert_array_equal(shifted.values, values[11:54])
-        powers = hv.GenerationRecipe.real_only_last_dimension_fastest(
+        powers = hv.GenerationRecipe.real_only(
             hv.GenerationRecipe.binomial_half(trials)
             .with_exp2_transform()
             .with_affine_value_mapping(hv.GenerationAffineValueParameters(2**-11, 0)),
             31,
+            index_order=hv.LastDimensionFastest(),
         )
         np.testing.assert_array_equal(
             hv.generate_tensor(hv.ScalarType.Float64, [43], powers).values,
@@ -176,16 +181,18 @@ class GenerationPrecisionTests(unittest.TestCase):
             )
 
     def test_independent_mx_codes_and_scales(self):
-        settings = hv.GenerationRecipeSettings(0, hv.Permutation([1, 0]))
-        recipe = hv.GenerationRecipe.real_only(hv.GenerationRecipe.sine(), settings)
+        order = hv.Permutation([1, 0])
+        recipe = hv.GenerationRecipe.real_only(hv.GenerationRecipe.sine(), 0, order)
         mx_options = hv.MxGenerationOptions()
         mx_options.scale = hv.MxScaleGenerationMode.One
-        zero = hv.GenerationRecipe.real_only(hv.GenerationRecipe.zero(), settings)
+        zero = hv.GenerationRecipe.real_only(hv.GenerationRecipe.zero(), 0, order)
         tensor = hv.generate_mx([40, 4], hv.MxDataGeneration.quantize(zero), mx_options)
         self.assertEqual(math.prod(tensor.scales.shape), 8)
         hv.generate_tensor(tensor.data, recipe, options())
-        constant = hv.GenerationRecipe.real_only_last_dimension_fastest(
-            hv.GenerationRecipe.constant(hv.ConstantGenerationParameters(0.5)), 0
+        constant = hv.GenerationRecipe.real_only(
+            hv.GenerationRecipe.constant(hv.ConstantGenerationParameters(0.5)),
+            0,
+            index_order=hv.LastDimensionFastest(),
         )
         hv.generate_tensor(tensor.scales, constant, options())
         tensor.refresh_reference()
@@ -202,11 +209,12 @@ class GenerationPrecisionTests(unittest.TestCase):
         self.assertEqual(actual[1, 0], 0.5)
 
     def test_absolute_normal_scale_code_probabilities(self):
-        recipe = hv.GenerationRecipe.real_only_last_dimension_fastest(
+        recipe = hv.GenerationRecipe.real_only(
             hv.GenerationRecipe.normal(
                 hv.NormalGenerationParameters(0.34375, 0.08)
             ).with_absolute_transform(),
             0x12345,
+            index_order=hv.LastDimensionFastest(),
         )
         conversion = options()
         conversion.e8m0_underflow = hv.E8M0Underflow.FlushBelowFloat32Normal
@@ -247,17 +255,21 @@ class GenerationPrecisionTests(unittest.TestCase):
                 )
 
     def test_offset_raw_complex_and_unsigned_rejection(self):
-        raw = hv.GenerationRecipe.real_only_last_dimension_fastest(
-            hv.GenerationRecipe.uniform_finite_encoded_value(), 57
+        raw = hv.GenerationRecipe.real_only(
+            hv.GenerationRecipe.uniform_finite_encoded_value(),
+            57,
+            index_order=hv.LastDimensionFastest(),
         )
         full = hv.generate_tensor(hv.ScalarType.Float4E2M1, [128], raw, options())
         shifted = hv.generate_tensor(
             hv.ScalarType.Float4E2M1, [32], raw.with_index_offset(10), options()
         )
         self.assertEqual(shifted.storage, full.storage[5:21])
-        settings = hv.GenerationRecipeSettings(19, hv.Permutation([0]))
         complex_recipe = hv.GenerationRecipe.cartesian(
-            hv.GenerationRecipe.sine(), hv.GenerationRecipe.cosine(), settings
+            hv.GenerationRecipe.sine(),
+            hv.GenerationRecipe.cosine(),
+            19,
+            hv.Permutation([0]),
         )
         full = hv.generate_tensor(
             hv.ScalarType.ComplexFloat64, [32], complex_recipe, options()

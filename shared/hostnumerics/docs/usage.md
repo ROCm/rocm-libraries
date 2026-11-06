@@ -92,11 +92,16 @@ use for randomized components. For example:
 using namespace roc::hostnumerics;
 
 // Fill a 2-by-3 F32 tensor with reproducible values sampled uniformly from
-// the range -1 to 1.
-GenerationRecipe recipe = GenerationRecipe::realOnlyLastDimensionFastest(
-    GenerationRecipe::uniformReal({.lower = -1.0, .upper = 1.0}), 17);
+// the range -1 to 1, numbering elements with the last dimension fastest.
+GenerationRecipe recipe = GenerationRecipe::realOnly(
+    GenerationRecipe::uniformReal({.lower = -1.0, .upper = 1.0}), 17, LastDimensionFastest{});
 Tensor values = generate(ScalarType::Float32, Shape{2, 3}, recipe);
 ```
+
+The seed and the `IndexOrder` are required. An `IndexOrder` is either
+`LastDimensionFastest`, which fits every rank, or an explicit `Permutation` of
+the axes from slowest to fastest, such as `Permutation{1, 0}` for a
+column-major matrix. An explicit permutation must have the tensor's rank.
 
 The caller owns seed selection. Each generation call sees exactly one explicit
 seed; the component neither advances caller state nor derives named streams.

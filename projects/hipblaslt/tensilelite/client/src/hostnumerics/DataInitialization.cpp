@@ -44,7 +44,6 @@ namespace TensileLite::Client
     namespace
     {
         using roc::hostnumerics::GenerationRecipe;
-        using roc::hostnumerics::GenerationRecipeSettings;
         using roc::hostnumerics::Layout;
         using roc::hostnumerics::ScalarType;
         using roc::hostnumerics::Shape;
@@ -63,17 +62,19 @@ namespace TensileLite::Client
         {
             const uint64_t recipeSeed = seed + sequence;
             auto           realOnly   = [recipeSeed](GenerationRecipe::Component component) {
-                return GenerationRecipe::realOnlyLastDimensionFastest(std::move(component),
-                                                                      recipeSeed);
+                return GenerationRecipe::realOnly(
+                    std::move(component), recipeSeed, roc::hostnumerics::LastDimensionFastest{});
             };
             auto replicated = [recipeSeed](GenerationRecipe::Component component) {
-                return GenerationRecipe::replicatedLastDimensionFastest(std::move(component),
-                                                                        recipeSeed);
+                return GenerationRecipe::replicated(
+                    std::move(component), recipeSeed, roc::hostnumerics::LastDimensionFastest{});
             };
             auto cartesian = [recipeSeed](GenerationRecipe::Component component) {
                 GenerationRecipe::Component imaginary = component;
-                return GenerationRecipe::cartesianLastDimensionFastest(
-                    std::move(component), std::move(imaginary), recipeSeed);
+                return GenerationRecipe::cartesian(std::move(component),
+                                                   std::move(imaginary),
+                                                   recipeSeed,
+                                                   roc::hostnumerics::LastDimensionFastest{});
             };
 
             switch(mode)
@@ -347,8 +348,9 @@ namespace TensileLite::Client
                 {
                     hipblaslt::hostnumerics::maf::validateType(type);
                     generate(destination,
-                             GenerationRecipe::realOnlyLastDimensionFastest(
-                                 GenerationRecipe::constant({.value = 0.5}), 0),
+                             GenerationRecipe::realOnly(GenerationRecipe::constant({.value = 0.5}),
+                                                        0,
+                                                        roc::hostnumerics::LastDimensionFastest{}),
                              hipblaslt::hostnumerics::maf::conversion(
                                  hipblaslt::hostnumerics::maf::Mode::Maf1, type));
                     return;
@@ -480,10 +482,10 @@ namespace TensileLite::Client
         if(lower > upper)
             throw std::runtime_error("TensileLite uniform lower bound exceeds upper bound.");
 
-        const auto uniformRealRecipe
-            = roc::hostnumerics::GenerationRecipe::realOnlyLastDimensionFastest(
-                roc::hostnumerics::GenerationRecipe::uniformReal({.lower = lower, .upper = upper}),
-                key.seed + key.semanticStream);
+        const auto uniformRealRecipe = roc::hostnumerics::GenerationRecipe::realOnly(
+            roc::hostnumerics::GenerationRecipe::uniformReal({.lower = lower, .upper = upper}),
+            key.seed + key.semanticStream,
+            roc::hostnumerics::LastDimensionFastest{});
 
         Tensor generated(ScalarType::Float64, Shape{1});
         roc::hostnumerics::generate(generated, uniformRealRecipe);

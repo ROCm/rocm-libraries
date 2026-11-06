@@ -86,12 +86,16 @@ namespace hipblaslt::hostnumerics
         {
             if(scalarTypeInfo(destinationType).category != ScalarCategory::Complex
                || policy == ComplexGenerationPolicy::RealOnly)
-                return GenerationRecipe::realOnlyLastDimensionFastest(std::move(component), seed);
+                return GenerationRecipe::realOnly(
+                    std::move(component), seed, roc::hostnumerics::LastDimensionFastest{});
             if(policy == ComplexGenerationPolicy::Replicated)
-                return GenerationRecipe::replicatedLastDimensionFastest(std::move(component), seed);
+                return GenerationRecipe::replicated(
+                    std::move(component), seed, roc::hostnumerics::LastDimensionFastest{});
             GenerationRecipe::Component imaginary = component;
-            return GenerationRecipe::cartesianLastDimensionFastest(
-                std::move(component), std::move(imaginary), seed);
+            return GenerationRecipe::cartesian(std::move(component),
+                                               std::move(imaginary),
+                                               seed,
+                                               roc::hostnumerics::LastDimensionFastest{});
         }
 
         GenerationRecipe bindComponentPairRecipe(ScalarType                  destinationType,
@@ -102,11 +106,15 @@ namespace hipblaslt::hostnumerics
         {
             if(scalarTypeInfo(destinationType).category != ScalarCategory::Complex
                || policy == ComplexGenerationPolicy::RealOnly)
-                return GenerationRecipe::realOnlyLastDimensionFastest(std::move(real), seed);
+                return GenerationRecipe::realOnly(
+                    std::move(real), seed, roc::hostnumerics::LastDimensionFastest{});
             if(policy == ComplexGenerationPolicy::Replicated)
-                return GenerationRecipe::replicatedLastDimensionFastest(std::move(real), seed);
-            return GenerationRecipe::cartesianLastDimensionFastest(
-                std::move(real), std::move(imaginary), seed);
+                return GenerationRecipe::replicated(
+                    std::move(real), seed, roc::hostnumerics::LastDimensionFastest{});
+            return GenerationRecipe::cartesian(std::move(real),
+                                               std::move(imaginary),
+                                               seed,
+                                               roc::hostnumerics::LastDimensionFastest{});
         }
 
         GenerationRecipe::Component trigonometricComponent(TrigonometricComponent component,
@@ -233,8 +241,9 @@ namespace hipblaslt::hostnumerics
                                    uint64_t seed = defaultInitializationSeed)
         {
             if(!scalarTypeInfo(type).supportsNaN)
-                return GenerationRecipe::realOnlyLastDimensionFastest(
-                    GenerationRecipe::randomRawBits(), seed);
+                return GenerationRecipe::realOnly(GenerationRecipe::randomRawBits(),
+                                                  seed,
+                                                  roc::hostnumerics::LastDimensionFastest{});
             return bindComponentRecipe(type, GenerationRecipe::typeNaN(), complexPolicy, seed);
         }
 
@@ -293,8 +302,10 @@ namespace hipblaslt::hostnumerics
         GenerationRecipe sentinelRecipe(GenerationRecipe::Component component, bool complexOutput)
         {
             return complexOutput
-                       ? GenerationRecipe::replicatedLastDimensionFastest(std::move(component), 0)
-                       : GenerationRecipe::realOnlyLastDimensionFastest(std::move(component), 0);
+                       ? GenerationRecipe::replicated(
+                           std::move(component), 0, roc::hostnumerics::LastDimensionFastest{})
+                       : GenerationRecipe::realOnly(
+                           std::move(component), 0, roc::hostnumerics::LastDimensionFastest{});
         }
 
         bool supportsExplicitFloatingSentinel(ScalarType type)
@@ -310,11 +321,7 @@ namespace hipblaslt::hostnumerics
         {
             auto recipe = [&](GenerationRecipe::Component component) {
                 return GenerationRecipe::realOnly(
-                    std::move(component),
-                    {
-                        .seed       = seed,
-                        .indexOrder = roc::hostnumerics::Permutation{1, 0},
-                    });
+                    std::move(component), seed, roc::hostnumerics::Permutation{1, 0});
             };
 
             switch(initialization)
@@ -412,16 +419,23 @@ namespace hipblaslt::hostnumerics
             case hipblaslt_initialization::special:
             {
                 if(role == MatrixRole::A)
-                    return GenerationRecipe::realOnlyLastDimensionFastest(
-                        GenerationRecipe::constant({.value = specialInitializationAValue}), 0);
+                    return GenerationRecipe::realOnly(
+                        GenerationRecipe::constant({.value = specialInitializationAValue}),
+                        0,
+                        roc::hostnumerics::LastDimensionFastest{});
                 if(role == MatrixRole::B)
-                    return GenerationRecipe::realOnlyLastDimensionFastest(
-                        GenerationRecipe::constant({.value = specialInitializationBValue}), 0);
-                return GenerationRecipe::realOnlyLastDimensionFastest(
-                    GenerationRecipe::uniformInteger({.lower = 1, .upper = 10}), seed);
+                    return GenerationRecipe::realOnly(
+                        GenerationRecipe::constant({.value = specialInitializationBValue}),
+                        0,
+                        roc::hostnumerics::LastDimensionFastest{});
+                return GenerationRecipe::realOnly(
+                    GenerationRecipe::uniformInteger({.lower = 1, .upper = 10}),
+                    seed,
+                    roc::hostnumerics::LastDimensionFastest{});
             }
             case hipblaslt_initialization::zero:
-                return GenerationRecipe::realOnlyLastDimensionFastest(GenerationRecipe::zero(), 0);
+                return GenerationRecipe::realOnly(
+                    GenerationRecipe::zero(), 0, roc::hostnumerics::LastDimensionFastest{});
             case hipblaslt_initialization::norm_dist:
                 return normalRecipe(type, ComplexGenerationPolicy::RealOnly, seed);
             case hipblaslt_initialization::norm_dist_one_special:
@@ -444,7 +458,8 @@ namespace hipblaslt::hostnumerics
                     component = component.withAlternatingSign(
                         {.dimensions = {0, 1}, .negativeWhenOdd = false});
                 }
-                return GenerationRecipe::realOnlyLastDimensionFastest(std::move(component), seed);
+                return GenerationRecipe::realOnly(
+                    std::move(component), seed, roc::hostnumerics::LastDimensionFastest{});
             }
             case hipblaslt_initialization::fp16_accumulator_probe:
             {
@@ -452,16 +467,19 @@ namespace hipblaslt::hostnumerics
                     throw std::runtime_error(
                         "hipBLASLt FP16 accumulator probe requires Float16 storage.");
                 if(role == MatrixRole::A)
-                    return GenerationRecipe::realOnlyLastDimensionFastest(
+                    return GenerationRecipe::realOnly(
                         GenerationRecipe::constant(
                             {.value = maximumFiniteFloat16Value - fp16AccumulatorProbeStep}),
-                        0);
+                        0,
+                        roc::hostnumerics::LastDimensionFastest{});
                 if(role == MatrixRole::B)
-                    return GenerationRecipe::realOnlyLastDimensionFastest(
+                    return GenerationRecipe::realOnly(
                         GenerationRecipe::constant({.value = 2.0})
                             .withAlternatingSign({.dimensions = {0}, .negativeWhenOdd = true}),
-                        0);
-                return GenerationRecipe::realOnlyLastDimensionFastest(GenerationRecipe::zero(), 0);
+                        0,
+                        roc::hostnumerics::LastDimensionFastest{});
+                return GenerationRecipe::realOnly(
+                    GenerationRecipe::zero(), 0, roc::hostnumerics::LastDimensionFastest{});
             }
             case hipblaslt_initialization::inf:
                 if(!supportsExplicitFloatingSentinel(type))
@@ -500,7 +518,8 @@ namespace hipblaslt::hostnumerics
                     "Sparse-K initialization requires a matrix with an optional batch axis.");
 
             generate(destination,
-                     GenerationRecipe::realOnlyLastDimensionFastest(GenerationRecipe::zero(), 0));
+                     GenerationRecipe::realOnly(
+                         GenerationRecipe::zero(), 0, roc::hostnumerics::LastDimensionFastest{}));
             const size_t kExtent = shape[reductionAxis];
             if(kExtent == 0)
                 return;
@@ -511,8 +530,7 @@ namespace hipblaslt::hostnumerics
             const size_t     batches = shape.rank() == 3 ? shape[2] : 1;
             const auto       order   = roc::hostnumerics::Permutation::reverse(shape.rank());
             const auto       nonzero = GenerationRecipe::realOnly(
-                GenerationRecipe::uniformInteger({.lower = 1, .upper = 2}),
-                {.seed = seed, .indexOrder = order});
+                GenerationRecipe::uniformInteger({.lower = 1, .upper = 2}), seed, order);
             for(size_t batch = 0; batch < batches; ++batch)
                 for(size_t row = 0; row < shape[1 - reductionAxis]; ++row)
                 {
@@ -633,9 +651,11 @@ namespace hipblaslt::hostnumerics
         {
             const uint64_t scaleSeed = hipblaslt::hostnumerics::initialization::seedForSequence(
                 seed, role == MatrixRole::A ? 0x41 : 0x42);
-            generate(generated.scales,
-                     GenerationRecipe::realOnlyLastDimensionFastest(
-                         GenerationRecipe::choice({.values = {1.0, 2.0, 4.0}}), scaleSeed));
+            generate(
+                generated.scales,
+                GenerationRecipe::realOnly(GenerationRecipe::choice({.values = {1.0, 2.0, 4.0}}),
+                                           scaleSeed,
+                                           roc::hostnumerics::LastDimensionFastest{}));
             generated.refreshReference();
         }
         return generated;
@@ -675,10 +695,13 @@ namespace hipblaslt::hostnumerics
         case hipblaslt_initialization::uniform_low_precision:
             return lowPrecisionRecipe(type, ComplexGenerationPolicy::Cartesian, seed);
         case hipblaslt_initialization::special:
-            return GenerationRecipe::realOnlyLastDimensionFastest(
-                GenerationRecipe::constant({.value = specialInitializationAValue}), seed);
+            return GenerationRecipe::realOnly(
+                GenerationRecipe::constant({.value = specialInitializationAValue}),
+                seed,
+                roc::hostnumerics::LastDimensionFastest{});
         case hipblaslt_initialization::zero:
-            return GenerationRecipe::realOnlyLastDimensionFastest(GenerationRecipe::zero(), seed);
+            return GenerationRecipe::realOnly(
+                GenerationRecipe::zero(), seed, roc::hostnumerics::LastDimensionFastest{});
         case hipblaslt_initialization::norm_dist:
             return normalRecipe(type, ComplexGenerationPolicy::Cartesian, seed);
         case hipblaslt_initialization::uniform_01:
@@ -689,14 +712,16 @@ namespace hipblaslt::hostnumerics
                                        ComplexGenerationPolicy::Cartesian,
                                        seed);
         case hipblaslt_initialization::inf:
-            return GenerationRecipe::realOnlyLastDimensionFastest(GenerationRecipe::typeInfinity(),
-                                                                  seed);
+            return GenerationRecipe::realOnly(
+                GenerationRecipe::typeInfinity(), seed, roc::hostnumerics::LastDimensionFastest{});
         case hipblaslt_initialization::neg_zero:
-            return GenerationRecipe::realOnlyLastDimensionFastest(
-                GenerationRecipe::typeNegativeZero(), seed);
+            return GenerationRecipe::realOnly(GenerationRecipe::typeNegativeZero(),
+                                              seed,
+                                              roc::hostnumerics::LastDimensionFastest{});
         case hipblaslt_initialization::neg_inf:
-            return GenerationRecipe::realOnlyLastDimensionFastest(
-                GenerationRecipe::typeNegativeInfinity(), seed);
+            return GenerationRecipe::realOnly(GenerationRecipe::typeNegativeInfinity(),
+                                              seed,
+                                              roc::hostnumerics::LastDimensionFastest{});
         case hipblaslt_initialization::nan:
             return nanRecipe(type, ComplexGenerationPolicy::RealOnly, seed);
         case hipblaslt_initialization::fp16_accumulator_probe:
@@ -759,11 +784,15 @@ namespace hipblaslt::hostnumerics
         if(mode == hipblaslt_initialization::special)
         {
             if(operand == initialization::OperandSequence::MatrixA)
-                return GenerationRecipe::realOnlyLastDimensionFastest(
-                    GenerationRecipe::constant({.value = specialInitializationAValue}), seed);
+                return GenerationRecipe::realOnly(
+                    GenerationRecipe::constant({.value = specialInitializationAValue}),
+                    seed,
+                    roc::hostnumerics::LastDimensionFastest{});
             if(operand == initialization::OperandSequence::MatrixB)
-                return GenerationRecipe::realOnlyLastDimensionFastest(
-                    GenerationRecipe::constant({.value = specialInitializationBValue}), seed);
+                return GenerationRecipe::realOnly(
+                    GenerationRecipe::constant({.value = specialInitializationBValue}),
+                    seed,
+                    roc::hostnumerics::LastDimensionFastest{});
             return hplRecipe(type, {.seed = seed});
         }
 

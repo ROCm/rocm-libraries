@@ -1839,17 +1839,20 @@ void testing_matmul_with_bias(const Arguments&                                  
                    && (sequence == hipblaslt::hostnumerics::initialization::OperandSequence::ScaleA
                        || sequence
                               == hipblaslt::hostnumerics::initialization::OperandSequence::ScaleB))
-                    return roc::hostnumerics::GenerationRecipe::realOnlyLastDimensionFastest(
-                        roc::hostnumerics::GenerationRecipe::constant({.value = 0.5}), 0);
+                    return roc::hostnumerics::GenerationRecipe::realOnly(
+                        roc::hostnumerics::GenerationRecipe::constant({.value = 0.5}),
+                        0,
+                        roc::hostnumerics::LastDimensionFastest{});
                 const auto scalar = hipblaslt::hostnumerics::scalarType(type);
                 const auto seed   = initializationSeed(sequence);
                 if(small)
                 {
-                    return roc::hostnumerics::GenerationRecipe::realOnlyLastDimensionFastest(
+                    return roc::hostnumerics::GenerationRecipe::realOnly(
                         roc::hostnumerics::GenerationRecipe::uniformInteger(
                             {.lower = 1, .upper = 10})
                             .withAffineValueMapping({.scale = 0.1}),
-                        seed);
+                        seed,
+                        roc::hostnumerics::LastDimensionFastest{});
                 }
                 return hipblaslt::hostnumerics::initializationRecipe(
                     scalar,
@@ -2413,12 +2416,13 @@ void testing_matmul_with_bias(const Arguments&                                  
             }
 
             if(arg.amaxD)
-                initializeHostTensor(
-                    hAmaxD_gold[i],
-                    Talpha,
-                    roc::hostnumerics::Layout::contiguousLastDimensionFastest({1}),
-                    roc::hostnumerics::GenerationRecipe::realOnlyLastDimensionFastest(
-                        roc::hostnumerics::GenerationRecipe::zero(), 0));
+                initializeHostTensor(hAmaxD_gold[i],
+                                     Talpha,
+                                     roc::hostnumerics::Layout::contiguousLastDimensionFastest({1}),
+                                     roc::hostnumerics::GenerationRecipe::realOnly(
+                                         roc::hostnumerics::GenerationRecipe::zero(),
+                                         0,
+                                         roc::hostnumerics::LastDimensionFastest{}));
 
             if(arg.scaleE)
                 initializeHostTensor(

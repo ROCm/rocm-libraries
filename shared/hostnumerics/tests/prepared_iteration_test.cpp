@@ -127,12 +127,12 @@ TEST(PreparedIteration, PublicAccessChecksAndValueReturningConversion) {
     tensor.storeFrom({0}, 1.75f);
     const detail::RuntimeTensorReader<int64_t> integerReader(tensor);
     EXPECT_EQ(integerReader({0}), 1);
-    const auto affine = GenerationRecipe::realOnlyLastDimensionFastest(
+    const auto affine = GenerationRecipe::realOnly(
         GenerationRecipe::affineIndexRemainder(
             {.dimensionCoefficients = {std::numeric_limits<int64_t>::max()},
              .offset = 1,
              .positiveDivisor = 7}),
-        0);
+        0, LastDimensionFastest{});
     EXPECT_THROW(generate(tensor, affine), std::runtime_error);
     EXPECT_EQ(tensor.loadAs<float>({0}), 1.75f);
 }
@@ -154,15 +154,15 @@ TEST(PreparedIteration, HugeZeroStrideRunAndInvalidEmptyOrders) {
 
 TEST(PreparedIteration, AffinePrefixOverflowFailsBeforeAnyOutputWrite) {
     Tensor tensor(ScalarType::Float32, Shape{2, 2});
-    generate(tensor, GenerationRecipe::realOnlyLastDimensionFastest(
-                         GenerationRecipe::constant({.value = 7.0}), 0));
-    const auto recipe = GenerationRecipe::realOnlyLastDimensionFastest(
-        GenerationRecipe::affineIndexRemainder({
-            .dimensionCoefficients = {1, -1},
-            .offset = std::numeric_limits<int64_t>::max(),
-            .positiveDivisor = 7,
-        }),
-        0);
+    generate(tensor, GenerationRecipe::realOnly(GenerationRecipe::constant({.value = 7.0}), 0,
+                                                LastDimensionFastest{}));
+    const auto recipe =
+        GenerationRecipe::realOnly(GenerationRecipe::affineIndexRemainder({
+                                       .dimensionCoefficients = {1, -1},
+                                       .offset = std::numeric_limits<int64_t>::max(),
+                                       .positiveDivisor = 7,
+                                   }),
+                                   0, LastDimensionFastest{});
     EXPECT_THROW(generate(tensor, recipe), std::runtime_error);
     EXPECT_EQ(tensor.loadAs<float>({0, 0}), 7.0f);
 }
@@ -170,13 +170,13 @@ TEST(PreparedIteration, AffinePrefixOverflowFailsBeforeAnyOutputWrite) {
 TEST(PreparedIteration, ElementwiseSelectionUsesPermutationAndRejectsInvalidEmptyOrders) {
     const Shape shape{2, 3, 4};
     Tensor input(ScalarType::Float32, shape), output(ScalarType::Float32, shape);
-    generate(input,
-             GenerationRecipe::realOnlyLastDimensionFastest(GenerationRecipe::serialIndex(), 0));
+    generate(input, GenerationRecipe::realOnly(GenerationRecipe::serialIndex(), 0,
+                                               LastDimensionFastest{}));
     const Tensor one = Tensor::scalar(ScalarType::Float32, 1.0f);
     const Permutation order{1, 0, 2};
     const auto check = [&](const auto& selection) {
-        generate(output, GenerationRecipe::realOnlyLastDimensionFastest(
-                             GenerationRecipe::constant({.value = -7}), 0));
+        generate(output, GenerationRecipe::realOnly(GenerationRecipe::constant({.value = -7}), 0,
+                                                    LastDimensionFastest{}));
         addInto(input, one, output, ScalarType::Float32, selection, order);
         std::set<size_t> selected;
         shape.forEachCoordinate(selection, order,
@@ -211,7 +211,7 @@ TEST(PreparedIteration, RecipesOwnTheirOrders) {
     static_assert(
         std::is_same_v<decltype(std::declval<GenerationRecipe>().indexOrder(3)), Permutation>);
     const auto recipe =
-        GenerationRecipe::realOnlyLastDimensionFastest(GenerationRecipe::serialIndex(), 0);
+        GenerationRecipe::realOnly(GenerationRecipe::serialIndex(), 0, LastDimensionFastest{});
     Permutation order{2, 1, 0};
     const auto ordered = recipe.withIndexOrder(order);
     order = Permutation{0, 1, 2};
@@ -233,8 +233,8 @@ TEST(PreparedIteration, EncodedExponentIntervalSupportsFullIntRange) {
     const auto plan = detail::prepareEncodedExponent(parameters, ScalarType::Float32);
     EXPECT_EQ(plan.lowerExponent, std::numeric_limits<int>::min());
     EXPECT_EQ(plan.exponentCount, uint64_t{1} << 32);
-    const auto recipe = GenerationRecipe::realOnlyLastDimensionFastest(
-        GenerationRecipe::randomEncodedExponent(parameters), 0);
+    const auto recipe = GenerationRecipe::realOnly(
+        GenerationRecipe::randomEncodedExponent(parameters), 0, LastDimensionFastest{});
     EXPECT_NO_THROW(generate(Tensor(ScalarType::Float32, Shape{64}), recipe));
 }
 

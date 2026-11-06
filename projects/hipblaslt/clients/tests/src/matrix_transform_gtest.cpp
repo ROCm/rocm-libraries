@@ -149,9 +149,10 @@ namespace
             const uint64_t recipeSeed = hipblaslt::hostnumerics::initialization::seedForSequence(
                 hipblaslt::hostnumerics::defaultInitializationSeed,
                 static_cast<std::uint64_t>(sequence));
-            const auto recipe = roc::hostnumerics::GenerationRecipe::realOnlyLastDimensionFastest(
+            const auto recipe = roc::hostnumerics::GenerationRecipe::realOnly(
                 roc::hostnumerics::GenerationRecipe::uniformInteger({.lower = -3, .upper = 3}),
-                recipeSeed);
+                recipeSeed,
+                roc::hostnumerics::LastDimensionFastest{});
             auto generated = hipblaslt::hostnumerics::copyTensorFromEncodedStorage(
                 ref.data(),
                 ref.size(),

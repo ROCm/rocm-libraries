@@ -23,7 +23,6 @@ namespace rocRoller::hostnumerics
     namespace
     {
         using roc::hostnumerics::GenerationRecipe;
-        using roc::hostnumerics::GenerationRecipeSettings;
         using roc::hostnumerics::Layout;
         using roc::hostnumerics::MxDataGeneration;
         using roc::hostnumerics::MxGenerationOptions;
@@ -177,12 +176,9 @@ namespace rocRoller::hostnumerics
                                           float                     maximum,
                                           uint32_t                  seed)
         {
-            GenerationRecipeSettings const settings{
-                .seed       = seed,
-                .indexOrder = indexOrder(descriptor),
-            };
-            auto realOnly = [&settings](GenerationRecipe::Component component) {
-                return GenerationRecipe::realOnly(std::move(component), settings);
+            auto const order    = indexOrder(descriptor);
+            auto       realOnly = [seed, &order](GenerationRecipe::Component component) {
+                return GenerationRecipe::realOnly(std::move(component), seed, order);
             };
 
             switch(initialization.mode)
@@ -242,11 +238,7 @@ namespace rocRoller::hostnumerics
         {
             auto recipe = [&](GenerationRecipe::Component component) {
                 return GenerationRecipe::realOnly(
-                    std::move(component),
-                    {
-                        .seed       = seed,
-                        .indexOrder = roc::hostnumerics::Permutation{1, 0},
-                    });
+                    std::move(component), seed, roc::hostnumerics::Permutation{1, 0});
             };
 
             switch(initialization.mode)
