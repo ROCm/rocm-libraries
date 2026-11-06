@@ -124,6 +124,18 @@ void registerGfx1151WmmaAttentionDecodeSymbols(
     hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
 void resetGfx1151WmmaAttentionDecodeModuleCache();
 
+/// @see packs/Gfx950ConvDgradNative.cpp (hipkernel:Gfx950ConvDgradAot)
+void registerGfx950ConvDgradAotSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
+void resetGfx950ConvDgradAotModuleCache();
+
+/// Sets the per-image byte limit gfx950_conv_dgrad::batchChunks() slices a batch at, in
+/// the provider's own loaded copy of that test seam -- see
+/// Gfx950ConvDgradGeometry.hpp::batchChunkByteLimitForTesting(). A test in another TU
+/// (an integration test that loads this engine as a separate plugin .so) mutating its
+/// own copy of that inline function's local static never reaches the one the plugin's
+/// plan build actually reads; this function runs inside the plugin. FOR TESTS ONLY.
+void setGfx950ConvDgradAotBatchChunkByteLimitForTesting(int64_t limit);
+
 /// Drops every pack's cached kpack modules and closes every kpack archive
 /// SharedKpackArchives retains, so the next dispatch re-reads its archive from disk. Leases
 /// stay held: the archive that next dispatch opens is retained again.
