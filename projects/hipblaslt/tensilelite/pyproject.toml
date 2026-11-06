@@ -100,6 +100,11 @@ dev = [
 requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
+[tool.setuptools]
+# package-data below is the only list of non-Python files in the wheel.
+# MANIFEST.in only adds sdist-only build inputs; it must not add wheel files.
+include-package-data = false
+
 [tool.setuptools.packages.find]
 include = ["tensilelite*"]
 exclude = ["tensilelite.Tests*", "tensilelite.Utilities.archive*"]
@@ -112,7 +117,7 @@ tensilelite = [
     "Source/KernelHeader.h",
     "Source/ReductionTemplate.h",
     "Source/memory_gfx.h",
-    "CustomKernels/*.s",
+    "CustomKernels/**/*.s",
     "logic/known_bugs.yaml",
     "ductile/config/defaults.yaml",
 ]
