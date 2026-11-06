@@ -177,7 +177,10 @@ set_target_properties(hip_kernel_provider PROPERTIES
 if(HIPKERNELPROVIDER_ENABLE_TESTS)
 
     # Bundle filters for the attention engines' external integration checks below and
-    # their GPU-reference targets in integration_tests/.
+    # their GPU-reference targets in integration_tests/. Under YAML categorization the
+    # checks' CTest suites select from each engine's
+    # ../hipkernel_Gfx9*Attention*_test_categories_integration.yaml instead, and
+    # ../descriptor-packaging/tests/test_attention_bundle_filters.py fails on a mismatch.
     string(JOIN ":" HKP_SDPA_FWD_DEFAULT_GTEST_FILTER
         "quick_SdpaFwd_Default.*" "standard_SdpaFwd_Default.*"
         "comprehensive_SdpaFwd_Default.*" "full_SdpaFwd_Default.*")

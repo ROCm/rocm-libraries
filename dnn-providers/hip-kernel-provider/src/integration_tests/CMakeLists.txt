@@ -224,6 +224,15 @@ if(NOT COMMAND add_external_integration_test_target)
     find_package(hipdnn_integration_tests CONFIG QUIET)
 endif()
 
+# The attention bundle filters below come from src/CMakeLists.txt. An unset one expands
+# to "", and add_external_integration_test_target() then passes no --gtest_filter: the
+# engine-pinned target runs every bundle.
+if(NOT HKP_SDPA_FWD_DEFAULT_GTEST_FILTER OR NOT HKP_GFX942_ATTENTION_DENSE_GTEST_FILTER)
+    message(FATAL_ERROR
+        "HKP_SDPA_FWD_DEFAULT_GTEST_FILTER and HKP_GFX942_ATTENTION_DENSE_GTEST_FILTER "
+        "must be set in src/CMakeLists.txt before add_subdirectory(integration_tests)")
+endif()
+
 # One gpu_ref entry per gfx950 attention engine. Each item is
 # "<snake slug>|<engine local name>"; Unified3D serves only the sweeps' decode (seqlen_q 1)
 # cases.
