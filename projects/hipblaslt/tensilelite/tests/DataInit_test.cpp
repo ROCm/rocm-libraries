@@ -419,28 +419,32 @@ TEST(InitializeMXDataForFP4OrFP8_BatchStrideFormula, BFloat8_OneBytePerElement)
 }
 
 #if HIPBLASLT_ENABLE_MXDATAGENERATOR
-TEST(DataInitializationReferenceRecompute, Gfx950RequiresPerSolutionRecomputeForSwizzledMX)
+// The CPU reference is recomputed only when DataInitialization::inputEpoch() moves. The epoch is
+// published by DataInitialization::preSolution(), so asking for it before that has run for the
+// solution must be a loud error (a listener-ordering mistake would otherwise give a stale
+// reference silently).
+TEST(DataInitializationInputEpoch, PerSolutionEpochRequiresPreSolution)
 {
     hipDeviceProp_t prop{};
     ASSERT_EQ(hipGetDeviceProperties(&prop, 0), hipSuccess);
-    if(std::string(prop.gcnArchName).find("gfx950") == std::string::npos)
-        GTEST_SKIP() << "gfx950-specific recompute behavior is only observable on gfx950";
-
-    auto problem = makeProblem(rocisa::DataType::Float8,
-                               rocisa::DataType::Float8,
-                               /*mxBlockA=*/32,
-                               /*mxBlockB=*/32);
     auto args = makeMinimalClientArgs(/*mxScaleFormat=*/1);
     TensileLite::Client::ClientProblemFactory factory(args);
     TensileLite::Client::DataInitialization   dataInit(args, factory);
 
-    ContractionSolution noSwizzleSolution;
-    noSwizzleSolution.problemType.mxScaleFormat = 0;
-    ContractionSolution swizzleSolution;
-    swizzleSolution.problemType.mxScaleFormat = 1;
+    ContractionSolution solution;
+    solution.problemType.mxScaleFormat = 1;
+    ContractionSolution otherSolution;
 
-    EXPECT_FALSE(dataInit.referenceNeedsPerSolutionRecompute(problem, &noSwizzleSolution));
-    EXPECT_TRUE(dataInit.referenceNeedsPerSolutionRecompute(problem, &swizzleSolution));
+    EXPECT_THROW(dataInit.inputEpoch(&solution), std::logic_error);
+    EXPECT_THROW(dataInit.inputEpoch(nullptr), std::logic_error);
+
+    auto const problemEpoch = dataInit.inputEpoch();
+    // No problem is registered, so preSolution() has nothing to refresh: the epoch must not move.
+    dataInit.preSolution(&solution);
+    EXPECT_EQ(dataInit.inputEpoch(&solution), problemEpoch);
+
+    // A different solution that preSolution() has not seen is still rejected.
+    EXPECT_THROW(dataInit.inputEpoch(&otherSolution), std::logic_error);
 }
 
 TEST(DataInitializationReferenceRecompute, Gfx1250ReusesPreswizzledMXAcrossSolutions)
@@ -479,6 +483,35 @@ namespace
         TensorDescriptor const& initDescriptor(int tensor) const
         {
             return m_vdata[tensor].pristine.begin()->second.initDescriptor[0];
+        }
+        void useGfx950ScaleLayout()
+        {
+            // Exercise the host layout code on any HIP device; no gfx950 kernel is launched.
+            m_mxScaleLayout = MXScaleLayout::GFX950;
+        }
+        std::vector<uint8_t> canonicalBytes(int tensor, TensorDescriptor const& descriptor) const
+        {
+            auto const& pristine = m_vdata[tensor].pristine.at(descriptor.dataType());
+            auto const* bytes    = static_cast<uint8_t const*>(pristine.cpuInput.valid.get());
+            return {bytes, bytes + descriptor.totalAllocatedBytes()};
+        }
+        void invalidateHostData(int tensor, TensorDescriptor const& descriptor)
+        {
+            auto& data = m_vdata[tensor];
+            data.init  = TensileLite::Client::InitMode::One;
+            data.pristine.at(descriptor.dataType()).initDescriptor[0] = TensorDescriptor{};
+        }
+        void clearSwizzledScaleCache()
+        {
+            m_mxSwizzledDescriptor.clear();
+        }
+        void initializeNonMXB(ContractionProblemGemm const& problem)
+        {
+            initNonMXSideWithMXGenerator(ContractionProblemGemm::TENSOR::B,
+                                         ContractionProblemGemm::TENSOR::MXSB,
+                                         problem.b(),
+                                         problem.transB(),
+                                         false);
         }
     };
 
@@ -525,6 +558,80 @@ namespace
             hipMemcpy(bytes.data(), gemmInputs->mxsa, bytes.size(), hipMemcpyDeviceToHost));
         return bytes;
     }
+}
+
+class DataInitializationCanonicalEpoch : public ::testing::TestWithParam<int>
+{
+};
+
+TEST_P(DataInitializationCanonicalEpoch, HostRewriteAdvancesButSwizzleAndCacheReuseDoNot)
+{
+    using Tensor = ContractionProblemGemm::TENSOR;
+    auto args    = makeMXLaunchArgs({{128, 128, 1, 512}});
+    setOption(args, "mx-data-generator", GetParam());
+    TensileLite::Client::ClientProblemFactory factory(args);
+    MXReuseProbe                              dataInit(args, factory);
+    dataInit.useGfx950ScaleLayout();
+    auto*       problem = factory.problems()[0].get();
+    auto const& gemm    = dynamic_cast<ContractionProblemGemm const&>(*problem);
+    dataInit.preProblem(problem);
+    auto const beforeProblem = dataInit.inputEpoch();
+    dataInit.prepareCPUInputs(problem);
+    EXPECT_GT(dataInit.inputEpoch(), beforeProblem);
+    dataInit.prepareGPUInputs(problem); // allocate the GPU buffers required by the swizzle gate
+    auto const epoch     = dataInit.inputEpoch();
+    auto const hostA     = dataInit.canonicalBytes(Tensor::A, gemm.a());
+    auto const hostScale = dataInit.canonicalBytes(Tensor::MXSA, gemm.mxsa());
+
+    ContractionSolution first;
+    setMXSolution(first, 1, 128);
+    dataInit.preSolution(&first); // first swizzled upload, with canonical inputs already ready
+    EXPECT_TRUE(dataInit.preswizzledA());
+    EXPECT_EQ(dataInit.inputEpoch(&first), epoch);
+    EXPECT_EQ(dataInit.canonicalBytes(Tensor::A, gemm.a()), hostA);
+    EXPECT_EQ(dataInit.canonicalBytes(Tensor::MXSA, gemm.mxsa()), hostScale);
+
+    ContractionSolution cached;
+    setMXSolution(cached, 1, 64);
+    dataInit.preSolution(&cached); // different MI-K, matching canonical and swizzled cache
+    EXPECT_EQ(dataInit.inputEpoch(&cached), epoch);
+
+    dataInit.clearSwizzledScaleCache();
+    ContractionSolution rebuild;
+    setMXSolution(rebuild, 1, 128);
+    dataInit.preSolution(&rebuild);
+    EXPECT_TRUE(dataInit.preswizzledA());
+    EXPECT_EQ(dataInit.inputEpoch(&rebuild), epoch);
+    EXPECT_EQ(dataInit.canonicalBytes(Tensor::A, gemm.a()), hostA);
+    EXPECT_EQ(dataInit.canonicalBytes(Tensor::MXSA, gemm.mxsa()), hostScale);
+
+    dataInit.invalidateHostData(Tensor::A, gemm.a());
+    dataInit.preSolution(&cached); // actual canonical generation, with a different init mode
+    EXPECT_GT(dataInit.inputEpoch(&cached), epoch);
+    EXPECT_NE(dataInit.canonicalBytes(Tensor::A, gemm.a()), hostA);
+}
+
+INSTANTIATE_TEST_SUITE_P(GeneratorModes, DataInitializationCanonicalEpoch, ::testing::Values(0, 1));
+
+TEST(DataInitializationInputEpoch, NonMXGeneratorWriterAdvancesOnlyOnDescriptorMiss)
+{
+    using Tensor = ContractionProblemGemm::TENSOR;
+    auto args    = makeMXLaunchArgs({{128, 128, 1, 512}});
+    setOption(args, "mx-b-block", 0);
+    setOption(args, "mx-data-generator", 1);
+    TensileLite::Client::ClientProblemFactory factory(args);
+    MXReuseProbe                              dataInit(args, factory);
+    auto const& problem = dynamic_cast<ContractionProblemGemm const&>(*factory.problems()[0]);
+    dataInit.prepareCPUInputs(problem);
+    auto const before = dataInit.inputEpoch();
+    auto const hostB  = dataInit.canonicalBytes(Tensor::B, problem.b());
+    dataInit.invalidateHostData(Tensor::B, problem.b());
+    dataInit.initializeNonMXB(problem);
+    EXPECT_GT(dataInit.inputEpoch(), before);
+    EXPECT_NE(dataInit.canonicalBytes(Tensor::B, problem.b()), hostB);
+    auto const after = dataInit.inputEpoch();
+    dataInit.initializeNonMXB(problem);
+    EXPECT_EQ(dataInit.inputEpoch(), after);
 }
 
 // From the second problem on, preSolution re-initializes the MX inputs before
