@@ -50,6 +50,14 @@ exclude: |
     projects/hipdnn/flatbuffers_sdk/include/hipdnn_flatbuffers_sdk/data_objects/.*_generated\.h|
     # Generated hip-kernel-provider FlatBuffers header
     dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/serialization/ingestor_plan_generated\.h|
+    # Generated replay corpus of hipkernel:AttentionGeneralBwd (written by
+    # descriptor-packaging/tools/general_bwd_corpus.py, checked for staleness by
+    # test_attention_general_bwd_corpus.py); each file is over check-added-large-files'
+    # limit.
+    dnn-providers/hip-kernel-provider/src/tests/fixtures/attention_general_bwd/.*\.jsonl$|
+    # Its generated IngestorGenerator config (written and checked by
+    # descriptor-packaging/tools/general_bwd_catalog.py), also over that limit.
+    projects/hipdnn/tools/IngestorGenerator/configs/attention_general_bwd\.yaml$|
     # Reference data (auto-generated). The generic hooks would fight the
     # generators: some graph JSON is written without a final newline, which
     # end-of-file-fixer would rewrite, and sweep manifests run past 1 MB, over
