@@ -434,6 +434,8 @@ struct DeviceOperationInstanceFactory<ck::tensor_operation::device::DeviceGroupe
                         op_ptrs);
                     add_device_grouped_conv2d_bwd_weight_xdl_nhwgc_gkyxc_nhwgk_f16_default_large_tensors_instances(
                         op_ptrs);
+                    add_device_grouped_conv2d_bwd_weight_xdl_nhwgc_gkyxc_nhwgk_f16_default_large_tensors_gfx1250_instances(
+                        op_ptrs);
                     // Explicit GEMM
                     add_device_grouped_convnd_bwd_weight_xdl_f16_f16_f16_exp_comp_default_instances(
                         op_ptrs);
@@ -512,6 +514,8 @@ struct DeviceOperationInstanceFactory<ck::tensor_operation::device::DeviceGroupe
                     add_device_grouped_conv2d_bwd_weight_two_stage_xdl_nhwgc_gkyxc_nhwgk_bf16_large_tensors_instances(
                         op_ptrs);
                     add_device_grouped_conv2d_bwd_weight_xdl_nhwgc_gkyxc_nhwgk_bf16_default_large_tensors_instances(
+                        op_ptrs);
+                    add_device_grouped_conv2d_bwd_weight_xdl_nhwgc_gkyxc_nhwgk_bf16_default_large_tensors_gfx1250_instances(
                         op_ptrs);
                     // Explicit GEMM
                     add_device_grouped_convnd_bwd_weight_xdl_bf16_bf16_bf16_exp_comp_default_instances(
@@ -732,6 +736,8 @@ struct DeviceOperationInstanceFactory<ck::tensor_operation::device::DeviceGroupe
                         op_ptrs);
                     add_device_grouped_conv3d_bwd_weight_xdl_ndhwgc_gkzyxc_ndhwgk_f16_default_large_tensors_instances(
                         op_ptrs);
+                    add_device_grouped_conv3d_bwd_weight_xdl_ndhwgc_gkzyxc_ndhwgk_f16_default_large_tensors_gfx1250_instances(
+                        op_ptrs);
                     // Explicit GEMM
                     add_device_grouped_convnd_bwd_weight_xdl_f16_f16_f16_exp_comp_default_instances(
                         op_ptrs);
@@ -802,6 +808,8 @@ struct DeviceOperationInstanceFactory<ck::tensor_operation::device::DeviceGroupe
                     add_device_grouped_conv3d_bwd_weight_two_stage_xdl_ndhwgc_gkzyxc_ndhwgk_bf16_large_tensors_instances(
                         op_ptrs);
                     add_device_grouped_conv3d_bwd_weight_xdl_ndhwgc_gkzyxc_ndhwgk_bf16_default_large_tensors_instances(
+                        op_ptrs);
+                    add_device_grouped_conv3d_bwd_weight_xdl_ndhwgc_gkzyxc_ndhwgk_bf16_default_large_tensors_gfx1250_instances(
                         op_ptrs);
                     // Explicit GEMM
                     add_device_grouped_convnd_bwd_weight_xdl_bf16_bf16_bf16_exp_comp_default_instances(
