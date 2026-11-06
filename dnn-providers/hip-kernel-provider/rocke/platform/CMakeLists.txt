@@ -636,7 +636,12 @@ if(ROCKE_INSTALL_TESTS)
       # portable-IR replay CLI and ROCKE_PROVENANCE_MANIFEST its provenance
       # manifest; ROCKE_UNSIGNED_INT_OPS_CLI is the C API program whose
       # --print-llvm output test_unsigned_int_ops.py compares with the Python
-      # builder's text.
+      # builder's text; ROCKE_INTEXPR_CLI is the C++ integer-expression
+      # evaluator whose --eval output test_intexpr.py compares with Python's;
+      # ROCKE_PARAM_FACTS_CLI prints the C++ print_ir, verifier messages and
+      # canonicalize that test_param_facts.py compares with Python's;
+      # ROCKE_GPU_CHECKED_VALUE_CLI prints the C++ builder's GPU-check cases
+      # and marker verifier messages that test_gpu_checked_value.py compares.
       set(_ROCKE_PYTEST_ENVIRONMENT
           "PYTHONPATH=."
           "ROCKE_REPLAY_CLI=${ROCKE_TEST_CTEST_REL}tests/portable_ir/rocke_portable_ir_replay_cli${CMAKE_EXECUTABLE_SUFFIX}"
@@ -646,6 +651,9 @@ if(ROCKE_INSTALL_TESTS)
               "ROCKE_IR_TYPES_TEST=rocke_ir_types"
               "ROCKE_NONTEMPORAL_HIP_TEST=rocke_nontemporal_hip"
               "ROCKE_UNSIGNED_INT_OPS_CLI=rocke_unsigned_int_ops"
+              "ROCKE_INTEXPR_CLI=rocke_intexpr"
+              "ROCKE_PARAM_FACTS_CLI=rocke_param_facts"
+              "ROCKE_GPU_CHECKED_VALUE_CLI=rocke_gpu_checked_value"
               "ROCKE_ARCH_TARGET_TEST_EXE=rocke_arch_target_identity"
               "ROCKE_BUFFER_RSRC_HIP_TEST=rocke_buffer_rsrc_hip")
         string(REPLACE "=" ";" _rocke_native_parity "${_rocke_native_parity}")
@@ -665,6 +673,31 @@ if(ROCKE_INSTALL_TESTS)
              "set_tests_properties(rocke_pytest PROPERTIES\n"
              "  LABELS \"ckc\\;python\\;quick\"\n"
              "  ENVIRONMENT \"\${_rocke_platform_pytest_environment}\"\n"
+             "  TIMEOUT 300)\n")
+
+      # The tensor_transforms tests live inside the package
+      # (rocke/tests/helpers/tiling/tensor_transforms), so rocke_pytest above, which
+      # collects the installed tests/ tree, never sees them. Run them from the
+      # installed package. Without a usable GPU the GPU tests skip; the source
+      # scans of the dsl_docs and library trees skip here too, since the installed
+      # tree holds neither (rocke.tests.source_tree). Like rocke_pytest, the entry
+      # gets the compiler tool locations but not the compiler requirement policy.
+      #
+      # No directory above the installed package holds a rocke pytest
+      # configuration, so without -c pytest would take one from any pytest.ini or
+      # pyproject.toml above the install (a CI workspace has one whose
+      # python_files collects nothing here). -c names the installed
+      # tests/pytest.ini, the configuration rocke_pytest runs under.
+      set(_ROCKE_TENSOR_TRANSFORMS_TESTS
+          "${_ROCKE_INSTALLED_PYTHONPATH}/rocke/tests/helpers/tiling/tensor_transforms")
+      string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+             "set(_rocke_tensor_transforms_pytest_environment \"PYTHONPATH=${_ROCKE_INSTALLED_PYTHONPATH}\")\n"
+             "list(APPEND _rocke_tensor_transforms_pytest_environment \${_rocke_compiler_tool_environment})\n"
+             "add_test(rocke_tensor_transforms_pytest python -m pytest -c \"${ROCKE_TEST_CTEST_REL}tests/pytest.ini\" \"${_ROCKE_TENSOR_TRANSFORMS_TESTS}\" -v -rs --timeout=60)\n")
+      string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+             "set_tests_properties(rocke_tensor_transforms_pytest PROPERTIES\n"
+             "  LABELS \"ckc\\;python\\;quick\"\n"
+             "  ENVIRONMENT \"\${_rocke_tensor_transforms_pytest_environment}\"\n"
              "  TIMEOUT 300)\n")
     endif()
 
