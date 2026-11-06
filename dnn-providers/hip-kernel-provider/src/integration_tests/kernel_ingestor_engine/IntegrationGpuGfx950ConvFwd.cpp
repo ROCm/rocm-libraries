@@ -806,7 +806,7 @@ TEST_P(IntegrationGpuGfx950ConvFwdAotSeed, KernelFamilyKnobSelectsEachFamilysIns
 // plan, which also checks the selected count of each family, (b) a fixed sample of
 // selected instances, each pinned: the best few by score, then more drawn by a seeded
 // shuffle of the dtype's whole catalog, and (c) a benchmarked plan under
-// HIPDNN_INGESTOR_CANDIDATE_LIMIT.
+// HIPDNN_INGESTOR_SHORTLIST_LIMIT.
 
 namespace
 {
@@ -947,7 +947,7 @@ protected:
     }
 
     hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter _candidateLimit{
-        hipdnn_plugin_sdk::INGESTOR_CANDIDATE_LIMIT_ENV_NAME, ""};
+        hipdnn_plugin_sdk::INGESTOR_SHORTLIST_LIMIT_ENV_NAME, ""};
 };
 
 // (a), and the selected count of each family at full size.
@@ -1068,7 +1068,7 @@ TEST_P(IntegrationGpuGfx950ConvFwdAot, SampledSelectedInstancesMatchCpuReference
     }
 }
 
-// (c): benchmarking under HIPDNN_INGESTOR_CANDIDATE_LIMIT measures only the best-ranked
+// (c): benchmarking under HIPDNN_INGESTOR_SHORTLIST_LIMIT measures only the best-ranked
 // candidates, and its record serves the next build of the graph.
 TEST_P(IntegrationGpuGfx950ConvFwdAot, CappedBenchmarkMatchesCpuReference)
 {

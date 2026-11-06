@@ -129,6 +129,14 @@ def test_the_catalog_lists_233_kernels_per_dtype_the_same_in_both(catalog):
 def test_every_catalog_entry_is_a_forward_sweep_identity(catalog):
     """Each entry is a gfx950 forward identity of rocKE's implicit-GEMM AOT grid or of
     its direct grid."""
+    from kernels.conv.kernel_identity import current_llvm_flavor
+
+    flavor = catalog[0]["llvm_flavor"]
+    if flavor != current_llvm_flavor():
+        pytest.skip(
+            f"the catalog is for LLVM flavor {flavor}, this process lowers to "
+            f"{current_llvm_flavor()}, so every identity differs"
+        )
     jobs = min(16, os.cpu_count() or 1)
     for dtype in tool.DTYPES:
         swept = tool.sweep_hashes(dtype, jobs)

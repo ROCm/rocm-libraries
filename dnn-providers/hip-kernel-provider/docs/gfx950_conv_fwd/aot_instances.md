@@ -255,7 +255,7 @@ engine.
 "Serves" and "selected" are separate. An instance **serves** a graph when its binary
 computes it: the capability check of the previous section, one instance at a time. Of
 the instances that serve, the engine **selects** the ones it runs, and only those are
-its candidates: ranked, benchmarked, or limited by `HIPDNN_INGESTOR_CANDIDATE_LIMIT`.
+its candidates: ranked, benchmarked, or limited by `HIPDNN_INGESTOR_SHORTLIST_LIMIT`.
 
 Narrower access does not win, so the policy keeps the problem's widest vector widths.
 The problem's widest combination is the widest load width C/groups admits and the
@@ -294,7 +294,7 @@ and merged candidates therefore add to its selected implicit-GEMM ones.
 The selected instances are the engine's catalog for the graph, so everything after it
 applies to them alone, in this order: the knob filter (a forced `tile_k` or
 `kernel_family`), the ranking (`aotScore` or a benchmarked record), and
-`HIPDNN_INGESTOR_CANDIDATE_LIMIT`. A forced knob therefore picks among the selected
+`HIPDNN_INGESTOR_SHORTLIST_LIMIT`. A forced knob therefore picks among the selected
 instances; a knob value that only narrower copies have selects nothing.
 
 The Python mirror is `gfx950_conv_fwd_aot_runtime_candidates` in
@@ -416,7 +416,11 @@ seed keeps one pack per dtype, and one more for its split-C instances
 
 From `projects/hipdnn/tools/IngestorGenerator`, with
 `ROCKE=<repo>/dnn-providers/hip-kernel-provider/rocke`, `ROCM_PATH=/opt/rocm`,
-`ROCKE_BACKEND=python`, and `PYTHONPATH` set to `$ROCKE/platform/python:$ROCKE/library`:
+`ROCKE_BACKEND=python`, `PYTHONPATH` set to `$ROCKE/platform/python:$ROCKE/library`,
+and `ROCKE_LLVM_FLAVOR` set to the catalog's flavor (the committed lists' first
+entry; currently `llvm22`) if the environment's own comgr resolves to a different
+one — otherwise every identity in the lists below reads back as "not a sweep
+identity", since `stable_hash()` covers `llvm_flavor`:
 
 ```bash
 python tools/enumerate_conv_aot_instances.py --rocke-root "$ROCKE" --output-dir configs
@@ -520,7 +524,7 @@ selection ([Serves and selected](#serves-and-selected)) keeps the problem's wide
 combination, or every serving instance when the catalog lacks it. An unbenchmarked
 plan takes the best by score.
 Benchmarking loads and measures every selected candidate, so a cold plan build still
-grows with the number of configurations. `HIPDNN_INGESTOR_CANDIDATE_LIMIT=<n>`
+grows with the number of configurations. `HIPDNN_INGESTOR_SHORTLIST_LIMIT=<n>`
 (`GlobalKnobDefines.hpp`) keeps only the `n` best-ranked candidates after knob
 filtering, before the winner-record lookup, with benchmarking on or off. A record
 benchmarked under a limit therefore covers exactly the candidates a later build under
@@ -565,7 +569,7 @@ Without these, a `hipdnn_bench --sweep` over a graph, which pins every knob of e
 candidate and makes several engine-details, workspace and plan calls per candidate, spent
 almost all its time re-matching and re-filtering the catalog rather than timing kernels.
 A benchmarked plan adds the candidates' code-object loads and timed runs, which
-`HIPDNN_INGESTOR_CANDIDATE_LIMIT` bounds.
+`HIPDNN_INGESTOR_SHORTLIST_LIMIT` bounds.
 
 ## The seed engine and the GPU tests
 
@@ -632,7 +636,7 @@ width divides, stride 2 and every swept dilation.
   more, drawn by a seeded shuffle of every kernel in the dtype's shards: a record that
   orders all of them covers every candidate, so it serves the first instance in its
   order that is selected for the graph. A benchmark under
-  `HIPDNN_INGESTOR_CANDIDATE_LIMIT=64` is checked, and so is its reuse.
+  `HIPDNN_INGESTOR_SHORTLIST_LIMIT=64` is checked, and so is its reuse.
 
 Each row of the table states how many instances of each family are selected for the
 graph, in the seed and in the full catalog, with the full catalog's implicit-GEMM count
@@ -656,5 +660,13 @@ integration root packs it for gfx950, the product's where the product root offer
   catalog before relying on the unbenchmarked ranking.
 - One score heuristic, as described above. It is a placeholder until rocKE's
   dispatcher ranks instances. Benchmarking every selected instance grows with the
-  number of configurations in the catalog; `HIPDNN_INGESTOR_CANDIDATE_LIMIT` bounds it
+  number of configurations in the catalog; `HIPDNN_INGESTOR_SHORTLIST_LIMIT` bounds it
   to the best-ranked ones, which makes the quality of the score matter more.
+- Direct depthwise coverage is the catalog's label list, not the kernels'
+  capability: each direct depthwise instance (`std`, `spatial`, `tiled`, `col`, `win`)
+  bakes one filter size, and `spatial` additionally rejects `groups > wave_size`
+  (`DirectDepthwiseSpatialSpec.validate`, `library/kernels/common/conv_direct_grouped.py`).
+  A depthwise shape outside every packaged instance's compiled filter/group
+  combination, such as a large odd filter at `groups=256`, serves no direct
+  instance and falls back to implicit GEMM. This is a catalog gap (add a serving
+  instance via a new sweep round), not a kernel defect.

@@ -542,12 +542,17 @@ def dump_config(config: dict, dumper=None) -> str:
     )
 
 
-def stabilize_ids(kdp_path: Path, engine_name: str = PRODUCT_ENGINE) -> int:
+def stabilize_ids(
+    kdp_path: Path, engine_name: str = PRODUCT_ENGINE, product: str = PRODUCT_ENGINE
+) -> int:
     """Re-derive every kernel UUID of one KDP from its instance_id; returns the count.
 
     A kernel id found anywhere else in the file is referenced, and is refused.
     Every UUID in the text is counted in one pass and all kernel ids are then
     substituted in another, so the cost stays linear in the size of the file.
+    ``product`` is :data:`PRODUCT_ENGINE` for this tool's own catalog; another
+    tool sharing this helper (:mod:`make_conv_dgrad_aot_config`) passes its own
+    shipped engine name, so ``engine_name == product`` there, not here.
     """
     text = kdp_path.read_text()
     kernels = list(_kernels(json.loads(text)))
@@ -562,22 +567,29 @@ def stabilize_ids(kdp_path: Path, engine_name: str = PRODUCT_ENGINE) -> int:
                 f"kernel id {old_id} appears {counts[old_id]} times in "
                 f"{kdp_path}; refusing to rewrite a referenced id"
             )
-        new_ids[old_id] = kernel_uuid(kernel["metadata"]["instance_id"], engine_name)
+        new_ids[old_id] = kernel_uuid(
+            kernel["metadata"]["instance_id"], engine_name, product
+        )
     kdp_path.write_text(
         _UUID.sub(lambda match: new_ids.get(match.group(0), match.group(0)), text)
     )
     return len(kernels)
 
 
-def kernel_uuid(instance_id: str, engine_name: str = PRODUCT_ENGINE) -> str:
+def kernel_uuid(
+    instance_id: str, engine_name: str = PRODUCT_ENGINE, product: str = PRODUCT_ENGINE
+) -> str:
     """The kernel UUID an instance is shipped under by ``engine_name``.
 
     The shipped engine's ids are uuid5 of the instance_id. Any other engine derives
     them under a namespace of its own name, so an instance it shares with the shipped
-    catalog never carries the same kernel id into one process twice.
+    catalog never carries the same kernel id into one process twice. ``product`` is
+    the shipped engine to compare ``engine_name`` against: :data:`PRODUCT_ENGINE` for
+    this tool's own catalog, or another tool's own product when it shares this
+    helper.
     """
     namespace = INSTANCE_UUID_NAMESPACE
-    if engine_name != PRODUCT_ENGINE:
+    if engine_name != product:
         namespace = uuid.uuid5(INSTANCE_UUID_NAMESPACE, engine_name)
     return str(uuid.uuid5(namespace, instance_id))
 

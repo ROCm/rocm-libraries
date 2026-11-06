@@ -741,7 +741,8 @@ if(ROCKE_INSTALL_TESTS)
         "tests/library/tests/test_capability_keys.py"
         "tests/library/tests/test_module_cache.py"
         "tests/library/tests/test_run_conv_shards.py"
-        "tests/library/tests/test_convolution_backward_data_aot_packaging.py")
+        "tests/library/tests/test_convolution_backward_data_aot_packaging.py"
+        "tests/library/tests/test_convolution_forward_aot_packaging.py")
     set(_ROCKE_LIBRARY_CONV_TESTS "")
     foreach(_rocke_conv_test ${_ROCKE_LIBRARY_CONV_TEST_RELPATHS})
       string(APPEND _ROCKE_LIBRARY_CONV_TESTS
