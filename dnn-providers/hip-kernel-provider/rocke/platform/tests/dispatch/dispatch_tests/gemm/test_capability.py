@@ -16,7 +16,7 @@ from rocke.core.arch.target import _load_generic_targets
 from rocke.dispatch import GemmRequest
 from rocke.dispatch.gemm.bf16_rcr import GEMM_BF16_REGISTRY
 from rocke.dispatch.gemm.fp16_rcr import GEMM_FP16_REGISTRY
-from rocke.tests.arch_marks import arch_specific
+from rocke.tests.arch_marks import COVERED_ARCHES, arch_specific
 
 _REGISTRIES = (("fp16", GEMM_FP16_REGISTRY), ("bf16", GEMM_BF16_REGISTRY))
 
@@ -121,7 +121,7 @@ class TestDeclaredCoverage(unittest.TestCase):
         by_name = {c["name"]: c for c in manifest["candidates"]}
         self.assertEqual(
             by_name["universal_gemm_fp16_cdna_cshuffle"]["capability"]["arches"],
-            ["gfx942", "gfx950"],
+            list(COVERED_ARCHES),
         )
         self.assertEqual(
             by_name["universal_gemm_fp16_rdna_wmma"]["capability"]["arches"],

@@ -13,8 +13,7 @@ from rocke.dispatch.families.norm import (
     norm_candidates,
     norm_sweep_space,
 )
-
-_ARCHES = ("gfx942", "gfx950")
+from rocke.tests.arch_marks import COVERED_ARCHES
 
 
 def _rms(rows, cols, arch, dtype="fp16"):
@@ -27,14 +26,14 @@ def _ln(rows, cols, arch, dtype="fp16"):
 
 class TestNormDispatch(unittest.TestCase):
     def test_rejects_unknown_kind(self):
-        for arch in _ARCHES:
+        for arch in COVERED_ARCHES:
             with self.subTest(arch=arch), self.assertRaises(ValueError):
                 dispatch_norm(
                     NormRequest(rows=4, cols=4096, kind="groupnorm", arch=arch)
                 )
 
     def test_rejects_unsupported_dtype(self):
-        for arch in _ARCHES:
+        for arch in COVERED_ARCHES:
             with self.subTest(arch=arch), self.assertRaises(ValueError):
                 dispatch_norm(
                     NormRequest(
@@ -48,7 +47,7 @@ class TestNormDispatch(unittest.TestCase):
 
     def test_picks_largest_blocksize_then_widest_vec(self):
         # cols=4096: b1024*v4=4096 divides; b1024*v8=8192 does not.
-        for arch in _ARCHES:
+        for arch in COVERED_ARCHES:
             with self.subTest(arch=arch):
                 r = dispatch_norm(_rms(4096, 4096, arch))
                 self.assertEqual(r.spec.block_size, 1024)
@@ -57,27 +56,27 @@ class TestNormDispatch(unittest.TestCase):
 
     def test_widest_vec_when_divisible(self):
         # cols=8192: b1024*v8=8192 divides -> widest vec wins.
-        for arch in _ARCHES:
+        for arch in COVERED_ARCHES:
             with self.subTest(arch=arch):
                 r = dispatch_norm(_rms(4096, 8192, arch))
                 self.assertEqual((r.spec.block_size, r.spec.vec), (1024, 8))
 
     def test_layernorm_kind_selects_layernorm_candidate(self):
-        for arch in _ARCHES:
+        for arch in COVERED_ARCHES:
             with self.subTest(arch=arch):
                 r = dispatch_norm(_ln(1024, 2048, arch))
                 self.assertEqual(r.candidate.algorithm, "layernorm")
                 self.assertIn("layernorm", r.candidate.name)
 
     def test_grid_is_one_cta_per_row(self):
-        for arch in _ARCHES:
+        for arch in COVERED_ARCHES:
             with self.subTest(arch=arch):
                 r = dispatch_norm(_rms(777, 4096, arch))
                 self.assertEqual(r.grid, (777, 1, 1))
                 self.assertEqual(r.block, (r.spec.block_size, 1, 1))
 
     def test_bf16_supported(self):
-        for arch in _ARCHES:
+        for arch in COVERED_ARCHES:
             with self.subTest(arch=arch):
                 r = dispatch_norm(_rms(512, 2048, arch, dtype="bf16"))
                 self.assertEqual(r.spec.dtype, "bf16")
@@ -90,7 +89,7 @@ class TestNormDispatch(unittest.TestCase):
         self.assertEqual(r.spec.wave_size, 32)
 
     def test_kind_gate_filters_candidates(self):
-        for arch in _ARCHES:
+        for arch in COVERED_ARCHES:
             with self.subTest(arch=arch):
                 req = _rms(4096, 4096, arch)
                 for c in norm_candidates():
@@ -103,7 +102,7 @@ class TestNormDispatch(unittest.TestCase):
         self.assertEqual(len(names), len(set(names)))
 
     def test_explicit_spec_id_selects_that_candidate(self):
-        for arch in _ARCHES:
+        for arch in COVERED_ARCHES:
             with self.subTest(arch=arch):
                 req = NormRequest(
                     rows=4096,
@@ -116,7 +115,7 @@ class TestNormDispatch(unittest.TestCase):
                 self.assertEqual(r.candidate.spec_id, "rmsnorm_b256_v4")
 
     def test_sweep_space_enumerates_valid_block_vec_combos(self):
-        for arch in _ARCHES:
+        for arch in COVERED_ARCHES:
             with self.subTest(arch=arch):
                 req = _rms(4096, 4096, arch)
                 winner = dispatch_norm(req)

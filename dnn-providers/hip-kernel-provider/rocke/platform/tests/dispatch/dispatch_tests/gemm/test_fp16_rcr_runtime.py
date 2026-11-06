@@ -13,6 +13,7 @@ from rocke.dispatch import GemmRequest, dispatch_gemm_fp16
 from rocke.dispatch.gemm import build_kernel
 from rocke.helpers import compile_kernel, make_gemm_manifest, write_artifact
 from rocke.runtime.hip_module import get_device_arch
+from rocke.tests.arch_marks import COVERED_ARCHES
 from rocke.tests.subprocess_launcher import (
     rocke_python_command,
     rocke_subprocess_env,
@@ -21,11 +22,10 @@ from rocke.tests.subprocess_launcher import (
 # The runtime body below builds+launches a code object for the device arch, so gate on
 # the exact arch (via the rocke HIP runtime, no torch): on any other device the launch
 # would fail with hipError(209) no kernel image.
-_CDNA_ARCHES = ("gfx942", "gfx950")
 _ARCH = get_device_arch(0)
 
 
-@unittest.skipUnless(_ARCH in _CDNA_ARCHES, "requires a gfx942 or gfx950 GPU")
+@unittest.skipUnless(_ARCH in COVERED_ARCHES, "requires a gfx942 or gfx950 GPU")
 class TestDispatchGemmRuntime(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:

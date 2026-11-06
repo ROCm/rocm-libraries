@@ -21,8 +21,7 @@ from rocke.dispatch.families.norm import NormRequest, dispatch_norm
 from rocke.dispatch.gemm.bf16_rcr import dispatch_gemm_bf16
 from rocke.dispatch.gemm.common import GemmRequest
 from rocke.dispatch.gemm.fp16_rcr import dispatch_gemm_fp16
-
-_ARCHES = ("gfx942", "gfx950")
+from rocke.tests.arch_marks import COVERED_ARCHES
 
 
 def _gemm(dtype, arch):
@@ -49,7 +48,7 @@ def _norm(kind, arch):
 # build cannot skip the agreement check.
 _CASES = tuple(
     (f"{label}:{arch}", dispatch, request)
-    for arch in _ARCHES
+    for arch in COVERED_ARCHES
     for label, dispatch, request in (
         ("gemm_fp16_rcr", dispatch_gemm_fp16, _gemm("fp16", arch)),
         ("gemm_bf16_rcr", dispatch_gemm_bf16, _gemm("bf16", arch)),
@@ -90,7 +89,7 @@ class TestSpecBuilderAgreement(unittest.TestCase):
             )
             .build()
             .name
-            for arch in ("gfx942", "gfx950")
+            for arch in COVERED_ARCHES
         }
         self.assertEqual(len(names), 2)
 
@@ -129,8 +128,8 @@ class TestBuildRatchet(unittest.TestCase):
     def test_registration_fails_when_a_required_build_is_missing(self):
         from rocke.core.arch import known_arches
         from rocke.dispatch.core import (
-            Capability,
             CandidateRegistry,
+            Capability,
             KernelCandidate,
         )
 

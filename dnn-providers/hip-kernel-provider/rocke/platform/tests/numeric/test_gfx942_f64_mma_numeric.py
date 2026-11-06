@@ -70,7 +70,7 @@ def _reference(m, a, b, c):
 
 @arch_specific(
     ("gfx942",),
-    reason="the gfx942 MMA catalog lists f64 MFMA atoms; the gfx950 catalog lists none",
+    reason="the f64 MMA probe builds for gfx942 only; the gfx950 catalog lists f64 MFMA atoms",
 )
 @pytest.mark.parametrize("m", [16, 4])
 @pytest.mark.parametrize("k", [4, 8, 64])

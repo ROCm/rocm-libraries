@@ -9,8 +9,7 @@ import unittest
 from rocke.core.arch import known_arches
 from rocke.dispatch.core import CandidateRegistry, Capability, KernelCandidate
 from rocke.dispatch.gemm import GemmRequest, gemm_fp16_candidates
-
-_CDNA_ARCHES = ("gfx942", "gfx950")
+from rocke.tests.arch_marks import COVERED_ARCHES
 
 
 def _dummy_candidate(name: str, family: str = "dummy") -> KernelCandidate:
@@ -51,7 +50,7 @@ class TestCandidateRegistry(unittest.TestCase):
         # the rogue-ranker path would never be exercised.
         rogue = _dummy_candidate("rogue")
 
-        for arch in _CDNA_ARCHES:
+        for arch in COVERED_ARCHES:
             req = GemmRequest(M=128, N=128, K=32, arch=arch)
             with (
                 self.subTest(arch=arch),
@@ -66,7 +65,7 @@ class TestCandidateRegistry(unittest.TestCase):
 
     def test_gemm_registered_candidates_support_expected_arch_classes(self):
         rdna_req = GemmRequest(M=64, N=32, K=16, arch="gfx1151")
-        for arch in _CDNA_ARCHES:
+        for arch in COVERED_ARCHES:
             cdna_req = GemmRequest(M=128, N=128, K=32, arch=arch)
             supported_cdna = {
                 c.spec_id for c in gemm_fp16_candidates() if c.admits(cdna_req)[0]

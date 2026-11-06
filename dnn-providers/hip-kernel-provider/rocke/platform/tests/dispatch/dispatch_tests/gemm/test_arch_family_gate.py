@@ -20,8 +20,7 @@ import unittest
 
 from rocke.dispatch import GemmRequest, dispatch_gemm_fp16
 from rocke.dispatch.gemm import gemm_fp16_candidates
-
-_CDNA_ARCHES = ("gfx942", "gfx950")
+from rocke.tests.arch_marks import COVERED_ARCHES
 
 
 def _by_spec_id(spec_id: str):
@@ -35,7 +34,7 @@ class TestArchFamilyGate(unittest.TestCase):
     def test_rdna_candidates_unsupported_on_cdna_arch(self):
         # On a CDNA arch, neither RDNA/WMMA candidate may report support, even
         # for shapes whose tiles happen to divide the problem.
-        for arch in _CDNA_ARCHES:
+        for arch in COVERED_ARCHES:
             req = GemmRequest(M=64, N=32, K=16, arch=arch)
             for spec_id in ("rdna_wmma_default", "rdna_wmma_32x32"):
                 with self.subTest(arch=arch, spec_id=spec_id):
@@ -54,7 +53,7 @@ class TestArchFamilyGate(unittest.TestCase):
     def test_cdna_selection_prefers_mem_when_cshuffle_tile_does_not_divide(self):
         # M=64 breaks the 128x128 cshuffle tile but the 64x128 mem tile divides;
         # the intended pick is cdna_mem. Pre-fix this returned rdna_wmma.
-        for arch in _CDNA_ARCHES:
+        for arch in COVERED_ARCHES:
             with self.subTest(arch=arch):
                 result = dispatch_gemm_fp16(GemmRequest(M=64, N=128, K=32, arch=arch))
                 self.assertEqual(result.candidate.spec_id, "cdna_mem_64x128")
@@ -66,7 +65,7 @@ class TestArchFamilyGate(unittest.TestCase):
         self.assertEqual(result.candidate.spec_id, "rdna_wmma_default")
 
     def test_cdna_cshuffle_still_selected_when_it_divides(self):
-        for arch in _CDNA_ARCHES:
+        for arch in COVERED_ARCHES:
             with self.subTest(arch=arch):
                 result = dispatch_gemm_fp16(GemmRequest(M=128, N=128, K=32, arch=arch))
                 self.assertEqual(result.candidate.spec_id, "cdna_cshuffle_default")

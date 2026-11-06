@@ -22,8 +22,7 @@ from rocke.dispatch.gemm.support import (
     support_query_from_universal_spec,
 )
 from rocke.instances.common.gemm_universal import is_valid_spec
-
-_CDNA_ARCHES = ("gfx942", "gfx950")
+from rocke.tests.arch_marks import COVERED_ARCHES
 
 # The 32x32 fp16 MFMA intrinsic that the cdna_cshuffle candidate lowers to.
 _MFMA_32X32_FP16 = {
@@ -34,7 +33,7 @@ _MFMA_32X32_FP16 = {
 
 class TestGemmFp16Dispatch(unittest.TestCase):
     def test_dispatch_cdna_request(self):
-        for arch in _CDNA_ARCHES:
+        for arch in COVERED_ARCHES:
             with self.subTest(arch=arch):
                 req = GemmRequest(M=4096, N=4096, K=4096, arch=arch)
                 result = dispatch_gemm_fp16(req)
@@ -66,7 +65,7 @@ class TestGemmFp16Dispatch(unittest.TestCase):
         self.assertTrue(ok, why)
 
     def test_kernel_id_is_deterministic(self):
-        for arch in _CDNA_ARCHES:
+        for arch in COVERED_ARCHES:
             with self.subTest(arch=arch):
                 req = GemmRequest(M=1024, N=2048, K=512, arch=arch)
                 a = dispatch_gemm_fp16(req).kernel_id
@@ -77,7 +76,7 @@ class TestGemmFp16Dispatch(unittest.TestCase):
     def test_rejects_unsupported_dtype_and_layout(self):
         # dtype and layout are declared coverage, so the capability prefilter
         # rejects them before the residual predicate is consulted.
-        for arch in _CDNA_ARCHES:
+        for arch in COVERED_ARCHES:
             with self.subTest(arch=arch):
                 with self.assertRaisesRegex(
                     ValueError, r"dtype 'bf16' not in \('fp16',\)"
@@ -100,7 +99,7 @@ class TestGemmFp16Dispatch(unittest.TestCase):
         # Registered phase-1 variants have pad_m/n/k disabled, so the problem
         # shape must be an exact multiple of the selected CTA tile. This mirrors
         # tile_engine's split between config validity and problem-shape support.
-        for arch in _CDNA_ARCHES:
+        for arch in COVERED_ARCHES:
             with self.subTest(arch=arch):
                 with self.assertRaisesRegex(ValueError, "M=130 is not divisible"):
                     dispatch_gemm_fp16(
@@ -118,7 +117,7 @@ class TestGemmFp16Dispatch(unittest.TestCase):
                 )
 
     def test_config_support_uses_arch_mma_and_tile_knobs(self):
-        for arch in _CDNA_ARCHES:
+        for arch in COVERED_ARCHES:
             with self.subTest(arch=arch):
                 result = dispatch_gemm_fp16(GemmRequest(M=128, N=128, K=32, arch=arch))
                 query = support_query_from_universal_spec(result.spec, arch=arch)
@@ -138,7 +137,7 @@ class TestGemmFp16Dispatch(unittest.TestCase):
                 self.assertIn("unsupported", why)
 
     def test_request_shape_granularity_is_separate_from_config_support(self):
-        for arch in _CDNA_ARCHES:
+        for arch in COVERED_ARCHES:
             with self.subTest(arch=arch):
                 result = dispatch_gemm_fp16(GemmRequest(M=128, N=128, K=32, arch=arch))
                 ok, why = request_shape_supported(
@@ -148,7 +147,7 @@ class TestGemmFp16Dispatch(unittest.TestCase):
                 self.assertIn("M=130", why)
 
     def test_registered_variants_can_be_selected_by_spec_id(self):
-        for arch in _CDNA_ARCHES:
+        for arch in COVERED_ARCHES:
             with self.subTest(arch=arch):
                 cdna = dispatch_gemm_fp16(
                     GemmRequest(
@@ -187,7 +186,7 @@ class TestGemmFp16Dispatch(unittest.TestCase):
         def prefer_mem(_request, candidates):
             return sorted(candidates, key=lambda c: c.spec_id != "cdna_mem_64x128")
 
-        for arch in _CDNA_ARCHES:
+        for arch in COVERED_ARCHES:
             with self.subTest(arch=arch):
                 result = dispatch_gemm_fp16(
                     GemmRequest(M=1024, N=2048, K=512, arch=arch),
@@ -197,7 +196,7 @@ class TestGemmFp16Dispatch(unittest.TestCase):
                 self.assertEqual(result.candidate.name, "universal_gemm_fp16_cdna_mem")
 
     def test_sweep_space_is_bounded_and_valid(self):
-        for arch in ("gfx942", "gfx950", "gfx1151", "gfx1201"):
+        for arch in (*COVERED_ARCHES, "gfx1151", "gfx1201"):
             req = GemmRequest(M=512, N=512, K=512, arch=arch)
             specs = gemm_fp16_sweep_space(req)
             self.assertGreaterEqual(len(specs), 1)
@@ -207,7 +206,7 @@ class TestGemmFp16Dispatch(unittest.TestCase):
                 self.assertTrue(ok, f"{arch}: {why}")
 
     def test_dispatch_all_enumerates_every_eligible_variant(self):
-        for arch in _CDNA_ARCHES:
+        for arch in COVERED_ARCHES:
             with self.subTest(arch=arch):
                 req = GemmRequest(M=512, N=512, K=512, arch=arch)
                 winner = dispatch_gemm_fp16(req)
@@ -218,7 +217,7 @@ class TestGemmFp16Dispatch(unittest.TestCase):
                 self.assertEqual(len(results), len(registered_gemm_fp16_combos(req)))
 
     def test_selected_kernel_lowers_to_llvm(self):
-        for arch in _CDNA_ARCHES:
+        for arch in COVERED_ARCHES:
             with self.subTest(arch=arch):
                 req = GemmRequest(M=128, N=128, K=64, arch=arch)
                 result = dispatch_gemm_fp16(req)

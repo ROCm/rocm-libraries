@@ -18,6 +18,7 @@ from rocke.dispatch.core import Capability, KernelCandidate, ProblemBinding
 from rocke.dispatch.gemm.bf16_rcr import dispatch_gemm_bf16, gemm_bf16_candidates
 from rocke.dispatch.gemm.common import GemmRequest
 from rocke.dispatch.gemm.fp16_rcr import dispatch_gemm_fp16, gemm_fp16_candidates
+from rocke.tests.arch_marks import COVERED_ARCHES
 
 
 class FakeRuntime:
@@ -46,7 +47,6 @@ class FakeRuntime:
 def _write_reference_output(rt, binding, ptrs, req, dtype):
     """Fill the C buffer with the exact expected result, as a perfect kernel would."""
     import numpy as np
-
     from rocke.dispatch.gemm.binding import _SEED, _bf16_from_f32
 
     rng = np.random.default_rng(_SEED)
@@ -99,10 +99,9 @@ class TestBindSeam(unittest.TestCase):
 
 
 class TestGemmBinding(unittest.TestCase):
-    ARCHES = ("gfx942", "gfx950")
     CASES = tuple(
         (arch, dtype, dispatch)
-        for arch in ARCHES
+        for arch in COVERED_ARCHES
         for dtype, dispatch in (
             ("fp16", dispatch_gemm_fp16),
             ("bf16", dispatch_gemm_bf16),
@@ -166,7 +165,7 @@ class TestGemmBinding(unittest.TestCase):
                 self.assertGreater(bad_zero, 0, "a silent kernel must fail verify")
 
     def test_binding_without_verify_does_no_reference_work(self):
-        for arch in self.ARCHES:
+        for arch in COVERED_ARCHES:
             with self.subTest(arch=arch):
                 req = self._request("fp16", arch)
                 binding = dispatch_gemm_fp16(req).bind()
@@ -292,7 +291,6 @@ class TestBindingRatchet(unittest.TestCase):
 class TestBf16Encoding(unittest.TestCase):
     def test_round_trip_is_exact_for_bf16_representable_values(self):
         import numpy as np
-
         from rocke.dispatch.gemm.binding import _bf16_from_f32, _f32_from_bf16
 
         values = np.array([0.0, 1.0, -1.0, 5.0, -256.0, 1024.0], dtype=np.float32)
@@ -301,7 +299,6 @@ class TestBf16Encoding(unittest.TestCase):
 
     def test_rounding_is_nearest_even_not_truncation(self):
         import numpy as np
-
         from rocke.dispatch.gemm.binding import _bf16_from_f32, _f32_from_bf16
 
         # A value just above a bf16 tick must round up, not truncate down.

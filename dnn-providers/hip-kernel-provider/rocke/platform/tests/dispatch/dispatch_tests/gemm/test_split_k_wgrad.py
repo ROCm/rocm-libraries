@@ -20,6 +20,7 @@ from rocke.helpers.split_k import (
     WGRAD_TARGET_WAVES_PER_CU,
     select_split_k_wgrad,
 )
+from rocke.tests.arch_marks import COVERED_ARCHES
 
 # Per-group wgrad GEMM dims for the grouped conv shapes the library benchmarks
 # cover: (wg_M, wg_N, wg_K, groups). All are depthwise (cpg == kpg == 1) except
@@ -332,7 +333,7 @@ class TestGfx1250Policy(unittest.TestCase):
     def test_other_arches_ignore_dtype(self):
         # The policy is gfx1250-only: gfx942 and gfx950 give the same degree
         # with or without a dtype.
-        for arch in ("gfx942", "gfx950"):
+        for arch in COVERED_ARCHES:
             with self.subTest(arch=arch):
                 kw = dict(
                     wg_M=128,

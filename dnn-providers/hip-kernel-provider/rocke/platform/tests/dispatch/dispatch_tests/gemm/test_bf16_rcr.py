@@ -9,8 +9,7 @@ import unittest
 from rocke.dispatch import GemmRequest, dispatch_gemm_bf16
 from rocke.dispatch.gemm import gemm_bf16_candidates
 from rocke.dispatch.gemm.bf16_rcr import build_kernel
-
-_CDNA_ARCHES = ("gfx942", "gfx950")
+from rocke.tests.arch_marks import COVERED_ARCHES
 
 
 def _bf16(M, N, K, arch):
@@ -26,12 +25,12 @@ _EXPECTED_BF16_PTRS = {
 
 class TestBf16RcrDispatch(unittest.TestCase):
     def test_dtype_gate_rejects_non_bf16(self):
-        for arch in _CDNA_ARCHES:
+        for arch in COVERED_ARCHES:
             with self.subTest(arch=arch), self.assertRaises(ValueError):
                 dispatch_gemm_bf16(GemmRequest(M=128, N=128, K=32, arch=arch))  # fp16
 
     def test_cdna_cshuffle_selected_when_tile_divides(self):
-        for arch in _CDNA_ARCHES:
+        for arch in COVERED_ARCHES:
             with self.subTest(arch=arch):
                 r = dispatch_gemm_bf16(_bf16(256, 256, 256, arch))
                 self.assertEqual(r.candidate.spec_id, "cdna_cshuffle_default")
@@ -44,7 +43,7 @@ class TestBf16RcrDispatch(unittest.TestCase):
 
     def test_cdna_mem_selected_when_cshuffle_does_not_divide(self):
         # Same divergence shape the arch-family gate fix covers, for bf16.
-        for arch in _CDNA_ARCHES:
+        for arch in COVERED_ARCHES:
             with self.subTest(arch=arch):
                 r = dispatch_gemm_bf16(_bf16(64, 128, 32, arch))
                 self.assertEqual(r.candidate.spec_id, "cdna_mem_64x128")
@@ -55,7 +54,7 @@ class TestBf16RcrDispatch(unittest.TestCase):
         self.assertEqual(r.candidate.spec_id, "rdna_wmma_default")
 
     def test_rdna_candidates_unsupported_on_cdna(self):
-        for arch in _CDNA_ARCHES:
+        for arch in COVERED_ARCHES:
             req = _bf16(64, 32, 16, arch)
             for c in gemm_bf16_candidates():
                 if "rdna" in c.name:
@@ -69,7 +68,7 @@ class TestBf16RcrDispatch(unittest.TestCase):
         self.assertEqual(len(names), len(set(names)))
 
     def test_build_kernel_lowers(self):
-        for arch in _CDNA_ARCHES:
+        for arch in COVERED_ARCHES:
             with self.subTest(arch=arch):
                 r = dispatch_gemm_bf16(_bf16(256, 256, 256, arch))
                 mod = build_kernel(r)

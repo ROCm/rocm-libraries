@@ -11,38 +11,21 @@ separation. Cases that differ between the profiles are in
 import pytest
 from rocke.analysis.lds.model import AccessClassification, GroupKind, LdsAccess
 from rocke.analysis.lds.predict import predict_lds_conflicts
-
-_CDNA_TARGETS = ["gfx942", "gfx950"]
-
-
-def _access(access_id: int, lane: int, address: int, *, width: int = 4) -> LdsAccess:
-    return LdsAccess(
-        access_id=access_id,
-        lane=lane,
-        lds_byte_address=address,
-        access_width_bytes=width,
-    )
-
-
-def _predict(target: str, opcode: str, accesses: list[LdsAccess]):
-    return predict_lds_conflicts(
-        target=target, opcode=opcode, wave_size=64, accesses=accesses
-    )
+from rocke.tests.arch_marks import COVERED_ARCHES
 
 
 def _classes(result) -> list[AccessClassification]:
     return [access.classification for access in result.accesses]
 
 
-@pytest.mark.parametrize("target", _CDNA_TARGETS)
+@pytest.mark.parametrize("target", COVERED_ARCHES)
 @pytest.mark.parametrize("multiplicity", [4, 8])
 def test_explicit_multiway_conflict_group(target, multiplicity):
-    accesses = [
-        _access(access_id=lane, lane=lane, address=lane * 128)
-        for lane in range(multiplicity)
-    ]
+    accesses = [LdsAccess(lane, lane, lane * 128, 4) for lane in range(multiplicity)]
 
-    result = _predict(target, "ds_read_b32", accesses)
+    result = predict_lds_conflicts(
+        target=target, opcode="ds_read_b32", wave_size=64, accesses=accesses
+    )
 
     assert len(result.conflict_groups) == 1
     group = result.conflict_groups[0]
@@ -53,13 +36,13 @@ def test_explicit_multiway_conflict_group(target, multiplicity):
     assert all(c is AccessClassification.CONFLICT for c in _classes(result))
 
 
-@pytest.mark.parametrize("target", _CDNA_TARGETS)
+@pytest.mark.parametrize("target", COVERED_ARCHES)
 def test_eight_distinct_address_classes_are_conflict_free(target):
-    accesses = [
-        _access(access_id=lane, lane=lane, address=lane * 4) for lane in range(8)
-    ]
+    accesses = [LdsAccess(lane, lane, lane * 4, 4) for lane in range(8)]
 
-    result = _predict(target, "ds_read_b32", accesses)
+    result = predict_lds_conflicts(
+        target=target, opcode="ds_read_b32", wave_size=64, accesses=accesses
+    )
 
     assert not result.conflict_groups
     assert result.summary.conflict_group_count == 0
@@ -67,10 +50,20 @@ def test_eight_distinct_address_classes_are_conflict_free(target):
     assert all(c is AccessClassification.NORMAL for c in _classes(result))
 
 
-@pytest.mark.parametrize("target", _CDNA_TARGETS)
+@pytest.mark.parametrize("target", COVERED_ARCHES)
 def test_b32_conflict_and_no_conflict_cases(target):
-    conflict = _predict(target, "ds_read_b32", [_access(0, 0, 0), _access(1, 1, 128)])
-    no_conflict = _predict(target, "ds_read_b32", [_access(0, 0, 0), _access(1, 1, 4)])
+    conflict = predict_lds_conflicts(
+        target=target,
+        opcode="ds_read_b32",
+        wave_size=64,
+        accesses=[LdsAccess(0, 0, 0, 4), LdsAccess(1, 1, 128, 4)],
+    )
+    no_conflict = predict_lds_conflicts(
+        target=target,
+        opcode="ds_read_b32",
+        wave_size=64,
+        accesses=[LdsAccess(0, 0, 0, 4), LdsAccess(1, 1, 4, 4)],
+    )
 
     assert _classes(conflict) == [AccessClassification.CONFLICT] * 2
     assert conflict.conflict_groups[0].kind is GroupKind.DISTINCT_ADDRESS_CONFLICT
@@ -79,27 +72,38 @@ def test_b32_conflict_and_no_conflict_cases(target):
     assert _classes(no_conflict) == [AccessClassification.NORMAL] * 2
 
 
-@pytest.mark.parametrize("target", _CDNA_TARGETS)
+@pytest.mark.parametrize("target", COVERED_ARCHES)
 def test_same_address_read_is_broadcast(target):
-    result = _predict(target, "ds_read_b32", [_access(0, 0, 0), _access(1, 1, 0)])
+    result = predict_lds_conflicts(
+        target=target,
+        opcode="ds_read_b32",
+        wave_size=64,
+        accesses=[LdsAccess(0, 0, 0, 4), LdsAccess(1, 1, 0, 4)],
+    )
 
     assert _classes(result) == [AccessClassification.BROADCAST] * 2
     assert result.conflict_groups[0].kind is GroupKind.BROADCAST
 
 
-@pytest.mark.parametrize("target", _CDNA_TARGETS)
+@pytest.mark.parametrize("target", COVERED_ARCHES)
 def test_b32_wave_half_separation_remains_conflict_free(target):
-    result = _predict(target, "ds_read_b32", [_access(0, 0, 0), _access(1, 32, 128)])
+    result = predict_lds_conflicts(
+        target=target,
+        opcode="ds_read_b32",
+        wave_size=64,
+        accesses=[LdsAccess(0, 0, 0, 4), LdsAccess(1, 32, 128, 4)],
+    )
 
     assert not result.conflict_groups
 
 
-@pytest.mark.parametrize("target", _CDNA_TARGETS)
+@pytest.mark.parametrize("target", COVERED_ARCHES)
 def test_b64_wave_half_separation_prevents_conflict(target):
-    result = _predict(
-        target,
-        "ds_read_b64",
-        [_access(0, 0, 0, width=8), _access(1, 32, 256, width=8)],
+    result = predict_lds_conflicts(
+        target=target,
+        opcode="ds_read_b64",
+        wave_size=64,
+        accesses=[LdsAccess(0, 0, 0, 8), LdsAccess(1, 32, 256, 8)],
     )
 
     assert not result.conflict_groups

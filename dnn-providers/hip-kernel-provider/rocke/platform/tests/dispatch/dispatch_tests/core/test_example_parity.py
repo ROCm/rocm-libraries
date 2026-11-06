@@ -30,7 +30,7 @@ from rocke.dispatch.families.norm import NORM_REGISTRY, NormRequest, dispatch_no
 from rocke.dispatch.gemm.bf16_rcr import GEMM_BF16_REGISTRY
 from rocke.dispatch.gemm.common import GemmRequest
 from rocke.dispatch.gemm.fp16_rcr import GEMM_FP16_REGISTRY, dispatch_gemm_fp16
-from rocke.tests.arch_marks import arch_specific
+from rocke.tests.arch_marks import COVERED_ARCHES, arch_specific
 
 # ---------------------------------------------------------------------------
 # Problem shapes lifted from the examples, so "does it build?" is asked about
@@ -138,10 +138,8 @@ class TestExampleParity(unittest.TestCase):
     instead of a parallel construction of the same kernel.
     """
 
-    ARCHES = ("gfx942", "gfx950")
-
     def test_norm_matches_the_example_exactly(self):
-        for arch in self.ARCHES:
+        for arch in COVERED_ARCHES:
             with self.subTest(arch=arch):
                 self._check_norm_matches_the_example(arch)
 
@@ -153,7 +151,7 @@ class TestExampleParity(unittest.TestCase):
         self._check_moe_matches_the_example("gfx950")
 
     def test_gemm_deliberately_does_not_match_the_example(self):
-        for arch in self.ARCHES:
+        for arch in COVERED_ARCHES:
             with self.subTest(arch=arch):
                 self._check_gemm_does_not_match_the_example(arch)
 

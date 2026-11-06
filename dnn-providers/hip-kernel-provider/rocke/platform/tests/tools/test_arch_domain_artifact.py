@@ -58,6 +58,7 @@ from unittest import mock
 
 from rocke.core.isa.backend import wired_arches
 from rocke.core.lower_llvm import _resolve_llvm_flavor
+from rocke.tests.arch_marks import COVERED_ARCHES
 
 _HERE = Path(__file__).resolve().parent
 _ROCKE = _HERE.parents[1]  # tests/tools -> platform
@@ -421,9 +422,10 @@ class NameDiscoveryBatchTest(unittest.TestCase):
             "declare i32 @llvm.amdgcn.example(i32) #1\n"
         )
         completed = mock.Mock(returncode=0, stdout=output, stderr="")
-        with tempfile.TemporaryDirectory() as td, mock.patch.object(
-            G, "run_bounded", return_value=completed
-        ) as run:
+        with (
+            tempfile.TemporaryDirectory() as td,
+            mock.patch.object(G, "run_bounded", return_value=completed) as run,
+        ):
             verdicts = G._name_exists_many(
                 "opt", [("fabs", self._A), ("example", self._B)], Path(td)
             )
@@ -436,9 +438,10 @@ class NameDiscoveryBatchTest(unittest.TestCase):
     def test_alias_keys_share_one_declaration_query(self):
         output = "declare float @llvm.fabs.f32(float) #0\n"
         completed = mock.Mock(returncode=0, stdout=output, stderr="")
-        with tempfile.TemporaryDirectory() as td, mock.patch.object(
-            G, "run_bounded", return_value=completed
-        ) as run:
+        with (
+            tempfile.TemporaryDirectory() as td,
+            mock.patch.object(G, "run_bounded", return_value=completed) as run,
+        ):
             verdicts = G._name_exists_many(
                 "opt", [("fabs", self._A), ("fabs-alias", self._A)], Path(td)
             )
@@ -451,9 +454,10 @@ class NameDiscoveryBatchTest(unittest.TestCase):
         failed = mock.Mock(returncode=1, stdout="", stderr="bad combined module")
         a = mock.Mock(returncode=0, stdout=self._A + " #0\n", stderr="")
         b = mock.Mock(returncode=0, stdout=self._B + " #0\n", stderr="")
-        with tempfile.TemporaryDirectory() as td, mock.patch.object(
-            G, "run_bounded", side_effect=(failed, a, b)
-        ) as run:
+        with (
+            tempfile.TemporaryDirectory() as td,
+            mock.patch.object(G, "run_bounded", side_effect=(failed, a, b)) as run,
+        ):
             verdicts = G._name_exists_many(
                 "opt", [("fabs", self._A), ("example", self._B)], Path(td)
             )
@@ -631,9 +635,12 @@ class PositiveBatchTest(unittest.TestCase):
             "unsupported": G.STATUS_TARGET_UNSUPPORTED,
             "supported": G.STATUS_OK,
         }
-        with tempfile.TemporaryDirectory() as td, mock.patch.object(
-            G, "_target_preflight", return_value=(G.STATUS_OK, "")
-        ) as probe:
+        with (
+            tempfile.TemporaryDirectory() as td,
+            mock.patch.object(
+                G, "_target_preflight", return_value=(G.STATUS_OK, "")
+            ) as probe,
+        ):
             retried = G._retry_target_preflights(
                 "clang", path, Path(td), preflight, expected
             )
@@ -895,7 +902,7 @@ class AssemblerCheckTest(unittest.TestCase):
             path.write_text(module)
             results = {
                 arch: G._probe(clang, path, arch, Path(scratch) / f"{arch}.o")
-                for arch in ("gfx942", "gfx950")
+                for arch in COVERED_ARCHES
             }
         self.assertEqual(results["gfx950"], (G.STATUS_OK, ""))
         status, evidence = results["gfx942"]
@@ -1295,8 +1302,9 @@ for line in open(src):
         # Pin the flavor so the earlier clang-vs-rocke check passes on any host
         # and the run reaches the pairing check.
         for extra in ((), ("--check", "--unvalidated-exit-code", "77")):
-            with self.subTest(adapter=bool(extra)), mock.patch.dict(
-                os.environ, {"ROCKE_LLVM_FLAVOR": "llvm22"}
+            with (
+                self.subTest(adapter=bool(extra)),
+                mock.patch.dict(os.environ, {"ROCKE_LLVM_FLAVOR": "llvm22"}),
             ):
                 rc = self._run(tools, out, *extra)
                 self.assertEqual(rc, 2, "two vintages measured one column")
@@ -1780,9 +1788,11 @@ class CTestExitTest(unittest.TestCase):
             ("--check", "--unvalidated-exit-code", "0"),
             ("--unvalidated-exit-code", "77"),
         ):
-            with self.subTest(args=args), mock.patch.object(
-                sys, "argv", [str(_TOOL), *args]
-            ), self.assertRaises(SystemExit):
+            with (
+                self.subTest(args=args),
+                mock.patch.object(sys, "argv", [str(_TOOL), *args]),
+                self.assertRaises(SystemExit),
+            ):
                 G.main()
 
 
@@ -1800,7 +1810,7 @@ class ValidityGateTest(unittest.TestCase):
 
         self.assertIn("-O0", V.COMPILE_CFLAGS)
         self.assertIn("-O0", G.PROBE_CFLAGS)
-        for arch in ("gfx942", "gfx950"):
+        for arch in COVERED_ARCHES:
             with self.subTest(arch=arch):
                 argv = V._compile_argv("clang", Path("m.ll"), arch, Path("m.hsaco"))
                 self.assertIn("-O0", argv)

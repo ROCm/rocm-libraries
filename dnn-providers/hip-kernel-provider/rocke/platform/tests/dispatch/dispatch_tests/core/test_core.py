@@ -14,8 +14,8 @@ from dataclasses import dataclass, replace
 
 from rocke.core.arch import known_arches
 from rocke.dispatch.core import (
-    Capability,
     CandidateRegistry,
+    Capability,
     DimRelation,
     DispatchResult,
     KernelCandidate,
@@ -25,6 +25,7 @@ from rocke.dispatch.core import (
     opt_in_probe,
     spec_identity,
 )
+from rocke.tests.arch_marks import COVERED_ARCHES
 
 
 def _kernel_id(**overrides) -> KernelId:
@@ -45,11 +46,10 @@ def _kernel_id(**overrides) -> KernelId:
 
 # The archs that the dispatch tests cover. A test whose request arch is only a
 # label for the mechanism under test runs once per arch in this tuple.
-_ARCHES = ("gfx942", "gfx950")
 
 
 def _other_arch(arch: str) -> str:
-    return next(a for a in _ARCHES if a != arch)
+    return next(a for a in COVERED_ARCHES if a != arch)
 
 
 # Registration requires a capability, so tests about registry mechanics rather
@@ -123,7 +123,7 @@ class TestKernelIdKeys(unittest.TestCase):
         self.assertNotEqual(a.selection_key, b.selection_key)
 
     def test_compile_key_tracks_arch_abi_and_spec(self):
-        for arch in _ARCHES:
+        for arch in COVERED_ARCHES:
             base = _kernel_id(arch=arch)
             for field, value in (
                 ("arch", _other_arch(arch)),
@@ -136,7 +136,7 @@ class TestKernelIdKeys(unittest.TestCase):
                     )
 
     def test_selection_key_distinguishes_every_field(self):
-        for arch in _ARCHES:
+        for arch in COVERED_ARCHES:
             base = _kernel_id(arch=arch)
             for field, value in (
                 ("op", "batched_gemm"),
@@ -157,7 +157,7 @@ class TestKernelIdKeys(unittest.TestCase):
 
     def test_cache_key_alias_value_is_unchanged_by_the_split(self):
         """Pinned literal: benchmark records and manifests already carry it."""
-        for arch in _ARCHES:
+        for arch in COVERED_ARCHES:
             with self.subTest(arch=arch):
                 self.assertEqual(
                     _kernel_id(arch=arch).cache_key,
@@ -249,7 +249,7 @@ class TestRegistryCoverage(unittest.TestCase):
             _candidate(
                 "fast",
                 capability=Capability(
-                    arches=("gfx942", "gfx950"),
+                    arches=COVERED_ARCHES,
                     dtypes=("fp16",),
                     shapes=(ShapeRange(frozenset({"rows", "cols"}), multiple_of=64),),
                     relations=(DimRelation("cols", ">=", "rows"),),
@@ -260,7 +260,7 @@ class TestRegistryCoverage(unittest.TestCase):
         capability = registry.coverage()["candidates"][0]["capability"]
 
         json.dumps(capability)
-        self.assertEqual(capability["arches"], ["gfx942", "gfx950"])
+        self.assertEqual(capability["arches"], list(COVERED_ARCHES))
         self.assertEqual(
             capability["shapes"], [{"dims": ["cols", "rows"], "multiple_of": 64}]
         )
@@ -375,28 +375,28 @@ class TestDimRelation(unittest.TestCase):
 class TestCapability(unittest.TestCase):
     def test_arch_fails_closed_when_none_are_declared(self):
         """A capability that declares no arch must match nothing, not everything."""
-        for arch in _ARCHES:
+        for arch in COVERED_ARCHES:
             with self.subTest(arch=arch):
                 ok, why = Capability().check(_Request(arch=arch))
                 self.assertFalse(ok)
                 self.assertIn(f"arch '{arch}' not in ()", why)
 
     def test_an_undeclared_arch_is_rejected(self):
-        for arch in _ARCHES:
+        for arch in COVERED_ARCHES:
             with self.subTest(arch=arch):
                 cap = Capability(arches=(arch,))
                 self.assertFalse(cap.check(_Request(arch=_other_arch(arch)))[0])
                 self.assertTrue(cap.check(_Request(arch=arch))[0])
 
     def test_empty_tuples_other_than_arches_mean_unconstrained(self):
-        for arch in _ARCHES:
+        for arch in COVERED_ARCHES:
             with self.subTest(arch=arch):
                 self.assertTrue(
                     Capability(arches=(arch,)).check(_Request(arch=arch))[0]
                 )
 
     def test_dtype_and_layout_are_gated_case_insensitively(self):
-        for arch in _ARCHES:
+        for arch in COVERED_ARCHES:
             with self.subTest(arch=arch):
                 cap = Capability(arches=(arch,), dtypes=("fp16",), layouts=("RCR",))
                 self.assertTrue(
@@ -406,7 +406,7 @@ class TestCapability(unittest.TestCase):
                 self.assertFalse(cap.check(_Request(arch=arch, layout="RRR"))[0])
 
     def test_shape_and_relation_constraints_are_applied(self):
-        for arch in _ARCHES:
+        for arch in COVERED_ARCHES:
             with self.subTest(arch=arch):
                 cap = Capability(
                     arches=(arch,),
@@ -419,7 +419,7 @@ class TestCapability(unittest.TestCase):
 
     def test_a_derived_dim_is_constrainable(self):
         """``total`` is computed by dims(), not stored on the request."""
-        for arch in _ARCHES:
+        for arch in COVERED_ARCHES:
             with self.subTest(arch=arch):
                 cap = Capability(
                     arches=(arch,), shapes=(ShapeRange("total", max=1024),)
@@ -429,7 +429,7 @@ class TestCapability(unittest.TestCase):
 
     def test_an_undeclared_feature_is_rejected(self):
         """Forgetting to declare a feature must reject, not silently ignore it."""
-        for arch in _ARCHES:
+        for arch in COVERED_ARCHES:
             with self.subTest(arch=arch):
                 cap = Capability(arches=(arch,))
                 ok, why = cap.check(_Request(arch=arch, causal=True))
@@ -437,7 +437,7 @@ class TestCapability(unittest.TestCase):
                 self.assertIn("cannot serve features ['causal']", why)
 
     def test_a_declared_feature_is_accepted(self):
-        for arch in _ARCHES:
+        for arch in COVERED_ARCHES:
             with self.subTest(arch=arch):
                 cap = Capability(
                     arches=(arch,), supports_features=frozenset({"causal"})
@@ -445,7 +445,7 @@ class TestCapability(unittest.TestCase):
                 self.assertTrue(cap.check(_Request(arch=arch, causal=True))[0])
 
     def test_a_required_feature_must_be_present(self):
-        for arch in _ARCHES:
+        for arch in COVERED_ARCHES:
             with self.subTest(arch=arch):
                 cap = Capability(
                     arches=(arch,),
@@ -458,7 +458,7 @@ class TestCapability(unittest.TestCase):
                 self.assertIn("requires features ['causal']", why)
 
     def test_dim_names_collects_from_shapes_and_relations(self):
-        for arch in _ARCHES:
+        for arch in COVERED_ARCHES:
             with self.subTest(arch=arch):
                 cap = Capability(
                     arches=(arch,),
@@ -499,7 +499,7 @@ class TestCapabilityRegistration(unittest.TestCase):
 
     def test_a_misspelled_dim_is_rejected_at_registration(self):
         """The hazard named dimensions introduce: a typo that never fires."""
-        for arch in _ARCHES:
+        for arch in COVERED_ARCHES:
             with self.subTest(arch=arch):
                 registry = CandidateRegistry("dummy", dim_vocabulary=_VOCAB)
                 capability = Capability(
@@ -509,7 +509,7 @@ class TestCapabilityRegistration(unittest.TestCase):
                     registry.register(_candidate("typo", capability=capability))
 
     def test_dims_are_unchecked_when_the_family_declares_no_vocabulary(self):
-        for arch in _ARCHES:
+        for arch in COVERED_ARCHES:
             with self.subTest(arch=arch):
                 registry = CandidateRegistry("dummy")
                 registry.register(
@@ -526,30 +526,24 @@ class TestCapabilityRegistration(unittest.TestCase):
 class TestCapabilityPrefilter(unittest.TestCase):
     def _registry(self) -> CandidateRegistry:
         registry = CandidateRegistry("dummy", dim_vocabulary=_VOCAB)
-        registry.register(
-            _candidate(
-                "gfx942_only",
-                priority=10,
-                capability=Capability(arches=("gfx942",)),
+        for priority, arch in enumerate(COVERED_ARCHES, start=1):
+            registry.register(
+                _candidate(
+                    f"{arch}_only",
+                    priority=10 * priority,
+                    capability=Capability(arches=(arch,)),
+                )
             )
-        )
-        registry.register(
-            _candidate(
-                "gfx950_only",
-                priority=20,
-                capability=Capability(arches=("gfx950",)),
-            )
-        )
         return registry
 
     def test_capability_filters_before_the_predicate_runs(self):
-        for arch in _ARCHES:
+        for arch in COVERED_ARCHES:
             with self.subTest(arch=arch):
                 supported = self._registry().supported(_Request(arch=arch))
                 self.assertEqual([c.name for c in supported], [f"{arch}_only"])
 
     def test_the_predicate_still_narrows_what_capability_admits(self):
-        for arch in _ARCHES:
+        for arch in COVERED_ARCHES:
             with self.subTest(arch=arch):
                 registry = CandidateRegistry("dummy", dim_vocabulary=_VOCAB)
                 registry.register(
@@ -575,7 +569,7 @@ class TestCapabilityPrefilter(unittest.TestCase):
             calls.append(req)
             return True, "ok"
 
-        for arch in _ARCHES:
+        for arch in COVERED_ARCHES:
             with self.subTest(arch=arch):
                 calls.clear()
                 registry = CandidateRegistry("dummy")
@@ -603,7 +597,7 @@ class TestCapabilityPrefilter(unittest.TestCase):
         def explode(_req):
             raise AssertionError("predicate ran despite a capability rejection")
 
-        for arch in _ARCHES:
+        for arch in COVERED_ARCHES:
             with self.subTest(arch=arch):
                 other = _other_arch(arch)
                 candidate = _candidate(
@@ -623,7 +617,7 @@ class TestForArch(unittest.TestCase):
             _candidate(
                 "generic",
                 priority=50,
-                capability=Capability(arches=("gfx942", "gfx950")),
+                capability=Capability(arches=COVERED_ARCHES),
             )
         )
         registry.register(
@@ -636,13 +630,13 @@ class TestForArch(unittest.TestCase):
         return registry
 
     def test_for_arch_returns_declaring_candidates_in_priority_order(self):
-        for arch in _ARCHES:
+        for arch in COVERED_ARCHES:
             with self.subTest(arch=arch):
                 names = [c.name for c in self._registry(only=arch).for_arch(arch)]
                 self.assertEqual(names, ["specialized", "generic"])
 
     def test_for_arch_excludes_candidates_that_did_not_declare_the_arch(self):
-        for only in _ARCHES:
+        for only in COVERED_ARCHES:
             with self.subTest(only=only):
                 names = [
                     c.name

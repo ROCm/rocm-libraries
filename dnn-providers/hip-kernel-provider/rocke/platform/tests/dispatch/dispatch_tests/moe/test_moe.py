@@ -15,10 +15,9 @@ from rocke.dispatch.families.moe import (
     moe_candidates,
     moe_sweep_space,
 )
-from rocke.tests.arch_marks import arch_specific
+from rocke.tests.arch_marks import COVERED_ARCHES, arch_specific
 
 # Every (arch, dtype) the family claims to dispatch.
-_ARCHES = ("gfx942", "gfx950")
 _DTYPES = ("fp16", "bf16", "fp8")
 
 
@@ -179,7 +178,7 @@ class TestGfx942Retile(unittest.TestCase):
         # without a distinct spec name.
         names = {
             arch: dispatch_moe(_moe(arch=arch, dtype="fp8")).build().name
-            for arch in _ARCHES
+            for arch in COVERED_ARCHES
         }
         self.assertEqual(len(set(names.values())), 2, names)
 
@@ -244,14 +243,14 @@ class TestSelectedSpecIsRunnable(unittest.TestCase):
     """
 
     def test_every_selection_builds(self):
-        for arch in _ARCHES:
+        for arch in COVERED_ARCHES:
             for dtype in _DTYPES:
                 with self.subTest(arch=arch, dtype=dtype):
                     kernel = dispatch_moe(_moe(arch=arch, dtype=dtype)).build()
                     self.assertTrue(getattr(kernel, "name", ""))
 
     def test_every_selection_fits_the_target_lds_budget(self):
-        for arch in _ARCHES:
+        for arch in COVERED_ARCHES:
             cap = ArchTarget.from_gfx(arch).lds_capacity_bytes
             for dtype in _DTYPES:
                 with self.subTest(arch=arch, dtype=dtype):
@@ -273,9 +272,9 @@ class TestSelectedSpecIsRunnable(unittest.TestCase):
             with self.subTest(dtype=dtype):
                 names = {
                     arch: dispatch_moe(_moe(arch=arch, dtype=dtype)).build().name
-                    for arch in _ARCHES
+                    for arch in COVERED_ARCHES
                 }
-                self.assertEqual(len(set(names.values())), len(_ARCHES), names)
+                self.assertEqual(len(set(names.values())), len(COVERED_ARCHES), names)
 
     def test_every_selection_lowers_to_an_mfma_that_exists_on_the_target(self):
         # The end of the chain the arch gate exists to protect: gfx942 must not
@@ -313,7 +312,7 @@ class TestShapeCoverage(unittest.TestCase):
     """
 
     def test_ragged_intermediate_is_refused_with_a_stated_reason(self):
-        for arch in _ARCHES:
+        for arch in COVERED_ARCHES:
             with self.subTest(arch=arch):
                 with self.assertRaises(ValueError) as ctx:
                     dispatch_moe(_moe(arch=arch, dtype="bf16", intermediate=1408))
@@ -322,7 +321,7 @@ class TestShapeCoverage(unittest.TestCase):
     def test_ragged_hidden_is_refused_with_a_stated_reason(self):
         # 2880 leaves 64 against both down tiles (256 on gfx950, 128 on
         # gfx942); the default intermediate divides, so only H can be at fault.
-        for arch in _ARCHES:
+        for arch in COVERED_ARCHES:
             with self.subTest(arch=arch):
                 with self.assertRaises(ValueError) as ctx:
                     dispatch_moe(_moe(arch=arch, dtype="bf16", hidden=2880))
@@ -331,13 +330,13 @@ class TestShapeCoverage(unittest.TestCase):
     def test_the_gpt_oss_shape_is_refused_rather_than_silently_served(self):
         # H = I = 2880 divides neither tile on either arch. It used to be
         # admitted and handed the shipped tile regardless of shape.
-        for arch in _ARCHES:
+        for arch in COVERED_ARCHES:
             req = _moe(arch=arch, dtype="bf16", hidden=2880, intermediate=2880)
             with self.subTest(arch=arch):
                 self.assertRaises(ValueError, dispatch_moe, req)
 
     def test_shapes_the_tile_divides_are_still_admitted(self):
-        for arch in _ARCHES:
+        for arch in COVERED_ARCHES:
             for dtype in _DTYPES:
                 with self.subTest(arch=arch, dtype=dtype):
                     self.assertTrue(
@@ -358,17 +357,17 @@ class TestSpecIdentity(unittest.TestCase):
 
     def test_compile_key_separates_every_dispatchable_selection(self):
         keys = {}
-        for arch in _ARCHES:
+        for arch in COVERED_ARCHES:
             for dtype in _DTYPES:
                 key = dispatch_moe(_moe(arch=arch, dtype=dtype)).kernel_id.compile_key
                 keys.setdefault(key, []).append((arch, dtype))
         collisions = {k: v for k, v in keys.items() if len(v) > 1}
         self.assertEqual(collisions, {})
-        self.assertEqual(len(keys), len(_ARCHES) * len(_DTYPES))
+        self.assertEqual(len(keys), len(COVERED_ARCHES) * len(_DTYPES))
 
     def test_fp16_and_bf16_do_not_share_a_compiled_binary(self):
         # They build different MFMA intrinsics and different entry points.
-        for arch in _ARCHES:
+        for arch in COVERED_ARCHES:
             with self.subTest(arch=arch):
                 a = dispatch_moe(_moe(arch=arch, dtype="fp16"))
                 b = dispatch_moe(_moe(arch=arch, dtype="bf16"))
@@ -378,7 +377,7 @@ class TestSpecIdentity(unittest.TestCase):
     def test_spec_id_stays_arch_independent(self):
         # One candidate per element path spanning both arches, so a caller
         # pinning a spec_id does not have to know which arch it is on.
-        for arch in _ARCHES:
+        for arch in COVERED_ARCHES:
             with self.subTest(arch=arch):
                 r = dispatch_moe(_moe(arch=arch, dtype="bf16", spec_id="mega_f16"))
                 self.assertEqual(r.candidate.name, "moe_fused_mega_f16")
@@ -386,7 +385,7 @@ class TestSpecIdentity(unittest.TestCase):
 
 class TestDeclaredCoverage(unittest.TestCase):
     def test_both_element_paths_are_declared_on_both_arches(self):
-        for arch in _ARCHES:
+        for arch in COVERED_ARCHES:
             with self.subTest(arch=arch):
                 self.assertEqual(
                     {c.spec_id for c in MOE_REGISTRY.for_arch(arch)},
@@ -395,7 +394,7 @@ class TestDeclaredCoverage(unittest.TestCase):
 
     def test_no_other_arch_is_declared(self):
         declared = {a for c in moe_candidates() for a in c.capability.arches}
-        self.assertEqual(declared, set(_ARCHES))
+        self.assertEqual(declared, set(COVERED_ARCHES))
 
 
 if __name__ == "__main__":

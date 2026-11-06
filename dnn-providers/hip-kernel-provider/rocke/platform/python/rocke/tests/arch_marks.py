@@ -23,9 +23,13 @@ from typing import TypeVar
 
 from rocke.core.arch.target import known_arches
 
-__all__ = ["ARCH_SPECIFIC_ATTR", "arch_specific"]
+__all__ = ["ARCH_SPECIFIC_ATTR", "COVERED_ARCHES", "arch_specific"]
 
 ARCH_SPECIFIC_ATTR = "__rocke_arch_specific__"
+
+# The CDNA arches that the rocKE tests cover. A test that runs on every covered arch
+# iterates this tuple. A test that needs one arch uses `arch_specific`.
+COVERED_ARCHES = ("gfx942", "gfx950")
 
 _T = TypeVar("_T")
 
