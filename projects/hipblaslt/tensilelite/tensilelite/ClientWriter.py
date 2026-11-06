@@ -391,6 +391,18 @@ def getBuildClientLibraryScript(buildPath, libraryLogicPath, cxxCompiler, target
   if globalParameters["KeepBuildTmp"]:
     callCreateLibraryCmd += " --keep-build-tmp"
 
+  if globalParameters.get("StinkyTofuIRDumpPath"):
+    callCreateLibraryCmd += " --dump-st-ir=" + shlex.quote(
+        globalParameters["StinkyTofuIRDumpPath"])
+
+  if globalParameters.get("StinkyTofuIRLoadPath"):
+    callCreateLibraryCmd += " --load-st-ir=" + shlex.quote(
+        globalParameters["StinkyTofuIRLoadPath"])
+
+  if globalParameters.get("StinkyTofuIRCheckpointAfterPass"):
+    callCreateLibraryCmd += " --st-ir-checkpoint=" + shlex.quote(
+        globalParameters["StinkyTofuIRCheckpointAfterPass"])
+
   if globalParameters["DisableAsmComments"]:
     callCreateLibraryCmd += " --disable-asm-comments"
 

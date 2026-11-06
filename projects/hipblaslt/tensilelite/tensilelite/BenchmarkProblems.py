@@ -975,6 +975,12 @@ def main(
         print(f'No config specified in {globalParameters["ConfigPath"]}, built client only')
         return
 
+    # An IR checkpoint is external to the Solution parameters used by cache.yaml. Force
+    # codegen so dumping sees every kernel and loading cannot reuse a pre-edit code object.
+    if globalParameters.get("StinkyTofuIRDumpPath") \
+            or globalParameters.get("StinkyTofuIRLoadPath"):
+        useCache = False
+
     # Parse and validate backend config using shared contract
     backend = parse_backend_config(backend if backend else None)
 

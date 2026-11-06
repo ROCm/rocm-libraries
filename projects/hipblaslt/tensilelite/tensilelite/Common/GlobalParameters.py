@@ -41,6 +41,10 @@ from .ValidParameters import validISA, validParameters
 
 startTime = time.time()
 
+# After the region pass manager attaches dependencies and before any wait is inserted, so the
+# waits an edit invalidates are derived again. The SIA4 equivalent ends with StinkyMergeBarrierPass.
+DEFAULT_ST_IR_CHECKPOINT = "loopWithPrefetch+noLoadLoopBody:StinkyBuildImplicitDependencyPass"
+
 globalParameters = OrderedDict()
 globalParameters["MinimumRequiredVersion"] = (
     "0.0.0"  # which version of TensileLite is required to handle all the features required by this configuration file
@@ -253,6 +257,11 @@ globalParameters["CMakeCFlags"] = ""  # pass flags to cmake
 globalParameters["AsanBuild"] = False  # build with asan
 #globalParameters["SaveTemps"] = False  # Generate intermediate results of hip kernels
 globalParameters["KeepBuildTmp"] = False  # If true, do not remove artifacts in build_tmp
+# StinkyTofu IR checkpoint: dump the region IR after a pass, or load an edited copy there.
+# Spec is "<pmLabel>:<PassName>[#n]"; empty with a path set means DEFAULT_ST_IR_CHECKPOINT.
+globalParameters["StinkyTofuIRCheckpointAfterPass"] = ""
+globalParameters["StinkyTofuIRDumpPath"] = ""  # Directory for per-kernel checkpoint bundles.
+globalParameters["StinkyTofuIRLoadPath"] = ""  # Directory containing edited checkpoint bundles.
 
 # debug for assembly
 #globalParameters["SplitGSU"] = False  # Split GSU kernel into GSU1 and GSUM
@@ -1003,6 +1012,20 @@ def assignGlobalParameters(config, isaInfoMap: Dict[IsaVersion, IsaInfo]):
 
     if "KeepBuildTmp" in config:
         globalParameters["KeepBuildTmp"] = config["KeepBuildTmp"]
+
+    dumpStIR = config.get("StinkyTofuIRDumpPath", "")
+    loadStIR = config.get("StinkyTofuIRLoadPath", "")
+    if dumpStIR and loadStIR:
+        raise RuntimeError(
+            "StinkyTofuIRDumpPath and StinkyTofuIRLoadPath are mutually exclusive")
+    globalParameters["StinkyTofuIRDumpPath"] = (
+        os.path.abspath(os.path.expanduser(str(dumpStIR))) if dumpStIR else "")
+    globalParameters["StinkyTofuIRLoadPath"] = (
+        os.path.abspath(os.path.expanduser(str(loadStIR))) if loadStIR else "")
+    checkpointSpec = str(config.get("StinkyTofuIRCheckpointAfterPass", "") or "")
+    if not checkpointSpec and (dumpStIR or loadStIR):
+        checkpointSpec = DEFAULT_ST_IR_CHECKPOINT
+    globalParameters["StinkyTofuIRCheckpointAfterPass"] = checkpointSpec
 
     if "CodeObjectVersion" in config:
         globalParameters["CodeObjectVersion"] = config["CodeObjectVersion"]

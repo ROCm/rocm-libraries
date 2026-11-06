@@ -68,7 +68,7 @@ from .Activation import ActivationModule
 from .Common import printWarning, roundUp, print2, DebugConfig, DataDirection, \
   INDEX_CHARS, IsaVersion, log2, clusterEnabled, \
   swizzleGeometry, isMxf4SubtilePath
-from .Common.GlobalParameters import globalParameters
+from .Common.GlobalParameters import globalParameters, DEFAULT_ST_IR_CHECKPOINT
 from .Common.ScaleAlphaVec import scaleAlphaSupportsDeviceScalar, scaleAlphaVectorMode
 from .Common.Architectures import ARCH_CAP_OVERRIDES
 from .Common.MxScaleLayout import mxFreePhase, mxFreeTile, splatFirst
@@ -102,6 +102,24 @@ def _needsPreLoopLocalReadDrain(kernel, numItersPLR, preLoopLocalReadDrainEmitte
   # already emitted one; ForceUnrollSubIter does not change that dependency.
   return bool(numItersPLR and kernel["UseCustomMainLoopSchedule"]
               and not preLoopLocalReadDrainEmitted)
+
+
+def stinkyTofuIRCheckpointOptions(params):
+  """StinkyTofu IRCheckpoint* module options from the StinkyTofuIR* global parameters.
+
+  TensileCreateLibrary copies its arguments into globalParameters without
+  assignGlobalParameters, so the default spec and absolute paths are applied here too.
+  """
+  def absolute(path):
+    return os.path.abspath(os.path.expanduser(str(path))) if path else ""
+  dumpDir = absolute(params.get("StinkyTofuIRDumpPath"))
+  loadDir = absolute(params.get("StinkyTofuIRLoadPath"))
+  spec = str(params.get("StinkyTofuIRCheckpointAfterPass") or "")
+  if not spec and (dumpDir or loadDir):
+    spec = DEFAULT_ST_IR_CHECKPOINT
+  return {"IRCheckpointAfterPass": spec,
+          "IRCheckpointDumpDir": dumpDir,
+          "IRCheckpointLoadDir": loadDir}
 
 
 def clusterBarrierSplitWaveLoop(kernel):
@@ -7712,6 +7730,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
                                "PrintAfterPass": str(globalParameters.get("StinkyTofuPrintAfterPass") or ""),
                                "DebugPass": str(globalParameters.get("StinkyTofuDebugPass") or ""),
                                "PassOrderSnapshotJson": str(globalParameters.get("StinkyTofuPassOrderSnapshotJson") or ""),
+                               **stinkyTofuIRCheckpointOptions(globalParameters),
                                "EnableWaitCntInsertion": enableWaitCntInsertion,
                                "RegisterAllocation": self.stinkyTofuRegisterAllocationMode(kernel),
                                # The rest of StinkyTofuRegisterAllocation, in its shortest
@@ -7827,6 +7846,10 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
         stModule.setOutputName(getKernelFileBase(self.debugConfig.splitGSU, kernel))
         if globalParameters.get("StinkyTofuCostOutputDir"):
           stModule.setOutputDir(str(globalParameters["StinkyTofuCostOutputDir"]))
+      # A checkpoint bundle directory is named after the kernel too, so kernels generated in
+      # parallel never share one.
+      if stinky_module_options["IRCheckpointAfterPass"]:
+        stModule.setOutputName(getKernelFileBase(self.debugConfig.splitGSU, kernel))
 
       # Run pipeline — builder handles O0 internally (skips optimization,
       # still runs required passes like InsertVgprMsb)

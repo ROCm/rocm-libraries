@@ -271,6 +271,17 @@ def addCommonArguments(argParser):
         help="Run the benchmark flow GPU-less for a target arch (requires --gpu-targets): spoof ISA "
              "detection, skip the GPU clock-frequency probe, and stub the client launch with a "
              "synthetic results CSV. For CPU-only CI/coverage; perf numbers are synthetic.")
+    stIRGroup = argParser.add_mutually_exclusive_group()
+    stIRGroup.add_argument("--dump-st-ir", dest="StinkyTofuIRDumpPath",
+        metavar="DIR", default="",
+        help="Write one StinkyTofu IR checkpoint bundle per kernel at --st-ir-checkpoint")
+    stIRGroup.add_argument("--load-st-ir", dest="StinkyTofuIRLoadPath",
+        metavar="DIR", default="",
+        help="Replace the StinkyTofu IR at --st-ir-checkpoint with the edited bundles in DIR")
+    argParser.add_argument("--st-ir-checkpoint", dest="StinkyTofuIRCheckpointAfterPass",
+        metavar="SPEC", default="",
+        help="Checkpoint boundary <pmLabel>:<PassName>[#n] (default: after "
+             "StinkyBuildImplicitDependencyPass in loopWithPrefetch+noLoadLoopBody)")
     # extend (not store): repeated --global-parameters accumulate instead of the last
     # occurrence clobbering earlier ones.
     argParser.add_argument("--global-parameters", nargs="+", type=splitExtraParameters,
@@ -302,6 +313,15 @@ def argUpdatedGlobalParameters(args):
     if args.MXScaleFormat:
         print1("# Command-line override: MXScaleFormat")
         rv["MXScaleFormat"] = args.MXScaleFormat
+
+    if getattr(args, "StinkyTofuIRDumpPath", ""):
+        rv["StinkyTofuIRDumpPath"] = os.path.abspath(
+            os.path.expanduser(args.StinkyTofuIRDumpPath))
+    if getattr(args, "StinkyTofuIRLoadPath", ""):
+        rv["StinkyTofuIRLoadPath"] = os.path.abspath(
+            os.path.expanduser(args.StinkyTofuIRLoadPath))
+    if getattr(args, "StinkyTofuIRCheckpointAfterPass", ""):
+        rv["StinkyTofuIRCheckpointAfterPass"] = args.StinkyTofuIRCheckpointAfterPass
 
     for key, value in args.global_parameters:
         rv[key] = value

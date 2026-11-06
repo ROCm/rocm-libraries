@@ -187,6 +187,29 @@ def parseArguments(input: Optional[List[str]] = None) -> Dict[str, Any]:
         default=False,
         help="Do not remove the temporary build directory (may required hundreds of GBs of space)",
     )
+    stIRGroup = argParser.add_mutually_exclusive_group()
+    stIRGroup.add_argument(
+        "--dump-st-ir",
+        dest="StinkyTofuIRDumpPath",
+        metavar="DIR",
+        default="",
+        help="Write one StinkyTofu IR checkpoint bundle per kernel at --st-ir-checkpoint",
+    )
+    stIRGroup.add_argument(
+        "--load-st-ir",
+        dest="StinkyTofuIRLoadPath",
+        metavar="DIR",
+        default="",
+        help="Replace the StinkyTofu IR at --st-ir-checkpoint with the edited bundles in DIR",
+    )
+    argParser.add_argument(
+        "--st-ir-checkpoint",
+        dest="StinkyTofuIRCheckpointAfterPass",
+        metavar="SPEC",
+        default="",
+        help="Checkpoint boundary <pmLabel>:<PassName>[#n] (default: after "
+        "StinkyBuildImplicitDependencyPass in loopWithPrefetch+noLoadLoopBody)",
+    )
     argParser.add_argument(
         "--logic-filter",
         dest="LogicFilter",
@@ -240,6 +263,9 @@ def parseArguments(input: Optional[List[str]] = None) -> Dict[str, Any]:
     arguments["AsmDebug"] = args.AsmDebug
     arguments["BuildIdKind"] = args.BuildIdKind
     arguments["KeepBuildTmp"] = args.KeepBuildTmp
+    arguments["StinkyTofuIRDumpPath"] = args.StinkyTofuIRDumpPath
+    arguments["StinkyTofuIRLoadPath"] = args.StinkyTofuIRLoadPath
+    arguments["StinkyTofuIRCheckpointAfterPass"] = args.StinkyTofuIRCheckpointAfterPass
     arguments["AsanBuild"] = args.AsanBuild
     arguments["UseCompression"] = not args.NoCompress
     arguments["CxxCompiler"] = args.CxxCompiler
