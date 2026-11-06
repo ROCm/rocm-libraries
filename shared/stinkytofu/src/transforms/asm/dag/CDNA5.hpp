@@ -982,6 +982,7 @@ class CDNA5ReadyQueue : public ReadyQueue {
     void decidePromote();
     void promote(PromotePhase phase, DAGNode* node, int kind = -1);
     bool promoteDueBarrier();
+    bool promoteDueLastDs();
     bool promotePrefetchAddressValu();
     bool promotePrefetchAtWindow();
     bool promoteWmmaQueueFill();
@@ -989,7 +990,6 @@ class CDNA5ReadyQueue : public ReadyQueue {
     DAGNode* bestDsRead() const;
     bool loopHeadBalanceHoldsWmma() const;
     bool coexecSpacingHoldsWmma(const DAGNode* wmma, bool hasPickableNonWmma) const;
-    bool dsLoadDue() const;
     bool isPromote(PromotePhase phase) const {
         return promotedPhase_ == PromotePhase::None || promotedPhase_ == phase;
     }
@@ -1831,6 +1831,7 @@ void CDNA5ReadyQueue::decidePromote() {
     using Rule = bool (CDNA5ReadyQueue::*)();
     static constexpr std::pair<PlacementLevel, Rule> kRules[] = {
         {PlacementLevel::Barrier, &CDNA5ReadyQueue::promoteDueBarrier},
+        {PlacementLevel::LastDs, &CDNA5ReadyQueue::promoteDueLastDs},
         {PlacementLevel::Prefetch, &CDNA5ReadyQueue::promotePrefetchAddressValu},
         {PlacementLevel::Prefetch, &CDNA5ReadyQueue::promotePrefetchAtWindow},
         {PlacementLevel::WmmaQueue, &CDNA5ReadyQueue::promoteWmmaQueueFill},
@@ -1923,14 +1924,28 @@ bool CDNA5ReadyQueue::issuableNow(DAGNode* node) const {
     return !destOverlapsActiveWmmaSrc(node);
 }
 
+// The last ds before a barrier, once its stage has reached its end (DsSpreadPacer::due). LastDs
+// is above the WMMA queue, so the load issues through the non-WMMA phase instead of waiting out
+// a queue fill. The best dsReadPriority wins, matching the load the phases would pick.
+bool CDNA5ReadyQueue::promoteDueLastDs() {
+    DAGNode* due = nullptr;
+    for (DAGNode* n : localReadQueue) {
+        if (!dsSpread_.due(n->id, wmmaIssuedCountThisRegion_)) continue;
+        if (!dsWarClear(n) || !issuableNow(n) || dsReadInflight_.full()) continue;
+        if (!due || n->dsReadPriority < due->dsReadPriority) due = n;
+    }
+    if (!due) return false;
+    promote(PromotePhase::NonWmmaFill, due, kLocalRead);
+    return true;
+}
+
 // After a queue reset (wmmaQueueFillPending_) the most-ready WMMA goes ahead of ds_loads and
-// fillers until the queue is full. A ds_load its stage needs now (LastDs level), a tensor_load or
-// a prefetch (Prefetch level) keeps its own schedule, and the vetoes no queue fill overrides still
-// hold the WMMA.
+// fillers until the queue is full. A higher rule already won when it fired, and a tensor_load or
+// prefetch that is the next pickable non-WMMA keeps its own schedule. The vetoes no queue fill
+// overrides still hold the WMMA.
 bool CDNA5ReadyQueue::promoteWmmaQueueFill() {
     if (!wmmaQueueFillPending_ || wmmaQueue.empty() || outstandingWmmas() >= wmmaQueueDepth())
         return false;
-    if (dsLoadDue()) return false;
     auto [best, latency] = findMostReadyWMMA();
     if (latency > 0 || !issuableNow(best)) return false;
     DAGNode* smallest = nullptr;
@@ -1941,14 +1956,6 @@ bool CDNA5ReadyQueue::promoteWmmaQueueFill() {
         return false;
     promote(PromotePhase::Wmma, best);
     return true;
-}
-
-// Whether a ready ds_load's stage has reached its end (DsSpreadPacer::due): the last ds before the
-// barrier it feeds is due.
-bool CDNA5ReadyQueue::dsLoadDue() const {
-    for (DAGNode* n : localReadQueue)
-        if (dsSpread_.due(n->id, wmmaIssuedCountThisRegion_)) return true;
-    return false;
 }
 
 // The ds_load the phases consider: the best by dsReadPriority among those the spread releases,
@@ -2622,8 +2629,7 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
             blockWmmaForAtLeastOneNonWmmaInterleaving = !preemptForQueue && hasPickableNonWmma &&
                                                         isMatrixInstruction(*lastPickedNode_->inst);
         }
-        const bool blockWmmaForCoexecSpacing =
-            coexecSpacingHoldsWmma(bestWMMA, hasPickableNonWmma);
+        const bool blockWmmaForCoexecSpacing = coexecSpacingHoldsWmma(bestWMMA, hasPickableNonWmma);
         PASS_DEBUG(
             std::cerr
             << "[CDNA5 pickOne] Phase B candidate wmmaId=" << bestWMMA->id
