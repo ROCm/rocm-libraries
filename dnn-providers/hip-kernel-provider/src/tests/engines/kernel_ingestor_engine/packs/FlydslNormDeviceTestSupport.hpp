@@ -90,7 +90,9 @@ inline std::vector<hipdnn_plugin_sdk::ingestor::KernelDefinition>
                                                                             kernel.originDirectory,
                                                                             kernel.name,
                                                                             kernel.treeRoot,
-                                                                            kernel.sources});
+                                                                            kernel.sources,
+                                                                            nullptr,
+                                                                            nullptr});
         }
     }
     return kernels;

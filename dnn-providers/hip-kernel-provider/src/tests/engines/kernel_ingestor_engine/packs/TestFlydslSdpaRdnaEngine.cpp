@@ -1783,7 +1783,9 @@ std::optional<KernelDefinition> findStagedKernel(const std::string& dtype,
                                         kernel.originDirectory,
                                         kernel.name,
                                         kernel.treeRoot,
-                                        kernel.sources};
+                                        kernel.sources,
+                                        nullptr,
+                                        nullptr};
             if(exact)
             {
                 return definition;
@@ -2113,7 +2115,9 @@ std::optional<KernelDefinition> findStagedAiwKernel(const std::string& dtype,
                                         kernel.originDirectory,
                                         kernel.name,
                                         kernel.treeRoot,
-                                        kernel.sources};
+                                        kernel.sources,
+                                        nullptr,
+                                        nullptr};
             if(exact)
             {
                 return definition;
@@ -6512,7 +6516,9 @@ TEST(TestFlydslSdpaDropoutKernelMatch, ServesOnlyTheShippedDropoutClasses)
                                                   kernel.originDirectory,
                                                   kernel.name,
                                                   kernel.treeRoot,
-                                                  kernel.sources};
+                                                  kernel.sources,
+                                                  nullptr,
+                                                  nullptr};
                 if(matchesKernel(FLYDSL_SDPA_AIW, fixture.context(), definition, *bound))
                 {
                     return true;
@@ -6660,7 +6666,9 @@ TEST(TestFlydslSdpaDropoutKernelMatch, ServesTheShippedRdnaDropoutClassesOnGfx11
                                                   kernel.originDirectory,
                                                   kernel.name,
                                                   kernel.treeRoot,
-                                                  kernel.sources};
+                                                  kernel.sources,
+                                                  nullptr,
+                                                  nullptr};
                 if(matchesKernel(FLYDSL_SDPA_RDNA, fixture.context(), definition, *bound))
                 {
                     return true;
@@ -6773,7 +6781,9 @@ TEST(TestFlydslSdpaRdnaF32KernelMatch, ServesTheShippedF32ClassesOnBothFamilies)
                                                   kernel.originDirectory,
                                                   kernel.name,
                                                   kernel.treeRoot,
-                                                  kernel.sources};
+                                                  kernel.sources,
+                                                  nullptr,
+                                                  nullptr};
                 if(matchesKernel(FLYDSL_SDPA_RDNA, fixture.context(), definition, *bound))
                 {
                     return true;
@@ -6883,7 +6893,9 @@ std::vector<KernelDefinition> stagedDropoutKernels(const PackSymbols& engine)
                                                kernel.originDirectory,
                                                kernel.name,
                                                kernel.treeRoot,
-                                               kernel.sources});
+                                               kernel.sources,
+                                               nullptr,
+                                               nullptr});
         }
     }
     return kernels;
@@ -7053,7 +7065,9 @@ TEST(TestFlydslSdpaDropoutMaskEngine, ServesNoGraph)
                                           kernel.originDirectory,
                                           kernel.name,
                                           kernel.treeRoot,
-                                          kernel.sources};
+                                          kernel.sources,
+                                          nullptr,
+                                          nullptr};
         EXPECT_FALSE(matchesKernel(FLYDSL_SDPA_DROPOUT_MASK, fixture.context(), definition, {}));
         EXPECT_THROW(static_cast<void>(dispatchHandler(FLYDSL_SDPA_DROPOUT_MASK)
                                            .prepare(fixture.context(), {}, definition)),

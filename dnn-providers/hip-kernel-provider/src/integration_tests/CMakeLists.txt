@@ -31,6 +31,7 @@ target_compile_definitions(
 
 target_include_directories(hip_kernel_provider_integration_tests PRIVATE
     ${CMAKE_CURRENT_LIST_DIR}/../../include
+    ${CMAKE_CURRENT_LIST_DIR}/..
 )
 
 target_link_libraries(
@@ -96,6 +97,16 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
             kernel_ingestor_engine/IntegrationGpuGfx950AttentionDenseKnobs.cpp
         )
     endif()
+    # The dgrad AOT-instance engine is a product bundle of its own, gated the same way.
+    hkp_product_offers_engine(_hkp_conv_dgrad_aot_bundle "hipkernel:Gfx950ConvDgradAot")
+    if(_hkp_conv_dgrad_aot_bundle)
+        target_sources(hip_kernel_provider_integration_tests PRIVATE
+            kernel_ingestor_engine/IntegrationGpuGfx950ConvDgrad.cpp
+        )
+        target_compile_definitions(hip_kernel_provider_integration_tests
+            PRIVATE HKP_TEST_GFX950_CONV_DGRAD_AOT=1
+        )
+    endif()
     # The Unified2D/3D knobs suite: compiled on any build arch when the product carries
     # both bundles, GTEST_SKIPs off gfx950 (see the dense block above).
     hkp_product_offers_engine(_hkp_unified_2d_bundle "hipkernel:Gfx950AttentionUnified2D")
@@ -131,6 +142,20 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     target_compile_definitions(hip_kernel_provider_integration_tests
         PRIVATE HIPKERNELPROVIDER_FLYDSL_SDPA_ARCHS="${_flydsl_sdpa_archs}"
     )
+    # The gfx942 unified 3D (split-KV decode) knob suite: forced block_size/num_segments
+    # select one shipped kernel, launched on a gfx942 device against the CPU reference.
+    # Gated like the census and the engine's external integration target, so a build that
+    # does not ship the engine compiles no case for it; it GTEST_SKIPs on other devices.
+    hkp_gfx942_attention_unified_3d_available(_hkp_gfx942_unified_3d_suite)
+    if(_hkp_gfx942_unified_3d_suite AND NOT HIPDNN_ENABLE_SDPA)
+        message(WARNING
+                "HIPDNN_ENABLE_KERNEL_INGESTOR is ON but hipDNN was built with HIPDNN_ENABLE_SDPA=OFF. "
+                "Skipping gfx942 unified 3D knob integration tests. Rebuild hipDNN with -DHIPDNN_ENABLE_SDPA=ON to enable them.")
+    elseif(_hkp_gfx942_unified_3d_suite)
+        target_sources(hip_kernel_provider_integration_tests PRIVATE
+            kernel_ingestor_engine/IntegrationGpuGfx942AttentionUnified3dKnobs.cpp
+        )
+    endif()
     target_sources(hip_kernel_provider_integration_tests PRIVATE
         kernel_ingestor_engine/IntegrationGpuKernelIngestor.cpp
         kernel_ingestor_engine/IntegrationGpuKernelIngestorKpack.cpp
@@ -278,6 +303,33 @@ foreach(_gfx950_engine IN ITEMS
         )
     endif()
 endforeach()
+
+# hipkernel:Gfx942AttentionUnified3d (gfx942 split-KV decode), engine-pinned against the
+# GPU reference and routed into the gfx942 shard, for the reasons the gfx950 registration
+# above gives.
+set(_hkp_gfx942_attention_unified_3d FALSE)
+if(HIPDNN_ENABLE_KERNEL_INGESTOR)
+    hkp_gfx942_attention_unified_3d_available(_hkp_gfx942_attention_unified_3d)
+endif()
+if(HIPDNN_ENABLE_KERNEL_INGESTOR AND HIPDNN_ENABLE_SDPA
+   AND _hkp_gfx942_attention_unified_3d
+   AND TARGET hipdnn_integration_tests AND COMMAND add_external_integration_test_target)
+    hkp_reserve_census_shard(_hkp_gfx942_shard_dest gfx942)
+    set(_gfx942_shard_args
+        INSTALL_DESTINATION "${_hkp_gfx942_shard_dest}"
+        INSTALL_STAGING_KEY hkp_census_gfx942)
+
+    add_external_integration_test_target(
+        TARGET_NAME hip_kernel_provider_gfx942_attention_unified_3d_gpu_ref_integration_tests
+        PLUGIN_TARGET hip_kernel_provider
+        ENGINE_NAME   "hipkernel:Gfx942AttentionUnified3d"
+        INSTALL_SUBDIR hip_kernel_provider
+        ${_gfx942_shard_args}
+        REFERENCE_EXECUTOR gpu
+        GTEST_FILTER "quick_SdpaFwd_Default.*:standard_SdpaFwd_Default.*:comprehensive_SdpaFwd_Default.*:full_SdpaFwd_Default.*"
+        ENVIRONMENT_MODIFICATION ${TEST_ENVIRONMENT_MODIFICATION}
+    )
+endif()
 
 if(ENABLE_ASM_SDPA_ENGINE AND HIPDNN_ENABLE_SDPA
    AND TARGET hipdnn_integration_tests AND COMMAND add_external_integration_test_target)

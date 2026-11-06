@@ -807,6 +807,7 @@ _UHD_ADAPTERS = (
     "native",
     "tree_data",
     "table",
+    "linear_data",
     "custom_library",
 )
 _BEHAVIOR_NOTES = ("runtime_compilation",)
@@ -1029,7 +1030,7 @@ def _validate_uhd(desc, source_root):
     if adapter != "static_order" or "objective" in doc:
         _require(doc, ("objective",), where)
         _require_enum(doc, "objective", ("max", "min"), where)
-    if adapter in ("tree_data", "table"):
+    if adapter in ("tree_data", "table", "linear_data"):
         _require(doc, ("features_signature", "features_hash", "trained_against"), where)
     if "features_signature" in doc:
         signature = doc["features_signature"]
@@ -1101,6 +1102,20 @@ def _validate_uhd(desc, source_root):
                     f"{where}: score.metric '{score['metric']}' requires objective "
                     f"'{expected}', got {doc.get('objective')!r}"
                 )
+    if adapter == "linear_data":
+        # A log slowdown against the catalog's best (RFC 0019 §7.5): lower is better and in
+        # no registered unit, as UhdParser requires.
+        score = doc.get("score", {})
+        if (
+            doc["objective"] != "min"
+            or "metric" in score
+            or score.get("calibrated")
+            or score.get("transform", "identity") != "identity"
+        ):
+            raise HkpPackError(
+                f"{where}: linear_data requires objective 'min' and no score.metric, "
+                "calibration or transform"
+            )
     body = doc[adapter]
     if adapter == "static_order":
         # static_order ranks by UKD priority, then descriptor id. Declared criteria are
