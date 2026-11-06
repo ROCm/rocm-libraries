@@ -227,7 +227,12 @@ def _derive(gfx1250_iim, assembler, capsys, **overrides):
     return sol, capsys.readouterr().out
 
 
-@pytest.mark.parametrize("fuse", sorted(TDM_FUSE_GROUPING))
+# AB_first is left out: it stages a later region, so it needs UseLoopModel and both operands
+# split alike, neither of which this unsplit scaffold solution carries.
+_SCAFFOLD_FUSES = [f for f, name in sorted(TDM_FUSE_GROUPING.items()) if name != "AB_first"]
+
+
+@pytest.mark.parametrize("fuse", _SCAFFOLD_FUSES)
 def test_solution_accepts_each_grouping_at_equal_pair(
         _gp_gfx1250, gfx1250_iim, assembler, capsys, fuse):
     sol, out = _derive(gfx1250_iim, assembler, capsys, TDMFuse=fuse)
@@ -242,7 +247,7 @@ def test_solution_accepts_paired_at_divergent_pair(
     assert sol.get("Valid") is True, out
 
 
-@pytest.mark.parametrize("fuse", sorted(TDM_FUSE_GROUPING))
+@pytest.mark.parametrize("fuse", _SCAFFOLD_FUSES)
 def test_solution_accepts_stagger(_gp_gfx1250, gfx1250_iim, assembler, capsys, fuse):
     sol, out = _derive(gfx1250_iim, assembler, capsys, TDMFuse=fuse, StaggerU=32)
     assert sol.get("Valid") is True, out
@@ -304,7 +309,7 @@ def ks(fuse=3, **over):
     return state
 
 
-@pytest.mark.parametrize("fuse", [-3, -1, 4, 5, 6, 7, 8])
+@pytest.mark.parametrize("fuse", [-3, -1, 5, 6, 7, 8])
 def test_an_unmapped_integer_raises_instead_of_resolving(fuse):
     """An integer no row claims must raise, not fall back."""
     with pytest.raises(ValueError, match="names no grouping"):
@@ -325,7 +330,11 @@ def test_valid_parameters_and_the_mapping_name_the_same_integers():
 
 
 def test_every_shipped_row_is_reachable():
-    assert set(TF.TDM_GROUPS) == set(TF.TDM_FUSE_GROUPING.values())
+    """`unfused` is the one row no integer names: `tdmGrouping` selects it where `paired` has no
+    scale to pair. It carries paired's name and seats, so only the row object tells them apart."""
+    assert set(TF.TDM_GROUPS) - set(TF.TDM_FUSE_GROUPING.values()) == {"unfused"}
+    assert TF.tdmGrouping(ks(fuse=1, ProblemType={"MXBlockA": 0, "MXBlockB": 0})) \
+        is TF.TDM_GROUPS["unfused"]
     assert set(TF.TDM_GROUPS) == set(TF._GROUPING_ACCEPTED)
 
 
@@ -444,8 +453,10 @@ def test_four_waves_is_accepted_and_shares_a_mx_entry():
     assert TF._GROUPING_ACCEPTED["B_MX"] is TF._GROUPING_ACCEPTED["A_MX"]
 
 
+# The split is not among these: `TDMSplitA`/`TDMSplitB` are per operand, so a split alone no
+# longer declines a row -- whether a group's members agree on a region count is Solution.py's rule.
 @pytest.mark.parametrize("overrides", [
-    {"TDMInst": 1}, {"TDMSplit": True}, {"UseSubtileImpl": True},
+    {"TDMInst": 1}, {"UseSubtileImpl": True},
 ])
 def test_b_mx_inherits_every_a_mx_precondition(overrides):
     assert _groupingAccepted(ks(**overrides)) is False
@@ -506,6 +517,7 @@ class Stub:
         for name in ("isTdmWaveSeparated", "tdmFusePaired",
                      "tdmSeparateABDescriptors", "tdmSetupIncrementWaveSeparated",
                      "tdmDescriptorSetOwner", "tdmLastIterDisableSgprs", "defineTdmSgprs",
+                     "graPrefetchSilenceMask",
                      "_dcpTokenSide", "_dcpCurrentToken", "_dcpTdmIssueTokens",
                      "tdmPairOnEveryWave", "removeStaggerCopies", "tdmHalfPlrReenableSgprs",
                      "removeStaggerIncs", "graIncrementMask", "releaseGlobalReadIncsSgprsAfterTdmWaveSep",
@@ -578,6 +590,38 @@ def test_every_tdm_sgpr_alias_targets_a_defined_set(monkeypatch, name, mxA, mxB)
 def test_last_iter_disable_names_per_grouping(monkeypatch, name, expected):
     monkeypatch.setattr(TF, "tdmGrouping", lambda _ks: TF.TDM_GROUPS[name])
     assert Stub().tdmLastIterDisableSgprs(_ksOwner()) == expected
+
+
+_SNLL_MASK_CASES = [
+    (fuse, name, {"MXBlockA": 32, "MXBlockB": 32})
+    for fuse, name in sorted(TDM_FUSE_GROUPING.items())
+] + [(1, "paired", {"MXBlockA": 0, "MXBlockB": 0})]
+
+
+@pytest.mark.parametrize("fuse, name, problem", _SNLL_MASK_CASES)
+def test_loop_model_snll_mask_uses_base_descriptor_owners(fuse, name, problem):
+    """ULM must not retain the pre-#12825 A/MXSA-only last-iteration mask."""
+    writer = Stub(
+        states=types.SimpleNamespace(unrollIdx=0),
+        rapTdmPrefetchIsDead=lambda _kernel: False,
+        loopCounter=lambda _kernel, _loop_idx: 0,
+    )
+    state = _ksOwner(
+        TDMFuse=fuse,
+        ProblemType=problem,
+        SuppressNoLoadLoop=True,
+        PrefetchGlobalRead=2,
+    )
+    if name == "AB_first":
+        state.update(UseLoopModel=True, TDMSplit=True)
+    assert TF.tdmGrouping(state).name == name
+
+    mask = Module("ULM SNLL mask")
+    writer.graPrefetchSilenceMask(state, mask)
+
+    text = str(mask)
+    for name in writer.tdmLastIterDisableSgprs(state):
+        assert name in text
 
 
 @pytest.mark.parametrize("over", [dict(enableTDMB=False), dict(UseSubtileImpl=True)])
@@ -843,12 +887,14 @@ _ONE_WAVE_64X64 = {"MatrixInstruction": [16, 16, 128, 1, 1, 4, 4, 1, 1], "WorkGr
 _WAVES = {1: _ONE_WAVE_64X64, 2: _TWO_WAVES, 4: {}}
 _ONE_SCALE = {"mx_a": _MXSA_ONLY, "mx_b": _MXSB_ONLY}
 _ONE_SIDED_MX = "MX scales on one tensor only"
+# The rows a lone scale leaves distinct; 2-4 give row 1's two sets on a block wave layout.
+_ONE_SIDED_FUSES = [0, 1]
 _STREAMK = {"StreamK": 3, "StreamKForceDPOnly": 1}
 
 
 @pytest.mark.parametrize("numWaves", [2, 4])
 @pytest.mark.parametrize("mx", sorted(_ONE_SCALE))
-@pytest.mark.parametrize("fuse", sorted(TDM_FUSE_GROUPING))
+@pytest.mark.parametrize("fuse", _ONE_SIDED_FUSES)
 def test_solution_on_one_mx_scale_for_every_grouping_and_wave_count(
         _gp_gfx1250, gfx1250_iim, assembler, capsys, fuse, mx, numWaves):
     """One-sided MX derives on gfx1250 TDM kernels of more than one wave."""
@@ -872,7 +918,7 @@ def test_solution_on_one_mx_scale_for_every_grouping_and_wave_count(
     ({"PrefetchGlobalReadA": 2, "PrefetchGlobalReadB": 1}, "PGRA=2, PGRB=1"),
 ], ids=["subtile", "pap", "rap", "divergent_pair", "divergent_pair_ba"])
 @pytest.mark.parametrize("mx", sorted(_ONE_SCALE))
-@pytest.mark.parametrize("fuse", [0, 1, 2, 3])
+@pytest.mark.parametrize("fuse", _ONE_SIDED_FUSES)
 def test_solution_rejects_one_mx_scale_outside_its_limits(
         _gp_gfx1250, gfx1250_iim, assembler, capsys, fuse, mx, overrides, found):
     sol, out = _derive(gfx1250_iim, assembler, capsys, TDMFuse=fuse,
@@ -949,14 +995,16 @@ _ONE_SIDED_MI = {
     2: [16, 16, 128, 1, 1, 2, 4, 2, 1],
     4: [16, 16, 128, 1, 1, 2, 4, 2, 2],
 }
+# One scale leaves rows 2-4 the same two sets row 1 already gives, on a block wave layout
+# the split region step cannot express, so the solution gate declines them.
+_ONE_SIDED_DECLINED = (2, 3, 4)
 _ONE_SIDED_CELLS = [(fuse, scale, numWaves)
-                    for fuse in (0, 1, 2, 3)
+                    for fuse in (0, 1)
                     for numWaves in (2, 4)
                     for scale in ("MXSA", "MXSB")]
 _ONE_SIDED_IDS = ["tdmfuse%d-%s-w%d" % cell for cell in _ONE_SIDED_CELLS]
-# The data tensor whose descriptor set the lone scale rides on TDMFuse 1-3.
-_SCALE_SET_OWNER = {(1, "MXSA"): "A", (1, "MXSB"): "B", (2, "MXSA"): "A",
-                    (2, "MXSB"): "A", (3, "MXSA"): "B", (3, "MXSB"): "B"}
+# The data tensor whose descriptor set the lone scale rides on TDMFuse 1.
+_SCALE_SET_OWNER = {(1, "MXSA"): "A", (1, "MXSB"): "B"}
 _GROUP1_SGPRS = 8
 _ONE_SIDED_FORK = {
     "DepthU": 256,
@@ -1243,14 +1291,20 @@ def test_onesided_mx_every_live_set_swaps_its_lds_buffer_inside_the_main_loop(
     assert not unswapped, unswapped
 
 
-@pytest.mark.parametrize("fuse, scale", [(fuse, scale) for fuse in (2, 3) for scale in ("MXSA", "MXSB")])
-def test_onesided_mx_lone_scale_on_a_block_set_subtracts_its_wave_offset(oneSidedKernel, fuse, scale):
-    """On four waves the scale is the run on waves 2-3, so its setup and its tail reset use WaveIdx - 2."""
-    kernel = oneSidedKernel(fuse, scale, 4)
-    before = kernel.source.partition("label_LoopBeginL:")[0]
-    after = kernel.source.partition("label_LoopEndL:")[2]
-    assert len(re.findall(r"WaveIdx - 2\b", before)) >= 2, "component id and global offset"
-    assert re.search(r"WaveIdx - 2\b", after), "tail reset"
+@pytest.mark.parametrize("fuse", _ONE_SIDED_DECLINED)
+@pytest.mark.parametrize("mx", ["mx_a", "mx_b"])
+@pytest.mark.parametrize("waves", [_TWO_WAVES, {}], ids=["2w", "4w"])
+def test_solution_rejects_a_block_set_with_one_mx_scale(
+        _gp_gfx1250, gfx1250_iim, assembler, capsys, fuse, mx, waves):
+    """A lone scale puts rows 2-4 on a block wave layout that the split region step reads as parity.
+
+    The surviving rows name the same two sets, so the gate declines rather than silently
+    downgrading -- and the wave layout the emitted kernel then carries is parity throughout.
+    """
+    sol, out = _derive(gfx1250_iim, assembler, capsys, TDMFuse=fuse,
+                       ProblemType=_ONE_SCALE[mx], **waves)
+    assert sol.get("Valid") is not True, out
+    assert "MX scales on one tensor only" in out, out
 
 
 @pytest.mark.parametrize("fuse", [1, 2, 3])
@@ -1271,6 +1325,8 @@ _MX_PROBLEMS = {"mx": {}, "no_mx": _NO_MX, "mx_a": _MXSA_ONLY, "mx_b": _MXSB_ONL
 @pytest.mark.parametrize("mx", sorted(_MX_PROBLEMS))
 def test_solution_rejects_rows_one_to_three_on_one_wave(
         _gp_gfx1250, gfx1250_iim, assembler, capsys, fuse, mx):
+    if fuse == 1 and mx == "no_mx":
+        pytest.skip("downgrades to TDMFuse=0; see test_one_wave_no_scale_downgrades_to_zero")
     sol, out = _derive(gfx1250_iim, assembler, capsys, TDMFuse=fuse,
                        ProblemType=_MX_PROBLEMS[mx], **_ONE_WAVE_64X64)
     assert sol.get("Valid") is False
@@ -1516,8 +1572,9 @@ def test_two_waves_advance_mxsas_set_and_mxsbs_stash(tdmKernel, fuse, owner):
     assert advanced("s[sgprtdmMXSBGroup0+2"), "the stash's address must advance"
 
 
+# One scale is declined on these rows, so their cells are both scales or neither.
 _TWO_SET_CELLS = [(fuse, waves, mxA, mxB) for fuse in (2, 3) for waves in (2, 4)
-                  for mxA, mxB in ((32, 32), (32, 0), (0, 32), (0, 0))]
+                  for mxA, mxB in ((32, 32), (0, 0))]
 
 
 @pytest.mark.parametrize("fuse, numWaves, mxA, mxB", _TWO_SET_CELLS,
@@ -1572,7 +1629,9 @@ def test_only_rows_without_scales_put_both_data_tensors_on_every_wave(fuse):
     assert TF.tdmPairOnEveryWave(ks(fuse=fuse), "A", "B") is False
     assert TF.tdmPairOnEveryWave(ks(fuse=fuse), "MXSA", "MXSB") is False
     unscaled = ks(fuse=fuse, ProblemType={"MXBlockA": 0, "MXBlockB": 0})
-    assert TF.tdmPairOnEveryWave(unscaled, "A", "B") is (fuse != 0)
+    # A declined row falls back to TDMFuse=0's, which keeps A and B on one parity set.
+    assert TF.tdmPairOnEveryWave(unscaled, "A", "B") \
+        is (fuse != 0 and TF.tdmGroupingAccepted(unscaled))
 
 
 def test_a_single_member_set_alone_rides_every_wave():
@@ -1674,8 +1733,9 @@ def test_rows_one_to_three_reduce_to_a_and_b_on_every_wave_without_scales(fuse, 
     assert TF.tdmGroupPartner(state, "B", "A") == "A"
 
 
+# TDMSplit is absent: it is per operand now, so it refuses the solution without declining a row.
 @pytest.mark.parametrize("over", [
-    {"TDMSplit": True}, {"UseSubtileImpl": True}, {"TDMInst": 1},
+    {"UseSubtileImpl": True}, {"TDMInst": 1},
 ])
 @pytest.mark.parametrize("fuse", [1, 2, 3])
 def test_rows_one_to_three_without_scales_decline_outside_their_limits(fuse, over):
@@ -1778,9 +1838,14 @@ def test_a_lone_scale_on_a_block_set_rides_an_offset_run(fuse, mx, scale):
 def test_wave_shares_with_every_member_live_split_each_full_set():
     for grouping, numWaves in itertools.product(TF.TDM_GROUPS.values(), range(1, 17)):
         shares = TF.tdmWaveShares(grouping, numWaves, lambda _tc: True)
+        seen = set()
         for group in grouping.groups:
             split = TF._waveShares(numWaves, len(group), grouping.layout)
             for tc, (waves, numComp) in zip(group, split):
+                # A later tuple repeating a member is a region step, not a second seat.
+                if tc in seen:
+                    continue
+                seen.add(tc)
                 assert shares[tc] == (numComp, waves), (grouping.name, numWaves, tc)
 
 
@@ -1867,6 +1932,17 @@ _ALLOCATION = {
     (3, "mx_a", 4):  ("B_MX",   False,    (0, 1, 2, 3), (2, 3),       (),           (0, 1)),
     (3, "mx_b", 4):  ("B_MX",   False,    (0, 1, 2, 3), (),           (2, 3),       (0, 1)),
     (3, "mx", 4):    ("B_MX",   False,    (0, 1, 2, 3), (2,),         (3,),         (0, 1)),
+    # TDMFuse=4 AB_first stages a later region, so it needs UseLoopModel and both operands
+    # split alike. This scaffold state carries neither: every entry declines to the default
+    # row and takes TDMFuse=0's wave layout. Its own walk is asserted by test_ab_first_walk.
+    (4, "no_mx", 2): ("MX_AB",  True,     (0,),         (),           (),           (1,)),
+    (4, "mx_a", 2):  ("MX_AB",  True,     (0,),         (0, 1),       (),           (1,)),
+    (4, "mx_b", 2):  ("MX_AB",  True,     (0,),         (),           (0, 1),       (1,)),
+    (4, "mx", 2):    ("MX_AB",  True,     (0,),         (0,),         (1,),         (1,)),
+    (4, "no_mx", 4): ("MX_AB",  True,     (0, 2),       (),           (),           (1, 3)),
+    (4, "mx_a", 4):  ("MX_AB",  True,     (0, 2),       (0, 1, 2, 3), (),           (1, 3)),
+    (4, "mx_b", 4):  ("MX_AB",  True,     (0, 2),       (),           (0, 1, 2, 3), (1, 3)),
+    (4, "mx", 4):    ("MX_AB",  True,     (0, 2),       (0, 2),       (1, 3),       (1, 3)),
 }
 
 # What a wave share means at its NumWaves: (numComp, wave mask, tdmWaveComponents,
@@ -1970,11 +2046,12 @@ def test_shared_scale_set_over_the_allocation_matrix(fuse, mx, numWaves):
 
 # Tensors whose own GlobalReadIncs HalfPLR's last-iteration mask zeroes on more than one wave,
 # by whether A and B carry MX scales, then TDMFuse.
+# Row 4 declines on this scaffold state (no UseLoopModel, no split), so it takes row 0's answer.
 _HALFPLR_MASKED_INCS = {
-    (False, False): {0: (), 1: ("A", "B"), 2: ("A", "B"), 3: ("A", "B")},
-    (True, True): {0: (), 1: (), 2: ("B",), 3: ("A",)},
-    (True, False): {0: ("MXSA",), 1: ("B",), 2: ("B",), 3: ("A",)},
-    (False, True): {0: ("MXSB",), 1: ("A",), 2: ("B",), 3: ("A",)},
+    (False, False): {0: (), 1: ("A", "B"), 2: ("A", "B"), 3: ("A", "B"), 4: ()},
+    (True, True): {0: (), 1: (), 2: ("B",), 3: ("A",), 4: ()},
+    (True, False): {0: ("MXSA",), 1: ("B",), 2: ("B",), 3: ("A",), 4: ("MXSA",)},
+    (False, True): {0: ("MXSB",), 1: ("A",), 2: ("B",), 3: ("A",), 4: ("MXSB",)},
 }
 
 
@@ -2122,14 +2199,14 @@ _HEAD = {"mx_a": "MX scales on one tensor only (MXBlockA=32, MXBlockB=0)",
 
 @pytest.mark.parametrize("overrides", [{}, {"TDMInst": 0, "ProblemType": _NO_MX}],
                          ids=["tdm_on_a_and_b", "tdm_off"])
-@pytest.mark.parametrize("fuse", [-1, 4])
+@pytest.mark.parametrize("fuse", [-1, 5])
 def test_solution_rejects_a_tdmfuse_value_that_names_no_grouping(
         _gp_gfx1250, gfx1250_iim, assembler, capsys, fuse, overrides):
     """Rejected ahead of every row rule; the layer itself raises for such a value."""
     assert fuse not in validParameters["TDMFuse"]
     sol, out = _derive(gfx1250_iim, assembler, capsys, TDMFuse=fuse, **overrides)
     assert sol.get("Valid") is False
-    assert ("TDMFuse=%d names no descriptor grouping; supported values are 0, 1, 2 and 3"
+    assert ("TDMFuse=%d names no descriptor grouping; supported values are 0, 1, 2, 3 and 4"
             % fuse) in out, out
 
 
@@ -2139,28 +2216,48 @@ _LAYER_DECLINES = {
     "tdminst0": ((1, 2, 3), {"TDMInst": 0, "ProblemType": _NO_MX}, "is not implemented with TDMInst=0"),
     "tdminst1": ((1, 2, 3), {"TDMInst": 1}, "TDMA and TDMB must be enabled simultaneously"),
     "tdminst2": ((1, 2, 3), {"TDMInst": 2}, "TDMA and TDMB must be enabled simultaneously"),
-    "tdmsplit": ((1, 2, 3), {"TDMSplit": True}, "TDMSplit is currently disabled"),
+    # The split is per operand now, so it refuses the SOLUTION without declining the grouping.
+    "tdmsplit": ((1, 2, 3), {"TDMSplit": True}, "TDMSplit is currently disabled", False),
     "tdmsplit_one_wave": ((1, 2, 3), dict(_ONE_WAVE_64X64, TDMSplit=True),
                           "TDMSplit is currently disabled"),
     "one_wave": ((1, 2, 3), _ONE_WAVE_64X64, "needs more than one wave (NumWaves=1)"),
-    "one_wave_no_mx": ((1, 2, 3), dict(_ONE_WAVE_64X64, ProblemType=_NO_MX),
+    # TDMFuse=1 is absent: with no scale to pair on one wave the row IS TDMFuse=0, so
+    # derivation downgrades it instead of refusing (test_one_wave_no_scale_downgrades_to_zero).
+    "one_wave_no_mx": ((2, 3), dict(_ONE_WAVE_64X64, ProblemType=_NO_MX),
                        "needs more than one wave (NumWaves=1)"),
     "subtile": ((1, 2, 3), _SUBTILE, _SUBTILE_RULE),
     "subtile_no_mx": ((1, 2, 3), dict(_SUBTILE, ProblemType=_NO_MX), _SUBTILE_RULE),
     "waves8": ((2, 3), _EIGHT_WAVES, _WAVE_RULE % 8),
     "waves16": ((2, 3), _SIXTEEN_WAVES, _WAVE_RULE % 16),
 }
-_DECLINE_CASES = [(name, fuse) for name, (fuses, _, _) in _LAYER_DECLINES.items() for fuse in fuses]
+_DECLINE_CASES = [(name, fuse) for name, entry in _LAYER_DECLINES.items() for fuse in entry[0]]
 
 
 @pytest.mark.parametrize("name, fuse", _DECLINE_CASES, ids=["%s-%d" % case for case in _DECLINE_CASES])
 def test_every_layer_decline_is_rejected_by_an_earlier_named_rule(
         _gp_gfx1250, gfx1250_iim, assembler, capsys, name, fuse):
-    _, overrides, rule = _LAYER_DECLINES[name]
+    entry = _LAYER_DECLINES[name]
+    overrides, rule = entry[1], entry[2]
+    declines = entry[3] if len(entry) > 3 else True
     sol, out = _derive(gfx1250_iim, assembler, capsys, TDMFuse=fuse, **overrides)
-    assert _groupingAccepted(sol._state) is False, name
+    if declines:
+        assert _groupingAccepted(sol._state) is False, name
     assert sol.get("Valid") is False
     assert rule in out, out
+
+
+@pytest.mark.parametrize("subtile", [False, True], ids=["dense", "subtile"])
+def test_one_wave_no_scale_downgrades_to_zero(
+        _gp_gfx1250, gfx1250_iim, assembler, capsys, subtile):
+    """One wave shares no descriptor, so TDMFuse=1 with no scale to pair IS TDMFuse=0."""
+    overrides = dict(_ONE_WAVE_64X64, ProblemType=_NO_MX)
+    if subtile:
+        overrides["UseSubtileImpl"] = True
+    sol0, _ = _derive(gfx1250_iim, assembler, capsys, TDMFuse=0, **overrides)
+    sol, out = _derive(gfx1250_iim, assembler, capsys, TDMFuse=1, **overrides)
+    assert sol.get("Valid") is sol0.get("Valid"), out
+    if sol.get("Valid"):
+        assert sol._state["TDMFuse"] == 0, out
 
 
 @pytest.mark.parametrize("mx", ["mx", "no_mx"])
@@ -2168,6 +2265,9 @@ def test_every_layer_decline_is_rejected_by_an_earlier_named_rule(
 def test_one_wave_subtile_rows_are_rejected(
         _gp_gfx1250, gfx1250_iim, assembler, capsys, fuse, mx):
     """Subtile does not lift the one-wave limit: rows 1-3 are rejected, by it wherever TDMFuse=0 derives."""
+    if fuse == 1 and mx == "no_mx":
+        pytest.skip("one wave with no scale to pair downgrades TDMFuse=1 to 0; see "
+                    "test_one_wave_no_scale_downgrades_to_zero")
     overrides = dict(_ONE_WAVE_64X64, UseSubtileImpl=True, ProblemType=_MX_PROBLEMS[mx])
     sol0, out0 = _derive(gfx1250_iim, assembler, capsys, TDMFuse=0, **overrides)
     sol, out = _derive(gfx1250_iim, assembler, capsys, TDMFuse=fuse, **overrides)
@@ -2358,12 +2458,15 @@ _SPARSE_PROBLEM = {"mx": {}, "mx_a": _MXSA_ONLY, "mx_b": _MXSB_ONLY, "no_mx": _N
 
 # Sparse B with F4 B (mx) stays out: its global-read width is 2, not the multiple of 4 Sparse B needs,
 # and TDMFuse=0 refuses it the same way.
-_SPARSE_ACCEPT_CELLS = [(mx, sparse) for mx in sorted(_SPARSE_PROBLEM) for sparse in (1, 2)
-                        if (mx, sparse) != ("mx", 2)]
+# One scale is declined on rows 2-3, so it rides only row 1 here.
+_SPARSE_ACCEPT_CELLS = [(fuse, mx, sparse)
+                        for fuse in (1, 2, 3) for mx in sorted(_SPARSE_PROBLEM)
+                        for sparse in (1, 2)
+                        if (mx, sparse) != ("mx", 2)
+                        and not (fuse != 1 and mx in _ONE_SCALE)]
 
 
-@pytest.mark.parametrize("mx, sparse", _SPARSE_ACCEPT_CELLS)
-@pytest.mark.parametrize("fuse", [1, 2, 3])
+@pytest.mark.parametrize("fuse, mx, sparse", _SPARSE_ACCEPT_CELLS)
 def test_solution_accepts_sparse_metadata_on_rows_one_to_three(
         _gp_gfx1250, gfx1250_iim, assembler, capsys, fuse, mx, sparse):
     """Rows 1-3 take TDM sparse metadata with MX scales on both tensors, on one, or on neither."""
@@ -2562,9 +2665,9 @@ def test_streamk_moves_a_lone_tdmfuse0_scale_by_its_own_increment(scale, numWave
 
 @pytest.mark.parametrize("numWaves", [2, 4])
 @pytest.mark.parametrize("scale", ["MXSA", "MXSB"])
-@pytest.mark.parametrize("fuse", [1, 2, 3])
+@pytest.mark.parametrize("fuse", [1])
 def test_streamk_moves_a_lone_scale_on_a_shared_set_only_on_the_ab_call(fuse, scale, numWaves):
-    """On TDMFuse 1-3 a lone scale rides its data tensor's set: the A/B call moves that set by
+    """On TDMFuse 1 a lone scale rides its data tensor's set: the A/B call moves that set by
     tdmABIncs, which holds the scale's increment on the scale's waves, and the other data set by
     its own increment; the scale call adds nothing."""
     state = _policyState(fuse, "mx_a" if scale == "MXSA" else "mx_b", numWaves, "streamk")
@@ -2654,10 +2757,10 @@ def _sgprNamesUsed(kernel, *prefixes):
 # Every arrangement with separate A and B sets under a cluster, which drops stagger code:
 # DataParallel with [2, 4]; StreamK takes a cluster only without a Y-extent, so [2, 1].
 _CLUSTER_CELLS = [(fuse, 2, 0, 0, "dp", (2, 4)) for fuse in (1, 2, 3)] \
-    + [(1, 2, 0, 32, "dp", (2, 4)), (2, 2, 32, 0, "dp", (2, 4)), (3, 2, 0, 32, "dp", (2, 4))] \
+    + [(1, 2, 0, 32, "dp", (2, 4)), (1, 2, 32, 0, "dp", (2, 4))] \
     + [(fuse, 2, 32, 32, "dp", (2, 4)) for fuse in (1, 2, 3)] + [(2, 4, 32, 32, "dp", (2, 4))] \
     + [(fuse, 2, 0, 0, "streamk", (2, 1)) for fuse in (1, 2, 3)] \
-    + [(2, 2, 32, 0, "streamk", (2, 1)), (2, 2, 32, 32, "streamk", (2, 1)), (3, 2, 32, 32, "streamk", (2, 1))]
+    + [(1, 2, 32, 0, "streamk", (2, 1)), (2, 2, 32, 32, "streamk", (2, 1)), (3, 2, 32, 32, "streamk", (2, 1))]
 
 
 @pytest.mark.parametrize("fuse, numWaves, mxA, mxB, policy, cluster", _CLUSTER_CELLS,
@@ -2692,7 +2795,7 @@ def _expectedKOffsets(fuse, mxA, mxB):
 
 _STREAMK_CELLS = [(fuse, numWaves, 0, 0) for fuse in (1, 2, 3) for numWaves in (2, 4)] \
     + [(0, numWaves, mxA, mxB) for numWaves in (2, 4) for mxA, mxB in ((32, 0), (0, 32))] \
-    + [(fuse, 2, mxA, mxB) for fuse in (1, 2, 3) for mxA, mxB in ((32, 0), (0, 32))] \
+    + [(1, 2, mxA, mxB) for mxA, mxB in ((32, 0), (0, 32))] \
     + [(2, 2, 32, 32), (3, 2, 32, 32), (0, 2, 32, 32)]
 
 
@@ -2732,7 +2835,7 @@ def test_each_persistent_tile_rebuilds_mxsb_disabled_on_wave_0(gfx1250_iim, tmp_
 
 @pytest.mark.parametrize("policy", [_STREAMK, _STREAMK_SPLIT], ids=["persistent_dp", "streamk"])
 @pytest.mark.parametrize("mx", sorted(_ONE_SCALE))
-@pytest.mark.parametrize("fuse", [0, 1, 2, 3])
+@pytest.mark.parametrize("fuse", _ONE_SIDED_FUSES)
 def test_solution_accepts_one_mx_scale_with_streamk_and_data_parallel(
         _gp_gfx1250, gfx1250_iim, assembler, capsys, fuse, mx, policy):
     """One-sided MX takes StreamK and data-parallel persistent kernels."""

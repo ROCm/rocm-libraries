@@ -1,0 +1,68 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --NumWaves=2 --GirFencePlacementPass --StinkyBuildImplicitDependencyPass --StinkyWaitCntInsertionPass --GirWaitCntInsertionPass --print-output
+#
+# Memory tokens alone cannot grade an LDS WAR; the frame graph can. Both are shown here.
+#
+# A double-buffered loop over two operands: the prologue fills all four slots, the body reads the
+# older generation (LDS2/LDS3) then the newer (LDS0/LDS1), and refills the generation it read.
+# Every access is tagged and every slot is written before it is read.
+#
+# The loop-head fence publishes all four slots, so its token set overlaps every read in the DS
+# queue. `scanDsAntiDeps` answers from that overlap and tightens to the NEWEST overlapping read,
+# which drains the counter to 0 -- a wait the frame graph does not need here at all, because the
+# reads it would order come after the fence, not before it.
+#
+# CHECK-LABEL: @gir_war_dscnt_is_graded_not_drained
+# CHECK: ^loop:
+# CHECK-NEXT: "st.s_wait_tensorcnt"(0)
+# CHECK-SAME: mod.memtoken = { tokens = [0,1,2,3] }
+# CHECK-NEXT: LDS0, LDS1, LDS2, LDS3 = "st.s_barrier_signal"(-1, LDS0, LDS1, LDS2, LDS3)
+# CHECK-NEXT: LDS0, LDS1, LDS2, LDS3 = "st.s_barrier_wait"(-1, LDS0, LDS1, LDS2, LDS3)
+# CHECK-SAME: mod.memtoken = { tokens = [0,1,2,3] }
+#
+# Each read carries the slot it reads, so the aliasing is fully expressed in tokens.
+# CHECK-NEXT: "st.ds_load_b64"(v10, LDS2)
+# CHECK-SAME: mod.memtoken = { tokens = [2] }
+# CHECK-NEXT: "st.ds_load_b64"(v11, LDS3)
+# CHECK-SAME: mod.memtoken = { tokens = [3] }
+# CHECK-NEXT: "st.ds_load_b64"(v12, LDS0)
+# CHECK-SAME: mod.memtoken = { tokens = [0] }
+# CHECK-NEXT: "st.ds_load_b64"(v13, LDS1)
+# CHECK-SAME: mod.memtoken = { tokens = [1] }
+#
+# The WAR names the two reads of the generation about to be overwritten, so the two newer reads
+# may stay in flight. The fence carries exactly the slots it discharges.
+# CHECK-NEXT: "st.s_wait_dscnt"(2)
+# CHECK-SAME: dlcnt = 2
+# CHECK-NEXT: LDS2, LDS3 = "st.s_barrier_signal"(-1, LDS2, LDS3)
+# CHECK-NEXT: LDS2, LDS3 = "st.s_barrier_wait"(-1, LDS2, LDS3)
+# CHECK-SAME: mod.memtoken = { tokens = [2,3] }
+# CHECK-NEXT: LDS2 = "st.tensor_load_to_lds"
+# CHECK-NEXT: LDS3 = "st.tensor_load_to_lds"
+
+st.metadata "gir.frame_contract" {
+gir-frame-contract
+
+gen 0  ring=2 entry=0
+incoming  dst=4 src=0 gen=0 value=0
+incoming  dst=4 src=4 gen=0 value=1 relative=1
+}
+
+st.func @gir_war_dscnt_is_graded_not_drained() {
+^entry:
+  "st.tensor_load_to_lds"(s[0:3], s[10:17]) { mod.gir_action = { action = 0, anchor = 0, kind = tensor, access0_write = 1, access0_operand = 0, access0_ring = 2, access0_abs = 0, access0_cross = 1 } }
+  "st.tensor_load_to_lds"(s[4:7], s[10:17]) { mod.gir_action = { action = 1, anchor = 0, kind = tensor, access0_write = 1, access0_operand = 1, access0_ring = 2, access0_abs = 0, access0_cross = 1 } }
+  "st.tensor_load_to_lds"(s[8:11], s[10:17]) { mod.gir_action = { action = 2, anchor = 0, kind = tensor, access0_write = 1, access0_operand = 0, access0_ring = 2, access0_abs = 1, access0_cross = 1 } }
+  "st.tensor_load_to_lds"(s[12:15], s[10:17]) { mod.gir_action = { action = 3, anchor = 0, kind = tensor, access0_write = 1, access0_operand = 1, access0_ring = 2, access0_abs = 1, access0_cross = 1 } }
+  "st.s_branch"("loop")
+  Successors: ^loop
+^loop:
+  v[0:1] = "st.ds_load_b64"(v10) { mod.ds = { na = 1, offset = 0, gds = false }, mod.gir_action = { action = 4, anchor = 4, kind = ds, access0_write = 0, access0_operand = 0, access0_ring = 2, access0_gen = 0, access0_gdelta = 1, access0_cross = 1 } }
+  v[2:3] = "st.ds_load_b64"(v11) { mod.ds = { na = 1, offset = 0, gds = false }, mod.gir_action = { action = 5, anchor = 4, kind = ds, access0_write = 0, access0_operand = 1, access0_ring = 2, access0_gen = 0, access0_gdelta = 1, access0_cross = 1 } }
+  v[4:5] = "st.ds_load_b64"(v12) { mod.ds = { na = 1, offset = 0, gds = false }, mod.gir_action = { action = 6, anchor = 4, kind = ds, access0_write = 0, access0_operand = 0, access0_ring = 2, access0_gen = 0, access0_gdelta = 0, access0_cross = 1 } }
+  v[6:7] = "st.ds_load_b64"(v13) { mod.ds = { na = 1, offset = 0, gds = false }, mod.gir_action = { action = 7, anchor = 4, kind = ds, access0_write = 0, access0_operand = 1, access0_ring = 2, access0_gen = 0, access0_gdelta = 0, access0_cross = 1 } }
+  "st.tensor_load_to_lds"(s[0:3], s[10:17]) { mod.gir_action = { action = 8, anchor = 4, kind = tensor, access0_write = 1, access0_operand = 0, access0_ring = 2, access0_gen = 0, access0_gdelta = 1, access0_cross = 1 } }
+  "st.tensor_load_to_lds"(s[4:7], s[10:17]) { mod.gir_action = { action = 9, anchor = 4, kind = tensor, access0_write = 1, access0_operand = 1, access0_ring = 2, access0_gen = 0, access0_gdelta = 1, access0_cross = 1 } }
+  "st.s_cbranch_scc1"("loop", SCC0)
+  Successors: ^loop, ^exit
+^exit:
+}

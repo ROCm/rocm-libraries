@@ -1,0 +1,60 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --NumWaves=2 --GirFencePlacementPass --StinkyBuildImplicitDependencyPass --print-output
+#
+# A GIR barrier's memory token is the hazard set that barrier DISCHARGES, not everything live
+# across it. Fence placement decides the fence set first and only then reads the discharge off it,
+# so a hazard an earlier fence already answered is not tagged again on a later one.
+
+st.metadata "gir.frame_contract" {
+gir-frame-contract
+
+gen 0  ring=2 entry=0
+gen 100  ring=2 entry=0
+}
+
+#
+# Two storages, one copy each, and a reader of EACH in the loop. The copy of operand 0 is already
+# fenced in ^entry, so the loop's barrier publishes operand 1 alone -- it discharges nothing else.
+# Tagging it with operand 0 as well is the over-assignment this test pins.
+#
+# CHECK-LABEL: @gir_fence_tags_only_what_it_discharges
+# CHECK: ^entry:
+# CHECK: LDS0 = "st.s_barrier_wait"(-1, LDS0)
+# CHECK: ^loop:
+# CHECK: LDS1 = "st.s_barrier_wait"(-1, LDS1)
+
+st.func @gir_fence_tags_only_what_it_discharges() {
+^entry:
+  "st.tensor_load_to_lds"(s[0:3], s[10:17]) { mod.gir_action = { action = 0, anchor = 0, kind = tensor, access0_write = 1, access0_operand = 0, access0_ring = 2, access0_abs = 0, access0_cross = 1 } }
+  "st.tensor_load_to_lds"(s[4:7], s[10:17]) { mod.gir_action = { action = 1, anchor = 0, kind = tensor, access0_write = 1, access0_operand = 1, access0_ring = 2, access0_abs = 0, access0_cross = 1 } }
+  v[0:1] = "st.ds_load_b64"(v10) { mod.ds = { na = 1, offset = 0, gds = false }, mod.gir_action = { action = 2, anchor = 0, kind = ds, access0_write = 0, access0_operand = 0, access0_ring = 2, access0_abs = 0, access0_cross = 1 } }
+  "st.s_branch"("loop")
+  Successors: ^loop
+^loop:
+  v[2:3] = "st.ds_load_b64"(v11) { mod.ds = { na = 1, offset = 0, gds = false }, mod.gir_action = { action = 3, anchor = 1, kind = ds, access0_write = 0, access0_operand = 0, access0_ring = 2, access0_abs = 0, access0_cross = 1 } }
+  v[4:5] = "st.ds_load_b64"(v12) { mod.ds = { na = 1, offset = 0, gds = false }, mod.gir_action = { action = 4, anchor = 1, kind = ds, access0_write = 0, access0_operand = 1, access0_ring = 2, access0_abs = 0, access0_cross = 1 } }
+  "st.s_cbranch_scc1"("loop", SCC0)
+  Successors: ^loop, ^exit
+^exit:
+}
+
+#
+# The complement: when one fence is the first to answer for BOTH storages it carries both. The
+# narrowing above is a discharge test, not a cap on how much a single barrier may publish.
+#
+# CHECK-LABEL: @gir_fence_tags_every_storage_it_discharges
+# CHECK: ^loop:
+# CHECK: LDS0, LDS1 = "st.s_barrier_wait"(-1, LDS0, LDS1)
+
+st.func @gir_fence_tags_every_storage_it_discharges() {
+^entry:
+  "st.tensor_load_to_lds"(s[0:3], s[10:17]) { mod.gir_action = { action = 100, anchor = 100, kind = tensor, access0_write = 1, access0_operand = 0, access0_ring = 2, access0_abs = 0, access0_cross = 1 } }
+  "st.tensor_load_to_lds"(s[4:7], s[10:17]) { mod.gir_action = { action = 101, anchor = 100, kind = tensor, access0_write = 1, access0_operand = 1, access0_ring = 2, access0_abs = 0, access0_cross = 1 } }
+  "st.s_branch"("loop")
+  Successors: ^loop
+^loop:
+  v[0:1] = "st.ds_load_b64"(v10) { mod.ds = { na = 1, offset = 0, gds = false }, mod.gir_action = { action = 102, anchor = 101, kind = ds, access0_write = 0, access0_operand = 0, access0_ring = 2, access0_abs = 0, access0_cross = 1 } }
+  v[2:3] = "st.ds_load_b64"(v11) { mod.ds = { na = 1, offset = 0, gds = false }, mod.gir_action = { action = 103, anchor = 101, kind = ds, access0_write = 0, access0_operand = 1, access0_ring = 2, access0_abs = 0, access0_cross = 1 } }
+  "st.s_cbranch_scc1"("loop", SCC0)
+  Successors: ^loop, ^exit
+^exit:
+}

@@ -245,7 +245,7 @@ class GSUOff(GSU):
             # MX scale unroll-step SRD increment, gated by MXScaleFormat:
             #   - Swizzled (HostPreSwizzle/InMemorySwizzle): each K-block of
             #     scales (DepthU/MXBlock K-scales per M) is laid out as a
-            #     contiguous (ceil(M/MXBlockFree), K_inner) block, so a K-step of DepthU
+            #     contiguous (ceil(M/MXBlockFree), Ki) block, so a K-step of DepthU
             #     advances the SRD by ceil(Size{tile}/MXBlockFree)*(DepthU/MXBlock*bpe).
             #   - NoSwizzle: canonical row/column layout with K-axis stride 1;
             #     the K-step of DepthU is just DepthU/MXBlock * bpe and goes
@@ -505,7 +505,7 @@ class GSUOn(GSU):
 
                 # MX scale GSU SRD increment, gated by MXScaleFormat:
                 #   - Swizzled (HostPreSwizzle/InMemorySwizzle): the K-block is
-                #     M*K_inner contiguous, so the increment scales with Size{tile}.
+                #     M*Ki contiguous, so the increment scales with Size{tile}.
                 #   - NoSwizzle: canonical layout, same step as A/B (duBpe only).
                 mxFmt = kernel.get("MXScaleFormat", "NoSwizzle")
                 isMxSwizzledScale = ('MXS' in tc) and mxFmt in ("InMemorySwizzle", "HostPreSwizzle")
