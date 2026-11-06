@@ -1482,7 +1482,7 @@ class KernelComponentFactoryGfx11(CompatibilityRuleFactory):
             # Keep the padded PV32 fallback from taking aligned plain inputs.
             m128_d64_pv32_constraint = (
                 "t.has_dropout || t.bias_type == bias_enum::elementwise_bias || "
-                "a.hdim_q % 32 != 0 || a.hdim_v % 32 != 0"
+                "a.hdim_q % 64 != 0 || a.hdim_v % 64 != 0"
             )
             # Use K32 for bias, dropout, or short Q/K; feature support is checked above.
             m128_d128_k32_constraint = (
