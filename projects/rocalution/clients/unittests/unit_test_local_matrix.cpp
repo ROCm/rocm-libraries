@@ -2281,9 +2281,14 @@ TEST_P(local_matrix_formats, transposes)
         A->Transpose();
         expect_kept(*A, transposed(ref));
 
-        auto transpose = empty_local_matrix<T>(backend());
+        auto transpose = empty<T>();
         make(ref)->Transpose(transpose.get());
         expect_kept(*transpose, transposed(ref));
+
+        // The transpose of a CSR matrix is a CSR matrix
+        auto from_csr = make(banded<T>());
+        make_local_matrix(backend(), ref)->Transpose(from_csr.get());
+        expect_matrix(*from_csr, transposed(ref), csr_format, backend());
 
         if(!is(DIA) && !is(MCSR))
         {
@@ -2295,8 +2300,8 @@ TEST_P(local_matrix_formats, transposes)
     });
 }
 
-// The transpose of an n x m matrix without entries is an m x n one in the format of the
-// input, also into a matrix that held entries in this format
+// The transpose of an n x m matrix without entries is an m x n one, also into a matrix
+// that held entries
 TEST_P(local_matrix_formats, transpose_of_a_matrix_without_entries)
 {
     for_each_type<RealTypes>([&](auto type) {
@@ -2309,22 +2314,17 @@ TEST_P(local_matrix_formats, transpose_of_a_matrix_without_entries)
         }
         const Csr<T> expected = transposed(ref);
 
-        // make() leaves the input in CSR if the format cannot hold it
-        auto         A = make(ref);
-        const Format input{A->GetFormat(), A->GetBlockDimension()};
-
-        const auto expect_transposed = [&](const LocalMatrix<T>& B) {
-            EXPECT_EQ(B.GetM(), 6);
-            EXPECT_EQ(B.GetN(), 4);
-            expect_matrix(B, expected, input, backend());
-        };
-
+        auto A         = make(ref);
         auto transpose = make(banded<T>());
         A->Transpose(transpose.get());
-        expect_transposed(*transpose);
+        expect_kept(*transpose, expected);
+
+        auto from_csr = make(banded<T>());
+        make_local_matrix(backend(), ref)->Transpose(from_csr.get());
+        expect_matrix(*from_csr, expected, csr_format, backend());
 
         A->Transpose();
-        expect_transposed(*A);
+        expect_kept(*A, expected);
     });
 }
 
