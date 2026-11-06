@@ -196,7 +196,9 @@ def test_write_benchmark_files_results_policy(
     monkeypatch.setattr(bp, "HelperKernelObjectsMemo", lambda *args: lambda solution: [])
     monkeypatch.setattr(bp, "KernelWriterAssembly", lambda *args: None)
     monkeypatch.setattr(bp, "cmdLineArchsFor", lambda *args: ["gfx950"])
-    monkeypatch.setattr(bp, "writeSolutionsAndKernels", lambda *args, **kwargs: ([], None))
+    monkeypatch.setattr(bp, "prepareSolutionsAndKernels", lambda *args, **kwargs: object())
+    monkeypatch.setattr(bp, "generateBenchmarkKernels", lambda *args: None)
+    monkeypatch.setattr(bp, "finishSolutionsAndKernels", lambda *args: ([], None))
     monkeypatch.setattr(bp, "getSolutionNameMin", lambda *args: "solution")
     monkeypatch.setattr(bp, "getKernelNameMin", lambda *args: "kernel")
     monkeypatch.setattr(
