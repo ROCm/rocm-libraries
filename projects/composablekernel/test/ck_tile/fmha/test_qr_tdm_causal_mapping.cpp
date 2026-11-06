@@ -97,6 +97,138 @@ static_assert(!kKVHint<HintProbePipeline<ck_tile::bf16_t, 64, 128, false>>);
 static_assert(kKVHint<ck_tile::BlockFmhaPipelineQRKSVSTdm<MappingProblem<64, true>>>);
 static_assert(!kKVHint<ck_tile::BlockFmhaPipelineQRKSVSTdm<MappingProblem<128, true>>>);
 
+using ScheduledMappingKernel = ck_tile::FmhaFwdKernel<
+    ck_tile::BlockFmhaPipelineQRKSVSTdmSched<
+        MappingProblem<128,
+                       true,
+                       false,
+                       ck_tile::bf16_t,
+                       ck_tile::BlockAttentionBiasEnum::NO_BIAS,
+                       false,
+                       128>>,
+    ck_tile::Default2DEpilogue<
+        ck_tile::Default2DEpilogueProblem<float, ck_tile::bf16_t, false, false>>>;
+
+// Bias, dropout, softcap and quantization are rejected by the scheduled pipeline
+// itself. These probes inherit a valid pipeline and override only eligibility
+// facts; they exercise the real FmhaFwdKernel predicate without GPU computation.
+template <bool Lse                             = false,
+          bool Dropout                         = false,
+          bool Sink                            = false,
+          bool Softcap                         = false,
+          ck_tile::BlockAttentionBiasEnum Bias = ck_tile::BlockAttentionBiasEnum::NO_BIAS,
+          ck_tile::BlockAttentionQuantScaleEnum Scale =
+              ck_tile::BlockAttentionQuantScaleEnum::NO_SCALE>
+using EligibilityTraits = ck_tile::TileFmhaTraits<false,
+                                                  false,
+                                                  false,
+                                                  false,
+                                                  Softcap,
+                                                  Bias,
+                                                  false,
+                                                  Lse,
+                                                  Dropout,
+                                                  Scale,
+                                                  -1,
+                                                  false,
+                                                  Sink>;
+
+template <typename Traits_         = EligibilityTraits<>,
+          typename Q               = ck_tile::bf16_t,
+          typename K               = Q,
+          typename V               = Q,
+          ck_tile::index_t M       = 128,
+          ck_tile::index_t N       = 128,
+          ck_tile::index_t HeadDim = 128,
+          bool Mask                = true,
+          bool Group               = false>
+struct ScheduledEligibilityPipeline : ScheduledMappingKernel::FmhaPipeline
+{
+    struct Problem : ScheduledMappingKernel::FmhaPipeline::Problem
+    {
+        static constexpr auto QScaleEnum = Traits_::QScaleEnum;
+    };
+    using QDataType = Q;
+    using KDataType = K;
+    using VDataType = V;
+    using FmhaMask  = ck_tile::SimplifiedGenericAttentionMask<Mask>;
+    struct BlockFmhaShape : ScheduledMappingKernel::FmhaPipeline::BlockFmhaShape
+    {
+        static constexpr auto kQKHeaddim = HeadDim;
+    };
+    static constexpr auto kM0               = M;
+    static constexpr auto kN0               = N;
+    static constexpr bool kIsGroupMode      = Group;
+    static constexpr bool kStoreLSE         = Traits_::kStoreLSE;
+    static constexpr bool kHasDropout       = Traits_::kHasDropout;
+    static constexpr bool kHasSink          = Traits_::kHasSink;
+    static constexpr bool kHasLogitsSoftCap = Traits_::kHasLogitsSoftCap;
+    static constexpr auto BiasEnum          = Traits_::BiasEnum;
+};
+
+template <typename Pipeline>
+constexpr bool kSupportsXcdCausal =
+    ck_tile::FmhaFwdKernel<Pipeline,
+                           ScheduledMappingKernel::EpiloguePipeline>::kSupportsXcdCausalOrder;
+
+using ck_tile::bf16_t;
+using ck_tile::BlockAttentionBiasEnum;
+using ck_tile::BlockAttentionQuantScaleEnum;
+using ck_tile::fp16_t;
+using DefaultEligibilityTraits = EligibilityTraits<>;
+
+// Pin each exclusion independently: removing any one gate must fail compilation.
+static_assert(ScheduledMappingKernel::kSupportsXcdCausalOrder);
+static_assert(kSupportsXcdCausal<ScheduledEligibilityPipeline<>>);
+static_assert(!kSupportsXcdCausal<ScheduledEligibilityPipeline<EligibilityTraits<true>>>);
+static_assert(!kSupportsXcdCausal<ScheduledEligibilityPipeline<EligibilityTraits<false, true>>>);
+static_assert(
+    !kSupportsXcdCausal<ScheduledEligibilityPipeline<EligibilityTraits<false, false, true>>>);
+static_assert(!kSupportsXcdCausal<
+              ScheduledEligibilityPipeline<EligibilityTraits<false, false, false, true>>>);
+static_assert(
+    !kSupportsXcdCausal<ScheduledEligibilityPipeline<
+        EligibilityTraits<false, false, false, false, BlockAttentionBiasEnum::ELEMENTWISE_BIAS>>>);
+static_assert(
+    !kSupportsXcdCausal<
+        ScheduledEligibilityPipeline<EligibilityTraits<false,
+                                                       false,
+                                                       false,
+                                                       false,
+                                                       BlockAttentionBiasEnum::NO_BIAS,
+                                                       BlockAttentionQuantScaleEnum::PERTENSOR>>>);
+static_assert(!kSupportsXcdCausal<
+              ScheduledEligibilityPipeline<DefaultEligibilityTraits, fp16_t, bf16_t, bf16_t>>);
+static_assert(!kSupportsXcdCausal<
+              ScheduledEligibilityPipeline<DefaultEligibilityTraits, bf16_t, fp16_t, bf16_t>>);
+static_assert(!kSupportsXcdCausal<
+              ScheduledEligibilityPipeline<DefaultEligibilityTraits, bf16_t, bf16_t, fp16_t>>);
+template <ck_tile::index_t M       = 128,
+          ck_tile::index_t N       = 128,
+          ck_tile::index_t HeadDim = 128,
+          bool Mask                = true,
+          bool Group               = false>
+using GeometryEligibilityPipeline = ScheduledEligibilityPipeline<DefaultEligibilityTraits,
+                                                                 bf16_t,
+                                                                 bf16_t,
+                                                                 bf16_t,
+                                                                 M,
+                                                                 N,
+                                                                 HeadDim,
+                                                                 Mask,
+                                                                 Group>;
+
+static_assert(!kSupportsXcdCausal<GeometryEligibilityPipeline<64>>);
+static_assert(!kSupportsXcdCausal<GeometryEligibilityPipeline<128, 64>>);
+static_assert(!kSupportsXcdCausal<GeometryEligibilityPipeline<128, 128, 64>>);
+static_assert(!kSupportsXcdCausal<GeometryEligibilityPipeline<128, 128, 192>>);
+static_assert(!kSupportsXcdCausal<GeometryEligibilityPipeline<128, 128, 128, false>>);
+static_assert(!kSupportsXcdCausal<GeometryEligibilityPipeline<128, 128, 128, true, true>>);
+// Ordinary qr_tdm remains excluded even with M128/N128/D128.
+static_assert(
+    !kSupportsXcdCausal<ck_tile::BlockFmhaPipelineQRKSVSTdm<
+        MappingProblem<128, true, false, bf16_t, BlockAttentionBiasEnum::NO_BIAS, false, 128>>>);
+
 template <typename Kernel>
 __global__ void capture_mapping(typename Kernel::Kargs args, int* output)
 {
@@ -406,18 +538,6 @@ TEST(QrTdmCausalMapping, CausalOverridePrecedesUniformLengthCheck)
     for(int pointer : {1, 2})
         EXPECT_EQ((capture<128, true>(2, 1, 3, -1, 0, 128, 128, true, pointer)), expected);
 }
-
-using ScheduledMappingKernel = ck_tile::FmhaFwdKernel<
-    ck_tile::BlockFmhaPipelineQRKSVSTdmSched<
-        MappingProblem<128,
-                       true,
-                       false,
-                       ck_tile::bf16_t,
-                       ck_tile::BlockAttentionBiasEnum::NO_BIAS,
-                       false,
-                       128>>,
-    ck_tile::Default2DEpilogue<
-        ck_tile::Default2DEpilogueProblem<float, ck_tile::bf16_t, false, false>>>;
 
 std::vector<int> capture_scheduled(
     bool bhsd, int tiles = 4, int ratio = 1, int variable_lengths = 0, int batches = 128)

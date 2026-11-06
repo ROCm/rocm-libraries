@@ -17,7 +17,7 @@ using namespace ck_tile;
 template <bool Mask>
 FmhaFwdTileIndex GridMapping(const FmhaFwdWorkgroupGrid& grid, const FmhaFwdWorkgroup& block)
 {
-    return MapFmhaFwdWorkgroup<Mask>({}, grid, block, 0);
+    return MapFmhaFwdWorkgroup<Mask, false, false>({}, grid, block, 0);
 }
 
 template <bool Mask>
@@ -25,26 +25,23 @@ FmhaFwdTileIndex
 HeadMajorMapping(const FmhaFwdWorkgroupGrid& grid, const FmhaFwdWorkgroup& block, index_t xcds)
 {
     FmhaFwdWorkgroupFeatures features{};
-    features.enable_head_major = true;
-    features.is_bhsd           = true;
-    features.uniform_lengths   = true;
-    return MapFmhaFwdWorkgroup<Mask>(features, grid, block, xcds);
+    features.is_bhsd         = true;
+    features.uniform_lengths = true;
+    return MapFmhaFwdWorkgroup<Mask, true, false>(features, grid, block, xcds);
 }
 
 FmhaFwdTileIndex CausalMapping(const FmhaFwdWorkgroupGrid& grid, const FmhaFwdWorkgroup& block)
 {
     FmhaFwdWorkgroupFeatures features{};
-    features.enable_head_major   = true;
-    features.enable_batch_causal = true;
-    features.is_bhsd             = true;
-    features.square_causal       = true;
-    return MapFmhaFwdWorkgroup<true>(features, grid, block, 8);
+    features.is_bhsd       = true;
+    features.square_causal = true;
+    return MapFmhaFwdWorkgroup<true, true, true>(features, grid, block, 8);
 }
 
 FmhaFwdTileIndex
 PairedMapping(const FmhaFwdWorkgroupGrid& grid, const FmhaFwdWorkgroup& block, index_t ratio)
 {
-    return MapFmhaFwdWorkgroup<true, true>({}, grid, block, 8, ratio);
+    return MapFmhaFwdWorkgroup<true, false, false, true>({}, grid, block, 8, ratio);
 }
 
 FmhaFwdWorkgroup PhysicalBlock(index_t linear, const FmhaFwdWorkgroupGrid& g)
@@ -61,19 +58,15 @@ TEST(FmhaFwdWorkgroupMapping, DisabledHeadMajorAndCausalGatesRetainTheirFallback
     const FmhaFwdWorkgroupGrid grid{2, 4, 1, 1, false};
     const FmhaFwdWorkgroup block{1, 0, 0};
     FmhaFwdWorkgroupFeatures features{};
-    features.enable_head_major   = true;
-    features.enable_batch_causal = true;
-    features.is_bhsd             = true;
-    features.square_causal       = true;
-    auto tile                    = MapFmhaFwdWorkgroup<true>(features, grid, block, 0);
+    features.is_bhsd       = true;
+    features.square_causal = true;
+    auto tile              = MapFmhaFwdWorkgroup<true, true, true>(features, grid, block, 0);
     EXPECT_EQ(tile.q_tile, 3);
     EXPECT_EQ(tile.head, 1);
-    features.enable_batch_causal = false;
-    tile                         = MapFmhaFwdWorkgroup<true>(features, grid, block, 0);
+    tile = MapFmhaFwdWorkgroup<true, true, false>(features, grid, block, 0);
     EXPECT_EQ(tile.q_tile, 2);
     EXPECT_EQ(tile.head, 0);
-    features.enable_head_major = false;
-    tile                       = MapFmhaFwdWorkgroup<true>(features, grid, block, 0);
+    tile = MapFmhaFwdWorkgroup<true, false, false>(features, grid, block, 0);
     EXPECT_EQ(tile.q_tile, 3);
     EXPECT_EQ(tile.head, 1);
 }
@@ -206,10 +199,12 @@ TEST(FmhaFwdWorkgroupMapping, BijectionsOnUnevenGridsAndMultipleVTiles)
                             FmhaFwdWorkgroupFeatures features{};
                             features.uniform_lengths = true;
                             CheckCoverage(g, [=](auto grid, auto block) {
-                                return MapFmhaFwdWorkgroup<false>(features, grid, block, xcds);
+                                return MapFmhaFwdWorkgroup<false, false, false>(
+                                    features, grid, block, xcds);
                             });
                             CheckCoverage(g, [=](auto grid, auto block) {
-                                return MapFmhaFwdWorkgroup<true>(features, grid, block, xcds);
+                                return MapFmhaFwdWorkgroup<true, false, false>(
+                                    features, grid, block, xcds);
                             });
                         }
                     }
@@ -247,7 +242,7 @@ TEST(FmhaFwdWorkgroupMapping, PairedOriginalOneFillOrder)
 FmhaFwdWorkgroupFeatures XcdCausalFeatures()
 {
     FmhaFwdWorkgroupFeatures f{};
-    f.enable_head_major = f.enable_batch_causal = f.is_bhsd = true;
+    f.is_bhsd         = true;
     f.uniform_lengths = f.square_causal = true;
     return f;
 }
@@ -277,8 +272,8 @@ TEST(FmhaFwdWorkgroupMapping, XcdCausalKeepsWholeHeadsAndBoundsConcurrentGroups)
             }
             for(int l = 0; l < rows * qtiles; ++l)
             {
-                const auto out =
-                    MapFmhaFwdWorkgroup<true, false, true>(features, g, PhysicalBlock(l, g), 8, 1);
+                const auto out = MapFmhaFwdWorkgroup<true, true, true, false, true>(
+                    features, g, PhysicalBlock(l, g), 8, 1);
                 EXPECT_EQ(out.q_tile, expected[l].q_tile);
                 EXPECT_EQ(out.v_tile, 0);
                 EXPECT_EQ(out.head, expected[l].head);
@@ -297,7 +292,7 @@ TEST(FmhaFwdWorkgroupMapping, XcdCausalCoverageAndBalancedWork)
             std::array<int, 8> costs{};
             CheckCoverage(g, [&](auto grid, auto block) {
                 const auto out =
-                    MapFmhaFwdWorkgroup<true, false, true>(features, grid, block, 8, 1);
+                    MapFmhaFwdWorkgroup<true, true, true, false, true>(features, grid, block, 8, 1);
                 const int xcd = FmhaFwdLinearWorkgroupId(grid, block) % 8;
                 costs[xcd] += out.q_tile + 1;
                 // A row belongs to exactly one XCD across all Q depths.
@@ -343,14 +338,16 @@ TEST(FmhaFwdWorkgroupMapping, XcdCausalEligibilityRetainsFallbacks)
         for(int l = 0; l < g.num_heads * g.num_qv_tiles * g.num_batches; ++l)
         {
             const auto block = PhysicalBlock(l, g);
-            const auto old   = MapFmhaFwdWorkgroup<true>(f, g, block, xcds, ratio);
-            const auto out   = MapFmhaFwdWorkgroup<true, false, true>(f, g, block, xcds, ratio);
+            const auto old   = MapFmhaFwdWorkgroup<true, true, true>(f, g, block, xcds, ratio);
+            const auto out =
+                MapFmhaFwdWorkgroup<true, true, true, false, true>(f, g, block, xcds, ratio);
             EXPECT_EQ(out.q_tile, old.q_tile);
             EXPECT_EQ(out.v_tile, old.v_tile);
             EXPECT_EQ(out.head, old.head);
             EXPECT_EQ(out.batch, old.batch);
-            const auto dense_old = MapFmhaFwdWorkgroup<false>(f, g, block, xcds, ratio);
-            const auto dense = MapFmhaFwdWorkgroup<false, false, true>(f, g, block, xcds, ratio);
+            const auto dense_old = MapFmhaFwdWorkgroup<false, true, true>(f, g, block, xcds, ratio);
+            const auto dense =
+                MapFmhaFwdWorkgroup<false, true, true, false, true>(f, g, block, xcds, ratio);
             EXPECT_EQ(dense.q_tile, dense_old.q_tile);
             EXPECT_EQ(dense.v_tile, dense_old.v_tile);
             EXPECT_EQ(dense.head, dense_old.head);
@@ -367,9 +364,11 @@ TEST(FmhaFwdWorkgroupMapping, PairedOptInKeepsItsOwnFallbackWithXcdCausalEnabled
         const FmhaFwdWorkgroupGrid grid{2, qtiles, 128, 1, false};
         for(int l = 0; l < 256 * qtiles; ++l)
         {
-            const auto block  = PhysicalBlock(l, grid);
-            const auto paired = MapFmhaFwdWorkgroup<true, true>(features, grid, block, 8, 1);
-            const auto both   = MapFmhaFwdWorkgroup<true, true, true>(features, grid, block, 8, 1);
+            const auto block = PhysicalBlock(l, grid);
+            const auto paired =
+                MapFmhaFwdWorkgroup<true, true, true, true>(features, grid, block, 8, 1);
+            const auto both =
+                MapFmhaFwdWorkgroup<true, true, true, true, true>(features, grid, block, 8, 1);
             EXPECT_EQ(both.q_tile, paired.q_tile);
             EXPECT_EQ(both.v_tile, paired.v_tile);
             EXPECT_EQ(both.head, paired.head);

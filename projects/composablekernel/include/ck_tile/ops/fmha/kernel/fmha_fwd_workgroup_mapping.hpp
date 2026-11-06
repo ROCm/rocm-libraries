@@ -39,11 +39,9 @@ struct FmhaFwdTileIndex
 // layout and sequence properties. No Kargs fields or launch ABI are added.
 struct FmhaFwdWorkgroupFeatures
 {
-    bool enable_head_major   = false;
-    bool enable_batch_causal = false;
-    bool is_bhsd             = false;
-    bool uniform_lengths     = false;
-    bool square_causal       = false;
+    bool is_bhsd         = false;
+    bool uniform_lengths = false;
+    bool square_causal   = false;
 };
 
 // Existing opt-in tm5r topology assumptions. These are not inferred from num_xcds
@@ -56,6 +54,47 @@ struct FmhaFwdPairedXccConfig
     static constexpr index_t kFullStreamsPerXcc = 8;
     static_assert((kCount & (kCount - 1)) == 0, "paired XCC count must be a power of two");
 };
+
+// Measured topology and working-set bounds for scheduled BF16 D128 causal MHA.
+// A different CK_TILE_XCD_REMAP_NUM_XCDS override retains the existing fallback.
+struct FmhaFwdXcdCausalConfig
+{
+    static constexpr index_t kCount        = 8;
+    static constexpr index_t kMinGroupRows = 4;
+    static constexpr index_t kMaxGroupRows = 16;
+    static constexpr index_t kRowDivisor   = kCount * kMinGroupRows;
+    static constexpr index_t kMaxQTiles    = 16;
+    static constexpr index_t kMinGroupBits = integer_log2_floor(kMinGroupRows);
+    static constexpr index_t kMaxGroupBits = integer_log2_floor(kMaxGroupRows);
+    static_assert(is_power_of_two_integer(kCount) && is_power_of_two_integer(kMinGroupRows) &&
+                  is_power_of_two_integer(kMaxGroupRows));
+    static_assert(kMaxGroupRows == 4 * kMinGroupRows,
+                  "group selection assumes three consecutive power-of-two sizes");
+};
+
+struct FmhaFwdPairedPartition
+{
+    index_t rows;
+    index_t parts;
+};
+
+CK_TILE_HOST_DEVICE constexpr FmhaFwdPairedPartition
+FmhaFwdGetPairedPartition(const FmhaFwdWorkgroupGrid& grid)
+{
+    const index_t rows = grid.num_batches * grid.num_heads;
+    const index_t gcd  = ck_tile::min(FmhaFwdPairedXccConfig::kCount, rows & -rows);
+    return {rows / gcd, FmhaFwdPairedXccConfig::kCount / gcd};
+}
+
+CK_TILE_HOST_DEVICE constexpr FmhaFwdTileIndex FmhaFwdBroadcastTileIndex(FmhaFwdTileIndex tile)
+{
+#if defined(__HIP_DEVICE_COMPILE__)
+    tile.q_tile = amd_wave_read_first_lane(tile.q_tile);
+    tile.head   = amd_wave_read_first_lane(tile.head);
+    tile.batch  = amd_wave_read_first_lane(tile.batch);
+#endif
+    return tile;
+}
 
 CK_TILE_HOST_DEVICE constexpr index_t FmhaFwdLinearWorkgroupId(const FmhaFwdWorkgroupGrid& grid,
                                                                const FmhaFwdWorkgroup& block)
@@ -73,11 +112,11 @@ CK_TILE_HOST_DEVICE constexpr FmhaFwdTileIndex MapFmhaFwdPairedWorkgroup(
     using Config            = FmhaFwdPairedXccConfig;
     const index_t linear_id = FmhaFwdLinearWorkgroupId(grid, block);
     const index_t num_row   = grid.num_batches * grid.num_heads;
-    const index_t gcd       = ck_tile::min(Config::kCount, num_row & -num_row);
-    const index_t parts     = Config::kCount / gcd;
+    const auto partition    = FmhaFwdGetPairedPartition(grid);
+    const index_t parts     = partition.parts;
     const index_t xcc       = linear_id % Config::kCount;
     const index_t slot      = linear_id / Config::kCount;
-    const index_t rows      = num_row / gcd;
+    const index_t rows      = partition.rows;
     const index_t pairs     = grid.num_qv_tiles / (2 * parts);
     const index_t deep      = rows * pairs;
     const index_t tiles     = 2 * deep;
@@ -115,11 +154,44 @@ CK_TILE_HOST_DEVICE constexpr FmhaFwdTileIndex MapFmhaFwdPairedWorkgroup(
     return {shallow ? q : grid.num_qv_tiles - 1 - q, 0, row - batch * grid.num_heads, batch};
 }
 
-// Map a normalized physical workgroup directly to its logical tile. Selection
-// and decoding remain inside this entry; no policy or intermediate ID escapes.
-// Eligibility is supplied at compile time. EnablePaired retains the opt-in
-// experiment; EnableXcdCausal enables the measured gfx1250 causal grouping.
-template <bool HasMask, bool EnablePaired = false, bool EnableXcdCausal = false>
+// Pure coordinates for XCD-owned rows, with heavy Q tiles first in bounded groups.
+// Requires a valid grid/block admitted by the XcdCausal selector: rows divisible
+// by kRowDivisor, one V tile, no padded K lengths and the configured XCD count.
+CK_TILE_HOST_DEVICE constexpr FmhaFwdTileIndex
+MapFmhaFwdXcdCausalWorkgroup(const FmhaFwdWorkgroupGrid& grid, const FmhaFwdWorkgroup& block)
+{
+    using Config                = FmhaFwdXcdCausalConfig;
+    const uint32_t rows         = grid.num_batches * grid.num_heads;
+    const uint32_t rows_per_xcd = rows / Config::kCount;
+    // gcd(rows_per_xcd, kMaxGroupRows) is one of the three configured group sizes.
+    // Explicit shifts avoid a runtime division by the group size.
+    const uint32_t group_bits =
+        rows % (Config::kCount * Config::kMaxGroupRows) == 0       ? Config::kMaxGroupBits
+        : rows % (Config::kCount * Config::kMaxGroupRows / 2) == 0 ? Config::kMaxGroupBits - 1
+                                                                   : Config::kMinGroupBits;
+    const uint32_t group     = 1u << group_bits;
+    const uint32_t linear    = FmhaFwdLinearWorkgroupId(grid, block);
+    const uint32_t slot      = linear / Config::kCount;
+    const uint32_t tile_slot = slot >> group_bits;
+    const uint32_t chunk     = tile_slot / static_cast<uint32_t>(grid.num_qv_tiles);
+    const uint32_t q         = grid.num_qv_tiles - 1 - (tile_slot - chunk * grid.num_qv_tiles);
+    const uint32_t row =
+        (linear % Config::kCount) * rows_per_xcd + chunk * group + (slot & (group - 1));
+    const uint32_t batch = row / static_cast<uint32_t>(grid.num_heads);
+    return {static_cast<index_t>(q),
+            0,
+            static_cast<index_t>(row - batch * grid.num_heads),
+            static_cast<index_t>(batch)};
+}
+
+// Map a normalized physical workgroup directly to its logical tile. Pipeline
+// eligibility is compile-time; only layout, sequence and topology facts are runtime.
+// Paired opt-in and its fallback take precedence over the measured XCD grouping.
+template <bool HasMask,
+          bool EnableHeadMajor,
+          bool EnableBatchCausal,
+          bool EnablePaired    = false,
+          bool EnableXcdCausal = false>
 CK_TILE_HOST_DEVICE constexpr FmhaFwdTileIndex
 MapFmhaFwdWorkgroup(const FmhaFwdWorkgroupFeatures& features,
                     const FmhaFwdWorkgroupGrid& grid,
@@ -136,84 +208,70 @@ MapFmhaFwdWorkgroup(const FmhaFwdWorkgroupFeatures& features,
         BhsdXcd,
         GridXcd,
         PairedCausal,
+        XcdCausal,
     };
     const auto path = [&]() {
-        if(HasMask && EnablePaired && grid.num_v_tiles == 1)
+        // This source structure is codegen-sensitive with HIP 7.16 on gfx1250:
+        // checking XCD eligibility first added ~0.2 us to small causal kernels.
+        // Retest structural/compiler changes; this does not enforce runtime order.
+        const auto fallback = [&]() {
+            if constexpr(HasMask && EnablePaired)
+            {
+                if(grid.num_v_tiles == 1)
+                {
+                    const auto partition = FmhaFwdGetPairedPartition(grid);
+                    return grid.num_qv_tiles % (2 * partition.parts) == 0 ? Path::PairedCausal
+                                                                          : Path::BatchCausal;
+                }
+            }
+
+            if constexpr(EnableHeadMajor)
+            {
+                if(features.is_bhsd)
+                {
+                    // Preserve the batch-local causal override ahead of generic XCD remap.
+                    if constexpr(HasMask && EnableBatchCausal)
+                    {
+                        if(features.square_causal && grid.num_v_tiles == 1)
+                            return Path::BatchCausal;
+                    }
+                    return num_xcds > 0 && features.uniform_lengths ? Path::BhsdXcd
+                                                                    : Path::HeadMajor;
+                }
+            }
+
+            // Whole-batch XCD segments can be unbalanced with variable effective lengths.
+            if(num_xcds > 0 && !grid.has_padded_seqlen_k && features.uniform_lengths &&
+               grid.num_qv_tiles > 1 &&
+               (!HasMask || grid.num_heads * grid.num_batches >= num_xcds * grid.num_qv_tiles))
+                return Path::GridXcd;
+            return Path::Grid;
+        }();
+        if constexpr(HasMask && EnableXcdCausal && !EnablePaired)
         {
-            const index_t rows  = grid.num_batches * grid.num_heads;
-            const index_t gcd   = ck_tile::min(FmhaFwdPairedXccConfig::kCount, rows & -rows);
-            const index_t parts = FmhaFwdPairedXccConfig::kCount / gcd;
-            return grid.num_qv_tiles % (2 * parts) == 0 ? Path::PairedCausal : Path::BatchCausal;
+            using Config = FmhaFwdXcdCausalConfig;
+            // Whole rows retain K/V locality; bounded groups avoid the measured
+            // regressions from traversing every owned head at each Q depth.
+            // M128 keeps Q <= 2048: larger working sets retain the existing order.
+            if(num_xcds == Config::kCount && features.uniform_lengths && features.square_causal &&
+               !grid.has_padded_seqlen_k && grid.num_v_tiles == 1 && nhead_ratio_qk == 1 &&
+               (grid.num_batches * grid.num_heads) % Config::kRowDivisor == 0 &&
+               grid.num_qv_tiles > 1 && grid.num_qv_tiles <= Config::kMaxQTiles)
+                return Path::XcdCausal;
         }
 
-        if(features.enable_head_major && features.is_bhsd)
-        {
-            // Preserve the batch-local causal override, including its precedence over XCD remap.
-            if(HasMask && features.enable_batch_causal && features.square_causal &&
-               grid.num_v_tiles == 1)
-                return Path::BatchCausal;
-            return num_xcds > 0 && features.uniform_lengths ? Path::BhsdXcd : Path::HeadMajor;
-        }
-
-        // Short batches must retain their existing distribution: whole-batch XCD
-        // segments can become unbalanced when effective sequence lengths differ.
-        if(num_xcds > 0 && !grid.has_padded_seqlen_k && features.uniform_lengths &&
-           grid.num_qv_tiles > 1 &&
-           (!HasMask || grid.num_heads * grid.num_batches >= num_xcds * grid.num_qv_tiles))
-            return Path::GridXcd;
-        return Path::Grid;
+        return fallback;
     }();
-    if constexpr(EnablePaired)
+    if constexpr(HasMask && EnablePaired)
     {
         if(path == Path::PairedCausal)
-        {
-            auto tile = MapFmhaFwdPairedWorkgroup(grid, block, nhead_ratio_qk);
-#if defined(__HIP_DEVICE_COMPILE__)
-            tile.q_tile = amd_wave_read_first_lane(tile.q_tile);
-            tile.head   = amd_wave_read_first_lane(tile.head);
-            tile.batch  = amd_wave_read_first_lane(tile.batch);
-#endif
-            return tile;
-        }
+            return FmhaFwdBroadcastTileIndex(
+                MapFmhaFwdPairedWorkgroup(grid, block, nhead_ratio_qk));
     }
-    // Assign whole (batch, head) rows to XCDs, then visit heavy Q tiles first
-    // within groups of at most 16 rows. This avoids the measured regressions
-    // of traversing every owned head at each Q depth.
-    // Require at least four rows per XCD. Other grids,
-    // variable lengths and GQA retain their existing mapping below.
-    // The measured M128/D128 family keeps Q <= 2048: larger K/V sets
-    // regress with 16-row groups, so retain the existing long-sequence order.
-    if constexpr(EnableXcdCausal && !EnablePaired)
+    else if constexpr(HasMask && EnableXcdCausal)
     {
-        if(HasMask && num_xcds == 8 && features.uniform_lengths && features.square_causal &&
-           !grid.has_padded_seqlen_k && grid.num_v_tiles == 1 && nhead_ratio_qk == 1 &&
-           (grid.num_batches * grid.num_heads) % 32 == 0 && grid.num_qv_tiles > 1 &&
-           grid.num_qv_tiles <= 16)
-        {
-            const uint32_t rows         = grid.num_batches * grid.num_heads;
-            const uint32_t rows_per_xcd = rows / 8;
-            // gcd(rows_per_xcd, 16) is 4, 8 or 16 under the divisibility guard.
-            // Explicit shifts avoid a runtime division by the group size.
-            const uint32_t group_bits = rows % 128 == 0 ? 4 : rows % 64 == 0 ? 3 : 2;
-            const uint32_t group      = 1u << group_bits;
-            const uint32_t linear     = FmhaFwdLinearWorkgroupId(grid, block);
-            const uint32_t slot       = linear / 8;
-            const uint32_t tile_slot  = slot >> group_bits;
-            const uint32_t chunk      = tile_slot / static_cast<uint32_t>(grid.num_qv_tiles);
-            const uint32_t q   = grid.num_qv_tiles - 1 - (tile_slot - chunk * grid.num_qv_tiles);
-            const uint32_t row = (linear % 8) * rows_per_xcd + chunk * group + (slot & (group - 1));
-            const uint32_t batch = row / static_cast<uint32_t>(grid.num_heads);
-            FmhaFwdTileIndex tile{static_cast<index_t>(q),
-                                  0,
-                                  static_cast<index_t>(row - batch * grid.num_heads),
-                                  static_cast<index_t>(batch)};
-#if defined(__HIP_DEVICE_COMPILE__)
-            tile.q_tile = amd_wave_read_first_lane(tile.q_tile);
-            tile.head   = amd_wave_read_first_lane(tile.head);
-            tile.batch  = amd_wave_read_first_lane(tile.batch);
-#endif
-            return tile;
-        }
+        if(path == Path::XcdCausal)
+            return FmhaFwdBroadcastTileIndex(MapFmhaFwdXcdCausalWorkgroup(grid, block));
     }
     if(path == Path::BatchCausal)
         return {grid.num_qv_tiles - 1 - block.tile, 0, block.head, block.batch};

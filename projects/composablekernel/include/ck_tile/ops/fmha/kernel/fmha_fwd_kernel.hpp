@@ -275,15 +275,16 @@ struct FmhaFwdKernel
         detail::uses_qr_tdm_lds_arena_v<FmhaPipeline> || kIsTdmSchedD128 ||
         (kPipelineName == "qr_tdm_sched" && FmhaPipeline::BlockFmhaShape::kQKHeaddim == 64);
 
-#if defined(CK_TILE_FMHA_PAIRED_XCC_ORDER) && CK_TILE_FMHA_PAIRED_XCC_ORDER
-    // Experimental mode 5/tm5r assumes eight XCCs and a specific WG-to-WGP mapping.
-    // Recheck those hardware assumptions before enabling this path on a target machine.
-    static constexpr index_t kPairedXccCount         = FmhaFwdPairedXccConfig::kCount;
-    static constexpr index_t kPairedXccWgpsPerXcc    = FmhaFwdPairedXccConfig::kWgpsPerXcc;
-    static constexpr index_t kPairedXccFullWgsPerXcc = FmhaFwdPairedXccConfig::kFullWgsPerXcc;
-    static constexpr index_t kPairedXccFullStreamsPerXcc =
-        FmhaFwdPairedXccConfig::kFullStreamsPerXcc;
-#endif
+    // This family was measured without LSE output. Keep LSE-writing variants
+    // on their existing mapping until their performance is validated separately.
+    // GetTileIndex applies architecture and runtime layout/length/topology gates per workgroup.
+    static constexpr bool kSupportsXcdCausalOrder =
+        kHasMask && !kIsGroupMode && kIsTdmSchedD128 && FmhaPipeline::kM0 == 128 &&
+        FmhaPipeline::kN0 == 128 && std::is_same_v<QDataType, ck_tile::bf16_t> &&
+        std::is_same_v<KDataType, ck_tile::bf16_t> && std::is_same_v<VDataType, ck_tile::bf16_t> &&
+        !kStoreLSE && !kHasDropout && !kHasSink && !kHasLogitsSoftCap &&
+        BiasEnum == BlockAttentionBiasEnum::NO_BIAS &&
+        QScaleEnum == BlockAttentionQuantScaleEnum::NO_SCALE;
 
 #if defined(__gfx950__)
     static constexpr bool kIsAvailable = true;
@@ -1683,9 +1684,11 @@ struct FmhaFwdKernel
 #else
         constexpr bool kSkipHeadMajor = false;
 #endif
-        features.enable_head_major = !kSkipHeadMajor;
+        constexpr bool kEnableHeadMajor = !kSkipHeadMajor;
+#else
+        constexpr bool kEnableHeadMajor = false;
 #endif
-        features.enable_batch_causal =
+        constexpr bool kEnableBatchCausal =
             kHasMask && !kIsGroupMode && !kHasDropout && kUseBatchLocalCausalOrder;
         // The head-stride guard avoids the single-head BSHD false positive.
         features.is_bhsd = kargs.stride_q == kargs.hdim_q && kargs.nhead_stride_q > kargs.hdim_q;
@@ -1704,20 +1707,17 @@ struct FmhaFwdKernel
 #else
         constexpr bool kEnablePaired = false;
 #endif
-// Keep the new grouping on the measured scheduled BF16 D128/M128/N128
-// instance family. Runtime layout/length/topology guards live in the mapper.
+// The measured device pass is gfx1250; gfx1250-strict retains its fallback.
 #if defined(__gfx1250__)
-        constexpr bool kEnableXcdCausal =
-            kHasMask && !kIsGroupMode && kIsTdmSchedD128 && FmhaPipeline::kM0 == 128 &&
-            FmhaPipeline::kN0 == 128 && std::is_same_v<QDataType, ck_tile::bf16_t> &&
-            std::is_same_v<KDataType, ck_tile::bf16_t> &&
-            std::is_same_v<VDataType, ck_tile::bf16_t> && !kStoreLSE && !kHasDropout && !kHasSink &&
-            !kHasLogitsSoftCap && BiasEnum == BlockAttentionBiasEnum::NO_BIAS &&
-            QScaleEnum == BlockAttentionQuantScaleEnum::NO_SCALE;
+        constexpr bool kEnableXcdCausal = kSupportsXcdCausalOrder;
 #else
         constexpr bool kEnableXcdCausal = false;
 #endif
-        const auto tile = MapFmhaFwdWorkgroup<kHasMask, kEnablePaired, kEnableXcdCausal>(
+        const auto tile = MapFmhaFwdWorkgroup<kHasMask,
+                                              kEnableHeadMajor,
+                                              kEnableBatchCausal,
+                                              kEnablePaired,
+                                              kEnableXcdCausal>(
             features, grid, block, CK_TILE_XCD_REMAP_NUM_XCDS, kargs.nhead_ratio_qk);
         return ck_tile::make_tuple(tile.q_tile, tile.v_tile, tile.head, tile.batch);
     }
