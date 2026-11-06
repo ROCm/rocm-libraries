@@ -270,6 +270,7 @@ def test_tile_sweep_runs_the_table_sweep_stage_one_and_fails_closed(
     through ``decode_table_sweep`` and fails on any configuration that did not
     pass and time."""
     calls = []
+    autos = []  # the invented auto time of each fake run: stub input, not a result
 
     def fake_stage1(shape, auto, configs, indices, opts, meta):
         calls.append((shape, list(indices), opts.bases_only, opts.rotate_mb))
@@ -278,6 +279,7 @@ def test_tile_sweep_runs_the_table_sweep_stage_one_and_fails_closed(
             for i, r in enumerate(configs)
         ]
         rows[-1]["us"] = 9.0 if shape.batch == 1 else 30.0
+        autos.append(rows[-1]["us"])
         rows[0]["status"] = "fail" if shape.batch == 8 else "ok"
         return rows
 
@@ -307,7 +309,7 @@ def test_tile_sweep_runs_the_table_sweep_stage_one_and_fails_closed(
     assert len(idx1) == 55
     out = capsys.readouterr().out
     auto_id = bench.dispatch_gdn_decode(s1.request()).spec.tuning_id
-    assert f"auto={auto_id} 9.000us" in out and "auto/fastest=1.000" in out
+    assert f"auto={auto_id} {autos[0]:.3f}us" in out and "auto/fastest=1.000" in out
     assert len(failures.messages) == 1 and "batch 8" in failures.messages[0]
 
 
