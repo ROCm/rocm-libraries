@@ -63,4 +63,14 @@ extern "C" HIPDNN_PLUGIN_EXPORT void
     hip_kernel_provider::kernel_ingestor_engine::setGfx950ConvDgradAotBatchChunkByteLimitForTesting(
         limit);
 }
+
+/// The implicit-GEMM kernel launches hipkernel:Gfx950ConvDgradAot has made inside this
+/// loaded plugin, one per batch slice, so a test can tell a sliced launch from a whole
+/// one. FOR TESTS ONLY, exported for the same reason as the hooks above.
+extern "C" HIPDNN_PLUGIN_EXPORT int64_t
+    hipdnnEnginePluginGfx950ConvDgradAotImplicitLaunchCountForTesting()
+{
+    return hip_kernel_provider::kernel_ingestor_engine::
+        gfx950ConvDgradAotImplicitLaunchCountForTesting();
+}
 #endif // HIPDNN_ENABLE_KERNEL_INGESTOR

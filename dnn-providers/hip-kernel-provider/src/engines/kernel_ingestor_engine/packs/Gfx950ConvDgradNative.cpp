@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
@@ -807,6 +808,14 @@ private:
     bool _zeroDx;
 };
 
+/// Implicit-GEMM kernel launches this plugin has made, over the process: one per batch
+/// slice. Read by tests only (gfx950ConvDgradAotImplicitLaunchCountForTesting).
+std::atomic<int64_t>& implicitLaunchCount()
+{
+    static std::atomic<int64_t> s_count{0};
+    return s_count;
+}
+
 class ConvDgradDispatchHandler : public IKernelDispatchHandler<Handle>
 {
 public:
@@ -1018,6 +1027,10 @@ public:
                 params.push_back(const_cast<int32_t*>(&step.values.back()));
             }
             code.kernelForStream(stream).launchWithParams(stream, params.data());
+            if(step.abi == dgrad::Abi::IMPLICIT)
+            {
+                implicitLaunchCount().fetch_add(1, std::memory_order_relaxed);
+            }
         }
     }
 
@@ -1061,6 +1074,11 @@ void resetGfx950ConvDgradAotModuleCache()
 void setGfx950ConvDgradAotBatchChunkByteLimitForTesting(int64_t limit)
 {
     dgrad::batchChunkByteLimitForTesting() = limit;
+}
+
+int64_t gfx950ConvDgradAotImplicitLaunchCountForTesting()
+{
+    return implicitLaunchCount().load(std::memory_order_relaxed);
 }
 
 } // namespace hip_kernel_provider::kernel_ingestor_engine

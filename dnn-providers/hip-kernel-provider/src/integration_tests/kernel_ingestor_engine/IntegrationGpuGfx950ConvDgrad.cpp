@@ -87,6 +87,9 @@ constexpr const char* DIRECT_VARIANT_KNOB = "direct_variant";
 constexpr int64_t IMPLICIT_GEMM_FAMILY = 0;
 constexpr int64_t DIRECT_FAMILY = 1;
 constexpr int64_t HELPER_FAMILY = 2;
+/// The NaN tail executeAndVerify places after dX: a kernel's store past dX's end lands in
+/// it. Wider than any one workgroup's dX tile row.
+constexpr size_t DX_GUARD_BYTES = 64 * 1024;
 /// Every direct_variant a selectable kernel carries, "none" being implicit GEMM; the order
 /// of DgradGraph's counts.
 constexpr std::array<const char*, 7> VARIANTS{"none",
@@ -777,12 +780,36 @@ protected:
             ASSERT_EQ(hipMemsetAsync(_workspace, 0xFF, _workspaceSize, _stream), hipSuccess);
         }
         // Every dX element the kernel does not write stays NaN and fails the comparison.
-        reference.gpu->getTensor(DX_UID).fillWithSentinelValue();
+        auto& dx = reference.gpu->getTensor(DX_UID);
+        dx.fillWithSentinelValue();
         auto buffers = reference.gpu->toDeviceVariantPack();
+        // dX runs in a copy followed by a NaN guard tail, which a write past its end would
+        // change: the comparison below sees only dX itself.
+        const auto dxBytes = dx.elementSpace() * dx.elementSize();
+        void* guarded = nullptr;
+        ASSERT_EQ(hipMalloc(&guarded, dxBytes + DX_GUARD_BYTES), hipSuccess);
+        const std::unique_ptr<void, hipError_t (*)(void*)> guardedOwner(guarded, hipFree);
+        auto* tail = static_cast<char*>(guarded) + dxBytes;
+        ASSERT_EQ(
+            hipMemcpyAsync(guarded, buffers.at(DX_UID), dxBytes, hipMemcpyDeviceToDevice, _stream),
+            hipSuccess);
+        ASSERT_EQ(hipMemsetAsync(tail, 0xFF, DX_GUARD_BYTES, _stream), hipSuccess);
+        buffers[DX_UID] = guarded;
         result = graph.execute(_handle, buffers, workspaceSize > 0 ? _workspace : nullptr);
         ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+        ASSERT_EQ(
+            hipMemcpyAsync(dx.rawDeviceData(), guarded, dxBytes, hipMemcpyDeviceToDevice, _stream),
+            hipSuccess);
+        std::vector<unsigned char> guard(DX_GUARD_BYTES);
+        ASSERT_EQ(
+            hipMemcpyAsync(guard.data(), tail, DX_GUARD_BYTES, hipMemcpyDeviceToHost, _stream),
+            hipSuccess);
         ASSERT_EQ(hipStreamSynchronize(_stream), hipSuccess);
-        reference.gpu->getTensor(DX_UID).markDeviceModified();
+        dx.markDeviceModified();
+        const auto written
+            = std::find_if(guard.begin(), guard.end(), [](unsigned char b) { return b != 0xFF; });
+        EXPECT_EQ(written, guard.end())
+            << "the plan wrote " << (written - guard.begin()) << " byte(s) past the end of dX";
 
         // FP32 accumulation followed by a low-precision store; inputs bounded to [-1,1].
         const float relativeTolerance = dtype == DataType::HALF ? 0.002F : 0.016F;
@@ -1064,17 +1091,51 @@ public:
 // never otherwise runs: every other case's images fit the kernels' 32-bit ABI whole. With
 // the chunk limit lowered for the test alone, N=3 of a 64x64x64 fp16 image (one image
 // 524288 bytes; the limit below fits one but not two) splits into three single-image
-// launches, each checked against the CPU reference.
+// launches, each checked against the CPU reference. Only the implicit-GEMM plan slices,
+// so the family is pinned, and the provider's launch count must grow by three: an
+// unsliced launch of the graph fails it.
 TEST_F(IntegrationGpuGfx950ConvDgradAot, ABatchPastTheChunkLimitRunsAsSlicesOnDevice)
 {
+    constexpr int64_t CHUNK_LIMIT = 600000;
     const DgradVariant variant{"BatchChunk", DataType::HALF, std::nullopt};
     const DgradProblem problem{3, 64, 64, 64, 64, 3, 3, 1, 1, 1, 1, 1, 1, 1};
-    const ScopedBatchChunkLimit chunkLimit(600000);
+    {
+        // The geometry's own slicing at this limit, in this binary's copy of it.
+        auto& limit = gfx950_conv_dgrad::batchChunkByteLimitForTesting();
+        const auto saved = limit;
+        limit = CHUNK_LIMIT;
+        const gfx950_conv_dgrad::Problem p{problem.n,
+                                           problem.c,
+                                           problem.k,
+                                           problem.hi,
+                                           problem.wi,
+                                           problem.y,
+                                           problem.x,
+                                           problem.strideH,
+                                           problem.strideW,
+                                           problem.padH,
+                                           problem.padW,
+                                           problem.dilationH,
+                                           problem.dilationW,
+                                           problem.groups};
+        const auto geometry = gfx950_conv_dgrad::deriveGeometry(p);
+        const auto chunks = geometry ? gfx950_conv_dgrad::batchChunks(p, *geometry) : std::nullopt;
+        limit = saved;
+        ASSERT_TRUE(chunks);
+        ASSERT_EQ(chunks->size(), 3U);
+    }
+    const ScopedBatchChunkLimit chunkLimit(CHUNK_LIMIT);
     auto reference = makeReference(variant, problem, 97);
 
     auto graph = buildDgradGraph(variant.dtype, problem);
-    ASSERT_NO_FATAL_FAILURE(buildAndCompile(*graph, {benchmarkingKnob(false)}));
+    ASSERT_NO_FATAL_FAILURE(buildAndCompile(
+        *graph, {KnobSetting(KERNEL_FAMILY_KNOB, IMPLICIT_GEMM_FAMILY), benchmarkingKnob(false)}));
+    std::string error;
+    const auto before = detail::providerDgradImplicitLaunchCount(error);
+    ASSERT_GE(before, 0) << error;
     ASSERT_NO_FATAL_FAILURE(executeAndVerify(*graph, variant.dtype, reference));
+    EXPECT_EQ(detail::providerDgradImplicitLaunchCount(error) - before, 3)
+        << "the plan did not run as three slices";
 }
 
 // ---- Per dtype: every catalog instance pinned and checked ----

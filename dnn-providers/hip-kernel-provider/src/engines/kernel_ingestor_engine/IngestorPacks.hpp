@@ -136,6 +136,10 @@ void resetGfx950ConvDgradAotModuleCache();
 /// plan build actually reads; this function runs inside the plugin. FOR TESTS ONLY.
 void setGfx950ConvDgradAotBatchChunkByteLimitForTesting(int64_t limit);
 
+/// The implicit-GEMM kernel launches hipkernel:Gfx950ConvDgradAot has made in this
+/// process, one per batch slice: how a test sees that a plan ran sliced. FOR TESTS ONLY.
+int64_t gfx950ConvDgradAotImplicitLaunchCountForTesting();
+
 /// Drops every pack's cached kpack modules and closes every kpack archive
 /// SharedKpackArchives retains, so the next dispatch re-reads its archive from disk. Leases
 /// stay held: the archive that next dispatch opens is retained again.

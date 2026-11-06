@@ -138,6 +138,32 @@ inline std::string setProviderDgradBatchChunkByteLimit(int64_t limit)
     return {};
 }
 
+// The loaded provider's count of hipkernel:Gfx950ConvDgradAot implicit-GEMM launches, one
+// per batch slice (exported as
+// hipdnnEnginePluginGfx950ConvDgradAotImplicitLaunchCountForTesting). Writes a
+// description of the failure to error and returns -1 if the hook is not there.
+inline int64_t providerDgradImplicitLaunchCount(std::string& error)
+{
+    const auto pluginPath = loadedProviderPluginPath();
+    auto* library = hipdnn_data_sdk::utilities::openLoadedLibrary(pluginPath);
+    if(library == nullptr)
+    {
+        error = "the provider at " + pluginPath.string() + " is not loaded";
+        return -1;
+    }
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
+    auto* count = reinterpret_cast<int64_t (*)()>(hipdnn_data_sdk::utilities::getSymbol(
+        library, "hipdnnEnginePluginGfx950ConvDgradAotImplicitLaunchCountForTesting"));
+    const auto value = count == nullptr ? -1 : count();
+    if(count == nullptr)
+    {
+        error = "the provider at " + pluginPath.string()
+                + " exports no hipdnnEnginePluginGfx950ConvDgradAotImplicitLaunchCountForTesting";
+    }
+    hipdnn_data_sdk::utilities::closeLibrary(library);
+    return value;
+}
+
 // Replaces handle with a new hipDNN handle that uses stream.
 // Destroy every graph built with the old handle before you call this function.
 // When no other handle is alive, the next plugin handle gets a new provider container.
