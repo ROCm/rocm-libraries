@@ -14,8 +14,14 @@ the prediction is re-derived for the new path, never widened to absorb it.
 
 from __future__ import annotations
 
+import ast
+import dataclasses
+import inspect
+import json
 import re
 import struct
+import subprocess
+import sys
 from collections import Counter
 from collections.abc import Mapping
 from dataclasses import dataclass, field
@@ -28,39 +34,59 @@ import pytest
 from rocke.numeric.bf16 import f32_to_bf16
 
 from ._p4_shared_analytical import (
+    UNIFORM_CALIBRATION,
     UNIFORM_QUICK_CASES,
     UniformCase,
+    UniformObservation,
     encode_bits,
     legal_interval,
     target_bits,
     uniform_expected_bits,
 )
-from ._p4_shared_subject import _resolve_tuning_spec
+from ._p4_shared_subject import (
+    _resolve_tuning_spec,
+    _shape,
+    _validate_supported_case,
+    resolve_dense_subject,
+    run_dense_case,
+)
 from ._p4_analytical import (
     F32_SMALLEST_SUBNORMAL,
     MASKED_SCORE,
     P4_EXPOSURES,
     P4_HEAD_LOGITS,
     P4_HEAD_SCALE_MARGIN,
+    P4_ASSUMPTIONS,
+    P4_CALIBRATION,
+    P4_FAILURE_LABELS,
     P4_HEAD_SCALES,
+    P4_POLICY,
     P4_QUICK_CASES,
+    P4_SEPARATION_ROWS,
     P4_SEARCH_BASES,
     P4_UNSEPARATED,
     SCORE_SCALE,
     SEPARATION_LABELS,
     F32Interval,
+    P4CalibrationEntry,
     P4Case,
     P4Fixture,
+    P4Label,
     P4Mutation,
+    analyze_p4_policy,
     applicable_mutations,
     certified_target_bits,
     coordinate_class,
     emulate_row,
+    format_p4_result,
     format_separation,
     head_scale_margin,
     mutation_separation,
+    p4_diagnostics,
     p4_inputs,
     p4_query_key,
+    p4_records,
+    require_p4_calibration,
     row_logit,
     row_trace,
     score,
@@ -1251,3 +1277,474 @@ def test_mutant_paths_lie_inside_their_tier_b(case: P4Case) -> None:
                             row,
                             head,
                         )
+
+
+# ---------------------------------------------------------------------------
+# Analyzer policy and failure taxonomy (Phase 3).
+# ---------------------------------------------------------------------------
+
+
+def _tier_b_observation(case: P4Case, end: int = 0) -> UniformObservation:
+    """Synthetic outputs at one end (0 low, 1 high) of every Tier B set."""
+    return UniformObservation(
+        tuple(
+            (exposure, tier_b_exposure(case, exposure)[end])
+            for exposure in P4_EXPOSURES
+        )
+    )
+
+
+def _with_bits(
+    observation: UniformObservation,
+    exposure: str,
+    coordinate: tuple[int, int, int, int],
+    bits: int,
+) -> UniformObservation:
+    exposures = []
+    for name, values in observation.exposures:
+        values = values.copy()
+        if name == exposure:
+            values[coordinate] = bits
+        exposures.append((name, values))
+    return UniformObservation(tuple(exposures))
+
+
+@pytest.mark.parametrize("case", P4_QUICK_CASES, ids=_quick_id)
+def test_structural_zeros_have_tier_b_plus_zero(case: P4Case) -> None:
+    """I3 / T4: every structural coordinate (masked, no target) has Tier B
+    ``{+0}``. The quick matrix has no trailing basis coordinate and no keyless
+    row, so those sentinels cannot occur here."""
+    for exposure in P4_EXPOSURES:
+        low, high = tier_b_exposure(case, exposure)
+        radius = tier_a_exposure(case, exposure)[1]
+        structural = radius == 0
+        assert np.all(low[structural] == 0) and np.all(high[structural] == 0)
+    assert all(offset + 63 < case.base.seqlen_k for offset in (0, 64, 128, 192))
+    assert all(
+        legal_interval(case.base, row)[1] >= legal_interval(case.base, row)[0]
+        for row in range(case.base.seqlen_q)
+    )
+
+
+@pytest.mark.parametrize("case", P4_QUICK_CASES, ids=_quick_id)
+def test_every_tier_b_value_passes(case: P4Case) -> None:
+    """Synthetic outputs at either end of every Tier B set pass, and every
+    two-value set is counted with the end that was observed."""
+    for end in (0, 1):
+        result = analyze_p4_policy(case, _tier_b_observation(case, end))
+        assert not result.violations, format_p4_result(result)
+        assert result.labels[P4Label.PASS.value] == 5 * int(np.prod(case.output_shape))
+        assert result.ambiguous_high == (result.ambiguous if end else 0)
+
+
+_LABEL_CASE = next(
+    case
+    for case in P4_QUICK_CASES
+    if case.dtype == "fp16" and case.fixture is P4Fixture.IDENTITY
+)
+
+
+def _find(
+    exposure: str, rows: range, predicate
+) -> tuple[tuple[int, int, int, int], int, int, int, int]:
+    """The first coordinate whose ``(low, high, center, radius)`` satisfies
+    ``predicate(query, head, dim, low, high, center, radius)``."""
+    low, high = tier_b_exposure(_LABEL_CASE, exposure)
+    center, radius, _ = tier_a_exposure(_LABEL_CASE, exposure)
+    for query in rows:
+        for head in range(4):
+            for dim in range(64):
+                values = tuple(
+                    int(array[0, query, head, dim])
+                    for array in (low, high, center, radius)
+                )
+                if predicate(query, head, dim, *values):
+                    return ((0, query, head, dim), *values)
+    raise AssertionError(f"no {exposure} coordinate satisfies the predicate")
+
+
+def _relaxed(exposure: str, query: int, head: int) -> tuple[np.ndarray, np.ndarray]:
+    return tier_b_row(_LABEL_CASE, exposure, query, head, e_ulps=2)
+
+
+def _normal(center: int, radius: int) -> bool:
+    return radius > 0 and center >= 0x0400
+
+
+def _label_input(label: P4Label) -> tuple[str, tuple[int, int, int, int], int]:
+    """An exposure, coordinate and stored bits that must carry ``label``."""
+    from ._p4_analytical import _genuine_addition
+
+    if label is P4Label.STRUCTURAL:
+        where, *_ = _find("basis@0", range(256), lambda q, h, d, lo, hi, c, r: r == 0)
+        return "basis@0", where, 0x0001
+    if label is P4Label.NEGATIVE:
+        where, low, *_ = _find(
+            "basis@0", range(256), lambda q, h, d, lo, hi, c, r: r > 0
+        )
+        return "basis@0", where, low | 0x8000
+    if label is P4Label.INVALID:
+        where, *_ = _find("basis@0", range(256), lambda q, h, d, lo, hi, c, r: r > 0)
+        return "basis@0", where, 0x7E00  # the adapter's unwritten-output prefill
+    if label is P4Label.E2:
+        where, _, high, *_ = _find(
+            "basis@0", range(256), lambda q, h, d, lo, hi, c, r: r > 0 and c < 0x0400
+        )
+        return "basis@0", where, high + 1
+    if label is P4Label.A_MFMA:
+        where, _, high, *_ = _find(
+            "folded",
+            range(64, 256),
+            lambda q, h, d, lo, hi, c, r: _normal(c, r)
+            and _genuine_addition(_LABEL_CASE, q, h, d),
+        )
+        return "folded", where, high + 1
+    if label is P4Label.A_E:
+
+        def widened(q, h, d, lo, hi, c, r):
+            relaxed_low, relaxed_high = _relaxed("basis@0", q, h)
+            return _normal(c, r) and (relaxed_low[d] < lo or relaxed_high[d] > hi)
+
+        where, low, _, _, _ = _find("basis@0", range(128, 160), widened)
+        relaxed_low, relaxed_high = _relaxed("basis@0", where[1], where[2])
+        dim = where[3]
+        return "basis@0", where, int(
+            relaxed_low[dim] if relaxed_low[dim] < low else relaxed_high[dim]
+        )
+
+    def outside(step: int):
+        def predicate(q, h, d, lo, hi, c, r):
+            bits = c + (1 if step == 1 else r + 1)
+            return (
+                _normal(c, r)
+                and lo == hi == c
+                and bits > _relaxed("basis@0", q, h)[1][d]
+            )
+
+        return predicate
+
+    if label is P4Label.PATH_MODEL:  # one ULP outside an unambiguous Tier B
+        where, _, _, center, _ = _find("basis@0", range(1, 64), outside(1))
+        return "basis@0", where, center + 1
+    assert label is P4Label.NUMERICAL
+    where, _, _, center, radius = _find("basis@0", range(1, 64), outside(2))
+    return "basis@0", where, center + radius + 1
+
+
+@pytest.mark.parametrize("label", P4_FAILURE_LABELS, ids=lambda label: label.name)
+def test_each_failure_label_is_produced_and_fails(label: P4Label) -> None:
+    """Policy: one synthetic coordinate per taxonomy label (§5) fails with that
+    label and nothing else, starting from outputs that pass. One ULP outside an
+    unambiguous Tier B fails as "path model"; the exact-zero sentinels (a
+    nonzero masked coordinate, a negative value, NaN, the unwritten prefill)
+    fail as structural, negative and invalid."""
+    exposure, coordinate, bits = _label_input(label)
+    observation = _with_bits(
+        _tier_b_observation(_LABEL_CASE), exposure, coordinate, bits
+    )
+    result = analyze_p4_policy(_LABEL_CASE, observation, rows=(coordinate[1],))
+    failures = {name: count for name, count in result.labels.items() if name != "pass"}
+    assert failures == {**dict.fromkeys(failures, 0), label.value: 1}, failures
+    assert result.first[label.value] == (exposure, coordinate)
+    assert result.violations and result.violations[0].startswith(label.value)
+
+
+def test_negative_zero_and_infinity_are_not_zero_or_finite() -> None:
+    structural, *_ = _find("basis@0", range(256), lambda q, h, d, lo, hi, c, r: r == 0)
+    for bits, label in ((0x8000, P4Label.NEGATIVE), (0x7C00, P4Label.INVALID)):
+        observation = _with_bits(
+            _tier_b_observation(_LABEL_CASE), "basis@0", structural, bits
+        )
+        result = analyze_p4_policy(_LABEL_CASE, observation, rows=(structural[1],))
+        assert result.labels[label.value] == 1
+
+
+@pytest.mark.parametrize(
+    "case",
+    [
+        case
+        for case in P4_QUICK_CASES
+        if (case.dtype, case.fixture)
+        in {("fp16", P4Fixture.LATE_MAX), ("bf16", P4Fixture.WALSH)}
+    ],
+    ids=_quick_id,
+)
+def test_mutated_analysis_rejects_correct_outputs(case: P4Case) -> None:
+    """The analyzer-side mutations the GPU lane runs reject a correct output on
+    the sampled rows, for every mutation not listed as inseparable."""
+    observation = _tier_b_observation(case)
+    for mutation in applicable_mutations(case):
+        if (case.case_id, mutation) in P4_UNSEPARATED:
+            continue
+        result = analyze_p4_policy(
+            case, observation, mutation=mutation, rows=P4_SEPARATION_ROWS
+        )
+        assert result.violations, mutation.value
+
+
+def test_records_cover_every_coordinate_and_serialize() -> None:
+    case = _LABEL_CASE
+    observation = _tier_b_observation(case)
+    control = analyze_p4_policy(case, observation)
+    mutated = analyze_p4_policy(
+        case, observation, mutation=P4Mutation.OMIT_SQRT_D, rows=P4_SEPARATION_ROWS
+    )
+    separation = mutation_separation(case, P4Mutation.OMIT_SQRT_D)
+    records = p4_records(
+        case,
+        "attention_gfx942_dense",
+        {"none": control, "omit_sqrt_d": mutated},
+        deterministic=True,
+        diagnostics=p4_diagnostics(case, observation),
+        separations={"omit_sqrt_d": separation},
+    )
+    for record in records:
+        json.dumps(record)
+    groups = [r for r in records if r["record_type"] == "rocke_p4_group"]
+    control_groups = [r for r in groups if r["mutation"] == "none"]
+    per_exposure = Counter()
+    for record in control_groups:
+        per_exposure[record["exposure"]] += record["coordinates"]
+    assert per_exposure == dict.fromkeys(P4_EXPOSURES, int(np.prod(case.output_shape)))
+    summaries = {
+        r["mutation"]: r for r in records if r["record_type"] == "rocke_p4_summary"
+    }
+    assert not summaries["none"]["rejected"]
+    assert summaries["omit_sqrt_d"]["rejected"]
+    assert summaries["omit_sqrt_d"]["cpu_gap"] == separation.gap > 0
+    (diagnostics,) = [r for r in records if r["record_type"] == "rocke_p4_diagnostics"]
+    assert diagnostics["assumptions"] == list(P4_ASSUMPTIONS)
+    assert diagnostics["deterministic"] is True
+    assert diagnostics["mfma_rn"] <= diagnostics["mfma_additions"]
+    assert 0 < diagnostics["path_exact"] <= diagnostics["path_compared"]
+
+
+# ---------------------------------------------------------------------------
+# Calibration independence (I6) and scope.
+# ---------------------------------------------------------------------------
+
+
+def _p4_entry(dtype: str, **overrides) -> P4CalibrationEntry:
+    spec = UNIFORM_CALIBRATION[("gfx942", "attention_gfx942_dense", dtype)].spec
+    arguments = {
+        "policy": P4_POLICY,
+        "assumptions": P4_ASSUMPTIONS,
+        "case_ids": tuple(c.case_id for c in P4_QUICK_CASES if c.dtype == dtype),
+        "spec": spec,
+    }
+    arguments.update(overrides)
+    return P4CalibrationEntry(**arguments)
+
+
+def test_calibration_entry_has_no_numeric_width() -> None:
+    """I6 / D8: an entry names the policy, the assumption versions, the cases
+    and the fingerprint; there is no field a measurement could widen."""
+    assert [item.name for item in dataclasses.fields(P4CalibrationEntry)] == [
+        "policy",
+        "assumptions",
+        "case_ids",
+        "spec",
+    ]
+    _p4_entry("fp16")
+    with pytest.raises(ValueError, match="policy"):
+        _p4_entry("fp16", policy="ulp_budget")
+    with pytest.raises(ValueError, match="assumptions"):
+        _p4_entry("fp16", assumptions=("A-E v2", "A-MFMA v1"))
+    with pytest.raises(ValueError, match="case_ids"):
+        _p4_entry("fp16", case_ids=())
+    with pytest.raises(TypeError):
+        _p4_entry("fp16", ulp_budget=1)
+
+
+def test_observations_never_change_the_enclosures() -> None:
+    """I6: judging hostile outputs leaves Tier B and the exponential candidate
+    sets exactly as derived, and the cached enclosures are read-only."""
+    case = _LABEL_CASE
+    before = {
+        exposure: [bits.copy() for bits in tier_b_exposure(case, exposure)]
+        for exposure in P4_EXPOSURES
+    }
+    candidates = {x: exp2_candidates(x) for x in (Fraction(0), MASKED_SCORE)}
+    for bits in (0x3C00, 0x7E00, 0x0000, 0x8001):
+        observation = UniformObservation(
+            tuple(
+                (exposure, np.full(case.output_shape, bits, dtype=np.uint16))
+                for exposure in P4_EXPOSURES
+            )
+        )
+        assert analyze_p4_policy(case, observation).violations
+    for exposure in P4_EXPOSURES:
+        for cached, saved in zip(tier_b_exposure(case, exposure), before[exposure]):
+            assert not cached.flags.writeable
+            np.testing.assert_array_equal(cached, saved)
+    assert {x: exp2_candidates(x) for x in candidates} == candidates
+
+
+def test_calibration_scope_is_all_quick_cases_or_none() -> None:
+    """No partial ratification: the calibrated case set is empty (Phase 4
+    capture, failing closed) or exactly the quick matrix, with the same
+    dispatch fingerprint as the uniform (P3) entries."""
+    quick = {case.case_id for case in P4_QUICK_CASES}
+    calibrated = {
+        case_id for entry in P4_CALIBRATION.values() for case_id in entry.case_ids
+    }
+    assert calibrated in (set(), quick)
+    for key, entry in P4_CALIBRATION.items():
+        assert entry.spec == UNIFORM_CALIBRATION[key].spec
+        assert entry.policy == P4_POLICY and entry.assumptions == P4_ASSUMPTIONS
+
+
+@pytest.mark.parametrize("case", P4_QUICK_CASES, ids=_quick_id)
+def test_require_p4_calibration_fails_closed(case: P4Case) -> None:
+    spec = UNIFORM_CALIBRATION[("gfx942", "attention_gfx942_dense", case.dtype)].spec
+    key = ("gfx942", "attention_gfx942_dense", case.dtype)
+    if key not in P4_CALIBRATION:
+        with pytest.raises(AssertionError, match="no P4 calibration") as raised:
+            require_p4_calibration("gfx942", "attention_gfx942_dense", case, spec)
+        assert "ROCKE_ORACLE_FREE_CALIBRATION_OUT" in str(raised.value)
+    table = {key: _p4_entry(case.dtype)}
+    entry = require_p4_calibration(
+        "gfx942", "attention_gfx942_dense", case, spec, table=table
+    )
+    assert entry is table[key]
+    drifted = dataclasses.replace(spec, block_m=spec.block_m // 2)
+    with pytest.raises(AssertionError, match="block_m: calibrated"):
+        require_p4_calibration(
+            "gfx942", "attention_gfx942_dense", case, drifted, table=table
+        )
+    narrow = {key: _p4_entry(case.dtype, case_ids=("other",))}
+    with pytest.raises(AssertionError, match=f"case {case.case_id} not in"):
+        require_p4_calibration(
+            "gfx942", "attention_gfx942_dense", case, spec, table=narrow
+        )
+
+
+def _p4_gpu_lane_tree() -> ast.Module:
+    from pathlib import Path
+
+    path = Path(__file__).with_name("test_p4_analytical_gfx942.py")
+    return ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+
+
+def _dotted(node: ast.AST) -> str:
+    parts: list[str] = []
+    while isinstance(node, ast.Attribute):
+        parts.append(node.attr)
+        node = node.value
+    if isinstance(node, ast.Name):
+        parts.append(node.id)
+    return ".".join(reversed(parts))
+
+
+def test_p4_gpu_lane_scope_and_gate() -> None:
+    """The P4 GPU lane runs exactly ``P4_QUICK_CASES``, gates once through the
+    require-aware ``current_device_arch_in(("gfx942",), ...)``, never skips
+    otherwise, and ends in ``require_p4_calibration``."""
+    tree = _p4_gpu_lane_tree()
+    calls = [node for node in ast.walk(tree) if isinstance(node, ast.Call)]
+    names = [_dotted(call.func) for call in calls]
+    parametrized = [
+        call for call, name in zip(calls, names) if name.endswith("mark.parametrize")
+    ]
+    assert parametrized
+    for call in parametrized:
+        argvalues = call.args[1]
+        assert isinstance(argvalues, ast.Name) and argvalues.id == "P4_QUICK_CASES"
+    skip_calls = {"skip", "skipif", "importorskip", "xfail"}
+    skips = [name for name in names if name.split(".")[-1] in skip_calls]
+    assert not skips
+    gates = [
+        call for call, name in zip(calls, names) if name == "current_device_arch_in"
+    ]
+    assert len(gates) == 1 and ast.literal_eval(gates[0].args[0]) == ("gfx942",)
+    assert "require_p4_calibration" in names
+
+
+# ---------------------------------------------------------------------------
+# Subject adapter widening.
+# ---------------------------------------------------------------------------
+
+
+def test_adapter_accepts_p4_cases_through_the_shape_protocol() -> None:
+    for case in P4_QUICK_CASES:
+        _validate_supported_case(case)
+        shape = _shape(case)
+        assert (shape.batch, shape.seqlen_q, shape.nhead_q, shape.head_dim) == (
+            case.output_shape
+        )
+    parameter = inspect.signature(run_dense_case).parameters["scale_override"]
+    assert parameter.kind is inspect.Parameter.KEYWORD_ONLY
+    assert parameter.default is None
+
+
+@pytest.mark.parametrize("base", UNIFORM_QUICK_CASES, ids=lambda base: base.case_id)
+def test_p4_cases_resolve_to_the_uniform_dispatch_identity(base: UniformCase) -> None:
+    """P4 reuses the ratified P3 dispatch identity: every P4 case on a quick
+    shape resolves to the same candidate and fingerprint as its P3 case."""
+    uniform = resolve_dense_subject(base)
+    for case in (c for c in P4_QUICK_CASES if c.base == base):
+        subject = resolve_dense_subject(case)
+        assert subject.case_id == case.case_id
+        assert subject.candidate_name == uniform.candidate_name
+        assert subject.fingerprint == uniform.fingerprint
+
+
+def test_subject_side_wrong_scale_is_the_omitted_sqrt_d_mutation() -> None:
+    """The GPU lane's ``scale_override`` launch is the kernel twin of the
+    analyzer's ``omit_sqrt_d``: both give ``qk_scale = RN(scale * LOG2E)``."""
+    from kernels.gfx942 import attention_dense
+
+    from .test_p4_analytical_gfx942 import _WRONG_SCALE
+
+    case = _LABEL_CASE
+    row, key = 64, 64
+    numerator = score_numerator(case, 0, row, key)
+    qk_scale = round_f32(f32(_WRONG_SCALE) * f32(attention_dense.LOG2E))
+    assert score(case, 0, row, key, P4Mutation.OMIT_SQRT_D) == round_f32(
+        numerator * qk_scale
+    )
+
+
+_P4_TORCH_BLOCKED_PROBE = """
+import importlib
+import importlib.abc
+import json
+import sys
+
+
+class _RefuseTorch(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname.split(".")[0] == "torch":
+            raise ModuleNotFoundError(f"No module named {fullname!r}", name=fullname)
+        return None
+
+
+sys.meta_path.insert(0, _RefuseTorch())
+config = json.loads(sys.argv[1])
+sys.path[:0] = config["path"]
+package = config["package"]
+p4 = importlib.import_module(package + "._p4_analytical")
+subject = importlib.import_module(package + "._p4_shared_subject")
+importlib.import_module(package + ".test_p4_analytical_gfx942")
+for case in p4.P4_QUICK_CASES:
+    subject.resolve_dense_subject(case)
+loaded = sorted(name for name in sys.modules if name.split(".")[0] == "torch")
+assert not loaded, loaded
+print("torch-free P4 import and resolution ok")
+"""
+
+
+def test_p4_suite_imports_and_resolves_with_torch_blocked() -> None:
+    from .test_contracts import _package_root
+
+    package, root = _package_root()
+    config = {"package": package, "path": [str(root), *(e for e in sys.path if e)]}
+    completed = subprocess.run(
+        [sys.executable, "-c", _P4_TORCH_BLOCKED_PROBE, json.dumps(config)],
+        capture_output=True,
+        text=True,
+        timeout=300,
+        check=False,
+    )
+    assert completed.returncode == 0, completed.stdout + completed.stderr
+    assert "torch-free P4 import and resolution ok" in completed.stdout
