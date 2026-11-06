@@ -251,7 +251,8 @@ private:
 };
 
 // The optional mode parameters hold only what lowering forwards: the values
-// that differ from upstream's defaults (see makePointwiseRecord).
+// that differ from upstream's defaults, plus Swish beta for the Swish modes
+// (see makePointwiseRecord).
 class PointwiseRecord final : public RecordOf<CUDNN_BACKEND_POINTWISE_DESCRIPTOR>
 {
 public:

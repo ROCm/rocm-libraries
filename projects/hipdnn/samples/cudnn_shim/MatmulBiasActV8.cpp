@@ -48,9 +48,10 @@ struct Activation
     ReferenceMode referenceMode;
 };
 
-constexpr std::array<Activation, 2> ACTIVATIONS = {{
+constexpr std::array<Activation, 3> ACTIVATIONS = {{
     {"gelu_approx_tanh", CUDNN_POINTWISE_GELU_APPROX_TANH_FWD, ReferenceMode::GELU_APPROX_TANH_FWD},
     {"relu", CUDNN_POINTWISE_RELU_FWD, ReferenceMode::RELU_FWD},
+    {"swish", CUDNN_POINTWISE_SWISH_FWD, ReferenceMode::SWISH_FWD},
 }};
 
 template <typename T>

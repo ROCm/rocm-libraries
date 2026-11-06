@@ -7,9 +7,12 @@
 // needs no device, so this suite does not skip on device-less hosts.
 
 #include <cstdint>
+#include <optional>
 #include <vector>
 
 #include <gtest/gtest.h>
+#include <hipdnn_frontend/node/PointwiseNode.hpp>
+#include <hipdnn_test_sdk/utilities/TestableGraph.hpp>
 
 #include "CudnnCompatibilityV8BuilderGraph.hpp"
 
@@ -22,6 +25,7 @@ using namespace hipdnn_compatibility_v8_test;
 using fe::DataType_t;
 using fe::DescriptorType_t;
 using fe::PointwiseMode_t;
+using hipdnn_frontend::graph::PointwiseNode;
 
 class IntegrationCudnnCompatibilityV8Builders : public DevicelessGraphFixture
 {
@@ -64,6 +68,49 @@ TEST_F(IntegrationCudnnCompatibilityV8Builders, MatmulBiasGeluTanh)
     ops.emplace_back(
         pointwise(PointwiseMode_t::GELU_APPROX_TANH_FWD, biased, nullptr, tensor(6, cDims)));
     expectGraphBuilds(ops);
+}
+
+// The backend accepts Swish with or without beta, so building alone would not show it was
+// sent; hipBLASLt's Swish epilogue needs it. Lifting the lowered graph shows what hipDNN got.
+TEST_F(IntegrationCudnnCompatibilityV8Builders, MatmulBiasSwishSendsBeta)
+{
+    const Dims cDims = {2, 4, 16};
+    const fe::Tensor product = virtualTensor(3, cDims);
+    const fe::Tensor bias = tensor(4, {1, 1, 16});
+    const fe::Tensor biased = virtualTensor(5, cDims);
+    const fe::MatMulDesc matmul = fe::MatMulDescBuilder().setComputeType(DataType_t::FLOAT).build();
+    std::vector<fe::Operation> ops;
+    ops.emplace_back(fe::OperationBuilder(DescriptorType_t::OPERATION_MATMUL_DESCRIPTOR)
+                         .setaMatDesc(tensor(1, {2, 4, 8}))
+                         .setbMatDesc(tensor(2, {2, 8, 16}))
+                         .setcMatDesc(product)
+                         .setmatmulDesc(matmul)
+                         .build());
+    ops.emplace_back(pointwise(PointwiseMode_t::ADD, product, &bias, biased));
+    ops.emplace_back(pointwise(PointwiseMode_t::SWISH_FWD, biased, nullptr, tensor(6, cDims)));
+    fe::OperationGraphBuilder builder;
+    builder.setHandle(_handle).setOperationGraph(ops);
+    const fe::OperationGraph graph = builder.build();
+    ASSERT_EQ(graph.get_status(), CUDNN_STATUS_SUCCESS) << graph.get_error();
+
+    hipdnn_tests::TestableGraphLifting lifted;
+    const hipdnn_frontend::Error result = lifted.fromBackendDescriptor(graph.get_raw_desc());
+    ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
+    std::optional<float> swishBeta;
+    int swishNodes = 0;
+    for(const auto& node : lifted.getSubNodes())
+    {
+        const auto* pointwiseNode = dynamic_cast<const PointwiseNode*>(node.get());
+        if(pointwiseNode != nullptr
+           && pointwiseNode->attributes.get_mode() == hipdnn_frontend::PointwiseMode::SWISH_FWD)
+        {
+            ++swishNodes;
+            swishBeta = pointwiseNode->attributes.get_swish_beta();
+        }
+    }
+    ASSERT_EQ(swishNodes, 1);
+    ASSERT_TRUE(swishBeta.has_value());
+    EXPECT_FLOAT_EQ(*swishBeta, 1.0F);
 }
 
 TEST_F(IntegrationCudnnCompatibilityV8Builders, PointwiseChain)

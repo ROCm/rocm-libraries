@@ -564,8 +564,8 @@ inline void lowerOperation(const PointwiseOperationRecord& op, LoweringContext& 
     {
         attributes.set_input_2(context.tensor(op.in2()));
     }
-    // The record holds only non-default parameters; leaving the rest unset
-    // keeps them off the hipDNN descriptor.
+    // The record holds only the parameters to send (non-default ones, plus
+    // Swish beta); leaving the rest unset keeps them off the hipDNN descriptor.
     if(const std::optional<double> value = pointwise.reluLowerClip())
     {
         attributes.set_relu_lower_clip(narrowParameter(*value));

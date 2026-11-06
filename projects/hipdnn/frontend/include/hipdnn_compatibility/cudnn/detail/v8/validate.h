@@ -504,7 +504,8 @@ struct PointwiseInputs
 
 // Keeps only the mode parameters that differ from upstream's defaults. Upstream
 // sets every parameter of the mode, defaults included, and MIOpen rejects a
-// fusion that carries a lower-clip slope at all.
+// fusion that carries a lower-clip slope at all. Swish beta is the exception:
+// hipBLASLt's Swish epilogue needs it present.
 inline std::shared_ptr<const PointwiseRecord> makePointwiseRecord(const PointwiseInputs& inputs,
                                                                   const PointwiseLabels& labels)
 {
@@ -545,7 +546,9 @@ inline std::shared_ptr<const PointwiseRecord> makePointwiseRecord(const Pointwis
     fields.reluLowerClipSlope = nonDefault(inputs.reluLowerClipSlope, 0.0);
     fields.eluAlpha = nonDefault(inputs.eluAlpha, 1.0);
     fields.softplusBeta = nonDefault(inputs.softplusBeta, 1.0);
-    fields.swishBeta = nonDefault(inputs.swishBeta, 1.0);
+    const bool isSwish
+        = fields.mode == PointwiseMode_t::SWISH_FWD || fields.mode == PointwiseMode_t::SWISH_BWD;
+    fields.swishBeta = isSwish ? inputs.swishBeta.value_or(1.0) : nonDefault(inputs.swishBeta, 1.0);
     // The upper-clip default is DBL_MAX, which upstream clamps to FLT_MAX for
     // FLOAT math; any bound at or above FLT_MAX clips nothing once narrowed.
     fields.reluUpperClip

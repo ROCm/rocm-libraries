@@ -228,9 +228,9 @@ runs no heuristics and needs no GPU.
 - **Pointwise defaults are not forwarded.** Upstream sets every parameter of the mode, including
   defaults; MIOpen rejects a fusion if a lower-clip slope is present at all. Plain ReLU therefore
   reaches hipDNN with no parameters, as from the v9 API, and relies on the providers reading an unset
-  lower clip as 0 (§9 R9). Non-default values are narrowed to float, so an infinite lower clip
-  saturates; an upper clip at or above `FLT_MAX` clips nothing and is not sent. A NaN clip is
-  `BAD_PARAM`.
+  lower clip as 0 (§9 R9). The exception is Swish β, which is always sent: hipBLASLt's Swish epilogue
+  requires it. Non-default values are narrowed to float, so an infinite lower clip saturates; an
+  upper clip at or above `FLT_MAX` clips nothing and is not sent. A NaN clip is `BAD_PARAM`.
 - **Alpha / beta.** Alpha ≠ 1 or beta ≠ 0 on any op → `NOT_SUPPORTED`. No hipDNN engine accepts the
   alternative (an extra scalar multiply). A pointwise alpha2 is checked only on modes with a B input
   and on activation-backward modes; cuDNN ignores it on one-input forward modes.

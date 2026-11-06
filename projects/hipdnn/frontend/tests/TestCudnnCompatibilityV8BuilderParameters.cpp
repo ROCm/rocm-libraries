@@ -530,11 +530,6 @@ TEST_F(TestCudnnCompatibilityV8BuilderParameters, PointwiseDefaultParametersElid
          DataType_t::FLOAT,
          [](fe::PointWiseDescBuilder&) {},
          {HIPDNN_ATTR_POINTWISE_SOFTPLUS_BETA}},
-        {"swish",
-         PointwiseMode_t::SWISH_FWD,
-         DataType_t::FLOAT,
-         [](fe::PointWiseDescBuilder&) {},
-         {HIPDNN_ATTR_POINTWISE_SWISH_BETA}},
         {"gen index",
          PointwiseMode_t::GEN_INDEX,
          DataType_t::FLOAT,
@@ -555,6 +550,19 @@ TEST_F(TestCudnnCompatibilityV8BuilderParameters, PointwiseDefaultParametersElid
         {
             EXPECT_FALSE(isSet(op, name)) << name;
         }
+    }
+}
+
+TEST_F(TestCudnnCompatibilityV8BuilderParameters, PointwiseSwishDefaultBetaReachesHipdnn)
+{
+    for(const PointwiseMode_t mode : {PointwiseMode_t::SWISH_FWD, PointwiseMode_t::SWISH_BWD})
+    {
+        SCOPED_TRACE(static_cast<int>(mode));
+        const fe::PointWiseDesc swish
+            = fe::PointWiseDescBuilder().setMode(mode).setComputeType(DataType_t::FLOAT).build();
+        hipdnnBackendDescriptor_t op = lowerPointwise(swish, mode == PointwiseMode_t::SWISH_BWD);
+        ASSERT_NE(op, nullptr);
+        EXPECT_EQ(scalarOn<float>(op, HIPDNN_ATTR_POINTWISE_SWISH_BETA), 1.0F);
     }
 }
 

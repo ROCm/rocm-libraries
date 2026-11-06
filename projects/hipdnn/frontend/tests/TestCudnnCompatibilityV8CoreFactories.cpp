@@ -537,6 +537,22 @@ TEST(TestCudnnCompatibilityV8CoreFactories, PointwiseDefaultsAndAxisElided)
     EXPECT_EQ(record->axis(), std::optional<std::int64_t>(2));
 }
 
+TEST(TestCudnnCompatibilityV8CoreFactories, PointwiseSwishRecordAlwaysCarriesBeta)
+{
+    for(const cudnnPointwiseMode_t mode : {CUDNN_POINTWISE_SWISH_FWD, CUDNN_POINTWISE_SWISH_BWD})
+    {
+        SCOPED_TRACE(static_cast<int>(mode));
+        EXPECT_EQ(pointwise(mode)->swishBeta(), std::optional<double>(1.0));
+
+        v8::PointwiseInputs inputs;
+        inputs.mode = mode;
+        inputs.computeType = CUDNN_DATA_FLOAT;
+        inputs.swishBeta = 1.0;
+        EXPECT_EQ(v8::makePointwiseRecord(inputs, POINTWISE_LABELS)->swishBeta(),
+                  std::optional<double>(1.0));
+    }
+}
+
 TEST(TestCudnnCompatibilityV8CoreFactories, PointwiseRejectsMissingAndNonFinite)
 {
     v8::PointwiseInputs inputs;
