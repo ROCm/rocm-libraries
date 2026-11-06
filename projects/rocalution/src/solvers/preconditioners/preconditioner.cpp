@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -266,6 +266,7 @@ namespace rocalution
     {
         log_debug(this, "GS::MoveToHostLocalData_()", this->build_);
 
+        DISPATCH_OPERATOR_ANALYSE_STRATEGY(this->solver_descr_, this->GS_, LAnalyseClear);
         this->GS_.MoveToHost();
         DISPATCH_OPERATOR_ANALYSE_STRATEGY(this->solver_descr_, this->GS_, LAnalyse, false);
     }
@@ -275,6 +276,7 @@ namespace rocalution
     {
         log_debug(this, "GS::MoveToAcceleratorLocalData_()", this->build_);
 
+        DISPATCH_OPERATOR_ANALYSE_STRATEGY(this->solver_descr_, this->GS_, LAnalyseClear);
         this->GS_.MoveToAccelerator();
         DISPATCH_OPERATOR_ANALYSE_STRATEGY(this->solver_descr_, this->GS_, LAnalyse, false);
     }
@@ -385,6 +387,8 @@ namespace rocalution
     {
         log_debug(this, "SGS::MoveToHostLocalData_()", this->build_);
 
+        DISPATCH_OPERATOR_ANALYSE_STRATEGY(this->solver_descr_, this->SGS_, LAnalyseClear);
+        DISPATCH_OPERATOR_ANALYSE_STRATEGY(this->solver_descr_, this->SGS_, UAnalyseClear);
         this->SGS_.MoveToHost();
         DISPATCH_OPERATOR_ANALYSE_STRATEGY(this->solver_descr_, this->SGS_, LAnalyse, false);
         DISPATCH_OPERATOR_ANALYSE_STRATEGY(this->solver_descr_, this->SGS_, UAnalyse, false);
@@ -398,6 +402,8 @@ namespace rocalution
     {
         log_debug(this, "SGS::MoveToAcceleratorLocalData_()", this->build_);
 
+        DISPATCH_OPERATOR_ANALYSE_STRATEGY(this->solver_descr_, this->SGS_, LAnalyseClear);
+        DISPATCH_OPERATOR_ANALYSE_STRATEGY(this->solver_descr_, this->SGS_, UAnalyseClear);
         this->SGS_.MoveToAccelerator();
         DISPATCH_OPERATOR_ANALYSE_STRATEGY(this->solver_descr_, this->SGS_, LAnalyse, false);
         DISPATCH_OPERATOR_ANALYSE_STRATEGY(this->solver_descr_, this->SGS_, UAnalyse, false);
@@ -486,6 +492,7 @@ namespace rocalution
     {
         log_debug(this, "ILU::MoveToHostLocalData_()", this->build_);
 
+        DISPATCH_OPERATOR_ANALYSE_STRATEGY(this->solver_descr_, this->ILU_, LUAnalyseClear);
         this->ILU_.MoveToHost();
         DISPATCH_OPERATOR_ANALYSE_STRATEGY(this->solver_descr_, this->ILU_, LUAnalyse);
     }
@@ -495,6 +502,7 @@ namespace rocalution
     {
         log_debug(this, "ILU::MoveToAcceleratorLocalData_()", this->build_);
 
+        DISPATCH_OPERATOR_ANALYSE_STRATEGY(this->solver_descr_, this->ILU_, LUAnalyseClear);
         this->ILU_.MoveToAccelerator();
         DISPATCH_OPERATOR_ANALYSE_STRATEGY(this->solver_descr_, this->ILU_, LUAnalyse);
     }
@@ -693,6 +701,7 @@ namespace rocalution
     {
         log_debug(this, "ItILU0::MoveToHostLocalData_()", this->build_);
 
+        DISPATCH_OPERATOR_ANALYSE_STRATEGY(this->solver_descr_, this->ItILU0_, LUAnalyseClear);
         this->ItILU0_.MoveToHost();
         DISPATCH_OPERATOR_ANALYSE_STRATEGY(this->solver_descr_, this->ItILU0_, LUAnalyse);
     }
@@ -702,6 +711,7 @@ namespace rocalution
     {
         log_debug(this, "ItILU0::MoveToAcceleratorLocalData_()", this->build_);
 
+        DISPATCH_OPERATOR_ANALYSE_STRATEGY(this->solver_descr_, this->ItILU0_, LUAnalyseClear);
         this->ItILU0_.MoveToAccelerator();
         DISPATCH_OPERATOR_ANALYSE_STRATEGY(this->solver_descr_, this->ItILU0_, LUAnalyse);
     }
@@ -809,7 +819,9 @@ namespace rocalution
     {
         log_debug(this, "ILUT::MoveToHostLocalData_()", this->build_);
 
+        DISPATCH_OPERATOR_ANALYSE_STRATEGY(this->solver_descr_, this->ILUT_, LUAnalyseClear);
         this->ILUT_.MoveToHost();
+        DISPATCH_OPERATOR_ANALYSE_STRATEGY(this->solver_descr_, this->ILUT_, LUAnalyse);
     }
 
     template <class OperatorType, class VectorType, typename ValueType>
@@ -817,7 +829,9 @@ namespace rocalution
     {
         log_debug(this, "ILUT::MoveToAcceleratorLocalData_()", this->build_);
 
+        DISPATCH_OPERATOR_ANALYSE_STRATEGY(this->solver_descr_, this->ILUT_, LUAnalyseClear);
         this->ILUT_.MoveToAccelerator();
+        DISPATCH_OPERATOR_ANALYSE_STRATEGY(this->solver_descr_, this->ILUT_, LUAnalyse);
     }
 
     template <class OperatorType, class VectorType, typename ValueType>
@@ -901,8 +915,10 @@ namespace rocalution
     {
         log_debug(this, "IC::MoveToHostLocalData_()", this->build_);
 
-        // this->inv_diag_entries_ is NOT needed on accelerator!
+        DISPATCH_OPERATOR_ANALYSE_STRATEGY(this->solver_descr_, this->IC_, LLAnalyseClear);
         this->IC_.MoveToHost();
+        this->inv_diag_entries_.MoveToHost();
+        DISPATCH_OPERATOR_ANALYSE_STRATEGY(this->solver_descr_, this->IC_, LLAnalyse);
     }
 
     template <class OperatorType, class VectorType, typename ValueType>
@@ -910,8 +926,10 @@ namespace rocalution
     {
         log_debug(this, "IC::MoveToAcceleratorLocalData_()", this->build_);
 
-        // this->inv_diag_entries_ is NOT needed on accelerator!
+        DISPATCH_OPERATOR_ANALYSE_STRATEGY(this->solver_descr_, this->IC_, LLAnalyseClear);
         this->IC_.MoveToAccelerator();
+        this->inv_diag_entries_.MoveToAccelerator();
+        DISPATCH_OPERATOR_ANALYSE_STRATEGY(this->solver_descr_, this->IC_, LLAnalyse);
     }
 
     template <class OperatorType, class VectorType, typename ValueType>
