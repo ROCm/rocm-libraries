@@ -22,13 +22,17 @@ in rocKE and elsewhere, replace them.
 | Naive | `hipkernel:CONV_NAIVE_FWD`, `hipkernel:CONV_NAIVE_BWD`, `hipkernel:CONV_NAIVE_WRW` | In progress | Direct convolution, one thread per output element, fp32 accumulation. Correct for every layout, group count, padding, stride, dilation, 1-D/2-D/3-D shape and both convolution modes, in fp32, fp16 and bf16. The coverage floor: accepted only for problems small enough that its speed does not matter. |
 | Explicit GEMM | lives in the BLAS provider (`hipblaslt-provider`), not here | Planned | im2col/col2im plus a rocBLAS or hipBLASLt GEMM, and every special case that needs no repack. |
 | Direct | — | Planned | MIOpen's HIP direct kernels. |
-| Depthwise | — | Planned | MIOpen's HIP depthwise kernels, opened to every architecture. |
+| Depthwise VALU | `hipkernel:CONV_DEPTHWISE_VALU_FWD`, `hipkernel:CONV_DEPTHWISE_VALU_BWD` | In progress | hipconv's hand-written VALU depthwise kernels (from rocm-libraries PR #10945): a W-strip floor for any filter, stride and dilation, plus register-halo, fused and LDS-staged configs for unit-stride 3×3 to 9×9 and 3×3×3. NHWC and NCHW, 1-D/2-D/3-D, fp32/fp16/bf16, every architecture. Backward data runs as the forward convolution of dy with the filter reflected, unit stride only. Each config is a catalog entry admitted on correctness alone; autotune (UHD later) picks among them, with the floor the default. |
 | hipconv families | — | Planned | `ConvHipConv`'s kernel families (direct, direct_l1, direct_wgrad, patch embed, grouped, Toeplitz and Hankel depthwise), one engine each instead of one opaque solver, then generalized beyond CDNA3/4/5. |
 | Winograd | — | Planned | F(2,3)/F(3,2), written fresh in HIP or FlyDSL; MIOpen's are hand-written assembly. |
 
 Every engine applies its own poor-fit rule as part of applicability, so it declines problems
 it would serve badly. For naive that is the workload budget, `NAIVE_MACS_PER_LANE_BUDGET` in
 `ConvNaiveProblem.hpp`.
+
+An engine with several kernel configs lists each in its catalog, admitted by its kernel match
+on correctness alone. There is no shape-to-config routing table: the catalog's declared order
+(most general first) is the default, and autotune, then UHD, choose per shape and device.
 
 ## Layout
 

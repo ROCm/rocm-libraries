@@ -234,16 +234,24 @@ if(HIPKERNELPROVIDER_ENABLE_CONV)
     target_sources(hip_kernel_provider_impl PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/packs/ConvNaiveNative.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/packs/ConvNaiveProblem.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/packs/ConvDepthwiseValuNative.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/packs/ConvDepthwiseValuProblem.cpp
     )
     target_compile_definitions(hip_kernel_provider_impl PUBLIC HIPDNN_ENGINE_CONV=1)
     include("${PROJECT_SOURCE_DIR}/src/cmake/KernelEmbedding.cmake")
     set(HKP_CONV_KERNEL_SOURCES
         "${CMAKE_CURRENT_SOURCE_DIR}/descriptors/conv/naive/kernels/ConvNaive.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/descriptors/conv/naive/kernels/ConvNaiveArgs.h"
+        "${CMAKE_CURRENT_SOURCE_DIR}/descriptors/conv/depthwise_valu/kernels/ConvDepthwiseValu.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/descriptors/conv/depthwise_valu/kernels/ConvDepthwiseValuArgs.h"
+        "${CMAKE_CURRENT_SOURCE_DIR}/descriptors/conv/depthwise_valu/kernels/ConvDepthwiseValuCores.h"
         CACHE INTERNAL "Kernel sources of the conv engine group, embedded for HIPRTC")
     set(HKP_CONV_KERNEL_KEYS
         kernels/ConvNaive.cpp
         ConvNaiveArgs.h
+        kernels/ConvDepthwiseValu.cpp
+        ConvDepthwiseValuArgs.h
+        ConvDepthwiseValuCores.h
         CACHE INTERNAL "Embedding keys of HKP_CONV_KERNEL_SOURCES, in the same order")
     add_kernels_for_embedding(
         TARGET hip_kernel_provider_impl

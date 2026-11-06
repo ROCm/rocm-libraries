@@ -121,6 +121,8 @@ if(HIPKERNELPROVIDER_ENABLE_CONV)
     target_sources(hip_kernel_provider_tests PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestConvNaiveProblem.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGpuConvNaive.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestConvDepthwiseValuProblem.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGpuConvDepthwiseValu.cpp
     )
 endif()
 

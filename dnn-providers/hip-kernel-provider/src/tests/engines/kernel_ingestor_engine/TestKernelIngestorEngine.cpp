@@ -668,6 +668,7 @@ TEST(TestKernelIngestorEngine, EveryHandlerReportsSupportsSavingExactlyWhenItSav
 #ifdef HIPDNN_ENGINE_CONV
         // The conv engine group's packs, compiled in with HIPKERNELPROVIDER_ENABLE_CONV.
         "hipkernel.conv_naive.dispatch",
+        "hipkernel.conv_depthwise_valu.dispatch",
 #endif
     };
     EXPECT_EQ(packDispatchSymbols.size(), ingestorPacks().size())
