@@ -66,8 +66,6 @@ namespace TensileLite
         origami::nn::library_models_t nn_models;
 #endif
 
-        mutable std::atomic<bool> lastFindTopRetAll = false;
-
         static std::string Type()
         {
             return "Prediction";
@@ -285,14 +283,7 @@ namespace TensileLite
                 }
 #endif
             }
-            // can't reach the requested number, means findTop already done its best
-            lastFindTopRetAll = (rv.size() < static_cast<std::size_t>(numSolutions));
             return rv;
-        }
-
-        virtual bool lastFindTopAlreadyRetAll() const override
-        {
-            return lastFindTopRetAll;
         }
 
         virtual SolutionVector<MySolution>
