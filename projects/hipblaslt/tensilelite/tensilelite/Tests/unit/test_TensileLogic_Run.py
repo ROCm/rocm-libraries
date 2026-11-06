@@ -75,6 +75,7 @@ class TestSetup:
             mock_args.CheckAll = True
             mock_args.CheckOnlyCustomKernels = False
             mock_args.Architecture = "all"
+            mock_args.LogicFilter = "**/*.yaml"
 
             with tempfile.TemporaryDirectory() as tmpdir:
                 logic_dir = Path(tmpdir)
@@ -94,6 +95,28 @@ class TestSetup:
                 yaml_names = {f.name for f in files}
                 assert "logic1.yaml" in yaml_names
                 assert "logic2.yaml" in yaml_names
+
+    def test_setup_recursive_yaml_filter_selects_nested_yaml_files_only(self, tmp_path):
+        nested = tmp_path / "gfx942" / "Equality"
+        nested.mkdir(parents=True)
+        selected = nested / "logic.yaml"
+        selected.write_text("dummy", encoding="utf-8")
+        (nested / "ignore.txt").write_text("not yaml", encoding="utf-8")
+
+        with (
+            patch(
+                "tensilelite.logic.run.validateToolchain",
+                return_value="/usr/bin/g++",
+            ),
+            patch("tensilelite.logic.run.makeIsaInfoMap", return_value={}),
+            patch("tensilelite.logic.run.assignGlobalParameters"),
+            patch("tensilelite.logic.run.setVerbosity"),
+        ):
+            _, _, _, files, _, _ = _setup(
+                [str(tmp_path), "--check-all", "--logic-filter", "**/*.yaml"]
+            )
+
+        assert files == [selected]
 
     def test_setup_forwards_explicit_argv(self):
         """Ensure `_setup` parses caller-supplied argv instead of global `sys.argv`."""
@@ -155,6 +178,7 @@ class TestSetup:
             mock_args.CheckAll = True
             mock_args.CheckOnlyCustomKernels = False
             mock_args.Architecture = "all"
+            mock_args.LogicFilter = "**/*.yaml"
 
             with tempfile.TemporaryDirectory() as tmpdir:
                 empty_dir = Path(tmpdir)
@@ -297,6 +321,7 @@ class TestSetup:
             mock_args.CheckAll = True
             mock_args.CheckOnlyCustomKernels = False
             mock_args.Architecture = architecture
+            mock_args.LogicFilter = "**/*.yaml"
 
             with tempfile.TemporaryDirectory() as tmpdir:
                 logic_dir = Path(tmpdir)
