@@ -1296,7 +1296,7 @@ class _RapTdmNullWriter:
 
     def __init__(self, in_pap_next_tile_prefetch):
         self.states = SimpleNamespace(
-            rapDropAResidentLoads=True,
+            rapDropResidentLoads=True,
             rapInPapNextTilePrefetch=in_pap_next_tile_prefetch,
             tdmParityPackedInArgType=True,
         )

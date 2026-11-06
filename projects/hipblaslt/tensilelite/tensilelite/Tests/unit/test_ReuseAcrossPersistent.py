@@ -1037,6 +1037,64 @@ def test_store_guard_examines_only_the_beta_non_edge_path(beta, edge):
 
 
 # ---------------------------------------------------------------------------
+# Which operand is resident, and what that leaves the store to borrow. The
+# register layout below follows the allocation order, MXSA, MXSB, then ValuA,
+# ValuB, with a bank pad before MXSB -- which puts a resident MXSB in the middle.
+# ---------------------------------------------------------------------------
+class _LendingWriter(PersistentKernelState):
+    def __init__(self):
+        self.states = SimpleNamespace(
+            a=SimpleNamespace(startVgprValu=176, numVgprValu=256),
+            b=SimpleNamespace(startVgprValu=432, numVgprValu=512),
+            lastValuAB=944,
+            mxsa=SimpleNamespace(startVgprValu=0, numVgprValu=8),
+            mxsb=SimpleNamespace(startVgprValu=10, numVgprValu=32),
+            lastValuMXSAB=46,
+        )
+
+
+@pytest.mark.parametrize("rap, tcs", [(0, ()), (1, ("A", "MXSA")), (2, ("B", "MXSB"))])
+def test_rap_value_names_one_resident_operand(rap, tcs):
+    # Not a bit mask: 2 holds B alone, and nothing holds A and B together.
+    assert _LendingWriter().rapResidentTcs({"ReuseAcrossPersistent": rap}) == tcs
+
+
+@pytest.mark.parametrize("rap, ab, mxs, withheld", [
+    pytest.param(0, [(176, 768)], [(0, 46)], 0, id="off_lends_everything"),
+    # A and the MXSA prefix stay; the rest of each block is one range, as before.
+    pytest.param(1, [(432, 512)], [(8, 38)], (432 - 176) + 8, id="a_resident_lends_what_follows_it"),
+    # B is the top of its block and MXSB sits between MXSA and the tail.
+    pytest.param(2, [(176, 256)], [(0, 10), (42, 4)], 512 + 32, id="b_resident_lends_both_sides_of_mxsb"),
+])
+def test_rap_lends_the_store_what_the_resident_operand_leaves(rap, ab, mxs, withheld):
+    writer = _LendingWriter()
+    kernel = {"ReuseAcrossPersistent": rap}
+    assert writer.rapReclaimableValuABRanges(kernel) == ab
+    assert writer.rapReclaimableValuMXSABRanges(kernel) == mxs
+    # The guard prices exactly what the reclaim sites do not lend.
+    assert writer.rapStoreWithheldVgprs(kernel) == withheld
+
+
+@pytest.mark.parametrize("rap", [1, 2])
+def test_rap_reuse_copy_skips_only_the_resident_operands_loads(rap):
+    writer = _LendingWriter()
+    kernel = {"ReuseAcrossPersistent": rap}
+    resident = writer.rapResidentTcs(kernel)
+    writer.states.rapDropResidentLoads = False
+    assert not any(writer.rapSkipsResidentLoads(kernel, tc) for tc in ("A", "MXSA", "B", "MXSB"))
+    writer.states.rapDropResidentLoads = True
+    for tc in ("A", "MXSA", "B", "MXSB"):
+        assert writer.rapSkipsResidentLoads(kernel, tc) == (tc in resident)
+
+
+def test_rap_pool_comments_keep_their_end_for_a_single_range():
+    # One range prints the end its comment always printed, so lending that did
+    # not change leaves the asm text alone; several print their own ends.
+    assert PersistentKernelState.rapPoolRangeEnd([(8, 38)], 8, 38, 99) == 99
+    assert PersistentKernelState.rapPoolRangeEnd([(0, 10), (42, 4)], 42, 4, 99) == 46
+
+
+# ---------------------------------------------------------------------------
 # K dim tracking. A partial last k-tile runs through the resident loop, and the
 # TDM descriptor clamps it at K only if each set's K dim, measured from the
 # moving base, shrinks as the address advances.
