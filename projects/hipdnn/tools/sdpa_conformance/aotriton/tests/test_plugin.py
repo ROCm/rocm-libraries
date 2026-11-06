@@ -834,6 +834,98 @@ def test_forward_file_always_fails_forward():
     }
 
 
+def test_a_hipdnn_backward_over_a_reference_forward_owns_every_failure(run):
+    result, rows = run(
+        BOTH_CALLED
+        + """
+def test_ref_fwd_forward_comparison():
+    plug.record('fwd', 'ref', 'no dropout engine')
+    call_bwd()
+    assert False, 'Forward pass is_allclose=False tfts=None'
+
+def test_ref_fwd_backward_comparison():
+    plug.record('fwd', 'ref', 'no dropout engine')
+    call_bwd()
+    assert False, 'dq_allclose=False'
+
+def test_no_forward_call_forward_comparison():
+    call_bwd()
+    assert False, 'Forward pass is_allclose=False tfts=None'
+
+def test_hipdnn_forward_keeps_the_forward_comparison():
+    call_both()
+    assert False, 'Forward pass is_allclose=False tfts=None'
+"""
+    )
+    side = {name: row["fail_side"] for name, row in rows.items()}
+    assert side == {
+        "test_ref_fwd_forward_comparison": "bwd",
+        "test_ref_fwd_backward_comparison": "bwd",
+        "test_no_forward_call_forward_comparison": "bwd",
+        "test_hipdnn_forward_keeps_the_forward_comparison": "fwd",
+    }
+
+
+# ------------------------------------------------------------------ out of memory
+
+
+def test_an_out_of_memory_before_any_hipdnn_call_is_not_run_but_stays_a_pytest_failure(
+    run,
+):
+    result, rows = run(
+        BOTH_CALLED
+        + """
+import torch
+
+def test_torch_oom():
+    raise torch.OutOfMemoryError('HIP out of memory. Tried to allocate 20.00 GiB')
+
+def test_runtime_error_oom():
+    raise RuntimeError('hipErrorOutOfMemory: allocation failed')
+
+def test_runtime_error_text_oom():
+    raise RuntimeError('CUDA error: out of memory')
+
+def test_oom_behind_a_wrapper():
+    try:
+        raise RuntimeError('out of memory')
+    except RuntimeError as e:
+        raise ValueError('setup failed') from e
+
+def test_oom_after_a_hipdnn_call():
+    call_fwd()
+    raise RuntimeError('out of memory')
+
+def test_oom_after_a_hipdnn_error():
+    plug.record('bwd', 'error', 'eng')
+    raise RuntimeError('out of memory')
+
+def test_other_runtime_error():
+    raise RuntimeError('shape mismatch')
+"""
+    )
+    result.assert_outcomes(failed=7)
+    outcome = {name: row["outcome"] for name, row in rows.items()}
+    assert outcome == {
+        "test_torch_oom": "not-run",
+        "test_runtime_error_oom": "not-run",
+        "test_runtime_error_text_oom": "not-run",
+        "test_oom_behind_a_wrapper": "not-run",
+        "test_oom_after_a_hipdnn_call": "fail",
+        "test_oom_after_a_hipdnn_error": "fail",
+        "test_other_runtime_error": "fail",
+    }
+    assert rows["test_torch_oom"]["reason"] == (
+        "out of memory: HIP out of memory. Tried to allocate 20.00 GiB"
+    )
+    assert rows["test_runtime_error_oom"]["reason"].startswith(
+        "out of memory: hipErrorOutOfMemory"
+    )
+    assert rows["test_torch_oom"]["mode"] == ""
+    assert rows["test_torch_oom"]["fail_side"] == ""
+    assert rows["test_oom_after_a_hipdnn_call"]["fail_side"] != ""
+
+
 def write_marker(directory, worker, **fields):
     """What hipdnn_sdpa's runtime leaves in the in-flight directory (contract marker)."""
     marker = dict.fromkeys(contract.MARKER_FIELDS, "") | fields

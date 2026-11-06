@@ -21,6 +21,15 @@ no hipDNN engine produced. With
 ``HIPDNN_SDPA_CONFORMANCE_FWD_NO_STATS`` set, the forward asks hipDNN for no Stats and fills the M buffer
 with zeros: AOTriton's wrapper rejects NaN in M under ``is_testing``, and ``test_forward.py`` compares
 only O. The reference fallback still fills M with the real LSE.
+
+Two differences from AOTriton's own wrapper, both visible to the vendored tests:
+
+* With dropout, ``encoded_softmax`` is filled from this tool's own Philox mask (``hipdnn_sdpa.philox_mask``,
+  ``_keep_mask``): +0.5 where kept, -0.5 where dropped. It is not the value AOTriton's kernel writes, and
+  the mask is the one hipDNN's backward reproduces, not one read back from a forward kernel.
+* ``pyaotriton.hipGetLastError`` is a stub that always returns ``hipSuccess``. The vendored
+  ``is_testing`` check after each call and the illegal-address handlers therefore never fire; a GPU
+  fault surfaces only through the exception hipDNN or torch raises.
 """
 
 import os
