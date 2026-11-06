@@ -403,8 +403,11 @@ assert ctypes.c_uint.in_dll(fixture, 'fixture_queries').value == (
     )
 
 
+ARCHS = ("gfx942", "gfx950")
+
 REJECTION_PROBE = r"""
-import os
+import os, sys
+arch = sys.argv[1]
 from rocke.core.ir import IRBuilder
 from rocke.core.ir_serialize import serialize
 from rocke.core import lower_llvm
@@ -414,8 +417,8 @@ import rocke_engine
 kernel = IRBuilder("compiler_requirement").kernel
 serialized = serialize(kernel)
 for lower in (
-    lambda: lower_llvm.lower_kernel_to_llvm(kernel, arch="gfx950"),
-    lambda: rocke_engine.lower_serialized_ir(serialized, arch="gfx950"),
+    lambda: lower_llvm.lower_kernel_to_llvm(kernel, arch=arch),
+    lambda: rocke_engine.lower_serialized_ir(serialized, arch=arch),
 ):
     try:
         lower()
@@ -425,13 +428,13 @@ for lower in (
         raise AssertionError("AUTO emitted IR without compiler evidence")
 
 for flavor in lower_llvm.LLVM_FLAVORS:
-    py = lower_llvm.lower_kernel_to_llvm(kernel, arch="gfx950", llvm_flavor=flavor)
-    native = rocke_engine.lower_serialized_ir(serialized, arch="gfx950", flavor=flavor)
+    py = lower_llvm.lower_kernel_to_llvm(kernel, arch=arch, llvm_flavor=flavor)
+    native = rocke_engine.lower_serialized_ir(serialized, arch=arch, flavor=flavor)
     assert py == native
 
 os.environ["ROCKE_LLVM_FLAVOR"] = "llvm20"
-assert lower_llvm.lower_kernel_to_llvm(kernel, arch="gfx950") == rocke_engine.lower_serialized_ir(
-    serialized, arch="gfx950")
+assert lower_llvm.lower_kernel_to_llvm(kernel, arch=arch) == rocke_engine.lower_serialized_ir(
+    serialized, arch=arch)
 try:
     comgr.build_hsaco_from_llvm_ir(py)
 except comgr.ComgrError as error:
@@ -441,7 +444,8 @@ else:
 """
 
 
-def test_unqueryable_compiler_rejects_auto_but_allows_explicit_emission(tmp_path):
+@pytest.mark.parametrize("arch", ARCHS)
+def test_unqueryable_compiler_rejects_auto_but_allows_explicit_emission(tmp_path, arch):
     pytest.importorskip("rocke_engine")
     if sys.platform != "linux" or not shutil.which("cc"):
         pytest.skip("ELF loader fixture requires Linux and a C compiler")
@@ -450,7 +454,7 @@ def test_unqueryable_compiler_rejects_auto_but_allows_explicit_emission(tmp_path
     env.pop("ROCKE_LLVM_FLAVOR", None)
     env["PYTHONPATH"] = os.pathsep.join(sys.path)
     result = subprocess.run(
-        rocke_python_command("-c", REJECTION_PROBE),
+        rocke_python_command("-c", REJECTION_PROBE, arch),
         env=rocke_subprocess_env(env),
         capture_output=True,
         text=True,
