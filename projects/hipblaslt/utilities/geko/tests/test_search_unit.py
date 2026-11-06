@@ -151,6 +151,34 @@ def test_configure_defaults_to_thorough_profile() -> None:
     assert cfg["stability_interval"] == 3
 
 
+def _flat_profiles() -> list[dict]:
+    flat = []
+    for cfg in search.SEARCH_PROFILES.values():
+        flat.extend([cfg["stage_a"], cfg["stage_b"]] if "stage_a" in cfg else [cfg])
+    return flat
+
+
+@pytest.mark.parametrize("cfg", _flat_profiles())
+def test_profile_knobs_expand_to_expected_adaptive_fields(cfg: dict) -> None:
+    """Every flat profile dict unpacks into adaptive_fields and yields the expected block."""
+    fields = search.bench.log.adaptive_fields(**cfg)
+    mt = cfg["measure_time"]
+
+    assert fields == {
+        "adaptive": True,
+        "measure_time": mt,
+        "warmup_time": cfg["warmup_mult"] * mt,
+        "max_measure_time": cfg["ceil_mult"] * mt,
+        "sample_time": mt / cfg["min_samples"],
+        "noise_threshold": cfg["noise_threshold"],
+        "min_iters": cfg["min_iters"],
+        "max_iters": cfg["max_iters"],
+        "stability_threshold": cfg["stability_threshold"],
+        "stability_window": cfg["stability_window"],
+        "stability_interval": cfg["stability_interval"],
+    }
+
+
 def test_configure_rejects_unknown_profile() -> None:
     with pytest.raises(ValueError, match="Unknown search profile"):
         search.configure(pd.DataFrame([_adaptive_like_row()]), profile="bogus")

@@ -10,6 +10,7 @@ import pytest
 
 from geko.constants import GEMM_FIELDS
 from geko.library import _bank
+from geko.search import SEARCH_PROFILES
 
 
 class _FakeLib:
@@ -17,8 +18,10 @@ class _FakeLib:
         self.solutions = solutions
         self.sizes = sizes
         self._bench_file = bench_file
+        self.create_kwargs: dict = {}
 
-    def create_bench_input(self, _cluster_dir):
+    def create_bench_input(self, _cluster_dir, **kwargs):
+        self.create_kwargs = kwargs
         return (self._bench_file, None)
 
 
@@ -146,6 +149,62 @@ def test_min_assignment_uses_cached_output(monkeypatch: pytest.MonkeyPatch, tmp_
     assert len(new_sols) == 1
     assert len(new_sizes) == 2
     assert all(s[1][0] == 0 for s in new_sizes)
+
+
+def test_min_assignment_benchmarks_with_fast_adaptive_profile_and_flush(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    bench_file = tmp_path / "bench.yaml"
+    bench_file.write_text("[]\n", encoding="utf-8")
+    lib = _FakeLib(
+        solutions=[
+            {"SolutionIndex": 0, "MacroTile0": 64, "MacroTile1": 64, "DepthU": 16},
+            {"SolutionIndex": 1, "MacroTile0": 64, "MacroTile1": 64, "DepthU": 16},
+        ],
+        sizes=[[[16, 16, 1, 16], [0, 0.0]], [[32, 32, 1, 32], [1, 0.0]]],
+        bench_file=bench_file,
+    )
+    update_kwargs: dict = {}
+    dumped: dict = {}
+
+    def _update(data, **kwargs):
+        update_kwargs.update(kwargs)
+        return (data,)
+
+    monkeypatch.setattr(
+        _bank.bench.log,
+        "parse",
+        lambda _p: [
+            {"M": 16, "N": 16, "K": 16, "batch_count": 1},
+            {"M": 32, "N": 32, "K": 32, "batch_count": 1},
+        ],
+    )
+    monkeypatch.setattr(_bank.bench.log, "update", _update)
+    monkeypatch.setattr(_bank.bench.log, "dump", lambda rows, *_a, **_k: dumped.update(rows=rows))
+    monkeypatch.setattr(
+        _bank.bench.utils,
+        "parse_benchmark_output",
+        lambda _p: (_ for _ in ()).throw(FileNotFoundError()),
+    )
+    monkeypatch.setattr(_bank.bench, "run", lambda *_a, **_k: pd.DataFrame(_bench_rows()))
+
+    _bank.min_assigment(
+        hipblaslt_path=tmp_path,
+        lib=lib,
+        cluster_dir=tmp_path,
+        custom_lib_dir=tmp_path,
+        devices=[0],
+    )
+
+    assert update_kwargs["flush"] is True
+    expected = _bank.bench.log.adaptive_fields(**SEARCH_PROFILES["fast"])
+    assert len(dumped["rows"]) == 2
+    for row in dumped["rows"]:
+        assert row["algo_method"] == 0
+        assert row["requested_solution_num"] == -1
+        assert "iters" not in row and "cold_iters" not in row
+        for key, value in expected.items():
+            assert row[key] == value
 
 
 def test_min_assignment_falls_back_to_bench_run(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

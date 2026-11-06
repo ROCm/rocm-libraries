@@ -202,7 +202,21 @@ def build_parser() -> argparse.ArgumentParser:
         type=float,
         default=0.5,
         metavar="SEC",
-        help="Target seconds per cold and per timed phase when using --bench",
+        help=(
+            "Used with --bench: measurement time in seconds of each GEMM "
+            "benchmark. With --no-benchmark-adaptive, target seconds per cold "
+            "and per timed phase instead."
+        ),
+    )
+    parser.add_argument(
+        "--no-benchmark-adaptive",
+        dest="adaptive_benchmark",
+        action="store_false",
+        default=True,
+        help=(
+            "Used with --bench: disable adaptive timing and use fixed "
+            "iteration counts scaled from a probe run instead."
+        ),
     )
     parser.add_argument(
         "--custom-lib-src",
@@ -284,6 +298,7 @@ class CliArgs:
     bench_freq: bool
     skip_gpu_check: bool = False
     search_profile: str = "thorough"
+    adaptive_benchmark: bool = True
 
 
 def parse_cli_args(argv: Sequence[str] | None) -> CliArgs:
@@ -364,6 +379,7 @@ def parse_cli_args(argv: Sequence[str] | None) -> CliArgs:
         retry=not ns.no_retry,
         bench_freq=ns.bench_freq,
         skip_gpu_check=ns.skip_gpu_check,
+        adaptive_benchmark=ns.adaptive_benchmark,
     )
 
 
@@ -438,6 +454,7 @@ def dispatch(args: CliArgs, anchor: str | None = None) -> int:
             bench_freq=args.bench_freq,
             custom_lib_src=args.custom_lib_src,
             custom_lib_dir=args.custom_lib_dir,
+            adaptive_benchmark=args.adaptive_benchmark,
         )
     if args.search:
         run_search(

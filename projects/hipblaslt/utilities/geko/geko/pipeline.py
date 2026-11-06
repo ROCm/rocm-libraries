@@ -74,18 +74,21 @@ def run_bench(
     device: int | None = None,
     custom_lib_src: str | Path | None = None,
     custom_lib_dir: str | Path | None = None,
+    adaptive_benchmark: bool = True,
 ) -> int:
     """Summarize a workload log into output_dir (benchmark path only; no tuning).
 
     Parses the workload, materializes a bench YAML, runs bench.standard_benchmark
-    (probe then scaled iterations), and leaves summary artifacts under output_dir.
+    (a single adaptive pass, or probe then scaled iterations when adaptive timing
+    is disabled), and leaves summary artifacts under output_dir.
 
     Args:
         hipblaslt_path: hipBLASLt checkout root.
         workload_path: GEMM workload YAML or CSV with GEMM_LOG_FIELDS.
         output_dir: Writes summary.csv, gemms.csv, and intermediate YAML here.
         devices: GPU indices for summarizing.
-        benchmark_duration: Target seconds per cold and per timed phase for standard_benchmark.
+        benchmark_duration: Measurement time in seconds per GEMM with adaptive
+            timing; otherwise target seconds per cold and per timed phase.
         bench_freq: Passed to bench.standard_benchmark (HIPBLASLT_BENCH_FREQ).
         device: Backward-compatible single-device alias. If set, overrides devices.
         custom_lib_src: Optional source library directory to build into
@@ -93,6 +96,8 @@ def run_bench(
         custom_lib_dir: Optional pre-built custom library directory. If both
             custom_lib_src and custom_lib_dir are provided, this one takes
             precedence.
+        adaptive_benchmark: Whether to benchmark with adaptive timing.
+            Defaults to True.
 
     Returns:
         0 on success; 1 if hipBLASLt or workload path is missing (logged).
@@ -133,7 +138,11 @@ def run_bench(
         )
         library.operations.create(hip_path, custom_lib_src, custom_lib_dir)
 
-    data = bench.log.update(bench.log.parse(log_path, as_df=False))[0]
+    data = bench.log.update(
+        bench.log.parse(log_path, as_df=False),
+        duration=benchmark_duration,
+        adaptive=adaptive_benchmark,
+    )[0]
     logger.info(f"Working on '{log_path}' with {len(data)} GEMMs...")
     bench_yaml = out / f"{log_path.stem}.yaml"
     bench.log.dump(data, bench_yaml)
@@ -146,6 +155,7 @@ def run_bench(
         devices=devices,
         duration=benchmark_duration,
         bench_freq=bench_freq,
+        adaptive=adaptive_benchmark,
     )
     logger.info(f"Benchmark outputs under '{out.resolve()}'")
 
@@ -260,6 +270,7 @@ def run_search(
         bench_freq=bench_freq,
         custom_lib_dir=ref_custom_lib_dir,
         force_benchmark=True,
+        adaptive=False,  # fast probe to rank GEMMs, not an accurate measurement
     )
     if uniq_df.empty:
         logger.warning("No GEMM operations found after filtering. Consider lowering keep_thr")
@@ -309,7 +320,6 @@ def run_search(
         winners,
         match_table_path,
         hipblaslt_path=hipblaslt_path,
-        fill_perf=True, # Needed to set proper iterations during optim.analyze call
     )
     libs.dump(lib_dir)
     logger.info(f"Extracted library available in: '{lib_dir}'")
@@ -438,6 +448,7 @@ def run_configure(
         keep_thr=keep_thr,
         cache=True,
         bench_freq=bench_freq,
+        adaptive=False,  # fast probe to rank GEMMs, not an accurate measurement
     )
 
     if uniq_df.empty:

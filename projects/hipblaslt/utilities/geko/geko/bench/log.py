@@ -14,6 +14,7 @@ Key functions:
     summarize: Analyze logs and filter by contribution thresholds.
     benchmark: Generate and run benchmarks from log configurations.
     update: Modify benchmark configurations with timing parameters.
+    adaptive_fields: Build the hipblaslt-bench adaptive timing fields of a row.
     realign_rows: Reorder benchmark results to match original row order.
 """
 
@@ -269,6 +270,99 @@ def realign_rows(rows: List[dict], df: pd.DataFrame) -> pd.DataFrame:
     return df_rows.merge(df, on=key, how="left")
 
 
+# Defaults of the adaptive timing configuration. Everything except the noise,
+# stability and iteration knobs is expressed relative to the measurement time.
+ADAPTIVE_WARMUP_MULT = 0.4  # warmup_time = ADAPTIVE_WARMUP_MULT * measure_time
+ADAPTIVE_CEIL_MULT = 4.0  # max_measure_time = ADAPTIVE_CEIL_MULT * measure_time
+ADAPTIVE_MIN_SAMPLES = 500  # sample_time = measure_time / ADAPTIVE_MIN_SAMPLES
+ADAPTIVE_NOISE_THRESHOLD = 0.005
+ADAPTIVE_MIN_ITERS = 20
+ADAPTIVE_MAX_ITERS = 10000
+ADAPTIVE_STABILITY_THRESHOLD = 0.05
+ADAPTIVE_STABILITY_WINDOW = 32
+ADAPTIVE_STABILITY_INTERVAL = 16
+
+# Row fields that enable/tune hipblaslt-bench adaptive timing.
+ADAPTIVE_ROW_KEYS = (
+    "adaptive",
+    "sample_time",
+    "min_iters",
+    "max_iters",
+    "stability_threshold",
+    "stability_window",
+    "stability_interval",
+    "warmup_time",
+    "measure_time",
+    "max_measure_time",
+    "noise_threshold",
+)
+
+
+def adaptive_fields(
+    measure_time: float,
+    warmup_mult: float = ADAPTIVE_WARMUP_MULT,
+    ceil_mult: float = ADAPTIVE_CEIL_MULT,
+    min_samples: float = ADAPTIVE_MIN_SAMPLES,
+    noise_threshold: float = ADAPTIVE_NOISE_THRESHOLD,
+    min_iters: int = ADAPTIVE_MIN_ITERS,
+    max_iters: int = ADAPTIVE_MAX_ITERS,
+    stability_threshold: float = ADAPTIVE_STABILITY_THRESHOLD,
+    stability_window: int = ADAPTIVE_STABILITY_WINDOW,
+    stability_interval: int = ADAPTIVE_STABILITY_INTERVAL,
+) -> dict:
+    """Build the hipblaslt-bench adaptive timing fields of a benchmark row.
+
+    With adaptive timing the bench warms up, then accumulates timed samples until
+    the relative standard error of the mean drops below ``noise_threshold``, the
+    robust spread plateaus, or a ceiling is reached, instead of running a fixed
+    number of iterations.
+
+    Args:
+        measure_time (float): Minimum total measurement time in milliseconds.
+        warmup_mult (float, optional): Warmup time as a multiple of measure_time.
+            Defaults to 0.4.
+        ceil_mult (float, optional): Measurement ceiling as a multiple of
+            measure_time. Defaults to 4.0.
+        min_samples (float, optional): Number of timed samples that fit in the
+            measurement floor (sample_time = measure_time / min_samples).
+            Defaults to 500.
+        noise_threshold (float, optional): Target relative standard error of the
+            mean. Defaults to 0.005.
+        min_iters (int, optional): Floor on total timed iterations. Defaults to 20.
+        max_iters (int, optional): Ceiling on total timed iterations. Defaults to 10000.
+        stability_threshold (float, optional): Robust spread plateau threshold.
+            Defaults to 0.05.
+        stability_window (int, optional): Number of samples in the stability
+            window. Defaults to 32.
+        stability_interval (int, optional): Number of samples between stability
+            checks. Defaults to 16.
+
+    Returns:
+        dict: Fields to merge into a benchmark row, keys listed in ADAPTIVE_ROW_KEYS.
+
+    Raises:
+        ValueError: If measure_time or min_samples is not positive.
+    """
+    measure_time = float(measure_time)
+    if not measure_time > 0:
+        raise ValueError(f"Adaptive timing requires a positive measure_time, got {measure_time}")
+    if not min_samples > 0:
+        raise ValueError(f"min_samples must be positive, got {min_samples}")
+    return {
+        "adaptive": True,
+        "sample_time": measure_time / min_samples,
+        "min_iters": min_iters,
+        "max_iters": max_iters,
+        "stability_threshold": stability_threshold,
+        "stability_window": stability_window,
+        "stability_interval": stability_interval,
+        "warmup_time": warmup_mult * measure_time,
+        "measure_time": measure_time,
+        "max_measure_time": ceil_mult * measure_time,
+        "noise_threshold": noise_threshold,
+    }
+
+
 def update(
     data: List[dict] | str | Path,
     latency: Sequence[float] | np.ndarray = None,
@@ -280,6 +374,16 @@ def update(
     flush: bool = None,
     aux: bool = False,
     print_kernel_info: bool = True,
+    adaptive: bool = True,
+    warmup_mult: float = ADAPTIVE_WARMUP_MULT,
+    ceil_mult: float = ADAPTIVE_CEIL_MULT,
+    min_samples: float = ADAPTIVE_MIN_SAMPLES,
+    noise_threshold: float = ADAPTIVE_NOISE_THRESHOLD,
+    min_iters: int = ADAPTIVE_MIN_ITERS,
+    max_iters: int = ADAPTIVE_MAX_ITERS,
+    stability_threshold: float = ADAPTIVE_STABILITY_THRESHOLD,
+    stability_window: int = ADAPTIVE_STABILITY_WINDOW,
+    stability_interval: int = ADAPTIVE_STABILITY_INTERVAL,
 ) -> Tuple[List[dict], Optional[str]]:
     """Update benchmark configuration.
 
@@ -287,8 +391,8 @@ def update(
         data (List[dict] | str | Path]): Benchmark data list or file path to update.
         latency (Sequence[float], optional): Expected latencies for duration calculation.
             Defaults to None.
-        duration (float, optional): Target benchmark duration in seconds.
-            Defaults to 0.5.
+        duration (float, optional): Target benchmark duration in seconds. With
+            adaptive timing this is the measurement time. Defaults to 0.5.
         iters (int, optional): Number of benchmark iterations.
             Defaults to 100.
         cold_iters (int, optional): Number of warm-up iterations.
@@ -303,6 +407,15 @@ def update(
             Defaults to False.
         print_kernel_info (bool, optional): Whether to print kernel information.
             Defaults to True.
+        adaptive (bool, optional): Whether to use adaptive timing. Adaptive
+            warmup and sampling are derived from ``duration``; ``iters`` and
+            ``cold_iters`` are still set but ignored by the bench. When False,
+            any adaptive field already present in a row is removed.
+            Defaults to True.
+        warmup_mult, ceil_mult, min_samples, noise_threshold, min_iters,
+            max_iters, stability_threshold, stability_window,
+            stability_interval: Adaptive timing knobs, see ``adaptive_fields``.
+            Ignored when ``adaptive`` is False.
 
     Returns:
         Tuple[List[dict], Optional[str]] |  Tuple[List[dict]]: A tuple containing:
@@ -317,6 +430,21 @@ def update(
         Dynamically adjusts iteration counts based on expected latencies
         to achieve target benchmark duration.
     """
+    adaptive_row = None
+    if adaptive:
+        adaptive_row = adaptive_fields(
+            duration * 1000.0,  # duration is in seconds, measure_time in ms
+            warmup_mult=warmup_mult,
+            ceil_mult=ceil_mult,
+            min_samples=min_samples,
+            noise_threshold=noise_threshold,
+            min_iters=min_iters,
+            max_iters=max_iters,
+            stability_threshold=stability_threshold,
+            stability_window=stability_window,
+            stability_interval=stability_interval,
+        )
+
     output_file = None
     if isinstance(data, (str, Path)):
         log_file = Path(data)
@@ -369,6 +497,11 @@ def update(
             row["iters"] = iters
             row["cold_iters"] = cold_iters
 
+        for key in ADAPTIVE_ROW_KEYS:
+            row.pop(key, None)
+        if adaptive_row is not None:
+            row.update(adaptive_row)
+
     if output_file is None:
         return (data,)
 
@@ -393,6 +526,7 @@ def benchmark(
     device: int = 0,
     bench_freq: bool = False,
     custom_lib_dir: str | Path | None = None,
+    adaptive: bool = True,
 ) -> pd.DataFrame:
     """Run benchmark from log file configuration.
 
@@ -422,6 +556,8 @@ def benchmark(
             HIPBLASLT_BENCH_FREQ). Defaults to False.
         custom_lib_dir (str | Path | None, optional): Optional built custom
             library directory. If provided, forwarded to bench.run.
+        adaptive (bool, optional): Whether to use adaptive timing, see update.
+            Defaults to True.
 
     Returns:
         pd.DataFrame: DataFrame with benchmark results.
@@ -437,6 +573,7 @@ def benchmark(
         beta=beta,
         flush=flush,
         aux=aux,
+        adaptive=adaptive,
     )[0]
 
     benchmark_dir = Path(benchmark_dir)
@@ -466,11 +603,14 @@ def summarize(
     device: int | None = None,
     custom_lib_dir: str | Path | None = None,
     force_benchmark: bool = False,
+    adaptive: bool = True,
 ) -> Tuple[pd.DataFrame, pd.DataFrame]:
     """Analyze and summarize GEMM operations from hipBLASLt log file.
 
     Processes log files to extract unique GEMM types and optionally
-    filters by performance contribution threshold.
+    filters by performance contribution threshold. Pass adaptive=False for a
+    fast probe of the timings (fixed 100 timed and 20 cold iterations),
+    enough to rank GEMMs by importance but not to measure them accurately.
 
     Args:
         hipblaslt_path (str | Path): Path to hipBLASLt installation.
@@ -487,8 +627,10 @@ def summarize(
         use_standard_benchmark (bool, optional): When True, use
             bench.standard_benchmark (probe + per-row iteration scaling)
             instead of bench.run. Defaults to False.
-        benchmark_duration (float, optional): Target seconds for each cold and
-            timed phase when use_standard_benchmark=True. Defaults to 0.5.
+        benchmark_duration (float, optional): Only used when adaptive timing
+            is enabled (measurement time in seconds) or when
+            use_standard_benchmark=True (target seconds for each cold and
+            timed phase). Defaults to 0.5.
         bench_freq (bool, optional): Forwarded to bench.run or
             bench.standard_benchmark (controls HIPBLASLT_BENCH_FREQ).
             Ignored when keep_thr == 0 because that branch skips
@@ -499,6 +641,8 @@ def summarize(
             library directory used for benchmark-based summarize paths.
         force_benchmark (bool, optional): If True, forces benchmarking even if 
             keep_thr is 0. Defaults to False.
+        adaptive (bool, optional): Whether to benchmark with adaptive timing,
+            see update. Defaults to True.
 
     Returns:
         Tuple[pd.DataFrame, pd.DataFrame]: DataFrames with summarized and unique GEMM operations, filtered by threshold
@@ -519,7 +663,7 @@ def summarize(
         devices = [0]
     devices = parse_devices(devices)
 
-    data = update(parse(log_file, as_df=False))[0]
+    data = update(parse(log_file, as_df=False), duration=benchmark_duration, adaptive=adaptive)[0]
     logger.info(f"Working on '{log_file}' with {len(data)} GEMMs...")
 
     # no need to benchmark if keep_thr=0 (tune all sizes), build summary from log file
@@ -542,6 +686,7 @@ def summarize(
                 custom_lib_dir=custom_lib_dir,
                 devices=devices,
                 duration=benchmark_duration,
+                adaptive=adaptive,
                 bench_freq=bench_freq,
             )
         else:

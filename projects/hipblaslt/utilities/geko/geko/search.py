@@ -82,28 +82,6 @@ def _normalize_compute_type(v: str) -> str:
     return v if v.startswith("c_") else f"c_{v}"
 
 
-def _resolve_adaptive_fields(adaptive_cfg: dict) -> dict:
-    """Expand one flat SEARCH_PROFILES adaptive-knob dict (measure_time,
-    warmup_mult, ceil_mult, min_samples, noise_threshold, min_iters,
-    max_iters, stability_threshold, stability_window, stability_interval)
-    into the full hipblaslt-bench ``--adaptive`` per-row field block.
-    """
-    measure_time = float(adaptive_cfg["measure_time"])
-    return {
-        "adaptive": True,
-        "sample_time": measure_time / adaptive_cfg["min_samples"],
-        "min_iters": adaptive_cfg["min_iters"],
-        "max_iters": adaptive_cfg["max_iters"],
-        "stability_threshold": adaptive_cfg["stability_threshold"],
-        "stability_window": adaptive_cfg["stability_window"],
-        "stability_interval": adaptive_cfg["stability_interval"],
-        "warmup_time": adaptive_cfg["warmup_mult"] * measure_time,
-        "measure_time": measure_time,
-        "max_measure_time": adaptive_cfg["ceil_mult"] * measure_time,
-        "noise_threshold": adaptive_cfg["noise_threshold"],
-    }
-
-
 def _load_processed_df(processed_file: Path) -> pd.DataFrame:
     """Load processed.csv, deleting it if schema is invalid.
 
@@ -204,9 +182,11 @@ def configure(
         flush=flush,
         aux=False,
         print_kernel_info=True,
+        adaptive=False,  # the profile's own adaptive fields are applied below
     )[0]
 
-    adaptive_fields = _resolve_adaptive_fields(adaptive_cfg)
+    # Profile keys are named after the bench.log.adaptive_fields parameters.
+    adaptive_fields = bench.log.adaptive_fields(**adaptive_cfg)
     for i, config in enumerate(configs):
         config["algo_method"] = 1
         config["requested_solution_num"] = -1
@@ -299,7 +279,7 @@ def run(
             raise ValueError(
                 f"Search profile '{profile}' has a 'stage_b' entry but no positive 'k'"
             )
-    stage_b_adaptive = _resolve_adaptive_fields(stage_b_cfg) if stage_b_cfg is not None else None
+    stage_b_adaptive = bench.log.adaptive_fields(**stage_b_cfg) if stage_b_cfg is not None else None
 
     hipblaslt_path = Path(hipblaslt_path)
     if not hipblaslt_path.is_dir():

@@ -419,7 +419,8 @@ See [`tests/README.md`](tests/README.md) for further details on the test layout.
 ### `--bench` options
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--benchmark-duration SEC` | `0.5` | Target seconds per cold and per timed phase of `hipblaslt-bench`. |
+| `--benchmark-duration SEC` | `0.5` | Measurement time of each GEMM benchmark using `hipblaslt-bench --adaptive`. About 2.4x faster than a 1 s fixed-iteration run, with ratios about 3.8x more repeatable. With `--no-benchmark-adaptive`, the target seconds per cold and per timed phase instead. |
+| `--no-benchmark-adaptive` | _off_ | Disable adaptive timing and use fixed iteration counts scaled from a probe run. |
 | `--custom-lib-src PATH` | _none_ | Optional source logic directory used to build a reference custom library (`workdir/ref_build`) and benchmark against it. |
 | `--custom-lib-dir PATH` | _none_ | Optional pre-built custom library directory containing `library/**/TensileLibrary_lazy_gfx*.dat` (or `.dat.zlib`). If set together with `--custom-lib-src`, this flag wins. |
 

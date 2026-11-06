@@ -28,9 +28,15 @@ from typing import Set, List, Tuple, Sequence
 from geko.library import Library
 from geko.constants import GEMM_FIELDS
 from geko import bench
+from geko.search import SEARCH_PROFILES
 
 
 logger = logging.getLogger("GEKO")
+
+# Timing used to benchmark every size against every solution of a cluster: the
+# adaptive "fast" search profile, with cache flushing. 
+PRUNE_PROFILE = "fast"
+PRUNE_FLUSH = True
 
 
 def cluster_solutions(lib: Library, other_keys: Sequence[str] = None) -> dict:
@@ -147,7 +153,8 @@ def min_assigment(
 
     Workflow:
 
-    1 - Benchmarks all sizes against all solutions in the cluster.
+    1 - Benchmarks all sizes against all solutions in the cluster, with the adaptive
+        "fast" timing profile and cache flushing (see ``PRUNE_PROFILE``).
     2 - Filters out non-feasible pairs based of the given tolerance (e.g.
         size_x-kernel_y with relative performance < (1.0 - tol)).
     3 - Reformulates the problem as a set cover problem (see 'solve_set_cover')
@@ -172,17 +179,16 @@ def min_assigment(
     """
     if devices is None:
         devices = [0]
-    bench_file = lib.create_bench_input(cluster_dir)[0]
+    bench_file = lib.create_bench_input(cluster_dir, adaptive=False)[0]
     bench_data = bench.log.parse(bench_file)
-    bench_data = bench.log.update(bench_data, beta=False, flush=False)[0]
+    bench_data = bench.log.update(bench_data, beta=False, flush=PRUNE_FLUSH, adaptive=False)[0]
+    adaptive = bench.log.adaptive_fields(**SEARCH_PROFILES[PRUNE_PROFILE])
     all_flops = []
     for config in bench_data:
         flops = 2 * config["M"] * config["N"] * config["K"] * config["batch_count"]
-        iters = min(max(int(7e13 / flops), 10), 1000)
-        config["iters"] = iters
-        config["cold_iters"] = int(iters * 0.2)
         config["algo_method"] = 0
         config["requested_solution_num"] = -1
+        config.update(adaptive)
         all_flops.append(flops)
     
     if scale_tol:

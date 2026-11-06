@@ -218,9 +218,92 @@ def test_standard_benchmark_validation_and_scaling(monkeypatch: pytest.MonkeyPat
         return pd.DataFrame([{"ok": 1}])
 
     monkeypatch.setattr(bcore, "run", _fake_run)
-    out = bcore.standard_benchmark(hip, bench_file, out_file, duration=0.001)
+    out = bcore.standard_benchmark(hip, bench_file, out_file, duration=0.001, adaptive=False)
     assert len(out) == 1
     assert len(seen["calls"]) == 2
+
+
+def test_standard_benchmark_adaptive_single_run_without_probe(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    hip = tmp_path / "hip"
+    hip.mkdir()
+    bench_file = tmp_path / "bench.yaml"
+    yaml.safe_dump([_log_row(M=16), _log_row(M=32)], bench_file.open("w"), sort_keys=False)
+    out_file = tmp_path / "out.out"
+
+    seen = {"calls": [], "kwargs": []}
+
+    def _fake_run(_hip, yaml_file, _out, **kwargs):
+        seen["calls"].append(Path(yaml_file))
+        seen["kwargs"].append(kwargs)
+        return pd.DataFrame([{"ok": 1}])
+
+    monkeypatch.setattr(bcore, "run", _fake_run)
+    out = bcore.standard_benchmark(hip, bench_file, out_file, duration=0.5, bench_freq=True)
+    assert len(out) == 1
+    assert len(seen["calls"]) == 1
+    assert not any("probe" in str(p) for p in seen["calls"])
+    assert seen["kwargs"][0]["cache"] is False
+    assert seen["kwargs"][0]["bench_freq"] is True
+
+    rows = yaml.safe_load(seen["calls"][0].read_text())
+    assert len(rows) == 2
+    for row in rows:
+        assert row["adaptive"] is True
+        assert row["measure_time"] == pytest.approx(500.0)
+        assert row["warmup_time"] == pytest.approx(200.0)
+        assert row["max_measure_time"] == pytest.approx(2000.0)
+        assert row["sample_time"] == pytest.approx(1.0)
+
+
+def test_standard_benchmark_adaptive_replaces_existing_adaptive_fields(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    hip = tmp_path / "hip"
+    hip.mkdir()
+    bench_file = tmp_path / "bench.yaml"
+    row = _log_row()
+    row.update({"adaptive": True, "measure_time": 1.0, "noise_threshold": 0.5})
+    yaml.safe_dump([row], bench_file.open("w"), sort_keys=False)
+
+    seen = {}
+
+    def _fake_run(_hip, yaml_file, _out, **kwargs):
+        seen["rows"] = yaml.safe_load(Path(yaml_file).read_text())
+        return pd.DataFrame([{"ok": 1}])
+
+    monkeypatch.setattr(bcore, "run", _fake_run)
+    bcore.standard_benchmark(hip, bench_file, tmp_path / "out.out", duration=0.2)
+    assert seen["rows"][0]["measure_time"] == pytest.approx(200.0)
+    assert seen["rows"][0]["noise_threshold"] == pytest.approx(0.005)
+
+
+def test_standard_benchmark_non_adaptive_strips_adaptive_fields(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    hip = tmp_path / "hip"
+    hip.mkdir()
+    bench_file = tmp_path / "bench.yaml"
+    row = _log_row()
+    row.update({"adaptive": True, "measure_time": 1.0, "noise_threshold": 0.5})
+    yaml.safe_dump([row], bench_file.open("w"), sort_keys=False)
+
+    seen = []
+
+    def _fake_run(_hip, yaml_file, _out, **kwargs):
+        rows = yaml.safe_load(Path(yaml_file).read_text())
+        seen.append(rows)
+        if "probe" in str(yaml_file):
+            return pd.DataFrame([_probe_row(row, 10.0)])
+        return pd.DataFrame([{"ok": 1}])
+
+    monkeypatch.setattr(bcore, "run", _fake_run)
+    bcore.standard_benchmark(hip, bench_file, tmp_path / "out.out", duration=0.001, adaptive=False)
+    assert len(seen) == 2
+    for rows in seen:
+        for key in bcore.log.ADAPTIVE_ROW_KEYS:
+            assert key not in rows[0]
 
 
 def test_standard_benchmark_probe_mismatch_raises(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -234,7 +317,7 @@ def test_standard_benchmark_probe_mismatch_raises(monkeypatch: pytest.MonkeyPatc
 
     monkeypatch.setattr(bcore, "run", _fake_run)
     with pytest.raises(ValueError, match="Probe output rows"):
-        bcore.standard_benchmark(hip, bench_file, tmp_path / "x.out")
+        bcore.standard_benchmark(hip, bench_file, tmp_path / "x.out", adaptive=False)
 
 
 def test_compare_raises_when_no_libraries(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -254,7 +337,8 @@ def test_compare_happy_path_with_verify(monkeypatch: pytest.MonkeyPatch, tmp_pat
     class _Lib:
         name = "libA"
 
-        def create_bench_input(self, benchmark_dir, duration, verify, beta):
+        def create_bench_input(self, benchmark_dir, duration, verify, beta, adaptive):
+            assert adaptive is True
             bf = Path(benchmark_dir) / "libA_bench.yaml"
             vf = Path(benchmark_dir) / "libA_verify.yaml"
             bf.write_text("[]\n")
