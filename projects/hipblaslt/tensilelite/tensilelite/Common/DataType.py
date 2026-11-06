@@ -73,6 +73,11 @@ class DataType:
 
         self.properties = DataType.properties[self.value]
 
+    def __deepcopy__(self, memo):
+        # properties is a row of the shared, read-only class table: re-share it instead of
+        # letting deepcopy duplicate the dict (most of the cost of deep-copying a ProblemType).
+        return DataType(self.value)
+
     def toChar(self):
         return self.properties['char']
     def toName(self):
