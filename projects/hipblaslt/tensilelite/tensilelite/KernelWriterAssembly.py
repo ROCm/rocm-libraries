@@ -17728,6 +17728,7 @@ class KernelWriterAssembly(KernelWriter):
                 edgeModule.add(SLongBranch(endLabel, tmpPair, tmpOff, posLabel, comment="jump to end"))
           else:
             tdmStoreLdsBase = self.vgprPool.checkOut(1, "tdmStoreLdsBase") if tdmStoreBlock else None
+            tdmStoreCBytes = self.sgprPool.checkOut(1, "tdmStoreCBytes") if tdmStoreBlock and beta else None
             currentInstLength, activationTypeStr = \
             self.globalWriteElementBatch(kernel, tPA, tPB, activation,
                                           applyAlpha, beta, edge and not tdmStoreBlock, atomic,
@@ -17738,9 +17739,11 @@ class KernelWriterAssembly(KernelWriter):
                                           currentInstLength, betaIdx, fdIdx, vectorDataTypes, factorDims,
                                           emitGateResidual=emitGateResidual,
                                           hasMultipleGlobalWriteModes=hasMultipleGlobalWriteModes,
-                                          tdmStoreLdsBase=tdmStoreLdsBase)
+                                          tdmStoreLdsBase=tdmStoreLdsBase, tdmStoreCBytes=tdmStoreCBytes)
             if tdmStoreBlock:
               self.vgprPool.checkIn(tdmStoreLdsBase)
+            if tdmStoreCBytes is not None:
+              self.sgprPool.checkIn(tdmStoreCBytes)
           # Edge conditions and branches
           if edge == True:
             # Else label
@@ -19958,7 +19961,7 @@ class KernelWriterAssembly(KernelWriter):
                               edgeModule, writeLabel, endLabel, \
                               currentInstLength, \
                               betaIdx, fdIdx, vectorDataTypes, factorDims, emitGateResidual,
-                              hasMultipleGlobalWriteModes=False, tdmStoreLdsBase=None):
+                              hasMultipleGlobalWriteModes=False, tdmStoreLdsBase=None, tdmStoreCBytes=None):
     factorDim = factorDims[fdIdx]
     gateAppliesToFinalD = bool(
         self.states.useGateResidual
@@ -20183,7 +20186,7 @@ class KernelWriterAssembly(KernelWriter):
                 self.vgprs.addrScaleAVec, self.vgprs.addrScaleBVec, self.vgprs.addrScaleAlphaVec, \
                 biasLocalBarrierInit, tmpVgpr, tmpVgprDynamic, cvtVgprStruct, activationSetPCStruct, \
                 activationTypeStr, elementSgprs, tmpSgpr, passAccVgprRead, passMulAlpha, factorDim, numBatches, \
-                _next_firing_rowInc, _direct_next_rowInc, tdmStoreLdsBase))
+                _next_firing_rowInc, _direct_next_rowInc, tdmStoreLdsBase, tdmStoreCBytes))
             biasLocalBarrierInit = True
           return m
 
@@ -20911,7 +20914,7 @@ class KernelWriterAssembly(KernelWriter):
       addrScaleAVec, addrScaleBVec, addrScaleAlphaVec, biasLocalBarrierInit: bool, \
       tmpVgpr, tmpVgprDynamic, cvtVgprStruct, activationSetPCStruct, activationTypeStr, \
       batchElementSgprs, tmpSgpr, codeAccVgprRead, codeMulAlpha, factorDim, numBatches, \
-      inter_iter_rowInc=0, direct_next_rowInc=0, tdmStoreLdsBase=None) -> Module:
+      inter_iter_rowInc=0, direct_next_rowInc=0, tdmStoreLdsBase=None, tdmStoreCBytes=None) -> Module:
       packdata = Component.PackData.find(self)
       gwriter  = Component.GlobalWriteComponents.find(self)
       return gwriter(kernel, tPA, tPB, activation, ss, \
@@ -20920,7 +20923,7 @@ class KernelWriterAssembly(KernelWriter):
         addrScaleAVec, addrScaleBVec, addrScaleAlphaVec, biasLocalBarrierInit, \
         tmpVgpr, tmpVgprDynamic, cvtVgprStruct, activationSetPCStruct, activationTypeStr, \
         batchElementSgprs, tmpSgpr, codeAccVgprRead, codeMulAlpha, packdata, self, factorDim, \
-        self.assembler.version, numBatches, inter_iter_rowInc, direct_next_rowInc, tdmStoreLdsBase)
+        self.assembler.version, numBatches, inter_iter_rowInc, direct_next_rowInc, tdmStoreLdsBase, tdmStoreCBytes)
 
   ##############################################################################
   def openPrefetchGlobalRead2orMore(self, kernel, idxPgr):

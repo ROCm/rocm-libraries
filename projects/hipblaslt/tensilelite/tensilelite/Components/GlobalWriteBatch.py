@@ -187,13 +187,14 @@ class GlobalWriteBatchComponent(GlobalWriteComponents):
     batchElements, addrE, addrD, addrC, addrBias, addrScaleAVec, addrScaleBVec, addrScaleAlphaVec, isLocalBarrierInit: bool, \
     tmpVgpr, tmpVgprDynamic, cvtVgprStruct, activationSetPCStruct, activationTypeStr, batchElementSgprs, tmpSgpr, codeAccVgprRead, \
     codeMulAlpha, packdata, parentWriter, factorDim, amdClangVersion: SemanticVersion, numBatches: int,
-    inter_iter_rowInc: int = 0, direct_next_rowInc: int = 0, tdmStoreLdsBase: int | None = None) -> Module:
+    inter_iter_rowInc: int = 0, direct_next_rowInc: int = 0, tdmStoreLdsBase: int | None = None,
+    tdmStoreCBytes: int | None = None) -> Module:
     return GlobalWriteBatchWriter(kernel, tPA, tPB, activation, ss, batchIdx, applyAlpha, \
       beta, edge, atomic, gwvw, atomicW, \
       batchElements, addrE, addrD, addrC, addrBias, addrScaleAVec, addrScaleBVec, addrScaleAlphaVec, isLocalBarrierInit, \
       tmpVgpr, tmpVgprDynamic, cvtVgprStruct, activationSetPCStruct, activationTypeStr, batchElementSgprs, tmpSgpr, \
       codeAccVgprRead, codeMulAlpha, packdata, parentWriter, factorDim, amdClangVersion, numBatches,
-      inter_iter_rowInc, direct_next_rowInc, tdmStoreLdsBase).emit()
+      inter_iter_rowInc, direct_next_rowInc, tdmStoreLdsBase, tdmStoreCBytes).emit()
 
 class GlobalWriteBatchWriter:
   def __init__(self, kernel: Solution, tPA, tPB, activation: ActivationModule, ss: StoreState, \
@@ -201,7 +202,8 @@ class GlobalWriteBatchWriter:
     batchElements, addrE, addrD, addrC, addrBias, addrScaleAVec, addrScaleBVec, addrScaleAlphaVec, isLocalBarrierInit: bool, \
     tmpVgpr, tmpVgprDynamic, cvtVgprStruct, activationSetPCStruct, activationTypeStr, batchElementSgprs, tmpSgpr, codeAccVgprRead, \
     codeMulAlpha, packdata, parentWriter, factorDim, amdClangVersion: SemanticVersion, numBatches: int,
-    inter_iter_rowInc: int = 0, direct_next_rowInc: int = 0, tdmStoreLdsBase: int | None = None):
+    inter_iter_rowInc: int = 0, direct_next_rowInc: int = 0, tdmStoreLdsBase: int | None = None,
+    tdmStoreCBytes: int | None = None):
     self.kernel = kernel
     self.tPA    = tPA
     self.tPB    = tPB
@@ -276,6 +278,7 @@ class GlobalWriteBatchWriter:
     self.direct_next_rowInc = direct_next_rowInc
     # VGPR holding this thread's LDS byte address in the staged D tile; None = buffer_store.
     self.tdmStoreLdsBase = tdmStoreLdsBase
+    self.tdmStoreCBytes = tdmStoreCBytes
 
     # Internal state for GlobalWriteBatch
     # 0 for None, 1 for WorkGroupReduction = False, 2 for WorkGroupReduction = True
@@ -1294,6 +1297,8 @@ class GlobalWriteBatchWriter:
               else:
                 module.add(SCSelectB32(dst=sgpr("SrdC+2"), src0="BufferOOB", src1=0,
                                        comment="SrdC+2 = BufferOOB if M valid, else 0"))
+          if self.tdmStoreCBytes is not None and self.ss.optSrdIncForRow and addrCalc.rowInc:
+            (loadInputCode if self.kernel["GroupLoadStore"] else module).add(self._emitTDMStoreAdvanceBoundC(addrCalc.rowInc))
           # Pass `elementIdx` so the readInput's incrementToNextRow gate can
           # open the CompactLoopStore chain-seed emit for elt-0. Pass
           # `overrideAfterPrimerRows=_emitOverrideRows` so the AFTER-primer
@@ -1911,6 +1916,7 @@ class GlobalWriteBatchWriter:
     SrdC points at row 0 of the first column of the tile; the load offsets include wg0*MT0.
     The block reads C without per-element masks, so a load past the end of C must return zero
     instead of reading memory after C; tensor_dim drops the elements that use those values.
+    tdmStoreCBytes keeps the exact byte count, which _emitTDMStoreAdvanceBoundC lowers as SrdC moves.
     """
     module = Module("TDMStoreBoundC")
     kw = self.parentWriter
@@ -1925,13 +1931,37 @@ class GlobalWriteBatchWriter:
       module.add(SAddU32(dst=sgpr(lo), src0=sgpr(lo), src1=kw.sizeRef(self.kernel["ProblemType"]["Index0"]), comment="elements from SrdC to the end of C"))
       module.add(SAddCU32(dst=sgpr(hi), src0=sgpr(hi), src1=0, comment="carry"))
       module.add(SLShiftLeftB64(dst=sgpr(lo, 2), src=sgpr(lo, 2), shiftHex=int(log2(kw.states.bpeCexternal)), comment="bytes"))
-      if kw.states.bpeCexternal % 4:
-        module.add(SAddU32(dst=sgpr(lo), src0=sgpr(lo), src1=3, comment="round up to a dword: the range check drops a partial dword"))
-        module.add(SAddCU32(dst=sgpr(hi), src0=sgpr(hi), src1=0, comment="carry"))
-        module.add(SAndB32(dst=sgpr(lo), src0=sgpr(lo), src1=hex(0xFFFFFFFC), comment="round up to a dword"))
       module.add(SCmpEQU32(src0=sgpr(hi), src1=0, comment="below 4 GiB?"))
-      module.add(SCSelectB32(dst=sgpr(lo), src0=sgpr(lo), src1="BufferOOB"))
-      module.add(SMinU32(dst=sgpr("SrdC+2"), src0=sgpr(lo), src1="BufferOOB", comment="num_records"))
+      module.add(SCSelectB32(dst=sgpr(self.tdmStoreCBytes), src0=sgpr(lo), src1=hex(0xFFFFFFFC)))
+      module.add(SMinU32(dst=sgpr(self.tdmStoreCBytes), src0=sgpr(self.tdmStoreCBytes), src1=hex(0xFFFFFFFC),
+                         comment="at most 2^32-4, so rounding up to a dword cannot wrap"))
+    module.add(self._emitTDMStoreCRecords())
+    return module
+
+  def _emitTDMStoreAdvanceBoundC(self, rows) -> Module:
+    """Keep SrdC num_records at the end of C when the next C load moves SrdC forward by rows columns."""
+    assert rows > 0
+    module = Module("TDMStoreAdvanceBoundC")
+    kw = self.parentWriter
+    strideC1 = "StrideC%s" % kw.states.indexChars[self.kernel["PackedC1IndicesX"][0]]
+    with kw.allocTmpSgpr(1, tag="tdmStoreAdvanceBoundC") as tmp:
+      module.add(SMulI32(dst=sgpr(tmp.idx), src0=sgpr(strideC1), src1=rows * kw.states.bpeCexternal, comment="bytes SrdC moves"))
+      module.add(SSubU32(dst=sgpr(self.tdmStoreCBytes), src0=sgpr(self.tdmStoreCBytes), src1=sgpr(tmp.idx),
+                         comment="bytes from the next SrdC to the end of C"))
+    module.add(SCSelectB32(dst=sgpr(self.tdmStoreCBytes), src0=0, src1=sgpr(self.tdmStoreCBytes), comment="none once SrdC is past the end of C"))
+    module.add(self._emitTDMStoreCRecords())
+    return module
+
+  def _emitTDMStoreCRecords(self) -> Module:
+    """Set SrdC num_records to tdmStoreCBytes rounded up to a dword: the range check drops a partial dword."""
+    module = Module("TDMStoreCRecords")
+    kw = self.parentWriter
+    records = sgpr(self.tdmStoreCBytes)
+    if kw.states.bpeCexternal % 4:
+      module.add(SAddU32(dst=sgpr("SrdC+2"), src0=records, src1=3, comment="round up to a dword"))
+      module.add(SAndB32(dst=sgpr("SrdC+2"), src0=sgpr("SrdC+2"), src1=hex(0xFFFFFFFC), comment="round up to a dword"))
+      records = sgpr("SrdC+2")
+    module.add(SMinU32(dst=sgpr("SrdC+2"), src0=records, src1="BufferOOB", comment="num_records"))
     module.add(kw.shiftSrd("C"))
     return module
 

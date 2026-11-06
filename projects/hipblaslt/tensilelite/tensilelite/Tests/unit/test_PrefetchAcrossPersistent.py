@@ -1828,6 +1828,21 @@ def test_factor_dim_3_vector_preload_barriers_both_factor_dims(
     _assert_every_vector_preload_barriers(asm)
 
 
+def test_tdm_store_keeps_the_c_bound_at_the_end_of_c_as_srdc_moves(
+        _gp_gfx1250, gfx1250_iim, assembler, capsys):
+    # The beta != 0 TDM block reads C without masks, so num_records must follow every move of SrdC.
+    sol, asm = _emit_asm(gfx1250_iim, assembler, mi=_BF16_VECTOR_MI, DepthU=64, TDMStore=1,
+                         StreamK=0, StreamKForceDPOnly=0, ProblemType=dict(_BF16_VECTOR_EPILOGUE))
+    assert sol.get("Valid"), capsys.readouterr().out
+    start = asm.index("elements from SrdC to the end of C")
+    block = asm[start:asm.index("tensor_store_from_lds", start)]
+    beforeEachLoad = re.split(r"\n\s*buffer_load\S* [^\n]*s\[sgprSrdC:", block)[:-1]
+    moved = [s for s in beforeEachLoad if re.search(r"^\s*s_add_u32 s\[sgprSrdC\+0\],", s, re.M)]
+    assert moved
+    for segment in moved:
+        assert re.search(r"^\s*s_\w+ s\[sgprSrdC\+2\],", segment, re.M)
+
+
 # PAP and RAP on TDMFuse 1-3.
 
 
