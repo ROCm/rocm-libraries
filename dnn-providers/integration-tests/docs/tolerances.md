@@ -100,12 +100,16 @@ The function is `calculateConvFpropOutputTolerance<T>()` in
 
 `convFwdErrorScale()` applies the model only when the graph has exactly one
 `ConvolutionFwd` node, with float compute type, and its `x` and `w` are graph
-inputs. It reads both on the host to compute the mean squares. A `MUL` node
-whose second operand is a graph input scales `sigma` by that operand's largest
-magnitude. Other pointwise nodes (bias add, activations) change an error by at
-most their slope, which is about 1 for every supported activation, so they
-leave `sigma` unchanged. Any other graph, and every float output, uses the
-per-op default.
+inputs. A `MUL` node whose second operand is a graph input scales `sigma` by
+that operand's largest magnitude. Other pointwise nodes (bias add,
+activations) change an error by at most their slope, which is about 1 for
+every supported activation, so they leave `sigma` unchanged. Any other graph,
+and every float output, uses the per-op default.
+
+The mean squares cost nothing for inputs the harness fills: they come from the
+fill recipe (`(lo^2 + lo*hi + hi^2) / 3` for a uniform draw on `[lo, hi]`, `v^2`
+for a fixed value), so no tensor is read. Inputs loaded from golden blobs are
+already on the host and are scanned once.
 
 ### Calibration
 
