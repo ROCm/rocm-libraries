@@ -1168,7 +1168,7 @@ TYPED_TEST(host_vector_random, uniform_integers_of_wide_ranges_stay_in_the_range
     EXPECT_TRUE(std::any_of(values.begin(), values.end(), [](T x) { return x % 2 != 0; }));
 
     // Bounds that a double cannot hold. 1000 draws from 602 integers give about 490
-    // distinct values, a double between the bounds only a few
+    // distinct values, a double between the bounds only one, 2^62
     if constexpr(std::is_same_v<T, int64_t>)
     {
         const T a = (T(1) << 62) - 1;

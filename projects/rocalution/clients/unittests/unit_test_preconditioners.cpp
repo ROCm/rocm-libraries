@@ -1905,7 +1905,8 @@ TYPED_TEST(preconditioners, approximate_inverses_apply_in_every_format)
         fsai_p.Build();
         expect_near(apply(fsai_p, *A, r), fsai(ref, pattern(ref), r), scaled_tol<T>(1e-13));
 
-        // A second Build transposes into the cleared factor, which kept the format f
+        // A second Build transposes into the cleared factor, which kept the format f. Clear
+        // also resets the preconditioner format, so the factors of this Build stay CSR
         fsai_p.Build();
         expect_near(apply(fsai_p, *A, r), fsai(ref, pattern(ref), r), scaled_tol<T>(1e-13));
 

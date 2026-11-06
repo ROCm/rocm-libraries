@@ -1091,7 +1091,8 @@ namespace rocalution
 
         /** \brief Transpose the matrix into T
       * \details
-      * T is overwritten and gets the format of this matrix.
+      * T is overwritten and gets the format of this matrix, or CSR if the conversion to
+      * that format fails.
       */
         ROCALUTION_EXPORT
         void Transpose(LocalMatrix<ValueType>* T) const;

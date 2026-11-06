@@ -1698,8 +1698,8 @@ TYPED_TEST(host_matrix_csr, check_accepts_valid_and_unsorted_matrices)
     std::swap(ref.val[0], ref.val[1]);
     EXPECT_TRUE(ref.host_csr()->Check());
 
-    // A last row without entries starts at nnz. Reading its first column index reads
-    // past the column indices, which only a build with ASAN reports
+    // A last row without entries starts at nnz, so its first column index would be past
+    // the column indices. Only a build with ASAN reports a Check that reads it
     Csr<T> trailing(3);
     trailing.add(0, T(1));
     trailing.add(2, T(2));
