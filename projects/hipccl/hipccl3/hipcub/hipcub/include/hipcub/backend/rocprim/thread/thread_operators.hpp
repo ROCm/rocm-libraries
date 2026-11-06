@@ -42,7 +42,20 @@
 
 #include <hip/hip_bf16.h>
 
+#include <utility>
+
 BEGIN_HIPCUB_NAMESPACE
+
+// Restored for backward compatibility with code written against older hipCUB (e.g. PyTorch).
+// New code should use _HIPCUB_STD::equal_to<> instead.
+struct Equality
+{
+    template<class T, class U>
+    HIPCUB_HOST_DEVICE inline constexpr bool operator()(T&& t, U&& u) const
+    {
+        return std::forward<T>(t) == std::forward<U>(u);
+    }
+};
 
 struct ArgMax
 {

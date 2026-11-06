@@ -53,6 +53,44 @@ BEGIN_ROCPRIM_NAMESPACE
 namespace detail
 {
 
+template<class T, class = void>
+constexpr bool has_offset_iterator_plus_v = false;
+
+template<class T>
+constexpr bool has_offset_iterator_plus_v<
+    T,
+    std::void_t<decltype(std::declval<const T&>() + std::declval<size_t>())>>
+    = true;
+
+// Offset iterators used to only need operator[], since the kernels only index them.
+// Batched launches advance them by the batch offset, so for types without operator+
+// (e.g. index functors) we wrap them in an adaptor that applies the offset when indexing.
+template<class OffsetIterator>
+struct offset_iterator_subscript_adaptor
+{
+    OffsetIterator base;
+    size_t         offset;
+
+    ROCPRIM_HOST_DEVICE
+    inline decltype(auto) operator[](size_t i) const
+    {
+        return base[offset + i];
+    }
+};
+
+template<class OffsetIterator>
+inline auto advance_offset_iterator(OffsetIterator it, size_t offset)
+{
+    if constexpr(has_offset_iterator_plus_v<OffsetIterator>)
+    {
+        return it + offset;
+    }
+    else
+    {
+        return offset_iterator_subscript_adaptor<OffsetIterator>{it, offset};
+    }
+}
+
 struct Partitioner
 {
     bool three_way_partitioning;
@@ -538,6 +576,9 @@ inline hipError_t segmented_radix_sort_impl(
             1 /*segments_per_block*/,
             [&](unsigned int current_grid_size, size_t offset)
             {
+                const auto batch_begin_offsets = advance_offset_iterator(begin_offsets, offset);
+                const auto batch_end_offsets   = advance_offset_iterator(end_offsets, offset);
+
                 auto segmented_sort_kernel = [=](auto target_config)
                 {
                     segmented_sort<decltype(target_config), Descending>(keys_input,
@@ -547,8 +588,8 @@ inline hipError_t segmented_radix_sort_impl(
                                                                         values_tmp,
                                                                         values_output,
                                                                         to_output,
-                                                                        begin_offsets + offset,
-                                                                        end_offsets + offset,
+                                                                        batch_begin_offsets,
+                                                                        batch_end_offsets,
                                                                         iterations,
                                                                         begin_bit,
                                                                         end_bit);
