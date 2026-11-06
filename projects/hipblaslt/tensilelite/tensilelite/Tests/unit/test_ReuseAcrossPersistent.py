@@ -811,6 +811,28 @@ def test_rap_kernel_with_a_duplicate_label_fails_instead_of_aborting(
         _kernelSource(sol, assembler)
 
 
+def test_rap_reuse_copy_prefetches_only_b_into_gl2(_gp_gfx1250, gfx1250_iim, assembler):
+    """A and its scales stay resident, so the reuse copy warms L2 for B alone.
+
+    Their prefetch there is pure overhead: on g04-2 dropping it made RAP 1 with
+    PrefetchGL2 1 3-5% faster, about as much with 288 KB of A as with 16 MB.
+    """
+    sol = Solution(_make_params(gfx1250_iim, ProblemType=_MX_PROBLEM_TYPE, PrefetchGL2=1, **_AUDITED),
+                   False, False, False, assembler, gfx1250_iim)
+    assert sol.get("Valid") is True
+    source = _kernelSource(sol, assembler)
+    fill, reuse = source.split("label_RAP_IterN:", 1)
+    reuse = reuse.split("label_RAP_StoreJoin:", 1)[0]
+
+    def prefetched(section):
+        return set(re.findall(r"prefetch_b8 v\[vgprGL2PrefetchAddr(A|B|MXSA|MXSB)_", section))
+
+    assert prefetched(fill) == {"A", "B", "MXSA", "MXSB"}
+    assert prefetched(reuse) == {"B", "MXSB"}
+    assert not re.search(r"GL2Prefetch(?:Addr|Inc)(?:A|MXSA)\b|GL2PrefetchAddr(?:A|MXSA)_", reuse), \
+        "the reuse copy still computes A's prefetch addresses"
+
+
 def test_rap_gives_each_iteration_of_a_resident_k_tile_its_own_buffer_set(
     _gp_gfx1250, gfx1250_iim, assembler
 ):
