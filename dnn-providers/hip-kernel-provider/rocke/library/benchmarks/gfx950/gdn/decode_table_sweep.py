@@ -867,11 +867,14 @@ def summarize(rows: list, out=None, require_auto: bool = True) -> int:
         return 1
     exit_code = 0
     by_shape = rows_by_shape(rows)
+    summaries = {
+        shape: shape_summary(shape_rows) for shape, shape_rows in by_shape.items()
+    }
     scored = [
         r
-        for shape_rows in by_shape.values()
+        for shape, shape_rows in by_shape.items()
         for r in shape_rows
-        if r["stage"] == shape_summary(shape_rows)["stage"]
+        if r["stage"] == summaries[shape]["stage"]
     ]
     problems = comparability_problems(scored, require_cold=False)
     for problem in problems:
@@ -889,8 +892,8 @@ def summarize(rows: list, out=None, require_auto: bool = True) -> int:
         f"{'auto/best':>9}  best tuning_id  knobs",
         file=out,
     )
-    for shape, shape_rows in sorted(rows_by_shape(rows).items()):
-        s = shape_summary(shape_rows)
+    for shape in sorted(by_shape):
+        s = summaries[shape]
         best, auto = s["best"], s["auto"]
         if best is None:
             print(
