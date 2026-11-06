@@ -126,14 +126,14 @@ namespace TensileLite
             // matching promise to ContractionSolution about what it allocated.
             // The two must agree: the stride handed to a custom kernel is read
             // back out of the descriptor these shape.
-            MXScalePadding                   m_mxScalePadding;
-            bool                             m_mxScalesPacked;
+            MXScalePadding m_mxScalePadding;
+            bool           m_mxScalesPacked;
             // --mx-scale-format 1 (HostPreSwizzle) makes DataInitialization upload
             // the scales through the gfx950 e8m0_shuffle permutation, so the
             // problem's scale buffers are pre-swizzled and only kernels built for
             // that layout may be selected. Mutually exclusive with m_mxScalesPacked:
             // a permuted buffer has no row pitch to be unpadded.
-            bool                             m_mxScaleHostPreSwizzle;
+            bool m_mxScaleHostPreSwizzle;
 
             TensorOps m_aOps;
             TensorOps m_bOps;

@@ -1592,13 +1592,13 @@ namespace
     // would break row uniformity.
     TEST(RowUniformityStreamKRejection_pre_checkin, HandwrittenCustomKernelDeclaringUniformOrder)
     {
-        const auto hardware                           = probeHardware();
-        auto       solution                           = probeSolution();
-        solution->sizeMapping.tileProcessingStrategy  = TensileLite::TileProcessingStrategy::None;
-        solution->customKernel.name                   = "DummyCustomKernel";
-        solution->customKernel.generated              = false;
-        solution->customKernel.macrotile              = TensileLite::dim3(128, 128, 32);
-        solution->customKernel.uniformSummationOrder  = true;
+        const auto hardware                          = probeHardware();
+        auto       solution                          = probeSolution();
+        solution->sizeMapping.tileProcessingStrategy = TensileLite::TileProcessingStrategy::None;
+        solution->customKernel.name                  = "DummyCustomKernel";
+        solution->customKernel.generated             = false;
+        solution->customKernel.macrotile             = TensileLite::dim3(128, 128, 32);
+        solution->customKernel.uniformSummationOrder = true;
 
         EXPECT_TRUE(admitsUniformSummationOrder(*solution, hardware))
             << "a handwritten custom kernel that declares uniform summation order must be admitted";

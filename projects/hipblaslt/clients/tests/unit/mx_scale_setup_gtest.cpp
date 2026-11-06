@@ -52,7 +52,8 @@ TEST(HostUnitMXScaleSetup, smoke_PackedDeclarationArrivesWithTheScaleDescriptor)
     ASSERT_FALSE(problem.customKernelMXScaleAIsPacked());
     ASSERT_FALSE(problem.customKernelMXScaleBIsPacked());
 
-    rocblaslt::setHostMXScaleA(problem, rocisa::DataType::E8, 32, TensileLite::MXScalePadding::Gfx950);
+    rocblaslt::setHostMXScaleA(
+        problem, rocisa::DataType::E8, 32, TensileLite::MXScalePadding::Gfx950);
     EXPECT_EQ(problem.mxBlockA(), 32u);
     EXPECT_TRUE(problem.customKernelMXScaleAIsPacked());
     EXPECT_FALSE(problem.customKernelMXScaleBIsPacked());
@@ -114,14 +115,18 @@ TEST(HostUnitMXScaleSetup, smoke_RawSetMXScaleLeavesTheDeclarationUnset)
 TEST(HostUnitMXScaleSetup, smoke_PaddingArgumentReachesTheDescriptor)
 {
     auto padded = mxProblem(64, 64, 128);
-    rocblaslt::setHostMXScaleA(padded, rocisa::DataType::E8, 32, TensileLite::MXScalePadding::Gfx950);
-    rocblaslt::setHostMXScaleB(padded, rocisa::DataType::E8, 32, TensileLite::MXScalePadding::Gfx950);
+    rocblaslt::setHostMXScaleA(
+        padded, rocisa::DataType::E8, 32, TensileLite::MXScalePadding::Gfx950);
+    rocblaslt::setHostMXScaleB(
+        padded, rocisa::DataType::E8, 32, TensileLite::MXScalePadding::Gfx950);
     EXPECT_EQ(padded.mxsa().strides()[1], 8u);
     EXPECT_EQ(padded.mxsb().strides()[1], 8u);
 
     auto unpadded = mxProblem(64, 64, 128);
-    rocblaslt::setHostMXScaleA(unpadded, rocisa::DataType::E8, 32, TensileLite::MXScalePadding::Gfx1250);
-    rocblaslt::setHostMXScaleB(unpadded, rocisa::DataType::E8, 32, TensileLite::MXScalePadding::Gfx1250);
+    rocblaslt::setHostMXScaleA(
+        unpadded, rocisa::DataType::E8, 32, TensileLite::MXScalePadding::Gfx1250);
+    rocblaslt::setHostMXScaleB(
+        unpadded, rocisa::DataType::E8, 32, TensileLite::MXScalePadding::Gfx1250);
     EXPECT_EQ(unpadded.mxsa().strides()[1], 4u);
     EXPECT_EQ(unpadded.mxsb().strides()[1], 4u);
     EXPECT_TRUE(unpadded.customKernelMXScaleAIsPacked());
@@ -133,8 +138,10 @@ TEST(HostUnitMXScaleSetup, smoke_PaddingArgumentReachesTheDescriptor)
 TEST(HostUnitMXScaleSetup, smoke_PaddingFollowsTheCallerScaleFormat)
 {
     auto packed = mxProblem(64, 64, 96);
-    rocblaslt::setHostMXScaleA(packed, rocisa::DataType::E8, 32, TensileLite::MXScalePadding::Packed);
-    rocblaslt::setHostMXScaleB(packed, rocisa::DataType::E8, 32, TensileLite::MXScalePadding::Packed);
+    rocblaslt::setHostMXScaleA(
+        packed, rocisa::DataType::E8, 32, TensileLite::MXScalePadding::Packed);
+    rocblaslt::setHostMXScaleB(
+        packed, rocisa::DataType::E8, 32, TensileLite::MXScalePadding::Packed);
     EXPECT_EQ(packed.mxsa().strides()[1], 3u);
     EXPECT_EQ(packed.mxsb().strides()[1], 3u);
     EXPECT_TRUE(packed.customKernelMXScaleAIsPacked());

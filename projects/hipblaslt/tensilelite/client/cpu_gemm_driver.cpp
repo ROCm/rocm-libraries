@@ -714,8 +714,10 @@ int runGemm(size_t         m,
             // m as leading stride (and analogous for B). The default
             // MXScalePadding::Gfx950 would round M up to the next 32 and the
             // K-block count up to the next 8, breaking the index math below.
-            contraction.setMXScaleA(rocisa::DataType::E8, mxBlockA, /*saStride=*/{}, MXScalePadding::Gfx1250);
-            contraction.setMXScaleB(rocisa::DataType::E8, mxBlockB, /*sbStride=*/{}, MXScalePadding::Gfx1250);
+            contraction.setMXScaleA(
+                rocisa::DataType::E8, mxBlockA, /*saStride=*/{}, MXScalePadding::Gfx1250);
+            contraction.setMXScaleB(
+                rocisa::DataType::E8, mxBlockB, /*sbStride=*/{}, MXScalePadding::Gfx1250);
 
             size_t nmxsa = contraction.mxsa().totalLogicalElements();
             size_t nmxsb = contraction.mxsb().totalLogicalElements();

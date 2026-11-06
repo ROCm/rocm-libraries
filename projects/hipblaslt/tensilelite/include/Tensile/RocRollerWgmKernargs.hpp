@@ -31,7 +31,7 @@ namespace TensileLite
         uint32_t magicShiftAndSignNumTilesN;
         uint32_t magicShiftAndSignWgmTail;
         uint32_t magicShiftAndSignWgmMainBlock;
-        int32_t quotientTilesMByWgm;
+        int32_t  quotientTilesMByWgm;
         // ceil(M / tileM) and ceil(N / tileN). A power-of-two macrotile
         // recomputes these inline; any other macrotile hoists them as int64
         // kernargs. Computed either way.
@@ -276,10 +276,10 @@ namespace TensileLite
                                                              uint32_t tileN,
                                                              int32_t  wgm = RocRollerDefaultWgm)
     {
-        int64_t ntM64 = rocRollerNumTilesS64(m, tileM);
-        int64_t ntN64 = rocRollerNumTilesS64(n, tileN);
-        int32_t ntM   = static_cast<int32_t>(ntM64);
-        int32_t ntN   = static_cast<int32_t>(ntN64);
+        int64_t              ntM64  = rocRollerNumTilesS64(m, tileM);
+        int64_t              ntN64  = rocRollerNumTilesS64(n, tileN);
+        int32_t              ntM    = static_cast<int32_t>(ntM64);
+        int32_t              ntN    = static_cast<int32_t>(ntN64);
         int32_t w     = wgm;
         int32_t total = rocRollerMulS32(ntM, ntN);
         int32_t block = rocRollerMulS32(w, ntN);

@@ -345,7 +345,7 @@ const origami::hardware_t& rankerHardwareForCurrentDevice()
 {
     // One model per device, built once. get_hardware_for_device queries HIP,
     // which is far too expensive to repeat per ranked problem.
-    static std::mutex                                    guard;
+    static std::mutex                                          guard;
     static std::map<int, std::unique_ptr<origami::hardware_t>> cache;
 
     int device = 0;
@@ -406,8 +406,8 @@ std::vector<SolutionIndexParameters>
     size_t elementSizeB_bits = elementBits(kernelType.typeB);
 
     origami::problem_t origami_problem = {
-        .size        = {prob.m, prob.n, prob.k},
-        .batch       = prob.batch_count,
+        .size  = {prob.m, prob.n, prob.k},
+        .batch = prob.batch_count,
         // 0 = use all CUs;
         .num_cus     = static_cast<size_t>(prob.sm_count_target),
         .a_transpose = kernelType.transA ? origami::transpose_t::T : origami::transpose_t::N,

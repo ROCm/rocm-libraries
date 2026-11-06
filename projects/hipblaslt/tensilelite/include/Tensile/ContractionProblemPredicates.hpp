@@ -1647,13 +1647,13 @@ namespace TensileLite
                 // which makes their extent 0 and the test vacuous.
                 static uint64_t largestTensorBytes(ContractionProblemGemm const& problem)
                 {
-                    static constexpr ContractionProblemGemm::TENSOR addressed[] = {
-                        ContractionProblemGemm::TENSOR::A,
-                        ContractionProblemGemm::TENSOR::B,
-                        ContractionProblemGemm::TENSOR::C,
-                        ContractionProblemGemm::TENSOR::D,
-                        ContractionProblemGemm::TENSOR::MXSA,
-                        ContractionProblemGemm::TENSOR::MXSB};
+                    static constexpr ContractionProblemGemm::TENSOR addressed[]
+                        = {ContractionProblemGemm::TENSOR::A,
+                           ContractionProblemGemm::TENSOR::B,
+                           ContractionProblemGemm::TENSOR::C,
+                           ContractionProblemGemm::TENSOR::D,
+                           ContractionProblemGemm::TENSOR::MXSA,
+                           ContractionProblemGemm::TENSOR::MXSB};
 
                     uint64_t largest = 0;
                     for(auto which : addressed)
@@ -3601,8 +3601,13 @@ namespace TensileLite
                 virtual bool debugEval(ContractionProblemGemm const& problem,
                                        std::ostream&                 stream) const override
                 {
-                    return debugEvalCmp(
-                        problem, stream, "prob", problem.mxScaleHostPreSwizzle(), "==", "sol", value);
+                    return debugEvalCmp(problem,
+                                        stream,
+                                        "prob",
+                                        problem.mxScaleHostPreSwizzle(),
+                                        "==",
+                                        "sol",
+                                        value);
                 }
             };
         } // namespace Contraction

@@ -271,7 +271,8 @@ TEST(Predicates, MXScaleHostPreSwizzleRejectsLayoutMismatch)
     using namespace TensileLite;
 
     auto mxProblem = [](bool hostPreSwizzled) {
-        auto p = ContractionProblemGemm::GEMM(true, false, 256, 256, 128, 128, 128, 256, 1.0, false, 1);
+        auto p = ContractionProblemGemm::GEMM(
+            true, false, 256, 256, 128, 128, 128, 256, 1.0, false, 1);
         p.setMXScaleA(rocisa::DataType::E8, 32);
         p.setMXScaleB(rocisa::DataType::E8, 32);
         p.setMXScaleHostPreSwizzle(hostPreSwizzled);
