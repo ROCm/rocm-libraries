@@ -72,16 +72,15 @@ std::string validatorNotApplicableAtSite(const std::string& label,
 }
 
 /// The report for a ragged output whose comparison resolved to the device. No device
-/// validator understands ragged layouts, and falling back to the host validator would
-/// read device memory through host pointers.
+/// validator understands ragged layouts.
 std::string raggedNotSupportedOnDevice(const std::string& label)
 {
     std::ostringstream error;
     error << "\nRagged output NOT COMPARABLE ON DEVICE\n"
           << "  Tensor: " << label << "\n"
-          << "  Ragged outputs are compared on the host only, and this comparison runs on\n"
-             "  the device, where the reference left its output.\n"
-             "  Rerun with --validator cpu to compare it on the host.\n";
+          << "  Ragged outputs are compared on the host only, and this run asks for the\n"
+             "  comparison on the device.\n"
+             "  Rerun with --validator cpu or --validator auto to compare it on the host.\n";
     return error.str();
 }
 
@@ -96,6 +95,26 @@ std::string liveRowsNotSupportedOnDevice(const std::string& label)
              "  run asks for the comparison on the device.\n"
              "  Rerun with --validator cpu or --validator auto to compare it on the host.\n";
     return error.str();
+}
+
+// The floating-point data types, whose host allclose validator can match infinities.
+bool isFloatingPoint(hipdnn_flatbuffers_sdk::data_objects::DataType dataType)
+{
+    using hipdnn_flatbuffers_sdk::data_objects::DataType;
+    switch(dataType)
+    {
+    case DataType::FLOAT:
+    case DataType::HALF:
+    case DataType::BFLOAT16:
+    case DataType::DOUBLE:
+    case DataType::FP8_E4M3:
+    case DataType::FP8_E5M2:
+    case DataType::FP8_E4M3_FNUZ:
+    case DataType::FP8_E5M2_FNUZ:
+        return true;
+    default:
+        return false;
+    }
 }
 
 } // namespace
@@ -248,6 +267,18 @@ std::optional<TensorMismatch>
         return TensorMismatch{uid, label, raggedNotSupportedOnDevice(label)};
     }
 
+    if(site == ValidationSite::HOST)
+    {
+        // Copy device-resident data to the host here, on one thread. The host validator
+        // reads the elements from many threads.
+        expected.rawHostData();
+        actual.rawHostData();
+        if(tolerance.kind == ValidatorKind::ALLCLOSE && isFloatingPoint(dataType))
+        {
+            tolerance.kind = ValidatorKind::ALLCLOSE_MATCHING_INFINITIES;
+        }
+    }
+
     auto selection = makeValidator(dataType, label, tolerance, site);
     if(selection.validator == nullptr)
     {
@@ -273,7 +304,7 @@ std::vector<TensorMismatch>
                    ValidationSite site,
                    const std::string& contextLine,
                    const LiveRowMap& liveRows,
-                   std::optional<ValidationSite> liveRowSite)
+                   std::optional<ValidationSite> hostOnlySite)
 {
     const auto& tensorAttrMap = wrapper.getTensorMap();
 
@@ -286,10 +317,13 @@ std::vector<TensorMismatch>
         const auto live = liveRows.find(uid);
         if(live == liveRows.end())
         {
+            const auto tensorSite = attrs->ragged_offset_tensor_uid().has_value()
+                                        ? hostOnlySite.value_or(site)
+                                        : site;
             mismatch = compareTensor(
-                uid, *attrs, expectedFor(uid), *actual.at(uid), tolerance, site, contextLine);
+                uid, *attrs, expectedFor(uid), *actual.at(uid), tolerance, tensorSite, contextLine);
         }
-        else if(liveRowSite.value_or(site) == ValidationSite::DEVICE)
+        else if(hostOnlySite.value_or(site) == ValidationSite::DEVICE)
         {
             const auto label = tensorLabel(uid, *attrs);
             mismatch = TensorMismatch{uid, label, liveRowsNotSupportedOnDevice(label)};

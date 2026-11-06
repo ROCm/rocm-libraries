@@ -871,10 +871,10 @@ TEST(TestOutputComparison, AllcloseMatchingInfinitiesAcceptsSameSignedInfinities
                      .has_value())
         << "both sides are -inf and both are right";
 
-    EXPECT_TRUE(
+    EXPECT_FALSE(
         compareTensor(K_UID_B, attrs, *expected, *actual, exact(), ValidationSite::HOST, "b")
             .has_value())
-        << "plain allclose computes |ref - impl| = NaN for two infinities and rejects";
+        << "on the host, plain allclose of a floating-point tensor matches them too";
 }
 
 TEST(TestOutputComparison, AllcloseMatchingInfinitiesStillRejectsOppositeSignedInfinities)
@@ -981,30 +981,32 @@ TEST(TestOutputComparison, AllcloseMatchingInfinitiesIsChosenPerTensor)
 
     OutputTensors expected;
     expected[K_UID_A] = floatTensor(*map.at(K_UID_A), -K_INF);
-    expected[K_UID_B] = floatTensor(*map.at(K_UID_B), -K_INF);
+    expected[K_UID_INT] = intTensor(*map.at(K_UID_INT), 7);
 
     OutputTensors actual;
     actual[K_UID_A] = floatTensor(*map.at(K_UID_A), -K_INF);
-    actual[K_UID_B] = floatTensor(*map.at(K_UID_B), -K_INF);
+    actual[K_UID_INT] = intTensor(*map.at(K_UID_INT), 7);
 
     std::vector<std::string> labelsSeen;
     const auto mismatches = compareOutputs(
         wrapper,
-        {K_UID_A, K_UID_B},
+        {K_UID_A, K_UID_INT},
         actual,
         [&](int64_t uid) -> hipdnn_data_sdk::utilities::ITensor& { return *expected.at(uid); },
         [&](const std::string& label, auto) {
             labelsSeen.push_back(label);
-            return label == "uid=4" ? exactMatchingInfinities() : exact();
+            return label == "counts" ? exactMatchingInfinities() : exact();
         },
         ValidationSite::HOST,
         "Bundle: b");
 
-    EXPECT_EQ(labelsSeen, (std::vector<std::string>{"y_out", "uid=4"}))
+    EXPECT_EQ(labelsSeen, (std::vector<std::string>{"y_out", "counts"}))
         << "the lookup must be given the label a TOML glob would match on";
     ASSERT_EQ(mismatches.size(), 1u)
-        << "uid 4 accepts its matched infinities; y_out is still graded by plain allclose";
-    EXPECT_EQ(mismatches[0].uid, K_UID_A);
+        << "y_out is plain allclose and matches its infinities on the host; only counts "
+           "gets the kind that an integer tensor cannot take";
+    EXPECT_EQ(mismatches[0].uid, K_UID_INT);
+    EXPECT_NE(mismatches[0].report.find("allclose_matching_infinities"), std::string::npos);
 }
 
 // Integers have no infinity, so this kind is undefined for them — the same shape of
@@ -1350,7 +1352,7 @@ TEST(TestOutputComparison, LiveRowValuesPastTheLengthThatAreNotNaNAreNotCompared
         float actual;
     };
     for(const auto& past : {PastValues{"inf_against_finite", -K_INF, 7.0f},
-                            PastValues{"inf_against_inf", -K_INF, -K_INF},
+                            PastValues{"inf_against_opposite_inf", -K_INF, K_INF},
                             PastValues{"finite_against_finite", 5.0f, 6.0f}})
     {
         SCOPED_TRACE(past.name);
@@ -1607,6 +1609,179 @@ TEST(TestOutputComparison, LiveRowResolveRejectsATensorWithNoData)
                      {entry}, wrapper, [&](int64_t) { return dense.get(); }),
                  std::runtime_error)
         << "a like tensor that is not ragged has no live lengths";
+}
+
+// ---------------------------------------------------------------------------
+// Ragged outputs at the host-only site, and same-signed infinities on the host.
+// ---------------------------------------------------------------------------
+
+namespace
+{
+
+// makeGraphBuffer() with y_out marked ragged, so compareOutputs() routes it as a ragged
+// output.
+flatbuffers::DetachedBuffer makeGraphBufferWithRaggedOutput()
+{
+    auto json = nlohmann::json::parse(K_GRAPH);
+    for(auto& tensor : json.at("tensors"))
+    {
+        if(tensor.at("uid").get<int64_t>() == K_UID_A)
+        {
+            tensor["ragged_offset_tensor_uid"] = K_UID_INT;
+        }
+    }
+    flatbuffers::DetachedBuffer buffer;
+    EXPECT_TRUE(hipdnn_integration_tests::bundle::detail::buildGraphBuffer(json, buffer));
+    return buffer;
+}
+
+std::vector<hipdnn_integration_tests::bundle::TensorMismatch>
+    compareRagged(const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper& wrapper,
+                  const std::shared_ptr<hipdnn_data_sdk::utilities::ITensor>& expected,
+                  const std::shared_ptr<hipdnn_data_sdk::utilities::ITensor>& actual,
+                  ValidationSite site,
+                  std::optional<ValidationSite> hostOnlySite)
+{
+    OutputTensors actualOutputs;
+    actualOutputs[K_UID_A] = actual;
+    return compareOutputs(
+        wrapper,
+        {K_UID_A},
+        actualOutputs,
+        [&](int64_t) -> hipdnn_data_sdk::utilities::ITensor& { return *expected; },
+        [](const std::string&, auto) { return exact(); },
+        site,
+        "Bundle: b",
+        {},
+        hostOnlySite);
+}
+
+struct InfinityPair
+{
+    const char* name;
+    float expected;
+    float actual;
+    bool matches;
+};
+
+const std::vector<InfinityPair> K_INFINITY_PAIRS = {{"+inf/+inf", K_INF, K_INF, true},
+                                                    {"-inf/-inf", -K_INF, -K_INF, true},
+                                                    {"+inf/-inf", K_INF, -K_INF, false},
+                                                    {"-inf/+inf", -K_INF, K_INF, false},
+                                                    {"inf/finite", -K_INF, 1.0f, false},
+                                                    {"finite/inf", 1.0f, K_INF, false}};
+
+} // namespace
+
+// A GPU reference leaves a ragged output on the device. With the host-only site set
+// (what --validator auto and cpu give), the ragged output is compared on the host.
+TEST(TestOutputComparison, RaggedOutputIsComparedAtTheHostOnlySite)
+{
+    const auto buffer = makeGraphBufferWithRaggedOutput();
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper wrapper{buffer.data(),
+                                                                             buffer.size()};
+
+    const auto expected = raggedFloatTensor(3.5f);
+    const auto same = raggedFloatTensor(3.5f);
+    const auto different = raggedFloatTensor(4.5f);
+
+    EXPECT_TRUE(compareRagged(wrapper, expected, same, ValidationSite::DEVICE, ValidationSite::HOST)
+                    .empty());
+    EXPECT_EQ(
+        compareRagged(wrapper, expected, different, ValidationSite::DEVICE, ValidationSite::HOST)
+            .size(),
+        1u);
+
+    const auto refused
+        = compareRagged(wrapper, expected, same, ValidationSite::DEVICE, ValidationSite::DEVICE);
+    ASSERT_EQ(refused.size(), 1u);
+    EXPECT_NE(refused[0].report.find("Ragged output NOT COMPARABLE ON DEVICE"), std::string::npos);
+
+    const auto noHostOnlySite
+        = compareRagged(wrapper, expected, same, ValidationSite::DEVICE, std::nullopt);
+    ASSERT_EQ(noHostOnlySite.size(), 1u)
+        << "without a host-only site the ragged output stays at the device site";
+}
+
+// The engine output is on the device only, and its host copy holds stale values. The
+// comparison copies it to the host before the host validator reads it.
+TEST(TestGpuOutputComparison, RaggedDeviceResidentOutputComparesOnTheHost)
+{
+    SKIP_IF_NO_DEVICES();
+    const auto buffer = makeGraphBufferWithRaggedOutput();
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper wrapper{buffer.data(),
+                                                                             buffer.size()};
+
+    const auto expected = raggedFloatTensor(3.5f);
+    const auto actual = raggedFloatTensor(0.0f);
+    const std::vector<float> values(actual->elementSpace(), 3.5f);
+    ASSERT_EQ(hipMemcpy(actual->rawDeviceData(),
+                        values.data(),
+                        values.size() * sizeof(float),
+                        hipMemcpyHostToDevice),
+              hipSuccess);
+    actual->markDeviceModified();
+
+    EXPECT_TRUE(
+        compareRagged(wrapper, expected, actual, ValidationSite::DEVICE, ValidationSite::HOST)
+            .empty());
+}
+
+// On the host, plain allclose matches two infinities of the same sign. Other pairs that
+// hold an infinity, and NaN against NaN, still fail.
+TEST(TestOutputComparison, HostAllcloseMatchesOnlySameSignedInfinities)
+{
+    const auto buffer = makeGraphBuffer();
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper wrapper{buffer.data(),
+                                                                             buffer.size()};
+    const auto& attrs = *wrapper.getTensorMap().at(K_UID_B);
+
+    for(const auto& pair : K_INFINITY_PAIRS)
+    {
+        SCOPED_TRACE(pair.name);
+        auto expected = floatTensor3(attrs, pair.expected, 1.0f, 2.0f);
+        auto actual = floatTensor3(attrs, pair.actual, 1.0f, 2.0f);
+        EXPECT_EQ(
+            compareTensor(K_UID_B, attrs, *expected, *actual, exact(), ValidationSite::HOST, "b")
+                .has_value(),
+            !pair.matches);
+    }
+
+    auto nanExpected = floatTensor3(attrs, K_NAN, 1.0f, 2.0f);
+    auto nanActual = floatTensor3(attrs, K_NAN, 1.0f, 2.0f);
+    EXPECT_TRUE(
+        compareTensor(K_UID_B, attrs, *nanExpected, *nanActual, exact(), ValidationSite::HOST, "b")
+            .has_value())
+        << "NaN never matches";
+}
+
+// The live-row comparison grades its live positions in the same way. An expected NaN at
+// a live position is not compared, so a NaN actual value is the failing case there.
+TEST(TestOutputComparison, LiveRowHostAllcloseMatchesOnlySameSignedInfinities)
+{
+    const auto buffer = makeGraphBuffer();
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper wrapper{buffer.data(),
+                                                                             buffer.size()};
+    const std::vector<int64_t> lengths = {2, 1};
+
+    for(const auto& pair : K_INFINITY_PAIRS)
+    {
+        SCOPED_TRACE(pair.name);
+        auto expected = liveRowStats(K_STATS_STRIDES, lengths);
+        auto actual = liveRowStats(K_STATS_STRIDES, lengths);
+        hipdnn_data_sdk::utilities::TensorView<float>(*expected).getHostValue({0, 1, 1, 0})
+            = pair.expected;
+        hipdnn_data_sdk::utilities::TensorView<float>(*actual).getHostValue({0, 1, 1, 0})
+            = pair.actual;
+        EXPECT_EQ(compareStats(wrapper, expected, actual, statsLiveRows(lengths)).empty(),
+                  pair.matches);
+    }
+
+    auto expected = liveRowStats(K_STATS_STRIDES, lengths);
+    auto actual = liveRowStats(K_STATS_STRIDES, lengths);
+    hipdnn_data_sdk::utilities::TensorView<float>(*actual).getHostValue({0, 1, 1, 0}) = K_NAN;
+    EXPECT_EQ(compareStats(wrapper, expected, actual, statsLiveRows(lengths)).size(), 1u)
+        << "a NaN in a live position of the actual output fails";
 }
 
 // NOLINTEND(readability-identifier-naming)

@@ -403,6 +403,41 @@ reads an unknown kind as `free`. In version-1 metadata it fills the tensor with
 random values and reports no error. Version 2 makes such a harness reject the
 metadata.
 
+#### Ragged tensors in a bundle without tensor blobs
+
+A bundle without tensor blobs can hold ragged tensors. Give each of these tensors
+a `values` fill spec with its exact values:
+
+- the `ragged_offset_tensor_uid` tensor of each ragged tensor;
+- the `seq_len_q` and `seq_len_kv` tensors of each SDPA node that has a ragged
+  tensor.
+
+The harness fills each ragged input as a dense tensor of its `dims` and
+`strides`, with the seed, as it fills any other input. The offset and seq_len
+values select the rows that the engine and the references read. Positions
+outside these rows hold seed values, and no comparison reads them.
+
+When one of these tensors has no `values` fill spec, the test skips as
+unverifiable: `ragged inputs need exact offset values or golden blobs`. The
+engine does not run.
+
+After the fill, and before the engine runs, the harness checks the layout of
+each ragged tensor. The test fails with a harness failure, and does not skip,
+when:
+
+- the offsets and lengths do not give a valid ragged layout, for example a
+  negative origin or two batches whose rows overlap;
+- the last element that a ragged input reaches is past its dense buffer.
+
+The offsets need not increase from batch to batch when the node has seq_len
+tensors.
+
+The harness compares a ragged output on the host only, as it compares a
+[`live_rows`](#outputs-with-rows-past-a-live-length--live_rows) output. Under
+`--validator auto` (the default) and `--validator cpu`, it copies output that a
+GPU reference left on the device to the host. Under `--validator gpu` the output
+fails with `Ragged output NOT COMPARABLE ON DEVICE`.
+
 ### Tensors that share memory — `aliases`
 
 An alias makes one input tensor, the **view**, read the memory of another input
@@ -939,7 +974,9 @@ The two non-default validators:
   in both the reference and the engine output compares equal. NaN,
   opposite-signed infinities, and finite-versus-infinite still fail. Use it for
   outputs whose correct value is infinite on both sides, such as the log-sum-exp
-  of a fully masked SDPA row. It is **host-only**. A tensor that it selects fails
+  of a fully masked SDPA row. In a bundle test, the host `allclose` comparison of
+  a floating-point output also matches same-signed infinities. It is
+  **host-only**. A tensor that it selects fails
   with `Validator override NOT APPLICABLE ON DEVICE` whenever its comparison runs
   on the device. Under `auto`, this is every run where the GPU reference
   produced the expected values. Run such a config with `--validator cpu`.

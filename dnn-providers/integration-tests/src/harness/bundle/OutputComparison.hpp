@@ -66,7 +66,10 @@ using ExpectedTensorLookup = std::function<hipdnn_data_sdk::utilities::ITensor&(
 /// disagreements still fail, and finite elements are still graded by atol/rtol. It
 /// exists for an output whose correct value is infinite on both sides — an SDPA
 /// forward log-sum-exp row that is fully masked, whose reference and device values
-/// are both -inf and are both right.
+/// are both -inf and are both right. It has no device implementation.
+///
+/// compareTensor() grades a floating-point ALLCLOSE tensor on the host as
+/// ALLCLOSE_MATCHING_INFINITIES.
 ///
 /// Nothing selects RMS or ALLCLOSE_MATCHING_INFINITIES on its own: only an engine's
 /// TOML config can, via a [[validator_overrides]] entry naming the tensor.
@@ -119,6 +122,10 @@ using ToleranceLookup = std::function<ComparisonTolerance(
 /// Pure: no gtest, no config lookups, no harness state. Everything it needs to
 /// describe a failure is an argument. The mismatch report is always built on the
 /// host, whichever site made the pass/fail call.
+///
+/// On the host, a floating-point tensor graded by ALLCLOSE matches same-signed
+/// infinities (see ValidatorKind). A ragged tensor at the device site is reported as
+/// not comparable.
 std::optional<TensorMismatch>
     compareTensor(int64_t uid,
                   const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& attrs,
@@ -134,9 +141,10 @@ std::optional<TensorMismatch>
 /// `toleranceFor` resolves how each output is compared, so the caller owns the TOML
 /// override and this stays free of TestConfig.
 ///
-/// An output in `liveRows` is compared at `liveRowSite` (or at `site` when it is not set)
+/// An output in `liveRows` is compared at `hostOnlySite` (or at `site` when it is not set)
 /// through a host view of each side that skips the positions past each batch's live
-/// length. A live-row output at the device site is reported as not comparable. Throws
+/// length. A ragged output is compared at `hostOnlySite` (or at `site`) too. A live-row
+/// or ragged output at the device site is reported as not comparable. Throws
 /// std::invalid_argument when an entry does not fit its output.
 std::vector<TensorMismatch>
     compareOutputs(const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper& wrapper,
@@ -147,7 +155,7 @@ std::vector<TensorMismatch>
                    ValidationSite site,
                    const std::string& contextLine,
                    const LiveRowMap& liveRows = {},
-                   std::optional<ValidationSite> liveRowSite = std::nullopt);
+                   std::optional<ValidationSite> hostOnlySite = std::nullopt);
 
 /// The tensor's name, or "uid=N" when the graph did not give it one.
 ///

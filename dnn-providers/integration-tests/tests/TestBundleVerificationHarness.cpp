@@ -40,6 +40,7 @@
 #include "harness/Benchmark.hpp"
 #include "harness/bundle/IntegrationBundleVerificationHarness.hpp"
 #include "harness/bundle/IntegrationTestBundle.hpp"
+#include "harness/bundle/LiveRows.hpp"
 #include "harness/bundle/VariantPackBuilder.hpp"
 
 // NOLINTBEGIN(readability-identifier-naming)
@@ -594,8 +595,10 @@ TEST_F(TestGoldenHarnessFixture, RaggedBundleWithoutBlobsIsUnverifiable)
 
     EXPECT_TRUE(testing_support::anySkipped(results));
     EXPECT_FALSE(testing_support::anyFailed(results));
-    EXPECT_NE(testing_support::allMessages(results).find("ragged inputs require golden blobs"),
-              std::string::npos);
+    EXPECT_NE(testing_support::allMessages(results).find(
+                  "ragged inputs need exact offset values or golden blobs"),
+              std::string::npos)
+        << testing_support::allMessages(results);
     EXPECT_TRUE(harness.inputs().empty());
 }
 
@@ -2001,6 +2004,332 @@ TEST_F(TestGoldenHarnessFixture, LiveRowDeviceReferenceOutputIsComparedOnTheHost
             EXPECT_TRUE(testing_support::anyFailed(results));
             EXPECT_NE(messages.find("Output with live rows NOT COMPARABLE ON DEVICE"),
                       std::string::npos)
+                << messages;
+        }
+        EXPECT_FALSE(testing_support::anySkipped(results)) << messages;
+    }
+}
+
+// ---- ragged recipe bundles ---------------------------------------------------
+
+namespace
+{
+
+constexpr float K_RAGGED_VALUE = 2.0f;
+
+// Writes `value` into O (qkvoSpace elements) and Stats (statsSpace elements, or every
+// element of a dense Stats) through `pack`, which holds host pointers.
+void writeRaggedSdpaOutputs(const VariantPack& pack,
+                            const fixtures::RaggedSdpaCase& c,
+                            size_t statsElements,
+                            float value)
+{
+    auto* o = static_cast<float*>(pack.at(fixtures::K_SDPA_O_UID));
+    std::fill(o, o + c.qkvoSpace, value);
+    auto* stats = static_cast<float*>(pack.at(fixtures::K_SDPA_STATS_UID));
+    std::fill(stats, stats + statsElements, value);
+}
+
+// The engine and the CPU reference write `engineValue` and `referenceValue` into every
+// output element. The GPU reference declines, so the CPU reference is the oracle.
+void engineAndCpuReferenceWrite(testing_support::HarnessMocks& mocks,
+                                const fixtures::RaggedSdpaCase& c,
+                                float engineValue,
+                                float referenceValue)
+{
+    ON_CALL(mocks.gpuReference, isApplicable(::testing::_, ::testing::_))
+        .WillByDefault(::testing::Return(false));
+    ON_CALL(mocks.engineRunner, execute(::testing::_, ::testing::_, ::testing::_))
+        .WillByDefault(
+            [c, engineValue](GraphSession&, const std::optional<LoadedEngine>&, VariantPack& pack) {
+                writeRaggedSdpaOutputs(pack, c, c.statsSpace, engineValue);
+                return EngineOpResult::succeeded();
+            });
+    ON_CALL(mocks.cpuReference, execute(::testing::_, ::testing::_, ::testing::_))
+        .WillByDefault([c, referenceValue](void*, size_t, const VariantPack& pack) {
+            writeRaggedSdpaOutputs(pack, c, c.statsSpace, referenceValue);
+        });
+}
+
+// The offset layouts a recipe bundle must fill and run: contiguous, gapped (seq_len),
+// leading gap and out of order (seq_len).
+std::vector<fixtures::RaggedSdpaCase> raggedRecipeCases()
+{
+    return {fixtures::raggedSdpaHeadTokenStatsCase(),
+            fixtures::raggedSdpaGappedStatsCase(),
+            fixtures::raggedSdpaShiftedOriginCase(),
+            fixtures::raggedSdpaNonMonotonicCase()};
+}
+
+} // namespace
+
+// A recipe bundle whose offset and seq_len tensors have exact values is filled from
+// them, run, and checked against the CPU reference, for int32 and int64 index tensors.
+TEST_F(TestGoldenHarnessFixture, RaggedRecipeBundleFillsRunsAndPasses)
+{
+    for(const std::string indexType : {"int32", "int64"})
+    {
+        for(const auto& c : raggedRecipeCases())
+        {
+            SCOPED_TRACE(c.name + " " + indexType);
+            testing_support::HarnessMocks mocks;
+            engineAndCpuReferenceWrite(mocks, c, K_RAGGED_VALUE, K_RAGGED_VALUE);
+            EXPECT_CALL(mocks.cpuReference, execute(::testing::_, ::testing::_, ::testing::_))
+                .Times(1);
+
+            fixtures::RaggedRecipeOptions options;
+            options.indexType = indexType;
+            const auto bundle = fixtures::writeRaggedSdpaRecipeBundle(
+                _tempDir, "recipe_" + c.name + "_" + indexType, c, options);
+            ASSERT_FALSE(bundle->blobs.has_value());
+
+            IntegrationBundleVerificationHarness harness(
+                mocks.dependencies(testing_support::hostPolicy(VerificationMode::AUTO)));
+            harness.setBundle(bundle, "unit-test-bundle");
+            ::testing::TestPartResultArray results;
+            testing_support::driveHarness(harness, &results);
+
+            const auto messages = testing_support::allMessages(results);
+            EXPECT_FALSE(testing_support::anyFailed(results)) << messages;
+            EXPECT_FALSE(testing_support::anySkipped(results)) << messages;
+
+            const auto& inputs = harness.inputs();
+            ASSERT_EQ(inputs.count(fixtures::K_SDPA_QKVO_OFFSET_UID), 1u);
+            const auto offsets = detail::readLengths(*inputs.at(fixtures::K_SDPA_QKVO_OFFSET_UID));
+            EXPECT_EQ(offsets, std::vector<int64_t>(c.qkvo.offsets.begin(), c.qkvo.offsets.end()));
+        }
+    }
+}
+
+// The comparison of a filled ragged recipe bundle is real: a drifted output fails.
+TEST_F(TestGoldenHarnessFixture, RaggedRecipeBundleInBlockMismatchFails)
+{
+    const auto c = fixtures::raggedSdpaGappedStatsCase();
+    testing_support::HarnessMocks mocks;
+    engineAndCpuReferenceWrite(mocks, c, K_RAGGED_VALUE + 1.0f, K_RAGGED_VALUE);
+
+    IntegrationBundleVerificationHarness harness(
+        mocks.dependencies(testing_support::hostPolicy(VerificationMode::AUTO)));
+    harness.setBundle(fixtures::writeRaggedSdpaRecipeBundle(_tempDir, "recipe_mismatch", c),
+                      "unit-test-bundle");
+    ::testing::TestPartResultArray results;
+    testing_support::driveHarness(harness, &results);
+
+    EXPECT_TRUE(testing_support::anyFailed(results));
+    EXPECT_FALSE(testing_support::anySkipped(results));
+}
+
+// An offset or seq_len tensor without a values fill spec leaves the bundle unverifiable,
+// and the engine does not run.
+TEST_F(TestGoldenHarnessFixture, RaggedRecipeBundleWithoutOffsetValuesIsUnverifiable)
+{
+    const auto c = fixtures::raggedSdpaGappedStatsCase();
+    for(const int64_t missing : {fixtures::K_SDPA_QKVO_OFFSET_UID, fixtures::K_SDPA_SEQ_LEN_KV_UID})
+    {
+        SCOPED_TRACE("uid " + std::to_string(missing));
+        testing_support::HarnessMocks mocks;
+        EXPECT_CALL(mocks.engineRunner, execute(::testing::_, ::testing::_, ::testing::_)).Times(0);
+
+        fixtures::RaggedRecipeOptions options;
+        options.withoutValues = {missing};
+        IntegrationBundleVerificationHarness harness(
+            mocks.dependencies(testing_support::hostPolicy(VerificationMode::AUTO)));
+        harness.setBundle(fixtures::writeRaggedSdpaRecipeBundle(
+                              _tempDir, "recipe_no_values_" + std::to_string(missing), c, options),
+                          "unit-test-bundle");
+        ::testing::TestPartResultArray results;
+        testing_support::driveHarness(harness, &results);
+
+        const auto messages = testing_support::allMessages(results);
+        EXPECT_TRUE(testing_support::anySkipped(results)) << messages;
+        EXPECT_FALSE(testing_support::anyFailed(results)) << messages;
+        EXPECT_NE(messages.find("ragged inputs need exact offset values or golden blobs; "
+                                "tensor(s) "
+                                + std::to_string(missing) + " have no values fill spec"),
+                  std::string::npos)
+            << messages;
+    }
+}
+
+// seq_len_kv needs exact values even when K and V are dense: it bounds the keys that the
+// engine and the references read.
+TEST_F(TestGoldenHarnessFixture, RaggedRecipeBundleNeedsValuesForEverySeqLenOfARaggedNode)
+{
+    const auto c = fixtures::raggedSdpaGappedStatsCase();
+    testing_support::HarnessMocks mocks;
+    EXPECT_CALL(mocks.engineRunner, execute(::testing::_, ::testing::_, ::testing::_)).Times(0);
+
+    fixtures::RaggedRecipeOptions options;
+    options.raggedKv = false;
+    options.withoutValues = {fixtures::K_SDPA_SEQ_LEN_KV_UID};
+    IntegrationBundleVerificationHarness harness(
+        mocks.dependencies(testing_support::hostPolicy(VerificationMode::AUTO)));
+    harness.setBundle(
+        fixtures::writeRaggedSdpaRecipeBundle(_tempDir, "recipe_dense_kv", c, options),
+        "unit-test-bundle");
+    ::testing::TestPartResultArray results;
+    testing_support::driveHarness(harness, &results);
+
+    const auto messages = testing_support::allMessages(results);
+    EXPECT_TRUE(testing_support::anySkipped(results)) << messages;
+    EXPECT_FALSE(testing_support::anyFailed(results)) << messages;
+    EXPECT_NE(messages.find("tensor(s) " + std::to_string(fixtures::K_SDPA_SEQ_LEN_KV_UID)
+                            + " have no values fill spec"),
+              std::string::npos)
+        << messages;
+}
+
+// Offsets that send a ragged input past its dense buffer fail the test before the engine
+// or a reference runs. Batch 1 starts at row 4 and holds 3 rows: element 27 is the last
+// one it reaches, past the 24 elements of Q, K and V.
+TEST_F(TestGoldenHarnessFixture, RaggedRecipeOffsetsPastTheBufferFailBeforeTheEngine)
+{
+    auto c = fixtures::raggedSdpaGappedStatsCase();
+    c.qkvo.offsets = {0, 16, 20};
+    testing_support::HarnessMocks mocks;
+    EXPECT_CALL(mocks.engineRunner, execute(::testing::_, ::testing::_, ::testing::_)).Times(0);
+    EXPECT_CALL(mocks.cpuReference, execute(::testing::_, ::testing::_, ::testing::_)).Times(0);
+    EXPECT_CALL(mocks.gpuReference, execute(::testing::_, ::testing::_, ::testing::_)).Times(0);
+
+    IntegrationBundleVerificationHarness harness(
+        mocks.dependencies(testing_support::hostPolicy(VerificationMode::AUTO)));
+    harness.setBundle(fixtures::writeRaggedSdpaRecipeBundle(_tempDir, "recipe_past_buffer", c),
+                      "unit-test-bundle");
+    ::testing::TestPartResultArray results;
+    testing_support::driveHarness(harness, &results);
+
+    const auto messages = testing_support::allMessages(results);
+    EXPECT_TRUE(testing_support::anyFailed(results)) << messages;
+    EXPECT_FALSE(testing_support::anySkipped(results)) << messages;
+    EXPECT_NE(messages.find("does not fit its buffer: its offsets reach element 27, past the 24 "
+                            "elements of its buffer"),
+              std::string::npos)
+        << messages;
+}
+
+// A dense Stats beside the filled ragged Q takes its live rows from Q through a `like`
+// entry. Positions past each live length differ and are not compared.
+TEST_F(TestGoldenHarnessFixture, RaggedRecipeLiveRowsLikeResolvesOnTheFilledQ)
+{
+    auto c = fixtures::raggedSdpaGappedStatsCase();
+    c.stats.dims = {2, 2, 3, 1};
+    c.stats.strides = {6, 3, 1, 1};
+    constexpr size_t K_DENSE_STATS = 12;
+    // Q lengths are {2, 3} on a sequence extent of 3: only (b=0, s=2) is past a length.
+    const auto statsWith = [](float live, float past) {
+        std::vector<float> stats(K_DENSE_STATS, live);
+        for(size_t h = 0; h < 2; ++h)
+        {
+            stats[h * 3 + 2] = past;
+        }
+        return stats;
+    };
+
+    // A live position that differs still fails.
+    for(const bool live : {true, false})
+    {
+        const float engineLive = live ? K_RAGGED_VALUE : K_RAGGED_VALUE + 1.0f;
+        SCOPED_TRACE(live ? "live rows agree" : "a live row differs");
+        testing_support::HarnessMocks mocks;
+        ON_CALL(mocks.gpuReference, isApplicable(::testing::_, ::testing::_))
+            .WillByDefault(::testing::Return(false));
+        ON_CALL(mocks.engineRunner, execute(::testing::_, ::testing::_, ::testing::_))
+            .WillByDefault([c, statsWith, engineLive](GraphSession&,
+                                                      const std::optional<LoadedEngine>&,
+                                                      VariantPack& pack) {
+                writeRaggedSdpaOutputs(pack, c, 0, K_RAGGED_VALUE);
+                const auto stats = statsWith(engineLive, 99.0f);
+                std::copy(stats.begin(),
+                          stats.end(),
+                          static_cast<float*>(pack.at(fixtures::K_SDPA_STATS_UID)));
+                return EngineOpResult::succeeded();
+            });
+        ON_CALL(mocks.cpuReference, execute(::testing::_, ::testing::_, ::testing::_))
+            .WillByDefault([c, statsWith](void*, size_t, const VariantPack& pack) {
+                writeRaggedSdpaOutputs(pack, c, 0, K_RAGGED_VALUE);
+                const auto stats = statsWith(K_RAGGED_VALUE, -5.0f);
+                std::copy(stats.begin(),
+                          stats.end(),
+                          static_cast<float*>(pack.at(fixtures::K_SDPA_STATS_UID)));
+            });
+
+        fixtures::RaggedRecipeOptions options;
+        options.raggedStats = false;
+        options.extraMetadata = nlohmann::json::parse(
+            R"({"live_rows": [{"uid": )" + std::to_string(fixtures::K_SDPA_STATS_UID)
+            + R"(, "like": )" + std::to_string(fixtures::K_SDPA_Q_UID) + "}]}");
+        IntegrationBundleVerificationHarness harness(
+            mocks.dependencies(testing_support::hostPolicy(VerificationMode::AUTO)));
+        harness.setBundle(fixtures::writeRaggedSdpaRecipeBundle(
+                              _tempDir, live ? "recipe_like" : "recipe_like_mismatch", c, options),
+                          "unit-test-bundle");
+        ::testing::TestPartResultArray results;
+        testing_support::driveHarness(harness, &results);
+
+        const auto messages = testing_support::allMessages(results);
+        EXPECT_EQ(testing_support::anyFailed(results), !live) << messages;
+        EXPECT_FALSE(testing_support::anySkipped(results)) << messages;
+    }
+}
+
+// A GPU reference leaves the ragged outputs of a recipe bundle on the device. Under the
+// default validator they are copied to the host and compared there; under
+// --validator gpu they are reported as not comparable.
+TEST_F(TestGoldenHarnessFixture, RaggedRecipeGpuReferenceOutputOnTheDeviceIsComparedOnTheHost)
+{
+    SKIP_IF_NO_DEVICES();
+    const auto c = fixtures::raggedSdpaGappedStatsCase();
+    const auto copyOutputs = [c](const VariantPack& pack) {
+        const std::vector<float> o(c.qkvoSpace, K_RAGGED_VALUE);
+        const std::vector<float> stats(c.statsSpace, K_RAGGED_VALUE);
+        const auto oStatus = hipMemcpy(pack.at(fixtures::K_SDPA_O_UID),
+                                       o.data(),
+                                       o.size() * sizeof(float),
+                                       hipMemcpyHostToDevice);
+        const auto statsStatus = hipMemcpy(pack.at(fixtures::K_SDPA_STATS_UID),
+                                           stats.data(),
+                                           stats.size() * sizeof(float),
+                                           hipMemcpyHostToDevice);
+        return oStatus != hipSuccess ? oStatus : statsStatus;
+    };
+    for(const auto validator : {ValidatorDevice::AUTO, ValidatorDevice::GPU})
+    {
+        const bool isAuto = validator == ValidatorDevice::AUTO;
+        SCOPED_TRACE(isAuto ? "auto" : "gpu");
+        testing_support::HarnessMocks mocks;
+        ON_CALL(mocks.engineRunner, execute(::testing::_, ::testing::_, ::testing::_))
+            .WillByDefault([&copyOutputs](GraphSession&,
+                                          const std::optional<LoadedEngine>&,
+                                          VariantPack& pack) {
+                const auto status = copyOutputs(pack);
+                return status == hipSuccess ? EngineOpResult::succeeded()
+                                            : EngineOpResult::failed(hipGetErrorString(status));
+            });
+        ON_CALL(mocks.gpuReference, requiresDeviceMemory()).WillByDefault(::testing::Return(true));
+        ON_CALL(mocks.gpuReference, execute(::testing::_, ::testing::_, ::testing::_))
+            .WillByDefault([&copyOutputs](void*, std::size_t, const VariantPack& pack) {
+                ASSERT_EQ(copyOutputs(pack), hipSuccess);
+            });
+
+        auto policy = testing_support::hostPolicy(VerificationMode::GPU);
+        policy.placement = TensorPlacement::DEVICE;
+        policy.validator = validator;
+        IntegrationBundleVerificationHarness harness(mocks.dependencies(policy));
+        harness.setBundle(fixtures::writeRaggedSdpaRecipeBundle(
+                              _tempDir, isAuto ? "recipe_device_auto" : "recipe_device_gpu", c),
+                          "unit-test-bundle");
+        ::testing::TestPartResultArray results;
+        testing_support::driveHarness(harness, &results);
+
+        const auto messages = testing_support::allMessages(results);
+        if(isAuto)
+        {
+            EXPECT_FALSE(testing_support::anyFailed(results)) << messages;
+        }
+        else
+        {
+            EXPECT_TRUE(testing_support::anyFailed(results));
+            EXPECT_NE(messages.find("Ragged output NOT COMPARABLE ON DEVICE"), std::string::npos)
                 << messages;
         }
         EXPECT_FALSE(testing_support::anySkipped(results)) << messages;

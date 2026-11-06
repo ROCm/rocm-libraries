@@ -16,7 +16,6 @@
 
 #include "harness/BundleMetadata.hpp"
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
-#include <hipdnn_flatbuffers_sdk/utilities/ApplicabilityUtils.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 #include <hipdnn_test_sdk/utilities/ComparisonReport.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
@@ -31,6 +30,7 @@
 #include "harness/bundle/LiveRows.hpp"
 #include "harness/bundle/LoadedEngine.hpp"
 #include "harness/bundle/LoadedEngineTable.hpp"
+#include "harness/bundle/RaggedInputs.hpp"
 #include "harness/bundle/SupportClaimReport.hpp"
 #include "harness/bundle/SupportObservationLog.hpp"
 #include "harness/bundle/SupportVerdict.hpp"
@@ -891,11 +891,33 @@ std::optional<VerificationOutcome> IntegrationBundleVerificationHarness::fillBun
     const auto wrapper = _bundle->graphWrapper();
     const auto& tensorAttrMap = wrapper.getTensorMap();
 
-    // The generic fill recipes cannot produce a valid monotonic offset table, and
-    // garbage offsets would send the engine reading out of bounds.
-    if(!hipdnn_flatbuffers_sdk::utilities::hasNoRaggedTensorIds(tensorAttrMap))
+    // Random offsets would send the engine reading out of bounds, so every offset and
+    // seq_len tensor of a ragged graph must have its exact values in the metadata.
+    std::unordered_map<int64_t, int64_t> lengthUids;
+    try
     {
-        return unverifiable("ragged inputs require golden blobs");
+        lengthUids = hipdnn_test_sdk::utilities::raggedLengthUids(wrapper.getGraph());
+    }
+    catch(const std::exception& e)
+    {
+        return VerificationOutcome::failed(VerificationDepth::NOT_REACHED,
+                                           FailureOrigin::HARNESS,
+                                           std::string("ragged graph cannot be filled: ") + e.what()
+                                               + " (" + _bundlePath.string() + ")");
+    }
+    std::string missingValues;
+    for(const int64_t uid : detail::raggedIndexUids(wrapper.getGraph(), tensorAttrMap))
+    {
+        if(!_inputFillRecipes.isSet(uid)
+           || _inputFillRecipes.fill(uid).kind != FillRecipe::Kind::VALUES)
+        {
+            missingValues.append(missingValues.empty() ? "" : ", ").append(std::to_string(uid));
+        }
+    }
+    if(!missingValues.empty())
+    {
+        return unverifiable("ragged inputs need exact offset values or golden blobs; tensor(s) "
+                            + missingValues + " have no values fill spec");
     }
 
     const std::set<int64_t> outputUids(_bundle->outputTensorUids.begin(),
@@ -1007,6 +1029,45 @@ std::optional<VerificationOutcome> IntegrationBundleVerificationHarness::fillBun
     }
 
     _inputs = std::move(inputs);
+    return checkRaggedLayouts(lengthUids);
+}
+
+std::optional<VerificationOutcome> IntegrationBundleVerificationHarness::checkRaggedLayouts(
+    const std::unordered_map<int64_t, int64_t>& lengthUids) const
+{
+    const auto wrapper = _bundle->graphWrapper();
+    for(const auto& [uid, attrs] : wrapper.getTensorMap())
+    {
+        if(attrs->virtual_() || !attrs->ragged_offset_tensor_uid().has_value())
+        {
+            continue;
+        }
+        std::string problem;
+        try
+        {
+            const auto footprint = detail::raggedLayoutFootprint(*attrs, _inputs, lengthUids);
+            // An output buffer is sized to its footprint; an input has its dense size.
+            const auto input = _inputs.find(uid);
+            if(input != _inputs.end() && footprint.elementSpace > input->second->elementSpace())
+            {
+                problem = "does not fit its buffer: its offsets reach element "
+                          + std::to_string(footprint.elementSpace - 1) + ", past the "
+                          + std::to_string(input->second->elementSpace())
+                          + " elements of its buffer";
+            }
+        }
+        catch(const std::exception& e)
+        {
+            problem = std::string("has no valid ragged layout: ") + e.what();
+        }
+        if(!problem.empty())
+        {
+            return VerificationOutcome::failed(VerificationDepth::NOT_REACHED,
+                                               FailureOrigin::HARNESS,
+                                               "ragged tensor " + std::to_string(uid) + " "
+                                                   + problem + " (" + _bundlePath.string() + ")");
+        }
+    }
     return std::nullopt;
 }
 
@@ -1284,12 +1345,26 @@ VerificationOutcome
         }
     }
     LiveRowMap liveRows;
+    // A filled ragged input is a dense buffer. A `like` entry reads its layout through a
+    // ragged view of that buffer.
+    std::vector<std::unique_ptr<hipdnn_data_sdk::utilities::ITensor>> raggedViews;
     try
     {
         liveRows = resolveLiveRows(_bundle->metadata.liveRows, wrapper, [&](int64_t uid) {
             const auto input = _inputs.find(uid);
             if(input != _inputs.end())
             {
+                const auto* attrs = wrapper.getTensorMap().at(uid);
+                if(attrs->ragged_offset_tensor_uid().has_value()
+                   && !input->second->raggedIterationInfo().has_value())
+                {
+                    raggedViews.push_back(detail::makeRaggedView(
+                        input->second->rawHostData(),
+                        *attrs,
+                        _inputs,
+                        hipdnn_test_sdk::utilities::raggedLengthUids(wrapper.getGraph())));
+                    return raggedViews.back().get();
+                }
                 return input->second.get();
             }
             const auto output = engineOutputs.find(uid);
