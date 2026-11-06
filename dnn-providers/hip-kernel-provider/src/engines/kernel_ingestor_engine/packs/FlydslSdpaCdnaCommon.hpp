@@ -185,10 +185,14 @@ inline constexpr std::string_view RAGGED_OFFSET_KV_TOKEN = "flydsl_sdpa_cdna.rag
 /// and a padded query row is stored as O = 0, LSE = -inf (hipDNN's reference contract);
 /// and the diagonal is bottom-right, so it moves with each batch's lengths. Modification 34:
 /// the operands are packed (THD) through the row-offset tables, each sequence starting at its
-/// own first token and as long as its token count.
+/// own first token and as long as its token count. Modification 47: packed with per-batch
+/// lengths, each sequence is its length's tokens from its first, wherever the table's next
+/// entry lies; VARLEN_QUERY_FROM_TABLE takes the query counts from Q's table instead
+/// (`seq_len_kv` alone, queryLengthsFromOffsets()).
 inline constexpr int32_t VARLEN_PADDED = 1;
 inline constexpr int32_t VARLEN_BOTTOM_RIGHT = 2;
 inline constexpr int32_t VARLEN_PACKED = 4;
+inline constexpr int32_t VARLEN_QUERY_FROM_TABLE = 8;
 /// Dropout (vendored-kernel modification 33): the probability's f32 bits (0 for none), and
 /// the uids of the Philox seed and offset tensors, or NO_DROPOUT_TENSOR.
 inline constexpr std::string_view DROPOUT_P_TOKEN = "flydsl_sdpa_cdna.dropout_p";
@@ -2500,7 +2504,10 @@ public:
         const bool perSequence = binding.padded() || binding.packed();
         const int32_t varlenFlags
             = (binding.padded() ? VARLEN_PADDED : 0) | (binding.packed() ? VARLEN_PACKED : 0)
-              | (perSequence && binding.bottomRight != 0 ? VARLEN_BOTTOM_RIGHT : 0);
+              | (perSequence && binding.bottomRight != 0 ? VARLEN_BOTTOM_RIGHT : 0)
+              | (binding.packed() && queryLengthsFromOffsets(binding.seqLenQ, binding.raggedOffsetQ)
+                     ? VARLEN_QUERY_FROM_TABLE
+                     : 0);
         // Dropout (vendored-kernel modification 33): the seed and offset1 pointers, offset2's
         // two words, the keep threshold and the scale; read only by a dropout object.
         const auto dropout = cdnaDropoutArgs(binding,

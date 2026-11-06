@@ -516,11 +516,12 @@ diff against upstream plus the modifications below.
     - **Flag:** `varlen_flags` bit 2 (`VARLEN_PACKED`): Q/O and K/V are packed through
       modification 32's `RowOffQ`/`RowOffKv`, INT32 `[B + 1]` cumulative token counts.
       Sequence `b` starts at token `off[b]` and has `off[b + 1] - off[b]` tokens, clamped
-      to `[0, the launch's length]`.
+      to `[0, the launch's length]` (with per-batch lengths, its length's tokens:
+      modification 47).
     - **Reads:** `_load_varlen` replaces `_load_seq_lens` on the prefill builds: one real
       branch on bit 2 loads the two tables' entries, then one on bit 0 loads the padded
-      lengths (clamped to the sequence's tokens, so per-batch lengths inside a packed
-      sequence need no new kernel code). A dense launch loads nothing.
+      lengths (modification 47 reads them as each sequence's own token count). A dense
+      launch loads nothing.
     - **Bases and views:** each sequence's Q, O, K, V and LSE views start at its first
       token: `tok * stride_n` is added to the batch base, and the host passes a packed
       operand's batch stride as 0. Q, K and V span the sequence's tokens. O spans them
@@ -863,6 +864,24 @@ diff against upstream plus the modifications below.
       a transcendental read by the next VALU instruction, the inline-asm hazard above. Measured
       cost: `COVERAGE.md` section 7.5 (item 27): gfx942 +0.9% geomean, gfx950 within noise.
     - Not yet upstream (the pinned upstream truncates).
+47. **Packed sequences at per-batch origins, for their own lengths** (`flash_attn_utils.py`;
+    generic prefill builds).
+    - **Why:** hipDNN's ragged tensors follow cuDNN's rules (RFC 0014): with per-batch
+      lengths, sequence b is `seq_len[b]` tokens from `offset[b]`, and the tables may list
+      the origins in any order, leave gaps, and end in an entry that bounds no sequence.
+      Modification 34 clamped each length to `offset[b + 1] - offset[b]`, which reads such
+      a table wrong (a sequence after its successor gets 0 rows or keys), and filled a
+      slot's rows past the length, tokens the tensor does not address.
+    - **Change:** under `VARLEN_PACKED` with `VARLEN_PADDED`, `_load_varlen` clamps each
+      length to `[0, the launch's length]` only, and a sequence's view (the rows its stores
+      and padded-row fill may write) is its length's rows. A new flag,
+      `VARLEN_QUERY_FROM_TABLE` (bit 3), keeps the query side's count from Q's table for
+      PyTorch's `seqused_k`, which gives key lengths alone. Without lengths the tables
+      still give both bounds, as before.
+    - **Objects:** every generic prefill object changes (a few scalar selects in the
+      prologue); the KV loop is unchanged. The decode, merge and dual-wave builds read no
+      row offsets and are byte-identical. Measured cost: `COVERAGE.md` section 7.5.
+    - Not yet upstream.
 
 The repository's `black` hook reformats these files on commit; that changes
 formatting only (the syntax trees are unchanged).

@@ -388,6 +388,10 @@ batch when `seq_len_q/kv` are set).
 - **Contract:** every logical element has exactly one address, so outputs are written once and the element count
   and footprint are well defined. A use case that needs aliased read-only inputs (for example a shared prefix)
   would relax the rule for inputs only.
+- **Engines:** the FlyDSL packed prefill engines (RDNA prefill, aiw, CDNA generic) address each batch at its origin
+  for its length, origins in any order and with gaps, and write no element outside a batch; they serve
+  token-major INT32 tables and lengths at batch stride 1, and decline INT64 tables, other batch strides,
+  element-unit offsets and head-major packing (hip-kernel-provider `flydsl/COVERAGE.md` §5.9, §7.10; SEM-028).
 
 ## vLLM forms
 
@@ -441,7 +445,8 @@ batch when `seq_len_q/kv` are set).
   its slot is an error, as PyTorch forbids it. The same problem with both lengths (cuDNN 1.24's form,
   `seq_len_q = diff(offsets)`) has the same meaning and result.
 - **Engines:** the FlyDSL RDNA prefill (gfx11, gfx12), aiw (gfx12) and CDNA generic prefill engines serve the
-  packed form; a dense K/V beside the ragged Q declines there (the references serve it).
+  packed form, K's sequences at origins in any order (SEM-026); a dense K/V beside the ragged Q declines there
+  (the references serve it).
 - **Conversion:** `cu_seqlens_q` / `query_start_loc` becomes Q's (and O's, the LSE's) ragged offset; `cu_seqlens_k`
   K's and V's; `seqused_k` / `seq_lens` becomes `seq_len_kv` `[B, 1, 1, 1]`. All views, no copy.
 
