@@ -17,7 +17,7 @@
  * Pure f32 load / exp2 / store; no MFMA, no async DMA. wave64_reduce_max /
  * wave64_reduce_sum come from helper_helper_rocke.helpers.attention.h. The
  * builder-call sequence is a byte-identical translation of the Python span
- * (which is itself a byte-for-byte port of the gfx950 reduce).
+ * (itself the gfx950 reduce with a runtime query head count).
  *
  * Peers (segment-kernel phases, ctx init, config_from_spec) live in sibling
  * translation units and are called only via the internal header. This file
@@ -29,6 +29,7 @@
 #include <string.h>
 
 #include "rocke/instance_gfx942_attention_tiled_3d_internal.h"
+#include "rocke/instance_lse_store_internal.h"
 
 /* ============================================================ *
  * Per-slot caches shared between reduce_max_pass and reduce_combine_pass.
@@ -134,7 +135,6 @@ void rocke_gfx942_attention_tiled_3d_reduce_declare_and_prologue(
     const rocke_gfx942_attn_tiled_3d_config_t* cfg = &ctx->cfg;
     rocke_param_opts_t opts;
 
-    int NUM_QH = cfg->NUM_QH;
     int NUM_SEG = cfg->NUM_SEG;
     int HD = cfg->HD;
 
@@ -187,6 +187,21 @@ void rocke_gfx942_attention_tiled_3d_reduce_declare_and_prologue(
     /* seq_lens_ptr : ptr<i32, global>, readonly, align=4 (unused in body) */
     ctx->red_seq_lens
         = rocke_b_param(b, "seq_lens_ptr", rocke_ptr_type(b, rocke_i32(), "global"), &opts);
+    ctx->red_num_qh_p = rocke_b_param(b, "num_query_heads", rocke_i32(), NULL);
+
+    /* lse_ptr : ptr<f32, global>, noalias, writeonly, align=4 (emit_lse only) */
+    ctx->red_lse = NULL;
+    if(spec != NULL && spec->emit_lse)
+    {
+        memset(&opts, 0, sizeof(opts));
+        opts.noalias = true;
+        opts.noalias_set = true;
+        opts.writeonly = true;
+        opts.writeonly_set = true;
+        opts.align = 4;
+        opts.align_set = true;
+        ctx->red_lse = rocke_b_param(b, "lse_ptr", rocke_ptr_type(b, rocke_f32(), "global"), &opts);
+    }
 
     /* ---- grid ids + thread (lines 1032-1034) ---- */
     ctx->q_token = rocke_b_block_id_x(b);
@@ -198,23 +213,33 @@ void rocke_gfx942_attention_tiled_3d_reduce_declare_and_prologue(
     ctx->zero_f = rocke_b_const_f32(b, 0.0);
 
     /* ---- descriptors (lines 1039-1053) ---- */
+    /* The head count is a kernarg, so each token stride is too. */
     {
-        int ml_lengths[3] = {1 << 30, NUM_QH, NUM_SEG};
+        rocke_value_t* strides[3]
+            = {rocke_b_mul(b, ctx->red_num_qh_p, rocke_b_const_i32(b, NUM_SEG)), NULL, NULL};
+        const int static_strides[3] = {1, NUM_SEG, 1};
         const char* ml_coords[3] = {"token", "head", "seg"};
-        ctx->ml_desc_red
-            = rocke_tensor_descriptor_naive(b, "segm_ml", ml_lengths, 3, NULL, ml_coords, 3);
+        ctx->ml_desc_red = rocke_tensor_descriptor_naive_dynamic_mixed(
+            b, "segm_ml", ml_coords, 3, strides, static_strides);
     }
     {
-        int sa_lengths[4] = {1 << 30, NUM_QH, NUM_SEG, HD};
+        rocke_value_t* strides[4]
+            = {rocke_b_mul(b, ctx->red_num_qh_p, rocke_b_const_i32(b, NUM_SEG * HD)),
+               NULL,
+               NULL,
+               NULL};
+        const int static_strides[4] = {1, NUM_SEG * HD, HD, 1};
         const char* sa_coords[4] = {"token", "head", "seg", "dim"};
-        ctx->seg_acc_desc_red
-            = rocke_tensor_descriptor_naive(b, "segm_output", sa_lengths, 4, NULL, sa_coords, 4);
+        ctx->seg_acc_desc_red = rocke_tensor_descriptor_naive_dynamic_mixed(
+            b, "segm_output", sa_coords, 4, strides, static_strides);
     }
     {
-        int out_lengths[3] = {1 << 30, NUM_QH, HD};
+        rocke_value_t* strides[3]
+            = {rocke_b_mul(b, ctx->red_num_qh_p, rocke_b_const_i32(b, HD)), NULL, NULL};
+        const int static_strides[3] = {1, HD, 1};
         const char* out_coords[3] = {"token", "head", "dim"};
-        ctx->out_desc_red
-            = rocke_tensor_descriptor_naive(b, "out", out_lengths, 3, NULL, out_coords, 3);
+        ctx->out_desc_red = rocke_tensor_descriptor_naive_dynamic_mixed(
+            b, "out", out_coords, 3, strides, static_strides);
     }
 
     /* ---- base_ml = ml_desc_red.offset(token=q_token, head=q_head, seg=0) ----
@@ -507,5 +532,27 @@ void rocke_gfx942_attention_tiled_3d_reduce_normalize_pass(
 
         out_idx = rocke__red_out_offset(ctx, ctx->q_token, ctx->q_head, d);
         rocke_b_global_store(b, ctx->out, out_idx, scalar_out, 2);
+    }
+
+    /* emit_lse: every lane holds the same butterfly-reduced overall_max/expsum,
+     * so lane 0 writes. overall_max is in log2 units; lse_store converts to
+     * natural log and writes -inf for a row with no mass (sum 0); a NaN sum
+     * keeps NaN, as O does (!(l == 0), never l > 0). One builder call per
+     * statement, in Python order. */
+    if(ctx->reduce_spec != NULL && ctx->reduce_spec->emit_lse)
+    {
+        rocke_value_t* c0 = rocke_b_const_i32(b, 0);
+        rocke_value_t* is_writer = rocke_b_cmp_eq(b, ctx->tid, c0);
+        rocke_if_t guard = rocke_b_scf_if(b, is_writer);
+        rocke_b_region_enter(b, guard.then_region);
+        {
+            rocke_value_t* nqh = ctx->red_num_qh_p;
+            rocke_value_t* row = rocke_b_mul(b, ctx->q_token, nqh);
+            rocke_value_t* lse_index = rocke_b_add(b, row, ctx->q_head);
+            rocke_value_t* has_mass = rocke_lse_row_has_mass(b, ctx->overall_expsum);
+            rocke_lse_store(
+                b, ctx->red_lse, lse_index, ctx->overall_max, ctx->overall_expsum, has_mass);
+        }
+        rocke_b_region_leave(b);
     }
 }

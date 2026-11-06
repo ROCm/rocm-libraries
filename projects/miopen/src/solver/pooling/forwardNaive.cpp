@@ -71,7 +71,7 @@ bool PoolingForwardNaive::IsApplicable(const ExecutionContext&,
 }
 
 ConvSolution
-PoolingForwardNaive::GetSolution(const ExecutionContext&,
+PoolingForwardNaive::GetSolution(const ExecutionContext& context,
                                  const miopen::pooling::ProblemDescription& problem,
                                  const PerformanceConfigPoolingForwardNaive& config) const
 {
@@ -214,7 +214,7 @@ PoolingForwardNaive::GetSolution(const ExecutionContext&,
             {"MLO_POOLING_INDEX_TYPE", get_pooling_index_type_name(index_type)},
             {"MLO_POOLING_IS2D_KERNEL", static_cast<int>(is2d_kernel)},
         };
-        build_params << GetDataTypeKBP(bot.GetType());
+        build_params << GetDataTypeKBP(bot.GetType(), context.GetStream().GetDeviceName());
         kernel.comp_options = build_params.GenerateFor(kbp::HIP{});
 
         // [Informative] The total number of kernels required to cover the whole

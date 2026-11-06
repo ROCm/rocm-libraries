@@ -10,8 +10,8 @@ GoogleTest 1.12.1 or newer. See [test dependencies](#test-dependencies) for
 installed and fetched dependency options.
 
 Test numerical behavior primarily through the Python API, using independent
-expected results. Keep native core tests in `tests/core_test.cpp` for contracts
-that Python cannot exercise, such as C++ construction and ownership rules.
+expected results. Native tests cover contracts that Python cannot exercise,
+such as C++ construction, ownership, and integer conversion templates.
 
 ## Standalone build
 
@@ -71,8 +71,8 @@ target_link_libraries(my_target PRIVATE roc::hostnumerics)
 ```
 
 The installed package exports `roc::hostnumerics-core` and
-`roc::hostnumerics`. Both are currently `INTERFACE` libraries exposing version
-information and scalar encoding metadata. The operations target
+`roc::hostnumerics`. Both are currently `INTERFACE` libraries exposing the
+header-only core APIs. The operations target
 links core transitively. Their intended responsibilities as implementation
 lands are:
 

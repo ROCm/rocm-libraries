@@ -247,7 +247,6 @@ This kind of investment is deeply valued for the overall health of the team and 
 CI | Main primary contact | Team
 ---- | ------- | ---------
 Math CI | eidenyoshida | [ROCm/rocm-math-lib-ci-team](https://github.com/orgs/ROCm/teams/rocm-math-lib-ci-team)
-External (Azure) CI | jayhawk-commits | [ROCm/external-ci](https://github.com/orgs/ROCm/teams/external-ci)
 TheRock CI | geomin12 | [ROCm/therockinfra](https://github.com/orgs/ROCm/teams/therockinfra)
 
 ## Gardener Rotation

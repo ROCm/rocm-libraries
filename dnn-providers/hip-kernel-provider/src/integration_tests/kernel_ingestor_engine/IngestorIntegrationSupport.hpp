@@ -41,6 +41,18 @@ inline constexpr std::array<const char*, 4> KERNEL_SELECTION_LOG_MARKERS = {
 // The plugin log line of a new provider container.
 inline constexpr const char* CREATING_CONTAINER_LOG = "Creating Container";
 
+// The already-loaded provider's own shared-object path. Does not load a second copy.
+inline std::filesystem::path loadedProviderPluginPath()
+{
+    const std::filesystem::path pluginTarget(PLUGIN_PATH);
+    const auto pluginFile = hipdnn_data_sdk::utilities::LIB_PREFIX
+                            + pluginTarget.filename().string()
+                            + hipdnn_data_sdk::utilities::SHARED_LIB_EXT;
+    return std::filesystem::weakly_canonical(
+        hipdnn_data_sdk::utilities::getCurrentExecutableDirectory() / pluginTarget.parent_path()
+        / pluginFile);
+}
+
 // Clears the process-wide kpack module cache of the loaded provider.
 // Makes the loaded provider read kpack code bytes from disk again.
 // The provider keeps one module for each archive, entry and architecture for the life of
@@ -49,13 +61,7 @@ inline constexpr const char* CREATING_CONTAINER_LOG = "Creating Container";
 // Returns a description of the failure, or an empty string.
 inline std::string resetProviderModuleCaches()
 {
-    const std::filesystem::path pluginTarget(PLUGIN_PATH);
-    const auto pluginFile = hipdnn_data_sdk::utilities::LIB_PREFIX
-                            + pluginTarget.filename().string()
-                            + hipdnn_data_sdk::utilities::SHARED_LIB_EXT;
-    const auto pluginPath = std::filesystem::weakly_canonical(
-        hipdnn_data_sdk::utilities::getCurrentExecutableDirectory() / pluginTarget.parent_path()
-        / pluginFile);
+    const auto pluginPath = loadedProviderPluginPath();
 
     auto* library = hipdnn_data_sdk::utilities::openLoadedLibrary(pluginPath);
     if(library == nullptr)
@@ -79,6 +85,42 @@ inline std::string resetProviderModuleCaches()
     reset();
 
     // Releases only the reference that this function took. The harness keeps the provider loaded.
+    hipdnn_data_sdk::utilities::closeLibrary(library);
+    return {};
+}
+
+// Sets the loaded provider's own per-image byte limit for hipkernel:Gfx950ConvDgradAot's
+// batch chunker (Gfx950ConvDgradGeometry.hpp::batchChunkByteLimitForTesting()), so a
+// small batch exercises the chunked-launch device path without a multi-GiB image. The
+// limit lives in a function-local static: a test in another TU that includes the header
+// and mutates it directly holds its own copy, never the plugin's, which is why this goes
+// through the plugin's exported hipdnnEnginePluginSetGfx950ConvDgradAotBatchChunkByteLimit
+// ForTesting symbol instead. Returns a description of the failure, or an empty string.
+inline std::string setProviderDgradBatchChunkByteLimit(int64_t limit)
+{
+    const auto pluginPath = loadedProviderPluginPath();
+
+    auto* library = hipdnn_data_sdk::utilities::openLoadedLibrary(pluginPath);
+    if(library == nullptr)
+    {
+        return "the provider at " + pluginPath.string()
+               + " is not loaded, so there is no batch chunk limit to set";
+    }
+
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
+    auto* setLimit = reinterpret_cast<void (*)(int64_t)>(hipdnn_data_sdk::utilities::getSymbol(
+        library, "hipdnnEnginePluginSetGfx950ConvDgradAotBatchChunkByteLimitForTesting"));
+    if(setLimit == nullptr)
+    {
+        hipdnn_data_sdk::utilities::closeLibrary(library);
+        return "the provider at " + pluginPath.string()
+               + " exports no "
+                 "hipdnnEnginePluginSetGfx950ConvDgradAotBatchChunkByteLimitForTesting; it was "
+                 "built without HIPDNN_ENABLE_KERNEL_INGESTOR, or the test-only hook was removed";
+    }
+
+    setLimit(limit);
+
     hipdnn_data_sdk::utilities::closeLibrary(library);
     return {};
 }

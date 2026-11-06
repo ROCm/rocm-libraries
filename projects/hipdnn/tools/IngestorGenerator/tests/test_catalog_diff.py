@@ -3,11 +3,11 @@
 
 """What `catalog_diff.py` calls the same catalog, and what it refuses to.
 
-The gate exists because byte comparison cannot work here: `generator.py` mints
-every descriptor id with `uuid.uuid4()`, so two runs of one config differ
-everywhere. Masking ids is therefore the premise, and the risk that comes with
-it is a mask that hides a real change. Each case below is one thing the mask
-must NOT swallow.
+The gate exists because output generated with new ids (`--new-ids`, or nothing to
+reuse) differs from the shipped bundle in every id, so byte comparison fails (a run
+that reused the previous bundle's ids needs no mask). Masking ids is
+therefore the premise, and the risk that comes with it is a mask that hides a
+real change. Each case below is one thing the mask must NOT swallow.
 """
 
 from __future__ import annotations
@@ -81,8 +81,9 @@ def run(tmp_path):
 
 class TestTheMaskHidesIdsAndNothingElse:
     def test_regenerated_ids_alone_are_not_a_difference(self, run):
-        """The premise. Every id differs between two runs of one config, so if
-        this failed the gate could never pass and would be abandoned."""
+        """The premise. Every id differs between two runs of one config that
+        reuse nothing, so if this failed the gate could never pass and would be
+        abandoned."""
         shipped = _kdp([_entry("k0")])
         regenerated = json.loads(json.dumps(shipped))
         regenerated["id"] = "fresh-kdp-id"
@@ -92,8 +93,8 @@ class TestTheMaskHidesIdsAndNothingElse:
 
     @pytest.mark.parametrize("key", ["engine_id", "kmd_id"])
     def test_the_contract_consumer_ids_are_masked(self, run, key):
-        """The contract references the freshly minted UED and KMD, so a straight
-        generate.py output differs from the shipped KDP in these two keys."""
+        """The contract references the UED and KMD ids, so output generated
+        with new ids differs from the shipped KDP in these two keys."""
         shipped = _kdp([_entry("k0")])
         regenerated = json.loads(json.dumps(shipped))
         consumer = regenerated["provenance"]["specialization_contract"]["consumers"][0]
@@ -222,9 +223,10 @@ class TestTheDuplicateSpecCheck:
 
 class TestExpectIds:
     def test_preserved_ids_pass_and_fresh_ones_fail(self, run, capsys):
-        """`--expect-ids` is for checking a SPLICE, where reusing the shipped
-        UUIDs is the obligation -- `extend.md`'s 'resolve by UUID, not
-        filename' made checkable rather than left to review."""
+        """`--expect-ids` is for checking a splice or a `generate.py` run that
+        reused the previous ids, where reusing the shipped UUIDs is the
+        obligation -- `extend.md`'s 'resolve by UUID, not filename' made
+        checkable rather than left to review."""
         shipped = _kdp([_entry("k0")])
         assert run(shipped, json.loads(json.dumps(shipped)), "--expect-ids") == 0
 
@@ -726,3 +728,119 @@ class TestMultiLaunchEntries:
         entry.pop("kernel_source")
         entry["sources"] = sources
         assert run(_kdp([entry]), _kdp([entry]), "--ignore-ids") == 2
+
+
+class TestNativeSymbolsAreComparedWhenDirectoriesAreGiven:
+    """The KDP names no native symbol, so a renamed `graph_match` / `score` /
+    `dispatch` / `kernel_match` symbol orphans the hand-written pack with the catalog
+    diff green. Each case is one rename or omission the comparison must not swallow."""
+
+    _FILES = {
+        "e.ued.json": {"graph_match": {"native": "hipkernel.e.graph_match"}},
+        "e.uhd.json": {"adapter": "native", "native": {"symbol": "hipkernel.e.score"}},
+        "e.udd.json": {"dispatch_symbol": "hipkernel.e.dispatch"},
+        "k.umd.json": {"scope": "kernel", "match_symbol": "hipkernel.e.kernel_match"},
+    }
+
+    def _write(self, root: Path, files: dict) -> Path:
+        root.mkdir(parents=True, exist_ok=True)
+        for name, doc in files.items():
+            (root / name).write_text(json.dumps(doc))
+        return root
+
+    def _run(self, run, tmp_path, regenerated_files: dict) -> int:
+        kdp = _kdp([_entry("k0")])
+        shipped = self._write(tmp_path / "shipped", self._FILES)
+        regenerated = self._write(tmp_path / "regenerated", regenerated_files)
+        return run(
+            kdp,
+            kdp,
+            "--shipped-descriptors",
+            str(shipped),
+            "--regenerated-descriptors",
+            str(regenerated),
+        )
+
+    def test_every_shipped_bundle_symbol_is_read(self):
+        """Every shipped native UED/UHD/UDD/UMD yields a symbol. A reader keyed on a
+        retired descriptor field reads None on both sides and passes vacuously."""
+        root = (
+            Path(__file__).resolve().parents[5]
+            / "dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine"
+            / "descriptors/rocKE/gfx950_attention_dense"
+        )
+        symbols = catalog_diff._load_symbols(str(root), "shipped")
+        kinds = {name.split(".")[-2] for name in symbols}
+        assert kinds == {"ued", "uhd", "udd", "umd"}, sorted(symbols)
+
+    def test_identical_symbols_pass(self, run, tmp_path):
+        """The positive control: the comparison is not vacuously failing."""
+        assert self._run(run, tmp_path, self._FILES) == 0
+
+    @pytest.mark.parametrize(
+        "name,doc",
+        [
+            ("e.ued.json", {"graph_match": {"native": "hipkernel.e.graph_match2"}}),
+            (
+                "e.uhd.json",
+                {"adapter": "native", "native": {"symbol": "hipkernel.e.rank"}},
+            ),
+            ("e.udd.json", {"dispatch_symbol": "hipkernel.e.run"}),
+            ("k.umd.json", {"scope": "kernel", "match_symbol": "hipkernel.e.other"}),
+        ],
+        ids=["ued", "uhd", "udd", "umd"],
+    )
+    def test_a_renamed_symbol_is_a_difference(self, run, tmp_path, name, doc, capsys):
+        changed = {**self._FILES, name: doc}
+        assert self._run(run, tmp_path, changed) == 1
+        assert name in capsys.readouterr().out
+
+    def test_a_descriptor_missing_from_the_regenerated_side_is_a_difference(
+        self, run, tmp_path
+    ):
+        fewer = {k: v for k, v in self._FILES.items() if k != "e.udd.json"}
+        assert self._run(run, tmp_path, fewer) == 1
+
+    def test_ids_and_other_fields_are_not_symbols(self, run, tmp_path):
+        """Minted ids differ on every run, so they must not count."""
+        noisy = {
+            k: {**v, "id": f"fresh-{k}", "name": "other"}
+            for k, v in self._FILES.items()
+        }
+        assert self._run(run, tmp_path, noisy) == 0
+
+    @pytest.mark.parametrize(
+        "files",
+        [
+            {},
+            {"e.uhd.json": {"adapter": "rule", "native": {"symbol": "x"}}},
+            {"e.ued.v2.json": {"graph_match": {"native": "hipkernel.e.graph_match"}}},
+        ],
+        ids=["wrong_directory", "non_native_uhd", "renamed_suffix"],
+    )
+    def test_a_shipped_side_with_no_symbols_is_an_error(self, run, tmp_path, files):
+        """Nothing shipped compares clean against nothing regenerated, so a wrong
+        ``--shipped-descriptors`` directory would pass the orphaned-pack check."""
+        kdp = _kdp([_entry("k0")])
+        shipped = self._write(tmp_path / "shipped", files)
+        regenerated = self._write(tmp_path / "regenerated", files)
+        assert (
+            run(
+                kdp,
+                kdp,
+                "--shipped-descriptors",
+                str(shipped),
+                "--regenerated-descriptors",
+                str(regenerated),
+            )
+            == 2
+        )
+
+    def test_without_the_directories_symbols_are_not_read(self, run):
+        kdp = _kdp([_entry("k0")])
+        assert run(kdp, kdp) == 0
+
+    def test_one_directory_alone_is_bad_usage(self, run, tmp_path):
+        kdp = _kdp([_entry("k0")])
+        shipped = self._write(tmp_path / "shipped", self._FILES)
+        assert run(kdp, kdp, "--shipped-descriptors", str(shipped)) == 2

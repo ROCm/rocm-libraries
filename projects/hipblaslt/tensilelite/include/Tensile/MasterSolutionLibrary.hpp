@@ -30,6 +30,7 @@
 #include <atomic>
 #include <chrono>
 #include <filesystem>
+#include <iterator>
 #include <map>
 #include <memory>
 #include <vector>
@@ -407,11 +408,27 @@ namespace TensileLite
             }
         }
 
+        /// resolveSolutionByIndex, limited to solutions that can run on
+        /// `hardware`. The shipped library holds only this architecture's
+        /// kernels, but the local kernel library is shared by every device in the
+        /// process and its kernels are pinned to the processor they were
+        /// registered for.
+        std::shared_ptr<MySolution> resolveSolutionByIndex(Hardware const& hardware,
+                                                           const int       index) const
+        {
+            auto solution = resolveSolutionByIndex(index);
+#ifdef TENSILELITE_ENABLE_LOCAL_KERNELS
+            if(solution && isLocalKernelIndex(index) && !(*solution->hardwarePredicate)(hardware))
+                return std::shared_ptr<MySolution>();
+#endif
+            return solution;
+        }
+
         virtual std::shared_ptr<MySolution> getSolutionByIndex(MyProblem const& problem,
                                                                Hardware const&  hardware,
                                                                const int index) const override
         {
-            auto solution = resolveSolutionByIndex(index);
+            auto solution = resolveSolutionByIndex(hardware, index);
             if(!solution)
             {
                 return std::shared_ptr<MySolution>();
@@ -427,7 +444,7 @@ namespace TensileLite
         virtual std::shared_ptr<MySolution> getSolutionByIndex(Hardware const& hardware,
                                                                const int       index) const override
         {
-            auto solution = resolveSolutionByIndex(index);
+            auto solution = resolveSolutionByIndex(hardware, index);
             if(!solution)
             {
                 return std::shared_ptr<MySolution>();
@@ -527,7 +544,8 @@ namespace TensileLite
                     Task task(hardware, problem, *(selected_solution));
                     if((*selected_solution->problemPredicate)(problem)
                        && (*selected_solution->taskPredicate)(task)
-                       && (*selected_solution->hardwarePredicate)(hardware))
+                       && (*selected_solution->hardwarePredicate)(hardware)
+                       && selected_solution->deviceScalarAlphaSupported(problem))
                         rv = selected_solution;
                     else
                         return nullptr;

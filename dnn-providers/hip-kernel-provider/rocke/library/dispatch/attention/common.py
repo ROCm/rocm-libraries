@@ -54,8 +54,12 @@ from enum import IntEnum
 from operator import index
 from typing import Any, Tuple
 
+# Re-exported, never redeclared: the tiled kernel specs name their band by these
+# ordinals (``mask_type()``), so the ordinals have one home, beside that mapping.
+from kernels.common.attention_mask_type import AttentionMaskType
 from kernels.common.attention_unified import (
     UnifiedAttentionProblem,
+    gfx942_3d_kv_needs_i64_addr,
     kv_addr_width_for_builder,
     # Re-exported, never redeclared. The kernel owns what it covers; dispatch's
     # job is to state that coverage as a Capability so it can be filtered and
@@ -71,19 +75,9 @@ from rocke.dispatch.core import KernelCandidate, OperatorRequest, selector_match
 from rocke.dispatch.tuning.identity import jsonable, normalize_knobs
 
 FAMILY = "attention_unified"
-ATTENTION_ABI_VERSION = "hipkg-attention-unified/v1"
-
-
-class AttentionMaskType(IntEnum):
-    """Attention-mask ordinals matching ``plan_utils::MaskType``.
-
-    These are mask kinds, not hipDNN ``DiagonalAlignment`` ordinals.
-    """
-
-    NO_MASK = 0
-    TOP_LEFT_CAUSAL = 1
-    BOTTOM_RIGHT_CAUSAL = 2
-    SLIDING_WINDOW = 3
+# v2: the gfx942 and gfx950 tiled kernels take the head counts and the sliding
+# window as kernargs.
+ATTENTION_ABI_VERSION = "hipkg-attention-unified/v2"
 
 
 _ATTENTION_MASK_ORDINALS = tuple(mask_type.value for mask_type in AttentionMaskType)
@@ -200,7 +194,7 @@ class AttentionRequest(OperatorRequest):
     # Also write the natural-log softmax normalizer (LSE) into a caller-owned
     # FP32 ``tensors["lse"]``. Reported as the ``lse`` feature, so only
     # candidates whose kernels implement it (dense, RDNA WMMA, and the
-    # gfx942/gfx950 unified split-KV path) admit it.
+    # gfx942/gfx950 unified split-KV and tiled 2D paths) admit it.
     emit_lse: bool = False
     # Serve runtime head widths from one compiled bucket: ``hdim_q``/``hdim_v``
     # are the bucket maxima, and any widths the kernel takes up to them (RDNA
@@ -1109,13 +1103,26 @@ class AttentionTuningSpec:
             * int(kernel_spec.head_size)
             * elem_bytes
         )
-        # A builder with no i64 path (gfx942 4-warp GQA) shares its spec class
-        # with the default builder, so no __post_init__ can refuse the flag the
-        # way the gfx942 3D spec does. It stays i32 up to its element limit and
-        # is refused at bind time past that, not at compile.
-        use_i64 = kv_addr_width_for_builder(
-            self.builder_kind, count, block_stride, elem_bytes
-        )
+        if self.path == "3d" and self.arch == "gfx942":
+            # No i64 path: the flag marks a cache past what the spec's K/V
+            # loader reads, and the spec's __post_init__ refuses it.
+            use_i64 = gfx942_3d_kv_needs_i64_addr(
+                count,
+                block_stride,
+                kv_fp8=kernel_spec.kv_storage_dtype == "fp8e4m3",
+                use_wide_kv_load=kernel_spec.use_wide_kv_load,
+                tile_size=kernel_spec.tile_size,
+                head_size=kernel_spec.head_size,
+            )
+        else:
+            # A builder with no i64 path (gfx942 4-warp GQA) shares its spec
+            # class with the default builder, so no __post_init__ can refuse the
+            # flag the way the gfx942 3D spec does. It stays i32 up to its
+            # element limit and is refused at bind time past that, not at
+            # compile.
+            use_i64 = kv_addr_width_for_builder(
+                self.builder_kind, count, block_stride, elem_bytes
+            )
         return replace(
             self,
             kernel_spec=replace(kernel_spec, use_i64_kv_addr=use_i64),
