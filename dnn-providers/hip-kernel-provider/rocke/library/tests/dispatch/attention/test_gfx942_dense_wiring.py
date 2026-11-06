@@ -1024,7 +1024,53 @@ class TestGfx942DensePersistentRuntimeShape(unittest.TestCase):
 
 
 class TestGfx942SlidingWindow(unittest.TestCase):
-    """Sliding-window pass-through and capability tests, mirroring gfx950's suite."""
+    """Sliding-window pass-through and capability tests, mirroring gfx950's suite.
+    The key-less-row refusal is gfx942's own: gfx950's kernel zeroes those rows."""
+
+    @staticmethod
+    def _windowed_spec(seqlen_kv, **kw) -> Gfx942AttentionDenseSpec:
+        """512 query rows at 256/64 tiles under a causal 128-key window."""
+        return Gfx942AttentionDenseSpec(
+            batch=1,
+            seqlen_q=512,
+            seqlen_kv=seqlen_kv,
+            num_query_heads=128,
+            num_kv_heads=8,
+            head_size=128,
+            causal=True,
+            dtype="bf16",
+            sliding_window=128,
+            block_m=256,
+            block_n=64,
+            **kw,
+        )
+
+    def test_supports_rejects_a_window_that_leaves_rows_no_key(self):
+        """Row q keeps keys (q - W, q]; once seqlen_q - seqlen_kv >= W the last rows keep
+        none, and without a sink or the LSE path they would average V. 512/256 at
+        256/64 passes the block-level zero-trip guard (the last block starts at tile 2
+        of 4) yet rows from 383 see no key."""
+        for seqlen_kv, ok_expected in (
+            (256, False),
+            (384, False),
+            (448, True),
+            (512, True),
+        ):
+            with self.subTest(seqlen_kv=seqlen_kv):
+                spec = self._windowed_spec(seqlen_kv)
+                ok, why = supports_attention_dense(spec, arch="gfx942")
+                self.assertEqual(ok, ok_expected, why)
+                if not ok:
+                    self.assertIn("see no key", why)
+
+    def test_supports_accepts_key_less_window_rows_with_sinks_or_lse(self):
+        """Sinks seed the softmax (a key-less row is 0) and the LSE path zeroes
+        key-less rows, so the row rule leaves both alone."""
+        for exempt in ("use_sinks", "emit_lse"):
+            with self.subTest(exempt=exempt):
+                spec = self._windowed_spec(256, **{exempt: True})
+                ok, why = supports_attention_dense(spec, arch="gfx942")
+                self.assertTrue(ok, why)
 
     def test_sliding_window_zero_by_default(self):
         with _Gfx942Arch():

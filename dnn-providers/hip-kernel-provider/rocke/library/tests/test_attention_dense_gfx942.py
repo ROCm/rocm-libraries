@@ -956,35 +956,6 @@ def test_supports_rejects_sliding_window_past_seqlen_kv():
     assert not ok and "sliding_window" in why
 
 
-@pytest.mark.parametrize(
-    "seqlen_q,seqlen_kv,ok_expected",
-    [(512, 256, False), (512, 384, False), (512, 448, True), (512, 512, True)],
-)
-def test_supports_rejects_a_window_that_leaves_rows_no_key(
-    seqlen_q, seqlen_kv, ok_expected
-):
-    """Row q keeps keys (q - W, q]; once seqlen_q - seqlen_kv >= W the last rows keep
-    none, and without a sink or the LSE path they would average V. 512/256 at
-    256/64 passes the block-level zero-trip guard (the last block starts at tile 2
-    of 4) yet rows from 383 see no key."""
-    spec = _spec(
-        seqlen_q=seqlen_q, seqlen_kv=seqlen_kv, sliding_window=128, block_m=256
-    )
-    ok, why = supports_attention_dense(spec, arch="gfx942")
-    assert ok == ok_expected, why
-    if not ok:
-        assert "see no key" in why
-
-
-@pytest.mark.parametrize("exempt", [dict(use_sinks=True), dict(emit_lse=True)])
-def test_supports_accepts_key_less_window_rows_with_sinks_or_lse(exempt):
-    """Sinks seed the softmax (a key-less row is 0) and the LSE path zeroes
-    key-less rows, so the row rule leaves both alone."""
-    spec = _spec(seqlen_q=512, seqlen_kv=256, sliding_window=128, block_m=256, **exempt)
-    ok, why = supports_attention_dense(spec, arch="gfx942")
-    assert ok, why
-
-
 def test_supports_accepts_sliding_window_in_range():
     """SWA + causal where the window stays within seqlen_kv is accepted."""
     ok, why = supports_attention_dense(
