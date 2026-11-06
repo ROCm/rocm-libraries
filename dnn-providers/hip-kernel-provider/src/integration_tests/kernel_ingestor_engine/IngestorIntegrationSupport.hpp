@@ -427,6 +427,17 @@ enum class SdpaMask
     WINDOW_BOTTOM_RIGHT
 };
 
+// The memory layout of a [B, H, S, D] SDPA tensor.
+enum class SdpaLayout
+{
+    // Token-major, head varying fastest. The dense kernels bake this layout.
+    BSHD,
+    // Head-major.
+    BHSD,
+    // Head-major, each row padded to D + 8 elements.
+    BHSD_PADDED_ROW
+};
+
 // One SDPA forward graph: its tensors' shapes and the attributes a case varies.
 struct IngestorSdpaGraphSpec
 {
@@ -449,6 +460,9 @@ struct IngestorSdpaGraphSpec
     std::optional<float> scaleOverride = std::nullopt;
     // Binds the stats (LSE) output.
     bool withStats = false;
+    // The layouts of K and V. Q and O are BSHD.
+    SdpaLayout kLayout = SdpaLayout::BSHD;
+    SdpaLayout vLayout = SdpaLayout::BSHD;
 };
 
 struct SdpaGraph
@@ -484,34 +498,51 @@ inline float sdpaForwardTolerance(hipdnn_frontend::DataType dataType)
                      hipdnn_data_sdk::types::bfloat16>();
 }
 
-// BSHD: token-major, head varying fastest. The kernels bake this layout.
-inline std::vector<int64_t> bshdStrides(int64_t heads, int64_t seq, int64_t headSize)
+// The strides of a [B, heads, seq, headSize] tensor in layout.
+inline std::vector<int64_t>
+    sdpaStrides(SdpaLayout layout, int64_t heads, int64_t seq, int64_t headSize)
 {
-    return {seq * heads * headSize, headSize, heads * headSize, 1};
+    constexpr int64_t ROW_PAD = 8;
+    switch(layout)
+    {
+    case SdpaLayout::BSHD:
+        return {seq * heads * headSize, headSize, heads * headSize, 1};
+    case SdpaLayout::BHSD:
+        return {heads * seq * headSize, seq * headSize, headSize, 1};
+    case SdpaLayout::BHSD_PADDED_ROW:
+    {
+        const int64_t row = headSize + ROW_PAD;
+        return {heads * seq * row, seq * row, row, 1};
+    }
+    default:
+        throw std::invalid_argument("sdpaStrides: unhandled SdpaLayout value");
+    }
 }
 
 inline std::shared_ptr<hipdnn_frontend::graph::TensorAttributes>
-    makeBshdTensor(int64_t uid,
+    makeSdpaTensor(int64_t uid,
                    const std::string& name,
                    hipdnn_frontend::DataType dataType,
                    int64_t batch,
                    int64_t heads,
                    int64_t seq,
-                   int64_t headSize)
+                   int64_t headSize,
+                   SdpaLayout layout)
 {
     auto tensor = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     tensor->set_uid(uid)
         .set_name(name)
         .set_dim({batch, heads, seq, headSize})
-        .set_stride(bshdStrides(heads, seq, headSize))
+        .set_stride(sdpaStrides(layout, heads, seq, headSize))
         .set_data_type(dataType);
     return tensor;
 }
 
-// A single SDPA forward node with BSHD Q/K/V/O and the softmax scale 1/sqrt(D), set
-// explicitly unless the shape omits it. O is laid out explicitly: the frontend's default for
-// an unset output is packed BHSD, which the engines decline. A shape with stats binds the
-// stats output as the frontend does, FLOAT [B, Hq, Sq, 1], packed.
+// A single SDPA forward node with BSHD Q and O, K and V in the shape's layouts, and the
+// softmax scale 1/sqrt(D), set explicitly unless the shape omits it. O is laid out
+// explicitly: the frontend's default for an unset output is packed BHSD, which the engines
+// decline. A shape with stats binds the stats output as the frontend does,
+// FLOAT [B, Hq, Sq, 1], packed.
 inline SdpaGraph buildSdpaGraph(const std::string& name, const IngestorSdpaGraphSpec& shape)
 {
     constexpr int64_t Q_UID = 1;
@@ -526,12 +557,30 @@ inline SdpaGraph buildSdpaGraph(const std::string& name, const IngestorSdpaGraph
         .set_intermediate_data_type(hipdnn_frontend::DataType::FLOAT)
         .set_compute_data_type(hipdnn_frontend::DataType::FLOAT);
 
-    auto q = makeBshdTensor(
-        Q_UID, "Q", shape.dataType, shape.batch, shape.queryHeads, shape.seqQ, shape.headSize);
-    auto k = makeBshdTensor(
-        K_UID, "K", shape.dataType, shape.batch, shape.kvHeads, shape.seqKv, shape.headSize);
-    auto v = makeBshdTensor(
-        V_UID, "V", shape.dataType, shape.batch, shape.kvHeads, shape.seqKv, shape.headSize);
+    auto q = makeSdpaTensor(Q_UID,
+                            "Q",
+                            shape.dataType,
+                            shape.batch,
+                            shape.queryHeads,
+                            shape.seqQ,
+                            shape.headSize,
+                            SdpaLayout::BSHD);
+    auto k = makeSdpaTensor(K_UID,
+                            "K",
+                            shape.dataType,
+                            shape.batch,
+                            shape.kvHeads,
+                            shape.seqKv,
+                            shape.headSize,
+                            shape.kLayout);
+    auto v = makeSdpaTensor(V_UID,
+                            "V",
+                            shape.dataType,
+                            shape.batch,
+                            shape.kvHeads,
+                            shape.seqKv,
+                            shape.headSize,
+                            shape.vLayout);
 
     hipdnn_frontend::graph::SdpaAttributes attributes;
     attributes.set_name(name);
@@ -587,7 +636,7 @@ inline SdpaGraph buildSdpaGraph(const std::string& name, const IngestorSdpaGraph
         .set_output(true)
         .set_data_type(shape.dataType)
         .set_dim({shape.batch, shape.queryHeads, shape.seqQ, shape.headSize})
-        .set_stride(bshdStrides(shape.queryHeads, shape.seqQ, shape.headSize));
+        .set_stride(sdpaStrides(SdpaLayout::BSHD, shape.queryHeads, shape.seqQ, shape.headSize));
 
     auto stats = outputs[1];
     if(stats != nullptr)
