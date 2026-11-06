@@ -30,6 +30,10 @@ from config_helpers import findAvailableArchs, findConfigs
 
 _COMMON_DIR = Path(__file__).parent
 
+# Architectures the YAML configs were parametrized for (set in pytest_generate_tests), so the
+# deselection below does not detect them a second time.
+_ARCHS_KEY = pytest.StashKey[list]()
+
 
 def pytest_ignore_collect(collection_path: Path, config: pytest.Config):
     """Filter direct children of common/ based on --build-only / --use-cache mode."""
@@ -77,10 +81,36 @@ def pytest_generate_tests(metafunc):
     """
     if "config" not in metafunc.fixturenames:
         return
-    gpu_targets = metafunc.config.getoption("--gpu-targets", default=None)
-    archs = findAvailableArchs(gpu_targets)
+    archs = metafunc.config.stash.get(_ARCHS_KEY, None)
+    if archs is None:
+        gpu_targets = metafunc.config.getoption("--gpu-targets", default=None)
+        archs = findAvailableArchs(gpu_targets)
+        metafunc.config.stash[_ARCHS_KEY] = archs
     device_tags = () if metafunc.config.getoption("--build-only", default=False) else None
     configs = findConfigs(availableArchs=archs,
                           deviceTags=device_tags,
                           splitWorlds=not metafunc.config.getoption("--build-only", default=False))
     metafunc.parametrize("config", configs)
+
+
+def pytest_collection_modifyitems(config, items):
+    """Deselect the YAML configs that opt out of every target architecture.
+
+    A config opts out of an architecture with a ``skip-<arch>`` mark in its TestParameters, and
+    configMarks then also marks it ``skip``. Such a test would only report a skip, but it would still
+    be sent to (and counted by) the pytest-xdist scheduler: on gfx942 that is 563 of the 709 common
+    tests, which inflates the chunks the default ``load`` scheduler hands out. Deselecting them
+    keeps only the configs that run. This reads the marks configMarks already attached; it opens no
+    files.
+    """
+    archs = config.stash.get(_ARCHS_KEY, None)
+    if not archs:
+        return
+    optOut = {f"skip-{arch}" for arch in archs}
+    keep, drop = [], []
+    for item in items:
+        names = {m.name for m in item.iter_markers()} if item.path.is_relative_to(_COMMON_DIR) else ()
+        (drop if optOut.issubset(names) else keep).append(item)
+    if drop:
+        config.hook.pytest_deselected(items=drop)
+        items[:] = keep
