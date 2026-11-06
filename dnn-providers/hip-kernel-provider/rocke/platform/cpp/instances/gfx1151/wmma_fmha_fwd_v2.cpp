@@ -276,7 +276,10 @@ void v2_declare_params(rocke_ir_builder_t* b, const rocke_wmma_fmha_fwd_v2_spec_
     if(spec->use_softcap)
         scalar("softcap", rocke_f32());
     if(spec->use_sinks)
+    {
         ptr("sink_ptr", elem, 2);
+        scalar("sink_is_f32", rocke_i32());
+    }
     if(spec->use_alibi)
         ptr("alibi_slopes_ptr", rocke_f32(), 4);
     if(spec->use_qq_bias)
@@ -603,9 +606,25 @@ rocke_status_t
         log2e = rocke_b_const_f32(b, 1.4426950408889634);
     if(spec->use_sinks)
     {
+        // One logit per query head, f32 (sink_is_f32 != 0) or the Q dtype: two 16-bit
+        // loads that stay inside either form's [Hq] extent, combined into the f32 word or
+        // widened from the low half.
         const rocke_type_t* elem = v2_is_bf16(spec) ? rocke_bf16() : rocke_f16();
-        rocke_value_t* raw = rocke_b_global_load(b, param("sink_ptr"), head, elem, 2);
-        rocke_value_t* f = rocke_b_cast_to_f32(b, raw);
+        rocke_value_t* is_f32 = rocke_b_cmp_ne(b, param("sink_is_f32"), c0);
+        rocke_value_t* word_lo = rocke_b_mul(b, head, ci(2));
+        rocke_value_t* lo_idx = rocke_b_select(b, is_f32, word_lo, head);
+        rocke_value_t* word_hi = rocke_b_add(b, word_lo, c1);
+        rocke_value_t* hi_idx = rocke_b_select(b, is_f32, word_hi, head);
+        rocke_value_t* lo = rocke_b_global_load(b, param("sink_ptr"), lo_idx, rocke_i16(), 2);
+        rocke_value_t* hi = rocke_b_global_load(b, param("sink_ptr"), hi_idx, rocke_i16(), 2);
+        rocke_value_t* hi32 = rocke_b_zext(b, hi, rocke_i32());
+        rocke_value_t* hi_sh = rocke_b_shl(b, hi32, ci(16));
+        rocke_value_t* lo32 = rocke_b_zext(b, lo, rocke_i32());
+        rocke_value_t* word = rocke_b_lor(b, hi_sh, lo32);
+        rocke_value_t* as_f32 = rocke_b_bitcast(b, word, rocke_f32());
+        rocke_value_t* lo_q = rocke_b_bitcast(b, lo, elem);
+        rocke_value_t* q_f32 = rocke_b_cast_to_f32(b, lo_q);
+        rocke_value_t* f = rocke_b_select(b, is_f32, as_f32, q_f32);
         p.sink_log2 = rocke_b_fmul(b, f, log2e);
     }
     if(spec->use_alibi)

@@ -26,8 +26,8 @@ across a wave pair (gfx12 keeps an unsplit Q up to 256 when V <= 128 with
 
 Optional baked features (each appends its runtime arguments to the ABI, in
 the order below, before the bias arguments): softcap (``softcap``), attention
-sinks (``sink_ptr``,
-[Hq] in the Q dtype), ALiBi (``alibi_slopes_ptr``, [Hq] f32), QQ-bias
+sinks (``sink_ptr``, [Hq] logits, and ``sink_is_f32``: nonzero when they are
+f32, else in the Q dtype), ALiBi (``alibi_slopes_ptr``, [Hq] f32), QQ-bias
 (``qq_bias_ptr`` [rows, cols] f32 with ``qq_bias_rows / cols / stride``), a
 packed layout -- ragged (``cu_seqlens_q``, ``cu_seqlens_k``) or paged
 (``cu_seqlens_q``, ``seqused_k``, ``block_table``, ``block_table_v``,
@@ -79,6 +79,7 @@ from rocke.core.ir import (
     F16,
     F32,
     FP8E4M3,
+    I16,
     I32,
     I64,
     IRBuilder,
@@ -415,6 +416,7 @@ def _declare_params(b: IRBuilder, spec: WmmaFmhaFwdV2Spec):
         scalars(F32, "softcap")
     if spec.use_sinks:
         ptr("sink_ptr", elem, 2)
+        scalars(I32, "sink_is_f32")
     if spec.use_alibi:
         ptr("alibi_slopes_ptr", F32, 4)
     if spec.use_qq_bias:
@@ -619,9 +621,19 @@ def build_wmma_fmha_fwd_v2(spec: WmmaFmhaFwdV2Spec, *, arch: str) -> KernelDef:
     if spec.use_sinks or spec.use_alibi:
         log2e = b.const_f32(1.4426950408889634)
     if spec.use_sinks:
+        # One logit per query head, f32 (sink_is_f32 != 0) or the Q dtype: two
+        # 16-bit loads that stay inside either form's [Hq] extent, combined
+        # into the f32 word or widened from the low half.
         elem = BF16 if spec.dtype == "bf16" else F16
-        raw = b.global_load(p["sink_ptr"], head, elem, align=2)
-        sink = b.fmul(b.cast_to_f32(raw), log2e)
+        is_f32 = b.cmp_ne(p["sink_is_f32"], c0)
+        word_lo = b.mul(head, ci(2))
+        lo_idx = b.select(is_f32, word_lo, head)
+        hi_idx = b.select(is_f32, b.add(word_lo, c1), head)
+        lo = b.global_load(p["sink_ptr"], lo_idx, I16, align=2)
+        hi = b.global_load(p["sink_ptr"], hi_idx, I16, align=2)
+        word = b.lor(b.shl(b.zext(hi, I32), ci(16)), b.zext(lo, I32))
+        raw = b.select(is_f32, b.bitcast(word, F32), b.cast_to_f32(b.bitcast(lo, elem)))
+        sink = b.fmul(raw, log2e)
     if spec.use_alibi:
         raw = b.global_load(p["alibi_slopes_ptr"], head, F32, align=4)
         slope = b.fmul(raw, log2e)

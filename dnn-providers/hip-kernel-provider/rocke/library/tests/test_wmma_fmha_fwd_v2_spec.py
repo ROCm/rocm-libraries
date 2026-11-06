@@ -215,7 +215,7 @@ class TestWmmaFmhaFwdV2Spec(unittest.TestCase):
             [p["name"] for p in sig],
             base
             + [
-                "softcap", "sink_ptr", "alibi_slopes_ptr", "qq_bias_ptr",
+                "softcap", "sink_ptr", "sink_is_f32", "alibi_slopes_ptr", "qq_bias_ptr",
                 "qq_bias_rows", "qq_bias_cols", "qq_bias_stride", "cu_seqlens_q",
                 "seqused_k", "block_table", "block_table_v", "block_table_stride",
                 "stride_k_block", "stride_v_block", "num_blocks", "k_scale", "v_scale",
@@ -228,6 +228,7 @@ class TestWmmaFmhaFwdV2Spec(unittest.TestCase):
         self.assertIn("fp8e4m3", types["V"])
         self.assertIn("bf16", types["sink_ptr"])
         self.assertEqual(types["softcap"], "f32")
+        self.assertEqual(types["sink_is_f32"], "i32")
         ragged = WmmaFmhaFwdV2Spec(layout="ragged")
         self.assertEqual(
             [p["name"] for p in wmma_fmha_fwd_v2_signature(ragged)],
