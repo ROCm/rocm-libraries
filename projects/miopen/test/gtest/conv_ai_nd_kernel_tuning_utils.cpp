@@ -719,8 +719,8 @@ TEST_P(GPU_ConvNDKernelTuning_FP32, GetFeaturesND_Test)
     int max_cu        = 304;
     auto features     = GetFeaturesND(problem, max_cu, device_arch);
 
-    // 2D has 23 features, 3D has 29 features (6 depth-related features)
-    size_t expected_feature_count = (spatial_dim == 3) ? 29u : 23u;
+    // 2D has 25 features, 3D has 31 features (6 depth-related); both include num_cu + arch
+    size_t expected_feature_count = (spatial_dim == 3) ? 31u : 25u;
     ASSERT_EQ(features.size(), expected_feature_count);
     CheckGetFeaturesND_MapValues(features, problem, param.direction, spatial_dim == 3);
 }
@@ -1208,7 +1208,7 @@ TEST_F(CPU_ConvNDKernelTuningDiagnostic_NONE, GetFeatures2D_CrossPlatform_Test)
     for(const auto& arch : test_archs)
     {
         auto features = GetFeaturesND(problem, max_cu, arch);
-        EXPECT_EQ(features.size(), 23u) << "Feature count inconsistent for " << arch;
+        EXPECT_EQ(features.size(), 25u) << "Feature count inconsistent for " << arch;
         EXPECT_EQ(features.at("spatial_dim"), 2.0f) << "Spatial dim incorrect for " << arch;
     }
 }
@@ -1222,7 +1222,7 @@ TEST_F(CPU_ConvNDKernelTuningDiagnostic_NONE, GetFeatures3D_CrossPlatform_Test)
     for(const auto& arch : test_archs)
     {
         auto features = GetFeaturesND(problem, max_cu, arch);
-        EXPECT_EQ(features.size(), 29u) << "Feature count inconsistent for " << arch;
+        EXPECT_EQ(features.size(), 31u) << "Feature count inconsistent for " << arch;
         EXPECT_EQ(features.at("spatial_dim"), 3.0f) << "Spatial dim incorrect for " << arch;
     }
 }
