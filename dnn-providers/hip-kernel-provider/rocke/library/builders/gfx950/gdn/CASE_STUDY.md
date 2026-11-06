@@ -306,20 +306,20 @@ Of the 2,072 late-order kernels that spill in both orders: 1,219 at
 the rest under a `waves_per_eu` floor of 2 or more; 42 others.
 
 **Reproduce.** Save as `spill_sweep.py` outside the tree and run it from
-[`rocke/library`](../../..). It uses every worker named by `SWEEP_JOBS` (default
-32); on a shared node run one instance at a time. The run time depends on the host load and on
-the worker count (`SWEEP_JOBS`).
+[`rocke/library`](../../..). It runs as many workers as its first argument says
+(default 32); on a shared node run one instance at a time. The run time depends
+on the host load and on the worker count.
 
 ```bash
-export ROCKE_BACKEND=python SWEEP_JOBS=48
+export ROCKE_BACKEND=python
 export ROCKE_COMGR_LIB=/opt/rocm-7.1.0/lib/libamd_comgr.so.3 ROCKE_LLVM_FLAVOR=llvm20
 export PATH=/opt/rocm-7.1.0/llvm/bin:$PATH   # llvm-objdump that knows the AMDGPU target
-PYTHONPATH=.:../platform/python python3 /path/to/spill_sweep.py
+PYTHONPATH=.:../platform/python python3 /path/to/spill_sweep.py 48
 ```
 
 ```python
 import dataclasses as dc
-import os
+import sys
 import tempfile
 from itertools import product
 from multiprocessing import Pool
@@ -379,7 +379,7 @@ if __name__ == "__main__":
     for _order, spec, other in rows.values():
         kernels[spec.kernel_name()] = spec
         kernels[other.kernel_name()] = other
-    with Pool(int(os.environ.get("SWEEP_JOBS", "32"))) as pool:
+    with Pool(int(sys.argv[1]) if len(sys.argv) > 1 else 32) as pool:
         out = dict(zip(kernels, pool.map(scratch, kernels.values(), chunksize=8)))
 
     def spills(spec):
