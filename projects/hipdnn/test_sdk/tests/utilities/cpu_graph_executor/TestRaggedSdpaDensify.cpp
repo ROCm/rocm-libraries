@@ -3,9 +3,11 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
+#include <functional>
 #include <limits>
 #include <memory>
 #include <numeric>
@@ -18,6 +20,7 @@
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceSdpa.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
+#include <hipdnn_test_sdk/utilities/RaggedLayoutTestSupport.hpp>
 #include <hipdnn_test_sdk/utilities/RaggedSdpaDensifyTestGraphs.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/CpuReferenceGraphExecutor.hpp>
 #include <hipdnn_test_sdk/utilities/detail/RaggedSdpaDensify.hpp>
@@ -29,6 +32,7 @@ using hipdnn_test_sdk::utilities::CpuReferenceGraphExecutor;
 using hipdnn_test_sdk::utilities::SdpaBwdOptions;
 using hipdnn_test_sdk::utilities::SdpaFwdOptions;
 using namespace hipdnn_test_sdk::utilities::ragged_densify_test;
+using hipdnn_test_sdk::utilities::ragged_layout_test::stridedAuxBuffer;
 
 TEST(TestRaggedSdpaDensify, RewritesRaggedPrimariesToDensePadding)
 {
@@ -36,7 +40,7 @@ TEST(TestRaggedSdpaDensify, RewritesRaggedPrimariesToDensePadding)
     const auto dense
         = hipdnn_test_sdk::detail::densifyRaggedSdpaGraph(buffer.data(), buffer.size());
     ASSERT_TRUE(dense.has_value());
-    EXPECT_EQ(dense->primaries.size(), 5u); // Q, K, V, O and the packed LSE
+    EXPECT_EQ(dense->primaries.size(), 5u); // Q, K, V, O and the ragged LSE
     ASSERT_TRUE(dense->addedSeqLenQUid.has_value());
     ASSERT_TRUE(dense->addedSeqLenKvUid.has_value());
 
@@ -75,7 +79,7 @@ TEST(TestRaggedSdpaDensify, PackAndUnpackRoundTrip)
     const auto& q = dense->primaries.front();
     const auto offsets = hipdnn_test_sdk::detail::raggedElementOffsets(q, Q_TOKENS.data(), B);
     EXPECT_EQ(offsets, (std::vector<int64_t>{0, 4 * H * D, 10 * H * D}));
-    const auto lengths = hipdnn_test_sdk::detail::raggedLengths(q, offsets);
+    const auto lengths = hipdnn_test_sdk::detail::raggedLengths(q, offsets, nullptr);
     EXPECT_EQ(lengths, Q_LENS);
 
     auto packed = packedValues(10, H * D, 3);
@@ -364,4 +368,666 @@ TEST(TestRaggedSdpaDensify, RaggedOffsetOnPagedKvIsDeclined)
     const auto denseKv = raggedQPagedKvGraph(false);
     EXPECT_TRUE(hipdnn_test_sdk::detail::densifyRaggedSdpaGraph(denseKv.data(), denseKv.size())
                     .has_value());
+}
+
+namespace
+{
+
+// Offset tables of the edited graphs (token units, multiplier = the tensor's seq stride unless
+// stated). Not in the Uid enum.
+constexpr int64_t STATS_OFFSETS = 100;
+constexpr int64_t MAX_UID = 101;
+constexpr int64_t SUM_EXP_UID = 102;
+constexpr int64_t DQ_OFFSETS = 103;
+constexpr int64_t DKV_OFFSETS = 104;
+
+void addInt32(GraphT& graph, int64_t uid, int64_t count)
+{
+    graph.tensors.push_back(tensor(uid, DataType::INT32, {count, 1, 1, 1}, {1, 1, 1, 1}));
+}
+
+void addSeqLens(GraphT& graph)
+{
+    addInt32(graph, SEQ_Q, B);
+    addInt32(graph, SEQ_KV, B);
+}
+
+const std::vector<int32_t> Q_LENS32 = {4, 6};
+const std::vector<int32_t> KV_LENS32 = {8, 5};
+
+// Token index of (b, tok) in a packed layout whose batch starts are `tokens`.
+size_t tokenRow(const std::vector<int32_t>& tokens, int64_t b, int64_t tok)
+{
+    return static_cast<size_t>(tokens[static_cast<size_t>(b)] + tok);
+}
+
+} // namespace
+
+// Ragged Max and Sum_exp are served through the rewrite with seq_len_q lengths. Stats, Max and
+// Sum_exp sit at non-monotonic origins (batch 0 after batch 1); Max + log(Sum_exp) equals Stats,
+// and Stats equals the run with monotonic origins and no Max / Sum_exp. Bottom-right causal
+// masking leaves query 0 of batch 1 (6 queries, 5 keys) with no visible key: that row's Stats and
+// Max are -inf and its Sum_exp is 0, checked exactly because a tolerance check on -inf is NaN.
+TEST(TestRaggedSdpaDensify, RaggedMaxAndSumExpAtNonMonotonicOriginsEqualStats)
+{
+    const std::vector<int32_t> statsTokens = {6, 0, 0};
+    const auto base = raggedGraph(false, false);
+    const auto graph = editGraph(base, [&](GraphT& g) {
+        addSeqLens(g);
+        addInt32(g, STATS_OFFSETS, B + 1);
+        for(const int64_t uid : {static_cast<int64_t>(STATS), MAX_UID, SUM_EXP_UID})
+        {
+            if(uid != STATS)
+            {
+                g.tensors.push_back(
+                    tensor(uid, DataType::FLOAT, {B, H, SQ, 1}, {SQ * H, 1, H, 1}, STATS_OFFSETS));
+            }
+        }
+        tensorOf(g, STATS).ragged_offset_tensor_uid = STATS_OFFSETS;
+        auto* attrs = g.nodes.front()->attributes.AsSdpaAttributes();
+        attrs->max_tensor_uid = MAX_UID;
+        attrs->sum_exp_tensor_uid = SUM_EXP_UID;
+        attrs->seq_len_q_tensor_uid = SEQ_Q;
+        attrs->seq_len_kv_tensor_uid = SEQ_KV;
+    });
+
+    auto q = packedValues(10, H * D, 41);
+    auto k = packedValues(13, H * D, 42);
+    auto v = packedValues(13, H * D, 43);
+    auto qOffsets = Q_TOKENS;
+    auto kvOffsets = KV_TOKENS;
+    auto seqQ = Q_LENS32;
+    auto seqKv = KV_LENS32;
+    auto statsOffsets = statsTokens;
+    std::vector<float> o(10 * H * D, -7.0F);
+    std::vector<float> stats(10 * H, -7.0F);
+    std::vector<float> maxRows(10 * H, -7.0F);
+    std::vector<float> sumExp(10 * H, -7.0F);
+    const std::unordered_map<int64_t, void*> pack = {{Q, q.data()},
+                                                     {K, k.data()},
+                                                     {V, v.data()},
+                                                     {O, o.data()},
+                                                     {STATS, stats.data()},
+                                                     {MAX_UID, maxRows.data()},
+                                                     {SUM_EXP_UID, sumExp.data()},
+                                                     {Q_OFFSETS, qOffsets.data()},
+                                                     {KV_OFFSETS, kvOffsets.data()},
+                                                     {STATS_OFFSETS, statsOffsets.data()},
+                                                     {SEQ_Q, seqQ.data()},
+                                                     {SEQ_KV, seqKv.data()}};
+    CpuReferenceGraphExecutor executor;
+    ASSERT_TRUE(executor.isApplicable(const_cast<uint8_t*>(graph.data()), graph.size()));
+    executor.execute(const_cast<uint8_t*>(graph.data()), graph.size(), pack);
+
+    // Reference: monotonic Stats, no Max / Sum_exp.
+    const auto baseline = raggedGraph(false, false);
+    std::vector<float> oBase(10 * H * D, -7.0F);
+    std::vector<float> statsBase(10 * H, -7.0F);
+    const std::unordered_map<int64_t, void*> basePack = {{Q, q.data()},
+                                                         {K, k.data()},
+                                                         {V, v.data()},
+                                                         {O, oBase.data()},
+                                                         {STATS, statsBase.data()},
+                                                         {Q_OFFSETS, qOffsets.data()},
+                                                         {KV_OFFSETS, kvOffsets.data()}};
+    executor.execute(const_cast<uint8_t*>(baseline.data()), baseline.size(), basePack);
+
+    for(int64_t b = 0; b < B; ++b)
+    {
+        for(int64_t tok = 0; tok < Q_LENS[static_cast<size_t>(b)]; ++tok)
+        {
+            for(int64_t h = 0; h < H; ++h)
+            {
+                const auto at = tokenRow(statsTokens, b, tok) * H + static_cast<size_t>(h);
+                const auto ref = tokenRow(Q_TOKENS, b, tok) * H + static_cast<size_t>(h);
+                if(std::isinf(statsBase[ref]))
+                {
+                    EXPECT_EQ(statsBase[ref], -std::numeric_limits<float>::infinity())
+                        << "b=" << b << " tok=" << tok << " h=" << h;
+                    EXPECT_EQ(stats[at], statsBase[ref])
+                        << "b=" << b << " tok=" << tok << " h=" << h;
+                    EXPECT_EQ(maxRows[at], statsBase[ref])
+                        << "b=" << b << " tok=" << tok << " h=" << h;
+                    EXPECT_EQ(sumExp[at], 0.0F) << "b=" << b << " tok=" << tok << " h=" << h;
+                    continue;
+                }
+                EXPECT_NEAR(maxRows[at] + std::log(sumExp[at]), stats[at], 1e-5F)
+                    << "b=" << b << " tok=" << tok << " h=" << h;
+                EXPECT_NEAR(stats[at], statsBase[ref], 1e-5F)
+                    << "b=" << b << " tok=" << tok << " h=" << h;
+            }
+        }
+    }
+}
+
+namespace
+{
+
+struct BackwardData
+{
+    std::vector<float> q = packedValues(10, H* D, 51);
+    std::vector<float> k = packedValues(13, H* D, 52);
+    std::vector<float> v = packedValues(13, H* D, 53);
+    std::vector<float> o = packedValues(10, H* D, 54);
+    std::vector<float> dO = packedValues(10, H* D, 55);
+    // Stats [T, H]: lse[(token) * H + h], arbitrary but fixed per (token, h).
+    std::vector<float> lseTH = packedValues(10, H, 56);
+};
+
+struct Gradients
+{
+    std::vector<float> dQ;
+    std::vector<float> dK;
+    std::vector<float> dV;
+};
+
+// Runs a ragged backward graph through the executor. Gradient buffers are NaN-filled so a gap
+// that is written (or a row that is not) shows.
+Gradients runBackward(const std::vector<uint8_t>& graph,
+                      BackwardData& data,
+                      std::vector<float>& lse,
+                      std::unordered_map<int64_t, std::vector<int32_t>>& tables)
+{
+    Gradients g{std::vector<float>(10 * H * D, std::numeric_limits<float>::quiet_NaN()),
+                std::vector<float>(13 * H * D, std::numeric_limits<float>::quiet_NaN()),
+                std::vector<float>(13 * H * D, std::numeric_limits<float>::quiet_NaN())};
+    std::unordered_map<int64_t, void*> pack = {{Q, data.q.data()},
+                                               {K, data.k.data()},
+                                               {V, data.v.data()},
+                                               {O, data.o.data()},
+                                               {DO, data.dO.data()},
+                                               {STATS, lse.data()},
+                                               {DQ, g.dQ.data()},
+                                               {DK, g.dK.data()},
+                                               {DV, g.dV.data()}};
+    for(auto& [uid, values] : tables)
+    {
+        pack[uid] = values.data();
+    }
+    CpuReferenceGraphExecutor executor;
+    EXPECT_TRUE(executor.isApplicable(const_cast<uint8_t*>(graph.data()), graph.size()));
+    executor.execute(const_cast<uint8_t*>(graph.data()), graph.size(), pack);
+    return g;
+}
+
+void expectSame(const std::vector<float>& a, const std::vector<float>& b, const char* name)
+{
+    ASSERT_EQ(a.size(), b.size()) << name;
+    for(size_t i = 0; i < a.size(); ++i)
+    {
+        EXPECT_NEAR(a[i], b[i], 1e-6F) << name << " element " << i;
+    }
+}
+
+} // namespace
+
+// Each tensor has its own origins. Q starts at token 0 (monotonic), while dQ sits at {6, 0} and
+// dK/dV at {5, 0} (batch 0 after batch 1), with lengths from seq_len. The gradients, read at their
+// own origins, equal those of the all-monotonic run.
+TEST(TestRaggedSdpaDensify, BackwardGradientsAtIndependentOriginsEqualMonotonicRun)
+{
+    BackwardData data;
+    std::unordered_map<int64_t, std::vector<int32_t>> baseTables
+        = {{Q_OFFSETS, Q_TOKENS}, {KV_OFFSETS, KV_TOKENS}};
+    auto lse = data.lseTH;
+    const auto expected = runBackward(raggedGraph(true, false), data, lse, baseTables);
+
+    const std::vector<int32_t> dqTokens = {6, 0, 0};
+    const std::vector<int32_t> dkvTokens = {5, 0, 0};
+    const auto graph = editGraph(raggedGraph(true, false), [&](GraphT& g) {
+        addSeqLens(g);
+        addInt32(g, DQ_OFFSETS, B + 1);
+        addInt32(g, DKV_OFFSETS, B + 1);
+        tensorOf(g, DQ).ragged_offset_tensor_uid = DQ_OFFSETS;
+        tensorOf(g, DK).ragged_offset_tensor_uid = DKV_OFFSETS;
+        tensorOf(g, DV).ragged_offset_tensor_uid = DKV_OFFSETS;
+        auto* attrs = g.nodes.front()->attributes.AsSdpaBackwardAttributes();
+        attrs->seq_len_q_tensor_uid = SEQ_Q;
+        attrs->seq_len_kv_tensor_uid = SEQ_KV;
+    });
+    std::unordered_map<int64_t, std::vector<int32_t>> tables = {{Q_OFFSETS, Q_TOKENS},
+                                                                {KV_OFFSETS, KV_TOKENS},
+                                                                {DQ_OFFSETS, dqTokens},
+                                                                {DKV_OFFSETS, dkvTokens},
+                                                                {SEQ_Q, Q_LENS32},
+                                                                {SEQ_KV, KV_LENS32}};
+    const auto got = runBackward(graph, data, lse, tables);
+
+    expectSame(unpack(got.dQ, dqTokens, Q_LENS, SQ, D), unpack(expected.dQ, Q_TOKENS, SQ, D), "dQ");
+    expectSame(
+        unpack(got.dK, dkvTokens, KV_LENS, SKV, D), unpack(expected.dK, KV_TOKENS, SKV, D), "dK");
+    expectSame(
+        unpack(got.dV, dkvTokens, KV_LENS, SKV, D), unpack(expected.dV, KV_TOKENS, SKV, D), "dV");
+}
+
+// The same logical Stats as [T, H] (L7b, the token-major default) and as [H, T] (L7a: head
+// stride T = 10, sequence stride 1, element-unit offsets) give equal gradients.
+TEST(TestRaggedSdpaDensify, BackwardStatsHeadMajorEqualsTokenMajor)
+{
+    BackwardData data;
+    std::unordered_map<int64_t, std::vector<int32_t>> baseTables
+        = {{Q_OFFSETS, Q_TOKENS}, {KV_OFFSETS, KV_TOKENS}};
+    auto lseTH = data.lseTH;
+    const auto expected = runBackward(raggedGraph(true, false), data, lseTH, baseTables);
+
+    std::vector<float> lseHT(10 * H);
+    for(int64_t t = 0; t < 10; ++t)
+    {
+        for(int64_t h = 0; h < H; ++h)
+        {
+            lseHT[static_cast<size_t>(h * 10 + t)] = data.lseTH[static_cast<size_t>(t * H + h)];
+        }
+    }
+    const auto graph = editGraph(raggedGraph(true, false), [&](GraphT& g) {
+        auto& stats = tensorOf(g, STATS);
+        stats.strides = {10 * H, 10, 1, 1};
+        stats.ragged_offset_multiplier = 1;
+    });
+    // Element-unit offsets of the [H, T] Stats: one element per token.
+    std::unordered_map<int64_t, std::vector<int32_t>> tables
+        = {{Q_OFFSETS, Q_TOKENS}, {KV_OFFSETS, KV_TOKENS}};
+    // Q's table is shared with Stats (ragged_offset uid), so Stats needs its own table of element
+    // offsets, which equals the token offsets here.
+    const auto split = editGraph(graph, [&](GraphT& g) {
+        addInt32(g, STATS_OFFSETS, B + 1);
+        tensorOf(g, STATS).ragged_offset_tensor_uid = STATS_OFFSETS;
+    });
+    tables[STATS_OFFSETS] = Q_TOKENS;
+    const auto got = runBackward(split, data, lseHT, tables);
+
+    expectSame(unpack(got.dQ, Q_TOKENS, SQ, D), unpack(expected.dQ, Q_TOKENS, SQ, D), "dQ");
+    expectSame(unpack(got.dK, KV_TOKENS, SKV, D), unpack(expected.dK, KV_TOKENS, SKV, D), "dK");
+    expectSame(unpack(got.dV, KV_TOKENS, SKV, D), unpack(expected.dV, KV_TOKENS, SKV, D), "dV");
+}
+
+// The layout table round-trips through the pack/unpack copies: every live element reaches the
+// dense form and returns to its address; elements the layout does not address stay untouched.
+TEST(TestRaggedSdpaDensify, LayoutTableRoundTrips)
+{
+    using hipdnn_test_sdk::utilities::ragged_layout_test::raggedLayoutCase;
+    for(const char* id : {"L2", "L4", "L5", "L6", "L7a", "L8", "L9"})
+    {
+        SCOPED_TRACE(id);
+        const auto& layout = raggedLayoutCase(id);
+        hipdnn_test_sdk::detail::RaggedSdpaPrimary primary;
+        primary.dims = layout.dims;
+        primary.packedStrides = layout.strides;
+        primary.elementSize = sizeof(float);
+        std::vector<int64_t> offsets;
+        offsets.reserve(layout.offsets.size());
+        for(size_t i = 0; i < layout.offsets.size(); ++i)
+        {
+            offsets.push_back(static_cast<int64_t>(layout.offsets[i]) * layout.multiplier);
+        }
+        const auto lengths = hipdnn_test_sdk::detail::raggedLengths(
+            primary, offsets, layout.seqLen.empty() ? nullptr : layout.seqLen.data());
+        EXPECT_EQ(lengths, layout.lengths);
+
+        std::vector<float> packed(layout.space, -1.0F);
+        for(int64_t b = 0; b < layout.batch(); ++b)
+        {
+            for(int64_t h = 0; h < layout.dims[1]; ++h)
+            {
+                for(int64_t s = 0; s < lengths[static_cast<size_t>(b)]; ++s)
+                {
+                    for(int64_t d = 0; d < layout.dims[3]; ++d)
+                    {
+                        packed[static_cast<size_t>(layout.address(b, h, s, d))]
+                            = static_cast<float>(1 + b * 1000 + h * 100 + s * 10 + d);
+                    }
+                }
+            }
+        }
+        EXPECT_EQ(hipdnn_test_sdk::detail::raggedPackedBytes(primary, offsets, lengths),
+                  layout.space * sizeof(float));
+
+        std::vector<uint8_t> dense(hipdnn_test_sdk::detail::raggedDenseBytes(primary), 0);
+        hipdnn_test_sdk::detail::copyRaggedTokens(primary,
+                                                  offsets,
+                                                  lengths,
+                                                  reinterpret_cast<uint8_t*>(packed.data()),
+                                                  dense.data(),
+                                                  true);
+        std::vector<float> back(packed.size(), -1.0F);
+        hipdnn_test_sdk::detail::copyRaggedTokens(primary,
+                                                  offsets,
+                                                  lengths,
+                                                  reinterpret_cast<uint8_t*>(back.data()),
+                                                  dense.data(),
+                                                  false);
+        EXPECT_EQ(back, packed);
+    }
+}
+
+// Aliasing origins and out-of-range lengths are rejected by name, not copied.
+TEST(TestRaggedSdpaDensify, RaggedLengthsRejectsInvalidLayouts)
+{
+    using hipdnn_test_sdk::utilities::ragged_layout_test::raggedLayoutCase;
+    for(const char* id : {"L10", "L11"})
+    {
+        const auto& layout = raggedLayoutCase(id);
+        hipdnn_test_sdk::detail::RaggedSdpaPrimary primary;
+        primary.dims = layout.dims;
+        primary.packedStrides = layout.strides;
+        std::vector<int64_t> offsets;
+        offsets.reserve(layout.offsets.size());
+        for(const auto o : layout.offsets)
+        {
+            offsets.push_back(static_cast<int64_t>(o) * layout.multiplier);
+        }
+        EXPECT_THROW(hipdnn_test_sdk::detail::raggedLengths(
+                         primary, offsets, layout.seqLen.empty() ? nullptr : layout.seqLen.data()),
+                     std::invalid_argument)
+            << id;
+    }
+    // seq_len beyond S_max.
+    const auto& l9 = raggedLayoutCase("L9");
+    hipdnn_test_sdk::detail::RaggedSdpaPrimary primary;
+    primary.dims = l9.dims;
+    primary.packedStrides = l9.strides;
+    const std::vector<int32_t> tooLong = {2, 5};
+    EXPECT_THROW(hipdnn_test_sdk::detail::raggedLengths(primary, {10, 0, 0}, tooLong.data()),
+                 std::invalid_argument);
+}
+
+namespace
+{
+
+// Forward graph with seq_len_q/kv (lengths shorter than the offset blocks) whose token offsets
+// and seq_len tensors have batch stride `auxStride`; a bias sends it through the dense rewrite,
+// without one the native ragged plan runs it. Returns O and Stats.
+std::pair<std::vector<float>, std::vector<float>> runWithAuxStride(bool bias, int64_t auxStride)
+{
+    const auto graph = editGraph(raggedGraph(false, bias), [&](GraphT& g) {
+        addSeqLens(g);
+        for(const int64_t uid : {Q_OFFSETS, KV_OFFSETS, SEQ_Q, SEQ_KV})
+        {
+            tensorOf(g, uid).strides = {auxStride, 1, 1, 1};
+        }
+        auto* attrs = g.nodes.front()->attributes.AsSdpaAttributes();
+        attrs->seq_len_q_tensor_uid = SEQ_Q;
+        attrs->seq_len_kv_tensor_uid = SEQ_KV;
+        attrs->padding_mask = true;
+    });
+    auto q = packedValues(10, H * D, 61);
+    auto k = packedValues(13, H * D, 62);
+    auto v = packedValues(13, H * D, 63);
+    std::vector<float> zeroBias(static_cast<size_t>(SQ * SKV), 0.0F);
+    auto qOffsets = stridedAuxBuffer(Q_TOKENS, auxStride);
+    auto kvOffsets = stridedAuxBuffer(KV_TOKENS, auxStride);
+    auto seqQ = stridedAuxBuffer(Q_LENS32, auxStride);
+    auto seqKv = stridedAuxBuffer(KV_LENS32, auxStride);
+    std::vector<float> o(10 * H * D, -7.0F);
+    std::vector<float> stats(10 * H, -7.0F);
+    std::unordered_map<int64_t, void*> pack = {{Q, q.data()},
+                                               {K, k.data()},
+                                               {V, v.data()},
+                                               {O, o.data()},
+                                               {STATS, stats.data()},
+                                               {Q_OFFSETS, qOffsets.data()},
+                                               {KV_OFFSETS, kvOffsets.data()},
+                                               {SEQ_Q, seqQ.data()},
+                                               {SEQ_KV, seqKv.data()}};
+    if(bias)
+    {
+        pack[BIAS] = zeroBias.data();
+    }
+    CpuReferenceGraphExecutor executor;
+    EXPECT_TRUE(executor.isApplicable(const_cast<uint8_t*>(graph.data()), graph.size()));
+    executor.execute(const_cast<uint8_t*>(graph.data()), graph.size(), pack);
+    return {o, stats};
+}
+
+void expectStridedEqualsPacked(bool bias)
+{
+    const auto packed = runWithAuxStride(bias, 1);
+    const auto strided = runWithAuxStride(bias, 2);
+    ASSERT_EQ(packed.first.size(), strided.first.size());
+    for(size_t i = 0; i < packed.first.size(); ++i)
+    {
+        EXPECT_EQ(packed.first[i], strided.first[i]) << "O element " << i;
+    }
+    for(size_t i = 0; i < packed.second.size(); ++i)
+    {
+        EXPECT_EQ(packed.second[i], strided.second[i]) << "Stats element " << i;
+    }
+}
+
+} // namespace
+
+// Token offsets and seq_len tensors with batch stride 2 (odd slots poisoned) give the packed
+// run's results through the dense rewrite.
+TEST(TestRaggedSdpaDensify, StridedAuxEqualsPacked)
+{
+    expectStridedEqualsPacked(true);
+}
+
+// The same through the native ragged plan.
+TEST(TestRaggedSdpaDensify, StridedAuxEqualsPackedNativePlan)
+{
+    expectStridedEqualsPacked(false);
+}
+
+namespace
+{
+
+bool densifies(const std::vector<uint8_t>& graph)
+{
+    return hipdnn_test_sdk::detail::densifyRaggedSdpaGraph(graph.data(), graph.size()).has_value();
+}
+
+} // namespace
+
+// An offset table or seq_len tensor whose values lie off the batch axis would be read at
+// strides past its buffer; the graph is declined instead.
+TEST(TestRaggedSdpaDensify, OffsetTableOffTheBatchAxisIsDeclined)
+{
+    const auto graph = editGraph(raggedGraph(false, true), [](GraphT& g) {
+        auto& offsets = tensorOf(g, Q_OFFSETS);
+        offsets.dims = {1, B + 1, 1, 1};
+        offsets.strides = {B + 1, 1, 1, 1};
+    });
+    EXPECT_FALSE(densifies(graph));
+    EXPECT_TRUE(densifies(raggedGraph(false, true)));
+}
+
+// Every offset table is read with Q's batch, so a ragged K/V with a smaller batch would be
+// read past its own table; the graph is declined instead.
+TEST(TestRaggedSdpaDensify, RaggedRoleWithAnotherBatchIsDeclined)
+{
+    // K/V get `batch` and a KV offset table sized for it, so only the batch differs from Q's.
+    for(const int64_t batch : {B - 1, B + 1})
+    {
+        const auto graph = editGraph(raggedGraph(false, true), [&](GraphT& g) {
+            for(const int64_t uid : {static_cast<int64_t>(K), static_cast<int64_t>(V)})
+            {
+                tensorOf(g, uid).dims[0] = batch;
+            }
+            tensorOf(g, KV_OFFSETS).dims = {batch + 1, 1, 1, 1};
+        });
+        EXPECT_FALSE(densifies(graph)) << "K/V batch " << batch;
+    }
+}
+
+TEST(TestRaggedSdpaDensify, SeqLenOffTheBatchAxisIsDeclined)
+{
+    // Reshapes one seq_len tensor (SEQ_Q or SEQ_KV) onto `dims`; the other stays [B, 1, 1, 1].
+    const auto make
+        = [](int64_t reshaped, std::vector<int64_t> dims, std::vector<int64_t> strides) {
+              return editGraph(raggedGraph(false, true), [&](GraphT& g) {
+                  addSeqLens(g);
+                  tensorOf(g, reshaped).dims = dims;
+                  tensorOf(g, reshaped).strides = strides;
+                  auto* attrs = g.nodes.front()->attributes.AsSdpaAttributes();
+                  attrs->seq_len_q_tensor_uid = SEQ_Q;
+                  attrs->seq_len_kv_tensor_uid = SEQ_KV;
+              });
+          };
+    for(const int64_t uid : {static_cast<int64_t>(SEQ_Q), static_cast<int64_t>(SEQ_KV)})
+    {
+        EXPECT_FALSE(densifies(make(uid, {1, B, 1, 1}, {B, 1, 1, 1}))) << "uid " << uid;
+        EXPECT_TRUE(densifies(make(uid, {B, 1, 1, 1}, {1, 1, 1, 1}))) << "uid " << uid;
+    }
+}
+
+// The rewrite reads seq_len values as INT32, so any other element type is declined, whichever
+// of seq_len_q and seq_len_kv carries it.
+TEST(TestRaggedSdpaDensify, NonInt32SeqLenIsDeclined)
+{
+    const auto make = [](int64_t typed, DataType type) {
+        return editGraph(raggedGraph(false, true), [&](GraphT& g) {
+            addSeqLens(g);
+            tensorOf(g, typed).data_type = type;
+            auto* attrs = g.nodes.front()->attributes.AsSdpaAttributes();
+            attrs->seq_len_q_tensor_uid = SEQ_Q;
+            attrs->seq_len_kv_tensor_uid = SEQ_KV;
+        });
+    };
+    for(const int64_t uid : {static_cast<int64_t>(SEQ_Q), static_cast<int64_t>(SEQ_KV)})
+    {
+        EXPECT_FALSE(densifies(make(uid, DataType::INT64))) << "uid " << uid;
+        EXPECT_TRUE(densifies(make(uid, DataType::INT32))) << "uid " << uid;
+    }
+}
+
+// A non-ragged Q or K of rank below 4 is declined, not read past its dims. The ragged side is
+// the other of Q and K; seq_len tensors cover the dense one.
+TEST(TestRaggedSdpaDensify, NonRaggedQOrKBelowRankFourIsDeclined)
+{
+    const auto make = [](bool denseQ, bool lowRank) {
+        return editGraph(raggedGraph(false, false), [&](GraphT& g) {
+            addSeqLens(g);
+            auto* attrs = g.nodes.front()->attributes.AsSdpaAttributes();
+            attrs->seq_len_q_tensor_uid = SEQ_Q;
+            attrs->seq_len_kv_tensor_uid = SEQ_KV;
+            const std::vector<int64_t> group
+                = denseQ ? std::vector<int64_t>{Q, O, STATS} : std::vector<int64_t>{K, V};
+            for(const int64_t uid : group)
+            {
+                auto& t = tensorOf(g, uid);
+                t.ragged_offset_tensor_uid.reset();
+                t.ragged_offset_multiplier = 1;
+                if(uid == STATS)
+                {
+                    t.strides = {H * SQ, SQ, 1, 1};
+                }
+                else
+                {
+                    t.strides = (uid == K || uid == V) ? denseStrides(SKV) : denseStrides(SQ);
+                }
+            }
+            if(lowRank)
+            {
+                auto& t = tensorOf(g, denseQ ? static_cast<int64_t>(Q) : static_cast<int64_t>(K));
+                t.dims = {B, denseQ ? SQ : SKV};
+                t.strides = {t.dims[1], 1};
+            }
+        });
+    };
+    for(const bool denseQ : {true, false})
+    {
+        EXPECT_TRUE(densifies(make(denseQ, false))) << "dense Q " << denseQ;
+        EXPECT_FALSE(densifies(make(denseQ, true))) << "dense Q " << denseQ;
+    }
+}
+
+// An INT64 offset table densifies to the same graph and lengths as an INT32 one.
+TEST(TestRaggedSdpaDensify, Int64OffsetTablesMatchInt32)
+{
+    const auto int64Graph = editGraph(raggedGraph(false, true), [](GraphT& g) {
+        tensorOf(g, Q_OFFSETS).data_type = DataType::INT64;
+        tensorOf(g, KV_OFFSETS).data_type = DataType::INT64;
+    });
+    const auto int32Graph = raggedGraph(false, true);
+    const auto dense32
+        = hipdnn_test_sdk::detail::densifyRaggedSdpaGraph(int32Graph.data(), int32Graph.size());
+    const auto dense64
+        = hipdnn_test_sdk::detail::densifyRaggedSdpaGraph(int64Graph.data(), int64Graph.size());
+    ASSERT_TRUE(dense32.has_value());
+    ASSERT_TRUE(dense64.has_value());
+    EXPECT_EQ(dense64->graph, dense32->graph);
+    ASSERT_EQ(dense64->primaries.size(), dense32->primaries.size());
+    for(size_t i = 0; i < dense64->primaries.size(); ++i)
+    {
+        EXPECT_EQ(dense32->primaries[i].offsetElementSize, sizeof(int32_t));
+        EXPECT_EQ(dense64->primaries[i].offsetElementSize, sizeof(int64_t));
+    }
+
+    // The same table values, read at either width, give the same element offsets.
+    const std::vector<int64_t> tokens64(Q_TOKENS.begin(), Q_TOKENS.end());
+    const auto& primary32 = dense32->primaries.front();
+    const auto& primary64 = dense64->primaries.front();
+    EXPECT_EQ(hipdnn_test_sdk::detail::raggedElementOffsets(primary64, tokens64.data(), B),
+              hipdnn_test_sdk::detail::raggedElementOffsets(primary32, Q_TOKENS.data(), B));
+
+    // A host copy sized by raggedOffsetBytes holds a strided table of either width: values at
+    // every stride-th slot, a sentinel in the gaps, so a read at the wrong slot or width differs.
+    for(const int64_t stride : {int64_t{1}, int64_t{3}})
+    {
+        auto strided32 = primary32;
+        auto strided64 = primary64;
+        strided32.offsetStride = stride;
+        strided64.offsetStride = stride;
+        const auto slots = static_cast<size_t>(B * stride + 1);
+        ASSERT_EQ(hipdnn_test_sdk::detail::raggedOffsetBytes(strided32, B), slots * 4);
+        ASSERT_EQ(hipdnn_test_sdk::detail::raggedOffsetBytes(strided64, B), slots * 8);
+
+        std::vector<int32_t> table32(slots, -1);
+        std::vector<int64_t> table64(slots, -1);
+        for(int64_t b = 0; b <= B; ++b)
+        {
+            table32[static_cast<size_t>(b * stride)] = Q_TOKENS[static_cast<size_t>(b)];
+            table64[static_cast<size_t>(b * stride)] = Q_TOKENS[static_cast<size_t>(b)];
+        }
+        EXPECT_EQ(hipdnn_test_sdk::detail::raggedElementOffsets(strided64, table64.data(), B),
+                  hipdnn_test_sdk::detail::raggedElementOffsets(strided32, table32.data(), B))
+            << "stride " << stride;
+    }
+}
+
+// A primary whose data type has no native mapping is declined, not thrown on.
+TEST(TestRaggedSdpaDensify, UnmappedPrimaryDataTypeIsDeclined)
+{
+    const auto make = [](DataType type) {
+        return editGraph(raggedGraph(false, true),
+                         [&](GraphT& g) { tensorOf(g, Q).data_type = type; });
+    };
+    EXPECT_TRUE(densifies(make(DataType::FLOAT)));
+    EXPECT_FALSE(densifies(make(DataType::INT8)));
+}
+
+// A ragged_offset tensor another attribute still names stays in the dense graph.
+TEST(TestRaggedSdpaDensify, OffsetTableNamedByAnotherAttributeIsKept)
+{
+    const auto graph = editGraph(raggedGraph(false, true), [](GraphT& g) {
+        g.nodes.front()->attributes.AsSdpaAttributes()->scale_tensor_uid = Q_OFFSETS;
+    });
+    const auto dense = hipdnn_test_sdk::detail::densifyRaggedSdpaGraph(graph.data(), graph.size());
+    ASSERT_TRUE(dense.has_value());
+    const auto rewritten = UnPackGraph(dense->graph.data());
+    const auto has = [&](int64_t uid) {
+        return std::any_of(rewritten->tensors.begin(),
+                           rewritten->tensors.end(),
+                           [&](const auto& t) { return t->uid == uid; });
+    };
+    EXPECT_TRUE(has(Q_OFFSETS));
+    EXPECT_FALSE(has(KV_OFFSETS));
+}
+
+// The same for a table named only by an attribute of the backward node.
+TEST(TestRaggedSdpaDensify, OffsetTableNamedByBackwardAttributeIsKept)
+{
+    const auto graph = editGraph(raggedGraph(true, false), [](GraphT& g) {
+        g.nodes.front()->attributes.AsSdpaBackwardAttributes()->dbias_tensor_uid = Q_OFFSETS;
+    });
+    const auto dense = hipdnn_test_sdk::detail::densifyRaggedSdpaGraph(graph.data(), graph.size());
+    ASSERT_TRUE(dense.has_value());
+    const auto rewritten = UnPackGraph(dense->graph.data());
+    const auto has = [&](int64_t uid) {
+        return std::any_of(rewritten->tensors.begin(),
+                           rewritten->tensors.end(),
+                           [&](const auto& t) { return t->uid == uid; });
+    };
+    EXPECT_TRUE(has(Q_OFFSETS));
+    EXPECT_FALSE(has(KV_OFFSETS));
 }
