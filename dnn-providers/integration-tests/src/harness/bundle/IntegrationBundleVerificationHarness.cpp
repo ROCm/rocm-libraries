@@ -44,6 +44,14 @@ namespace hipdnn_integration_tests::bundle
 namespace
 {
 
+// The message for a staged device wait that came back with a failing status, shared by
+// every call site that reports rather than throws on it (runEngine(),
+// benchmarkIfVerified()).
+std::string describeDeviceWaitFailure(hipError_t status)
+{
+    return std::string("engine device work failed: ") + hipGetErrorString(status);
+}
+
 // The --verification-mode value that selects `mode`, for messages.
 const char* modeName(VerificationMode mode)
 {
@@ -1119,7 +1127,7 @@ IntegrationBundleVerificationHarness::EngineRunResult
     if(const hipError_t status = staging.waitForEngine(); status != hipSuccess)
     {
         run.status = EngineStatus::ERRORED;
-        run.message = std::string("engine device work failed: ") + hipGetErrorString(status);
+        run.message = describeDeviceWaitFailure(status);
         return run;
     }
     try
@@ -1216,8 +1224,7 @@ void IntegrationBundleVerificationHarness::benchmarkIfVerified(GraphSession& ses
         if(const hipError_t status = staging.waitForEngine(); status != hipSuccess)
         {
             hipdnn_frontend::AutotuneResult failed;
-            failed.errorMessage
-                = std::string("engine device work failed: ") + hipGetErrorString(status);
+            failed.errorMessage = describeDeviceWaitFailure(status);
             _benchmark = failed;
             return;
         }

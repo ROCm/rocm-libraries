@@ -24,10 +24,10 @@ namespace
 // here only so the class is concrete. The constructor guarantees TestConfig is
 // ready before gtest's own SetUp() call reaches checkTomlSkip(), regardless of
 // what order other suites in this binary run in.
-class FakeGraphVerificationHarness : public IntegrationGraphVerificationHarness<float, int>
+class TestGraphVerificationHarness : public IntegrationGraphVerificationHarness<float, int>
 {
 public:
-    FakeGraphVerificationHarness()
+    TestGraphVerificationHarness()
     {
         bundle::testing_support::ensureTestConfigInitialized();
     }
@@ -38,7 +38,7 @@ protected:
 
 } // namespace
 
-TEST_F(FakeGraphVerificationHarness, InvalidFillFailsTheTest)
+TEST_F(TestGraphVerificationHarness, RejectsInvalidFill)
 {
     ::testing::TestPartResultArray results;
     {
@@ -51,7 +51,7 @@ TEST_F(FakeGraphVerificationHarness, InvalidFillFailsTheTest)
     EXPECT_FALSE(bundle::testing_support::anySkipped(results));
 }
 
-TEST_F(FakeGraphVerificationHarness, UnsupportedFillSkipsTheTest)
+TEST_F(TestGraphVerificationHarness, SkipsUnsupportedFill)
 {
     ::testing::TestPartResultArray results;
     {

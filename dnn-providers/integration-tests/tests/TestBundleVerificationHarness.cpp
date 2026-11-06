@@ -1484,13 +1484,13 @@ TEST_F(TestGoldenHarnessFixture, StartOffsetBenchmarkGetsTheEnginePointers)
               (std::vector<int64_t>{K_SHIFTED_INPUT_OFFSET, K_SHIFTED_OUTPUT_OFFSET}));
 }
 
-// CORR-2 regression: benchmarkIfVerified() used to return right after calling the
-// engine runner's benchmark(), without the waitForEngine()/copyOutputsBack() sequence
-// runEngine() does. This exercises that exact path on real gfx942 device memory with a
-// forced-to-fail benchmark (every candidate engine declining, the case the fix matters
-// on per finding-decisions.md -- a real autotune pass only waits internally when some
-// candidate succeeds), with start offsets in play so the benchmark's own staged device
-// copies are real, not mocked.
+// benchmarkIfVerified() used to return right after calling the engine runner's
+// benchmark(), without the waitForEngine()/copyOutputsBack() sequence runEngine() does.
+// This exercises that exact path on real gfx942 device memory with a forced-to-fail
+// benchmark (every candidate engine declining -- the case where the missing wait
+// matters, since a real autotune pass only waits internally when some candidate
+// succeeds), with start offsets in play so the benchmark's own staged device copies are
+// real, not mocked.
 //
 // NOTE ON COVERAGE: an earlier version of this test tried to prove the missing wait via
 // a StallGate-held stream, expecting the unfixed code to observably return before the
