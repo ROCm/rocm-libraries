@@ -107,6 +107,65 @@ TEST(TestKernelIngestorStateManager, KernelLevelMatcherPrunesTheCatalog)
     }
 }
 
+namespace prepare_test
+{
+int callCount = 0;
+
+std::shared_ptr<const void> countingPrepare(const KernelDefinition& /*kernel*/)
+{
+    ++callCount;
+    return std::make_shared<const int>(callCount);
+}
+} // namespace prepare_test
+
+/// RAII: registers a KernelPrepareFn under a kernel-scoped matcher's own symbol, the way
+/// hipkernel:Gfx950ConvFwdAot registers its AOT_KERNEL_MATCHER's preparer (TESTB-2: this
+/// mechanism had zero coverage in the SDK's own tests before this).
+class ScopedKernelPrepare
+{
+public:
+    ScopedKernelPrepare(std::string symbol, KernelPrepareFn prepare)
+        : _symbol(std::move(symbol))
+    {
+        KernelPrepareRegistry::registerSymbol(_symbol, prepare);
+    }
+
+    ~ScopedKernelPrepare()
+    {
+        KernelPrepareRegistry::unregisterSymbol(_symbol);
+    }
+
+    ScopedKernelPrepare(const ScopedKernelPrepare&) = delete;
+    ScopedKernelPrepare& operator=(const ScopedKernelPrepare&) = delete;
+
+private:
+    std::string _symbol;
+};
+
+TEST(TestKernelIngestorStateManager, PrepareDefinitionsRunsTheKernelScopedPreparerOnEveryDefinition)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    prepare_test::callCount = 0;
+    const ScopedKernelPrepare prepare("test.kernel", &prepare_test::countingPrepare);
+
+    const auto manager = makeStateManager();
+    const TestGraph graph(makeGraphId(1));
+    const auto properties = testDeviceProperties();
+    const MatchContext context{graph, 0, properties};
+
+    const auto definitions = manager->unsortedDefinitions(context);
+
+    // Preparation runs once per pack definition at indexing time, over every kernel of
+    // the pack -- not only the ones that go on to serve this particular graph.
+    ASSERT_EQ(definitions.size(), 2U);
+    EXPECT_GE(prepare_test::callCount, static_cast<int>(definitions.size()));
+    for(const KernelDefinition* definition : definitions)
+    {
+        ASSERT_NE(definition->prepared, nullptr);
+        EXPECT_EQ(definition->preparedBy, &prepare_test::countingPrepare);
+    }
+}
+
 TEST(TestKernelIngestorStateManager, GraphLevelMatcherFailurePrunesTheWholePack)
 {
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);

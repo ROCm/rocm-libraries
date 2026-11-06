@@ -323,18 +323,17 @@ subset instead, a one-off override, not the normal path:
 
 | Family | fp16 | bf16 |
 |---|---:|---:|
-| Implicit GEMM | 73 | 73 |
+| Implicit GEMM | 83 | 83 |
 | Implicit GEMM, group-merged | 6 | 6 |
-| Direct `nongrouped`, split-C | 29 | 29 |
-| Direct `nongrouped` | 44 | 44 |
-| Direct depthwise/grouped `win` (`cpg` 1 or 8..64, stride 1 or 2) | 38 | 38 |
+| Direct `nongrouped` | 82 | 82 |
+| Direct depthwise/grouped `win` (`cpg` 1 or 8..64, stride 1 or 2) | 45 | 45 |
 | Direct `grouped_halo` | 9 | 9 |
 | Direct depthwise `tiled` | 4 | 4 |
 | Direct depthwise `col` | 3 | 3 |
 | Direct depthwise `spatial` | 1 | 1 |
-| **Total** | **207** | **207** |
+| **Total** | **233** | **233** |
 
-414 instances in all. Every entry must be an identity of rocKE's gfx950 forward
+466 instances in all. Every entry must be an identity of rocKE's gfx950 forward
 sweeps (`aot_jobs.py` for implicit GEMM, `direct_aot_jobs.py` for direct) and
 must convert, that is, the packaged launch runs it. The tool fails on any entry that
 is not, rather than dropping it.
@@ -463,7 +462,7 @@ together:
 
 - `tests/test_enumerate_conv_aot_instances.py` fails when the lists are not what the
   tool builds from the committed dispatcher list and the rocKE tree beside them, when
-  an entry is not a sweep identity or does not convert, or when the catalog is not 207 kernels per
+  an entry is not a sweep identity or does not convert, or when the catalog is not 233 kernels per
   dtype, the same in both.
 - `tests/test_make_conv_aot_config.py` fails when a shipped shard is not exactly the
   lists' instances of its shard, with instance-derived ids, or when a committed file is
@@ -479,8 +478,7 @@ current sources.
 
 ### Build and package cost
 
-The product pack compiles every instance, 414 variants for this engine (and a second
-launch for each of the 58 split-C ones).
+The product pack compiles every instance, 466 variants for this engine.
 
 The build figures below were measured for an earlier catalog, rocKE's whole forward
 sweep with only the std and spatial direct kernels (about 159,000 variants with the
@@ -649,10 +647,10 @@ integration root packs it for gfx950, the product's where the product root offer
 ## Current limits
 
 - Forward only. The launch runs every forward kernel of rocKE's sweeps, but the shipped
-  catalog packages only the 207 per dtype its label list names; the seed exercises
+  catalog packages only the 233 per dtype its label list names; the seed exercises
   knob values the catalog does not ship.
 - The trained `sort_kernel_catalog` model predates the group-merged, grouped-halo,
-  split-C and `win` instances. It ignores the `group_merge`, `split_c`, `prefetch_rows`
+  and `win` instances. It ignores the `group_merge`, `prefetch_rows`
   and `w_fold` knobs, and the `grouped_halo`/`win` values of `direct_variant` are unseen
   by it; benchmarking measures every selected instance regardless. Retrain it on this
   catalog before relying on the unbenchmarked ranking.

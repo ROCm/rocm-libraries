@@ -724,6 +724,70 @@ TEST(TestGfx950ConvFwdGeometry, DirectInstanceLaunchAppliesTheGuardAndTheVariant
                           {{3, 3, 1, 1, 1, 1, 1, 1}, DirectVariant::STD, 4, 17}));
 }
 
+TEST(TestGfx950ConvFwdGeometry, WindowedDirectRequiresGroupsAMultipleOfTheMfmaChannelsAtCpgOne)
+{
+    // The shipped direct_depthwise_win knobs (block_h=12, block_waves=8, prefetch_rows=2,
+    // w_fold=2); cpg == kpg == 1 is the pure-depthwise arm, where every wave still owns
+    // DIRECT_WINDOWED_MFMA_CH (8) one-hot MFMA lanes but only the first is masked against
+    // problem.groups -- the bug ca935e1cc8b fixed had no CPU-visible failure before this
+    // test, only the GPU correctness suite's DirectDepthwise cases (TESTB-3).
+    const DirectInstance pureDepthwiseWin{{3, 3, 1, 1, 1, 1, 1, 1},
+                                          DirectVariant::WIN,
+                                          0,
+                                          8,
+                                          12,
+                                          0,
+                                          0,
+                                          1,
+                                          1,
+                                          0,
+                                          0,
+                                          0,
+                                          0,
+                                          0,
+                                          0,
+                                          0,
+                                          0,
+                                          1,
+                                          1,
+                                          2,
+                                          2};
+    const auto launches = [](const Problem& problem, const DirectInstance& instance) {
+        const auto geometry = deriveGeometry(problem);
+        return geometry && directInstanceLaunch(problem, *geometry, instance).has_value();
+    };
+    EXPECT_TRUE(launches(depthwise(8, 14, 14, 3, 1, 1), pureDepthwiseWin));
+    EXPECT_TRUE(launches(depthwise(16, 14, 14, 3, 1, 1), pureDepthwiseWin));
+    EXPECT_FALSE(launches(depthwise(7, 14, 14, 3, 1, 1), pureDepthwiseWin));
+    EXPECT_FALSE(launches(depthwise(9, 14, 14, 3, 1, 1), pureDepthwiseWin));
+
+    // The grouped arm (cpg == kpg, a multiple of 8) instead guards cpg itself, not
+    // problem.groups: any groups value launches once cpg/kpg qualify.
+    const DirectInstance groupedWin{{3, 3, 1, 1, 1, 1, 1, 1},
+                                    DirectVariant::WIN,
+                                    0,
+                                    8,
+                                    12,
+                                    0,
+                                    0,
+                                    16,
+                                    16,
+                                    0,
+                                    0,
+                                    0,
+                                    0,
+                                    0,
+                                    0,
+                                    0,
+                                    0,
+                                    1,
+                                    1,
+                                    2,
+                                    2};
+    EXPECT_TRUE(
+        launches(Problem{2, 16 * 3, 16 * 3, 14, 14, 3, 3, 1, 1, 1, 1, 1, 1, 3}, groupedWin));
+}
+
 /// One (instance, problem) case of the AOT direct variants and what
 /// gfx950_conv_fwd_aot_serves, Gfx950ConvFwdAotSpec.grid() and .block() in
 /// convolution_forward.py give for it: whether the instance serves the problem, and then

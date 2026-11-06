@@ -215,6 +215,28 @@ KernelDefinition directSampleKernel()
     return kernel;
 }
 
+/// A windowed direct_depthwise_win instance (the shipped catalog's largest family, 248 of
+/// 233*2 instances), pure depthwise (cpg == kpg == 1), compiled for the same 3x3 filter.
+KernelDefinition winSampleKernel()
+{
+    auto kernel
+        = sampleKernel({"direct", {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, "direct", {0, 0, 0, 0}});
+    kernel.metadata["grouped"] = int64_t{0};
+    kernel.metadata["kernel_family"] = int64_t{1};
+    kernel.metadata["direct_variant"] = std::string("win");
+    kernel.metadata["filter_h"] = kernel.metadata["filter_w"] = int64_t{3};
+    kernel.metadata["stride_h"] = kernel.metadata["stride_w"] = int64_t{1};
+    kernel.metadata["pad_h"] = kernel.metadata["pad_w"] = int64_t{1};
+    kernel.metadata["dilation_h"] = kernel.metadata["dilation_w"] = int64_t{1};
+    kernel.metadata["block_h"] = int64_t{12};
+    kernel.metadata["block_waves"] = int64_t{8};
+    kernel.metadata["cpg"] = int64_t{1};
+    kernel.metadata["kpg"] = int64_t{1};
+    kernel.metadata["prefetch_rows"] = int64_t{2};
+    kernel.metadata["w_fold"] = int64_t{2};
+    return kernel;
+}
+
 /// A packed NHWC fp16 forward graph for @p p, in SelectionCase's field order.
 flatbuffers::FlatBufferBuilder convGraph(const std::array<int64_t, 14>& p)
 {
@@ -352,6 +374,24 @@ TEST(TestGfx950ConvFwdAotSelection, KeepsEveryServingDirectInstance)
     EXPECT_EQ(selected, (std::vector<size_t>{0, 16, 36}));
 }
 
+TEST(TestGfx950ConvFwdAotSelection, KeepsAServingWinInstanceAlongsideImplicitGemm)
+{
+    // TESTB-8: the candidate-filter tests here only ever named the generic "direct"
+    // sample; direct_depthwise_win is the shipped catalog's largest family (248 of
+    // 233*2 instances) and was never exercised here by name.
+    std::vector<KernelDefinition> kernels{winSampleKernel()};
+    for(const auto& sample : aotSample())
+    {
+        kernels.push_back(sampleKernel(sample));
+    }
+    const GraphFixture fixture(convGraph({2, 32, 32, 14, 14, 3, 3, 1, 1, 1, 1, 1, 1, 32}),
+                               gfx950());
+    std::vector<size_t> selected;
+    const auto serving = serveAndSelect(fixture.context(), kernels, selected);
+    ASSERT_FALSE(serving.empty());
+    EXPECT_EQ(serving.front(), 0U) << "the win instance did not serve this depthwise problem";
+}
+
 std::shared_ptr<const void> foreignPayload(const KernelDefinition& /*kernel*/)
 {
     return std::make_shared<const int>(0);
@@ -419,8 +459,22 @@ TEST(TestGfx950ConvFwdAotSelection, PreparedKernelsAndTheBoundProblemDecideAsThe
             }
         }
         EXPECT_FALSE(plainServing.empty());
-        EXPECT_EQ(filter(context, *bound, preparedServing),
-                  filter(context, BoundTokens{}, plainServing));
+        const auto kept = filter(context, *bound, preparedServing);
+        EXPECT_EQ(kept, filter(context, BoundTokens{}, plainServing));
+        if(!expected.empty())
+        {
+            std::vector<size_t> selectedSampleIndices;
+            for(size_t position = 0; position < plainServing.size(); ++position)
+            {
+                const size_t originalIndex
+                    = static_cast<size_t>(plainServing[position] - plain.data());
+                if(kept[position] && originalIndex >= 1 && originalIndex <= aotSample().size())
+                {
+                    selectedSampleIndices.push_back(originalIndex - 1);
+                }
+            }
+            EXPECT_EQ(selectedSampleIndices, expected);
+        }
     }
 }
 
