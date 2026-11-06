@@ -319,6 +319,29 @@ TEST(host_conversion, bcsr_requires_dimensions_divisible_by_the_block_dimension)
     EXPECT_EQ(dst.row_offset, nullptr);
 }
 
+// DIA stores max(n, m) values per diagonal, as on the accelerator, so a 2 x 12 or 12 x 2 matrix
+// that holds only its main diagonal would hold 6 times as many values as it has entries
+TEST(host_conversion, dia_rejects_non_square_matrices_by_the_larger_dimension)
+{
+    for(const auto& size : std::vector<std::pair<int, int>>{{2, 12}, {12, 2}})
+    {
+        SCOPED_TRACE(std::to_string(size.first) + " x " + std::to_string(size.second));
+        Csr<double> A(size.first, size.second);
+        for(int i = 0; i < A.n; ++i)
+        {
+            if(i < A.m)
+            {
+                A.add(i, 1.0);
+            }
+            A.end_row();
+        }
+
+        std::unique_ptr<BaseMatrix<double>> out;
+        EXPECT_FALSE(
+            try_make_matrix(Backend::Host, Format{rocalution::DIA, 1}, *A.host_csr(), &out));
+    }
+}
+
 TYPED_TEST(host_conversion, coo_to_csr_sorts_the_columns_of_each_row)
 {
     using T = typename TypeParam::value_type;

@@ -2325,12 +2325,15 @@ TEST_P(local_matrix_formats, transposes)
         make(ref)->Transpose(transpose.get());
         expect_kept(*transpose, transposed(ref));
 
-        if(!is(DIA) && !is(MCSR))
+        if(!is(MCSR))
         {
-            const Csr<T> rect = rectangular<T>(8, 12);
-            auto         R    = make(rect);
-            R->Transpose();
-            expect_kept(*R, transposed(rect));
+            for(const Csr<T>& rect : wide_and_tall<T>())
+            {
+                SCOPED_TRACE(std::to_string(rect.n) + " x " + std::to_string(rect.m));
+                auto R = make(rect);
+                R->Transpose();
+                expect_kept(*R, transposed(rect));
+            }
         }
     });
 }
@@ -3159,6 +3162,64 @@ TYPED_TEST(local_matrix, set_data_ptr_dia_of_a_tall_matrix)
     auto                 y = make_local_vector(this->backend(), std::vector<T>(nrow, 0.0));
     A->Apply(*make_local_vector(this->backend(), x), y.get());
     expect_vector(*y, ref.apply(x), this->backend(), 0);
+}
+
+// The products take the diagonals in any order, and the slots of the entries outside the matrix
+// hold NaN
+TYPED_TEST(local_matrix, set_data_ptr_dia_with_descending_offsets)
+{
+    using T = typename TypeParam::value_type;
+
+    const int n      = 4;
+    const int ndiag  = 3;
+    int*      offset = nullptr;
+    T*        val    = nullptr;
+    rocalution::allocate_host(ndiag, &offset);
+    rocalution::allocate_host(n * ndiag, &val);
+    std::fill(val, val + n * ndiag, std::numeric_limits<T>::quiet_NaN());
+    offset[0] = 1;
+    offset[1] = 0;
+    offset[2] = -1;
+
+    Csr<T> ref(n);
+    for(int i = 0; i < n; ++i)
+    {
+        for(int d = ndiag - 1; d >= 0; --d)
+        {
+            const int j = i + offset[d];
+            if(j >= 0 && j < n)
+            {
+                const T v = static_cast<T>(10 * i + d + 1);
+                ref.add(j, v);
+                val[d * n + i] = v;
+            }
+        }
+        ref.end_row();
+    }
+
+    auto A = empty_local_matrix<T>(Backend::Host);
+    A->SetDataPtrDIA(&offset, &val, "descending", n * ndiag, n, n, ndiag);
+    if(this->backend() == Backend::Accelerator)
+    {
+        A->MoveToAccelerator();
+    }
+
+    const std::vector<T> x = {1, 2, 3, 4};
+    auto                 y = make_local_vector(this->backend(), std::vector<T>(n, 0.5));
+    A->Apply(*make_local_vector(this->backend(), x), y.get());
+    expect_vector(*y, ref.apply(x), this->backend(), 0);
+
+    std::vector<T> expected = ref.apply(x);
+    for(int i = 0; i < n; ++i)
+    {
+        expected[i] = static_cast<T>(0.5) + 3 * expected[i];
+    }
+    y = make_local_vector(this->backend(), std::vector<T>(n, 0.5));
+    A->ApplyAdd(*make_local_vector(this->backend(), x), 3.0, y.get());
+    expect_vector(*y, expected, this->backend(), 0);
+
+    KNOWN_BUG("dia_to_csr keeps the order of the diagonals, so the columns of a row are unsorted");
+    expect_matrix(*A, ref, Format{DIA, 1}, this->backend());
 }
 
 // Preconditions

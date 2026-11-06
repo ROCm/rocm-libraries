@@ -281,7 +281,7 @@ where
 DIA storage format
 ------------------
 
-If all (or most) of the non-zero entries belong to a few diagonals of the matrix, they can be stored with the corresponding offsets. The values in DIA format are stored as array with size :math:`D \times N_D`, where :math:`D` is the number of diagonals in the matrix and :math:`N_D` is the number of elements in the main diagonal. Since not all values in this array are occupied, the not accessible entries are denoted with :math:`\ast`. They correspond to the offsets in the diagonal array (negative values represent offsets from the beginning of the array).
+If all (or most) of the non-zero entries belong to a few diagonals of the matrix, they can be stored with the corresponding offsets. The values in DIA format are stored as array with size :math:`D \times N_D`, where :math:`D` is the number of diagonals in the matrix and :math:`N_D` is the larger of the number of rows :math:`m` and the number of columns :math:`n`. The value of row :math:`i` on the diagonal ``dia_offset[d]`` is at :math:`d \cdot m + i`, so for a matrix with more columns than rows, the values from :math:`m \cdot D` on are unused. Since not all values in this array are occupied, the not accessible entries are denoted with :math:`\ast`. They correspond to the offsets in the diagonal array (negative values represent offsets from the beginning of the array).
 The DIA storage format represents a :math:`m \times n` matrix by:
 
 ============== ===============================================================================================
@@ -289,7 +289,7 @@ The DIA storage format represents a :math:`m \times n` matrix by:
 ``n``          Number of columns (integer)
 ``ndiag``      Number of occupied diagonals (integer)
 ``dia_offset`` Array of ``ndiag`` elements containing the offset with respect to the main diagonal (integer).
-``dia_val``	   Array of ``m times ndiag`` elements containing the values (floating point).
+``dia_val``	   Array of ``max(m, n) times ndiag`` elements containing the values (floating point).
 ============== ===============================================================================================
 
 Consider the following :math:`5 \times 5` matrix and the corresponding DIA structures, with :math:`m = 5, n = 5` and :math:`\text{ndiag} = 4`:
@@ -346,7 +346,7 @@ ELL    :math:`M \times N`          :math:`M \times N`
 DIA    :math:`D`                   :math:`D \times N_D`
 ====== =========================== =======
 
-For the ELL matrix :math:`M` characterizes the maximal number of non-zero elements per row and for the DIA matrix, :math:`D` defines the number of diagonals and :math:`N_D` defines the size of the main diagonal.
+For the ELL matrix :math:`M` characterizes the maximal number of non-zero elements per row and for the DIA matrix, :math:`D` defines the number of diagonals and :math:`N_D` defines the larger dimension of the matrix.
 
 File I/O
 ========
