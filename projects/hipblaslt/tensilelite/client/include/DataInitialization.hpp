@@ -40,6 +40,7 @@
 #include <cstddef>
 #include <stdexcept>
 #include <map>
+#include <optional>
 #include <random>
 
 #include "RunListener.hpp"
@@ -182,17 +183,6 @@ namespace TensileLite
             DataInitialization(po::variables_map const&    args,
                                ClientProblemFactory const& problemFactory);
             ~DataInitialization();
-
-            // True when the CPU reference must be recomputed for this solution
-            // because DataInitialization may refresh MX inputs for it
-            // (solution-dependent HostPreSwizzle, gfx950). When false (e.g.
-            // gfx1250, gfx942, non-MX) the per-problem reference is still valid
-            // and can be reused across all solutions.
-            bool referenceNeedsPerSolutionRecompute(ContractionProblemGemm const& problem,
-                                                    ContractionSolution const*    solution) const
-            {
-                return needsSolutionDependentMXPreswizzle(problem, solution);
-            }
 
             // Version of the host-side inputs (A, B, MX scales, ...) that the CPU reference
             // reads. It is incremented at every point where those buffers are actually rewritten,
@@ -370,13 +360,16 @@ namespace TensileLite
                     if(m_problemDependentData)
                         copyValidToGPUBuffer(problem.gemms[0]);
 
-                    // gpu to gpu
+                    // gpu to gpu. When this call sets up the fast path above, later, possibly
+                    // larger, problems reuse these buffers without copying: copy them whole.
                     copyInputs(m_gpuPtrs,
                                m_gpuBatchPtrs,
                                m_maxElements,
                                m_groupedOffsets,
                                problem.gemms[0],
-                               hipMemcpyDeviceToDevice);
+                               hipMemcpyDeviceToDevice,
+                               m_curBoundsCheck == BoundsCheckMode::Disable
+                                   && !m_problemDependentData);
                     m_gpuInit = true;
                 }
                 initializeGPUBatchedInputs(problem.gemms[0]);
@@ -398,6 +391,9 @@ namespace TensileLite
 
                 bool needSwizzle = problem.swizzleTensorA() || problem.swizzleTensorB();
                 bool needMXSwizzle = (problem.mxBlockA() != 0) || (problem.mxBlockB() != 0);
+                bool const fastPathEligible = m_curBoundsCheck == BoundsCheckMode::Disable
+                                              && !m_problemDependentData && !needSwizzle
+                                              && !needMXSwizzle;
 
                 if(m_keepPristineCopyOnGPU && !m_problemDependentData)
                 {
@@ -410,8 +406,7 @@ namespace TensileLite
                     kind = hipMemcpyHostToDevice;
                 }
 
-                if(m_gpuInit && m_curBoundsCheck == BoundsCheckMode::Disable
-                   && !m_problemDependentData && !needSwizzle && !needMXSwizzle)
+                if(m_gpuInit && fastPathEligible)
                 {
                     if(m_elementsToValidate)
                     {
@@ -455,7 +450,8 @@ namespace TensileLite
                         copySwizzledToGPUBuffer(problem);
                     }
 
-                    // gpu to gpu
+                    // gpu to gpu. When this call sets up the fast path above, later, possibly
+                    // larger, problems reuse these buffers without copying: copy them whole.
                     {
                         ScopedTimer timer(gpuInputCategory("gpu_input_reset_copy_inputs_d2d",
                                                            "gpu_input_prep_copy_inputs_d2d"));
@@ -464,7 +460,8 @@ namespace TensileLite
                                    m_maxElements,
                                    m_groupedOffsets,
                                    problem,
-                                   hipMemcpyDeviceToDevice);
+                                   hipMemcpyDeviceToDevice,
+                                   fastPathEligible);
                     }
                     if(m_rotatingMode == 1 && m_rotatingBuffer > 0)
                     {
@@ -1152,7 +1149,16 @@ namespace TensileLite
             {
             }
 
-            virtual void finalizeReport() override {}
+            virtual void finalizeReport() override
+            {
+                if(m_verifyUploadSkip)
+                {
+                    std::cout << "Verified " << m_verifiedUploadSkips
+                              << " skipped GPU input uploads against the host data." << std::endl;
+                    std::cout << "Verified " << m_verifiedBatchedPointerSkips
+                              << " skipped GPU batched-pointer uploads." << std::endl;
+                }
+            }
 
             virtual int error() const override
             {
@@ -1169,6 +1175,19 @@ namespace TensileLite
                 std::shared_ptr<void*> batch;
             };
 
+            // Everything a batched-pointer array (gpuInput.batch) is built from: the start
+            // pointer of batch 0 (the current buffer plus the bounds-check padding) and the
+            // tensor's batch sizes, strides and element size.
+            struct BatchedPointersKey
+            {
+                uint8_t*            base = nullptr;
+                std::vector<size_t> batchSizes;
+                std::vector<size_t> batchStrides;
+                size_t              elementBytes = 0;
+
+                bool operator==(BatchedPointersKey const&) const = default;
+            };
+
             // Pristine unit for each allocated memory
             struct PristineUnit
             {
@@ -1177,6 +1196,16 @@ namespace TensileLite
                 std::vector<TensorDescriptor> initDescriptor;
                 MemoryInput                   cpuInput;
                 MemoryInput                   gpuInput;
+
+                // What gpuInput.valid holds: the first gpuValidElements elements of
+                // cpuInput.valid as of input epoch gpuValidEpoch. 0 elements means unknown (not
+                // written yet, or last written with another layout, e.g. a swizzled copy).
+                InputEpoch gpuValidEpoch    = 0;
+                size_t     gpuValidElements = 0;
+
+                // What gpuInput.batch holds: the pointers built from this key. Empty means
+                // unknown (not written yet).
+                std::optional<BatchedPointersKey> gpuBatchKey;
 
                 MemoryInput& getInputByKind(hipMemcpyKind kind)
                 {
@@ -1212,7 +1241,31 @@ namespace TensileLite
 
             void copySwizzledToGPUBuffer(ContractionProblemGemm const& problem);
 
+            // Uploads the first `elements` elements of p.cpuInput.valid to p.gpuInput.valid
+            // unless gpuInput.valid already holds them for the current input epoch (then, with
+            // m_verifyUploadSkip, reads them back and throws if they differ). Returns
+            // gpuInput.valid.
+            void* uploadValidToGPU(TensorDescriptor const& desc, PristineUnit& p, size_t elements);
+
+            // Every writer of gpuInput.valid other than uploadValidToGPU calls this (or sets the
+            // tag to what it wrote).
+            static void invalidateGPUValid(PristineUnit& p)
+            {
+                p.gpuValidElements = 0;
+            }
+
             void initializeGPUBatchedInputs(ContractionProblemGemm const& problem);
+
+            // The start pointer of each batch of the tensor described by key.
+            static std::vector<uint8_t*> batchedPointers(BatchedPointersKey const& key);
+
+            // Uploads to p.gpuInput.batch the start pointer of each batch of `tensor`, whose
+            // batch 0 starts at `base`, unless p.gpuBatchKey says it already holds them (then,
+            // with m_verifyUploadSkip, reads them back and throws if they differ).
+            void uploadBatchedPointers(PristineUnit&              p,
+                                       uint8_t*                   base,
+                                       TensorDescriptor const&    tensor,
+                                       std::vector<size_t> const& batchIdx);
 
             void initializeCPUInputs(ContractionProblemGroupedGemm const& problem);
             void initializeCPUInputs(ContractionProblemGemm const& problem);
@@ -1238,12 +1291,22 @@ namespace TensileLite
                        && solution->problemType.mxScaleFormat == 1;
             }
 
+            // Number of elements of pristine unit p (tensor i) that hold the current problem's
+            // data, i.e. what a copy of its buffers must cover.
+            size_t problemExtentElements(ContractionProblemGemm const& problem,
+                                         size_t                        i,
+                                         PristineUnit const&           p) const;
+
+            // Copies each tensor's valid data to its current buffer. Disable mode (and the
+            // GuardPageFront run, which shares its layout) copies the current problem's extent,
+            // or the whole buffers with copyWholeBuffers.
             void copyInputs(std::vector<void*>&               ptrs,
                             std::vector<void**>&              batchPtrs,
                             std::vector<size_t>&              maxElements,
                             std::vector<std::vector<size_t>>& offsets,
                             ContractionProblemGemm const&     problem,
-                            hipMemcpyKind                     kind);
+                            hipMemcpyKind                     kind,
+                            bool                              copyWholeBuffers = false);
 
             void resetOutput(std::vector<void*>&               ptrs,
                              std::vector<void**>&              batchPtrs,
@@ -1357,6 +1420,13 @@ namespace TensileLite
             // tensor index. The MX equivalent of g_swizzleCache.
             std::map<size_t, TensorDescriptor> m_mxSwizzledDescriptor;
             InputEpoch                         m_inputEpoch = 0;
+
+            // Debug mode (--verify-upload-skip / TENSILELITE_VERIFY_UPLOAD_SKIP=1): every upload
+            // skipped by uploadValidToGPU is checked against the host data, every one skipped by
+            // uploadBatchedPointers against the pointers it would upload.
+            bool   m_verifyUploadSkip            = false;
+            size_t m_verifiedUploadSkips         = 0;
+            size_t m_verifiedBatchedPointerSkips = 0;
         };
 
         template <>
