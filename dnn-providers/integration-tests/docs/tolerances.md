@@ -55,7 +55,7 @@ and graded against a float-accumulating reference:
 | Symbol | Meaning |
 |---|---|
 | `K` | Products summed per output: the weight tensor's channel dimension (C / groups) times the filter volume. |
-| `sigma` | The typical output magnitude, `sqrt(K * mean(x^2) * mean(w^2))`, times the largest magnitude of any tensor a fused multiply applies. Computed from the actual input tensors. |
+| `sigma` | The typical output magnitude, `sqrt(K * mean(x^2) * mean(w^2))`, times the largest magnitude of any tensor a fused multiply applies. The mean squares come from how the inputs were filled (see below). |
 | `eps` | Machine epsilon of the output type: 2^-7 for bfloat16, 2^-10 for half. |
 | `u32` | Unit roundoff of float, 2^-24. |
 | `lambda` | 0 for bfloat16, 12 for half (calibrated, see below). |
@@ -75,6 +75,14 @@ Each term is one way two correct implementations differ:
   keep partial results in half (for example Winograd transforms). bfloat16
   showed none.
 - **Denormals** (`minNormal`). Hardware may flush denormal results to zero.
+
+Why `lambda` is a constant, not a function of `K`: a fixed number of
+half-precision roundings of intermediates the size of the output adds an
+error proportional to `eps * sigma`, whatever `K` is. Summing in half
+throughout would instead grow as `sqrt(K)`, and float accumulation of
+half-rounded blocks is again constant. The measured half errors do shrink
+somewhat at large `K`, but that follows which solvers MIOpen picks for which
+shapes, not a rounding law, so the tolerance does not model it.
 
 `sigma` grows as `sqrt(K)` exactly as the output does, so the band is a fixed
 fraction of the output at every reduction length. For inputs uniform in
@@ -140,6 +148,19 @@ where that ratio is smallest: the factor by which the error could grow before
 the output fails. It is 1 at the point of failure. It was taken over the 48
 largest-error elements (by absolute error and by rounding steps) and 48
 random elements of each output; the failure counts use every element.
+
+The C++ implementation was then run through the harness, on every half and
+bfloat16 conv-fwd case MIOpen runs, at all four levels:
+
+| Hardware | Input seed sets | Failures the dynamic tolerance adds |
+|---|---|---|
+| MI325X (gfx942) | 4 | 0 |
+| MI250 (gfx90a) | 3 | 0 |
+
+Every failure in those runs is an output MIOpen computes wrongly (values with
+the wrong sign), which also fails the fixed 0.1. One correct gfx90a half output
+that the fixed 0.1 failed (one element 0.12 off at `|ref|` of about 0.1, with
+`K` = 18,432) passes.
 
 How much tighter it is: the median headroom per output, by range of `K`, is
 2.0 to 2.7 for bfloat16 and 3 to 12 for half. For the fixed 0.1 it is 15 to
