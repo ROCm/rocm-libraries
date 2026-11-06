@@ -7,7 +7,7 @@ float64 search and builds the reference with float64 temporaries, which takes
 seconds and tens of GB for the largest shapes. Here the operands are generated
 in blocks, in parallel, straight into the layout the kernel reads, by indexing
 a table of fp8 codes with random 16-bit numbers (the table holds the quantiles
-of the driver's distribution, a standard normal times 2, so the data keep its
+of a standard normal times 2, so the data keep its
 character). An operand depends only on (cols, k, ld), so a worker keeps the
 generated operands of the recent shapes and shares them between cases.
 
@@ -251,9 +251,10 @@ class Verifier:
     reference: dense (full) or sampled. The dense product is computed once, on
     first use, and shared by all the winners."""
 
-    def __init__(self, inputs: CaseInputs, full: bool):
+    def __init__(self, inputs: CaseInputs, full: bool, d_rtol: float = D_RTOL):
         self.inputs = inputs
         self.full = full
+        self.d_rtol = d_rtol
         self.dense = None
         self.positions: dict[tuple, tuple] = {}
 
@@ -278,7 +279,9 @@ class Verifier:
         """Checks D (a single split) or the workspace after the GEMM; raises
         AssertionError."""
         if self.full:
-            support.verifyGemm(p, self.support_inputs(), d_bits, ws)
+            support.verifyGemm(
+                p, self.support_inputs(), d_bits, ws, dRtol=self.d_rtol
+            )
             return
         rows, cols = self.sample(p)
         partials = self.sample_partials(p, rows, cols)
@@ -293,7 +296,9 @@ class Verifier:
         """Checks D after the split-K reduce; raises AssertionError."""
         if self.full:
             expected = support.expectedD(p, self.support_inputs())
-            support.verifyD(d_bits, expected, p.m, p.n, p.ldD, p.label)
+            support.verifyD(
+                d_bits, expected, p.m, p.n, p.ldD, p.label, rtol=self.d_rtol
+            )
             return
         rows, cols = self.sample(p)
         total = self.sample_partials(p, rows, cols).sum(axis=0).astype(np.float32)
@@ -337,11 +342,11 @@ class Verifier:
         check_padding(d_bits, p)
         actual = support.bf16ToFloat32(d_bits[cols * p.ldD + rows])
         atol = ATOL_SCALE * max(1.0, float(np.abs(expected).max()))
-        # A 1-ulp bf16 truncation difference is at most 2^-7 relative.
+        # A 1-ulp bf16 rounding difference is at most 2^-7 relative.
         np.testing.assert_allclose(
             actual,
-            support.bf16ToFloat32(support.truncateToBf16(expected)),
-            rtol=D_RTOL,
+            support.bf16ToFloat32(support.roundToBf16(expected)),
+            rtol=self.d_rtol,
             atol=atol,
             err_msg=f"{p.label}: D mismatch",
         )

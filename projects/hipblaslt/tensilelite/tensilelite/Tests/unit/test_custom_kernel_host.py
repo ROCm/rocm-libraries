@@ -142,6 +142,7 @@ def test_assign_custom_kernel_params_split_k_grid_is_accepted(grid):
 @pytest.mark.parametrize("grid", [
     ["TilesX", "TilesY", "Batch"],
     ["TilesLong", "TilesShort", "Batch"],
+    ["TilesLongShort", "One", "One"],
 ])
 def test_assign_custom_kernel_params_split_k_without_gsu_grid_raises(over, grid):
     # A split-K kernel reduces into D only once every GSU slice has arrived, so a
@@ -156,6 +157,7 @@ def test_assign_custom_kernel_params_split_k_without_gsu_grid_raises(over, grid)
 @pytest.mark.parametrize("grid", [
     ["TilesX", "TilesY", "Batch"],
     ["TilesLong", "TilesShort", "Batch"],
+    ["TilesLongShort", "One", "One"],
 ])
 def test_assign_custom_kernel_params_grid_without_gsu_term_rejects_user_gsu(gsu, grid):
     # Such a grid launches one GSU slice per tile, so a runtime GSU override has to

@@ -47,6 +47,7 @@ class Job:
     hsaco_dir: str
     settings: dict
     verify: bool
+    one_shot: bool = False
 
 
 @dataclass
@@ -60,14 +61,24 @@ class Timing:
         self.gemm_ns += other.gemm_ns
         self.reduce_ns += other.reduce_ns
 
+    @staticmethod
+    def _mean(values: list[int]) -> float:
+        return sum(values) / len(values)
+
     @property
-    def total_ns(self) -> int:
-        """The minimum of the per-iteration gemm (flushed) + reduce (warm) sums:
-        contention and clock dips only ever add time, so the minimum is the
-        least disturbed launch."""
+    def total_ns(self) -> float:
+        """The average of the per-iteration gemm (flushed) + reduce (warm) sums."""
         if not self.reduce_ns:
-            return min(self.gemm_ns)
-        return min(g + r for g, r in zip(self.gemm_ns, self.reduce_ns))
+            return self._mean(self.gemm_ns)
+        return self._mean([g + r for g, r in zip(self.gemm_ns, self.reduce_ns)])
+
+    @property
+    def gemm_mean_ns(self) -> float:
+        return self._mean(self.gemm_ns)
+
+    @property
+    def reduce_mean_ns(self) -> float:
+        return self._mean(self.reduce_ns)
 
 
 def hsaco_file(hsaco_dir: str, name: str) -> str:
@@ -260,16 +271,72 @@ def check_result(
     verifier.check_reduced(p, d_out)
 
 
+def screening_only_entry(index: int, timing: Timing, verified: str) -> dict:
+    """A ranked configuration from the screening pass only (--one-shot)."""
+    entry = {
+        "index": index,
+        "timeUs": round(timing.total_ns / NS_PER_US, 3),
+        "gemmUs": round(timing.gemm_mean_ns / NS_PER_US, 3),
+        "screeningUs": round(timing.total_ns / NS_PER_US, 3),
+        "verified": verified,
+    }
+    if timing.reduce_ns:
+        entry["reduceUs"] = round(timing.reduce_mean_ns / NS_PER_US, 3)
+    return entry
+
+
+def verify_screened(
+    job: Job,
+    buffers: CaseBuffers,
+    screening: dict[int, Timing],
+    outcome: dict,
+) -> dict[int, str]:
+    """One host check per screened configuration (--one-shot)."""
+    if not job.verify:
+        return {index: "no" for index in screening}
+    first = job.entries[0][1]
+    elements = (first.m + first.n) * first.k
+    full = elements <= job.settings["verify_full_max_elems"]
+    verifier = Verifier(buffers.inputs, full)
+    labels: dict[int, str] = {}
+    for index in screening:
+        name, p = job.entries[index]
+        try:
+            check_result(job, buffers, p, name, verifier)
+        except AssertionError as err:
+            outcome["failures"].append(
+                run_failure(index, VERIFY_STATUS, "verify", err)
+            )
+            labels[index] = "failed"
+            continue
+        except (RuntimeError, OSError) as err:
+            outcome["failures"].append(run_failure(index, RUN_STATUS, "verify", err))
+            labels[index] = "failed"
+            continue
+        labels[index] = verifier.label(p)
+    return labels
+
+
+def rank_all_screened(
+    screening: dict[int, Timing], outcome: dict, verified: dict[int, str]
+) -> None:
+    """Fills outcome['ranked'] with every screened configuration, fastest first."""
+    for index in sorted(screening, key=lambda i: screening[i].total_ns):
+        outcome["ranked"].append(
+            screening_only_entry(index, screening[index], verified[index])
+        )
+
+
 def winner_entry(index: int, refined: Timing, screened: Timing, verified: str) -> dict:
     entry = {
         "index": index,
         "timeUs": round(refined.total_ns / NS_PER_US, 3),
-        "gemmUs": round(min(refined.gemm_ns) / NS_PER_US, 3),
+        "gemmUs": round(refined.gemm_mean_ns / NS_PER_US, 3),
         "screeningUs": round(screened.total_ns / NS_PER_US, 3),
         "verified": verified,
     }
     if refined.reduce_ns:
-        entry["reduceUs"] = round(min(refined.reduce_ns) / NS_PER_US, 3)
+        entry["reduceUs"] = round(refined.reduce_mean_ns / NS_PER_US, 3)
     return entry
 
 
@@ -325,6 +392,14 @@ def time_case(job: Job, gpu: int, flush, cache: OperandCache, outcome: dict) -> 
         screening = screen(job, buffers, flush, outcome)
         outcome["timed"] = len(screening)
         phases["screeningS"] = time.perf_counter() - start
+        if job.one_shot:
+            outcome["clocks"]["end"] = sample_clocks(gpu)
+            phases["refinementS"] = 0.0
+            start = time.perf_counter()
+            verified = verify_screened(job, buffers, screening, outcome)
+            phases["verificationS"] = time.perf_counter() - start
+            rank_all_screened(screening, outcome, verified)
+            return
         start = time.perf_counter()
         refined = refine(job, buffers, flush, screening, outcome)
         outcome["clocks"]["end"] = sample_clocks(gpu)

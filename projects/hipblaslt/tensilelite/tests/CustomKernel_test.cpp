@@ -575,19 +575,27 @@ static ContractionProblemGemm longShortProblem(size_t m, size_t n, size_t batch)
     return problem;
 }
 
+static vector3<CustomGridSize> longShortBatchGrid()
+{
+    return {CustomGridSize::TilesLong, CustomGridSize::TilesShort, CustomGridSize::Batch};
+}
+
 namespace
 {
-    KernelInvocation longShortCall(size_t  m,
-                                   size_t  n,
-                                   size_t  batch,
-                                   int16_t compiledGsu = 1,
-                                   int16_t runtimeGsu  = 0)
+    vector3<CustomGridSize> const longShortFlatGrid
+        = {CustomGridSize::TilesLongShort, CustomGridSize::One, CustomGridSize::One};
+
+    KernelInvocation longShortCall(size_t                  m,
+                                   size_t                  n,
+                                   size_t                  batch,
+                                   int16_t                 compiledGsu = 1,
+                                   int16_t                 runtimeGsu  = 0,
+                                   vector3<CustomGridSize> grid        = longShortBatchGrid())
     {
         ContractionSolution solution;
         configureProbeKernel(solution, {CustomArgType::uint32, CustomArgSemantic::SizeFree0});
         solution.customKernel.macrotile = TensileLite::dim3(256, 4, 64);
-        solution.customKernel.grid
-            = {CustomGridSize::TilesLong, CustomGridSize::TilesShort, CustomGridSize::Batch};
+        solution.customKernel.grid        = grid;
         solution.sizeMapping.globalSplitU = compiledGsu;
 
         ContractionProblemGemm problem = longShortProblem(m, n, batch);
@@ -635,6 +643,35 @@ TEST(CustomKernelTest, LongShortGridRejectsSplitK)
     EXPECT_THROW(longShortCall(512, 4, 1, /*compiled*/ 16), std::runtime_error);
     EXPECT_THROW(longShortCall(512, 4, 1, /*compiled*/ 1, /*runtime*/ 4), std::runtime_error);
     EXPECT_NO_THROW(longShortCall(512, 4, 1, /*compiled*/ 1, /*runtime*/ 0));
+}
+
+// The flat grid is the product of the long and short tile counts, in either orientation.
+TEST(CustomKernelTest, TilesLongShortGridIsFlatAndOrientationAgnostic)
+{
+    for(auto const& [m, n] : {std::pair<size_t, size_t>{1025, 9}, {9, 1025}})
+    {
+        TensileLite::dim3 const grid
+            = longShortCall(m, n, 1, 1, 0, longShortFlatGrid).numWorkGroups;
+        EXPECT_EQ(grid.x, 15u);
+        EXPECT_EQ(grid.y, 1u);
+        EXPECT_EQ(grid.z, 1u);
+    }
+}
+
+TEST(CustomKernelTest, TilesLongShortGridRejectsSplitK)
+{
+    EXPECT_THROW(longShortCall(512, 4, 1, /*compiled*/ 16, 0, longShortFlatGrid),
+                 std::runtime_error);
+    EXPECT_THROW(longShortCall(512, 4, 1, /*compiled*/ 1, /*runtime*/ 4, longShortFlatGrid),
+                 std::runtime_error);
+    EXPECT_NO_THROW(longShortCall(512, 4, 1, /*compiled*/ 1, /*runtime*/ 0, longShortFlatGrid));
+}
+
+TEST(CustomKernelTest, TilesLongShortRoundTripsThroughItsName)
+{
+    std::string name = "TilesLongShort";
+    EXPECT_EQ(toString(CustomGridSize::TilesLongShort), name);
+    EXPECT_EQ(fromStringCustomGridSize(name), CustomGridSize::TilesLongShort);
 }
 
 // Probe kernel with one uint32 kernarg per semantic, launched on the given grid.
@@ -713,11 +750,6 @@ static TensileLite::dim3 longShortMacrotile()
     return TensileLite::dim3(256, 4, 64);
 }
 
-static vector3<CustomGridSize> longShortBatchGrid()
-{
-    return {CustomGridSize::TilesLong, CustomGridSize::TilesShort, CustomGridSize::Batch};
-}
-
 // NumWorkGroupsX/Y/Z carry the launched grid, including a persistent ComputeUnits
 // grid after the CU budget caps are applied.
 TEST(CustomKernelTest, NumWorkGroupsPerDimensionFollowComputeUnitsGrid)
@@ -789,6 +821,35 @@ TEST(CustomKernelTest, NumWorkGroupsPerDimensionKeepTheGridUnflattened)
     EXPECT_EQ(invocation.numWorkGroups.y, 3u);
     EXPECT_EQ(invocation.numWorkGroups.z, 3u);
     expectPerDimensionArgs(invocation, 0);
+}
+
+// int32 ConstantZero kernargs after the per-dimension grid, as the skinny GEMM declares for its
+// remainder narrowing, are zero dwords that keep the order of the arguments.
+TEST(CustomKernelTest, Int32ConstantZeroArgsFollowThePerDimensionArgs)
+{
+    ContractionSolution solution;
+    configureProbeKernel(solution, {CustomArgType::int32, CustomArgSemantic::NumWorkGroupsX});
+    solution.customKernel.grid      = {CustomGridSize::TilesLong,
+                                       CustomGridSize::TilesShort,
+                                       CustomGridSize::Batch};
+    solution.customKernel.macrotile = longShortMacrotile();
+    solution.customKernel.args.clear();
+    for(CustomArgSemantic semantic : perDimensionSemantics())
+        solution.customKernel.args.push_back({CustomArgType::int32, semantic});
+    for(int32_t i = 0; i < 2; ++i)
+        solution.customKernel.args.push_back({CustomArgType::int32, CustomArgSemantic::ConstantZero});
+    solution.customKernel.args.push_back({CustomArgType::int32, CustomArgSemantic::ConstantOne});
+
+    ContractionInputs inputs;
+    StreamKSettings   sk;
+    KernelInvocation  invocation = solution.generateCustomCall<false>(
+        longShortProblem(1025, 9, 3), inputs, probeDevice(), sk);
+
+    ASSERT_EQ(invocation.args.size(), 6 * sizeof(int32_t));
+    expectPerDimensionArgs(invocation, 0);
+    EXPECT_EQ(emittedUint32(invocation, 3), 0u);
+    EXPECT_EQ(emittedUint32(invocation, 4), 0u);
+    EXPECT_EQ(emittedUint32(invocation, 5), 1u);
 }
 
 TEST(CustomKernelTest, NumWorkGroupsSemanticsRoundTripThroughStrings)

@@ -10,7 +10,7 @@ pytestmark = pytest.mark.unit
 
 from Tensile.KernelGenerators import SkinnyGEMM, SkinnyGEMMLogic
 
-RING_PARAMS = {"bm": 1, "tn": 1, "lanesK": 16, "waves": 1, "prefetch": 1, "upIters": 0, "partialSteps": 1,
+RING_PARAMS = {"bm": 1, "tn": 1, "lanesK": 16, "waves": 1, "prefetch": 1, "upIters": 0,
                "group": 1, "numXcds": 1, "grid3d": True}
 RING_KNOBS = SkinnyGEMMLogic.to_knobs(dict(RING_PARAMS, useBeta=False))
 
@@ -90,14 +90,11 @@ class TestPool:
 
 
 class TestKCoverage:
-    def test_ring_partial_steps(self):
-        assert SkinnyGEMMLogic.kCoverage((1, 1, 16, 1, 1, 0, 1, 1, 1, True, False)) == "(0, 2^20]"
-
-    def test_ring_whole_steps(self):
-        assert SkinnyGEMMLogic.kCoverage((1, 1, 16, 1, 1, 0, 0, 1, 1, True, True)) == "(0, 2^20], K % 1024 == 0"
+    def test_ring(self):
+        assert SkinnyGEMMLogic.kCoverage((1, 1, 16, 1, 1, 0, 1, 1, True, False)) == "(0, 2^20]"
 
     def test_up_front(self):
-        assert SkinnyGEMMLogic.kCoverage((1, 1, 64, 4, 2, 2, 0, 1, 1, True, False)) == "(4096, 8192], K % 4096 == 0"
+        assert SkinnyGEMMLogic.kCoverage((1, 1, 64, 4, 2, 2, 1, 1, True, False)) == "(4096, 8192]"
 
 
 class TestHeader:

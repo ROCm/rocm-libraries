@@ -39,11 +39,11 @@ LOGIC_FILE = (
     / "gfx950_Cijk_Alik_Bljk_F8BS_MXAE8B32_MXBE8B32_BH_Bias_HA_S_SAB_SAV_UserArgs_SkinnyGEMM.yaml"
 )
 
-S1 = dict(bm=1, tn=1, lanesK=64, waves=4, prefetch=2, upIters=2, partialSteps=0, group=1, numXcds=1, grid3d=True, useBeta=False)
-S2 = dict(bm=1, tn=1, lanesK=16, waves=4, prefetch=2, upIters=0, partialSteps=0, group=1, numXcds=1, grid3d=True, useBeta=False)
-S3 = dict(bm=2, tn=2, lanesK=16, waves=4, prefetch=1, upIters=0, partialSteps=1, group=1, numXcds=1, grid3d=True, useBeta=False)
-S4 = dict(bm=1, tn=1, lanesK=64, waves=4, prefetch=2, upIters=2, partialSteps=0, group=1, numXcds=1, grid3d=False, useBeta=False)
-S5 = dict(bm=1, tn=2, lanesK=16, waves=2, prefetch=2, upIters=3, partialSteps=1, group=2, numXcds=8, grid3d=False, useBeta=False)
+S1 = dict(bm=1, tn=1, lanesK=64, waves=4, prefetch=2, upIters=2, group=1, numXcds=1, grid3d=True, useBeta=False)
+S2 = dict(bm=1, tn=1, lanesK=16, waves=4, prefetch=2, upIters=0, group=1, numXcds=1, grid3d=True, useBeta=False)
+S3 = dict(bm=2, tn=2, lanesK=16, waves=4, prefetch=1, upIters=0, group=1, numXcds=1, grid3d=True, useBeta=False)
+S4 = dict(bm=1, tn=1, lanesK=64, waves=4, prefetch=2, upIters=2, group=1, numXcds=1, grid3d=False, useBeta=False)
+S5 = dict(bm=1, tn=2, lanesK=16, waves=2, prefetch=2, upIters=3, group=2, numXcds=8, grid3d=False, useBeta=False)
 
 
 def betaVariant(params):
@@ -67,13 +67,13 @@ EXPECTED_ARGS = [
     {"type": "int32", "semantic": "SizeFree0"},
     {"type": "int32", "semantic": "SizeFree1"},
     {"type": "int32", "semantic": "SizeSum"},
-    {"type": "int32", "semantic": "SizeSum"},
+    {"type": "int32", "semantic": "Spk"},
     {"type": "int32", "semantic": "StrideC0Bytes"},
     {"type": "float32", "semantic": "Alpha"},
     {"type": "float32", "semantic": "Beta"},
     {"type": "int32", "semantic": "NumWorkGroupsX"},
-    {"type": "int32", "semantic": "NumWorkGroupsY"},
-    {"type": "int32", "semantic": "NumWorkGroupsZ"},
+    {"type": "int32", "semantic": "ConstantZero"},
+    {"type": "int32", "semantic": "ConstantZero"},
 ]
 
 COMMON_ASSERTS = {
@@ -96,7 +96,7 @@ BETA_ASSERTS = {"AssertStrideCEqual": {0: 1}}
 def kernelNameOf(p):
     return (
         f"gemm_BM{p['bm']}_TN{p['tn']}_LANES_K{p['lanesK']}_WAVES{p['waves']}"
-        f"_UP_ITERS{p['upIters']}_PARTIAL_STEPS{p['partialSteps']}_PF{p['prefetch']}"
+        f"_UP_ITERS{p['upIters']}_PF{p['prefetch']}"
         f"_GROUP{p['group']}_NUM_XCDS{p['numXcds']}_GRID_3D{int(p['grid3d'])}"
         f"_USE_BETA{int(p.get('useBeta', False))}"
     )
@@ -148,17 +148,17 @@ needsCodegen = pytest.mark.skipif(
 # Expansion.
 # --------------------------------------------------------------------------- #
 @pytest.mark.parametrize(
-    "params,tile,grid,sizeGreater,sizeLess,kMultiple",
+    "params,tile,grid,sizeGreater,sizeLess",
     [
-        (S1, [4, 1, 4096], ["TilesLong", "TilesShort", "Batch"], 4096, 8193, 4096),
-        (S2, [16, 1, 1024], ["TilesLong", "TilesShort", "Batch"], 0, 2**20 + 1, 1024),
-        (S3, [32, 2, 1024], ["TilesLong", "TilesShort", "Batch"], 0, 2**20 + 1, None),
-        (S4, [4, 1, 4096], ["ComputeUnits", "One", "One"], 4096, 8193, 4096),
-        (S5, [16, 1, 1024], ["ComputeUnits", "One", "One"], 2048, 3073, None),
+        (S1, [4, 1, 4096], ["TilesLongShort", "One", "One"], 4096, 8193),
+        (S2, [16, 1, 1024], ["TilesLongShort", "One", "One"], 0, 2**20 + 1),
+        (S3, [32, 2, 1024], ["TilesLongShort", "One", "One"], 0, 2**20 + 1),
+        (S4, [4, 1, 4096], ["ComputeUnits", "One", "One"], 4096, 8193),
+        (S5, [16, 1, 1024], ["ComputeUnits", "One", "One"], 2048, 3073),
     ],
 )
 @pytest.mark.parametrize("useBeta", [False, True])
-def test_expanded_config(fakeCodegen, params, tile, grid, sizeGreater, sizeLess, kMultiple, useBeta):
+def test_expanded_config(fakeCodegen, params, tile, grid, sizeGreater, sizeLess, useBeta):
     params = {**params, "useBeta": useBeta}
     config = getGeneratorKernelConfig(block(params), {}, "gfx950")
     name = kernelNameOf(params)
@@ -184,8 +184,6 @@ def test_expanded_config(fakeCodegen, params, tile, grid, sizeGreater, sizeLess,
     expected = {**COMMON_ASSERTS, **(BETA_ASSERTS if useBeta else NO_BETA_ASSERTS)}
     expected["AssertSizeGreaterThan"] = {3: sizeGreater}
     expected["AssertSizeLessThan"] = {0: 2**20 + 1, 1: 2**30 + 1, 3: sizeLess}
-    if kMultiple is not None:
-        expected["AssertSummationElementMultiple"] = kMultiple
     asserts = {key: value for key, value in config.items() if key.startswith("Assert")}
     assert asserts == expected
 
@@ -260,7 +258,6 @@ def withParam(key, value):
         (withParam("useBeta", "true"), "useBeta must be a bool"),
         (withParam("useBeta", None), "useBeta must be a bool"),
         ({"generator": "SkinnyGEMM", "generatorParams": {k: v for k, v in S1.items() if k != "useBeta"}}, "missing useBeta"),
-        (withParam("partialSteps", 2), "partialSteps must be 0 or 1"),
         (withParam("upIters", -1), "upIters must not be negative"),
         (withParam("lanesK", 3), "unsupported lanesK 3"),
     ],
@@ -462,7 +459,6 @@ def test_handwritten_custom_kernel_keeps_its_path(fakeCodegen, parseEnv, monkeyp
 
 @pytest.mark.parametrize("mutate", [
     lambda params: params.pop("waves"),
-    lambda params: params.update(partialSteps=2),
     lambda params: params.update(grid3d=1),
 ])
 def test_invalid_generator_block_fails_the_parse(fakeCodegen, parseEnv, mutate):
@@ -510,7 +506,7 @@ def test_generator_kernel_rejected_by_the_emitter_is_dropped(fakeCodegen, parseE
 
 @needsCodegen
 def test_real_over_budget_generator_kernel_is_dropped(parseEnv, capsys):
-    overBudget = dict(bm=2, tn=8, lanesK=8, waves=2, prefetch=1, upIters=10, partialSteps=0, group=1,
+    overBudget = dict(bm=2, tn=8, lanesK=8, waves=2, prefetch=1, upIters=10, group=1,
                       numXcds=1, grid3d=True, useBeta=True)
     raw = readLogic()
     raw["Solutions"][1]["CustomKernel"]["generatorParams"] = dict(overBudget)
@@ -534,7 +530,7 @@ def test_emitter_rejection_raises_generator_kernel_rejected(fakeCodegen):
 
 def test_shape_errors_are_not_rejections(fakeCodegen):
     with pytest.raises(ValueError) as error:
-        getGeneratorKernelConfig(withParam("partialSteps", 2), {}, "gfx950")
+        getGeneratorKernelConfig(withParam("bm", True), {}, "gfx950")
     assert not isinstance(error.value, GeneratorKernelRejected)
 
 
@@ -708,7 +704,7 @@ def emittedExplicitArgs(source):
 @needsCodegen
 def test_real_kernel_name():
     assert SkinnyGEMM.kernelName(S1) == (
-        "gemm_BM1_TN1_LANES_K64_WAVES4_UP_ITERS2_PARTIAL_STEPS0_PF2_GROUP1_NUM_XCDS1_GRID_3D1_USE_BETA0"
+        "gemm_BM1_TN1_LANES_K64_WAVES4_UP_ITERS2_PF2_GROUP1_NUM_XCDS1_GRID_3D1_USE_BETA0"
     )
     for params in FIXTURE_SOLUTIONS:
         assert SkinnyGEMM.kernelName(params) == kernelNameOf(params)
@@ -729,7 +725,7 @@ def test_real_source_is_code_object_v6():
 
 ARG_NAMES = [
     "D", "A", "B", "scalesA", "scalesB", "ws", "C", "ldD", "ldA", "ldB", "m", "n", "k", "spk",
-    "ldC", "alpha", "beta", "numWorkGroupsX", "numWorkGroupsY", "numWorkGroupsZ",
+    "ldC", "alpha", "beta", "numWorkGroupsX", "wholeTiles", "pieces",
 ]
 ARG_SIZES = {"address": 8, "uint64": 8, "int32": 4, "float32": 4}
 

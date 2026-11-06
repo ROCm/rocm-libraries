@@ -12,6 +12,7 @@
 #include "instruction/instruction.hpp"
 #include "instruction/mem.hpp"
 
+#include <algorithm>
 #include <array>
 #include <bit>
 #include <cassert>
@@ -428,7 +429,154 @@ void IRBuilder::insertItem(const std::shared_ptr<rocisa::Item> &item) {
     throw std::invalid_argument("cannot insert a null item");
   if (item->parent)
     throw std::logic_error("item is already in a module");
+  if (pendingSgprWrites.empty()) {
+    module->add(item);
+    return;
+  }
+  coverPendingHazards(*item);
   module->add(item);
+  advancePendingHazards(*item);
+}
+
+// Hazards.
+
+// Wait states a v_readlane or v_writelane lane select and a vector memory
+// instruction need after a VALU write of the SGPR they read.
+static constexpr int32_t valuWriteSgprLaneSelectWaitStates = 4;
+static constexpr int32_t valuWriteSgprVmemWaitStates = 5;
+
+static bool startsWith(std::string_view text, std::string_view prefix) {
+  return text.substr(0, prefix.size()) == prefix;
+}
+
+static bool overlapsSgprs(const InstructionInput &input, int32_t start,
+                          int32_t count) {
+  const auto *container =
+      std::get_if<std::shared_ptr<rocisa::Container>>(&input);
+  if (!container)
+    return false;
+  auto reg = std::dynamic_pointer_cast<rocisa::RegisterContainer>(*container);
+  if (!reg || reg->regType != "s" || reg->regName)
+    return false;
+  return reg->regIdx < start + count && start < reg->regIdx + reg->regNum;
+}
+
+static bool readsSgprs(const rocisa::Instruction &inst, int32_t start,
+                       int32_t count) {
+  for (const InstructionInput &input : inst.getSrcParams())
+    if (overlapsSgprs(input, start, count))
+      return true;
+  return false;
+}
+
+static bool isBranch(std::string_view name) {
+  return startsWith(name, "s_branch") || startsWith(name, "s_cbranch") ||
+         startsWith(name, "s_setpc") || startsWith(name, "s_swappc") ||
+         startsWith(name, "s_call");
+}
+
+// The wait states that item needs after a VALU write of the SGPRs [start, start
+// + count).
+static int32_t requiredWaitStates(const rocisa::Item &item, int32_t start,
+                                  int32_t count) {
+  if (dynamic_cast<const rocisa::Label *>(&item))
+    return 0;
+  if (const auto *text = dynamic_cast<const rocisa::TextBlock *>(&item)) {
+    std::string_view body = text->text;
+    size_t first = body.find_first_not_of(" \t\n");
+    if (first == std::string_view::npos ||
+        startsWith(body.substr(first), "//") ||
+        startsWith(body.substr(first), "."))
+      return 0;
+    return valuWriteSgprReadWaitStates;
+  }
+  const auto *inst = dynamic_cast<const rocisa::Instruction *>(&item);
+  if (!inst)
+    return valuWriteSgprReadWaitStates;
+  if (dynamic_cast<const rocisa::SNop *>(inst) ||
+      dynamic_cast<const rocisa::SWaitCnt *>(inst))
+    return 0;
+  std::string_view name = inst->instStr;
+  if (name.empty() || isBranch(name))
+    return valuWriteSgprReadWaitStates;
+  if (startsWith(name, "s_") || !readsSgprs(*inst, start, count))
+    return 0;
+  if (startsWith(name, "v_readlane") || startsWith(name, "v_writelane"))
+    return valuWriteSgprLaneSelectWaitStates;
+  if (startsWith(name, "v_"))
+    return valuWriteSgprReadWaitStates;
+  if (startsWith(name, "buffer_") || startsWith(name, "global_") ||
+      startsWith(name, "flat_") || startsWith(name, "scratch_") ||
+      startsWith(name, "tbuffer_"))
+    return valuWriteSgprVmemWaitStates;
+  return valuWriteSgprReadWaitStates;
+}
+
+// The wait states that item provides to the instructions after it.
+static int32_t providedWaitStates(const rocisa::Item &item) {
+  const auto *inst = dynamic_cast<const rocisa::Instruction *>(&item);
+  if (!inst || dynamic_cast<const rocisa::SWaitCnt *>(inst))
+    return 0;
+  if (const auto *nop = dynamic_cast<const rocisa::SNop *>(inst))
+    return std::get<int>(nop->getParams().front()) + 1;
+  return 1;
+}
+
+void IRBuilder::deferValuSgprWrite(RegisterRef dst) {
+  assert(dst.kind == RegisterKind::sgpr && "the deferred write is an SGPR");
+  pendingSgprWrites.push_back({dst.start, dst.count, 0});
+}
+
+void IRBuilder::emitWaitStates(int32_t count) {
+  if (count <= 0)
+    return;
+  module->add(std::make_shared<rocisa::SNop>(count - 1));
+  for (PendingSgprWrite &write : pendingSgprWrites)
+    write.elapsed += count;
+}
+
+void IRBuilder::resolvePendingHazards() {
+  int32_t missing = 0;
+  for (const PendingSgprWrite &write : pendingSgprWrites)
+    missing = std::max(missing, valuWriteSgprReadWaitStates - write.elapsed);
+  emitWaitStates(missing);
+  pendingSgprWrites.clear();
+}
+
+void IRBuilder::coverPendingHazards(const rocisa::Item &item) {
+  int32_t missing = 0;
+  for (const PendingSgprWrite &write : pendingSgprWrites)
+    missing =
+        std::max(missing, requiredWaitStates(item, write.start, write.count) -
+                              write.elapsed);
+  emitWaitStates(missing);
+}
+
+void IRBuilder::advancePendingHazards(const rocisa::Item &item) {
+  int32_t provided = providedWaitStates(item);
+  const auto *inst = dynamic_cast<const rocisa::Instruction *>(&item);
+  // A scalar write of all the SGPRs ends the hazard.
+  bool scalar = inst && startsWith(inst->instStr, "s_");
+  std::erase_if(pendingSgprWrites, [&](PendingSgprWrite &write) {
+    write.elapsed += provided;
+    if (write.elapsed >= valuWriteSgprVmemWaitStates)
+      return true;
+    if (!scalar)
+      return false;
+    for (const InstructionInput &output : inst->getDstParams()) {
+      const auto *container =
+          std::get_if<std::shared_ptr<rocisa::Container>>(&output);
+      auto reg =
+          container
+              ? std::dynamic_pointer_cast<rocisa::RegisterContainer>(*container)
+              : nullptr;
+      if (reg && reg->regType == "s" && !reg->regName &&
+          reg->regIdx <= write.start &&
+          write.start + write.count <= reg->regIdx + reg->regNum)
+        return true;
+    }
+    return false;
+  });
 }
 
 std::shared_ptr<rocisa::Label> IRBuilder::createLabel(std::string_view name) {
@@ -1277,7 +1425,7 @@ static void emitFastQuotient(IRBuilder &builder, RegisterRef dst, Operand a,
     return;
   }
   // The mask is written by a VALU instruction and read by the cndmask.
-  emitValuSgprWriteNop(builder);
+  builder.deferValuSgprWrite(estimate.needsCorrection.ref());
   RegisterRange correction = builder.allocateVgpr(1);
   builder.selectb32(correction.ref(), estimate.needsCorrection.ref(), sign, 0);
   builder.addi32(dst, estimate.quotient, correction);
@@ -1661,9 +1809,9 @@ static void emitCompare(IRBuilder &builder, int32_t width, Predicate pred,
     assert(isLegalVop3(a, b) && "illegal vop3 operands");
     createVectorCmp64(builder, pred, dst, a, b);
   }
-  // The mask is written by a VALU instruction, so the nop lets any following
-  // instruction read it.
-  emitValuSgprWriteNop(builder);
+  // The mask is written by a VALU instruction; its first reader gets the wait
+  // states it needs.
+  builder.deferValuSgprWrite(dst);
 }
 
 void IRBuilder::cmpi32(Predicate pred, RegisterRef dst, Operand a, Operand b) {
@@ -2020,6 +2168,50 @@ void IRBuilder::loadBuffer(RegisterRef dst, RegisterRef rsrc,
   create<rocisa::MUBUFReadInstruction>(
       memoryWidthInfo(width).loadType, dst.container(), voffset.container(),
       rsrc.container(), soffset, bufferModifiers(access, false));
+}
+
+// Throws std::invalid_argument unless base is a single SGPR.
+static void requireLdsBase(std::string_view opName, RegisterRef base) {
+  if (base.kind == RegisterKind::sgpr && base.count == 1)
+    return;
+  throw std::invalid_argument(std::string(opName) +
+                              " lds base must be a single sgpr, got " +
+                              registerText(base));
+}
+
+void IRBuilder::loadBufferToLds(RegisterRef rsrc, RegisterRef voffset,
+                                Operand soffset, RegisterRef ldsBase,
+                                int32_t ldsOffset, MemoryWidth width,
+                                BufferAccess access,
+                                const std::function<void()> &fill) {
+  static constexpr std::string_view opName = "loadBufferToLds";
+  if (width != MemoryWidth::b32 && width != MemoryWidth::b96 &&
+      width != MemoryWidth::b128)
+    throw std::invalid_argument(std::string(opName) +
+                                " width must be b32, b96 or b128");
+  requireRsrcRegister(opName, "resource", rsrc);
+  requireSingleVgpr(opName, "voffset", voffset);
+  requireSoffset(opName, soffset);
+  requireOffset(opName, access.offset, maxBufferOffset);
+  requireLdsBase(opName, ldsBase);
+  // The hardware adds the immediate offset to the LDS address too.
+  int32_t m0Offset = ldsOffset - access.offset;
+  std::shared_ptr<rocisa::RegisterContainer> m0 = rocisa::mgpr(0);
+  if (m0Offset == 0)
+    create<rocisa::SMovB32>(m0, ldsBase.container());
+  else
+    create<rocisa::SAddU32>(m0, ldsBase.container(), m0Offset);
+  // The load must not follow the M0 write directly.
+  size_t itemsBefore = module->itemList.size();
+  if (fill)
+    fill();
+  if (module->itemList.size() == itemsBefore)
+    create<rocisa::SNop>(0);
+  rocisa::MUBUFModifiers modifiers = bufferModifiers(access, false);
+  modifiers.lds = true;
+  create<rocisa::MUBUFReadInstruction>(memoryWidthInfo(width).loadType, nullptr,
+                                       voffset.container(), rsrc.container(),
+                                       soffset, modifiers);
 }
 
 void IRBuilder::storeBuffer(RegisterRef data, RegisterRef rsrc,

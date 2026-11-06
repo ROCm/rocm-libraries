@@ -45,68 +45,57 @@ namespace
     constexpr int64_t maxWide   = int64_t(1) << 30;
     constexpr int64_t mxBlock   = 32;
 
-    // A generated solution and the K it serves: kLow < K <= kHigh and K a multiple of kMultiple.
+    // A generated solution and the K it serves: kLow < K <= kHigh.
     // The useBeta variants read C, the others only serve beta == 0.
     struct GeneratedKernel
     {
         const char* name;
         int64_t     kLow;
         int64_t     kHigh;
-        int64_t     kMultiple;
         bool        useBeta;
     };
 
     // clang-format off
     const std::array<GeneratedKernel, 10> generatedKernels = {{
-        {"gemm_BM1_TN1_LANES_K64_WAVES4_UP_ITERS2_PARTIAL_STEPS0_PF2_GROUP1_NUM_XCDS1_GRID_3D1_USE_BETA0",
+        {"gemm_BM1_TN1_LANES_K64_WAVES4_UP_ITERS2_PF2_GROUP1_NUM_XCDS1_GRID_3D1_USE_BETA0",
          4096,
          8192,
-         4096,
          false},
-        {"gemm_BM1_TN1_LANES_K64_WAVES4_UP_ITERS2_PARTIAL_STEPS0_PF2_GROUP1_NUM_XCDS1_GRID_3D1_USE_BETA1",
+        {"gemm_BM1_TN1_LANES_K64_WAVES4_UP_ITERS2_PF2_GROUP1_NUM_XCDS1_GRID_3D1_USE_BETA1",
          4096,
          8192,
-         4096,
          true},
-        {"gemm_BM1_TN1_LANES_K16_WAVES4_UP_ITERS0_PARTIAL_STEPS0_PF2_GROUP1_NUM_XCDS1_GRID_3D1_USE_BETA0",
+        {"gemm_BM1_TN1_LANES_K16_WAVES4_UP_ITERS0_PF2_GROUP1_NUM_XCDS1_GRID_3D1_USE_BETA0",
          0,
          maxExtent,
-         1024,
          false},
-        {"gemm_BM1_TN1_LANES_K16_WAVES4_UP_ITERS0_PARTIAL_STEPS0_PF2_GROUP1_NUM_XCDS1_GRID_3D1_USE_BETA1",
+        {"gemm_BM1_TN1_LANES_K16_WAVES4_UP_ITERS0_PF2_GROUP1_NUM_XCDS1_GRID_3D1_USE_BETA1",
          0,
          maxExtent,
-         1024,
          true},
-        {"gemm_BM2_TN2_LANES_K16_WAVES4_UP_ITERS0_PARTIAL_STEPS1_PF1_GROUP1_NUM_XCDS1_GRID_3D1_USE_BETA0",
+        {"gemm_BM2_TN2_LANES_K16_WAVES4_UP_ITERS0_PF1_GROUP1_NUM_XCDS1_GRID_3D1_USE_BETA0",
          0,
          maxExtent,
-         1,
          false},
-        {"gemm_BM2_TN2_LANES_K16_WAVES4_UP_ITERS0_PARTIAL_STEPS1_PF1_GROUP1_NUM_XCDS1_GRID_3D1_USE_BETA1",
+        {"gemm_BM2_TN2_LANES_K16_WAVES4_UP_ITERS0_PF1_GROUP1_NUM_XCDS1_GRID_3D1_USE_BETA1",
          0,
          maxExtent,
-         1,
          true},
-        {"gemm_BM1_TN1_LANES_K64_WAVES4_UP_ITERS2_PARTIAL_STEPS0_PF2_GROUP1_NUM_XCDS1_GRID_3D0_USE_BETA0",
+        {"gemm_BM1_TN1_LANES_K64_WAVES4_UP_ITERS2_PF2_GROUP1_NUM_XCDS1_GRID_3D0_USE_BETA0",
          4096,
          8192,
-         4096,
          false},
-        {"gemm_BM1_TN1_LANES_K64_WAVES4_UP_ITERS2_PARTIAL_STEPS0_PF2_GROUP1_NUM_XCDS1_GRID_3D0_USE_BETA1",
+        {"gemm_BM1_TN1_LANES_K64_WAVES4_UP_ITERS2_PF2_GROUP1_NUM_XCDS1_GRID_3D0_USE_BETA1",
          4096,
          8192,
-         4096,
          true},
-        {"gemm_BM1_TN2_LANES_K16_WAVES2_UP_ITERS3_PARTIAL_STEPS1_PF2_GROUP2_NUM_XCDS8_GRID_3D0_USE_BETA0",
+        {"gemm_BM1_TN2_LANES_K16_WAVES2_UP_ITERS3_PF2_GROUP2_NUM_XCDS8_GRID_3D0_USE_BETA0",
          2048,
          3072,
-         1,
          false},
-        {"gemm_BM1_TN2_LANES_K16_WAVES2_UP_ITERS3_PARTIAL_STEPS1_PF2_GROUP2_NUM_XCDS8_GRID_3D0_USE_BETA1",
+        {"gemm_BM1_TN2_LANES_K16_WAVES2_UP_ITERS3_PF2_GROUP2_NUM_XCDS8_GRID_3D0_USE_BETA1",
          2048,
          3072,
-         1,
          true},
     }};
     // clang-format on
@@ -194,9 +183,7 @@ namespace
             return false;
         if(spec.m > maxExtent || spec.n > maxWide)
             return false;
-        if(spec.k <= kernel.kLow || spec.k > kernel.kHigh)
-            return false;
-        return spec.k % kernel.kMultiple == 0;
+        return spec.k > kernel.kLow && spec.k <= kernel.kHigh;
     }
 
     void setBias(Problem& problem, ProblemSpec const& spec)
@@ -245,6 +232,11 @@ namespace
             setBias(problem, spec);
         problem.setMXScaleA(DataType::E8, mxBlock);
         problem.setMXScaleB(DataType::E8, mxBlock);
+        // SkinnyGEMM is a custom kernel the host cannot reason about for row-uniformity
+        // (handwrittenCustomKernel() applies to it exactly as it would to a hand-written
+        // one), so it is unconditionally refused once uniform summation order is active.
+        // These tests validate SkinnyGEMM's own numerics, not uniform summation order.
+        problem.setParams().setUniformSummationOrder(0);
         return problem;
     }
 
@@ -434,10 +426,13 @@ namespace
         return value;
     }
 
-    uint16_t truncateToBf16(float value)
+    uint16_t roundToBf16(float value)
     {
         uint32_t wide;
         std::memcpy(&wide, &value, sizeof(value));
+        if(std::isnan(value))
+            return static_cast<uint16_t>((wide >> 16) | 0x40);
+        wide += 0x7fff + ((wide >> 16) & 1);
         return static_cast<uint16_t>(wide >> 16);
     }
 
@@ -506,7 +501,7 @@ namespace
         std::vector<uint16_t> c(cElements(spec) + guardCount, sentinel);
         for(int64_t j = 0; j < spec.n; j++)
             for(int64_t i = 0; i < spec.m; i++)
-                c[j * spec.ldC + i] = truncateToBf16((static_cast<int>(rng() % 33) - 16) / 8.0f);
+                c[j * spec.ldC + i] = roundToBf16((static_cast<int>(rng() % 33) - 16) / 8.0f);
         return c;
     }
 
@@ -526,7 +521,7 @@ namespace
     }
 
     // Checks that the ld padding and the guard kept the sentinel and that D matches the
-    // reference up to the truncation of the f32 result to bf16.
+    // reference up to the rounding of the f32 result to bf16.
     void verifyD(std::vector<uint16_t> const& d,
                  std::vector<float> const&    expected,
                  ProblemSpec const&           spec)
@@ -548,7 +543,7 @@ namespace
             for(int64_t i = 0; i < spec.m; i++)
             {
                 double actual = bf16ToFloat(d[j * spec.ldD + i]);
-                double wanted = bf16ToFloat(truncateToBf16(expected[j * spec.m + i]));
+                double wanted = bf16ToFloat(roundToBf16(expected[j * spec.m + i]));
                 if(std::fabs(actual - wanted) <= atol + 1e-2 * std::fabs(wanted))
                     continue;
                 if(mismatches++ < 5)

@@ -15,7 +15,7 @@ from .Errors import GeneratorKernelRejected
 
 # The knobs of tensilelite_codegen.SkinnyGEMMConfig, in binding order.
 PARAMETERS = ("bm", "tn", "lanesK", "waves", "prefetch", "upIters",
-              "partialSteps", "group", "numXcds", "grid3d", "useBeta")
+              "group", "numXcds", "grid3d", "useBeta")
 
 # Limits of the emitted kernel's 32-bit index arithmetic.
 MAX_EXTENT = 2**20
@@ -34,7 +34,8 @@ _ARGS = (
     {"type": "address", "semantic": "AddressB"},
     {"type": "address", "semantic": "AddressMXScaleA"},
     {"type": "address", "semantic": "AddressMXScaleB"},
-    # The split-K workspace: unused with a single split, passed as a null pointer.
+    # The split-K workspace: unused, as the generated kernels have no useSplitK,
+    # passed as a null pointer.
     {"type": "uint64", "semantic": "ConstantZero"},
     # C is read by the useBeta variant and by the split-K reduce, never by the other variants.
     {"type": "address", "semantic": "AddressC"},
@@ -44,15 +45,18 @@ _ARGS = (
     {"type": "int32", "semantic": "SizeFree0"},
     {"type": "int32", "semantic": "SizeFree1"},
     {"type": "int32", "semantic": "SizeSum"},
-    # The split-K slice length, which is the whole K without split-K.
-    {"type": "int32", "semantic": "SizeSum"},
+    # Split-K chunk: ignored by the generated kernels, which have no useSplitK;
+    # kept in the shared ABI.
+    {"type": "int32", "semantic": "Spk"},
     {"type": "int32", "semantic": "StrideC0Bytes"},
     {"type": "float32", "semantic": "Alpha"},
     {"type": "float32", "semantic": "Beta"},
-    # The launched workgroup counts, filled by the host.
+    # The launched workgroup count x, filled by the host; only the persistent kernel reads it.
     {"type": "int32", "semantic": "NumWorkGroupsX"},
-    {"type": "int32", "semantic": "NumWorkGroupsY"},
-    {"type": "int32", "semantic": "NumWorkGroupsZ"},
+    # The remainder narrowing of the MFMA 3-D kernel (whole tiles, pieces per remainder tile); zero
+    # means off, which is what the custom-kernel path passes.
+    {"type": "int32", "semantic": "ConstantZero"},
+    {"type": "int32", "semantic": "ConstantZero"},
 )
 
 
@@ -99,8 +103,6 @@ def _validateParam(key: str, value: Any) -> None:
         return
     if not _isInt(value):
         raise ValueError(f"the SkinnyGEMM generatorParams {key} must be an int, got {value!r}")
-    if key == "partialSteps" and value not in (0, 1):
-        raise ValueError(f"the SkinnyGEMM generatorParams partialSteps must be 0 or 1, got {value}")
     if key == "upIters" and value < 0:
         raise ValueError(f"the SkinnyGEMM generatorParams upIters must not be negative, got {value}")
 
@@ -133,7 +135,7 @@ def _tileShape(params: Dict[str, Any]) -> List[int]:
 
 def _grid(params: Dict[str, Any]) -> List[str]:
     if params["grid3d"]:
-        return ["TilesLong", "TilesShort", "Batch"]
+        return ["TilesLongShort", "One", "One"]
     return ["ComputeUnits", "One", "One"]
 
 
@@ -162,9 +164,6 @@ def _asserts(params: Dict[str, Any]) -> Dict[str, Any]:
         asserts["AssertStrideCEqual"] = {0: 1}
     else:
         asserts["AssertBetaZero"] = True
-    # A partial last step handles any K; otherwise K must fill whole steps.
-    if params["partialSteps"] == 0:
-        asserts["AssertSummationElementMultiple"] = kStep
     return asserts
 
 

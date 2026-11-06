@@ -5063,8 +5063,10 @@ TEST_F(CmpTest, VectorI32) {
   for (const PredicateCase &current : predicateCases) {
     SCOPED_TRACE(current.name);
     std::string out = emit32(current.pred, mask.ref(), a, b);
-    expectLinesInOrder(
-        out, {line(current.vector32, text(mask), text(a), text(b)), "s_nop 1"});
+    expectLinesInOrder(out,
+                       {line(current.vector32, text(mask), text(a), text(b))});
+    // Nothing reads the mask, so no wait states follow.
+    EXPECT_EQ(countLinesContaining(out, "s_nop"), 0);
     EXPECT_EQ(countLinesContaining(out, "v_mov"), 0);
     EXPECT_EQ(countLinesContaining(out, "s_cselect"), 0);
   }
@@ -5077,8 +5079,9 @@ TEST_F(CmpTest, VectorI64) {
   for (const PredicateCase &current : predicateCases) {
     SCOPED_TRACE(current.name);
     std::string out = emit64(current.pred, mask.ref(), a, b);
-    expectLinesInOrder(
-        out, {line(current.vector64, text(mask), text(a), text(b)), "s_nop 1"});
+    expectLinesInOrder(out,
+                       {line(current.vector64, text(mask), text(a), text(b))});
+    EXPECT_EQ(countLinesContaining(out, "s_nop"), 0);
     EXPECT_EQ(countLinesContaining(out, "v_mov"), 0);
   }
 }
@@ -5112,8 +5115,7 @@ TEST_F(CmpTest, VectorI32LiteralIsCopied) {
   // The temporary takes the lowest free VGPR.
   std::string out = emit32(Predicate::slt, mask.ref(), v, literal32);
   expectLinesInOrder(out, {line("v_mov_b32", "v1", literal32Text),
-                           line("v_cmp_lt_i32", text(mask), text(v), "v1"),
-                           "s_nop 1"});
+                           line("v_cmp_lt_i32", text(mask), text(v), "v1")});
   out = emit32(Predicate::slt, mask.ref(), literal32, v);
   expectLinesInOrder(out, {line("v_mov_b32", "v1", literal32Text),
                            line("v_cmp_lt_i32", text(mask), "v1", text(v))});
@@ -5142,7 +5144,32 @@ TEST_F(CmpTest, VectorI64LiteralIsCopiedToEvenPair) {
   std::string out = emit64(Predicate::ult, mask.ref(), v, -100);
   expectLinesInOrder(
       out, {line("v_mov_b32", "v2", "-100"), line("v_mov_b32", "v3", "-1"),
-            line("v_cmp_lt_u64", text(mask), text(v), "v[2:3]"), "s_nop 1"});
+            line("v_cmp_lt_u64", text(mask), text(v), "v[2:3]")});
+}
+
+// The wait states of a vector compare's mask go before its first reader that
+// needs them, less the instructions in between: a VALU reader needs 2, a
+// scalar one none.
+TEST_F(CmpTest, VectorMaskWaitStatesPrecedeTheReader) {
+  RegisterRange mask = builder.allocateSgpr(2, 2);
+  RegisterRange other = builder.allocateSgpr(2, 2);
+  RegisterRange a = builder.allocateVgpr(1);
+  RegisterRange b = builder.allocateVgpr(1);
+  RegisterRange c = builder.allocateVgpr(1);
+  std::string out = emitted([&](IRBuilder &local) {
+    local.cmpi32(Predicate::slt, mask.ref(), a, b);
+    local.andi64(other.ref(), other.ref(), mask.ref());
+    local.selectb32(c.ref(), mask.ref(), a.ref(), b.ref());
+  });
+  expectLinesInOrder(out,
+                     {"v_cmp_lt_i32", "s_and_b64", "s_nop 0", "v_cndmask_b32"});
+  out = emitted([&](IRBuilder &local) {
+    local.cmpi32(Predicate::slt, mask.ref(), a, b);
+    local.addi32(c.ref(), a.ref(), b.ref());
+    local.addi32(c.ref(), c.ref(), b.ref());
+    local.selectb32(c.ref(), mask.ref(), a.ref(), b.ref());
+  });
+  EXPECT_EQ(countLinesContaining(out, "s_nop"), 0);
 }
 
 TEST_F(CmpTest, VectorI64MisalignedPairsAreCopied) {
@@ -7375,6 +7402,103 @@ TEST_F(MemoryTest, ErrorMessagesNameTheOperationAndTheProblem) {
     EXPECT_NE(message.find(current.problem), std::string::npos);
     EXPECT_NE(message.back(), '.');
   }
+}
+
+static void ldsLoad(IRBuilder &target, RegisterRef base, int32_t ldsOffset,
+                    MemoryWidth width, BufferAccess access = {}) {
+  RegisterRef rsrc{sgpr, 4, 4};
+  RegisterRef voffset{vgpr, 0, 1};
+  target.loadBufferToLds(rsrc, voffset, 0, base, ldsOffset, width, access);
+}
+
+TEST_F(MemoryTest, BufferToLdsPrintsTheM0WriteAndTheLoad) {
+  RegisterRef base{sgpr, 9, 1};
+  EXPECT_EQ(emitted([&](IRBuilder &local) {
+              ldsLoad(local, base, 0, MemoryWidth::b128);
+            }),
+            "s_mov_b32 m0, s9\ns_nop 0\n"
+            "buffer_load_dwordx4 v0, s[4:7], 0 offen offset:0 lds\n");
+  EXPECT_EQ(emitted([&](IRBuilder &local) {
+              ldsLoad(local, base, 1024, MemoryWidth::b32);
+            }),
+            "s_add_u32 m0, s9, 1024\ns_nop 0\n"
+            "buffer_load_dword v0, s[4:7], 0 offen offset:0 lds\n");
+  EXPECT_EQ(emitted([&](IRBuilder &local) {
+              ldsLoad(local, base, 0, MemoryWidth::b96);
+            }),
+            "s_mov_b32 m0, s9\ns_nop 0\n"
+            "buffer_load_dwordx3 v0, s[4:7], 0 offen offset:0 lds\n");
+}
+
+// The immediate offset moves the LDS address with the global one, so M0
+// compensates for it.
+TEST_F(MemoryTest, BufferToLdsCancelsTheImmediateOffsetInM0) {
+  RegisterRef base{sgpr, 9, 1};
+  EXPECT_EQ(emitted([&](IRBuilder &local) {
+              ldsLoad(local, base, 1024, MemoryWidth::b128, {.offset = 128});
+            }),
+            "s_add_u32 m0, s9, 896\ns_nop 0\n"
+            "buffer_load_dwordx4 v0, s[4:7], 0 offen offset:128 lds\n");
+  EXPECT_EQ(emitted([&](IRBuilder &local) {
+              ldsLoad(local, base, 128, MemoryWidth::b128, {.offset = 128});
+            }),
+            "s_mov_b32 m0, s9\ns_nop 0\n"
+            "buffer_load_dwordx4 v0, s[4:7], 0 offen offset:128 lds\n");
+  EXPECT_EQ(emitted([&](IRBuilder &local) {
+              ldsLoad(local, base, 0, MemoryWidth::b128, {.offset = 128});
+            }),
+            "s_add_u32 m0, s9, -128\ns_nop 0\n"
+            "buffer_load_dwordx4 v0, s[4:7], 0 offen offset:128 lds\n");
+}
+
+TEST_F(MemoryTest, BufferToLdsRejectsInvalidArguments) {
+  RegisterRef base{sgpr, 9, 1};
+  for (MemoryWidth width :
+       {MemoryWidth::b8, MemoryWidth::b16, MemoryWidth::b64})
+    expectRejected([&] { ldsLoad(builder, base, 0, width); });
+  expectRejected(
+      [&] { ldsLoad(builder, RegisterRef{vgpr, 9, 1}, 0, MemoryWidth::b128); });
+  expectRejected(
+      [&] { ldsLoad(builder, RegisterRef{sgpr, 8, 2}, 0, MemoryWidth::b128); });
+  expectRejected(
+      [&] { ldsLoad(builder, base, 0, MemoryWidth::b128, {.offset = 4096}); });
+  expectRejected([&] {
+    RegisterRef rsrc{sgpr, 6, 4};
+    builder.loadBufferToLds(rsrc, RegisterRef{vgpr, 0, 1}, 0, base, 0,
+                            MemoryWidth::b128);
+  });
+  expectRejected([&] {
+    builder.loadBufferToLds(RegisterRef{sgpr, 4, 4}, RegisterRef{sgpr, 0, 1}, 0,
+                            base, 0, MemoryWidth::b128);
+  });
+  expectRejected([&] {
+    builder.loadBufferToLds(RegisterRef{sgpr, 4, 4}, RegisterRef{vgpr, 0, 1},
+                            65, base, 0, MemoryWidth::b128);
+  });
+}
+
+TEST(MemoryAssembly, BufferToLdsAssembles) {
+  Target target = Target::get("gfx950");
+  Kernel kernel(target, "codegen_lds_load", memoryWorkgroupSize,
+                KernelSignature());
+  IRBuilder &builder = kernel.builder();
+  kernel.setLdsSize(1 << 16);
+  RegisterRange rsrc = builder.allocateSgpr(4, 4);
+  RegisterRange base = builder.allocateSgpr(1);
+  RegisterRange soffsetReg = builder.allocateSgpr(1);
+  RegisterRange voffset = builder.allocateVgpr(1);
+  for (MemoryWidth width :
+       {MemoryWidth::b32, MemoryWidth::b96, MemoryWidth::b128})
+    for (Operand soffset : {Operand(soffsetReg), Operand(0), Operand(64)})
+      for (int32_t ldsOffset : {0, 1024, 40960})
+        for (int32_t offset : {0, 128, 4095})
+          builder.loadBufferToLds(rsrc.ref(), voffset.ref(), soffset,
+                                  base.ref(), ldsOffset, width,
+                                  {.offset = offset});
+  builder.createEndProgram();
+  std::string assembly = kernel.toAssembly();
+  SCOPED_TRACE(assembly);
+  EXPECT_NO_THROW(assembleToHSACO(assembly, target.isaName()));
 }
 
 // Emits every width, payload kind and option into one kernel.

@@ -2,13 +2,12 @@
 # SPDX-License-Identifier: MIT
 """Benchmark of the emitted skinny MXFP8 GEMM (and the split-K reduce).
 
-Prints one SWEEP line per shape in the format of aster's
-kernels/test_gemm_mxfp8_skinny.py, with the same timing methodology: before
-each GEMM launch a read-only kernel streams a 256 MiB buffer to empty the LLC
-and the device is synchronised; HIP events on the null stream bracket a single
-launch whose kernel arguments were built once; the reported time is the minimum
-over the iterations (the first included). The split-K reduce is timed warm,
-without the flush, after the GEMM iterations.
+Prints one SWEEP line per shape. The timing methodology is: before each GEMM
+launch a read-only kernel streams a 256 MiB buffer to empty the LLC and the
+device is synchronised; HIP events on the null stream bracket a single launch
+whose kernel arguments were built once; the reported time is the minimum over
+the iterations (the first included). The split-K reduce is timed warm, without
+the flush, after the GEMM iterations.
 
 Run from the tensilelite directory:
 
@@ -23,14 +22,16 @@ import glob
 import sys
 from contextlib import ExitStack
 
+import yaml
+
 import skinny_gemm_support as support
 from skinny_gemm_support import DeviceBuffer, LoadedKernel, Problem, hipCheck
 
 FLUSH_MB = 256
 FLUSH_KERNEL_NAME = "flush_llc_kernel"
-# The assembly of aster's flush_llc kernel: each thread of the workgroup loads
-# its slice of the buffer one dword at a time. Despite the name of the aster
-# class it only reads, so the LLC is left clean.
+# The assembly of the LLC flush kernel: each thread of the workgroup loads its
+# slice of the buffer one dword at a time. It only reads, so the LLC is left
+# clean.
 FLUSH_ASM = """
   .amdgcn_target "amdgcn-amd-amdhsa--gfx950"
   .text
@@ -204,7 +205,7 @@ def timeLaunches(
 
 
 class MissingAsm(Exception):
-    """The reference asm of a kernel is not in the asm directory."""
+    """The saved asm of a kernel is not in the asm directory."""
 
 
 def loadAsmKernel(stack: ExitStack, pattern: str, name: str) -> LoadedKernel:
@@ -214,7 +215,7 @@ def loadAsmKernel(stack: ExitStack, pattern: str, name: str) -> LoadedKernel:
 
     paths = sorted(glob.glob(pattern))
     if not paths:
-        raise MissingAsm(f"no reference asm matches {pattern}")
+        raise MissingAsm(f"no saved asm matches {pattern}")
     with open(paths[0]) as stream:
         asm = stream.read()
     if f".globl {name}\n" not in asm:
@@ -302,7 +303,7 @@ def benchProblem(
 
 
 def formatSweepLine(p: Problem, gemmTimes, reduceTimes) -> str:
-    """One SWEEP line in the format of the aster driver: times are minima over
+    """One SWEEP line: times are minima over
     the iterations in us; total_us is the minimum of the per-iteration gemm +
     reduce sums."""
     fields = {
@@ -321,6 +322,11 @@ def formatSweepLine(p: Problem, gemmTimes, reduceTimes) -> str:
         "up_scales": p.up_scales,
         "blocks": p.blocks,
         "grid3d": int(p.grid3d),
+        "pieces": p.plan.pieces,
+        "workgroups": p.plan.workgroups,
+        **({"mfma": 1} if p.mfma else {}),
+        **({"lds": 1} if p.lds else {}),
+        **({"use_split_k": 1} if p.use_split_k else {}),
         "gemm_us": f"{min(gemmTimes) * 1e-3:.2f}",
     }
     if reduceTimes is not None:
@@ -351,14 +357,23 @@ def sweepShape(
     printOnly: bool,
     codeObjectVersion: int,
     maxPreloadDwords: int,
+    splitRemainder: int = 1,
 ) -> None:
     """Runs one shape and prints its SWEEP line, or with printOnly its emitted
     asm instead of benchmarking it; a shape that violates the constraints with
-    the overrides, or lacks reference asm, is reported as skipped."""
+    the overrides, or lacks saved asm, is reported as skipped. splitRemainder is
+    the remainder narrowing of the mfma 3-D kernel: 0 picks it for the compute
+    units of the device (off when only printing, which needs no device), 1 turns
+    it off and N forces N pieces."""
     knobs = {name: None for name in support.KNOB_OVERRIDE_NAMES}
     knobs.update(overrides)
     try:
         p = support.makeProblem(m, n, k, padding=(0, 0, 0), **knobs)
+        if printOnly and splitRemainder == 0:
+            splitRemainder = 1
+        if splitRemainder != 1:
+            cus = support.getDeviceProperties().multiProcessorCount
+            p = support.resolvePieces(p, splitRemainder, cus)
         if printOnly:
             printAsm(p, codeObjectVersion, maxPreloadDwords)
             return
@@ -391,7 +406,13 @@ def makeParser() -> argparse.ArgumentParser:
     parser.add_argument("-n", type=int, default=8192, help="Columns of B / cols of D")
     parser.add_argument("-k", type=int, default=8192, help="Shared dimension")
     parser.add_argument("--iters", type=int, default=30, help="Timed launches")
-    parser.add_argument("--spk", type=int, default=None, help="K elements per split")
+    parser.add_argument(
+        "--spk",
+        type=int,
+        default=None,
+        help="K elements per split; selects the split-K kernel (default: the "
+        "kernel without split-K over the whole K)",
+    )
     parser.add_argument("--bm", type=int, default=None, help="Skinny columns per block")
     parser.add_argument("--tn", type=int, default=None, help="Wide columns per lane")
     parser.add_argument("--lanes-k", type=int, default=None, help="Lanes sharing K")
@@ -416,6 +437,32 @@ def makeParser() -> argparse.ArgumentParser:
         "--use-beta",
         action="store_true",
         help="Run the useBeta GEMM, which prefetches C and adds beta * C",
+    )
+    parser.add_argument(
+        "--mfma",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Force the scaled-MFMA kernel (with the untuned plain defaults "
+        "unless --lds) or, with --no-mfma, the VALU kernel; by default the "
+        "shape picks, and a knob option selects the VALU kernel",
+    )
+    parser.add_argument(
+        "--lds",
+        action="store_true",
+        default=None,
+        help="With --mfma, stage the operands through LDS (coalesced loads) "
+        "with the tuned defaults",
+    )
+    parser.add_argument(
+        "--config",
+        metavar="MAPPING",
+        default=None,
+        help="Run one kernel config given as a YAML mapping, as in the "
+        "'config' entries of select_skinny_gemm_kernels.py's selection, e.g. "
+        "'{bm: 16, tn: 1, lanes_k: 64, waves: 4, pf: 2, up_iters: 0, "
+        "group: 1, xcds: 1, grid3d: true, blocks: null, "
+        "mfma: true, lds: true, use_beta: true}'; knob options given "
+        "explicitly override its entries",
     )
     parser.add_argument(
         "--code-object-version",
@@ -448,9 +495,19 @@ def makeParser() -> argparse.ArgumentParser:
         "--asm-dir",
         metavar="DIR",
         default=None,
-        help="Harness validation: run the reference asm saved by the aster "
-        "driver's --save-tmps (DIR/<gemm kernel name>_*/kernel.s and "
-        "DIR/splitk_reduce_*/kernel.s) instead of the emitted kernels",
+        help="Run previously saved asm instead of the emitted kernels, e.g. "
+        "for an A/B comparison (DIR/<gemm kernel name>_*/kernel.s and "
+        "DIR/splitk_reduce_*/kernel.s)",
+    )
+    parser.add_argument(
+        "--split-remainder",
+        type=int,
+        default=0,
+        metavar="N",
+        help="Remainder narrowing of the mfma 3-D kernel with lds: 0 picks the "
+        "pieces per remainder tile for the CUs of the device, 1 turns it off, "
+        "N >= 2 forces N pieces (a power of two up to 16 * tn); with "
+        "--print-asm 0 means off",
     )
     parser.add_argument(
         "--print-asm",
@@ -459,6 +516,54 @@ def makeParser() -> argparse.ArgumentParser:
         "benchmarking; no assembling or GPU is needed",
     )
     return parser
+
+
+CONFIG_KEYS = frozenset(
+    (
+        "bm",
+        "tn",
+        "lanes_k",
+        "waves",
+        "pf",
+        "up_iters",
+        "group",
+        "xcds",
+        "grid3d",
+        "blocks",
+        "mfma",
+        "lds",
+        "use_beta",
+    )
+)
+
+
+def parseConfig(text: str) -> dict:
+    """The makeProblem knobs of a selection config mapping. up_iters is derived
+    from the shape, so only whether it is non-zero (the up-front scales) is
+    kept; blocks is only meaningful for the persistent grid, which grid3d false
+    selects."""
+    config = yaml.safe_load(text)
+    if not isinstance(config, dict):
+        raise SystemExit(f"--config must be a mapping, got {text!r}")
+    unknown = sorted(set(config) - CONFIG_KEYS)
+    if unknown:
+        raise SystemExit(f"--config has unknown keys {unknown}")
+    grid3d = bool(config.get("grid3d", True))
+    if not grid3d and config.get("blocks") is None:
+        raise SystemExit("--config with grid3d false needs blocks")
+    mfma = bool(config.get("mfma", False))
+    overrides = {
+        name: config[name]
+        for name in ("bm", "tn", "lanes_k", "waves", "pf", "group", "xcds", "lds")
+        if config.get(name) is not None
+    }
+    overrides["mfma"] = mfma
+    overrides["blocks"] = None if grid3d else config["blocks"]
+    if "up_iters" in config:
+        overrides["up_scales"] = 0 if mfma else int(config["up_iters"] > 0)
+    if config.get("use_beta"):
+        overrides["use_beta"] = True
+    return overrides
 
 
 def knobOverrides(args: argparse.Namespace) -> dict:
@@ -477,7 +582,10 @@ def knobOverrides(args: argparse.Namespace) -> dict:
         values["alpha"] = args.alpha
     if args.beta != 0.0:
         values["beta"] = args.beta
-    return {name: value for name, value in values.items() if value is not None}
+    given = {name: value for name, value in values.items() if value is not None}
+    if args.config is None:
+        return given
+    return {**parseConfig(args.config), **given}
 
 
 def main() -> None:
@@ -495,6 +603,7 @@ def main() -> None:
             args.print_asm,
             args.code_object_version,
             args.max_preload_dwords,
+            args.split_remainder,
         )
         return
     if not args.print_asm:
@@ -515,6 +624,7 @@ def main() -> None:
             args.print_asm,
             args.code_object_version,
             args.max_preload_dwords,
+            args.split_remainder,
         )
 
 

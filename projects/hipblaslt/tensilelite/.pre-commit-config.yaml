@@ -6,7 +6,7 @@
 # See projects/hipblaslt/tensilelite/README.md for setup.
 
 repos:
-  # Hooks below mirror the aster pre-commit config and only apply to the new
+  # Hooks below only apply to the new
   # tensilelite tree, so existing TensileLite code is left untouched.
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v2.3.0

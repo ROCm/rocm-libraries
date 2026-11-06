@@ -35,7 +35,7 @@ an empty rows file gives the pool only. A rows file is a YAML list; one row rout
 range of problems (batch fixed to 1, -1 is an unbounded upper end) to one knob set, without useBeta:
 
     - range: [m_lo, m_hi, n_lo, n_hi, 1, 1, k_lo, k_hi]
-      params: {bm: 1, tn: 1, lanesK: 16, waves: 1, prefetch: 1, upIters: 0, partialSteps: 1, group: 1, numXcds: 1, grid3d: true}
+      params: {bm: 1, tn: 1, lanesK: 16, waves: 1, prefetch: 1, upIters: 0, group: 1, numXcds: 1, grid3d: true}
 """
 
 import argparse
@@ -67,7 +67,7 @@ MAX_POOL = 2 * MAX_KNOB_SETS
 MAX_REASON_SHAPES = 3
 
 # The four knob sets of the vLLM baseline table: (lanesK, waves, prefetch, upIters).
-BASELINE_PARAMS = tuple((1, 1, lanesK, waves, prefetch, upIters, 0, 1, 1, True, False)
+BASELINE_PARAMS = tuple((1, 1, lanesK, waves, prefetch, upIters, 1, 1, True, False)
                         for lanesK, waves, prefetch, upIters in ((64, 4, 2, 2), (16, 1, 1, 0), (16, 1, 2, 5), (16, 4, 3, 5)))
 
 RING_LANES_K = (8, 16, 64)
@@ -85,7 +85,7 @@ Knobs = Tuple[Any, ...]
 Pool = Dict[Knobs, List[str]]
 RoutingRow = Tuple[List[int], int]
 
-_BM, _TN, _LANES_K, _WAVES, _PREFETCH, _UP_ITERS, _PARTIAL_STEPS, _GROUP, _NUM_XCDS, _GRID3D, _USE_BETA = range(11)
+_BM, _TN, _LANES_K, _WAVES, _PREFETCH, _UP_ITERS, _GROUP, _NUM_XCDS, _GRID3D, _USE_BETA = range(10)
 
 
 def asParams(knobs: Knobs) -> Dict[str, Any]:
@@ -118,7 +118,7 @@ def measuredShapes() -> List[Tuple[int, int, int]]:
 def pickedKnobs(m: int, n: int, k: int) -> Knobs:
     problem = _support().noKnobProblem(m, n, k)
     return (problem.bm, problem.tn, problem.lanes_k, problem.waves, problem.pf, problem.up_iters,
-            problem.partial_steps, problem.group, problem.xcds, problem.grid3d, False)
+            problem.group, problem.xcds, problem.grid3d, False)
 
 
 def _pickedByShape() -> Dict[Knobs, List[Tuple[int, int, int]]]:
@@ -137,12 +137,11 @@ def _pickReason(shapes: Sequence[Tuple[int, int, int]]) -> str:
 def _ringTwin(knobs: Knobs) -> Knobs:
     twin = list(knobs)
     twin[_UP_ITERS] = 0
-    twin[_PARTIAL_STEPS] = 1
     return tuple(twin)
 
 
-def _singleColumn(tn: int, lanesK: int, waves: int, prefetch: int, upIters: int = 0, partialSteps: int = 1) -> Knobs:
-    return (1, tn, lanesK, waves, prefetch, upIters, partialSteps, 1, 1, True, False)
+def _singleColumn(tn: int, lanesK: int, waves: int, prefetch: int, upIters: int = 0) -> Knobs:
+    return (1, tn, lanesK, waves, prefetch, upIters, 1, 1, True, False)
 
 
 def _ringNeighbourhood() -> List[Knobs]:
@@ -220,7 +219,7 @@ def kCoverage(knobs: Knobs) -> str:
     step = kernelStep(knobs)
     upIters = knobs[_UP_ITERS]
     window = "(0, 2^20]" if upIters == 0 else f"({(upIters - 1) * step}, {upIters * step}]"
-    return window + (f", K % {step} == 0" if knobs[_PARTIAL_STEPS] == 0 else "")
+    return window
 
 
 def _checkRowKey(index: int, key: Any) -> List[int]:
@@ -333,7 +332,7 @@ def renderLogic(header: Sequence[str], pool: Pool, routingRows: Sequence[Routing
 
 
 def renderTable(pool: Pool) -> str:
-    columns = " | ".join(("bm", "tn", "lanesK", "waves", "prefetch", "upIters", "partialSteps", "group", "numXcds", "grid3d", "useBeta"))
+    columns = " | ".join(("bm", "tn", "lanesK", "waves", "prefetch", "upIters", "group", "numXcds", "grid3d", "useBeta"))
     lines = [f"| index | {columns} | KI | K coverage | reasons |",
              "|" + "---|" * (len(SkinnyGEMM.PARAMETERS) + 4)]
     for index, (knobs, reasons) in enumerate(pool.items()):

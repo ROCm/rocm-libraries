@@ -592,6 +592,7 @@ void Kernel::loadArgument(RegisterRef dst, int32_t offset) {
              !heldArgumentAt(byteOffset + 4 * chunk))
         ++chunk;
       emitLoads(irBuilder, base, dst.start + done, byteOffset, chunk);
+      argumentLoads = true;
     }
     done += chunk;
   }

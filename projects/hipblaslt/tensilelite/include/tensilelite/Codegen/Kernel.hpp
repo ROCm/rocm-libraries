@@ -186,6 +186,10 @@ public:
   /// request is misaligned or outside the segment.
   void loadArgument(RegisterRef dst, int32_t offset);
 
+  /// Whether loadArgument emitted an s_load, so that the arguments need a
+  /// scalar memory wait.
+  bool loadsArguments() const { return argumentLoads; }
+
   /// Moves the pre-initialized range of the argument starting at byte offset
   /// to the caller, who owns it like any allocated range. Returns std::nullopt
   /// if the argument is not preloaded or was already taken or released. Hidden
@@ -240,6 +244,7 @@ private:
   std::optional<RegisterRange> workgroupIdYReg;
   std::optional<RegisterRange> workgroupIdZReg;
   std::vector<PreloadedArgument> preloaded;
+  bool argumentLoads = false;
 };
 
 } // namespace rocm::tensilelite::codegen

@@ -74,8 +74,8 @@ def csv_text(table: Table) -> str:
 
 
 def knobs_label(knobs: Knobs) -> str:
-    bm, tn, lanesK, waves, prefetch, upIters, partialSteps, group, numXcds, grid3d, _ = knobs
-    return (f"bm{bm} tn{tn} lk{lanesK} w{waves} pf{prefetch} up{upIters} ps{partialSteps} "
+    bm, tn, lanesK, waves, prefetch, upIters, group, numXcds, grid3d, _ = knobs
+    return (f"bm{bm} tn{tn} lk{lanesK} w{waves} pf{prefetch} up{upIters} "
             f"g{group} x{numXcds} {'3d' if grid3d else 'persistent'}")
 
 

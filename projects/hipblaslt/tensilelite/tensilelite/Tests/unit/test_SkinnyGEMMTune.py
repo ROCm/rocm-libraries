@@ -18,9 +18,9 @@ from Tensile.KernelGenerators import (SkinnyGEMM, SkinnyGEMMBench, SkinnyGEMMCel
                                       SkinnyGEMMReport, SkinnyGEMMTune)
 from Tensile.KernelGenerators.SkinnyGEMMBench import Job, Point, RunRecord
 
-RING = (1, 1, 16, 1, 1, 0, 1, 1, 1, True, False)
-RING_B = (1, 1, 16, 2, 1, 0, 1, 1, 1, True, False)
-UP_FRONT = (1, 1, 64, 4, 2, 2, 0, 1, 1, True, False)
+RING = (1, 1, 16, 1, 1, 0, 1, 1, True, False)
+RING_B = (1, 1, 16, 2, 1, 0, 1, 1, True, False)
+UP_FRONT = (1, 1, 64, 4, 2, 2, 1, 1, True, False)
 LIMITS = SkinnyGEMMCells.Thresholds()
 GRID_DATA = {"orientations": ["n", "m"], "skinny": [1, 6, 4], "wide": [4096, 1024], "k": [1024, 4100],
              "extra_points": [], "held_out": {"count": 20, "seed": 3},
@@ -28,8 +28,8 @@ GRID_DATA = {"orientations": ["n", "m"], "skinny": [1, 6, 4], "wide": [4096, 102
 
 
 def generated_name(knobs):
-    bm, tn, lanesK, waves, prefetch, upIters, partialSteps, group, numXcds, grid3d, useBeta = knobs
-    return (f"gemm_BM{bm}_TN{tn}_LANES_K{lanesK}_WAVES{waves}_UP_ITERS{upIters}_PARTIAL_STEPS{partialSteps}"
+    bm, tn, lanesK, waves, prefetch, upIters, group, numXcds, grid3d, useBeta = knobs
+    return (f"gemm_BM{bm}_TN{tn}_LANES_K{lanesK}_WAVES{waves}_UP_ITERS{upIters}"
             f"_PF{prefetch}_GROUP{group}_NUM_XCDS{numXcds}_GRID_3D{int(grid3d)}_USE_BETA{int(useBeta)}")
 
 
@@ -94,7 +94,7 @@ class TestParser:
 
     def test_unknown_knobs_are_errors(self, pool):
         with pytest.raises(ValueError, match="not in the pool"):
-            SkinnyGEMMBench.generated_knobs(generated_name((1, 1, 4, 1, 1, 0, 1, 1, 1, True, False)), pool)
+            SkinnyGEMMBench.generated_knobs(generated_name((1, 1, 4, 1, 1, 0, 1, 1, True, False)), pool)
         with pytest.raises(ValueError, match="unparsable"):
             SkinnyGEMMBench.generated_knobs("gemm_BM1_TN1", pool)
 
@@ -311,17 +311,12 @@ class TestKSupports:
         assert SkinnyGEMMCells.k_supports(RING, 1, 1 << 20) and SkinnyGEMMCells.k_supports(RING, 4100, 4100)
         assert not SkinnyGEMMCells.k_supports(RING, 1, (1 << 20) + 1)
 
-    def test_up_front_window_and_whole_steps(self):
+    def test_up_front_window(self):
         supports = SkinnyGEMMCells.k_supports
         assert supports(UP_FRONT, 8192, 8192) and supports(UP_FRONT, 4096 + 4096, 8192)
         assert not supports(UP_FRONT, 4096, 4096) and not supports(UP_FRONT, 8192, 8193)
-        assert not supports(UP_FRONT, 5000, 5000)
-        assert not supports(UP_FRONT, 4097, 8191)
-
-    def test_partial_step_free_entries_need_a_point_interval(self):
-        twin = (1, 1, 16, 1, 1, 0, 0, 1, 1, True, False)
-        assert SkinnyGEMMCells.k_supports(twin, 2048, 2048) and not SkinnyGEMMCells.k_supports(twin, 1025, 2047)
-        assert not SkinnyGEMMCells.k_supports(twin, 1500, 1500)
+        assert supports(UP_FRONT, 5000, 5000)
+        assert supports(UP_FRONT, 4097, 8191)
 
 
 class TestPartition:
@@ -418,10 +413,10 @@ class TestCells:
         assert routes[0].knobs == min(RING, RING_B)
 
     def test_up_front_entry_needs_a_matching_k_window(self, tmp_path, pool):
-        grid = self.grid(skinny=[4], wide=[1024], k=[8192, 7168])
+        grid = self.grid(skinny=[4], wide=[1024], k=[8192, 12288])
         fast = lambda p: {0: 100.0, 3: 20.0}
         _, routes = build_routes(grid, synthetic(grid, tmp_path, pool, fast), pool)
-        # 7168 is not a multiple of the 4096 step and the gap between the K values is not a point interval.
+        # 12288 and the gap above 8192 lie outside the (4096, 8192] window.
         assert keys(routes) == [(1024, 1024, 4, 4, 1, 1, 8192, 8192)]
         assert routes[0].knobs == UP_FRONT
 

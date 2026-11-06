@@ -14,12 +14,14 @@
 #include <cassert>
 #include <concepts>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
 #include <utility>
 #include <variant>
+#include <vector>
 
 namespace rocm::tensilelite::codegen {
 
@@ -142,6 +144,7 @@ public:
   RegisterAllocator &allocator() const { return *registers; }
   rocisa::Module &insertionPoint() const { return *module; }
   void setInsertionPoint(rocisa::Module &newInsertionPoint) {
+    resolvePendingHazards();
     module = &newInsertionPoint;
   }
 
@@ -562,14 +565,59 @@ public:
   void storeBuffer(RegisterRef data, RegisterRef rsrc, RegisterRef voffset,
                    Operand soffset, MemoryWidth width,
                    BufferAccess access = {});
+  /// Emits a buffer load of width straight into LDS (buffer_load_* ... lds,
+  /// gfx950), with the rules of loadBuffer except that there is no destination
+  /// register and width is b32, b96 or b128. Lane l writes its width bytes at
+  /// the LDS address ldsBase + ldsOffset + l * bytes, so the wave writes a
+  /// contiguous block in lane order, whatever its global addresses; ldsBase is
+  /// one SGPR and ldsOffset any value that keeps the block inside the kernel's
+  /// LDS allocation. An out-of-range lane writes zeros to its LDS bytes, as a
+  /// load returns zeros; a straddling access zeroes its out-of-range dwords.
+  /// The data has landed in LDS once vectorLoads waits for the load. The
+  /// builder writes M0 (the LDS base of the instruction) with s_add_u32 or
+  /// s_mov_b32 and the wait state that the load needs after it, so M0 and SCC
+  /// are clobbered, and it cancels the effect of access.offset, which the
+  /// hardware adds to the LDS address as well as to the global one.
+  /// The load needs one wait state after the M0 write: fill, when given, emits
+  /// independent instructions between the two, which must not touch M0 or
+  /// SCC, and the builder only adds s_nop 0 when fill emits nothing.
+  void loadBufferToLds(RegisterRef rsrc, RegisterRef voffset, Operand soffset,
+                       RegisterRef ldsBase, int32_t ldsOffset,
+                       MemoryWidth width, BufferAccess access = {},
+                       const std::function<void()> &fill = {});
+
+  // Hazards.
+
+  /// Records that the instruction just emitted is a VALU write of the SGPRs
+  /// dst. Instead of an s_nop right after it, the builder inserts the wait
+  /// states that are still missing before the first instruction that reads
+  /// them: 2 for a VALU, 4 for a v_readlane or v_writelane and 5 for a vector
+  /// memory instruction, counting every instruction in between. A branch
+  /// takes the 2 a VALU at its target would need, as does an item the builder
+  /// cannot classify, and an s_waitcnt counts as no wait state.
+  void deferValuSgprWrite(RegisterRef dst);
+  /// Inserts the wait states that the recorded SGPR writes still need for any
+  /// reader, as before an unknown successor.
+  void resolvePendingHazards();
 
 private:
+  // A VALU write of SGPRs and the wait states issued since.
+  struct PendingSgprWrite {
+    int32_t start, count, elapsed;
+  };
+
   void insertItem(const std::shared_ptr<rocisa::Item> &item);
+  // Inserts the s_nop that item needs after the pending writes, then counts
+  // the wait states that item provides.
+  void coverPendingHazards(const rocisa::Item &item);
+  void advancePendingHazards(const rocisa::Item &item);
+  void emitWaitStates(int32_t count);
 
   const Target *targetInfo;
   RegisterAllocator *registers;
   rocisa::Module *module;
   int32_t nextLabelId = 0;
+  std::vector<PendingSgprWrite> pendingSgprWrites;
 };
 
 } // namespace rocm::tensilelite::codegen

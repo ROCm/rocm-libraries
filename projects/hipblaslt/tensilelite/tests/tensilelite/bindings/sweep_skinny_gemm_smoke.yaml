@@ -52,7 +52,7 @@ problems:
       waves: [1, 4]
       prefetch: [1, 2]
       upScales: [0, 1]
-  # Split-K, with 2 splits and with a single split.
+  # Split-K with 2 splits, and the kernel without split-K.
   - name: smoke-split-k
     m: 4
     n: 4096

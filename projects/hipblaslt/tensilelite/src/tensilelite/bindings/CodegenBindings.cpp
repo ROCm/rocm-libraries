@@ -47,45 +47,55 @@ NB_MODULE(tensilelite_codegen, m) {
   const SkinnyGEMMConfig defaults;
   nb::class_<SkinnyGEMMConfig>(
       m, "SkinnyGEMMConfig",
-      "Compile-time knobs of the skinny MXFP8 GEMM, named after the "
-      "constants of the MLIR reference: bm (BM), tn (TN), lanesK (LANES_K, one "
-      "of 4, 8, 16 and 64), waves (WAVES, so a block has 64 * waves lanes), "
+      "Compile-time knobs of the skinny MXFP8 GEMM: bm (BM), tn (TN), "
+      "lanesK (LANES_K, one of 4, 8, 16 and 64), waves (WAVES, so a block has "
+      "64 * waves lanes), "
       "prefetch (PF, 0 means no ring), upIters (UP_ITERS, 0 rings the scales, "
-      "else the up-front vector size), partialSteps (PARTIAL_STEPS, 0 or "
-      "1), group (GROUP), numXcds (NUM_XCDS), grid3d (GRID_3D, false "
+      "else the up-front vector size), group (GROUP), numXcds (NUM_XCDS), "
+      "grid3d (GRID_3D, false "
       "selects a persistent 1-D launch) and useBeta (USE_BETA, true prefetches "
-      "C and adds beta * C).")
+      "C and adds beta * C), mfma (true selects the scaled-MFMA compute "
+      "path, whose knobs have the meanings documented in SkinnyGEMM.hpp), "
+      "lds (true stages the operands of the MFMA path through LDS) and "
+      "useSplitK (USE_SPLIT_K, true reads spk and splits K at run time, "
+      "storing the slices of several splits into the workspace for "
+      "splitk_reduce; false covers the whole K and ignores spk and ws).")
       .def(
           "__init__",
           [](SkinnyGEMMConfig *self, int32_t bm, int32_t tn, int32_t lanesK,
-             int32_t waves, int32_t prefetch, int32_t upIters,
-             int32_t partialSteps, int32_t group, int32_t numXcds, bool grid3d,
-             bool useBeta) {
-            new (self) SkinnyGEMMConfig{bm,       tn,      lanesK,       waves,
-                                        prefetch, upIters, partialSteps, group,
-                                        numXcds,  grid3d,  useBeta};
+             int32_t waves, int32_t prefetch, int32_t upIters, int32_t group,
+             int32_t numXcds, bool grid3d, bool useBeta, bool mfma, bool lds,
+             bool useSplitK) {
+            new (self) SkinnyGEMMConfig{
+                bm,      tn,     lanesK,  waves, prefetch, upIters,  group,
+                numXcds, grid3d, useBeta, mfma,  lds,      useSplitK};
           },
           nb::kw_only(), "bm"_a = defaults.bm, "tn"_a = defaults.tn,
           "lanesK"_a = defaults.lanesK, "waves"_a = defaults.waves,
           "prefetch"_a = defaults.prefetch, "upIters"_a = defaults.upIters,
-          "partialSteps"_a = defaults.partialSteps, "group"_a = defaults.group,
-          "numXcds"_a = defaults.numXcds, "grid3d"_a = defaults.grid3d,
-          "useBeta"_a = defaults.useBeta)
+          "group"_a = defaults.group, "numXcds"_a = defaults.numXcds,
+          "grid3d"_a = defaults.grid3d, "useBeta"_a = defaults.useBeta,
+          "mfma"_a = defaults.mfma, "lds"_a = defaults.lds,
+          "useSplitK"_a = defaults.useSplitK)
       .def_rw("bm", &SkinnyGEMMConfig::bm)
       .def_rw("tn", &SkinnyGEMMConfig::tn)
       .def_rw("lanesK", &SkinnyGEMMConfig::lanesK)
       .def_rw("waves", &SkinnyGEMMConfig::waves)
       .def_rw("prefetch", &SkinnyGEMMConfig::prefetch)
       .def_rw("upIters", &SkinnyGEMMConfig::upIters)
-      .def_rw("partialSteps", &SkinnyGEMMConfig::partialSteps)
       .def_rw("group", &SkinnyGEMMConfig::group)
       .def_rw("numXcds", &SkinnyGEMMConfig::numXcds)
       .def_rw("grid3d", &SkinnyGEMMConfig::grid3d)
-      .def_rw("useBeta", &SkinnyGEMMConfig::useBeta);
+      .def_rw("useBeta", &SkinnyGEMMConfig::useBeta)
+      .def_rw("mfma", &SkinnyGEMMConfig::mfma)
+      .def_rw("lds", &SkinnyGEMMConfig::lds)
+      .def_rw("useSplitK", &SkinnyGEMMConfig::useSplitK);
 
   m.def("skinnyGEMMKernelName", &skinnyGEMMKernelName, "config"_a,
-        "Returns the symbol of the GEMM kernel for config, in the format of "
-        "the reference. Raises ValueError for invalid knobs.");
+        "Returns the symbol of the GEMM kernel for config, in the format "
+        "gemm_BM<v>_TN<v>_...., with the suffixes _MFMA1, _LDS1 and "
+        "_USE_SPLIT_K1 for the knobs that are set. Raises ValueError for "
+        "invalid knobs.");
 
   // The arch string is resolved here: Target keeps per-thread rocisa state, and
   // each call builds its kernel on the calling thread.
@@ -99,8 +109,8 @@ NB_MODULE(tensilelite_codegen, m) {
       "config"_a, "arch"_a = "gfx950", "codeObjectVersion"_a = 6,
       "maxPreloadDwords"_a = 0,
       "Returns the assembly text of the GEMM kernel for config, for the 3-D "
-      "launch (grid3d, group = 1, numXcds = 1) with any upIters and "
-      "partialSteps. Raises ValueError for invalid knobs, an unsupported arch, "
+      "launch (grid3d, group = 1, numXcds = 1) with any upIters. "
+      "Raises ValueError for invalid knobs, an unsupported arch, "
       "the features that are not emitted yet (grid3d = false, group, numXcds; "
       "the message names the knob) and a configuration that exceeds the "
       "register budget. codeObjectVersion (4, 5 or 6) selects the directives "

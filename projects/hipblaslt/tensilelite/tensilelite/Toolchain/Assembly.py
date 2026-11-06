@@ -157,7 +157,7 @@ def buildAssemblyCodeObjectFiles(
         objectFile = str(asmDir / (baseName + extObj))
         aliases = getattr(entry, "aliases", (kernel,))
         for alias in aliases:
-          destination = _codeObjectDestination(alias, asmDir, name, extCoRaw, linker.path)
+          destination = _codeObjectDestination(alias, asmDir, name, extCoRaw, getattr(linker, "path", None))
           if destination is not None:
             coFileMap[destination].add(objectFile)
 

@@ -1,25 +1,25 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""rocm-smi helpers of the skinny GEMM sweep: GPU selection, clock sampling and
+"""amd-smi helpers of the skinny GEMM sweep: GPU selection, clock sampling and
 the clock lock around the timed stage.
 
-Nothing here touches HIP, so the main process of the sweep can use it.
+Nothing here touches HIP, so the main process of the sweep can use it. The GPU
+ids are the indices of the amd-smi processor handles.
 """
 
 import atexit
-import json
+import importlib
 import os
-import re
 import signal
 import subprocess
 import sys
 from dataclasses import dataclass, field
 
 SMI_TIMEOUT_S = 30
-# rocm-smi does not always fail its exit code when a request is refused.
-REFUSAL = re.compile(r"sudo|not supported|unable|error|fail", re.IGNORECASE)
-CARD = re.compile(r"card(\d+)")
-MHZ = re.compile(r"(\d+)\s*mhz", re.IGNORECASE)
+PERF_LEVEL_PREFIX = "AMDSMI_DEV_PERF_LEVEL_"
+# Where the ROCm installs ship the amdsmi python package when it is not on the
+# path of the interpreter.
+AMDSMI_SEARCH_DIRS = ("share/amd_smi",)
 
 
 class SweepAbort(Exception):
@@ -33,81 +33,140 @@ def log(message: str) -> None:
 @dataclass
 class SmiResult:
     ok: bool
-    rc: int
     message: str
-    stdout: str
 
 
-def run_smi(args: list[str]) -> SmiResult:
-    """Runs rocm-smi with the plain user's rights; never raises. The message is
-    the output on one line without the banner, for logging."""
+class AmdSmi:
+    """The amdsmi python bindings, initialized once per process."""
+
+    def __init__(self):
+        self.module = load_amdsmi_module()
+        self.module.amdsmi_init()
+        self.pid = os.getpid()
+        self.handles = self.module.amdsmi_get_processor_handles()
+        atexit.register(self.shut_down)
+
+    def shut_down(self) -> None:
+        # A forked child must not shut down the library of its parent.
+        if os.getpid() != self.pid:
+            return
+        try:
+            self.module.amdsmi_shut_down()
+        except Exception:
+            pass
+
+    def handle(self, gpu: int):
+        if not 0 <= gpu < len(self.handles):
+            raise SweepAbort(f"GPU {gpu} is not reported by amd-smi")
+        return self.handles[gpu]
+
+
+def load_amdsmi_module():
     try:
-        proc = subprocess.run(
-            ["rocm-smi", *args],
-            capture_output=True,
-            text=True,
-            timeout=SMI_TIMEOUT_S,
-        )
-    except (OSError, subprocess.TimeoutExpired) as err:
-        return SmiResult(False, -1, str(err), "")
-    lines = (proc.stderr + proc.stdout).splitlines()
-    message = " ".join(
-        line.strip() for line in lines if line.strip() and not line.startswith("=")
+        return importlib.import_module("amdsmi")
+    except ImportError:
+        pass
+    roots = [os.environ.get("ROCM_PATH"), "/opt/rocm"]
+    for root in filter(None, roots):
+        for directory in AMDSMI_SEARCH_DIRS:
+            path = os.path.join(root, directory)
+            if os.path.isdir(os.path.join(path, "amdsmi")):
+                sys.path.append(path)
+                return importlib.import_module("amdsmi")
+    raise SweepAbort(
+        "cannot import the amdsmi python package; add <rocm>/share/amd_smi "
+        "to PYTHONPATH"
     )
-    return SmiResult(proc.returncode == 0, proc.returncode, message, proc.stdout)
 
 
-def smi_json(args: list[str]) -> dict[int, dict]:
-    """The per-GPU mappings of a --json query, keyed by GPU id; empty when
-    rocm-smi fails."""
-    result = run_smi([*args, "--json"])
-    if not result.ok:
-        return {}
+_smi: AmdSmi | None = None
+
+
+def get_smi() -> AmdSmi:
+    """The amd-smi bindings of this process, initialized on first use."""
+    global _smi
+    if _smi is None or _smi.pid != os.getpid():
+        try:
+            _smi = AmdSmi()
+        except SweepAbort:
+            raise
+        except Exception as err:
+            raise SweepAbort(f"cannot initialize amd-smi: {err}")
+    return _smi
+
+
+def run_smi(action, *args) -> SmiResult:
+    """Calls an amdsmi function; never raises. The message is the failure."""
     try:
-        data = json.loads(result.stdout)
-    except json.JSONDecodeError:
-        return {}
-    cards = {}
-    for key, value in data.items():
-        match = CARD.fullmatch(key)
-        if match and isinstance(value, dict):
-            cards[int(match.group(1))] = value
-    return cards
+        action(*args)
+    except Exception as err:
+        return SmiResult(False, f"{type(err).__name__}: {err}")
+    return SmiResult(True, "")
 
 
 def read_use() -> dict[int, float]:
     """The GPU use in percent of every GPU."""
+    smi = get_smi()
     use = {}
-    for gpu, values in smi_json(["--showuse"]).items():
+    for gpu, handle in enumerate(smi.handles):
         try:
-            use[gpu] = float(values["GPU use (%)"])
-        except (KeyError, ValueError):
+            activity = smi.module.amdsmi_get_gpu_activity(handle)
+            use[gpu] = float(activity["gfx_activity"])
+        except Exception:
             continue
     return use
 
 
 def read_perf_level(gpu: int) -> str | None:
-    values = smi_json(["-d", str(gpu), "--showperflevel"]).get(gpu, {})
-    return values.get("Performance Level")
+    smi = get_smi()
+    try:
+        level = smi.module.amdsmi_get_gpu_perf_level(smi.handle(gpu))
+    except Exception:
+        return None
+    return str(level).removeprefix(PERF_LEVEL_PREFIX)
+
+
+def read_clock(gpu: int, clock_type: str) -> dict | None:
+    smi = get_smi()
+    try:
+        kind = getattr(smi.module.AmdSmiClkType, clock_type)
+        return smi.module.amdsmi_get_clock_info(smi.handle(gpu), kind)
+    except Exception:
+        return None
 
 
 def read_max_sclk(gpu: int) -> int | None:
-    values = smi_json(["-d", str(gpu), "--showsclkrange"]).get(gpu, {})
-    clocks = [int(value) for value in MHZ.findall(str(values.get("Valid sclk range")))]
-    return max(clocks, default=None)
+    info = read_clock(gpu, "GFX")
+    if not info or not isinstance(info.get("max_clk"), int):
+        return None
+    return info["max_clk"]
 
 
 def sample_clocks(gpu: int) -> dict:
     """The current sclk and mclk in MHz, best effort: a clock that cannot be
     read is left out."""
-    values = smi_json(["-d", str(gpu), "--showclocks"]).get(gpu, {})
     sample = {}
-    keys = (("sclk clock speed:", "sclkMHz"), ("mclk clock speed:", "mclkMHz"))
-    for key, name in keys:
-        match = MHZ.search(str(values.get(key)))
-        if match:
-            sample[name] = int(match.group(1))
+    for clock_type, name in (("GFX", "sclkMHz"), ("MEM", "mclkMHz")):
+        info = read_clock(gpu, clock_type)
+        if info and isinstance(info.get("clk"), int):
+            sample[name] = info["clk"]
     return sample
+
+
+def set_perf_level(gpu: int, level: str) -> SmiResult:
+    smi = get_smi()
+    try:
+        value = smi.module.AmdSmiDevPerfLevel[level.upper()]
+    except KeyError:
+        return SmiResult(False, f"unknown performance level {level!r}")
+    return run_smi(smi.module.amdsmi_set_gpu_perf_level, smi.handle(gpu), value)
+
+
+def set_perf_determinism(gpu: int, sclk_mhz: int) -> SmiResult:
+    smi = get_smi()
+    return run_smi(
+        smi.module.amdsmi_set_gpu_perf_determinism_mode, smi.handle(gpu), sclk_mhz
+    )
 
 
 def parse_gpu_list(spec: str) -> list[int]:
@@ -123,7 +182,7 @@ def select_gpus(spec: str, max_busy: float, allow_busy: bool) -> list[int]:
     the listed ones, which must be idle unless allow_busy."""
     use = read_use()
     if not use:
-        raise SweepAbort("cannot read the GPU use from rocm-smi")
+        raise SweepAbort("cannot read the GPU use from amd-smi")
     if spec == "auto":
         gpus = [gpu for gpu, percent in sorted(use.items()) if percent < max_busy]
         if not gpus:
@@ -132,7 +191,7 @@ def select_gpus(spec: str, max_busy: float, allow_busy: bool) -> list[int]:
     gpus = parse_gpu_list(spec)
     unknown = [gpu for gpu in gpus if gpu not in use]
     if unknown:
-        raise SweepAbort(f"GPU(s) {unknown} are not reported by rocm-smi")
+        raise SweepAbort(f"GPU(s) {unknown} are not reported by amd-smi")
     busy = [gpu for gpu in gpus if use[gpu] >= max_busy]
     if busy and not allow_busy:
         raise SweepAbort(
@@ -175,10 +234,14 @@ class GpuStabilizer:
     exit, on SIGINT and SIGTERM and from an atexit handler, only for the GPUs
     where a lock attempt succeeded (a failed lock never restores anything).
 
+    Locking is opt-in through require_stable (--require-stable-clocks); when it
+    is not requested nothing is attempted, amd-smi is never invoked and no
+    elevated rights are ever needed.
+
     The lock tries the performance determinism mode with the highest sclk,
     then the performance level high, which holds sclk and mclk at their
-    maximum; both need rights that an ordinary user may lack, in which case the
-    sweep goes on with its software noise reduction unless it must be stable.
+    maximum; both need rights that an ordinary user may lack, in which case
+    the sweep aborts.
     """
 
     def __init__(self, gpus: list[int], require_stable: bool):
@@ -210,10 +273,15 @@ class GpuStabilizer:
             self.previous_sigterm = None
 
     def lock_all(self) -> None:
+        if not self.require_stable:
+            # Not even a read: amd-smi must never be invoked unless requested.
+            for gpu in self.gpus:
+                self.locks[gpu] = GpuLock(gpu, prior_level=None)
+            return
         for gpu in self.gpus:
             self.locks[gpu] = self.lock(gpu)
         unavailable = [gpu for gpu, lock in self.locks.items() if not lock.locked]
-        if unavailable and self.require_stable:
+        if unavailable:
             raise SweepAbort(f"cannot lock the clocks of GPU(s) {unavailable}")
 
     def lock(self, gpu: int) -> GpuLock:
@@ -221,16 +289,15 @@ class GpuStabilizer:
         sclk = read_max_sclk(gpu)
         attempts = []
         if sclk is not None:
-            attempts.append(("perfdeterminism", ["--setperfdeterminism", str(sclk)]))
-        attempts.append(("perflevel-high", ["--setperflevel", "high"]))
-        for mode, args in attempts:
-            result = run_smi(["-d", str(gpu), *args])
-            refused = not result.ok or REFUSAL.search(result.message)
-            if not refused:
+            attempts.append(("perfdeterminism", lambda: set_perf_determinism(gpu, sclk)))
+        attempts.append(("perflevel-high", lambda: set_perf_level(gpu, "high")))
+        for mode, attempt in attempts:
+            result = attempt()
+            if result.ok:
                 lock.mode = mode
                 log(f"GPU {gpu}: clocks locked with {mode}")
                 return lock
-            lock.failures.append(f"{mode}: rc={result.rc} {result.message[:200]}")
+            lock.failures.append(f"{mode}: {result.message[:200]}")
         log(
             f"warning: GPU {gpu}: clock lock unavailable ({'; '.join(lock.failures)}); "
             "continuing with warmup, LLC flush, min-of-N and interleaved refinement"
@@ -244,24 +311,24 @@ class GpuStabilizer:
                 continue
             lock.restored = True
             if lock.mode == "perfdeterminism":
-                args = ["--resetperfdeterminism"]
+                level = "auto"
             elif lock.prior_level is None:
                 # Without a known prior level there is nothing safe to restore
                 # to; the user must reset the level by hand.
                 log(
                     f"warning: GPU {gpu}: the prior performance level is unknown, "
-                    f"not restoring; run rocm-smi -d {gpu} --setperflevel auto"
+                    f"not restoring; run amd-smi reset -g {gpu} --clocks"
                 )
                 continue
             else:
-                args = ["--setperflevel", lock.prior_level]
-            result = run_smi(["-d", str(gpu), *args])
+                level = lock.prior_level
+            result = set_perf_level(gpu, level)
             if result.ok:
-                log(f"GPU {gpu}: clocks restored ({' '.join(args)})")
+                log(f"GPU {gpu}: clocks restored (performance level {level})")
                 continue
             log(
-                f"warning: GPU {gpu}: restoring the clocks failed (rc={result.rc} "
-                f"{result.message[:200]}); run rocm-smi -d {gpu} {' '.join(args)}"
+                f"warning: GPU {gpu}: restoring the clocks failed "
+                f"({result.message[:200]}); run amd-smi reset -g {gpu} --clocks"
             )
 
     def summary(self) -> dict:

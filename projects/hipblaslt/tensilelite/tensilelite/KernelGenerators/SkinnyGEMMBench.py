@@ -50,7 +50,7 @@ _HEADER = re.compile(r"^\[\d+\]:transA,")
 _INDEX = re.compile(r"^\s*--Solution index:\s*(\d+)\s*$")
 _NAME = re.compile(r"^\s*--Solution name:\s*(\S+)\s*$")
 _KERNEL = re.compile(r"^\s*--kernel name:\s*(\S+)\s*$")
-_GENERATED = re.compile(r"gemm_BM(\d+)_TN(\d+)_LANES_K(\d+)_WAVES(\d+)_UP_ITERS(\d+)_PARTIAL_STEPS(\d+)"
+_GENERATED = re.compile(r"gemm_BM(\d+)_TN(\d+)_LANES_K(\d+)_WAVES(\d+)_UP_ITERS(\d+)"
                         r"_PF(\d+)_GROUP(\d+)_NUM_XCDS(\d+)_GRID_3D([01])(?:_USE_BETA([01]))?")
 
 Knobs = SkinnyGEMMLogic.Knobs
@@ -253,9 +253,9 @@ def generated_knobs(kernel_name: str, pool: SkinnyGEMMLogic.Pool) -> Optional[Kn
         raise ValueError(f"unparsable generated kernel name {kernel_name}")
     # A name without the suffix predates the useBeta variants.
     values = [int(group or 0) for group in match.groups()]
-    # The name order is bm, tn, lanesK, waves, upIters, partialSteps, prefetch, group, numXcds, grid3d, useBeta.
-    bm, tn, lanesK, waves, upIters, partialSteps, prefetch, group, numXcds, grid3d, useBeta = values
-    knobs = (bm, tn, lanesK, waves, prefetch, upIters, partialSteps, group, numXcds, bool(grid3d), bool(useBeta))
+    # The name order is bm, tn, lanesK, waves, upIters, prefetch, group, numXcds, grid3d, useBeta.
+    bm, tn, lanesK, waves, upIters, prefetch, group, numXcds, grid3d, useBeta = values
+    knobs = (bm, tn, lanesK, waves, prefetch, upIters, group, numXcds, bool(grid3d), bool(useBeta))
     if knobs not in pool:
         raise ValueError(f"generated kernel {kernel_name} is not in the pool")
     return knobs

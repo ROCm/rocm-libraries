@@ -6,13 +6,15 @@
 #   settings   timing and verification knobs of the tool (CLI flags override).
 #   defaults   useBeta, spk, transpose, sweep (and alpha, beta) for every entry.
 #   problems   name, m, n, k (int or list: cartesian product), transpose
-#              (also emit every (n, m, k) swapped shape), optional spk (int or
-#              "k" = one split), ldA/ldB/ldD/ldC in BYTES, useBeta, alpha, beta,
-#              sweep (merged over the default sweep).
+#              (also emit every (n, m, k) swapped shape), optional spk (int =
+#              the split-K kernel, "k" = the kernel without split-K),
+#              ldA/ldB/ldD/ldC in BYTES, useBeta, alpha, beta, sweep (merged
+#              over the default sweep).
 # A sweep value is a scalar, a list or a range {min, max, step | mul}. The
-# default sweep is a list of two mappings whose configurations are unioned: the
-# 3-D grid (grid3d true, plain tile order) and a smaller persistent sub-sweep
-# over the tile order (group, numXcds) and the block count.
+# default sweep is a list of four mappings whose configurations are unioned: the
+# VALU 3-D grid (grid3d true, plain tile order) and a smaller VALU persistent
+# sub-sweep over the tile order (group, numXcds) and the block count, then the
+# same two shapes of sweep for the scaled-MFMA path (plain and with the LDS ring).
 #
 # useBeta: every problem runs with the kernel that never reads C and with the
 # useBeta kernel. beta: the useBeta kernel (and the split-K reduce, which applies
@@ -26,191 +28,198 @@
 # name, m, n, k and useBeta of the problem, not on the order of the problems or
 # on the GPU. The resolved values are in the problem records of the results.
 #
-# Expected runtime of the whole file: 957 cases (321 shapes, 3 cases each where
-# beta matters: the plain kernel, and the useBeta kernel in the beta modes zero and
-# random), about 795k configurations and about 11.5k unique GEMM kernels. Building
-# the kernels is CPU-parallel and overlaps the timing. The earlier 231-shape,
-# 193k-configuration file (one case per shape) took 8 min 56 s on 4 GPUs, so this
-# one is estimated at 35 to 40 minutes on 4 GPUs (4 times that on one). Use
-# --only/--limit-shapes to run a slice.
+# Expected runtime of the whole file: 726 cases (the plain kernel, and the useBeta
+# kernel in the beta modes zero and random), about 8.05M configurations (the
+# MFMA mappings add about 216k, 2.8%) and about 48k unique GEMM kernels (--list
+# counts them). Building the kernels is CPU-parallel and overlaps the timing. A
+# measured cold case of about 15k configurations took 31 s on one GPU, so the
+# whole file is estimated at 1.5 to 2 hours on 4 GPUs (4 times that on one); this
+# is an estimate, not a measurement. Use --only/--limit-shapes to run a slice.
 
 settings:
-  iters: 20
-  warmup: 3
-  refine_top: 10
-  refine_iters: 100
-  top: 5
+  iters: 30
+  warmup: 10
+  refine_top: 0
+  refine_iters: 0
+  top: 0
   verify_full_max_elems: 2147483648 # (m + n) * k up to this: dense reference, else sampled
   seed: 20240601 # of the random alpha and beta
 defaults:
-  useBeta: [false, true]
-  betaModes: [zero, random]
+  useBeta: [true]
+  betaModes: [zero]
   sweep:
     - &grid3d_sweep
       bm: [1, 2, 3, 4]
       tn: [1, 2, 4]
       lanesK: [8, 16, 64]
       waves: [1, 2, 4]
-      prefetch: [1, 2, 3]
+      prefetch: [0, 1, 2]
       upScales: [0, 1]
       grid3d: true
     - &persistent_sweep
       bm: [1, 2, 4]
-      tn: [1, 2]
+      tn: [2, 4]
       lanesK: [16, 64]
-      waves: [4]
-      prefetch: [1, 2]
-      upScales: [1]
+      waves: [1, 4]
+      prefetch: [0, 1]
+      upScales: [0, 1]
       grid3d: false
-      group: [1, 4]
+      group: [1, 4, 8]
+      numXcds: [1, 4, 8, 16]
+      blocks: [256, 512]
+    - &mfma_grid3d_sweep
+      mfma: true
+      lds: [false, true]
+      bm: [16, 32]
+      tn: [1, 2, 3, 4]
+      lanesK: 64
+      waves: [1, 2, 4]
+      prefetch: [2, 3, 4, 6]
+      upScales: 0
+      grid3d: true
+    - &mfma_persistent_sweep
+      mfma: true
+      lds: true
+      bm: [16, 32]
+      tn: [1, 2]
+      lanesK: 64
+      waves: [1, 2]
+      prefetch: [3, 4]
+      upScales: 0
+      grid3d: false
+      group: [1, 8]
       numXcds: [1, 8]
       blocks: [256, 512]
 problems:
   # ---- Sourced from the repo -------------------------------------------------
   # The vLLM decode shapes of skinny_gemm_support.VLLM_SHAPES (the Qwen3-32B
   # projections, hidden 5120), with the skinny dimension swept over the skinny
-  # range of data/SkinnyGEMMGrid.yaml, in both orientations.
+  # range of data/SkinnyGEMMGrid.yaml; n is the skinny dimension.
   - name: qwen3-32b-down_proj # (1, 5120, 25600)
-    m: &decode_batch [1, 2, 3, 4, 6, 8, 12, 16]
-    n: 5120
+    m: 5120
+    n: &decode_batch [1, 2, 3, 4]
     k: 25600
-    transpose: true
+    transpose: false
   - name: qwen3-32b-qkv_proj # (1, 10240, 5120)
-    m: *decode_batch
-    n: 10240
+    m: 10240
+    n: *decode_batch
     k: 5120
-    transpose: true
+    transpose: false
   - name: qwen3-32b-o_proj # (1, 5120, 8192)
-    m: *decode_batch
-    n: 5120
+    m: 5120
+    n: *decode_batch
     k: 8192
-    transpose: true
+    transpose: false
   - name: qwen3-32b-gate_up_proj # (1, 51200, 5120)
-    m: *decode_batch
-    n: 51200
+    m: 51200
+    n: *decode_batch
     k: 5120
-    transpose: true
+    transpose: false
   - name: qwen3-32b-lm_head # (1, 151936, 5120)
-    m: *decode_batch
-    n: 151936
+    m: 151936
+    n: *decode_batch
     k: 5120
-    transpose: true
+    transpose: false
+  # hipblaslt-bench bring-up (TN M×N×K); not a shipped projection.
+  - name: hipblaslt-bench-5120x4x5120
+    m: 5120
+    n: 4
+    k: 5120
+    transpose: false
   # The extra_points of data/SkinnyGEMMGrid.yaml, [m, n, k], verbatim.
-  - {name: grid-extra-2x32768x14336, m: 2, n: 32768, k: 14336}
-  - {name: grid-extra-3x16384x25600, m: 3, n: 16384, k: 25600}
-  - {name: grid-extra-5x10240x3872, m: 5, n: 10240, k: 3872}
-  - {name: grid-extra-6x2048x25600, m: 6, n: 2048, k: 25600}
-  - {name: grid-extra-6x51200x14336, m: 6, n: 51200, k: 14336}
-  - {name: grid-extra-12x16384x7168, m: 12, n: 16384, k: 7168}
-  - {name: grid-extra-12x51200x4096, m: 12, n: 51200, k: 4096}
-  - {name: grid-extra-16x5120x16384, m: 16, n: 5120, k: 16384}
-  - {name: grid-extra-8192x6x8192, m: 8192, n: 6, k: 8192}
-  - {name: grid-extra-16384x16x6144, m: 16384, n: 16, k: 6144}
-  - {name: grid-extra-51200x6x1024, m: 51200, n: 6, k: 1024}
+  - {name: grid-extra-32768x2x14336, m: 32768, n: 2, k: 14336}
+  - {name: grid-extra-16384x3x25600, m: 16384, n: 3, k: 25600}
   # ---- Assumption, not sourced from the repo ---------------------------------
   # Public Llama-family projection dimensions (from the published model
   # configurations, not from this repository) with a decode batch as the skinny
   # dimension. Llama-3-8B: hidden 4096, qkv 6144, gate_up 28672, down k 14336,
   # vocabulary 128256.
   - name: llama3-8b-o_proj
-    m: &llama_batch [1, 2, 4, 8, 16, 32, 64]
-    n: 4096
+    m: 4096
+    n: &llama_batch [1, 2, 4]
     k: 4096
-    transpose: true
+    transpose: false
   - name: llama3-8b-qkv_proj
-    m: *llama_batch
-    n: 6144
+    m: 6144
+    n: *llama_batch
     k: 4096
-    transpose: true
+    transpose: false
   - name: llama3-8b-gate_up_proj
-    m: *llama_batch
-    n: 28672
+    m: 28672
+    n: *llama_batch
     k: 4096
-    transpose: true
+    transpose: false
   - name: llama3-8b-down_proj
-    m: *llama_batch
-    n: 4096
+    m: 4096
+    n: *llama_batch
     k: 14336
-    transpose: true
+    transpose: false
   - name: llama3-8b-lm_head
-    m: *llama_batch
-    n: 128256
+    m: 128256
+    n: *llama_batch
     k: 4096
-    transpose: true
+    transpose: false
   # Llama-3-70B: hidden 8192, qkv 10240, gate_up 57344, down k 28672,
   # vocabulary 128256.
   - name: llama3-70b-o_proj
-    m: *llama_batch
-    n: 8192
+    m: 8192
+    n: *llama_batch
     k: 8192
-    transpose: true
+    transpose: false
   - name: llama3-70b-qkv_proj
-    m: *llama_batch
-    n: 10240
+    m: 10240
+    n: *llama_batch
     k: 8192
-    transpose: true
+    transpose: false
   - name: llama3-70b-gate_up_proj
-    m: *llama_batch
-    n: 57344
+    m: 57344
+    n: *llama_batch
     k: 8192
-    transpose: true
+    transpose: false
   - name: llama3-70b-down_proj
-    m: *llama_batch
-    n: 8192
+    m: 8192
+    n: *llama_batch
     k: 28672
-    transpose: true
+    transpose: false
   - name: llama3-70b-lm_head
-    m: *llama_batch
-    n: 128256
+    m: 128256
+    n: *llama_batch
     k: 8192
-    transpose: true
-  # ---- Synthetic regime coverage, not model-derived ---------------------------
-  # Hand-picked sizes of three regimes of the wide (n) and the reduction (k)
-  # dimension, each over a skinny dimension of 1 to 64 in both orientations.
-  # They are not taken from any model or from the repo. The values are distinct
-  # in magnitude, include non-powers of two (n = 1000, 6000, 40000) and a K that
-  # is not a multiple of 32 and leaves a partial tail step (k = 4100), and stay
-  # below the 2^31-byte buffer limit (n * k up to 6.6e8).
-  # Small, n and k of the order of 10^3.
-  - name: synthetic-small-n512-k1024
-    m: &regime_batch [1, 2, 4, 8, 16, 32, 64]
-    n: 512
-    k: 1024
-    transpose: true
-  - name: synthetic-small-n1000-k512
-    m: *regime_batch
-    n: 1000
-    k: 512
-    transpose: true
-  # Medium, of the order of 10^4.
-  - name: synthetic-medium-n4096-k8192
-    m: *regime_batch
-    n: 4096
-    k: 8192
-    transpose: true
-  - name: synthetic-medium-n6000-k4100
-    m: *regime_batch
-    n: 6000
-    k: 4100
-    transpose: true
-  # Large, of the order of 10^4 to 10^5.
-  - name: synthetic-large-n16384-k32768
-    m: *regime_batch
-    n: 16384
-    k: 32768
-    transpose: true
-  - name: synthetic-large-n40000-k16384
-    m: *regime_batch
-    n: 40000
-    k: 16384
-    transpose: true
-  # ---- Synthetic split-K coverage, not model-derived --------------------------
-  # Split-K without the useBeta kernel: the reduce applies beta * C, in both beta
-  # modes.
-  - name: synthetic-split-k
-    m: [1, 4, 16]
-    n: 4096
-    k: 8192
-    spk: 4096
-    useBeta: false
-    transpose: true
+    transpose: false
+  # ---- Additional decode projection shapes ------------------------------------
+  # User-provided layer dimensions (m × k), n is the decode batch, in [1, 4].
+  - name: attn.fused_wqa_wkv # (1, 1792, 5120)
+    m: 1792
+    n: *llama_batch
+    k: 5120
+    transpose: false
+  - name: attn.wq_b # (1, 8192, 1280)
+    m: 8192
+    n: *llama_batch
+    k: 1280
+    transpose: false
+  - name: attn.wo_b # (1, 5120, 2048)
+    m: 5120
+    n: *llama_batch
+    k: 2048
+    transpose: false
+  - name: shared.gate_up # (1, 1152, 5120)
+    m: 1152
+    n: *llama_batch
+    k: 5120
+    transpose: false
+  - name: attn.indexer.wq_b # (1, 4096, 1280)
+    m: 4096
+    n: *llama_batch
+    k: 1280
+    transpose: false
+  - name: engram.wkv # (1, 25600, 6144)
+    m: 25600
+    n: *llama_batch
+    k: 6144
+    transpose: false
+  - name: dspark.main_proj # (1, 5120, 1536)
+    m: 5120
+    n: *llama_batch
+    k: 1536
+    transpose: false

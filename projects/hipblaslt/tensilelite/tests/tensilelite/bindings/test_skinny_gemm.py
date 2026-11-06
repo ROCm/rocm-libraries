@@ -16,12 +16,12 @@ ELF_MAGIC = b"\x7fELF"
 KERNEL_NAMES = [
     (
         {},
-        "gemm_BM1_TN1_LANES_K64_WAVES4_UP_ITERS0_PARTIAL_STEPS0_PF2_GROUP1_"
+        "gemm_BM1_TN1_LANES_K64_WAVES4_UP_ITERS0_PF2_GROUP1_"
         "NUM_XCDS1_GRID_3D1_USE_BETA0",
     ),
     (
         {"prefetch": 1, "upIters": 1},
-        "gemm_BM1_TN1_LANES_K64_WAVES4_UP_ITERS1_PARTIAL_STEPS0_PF1_GROUP1_"
+        "gemm_BM1_TN1_LANES_K64_WAVES4_UP_ITERS1_PF1_GROUP1_"
         "NUM_XCDS1_GRID_3D1_USE_BETA0",
     ),
     (
@@ -31,25 +31,24 @@ KERNEL_NAMES = [
             "waves": 1,
             "prefetch": 2,
             "upIters": 0,
-            "partialSteps": 1,
             "grid3d": False,
         },
-        "gemm_BM1_TN4_LANES_K16_WAVES1_UP_ITERS0_PARTIAL_STEPS1_PF2_GROUP1_"
+        "gemm_BM1_TN4_LANES_K16_WAVES1_UP_ITERS0_PF2_GROUP1_"
         "NUM_XCDS1_GRID_3D0_USE_BETA0",
     ),
     (
         {"group": 4, "numXcds": 8},
-        "gemm_BM1_TN1_LANES_K64_WAVES4_UP_ITERS0_PARTIAL_STEPS0_PF2_GROUP4_"
+        "gemm_BM1_TN1_LANES_K64_WAVES4_UP_ITERS0_PF2_GROUP4_"
         "NUM_XCDS8_GRID_3D1_USE_BETA0",
     ),
     (
         {"useBeta": True},
-        "gemm_BM1_TN1_LANES_K64_WAVES4_UP_ITERS0_PARTIAL_STEPS0_PF2_GROUP1_"
+        "gemm_BM1_TN1_LANES_K64_WAVES4_UP_ITERS0_PF2_GROUP1_"
         "NUM_XCDS1_GRID_3D1_USE_BETA1",
     ),
     (
         {"useBeta": True, "grid3d": False, "lanesK": 16, "waves": 1},
-        "gemm_BM1_TN1_LANES_K16_WAVES1_UP_ITERS0_PARTIAL_STEPS0_PF2_GROUP1_"
+        "gemm_BM1_TN1_LANES_K16_WAVES1_UP_ITERS0_PF2_GROUP1_"
         "NUM_XCDS1_GRID_3D0_USE_BETA1",
     ),
 ]
@@ -63,9 +62,6 @@ INVALID_KNOBS = [
     {"waves": 17},
     {"prefetch": -1},
     {"upIters": -1},
-    {"partialSteps": 2},
-    {"partialSteps": 3},
-    {"partialSteps": -1},
     {"group": 0},
     {"numXcds": 0},
 ]
@@ -74,7 +70,7 @@ INVALID_KNOBS = [
 def test_config_defaults_and_keywords():
     config = codegen.SkinnyGEMMConfig()
     assert (config.bm, config.tn, config.lanesK, config.waves) == (1, 1, 64, 4)
-    assert (config.prefetch, config.upIters, config.partialSteps) == (2, 0, 0)
+    assert (config.prefetch, config.upIters) == (2, 0)
     assert (config.group, config.numXcds, config.grid3d) == (1, 1, True)
     assert config.useBeta is False
 
@@ -254,7 +250,7 @@ def runReduce(
 
 
 def reduceExpected(ws, cBits, m, n, splits, ldC, alpha, beta):
-    """fma(beta, C, alpha * sum) in f32, the reduce's value before truncation."""
+    """fma(beta, C, alpha * sum) in f32, the reduce's value before rounding."""
     scaled = np.float32(alpha) * support.reduceReference(ws, splits, m, n)
     if beta == 0:
         return scaled
@@ -269,22 +265,22 @@ def test_splitk_reduce(reduceKernel, m, n, ldDPad, splits):
     ws, _, dBits = runReduce(reduceKernel, m, n, ldD, splits, seed=m * 31 + n)
     expected = support.reduceReference(ws, splits, m, n)
     label = f"m={m} n={n} ldD={ldD} splits={splits}"
-    # Bit exact against the truncation of the in-order f32 sum, then through the
+    # Bit exact against the rounding of the in-order f32 sum, then through the
     # tolerance based check that the GEMM tests use.
     actual = support.dColumns(dBits, m, n, ldD).T
     np.testing.assert_array_equal(
-        actual, support.truncateToBf16(expected), err_msg=label
+        actual, support.roundToBf16(expected), err_msg=label
     )
     support.verifyD(dBits, expected, m, n, ldD, label)
 
 
-def test_splitk_reduce_truncates_instead_of_rounding(reduceKernel):
+def test_splitk_reduce_rounds_instead_of_truncating(reduceKernel):
     m, n, ldD, splits = 1000, 4, 1000, 2
     ws, _, dBits = runReduce(reduceKernel, m, n, ldD, splits, seed=7)
     expected = support.reduceReference(ws, splits, m, n)
-    nearest = np.rint(expected.view(np.uint32).astype(np.float64) / 65536.0)
+    truncated = (expected.view(np.uint32) >> 16).astype(np.uint16)
     actual = support.dColumns(dBits, m, n, ldD).T
-    assert (nearest.astype(np.uint32) != actual).any()
+    assert (truncated != actual).any()
 
 
 REDUCE_SCALAR_CASES = [(1.0, 0.0), (0.75, 0.0), (1.0, 1.5), (0.75, -2.0), (-0.5, 1.5)]
@@ -337,17 +333,27 @@ def test_splitk_reduce_c_aliases_d(reduceKernel):
     support.verifyD(dBits, expected, m, n, ldD, "C aliases D")
 
 
-# The skinny GEMM tests of the aster driver.
+# The skinny GEMM tests.
 
 
 def resolve(m, n, k, **knobs):
-    """The problem of makeProblem with the driver's defaults: every knob from
+    """The problem of makeProblem with its defaults: every knob from
     pickConfig unless given, tight leading dimensions."""
     resolved = {name: knobs.pop(name, None) for name in support.KNOB_OVERRIDE_NAMES}
     padding = knobs.pop("padding", (0, 0, 0))
     scalars = {
         name: knobs.pop(name)
-        for name in ("paddingC", "ldD", "ldC", "alpha", "beta", "use_beta")
+        for name in (
+            "paddingC",
+            "ldD",
+            "ldC",
+            "alpha",
+            "beta",
+            "use_beta",
+            "scale_pad",
+            "pieces",
+            "cus",
+        )
         if name in knobs
     }
     assert not knobs, f"unknown knobs {sorted(knobs)}"
@@ -360,16 +366,26 @@ def skipUnlessRunnable(*problems):
         pytest.skip("no HIP device or hip-python is not usable")
 
 
+# The texts of the emitter errors for a configuration over a resource budget.
+BUDGET_ERRORS = ("config exceeds the register budget", "config exceeds the LDS budget")
+
+
+def isBudgetError(err):
+    return str(err).startswith(BUDGET_ERRORS)
+
+
 def run(m, n, k, *, iters=10, seed=42, **knobs):
     """Resolves the problem and, if the emitter supports it, runs and verifies it.
     A useBeta kernel holds the VGPRs of C, so a tile that already nearly fills
-    the budget may not fit with them, and the test is skipped."""
+    the budget may not fit with them, and the test is skipped; so is an mfma
+    configuration whose accumulators and ring do not fit the registers or, with
+    lds, the LDS."""
     p = resolve(m, n, k, **knobs)
     skipUnlessRunnable(p)
     try:
         support.runProblem(p, iters, seed)
     except ValueError as err:
-        if p.use_beta and "register budget" in str(err):
+        if (p.use_beta or p.mfma) and isBudgetError(err):
             pytest.skip(str(err))
         raise
 
@@ -656,7 +672,7 @@ PARAMS = [
         100,
         3072,
         2048,
-    ),  # Short last split without partial steps (PARTIAL_STEPS = 0).
+    ),  # Short last split.
     # M/N tails together with K tails.
     (2, 2, 16, 1, 1, 3, 100, 2500, 3072),  # Path A, both tails.
     (4, 4, 16, 2, 1, 301, 5, 1500, 2048),  # Path B, both tails.
@@ -726,7 +742,7 @@ def problemKind(row) -> tuple:
 
 
 # Both dispatch paths must cover aligned shapes, a tail in each single
-# dimension and tails in both (see the Tails paragraph of gemm_mxfp8_skinny.mlir).
+# dimension and tails in both.
 KINDS = {problemKind(row) for row in PARAMS}
 for _path in "AB":
     for _tail in ("aligned", "skinny", "wide", "both"):
@@ -748,7 +764,7 @@ PADDED_PARAMS = [
 @pytest.mark.parametrize(("USE_BETA", "BETA"), BETA_VARIANTS)
 @pytest.mark.parametrize("BM,TN,LANES_K,WAVES,PF,M,N,K,SPK", PARAMS)
 def test_gemm_mxfp8_skinny(BM, TN, LANES_K, WAVES, PF, M, N, K, SPK, USE_BETA, BETA):
-    """D = A^T @ B matches the float64 dequantized reference (bf16-truncated)."""
+    """D = A^T @ B matches the float64 dequantized reference (bf16-rounded)."""
     run(
         M,
         N,
@@ -1705,7 +1721,7 @@ UP_SPK_PARAMS = [
         None,
         1,
         1,
-    ),  # PARTIAL_STEPS = 0, short last split: its second vector entry lies past k, unsteered and never selected.
+    ),  # Short last split: its second vector entry lies past k, unsteered and never selected.
     (
         2,
         2,
@@ -1720,7 +1736,7 @@ UP_SPK_PARAMS = [
         5,
         1,
         1,
-    ),  # PARTIAL_STEPS = 0, persistent, rotation modulus 3 against NIfull 2.
+    ),  # Persistent, rotation modulus 3 against NIfull 2.
     # LANES_K = 64 with several waves shares the scales through LDS.
     (
         2,
@@ -2185,7 +2201,7 @@ def test_gemm_mxfp8_skinny_up_scales(
     )
 
 
-# Not from the driver: up-front scales through LDS in shapes that no driver row
+# Up-front scales through LDS in shapes that no row of PARAMS
 # covers. (BM, TN, LANES_K, WAVES, PF, M, N, K, SPK).
 SHARED_SCALES_PARAMS = [
     (1, 1, 64, 3, 1, 1, 2000, 8192, 8192),  # R = 3 is not a power of two.
@@ -2572,7 +2588,7 @@ def test_tail_scales_never_read_the_next_row_group(LANES_K, K, UP):
     def verifyFirstRowGroup(_inputs, outputs):
         rows = support.SCALE_ROWS
         actual = support.dColumns(outputs[0], p.m, p.n, p.ldD)[:rows, :rows]
-        reference = support.truncateToBf16(inputs.expected[:rows, :rows])
+        reference = support.roundToBf16(inputs.expected[:rows, :rows])
         np.testing.assert_allclose(
             support.bf16ToFloat32(actual).T,
             support.bf16ToFloat32(reference),
@@ -2583,7 +2599,90 @@ def test_tail_scales_never_read_the_next_row_group(LANES_K, K, UP):
     support.executeProblem(p, inputs, 1, verifyFn=verifyFirstRowGroup)
 
 
-# The kernels pass the launched workgroup counts as explicit kernargs and have
+# The partial step of the VALU kernel holds K % KI bytes. (LANES_K, K, M, N, BM,
+# TN) with the tail of every K at a different place of the 4 chunks of the
+# iteration: a lane covers 16 bytes of a chunk, 16 * S bytes apart (S = min(LANES_K,
+# 8)), and the subgroups of S lanes start 64 * S bytes apart. The tails end
+# inside the first slab (1, 37, 100, 255, 500), at a chunk bound (128), at a
+# 16-byte bound (96), and in the second and later slabs (520, 1000, 2500, 4095),
+# with 0 to 2 full iterations before them.
+VALU_PARTIAL_K_PARAMS = [
+    (8, 512 + 37, 300, 1, 1, 2),
+    (8, 1024 + 255, 3, 300, 2, 1),
+    (8, 512 + 128, 300, 2, 1, 3),
+    (8, 500, 1, 300, 1, 2),
+    (8, 1, 300, 3, 2, 2),
+    (16, 100, 300, 1, 1, 2),
+    (16, 1024 + 520, 2, 300, 2, 1),
+    (16, 1024 + 96, 300, 3, 1, 2),
+    (16, 2048 + 1000, 300, 1, 1, 1),
+    (64, 4096 + 100, 300, 1, 1, 2),
+    (64, 4096 + 2500, 1, 300, 1, 2),
+    (64, 4095, 300, 2, 1, 1),
+    (64, 4096 + 700, 3, 300, 2, 1),
+    (64, 1, 300, 1, 1, 2),
+]
+
+
+@pytest.mark.parametrize("UP", [0, 1])
+@pytest.mark.parametrize("PF", [0, 1, 2, 3])
+@pytest.mark.parametrize("LANES_K,K,M,N,BM,TN", VALU_PARTIAL_K_PARAMS)
+def test_gemm_mxfp8_skinny_partial_k_poisoned_padding(LANES_K, K, M, N, BM, TN, PF, UP):
+    """The padding of the operands holds NaNs through the whole partial step (the
+    leading dimension is K plus 256) and the scale padding holds the E8M0 NaN, so
+    bytes or scales that leak into the products make the result NaN."""
+    p = resolve(
+        M,
+        N,
+        K,
+        bm=BM,
+        tn=TN,
+        lanes_k=LANES_K,
+        waves=1,
+        pf=PF,
+        up_scales=UP,
+        padding=(256, 256, 4),
+        scale_pad=0xFF,
+    )
+    assert (p.extents % p.ki != 0).any()
+    skipUnlessRunnable(p)
+    try:
+        support.runProblem(p, 1, 42)
+    except ValueError as err:
+        if isBudgetError(err):
+            pytest.skip(str(err))
+        raise
+
+
+# A partial last split with ring and up-front scales, with the beta variants.
+@pytest.mark.parametrize(("USE_BETA", "BETA"), BETA_VARIANTS)
+@pytest.mark.parametrize("UP", [0, 1])
+@pytest.mark.parametrize(
+    "LANES_K,K,SPK,M,N", [(8, 2000, 768, 300, 2), (16, 3000, 1024, 3, 300)]
+)
+def test_gemm_mxfp8_skinny_partial_k_poisoned_split_k(
+    LANES_K, K, SPK, M, N, UP, USE_BETA, BETA
+):
+    run(
+        M,
+        N,
+        K,
+        spk=SPK,
+        bm=2,
+        tn=2,
+        lanes_k=LANES_K,
+        waves=1,
+        pf=1,
+        up_scales=UP,
+        padding=(256, 256, 4),
+        scale_pad=0xFF,
+        iters=1,
+        use_beta=USE_BETA,
+        beta=BETA,
+    )
+
+
+# The kernels pass the launched workgroup count as an explicit kernarg and have
 # no hidden arguments, so they run at every code object version. The cases are
 # the smallest of each launch: the 3-D grid and the persistent grid with fewer
 # blocks than tiles (so a wrong numWorkGroupsX shows), each with and without
@@ -2648,7 +2747,7 @@ def test_gemm_mxfp8_skinny_code_object_versions_run(
             p, 3, codeObjectVersion=codeObjectVersion, maxPreloadDwords=maxPreloadDwords
         )
     except ValueError as err:
-        if p.use_beta and "register budget" in str(err):
+        if p.use_beta and isBudgetError(err):
             pytest.skip(str(err))
         raise
 
@@ -2857,3 +2956,1401 @@ def test_check_constraints_rejects_unaligned_operand_ld(name):
     p = resolve(5, 100, 2048, spk=2048, bm=1, tn=1, lanes_k=16, waves=1, pf=1)
     with pytest.raises(AssertionError, match="multiples of 4"):
         support.checkConstraints(dataclasses.replace(p, **{name: p.k + 2}))
+
+
+# The scaled-MFMA kernel (mfma=True). bm is the skinny columns per block (16 or
+# 32), tn the 16-column wide MFMA tiles per wave, waves split K inside the block
+# and pf is the ring depth in iterations of 256 K. lanes_k is 64 and up_scales 0.
+
+
+def test_mfma_kernel_name():
+    p = resolve(5120, 8, 8192, mfma=True, bm=16, tn=2, waves=2, pf=2)
+    name = support.gemmKernelName(p)
+    assert name == codegen.skinnyGEMMKernelName(support.skinnyConfig(p))
+    valu = resolve(5120, 8, 8192, bm=16, tn=2, waves=2, pf=2, lanes_k=64, up_scales=0)
+    assert not valu.mfma and "MFMA" not in support.gemmKernelName(valu)
+    assert name == support.gemmKernelName(valu) + "_MFMA1"
+
+
+@pytest.mark.parametrize("SKINNY", [1, 2, 3])
+@pytest.mark.parametrize("TRANSPOSED", [False, True])
+def test_default_is_valu_below_the_crossover(SKINNY, TRANSPOSED):
+    m, n = (SKINNY, 5120) if TRANSPOSED else (5120, SKINNY)
+    p = resolve(m, n, 8192)
+    assert not p.mfma and not p.lds
+    assert "MFMA" not in support.gemmKernelName(p)
+    assert support.pickConfig(m, n, 8192) == support.pickValuConfig(m, n, 8192)
+
+
+def test_single_column_default_is_unchanged():
+    assert support.pickConfig(5120, 1, 8192) == support.pickSingleColumnConfig(
+        5120, 8192
+    )
+    p = resolve(5120, 1, 8192)
+    assert (p.bm, p.tn, p.lanes_k, p.waves, p.pf) == (1, 1, 64, 4, 2)
+    assert not p.mfma
+
+
+# (M, N, K, (bm, tn, lanes_k, waves, pf, up_scales)) of the VALU defaults, from
+# the knob sweeps that fixed the grid collapse, the small-grid and the VGPR cases.
+VALU_DEFAULT_PINS = [
+    (5120, 2, 8448, (2, 5, 64, 1, 1, 0)),
+    (2048, 3, 12544, (3, 2, 64, 1, 1, 0)),
+    (1, 5120, 8448, (1, 1, 16, 1, 1, 0)),
+    (5120, 1, 8448, (1, 1, 16, 1, 1, 0)),
+    (1, 10240, 8448, (1, 1, 4, 1, 2, 0)),
+    (4096, 2, 1280, (1, 1, 4, 4, 1, 1)),
+    (4096, 3, 1280, (1, 1, 4, 4, 1, 1)),
+    (4096, 4, 1280, (1, 1, 4, 4, 1, 1)),
+    (4, 4096, 1280, (1, 1, 4, 4, 1, 1)),
+    (4096, 1, 1280, (1, 1, 4, 1, 2, 1)),
+    (2048, 2, 2048, (1, 2, 16, 4, 1, 1)),
+    (16384, 4, 16384, (4, 4, 16, 4, 1, 0)),
+    (4, 16384, 16384, (4, 4, 16, 4, 1, 0)),
+    (8192, 8, 4096, (4, 4, 16, 4, 1, 1)),
+    (4096, 16, 1024, (4, 4, 16, 4, 1, 1)),
+    (8192, 2, 8192, (2, 2, 16, 4, 1, 1)),
+    (16384, 3, 25600, (3, 4, 16, 4, 1, 0)),
+    (5120, 1, 8192, (1, 1, 64, 4, 2, 1)),
+    (1, 10240, 5120, (1, 1, 16, 1, 2, 1)),
+    (1, 5120, 25600, (1, 1, 16, 1, 1, 0)),
+    (1, 51200, 5120, (1, 1, 16, 4, 3, 1)),
+    (1, 151936, 5120, (1, 1, 16, 4, 3, 1)),
+]
+
+
+@pytest.mark.parametrize("M, N, K, KNOBS", VALU_DEFAULT_PINS)
+def test_valu_defaults_pinned(M, N, K, KNOBS):
+    """The VALU default knobs of a shape."""
+    p = resolve(M, N, K, mfma=False)
+    assert (p.bm, p.tn, p.lanes_k, p.waves, p.pf, p.up_scales) == KNOBS
+
+
+# Shapes whose old defaults needed more than 256 VGPRs, plus small ones.
+VALU_BUDGET_SHAPES = [
+    (16384, 4, 16384),
+    (4, 16384, 16384),
+    (16384, 16, 8448),
+    (16, 16384, 12544),
+    (16384, 12, 12544),
+    (8192, 8, 12544),
+    (5120, 16, 12544),
+    (8192, 16, 5376),
+    (16384, 6, 16384),
+    (1, 10240, 8448),
+    (151936, 1, 12544),
+    (5120, 2, 8448),
+    (2048, 3, 12544),
+    (65, 8192, 8192),
+    (300, 5120, 8192),
+    (256, 2, 256),
+    (64, 5, 640),
+    (1, 128, 64),
+    (40000, 2, 4096),
+    (65536, 2, 8192),
+    (200000, 2, 2048),
+    (200000, 2, 4096),
+    (300000, 2, 4096),
+    (40000, 3, 8192),
+    (100000, 3, 5120),
+    (40000, 2, 6144),
+]
+
+
+@pytest.mark.parametrize("M, N, K", VALU_BUDGET_SHAPES)
+def test_valu_defaults_fit_the_register_budget(M, N, K):
+    """The default kernel of a shape is emitted within 256 VGPRs."""
+    assert support.vgprCount(resolve(M, N, K, mfma=False)) <= 256
+
+
+# (skinny, wide, K) of the shapes whose old defaults ran 48 to 80 workgroups.
+VALU_FILLED_GRIDS = [
+    (n, wide, k)
+    for n in (1, 2, 3)
+    for wide in (4096, 5120, 8192, 16384)
+    for k in (1280, 2304, 5376, 8448, 12544)
+]
+
+
+@pytest.mark.parametrize("SKINNY, WIDE, K", VALU_FILLED_GRIDS)
+@pytest.mark.parametrize("TRANSPOSED", [False, True])
+def test_valu_defaults_keep_the_grid_filled(SKINNY, WIDE, K, TRANSPOSED):
+    """The default grid holds at least 128 workgroups."""
+    m, n = (SKINNY, WIDE) if TRANSPOSED else (WIDE, SKINNY)
+    assert resolve(m, n, K, mfma=False).blocks >= 128
+
+
+@pytest.mark.parametrize(
+    "K, LIMIT, AREA, RING_WAVES, LANES_K",
+    [
+        (8448, 64, 10240, None, 64),
+        (8448, 16, 5120, support.DEEP_RING_WAVES, 16),
+        (8448, 16, 10240, support.DEEP_RING_WAVES, 4),
+        (1280, 16, 4096, None, 4),
+        (25600, 16, 5120, None, 16),
+        (8192, 64, 4096, None, 64),
+    ],
+)
+def test_fit_lanes_k(K, LIMIT, AREA, RING_WAVES, LANES_K):
+    """The largest LANES_K that divides K with a short K loop."""
+    assert support.fitLanesK(K, LIMIT, AREA, RING_WAVES) == LANES_K
+
+
+@pytest.mark.parametrize(
+    "SPK, LANES_K, BM, TN, UP_SCALES",
+    [
+        (8192, 16, 4, 4, 1),
+        (16384, 16, 4, 4, 0),
+        (4096, 16, 2, 8, 0),
+        (2048, 16, 2, 8, 1),
+        (16384, 16, 3, 2, 1),
+        (8448, 4, 1, 1, 0),
+        (32768, 64, 1, 1, 0),
+    ],
+)
+def test_pick_up_scales(SPK, LANES_K, BM, TN, UP_SCALES):
+    """The up-front scales need a short K loop, a small spk and the VGPR budget."""
+    assert support.pickUpScales(SPK, LANES_K, BM, TN) == UP_SCALES
+
+
+@pytest.mark.parametrize("ITERS", [1, 2, 4, 8])
+@pytest.mark.parametrize("LANES_K", [8, 16, 64])
+@pytest.mark.parametrize("BM, TN", [(1, 1), (1, 4), (2, 2), (2, 8), (3, 5), (4, 4)])
+def test_up_front_bound_covers_the_emitted_vgprs(BM, TN, LANES_K, ITERS):
+    """A tile that pickUpScales allows up-front is emitted within 256 VGPRs."""
+    k = 64 * LANES_K * ITERS
+    if not support.pickUpScales(k, LANES_K, BM, TN):
+        pytest.skip("scales stay in the ring")
+    p = resolve(
+        65536, max(BM, 2), k, mfma=False, bm=BM, tn=TN, lanes_k=LANES_K,
+        waves=1, pf=1, up_scales=1,
+    )
+    assert support.vgprCount(p) <= support.MAX_VGPRS
+
+
+@pytest.mark.parametrize("ITERS", [1, 4, 8, 16])
+@pytest.mark.parametrize("PF", [1, 2, 3])
+@pytest.mark.parametrize("LANES_K", [4, 8, 16])
+def test_up_front_bound_covers_the_single_column_rings(LANES_K, PF, ITERS):
+    """A 1 x 1 tile with a ring of up to 3 is emitted within 256 VGPRs."""
+    if PF > ITERS:
+        pytest.skip("ring deeper than the K loop")
+    k = 64 * LANES_K * ITERS
+    if not support.pickUpScales(k, LANES_K, 1, 1):
+        pytest.skip("scales stay in the ring")
+    p = resolve(
+        65536, 2, k, mfma=False, bm=1, tn=1, lanes_k=LANES_K, waves=1, pf=PF,
+        up_scales=1,
+    )
+    assert support.vgprCount(p) <= support.MAX_VGPRS
+
+
+@pytest.mark.parametrize("WIDE", [5120, 8192])
+@pytest.mark.parametrize("SKINNY", [4, 5, 8, 16, 32, 64])
+def test_mfma_valu_routing_by_skinny_extent(SKINNY, WIDE):
+    """Skinny extents 4 to 64 default to the MFMA kernel."""
+    assert support.pickConfig(WIDE, SKINNY, 8192).mfma
+
+
+@pytest.mark.parametrize("SKINNY", [1, 2, 3, 65])
+def test_valu_routing_is_unchanged(SKINNY):
+    """Skinny extents below 4 and above 64 default to the VALU kernel."""
+    assert not support.pickConfig(5120, SKINNY, 8192).mfma
+
+
+@pytest.mark.parametrize("SKINNY", [4, 5, 8, 16, 17, 32, 64])
+@pytest.mark.parametrize("TRANSPOSED", [False, True])
+def test_default_is_mfma_lds_from_the_crossover(SKINNY, TRANSPOSED):
+    m, n = (SKINNY, 5120) if TRANSPOSED else (5120, SKINNY)
+    p = resolve(m, n, 8192)
+    assert p.mfma and p.lds and p.grid3d
+    assert (p.bm, p.tn, p.lanes_k, p.waves, p.pf) == (16, 2, 64, 1, 4)
+    assert (p.up_scales, p.group, p.xcds) == (0, 1, 1)
+    assert support.gemmKernelName(p).endswith("_MFMA1_LDS1")
+
+
+@pytest.mark.parametrize("SKINNY", [65, 300])
+def test_default_is_valu_above_the_mfma_range(SKINNY):
+    assert not resolve(5120, SKINNY, 8192).mfma
+
+
+@pytest.mark.parametrize(
+    "WIDE,K,KNOBS",
+    [
+        (8192, 8192, (2, 1, 4)),
+        (5120, 8192, (2, 1, 4)),
+        (151936, 5120, (2, 1, 4)),
+        (4097, 8192, (2, 1, 4)),
+        (8192, 4096, (2, 1, 4)),
+        (4096, 8192, (1, 2, 3)),
+        (2048, 8192, (1, 2, 3)),
+        (1024, 8292, (1, 2, 3)),
+        (4096, 100, (1, 2, 3)),
+    ],
+)
+def test_mfma_lds_defaults_by_wide_extent(WIDE, K, KNOBS):
+    knobs = support.pickConfig(WIDE, 8, K)
+    assert (knobs.tn, knobs.waves, knobs.pf) == KNOBS
+    assert (knobs.bm, knobs.mfma, knobs.lds) == (16, True, True)
+
+
+def test_mfma_lds_defaults_are_independent_of_the_skinny_extent():
+    for wide, k in ((5120, 8192), (1024, 8192)):
+        picks = {support.pickConfig(wide, s, k) for s in range(4, 65)}
+        assert len(picks) == 1
+
+
+def test_explicit_mfma_without_lds_keeps_the_plain_defaults():
+    p = resolve(5120, 8, 8192, mfma=True)
+    assert p.mfma and not p.lds
+    assert (p.bm, p.tn, p.waves, p.pf) == (16, 2, 1, 2)
+    assert resolve(5120, 8, 8192, mfma=True, lds=True).pf == 4
+
+
+def test_explicit_no_mfma_gives_the_valu_defaults():
+    p = resolve(5120, 8, 8192, mfma=False)
+    assert not p.mfma
+    assert support.skinnyConfig(p).bm == support.pickValuConfig(5120, 8, 8192).bm
+
+
+@pytest.mark.parametrize(
+    "KNOBS",
+    [{"tn": 3}, {"bm": 4}, {"lanes_k": 16}, {"waves": 2}, {"pf": 2}, {"blocks": 100}],
+)
+def test_a_tile_knob_selects_the_valu_defaults(KNOBS):
+    p = resolve(5120, 8, 8192, **KNOBS)
+    assert not p.mfma and not p.lds
+
+
+def test_spk_alone_keeps_the_mfma_default():
+    p = resolve(5120, 8, 8192, spk=4096)
+    assert p.mfma and p.lds and p.splits == 2
+
+
+# (m, n, k, knobs) that cover the VALU picks, the MFMA picks (skinny 4 to 64),
+# the explicit mfma, the explicit blocks (persistent) and a large K.
+NO_SPLIT_K_SHAPES = [
+    (5120, 1, 8192, {}),
+    (5120, 3, 4096, {}),
+    (5120, 4, 8192, {}),
+    (5120, 8, 8192, {}),
+    (300, 32, 2048, {}),
+    (8192, 64, 4096, {}),
+    (5120, 100, 8192, {}),
+    (5, 300, 2048, {"mfma": True, "bm": 16, "tn": 1, "waves": 2, "pf": 2}),
+    (5, 300, 2048, {"bm": 1, "tn": 1, "lanes_k": 16, "waves": 1, "pf": 1, "blocks": 7}),
+    (80, 300, 2048, {"mfma": True, "bm": 16, "tn": 1, "waves": 2, "pf": 2, "blocks": 5}),
+    (5120, 1, 65536, {}),
+    (5120, 8, 65536, {}),
+]
+
+
+@pytest.mark.parametrize("M,N,K,KNOBS", NO_SPLIT_K_SHAPES)
+def test_without_spk_the_problem_is_never_split_k(M, N, K, KNOBS):
+    for p in (resolve(M, N, K, **KNOBS), support.noKnobProblem(M, N, K, **KNOBS)):
+        assert not p.use_split_k and p.splits == 1
+        assert "_USE_SPLIT_K1" not in support.gemmKernelName(p)
+        assert "USE_SPLIT_K" not in p.label
+        assert not support.skinnyConfig(p).useSplitK
+
+
+@pytest.mark.parametrize("SPK", [4096, 8192, 16384])
+def test_an_explicit_spk_selects_the_split_k_variant_even_for_one_split(SPK):
+    p = resolve(5120, 8, 8192, spk=SPK)
+    assert p.use_split_k and p.splits == support.ceilDiv(8192, SPK)
+    assert support.gemmKernelName(p).endswith("_LDS1_USE_SPLIT_K1")
+    assert p.label.endswith(" USE_SPLIT_K=1")
+    assert support.skinnyConfig(p).useSplitK
+    valu = resolve(5120, 1, 8192, spk=SPK, mfma=False)
+    assert valu.use_split_k and support.gemmKernelName(valu).endswith("_USE_SPLIT_K1")
+
+
+def test_several_splits_need_use_split_k():
+    p = resolve(5120, 8, 8192)
+    assert not p.use_split_k
+    with pytest.raises(AssertionError, match="several splits need use_split_k"):
+        support.checkConstraints(dataclasses.replace(p, spk=256))
+    support.checkConstraints(dataclasses.replace(p, spk=256, use_split_k=True))
+
+
+def test_bench_sweep_line_reports_the_split_k_variant():
+    import bench_skinny_gemm as bench
+
+    assert " use_split_k=1" not in bench.formatSweepLine(
+        resolve(5120, 8, 8192), [30000], None
+    )
+    line = bench.formatSweepLine(resolve(5120, 8, 8192, spk=4096), [30000], [1000])
+    assert " use_split_k=1 " in line and " spk=4096 " in line
+
+
+# One run per path of the kernel without split-K.
+NO_SPLIT_K_RUNS = [
+    dict(m=5, n=300, k=2048 + 100, bm=2, tn=1, lanes_k=16, waves=1, pf=1),
+    dict(m=5, n=300, k=2048 + 100, bm=2, tn=1, lanes_k=16, waves=1, pf=1, blocks=3),
+    dict(m=40, n=300, k=2048 + 100, mfma=True, bm=16, tn=1, waves=2, pf=2),
+    dict(m=40, n=300, k=2048 + 100, mfma=True, bm=16, tn=1, waves=2, pf=2, blocks=3),
+]
+
+
+@pytest.mark.parametrize("KNOBS", NO_SPLIT_K_RUNS, ids=["valu3d", "valuP", "mfma3d", "mfmaP"])
+def test_without_split_k_every_path_computes_the_whole_k(KNOBS):
+    assert not resolve(**KNOBS).use_split_k
+    run(**KNOBS)
+
+
+def test_no_knob_problem_is_the_valu_default():
+    assert not support.noKnobProblem(5120, 8, 8192).mfma
+    assert support.noKnobProblem(5120, 8, 8192, mfma=True, bm=16, tn=2).mfma
+
+
+def test_default_falls_back_to_valu_when_a_buffer_reaches_2_gib():
+    assert support.pickConfig(200000, 8, 8192).mfma
+    assert not support.pickConfig(300000, 8, 8192).mfma
+    assert not support.pickConfig(8, 300000, 8192).mfma
+    # The split-K workspace counts too.
+    assert support.pickConfig(5120, 8, 8192, splits=1).mfma
+    assert not support.pickConfig(5120, 8, 8192, splits=2**20).mfma
+    # The buffers are sized by the real K, not by the K of one split.
+    assert support.pickConfig(200000, 8, 8192, splits=2).mfma
+    assert not support.pickConfig(200000, 8, 16384, splits=2, blockK=8192).mfma
+    # The VALU kernel then rejects the shape as well, it is not a fallback bug.
+    with pytest.raises(AssertionError, match="buffers must stay below"):
+        resolve(300000, 8, 8192)
+
+
+# (skinny, wide, K) of the picked configurations that must fit the LDS and
+# register budgets: partial and whole K, small and large wide operands.
+PICKED_SHAPES = [
+    (skinny, wide, k)
+    for skinny in (4, 5, 8, 16, 17, 32, 64)
+    for wide in (512, 2048, 4096, 5120, 8192, 151936)
+    for k in (100, 4096, 8292, 8192 + 255, 13000)
+]
+# The transposed orientation, the skinny extent as m.
+PICKED_SHAPES_T = [(skinny, wide, k) for skinny, wide, k in PICKED_SHAPES[::7]]
+
+
+@pytest.mark.parametrize("SKINNY,WIDE,K", PICKED_SHAPES)
+def test_picked_mfma_lds_configurations_fit_the_budgets(SKINNY, WIDE, K):
+    for use_beta in (False, True):
+        p = resolve(WIDE, SKINNY, K, use_beta=use_beta)
+        assert p.mfma and p.lds
+        asm = support.gemmAsm(p)
+        assert f".globl {support.gemmKernelName(p)}\n" in asm
+
+
+@pytest.mark.parametrize("SKINNY,WIDE,K", PICKED_SHAPES_T)
+def test_picked_mfma_lds_configurations_fit_the_budgets_transposed(SKINNY, WIDE, K):
+    p = resolve(SKINNY, WIDE, K)
+    assert p.mfma and p.lds
+    asm = support.gemmAsm(p)
+    assert f".globl {support.gemmKernelName(p)}\n" in asm
+
+
+@pytest.mark.parametrize(("M", "N"), [(5120, 8), (8, 5120)])
+def test_mfma_problem_geometry(M, N):
+    p = resolve(M, N, 8192, mfma=True, bm=16, tn=3, waves=2, pf=2, spk=2048)
+    assert p.bn == 48 and p.ki == 256
+    assert p.up_iters == 0 and (p.extents % p.ki == 0).all() and p.splits == 4
+    assert p.grid == (support.ceilDiv(5120, 48) * 4, 1, 1)
+    assert p.blocks == support.ceilDiv(5120, 48) * 4
+    assert "MFMA=1" in p.label
+    assert "MFMA" not in resolve(M, N, 8192, mfma=False).label
+
+
+def test_mfma_defaults_and_explicit_overrides():
+    for n, bm in ((8, 16), (16, 16), (17, 32), (32, 32)):
+        p = resolve(5120, n, 8192, mfma=True)
+        assert (p.bm, p.tn, p.waves, p.pf) == (bm, 2, 1, 2)
+        assert (p.lanes_k, p.up_scales, p.group, p.xcds) == (64, 0, 1, 1)
+        assert p.grid3d and p.mfma and p.spk == 8192
+    p = resolve(5120, 8, 8192, mfma=True, bm=32, tn=3, waves=2, pf=3, spk=4096)
+    assert (p.bm, p.tn, p.waves, p.pf, p.spk) == (32, 3, 2, 3, 4096)
+
+
+@pytest.mark.parametrize(
+    "KNOBS,K,MATCH",
+    [
+        ({"bm": 8}, 8192, "bm 16 or 32"),
+        ({"bm": 1}, 8192, "bm 16 or 32"),
+        ({"lanes_k": 16}, 8192, "lanes_k=64"),
+        ({"up_scales": 1}, 8192, "up_scales=0"),
+        ({"pf": 0}, 8192, "pf >= 1"),
+        ({"spk": 2048 + 128}, 8192, "multiple of 256"),
+    ],
+)
+def test_mfma_rejects_invalid_configurations(KNOBS, K, MATCH):
+    with pytest.raises(AssertionError, match=MATCH):
+        resolve(5120, 8, K, mfma=True, **KNOBS)
+
+
+@pytest.mark.parametrize("K,SPK", [(768, None), (4352, 2048), (2816, 2048), (256, None)])
+def test_mfma_accepts_whole_iterations_in_every_split(K, SPK):
+    p = resolve(5120, 8, K, mfma=True, spk=SPK)
+    assert (p.extents % 256 == 0).all()
+
+
+@pytest.mark.parametrize(
+    "K,SPK,PARTIAL", [(8192, None, 0), (1000, None, 1), (8192 + 100, 2048, 1)]
+)
+def test_mfma_partial_k_has_a_ragged_split(K, SPK, PARTIAL):
+    p = resolve(5120, 8, K, mfma=True, spk=SPK)
+    assert (p.extents % 256 != 0).any() == bool(PARTIAL)
+
+
+def test_mfma_buffers_including_c_stay_below_2_gib():
+    ldC = 2**28
+    with pytest.raises(AssertionError, match="buffers must stay below"):
+        resolve(5120, 8, 256, mfma=True, ldC=ldC)
+    # The size of C is only checked for the mfma kernel, so the default shape
+    # falls back to the VALU kernel, which accepts it.
+    p = resolve(5120, 8, 256, ldC=ldC)
+    assert p.ldC == ldC and not p.mfma
+    assert resolve(5120, 8, 256, ldC=ldC, mfma=False).ldC == ldC
+    with pytest.raises(AssertionError, match="buffers must stay below"):
+        resolve(5120, 300000, 256, mfma=True)
+
+
+def test_mfma_emits_and_assembles_without_a_gpu():
+    p = resolve(5120, 8, 8192, mfma=True, bm=16, tn=2, waves=2, pf=2)
+    asm = support.gemmAsm(p)
+    assert f".globl {support.gemmKernelName(p)}\n" in asm
+    assert support.assemble(asm)[:4] == ELF_MAGIC
+
+
+def runMfma(m, n, k, *, bm, tn, waves, pf, iters=3, **knobs):
+    """run with the mfma knobs that are fixed: lanes_k 64 and the ring scales."""
+    run(
+        m,
+        n,
+        k,
+        bm=bm,
+        tn=tn,
+        waves=waves,
+        pf=pf,
+        mfma=True,
+        lanes_k=64,
+        up_scales=0,
+        iters=iters,
+        **knobs,
+    )
+
+
+# (BM, TN, WAVES, PF, M, N, K, SPK) of the primary shape: every N of the skinny
+# sweep with two knob sets each, covering bm 16 and 32, tn 1, 2 and 3 (odd),
+# waves 1, 2 and 4 and prefetch 1 to 3.
+MFMA_PARAMS = [
+    (16, 3, 4, 1, 5120, 1, 8192, 8192),  # N = 1, three tiles per wave.
+    (32, 1, 1, 2, 5120, 1, 8192, 8192),  # N = 1 padded to 32 columns.
+    (16, 2, 2, 3, 5120, 5, 8192, 8192),
+    (32, 2, 1, 1, 5120, 5, 8192, 8192),
+    (16, 2, 2, 2, 5120, 8, 8192, 8192),
+    (32, 3, 4, 2, 5120, 8, 8192, 8192),
+    (16, 1, 1, 3, 5120, 13, 8192, 8192),
+    (32, 2, 2, 2, 5120, 13, 8192, 8192),
+    (16, 2, 1, 3, 5120, 16, 8192, 8192),  # N = 16 fills one 16-column tile.
+    (16, 3, 2, 1, 5120, 16, 8192, 8192),
+    (32, 2, 1, 3, 5120, 32, 8192, 8192),  # N = 32 fills the block.
+    (32, 1, 4, 2, 5120, 32, 8192, 8192),
+    (16, 2, 2, 2, 5120, 32, 8192, 8192),  # Two skinny tile rows.
+]
+
+
+@pytest.mark.parametrize("BM,TN,WAVES,PF,M,N,K,SPK", MFMA_PARAMS)
+def test_gemm_mxfp8_skinny_mfma(BM, TN, WAVES, PF, M, N, K, SPK):
+    """D = A^T @ B matches the float64 dequantized reference (bf16-truncated)."""
+    runMfma(M, N, K, bm=BM, tn=TN, waves=WAVES, pf=PF, spk=SPK)
+
+
+# One row per N, with the useBeta kernel: with beta 0 C is NaN, so a load of it
+# fails, and with -2.5 the epilogue adds beta * C.
+MFMA_BETA_PARAMS = MFMA_PARAMS[1::2]
+
+
+@pytest.mark.parametrize(("USE_BETA", "BETA"), BETA_VARIANTS[1:])
+@pytest.mark.parametrize("BM,TN,WAVES,PF,M,N,K,SPK", MFMA_BETA_PARAMS)
+def test_gemm_mxfp8_skinny_mfma_use_beta(
+    BM, TN, WAVES, PF, M, N, K, SPK, USE_BETA, BETA
+):
+    runMfma(
+        M,
+        N,
+        K,
+        bm=BM,
+        tn=TN,
+        waves=WAVES,
+        pf=PF,
+        spk=SPK,
+        use_beta=USE_BETA,
+        beta=BETA,
+        alpha=0.75,
+    )
+
+
+# The (m, n) swapped shapes, where the skinny operand is A.
+MFMA_TRANSPOSED_PARAMS = [
+    (16, 2, 2, 2, 5, 5120, 4096, 4096),
+    (32, 3, 1, 2, 13, 5120, 4096, 4096),
+    (16, 1, 4, 1, 16, 5120, 4096, 4096),
+    (32, 2, 2, 2, 32, 5120, 4096, 4096),
+]
+
+
+@pytest.mark.parametrize(("USE_BETA", "BETA"), BETA_VARIANTS)
+@pytest.mark.parametrize("BM,TN,WAVES,PF,M,N,K,SPK", MFMA_TRANSPOSED_PARAMS)
+def test_gemm_mxfp8_skinny_mfma_transposed(
+    BM, TN, WAVES, PF, M, N, K, SPK, USE_BETA, BETA
+):
+    runMfma(
+        M,
+        N,
+        K,
+        bm=BM,
+        tn=TN,
+        waves=WAVES,
+        pf=PF,
+        spk=SPK,
+        use_beta=USE_BETA,
+        beta=BETA,
+        alpha=0.75,
+    )
+
+
+# Split-K stores raw partial sums that the reduce scales, with beta and C: four
+# equal splits, and a short last split (extents 2048 and 768), on both paths.
+MFMA_SPLIT_K_PARAMS = [
+    (16, 2, 2, 2, 1024, 8, 8192, 2048),
+    (32, 1, 1, 3, 8, 1024, 8192, 2048),
+    (16, 2, 1, 2, 1024, 13, 2816, 2048),
+    (32, 2, 2, 1, 13, 1024, 2816, 2048),
+]
+
+
+@pytest.mark.parametrize(("USE_BETA", "BETA"), BETA_VARIANTS)
+@pytest.mark.parametrize("BM,TN,WAVES,PF,M,N,K,SPK", MFMA_SPLIT_K_PARAMS)
+def test_gemm_mxfp8_skinny_mfma_split_k(
+    BM, TN, WAVES, PF, M, N, K, SPK, USE_BETA, BETA
+):
+    runMfma(
+        M,
+        N,
+        K,
+        bm=BM,
+        tn=TN,
+        waves=WAVES,
+        pf=PF,
+        spk=SPK,
+        use_beta=USE_BETA,
+        beta=BETA,
+        alpha=0.75,
+        paddingC=8,
+    )
+
+
+# Few iterations per split: waves past the iteration count load nothing and still
+# take part in the reduction through LDS.
+MFMA_SHORT_K_PARAMS = [
+    (16, 2, 2, 3, 256),
+    (32, 2, 4, 2, 512),
+    (16, 1, 4, 1, 768),
+    (32, 3, 2, 2, 1280),
+]
+
+
+@pytest.mark.parametrize("BM,TN,WAVES,PF,K", MFMA_SHORT_K_PARAMS)
+def test_gemm_mxfp8_skinny_mfma_short_k(BM, TN, WAVES, PF, K):
+    runMfma(1000, 20, K, bm=BM, tn=TN, waves=WAVES, pf=PF)
+    runMfma(20, 1000, K, bm=BM, tn=TN, waves=WAVES, pf=PF)
+
+
+# Persistent launches over 4 tile rows (n = 64, bm = 16) and 64 wide tiles: fewer
+# blocks than tiles, as many, more (the extra ones find no tile), and the grouped
+# and XCD-remapped tile orders, with and without a split.
+@pytest.mark.parametrize("SPK", [2048, 1024])
+@pytest.mark.parametrize(
+    "BLOCKS,GROUP,XCDS",
+    [(7, 1, 1), (37, 2, 8), (None, 2, 8), (100, 4, 1), (256, 4, 8), (1000, 2, 8)],
+)
+def test_gemm_mxfp8_skinny_mfma_persistent(BLOCKS, GROUP, XCDS, SPK):
+    knobs = dict(bm=16, tn=2, waves=1, pf=2, blocks=BLOCKS, group=GROUP, xcds=XCDS)
+    assert not resolve(2048, 64, 2048, mfma=True, spk=SPK, **knobs).grid3d
+    runMfma(
+        2048, 64, 2048, spk=SPK, use_beta=True, beta=-2.5, alpha=0.75, **knobs
+    )
+
+
+# Odd extents with ragged wide and skinny tails, and leading dimensions of the
+# operands, D and C padded differently.
+MFMA_ODD_PARAMS = [
+    (16, 2, 1, 2, 300, 13, 1280),
+    (32, 1, 2, 3, 67, 5, 768),
+    (16, 3, 2, 1, 13, 300, 1280),
+    (32, 2, 1, 2, 5, 67, 768),
+]
+
+
+@pytest.mark.parametrize(("USE_BETA", "BETA"), BETA_VARIANTS)
+@pytest.mark.parametrize("BM,TN,WAVES,PF,M,N,K", MFMA_ODD_PARAMS)
+def test_gemm_mxfp8_skinny_mfma_padded_ld(BM, TN, WAVES, PF, M, N, K, USE_BETA, BETA):
+    runMfma(
+        M,
+        N,
+        K,
+        bm=BM,
+        tn=TN,
+        waves=WAVES,
+        pf=PF,
+        padding=PADDING,
+        paddingC=8,
+        use_beta=USE_BETA,
+        beta=BETA,
+        alpha=0.75,
+    )
+
+
+@pytest.mark.parametrize("LD", ODD_LD_KINDS)
+@pytest.mark.parametrize("BM,TN,WAVES,PF,M,N,K", MFMA_ODD_PARAMS)
+def test_gemm_mxfp8_skinny_mfma_odd_ld(BM, TN, WAVES, PF, M, N, K, LD):
+    """The epilogue stores D and loads C at odd leading dimensions."""
+    ldD, ldC = oddLds(M, LD)
+    runMfma(
+        M,
+        N,
+        K,
+        bm=BM,
+        tn=TN,
+        waves=WAVES,
+        pf=PF,
+        ldD=ldD,
+        ldC=ldC,
+        use_beta=True,
+        beta=-2.5,
+        alpha=0.75,
+    )
+
+
+@pytest.mark.parametrize(
+    "BM,TN,WAVES,PF,M,N,K",
+    [row[:7] for row in MFMA_BETA_PARAMS + MFMA_TRANSPOSED_PARAMS] + MFMA_ODD_PARAMS,
+)
+def test_gemm_mxfp8_skinny_mfma_use_beta_aliases_c(BM, TN, WAVES, PF, M, N, K):
+    """C and D are one buffer: the lane loads its elements (vector loads for a
+    tile inside the output) at the start of the tile and stores them at the end."""
+    p = resolve(
+        M,
+        N,
+        K,
+        bm=BM,
+        tn=TN,
+        waves=WAVES,
+        pf=PF,
+        mfma=True,
+        lanes_k=64,
+        up_scales=0,
+        use_beta=True,
+        beta=-2.5,
+        alpha=0.75,
+    )
+    skipUnlessRunnable(p)
+    assert p.ldC == p.ldD
+    try:
+        support.executeProblem(p, support.makeInputs(p, 42), 1, aliasC=True)
+    except ValueError as err:
+        if isBudgetError(err):
+            pytest.skip(str(err))
+        raise
+
+
+# Partial K with mfma: the last iteration of the split holds K % 256 bytes, run
+# by a guarded tail iteration. (BM, TN, WAVES, PF, N, K) with m = 5120 and a
+# single split; each K has two knob sets, and the Ks cover the remainders 1, 4,
+# 31, 100, 129 and 255 and Ks below one iteration and above 16 iterations.
+MFMA_PARTIAL_K_PARAMS = [
+    (16, 3, 4, 1, 1, 8192 + 1),
+    (32, 1, 1, 2, 8, 8192 + 1),
+    (16, 2, 2, 3, 13, 8192 + 4),
+    (32, 2, 1, 1, 32, 8192 + 4),
+    (16, 1, 1, 3, 8, 8192 + 31),
+    (32, 3, 2, 2, 1, 8192 + 31),
+    (16, 2, 2, 2, 32, 8192 + 100),
+    (32, 2, 4, 2, 13, 8192 + 100),
+    (16, 3, 1, 2, 1, 8192 + 129),
+    (32, 1, 2, 3, 32, 8192 + 129),
+    (16, 2, 4, 1, 13, 8192 + 255),
+    (32, 2, 1, 3, 8, 8192 + 255),
+    (16, 2, 2, 3, 32, 100),
+    (32, 3, 1, 1, 13, 100),
+    (16, 1, 4, 2, 1, 4100),
+    (32, 2, 2, 2, 8, 4100),
+]
+
+
+@pytest.mark.parametrize("BM,TN,WAVES,PF,N,K", MFMA_PARTIAL_K_PARAMS)
+def test_gemm_mxfp8_skinny_mfma_partial_k(BM, TN, WAVES, PF, N, K):
+    p = resolve(5120, N, K, mfma=True, bm=BM, tn=TN, waves=WAVES, pf=PF)
+    assert (p.extents % 256 != 0).any()
+    runMfma(5120, N, K, bm=BM, tn=TN, waves=WAVES, pf=PF)
+
+
+@pytest.mark.parametrize(("USE_BETA", "BETA"), BETA_VARIANTS[1:])
+@pytest.mark.parametrize("BM,TN,WAVES,PF,N,K", MFMA_PARTIAL_K_PARAMS[1::3])
+def test_gemm_mxfp8_skinny_mfma_partial_k_use_beta(
+    BM, TN, WAVES, PF, N, K, USE_BETA, BETA
+):
+    runMfma(
+        5120,
+        N,
+        K,
+        bm=BM,
+        tn=TN,
+        waves=WAVES,
+        pf=PF,
+        use_beta=USE_BETA,
+        beta=BETA,
+        alpha=0.75,
+    )
+
+
+# (BM, TN, WAVES, PF, M, N, K) with the skinny operand A.
+MFMA_PARTIAL_K_TRANSPOSED_PARAMS = [
+    (16, 2, 2, 2, 5, 5120, 8192 + 100),
+    (32, 3, 1, 2, 13, 5120, 8192 + 31),
+    (16, 1, 4, 1, 32, 5120, 4100),
+    (32, 2, 2, 2, 1, 5120, 8192 + 1),
+]
+
+
+@pytest.mark.parametrize(("USE_BETA", "BETA"), BETA_VARIANTS)
+@pytest.mark.parametrize("BM,TN,WAVES,PF,M,N,K", MFMA_PARTIAL_K_TRANSPOSED_PARAMS)
+def test_gemm_mxfp8_skinny_mfma_partial_k_transposed(
+    BM, TN, WAVES, PF, M, N, K, USE_BETA, BETA
+):
+    runMfma(
+        M,
+        N,
+        K,
+        bm=BM,
+        tn=TN,
+        waves=WAVES,
+        pf=PF,
+        use_beta=USE_BETA,
+        beta=BETA,
+        alpha=0.75,
+    )
+
+
+# Several splits of 2048 with a partial last split (extents 100, 255, 4 and 1),
+# on both orientations; the other splits have no tail.
+MFMA_PARTIAL_K_SPLIT_PARAMS = [
+    (16, 2, 2, 2, 1024, 8, 8192 + 100),
+    (32, 1, 1, 3, 8, 1024, 8192 + 255),
+    (16, 2, 1, 2, 1024, 13, 4100),
+    (32, 2, 2, 1, 13, 1024, 8192 + 1),
+]
+
+
+@pytest.mark.parametrize(("USE_BETA", "BETA"), BETA_VARIANTS)
+@pytest.mark.parametrize("BM,TN,WAVES,PF,M,N,K", MFMA_PARTIAL_K_SPLIT_PARAMS)
+def test_gemm_mxfp8_skinny_mfma_partial_k_split_k(
+    BM, TN, WAVES, PF, M, N, K, USE_BETA, BETA
+):
+    runMfma(
+        M,
+        N,
+        K,
+        bm=BM,
+        tn=TN,
+        waves=WAVES,
+        pf=PF,
+        spk=2048,
+        use_beta=USE_BETA,
+        beta=BETA,
+        alpha=0.75,
+        paddingC=8,
+    )
+
+
+# The persistent grid runs the tail per tile: with a partial last split of
+# k = 2500 and spk = 1024 (extents 1024, 1024 and 452), and a single partial
+# split.
+@pytest.mark.parametrize("SPK", [1024, None])
+@pytest.mark.parametrize("WAVES", [1, 2])
+@pytest.mark.parametrize(
+    "BLOCKS,GROUP,XCDS", [(7, 1, 1), (37, 2, 8), (256, 4, 8)]
+)
+def test_gemm_mxfp8_skinny_mfma_partial_k_persistent(
+    BLOCKS, GROUP, XCDS, WAVES, SPK
+):
+    knobs = dict(bm=16, tn=2, waves=WAVES, pf=2, blocks=BLOCKS, group=GROUP, xcds=XCDS)
+    p = resolve(2048, 64, 2500, mfma=True, spk=SPK, **knobs)
+    assert not p.grid3d and (p.extents % 256 != 0).any()
+    runMfma(2048, 64, 2500, spk=SPK, use_beta=True, beta=-2.5, alpha=0.75, **knobs)
+
+
+# K below the iteration count of the waves: waves with no iteration still take
+# part in the reduction, and the tail wave is the one after the last iteration.
+@pytest.mark.parametrize("WAVES", [1, 2, 4])
+@pytest.mark.parametrize("K", [1, 3, 37, 255, 257])
+def test_gemm_mxfp8_skinny_mfma_partial_k_tiny(K, WAVES):
+    knobs = dict(bm=32, tn=2, waves=WAVES, pf=2)
+    runMfma(1000, 20, K, **knobs)
+    runMfma(20, 1000, K, **knobs)
+
+
+# The padding of the operands holds NaNs through the whole tail iteration (the
+# leading dimension is K plus 256) and the scale padding holds the E8M0 NaN, so
+# bytes or scales that leak into the products make the result NaN.
+@pytest.mark.parametrize("WAVES", [1, 2])
+@pytest.mark.parametrize(
+    "K,N",
+    [
+        (8192 + 31, 1),
+        (8192 + 100, 13),
+        (4100, 32),
+        (100, 1),
+        (1, 13),
+        (8192 + 31, 32),
+        (8192 + 100, 1),
+        (4100, 13),
+        (100, 32),
+        (1, 1),
+    ],
+)
+def test_gemm_mxfp8_skinny_mfma_partial_k_poisoned_padding(K, N, WAVES):
+    runMfma(
+        5120,
+        N,
+        K,
+        bm=16,
+        tn=2,
+        waves=WAVES,
+        pf=2,
+        padding=(256, 256, 4),
+        scale_pad=0xFF,
+    )
+
+
+# The staged variant (lds=True) loads the operands coalesced into a private LDS
+# ring per wave; it runs the cases of the direct mfma kernel, with deeper rings.
+
+
+def test_mfma_lds_kernel_name():
+    p = resolve(5120, 8, 8192, mfma=True, lds=True, bm=16, tn=2, waves=2, pf=2)
+    name = support.gemmKernelName(p)
+    assert name == codegen.skinnyGEMMKernelName(support.skinnyConfig(p))
+    direct = resolve(5120, 8, 8192, mfma=True, bm=16, tn=2, waves=2, pf=2)
+    assert name == support.gemmKernelName(direct) + "_LDS1"
+
+
+def test_mfma_lds_requires_mfma():
+    with pytest.raises(AssertionError, match="lds needs mfma"):
+        resolve(5120, 1, 8192, lds=True)
+    with pytest.raises(AssertionError, match="lds needs mfma"):
+        resolve(5120, 8, 8192, mfma=False, lds=True)
+
+
+def test_mfma_lds_emits_and_assembles_without_a_gpu():
+    p = resolve(5120, 8, 8192 + 100, mfma=True, lds=True, bm=16, tn=2, waves=2, pf=3)
+    asm = support.gemmAsm(p)
+    assert f".globl {support.gemmKernelName(p)}\n" in asm
+    assert " lds\n" in asm and "ds_read_b128" in asm
+    assert support.assemble(asm)[:4] == ELF_MAGIC
+
+
+# (BM, TN, WAVES, PF, M, N, K, SPK): the primary shape with rings of up to 8
+# slots, whole iterations.
+LDS_PARAMS = MFMA_PARAMS + [
+    (16, 2, 1, 6, 5120, 16, 8192, 8192),
+    (32, 1, 1, 8, 5120, 32, 8192, 8192),
+    (16, 4, 1, 2, 5120, 8, 8192, 8192),
+    (32, 2, 2, 4, 5120, 13, 8192, 8192),
+]
+
+
+@pytest.mark.parametrize("BM,TN,WAVES,PF,M,N,K,SPK", LDS_PARAMS)
+def test_gemm_mxfp8_skinny_mfma_lds(BM, TN, WAVES, PF, M, N, K, SPK):
+    runMfma(M, N, K, bm=BM, tn=TN, waves=WAVES, pf=PF, spk=SPK, lds=True)
+
+
+@pytest.mark.parametrize(("USE_BETA", "BETA"), BETA_VARIANTS[1:])
+@pytest.mark.parametrize("BM,TN,WAVES,PF,M,N,K,SPK", MFMA_BETA_PARAMS)
+def test_gemm_mxfp8_skinny_mfma_lds_use_beta(
+    BM, TN, WAVES, PF, M, N, K, SPK, USE_BETA, BETA
+):
+    runMfma(
+        M,
+        N,
+        K,
+        bm=BM,
+        tn=TN,
+        waves=WAVES,
+        pf=PF,
+        spk=SPK,
+        lds=True,
+        use_beta=USE_BETA,
+        beta=BETA,
+        alpha=0.75,
+    )
+
+
+@pytest.mark.parametrize(("USE_BETA", "BETA"), BETA_VARIANTS)
+@pytest.mark.parametrize("BM,TN,WAVES,PF,M,N,K,SPK", MFMA_SPLIT_K_PARAMS)
+def test_gemm_mxfp8_skinny_mfma_lds_split_k(
+    BM, TN, WAVES, PF, M, N, K, SPK, USE_BETA, BETA
+):
+    runMfma(
+        M,
+        N,
+        K,
+        bm=BM,
+        tn=TN,
+        waves=WAVES,
+        pf=PF,
+        spk=SPK,
+        lds=True,
+        use_beta=USE_BETA,
+        beta=BETA,
+        alpha=0.75,
+        paddingC=8,
+    )
+
+
+@pytest.mark.parametrize("BM,TN,WAVES,PF,K", MFMA_SHORT_K_PARAMS)
+def test_gemm_mxfp8_skinny_mfma_lds_short_k(BM, TN, WAVES, PF, K):
+    runMfma(1000, 20, K, bm=BM, tn=TN, waves=WAVES, pf=PF, lds=True)
+    runMfma(20, 1000, K, bm=BM, tn=TN, waves=WAVES, pf=PF, lds=True)
+
+
+@pytest.mark.parametrize("SPK", [2048, 1024])
+@pytest.mark.parametrize(
+    "BLOCKS,GROUP,XCDS", [(7, 1, 1), (37, 2, 8), (None, 2, 8), (1000, 2, 8)]
+)
+def test_gemm_mxfp8_skinny_mfma_lds_persistent(BLOCKS, GROUP, XCDS, SPK):
+    knobs = dict(bm=16, tn=2, waves=2, pf=3, blocks=BLOCKS, group=GROUP, xcds=XCDS)
+    assert not resolve(2048, 64, 2048, mfma=True, spk=SPK, **knobs).grid3d
+    runMfma(
+        2048, 64, 2048, spk=SPK, lds=True, use_beta=True, beta=-2.5, alpha=0.75, **knobs
+    )
+
+
+@pytest.mark.parametrize("BM,TN,WAVES,PF,N,K", MFMA_PARTIAL_K_PARAMS)
+def test_gemm_mxfp8_skinny_mfma_lds_partial_k(BM, TN, WAVES, PF, N, K):
+    runMfma(5120, N, K, bm=BM, tn=TN, waves=WAVES, pf=PF, lds=True)
+
+
+@pytest.mark.parametrize(("USE_BETA", "BETA"), BETA_VARIANTS)
+@pytest.mark.parametrize("BM,TN,WAVES,PF,M,N,K", MFMA_PARTIAL_K_SPLIT_PARAMS)
+def test_gemm_mxfp8_skinny_mfma_lds_partial_k_split_k(
+    BM, TN, WAVES, PF, M, N, K, USE_BETA, BETA
+):
+    runMfma(
+        M,
+        N,
+        K,
+        bm=BM,
+        tn=TN,
+        waves=WAVES,
+        pf=PF,
+        spk=2048,
+        lds=True,
+        use_beta=USE_BETA,
+        beta=BETA,
+        alpha=0.75,
+        paddingC=8,
+    )
+
+
+@pytest.mark.parametrize("WAVES", [1, 2, 4])
+@pytest.mark.parametrize("K", [1, 3, 37, 255, 257])
+def test_gemm_mxfp8_skinny_mfma_lds_partial_k_tiny(K, WAVES):
+    knobs = dict(bm=32, tn=2, waves=WAVES, pf=2, lds=True)
+    runMfma(1000, 20, K, **knobs)
+    runMfma(20, 1000, K, **knobs)
+
+
+@pytest.mark.parametrize("WAVES", [1, 2])
+@pytest.mark.parametrize(
+    "K,N",
+    [(8192 + 31, 1), (8192 + 100, 13), (4100, 32), (100, 1), (1, 13), (8192 + 100, 32)],
+)
+def test_gemm_mxfp8_skinny_mfma_lds_partial_k_poisoned_padding(K, N, WAVES):
+    runMfma(
+        5120,
+        N,
+        K,
+        bm=16,
+        tn=2,
+        waves=WAVES,
+        pf=3,
+        lds=True,
+        padding=(256, 256, 4),
+        scale_pad=0xFF,
+    )
+
+
+# The default of the shapes at and above the crossover runs the MFMA kernel with
+# LDS staging.
+
+
+@pytest.mark.parametrize(
+    "M,N,K,SPK",
+    [
+        (5120, 4, 8192, None),
+        (5120, 8, 8192, None),
+        (5120, 16, 8292, None),
+        (5120, 32, 8292, None),
+        (8, 5120, 8192, None),
+        (2048, 8, 8192, None),
+        (1024, 32, 4100, None),
+        (5120, 8, 8192 + 100, 2048),
+    ],
+)
+@pytest.mark.parametrize(("USE_BETA", "BETA"), BETA_VARIANTS)
+def test_default_mfma_lds_runs_and_verifies(M, N, K, SPK, USE_BETA, BETA):
+    assert resolve(M, N, K, spk=SPK).lds
+    run(M, N, K, spk=SPK, use_beta=USE_BETA, beta=BETA)
+
+
+def test_sweep_skips_the_lds_configurations_over_the_budget(tmp_path):
+    """The sweep tooling records an lds configuration whose rings exceed the LDS
+    as a failure to build, like the register-budget ones, and builds the rest."""
+    import sweep_skinny_gemm as sweep
+    import sweep_skinny_gemm_config as sweepConfig
+
+    entry = {
+        "name": "budget",
+        "m": 5120,
+        "n": 32,
+        "k": 8292,
+        "useBeta": False,
+        "sweep": {
+            "bm": 16,
+            "tn": [2, 6],
+            "waves": [1, 4],
+            "prefetch": [2, 8],
+            "mfma": True,
+            "lds": True,
+        },
+    }
+    case = sweepConfig.parse_input({"problems": [entry]}).cases[0]
+    problems = sweepConfig.expand_case(case).problems
+    assert len(problems) == 8
+    results = {
+        (p.tn, p.waves, p.pf): sweep.build_kernel(
+            support.gemmKernelName(p), p, str(tmp_path)
+        )
+        for p in problems
+    }
+    failed = results[(6, 4, 8)]
+    assert not failed.ok and failed.stage == "emit"
+    assert "LDS budget" in failed.message
+    assert results[(2, 1, 2)].ok
+
+
+# The remainder narrowing: a piece of a remainder tile computes some of its wide
+# columns over the whole K, so D is bit-identical to the one of the unsplit
+# kernel. The cus of these tests are small so that the shapes stay small.
+
+
+def splitD(m, n, k, inputs, pieces, cus, iters, **knobs):
+    """The D bits of the problem with the pieces, launched iters times."""
+    p = resolve(m, n, k, pieces=pieces, cus=cus, **knobs)
+    return p, support.executeProblem(p, inputs, iters)
+
+
+def expectSplitEqual(m, n, k, pieces, cus, iters=2, **knobs):
+    """Checks D(S) == D(1) bit for bit for every S, each against the reference
+    too, and returns the plans."""
+    base = resolve(m, n, k, **knobs)
+    skipUnlessRunnable(base)
+    inputs = support.makeInputs(base, 7)
+    try:
+        expected = support.executeProblem(base, inputs, iters)
+    except ValueError as err:
+        if isBudgetError(err):
+            pytest.skip(str(err))
+        raise
+    plans = []
+    for S in pieces:
+        p, actual = splitD(m, n, k, inputs, S, cus, iters, **knobs)
+        np.testing.assert_array_equal(actual, expected, err_msg=p.label)
+        plans.append(p.plan)
+    return plans
+
+
+# (name, M, N, K, knobs, cus, pieces): the staged mfma 3-D kernel; W > 0 and
+# R > 0, W = 0 (more CUs than tiles), partial last tiles (the wide extent is not
+# a multiple of the tile or of the piece width, so some pieces are empty), ragged
+# K with a tail, both orientations, bm 16 and 32, tn 1, 2 and 4, waves 1, 4 and
+# 8, and the beta variants.
+SPLIT_CASES = [
+    ("s1_beta", 2000, 1, 4096, dict(use_beta=True, beta=1.5), 6, (2, 4, 8, 16)),
+    ("s1_beta_zero_poisoned_c", 2000, 1, 4096, dict(use_beta=True, beta=0.0), 6, (2, 16)),
+    ("s1_no_beta", 2000, 1, 4096, dict(use_beta=False, alpha=0.75), 6, (2, 8)),
+    ("s1_all_remainder", 2000, 1, 4096, dict(use_beta=True, beta=1.5), 4000, (2, 4, 16)),
+    ("s1_ragged_k", 2000, 1, 4000, dict(use_beta=True, beta=-0.5), 6, (2, 4, 16)),
+    ("m_skinny", 1, 2000, 4096, dict(use_beta=True, beta=-0.5), 6, (2, 4, 8, 16)),
+    ("m_skinny_all_remainder", 1, 2000, 4096, dict(use_beta=False), 4000, (2, 4)),
+    (
+        "bm32_tn2",
+        3000,
+        5,
+        2048,
+        dict(bm=32, tn=2, waves=2, pf=2, use_beta=True, beta=0.75),
+        7,
+        (2, 4, 8, 16, 32),
+    ),
+    (
+        "bm32_tn2_ragged_k",
+        3000,
+        40,
+        2000,
+        dict(bm=32, tn=2, waves=2, pf=3, use_beta=True, beta=2.0),
+        7,
+        (2, 8, 32),
+    ),
+    (
+        "tn4_partial_tile",
+        2500,
+        3,
+        1024,
+        dict(tn=4, waves=1, use_beta=False),
+        7,
+        (2, 4, 8, 16, 32, 64),
+    ),
+    (
+        "tn2_waves8",
+        2200,
+        2,
+        2048,
+        dict(tn=2, waves=8, pf=1, use_beta=True, beta=1.0),
+        5,
+        (2, 8, 32),
+    ),
+    (
+        "tn1_waves8_ragged_k",
+        2200,
+        2,
+        3000,
+        dict(waves=8, pf=1, use_beta=True, beta=1.0),
+        5,
+        (2, 4, 16),
+    ),
+    ("no_remainder", 2000, 1, 4096, dict(use_beta=True, beta=1.5), 5, (2, 8)),
+    (
+        "lds_off",
+        2000,
+        1,
+        4096,
+        dict(lds=False, use_beta=True, beta=1.5),
+        6,
+        (2, 8, 16),
+    ),
+    (
+        "lds_off_bm32_tn2",
+        3000,
+        5,
+        2000,
+        dict(bm=32, tn=2, waves=2, lds=False, use_beta=True, beta=1.5),
+        7,
+        (2, 8, 32),
+    ),
+]
+
+
+@pytest.mark.parametrize("name,M,N,K,KNOBS,CUS,PIECES", SPLIT_CASES, ids=[c[0] for c in SPLIT_CASES])
+def test_remainder_narrowing_is_bit_identical(name, M, N, K, KNOBS, CUS, PIECES):
+    knobs = {"mfma": True, "lds": True, "bm": 16, "tn": 1, "waves": 4, "pf": 2, **KNOBS}
+    plans = expectSplitEqual(M, N, K, PIECES, CUS, **knobs)
+    tiles = resolve(M, N, K, **knobs).tiles
+    if tiles % CUS == 0:
+        assert all(plan.pieces == 1 for plan in plans)
+        return
+    # The split launches W + R * S workgroups, the whole tiles first.
+    for plan, S in zip(plans, PIECES):
+        remainder = tiles % CUS
+        assert plan == support.RemainderPlan(
+            tiles - remainder, S, tiles - remainder + remainder * S, remainder
+        )
+
+
+def test_remainder_narrowing_repeated_launches_agree():
+    expectSplitEqual(
+        2000, 1, 4096, (4,), 6, iters=6, mfma=True, lds=True, bm=16, tn=1, waves=4,
+        pf=2, use_beta=True, beta=1.5,
+    )
+
+
+def test_remainder_grid_and_kernargs():
+    base = resolve(2000, 1, 4096, mfma=True, lds=True, bm=16, tn=1, waves=4, pf=2)
+    assert base.tiles == 125 and base.grid == (125, 1, 1)
+    p = dataclasses.replace(base, pieces=4, cus=6)
+    assert p.plan == support.RemainderPlan(120, 4, 140, 5)
+    assert p.grid == (140, 1, 1)
+    assert "PIECES=4" in p.label
+    # No plan with fewer than 2 pieces, no remainder or no compute units.
+    for q in (base, dataclasses.replace(base, pieces=4, cus=5)):
+        assert q.grid == (125, 1, 1) and q.plan.pieces == 1
+    zero = zeroBuffers()
+    unsplit = support.gemmArgs(base, *zero)
+    split = support.gemmArgs(p, *zero)
+    assert [a.value for a in unsplit[-2:]] == [0, 0]
+    assert [a.value for a in split[-3:]] == [140, 120, 4]
+    assert [a.value for a in unsplit[-3:]] == [125, 0, 0]
+
+
+def test_grid3d_is_flat_and_only_the_persistent_kernel_reads_its_count():
+    p = resolve(5, 300, 2048, spk=1024, bm=2, tn=1, lanes_k=16, waves=1, pf=1)
+    assert p.grid3d and p.tilesX >= 2 and p.splits >= 2
+    assert support.ceilDiv(p.skinny, p.bm) >= 2
+    assert p.grid == (p.tilesX * support.ceilDiv(p.skinny, p.bm) * p.splits, 1, 1)
+    args = support.gemmArgs(p, *zeroBuffers())
+    assert len(args) == 20
+    assert args[17].value == p.grid[0]
+    assert [a.value for a in args[-2:]] == [0, 0]
+
+
+# The flat decode of the 3-D launch: the tile (tx, ty) and the split kz come from
+# the flat workgroup id. VALU with BN = 12 and with BN = 4, whose xcdRun = 8 and
+# span of 64 tiles leave a tail of 11 (75 tiles), and mfma with BN = 16. The
+# decode branches on the tile rows: 1 skips the division, 2 to 4 subtract, and
+# more divide. (id, tile rows, knobs).
+FLAT_DECODE_CASES = [
+    ("valu_bn12", 2, dict(m=5, n=300, k=2048, spk=1024, bm=3, tn=3, lanes_k=16, waves=1, pf=2)),
+    ("valu_bn4", 3, dict(m=5, n=300, k=2048, spk=1024, bm=2, tn=1, lanes_k=16, waves=1, pf=1)),
+    ("mfma", 3, dict(m=40, n=300, k=2048, spk=1024, mfma=True, bm=16, tn=1, waves=2, pf=2)),
+    ("valu_1_row_3_splits", 1, dict(m=2, n=300, k=3072, spk=1024, bm=2, tn=1, lanes_k=16, waves=1, pf=1)),
+    ("valu_4_rows", 4, dict(m=8, n=300, k=2048, spk=1024, bm=2, tn=1, lanes_k=16, waves=1, pf=1)),
+    ("valu_4_rows_partial", 4, dict(m=7, n=300, k=2048, spk=1024, bm=2, tn=1, lanes_k=16, waves=1, pf=1)),
+    ("mfma_4_rows", 4, dict(m=64, n=300, k=2048, spk=1024, mfma=True, bm=16, tn=1, waves=2, pf=2)),
+    ("valu_7_rows", 7, dict(m=7, n=300, k=2048, spk=1024, bm=1, tn=1, lanes_k=16, waves=1, pf=1)),
+    ("mfma_5_rows", 5, dict(m=80, n=300, k=2048, spk=1024, mfma=True, bm=16, tn=1, waves=2, pf=2)),
+]
+
+
+@pytest.mark.parametrize("SPLIT_K", [True, False], ids=["split_k", "no_split_k"])
+@pytest.mark.parametrize(
+    "ROWS,KNOBS",
+    [case[1:] for case in FLAT_DECODE_CASES],
+    ids=[case[0] for case in FLAT_DECODE_CASES],
+)
+def test_flat_decode_matches_the_reference(ROWS, KNOBS, SPLIT_K):
+    # The kernel without split-K covers the whole K, so it has no split to decode.
+    knobs = KNOBS if SPLIT_K else {k: v for k, v in KNOBS.items() if k != "spk"}
+    p = resolve(**knobs)
+    assert p.grid3d and p.tilesX >= 2
+    if SPLIT_K:
+        assert p.use_split_k and p.splits >= 2
+    else:
+        assert not p.use_split_k and p.splits == 1
+    assert support.ceilDiv(p.skinny, p.bm) == ROWS
+    run(**knobs)
+
+
+def zeroBuffers():
+    class Buffer:
+        pointer = 0
+
+    return (Buffer(),) * 7
+
+
+FORCED_ERRORS = [
+    (dict(pieces=3, cus=6), "power of two"),
+    (dict(pieces=32, cus=6), "must not exceed 16"),
+    (dict(pieces=2, cus=0), "compute units"),
+    (dict(pieces=2, cus=6, mfma=False, lds=False, tn=2), "needs mfma"),
+    (dict(pieces=2, cus=6, blocks=64), "3-D launch"),
+    (dict(pieces=2, cus=6, spk=256), "single split"),
+    (dict(pieces=2, cus=6, tn=3), "power of two tn"),
+]
+
+
+@pytest.mark.parametrize("KNOBS,MESSAGE", FORCED_ERRORS)
+def test_forced_pieces_are_validated(KNOBS, MESSAGE):
+    knobs = {"mfma": True, "lds": True, "bm": 16, "tn": 1, "waves": 4, "pf": 2, **KNOBS}
+    with pytest.raises(AssertionError, match=MESSAGE):
+        resolve(2000, 1, 4096 if "spk" not in KNOBS else 1024, **knobs)
+
+
+def pickProblem(m, n, k=25600, **knobs):
+    knobs = {
+        "mfma": True, "lds": True, "bm": 16, "tn": 1, "waves": 4, "pf": 2,
+        "up_scales": 0, "use_beta": True, "beta": 1.0, **knobs,
+    }
+    return resolve(m, n, k, **knobs)
+
+
+# (M, N, S) measured best pieces on 256 CUs, with the S1 configuration.
+PICK_POINTS = [
+    (1024, 1, 4), (2048, 1, 2), (4096, 1, 1), (4352, 1, 16), (4608, 1, 8),
+    (5120, 1, 4), (6144, 1, 2), (6400, 1, 1), (8192, 1, 1), (12288, 1, 1),
+    (5120, 16, 4), (4608, 16, 8), (6144, 16, 2),
+]
+
+
+@pytest.mark.parametrize("M,N,S", PICK_POINTS)
+def test_pick_pieces_matches_the_measured_landscape(M, N, S):
+    assert support.pickPieces(pickProblem(M, N), 256) == S
+
+
+def test_residency_of_the_primary_kernel_is_bound_by_the_lds():
+    p = pickProblem(5120, 1)
+    assert support.stagedLdsBytes(p) == 4 * 2 * 2 * 4096 + 3 * 1024
+    assert support.residentBlocksPerCu(p) == support.LDS_BYTES_PER_CU // 68608 == 2
+    # A small kernel may be bound by the VGPRs, through the waves a SIMD holds.
+    small = pickProblem(5120, 1, pf=1, waves=1)
+    allocated = -(-support.vgprCount(small) // support.VGPR_GRANULE) * support.VGPR_GRANULE
+    wavesPerSimd = min(support.MAX_WAVES_PER_SIMD, support.VGPRS_PER_SIMD // allocated)
+    assert support.residentBlocksPerCu(small) == min(
+        support.LDS_BYTES_PER_CU // support.stagedLdsBytes(small), wavesPerSimd
+    )
+
+
+@pytest.mark.parametrize("M,N", [(m, n) for m in range(256, 9000, 640) for n in (1, 16)])
+def test_pick_never_exceeds_the_resident_workgroups(M, N):
+    p = pickProblem(M, N)
+    S = support.pickPieces(p, 256)
+    if S > 1:
+        plan = support.remainderPlan(p.tiles, 256, S)
+        assert plan.workgroups <= 256 * support.residentBlocksPerCu(p)
+        assert max(support.cuLoads(p, 256, S)) < max(support.cuLoads(p, 256, 1))
+
+
+def test_pick_falls_back_to_one_piece():
+    cus = 256
+    # No remainder.
+    assert support.pickPieces(pickProblem(8192, 1), cus) == 1
+    # Without lds, with a persistent grid, with several splits, with tn = 3, the
+    # VALU kernel.
+    assert support.pickPieces(pickProblem(5120, 1, lds=False), cus) == 1
+    assert support.pickPieces(pickProblem(5120, 1, blocks=64), cus) == 1
+    assert support.pickPieces(pickProblem(5120, 1, spk=8192), cus) == 1
+    assert support.pickPieces(pickProblem(5120, 1, tn=3), cus) == 1
+    valu = resolve(5120, 1, 4096, mfma=False, bm=1, tn=1, lanes_k=16, waves=1, pf=1)
+    assert support.pickPieces(valu, cus) == 1
+    assert support.pickPieces(pickProblem(5120, 1), 0) == 1
+
+
+def test_resolve_pieces():
+    p = pickProblem(5120, 1)
+    auto = support.resolvePieces(p, 0, 256)
+    assert (auto.pieces, auto.cus) == (4, 256)
+    assert support.resolvePieces(p, 1, 256).plan.pieces == 1
+    forced = support.resolvePieces(p, 8, 256)
+    # A forced value may exceed the residency (768 workgroups on 512 slots).
+    assert forced.plan == support.RemainderPlan(256, 8, 768, 64)
+    with pytest.raises(AssertionError, match="power of two"):
+        support.resolvePieces(p, 6, 256)
+    with pytest.raises(AssertionError, match="negative"):
+        support.resolvePieces(p, -1, 256)
+    assert support.resolvePieces(pickProblem(8192, 1), 0, 256).plan.pieces == 1
+
+
+def test_bench_sweep_line_reports_the_plan():
+    import bench_skinny_gemm as bench
+
+    p = support.resolvePieces(pickProblem(5120, 1), 0, 256)
+    line = bench.formatSweepLine(p, [30000], None)
+    assert " pieces=4 workgroups=512 " in line
+    off = bench.formatSweepLine(pickProblem(5120, 1), [30000], None)
+    assert " pieces=1 workgroups=320 " in off

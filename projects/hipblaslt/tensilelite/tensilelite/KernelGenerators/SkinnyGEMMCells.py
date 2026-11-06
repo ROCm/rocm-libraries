@@ -159,10 +159,7 @@ def no_regression(measurement: Measurement, knobs: Knobs, limits: Thresholds) ->
 def k_supports(knobs: Knobs, lo: int, hi: int) -> bool:
     """Whether the entry's K predicates hold for every K in [lo, hi]; mirrors SkinnyGEMM._asserts."""
     asserts = SkinnyGEMM._asserts(SkinnyGEMMLogic.asParams(knobs))
-    if lo <= asserts["AssertSizeGreaterThan"][3] or hi >= asserts["AssertSizeLessThan"][3]:
-        return False
-    step = asserts.get("AssertSummationElementMultiple")
-    return step is None or (lo == hi and lo % step == 0)
+    return asserts["AssertSizeGreaterThan"][3] < lo and hi < asserts["AssertSizeLessThan"][3]
 
 
 # ---------------------------------------------------------------------------

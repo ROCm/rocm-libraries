@@ -65,6 +65,7 @@ namespace TensileLite
         X_MACRO(SizeSumDiv2) \
         X_MACRO(SizeSum1) \
         X_MACRO(SizeSum2) \
+        X_MACRO(Spk) \
         X_MACRO(StrideA0) \
         X_MACRO(StrideA1) \
         X_MACRO(StrideA2) \
@@ -234,6 +235,8 @@ namespace TensileLite
         // orientation.
         TilesLong,
         TilesShort,
+        // The product of the long and short tile counts, a flat grid that the kernel decodes.
+        TilesLongShort,
         CustomGridSize_Count,
     };
 
