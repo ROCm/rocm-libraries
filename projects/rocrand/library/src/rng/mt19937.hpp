@@ -58,6 +58,7 @@
 #include "common.hpp"
 #include "config_types.hpp"
 #include "distributions.hpp"
+#include "engine_array.hpp"
 #include "generator_type.hpp"
 #include "mt19937_octo_engine.hpp"
 #include "system.hpp"
@@ -755,22 +756,14 @@ public:
                                rocrand_ordering   order  = ROCRAND_ORDERING_PSEUDO_DEFAULT,
                                hipStream_t        stream = 0)
         : base_type(order, 0, stream), m_seed(seed)
-    {
-        // Allocate device random number engines
-        auto error = hipMalloc(&m_engines,
-                               m_generator_count * mt19937_constants::n * sizeof(unsigned int));
-        if(error != hipSuccess)
-        {
-            throw ROCRAND_STATUS_ALLOCATION_FAILED;
-        }
-    }
+    {}
 
     mt19937_generator_template(const mt19937_generator_template&) = delete;
 
     mt19937_generator_template(mt19937_generator_template&& other)
         : base_type(other)
         , m_engines_initialized(std::exchange(other.m_engines_initialized, false))
-        , m_engines(std::exchange(other.m_engines, nullptr))
+        , m_engines(std::move(other.m_engines))
         , m_start_input(other.m_start_input)
         , m_prev_input_width(other.m_prev_input_width)
         , m_seed(other.m_seed)
@@ -785,7 +778,7 @@ public:
         *static_cast<base_type*>(this) = other;
 
         m_engines_initialized = std::exchange(other.m_engines_initialized, false);
-        m_engines             = std::exchange(other.m_engines, nullptr);
+        m_engines             = std::move(other.m_engines);
         m_start_input         = other.m_start_input;
         m_prev_input_width    = other.m_prev_input_width;
         m_seed                = other.m_seed;
@@ -793,15 +786,6 @@ public:
         m_generator_count     = other.m_generator_count;
 
         return *this;
-    }
-
-    ~mt19937_generator_template()
-    {
-        if(m_engines != nullptr)
-        {
-            system_type::free(m_engines);
-            m_engines = nullptr;
-        }
     }
 
     static constexpr rocrand_rng_type type()
@@ -885,14 +869,8 @@ public:
             return ROCRAND_STATUS_INTERNAL_ERROR;
         }
 
-        if(m_engines != nullptr)
-        {
-            system_type::free(m_engines);
-        }
         // Allocate device random number engines
-        rocrand_status status
-            = system_type::alloc(&m_engines,
-                                 m_generator_count * mt19937_constants::n * sizeof(unsigned int));
+        rocrand_status status = m_engines.reserve(m_generator_count * mt19937_constants::n);
         if(status != ROCRAND_STATUS_SUCCESS)
         {
             return status;
@@ -963,7 +941,7 @@ public:
                                                                    dim3(config.threads),
                                                                    0,
                                                                    m_stream,
-                                                                   m_engines,
+                                                                   m_engines.data(),
                                                                    d_engines);
             });
         if(status != ROCRAND_STATUS_SUCCESS)
@@ -995,6 +973,7 @@ public:
         {
             return status;
         }
+        m_engines.track_capture(m_stream);
 
         constexpr unsigned int input_width  = Distribution::input_width;
         constexpr unsigned int output_width = Distribution::output_width;
@@ -1082,7 +1061,7 @@ public:
                                         dim3(config.threads),
                                         0,
                                         m_stream,
-                                        m_engines,
+                                        m_engines.data(),
                                         m_start_input,
                                         data,
                                         size,
@@ -1109,7 +1088,7 @@ public:
                                         dim3(config.threads),
                                         0,
                                         m_stream,
-                                        m_engines,
+                                        m_engines.data(),
                                         m_start_input,
                                         data,
                                         size,
@@ -1199,8 +1178,8 @@ public:
     }
 
 private:
-    bool          m_engines_initialized = false;
-    unsigned int* m_engines             = nullptr;
+    bool                                    m_engines_initialized = false;
+    engine_array<unsigned int, system_type> m_engines;
     // The index of the next unused input across all engines (where "input" is `input_width`
     // unsigned int state values), it equals to the number of inputs used by previous generate
     // calls. 0 means that a new generation (gen_next_n) is required.

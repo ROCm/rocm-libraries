@@ -12,6 +12,8 @@ Documentation for rocRAND is available at
 ### Resolved Issues
 
 * Fixed race condition inside `poisson` distribution.
+* Fixed a use-after-free when a HIP graph that captured generation with an XORWOW, MRG31K3P, MRG32K3A, LFSR113, MT19937, or MTGP32 generator was launched after `rocrand_set_seed`, `rocrand_set_offset`, or `rocrand_set_ordering` reinitialized the generator. The engine states are now reused or kept alive until the generator is destroyed.
+* Fixed MT19937 allocating four times more device memory for its engine states than needed.
 
 
 ## rocRAND 5.2.0 for ROCm 10.2.0

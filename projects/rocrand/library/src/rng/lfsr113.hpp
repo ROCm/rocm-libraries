@@ -28,6 +28,7 @@
 #include "common.hpp"
 #include "config_types.hpp"
 #include "distributions.hpp"
+#include "engine_array.hpp"
 #include "generator_type.hpp"
 #include "system.hpp"
 #include "utils/cpp_utils.hpp"
@@ -222,14 +223,13 @@ public:
     lfsr113_generator_template(lfsr113_generator_template&& other)
         : base_type(other)
         , m_engines_initialized(other.m_engines_initialized)
-        , m_engines(other.m_engines)
+        , m_engines(std::move(other.m_engines))
         , m_start_engine_id(other.m_start_engine_id)
         , m_engines_size(other.m_engines_size)
         , m_seed(other.m_seed)
         , m_poisson(std::move(other.m_poisson))
     {
         other.m_engines_initialized = false;
-        other.m_engines             = nullptr;
     }
 
     lfsr113_generator_template& operator=(const lfsr113_generator_template&) = delete;
@@ -238,25 +238,15 @@ public:
     {
         *static_cast<base_type*>(this) = std::move(other);
         m_engines_initialized          = other.m_engines_initialized;
-        m_engines                      = other.m_engines;
+        m_engines                      = std::move(other.m_engines);
         m_start_engine_id              = other.m_start_engine_id;
         m_engines_size                 = other.m_engines_size;
         m_seed                         = other.m_seed;
         m_poisson                      = std::move(other.m_poisson);
 
         other.m_engines_initialized = false;
-        other.m_engines             = nullptr;
 
         return *this;
-    }
-
-    ~lfsr113_generator_template()
-    {
-        if(m_engines != nullptr)
-        {
-            system_type::free(m_engines);
-            m_engines = nullptr;
-        }
     }
 
     static constexpr rocrand_rng_type type()
@@ -371,11 +361,7 @@ public:
 
         m_start_engine_id = m_offset % m_engines_size;
 
-        if(m_engines != nullptr)
-        {
-            system_type::free(m_engines);
-        }
-        rocrand_status status = system_type::alloc(&m_engines, m_engines_size);
+        rocrand_status status = m_engines.reserve(m_engines_size);
         if(status != ROCRAND_STATUS_SUCCESS)
         {
             return status;
@@ -391,7 +377,7 @@ public:
             dim3(init_threads),
             0,
             m_stream,
-            m_engines,
+            m_engines.data(),
             m_start_engine_id,
             m_engines_size,
             m_seed,
@@ -419,6 +405,7 @@ public:
         {
             return status;
         }
+        m_engines.track_capture(m_stream);
 
         generator_config config;
         const hipError_t error = ConfigProvider::template host_config<T>(m_stream, m_order, config);
@@ -457,7 +444,7 @@ public:
                                                                     dim3(config.threads),
                                                                     0,
                                                                     m_stream,
-                                                                    m_engines,
+                                                                    m_engines.data(),
                                                                     m_start_engine_id,
                                                                     data,
                                                                     data_size,
@@ -545,11 +532,11 @@ public:
     }
 
 private:
-    bool         m_engines_initialized = false;
-    engine_type* m_engines             = nullptr;
-    unsigned int m_start_engine_id     = 0;
-    unsigned int m_engines_size        = 0;
-    uint4        m_seed;
+    bool                                   m_engines_initialized = false;
+    engine_array<engine_type, system_type> m_engines;
+    unsigned int                           m_start_engine_id = 0;
+    unsigned int                           m_engines_size    = 0;
+    uint4                                  m_seed;
 
     // For caching of Poisson for consecutive generations with the same lambda
     poisson_distribution_manager_t m_poisson;

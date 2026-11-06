@@ -62,6 +62,7 @@
 #include "common.hpp"
 #include "config_types.hpp"
 #include "distributions.hpp"
+#include "engine_array.hpp"
 #include "generator_type.hpp"
 #include "system.hpp"
 #include "utils/cpp_utils.hpp"
@@ -358,13 +359,12 @@ public:
     mtgp32_generator_template(mtgp32_generator_template&& other)
         : base_type(other)
         , m_engines_initialized(other.m_engines_initialized)
-        , m_engines(other.m_engines)
+        , m_engines(std::move(other.m_engines))
         , m_engines_size(other.m_engines_size)
         , m_seed(other.m_seed)
         , m_poisson(std::move(other.m_poisson))
     {
         other.m_engines_initialized = false;
-        other.m_engines             = nullptr;
     }
 
     mtgp32_generator_template& operator=(const mtgp32_generator_template&) = delete;
@@ -373,29 +373,14 @@ public:
     {
         *static_cast<base_type*>(this) = other;
         m_engines_initialized          = other.m_engines_initialized;
-        m_engines                      = other.m_engines;
+        m_engines                      = std::move(other.m_engines);
         m_engines_size                 = other.m_engines_size;
         m_seed                         = other.m_seed;
         m_poisson                      = std::move(other.m_poisson);
 
         other.m_engines_initialized = false;
-        other.m_engines             = nullptr;
 
         return *this;
-    }
-
-    void free_engines()
-    {
-        if(m_engines != nullptr)
-        {
-            system_type::free(m_engines);
-            m_engines = nullptr;
-        }
-    }
-
-    ~mtgp32_generator_template()
-    {
-        free_engines();
     }
 
     static constexpr rocrand_rng_type type()
@@ -405,7 +390,6 @@ public:
 
     void reset() override final
     {
-        free_engines();
         m_engines_initialized = false;
     }
 
@@ -483,13 +467,13 @@ public:
             return ROCRAND_STATUS_ALLOCATION_FAILED;
         }
 
-        rocrand_status status = system_type::alloc(&m_engines, m_engines_size);
+        rocrand_status status = m_engines.reserve(m_engines_size);
         if(status != ROCRAND_STATUS_SUCCESS)
         {
             return status;
         }
 
-        status = rocrand_make_state_mtgp32(m_engines,
+        status = rocrand_make_state_mtgp32(m_engines.data(),
                                            mtgp32dc_params_fast_11213,
                                            m_engines_size,
                                            m_seed);
@@ -517,6 +501,7 @@ public:
         {
             return status;
         }
+        m_engines.track_capture(m_stream);
 
         generator_config config;
         const hipError_t error = ConfigProvider::template host_config<T>(m_stream, m_order, config);
@@ -559,7 +544,7 @@ public:
                                                                     dim3(threads),
                                                                     0,
                                                                     m_stream,
-                                                                    m_engines,
+                                                                    m_engines.data(),
                                                                     data,
                                                                     data_size,
                                                                     distribution);
@@ -653,9 +638,9 @@ public:
     }
 
 private:
-    bool         m_engines_initialized = false;
-    engine_type* m_engines             = nullptr;
-    unsigned int m_engines_size        = false;
+    bool                                   m_engines_initialized = false;
+    engine_array<engine_type, system_type> m_engines;
+    unsigned int                           m_engines_size = false;
 
     unsigned long long m_seed;
 

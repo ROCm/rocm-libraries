@@ -181,3 +181,14 @@ outside of the recorded section. See the following example (error handling is om
 
 .. literalinclude:: ../../test/hipgraphs_doc_sample.hpp
     :language: c++
+
+A captured graph records the generator state it was captured with, such as the
+location of the engine states, the offset, and the ordering. If the generator is
+reconfigured after capture with ``rocrand_set_seed``, ``rocrand_set_offset``,
+``rocrand_set_ordering``, or ``rocrand_set_quasi_random_generator_dimensions``, the
+existing graph remains safe to launch, but it keeps generating with the configuration
+that was in effect when it was captured. It doesn't pick up the new seed, offset,
+ordering, or number of dimensions, and launching it concurrently with other work that
+uses the same generator is a data race. To generate with the new configuration, capture
+and instantiate a new graph after the change. A graph that uses a generator must not be
+launched after that generator is destroyed.
