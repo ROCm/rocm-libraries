@@ -21,8 +21,9 @@ says nothing about bf16 *with* causal. ``coverage.py`` prints the per-feature
 graph counts behind every cell, and ``coverage.py --graphs OP FEATURE --arch
 ARCH`` lists the graphs themselves.
 
-This document is the committed ``SUPPORT_MATRIX_OVERVIEW.md``, and CI and
-pre-commit fail if it differs from a fresh render (``--check``).
+This document is the committed ``SUPPORT_MATRIX_OVERVIEW.md``. It is refreshed
+on its own, not with each claim change, so it can lag the sidecars; ``--check``
+says whether it does.
 
 Usage:
 
@@ -493,6 +494,10 @@ def render(claims: FeatureClaims) -> str:
         "Percentages are shares of each op's API options, not of its graphs. "
         "Options count singly, not in combination.",
         "",
+        "This file is refreshed on its own, not with each claim change, so it "
+        "can lag the claims on develop. Every `hipdnn-superbuild-ci` Linux run "
+        "uploads a current copy in its `hipdnn-support-matrix` artifact.",
+        "",
         f"**Jump to:** {jump}",
         "",
         *render_dashboard(claims),
@@ -528,8 +533,8 @@ def main(argv: list[str] | None = None) -> int:
         "--check",
         action="store_true",
         help="Do not write. Re-render and compare against --output; exit 1 if "
-        "they differ or it is missing. The CI and pre-commit check on the "
-        "committed overview.",
+        "they differ or it is missing: whether the committed overview needs a "
+        "refresh.",
     )
     args = parser.parse_args(argv)
 

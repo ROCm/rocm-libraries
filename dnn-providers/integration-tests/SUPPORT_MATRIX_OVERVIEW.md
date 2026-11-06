@@ -4,6 +4,8 @@
 
 Generated from the committed support claims (12353 graphs, 490 catalogued options). Percentages are shares of each op's API options, not of its graphs. Options count singly, not in combination.
 
+This file is refreshed on its own, not with each claim change, so it can lag the claims on develop. Every `hipdnn-superbuild-ci` Linux run uploads a current copy in its `hipdnn-support-matrix` artifact.
+
 **Jump to:** [RDNA (consumer)](#rdna-consumer) · [CDNA (data center)](#cdna-data-center) · [By engine](#by-engine) · [Op groups](#op-groups) · [Options per op](#options-per-op) · [GPU targets](#gpu-targets)
 
 ## Summary by architecture
