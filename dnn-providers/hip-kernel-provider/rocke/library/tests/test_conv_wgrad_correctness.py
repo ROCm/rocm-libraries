@@ -831,12 +831,12 @@ class TestConvWgradCorrectness(unittest.TestCase):
         at that degree rather than at the cache's ``split_k=2`` marker; the
         degree is a kernarg, so the IR is the same.
 
-        These are the 2x2-warp tiles, and the bf16 problems are sized so the
+        These are 2x2-warp tiles of the gfx1250 cover, and the bf16 problems are sized so the
         degree lands on its cap. The last bf16 problem (small channels, deep
         reduction) asks for 128 before the cap; all-positive partials miss the
-        tolerance there. fp16 is not split automatically (its cap is 1), so its
-        cases check that the resolver launches no split-K binary, then run the
-        binary at an explicit degree, as a caller that opts in would. The inputs are all-positive -- same-sign partials
+        tolerance there. fp16 takes its own policy (fill to 1024 CTAs, 2048
+        grouped, slices down to 512, up to 128); its cases run at the degree the
+        resolver picks. The inputs are all-positive -- same-sign partials
         do not cancel their 16-bit rounding -- so this also bounds the accuracy
         at the cap.
         """
@@ -861,9 +861,9 @@ class TestConvWgradCorrectness(unittest.TestCase):
         #  expected degree); -1 is the resolver's pick.
         cases = [
             (32, 32, 64, 96, 1, "bf16", (32, 64, 64), -1, 12),
-            (32, 32, 64, 128, 1, "fp16", (64, 64, 64), 8, 8),
-            (32, 32, 64, 64, 4, "bf16", (32, 32, 32), -1, 12),
-            (32, 32, 64, 64, 4, "fp16", (32, 32, 32), 8, 8),
+            (32, 32, 64, 128, 1, "fp16", (64, 128, 64), -1, 64),
+            (32, 32, 64, 64, 4, "bf16", (32, 128, 32), -1, 12),
+            (32, 32, 64, 64, 4, "fp16", (32, 128, 32), -1, 64),
             (64, 64, 16, 16, 1, "bf16", (32, 64, 64), -1, 12),
         ]
         ran = 0
@@ -879,14 +879,17 @@ class TestConvWgradCorrectness(unittest.TestCase):
                     and g[5] == 16
                     and g[6:8] == ("mem", "default")
                 ]
-                # The cache's split-K binaries for this geometry that would be
-                # built (spec validity) and offered for this problem (lookup).
+                # The cache's packed-atomic split-K binaries for this geometry
+                # (synchronous K loop) that would be built (spec validity) and
+                # offered for this problem (lookup).
                 jobs = [
                     j
                     for j in aot_jobs._direction_jobs(
                         "wgrad", GPU_ARCH, dtype, target, (2,), 1, geometries=geometries
                     )
-                    if aot_jobs._spec_is_valid(j, GPU_ARCH, dtype)
+                    if not j.identity.two_stage
+                    and not j.identity.async_dma
+                    and aot_jobs._spec_is_valid(j, GPU_ARCH, dtype)
                     and identity_supports_problem(j.identity, problem)[0]
                 ]
                 self.assertTrue(jobs, f"no cached split-K kernel serves {problem}")
@@ -2199,14 +2202,14 @@ class TestWgradValidatorAgreement(unittest.TestCase):
         self.assertIn("two_stage", why)
 
 
-class TestWgradTwoStageIsCdnaOnly(unittest.TestCase):
-    """Two-stage wgrad must be rejected on WMMA rather than crashing the builder.
+class TestWgradTwoStageOnWmma(unittest.TestCase):
+    """Two-stage wgrad on WMMA: built on gfx1250, rejected cleanly elsewhere.
 
-    ``_emit_wgrad_workspace_store_epilogue`` is MFMA-only -- it calls
-    ``c_warp_params(atom)`` and ``atom`` is None on wave32 -- and the epilogue
-    dispatch tests ``_is_two_stage`` before the WMMA branch. Without a validator
-    gate a two-stage wave32 spec reaches that emitter and dies with an
-    ``AttributeError``, which no caller pre-filters against.
+    ``_emit_wgrad_workspace_store_epilogue`` decodes the WMMA C fragment through
+    ``op.c_layout()`` (the MFMA one through the atom). Its f32 scratch adds are
+    global float atomics, so a wave32 arch without validated float atomics
+    (gfx1151) must get a validation error, never an exception out of the
+    emitter.
     """
 
     def _gfx1250_spec(self, **kw):
@@ -2216,9 +2219,10 @@ class TestWgradTwoStageIsCdnaOnly(unittest.TestCase):
         )
         from kernels.common.conv_implicit_gemm_wgrad import WgradConvSpec
 
+        dtype_d = kw.pop("dtype_d", "fp32")
         base = dict(
             problem=ConvProblem(N=8, Hi=56, Wi=56, C=64, K=64, Y=3, X=3, pH=1, pW=1),
-            data=ConvDataSpec(dtype_a="fp16", dtype_b="fp16", dtype_d="fp32"),
+            data=ConvDataSpec(dtype_a="fp16", dtype_b="fp16", dtype_d=dtype_d),
             tile_m=32,
             tile_n=32,
             tile_k=32,
@@ -2234,28 +2238,36 @@ class TestWgradTwoStageIsCdnaOnly(unittest.TestCase):
         base.update(kw)
         return WgradConvSpec(**base)
 
-    def test_two_stage_rejected_on_wmma(self):
-        from kernels.common.conv_implicit_gemm_wgrad import (
-            is_valid_wgrad_spec,
-        )
-
-        ok, why = is_valid_wgrad_spec(
-            self._gfx1250_spec(split_k=4, two_stage=True), "gfx1250"
-        )
-        self.assertFalse(ok, "two-stage on WMMA must be rejected")
-        self.assertIn("CDNA", why)
-
-    def test_two_stage_build_raises_value_error_not_attribute_error(self):
-        # The failure mode that matters: a clean ValueError a caller can handle,
-        # never an AttributeError out of the epilogue emitter.
+    def test_two_stage_admitted_on_gfx1250(self):
         from kernels.common.conv_implicit_gemm_wgrad import (
             build_implicit_gemm_conv_wgrad,
+            is_valid_wgrad_spec,
+            wgrad_two_stage_available,
         )
 
+        self.assertTrue(wgrad_two_stage_available("gfx1250"))
+        for dtype_d in ("fp32", "fp16", "bf16"):
+            spec = self._gfx1250_spec(split_k=4, two_stage=True, dtype_d=dtype_d)
+            ok, why = is_valid_wgrad_spec(spec, "gfx1250")
+            self.assertTrue(ok, f"two-stage on gfx1250 WMMA ({dtype_d}): {why}")
+            build_implicit_gemm_conv_wgrad(spec, arch="gfx1250")
+
+    def test_two_stage_rejected_without_float_atomics(self):
+        # gfx1151 has no validated float global atomics: a clean ValueError a
+        # caller can handle, never an exception out of the epilogue emitter.
+        from kernels.common.conv_implicit_gemm_wgrad import (
+            build_implicit_gemm_conv_wgrad,
+            is_valid_wgrad_spec,
+            wgrad_two_stage_available,
+        )
+
+        self.assertFalse(wgrad_two_stage_available("gfx1151"))
+        spec = self._gfx1250_spec(split_k=4, two_stage=True, warp_tile_k=16)
+        ok, why = is_valid_wgrad_spec(spec, "gfx1151")
+        self.assertFalse(ok)
+        self.assertIn("has_global_float_atomic_add", why)
         with self.assertRaises(ValueError):
-            build_implicit_gemm_conv_wgrad(
-                self._gfx1250_spec(split_k=4, two_stage=True), arch="gfx1250"
-            )
+            build_implicit_gemm_conv_wgrad(spec, arch="gfx1151")
 
     def test_split_k_atomic_still_valid_on_wmma(self):
         # The gate is two-stage-specific: the packed atomic epilogue DOES have a
@@ -2275,9 +2287,9 @@ class TestWgradTwoStageIsCdnaOnly(unittest.TestCase):
             wgrad_two_stage_available,
         )
 
-        for arch in ("gfx942", "gfx950"):
+        for arch in ("gfx942", "gfx950", "gfx1250"):
             self.assertTrue(wgrad_two_stage_available(arch), arch)
-        for arch in ("gfx1250", "gfx1151", "gfx1201"):
+        for arch in ("gfx1151", "gfx1201"):
             self.assertFalse(wgrad_two_stage_available(arch), arch)
 
     def test_16bit_split_k_atomic_arch_scope(self):
@@ -2308,14 +2320,32 @@ class TestWgradTwoStageIsCdnaOnly(unittest.TestCase):
                 ok, why = is_valid_wgrad_spec(other, arch)
                 self.assertFalse(ok, f"{dtype} split-K on {arch} must stay rejected")
                 self.assertIn("enabled only on", why)
-            # And no WMMA epilogue but 'default' is admitted for split-K.
-            ok, _ = is_valid_wgrad_spec(
+            # The cshuffle epilogue is admitted for WMMA split-K too: it pairs
+            # through LDS from the WMMA fragment (CShuffleEpilogue.from_grid_op).
+            ok, why = is_valid_wgrad_spec(
                 self._gfx1250_spec(data=data, split_k=4, epilogue="cshuffle"),
                 "gfx1250",
             )
-            self.assertFalse(
-                ok, f"{dtype} cshuffle split-K on gfx1250 must be rejected"
+            self.assertTrue(ok, f"{dtype} cshuffle split-K on gfx1250: {why}")
+
+    def test_wmma_cshuffle_split_k_needs_even_store_vec(self):
+        # The cshuffle epilogue pairs from LDS on WMMA as on MFMA, so unlike the
+        # default WMMA epilogue it needs an even store vector.
+        from kernels.common._conv_implicit_gemm_common import ConvDataSpec
+        from kernels.common.conv_implicit_gemm_wgrad import is_valid_wgrad_spec
+
+        for dtype in ("bf16", "fp16"):
+            data = ConvDataSpec(dtype_a=dtype, dtype_b=dtype, dtype_d=dtype)
+            for sv, want in ((1, False), (2, True), (8, True)):
+                spec = self._gfx1250_spec(
+                    data=data, split_k=4, epilogue="cshuffle", vector_size_c=sv
+                )
+                ok, why = is_valid_wgrad_spec(spec, "gfx1250")
+                self.assertEqual(ok, want, f"{dtype} sv={sv}: {why}")
+            ok, _ = is_valid_wgrad_spec(
+                self._gfx1250_spec(data=data, split_k=4, vector_size_c=1), "gfx1250"
             )
+            self.assertTrue(ok, "the default WMMA epilogue ignores the store vector")
 
     def test_wmma_split_k_ignores_store_vec(self):
         # The AOT cache grid pins vector_size_c=1 for the default epilogue. The
@@ -2458,11 +2488,13 @@ class TestWgradDoubleBufferedSplitKTail(unittest.TestCase):
     )
 
     def _sweep(self, **knobs) -> None:
-        # Both loops are MFMA-only (WMMA wgrad rejects async_dma and
-        # unroll_k). On MFMA every case must build and run: a skip (an
-        # invalid spec) is a failure, not a quiet pass.
-        if not _IS_MFMA:
-            self.skipTest(f"{knobs} wgrad is MFMA-only; running on {GPU_ARCH}")
+        # Both loops exist on MFMA; gfx1250 WMMA has async_dma only (the
+        # global_load_async_to_lds ping-pong) and rejects unroll_k. Every case
+        # must build and run: a skip (an invalid spec) is a failure, not a
+        # quiet pass.
+        gfx1250_async = GPU_ARCH == "gfx1250" and knobs.get("async_dma", False)
+        if not (_IS_MFMA or gfx1250_async):
+            self.skipTest(f"{knobs} wgrad is not built on {GPU_ARCH}")
         for shape in self._CASES:
             for dtype in _DTYPES:
                 with self.subTest(shape=shape.id, dtype=dtype):
@@ -2497,6 +2529,186 @@ def _assert_case_ran(test, ok: bool, why: str) -> None:
     """
     test.assertTrue(ok, why)
     test.assertFalse(why.startswith("skip"), f"case was skipped rather than run: {why}")
+
+
+@unittest.skipIf(_skip_reason(), _skip_reason())
+class TestWgradWmmaCShuffle(unittest.TestCase):
+    """gfx1250 dW numerics for the WMMA cshuffle epilogue.
+
+    The tile is staged through LDS from the WMMA C layout (op.c_layout()) and
+    written as wide stores, or as genuine packed atomic pairs under split-K. A
+    wrong lane-to-element mapping shows up only in dW, so every case runs
+    against the CPU reference: direct store and split-K, fp16 and bf16, partial
+    M/N tiles (C=24), pointwise, stride 2, grouped, and the async K loop.
+    """
+
+    _CASES = (
+        _Shape(
+            "3x3_N2H14W14C64K64", N=2, Hi=14, Wi=14, C=64, K=64, Y=3, X=3, pH=1, pW=1
+        ),
+        _Shape(
+            "3x3_C24_N2H12W12C24K32",
+            N=2,
+            Hi=12,
+            Wi=12,
+            C=24,
+            K=32,
+            Y=3,
+            X=3,
+            pH=1,
+            pW=1,
+        ),
+        _Shape("1x1_N2H14W14C32K32", N=2, Hi=14, Wi=14, C=32, K=32, Y=1, X=1),
+        _Shape(
+            "3x3s2_N2H15W15C32K48",
+            N=2,
+            Hi=15,
+            Wi=15,
+            C=32,
+            K=48,
+            Y=3,
+            X=3,
+            sH=2,
+            sW=2,
+            pH=1,
+            pW=1,
+        ),
+        _Shape(
+            "3x3_g2_N2H10W10C32K32",
+            N=2,
+            Hi=10,
+            Wi=10,
+            C=32,
+            K=32,
+            Y=3,
+            X=3,
+            pH=1,
+            pW=1,
+            groups=2,
+        ),
+    )
+
+    def _sweep(self, **knobs) -> None:
+        if GPU_ARCH != "gfx1250":
+            self.skipTest(
+                f"the WMMA cshuffle epilogue is gfx1250-tested; on {GPU_ARCH}"
+            )
+        from kernels.common._conv_implicit_gemm_common import ConvProblem
+        from kernels.common.conv_implicit_gemm import ConvDataSpec
+        from kernels.common.conv_implicit_gemm_wgrad import WgradConvSpec
+
+        for shape in self._CASES:
+            p = ConvProblem(
+                N=shape.N,
+                Hi=shape.Hi,
+                Wi=shape.Wi,
+                C=shape.C,
+                K=shape.K,
+                Y=shape.Y,
+                X=shape.X,
+                sH=shape.sH,
+                sW=shape.sW,
+                pH=shape.pH,
+                pW=shape.pW,
+                groups=shape.groups,
+            )
+            for dtype in _DTYPES:
+                for split_k in (1, 2):
+                    for tm, tn, tk, wm, wn in ((32, 64, 32, 2, 2), (64, 32, 64, 2, 1)):
+                        spec = WgradConvSpec(
+                            problem=p,
+                            data=ConvDataSpec(
+                                dtype_a=dtype, dtype_b=dtype, dtype_d=dtype
+                            ),
+                            tile_m=tm,
+                            tile_n=tn,
+                            tile_k=tk,
+                            warp_m=wm,
+                            warp_n=wn,
+                            warp_tile_m=16,
+                            warp_tile_n=16,
+                            warp_tile_k=32,
+                            wave_size=32,
+                            pipeline="mem",
+                            epilogue="cshuffle",
+                            split_k=split_k,
+                            lds_k_outer=True,
+                            **knobs,
+                        )
+                        with self.subTest(
+                            shape=shape.id, dtype=dtype, sk=split_k, tile=(tm, tn, tk)
+                        ):
+                            ok, why = _run_one(
+                                GPU_ARCH,
+                                shape,
+                                dtype,
+                                "mem",
+                                "cshuffle",
+                                spec_override=spec,
+                            )
+                            _assert_case_ran(
+                                self, ok, f"{shape.id} {dtype} {knobs}: {why}"
+                            )
+
+    def test_cshuffle(self):
+        self._sweep()
+
+    def test_cshuffle_async(self):
+        self._sweep(async_dma=True)
+
+
+@unittest.skipIf(_skip_reason(), _skip_reason())
+class TestWgradTwoStageWmmaNumerics(unittest.TestCase):
+    """gfx1250 dW numerics for two-stage (f32 workspace) split-K on WMMA.
+
+    The Stage 1 scratch epilogue decodes the WMMA C fragment through
+    op.c_layout(); a wrong lane-to-element mapping only shows in dW. Covers an
+    odd dW row (a 3-channel stem, wg_N = 27, which the packed atomic cannot
+    serve) and a 2x2 stride-2 downsample, fp16 and bf16, with the plain and the
+    async K loop.
+    """
+
+    _CASES = (
+        _Shape(
+            "stem_C3_N4H32W32C3K32", N=4, Hi=32, Wi=32, C=3, K=32, Y=3, X=3, pH=1, pW=1
+        ),
+        _Shape(
+            "2x2s2_N4H32W32C32K64",
+            N=4,
+            Hi=32,
+            Wi=32,
+            C=32,
+            K=64,
+            Y=2,
+            X=2,
+            sH=2,
+            sW=2,
+        ),
+    )
+
+    def _sweep(self, **knobs) -> None:
+        if GPU_ARCH != "gfx1250":
+            self.skipTest(f"two-stage WMMA wgrad is gfx1250-only; on {GPU_ARCH}")
+        for shape in self._CASES:
+            if knobs.get("async_dma") and shape.C % 2:
+                continue  # the async copy needs an even channel run
+            for dtype in _DTYPES:
+                for split_k in (4, 16):
+                    with self.subTest(shape=shape.id, dtype=dtype, sk=split_k):
+                        ok, why = _check_two_stage(
+                            shape, dtype, "mem", split_k, seed=7, **knobs
+                        )
+                        self.assertTrue(ok, f"{shape.id} {dtype} {knobs}: {why}")
+                        self.assertFalse(why.startswith("split_k=1"), why)
+
+    def test_two_stage(self):
+        self._sweep()
+
+    def test_two_stage_kouter(self):
+        self._sweep(lds_k_outer=True)
+
+    def test_two_stage_async(self):
+        self._sweep(lds_k_outer=True, async_dma=True)
 
 
 @unittest.skipUnless(not _SKIP_REASON, _SKIP_REASON or "needs CDNA GPU + torch")
