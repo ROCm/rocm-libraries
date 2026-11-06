@@ -34,7 +34,27 @@ struct FrontendFeatureCase
     /// The architecture prefix of the only family that serves the graph (e.g. "gfx9" for a
     /// CDNA-only feature); every FlyDSL family when null.
     const char* onlyOn = nullptr;
+    /// The architecture prefix on which the standard tier runs the case; on other GPUs its
+    /// Comprehensive* copy (comprehensiveCopy, comprehensiveCopies) runs it. Every tier on
+    /// every GPU when null.
+    const char* standardOn = nullptr;
+    bool comprehensiveCopy = false;
 };
+
+/// The Comprehensive* copies of the @p cases that name standardOn.
+std::vector<FrontendFeatureCase> comprehensiveCopies(const std::vector<FrontendFeatureCase>& cases)
+{
+    std::vector<FrontendFeatureCase> copies;
+    for(auto testCase : cases)
+    {
+        if(testCase.standardOn != nullptr)
+        {
+            testCase.comprehensiveCopy = true;
+            copies.push_back(testCase);
+        }
+    }
+    return copies;
+}
 
 using IntegrationGpuFlydslSdpaFrontendFeatures
     = IntegrationGpuFlydslFrontendLane<FrontendFeatureCase>;
@@ -257,7 +277,11 @@ std::vector<FrontendFeatureCase> backfillCases()
 /// element 133,120, raw scores near 3e11: O was NaN) and test_sm_scale_magnitude at head_dim 512
 /// and scale 1.2 with normal inputs (O a whole bf16 step off, past AOTriton's absolute bound of
 /// 0.03). The decode shape on the decode engines, where gfx950's and gfx942's CDNA decode
-/// objects failed the second; the first-ranked engine elsewhere.
+/// objects failed the second; the first-ranked engine elsewhere. The head_dim 512 cases run
+/// in every tier on CDNA, where those objects are, and in the comprehensive tier on RDNA
+/// (~4 s on a gfx11 CI runner), as RDNA's head_dim 512 dispatch check does
+/// (TestGpuFlydslSdpaRdnaComprehensiveTier.DecodesWithinAotritonsBoundAtScale1Point2); the
+/// standard tier's RDNA check is HoldsAotritonsBoundAtScale1Point2 at head_dim 64 and 256.
 std::vector<FrontendFeatureCase> aotritonCases()
 {
     std::vector<FrontendFeatureCase> cases;
@@ -295,14 +319,14 @@ std::vector<FrontendFeatureCase> aotritonCases()
     sharp.engine = "hipkernel:flydsl_sdpa_cdna_decode";
     sharp.engineArch = "gfx950";
     sharp.name = "aotriton_scale_1_2_head_dim_512";
-    cases.push_back({"AotritonScale1Point2HeadDim512", sharp});
+    cases.push_back({"AotritonScale1Point2HeadDim512", sharp, nullptr, "gfx9"});
     auto sharpCausal = sharp;
     sharpCausal.seqKv = 400;
     sharpCausal.rightBound = 0;
     sharpCausal.alignment = hipdnn_frontend::DiagonalAlignment::TOP_LEFT;
     sharpCausal.engineArch = "gfx942";
     sharpCausal.name = "aotriton_scale_1_2_head_dim_512_causal";
-    cases.push_back({"AotritonScale1Point2HeadDim512Causal", sharpCausal});
+    cases.push_back({"AotritonScale1Point2HeadDim512Causal", sharpCausal, nullptr, "gfx9"});
     return cases;
 }
 
@@ -355,6 +379,18 @@ TEST_P(IntegrationGpuFlydslSdpaFrontendFeatures, ServesTheFeatureAsTheCpuReferen
     {
         GTEST_SKIP() << "only " << testCase.onlyOn << " serves " << testCase.name;
     }
+    if(testCase.standardOn != nullptr)
+    {
+        const bool standardHere = _arch.rfind(testCase.standardOn, 0) == 0;
+        if(!testCase.comprehensiveCopy && !standardHere)
+        {
+            GTEST_SKIP() << "its Comprehensive* copy runs it on " << _arch;
+        }
+        if(testCase.comprehensiveCopy && standardHere)
+        {
+            GTEST_SKIP() << "the standard-tier copy runs it on " << _arch;
+        }
+    }
     auto sdpa = buildFrontendSdpaGraph(testCase.spec);
     validateServeAndVerify(sdpa, testCase.spec.dataType);
 }
@@ -377,6 +413,11 @@ INSTANTIATE_TEST_SUITE_P(Backfill,
 INSTANTIATE_TEST_SUITE_P(Aotriton,
                          IntegrationGpuFlydslSdpaFrontendFeatures,
                          ::testing::ValuesIn(aotritonCases()),
+                         caseName);
+
+INSTANTIATE_TEST_SUITE_P(ComprehensiveAotriton,
+                         IntegrationGpuFlydslSdpaFrontendFeatures,
+                         ::testing::ValuesIn(comprehensiveCopies(aotritonCases())),
                          caseName);
 
 INSTANTIATE_TEST_SUITE_P(ZeroProbabilityDropout,

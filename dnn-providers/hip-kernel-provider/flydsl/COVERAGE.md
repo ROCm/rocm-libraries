@@ -271,7 +271,22 @@ do not compute, declined rather than approximated.
 
 Tiers: GTest names prefixed `Full/` are excluded from the quick, standard and
 comprehensive tiers by `HIP_MLOPS_ENGINE_test_categories.yaml` and run only in the full
-(nightly) tier; every other case above runs in every tier.
+tier; names prefixed `Comprehensive` are excluded from the quick and standard tiers and run
+in the comprehensive (nightly) and full tiers; every other case above runs in every tier.
+The FlyDSL SDPA cases that run in the comprehensive tier and not pre-merge:
+
+- `Comprehensive/TestGpuFlydslSdpaObjects.*/OnePerNightlyForm`: one RDNA prefill and decode
+  object per form `isNightlyForm` names (a bias with a sink, a generic tier or a V head dim of
+  its own, or on prefill a split V; exact f32; V-mask pairs; the generic decode tiers split
+  four ways). `OnePerForm` keeps one object of every other form (44 per engine per target).
+- `Comprehensive/TestGpuFlydslSdpaRdnaComprehensiveTier`: `DropsThroughABias` at `head_dim`
+  64, 96 and 256 (128 pre-merge), `DropsAtTheGenericTiersWidths` at 80, 160 and 192 (48 and 224
+  pre-merge), `DecodesZeroAndNegativeScalesAcrossSplits`,
+  `DecodesWithinAotritonsBoundAtScale1Point2` and `AppliesALeftOnlyWindowAsTheCpuReferenceDoes`.
+- `ComprehensiveDualwaveHeadDim256/IntegrationGpuFlydslSdpaFrontendParity` off gfx950 (gfx950
+  runs `DualwaveHeadDim256` in every tier) and
+  `ComprehensiveAotriton/IntegrationGpuFlydslSdpaFrontendFeatures.*/AotritonScale1Point2HeadDim512*`
+  off CDNA (CDNA runs `Aotriton/` in every tier).
 
 ---
 
@@ -1073,8 +1088,9 @@ hipDNN states dropout cuDNN's way: `dropout_probability` with a seed and an offs
   twins spill 16-26): every multiple of 8 to 224 drops on gfx12. The padded tiers' dropout
   builds read Q/K's and V's widths apart, so they drop on a pair up to the tier, MLA 192/128 on
   the 224 tier included (`DropsWithQueryKeyAndValueHeadDimsThatDiffer` up to 96/96, gfx1201).
-  Tested: the mask bit for bit and O against the reference at 48, 80, 160, 192 and 224 on gfx11
-  (`DropsAtTheGenericTiersWidths`) and at 136, 160, 192 and 224 on gfx12
+  Tested: the mask bit for bit and O against the reference at 48 and 224 on gfx11
+  (`DropsAtTheGenericTiersWidths`; 80, 160 and 192 in the comprehensive tier's
+  `Comprehensive/TestGpuFlydslSdpaRdnaComprehensiveTier`) and at 136, 160, 192 and 224 on gfx12
   (`DropsAtThePaddedTiersWidths`), with and without a bias in either dtype, causal and not.
 - **Declined**, each a row of objects when a model needs it: dropout with a
   sink, at 232-248 and a pair wider than 224 on gfx12, past 256, with a pair on gfx11 (no pair

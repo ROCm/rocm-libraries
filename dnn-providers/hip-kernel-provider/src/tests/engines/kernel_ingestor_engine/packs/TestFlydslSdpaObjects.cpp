@@ -52,9 +52,11 @@
  * the graph first: an object that admits no graph built from its metadata would never be
  * selected, which a launch by name would otherwise hide.
  *
- * Two tiers. `OnePerForm` runs one object per (engine, form) -- a form being what changes
- * the code an object runs beyond its head dim -- and is the pre-merge case. `Full/...Every`
- * runs all of them, bucketed objects at two widths; it is the nightly one.
+ * Three tiers. `OnePerForm` runs one object per (engine, form) -- a form being what changes
+ * the code an object runs beyond its head dim -- and is the pre-merge case; on the RDNA
+ * prefill and decode engines it leaves the forms isNightlyForm names to
+ * `Comprehensive/...OnePerNightlyForm`, one object of each, in the comprehensive (nightly)
+ * tier. `Full/...Every` runs all of them, bucketed objects at two widths.
  *
  * `TestFlydslSdpaObjectGraphs` is the host half: for every object every loaded shard
  * carries, on every architecture, the graph this suite would run is one the object's
@@ -169,7 +171,10 @@ RdnaObjectEngine rdnaObjectEngine(ObjectKind kind)
 /// Which of the staged objects a case launches.
 enum class ObjectSelection
 {
+    /// One object per form, but the forms isNightlyForm names: the standard tier.
     ONE_PER_FORM,
+    /// One object per form isNightlyForm names: the comprehensive tier.
+    ONE_PER_NIGHTLY_FORM,
     EVERY
 };
 
@@ -282,6 +287,26 @@ ObjectForm formOf(ObjectKind kind, const KernelDefinition& kernel)
             traits.hdPair,
             traits.dvSplit,
             traits.vMask};
+}
+
+/// Whether one object per form leaves @p kernel's form to the comprehensive (nightly) tier. On
+/// the RDNA prefill and decode engines: a bias with a sink, a generic tier or a V head dim of
+/// its own (on prefill, or a split V); the exact f32 and V-mask pair forms; and the generic
+/// tiers that split V four ways. Each of these features also runs in the standard tier, on a
+/// form of its own or in TestGpuFlydslSdpaRdnaDispatch. A function of the form.
+bool isNightlyForm(ObjectKind kind, const KernelDefinition& kernel)
+{
+    if(kind != ObjectKind::RDNA_PREFILL && kind != ObjectKind::RDNA_DECODE)
+    {
+        return false;
+    }
+    const auto traits = traitsOf(kind, kernel);
+    const bool bucketed = isBucketed(kind, traits);
+    const bool mla = traits.headDimV != 0 && traits.headDimV != traits.headDim;
+    const bool splitValue = kind == ObjectKind::RDNA_PREFILL && traits.dvSplit > 1;
+    return traits.dtype == "f32" || traits.vMask
+           || (traits.bias && (traits.sink || bucketed || mla || splitValue))
+           || (bucketed && traits.dvSplit > 2);
 }
 
 /// A head dim inside a bucket of @p bound: about five eighths of it, on the multiple of 8
@@ -486,8 +511,9 @@ std::string describe(const SdpaGraphSpec& spec)
            + (spec.dropoutProbability.value_or(0.0F) > 0.0F ? " dropout" : "");
 }
 
-/// @p kernels in name order, or one per form when @p selection asks for that: the first of
-/// each in name order, so the choice is the same on every run.
+/// @p kernels in name order, or one per form when @p selection asks for that (the standard
+/// tier's forms or the nightly ones, isNightlyForm): the first of each in name order, so the
+/// choice is the same on every run.
 std::vector<KernelDefinition>
     select(ObjectKind kind, std::vector<KernelDefinition> kernels, ObjectSelection selection)
 {
@@ -498,10 +524,15 @@ std::vector<KernelDefinition>
     {
         return kernels;
     }
+    const bool nightly = selection == ObjectSelection::ONE_PER_NIGHTLY_FORM;
     std::vector<KernelDefinition> chosen;
     std::vector<ObjectForm> seen;
     for(auto& kernel : kernels)
     {
+        if(isNightlyForm(kind, kernel) != nightly)
+        {
+            continue;
+        }
         auto form = formOf(kind, kernel);
         if(std::find(seen.begin(), seen.end(), form) == seen.end())
         {
@@ -527,6 +558,10 @@ void expectStagedObjectsMatch(ObjectKind kind, ObjectSelection selection)
 
     const auto device = packedArchDeviceProperties();
     const auto kernels = select(kind, staged, selection);
+    if(kernels.empty() && selection == ObjectSelection::ONE_PER_NIGHTLY_FORM)
+    {
+        GTEST_SKIP() << "the standard tier runs every " << engine.op << " form";
+    }
     int launches = 0;
     for(const auto& kernel : kernels)
     {
@@ -659,7 +694,9 @@ TEST_P(TestFlydslSdpaObjectGraphs, EveryLoadedObjectAdmitsTheGraphsBuiltFromItsM
         std::cout << "[ objects  ] " << engine.op << " " << arch << ": " << kernels.size()
                   << " objects, "
                   << select(GetParam(), kernels, ObjectSelection::ONE_PER_FORM).size()
-                  << " forms\n";
+                  << " forms + "
+                  << select(GetParam(), kernels, ObjectSelection::ONE_PER_NIGHTLY_FORM).size()
+                  << " nightly forms\n";
     }
 }
 
@@ -726,12 +763,21 @@ TEST_P(TestGpuFlydslSdpaObjects, CdnaDecodeObjectsMatchTheReference)
 
 std::string selectionName(const ::testing::TestParamInfo<ObjectSelection>& info)
 {
-    return info.param == ObjectSelection::EVERY ? "Every" : "OnePerForm";
+    if(info.param == ObjectSelection::EVERY)
+    {
+        return "Every";
+    }
+    return info.param == ObjectSelection::ONE_PER_NIGHTLY_FORM ? "OnePerNightlyForm" : "OnePerForm";
 }
 
 INSTANTIATE_TEST_SUITE_P(,
                          TestGpuFlydslSdpaObjects,
                          ::testing::Values(ObjectSelection::ONE_PER_FORM),
+                         selectionName);
+
+INSTANTIATE_TEST_SUITE_P(Comprehensive,
+                         TestGpuFlydslSdpaObjects,
+                         ::testing::Values(ObjectSelection::ONE_PER_NIGHTLY_FORM),
                          selectionName);
 
 INSTANTIATE_TEST_SUITE_P(Full,

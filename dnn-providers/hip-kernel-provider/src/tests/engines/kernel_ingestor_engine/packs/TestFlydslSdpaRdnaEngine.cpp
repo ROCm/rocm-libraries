@@ -3458,13 +3458,27 @@ void expectZeroAndNegativeScalesMatchTheReference(RdnaFamily family)
     run(spec);
 }
 
+/// The comprehensive (nightly) tier's RDNA dispatch cases: breadth sweeps whose standard-tier
+/// case is one point of the sweep, and cases whose standard-tier sibling runs the same check on
+/// another family or form (ServesZeroAndNegativeScales, HoldsAotritonsBoundAtScale1Point2,
+/// AppliesALeftOnlyWindowWithTheNonCausalObject and the frontend lane's LeftOnlyWindow cases).
+/// TestGpuFlydslSdpaObjects launches every dropout object in every tier.
+class TestGpuFlydslSdpaRdnaComprehensiveTier : public ::testing::TestWithParam<int>
+{
+};
+
+INSTANTIATE_TEST_SUITE_P(Comprehensive,
+                         TestGpuFlydslSdpaRdnaComprehensiveTier,
+                         ::testing::Values(0),
+                         [](const ::testing::TestParamInfo<int>&) { return std::string("Sweep"); });
+
 TEST(TestGpuFlydslSdpaRdnaDispatch, ServesZeroAndNegativeScales)
 {
     SKIP_IF_NO_DEVICES();
     expectZeroAndNegativeScalesMatchTheReference(RdnaFamily::PREFILL);
 }
 
-TEST(TestGpuFlydslSdpaRdnaDispatch, DecodesZeroAndNegativeScalesAcrossSplits)
+TEST_P(TestGpuFlydslSdpaRdnaComprehensiveTier, DecodesZeroAndNegativeScalesAcrossSplits)
 {
     SKIP_IF_NO_DEVICES();
     expectZeroAndNegativeScalesMatchTheReference(RdnaFamily::DECODE);
@@ -3631,7 +3645,7 @@ TEST(TestGpuFlydslSdpaRdnaDispatch, HoldsAotritonsBoundAtScale1Point2)
     expectAotritonBoundAtScale1Point2(RdnaFamily::PREFILL);
 }
 
-TEST(TestGpuFlydslSdpaRdnaDispatch, DecodesWithinAotritonsBoundAtScale1Point2)
+TEST_P(TestGpuFlydslSdpaRdnaComprehensiveTier, DecodesWithinAotritonsBoundAtScale1Point2)
 {
     SKIP_IF_NO_DEVICES();
     expectAotritonBoundAtScale1Point2(RdnaFamily::DECODE);
@@ -3828,7 +3842,7 @@ TEST(TestGpuFlydslSdpaRdnaDispatch, AppliesALeftOnlyWindowWithTheNonCausalObject
     expectSdpaMatchesReference<hipdnn_data_sdk::types::half>(spec, F16_TOLERANCE);
 }
 
-TEST(TestGpuFlydslSdpaRdnaDispatch, AppliesALeftOnlyWindowAsTheCpuReferenceDoes)
+TEST_P(TestGpuFlydslSdpaRdnaComprehensiveTier, AppliesALeftOnlyWindowAsTheCpuReferenceDoes)
 {
     SKIP_IF_NO_DEVICES();
     // The cross-family case list CDNA serves (leftOnlyWindowSpecs), on the RDNA
@@ -7538,6 +7552,40 @@ TEST(TestGpuFlydslSdpaAiwDispatch, WritesTheLseThroughItsOwnLayoutAndReadsARunti
         spec, BF16_TOLERANCE, RdnaFamily::AIW);
 }
 
+/// Dropout with a bias at @p headDim: the mask read off O bit for bit through an additive bias (Q
+/// zero and V the identity, so each O element is one key's kept, scaled probability), with a full
+/// bias and a key-broadcast one [B, 1, 1, Skv], f32 and in the query's dtype, both causal
+/// variants; rows the bias masks whole with -inf stay O = 0 and LSE = -inf under dropout.
+void expectDropsThroughABias(int64_t headDim)
+{
+    SCOPED_TRACE("head_dim " + std::to_string(headDim));
+    for(const auto mask : {SdpaMask::NONE, SdpaMask::BOTTOM_RIGHT_CAUSAL})
+    {
+        SdpaGraphSpec spec;
+        spec.dataType = DataType::HALF;
+        spec.batch = 2;
+        spec.heads = 3;
+        spec.kvHeads = 3;
+        spec.headDim = headDim;
+        spec.seqLenQ = 80;
+        spec.seqLenKv = headDim;
+        spec.mask = mask;
+        spec.stats = SdpaStats::LSE;
+        spec.withBias = true;
+        setDropout(spec, 0.2F, 0x0123456789ABCDEFULL, 99);
+        spec.exposeDropoutMask = true;
+        expectSdpaMatchesReference<hipdnn_data_sdk::types::half>(spec, F16_TOLERANCE);
+        spec.biasDims = {spec.batch, 1, 1, spec.seqLenKv};
+        spec.biasDataType = DataType::HALF;
+        expectSdpaMatchesReference<hipdnn_data_sdk::types::half>(spec, F16_TOLERANCE);
+        spec.biasDims.clear();
+        spec.biasDataType = DataType::FLOAT;
+        spec.exposeDropoutMask = false;
+        spec.biasNegativeInfinityRows = true;
+        expectSdpaMatchesReference<hipdnn_data_sdk::types::half>(spec, F16_TOLERANCE);
+    }
+}
+
 } // namespace
 
 // The harness above, reached with a named object (FlydslSdpaObjectTestSupport.hpp).
@@ -7552,37 +7600,20 @@ TEST(TestGpuFlydslSdpaRdnaDispatch, DropsThroughABias)
     {
         GTEST_SKIP() << "the RDNA 16-bit dropout objects ship for gfx11 only";
     }
-    // Dropout with a bias: the mask read off O bit for bit through an additive bias (Q zero and V the
-    // identity, so each O element is one key's kept, scaled probability), with a full bias
-    // and a key-broadcast one [B, 1, 1, Skv], f32 and in the query's dtype, both causal
-    // variants; rows the bias masks whole with -inf stay O = 0 and LSE = -inf under dropout.
-    for(const int64_t headDim : {64, 96, 128, 256})
+    // head_dim 64, 96 and 256: Comprehensive/TestGpuFlydslSdpaRdnaComprehensiveTier.
+    expectDropsThroughABias(128);
+}
+
+TEST_P(TestGpuFlydslSdpaRdnaComprehensiveTier, DropsThroughABias)
+{
+    SKIP_IF_NO_DEVICES();
+    if(packedArchDeviceProperties().gcnArchName.rfind("gfx11", 0) != 0)
     {
-        for(const auto mask : {SdpaMask::NONE, SdpaMask::BOTTOM_RIGHT_CAUSAL})
-        {
-            SdpaGraphSpec spec;
-            spec.dataType = DataType::HALF;
-            spec.batch = 2;
-            spec.heads = 3;
-            spec.kvHeads = 3;
-            spec.headDim = headDim;
-            spec.seqLenQ = 80;
-            spec.seqLenKv = headDim;
-            spec.mask = mask;
-            spec.stats = SdpaStats::LSE;
-            spec.withBias = true;
-            setDropout(spec, 0.2F, 0x0123456789ABCDEFULL, 99);
-            spec.exposeDropoutMask = true;
-            expectSdpaMatchesReference<hipdnn_data_sdk::types::half>(spec, F16_TOLERANCE);
-            spec.biasDims = {spec.batch, 1, 1, spec.seqLenKv};
-            spec.biasDataType = DataType::HALF;
-            expectSdpaMatchesReference<hipdnn_data_sdk::types::half>(spec, F16_TOLERANCE);
-            spec.biasDims.clear();
-            spec.biasDataType = DataType::FLOAT;
-            spec.exposeDropoutMask = false;
-            spec.biasNegativeInfinityRows = true;
-            expectSdpaMatchesReference<hipdnn_data_sdk::types::half>(spec, F16_TOLERANCE);
-        }
+        GTEST_SKIP() << "the RDNA 16-bit dropout objects ship for gfx11 only";
+    }
+    for(const int64_t headDim : {64, 96, 256})
+    {
+        expectDropsThroughABias(headDim);
     }
 }
 
@@ -8990,10 +9021,31 @@ SdpaGraphSpec droppingWidthSpec(int64_t headDim, SdpaMask mask)
     return spec;
 }
 
+/// gfx11: the keep mask bit for bit and O against the reference at @p headDim on the generic
+/// dropout builds, both causal variants, without a bias and with one in either dtype.
+void expectDropsAtAGenericTierWidth(int64_t headDim)
+{
+    for(const auto mask : {SdpaMask::NONE, SdpaMask::BOTTOM_RIGHT_CAUSAL})
+    {
+        SCOPED_TRACE("head_dim " + std::to_string(headDim)
+                     + (mask == SdpaMask::NONE ? "" : ", causal"));
+        auto spec = droppingWidthSpec(headDim, mask);
+        expectSdpaMatchesReference<hipdnn_data_sdk::types::half>(spec, F16_TOLERANCE);
+        for(const auto biasType : {DataType::FLOAT, DataType::HALF})
+        {
+            auto biased = spec;
+            biased.withBias = true;
+            biased.biasDataType = biasType;
+            biased.biasDims = {spec.batch, spec.heads, spec.seqLenQ, spec.seqLenKv};
+            expectSdpaMatchesReference<hipdnn_data_sdk::types::half>(biased, F16_TOLERANCE);
+        }
+    }
+}
+
 } // namespace
 
-// gfx11: the keep mask bit for bit and O against the reference at widths only the generic
-// dropout builds serve (48, 80, 160, 192, 224), without a bias and with one in either dtype.
+// gfx11: widths only the generic dropout builds serve. 48 and 224, the ends, here; 80, 160 and
+// 192 in Comprehensive/TestGpuFlydslSdpaRdnaComprehensiveTier.
 TEST(TestGpuFlydslSdpaRdnaDispatch, DropsAtTheGenericTiersWidths)
 {
     SKIP_IF_NO_DEVICES();
@@ -9001,23 +9053,22 @@ TEST(TestGpuFlydslSdpaRdnaDispatch, DropsAtTheGenericTiersWidths)
     {
         GTEST_SKIP() << "the RDNA 16-bit dropout objects ship for gfx11 only";
     }
-    for(const int64_t headDim : {48, 80, 160, 192, 224})
+    for(const int64_t headDim : {48, 224})
     {
-        for(const auto mask : {SdpaMask::NONE, SdpaMask::BOTTOM_RIGHT_CAUSAL})
-        {
-            SCOPED_TRACE("head_dim " + std::to_string(headDim)
-                         + (mask == SdpaMask::NONE ? "" : ", causal"));
-            auto spec = droppingWidthSpec(headDim, mask);
-            expectSdpaMatchesReference<hipdnn_data_sdk::types::half>(spec, F16_TOLERANCE);
-            for(const auto biasType : {DataType::FLOAT, DataType::HALF})
-            {
-                auto biased = spec;
-                biased.withBias = true;
-                biased.biasDataType = biasType;
-                biased.biasDims = {spec.batch, spec.heads, spec.seqLenQ, spec.seqLenKv};
-                expectSdpaMatchesReference<hipdnn_data_sdk::types::half>(biased, F16_TOLERANCE);
-            }
-        }
+        expectDropsAtAGenericTierWidth(headDim);
+    }
+}
+
+TEST_P(TestGpuFlydslSdpaRdnaComprehensiveTier, DropsAtTheGenericTiersWidths)
+{
+    SKIP_IF_NO_DEVICES();
+    if(packedArchDeviceProperties().gcnArchName.rfind("gfx11", 0) != 0)
+    {
+        GTEST_SKIP() << "the RDNA 16-bit dropout objects ship for gfx11 only";
+    }
+    for(const int64_t headDim : {80, 160, 192})
+    {
+        expectDropsAtAGenericTierWidth(headDim);
     }
 }
 
