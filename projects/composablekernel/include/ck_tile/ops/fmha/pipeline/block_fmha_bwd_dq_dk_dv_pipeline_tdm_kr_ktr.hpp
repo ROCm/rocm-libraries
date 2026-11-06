@@ -89,11 +89,6 @@ struct BlockFmhaBwdDQDKDVPipelineTdmKRKTR
     static constexpr bool kIsDeterministic = Problem::kIsDeterministic;
     static constexpr bool kUseTrLoad       = Problem::kUseTrLoad;
 
-    // The tuned schedule defers each tile's dQ atomics into the next tile's gemm_0, issued
-    // from one base VGPR plus immediate offsets. The generic path recomputes the address of
-    // every atomic into the same VGPR and has to wait for the previous atomic to read it
-    // (s_wait_xcnt), which costs the deterministic persistent kernel about a third of its
-    // time. Elementwise bias stays out: its LDS tile aliases the double-buffered dS.
     static constexpr bool kTunedShape =
         (BlockFmhaShape::kM0 == 64 && BlockFmhaShape::kN0 == 128 &&
          (BlockFmhaShape::kQKHeaddim == 32 || BlockFmhaShape::kQKHeaddim == 64 ||
@@ -105,11 +100,8 @@ struct BlockFmhaBwdDQDKDVPipelineTdmKRKTR
                                         (BiasEnum == BlockAttentionBiasEnum::NO_BIAS ||
                                          BiasEnum == BlockAttentionBiasEnum::ALIBI) &&
                                         !kHasBiasGrad;
-    // With hdim padding the kernel pads each dq_acc row to kQKHeaddim floats, so the tuned
-    // dQ window above still covers whole rows; the padded columns only ever receive zeros.
-    static constexpr bool kPadDqAccRow = kPadHeadDimQ > 0;
-    // At headdim 32 two workgroups fit on a CU, so a persistent kernel with one worker per CU
-    // leaves half of it idle (1.2-1.6x slower than with two).
+
+    static constexpr bool kPadDqAccRow               = kPadHeadDimQ > 0;
     static constexpr index_t kPersistentWorkersPerCu = kQKHeaddim <= 32 ? 2 : 1;
     static constexpr bool kMaskTuned                 = kTunedSched && FmhaMask::IsMasking;
     static constexpr bool kNoMaskTuned               = kTunedSched && !FmhaMask::IsMasking;
@@ -975,7 +967,6 @@ struct BlockFmhaBwdDQDKDVPipelineTdmKRKTR
             {
                 const auto dq_atomic_window = make_dq_atomic_window();
                 constexpr index_t kKSlices  = decltype(gemm_0)::KPerSubTile;
-                // dO^T is loaded after the second K slice, or the only one at hdim 32.
                 constexpr index_t kDotSlice = kKSlices >= 2 ? 1 : 0;
                 constexpr index_t kAtomicsPerSlice =
                     remove_cvref_t<decltype(dq_atomic_window)>::NumAccess / kKSlices;

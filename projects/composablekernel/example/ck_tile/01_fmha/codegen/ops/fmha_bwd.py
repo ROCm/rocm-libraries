@@ -844,7 +844,6 @@ class FmhaBwdConvertQGradKernel:
     F_occupancy: int  #
     F_deterministic: str  #
     disabled: bool  # sometimes this kernel is not used
-    # dq_acc rows padded to the tile hdim; must match the dq_dk_dv pipeline's kPadDqAccRow
     F_pad_dq_acc_row: bool = False
 
     @property
@@ -1042,7 +1041,6 @@ class FmhaBwdApiTrait:
             F_occupancy=get_occupancy(self.dtype, self.hdim),
             F_deterministic=self.deterministic,
             disabled=self.tile.max_seq_q != 0,
-            # the TDM pipeline pads dq_acc rows whenever hdim is padded
             F_pad_dq_acc_row=self.tile.tdm_kr_ktr and self.dpad != 0,
         )
 

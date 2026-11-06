@@ -562,7 +562,6 @@ void fmha_bwd_dot_do_o_oneshot_(const ck_tile::stream_config&, fmha_bwd_args);
 template <typename Traits_, typename Arch = void>
 std::string fmha_bwd_dot_do_o_get_name_();
 
-// Query rows per OGradDotO block; sizes the two-stage d_sink buffer (one slot per block).
 template <typename Traits_, typename Arch = void>
 ck_tile::index_t fmha_bwd_dot_do_o_m0_();
 

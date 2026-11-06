@@ -63,8 +63,6 @@ struct fmha_bwd_qdo_depth<P, std::void_t<decltype(P::kQDOSlotsResolved)>>
     static constexpr index_t value = P::kQDOSlotsResolved;
 };
 
-// Batch-mode persistent workers per CU; a pipeline that fits more than one workgroup on a CU
-// says so with kPersistentWorkersPerCu.
 template <typename P, typename = void>
 struct fmha_bwd_persistent_workers_per_cu
 {
@@ -76,8 +74,6 @@ struct fmha_bwd_persistent_workers_per_cu<P, std::void_t<decltype(P::kPersistent
     static constexpr index_t value = P::kPersistentWorkersPerCu;
 };
 
-// Whether the pipeline pads each dq_acc row to its tile hdim. The ConvertQGrad kernel that
-// reads the buffer back must be built with the same setting.
 template <typename P, typename = void>
 struct fmha_bwd_pad_dq_acc_row
 {
@@ -1789,8 +1785,6 @@ struct FmhaBwdDQDKDVKernel
             else if constexpr(!kIsDeterministic)
                 batch_offset_dq_acc = query_start * DqAccHdim(kargs.hdim_q) * kargs.nhead_q;
             else
-                // Wave-uniform: left in a VGPR it makes the dq_acc buffer descriptor divergent,
-                // and every atomic then runs a readfirstlane loop.
                 batch_offset_dq_acc =
                     amd_wave_read_first_lane(kargs.dq_acc_batch_offset_ptr[i_batch]);
             batch_offset_dk = key_start * kargs.stride_dk;
