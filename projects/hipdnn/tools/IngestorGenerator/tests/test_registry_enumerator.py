@@ -190,6 +190,24 @@ def test_base_spec_is_the_named_pins_select_spec(probe):
         registry.base_spec(cell, {"algorithm": "persist", "spec_id": "b"})
 
 
+@pytest.mark.parametrize(
+    "key, value",
+    [
+        ("spec_overrides", {"tile_m": 128}),
+        ("neutral_fields", ["tile_m"]),
+        ("selector_fields", ["heads"]),
+        ("cell_keyed_by", ["tile_m"]),
+    ],
+)
+def test_base_spec_refuses_a_section_that_reshapes_its_cells(probe, key, value):
+    """cell_spaces rewrites or merges such a section's specs, so a raw request combo's
+    select_spec is not its cell's default kernel: base_spec names the key instead."""
+    probe.manifest["enumerate"][key] = value
+    registry = re_.Registry(probe.manifest)
+    with pytest.raises(re_.EnumerationError, match=rf"enumerate sets \['{key}'\]"):
+        registry.base_spec(registry.cells()[0])
+
+
 def test_each_pin_of_a_list_must_match_one_candidate(probe, capsys):
     probe.manifest["enumerate"]["pin"] = [
         {"algorithm": "probe", "spec_id": "grid"},

@@ -415,6 +415,15 @@ class Registry:
         "selector_fields",
         "cell_keyed_by",
     )
+    #: The ``enumerate`` keys under which `cell_spaces` rewrites or merges the
+    #: registry's specs, so a request combo's ``select_spec`` is no longer a cell's
+    #: default kernel.
+    _RESHAPING = (
+        "spec_overrides",
+        "neutral_fields",
+        "selector_fields",
+        "cell_keyed_by",
+    )
 
     def __init__(self, manifest: dict, decl: dict | None = None):
         primary = decl is None
@@ -643,9 +652,21 @@ class Registry:
                 specs += added
         return base, specs
 
+    def reshaped_by(self) -> list:
+        """The `_RESHAPING` keys this section sets."""
+        return [key for key in self._RESHAPING if getattr(self, key)]
+
     def base_spec(self, cell: dict, pin: dict | None = None):
-        """The unwrapped ``select_spec`` spec for one cell under one of the manifest's
-        pins (default the first, whose base spec is the cell's default kernel)."""
+        """The unwrapped ``select_spec`` spec for one request combo under one of the
+        manifest's pins (default the first, whose base spec is the cell's default
+        kernel). Raises for a section that sets any `_RESHAPING` key: `cell_spaces`
+        rewrites or merges its specs, so a raw combo's pick is no cell's default."""
+        reshaped = self.reshaped_by()
+        if reshaped:
+            raise EnumerationError(
+                f"base_spec answers a raw request combo's select_spec, which is not a "
+                f"cell's default kernel when enumerate sets {reshaped}."
+            )
         pin = self.pin if pin is None else pin
         pairs = [(self.pin, self.candidate), *self.extra_pins]
         candidate = next((c for p, c in pairs if p == pin), None)
@@ -1007,7 +1028,7 @@ def cell_spaces(registry: Registry, classification: Classification) -> CellSpace
     raw = [registry.space(cell) for cell in combos]
     selectors, neutral = registry.selector_fields, registry.neutral_fields
     overrides, keyed = registry.spec_overrides, registry.cell_keyed_by
-    if not combos or (not selectors and not neutral and not overrides and not keyed):
+    if not combos or not registry.reshaped_by():
         return CellSpaces(combos, raw, [], len(combos))
     absent = [a for a in keyed if not hasattr(raw[0][0], a)]
     if absent:
