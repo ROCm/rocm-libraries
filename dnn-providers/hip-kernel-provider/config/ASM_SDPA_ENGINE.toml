@@ -1570,3 +1570,11 @@ filters = [
     "full_SdpaFwdPlan_Rng.bf16_d76387ccee33e522",
 ]
 reason = "ALMIOPEN-3211: no reference supports this block-mask, dropout-mask or RNG-dump form, so the result cannot be checked"
+
+# SdpaFwdPlan case where the engine intermittently writes zeros to a small block of O.
+[[test_skips]]
+archs = ["gfx942", "gfx950"]
+filters = [
+    "full_SdpaFwdPlan_Rng.bf16_edb982e24ace0136",
+]
+reason = "ALMIOPEN-3212: a small block of O is intermittently written as zeros"
