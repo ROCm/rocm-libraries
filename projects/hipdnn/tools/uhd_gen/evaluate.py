@@ -82,9 +82,26 @@ MILLISECOND_TARGETS = frozenset({"minTimeMs", "avgTimeMs", "robustMeanMs"})
 #: Float slack for the regret non-negativity check.
 _REGRET_EPSILON = 1e-9
 
+
+@dataclass(frozen=True)
+class StagedPredictions:
+    """One catalog's scores from a model with an early-exit schedule (early_exit.py).
+
+    `predictions` are recovered full scores; a pruned row's is -inf, since it reports no
+    estimate. `stage` is how many stages each row survived (`stages` for a fully scored
+    row) and `partial` a pruned row's raw partial sum, which orders the pruned rows as the
+    runtime does: later stage first, then by that sum in the objective's direction.
+    """
+
+    predictions: np.ndarray
+    stage: np.ndarray
+    partial: np.ndarray
+    stages: int
+
+
 #: Maps candidate rows to a score in the target's direction. Only the induced order is
-#: used; regret comes from measured values.
-Scorer = Callable[[pd.DataFrame], np.ndarray]
+#: used; regret comes from measured values. A staged model returns StagedPredictions.
+Scorer = Callable[[pd.DataFrame], "np.ndarray | StagedPredictions"]
 
 
 class ObjectiveDirectionError(RuntimeError):
@@ -691,8 +708,13 @@ def evaluate_corpus(
         # model cannot predict this problem, and the runtime ranks it in declared order.
         # Scored as that fallback pick -- what a deployment chooses -- and counted apart.
         fallback = False
+        staged: StagedPredictions | None = None
         try:
-            predictions = np.asarray(scorer(candidates), dtype=float)
+            scored = scorer(candidates)
+            if isinstance(scored, StagedPredictions):
+                staged = scored
+                scored = scored.predictions
+            predictions = np.asarray(scored, dtype=float)
         except UnseenCategoryError as error:
             fallback = True
             fallback_problems.append((key, str(error)))
@@ -723,7 +745,18 @@ def evaluate_corpus(
             )
         ranking_key = -predictions if objective == "max" else predictions
         ranking_key = np.where(rankable, ranking_key, np.inf)
-        order = np.argsort(ranking_key, kind="stable")
+        if staged is None:
+            order = np.argsort(ranking_key, kind="stable")
+        else:
+            # As rankWith orders an early-exit catalog: usable fully scored rows, then
+            # pruned rows (later stage first, then partial sum in the objective's
+            # direction), then unusable rows; corpus order breaks every tie.
+            pruned = staged.stage < staged.stages
+            tier = np.where(rankable, 0, np.where(pruned, 1, 2))
+            oriented = -staged.partial if objective == "max" else staged.partial
+            within = np.where(rankable, ranking_key, np.where(pruned, oriented, 0.0))
+            depth = np.where(pruned, staged.stages - staged.stage, 0)
+            order = np.lexsort((np.arange(len(within)), within, depth, tier))
         picked_position = int(order[0])
         picked_value = float(measured[picked_position])
         regret = regret_of(picked_value, oracle_value, objective)
@@ -1378,33 +1411,16 @@ def _flatbuffer_scorer(
                 "descriptor features_hash does not match the shipped model artifact"
             )
 
-    def routing(values, count: int, absent: bool) -> np.ndarray:
-        """A per-node flag vector as `prepareTrees` reads it: supplied entries, then `absent`."""
-        flags = np.full(count, absent, dtype=bool)
-        supplied = np.asarray([] if values is None else values, dtype=bool)[:count]
-        flags[: len(supplied)] = supplied
-        return flags
+    from .artifact import threshold_table, tree_arrays
+
+    # Either tree encoding, decoded as the runtime decodes it; the artifact is verified above.
+    table = threshold_table(model, str(artifact))
 
     def arrays_of(trees) -> list[tuple[np.ndarray, ...]]:
-        # `default_left`/`decision_lte` may be short, read as TreeDataAdapter does: missing
-        # `default_left` is false; absent or empty `decision_lte` is `<=` everywhere, but a
-        # nonempty short one is `<` past its end.
-        arrays = []
-        for tree in trees or []:
-            count = len(tree.leftChildren)
-            lte = tree.decisionLte
-            arrays.append(
-                (
-                    np.asarray(tree.featureIndices, dtype=np.int64),
-                    np.asarray(tree.thresholds, dtype=np.float64),
-                    np.asarray(tree.leftChildren, dtype=np.int64),
-                    np.asarray(tree.rightChildren, dtype=np.int64),
-                    np.asarray(tree.leafValues, dtype=np.float64),
-                    routing(tree.defaultLeft, count, False),
-                    routing(lte, count, lte is None or len(lte) == 0),
-                )
-            )
-        return arrays
+        return [
+            tree_arrays(tree, table, model.numFeatures, f"{artifact} tree {index}")
+            for index, tree in enumerate(trees or [])
+        ]
 
     trees = arrays_of(model.trees)
     base = float(model.baseScore)
@@ -1427,12 +1443,26 @@ def _flatbuffer_scorer(
             f"{artifact}: a grouped artifact chooses its group in the objective's "
             f"direction, and the descriptor declares none ({objective!r})"
         )
+    # An early-exit schedule shapes catalog ranking only (scoreBatch): EnginePredictor
+    # scores one row with the whole model, and the runtime ignores a grouped model's.
+    schedule = [
+        (int(stage.trees), int(stage.keep)) for stage in (model.earlyExit or [])
+    ]
+    if engine_prediction or groups:
+        schedule = []
 
-    def ensemble(
-        arrays: list[tuple[np.ndarray, ...]], matrix: np.ndarray, rows: np.ndarray
-    ) -> np.ndarray:
-        total = np.full(len(rows), base, dtype=np.float64)
-        for feature_index, threshold, left, right, leaf, default_left, lte in arrays:
+    def add_trees(
+        arrays: list[tuple[np.ndarray, ...]],
+        matrix: np.ndarray,
+        acc: np.ndarray,
+        rows: np.ndarray,
+        begin: int,
+        end: int,
+    ) -> None:
+        """Add the leaves of trees [begin, end) to acc[rows], one tree at a time."""
+        for feature_index, threshold, left, right, leaf, default_left, lte in arrays[
+            begin:end
+        ]:
             node = np.zeros(len(rows), dtype=np.int64)
             # Vectorised: descend every row one level per iteration.
             while True:
@@ -1446,13 +1476,19 @@ def _flatbuffer_scorer(
                 go_left = np.where(lte[here], x <= threshold[here], x < threshold[here])
                 go_left = np.where(np.isnan(x), default_left[here], go_left)
                 node[at] = np.where(go_left, left[here], right[here])
-            total += leaf[node]
-        return total
+            acc[rows] += leaf[node]
+
+    def ensemble(
+        arrays: list[tuple[np.ndarray, ...]], matrix: np.ndarray, rows: np.ndarray
+    ) -> np.ndarray:
+        total = np.full(len(matrix), base, dtype=np.float64)
+        add_trees(arrays, matrix, total, rows, 0, len(arrays))
+        return total[rows]
 
     def recover(raw: np.ndarray) -> np.ndarray:
         return invert_score(raw, score_transform)
 
-    def score(frame: pd.DataFrame) -> np.ndarray:
+    def score(frame: pd.DataFrame) -> "np.ndarray | StagedPredictions":
         matrix = build_feature_matrix(
             frame,
             features,
@@ -1461,6 +1497,27 @@ def _flatbuffer_scorer(
             feature_evaluator=feature_evaluator,
         )
         every = np.arange(len(frame))
+        if schedule:
+            from .early_exit import staged_scores
+
+            staged = staged_scores(
+                lambda acc, rows, begin, end: add_trees(
+                    trees, matrix, acc, rows, begin, end
+                ),
+                len(frame),
+                len(trees),
+                schedule,
+                base,
+                objective == "min",
+            )
+            predictions = recover(staged.raw)
+            predictions[staged.pruned] = -np.inf
+            return StagedPredictions(
+                predictions=predictions,
+                stage=staged.stage,
+                partial=staged.raw,
+                stages=staged.stages,
+            )
         layer_one = ensemble(trees, matrix, every)
         if group_slot < 0 or not groups:
             return recover(layer_one)
@@ -1523,14 +1580,73 @@ def _booster_scorer(
     return score
 
 
+def _linear_scorer(
+    artifact: Path,
+    features: list[str],
+    categorical_encoding: dict[str, dict[str, int]] | None = None,
+    *,
+    signature: list | None = None,
+    feature_evaluator: str | None = None,
+    expected_hash: str | None = None,
+    model_hash: str | None = None,
+    objective: str | None = None,
+) -> Scorer:
+    """Score with the shipped linear_data `model.bin`, as `LinearDataAdapter::score()` does.
+
+    The bytes pass the loader's own checks (`load_linear_artifact`, features hash) first, so
+    a file the engine would refuse is never reported with a regret. The adapter's score is a
+    log slowdown, lower is better; it is returned as is for objective `min` and negated for
+    `max`, so a report ranking measured TFLOPS (`max`) reads it in the corpus's direction.
+    """
+    from .artifact import linear_features_hash, load_linear_artifact
+    from .train_uhd import build_feature_matrix
+
+    ranker = load_linear_artifact(
+        artifact,
+        model_hash,
+        feature_count=len(signature) if signature else None,
+    )
+    if expected_hash is not None:
+        if linear_features_hash(Path(artifact).read_bytes()) != expected_hash:
+            raise ValueError(
+                "descriptor features_hash does not match the shipped model artifact"
+            )
+    if objective not in ("max", "min"):
+        raise ValueError(
+            f"{artifact}: a linear_data score is oriented by the corpus's objective, and "
+            f"none was declared ({objective!r}). The descriptor's `min` orients only the "
+            "runtime score, and an installed model has no train_manifest.json: pass "
+            "--objective, as min and max are both legal and this is never guessed"
+        )
+    sign = -1.0 if objective == "max" else 1.0
+
+    def score(frame: pd.DataFrame) -> np.ndarray:
+        matrix = build_feature_matrix(
+            frame,
+            features,
+            categorical_encoding,
+            signature=signature,
+            feature_evaluator=feature_evaluator,
+        )
+        return sign * ranker.predict(matrix)
+
+    return score
+
+
 def load_model(
     model_dir: Path,
     model_file: Path | None = None,
     *,
     feature_evaluator: str | None = None,
     runtime_predictions: list[dict] | None = None,
+    objective_override: str | None = None,
 ) -> ModelBundle:
-    """Load a `train --output-dir` result: features, direction, and something to rank with."""
+    """Load a `train --output-dir` result: features, direction, and something to rank with.
+
+    `objective_override` (`--objective`) is read only for a linear_data model, whose
+    descriptor declares the direction of its own score (`min`) and says nothing of the
+    measured target a report compares it with.
+    """
     descriptor_paths = sorted(model_dir.glob("*.uhd.json"))
     if len(descriptor_paths) > 1:
         raise ValueError(
@@ -1577,6 +1693,12 @@ def load_model(
 
     # Read, never assumed: a backwards objective inverts every number in the report.
     objective = descriptor.get("objective") or manifest.get("objective")
+    if descriptor.get("adapter") == "linear_data":
+        # The descriptor's `min` orients the runtime's score, not the measured target: a
+        # report ranks against the target, whose direction `train` recorded as the
+        # manifest's `objective`. An installed model has no manifest, so without
+        # --objective the direction is unknown and `run_evaluate` refuses to guess it.
+        objective = objective_override or manifest.get("objective")
 
     group_feature = manifest.get("group_by_feature")
 
@@ -1628,7 +1750,10 @@ def load_model(
             raise ValueError(
                 "native/custom models require --predictions from hipdnn_bench --predict-engine"
             )
-        declared = descriptor.get("tree_data", {})
+        body_key = (
+            "linear_data" if descriptor.get("adapter") == "linear_data" else "tree_data"
+        )
+        declared = descriptor.get(body_key, {})
         named = None
         if "artifact" in declared:
             artifact = declared["artifact"]
@@ -1639,7 +1764,7 @@ def load_model(
                 or not is_contained_relative_path(artifact)
             ):
                 raise ValueError(
-                    f"tree_data.artifact {artifact!r} must be a relative path inside the "
+                    f"{body_key}.artifact {artifact!r} must be a relative path inside the "
                     "descriptor's directory"
                 )
             named = model_dir / artifact
@@ -1654,7 +1779,23 @@ def load_model(
             candidate = model_dir / "model.bin"
         if not candidate.exists():
             raise ValueError(f"no model artifact at {candidate}")
-        if candidate.suffix in (".lgbm", ".txt"):
+        if body_key == "linear_data":
+            model_hash = (
+                declared.get("hash")
+                if named is not None and candidate.resolve() == named.resolve()
+                else None
+            )
+            scorer = _linear_scorer(
+                candidate,
+                features,
+                categorical_encoding,
+                signature=signature,
+                feature_evaluator=feature_evaluator,
+                expected_hash=expected_hash,
+                model_hash=model_hash,
+                objective=objective,
+            )
+        elif candidate.suffix in (".lgbm", ".txt"):
             scorer = _booster_scorer(
                 candidate,
                 features,
@@ -1781,7 +1922,7 @@ def add_evaluate_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--model",
         default=None,
-        help="Model artifact override (default: the descriptor's tree_data.artifact, "
+        help="Model artifact override (default: the descriptor's tree_data (or linear_data).artifact, "
         "the file the engine itself loads)",
     )
     parser.add_argument(
@@ -1897,6 +2038,7 @@ def run_evaluate(args: argparse.Namespace) -> int:
             Path(args.model) if args.model else None,
             feature_evaluator=args.feature_evaluator,
             runtime_predictions=predictions,
+            objective_override=args.objective,
         )
     except (ValueError, OSError) as error:
         logger.error("%s", error)

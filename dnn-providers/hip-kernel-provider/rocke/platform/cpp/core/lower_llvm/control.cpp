@@ -1374,16 +1374,12 @@ static void _op_tile_s_buffer_prefetch_data(rocke_lower_t* L, const rocke_op_t* 
 
 static void _op_tile_global_prefetch(rocke_lower_t* L, const rocke_op_t* op)
 {
-    const char* ty;
     int64_t cp;
     if(!rocke_ll_live(L))
         return;
     rocke_ll_require_llvm23_target_fact(L, "global_prefetch", ROCKE_LL_FACT_GLOBAL_PREFETCH);
     ll_expect_operands(L, op, "global_prefetch", 1);
-    ty = rocke_ll_value_ptr_type(L, op->operands[0]);
-    if(strcmp(ty, "ptr addrspace(1)") != 0)
-        rocke_ll_fail(
-            L, ROCKE_ERR_VALUE, "global_prefetch ptr must be a global pointer, got %s", ty);
+    rocke_ll_require_global_header_ptr(L, "global_prefetch", op->operands[0], "ptr");
     cp = ll_check_cachepolicy(L, op, "global_prefetch");
     rocke_ll_need(L, "global.prefetch");
     rocke_ll_emitf(L,
@@ -1394,15 +1390,12 @@ static void _op_tile_global_prefetch(rocke_lower_t* L, const rocke_op_t* op)
 
 static void _op_tile_flat_prefetch(rocke_lower_t* L, const rocke_op_t* op)
 {
-    const char* ty;
     int64_t cp;
     if(!rocke_ll_live(L))
         return;
     rocke_ll_require_llvm23_target_fact(L, "flat_prefetch", ROCKE_LL_FACT_GLOBAL_PREFETCH);
     ll_expect_operands(L, op, "flat_prefetch", 1);
-    ty = rocke_ll_value_ptr_type(L, op->operands[0]);
-    if(strcmp(ty, "ptr") != 0)
-        rocke_ll_fail(L, ROCKE_ERR_VALUE, "flat_prefetch ptr must be a flat pointer, got %s", ty);
+    rocke_ll_require_header_ptr(L, "flat_prefetch", op->operands[0], "ptr", "flat", "ptr");
     cp = ll_check_cachepolicy(L, op, "flat_prefetch");
     rocke_ll_need(L, "flat.prefetch");
     rocke_ll_emitf(L,
@@ -1566,6 +1559,35 @@ static void _op_tile_trap(rocke_lower_t* L, const rocke_op_t* op)
     rocke_ll_emitf(L, "  call void @llvm.trap()");
 }
 
+/* Python _op_tile_gpu_check_failed: store 1 to the kernel's GPU-check word,
+ * then return from the kernel, which ends the block like cf.return. Not a
+ * trap: on Windows the trap handler parks a trapped wave and the launch never
+ * returns, while a returned lane lets it complete. */
+static void _op_tile_gpu_check_failed(rocke_lower_t* L, const rocke_op_t* op)
+{
+    char err[64];
+    if(!rocke_ll_live(L))
+    {
+        return;
+    }
+    if(const char* error = rocke_i_gpu_check_failed_op_error(op, err, sizeof err))
+    {
+        rocke_ll_fail(L, ROCKE_ERR_VALUE, "%s", error);
+        return;
+    }
+    L->gpu_check_word = rocke_i_gpu_check_word_symbol(&L->arena, L->kernel ? L->kernel->name : "");
+    rocke_ll_emitf(L,
+                   "  store atomic i32 1, ptr addrspace(1) @%s syncscope(\"agent\") monotonic, "
+                   "align 4",
+                   L->gpu_check_word);
+    rocke_ll_emit(L, " ret void");
+    rocke_ll_block_t* cur = rocke_ll_current(L);
+    if(cur)
+    {
+        cur->terminated = true;
+    }
+}
+
 /* ======================================================================== */
 /* scf.* / cf.* control flow                                                */
 /* ======================================================================== */
@@ -1703,6 +1725,270 @@ static const char*
     return rocke_ll_llvm_type(L, type);
 }
 
+/* One (Value*, saved-name) record of a loop lowering's name renaming. */
+typedef struct ll_rename
+{
+    rocke_value_t* val;
+    const char* saved;
+} ll_rename_t;
+
+/* The renaming of the kernel's values while a loop body lowers (Python: the
+ * try/finally around lower_region). The new names live in L->arena, which the
+ * lowerer frees when it returns, so every saved name is restored when the
+ * scope ends -- also when the body's lowering fails (rocke_ll_fail throws) --
+ * and a failed lowering never leaves a value naming freed memory. */
+struct ll_rename_scope
+{
+    rocke_lower_t* L;
+    ROCKE_VEC(ll_rename_t) renames;
+
+    explicit ll_rename_scope(rocke_lower_t* lowerer)
+        : L(lowerer)
+    {
+        rocke_vec_init(&renames);
+    }
+    ~ll_rename_scope()
+    {
+        restore();
+    }
+    ll_rename_scope(const ll_rename_scope&) = delete;
+    ll_rename_scope& operator=(const ll_rename_scope&) = delete;
+
+    /* Save `value`'s name and give it `name`. The record is kept before the
+     * name changes, so a failed save leaves the value as it was. */
+    void rename(rocke_value_t* value, const char* name)
+    {
+        const ll_rename_t record = {value, value->name};
+        int rc = 0;
+        rocke_vec_push(&L->arena, &renames, record, rc);
+        if(rc != 0)
+        {
+            rocke_ll_fail(L, ROCKE_ERR_OOM, "scf.for: arena OOM");
+        }
+        value->name = name;
+    }
+
+    /* Give every renamed value its saved name back. */
+    void restore()
+    {
+        for(size_t k = 0; k < renames.len; k++)
+        {
+            renames.data[k].val->name = renames.data[k].saved;
+        }
+        renames.len = 0;
+    }
+};
+
+/* True when an earlier rolled scf.for's header defined `name` + `suffix`. */
+static bool
+    ll_loop_header_name_defined(const rocke_lower_t* L, const char* name, const char* suffix)
+{
+    const size_t name_len = strlen(name);
+    for(size_t i = 0; i < L->loop_header_names.len; i++)
+    {
+        const char* defined = L->loop_header_names.data[i];
+        if(strncmp(defined, name, name_len) == 0 && strcmp(defined + name_len, suffix) == 0)
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+/* True when an earlier rolled scf.for's header defined the induction variable
+ * `iv_name` or a carried value of `op`, with `suffix` added. */
+static bool ll_any_loop_header_name_defined(const rocke_lower_t* L,
+                                            const rocke_op_t* op,
+                                            const char* iv_name,
+                                            int64_t num_iter,
+                                            const char* suffix)
+{
+    if(ll_loop_header_name_defined(L, iv_name, suffix))
+    {
+        return true;
+    }
+    for(int i = 0; i < (int)num_iter; i++)
+    {
+        const char* mname = NULL;
+        if(ll_iter_meta(op, i, &mname, NULL) && mname
+           && ll_loop_header_name_defined(L, mname, suffix))
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+/* Record `name` + `suffix` as defined by a rolled scf.for's header. */
+static void ll_record_loop_header_name(rocke_lower_t* L, const char* name, const char* suffix)
+{
+    int rc = 0;
+    rocke_vec_push(
+        &L->arena, &L->loop_header_names, rocke_arena_printf(&L->arena, "%s%s", name, suffix), rc);
+    if(rc != 0)
+    {
+        rocke_ll_fail(L, ROCKE_ERR_OOM, "scf.for: arena OOM");
+    }
+}
+
+/* Python _claim_loop_header_names: the suffix the rolled scf.for `op` adds to
+ * the names its header defines (its induction variable and carried values),
+ * recording the names it defines. A loop names these values itself, so two
+ * loops of one kernel may share a name: loops side by side, or a loop lowered
+ * once per trip of an unrolled loop around it. LLVM needs every name defined
+ * once, so the first loop to define a name keeps it, and a loop that would
+ * define a name again adds ".<header_label>" (unique in the kernel) to all of
+ * its names. An earlier loop may have named a value like that itself
+ * ("%acc.for.header.5"), so while a suffixed name is still taken the loop adds
+ * ".<header_label>.<n>" instead, for the first n = 1, 2, ... that leaves all of
+ * its names free. */
+static const char* ll_claim_loop_header_names(rocke_lower_t* L,
+                                              const rocke_op_t* op,
+                                              const char* iv_name,
+                                              int64_t num_iter,
+                                              const char* header_label)
+{
+    const char* suffix = "";
+    for(int attempt = 0; ll_any_loop_header_name_defined(L, op, iv_name, num_iter, suffix);
+        attempt++)
+    {
+        suffix = attempt == 0 ? rocke_arena_printf(&L->arena, ".%s", header_label)
+                              : rocke_arena_printf(&L->arena, ".%s.%d", header_label, attempt);
+        if(!suffix)
+        {
+            rocke_ll_fail(L, ROCKE_ERR_OOM, "scf.for: arena OOM");
+        }
+    }
+    ll_record_loop_header_name(L, iv_name, suffix);
+    for(int i = 0; i < (int)num_iter; i++)
+    {
+        const char* mname = NULL;
+        if(ll_iter_meta(op, i, &mname, NULL) && mname)
+        {
+            ll_record_loop_header_name(L, mname, suffix);
+        }
+    }
+    return suffix;
+}
+
+/* Python _ops_in_region: every op of `region` in order, each followed by the
+ * ops of the regions nested in it, to any depth. Returns an arena array of
+ * *out_count ops. */
+static void ll_count_ops_in_region(const rocke_region_t* region, int* count)
+{
+    if(!region)
+    {
+        return;
+    }
+    for(int i = 0; i < region->num_ops; i++)
+    {
+        const rocke_op_t* op = region->ops[i];
+        (*count)++;
+        for(int r = 0; r < op->num_regions; r++)
+        {
+            ll_count_ops_in_region(op->regions[r], count);
+        }
+    }
+}
+
+static void ll_fill_ops_in_region(const rocke_region_t* region, const rocke_op_t** ops, int* n)
+{
+    if(!region)
+    {
+        return;
+    }
+    for(int i = 0; i < region->num_ops; i++)
+    {
+        const rocke_op_t* op = region->ops[i];
+        ops[(*n)++] = op;
+        for(int r = 0; r < op->num_regions; r++)
+        {
+            ll_fill_ops_in_region(op->regions[r], ops, n);
+        }
+    }
+}
+
+static const rocke_op_t**
+    ll_ops_in_region(rocke_lower_t* L, const rocke_region_t* region, int* out_count)
+{
+    int count = 0;
+    ll_count_ops_in_region(region, &count);
+    const rocke_op_t** ops = (const rocke_op_t**)rocke_arena_alloc(
+        &L->arena, sizeof(const rocke_op_t*) * (size_t)(count > 0 ? count : 1));
+    if(!ops)
+    {
+        rocke_ll_fail(L, ROCKE_ERR_OOM, "scf.for: arena OOM");
+    }
+    int n = 0;
+    ll_fill_ops_in_region(region, ops, &n);
+    *out_count = n;
+    return ops;
+}
+
+/* Python _loop_block_values: the induction variable and the carried values of
+ * the scf.for `loop` that its body reads, nested regions included. The loop
+ * does not hold these values; they are found as operands of the body's ops. A
+ * value the body never reads is not returned (*out_iv is then NULL). Fills
+ * `carried` (room for the loop's iter-arg count) and returns how many. */
+static int ll_loop_block_values(rocke_lower_t* L,
+                                const rocke_op_t* loop,
+                                int64_t num_iter,
+                                rocke_value_t** out_iv,
+                                rocke_value_t** carried)
+{
+    const char* iv_name = rocke_attr_get_str(&loop->attrs, "iv");
+    *out_iv = NULL;
+    int n_carried = 0;
+    if(loop->num_regions < 1 || !loop->regions[0])
+    {
+        return 0;
+    }
+    int n_ops = 0;
+    const rocke_op_t** ops = ll_ops_in_region(L, loop->regions[0], &n_ops);
+    for(int bi = 0; bi < n_ops; bi++)
+    {
+        const rocke_op_t* bop = ops[bi];
+        for(int oi = 0; oi < bop->num_operands; oi++)
+        {
+            rocke_value_t* operand = bop->operands[oi];
+            if(!operand || !operand->name || operand->op != loop)
+            {
+                continue;
+            }
+            if(iv_name && strcmp(operand->name, iv_name) == 0)
+            {
+                *out_iv = operand;
+                continue;
+            }
+            bool is_carried = false;
+            for(int mi = 0; mi < (int)num_iter; mi++)
+            {
+                const char* mname = NULL;
+                if(ll_iter_meta(loop, mi, &mname, NULL) && mname
+                   && strcmp(operand->name, mname) == 0)
+                {
+                    is_carried = true;
+                    break;
+                }
+            }
+            bool present = false;
+            for(int k = 0; k < n_carried; k++)
+            {
+                if(carried[k] == operand)
+                {
+                    present = true;
+                    break;
+                }
+            }
+            if(is_carried && !present && n_carried < (int)num_iter)
+            {
+                carried[n_carried++] = operand;
+            }
+        }
+    }
+    return n_carried;
+}
+
 /* Python _lower_normal_for: header / body / latch / exit CFG with phi nodes.
  *
  *     num_iter = int(attrs.get("num_iter_args", 0))
@@ -1735,6 +2021,10 @@ static const char*
  *     for line in header.lines: replace %FOR_LATCH->%latch ; %FOR_EXIT->%exit
  *     for meta, result, ll_ty in zip(iter_meta, op.results, iter_llvm_types):
  *         exit_blk.emit(f"  {result.name} = bitcast {ll_ty} {meta['name']} to {ll_ty}")
+ *
+ * When an earlier loop already defined one of this loop's names, iv_name and
+ * every meta['name'] above take a suffix (ll_claim_loop_header_names); the
+ * body's reads of them are renamed to match while it lowers.
  */
 void rocke_ll_lower_normal_for(rocke_lower_t* L, const rocke_op_t* op)
 {
@@ -1746,8 +2036,8 @@ void rocke_ll_lower_normal_for(rocke_lower_t* L, const rocke_op_t* op)
     const rocke_value_t* lower = op->operands[0];
     const rocke_value_t* upper = op->operands[1];
     const rocke_value_t* step = op->operands[2];
-    const char* iv_name = rocke_attr_get_str(&op->attrs, "iv");
-    if(!iv_name)
+    const char* iv_attr = rocke_attr_get_str(&op->attrs, "iv");
+    if(!iv_attr)
     {
         rocke_ll_fail(L, ROCKE_ERR_KEY, "scf.for: missing iv attr");
     }
@@ -1765,6 +2055,9 @@ void rocke_ll_lower_normal_for(rocke_lower_t* L, const rocke_op_t* op)
         prev_blk->terminated = true;
     }
 
+    const char* suffix = ll_claim_loop_header_names(L, op, iv_attr, num_iter, header->label);
+    const char* iv_name = rocke_arena_printf(&L->arena, "%s%s", iv_attr, suffix);
+
     rocke_ll_block_emitf(L,
                          header,
                          "  %s = phi %s [ %s, %%%s ], "
@@ -1779,15 +2072,16 @@ void rocke_ll_lower_normal_for(rocke_lower_t* L, const rocke_op_t* op)
         const char* mname = NULL;
         const rocke_value_t* init = op->operands[3 + i];
         const char* ll_ty = ll_iter_llvm_type(L, op, i, &mname);
+        const char* name = rocke_arena_printf(&L->arena, "%s%s", mname, suffix);
         rocke_ll_block_emitf(L,
                              header,
                              "  %s = phi %s [ %s, %%%s ], "
                              "[ %s.next.%s, %%FOR_LATCH ]",
-                             mname,
+                             name,
                              ll_ty,
                              rocke_ll_operand(L, init),
                              pred_block,
-                             mname,
+                             name,
                              header->label);
     }
 
@@ -1799,11 +2093,38 @@ void rocke_ll_lower_normal_for(rocke_lower_t* L, const rocke_op_t* op)
     rocke_ll_block_emitf(L, header, "  br i1 %s, label %%%s, label %%FOR_EXIT", cmp, body->label);
     header->terminated = true;
 
+    /* Rename the body's reads of the header's values to the names defined
+     * above while the body lowers. */
+    rocke_value_t* iv_value = NULL;
+    rocke_value_t** carried_values = (rocke_value_t**)rocke_arena_alloc(
+        &L->arena, sizeof(rocke_value_t*) * (size_t)(num_iter > 0 ? num_iter : 1));
+    if(!carried_values)
+    {
+        rocke_ll_fail(L, ROCKE_ERR_OOM, "scf.for: arena OOM");
+    }
+    const int n_carried = ll_loop_block_values(L, op, num_iter, &iv_value, carried_values);
+    ll_rename_scope block_renames(L);
+    if(suffix[0])
+    {
+        if(iv_value)
+        {
+            block_renames.rename(iv_value,
+                                 rocke_arena_printf(&L->arena, "%s%s", iv_value->name, suffix));
+        }
+        for(int k = 0; k < n_carried; k++)
+        {
+            block_renames.rename(
+                carried_values[k],
+                rocke_arena_printf(&L->arena, "%s%s", carried_values[k]->name, suffix));
+        }
+    }
+
     rocke_ll_yield_push(L);
     if(op->num_regions > 0 && op->regions[0])
     {
         rocke_ll_lower_region(L, op->regions[0]);
     }
+    block_renames.restore();
 
     rocke_ll_block_t* last_body = rocke_ll_current(L);
     rocke_ll_block_t* latch = rocke_ll_new_block(L, "for.latch");
@@ -1838,8 +2159,9 @@ void rocke_ll_lower_normal_for(rocke_lower_t* L, const rocke_op_t* op)
         const char* ll_ty = ll_iter_llvm_type(L, op, i, &mname);
         rocke_ll_block_emitf(L,
                              latch,
-                             "  %s.next.%s = bitcast %s %s to %s",
+                             "  %s%s.next.%s = bitcast %s %s to %s",
                              mname,
+                             suffix,
                              header->label,
                              ll_ty,
                              yielded ? yielded[i] : "",
@@ -1860,18 +2182,17 @@ void rocke_ll_lower_normal_for(rocke_lower_t* L, const rocke_op_t* op)
             const char* mname = NULL;
             const char* ll_ty = ll_iter_llvm_type(L, op, i, &mname);
             const rocke_value_t* result = op->results[i];
-            rocke_ll_block_emitf(
-                L, exit_blk, "  %s = bitcast %s %s to %s", result->name, ll_ty, mname, ll_ty);
+            rocke_ll_block_emitf(L,
+                                 exit_blk,
+                                 "  %s = bitcast %s %s%s to %s",
+                                 result->name,
+                                 ll_ty,
+                                 mname,
+                                 suffix,
+                                 ll_ty);
         }
     }
 }
-
-/* One (Value*, saved-name) record for the unrolled-for name renaming. */
-typedef struct ll_rename
-{
-    rocke_value_t* val;
-    const char* saved;
-} ll_rename_t;
 
 /* Python _lower_unrolled_for: straight-line replication of the body for
  * constant bounds. See the Python source for the full strategy comment; the
@@ -1879,14 +2200,15 @@ typedef struct ll_rename
  *
  *   - eval constant lower/upper/step -> trip_count = (upper-lower)//step
  *   - current_iter_values[meta.name] = operand(init)
- *   - find the IV + iter-arg Value objects by scanning region operands for
- *     `operand.name == iv_name/meta.name and operand.op == op`
+ *   - find the IV + iter-arg Value objects by scanning the operands of every
+ *     body op, nested regions included (ll_loop_block_values)
  *   - detect a trailing tile.sync (second-last region op) when
  *     attrs["elide_trailing_barrier"] (default True)
  *   - per iteration: emit `iv_const = add iv_ty 0, iv_value`, rename the IV +
- *     iter-arg objects + ALL body op results to `%base.unrollN`, set the
- *     elide marker on non-final trips, lower the region under a yield frame,
- *     thread yielded values into current_iter_values, restore names
+ *     iter-arg objects + ALL body op results (nested regions included) but
+ *     tile.smem_alloc handles to `%base.unrollN`, set the elide marker on
+ *     non-final trips, lower the region under a yield frame, thread yielded
+ *     values into current_iter_values, restore names (ll_rename_scope)
  *   - bind op.results to the final current_iter_values via bitcast
  *
  * The Value.name fields are `const char*`; the Python rebinds them in place, so
@@ -1934,53 +2256,20 @@ void rocke_ll_lower_unrolled_for(rocke_lower_t* L, const rocke_op_t* op)
     }
     int64_t trip_count = (upper_val - lower_val) / step_val;
 
-    /* Find the IV + iter-arg Value objects referenced by body operands. */
+    /* The IV + iter-arg Value objects the body reads, nested regions included. */
     rocke_value_t* iv_value_obj = NULL;
     rocke_value_t** iter_value_objs
         = num_iter > 0 ? (rocke_value_t**)rocke_arena_alloc(
                              &L->arena, sizeof(rocke_value_t*) * (size_t)num_iter)
                        : NULL;
-    int iter_value_count = 0;
-    for(int bi = 0; bi < body->num_ops; bi++)
+    if(num_iter > 0 && !iter_value_objs)
     {
-        const rocke_op_t* bop = body->ops[bi];
-        for(int oi = 0; oi < bop->num_operands; oi++)
-        {
-            rocke_value_t* operand = bop->operands[oi];
-            if(!operand || !operand->name)
-            {
-                continue;
-            }
-            if(operand->op == op && strcmp(operand->name, iv_name) == 0)
-            {
-                iv_value_obj = operand;
-            }
-            for(int mi = 0; mi < (int)num_iter; mi++)
-            {
-                const char* mname = NULL;
-                if(!ll_iter_meta(op, mi, &mname, NULL) || !mname)
-                {
-                    continue;
-                }
-                if(operand->op == op && strcmp(operand->name, mname) == 0)
-                {
-                    bool present = false;
-                    for(int k = 0; k < iter_value_count; k++)
-                    {
-                        if(iter_value_objs[k] == operand)
-                        {
-                            present = true;
-                            break;
-                        }
-                    }
-                    if(!present && iter_value_objs)
-                    {
-                        iter_value_objs[iter_value_count++] = operand;
-                    }
-                }
-            }
-        }
+        rocke_ll_fail(L, ROCKE_ERR_OOM, "unrolled_for: arena OOM");
     }
+    const int iter_value_count
+        = ll_loop_block_values(L, op, num_iter, &iv_value_obj, iter_value_objs);
+    int n_body_ops = 0;
+    const rocke_op_t** body_ops = ll_ops_in_region(L, body, &n_body_ops);
 
     /* Trailing tile.sync detection (second-last body op). */
     bool elide_enabled = rocke_attr_get_bool(&op->attrs, "elide_trailing_barrier", true);
@@ -2002,34 +2291,17 @@ void rocke_ll_lower_unrolled_for(rocke_lower_t* L, const rocke_op_t* op)
         const char* iv_const_name = rocke_ll_fresh(L, "iv_const");
         rocke_ll_emitf(L, "  %s = add %s 0, %lld", iv_const_name, iv_ty, (long long)iv_value);
 
-        /* Collect (Value*, saved-name) for restoration after this trip. */
-        int max_renames = 1 + iter_value_count;
-        for(int bi = 0; bi < body->num_ops; bi++)
-        {
-            max_renames += body->ops[bi]->num_results;
-        }
-        ll_rename_t* renames = (ll_rename_t*)rocke_arena_alloc(
-            &L->arena, sizeof(ll_rename_t) * (size_t)(max_renames > 0 ? max_renames : 1));
-        if(!renames)
-        {
-            rocke_ll_fail(L, ROCKE_ERR_OOM, "unrolled_for: arena OOM");
-        }
-        int n_renames = 0;
+        /* This trip's names; restored after the trip. */
+        ll_rename_scope trip_renames(L);
 
         if(iv_value_obj)
         {
-            renames[n_renames].val = iv_value_obj;
-            renames[n_renames].saved = iv_value_obj->name;
-            n_renames++;
-            iv_value_obj->name = iv_const_name;
+            trip_renames.rename(iv_value_obj, iv_const_name);
         }
         /* Rename iter-arg objects to their current operand string. */
         for(int k = 0; k < iter_value_count; k++)
         {
             rocke_value_t* vo = iter_value_objs[k];
-            renames[n_renames].val = vo;
-            renames[n_renames].saved = vo->name;
-            n_renames++;
             for(int mi = 0; mi < (int)num_iter; mi++)
             {
                 const char* mname = NULL;
@@ -2039,28 +2311,33 @@ void rocke_ll_lower_unrolled_for(rocke_lower_t* L, const rocke_op_t* op)
                 }
                 if(strcmp(vo->name, mname) == 0)
                 {
-                    vo->name = current_iter_values[mi];
+                    trip_renames.rename(vo, current_iter_values[mi]);
                     break;
                 }
             }
         }
-        /* Rename all body op results to %base.unrollN. */
-        for(int bi = 0; bi < body->num_ops; bi++)
+        /* Rename all body op results, nested regions included, to %base.unrollN
+         * -- except a shared-memory allocation: it names one module-level
+         * buffer every trip shares, found by that name (rocke_ll_collect_smem). */
+        for(int bi = 0; bi < n_body_ops; bi++)
         {
-            const rocke_op_t* bop = body->ops[bi];
+            const rocke_op_t* bop = body_ops[bi];
+            if(bop->opcode == ROCKE_OP_TILE_SMEM_ALLOC)
+            {
+                continue;
+            }
             for(int ri = 0; ri < bop->num_results; ri++)
             {
                 rocke_value_t* result = bop->results[ri];
-                renames[n_renames].val = result;
-                renames[n_renames].saved = result->name;
-                n_renames++;
                 const char* base = result->name;
                 if(base && base[0] == '%')
                 {
                     base++;
                 }
-                result->name = rocke_arena_printf(
-                    &L->arena, "%%%s.unroll%lld", base ? base : "", (long long)iteration);
+                trip_renames.rename(
+                    result,
+                    rocke_arena_printf(
+                        &L->arena, "%%%s.unroll%lld", base ? base : "", (long long)iteration));
             }
         }
 
@@ -2075,11 +2352,7 @@ void rocke_ll_lower_unrolled_for(rocke_lower_t* L, const rocke_op_t* op)
 
         L->unroll_elide_sync_op = NULL;
 
-        /* Restore original names. */
-        for(int k = 0; k < n_renames; k++)
-        {
-            renames[k].val->name = renames[k].saved;
-        }
+        trip_renames.restore();
 
         if(n_yield != (int)num_iter)
         {
@@ -2520,6 +2793,7 @@ void rocke_ll_register_vector(void)
     rocke_ll_set_handler(ROCKE_OP_TILE_CLUSTER_BARRIER, _op_tile_cluster_barrier);
     rocke_ll_set_handler(ROCKE_OP_TILE_S_SETPRIO, _op_tile_s_setprio);
     rocke_ll_set_handler(ROCKE_OP_TILE_TRAP, _op_tile_trap);
+    rocke_ll_set_handler(ROCKE_OP_TILE_GPU_CHECK_FAILED, _op_tile_gpu_check_failed);
     rocke_ll_set_handler(ROCKE_OP_TILE_IGLP_OPT, _op_tile_iglp_opt);
     rocke_ll_set_handler(ROCKE_OP_TILE_SCHED_BARRIER, _op_tile_sched_barrier);
     rocke_ll_set_handler(ROCKE_OP_TILE_SCHED_GROUP_BARRIER, _op_tile_sched_group_barrier);

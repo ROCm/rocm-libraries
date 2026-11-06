@@ -54,5 +54,6 @@ BenchmarkProblems:
           - Exact: [512, 512, 1, 512]  # Large
           - Exact: [63, 65, 1, 67]     # Odd
           - Exact: [128, 256, 1, 128]  # Non-square
+          - Exact: [32, 16, 65537, 64]  # Batch > 65535 (cluster grid z limit)
           # === RANGE SIZES ===
           - Range: [ [128, 128, 512], [128, 128, 512], [1], [256] ]

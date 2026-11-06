@@ -26,6 +26,7 @@
 #include <hipdnn_test_sdk/utilities/FileUtilities.hpp>
 #include <hipdnn_test_sdk/utilities/ScopedEnvironmentVariableSetter.hpp>
 #include <hipdnn_test_sdk/utilities/ScratchDirectory.hpp>
+#include <hipdnn_test_sdk/utilities/UhdFeatureRows.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -173,6 +174,7 @@ import numpy as np
 
 booster = lgb.Booster(model_file=sys.argv[1])
 thresholds = []
+leaves = []
 
 
 def walk(node):
@@ -180,9 +182,12 @@ def walk(node):
         thresholds.append((node["split_feature"], node["threshold"]))
         walk(node["left_child"])
         walk(node["right_child"])
+    else:
+        leaves[-1] = max(leaves[-1], abs(node["leaf_value"]))
 
 
 for tree in booster.dump_model()["tree_info"]:
+    leaves.append(0.0)
     walk(tree["tree_structure"])
 base = [2048.0, 128.0]
 rows = []
@@ -197,7 +202,9 @@ raw = booster.predict(np.array(rows), raw_score=True)
 with open(sys.argv[2], "w") as out:
     json.dump({"thresholds": len(thresholds),
                "rows": [[None if v != v else v for v in row] for row in rows],
-               "raw": [float(v) for v in raw]}, out)
+               "raw": [float(v) for v in raw],
+               # A float32 leaf is within 2**-24 of itself, so a row's sum within this.
+               "leaf_rounding": sum(leaves) * 2.0**-24}, out)
 )";
 
 /// Trains on @p csv's single-layer corpus into @p outputDir.
@@ -348,6 +355,9 @@ TEST_F(TestUhdGenArtifact, TheRuntimeWalksTheTreesAsLightGbmDoes)
     const auto& rows = document.at("rows");
     const auto& raw = document.at("raw");
     ASSERT_EQ(rows.size(), raw.size());
+    // uhd_gen stores leaves as float32 by default: the walk must still take LightGBM's path,
+    // so every row lands within the leaves' rounding of LightGBM's own sum.
+    const double leafRounding = document.at("leaf_rounding").get<double>();
     for(size_t i = 0; i < rows.size(); ++i)
     {
         std::vector<double> features;
@@ -357,7 +367,9 @@ TEST_F(TestUhdGenArtifact, TheRuntimeWalksTheTreesAsLightGbmDoes)
                                                : value.get<double>());
         }
         const double expected = raw[i].get<double>();
-        EXPECT_NEAR(adapter->score(features), expected, 1e-9 * std::max(1.0, std::abs(expected)))
+        EXPECT_NEAR(adapter->score(features),
+                    expected,
+                    leafRounding + 1e-9 * std::max(1.0, std::abs(expected)))
             << "probe " << i << ": " << rows[i].dump();
     }
 }
@@ -433,7 +445,9 @@ TEST(TestUhdGenArtifactGrouped, TheRuntimeGroupsWhatTheToolTrained)
         return extractor.extract(ctx);
     };
 
-    const auto scores = adapter->scoreBatch({row(0, 256), row(1, 64), row(1, 256), row(0, 64)});
+    const auto scores = hipdnn_test_sdk::utilities::scoreRows(
+                            *adapter, {row(0, 256), row(1, 64), row(1, 256), row(0, 64)})
+                            .raw;
     ASSERT_EQ(scores.size(), 4U);
 
     // Group 0 is filtered out by layer 1, including its largest tile, which a flat model

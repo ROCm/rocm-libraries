@@ -28,6 +28,8 @@ from rocke.portable_ir.src import abi
 from rocke.portable_ir.src.recipe_bundle import cbor_encode
 from rocke.portable_ir.utils.recipe_expand import ExpandError, expand_recipe
 
+ARCHS = ("gfx942", "gfx950")
+
 SPEC = {"D": 4, "dtype": "f32"}
 
 
@@ -166,6 +168,49 @@ class TestMinReaderDerivation(unittest.TestCase):
         )
         self.assertEqual(abi.recipe_min_reader(r), 1)
 
+    def test_exact_workgroup_size_needs_level_four(self):
+        """A lowerer older than workgroup_size ignores it and sizes the kernel
+        for max_workgroup_size, so a recorded kernel stating it must not reach
+        that engine. Recorded from a real kernel, as a generator would."""
+        from rocke.core.ir import F32, IRBuilder, PtrType
+        from rocke.portable_ir.src.kerneldef_to_recipe import kerneldef_to_recipe
+
+        b = IRBuilder("exact_block")
+        b.kernel.attrs["workgroup_size"] = 64
+        x = b.param("X", PtrType(F32, "global"))
+        b.global_store(x, b.thread_id_x(), b.const_f32(0.0), align=4)
+        b.ret()
+        r = kerneldef_to_recipe(b.kernel)
+        self.assertEqual(abi.recipe_min_reader(r), 4)
+        self.assertEqual(abi.stamp(r, engine="test")["abi"]["min_reader"], 4)
+        # The upper-bound attr every older lowerer knows stays at the floor.
+        del b.kernel.attrs["workgroup_size"]
+        b.kernel.attrs["max_workgroup_size"] = 64
+        self.assertEqual(abi.recipe_min_reader(kerneldef_to_recipe(b.kernel)), 1)
+
+    def test_parameter_facts_need_level_four(self):
+        """A reader older than parameter facts drops the param attrs it does
+        not know, so it would plan a launch that checks none of them. One fact
+        on one parameter is enough; pointer attributes alone stay at the floor.
+        Recorded from a real kernel, as a generator would."""
+        from rocke.core.ir import F32, I32, IRBuilder, PtrType
+        from rocke.portable_ir.src.kerneldef_to_recipe import kerneldef_to_recipe
+
+        def recorded(**facts):
+            b = IRBuilder("stated_facts")
+            x = b.param("X", PtrType(F32, "global"), noalias=True, align=16)
+            b.param("M", I32, **facts)
+            b.global_store(x, b.thread_id_x(), b.const_f32(0.0), align=4)
+            b.ret()
+            return kerneldef_to_recipe(b.kernel)
+
+        self.assertEqual(abi.recipe_min_reader(recorded()), 1)
+        for facts in ({"ge": 1}, {"multiple_of": 64}, {"eq": 128}):
+            with self.subTest(facts=facts):
+                r = recorded(**facts)
+                self.assertEqual(abi.recipe_min_reader(r), 4)
+                self.assertEqual(abi.stamp(r, engine="test")["abi"]["min_reader"], 4)
+
     def test_finds_constructs_nested_in_compile_time_bodies(self):
         """static_for bodies are where most of a rolled recipe lives, so a walk
         that only looked at the top level would report the floor for almost
@@ -297,12 +342,14 @@ class TestCEngineAgrees(unittest.TestCase):
         and the first artifact that needs tracing down cannot be."""
         from rocke.portable_ir.src.recipe_bundle import build_bundle
 
-        block = build_bundle(
-            [{"key": "toy", "arch": "gfx950", "recipe": recipe_toy.make_recipe()}]
-        )["abi"]
-        self.assertTrue(block["engine"], "engine version stamped empty")
-        self.assertTrue(block["build_id"], "build id stamped empty")
-        self.assertEqual(block["min_reader"], 1)
+        for arch in ARCHS:
+            with self.subTest(arch=arch):
+                block = build_bundle(
+                    [{"key": "toy", "arch": arch, "recipe": recipe_toy.make_recipe()}]
+                )["abi"]
+                self.assertTrue(block["engine"], "engine version stamped empty")
+                self.assertTrue(block["build_id"], "build id stamped empty")
+                self.assertEqual(block["min_reader"], 1)
 
     def test_c_vm_refuses_a_future_recipe(self):
         future = from_the_future(recipe_toy.make_recipe())
@@ -326,42 +373,50 @@ class TestCEngineAgrees(unittest.TestCase):
         self.assertEqual(a, b)
 
     def test_future_bundle_refused_before_lookup(self):
-        bundle = from_the_future(
-            {
-                "schema": "rocke.bundle/v1",
-                "entries": [
-                    {"key": "toy", "arch": "gfx950", "recipe": recipe_toy.make_recipe()}
-                ],
-            }
-        )
-        blob = cbor_encode(bundle)
-        with self.assertRaises(RuntimeError) as cm:
-            self.online.bundle_cbor_to_llvm(
-                blob, "toy", arch="gfx950", ints={"D": 4}, strs={"dtype": "f32"}
-            )
-        self.assertIn("recipe reader >=", str(cm.exception))
+        for arch in ARCHS:
+            with self.subTest(arch=arch):
+                bundle = from_the_future(
+                    {
+                        "schema": "rocke.bundle/v1",
+                        "entries": [
+                            {
+                                "key": "toy",
+                                "arch": arch,
+                                "recipe": recipe_toy.make_recipe(),
+                            }
+                        ],
+                    }
+                )
+                blob = cbor_encode(bundle)
+                with self.assertRaises(RuntimeError) as cm:
+                    self.online.bundle_cbor_to_llvm(
+                        blob, "toy", arch=arch, ints={"D": 4}, strs={"dtype": "f32"}
+                    )
+                self.assertIn("recipe reader >=", str(cm.exception))
 
     def test_guard_check_reports_too_old_as_error_not_refusal(self):
         """A caller must be able to tell a deployment problem from an
         unsupported shape: the first is fixed by shipping matched artifacts, the
         second by routing elsewhere. Answering 'refused' here would file the
         former under the latter and nobody would ever look."""
-        bundle = {
-            "schema": "rocke.bundle/v1",
-            "entries": [
-                {
-                    "key": "toy",
-                    "arch": "gfx950",
-                    "recipe": from_the_future(recipe_toy.make_recipe()),
+        for arch in ARCHS:
+            with self.subTest(arch=arch):
+                bundle = {
+                    "schema": "rocke.bundle/v1",
+                    "entries": [
+                        {
+                            "key": "toy",
+                            "arch": arch,
+                            "recipe": from_the_future(recipe_toy.make_recipe()),
+                        }
+                    ],
                 }
-            ],
-        }
-        blob = cbor_encode(bundle)
-        with self.assertRaises(RuntimeError) as cm:
-            self.online.check_bundle_guard(
-                blob, "toy", arch="gfx950", ints={"D": 4}, strs={"dtype": "f32"}
-            )
-        self.assertIn("recipe reader >=", str(cm.exception))
+                blob = cbor_encode(bundle)
+                with self.assertRaises(RuntimeError) as cm:
+                    self.online.check_bundle_guard(
+                        blob, "toy", arch=arch, ints={"D": 4}, strs={"dtype": "f32"}
+                    )
+                self.assertIn("recipe reader >=", str(cm.exception))
 
 
 if __name__ == "__main__":

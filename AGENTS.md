@@ -77,7 +77,9 @@ All under [`projects/hipdnn/tools/ai/skills/`](projects/hipdnn/tools/ai/skills/)
 | `hipdnn-superbuild-test` | Running tests against an existing hipDNN superbuild. |
 | `hipdnn-tidy` | Running clang-tidy on hipDNN, scoped to the files you changed. |
 | `hipdnn-ingestor-engine` | Creating or extending a generic-kernel-ingestor integration. |
+| `hipdnn-ingestor-impact` | Checking whether a kernel ingestor change breaks kernel ABI or dispatch at run time while the build stays green, without a full review. |
 | `hipdnn-uhd` | Taking a hipDNN engine through the UHD heuristic lifecycle on the local GPU: generating, training, judging, validating, installing, and triaging heuristics and their training data. |
+| `hipdnn-deep-review` | Reviewing a hipDNN or provider change in depth with parallel agents until its findings close. Its `IMPACT` lane runs the `hipdnn-ingestor-impact` scripts. |
 | `hipdnn-codegen` (at [`projects/hipdnn/tools/DescriptorGenerator/.claude/skills/`](projects/hipdnn/tools/DescriptorGenerator/.claude/skills/hipdnn-codegen/SKILL.md)) | Generating operation boilerplate from a YAML config. |
 | `rfc-review` | Reviewing a technical RFC across the structured perspectives. Follow-ups: `rfc-review-compatibility`, `rfc-review-ops`, `rfc-review-security`. |
 | `rfc-backlog` | Turning an RFC into a backlog of Jira stories and tasks. |
@@ -112,6 +114,7 @@ All under [`projects/hipdnn/tools/ai/skills/`](projects/hipdnn/tools/ai/skills/)
 | hipBLASLt | [`projects/hipblaslt/AGENTS.md`](projects/hipblaslt/AGENTS.md) (reference material in `AGENTS_reference.md`) |
 | TensileLite | [`projects/hipblaslt/tensilelite/AGENTS.md`](projects/hipblaslt/tensilelite/AGENTS.md) |
 | hipDNN | [`projects/hipdnn/docs/ai-rules.md`](projects/hipdnn/docs/ai-rules.md) |
+| MIOpen | [`projects/miopen/AGENTS.md`](projects/miopen/AGENTS.md) |
 | MIOpen provider | [`dnn-providers/miopen-provider/docs/ai-rules.md`](dnn-providers/miopen-provider/docs/ai-rules.md) |
 | rocKE | [`dnn-providers/hip-kernel-provider/rocke/AGENTS.md`](dnn-providers/hip-kernel-provider/rocke/AGENTS.md) |
 | rocRoller | [`shared/rocroller/docs/ai-rules.md`](shared/rocroller/docs/ai-rules.md) |
