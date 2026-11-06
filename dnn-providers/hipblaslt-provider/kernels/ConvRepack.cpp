@@ -7,8 +7,8 @@
 //
 // One HIPRTC program holds every entry point, and every shape is a runtime argument
 // (ConvRepackArgs.h), so one compile per device serves every problem. im2col and the copy
-// move bytes and have one entry per element size; col2im converts its fp32 sums and has one
-// entry per output type. Grid-stride loops with 64-bit indexing throughout; no vectorization
+// move bytes and have one entry per element size; col2im and the cast convert fp32 sums and have
+// one entry per output type. Grid-stride loops with 64-bit indexing throughout; no vectorization
 // or LDS tiling yet -- those come one at a time, each with a measured gain.
 
 #include "ConvRepackArgs.h"
@@ -45,6 +45,26 @@ __device__ void stridedCopy(const StridedCopyArgs& args)
             dstOffset += coordinate * args.dstStrides[axis];
         }
         dst[dstOffset] = src[srcOffset];
+    }
+}
+
+template <typename OutputType>
+__device__ void stridedCast(const StridedCastArgs& args)
+{
+    auto* dst = static_cast<OutputType*>(args.dst);
+    for(long long index = firstThread(); index < args.total; index += threadStride())
+    {
+        long long rest = index;
+        long long srcOffset = 0;
+        long long dstOffset = 0;
+        for(int axis = args.rank - 1; axis >= 0; --axis)
+        {
+            const long long coordinate = rest % args.dims[axis];
+            rest /= args.dims[axis];
+            srcOffset += coordinate * args.srcStrides[axis];
+            dstOffset += coordinate * args.dstStrides[axis];
+        }
+        dst[dstOffset] = static_cast<OutputType>(args.src[srcOffset]);
     }
 }
 
@@ -184,6 +204,16 @@ extern "C" __global__ void StridedCopy2(StridedCopyArgs args)
 extern "C" __global__ void StridedCopy4(StridedCopyArgs args)
 {
     stridedCopy<unsigned int>(args);
+}
+
+extern "C" __global__ void StridedCastFloatToHalf(StridedCastArgs args)
+{
+    stridedCast<_Float16>(args);
+}
+
+extern "C" __global__ void StridedCastFloatToBfloat16(StridedCastArgs args)
+{
+    stridedCast<__bf16>(args);
 }
 
 extern "C" __global__ void Im2Col2(Im2ColArgs args)

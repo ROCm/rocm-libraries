@@ -96,12 +96,13 @@ How a convolution runs, in order of preference:
 1. **Directly on the tensors**, no workspace: a 1x1 filter with unit stride and no padding (a GEMM over pixels or channels), or a
    filter that covers the whole unpadded input (a GEMM over images).
 2. **im2col**: every other convolution. A repack kernel writes the column matrix to the workspace and one GEMM reads it; backward data
-   runs the GEMM into an FP32 column matrix that col2im sums into dx. The repack kernels are compiled at runtime by HIPRTC on
-   first use.
+   runs the GEMM into an FP32 column matrix that col2im sums into dx. The repack workspace is held to 1 GiB: a larger column
+   matrix is built a slice of images at a time, and backward weights sums the slices in FP32 before rounding once. The repack
+   kernels are compiled at runtime by HIPRTC on first use.
 
 Declined:
 - A filter whose (channel, spatial) axes nest in neither KCRS nor KRSC order
-- A plan whose repack workspace exceeds 1 GiB
+- A convolution whose column matrix for a single image exceeds 1 GiB
 - A GEMM size or leading dimension beyond 32 bits
 
 ## Legend

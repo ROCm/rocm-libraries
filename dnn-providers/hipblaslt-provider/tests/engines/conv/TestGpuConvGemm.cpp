@@ -33,7 +33,8 @@
  * @brief The explicit-GEMM convolution on the device, through each enabled backend, against
  *        hipDNN's CPU reference convolution: every direction, the 1x1 and point-output rows,
  *        and the im2col/col2im plans for everything else -- padding, stride, dilation,
- *        asymmetric padding, groups, depthwise, mixed layouts, true convolution, 1-D to 3-D.
+ *        asymmetric padding, groups, depthwise, mixed layouts, true convolution, 1-D to 3-D --
+ *        and the same plans run a slice of images at a time under a lowered workspace cap.
  *
  * The reference is cross-correlation only, so true convolution is checked against it with the
  * filter reflected on the host: the reference's input for forward and backward data, its
@@ -331,8 +332,31 @@ std::vector<std::vector<int64_t>> allIndices(const std::vector<int64_t>& dims)
     }
 }
 
+/// The repack workspace cap that makes @p graph's plan run in several slices of images: half of
+/// what it takes unsliced.
+size_t slicingCap(const ConvGemmGraph& graph, ConvDirection direction)
+{
+    const auto problem = parseConvProblem(graph.graph(), direction);
+    if(!problem.has_value())
+    {
+        return MAX_REPACK_WORKSPACE_BYTES;
+    }
+    const auto whole = convGemmCalls(*problem);
+    if(!whole.has_value())
+    {
+        return MAX_REPACK_WORKSPACE_BYTES;
+    }
+    const size_t cap = whole->workspaceBytes / 2;
+    const auto sliced = convGemmCalls(*problem, cap);
+    EXPECT_TRUE(sliced.has_value() && sliced->stages.size() > 1)
+        << "half the workspace does not slice this case";
+    return cap;
+}
+
+/// Runs @p convCase through @p backend and checks it against the CPU reference; @p sliced runs it
+/// a slice of images at a time.
 template <typename T>
-void runCase(ConvCase convCase, Backend backend)
+void runCase(ConvCase convCase, Backend backend, bool sliced = false)
 {
     auto& shape = convCase.shape;
     shape.dataType = dataTypeOf<T>();
@@ -346,7 +370,9 @@ void runCase(ConvCase convCase, Backend backend)
             delete owned;
         });
 
-    const ConvGemmPlanBuilder builder(factoryFor(backend));
+    const ConvGemmPlanBuilder builder(factoryFor(backend),
+                                      sliced ? slicingCap(graph, convCase.direction)
+                                             : MAX_REPACK_WORKSPACE_BYTES);
     if(!builder.isApplicable(*handle, graph.graph()))
     {
         // The only decline a backend may add to the formulation's is finding no algorithm for
@@ -357,7 +383,19 @@ void runCase(ConvCase convCase, Backend backend)
         auto calls = convGemmCalls(*problem);
         ASSERT_TRUE(calls.has_value()) << "the formulation declined the convolution";
         ASSERT_EQ(backend, Backend::HIPBLASLT) << "only hipBLASLt declines a formulated GEMM";
-        EXPECT_ANY_THROW(factoryFor(backend)(*handle, std::move(calls->calls)));
+        bool threw = false;
+        for(auto& stage : calls->stages)
+        {
+            try
+            {
+                static_cast<void>(factoryFor(backend)(*handle, stage.calls));
+            }
+            catch(const std::exception&)
+            {
+                threw = true;
+            }
+        }
+        EXPECT_TRUE(threw) << "hipBLASLt took every GEMM, so the decline came from elsewhere";
         GTEST_SKIP() << "hipBLASLt has no algorithm on this device for a GEMM of this convolution";
     }
     HipdnnEnginePluginExecutionContext context;
@@ -517,6 +555,65 @@ TEST_P(TestGpuConvGemm, Bfp16)
 INSTANTIATE_TEST_SUITE_P(,
                          TestGpuConvGemm,
                          ::testing::Combine(::testing::ValuesIn(convCases()),
+                                            ::testing::ValuesIn(enabledBackends())),
+                         [](const auto& info) {
+                             return std::get<0>(info.param).name + "_"
+                                    + backendName(std::get<1>(info.param));
+                         });
+
+/// The im2col cases of several images, run a slice of images at a time.
+std::vector<ConvCase> slicedCases()
+{
+    std::vector<ConvCase> cases;
+    for(const auto& convCase : convCases())
+    {
+        for(const auto* name : {"Padded3x3Nchw",
+                                "Padded3x3Nhwc",
+                                "Grouped3x3Nchw",
+                                "StridedDilatedAsymmetricNchw",
+                                "ConvolutionModeNhwc",
+                                "Conv3dNcdhw"})
+        {
+            if(convCase.name.rfind(name, 0) == 0
+               && convCase.name.size() == std::string(name).size() + 3)
+            {
+                cases.push_back(convCase);
+            }
+        }
+        // The 1x1 channels-first backward weights of several images goes through im2col.
+        if(convCase.name == "OneByOneNchwWrw")
+        {
+            cases.push_back(convCase);
+        }
+    }
+    return cases;
+}
+
+class TestGpuConvGemmSliced : public ::testing::TestWithParam<std::tuple<ConvCase, Backend>>
+{
+};
+
+TEST_P(TestGpuConvGemmSliced, Fp32)
+{
+    SKIP_IF_NO_DEVICES();
+    runCase<float>(std::get<0>(GetParam()), std::get<1>(GetParam()), true);
+}
+
+TEST_P(TestGpuConvGemmSliced, Fp16)
+{
+    SKIP_IF_NO_DEVICES();
+    runCase<Half>(std::get<0>(GetParam()), std::get<1>(GetParam()), true);
+}
+
+TEST_P(TestGpuConvGemmSliced, Bfp16)
+{
+    SKIP_IF_NO_DEVICES();
+    runCase<BFloat16>(std::get<0>(GetParam()), std::get<1>(GetParam()), true);
+}
+
+INSTANTIATE_TEST_SUITE_P(,
+                         TestGpuConvGemmSliced,
+                         ::testing::Combine(::testing::ValuesIn(slicedCases()),
                                             ::testing::ValuesIn(enabledBackends())),
                          [](const auto& info) {
                              return std::get<0>(info.param).name + "_"

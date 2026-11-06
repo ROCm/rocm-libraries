@@ -54,8 +54,8 @@ TEST(TestConvGemmFormulation, OneByOneChannelsLastIsOneCallBatchedOverGroups)
         const auto calls = resolve(shape, direction);
         ASSERT_TRUE(calls.has_value());
         EXPECT_EQ(calls->row, ConvGemmRow::ONE_BY_ONE);
-        ASSERT_EQ(calls->calls.size(), 1u);
-        EXPECT_EQ(calls->calls[0].batchCount, 3);
+        ASSERT_EQ(calls->stages[0].calls.size(), 1u);
+        EXPECT_EQ(calls->stages[0].calls[0].batchCount, 3);
     }
 }
 
@@ -65,8 +65,8 @@ TEST(TestConvGemmFormulation, OneByOneChannelsFirstBatchesImagesWithoutGroups)
     {
         const auto calls = resolve(ConvGemmShape{}, direction);
         ASSERT_TRUE(calls.has_value());
-        ASSERT_EQ(calls->calls.size(), 1u);
-        EXPECT_EQ(calls->calls[0].batchCount, 2); // n
+        ASSERT_EQ(calls->stages[0].calls.size(), 1u);
+        EXPECT_EQ(calls->stages[0].calls[0].batchCount, 2); // n
     }
 }
 
@@ -79,10 +79,10 @@ TEST(TestConvGemmFormulation, OneByOneChannelsFirstWithGroupsIsOneCallPerImage)
     {
         const auto calls = resolve(shape, direction);
         ASSERT_TRUE(calls.has_value());
-        ASSERT_EQ(calls->calls.size(), 3u);
-        for(size_t image = 0; image < calls->calls.size(); ++image)
+        ASSERT_EQ(calls->stages[0].calls.size(), 3u);
+        for(size_t image = 0; image < calls->stages[0].calls.size(); ++image)
         {
-            EXPECT_EQ(calls->calls[image].batchCount, 2); // groups
+            EXPECT_EQ(calls->stages[0].calls[image].batchCount, 2); // groups
         }
     }
 }
@@ -115,7 +115,7 @@ TEST(TestConvGemmFormulation, PointOutputInEveryLayoutWhoseColumnsAgree)
             const auto calls = resolve(layout, direction);
             ASSERT_TRUE(calls.has_value()) << "channels last " << last;
             EXPECT_EQ(calls->row, ConvGemmRow::POINT_OUTPUT);
-            EXPECT_EQ(calls->calls.size(), 1u);
+            EXPECT_EQ(calls->stages[0].calls.size(), 1u);
         }
     }
 }

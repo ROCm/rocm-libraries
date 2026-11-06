@@ -30,6 +30,9 @@ struct ConvOperand
     /// The operand's element type when it differs from the problem's: set only on a workspace
     /// operand a repack plan stages, such as the fp32 column matrix of backward data.
     std::optional<hipdnn_flatbuffers_sdk::data_objects::DataType> dataType;
+    /// Elements from the start of the tensor's buffer to this operand's first element: nonzero
+    /// only for a slice of images a staged plan addresses.
+    int64_t offset = 0;
 };
 
 /**

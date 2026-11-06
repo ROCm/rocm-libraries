@@ -35,7 +35,7 @@ void runGemm(rocblas_handle handle, const GemmCall& call, const void* a, const v
 {
     // Host-side scalars, f32 to match the compute type.
     const float alpha = 1.0f;
-    const float beta = 0.0f;
+    const float beta = call.accumulate ? 1.0f : 0.0f;
     const auto dType = rocblasDataType(call.d.dataType);
 
     // Parenthesized: rocblas.h wraps the function in a variadic compatibility macro for its
@@ -60,7 +60,7 @@ void runGemm(rocblas_handle handle, const GemmCall& call, const void* a, const v
                                             static_cast<rocblas_int>(call.b.leadingDimension),
                                             call.b.batchStride,
                                             &beta,
-                                            d, // beta is 0, so c is never read; d is written in its place
+                                            d, // c is d: read only when accumulating
                                             dType,
                                             static_cast<rocblas_int>(call.d.leadingDimension),
                                             call.d.batchStride,

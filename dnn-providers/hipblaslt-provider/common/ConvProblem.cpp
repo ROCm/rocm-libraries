@@ -139,7 +139,7 @@ std::optional<ConvOperand>
         return std::nullopt;
     }
     ConvOperand operand{
-        uid, {dims->begin(), dims->end()}, {strides->begin(), strides->end()}, std::nullopt};
+        uid, {dims->begin(), dims->end()}, {strides->begin(), strides->end()}, std::nullopt, 0};
     for(size_t axis = 0; axis < operand.dims.size(); ++axis)
     {
         if(operand.dims[axis] < 1 || operand.strides[axis] < 0)

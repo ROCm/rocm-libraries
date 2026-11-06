@@ -34,7 +34,8 @@ public:
     RepackProgram(RepackProgram&&) = delete;
     RepackProgram& operator=(RepackProgram&&) = delete;
 
-    /// Runs @p step on @p stream, reading @p src and writing @p dst.
+    /// Runs @p step on @p stream, reading @p src and writing @p dst (already advanced by the
+    /// step's byte offsets).
     void launch(const RepackStep& step, const void* src, void* dst, hipStream_t stream) const;
 
     /// The kernel entry point that runs @p step.

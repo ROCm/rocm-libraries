@@ -24,7 +24,6 @@ namespace
 constexpr size_t MAX_WORKSPACE_BYTES = static_cast<size_t>(128) * 1024 * 1024;
 
 constexpr float ALPHA = 1.0f;
-constexpr float BETA = 0.0f;
 
 /// A column-major layout for @p operand, @p rows x @p cols as stored, batched like the call.
 HipblasltMatrixLayout
@@ -120,8 +119,9 @@ void HipblasltGemmPlan::execute(const HipdnnEnginePluginHandle& handle,
         const auto d
             = hipdnn_plugin_sdk::findDeviceBuffer(call.d.uid, deviceBuffers, numDeviceBuffers);
         void* output = operandAddress(d.ptr, call.d);
+        const float beta = call.accumulate ? 1.0f : 0.0f;
 
-        // beta is 0, so c is never read; d is written in its place.
+        // c is d: read only when accumulating.
         THROW_ON_HIPBLASLT_FAILURE(hipblasLtMatmul(handle.hipblasltHandle,
                                                    prepared.desc.matmulDesc(),
                                                    &ALPHA,
@@ -129,7 +129,7 @@ void HipblasltGemmPlan::execute(const HipdnnEnginePluginHandle& handle,
                                                    prepared.a.matrixLayout(),
                                                    operandAddress(b.ptr, call.b),
                                                    prepared.b.matrixLayout(),
-                                                   &BETA,
+                                                   &beta,
                                                    output,
                                                    prepared.d.matrixLayout(),
                                                    output,

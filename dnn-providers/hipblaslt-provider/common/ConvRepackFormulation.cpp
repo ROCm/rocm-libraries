@@ -49,32 +49,27 @@ std::vector<int64_t> channelsLastStrides(const std::vector<int64_t>& dims)
     return strides;
 }
 
-/// Hands out workspace tensors, each aligned, each with a uid the graph does not use.
+/// Workspace tensors, each aligned, laid out in the order they are added.
 class WorkspaceLayout
 {
 public:
-    explicit WorkspaceLayout(int64_t firstUid)
-        : _nextUid(firstUid)
-    {
-    }
-
-    /// A tensor of @p elements of @p dataType, or nullopt when the total would overflow.
-    std::optional<int64_t> add(int64_t elements, data_objects::DataType dataType)
+    /// Adds tensor @p uid of @p elements of @p dataType; false when the total would overflow.
+    bool add(int64_t uid, int64_t elements, data_objects::DataType dataType)
     {
         int64_t bytes = 0;
         if(__builtin_mul_overflow(elements, elementBytes(dataType), &bytes))
         {
-            return std::nullopt;
+            return false;
         }
         const size_t offset
             = (_bytes + WORKSPACE_ALIGNMENT - 1) / WORKSPACE_ALIGNMENT * WORKSPACE_ALIGNMENT;
         if(static_cast<uint64_t>(bytes) > std::numeric_limits<size_t>::max() - offset)
         {
-            return std::nullopt;
+            return false;
         }
-        _tensors.push_back(WorkspaceTensor{_nextUid, offset, static_cast<size_t>(bytes)});
+        _tensors.push_back(WorkspaceTensor{uid, offset, static_cast<size_t>(bytes)});
         _bytes = offset + static_cast<size_t>(bytes);
-        return _nextUid++;
+        return true;
     }
 
     size_t bytes() const
@@ -88,7 +83,6 @@ public:
     }
 
 private:
-    int64_t _nextUid;
     size_t _bytes = 0;
     std::vector<WorkspaceTensor> _tensors;
 };
@@ -132,26 +126,175 @@ ConvColumnGeometry geometryFor(const ConvProblem& problem, bool channelsInner)
     return geometry;
 }
 
-/// A copy of every element of @p from to the same index of @p to; both share dims.
-RepackStep copyStep(const ConvOperand& from, const ConvOperand& to, data_objects::DataType dataType)
+/// The strides arguments of a copy or cast of every element of @p dims from @p srcStrides to
+/// @p dstStrides.
+template <typename Args>
+Args stridedArgs(const std::vector<int64_t>& dims,
+                 const std::vector<int64_t>& srcStrides,
+                 const std::vector<int64_t>& dstStrides)
 {
-    StridedCopyArgs args{};
-    args.rank = static_cast<int>(from.dims.size());
+    Args args{};
+    args.rank = static_cast<int>(dims.size());
     args.total = 1;
-    for(size_t axis = 0; axis < from.dims.size(); ++axis)
+    for(size_t axis = 0; axis < dims.size(); ++axis)
     {
-        args.dims[axis] = from.dims[axis];
-        args.srcStrides[axis] = from.strides[axis];
-        args.dstStrides[axis] = to.strides[axis];
-        args.total *= from.dims[axis];
+        args.dims[axis] = dims[axis];
+        args.srcStrides[axis] = srcStrides[axis];
+        args.dstStrides[axis] = dstStrides[axis];
+        args.total *= dims[axis];
     }
-    return RepackStep{args, dataType, from.uid, to.uid};
+    return args;
+}
+
+/// Packed row-major strides for @p dims, last axis innermost.
+std::vector<int64_t> packedStrides(const std::vector<int64_t>& dims)
+{
+    std::vector<int64_t> strides(dims.size(), 1);
+    for(size_t axis = dims.size(); axis-- > 1;)
+    {
+        strides[axis - 1] = strides[axis] * dims[axis];
+    }
+    return strides;
+}
+
+/// Everything about a problem's IM2COL plan that does not depend on how its images are sliced.
+struct ColumnForm
+{
+    bool channelsInner = false;
+    int64_t filterUnitStride = 0;
+    int64_t taps = 0;
+    int64_t outputs = 0;
+    int64_t inputs = 0;
+    int64_t columns = 0;
+    data_objects::DataType colType = data_objects::DataType::UNSET;
+    int64_t colUid = 0;
+    int64_t stagedUid = 0;
+    int64_t accumulatorUid = 0;
+};
+
+/// The stage that computes images [first, first + count) of @p problem through a column matrix
+/// of that many images, or nullopt when the GEMM cannot read its operands. @p stageY routes y
+/// (dy) through a channels-last copy in the workspace; @p wTarget is the filter the GEMM reads or
+/// writes; @p accumulate adds a backward-weights slice to what earlier slices wrote.
+std::optional<ConvGemmStage> sliceStage(const ConvProblem& problem,
+                                        const ColumnForm& form,
+                                        int64_t first,
+                                        int64_t count,
+                                        bool stageY,
+                                        const ConvOperand& wTarget,
+                                        bool accumulate)
+{
+    const auto bytes = elementBytes(problem.dataType);
+    const size_t spatialRank = problem.input.size();
+
+    // The column matrix as a channels-last tensor of C * filterSize channels over the output
+    // positions of `count` images.
+    std::vector<int64_t> colDims{count, form.columns};
+    colDims.insert(colDims.end(), problem.output.begin(), problem.output.end());
+    ConvOperand col{form.colUid, colDims, channelsLastStrides(colDims), std::nullopt, 0};
+    if(form.colType != problem.dataType)
+    {
+        col.dataType = form.colType;
+    }
+
+    ConvOperand ySlice = problem.y;
+    ySlice.dims[0] = count;
+    ySlice.offset = first * problem.y.strides[0];
+
+    ConvProblem columnProblem = problem;
+    columnProblem.n = count;
+    columnProblem.mode = data_objects::ConvMode::CROSS_CORRELATION;
+    columnProblem.c = form.columns;
+    columnProblem.input = problem.output;
+    columnProblem.filter.assign(spatialRank, 1);
+    columnProblem.prePadding.assign(spatialRank, 0);
+    columnProblem.postPadding.assign(spatialRank, 0);
+    columnProblem.stride.assign(spatialRank, 1);
+    columnProblem.dilation.assign(spatialRank, 1);
+    columnProblem.x = col;
+    columnProblem.w = wTarget;
+    columnProblem.y = ySlice;
+
+    ConvGemmStage stage;
+    auto geometry = geometryFor(problem, form.channelsInner);
+    geometry.n = count;
+    const int64_t xByteOffset = first * problem.x.strides[0] * bytes;
+    if(problem.direction == ConvDirection::BACKWARD_DATA)
+    {
+        Col2ImArgs args{};
+        args.geometry = geometry;
+        args.total = count * problem.c * form.inputs;
+        stage.after.push_back(
+            RepackStep{args, problem.dataType, form.colUid, problem.x.uid, 0, xByteOffset});
+    }
+    else
+    {
+        Im2ColArgs args{};
+        args.geometry = geometry;
+        args.total = count * form.outputs * form.columns;
+        stage.before.push_back(
+            RepackStep{args, problem.dataType, problem.x.uid, form.colUid, xByteOffset, 0});
+    }
+
+    if(stageY)
+    {
+        const ConvOperand staged{
+            form.stagedUid, ySlice.dims, channelsLastStrides(ySlice.dims), std::nullopt, 0};
+        const int64_t yByteOffset = first * problem.y.strides[0] * bytes;
+        if(problem.direction == ConvDirection::FORWARD)
+        {
+            stage.after.push_back(RepackStep{
+                stridedArgs<StridedCopyArgs>(ySlice.dims, staged.strides, problem.y.strides),
+                problem.dataType,
+                staged.uid,
+                problem.y.uid,
+                0,
+                yByteOffset});
+        }
+        else
+        {
+            stage.before.push_back(RepackStep{
+                stridedArgs<StridedCopyArgs>(ySlice.dims, problem.y.strides, staged.strides),
+                problem.dataType,
+                problem.y.uid,
+                staged.uid,
+                yByteOffset,
+                0});
+        }
+        columnProblem.y = staged;
+    }
+
+    auto calls = directGemmCalls(columnProblem);
+    if(!calls.has_value() || calls->stages.size() != 1)
+    {
+        return std::nullopt;
+    }
+    stage.calls = std::move(calls->stages[0].calls);
+    for(auto& call : stage.calls)
+    {
+        call.accumulate = accumulate;
+    }
+    return stage;
+}
+
+/// Bytes of a workspace tensor of @p elements of @p dataType, padded to the alignment.
+std::optional<int64_t> alignedBytes(int64_t elements, data_objects::DataType dataType)
+{
+    int64_t bytes = 0;
+    if(__builtin_mul_overflow(elements, elementBytes(dataType), &bytes)
+       || bytes > std::numeric_limits<int64_t>::max() - static_cast<int64_t>(WORKSPACE_ALIGNMENT))
+    {
+        return std::nullopt;
+    }
+    return bytes + static_cast<int64_t>(WORKSPACE_ALIGNMENT);
 }
 
 } // namespace
 
-std::optional<ConvGemmPlanCalls> im2colGemmCalls(const ConvProblem& problem)
+std::optional<ConvGemmPlanCalls> im2colGemmCalls(const ConvProblem& problem,
+                                                 size_t maxWorkspaceBytes)
 {
+    ColumnForm form;
     // The column order follows the filter's layout, so the GEMM reads w in place: channels
     // outermost for KCRS, innermost for KRSC.
     std::vector<size_t> channelsOuter{1};
@@ -162,142 +305,190 @@ std::optional<ConvGemmPlanCalls> im2colGemmCalls(const ConvProblem& problem)
         channelsInner.push_back(axis);
     }
     channelsInner.push_back(1);
-    bool inner = false;
     auto filterColumns = collapseAxes(problem.w, channelsOuter);
     if(!filterColumns.has_value())
     {
-        inner = true;
+        form.channelsInner = true;
         filterColumns = collapseAxes(problem.w, channelsInner);
     }
     if(!filterColumns.has_value())
     {
         return std::nullopt;
     }
+    form.filterUnitStride = filterColumns->second;
 
     const auto taps = product(problem.filter);
     const auto outputs = product(problem.output);
     const auto inputs = product(problem.input);
-    int64_t columns = 0;
-    int64_t rows = 0;
-    int64_t colElements = 0;
+    int64_t imageColumnElements = 0;
     if(!taps.has_value() || !outputs.has_value() || !inputs.has_value()
-       || __builtin_mul_overflow(problem.c, *taps, &columns)
-       || __builtin_mul_overflow(problem.n, *outputs, &rows)
-       || __builtin_mul_overflow(rows, columns, &colElements))
+       || __builtin_mul_overflow(problem.c, *taps, &form.columns)
+       || __builtin_mul_overflow(*outputs, form.columns, &imageColumnElements))
     {
         return std::nullopt;
     }
+    form.taps = *taps;
+    form.outputs = *outputs;
+    form.inputs = *inputs;
 
     const int64_t lastUid = std::max({problem.x.uid, problem.w.uid, problem.y.uid});
-    if(lastUid > std::numeric_limits<int64_t>::max() - 2)
+    if(lastUid > std::numeric_limits<int64_t>::max() - 3)
     {
         return std::nullopt;
     }
-    WorkspaceLayout workspace(lastUid + 1);
+    form.colUid = lastUid + 1;
+    form.stagedUid = lastUid + 2;
+    form.accumulatorUid = lastUid + 3;
 
     // Backward data's GEMM writes fp32 so col2im sums before it rounds.
-    const bool backwardData = problem.direction == ConvDirection::BACKWARD_DATA;
-    const auto colType = backwardData ? data_objects::DataType::FLOAT : problem.dataType;
-    const auto colUid = workspace.add(colElements, colType);
-    if(!colUid.has_value())
-    {
-        return std::nullopt;
-    }
+    const bool backwardWeights = problem.direction == ConvDirection::BACKWARD_WEIGHTS;
+    form.colType = problem.direction == ConvDirection::BACKWARD_DATA ? data_objects::DataType::FLOAT
+                                                                     : problem.dataType;
 
-    // The column matrix as a channels-last tensor of C * filterSize channels over the output
-    // positions, and the filter as a 1x1 one over those channels.
-    std::vector<int64_t> colDims{problem.n, columns};
-    colDims.insert(colDims.end(), problem.output.begin(), problem.output.end());
-    ConvOperand col{*colUid, colDims, channelsLastStrides(colDims), std::nullopt};
-    if(colType != problem.dataType)
-    {
-        col.dataType = colType;
-    }
-    ConvOperand filter{problem.w.uid,
-                       {problem.k, problem.cPerGroup() * *taps},
-                       {problem.w.strides[0], filterColumns->second},
-                       std::nullopt};
+    // The filter as a 1x1 one over the column matrix's channels.
     const size_t spatialRank = problem.input.size();
+    ConvOperand filter{problem.w.uid,
+                       {problem.k, problem.cPerGroup() * form.taps},
+                       {problem.w.strides[0], form.filterUnitStride},
+                       std::nullopt,
+                       0};
     filter.dims.resize(2 + spatialRank, 1);
     filter.strides.resize(2 + spatialRank, 1);
 
-    ConvProblem columnProblem = problem;
-    columnProblem.mode = data_objects::ConvMode::CROSS_CORRELATION;
-    columnProblem.c = columns;
-    columnProblem.input = problem.output;
-    columnProblem.filter.assign(spatialRank, 1);
-    columnProblem.prePadding.assign(spatialRank, 0);
-    columnProblem.postPadding.assign(spatialRank, 0);
-    columnProblem.stride.assign(spatialRank, 1);
-    columnProblem.dilation.assign(spatialRank, 1);
-    columnProblem.x = col;
-    columnProblem.w = filter;
-
-    ConvGemmPlanCalls plan;
-    plan.row = ConvGemmRow::IM2COL;
-    const auto geometry = geometryFor(problem, inner);
-    if(backwardData)
-    {
-        Col2ImArgs args{};
-        args.geometry = geometry;
-        args.total = problem.n * problem.c * *inputs;
-        plan.after.push_back(RepackStep{args, problem.dataType, *colUid, problem.x.uid});
-    }
-    else
-    {
-        Im2ColArgs args{};
-        args.geometry = geometry;
-        args.total = colElements;
-        plan.before.push_back(RepackStep{args, problem.dataType, problem.x.uid, *colUid});
-    }
-
-    auto calls = directGemmCalls(columnProblem);
-    if(!calls.has_value())
-    {
-        // Stage y (dy) channels-last, which the pixel-rows GEMM reads in every direction.
-        const auto yElements = product(problem.y.dims);
-        const auto stagedUid
-            = yElements.has_value() ? workspace.add(*yElements, problem.dataType) : std::nullopt;
-        if(!stagedUid.has_value())
-        {
-            return std::nullopt;
-        }
-        const ConvOperand staged{
-            *stagedUid, problem.y.dims, channelsLastStrides(problem.y.dims), std::nullopt};
-        if(problem.direction == ConvDirection::FORWARD)
-        {
-            plan.after.push_back(copyStep(staged, problem.y, problem.dataType));
-        }
-        else
-        {
-            plan.before.push_back(copyStep(problem.y, staged, problem.dataType));
-        }
-        columnProblem.y = staged;
-        calls = directGemmCalls(columnProblem);
-        if(!calls.has_value())
-        {
-            return std::nullopt;
-        }
-    }
-
-    if(workspace.bytes() > MAX_REPACK_WORKSPACE_BYTES)
+    // Per-image workspace, and the images one slice can hold within the cap.
+    const auto colImageBytes = alignedBytes(imageColumnElements, form.colType);
+    const auto yImageElements
+        = product(std::vector<int64_t>(problem.y.dims.begin() + 1, problem.y.dims.end()));
+    const auto yImageBytes = yImageElements.has_value()
+                                 ? alignedBytes(*yImageElements, problem.dataType)
+                                 : std::nullopt;
+    const auto filterElements = product(problem.w.dims);
+    const auto accumulatorBytes = filterElements.has_value()
+                                      ? alignedBytes(*filterElements, data_objects::DataType::FLOAT)
+                                      : std::nullopt;
+    if(!colImageBytes.has_value() || !yImageBytes.has_value() || !accumulatorBytes.has_value())
     {
         return std::nullopt;
     }
-    plan.calls = std::move(calls->calls);
+    const auto cap = static_cast<int64_t>(
+        std::min(maxWorkspaceBytes, static_cast<size_t>(std::numeric_limits<int64_t>::max())));
+    const auto imagesWithin = [&](int64_t perImage, int64_t fixed) {
+        return fixed >= cap ? 0 : std::min(problem.n, (cap - fixed) / perImage);
+    };
+
+    // Whether y has to be staged does not depend on the slice size except through the number of
+    // images, so probe at the largest slice the cap allows without staging.
+    bool stageY = false;
+    int64_t slice = imagesWithin(*colImageBytes, 0);
+    if(slice == 0)
+    {
+        return std::nullopt;
+    }
+    if(!sliceStage(problem, form, 0, slice, false, filter, false).has_value())
+    {
+        stageY = true;
+        slice = imagesWithin(*colImageBytes + *yImageBytes, 0);
+    }
+    // Backward weights over several slices sums them: in w itself for fp32, otherwise in an fp32
+    // accumulator rounded once at the end.
+    const bool sliced = slice < problem.n;
+    const bool accumulator
+        = backwardWeights && sliced && problem.dataType != data_objects::DataType::FLOAT;
+    if(accumulator)
+    {
+        slice = imagesWithin(*colImageBytes + (stageY ? *yImageBytes : 0), *accumulatorBytes);
+    }
+    if(slice == 0)
+    {
+        return std::nullopt;
+    }
+
+    ConvOperand wTarget = filter;
+    std::vector<int64_t> accumulatorStrides;
+    if(accumulator)
+    {
+        // The GEMM's view of w, packed: rows k, columns (c, taps) in the filter's own order.
+        const int64_t columnsPerGroup = problem.cPerGroup() * form.taps;
+        wTarget = ConvOperand{form.accumulatorUid,
+                              filter.dims,
+                              {columnsPerGroup, 1},
+                              data_objects::DataType::FLOAT,
+                              0};
+        wTarget.strides.resize(2 + spatialRank, 1);
+        std::vector<int64_t> layout = problem.w.dims;
+        if(form.channelsInner)
+        {
+            // (k, spatial..., c) packed, read back through (k, c, spatial...) indices.
+            std::vector<int64_t> krsc{layout[0]};
+            krsc.insert(krsc.end(), layout.begin() + 2, layout.end());
+            krsc.push_back(layout[1]);
+            const auto packed = packedStrides(krsc);
+            accumulatorStrides.assign(layout.size(), 0);
+            accumulatorStrides[0] = packed[0];
+            accumulatorStrides[1] = packed.back();
+            for(size_t axis = 2; axis < layout.size(); ++axis)
+            {
+                accumulatorStrides[axis] = packed[axis - 1];
+            }
+        }
+        else
+        {
+            accumulatorStrides = packedStrides(layout);
+        }
+    }
+
+    WorkspaceLayout workspace;
+    const int64_t sliceColumnElements = slice * imageColumnElements;
+    if(!workspace.add(form.colUid, sliceColumnElements, form.colType)
+       || (stageY && !workspace.add(form.stagedUid, slice * *yImageElements, problem.dataType))
+       || (accumulator
+           && !workspace.add(form.accumulatorUid, *filterElements, data_objects::DataType::FLOAT)))
+    {
+        return std::nullopt;
+    }
+    if(workspace.bytes() > maxWorkspaceBytes)
+    {
+        return std::nullopt;
+    }
+
+    ConvGemmPlanCalls plan;
+    plan.row = ConvGemmRow::IM2COL;
+    for(int64_t first = 0; first < problem.n; first += slice)
+    {
+        const int64_t count = std::min(slice, problem.n - first);
+        auto stage = sliceStage(
+            problem, form, first, count, stageY, wTarget, backwardWeights && first > 0);
+        if(!stage.has_value())
+        {
+            return std::nullopt;
+        }
+        plan.stages.push_back(std::move(*stage));
+    }
+    if(accumulator)
+    {
+        ConvGemmStage round;
+        round.before.push_back(RepackStep{
+            stridedArgs<StridedCastArgs>(problem.w.dims, accumulatorStrides, problem.w.strides),
+            problem.dataType,
+            form.accumulatorUid,
+            problem.w.uid,
+            0,
+            0});
+        plan.stages.push_back(std::move(round));
+    }
     plan.workspace = workspace.tensors();
     plan.workspaceBytes = workspace.bytes();
     return plan;
 }
 
-std::optional<ConvGemmPlanCalls> convGemmCalls(const ConvProblem& problem)
+std::optional<ConvGemmPlanCalls> convGemmCalls(const ConvProblem& problem, size_t maxWorkspaceBytes)
 {
     auto direct = directGemmCalls(problem);
     if(direct.has_value())
     {
         return direct;
     }
-    return im2colGemmCalls(problem);
+    return im2colGemmCalls(problem, maxWorkspaceBytes);
 }
 
 } // namespace hipblaslt_plugin

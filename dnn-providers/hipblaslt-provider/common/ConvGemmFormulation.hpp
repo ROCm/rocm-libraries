@@ -42,32 +42,48 @@ struct WorkspaceTensor
 };
 
 /// One launch of a repack kernel (kernels/ConvRepack.cpp). The pointers in `args` are left null
-/// and filled at execution from `srcUid` and `dstUid`.
+/// and filled at execution from `srcUid` and `dstUid`, advanced by the byte offsets.
 struct RepackStep
 {
-    std::variant<StridedCopyArgs, Im2ColArgs, Col2ImArgs> args;
-    /// The element type moved (strided copy, im2col) or written (col2im).
+    std::variant<StridedCopyArgs, StridedCastArgs, Im2ColArgs, Col2ImArgs> args;
+    /// The element type moved (strided copy, im2col) or written (cast, col2im).
     hipdnn_flatbuffers_sdk::data_objects::DataType dataType
         = hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET;
     int64_t srcUid = 0;
     int64_t dstUid = 0;
+    int64_t srcByteOffset = 0;
+    int64_t dstByteOffset = 0;
 };
 
-/// How a convolution runs: repack steps, then the GEMM calls in order, each writing its own part
-/// of its output once, then more repack steps. The direct rows have no steps and no workspace.
+/// Repack steps, then GEMM calls in order, then more repack steps.
+struct ConvGemmStage
+{
+    std::vector<RepackStep> before;
+    std::vector<GemmCall> calls;
+    std::vector<RepackStep> after;
+};
+
+/// How a convolution runs: its stages in order, sharing one workspace. The direct rows are one
+/// stage of GEMM calls with no steps and no workspace; IM2COL has a stage per slice of images
+/// the workspace holds at once, and backward weights a final stage that rounds its fp32 sum.
 struct ConvGemmPlanCalls
 {
     ConvGemmRow row = ConvGemmRow::ONE_BY_ONE;
-    std::vector<GemmCall> calls;
+    std::vector<ConvGemmStage> stages;
     std::vector<WorkspaceTensor> workspace;
     /// Bytes of workspace the steps and calls address, before any the GEMM backend needs.
     size_t workspaceBytes = 0;
-    std::vector<RepackStep> before;
-    std::vector<RepackStep> after;
 
     bool hasRepack() const
     {
-        return !before.empty() || !after.empty();
+        for(const auto& stage : stages)
+        {
+            if(!stage.before.empty() || !stage.after.empty())
+            {
+                return true;
+            }
+        }
+        return stages.size() > 1;
     }
 };
 

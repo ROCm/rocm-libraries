@@ -8,7 +8,7 @@
 #include <optional>
 #include <vector>
 
-#include "common/ConvGemmFormulation.hpp"
+#include "common/ConvRepackFormulation.hpp"
 #include "engines/plans/PlanBuilderInterface.hpp"
 #include "engines/plans/PlanInterface.hpp"
 
@@ -33,7 +33,10 @@ public:
     using PlanFactory = std::function<std::unique_ptr<IPlan>(const HipdnnEnginePluginHandle&,
                                                              std::vector<GemmCall>)>;
 
-    explicit ConvGemmPlanBuilder(PlanFactory factory);
+    /// @p maxRepackWorkspaceBytes bounds the repack workspace of a plan (convGemmCalls); tests
+    /// lower it to exercise image slicing on small shapes.
+    explicit ConvGemmPlanBuilder(PlanFactory factory,
+                                 size_t maxRepackWorkspaceBytes = MAX_REPACK_WORKSPACE_BYTES);
 
     bool isApplicable(
         const HipdnnEnginePluginHandle& handle,
@@ -49,14 +52,15 @@ public:
 
 private:
     /// The plan calls for @p opGraph in whichever direction it is, or nullopt.
-    static std::optional<ConvGemmPlanCalls>
-        callsFor(const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph);
+    std::optional<ConvGemmPlanCalls>
+        callsFor(const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph) const;
 
     /// The backend's plan for @p calls' GEMMs, wrapped in their repack steps when there are any.
     std::unique_ptr<IPlan> planFor(const HipdnnEnginePluginHandle& handle,
                                    ConvGemmPlanCalls calls) const;
 
     PlanFactory _factory;
+    size_t _maxRepackWorkspaceBytes;
 };
 
 } // namespace hipblaslt_plugin

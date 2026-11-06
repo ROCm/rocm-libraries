@@ -41,7 +41,7 @@ MatrixView view(const ConvProblem& problem,
                       rowStride,
                       colStride,
                       batchStride,
-                      offset};
+                      operand.offset + offset};
 }
 
 std::optional<std::vector<GemmCall>> single(const std::optional<GemmCall>& call)
@@ -333,7 +333,7 @@ std::optional<ConvGemmPlanCalls> directGemmCalls(const ConvProblem& problem)
         {
             ConvGemmPlanCalls plan;
             plan.row = ConvGemmRow::ONE_BY_ONE;
-            plan.calls = std::move(*calls);
+            plan.stages.push_back(ConvGemmStage{{}, std::move(*calls), {}});
             return plan;
         }
     }
@@ -347,7 +347,7 @@ std::optional<ConvGemmPlanCalls> directGemmCalls(const ConvProblem& problem)
         {
             ConvGemmPlanCalls plan;
             plan.row = ConvGemmRow::POINT_OUTPUT;
-            plan.calls = std::move(*calls);
+            plan.stages.push_back(ConvGemmStage{{}, std::move(*calls), {}});
             return plan;
         }
     }

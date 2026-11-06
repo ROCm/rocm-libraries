@@ -25,8 +25,10 @@ constexpr unsigned int BLOCK_SIZE = 256;
 /// Grid-stride loops cover the rest; a cap keeps the block count a 32-bit launch dimension.
 constexpr long long MAX_BLOCKS = 1LL << 20;
 
-constexpr std::array<const char*, 7> ENTRY_POINTS = {"StridedCopy2",
+constexpr std::array<const char*, 9> ENTRY_POINTS = {"StridedCopy2",
                                                      "StridedCopy4",
+                                                     "StridedCastFloatToHalf",
+                                                     "StridedCastFloatToBfloat16",
                                                      "Im2Col2",
                                                      "Im2Col4",
                                                      "Col2ImFloat",
@@ -152,14 +154,17 @@ std::string RepackProgram::entryName(const RepackStep& step)
     {
         return "Im2Col" + bytes;
     }
+    const std::string prefix
+        = std::holds_alternative<StridedCastArgs>(step.args) ? "StridedCastFloatTo" : "Col2Im";
     switch(step.dataType)
     {
     case data_objects::DataType::FLOAT:
-        return "Col2ImFloat";
+        // An fp32 sum needs no rounding, so there is no cast to fp32.
+        return prefix == "Col2Im" ? "Col2ImFloat" : "";
     case data_objects::DataType::HALF:
-        return "Col2ImHalf";
+        return prefix + "Half";
     case data_objects::DataType::BFLOAT16:
-        return "Col2ImBfloat16";
+        return prefix + "Bfloat16";
     default:
         break;
     }
@@ -186,6 +191,12 @@ void RepackProgram::launch(const RepackStep& step,
         copy->src = src;
         copy->dst = dst;
         total = copy->total;
+    }
+    else if(auto* cast = std::get_if<StridedCastArgs>(&args))
+    {
+        cast->src = static_cast<const float*>(src);
+        cast->dst = dst;
+        total = cast->total;
     }
     else if(auto* im2col = std::get_if<Im2ColArgs>(&args))
     {

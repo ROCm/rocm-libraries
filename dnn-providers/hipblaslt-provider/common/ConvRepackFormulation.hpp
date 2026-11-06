@@ -11,14 +11,14 @@
 namespace hipblaslt_plugin
 {
 
-/// The most workspace the repack steps of one plan may take. A convolution whose column matrix
-/// needs more is a poor fit for explicit GEMM and is declined. Conservative to start with; it is
-/// calibrated, or replaced by image chunking, from exit-suite data.
+/// The most workspace the repack steps of one plan take by default. A column matrix that needs
+/// more is built a slice of images at a time; a single image that needs more is a poor fit for
+/// explicit GEMM and is declined. To be calibrated from exit-suite data.
 inline constexpr size_t MAX_REPACK_WORKSPACE_BYTES = static_cast<size_t>(1) << 30;
 
 /**
- * @brief The IM2COL plan for @p problem, or nullopt when explicit GEMM is a poor fit for it or
- *        cannot read its operands.
+ * @brief The IM2COL plan for @p problem within @p maxWorkspaceBytes of repack workspace, or
+ *        nullopt when explicit GEMM is a poor fit for it or cannot read its operands.
  *
  * im2col writes the column matrix (kernels/ConvRepackArgs.h) to the workspace, which turns the
  * convolution into a ONE_BY_ONE one with C * filterSize channels over the output positions;
@@ -26,13 +26,21 @@ inline constexpr size_t MAX_REPACK_WORKSPACE_BYTES = static_cast<size_t>(1) << 3
  * and col2im sums it into dx. Columns follow the filter's own layout (KCRS or KRSC), so w is
  * read in place; a filter that is neither is declined. When the GEMM cannot read y (dy) as
  * given -- channels-first backward weights over several images, say -- y is staged in the
- * workspace channels-last by a strided copy. Declined when the workspace would exceed
- * MAX_REPACK_WORKSPACE_BYTES.
+ * workspace channels-last by a strided copy.
+ *
+ * When the column matrix of every image does not fit, the images are processed a slice at a
+ * time, each slice a stage reusing the same workspace. Backward weights sums its slices with
+ * accumulating GEMMs: into w for fp32, otherwise into an fp32 accumulator in the workspace that
+ * a final stage rounds into w once. Declined when one image does not fit.
  */
-std::optional<ConvGemmPlanCalls> im2colGemmCalls(const ConvProblem& problem);
+std::optional<ConvGemmPlanCalls> im2colGemmCalls(const ConvProblem& problem,
+                                                 size_t maxWorkspaceBytes
+                                                 = MAX_REPACK_WORKSPACE_BYTES);
 
 /// The plan for @p problem: a direct row (directGemmCalls) when one applies, IM2COL otherwise,
 /// or nullopt when neither does.
-std::optional<ConvGemmPlanCalls> convGemmCalls(const ConvProblem& problem);
+std::optional<ConvGemmPlanCalls> convGemmCalls(const ConvProblem& problem,
+                                               size_t maxWorkspaceBytes
+                                               = MAX_REPACK_WORKSPACE_BYTES);
 
 } // namespace hipblaslt_plugin

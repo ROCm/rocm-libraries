@@ -46,8 +46,9 @@ inline void* operandAddress(void* base, const GemmOperand& operand)
  *        that executes it.
  *
  * For each of `batchCount` matrices: d(m x n) = op(a)(m x k) * op(b)(k x n), accumulated in
- * fp32 and written once. `d` is written in place of `c` (beta = 0), so it carries the output.
- * Every value is validated to fit the 32-bit sizes the BLAS libraries take.
+ * fp32 and written once -- or, with `accumulate`, added to what d already holds (beta = 1).
+ * `d` stands in for `c` too, so it carries the output. Every value is validated to fit the
+ * 32-bit sizes the BLAS libraries take.
  */
 struct GemmCall
 {
@@ -60,6 +61,9 @@ struct GemmCall
     GemmOperand a;
     GemmOperand b;
     GemmOperand d;
+    /// d += product (beta 1) rather than d = product (beta 0): sums a reduction split across
+    /// several calls, such as backward weights over slices of images.
+    bool accumulate = false;
 };
 
 } // namespace hipblaslt_plugin

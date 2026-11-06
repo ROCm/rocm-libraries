@@ -18,13 +18,14 @@
 namespace hipblaslt_plugin
 {
 
-ConvGemmPlanBuilder::ConvGemmPlanBuilder(PlanFactory factory)
+ConvGemmPlanBuilder::ConvGemmPlanBuilder(PlanFactory factory, size_t maxRepackWorkspaceBytes)
     : _factory(std::move(factory))
+    , _maxRepackWorkspaceBytes(maxRepackWorkspaceBytes)
 {
 }
 
 std::optional<ConvGemmPlanCalls> ConvGemmPlanBuilder::callsFor(
-    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph)
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph) const
 {
     for(const auto direction :
         {ConvDirection::FORWARD, ConvDirection::BACKWARD_DATA, ConvDirection::BACKWARD_WEIGHTS})
@@ -32,7 +33,7 @@ std::optional<ConvGemmPlanCalls> ConvGemmPlanBuilder::callsFor(
         const auto problem = parseConvProblem(opGraph, direction);
         if(problem.has_value())
         {
-            return convGemmCalls(*problem);
+            return convGemmCalls(*problem, _maxRepackWorkspaceBytes);
         }
     }
     return std::nullopt;
@@ -84,21 +85,25 @@ void ConvGemmPlanBuilder::buildPlan(
             "explicit-GEMM convolution does not apply to this graph");
     }
     HIPDNN_PLUGIN_LOG_INFO("Building explicit-GEMM convolution plan, row "
-                           << toString(calls->row) << ", " << calls->calls.size()
-                           << " GEMM call(s), " << calls->before.size() + calls->after.size()
-                           << " repack step(s)");
+                           << toString(calls->row) << ", " << calls->stages.size() << " stage(s), "
+                           << calls->workspaceBytes << " workspace bytes");
     executionContext.setPlan(planFor(handle, std::move(*calls)));
 }
 
 std::unique_ptr<IPlan> ConvGemmPlanBuilder::planFor(const HipdnnEnginePluginHandle& handle,
                                                     ConvGemmPlanCalls calls) const
 {
-    auto gemmPlan = _factory(handle, std::move(calls.calls));
     if(!calls.hasRepack())
     {
-        return gemmPlan;
+        // A direct row: one stage of GEMM calls, run by the backend's plan alone.
+        return _factory(handle, std::move(calls.stages.front().calls));
     }
-    return std::make_unique<ConvRepackPlan>(std::move(calls), std::move(gemmPlan));
+    std::vector<std::unique_ptr<IPlan>> gemmPlans;
+    for(auto& stage : calls.stages)
+    {
+        gemmPlans.push_back(stage.calls.empty() ? nullptr : _factory(handle, stage.calls));
+    }
+    return std::make_unique<ConvRepackPlan>(std::move(calls), std::move(gemmPlans));
 }
 
 } // namespace hipblaslt_plugin

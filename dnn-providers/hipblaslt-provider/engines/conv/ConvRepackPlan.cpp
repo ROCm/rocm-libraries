@@ -3,6 +3,7 @@
 
 #include "engines/conv/ConvRepackPlan.hpp"
 
+#include <algorithm>
 #include <utility>
 #include <vector>
 
@@ -23,20 +24,35 @@ constexpr size_t GEMM_WORKSPACE_ALIGNMENT = 256;
 
 } // namespace
 
-ConvRepackPlan::ConvRepackPlan(ConvGemmPlanCalls steps, std::unique_ptr<IPlan> gemmPlan)
+ConvRepackPlan::ConvRepackPlan(ConvGemmPlanCalls steps,
+                               std::vector<std::unique_ptr<IPlan>> gemmPlans)
     : _steps(std::move(steps))
-    , _gemmPlan(std::move(gemmPlan))
+    , _gemmPlans(std::move(gemmPlans))
     , _gemmWorkspaceOffset((_steps.workspaceBytes + GEMM_WORKSPACE_ALIGNMENT - 1)
                            / GEMM_WORKSPACE_ALIGNMENT * GEMM_WORKSPACE_ALIGNMENT)
 {
-    PLUGIN_THROW_IF_FALSE(_gemmPlan != nullptr,
+    PLUGIN_THROW_IF_FALSE(_gemmPlans.size() == _steps.stages.size(),
                           HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
-                          "a repack plan needs a GEMM plan");
+                          "a repack plan needs one GEMM plan slot per stage");
+    for(size_t i = 0; i < _gemmPlans.size(); ++i)
+    {
+        PLUGIN_THROW_IF_FALSE((_gemmPlans[i] != nullptr) == !_steps.stages[i].calls.empty(),
+                              HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+                              "a stage with GEMM calls needs a GEMM plan, and only such a stage");
+    }
 }
 
 size_t ConvRepackPlan::getWorkspaceSize(const HipdnnEnginePluginHandle& handle) const
 {
-    return _gemmWorkspaceOffset + _gemmPlan->getWorkspaceSize(handle);
+    size_t gemmBytes = 0;
+    for(const auto& plan : _gemmPlans)
+    {
+        if(plan != nullptr)
+        {
+            gemmBytes = std::max(gemmBytes, plan->getWorkspaceSize(handle));
+        }
+    }
+    return _gemmWorkspaceOffset + gemmBytes;
 }
 
 void ConvRepackPlan::execute(const HipdnnEnginePluginHandle& handle,
@@ -67,14 +83,23 @@ void ConvRepackPlan::execute(const HipdnnEnginePluginHandle& handle,
                 = hipdnn_plugin_sdk::findDeviceBuffer(step.srcUid, buffers.data(), count);
             const auto dst
                 = hipdnn_plugin_sdk::findDeviceBuffer(step.dstUid, buffers.data(), count);
-            program.launch(step, src.ptr, dst.ptr, handle.getStream());
+            program.launch(step,
+                           static_cast<const char*>(src.ptr) + step.srcByteOffset,
+                           static_cast<char*>(dst.ptr) + step.dstByteOffset,
+                           handle.getStream());
         }
     };
 
-    run(_steps.before);
-    _gemmPlan->execute(
-        handle, buffers.data(), count, base == nullptr ? nullptr : base + _gemmWorkspaceOffset);
-    run(_steps.after);
+    void* gemmWorkspace = base == nullptr ? nullptr : base + _gemmWorkspaceOffset;
+    for(size_t i = 0; i < _steps.stages.size(); ++i)
+    {
+        run(_steps.stages[i].before);
+        if(_gemmPlans[i] != nullptr)
+        {
+            _gemmPlans[i]->execute(handle, buffers.data(), count, gemmWorkspace);
+        }
+        run(_steps.stages[i].after);
+    }
 }
 
 } // namespace hipblaslt_plugin

@@ -14,8 +14,8 @@
 /**
  * @file TestConvRepackFormulation.cpp
  * @brief The IM2COL plans: which steps run around the GEMM in each direction and layout, the
- *        workspace they take, the column order and geometry handed to the kernels, and the
- *        shapes that are declined.
+ *        workspace they take, the column order and geometry handed to the kernels, the slicing
+ *        of images to fit the workspace cap, and the shapes that are declined.
  */
 namespace
 {
@@ -67,6 +67,7 @@ TEST(TestConvRepackFormulation, DirectRowsArePreferred)
         ASSERT_TRUE(calls.has_value());
         EXPECT_EQ(calls->row, ConvGemmRow::ONE_BY_ONE);
         EXPECT_FALSE(calls->hasRepack());
+        EXPECT_EQ(calls->stages.size(), 1u);
         EXPECT_TRUE(calls->workspace.empty());
         EXPECT_EQ(calls->workspaceBytes, 0u);
     }
@@ -80,15 +81,17 @@ TEST(TestConvRepackFormulation, ForwardIsIm2colThenGemm)
         const auto calls = plan(shape, ConvDirection::FORWARD);
         ASSERT_TRUE(calls.has_value()) << "channels last " << last;
         EXPECT_EQ(calls->row, ConvGemmRow::IM2COL);
-        ASSERT_EQ(calls->before.size(), 1u);
-        EXPECT_TRUE(calls->after.empty());
-        const auto* args = stepArgs<Im2ColArgs>(calls->before[0]);
+        ASSERT_EQ(calls->stages.size(), 1u);
+        const auto& stage = calls->stages[0];
+        ASSERT_EQ(stage.before.size(), 1u);
+        EXPECT_TRUE(stage.after.empty());
+        const auto* args = stepArgs<Im2ColArgs>(stage.before[0]);
         ASSERT_NE(args, nullptr);
-        EXPECT_EQ(calls->before[0].srcUid, CONV_X_UID);
-        EXPECT_EQ(calls->before[0].dstUid, calls->workspace[0].uid);
+        EXPECT_EQ(stage.before[0].srcUid, CONV_X_UID);
+        EXPECT_EQ(stage.before[0].dstUid, calls->workspace[0].uid);
         // rows (n * output positions) x columns (c * filter taps)
         EXPECT_EQ(args->total, 2 * 5 * 7 * 4 * 9);
-        EXPECT_FALSE(calls->calls.empty());
+        EXPECT_FALSE(stage.calls.empty());
     }
 }
 
@@ -99,18 +102,20 @@ TEST(TestConvRepackFormulation, BackwardDataIsGemmIntoFp32ThenCol2im)
     const auto calls = plan(shape, ConvDirection::BACKWARD_DATA);
     ASSERT_TRUE(calls.has_value());
     EXPECT_EQ(calls->row, ConvGemmRow::IM2COL);
-    EXPECT_TRUE(calls->before.empty());
-    ASSERT_EQ(calls->after.size(), 1u);
-    ASSERT_NE(stepArgs<Col2ImArgs>(calls->after[0]), nullptr);
-    EXPECT_EQ(calls->after[0].dstUid, CONV_X_UID);
-    EXPECT_EQ(calls->after[0].dataType, conv_data_objects::DataType::HALF);
-    EXPECT_EQ(stepArgs<Col2ImArgs>(calls->after[0])->total, 2 * 4 * 5 * 7);
+    ASSERT_EQ(calls->stages.size(), 1u);
+    const auto& stage = calls->stages[0];
+    EXPECT_TRUE(stage.before.empty());
+    ASSERT_EQ(stage.after.size(), 1u);
+    ASSERT_NE(stepArgs<Col2ImArgs>(stage.after[0]), nullptr);
+    EXPECT_EQ(stage.after[0].dstUid, CONV_X_UID);
+    EXPECT_EQ(stage.after[0].dataType, conv_data_objects::DataType::HALF);
+    EXPECT_EQ(stepArgs<Col2ImArgs>(stage.after[0])->total, 2 * 4 * 5 * 7);
 
-    const auto colUid = calls->after[0].srcUid;
+    const auto colUid = stage.after[0].srcUid;
     ASSERT_EQ(calls->workspace.size(), 1u);
     EXPECT_EQ(calls->workspace[0].uid, colUid);
     EXPECT_EQ(calls->workspace[0].bytes, static_cast<size_t>(2 * 5 * 7 * 4 * 9 * 4));
-    for(const auto& call : calls->calls)
+    for(const auto& call : stage.calls)
     {
         EXPECT_EQ(call.d.uid, colUid);
         EXPECT_EQ(call.d.dataType, conv_data_objects::DataType::FLOAT);
@@ -123,8 +128,9 @@ TEST(TestConvRepackFormulation, BackwardWeightsChannelsLastNeedsNoStaging)
 {
     const auto calls = plan(channelsLast(padded3x3()), ConvDirection::BACKWARD_WEIGHTS);
     ASSERT_TRUE(calls.has_value());
-    ASSERT_EQ(calls->before.size(), 1u);
-    EXPECT_NE(stepArgs<Im2ColArgs>(calls->before[0]), nullptr);
+    ASSERT_EQ(calls->stages.size(), 1u);
+    ASSERT_EQ(calls->stages[0].before.size(), 1u);
+    EXPECT_NE(stepArgs<Im2ColArgs>(calls->stages[0].before[0]), nullptr);
     EXPECT_EQ(calls->workspace.size(), 1u);
 }
 
@@ -135,13 +141,15 @@ TEST(TestConvRepackFormulation, ChannelsFirstBackwardWeightsStagesDyChannelsLast
         const auto calls = plan(shape, ConvDirection::BACKWARD_WEIGHTS);
         ASSERT_TRUE(calls.has_value());
         EXPECT_EQ(calls->row, ConvGemmRow::IM2COL);
-        ASSERT_EQ(calls->before.size(), 2u);
-        EXPECT_NE(stepArgs<Im2ColArgs>(calls->before[0]), nullptr);
-        const auto* copy = stepArgs<StridedCopyArgs>(calls->before[1]);
+        ASSERT_EQ(calls->stages.size(), 1u);
+        const auto& before = calls->stages[0].before;
+        ASSERT_EQ(before.size(), 2u);
+        EXPECT_NE(stepArgs<Im2ColArgs>(before[0]), nullptr);
+        const auto* copy = stepArgs<StridedCopyArgs>(before[1]);
         ASSERT_NE(copy, nullptr);
-        EXPECT_EQ(calls->before[1].srcUid, CONV_Y_UID);
+        EXPECT_EQ(before[1].srcUid, CONV_Y_UID);
         ASSERT_EQ(calls->workspace.size(), 2u);
-        EXPECT_EQ(calls->before[1].dstUid, calls->workspace[1].uid);
+        EXPECT_EQ(before[1].dstUid, calls->workspace[1].uid);
         // dy (n, k, h, w) lands channels-last: k innermost.
         EXPECT_EQ(copy->dstStrides[1], 1);
         EXPECT_EQ(copy->dstStrides[3], shape.k);
@@ -175,7 +183,7 @@ TEST(TestConvRepackFormulation, ColumnOrderFollowsTheFilterLayout)
     {
         const auto calls = plan(shape, ConvDirection::FORWARD);
         ASSERT_TRUE(calls.has_value());
-        EXPECT_EQ(stepArgs<Im2ColArgs>(calls->before[0])->geometry.channelsInner, inner);
+        EXPECT_EQ(stepArgs<Im2ColArgs>(calls->stages[0].before[0])->geometry.channelsInner, inner);
     }
 }
 
@@ -191,7 +199,7 @@ TEST(TestConvRepackFormulation, GeometryPadsLeadingAxesAndCarriesTheMode)
     shape.mode = conv_data_objects::ConvMode::CONVOLUTION;
     const auto calls = plan(shape, ConvDirection::FORWARD);
     ASSERT_TRUE(calls.has_value());
-    const auto& geometry = stepArgs<Im2ColArgs>(calls->before[0])->geometry;
+    const auto& geometry = stepArgs<Im2ColArgs>(calls->stages[0].before[0])->geometry;
     for(const int axis : {0, 1})
     {
         EXPECT_EQ(geometry.input[axis], 1);
@@ -228,25 +236,128 @@ TEST(TestConvRepackFormulation, ServesWhatTheDirectRowsDecline)
     }
 }
 
-TEST(TestConvRepackFormulation, DeclinesAColumnMatrixOverTheWorkspaceCap)
+/// A channels-last 3x3 convolution of @p n images whose column matrix is far over the cap.
+ConvGemmShape oversized(int64_t n)
 {
     ConvGemmShape shape = channelsLast(padded3x3());
-    shape.n = 64;
+    shape.n = n;
     shape.c = 512;
     shape.k = 64;
     shape.input = {128, 128};
-    // 64 * 128 * 128 rows x 512 * 9 columns of fp32: far over the cap.
+    return shape;
+}
+
+TEST(TestConvRepackFormulation, SlicesImagesToFitTheCap)
+{
+    // 64 images of 128 * 128 rows x 512 * 9 columns: about 302 MB of fp32 column matrix each.
     for(const auto direction : ALL_DIRECTIONS)
     {
-        EXPECT_FALSE(plan(shape, direction).has_value());
-    }
-    shape.n = 1;
-    shape.c = 8;
-    for(const auto direction : ALL_DIRECTIONS)
-    {
+        const auto shape = oversized(64);
         const auto calls = plan(shape, direction);
         ASSERT_TRUE(calls.has_value());
         EXPECT_LE(calls->workspaceBytes, MAX_REPACK_WORKSPACE_BYTES);
+        ASSERT_GT(calls->stages.size(), 1u);
+
+        const auto problem = parse(shape, direction);
+        const int64_t xImageBytes = problem.x.strides[0] * 4;
+        int64_t covered = 0;
+        for(const auto& stage : calls->stages)
+        {
+            const auto& steps
+                = direction == ConvDirection::BACKWARD_DATA ? stage.after : stage.before;
+            ASSERT_FALSE(steps.empty());
+            const auto& step = steps[0];
+            const auto& geometry = direction == ConvDirection::BACKWARD_DATA
+                                       ? stepArgs<Col2ImArgs>(step)->geometry
+                                       : stepArgs<Im2ColArgs>(step)->geometry;
+            // Each slice starts where the last ended, in x's bytes.
+            const int64_t xOffset = direction == ConvDirection::BACKWARD_DATA ? step.dstByteOffset
+                                                                              : step.srcByteOffset;
+            EXPECT_EQ(xOffset, covered * xImageBytes);
+            covered += geometry.n;
+        }
+        EXPECT_EQ(covered, 64);
+    }
+}
+
+TEST(TestConvRepackFormulation, SlicedBackwardWeightsAccumulates)
+{
+    // fp32 sums into w itself; the first slice writes, the rest add.
+    const auto fp32 = plan(oversized(64), ConvDirection::BACKWARD_WEIGHTS);
+    ASSERT_TRUE(fp32.has_value());
+    ASSERT_GT(fp32->stages.size(), 1u);
+    for(size_t i = 0; i < fp32->stages.size(); ++i)
+    {
+        for(const auto& call : fp32->stages[i].calls)
+        {
+            EXPECT_EQ(call.accumulate, i > 0);
+            EXPECT_EQ(call.d.uid, CONV_W_UID);
+        }
+    }
+
+    // bf16 sums into an fp32 accumulator in the workspace, rounded into w by a final stage.
+    auto shape = oversized(64);
+    shape.dataType = conv_data_objects::DataType::BFLOAT16;
+    const auto bf16 = plan(shape, ConvDirection::BACKWARD_WEIGHTS);
+    ASSERT_TRUE(bf16.has_value());
+    ASSERT_GT(bf16->stages.size(), 2u);
+    const auto& round = bf16->stages.back();
+    EXPECT_TRUE(round.calls.empty());
+    ASSERT_EQ(round.before.size(), 1u);
+    ASSERT_NE(stepArgs<StridedCastArgs>(round.before[0]), nullptr);
+    EXPECT_EQ(round.before[0].dstUid, CONV_W_UID);
+    const auto accumulator = round.before[0].srcUid;
+    for(size_t i = 0; i + 1 < bf16->stages.size(); ++i)
+    {
+        for(const auto& call : bf16->stages[i].calls)
+        {
+            EXPECT_EQ(call.accumulate, i > 0);
+            EXPECT_EQ(call.d.uid, accumulator);
+            EXPECT_EQ(call.d.dataType, conv_data_objects::DataType::FLOAT);
+        }
+    }
+}
+
+TEST(TestConvRepackFormulation, UnslicedPlansWriteTheirOutputOnce)
+{
+    for(const auto direction : ALL_DIRECTIONS)
+    {
+        const auto calls = plan(padded3x3(), direction);
+        ASSERT_TRUE(calls.has_value());
+        ASSERT_EQ(calls->stages.size(), 1u);
+        for(const auto& call : calls->stages[0].calls)
+        {
+            EXPECT_FALSE(call.accumulate);
+        }
+    }
+}
+
+TEST(TestConvRepackFormulation, ALowerCapSlicesSmallShapes)
+{
+    for(const auto direction : ALL_DIRECTIONS)
+    {
+        auto shape = padded3x3();
+        shape.n = 4;
+        const auto problem = parse(shape, direction);
+        const auto whole = im2colGemmCalls(problem);
+        ASSERT_TRUE(whole.has_value());
+        ASSERT_EQ(whole->stages.size(), 1u);
+        const auto sliced = im2colGemmCalls(problem, whole->workspaceBytes / 2);
+        ASSERT_TRUE(sliced.has_value());
+        EXPECT_GT(sliced->stages.size(), 1u);
+        EXPECT_LE(sliced->workspaceBytes, whole->workspaceBytes / 2);
+    }
+}
+
+TEST(TestConvRepackFormulation, DeclinesWhenOneImageExceedsTheCap)
+{
+    // One image of 512 * 512 rows x 512 * 9 columns is 2.4 GB of bf16 column matrix.
+    ConvGemmShape shape = oversized(1);
+    shape.input = {512, 512};
+    shape.dataType = conv_data_objects::DataType::BFLOAT16;
+    for(const auto direction : ALL_DIRECTIONS)
+    {
+        EXPECT_FALSE(plan(shape, direction).has_value());
     }
 }
 

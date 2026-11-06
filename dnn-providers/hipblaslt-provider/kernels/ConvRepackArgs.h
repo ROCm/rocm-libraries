@@ -25,6 +25,20 @@ struct StridedCopyArgs
     int padding0;
 };
 
+/// dst[i] = convert(src[i]) for every multi-index i of `dims`, src fp32 and dst the entry
+/// point's type: the one rounding of a sum accumulated in fp32 across several GEMMs.
+struct StridedCastArgs
+{
+    const float* src;
+    void* dst;
+    long long dims[CONV_REPACK_MAX_RANK];
+    long long srcStrides[CONV_REPACK_MAX_RANK];
+    long long dstStrides[CONV_REPACK_MAX_RANK];
+    long long total;
+    int rank;
+    int padding0;
+};
+
 /// The convolution geometry im2col and col2im share. Every problem is described as 3-D: missing
 /// leading spatial axes have extent 1, pad 0, stride 1, dilation 1 and tensor stride 0.
 ///
