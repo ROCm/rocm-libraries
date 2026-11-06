@@ -1940,6 +1940,9 @@ namespace TensileLite
             // gemm
 #pragma omp parallel
             {
+                // Per-thread AMAX-D, combined into amaxD once per thread after the loop.
+                Accumulator threadAmaxD(0);
+
                 // Allocate coordinate buffers per-thread.
                 std::vector<int64_t> aCoord(a.dimensions());
                 std::vector<int64_t> bCoord(b.dimensions());
@@ -2247,17 +2250,13 @@ namespace TensileLite
                                          actArgs);
                 }
 
-#pragma omp critical
+                if constexpr(notCmplxAmaxD)
                 {
-                    if constexpr(notCmplxAmaxD)
+                    if(problem.outputAmaxD())
                     {
-                        if(problem.outputAmaxD())
-                        {
-                            Accumulator absResultD
-                                = (resultD > zero) ? resultD : resultD * negOne;
-                            if(absResultD > amaxD)
-                                amaxD = absResultD;
-                        }
+                        Accumulator absResultD = (resultD > zero) ? resultD : resultD * negOne;
+                        if(absResultD > threadAmaxD)
+                            threadAmaxD = absResultD;
                     }
                 }
 
@@ -2286,6 +2285,18 @@ namespace TensileLite
                 }
 
                 dPtr[dIndex] = SaturateCast<typename Inputs::DType>(resultD);
+            }
+
+            if constexpr(notCmplxAmaxD)
+            {
+                if(problem.outputAmaxD())
+                {
+#pragma omp critical
+                    {
+                        if(threadAmaxD > amaxD)
+                            amaxD = threadAmaxD;
+                    }
+                }
             }
             } // end #pragma omp parallel
 
