@@ -146,14 +146,17 @@ static void op_memref_global_load_typed(rocke_lower_t* L, const rocke_op_t* op)
     const rocke_value_t* idx = op->operands[1];
     const char* ptr_ty = ll_global_load_ptr_type(L, "global_load", ptr);
     const char* elem_ty = rocke_ll_llvm_type(L, op->results[0]->type);
+    /* The GEP index takes the operand's own width, as in global_load_vN. */
+    const char* idx_ty = rocke_ll_llvm_type(L, idx->type);
     const char* gep = rocke_ll_fresh(L, "gep");
     int64_t align = ll_attr_int(op, "align", 1);
     rocke_ll_emitf(L,
-                   "  %s = getelementptr inbounds %s, %s %s, i32 %s",
+                   "  %s = getelementptr inbounds %s, %s %s, %s %s",
                    gep,
                    elem_ty,
                    ptr_ty,
                    rocke_ll_operand(L, ptr),
+                   idx_ty,
                    rocke_ll_operand(L, idx));
     rocke_ll_emitf(
         L, "  %s = load %s, %s %s, align %lld", ll_res(op), elem_ty, ptr_ty, gep, (long long)align);
@@ -415,21 +418,31 @@ static void op_memref_global_atomic_add_pk_bf16(rocke_lower_t* L, const rocke_op
 
 static void op_memref_global_atomic_add_pk_f16(rocke_lower_t* L, const rocke_op_t* op)
 {
+    /* Mirror of Python _op_memref_global_atomic_add_pk_f16: a generic
+     * atomicrmw fadd <2 x half> (agent scope, monotonic) with the AMDGPU
+     * memory-model metadata, as the packed bf16 add does. The backend selects
+     * the native global_atomic_pk_add_f16. The legacy
+     * llvm.amdgcn.global.atomic.fadd.v2f16 intrinsic it replaces is lowered on
+     * gfx1250 as a fenced atomic (global_wb / global_inv and counter drains
+     * around every add). */
     const rocke_value_t* ptr = op->operands[0];
     const rocke_value_t* idx = op->operands[1];
     const rocke_value_t* val = op->operands[2];
     const char* gep;
     rocke_ll_require_global_header_ptr(L, "global_atomic_add_pk_f16", ptr, "ptr");
-    rocke_ll_need(L, "global.atomic.fadd.v2f16");
     gep = rocke_ll_fresh(L, "gep");
     rocke_ll_emitf(L,
                    "  %s = getelementptr inbounds half, ptr addrspace(1) %s, i32 %s",
                    gep,
                    rocke_ll_operand(L, ptr),
                    rocke_ll_operand(L, idx));
+    L->needs_fp_atomic_md = true;
     rocke_ll_emitf(L,
-                   "  %s = call <2 x half> @llvm.amdgcn.global.atomic.fadd.v2f16.p1("
-                   "ptr addrspace(1) %s, <2 x half> %s)",
+                   "  %s = atomicrmw fadd ptr addrspace(1) %s, <2 x half> %s "
+                   "syncscope(\"agent\") monotonic"
+                   ", !amdgpu.no.fine.grained.memory !1"
+                   ", !amdgpu.no.remote.memory !1"
+                   ", !amdgpu.ignore.denormal.mode !1",
                    ll_res(op),
                    gep,
                    rocke_ll_operand(L, val));
