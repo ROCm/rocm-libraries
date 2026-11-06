@@ -159,4 +159,41 @@ TEST(TestFeatureExtractor, WorkspacesCannotBeUsedWithAnotherSignature)
     EXPECT_THROW(second.extractKernelInto(ctx, work), JsonLogicError);
 }
 
+TEST(TestFeatureExtractor, KernelOnlyEntriesAreCachedPerKernelAndMixedOnesRunPerCandidate)
+{
+    const FeatureExtractor extractor(
+        {"$query.batch",
+         "$kernel.tile_m",
+         json::parse(R"({"*":["$kernel.tile_m","$kernel.priority"]})"),
+         json::parse(R"({"ceil_div":["$query.batch","$kernel.tile_m"]})"),
+         json::parse(R"({"+":["$kernel.tile[1]","$query.batch"]})")});
+    EXPECT_EQ(extractor.kernelDependentCount(), 4u);
+    EXPECT_EQ(extractor.mixedCount(), 2u);
+    // Only what mixed entries read is bound per candidate; kernel-only reads are cached.
+    EXPECT_EQ(extractor.mixedKernelVariables(),
+              (std::vector<std::string>{"kernel.tile_m", "kernel.tile[1]"}));
+
+    FeatureExtractionContext ctx;
+    ctx.bindQueryVars({{"query.batch", int64_t{100}}});
+    ctx.bindKernelVars(
+        {{"tile_m", int64_t{32}}, {"priority", int64_t{3}}, {"tile[1]", int64_t{5}}});
+    const auto reference = extractor.extract(ctx);
+
+    FeatureExtractionContext kernelOnly;
+    kernelOnly.bindKernelVars(
+        {{"tile_m", int64_t{32}}, {"priority", int64_t{3}}, {"tile[1]", int64_t{5}}});
+    const auto cached = extractor.kernelOnlyValues(kernelOnly);
+    EXPECT_EQ(cached, (std::vector<double>{32, 96}));
+
+    auto work = extractor.prepare(ctx);
+    auto row = work.values;
+    extractor.applyKernelOnly(row.data(), cached);
+    for(size_t j = 0; j < extractor.mixedCount(); ++j)
+    {
+        row[extractor.mixedFeatureIndex(j)] = extractor.evaluateMixed(j, ctx);
+    }
+    EXPECT_EQ(row, reference);
+    EXPECT_EQ(row, (std::vector<double>{100, 32, 96, 4, 105}));
+}
+
 } // namespace

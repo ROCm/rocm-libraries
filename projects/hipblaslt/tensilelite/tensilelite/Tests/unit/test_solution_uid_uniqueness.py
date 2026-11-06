@@ -18,9 +18,9 @@ import pytest
 def _load_solution_id_gen() -> ModuleType:
     """Load SolutionIdGen without importing ``tensilelite.Common``.
 
-    The ``library-uniqueness`` tox env skips installing tensilelite and rocisa.
-    ``from tensilelite.Common.SolutionIdGen import ...`` still executes
-    ``tensilelite.Common.__init__``, which imports rocisa.
+    This keeps the test runnable on a bare Python with only pytest, without
+    tensilelite or rocisa installed. ``from tensilelite.Common.SolutionIdGen
+    import ...`` would execute ``tensilelite.Common.__init__``, which imports rocisa.
 
     Args:
         None.
@@ -47,32 +47,14 @@ _solution_id_gen = _load_solution_id_gen()
 decode_solution_uid = _solution_id_gen.decode_solution_uid
 encode_solution_uid = _solution_id_gen.encode_solution_uid
 
+from logic_corpus import needs_logic_corpus, require_logic_root
+
 pytestmark = pytest.mark.unit
 
-DEFAULT_LOGIC_ROOT = (
-    Path(__file__).resolve().parents[4]
-    / "library"
-    / "src"
-    / "amd_detail"
-    / "rocblaslt"
-    / "src"
-    / "Tensile"
-    / "Logic"
-)
-
-# The shipped logic corpus lives in the hipBLASLt product tree, not in
-# tensilelite, so it is absent whenever this file is run from installed
-# tensilelite test artifacts. The enforcement point is the library-uniqueness
-# component job, which checks out the source tree; this copy is a
-# convenience/local-dev signal otherwise -- hence ``skipif`` (an unmet
-# precondition), not ``xfail`` (an expected failure).
-_LOGIC_ROOT = Path(os.environ.get("HIPBLASLT_LOGIC_ROOT") or DEFAULT_LOGIC_ROOT)
-
-_needs_logic_dir = pytest.mark.skipif(
-    not _LOGIC_ROOT.is_dir(),
-    reason="Logic files not found: https://github.com/ROCm/rocm-libraries/issues/7481",
-)
-
+# The enforcement point for the corpus check below is the logic-corpus
+# component job (tox -e logic-corpus), which runs whenever the logic changes
+# and sets HIPBLASLT_REQUIRE_LOGIC_CORPUS so a missing corpus fails there.
+# Elsewhere it is a convenience signal that skips when the corpus is absent.
 STRICT_ENV = "HIPBLASLT_REQUIRE_SOLUTION_UID"
 
 
@@ -225,15 +207,15 @@ def find_duplicate_uids(
 
 @pytest.fixture(name="logic_root")
 def fixture_logic_root() -> Path:
-    """Resolve the logic YAML root, overridable via env var.
+    """Resolve the logic YAML root, overridable via ``HIPBLASLT_LOGIC_ROOT``.
 
     Returns:
         Path to ``Logic/`` under the hipBLASLt library tree.
     """
-    return _LOGIC_ROOT
+    return require_logic_root()
 
 
-@_needs_logic_dir
+@needs_logic_corpus
 def test_solution_uid_unique_across_logic_files(logic_root: Path) -> None:
     """All present SolutionUID values must be unique repo-wide."""
     process_count = int(os.environ.get("HIPBLASLT_UID_TEST_PROCESSES", "8"))

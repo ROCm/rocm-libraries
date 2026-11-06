@@ -24,6 +24,7 @@
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
+#include "BundleFixtureFiles.hpp"
 #include "harness/bundle/IntegrationTestBundle.hpp"
 #include "harness/bundle/OutputComparison.hpp"
 
@@ -159,6 +160,50 @@ std::shared_ptr<hipdnn_data_sdk::utilities::ITensor> raggedFloatTensor(float val
         hipdnn_data_sdk::utilities::SDPA_SEQ_AXIS,
         offsetTensor);
     tensor->fillWithValue(value);
+    return tensor;
+}
+
+// The Stats (or head-major primary) tensor of a ragged SDPA case, holding the logical value
+// 100*b + 10*h + s at every in-block coordinate (d = 0), whatever the storage layout.
+// `perturb` adds 1 to the value at one coordinate.
+std::shared_ptr<hipdnn_data_sdk::utilities::ITensor>
+    raggedLogicalTensor(const hipdnn_integration_tests::bundle::fixtures::RaggedLayout& layout,
+                        bool perturb = false)
+{
+    using hipdnn_data_sdk::utilities::Tensor;
+    const auto int32Aux = [](const std::vector<int32_t>& values) {
+        auto tensor = std::make_shared<Tensor<int32_t>>(
+            std::vector<int64_t>{static_cast<int64_t>(values.size()), 1, 1, 1});
+        for(size_t i = 0; i < values.size(); ++i)
+        {
+            tensor->setHostValue(values[i], static_cast<int64_t>(i), 0, 0, 0);
+        }
+        return tensor;
+    };
+
+    auto tensor = std::make_shared<hipdnn_data_sdk::utilities::RaggedTensor<float>>(
+        layout.dims,
+        layout.strides,
+        hipdnn_data_sdk::utilities::SDPA_SEQ_AXIS,
+        int32Aux(layout.offsets),
+        std::nullopt,
+        layout.offsetMultiplier);
+    tensor->fillWithValue(-1.0f);
+
+    const auto info = tensor->raggedIterationInfo();
+    const auto& lengths = info->lengths;
+    for(int64_t b = 0; b < layout.dims[0]; ++b)
+    {
+        for(int64_t h = 0; h < layout.dims[1]; ++h)
+        {
+            for(int64_t s = 0; s < lengths[static_cast<size_t>(b)]; ++s)
+            {
+                const bool bump = perturb && b == 1 && h == 1 && s == 1;
+                tensor->setHostValue(
+                    static_cast<float>(100 * b + 10 * h + s) + (bump ? 1.0f : 0.0f), b, h, s, 0);
+            }
+        }
+    }
     return tensor;
 }
 
@@ -948,6 +993,63 @@ TEST(TestOutputComparison, AllcloseMatchingInfinitiesFailureStillReportsAtolRtol
     EXPECT_NE(mismatch->report.find("atol="), std::string::npos);
     EXPECT_EQ(mismatch->report.find("relative RMS"), std::string::npos)
         << "no threshold decided this failure; reporting one would name a check that did not run";
+}
+
+// Ragged Stats compare within one storage layout: [H,T] (L7a) and [T,H] (L7b) each match the
+// same logical data and report a single differing in-block element. A pair whose layouts
+// differ (origins, lengths or strides) is reported as a ragged layout mismatch.
+TEST(TestOutputComparison, RaggedStatsCompareWithinEachStorageLayout)
+{
+    const auto buffer = makeGraphBuffer();
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper wrapper{buffer.data(),
+                                                                             buffer.size()};
+    const auto& attrs = *wrapper.getTensorMap().at(K_UID_A);
+    using namespace hipdnn_integration_tests::bundle;
+
+    for(const auto& layout : {fixtures::raggedSdpaHeadTokenStatsCase().stats,
+                              fixtures::raggedSdpaTokenHeadStatsCase().stats})
+    {
+        auto expected = raggedLogicalTensor(layout);
+        auto same = raggedLogicalTensor(layout);
+        auto different = raggedLogicalTensor(layout, /*perturb=*/true);
+
+        EXPECT_FALSE(
+            compareTensor(K_UID_A, attrs, *expected, *same, exact(), ValidationSite::HOST, "b")
+                .has_value());
+        EXPECT_TRUE(
+            compareTensor(K_UID_A, attrs, *expected, *different, exact(), ValidationSite::HOST, "b")
+                .has_value());
+    }
+
+    auto headToken = raggedLogicalTensor(fixtures::raggedSdpaHeadTokenStatsCase().stats);
+    auto tokenHead = raggedLogicalTensor(fixtures::raggedSdpaTokenHeadStatsCase().stats);
+    const auto mismatch
+        = compareTensor(K_UID_A, attrs, *headToken, *tokenHead, exact(), ValidationSite::HOST, "b");
+    ASSERT_TRUE(mismatch.has_value());
+    EXPECT_NE(mismatch->report.find("ragged layout mismatch"), std::string::npos);
+}
+
+// A head-major output (L6, head pitch S_max*D) compares against itself and reports a
+// differing in-block element.
+TEST(TestOutputComparison, RaggedHeadMajorOutputCompares)
+{
+    const auto buffer = makeGraphBuffer();
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper wrapper{buffer.data(),
+                                                                             buffer.size()};
+    const auto& attrs = *wrapper.getTensorMap().at(K_UID_A);
+    using namespace hipdnn_integration_tests::bundle;
+
+    const auto layout = fixtures::raggedSdpaHeadMajorCase().qkvo;
+
+    auto expected = raggedLogicalTensor(layout);
+    auto same = raggedLogicalTensor(layout);
+    auto different = raggedLogicalTensor(layout, /*perturb=*/true);
+
+    EXPECT_FALSE(compareTensor(K_UID_A, attrs, *expected, *same, exact(), ValidationSite::HOST, "b")
+                     .has_value());
+    EXPECT_TRUE(
+        compareTensor(K_UID_A, attrs, *expected, *different, exact(), ValidationSite::HOST, "b")
+            .has_value());
 }
 
 // The device validators index every padded position, which for a ragged tensor reads other

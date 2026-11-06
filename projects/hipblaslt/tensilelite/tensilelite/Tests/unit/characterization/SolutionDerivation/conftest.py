@@ -31,22 +31,9 @@ from pathlib import Path
 
 import pytest
 
-from tensilelite.Common.Architectures import SUPPORTED_ISA
-from tensilelite.Common.Capabilities import makeIsaInfoMap
-from tensilelite.Toolchain.Validators import validateToolchain
 import tensilelite.LibraryIO as LibraryIO
 
 _FIXTURE = Path(__file__).parent.parent / "LibraryIO" / "data" / "logic_gfx942_HSS_BH.yaml"
-
-
-@pytest.fixture(scope="session")
-def cxx_compiler():
-    return validateToolchain("amdclang++")
-
-
-@pytest.fixture(scope="session")
-def isa_info_map(cxx_compiler):
-    return makeIsaInfoMap(SUPPORTED_ISA, cxx_compiler)
 
 
 @pytest.fixture(scope="session")
