@@ -1126,8 +1126,9 @@ VerificationOutcome
     // A half or bfloat16 output of a convolution-forward graph is graded with the dynamic
     // tolerance computed from the graph and its input statistics instead of the fixed per-op
     // default. Inputs filled from a recipe take their statistics from the recipe, at no cost;
-    // inputs read from golden blobs are scanned on the host. Computed once, and only when an
-    // output needs it.
+    // inputs read from golden blobs are scanned on the host; a scalar baked into the graph is
+    // read from the graph (convFwdErrorScale() asks this lookup only for the rest). Computed
+    // once, and only when an output needs it.
     std::optional<std::optional<hipdnn_test_sdk::utilities::conv::ConvFpropErrorScale>> convScale;
     const auto momentsFor = [&](int64_t uid) -> std::optional<tolerance::InputMoments> {
         if(_inputsFromRecipes)

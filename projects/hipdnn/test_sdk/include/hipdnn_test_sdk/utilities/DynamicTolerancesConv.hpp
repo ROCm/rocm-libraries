@@ -187,6 +187,29 @@ float calculateConvDgradTolerance(
 }
 
 /**
+ * @brief Products summed per output element of a forward convolution: C/groups times the filter
+ * volume, i.e. the product of every weight dimension but the first.
+ *
+ * @param wDims The dimensions of the weight/filter tensor (w), [K, C/groups, R, S, ...].
+ * @throws std::invalid_argument if wDims has fewer than 2 dimensions.
+ */
+inline uint64_t convFpropAccumulationLength(const std::vector<int64_t>& wDims)
+{
+    // y[n, k, h, w] = sum_{c, r, s} x[n, c, h+r, w+s] * w[k, c, r, s]
+    if(wDims.size() < 2)
+    {
+        throw std::invalid_argument("wDims must have at least 2 dimensions (K, C).");
+    }
+
+    auto numberOfAccumulations = static_cast<uint64_t>(wDims[1]); // Input channels C
+    for(size_t i = 2; i < wDims.size(); ++i)
+    {
+        numberOfAccumulations *= static_cast<uint64_t>(wDims[i]); // Filter spatial dimensions
+    }
+    return numberOfAccumulations;
+}
+
+/**
  * @brief Calculates the expected tolerance for Convolution Forward Propagation (fprop) operations.
  *
  * This function estimates the maximum expected error due to floating-point accumulation during the
@@ -220,20 +243,8 @@ float calculateConvFpropTolerance(
 {
     hipdnn_test_sdk::utilities::validateComputeType<ComputeType>();
 
-    // wDims: [K, C, R, S]
     // Accumulation for output (y) happens over C (input channels) and R, S (filter spatial dimensions).
-    // y[n, k, h, w] = sum_{c, r, s} x[n, c, h+r, w+s] * w[k, c, r, s]
-
-    if(wDims.empty() || wDims.size() < 2)
-    {
-        throw std::invalid_argument("wDims must have at least 2 dimensions (K, C).");
-    }
-
-    auto numberOfAccumulations = static_cast<uint64_t>(wDims[1]); // Input channels C
-    for(size_t i = 2; i < wDims.size(); ++i)
-    {
-        numberOfAccumulations *= static_cast<uint64_t>(wDims[i]); // Filter spatial dimensions R, S
-    }
+    const uint64_t numberOfAccumulations = convFpropAccumulationLength(wDims);
 
     const double maxAbsInput = std::max(std::abs(inputMin), std::abs(inputMax));
     const double maxAbsW = std::max(std::abs(wMin), std::abs(wMax));
@@ -275,11 +286,12 @@ float calculateConvFpropTolerance(
  */
 struct ConvFpropErrorScale
 {
-    /// K: terms summed per output element, C/groups times the filter volume.
+    /// K: terms summed per output element, C/groups times the filter volume (see
+    /// convFpropAccumulationLength). At least 1.
     uint64_t accumulationLength = 0;
-    /// Mean of x^2 over the input tensor.
+    /// Mean of x^2 over the input tensor. Finite and not negative.
     double inputMeanSquare = 0.0;
-    /// Mean of w^2 over the weight tensor.
+    /// Mean of w^2 over the weight tensor. Finite and not negative.
     double weightMeanSquare = 0.0;
     /// Largest |scale| a fused multiply applies to the convolution output (1 when there is none).
     double outputScale = 1.0;
@@ -296,32 +308,27 @@ struct AbsRelTolerance
  * @brief Per-element tolerance for a convolution-forward output stored as half or bfloat16, with
  * float accumulation, graded against a float-accumulating reference.
  *
- * Error model (each term is one way a correct implementation can differ from the reference):
+ *   |impl_i - ref_i| <= rtol * |ref_i| + atol
+ *   rtol = 2 * eps
+ *   atol = (sqrt(K) * u32 + lambda * eps) * sigma + minNormal
+ *   sigma = sqrt(K * mean(x^2) * mean(w^2)) * outputScale
  *
- *   |impl_i - ref_i| <= 2 * eps * |ref_i|                          (a) output rounding
- *                     + sqrt(K) * u32 * sigma                       (b) float accumulation order
- *                     + lambda_io * eps * sigma                     (c) io-precision intermediates
- *                     + minNormal                                   (d) denormal flushing
+ * - eps is the machine epsilon of the output type, u32 the unit roundoff of float (2^-24),
+ *   minNormal the smallest normal number of the output type.
+ * - lambda is 12 for half and 0 for bfloat16.
+ * - sigma is the typical magnitude of an output element, and holds only for inputs with a zero
+ *   mean: for a nonzero mean the partial sums do not cancel, the output is larger than sigma, and
+ *   only the rtol term grows with it.
  *
- * - eps is the machine epsilon of the output type, u32 the unit roundoff of float (2^-24).
- * - sigma = sqrt(K * mean(x^2) * mean(w^2)) * outputScale is the typical magnitude of an output
- *   element. It grows as sqrt(K), as the output does, so the tolerance is a constant fraction of
- *   the output at every reduction length.
- * - (a) Both sides round once to the output type; two correct roundings differ by at most one
- *   unit in the last place, and eps*|ref| is one to two of them.
- * - (b) Two float sums of the same K terms in a different order differ by a random walk of
- *   rounding errors, about u32 * sqrt(K) * sigma. This is what an output near zero sees.
- * - (c) Some fp16 kernels hold partial results in fp16 (Winograd transforms, fp16 partial sums).
- *   lambda_io is 12 for half and 0 for bfloat16; calibrated on MIOpen, gfx942 and gfx90a.
- * - (d) Hardware may flush denormals; results below the smallest normal number are not graded.
- *
- * The previous bound, calculateConvFpropTolerance(), assumes the output can be as large as
- * K * max|x| * max|w|. Real outputs grow as sqrt(K), so that bound widens relative to the output
- * as K grows and passes almost anything for large reductions.
+ * The derivation of each term, the calibration of lambda and the comparison with
+ * calculateConvFpropTolerance() are in dnn-providers/integration-tests/docs/tolerances.md.
  *
  * @tparam OutputType half or bfloat16.
  * @param scale The problem statistics; see ConvFpropErrorScale.
  * @return atol and rtol for an allclose comparison.
+ * @throws std::invalid_argument if scale.accumulationLength is 0, a mean square is negative or
+ * not finite, or outputScale is not finite.
+ * @throws std::overflow_error if atol exceeds the largest value of OutputType.
  */
 template <typename OutputType>
 AbsRelTolerance calculateConvFpropOutputTolerance(const ConvFpropErrorScale& scale)
@@ -329,7 +336,16 @@ AbsRelTolerance calculateConvFpropOutputTolerance(const ConvFpropErrorScale& sca
     static_assert(std::is_same_v<OutputType, half> || std::is_same_v<OutputType, bfloat16>,
                   "calculateConvFpropOutputTolerance models half and bfloat16 outputs only");
 
-    constexpr double OUTPUT_ROUNDING_ULPS = 2.0;
+    const auto validMoment = [](double v) { return std::isfinite(v) && v >= 0.0; };
+    if(scale.accumulationLength == 0 || !validMoment(scale.inputMeanSquare)
+       || !validMoment(scale.weightMeanSquare) || !std::isfinite(scale.outputScale))
+    {
+        throw std::invalid_argument("calculateConvFpropOutputTolerance: ConvFpropErrorScale needs "
+                                    "a nonzero accumulationLength, finite non-negative mean "
+                                    "squares and a finite outputScale.");
+    }
+
+    constexpr double OUTPUT_ROUNDING_MARGIN = 2.0;
     constexpr double IO_INTERMEDIATE_LAMBDA = std::is_same_v<OutputType, half> ? 12.0 : 0.0;
     const double floatUnitRoundoff = std::ldexp(1.0, -24);
 
@@ -340,13 +356,10 @@ AbsRelTolerance calculateConvFpropOutputTolerance(const ConvFpropErrorScale& sca
                          * std::abs(scale.outputScale);
 
     AbsRelTolerance tolerance;
-    tolerance.rtol = OUTPUT_ROUNDING_ULPS * eps;
+    tolerance.rtol = OUTPUT_ROUNDING_MARGIN * eps;
     tolerance.atol
         = (std::sqrt(k) * floatUnitRoundoff + IO_INTERMEDIATE_LAMBDA * eps) * sigma + minNormal;
-    if(!std::isfinite(tolerance.atol))
-    {
-        throw std::overflow_error("calculateConvFpropOutputTolerance: tolerance is not finite");
-    }
+    hipdnn_test_sdk::utilities::validateToleranceRange<OutputType>(tolerance.atol);
     return tolerance;
 }
 
