@@ -120,6 +120,20 @@ _SAME_IR = (
     "the smoke tests that use _each_cdna_arch cover the lowerer on every CDNA arch"
 )
 _LABEL_ONLY = "the arch is only a label here; the test does not lower for the target"
+_ATOM_32X32X16 = (
+    "the test asserts the 32x32x16 f16 MFMA atom, which exists on gfx950 only"
+)
+_ATOM_16X16X32 = "the test asserts the 16x16x32 MFMA atom, which exists on gfx950 only"
+_COMMON_ATOM = (
+    "the spec uses an atom that exists on gfx942 and gfx950; "
+    "the IR is identical on both, so gfx942 stands for both"
+)
+_MIXED = (
+    "the test names one CDNA arch and one RDNA arch; "
+    "the CDNA path is the same on the other CDNA arch"
+)
+_PERMLANE32 = "permlane32.swap exists on gfx950 only"
+_RDNA_ONLY = "the intrinsic or atom exists on RDNA and gfx12 targets only"
 
 
 def _each_cdna_arch(test):
@@ -218,6 +232,7 @@ class TestCoreIR(unittest.TestCase):
             any(op.name == "memref.global_load" for op in b.kernel.body.ops)
         )
 
+    @arch_specific(("gfx942",), reason=_LABEL_ONLY)
     def test_optimize_kernel_cse_keeps_signed_zeros_apart(self):
         # 0.0 == -0.0 in Python, but they are different constants: CSE keys a
         # float by its bits (as the C++ engine does), and still merges two
@@ -401,6 +416,7 @@ define amdgpu_kernel void @k() {
         self.assertEqual(res.sgpr_count, 48)
         self.assertEqual(res.lds_bytes, 32768)
 
+    @arch_specific(("gfx1151", "gfx1201"), reason=_RDNA_ONLY)
     def test_parse_isa_rdna_gfx12(self):
         # Verbatim llvm-objdump lines from gfx1201/gfx1151 WMMA FMHA builds. RDNA
         # spells LDS ops ds_load/ds_store, uses global_* memory ops, and gfx12
@@ -477,6 +493,7 @@ define amdgpu_kernel void @k() {
         self.assertEqual(rows[0]["median_tflops"], 123.0)
         self.assertEqual(rows[0]["llvm_mfma"], 1)
 
+    @arch_specific(("gfx1201",), reason=_RDNA_ONLY)
     def test_resources_and_report_expose_compiled_workgroup_bound(self):
         # Verbatim llvm-readelf --notes lines from a one-wave (32-thread) gfx1201
         # kernel whose flat-work-group-size range was invalid, so LLVM budgeted
@@ -562,6 +579,7 @@ class TestHelpers(unittest.TestCase):
         a4 = mfma_atom("f16", 4, 4, 4)
         self.assertEqual((a4.a_per_lane, a4.b_per_lane, a4.c_per_lane), (4, 4, 4))
 
+    @arch_specific(("gfx1151",), reason=_RDNA_ONLY)
     def test_wmma_atom_rdna_support(self):
         """RDNA WMMA atom: wave32 metadata, layout delegated to the MmaOp SSOT,
         a single packed (non-f32) fragment load, and a wave32 WarpGrid path."""
@@ -638,6 +656,7 @@ class TestHelpers(unittest.TestCase):
             32,
         )
 
+    @arch_specific(("gfx1151",), reason=_RDNA_ONLY)
     def test_wmma_tensor_tile_api(self):
         """WmmaTensor + load_wmma_tile/wmma_mma/store_wmma_tile are 1:1 packed
         wrappers: the tile API must emit the SAME single packed load / single
@@ -997,6 +1016,7 @@ class TestHelpers(unittest.TestCase):
 
 
 class TestInstances(unittest.TestCase):
+    @arch_specific(("gfx950",), reason=_ATOM_32X32X16)
     def test_universal_gemm_compv4_cshuffle_builds(self):
         spec = UniversalGemmSpec(
             name="uni_smoke",
@@ -1019,6 +1039,7 @@ class TestInstances(unittest.TestCase):
         self.assertIn("define amdgpu_kernel void", ll)
         self.assertIn("@llvm.amdgcn.mfma.f32.32x32x16.f16", ll)
 
+    @arch_specific(("gfx950",), reason=_ATOM_32X32X16)
     def test_implicit_gemm_conv_builds(self):
         prob = ConvProblem(
             N=8, Hi=56, Wi=56, C=64, K=64, Y=3, X=3, sH=1, sW=1, pH=1, pW=1, dH=1, dW=1
@@ -1065,6 +1086,7 @@ class TestInstances(unittest.TestCase):
         with self.assertRaises(ValueError):
             build_implicit_gemm_conv(spec)
 
+    @arch_specific(("gfx942",), reason=_COMMON_ATOM)
     def test_implicit_gemm_async_emits_pingpong_artifacts(self):
         """Async-DMA conv must emit the ping-pong scaffolding.
 
@@ -1091,13 +1113,13 @@ class TestInstances(unittest.TestCase):
             warp_n=2,
             warp_tile_m=32,
             warp_tile_n=32,
-            warp_tile_k=16,
+            warp_tile_k=8,
             pipeline="mem",
             epilogue="cshuffle",
             async_dma=True,
         )
         kernel = build_implicit_gemm_conv(spec)
-        ll = lower_kernel_to_llvm(kernel, arch="gfx950")
+        ll = lower_kernel_to_llvm(kernel, arch="gfx942")
         # 1) The async DMA intrinsic itself is emitted.
         self.assertIn("@llvm.amdgcn.raw.ptr.buffer.load.lds", ll)
         # 2) Interwave ping-pong: setprio bookends. We expect *both*
@@ -1115,6 +1137,7 @@ class TestInstances(unittest.TestCase):
             msg=f"expected >= 8 s_barriers for ping-pong, found {barrier_count}",
         )
 
+    @arch_specific(("gfx950",), reason=_ATOM_16X16X32)
     def test_direct_conv_16c_builds(self):
         prob = DirectConvProblem(
             N=32, H=200, W=200, groups=16, cpg=16, kpg=16, KH=3, KW=3, PAD=1, stride=1
@@ -1380,6 +1403,7 @@ class TestTransposeInstance(unittest.TestCase):
 
 
 class TestBatchedGemmInstance(unittest.TestCase):
+    @arch_specific(("gfx950",), reason=_ATOM_32X32X16)
     def test_builds_with_strides(self):
         from rocke.instances import BatchedGemmSpec, build_batched_gemm
 
@@ -2892,6 +2916,7 @@ class TestSpecHelper(unittest.TestCase):
 
 
 class TestGroupedGemmInstance(unittest.TestCase):
+    @arch_specific(("gfx942",), reason=_COMMON_ATOM)
     def test_builds(self):
         from rocke.instances import GroupedGemmSpec, build_grouped_gemm
 
@@ -2906,16 +2931,17 @@ class TestGroupedGemmInstance(unittest.TestCase):
                 warp_k=1,
                 warp_tile_m=32,
                 warp_tile_n=32,
-                warp_tile_k=16,
+                warp_tile_k=8,
             ),
             trait=TraitSpec(pipeline="compv3", epilogue="cshuffle"),
         )
         kernel = build_grouped_gemm(spec)
-        ll = lower_kernel_to_llvm(kernel, arch="gfx950")
+        ll = lower_kernel_to_llvm(kernel, arch="gfx942")
         # The (current) per-group launcher uses the non-batched kernel
         # so there's no block_id_z dependency.
         self.assertIn("define amdgpu_kernel void", ll)
 
+    @arch_specific(("gfx950",), reason=_ATOM_16X16X32)
     def test_bf16_dtype_drives_signature_and_lowering(self):
         from rocke.instances import GroupedGemmSpec, build_grouped_gemm
         from rocke.instances.common.grouped_gemm import grouped_gemm_signature
@@ -3420,6 +3446,7 @@ class TestCdnaPrimitives(unittest.TestCase):
         self.assertIn('"amdgpu-waves-per-eu"="2,4"', ll)
 
     # ---- Instance integration tests ----
+    @arch_specific(("gfx942",), reason=_COMMON_ATOM)
     def test_universal_gemm_chiplet_swizzle_emits_remap_math(self):
         """The opt-in ``trait.chiplet_swizzle`` must emit the
         chiplet round-robin reverse plus the WGM super-tile remap
@@ -3444,7 +3471,7 @@ class TestCdnaPrimitives(unittest.TestCase):
                 warp_k=1,
                 warp_tile_m=32,
                 warp_tile_n=32,
-                warp_tile_k=16,
+                warp_tile_k=8,
             ),
             trait=TraitSpec(
                 pipeline="compv4",
@@ -3453,7 +3480,7 @@ class TestCdnaPrimitives(unittest.TestCase):
                 chiplet_wgm=8,
             ),
         )
-        ll = lower_kernel_to_llvm(build_universal_gemm(spec), arch="gfx950")
+        ll = lower_kernel_to_llvm(build_universal_gemm(spec), arch="gfx942")
         # Chiplet remap: the closed-form formula generates `sdiv` /
         # `srem` by the chunk_size and num_xcds constants.
         self.assertIn("sdiv i32", ll)
@@ -3467,6 +3494,7 @@ class TestCdnaPrimitives(unittest.TestCase):
         self.assertIn("@llvm.amdgcn.workgroup.id.x", ll)
         self.assertIn("@llvm.amdgcn.workgroup.id.y", ll)
 
+    @arch_specific(("gfx942",), reason=_COMMON_ATOM)
     def test_universal_gemm_waves_per_eu_attr(self):
         from rocke.instances import (
             UniversalGemmSpec,
@@ -3487,7 +3515,7 @@ class TestCdnaPrimitives(unittest.TestCase):
                 warp_k=1,
                 warp_tile_m=32,
                 warp_tile_n=32,
-                warp_tile_k=16,
+                warp_tile_k=8,
             ),
             trait=TraitSpec(
                 pipeline="compv4",
@@ -3495,9 +3523,10 @@ class TestCdnaPrimitives(unittest.TestCase):
                 waves_per_eu=2,
             ),
         )
-        ll = lower_kernel_to_llvm(build_universal_gemm(spec), arch="gfx950")
+        ll = lower_kernel_to_llvm(build_universal_gemm(spec), arch="gfx942")
         self.assertIn('"amdgpu-waves-per-eu"="2,2"', ll)
 
+    @arch_specific(("gfx950",), reason=_ATOM_32X32X16)
     def test_implicit_gemm_conv_chiplet_swizzle_compiles(self):
         from kernels.common.conv_implicit_gemm import (
             ImplicitGemmConvSpec,
@@ -3543,6 +3572,7 @@ class TestCdnaPrimitives(unittest.TestCase):
         self.assertIn("@llvm.amdgcn.workgroup.id.x", ll)
         self.assertIn("@llvm.amdgcn.workgroup.id.y", ll)
 
+    @arch_specific(("gfx942",), reason=_COMMON_ATOM)
     def test_implicit_gemm_conv_async_uses_sgpr_pinned_lds_base(self):
         """The async-DMA conv must hoist the per-wave LDS base into
         an SGPR via ``to_sgpr_u32`` (``readfirstlane`` + SGPR-pin asm).
@@ -3577,12 +3607,12 @@ class TestCdnaPrimitives(unittest.TestCase):
             warp_n=2,
             warp_tile_m=32,
             warp_tile_n=32,
-            warp_tile_k=16,
+            warp_tile_k=8,
             pipeline="mem",
             epilogue="cshuffle",
             async_dma=True,
         )
-        ll = lower_kernel_to_llvm(build_implicit_gemm_conv(spec), arch="gfx950")
+        ll = lower_kernel_to_llvm(build_implicit_gemm_conv(spec), arch="gfx942")
         # readfirstlane for wave-uniform LDS offset.
         self.assertIn("@llvm.amdgcn.readfirstlane.i32", ll)
         # SGPR-pin asm constraint.
@@ -3590,6 +3620,7 @@ class TestCdnaPrimitives(unittest.TestCase):
         # CACHE_STREAM coherency on the async loads (aux i32 = 2).
         self.assertIn("@llvm.amdgcn.raw.ptr.buffer.load.lds", ll)
 
+    @arch_specific(("gfx950",), reason=_ATOM_16X16X32)
     def test_universal_gemm_bf16_spec_drives_ir(self):
         """Universal GEMM should use DataSpec dtype fields in params,
         LDS allocation, global loads/stores and MFMA dispatch.
@@ -3627,6 +3658,7 @@ class TestCdnaPrimitives(unittest.TestCase):
         self.assertIn("load <8 x bfloat>", ll)
         self.assertIn("store <8 x bfloat>", ll)
 
+    @arch_specific(("gfx950",), reason=_LABEL_ONLY)
     def test_universal_gemm_rejects_unsupported_bf16_atom(self):
         from rocke.instances import (
             DataSpec,
@@ -3804,6 +3836,7 @@ def _assert_engines_agree(test, kernel, python_ir, **kw):
         )
 
 
+@arch_specific(("gfx950",), reason=_LABEL_ONLY)
 class TestNewTargetIntrinsics(unittest.TestCase):
     """One case per intrinsic added for the LLVM 23 / future-operator surface.
 
@@ -4177,6 +4210,7 @@ class TestNewTargetIntrinsics(unittest.TestCase):
                         ll.count("call i32 @llvm.amdgcn.update.dpp.i32("), 1
                     )
 
+    @arch_specific(("gfx1151", "gfx1201", "gfx1250"), reason=_RDNA_ONLY)
     def test_warp_shuffle_xor_dpp_row_xmask_targets_unchanged(self):
         """Targets with ``row_xmask`` (gfx11, gfx12, gfx1250) keep
         ``0x160 | mask`` for every mask, as before the gfx9 table existed."""
@@ -4191,6 +4225,7 @@ class TestNewTargetIntrinsics(unittest.TestCase):
                     self.assertIn(self._DPP_CALL.format(0x160 | mask), ll)
 
     # ---- vop2_f32_dpp_xor (softmax row-reduce step) ----
+    @arch_specific(("gfx1250",), reason=_RDNA_ONLY)
     def test_vop2_f32_dpp_xor_is_update_dpp_then_fmax_or_fadd(self):
         """One reduce step is the in-row ``update.dpp`` shuffle (``row_xmask``
         on gfx1250) followed by ``maxnum`` / ``fadd`` -- never inline asm,
@@ -4515,6 +4550,7 @@ class TestNewTargetIntrinsics(unittest.TestCase):
                             lower(b.kernel, arch="gfx950")
 
     # ---- mov_dpp8 ----
+    @arch_specific(("gfx1201",), reason=_RDNA_ONLY)
     def test_mov_dpp8_i32_emits_typed_intrinsic(self):
         ll = self._lower(
             "dpp8i", lambda b: b.mov_dpp8(b.const_i32(1), 0x765432), arch="gfx1201"
@@ -4523,6 +4559,7 @@ class TestNewTargetIntrinsics(unittest.TestCase):
         # 0x765432 == 7754802, passed through as the 24-bit lane-select imm.
         self.assertIn("call i32 @llvm.amdgcn.mov.dpp8.i32(i32 1, i32 7754802)", ll)
 
+    @arch_specific(("gfx1201",), reason=_RDNA_ONLY)
     def test_mov_dpp8_f32_emits_typed_intrinsic(self):
         ll = self._lower(
             "dpp8f", lambda b: b.mov_dpp8(b.const_f32(1.0), 0x765432), arch="gfx1201"
@@ -4530,6 +4567,7 @@ class TestNewTargetIntrinsics(unittest.TestCase):
         self.assertIn("declare float @llvm.amdgcn.mov.dpp8.f32(float, i32 immarg)", ll)
         self.assertIn("call float @llvm.amdgcn.mov.dpp8.f32(float", ll)
 
+    @arch_specific(("gfx1201",), reason=_RDNA_ONLY)
     def test_mov_dpp8_both_types_coexist_in_one_module(self):
         """i32 and f32 mov_dpp8 must not collide on one overloaded symbol.
 
@@ -4631,6 +4669,7 @@ class TestNewTargetIntrinsics(unittest.TestCase):
             b.writelane(b.const_i32(1), b.const_i32(0), b.const_f32(1.0))
 
     # ---- permlane16 / permlane64 / permlane32_swap ----
+    @arch_specific(("gfx1201",), reason=_RDNA_ONLY)
     def test_permlane16_emits_four_sources_and_bool_flags(self):
         ll = self._lower(
             "pl16",
@@ -4652,6 +4691,7 @@ class TestNewTargetIntrinsics(unittest.TestCase):
             ll,
         )
 
+    @arch_specific(("gfx1201",), reason=_RDNA_ONLY)
     def test_permlane16_propagates_fi_and_bound_ctrl(self):
         ll = self._lower(
             "pl16_flags",
@@ -4672,6 +4712,7 @@ class TestNewTargetIntrinsics(unittest.TestCase):
         self.assertIn("declare i32 @llvm.amdgcn.permlane64.i32(i32)", ll)
         self.assertIn("call i32 @llvm.amdgcn.permlane64.i32(i32 1)", ll)
 
+    @arch_specific(("gfx950",), reason=_PERMLANE32)
     def test_permlane32_swap_unpacks_struct_result(self):
         ll = self._lower(
             "psw", lambda b: b.permlane32_swap(b.const_i32(1), b.const_i32(2))
@@ -4805,6 +4846,7 @@ class TestNewTargetIntrinsics(unittest.TestCase):
             b.av_store_b128(p, b.const_i32(0))
 
     # ---- s_alloc_vgpr ----
+    @arch_specific(("gfx1250",), reason=_RDNA_ONLY)
     def test_s_alloc_vgpr_zexts_i1_result_to_i32(self):
         ll = self._lower("valloc", lambda b: b.s_alloc_vgpr(8), arch="gfx1250")
         self.assertIn("declare i1 @llvm.amdgcn.s.alloc.vgpr(i32)", ll)
@@ -4830,11 +4872,13 @@ class TestNewTargetIntrinsics(unittest.TestCase):
         self.assertIn("declare void @llvm.amdgcn.wait.asyncmark(i16 immarg)", ll)
         self.assertIn("call void @llvm.amdgcn.wait.asyncmark(i16 3)", ll)
 
+    @arch_specific(("gfx1201",), reason=_RDNA_ONLY)
     def test_s_wait_event_passes_i16_bitmask(self):
         ll = self._lower("sevt", lambda b: b.s_wait_event(1), arch="gfx1201")
         self.assertIn("declare void @llvm.amdgcn.s.wait.event(i16 immarg)", ll)
         self.assertIn("call void @llvm.amdgcn.s.wait.event(i16 1)", ll)
 
+    @arch_specific(("gfx1250",), reason=_RDNA_ONLY)
     def test_s_prefetch_inst_emits_ptr_and_length(self):
         from rocke.core.ir import I32, PtrType
 
@@ -4855,6 +4899,7 @@ class TestNewTargetIntrinsics(unittest.TestCase):
             ll,
         )
 
+    @arch_specific(("gfx1250",), reason=_RDNA_ONLY)
     def test_s_prefetch_inst_spaces_coexist_in_one_module(self):
         """Two spaces in one kernel must not collide on one declare.
 
@@ -4951,6 +4996,7 @@ class TestNewTargetIntrinsics(unittest.TestCase):
                 rsrc, lds_addr, b.const_i32(0), b.const_i32(0), dwords=4, coherency=7
             )
 
+    @arch_specific(("gfx1250",), reason=_RDNA_ONLY)
     def test_global_load_async_to_lds_supports_b8_width(self):
         """width_bytes=1 selects the LLVM 23 ``.b8`` async copy, a gfx1250
         opcode, so it is lowered for gfx1250."""
@@ -4986,6 +5032,7 @@ class TestNewTargetIntrinsics(unittest.TestCase):
             )
 
 
+@arch_specific(("gfx1250",), reason=_RDNA_ONLY)
 @pytest.mark.parametrize("strict", ["0", "1"])
 @pytest.mark.parametrize("op", ["av_load_b128", "s_prefetch_inst"])
 def test_lds_rejection_without_cpp_binding(monkeypatch, strict, op):
@@ -5014,6 +5061,7 @@ def test_lds_rejection_without_cpp_binding(monkeypatch, strict, op):
         lower_kernel_to_llvm(b.kernel, llvm_flavor="llvm23", arch="gfx1250")
 
 
+@arch_specific(("gfx950",), reason=_LABEL_ONLY)
 class TestBothBackendDifferentialGate(unittest.TestCase):
     """``backend="both"`` must never answer with IR it did not compare.
 
@@ -5136,6 +5184,7 @@ class TestBothBackendDifferentialGate(unittest.TestCase):
         """
         self.assertEqual(self.backend.CPP_UNPORTED_ARCHES, ())
 
+    @arch_specific(("gfx1250",), reason=_RDNA_ONLY)
     def test_cpp_engine_lowers_every_arch_python_wires(self):
         """The invariant that replaced the gap list, checked against the engine.
 
@@ -5833,6 +5882,7 @@ class TestGemmEpilogueLowererTarget(unittest.TestCase):
     built or loaded, so this runs on any host without stand-ins for HIP.
     """
 
+    @arch_specific(("gfx950", "gfx1151"), reason=_MIXED)
     def test_wave64_candidate_refused_on_wave32_target(self):
         from rocke.helpers import (
             FusionOp,
@@ -5877,6 +5927,7 @@ class TestGemmEpilogueLowererTarget(unittest.TestCase):
         self.assertNotIn("gfx1151", suggested)
 
 
+@arch_specific(("gfx950",), reason=_LABEL_ONLY)
 class TestLoweringRegistryBuild(unittest.TestCase):
     """Lowerer tests: candidate generation phase (GPU-agnostic).
 
@@ -6003,6 +6054,7 @@ class TestLoweringRegistryBuild(unittest.TestCase):
         self.assertGreater(built.block_size, 0)
         self.assertEqual(built.extra.get("bias"), "bias")
 
+    @arch_specific(("gfx1151",), reason=_RDNA_ONLY)
     def test_gemm_epilogue_build_refuses_candidate_for_other_wave_size(self):
         """A wave32 candidate is refused on the wave64 active device.
 
@@ -6025,6 +6077,7 @@ class TestLoweringRegistryBuild(unittest.TestCase):
         self.assertIn("GemmEpilogueLowerer(arch=...)", msg)
         self.assertIn("gfx1151", msg)
 
+    @arch_specific(("gfx1151",), reason=_RDNA_ONLY)
     def test_gemm_epilogue_explicit_target_overrides_device(self):
         """An explicit target is used for candidates and build, not the device.
 
@@ -6445,6 +6498,7 @@ class TestValidationHarness(unittest.TestCase):
 class TestConvDirectGroupedTransforms(unittest.TestCase):
     """The transform-descriptor migration must keep the kernels building."""
 
+    @arch_specific(("gfx942",), reason=_COMMON_ATOM)
     def test_16c_kernel_lowers_to_llvm(self):
         from rocke.core.lower_llvm import lower_kernel_to_llvm
         from kernels.common.conv_direct_grouped import (
@@ -6454,10 +6508,11 @@ class TestConvDirectGroupedTransforms(unittest.TestCase):
         )
 
         spec = DirectConv16cSpec(
-            problem=DirectConvProblem(N=1, H=8, W=8, groups=8, cpg=16, kpg=16)
+            problem=DirectConvProblem(N=1, H=8, W=8, groups=8, cpg=16, kpg=16),
+            fold_k32=False,
         )
         kernel = build_direct_conv_16c(spec)
-        ll = lower_kernel_to_llvm(kernel, arch="gfx950")
+        ll = lower_kernel_to_llvm(kernel, arch="gfx942")
         # Smoke check: the generated LLVM IR mentions amdgpu and the
         # kernel name (proves the body got emitted).
         self.assertIn("amdgpu", ll)
@@ -8724,14 +8779,14 @@ class TestMfmaGemm(unittest.TestCase):
         """
         from rocke.instances import MfmaGemmSpec, build_mfma_gemm
 
-        spec = MfmaGemmSpec(M=32, N=32, K=32, dtype="f16")
+        spec = MfmaGemmSpec(M=32, N=32, K=32, dtype="f16", kpack=False)
         kernel = build_mfma_gemm(spec)
-        ll = lower_kernel_to_llvm(kernel, arch="gfx950")
+        ll = lower_kernel_to_llvm(kernel, arch="gfx942")
         # The default ``kpack=True`` selects the f16 16x16x32 atom on
         # gfx950+; fall back to a substring match so the test stays
         # honest if a future worker bumps the default again.
         self.assertIn("@llvm.amdgcn.mfma.f32.", ll)
-        self.assertIn(".f16(", ll)
+        self.assertIn("f16(", ll)
 
     def test_grid_one_cta_per_tile(self):
         """Grid math: (N//16, M//16, 1)."""
@@ -8781,14 +8836,16 @@ class TestEveryKernelUsesMfma(unittest.TestCase):
     """
 
     def _llvm_for(self, build_fn, spec):
-        return lower_kernel_to_llvm(build_fn(spec), arch="gfx950")
+        # The specs below use atoms that exist on gfx942 and gfx950. The IR is the
+        # same on both, so one arch is enough; gfx942 is the one with fewer atoms.
+        return lower_kernel_to_llvm(build_fn(spec), arch="gfx942")
 
     def test_mfma_gemm_uses_mfma(self):
         from rocke.instances import MfmaGemmSpec, build_mfma_gemm
 
         ll = self._llvm_for(
             build_mfma_gemm,
-            MfmaGemmSpec(M=32, N=32, K=32, dtype="f16"),
+            MfmaGemmSpec(M=32, N=32, K=32, dtype="f16", kpack=False),
         )
         # The "uses MFMA" gremlin: assert an AMDGCN MFMA intrinsic is
         # emitted regardless of the specific atom shape (legacy
@@ -8861,7 +8918,7 @@ class TestEveryKernelUsesMfma(unittest.TestCase):
                 warp_k=1,
                 warp_tile_m=32,
                 warp_tile_n=32,
-                warp_tile_k=16,
+                warp_tile_k=8,
             ),
             trait=TraitSpec(),
             data=DataSpec(),
@@ -8873,6 +8930,7 @@ class TestEveryKernelUsesMfma(unittest.TestCase):
         )
 
 
+@arch_specific(("gfx950",), reason=_LABEL_ONLY)
 class TestCShuffleEpilogueSmoke(unittest.TestCase):
     """Quick smoke tests for CShuffleEpilogue across fp16, bf16, and fp32.
 
