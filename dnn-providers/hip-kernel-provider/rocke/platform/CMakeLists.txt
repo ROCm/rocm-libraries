@@ -488,6 +488,7 @@ if(ROCKE_INSTALL_TESTS)
               PATTERN "test_dsl_probes.py" EXCLUDE
               PATTERN "test_arch_domain_artifact.py" EXCLUDE
               PATTERN "test_arch_table_engine_parity.py" EXCLUDE
+              PATTERN "test_gemm_spec_dict_binding_parity.py" EXCLUDE
               PATTERN "test_gpu_references.py" EXCLUDE)
 
     endblock()

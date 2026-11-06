@@ -539,6 +539,9 @@ def universal_gemm_spec_to_dict(spec: Any) -> Dict[str, Any]:
     still reads each key by name (``fill_universal_spec`` in
     ``cpp/bindings/rocke_engine.cpp``), so a new field must also be read there,
     or ``backend="cpp"`` keeps the C default for it without a word.
+    ``tests/core/test_gemm_spec_dict_binding_parity.py`` fails when the keys
+    this dict (or the batched, grouped or FlatMM dict) writes and the keys the
+    binding reads differ.
     """
     d = _gemm_subspec_to_dict(spec)
     d.update(_dataclass_items(spec.data))

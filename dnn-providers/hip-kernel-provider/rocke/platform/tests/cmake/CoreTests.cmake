@@ -44,6 +44,20 @@ if(BUILD_TESTING)
       PROPERTIES
         LABELS "ckc;python;host"
         ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python")
+
+    # The GEMM spec-dict parity test reads cpp/bindings/rocke_engine.cpp, which
+    # the installed test tree does not carry either; it checks that the binding
+    # reads every key the Python spec dicts write, and only those, without
+    # needing the optional rocke_engine build.
+    add_test(
+      NAME rocke_gemm_spec_dict_binding_parity
+      COMMAND "${Python3_EXECUTABLE}" -m pytest
+              "${CMAKE_CURRENT_SOURCE_DIR}/core/test_gemm_spec_dict_binding_parity.py" -q)
+    set_tests_properties(
+      rocke_gemm_spec_dict_binding_parity
+      PROPERTIES
+        LABELS "ckc;python;host"
+        ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python")
   else()
     message(WARNING
             "rocKE: Python3 interpreter not found; arch-domain reproducibility "
