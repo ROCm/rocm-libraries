@@ -40,9 +40,6 @@
 #include "rocke/instance_conv_direct_grouped_internal.h"
 #include "rocke/ir.h"
 
-/* rocke.core.ir.CPOL_ATOMIC_CASCADE_DEV = 4 | (2 << 3). */
-#define ROCKE_WGRAD_SC_CPOL_ATOMIC_CASCADE_DEV (4 | (2 << 3))
-
 /* Fixed-capacity scratch. The validator caps the accumulators at 128 VGPRs
  * (16 tiles), the waves at 16 and sub_steps at 8; the pass counts follow from
  * block_k / block_c over the wave count. All checked before any write. */
@@ -956,7 +953,7 @@ rocke_kernel_def_t* rocke_dconv_wgrad_build_small_c(rocke_ir_builder_t* b,
                         rocke_if_t gate = rocke_b_scf_if(b, ok);
                         rocke_b_region_enter(b, gate.then_region);
                         rocke_b_buffer_atomic_fadd_f32(
-                            b, d_rsrc, byte, c->c0, val, ROCKE_WGRAD_SC_CPOL_ATOMIC_CASCADE_DEV);
+                            b, d_rsrc, byte, c->c0, val, ROCKE_CPOL_ATOMIC_CASCADE_DEV);
                         rocke_b_region_leave(b);
                     }
                 }

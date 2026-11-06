@@ -4467,10 +4467,7 @@ rocke_status_t rocke_direct_depthwise_wgrad_validate(
     }
     if(rocke_depthwise_wgrad_reason(spec, why, sizeof why))
     {
-        if(reason != NULL && reason_cap > 0)
-        {
-            snprintf(reason, reason_cap, "DirectDepthwiseWgradSpec: %s", why);
-        }
+        rocke_spec_set_reasonf(reason, reason_cap, "DirectDepthwiseWgradSpec: %s", why);
         return ROCKE_ERR_VALUE;
     }
     return ROCKE_OK;

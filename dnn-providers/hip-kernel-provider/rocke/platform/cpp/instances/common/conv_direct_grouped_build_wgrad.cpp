@@ -37,10 +37,6 @@
 #include "rocke/instance_conv_direct_grouped_internal.h"
 #include "rocke/ir.h"
 
-/* rocke.core.ir.CPOL_ATOMIC_CASCADE_DEV: gfx12+ atomic cache-policy immediate,
- * th = TH_ATOMIC_CASCADE (4), scope = SCOPE_DEV (2) in bits [4:3]. */
-#define ROCKE_WGRAD_CPOL_ATOMIC_CASCADE_DEV (4 | (2 << 3))
-
 /* ===================================================================== *
  *  Closures (Python nested defs) -- readers
  * ===================================================================== */
@@ -998,16 +994,11 @@ rocke_kernel_def_t* rocke_dconv_wgrad_epilogue(rocke_dconv_wgrad_ctx_t* ctx)
                     {
                         /* Guarded rather than sent to the out-of-range
                          * sentinel: a buffer atomic at the sentinel faults on
-                         * gfx1250, where a load reads 0. Cache policy
-                         * CPOL_ATOMIC_CASCADE_DEV = 4 | (2 << 3). */
+                         * gfx1250, where a load reads 0. */
                         rocke_value_t* c4b = rocke_b_const_i32(b, 4);
                         rocke_value_t* voff = rocke_b_mul(b, dw_off, c4b);
-                        rocke_b_buffer_atomic_fadd_f32(b,
-                                                       ctx->d_rsrc,
-                                                       voff,
-                                                       ctx->c0,
-                                                       acc_val,
-                                                       ROCKE_WGRAD_CPOL_ATOMIC_CASCADE_DEV);
+                        rocke_b_buffer_atomic_fadd_f32(
+                            b, ctx->d_rsrc, voff, ctx->c0, acc_val, ROCKE_CPOL_ATOMIC_CASCADE_DEV);
                     }
                     else
                     {

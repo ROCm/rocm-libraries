@@ -39,9 +39,6 @@
 #include "rocke/instance_conv_direct_grouped_internal.h"
 #include "rocke/ir.h"
 
-/* rocke.core.ir.CPOL_ATOMIC_CASCADE_DEV = 4 | (2 << 3). */
-#define ROCKE_WGRAD_IMG_CPOL_ATOMIC_CASCADE_DEV (4 | (2 << 3))
-
 /* Fixed-capacity scratch. The image-reason VGPR budget (224) bounds
  * KH*KW*TK*TC, KH*TK and G*KW*TC by 28 each; the caps leave headroom and are
  * checked before any array is written. */
@@ -707,7 +704,7 @@ static void img_lds_epilogue(rocke_ir_builder_t* b,
                 rocke_value_t* c_4 = rocke_b_const_i32(b, 4);
                 rocke_value_t* voff = rocke_b_mul(b, dw_off, c_4);
                 rocke_b_buffer_atomic_fadd_f32(
-                    b, d_rsrc, voff, c0, val, ROCKE_WGRAD_IMG_CPOL_ATOMIC_CASCADE_DEV);
+                    b, d_rsrc, voff, c0, val, ROCKE_CPOL_ATOMIC_CASCADE_DEV);
             }
             rocke_b_region_leave(b);
         }
@@ -1781,7 +1778,7 @@ rocke_kernel_def_t* rocke_dconv_wgrad_build_image(rocke_ir_builder_t* b,
                         rocke_value_t* c_4 = rocke_b_const_i32(b, 4);
                         rocke_value_t* voff = rocke_b_mul(b, dw_off, c_4);
                         rocke_b_buffer_atomic_fadd_f32(
-                            b, d_rsrc, voff, c->c0, val, ROCKE_WGRAD_IMG_CPOL_ATOMIC_CASCADE_DEV);
+                            b, d_rsrc, voff, c->c0, val, ROCKE_CPOL_ATOMIC_CASCADE_DEV);
                     }
                     rocke_b_region_leave(b);
                 }

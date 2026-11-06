@@ -699,6 +699,7 @@ if(ROCKE_INSTALL_TESTS)
         "tests/library/tests/dispatch/test_conv_winograd_aot_dispatch.py"
         "tests/library/tests/test_direct_kernel_cache.py"
         "tests/library/tests/test_direct_wgrad_refusals.py"
+        "tests/library/tests/test_direct_depthwise_wgrad_cachepolicy.py"
         "tests/library/tests/test_conv_tr_lane_map.py"
         "tests/library/tests/test_direct_depthwise_fwd_cpl.py"
         "tests/library/tests/test_conv_gradient_contract.py"

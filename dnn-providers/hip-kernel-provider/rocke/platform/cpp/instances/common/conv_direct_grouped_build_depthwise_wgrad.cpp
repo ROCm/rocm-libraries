@@ -35,11 +35,6 @@
 #include "rocke/instance_conv_direct_grouped_internal.h"
 #include "rocke/ir.h"
 
-/* rocke.core.ir.CPOL_ATOMIC_CASCADE_DEV = 4 | (2 << 3): the gfx12 th/scope
- * encoding. gfx11 and gfx9 read the same bits as glc/slc/dlc, so they take
- * the default policy 0. */
-#define ROCKE_DW_WGRAD_CPOL_ATOMIC_CASCADE_DEV (4 | (2 << 3))
-
 /* Fixed-capacity scratch, checked before any write. The accumulator budget
  * (128) bounds RC * KW * CPL; the X span and carried head follow from the
  * filter, wo_chunk and stride. */
@@ -251,7 +246,7 @@ rocke_kernel_def_t* rocke_build_direct_depthwise_wgrad(
     target = rocke_archtarget_from_gfx(arch);
     cpol = (target != NULL && target->target_family != NULL
             && strncmp(target->target_family, "gfx12", 5) == 0)
-               ? ROCKE_DW_WGRAD_CPOL_ATOMIC_CASCADE_DEV
+               ? ROCKE_CPOL_ATOMIC_CASCADE_DEV
                : 0;
 
     memset(&cx, 0, sizeof cx);

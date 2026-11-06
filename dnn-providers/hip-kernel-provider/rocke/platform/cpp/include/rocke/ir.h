@@ -1683,6 +1683,11 @@ void rocke_b_buffer_store_f32(rocke_ir_builder_t* b,
                               rocke_value_t* voffset,
                               rocke_value_t* soffset,
                               rocke_value_t* value);
+/* rocke.core.ir.CPOL_ATOMIC_CASCADE_DEV: gfx12+ atomic cache-policy immediate
+ * for a device-scope cascade add, th = TH_ATOMIC_CASCADE (4), scope =
+ * SCOPE_DEV (2) in bits [4:3]. gfx11 and gfx9 read the same bits as
+ * glc/slc/dlc, so only gfx12 targets may carry it. */
+#define ROCKE_CPOL_ATOMIC_CASCADE_DEV (4 | (2 << 3))
 /* IRBuilder.buffer_atomic_fadd_f32: f32 atomic add through a buffer resource;
  * cachepolicy is the raw immediate (0..31; gfx12+: th bits [2:0], scope [4:3]).
  * Callers must guard invalid offsets (e.g. with scf_if) instead of steering

@@ -8,9 +8,11 @@
  * case ids, base specs and one-knob changes, checked through
  * rocke_direct_conv_wgrad_is_valid_spec / rocke_direct_depthwise_wgrad_is_valid_spec.
  * Each case asserts the spec is refused and that the reason contains the
- * message of the check it targets. The byte-identity gate never sees a
- * refused spec, so this is what keeps the two validators' refusals in step.
- * Keep the two tables in step.
+ * message of the check it targets. The messages live in
+ * library/tests/direct_wgrad_refusal_reasons.inc, which the Python test reads
+ * too, so both engines are held to one text. The byte-identity gate never
+ * sees a refused spec, so this is what keeps the two validators' refusals in
+ * step. Keep the case tables in step.
  *
  * It also checks the cache policy of the depthwise wgrad atomics per arch,
  * like library/tests/test_direct_depthwise_wgrad_cachepolicy.py: the gfx12
@@ -35,7 +37,7 @@
  * to bump ROCKE_ABI_VERSION in rocke/abi.h and BINARY_ABI in
  * python/rocke/portable_ir/src/abi.py, then update this pin. 64-bit only. */
 #if INTPTR_MAX == INT64_MAX
-static_assert(sizeof(rocke_direct_conv_wgrad_spec_t) == 160 && ROCKE_ABI_VERSION >= 9,
+static_assert(sizeof(rocke_direct_conv_wgrad_spec_t) == 160 && ROCKE_ABI_VERSION >= 10,
               "rocke_direct_conv_wgrad_spec_t changed size: bump ROCKE_ABI_VERSION in "
               "rocke/abi.h, then update this pin");
 #endif
@@ -110,7 +112,6 @@ typedef struct
     wgrad_base_t base;
     wgrad_edit_t edit;
     const char* arch;
-    const char* reason;
 } wgrad_case_t;
 
 typedef struct
@@ -118,7 +119,6 @@ typedef struct
     const char* id;
     dw_edit_t edit;
     const char* arch;
-    const char* reason;
 } dw_case_t;
 
 using W = rocke_direct_conv_wgrad_spec_t;
@@ -126,52 +126,15 @@ using D = rocke_direct_depthwise_wgrad_spec_t;
 
 static const wgrad_case_t k_wgrad_cases[] = {
     /* ---- _wgrad_image_reason */
-    {"img_wave_tiles_lt1",
-     BASE_IMG,
-     [](W* s) { s->wave_tiles_k = 0; },
-     "gfx1250",
-     "wave_tiles_k and wave_tiles_c must be >= 1 (got 0, 1)"},
-    {"img_small_c_knob",
-     BASE_W32,
-     [](W* s) { s->sub_steps = 2; },
-     "gfx1250",
-     "sub_steps / vec_x / uniform_wave need small_c=True (got sub_steps=2, vec_x=0, "
-     "uniform_wave=False)"},
-    {"img_tiles_need_img",
-     BASE_W32,
-     [](W* s) { s->wave_tiles_c = 2; },
-     "gfx1250",
-     "wave_tiles_k / wave_tiles_c > 1 need image_per_block=True (got 1, 2)"},
-    {"img_rps_need_img",
-     BASE_W32,
-     [](W* s) { s->rows_per_sync = 3; },
-     "gfx1250",
-     "rows_per_sync > 1 needs image_per_block=True (got 3)"},
-    {"img_rb_need_img",
-     BASE_W32,
-     [](W* s) { s->row_blocks = 2; },
-     "gfx1250",
-     "row_blocks > 1 needs image_per_block=True (got 2)"},
-    {"img_tdm_need_img",
-     BASE_W32,
-     [](W* s) { s->tdm_stages = 2; },
-     "gfx1250",
-     "tdm_stages needs image_per_block=True (got 2)"},
-    {"img_wsr_need_img",
-     BASE_W32,
-     [](W* s) { s->ws_replicas = 2; },
-     "gfx1250",
-     "ws_replicas > 1 needs image_per_block=True (got 2)"},
-    {"img_ldsepi_need_img",
-     BASE_W32,
-     [](W* s) { s->lds_epilogue = 1; },
-     "gfx1250",
-     "lds_epilogue needs image_per_block=True"},
-    {"img_wsr_lt1",
-     BASE_IMG,
-     [](W* s) { s->ws_replicas = 0; },
-     "gfx1250",
-     "ws_replicas must be >= 1 (got 0)"},
+    {"img_wave_tiles_lt1", BASE_IMG, [](W* s) { s->wave_tiles_k = 0; }, "gfx1250"},
+    {"img_small_c_knob", BASE_W32, [](W* s) { s->sub_steps = 2; }, "gfx1250"},
+    {"img_tiles_need_img", BASE_W32, [](W* s) { s->wave_tiles_c = 2; }, "gfx1250"},
+    {"img_rps_need_img", BASE_W32, [](W* s) { s->rows_per_sync = 3; }, "gfx1250"},
+    {"img_rb_need_img", BASE_W32, [](W* s) { s->row_blocks = 2; }, "gfx1250"},
+    {"img_tdm_need_img", BASE_W32, [](W* s) { s->tdm_stages = 2; }, "gfx1250"},
+    {"img_wsr_need_img", BASE_W32, [](W* s) { s->ws_replicas = 2; }, "gfx1250"},
+    {"img_ldsepi_need_img", BASE_W32, [](W* s) { s->lds_epilogue = 1; }, "gfx1250"},
+    {"img_wsr_lt1", BASE_IMG, [](W* s) { s->ws_replicas = 0; }, "gfx1250"},
     {"img_ldsepi_bytes",
      BASE_IMG,
      [](W* s) {
@@ -180,149 +143,59 @@ static const wgrad_case_t k_wgrad_cases[] = {
          s->problem.KH = 7;
          s->problem.KW = 7;
      },
-     "gfx1250",
-     "lds_epilogue stages 903168 B of dW in LDS (> 196608)"},
-    {"img_rb_lt1",
-     BASE_IMG,
-     [](W* s) { s->row_blocks = 0; },
-     "gfx1250",
-     "row_blocks must be >= 1 (got 0)"},
-    {"img_tdm_range",
-     BASE_IMG,
-     [](W* s) { s->tdm_stages = 5; },
-     "gfx1250",
-     "tdm_stages must be 0 or 2..4 (got 5)"},
+     "gfx1250"},
+    {"img_rb_lt1", BASE_IMG, [](W* s) { s->row_blocks = 0; }, "gfx1250"},
+    {"img_tdm_range", BASE_IMG, [](W* s) { s->tdm_stages = 5; }, "gfx1250"},
     {"img_tdm_waves",
      BASE_IMG,
      [](W* s) {
          s->tdm_stages = 3;
          s->rows_per_sync = 3;
      },
-     "gfx1250",
-     "tdm_stages > 2 needs a wave per TDM transfer of a step (6), got 4 waves"},
-    {"img_rps_value",
-     BASE_IMG,
-     [](W* s) { s->rows_per_sync = 2; },
-     "gfx1250",
-     "rows_per_sync must be 1 or KH=3 (got 2)"},
-    {"img_wave64",
-     BASE_IMG,
-     [](W* s) { s->wave_size = 64; },
-     "gfx950",
-     "image_per_block is implemented for wave32 (gfx1250) only (got wave_size=64)"},
-    {"img_waves_q",
-     BASE_IMG,
-     [](W* s) { s->waves_q = 2; },
-     "gfx1250",
-     "image_per_block walks every wo tile itself; waves_q must be 1 (got 2)"},
+     "gfx1250"},
+    {"img_rps_value", BASE_IMG, [](W* s) { s->rows_per_sync = 2; }, "gfx1250"},
+    {"img_wave64", BASE_IMG, [](W* s) { s->wave_size = 64; }, "gfx950"},
+    {"img_waves_q", BASE_IMG, [](W* s) { s->waves_q = 2; }, "gfx1250"},
     {"img_vgpr_budget",
      BASE_IMG,
      [](W* s) {
          s->wave_tiles_k = 4;
          s->wave_tiles_c = 4;
      },
-     "gfx1250",
-     "image_per_block body needs ~1344 VGPRs for accumulators and fragments (> 224)"},
+     "gfx1250"},
     /* ---- is_valid_wgrad_spec: the wave32 arch gate */
-    {"w32_arch",
-     BASE_W32,
-     [](W*) {},
-     "gfx1151",
-     "wave32 direct wgrad is implemented for ['gfx1250'] (got gfx1151)"},
+    {"w32_arch", BASE_W32, [](W*) {}, "gfx1151"},
     /* ---- _wgrad_small_c_reason */
-    {"sc_and_img",
-     BASE_SC,
-     [](W* s) { s->image_per_block = 1; },
-     "gfx1250",
-     "small_c and image_per_block are separate variants"},
-    {"sc_wave64",
-     BASE_SC,
-     [](W* s) { s->wave_size = 64; },
-     "gfx950",
-     "small_c is implemented for wave32 (gfx1250) only (got wave_size=64)"},
-    {"sc_mfma_k",
-     BASE_SC,
-     [](W* s) { s->mfma_k = 16; },
-     "gfx1250",
-     "direct wgrad on wave32 needs mfma_k=32 (WMMA 16x16x32); got mfma_k=16"},
-    {"sc_groups",
-     BASE_SC,
-     [](W* s) { s->problem.groups = 2; },
-     "gfx1250",
-     "small_c needs groups=1 (got 2)"},
-    {"sc_kpg",
-     BASE_SC,
-     [](W* s) { s->problem.kpg = 12; },
-     "gfx1250",
-     "small_c loads dY as 8-channel vectors; kpg must be a multiple of 8 (got 12)"},
-    {"sc_filter",
-     BASE_SC,
-     [](W* s) { s->problem.KW = 0; },
-     "gfx1250",
-     "KH and KW must be >= 1 (got 3, 0)"},
-    {"sc_wave_tile",
-     BASE_SC,
-     [](W* s) { s->wave_tile_c = 32; },
-     "gfx1250",
-     "wave_tile_k and wave_tile_c must be 16 (got 16, 32)"},
-    {"sc_waves_lt1",
-     BASE_SC,
-     [](W* s) { s->waves_c = 0; },
-     "gfx1250",
-     "waves_k and waves_c must be >= 1 (got 1, 0)"},
+    {"sc_and_img", BASE_SC, [](W* s) { s->image_per_block = 1; }, "gfx1250"},
+    {"sc_wave64", BASE_SC, [](W* s) { s->wave_size = 64; }, "gfx950"},
+    {"sc_mfma_k", BASE_SC, [](W* s) { s->mfma_k = 16; }, "gfx1250"},
+    {"sc_groups", BASE_SC, [](W* s) { s->problem.groups = 2; }, "gfx1250"},
+    {"sc_kpg", BASE_SC, [](W* s) { s->problem.kpg = 12; }, "gfx1250"},
+    {"sc_filter", BASE_SC, [](W* s) { s->problem.KW = 0; }, "gfx1250"},
+    {"sc_wave_tile", BASE_SC, [](W* s) { s->wave_tile_c = 32; }, "gfx1250"},
+    {"sc_waves_lt1", BASE_SC, [](W* s) { s->waves_c = 0; }, "gfx1250"},
     {"sc_waves_gt16",
      BASE_SC,
      [](W* s) {
          s->waves_k = 8;
          s->waves_c = 4;
      },
-     "gfx1250",
-     "waves_k * waves_c must be <= 16 (got 8 * 4 = 32)"},
-    {"sc_waves_q",
-     BASE_SC,
-     [](W* s) { s->waves_q = 2; },
-     "gfx1250",
-     "small_c walks its pixel range itself; waves_q must be 1 (got 2)"},
-    {"sc_wave_tiles_lt1",
-     BASE_SC,
-     [](W* s) { s->wave_tiles_k = 0; },
-     "gfx1250",
-     "wave_tiles_k and wave_tiles_c must be >= 1 (got 0, 1)"},
-    {"sc_image_knob",
-     BASE_SC,
-     [](W* s) { s->tdm_stages = 2; },
-     "gfx1250",
-     "rows_per_sync / tdm_stages / lds_epilogue are image_per_block knobs (got rows_per_sync=1, "
-     "tdm_stages=2, lds_epilogue=False)"},
-    {"sc_runtime_channels",
-     BASE_SC,
-     [](W* s) { s->runtime_channels = 1; },
-     "gfx1250",
-     "small_c bakes its channel counts; runtime_channels is not supported"},
-    {"sc_rb_lt1",
-     BASE_SC,
-     [](W* s) { s->row_blocks = 0; },
-     "gfx1250",
-     "row_blocks must be >= 1 (got 0)"},
-    {"sc_wsr_lt1",
-     BASE_SC,
-     [](W* s) { s->ws_replicas = 0; },
-     "gfx1250",
-     "ws_replicas must be >= 1 (got 0)"},
-    {"sc_sub_steps",
-     BASE_SC,
-     [](W* s) { s->sub_steps = 9; },
-     "gfx1250",
-     "sub_steps must be in 1..8 (got 9)"},
-    {"sc_vec_x", BASE_SC, [](W* s) { s->vec_x = 2; }, "gfx1250", "vec_x must be 0, 4 or 8 (got 2)"},
+     "gfx1250"},
+    {"sc_waves_q", BASE_SC, [](W* s) { s->waves_q = 2; }, "gfx1250"},
+    {"sc_wave_tiles_lt1", BASE_SC, [](W* s) { s->wave_tiles_k = 0; }, "gfx1250"},
+    {"sc_image_knob", BASE_SC, [](W* s) { s->tdm_stages = 2; }, "gfx1250"},
+    {"sc_runtime_channels", BASE_SC, [](W* s) { s->runtime_channels = 1; }, "gfx1250"},
+    {"sc_rb_lt1", BASE_SC, [](W* s) { s->row_blocks = 0; }, "gfx1250"},
+    {"sc_wsr_lt1", BASE_SC, [](W* s) { s->ws_replicas = 0; }, "gfx1250"},
+    {"sc_sub_steps", BASE_SC, [](W* s) { s->sub_steps = 9; }, "gfx1250"},
+    {"sc_vec_x", BASE_SC, [](W* s) { s->vec_x = 2; }, "gfx1250"},
     {"sc_acc_budget",
      BASE_SC,
      [](W* s) {
          s->wave_tiles_k = 4;
          s->wave_tiles_c = 5;
      },
-     "gfx1250",
-     "small_c accumulators need 160 VGPRs (> 128)"},
+     "gfx1250"},
     {"sc_uniform_wave_spill",
      BASE_SC,
      [](W* s) {
@@ -334,55 +207,32 @@ static const wgrad_case_t k_wgrad_cases[] = {
          s->sub_steps = 4;
          s->uniform_wave = 1;
      },
-     "gfx1250",
-     "uniform_wave with more than 8 waves, vec_x=4, sub_steps >= 4 and >= 4 wave tiles spills "
-     "SGPRs into VGPR lanes and returns an all-zero dW (got 16 waves, sub_steps=4, 4 wave tiles)"},
+     "gfx1250"},
     /* ---- is_valid_wgrad_spec: the small_c arch gate */
-    {"sc_arch",
-     BASE_SC,
-     [](W*) {},
-     "gfx1151",
-     "small_c direct wgrad is implemented for wave32 gfx1250 (got gfx1151)"},
+    {"sc_arch", BASE_SC, [](W*) {}, "gfx1151"},
 };
 
 static const dw_case_t k_dw_cases[] = {
     /* ---- _depthwise_wgrad_reason */
-    {"dw_dtype",
-     [](D* s) { s->problem.dtype = "fp32"; },
-     "gfx1250",
-     "unsupported dtype 'fp32'; expected fp16 or bf16"},
+    {"dw_dtype", [](D* s) { s->problem.dtype = "fp32"; }, "gfx1250"},
     {"dw_cpg",
      [](D* s) {
          s->problem.cpg = 2;
          s->problem.kpg = 2;
      },
-     "gfx1250",
-     "requires cpg=kpg=1 (got 2, 2)"},
-    {"dw_filter", [](D* s) { s->problem.KH = 0; }, "gfx1250", "KH and KW must be >= 1 (got 0, 3)"},
-    {"dw_wave_size",
-     [](D* s) { s->wave_size = 16; },
-     "gfx1250",
-     "wave_size must be 32 or 64 (got 16)"},
-    {"dw_cpl",
-     [](D* s) { s->chan_per_lane = 3; },
-     "gfx1250",
-     "chan_per_lane must be 2, 4 or 8 (got 3)"},
+     "gfx1250"},
+    {"dw_filter", [](D* s) { s->problem.KH = 0; }, "gfx1250"},
+    {"dw_wave_size", [](D* s) { s->wave_size = 16; }, "gfx1250"},
+    {"dw_cpl", [](D* s) { s->chan_per_lane = 3; }, "gfx1250"},
     {"dw_channels",
      [](D* s) {
          s->chan_per_lane = 4;
          s->problem.groups = 66;
      },
-     "gfx1250",
-     "channels 66 must be a multiple of chan_per_lane 4 (one vector load per lane)"},
-    {"dw_waves_lt1",
-     [](D* s) { s->wo_chunk = 0; },
-     "gfx1250",
-     "waves, rows_per_wave and wo_chunk must be >= 1 (got 4, 2, 0)"},
-    {"dw_r_split",
-     [](D* s) { s->r_split = 3; },
-     "gfx1250",
-     "r_split must be in 1..KH=3 and divide waves=4 (got 3)"},
-    {"dw_wsr_lt1", [](D* s) { s->ws_replicas = 0; }, "gfx1250", "ws_replicas must be >= 1 (got 0)"},
+     "gfx1250"},
+    {"dw_waves_lt1", [](D* s) { s->wo_chunk = 0; }, "gfx1250"},
+    {"dw_r_split", [](D* s) { s->r_split = 3; }, "gfx1250"},
+    {"dw_wsr_lt1", [](D* s) { s->ws_replicas = 0; }, "gfx1250"},
     {"dw_acc_budget",
      [](D* s) {
          s->chan_per_lane = 8;
@@ -390,14 +240,10 @@ static const dw_case_t k_dw_cases[] = {
          s->problem.KW = 7;
          s->problem.PAD = 3;
      },
-     "gfx1250",
-     "accumulators need 392 VGPRs (> 128)"},
+     "gfx1250"},
     /* ---- is_valid_depthwise_wgrad_spec */
-    {"dw_wave_arch", [](D*) {}, "gfx950", "wave_size 32 does not match the gfx950 wave size 64"},
-    {"dw_threads",
-     [](D* s) { s->waves = 64; },
-     "gfx1250",
-     "threads_per_block 2048 > 1024 (hardware cap) on gfx1250"},
+    {"dw_wave_arch", [](D*) {}, "gfx950"},
+    {"dw_threads", [](D* s) { s->waves = 64; }, "gfx1250"},
     {"dw_lds",
      [](D* s) {
          s->chan_per_lane = 8;
@@ -408,12 +254,38 @@ static const dw_case_t k_dw_cases[] = {
          s->problem.KW = 7;
          s->problem.PAD = 3;
      },
-     "gfx1250",
-     "epilogue LDS 702464 B > 327680 on gfx1250"},
+     "gfx1250"},
 };
+
+/* The refusal text of every case, shared with the Python test: both engines
+ * must produce the same sentence, so a reword in one engine fails here or
+ * there. */
+static const struct
+{
+    const char* id;
+    const char* reason;
+} k_reasons[] = {
+#define ROCKE_WGRAD_REFUSAL(id, reason) {id, reason},
+#include "direct_wgrad_refusal_reasons.inc"
+#undef ROCKE_WGRAD_REFUSAL
+};
+
+/* The shared text of case `id`; NULL (and a failure) when it has none. */
+static const char* reason_of(const char* id)
+{
+    size_t i;
+    for(i = 0; i < sizeof k_reasons / sizeof k_reasons[0]; ++i)
+        if(strcmp(k_reasons[i].id, id) == 0)
+            return k_reasons[i].reason;
+    fprintf(stderr, "FAIL %s: no entry in direct_wgrad_refusal_reasons.inc\n", id);
+    ++g_failures;
+    return NULL;
+}
 
 static void expect_refused(const char* id, bool ok, const char* why, const char* reason)
 {
+    if(reason == NULL)
+        return;
     if(ok)
     {
         fprintf(stderr, "FAIL %s: accepted, expected \"%s\"\n", id, reason);
@@ -582,7 +454,7 @@ int main(void)
         expect_refused(c->id,
                        rocke_direct_conv_wgrad_is_valid_spec(&s, c->arch, why, sizeof why),
                        why,
-                       c->reason);
+                       reason_of(c->id));
         expect_names_value(c->id, why);
         /* The image-per-block and small_c builders hand the refusal on to
          * the lowering entry's error, not just a failed status. */
@@ -594,7 +466,7 @@ int main(void)
             err[0] = '\0';
             st = rocke_direct_conv_wgrad_lower_to_llvm(
                 &s, c->arch, ROCKE_LLVM_FLAVOR_AUTO, &ll, err, sizeof err);
-            expect_refused(c->id, st == ROCKE_OK, err, c->reason);
+            expect_refused(c->id, st == ROCKE_OK, err, reason_of(c->id));
             free(ll);
         }
     }
@@ -607,13 +479,28 @@ int main(void)
         expect_refused(c->id,
                        rocke_direct_depthwise_wgrad_is_valid_spec(&s, c->arch, why, sizeof why),
                        why,
-                       c->reason);
+                       reason_of(c->id));
         expect_names_value(c->id, why);
     }
 
-    /* rocke.core.ir.CPOL_ATOMIC_CASCADE_DEV = 4 | (2 << 3). */
-    check_dw_cachepolicy("gfx1250", 4 | (2 << 3));
-    check_dw_cachepolicy("gfx1201", 4 | (2 << 3));
+    /* Every shared text belongs to a case of one of the two tables. */
+    for(i = 0; i < sizeof k_reasons / sizeof k_reasons[0]; ++i)
+    {
+        size_t j;
+        bool found = false;
+        for(j = 0; j < sizeof k_wgrad_cases / sizeof k_wgrad_cases[0]; ++j)
+            found = found || strcmp(k_wgrad_cases[j].id, k_reasons[i].id) == 0;
+        for(j = 0; j < sizeof k_dw_cases / sizeof k_dw_cases[0]; ++j)
+            found = found || strcmp(k_dw_cases[j].id, k_reasons[i].id) == 0;
+        if(!found)
+        {
+            fprintf(stderr, "FAIL %s: shared text has no case\n", k_reasons[i].id);
+            ++g_failures;
+        }
+    }
+
+    check_dw_cachepolicy("gfx1250", ROCKE_CPOL_ATOMIC_CASCADE_DEV);
+    check_dw_cachepolicy("gfx1201", ROCKE_CPOL_ATOMIC_CASCADE_DEV);
     check_dw_cachepolicy("gfx1151", 0);
     check_dw_cachepolicy("gfx1100", 0);
 

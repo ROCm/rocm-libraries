@@ -21,33 +21,15 @@ from kernels.common.conv_direct_grouped import (
     DirectConvWgradSpec,
     build_direct_conv_wgrad,
 )
+from kernels.common._attention_bwd_frag import IntLaneBuilder
 from rocke.helpers.layouts import ConvKOuterFragmentReader
-
-
-class _IntBuilder:
-    """Duck-typed IRBuilder over plain ints: evaluates the map for one lane."""
-
-    def const_i32(self, v: int) -> int:
-        return v
-
-    def add(self, a: int, b: int) -> int:
-        return a + b
-
-    def mul(self, a: int, b: int) -> int:
-        return a * b
-
-    def div(self, a: int, b: int) -> int:
-        return a // b
-
-    def mod(self, a: int, b: int) -> int:
-        return a % b
 
 
 @pytest.mark.parametrize("n", [8, 16])
 def test_wave32_lane_map_values(n):
     """Lane l addresses the 8-column block holding column l % 16 and supplies
     K row (l // 16) * n + l % 8 of it; the bases are added when given."""
-    b = _IntBuilder()
+    b = IntLaneBuilder()
     for lane in range(32):
         col, row = ConvKOuterFragmentReader.wave32_lane_offsets(b, lane, n=n)
         assert col == ((lane % 16) // 8) * 8
