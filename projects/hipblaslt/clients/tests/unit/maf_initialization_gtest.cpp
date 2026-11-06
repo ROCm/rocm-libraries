@@ -130,12 +130,15 @@ TEST(HostUnitMafInitialization, EveryMxFormatHasIndependentScales)
                 continue;
             for(size_t axis : {0u, 1u})
             {
-                hn::MxGenerationOptions options;
-                options.dataType  = data;
-                options.scaleType = scale;
-                options.blockSize = scale == hn::ScalarType::E8M0 ? 32 : 16;
-                options.blockAxis = axis;
-                auto mx           = client::maf::generateMx(
+                hn::MxGenerationOptions options{
+                    .dataType         = data,
+                    .scaleType        = scale,
+                    .leadingDimension = std::nullopt,
+                    .blockAxis        = axis,
+                    .blockSize        = scale == hn::ScalarType::E8M0 ? size_t{32} : size_t{16},
+                    .scale            = hn::MxScaleGenerationMode::One,
+                };
+                auto mx = client::maf::generateMx(
                     hn::Shape{40, 48}, options, client::maf::Mode::Maf2, 1, 2);
                 for(size_t j = 0; j < 48; ++j)
                     for(size_t i = 0; i < 40; ++i)

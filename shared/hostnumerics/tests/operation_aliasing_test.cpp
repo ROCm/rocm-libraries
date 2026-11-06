@@ -78,8 +78,11 @@ void testReferenceOperationAliasing() {
 
     Tensor layerNormInPlace =
         Tensor::copyNativeValues<float>(Shape{1, 2}, std::array<float, 2>{1.0f, 3.0f});
-    LayerNormOptions layerNormOptions;
-    layerNormOptions.axis = 1;
+    LayerNormOptions layerNormOptions{
+        .axis = 1,
+        .accumulatorType = ScalarType::Float32,
+        .epsilon = 1e-5,
+    };
     referenceLayerNormInto(layerNormInPlace, {.output = layerNormInPlace}, layerNormOptions);
     require(layerNormInPlace.loadAs<float>({0, 0}) < 0.0f &&
                 layerNormInPlace.loadAs<float>({0, 1}) > 0.0f &&

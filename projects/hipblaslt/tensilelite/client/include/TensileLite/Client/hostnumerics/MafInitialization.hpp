@@ -58,7 +58,7 @@ namespace hipblaslt::hostnumerics::maf
         return GenerationRecipe::realOnly(
                    mode == Mode::Maf1
                        ? (operand == 0 ? GenerationRecipe::sine() : GenerationRecipe::cosine())
-                       : GenerationRecipe::normal({}),
+                       : GenerationRecipe::normal({.mean = 0.0, .standardDeviation = 1.0}),
                    seed(operand, batch),
                    Permutation::reverse(rank))
             .withIndexOffset(indexOffset);

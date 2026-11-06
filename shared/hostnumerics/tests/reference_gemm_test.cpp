@@ -277,7 +277,8 @@ void testRuntimeComplexAndExplicitAxisGemm() {
     EpilogueOptions axisOptions(ScalarType::Float32);
     axisOptions.bias = Tensor::copyNativeStorage<float>(
         Layout::contiguousLastDimensionFastest(Shape{2}), std::span<const float>(columnBias));
-    const Tensor axisResult = referenceEpilogue(realProduct, {}, axisOptions).output;
+    const Tensor axisResult =
+        referenceEpilogue(realProduct, {.output = ScalarType::Float32}, axisOptions).output;
     require(compare(axisResult,
                     Tensor::copyNativeStorage<float>(
                         Layout::contiguousLastDimensionFastest(Shape{1, 2}),

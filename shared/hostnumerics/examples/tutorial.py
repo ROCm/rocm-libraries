@@ -178,12 +178,14 @@ class HostNumericsTutorial(unittest.TestCase):
         data = hn.MxDataGeneration.preserve_range(
             recipe, hn.MxRepresentedValueRange(lower=-1.0, upper=1.0)
         )
-        options = hn.MxGenerationOptions()
-        options.data_type = hn.ScalarType.Float4E2M1
-        options.scale_type = hn.ScalarType.E8M0
-        options.leading_dimension = 32
-        options.block_axis = 0
-        options.block_size = 32
+        options = hn.MxGenerationOptions(
+            data_type=hn.ScalarType.Float4E2M1,
+            scale_type=hn.ScalarType.E8M0,
+            leading_dimension=32,
+            block_axis=0,
+            block_size=32,
+            scale=hn.MxScaleGenerationMode.Derived,
+        )
         mx = hn.generate_mx([32, 2], data, options)
 
         self.assertEqual(mx.data.type, hn.ScalarType.Float4E2M1)

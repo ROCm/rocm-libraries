@@ -84,7 +84,8 @@ GenerationRecipe generationRecipe(std::string_view name) {
         if (name == "uniform-real")
             return GenerationRecipe::uniformReal({.lower = -0.5, .upper = 0.5});
         if (name == "uniform-encoded") return GenerationRecipe::uniformFiniteEncodedValue();
-        if (name == "normal") return GenerationRecipe::normal({});
+        if (name == "normal")
+            return GenerationRecipe::normal({.mean = 0.0, .standardDeviation = 1.0});
         if (name == "sine") return GenerationRecipe::sine();
         if (name == "serial") return GenerationRecipe::serialIndex();
         throw std::runtime_error(

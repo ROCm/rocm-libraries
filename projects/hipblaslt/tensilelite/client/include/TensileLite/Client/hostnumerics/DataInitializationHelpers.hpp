@@ -220,15 +220,17 @@ namespace TensileLite
                     throw std::runtime_error("TensileLite MX leading dimension exceeds ptrdiff_t.");
                 if(isMaf(dataInitialization))
                 {
-                    MxGenerationOptions options;
-                    options.dataType = hostDataType;
-                    options.scaleType
+                    MxGenerationOptions options{
+                        .dataType = hostDataType,
+                        .scaleType
                         = scaleType == rocisa::DataType::E8 || scaleType == rocisa::DataType::None
                               ? ScalarType::E8M0
-                              : toHostNumericsMxScaleType(scaleType);
-                    options.leadingDimension = static_cast<ptrdiff_t>(leadingDimension);
-                    options.blockAxis        = blockAxis;
-                    options.blockSize        = blockSize;
+                              : toHostNumericsMxScaleType(scaleType),
+                        .leadingDimension = static_cast<ptrdiff_t>(leadingDimension),
+                        .blockAxis        = blockAxis,
+                        .blockSize        = blockSize,
+                        .scale            = roc::hostnumerics::MxScaleGenerationMode::One,
+                    };
                     return hipblaslt::hostnumerics::maf::generateMx(std::move(shape),
                                                                     options,
                                                                     mafMode(dataInitialization),
@@ -241,14 +243,15 @@ namespace TensileLite
                                        shape,
                                        seed);
 
-                MxGenerationOptions options;
-                options.dataType         = hostDataType;
-                options.scaleType        = toHostNumericsMxScaleType(scaleType);
-                options.leadingDimension = static_cast<ptrdiff_t>(leadingDimension);
-                options.blockAxis        = blockAxis;
-                options.blockSize        = blockSize;
-                options.scale  = independentData ? roc::hostnumerics::MxScaleGenerationMode::One
-                                                 : mxScaleGenerationMode(scaleInitialization);
+                MxGenerationOptions options{
+                    .dataType         = hostDataType,
+                    .scaleType        = toHostNumericsMxScaleType(scaleType),
+                    .leadingDimension = static_cast<ptrdiff_t>(leadingDimension),
+                    .blockAxis        = blockAxis,
+                    .blockSize        = blockSize,
+                    .scale = independentData ? roc::hostnumerics::MxScaleGenerationMode::One
+                                             : mxScaleGenerationMode(scaleInitialization),
+                };
                 auto generated = generateMx(std::move(shape), std::move(dataGeneration), options);
                 if(independentData)
                     initializeMxDataIndependently(dataType,

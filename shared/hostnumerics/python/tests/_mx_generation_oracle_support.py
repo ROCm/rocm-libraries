@@ -145,13 +145,14 @@ def make_problem(case):
         data_generation = hv.MxDataGeneration.preserve_generated_encoding(data)
     else:
         data_generation = hv.MxDataGeneration.quantize(data)
-    options = hv.MxGenerationOptions()
-    options.data_type = case.data_type
-    options.scale_type = case.scale_type
-    options.leading_dimension = case.leading_dimension
-    options.block_axis = case.block_axis
-    options.block_size = case.block_size
-    options.scale = case.scale if scale_override is None else scale_override
+    options = hv.MxGenerationOptions(
+        data_type=case.data_type,
+        scale_type=case.scale_type,
+        leading_dimension=case.leading_dimension,
+        block_axis=case.block_axis,
+        block_size=case.block_size,
+        scale=case.scale if scale_override is None else scale_override,
+    )
     return hv.Shape(list(case.shape)), data_generation, options
 
 

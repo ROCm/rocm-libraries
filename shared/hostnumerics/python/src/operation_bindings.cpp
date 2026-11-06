@@ -111,12 +111,13 @@ LayerNormOutputs referenceLayerNormOwned(Tensor input, ScalarType outputType,
                                          ScalarType statisticsType, ScalarType accumulatorType,
                                          size_t axis, double epsilon, std::optional<Tensor> gamma,
                                          std::optional<Tensor> beta) {
-    LayerNormOptions options;
-    options.axis = axis;
-    options.accumulatorType = accumulatorType;
-    options.gamma = std::move(gamma);
-    options.beta = std::move(beta);
-    options.epsilon = epsilon;
+    LayerNormOptions options{
+        .axis = axis,
+        .accumulatorType = accumulatorType,
+        .gamma = std::move(gamma),
+        .beta = std::move(beta),
+        .epsilon = epsilon,
+    };
     return referenceLayerNorm(
         std::move(input),
         {.output = outputType, .mean = statisticsType, .inverseVariance = statisticsType}, options);

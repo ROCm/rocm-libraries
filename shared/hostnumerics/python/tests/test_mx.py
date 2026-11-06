@@ -5,11 +5,15 @@ from _hostnumerics_test_support import *  # noqa: F403
 
 
 class MxTests(unittest.TestCase):  # noqa: F405
-    def test_leading_dimension_defaults_to_contiguous_columns(self):
-        options = hv.MxGenerationOptions()
-        self.assertIsNone(options.leading_dimension)
-        options.block_axis = 0
-        options.block_size = 4
+    def test_absent_leading_dimension_means_contiguous_columns(self):
+        options = hv.MxGenerationOptions(
+            data_type=hv.ScalarType.Float4E2M1,
+            scale_type=hv.ScalarType.E8M0,
+            leading_dimension=None,
+            block_axis=0,
+            block_size=4,
+            scale=hv.MxScaleGenerationMode.Derived,
+        )
         data_generation = hv.MxDataGeneration.quantize(
             real_generation_recipe_last_dimension_fastest(
                 hv.GenerationRecipe.uniform_real(
@@ -37,12 +41,14 @@ class MxTests(unittest.TestCase):  # noqa: F405
                     ),
                     hv.MxRepresentedValueRange(-1, 1),
                 )
-                options = hv.MxGenerationOptions()
-                options.data_type = hv.ScalarType.Float4E2M1
-                options.scale_type = hv.ScalarType.E8M0
-                options.leading_dimension = dimensions[0]
-                options.block_axis = block_axis
-                options.block_size = 32
+                options = hv.MxGenerationOptions(
+                    data_type=hv.ScalarType.Float4E2M1,
+                    scale_type=hv.ScalarType.E8M0,
+                    leading_dimension=dimensions[0],
+                    block_axis=block_axis,
+                    block_size=32,
+                    scale=hv.MxScaleGenerationMode.Derived,
+                )
 
                 first = hv.generate_mx(dimensions, data_generation, options)
                 second = hv.generate_mx(dimensions, data_generation, options)
@@ -83,12 +89,14 @@ class MxTests(unittest.TestCase):  # noqa: F405
                     ),
                     hv.MxRepresentedValueRange(minimum, maximum),
                 )
-                options = hv.MxGenerationOptions()
-                options.data_type = hv.ScalarType.Float4E2M1
-                options.scale_type = hv.ScalarType.E8M0
-                options.leading_dimension = leading_dimension
-                options.block_axis = block_axis
-                options.block_size = 4
+                options = hv.MxGenerationOptions(
+                    data_type=hv.ScalarType.Float4E2M1,
+                    scale_type=hv.ScalarType.E8M0,
+                    leading_dimension=leading_dimension,
+                    block_axis=block_axis,
+                    block_size=4,
+                    scale=hv.MxScaleGenerationMode.Derived,
+                )
 
                 observed = hv.generate_mx(dimensions, data_generation, options)
                 expected_data, expected_scales, expected_indices, expected_reference = (
@@ -129,12 +137,14 @@ class MxTests(unittest.TestCase):  # noqa: F405
             ),
             hv.MxRepresentedValueRange(-1.0, 1.0),
         )
-        options = hv.MxGenerationOptions()
-        options.data_type = hv.ScalarType.Float4E2M1
-        options.scale_type = hv.ScalarType.E8M0
-        options.block_axis = 0
-        options.block_size = 4
-        options.scale = hv.MxScaleGenerationMode.One
+        options = hv.MxGenerationOptions(
+            data_type=hv.ScalarType.Float4E2M1,
+            scale_type=hv.ScalarType.E8M0,
+            leading_dimension=None,
+            block_axis=0,
+            block_size=4,
+            scale=hv.MxScaleGenerationMode.One,
+        )
 
         observed = hv.generate_mx([8, 8], data_generation, options)
         np.testing.assert_array_equal(

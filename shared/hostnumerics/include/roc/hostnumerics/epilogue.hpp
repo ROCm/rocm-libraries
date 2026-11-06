@@ -44,7 +44,7 @@ struct EpilogueOptions {
 // Scalar types to allocate for an owning epilogue call. Optional types request
 // the corresponding additional result tensor.
 struct EpilogueOutputTypes {
-    ScalarType output = ScalarType::Float32;
+    ScalarType output;
     std::optional<ScalarType> rawOutput;
     std::optional<ScalarType> auxiliaryOutput;
     std::optional<ScalarType> amax;

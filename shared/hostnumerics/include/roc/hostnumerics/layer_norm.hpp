@@ -9,18 +9,19 @@
 
 namespace roc::hostnumerics {
 // Numerical policy and optional affine inputs for population-variance LayerNorm.
+// axis, accumulatorType and epsilon are required.
 struct LayerNormOptions {
-    size_t axis = 0;                                   // Nonempty dimension normalized per slice.
-    ScalarType accumulatorType = ScalarType::Float32;  // Float32 or Float64 arithmetic.
-    std::optional<Tensor> gamma;                       // Optional scale vector indexed by axis.
-    std::optional<Tensor> beta;                        // Optional bias vector indexed by axis.
-    double epsilon = 1e-5;                             // Finite nonnegative variance offset.
+    size_t axis;                  // Nonempty dimension normalized per slice.
+    ScalarType accumulatorType;   // Float32 or Float64 arithmetic.
+    std::optional<Tensor> gamma;  // Optional scale vector indexed by axis.
+    std::optional<Tensor> beta;   // Optional bias vector indexed by axis.
+    double epsilon;               // Finite nonnegative variance offset.
 };
 
 // Scalar types to allocate for an owning LayerNorm call. Optional statistic
 // types request one value per normalization slice.
 struct LayerNormOutputTypes {
-    ScalarType output = ScalarType::Float32;
+    ScalarType output;
     std::optional<ScalarType> mean;
     std::optional<ScalarType> inverseVariance;
 };

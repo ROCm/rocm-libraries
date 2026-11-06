@@ -44,7 +44,10 @@ void registerMxBindings(nb::module_& module) {
         .value("NaN", MxScaleGenerationMode::NaN);
 
     nb::class_<MxGenerationOptions>(module, "MxGenerationOptions")
-        .def(nb::init<>())
+        .def(nb::init<ScalarType, ScalarType, std::optional<ptrdiff_t>, size_t, size_t,
+                      MxScaleGenerationMode>(),
+             "data_type"_a, "scale_type"_a, "leading_dimension"_a, "block_axis"_a, "block_size"_a,
+             "scale"_a)
         .def_rw("data_type", &MxGenerationOptions::dataType)
         .def_rw("scale_type", &MxGenerationOptions::scaleType)
         .def_rw("leading_dimension", &MxGenerationOptions::leadingDimension)
