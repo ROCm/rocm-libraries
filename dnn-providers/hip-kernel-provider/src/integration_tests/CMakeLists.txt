@@ -106,6 +106,18 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
             kernel_ingestor_engine/IntegrationGpuGfx950AttentionUnifiedKnobs.cpp
         )
     endif()
+    # The gfx942 Unified2D knobs suite: compiled on any build arch when the product carries
+    # the bundle, GTEST_SKIPs off gfx942.
+    hkp_product_offers_engine(_hkp_gfx942_unified_2d_bundle "hipkernel:Gfx942AttentionUnified2D")
+    if(_hkp_gfx942_unified_2d_bundle AND NOT HIPDNN_ENABLE_SDPA)
+        message(WARNING
+                "HIPDNN_ENABLE_KERNEL_INGESTOR is ON but hipDNN was built with HIPDNN_ENABLE_SDPA=OFF. "
+                "Skipping gfx942 unified attention 2D knob integration tests. Rebuild hipDNN with -DHIPDNN_ENABLE_SDPA=ON to enable them.")
+    elseif(_hkp_gfx942_unified_2d_bundle)
+        target_sources(hip_kernel_provider_integration_tests PRIVATE
+            kernel_ingestor_engine/IntegrationGpuGfx942AttentionUnified2DKnobs.cpp
+        )
+    endif()
     target_sources(hip_kernel_provider_integration_tests PRIVATE
         kernel_ingestor_engine/IntegrationGpuKernelIngestor.cpp
         kernel_ingestor_engine/IntegrationGpuKernelIngestorKpack.cpp
@@ -247,6 +259,37 @@ foreach(_gfx950_engine IN ITEMS
             INSTALL_SUBDIR hip_kernel_provider
             INSTALL_DESTINATION "${_hkp_gfx950_shard_dest}"
             INSTALL_STAGING_KEY hkp_census_gfx950
+            REFERENCE_EXECUTOR gpu
+            GTEST_FILTER "quick_SdpaFwd_Default.*:standard_SdpaFwd_Default.*:comprehensive_SdpaFwd_Default.*:full_SdpaFwd_Default.*"
+            ENVIRONMENT_MODIFICATION ${TEST_ENVIRONMENT_MODIFICATION}
+        )
+    endif()
+endforeach()
+
+# One gpu_ref entry per gfx942 attention engine, gated and routed into the gfx942 shard
+# for the same reasons as the gfx950 entries above.
+foreach(_gfx942_engine IN ITEMS
+        "unified_2d|Gfx942AttentionUnified2D")
+    string(REPLACE "|" ";" _gfx942_engine "${_gfx942_engine}")
+    list(GET _gfx942_engine 0 _snake)
+    list(GET _gfx942_engine 1 _local)
+
+    set(_available FALSE)
+    if(HIPDNN_ENABLE_KERNEL_INGESTOR)
+        hkp_product_ships_engine_for_arch(_available "hipkernel:${_local}" gfx942)
+    endif()
+    if(HIPDNN_ENABLE_KERNEL_INGESTOR AND HIPDNN_ENABLE_SDPA
+       AND _available
+       AND TARGET hipdnn_integration_tests AND COMMAND add_external_integration_test_target)
+        hkp_reserve_census_shard(_hkp_gfx942_shard_dest gfx942)
+
+        add_external_integration_test_target(
+            TARGET_NAME hip_kernel_provider_gfx942_attention_${_snake}_gpu_ref_integration_tests
+            PLUGIN_TARGET hip_kernel_provider
+            ENGINE_NAME   "hipkernel:${_local}"
+            INSTALL_SUBDIR hip_kernel_provider
+            INSTALL_DESTINATION "${_hkp_gfx942_shard_dest}"
+            INSTALL_STAGING_KEY hkp_census_gfx942
             REFERENCE_EXECUTOR gpu
             GTEST_FILTER "quick_SdpaFwd_Default.*:standard_SdpaFwd_Default.*:comprehensive_SdpaFwd_Default.*:full_SdpaFwd_Default.*"
             ENVIRONMENT_MODIFICATION ${TEST_ENVIRONMENT_MODIFICATION}

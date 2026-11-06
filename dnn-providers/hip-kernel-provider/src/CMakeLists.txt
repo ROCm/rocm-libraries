@@ -439,6 +439,65 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
         endif()
     endforeach()
 
+    # The gfx942 attention engines, routed into the gfx942 shard the same way. The file is
+    # truncated once here; every gfx942 engine appends to it, so a later gfx942 engine adds
+    # an item to the loop below rather than a second truncation. Each item is
+    # "<snake slug>|<engine local name>"; each engine has its own TOML and categories YAML.
+    set(_hkp_gfx942_external_ctest
+        "${CMAKE_CURRENT_BINARY_DIR}/census_external_gfx942_CTestTestfile.cmake")
+    file(WRITE "${_hkp_gfx942_external_ctest}" "")
+    set_property(GLOBAL PROPERTY
+                 HKP_CENSUS_EXTERNAL_TEST_FILE_gfx942 "${_hkp_gfx942_external_ctest}")
+
+    foreach(_gfx942_engine IN ITEMS
+            "unified_2d|Gfx942AttentionUnified2D")
+        string(REPLACE "|" ";" _gfx942_engine "${_gfx942_engine}")
+        list(GET _gfx942_engine 0 _snake)
+        list(GET _gfx942_engine 1 _local)
+        string(REPLACE "_" "-" _dash "${_snake}")
+        string(TOUPPER "${_snake}" _upper)
+        set(_target ${PROJECT_NAME}-gfx942-attention-${_dash}-external-integration-check)
+
+        set(_category_args "")
+        if(HIPKERNELPROVIDER_YAML_CATEGORIZATION_ENABLED
+           AND DEFINED HIPKERNELPROVIDER_GFX942_ATTENTION_${_upper}_INTEGRATION_CATEGORIES_YAML)
+            list(APPEND _category_args
+                TEST_CATEGORIES_YAML
+                    "${HIPKERNELPROVIDER_GFX942_ATTENTION_${_upper}_INTEGRATION_CATEGORIES_YAML}"
+                INSTALL_TEST_FILE "${_hkp_gfx942_external_ctest}"
+                TEST_NAME_PREFIX ${PROJECT_NAME}-gfx942-attention-${_dash}-external-integration
+            )
+        endif()
+
+        set(_available FALSE)
+        if(HIPDNN_ENABLE_KERNEL_INGESTOR)
+            hkp_product_ships_engine_for_arch(_available "hipkernel:${_local}" gfx942)
+        endif()
+        if(HIPDNN_ENABLE_KERNEL_INGESTOR AND HIPDNN_ENABLE_SDPA
+           AND _available
+           AND TARGET hipdnn_integration_tests)
+            set(_config "${CMAKE_CURRENT_SOURCE_DIR}/../config/hipkernel_${_local}.toml")
+            hkp_reserve_census_shard(_hkp_gfx942_shard_dest gfx942 FILES "${_config}")
+
+            add_external_integration_test_target(
+                TARGET_NAME    ${_target}
+                PLUGIN_TARGET  hip_kernel_provider
+                ENGINE_NAME    "hipkernel:${_local}"
+                INSTALL_SUBDIR hip_kernel_provider
+                INSTALL_DESTINATION "${_hkp_gfx942_shard_dest}"
+                INSTALL_STAGING_KEY hkp_census_gfx942
+                TEST_CONFIG    ${_config}
+                GTEST_FILTER   "quick_SdpaFwd_Default.*:standard_SdpaFwd_Default.*:comprehensive_SdpaFwd_Default.*:full_SdpaFwd_Default.*"
+                ENVIRONMENT    ${TEST_ENVIRONMENT}
+                ENVIRONMENT_MODIFICATION ${TEST_ENVIRONMENT_MODIFICATION}
+                ${_category_args}
+            )
+            message(STATUS "Created ${_target} target")
+        else()
+            message(STATUS "hipkernel:${_local} is not shipped for gfx942 by this configuration - skipping ${_target}")
+        endif()
+    endforeach()
+
     # FlyDSL engines against the shared bundles, checked by the GPU reference executor.
     # One entry per engine and architecture it carries content for, routed into that
     # architecture's shard like the gfx950 entries above, so pruning an artifact to other
