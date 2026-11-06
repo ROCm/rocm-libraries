@@ -3330,6 +3330,29 @@ void testing_matmul_with_bias(const Arguments& arg,
                 hScaleD.emplace_back(Talpha, 1);
         }
 
+        // A failed pinned allocation leaves a null buffer that the initialization below would
+        // write through.
+        CHECK_HOST_ALLOCATION(host_allocation_failure({&hA,
+                                                       &hB,
+                                                       &hC,
+                                                       &hD_gold,
+                                                       &hD_1,
+                                                       &hBias,
+                                                       &hBias_gold,
+                                                       &hE,
+                                                       &hE_gold,
+                                                       &hScaleAlphaVec,
+                                                       &hScaleA,
+                                                       &hScaleB,
+                                                       &hScaleC,
+                                                       &hScaleD,
+                                                       &hScaleE,
+                                                       &hAmaxD_gold,
+                                                       &hAmaxD,
+                                                       &hD_gold_epl,
+                                                       &hD_gold_ScaleAlpha,
+                                                       &hBias_gold_epl}));
+
         hipblaslt_seedrand();
 
         // For ULP validation, force hpl / trig_float A/B/C inputs to be
@@ -3720,6 +3743,7 @@ void testing_matmul_with_bias(const Arguments& arg,
             if(do_swizzle_a)
             {
                 HipHostBuffer tmp(TiA, size_dA[i]);
+                CHECK_HOST_ALLOCATION(host_allocation_failure(tmp));
                 swizzle_tensor_type(
                     tmp, hA[i], TiA, arg, num_batches[i], M[i], K[i], lda[i], false);
                 CHECK_HIP_ERROR(synchronize(dA[i], tmp, block_count));
@@ -3728,6 +3752,7 @@ void testing_matmul_with_bias(const Arguments& arg,
             if(do_swizzle_b)
             {
                 HipHostBuffer tmp(TiB, size_dB[i]);
+                CHECK_HOST_ALLOCATION(host_allocation_failure(tmp));
                 swizzle_tensor_type(
                     tmp, hB[i], TiB, arg, num_batches[i], N[i], K[i], ldb[i], false);
                 CHECK_HIP_ERROR(synchronize(dB[i], tmp, block_count));
@@ -4210,6 +4235,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                 if(do_swizzle_a)
                 {
                     HipHostBuffer tmp(TiA, size_dA[i]);
+                    CHECK_HOST_ALLOCATION(host_allocation_failure(tmp));
                     swizzle_tensor_type(
                         tmp, hA[batchCount], TiA, arg, 1, M[i], K[i], lda[i], false);
                     CHECK_HIP_ERROR(synchronize(dA[batchCount], tmp, block_count));
@@ -4218,6 +4244,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                 if(do_swizzle_b)
                 {
                     HipHostBuffer tmp(TiB, size_dB[i]);
+                    CHECK_HOST_ALLOCATION(host_allocation_failure(tmp));
                     swizzle_tensor_type(
                         tmp, hB[batchCount], TiB, arg, 1, N[i], K[i], ldb[i], false);
                     CHECK_HIP_ERROR(synchronize(dB[batchCount], tmp, block_count));
