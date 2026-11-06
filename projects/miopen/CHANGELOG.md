@@ -44,6 +44,12 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
 * [Conv] Added `ConvDirectDepthwiseFwd2D`, a direct 2D depthwise forward convolution solver for
   RDNA3, RDNA3.5 and RDNA4 (`gfx110X`, `gfx115X`, `gfx120X`). It covers fp16, bf16 and fp32 NCHW
   filters up to 7x7 and is selected through Find mode.
+* [Conv] Added `ConvDirectDepthwiseFwd2DDilated`, a forward 2D depthwise convolution solver for
+  dilated filters on RDNA3, RDNA3.5 and RDNA4 (`gfx110X`, `gfx115X`, `gfx120X`). It runs the
+  `ConvDirectDepthwiseFwd2D` kernel with each lane walking outputs a dilation step apart, so the
+  outputs share their input rows and columns, and takes any dilation up to a 7x7 filter, including
+  the 3x3 separable ASPP convolutions of DeepLabV3+ (dilation 6, 12, 18) that ran on the naive
+  solver. Both solvers stay applicable and Find picks between them.
 
 ### Changed
 * [Conv] `ConvDirectDepthwiseFwd2D` now also takes undilated filters up to 9x9 (horizontal stride

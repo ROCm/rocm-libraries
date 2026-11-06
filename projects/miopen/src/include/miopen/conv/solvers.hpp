@@ -4632,6 +4632,22 @@ struct MIOPEN_INTERNALS_EXPORT ConvDirectDepthwiseFwd2D final : ConvSolver
                              const miopen::conv::ProblemDescription&) const override;
 };
 
+/// Forward 2D depthwise convolution with a dilated filter for RDNA, on the
+/// ConvDirectDepthwiseFwd2D kernel with each lane walking outputs a dilation step apart.
+struct MIOPEN_INTERNALS_EXPORT ConvDirectDepthwiseFwd2DDilated final : ConvSolver
+{
+    const std::string& SolverDbId() const override
+    {
+        return GetSolverDbId<ConvDirectDepthwiseFwd2DDilated>();
+    }
+
+    bool IsApplicable(const ExecutionContext&,
+                      const miopen::conv::ProblemDescription&) const override;
+    bool IsDynamic() const override { return true; }
+    ConvSolution GetSolution(const ExecutionContext&,
+                             const miopen::conv::ProblemDescription&) const override;
+};
+
 /// Placeholder forward 3D depthwise convolution (FP16/BF16, default/NCDHW layout); stub kernel.
 struct MIOPEN_INTERNALS_EXPORT ConvDepthwiseFwd3D final : ConvSolver
 {
