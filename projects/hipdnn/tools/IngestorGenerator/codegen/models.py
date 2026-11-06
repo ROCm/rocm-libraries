@@ -436,8 +436,9 @@ class EngineSpec:
     #: (``Unified2D``) would come out as ``unified2_d``.
     slug_override: str | None = None
     #: Per-arch heuristic bindings `uhd_gen promote` writes into the UED: role ->
-    #: arch (or `default`) -> UHD ids, in config order. Empty emits nothing.
-    heuristics: dict[str, dict[str, list[str]]] = field(default_factory=dict)
+    #: arch (or `default`) -> UHD ids in config order (a bare UUID string for
+    #: `predict_applicable_kernels`, which is single-valued). Empty emits nothing.
+    heuristics: dict[str, dict[str, list[str] | str]] = field(default_factory=dict)
 
     @property
     def namespace(self) -> str:

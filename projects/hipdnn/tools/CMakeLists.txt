@@ -641,6 +641,14 @@ endif()
                 list(APPEND _hipdnn_ingestor_pytest_env "HKP_HIPCC=${HIP_HIPCC_EXECUTABLE}")
             endif()
 
+            # test_promote_round_trip.py runs uhd_gen promote, which computes features_hash
+            # with the built evaluator (as uhd_gen_tests does above); without it the test skips.
+            if(TARGET hipdnn_uhd_features)
+                list(APPEND _hipdnn_ingestor_pytest_env
+                     "HIPDNN_UHD_FEATURE_EVALUATOR=$<TARGET_FILE:hipdnn_uhd_features>"
+                )
+            endif()
+
             # Include directories for test_native_stub.py, one per line. TARGET_PROPERTY does not
             # follow ALIAS targets, so resolve to the real target.
             set(_hipdnn_stub_include_exprs "")

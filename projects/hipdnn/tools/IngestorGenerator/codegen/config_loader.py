@@ -743,6 +743,10 @@ HEURISTIC_ROLES = (
     "predict_applicable_kernels",
 )
 
+#: Roles whose arch entries are one UUID string, not a list: the runtime reads them
+#: with `requireId` (RFC 0019 §3.1, RFC 0020), and promote writes a bare id.
+SINGLE_ID_ROLES = ("predict_applicable_kernels",)
+
 #: One concrete architecture name. Mirrors `device_probe.ARCH_SHAPE` and its family-word
 #: refusal (tools/device_probe.py), which `codegen` cannot import; a test pins the two.
 _ARCH_TOKEN = re.compile(r"gfx[0-9a-f]{3,}(?:-[a-z]+)*")
@@ -759,16 +763,18 @@ def _is_arch_token(text) -> bool:
 
 
 def _load_heuristics(engine_raw: dict, slotted: bool) -> dict:
-    """Read ``engine.heuristics``: role -> arch -> UHD ids, as `uhd_gen promote`
-    writes them into the UED. Absent is ``{}``, which emits nothing."""
+    """Read ``engine.heuristics``: role -> arch -> UHD ids (one UUID string for the
+    single-valued roles), as `uhd_gen promote` writes them into the UED. Absent is
+    ``{}``, which emits nothing."""
     raw = engine_raw.get("heuristics")
     if raw is None:
         return {}
     scope = "engine.heuristics"
     if slotted:
         raise ConfigError(
-            f"{scope} is set on a slotted engine; a slotted engine binds its rankers "
-            f"per slot (slots[].ranker), so per-arch engine bindings are not supported."
+            f"{scope} is set on a slotted engine; per-arch engine.heuristics bindings "
+            f"are not supported on a slotted engine yet. `uhd_gen promote` installs "
+            f"slot rankers per slot (RFC 0021)."
         )
     _require_mapping(raw, scope)
     heuristics = {}
@@ -800,6 +806,17 @@ def _load_heuristics(engine_raw: dict, slotted: bool) -> dict:
                     f"{scope}.{role} key {arch!r} is not one concrete gfx architecture "
                     f"name (e.g. gfx942) or 'default'."
                 )
+            if role in SINGLE_ID_ROLES:
+                if isinstance(ids, (list, tuple)):
+                    raise ConfigError(
+                        f"{key} is a list; {role} is single-valued (RFC 0019 §3.1: "
+                        f"the runtime reads one UHD id per arch), so give one UUID "
+                        f"string, not a list."
+                    )
+                if not isinstance(ids, str) or not _UUID.fullmatch(ids):
+                    raise ConfigError(f"{key} holds {ids!r}, which is not a UUID.")
+                bound[arch] = ids
+                continue
             ids = _require_sequence(ids, key, "UHD ids")
             if not ids:
                 raise ConfigError(f"{key} is an empty list; bind at least one UHD id.")

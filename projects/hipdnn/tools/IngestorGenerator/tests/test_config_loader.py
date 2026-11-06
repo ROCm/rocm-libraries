@@ -3124,14 +3124,69 @@ class TestEngineHeuristics:
                 heuristic="none",
             )
 
+    def test_predict_applicable_kernels_is_one_id_and_emits_a_string(
+        self, tmp_path, configs_dir
+    ):
+        from codegen.generator import build_ued, mint_ids
+
+        config = self._load(
+            tmp_path,
+            configs_dir,
+            {
+                "predict_applicable_kernels": {"default": self.OTHER},
+                "predict_engine": {"gfx942": [self.MODEL]},
+                "sort_kernel_catalog": {"gfx942": [self.MODEL]},
+            },
+        )
+        assert config.engine.heuristics["predict_applicable_kernels"] == {
+            "default": self.OTHER
+        }
+        ued = build_ued(config, mint_ids(config))
+        assert ued["predict_applicable_kernels"] == {"default": self.OTHER}
+        # The metric roles keep the list form promote writes for them.
+        assert ued["predict_engine"] == {"gfx942": [self.MODEL]}
+        assert ued["sort_kernel_catalog"]["gfx942"] == [self.MODEL]
+
+    @pytest.mark.parametrize("ids", [[MODEL], [MODEL, OTHER]], ids=["one", "two"])
+    def test_predict_applicable_kernels_refuses_a_list(
+        self, tmp_path, configs_dir, ids
+    ):
+        with pytest.raises(
+            ConfigError,
+            match=r"engine\.heuristics\.predict_applicable_kernels\.gfx942 is a list; "
+            r"predict_applicable_kernels is single-valued \(RFC 0019 §3\.1",
+        ):
+            self._load(
+                tmp_path,
+                configs_dir,
+                {"predict_applicable_kernels": {"gfx942": ids}},
+            )
+
+    @pytest.mark.parametrize("bad", ["not-a-uuid", 7, None])
+    def test_predict_applicable_kernels_id_must_be_a_uuid(
+        self, tmp_path, configs_dir, bad
+    ):
+        with pytest.raises(ConfigError, match=r"predict_applicable_kernels\.gfx942"):
+            self._load(
+                tmp_path,
+                configs_dir,
+                {"predict_applicable_kernels": {"gfx942": bad}},
+            )
+
     def test_refused_beside_slots(self, tmp_path):
         fixture = Path(__file__).parent / "fixtures" / "slotted_three_slot.yaml"
         raw = yaml.safe_load(fixture.read_text())
         raw["engine"]["heuristics"] = {"predict_engine": {"gfx942": [self.MODEL]}}
         path = tmp_path / fixture.name
         path.write_text(yaml.safe_dump(raw, sort_keys=False))
-        with pytest.raises(ConfigError, match="engine.heuristics is set on a slotted"):
+        with pytest.raises(
+            ConfigError, match=r"engine\.heuristics is set on a slotted"
+        ) as refusal:
             load_config(path)
+        message = str(refusal.value)
+        assert "slots[].ranker" not in message
+        assert "not supported on a slotted engine yet" in message
+        assert "uhd_gen promote" in message and "RFC 0021" in message
 
     def test_refusal_exits_2(self, tmp_path, configs_dir, monkeypatch, capsys):
         import generate

@@ -406,9 +406,21 @@ regeneration drops it (and the regeneration gate's byte compare fails):
 
 Roles are the three promote accepts. Keys are one concrete arch (`gfx942`, not `gfx9` or
 `gfx950-dcgpu`); `default` is allowed except under `sort_kernel_catalog`, whose `default`
-is the generator's native UHD (so that role also needs `heuristic: native`). Values are
-non-empty lists of distinct UUIDs. A slotted engine refuses the key: its rankers are
-per slot. Without `engine.heuristics` every output is unchanged.
+is the generator's native UHD (so that role also needs `heuristic: native`). The two
+metric roles (`sort_kernel_catalog`, `predict_engine`) take non-empty lists of distinct
+UUIDs, one per ranking metric. `predict_applicable_kernels` is single-valued (RFC 0019
+§3.1; the runtime reads one id), so its arch value is one UUID string, as promote writes
+it, and a list is refused:
+
+```yaml
+predict_applicable_kernels:
+  gfx942: 4b750e22-2656-46ce-89e7-be9ba588d732
+```
+
+A slotted engine refuses the key: it is not supported there yet, and `uhd_gen promote`
+installs slot rankers per slot (RFC 0021). Without `engine.heuristics` every output is
+unchanged. `tests/test_promote_round_trip.py` runs the real promote and checks that the
+regenerated UED is identical.
 
 ## Output
 
@@ -912,8 +924,9 @@ engine:
   knobs: [block_size]             # optional; must all be int-typed kmd_fields
   heuristic: native | none        # optional, default "native"; "none" omits the UHD
   heuristics:                     # optional; per-arch model UHDs `uhd_gen promote` bound,
-    sort_kernel_catalog:          # role -> arch -> [UHD id]. See "Shipping a trained
-      gfx942: [<uhd-uuid>]        # model". Not allowed beside `slots`.
+    sort_kernel_catalog:          # role -> arch -> [UHD id] (one UUID for
+      gfx942: [<uhd-uuid>]        # predict_applicable_kernels). See "Shipping a trained
+                                  # model". Not allowed beside `slots`.
 
 kmd_fields:                       # the KMD's fields[] -- one per axis this engine's
   - name: block_size              # kernels vary along
