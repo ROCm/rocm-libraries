@@ -92,6 +92,17 @@ namespace FixedPointEmulation
         return static_cast<unsigned>(std::max(size_t(1u), chunk));
     }
 
+    /* Workspace needed independently of the moduli count: sftA/sftB, nan_flag,
+     * row/col max, the ADP buffer, and the INT8 GEMM reserve.                 */
+    static size_t fixed_overhead_bytes(int64_t m, int64_t n)
+    {
+        const size_t co = pad(static_cast<size_t>(m));
+        const size_t pn = pad(static_cast<size_t>(n));
+        return co * sizeof(int16_t) + pn * sizeof(int16_t) + sizeof(uint32_t)
+               + co * sizeof(int32_t) + pn * sizeof(int32_t) + 2 * sizeof(float)
+               + OZ2_INT8_WS_RESERVE;
+    }
+
     /* Compute the effective INT8 workspace budget for the monolithic path given
      * workspace_bytes, sub-problem dimensions (m, n), and the moduli count s.
      * Mirrors the two-step budget derivation in emulated_gemm_impl so that
@@ -100,11 +111,8 @@ namespace FixedPointEmulation
     static size_t
         compute_budget_from_ws(int64_t m, int64_t n, int64_t k, unsigned s, size_t workspace_bytes)
     {
-        const size_t co  = pad(static_cast<size_t>(m));
-        const size_t pn  = pad(static_cast<size_t>(n));
-        const size_t boh = co * sizeof(int16_t) + pn * sizeof(int16_t) + sizeof(uint32_t)
-                           + co * sizeof(int32_t) + pn * sizeof(int32_t) + 2 * sizeof(float)
-                           + OZ2_INT8_WS_RESERVE;
+        const size_t   co  = pad(static_cast<size_t>(m));
+        const size_t   boh = fixed_overhead_bytes(m, n);
         const size_t   W1  = (workspace_bytes > boh) ? workspace_bytes - boh : 0u;
         const unsigned cs1 = compute_chunk_size(m, n, k, s, W1);
         if(cs1 < s)
@@ -113,6 +121,19 @@ namespace FixedPointEmulation
             return (workspace_bytes > boh + zoh) ? workspace_bytes - boh - zoh : 0u;
         }
         return W1;
+    }
+
+    /* Smallest workspace that emulates (m, n, k) without a spatial split, i.e.
+     * the smallest W with chunk_fits(m, n, k, compute_budget_from_ws(..., W)).
+     * Either all s modulus slices fit in one pass (no Zhi/Zlo accumulators
+     * needed), or one slice per pass plus the Zhi/Zlo accumulators; for s >= 6
+     * the latter is always smaller.                                           */
+    static size_t min_workspace_bytes(int64_t m, int64_t n, int64_t k, unsigned s)
+    {
+        const size_t per = bytes_per_modulus(m, n, k);
+        const size_t zoh
+            = 2u * pad(static_cast<size_t>(m)) * static_cast<size_t>(n) * sizeof(double);
+        return fixed_overhead_bytes(m, n) + std::min(static_cast<size_t>(s) * per, zoh + per);
     }
 
     struct PerfModelKernelEffs
@@ -1196,6 +1217,15 @@ namespace FixedPointEmulation
         /* Type-specific label strings for warning messages. */
         constexpr const char* type_name  = std::is_same_v<T, double> ? "FP64" : "FP32";
         constexpr const char* native_str = std::is_same_v<T, double> ? "DGEMM" : "SGEMM";
+
+        /* Minimum problem size guard — see FIXED_POINT_EMUL_MIN_MN.  Must come
+         * before the split below (as in effective_time): splitting only shrinks
+         * m and n, and without this guard a sub-problem that never fits, e.g.
+         * (m, n) = (0, 1), recurses into an identical copy of itself.          */
+        if(m < FIXED_POINT_EMUL_MIN_MN || n < FIXED_POINT_EMUL_MIN_MN)
+            return native_gemm_fallback<T>(
+                h, opA, opB, m, n, k, alpha, A, lda, B, ldb, beta, C, ldc, D, ldd, stream);
+
         /* Always ADP mode: workspace layout always covers max_num_moduli<T>() moduli.
          * fixedPointEmulationNumModuli() post-ADP override is applied later. */
         const unsigned num_moduli = max_num_moduli<T>();
@@ -1341,11 +1371,6 @@ namespace FixedPointEmulation
             }
         }
         /* ── Existing monolithic path ────────────────────────────────────── */
-
-        /* Minimum problem size guard — see FIXED_POINT_EMUL_MIN_MN. */
-        if(m < FIXED_POINT_EMUL_MIN_MN || n < FIXED_POINT_EMUL_MIN_MN)
-            return native_gemm_fallback<T>(
-                h, opA, opB, m, n, k, alpha, A, lda, B, ldb, beta, C, ldc, D, ldd, stream);
 
         const bool    _prof = (prof != nullptr);
         Ozaki2Context context;
@@ -2366,31 +2391,33 @@ rocblaslt_status fp64EmulatedGemm(hipblasLtHandle_t                  handle,
             return rocblaslt_status_memory_error;
         }
 
-        /* Case 2: workspace provided — compute budget-constrained chunk_size. */
-        const bool   tA_g = (opA != HIPBLAS_OP_N), tB_g = (opB != HIPBLAS_OP_N);
-        const size_t cola8i_g = pad(static_cast<size_t>(m));
-        const size_t padn_g   = pad(static_cast<size_t>(n));
-        const size_t base_oh  = cola8i_g * sizeof(int16_t) /* sftA       */
-                               + padn_g * sizeof(int16_t) /* sftB       */
-                               + sizeof(uint32_t) /* nan_flag   */
-                               + cola8i_g * sizeof(int32_t) /* row_max    */
-                               + padn_g * sizeof(int32_t) /* col_max    */
-                               + 2 * sizeof(float) /* adp_buf    */
-                               + OZ2_INT8_WS_RESERVE;
-
-        const size_t   W_var1 = (W > base_oh) ? W - base_oh : 0u;
-        const unsigned cs1    = compute_chunk_size(m, n, k, num_moduli, W_var1);
-
-        size_t W_var;
-        if(cs1 < num_moduli)
+        /* Case 2: workspace provided.  Hard capacity check, for every strategy
+         * (EAGER bypasses the performance model below, not this check): if not
+         * even a FIXED_POINT_EMUL_MIN_MN^2 tile fits, splitting cannot help.  */
+        const bool   tA_g  = (opA != HIPBLAS_OP_N), tB_g = (opB != HIPBLAS_OP_N);
+        const size_t W_min = min_workspace_bytes(
+            FIXED_POINT_EMUL_MIN_MN, FIXED_POINT_EMUL_MIN_MN, k, num_moduli);
+        if(W < W_min)
         {
-            const size_t szC32i_g = cola8i_g * static_cast<size_t>(n);
-            const size_t zlo_oh   = 2u * szC32i_g * sizeof(double);
-            W_var                 = (W > base_oh + zlo_oh) ? W - base_oh - zlo_oh : 0u;
-        }
-        else
-        {
-            W_var = W_var1;
+            static std::atomic<int> s_ws_min_warns{0};
+            if(s_ws_min_warns.fetch_add(1, std::memory_order_relaxed) < 5)
+            {
+                FixedPointEmulationSettings ws_dec{};
+                ws_dec.workspace_bytes = ~size_t{0};
+                const size_t opt_ws
+                    = fixedPointEmulationWorkspaceSize(h, HIP_R_64F, opA, opB, m, n, k, ws_dec);
+                const size_t nosplit_ws = min_workspace_bytes(m, n, k, num_moduli);
+                constexpr size_t MiB    = size_t(1) << 20;
+                hipblaslt_cerr
+                    << "[hipBLASLt WARNING] FP64 emulation workspace (" << (W / MiB)
+                    << " MiB) is below the minimum of " << ((W_min + MiB - 1) / MiB)
+                    << " MiB, which includes a " << (OZ2_INT8_GEMM_WS_BYTES / MiB)
+                    << " MiB INT8 GEMM reserve (m=" << m << ",n=" << n << ",k=" << k << ").\n"
+                    << "  Without spatial splitting: " << ((nosplit_ws + MiB - 1) / MiB)
+                    << " MiB. Optimal: " << (opt_ws / MiB) << " MiB.\n"
+                    << "  Falling back to native DGEMM." << std::endl;
+            }
+            return rocblaslt_status_memory_error;
         }
 
         /* EAGER strategy means "always emulate, bypass the performance model".
@@ -2751,26 +2778,31 @@ rocblaslt_status fp32EmulatedGemm(hipblasLtHandle_t                  handle,
             return rocblaslt_status_memory_error;
         }
 
-        const bool   tA_g = (opA != HIPBLAS_OP_N), tB_g = (opB != HIPBLAS_OP_N);
-        const size_t cola8i_g = pad(static_cast<size_t>(m));
-        const size_t padn_g   = pad(static_cast<size_t>(n));
-        const size_t base_oh  = cola8i_g * sizeof(int16_t) + padn_g * sizeof(int16_t)
-                               + sizeof(uint32_t) + cola8i_g * sizeof(int32_t)
-                               + padn_g * sizeof(int32_t) + 2 * sizeof(float)
-                               + OZ2_INT8_WS_RESERVE;
-
-        const size_t   W_var1 = (W > base_oh) ? W - base_oh : 0u;
-        const unsigned cs1    = compute_chunk_size(m, n, k, num_moduli, W_var1);
-        size_t         W_var;
-        if(cs1 < num_moduli)
+        /* Hard capacity check for every strategy — see fp64EmulatedGemm. */
+        const bool   tA_g  = (opA != HIPBLAS_OP_N), tB_g = (opB != HIPBLAS_OP_N);
+        const size_t W_min = min_workspace_bytes(
+            FIXED_POINT_EMUL_MIN_MN, FIXED_POINT_EMUL_MIN_MN, k, num_moduli);
+        if(W < W_min)
         {
-            const size_t szC32i_g = cola8i_g * static_cast<size_t>(n);
-            const size_t zlo_oh   = 2u * szC32i_g * sizeof(double);
-            W_var                 = (W > base_oh + zlo_oh) ? W - base_oh - zlo_oh : 0u;
-        }
-        else
-        {
-            W_var = W_var1;
+            static std::atomic<int> s_ws_min_warns{0};
+            if(s_ws_min_warns.fetch_add(1, std::memory_order_relaxed) < 5)
+            {
+                FixedPointEmulationSettings ws_dec{};
+                ws_dec.workspace_bytes = ~size_t{0};
+                const size_t opt_ws
+                    = fixedPointEmulationWorkspaceSize(h, HIP_R_32F, opA, opB, m, n, k, ws_dec);
+                const size_t nosplit_ws = min_workspace_bytes(m, n, k, num_moduli);
+                constexpr size_t MiB    = size_t(1) << 20;
+                hipblaslt_cerr
+                    << "[hipBLASLt WARNING] FP32 emulation workspace (" << (W / MiB)
+                    << " MiB) is below the minimum of " << ((W_min + MiB - 1) / MiB)
+                    << " MiB, which includes a " << (OZ2_INT8_GEMM_WS_BYTES / MiB)
+                    << " MiB INT8 GEMM reserve (m=" << m << ",n=" << n << ",k=" << k << ").\n"
+                    << "  Without spatial splitting: " << ((nosplit_ws + MiB - 1) / MiB)
+                    << " MiB. Optimal: " << (opt_ws / MiB) << " MiB.\n"
+                    << "  Falling back to native SGEMM." << std::endl;
+            }
+            return rocblaslt_status_memory_error;
         }
 
         const bool is_eager_g = (decision.strategy == HIPBLAS_EMULATION_STRATEGY_EAGER);

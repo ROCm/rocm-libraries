@@ -300,10 +300,21 @@ emulation workspace size in the ``workspaceSize`` field of each result.
 
 The returned size is optimal: it lets emulation run all INT8 GEMM passes at
 once. Emulation also works with a smaller workspace, but it then splits the
-work into more passes, which reduces throughput. With the ``performant``
-strategy on a GPU with measured performance values, if the smaller workspace
-makes emulation slower than the native GEMM, the call runs natively and prints
-a warning with the optimal size.
+work into more passes, or into smaller tiles of the output, which reduces
+throughput. With the ``performant`` strategy on a GPU with measured
+performance values, if the smaller workspace makes emulation slower than the
+native GEMM, the call runs natively and prints a warning with the optimal size.
+
+The workspace must be larger than the 128 MiB that emulation reserves for its
+internal INT8 GEMMs. If you reuse one buffer for many problems, at least 512 MiB
+is recommended. Emulation runs one INT8 GEMM per modulus and batches as many of
+them together as the workspace allows.
+For FP64, 512 MiB is enough to run GEMMs up to about 4096 x 4096 x 4096 without
+splitting the output into tiles, but the INT8 GEMMs then run in several smaller
+batches. Running all of them as a single batched INT8 GEMM at that size takes
+about 2 GiB. If the workspace can't hold even a minimal 16 x 16 tile of the
+output, the call runs natively, with any strategy, and prints a warning with
+the minimum and the optimal size.
 
 To avoid sizing the workspace for every problem, you can allocate one buffer
 and reuse it for all emulated GEMMs. On MI355X, a 16 to 32 GiB buffer gives
@@ -491,6 +502,8 @@ An emulation request runs as a native GEMM in these cases:
 * No workspace is passed, or, on a GPU with measured performance values, the
   workspace is too small for emulation to beat the native GEMM under the
   ``performant`` strategy.
+* The workspace can't hold a minimal 16 x 16 tile of the output, with any
+  strategy. See `Allocating the workspace`_.
 * Inf or NaN detection is enabled and the input contains Inf or NaN.
 * The dynamic range of the input is too wide for any supported number of moduli
   to reach the precision target. hipBLASLt runs the native GEMM rather than

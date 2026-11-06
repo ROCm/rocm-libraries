@@ -3363,4 +3363,348 @@ namespace
         hipblasLtEmulationDescDestroy(ed);
     }
 
+    // ── WorkspaceAndStrategy: workspace size × strategy × data type ──────────
+    //
+    // Sweeps the workspace from below the 128 MiB INT8 GEMM reserve up to the
+    // optimal size, for both strategies and both data types, on a 512³ GEMM:
+    //   BelowReserve  64 MiB         : can't hold a 16x16 tile -> memory_error
+    //   AtReserve     128 MiB        : same, for every strategy
+    //   Minimal       128 MiB + 1 MiB: emulates through spatial splitting
+    //   BelowOptimal  optimal - 1 MiB: emulates in several INT8 GEMM batches
+    //   Optimal       optimal        : one batched INT8 GEMM
+    // The direct entry point must return memory_error below the minimum with
+    // any strategy (EAGER bypasses only the performance model), and success
+    // under EAGER above it.  PERFORMANT may choose either.  Whatever happens,
+    // hipblasLtMatmul must succeed and match the native GEMM, emulated or not.
+    // Regression test for the unbounded recursion in EAGER mode with a
+    // workspace at or below the INT8 GEMM reserve.
+
+    enum WsKind
+    {
+        WS_BELOW_RESERVE,
+        WS_AT_RESERVE,
+        WS_MINIMAL,
+        WS_BELOW_OPTIMAL,
+        WS_OPTIMAL,
+    };
+
+    struct WsParam
+    {
+        hipDataType                type;
+        hipblasEmulationStrategy_t strategy;
+        WsKind                     ws;
+    };
+
+    static std::string WsParamName(const ::testing::TestParamInfo<WsParam>& info)
+    {
+        static const char* ws[]
+            = {"BelowReserve", "AtReserve", "Minimal", "BelowOptimal", "Optimal"};
+        const WsParam& p = info.param;
+        return std::string(p.type == HIP_R_32F ? "FP32" : "FP64") + "_"
+               + (p.strategy == HIPBLAS_EMULATION_STRATEGY_EAGER ? "Eager" : "Performant") + "_"
+               + ws[p.ws];
+    }
+
+    static std::vector<WsParam> AllWsParams()
+    {
+        std::vector<WsParam> v;
+        for(hipDataType t : {HIP_R_64F, HIP_R_32F})
+            for(hipblasEmulationStrategy_t s :
+                {HIPBLAS_EMULATION_STRATEGY_EAGER, HIPBLAS_EMULATION_STRATEGY_PERFORMANT})
+                for(WsKind w :
+                    {WS_BELOW_RESERVE, WS_AT_RESERVE, WS_MINIMAL, WS_BELOW_OPTIMAL, WS_OPTIMAL})
+                    v.push_back({t, s, w});
+        return v;
+    }
+
+    template <typename T>
+    struct WsTypeTraits;
+    template <>
+    struct WsTypeTraits<double>
+    {
+        static constexpr hipDataType          hip_type     = HIP_R_64F;
+        static constexpr hipblasComputeType_t native_ctype = HIPBLAS_COMPUTE_64F;
+        static constexpr hipblasComputeType_t emul_ctype = HIPBLAS_COMPUTE_64F_EMULATED_FIXEDPOINT;
+        static constexpr double               tol(int64_t)
+        {
+            return 1e-10;
+        }
+    };
+    template <>
+    struct WsTypeTraits<float>
+    {
+        static constexpr hipDataType          hip_type     = HIP_R_32F;
+        static constexpr hipblasComputeType_t native_ctype = HIPBLAS_COMPUTE_32F;
+        static constexpr hipblasComputeType_t emul_ctype = HIPBLAS_COMPUTE_32F_EMULATED_FIXEDPOINT;
+        static double                         tol(int64_t k)
+        {
+            return 2.0 * std::numeric_limits<float>::epsilon() * static_cast<double>(k);
+        }
+    };
+
+    /* NN, column-major, ld = rows: calls the internal FP64 / FP32 entry point. */
+    static rocblaslt_status emulatedGemmNN(hipblasLtHandle_t                  h,
+                                           int64_t                            m,
+                                           int64_t                            n,
+                                           int64_t                            k,
+                                           const double*                      alpha,
+                                           const double*                      A,
+                                           const double*                      B,
+                                           const double*                      beta,
+                                           const double*                      C,
+                                           double*                            D,
+                                           const FixedPointEmulationSettings& s)
+    {
+        return fp64EmulatedGemm(
+            h, HIPBLAS_OP_N, HIPBLAS_OP_N, m, n, k, alpha, A, m, B, k, beta, C, m, D, m, nullptr, s);
+    }
+    static rocblaslt_status emulatedGemmNN(hipblasLtHandle_t                  h,
+                                           int64_t                            m,
+                                           int64_t                            n,
+                                           int64_t                            k,
+                                           const float*                       alpha,
+                                           const float*                       A,
+                                           const float*                       B,
+                                           const float*                       beta,
+                                           const float*                       C,
+                                           float*                             D,
+                                           const FixedPointEmulationSettings& s)
+    {
+        return fp32EmulatedGemm(
+            h, HIPBLAS_OP_N, HIPBLAS_OP_N, m, n, k, alpha, A, m, B, k, beta, C, m, D, m, nullptr, s);
+    }
+
+    template <typename T>
+    static double maxRelDiff(const std::vector<T>& a, const std::vector<T>& ref)
+    {
+        double dmax = 0.0;
+        for(T v : ref)
+            dmax = std::max(dmax, std::abs(static_cast<double>(v)));
+        const double norm = std::max(dmax, 1.0);
+        double       err  = 0.0;
+        for(size_t i = 0; i < a.size(); ++i)
+            err = std::max(err,
+                           std::abs(static_cast<double>(a[i]) - static_cast<double>(ref[i])) / norm);
+        return err;
+    }
+
+    /* Owns every object a WorkspaceAndStrategy case creates, so that early
+     * exits (ASSERT, GTEST_SKIP) release them.                              */
+    struct WsCaseResources
+    {
+        hipblasLtHandle_t        handle = nullptr;
+        hipblasLtMatmulDesc_t    emul = nullptr, nat = nullptr, sizing = nullptr;
+        hipblasLtEmulationDesc_t ed = nullptr, sizing_ed = nullptr;
+        hipblasLtMatrixLayout_t  la = nullptr, lb = nullptr, lc = nullptr;
+        std::vector<void*>       dev;
+
+        void* alloc(size_t bytes)
+        {
+            void* p = nullptr;
+            if(hipMalloc(&p, bytes) != hipSuccess)
+                return nullptr;
+            dev.push_back(p);
+            return p;
+        }
+
+        ~WsCaseResources()
+        {
+            for(void* p : dev)
+                (void)hipFree(p);
+            if(lc)
+                hipblasLtMatrixLayoutDestroy(lc);
+            if(lb)
+                hipblasLtMatrixLayoutDestroy(lb);
+            if(la)
+                hipblasLtMatrixLayoutDestroy(la);
+            if(sizing_ed)
+                hipblasLtEmulationDescDestroy(sizing_ed);
+            if(sizing)
+                hipblasLtMatmulDescDestroy(sizing);
+            if(ed)
+                hipblasLtEmulationDescDestroy(ed);
+            if(emul)
+                hipblasLtMatmulDescDestroy(emul);
+            if(nat)
+                hipblasLtMatmulDescDestroy(nat);
+            if(handle)
+                hipblasLtDestroy(handle);
+        }
+    };
+
+    template <typename T>
+    static void runWorkspaceAndStrategyCase(const WsParam& p)
+    {
+        using Tr = WsTypeTraits<T>;
+        if(fixedPointEmulationIsEnabled(Tr::hip_type))
+            GTEST_SKIP() << "HIPBLAS_EMULATE_*_PRECISION is set: no native reference";
+
+        constexpr int64_t M = 512, N = 512, K = 512;
+        constexpr size_t  MiB = size_t(1) << 20;
+        /* INT8 GEMM reserve (OZ2_INT8_GEMM_WS_BYTES in emulation.cpp). */
+        constexpr size_t RESERVE = 128 * MiB;
+
+        WsCaseResources r;
+        ASSERT_EQ(hipblasLtCreate(&r.handle), HIPBLAS_STATUS_SUCCESS);
+        ASSERT_EQ(hipblasLtMatmulDescCreate(&r.emul, Tr::emul_ctype, Tr::hip_type),
+                  HIPBLAS_STATUS_SUCCESS);
+        ASSERT_EQ(hipblasLtMatmulDescCreate(&r.nat, Tr::native_ctype, Tr::hip_type),
+                  HIPBLAS_STATUS_SUCCESS);
+        ASSERT_EQ(hipblasLtEmulationDescCreate(&r.ed), HIPBLAS_STATUS_SUCCESS);
+        emulSetStrategy(r.ed, p.strategy);
+        {
+            int32_t sv = 0; /* inputs are finite */
+            hipblasLtEmulationDescSetAttribute(
+                r.ed, HIPBLASLT_EMULATION_DESC_SPECIAL_VALUES_SUPPORT, &sv, sizeof(sv));
+        }
+        emulAttach(r.emul, r.ed);
+        ASSERT_EQ(hipblasLtMatrixLayoutCreate(&r.la, Tr::hip_type, M, K, M),
+                  HIPBLAS_STATUS_SUCCESS);
+        ASSERT_EQ(hipblasLtMatrixLayoutCreate(&r.lb, Tr::hip_type, K, N, K),
+                  HIPBLAS_STATUS_SUCCESS);
+        ASSERT_EQ(hipblasLtMatrixLayoutCreate(&r.lc, Tr::hip_type, M, N, M),
+                  HIPBLAS_STATUS_SUCCESS);
+
+        /* Size the workspace through an EAGER descriptor: with PERFORMANT the
+         * query returns 0 when the performance model prefers native, which
+         * would skip exactly the cases that check the PERFORMANT fallback.  */
+        ASSERT_EQ(hipblasLtMatmulDescCreate(&r.sizing, Tr::emul_ctype, Tr::hip_type),
+                  HIPBLAS_STATUS_SUCCESS);
+        ASSERT_EQ(hipblasLtEmulationDescCreate(&r.sizing_ed), HIPBLAS_STATUS_SUCCESS);
+        emulSetStrategy(r.sizing_ed, HIPBLAS_EMULATION_STRATEGY_EAGER);
+        emulAttach(r.sizing, r.sizing_ed);
+        const size_t opt_ws
+            = hipblasLtEmulationWorkspaceSize(r.handle, r.sizing, Tr::hip_type, M, N, K, 1);
+        if(opt_ws == 0)
+            GTEST_SKIP() << "Emulation does not apply on this device";
+        ASSERT_GT(opt_ws, RESERVE + 2 * MiB);
+
+        size_t ws_bytes = 0;
+        switch(p.ws)
+        {
+        case WS_BELOW_RESERVE:
+            ws_bytes = 64 * MiB;
+            break;
+        case WS_AT_RESERVE:
+            ws_bytes = RESERVE;
+            break;
+        case WS_MINIMAL:
+            ws_bytes = RESERVE + MiB;
+            break;
+        case WS_BELOW_OPTIMAL:
+            ws_bytes = opt_ws - MiB;
+            break;
+        case WS_OPTIMAL:
+            ws_bytes = opt_ws;
+            break;
+        }
+        const bool below_minimum = (p.ws == WS_BELOW_RESERVE || p.ws == WS_AT_RESERVE);
+
+        const size_t   nA = size_t(M) * K, nB = size_t(K) * N, nC = size_t(M) * N;
+        std::vector<T> hA(nA), hB(nB), hC(nC), hD_nat(nC), hD(nC);
+        {
+            std::mt19937                      rng(20261105u);
+            std::uniform_real_distribution<T> dist(T(-1), T(1));
+            for(T& v : hA)
+                v = dist(rng);
+            for(T& v : hB)
+                v = dist(rng);
+            for(T& v : hC)
+                v = dist(rng);
+        }
+
+        T* dA     = static_cast<T*>(r.alloc(nA * sizeof(T)));
+        T* dB     = static_cast<T*>(r.alloc(nB * sizeof(T)));
+        T* dC     = static_cast<T*>(r.alloc(nC * sizeof(T)));
+        T* dD     = static_cast<T*>(r.alloc(nC * sizeof(T)));
+        void* dWs = r.alloc(ws_bytes);
+        ASSERT_TRUE(dA && dB && dC && dD && dWs) << "hipMalloc failed";
+        ASSERT_EQ(hipMemcpy(dA, hA.data(), nA * sizeof(T), hipMemcpyHostToDevice), hipSuccess);
+        ASSERT_EQ(hipMemcpy(dB, hB.data(), nB * sizeof(T), hipMemcpyHostToDevice), hipSuccess);
+        ASSERT_EQ(hipMemcpy(dC, hC.data(), nC * sizeof(T), hipMemcpyHostToDevice), hipSuccess);
+
+        const T alpha = T(1), beta = T(0.5);
+        const double tol = Tr::tol(K);
+
+        /* Native reference. */
+        if(hipblasLtMatmul(r.handle, r.nat, &alpha, dA, r.la, dB, r.lb, &beta, dC, r.lc, dD,
+                           r.lc, nullptr, nullptr, 0, nullptr)
+           != HIPBLAS_STATUS_SUCCESS)
+            GTEST_SKIP() << "Native hipblasLtMatmul failed";
+        ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+        ASSERT_EQ(hipMemcpy(hD_nat.data(), dD, nC * sizeof(T), hipMemcpyDeviceToHost),
+                  hipSuccess);
+
+        /* Internal entry point: status depends on the workspace and strategy. */
+        {
+            FixedPointEmulationSettings s{};
+            s.strategy        = p.strategy;
+            s.sv_support      = 0u;
+            s.workspace       = dWs;
+            s.workspace_bytes = ws_bytes;
+            ASSERT_EQ(hipMemset(dD, 0, nC * sizeof(T)), hipSuccess);
+            const rocblaslt_status st
+                = emulatedGemmNN(r.handle, M, N, K, &alpha, dA, dB, &beta, dC, dD, s);
+            ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+            if(below_minimum)
+            {
+                EXPECT_EQ(st, rocblaslt_status_memory_error)
+                    << "workspace " << ws_bytes << " B can't hold a 16x16 tile";
+            }
+            else if(p.strategy == HIPBLAS_EMULATION_STRATEGY_EAGER)
+            {
+                EXPECT_EQ(st, rocblaslt_status_success)
+                    << "EAGER must emulate with workspace " << ws_bytes << " B";
+            }
+            else
+            {
+                EXPECT_TRUE(st == rocblaslt_status_success
+                            || st == rocblaslt_status_memory_error)
+                    << "PERFORMANT returned " << static_cast<int>(st);
+            }
+            if(st == rocblaslt_status_success)
+            {
+                ASSERT_EQ(hipMemcpy(hD.data(), dD, nC * sizeof(T), hipMemcpyDeviceToHost),
+                          hipSuccess);
+                EXPECT_LE(maxRelDiff(hD, hD_nat), tol) << "direct entry point vs native";
+            }
+        }
+
+        /* Public API: emulated or fallen back, the result must match native. */
+        {
+            ASSERT_EQ(hipMemset(dD, 0, nC * sizeof(T)), hipSuccess);
+            const hipblasStatus_t st = hipblasLtMatmul(r.handle, r.emul, &alpha, dA, r.la, dB,
+                                                       r.lb, &beta, dC, r.lc, dD, r.lc, nullptr,
+                                                       dWs, ws_bytes, nullptr);
+            ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+            ASSERT_EQ(st, HIPBLAS_STATUS_SUCCESS);
+            ASSERT_EQ(hipMemcpy(hD.data(), dD, nC * sizeof(T), hipMemcpyDeviceToHost),
+                      hipSuccess);
+            EXPECT_LE(maxRelDiff(hD, hD_nat), tol) << "hipblasLtMatmul vs native";
+        }
+    }
+
+    class FixedPointEmulationWorkspaceTest : public ::testing::TestWithParam<WsParam>
+    {
+    protected:
+        void SetUp() override
+        {
+            if(!has_supported_device())
+                GTEST_SKIP() << "No HIP device or device not supported by emulation";
+        }
+    };
+
+    TEST_P(FixedPointEmulationWorkspaceTest, WorkspaceAndStrategy)
+    {
+        if(GetParam().type == HIP_R_32F)
+            runWorkspaceAndStrategyCase<float>(GetParam());
+        else
+            runWorkspaceAndStrategyCase<double>(GetParam());
+    }
+
+    INSTANTIATE_TEST_SUITE_P(WorkspaceAndStrategy,
+                             FixedPointEmulationWorkspaceTest,
+                             ::testing::ValuesIn(AllWsParams()),
+                             WsParamName);
+
 } // namespace
