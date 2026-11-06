@@ -4274,6 +4274,7 @@ namespace rocalution
         return true;
     }
 
+    // LCOV_EXCL_START (deprecated interface)
     // ----------------------------------------------------------
     // original function connect(const spmat &A,
     //                           float eps_strong)
@@ -4868,6 +4869,7 @@ namespace rocalution
 
         return true;
     }
+    // LCOV_EXCL_STOP
 
     // ----------------------------------------------------------
     // original function aggregates( const spmat &A,
@@ -4980,6 +4982,7 @@ namespace rocalution
         return true;
     }
 
+    // COVERAGE_EXCL_NO_MPI_START
     template <typename ValueType>
     bool HostMatrixCSR<ValueType>::AMGBoundaryNnz(const BaseVector<int>&       boundary,
                                                   const BaseVector<bool>&      connections,
@@ -5125,6 +5128,7 @@ namespace rocalution
 
         return true;
     }
+    // COVERAGE_EXCL_NO_MPI_STOP
 
     // ----------------------------------------------------------
     // original function connect(const spmat &A,
@@ -5185,6 +5189,7 @@ namespace rocalution
 
             if(global == true)
             {
+                // COVERAGE_EXCL_NO_MPI_START
                 PtrType gst_row_begin = cast_gst->mat_.row_offset[i];
                 PtrType gst_row_end   = cast_gst->mat_.row_offset[i + 1];
 
@@ -5196,6 +5201,7 @@ namespace rocalution
                     cast_conn->vec_[j + this->nnz_]
                         = (v * v > eps_dia_i * cast_diag->vec_[c + this->nrow_]);
                 }
+                // COVERAGE_EXCL_NO_MPI_STOP
             }
         }
 
@@ -5254,6 +5260,7 @@ namespace rocalution
 
             if(global == true)
             {
+                // COVERAGE_EXCL_NO_MPI_START
                 PtrType gst_row_begin = cast_gst->mat_.row_offset[i];
                 PtrType gst_row_end   = cast_gst->mat_.row_offset[i + 1];
 
@@ -5265,6 +5272,7 @@ namespace rocalution
                         break;
                     }
                 }
+                // COVERAGE_EXCL_NO_MPI_STOP
             }
 
             cast_state->vec_[i] = s;
@@ -5292,7 +5300,7 @@ namespace rocalution
         return *ti;
     }
 
-    // LCOV_EXCL_START
+    // COVERAGE_EXCL_NO_MPI_START
     template <typename ValueType>
     bool HostMatrixCSR<ValueType>::AMGExtractBoundaryState(
         const BaseVector<PtrType>&   bnd_csr_row_ptr,
@@ -5379,7 +5387,7 @@ namespace rocalution
 
         return true;
     }
-    // LCOV_EXCL_STOP
+    // COVERAGE_EXCL_NO_MPI_STOP
 
     template <typename ValueType>
     bool HostMatrixCSR<ValueType>::AMGPMISFindMaxNeighbourNode(
@@ -5458,6 +5466,7 @@ namespace rocalution
 
             if(global == true)
             {
+                // COVERAGE_EXCL_NO_MPI_START
                 PtrType gst_row_begin = cast_gst->mat_.row_offset[i];
                 PtrType gst_row_end   = cast_gst->mat_.row_offset[i + 1];
 
@@ -5475,6 +5484,7 @@ namespace rocalution
                         t_max = lexographical_max(&tj, &t_max);
                     }
                 }
+                // COVERAGE_EXCL_NO_MPI_STOP
             }
 
             // Find distance two max node
@@ -5508,6 +5518,7 @@ namespace rocalution
 
                 if(global == true)
                 {
+                    // COVERAGE_EXCL_NO_MPI_START
                     PtrType gst_row_begin = cast_gst->mat_.row_offset[row];
                     PtrType gst_row_end   = cast_gst->mat_.row_offset[row + 1];
 
@@ -5525,9 +5536,10 @@ namespace rocalution
                             t_max = lexographical_max(&tj, &t_max);
                         }
                     }
+                    // COVERAGE_EXCL_NO_MPI_STOP
                 }
             }
-            else
+            else // COVERAGE_EXCL_NO_MPI_START
             {
                 PtrType bnd_row_start = cast_bnd_ptr->vec_[t_max.i - this->nrow_];
                 PtrType bnd_row_end   = cast_bnd_ptr->vec_[t_max.i - this->nrow_ + 1];
@@ -5553,6 +5565,7 @@ namespace rocalution
 
                     t_max = lexographical_max(&tj, &t_max);
                 }
+                // COVERAGE_EXCL_NO_MPI_STOP
             }
 
             if(cast_state->vec_[i] == 0)
@@ -5649,6 +5662,7 @@ namespace rocalution
 
                 if(global)
                 {
+                    // COVERAGE_EXCL_NO_MPI_START
                     PtrType gst_row_begin = cast_gst->mat_.row_offset[i];
                     PtrType gst_row_end   = cast_gst->mat_.row_offset[i + 1];
 
@@ -5672,6 +5686,7 @@ namespace rocalution
                             }
                         }
                     }
+                    // COVERAGE_EXCL_NO_MPI_STOP
                 }
             }
             else if(s == -2)
@@ -6021,6 +6036,7 @@ namespace rocalution
         // Ghost part
         if(global == true)
         {
+            // COVERAGE_EXCL_NO_MPI_START
             // LCOV_EXCL_START
             assert(cast_gst != NULL);
             assert(cast_pg != NULL);
@@ -6035,6 +6051,7 @@ namespace rocalution
             // Number of ghost rows is identical to interior
             cast_pg->nrow_ = this->nrow_;
             // LCOV_EXCL_STOP
+            // COVERAGE_EXCL_NO_MPI_STOP
         }
 
         // Count number of entries in interior prolong
@@ -6070,15 +6087,17 @@ namespace rocalution
                         int_set.insert(global_node);
                         cast_f2c->vec_[global_node - global_column_begin] = 1;
                     }
-                    else
+                    else // COVERAGE_EXCL_NO_MPI_START
                     {
                         gst_set.insert(global_node);
+                        // COVERAGE_EXCL_NO_MPI_STOP
                     }
                 }
             }
 
             if(global == true)
             {
+                // COVERAGE_EXCL_NO_MPI_START
                 // LCOV_EXCL_START
                 PtrType gst_row_begin = cast_gst->mat_.row_offset[i];
                 PtrType gst_row_end   = cast_gst->mat_.row_offset[i + 1];
@@ -6112,6 +6131,7 @@ namespace rocalution
 
                 cast_pg->mat_.row_offset[i + 1] = gst_set.size();
                 // LCOV_EXCL_STOP
+                // COVERAGE_EXCL_NO_MPI_STOP
             }
 
             cast_pi->mat_.row_offset[i + 1] = int_set.size();
@@ -6181,6 +6201,7 @@ namespace rocalution
         // Once again for the ghost part
         if(global == true)
         {
+            // COVERAGE_EXCL_NO_MPI_START
             // LCOV_EXCL_START
             assert(cast_gst != NULL);
             assert(cast_pg != NULL);
@@ -6206,6 +6227,7 @@ namespace rocalution
 
             cast_glo->Allocate(cast_pg->nnz_);
             // LCOV_EXCL_STOP
+            // COVERAGE_EXCL_NO_MPI_STOP
         }
 
         // Fill the interpolation matrix.
@@ -6236,6 +6258,7 @@ namespace rocalution
 
             if(global == true)
             {
+                // COVERAGE_EXCL_NO_MPI_START
                 // LCOV_EXCL_START
                 for(PtrType j = cast_gst->mat_.row_offset[i]; j < cast_gst->mat_.row_offset[i + 1];
                     ++j)
@@ -6253,6 +6276,7 @@ namespace rocalution
                     }
                 }
                 // LCOV_EXCL_STOP
+                // COVERAGE_EXCL_NO_MPI_STOP
             }
 
             dia = static_cast<ValueType>(1) / dia;
@@ -6298,7 +6322,7 @@ namespace rocalution
                             int_table[global_node] = v;
                         }
                     }
-                    else
+                    else // COVERAGE_EXCL_NO_MPI_START
                     {
                         if(gst_table.find(global_node) != gst_table.end())
                         {
@@ -6308,11 +6332,13 @@ namespace rocalution
                         {
                             gst_table[global_node] = v;
                         }
+                        // COVERAGE_EXCL_NO_MPI_STOP
                     }
                 }
             }
             if(global == true)
             {
+                // COVERAGE_EXCL_NO_MPI_START
                 // LCOV_EXCL_START
                 PtrType pg_row_begin = cast_pg->mat_.row_offset[i];
                 PtrType pg_row_end   = pg_row_begin;
@@ -6370,6 +6396,7 @@ namespace rocalution
                     ++pg_row_end;
                 }
                 // LCOV_EXCL_STOP
+                // COVERAGE_EXCL_NO_MPI_STOP
             }
 
             for(auto it = int_table.begin(); it != int_table.end(); it++)
@@ -6424,6 +6451,7 @@ namespace rocalution
         // Ghost part
         if(global == true)
         {
+            // COVERAGE_EXCL_NO_MPI_START
             // LCOV_EXCL_START
             assert(cast_gst != NULL);
             assert(cast_pg != NULL);
@@ -6438,6 +6466,7 @@ namespace rocalution
             // Number of ghost rows is identical to interior
             cast_pg->nrow_ = this->nrow_;
             // LCOV_EXCL_STOP
+            // COVERAGE_EXCL_NO_MPI_STOP
         }
 
         // Count number of entries in interior prolong
@@ -6455,9 +6484,10 @@ namespace rocalution
                     cast_pi->mat_.row_offset[i + 1]                   = 1;
                     cast_f2c->vec_[global_node - global_column_begin] = 1;
                 }
-                else
+                else // COVERAGE_EXCL_NO_MPI_START
                 {
                     cast_pg->mat_.row_offset[i + 1] = 1;
+                    // COVERAGE_EXCL_NO_MPI_STOP
                 }
             }
         }
@@ -6518,6 +6548,7 @@ namespace rocalution
         // Once again for the ghost part
         if(global == true)
         {
+            // COVERAGE_EXCL_NO_MPI_START
             // LCOV_EXCL_START
             assert(cast_gst != NULL);
             assert(cast_pg != NULL);
@@ -6543,6 +6574,7 @@ namespace rocalution
 
             cast_glo->Allocate(cast_pg->nnz_);
             // LCOV_EXCL_STOP
+            // COVERAGE_EXCL_NO_MPI_STOP
         }
 
         // Count number of entries in interior prolong
@@ -6563,12 +6595,13 @@ namespace rocalution
                         = cast_f2c->vec_[global_node - global_column_begin];
                     cast_pi->mat_.val[pi_row_end] = 1;
                 }
-                else
+                else // COVERAGE_EXCL_NO_MPI_START
                 {
                     PtrType pg_row_end = cast_pg->mat_.row_offset[i];
 
                     cast_pg->mat_.val[pg_row_end] = 1;
                     cast_glo->vec_[pg_row_end]    = global_node;
+                    // COVERAGE_EXCL_NO_MPI_STOP
                 }
             }
         }
@@ -7199,6 +7232,7 @@ namespace rocalution
 
             if(global == true)
             {
+                // COVERAGE_EXCL_NO_MPI_START
                 PtrType gst_row_begin = cast_gst->mat_.row_offset[i];
                 PtrType gst_row_end   = cast_gst->mat_.row_offset[i + 1];
 
@@ -7209,6 +7243,7 @@ namespace rocalution
                     min_a_ik = (min_a_ik < val) ? min_a_ik : val;
                     max_a_ik = (max_a_ik > val) ? max_a_ik : val;
                 }
+                // COVERAGE_EXCL_NO_MPI_STOP
             }
 
             // Threshold to check for strength of connection
@@ -7239,6 +7274,7 @@ namespace rocalution
 
             if(global == true)
             {
+                // COVERAGE_EXCL_NO_MPI_START
                 PtrType gst_row_begin = cast_gst->mat_.row_offset[i];
                 PtrType gst_row_end   = cast_gst->mat_.row_offset[i + 1];
 
@@ -7263,6 +7299,7 @@ namespace rocalution
                         cast_w->vec_[col + this->nrow_] += 1.0f;
                     }
                 }
+                // COVERAGE_EXCL_NO_MPI_STOP
             }
         }
 
@@ -7397,6 +7434,7 @@ namespace rocalution
 
                 if(global == true)
                 {
+                    // COVERAGE_EXCL_NO_MPI_START
                     PtrType gst_row_begin = cast_gst->mat_.row_offset[i];
                     PtrType gst_row_end   = cast_gst->mat_.row_offset[i + 1];
 
@@ -7434,6 +7472,7 @@ namespace rocalution
                             }
                         }
                     }
+                    // COVERAGE_EXCL_NO_MPI_STOP
                 }
             }
         }
@@ -7492,6 +7531,7 @@ namespace rocalution
 
                 if(global == true)
                 {
+                    // COVERAGE_EXCL_NO_MPI_START
                     PtrType gst_row_begin = cast_gst->mat_.row_offset[i];
                     PtrType gst_row_end   = cast_gst->mat_.row_offset[i + 1];
 
@@ -7512,6 +7552,7 @@ namespace rocalution
                             }
                         }
                     }
+                    // COVERAGE_EXCL_NO_MPI_STOP
                 }
             }
         }
@@ -7602,6 +7643,7 @@ namespace rocalution
         // Ghost part
         if(global == true)
         {
+            // COVERAGE_EXCL_NO_MPI_START
             // LCOV_EXCL_START
             assert(cast_gst != NULL);
             assert(cast_pg != NULL);
@@ -7615,6 +7657,7 @@ namespace rocalution
             // Number of ghost rows is identical to interior
             cast_pg->nrow_ = this->nrow_;
             // LCOV_EXCL_STOP
+            // COVERAGE_EXCL_NO_MPI_STOP
         }
 
 #ifdef _OPENMP
@@ -7631,7 +7674,9 @@ namespace rocalution
 
                 if(global == true)
                 {
+                    // COVERAGE_EXCL_NO_MPI_START
                     cast_pg->mat_.row_offset[row] = 0;
+                    // COVERAGE_EXCL_NO_MPI_STOP
                 }
             }
             else
@@ -7660,6 +7705,7 @@ namespace rocalution
                 // Ghost part
                 if(global == true)
                 {
+                    // COVERAGE_EXCL_NO_MPI_START
                     for(PtrType j = cast_gst->mat_.row_offset[row];
                         j < cast_gst->mat_.row_offset[row + 1];
                         ++j)
@@ -7673,6 +7719,7 @@ namespace rocalution
                         amin = (amin < cast_gst->mat_.val[j]) ? amin : cast_gst->mat_.val[j];
                         amax = (amax > cast_gst->mat_.val[j]) ? amax : cast_gst->mat_.val[j];
                     }
+                    // COVERAGE_EXCL_NO_MPI_STOP
                 }
 
                 cast_Amin->vec_[row] = amin = amin * static_cast<ValueType>(0.2f);
@@ -7696,6 +7743,7 @@ namespace rocalution
                 // Ghost part
                 if(global == true)
                 {
+                    // COVERAGE_EXCL_NO_MPI_START
                     PtrType gst_nnz = 0;
 
                     row_begin = cast_gst->mat_.row_offset[row];
@@ -7715,6 +7763,7 @@ namespace rocalution
                     }
 
                     cast_pg->mat_.row_offset[row] = gst_nnz;
+                    // COVERAGE_EXCL_NO_MPI_STOP
                 }
             }
         }
@@ -7776,12 +7825,14 @@ namespace rocalution
         // Ghost part
         if(global == true)
         {
+            // COVERAGE_EXCL_NO_MPI_START
             // LCOV_EXCL_START
             assert(cast_l2g != NULL);
             assert(cast_gst != NULL);
             assert(cast_pg != NULL);
             assert(cast_glo != NULL);
             // LCOV_EXCL_STOP
+            // COVERAGE_EXCL_NO_MPI_STOP
         }
 
         // Exclusive sum to obtain row offset pointers of P
@@ -7811,6 +7862,7 @@ namespace rocalution
         // Once again for the ghost part
         if(global == true)
         {
+            // COVERAGE_EXCL_NO_MPI_START
             // LCOV_EXCL_START
             for(int i = this->nrow_; i > 0; --i)
             {
@@ -7834,6 +7886,7 @@ namespace rocalution
 
             cast_glo->Allocate(cast_pg->nnz_);
             // LCOV_EXCL_STOP
+            // COVERAGE_EXCL_NO_MPI_STOP
         }
 
 #ifdef _OPENMP
@@ -7902,6 +7955,7 @@ namespace rocalution
 
             if(global == true)
             {
+                // COVERAGE_EXCL_NO_MPI_START
                 PtrType ghost_row_begin = cast_gst->mat_.row_offset[row];
                 PtrType ghost_row_end   = cast_gst->mat_.row_offset[row + 1];
 
@@ -7939,6 +7993,7 @@ namespace rocalution
                         }
                     }
                 }
+                // COVERAGE_EXCL_NO_MPI_STOP
             }
 
             ValueType cf_neg = static_cast<ValueType>(1);
@@ -7985,6 +8040,7 @@ namespace rocalution
 
             if(global)
             {
+                // COVERAGE_EXCL_NO_MPI_START
                 PtrType ghost_row_P     = cast_pg->mat_.row_offset[row];
                 PtrType ghost_row_begin = cast_gst->mat_.row_offset[row];
                 PtrType ghost_row_end   = cast_gst->mat_.row_offset[row + 1];
@@ -8007,13 +8063,14 @@ namespace rocalution
                         ++ghost_row_P;
                     }
                 }
+                // COVERAGE_EXCL_NO_MPI_STOP
             }
         }
 
         return true;
     }
 
-    // LCOV_EXCL_START
+    // COVERAGE_EXCL_NO_MPI_START
     template <typename ValueType>
     bool HostMatrixCSR<ValueType>::RSExtPIBoundaryNnz(const BaseVector<int>&       boundary,
                                                       const BaseVector<int>&       CFmap,
@@ -8185,7 +8242,7 @@ namespace rocalution
 
         return true;
     }
-    // LCOV_EXCL_STOP
+    // COVERAGE_EXCL_NO_MPI_STOP
 
     template <typename ValueType>
     bool HostMatrixCSR<ValueType>::RSExtPIProlongNnz(int64_t                    global_column_begin,
@@ -8234,6 +8291,7 @@ namespace rocalution
         // Ghost part
         if(global == true)
         {
+            // COVERAGE_EXCL_NO_MPI_START
             // LCOV_EXCL_START
             assert(cast_l2g != NULL);
             assert(cast_gst != NULL);
@@ -8250,6 +8308,7 @@ namespace rocalution
             // Number of ghost rows is identical to interior
             cast_pg->nrow_ = this->nrow_;
             // LCOV_EXCL_STOP
+            // COVERAGE_EXCL_NO_MPI_STOP
         }
 
 #ifdef _OPENMP
@@ -8269,7 +8328,9 @@ namespace rocalution
 
                 if(global == true)
                 {
+                    // COVERAGE_EXCL_NO_MPI_START
                     cast_pg->mat_.row_offset[row] = 0;
+                    // COVERAGE_EXCL_NO_MPI_STOP
                 }
 
                 continue;
@@ -8354,6 +8415,7 @@ namespace rocalution
 
                     if(skip_ghost == false && global == true)
                     {
+                        // COVERAGE_EXCL_NO_MPI_START
                         // Row entry and exit of this fine point
                         row_begin_j = cast_gst->mat_.row_offset[col_j];
                         row_end_j   = cast_gst->mat_.row_offset[col_j + 1];
@@ -8382,12 +8444,14 @@ namespace rocalution
                                 gst_set.insert(gcol_k);
                             }
                         }
+                        // COVERAGE_EXCL_NO_MPI_STOP
                     }
                 }
             }
 
             if(global == true)
             {
+                // COVERAGE_EXCL_NO_MPI_START
                 // Row entry and exit points
                 row_begin = cast_gst->mat_.row_offset[row];
                 row_end   = cast_gst->mat_.row_offset[row + 1];
@@ -8460,6 +8524,7 @@ namespace rocalution
                         }
                     }
                 }
+                // COVERAGE_EXCL_NO_MPI_STOP
             }
 
             // Write row nnz back to global memory
@@ -8467,7 +8532,9 @@ namespace rocalution
 
             if(global == true)
             {
+                // COVERAGE_EXCL_NO_MPI_START
                 cast_pg->mat_.row_offset[row] = gst_set.size();
+                // COVERAGE_EXCL_NO_MPI_STOP
             }
 
             // Set this points state to fine
@@ -8528,6 +8595,7 @@ namespace rocalution
         // Ghost part
         if(global == true)
         {
+            // COVERAGE_EXCL_NO_MPI_START
             // LCOV_EXCL_START
             assert(cast_l2g != NULL);
             assert(cast_gst != NULL);
@@ -8539,6 +8607,7 @@ namespace rocalution
             assert(cast_pg != NULL);
             assert(cast_glo != NULL);
             // LCOV_EXCL_STOP
+            // COVERAGE_EXCL_NO_MPI_STOP
         }
 
         // Exclusive sum to obtain row offset pointers of P
@@ -8568,6 +8637,7 @@ namespace rocalution
         // Once again for the ghost part
         if(global == true)
         {
+            // COVERAGE_EXCL_NO_MPI_START
             // LCOV_EXCL_START
             for(int i = this->nrow_; i > 0; --i)
             {
@@ -8591,6 +8661,7 @@ namespace rocalution
 
             cast_glo->Allocate(cast_pg->nnz_);
             // LCOV_EXCL_STOP
+            // COVERAGE_EXCL_NO_MPI_STOP
         }
 
         // Extract diagonal matrix entries
@@ -8701,6 +8772,7 @@ namespace rocalution
 
                     if(skip_ghost == false && global == true)
                     {
+                        // COVERAGE_EXCL_NO_MPI_START
                         // Loop over all ghost columns of the fine point
                         for(PtrType l = cast_gst->mat_.row_offset[col_ik];
                             l < cast_gst->mat_.row_offset[col_ik + 1];
@@ -8725,12 +8797,14 @@ namespace rocalution
                                 gst_table[gcol_kl] = zero;
                             }
                         }
+                        // COVERAGE_EXCL_NO_MPI_STOP
                     }
                 }
             }
 
             if(global == true)
             {
+                // COVERAGE_EXCL_NO_MPI_START
                 for(PtrType k = cast_gst->mat_.row_offset[row];
                     k < cast_gst->mat_.row_offset[row + 1];
                     ++k)
@@ -8788,6 +8862,7 @@ namespace rocalution
                         }
                     }
                 }
+                // COVERAGE_EXCL_NO_MPI_STOP
             }
 
             // Now, we need to do the numerical part
@@ -8879,6 +8954,7 @@ namespace rocalution
 
                     if(global == true)
                     {
+                        // COVERAGE_EXCL_NO_MPI_START
                         // Loop over all columns of the fine point
                         for(PtrType l = cast_gst->mat_.row_offset[col_ik];
                             l < cast_gst->mat_.row_offset[col_ik + 1];
@@ -8912,6 +8988,7 @@ namespace rocalution
                                 }
                             }
                         }
+                        // COVERAGE_EXCL_NO_MPI_STOP
                     }
 
                     // Update sum over l with a_ik
@@ -8952,6 +9029,7 @@ namespace rocalution
 
                     if(global == true)
                     {
+                        // COVERAGE_EXCL_NO_MPI_START
                         // Row entry and exit of this fine point
                         row_begin_k = cast_gst->mat_.row_offset[col_ik];
                         row_end_k   = cast_gst->mat_.row_offset[col_ik + 1];
@@ -8982,6 +9060,7 @@ namespace rocalution
                                 }
                             }
                         }
+                        // COVERAGE_EXCL_NO_MPI_STOP
                     }
 
                     // If sign of a_ki and a_kk are different, a_ki contributes to the
@@ -9019,6 +9098,7 @@ namespace rocalution
 
             if(global == true)
             {
+                // COVERAGE_EXCL_NO_MPI_START
                 // Loop over all columns of the i-th row
                 for(PtrType k = cast_gst->mat_.row_offset[row];
                     k < cast_gst->mat_.row_offset[row + 1];
@@ -9195,6 +9275,7 @@ namespace rocalution
                         sum_k += val_ik;
                     }
                 }
+                // COVERAGE_EXCL_NO_MPI_STOP
             }
 
             // Precompute a_ii_tilde
@@ -9214,6 +9295,7 @@ namespace rocalution
 
             if(global == true)
             {
+                // COVERAGE_EXCL_NO_MPI_START
                 // Entry point into P (ghost)
                 PtrType gst_idx = cast_pg->mat_.row_offset[row];
 
@@ -9225,6 +9307,7 @@ namespace rocalution
                     cast_pg->mat_.val[gst_idx] = a_ii_tilde * it->second;
                     ++gst_idx;
                 }
+                // COVERAGE_EXCL_NO_MPI_STOP
             }
         }
 
@@ -11474,7 +11557,7 @@ namespace rocalution
         return true;
     }
 
-    // LCOV_EXCL_START
+    // COVERAGE_EXCL_NO_MPI_START
     template <typename ValueType>
     bool HostMatrixCSR<ValueType>::ExtractGlobalColumnIndices(int     ncol,
                                                               int64_t global_offset,
@@ -12465,7 +12548,7 @@ namespace rocalution
         return true;
     }
 
-    // LCOV_EXCL_STOP
+    // COVERAGE_EXCL_NO_MPI_STOP
 
     template class HostMatrixCSR<double>;
     template class HostMatrixCSR<float>;

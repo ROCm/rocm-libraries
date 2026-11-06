@@ -30,6 +30,8 @@ Full documentation for hipBLASLt is available at [rocm.docs.amd.com/projects/hip
 
 ### Changed
 
+* Non-grouped `hipblasLtMatmul` calls using `HIPBLASLT_POINTER_MODE_DEVICE` now return `HIPBLAS_STATUS_INTERNAL_ERROR` instead of proceeding without support for device alpha and device beta.
+* Uniform summation order is temporarily off by default on RDNA (gfx11, gfx120x), where it disables StaggerU and slows some GEMMs. It stays on by default elsewhere, and explicit settings still override it.
 * Persistent launch controls now use `TENSILE_PERSISTENT_*` environment names, and Hybrid assignment uses `--hybrid_assignment_policy` in `hipblaslt-bench` and `HybridAssignmentPolicy` in TensileLite YAML. Legacy environment, CLI, and YAML aliases remain supported. Preferred environment names take precedence; conflicting old and new CLI or YAML values are rejected.
 * `--global-parameters` and `--benchmark-parameters` values are now parsed as Python literals via `ast.literal_eval` instead of `eval`, correctly handling values containing `=` and rejecting non-literal expressions with an `argparse.ArgumentTypeError`.
 * `HIPBLASLT_TENSILE_LIBPATH` and `HIPBLASLT_EXT_OP_LIBRARY_PATH` are now ignored when the process runs in a secure execution context (set-uid/set-gid or other credential-changing exec), falling back to the default library location with a diagnostic; behavior is unchanged for non-privileged processes.
@@ -53,6 +55,7 @@ Full documentation for hipBLASLt is available at [rocm.docs.amd.com/projects/hip
 
 ### Resolved issues
 
+* Fixed hipBLASLt never selecting the gfx950 wave-split-K skinny GEMM kernels (vLLM wvSplitK and rocBLAS wvSpltK) under uniform summation order, which is on by default: it refused every handwritten custom kernel in that mode. A handwritten kernel that reduces every row of D in the same order now declares `uniformSummationOrder: true` in the `CustomKernel` block of its `custom.config`, and these kernels do.
 * Fixed rocisa macro expansion ignoring conditions after `&&`, which could omit required final-loop LDS waits in gfx950 kernels using custom main-loop scheduling.
 * Fixed premature LDS reads when handwritten gfx950 BF16 and FP16 TN kernels skip the second global prefetch at `K=64`.
 * Fixed `hipblaslt-bench` using C's batch stride for D and computing its CPU reference with the wrong layout when C and D have different leading dimensions or batch strides.
@@ -96,6 +99,8 @@ Full documentation for hipBLASLt is available at [rocm.docs.amd.com/projects/hip
 * `GemmInstance::getSolutionName()` in `hipblaslt_ext` crashed for a RocRoller solution. It looked the encoded RocRoller index up in the Tensile library and dereferenced the null result. It now returns the RocRoller short name, as `hipblaslt_ext::getSolutionNameFromAlgo()` already did.
 * The logger's destructor called `close()` on the log file, which throws out of a destructor and terminates the process at exit when the log file has failed, for example on a full disk. Reproducible with `HIPBLASLT_LOG_LEVEL=4` and a failing `HIPBLASLT_LOG_FILE`.
 * `hipblasLtMatmul` with no `algo` could return success for a GEMM that never launched. Its status already held the result of choosing the algorithm, and an exception thrown after that returned it unchanged instead of an error.
+* A matrix layout with `HIPBLASLT_ORDER_ROW` was computed as column-major, so matmul returned wrong results with `HIPBLAS_STATUS_SUCCESS`. `hipblasLtMatmul`, `hipblasLtMatmulAlgoGetHeuristic`, and the extension API `Gemm`, `GroupedGemm`, `matmulIsAlgoSupported`, and `isSolutionSupported` now return `HIPBLAS_STATUS_NOT_SUPPORTED` when A, B, C, or D uses `HIPBLASLT_ORDER_ROW`, or when `GemmProblemType` sets it for A or B, and `matmulIsTuned` returns `-1`. They also refuse a swizzled or unrecognized order on C or D, which were likewise computed as column-major. `hipblasLtMatrixTransform` still accepts `HIPBLASLT_ORDER_ROW`.
+* `hipblasLtMatrixLayoutGetAttribute` returned `HIPBLAS_STATUS_INVALID_VALUE` for `HIPBLASLT_MATRIX_LAYOUT_TYPE`, `ORDER`, `ROWS`, `COLS`, and `LD`, which `hipblasLtMatrixLayoutSetAttribute` accepts. It now reads them back.
 
 ## hipBLASLt 1.4.1 for ROCm 7.14
 

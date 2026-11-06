@@ -201,6 +201,9 @@ void BatchnormFwdTrainingPlan::compile(const IKernelCompiler& kernelCompiler,
 {
     // Determine data type configuration
     auto xDataType = _trainingParams.x()->data_type();
+    auto yDataType = _trainingParams.optActivation().has_value()
+                         ? _trainingParams.activationOut()->data_type()
+                         : _trainingParams.y()->data_type();
     auto scaleDataType = _trainingParams.scale()->data_type();
 
     // NOTE: Although the batchnorm spatial training kernel support the
@@ -208,36 +211,53 @@ void BatchnormFwdTrainingPlan::compile(const IKernelCompiler& kernelCompiler,
     // applicability checks require the scale and bias tensors to be FP32.
     // So we are not using the USE_FP16 path in the kernel for now.
     const bool useFp16Mix
-        = (xDataType == hipdnn_flatbuffers_sdk::data_objects::DataType::HALF
-           && scaleDataType == hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT);
+        = xDataType == hipdnn_flatbuffers_sdk::data_objects::DataType::HALF
+          && yDataType == hipdnn_flatbuffers_sdk::data_objects::DataType::HALF
+          && scaleDataType == hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT;
     const bool useBfp16Mix
-        = (xDataType == hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16
-           && scaleDataType == hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT);
+        = xDataType == hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16
+          && yDataType == hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16
+          && scaleDataType == hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT;
+    const bool useFp16Upcast
+        = xDataType == hipdnn_flatbuffers_sdk::data_objects::DataType::HALF
+          && yDataType == hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT
+          && scaleDataType == hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT;
+    const bool useBfp16Upcast
+        = xDataType == hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16
+          && yDataType == hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT
+          && scaleDataType == hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT;
 
     // Extract dimensions from x tensor
     const auto* xDims = _trainingParams.x()->dims();
 
-    size_t n = 0;
-    size_t c = 0;
-    size_t h = 0;
-    size_t w = 0;
-    // Check if 4D (NCHW/NHWC) or 5D (NCDHW/NDHWC)
-    if(xDims->size() == 4)
+    size_t batches = 0;
+    size_t channels = 0;
+    size_t spatialSize = 0;
+    // Check if 3D (NCL/NLC), 4D (NCHW/NHWC) or 5D (NCDHW/NDHWC)
+    if(xDims->size() == 3)
     {
-        n = static_cast<size_t>(xDims->Get(0));
-        c = static_cast<size_t>(xDims->Get(1));
-        h = static_cast<size_t>(xDims->Get(2));
-        w = static_cast<size_t>(xDims->Get(3));
+        batches = static_cast<size_t>(xDims->Get(0));
+        channels = static_cast<size_t>(xDims->Get(1));
+        spatialSize = static_cast<size_t>(xDims->Get(2));
+    }
+    else if(xDims->size() == 4)
+    {
+        batches = static_cast<size_t>(xDims->Get(0));
+        channels = static_cast<size_t>(xDims->Get(1));
+        auto height = static_cast<size_t>(xDims->Get(2));
+        auto width = static_cast<size_t>(xDims->Get(3));
+        // For 4D, combine H*W into spatial dimension
+        spatialSize = height * width;
     }
     else if(xDims->size() == 5)
     {
-        n = static_cast<size_t>(xDims->Get(0));
-        c = static_cast<size_t>(xDims->Get(1));
-        auto d = static_cast<size_t>(xDims->Get(2));
-        h = static_cast<size_t>(xDims->Get(3));
-        w = static_cast<size_t>(xDims->Get(4));
+        batches = static_cast<size_t>(xDims->Get(0));
+        channels = static_cast<size_t>(xDims->Get(1));
+        auto depth = static_cast<size_t>(xDims->Get(2));
+        auto height = static_cast<size_t>(xDims->Get(3));
+        auto width = static_cast<size_t>(xDims->Get(4));
         // For 5D, combine D*H*W into spatial dimension
-        h = d * h;
+        spatialSize = depth * height * width;
     }
     else
     {
@@ -246,12 +266,10 @@ void BatchnormFwdTrainingPlan::compile(const IKernelCompiler& kernelCompiler,
                                                            + std::to_string(xDims->size()));
     }
 
-    auto inCstride = static_cast<unsigned int>(h * w);
-    auto inNhw = static_cast<unsigned int>(n * h * w);
-    auto invInNhw = static_cast<float>(1.0 / inNhw);
+    auto inCstride = static_cast<unsigned int>(spatialSize);
 
     // Detect layout
-    const bool isLayoutNHWC = isChannelLastLayout(_trainingParams.x());
+    const bool isLayoutChannelLast = isChannelLastLayout(_trainingParams.x());
 
     // Kernel launch parameters
     // NOTE: These are generally selected based on heuristics and tuning,
@@ -269,7 +287,7 @@ void BatchnormFwdTrainingPlan::compile(const IKernelCompiler& kernelCompiler,
     unsigned int ldsgcn = 0;
     unsigned int ldsnogcn = 0;
     int stashMethod = 0;
-    size_t nelements = 1;
+    size_t batchElements = 1;
 
     // Spatial multiple needs space for 2 fp32 elements
     // per each x thread (including the last workgroup)
@@ -281,13 +299,14 @@ void BatchnormFwdTrainingPlan::compile(const IKernelCompiler& kernelCompiler,
     const size_t minWorkgroups = std::max(
         size_t(1), size_t(0.6f * static_cast<float>(deviceProperties.multiProcessorCount)));
     const hip_kernel_provider::batchnorm::ProblemDescription problem(
-        n,
-        c,
-        h,
-        w,
-        isLayoutNHWC,
+        batches,
+        channels,
+        spatialSize,
+        isLayoutChannelLast,
         useFp16Mix,
         useBfp16Mix,
+        useFp16Upcast,
+        useBfp16Upcast,
         hip_kernel_provider::batchnorm::Direction::FORWARD_TRAINING,
         minWorkgroups);
     // Define default configuration based on heuristics and
@@ -313,7 +332,7 @@ void BatchnormFwdTrainingPlan::compile(const IKernelCompiler& kernelCompiler,
     xlocalsize = config.xlocalsize;
     ylocalsize = config.ylocalsize;
     zlocalsize = config.zlocalsize;
-    nelements = config.nelements;
+    batchElements = config.batchElements;
 
     size_t xlocalsizeFinal = xlocalsize;
     size_t ylocalsizeFinal = ylocalsize;
@@ -321,35 +340,35 @@ void BatchnormFwdTrainingPlan::compile(const IKernelCompiler& kernelCompiler,
     if(variant != 2)
     {
         xlocalsize = 1024;
-        if(((inCstride < 256) && (n < 256)) || ((inCstride < 100) && (n <= 256)))
+        if(((inCstride < 256) && (batches < 256)) || ((inCstride < 100) && (batches <= 256)))
         {
             xlocalsize = 256;
         }
-        xgridsize = c * xlocalsize;
+        xgridsize = channels * xlocalsize;
         ldsgcn = static_cast<unsigned int>(xlocalsize / 64);
         ldsnogcn = static_cast<unsigned int>(xlocalsize);
     }
     else
     {
         // Compute grid size
-        if(isLayoutNHWC)
+        if(isLayoutChannelLast)
         {
-            xgridsize = xlocalsize * ((c / vectorsize + xlocalsize - 1) / xlocalsize);
+            xgridsize = xlocalsize * ((channels / vectorsize + xlocalsize - 1) / xlocalsize);
             ygridsize = ylocalsize * ((inCstride + ylocalsize - 1) / ylocalsize);
         }
         else
         {
-            xgridsize = xlocalsize * ((c + xlocalsize - 1) / xlocalsize);
+            xgridsize = xlocalsize * ((channels + xlocalsize - 1) / xlocalsize);
             ygridsize = ylocalsize * ((inCstride / vectorsize + ylocalsize - 1) / ylocalsize);
         }
-        zgridsize = zlocalsize * ((n / nelements + zlocalsize - 1) / zlocalsize);
+        zgridsize = zlocalsize * ((batches / batchElements + zlocalsize - 1) / zlocalsize);
 
         // Get the stash method based on problem size and WG size
         stashMethod = hip_kernel_provider::batchnorm::getStashMethod(
-            problem, stashValuesFwd, ylocalsize, zlocalsize, nelements);
+            problem, stashValuesFwd, ylocalsize, zlocalsize, batchElements);
 
-        // WG size for Final kernels (NHWC)
-        if(isLayoutNHWC && c % 2 == 0 && xlocalsize % 2 == 0)
+        // WG size for Final kernels (NLC/NHWC/NDHWC)
+        if(isLayoutChannelLast && channels % 2 == 0 && xlocalsize % 2 == 0)
         {
             // increase number of blocks (xgridsize does not change for final kernels)
             // 2 is the lower bound because of stashing
@@ -368,44 +387,42 @@ void BatchnormFwdTrainingPlan::compile(const IKernelCompiler& kernelCompiler,
     auto activationMode = ActivationMode::PASTHRU;
     if(_trainingParams.optActivation().has_value() && _trainingParams.activationOut() != nullptr)
     {
-        activationMode = (*_trainingParams.optActivation()).mode;
+        activationMode = _trainingParams.optActivation()->mode;
     }
 
     // Prepare compilation options
     BatchnormKernelCompileOptions options(_trainingParams.x(),
-                                          _trainingParams.y(),
+                                          _trainingParams.optActivation().has_value()
+                                              ? _trainingParams.activationOut()
+                                              : _trainingParams.y(),
                                           _trainingParams.mean(),
                                           _trainingParams.scale(),
                                           deviceProperties,
                                           activationMode);
     options.update("HIP_PLUGIN_USE_FPMIX", useFp16Mix);
     options.update("HIP_PLUGIN_USE_BFPMIX", useBfp16Mix);
-    // Not using FP16 and BFP16 paths due to affine data type requirements
-    options.update("HIP_PLUGIN_USE_FP16", 0);
-    options.update("HIP_PLUGIN_USE_BFP16", 0);
+    options.update("HIP_PLUGIN_USE_FPUPCAST", useFp16Upcast);
+    options.update("HIP_PLUGIN_USE_BFPUPCAST", useBfp16Upcast);
     options.update("HIP_PLUGIN_BN_SAVE_MEAN_VARIANCE", _trainingParams.hasSaveMeanVariance());
     options.update("HIP_PLUGIN_BN_RUNNING_RESULT", _trainingParams.hasRunningStats());
     options.update("HIP_PLUGIN_BN_VARIANT", variant);
     options.update("HIP_PLUGIN_BN_LDS_SIZE", ldsnogcn);
     options.update("HIP_PLUGIN_BN_LDSGCN_SIZE", ldsgcn);
-    options.update("HIP_PLUGIN_BN_N", n);
-    options.update("HIP_PLUGIN_BN_C", c);
-    options.update("HIP_PLUGIN_BN_HW", inCstride);
-    options.update("HIP_PLUGIN_BN_NHW", inNhw);
-    options.update("HIP_PLUGIN_BN_CHW", c * inCstride);
-    options.update("HIP_PLUGIN_BN_NCHW", c * inNhw);
-    options.update("HIP_PLUGIN_BN_N_ELEMENTS", nelements);
+    options.update("HIP_PLUGIN_BN_BATCHES", batches);
+    options.update("HIP_PLUGIN_BN_CHANNELS", channels);
+    options.update("HIP_PLUGIN_BN_SPATIAL_SIZE", spatialSize);
+    options.update("HIP_PLUGIN_BN_BATCH_ELEMENTS", batchElements);
     options.update("HIP_PLUGIN_BN_GRP0", xlocalsize);
     options.update("HIP_PLUGIN_BN_GRP1", ylocalsize);
     options.update("HIP_PLUGIN_BN_GRP2", zlocalsize);
     options.update("HIP_PLUGIN_BN_VEC_SIZE", vectorsize);
     options.update("HIP_PLUGIN_BN_STASH_METHOD", stashMethod);
-
-    options.add("HIP_PLUGIN_BN_NGRPS", ygridsize / ylocalsize);
-    options.add("HIP_PLUGIN_BN_NGRPS2", zgridsize / zlocalsize);
-    options.add("HIP_PLUGIN_BN_GRP0_FINAL", xlocalsizeFinal);
-    options.add("HIP_PLUGIN_BN_GRP1_FINAL", ylocalsizeFinal);
-    options.add("HIP_PLUGIN_BN_GRP2_FINAL", zlocalsizeFinal);
+    options.update("HIP_PLUGIN_BN_GRPS0", xgridsize / xlocalsize);
+    options.update("HIP_PLUGIN_BN_GRPS1", ygridsize / ylocalsize);
+    options.update("HIP_PLUGIN_BN_GRPS2", zgridsize / zlocalsize);
+    options.update("HIP_PLUGIN_BN_GRP0_FINAL", xlocalsizeFinal);
+    options.update("HIP_PLUGIN_BN_GRP1_FINAL", ylocalsizeFinal);
+    options.update("HIP_PLUGIN_BN_GRP2_FINAL", zlocalsizeFinal);
 
     // Compile the kernel and configure launch parameters based on the selected variant
     _compiledProgram = kernelCompiler.compile("BatchNormFwdTrainSpatial.cpp", options);
@@ -454,7 +471,6 @@ void BatchnormFwdTrainingPlan::compile(const IKernelCompiler& kernelCompiler,
 
     // Store kernel launch parameters
     _kernelVariant = variant;
-    _invInNhw = invInNhw;
 }
 
 void BatchnormFwdTrainingPlan::execute(const Handle& handle,
@@ -560,7 +576,6 @@ void BatchnormFwdTrainingPlan::execute(const Handle& handle,
                                         yBuffer.ptr,
                                         scaleBuffer.ptr,
                                         biasBuffer.ptr,
-                                        _invInNhw,
                                         expAvgFactor,
                                         prevRunningMeanPtr,
                                         prevRunningVariancePtr,
@@ -579,7 +594,6 @@ void BatchnormFwdTrainingPlan::execute(const Handle& handle,
                                         yBuffer.ptr,
                                         scaleBuffer.ptr,
                                         biasBuffer.ptr,
-                                        _invInNhw,
                                         epsilon,
                                         resultSaveMeanPtr,
                                         resultSaveInvVariancePtr,
@@ -593,7 +607,6 @@ void BatchnormFwdTrainingPlan::execute(const Handle& handle,
                                         yBuffer.ptr,
                                         scaleBuffer.ptr,
                                         biasBuffer.ptr,
-                                        _invInNhw,
                                         expAvgFactor,
                                         prevRunningMeanPtr,
                                         prevRunningVariancePtr,
@@ -610,7 +623,6 @@ void BatchnormFwdTrainingPlan::execute(const Handle& handle,
                                         yBuffer.ptr,
                                         scaleBuffer.ptr,
                                         biasBuffer.ptr,
-                                        _invInNhw,
                                         epsilon,
                                         activationAlpha,
                                         activationBeta);
@@ -626,7 +638,6 @@ void BatchnormFwdTrainingPlan::execute(const Handle& handle,
         {
             _runnableKernels[1]->launch(handle.getStream(),
                                         yBuffer.ptr,
-                                        _invInNhw,
                                         expAvgFactor,
                                         prevRunningMeanPtr,
                                         prevRunningVariancePtr,
@@ -640,7 +651,6 @@ void BatchnormFwdTrainingPlan::execute(const Handle& handle,
         {
             _runnableKernels[1]->launch(handle.getStream(),
                                         yBuffer.ptr,
-                                        _invInNhw,
                                         epsilon,
                                         resultSaveMeanPtr,
                                         resultSaveInvVariancePtr);
@@ -649,7 +659,6 @@ void BatchnormFwdTrainingPlan::execute(const Handle& handle,
         {
             _runnableKernels[1]->launch(handle.getStream(),
                                         yBuffer.ptr,
-                                        _invInNhw,
                                         expAvgFactor,
                                         prevRunningMeanPtr,
                                         prevRunningVariancePtr,
@@ -659,7 +668,7 @@ void BatchnormFwdTrainingPlan::execute(const Handle& handle,
         }
         else
         {
-            _runnableKernels[1]->launch(handle.getStream(), yBuffer.ptr, _invInNhw, epsilon);
+            _runnableKernels[1]->launch(handle.getStream(), yBuffer.ptr, epsilon);
         }
         // 3. BatchNormFwdTrainSpatialNorm kernel
         _runnableKernels[2]->launch(handle.getStream(),

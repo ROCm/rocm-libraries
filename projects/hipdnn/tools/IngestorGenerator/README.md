@@ -112,6 +112,17 @@ a request to run the class. See the
     --new-ids
 ```
 
+With `--stamp-provenance`, every KDP the run writes carries `provenance.generated_from`:
+the `--config` (and `--manifest`, when given) path, plus `generator_commit` and
+`rocke_commit`, each the last commit touching that tree (`-dirty` when it has local edits).
+It is informational: `catalog_diff` compares only `provenance.specialization_contract`, so
+a regeneration at a later commit still diffs clean. It is off by default because the
+commits change with every checkout, so a stamped KDP never regenerates byte-identical. A config kernel may carry `provenance.rocke_spec_id` /
+`rocke_tuning_id`, which `registry_enumerator.py` fills from the pin and the registry. Only the
+expanded (`kernels:`) form carries it: the compact `variants:` form that `factorise_config.py`
+writes, and so `variant_reduce.py`'s reduced selection, has no per-kernel provenance, and neither
+do the shipped selections.
+
 Exit codes: `0` success; `1` a gate refusal or internal failure: with `--strict`, a pack
 arch over `reduction.aot_budget_per_arch` (checked before anything is written),
 `--check-placeholders` findings, an emitted file that cannot be read back, or a template
@@ -365,12 +376,50 @@ echo '*.kdp.json diff=kdp' >> "$(git rev-parse --git-path info/attributes)"
 The splice tool appends rather than interleaves, so its output reads as pure insertion
 under every algorithm.
 
+### Shipping a trained model
+
+`uhd_gen promote` copies a trained model into the bundle's `heuristics/` subtree and adds
+its UHD id to the UED, per arch: `sort_kernel_catalog.<arch>` after `default`, or a new
+role (`predict_engine`, `predict_applicable_kernels`) at the end of the document. The
+generator writes the UED too, so record the same binding in the config, or the next
+regeneration drops it (and the regeneration gate's byte compare fails):
+
+1. Run `uhd_gen promote` on the bundle. It prints the arch and the model's UHD id.
+2. Add them to `engine.heuristics`, in the order promote added them. For a registry-driven
+   engine put them in the manifest's `engine` block (`configs/<bundle>.engine.yaml`) **and**
+   the selection (`configs/<bundle>.yaml`): `registry_enumerator.py` copies the manifest's
+   `engine` into every config it writes, and regeneration gate g4 requires the selection's
+   engine to equal it, so a binding only in the selection fails g4 and the next
+   enumeration drops it.
+
+   ```yaml
+   engine:
+     heuristics:
+       sort_kernel_catalog:
+         gfx942: [4b750e22-2656-46ce-89e7-be9ba588d732]
+   ```
+
+3. Regenerate. The UED comes out byte-identical to the promoted one; nothing else
+   changes, and the reader still resolves the native UHD from `default` only, so the
+   model UHD under `heuristics/` mints and reuses no id.
+4. `dvc add heuristics` in the bundle directory, and commit the `.dvc` pointer.
+
+Roles are the three promote accepts. Keys are one concrete arch (`gfx942`, not `gfx9` or
+`gfx950-dcgpu`); `default` is allowed except under `sort_kernel_catalog`, whose `default`
+is the generator's native UHD (so that role also needs `heuristic: native`). Values are
+non-empty lists of distinct UUIDs. A slotted engine refuses the key: its rankers are
+per slot. Without `engine.heuristics` every output is unchanged.
+
 ## Output
 
 The descriptor directory mirrors the authored root, so the emitted tree copies across
 verbatim. `direct_load` emits under `test_descriptors/<set>/<slug>/`, `<set>` being the
 `authored_subpath` the config must name; `packaged` emits under
 `descriptors/<producer>/<bundle>/`, defaulting the subpath to `<kernel_source_kind>/<slug>`.
+`<slug>` is the engine slug, the snake_case of the engine's local name; it names the files.
+The folder is the `authored_subpath` and may differ from it:
+`hipkernel:Gfx942AttentionUnified3d` writes `gfx942_attention_unified3d.*` files into
+`rocKE/gfx942_attention_unified_3d/`.
 
 ```
 <output-dir>/
@@ -597,18 +646,20 @@ it needs a validator binary this repo does not build by default: point
 The descriptors under `src/engines/kernel_ingestor_engine/descriptors/rocKE/<slug>/` are
 generated (never at build time) from the selection `configs/<slug>.yaml`, drawn from the
 registry space its manifest `configs/<slug>.engine.yaml` enumerates (RUNBOOK stages 2 and
-6). `tests/test_registry_regeneration.py` gates the three against each other. The gates
+6). `tests/test_registry_regeneration.py` gates the three against each other, once per `configs/*.engine.yaml`. The gates
 compare specs, not code: `hkp_pack` builds unshipped spec fields at their current default
 with the builder's current code, so review rocKE default and builder changes as changes to
 the shipped engine.
 
 | Gate | Fails when |
 |---|---|
-| g1 In registry | a selection kernel is not in the manifest's enumeration (name, shipped spec fields, metadata, `kernel_source` kind/source/builder, `default` marker), or ships an unshipped spec field off its dataclass default |
-| g2 Selection regenerates shipped | the shipped descriptors differ from `generate.py`'s output for the selection (`catalog_diff --strict-spec`) |
-| g3 Registry regenerates shipped | the shipped descriptors differ from `generate.py`'s output for the manifest's enumeration, compared on the shipped spec fields |
-| g4 Header matches manifest | the selection's `engine`, `dialect`, `kernel_source_kind`, `workspace_policy`, `authored_subpath`, `kmd_fields`, `specialization` or `reduction` differs from the manifest's |
-| g5 Vocabulary matches the matcher | a `specialization.vocabulary.dtype` spelling is not one the C++ matcher compares, or the matcher's source or dtype literals can no longer be read |
+| g1 In registry | a selection kernel is not in the manifest's enumeration (name, shipped spec fields, metadata, `kernel_source` kind/source/builder, `default` marker, launch names/builders/roles), or omits a spec field the registry holds off its dataclass default |
+| g2 Selection regenerates shipped | the shipped descriptors differ from `generate.py`'s output for the selection (`catalog_diff --strict-spec`, native symbols included) |
+| g3 Registry regenerates shipped | the shipped descriptors differ from `generate.py`'s output for the manifest's enumeration, compared on the shipped spec fields; a `space: full` (reduced) catalog must be a `--subset` of it |
+| g4 Header matches manifest | the selection's `engine`, `dialect`, `kernel_source_kind`, `workspace_policy`, `authored_subpath`, `kmd_fields`, `specialization`, `reduction` or launch set differs from the manifest's |
+| g5 Vocabulary matches the matcher | a `specialization.vocabulary.dtype` spelling is not one the C++ matcher compares (or the matcher produces one the vocabulary lacks), or the matcher's source or dtype literals can no longer be read |
+| g6 Specs hydrate | an enumerated or shipped spec (every launch of a multi-launch kernel) cannot be built by `hkp_pack`'s own `build_spec`, or the builder's support predicate declines it, or a module builder's kernels are not exactly the launched roles (the pack-time checks that need no comgr) |
+| g7 Metadata is observed | an enumerated kernel's metadata differs from what its hydrated spec reports through the manifest's `specialization.bindings` (a field, or a bound method such as `mask_type`), or a binding names an attribute the spec lacks: `hkp_pack`'s agreement check, without the compile |
 
 To update a catalog, from this directory: run the gates, diff the edited selection against
 the shipped bundle (the report is the change under review), and check with
@@ -618,10 +669,12 @@ is `space: slice`):
 
 ```bash
 PY="$PWD/.venv/bin/python"
-SLUG=gfx950_attention_dense
+SLUG=gfx950_attention_dense   # bundle folder and config stem (configs/$SLUG.yaml)
+STEM=gfx950_attention_dense   # descriptor file stem: the engine slug. Not always $SLUG:
+                              # gfx942_attention_unified_3d's files are gfx942_attention_unified3d.*
 SHIPPED="$PWD/../../../../dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/descriptors/rocKE/$SLUG"
 SCRATCH=$(mktemp -d)
-D="descriptors/rocKE/$SLUG/$SLUG"
+D="descriptors/rocKE/$SLUG/$STEM"
 "$PY" -m pytest tests/test_registry_regeneration.py -q
 # Both generate runs below reuse the installed bundle's ids (the gfx950 KDP is a DVC
 # object: fetch it into artifacts/ first, or generation refuses).
@@ -631,14 +684,14 @@ D="descriptors/rocKE/$SLUG/$SLUG"
 # hkp_pack would hydrate differently.  Use it whenever the shipped catalog and
 # the regenerated one come from the same enumerate.spec_fields declaration.
 "$PY" tools/catalog_diff.py --ignore-ids --strict-spec \
-    --shipped "$SHIPPED/artifacts/$SLUG.kdp.json" --shipped-kmd "$SHIPPED/$SLUG.kmd.json" \
+    --shipped "$SHIPPED/artifacts/$STEM.kdp.json" --shipped-kmd "$SHIPPED/$STEM.kmd.json" \
     --regenerated "$SCRATCH/selection/$D.kdp.json" --regenerated-kmd "$SCRATCH/selection/$D.kmd.json"
 "$PY" tools/registry_enumerator.py --manifest "configs/$SLUG.engine.yaml" --out "$SCRATCH/registry.yaml"
 "$PY" generate.py --config "$SCRATCH/registry.yaml" --output-dir "$SCRATCH/registry"
 # --subset only: shipped ⊆ regenerated is the right check for the full registry
 # (the registry may contain more tiles than the shipped selection). Its header
 # names the regenerated-only spec fields it did not compare.
-"$PY" tools/catalog_diff.py --subset --ignore-ids --shipped "$SHIPPED/artifacts/$SLUG.kdp.json" --shipped-kmd "$SHIPPED/$SLUG.kmd.json" \
+"$PY" tools/catalog_diff.py --subset --ignore-ids --shipped "$SHIPPED/artifacts/$STEM.kdp.json" --shipped-kmd "$SHIPPED/$STEM.kmd.json" \
     --regenerated "$SCRATCH/registry/$D.kdp.json" --regenerated-kmd "$SCRATCH/registry/$D.kmd.json"
 ```
 
@@ -770,6 +823,10 @@ There is no packaging `--profile`, CMake `PROFILES` or external root manifest.
 | `configs/binary_ops.yaml` | Multi-pack engine, like the shipped `pointwise`: one pack per operation sharing one KMD/UED/UHD/UDD, each naming its own operation-scoped UMD via `discriminator` |
 | `configs/gfx950_attention_dense.yaml` | The authored selection for the shipped `hipkernel:Gfx950AttentionDense` descriptors: 840 rocKE kernels in the `variants` form, a builder lowered by `hkp_pack` at build time |
 | `configs/gfx950_attention_dense.engine.yaml` | That engine's manifest: the registry space the selection is drawn from, its `reduction:` classification, ground-truth graph template and `launch_surface:` audit |
+| `configs/gfx950_attention_unified_2d.yaml` | The authored selection for the shipped `hipkernel:Gfx950AttentionUnified2D` descriptors: rocKE prefill kernels per head/dtype/mask cell, served through a host-derived identity paged-KV block table. Kernel and geometry counts: the bundle README, `rocKE/gfx950_attention_unified_2d/README.md` |
+| `configs/gfx950_attention_unified_2d.engine.yaml` | That engine's manifest: the `unified_tuning` geometries, the batch capacity (`enumerate.fixed.batch` -> the spec's `num_seqs`, which bounds the sequences one launch resolves at `2^ceil(log2(num_seqs+1)) - 1`), `mask_type` as the KMD's mask field, and the `engine.slug` override |
+| `configs/gfx950_attention_unified_3d.yaml` | The authored selection for the shipped `hipkernel:Gfx950AttentionUnified3D` descriptors: split-KV decode kernels, each one code object launched as a `segment` and a `reduce` launch (UKD 1.1 `sources`). Counts: the bundle README, `rocKE/gfx950_attention_unified_3d/README.md` |
+| `configs/gfx950_attention_unified_3d.engine.yaml` | That engine's manifest: the registry space, the `num_segments` knob, the host-derived identity block table staged beside the segment scratch, and the `engine.slug` override |
 | `configs/axes_example.yaml` | Pack-level `axes`: one `kernel_template` crossed with value lists, expanded at load time |
 | `configs/variants_example.yaml` | Pack-level `variants`: a shape list crossed per-shape with a named knob set (below) |
 | `configs/gfx1151_wmma_attention.yaml` | The shipped `hipkernel:Gfx1151WmmaAttention` catalog: packaged rocKE runtime-shape kernels under `rocKE/gfx1151_wmma_attention` |
@@ -853,8 +910,16 @@ engine:
                                   # rejected here though the scoped-name regex takes it.
   sdk_version: "1.0.0"            # optional, three components, default "1.0.0"
   behavior_notes: [runtime_compilation]   # optional, closed vocabulary
+  slug: conv_fwd                  # optional; the descriptor directory, file stem and native
+                                  # symbol namespace. Derived by default by splitting the
+                                  # local name before every capital, which turns a name ending
+                                  # in a digit-capital pair (Unified2D) into `unified2_d`.
+                                  # Must be a single path stem (^[A-Za-z0-9_][A-Za-z0-9_-]*$).
   knobs: [block_size]             # optional; must all be int-typed kmd_fields
   heuristic: native | none        # optional, default "native"; "none" omits the UHD
+  heuristics:                     # optional; per-arch model UHDs `uhd_gen promote` bound,
+    sort_kernel_catalog:          # role -> arch -> [UHD id]. See "Shipping a trained
+      gfx942: [<uhd-uuid>]        # model". Not allowed beside `slots`.
 
 kmd_fields:                       # the KMD's fields[] -- one per axis this engine's
   - name: block_size              # kernels vary along
@@ -907,6 +972,8 @@ provider_root: dnn-providers/hip-kernel-provider   # rocke/library is imported f
 source: kernels/gfx950/attention_dense.py   # the builder; no candidate exposes it
 builder: build_attention_dense
 kernel_name_template: attention_dense.{dtype}_d{head_size}_bm{block_m}_bn{block_n}.gfx950
+# launches: {segment: {}, reduce: {role: reduce}}  # optional; copied into every kernel_source.
+#   attention_dense has one launch; configs/gfx942_attention_unified_3d.engine.yaml sets this.
 
 enumerate:
   candidates: dispatch.attention:attention_candidates  # module:function -> KernelCandidate tuple
@@ -925,6 +992,19 @@ enumerate:
   free_fields: [block_m, block_n] # slice only: fields that may differ from select_spec
   spec_fields: [dtype, head_size] # slice only: spec fields the KDP carries
   max_kernels: 840                # slice only: more is an error
+  # The two keys below serve a rule-driven candidate (attention_dense is not one); see
+  # configs/gfx942_attention_unified_3d.engine.yaml and the text below.
+  # selector_fields: [batch, seqlen_k, kv_block_size]  # optional: cell fields that only steer select_spec
+  # neutral_fields: [num_seqs]    # optional: spec fields proven not to change the kernel
+  # spec_overrides: {kv_cache_policy: stream}  # optional: pin a spec field the candidate picks
+  # cell_keyed_by: [num_queries_per_kv]  # optional: spec attributes of the pick that key a merged cell
+  also:                           # optional: more sections in the same pack, each its own
+    - pin: {...}                  #   pin/fixed/cells/free_fields/spec_fields/max_kernels;
+      space: full                 #   candidates/request/sweep_level/space inherited unless set;
+                                  #   selector_fields/cell_keyed_by inherited, a different list exits 2
+launches:                         # optional: copied onto every kernel's kernel_source
+  segment: {}                     #   a KernelModule builder's primary kernel
+  reduce: {role: reduce}          #   and each companion, by role
 
 reduction:                        # copied into the selection; read by tools/variant_reduce.py
   fields:
@@ -951,7 +1031,65 @@ fields and name slots the spec lacks are read from the request. A field sits in 
 one `reduction.fields` list; in `space: full`, a varying field in none is held at its
 registry default with a WARN. `reduction:` never reaches a descriptor; a selection's arm
 or flat kernel may carry `default: true`, the variant its cell always keeps. An optional
-`launch_surface:` block feeds `tools/launch_surface.py`.
+`launch_surface:` block feeds `tools/launch_surface.py`. An optional
+`launches: {<name>: {<overrides>}}` mapping is copied verbatim into every generated
+kernel's `kernel_source`, making each one a multi-launch descriptor; its rules are the
+config's `launches` rules below, checked when the generated config loads.
+
+Four optional `enumerate` keys serve a rule-driven candidate, one that returns one spec per
+request and picks a knob from request fields (rocKE's strided split-KV decode picks
+`num_segments` from `batch` and `seqlen_k`, and its spec `block_size` from the request
+field `kv_block_size`, the KV keys per inner-loop step). Without them each request combo
+is a cell, so many cells name the same kernel and `--out` fails on duplicate names.
+
+- `selector_fields` lists cell fields that only steer the candidate's choice. Combos
+  equal in every other cell field merge into one cell, without the selector fields, at
+  the position of its first combo. Its specs are the union of each combo's `select_spec`
+  then `sweep_space` specs, combo by combo in catalog order, first occurrence kept; its
+  default spec is the first combo's `select_spec`. The `space` rules then apply as usual,
+  so a knob the combos vary (`num_segments`) must be a `performance` knob to reach the
+  name. Every combo's own `select_spec` must survive into its cell, or the run exits 2
+  naming the combo. A selector field must be a cell field and must not be a `feature` or
+  `performance` field. `--shapes` keys a shape's cell without the selector fields too: a
+  graph need not set them (a dense hipDNN graph has no `kv_block_size`) nor take a listed
+  value.
+- `neutral_fields` lists spec fields that do not change the compiled kernel. Before
+  merging, each spec's neutral fields take the cell's default spec's value, so specs
+  differing only there are one kernel. The manifest author owns that claim: a field is
+  neutral only if a test proves it IR-neutral. `num_seqs` on the gfx942 split-KV decode
+  grid is proven by rocKE's `test_num_seqs_is_ir_neutral_on_the_decode_grid`
+  (`dnn-providers/hip-kernel-provider/rocke/library/tests/test_attention_tiled_3d_module_gfx942.py`).
+  A neutral field must be a spec field and must not be a `feature` or `performance` field.
+- `spec_overrides` maps spec fields to one value every spec takes, applied first, before
+  `neutral_fields` and the merge. It is a deliberate departure from the candidate's own
+  pick, for a field that changes the kernel but whose other values the catalog chooses not
+  to ship: the gfx942 split-KV decode pins `kv_cache_policy: stream` (why: the header of
+  `configs/gfx942_attention_unified_3d.engine.yaml`). The spec's own validation decides whether
+  the value builds; a value it refuses exits 2 naming the request. An overridden field must
+  be a spec field, and must not be a `feature`, `performance` or neutral field. The g3
+  regeneration gate compares the shipped catalog against the overridden picks.
+- `cell_keyed_by` lists attributes of each combo's `select_spec` (a property is fine)
+  that also key the merged cell, so combos merge only when they agree on them. It serves
+  a kernel that reads some shape values at run time but bakes a value derived from
+  them: the gfx942 split-KV decode reads the head counts as kernel arguments and bakes
+  only the GQA ratio, so `nhead_q`/`nhead_k` are selector fields, `num_query_heads`/
+  `num_kv_heads` neutral (rocKE's `test_head_counts_are_ir_neutral_at_a_fixed_gqa_ratio`),
+  and `cell_keyed_by: [num_queries_per_kv]` keeps one cell per ratio. The merged cell
+  carries the attribute, so the name template and metadata can use it, and `--shapes`
+  keys a shape by its own pick's value. A keyed attribute must not be a cell field, and
+  every spec a cell holds must keep the cell's values, or the run exits 2: a neutral
+  field or sweep spec that moves one would silently file a kernel in the wrong cell.
+
+Without any of the four keys (or with all empty) the output is byte-identical to a manifest
+that never had them. `--plan-space` counts merged cells and prints the combo count beside
+them; duplicate kernel names after merging still exit 2.
+
+A `space: full` section (the primary or an `also`) projects its own varying performance
+knobs; the catalog's projected knobs are the union over sections, and `--plan-space`
+counts every section. A registry candidate that pairs its kernel with a reduce kernel (a
+`reduce_spec` beside the `kernel_spec`, as the attention split-KV tuning specs do) needs
+`launches`, built from one module builder, or the enumerator exits 2: the catalog would
+ship the kernel without the reduce the dispatcher launches after it.
 
 A packaged `rocke` `kernel_source` (or the pack's `kernel_defaults`, which every kernel
 inherits) may set `target: native | generic`, the processor `hkp_pack` compiles each shard

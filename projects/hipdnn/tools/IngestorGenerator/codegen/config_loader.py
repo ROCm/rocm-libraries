@@ -208,6 +208,8 @@ def load_config(path: Path) -> IngestorConfig:
         heuristic="none" if slotted else engine_raw.get("heuristic", "native"),
         census_name_symbol=engine_raw.get("census_name_symbol"),
         shared_workspace=engine_raw.get("shared_workspace", ""),
+        slug_override=engine_raw.get("slug"),
+        heuristics=_load_heuristics(engine_raw, slotted),
     )
 
     kmd_fields = _read_kmd_fields(raw.get("kmd_fields", []), "kmd_fields")
@@ -367,6 +369,10 @@ def load_config(path: Path) -> IngestorConfig:
                     ),
                     default=_default_marker(
                         kernel_raw.get("default", False),
+                        f"pack '{pack_raw['name']}' kernel '{kernel_raw['name']}'",
+                    ),
+                    provenance=_kernel_provenance(
+                        kernel_raw.get("provenance", {}),
                         f"pack '{pack_raw['name']}' kernel '{kernel_raw['name']}'",
                     ),
                 )
@@ -728,6 +734,83 @@ def _require_sequence(value, scope: str, what: str = "field names") -> list:
             f"characters, which silently does nothing."
         )
     return list(value)
+
+
+#: The UED roles `uhd_gen promote --role` binds per arch, in the order it accepts them.
+HEURISTIC_ROLES = (
+    "sort_kernel_catalog",
+    "predict_engine",
+    "predict_applicable_kernels",
+)
+
+#: One concrete architecture name. Mirrors `device_probe.ARCH_SHAPE` and its family-word
+#: refusal (tools/device_probe.py), which `codegen` cannot import; a test pins the two.
+_ARCH_TOKEN = re.compile(r"gfx[0-9a-f]{3,}(?:-[a-z]+)*")
+_ARCH_FAMILY_WORD = re.compile(r"-(?:generic|all|dcgpu|dgpu|igpu)(?:-|$)")
+_UUID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
+
+
+def _is_arch_token(text) -> bool:
+    return (
+        isinstance(text, str)
+        and _ARCH_TOKEN.fullmatch(text) is not None
+        and not _ARCH_FAMILY_WORD.search(text)
+    )
+
+
+def _load_heuristics(engine_raw: dict, slotted: bool) -> dict:
+    """Read ``engine.heuristics``: role -> arch -> UHD ids, as `uhd_gen promote`
+    writes them into the UED. Absent is ``{}``, which emits nothing."""
+    raw = engine_raw.get("heuristics")
+    if raw is None:
+        return {}
+    scope = "engine.heuristics"
+    if slotted:
+        raise ConfigError(
+            f"{scope} is set on a slotted engine; a slotted engine binds its rankers "
+            f"per slot (slots[].ranker), so per-arch engine bindings are not supported."
+        )
+    _require_mapping(raw, scope)
+    heuristics = {}
+    for role, arches in raw.items():
+        if role not in HEURISTIC_ROLES:
+            raise ConfigError(
+                f"{scope} names role {role!r}; expected one of {list(HEURISTIC_ROLES)} "
+                f"(the roles `uhd_gen promote --role` accepts)."
+            )
+        _require_mapping(arches, f"{scope}.{role}")
+        if not arches:
+            raise ConfigError(f"{scope}.{role} is empty; bind at least one arch.")
+        if role == "sort_kernel_catalog" and engine_raw.get("heuristic") == "none":
+            raise ConfigError(
+                f"{scope}.sort_kernel_catalog is set but engine.heuristic is 'none'; "
+                f"the arch entries follow the native 'default' UHD, which 'none' omits."
+            )
+        bound = {}
+        for arch, ids in arches.items():
+            key = f"{scope}.{role}.{arch}"
+            if arch == "default":
+                if role == "sort_kernel_catalog":
+                    raise ConfigError(
+                        f"{key}: the generator owns sort_kernel_catalog.default (the "
+                        f"native UHD from engine.heuristic); bind arch keys only."
+                    )
+            elif not _is_arch_token(arch):
+                raise ConfigError(
+                    f"{scope}.{role} key {arch!r} is not one concrete gfx architecture "
+                    f"name (e.g. gfx942) or 'default'."
+                )
+            ids = _require_sequence(ids, key, "UHD ids")
+            if not ids:
+                raise ConfigError(f"{key} is an empty list; bind at least one UHD id.")
+            for uhd in ids:
+                if not isinstance(uhd, str) or not _UUID.fullmatch(uhd):
+                    raise ConfigError(f"{key} holds {uhd!r}, which is not a UUID.")
+            if len(set(ids)) != len(ids):
+                raise ConfigError(f"{key} repeats a UHD id: {ids!r}.")
+            bound[arch] = ids
+        heuristics[role] = bound
+    return heuristics
 
 
 def _drop_tag_slot(match) -> str:
@@ -1331,6 +1414,8 @@ _KNOWN_ENGINE = frozenset(
         "heuristic",
         "census_name_symbol",
         "shared_workspace",
+        "slug",
+        "heuristics",
     }
 )
 #: RFC 0021 §4's per-slot selection members, plus the slot's own ``specialization``.
@@ -1363,8 +1448,30 @@ _KNOWN_VARIANT_GROUP = frozenset(
         "shape_axes",
     }
 )
+#: Per-kernel ``provenance`` keys a config may author. Informational only; the
+#: compiler-owned ``effective_spec`` and the specialization contract are not among them.
+_KERNEL_PROVENANCE_KEYS = frozenset({"rocke_spec_id", "rocke_tuning_id"})
+
+
+def _kernel_provenance(raw, where: str) -> dict:
+    if not isinstance(raw, dict):
+        raise ConfigError(f"{where} provenance must be a mapping, got {raw!r}.")
+    unknown = sorted(set(raw) - _KERNEL_PROVENANCE_KEYS)
+    if unknown:
+        raise ConfigError(
+            f"{where} provenance has unknown key(s) {unknown}; known: "
+            f"{sorted(_KERNEL_PROVENANCE_KEYS)}."
+        )
+    for key, value in raw.items():
+        if not isinstance(value, str) or not value:
+            raise ConfigError(
+                f"{where} provenance.{key} must be a non-empty string, got {value!r}."
+            )
+    return dict(raw)
+
+
 _KNOWN_KERNEL = frozenset(
-    {"name", "kernel_source", "metadata", "priority", "arch", "default"}
+    {"name", "kernel_source", "metadata", "priority", "arch", "default", "provenance"}
 )
 #: Each authored kind's MANDATORY ``kernel_source`` fields, mirroring
 #: ``hkp_pack._validate_ukd_fields``. Shared with `_KNOWN_KERNEL_SOURCE_BY_KIND`
@@ -2590,6 +2697,16 @@ def _check_emitted_identifiers(config: IngestorConfig) -> None:
         raise ConfigError(
             f"engine.census_name_symbol {symbol!r} must be a C++ identifier "
             "declared by IngestorPacks.hpp."
+        )
+
+    slug = config.engine.slug_override
+    if slug is not None and (
+        not isinstance(slug, str) or not PATH_STEM_PATTERN.fullmatch(slug)
+    ):
+        raise ConfigError(
+            f"engine.slug {slug!r} must be a single path stem, matching "
+            f"^[A-Za-z0-9_][A-Za-z0-9_-]*$: it names the descriptor directory and "
+            f"the stem of every descriptor file under it."
         )
 
     for derived, emitted_as in (
