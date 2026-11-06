@@ -1239,7 +1239,7 @@ class TestCalculateConvFpropOutputTolerance : public ::testing::Test
 };
 
 using ConvFpropOutputTypes = ::testing::Types<half, bfloat16>;
-TYPED_TEST_SUITE(TestCalculateConvFpropOutputTolerance, ConvFpropOutputTypes);
+TYPED_TEST_SUITE(TestCalculateConvFpropOutputTolerance, ConvFpropOutputTypes, );
 
 // A tree-ordered sum and the exact sum, each rounded once to the output type, stay within the
 // tolerance of the reference's sequential sum at every reduction length.
@@ -1252,9 +1252,9 @@ TYPED_TEST(TestCalculateConvFpropOutputTolerance, CorrectSumsInAnyOrderPass)
         {
             const auto p = makeDotProblem<T>(k, seed);
             const auto tol = calculateConvFpropOutputTolerance<T>(scaleOf(p));
-            const double ref = sequentialDot(p);
-            EXPECT_TRUE(withinTolerance<T>(pairwiseDot(p, 0, k, UINT64_MAX), ref, tol))
-                << "K=" << k << " seed=" << seed;
+            const auto ref = static_cast<double>(sequentialDot(p));
+            const auto tree = static_cast<double>(pairwiseDot(p, 0, k, UINT64_MAX));
+            EXPECT_TRUE(withinTolerance<T>(tree, ref, tol)) << "K=" << k << " seed=" << seed;
             EXPECT_TRUE(withinTolerance<T>(exactDot(p), ref, tol)) << "K=" << k << " seed=" << seed;
         }
     }
@@ -1279,8 +1279,9 @@ TYPED_TEST(TestCalculateConvFpropOutputTolerance, MissingTermFails)
             }
         }
         const auto tol = calculateConvFpropOutputTolerance<T>(scaleOf(p));
-        detected
-            += withinTolerance<T>(pairwiseDot(p, 0, k, largest), sequentialDot(p), tol) ? 0 : 1;
+        const auto withoutLargest = static_cast<double>(pairwiseDot(p, 0, k, largest));
+        const auto ref = static_cast<double>(sequentialDot(p));
+        detected += withinTolerance<T>(withoutLargest, ref, tol) ? 0 : 1;
     }
     EXPECT_EQ(detected, 32);
 }
