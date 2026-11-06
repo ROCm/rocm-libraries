@@ -15,19 +15,44 @@
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_test_sdk/utilities/DynamicTolerancesConv.hpp>
 
+#include "harness/input-init/FillRecipe.hpp"
+
 // The dynamic tolerance for convolution-forward outputs stored as half or bfloat16.
 //
 // The fixed per-op default (TestTolerances.hpp conv::getToleranceFwd, 0.1 for both atol and
 // rtol) is about 10% of a typical output at every size: far looser than the output's own
 // rounding at small reductions and unrelated to the error at large ones. This computes the
-// tolerance from the graph and the input tensors instead; the model and its calibration are
-// described with calculateConvFpropOutputTolerance() and in docs/tolerances.md.
+// tolerance from the graph and the input statistics instead; the model and its calibration
+// are described with calculateConvFpropOutputTolerance() and in docs/tolerances.md.
 
 namespace hipdnn_integration_tests::tolerance
 {
 
-/// Finds an input tensor by UID; nullptr when the UID is not a graph input held here.
-using InputTensorLookup = std::function<hipdnn_data_sdk::utilities::ITensor*(int64_t uid)>;
+/// The two statistics of an input the tolerance needs.
+struct InputMoments
+{
+    double meanSquare = 0.0;
+    double maxAbs = 0.0;
+};
+
+/// Moments of one graph input by UID; nullopt when the UID is not an input held here or its
+/// element type is not modeled.
+using InputMomentsLookup = std::function<std::optional<InputMoments>(int64_t uid)>;
+
+/// Moments of a tensor filled from a recipe, without reading it: E[x^2] of a uniform draw on
+/// [lo, hi] is (lo^2 + lo*hi + hi^2) / 3. The fill rounds each draw to the element type, which
+/// changes the mean square by far less than the tolerance's margin.
+inline InputMoments recipeMoments(const FillRecipe& recipe)
+{
+    if(recipe.kind == FillRecipe::Kind::FIXED)
+    {
+        const auto v = static_cast<double>(recipe.value);
+        return {v * v, std::abs(v)};
+    }
+    const auto lo = static_cast<double>(recipe.lo);
+    const auto hi = static_cast<double>(recipe.hi);
+    return {(lo * lo + lo * hi + hi * hi) / 3.0, std::max(std::abs(lo), std::abs(hi))};
+}
 
 namespace detail
 {
@@ -38,25 +63,36 @@ void accumulateSquares(hipdnn_data_sdk::utilities::ITensor& tensor,
                        double& maxAbs,
                        uint64_t& count)
 {
+    const auto add = [&](double v) {
+        sumOfSquares += v * v;
+        maxAbs = std::max(maxAbs, std::abs(v));
+        ++count;
+    };
+    if(tensor.isPacked() && !tensor.raggedIterationInfo().has_value())
+    {
+        // Every element exactly once, in some order: a linear walk of the buffer suffices
+        // and is far cheaper than the index-tracking iterator.
+        const auto* data = static_cast<const T*>(tensor.rawHostData());
+        const auto n = tensor.elementCount();
+        for(size_t i = 0; i < n; ++i)
+        {
+            add(static_cast<double>(data[i]));
+        }
+        return;
+    }
     for(auto it = tensor.begin(); it != tensor.end(); ++it)
     {
-        const auto value = static_cast<double>(*static_cast<const T*>(*it));
-        sumOfSquares += value * value;
-        maxAbs = std::max(maxAbs, std::abs(value));
-        ++count;
+        add(static_cast<double>(*static_cast<const T*>(*it)));
     }
 }
 
-struct Moments
-{
-    double meanSquare = 0.0;
-    double maxAbs = 0.0;
-};
+} // namespace detail
 
-/// Mean of v^2 and max |v| over the logical elements of a tensor, read on the host.
-/// nullopt for element types the model does not cover.
-inline std::optional<Moments> hostMoments(hipdnn_data_sdk::utilities::ITensor& tensor,
-                                          hipdnn_flatbuffers_sdk::data_objects::DataType dataType)
+/// Moments of a tensor read on the host: for inputs that came from data (golden blobs) rather
+/// than from a fill recipe. nullopt for element types the model does not cover.
+inline std::optional<InputMoments>
+    hostMoments(hipdnn_data_sdk::utilities::ITensor& tensor,
+                hipdnn_flatbuffers_sdk::data_objects::DataType dataType)
 {
     using hipdnn_flatbuffers_sdk::data_objects::DataType;
     double sumOfSquares = 0.0;
@@ -65,16 +101,18 @@ inline std::optional<Moments> hostMoments(hipdnn_data_sdk::utilities::ITensor& t
     switch(dataType)
     {
     case DataType::FLOAT:
-        accumulateSquares<float>(tensor, sumOfSquares, maxAbs, count);
+        detail::accumulateSquares<float>(tensor, sumOfSquares, maxAbs, count);
         break;
     case DataType::HALF:
-        accumulateSquares<hipdnn_data_sdk::types::half>(tensor, sumOfSquares, maxAbs, count);
+        detail::accumulateSquares<hipdnn_data_sdk::types::half>(
+            tensor, sumOfSquares, maxAbs, count);
         break;
     case DataType::BFLOAT16:
-        accumulateSquares<hipdnn_data_sdk::types::bfloat16>(tensor, sumOfSquares, maxAbs, count);
+        detail::accumulateSquares<hipdnn_data_sdk::types::bfloat16>(
+            tensor, sumOfSquares, maxAbs, count);
         break;
     case DataType::DOUBLE:
-        accumulateSquares<double>(tensor, sumOfSquares, maxAbs, count);
+        detail::accumulateSquares<double>(tensor, sumOfSquares, maxAbs, count);
         break;
     default:
         return std::nullopt;
@@ -83,10 +121,8 @@ inline std::optional<Moments> hostMoments(hipdnn_data_sdk::utilities::ITensor& t
     {
         return std::nullopt;
     }
-    return Moments{sumOfSquares / static_cast<double>(count), maxAbs};
+    return InputMoments{sumOfSquares / static_cast<double>(count), maxAbs};
 }
-
-} // namespace detail
 
 /// The error scale of a graph with exactly one ConvolutionFwd node that accumulates in float,
 /// whose x and w are graph inputs. Any multiply in the graph whose second operand is a graph
@@ -94,10 +130,10 @@ inline std::optional<Moments> hostMoments(hipdnn_data_sdk::utilities::ITensor& t
 /// change an error by at most their slope, which is close to 1 for every supported activation.
 ///
 /// nullopt when the graph is outside the model: no or several convolutions, a non-float
-/// accumulator, or inputs that are not held here.
+/// accumulator, or inputs whose moments are not available.
 inline std::optional<hipdnn_test_sdk::utilities::conv::ConvFpropErrorScale>
     convFwdErrorScale(const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper& wrapper,
-                      const InputTensorLookup& inputFor)
+                      const InputMomentsLookup& momentsFor)
 {
     namespace data = hipdnn_flatbuffers_sdk::data_objects;
 
@@ -120,14 +156,13 @@ inline std::optional<hipdnn_test_sdk::utilities::conv::ConvFpropErrorScale>
     }
 
     const auto& attrs = wrapper.getTensorMap();
-    auto* x = inputFor(conv->x_tensor_uid());
-    auto* w = inputFor(conv->w_tensor_uid());
-    if(x == nullptr || w == nullptr || w->dims().size() < 2)
+    const auto wIt = attrs.find(conv->w_tensor_uid());
+    if(wIt == attrs.end() || wIt->second->dims() == nullptr || wIt->second->dims()->size() < 2)
     {
         return std::nullopt;
     }
-    const auto xMoments = detail::hostMoments(*x, attrs.at(conv->x_tensor_uid())->data_type());
-    const auto wMoments = detail::hostMoments(*w, attrs.at(conv->w_tensor_uid())->data_type());
+    const auto xMoments = momentsFor(conv->x_tensor_uid());
+    const auto wMoments = momentsFor(conv->w_tensor_uid());
     if(!xMoments || !wMoments)
     {
         return std::nullopt;
@@ -135,9 +170,10 @@ inline std::optional<hipdnn_test_sdk::utilities::conv::ConvFpropErrorScale>
 
     hipdnn_test_sdk::utilities::conv::ConvFpropErrorScale scale;
     scale.accumulationLength = 1;
-    for(size_t d = 1; d < w->dims().size(); ++d)
+    const auto* wDims = wIt->second->dims();
+    for(flatbuffers::uoffset_t d = 1; d < wDims->size(); ++d)
     {
-        scale.accumulationLength *= static_cast<uint64_t>(w->dims()[d]);
+        scale.accumulationLength *= static_cast<uint64_t>(wDims->Get(d));
     }
     scale.inputMeanSquare = xMoments->meanSquare;
     scale.weightMeanSquare = wMoments->meanSquare;
@@ -156,12 +192,11 @@ inline std::optional<hipdnn_test_sdk::utilities::conv::ConvFpropErrorScale>
             continue;
         }
         const int64_t operandUid = *pointwise->in_1_tensor_uid();
-        auto* operand = inputFor(operandUid);
-        if(operand == nullptr)
+        if(attrs.find(operandUid) == attrs.end() || attrs.at(operandUid)->virtual_())
         {
             continue;
         }
-        const auto moments = detail::hostMoments(*operand, attrs.at(operandUid)->data_type());
+        const auto moments = momentsFor(operandUid);
         if(!moments)
         {
             return std::nullopt;

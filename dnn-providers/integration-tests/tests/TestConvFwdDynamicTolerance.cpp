@@ -102,11 +102,15 @@ struct Inputs
 {
     std::unordered_map<int64_t, std::shared_ptr<ITensor>> byUid;
 
-    tol::InputTensorLookup lookup()
+    tol::InputMomentsLookup lookup()
     {
-        return [this](int64_t uid) -> ITensor* {
+        return [this](int64_t uid) -> std::optional<tol::InputMoments> {
             const auto it = byUid.find(uid);
-            return it == byUid.end() ? nullptr : it->second.get();
+            if(it == byUid.end())
+            {
+                return std::nullopt;
+            }
+            return tol::hostMoments(*it->second, DataType::HALF);
         };
     }
 };
@@ -196,4 +200,34 @@ TEST(TestConvFwdDynamicTolerance, OnlyLowPrecisionOutputsGetADynamicTolerance)
     EXPECT_TRUE(tol::convFwdOutputTolerance(scale, DataType::HALF).has_value());
     EXPECT_TRUE(tol::convFwdOutputTolerance(scale, DataType::BFLOAT16).has_value());
     EXPECT_FALSE(tol::convFwdOutputTolerance(scale, DataType::FLOAT).has_value());
+}
+
+// Recipe-filled inputs are never read: their statistics come from the recipe.
+TEST(TestConvFwdDynamicTolerance, RecipeMomentsOfAUniformDraw)
+{
+    const auto m = tol::recipeMoments(hipdnn_integration_tests::FillRecipe::free(-1.0f, 3.0f));
+    EXPECT_DOUBLE_EQ(m.meanSquare, 7.0 / 3.0);
+    EXPECT_DOUBLE_EQ(m.maxAbs, 3.0);
+}
+
+TEST(TestConvFwdDynamicTolerance, RecipeMomentsOfAFixedValue)
+{
+    const auto m = tol::recipeMoments(hipdnn_integration_tests::FillRecipe::fixed(-0.5f));
+    EXPECT_DOUBLE_EQ(m.meanSquare, 0.25);
+    EXPECT_DOUBLE_EQ(m.maxAbs, 0.5);
+}
+
+// A strided tensor's buffer has gaps between rows; only the logical elements count.
+TEST(TestConvFwdDynamicTolerance, HostMomentsSkipTheGapsOfAStridedTensor)
+{
+    Tensor<half> t({2, 3}, {4, 1});
+    t.fillWithValue(static_cast<half>(10.0f));
+    for(auto it = t.begin(); it != t.end(); ++it)
+    {
+        *static_cast<half*>(*it) = static_cast<half>(1.0f);
+    }
+    const auto m = tol::hostMoments(t, DataType::HALF);
+    ASSERT_TRUE(m.has_value());
+    EXPECT_DOUBLE_EQ(m->meanSquare, 1.0);
+    EXPECT_DOUBLE_EQ(m->maxAbs, 1.0);
 }

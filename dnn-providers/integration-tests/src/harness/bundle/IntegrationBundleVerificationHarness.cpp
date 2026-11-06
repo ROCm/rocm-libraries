@@ -857,6 +857,7 @@ std::optional<VerificationOutcome> IntegrationBundleVerificationHarness::prepare
     try
     {
         _inputs = _bundle->loadTensors();
+        _inputsFromRecipes = false;
     }
     catch(const std::exception& e)
     {
@@ -947,6 +948,7 @@ std::optional<VerificationOutcome> IntegrationBundleVerificationHarness::fillBun
     }
 
     _inputs = std::move(inputs);
+    _inputsFromRecipes = true;
     return std::nullopt;
 }
 
@@ -1122,10 +1124,23 @@ VerificationOutcome
     // the only place that can log the check that actually graded this tensor.
     //
     // A half or bfloat16 output of a convolution-forward graph is graded with the dynamic
-    // tolerance computed from the graph and its inputs instead of the fixed per-op default.
-    // The error scale reads the inputs on the host, so it is computed once and only when an
+    // tolerance computed from the graph and its input statistics instead of the fixed per-op
+    // default. Inputs filled from a recipe take their statistics from the recipe, at no cost;
+    // inputs read from golden blobs are scanned on the host. Computed once, and only when an
     // output needs it.
     std::optional<std::optional<hipdnn_test_sdk::utilities::conv::ConvFpropErrorScale>> convScale;
+    const auto momentsFor = [&](int64_t uid) -> std::optional<tolerance::InputMoments> {
+        if(_inputsFromRecipes)
+        {
+            return tolerance::recipeMoments(_inputFillRecipes.fill(uid));
+        }
+        const auto it = _inputs.find(uid);
+        if(it == _inputs.end())
+        {
+            return std::nullopt;
+        }
+        return tolerance::hostMoments(*it->second, wrapper.getTensorMap().at(uid)->data_type());
+    };
     const auto toleranceFor
         = [&](const std::string& label, hipdnn_flatbuffers_sdk::data_objects::DataType dataType) {
               using hipdnn_flatbuffers_sdk::data_objects::DataType;
@@ -1133,11 +1148,7 @@ VerificationOutcome
               {
                   if(!convScale.has_value())
                   {
-                      convScale = tolerance::convFwdErrorScale(
-                          wrapper, [&](int64_t uid) -> hipdnn_data_sdk::utilities::ITensor* {
-                              const auto it = _inputs.find(uid);
-                              return it == _inputs.end() ? nullptr : it->second.get();
-                          });
+                      convScale = tolerance::convFwdErrorScale(wrapper, momentsFor);
                   }
                   if(convScale->has_value())
                   {
