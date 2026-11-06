@@ -26,6 +26,7 @@
 
 #include <Tensile/ContractionSolution.hpp>
 #include <Tensile/FusedA2AKernArg.hpp>
+#include <Tensile/MagicDivision.hpp>
 #include <Tensile/RocRollerWgmKernargs.hpp>
 #include <Tensile/ScaleAlphaVec.hpp>
 
@@ -584,117 +585,6 @@ namespace TensileLite
         return (isFallbackCUSol == 1);
     }
 
-    // Return magic number.  If magicShift is 0, compute and return it.
-    uint32_t ContractionSolution::magicNumberAlg1(uint32_t x, uint32_t* magicShift) const
-    {
-        uint64_t magicNum;
-        *magicShift = 33;
-        magicNum    = (1L << *magicShift) / x + 1;
-        if((magicNum >> 32) != 0)
-        {
-            *magicShift = 31;
-            magicNum    = (1L << *magicShift) / x + 1;
-        }
-
-        assert(magicNum >> 32 == 0); // ensure magic number fits
-
-        return static_cast<uint32_t>(magicNum);
-    }
-
-    uint32_t ContractionSolution::magicNumberAlg2(uint32_t d, uint32_t* magicShift) const
-    {
-        struct mu
-        {
-            unsigned M; // Magic number,
-            int      a; // "add" indicator,
-            int      s;
-        }; // and shift amount.
-
-        struct mu magu;
-        if(d == 0)
-        {
-            // Make dividend of 0 return 0
-            magu.M = 0;
-            magu.a = 0;
-            magu.s = 0;
-        }
-        else
-        {
-            // Must have 1 <= d <= 2**32-1.
-            int      p;
-            unsigned nc, delta, q1, r1, q2, r2;
-            magu.a = 0; // Initialize "add" indicator.
-            nc     = -1 - (-d) % d; // Unsigned arithmetic here.
-            p      = 31; // Init. p.
-            q1     = 0x80000000 / nc; // Init. q1 = 2**p/nc.
-            r1     = 0x80000000 - q1 * nc; // Init. r1 = rem(2**p, nc).
-            q2     = 0x7FFFFFFF / d; // Init. q2 = (2**p - 1)/d.
-            r2     = 0x7FFFFFFF - q2 * d; // Init. r2 = rem(2**p - 1, d).
-            do
-            {
-                p = p + 1;
-                if(r1 >= nc - r1)
-                {
-                    q1 = 2 * q1 + 1; // Update q1.
-                    r1 = 2 * r1 - nc;
-                } // Update r1.
-                else
-                {
-                    q1 = 2 * q1;
-                    r1 = 2 * r1;
-                }
-                if(r2 + 1 >= d - r2)
-                {
-                    if(q2 >= 0x7FFFFFFF)
-                        magu.a = 1;
-                    q2 = 2 * q2 + 1; // Update q2.
-                    r2 = 2 * r2 + 1 - d;
-                } // Update r2.
-                else
-                {
-                    if(q2 >= 0x80000000)
-                        magu.a = 1;
-                    q2 = 2 * q2;
-                    r2 = 2 * r2 + 1;
-                }
-                delta = d - 1 - r2;
-            } while(p < 64 && (q1 < delta || (q1 == delta && r1 == 0)));
-
-            magu.M = q2 + 1; // Magic number
-            magu.s = p - 32; // and shift amount to return
-        }
-
-        *magicShift         = magu.s;
-        const uint32_t abit = 0x80000000;
-        if(magu.a)
-            *magicShift |= abit;
-
-        // std::cout << " d=" << d << " M=" << magu.M << " a=" << magu.a << " s=" <<
-        // magu.s << "\n";
-
-        return magu.M;
-    }
-
-    uint32_t
-        ContractionSolution::magicNumber(int magicDivAlg, uint32_t x, uint32_t* magicShift) const
-    {
-        if(magicDivAlg == 1)
-            return magicNumberAlg1(x, magicShift);
-        else if(magicDivAlg == 2)
-            return magicNumberAlg2(x, magicShift);
-        else
-            throw std::runtime_error("bad magicDivAlg");
-    }
-
-    uint32_t ContractionSolution::smallMagicNumber(uint32_t x) const
-    {
-        uint64_t  magicNum;
-        const int smallMagicShift = 31;
-        magicNum                  = (1L << smallMagicShift) / x + 1;
-        assert(magicNum >> 32 == 0); // ensure magic number fits
-        return static_cast<uint32_t>(magicNum);
-    }
-
     StreamK::Static::Split StreamK::Static::computeSplit(size_t tiles,
                                                          size_t itersPerTile,
                                                          size_t skGrid,
@@ -1160,7 +1050,7 @@ namespace TensileLite
             // The flat space is in padded tiles here too, so that a solution with
             // a K unit keeps one convention across every path it can take.
             uint32_t magicShift = 0;
-            const uint32_t magic = solution.magicNumber(
+            const uint32_t magic = magicNumber(
                 2,
                 static_cast<uint32_t>(
                     StreamK::paddedItersPerTile(itersPerTile, solution.skKGranularity())),

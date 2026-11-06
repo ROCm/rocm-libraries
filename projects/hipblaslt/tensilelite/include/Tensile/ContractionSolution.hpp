@@ -1795,11 +1795,6 @@ namespace TensileLite
             return scaleSwizzleK / sizeMapping.depthU;
         }
 
-        uint32_t magicNumberAlg1(uint32_t x, uint32_t* magicShift) const;
-        uint32_t magicNumberAlg2(uint32_t x, uint32_t* magicShift) const;
-        uint32_t magicNumber(int magicDivAlg, uint32_t x, uint32_t* magicShift) const;
-        uint32_t smallMagicNumber(uint32_t x) const;
-
         std::tuple<int32_t, size_t, size_t, size_t> calculateAutoWGM(Problem const&  problem,
                                                                      Hardware const* hardware,
                                                                      uint32_t        skgrid) const;

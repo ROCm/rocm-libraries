@@ -106,6 +106,7 @@ target_sources(tensilelite-host
             BASE_DIRS "${CMAKE_CURRENT_SOURCE_DIR}"
             FILES
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/EmbeddedData.hpp"
+                "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/MagicDivision.hpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/SolutionMapLibrary.hpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/SolutionValidation.hpp"
 )
