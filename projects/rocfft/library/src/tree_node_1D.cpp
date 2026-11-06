@@ -899,17 +899,12 @@ void CRT1DNode::AssignParams_internal()
  *****************************************************/
 void Stockham1DNode::SetupGridParam_internal(GridParam& gp)
 {
-    // get working group size and number of transforms
-    size_t batch_accum = batch;
-    for(size_t j = 1; j < length.size(); j++)
-        batch_accum *= length[j];
-
     auto kernel = GetKernel();
 
-    bwd      = kernel.transforms_per_block;
-    wgs      = kernel.workgroup_size;
-    gp.b_x   = (batch_accum + bwd - 1) / bwd;
-    gp.wgs_x = wgs;
+    bwd = kernel.transforms_per_block;
+    wgs = kernel.workgroup_size;
+
+    SetStockhamGrid(gp);
 
     // we don't even need lds (kernel_1,2,3,4,5,6,7,10,11,13,17) since we don't use them at all
     // TODO: we can even use swizzle to do the butterfly shuffle if threads_per_transform[0] <= warpSize
@@ -923,6 +918,14 @@ void Stockham1DNode::SetupGridParam_internal(GridParam& gp)
 
         lds = (length[0] + lds_padding) * bwd;
     }
+}
+
+std::pair<size_t, unsigned int> Stockham1DNode::StockhamLaunchSize() const
+{
+    const auto kernel = GetKernel();
+    return {DivRoundingUp<size_t>(product(length.begin() + 1, length.end()) * batch,
+                                  kernel.transforms_per_block),
+            kernel.workgroup_size};
 }
 
 bool Stockham1DNode::CreateDeviceResources()
@@ -948,17 +951,13 @@ std::vector<size_t> Stockham1DNode::CollapsibleDims()
  *****************************************************/
 void StockhamPP1DNode::SetupGridParam_internal(GridParam& gp)
 {
-    // get working group size and number of transforms
-    size_t batch_accum = batch;
-    for(size_t j = 1; j < length.size(); j++)
-        batch_accum *= length[j];
-
     auto kernel = GetKernel();
 
-    bwd      = kernel.transforms_per_block;
-    wgs      = kernel.workgroup_size;
-    gp.b_x   = (batch_accum + bwd - 1) / bwd;
-    gp.wgs_x = wgs;
+    bwd = kernel.transforms_per_block;
+    wgs = kernel.workgroup_size;
+
+    // same launch size as Stockham1DNode
+    SetStockhamGrid(gp);
 
     const auto lds_padding = ebtype != EmbeddedType::NONE ? 1 : 0;
 

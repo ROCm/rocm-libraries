@@ -7,8 +7,9 @@ Documentation for rocFFT is available at
 
 ### Resolved issues
 
-* Fixed `rocfft_execute` failures for large batched transforms (for example, 512x512x512 with
-  batch 128) whose kernel launch exceeded 2^32 work items in one grid dimension.
+* Fixed `rocfft_execute` failures for very large batched transforms (for example, 512x512x512 with
+  batch 128) whose Stockham FFT kernel launch exceeded 2^32 work items in one grid dimension.
+  Real/complex pre- and post-processing kernels can still exceed this limit.
 
 ## rocFFT 1.0.41 for ROCm 10.2
 

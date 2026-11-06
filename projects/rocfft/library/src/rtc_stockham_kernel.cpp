@@ -141,6 +141,7 @@ RTCKernel::RTCGenerator RTCKernelStockham::generate_from_node(const LeafNode&   
         specs->threads_per_transform = kernel->threads_per_transform[0];
         specs->half_lds              = kernel->half_lds;
         specs->ebtype                = node.ebtype;
+        specs->grid_y                = node.StockhamGridY() > 1;
 
         specs2d.emplace(itype,
                         factors2d,
