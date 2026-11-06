@@ -19651,6 +19651,55 @@ class KernelWriterAssembly(KernelWriter):
       self.sgprPool.setOccupancyLimit(self.states.regCaps["MaxSgpr"], self.states.regCaps["PhysicalMaxSgpr"] // occupancy)
     return maxVgprs, occupancy
 
+  @staticmethod
+  def _coalesceBatchFloorMult4(numElementsPerBatch, numElements):
+    """Floor a DPP store-coalesce batch to a multiple of 4 (>=4).
+
+    The coalesce joins 4 M-adjacent blocks (two M-pairs) that must ALL co-reside in one
+    store batch; a batch that is not a multiple of 4 strands the trailing <4 remainder
+    (it coalesces with nothing). Returns the adjusted batch size: the coalesce minimum
+    (min(numElements, 4)) when below one full group, else the batch aligned DOWN to the
+    nearest multiple of 4. Aligning down never raises VGPR pressure, so it cannot overflow.
+    Pure helper for refineOccupancy; unit-tested in test_subtile_coalesce_batch_sizing.py.
+    """
+    if numElementsPerBatch < 4:
+      return min(numElements, 4)
+    return (numElementsPerBatch // 4) * 4
+
+  @staticmethod
+  def _dppCoalesceBatchBounds(element, numElementsPerBatch):
+    """DPP-aware N-group batch split -> list of (start, stop) element-index bounds.
+
+    Within each N-column (consecutive elements sharing element[i][0]), separate the
+    complete DPP groups (multiples of 4 M-tiles) from the orphan tail so that a sub-batch
+    never straddles an N-column boundary and the orphan (MIWaveTile[0] % 4 != 0, e.g.
+    M-tiles 8..9 of 10 for MIWT[0]=10) is isolated into its own sub-batch -- regardless of
+    numElementsPerBatch. Pure helper for globalWriteElementBatch; unit-tested in
+    test_subtile_coalesce_batch_sizing.py.
+    """
+    bounds = []
+    n = len(element)
+    i = 0
+    while i < n:
+      ncol = element[i][0]
+      j = i
+      while j < n and element[j][0] == ncol:
+        j += 1
+      k = i
+      while k < j:
+        # End of the last complete DPP group (4-block boundary) within this N-column.
+        ncol_complete = k + ((j - k) // 4) * 4
+        if k < ncol_complete < j:
+          # Complete groups followed by an orphan tail: cap at the group boundary.
+          stop = min(k + numElementsPerBatch, ncol_complete)
+        else:
+          # Whole remainder is < 4 (pure orphan) or exactly a multiple of 4 (no tail).
+          stop = min(k + numElementsPerBatch, j)
+        bounds.append((k, stop))
+        k = stop
+      i = j
+    return bounds
+
   def refineOccupancy(self, kernel, atomic, element, actPCMaxTempSgpr, \
                       gwvw, maxVgprs, ss, beta=False, edge=False):
     # Get estimated numVgprAvailable
@@ -19746,10 +19795,7 @@ class KernelWriterAssembly(KernelWriter):
       # (measured: MT256x256 kernels at batchLen 6 -> overall WA 1.15, vs 1.00 at batchLen 4/8/16).
       # Align DOWN to the nearest multiple of 4 (>=4). Rounding down never raises VGPR pressure, so
       # it cannot overflow -- it trades a slightly smaller batch for full coalesce coverage.
-      if numElementsPerBatch < 4:
-        numElementsPerBatch = min(len(element), 4)   # coalesce minimum = 2 M-pairs (one group)
-      else:
-        numElementsPerBatch = (numElementsPerBatch // 4) * 4   # align to the 4-block group
+      numElementsPerBatch = self._coalesceBatchFloorMult4(numElementsPerBatch, len(element))
 
     # TODO: Which of DataType or DestDataType is in a better sense? 0114: Check Using DestDataType + HSS
     destType = kernel["ProblemType"]["DestDataType"]
@@ -20087,34 +20133,13 @@ class KernelWriterAssembly(KernelWriter):
         _miwt0 = kernel.get("MIWaveTile", [0])[0]
         if getattr(self.states, "subtileCoalesceActive", False) and not kernel["CompactLoopStore"] \
             and _miwt0 % 4 != 0:
-          _coalesceBatchBounds = []
-          _i = 0
-          while _i < len(element):
-            _n = element[_i][0]
-            _j = _i
-            while _j < len(element) and element[_j][0] == _n:
-              _j += 1
-            _k = _i
-            while _k < _j:
-              # DPP-aware sub-batch split: within each N-col, separate complete DPP groups
-              # (multiples of 4 M-tiles) from the orphan tail so the orphan gets its own
-              # sub-batch. This keeps batch boundaries at mult-of-4 M-tile positions
-              # regardless of numElementsPerBatch — the upstream coalesce floor already
-              # aligns nepb to mult-of-4, but this makes the split robust to future
-              # changes and explicitly isolates the orphan (e.g. M-tiles 8-9 out of 10
-              # for MIWT[0]=10) so it doesn't dilute the VGPR window of clean batches.
-              _ncol_complete = _k + ((_j - _k) // 4) * 4   # end of last complete DPP group
-              if _ncol_complete > _k and _ncol_complete < _j:
-                # Complete groups followed by an orphan tail: cap the current sub-batch
-                # at the DPP group boundary (or numElementsPerBatch, whichever is smaller).
-                _stop = min(_k + numElementsPerBatch, _ncol_complete)
-              else:
-                # Either the whole remainder is < 4 (pure orphan) or exactly mult-of-4
-                # (no orphan tail), so use the normal numElementsPerBatch cap.
-                _stop = min(_k + numElementsPerBatch, _j)
-              _coalesceBatchBounds.append((_k, _stop))
-              _k = _stop
-            _i = _j
+          # DPP-aware sub-batch split: within each N-col, separate complete DPP groups
+          # (multiples of 4 M-tiles) from the orphan tail so the orphan gets its own
+          # sub-batch. Keeps batch boundaries at mult-of-4 M-tile positions regardless of
+          # numElementsPerBatch — the upstream coalesce floor already aligns nepb to mult-of-4,
+          # but this makes the split robust and explicitly isolates the orphan (e.g. M-tiles
+          # 8-9 out of 10 for MIWT[0]=10) so it doesn't dilute the VGPR window of clean batches.
+          _coalesceBatchBounds = self._dppCoalesceBatchBounds(element, numElementsPerBatch)
           numBatchesCLS = len(_coalesceBatchBounds)
           # The N-group split can create MORE batches than the uniform count. Make numBatches the
           # real batch count so every batchIdx-count-dependent consumer stays correct -- in
