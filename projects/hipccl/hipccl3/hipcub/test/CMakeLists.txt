@@ -54,11 +54,6 @@ function(add_relative_test test_name test_target resource_group)
     else()
         add_test(NAME "${test_name}" COMMAND "./${rel_path}")
     endif()
-    if(HIPCUB_ENABLE_COVERAGE AND NOT DEFINED ENV{LLVM_PROFILE_FILE})
-      set_tests_properties(${test_name} PROPERTIES
-        ENVIRONMENT "LLVM_PROFILE_FILE=${PROFILE_DIR}/profraw/hipcub-coverage_%m.profraw"
-      )
-    endif()
     rocm_install(TARGETS ${test_target} COMPONENT tests)
     file(APPEND "${INSTALL_TEST_FILE}" "add_test(${test_name} \"../${EXE_NAME}\")\n")
     # Set the resource group for the test. This must correspond to a gfxID present in resources.json.
@@ -116,7 +111,7 @@ if(HIPCUB_ENABLE_COVERAGE)
     coverage_analysis
     COMMAND ${CMAKE_COMMAND} -E rm -rf ${PROFILE_DIR}
     COMMAND ${CMAKE_COMMAND} -E make_directory ${PROFILE_DIR}/profraw
-    COMMAND ctest --output-on-failure
+    COMMAND ${CMAKE_COMMAND} -E env "LLVM_PROFILE_FILE=${PROFILE_DIR}/profraw/hipcub-coverage_%m.profraw" ctest --output-on-failure
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
     COMMENT ""
   )
