@@ -31,24 +31,20 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from test_gemm_split_barrier import _loop_body, _lower, _spec  # noqa: E402
 
+from rocke.tests.llvm_ir import KernelIR  # noqa: E402
+
 ARCH = "gfx1250"
 _TDM = "call void @llvm.amdgcn.tensor.load.to.lds("
 _ISSUER_CMP = re.compile(r"%(\w+) = icmp eq i32 %\w+, (%\w+|\d+)$")
 
 
-def _defs(ll: str) -> dict:
-    """SSA name -> its defining instruction text, for every ``%x = ...`` line."""
-    out = {}
-    for line in ll.splitlines():
-        m = re.match(r"\s*%([\w.]+) = (.*)$", line)
-        if m:
-            out[m.group(1)] = m.group(2)
-    return out
-
-
-def _is_wave_one(op: str, defs: dict) -> bool:
+def _is_wave_one(op: str, ir: KernelIR) -> bool:
     """Wave 1 appears as a literal ``1`` or as the folded ``add 0, 1``."""
-    return op == "1" or defs.get(op.lstrip("%"), "").endswith("add nsw i32 0, 1")
+    return op == "1" or (
+        op in ir.definitions
+        and ir.opcode(op) == "add"
+        and ir.operands(op) == ["0", "1"]
+    )
 
 
 def _issuer_operands(lines) -> list:
@@ -118,36 +114,43 @@ class TestGemmTdmAlternateIssuersEmission(unittest.TestCase):
 
     def test_default_issuers_are_waves_0_and_1(self):
         body = _loop_body(self.off)
-        defs = _defs(self.off)
+        ir = KernelIR(self.off)
         ops = _issuer_operands(body)
         self.assertEqual(len(ops), 2)
         self.assertEqual(ops[0], "0")
-        self.assertTrue(_is_wave_one(ops[1], defs), ops[1])
+        self.assertTrue(_is_wave_one(ops[1], ir), ops[1])
 
     def test_loop_issuers_follow_the_refilled_half(self):
         """A = 2 * (1 - par), B = A + 1: the half being refilled, not the one read."""
         body = _loop_body(self.on)
-        defs = _defs(self.on)
+        ir = KernelIR(self.on)
         ops = _issuer_operands(body)
         self.assertEqual(len(ops), 2, "one A and one B issue per iteration")
-        a_def = defs[ops[0].lstrip("%")]
-        m = re.match(r"mul nsw i32 %([\w.]+), 2$", a_def)
-        self.assertIsNotNone(m, f"A issuer is not 2 * parity: {a_def}")
-        self.assertRegex(defs[m.group(1)], r"sub nsw i32 1, %par$")
+        a, b = ops
         self.assertEqual(
-            defs[ops[1].lstrip("%")],
-            f"add nsw i32 {ops[0]}, 1",
-            "B issuer is not A + 1",
+            ir.opcode(a), "mul", f"A issuer is not 2 * parity: {ir.definitions[a]}"
+        )
+        parity, two = ir.operands(a)
+        self.assertEqual(two, "2", f"A issuer is not 2 * parity: {ir.definitions[a]}")
+        self.assertEqual(
+            (ir.opcode(parity), ir.operands(parity)),
+            ("sub", ["1", "%par"]),
+            f"A issuer's half is not 1 - par: {ir.definitions[parity]}",
+        )
+        self.assertEqual(
+            (ir.opcode(b), ir.operands(b)), ("add", [a, "1"]), "B issuer is not A + 1"
         )
 
     def test_prologue_fills_half_zero_from_waves_0_and_1(self):
         lines = self.on.splitlines()
-        start = next(i for i, l in enumerate(lines) if re.match(r"for\.body\.\d+:", l))
-        defs = _defs(self.on)
+        start = next(
+            i for i, line in enumerate(lines) if re.match(r"for\.body\.\d+:", line)
+        )
+        ir = KernelIR(self.on)
         ops = _issuer_operands(lines[:start])
         self.assertEqual(len(ops), 2)
         self.assertEqual(ops[0], "0")
-        self.assertTrue(_is_wave_one(ops[1], defs), ops[1])
+        self.assertTrue(_is_wave_one(ops[1], ir), ops[1])
 
 
 if __name__ == "__main__":

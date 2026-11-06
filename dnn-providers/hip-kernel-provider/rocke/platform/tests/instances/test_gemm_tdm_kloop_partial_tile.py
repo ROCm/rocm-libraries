@@ -30,53 +30,54 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from test_gemm_split_barrier import _lower, _ring_spec, _spec  # noqa: E402
 
-_ARITH = re.compile(
-    r"\s*(%[\w.]+) = (add|sub|mul|sdiv|srem)(?: nsw)? i32 (\S+), (\S+)$"
-)
-_SMIN = re.compile(
-    r"\s*(%[\w.]+) = call i32 @llvm\.(smin|smax)\.i32\(i32 (\S+), i32 (\S+)\)$"
-)
+from rocke.tests.llvm_ir import KernelIR  # noqa: E402
 
 
-class _Kernel:
-    """The i32 arithmetic and the K loop of one lowered kernel."""
+class _Kernel(KernelIR):
+    """One lowered kernel, read through :class:`KernelIR`, plus its K loop:
+    the i32 arithmetic that bounds and steps ``%k0`` evaluated for a given K."""
+
+    _EVAL = {
+        "add": lambda a, c: a + c,
+        "sub": lambda a, c: a - c,
+        "mul": lambda a, c: a * c,
+        "llvm.smin": min,
+        "llvm.smax": max,
+    }
 
     def __init__(self, ll: str):
-        self.defs = {}
-        for line in ll.splitlines():
-            m = _ARITH.match(line)
-            if m:
-                self.defs[m.group(1)] = (m.group(2), m.group(3).rstrip(","), m.group(4))
-                continue
-            m = _SMIN.match(line)
-            if m:
-                self.defs[m.group(1)] = (m.group(2), m.group(3).rstrip(","), m.group(4))
-        phi = re.search(r"%k0 = phi i32 \[ (\S+), [^\]]+\], \[ (%[\w.]+),", ll)
-        assert phi, "no %k0 K loop"
-        self.start, iv_next = phi.group(1), phi.group(2)
-        op, lhs, step = self.defs[iv_next]
-        assert op == "add" and lhs == "%k0", self.defs[iv_next]
-        self.step = step
-        bound = re.search(r"icmp slt i32 %k0, (\S+)$", ll, re.M)
-        assert bound, "no K-loop bound"
-        self.bound = bound.group(1)
-        self.smins = [n for n, d in self.defs.items() if d[0] == "smin"]
+        super().__init__(ll)
+        assert "%k0" in self.definitions, "no %k0 K loop"
+        self.start, iv_next = self.incoming("%k0")
+        assert self.opcode(iv_next) == "add", self.definitions[iv_next]
+        iv, self.step = self.operands(iv_next)
+        assert iv == "%k0", self.definitions[iv_next]
+        # Selected by their text, not KernelIR.find: find asks every definition
+        # for its opcode, and the kernel's inline-asm calls have no callee.
+        (bound,) = [
+            self.operands(n)[1]
+            for n, d in self.definitions.items()
+            if d.startswith("icmp slt i32 %k0,")
+        ]
+        self.bound = bound
+        self.smins = [
+            n
+            for n, d in self.definitions.items()
+            if d.startswith("call i32 @llvm.smin.i32(")
+        ]
 
     def value(self, x: str, K: int) -> int:
+        """The i32 value of ``x`` when the kernel runs with this K."""
         if x == "%K":
             return K
         if re.fullmatch(r"-?\d+", x):
             return int(x)
-        op, a, c = self.defs[x]
-        a, c = self.value(a, K), self.value(c, K)
-        if op == "smin":
-            return min(a, c)
-        if op == "smax":
-            return max(a, c)
+        op = self.opcode(x)
+        a, c = (self.value(v, K) for v in self.operands(x))
         if op in ("sdiv", "srem"):
             q = abs(a) // abs(c) * (1 if (a >= 0) == (c >= 0) else -1)
             return q if op == "sdiv" else a - q * c
-        return {"add": a + c, "sub": a - c, "mul": a * c}[op]
+        return self._EVAL[op](a, c)
 
     def trips(self, K: int) -> int:
         lo, hi, step = (self.value(x, K) for x in (self.start, self.bound, self.step))
@@ -122,7 +123,7 @@ class TestTdmKLoopsCoverAPartialLastTile(unittest.TestCase):
                 spec = _ring_spec(depth)
                 k = self._check(spec, lambda k, K: k.trips(K))
                 tile_k = spec.tile.tile_k
-                last = {k.defs[n][2] for n in k.smins}
+                last = {k.operands(n)[1] for n in k.smins}
                 self.assertEqual(len(last), 1, "fills clamp to one last tile origin")
                 (last_origin,) = last
                 for K, _ in _ks(tile_k):
@@ -167,14 +168,7 @@ class TestTdmTileOriginIsI64(unittest.TestCase):
         from dataclasses import replace
 
         ll = _lower(replace(_ring_spec(2), batched=True))
-        defs = {
-            m.group(1): (m.group(2), m.group(3).split(", "))
-            for m in re.finditer(
-                r"^\s*(%[\w.]+) = (add|mul|zext)(?: nsw)? i\d+ (.+?)(?: to i64)?$",
-                ll,
-                re.M,
-            )
-        }
+        ir = KernelIR(ll)
         fills = re.findall(
             r"getelementptr \S+, ptr addrspace\(1\) %(\w+), i64 (%[\w.]+)", ll
         )
@@ -182,11 +176,24 @@ class TestTdmTileOriginIsI64(unittest.TestCase):
         seen = set()
         for operand, index in fills:
             with self.subTest(operand=operand, index=index):
-                op, (batch, _) = defs[index]
-                self.assertEqual(op, "add", "the fill offset is batch + row/k")
-                op, factors = defs[batch]
-                self.assertEqual(op, "mul", "the batch term is an i64 product")
-                widened = {defs[f][1][0] for f in factors if defs[f][0] == "zext"}
+                self.assertEqual(
+                    ir.opcode(index), "add", "the fill offset is batch + row/k"
+                )
+                batch = ir.operands(index)[0]
+                self.assertEqual(
+                    ir.opcode(batch), "mul", "the batch term is an i64 product"
+                )
+                self.assertTrue(
+                    ir.definitions[batch].startswith("mul nsw i64 ")
+                    or ir.definitions[batch].startswith("mul i64 "),
+                    ir.definitions[batch],
+                )
+                factors = ir.operands(batch)
+                widened = {
+                    ir.operands(f)[0]
+                    for f in factors
+                    if f in ir.definitions and ir.opcode(f) == "zext"
+                }
                 stride = f"%stride_{operand.lower()}"
                 self.assertIn(stride, widened, "the stride is widened before *")
                 seen.add(operand)
