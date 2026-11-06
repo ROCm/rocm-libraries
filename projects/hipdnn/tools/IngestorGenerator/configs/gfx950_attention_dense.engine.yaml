@@ -247,7 +247,7 @@ launch_surface:
 
   # The tile-legality and static-LDS rules are restated by hand from the rocKE Python.
   # Matching and dispatch are shared with gfx942 (AttentionDenseNative.cpp);
-  # Gfx950AttentionDenseNative.cpp binds them to the gfx950 tile and scale hooks.
+  # Gfx950AttentionDenseNative.cpp binds them to the gfx950 tile and geometry hooks.
   - name: matcher
     python_source: kernels/gfx950/attention_dense.py:build_attention_dense
     cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/AttentionDenseNative.cpp

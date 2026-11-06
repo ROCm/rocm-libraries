@@ -780,7 +780,7 @@ TEST(TestPackLaunchValues, Gfx942AttentionDenseRefusesMalformedValues)
         &readGfx942AttentionDenseLaunchInputs, otherLayout, "launch value 'stride_layout'");
 }
 
-// gfx942 serves gfx950's scale range, so a saved scale outside it is refused alike.
+// gfx942 serves the shared dense scale range, so a saved scale outside it is refused alike.
 TEST(TestPackLaunchValues, Gfx942AttentionDenseRefusesAScaleOutsideTheSupportedRange)
 {
     expectDenseScaleRangeRestores(&readGfx942AttentionDenseLaunchInputs,

@@ -115,7 +115,7 @@ bool isWellFormedOperand(const data_objects::TensorAttributes& tensor)
 }
 
 // The softmax scales both kernels compute correctly: a chosen margin, not a hardware limit,
-// and the range gfx950's run_attention_dense_torch checks. gfx950 takes the row max on
+// and the range both rocKE runners check (check_dense_scale). gfx950 takes the row max on
 // unscaled scores (valid only for scale > 0), folds the scale into an fma whose rounding
 // residue grows with the scale, and masks raw scores with a power-of-two sentinel. gfx942
 // multiplies the f32 QK accumulator by scale * log2(e), then masks with the finite sentinel
