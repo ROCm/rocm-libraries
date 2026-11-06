@@ -1113,6 +1113,16 @@ TYPED_TEST(host_vector_check, rejects_nan_and_infinity)
 
         EXPECT_FALSE(
             host_vector_of(std::vector<T>{from_int<T>(1), T(-inf), from_int<T>(3)})->Check());
+
+        if constexpr(is_complex_v<T>)
+        {
+            for(const T& bad : {T(0, inf), T(0, -inf), T(0, nan)})
+            {
+                EXPECT_FALSE(
+                    host_vector_of(std::vector<T>{from_int<T>(1), bad, from_int<T>(3)})->Check())
+                    << bad;
+            }
+        }
     }
 }
 

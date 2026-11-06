@@ -488,6 +488,15 @@ TYPED_TEST(local_vector_data, check_accepts_finite_values_and_rejects_nan_and_in
             logged_check(*this->vec(std::vector<T>{from_int<T>(1), T(nan), from_int<T>(3)})));
         EXPECT_FALSE(
             logged_check(*this->vec(std::vector<T>{from_int<T>(1), T(-inf), from_int<T>(3)})));
+        if constexpr(is_complex_v<T>)
+        {
+            for(const T& bad : {T(0, inf), T(0, -inf), T(0, nan)})
+            {
+                EXPECT_FALSE(
+                    logged_check(*this->vec(std::vector<T>{from_int<T>(1), bad, from_int<T>(3)})))
+                    << bad;
+            }
+        }
     }
 
     EXPECT_TRUE(logged_check(*this->vec(std::vector<T>{from_int<T>(1), T(0), from_int<T>(3)})));

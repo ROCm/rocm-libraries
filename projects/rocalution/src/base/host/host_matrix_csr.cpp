@@ -196,8 +196,6 @@ namespace rocalution
 
             for(int ai = 0; ai < this->nrow_; ++ai)
             {
-                int s = this->mat_.col[this->mat_.row_offset[ai]];
-
                 for(PtrType aj = this->mat_.row_offset[ai]; aj < this->mat_.row_offset[ai + 1];
                     ++aj)
                 {
@@ -232,12 +230,10 @@ namespace rocalution
                         // LCOV_EXCL_STOP
                     }
 
-                    if((aj > this->mat_.row_offset[ai]) && (s >= col))
+                    if(prev_col > col)
                     {
                         sorted = false;
                     }
-
-                    s = this->mat_.col[aj];
                 }
             }
         }
