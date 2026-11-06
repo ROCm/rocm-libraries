@@ -14,7 +14,8 @@ three questions they ask of a shared object. It deliberately skips the ELF
 parser: that reads a real libMIOpen.so on every packaging build, so it is
 covered by construction, whereas the conditions the checks exist to catch (a
 stale half of a build, an entry point renamed with no stub) appear in no working
-tree.
+tree. The PE parser is tested directly, on images built here: only Windows runs
+read a real DLL, and few of those select the ABI check.
 
 Everything works on string fixtures and stand-ins, so no build, toolchain or GPU
 is needed and the module runs in a lint lane:
@@ -22,6 +23,7 @@ is needed and the module runs in a lint lane:
     python -m pytest projects/miopen/script/test_check_public_abi.py
 """
 
+import struct
 import subprocess
 import sys
 from pathlib import Path
@@ -718,18 +720,29 @@ def test_only_headers_are_scanned(tmp_path, capsys):
 # The binary stand-in
 #
 # The co-version and superset checks ask a shared object for three things:
-# what it exports, what SONAME it declares, and what it is linked against.
+# what it exports, what SONAME it declares, and what it is linked against. A
+# Windows DLL is also asked for its file version, since its name carries none.
 # --------------------------------------------------------------------------
 
 
-class FakeElf:
+class FakeLibrary:
     """A shared object as the binary checks see it."""
 
-    def __init__(self, path, symbols=(), soname="", needed=()):
+    def __init__(
+        self,
+        path,
+        symbols=(),
+        soname="",
+        needed=(),
+        naming=abi.ELF_NAMING,
+        file_version="",
+    ):
         self.path = Path(path)
         self._symbols = set(symbols)
         self._soname = soname
         self._needed = tuple(needed)
+        self.naming = naming
+        self._file_version = file_version
 
     def defined_dynamic_functions(self):
         return set(self._symbols)
@@ -740,15 +753,18 @@ class FakeElf:
     def needed(self):
         return sorted(self._needed)
 
+    def file_version(self):
+        return self._file_version
+
 
 def wrapper_elf(
     symbols=(), soname="libMIOpen.so.1", needed=("libMIOpen_private.so.1",)
 ):
-    return FakeElf("libMIOpen.so", symbols, soname, needed)
+    return FakeLibrary("libMIOpen.so", symbols, soname, needed)
 
 
 def private_elf(symbols=(), soname="libMIOpen_private.so.1"):
-    return FakeElf("libMIOpen_private.so", symbols, soname, ())
+    return FakeLibrary("libMIOpen_private.so", symbols, soname, ())
 
 
 # --------------------------------------------------------------------------
@@ -866,7 +882,7 @@ def run_check_wrapper(
     listed = tmp_path / "wrapper_only_symbols.txt"
     listed.write_text("".join(sym + "\n" for sym in wrapper_only))
     libs = {"libMIOpen.so": wrapper, "libMIOpen_private.so": private}
-    monkeypatch.setattr(abi, "open_elf", lambda path, what: libs[path])
+    monkeypatch.setattr(abi, "open_library", lambda path, what: libs[path])
     return abi.main(
         [
             "check-wrapper",
@@ -965,6 +981,302 @@ def test_check_wrapper_that_cannot_run_exits_2(tmp_path, monkeypatch, capsys):
     private = good_private(symbols=("miopenExcluded",))
     assert run_check_wrapper(tmp_path, monkeypatch, good_wrapper(), private) == 2
     assert "not a flag-on private library" in capsys.readouterr().err
+
+
+# --------------------------------------------------------------------------
+# Windows DLLs
+#
+# The same gates run on a Windows build's DLLs, with Windows names, case-blind
+# name matching, and the version resource in place of the soversion.
+# --------------------------------------------------------------------------
+
+
+def wrapper_dll(
+    symbols=("miopenFoo", "miopenBar"),
+    soname="MIOpen.dll",
+    needed=("MIOpen_private.dll", "KERNEL32.dll"),
+    file_version="3.5.1.0",
+):
+    return FakeLibrary(
+        "MIOpen.dll", symbols, soname, needed, abi.PE_NAMING, file_version
+    )
+
+
+def private_dll(
+    symbols=("miopenFoo_impl", "miopenBar_impl", "miopenExcluded"),
+    soname="MIOpen_private.dll",
+    file_version="3.5.1.0",
+):
+    return FakeLibrary(
+        "MIOpen_private.dll", symbols, soname, (), abi.PE_NAMING, file_version
+    )
+
+
+def test_check_wrapper_passes_a_consistent_dll_pair(tmp_path, monkeypatch, capsys):
+    result = run_check_wrapper(tmp_path, monkeypatch, wrapper_dll(), private_dll())
+    out = capsys.readouterr().out
+    assert result == 0, out
+    assert "PASS: DLL name is MIOpen.dll" in out
+    assert "co-versioned at file version 3.5.1.0" in out
+
+
+def test_dll_names_are_matched_without_case(capsys):
+    """Windows file names, and so the loader's view of DLL names, ignore case."""
+    wrapper = wrapper_dll(soname="miopen.DLL", needed=("MIOPEN_PRIVATE.dll",))
+    assert abi.check_soname(wrapper) is True
+    assert abi.check_private_dep(wrapper, expect_present=True) is True
+    assert abi.check_coversioned(wrapper, private_dll()) is True
+
+
+def test_a_linux_soname_does_not_pass_for_a_dll(capsys):
+    assert abi.check_soname(wrapper_dll(soname="libMIOpen.so.1")) is False
+    assert "expected 'MIOpen.dll'" in capsys.readouterr().out
+
+
+def test_a_dll_without_the_private_import_fails(capsys):
+    wrapper = wrapper_dll(needed=("KERNEL32.dll",))
+    assert abi.check_private_dep(wrapper, expect_present=True) is False
+    assert "flag-on wrapper has no import of MIOpen_private" in capsys.readouterr().out
+
+
+def test_a_dll_importing_the_hipdnn_backend_fails(capsys):
+    wrapper = wrapper_dll(needed=("MIOpen_private.dll", "HIPDNN_BACKEND.dll"))
+    assert abi.check_no_backend_dep(wrapper) is False
+    assert "wrapper has import of HIPDNN_BACKEND.dll" in capsys.readouterr().out
+
+
+def test_dlls_from_two_releases_are_not_coversioned(capsys):
+    """A stale half from another release still loads on Windows: the import
+    names no version, so only the version resource tells them apart."""
+    private = private_dll(file_version="3.4.0.0")
+    assert abi.check_coversioned(wrapper_dll(), private) is False
+    out = capsys.readouterr().out
+    assert "3.5.1.0" in out
+    assert "3.4.0.0" in out
+
+
+def test_a_dll_without_a_version_resource_is_not_coversioned():
+    """Two missing versions agree, and prove nothing."""
+    wrapper = wrapper_dll(file_version="")
+    private = private_dll(file_version="")
+    assert abi.check_coversioned(wrapper, private) is False
+
+
+def test_a_wrapper_importing_another_private_dll_is_not_coversioned(capsys):
+    wrapper = wrapper_dll(needed=("MIOpen_private_old.dll",))
+    assert abi.check_coversioned(wrapper, private_dll()) is False
+    assert "MIOpen_private_old.dll" in capsys.readouterr().out
+
+
+# --------------------------------------------------------------------------
+# The PE reader
+#
+# Images are built here rather than linked: the module runs in a lint lane with
+# no Windows toolchain. Each holds an executable .text section, which code
+# exports point into, and a read-only .rdata section with everything else.
+# --------------------------------------------------------------------------
+
+TEXT_RVA, RDATA_RVA = 0x1000, 0x2000
+TEXT_RAW, RDATA_RAW = 0x400, 0x600
+
+
+def pe_image(
+    dll_name,
+    exports=(),
+    imports=(),
+    delay_imports=(),
+    version=None,
+    pe32_plus=True,
+):
+    """Return a DLL image. `exports` maps a name to "code", "data" or "forward"."""
+    rdata = bytearray()
+
+    def put(data):
+        rva = RDATA_RVA + len(rdata)
+        rdata.extend(data)
+        rdata.extend(b"\0" * (-len(rdata) % 4))
+        return rva
+
+    def cstr(text):
+        return put(text.encode() + b"\0")
+
+    directories = {}
+    data_target = put(b"\0" * 4)
+
+    if exports:
+        names = sorted(exports)
+        start = put(b"\0" * 40)
+        functions = put(b"\0" * 4 * len(names))
+        name_table = put(b"\0" * 4 * len(names))
+        ordinals = put(b"\0" * 2 * len(names))
+        own_name = cstr(dll_name)
+        for i, name in enumerate(names):
+            if exports[name] == "code":
+                target = TEXT_RVA + 16 * i
+            elif exports[name] == "data":
+                target = data_target
+            else:
+                target = cstr("KERNEL32.GetTickCount")
+            struct.pack_into("<I", rdata, functions - RDATA_RVA + 4 * i, target)
+            struct.pack_into("<I", rdata, name_table - RDATA_RVA + 4 * i, cstr(name))
+            struct.pack_into("<H", rdata, ordinals - RDATA_RVA + 2 * i, i)
+        end = RDATA_RVA + len(rdata)
+        struct.pack_into(
+            "<IIHHIIIIIII",
+            rdata,
+            start - RDATA_RVA,
+            0,
+            0,
+            0,
+            0,
+            own_name,
+            1,
+            len(names),
+            len(names),
+            functions,
+            name_table,
+            ordinals,
+        )
+        directories[0] = (start, end - start)
+
+    # Each imported DLL gets an empty, terminated table of imported functions.
+    if imports:
+        descriptors = []
+        for name in imports:
+            thunks = put(b"\0" * 8)
+            descriptors.append(struct.pack("<IIIII", thunks, 0, 0, cstr(name), thunks))
+        table = put(b"".join(descriptors) + b"\0" * 20)
+        directories[1] = (table, 20 * (len(imports) + 1))
+
+    if delay_imports:
+        descriptors = []
+        for name in delay_imports:
+            thunks = put(b"\0" * 8)
+            descriptors.append(
+                struct.pack("<IIIIIIII", 1, cstr(name), 0, thunks, thunks, 0, 0, 0)
+            )
+        table = put(b"".join(descriptors) + b"\0" * 32)
+        directories[13] = (table, 32 * (len(delay_imports) + 1))
+
+    if version:
+        high = version[0] << 16 | version[1]
+        low = version[2] << 16 | version[3]
+        fixed = struct.pack("<13I", 0xFEEF04BD, 0x10000, high, low, high, low, *[0] * 7)
+        key = "VS_VERSION_INFO\0".encode("utf-16-le")
+        info = struct.pack("<HHH", 40 + len(fixed), len(fixed), 0) + key + b"\0\0"
+        info_rva = put(info + fixed)
+
+        def directory(ident, target):
+            return struct.pack("<IIHHHHII", 0, 0, 0, 0, 0, 1, ident, target)
+
+        tree = (
+            directory(16, 0x80000000 | 24)  # type RT_VERSION -> name directory
+            + directory(1, 0x80000000 | 48)  # name 1 -> language directory
+            + directory(0x409, 72)  # language -> data entry
+            + struct.pack("<IIII", info_rva, len(info + fixed), 0, 0)
+        )
+        directories[2] = (put(tree), len(tree))
+
+    rdata.extend(b"\0" * (-len(rdata) % 0x200))
+    text = b"\xc3" * 0x200
+
+    dir_offset = 112 if pe32_plus else 96
+    optional = bytearray(dir_offset + 16 * 8)
+    struct.pack_into("<H", optional, 0, 0x20B if pe32_plus else 0x10B)
+    struct.pack_into("<I", optional, dir_offset - 4, 16)
+    for index, (rva, size) in directories.items():
+        struct.pack_into("<II", optional, dir_offset + 8 * index, rva, size)
+
+    def section(name, rva, raw_offset, size, flags):
+        return struct.pack(
+            "<8sIIIIIIHHI", name, size, rva, size, raw_offset, 0, 0, 0, 0, flags
+        )
+
+    machine = 0x8664 if pe32_plus else 0x14C
+    headers = (
+        b"MZ"
+        + b"\0" * 0x3A
+        + struct.pack("<I", 0x40)
+        + b"PE\0\0"
+        + struct.pack("<HHIIIHH", machine, 2, 0, 0, 0, len(optional), 0x2022)
+        + bytes(optional)
+        + section(b".text", TEXT_RVA, TEXT_RAW, len(text), 0x60000020)
+        + section(b".rdata", RDATA_RVA, RDATA_RAW, len(rdata), 0x40000040)
+    )
+    return headers.ljust(TEXT_RAW, b"\0") + text + bytes(rdata)
+
+
+def read_dll(tmp_path, image, name="MIOpen.dll"):
+    path = tmp_path / name
+    path.write_bytes(image)
+    return abi.open_library(str(path), "library")
+
+
+@pytest.mark.parametrize("pe32_plus", [True, False], ids=["PE32+", "PE32"])
+def test_pe_reader_reads_what_the_checks_ask(tmp_path, pe32_plus):
+    image = pe_image(
+        "MIOpen.dll",
+        exports={"miopenFoo": "code", "miopenBar": "code"},
+        imports=["MIOpen_private.dll", "KERNEL32.dll"],
+        version=(3, 5, 1, 0),
+        pe32_plus=pe32_plus,
+    )
+    lib = read_dll(tmp_path, image)
+    assert isinstance(lib, abi.Pe)
+    assert lib.naming is abi.PE_NAMING
+    assert lib.defined_dynamic_functions() == {"miopenFoo", "miopenBar"}
+    assert lib.soname() == "MIOpen.dll"
+    assert lib.needed() == ["KERNEL32.dll", "MIOpen_private.dll"]
+    assert lib.file_version() == "3.5.1.0"
+
+
+def test_pe_data_exports_are_not_functions(tmp_path):
+    """As the ELF reader keeps only function symbols."""
+    image = pe_image("MIOpen.dll", exports={"miopenFoo": "code", "miopenData": "data"})
+    assert read_dll(tmp_path, image).defined_dynamic_functions() == {"miopenFoo"}
+
+
+def test_pe_forwarded_exports_are_functions(tmp_path):
+    """A forwarder points into the export table, not into code, and is still a
+    function a caller can bind to."""
+    image = pe_image("MIOpen.dll", exports={"miopenFoo": "forward"})
+    assert read_dll(tmp_path, image).defined_dynamic_functions() == {"miopenFoo"}
+
+
+def test_pe_delay_loaded_dlls_are_needed(tmp_path):
+    """The link binds to a delay-loaded DLL by name, which the backend check
+    forbids, even though nothing opens it until first use."""
+    image = pe_image(
+        "MIOpen.dll",
+        exports={"miopenFoo": "code"},
+        imports=["MIOpen_private.dll"],
+        delay_imports=["hipdnn_backend.dll"],
+    )
+    assert read_dll(tmp_path, image).needed() == [
+        "MIOpen_private.dll",
+        "hipdnn_backend.dll",
+    ]
+
+
+def test_pe_without_tables_has_no_name_imports_or_version(tmp_path):
+    lib = read_dll(tmp_path, pe_image("MIOpen.dll"))
+    assert lib.defined_dynamic_functions() == set()
+    assert lib.soname() == ""
+    assert lib.needed() == []
+    assert lib.file_version() == ""
+
+
+def test_a_truncated_pe_is_an_error(tmp_path):
+    image = pe_image("MIOpen.dll", exports={"miopenFoo": "code"})
+    with pytest.raises(abi.AbiError, match="MIOpen.dll"):
+        read_dll(tmp_path, image[:0x200]).defined_dynamic_functions()
+
+
+def test_an_elf_file_still_gets_the_elf_reader(tmp_path):
+    path = tmp_path / "libMIOpen.so.1.0"
+    path.write_bytes(b"\x7fELF" + b"\0" * 60)
+    with pytest.raises(abi.AbiError, match="ELF has no section headers"):
+        abi.open_library(str(path), "library")
 
 
 # --------------------------------------------------------------------------

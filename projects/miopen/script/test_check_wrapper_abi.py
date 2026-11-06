@@ -41,9 +41,9 @@ sys.exit(1)
 """
 
 
-# Checked before anything here touches os.geteuid(), which off POSIX would fail at
-# import rather than skip.
-@unittest.skipUnless(os.name == "posix", "the harness under test is POSIX-only")
+# The stand-in tree uses the Linux library layout, which the script only looks for
+# on Linux; test_miopen_wrapper_libs covers the Windows layout.
+@unittest.skipUnless(os.name == "posix", "the stand-in tree has the Linux layout")
 class WrapperAbiCheckTest(unittest.TestCase):
     def setUp(self):
         """A stand-in install tree: the libraries the harness resolves, plus its helper."""

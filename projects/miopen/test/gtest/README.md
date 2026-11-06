@@ -92,10 +92,20 @@ folder so that packagers can keep the fake backend, which has the real backend's
 out of runtime packages with a single pattern. TheRock's `ml-libs/artifact-miopen.toml` names
 the folder; change both together.
 
+The packaged scripts find the two libraries from their own location
+(`script/miopen_wrapper_libs.py`). On Linux they look in the prefix's `lib*/` for one
+versioned `libMIOpen.so.*` and one `libMIOpen_private.so.*`. On Windows they look in `bin/`
+for `MIOpen.dll` and `MIOpen_private.dll`, since Windows installs DLLs beside the programs
+that load them. The parity harness puts that directory first on `LD_LIBRARY_PATH` on Linux
+and on `PATH` on Windows.
+
 `wrapper_abi_check` (`script/check_wrapper_abi.py`) checks the wrapper's exported ABI from the
 two built libraries. It also checks the wrapper's list of required shared libraries
 (`DT_NEEDED`): `libMIOpen_private` must be on it and `libhipdnn_backend` must not, so the
-hipDNN backend is opened on first use rather than required at load time. The full list is
+hipDNN backend is opened on first use rather than required at load time. On Windows it reads
+the DLLs instead: their export tables, their import tables (`MIOpen_private.dll` must be
+imported and `hipdnn_backend.dll` must not), and their version resources, which must record
+the same file version because a DLL name carries none. The full list is
 also committed as `test/public_abi/wrapper_needed.baseline`, but the ctest entry does not
 compare against it, because it names ROCm soversions and the x86-64 loader and would fail on
 every ROCm update. To compare it by hand, pass `--needed-baseline

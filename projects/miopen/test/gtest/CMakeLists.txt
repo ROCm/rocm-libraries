@@ -407,7 +407,7 @@ function(miopen_forwarding_parity_entry MODE TEST_NAME ENTRY_NAME LABELS)
     # installed layout. python3 because the configure machine's interpreter path need not
     # exist where the package is tested.
     file(APPEND "${INSTALL_TEST_FILE}"
-"add_test(${ENTRY_NAME} python3 \"../${MIOPEN_WRAPPER_TESTS_SUBDIR}/run_forwarding_parity.py\" \"--gtest\" \"../${TEST_NAME}\" \"--filter\" \"${MIOPEN_FORWARDING_PARITY_FILTER}\")
+"add_test(${ENTRY_NAME} python3 \"../${MIOPEN_WRAPPER_TESTS_SUBDIR}/run_forwarding_parity.py\" \"--gtest\" \"../${TEST_NAME}${CMAKE_EXECUTABLE_SUFFIX}\" \"--filter\" \"${MIOPEN_FORWARDING_PARITY_FILTER}\")
 set_tests_properties(${ENTRY_NAME} PROPERTIES RUN_SERIAL TRUE TIMEOUT ${MIOPEN_FORWARDING_PARITY_TIMEOUT} LABELS \"${LABELS}\" ENVIRONMENT \"${PARITY_ENVIRONMENT}\")
 
 ")
