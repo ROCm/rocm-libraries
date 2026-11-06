@@ -707,6 +707,51 @@ namespace
         return A;
     }
 
+    // c (1 + 2 sum_{k = 1}^{degree} (-q)^k T_k(Z)) r, the Chebyshev series of 1 / x on
+    // [a, b] with c = 1 / sqrt(a b), q = (1 - sqrt(a / b)) / (1 + sqrt(a / b)) and
+    // Z = (A - (a + b) / 2) / ((b - a) / 2), through T_k(Z) r = 2 Z T_k-1(Z) r - T_k-2(Z) r
+    template <typename T>
+    std::vector<T> chebyshev_series(const Csr<T>& A, T a, T b, int degree, const std::vector<T>& r)
+    {
+        const int            n = A.n;
+        const std::vector<T> D = dense(A);
+        const T              q = (1 - std::sqrt(a / b)) / (1 + std::sqrt(a / b));
+        const T              c = 1 / std::sqrt(a * b);
+        const auto           Z = [&](const std::vector<T>& x) {
+            std::vector<T> y = dense_apply(D, n, x);
+            for(int i = 0; i < n; ++i)
+            {
+                y[i] = (y[i] - (a + b) / 2 * x[i]) / ((b - a) / 2);
+            }
+            return y;
+        };
+
+        std::vector<T> z(n);
+        for(int i = 0; i < n; ++i)
+        {
+            z[i] = c * r[i];
+        }
+        std::vector<T> previous    = r;
+        std::vector<T> current     = Z(r);
+        T              coefficient = 2 * c;
+        for(int k = 1; k <= degree; ++k)
+        {
+            coefficient *= -q;
+            for(int i = 0; i < n; ++i)
+            {
+                z[i] += coefficient * current[i];
+            }
+            std::vector<T> next = Z(current);
+            for(int i = 0; i < n; ++i)
+            {
+                next[i] = 2 * next[i] - previous[i];
+            }
+            previous = std::move(current);
+            current  = std::move(next);
+        }
+        return z;
+    }
+
     // 2 x 2 blocks on the diagonal
     template <typename T>
     Csr<T> block_diagonal(int blocks)
@@ -1987,6 +2032,28 @@ TYPED_TEST(preconditioners, aichebyshev_approximates_the_inverse)
     p.Build();
     const std::vector<T> z = apply(p, *A, r);
     expect_near(z, exact_solve(ref, r), 1e-4);
+}
+
+// The error bound above cannot tell the degree; at a low order the last term is large, so
+// the series itself pins the degree p + 1 and every coefficient
+TYPED_TEST(preconditioners, aichebyshev_of_a_low_order_is_its_chebyshev_series)
+{
+    using T                  = typename TypeParam::value_type;
+    const Csr<T>         ref = toeplitz<T>(12);
+    const std::vector<T> r   = rhs<T>(ref.n);
+    auto                 A   = this->make(ref);
+
+    for(int order : {1, 2, 3})
+    {
+        SCOPED_TRACE("order " + std::to_string(order));
+        rocalution::AIChebyshev<Matrix<T>, Vector<T>, T> p;
+        p.Set(order, 2.0, 6.0);
+        p.SetOperator(*A);
+        p.Build();
+        expect_near(apply(p, *A, r),
+                    chebyshev_series(ref, static_cast<T>(2), static_cast<T>(6), order + 1, r),
+                    scaled_tol<T>(1e-13));
+    }
 }
 
 // GMRES(30) solves a system of 12 unknowns with any invertible preconditioner, so the
