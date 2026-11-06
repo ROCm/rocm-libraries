@@ -365,7 +365,7 @@ void BatchnormFwdTrainingPlan::compile(const IKernelCompiler& kernelCompiler,
 
         // Get the stash method based on problem size and WG size
         stashMethod = hip_kernel_provider::batchnorm::getStashMethod(
-            problem, stashValuesFwd, ylocalsize, zlocalsize, batchElements);
+            problem, stashValuesFwd, ylocalsize, zlocalsize, batchElements, vectorsize);
 
         // WG size for Final kernels (NLC/NHWC/NDHWC)
         if(isLayoutChannelLast && channels % 2 == 0 && xlocalsize % 2 == 0)

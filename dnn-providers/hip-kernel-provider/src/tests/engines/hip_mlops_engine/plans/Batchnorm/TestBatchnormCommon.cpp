@@ -258,6 +258,21 @@ TEST(TestIsSpatialMultipleApplicable, UpcastOddCFailsOnSmallZ)
         isSpatialMultipleApplicable(makeProblem(10, 65, 256, true, false, true), 1, 16, 64, 1, 64));
 }
 
+TEST(TestIsSpatialMultipleApplicable, MixedPrecisionOddVectorizedChannelsFailsOnSmallZ)
+{
+    // C is even but C / vectorsize is odd (12 / 4 = 3), so the stash goes to the batch
+    // dimension, which is too small here (MIOpen #13998)
+    EXPECT_FALSE(isSpatialMultipleApplicable(
+        makeProblem(10, 12, 256, true, false, false), 4, 16, 64, 1, 64));
+}
+
+TEST(TestIsSpatialMultipleApplicable, MixedPrecisionEvenVectorizedChannelsPassesOnSmallZ)
+{
+    // 12 / 2 = 6 is even, so the stash fits in the spatial dimension
+    EXPECT_TRUE(isSpatialMultipleApplicable(
+        makeProblem(10, 12, 256, true, false, false), 2, 16, 64, 1, 64));
+}
+
 // ====================================================================================================
 // useMultiple - checks if spatial multiple implementation should be used based on heuristics
 // ====================================================================================================
@@ -308,32 +323,44 @@ TEST(TestUseMultiple, NhwcAlwaysReturnsTrue)
 
 TEST(TestGetStashMethod, ReturnsMethodZeroWhenSpatialFits)
 {
-    EXPECT_EQ(getStashMethod(makeProblem(64, 64, 1024, false, true, false), 32, 1024, 1, 64), 0);
+    EXPECT_EQ(getStashMethod(makeProblem(64, 64, 1024, false, true, false), 32, 1024, 1, 64, 1), 0);
 }
 
 TEST(TestGetStashMethod, ReturnsMethodOneWhenBatchStashRequired)
 {
-    EXPECT_EQ(getStashMethod(makeProblem(64, 64, 10, false, true, false), 32, 64, 1, 64), 1);
+    EXPECT_EQ(getStashMethod(makeProblem(64, 64, 10, false, true, false), 32, 64, 1, 64, 1), 1);
 }
 
 TEST(TestGetStashMethod, ReturnsMethodTwoForNhwcOddCMixedPrecision)
 {
-    EXPECT_EQ(getStashMethod(makeProblem(64, 65, 1024, true, false, false), 16, 1024, 1, 64), 2);
+    EXPECT_EQ(getStashMethod(makeProblem(64, 65, 1024, true, false, false), 16, 1024, 1, 64, 1), 2);
 }
 
 TEST(TestGetStashMethod, ReturnsMethodZeroForNhwcOddCUpcast)
 {
-    EXPECT_EQ(getStashMethod(makeProblem(64, 65, 1024, true, false, true), 16, 1024, 1, 64), 0);
+    EXPECT_EQ(getStashMethod(makeProblem(64, 65, 1024, true, false, true), 16, 1024, 1, 64, 1), 0);
 }
 
 TEST(TestGetStashMethod, MixedPrecisionScalesStashValues)
 {
-    EXPECT_EQ(getStashMethod(makeProblem(64, 64, 20, false, false, false), 16, 64, 1, 64), 1);
+    EXPECT_EQ(getStashMethod(makeProblem(64, 64, 20, false, false, false), 16, 64, 1, 64, 1), 1);
 }
 
 TEST(TestGetStashMethod, UpcastDoesntScaleStashValues)
 {
-    EXPECT_EQ(getStashMethod(makeProblem(64, 64, 20, false, false, true), 16, 64, 1, 64), 0);
+    EXPECT_EQ(getStashMethod(makeProblem(64, 64, 20, false, false, true), 16, 64, 1, 64, 1), 0);
+}
+
+TEST(TestGetStashMethod, ReturnsMethodTwoForNhwcOddVectorizedChannelsMixedPrecision)
+{
+    // C is even but C / vectorsize is odd (12 / 4 = 3); must agree with getStashIndex
+    // (MIOpen #13998)
+    EXPECT_EQ(getStashMethod(makeProblem(64, 12, 1024, true, false, false), 16, 1024, 1, 64, 4), 2);
+}
+
+TEST(TestGetStashMethod, ReturnsMethodZeroForNhwcEvenVectorizedChannelsMixedPrecision)
+{
+    EXPECT_EQ(getStashMethod(makeProblem(64, 12, 1024, true, false, false), 16, 1024, 1, 64, 2), 0);
 }
 
 // ====================================================================================================
