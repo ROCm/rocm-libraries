@@ -244,6 +244,7 @@ Where each corpus check lives:
 | A Range file matches its same-basename Equality sibling's header and effective `ProblemType` (same placeholder) | `ValidCorpusConsistency.find_range_sibling_violations` | `TensileLogic --check-all`: every kernel-generating build, and the logic-corpus lane for every architecture a change touches |
 | `SolutionUID` is unique across the corpus | [`test_solution_uid_uniqueness.py`](tensilelite/Tests/unit/test_solution_uid_uniqueness.py), `@needs_logic_corpus` | The logic-corpus lane, with the corpus required; unit lanes that have the corpus |
 | The skinny TN Range files wire the right kernels, without overlap, inside their predicates | `test_CustomKernelMetadata.py::test_skinny_tn_range_logic`, `@needs_logic_corpus` | The logic-corpus lane, with the corpus required; unit lanes that have the corpus |
+| Shipped gfx1250 device-scalar-alpha logic advertises the capability through `UseScaleAlphaVec` | `test_DeviceScalarAlpha.py::test_shipped_scalar_logic_explicitly_advertises_capability_gfx1250`, `@needs_logic_corpus` | The logic-corpus lane, with the corpus required; unit lanes that have the corpus |
 | Only gfx950 is chip-ID-aware | `test_PlaceholderMerge.py::test_supports_chip_id_predicate_only_gfx950` | Everywhere; it walks the architecture registry (`SUPPORTED_GFX`), not the corpus |
 | Generated kernels unpack the clamped `StaggerU` | `test_custom_kernel_staggeru_metadata.py`, against copies under `Tests/unit/logic_yaml/staggeru/` | Everywhere |
 

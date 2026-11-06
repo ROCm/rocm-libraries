@@ -832,7 +832,7 @@ suites:
     product: tensilelite
     kind: host_unit
     mode: default
-    oracle: "Unit tests that still read the logic corpus (@needs_logic_corpus): the skinny TN Range wiring and SolutionUID uniqueness"
+    oracle: "Unit tests that still read the logic corpus (@needs_logic_corpus): the skinny TN Range wiring, gfx1250 device scalar alpha logic, and SolutionUID uniqueness"
     source: projects/hipblaslt/tensilelite/tensilelite/Tests/unit/logic_corpus.py
     current:
       - system: math_ci
