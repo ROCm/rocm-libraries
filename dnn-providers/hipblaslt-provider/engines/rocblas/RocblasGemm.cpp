@@ -38,36 +38,41 @@ void runGemm(rocblas_handle handle, const GemmCall& call, const void* a, const v
     const float beta = 0.0f;
     const auto dType = rocblasDataType(call.d.dataType);
 
-    const rocblas_status status = rocblas_gemm_strided_batched_ex(
-        handle,
-        call.transposeA ? rocblas_operation_transpose : rocblas_operation_none,
-        call.transposeB ? rocblas_operation_transpose : rocblas_operation_none,
-        static_cast<rocblas_int>(call.m),
-        static_cast<rocblas_int>(call.n),
-        static_cast<rocblas_int>(call.k),
-        &alpha,
-        a,
-        rocblasDataType(call.a.dataType),
-        static_cast<rocblas_int>(call.a.leadingDimension),
-        call.a.batchStride,
-        b,
-        rocblasDataType(call.b.dataType),
-        static_cast<rocblas_int>(call.b.leadingDimension),
-        call.b.batchStride,
-        &beta,
-        d, // beta is 0, so c is never read; d is written in its place
-        dType,
-        static_cast<rocblas_int>(call.d.leadingDimension),
-        call.d.batchStride,
-        d,
-        dType,
-        static_cast<rocblas_int>(call.d.leadingDimension),
-        call.d.batchStride,
-        static_cast<rocblas_int>(call.batchCount),
-        rocblas_datatype_f32_r,
-        rocblas_gemm_algo_standard,
-        0,
-        rocblas_gemm_flags_none);
+    // Parenthesized: rocblas.h wraps the function in a variadic compatibility macro for its
+    // obsolete workspace arguments, which -Wvariadic-macro-arguments-omitted rejects when they
+    // are left out.
+    const rocblas_status status
+        = (rocblas_gemm_strided_batched_ex)(handle,
+                                            call.transposeA ? rocblas_operation_transpose
+                                                            : rocblas_operation_none,
+                                            call.transposeB ? rocblas_operation_transpose
+                                                            : rocblas_operation_none,
+                                            static_cast<rocblas_int>(call.m),
+                                            static_cast<rocblas_int>(call.n),
+                                            static_cast<rocblas_int>(call.k),
+                                            &alpha,
+                                            a,
+                                            rocblasDataType(call.a.dataType),
+                                            static_cast<rocblas_int>(call.a.leadingDimension),
+                                            call.a.batchStride,
+                                            b,
+                                            rocblasDataType(call.b.dataType),
+                                            static_cast<rocblas_int>(call.b.leadingDimension),
+                                            call.b.batchStride,
+                                            &beta,
+                                            d, // beta is 0, so c is never read; d is written in its place
+                                            dType,
+                                            static_cast<rocblas_int>(call.d.leadingDimension),
+                                            call.d.batchStride,
+                                            d,
+                                            dType,
+                                            static_cast<rocblas_int>(call.d.leadingDimension),
+                                            call.d.batchStride,
+                                            static_cast<rocblas_int>(call.batchCount),
+                                            rocblas_datatype_f32_r,
+                                            rocblas_gemm_algo_standard,
+                                            0,
+                                            rocblas_gemm_flags_none);
 
     if(status != rocblas_status_success)
     {

@@ -4,7 +4,10 @@
 #pragma once
 
 #include <flatbuffers/flatbuffers.h>
+#include <hip/hip_runtime_api.h>
+#ifdef HIPBLASLTPROVIDER_ENABLE_HIPBLASLT
 #include <hipblaslt/hipblaslt.h>
+#endif
 #include <memory>
 #include <unordered_map>
 #ifdef HIPBLASLTPROVIDER_ENABLE_ROCBLAS
@@ -16,7 +19,9 @@
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 
 #include "HipblasltContainer.hpp"
+#ifdef HIPBLASLTPROVIDER_ENABLE_HIPBLASLT
 #include "HipblasltUtils.hpp"
+#endif
 
 // NOLINTBEGIN
 struct HipdnnEnginePluginHandle
@@ -32,7 +37,9 @@ public:
 #endif
     }
 
+#ifdef HIPBLASLTPROVIDER_ENABLE_HIPBLASLT
     hipblasLtHandle_t hipblasltHandle = nullptr;
+#endif
 
 #ifdef HIPBLASLTPROVIDER_ENABLE_ROCBLAS
     /// The rocBLAS handle, created on first use: creating one loads rocBLAS's kernel library,

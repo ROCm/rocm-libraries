@@ -7,9 +7,11 @@
 #include "EngineManager.hpp"
 #include "HipblasltContainer.hpp"
 #include "engines/PlanBuilderEngine.hpp"
+#ifdef HIPBLASLTPROVIDER_ENABLE_HIPBLASLT
 #include "engines/plans/HipblasltMatmulPlanBuilder.hpp"
 #ifdef HIPBLASLTPROVIDER_ENABLE_MX_GEMM
 #include "engines/plans/HipblasltMxMatmulPlanBuilder.hpp"
+#endif
 #endif
 #ifdef HIPBLASLTPROVIDER_ENABLE_ROCBLAS
 #include "engines/rocblas/RocblasMatmulPlanBuilder.hpp"
@@ -22,6 +24,9 @@ HipblasltContainer::HipblasltContainer()
 {
     HIPDNN_PLUGIN_LOG_INFO("Creating HipblasltContainer");
 
+    _engineManager = std::make_unique<EngineManager>();
+
+#ifdef HIPBLASLTPROVIDER_ENABLE_HIPBLASLT
     auto hipblasltEngine
         = std::make_unique<PlanBuilderEngine>(hipdnn_data_sdk::utilities::HIPBLASLT_ENGINE_ID);
 
@@ -33,8 +38,8 @@ HipblasltContainer::HipblasltContainer()
     hipblasltEngine->addPlanBuilder(std::move(mxMatmulPlanBuilder));
 #endif
 
-    _engineManager = std::make_unique<EngineManager>();
     _engineManager->addEngine(std::move(hipblasltEngine));
+#endif
 
 #ifdef HIPBLASLTPROVIDER_ENABLE_ROCBLAS
     auto rocblasMatmulEngine

@@ -29,6 +29,13 @@ project(hipblaslt-provider VERSION ${HIPBLASLT_PROVIDER_VERSION} LANGUAGES CXX)
 # rocBLAS engines: ROCBLAS_MATMUL_ENGINE now, explicit-GEMM convolution later. OFF while the
 # provider grows from a hipBLASLt wrapper into a BLAS provider.
 option(HIPBLASLTPROVIDER_ENABLE_ROCBLAS "Build the rocBLAS engines" OFF)
+# hipBLASLt is not built for every target (TheRock excludes it for gfx906 and gfx103X), so a
+# rocBLAS-only provider must build without it.
+option(HIPBLASLTPROVIDER_ENABLE_HIPBLASLT "Build the hipBLASLt engines" ON)
+if(NOT HIPBLASLTPROVIDER_ENABLE_HIPBLASLT AND NOT HIPBLASLTPROVIDER_ENABLE_ROCBLAS)
+    message(FATAL_ERROR "hipblaslt-provider: enable HIPBLASLTPROVIDER_ENABLE_HIPBLASLT, "
+                        "HIPBLASLTPROVIDER_ENABLE_ROCBLAS or both; with neither it serves nothing")
+endif()
 option(HIPBLASLTPROVIDER_ENABLE_MX_GEMM
     "Enable MX (microscaling) data-type support for GEMM" OFF
 )
@@ -169,7 +176,9 @@ message(STATUS "Plugin build directory: ${HIPDNN_BUILD_PLUGIN_ENGINE_DIR}")
 message(STATUS "Plugin install directory: ${HIPDNN_INSTALL_PLUGIN_ENGINE_DIR}")
 file(MAKE_DIRECTORY ${HIPDNN_BUILD_PLUGIN_ENGINE_DIR})
 
-find_package(hipblaslt CONFIG REQUIRED)
+if(HIPBLASLTPROVIDER_ENABLE_HIPBLASLT)
+    find_package(hipblaslt CONFIG REQUIRED)
+endif()
 if(HIPBLASLTPROVIDER_ENABLE_ROCBLAS)
     find_package(rocblas CONFIG REQUIRED)
 endif()
@@ -181,14 +190,22 @@ add_library(
     HipblasltHandleFactory.cpp
     HipblasltContainer.cpp
     HipblasltPlugin.cpp
-    HipblasltUtils.cpp
-    engines/plans/HipblasltMatmulPlan.cpp
-    engines/plans/HipblasltMatmulPlanBuilder.cpp
-    $<$<BOOL:${HIPBLASLTPROVIDER_ENABLE_MX_GEMM}>:engines/plans/HipblasltMxMatmulPlan.cpp>
-    $<$<BOOL:${HIPBLASLTPROVIDER_ENABLE_MX_GEMM}>:engines/plans/HipblasltMxMatmulPlanBuilder.cpp>
-    HipblasltMatmulDesc.cpp
-    HipblasltMatrixLayout.cpp
-    HipblasltMatrixTransformDesc.cpp
+)
+if(HIPBLASLTPROVIDER_ENABLE_HIPBLASLT)
+    target_sources(hipblaslt_plugin_private PRIVATE
+        HipblasltUtils.cpp
+        engines/plans/HipblasltMatmulPlan.cpp
+        engines/plans/HipblasltMatmulPlanBuilder.cpp
+        $<$<BOOL:${HIPBLASLTPROVIDER_ENABLE_MX_GEMM}>:engines/plans/HipblasltMxMatmulPlan.cpp>
+        $<$<BOOL:${HIPBLASLTPROVIDER_ENABLE_MX_GEMM}>:engines/plans/HipblasltMxMatmulPlanBuilder.cpp>
+        HipblasltMatmulDesc.cpp
+        HipblasltMatrixLayout.cpp
+        HipblasltMatrixTransformDesc.cpp
+    )
+    target_link_libraries(hipblaslt_plugin_private PUBLIC roc::hipblaslt)
+    target_compile_definitions(hipblaslt_plugin_private PUBLIC HIPBLASLTPROVIDER_ENABLE_HIPBLASLT=1)
+endif()
+target_sources(hipblaslt_plugin_private PRIVATE
     $<$<BOOL:${HIPBLASLTPROVIDER_ENABLE_ROCBLAS}>:common/MatmulProblem.cpp>
     $<$<BOOL:${HIPBLASLTPROVIDER_ENABLE_ROCBLAS}>:engines/rocblas/RocblasGemm.cpp>
     $<$<BOOL:${HIPBLASLTPROVIDER_ENABLE_ROCBLAS}>:engines/rocblas/RocblasMatmulPlanBuilder.cpp>
@@ -199,7 +216,7 @@ if(HIPBLASLTPROVIDER_ENABLE_ROCBLAS)
     target_compile_definitions(hipblaslt_plugin_private PUBLIC HIPBLASLTPROVIDER_ENABLE_ROCBLAS=1)
 endif()
 dnn_provider_generate_version_header(hipblaslt_provider hipblaslt_plugin_private ${CMAKE_CURRENT_LIST_DIR})
-target_link_libraries(hipblaslt_plugin_private PUBLIC roc::hipblaslt hipdnn_data_sdk hipdnn_flatbuffers_sdk hipdnn_plugin_sdk hip::host)
+target_link_libraries(hipblaslt_plugin_private PUBLIC hipdnn_data_sdk hipdnn_flatbuffers_sdk hipdnn_plugin_sdk hip::host)
 
 target_compile_options(hipblaslt_plugin_private PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
 clang_tidy_check(hipblaslt_plugin_private)

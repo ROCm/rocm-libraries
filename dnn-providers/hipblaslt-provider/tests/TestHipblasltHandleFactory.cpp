@@ -31,7 +31,9 @@ TEST(TestGpuHipblasltHandleFactory, CreatesAndDestroysHandle)
     hipdnnEnginePluginHandle_t handle = nullptr;
     EXPECT_NO_THROW(HipblasltHandleFactory::createHipblasltHandle(&handle));
     ASSERT_NE(handle, nullptr);
+#ifdef HIPBLASLTPROVIDER_ENABLE_HIPBLASLT
     ASSERT_NE(handle->hipblasltHandle, nullptr);
+#endif
 
     EXPECT_NO_THROW(HipblasltHandleFactory::destroyHipblasltHandle(handle));
 
