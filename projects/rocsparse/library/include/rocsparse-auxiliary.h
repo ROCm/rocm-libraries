@@ -2587,7 +2587,7 @@ rocsparse_status rocsparse_const_ell_get(rocsparse_const_spmat_descr descr,
  *  ell_block_dim block dimension of the sparse blocked ELL matrix.
  *  @param[out]
  *  ell_cols      number of columns of the blocked ELL storage, that is, \p ell_block_dim times the
- *                number of blocks stored per block row. It is a multiple of \p ell_block_dim.
+ *                number of blocks stored per block row.
  *  @param[out]
  *  ell_col_ind   column indices of the blocked ELL matrix, an array of length
  *                \p mb*ell_cols/ell_block_dim,
