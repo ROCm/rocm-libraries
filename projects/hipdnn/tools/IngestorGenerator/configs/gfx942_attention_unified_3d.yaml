@@ -30,7 +30,7 @@ engine:
   heuristics:
     sort_kernel_catalog:
       gfx942:
-      - 8b3c960a-a47c-4ce3-96f8-343befdbc543
+      - ced4e2d1-e66a-4ab5-bfb2-fa3626f881d8
 kmd_fields:
 - name: dtype
   type: string
