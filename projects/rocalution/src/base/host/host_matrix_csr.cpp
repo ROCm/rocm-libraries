@@ -2661,6 +2661,23 @@ namespace rocalution
         {
             if(mis[ai] == 0)
             {
+                // A nonsymmetric pattern can couple ai to a node of the set that is not
+                // coupled to ai, and then ai cannot join the set
+                for(PtrType aj = this->mat_.row_offset[ai]; aj < this->mat_.row_offset[ai + 1];
+                    ++aj)
+                {
+                    if(ai != this->mat_.col[aj] && mis[this->mat_.col[aj]] == 1)
+                    {
+                        mis[ai] = -1;
+                        break;
+                    }
+                }
+
+                if(mis[ai] == -1)
+                {
+                    continue;
+                }
+
                 // set the node
                 mis[ai] = 1;
                 ++size;
@@ -10228,6 +10245,57 @@ namespace rocalution
             return false;
         }
 
+        // Ordering
+        HostVector<int> perm(this->local_backend_);
+
+        switch(ordering)
+        {
+        case 0: // No ordering
+            break;
+
+        case 1: // Connectivity ordering
+            this->ConnectivityOrder(&perm);
+            break;
+
+        case 2: // CMK
+            this->CMK(&perm);
+            break;
+
+        case 3: // RCMK
+            this->RCMK(&perm);
+            break;
+
+        case 4: // MIS
+            int size;
+            this->MaximalIndependentSet(size, &perm);
+            break;
+
+        case 5: // MultiColoring
+            int  num_colors;
+            int* size_colors = NULL;
+            this->MultiColoring(num_colors, &size_colors, &perm);
+            free_host(&size_colors);
+            break;
+        }
+
+        // The orderings map each node to its position. One that is not a permutation is
+        // rejected before any output is written.
+        if(ordering != 0 && perm.GetSize() != this->nrow_)
+        {
+            return false;
+        }
+
+        std::vector<int> node(this->nrow_, -1);
+        for(int n = 0; n < this->nrow_; ++n)
+        {
+            const int k = ordering == 0 ? n : perm.vec_[n];
+            if(k < 0 || k >= this->nrow_ || node[k] != -1)
+            {
+                return false;
+            }
+            node[k] = n;
+        }
+
         // Initialize G
         for(int i = 0; i < cast_G->size_; ++i)
         {
@@ -10276,48 +10344,6 @@ namespace rocalution
 
         nc              = 0;
         ValueType betam = -beta;
-
-        // Ordering
-        HostVector<int> perm(this->local_backend_);
-
-        switch(ordering)
-        {
-        case 0: // No ordering
-            break;
-
-        case 1: // Connectivity ordering
-            this->ConnectivityOrder(&perm);
-            break;
-
-        case 2: // CMK
-            this->CMK(&perm);
-            break;
-
-        case 3: // RCMK
-            this->RCMK(&perm);
-            break;
-
-        case 4: // MIS
-            int size;
-            this->MaximalIndependentSet(size, &perm);
-            break;
-
-        case 5: // MultiColoring
-            int  num_colors;
-            int* size_colors = NULL;
-            this->MultiColoring(num_colors, &size_colors, &perm);
-            free_host(&size_colors);
-            break;
-        }
-
-        // The orderings map each node to its position
-        std::vector<int> node(this->nrow_, -1);
-        for(int n = 0; n < this->nrow_; ++n)
-        {
-            const int k = ordering == 0 ? n : perm.vec_[n];
-            assert(k >= 0 && k < this->nrow_ && node[k] == -1);
-            node[k] = n;
-        }
 
         // Main algorithm
 
@@ -10437,6 +10463,57 @@ namespace rocalution
             return false;
         }
 
+        // Ordering
+        HostVector<int> perm(this->local_backend_);
+
+        switch(ordering)
+        {
+        case 0: // No ordering
+            break;
+
+        case 1: // Connectivity ordering
+            this->ConnectivityOrder(&perm);
+            break;
+
+        case 2: // CMK
+            this->CMK(&perm);
+            break;
+
+        case 3: // RCMK
+            this->RCMK(&perm);
+            break;
+
+        case 4: // MIS
+            int size;
+            this->MaximalIndependentSet(size, &perm);
+            break;
+
+        case 5: // MultiColoring
+            int  num_colors;
+            int* size_colors = NULL;
+            this->MultiColoring(num_colors, &size_colors, &perm);
+            free_host(&size_colors);
+            break;
+        }
+
+        // The orderings map each node to its position. One that is not a permutation is
+        // rejected before any output is written.
+        if(ordering != 0 && perm.GetSize() != this->nrow_)
+        {
+            return false;
+        }
+
+        std::vector<int> node(this->nrow_, -1);
+        for(int n = 0; n < this->nrow_; ++n)
+        {
+            const int k = ordering == 0 ? n : perm.vec_[n];
+            if(k < 0 || k >= this->nrow_ || node[k] != -1)
+            {
+                return false;
+            }
+            node[k] = n;
+        }
+
         // Initialize G
         for(int i = 0; i < cast_G->size_; ++i)
         {
@@ -10494,48 +10571,6 @@ namespace rocalution
 
         nc              = 0;
         ValueType betam = -beta;
-
-        // Ordering
-        HostVector<int> perm(this->local_backend_);
-
-        switch(ordering)
-        {
-        case 0: // No ordering
-            break;
-
-        case 1: // Connectivity ordering
-            this->ConnectivityOrder(&perm);
-            break;
-
-        case 2: // CMK
-            this->CMK(&perm);
-            break;
-
-        case 3: // RCMK
-            this->RCMK(&perm);
-            break;
-
-        case 4: // MIS
-            int size;
-            this->MaximalIndependentSet(size, &perm);
-            break;
-
-        case 5: // MultiColoring
-            int  num_colors;
-            int* size_colors = NULL;
-            this->MultiColoring(num_colors, &size_colors, &perm);
-            free_host(&size_colors);
-            break;
-        }
-
-        // The orderings map each node to its position
-        std::vector<int> node(this->nrow_, -1);
-        for(int n = 0; n < this->nrow_; ++n)
-        {
-            const int k = ordering == 0 ? n : perm.vec_[n];
-            assert(k >= 0 && k < this->nrow_ && node[k] == -1);
-            node[k] = n;
-        }
 
         // Main algorithm
 
@@ -10687,30 +10722,6 @@ namespace rocalution
             return false;
         }
 
-        // Initialize G and inverse indexing for G
-        Gsize *= 2;
-        int  rGsizec = this->nrow_;
-        int* rGc     = NULL;
-        allocate_host(Gsize * rGsizec, &rGc);
-
-        for(int i = 0; i < Gsize * rGsizec; ++i)
-        {
-            rGc[i] = -1;
-        }
-
-        for(int i = 0; i < cast_G->size_; ++i)
-        {
-            cast_G->vec_[i] = -1;
-        }
-
-        // Initialize U
-        int* U = NULL;
-        allocate_host(this->nrow_, &U);
-        set_to_zero_host(this->nrow_, U);
-
-        nc              = 0;
-        ValueType betam = -beta;
-
         // Ordering
         HostVector<int> perm(this->local_backend_);
 
@@ -10744,14 +10755,47 @@ namespace rocalution
             break;
         }
 
-        // The orderings map each node to its position
+        // The orderings map each node to its position. One that is not a permutation is
+        // rejected before any output is written.
+        if(ordering != 0 && perm.GetSize() != this->nrow_)
+        {
+            return false;
+        }
+
         std::vector<int> node(this->nrow_, -1);
         for(int n = 0; n < this->nrow_; ++n)
         {
             const int k = ordering == 0 ? n : perm.vec_[n];
-            assert(k >= 0 && k < this->nrow_ && node[k] == -1);
+            if(k < 0 || k >= this->nrow_ || node[k] != -1)
+            {
+                return false;
+            }
             node[k] = n;
         }
+
+        // Initialize G and inverse indexing for G
+        Gsize *= 2;
+        int  rGsizec = this->nrow_;
+        int* rGc     = NULL;
+        allocate_host(Gsize * rGsizec, &rGc);
+
+        for(int i = 0; i < Gsize * rGsizec; ++i)
+        {
+            rGc[i] = -1;
+        }
+
+        for(int i = 0; i < cast_G->size_; ++i)
+        {
+            cast_G->vec_[i] = -1;
+        }
+
+        // Initialize U
+        int* U = NULL;
+        allocate_host(this->nrow_, &U);
+        set_to_zero_host(this->nrow_, U);
+
+        nc              = 0;
+        ValueType betam = -beta;
 
         // While U != empty
         for(int k = 0; k < this->nrow_; ++k)
@@ -10902,30 +10946,6 @@ namespace rocalution
             return false;
         }
 
-        // Initialize G and inverse indexing for G
-        Gsize *= 2;
-        int  rGsizec = this->nrow_;
-        int* rGc     = NULL;
-        allocate_host(Gsize * rGsizec, &rGc);
-
-        for(int i = 0; i < Gsize * rGsizec; ++i)
-        {
-            rGc[i] = -1;
-        }
-
-        for(int i = 0; i < cast_G->size_; ++i)
-        {
-            cast_G->vec_[i] = -1;
-        }
-
-        // Initialize U
-        int* U = NULL;
-        allocate_host(this->nrow_, &U);
-        set_to_zero_host(this->nrow_, U);
-
-        nc              = 0;
-        ValueType betam = -beta;
-
         // Ordering
         HostVector<int> perm(this->local_backend_);
 
@@ -10959,14 +10979,47 @@ namespace rocalution
             break;
         }
 
-        // The orderings map each node to its position
+        // The orderings map each node to its position. One that is not a permutation is
+        // rejected before any output is written.
+        if(ordering != 0 && perm.GetSize() != this->nrow_)
+        {
+            return false;
+        }
+
         std::vector<int> node(this->nrow_, -1);
         for(int n = 0; n < this->nrow_; ++n)
         {
             const int k = ordering == 0 ? n : perm.vec_[n];
-            assert(k >= 0 && k < this->nrow_ && node[k] == -1);
+            if(k < 0 || k >= this->nrow_ || node[k] != -1)
+            {
+                return false;
+            }
             node[k] = n;
         }
+
+        // Initialize G and inverse indexing for G
+        Gsize *= 2;
+        int  rGsizec = this->nrow_;
+        int* rGc     = NULL;
+        allocate_host(Gsize * rGsizec, &rGc);
+
+        for(int i = 0; i < Gsize * rGsizec; ++i)
+        {
+            rGc[i] = -1;
+        }
+
+        for(int i = 0; i < cast_G->size_; ++i)
+        {
+            cast_G->vec_[i] = -1;
+        }
+
+        // Initialize U
+        int* U = NULL;
+        allocate_host(this->nrow_, &U);
+        set_to_zero_host(this->nrow_, U);
+
+        nc              = 0;
+        ValueType betam = -beta;
 
         // While U != empty
         for(int k = 0; k < this->nrow_; ++k)

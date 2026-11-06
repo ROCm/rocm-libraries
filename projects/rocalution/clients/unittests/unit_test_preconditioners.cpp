@@ -887,7 +887,8 @@ namespace
     }
 
     // The independent set of the multi-elimination, from the matrix on the
-    // backend b, after checking that it is independent and maximal
+    // backend b, after checking that it is a permutation, and that the set is
+    // independent and maximal in the pattern of A + A^T
     template <typename T>
     std::vector<int> independent_set(Backend b, const Csr<T>& A, int& size)
     {
@@ -897,16 +898,31 @@ namespace
         M->MaximalIndependentSet(size, &perm);
         const std::vector<int> p = values_of(perm);
 
+        std::vector<int> sorted = p;
+        std::sort(sorted.begin(), sorted.end());
+        std::vector<int> identity(A.n);
+        std::iota(identity.begin(), identity.end(), 0);
+        EXPECT_EQ(sorted, identity) << "not a permutation";
+        if(sorted != identity)
+        {
+            return p;
+        }
+
+        const Csr<T> At = transposed(A);
         for(int i = 0; i < A.n; ++i)
         {
             bool coupled_to_set = false;
-            for(PtrType k = A.row_offset[i]; k < A.row_offset[i + 1]; ++k)
+            for(const Csr<T>* B : {&A, &At})
             {
-                const int j = A.col[k];
-                if(i != j && p[j] < size)
+                for(PtrType k = B->row_offset[i]; k < B->row_offset[i + 1]; ++k)
                 {
-                    coupled_to_set = true;
-                    EXPECT_GE(p[i], size) << "rows " << i << " and " << j << " are both in the set";
+                    const int j = B->col[k];
+                    if(i != j && p[j] < size)
+                    {
+                        coupled_to_set = true;
+                        EXPECT_GE(p[i], size)
+                            << "rows " << i << " and " << j << " are both in the set";
+                    }
                 }
             }
             EXPECT_TRUE(p[i] < size || coupled_to_set) << "row " << i << " could join the set";
@@ -2683,6 +2699,30 @@ TYPED_TEST(preconditioners, multielimination_with_an_exact_schur_solve_is_exact)
         EXPECT_EQ(p.GetLevel(), level);
         expect_near(apply(p, *A, r), exact_solve(ref, r), tol<T>());
     }
+}
+
+// Row i + 1 of the lower triangle of nonsymmetric(12) couples to row i, but row i not to row
+// i + 1. The set is independent in both directions, so D is still diagonal and the solve is
+// exact.
+TYPED_TEST(preconditioners, multielimination_of_a_nonsymmetric_pattern_is_exact)
+{
+    using T                = typename TypeParam::value_type;
+    const Csr<T> ref       = filtered(nonsymmetric<T>(12), [](int i, int j, T) { return j <= i; });
+    const std::vector<T> r = rhs<T>(ref.n);
+    auto                 A = this->make(ref);
+
+    int size = 0;
+    independent_set(this->backend(), ref, size);
+    EXPECT_GT(size, 0);
+
+    rocalution::LU<Matrix<T>, Vector<T>, T> lu;
+    lu.Verbose(0);
+    rocalution::MultiElimination<Matrix<T>, Vector<T>, T> p;
+    p.Set(lu, 1);
+    p.SetOperator(*A);
+    p.Build();
+    EXPECT_EQ(p.GetSizeDiagBlock(), size);
+    expect_near(apply(p, *A, r), exact_solve(ref, r), tol<T>());
 }
 
 // The Schur complement keeps the entries above the drop-off and its diagonal

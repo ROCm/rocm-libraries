@@ -1183,6 +1183,51 @@ TYPED_TEST(matrix_csr, maximal_independent_set)
     }
 }
 
+// On a nonsymmetric pattern a row can couple to a member of the set that is not coupled to
+// it. The set is independent and maximal in the pattern of A + A^T, and its members take the
+// first size positions. Row i + 1 of the lower bidiagonal matrix couples to row i only, and
+// the lower triangle of general(8) also couples row 6 to row 1.
+TYPED_TEST(matrix_csr, maximal_independent_set_of_a_nonsymmetric_pattern)
+{
+    using T = typename TypeParam::value_type;
+    const Csr<T> matrices[]
+        = {filtered(general<T>(6), [](int i, int j, T) { return j == i || j == i - 1; }),
+           filtered(general<T>(8), [](int i, int j, T) { return j <= i; })};
+
+    for(const Csr<T>& ref : matrices)
+    {
+        SCOPED_TRACE("n " + std::to_string(ref.n));
+        auto A = this->make(ref);
+        ASSERT_IN_LOOP(A != nullptr);
+
+        int  size = 0;
+        auto perm = make_vector(TypeParam::backend, std::vector<int>());
+        ASSERT_IN_LOOP(A->MaximalIndependentSet(size, perm.get()));
+
+        std::vector<int> p = values_of(*perm);
+        ASSERT_IN_LOOP(is_permutation(p));
+        EXPECT_EQ(size, ref.n / 2);
+
+        const Csr<T> At = transposed(ref);
+        for(int i = 0; i < ref.n; ++i)
+        {
+            bool in_set  = p[i] < size;
+            bool coupled = false;
+            for(const Csr<T>* B : {&ref, &At})
+            {
+                for(PtrType j = B->row_offset[i]; j < B->row_offset[i + 1]; ++j)
+                {
+                    if(B->col[j] != i && p[B->col[j]] < size)
+                    {
+                        coupled = true;
+                    }
+                }
+            }
+            EXPECT_NE(in_set, coupled) << "row " << i;
+        }
+    }
+}
+
 // Rows without a diagonal entry move to the end, both groups keep their order
 TYPED_TEST(matrix_csr, zero_block_permutation)
 {

@@ -602,6 +602,36 @@ TYPED_TEST(backend_pairwise_amg, mis_and_multicoloring_orderings_visit_the_nodes
     }
 }
 
+// Row i + 1 of the lower bidiagonal matrix couples to row i, but row i not to row i + 1. Its
+// MIS is {0, 2, 4}, so the passes visit the nodes 0, 2, 4, 1, 3, 5: row 0 is dominant, 2 and 4
+// take their lower neighbours, and 5 stays alone. The coarse matrix is lower bidiagonal too,
+// and its MIS {0, 2} leaves aggregate 0 alone and pairs 2 with 1.
+TYPED_TEST(backend_pairwise_amg, mis_ordering_of_a_nonsymmetric_pattern)
+{
+    using T           = typename TypeParam::value_type;
+    const Csr<T> A    = transformed(filtered(path<T>(6), [](int i, int j, T) { return j <= i; }),
+                                 [](int i, int j, T v) { return i == j ? T(4) : v; });
+    const Csr<T> none = without_entries<T>(A.n, 3);
+
+    for(bool with_ghost : {false, true})
+    {
+        SCOPED_TRACE(with_ghost ? "with a ghost part" : "without a ghost part");
+
+        Aggregation agg;
+        ASSERT_IN_LOOP(this->initial(A, 0.25, 4, &agg, with_ghost ? &none : nullptr));
+        expect_valid_pairwise(A, agg, 2);
+        EXPECT_EQ(agg.G, (std::vector<int>{-1, 0, 0, 1, 1, 2}));
+        EXPECT_EQ(std::vector<int>(agg.rG, agg.rG + agg.nc), (std::vector<int>{2, 4, 5}));
+        EXPECT_EQ(agg.unaggregated(), dominant_rows(A));
+
+        const Csr<T> Ac        = galerkin(A, agg.G, agg.nc);
+        const Csr<T> no_coarse = without_entries<T>(Ac.n, 3);
+        ASSERT_IN_LOOP(this->further(Ac, 0.25, 4, &agg, with_ghost ? &no_coarse : nullptr));
+        expect_valid_pairwise(A, agg, 4);
+        EXPECT_EQ(agg.G, (std::vector<int>{-1, 0, 0, 1, 1, 1}));
+    }
+}
+
 // The pairs of path(6) form path(3) with the diagonal 1, 2, 1. Its nodes 0 and 1 are
 // paired, and node 2 stays alone, so the aggregates of the fine nodes are {0, 1, 2, 3} and
 // {4, 5}.
