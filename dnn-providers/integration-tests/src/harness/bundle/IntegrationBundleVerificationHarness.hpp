@@ -554,6 +554,10 @@ private:
     // nullopt when the inputs are ready; otherwise the outcome to return.
     std::optional<VerificationOutcome> prepareInputs();
     std::optional<VerificationOutcome> fillBundleInputs();
+    // Fails the test when a ragged tensor has no valid layout or reaches past its
+    // filled input buffer. Runs before any engine or reference reads the inputs.
+    std::optional<VerificationOutcome>
+        checkRaggedLayouts(const std::unordered_map<int64_t, int64_t>& lengthUids) const;
 
     OutputTensors allocateSentinelOutputs(bool onDevice) const;
     // The input set that a variant pack reads: the packed set for a device pack of a

@@ -179,15 +179,19 @@ constexpr int64_t K_SDPA_STATS_OFFSET_UID = 6;
 constexpr int64_t K_SDPA_SEQ_LEN_Q_UID = 7;
 constexpr int64_t K_SDPA_SEQ_LEN_KV_UID = 8;
 
-/// Writes a one-node SDPA forward bundle whose Q, K, V and O share the `qkvo` layout and
-/// ragged offset tensor, and whose Stats has its own `stats` layout and offset tensor.
-/// A non-empty `seqLen` adds the seq_len_q and seq_len_kv tensors (both holding it), which
-/// then give every ragged tensor its per-batch lengths. O and Stats carry golden blobs.
-inline void writeRaggedSdpaBundleFiles(const std::filesystem::path& dir,
-                                       const std::string& name,
-                                       const RaggedLayout& qkvo,
-                                       const RaggedLayout& stats,
-                                       const std::vector<int32_t>& seqLen = {})
+/// The graph of a one-node SDPA forward bundle whose Q, K, V and O share the `qkvo`
+/// layout and ragged offset tensor, and whose Stats has its own `stats` layout and offset
+/// tensor. A non-empty `seqLen` adds the seq_len_q and seq_len_kv tensors (both holding it),
+/// which then give every ragged tensor its per-batch lengths. `indexType` is the data type
+/// of the offset and seq_len tensors. With `raggedStats` false, Stats is a dense tensor of
+/// the `stats` dims and strides and the graph has no Stats offset tensor. With `raggedKv`
+/// false, K and V are dense tensors of the `qkvo` dims and strides.
+inline nlohmann::json raggedSdpaGraph(const RaggedLayout& qkvo,
+                                      const RaggedLayout& stats,
+                                      const std::vector<int32_t>& seqLen = {},
+                                      const std::string& indexType = "int32",
+                                      bool raggedStats = true,
+                                      bool raggedKv = true)
 {
     using nlohmann::json;
     const bool hasSeqLen = !seqLen.empty();
@@ -262,37 +266,72 @@ inline void writeRaggedSdpaBundleFiles(const std::filesystem::path& dir,
                            {"name", ""},
                            {"dims", std::vector<int64_t>{count, 1, 1, 1}},
                            {"strides", std::vector<int64_t>{1, 1, 1, 1}},
-                           {"data_type", "int32"},
+                           {"data_type", indexType},
                            {"virtual", false}});
     };
     for(const int64_t uid : {K_SDPA_Q_UID, K_SDPA_K_UID, K_SDPA_V_UID, K_SDPA_O_UID})
     {
+        if(!raggedKv && (uid == K_SDPA_K_UID || uid == K_SDPA_V_UID))
+        {
+            tensors.push_back({{"uid", uid},
+                               {"name", ""},
+                               {"dims", qkvo.dims},
+                               {"strides", qkvo.strides},
+                               {"data_type", "float"},
+                               {"virtual", false}});
+            continue;
+        }
         addRagged(uid, qkvo, K_SDPA_QKVO_OFFSET_UID);
     }
-    addRagged(K_SDPA_STATS_UID, stats, K_SDPA_STATS_OFFSET_UID);
+    if(raggedStats)
+    {
+        addRagged(K_SDPA_STATS_UID, stats, K_SDPA_STATS_OFFSET_UID);
+    }
+    else
+    {
+        tensors.push_back({{"uid", K_SDPA_STATS_UID},
+                           {"name", ""},
+                           {"dims", stats.dims},
+                           {"strides", stats.strides},
+                           {"data_type", "float"},
+                           {"virtual", false}});
+    }
     addAux(K_SDPA_QKVO_OFFSET_UID, static_cast<int64_t>(qkvo.offsets.size()));
-    addAux(K_SDPA_STATS_OFFSET_UID, static_cast<int64_t>(stats.offsets.size()));
+    if(raggedStats)
+    {
+        addAux(K_SDPA_STATS_OFFSET_UID, static_cast<int64_t>(stats.offsets.size()));
+    }
     if(hasSeqLen)
     {
         addAux(K_SDPA_SEQ_LEN_Q_UID, static_cast<int64_t>(seqLen.size()));
         addAux(K_SDPA_SEQ_LEN_KV_UID, static_cast<int64_t>(seqLen.size()));
     }
 
-    const json graph = {{"nodes",
-                         json::array({{{"type", "SdpaAttributes"},
-                                       {"compute_data_type", "float"},
-                                       {"name", ""},
-                                       {"inputs", inputs},
-                                       {"outputs", outputs},
-                                       {"attributes", attributes}}})},
-                        {"tensors", tensors},
-                        {"io_data_type", "float"},
-                        {"compute_data_type", "float"},
-                        {"intermediate_data_type", "float"},
-                        {"name", ""}};
+    return {{"nodes",
+             json::array({{{"type", "SdpaAttributes"},
+                           {"compute_data_type", "float"},
+                           {"name", ""},
+                           {"inputs", inputs},
+                           {"outputs", outputs},
+                           {"attributes", attributes}}})},
+            {"tensors", tensors},
+            {"io_data_type", "float"},
+            {"compute_data_type", "float"},
+            {"intermediate_data_type", "float"},
+            {"name", ""}};
+}
 
+/// Writes raggedSdpaGraph() with int32 index tensors as a bundle. O and Stats carry golden
+/// blobs.
+inline void writeRaggedSdpaBundleFiles(const std::filesystem::path& dir,
+                                       const std::string& name,
+                                       const RaggedLayout& qkvo,
+                                       const RaggedLayout& stats,
+                                       const std::vector<int32_t>& seqLen = {})
+{
+    const bool hasSeqLen = !seqLen.empty();
     std::filesystem::create_directories(dir);
-    std::ofstream(dir / (name + ".json")) << graph.dump();
+    std::ofstream(dir / (name + ".json")) << raggedSdpaGraph(qkvo, stats, seqLen).dump();
     std::ofstream(dir / (name + ".meta.json"))
         << R"({"format_version": 1, "operation": "SdpaFwd"})";
 
@@ -495,6 +534,59 @@ inline std::shared_ptr<IntegrationTestBundle> loadBundle(const std::filesystem::
 {
     const auto dir = parentDir / name;
     writeBundleFiles(dir, name, includeGoldenOutput);
+    return loadWrittenBundle(dir, name);
+}
+
+/// How writeRaggedSdpaRecipeBundle() writes a case.
+struct RaggedRecipeOptions
+{
+    std::string indexType = "int32";
+    bool raggedStats = true;
+    bool raggedKv = true;
+    /// Index tensors that get no `values` fill spec.
+    std::set<int64_t> withoutValues;
+    /// Keys merged into the metadata object.
+    nlohmann::json extraMetadata = nlohmann::json::object();
+};
+
+/// Writes the case as a recipe bundle under `parentDir/name` and loads it: no blobs, and
+/// format_version 2 metadata whose `inputs` give each offset and seq_len tensor its exact
+/// values.
+inline std::shared_ptr<IntegrationTestBundle>
+    writeRaggedSdpaRecipeBundle(const std::filesystem::path& parentDir,
+                                const std::string& name,
+                                const RaggedSdpaCase& c,
+                                const RaggedRecipeOptions& options = {})
+{
+    const auto dir = parentDir / name;
+    std::filesystem::create_directories(dir);
+    std::ofstream(dir / (name + ".json"))
+        << raggedSdpaGraph(
+               c.qkvo, c.stats, c.seqLen, options.indexType, options.raggedStats, options.raggedKv)
+               .dump();
+
+    nlohmann::json inputs = nlohmann::json::object();
+    const auto addValues = [&](int64_t uid, const std::vector<int32_t>& values) {
+        if(options.withoutValues.count(uid) == 0)
+        {
+            inputs[std::to_string(uid)]
+                = {{"kind", "values"}, {"values", values}, {"repeat", false}};
+        }
+    };
+    addValues(K_SDPA_QKVO_OFFSET_UID, c.qkvo.offsets);
+    if(options.raggedStats)
+    {
+        addValues(K_SDPA_STATS_OFFSET_UID, c.stats.offsets);
+    }
+    if(!c.seqLen.empty())
+    {
+        addValues(K_SDPA_SEQ_LEN_Q_UID, c.seqLen);
+        addValues(K_SDPA_SEQ_LEN_KV_UID, c.seqLen);
+    }
+    nlohmann::json metadata
+        = {{"format_version", 2}, {"operation", "SdpaFwd"}, {"seed", 7}, {"inputs", inputs}};
+    metadata.update(options.extraMetadata);
+    std::ofstream(dir / (name + ".meta.json")) << metadata.dump();
     return loadWrittenBundle(dir, name);
 }
 

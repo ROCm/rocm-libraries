@@ -417,7 +417,10 @@ decision moves. The host always builds the failure reports. A
 `[[validator_overrides]]` entry that uses `allclose_matching_infinities` has a
 host validator only. A comparison that resolves to the device therefore fails
 that tensor
-([details](file-formats.md#per-engine-test-config--configengine_nametoml)). The
+([details](file-formats.md#per-engine-test-config--configengine_nametoml)). In a
+bundle test, the host `allclose` comparison of a floating-point output treats two
+infinities of the same sign as equal. The comparison of a ragged output, or of an
+output with `live_rows`, runs on the host under `auto` and `cpu`. The
 `hipdnn_golden_data_tests` binary replaces the retired `golden-check` mode.
 
 **SDPA Philox dropout.** No reference can reproduce an engine's random stream, so a

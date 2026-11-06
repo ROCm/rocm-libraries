@@ -205,11 +205,12 @@ void BundleReferenceValidationHarness::TestBody()
 
     // defaultTolerance(), never resolveTolerance(): a TOML override belongs to an
     // engine and must not loosen the gate on our own data. For the same reason this
-    // path never selects a non-default validator — allclose always.
+    // path selects allclose, with one exception below.
     //
-    // The one relaxation is same-signed infinities in an SDPA forward stats (LSE) output: a row
-    // with no live key (fully masked, or padding past seq_len_q) has LSE = -inf by contract
+    // An SDPA forward stats (LSE) output matches same-signed infinities: a row with no live
+    // key (fully masked, or padding past seq_len_q) has LSE = -inf by contract
     // (SdpaSemanticsRegister.md SEM-010), so -inf on both sides is agreement, not a defect.
+    // On the host, compareTensor() matches them for every floating-point allclose output.
     std::set<std::string> sdpaStatsLabels;
     const auto& tensorMap = wrapper.getTensorMap();
     for(uint32_t i = 0; i < wrapper.nodeCount(); ++i)
@@ -260,7 +261,7 @@ void BundleReferenceValidationHarness::TestBody()
 
     // Golden data is loaded on the host, so by default the comparison runs there
     // whichever reference produced the output being judged; --validator can move it.
-    // liveRowSite is left at its default, which falls back to the site above.
+    // hostOnlySite is left at its default, which falls back to the site above.
     for(const auto& mismatch :
         bundle::compareOutputs(wrapper,
                                _bundle->outputTensorUids,
