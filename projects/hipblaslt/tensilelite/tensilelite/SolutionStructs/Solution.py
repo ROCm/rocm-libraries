@@ -1302,6 +1302,9 @@ class Solution(collections.abc.Mapping):
         reject(state, printRejectionReason, f"size of WorkGroup {state['NumThreads']} should be multiple of WavefrontSize {state['WavefrontSize']}")
 
       state["NumWaves"] = state["NumThreads"] // state['WavefrontSize']
+      numWaves = state["NumWaves"]
+      if state["ProblemType"].get("OutputAmaxD", False) and numWaves & (numWaves - 1):
+        reject(state, printRejectionReason, f"OutputAmaxD needs a power-of-two NumWaves ({numWaves}): the inter-wave amax reduction halves it each step")
 
     # macro tile sizes
     if "SubGroup0" in state and "ThreadTile0" in state:
