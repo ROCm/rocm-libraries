@@ -1,0 +1,12 @@
+{
+  "format_version": 1,
+  "kernel": "Cijk_Alik_Bljk_F8SS_BH_UserArgs_MT64x64x256_MI16x09jDDf6qbZ0DY1uXpTmoxaaLTZIoSoHqFMpoaSfchQ=",
+  "arch": [12, 5, 0],
+  "label": "loopWithPrefetch+noLoadLoopBody",
+  "pass": "StinkyBuildImplicitDependencyPass",
+  "occurrence": 1,
+  "spec": "loopWithPrefetch+noLoadLoopBody:StinkyBuildImplicitDependencyPass#1",
+  "stir": "loopWithPrefetch+noLoadLoopBody.StinkyBuildImplicitDependencyPass#1.stir",
+  "instructions": 248,
+  "fingerprint": "d9d38354c0af2adb00b062c70b5444c90b57fc4541e259430bf6bd5e5700276c"
+}

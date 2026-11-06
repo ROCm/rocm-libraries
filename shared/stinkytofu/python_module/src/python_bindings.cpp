@@ -36,6 +36,7 @@
 #include <stdexcept>
 
 #include "HardwareCaps.hpp"
+#include "stinkytofu/analysis/asm/DependencyExport.hpp"
 #include "stinkytofu/bindings/python/LogicalModule.hpp"
 #include "stinkytofu/bindings/python/Module.hpp"
 #include "stinkytofu/hardware/ArchHelper.hpp"
@@ -1173,6 +1174,77 @@ NB_MODULE(_stinkytofu, m) {
         "Return hardware capability dicts for [major, minor, stepping].\n\n"
         "Returns a dict with keys 'asmCaps', 'archCaps', 'regCaps', 'asmBugs',\n"
         "matching the rocisa getAsmCaps()/getArchCaps()/getRegCaps()/getAsmBugs() API.");
+
+    // ========================================================================
+    // stinkytofu.ir: dependency analysis of IR checkpoint bundles (the IR editor's backend)
+    // ========================================================================
+    nb::module_ ir = m.def_submodule(
+        "ir", "Dependency analysis of the Stinky IR text an IR checkpoint bundle holds");
+
+    auto edgeToDict = [](const DependencyEdge& edge) {
+        nb::dict d;
+        d["src"] = edge.src;
+        d["dst"] = edge.dst;
+        d["kind"] = edge.kind;
+        d["class"] = edge.regClass;
+        d["regs"] = edge.regs;
+        return d;
+    };
+
+    ir.def(
+        "analyze",
+        [edgeToDict](const std::string& stirText, std::array<int, 3> arch) {
+            const RegionDependencies deps = analyzeRegionText(stirText, arch);
+            if (!deps.error.empty()) throw nb::value_error(deps.error.c_str());
+            nb::list insts, edges;
+            for (const DependencyInst& inst : deps.insts) {
+                nb::dict d;
+                d["id"] = inst.id;
+                d["block"] = inst.block;
+                d["text"] = inst.text;
+                d["opcode"] = inst.opcode;
+                d["reads"] = inst.reads;
+                d["writes"] = inst.writes;
+                d["issue"] = inst.issue;
+                d["latency"] = inst.latency;
+                d["pinned"] = inst.pinned;
+                d["pin_reason"] = inst.pinReason;
+                insts.append(d);
+            }
+            for (const DependencyEdge& edge : deps.edges) edges.append(edgeToDict(edge));
+            nb::dict result;
+            result["blocks"] = deps.blocks;
+            result["insts"] = insts;
+            result["edges"] = edges;
+            return result;
+        },
+        nb::arg("stir_text"), nb::arg("arch") = std::array<int, 3>{12, 5, 0},
+        "Ordering constraints of a checkpoint bundle's region. Returns {'blocks': [label], "
+        "'insts': [{'id', 'block', 'text', 'opcode', 'reads', 'writes', 'issue', 'latency', "
+        "'pinned', 'pin_reason'}], 'edges': [{'src', 'dst', 'kind', 'class', 'regs'}]}. "
+        "An edge says src must stay before dst; ids are the text's mod.ckpt ids. kind is raw, "
+        "war or waw (class vgpr, agpr, sgpr, mgpr, scc, vcc, exec or lds). A pinned line is "
+        "never moved and nothing crosses it. Raises ValueError when the text does not parse.");
+
+    ir.def(
+        "check_order",
+        [edgeToDict](const std::string& baseText, const std::string& editedText,
+                     std::array<int, 3> arch) {
+            const RegionOrderCheck check = checkRegionOrder(baseText, editedText, arch);
+            if (!check.error.empty()) throw nb::value_error(check.error.c_str());
+            nb::list reversed;
+            for (const DependencyEdge& edge : check.reversed) reversed.append(edgeToDict(edge));
+            nb::dict result;
+            result["reversed"] = reversed;
+            result["problems"] = check.problems;
+            result["ok"] = check.reversed.empty() && check.problems.empty();
+            return result;
+        },
+        nb::arg("base_stir"), nb::arg("edited_stir"),
+        nb::arg("arch") = std::array<int, 3>{12, 5, 0},
+        "Check an edited bundle against its base. Returns {'reversed': [edge], 'problems': "
+        "[str], 'ok': bool}: the base edges the edited order puts the other way round, and the "
+        "moves the loader refuses plus the verifier's findings on the edited IR.");
 
     // ========================================================================
     // Logical Instruction Counting (ported from rocisa)

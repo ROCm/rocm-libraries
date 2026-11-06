@@ -3,6 +3,7 @@
 
 target_sources(stinkytofu_objs PRIVATE
     AsmVerifierPass.cpp
+    DependencyExport.cpp
     HazardGapAnalysisPass.cpp
 )
 
