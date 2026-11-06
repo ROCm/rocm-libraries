@@ -409,8 +409,7 @@ void RunCase(const MultiBlockCase& c)
     for(std::size_t o = 0; o < outTotal; o++)
     {
         const double got = ToDouble(gpu[o]);
-        const double exp =
-            c.exactOutput ? RoundToType(ref.values[o], c.inType) : ref.values[o];
+        const double exp = c.exactOutput ? RoundToType(ref.values[o], c.inType) : ref.values[o];
         EXPECT_LE(std::abs(got - exp), rel * std::abs(exp) + abs)
             << "output " << o << ": got " << got << ", expected " << exp;
     }
