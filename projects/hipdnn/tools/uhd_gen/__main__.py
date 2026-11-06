@@ -518,7 +518,9 @@ def add_adapter_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--adapter",
         choices=TRAINED_ADAPTERS,
-        default="tree_data",
+        # THROWAWAY (users/jascampb/uhd-linear-data-trial): linear_data by default so the UHD
+        # pipeline's generate stage, which has no adapter option, trains a RelLin model.
+        default="linear_data",
         help="UHD adapter, and so model, to train. tree_data (default): a LightGBM ensemble. "
         "linear_data: a per-configuration linear ranker (RelLin) of the log slowdown against "
         "the best candidate of each problem, for a small catalog; it needs problem identity "
