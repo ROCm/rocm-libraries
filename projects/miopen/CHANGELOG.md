@@ -14,12 +14,13 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
   workspace with the size returned. `miopenGetReductionWorkspaceSize` also returns
   `miopenStatusBadParm` for the compute type `miopenInt64` in such reductions, which
   `miopenReduceTensor` already rejected.
-* [Reduce] `miopenReduceTensor` now applies `alpha` in the compute type in every reduction. It
-  converted `alpha` to the input type first, in single-pass and in multi-block reductions, which
-  truncated a fractional `alpha` for INT8 input and rounded it for FP16 input when the compute type
-  is wider. An integer compute type still truncates a fractional `alpha`. `beta` is still
-  converted to the output type: a fractional `beta` for an INT8 output is truncated (0.5
-  becomes 0).
+* [Reduce] `miopenReduceTensor` now applies `alpha` and `beta` in the compute type in every
+  reduction. It converted `alpha` to the input type and `beta` to the output type first, in
+  single-pass and in multi-block reductions, and blended the prior output in the output type. With
+  a wider compute type this truncated a fractional `alpha` for INT8 input (0.5 became 0) and a
+  fractional `beta` for an INT8 output, and rounded both for FP16. The blend is now done in the
+  compute type and rounded to the output type once. An integer compute type still truncates a
+  fractional `alpha` or `beta`.
 * [Conv] Fixed the 3D grouped backward-weights CK xdlops convolution solver skipping
   `valid_kernels[0]` during exhaustive tuning: the populate branch fell through instead of emitting
   the seeded first config, so GenericSearch began enumeration at `valid_kernels[1]` and the first
