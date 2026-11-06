@@ -838,6 +838,7 @@ def cfgs_gfx1151_wmma_fmha_fwd_v2():
         ("fp16", 64, 64, "causal", None, "su", "paged", 32, 32, None),
         ("fp16", 96, 96, "causal", None, "u", "paged", 16, 32, None),
     )
+    shipped_paged_gfx11 = ("fp16", 96, 96, "causal", None, "du", "paged", 32, 32, None)
 
     def feat(row):
         dt, hd, hdv, mask, bias, flags, layout, ps, bn, pair = row
@@ -873,6 +874,8 @@ def cfgs_gfx1151_wmma_fmha_fwd_v2():
     for arch in archs:
         for row in shipped_paged:
             out.append((feat(row), arch))
+    # gfx11 ships head 96 at pages 32 and 64 with block_m 64.
+    out.append((dict(feat(shipped_paged_gfx11), block_m=64), "gfx11-generic"))
     return out
 
 

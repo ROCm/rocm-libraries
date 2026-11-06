@@ -32,6 +32,8 @@
 #            catalog combinations the rows above miss (sinks with dense Q +
 #            seqused_q at page 64, sinks with ragged Q + seqused_q on the
 #            per-tile path, head 96 paged)
+#   186      gfx11-generic head 96 paged at page 32 with block_m 64, as the
+#            catalog ships it on gfx11
 #
 # The head counts (Hq / Hkv / Hv), head widths, strides and window bounds
 # are kernel arguments, so every config covers Hv != Hkv by construction.
@@ -107,6 +109,8 @@ SHIPPED_PAGED = (
     ("fp16", 64, 64, "causal", None, "su", "paged", 32, 32, None),
     ("fp16", 96, 96, "causal", None, "u", "paged", 16, 32, None),
 )
+# gfx11 ships head 96 at pages 32 and 64 with block_m 64.
+SHIPPED_PAGED_GFX11 = ("fp16", 96, 96, "causal", None, "du", "paged", 32, 32, None)
 
 
 def _feature_fields(row):
@@ -238,6 +242,9 @@ def _configs():
     for arch in ARCHS:
         for row in SHIPPED_PAGED:
             out.append((arch, _feature_fields(row)))
+    out.append(
+        ("gfx11-generic", dict(_feature_fields(SHIPPED_PAGED_GFX11), block_m=64))
+    )
     return out
 
 
