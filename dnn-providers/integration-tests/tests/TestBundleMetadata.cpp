@@ -702,12 +702,12 @@ TEST(TestParseBundleMetadataJson, ErrorNamesTheSource)
 TEST(TestParseBundleMetadataJson, ParsesNumericInputsKeys)
 {
     auto meta = parseBundleMetadataJson(nlohmann::json::parse(R"({"format_version": 1,
-            "inputs": {"0": {"fill": "zeros"}, "12": {"fill": "ones"}}})"),
+            "inputs": {"0": {"seed": 1}, "12": {"seed": 2}}})"),
                                         "case_0");
     ASSERT_TRUE(meta.inputs.has_value());
     ASSERT_EQ(meta.inputs->size(), 2u);
-    EXPECT_EQ(meta.inputs->at(0)["fill"], "zeros");
-    EXPECT_EQ(meta.inputs->at(12)["fill"], "ones");
+    EXPECT_EQ(meta.inputs->at(0)["seed"], 1);
+    EXPECT_EQ(meta.inputs->at(12)["seed"], 2);
 }
 
 // inputs keys are tensor UIDs. A key that is not entirely an integer used to be

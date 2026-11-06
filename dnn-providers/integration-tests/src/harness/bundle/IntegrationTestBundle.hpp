@@ -1499,6 +1499,11 @@ inline void
     {
         for(const auto& patch : caseJson.at("tensor_patches"))
         {
+            if(!patch.is_object() || !patch.contains("uid") || !patch.at("uid").is_number_integer())
+            {
+                throw std::runtime_error("tensor_patch entry is missing an integer uid");
+            }
+
             const auto uid = patch.at("uid").get<int64_t>();
             if(absent.count(uid) != 0)
             {

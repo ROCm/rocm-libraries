@@ -3242,7 +3242,7 @@ std::vector<AbsentRuleCase> absentRuleCases()
          "removing [5] leaves no output to compare"},
         {"malformed_tensor_patch",
          caseField("tensor_patches", nlohmann::json::array({{{"uid", "zero"}}})),
-         "type must be number"},
+         "tensor_patch entry is missing an integer uid"},
     };
 }
 
