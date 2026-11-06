@@ -928,7 +928,7 @@ namespace rocalution
                                                                      VectorType*       x)
     {
         // gamma = 2 hardcoded, the second cycle continues from the first. The coarsest
-        // level is solved once
+        // level is solved once per visit
         this->Vcycle_(rhs, x);
 
         if(this->current_level_ < this->levels_ - 1)

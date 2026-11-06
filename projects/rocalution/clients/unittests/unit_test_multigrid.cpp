@@ -782,8 +782,9 @@ TYPED_TEST(multigrid, w_cycle_continues_from_the_first_coarse_cycle)
     expect_near(x, cycled(DenseCycle<T>(s.h, o), b, x0, 1), tol<T>());
 }
 
-// Each visit of the second coarsest level runs two cycles, so a W-cycle of L levels
-// solves the coarsest level 2^(L - 2) times
+// Each level l above the coarsest runs 2^l cycles, and each cycle of the level above the
+// coarsest solves the coarsest level once, so a W-cycle of L levels solves it 2^(L - 2)
+// times
 TYPED_TEST(multigrid, w_cycle_solves_the_coarsest_level_once_per_visit)
 {
     using T = typename TypeParam::value_type;
@@ -956,9 +957,9 @@ TYPED_TEST(multigrid, scaling_is_on_by_default_and_fixed_at_build)
 TYPED_TEST(multigrid, preconditioner_applies_one_cycle_from_zero)
 {
     using T = typename TypeParam::value_type;
-    for(unsigned int cycle : {rocalution::Vcycle, rocalution::Kcycle})
+    for(unsigned int cycle : {rocalution::Vcycle, rocalution::Wcycle, rocalution::Kcycle})
     {
-        SCOPED_TRACE(cycle == rocalution::Vcycle ? "V" : "K");
+        SCOPED_TRACE(cycle == rocalution::Vcycle ? "V" : cycle == rocalution::Wcycle ? "W" : "K");
         // Three levels scale only the finest correction, which the coarse-level scaling
         // bug leaves alone
         const CycleOptions o = options(cycle, 1, 1, true);
