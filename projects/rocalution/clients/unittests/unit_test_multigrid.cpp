@@ -481,15 +481,16 @@ namespace
 
             const Csr<T>& A = h_.A[l];
             cycle(l, b, x, true);
-            Vec<T> r   = b;
-            T      rho = dot(r, x);
-            Vec<T> q   = A.apply(x);
-            if(dot(x, q) == static_cast<T>(0))
+            Vec<T>  r   = b;
+            T       rho = dot(r, x);
+            Vec<T>  q   = A.apply(x);
+            const T xq  = dot(x, q);
+            if(rho == static_cast<T>(0) || xq == static_cast<T>(0))
             {
-                // A zero residual has the zero correction
+                // CG breaks down, as for a zero residual, which has the zero correction
                 return;
             }
-            T alpha = rho / dot(x, q);
+            T alpha = rho / xq;
             axpy(-alpha, q, r);
 
             cycle(l, r, q, true);
@@ -502,7 +503,13 @@ namespace
             {
                 v *= alpha;
             }
-            alpha = rho / dot(p, q);
+            const T pq = dot(p, q);
+            if(pq == static_cast<T>(0))
+            {
+                // The first step solved the level exactly
+                return;
+            }
+            alpha = rho / pq;
             axpy(alpha, p, x);
         }
 
@@ -834,6 +841,37 @@ TYPED_TEST(multigrid, zero_coarse_residual_gives_zero_coarse_correction)
         SCOPED_TRACE(full ? "K, all levels" : "K, level 1 only");
         expect(options(rocalution::Kcycle, 1, 1, true, full));
     }
+}
+
+// Jacobi without damping solves the diagonal operator 2I of level 1 exactly in floating
+// point, so the first CG step of the K-cycle leaves a zero residual, and the second step
+// has a zero search direction. A diagonal whose inverse rounds leaves a residual instead
+TYPED_TEST(multigrid, k_cycle_keeps_an_exact_first_step)
+{
+    using T        = typename TypeParam::value_type;
+    Hierarchy<T> h = geometric_hierarchy<T>(3);
+    Csr<T>       D(h.A[1].n);
+    for(int i = 0; i < D.n; ++i)
+    {
+        D.add(i, static_cast<T>(2));
+        D.end_row();
+    }
+    h.A[1] = D;
+    h.A[2] = galerkin(h.R[1], h.A[1], h.P[1], 1.0);
+
+    CycleOptions o = options(rocalution::Kcycle, 1, 1, false);
+    o.omega        = 1.0;
+    UserSetup<T> s(TypeParam::backend, h, o);
+    s.mg.Build();
+
+    const Vec<T> b  = rhs<T>(15);
+    const Vec<T> x0 = initial_guess<T>(15);
+    const Vec<T> x  = solve(s.mg, *s.user.A, b, x0, 1);
+    for(T v : x)
+    {
+        ASSERT_TRUE(std::isfinite(v));
+    }
+    expect_near(x, cycled(DenseCycle<T>(s.h, o), b, x0, 1), tol<T>());
 }
 
 TYPED_TEST(multigrid, scaling_is_on_by_default_and_fixed_at_build)

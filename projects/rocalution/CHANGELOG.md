@@ -43,7 +43,7 @@ Full documentation for rocALUTION is available at [https://rocm.docs.amd.com/pro
 * Fixed ILUT and IC failing to solve after they are moved to another backend. IC now moves its inverse diagonal, and the IC factorization on the accelerator now computes it.
 * Fixed `MultiGrid` crashing in `Clear()` and in its destructor after `Build()`, because it deleted transfer maps that only the AMG solvers allocate.
 * Fixed the W-cycle returning the V-cycle result at the cost of a W-cycle. Its second coarse cycle now continues from the first instead of restarting from zero, and the coarsest level is solved once.
-* Fixed the K-cycle returning NaN when a coarse residual is zero. It now returns the zero correction.
+* Fixed the K-cycle returning NaN when a coarse residual is zero, or when its first step solves a coarse level exactly. It now keeps the correction it has computed.
 * Fixed `UAAMG` failing an assert at a level without aggregates. Like `SAAMG`, it now stops coarsening at that level.
 * Fixed `UAAMG::ReBuildNumeric` not scaling the coarse operators by the over-interpolation factor.
 * Fixed `ReBuildNumeric` of the AMG solvers failing a backend assert after `SetHostLevels`. The coarse operators are now recomputed on the backend of their level.

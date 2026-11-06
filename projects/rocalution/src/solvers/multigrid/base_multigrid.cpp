@@ -983,10 +983,12 @@ namespace rocalution
             // q = Ax
             op->Apply(*x, q);
 
-            // (x,Ax) is zero for a zero rhs, which has the zero correction x
+            // (x,q)
             ValueType xq = x->DotNonConj(*q);
 
-            if(xq == static_cast<ValueType>(0))
+            // The CG step breaks down if (r,x) or (x,Ax) is zero, as for a zero rhs, whose
+            // cycle gives the zero correction. Keep the correction of the cycle then
+            if(rho == static_cast<ValueType>(0) || xq == static_cast<ValueType>(0))
             {
                 return;
             }
@@ -1018,8 +1020,17 @@ namespace rocalution
             // x = x * alpha
             x->Scale(alpha);
 
+            // (r,q)
+            ValueType rq = r->DotNonConj(*q);
+
+            // The search direction is zero if the first step solved the level exactly
+            if(rq == static_cast<ValueType>(0))
+            {
+                return;
+            }
+
             // alpha = rho / (r,q)
-            alpha = rho / r->DotNonConj(*q);
+            alpha = rho / rq;
 
             // x = x + alpha * r
             x->AddScale(*r, alpha);
