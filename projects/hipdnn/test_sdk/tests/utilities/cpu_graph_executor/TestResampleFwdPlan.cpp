@@ -172,7 +172,7 @@ TEST(TestResampleFwdPlanBuilder, BuildNodePlan)
         planBuilder;
     EXPECT_NO_THROW(planBuilder.buildNodePlan(graph, graph.getNode(0)));
 
-    auto reductionBuilder = createValidReductionGraph();
+    auto reductionBuilder = createReductionGraph(ReductionGraphSpec{});
     const GraphWrapper reductionGraph(reductionBuilder.GetBufferPointer(),
                                       reductionBuilder.GetSize());
     EXPECT_THROW(planBuilder.buildNodePlan(reductionGraph, reductionGraph.getNode(0)),

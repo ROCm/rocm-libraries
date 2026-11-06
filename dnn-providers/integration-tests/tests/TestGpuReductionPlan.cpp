@@ -19,7 +19,8 @@ using namespace hipdnn_integration_tests::gpu_graph_executor::detail;
 
 TEST(TestGpuReductionPlanBuilder, PlanConstruction)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidReductionGraph();
+    auto builder = hipdnn_test_sdk::utilities::createReductionGraph(
+        hipdnn_test_sdk::utilities::ReductionGraphSpec{});
     auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         builder.GetBufferPointer(), builder.GetSize());
 
@@ -34,7 +35,8 @@ TEST(TestGpuReductionPlanBuilder, PlanConstruction)
 
 TEST(TestGpuReductionPlanBuilder, IsApplicable)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidReductionGraph();
+    auto builder = hipdnn_test_sdk::utilities::createReductionGraph(
+        hipdnn_test_sdk::utilities::ReductionGraphSpec{});
     auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         builder.GetBufferPointer(), builder.GetSize());
 
@@ -56,7 +58,8 @@ TEST(TestGpuReductionPlanBuilder, IsApplicable)
 
 TEST(TestGpuReductionPlanBuilder, IsNotApplicableForRaggedTensors)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidReductionGraph();
+    auto builder = hipdnn_test_sdk::utilities::createReductionGraph(
+        hipdnn_test_sdk::utilities::ReductionGraphSpec{});
 
     const GpuReductionPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT> patient;
 
@@ -84,7 +87,8 @@ TEST(TestGpuReductionPlanBuilder, IsApplicableReturnsFalseForWrongAttributesType
 
 TEST(TestGpuReductionPlanBuilder, IsApplicableReturnsFalseForWrongOutputDataType)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidReductionGraph();
+    auto builder = hipdnn_test_sdk::utilities::createReductionGraph(
+        hipdnn_test_sdk::utilities::ReductionGraphSpec{});
     auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         builder.GetBufferPointer(), builder.GetSize());
 
@@ -95,7 +99,8 @@ TEST(TestGpuReductionPlanBuilder, IsApplicableReturnsFalseForWrongOutputDataType
 
 TEST(TestGpuReductionPlanBuilder, IsApplicableReturnsFalseForWrongComputeDataType)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidReductionGraph();
+    auto builder = hipdnn_test_sdk::utilities::createReductionGraph(
+        hipdnn_test_sdk::utilities::ReductionGraphSpec{});
     auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         builder.GetBufferPointer(), builder.GetSize());
 
@@ -106,7 +111,8 @@ TEST(TestGpuReductionPlanBuilder, IsApplicableReturnsFalseForWrongComputeDataTyp
 
 TEST(TestGpuReductionPlanBuilder, IsApplicableReturnsFalseForIncorrectReductionMode)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidReductionGraph();
+    auto builder = hipdnn_test_sdk::utilities::createReductionGraph(
+        hipdnn_test_sdk::utilities::ReductionGraphSpec{});
     auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         builder.GetBufferPointer(), builder.GetSize());
 

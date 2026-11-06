@@ -213,7 +213,8 @@ TEST(TestJson, GraphToJsonAndBack)
             context = "(valid custom op graph)";
             break;
         case hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::ReductionAttributes:
-            graphBuilder = hipdnn_test_sdk::utilities::createValidReductionGraph();
+            graphBuilder = hipdnn_test_sdk::utilities::createReductionGraph(
+                hipdnn_test_sdk::utilities::ReductionGraphSpec{});
             graph = hipdnn_flatbuffers_sdk::data_objects::GetGraph(graphBuilder.GetBufferPointer());
             context = "(valid reduction graph)";
             break;

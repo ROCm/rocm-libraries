@@ -36,6 +36,9 @@ add_executable(
     engines/plans/TestMiopenConvPlanBuilder.cpp
     engines/plans/TestMiopenConvWrwPlan.cpp
     engines/plans/TestMiopenPointwiseTensorChecks.cpp
+    engines/plans/TestMiopenReductionChecks.cpp
+    engines/plans/TestMiopenReductionPlan.cpp
+    engines/plans/TestMiopenReductionPlanBuilder.cpp
     engines/plans/TestMiopenUnaryActivationPlanBuilder.cpp
     engines/TestMiopenEngine.cpp
     main.cpp
@@ -45,6 +48,7 @@ add_executable(
     TestMiopenHipdnnEnginePluginHandle.cpp
     TestMiopenHipdnnPluginExecutionContext.cpp
     TestMiopenPluginPublic.cpp
+    TestMiopenReduceTensorDescriptor.cpp
     TestMiopenTensor.cpp
     TestMiopenUtils.cpp
 )

@@ -23,6 +23,7 @@ add_executable(
     IntegrationGpuBenchmarkingKnob.cpp
     IntegrationGpuDeterministic.cpp
     IntegrationGpuPassByValue.cpp
+    IntegrationGpuReductionUnhappy.cpp
 )
 
 # Superbuild: the hipDNN option; standalone: the installed frontend's cudnn_compatibility component.

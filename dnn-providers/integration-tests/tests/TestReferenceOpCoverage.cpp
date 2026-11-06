@@ -15,6 +15,7 @@
 #include <vector>
 
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
+#include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 
 #include "ReferenceGraphFixtures.hpp"
 #include "harness/bundle/BundleDiscovery.hpp"
@@ -120,6 +121,16 @@ TEST(TestReferenceOpCoverage, DeviceReferenceDoesNotCoverBatchnormInference)
         = uncoveredNodeTypes(ReferenceExecutorType::GPU, graph.data(), graph.size());
     ASSERT_EQ(uncovered.size(), 1u);
     EXPECT_EQ(uncovered.front(), "BatchnormInferenceAttributes");
+}
+
+// Reduction is in the CPU reference's required set, so a Reduction bundle with
+// golden data is registered for validation against it.
+TEST(TestReferenceOpCoverage, CpuCoversReduction)
+{
+    const auto builder = hipdnn_test_sdk::utilities::createReductionGraph(
+        hipdnn_test_sdk::utilities::ReductionGraphSpec{});
+    EXPECT_TRUE(referenceCoversGraph(
+        ReferenceExecutorType::CPU, builder.GetBufferPointer(), builder.GetSize()));
 }
 
 // ---------------------------------------------------------------------------
