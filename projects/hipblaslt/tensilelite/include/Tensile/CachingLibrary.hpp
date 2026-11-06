@@ -27,10 +27,12 @@
 #pragma once
 
 #include <atomic>
-#include <shared_mutex>
+#include <mutex>
+#include <tuple>
 #include <unordered_map>
 
 #include <Tensile/ContractionProblem.hpp>
+#include <Tensile/ReadMostlyMap.hpp>
 #include <Tensile/SolutionLibrary.hpp>
 
 #include <Tensile/AMDGPU_Detail.hpp>
@@ -41,33 +43,32 @@
 
 namespace TensileLite
 {
-    template <typename Value, typename Key, typename... Keys>
-    struct MultiLevelMap
-    {
-        using type = typename MultiLevelMap<std::unordered_map<Key, Value>, Keys...>::type;
-    };
-
-    template <typename Value, typename Key>
-    struct MultiLevelMap<Value, Key>
-    {
-        using type = std::unordered_map<Key, Value>;
-    };
-
     /**
-     * Thread-safe multi-valued cache.
+     * Thread-safe multi-valued cache. find() takes no lock and writes no shared
+     * memory (see ReadMostlyMap); add() serializes writers on a mutex.
      *
-     * Note that due to a quirk with templates, the order of the keys in find() and add() is *opposite* of that in the type.
-     *
-     * e.g.
-     *
-     *     CacheMap<int, float, std::string> myCache
-     *     myCache.find("foo", 1.4); // great
-     *     myCache.find(1.4, "foo"); // error!
+     * Keys are passed to find() and add() in the order of the type.
      */
     template <typename Value, typename... Keys>
     class CacheMap
     {
-        using Map = typename MultiLevelMap<Value, Keys...>::type;
+        using KeyTuple = std::tuple<Keys...>;
+
+        // Hashes each key as its stored type, so lookups by reference match.
+        struct KeyHash
+        {
+            template <typename Tuple>
+            size_t operator()(Tuple const& keys) const
+            {
+                return std::apply(
+                    [](auto const&... k) {
+                        size_t rv = 0;
+                        ((rv = rv * 31 + std::hash<Keys>{}(k)), ...);
+                        return rv;
+                    },
+                    keys);
+            }
+        };
 
     public:
         CacheMap(Value const& nullValue)
@@ -89,9 +90,8 @@ namespace TensileLite
         template <typename... Ks>
         Value find(Ks const&... keys)
         {
-            std::shared_lock<std::shared_timed_mutex> lock(m_mutex);
-
-            auto rv = find_impl(m_map, keys...);
+            Value const* found = m_map.find(std::forward_as_tuple(keys...));
+            Value        rv    = found ? *found : m_nullValue;
 
             if(m_lookupEfficiency)
             {
@@ -106,49 +106,20 @@ namespace TensileLite
         template <typename... Ks>
         void add(Value const& value, Ks const&... ks)
         {
-            std::lock_guard<std::shared_timed_mutex> lock(m_mutex);
+            std::lock_guard<std::mutex> lock(m_mutex);
 
-            add_impl(m_map, value, ks...);
+            // Replaced entries stay allocated, so skip re-adding an unchanged value.
+            Value const* found = m_map.find(std::forward_as_tuple(ks...));
+            if(found && *found == value)
+                return;
+
+            m_map.insertOrAssign(KeyTuple(ks...), value);
         }
 
     private:
-        template <typename SubMap, typename K>
-        Value find_impl(SubMap const& map, K const& key)
-        {
-            auto iter = map.find(key);
-
-            if(iter == map.end())
-                return m_nullValue;
-
-            return iter->second;
-        }
-
-        template <typename SubMap, typename K, typename... Ks>
-        Value find_impl(SubMap const& map, K const& key, Ks const&... ks)
-        {
-            auto iter = map.find(key);
-
-            if(iter == map.end())
-                return m_nullValue;
-
-            return find_impl(iter->second, ks...);
-        }
-
-        template <typename SubMap, typename K>
-        void add_impl(SubMap& map, Value const& value, K const& key)
-        {
-            map.insert_or_assign(key, value);
-        }
-
-        template <typename SubMap, typename K, typename... Ks>
-        void add_impl(SubMap& map, Value const& value, K const& key, Ks const&... ks)
-        {
-            add_impl(map[key], value, ks...);
-        }
-
-        Map                     m_map;
-        std::shared_timed_mutex m_mutex;
-        Value                   m_nullValue;
+        ReadMostlyMap<KeyTuple, Value, KeyHash, std::equal_to<>> m_map;
+        std::mutex                                               m_mutex;
+        Value                                                    m_nullValue;
 
         bool                 m_lookupEfficiency;
         std::atomic<int64_t> m_lookups;
@@ -160,12 +131,12 @@ namespace TensileLite
     {
     public:
         using Library = SolutionLibrary<MyProblem, MySolution>;
-        using Cache  = CacheMap<std::tuple<std::shared_ptr<MySolution>, double>, AMDGPU, MyProblem>;
-        using Caches = CacheMap<SolutionVector<MySolution>, AMDGPU, MyProblem>;
+        using Cache  = CacheMap<std::tuple<std::shared_ptr<MySolution>, double>, MyProblem, AMDGPU>;
+        using Caches = CacheMap<SolutionVector<MySolution>, MyProblem, AMDGPU>;
         using CachesAllSolsFlag
-            = CacheMap<bool, AMDGPU, MyProblem>;
+            = CacheMap<bool, MyProblem, AMDGPU>;
         using CachesGroupedGemm
-            = CacheMap<SolutionVector<MySolution>, AMDGPU, std::vector<MyProblem>>;
+            = CacheMap<SolutionVector<MySolution>, std::vector<MyProblem>, AMDGPU>;
 
         CachingLibrary(std::shared_ptr<Library> subLibrary)
             : m_subLibrary(subLibrary)

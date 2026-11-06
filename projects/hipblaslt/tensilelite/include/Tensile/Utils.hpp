@@ -27,9 +27,11 @@
 #pragma once
 
 #include <array>
+#include <atomic>
 #include <cmath>
 #include <cstdlib>
 #include <iostream>
+#include <memory>
 #include <mutex>
 #include <sstream>
 #include <type_traits>
@@ -42,35 +44,35 @@ namespace TensileLite
 
     // Type wrapper that can be copied or assigned to in a threadsafe manner. Value cannot be modified
     // Intended for using value semantics with non-trivially copyable data
+    // load() takes no lock: each value is published once through an atomic
+    // pointer and kept until destruction, since a reader may still be copying
+    // it. Assigning the current value again publishes nothing. Each distinct
+    // value assigned stays allocated, so use it only for values that rarely change.
     template <typename T>
     class ThreadSafeValue
     {
     private:
-        mutable std::mutex m_access;
-        T                  m_value;
+        mutable std::mutex              m_access;
+        std::vector<std::unique_ptr<T>> m_values;
+        std::atomic<T const*>           m_current{nullptr};
 
     public:
         ThreadSafeValue() {}
 
         ThreadSafeValue(const ThreadSafeValue<T>& other)
         {
-            std::lock_guard<std::mutex> lock(other.m_access);
-            m_value = other.m_value;
+            *this = other.load();
         }
 
         ThreadSafeValue(const T& other)
-            : m_value(other)
         {
+            *this = other;
         }
 
         ThreadSafeValue<T>& operator=(const ThreadSafeValue<T>& other)
         {
             if(this != &other)
-            {
-                std::lock_guard<std::mutex> otherLock(other.m_access);
-                std::lock_guard<std::mutex> selfLock(m_access);
-                m_value = other.m_value;
-            }
+                *this = other.load();
 
             return *this;
         }
@@ -78,15 +80,19 @@ namespace TensileLite
         ThreadSafeValue<T>& operator=(const T& other)
         {
             std::lock_guard<std::mutex> lock(m_access);
-            m_value = other;
+            T const*                    current = m_current.load(std::memory_order_relaxed);
+            if(current && *current == other)
+                return *this;
+            m_values.push_back(std::make_unique<T>(other));
+            m_current.store(m_values.back().get(), std::memory_order_release);
 
             return *this;
         }
 
         T load() const
         {
-            std::lock_guard<std::mutex> lock(m_access);
-            return m_value;
+            T const* current = m_current.load(std::memory_order_acquire);
+            return current ? *current : T();
         }
 
         T operator*() const

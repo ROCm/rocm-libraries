@@ -2028,22 +2028,10 @@ namespace
 
     bool mxScaleTensorNeedsPaddingFreeDim()
     {
-        static std::mutex                    cacheMutex;
-        static std::unordered_map<int, bool> cache;
-
         int deviceId = 0;
         HIP_CHECK_EXC(hipGetDevice(&deviceId));
 
-        std::lock_guard<std::mutex> lock(cacheMutex);
-        auto                        it = cache.find(deviceId);
-        if(it != cache.end())
-            return it->second;
-
-        hipDeviceProp_t prop;
-        HIP_CHECK_EXC(hipGetDeviceProperties(&prop, deviceId));
-        const bool needsPadFreeDim = std::string(prop.gcnArchName).find("gfx950") != std::string::npos;
-        cache[deviceId]            = needsPadFreeDim;
-        return needsPadFreeDim;
+        return rocblaslt_internal_get_arch_name(deviceId).find("gfx950") != std::string::npos;
     }
 
     // A Block_32_UE8M0_32_8_EXT caller pre-swizzled its scales into the padded
@@ -3272,7 +3260,7 @@ namespace
         {
             return m_devicePropMap.at(deviceName);
         }
-        auto get_hardware(const std::string& deviceName) const
+        auto& get_hardware(const std::string& deviceName) const
         {
             return m_hardwareMap.at(deviceName);
         }
@@ -3281,7 +3269,7 @@ namespace
         {
             return m_deviceProp;
         }
-        auto get_hardware() const
+        auto& get_hardware() const
         {
             return m_hardware;
         }
@@ -3542,7 +3530,20 @@ namespace
         }
     };
 
-    // Return the library and adapter for the current HIP device
+    // A shared_ptr that points at p's object without owning it, so copying and
+    // destroying it never touches p's reference count.
+    template <typename T>
+    std::shared_ptr<T> nonOwning(std::shared_ptr<T> const& p)
+    {
+        return std::shared_ptr<T>(std::shared_ptr<T>(), p.get());
+    }
+
+    // Return the library and adapter for the current HIP device. The library,
+    // device properties and hardware are owned by the static TensileHost and
+    // never replaced, so the out-params do not own them: every thread copying
+    // them would otherwise update reference counts in shared cache lines.
+    // Use nonOwning only for TensileHost-owned objects; hand out anything that
+    // can be replaced while a call uses it as an owning copy.
     TensileLite::hip::SolutionAdapter* get_library_and_adapter(
         std::shared_ptr<TensileLite::MasterSolutionLibrary<TensileLite::ContractionProblemGemm>>*
             library
@@ -3584,17 +3585,17 @@ namespace
 
         // If an adapter is found, it is assumed that the library is initialized
         if(library)
-            *library = host.get_library();
+            *library = nonOwning(host.get_library());
 #if ROCBLASLT_TENSILE_LAZY_LOAD
         if(deviceProp)
-            *deviceProp = host.get_device_property(rocblaslt_internal_get_arch_name());
+            *deviceProp = nonOwning(host.get_device_property(rocblaslt_internal_get_arch_name()));
         if(hardware)
-            *hardware = host.get_hardware(rocblaslt_internal_get_arch_name());
+            *hardware = nonOwning(host.get_hardware(rocblaslt_internal_get_arch_name()));
 #else
         if(deviceProp)
-            *deviceProp = host.get_device_property();
+            *deviceProp = nonOwning(host.get_device_property());
         if(hardware)
-            *hardware = host.get_hardware();
+            *hardware = nonOwning(host.get_hardware());
 #endif
 
         return adapter;
@@ -6209,12 +6210,10 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
         // the GSU reduction area, which is far larger and stays shared. The two
         // never coincide in one kernel, so a single pointer serves both and the
         // choice is made here, where the solution is finally known.
-        {
-            auto picked = library->getSolutionByIndex(data->problem, *hardware, *solutionIndex);
-            if(picked)
-                data->inputs.Synchronizer
-                    = synchronizerForSolution(*picked, prob.streamKFlags, prob.Synchronizer);
-        }
+        auto solution = library->getSolutionByIndex(data->problem, *hardware, *solutionIndex);
+        if(solution)
+            data->inputs.Synchronizer
+                = synchronizerForSolution(*solution, prob.streamKFlags, prob.Synchronizer);
 
         if((get_logger_layer_mode() & rocblaslt_layer_mode_log_bench)
            || rocblaslt::Debug::Instance().printLogAsMarker()
@@ -6262,7 +6261,6 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
                                                   false);
         }
 
-        auto solution = library->getSolutionByIndex(data->problem, *hardware, *solutionIndex);
         if(!solution)
             return rocblaslt_status_not_implemented;
         if(prob.workspaceSize < solution->requiredWorkspaceSize(data->problem, *hardware))

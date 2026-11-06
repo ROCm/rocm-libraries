@@ -3598,11 +3598,29 @@ struct ArchName
 // exported. Get architecture name
 std::string rocblaslt_internal_get_arch_name()
 {
-    int deviceId;
+    int deviceId = -1;
     static_cast<void>(hipGetDevice(&deviceId));
-    hipDeviceProp_t deviceProperties;
-    static_cast<void>(hipGetDeviceProperties(&deviceProperties, deviceId));
-    return ArchName{}(deviceProperties);
+    return rocblaslt_internal_get_arch_name(deviceId);
+}
+
+const std::string& rocblaslt_internal_get_arch_name(int deviceId)
+{
+    // A device's properties do not change while the process runs.
+    static const std::vector<std::string> names = [] {
+        int count = 0;
+        if(hipGetDeviceCount(&count) != hipSuccess)
+            count = 0;
+        std::vector<std::string> rv(count);
+        for(int i = 0; i < count; i++)
+        {
+            hipDeviceProp_t deviceProperties;
+            if(hipGetDeviceProperties(&deviceProperties, i) == hipSuccess)
+                rv[i] = ArchName{}(deviceProperties);
+        }
+        return rv;
+    }();
+    static const std::string unknown;
+    return deviceId >= 0 && deviceId < static_cast<int>(names.size()) ? names[deviceId] : unknown;
 }
 
 bool rocblaslt_internal_test_path(const std::string& path)

@@ -36,6 +36,7 @@
 #include <vector>
 
 #include <Tensile/Debug.hpp>
+#include <Tensile/ReadMostlyMap.hpp>
 #include <Tensile/SolutionBlobCache.hpp>
 #include <Tensile/SolutionLibrary.hpp>
 #include <Tensile/Tensile.hpp>
@@ -162,6 +163,10 @@ namespace TensileLite
         std::string                                             version;
         mutable std::mutex                                      solutionsGuard;
         mutable std::atomic<bool>                               lastFindTopRetAll = false;
+        // Indices resolveSolutionByIndex has returned, read without
+        // solutionsGuard; written under it. Valid only while `solutions`
+        // entries are never erased or replaced.
+        mutable ReadMostlyMap<int, std::shared_ptr<MySolution>> resolvedSolutions;
 
         // Indexed-format state. `blobCache` serves this file's own solutions;
         // `solutionSources` collects the caches of lazily loaded shards, keyed by
@@ -314,6 +319,9 @@ namespace TensileLite
                 return localLibrary ? localLibrary->lookupIndex(index)
                                     : std::shared_ptr<MySolution>();
 #endif
+            if(auto const* resolved = resolvedSolutions.find(index))
+                return *resolved;
+
             // Idempotent, and a no-op unless this is a lazy-loading master.
             loadLibrary(index);
 
@@ -321,7 +329,10 @@ namespace TensileLite
                 std::lock_guard<std::mutex> lock(solutionsGuard);
                 auto                        iter = solutions.find(index);
                 if(iter != solutions.end())
+                {
+                    resolvedSolutions.insertOrAssign(index, iter->second);
                     return iter->second;
+                }
             }
 
             std::shared_ptr<MySolution> solution;
@@ -352,7 +363,9 @@ namespace TensileLite
             // Publish so the workspace fixups below run once per solution and
             // later lookups take the map hit.
             std::lock_guard<std::mutex> lock(solutionsGuard);
-            return solutions.emplace(index, solution).first->second;
+            auto const& published = solutions.emplace(index, solution).first->second;
+            resolvedSolutions.insertOrAssign(index, published);
+            return published;
         }
 
         /// Parses every solution this library can serve and publishes it into
