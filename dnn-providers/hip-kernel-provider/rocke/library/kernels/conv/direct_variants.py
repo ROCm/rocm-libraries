@@ -41,6 +41,7 @@ __all__ = [
     "DIRECT_WGRAD_REDUCE",
     "DIRECT_WGRAD_TWO_STAGE",
     "PER_AXIS_PAD_VARIANTS",
+    "direct_dgrad_kernarg_direction",
     "direct_dgrad_weight_transforms",
     "direct_dgrad_workspaces",
     "direct_mfma_knobs_reason",
@@ -68,6 +69,25 @@ DIRECT_DGRAD_WMMA = "direct_dgrad_wmma"
 # Single-kernel dgrad variants that run a forward kernel on the transposed
 # problem (fused weights, no pre-pass): one step with the forward ABI.
 DIRECT_DGRAD_FPROP_SINGLE = ("direct_grouped_dgrad_4c", "direct_grouped_dgrad_fused")
+
+
+def direct_dgrad_kernarg_direction(algorithm: str) -> str:
+    """Which problem orientation and :class:`ConvArgs` direction a direct dgrad
+    instance's kernargs come from: ``"fwd"``, over the transposed problem, for a
+    FPROP_SINGLE algorithm (``direct_grouped_dgrad_4c``/``_fused``: a forward pass
+    over the transposed problem with no weight-transform helpers to gate on, reading
+    the original weights itself); ``"dgrad"`` otherwise.
+
+    The one place every reader of :data:`DIRECT_DGRAD_FPROP_SINGLE` -- the
+    dispatcher's ``launch_plan_for``/``_signature``, the AOT adapter
+    (``builders.common.convolution_backward_data``), and the benchmark sweep
+    (``benchmarks.common.direct_kernel_sweep``) -- reads, so none of them can
+    independently drift on which orientation an instance's kernargs are built
+    from.
+    """
+    return "fwd" if algorithm in DIRECT_DGRAD_FPROP_SINGLE else "dgrad"
+
+
 # Depthwise (and 8..64-channel grouped) forward, stride 1 or 2, square filter,
 # on the windowed dgrad kernel's Toeplitz MFMA form with the filter rotated
 # (``fwd=True``): the spec's problem is the transposed stride-1 grid

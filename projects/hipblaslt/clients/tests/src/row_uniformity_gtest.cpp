@@ -2129,10 +2129,16 @@ namespace
         auto       solution                  = probeSolution();
         solution->problemType.mxBlockA      = 32;
         solution->problemType.mxBlockB      = 32;
-        solution->problemType.mxScaleFormat = 2; // InMemorySwizzle
-
-        EXPECT_FALSE(admitsUniformSummationOrder(*solution, hardware))
-            << "An unaudited MX scale layout must be refused";
+        // Format 1 retains the HostPreSwizzle envelope. Format 2's TDM
+        // iteration increments need no extra USO geometry check, independent
+        // of this mock processor; kernel compatibility is checked separately.
+        for(int format : {0, 1, 2, 3})
+        {
+            solution->problemType.mxScaleFormat = format;
+            EXPECT_EQ(admitsUniformSummationOrder(*solution, hardware),
+                      format == 1 || format == 2)
+                << "MXScaleFormat=" << format;
+        }
     }
 
     TEST(RowUniformityStreamKRejection_pre_checkin, MXMatrixInstKEnvelope)

@@ -243,6 +243,14 @@ class _GbdtModelVerifier:
         for index, group in enumerate(self._elements(groups, count)):
             self._group(group, f"groups[{index}]")
         self._typed_array(at, vtable, 30, REAL_ARRAY_BYTES, "threshold_table")
+        stages = self._pointer_field(at, vtable, 34, "early_exit")
+        count = self._vector(stages, 4, "early_exit")
+        for index, stage in enumerate(self._elements(stages, count)):
+            where = f"early_exit[{index}]"
+            table = self._table(stage, where)
+            self._scalar_field(stage, table, 4, 4, f"{where}.trees")
+            self._scalar_field(stage, table, 6, 4, f"{where}.keep")
+            self._depth -= 1
         self._depth -= 1
 
     def verify(self) -> None:
@@ -657,6 +665,17 @@ def verify_tree_artifact(
                 total,
                 max_bytes,
             )
+    # The runtime ignores a grouped model's schedule and refuses a malformed one.
+    if model.earlyExit and not model.groups:
+        from .early_exit import check_schedule
+
+        try:
+            check_schedule(
+                [(int(stage.trees), int(stage.keep)) for stage in model.earlyExit],
+                len(model.trees or []),
+            )
+        except ValueError as error:
+            raise ValueError(f"{path}: {error}") from None
     if feature_count is not None:
         verify_feature_count(model.numFeatures, feature_count, path)
     return data
@@ -669,3 +688,275 @@ def is_grouped_tree(data: bytes) -> bool:
     from hipdnn_flatbuffers_sdk.data_objects.GbdtModel import GbdtModel
 
     return GbdtModel.GetRootAs(bytearray(data), 0).GroupsLength() > 0
+
+
+# --------------------------------------------------------------------------------------
+# linear_data (linear_model.fbs): the checks of LinearDataAdapter::loadFromBuffer
+# --------------------------------------------------------------------------------------
+
+LINEAR_MODEL_IDENTIFIER = b"HLIN"
+
+
+class _LinearModelVerifier(_GbdtModelVerifier):
+    """`VerifyLinearModelBuffer`, on the primitives of `_GbdtModelVerifier`."""
+
+    def _term(self, at: int, what: str) -> None:
+        vtable = self._table(at, what)
+        for field, width, name in (
+            (4, 4, "feature"),
+            (6, 1, "transform"),
+            (8, 8, "mean"),
+            (10, 8, "scale"),
+            (12, 8, "lo"),
+            (14, 8, "hi"),
+        ):
+            self._scalar_field(at, vtable, field, width, f"{what}.{name}")
+        self._depth -= 1
+
+    def _config(self, at: int, what: str) -> None:
+        vtable = self._table(at, what)
+        for field, name in ((4, "key"), (6, "coefficients")):
+            where = f"{what}.{name}"
+            self._vector(self._pointer_field(at, vtable, field, where), 8, where)
+        self._scalar_field(at, vtable, 8, 8, f"{what}.floor")
+        self._depth -= 1
+
+    def _table_vector(
+        self, at: int, vtable: int, field: int, what: str, verify
+    ) -> None:
+        tables = self._pointer_field(at, vtable, field, what)
+        count = self._vector(tables, 4, what)
+        for index, table in enumerate(self._elements(tables, count)):
+            verify(table, f"{what}[{index}]")
+
+    def _model(self, at: int) -> None:
+        vtable = self._table(at, "model")
+        self._scalar_field(at, vtable, 4, 4, "num_features")
+        self._string(
+            self._pointer_field(at, vtable, 6, "features_hash"), "features_hash"
+        )
+        for field, name in ((8, "key_features"), (10, "family_features")):
+            self._vector(self._pointer_field(at, vtable, field, name), 4, name)
+        self._table_vector(at, vtable, 12, "basis", self._term)
+        self._table_vector(at, vtable, 14, "configs", self._config)
+        self._table_vector(at, vtable, 16, "families", self._config)
+        glob = self._pointer_field(at, vtable, 18, "global")
+        if glob is not None:
+            self._config(glob, "global")
+        self._string(self._pointer_field(at, vtable, 20, "framework"), "framework")
+        self._string(
+            self._pointer_field(at, vtable, 22, "training_date"), "training_date"
+        )
+        self._scalar_field(at, vtable, 24, 8, "num_training_samples")
+        arches = self._pointer_field(at, vtable, 26, "training_arches")
+        count = self._vector(arches, 4, "training_arches")
+        for index, arch in enumerate(self._elements(arches, count)):
+            self._string(arch, f"training_arches[{index}]")
+        self._string(
+            self._pointer_field(at, vtable, 28, "model_version"), "model_version"
+        )
+        self._depth -= 1
+
+    def verify(self) -> None:
+        """`VerifyBufferFromStart<LinearModel>("HLIN", 0)`, or _Unverifiable naming the check."""
+        self._check(
+            self._size >= self._MIN_SIZE,
+            f"{self._size} bytes is below the smallest FlatBuffer",
+        )
+        self._check(
+            self._data[4:8] == LINEAR_MODEL_IDENTIFIER,
+            f"file identifier {bytes(self._data[4:8])!r} is not "
+            f"{LINEAR_MODEL_IDENTIFIER!r}",
+        )
+        self._model(self._offset(0, "root offset"))
+
+
+def verify_linear_buffer(data: bytes) -> None:
+    """Raise ValueError unless `VerifyLinearModelBuffer` would accept `data`."""
+    try:
+        _LinearModelVerifier(data).verify()
+    except _Unverifiable as error:
+        raise ValueError(
+            f"the FlatBuffers verifier refuses the artifact: {error}"
+        ) from None
+
+
+def _linear_ranker(data: bytes):
+    """The verified buffer `data` as a `LinearRanker`, or ValueError with the reason
+    `LinearDataAdapter::build` gives, checked in its order."""
+    import uhd_gen  # noqa: F401  puts _generated/ on sys.path
+
+    from hipdnn_flatbuffers_sdk.data_objects.LinearModel import LinearModelT
+
+    from .rellin import LinearRanker
+
+    model = LinearModelT.InitFromPackedBuf(bytearray(data), 0)
+    num_features = int(model.numFeatures)
+    if num_features < 0:
+        raise ValueError(f"the model declares {num_features} features")
+
+    def slots(values, what):
+        out = [int(value) for value in (values if values is not None else [])]
+        for index, slot in enumerate(out):
+            if not 0 <= slot < num_features:
+                raise ValueError(
+                    f"{what} {index} reads feature {slot} of a model with {num_features}"
+                )
+        return out
+
+    key_features = slots(model.keyFeatures, "key_features entry")
+    family_features = slots(model.familyFeatures, "family_features entry")
+
+    terms = list(model.basis or [])
+    columns = {
+        name: [] for name in ("feature", "transform", "mean", "scale", "lo", "hi")
+    }
+    for index, term in enumerate(terms):
+        name = f"basis term {index}"
+        if not 0 <= term.feature < num_features:
+            raise ValueError(
+                f"{name} reads feature {term.feature} of a model with {num_features}"
+            )
+        if term.transform > 1:
+            raise ValueError(f"{name} has unknown transform {term.transform}")
+        if not all(math.isfinite(v) for v in (term.mean, term.scale, term.lo, term.hi)):
+            raise ValueError(f"{name} has a mean, scale, lo or hi that is not finite")
+        if not term.scale > 0.0:
+            raise ValueError(f"{name}'s scale is not positive")
+        if term.lo > term.hi:
+            raise ValueError(f"{name}'s lo is above its hi")
+        for column in columns:
+            columns[column].append(getattr(term, column))
+    stride = 1 + len(terms)
+
+    def entries(items, label, width):
+        keys, coefficients, floors = [], [], []
+        for index, entry in enumerate(items):
+            name = f"{label} {index}" if label else "the global entry"
+            key = [float(v) for v in (entry.key if entry.key is not None else [])]
+            if len(key) != width:
+                raise ValueError(
+                    f"{name}'s key has {len(key)} values, expected {width}"
+                )
+            values = [
+                float(v)
+                for v in (entry.coefficients if entry.coefficients is not None else [])
+            ]
+            if len(values) != stride:
+                raise ValueError(
+                    f"{name} has {len(values)} coefficients, expected {stride} "
+                    "(an intercept and one per basis term)"
+                )
+            for position, value in enumerate(values):
+                if not math.isfinite(value):
+                    raise ValueError(f"{name}'s coefficient {position} is not finite")
+            if not math.isfinite(entry.floor):
+                raise ValueError(f"{name}'s floor is not finite")
+            keys.append(key)
+            coefficients.append(values)
+            floors.append(float(entry.floor))
+        return (
+            np.array(keys, dtype=np.float64).reshape(len(keys), width),
+            np.array(coefficients, dtype=np.float64).reshape(len(keys), stride),
+            np.array(floors, dtype=np.float64),
+        )
+
+    configs = list(model.configs or [])
+    families = list(model.families or [])
+    if not family_features and families:
+        raise ValueError("the model has families but no family_features to key them")
+    config_keys, config_coefficients, config_floors = entries(
+        configs, "config", len(key_features)
+    )
+    family_keys, family_coefficients, family_floors = entries(
+        families, "family", len(family_features)
+    )
+    if model.global_ is None:
+        raise ValueError("the global entry is missing")
+    _, global_coefficients, global_floors = entries([model.global_], "", 0)
+
+    def canonical(keys):
+        # Doubles, with every NaN one value and -0.0 == 0.0, as the runtime's table compares.
+        return [
+            tuple("nan" if math.isnan(v) else v + 0.0 for v in key)
+            for key in keys.tolist()
+        ]
+
+    for label, keys in (("config", config_keys), ("family", family_keys)):
+        seen = set()
+        for index, key in enumerate(canonical(keys)):
+            if key in seen:
+                raise ValueError(f"{label} {index} repeats an earlier {label}'s key")
+            seen.add(key)
+
+    return LinearRanker(
+        num_features=num_features,
+        key_features=key_features,
+        family_features=family_features,
+        basis_features=np.array(columns["feature"], dtype=np.int64),
+        transforms=np.array(columns["transform"], dtype=np.uint8),
+        mean=np.array(columns["mean"], dtype=np.float64),
+        scale=np.array(columns["scale"], dtype=np.float64),
+        lo=np.array(columns["lo"], dtype=np.float64),
+        hi=np.array(columns["hi"], dtype=np.float64),
+        config_keys=config_keys,
+        config_coefficients=config_coefficients,
+        config_floors=config_floors,
+        family_keys=family_keys,
+        family_coefficients=family_coefficients,
+        family_floors=family_floors,
+        global_coefficients=global_coefficients[0],
+        global_floor=float(global_floors[0]),
+    )
+
+
+def load_linear_artifact(
+    path: Path, declared_hash: str | None, *, feature_count: int | None = None
+):
+    """The `LinearRanker` of a `linear_data` artifact the runtime would load, or ValueError
+    saying why not. Checks run in `LinearDataAdapter::loadFromBuffer` order; the caller
+    compares the features hash. `feature_count`, when given, must equal `num_features`.
+    """
+    path = Path(path)
+    data = path.read_bytes()
+    if not data or len(data) > MAX_ARTIFACT_BYTES:
+        raise ValueError(f"{path}: artifact size {len(data)} is outside (0, 256 MiB]")
+    if len(data) < _MIN_ARTIFACT_BYTES:
+        raise ValueError(f"{path}: artifact is too short to be a FlatBuffer")
+    if declared_hash is not None:
+        actual = hashlib.sha256(data).hexdigest()
+        if actual != declared_hash:
+            raise ValueError(
+                f"{path}: model hash mismatch - declared {declared_hash!r}, actual {actual!r}"
+            )
+    if data[4:8] != LINEAR_MODEL_IDENTIFIER:
+        raise ValueError(
+            f"{path}: file identifier {bytes(data[4:8])!r} is not "
+            f"{LINEAR_MODEL_IDENTIFIER!r}"
+        )
+    try:
+        verify_linear_buffer(data)
+        ranker = _linear_ranker(data)
+    except ValueError as error:
+        raise ValueError(f"{path}: {error}") from None
+    if feature_count is not None:
+        verify_feature_count(ranker.num_features, feature_count, path)
+    return ranker
+
+
+def verify_linear_artifact(
+    path: Path, declared_hash: str | None, *, feature_count: int | None = None
+) -> bytes:
+    """The bytes of a `linear_data` artifact the runtime would load, or ValueError."""
+    load_linear_artifact(path, declared_hash, feature_count=feature_count)
+    return Path(path).read_bytes()
+
+
+def linear_features_hash(data: bytes) -> str:
+    """The `features_hash` a verified linear_data artifact records ("" when absent)."""
+    import uhd_gen  # noqa: F401  puts _generated/ on sys.path
+
+    from hipdnn_flatbuffers_sdk.data_objects.LinearModel import LinearModel
+
+    recorded = LinearModel.GetRootAs(bytearray(data), 0).FeaturesHash()
+    return recorded.decode("utf-8") if recorded is not None else ""
