@@ -7,7 +7,7 @@
 
 namespace ck {
 
-// Runtime SiLU override: clamp BEFORE SiLU, with no alpha or +1 (not gpt-oss).
+// Runtime SiLU override: clamp BEFORE SiLU, with no alpha or +1.
 struct MoeSilu
 {
     __host__ __device__ static bool ValidLimit(float limit) { return limit >= 0.0f; }
