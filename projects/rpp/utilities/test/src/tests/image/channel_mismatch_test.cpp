@@ -230,7 +230,7 @@ std::vector<ChannelMismatchParam> make_params() {
 
 std::string param_name(const ::testing::TestParamInfo<ChannelMismatchParam>& info) {
     const auto& p = info.param;
-    return std::string(op_cases()[p.opIndex].name) + "_" + backend_name(p.backend) + "_" +
+    return backend_name(p.backend) + "_" + std::string(op_cases()[p.opIndex].name) + "_" +
            layout_name(p.src) + "to" + layout_name(p.dst);
 }
 
@@ -239,7 +239,7 @@ inline void PrintTo(const ChannelMismatchParam&, std::ostream*) {}
 }  // namespace
 
 // Full name:
-// Image_Validation/ChannelMismatchTest.Rejected/<op>_<Backend>_PLN3toPLN1 (and PLN1toPLN3)
+// Image_Validation/ChannelMismatchTest.Rejected/<Backend>_<op>_PLN3toPLN1 (and PLN1toPLN3)
 class ChannelMismatchTest : public ::testing::TestWithParam<ChannelMismatchParam> {};
 
 TEST_P(ChannelMismatchTest, Rejected) {
