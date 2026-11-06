@@ -243,6 +243,30 @@ rocblas_status rocsolver_syevdx_heevdx_template(rocblas_handle handle,
         return rocblas_status_success;
     }
 
+    {
+        std::size_t size_scalars, size_tmpT, size_work1, size_work2, size_work3, size_work4,
+            size_work5, size_work6_ifail, size_D, size_E, size_iblock, size_isplit, size_tau,
+            size_nsplit_workArr;
+        rocsolver_syevdx_heevdx_getMemorySize<BATCHED, T, S>(
+            evect, uplo, n, batch_count, &size_scalars, &size_tmpT, &size_work1, &size_work2,
+            &size_work3, &size_work4, &size_work5, &size_work6_ifail, &size_D, &size_E,
+            &size_iblock, &size_isplit, &size_tau, &size_nsplit_workArr);
+
+        HIP_CHECK(hipMemsetAsync((void*)tmpT, 0, size_tmpT, stream));
+        HIP_CHECK(hipMemsetAsync((void*)work1, 0, size_work1, stream));
+        HIP_CHECK(hipMemsetAsync((void*)work2, 0, size_work2, stream));
+        HIP_CHECK(hipMemsetAsync((void*)work3, 0, size_work3, stream));
+        // Only initialize work4 in the stebz code path; the stedc code path initializes this buffer
+        if(n < SYEVDX_MIN_DC_SIZE)
+            HIP_CHECK(hipMemsetAsync((void*)work4, 0, size_work4, stream));
+        HIP_CHECK(hipMemsetAsync((void*)D, 0, size_D, stream));
+        HIP_CHECK(hipMemsetAsync((void*)E, 0, size_E, stream));
+        HIP_CHECK(hipMemsetAsync((void*)iblock, 0, size_iblock, stream));
+        HIP_CHECK(hipMemsetAsync((void*)isplit, 0, size_isplit, stream));
+        HIP_CHECK(hipMemsetAsync((void*)tau, 0, size_tau, stream));
+        HIP_CHECK(hipMemsetAsync((void*)nsplit_workArr, 0, size_nsplit_workArr, stream));
+    }
+
     const rocblas_stride stride = n;
 
     // reduce A to tridiagonal form
@@ -260,6 +284,7 @@ rocblas_status rocsolver_syevdx_heevdx_template(rocblas_handle handle,
         rocblas_eorder eorder
             = (evect == rocblas_evect_none ? rocblas_eorder_entire : rocblas_eorder_blocks);
         S abstol = 0;
+
         rocsolver_stebz_template<S>(handle, erange, eorder, n, vl, vu, il, iu, abstol, D, 0, stride,
                                     E, 0, stride, nev, (rocblas_int*)nsplit_workArr, W, strideW,
                                     iblock, stride, isplit, stride, info, batch_count,
