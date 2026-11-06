@@ -964,7 +964,6 @@ struct FmhaBwdDQDKDVKernel
         // if this param is larger than 1, indicate MQA/GQA case
         ck_tile::index_t nhead_q;
         ck_tile::index_t nhead_ratio_qk;
-        ck_tile::index_t nhead_q_offset;
         float raw_scale;
         float scale;
 
@@ -1097,6 +1096,15 @@ struct FmhaBwdDQDKDVKernel
         const FmhaBwdBatchState* batch_state_ptr;          // per-batch sq/nc/nsplits, size [batch]
     };
 
+    // Global index of the launch's first q head when the launcher splits a tile-split run
+    // into head chunks. Kept out of the common kargs on purpose: one extra field there
+    // changes register allocation in other instances, and on gfx950 it made the causal
+    // non-deterministic d128 kernel spill SGPRs and fault.
+    struct FmhaBwdHeadChunkKargs
+    {
+        ck_tile::index_t nhead_q_offset;
+    };
+
     struct FmhaBwdBatchModeKargs
         : FmhaBwdCommonKargs,
           std::conditional_t<BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS,
@@ -1108,7 +1116,8 @@ struct FmhaBwdDQDKDVKernel
           std::conditional_t<kHasMask, FmhaBwdMaskKargs, FmhaBwdEmptyKargs<3>>,
           std::conditional_t<kHasDropout, FmhaBwdBatchModeDropoutKargs, FmhaBwdEmptyKargs<4>>,
           std::conditional_t<kIsDeterministic, FmhaBwdDeterministicKargs, FmhaBwdEmptyKargs<5>>,
-          std::conditional_t<kUseQrQtrDorPipeline, FmhaBwdQrQtrDorKargs, FmhaBwdEmptyKargs<6>>
+          std::conditional_t<kUseQrQtrDorPipeline, FmhaBwdQrQtrDorKargs, FmhaBwdEmptyKargs<6>>,
+          std::conditional_t<kDetTileSplit, FmhaBwdHeadChunkKargs, FmhaBwdEmptyKargs<7>>
     {
         ck_tile::index_t batch_stride_q;
         ck_tile::index_t batch_stride_k;
@@ -1249,7 +1258,6 @@ struct FmhaBwdDQDKDVKernel
              hdim_v,
              nhead_q,
              nhead_ratio_qk,
-             nhead_q_offset,
              scale,
              static_cast<float>(scale * ck_tile::log2e_v<>),
              stride_q,
@@ -1271,6 +1279,7 @@ struct FmhaBwdDQDKDVKernel
             {},                // placeholder for dropout
             {},                // placeholder for deterministic
             {},                // placeholder for QrQtrDor
+            {},                // placeholder for head chunk
             batch_stride_q,
             batch_stride_k,
             batch_stride_v,
@@ -1305,6 +1314,11 @@ struct FmhaBwdDQDKDVKernel
             kargs.window_size_left  = window_size_left;
             kargs.window_size_right = window_size_right;
             kargs.mask_type         = static_cast<ck_tile::GenericAttentionMaskEnum>(mask_type);
+        }
+
+        if constexpr(kDetTileSplit)
+        {
+            kargs.nhead_q_offset = nhead_q_offset;
         }
 
         if constexpr(kHasDropout)
@@ -1403,8 +1417,7 @@ struct FmhaBwdDQDKDVKernel
                   ck_tile::index_t mask_type,
                   float p_drop,
                   std::variant<std::pair<uint64_t, uint64_t>, std::pair<const void*, const void*>>
-                      drop_seed_offset,
-                  ck_tile::index_t nhead_q_offset = 0)
+                      drop_seed_offset)
     {
         const auto ws = reinterpret_cast<uint8_t*>(workspace_ptr);
         Kargs kargs{
@@ -1430,7 +1443,6 @@ struct FmhaBwdDQDKDVKernel
              hdim_v,
              nhead_q,
              nhead_ratio_qk,
-             nhead_q_offset,
              scale,
              static_cast<float>(scale * ck_tile::log2e_v<>),
              stride_q,

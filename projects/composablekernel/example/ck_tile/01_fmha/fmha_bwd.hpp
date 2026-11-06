@@ -308,8 +308,7 @@ auto fmha_bwd_dq_dk_dv_create_kargs_and_grids(fmha_bwd_args args)
                 args.window_size_right,
                 args.mask_type,
                 args.p_drop,
-                args.drop_seed_offset,
-                args.nhead_q_offset);
+                args.drop_seed_offset);
         }
         else
         { // create batch mode kernel arguments
