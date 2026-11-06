@@ -110,11 +110,6 @@ private:
 
         if(_params.mode == hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::GEN_INDEX)
         {
-            if(!_params.axis.has_value())
-            {
-                throw std::runtime_error("GEN_INDEX requires an axis");
-            }
-
             utilities::CpuReferencePointwiseImpl<OutputType, Input0Type>::pointwiseCompute(
                 _params.mode, *shallowOut0Tensor, _params.axis.value());
         }
@@ -278,6 +273,12 @@ public:
                 = hipdnn_flatbuffers_sdk::utilities::isImplementedTernaryPointwiseMode(mode);
         }
         if(!isImplemented)
+        {
+            return false;
+        }
+
+        if(mode == hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::GEN_INDEX
+           && !nodeAttributes->axis_tensor_uid().has_value())
         {
             return false;
         }

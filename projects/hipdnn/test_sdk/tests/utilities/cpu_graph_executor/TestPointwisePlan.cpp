@@ -1151,6 +1151,30 @@ TEST(TestPointwisePlanBuilder, PlanConstructionGenIndex)
     EXPECT_TRUE(result);
 }
 
+TEST(TestPointwisePlanBuilder, IsApplicableGenIndexWithoutAxisIsDeclined)
+{
+    auto [graph, tensorBundle, variantPack]
+        = buildPointwiseUnaryGraph({1, 3, 4, 4},
+                                   {1, 3, 4, 4},
+                                   DataType::FLOAT,
+                                   DataType::FLOAT,
+                                   DataType::INT32,
+                                   hipdnn_frontend::PointwiseMode::GEN_INDEX);
+
+    auto [serializedGraph, serErr] = graph->to_binary();
+    ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
+    auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+        serializedGraph.data(), serializedGraph.size());
+
+    const PointwisePlanBuilder<DataType::FLOAT,
+                               DataType::FLOAT,
+                               DataType::FLOAT,
+                               DataType::FLOAT,
+                               DataType::INT32>
+        planBuilder;
+    EXPECT_FALSE(planBuilder.isApplicable(graphWrap.getNode(0), graphWrap.getTensorMap()));
+}
+
 TEST(TestPointwisePlanBuilder, IsApplicableGenIndex)
 {
     auto [graph, tensorBundle, variantPack]
@@ -1229,22 +1253,39 @@ TEST(TestPointwisePlanBuilder, IsApplicableLogicalOperationsAreBooleanOnly)
 
 TEST(TestPointwisePlanBuilder, UnsupportedOperation)
 {
-    // Every classified pointwise mode is implemented, so use an unclassified (UNSET) operation.
-    flatbuffers::FlatBufferBuilder fbb;
-    auto pointwiseAttributes = CreatePointwiseAttributes(fbb,
-                                                         PointwiseMode::UNSET,
-                                                         flatbuffers::nullopt,
-                                                         flatbuffers::nullopt,
-                                                         flatbuffers::nullopt,
-                                                         flatbuffers::nullopt,
-                                                         1,
-                                                         flatbuffers::nullopt,
-                                                         flatbuffers::nullopt,
-                                                         2);
-    auto node = CreateNode(
-        fbb, 0, DataType::FLOAT, NodeAttributes::PointwiseAttributes, pointwiseAttributes.Union());
-    fbb.Finish(node);
-    const auto& unsupportedNode = *flatbuffers::GetRoot<Node>(fbb.GetBufferPointer());
+    // Tensors 1 (input) and 2 (output) exist and have the right type, so only the operation decides
+    // whether the builder accepts the node.
+    const std::vector<int64_t> dims = {1};
+    const std::vector<int64_t> strides = {1};
+    flatbuffers::FlatBufferBuilder in0Builder;
+    in0Builder.Finish(
+        CreateTensorAttributesDirect(in0Builder, 1, "in", DataType::FLOAT, &strides, &dims));
+    flatbuffers::FlatBufferBuilder out0Builder;
+    out0Builder.Finish(
+        CreateTensorAttributesDirect(out0Builder, 2, "out", DataType::FLOAT, &strides, &dims));
+    const std::unordered_map<int64_t, const TensorAttributes*> tensorMap
+        = {{1, flatbuffers::GetRoot<TensorAttributes>(in0Builder.GetBufferPointer())},
+           {2, flatbuffers::GetRoot<TensorAttributes>(out0Builder.GetBufferPointer())}};
+
+    const auto buildNode
+        = [](flatbuffers::FlatBufferBuilder& fbb, PointwiseMode mode) -> const Node& {
+        auto pointwiseAttributes = CreatePointwiseAttributes(fbb,
+                                                             mode,
+                                                             flatbuffers::nullopt,
+                                                             flatbuffers::nullopt,
+                                                             flatbuffers::nullopt,
+                                                             flatbuffers::nullopt,
+                                                             1,
+                                                             flatbuffers::nullopt,
+                                                             flatbuffers::nullopt,
+                                                             2);
+        fbb.Finish(CreateNode(fbb,
+                              0,
+                              DataType::FLOAT,
+                              NodeAttributes::PointwiseAttributes,
+                              pointwiseAttributes.Union()));
+        return *flatbuffers::GetRoot<Node>(fbb.GetBufferPointer());
+    };
 
     const PointwisePlanBuilder<DataType::FLOAT,
                                DataType::FLOAT,
@@ -1252,7 +1293,15 @@ TEST(TestPointwisePlanBuilder, UnsupportedOperation)
                                DataType::FLOAT,
                                DataType::FLOAT>
         planBuilder;
-    EXPECT_FALSE(planBuilder.isApplicable(unsupportedNode, {}));
+
+    flatbuffers::FlatBufferBuilder supportedBuilder;
+    EXPECT_TRUE(
+        planBuilder.isApplicable(buildNode(supportedBuilder, PointwiseMode::RELU_FWD), tensorMap));
+
+    // Every classified pointwise mode is implemented, so use an unclassified (UNSET) operation.
+    flatbuffers::FlatBufferBuilder unsetBuilder;
+    EXPECT_FALSE(
+        planBuilder.isApplicable(buildNode(unsetBuilder, PointwiseMode::UNSET), tensorMap));
 }
 
 template <typename T>
@@ -1739,6 +1788,71 @@ TEST_F(TestPointwisePlan, SoftplusBwdWithBetaProducesExpectedGradient)
                                 * gradient(static_cast<double>(X_VALUES[widthIndex]));
         EXPECT_NEAR(static_cast<double>(dx->getHostValue(0, 0, 0, width)), expected, 1e-5);
     }
+}
+
+TEST_F(TestPointwisePlan, EluFwdWithoutAlphaUsesDefaultAlphaOfOne)
+{
+    auto [graph, tensorBundle, variantPack]
+        = buildPointwiseUnaryGraph({1, 1, 1, 3},
+                                   {1, 1, 1, 3},
+                                   DataType::FLOAT,
+                                   DataType::FLOAT,
+                                   DataType::FLOAT,
+                                   hipdnn_frontend::PointwiseMode::ELU_FWD);
+
+    auto [serializedGraph, serErr] = graph->to_binary();
+    ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
+    const GraphWrapper graphWrapper(serializedGraph.data(), serializedGraph.size());
+    const auto& attributes = graphWrapper.getNodeWrapper(0).attributesAs<PointwiseAttributes>();
+    auto* x = static_cast<Tensor<float>*>(&tensorBundle.getTensor(attributes.in_0_tensor_uid()));
+    auto* y = static_cast<Tensor<float>*>(&tensorBundle.getTensor(attributes.out_0_tensor_uid()));
+
+    x->setHostValue(-1.0f, 0, 0, 0, 0);
+    x->setHostValue(0.0f, 0, 0, 0, 1);
+    x->setHostValue(2.0f, 0, 0, 0, 2);
+    x->markHostModified();
+
+    CpuReferenceGraphExecutor{}.execute(
+        serializedGraph.data(), serializedGraph.size(), variantPack);
+
+    EXPECT_NEAR(y->getHostValue(0, 0, 0, 0), -0.6321205588f, 1e-6f); // exp(-1) - 1
+    EXPECT_NEAR(y->getHostValue(0, 0, 0, 1), 0.0f, 1e-6f);
+    EXPECT_NEAR(y->getHostValue(0, 0, 0, 2), 2.0f, 1e-6f);
+}
+
+TEST_F(TestPointwisePlan, SoftplusBwdWithoutBetaUsesDefaultBetaOfOne)
+{
+    auto [graph, tensorBundle, variantPack]
+        = buildPointwiseBinaryGraph({1, 1, 1, 2},
+                                    {1, 1, 1, 2},
+                                    {1, 1, 1, 2},
+                                    DataType::FLOAT,
+                                    DataType::FLOAT,
+                                    DataType::FLOAT,
+                                    DataType::FLOAT,
+                                    hipdnn_frontend::PointwiseMode::SOFTPLUS_BWD);
+
+    auto [serializedGraph, serErr] = graph->to_binary();
+    ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
+    const GraphWrapper graphWrapper(serializedGraph.data(), serializedGraph.size());
+    const auto& attributes = graphWrapper.getNodeWrapper(0).attributesAs<PointwiseAttributes>();
+    auto* dy = static_cast<Tensor<float>*>(&tensorBundle.getTensor(attributes.in_0_tensor_uid()));
+    auto* x = static_cast<Tensor<float>*>(
+        &tensorBundle.getTensor(attributes.in_1_tensor_uid().value()));
+    auto* dx = static_cast<Tensor<float>*>(&tensorBundle.getTensor(attributes.out_0_tensor_uid()));
+
+    dy->setHostValue(2.0f, 0, 0, 0, 0);
+    dy->setHostValue(2.0f, 0, 0, 0, 1);
+    x->setHostValue(1.0f, 0, 0, 0, 0);
+    x->setHostValue(0.0f, 0, 0, 0, 1);
+    dy->markHostModified();
+    x->markHostModified();
+
+    CpuReferenceGraphExecutor{}.execute(
+        serializedGraph.data(), serializedGraph.size(), variantPack);
+
+    EXPECT_NEAR(dx->getHostValue(0, 0, 0, 0), 1.4621171573f, 1e-6f); // 2 * sigmoid(1)
+    EXPECT_NEAR(dx->getHostValue(0, 0, 0, 1), 1.0f, 1e-6f); // 2 * sigmoid(0)
 }
 
 TEST_F(TestPointwisePlan, GenIndexProducesCoordinateAlongAxis)
