@@ -25,6 +25,8 @@
 # D-REL-RAGGED-ORDER and D-REL-GAPPED-NEEDS-SHORT-LENGTHS; new rules D-REL-O-OWN-STARTS-NOT-SHARED and
 # D-REL-SHARED-PAGES-NEEDS-TWO-SEQUENCES;
 # rejected candidates and equivalences for the added Layer 0 axes.
+# Amended 2026-11-05 (user decision): rule D-RAGGED-NOT-THROUGH-PAGES removes a ragged start position on a paged K
+# or V.
 #
 # Rule format
 #   id       stable identifier.
@@ -118,8 +120,8 @@ rules:
   - id: D-RAGGED-NO-OVERLAP
     kind: definition
     basis: meaning
-    reason: "Two sequences of an output cannot share memory: two results would be written to one place. hipDNN's ragged form also refuses input sequences that share memory (rocm-libraries @ 2fcf1e30202 projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/RaggedTensor.hpp:208-219)."
-    note: "The input half rests on hipDNN's ragged format, not on the definition of attention (user decision 2026-11-04)."
+    reason: "Two sequences of an output cannot share memory: two results would be written to one place. Input sequences that share memory are an invalid caller contract: the result is not defined, whether or not an API checks it."
+    note: "hipDNN's ragged form refuses input sequences that share memory (rocm-libraries @ 2fcf1e30202 projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/RaggedTensor.hpp:208-219); cuDNN's frontend does not check for it; the request is still invalid."
     forbid: {ragged_offsets: [overlapping]}
     source: "axis doc § 10 'Ragged offsets' ('every valid list of starting points')"
 
@@ -337,6 +339,15 @@ rules:
     forbid: {batch_size: [zero, one], page_table_order: [shared_pages]}
     source: "axis doc § 10 'Paged KV cache' (shared prefix)"
 
+  - id: D-RAGGED-NOT-THROUGH-PAGES
+    kind: definition
+    basis: meaning
+    reason: "No specification defines tokens counted through pages: a ragged start position on a paged K or V could count tokens from an origin before paging or after it, and a length could count tokens or pages, so the request has no one meaning."
+    forbid_any:
+      - {batch_packing: [ragged, ragged_kv_side], paged_kv: [present, k_only]}
+      - {batch_packing: [ragged, ragged_kv_side], v_packing: [as_k, own_starts], paged_kv: [v_only]}
+    source: "axis doc § 1, § 10"
+
   - id: D-REL-O-OWN-STARTS-NOT-SHARED
     kind: definition
     basis: consistency
@@ -450,7 +461,6 @@ rejected_candidates:
   - {candidate: "ALiBi only with a power-of-two head count", verdict: unusual_not_meaningless, reason: "The standard slope sequence has a defined form for other counts (closest power of two, then interleaved terms).", source: "axis doc § 6; CpuFpReferenceSdpa.hpp:941-960 at rocm-libraries 00d9c566bea"}
   - {candidate: "A NaN or infinite scale (D-SCALE-FINITE)", verdict: reference_limit, reason: "The evidence is reference behaviour; the frontend accepts it; the answer key carries it (AK-SCALE-FINITE).", source: "axis doc § 7 'Scale value'"}
   - {candidate: "rng_dump only with random dropout (D-RNG-DUMP-NEEDS-RANDOM)", verdict: reference_limit, reason: "The evidence is reference behaviour; the frontend accepts it; the answer key carries it (AK-RNG-DUMP-NEEDS-PHILOX).", source: "axis doc § 8 'Dropout-pattern output'"}
-  - {candidate: "Ragged start positions not on a paged K or V (D-REL-PAGED-NOT-RAGGED)", verdict: reference_limit, reason: "The evidence is reference behaviour; the frontend accepts it; the answer key carries it (AK-RAGGED-NOT-ON-PAGED).", source: "axis doc § 1, § 10"}
   - {candidate: "Ragged packing on every tensor or none", verdict: library_limit, reason: "The query side and the key/value side are different tensors; packing one and paging or padding the other is defined (common in serving).", source: "axis doc § 1, § 10"}
   - {candidate: "The tensors of one side share one list of start positions, so O starts where Q starts", verdict: library_limit, reason: "Each ragged tensor can carry its own list; O stored at other positions, or in equal-length slots, holds the same rows.", source: "axis doc § 1, § 10"}
   - {candidate: "Start positions count elements only", verdict: api_limit, reason: "A start position in tokens times the sequence stride names the same element; the unit is how the list is stored.", source: "axis doc § 14"}

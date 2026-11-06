@@ -131,9 +131,13 @@ or about numbers. Examples:
   head count must divide the query head count.
 - `D-OUTPUT-SELF-ALIAS`: output strides that send two output elements to one
   address cannot hold both results.
+- `D-RAGGED-NOT-THROUGH-PAGES`: a ragged start position on a paged K or V. No
+  specification says whether it counts tokens before or after paging, or
+  whether a length counts tokens or pages. A ragged Q over a paged K and V
+  keeps its meaning.
 
-Layer 1 has 34 definition rules. They leave about 2.1 × 10⁴³ combinations and
-63,262 valid pairs.
+Layer 1 has 35 definition rules. They leave about 5.8 × 10⁴² combinations and
+63,206 valid pairs.
 
 **Layer 2 removes combinations that hipDNN's frontend cannot express.** These
 are **frontend** rules (ids `F-*`). The frontend is the hipDNN C++ API that
@@ -146,8 +150,8 @@ builds the graph. Examples:
 - `F-SCALE-TENSOR-BY-VALUE`: a scale tensor must be passed by value, so a
   scale in device memory cannot be stated.
 
-Layer 2 has 17 frontend rules. They leave about 1.1 × 10³⁸ combinations and
-52,404 valid pairs.
+Layer 2 has 17 frontend rules. They leave about 3.2 × 10³⁷ combinations and
+52,348 valid pairs.
 
 Some values and combinations have meaning, but the frontend cannot state them,
 refuses them, or is to refuse them. Layer 2 removes them. The model does not hold the values of
@@ -170,9 +174,8 @@ them from every row. `F-PAGED-NEEDS-SEQ-LENS` removes a combination, not a value
   enforced yet".
 
 Some combinations are valid but no reference executor can check them. They are
-not Layer 1 or Layer 2 rules. The answer key (section 4) holds them. Examples: the
-dropout pattern output with a caller-supplied mask, and ragged offsets on a
-paged K or V.
+not Layer 1 or Layer 2 rules. The answer key (section 4) holds them. Example: the
+dropout pattern output with a caller-supplied mask.
 
 **Hints for a fuzzer.** Some Layer 0 axes describe the numbers inside tensors:
 special numbers such as NaN or infinity (`special_values`), numbers large
@@ -201,7 +204,7 @@ class into numbers. Example: `k_head_sharing = gqa` means the K head count is
 the query head count divided by 4, at least 2.
 
 Rules hold only for the values that were tested. A result at head size 128
-says nothing about head size 96.
+says nothing about head size 80.
 
 **Base case.** `base_cases.shared` is the plain case that other cases start
 from: bf16 in and out, fp32 compute, batch 2, 8 heads, head size 128,
@@ -264,12 +267,20 @@ alignment".
 
 **Other added cases.**
 
-- **Targeted cases** (`level_labels.targeted`, X2 to X10): the base case plus a
+- **Targeted cases** (`level_labels.targeted`, X2 to X11c): the base case plus a
   few changes, each aimed at one known hazard. Example: X6b, "a scale tensor may
   be ignored (scale 1.0 used)". A targeted case that the references cannot check
   (an answer-key rule matches its row) goes to full. X3c is such a case.
-- **Real-world cases** (`level_labels.real_world`, 11 entries): settings of
-  public models, for example Llama 3 8B decode and Mistral 7B sliding window.
+- **Real-world cases** (`level_labels.real_world`, 40 entries): settings of
+  public models, for example Llama 3 8B decode and Mistral 7B sliding window,
+  and 11 ragged (varlen) cases in quick, most of them token-major: vLLM-style
+  serving (ragged queries over a paged GQA cache), varlen prefill with one
+  token-count offset list per side, with GQA and bottom-right causal, a sliding
+  window, a bias, longer slots than sequences, INT64 offsets, a packed Stats,
+  ragged queries over dense K/V, fp16, and one head-major case for contrast;
+  and 16 more public-model shapes at their real head counts and head sizes (Llama 3.1
+  and 3.2, Qwen2.5, Phi-3 and Phi-4, Gemma 3, DeepSeek-V3 including MLA decode
+  with head sizes 576 and 512, gpt-oss) and two paged serving defaults.
 - **Seeds** (`level_labels.seeds`, 15 entries): combinations that public
   defect reports or serving workloads showed to matter. Example: S1, Stats with
   ragged queries over a paged GQA decode.
@@ -301,9 +312,9 @@ Each rule also has a `form`:
 | `setting` | Records a choice about how the model is built. It removes nothing. |
 | `covered` | A policy rule whose requests another rule already removes. |
 
-The model applies 45 exclusion rules: 32 definition, 12 frontend and 1 choice.
-Together they make 13,857 of the 56,412 structurally possible pairs invalid.
-42,555 valid pairs remain. One more definition exclusion,
+The model applies 46 exclusion rules: 33 definition, 12 frontend and 1 choice.
+Together they make 14,226 of the 58,766 structurally possible pairs invalid.
+44,540 valid pairs remain. One more definition exclusion,
 `D-RAGGED-NO-OVERLAP`, removes nothing: the value it forbids is not in the
 model.
 
@@ -342,11 +353,33 @@ The script uses these methods:
   low-change case is easy to trace to one setting.
 - **Packed pairwise.** Each row holds as many uncovered pairs as possible.
   This gives fewer rows, but each row changes many settings. An engine that
-  cannot handle one of them declines the whole row.
+  cannot handle one of them declines the whole row. Every tier uses it only
+  for the pairs that no bundle can hold (see "Rows a bundle can hold").
 - **One-at-a-time.** The base case with exactly one value changed (plus any
   value that a rule forces).
 - **Targeted, real-world and seed rows** (section 4). The script completes each
   one with the fewest extra changes that obey the rules.
+
+**Token-major ragged rows.** A ragged tensor is usually stored token-major
+(`bshd`, the layout varlen attention calls THD). In a row with a ragged Q side,
+`dim_order_q = bshd` and `dim_order_o = bshd` count as no change, as the base
+value `bhsd` does. The same holds for K and V on a ragged K/V side. A search
+for the fewest changes tries `bshd` first in such a row
+(`generator_hints.plain_when` in `model.yaml`). This applies to the size-sweep
+crossings and the coverage rows. Low-change pairwise rows never hold a ragged
+setting (see "Rows a bundle can hold"), and packed rows take any order. So the
+ragged rows of quick are mostly the hand-picked ones, which are token-major
+except one head-major case for contrast.
+
+**Rows a bundle can hold.** Some rows need a harness capability before a
+bundle can hold them, for example ragged offsets or a zero stride
+(`generator_hints.harness_needs` lists the rows of each capability; an axis
+names in `harness_needs` the values that need one). Every tier has
+`bundle_first: true`. Its low-change steps take only the pairs that a row with
+no such need can hold, and build only such rows. So each of those pairs is in a
+row that a bundle can hold. Then packed pairwise covers the tier's other pairs,
+for example a ragged setting with a mask, in a few rows. When two values cost
+the same number of changes, the script takes the value with no need first.
 
 **Super-setting.** In the quick tier, the data-type axes (`dtype_q`,
 `dtype_k_vs_q`, `dtype_v_vs_q`, `dtype_o`, `dtype_stats`, `compute_precision`)
@@ -372,10 +405,10 @@ the recipe are open to review.
 
 | Tier | Values it takes | Must every case be checkable? | Pairs | Extra rows | Shape tiers | Per-case ceiling | Budget |
 |---|---|---|---|---|---|---|---|
-| quick | `usage` common; `changes_numbers` not "no"; answer key yes or partial | yes | all, low-change | real-world rows and checkable seeds | S | 20 MFLOP | 5 min |
-| standard | as quick, plus `usage` rare | yes | all, low-change | targeted | S, H, M | 200 MFLOP | 30 min |
-| comprehensive | as standard | yes | within groups and bridges, packed | one-at-a-time at S and L | S, H, M, L (one per row) | 8,000 MFLOP | 60 min |
-| full | everything, including `fringe` and answer key "no" | no | all, packed | one-at-a-time at S and L; the base case at X | S, H, M, L, X | none | none |
+| quick | `usage` common; `changes_numbers` not "no"; answer key yes or partial | yes | all, bundle rows first, low-change; packed for the rest | real-world rows and checkable seeds | S | 20 MFLOP | 5 min |
+| standard | as quick, plus `usage` rare | yes | all, bundle rows first, low-change; packed for the rest | targeted | S, H, M | 200 MFLOP | 30 min |
+| comprehensive | as standard | yes | within groups and bridges, bundle rows first, low-change; packed for the rest | one-at-a-time at S and L | S, H, M, L (one per row) | 8,000 MFLOP | 60 min |
+| full | everything, including `fringe` and answer key "no" | no | all, bundle rows first, low-change; packed for the rest | one-at-a-time at S and L; the base case at X | S, H, M, L, X | none | none |
 
 **Size sweep.** Each level names the size-sweep rows it takes (`size_sweep`
 in `levels:`). quick takes the typical sizes, which are most likely to pass.
@@ -396,6 +429,13 @@ domain, the cost model's fitted range, or a ceiling above tier S). The sizes
 override sets the batch, the head counts, the sequence lengths and the head
 sizes. Page size and the window bounds get only a stress row: the class value
 that reaches the key length, at the key length of shape tier X.
+
+Corner sizes sit next to a representative size or, for the sequence lengths
+and the head sizes only, next to a tile edge (64, 128, 256): the edge and the
+sizes one below and one above it (`size_sweep.corner.tile_edge_axes`). The
+batch and the head count keep small corner sizes. Each crossed setting value
+takes 3 entries of the interleaved corner list, and the next value starts 3
+entries further on, so the values share out every corner size.
 
 The base value of each axis is always allowed. A required child axis whose
 values all have `changes_numbers` "no" (for example `max_seq_len_kv` under
@@ -442,10 +482,10 @@ Result for the generated CSV (section 8; times are the summed
 
 | Tier | Cases in this tier | Cumulative cases | Cumulative s, gfx942 | Cumulative s, gfx950 | Budget use, gfx942 |
 |---|---|---|---|---|---|
-| quick | 1,610 | 1,610 | 66.3 | 53.5 | 22.1 % |
-| standard | 9,434 | 11,044 | 581.4 | 437.0 | 32.3 % |
-| comprehensive | 4,543 | 15,587 | 2,294.2 | 1,656.5 | 63.7 % |
-| full | 7,390 | 22,977 | 5,518.4 | 3,962.4 | — |
+| quick | 1,461 | 1,461 | 61.4 | 49.7 | 20.5 % |
+| standard | 8,631 | 10,092 | 521.7 | 393.0 | 29.0 % |
+| comprehensive | 4,070 | 14,162 | 2,015.9 | 1,457.2 | 56.0 % |
+| full | 21,093 | 35,255 | 9,373.0 | 6,706.1 | — |
 
 These times are the PoC runner's times (`src/sdpa-case-flow-runner/`) for one engine
 run plus one reference run. The suite does more work per case, so its times are larger.
@@ -476,7 +516,7 @@ timing files or the generator changes the CSV, write the new SHA-256 to that
 file, and copy the new CSV to `test-plans/sdpa-fwd/levels.csv`, in the same
 change.
 
-`levels.csv` has one row per case: 22,977 rows. It has no quoted fields. A `-`
+`levels.csv` has one row per case: 35,255 rows. It has no quoted fields. A `-`
 means that a child axis is not active in that row. Each row has 105 columns: 13
 case columns, then 92 axis columns.
 
@@ -524,18 +564,18 @@ reasons, so the counts overlap and do not add up to the number of excluded rows.
 
 | Reason | Why the row is not a bundle | Rows |
 |---|---|---|
-| `ragged_offsets` | Ragged offsets are tensor contents. | 3,769 |
-| `tensor_overlap` | An output written over an input, or inputs that share memory on a row with paged K and V, need control of the pointers that a bundle does not have. Inputs that share memory on a padded, non-paged row are bundle contents (metadata `aliases`); a view that does not fit inside its owner leaves through the export outcomes. | 234 |
-| `arch_dtype` | The number format depends on the GPU (for example fp8 E4M3 becomes E4M3 FNUZ on gfx942), and one graph has one format. | 391 |
-| `page_table_contents` | A packed page table carries a ragged offset, and the harness does not verify ragged graphs. Dense page tables are bundle contents. | 190 |
-| `zero_stride_needs_pr14709` | A zero stride on an input needs a data-SDK change (PR #14709). These rows are left out of this bundle set. Adding them is planned as a follow-up change. Only the selection step removes these rows. | 1,126 (870 otherwise expressible) |
-| `dropout_without_rng_dump` | Random dropout without an `rng_dump` output has no oracle: the references check random dropout only through the dumped mask. | 82 (10 otherwise expressible) |
+| `ragged_offsets` | Ragged offsets are tensor contents. | 676 |
+| `tensor_overlap` | An output written over an input, or inputs that share memory on a row with paged K and V, need control of the pointers that a bundle does not have. Inputs that share memory on a padded, non-paged row are bundle contents (metadata `aliases`); a view that does not fit inside its owner leaves through the export outcomes. | 126 |
+| `arch_dtype` | The number format depends on the GPU (for example fp8 E4M3 becomes E4M3 FNUZ on gfx942), and one graph has one format. | 103 |
+| `page_table_contents` | A packed page table carries a ragged offset, and the harness does not verify ragged graphs. Dense page tables are bundle contents. | 98 |
+| `zero_stride_needs_pr14709` | A zero stride on an input needs a data-SDK change (PR #14709). These rows are left out of this bundle set. Adding them is planned as a follow-up change. Only the selection step removes these rows. | 286 (54 otherwise expressible) |
+| `dropout_without_rng_dump` | Random dropout without an `rng_dump` output has no oracle: the references check random dropout only through the dumped mask. | 58 (10 otherwise expressible) |
 
 These are the rows that the selection step chooses from the current
-`levels.csv`, which has 22,977 rows. 17,969 rows become bundles and 5,008 rows
-are excluded. Of the excluded rows, 4,128 have at least one of the first four
-reasons. The other 880 could be bundles but have an extra reason: 870 have only
-a zero stride and 10 have only dropout without `rng_dump`. A data start past an
+`levels.csv`, which has 35,255 rows. 34,496 rows become bundles and 759 rows
+are excluded. Of the excluded rows, 695 have at least one of the first four
+reasons. The other 64 could be bundles but have an extra reason: 54 have only a
+zero stride and 10 have only dropout without `rng_dump`. A data start past an
 aligned allocation start (`element_aligned`, `sub_element`) is a bundle
 content: the case's metadata `start_offsets` gives the offset of each such
 tensor. When the case has per-sequence query lengths in a `seq_len_q` tensor,
@@ -548,11 +588,11 @@ filters. To bring a row back, change the filter and regenerate the bundles.
 
 | Tier | All rows | Bundle rows | Sweeps | Largest sweep | Summed `est_seconds` of the bundle rows, gfx942 / gfx950 |
 |---|---|---|---|---|---|
-| quick | 1,610 | 1,352 | 90 | 384 | 47.1 / 36.4 |
-| standard | 9,434 | 7,467 | 258 | 1,949 | 402.9 / 300.2 |
-| comprehensive | 4,543 | 3,510 | 211 | 879 | 1,296.4 / 922.8 |
-| full | 7,390 | 5,640 | 273 | 1,463 | 2,593.1 / 1,855.4 |
-| total | 22,977 | 17,969 | 832 | | |
+| quick | 1,461 | 1,412 | 91 | 400 | 49.9 / 38.6 |
+| standard | 8,631 | 8,409 | 258 | 2,139 | 452.0 / 336.9 |
+| comprehensive | 4,070 | 3,954 | 209 | 969 | 1,468.3 / 1,045.9 |
+| full | 21,093 | 20,721 | 640 | 3,752 | 7,260.1 / 5,180.3 |
+| total | 35,255 | 34,496 | 1,198 | | |
 
 ### 9.2 How a graph is made from a row
 
@@ -592,7 +632,7 @@ each. A row with only Q, K, V and O is `Base`. Examples:
 | `Stats_DqBv_DkBv_DvBv` | Stats plus the three descales |
 
 A name longer than 64 characters keeps its first tokens and ends with 6 hex
-digits of a hash. The 22,977 rows have 486 topologies; the bundle rows use 257.
+digits of a hash. The 35,255 rows have 812 topologies; the bundle rows use 641.
 One sweep holds the cases of one tier and one topology.
 
 The suite's import tool `migration-scripts/import_graph.py` groups the graphs.
@@ -770,8 +810,8 @@ these defects need no skip.
   `support.json` file beside a sweep. It says that an engine supports a case on
   a given GPU ([Support Matrix](../support-matrix.md)). Claims come in a later
   change.
-- 5,008 rows are not bundles. 4,128 of them need contents or settings a bundle
-  cannot express (§ 9.1), mostly ragged offsets. The other 880 have a zero
+- 759 rows are not bundles. 695 of them need contents or settings a bundle
+  cannot express (§ 9.1), mostly ragged offsets. The other 64 have a zero
   stride or random dropout without `rng_dump`. They are rows of the generated
   CSV, but no bundle holds them.
 - `ASM_SDPA_ENGINE` declines every graph that declares a tensor alignment

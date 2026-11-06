@@ -38,6 +38,34 @@ class Spec:
         }
         self.bases = {n: b["values"] for n, b in (m.get("base_cases") or {}).items()}
         self.hints = m.get("generator_hints") or {}
+        # axis -> [(when, value)]: in a row that matches `when` ({axis: set}), `value` of the axis
+        # counts as no change from the base.
+        self.plain = {}
+        entries = self.hints.get("plain_when") or []
+        when_axes = {ax for e in entries for ax in e["when"]}
+        for e in entries:
+            if any(not isinstance(vs, list) for vs in e["when"].values()):
+                raise ValueError(
+                    f"plain_when {e.get('id')}: a `when` axis needs a list"
+                )
+            when = {ax: set(vs) for ax, vs in e["when"].items()}
+            for ax, v in e["values"].items():
+                if ax not in self.values or v not in self.values[ax]:
+                    raise ValueError(f"plain_when {e.get('id')}: unknown {ax}={v}")
+                if ax in when_axes or ax in self.plain:
+                    raise ValueError(
+                        f"plain_when {e.get('id')}: {ax} is a `when` axis or in two entries"
+                    )
+                self.plain.setdefault(ax, []).append((when, v))
+        # Rows that need a harness capability (generator_hints.harness_needs forbid_any).
+        self.need_nogoods = [
+            (f"NEED-{n['id']}", {ax: set(vs) for ax, vs in c.items()})
+            for n in self.hints.get("harness_needs") or []
+            for c in n.get("forbid_any") or []
+        ]
+        self.plain_axes = set(self.plain) | {
+            ax for pairs in self.plain.values() for when, _ in pairs for ax in when
+        }
         self.nogoods = []  # (rule id, {axis: set(values)})
         files = [model_dir / "rules.yaml", *map(Path, extra_rule_files)]
         self.rule_files = files
@@ -61,6 +89,35 @@ class Spec:
                     )
         self.rule_ids = sorted({rid for rid, _ in self.nogoods})
         self._memos = {}
+
+    def plain_state(self, axis: str, value, doms: dict):
+        """True when `value` of `axis` counts as no change from the base under `doms` (axis ->
+        set of values still possible), False when it does not, None while that is undecided.
+        """
+        unknown = False
+        for when, v in self.plain.get(axis, ()):
+            if v != value:
+                continue
+            state = True
+            for ax, vs in when.items():
+                d = doms[ax]
+                if not any(x in vs for x in d):
+                    state = False
+                    break
+                if not all(x in vs for x in d):
+                    state = None
+            if state:
+                return True
+            if state is None:
+                unknown = True
+        return None if unknown else False
+
+    def counts(self, base: dict, axis: str, value, doms: dict) -> bool:
+        """A value counts as a change when it differs from the base and is not plain; an
+        undecided plain value does not count yet."""
+        if not _differs(base[axis], value):
+            return False
+        return axis not in self.plain or self.plain_state(axis, value, doms) is False
 
     def base_row(self, name: str) -> dict:
         b = self.bases[name]
@@ -211,6 +268,9 @@ class Spec:
                 by_unit.setdefault(unit_of[a], []).append(a)
         for axes in by_unit.values():
             join(axes)
+        for ax, pairs in self.plain.items():
+            for when, _ in pairs:
+                join([ax, *when])
         live = []
         for i, c in enumerate(nogoods):
             if all(next(iter(doms[ax])) in c[ax] for ax in c if len(doms[ax]) == 1):
@@ -274,7 +334,7 @@ class Spec:
         return {
             unit_of.get(a, a)
             for a in self.axes
-            if len(doms[a]) == 1 and _differs(base[a], next(iter(doms[a])))
+            if len(doms[a]) == 1 and self.counts(base, a, next(iter(doms[a])), doms)
         }
 
     def _min_extra(
@@ -308,7 +368,10 @@ class Spec:
         ((comp, live),) = comps
         spent = self._changed_units(doms, base, unit_of)
         units = {unit_of.get(a, a) for a in comp}
-        key = ("min", self._state(doms, comp), live, frozenset(units & spent))
+        linked = ()
+        if self.plain_axes & set(comp):
+            linked = self._state(doms, sorted(self.plain_axes))
+        key = ("min", self._state(doms, comp), live, frozenset(units & spent), linked)
         hit = memo.get(key)
         if hit is not None:
             exact, value = hit
@@ -320,7 +383,7 @@ class Spec:
             unit_of.get(a, a)
             for a in comp
             if base[a] is not None
-            and all(x is not None and x != base[a] for x in doms[a])
+            and all(x is not None and self.counts(base, a, x, doms) for x in doms[a])
         }
         best = None
         if len(forced - spent) <= budget:
@@ -380,12 +443,15 @@ def read_cases(path: Path, spec: Spec):
 def change_count(spec: Spec, base: dict, row: dict, groups=None) -> int:
     """Settings set in both rows with different values (a child switched on or off is not counted).
 
-    The axes of one group in `groups` ({id: axes}) count once together."""
+    The axes of one group in `groups` ({id: axes}) count once together. A plain alternative
+    (model generator_hints.plain_when) in a row that matches its condition is not counted.
+    """
     groups = groups or {}
     grouped = {a for axes in groups.values() for a in axes}
+    doms = {a: {row[a]} for a in spec.axes}
 
     def changed(a):
-        return base[a] is not None and row[a] is not None and row[a] != base[a]
+        return spec.counts(base, a, row[a], doms)
 
     return sum(1 for a in spec.axes if a not in grouped and changed(a)) + sum(
         1 for axes in groups.values() if any(changed(a) for a in axes)

@@ -8,7 +8,9 @@ For each level of the `levels` recipe in model.yaml:
             accept (the shared base value is always accepted; a child setting none of whose values
             passes `changes_numbers` is not held to that label); targeted cases, real-world cases
             and cases filled down from a higher level (`filled_from` set) are exempt.
-  changes   with `max_changes: N`, every case of the level except targeted, real-world,
+  changes   a value of model.yaml generator_hints.plain_when counts as no change in a row that
+            matches its condition.
+            With `max_changes: N`, every case of the level except targeted, real-world,
             size-sweep and coverage cases changes at most N settings from the shared base (a
             setting counts when it is set in both rows with different values). With
             `max_changes: {start: N, escalate: true}`, a filled case changes at most N settings,
@@ -37,7 +39,8 @@ For each level of the `levels` recipe in model.yaml:
             own: within its shapes and ceiling, every value accepted by its labels (and, with
             `answerable`, no answer_key_needs combination), and size-sensitive under `larger_tiers`.
 Checked once for the file: every axis has `size_sensitive: [yes | no, reason]`; a case holding a
-value whose usage label is `fringe` is at a level whose `usage` accepts fringe.
+value whose usage label is `fringe` is at a level whose `usage` accepts fringe; targeted and
+real-world cases are hand-picked and exempt.
 Exit status 0 on pass, 1 on fail.
 """
 
@@ -54,8 +57,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from check_common import Spec, change_count, read_cases, row_pairs  # noqa: E402
 
 
-def level_groups(lv: dict) -> dict:
+def level_groups(lv: dict, spec: Spec | None = None) -> dict:
     sup = lv.get("super_setting")
+    if sup and spec is not None and spec.plain_axes & set(sup["axes"]):
+        raise ValueError(f"level {lv['name']}: super_setting holds a plain_when axis")
     return {sup["id"]: list(sup["axes"])} if sup else {}
 
 
@@ -138,7 +143,10 @@ def main(argv=None) -> int:
         held = [f"{a}={row[a]}" for a in spec.axes if (a, row[a]) in fringe]
         if held:
             fringe_cases += 1
-            if meta["level"] not in takes_fringe:
+            if meta["level"] not in takes_fringe and meta["origin"] not in (
+                "targeted",
+                "real_world",
+            ):
                 general.append(
                     f"{cid}: fringe value {', '.join(held)} at {meta['level']}"
                 )
@@ -181,7 +189,7 @@ def main(argv=None) -> int:
                 return True
             return label_ok(a, v, skip=("changes_numbers",) if a in relaxed else ())
 
-        groups = level_groups(lv)
+        groups = level_groups(lv, spec)
         mine = [
             (cid, meta, row)
             for cid, meta, row in cases
@@ -219,14 +227,31 @@ def main(argv=None) -> int:
                 )
         lim = change_limit(lv)
         limit, escalate = (None, False) if lim is None else lim
+        first = bool(lv.get("bundle_first"))
+
+        def needs_capability(row):
+            return any(
+                all(row[a] in vs for a, vs in c.items()) for _, c in spec.need_nogoods
+            )
+
+        def packed(meta):
+            return first and meta["origin"] == "pairwise"
+
         if limit is not None:
             for cid, meta, row in cases:
-                if meta["level"] == lv["name"] and meta["origin"] not in NOT_PAIRWISE:
-                    n = change_count(spec, base, row, groups)
-                    if n > limit and (not escalate or meta.get("filled_from")):
-                        problems.append(
-                            f"{cid}: changes {n} settings, above the {lv['name']} limit {limit}"
-                        )
+                if meta["level"] != lv["name"] or meta["origin"] in NOT_PAIRWISE:
+                    continue
+                if packed(meta):
+                    continue
+                if first and meta["origin"] == "low-change" and needs_capability(row):
+                    problems.append(
+                        f"{cid}: a low-change case of {lv['name']} needs a harness capability"
+                    )
+                n = change_count(spec, base, row, groups)
+                if n > limit and (not escalate or meta.get("filled_from")):
+                    problems.append(
+                        f"{cid}: changes {n} settings, above the {lv['name']} limit {limit}"
+                    )
         for cid, meta, row in cases:
             if (
                 meta["level"] != lv["name"]
@@ -340,15 +365,22 @@ def main(argv=None) -> int:
         ids = model_ids | {rid for rid, _ in level_nogoods}
 
         covered = {}
+        held_any = set()
         most = 0
         for _, meta, row in mine:
             n = change_count(spec, base, row, groups)
+            pairs_here = list(row_pairs(spec, row, groups))
+            held_any.update(pairs_here)
+            if first and needs_capability(row):
+                continue
             if limit is None or escalate or n <= limit:
-                for p in row_pairs(spec, row, groups):
+                for p in pairs_here:
                     if n < covered.get(p, n + 1):
                         covered[p] = n
             if limit is not None and meta["origin"] not in NOT_PAIRWISE:
                 most = max(most, n)
+        need_ids = {rid for rid, _ in spec.need_nogoods}
+        no_need = 0
         combos = ""
         for gid in groups:
             seen = {f[1] for p in covered for f in p if f[0] == gid}
@@ -399,12 +431,39 @@ def main(argv=None) -> int:
             ):
                 continue
             fixed = {**assign(f), **assign(g)}
+            if first:
+                spec.nogoods = saved + level_nogoods + spec.need_nogoods
+                free = spec.satisfiable(fixed, ids | need_ids)
+                if not free:
+                    spec.nogoods = saved + level_nogoods
+                    if (f, g) in held_any:
+                        asked += 1
+                    elif spec.satisfiable(fixed, ids):
+                        asked += 1
+                        missing += 1
+                        problems.append(
+                            f"pair {f[0]}={f[1]} + {g[0]}={g[1]} is asked for but in no case up to {lv['name']}"
+                        )
+                    continue
+                no_need += 1
+                if (f, g) not in covered:
+                    asked += 1
+                    missing += 1
+                    problems.append(
+                        f"pair {f[0]}={f[1]} + {g[0]}={g[1]}: a row with no harness need can hold it, "
+                        f"but no such case up to {lv['name']} does"
+                    )
+                    spec.nogoods = saved + level_nogoods
+                    continue
+                ids_now = ids | need_ids
+            else:
+                ids_now = ids
             if (f, g) in covered:
                 asked += 1
                 n = covered[(f, g)]
                 if escalate and n > limit:
                     if spec.satisfiable(
-                        fixed, ids, base=base, max_changes=n - 1, groups=groups
+                        fixed, ids_now, base=base, max_changes=n - 1, groups=groups
                     ):
                         problems.append(
                             f"pair {f[0]}={f[1]} + {g[0]}={g[1]}: its case with the fewest changes "
@@ -412,6 +471,7 @@ def main(argv=None) -> int:
                         )
                     else:
                         need[(f, g)] = n
+                spec.nogoods = saved + level_nogoods
                 continue
             if spec.satisfiable(
                 fixed,
@@ -440,12 +500,15 @@ def main(argv=None) -> int:
                 for cid, meta, row in cases
                 if meta["level"] == lv["name"]
                 and meta["origin"] not in NOT_PAIRWISE
+                and not packed(meta)
                 and tuple(row[a] for a in spec.axes) not in lower
                 and change_count(spec, base, row, groups) > limit
             ]
             only = 0
             changes_of, holders = {}, {}
             for _, _, r in mine:
+                if first and needs_capability(r):
+                    continue
                 k = tuple(r[a] for a in spec.axes)
                 if k in changes_of:
                     continue
@@ -491,9 +554,14 @@ def main(argv=None) -> int:
             )
         else:
             within = f", at most {most} changes per case (limit {limit})"
+        first_note = (
+            f"; bundle_first: {no_need} pairs a row with no harness need can hold, all in such rows"
+            if first and not missing
+            else ""
+        )
         print(
             f"{status} level {lv['name']}: {len(mine)} cases up to this level, "
-            f"{asked} pairs asked for, {missing} missing{within}{combos}{tier_note}"
+            f"{asked} pairs asked for, {missing} missing{within}{combos}{tier_note}{first_note}"
         )
         for p in problems[:MAX_LISTED]:
             print(f"  {p}")

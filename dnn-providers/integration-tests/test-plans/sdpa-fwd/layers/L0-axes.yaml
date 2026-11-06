@@ -837,7 +837,7 @@ axes:
       - {id: present, meaning: "K and V are both paged"}
       - {id: k_only, meaning: "only K is paged; V is stored whole. Added 2026-10-29"}
       - {id: v_only, meaning: "only V is paged; K is stored whole. Added 2026-10-29"}
-    notes: "Paging is a storage form of each tensor, so K and V can be paged separately (rocm-libraries @ 00d9c566bea SdpaFwdNode.hpp:308-310: 'K or V may be paged alone, with its own block size')."
+    notes: "A ragged offset can be stated on a paged K or V: the request names a start position for tokens that pages hold. Layer 1 D-RAGGED-NOT-THROUGH-PAGES removes it: no specification says whether the position counts tokens before or after paging, or whether a length counts tokens or pages. Paging is a storage form of each tensor, so K and V can be paged separately (rocm-libraries @ 00d9c566bea SdpaFwdNode.hpp:308-310: 'K or V may be paged alone, with its own block size')."
     source: "axis doc § 10 'Paged KV cache'"
   - id: page_table_sharing
     kind: child

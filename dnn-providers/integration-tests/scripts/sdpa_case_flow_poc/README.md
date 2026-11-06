@@ -61,7 +61,7 @@ python3 -m sdpa_case_flow_poc.levels \
 ```
 
 The command writes `levels.csv` and `levels-summary.md` to the output folder.
-It takes about 3 minutes. The same inputs always give the same `levels.csv`,
+It takes about 25 minutes. The same inputs always give the same `levels.csv`,
 byte for byte.
 
 ## Check the CSV
@@ -147,7 +147,7 @@ no GPU. The times are what the steps took for the 9,883 bundle rows.
 
 | Step | Tool | GPU | Output | Time |
 |---|---|---|---|---|
-| 1 | `sdpa_case_flow_poc.levels` | no | `levels.csv`, checked against `levels.csv.sha256` | about 3 min |
+| 1 | `sdpa_case_flow_poc.levels` | no | `levels.csv`, checked against `levels.csv.sha256` | about 25 min |
 | 2 | `python3 -m sdpa_case_flow_poc` | no | `class-to-value.json` | seconds |
 | 3 | `bundles/select_rows.py` | no | `selected.csv`, `exclusions.csv`, `summary.json` | under a minute |
 | 4 | CMake | no | `hipdnn_sdpa_case_flow_runner` | depends on the computer |
@@ -231,10 +231,10 @@ The default values are:
 - the descale filter (`--descale-non-fp8-filter`) off.
 
 With these defaults, and an input whose SHA-256 is the one in
-`levels.csv.sha256`, the script checks the counts that it records: 17,969 rows
-in 832 sweeps.
+`levels.csv.sha256`, the script checks the counts that it records: 34,496 rows
+in 1,198 sweeps.
 
-`--no-zero-stride-filter` also selects the 870 zero-stride rows that a bundle can
+`--no-zero-stride-filter` also selects the 54 zero-stride rows that a bundle can
 otherwise express. The data-SDK change that they need (PR #14709) is merged. But
 these rows are left out of this bundle set. Adding them is planned as a
 follow-up change.

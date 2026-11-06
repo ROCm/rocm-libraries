@@ -10,6 +10,15 @@ axes of one group (a super-setting) count as one change when any of them counts.
 Features: a feature is (key, value). For a plain axis the key is the axis and the value its value;
 for a group the key is the group id and the value the tuple of its axes' values (None for an
 inactive child), in the group's axis order.
+
+Plain alternatives (model generator_hints.plain_when): in a row that matches an entry's `when`, the
+entry's values count as no change from the base either. The search decides the `when` axes first,
+then tries such a value before the base value. A solver that forbids the `when` values (bundle_first
+low-change rows) never applies them.
+
+Value order: among values of equal cost, a value with no harness need (model `harness_needs`) comes
+first. A need with a `when` condition counts only in a row that matches it; the search decides the
+condition's axes first.
 """
 
 from __future__ import annotations
@@ -18,23 +27,71 @@ import random
 
 from .model import Model
 from .pairs import axis_pos, make_pair
-from .solver import Solver
+from .solver import Component, Solver
 
 
-def counts_as_change(base: dict, axis: str, value) -> bool:
-    return base[axis] is not None and value is not None and value != base[axis]
+class Plain:
+    """Values that count as no change from the base in a row that matches a condition."""
+
+    def __init__(self, entries):
+        self.entries = list(entries)
+        self.of = {}
+        for when, values in self.entries:
+            for a, v in values.items():
+                self.of.setdefault(a, []).append((when, v))
+        self.cond_axes = {a for when, _ in self.entries for a in when}
+
+    def links(self) -> list:
+        """Axis sets that the search must decide together."""
+        return [set(when) | set(values) for when, values in self.entries]
+
+    def free(self, axis: str, value, row: dict):
+        """True when `value` is plain for `axis` in `row`, False when not, None when a `when` axis
+        is not in `row` yet."""
+        unknown = False
+        for when, v in self.of.get(axis, ()):
+            if v != value:
+                continue
+            state = True
+            for a, vs in when.items():
+                if a not in row:
+                    state = None
+                elif row[a] not in vs:
+                    state = False
+                    break
+            if state:
+                return True
+            if state is None:
+                unknown = True
+        return None if unknown else False
+
+
+def counts_as_change(
+    base: dict, axis: str, value, row: dict | None = None, plain: Plain | None = None
+) -> bool:
+    """A value counts when it differs from the base and is not plain in `row`. An undecided
+    condition counts the value as plain, so the count is a lower bound until it is decided.
+    """
+    if base[axis] is None or value is None or value == base[axis]:
+        return False
+    if plain is None or axis not in plain.of:
+        return True
+    return plain.free(axis, value, row or {}) is False
 
 
 def change_count(
     model: Model, base: dict, row: dict, groups: dict | None = None
 ) -> int:
     """`groups` maps a group id to its axes; each group counts at most once."""
+    plain = Plain(model.plain_when)
     groups = groups or {}
     grouped = {a for axes in groups.values() for a in axes}
-    n = sum(counts_as_change(base, a, row[a]) for a in model.axes if a not in grouped)
-    n += sum(
-        any(counts_as_change(base, a, row[a]) for a in axes) for axes in groups.values()
-    )
+
+    def changed(a):
+        return counts_as_change(base, a, row[a], row, plain)
+
+    n = sum(changed(a) for a in model.axes if a not in grouped)
+    n += sum(any(changed(a) for a in axes) for axes in groups.values())
     return n
 
 
@@ -95,19 +152,41 @@ class LowChange:
         self.max_changes = max_changes
         self.groups = dict(groups or {})
         self.group_of = {a: g for g, axes in self.groups.items() for a in axes}
+        self.plain = plain = Plain(model.plain_when)
+        need_links = [
+            {a, *w} for a, per in model.harness_need_when.items() for w in per.values()
+        ]
+        self.components, self.comp_of = _merged_components(
+            solver, self.plain.links() + need_links
+        )
         for g, axes in self.groups.items():
-            if len({solver.comp_of[a] for a in axes}) > 1:
+            if len({self.comp_of[a] for a in axes}) > 1:
                 raise ValueError(
                     f"group {g}: its axes lie in several solver components; link them in one"
                 )
+        when = model.harness_need_when
+        self._need = {
+            a: {v: 1 for v in per if v not in when.get(a, {})}
+            for a, per in model.harness_needs.items()
+        }
+        self._need_when = when
+        self._first_axes = plain.cond_axes | {
+            x for per in when.values() for w in per.values() for x in w
+        }
+        # Per component, each conjunction as (axes whose base value it does not forbid, which must
+        # be assigned a forbidden value; the other axes).
         self._conjs = {}
-        for comp in solver.components:
+        for comp in self.components:
             seen, conjs = set(), []
             for a in comp.axes:
                 for c in comp.conjs_by_axis[a]:
                     if id(c) not in seen and c and all(c.values()):
                         seen.add(id(c))
-                        conjs.append(c)
+                        must = tuple(
+                            (x, vs) for x, vs in c.items() if base[x] not in vs
+                        )
+                        rest = tuple((x, vs) for x, vs in c.items() if base[x] in vs)
+                        conjs.append((must, rest))
             self._conjs[id(comp)] = conjs
         self._cache = {}
 
@@ -116,7 +195,7 @@ class LowChange:
         budget = self.max_changes if budget is None else budget
         by_comp = {}
         for a, v in fixed.items():
-            by_comp.setdefault(self.solver.comp_of[a], {})[a] = v
+            by_comp.setdefault(self.comp_of[a], {})[a] = v
         row = {a: self.base[a] for a in self.model.axes}
         spent = 0
         for ci in sorted(by_comp):
@@ -138,18 +217,27 @@ class LowChange:
         base value, and that only a counted change can leave; the conjunctions counted share no unit.
         """
         base = self.base
-        for conj in self._conjs[id(comp)]:
+        plain = self.plain
+        for must, rest in self._conjs[id(comp)]:
+            if any(asg.get(x) not in vs for x, vs in must):
+                continue
             units = set()
-            for x, vs in conj.items():
+            for x, vs in rest:
                 if x in asg:
                     if asg[x] not in vs:
                         break
                     continue
-                b = base[x]
                 d = doms[x]
-                if b is None or b not in vs or b not in d:
+                if base[x] not in d:
                     break
-                if any(y not in vs and not counts_as_change(base, x, y) for y in d):
+                if x in plain.of:
+                    if any(
+                        y not in vs and not counts_as_change(base, x, y, asg, plain)
+                        for y in d
+                    ):
+                        break
+                elif None in d:
+                    # Off a plain axis, only an inactive child leaves the conjunction uncounted.
                     break
                 units.add(self.group_of.get(x, x))
             else:
@@ -174,7 +262,7 @@ class LowChange:
                 first = best_cost + 1
             else:
                 return (sol, best_cost) if best_cost <= budget else None
-        comp = self.solver.components[ci]
+        comp = self.components[ci]
         doms = {}
         for a in comp.axes:
             dom = self.solver.domain(a)
@@ -185,8 +273,15 @@ class LowChange:
                 doms[a] = [part[a]]
             else:
                 b = self.base[a]
+                need = self._need.get(a, {})
                 doms[a] = sorted(
-                    dom, key=lambda x: (x != b, x is not None, dom.index(x))
+                    dom,
+                    key=lambda x: (
+                        x != b,
+                        need.get(x, 0),
+                        x is not None,
+                        dom.index(x),
+                    ),
                 )
         for bound in range(first, budget + 1):
             sol, _ = self._dfs(comp, {}, doms, 0, bound, frozenset(), {})
@@ -214,21 +309,27 @@ class LowChange:
         if len(asg) == len(comp.axes):
             return dict(asg), None
         base = self.base
+        plain = self.plain
         lb = cost
         # A unit is an axis, or a group (its axes change together for one count).
         used = set(changed_groups)
-        # Branch first on an axis that cannot keep its base value, then on the smallest domain.
+        # Branch first on an open `when` axis of a plain alternative or of a conditional need,
+        # then on an axis that cannot keep its base value, then on the smallest domain.
         best, bestn = None, None
         for a in comp.axes:
             if a in asg:
                 continue
             d = doms[a]
-            if all(counts_as_change(base, a, x) for x in d):
+            if a in plain.of:
+                forced = all(counts_as_change(base, a, x, asg, plain) for x in d)
+            else:
+                forced = base[a] is not None and base[a] not in d and None not in d
+            if forced:
                 unit = self.group_of.get(a, a)
                 if unit not in used:
                     used.add(unit)
                     lb += 1
-            n = (base[a] in d, len(d))
+            n = (a not in self._first_axes, base[a] in d, len(d))
             if best is None or n < bestn:
                 best, bestn = a, n
         if lb > bound:
@@ -238,8 +339,27 @@ class LowChange:
             return None, set(asg)
         g = self.group_of.get(best)
         conflict = set(why.get(best, ()))
-        for v in doms[best]:
-            changed = counts_as_change(base, best, v)
+        values = doms[best]
+        if best in plain.of:
+            values = sorted(
+                values,
+                key=lambda x: (
+                    counts_as_change(base, best, x, asg, plain),
+                    not plain.free(best, x, asg),
+                ),
+            )
+        cond_needs = self._need_when.get(best)
+        if cond_needs:
+            values = sorted(
+                values,
+                key=lambda x: (
+                    counts_as_change(base, best, x, asg, plain),
+                    x in cond_needs
+                    and all(asg.get(y) in vs for y, vs in cond_needs[x].items()),
+                ),
+            )
+        for v in values:
+            changed = counts_as_change(base, best, v, asg, plain)
             groups_now = changed_groups
             if g is not None and changed:
                 changed = g not in changed_groups
@@ -263,6 +383,39 @@ class LowChange:
                 conflict |= sub - {best}
             del asg[best]
         return None, conflict
+
+
+def _merged_components(solver: Solver, links: list):
+    """The solver's components, with the components of each axis set in `links` joined into one."""
+    n = len(solver.components)
+    uf = list(range(n))
+
+    def find(x):
+        while uf[x] != x:
+            uf[x] = uf[uf[x]]
+            x = uf[x]
+        return x
+
+    for axes in links:
+        cis = sorted({solver.comp_of[a] for a in axes})
+        for ci in cis[1:]:
+            uf[find(ci)] = find(cis[0])
+    members = {}
+    for ci in range(n):
+        members.setdefault(find(ci), []).append(ci)
+    comps, comp_of = [], {}
+    for root in sorted(members):
+        cis = members[root]
+        if len(cis) == 1:
+            comp = solver.components[cis[0]]
+        else:
+            comp = Component(axes=[a for ci in cis for a in solver.components[ci].axes])
+            for ci in cis:
+                comp.conjs_by_axis.update(solver.components[ci].conjs_by_axis)
+        for a in comp.axes:
+            comp_of[a] = len(comps)
+        comps.append(comp)
+    return comps, comp_of
 
 
 def lowchange_pairwise(

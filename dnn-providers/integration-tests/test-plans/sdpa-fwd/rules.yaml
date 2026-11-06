@@ -224,7 +224,7 @@ rules:
     form: exclusion
     basis: consistency
     reason: "A page size between one token and a whole sequence needs a key/value length of at least two."
-    forbid: {seq_kv: [one], page_size: [partial]}
+    forbid: {seq_kv: [one], page_size: [partial, large]}
     source: "no whole number lies strictly between 1 and 1"
     adapted: "seq_kv class zero dropped (F-EXTENT-NONZERO)."
 
@@ -262,23 +262,23 @@ rules:
       - {batch_size: [one], v_head_sharing: [mqa], seq_kv: [one], head_dim_v: [d1], strides_v: [zero_broadcast, negative, self_overlapping]}
       - {batch_size: [one], q_heads: [one], seq_q: [one], head_dim_v: [d1], strides_o: [negative]}
       - {batch_size: [one], q_heads: [one], seq_q: [one], strides_stats: [negative]}
-      - {batch_size: [one], q_heads: [one], seq_q: [one], head_dim_qk: [d1, d64, d128, d192, d256], strides_q: [self_overlapping]}
+      - {batch_size: [one], q_heads: [one], seq_q: [one], head_dim_qk: [d1, d64, d96, d128, d192, d256, d512, d576], strides_q: [self_overlapping]}
       - {batch_size: [one], q_heads: [one], seq_q: [many], head_dim_qk: [d1], strides_q: [self_overlapping]}
       - {batch_size: [one], q_heads: [many], seq_q: [one], head_dim_qk: [d1], strides_q: [self_overlapping]}
       - {batch_size: [many], q_heads: [one], seq_q: [one], head_dim_qk: [d1], strides_q: [self_overlapping]}
-      - {batch_size: [one], q_heads: [one], k_head_sharing: [mha], seq_kv: [one], head_dim_qk: [d1, d64, d128, d192, d256], paged_kv: [absent], strides_k: [self_overlapping]}
-      - {batch_size: [one], q_heads: [one], k_head_sharing: [mha], seq_kv: [one], head_dim_qk: [d1, d64, d128, d192, d256], paged_kv: [present, k_only], page_size: [one_token, whole_sequence], strides_k: [self_overlapping]}
+      - {batch_size: [one], q_heads: [one], k_head_sharing: [mha], seq_kv: [one], head_dim_qk: [d1, d64, d96, d128, d192, d256, d512, d576], paged_kv: [absent], strides_k: [self_overlapping]}
+      - {batch_size: [one], q_heads: [one], k_head_sharing: [mha], seq_kv: [one], head_dim_qk: [d1, d64, d96, d128, d192, d256, d512, d576], paged_kv: [present, k_only], page_size: [one_token, whole_sequence], strides_k: [self_overlapping]}
       - {batch_size: [one], q_heads: [one], k_head_sharing: [mha], seq_kv: [one, many], head_dim_qk: [d1], paged_kv: [v_only], max_seq_len_kv: [equal, larger], strides_k: [self_overlapping]}
-      - {batch_size: [one], q_heads: [one], k_head_sharing: [mha], seq_kv: [one], head_dim_qk: [d64, d128, d192, d256], paged_kv: [v_only], max_seq_len_kv: [equal], strides_k: [self_overlapping]}
+      - {batch_size: [one], q_heads: [one], k_head_sharing: [mha], seq_kv: [one], head_dim_qk: [d64, d96, d128, d192, d256, d512, d576], paged_kv: [v_only], max_seq_len_kv: [equal], strides_k: [self_overlapping]}
       - {batch_size: [one], q_heads: [one], k_head_sharing: [mha], seq_kv: [many], head_dim_qk: [d1], paged_kv: [absent], strides_k: [self_overlapping]}
       - {batch_size: [one], q_heads: [one], k_head_sharing: [mha], seq_kv: [many], head_dim_qk: [d1], paged_kv: [present, k_only], page_size: [one_token, whole_sequence], strides_k: [self_overlapping]}
       - {batch_size: [one], q_heads: [many], k_head_sharing: [mha, gqa, mqa], seq_kv: [one], head_dim_qk: [d1], paged_kv: [absent], strides_k: [self_overlapping]}
       - {batch_size: [one], q_heads: [many], k_head_sharing: [mha, gqa, mqa], seq_kv: [one], head_dim_qk: [d1], paged_kv: [present, k_only], page_size: [one_token, whole_sequence], strides_k: [self_overlapping]}
       - {batch_size: [one], q_heads: [many], k_head_sharing: [mha, gqa, mqa], seq_kv: [one], head_dim_qk: [d1], paged_kv: [v_only], max_seq_len_kv: [equal], strides_k: [self_overlapping]}
       - {batch_size: [one], q_heads: [many], k_head_sharing: [mqa], seq_kv: [one, many], head_dim_qk: [d1], paged_kv: [v_only], max_seq_len_kv: [larger], strides_k: [self_overlapping]}
-      - {batch_size: [one], q_heads: [many], k_head_sharing: [mqa], seq_kv: [one], head_dim_qk: [d64, d128, d192, d256], paged_kv: [absent], strides_k: [self_overlapping]}
-      - {batch_size: [one], q_heads: [many], k_head_sharing: [mqa], seq_kv: [one], head_dim_qk: [d64, d128, d192, d256], paged_kv: [present, k_only], page_size: [one_token, whole_sequence], strides_k: [self_overlapping]}
-      - {batch_size: [one], q_heads: [many], k_head_sharing: [mqa], seq_kv: [one], head_dim_qk: [d64, d128, d192, d256], paged_kv: [v_only], max_seq_len_kv: [equal], strides_k: [self_overlapping]}
+      - {batch_size: [one], q_heads: [many], k_head_sharing: [mqa], seq_kv: [one], head_dim_qk: [d64, d96, d128, d192, d256, d512, d576], paged_kv: [absent], strides_k: [self_overlapping]}
+      - {batch_size: [one], q_heads: [many], k_head_sharing: [mqa], seq_kv: [one], head_dim_qk: [d64, d96, d128, d192, d256, d512, d576], paged_kv: [present, k_only], page_size: [one_token, whole_sequence], strides_k: [self_overlapping]}
+      - {batch_size: [one], q_heads: [many], k_head_sharing: [mqa], seq_kv: [one], head_dim_qk: [d64, d96, d128, d192, d256, d512, d576], paged_kv: [v_only], max_seq_len_kv: [equal], strides_k: [self_overlapping]}
       - {batch_size: [one], q_heads: [many], k_head_sharing: [mqa], seq_kv: [many], head_dim_qk: [d1], paged_kv: [absent], strides_k: [self_overlapping]}
       - {batch_size: [one], q_heads: [many], k_head_sharing: [mqa], seq_kv: [many], head_dim_qk: [d1], paged_kv: [present, k_only], page_size: [one_token, whole_sequence], strides_k: [self_overlapping]}
       - {batch_size: [one], q_heads: [many], k_head_sharing: [mqa], seq_kv: [many], head_dim_qk: [d1], paged_kv: [v_only], max_seq_len_kv: [equal], strides_k: [self_overlapping]}
@@ -290,12 +290,12 @@ rules:
       - {batch_size: [many], q_heads: [many], k_head_sharing: [mqa], seq_kv: [one], head_dim_qk: [d1], paged_kv: [present, k_only], page_size: [one_token, whole_sequence], strides_k: [self_overlapping]}
       - {batch_size: [many], q_heads: [many], k_head_sharing: [mqa], seq_kv: [one], head_dim_qk: [d1], paged_kv: [v_only], max_seq_len_kv: [equal], strides_k: [self_overlapping]}
       - {batch_size: [many], q_heads: [many], k_head_sharing: [mqa], seq_kv: [many], head_dim_qk: [d1], paged_kv: [present, k_only], page_size: [one_token], strides_k: [self_overlapping]}
-      - {batch_size: [one], q_heads: [one], v_head_sharing: [mha], seq_kv: [one], head_dim_v: [d1, d64, d128, d192, d256], paged_kv: [absent], strides_v: [self_overlapping]}
+      - {batch_size: [one], q_heads: [one], v_head_sharing: [mha], seq_kv: [one], head_dim_v: [d1, d64, d96, d128, d192, d256, d512, d576], paged_kv: [absent], strides_v: [self_overlapping]}
       - {batch_size: [one], q_heads: [one], v_head_sharing: [mha], seq_kv: [one], head_dim_v: [d1], paged_kv: [present], page_size: [one_token, whole_sequence], page_size_k_vs_v: [equal, differ], strides_v: [self_overlapping]}
       - {batch_size: [one], q_heads: [one], v_head_sharing: [mha], seq_kv: [one, many], head_dim_v: [d1], paged_kv: [k_only], max_seq_len_kv: [equal, larger], strides_v: [self_overlapping]}
-      - {batch_size: [one], q_heads: [one], v_head_sharing: [mha], seq_kv: [one], head_dim_v: [d1, d64, d128, d192, d256], paged_kv: [v_only], page_size: [one_token, whole_sequence], strides_v: [self_overlapping]}
-      - {batch_size: [one], q_heads: [one], v_head_sharing: [mha], seq_kv: [one], head_dim_v: [d64, d128, d192, d256], paged_kv: [present], page_size: [one_token, whole_sequence], page_size_k_vs_v: [equal], strides_v: [self_overlapping]}
-      - {batch_size: [one], q_heads: [one], v_head_sharing: [mha], seq_kv: [one], head_dim_v: [d64, d128, d192, d256], paged_kv: [k_only], max_seq_len_kv: [equal], strides_v: [self_overlapping]}
+      - {batch_size: [one], q_heads: [one], v_head_sharing: [mha], seq_kv: [one], head_dim_v: [d1, d64, d96, d128, d192, d256, d512, d576], paged_kv: [v_only], page_size: [one_token, whole_sequence], strides_v: [self_overlapping]}
+      - {batch_size: [one], q_heads: [one], v_head_sharing: [mha], seq_kv: [one], head_dim_v: [d64, d96, d128, d192, d256, d512, d576], paged_kv: [present], page_size: [one_token, whole_sequence], page_size_k_vs_v: [equal], strides_v: [self_overlapping]}
+      - {batch_size: [one], q_heads: [one], v_head_sharing: [mha], seq_kv: [one], head_dim_v: [d64, d96, d128, d192, d256, d512, d576], paged_kv: [k_only], max_seq_len_kv: [equal], strides_v: [self_overlapping]}
       - {batch_size: [one], q_heads: [one], v_head_sharing: [mha], seq_kv: [many], head_dim_v: [d1], paged_kv: [absent], strides_v: [self_overlapping]}
       - {batch_size: [one], q_heads: [one], v_head_sharing: [mha], seq_kv: [many], head_dim_v: [d1], paged_kv: [present], page_size: [one_token, whole_sequence], page_size_k_vs_v: [equal], strides_v: [self_overlapping]}
       - {batch_size: [one], q_heads: [one], v_head_sharing: [mha], seq_kv: [many], head_dim_v: [d1], paged_kv: [present], page_size: [whole_sequence], page_size_k_vs_v: [differ], strides_v: [self_overlapping]}
@@ -306,10 +306,10 @@ rules:
       - {batch_size: [one], q_heads: [many], v_head_sharing: [mha, gqa, mqa], seq_kv: [one], head_dim_v: [d1], paged_kv: [v_only], page_size: [one_token, whole_sequence], strides_v: [self_overlapping]}
       - {batch_size: [one], q_heads: [many], v_head_sharing: [mqa], seq_kv: [one], head_dim_v: [d1], paged_kv: [present], page_size: [one_token, whole_sequence], page_size_k_vs_v: [equal, differ], strides_v: [self_overlapping]}
       - {batch_size: [one], q_heads: [many], v_head_sharing: [mqa], seq_kv: [one, many], head_dim_v: [d1], paged_kv: [k_only], max_seq_len_kv: [larger], strides_v: [self_overlapping]}
-      - {batch_size: [one], q_heads: [many], v_head_sharing: [mqa], seq_kv: [one], head_dim_v: [d64, d128, d192, d256], paged_kv: [absent], strides_v: [self_overlapping]}
-      - {batch_size: [one], q_heads: [many], v_head_sharing: [mqa], seq_kv: [one], head_dim_v: [d64, d128, d192, d256], paged_kv: [present], page_size: [one_token, whole_sequence], page_size_k_vs_v: [equal], strides_v: [self_overlapping]}
-      - {batch_size: [one], q_heads: [many], v_head_sharing: [mqa], seq_kv: [one], head_dim_v: [d64, d128, d192, d256], paged_kv: [k_only], max_seq_len_kv: [equal], strides_v: [self_overlapping]}
-      - {batch_size: [one], q_heads: [many], v_head_sharing: [mqa], seq_kv: [one], head_dim_v: [d64, d128, d192, d256], paged_kv: [v_only], page_size: [one_token, whole_sequence], strides_v: [self_overlapping]}
+      - {batch_size: [one], q_heads: [many], v_head_sharing: [mqa], seq_kv: [one], head_dim_v: [d64, d96, d128, d192, d256, d512, d576], paged_kv: [absent], strides_v: [self_overlapping]}
+      - {batch_size: [one], q_heads: [many], v_head_sharing: [mqa], seq_kv: [one], head_dim_v: [d64, d96, d128, d192, d256, d512, d576], paged_kv: [present], page_size: [one_token, whole_sequence], page_size_k_vs_v: [equal], strides_v: [self_overlapping]}
+      - {batch_size: [one], q_heads: [many], v_head_sharing: [mqa], seq_kv: [one], head_dim_v: [d64, d96, d128, d192, d256, d512, d576], paged_kv: [k_only], max_seq_len_kv: [equal], strides_v: [self_overlapping]}
+      - {batch_size: [one], q_heads: [many], v_head_sharing: [mqa], seq_kv: [one], head_dim_v: [d64, d96, d128, d192, d256, d512, d576], paged_kv: [v_only], page_size: [one_token, whole_sequence], strides_v: [self_overlapping]}
       - {batch_size: [one], q_heads: [many], v_head_sharing: [mqa], seq_kv: [many], head_dim_v: [d1], paged_kv: [absent], strides_v: [self_overlapping]}
       - {batch_size: [one], q_heads: [many], v_head_sharing: [mqa], seq_kv: [many], head_dim_v: [d1], paged_kv: [present], page_size: [one_token, whole_sequence], page_size_k_vs_v: [equal], strides_v: [self_overlapping]}
       - {batch_size: [one], q_heads: [many], v_head_sharing: [mqa], seq_kv: [many], head_dim_v: [d1], paged_kv: [present], page_size: [whole_sequence], page_size_k_vs_v: [differ], strides_v: [self_overlapping]}
@@ -400,6 +400,18 @@ rules:
     adapted: "batch class zero dropped (F-EXTENT-NONZERO)."
     evidence: inferred
 
+  - id: D-RAGGED-NOT-THROUGH-PAGES
+    kind: definition
+    form: exclusion
+    basis: meaning
+    reason: "No specification defines tokens counted through pages: a ragged start position on a paged K or V could count tokens from an origin before paging or after it, and a length could count tokens or pages, so the request has no one meaning."
+    forbid_any:
+      - {batch_packing: [ragged, ragged_kv_side], paged_kv: [present, k_only]}
+      - {batch_packing: [ragged, ragged_kv_side], v_packing: [as_k, own_starts], paged_kv: [v_only]}
+    source: "Layer 1 D-RAGGED-NOT-THROUGH-PAGES; the references decline the request too (@ d4e20d2655f RaggedSdpaDensify.hpp:196-206: a page table on K or V together with a ragged offset on the same tensor)"
+    note: "A ragged Q over a paged K and V is not touched: the offsets and the pages belong to different tensors. A dense V beside a ragged K (v_packing padded) can be paged."
+    evidence: read in code
+
   - id: D-REL-O-OWN-STARTS-NOT-SHARED
     kind: definition
     form: exclusion
@@ -480,16 +492,25 @@ rules:
       - {tensor_overlap: [inputs_overlap], head_dim_qk: [d1], head_dim_v: [d1], dtype_k_vs_q: [differs], dtype_v_vs_q: [same]}
       - {tensor_overlap: [inputs_overlap], head_dim_qk: [d64], head_dim_v: [d1, d64], dtype_k_vs_q: [same], dtype_v_vs_q: [differs]}
       - {tensor_overlap: [inputs_overlap], head_dim_qk: [d64], head_dim_v: [d1, d64], dtype_k_vs_q: [differs], dtype_v_vs_q: [same]}
-      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d128], head_dim_v: [d1, d64, d128], dtype_k_vs_q: [same], dtype_v_vs_q: [differs]}
-      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d128], head_dim_v: [d1, d64, d128], dtype_k_vs_q: [differs], dtype_v_vs_q: [same]}
-      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d192], head_dim_v: [d1, d64, d128, d192], dtype_k_vs_q: [same], dtype_v_vs_q: [differs]}
-      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d192], head_dim_v: [d1, d64, d128, d192], dtype_k_vs_q: [differs], dtype_v_vs_q: [same]}
-      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d256], head_dim_v: [d1, d64, d128, d192, d256], dtype_k_vs_q: [same], dtype_v_vs_q: [differs]}
-      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d256], head_dim_v: [d1, d64, d128, d192, d256], dtype_k_vs_q: [differs], dtype_v_vs_q: [same]}
-      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d1], head_dim_v: [d64, d128, d192, d256], dtype_k_vs_q: [differs]}
-      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d64], head_dim_v: [d128, d192, d256], dtype_k_vs_q: [differs]}
-      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d128], head_dim_v: [d192, d256], dtype_k_vs_q: [differs]}
-      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d192], head_dim_v: [d256], dtype_k_vs_q: [differs]}
+      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d96], head_dim_v: [d1, d64, d96], dtype_k_vs_q: [same], dtype_v_vs_q: [differs]}
+      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d96], head_dim_v: [d1, d64, d96], dtype_k_vs_q: [differs], dtype_v_vs_q: [same]}
+      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d128], head_dim_v: [d1, d64, d96, d128], dtype_k_vs_q: [same], dtype_v_vs_q: [differs]}
+      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d128], head_dim_v: [d1, d64, d96, d128], dtype_k_vs_q: [differs], dtype_v_vs_q: [same]}
+      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d192], head_dim_v: [d1, d64, d96, d128, d192], dtype_k_vs_q: [same], dtype_v_vs_q: [differs]}
+      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d192], head_dim_v: [d1, d64, d96, d128, d192], dtype_k_vs_q: [differs], dtype_v_vs_q: [same]}
+      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d256], head_dim_v: [d1, d64, d96, d128, d192, d256], dtype_k_vs_q: [same], dtype_v_vs_q: [differs]}
+      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d256], head_dim_v: [d1, d64, d96, d128, d192, d256], dtype_k_vs_q: [differs], dtype_v_vs_q: [same]}
+      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d512], head_dim_v: [d1, d64, d96, d128, d192, d256, d512], dtype_k_vs_q: [same], dtype_v_vs_q: [differs]}
+      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d512], head_dim_v: [d1, d64, d96, d128, d192, d256, d512], dtype_k_vs_q: [differs], dtype_v_vs_q: [same]}
+      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d576], head_dim_v: [d1, d64, d96, d128, d192, d256, d512, d576], dtype_k_vs_q: [same], dtype_v_vs_q: [differs]}
+      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d576], head_dim_v: [d1, d64, d96, d128, d192, d256, d512, d576], dtype_k_vs_q: [differs], dtype_v_vs_q: [same]}
+      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d1], head_dim_v: [d64, d96, d128, d192, d256, d512, d576], dtype_k_vs_q: [differs]}
+      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d64], head_dim_v: [d96, d128, d192, d256, d512, d576], dtype_k_vs_q: [differs]}
+      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d96], head_dim_v: [d128, d192, d256, d512, d576], dtype_k_vs_q: [differs]}
+      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d128], head_dim_v: [d192, d256, d512, d576], dtype_k_vs_q: [differs]}
+      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d192], head_dim_v: [d256, d512, d576], dtype_k_vs_q: [differs]}
+      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d256], head_dim_v: [d512, d576], dtype_k_vs_q: [differs]}
+      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d512], head_dim_v: [d576], dtype_k_vs_q: [differs]}
     source: "class_to_value.tensor_overlap.inputs_overlap; the harness refuses a view whose data type differs from its owner's"
     adapted: "Layer 1 states the rule over dtype_q, dtype_k, dtype_v and head_dim_v_vs_qk. Here V inside K needs dtype_v_vs_q = dtype_k_vs_q: each 'differs' maps to one format per Q format, also after the by_arch swap (class_to_value.dtype_relation), so equal relations mean equal formats. K inside Q needs dtype_k_vs_q same. The head-size relation is written over the head_dim_qk x head_dim_v value pairs."
     evidence: inferred
@@ -508,34 +529,58 @@ rules:
       - {tensor_overlap: [inputs_overlap], head_dim_qk: [d64], head_dim_v: [d1, d64], dim_order_v: [bhsd, bshd, other_permutation, bsdh]}
       - {tensor_overlap: [inputs_overlap], head_dim_qk: [d64], head_dim_v: [d1, d64], strides_k: [inherited]}
       - {tensor_overlap: [inputs_overlap], head_dim_qk: [d64], head_dim_v: [d1, d64], dim_order_k: [inherited]}
-      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d128], head_dim_v: [d1, d64, d128], strides_v: [packed, padded, non_contiguous_view, zero_broadcast, negative, self_overlapping, head_dim_strided]}
-      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d128], head_dim_v: [d1, d64, d128], dim_order_v: [bhsd, bshd, other_permutation, bsdh]}
-      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d128], head_dim_v: [d1, d64, d128], strides_k: [inherited]}
-      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d128], head_dim_v: [d1, d64, d128], dim_order_k: [inherited]}
-      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d192], head_dim_v: [d1, d64, d128, d192], strides_v: [packed, padded, non_contiguous_view, zero_broadcast, negative, self_overlapping, head_dim_strided]}
-      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d192], head_dim_v: [d1, d64, d128, d192], dim_order_v: [bhsd, bshd, other_permutation, bsdh]}
-      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d192], head_dim_v: [d1, d64, d128, d192], strides_k: [inherited]}
-      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d192], head_dim_v: [d1, d64, d128, d192], dim_order_k: [inherited]}
-      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d256], head_dim_v: [d1, d64, d128, d192, d256], strides_v: [packed, padded, non_contiguous_view, zero_broadcast, negative, self_overlapping, head_dim_strided]}
-      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d256], head_dim_v: [d1, d64, d128, d192, d256], dim_order_v: [bhsd, bshd, other_permutation, bsdh]}
-      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d256], head_dim_v: [d1, d64, d128, d192, d256], strides_k: [inherited]}
-      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d256], head_dim_v: [d1, d64, d128, d192, d256], dim_order_k: [inherited]}
-      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d1], head_dim_v: [d64, d128, d192, d256], strides_k: [packed, padded, non_contiguous_view, zero_broadcast, negative, self_overlapping, head_dim_strided]}
-      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d1], head_dim_v: [d64, d128, d192, d256], dim_order_k: [bhsd, bshd, other_permutation, bsdh]}
-      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d1], head_dim_v: [d64, d128, d192, d256], strides_v: [inherited]}
-      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d1], head_dim_v: [d64, d128, d192, d256], dim_order_v: [inherited]}
-      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d64], head_dim_v: [d128, d192, d256], strides_k: [packed, padded, non_contiguous_view, zero_broadcast, negative, self_overlapping, head_dim_strided]}
-      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d64], head_dim_v: [d128, d192, d256], dim_order_k: [bhsd, bshd, other_permutation, bsdh]}
-      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d64], head_dim_v: [d128, d192, d256], strides_v: [inherited]}
-      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d64], head_dim_v: [d128, d192, d256], dim_order_v: [inherited]}
-      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d128], head_dim_v: [d192, d256], strides_k: [packed, padded, non_contiguous_view, zero_broadcast, negative, self_overlapping, head_dim_strided]}
-      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d128], head_dim_v: [d192, d256], dim_order_k: [bhsd, bshd, other_permutation, bsdh]}
-      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d128], head_dim_v: [d192, d256], strides_v: [inherited]}
-      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d128], head_dim_v: [d192, d256], dim_order_v: [inherited]}
-      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d192], head_dim_v: [d256], strides_k: [packed, padded, non_contiguous_view, zero_broadcast, negative, self_overlapping, head_dim_strided]}
-      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d192], head_dim_v: [d256], dim_order_k: [bhsd, bshd, other_permutation, bsdh]}
-      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d192], head_dim_v: [d256], strides_v: [inherited]}
-      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d192], head_dim_v: [d256], dim_order_v: [inherited]}
+      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d96], head_dim_v: [d1, d64, d96], strides_v: [packed, padded, non_contiguous_view, zero_broadcast, negative, self_overlapping, head_dim_strided]}
+      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d96], head_dim_v: [d1, d64, d96], dim_order_v: [bhsd, bshd, other_permutation, bsdh]}
+      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d96], head_dim_v: [d1, d64, d96], strides_k: [inherited]}
+      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d96], head_dim_v: [d1, d64, d96], dim_order_k: [inherited]}
+      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d128], head_dim_v: [d1, d64, d96, d128], strides_v: [packed, padded, non_contiguous_view, zero_broadcast, negative, self_overlapping, head_dim_strided]}
+      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d128], head_dim_v: [d1, d64, d96, d128], dim_order_v: [bhsd, bshd, other_permutation, bsdh]}
+      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d128], head_dim_v: [d1, d64, d96, d128], strides_k: [inherited]}
+      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d128], head_dim_v: [d1, d64, d96, d128], dim_order_k: [inherited]}
+      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d192], head_dim_v: [d1, d64, d96, d128, d192], strides_v: [packed, padded, non_contiguous_view, zero_broadcast, negative, self_overlapping, head_dim_strided]}
+      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d192], head_dim_v: [d1, d64, d96, d128, d192], dim_order_v: [bhsd, bshd, other_permutation, bsdh]}
+      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d192], head_dim_v: [d1, d64, d96, d128, d192], strides_k: [inherited]}
+      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d192], head_dim_v: [d1, d64, d96, d128, d192], dim_order_k: [inherited]}
+      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d256], head_dim_v: [d1, d64, d96, d128, d192, d256], strides_v: [packed, padded, non_contiguous_view, zero_broadcast, negative, self_overlapping, head_dim_strided]}
+      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d256], head_dim_v: [d1, d64, d96, d128, d192, d256], dim_order_v: [bhsd, bshd, other_permutation, bsdh]}
+      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d256], head_dim_v: [d1, d64, d96, d128, d192, d256], strides_k: [inherited]}
+      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d256], head_dim_v: [d1, d64, d96, d128, d192, d256], dim_order_k: [inherited]}
+      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d512], head_dim_v: [d1, d64, d96, d128, d192, d256, d512], strides_v: [packed, padded, non_contiguous_view, zero_broadcast, negative, self_overlapping, head_dim_strided]}
+      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d512], head_dim_v: [d1, d64, d96, d128, d192, d256, d512], dim_order_v: [bhsd, bshd, other_permutation, bsdh]}
+      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d512], head_dim_v: [d1, d64, d96, d128, d192, d256, d512], strides_k: [inherited]}
+      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d512], head_dim_v: [d1, d64, d96, d128, d192, d256, d512], dim_order_k: [inherited]}
+      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d576], head_dim_v: [d1, d64, d96, d128, d192, d256, d512, d576], strides_v: [packed, padded, non_contiguous_view, zero_broadcast, negative, self_overlapping, head_dim_strided]}
+      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d576], head_dim_v: [d1, d64, d96, d128, d192, d256, d512, d576], dim_order_v: [bhsd, bshd, other_permutation, bsdh]}
+      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d576], head_dim_v: [d1, d64, d96, d128, d192, d256, d512, d576], strides_k: [inherited]}
+      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d576], head_dim_v: [d1, d64, d96, d128, d192, d256, d512, d576], dim_order_k: [inherited]}
+      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d1], head_dim_v: [d64, d96, d128, d192, d256, d512, d576], strides_k: [packed, padded, non_contiguous_view, zero_broadcast, negative, self_overlapping, head_dim_strided]}
+      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d1], head_dim_v: [d64, d96, d128, d192, d256, d512, d576], dim_order_k: [bhsd, bshd, other_permutation, bsdh]}
+      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d1], head_dim_v: [d64, d96, d128, d192, d256, d512, d576], strides_v: [inherited]}
+      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d1], head_dim_v: [d64, d96, d128, d192, d256, d512, d576], dim_order_v: [inherited]}
+      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d64], head_dim_v: [d96, d128, d192, d256, d512, d576], strides_k: [packed, padded, non_contiguous_view, zero_broadcast, negative, self_overlapping, head_dim_strided]}
+      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d64], head_dim_v: [d96, d128, d192, d256, d512, d576], dim_order_k: [bhsd, bshd, other_permutation, bsdh]}
+      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d64], head_dim_v: [d96, d128, d192, d256, d512, d576], strides_v: [inherited]}
+      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d64], head_dim_v: [d96, d128, d192, d256, d512, d576], dim_order_v: [inherited]}
+      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d96], head_dim_v: [d128, d192, d256, d512, d576], strides_k: [packed, padded, non_contiguous_view, zero_broadcast, negative, self_overlapping, head_dim_strided]}
+      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d96], head_dim_v: [d128, d192, d256, d512, d576], dim_order_k: [bhsd, bshd, other_permutation, bsdh]}
+      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d96], head_dim_v: [d128, d192, d256, d512, d576], strides_v: [inherited]}
+      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d96], head_dim_v: [d128, d192, d256, d512, d576], dim_order_v: [inherited]}
+      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d128], head_dim_v: [d192, d256, d512, d576], strides_k: [packed, padded, non_contiguous_view, zero_broadcast, negative, self_overlapping, head_dim_strided]}
+      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d128], head_dim_v: [d192, d256, d512, d576], dim_order_k: [bhsd, bshd, other_permutation, bsdh]}
+      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d128], head_dim_v: [d192, d256, d512, d576], strides_v: [inherited]}
+      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d128], head_dim_v: [d192, d256, d512, d576], dim_order_v: [inherited]}
+      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d192], head_dim_v: [d256, d512, d576], strides_k: [packed, padded, non_contiguous_view, zero_broadcast, negative, self_overlapping, head_dim_strided]}
+      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d192], head_dim_v: [d256, d512, d576], dim_order_k: [bhsd, bshd, other_permutation, bsdh]}
+      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d192], head_dim_v: [d256, d512, d576], strides_v: [inherited]}
+      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d192], head_dim_v: [d256, d512, d576], dim_order_v: [inherited]}
+      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d256], head_dim_v: [d512, d576], strides_k: [packed, padded, non_contiguous_view, zero_broadcast, negative, self_overlapping, head_dim_strided]}
+      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d256], head_dim_v: [d512, d576], dim_order_k: [bhsd, bshd, other_permutation, bsdh]}
+      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d256], head_dim_v: [d512, d576], strides_v: [inherited]}
+      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d256], head_dim_v: [d512, d576], dim_order_v: [inherited]}
+      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d512], head_dim_v: [d576], strides_k: [packed, padded, non_contiguous_view, zero_broadcast, negative, self_overlapping, head_dim_strided]}
+      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d512], head_dim_v: [d576], dim_order_k: [bhsd, bshd, other_permutation, bsdh]}
+      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d512], head_dim_v: [d576], strides_v: [inherited]}
+      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d512], head_dim_v: [d576], dim_order_v: [inherited]}
       - {tensor_overlap: [separate, output_overlaps_input, outputs_overlap], strides_k: [inherited]}
       - {tensor_overlap: [separate, output_overlaps_input, outputs_overlap], strides_v: [inherited]}
       - {tensor_overlap: [separate, output_overlaps_input, outputs_overlap], dim_order_k: [inherited]}
@@ -799,7 +844,7 @@ rules:
   - id: CH-HEAD-DIM-LEVELS
     kind: choice
     form: setting
-    reason: "Head sizes are carried as representative levels d1, d64, d128, d192, d256, so an engine's single-value refusal names one size; the v-vs-qk relation follows from the two levels."
+    reason: "Head sizes are carried as representative levels d1, d64, d96, d128, d192, d256, d512, d576, so an engine's single-value refusal names one size; the v-vs-qk relation follows from the two levels."
     applies_to: [head_dim_qk, head_dim_v]
     source: "include the values the engine is sensitive to, e.g. head sizes 64, 128, 192; rules hold only for the tested values"
 

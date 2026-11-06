@@ -48,6 +48,15 @@ class Model:
     hints: dict
     input_files: dict = field(default_factory=dict)
     injection_counts: dict = field(default_factory=dict)
+    # axis -> {value: tuple of harness needs}; a value that is not listed needs nothing.
+    harness_needs: dict = field(default_factory=dict)
+    # axis -> {value: {axis: frozenset}}: the need holds only in a row that matches the condition.
+    harness_need_when: dict = field(default_factory=dict)
+    # need id -> conjunctions ({axis: frozenset}) of the rows that need the capability.
+    harness_conditions: dict = field(default_factory=dict)
+    # (when, values): in a row that matches `when` ({axis: frozenset}), `values` ({axis: value})
+    # count as no change from the shared base.
+    plain_when: list = field(default_factory=list)
 
     def is_active(self, row: dict, axis: str) -> bool:
         if axis not in self.parent:
@@ -162,6 +171,17 @@ def load_model(model_dir: Path, extra_rule_files=()) -> Model:
 
     inj = load_yaml(model_dir / "injections.yaml")
     inj_counts = _check_injections(inj, values, bases)
+    hints = m.get("generator_hints") or {}
+    plain_when = _parse_plain_when(hints, values, parent)
+    needs, need_when = _parse_harness_needs(m["axes"], hints, values)
+    conditions = _parse_harness_conditions(hints, values, needs)
+    plain_targets = {a for _, vals in plain_when for a in vals}
+    for a, per in need_when.items():
+        for v, when in per.items():
+            if set(when) & plain_targets:
+                raise ModelError(
+                    f"axis {a}: the `when` of the harness need of {v} names a plain_when target"
+                )
 
     model = Model(
         axes=axes,
@@ -171,8 +191,12 @@ def load_model(model_dir: Path, extra_rule_files=()) -> Model:
         base_cases={},
         rules=rules,
         non_exclusion_rules=others,
-        hints=m.get("generator_hints") or {},
+        hints=hints,
         injection_counts=inj_counts,
+        harness_needs=needs,
+        harness_need_when=need_when,
+        harness_conditions=conditions,
+        plain_when=plain_when,
     )
     for name, vals in bases.items():
         row = {a: vals.get(a) for a in axes}
@@ -187,6 +211,118 @@ def load_model(model_dir: Path, extra_rule_files=()) -> Model:
     for label, path in rule_docs[1:]:
         model.input_files[label] = sha256_file(path)
     return model
+
+
+def _parse_harness_needs(axes: list, hints: dict, values: dict):
+    """({axis: {value: needs}}, {axis: {value: when}}) from each axis's `harness_needs`.
+
+    A value maps to a list of needs, or to {needs: [...], when: {axis: [values]}} for a need that
+    holds only in a row that matches `when`. Needs come from generator_hints.harness_needs.
+    """
+    known = {n["id"] for n in hints.get("harness_needs") or []}
+    out, cond = {}, {}
+    for a in axes:
+        entry = a.get("harness_needs")
+        if entry is None:
+            continue
+        per, per_when = {}, {}
+        for v, spec in entry.items():
+            where = f"axis {a['id']}: harness_needs of {v}"
+            if v not in values[a["id"]]:
+                raise ModelError(
+                    f"axis {a['id']}: harness_needs names unknown value {v}"
+                )
+            needs = spec
+            if isinstance(spec, dict):
+                if set(spec) != {"needs", "when"} or not spec["when"]:
+                    raise ModelError(
+                        f"{where}: a mapping needs exactly `needs` and `when`"
+                    )
+                if any(not isinstance(vs, list) for vs in spec["when"].values()):
+                    raise ModelError(
+                        f"{where}: each `when` axis needs a list of values"
+                    )
+                _check_axis_values(values, where, spec["when"])
+                per_when[v] = {x: frozenset(vs) for x, vs in spec["when"].items()}
+                needs = spec["needs"]
+            if not needs or any(n not in known for n in needs):
+                raise ModelError(
+                    f"{where} must list needs from generator_hints.harness_needs, got {needs}"
+                )
+            per[v] = tuple(needs)
+        out[a["id"]] = per
+        if per_when:
+            cond[a["id"]] = per_when
+    return out, cond
+
+
+def _parse_harness_conditions(hints: dict, values: dict, needs: dict) -> dict:
+    """{need: conjunctions} from generator_hints.harness_needs `forbid_any`. Every value labelled with
+    a need must appear in one of that need's conjunctions."""
+    out = {}
+    for n in hints.get("harness_needs") or []:
+        where = f"generator_hints.harness_needs {n.get('id')}"
+        if (
+            set(n) != {"id", "select_reason", "why", "forbid_any"}
+            or not n["forbid_any"]
+        ):
+            raise ModelError(
+                f"{where}: needs exactly `id`, `select_reason`, `why` and `forbid_any`"
+            )
+        conjs = []
+        for c in n["forbid_any"]:
+            if not c or any(not isinstance(vs, list) or not vs for vs in c.values()):
+                raise ModelError(
+                    f"{where}: each forbid_any entry maps axes to value lists"
+                )
+            _check_axis_values(values, where, c)
+            conjs.append({a: frozenset(vs) for a, vs in c.items()})
+        out[n["id"]] = tuple(conjs)
+    for a, per in needs.items():
+        for v, ns in per.items():
+            for n in ns:
+                if not any(v in c.get(a, ()) for c in out[n]):
+                    raise ModelError(
+                        f"axis {a}: value {v} needs {n}, but {n}'s forbid_any never names it"
+                    )
+    return out
+
+
+def _parse_plain_when(hints: dict, values: dict, parent: dict) -> list:
+    """A target axis belongs to one entry only and is no entry's `when` axis, so each target's
+    count depends on `when` axes whose own count does not change."""
+    out = []
+    entries = hints.get("plain_when") or []
+    when_axes = {a for e in entries for a in (e.get("when") or {})}
+    targets = set()
+    for e in entries:
+        where = f"generator_hints.plain_when {e.get('id')}"
+        if (
+            set(e) != {"id", "when", "values", "why"}
+            or not e["when"]
+            or not e["values"]
+        ):
+            raise ModelError(f"{where}: needs exactly `id`, `when`, `values` and `why`")
+        if any(not isinstance(vs, list) for vs in e["when"].values()):
+            raise ModelError(f"{where}: each `when` axis needs a list of values")
+        for a in e["values"]:
+            if a in when_axes or a in targets:
+                raise ModelError(
+                    f"{where}: {a} is a `when` axis or a target of another entry"
+                )
+            targets.add(a)
+        _check_axis_values(values, where, e["when"])
+        _check_axis_values(values, where, {k: [v] for k, v in e["values"].items()})
+        for a in e["values"]:
+            if a in parent:
+                raise ModelError(f"{where}: {a} must be a top-level axis")
+        out.append(
+            (
+                {a: frozenset(vs) for a, vs in e["when"].items()},
+                dict(e["values"]),
+            )
+        )
+    return out
 
 
 def _check_injections(doc: dict, values: dict, bases: dict) -> dict:

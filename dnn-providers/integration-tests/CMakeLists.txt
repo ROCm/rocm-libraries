@@ -188,7 +188,7 @@ if(Python3_FOUND)
                 --work-dir ${CMAKE_CURRENT_BINARY_DIR}/sdpa-fwd-levels-regenerate
     )
     set_tests_properties(hipdnn_sdpa_fwd_levels_regenerate_python_tests
-                         PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 900)
+                         PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 3600)
     set(HIPDNN_IT_SDPA_FWD_LEVELS_REGENERATE_TEST hipdnn_sdpa_fwd_levels_regenerate_python_tests)
 
     # pytest-style suites (fixtures, parametrize), so they run under -m pytest

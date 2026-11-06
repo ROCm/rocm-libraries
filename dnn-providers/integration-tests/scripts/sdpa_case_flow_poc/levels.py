@@ -16,8 +16,13 @@ Per level, in recipe order:
      escalate: true}` covers the pairs N changes can hold with rows of at most N changes, then
      the pairs that need N + 1 with rows of at most N + 1, and so on until every pair is covered;
      each pair is covered by a row with no more changes than the pair needs. At each step only
-     rows within that step's limit count as covering. Without `max_changes` the rows are packed
-     (modes.pairwise). With `super_setting: {id, axes}` the listed axes form one setting: each
+     rows within that step's limit count as covering. In a row that matches a
+     `generator_hints.plain_when` condition, the listed values count as no change, and the search
+     tries them first. Among values of equal cost, a value with no `harness_needs` comes first.
+     With `bundle_first: true` the low-change steps take only the pairs that some row needing no
+     harness capability (generator_hints.harness_needs `forbid_any`) can hold, and build and count
+     only such rows; packed pairwise then covers every other pair of the level.
+     Without `max_changes` the rows are packed (modes.pairwise). With `super_setting: {id, axes}` the listed axes form one setting: each
      complete combination of their values is one value of it, counts as one change, and is paired
      with every value of every other setting; pairs between the listed axes are not asked for.
   3. One-at-a-time rows from the shared base, targeted cases and real-world cases, when the recipe
@@ -51,10 +56,10 @@ Size sweep (origin size-sweep). The sweep sizes of each size axis come from `num
 `size_sweep`, `shape_tiers` and `class_to_value`, with no seed:
   typical   the representative values of the axis's classes: the sizes of every shape tier but
             the stress tier, and the class_to_value numbers.
-  corner    boundary values next to an anchor (a representative value or a tile edge): each
-            anchor and the values one above and one below it that are boundaries and lie in a
-            class range, without the representative values; ordered by distance to the nearest
-            anchor, then by value; the first `per_axis` of them.
+  corner    boundary values next to an anchor (a representative value, or a tile edge on an axis
+            of `corner.tile_edge_axes`): each anchor and the values one above and one below it
+            that are boundaries and lie in a class range, without the representative values;
+            ordered by distance to the nearest anchor, then by value; the first `per_axis` of them.
   stress    the axis's extent in the stress tier, or its largest representative value when that
             is larger. An axis that the sizes override cannot set (page size, window bounds) takes
             its longest class value at the stress tier's key length.
@@ -63,9 +68,10 @@ one `size_sensitive` non-base value the level accepts) with one size replaced. I
 hold the classes of its sizes, and its `sizes` give every extent. A level takes the labels its
 `size_sweep` names:
   typical, corner_plain, stress   the plain base row with each value of each axis, at tier S;
-  corner_crossed                  each crossing value with the first `per_crossed_value` entries
-                                  of the interleaved corner list (corner 1 of every axis, then
-                                  corner 2, ...) that its row can take, at tier S;
+  corner_crossed                  each crossing value with `per_crossed_value` entries of the
+                                  interleaved corner list (corner 1 of every axis, then corner 2,
+                                  ...) that its row can take, at tier S; the j-th crossing value
+                                  starts at entry j x per_crossed_value and wraps around;
   corner_crossed_at_L             the corner_crossed pairs again, at tier L.
 A sweep row that breaks a rule, a level label, an answer_key_needs rule or a numeric domain is not
 emitted. Nor is a row whose cost is outside the cost model's fitted range, or a row at a tier other
@@ -119,7 +125,17 @@ ORIGIN_ORDER = (
     SWEEP,
     COVERAGE,
 )
-HEAD_DIM = {"d1": 1, "d64": 64, "d128": 128, "d192": 192, "d256": 256}
+SIZE_KEYS = {"B", "H_q", "H_k", "H_v", "S", "S_short", "D_qk", "D_v"}
+HEAD_DIM = {
+    "d1": 1,
+    "d64": 64,
+    "d96": 96,
+    "d128": 128,
+    "d192": 192,
+    "d256": 256,
+    "d512": 512,
+    "d576": 576,
+}
 # Size-sweep label: the shape tier its rows start from.
 SIZE_SWEEP_LABELS = {
     "typical": "S",
@@ -220,6 +236,12 @@ def super_groups(model: Model, spec: dict) -> dict:
         raise ModelError(
             f"level {spec['name']}: super_setting id {sup['id']} is an axis id"
         )
+    plain_axes = {a for when, vals in model.plain_when for a in [*when, *vals]}
+    if plain_axes & set(sup["axes"]):
+        raise ModelError(
+            f"level {spec['name']}: super_setting holds a plain_when axis "
+            f"{sorted(plain_axes & set(sup['axes']))}"
+        )
     return {sup["id"]: list(sup["axes"])}
 
 
@@ -309,8 +331,19 @@ def load_recipe(model: Model, model_dir: Path) -> Recipe:
             for ax, v in t["changes"].items():
                 if ax not in model.values or v not in model.values[ax]:
                     raise ModelError(f"{kind} {t['id']}: unknown {ax}={v}")
+            unknown = set(t.get("sizes") or {}) - SIZE_KEYS
+            if unknown:
+                raise ModelError(
+                    f"{kind} {t['id']}: unknown sizes keys {sorted(unknown)}"
+                )
     for spec in doc["levels"]:
         super_groups(model, spec)
+        if spec.get("bundle_first") not in (None, True, False):
+            raise ModelError(
+                f"level {spec['name']}: bundle_first must be true or false"
+            )
+        if spec.get("bundle_first") and change_limit(spec) is None:
+            raise ModelError(f"level {spec['name']}: bundle_first needs max_changes")
         if spec.get("tiers_per_row") not in (None, "one"):
             raise ModelError(f"level {spec['name']}: tiers_per_row must be `one`")
         if spec.get("larger_tiers") not in (None, "size_sensitive"):
@@ -609,7 +642,15 @@ def concrete_sizes(row: dict, tier: dict, alibi_heads: dict | None = None) -> di
         ]
 
     def heads(sharing):
-        return {"mha": hq, "gqa": max(2, hq // 4), "mqa": 1}.get(sharing, hq)
+        if sharing == "mha":
+            return hq
+        if sharing == "gqa":
+            return max(2, hq // 4)
+        if sharing == "mqa":
+            return 1
+        if sharing == "non_divisor":
+            return next((h for h in range(2, hq) if hq % h), hq)
+        raise ModelError(f"no head count for sharing {sharing}")
 
     hk, hv = heads(row["k_head_sharing"]), heads(row["v_head_sharing"])
     if (
@@ -626,6 +667,8 @@ def concrete_sizes(row: dict, tier: dict, alibi_heads: dict | None = None) -> di
             and row["v_head_sharing"] == "gqa"
         ):
             hk, hv = alibi["differ"]
+    # A hand-picked row can state a real model's K/V head counts.
+    hk, hv = tier.get("H_k", hk), tier.get("H_v", hv)
     return {
         "B": b,
         "H_q": hq,
@@ -799,6 +842,9 @@ def derive_sweep(recipe: Recipe) -> dict:
     """
     corner = recipe.sweep["corner"]
     edges = [a for a in corner["anchors"] if isinstance(a, int)]
+    edge_axes = corner.get("tile_edge_axes")
+    if edge_axes is not None and any(a not in SWEEP_EXTENT for a in edge_axes):
+        raise ModelError("size_sweep.corner.tile_edge_axes: unknown axis")
     if any(
         a != "representative_values"
         for a in corner["anchors"]
@@ -812,10 +858,11 @@ def derive_sweep(recipe: Recipe) -> dict:
             continue
         ranges = class_ranges(recipe, axis)
         reps = {x for x in representative_values(recipe, axis) if class_of(ranges, x)}
+        axis_edges = edges if edge_axes is None or axis in edge_axes else []
         distance = {}
         for cls in ranges:
             own = {x for x in reps if class_of(ranges, x) == cls}
-            anchors = own | {e for e in edges if class_of(ranges, e) == cls}
+            anchors = own | {e for e in axis_edges if class_of(ranges, e) == cls}
             for a in anchors:
                 for x in (a - 1, a, a + 1):
                     if (
@@ -1132,6 +1179,7 @@ def sweep_rows(model: Model, recipe: Recipe):
             model, Solver(model, rules=list(model.rules) + extra), base, len(model.axes)
         )
         ok = accepted_values(model, recipe, spec)
+        n_crossed = 0
         for axis in model.axes:
             if not recipe.sensitive[axis]:
                 continue
@@ -1150,7 +1198,11 @@ def sweep_rows(model: Model, recipe: Recipe):
                     )
                     continue
                 taken = []
-                for xaxis, corner in order:
+                # The j-th crossed value starts at entry j x K of the list and wraps, so the
+                # values share out every entry.
+                start = (n_crossed * k_cross) % len(order) if order else 0
+                n_crossed += 1
+                for xaxis, corner in order[start:] + order[:start]:
                     if len(taken) == k_cross:
                         break
                     if xaxis == axis:
@@ -1293,6 +1345,88 @@ def coverage_rows(model: Model, recipe: Recipe, rows: list):
 
 
 # ------------------------------------------------------------------ assignment
+def need_rules(model: Model) -> list:
+    """The rows that need a harness capability (generator_hints.harness_needs), as exclusion rules."""
+    return [
+        Rule(f"NEED-{n}", "need", "exclusion", conjs, "model.yaml:generator_hints")
+        for n, conjs in sorted(model.harness_conditions.items())
+    ]
+
+
+def packed_projected(model, solver, proj, group_combos, pairs, rng, candidates=2):
+    """modes.pairwise over projected features: a super-setting is one feature."""
+    uncovered = set(pairs)
+    partners = {}
+    for f, g in sorted(uncovered, key=lambda p: (_feat_key(p[0]), _feat_key(p[1]))):
+        partners.setdefault(f, set()).add(g)
+        partners.setdefault(g, set()).add(f)
+    rows = []
+
+    def dom(key):
+        if key in proj.groups:
+            return group_combos[key]
+        return solver.domain(key)
+
+    def build():
+        top = max(len(s) for s in partners.values() if s)
+        seeds = sorted((f for f, s in partners.items() if len(s) == top), key=_feat_key)
+        f = rng.choice(seeds)
+        g = rng.choice(sorted(partners[f], key=_feat_key))
+        chosen = {f[0]: f[1], g[0]: g[1]}
+        asg = {**proj.assignment(f), **proj.assignment(g)}
+        order = [k for k in proj.keys if k not in chosen]
+        rng.shuffle(order)
+        for key in order:
+            best, best_score = [], -1
+            for v in dom(key):
+                fv = (key, v)
+                trial = {**asg, **proj.assignment(fv)}
+                if not solver.feasible(trial):
+                    continue
+                score = 0
+                if v is not None:
+                    for k2, w in chosen.items():
+                        if w is not None and proj.make_pair(fv, (k2, w)) in uncovered:
+                            score += 1
+                if score > best_score:
+                    best, best_score = [v], score
+                elif score == best_score:
+                    best.append(v)
+            if not best:
+                raise AssertionError(f"no completable value for {key}")
+            v = (
+                best[0]
+                if len(best) == 1
+                else rng.choice(sorted(best, key=lambda x: _feat_key((key, x))))
+            )
+            chosen[key] = v
+            asg.update(proj.assignment((key, v)))
+        return {a: asg[a] for a in model.axes}
+
+    while uncovered:
+        best_row, best_cov = None, None
+        for _ in range(candidates):
+            r = build()
+            cov = [p for p in proj.pairs(r) if p in uncovered]
+            if best_cov is None or len(cov) > len(best_cov):
+                best_row, best_cov = r, cov
+        if not best_cov:
+            raise AssertionError("packed row covers no pair")
+        for f, g in best_cov:
+            uncovered.discard((f, g))
+            partners[f].discard(g)
+            partners[g].discard(f)
+        rows.append(({}, best_row))
+    return rows
+
+
+def _feat_key(f):
+    key, value = f
+    if isinstance(value, tuple):
+        return (key, tuple("" if x is None else x for x in value))
+    return (key, ("" if value is None else value,))
+
+
 def assign(model: Model, recipe: Recipe, seed: int, candidates: int = 2):
     base_solver = Solver(model)
     base = model.base_cases[BASE]
@@ -1330,6 +1464,16 @@ def assign(model: Model, recipe: Recipe, seed: int, candidates: int = 2):
         covered.update(row_pairs(model, row))
         return True
 
+    def hand_picked_problems(kind, t, row):
+        z = concrete_sizes(
+            row,
+            {**tier_sizes(recipe, t.get("tier", "S")), **t["sizes"]},
+            recipe.alibi_heads,
+        )
+        probs = numeric_problems(recipe, row, z)
+        if probs:
+            raise ModelError(f"{kind} {t['id']}: its sizes break {'; '.join(probs)}")
+
     for li, spec in enumerate(recipe.levels):
         extra, banned = level_rules(model, recipe, spec)
         solver = Solver(model, rules=list(model.rules) + extra)
@@ -1352,8 +1496,34 @@ def assign(model: Model, recipe: Recipe, seed: int, candidates: int = 2):
             most = 0
         else:
             start, escalate = limit
-            lc = LowChange(model, solver, base, start, groups)
-            pending = list(pairs)
+            first = bool(spec.get("bundle_first"))
+            all_pairs = list(pairs)
+            if first:
+                needs = need_rules(model)
+                lsolver = Solver(model, rules=list(model.rules) + extra + needs)
+                need_conjs = [c for r in needs for c in r.conjs]
+
+                def counts_as_cover(row, need_conjs=need_conjs):
+                    return not any(
+                        all(row.get(a) in vs for a, vs in c.items()) for c in need_conjs
+                    )
+
+                pending = [
+                    p
+                    for p in pairs
+                    if lsolver.feasible(
+                        {**proj.assignment(p[0]), **proj.assignment(p[1])}
+                    )
+                ]
+            else:
+                lsolver = solver
+
+                def counts_as_cover(row):
+                    return True
+
+                pending = list(pairs)
+            n_first = len(pending)
+            lc = LowChange(model, lsolver, base, start, groups)
             asked, have, remaining, pw = [], set(), [], []
             n_pw = most = 0
             k = start
@@ -1368,7 +1538,7 @@ def assign(model: Model, recipe: Recipe, seed: int, candidates: int = 2):
                 pending = [p for p in pending if p not in step_set]
                 within = set()
                 for sr in srows:
-                    if proj.count(base, sr.row) <= k:
+                    if proj.count(base, sr.row) <= k and counts_as_cover(sr.row):
                         within.update(proj.pairs(sr.row))
                 todo = [p for p in step_pairs if p not in within]
                 have.update(p for p in step_pairs if p in within)
@@ -1405,6 +1575,36 @@ def assign(model: Model, recipe: Recipe, seed: int, candidates: int = 2):
                     f"{spec['name']}: {len(pending)} valid pairs fit in no row within {len(model.axes)} changes"
                 )
             pairs = asked
+            if first:
+                held = set()
+                for sr in srows:
+                    held.update(proj.pairs(sr.row))
+                rest = [p for p in all_pairs if p not in held]
+                packed = []
+                if rest and groups:
+                    combos = {
+                        g: group_values(model, solver, banned, axes)
+                        for g, axes in groups.items()
+                    }
+                    packed = packed_projected(
+                        model, solver, proj, combos, rest, rng, candidates
+                    )
+                elif rest:
+                    packed = modes.pairwise(
+                        model, solver, rest, rng, candidates=candidates
+                    )
+                n_packed = sum(add_srow(r, "pairwise", "", li) for _, r in packed)
+                notes.append(
+                    f"{spec['name']}: {n_first} of {len(all_pairs)} pairs fit a row with no "
+                    f"harness need; the other {len(rest)} pairs that no row held take "
+                    f"{n_packed} packed rows"
+                )
+                n_pw += n_packed
+                remaining += rest
+                have = set(held)
+                for _, r in packed:
+                    have.update(proj.pairs(r))
+                pairs = all_pairs
         n_oat = 0
         if spec.get("one_at_a_time"):
             rows, _ = modes.one_at_a_time(model, solver, [BASE])
@@ -1421,6 +1621,8 @@ def assign(model: Model, recipe: Recipe, seed: int, candidates: int = 2):
                             f"targeted {t['id']}: no valid row holds its changes; skipped"
                         )
                         continue
+                    if t.get("sizes"):
+                        hand_picked_problems("targeted", t, r)
                     pending_targeted.append((t, r))
             waiting = []
             for t, r in pending_targeted:
@@ -1451,7 +1653,11 @@ def assign(model: Model, recipe: Recipe, seed: int, candidates: int = 2):
                     raise AssertionError(
                         f"real_world {t['id']}: the completed row changed a requested value"
                     )
-                n_rw += add_srow(r, "real_world", t["id"], li, "S")
+                if t.get("sizes"):
+                    hand_picked_problems("real_world", t, r)
+                n_rw += add_srow(
+                    r, "real_world", t["id"], li, t.get("tier", "S"), t.get("sizes")
+                )
             for sid, r, checkable in seed_rows:
                 if checkable:
                     n_rw += add_srow(r, "real_world", f"seed:{sid}", li, "S")

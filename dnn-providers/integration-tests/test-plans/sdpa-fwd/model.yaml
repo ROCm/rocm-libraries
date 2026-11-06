@@ -31,7 +31,7 @@
 #   api_paths      the API routes that can state the axis: cpp, python, cudnn_compat.
 #
 # ⚠️ Rules hold only for the tested values. A rule found at head size 128 says nothing about
-#   head size 96. Every result that uses this model must state the concrete values from
+#   head size 80. Every result that uses this model must state the concrete values from
 #   `class_to_value`.
 #
 # Rule-reference contract for tools: every axis id and value id named in a `forbid`, `forbid_any`,
@@ -72,8 +72,11 @@
 #   keeps one shape tier per row, uses tiers above S only for size-sensitive rows, and keeps an M
 #   case and an L case for every value. Over budget, the level step only reports.
 #   The references decline ALiBi with bottom-right causal alignment (AK-ALIBI-TOP-LEFT-CAUSAL), so
-#   the BLOOM real-world row uses top-left causal. Ragged offsets on a paged K or V are valid rows
-#   that no reference checks (AK-RAGGED-NOT-ON-PAGED); ragged Q over paged K/V is checkable.
+#   the BLOOM real-world row uses top-left causal. A ragged offset on a paged K or V has no defined
+#   meaning (rule D-RAGGED-NOT-THROUGH-PAGES); ragged Q over paged K/V is checkable.
+#   harness_needs (per axis, optional): the harness capabilities a value needs before a bundle can
+#   hold its row (generator_hints.harness_needs). A value the axis does not list needs nothing. A
+#   value can map to {needs, when}: the need holds only in a row that matches `when`.
 
 schema_version: 1
 model: sdpa_forward
@@ -190,6 +193,7 @@ axes:
     note: "ragged_q_side usage common: vLLM's attention runs varlen queries (cu_seqlens_q) over a paged K/V cache (block_table), and the integration suite's reference bundles hd128_causal_ragged_paged and hd64_window_ragged_paged(_sinks) state this shape. ragged_kv_side has no known use: fringe. A ragged tensor in any dim order is written in a layout the references take: H outside S (bhsd) as head-major [H, T, D] with T = B x S, and S,B,H,D with the batch folded into the token axis ([T, H, D], the strides of bshd)."
     group: G5-batch-heads-kvstorage
     size_sensitive: ["yes", "ragged offsets cross tile edges; the diagonal is per sequence"]
+    harness_needs: {ragged: [ragged], ragged_q_side: [ragged], ragged_kv_side: [ragged]}
     labels:
       padded: [common, unclear, "yes"]
       ragged: [common, unclear, partial]
@@ -211,7 +215,7 @@ axes:
     not_in_model: "overlapping (two sequences share memory): Layer 1 D-RAGGED-NO-OVERLAP. A start inside a token: Layer 1 D-RAGGED-WHOLE-TOKENS."
     api_paths: [cpp]
     cite: "TA:508; DH:243-262 (checks the offset tensor's own properties only); @ 2fcf1e30202 RaggedTensor.hpp:91-99 (offset[0] any whole-token value of 0 or more), 101-111 (with length tensors: each length from them, at most S_max; starts in any order), 112-128 (without them: offsets must not decrease, each length is the block, capped at S_max), 208-219 (overlapping sequences refused); RaggedSdpaFwdSupport.hpp:165-168 (native plan: length tensors accepted); RaggedSdpaDensify.hpp:27-33 (dense rewrite: lengths from the length tensors, else from the offset blocks)"
-    note: "Both references take any whole-token offset[0] of 0 or more and, with the length tensors, start positions in any order with gaps between them. Without the length tensors the offsets are boundaries and lengths, so gapped, independent_starts and out_of_order need the length tensors (F-RAGGED-OFFSETS-ARE-LENGTHS). The answer_key yes of leading_gap, independent_starts and out_of_order is read in code; no runner row has measured them yet. The labels follow the references, not the meaning: the values stay in the model whatever the references take."
+    note: "Both references take any whole-token offset[0] of 0 or more and, with the length tensors, start positions in any order with gaps between them. Without the length tensors the offsets are boundaries and lengths, so gapped, independent_starts and out_of_order need the length tensors (F-RAGGED-OFFSETS-ARE-LENGTHS). The answer_key yes of leading_gap and independent_starts is measured: in the CASE-BUILDER ragged probe (runner, gfx942, 3,581 ragged rows) both references answered every clean row that holds them, and agreed. The labels follow the references, not the meaning: the values stay in the model whatever the references take."
     group: G5-batch-heads-kvstorage
     size_sensitive: ["yes", "ragged offsets cross tile edges; the diagonal is per sequence"]
     labels:
@@ -394,6 +398,7 @@ axes:
     cite: "TA:424; NODE:28-205 (no dtype check)"
     group: G3-precision-scale
     size_sensitive: ["no", "element format and rounding are per element, the same at every size"]
+    harness_needs: {differs: [arch_dtype]}
     labels:
       same: [common, "yes", "yes"]
       differs: [common, "yes", "no"]
@@ -408,6 +413,7 @@ axes:
     cite: "TA:424"
     group: G3-precision-scale
     size_sensitive: ["no", "element format and rounding are per element, the same at every size"]
+    harness_needs: {differs: [arch_dtype]}
     labels:
       same: [common, "yes", "yes"]
       differs: [common, "yes", "no"]
@@ -463,6 +469,7 @@ axes:
     note: "The references accept mma_core_mode and ignore it (SdpaReferenceImplementations.md, 'accepted and ignored'); they compute in fp32, so answer_key yes, with the tolerance risk the fp16 and bf16 values already carry. fp8 usage rare: every fp8 golden bundle sets it, but no real-model configuration was found that states it."
     group: G3-precision-scale
     size_sensitive: ["no", "element format and rounding are per element, the same at every size"]
+    harness_needs: {fp8: [arch_dtype]}
     labels:
       native: [common, "yes", "yes"]
       fp32: [rare, "yes", "yes"]
@@ -604,9 +611,12 @@ axes:
     values: &head_dims
       - {id: d1, class: one, meaning: "head size 1"}
       - {id: d64, class: many, meaning: "head size 64"}
+      - {id: d96, class: many, meaning: "head size 96 (Phi-3 mini)"}
       - {id: d128, class: many, meaning: "head size 128"}
       - {id: d192, class: many, meaning: "head size 192"}
       - {id: d256, class: many, meaning: "head size 256 (Gemma 2 9B, Gemma 3)"}
+      - {id: d512, class: many, meaning: "head size 512 (DeepSeek-V3 MLA decode, V: the latent vector)"}
+      - {id: d576, class: many, meaning: "head size 576 (DeepSeek-V3 MLA decode, Q and K: latent 512 + rotary 64)"}
     not_in_model: "zero (F-EXTENT-NONZERO). Other head sizes: untested; no rule covers them."
     api_paths: [cpp, python]
     cite: "NODE:80-87; TA:636-639"
@@ -615,9 +625,12 @@ axes:
     labels:
       d1: [rare, "yes", "yes"]
       d64: [common, "yes", "yes"]
+      d96: [rare, "yes", "yes"]
       d128: [common, "yes", "yes"]
       d192: [common, "yes", "yes"]
       d256: [common, "yes", "yes"]
+      d512: [fringe, "yes", "yes"]
+      d576: [fringe, "yes", "yes"]
 
   - id: head_dim_v
     kind: class
@@ -632,9 +645,12 @@ axes:
     labels:
       d1: [rare, "yes", "yes"]
       d64: [common, "yes", "yes"]
+      d96: [rare, "yes", "yes"]
       d128: [common, "yes", "yes"]
       d192: [common, "yes", "yes"]
       d256: [common, "yes", "yes"]
+      d512: [fringe, "yes", "yes"]
+      d576: [fringe, "yes", "yes"]
 
   # ------------------------------------------------------------------ memory layout, per tensor
   - {id: dim_order_q, kind: categorical, level: graph, meaning: "Physical dimension order of Q, set through strides.", values: *dim_orders_qo, api_paths: [cpp, python], cite: "SA:39-48; TA:438",
@@ -657,19 +673,24 @@ axes:
   - {id: strides_q, kind: class, level: graph, meaning: "Stride pattern of Q.", values: *stride_classes_qo, api_paths: [cpp, python], cite: "TA:438,627-630",
      note: "zero_broadcast answer_key yes: no reference gate refuses a zero stride on B, H or S, and both references computed the rows that held one (provisional until the reference probe run). The builder puts the zero stride on the head dim only when B, H and S all have extent 1; D-REL-STRIDE-NEEDS-EXTENT removes the rows where D has extent 1 too.",
      group: G4-layout-memory, size_sensitive: ["no", "strides are products of the extents; tier S already has every extent above 1 (only tier X reaches 32-bit stride limits)"],
+     harness_needs: {zero_broadcast: [zero_stride]},
      labels: {packed: [common, layout, "yes"], padded: [common, layout, "yes"], non_contiguous_view: [common, layout, "yes"], zero_broadcast: [rare, layout, "yes"], negative: [rare, layout, "no"], self_overlapping: [rare, layout, "yes"], head_dim_strided: [rare, layout, "yes"]}}
   - {id: strides_k, kind: class, level: graph, meaning: "Stride pattern of K.", values: *stride_classes_kv, api_paths: [cpp, python], cite: "TA:438,627-630",
      group: G4-layout-memory, size_sensitive: ["no", "strides are products of the extents; tier S already has every extent above 1 (only tier X reaches 32-bit stride limits)"],
+     harness_needs: {zero_broadcast: [zero_stride]},
      labels: {packed: [common, layout, "yes"], padded: [common, layout, "yes"], non_contiguous_view: [common, layout, "yes"], zero_broadcast: [rare, layout, "yes"], negative: [rare, layout, "no"], self_overlapping: [rare, layout, "yes"], head_dim_strided: [rare, layout, "yes"], inherited: [common, layout, "yes"]}}
   - {id: strides_v, kind: class, level: graph, meaning: "Stride pattern of V.", values: *stride_classes_kv, api_paths: [cpp, python], cite: "TA:438,627-630",
      group: G4-layout-memory, size_sensitive: ["no", "strides are products of the extents; tier S already has every extent above 1 (only tier X reaches 32-bit stride limits)"],
+     harness_needs: {zero_broadcast: [zero_stride]},
      labels: {packed: [common, layout, "yes"], padded: [common, layout, "yes"], non_contiguous_view: [common, layout, "yes"], zero_broadcast: [rare, layout, "yes"], negative: [rare, layout, "no"], self_overlapping: [rare, layout, "yes"], head_dim_strided: [rare, layout, "yes"], inherited: [common, layout, "yes"]}}
   - {id: strides_o, kind: class, level: graph, meaning: "Stride pattern of O. zero_broadcast and self_overlapping are removed by D-OUTPUT-SELF-ALIAS (rejection probe MV-04); negative by F-NO-NEGATIVE-STRIDE (MV-22).", values: *stride_classes_qo, api_paths: [cpp, python], cite: "TA:438,627-630",
      group: G4-layout-memory, size_sensitive: ["no", "strides are products of the extents; tier S already has every extent above 1 (only tier X reaches 32-bit stride limits)"],
+     harness_needs: {zero_broadcast: [zero_stride]},
      labels: {packed: [common, layout, "yes"], padded: [common, layout, "yes"], non_contiguous_view: [common, layout, "yes"], zero_broadcast: [common, layout, "no"], negative: [rare, layout, "no"], self_overlapping: [common, layout, "yes"], head_dim_strided: [rare, layout, "yes"]}}
   - {id: strides_stats, kind: child, value_kind: class, parent: {stats_output: [requested]}, level: graph,
      meaning: "Stride pattern of Stats.", values: *stride_classes, api_paths: [cpp, python], cite: "TA:438",
      group: G7-aux-outputs, size_sensitive: ["no", "strides are products of the extents; tier S already has every extent above 1 (only tier X reaches 32-bit stride limits)"],
+     harness_needs: {zero_broadcast: [zero_stride]},
      labels: {packed: [common, layout, "yes"], padded: [common, layout, "yes"], non_contiguous_view: [common, layout, "yes"], zero_broadcast: [rare, layout, "no"], negative: [rare, layout, "no"], self_overlapping: [rare, layout, "yes"]}}
 
   - {id: alignment_q, kind: class, level: both, meaning: "Start-address alignment of Q: declared by set_alignment, real through the execute pointer.", values: *alignment_classes, api_paths: [cpp], cite: "TA:538,641-643; PYT:130-160 (not bound)",
@@ -702,6 +723,7 @@ axes:
     cite: "G:4746-4748 (variant pack); no aliasing check found"
     group: G4-layout-memory
     size_sensitive: ["no", "strides are products of the extents; tier S already has every extent above 1 (only tier X reaches 32-bit stride limits)"]
+    harness_needs: {output_overlaps_input: [shared_memory], outputs_overlap: [shared_memory]}
     labels:
       separate: [common, unclear, "yes"]
       inputs_overlap: [common, unclear, "yes"]
@@ -1209,6 +1231,7 @@ axes:
     cite: "SA:557"
     group: G6-dropout
     size_sensitive: ["yes", "Philox counters per element across tiles and workgroups; the pattern output is a full score-sized tensor"]
+    harness_needs: {not_requested: {needs: [dropout_replay], when: {dropout: [random]}}}
     labels:
       not_requested: [common, "yes", "yes"]
       requested: [rare, "yes", "yes"]
@@ -1413,6 +1436,7 @@ axes:
     note: "packed usage rare: vLLM and the other serving stacks use a dense block table."
     group: G5-batch-heads-kvstorage
     size_sensitive: ["no", "a scalar or table-format choice"]
+    harness_needs: {packed: [page_table_contents]}
     labels:
       dense: [common, layout, "yes"]
       packed: [rare, layout, "no"]
@@ -1427,6 +1451,7 @@ axes:
       - {id: one_token, meaning: "one token per page"}
       - {id: partial, meaning: "more than one token, less than a whole sequence"}
       - {id: whole_sequence, meaning: "one page per sequence"}
+      - {id: large, class: partial, meaning: "64 tokens per page (a large serving block size); less than a whole sequence when the key/value length is above 64"}
     api_paths: [cpp, python]
     cite: "SA:414,424"
     group: G5-batch-heads-kvstorage
@@ -1435,6 +1460,7 @@ axes:
       one_token: [common, layout, "yes"]
       partial: [common, layout, "yes"]
       whole_sequence: [fringe, layout, "yes"]
+      large: [rare, layout, "yes"]
 
   - id: page_table_order
     kind: child
@@ -1637,7 +1663,10 @@ class_to_value:
     d128: 128
     d192: 192
     d256: 256
-    note: "Engine answer-key pairs (head_dim_qk, head_dim_v): (128,128) and (192,128) forward. 64 is a backward-table value, included as a likely-refused probe value. 256 is a real-model size (Gemma 2 9B head_dim 256) with no ASM kernel: a likely-refused value for ASM, a real value for other engines."
+    d96: 96
+    d512: 512
+    d576: 576
+    note: "Engine answer-key pairs (head_dim_qk, head_dim_v): (128,128) and (192,128) forward. 64 is a backward-table value, included as a likely-refused probe value. 256 is a real-model size (Gemma 2 9B head_dim 256) with no ASM kernel: a likely-refused value for ASM, a real value for other engines. 96 is Phi-3 mini; 576 (Q, K) with 512 (V) is DeepSeek-V3 MLA decode. Their answer_key yes is read in code: the reference gate has no head-size check (PlanUtils.hpp); no run has measured them yet."
   dtype_relation:
     same: {k_v: same_as_q}
     differs:
@@ -1656,7 +1685,7 @@ class_to_value:
     packed: {change: none}
     padded: {row_stride_extra_elements: 16, note: "D + 16 elements: 16 head-dim slots, wherever D sits in the order (in bsdh the stride outside D is (D + 16) x H)"}
     non_contiguous_view: {head_stride_multiplier: 2, note: "every head of a tensor with twice the heads"}
-    head_dim_strided: {head_dim_stride: twice_packed, note: "the head-dim stride and every stride outside D are twice their packed value; a stride inside D (H in bsdh) keeps its packed value"}
+    head_dim_strided: {head_dim_stride: twice_packed, note: "the head-dim stride and every stride outside D are twice their packed value; a stride inside D (H in bsdh) keeps its packed value. So the head-dim elements are not adjacent: the head-dim stride is 2 in every order but bsdh, where it is 2 x H"}
     inherited: {strides: owner,
                 note: "the tensor is a view; its numeric strides are its owner's strides, one per dim, applied to its own dims (so its dim order is the owner's). Owner: K for V when head_dim_v <= head_dim_qk, Q for K otherwise (tensor_overlap.inputs_overlap). Example: V d128 inside a packed bhsd K d192 has row stride 192"}
     zero_broadcast: {stride: 0, dimension: first_with_extent_over_1, search_order: [S, H, B, D]}
@@ -1672,7 +1701,7 @@ class_to_value:
     element_aligned: {base_alignment_bytes: 256, start_offset: element_size, declared_alignment: element_size}
     sub_element: {base_alignment_bytes: 256, start_offset: 1, declared_alignment: 1,
                   note: "start_offset and declared_alignment in bytes. Impossible for 1-byte formats (definition rule D-REL-SUB-ELEMENT-ALIGNMENT)"}
-    note: "The runner moves the data start by start_offset bytes from a base aligned to base_alignment_bytes and declares declared_alignment; the bundle harness keeps the declared alignment only."
+    note: "The runner moves the data start by start_offset bytes from a base aligned to base_alignment_bytes and declares declared_alignment. A bundle case carries the same start offset in its metadata `start_offsets`; the bundle harness moves the engine's data start by it."
   window:  # keys on one side of the diagonal; right_bound = keys, left_bound = keys + 1 (it counts the diagonal key, cuDNN)
     left_bound_adds: 1
     zero: {keys: 0, note: "left_bound 1 (the diagonal only), right_bound 0. The frontend refuses left_bound 0 (@ 00d9c566bea SdpaFwdNode.hpp:40-42 -> node/detail/Utilities.hpp:479-495)"}
@@ -1782,7 +1811,7 @@ class_to_value:
   block_mask_pattern:
     layout: {tile: [128, 128], dtype: uint8, dims: [B, H_q, {ceil_div: [S_q, 128]}, {ceil_div: [{ceil_div: [S_kv, 128]}, 8]}],
              bits: {per_tile: 1, tiles_per_byte: 8, order: least_significant_first, clear_bit: masks_the_tile},
-             note: "One bit per 128 x 128 score tile, 8 key tiles per byte, least significant bit first; a clear bit masks the tile. The references decline one flag per tile for more than one key tile (@ 00d9c566bea PlanUtils.hpp:396-428; CpuFpReferenceSdpa.hpp:74-76; SdpaReferenceImplementations.md:89; SdpaSemanticsRegister.md SEM-025). With paged K/V, S_kv is the paged key extent"}
+             note: "One bit per 128 x 128 score tile, 8 key tiles per byte, least significant bit first; a clear bit masks the tile. The references take a mask over more than one key tile: the reference gate checks only the mask's shape (isSupportedSdpaBlockMask, PlanUtils.hpp), and both references answered and agreed on 2-key-tile masks (runner, gfx942). With paged K/V, S_kv is the paged key extent"}
     all_open: {allowed: all}
     mixed: {allowed: alternating, always_allowed: first_column, note: "the first tile column allowed, every other tile alternating"}
     some_rows_blocked: {allowed: all, blocked_rows: [last]}
@@ -1790,7 +1819,7 @@ class_to_value:
   paging:
     sides: {present: [K, V], k_only: [K], v_only: [V], note: "The dense side keeps [B, H, S_kv, D]; S_kv there equals the paged side's key extent (max_seq_len_kv), @ 00d9c566bea PlanUtils.hpp:266-273. Each paged side's pool holds B x (its table width) pages: one page per table slot, so surplus slots point at pages of their own"}
     page_table_sharing: {separate: {tables: two}, shared: {tables: one, note: "one INT32 [B, 1, pages, 1] tensor given to set_paged_attention_k_table and _v_table; the same page slots in the K and V containers"}}
-    page_size: {one_token: 1, partial: 16, whole_sequence: S_kv}
+    page_size: {one_token: 1, partial: 16, whole_sequence: S_kv, large: 64}
     page_size_k_vs_v:
       equal: {v_page_size: {multiply: 1}}
       differ: {v_page_size: {multiply: 2}, note: "V's page size = 2 x K's; V's table is ceil(max_seq_len_kv / V's page size) wide. Each paged side's pool holds B x (its table width) pages"}
@@ -1911,6 +1940,35 @@ generator_hints:
   per_value_pairwise_axis: dtype_q        # one complete pairwise set per Q format (choice rule CH-STRATIFY-DTYPE)
   second_strength_candidate: dim_order_q  # count only: the cost of a second extra-strength axis
   execute_level_axes_note: "An acceptance-only driver cannot observe level `execute` values; it reports them as 'not observed', never as 'accepted'."
+  # Harness capabilities that a row can need before a bundle can carry it. `forbid_any` lists the
+  # rows that need the capability, as in rules.yaml; `select_reason` is the matching exclusion
+  # reason of the bundle row selection (select_rows.py). An axis lists per value in `harness_needs`
+  # the capabilities the value needs; a value that the axis does not list needs nothing. Among
+  # values of equal cost, the low-change step tries a value with no need first. A level with
+  # `bundle_first` covers first the pairs that a row with no need can hold, with such rows.
+  harness_needs:
+    - {id: ragged, select_reason: ragged_offsets, why: "the bundle harness has no ragged-offset contents; a ragged row is not bundled",
+       forbid_any: [{batch_packing: [ragged, ragged_q_side, ragged_kv_side]}]}
+    - {id: page_table_contents, select_reason: page_table_contents, why: "a packed page table (one buffer with an offset list) has no bundle content form",
+       forbid_any: [{paged_kv: [present, k_only, v_only], page_table_storage: [packed]}]}
+    - {id: shared_memory, select_reason: tensor_overlap, why: "an output written over an input is not realised: the case builder keeps O and Q apart. Inputs that share memory need it only on a paged row: the harness aliases carry the other rows",
+       forbid_any: [{tensor_overlap: [output_overlaps_input, outputs_overlap]}, {tensor_overlap: [inputs_overlap], paged_kv: [present, k_only, v_only]}]}
+    - {id: arch_dtype, select_reason: arch_dtype, why: "K or V in another format than an fp16 or bf16 Q, or fp8 matmul inputs with a non-fp8 Q, change format per GPU; the per-architecture cases are not bundled",
+       forbid_any: [{dtype_q: [fp16, bf16], dtype_k_vs_q: [differs]}, {dtype_q: [fp16, bf16], dtype_v_vs_q: [differs]},
+                    {matmul_input_precision: [fp8], dtype_q: [fp32, fp16, bf16]}]}
+    - {id: zero_stride, select_reason: zero_stride_needs_pr14709, why: "a zero stride needs the harness fill for broadcast inputs (PR 14709)",
+       forbid_any: [{strides_q: [zero_broadcast]}, {strides_k: [zero_broadcast]}, {strides_v: [zero_broadcast]}, {strides_o: [zero_broadcast]}, {strides_stats: [zero_broadcast]}]}
+    - {id: dropout_replay, select_reason: dropout_without_rng_dump, why: "random dropout is checked only through the RNG dump, so a bundle needs dropout_pattern_output requested",
+       forbid_any: [{dropout: [random], dropout_pattern_output: [not_requested]}]}
+  # Plain alternatives: in a row that matches `when`, each listed value counts as no change from the
+  # shared base, as the base value does. A fewest-change search decides the `when` axes first and then
+  # tries the listed value before the base value. With bundle_first, the low-change pairwise rows hold
+  # no ragged value, so these entries steer only the size-sweep crossings and the coverage rows.
+  plain_when:
+    - {id: PW-RAGGED-Q-TOKEN-MAJOR, when: {batch_packing: [ragged, ragged_q_side]}, values: {dim_order_q: bshd, dim_order_o: bshd},
+       why: "varlen attention stores a ragged Q and O token-major ([tokens, heads, head-dim], the THD layout); head-major rows still come from the pairs that name bhsd"}
+    - {id: PW-RAGGED-KV-TOKEN-MAJOR, when: {batch_packing: [ragged, ragged_kv_side]}, values: {dim_order_k: bshd, dim_order_v: bshd},
+       why: "varlen attention stores a ragged K and V token-major ([tokens, heads, head-dim], the THD layout); head-major rows still come from the pairs that name bhsd"}
 
 # ---------------------------------------------------------------------------------------------
 # Labels that are not per value (draft). Read only by the level step.
@@ -2008,11 +2066,9 @@ level_labels:
         {batch_packing: [ragged_kv_side], dim_order_k: [inherited], dim_order_q: [bhsd]},
         {batch_packing: [ragged, ragged_kv_side], strides_k: [inherited], strides_q: [zero_broadcast, negative, self_overlapping]}],
        note: "The case builder writes a ragged tensor with H outside S (bhsd) head-major as [H, T, D] and folds the batch into the token axis for S,B,H,D ([T, H, D]), so every dim order is a layout the references take. Evidence for the dense rewrite is code and the reference unit tests ZeroBiasThroughTheRewrite and ForwardWithBiasMatchesCpu. The PoC runs hold no fp32 or biased ragged row that the references computed. A dense Stats beside a ragged Q is not held to it (@ 2fcf1e30202 RaggedSdpaDensify.hpp:234: Stats is left out of the all-ragged-or-all-dense test); a packed Stats is (RaggedSdpaFwdSupport.hpp:253-257). A view (`inherited`) has its owner's layout: K inside a dense Q on a ragged K/V side takes Q's strides, so the last two clauses name Q's values (a dense bhsd Q beside a ragged K/V side has per-batch slots, which the ragged container refuses; a ragged Q is head-major itself); V inside K is covered by K's own clauses (both are on the K/V side). bsdh and head_dim_strided keep the H and D strides sorted within one token, so neither breaks the sorted-stride test."}
-    - {id: AK-RAGGED-NOT-ON-PAGED, why: "both references decline a ragged offset on a paged K or V container: tokens counted through pages are defined by no reference (RSD:154-163). Ragged Q over a paged, non-ragged K/V runs through the dense rewrite", forbid_any: [
-        {batch_packing: [ragged, ragged_kv_side], paged_kv: [present, k_only, v_only]}]}
     - {id: AK-SCALE-FINITE, why: "both references decline a non-finite scale written into the graph as a number: every output would be NaN (PU:328-332 isSupportedSdpaScaleOperand; native ragged plan RaggedSdpaFwdSupport.hpp:233-238). A one-element by-value or FLOAT scale tensor holding NaN or inf is not checked (PU:333-349)", forbid_any: [
         {scale_value: [non_finite], scale_source: [attribute_value]}],
-       note: "The tensor forms run, and every output is NaN, which no check grades: scale_value non_finite carries answer_key no, and CH-FUZZER-HINTS holds it out of generation."}
+       note: "The tensor forms run, and every output is NaN, which no check grades: scale_value non_finite carries answer_key no, and CH-FUZZER-HINTS holds it out of generation. So this rule removes no row that the label leaves in; it states the reference gate."}
     - {id: AK-RNG-DUMP-NEEDS-PHILOX, why: "rng_dump is checkable only with Philox dropout: a caller-supplied mask with rng_dump is declined (PU:681-686: without Philox-with-dump, the gate refuses any rng_dump tensor)", forbid_any: [
         {dropout: [caller_mask], dropout_pattern_output: [requested]}]}
     - {id: AK-RAGGED-ONE-SIDE-NEEDS-LENGTHS, why: "a ragged side beside a dense side runs only through the dense rewrite, which takes the dense side's lengths from seq_len_q / seq_len_kv and declines without them (RSD:268-284). sequence_lengths variable and variable_no_flag state the length tensors; uniform and lengths_in_offsets state none", forbid_any: [
@@ -2050,11 +2106,56 @@ level_labels:
     - {id: X9, why: "fp8 descales that are not 1.0, with GQA", changes: {dtype_q: fp8_e4m3_fnuz, dtype_o: bf16, descale_q: present, descale_k: present, descale_v: present, k_head_sharing: gqa, v_head_sharing: gqa}}
     - {id: X10, why: "fp8 K/V byte offsets past 2^31 (two batches, batch stride 1.5 * 2^30 bytes)", tier: X, sizes: {B: 2, H_q: 96, S: 131072},
        changes: {dtype_q: fp8_e4m3_fnuz, dtype_o: bf16, descale_q: present, descale_k: present, descale_v: present, seq_q: one, seq_q_vs_seq_kv: shorter}}
+    # 64-token pages need a key/value length above 64 to hold more than one page per sequence.
+    - {id: X11a, why: "64-token pages, several per sequence (key/value length 256)", sizes: {S: 256, S_short: 128},
+       changes: {paged_kv: present, page_size: large, sequence_lengths: variable}}
+    - {id: X11b, why: "64-token pages with GQA and bottom-right causal (key/value length 256)", sizes: {S: 256, S_short: 128},
+       changes: {paged_kv: present, page_size: large, sequence_lengths: variable, k_head_sharing: gqa, v_head_sharing: gqa,
+                 causal_mask: present, causal_alignment: bottom_right}}
+    - {id: X11c, why: "64-token pages in shuffled order (key/value length 256)", sizes: {S: 256, S_short: 128},
+       changes: {paged_kv: present, page_size: large, page_table_order: shuffled, sequence_lengths: variable}}
 
-  # Real-world configurations, each from a public model configuration.
+  # Real-world configurations: public model configurations and serving defaults (pinned source in the
+  # comment above an entry), and hand-picked ragged (varlen) cases for quick.
   # Same shape as `targeted`. Each runs at tier S
   # in the first level whose recipe has `real_world: true`, whatever that level's labels and ceiling.
   real_world:
+    - {id: ragged-vllm-serving, why: "vLLM-style serving: varlen queries token-major (THD) over a paged GQA K/V cache with shuffled pages, mixed lengths, bottom-right causal",
+       changes: {batch_packing: ragged_q_side, dim_order_q: bshd, dim_order_o: bshd, paged_kv: present, page_size: partial,
+                 page_table_order: shuffled, sequence_lengths: variable, per_seq_len_q: mixed, per_seq_len_kv: mixed,
+                 k_head_sharing: gqa, v_head_sharing: gqa, causal_mask: present, causal_alignment: bottom_right}}
+    - {id: ragged-varlen-prefill-thd, why: "varlen prefill in the THD layout: one token-count offset list per side (cu_seqlens style), mixed lengths",
+       changes: {batch_packing: ragged, dim_order_q: bshd, dim_order_k: bshd, dim_order_v: bshd, dim_order_o: bshd, ragged_offset_form: shared_tokens,
+                 sequence_lengths: lengths_in_offsets, per_seq_len_q: mixed, per_seq_len_kv: mixed}}
+    - {id: ragged-varlen-gqa-causal, why: "varlen GQA prefill, token-major, bottom-right causal: the diagonal is per sequence",
+       changes: {batch_packing: ragged, dim_order_q: bshd, dim_order_k: bshd, dim_order_v: bshd, dim_order_o: bshd, ragged_offset_form: shared_tokens, sequence_lengths: lengths_in_offsets,
+                 per_seq_len_q: mixed, per_seq_len_kv: mixed, k_head_sharing: gqa, v_head_sharing: gqa,
+                 causal_mask: present, causal_alignment: bottom_right}}
+    - {id: ragged-sliding-window, why: "varlen sliding-window attention (Mistral style), token-major",
+       changes: {batch_packing: ragged, dim_order_q: bshd, dim_order_k: bshd, dim_order_v: bshd, dim_order_o: bshd, sequence_lengths: lengths_in_offsets, per_seq_len_q: mixed,
+                 per_seq_len_kv: mixed, k_head_sharing: gqa, v_head_sharing: gqa, sliding_window: present,
+                 window_alignment: bottom_right, window_left: partial, window_right: zero}}
+    - {id: ragged-bias, why: "token-major ragged batch with an additive bias: the references run it through the dense rewrite",
+       changes: {batch_packing: ragged, dim_order_q: bshd, dim_order_k: bshd, dim_order_v: bshd, dim_order_o: bshd, sequence_lengths: lengths_in_offsets, per_seq_len_q: mixed,
+                 per_seq_len_kv: mixed, bias: present}}
+    - {id: ragged-gapped-seq-len, why: "token-major ragged slots longer than their sequences: live lengths come from the seq_len tensors",
+       changes: {batch_packing: ragged, dim_order_q: bshd, dim_order_k: bshd, dim_order_v: bshd, dim_order_o: bshd, ragged_offsets: gapped, sequence_lengths: variable,
+                 per_seq_len_q: mixed, per_seq_len_kv: mixed}}
+    - {id: ragged-int64-offsets, why: "token-major ragged batch with INT64 offset tensors",
+       changes: {batch_packing: ragged, dim_order_q: bshd, dim_order_k: bshd, dim_order_v: bshd, dim_order_o: bshd, ragged_offset_dtype: int64, sequence_lengths: lengths_in_offsets,
+                 per_seq_len_q: mixed, per_seq_len_kv: mixed}}
+    - {id: ragged-stats-packed, why: "token-major ragged training forward: Stats packed with Q's token boundaries",
+       changes: {batch_packing: ragged, dim_order_q: bshd, dim_order_k: bshd, dim_order_v: bshd, dim_order_o: bshd, stats_output: requested, stats_packing: packed_with_q,
+                 sequence_lengths: lengths_in_offsets, per_seq_len_q: mixed, per_seq_len_kv: mixed}}
+    - {id: ragged-q-side-dense-kv, why: "chunked prefill: token-major varlen queries over dense K/V slots, bottom-right causal",
+       changes: {batch_packing: ragged_q_side, dim_order_q: bshd, dim_order_o: bshd, sequence_lengths: variable,
+                 per_seq_len_q: mixed, per_seq_len_kv: mixed, causal_mask: present, causal_alignment: bottom_right}}
+    - {id: ragged-fp16-thd, why: "fp16 token-major ragged batch: the references take it through the dense rewrite",
+       changes: {batch_packing: ragged, dim_order_q: bshd, dim_order_k: bshd, dim_order_v: bshd, dim_order_o: bshd, dtype_q: fp16, dtype_o: fp16, sequence_lengths: lengths_in_offsets,
+                 per_seq_len_q: mixed, per_seq_len_kv: mixed}}
+    - {id: ragged-head-major, why: "head-major ([H, tokens, D]) ragged batch for contrast with the token-major rows",
+       changes: {batch_packing: ragged, sequence_lengths: lengths_in_offsets, per_seq_len_q: mixed,
+                 per_seq_len_kv: mixed, causal_mask: present, causal_alignment: bottom_right}}
     - {id: llama3-8b-prefill, why: "Llama 3 8B prompt processing: GQA, bottom-right causal",
        changes: {k_head_sharing: gqa, v_head_sharing: gqa, causal_mask: present, causal_alignment: bottom_right}}
     - {id: llama3-8b-prefill-bshd, why: "as llama3-8b-prefill, BSHD layout",
@@ -2085,6 +2186,61 @@ level_labels:
     - {id: gpt-oss-20b-sliding-sinks, why: "gpt-oss 20B sliding-window layer: GQA, head size 64, attention sinks",
        changes: {k_head_sharing: gqa, v_head_sharing: gqa, head_dim_qk: d64, head_dim_v: d64, attention_sinks: present,
                  sliding_window: present, window_alignment: bottom_right, window_left: partial, window_right: zero}}
+    # Real-model shapes with their real head counts (sizes); the comment above each entry is its pinned source.
+    # https://huggingface.co/unsloth/Llama-3.1-8B-Instruct/blob/4699cc75b550f9c6f3173fb80f4703b62d946aa5/config.json
+    - {id: llama31-8b-prefill-real-heads, why: "Llama 3.1 8B prompt processing at its real head count: 32 query heads, 8 K/V heads, d128, bottom-right causal", sizes: {H_q: 32, H_k: 8, H_v: 8},
+       changes: {k_head_sharing: gqa, v_head_sharing: gqa, causal_mask: present, causal_alignment: bottom_right}}
+    # https://huggingface.co/NousResearch/Meta-Llama-3.1-70B-Instruct/blob/d50656ee28e2c2906d317cbbb6fcb55eb4055a84/config.json
+    - {id: llama31-70b-prefill, why: "Llama 3.1/3.3 70B prompt processing: 64 query heads, GQA, d128, bottom-right causal", sizes: {H_q: 64, H_k: 8, H_v: 8},
+       changes: {k_head_sharing: gqa, v_head_sharing: gqa, causal_mask: present, causal_alignment: bottom_right}}
+    # https://huggingface.co/unsloth/Meta-Llama-3.1-405B-Instruct-bnb-4bit/blob/4efb87ce6435e670c5ed875715f90d2f79df1367/config.json
+    - {id: llama31-405b-tp8-shard, why: "Llama 3.1 405B served at tensor parallel 8: each GPU holds 16 query heads and 1 K/V head (MQA), d128, causal", sizes: {H_q: 16},
+       changes: {k_head_sharing: mqa, v_head_sharing: mqa, causal_mask: present, causal_alignment: bottom_right}}
+    # https://huggingface.co/unsloth/Llama-3.2-1B-Instruct/blob/5a8abab4a5d6f164389b1079fb721cfab8d7126c/config.json
+    - {id: llama32-1b-prefill, why: "Llama 3.2 1B prompt processing: 32 query heads, 8 K/V heads, head size 64, causal", sizes: {H_q: 32, H_k: 8, H_v: 8},
+       changes: {k_head_sharing: gqa, v_head_sharing: gqa, head_dim_qk: d64, head_dim_v: d64, causal_mask: present, causal_alignment: bottom_right}}
+    # https://huggingface.co/unsloth/Llama-3.2-3B-Instruct/blob/006f5dcd1393c3add266de40994ba96225e9689d/config.json
+    - {id: llama32-3b-prefill, why: "Llama 3.2 3B prompt processing: 24 query heads (not a power of two), GQA, d128, causal", sizes: {H_q: 24, H_k: 8, H_v: 8},
+       changes: {k_head_sharing: gqa, v_head_sharing: gqa, causal_mask: present, causal_alignment: bottom_right}}
+    # https://huggingface.co/Qwen/Qwen2.5-7B-Instruct/blob/a09a35458c702b33eeacc393d103063234e8bc28/config.json
+    - {id: qwen25-7b-prefill, why: "Qwen2.5 7B prompt processing: 28 query heads (not a power of two), 4 K/V heads, d128, causal", sizes: {H_q: 28, H_k: 4, H_v: 4},
+       changes: {k_head_sharing: gqa, v_head_sharing: gqa, causal_mask: present, causal_alignment: bottom_right}}
+    # https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct/blob/7ae557604adf67be50417f59c2c2f167def9a775/config.json
+    - {id: qwen25-05b-prefill, why: "Qwen2.5 0.5B prompt processing: 14 query heads, 2 K/V heads, head size 64, causal", sizes: {H_q: 14, H_k: 2, H_v: 2},
+       changes: {k_head_sharing: gqa, v_head_sharing: gqa, head_dim_qk: d64, head_dim_v: d64, causal_mask: present, causal_alignment: bottom_right}}
+    # https://huggingface.co/microsoft/phi-4/blob/2db69c1c3e91a05d2c64a3185acfbaf36f744e25/config.json
+    - {id: phi4-prefill, why: "Phi-4 prompt processing: 40 query heads, 10 K/V heads (exactly the gqa rule), d128, causal", sizes: {H_q: 40, H_k: 10, H_v: 10},
+       changes: {k_head_sharing: gqa, v_head_sharing: gqa, causal_mask: present, causal_alignment: bottom_right}}
+    # https://huggingface.co/microsoft/Phi-3-mini-4k-instruct/blob/f39ac1d28e925b323eae81227eaba4464caced4e/config.json
+    - {id: phi3-mini-prefill, why: "Phi-3 mini prompt processing: MHA, head size 96, sliding window 2047", sizes: {H_q: 32},
+       changes: {head_dim_qk: d96, head_dim_v: d96, sliding_window: present, window_alignment: bottom_right, window_left: partial, window_right: zero}}
+    # https://huggingface.co/unsloth/gemma-3-12b-it/blob/9478e665381f42974aa06177b019352fb6291876/config.json
+    - {id: gemma3-12b-local, why: "Gemma 3 12B local (sliding-window) layer, 5 of every 6 layers: GQA, head size 256, 1024-key window", sizes: {H_q: 16, H_k: 8, H_v: 8},
+       changes: {k_head_sharing: gqa, v_head_sharing: gqa, head_dim_qk: d256, head_dim_v: d256, sliding_window: present, window_alignment: bottom_right, window_left: partial, window_right: zero}}
+    # https://huggingface.co/unsloth/gemma-3-12b-it/blob/9478e665381f42974aa06177b019352fb6291876/config.json
+    - {id: gemma3-12b-global, why: "Gemma 3 12B global layer (1 of every 6): GQA, head size 256, bottom-right causal, no window", sizes: {H_q: 16, H_k: 8, H_v: 8},
+       changes: {k_head_sharing: gqa, v_head_sharing: gqa, head_dim_qk: d256, head_dim_v: d256, causal_mask: present, causal_alignment: bottom_right}}
+    # https://huggingface.co/unsloth/gemma-3-27b-it/blob/7a5a3053dbd5d1d58e48159e87b9df2fc545a49a/config.json
+    - {id: gemma3-27b-local, why: "Gemma 3 27B local layer: GQA, d128, scale 1/sqrt(168) (not 1/sqrt(head_dim)), 1024-key window", sizes: {H_q: 32, H_k: 16, H_v: 16},
+       changes: {k_head_sharing: gqa, v_head_sharing: gqa, scale_value: other_positive, sliding_window: present, window_alignment: bottom_right, window_left: partial, window_right: zero}}
+    # https://huggingface.co/unsloth/gemma-3-1b-it/blob/5b11413a10db4e486ef16a20101fd028f8f2499c/config.json
+    - {id: gemma3-1b-local, why: "Gemma 3 1B local layer: 4 query heads, 1 K/V head (MQA), head size 256, 512-key window", sizes: {H_q: 4},
+       changes: {k_head_sharing: mqa, v_head_sharing: mqa, head_dim_qk: d256, head_dim_v: d256, sliding_window: present, window_alignment: bottom_right, window_left: partial, window_right: zero}}
+    # https://huggingface.co/deepseek-ai/DeepSeek-V3/blob/e815299b0bcbac849fa540c768ef21845365c9eb/config.json
+    - {id: deepseek-v3-mla-prefill-h128, why: "DeepSeek-V3/R1 MLA prompt processing at its real 128 heads: Q/K head size 192, V 128", sizes: {H_q: 128},
+       changes: {head_dim_qk: d192, head_dim_v: d128, causal_mask: present, causal_alignment: bottom_right}}
+    # https://huggingface.co/deepseek-ai/DeepSeek-V3/blob/e815299b0bcbac849fa540c768ef21845365c9eb/config.json
+    - {id: deepseek-v3-mla-decode, why: "DeepSeek-V3 MLA decode (absorbed form): one query token, all heads against one latent K/V head; Q/K head size 576, V 512; 16 query heads per GPU at tensor parallel 8 (128 / 8)", sizes: {H_q: 16},
+       changes: {k_head_sharing: mqa, v_head_sharing: mqa, head_dim_qk: d576, head_dim_v: d512, seq_q: one, seq_q_vs_seq_kv: shorter, causal_mask: present, causal_alignment: bottom_right}}
+    # https://huggingface.co/openai/gpt-oss-20b/blob/6cee5e81ee83917806bbde320786a8fb61efebee/config.json
+    - {id: gpt-oss-full-attention-sinks, why: "gpt-oss full-attention layer (every other layer): GQA, head size 64, attention sinks, bottom-right causal, no window", sizes: {H_q: 64, H_k: 8, H_v: 8},
+       changes: {k_head_sharing: gqa, v_head_sharing: gqa, head_dim_qk: d64, head_dim_v: d64, attention_sinks: present, causal_mask: present, causal_alignment: bottom_right}}
+    # https://github.com/vllm-project/vllm/blob/1ab4476ac9d1829426f467f3c04ae2de3f49e8fe/vllm/config/scheduler.py#L41
+    - {id: vllm-chunked-prefill-paged, why: "vLLM chunked prefill (on by default, 2048-token budget): a later prompt chunk attends to the cached prefix, S_q < S_kv, bottom-right causal, paged K/V (block size 16)",
+       changes: {k_head_sharing: gqa, v_head_sharing: gqa, seq_q_vs_seq_kv: shorter, causal_mask: present, causal_alignment: bottom_right, paged_kv: present, page_size: partial, sequence_lengths: variable}}
+    # https://github.com/sgl-project/sglang/blob/82554dd0e91d6bd0ba51a95d68dd5cedfb3f4c28/python/sglang/srt/arg_groups/overrides.py#L1527-L1550
+    - {id: sglang-decode-page1, why: "SGLang decode with its default page size of 1 token (non-MUSA platforms, including ROCm without the vectorized AITER layout): GQA, one query token, paged K/V",
+       changes: {k_head_sharing: gqa, v_head_sharing: gqa, seq_q: one, seq_q_vs_seq_kv: shorter, causal_mask: present, causal_alignment: bottom_right, paged_kv: present, page_size: one_token, sequence_lengths: variable}}
 
   # Structural seeds: combinations that public defects or serving workloads have shown to matter.
   # Same shape as `real_world`; written
@@ -2227,12 +2383,13 @@ size_sweep:
   axis_order: [seq_q, seq_kv, head_dim_qk, head_dim_v, q_heads, batch_size, page_size, window_left, window_right]
   corner:
     anchors: [representative_values, 64, 128, 256]
+    tile_edge_axes: [seq_q, seq_kv, head_dim_qk, head_dim_v]   # the number anchors (tile edges) apply only to these axes
     candidates: "the axis's boundaries inside the class range that are an anchor or an anchor +/- 1"
     drop: "values equal to a representative value, and duplicates"
     order: "distance to the nearest anchor, then the smaller value"
     per_axis: 6            # N: corner values kept per axis
     per_crossed_value: 3   # K: corner sizes crossed with each size_sensitive non-base value
-    crossing: "the first K entries of the interleaved list (axis 1 corner 1, axis 2 corner 1, ..., then corner 2 of each axis, ...) that the value's row can take; an axis the value fixes is skipped"
+    crossing: "K entries of the interleaved list (axis 1 corner 1, axis 2 corner 1, ..., then corner 2 of each axis, ...) that the value's row can take; the j-th crossed value (from 0, in model order) starts at entry j x K and wraps around; an axis the value fixes is skipped"
   stress:
     tier: X
     note: "Each size axis takes at most one stress value. Page size whole_sequence and the window sizes scale with tier X's S 4096. The head size takes its largest class value, 256, because tier X's D 128 is not larger than its typical values."
@@ -2252,6 +2409,12 @@ size_sweep:
 #   max_changes: {start: N, escalate: true} the pairs N changes can hold get rows of at most N changes; then
 #                                           the pairs that need N + 1 get rows of at most N + 1; and so on,
 #                                           until every pair of the level is covered.
+#   Every level uses {start: 3, escalate: true}. A value in generator_hints.plain_when counts as no
+#   change in a row that matches its condition. Among values of equal cost, a value with no harness
+#   need comes first (generator_hints.harness_needs).
+# bundle_first: true: the low-change steps take only the pairs that a row with no harness need can
+#   hold, and use only such rows (a bundle can hold every one of them). Then packed pairwise covers the
+#   level's other pairs in a few rows that change many settings.
 # super_setting: {id: ID, axes: [...]}: the listed axes form ONE setting. Each complete combination of their
 #   values is one value of that setting; it counts as one change, and every combination the level allows is
 #   paired with every value of every other setting the level allows. Pairs between the listed axes are not
@@ -2273,19 +2436,19 @@ size_sweep:
 levels:
   - {name: quick, budget_min: 5, ceiling_mflop: 20, shapes: [S],
      usage: [common], changes_numbers: ["yes", layout, unclear], answer_key: ["yes", partial], answerable: true,
-     pairs: all, max_changes: {start: 3, escalate: true}, one_at_a_time: false, targeted: false, real_world: true,
+     pairs: all, max_changes: {start: 3, escalate: true}, bundle_first: true, one_at_a_time: false, targeted: false, real_world: true,
      super_setting: {id: dtype_combination, axes: [dtype_q, dtype_k_vs_q, dtype_v_vs_q, dtype_o, dtype_stats, compute_precision]},
      size_sweep: [typical]}
   - {name: standard, budget_min: 30, ceiling_mflop: 200, shapes: [S, H, M],
      usage: [common, rare], changes_numbers: ["yes", layout, unclear], answer_key: ["yes", partial], answerable: true,
-     pairs: all, max_changes: {start: 3, escalate: true}, one_at_a_time: false, targeted: true,
+     pairs: all, max_changes: {start: 3, escalate: true}, bundle_first: true, one_at_a_time: false, targeted: true,
      size_sweep: [corner_plain, corner_crossed]}
   - {name: comprehensive, budget_min: 60, ceiling_mflop: 8000, shapes: [S, H, M, L],
      usage: [common, rare], changes_numbers: ["yes", layout, unclear], answer_key: ["yes", partial], answerable: true,
-     pairs: groups_and_bridges, one_at_a_time: true, oat_shapes: [S, L], targeted: true,
+     pairs: groups_and_bridges, max_changes: {start: 3, escalate: true}, bundle_first: true, one_at_a_time: true, oat_shapes: [S, L], targeted: true,
      larger_tiers: size_sensitive, tiers_per_row: one, tiers_per_value: [M, L],
      size_sweep: [corner_crossed_at_L]}
   - {name: full, budget_min: null, ceiling_mflop: null, shapes: [S, H, M, L], stress_tier: X, stress_rows: [base],
      usage: any, changes_numbers: any, answer_key: any, answerable: false,
-     pairs: all, one_at_a_time: true, oat_shapes: [S, L], targeted: true,
+     pairs: all, max_changes: {start: 3, escalate: true}, bundle_first: true, one_at_a_time: true, oat_shapes: [S, L], targeted: true,
      size_sweep: [stress]}
