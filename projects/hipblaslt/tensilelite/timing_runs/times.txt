@@ -1,3 +1,0 @@
-build rc=0 60s
-run rc=0 26s
-DONE
