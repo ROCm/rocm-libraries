@@ -371,6 +371,16 @@ class BwdDqKnobs(Gfx950Knobs):
     # because at 16 rows `BLOCK_N` is not free.
     mfma_rows: int | None = None
 
+    # `1` or unset, bias builds only: the bias is FLOAT beside the 16-bit Q (and so is dB, when stored). Selects a different
+    # object, not a tuning point: `BIAS_F32` and `DB_F32` on the traits. Needs `bias_stage="direct"` -- the staged tile is
+    # 16-bit -- and the 32-row family, whose bias reads and dB store take the element width; the 16-row family reads and
+    # stores through paths that carry the 16-bit width only.
+    bias_f32: int | None = None
+
+    # `"dq"` or unset: the value-head build, where V carries its own head count (`V_HEADS`; the kernarg `num_head_v`). Plain
+    # and causal builds only (no bias).
+    u2: str | None = None
+
     # The forward's list plus the two-wave points. **Not a relaxation of the
     # check** -- the check exists because `_k_dma_m0_base` assumes one DMA
     # issue per wave, and `_ParityKvStaging` is the generalisation that lifts
@@ -667,6 +677,26 @@ class BwdDqKnobs(Gfx950Knobs):
             )
         if self.bias_stage is not None and not meta.bias:
             raise ValueError("bias_stage applies to bias builds only")
+        if self.bias_f32 not in (None, 1):
+            raise ValueError(f"bias_f32 is 1 or left unset, got {self.bias_f32!r}")
+        if self.u2 not in (None, "dq"):
+            raise ValueError(
+                f"u2 is 'dq' or left unset on the dQ kernel, got {self.u2!r}"
+            )
+        if self.bias_f32:
+            if not meta.bias:
+                raise ValueError("bias_f32 applies to bias builds only")
+            if self.bias_stage != "direct":
+                raise ValueError(
+                    "bias_f32 needs bias_stage='direct': the staged bias tile is 16-bit"
+                )
+            if (self.mfma_rows or 32) == 16:
+                raise NotImplementedError(
+                    "bias_f32 is built for the 32-row family; the 16-row family's bias reads and dB store carry the 16-bit width only"
+                )
+        if self.u2:
+            if meta.bias or self.bias_f32:
+                raise ValueError("u2 applies to builds without a bias")
         self.staging_shape()
         self._check_helpers_support_geometry()
         num_kv_heads = (
@@ -687,6 +717,9 @@ class BwdDqKnobs(Gfx950Knobs):
             mfma_shape=shape,
             store_db=bool(self.store_db),
             bias_stage=stage,
+            bias_f32=bool(self.bias_f32),
+            db_f32=bool(self.bias_f32) and bool(self.store_db),
+            v_heads=self.u2 == "dq",
             hdim_vo_floor=self._hdim_vo_floor(meta),
             num_heads=meta.num_heads,
             num_kv_heads=num_kv_heads,

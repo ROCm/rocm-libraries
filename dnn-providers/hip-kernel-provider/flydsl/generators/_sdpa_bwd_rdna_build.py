@@ -51,6 +51,7 @@ from ._instances import (
     SDPA_BWD_GFX11_TABLES,
     SDPA_BWD_GFX11_TARGET,
     instances_for,
+    sdpa_bwd_perf_knobs,
 )
 from ._manifest import (
     FLYDSL_DIR,
@@ -86,6 +87,19 @@ _GRID_RULE = {
     "dq": "qheads_by_qblocks_by_seqs",
     "dbias_reduce": "blocks_by_planes",
 }
+
+# The dV-only object (``u2=dv``) runs one workgroup column per V head.
+_GRID_RULE_DVONLY = "kvblocks_by_vheads_by_seqs"
+
+
+def grid_rule_of(spec: Spec) -> str:
+    """The launch grid spelling of @p spec's object (``_GRID_RULE`` of its kernel, the V-head one for the dV-only object)."""
+    return (
+        _GRID_RULE_DVONLY
+        if spec.kernel == "dkdv" and spec.u2 == "dv"
+        else _GRID_RULE[spec.kernel]
+    )
+
 
 _RESOURCE_COLUMNS = (
     "vgpr",
@@ -131,7 +145,7 @@ def specs_for(kind: str) -> list[Spec]:
     ) in SDPA_BWD_GFX11_TABLES[kind]:
         pins = {
             name: value
-            for name, value in zip(names, perf, strict=True)
+            for name, value in sdpa_bwd_perf_knobs(names, perf).items()
             if value not in (UNSET_INT, UNSET_WORD)
         }
         specs.append(
@@ -271,8 +285,8 @@ def geometry_of(built: cdna.Built) -> dict:
     """The schedule and launch geometry the knob record resolved, which replaces the row's ``-1`` knobs.
 
     dK/dV: ``num_waves``, ``block_q``, ``waves_per_eu`` (``-1`` where the record leaves it unset), ``block_threads``, ``block_kv``;
-    dQ: ``num_waves``, ``block_m``, ``block_n``, ``waves_per_eu``, ``block_threads``. The prep and reduce kernels fix their
-    block; the engine derives it.
+    dQ: ``num_waves``, ``block_m``, ``block_n``, ``waves_per_eu``, ``block_threads``, ``bias_stage_resolved`` (``direct`` with a bias, ``na``
+    without: gfx11 never stages the bias). The prep and reduce kernels fix their block; the engine derives it.
     """
     spec, knobs = built.spec, built.knobs
     if spec.kernel not in ("dkdv", "dq"):
@@ -293,6 +307,7 @@ def geometry_of(built: cdna.Built) -> dict:
         "block_n": knobs.block_n,
         "waves_per_eu": waves_per_eu,
         "block_threads": threads,
+        "bias_stage_resolved": "direct" if spec.cls == "bias" else "na",
     }
 
 
@@ -341,12 +356,13 @@ def verify(blob: bytes, spec: Spec, where: str) -> dict:
     described = describe(blob, where)
     verify_arch(described, ARCH, where)
     verify_generic(blob, ARCH, where)
+    cdna.verify_u2_symbol(spec, described["symbol"], where)
     if described["group_segment_fixed_size"] > _LDS_LIMIT_BYTES:
         raise GeneratorError(
             f"{where}: needs {described['group_segment_fixed_size']} bytes of LDS; "
             f"{ARCH} allows {_LDS_LIMIT_BYTES} per workgroup"
         )
-    expected, _ = cdna._signature(cdna._PARAMS[spec.kernel])
+    expected, _ = cdna._signature(cdna._PARAMS[cdna._params_key(spec)])
     if described["signature"] != expected:
         raise GeneratorError(
             f"{where}: kernarg layout is\n  {described['signature']}\nbut {spec.kernel} is declared as\n"
@@ -393,7 +409,7 @@ def _record(
     )
     record["knobs"].update(outcome.geometry or {})
     if spec.kernel in cdna.SPLIT_KERNELS:
-        record["knobs"]["grid"] = _GRID_RULE[spec.kernel]
+        record["knobs"]["grid"] = grid_rule_of(spec)
     if outcome.status != "ok":
         record["detail"] = outcome.detail
         return record
@@ -416,11 +432,11 @@ def _record(
         )
     (op_dir / filename).write_bytes(blob)
     delivered = sha256((op_dir / filename).read_bytes())
-    _, names = cdna._signature(cdna._PARAMS[spec.kernel])
+    _, names = cdna._signature(cdna._PARAMS[cdna._params_key(spec)])
     record.update(
         {
             "block": [described["block_threads"], 1, 1],
-            "grid_rule": _GRID_RULE[spec.kernel],
+            "grid_rule": grid_rule_of(spec),
             "args": arg_records(names, described["signature"]),
             "file": filename,
             "symbol": described["symbol"],
@@ -438,6 +454,15 @@ def _record(
     return record
 
 
+def _check_rebuild(spec: Spec, outcome: cdna.Outcome, listed: nondet.Row) -> None:
+    """``GeneratorError`` when the rebuild of a listed row exists and is neither its pin nor a recorded variant (``nondet.tolerates``)."""
+    if outcome.blob and not nondet.tolerates(listed, sha256(outcome.blob)):
+        raise GeneratorError(
+            f"{spec.key()}: the rebuild {sha256(outcome.blob)[:8]} is neither its pin {listed.pin_sha256[:8]} nor a recorded variant of it "
+            "(tests/data/sdpa_bwd_nondeterministic.csv): sample and list it"
+        )
+
+
 def _pinned_record(
     instance,
     spec: Spec,
@@ -445,8 +470,11 @@ def _pinned_record(
     pin: dict,
     op_dir: Path,
     reference_dir: Path,
+    listed: nondet.Row,
 ) -> dict:
-    """The record of a row of the nondeterministic list: it ships its pin, whatever its build did; the build is recorded as ``rebuilt_sha256``."""
+    """The record of a row of the nondeterministic list: it ships its pin, whatever its build did, but a rebuild must be its pin or a recorded
+    variant (``_check_rebuild``); the build is recorded as ``rebuilt_sha256``."""
+    _check_rebuild(spec, outcome, listed)
     blob = (reference_dir / f"{spec.hash()}.hsaco").read_bytes()
     record = _record(
         instance,
@@ -505,9 +533,9 @@ def generate(
     @p reference_dir holds the S1 objects (``<hash>.hsaco``): every built object must be its sha256, which the rows of @p reference_csv
     record, and the run raises ``GeneratorError`` with nothing left in the op directory when one is not or does not build, except a
     row of the nondeterministic list (``_sdpa_bwd_cdna_build``, "Nondeterministic builds"), which ships its pin whatever its build does
-    (``ship: pin``); a ``dual_object`` build of any other row is rebuilt up to ``_ATTEMPTS`` builds in all. The dQ op
+    (``ship: pin``) but stops the run when its rebuild is neither the pin nor a recorded variant; a ``dual_object`` build of any other row is rebuilt up to ``_ATTEMPTS`` builds in all. The dQ op
     also builds the standalone dBias reduce objects of every dtype (its companions, ``manifest.json`` ``companions``) and checks
-    that every bias row names the reduce symbol of its dtype's companion. @p build_tailzero supplies the op's tail-zero companions
+    that every bias row names the reduce symbol of its bias dtype's companion (``Spec.bias_dtype``). @p build_tailzero supplies the op's tail-zero companions
     (``(arch, op_dir) -> manifest entries``); they have no pin and no reference row.
     """
     if op not in OPS:
@@ -597,6 +625,7 @@ def generate(
                         reference[spec.hash()],
                         op_dir,
                         reference_dir,
+                        listed[spec.hash()],
                     )
                 )
             else:
@@ -620,6 +649,10 @@ def generate(
     for spec, outcome in zip(companions, outcomes[len(specs) :]):
         if spec.hash() in listed:
             # A listed companion ships its pin like a listed row.
+            try:
+                _check_rebuild(spec, outcome, listed[spec.hash()])
+            except GeneratorError as exc:
+                reasons.append(" ".join(str(exc).split())[:500])
             outcome = cdna.Outcome(
                 "ok", (reference_dir / f"{spec.hash()}.hsaco").read_bytes()
             )
@@ -633,10 +666,10 @@ def generate(
         }
         for record in records:
             wanted = record["knobs"].get("reduce_symbol", "")
-            dtype = record["dtype"]
+            dtype = "fp32" if record["knobs"].get("bias_f32") == 1 else record["dtype"]
             if wanted and wanted != symbols.get(dtype):
                 reasons.append(
-                    f"{record['name']}: names reduce symbol {wanted!r}, the {dtype} companion is {symbols.get(dtype)!r}"
+                    f"{record['name']}: names reduce symbol {wanted!r}, the {dtype} bias companion is {symbols.get(dtype)!r}"
                 )
     # The tail-zero objects are no row of this op: they have no pin and no reference row (the generator is their provenance).
     tailzero = []

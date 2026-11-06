@@ -64,8 +64,10 @@
  * kernel and the reduce, a graph with padding_mask and at least one dense gradient output also
  * launches the tail-zero kernel, which zeroes the rows of those outputs past `seq_len`.
  *
- * The graph contract is the shared backward matcher's (FlydslSdpaBwdCommon.hpp). The merged
- * engine adds what only it knows: a row serves the head sizes its
+ * The graph contract is the shared backward matcher's (FlydslSdpaBwdCommon.hpp) with its
+ * default options: an f32 bias beside a 16-bit query declines [attn_mask] and V heads that
+ * differ from K's decline [shape], each logged with its cause (the split engine opts into
+ * both). The merged engine adds what only it knows: a row serves the head sizes its
  * tile covers, every bias object stages the bias through LDS, and `gqa_pack` rows serve only
  * grouped-query graphs.
  *
@@ -329,6 +331,18 @@ std::optional<BoundTokens> flydslSdpaBwdMergedGraphMatches(const MatchContext& c
                        + std::to_string(problem.headDimV)
                        + " are covered by no merged object (<= 32, or equal at 64, 96, 128, 160, "
                          "192, 224 or 256)");
+        return std::nullopt;
+    }
+    // Correctness decline pending a kernel investigation: on gfx950 the merged d192 f16 object
+    // returns a wrong dK for a causal or window mask (any diagonal bound) and passes unmasked
+    // graphs; the bf16 d192 objects and the split engine are correct on the same graphs.
+    if(problem.masked && problem.headDimQk == 192 && problem.headDimV == 192
+       && problem.dtype == data_objects::DataType::HALF)
+    {
+        logDecline(
+            "correctness",
+            "f16 head dims 192 with a causal or window mask return a wrong dK from the merged "
+            "object (pending a kernel investigation); the split engine serves it");
         return std::nullopt;
     }
     // BI-8: every merged bias object stages the bias through LDS.
@@ -850,6 +864,7 @@ LaunchArguments launchArguments(const MergedPlan& plan,
     m.offDK = native::offsetArgsOf(problem.ragged.dK, buffer);
     m.offDV = native::offsetArgsOf(problem.ragged.dV, buffer);
     m.stats = native::statsArgsOf(problem, buffer);
+    m.stats.strides = native::rowStatsStrides(m.stats.strides, problem.seqLenQ);
     m.varlenBits = plan.varlenBits;
     m.numSeqlens = 0;
     m.maxSeqlenQ = toInt32(problem.seqLenQ, "seqlen_q");
@@ -1168,14 +1183,8 @@ FlydslSdpaBwdMergedLaunchDump describeFlydslSdpaBwdMergedLaunchForTesting(
     if(arguments.seedUpload.has_value())
     {
         dump.seedUploaded = true;
-        dump.seedCopiedFromDevice = arguments.seedUpload->seedSource != nullptr;
-        dump.seedSource = arguments.seedUpload->seedSource;
-        dump.offsetSource = arguments.seedUpload->offsetSource;
-        if(!dump.seedCopiedFromDevice)
-        {
-            dump.seedWords.assign(arguments.seedUpload->words.begin(),
-                                  arguments.seedUpload->words.end());
-        }
+        dump.seedWords.assign(arguments.seedUpload->words.begin(),
+                              arguments.seedUpload->words.end());
     }
     return dump;
 }

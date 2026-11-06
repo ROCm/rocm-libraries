@@ -63,15 +63,21 @@ independent FP64 autograd evaluation of the forward definition. They run as
 single-graph bundles, or as sweep cases of a template that expresses them (the
 generator checks that the template expands to the graph it emits).
 
-  - ragged:       --ragged-sides {q,qkv} with --seq-lens-q/--seq-lens-kv (zero
+  - ragged:       --ragged-sides {q,kv,qkv} with --seq-lens-q/--seq-lens-kv (zero
                   lengths allowed): cuDNN ragged operands, each with its own INT32
-                  offset tensor and ragged_offset_multiplier. --ragged-blocks sets
-                  a role's per-batch block rows (gaps past the lengths),
+                  offset tensor and ragged_offset_multiplier. A batch starts at its
+                  offset (its origin) and holds seq_len rows; the file holds exactly
+                  the elements the sequences address (elementSpace, RFC 0014).
+                  --ragged-blocks sets a role's per-batch block rows (gaps past the
+                  lengths), --ragged-origins places the batches at explicit origins,
                   --ragged-units tokens binds token starts with multiplier = the
-                  tensor's sequence stride, --stats-layout picks packed [T, H] or
-                  [H, T] Stats. Input gaps hold finite poison, output gaps NaN (the
-                  harness skips NaN golden positions of ragged outputs); the storage
-                  written is read back and cross-checked against FP64 autograd.
+                  tensor's sequence stride, --ragged-token-stride pads the token
+                  stride, --ragged-head-major lays a role out [H, T] with head pitch
+                  --ragged-head-pitch, --stats-layout picks packed [T, H] or [H, T]
+                  Stats. Input gaps hold finite poison, output gaps NaN; gap rows of a
+                  ragged output are not iterated (the reference and the comparison
+                  visit [origin, origin + length) per batch); the storage written
+                  is read back and cross-checked against FP64 autograd and the LSE.
   - graph-only:   --graph-only registers a sweep case with no golden data.
   - templates:    --write-template DIR --template-kind K writes graph.template.json.
 
@@ -145,7 +151,13 @@ from sdpa_common import (  # noqa: E402  (needs the sys.path entry above)
 #         (--graph-only) and sweep-template writing (--write-template); each ragged
 #         bundle's stored tensors are read back and cross-checked against FP64
 #         autograd. Bundles without these flags are byte-identical to 1.3.0.
-GENERATOR_VERSION = "1.4.0"
+# 1.5.0 — A ragged tensor is a per-batch origin plus a length and ordinary strides;
+#         its file holds exactly elementSpace elements (a trailing gap is not
+#         written) and unwritten elements hold the gap value. Adds --ragged-origins,
+#         --ragged-head-major, --ragged-head-pitch, --ragged-token-stride and
+#         --ragged-sides kv; [H, T] Stats may have H > 1; a block may be longer than
+#         S_max. Ragged bundles from 1.4.0 differ in payload size and gap values.
+GENERATOR_VERSION = "1.5.0"
 
 # Backward tensor UID assignment. These match the checked-in graph-only
 # SdpaBackward template topology (integration-test-bundles/*/SdpaBackward/), so
@@ -879,13 +891,19 @@ def write_sweep_golden(sweep_bundle_dir, case_id, graph_json, meta_json, tensors
 
 # --- Ragged layouts (cuDNN ragged offsets, RFC 0014) ---------------------------------
 #
-# A ragged tensor keeps logical dims [B, H, S_max, D] with BSHD physical strides and
-# its own INT32 [B+1, 1, 1, 1] offset tensor: batch b starts at element
-# offset[b] * ragged_offset_multiplier. Batch b owns a block of rows (>= its sequence
-# length); the rows past the length are the block's gap. The harness compares every
-# row of every block, so a gap row of an output holds NaN, which the ragged
-# comparator skips (RFC 0014 §4.11.4) and which is what the harness's sentinel fill
-# leaves there; the gap rows of inputs hold finite poison no kernel may read.
+# A ragged tensor keeps logical dims [B, H, S_max, D] and its own INT32 [B+1, 1, 1, 1]
+# offset tensor. Batch b starts at element offset[b] * ragged_offset_multiplier (its
+# origin) and holds seq_len[b] token rows; offset[B] is read with the table but neither
+# used nor validated (origins come from entries 0..B-1, lengths from seq_len). Strides are ordinary:
+# token-major (token stride H*D, or --ragged-token-stride) or head-major (token stride
+# D, head stride = head pitch rows * D). The file holds exactly the elements the
+# sequences address (elementSpace): up to the last row of the furthest sequence,
+# including the gaps between sequences and between head pitches, and nothing past it.
+# Batch b's block is the rows it owns (>= its length); blocks place the default origins
+# (cumulative) and set offset[B]. An element no sequence addresses is a gap: an output
+# holds NaN there (what the harness's sentinel fill leaves) and gap rows are not
+# iterated, since the reference and the comparison visit [origin, origin + length) per
+# batch (RFC 0014 §4.11.4); an input holds finite poison no kernel may read.
 RAGGED_ROLES_Q = ("q", "o", "do", "dq", "stats")
 RAGGED_ROLES_KV = ("k", "v", "dk", "dv")
 ROLE_UID = {
@@ -917,35 +935,89 @@ SDPA_SEQ_AXIS = 2
 INT32_MAX = 2**31 - 1
 
 
+def ragged_footprint(dims, strides, origin_rows, lens):
+    """(elementCount, elementSpace) of a ragged tensor whose batch b holds the token
+    rows [origin_rows[b], origin_rows[b] + lens[b]) (RFC 0014 §4.5). Raises
+    ValueError naming the violated rule: negative stride, overlapping rows, or
+    aliasing axes (sorted-stride rule on the dense view [maxRow+1, H, D]; the batch
+    axis is excluded and zero-stride axes are exempt)."""
+    _, heads, _, depth = dims
+    stride_s, stride_h, stride_d = strides[SDPA_SEQ_AXIS], strides[1], strides[3]
+    if stride_s <= 0 or stride_h < 0 or stride_d < 0:
+        raise ValueError(
+            "ragged strides must be non-negative with a positive sequence stride "
+            f"(negative-stride rule; got {strides})"
+        )
+    live = sorted((o, n) for o, n in zip(origin_rows, lens) if n > 0)
+    for (start, length), (next_start, _) in zip(live, live[1:]):
+        if next_start < start + length:
+            raise ValueError(
+                f"ragged sequences overlap: rows from {next_start} start inside rows "
+                f"{start}..{start + length - 1} (overlap rule)"
+            )
+    if not live:
+        return 0, 0
+    max_row = max(o + n - 1 for o, n in live)
+    span = 1
+    axes = sorted(
+        (s, e)
+        for e, s in ((max_row + 1, stride_s), (heads, stride_h), (depth, stride_d))
+        if e > 1 and s > 0
+    )
+    for stride, extent in axes:
+        if stride < span:
+            raise ValueError(
+                f"ragged strides {strides} alias: stride {stride} is below the span "
+                f"{span} of the axes under it (sorted-stride rule)"
+            )
+        span += (extent - 1) * stride
+    count = sum(lens) * heads * depth
+    space = 1 + max_row * stride_s + (heads - 1) * stride_h + (depth - 1) * stride_d
+    return count, space
+
+
 def plan_ragged(
-    q_dims, v_dims, seq_lens_q, seq_lens_kv, sides, blocks, units, stats_layout
+    q_dims,
+    v_dims,
+    seq_lens_q,
+    seq_lens_kv,
+    sides,
+    blocks,
+    units,
+    stats_layout,
+    origins=None,
+    head_major=(),
+    head_pitch=None,
+    token_stride=None,
 ):
     """Layout of every ragged tensor: role -> dict(dims, strides, blocks, offsets,
-    multiplier, offset_uid). Raises ValueError for a layout the harness's ragged
-    tensor cannot hold.
+    multiplier, offset_uid, origin_rows, count, space). Raises ValueError for a layout
+    the harness's ragged tensor cannot hold.
 
-    sides: "qkv" (every operand ragged) or "q" (Q, O, dO, dQ and Stats ragged; K, V,
-    dK and dV dense). blocks maps a role to its per-batch block rows; a role without
-    an entry uses its side's sequence lengths (compact). units: "elements"
-    (multiplier 1) or "tokens" (offsets count tokens, multiplier = the tensor's
-    sequence stride). stats_layout: "th" (token-major, stride [S*H, 1, H, 1]) or "ht"
-    (head-major [H, T]).
+    sides: "qkv" (every operand ragged), "q" (Q, O, dO, dQ and Stats ragged; K, V, dK
+    and dV dense) or "kv" (K, V, dK and dV ragged; the rest dense). blocks maps a role
+    to its per-batch block rows; a role without an entry uses its side's sequence
+    lengths (compact). origins maps a role to its per-batch origins, in elements or
+    tokens as `units` says; a role without an entry places its blocks one after the
+    other. units: "elements" (multiplier 1) or "tokens" (offsets count tokens,
+    multiplier = the tensor's sequence stride). stats_layout: "th" (token-major,
+    stride [S*H, 1, H, 1]) or "ht" (head-major [H, T]). head_major lists further
+    head-major roles: head stride = head pitch rows * D, token stride D. A head-major
+    role's pitch is head_pitch[role] rows, else maxRow+1 with origins, else the sum of
+    its blocks. token_stride maps a token-major role to its token stride in elements
+    (>= H*D).
     """
+    origins = origins or {}
+    head_pitch = head_pitch or {}
+    token_stride = token_stride or {}
     B, H_q, S_q, D_qk = q_dims
     _, H_kv, S_kv, D_v = v_dims
-    if sides not in ("q", "qkv"):
-        raise ValueError(f"--ragged-sides must be q or qkv (got {sides!r})")
+    if sides not in ("q", "kv", "qkv"):
+        raise ValueError(f"--ragged-sides must be q, kv or qkv (got {sides!r})")
     if units not in ("elements", "tokens"):
         raise ValueError(f"--ragged-units must be elements or tokens (got {units!r})")
     if stats_layout not in ("th", "ht"):
         raise ValueError(f"--stats-layout must be th or ht (got {stats_layout!r})")
-    if stats_layout == "ht" and H_q != 1:
-        raise ValueError(
-            "--stats-layout ht needs H_q == 1: the harness's ragged tensor requires "
-            "the sequence axis outermost within a batch (RaggedTensor.hpp "
-            "validateSequenceOutermostLayout), which a head-major [H, T] Stats "
-            "tensor with H > 1 violates"
-        )
     shapes = {
         "q": [B, H_q, S_q, D_qk],
         "dq": [B, H_q, S_q, D_qk],
@@ -957,35 +1029,88 @@ def plan_ragged(
         "v": [B, H_kv, S_kv, D_v],
         "dv": [B, H_kv, S_kv, D_v],
     }
-    roles = RAGGED_ROLES_Q + (RAGGED_ROLES_KV if sides == "qkv" else ())
-    unknown = sorted(set(blocks) - set(roles))
-    if unknown:
-        raise ValueError(f"--ragged-blocks names roles that are not ragged: {unknown}")
+    roles = (RAGGED_ROLES_Q if sides in ("q", "qkv") else ()) + (
+        RAGGED_ROLES_KV if sides in ("kv", "qkv") else ()
+    )
+    for flag, named in (
+        ("--ragged-blocks", blocks),
+        ("--ragged-origins", origins),
+        ("--ragged-head-major", head_major),
+        ("--ragged-head-pitch", head_pitch),
+        ("--ragged-token-stride", token_stride),
+    ):
+        unknown = sorted(set(named) - set(roles))
+        if unknown:
+            raise ValueError(f"{flag} names roles that are not ragged: {unknown}")
+    if stats_layout == "ht" and "stats" not in roles:
+        raise ValueError(
+            "--stats-layout ht needs Stats to be ragged (--ragged-sides q or qkv)"
+        )
+    major = set(head_major)
+    if stats_layout == "ht":
+        major.add("stats")
+    for role in sorted(set(head_pitch) - major):
+        raise ValueError(f"--ragged-head-pitch names {role}, which is not head-major")
+    for role in sorted(major & set(token_stride)):
+        raise ValueError(
+            f"--ragged-token-stride names {role}, which is head-major (token stride D)"
+        )
     plan = {}
     for role in roles:
         dims = shapes[role]
+        _, heads, s_max, depth = dims
         lens = seq_lens_q if role in RAGGED_ROLES_Q else seq_lens_kv
         rows = list(blocks.get(role, lens))
         if len(rows) != B:
             raise ValueError(f"role {role}: need one block size per batch ({B})")
-        if any(r < n or r > dims[SDPA_SEQ_AXIS] for r, n in zip(rows, lens)):
+        if any(r < n for r, n in zip(rows, lens)):
             raise ValueError(
-                f"role {role}: block rows {rows} must lie in [seq_len, "
-                f"{dims[SDPA_SEQ_AXIS]}] per batch"
+                f"role {role}: block rows {rows} must be at least seq_len {lens} "
+                "per batch"
             )
-        if role == "stats" and stats_layout == "ht":
-            strides = [INT32_MAX, sum(rows), 1, 1]
+        token = depth if role in major else token_stride.get(role, heads * depth)
+        if token < heads * depth and role not in major:
+            raise ValueError(
+                f"role {role}: token stride {token} must be >= H*D = {heads * depth}"
+            )
+        if role in origins:
+            given = origins[role]
+            if len(given) != B or any(o < 0 for o in given):
+                raise ValueError(
+                    f"role {role}: need one origin >= 0 per batch ({B}), got {given}"
+                )
+            if units == "elements" and any(o % token for o in given):
+                raise ValueError(
+                    f"role {role}: origins {given} must be whole tokens "
+                    f"(multiples of the token stride {token}; whole-token origin rule)"
+                )
+            origin_rows = [o // token if units == "elements" else o for o in given]
         else:
-            strides = compute_strides(dims, "bshd")
-        stride_s = strides[SDPA_SEQ_AXIS]
-        tokens = [0]
-        for r in rows:
-            tokens.append(tokens[-1] + r)
+            origin_rows = [sum(rows[:b]) for b in range(B)]
+        max_row = max(
+            (o + n - 1 for o, n in zip(origin_rows, lens) if n > 0), default=-1
+        )
+        if role in major:
+            least = max(max_row + 1, 1)
+            pitch = head_pitch.get(
+                role, least if role in origins else max(sum(rows), 1)
+            )
+            if pitch < least:
+                raise ValueError(
+                    f"role {role}: head pitch {pitch} rows is below maxRow+1 = {least}"
+                )
+            strides = [INT32_MAX, pitch * depth, depth, 1]
+        else:
+            strides = [s_max * token, depth, token, 1]
+        count, space = ragged_footprint(dims, strides, origin_rows, lens)
+        tokens = origin_rows + [
+            max((o + r for o, r in zip(origin_rows, rows) if r > 0), default=0)
+        ]
         if units == "tokens":
-            offsets, multiplier = tokens, stride_s
+            offsets, multiplier = tokens, token
         else:
-            offsets, multiplier = [t * stride_s for t in tokens], 1
-        if offsets[-1] > INT32_MAX:
+            offsets, multiplier = [t * token for t in tokens], 1
+        if max(offsets) > INT32_MAX:
             raise ValueError(f"role {role}: offsets overflow INT32")
         plan[role] = {
             "dims": dims,
@@ -994,28 +1119,34 @@ def plan_ragged(
             "offsets": offsets,
             "multiplier": multiplier,
             "offset_uid": UID_RAGGED_OFFSET[role],
+            "origin_rows": origin_rows,
+            "count": count,
+            "space": space,
         }
     return plan
 
 
-def pack_ragged_role(dense, seq_lens, blocks, pad):
-    """Physical [T, H, D] storage of a dense [B, H, S, D] tensor: each batch's first
-    seq_len rows, then its gap rows taken from `pad` (same shape as dense) or NaN."""
-    parts = []
-    for b, (length, rows) in enumerate(zip(seq_lens, blocks)):
-        live = dense[b].transpose(0, 1)[:length]
-        if rows > length:
-            if pad is None:
-                gap = torch.full(
-                    (rows - length,) + tuple(live.shape[1:]),
-                    float("nan"),
-                    dtype=dense.dtype,
-                )
-            else:
-                gap = pad[b].transpose(0, 1)[length:rows]
-            live = torch.cat([live, gap])
-        parts.append(live)
-    return torch.cat(parts).contiguous()
+def pack_ragged_role(dense, seq_lens, spec, pad):
+    """Physical storage of a dense [B, H, S, D] tensor: exactly spec["space"] elements,
+    batch b's first seq_len rows at its origin by the planned strides. Every other
+    element is NaN (pad None) or finite poison cycled from `pad`."""
+    space = spec["space"]
+    if pad is None:
+        storage = torch.full((space,), float("nan"), dtype=dense.dtype)
+    else:
+        flat = pad.reshape(-1)
+        storage = flat.repeat(-(-space // flat.numel()))[:space]
+    _, heads, _, depth = dense.shape
+    _, stride_h, stride_s, stride_d = spec["strides"]
+    for b, length in enumerate(seq_lens):
+        if length > 0:
+            window = storage.as_strided(
+                (length, heads, depth),
+                (stride_s, stride_h, stride_d),
+                spec["origin_rows"][b] * stride_s,
+            )
+            window.copy_(dense[b, :, :length, :].transpose(0, 1))
+    return storage
 
 
 def ragged_offset_tensor(offsets):
@@ -1050,13 +1181,14 @@ def gather_ragged(flat, entry, offsets, seq_lens):
 
 
 def check_ragged_storage(
-    graph_json, stored, plan, seq_lens_q, seq_lens_kv, scale, keep_mask
+    graph_json, stored, plan, seq_lens_q, seq_lens_kv, scale, keep_mask, lse
 ):
     """Read every tensor back from the storage written to the bundle and check what
-    the harness will see: sequences do not alias, input gaps are finite, output gaps
-    are NaN, dense gradients are zero past their lengths, and the gradients stored for
-    the sequences agree with FP64 autograd of the stored Q, K, V and dO. Returns the
-    worst relative deviation from autograd."""
+    the harness will see: sequences do not alias, each file holds exactly the elements
+    its sequences address, input gaps are finite, output gaps are NaN, dense gradients
+    are zero past their lengths, the Stats read back equal the LSE, and the gradients
+    stored for the sequences agree with FP64 autograd of the stored Q, K, V and dO.
+    Returns the worst relative deviation from autograd."""
     entries = {t["uid"]: t for t in graph_json["tensors"]}
     gathered = {}
     for role, uid in ROLE_UID.items():
@@ -1066,6 +1198,12 @@ def check_ragged_storage(
             dense, covered = gather_ragged(
                 stored[uid], entries[uid], stored[spec["offset_uid"]], lens
             )
+            addressed = int(covered.nonzero().max()) + 1 if bool(covered.any()) else 0
+            if addressed != covered.numel():
+                raise ValueError(
+                    f"{role}: the file holds {covered.numel()} elements but the "
+                    f"sequences address {addressed} (file-size vs elementSpace)"
+                )
             gap = stored[uid].reshape(-1)[~covered]
             if role in ROLE_OUTPUT:
                 if not bool(torch.isnan(gap).all()):
@@ -1079,6 +1217,9 @@ def check_ragged_storage(
                     if bool((dense[b, :, length:, :] != 0).any()):
                         raise ValueError(f"{role}: a padded row is not zero")
         gathered[role] = dense
+    for b, length in enumerate(seq_lens_q):
+        if not torch.equal(gathered["stats"][b, :, :length], lse[b, :, :length]):
+            raise ValueError(f"stats: batch {b} read back differs from the LSE")
     aq, ak, av, _ = autograd_fp64_gradients(
         gathered["q"], gathered["k"], gathered["v"], gathered["do"], scale, keep_mask
     )
@@ -1104,11 +1245,14 @@ def _sweep_tensor_values(tensor):
     return values
 
 
+RAGGED_TEMPLATE_SIDES = {"ragged_qkv": "qkv", "ragged_q": "q", "ragged_kv": "kv"}
+
 TEMPLATE_KINDS = {
     "dense": "SdpaBackwardTest",
     "dense_dbias": "SdpaBackwardBroadcastDBiasTest",
     "ragged_qkv": "SdpaBackwardRaggedTest",
     "ragged_q": "SdpaBackwardRaggedQTest",
+    "ragged_kv": "SdpaBackwardRaggedKvTest",
 }
 
 
@@ -1125,7 +1269,7 @@ def build_sweep_template(kind, scale):
             dims,
             [8, 8],
             [8, 8],
-            "q" if kind == "ragged_q" else "qkv",
+            RAGGED_TEMPLATE_SIDES[kind],
             {},
             "elements",
             "th",
@@ -1307,6 +1451,10 @@ def generate_bundles(
     ragged_blocks=None,
     ragged_units="elements",
     stats_layout="th",
+    ragged_origins=None,
+    ragged_head_major=(),
+    ragged_head_pitch=None,
+    ragged_token_stride=None,
     graph_only=False,
 ):
     # Validated before anything else: the remaining arguments mean different
@@ -1383,6 +1531,21 @@ def generate_bundles(
     ragged = ragged_sides is not None
     extended = padded or ragged or H_q != H_kv or dbias or dropout_p is not None
     ragged_plan = None
+    if stats_layout == "ht" and not ragged:
+        errors.append(
+            "--stats-layout ht needs Stats to be ragged (--ragged-sides q or qkv)"
+        )
+    if not ragged:
+        for flag, given in (
+            ("--ragged-blocks", ragged_blocks),
+            ("--ragged-origins", ragged_origins),
+            ("--ragged-head-major", ragged_head_major),
+            ("--ragged-head-pitch", ragged_head_pitch),
+            ("--ragged-token-stride", ragged_token_stride),
+            ("--ragged-units", ragged_units != "elements"),
+        ):
+            if given:
+                errors.append(f"{flag} requires --ragged-sides")
     if ragged:
         if not padded:
             errors.append("--ragged-sides requires --seq-lens-q and --seq-lens-kv")
@@ -1402,6 +1565,10 @@ def generate_bundles(
                     ragged_blocks or {},
                     ragged_units,
                     stats_layout,
+                    ragged_origins,
+                    ragged_head_major,
+                    ragged_head_pitch,
+                    ragged_token_stride,
                 )
             except ValueError as error:
                 errors.append(str(error))
@@ -1641,6 +1808,17 @@ def generate_bundles(
             "units": ragged_units,
             "stats_layout": stats_layout,
             "blocks": {role: spec["blocks"] for role, spec in ragged_plan.items()},
+            # Only the options a bundle uses, so earlier bundles' metadata is unchanged.
+            **{
+                key: value
+                for key, value in [
+                    ("origins", ragged_origins),
+                    ("head_major", sorted(ragged_head_major)),
+                    ("head_pitch", ragged_head_pitch),
+                    ("token_stride", ragged_token_stride),
+                ]
+                if value
+            },
         }
     config = {
         "q_dims": q_dims,
@@ -1799,7 +1977,7 @@ def generate_bundles(
             packed[ROLE_UID[role]] = pack_ragged_role(
                 dense_by_role[role],
                 lens,
-                spec["blocks"],
+                spec,
                 None if role in ROLE_OUTPUT else gap_source[role],
             )
         backward_tensors = [
@@ -1822,6 +2000,7 @@ def generate_bundles(
             seq_lens_kv,
             attn_scale,
             keep_mask,
+            lse,
         )
         print(
             f"  ragged storage vs fp64 autograd worst relative deviation: {worst:.3e}"
@@ -1845,6 +2024,22 @@ def generate_bundles(
         write_sweep_golden(
             sweep_bundle_dir, case_id, backward_graph, backward_meta, backward_tensors
         )
+
+
+def role_values(parser, flag, items, count=None):
+    """ROLE=N,N,.. items as {role: [int]}; `count`, when given, is the required number
+    of values per role."""
+    values = {}
+    for item in items:
+        role, _, numbers = item.partition("=")
+        try:
+            parsed = [int(n) for n in numbers.split(",")]
+        except ValueError:
+            parser.error(f"{flag} expects ROLE=N,N,.. (got {item!r})")
+        if count is not None and len(parsed) != count:
+            parser.error(f"{flag} expects ROLE=N (got {item!r})")
+        values[role] = parsed
+    return values
 
 
 def main():
@@ -1973,10 +2168,11 @@ def main():
     )
     parser.add_argument(
         "--ragged-sides",
-        choices=["q", "qkv"],
+        choices=["q", "kv", "qkv"],
         default=None,
         help="Make operands ragged: q = Q, O, dO, dQ and Stats (K, V, dK, dV dense); "
-        "qkv = every operand. Requires --seq-lens-q and --seq-lens-kv.",
+        "kv = K, V, dK and dV (the rest dense); qkv = every operand. Requires "
+        "--seq-lens-q and --seq-lens-kv.",
     )
     parser.add_argument(
         "--ragged-blocks",
@@ -1999,8 +2195,42 @@ def main():
         "--stats-layout",
         choices=["th", "ht"],
         default="th",
-        help="Packed Stats of a ragged Q: th = [T, H], ht = [H, T] (the harness's "
-        "ragged tensor holds ht only with H_q == 1)",
+        help="Packed Stats of a ragged Q: th = [T, H], ht = [H, T] (head-major; "
+        "the same as --ragged-head-major stats)",
+    )
+    parser.add_argument(
+        "--ragged-origins",
+        action="append",
+        default=[],
+        metavar="ROLE=N,N,..",
+        help="Per-batch origins of one ragged role, in --ragged-units, each a whole "
+        "token. The batches need not be in order; the file spans to the last row "
+        "any sequence addresses. Default: the blocks one after the other. "
+        "Repeatable.",
+    )
+    parser.add_argument(
+        "--ragged-head-major",
+        action="append",
+        default=[],
+        metavar="ROLE,ROLE,..",
+        help="Ragged roles laid out head-major [H, T]: token stride D, head stride "
+        "= head pitch rows * D. Repeatable.",
+    )
+    parser.add_argument(
+        "--ragged-head-pitch",
+        action="append",
+        default=[],
+        metavar="ROLE=N",
+        help="Head pitch in token rows of a head-major role, >= maxRow+1. Default: "
+        "maxRow+1 with --ragged-origins, else the sum of the blocks. Repeatable.",
+    )
+    parser.add_argument(
+        "--ragged-token-stride",
+        action="append",
+        default=[],
+        metavar="ROLE=N",
+        help="Token stride in elements of a token-major role, >= H*D (a fused or "
+        "padded token). Repeatable.",
     )
     parser.add_argument(
         "--graph-only",
@@ -2034,12 +2264,23 @@ def main():
             parser.error(f"{flag} is required")
     if args.forward_base_filename is None and not args.graph_only:
         parser.error("--forward-base-filename is required")
-    ragged_blocks = {}
-    for item in args.ragged_blocks:
-        role, _, rows = item.partition("=")
-        if not rows:
-            parser.error(f"--ragged-blocks expects ROLE=N,N,.. (got {item!r})")
-        ragged_blocks[role] = [int(n) for n in rows.split(",")]
+    ragged_blocks = role_values(parser, "--ragged-blocks", args.ragged_blocks)
+    ragged_origins = role_values(parser, "--ragged-origins", args.ragged_origins)
+    ragged_head_pitch = {
+        role: values[0]
+        for role, values in role_values(
+            parser, "--ragged-head-pitch", args.ragged_head_pitch, count=1
+        ).items()
+    }
+    ragged_token_stride = {
+        role: values[0]
+        for role, values in role_values(
+            parser, "--ragged-token-stride", args.ragged_token_stride, count=1
+        ).items()
+    }
+    ragged_head_major = [
+        role for item in args.ragged_head_major for role in item.split(",")
+    ]
 
     generate_bundles(
         base_filename=args.base_filename,
@@ -2065,6 +2306,10 @@ def main():
         dropout_p=args.dropout_p,
         ragged_sides=args.ragged_sides,
         ragged_blocks=ragged_blocks,
+        ragged_origins=ragged_origins,
+        ragged_head_major=ragged_head_major,
+        ragged_head_pitch=ragged_head_pitch,
+        ragged_token_stride=ragged_token_stride,
         ragged_units=args.ragged_units,
         stats_layout=args.stats_layout,
         graph_only=args.graph_only,

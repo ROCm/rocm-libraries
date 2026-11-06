@@ -127,6 +127,17 @@ inline SdpaBwdSpec valueHeadsSpec(int64_t valueHeads)
     });
 }
 
+/// A graph whose bias, in Q's dtype @p queryType, has rows @p rowPitch elements apart, with a
+/// dBias of the same layout when @p withDbias.
+inline SdpaBwdSpec biasRowPitchSpec(DataType queryType, int64_t rowPitch, bool withDbias)
+{
+    SdpaBwdSpec spec;
+    spec.dtype = queryType;
+    return spec.withEdit([=](SdpaBwdGraph& g) {
+        addBroadcastBias(g, false, false, withDbias, std::nullopt, rowPitch);
+    });
+}
+
 inline const std::vector<ParityCase>& parityCases()
 {
     constexpr auto HALF = DataType::HALF;
@@ -209,24 +220,76 @@ inline const std::vector<ParityCase>& parityCases()
         list.push_back(served("ComputesAGenericHeadDim240",
                               withMask(caseOf(BF16, 240, 140, 140, 4, 2), BwdMask::TOP_LEFT)));
 
-        // 7. A per-head bias at head dim 128, and biases in the query dtype. The contract admits
-        // only the query's dtype (BI-2); an f32 bias beside a 16-bit query is declined.
+        // 7. A per-head bias at head dim 128, and biases in the query dtype, or an f32 bias beside
+        // a 16-bit query (the split engine opts into it; the merged engine declines it).
         auto perHead = withBias(caseOf(HALF, 128, 70, 150));
         perHead.biasOverBatch = true;
         list.push_back(served("AddsAPerHeadBiasAtHeadDim128", perHead));
         list.push_back(served("AddsABiasInTheQueryDtype", withBias(caseOf(BF16, 64, 77, 99))));
         list.push_back(served("AddsAnFp32BiasToAnFp32Query", withBias(caseOf(FP32, 64, 77, 99))));
-        list.push_back(declined(
-            "DeclinesAnFp32BiasBesideAHalfQuery", biasOfTypeSpec(HALF, FP32), "BI-2", "attn_mask"));
-        list.push_back(declined(
-            "DeclinesAnFp32BiasBesideABf16Query", biasOfTypeSpec(BF16, FP32), "BI-2", "attn_mask"));
+        auto fp32BiasHalf = withBias(caseOf(HALF, 64, 77, 99));
+        fp32BiasHalf.biasType = DataType::FLOAT;
+        fp32BiasHalf.dbias = false;
+        list.push_back(served("ServesAnFp32BiasBesideAHalfQuery", fp32BiasHalf));
+        auto fp32BiasBf16 = withBias(caseOf(BF16, 64, 77, 99));
+        fp32BiasBf16.biasType = DataType::FLOAT;
+        fp32BiasBf16.dbias = false;
+        list.push_back(served("ServesAnFp32BiasBesideABf16Query", fp32BiasBf16));
+        auto fp32BiasWithDbias = withBias(caseOf(HALF, 64, 77, 99));
+        fp32BiasWithDbias.biasType = DataType::FLOAT;
+        list.push_back(served("ServesAnFp32BiasAndDbiasBesideAHalfQuery", fp32BiasWithDbias));
+        // The dBias has Q's strides; one whose rows are not a whole vector apart is declined
+        // (BI-9) whatever the bias's own pitch.
+        list.push_back(declined("DeclinesADbiasWhoseRowsAreNotAWholeVectorApart",
+                                biasRowPitchSpec(HALF, 100, true),
+                                "BI-9",
+                                "layout"));
+        auto unalignedPitch = withBias(caseOf(BF16, 64, 77, 99));
+        unalignedPitch.biasPitch = 100;
+        list.push_back(declined("DeclinesABiasPitchThatLeavesTheDbiasUnaligned",
+                                specOf(unalignedPitch),
+                                "BI-9",
+                                "layout"));
 
         // 8. Grouped and multi-query attention, and a V with heads of its own.
         list.push_back(served("ReadsKAndVThroughTheirHeadGroups",
                               withMask(caseOf(BF16, 64, 100, 100, 8, 2), BwdMask::TOP_LEFT)));
         list.push_back(served("ReadsKAndVThroughOneHeadForAMultiQueryGroup",
                               caseOf(HALF, 64, 100, 100, 8, 1)));
-        list.push_back(declined("DeclinesAVWithHeadsOfItsOwn", valueHeadsSpec(2), "SH-1"));
+        // V heads that differ from K's: served when Hq is a multiple of both and the graph has
+        // no bias, is not fp32 and is not ragged (the split engine; the merged engine declines).
+        auto valueHeadsOfItsOwn = caseOf(HALF, 64, 100, 100, 8, 8);
+        valueHeadsOfItsOwn.valueHeads = 2;
+        list.push_back(served("ServesAVWithHeadsOfItsOwn", valueHeadsOfItsOwn));
+        auto valueHeads = caseOf(BF16, 64, 100, 100, 8, 2);
+        valueHeads.valueHeads = 4;
+        list.push_back(served("ServesAVWithMoreHeadsThanKUnderGroupedQueries", valueHeads));
+        auto valueHeadsCausal = withMask(caseOf(BF16, 128, 96, 96, 32, 8), BwdMask::TOP_LEFT);
+        valueHeadsCausal.valueHeads = 4;
+        list.push_back(
+            served("ServesAVWithFewerHeadsThanKUnderCausalGroupedQueries", valueHeadsCausal));
+        auto valueHeadsWithBias = withBias(caseOf(HALF, 64, 100, 100, 8, 4));
+        valueHeadsWithBias.valueHeads = 2;
+        list.push_back(
+            declined("DeclinesVHeadsOfItsOwnWithABias", specOf(valueHeadsWithBias), "SH-1"));
+        auto valueHeadsFp32 = caseOf(FP32, 64, 100, 100, 8, 4);
+        valueHeadsFp32.valueHeads = 2;
+        list.push_back(declined("DeclinesVHeadsOfItsOwnUnderFp32", specOf(valueHeadsFp32), "SH-1"));
+        list.push_back(declined("DeclinesVHeadsOfItsOwnWithRaggedKeys",
+                                valueHeadsSpec(2).withEdit([](SdpaBwdGraph& g) {
+                                    addSeqLens(g);
+                                    for(const char* name : {"k", "v", "dk", "dv"})
+                                    {
+                                        addRagged(g, name, 1);
+                                    }
+                                }),
+                                "SH-1"));
+        auto valueHeadsNotDividing = caseOf(HALF, 64, 100, 100, 8, 8);
+        valueHeadsNotDividing.valueHeads = 3;
+        list.push_back(declined("DeclinesQueryHeadsThatAreNotAMultipleOfTheValueHeads",
+                                specOf(valueHeadsNotDividing),
+                                "DT-6",
+                                "gqa"));
 
         // 9. Layouts: head-major against sequence-major strides, packed QKV views, and V, dO and
         // the log-sum-exp through layouts of their own.

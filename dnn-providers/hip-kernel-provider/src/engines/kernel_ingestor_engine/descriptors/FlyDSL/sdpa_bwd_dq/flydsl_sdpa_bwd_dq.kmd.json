@@ -72,6 +72,10 @@
       "type": "string"
     },
     {
+      "name": "bias_f32",
+      "type": "int"
+    },
+    {
       "name": "reduce_symbol",
       "type": "string"
     },
@@ -81,7 +85,15 @@
       "default_value": 256
     },
     {
+      "name": "bias_stage_resolved",
+      "type": "string"
+    },
+    {
       "name": "grid",
+      "type": "string"
+    },
+    {
+      "name": "u2_role",
       "type": "string"
     }
   ]

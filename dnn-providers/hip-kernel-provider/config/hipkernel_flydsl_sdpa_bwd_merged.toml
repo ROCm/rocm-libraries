@@ -32,3 +32,11 @@ rtol = 5e-3
 filters = ["*_SdpaBackward_*.*_bfp16_*", "*_SdpaBackward_*.*_bf16_*", "*_SdpaBackward_*_bf16_*.*"]
 atol = 1e-2
 rtol = 1e-2
+
+# Class U (plan sdpa-bwd.md §6.1: unscaled or high-spread logits; the case id ends `_tolu`): |dS| reaches 3 to 4.5, and rounding dS to bf16 before the
+# dQ/dK MFMA moves a gradient element by up to 0.026 (model, up to 0.035 by the worst-case bound), above the 1e-2 bound. atol 4e-2, rtol 1.6e-2 (two bf16 ulps).
+# The tolerance of every other bf16 case is unchanged.
+[[tolerance_overrides]]
+filters = ["*_SdpaBackward_*.*_bfp16_*_tolu"]
+atol = 4e-2
+rtol = 1.6e-2

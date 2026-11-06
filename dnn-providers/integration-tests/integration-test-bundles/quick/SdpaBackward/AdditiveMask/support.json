@@ -3,8 +3,7 @@
     "hipkernel:flydsl_sdpa_bwd_merged": [
       {
         "cases": [
-          "golden_1_1_128_128_bf16_nomask",
-          "golden_1_1_128_128_fp16_nomask"
+          "reg07a_b1h2k2v2_64x96_d128_bfp16_none_biasm4to0_bias11io_told"
         ],
         "support": {
           "gfx950": [
@@ -16,8 +15,7 @@
     "hipkernel:flydsl_sdpa_bwd_split": [
       {
         "cases": [
-          "golden_1_1_128_128_bf16_nomask",
-          "golden_1_1_128_128_fp16_nomask"
+          "reg07a_b1h2k2v2_64x96_d128_bfp16_none_biasm4to0_bias11io_told"
         ],
         "support": {
           "gfx1100": [

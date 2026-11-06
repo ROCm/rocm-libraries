@@ -48,6 +48,20 @@ constexpr float TWO_POW_20 = 1048576.0F;
 /// The options of an engine that serves fp32.
 constexpr MatchOptions ACCEPT_FLOAT{true};
 
+/// The options of an engine that serves an f32 bias beside a 16-bit query.
+constexpr MatchOptions ACCEPT_F32_BIAS = [] {
+    MatchOptions options;
+    options.acceptF32Bias = true;
+    return options;
+}();
+
+/// The options of an engine that serves V heads of their own.
+constexpr MatchOptions ACCEPT_VALUE_HEADS = [] {
+    MatchOptions options;
+    options.acceptValueHeads = true;
+    return options;
+}();
+
 /// The problem the matcher computed, or a failure carrying its decline.
 std::optional<SdpaBwdProblem> accepted(const SdpaBwdSpec& spec, const MatchOptions& options = {})
 {
@@ -1629,6 +1643,183 @@ TEST(TestFlydslSdpaBwdMatcher, BI2BiasDtypeOtherThanQsDeclines)
         [](SdpaBwdGraph& g) { addBias(g).dtype = data_objects::DataType::HALF; })));
 }
 
+TEST(TestFlydslSdpaBwdMatcher, BI2AnF32BiasBesideA16BitQueryNeedsTheEnginesOptIn)
+{
+    const auto f32Bias = [](data_objects::DataType queryType, bool withDbias) {
+        SdpaBwdSpec spec;
+        spec.dtype = queryType;
+        return spec.withEdit([=](SdpaBwdGraph& g) {
+            addBias(g).dtype = data_objects::DataType::FLOAT;
+            if(withDbias)
+            {
+                addDbias(g);
+            }
+        });
+    };
+    for(const auto queryType : {data_objects::DataType::HALF, data_objects::DataType::BFLOAT16})
+    {
+        SCOPED_TRACE(static_cast<int>(queryType));
+        declined(f32Bias(queryType, false),
+                 "attn_mask",
+                 "does not accept an f32 bias beside a 16-bit Q");
+        declined(f32Bias(queryType, false),
+                 "attn_mask",
+                 "does not accept an f32 bias beside a 16-bit Q",
+                 ACCEPT_FLOAT);
+        const auto problem = accepted(f32Bias(queryType, true), ACCEPT_F32_BIAS);
+        ASSERT_TRUE(problem.has_value());
+        // The bias and dBias are 4 bytes wide beside a 2-byte query; the dBias keeps the bias's
+        // dtype (BI-7).
+        EXPECT_EQ(problem->elementBytes, 2U);
+        EXPECT_EQ(problem->biasElementBytes, 4U);
+        EXPECT_EQ(problem->dbiasUid, sdpa_bwd_uid::DBIAS);
+    }
+    // Only FLOAT beside a 16-bit Q is opened: another dtype still declines, as does a FLOAT
+    // bias beside a query that is neither.
+    declined(baseline().withEdit(
+                 [](SdpaBwdGraph& g) { addBias(g).dtype = data_objects::DataType::BFLOAT16; }),
+             "attn_mask",
+             "bias (uid 11) is BFLOAT16, but Q is HALF",
+             ACCEPT_F32_BIAS);
+    declined(baseline().withEdit(
+                 [](SdpaBwdGraph& g) { addBias(g).dtype = data_objects::DataType::BOOLEAN; }),
+             "attn_mask",
+             "BOOLEAN",
+             ACCEPT_F32_BIAS);
+    // A FLOAT bias beside a FLOAT query is the query's dtype and needs no opt-in beyond FLOAT.
+    const auto fp32
+        = accepted(fp32Spec().withEdit([](SdpaBwdGraph& g) { addBias(g); }), ACCEPT_FLOAT);
+    ASSERT_TRUE(fp32.has_value());
+    EXPECT_EQ(fp32->biasElementBytes, 4U);
+    // A 16-bit bias is 2 bytes, and a graph without one reads the query's width.
+    const auto half = accepted(baseline().withEdit([](SdpaBwdGraph& g) { addBias(g); }));
+    ASSERT_TRUE(half.has_value());
+    EXPECT_EQ(half->biasElementBytes, 2U);
+    const auto none = accepted(fp32Spec(), ACCEPT_FLOAT);
+    ASSERT_TRUE(none.has_value());
+    EXPECT_EQ(none->biasElementBytes, 4U);
+    // A mask or padding with an f32 bias declines as with any bias (MW-10, PV-10).
+    declined(baseline().withEdit([](SdpaBwdGraph& g) {
+        addBias(g).dtype = data_objects::DataType::FLOAT;
+        g.attributes.causalMask = true;
+    }),
+             "mask",
+             "a causal or window mask with bias",
+             ACCEPT_F32_BIAS);
+    declined(baseline().withEdit([](SdpaBwdGraph& g) {
+        addBias(g).dtype = data_objects::DataType::FLOAT;
+        addSeqLens(g);
+    }),
+             "varlen",
+             "with padding_mask",
+             ACCEPT_F32_BIAS);
+}
+
+TEST(TestFlydslSdpaBwdMatcher,
+     BI9AnF32DbiasStrideIsAMultipleOfFourElementsAndTheSlabIsBoundedAtFourBytes)
+{
+    const auto f32DbiasRowStride = [](int64_t rowStride) {
+        return baseline().withEdit([rowStride](SdpaBwdGraph& g) {
+            addBias(g).dtype = data_objects::DataType::FLOAT;
+            addDbias(g).strides
+                = {int64_t{8} * 16 * rowStride, int64_t{16} * rowStride, rowStride, 1};
+        });
+    };
+    // 20 elements are 80 bytes: whole 16-byte vectors of FLOAT, though not of f16.
+    const auto problem = accepted(f32DbiasRowStride(20), ACCEPT_F32_BIAS);
+    ASSERT_TRUE(problem.has_value());
+    expectStrides(problem->dbiasStrides, int64_t{8} * 16 * 20, int64_t{16} * 20, 20);
+    declined(f32DbiasRowStride(18),
+             "layout",
+             "dBias (uid 12) stride 18 on axis 2 (extent 16) is not a non-negative multiple of 4 "
+             "elements",
+             ACCEPT_F32_BIAS);
+
+    // 15 rows at the stride plus the key row, at 4 bytes each beside an f16 query: the bound
+    // that serves an f16 bias at twice the stride.
+    const auto withBiasStride = [](data_objects::DataType biasType, int64_t seqStride) {
+        return baseline().withEdit([=](SdpaBwdGraph& g) {
+            auto& bias = addBias(g);
+            bias.dtype = biasType;
+            bias.strides[2] = seqStride;
+        });
+    };
+    EXPECT_TRUE(accepted(withBiasStride(data_objects::DataType::FLOAT, 35791392), ACCEPT_F32_BIAS));
+    declined(withBiasStride(data_objects::DataType::FLOAT, 35791408),
+             "layout",
+             "bias (uid 11) per-head slab",
+             ACCEPT_F32_BIAS);
+    EXPECT_TRUE(accepted(withBiasStride(data_objects::DataType::HALF, 35791408)));
+}
+
+TEST(TestFlydslSdpaBwdMatcher, SH1ValueHeadsOfTheirOwnNeedTheEnginesOptInAndTheirConditions)
+{
+    const auto valueHeads = [](int64_t kvHeads, int64_t heads) {
+        return baseline().withEdit([=](SdpaBwdGraph& g) {
+            g.tensor("k").dims[1] = kvHeads;
+            g.tensor("dk").dims[1] = kvHeads;
+            g.tensor("v").dims[1] = heads;
+            g.tensor("dv").dims[1] = heads;
+        });
+    };
+    // Without the opt-in V's heads must equal K's.
+    declined(valueHeads(4, 2), "shape", "V (uid 3) dims [2,2,16,64] != [2,4,16,64]");
+    declined(valueHeads(4, 2), "shape", "V (uid 3)", ACCEPT_F32_BIAS);
+    const auto problem = accepted(valueHeads(4, 2), ACCEPT_VALUE_HEADS);
+    ASSERT_TRUE(problem.has_value());
+    EXPECT_EQ(problem->numHeads, 8);
+    EXPECT_EQ(problem->numKvHeads, 4);
+    EXPECT_EQ(problem->numVHeads, 2);
+    // V heads above K's are served too while Hq divides by both.
+    EXPECT_EQ(accepted(valueHeads(2, 4), ACCEPT_VALUE_HEADS)->numVHeads, 4);
+    // With the opt-in, V heads that equal K's are the old graph.
+    EXPECT_EQ(accepted(valueHeads(4, 4), ACCEPT_VALUE_HEADS)->numVHeads, 4);
+    EXPECT_EQ(accepted(baseline())->numVHeads, 8);
+
+    // dV has V's dims, not K's.
+    declined(baseline().withEdit([](SdpaBwdGraph& g) {
+        g.tensor("v").dims[1] = 2;
+        g.tensor("dv").dims[1] = 4;
+    }),
+             "shape",
+             "dV (uid 9)",
+             ACCEPT_VALUE_HEADS);
+    // Hq must be a multiple of Hv as well as of Hk.
+    declined(valueHeads(4, 3), "gqa", "are not a multiple of value heads 3", ACCEPT_VALUE_HEADS);
+    declined(
+        valueHeads(3, 2), "gqa", "are not a multiple of key/value heads 3", ACCEPT_VALUE_HEADS);
+    // No bias, not FLOAT, not ragged.
+    declined(valueHeads(4, 2).withEdit([](SdpaBwdGraph& g) { addBias(g); }),
+             "shape",
+             "differ from key heads 4 with a bias",
+             ACCEPT_VALUE_HEADS);
+    declined(fp32Spec().withEdit([](SdpaBwdGraph& g) {
+        g.tensor("k").dims[1] = 4;
+        g.tensor("dk").dims[1] = 4;
+        g.tensor("v").dims[1] = 2;
+        g.tensor("dv").dims[1] = 2;
+    }),
+             "shape",
+             "differ from key heads 4 under FLOAT",
+             flydsl_sdpa_bwd::SPLIT_MATCH_OPTIONS);
+    declined(valueHeads(4, 2).withEdit([](SdpaBwdGraph& g) {
+        addSeqLens(g);
+        addRagged(g, "k", 1);
+        addRagged(g, "v", 1);
+        addRagged(g, "dk", 1);
+        addRagged(g, "dv", 1);
+    }),
+             "shape",
+             "with a ragged tensor",
+             ACCEPT_VALUE_HEADS);
+    // Padding and a mask are served.
+    EXPECT_TRUE(accepted(valueHeads(4, 2).withEdit([](SdpaBwdGraph& g) { addSeqLens(g); }),
+                         ACCEPT_VALUE_HEADS));
+    EXPECT_TRUE(
+        accepted(valueHeads(4, 2).withEdit([](SdpaBwdGraph& g) { g.attributes.causalMask = true; }),
+                 ACCEPT_VALUE_HEADS));
+}
+
 TEST(TestFlydslSdpaBwdMatcher, BI3BiasBroadcastOverBatchOrHeadWithDbiasAccepts)
 {
     auto problem = accepted(baseline().withEdit([](SdpaBwdGraph& g) {
@@ -1725,7 +1916,7 @@ TEST(TestFlydslSdpaBwdMatcher, BI9DbiasStridesOfNonUnitAxesNeedAMultipleOfTheVec
              "layout",
              "dBias (uid 12) stride 20 on axis 2 (extent 16) is not a non-negative multiple of 8 "
              "elements");
-    // The input bias at the same stride is the engine's staging rule (BI-8), not the matcher's.
+    // The input bias at the same stride is the engine's chunk contract, not the matcher's.
     EXPECT_TRUE(accepted(baseline().withEdit([](SdpaBwdGraph& g) {
         addBias(g).strides = {int64_t{8} * 16 * 20, int64_t{16} * 20, 20, 1};
         addDbias(g).strides = {int64_t{8} * 16 * 24, int64_t{16} * 24, 24, 1};
@@ -1824,7 +2015,7 @@ TEST(TestFlydslSdpaBwdMatcher, DR3ProbabilityNeedsBothSeedAndOffsetAndTheyNeedPr
 TEST(TestFlydslSdpaBwdMatcher, DR4Int32AndInt64SeedAndOffsetAcceptAndRecordTheWidth)
 {
     auto problem = accepted(baseline().withEdit(
-        [](SdpaBwdGraph& g) { addDropout(g, 0.2F, data_objects::DataType::INT32); }));
+        [](SdpaBwdGraph& g) { addDropout(g, 0.2F, data_objects::DataType::INT32, true); }));
     ASSERT_TRUE(problem.has_value());
     EXPECT_EQ(problem->seedWidth, SeedWidth::INT32);
 
@@ -1838,11 +2029,40 @@ TEST(TestFlydslSdpaBwdMatcher, DR4Int32AndInt64SeedAndOffsetAcceptAndRecordTheWi
              "dropout",
              "is FLOAT, not INT32 or INT64");
     declined(baseline().withEdit([](SdpaBwdGraph& g) {
-        addDropout(g, 0.2F, data_objects::DataType::INT64);
+        addDropout(g, 0.2F, data_objects::DataType::INT64, true);
         g.tensor("offset").dtype = data_objects::DataType::INT32;
     }),
              "dropout",
              "seed (uid 15) is INT64 but offset (uid 16) is INT32");
+}
+
+TEST(TestFlydslSdpaBwdMatcher, DR4ADeviceInt32SeedOrOffsetDeclinesAndAPassByValueInt32IsServed)
+{
+    // The kernels read 8 bytes at a device seed or offset, as the forward engine's do.
+    declined(baseline().withEdit(
+                 [](SdpaBwdGraph& g) { addDropout(g, 0.2F, data_objects::DataType::INT32); }),
+             "dropout",
+             "seed (uid 15) is a device INT32 tensor");
+    declined(baseline().withEdit([](SdpaBwdGraph& g) {
+        addDropout(g);
+        g.tensor("offset").dtype = data_objects::DataType::INT32;
+    }),
+             "dropout",
+             "offset (uid 16) is a device INT32 tensor");
+    // A constant or runtime pass-by-value INT32 is served.
+    const auto constant = accepted(baseline().withEdit(
+        [](SdpaBwdGraph& g) { addDropout(g, 0.2F, data_objects::DataType::INT32, true); }));
+    ASSERT_TRUE(constant.has_value());
+    EXPECT_EQ(constant->seedForm, SeedForm::PASS_BY_VALUE);
+    EXPECT_EQ(constant->seedWidth, SeedWidth::INT32);
+    const auto runtime = accepted(baseline().withEdit([](SdpaBwdGraph& g) {
+        addDropout(g, 0.2F, data_objects::DataType::INT32);
+        g.tensor("seed").runtimePassByValue = true;
+        g.tensor("offset").runtimePassByValue = true;
+    }));
+    ASSERT_TRUE(runtime.has_value());
+    EXPECT_EQ(runtime->seedForm, SeedForm::PASS_BY_VALUE);
+    EXPECT_EQ(runtime->seedWidth, SeedWidth::INT32);
 }
 
 TEST(TestFlydslSdpaBwdMatcher, DR6SeedAndOffsetAsDeviceOrPassByValueScalarsAccept)
@@ -1913,14 +2133,18 @@ TEST(TestFlydslSdpaBwdMatcher, DR6SeedAndOffsetOfAnyRankWithEveryExtentOneAccept
         {
             const auto width
                 = type == data_objects::DataType::INT32 ? SeedWidth::INT32 : SeedWidth::INT64;
-            // Device, constant-valued and runtime pass-by-value.
-            auto problem = accepted(baseline().withEdit([=](SdpaBwdGraph& g) {
-                addDropout(g, 0.2F, type, false);
-                rank(g);
-            }));
-            ASSERT_TRUE(problem.has_value());
-            EXPECT_EQ(problem->seedForm, SeedForm::DEVICE);
-            EXPECT_EQ(problem->seedWidth, width);
+            // Device (INT64 only), constant-valued and runtime pass-by-value.
+            std::optional<SdpaBwdProblem> problem;
+            if(type == data_objects::DataType::INT64)
+            {
+                problem = accepted(baseline().withEdit([=](SdpaBwdGraph& g) {
+                    addDropout(g, 0.2F, type, false);
+                    rank(g);
+                }));
+                ASSERT_TRUE(problem.has_value());
+                EXPECT_EQ(problem->seedForm, SeedForm::DEVICE);
+                EXPECT_EQ(problem->seedWidth, width);
+            }
             problem = accepted(baseline().withEdit([=](SdpaBwdGraph& g) {
                 addDropout(g, 0.2F, type, true);
                 rank(g);
@@ -1947,8 +2171,7 @@ TEST(TestFlydslSdpaBwdMatcher, DR8DeviceSeedAndOffsetMustBeDenseAndAlignedToThei
         data_objects::DataType type;
         int64_t elementBytes;
     };
-    for(const Case entry :
-        {Case{data_objects::DataType::INT32, 4}, Case{data_objects::DataType::INT64, 8}})
+    for(const Case entry : {Case{data_objects::DataType::INT64, 8}})
     {
         const auto type = entry.type;
         const auto elementBytes = entry.elementBytes;

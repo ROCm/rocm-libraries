@@ -42,11 +42,16 @@ showed more than one whole-object sha (the pin counted) or any ``dual_object``. 
 renderer installs no list, and the in-tree list is the authority. The policy, applied by ``generate`` (and ``tools/sdpa_bwd_gate.py``
 for the combined rows):
 
-* A listed standalone row ships its pin (``ship: pin``, ``pin_reason: nondeterministic``). Its build runs once, for the manifest
-  (``rebuilt_sha256``), is never retried, and a ``dual_object`` build is no error.
-* A listed combined row (the dB-storing ``bias`` rows below) passes ``pin_gate`` when its main-function sha is the pin's or one of its
-  ``variant_function_sha256s`` and its resource rows equal the pin's. A ``dual_object`` build, or a red per-kernel gate, is rebuilt in a
-  fresh process up to ``_ATTEMPTS`` builds in all.
+* Every listed row ships its stored pin; a variant is a build-gate tolerance and is never shipped (so no variant needs device validation).
+  A listed standalone row ships the sweep's pin (``ship: pin``, ``pin_reason: nondeterministic``). Its build runs once, for the manifest
+  (``rebuilt_sha256``), is never retried, and a ``dual_object`` build is no error; a rebuild that exists must be the pin or a recorded
+  variant, by whole object (``variant_sha256s``) or by main function (``variant_function_sha256s``), else the run stops (C9: the list is incomplete).
+* A listed combined row (the dB-storing ``bias`` rows below) ships the combined object stored in the shipped content: the file and sha256
+  its ``manifest.json`` records (``stored_dir``, ``--stored-dir``: the content root as it was before the regeneration, kept aside because the
+  run needs an empty output directory). A missing object, or one whose sha256 disagrees with its manifest, stops the run. Its rebuild must still
+  pass ``pin_gate`` (main-function sha the pin's or one of its ``variant_function_sha256s``, resources unchanged); a ``dual_object`` build, or a
+  red per-kernel gate, is rebuilt in a fresh process up to ``_ATTEMPTS`` builds in all. The manifest records the rebuild's ``pin_gate`` and
+  ``rebuilt_sha256``; the object's own R-MIR scan was made when it was first built, so the record says ``not scanned``.
 * An unlisted row whose build differs from its pin (a standalone object that is not the pin, or a combined row whose gate is red), or
   that is still ``dual_object`` after ``_ATTEMPTS`` builds, stops the run: the list is incomplete. The fix is to sample the row and list it
   (``python -m generators._sdpa_bwd_nondet merge``), never to retry harder.
@@ -128,6 +133,7 @@ from ._sdpa_bwd_spec import (  # noqa: F401  (LADDER is part of this module's su
     KERNELS,
     LADDER,
     Spec,
+    U2_SYMBOLS,
     dbias_reduce_spec,
     rung_below,
     to_spec,
@@ -489,6 +495,19 @@ _PARAMS: dict[str, tuple[tuple[str, str], ...]] = {
     ),
 }
 
+
+def _with_num_head_v(
+    params: tuple[tuple[str, str], ...],
+) -> tuple[tuple[str, str], ...]:
+    """@p params with the V head count after ``num_head_k``: it fills the 4-byte hole before the first i64 stride, so the kernarg size is unchanged."""
+    at = params.index(("num_head_k", "i32")) + 1
+    return (*params[:at], ("num_head_v", "i32"), *params[at:])
+
+
+# The value-head split objects (``u2``: Hk != Hv) take ``num_head_v``: ``dkdv_u2`` for ``u2=dk`` and ``u2=dv``, ``dq_u2`` for ``u2=dq``.
+_PARAMS["dkdv_u2"] = _with_num_head_v(_PARAMS["dkdv"])
+_PARAMS["dq_u2"] = _with_num_head_v(_PARAMS["dq"])
+
 # Threads per workgroup. The prep and reduce kernels fix it; the dK/dV, dQ and merged
 # kernels run `num_waves * 64`, which the policy resolves unless the Spec sets it.
 _FIXED_BLOCK = {"prep": 256, "dbias_reduce": 256, "dsink_reduce": 64}
@@ -496,7 +515,7 @@ _FIXED_BLOCK = {"prep": 256, "dbias_reduce": 256, "dsink_reduce": 64}
 # Launch grid, as the launchers' `.launch(grid=...)` compute it (`seqs` is `num_seqlens`
 # when non-zero, else the batch size):
 #   prep          (ceil(max_seqlen_q / rows_per_block), num_head_q, seqs)
-#   dkdv          (num_head_k, ceil(max_seqlen_k / BLOCK_KV), seqs)
+#   dkdv          (num_head_k, ceil(max_seqlen_k / BLOCK_KV), seqs)   (dV-only, ``u2=dv``: num_head_v in x)
 #   dq            (num_head_q, ceil(max_seqlen_q / BLOCK_M), seqs)
 #   merged        (seqs * (num_head_k * kv_blocks + num_head_q * q_blocks), 1, 1)
 #   dbias_reduce  (blocks over the plane, planes, 1)
@@ -515,6 +534,19 @@ _GRID_RULE = {
 _LDS_LIMIT_BYTES = 163840
 
 
+# The dV-only object (``u2=dv``) runs one workgroup column per V head.
+_GRID_RULE_DVONLY = "vheads_by_kvblocks_by_seqs"
+
+
+def grid_rule_of(spec: Spec) -> str:
+    """The launch grid spelling of @p spec's object (``_GRID_RULE`` of its kernel, the V-head one for the dV-only object)."""
+    return (
+        _GRID_RULE_DVONLY
+        if spec.kernel == "dkdv" and spec.u2 == "dv"
+        else _GRID_RULE[spec.kernel]
+    )
+
+
 def op_of(spec: Spec) -> str:
     return f"sdpa_bwd_{spec.kernel}"
 
@@ -522,10 +554,11 @@ def op_of(spec: Spec) -> str:
 def reduce_symbol_of(spec: Spec) -> str:
     """The dBias reduce kernel the object of @p spec carries beside its own: the dB-storing ``bias`` objects of the merged and dQ kernels.
 
-    An fp32 bias dQ object always stores dB (``store_db`` is not an fp32 knob), so it always carries the fp32 reduce.
+    An fp32 bias dQ object always stores dB (``store_db`` is not an fp32 knob), so it always carries the fp32 reduce; the reduce is keyed by the
+    dtype of the bias (dB takes it), so a ``bias_f32`` object beside 16-bit Q carries the fp32 reduce too.
     """
     return (
-        SDPA_BWD_REDUCE_SYMBOL[spec.dtype]
+        SDPA_BWD_REDUCE_SYMBOL[spec.bias_dtype]
         if spec.kernel in ("merged", "dq") and spec.cls == "bias" and spec.store_db != 0
         else ""
     )
@@ -536,7 +569,8 @@ def geometry_of(built: Built) -> dict:
 
     The resolved values: the fields replace the rows' ``-1`` knobs. The prep and reduce kernels have a fixed block; the engine derives it.
     A packed dK/dV row (``gqa_pack``) and a merged row also carry ``block_q``, the dK/dV role's resolved q tile: the packed tile the
-    engine and the descriptor generator bound by ``PACK_MAX_BLOCK_Q``.
+    engine and the descriptor generator bound by ``PACK_MAX_BLOCK_Q``. A dQ row also carries ``bias_stage_resolved``: how the build loads its
+    bias (``lds`` staged, ``direct``; ``na`` without a bias), which the descriptor generator turns into the KMD field of that name.
     """
     spec = built.spec
     if built.traits is not None:
@@ -553,7 +587,11 @@ def geometry_of(built: Built) -> dict:
         family = built.knobs.family()
         if spec.kernel == "dkdv":
             return {"block_threads": family.block, "block_kv": built.knobs.block_kv}
-        return {"block_threads": family.block, "block_m": family.bq}
+        return {
+            "block_threads": family.block,
+            "block_m": family.bq,
+            "bias_stage_resolved": "direct" if spec.cls == "bias" else "na",
+        }
     traits = built.knobs.build_traits(built.meta)
     if spec.kernel == "dkdv":
         geometry = {
@@ -563,7 +601,15 @@ def geometry_of(built: Built) -> dict:
         if spec.gqa_pack:
             geometry["block_q"] = traits.BLOCK_Q
         return geometry
-    return {"block_threads": traits.BLOCK_SIZE, "block_m": traits.BLOCK_M}
+    return {
+        "block_threads": traits.BLOCK_SIZE,
+        "block_m": traits.BLOCK_M,
+        "bias_stage_resolved": (
+            ("lds" if traits.BIAS_STAGE == "lds" else "direct")
+            if spec.cls == "bias"
+            else "na"
+        ),
+    }
 
 
 def hdv_of(kernel: str, tile: int, dtype: str | None = None) -> int:
@@ -1334,7 +1380,21 @@ def _max_flat_workgroup_size(blob: bytes, where: str, symbol: str) -> int:
 
 
 def _params_key(spec: Spec) -> str:
-    return "prep_sink" if spec.kernel == "prep" and spec.sink else spec.kernel
+    """The ``_PARAMS`` entry of @p spec's kernel: the sink twin of prep, the value-head split objects of dkdv and dq."""
+    if spec.kernel == "prep" and spec.sink:
+        return "prep_sink"
+    if spec.kernel in ("dkdv", "dq") and spec.u2:
+        return f"{spec.kernel}_u2"
+    return spec.kernel
+
+
+def verify_u2_symbol(spec: Spec, symbol: str, where: str) -> None:
+    """A value-head split object (``u2``) carries its own kernel symbol (``U2_SYMBOLS``), never the plain kernel's."""
+    if spec.u2 and symbol != U2_SYMBOLS[spec.arch, spec.kernel]:
+        raise GeneratorError(
+            f"{where}: a u2={spec.u2} {spec.kernel} object on {spec.arch} must define "
+            f"{U2_SYMBOLS[spec.arch, spec.kernel]!r}, found {symbol!r}"
+        )
 
 
 def _verify_kernel(
@@ -1386,6 +1446,7 @@ def verify(
     wanted = _FIXED_BLOCK.get(spec.kernel) or (spec.num_waves or 0) * 64 or None
     if not reduce_symbol:
         described = describe(blob, where)
+        verify_u2_symbol(spec, described["symbol"], where)
         threads = _verify_kernel(
             blob, described, _params_key(spec), wanted, arch, where
         )
@@ -1565,15 +1626,16 @@ def _complete_source_md(
     if text.count(f"\n{line}\n") != 1:
         raise GeneratorError(f"{source_md}: no regenerate line {line!r}")
     text = text.replace(f"\n{line}\n", f"\n{line}{args}\n")
-    pinned = [r for r in records if r.get("ship") == "pin"]
+    pinned = [r for r in records if r.get("pin_reason")]
     if pinned:
         text += (
             "\n## Pinned objects\n\n"
-            "These objects are the sweep's pinned bytes, not built with the toolchain above; the rebuild of each is\n"
-            "nondeterministic (`flydsl/tests/data/sdpa_bwd_nondeterministic.csv`) or known bad (`flydsl/tests/data/sdpa_bwd_pinned_exceptions.csv`).\n\n"
+            "These objects are stored pins, not built with the toolchain above: the sweep's pinned bytes, or for a combined row the combined object\n"
+            "of the shipped content it replaces. The rebuild of each is nondeterministic (`flydsl/tests/data/sdpa_bwd_nondeterministic.csv`) or known\n"
+            "bad (`flydsl/tests/data/sdpa_bwd_pinned_exceptions.csv`).\n\n"
             "| Instance | Reason | SHA256 |\n| --- | --- | --- |\n"
             + "".join(
-                f"| `{r['name']}` | {r['pin_reason']} | `{r['sha256'][:16]}` |\n"
+                f"| `{r['name']}` | {r['pin_reason']}{', stored combined object' if r.get('ship') == 'combined' else ''} | `{r['sha256'][:16]}` |\n"
                 for r in pinned
             )
         )
@@ -1619,25 +1681,59 @@ def read_nondeterministic(
     return rows
 
 
+def read_stored_combined(
+    spec: Spec, op: str, arch: str, stored_dir: Path | None
+) -> bytes:
+    """The combined object the shipped content of @p op records for @p spec, from the content root @p stored_dir.
+
+    ``GeneratorError`` when there is no @p stored_dir, the manifest has no row for the spec, the object is missing, or its sha256 is not the manifest's.
+    """
+    if stored_dir is None:
+        raise GeneratorError(
+            f"{spec.key()}: a listed combined row ships its stored object and needs --stored-dir (the shipped content root)"
+        )
+    folder = stored_dir / op / arch
+    try:
+        manifest = json.loads((folder / MANIFEST_NAME).read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise GeneratorError(f"{folder / MANIFEST_NAME}: {exc}") from exc
+    record = next(
+        (r for r in manifest["instances"] if r.get("spec_hash") == spec.hash()), None
+    )
+    if record is None or record.get("spec") != spec.key() or not record.get("file"):
+        raise GeneratorError(f"{folder}: the manifest has no object for {spec.key()}")
+    path = folder / record["file"]
+    try:
+        blob = path.read_bytes()
+    except OSError as exc:
+        raise GeneratorError(f"{path}: {exc.strerror}") from exc
+    if sha256(blob) != record["sha256"]:
+        raise GeneratorError(f"{path} is not the object its manifest names")
+    return blob
+
+
 def load_pin(
     spec: Spec,
     reference_dir: Path,
     reference: dict[str, dict],
     exceptions: dict[str, dict],
     listed: dict[str, nondet.Row] | None = None,
+    stored_dir: Path | None = None,
+    op: str = "",
+    arch: str = "",
 ) -> Pin:
     """The pin of @p spec, by its reference row.
 
-    A combined row's pin is the standalone pin it is gated against (its bytes are not read). A standalone row of @p exceptions or
-    of the nondeterministic list @p listed ships its pin: the object is read and checked against its reference row.
+    A row outside @p exceptions and the nondeterministic list @p listed is gated against its reference sha (``Pin`` without bytes).
+    A standalone row of either list ships its pin: the object is read from @p reference_dir and checked against its reference row. A listed
+    combined row ships the combined object stored in the shipped content of @p op (``read_stored_combined``, from @p stored_dir); its
+    ``sha256`` stays the standalone pin it is gated against.
     """
     row = reference.get(spec.hash())
     if row is None or row["spec"] != spec.key():
         raise GeneratorError(f"the reference has no row for {spec.key()}")
     exception = exceptions.get(spec.hash())
-    if exception is None and (
-        reduce_symbol_of(spec) or spec.hash() not in (listed or {})
-    ):
+    if exception is None and spec.hash() not in (listed or {}):
         return Pin(row["sha256"])
     reason = exception["reason"] if exception else _NONDETERMINISTIC_REASON
     if exception and (exception["spec"], exception["pin_sha256"]) != (
@@ -1648,8 +1744,12 @@ def load_pin(
             f"the pinned exception {exception['hash']} is not the pin its reference row names"
         )
     if reduce_symbol_of(spec):
-        raise GeneratorError(
-            f"{spec.key()}: a combined row cannot ship a standalone pin"
+        if exception:
+            raise GeneratorError(
+                f"{spec.key()}: a combined row cannot ship a standalone pin"
+            )
+        return Pin(
+            row["sha256"], read_stored_combined(spec, op, arch, stored_dir), reason
         )
     path = reference_dir / f"{spec.hash()}.hsaco"
     try:
@@ -1661,6 +1761,14 @@ def load_pin(
     return Pin(row["sha256"], blob, reason)
 
 
+def _function_sha256(gate: dict) -> str | None:
+    """The function sha256 of the one kernel of a standalone object's @p gate (none for a gate of another shape)."""
+    kernels = gate.get("per_kernel", {})
+    if len(kernels) != 1:
+        return None
+    return next(iter(kernels.values())).get("function_sha256")
+
+
 def _record(
     instance,
     spec: Spec,
@@ -1668,12 +1776,15 @@ def _record(
     op_dir: Path,
     arch: str,
     pin: Pin | None = None,
+    listed: nondet.Row | None = None,
 ) -> dict:
     """The manifest record of one row: its build status, and for an ``ok`` row the object and its gates.
 
-    A combined row (one with a reduce symbol) carries @p pin, its sweep pin, and ``ship: combined``: the shipped object is
-    not the pin, it is judged by its per-kernel gate. A row whose @p pin has bytes ships them (``ship: pin``, with ``pin_reason``
-    and the sha256 of its rebuild, if any): the object is analysed from those bytes and no toolchain is claimed for it.
+    A combined row (one with a reduce symbol) carries @p pin, its sweep pin (``sha256``), and ``ship: combined``: the object is judged by its
+    per-kernel gate. When @p pin has bytes the row ships them (the stored combined object of a listed combined row; the sweep's pin of a
+    standalone row, ``ship: pin``), with ``pin_reason`` and the sha256 of its rebuild, if any: the object is analysed from those bytes and no
+    toolchain is claimed for it. The rebuild of a shipped combined row must have passed its per-kernel gate; the rebuild of a standalone row
+    listed in @p listed must be its pin or a recorded variant (``nondet.tolerates``), else ``GeneratorError``.
     """
     record = instance.to_record()
     record.update(
@@ -1687,7 +1798,7 @@ def _record(
     )
     record["knobs"].update(outcome.geometry or {})
     if spec.kernel in SPLIT_KERNELS:
-        record["knobs"]["grid"] = _GRID_RULE[spec.kernel]
+        record["knobs"]["grid"] = grid_rule_of(spec)
     reduce_symbol = instance.knobs.get("reduce_symbol", "")
     if reduce_symbol != reduce_symbol_of(spec):
         raise GeneratorError(
@@ -1696,7 +1807,8 @@ def _record(
     shipped_pin = pin is not None and pin.blob is not None
     if outcome.status != "ok":
         record["detail"] = outcome.detail
-        if not shipped_pin:
+        # A stored combined object ships only with a rebuild that passed the gate.
+        if not shipped_pin or reduce_symbol:
             return record
     blob = pin.blob if shipped_pin else outcome.blob
     filename = f"{instance.name}.hsaco"
@@ -1713,8 +1825,28 @@ def _record(
     (op_dir / filename).write_bytes(blob)
     delivered = sha256((op_dir / filename).read_bytes())
     if shipped_pin:
-        # The pin is not the object the rebuild's gates saw: analyse the shipped bytes (R-MIR: the sweep's scan stands).
-        gate = _run_gate(op_dir / filename, None, spec)
+        # The pin is not the object the rebuild's gates saw: analyse the shipped bytes (R-MIR: the earlier scan stands).
+        gate = _run_gate(op_dir / filename, None, spec, reduce_symbol)
+        if reduce_symbol:
+            if "pin_gate" not in (outcome.gate or {}):
+                raise GeneratorError(f"{where}: the build ran no per-kernel gate")
+            gate["pin_gate"] = outcome.gate["pin_gate"]
+        elif (
+            listed is not None
+            and pin.reason == _NONDETERMINISTIC_REASON
+            and outcome.blob
+        ):
+            rebuilt = sha256(outcome.blob)
+            if not nondet.tolerates(
+                listed,
+                rebuilt,
+                _function_sha256(outcome.gate or {}),
+                _function_sha256(gate),
+            ):
+                raise GeneratorError(
+                    f"{instance.name}: the rebuild {rebuilt[:8]} is neither its pin {pin.sha256[:8]} nor a recorded variant of it "
+                    "(tests/data/sdpa_bwd_nondeterministic.csv): sample and list it"
+                )
     else:
         gate = outcome.gate
     _, names = _signature(_PARAMS[_params_key(spec)])
@@ -1722,7 +1854,7 @@ def _record(
     record.update(
         {
             "block": [described["block_threads"], 1, 1],
-            "grid_rule": _GRID_RULE[spec.kernel],
+            "grid_rule": grid_rule_of(spec),
             "args": arg_records(names, described["signature"]),
             "file": filename,
             "symbol": described["symbol"],
@@ -1759,6 +1891,13 @@ def _record(
                 "ship": "combined",
             }
         )
+        if shipped_pin:
+            record.update(
+                {
+                    "pin_reason": pin.reason,
+                    "rebuilt_sha256": sha256(outcome.blob),
+                }
+            )
         record["gates"]["pin_gate"] = gate["pin_gate"]
     elif shipped_pin:
         record.update(
@@ -1806,6 +1945,8 @@ def _stop_reasons(records: list[dict], pins: list[Pin | None]) -> list[str]:
 # The tail-zero companions (``generators/gen_sdpa_bwd_tailzero.py``) are kept once per arch family, in the dQ arch folder.
 _TAILZERO_HOME_OP = "sdpa_bwd_dq"
 _TAILZERO_ROLE = "tailzero"
+# The V-head object (``tailzero_hv``) is the tail-zero launch of a ``u2=dq`` row.
+_TAILZERO_ROLES = (_TAILZERO_ROLE, "tailzero_hv")
 
 # Builds the unpinned companions of an op into its folder and returns their manifest entries: ``(arch, op_dir) -> entries``.
 CompanionBuilder = Callable[[str, Path], list[dict]]
@@ -1836,7 +1977,7 @@ def write_companions(op_dir: Path, companions: list[dict]) -> None:
 
 
 def dq_tailzero_companions(arch: str, op_dir: Path) -> list[dict]:
-    """The tail-zero ``companions`` entries of the op in @p op_dir (a sibling of ``sdpa_bwd_dq``), read from the dQ manifest of @p arch.
+    """The tail-zero ``companions`` entries (roles ``tailzero`` and ``tailzero_hv``) of the op in @p op_dir (a sibling of ``sdpa_bwd_dq``), read from the dQ manifest of @p arch.
 
     Each entry is the dQ manifest's, with ``file`` pointing at the dQ arch folder: ``../../sdpa_bwd_dq/<arch>/<name>``. Nothing is
     built or copied. ``GeneratorError`` when the dQ manifest, an entry or its object is missing, or the object is not the entry's sha256.
@@ -1851,7 +1992,7 @@ def dq_tailzero_companions(arch: str, op_dir: Path) -> list[dict]:
         for c in json.loads(manifest_path.read_text(encoding="utf-8")).get(
             "companions", []
         )
-        if c["spec"].split(",")[0] == _TAILZERO_ROLE
+        if c["spec"].split(",")[0] in _TAILZERO_ROLES
     ]
     if not entries:
         raise GeneratorError(
@@ -1881,6 +2022,7 @@ def generate(
     exceptions_csv: Path = _EXCEPTIONS_CSV,
     nondeterministic_csv: Path = nondet.NONDETERMINISTIC_CSV,
     build_tailzero: CompanionBuilder | None = None,
+    stored_dir: Path | None = None,
 ) -> int:
     """Build every row of @p op (or the rows whose Spec hash is in @p only) for @p arch.
 
@@ -1892,11 +2034,13 @@ def generate(
     included (``ROCM_PATH`` or ``ROCM_VERSION`` must name it).
 
     An op in ``_SHIPPED_OPS`` ships the objects it builds (a row with two objects is rebuilt, ``compile_specs``), except the rows of
-    ``tests/data/sdpa_bwd_pinned_exceptions.csv`` (@p exceptions_csv) and the standalone rows of the nondeterministic list
-    (@p nondeterministic_csv), which ship the sweep's pin (module docstring, "Nondeterministic builds"); it raises ``GeneratorError``,
+    ``tests/data/sdpa_bwd_pinned_exceptions.csv`` (@p exceptions_csv) and of the nondeterministic list (@p nondeterministic_csv): a
+    standalone row ships the sweep's pin and a combined row the combined object stored in the shipped content under @p stored_dir
+    (``<stored_dir>/<op>/<arch>/manifest.json``; required when a listed combined row is built, and never the directory being written). A
+    listed row's rebuild must still be its pin or a recorded variant (module docstring, "Nondeterministic builds"); the run raises ``GeneratorError``,
     with nothing left in the op directory, when a row has to stop the run (``_stop_reasons``). It needs @p reference_dir (the sweep's
     pins, ``<hash>.hsaco``, checked against the rows of @p reference_csv, ``tests/data/sdpa_bwd_reference.csv``): the
-    pins of the exception rows are shipped from it and the combined rows are gated against it. No other op takes one.
+    pins of the standalone pinned rows are shipped from it and the combined rows are gated against it. No other op takes one.
     """
     refusal = _refuse({op}, arch)
     if refusal:
@@ -1928,7 +2072,9 @@ def generate(
         exceptions = read_exceptions(exceptions_csv)
         listed = read_nondeterministic(arch, reference, specs, nondeterministic_csv)
         pins = [
-            load_pin(spec, reference_dir, reference, exceptions, listed)
+            load_pin(
+                spec, reference_dir, reference, exceptions, listed, stored_dir, op, arch
+            )
             for spec in specs
         ]
     env.assert_flydsl_version()
@@ -1940,7 +2086,9 @@ def generate(
         reference_csv,
         rebuild_unstable=shipped,
         shipped_pins=frozenset(
-            spec.hash() for spec, pin in zip(specs, pins) if pin and pin.blob
+            spec.hash()
+            for spec, pin in zip(specs, pins)
+            if pin and pin.blob and not reduce_symbol_of(spec)
         ),
     )
 
@@ -1948,7 +2096,17 @@ def generate(
     records = []
     for instance, spec, outcome, pin in zip(instances, specs, outcomes, pins):
         try:
-            records.append(_record(instance, spec, outcome, op_dir, arch, pin))
+            records.append(
+                _record(
+                    instance,
+                    spec,
+                    outcome,
+                    op_dir,
+                    arch,
+                    pin,
+                    listed.get(spec.hash()) if reference_dir is not None else None,
+                )
+            )
         except GeneratorError as exc:
             failed = Outcome(
                 "error",
@@ -2029,7 +2187,14 @@ def run_op(
             "--reference-dir",
             type=Path,
             default=None,
-            help="the sweep's pinned objects, <hash>.hsaco (required): the exception rows ship them, the combined rows are gated against them",
+            help="the sweep's pinned objects, <hash>.hsaco (required): the standalone pinned rows ship them, the combined rows are gated against them",
+        )
+        parser.add_argument(
+            "--stored-dir",
+            type=Path,
+            default=None,
+            help="the shipped content root as it was before this regeneration (<op>/<arch>/manifest.json and objects), kept aside: "
+            "a listed combined row ships its object from it (required for the dq and merged ops of gfx950)",
         )
     args = parser.parse_args(argv)
     refusal = None if args.arch in other_arches else _refuse({op}, args.arch)
@@ -2049,6 +2214,7 @@ def run_op(
                 only,
                 reference_dir,
                 build_tailzero=build_tailzero,
+                stored_dir=getattr(args, "stored_dir", None),
             )
     except (GeneratorError, env.FlydslEnvError) as exc:
         print(f"error: {exc}", file=sys.stderr)

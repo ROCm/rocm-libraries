@@ -356,6 +356,18 @@ def philox_keep(ctx, q_rows):
     return out
 
 
+def _bias_dtype(ctx):
+    """The element type the bias is read as: Q's, or f32 for a FLOAT bias beside 16-bit Q/K/V (`BIAS_F32`)."""
+    return fx.Float32 if ctx.traits.BIAS_F32 else ctx.elem_dtype
+
+
+def _bias_to_f32(ctx, ones):
+    """The scalar bias loads `ones` as f32, in natural units."""
+    if const_expr(ctx.traits.BIAS_F32):
+        return [fx.Float32(one) for one in ones]
+    return [fx.Float32(ctx.elem_dtype(one).to(fx.Float32)) for one in ones]
+
+
 def bias_f32(ctx, q_rows):
     """`bias` as f32, in natural units, per accumulator element, given each element's absolute q row.
 
@@ -405,11 +417,11 @@ def bias_f32(ctx, q_rows):
             rsrc,
             as_mlir_value(fx.Int32(q * pitch + col)),
             vec_width=1,
-            dtype=ctx.elem_dtype,
+            dtype=_bias_dtype(ctx),
         )
         for q in q_rows
     ]
-    return [fx.Float32(ctx.elem_dtype(one).to(fx.Float32)) for one in ones]
+    return _bias_to_f32(ctx, ones)
 
 
 def bias_f32_packed(ctx, q_rows):
@@ -429,11 +441,43 @@ def bias_f32_packed(ctx, q_rows):
 
     ones = [
         buffer_ops.buffer_load(
-            rsrc, as_mlir_value(fx.Int32(offset(x))), vec_width=1, dtype=ctx.elem_dtype
+            rsrc,
+            as_mlir_value(fx.Int32(offset(x))),
+            vec_width=1,
+            dtype=_bias_dtype(ctx),
         )
         for x in q_rows
     ]
-    return [fx.Float32(ctx.elem_dtype(one).to(fx.Float32)) for one in ones]
+    return _bias_to_f32(ctx, ones)
+
+
+def _prep_tensors_value_heads(named, *, q_heads, k_heads):
+    """`abi.prep_tensors` for a value-head split: V carries its own head count, and `"DV"` is checked against it rather than K's.
+
+    Returns `(pointers, (num_head_q, num_head_k, hdim_qk, hdim_vo), strides)`; the caller reads `num_head_v` off V.
+    """
+    by_name = dict(named)
+    st = []
+    for name, t in named:
+        st.extend(abi.strides_of(t, name))
+    q, k, v = by_name["Q"], by_name["K"], by_name["V"]
+    nhq, nhk, nhv = q.shape[1], k.shape[1], v.shape[1]
+    for name in q_heads:
+        if by_name[name].shape[1] != nhq:
+            raise ValueError(
+                f"{name} must carry num_heads_q ({nhq}), got {by_name[name].shape[1]}"
+            )
+    for name in k_heads:
+        want = nhv if name == "DV" else nhk
+        if by_name[name].shape[1] != want:
+            raise ValueError(
+                f"{name} must carry {want} heads, got {by_name[name].shape[1]}"
+            )
+    if nhq % nhk or nhq % nhv:
+        raise ValueError(
+            f"num_heads_q ({nhq}) must be divisible by num_heads_k ({nhk}) and num_heads_v ({nhv})"
+        )
+    return [abi.ptr_arg(t) for _, t in named], (nhq, nhk, q.shape[3], v.shape[3]), st
 
 
 def _lds_pack_read(traits, lds_ptr, elem_idx, scope_name, pack_type):
@@ -912,20 +956,29 @@ class BwdDkDvKernelContext(ParityKernelContext):
         # the two sequence lengths and the row stride, none of which are the
         # head's, so it is computed once here.
         if const_expr(self.traits.BIAS_TYPE):
+            # The bias strides are in elements of the bias dtype: f32 under `BIAS_F32`.
+            bias_elem_bytes = self.traits.BF16_BYTES
+            bias_step_elem_bytes = elem_bytes
+            if const_expr(self.traits.BIAS_F32):
+                bias_elem_bytes = 4
+                bias_step_elem_bytes = fx.Index(bias_elem_bytes)
             self.bias_num_records_bytes = _bias_slab_num_records_bytes(
                 self.seqlen_q_v,
                 self.seqlen_kv_v,
                 self.stride_b_seq_q,
-                self.traits.BF16_BYTES,
+                bias_elem_bytes,
             )
             self.bias_anchor = self.slab_anchor(
                 self.Bias,
                 self._slab_byte_base(
-                    self.stride_b_head, self.bias_origin(self.stride_b_batch), head0
+                    self.stride_b_head,
+                    self.bias_origin(self.stride_b_batch),
+                    head0,
+                    bias_elem_bytes,
                 ),
             )
             self.bias_head_step_bytes = self.pin_index(
-                fx.Index(self.stride_b_head) * elem_bytes
+                fx.Index(self.stride_b_head) * bias_step_elem_bytes
             )
 
         if const_expr(self.GQA_PACK):
@@ -1036,7 +1089,54 @@ class BwdDkDvKernelContext(ParityKernelContext):
         """
         self.bind_q_head(g)
 
-    def _slab_rsrc(self, tensor, name, s_batch, s_head, s_seq, hdim):
+    def rebind_res(self, which, head):
+        """Point the resident K (`which == "k"`) or V descriptors at `head`, a runtime `Index`.
+
+        A value-head split (`KV_ROLE` "dk" or "dv") launches over one of the two
+        head counts, so the other count's resident operand follows the query
+        head: `retarget_q_head` moves the query side per group member and this
+        moves that operand with it.
+        """
+        if which == "v":
+            self.v_res_div = self._slab_view(
+                self.V,
+                self.stride_v_head,
+                self.stride_v_seq,
+                self.tensor_origin("V", self.stride_v_batch),
+                head,
+                self.seqlen_kv_v,
+                self.hdim_vo,
+            )
+            self.v_res_rsrc = self._slab_rsrc(
+                self.V,
+                "V",
+                self.stride_v_batch,
+                self.stride_v_head,
+                self.stride_v_seq,
+                self.hdim_vo,
+                head=head,
+            )
+        else:
+            self.k_res_div = self._slab_view(
+                self.K,
+                self.stride_k_head,
+                self.stride_k_seq,
+                self.tensor_origin("K", self.stride_k_batch),
+                head,
+                self.seqlen_kv_v,
+                self.hdim_qk,
+            )
+            self.k_res_rsrc = self._slab_rsrc(
+                self.K,
+                "K",
+                self.stride_k_batch,
+                self.stride_k_head,
+                self.stride_k_seq,
+                self.hdim_qk,
+                head=head,
+            )
+
+    def _slab_rsrc(self, tensor, name, s_batch, s_head, s_seq, hdim, head=None):
         """A raw buffer resource over this workgroup's KV slab, bounded at its rows.
 
         The head is the KV head rather than a parameter and the origin is the
@@ -1050,7 +1150,9 @@ class BwdDkDvKernelContext(ParityKernelContext):
             self.traits.BF16_BYTES
         )
         base_bytes = self._slab_byte_base(
-            s_head, self.tensor_origin(name, s_batch), self.kv_head_idx
+            s_head,
+            self.tensor_origin(name, s_batch),
+            self.kv_head_idx if head is None else head,
         )
         return dualwave._make_ws_rsrc(
             fx.Int64(fx.ptrtoint(fx.get_iter(tensor))),
@@ -1278,7 +1380,10 @@ class BwdDkDvResidentLoader(dualwave.DualwaveKernelContext):
 
     def load_resident(self, which, hdim):
         traits = self.traits
-        div = self.k_res_div if which == "k" else self.v_res_div
+        # Read from the context, not this helper's construction-time snapshot: `rebind_res` re-points the resident descriptors
+        # per query head under a value-head split.
+        ctx = self.ctx_ref
+        div = ctx.k_res_div if which == "k" else ctx.v_res_div
         elem_base = self.k_res_elem_base if which == "k" else self.v_res_elem_base
         stride_seq = self.stride_k_seq_v if which == "k" else self.stride_v_seq_v
         row_in_block = self.kv_row_in_block
@@ -1963,6 +2068,10 @@ class BwdDkDvTileBody(dualwave.DualwaveKernelContext):
         # `delta` is loaded *after* `probabilities` in both arms -- it is not
         # needed until `dscores`, and loading it earlier would hold its 16
         # registers across the LSE vector's.
+        # A value-head split builds one gradient: dV-only skips `dP`, `Delta`
+        # and `dS`, dK-only skips the `P` packs and dV.
+        want_dv = traits.KV_ROLE != "dk"
+        want_dk = traits.KV_ROLE != "dv"
         p_packs = [None] * 4
         ds_packs = [None] * 4
         for group in self.half_groups:
@@ -1972,12 +2081,14 @@ class BwdDkDvTileBody(dualwave.DualwaveKernelContext):
                 )
                 for h in group
             }
-            dp = {
-                h: self.gemm.contract_d(
-                    self._row_reader(do_base, do_scope, h, self.hdim_vo), v_v
-                )
-                for h in group
-            }
+            dp = {h: None for h in group}
+            if const_expr(want_dk):
+                dp = {
+                    h: self.gemm.contract_d(
+                        self._row_reader(do_base, do_scope, h, self.hdim_vo), v_v
+                    )
+                    for h in group
+                }
             lse_term = {h: self.load_lse_term(tile_base, h) for h in group}
             # The bias is read per accumulator element and folded into the
             # exponent, so it lands before `P` exists and therefore before
@@ -2000,10 +2111,12 @@ class BwdDkDvTileBody(dualwave.DualwaveKernelContext):
                     h: self.softmax.mask_if_clipped(p_list[h], tile_idx, h)
                     for h in group
                 }
-            delta = {
-                h: self.load_delta(tile_idx, tile_base, h, do_base, do_scope)
-                for h in group
-            }
+            delta = {h: None for h in group}
+            if const_expr(want_dk):
+                delta = {
+                    h: self.load_delta(tile_idx, tile_base, h, do_base, do_scope)
+                    for h in group
+                }
             # **After the row sum, before the accumulation.**
             # The softmax denominator is the *undropped* sum, and it is already
             # baked into the LSE the forward wrote, so dropout applies here and
@@ -2015,11 +2128,13 @@ class BwdDkDvTileBody(dualwave.DualwaveKernelContext):
                 keep = {
                     h: philox_keep(ctx, self.softmax.q_rows(tile_idx, h)) for h in group
                 }
-            ds_list = {
-                h: self.softmax.dscores(p_list[h], dp[h], delta[h], keep[h])
-                for h in group
-            }
-            if const_expr(traits.ENABLE_DROPOUT):
+            ds_list = {h: None for h in group}
+            if const_expr(want_dk):
+                ds_list = {
+                    h: self.softmax.dscores(p_list[h], dp[h], delta[h], keep[h])
+                    for h in group
+                }
+            if const_expr(traits.ENABLE_DROPOUT and want_dv):
                 # `dV` accumulates `keep * P`; the survivor scale is a constant
                 # and rides the epilogue instead of 16 multiplies per tile.
                 p_list = {
@@ -2030,19 +2145,27 @@ class BwdDkDvTileBody(dualwave.DualwaveKernelContext):
                     for h in group
                 }
             for h in group:
-                p_packs[2 * h : 2 * h + 2] = self.softmax.pack_half(p_list[h])
-                ds_packs[2 * h : 2 * h + 2] = self.softmax.pack_half(ds_list[h])
+                if const_expr(want_dv):
+                    p_packs[2 * h : 2 * h + 2] = self.softmax.pack_half(p_list[h])
+                if const_expr(want_dk):
+                    ds_packs[2 * h : 2 * h + 2] = self.softmax.pack_half(ds_list[h])
 
         # -- GEMM 3 and 4. Q is the reduction axis, so the transposed operand
         #    is read one output chunk at a time and dies with its MFMAs.
-        for dc in range_constexpr(traits.D_CHUNKS_PER_SHARD):
-            dv[dc] = self.gemm.contract_q(
-                self.reader.read_column_chunk(do_base, do_scope, dc), p_packs, dv[dc]
-            )
-        for dc in range_constexpr(traits.D_CHUNKS_PER_SHARD):
-            dk[dc] = self.gemm.contract_q(
-                self.reader.read_column_chunk(q_base, q_scope, dc), ds_packs, dk[dc]
-            )
+        if const_expr(want_dv):
+            for dc in range_constexpr(traits.D_CHUNKS_PER_SHARD):
+                dv[dc] = self.gemm.contract_q(
+                    self.reader.read_column_chunk(do_base, do_scope, dc),
+                    p_packs,
+                    dv[dc],
+                )
+        if const_expr(want_dk):
+            for dc in range_constexpr(traits.D_CHUNKS_PER_SHARD):
+                dk[dc] = self.gemm.contract_q(
+                    self.reader.read_column_chunk(q_base, q_scope, dc),
+                    ds_packs,
+                    dk[dc],
+                )
 
         _s_waitcnt(traits.LGKMCNT_0_ONLY)
         _sched_barrier(0)
@@ -2185,6 +2308,14 @@ def build_fmha_bwd_dkdv_gfx950_module_primary(meta, knobs, runtime_axes=()):
         dropout_scale = a.dropout_scale
         num_head_q = a.num_head_q
         num_head_k = a.num_head_k
+        # `num_head_v` rides the wire only for a value-head split (`V_HEADS`); `ctx_num_head_k` is the count `grid.x` walks: V's for the
+        # dV-only object, K's otherwise.
+        num_head_v = None
+        ctx_num_head_k = num_head_k
+        if const_expr(traits.V_HEADS):
+            num_head_v = a.num_head_v
+            if const_expr(traits.KV_ROLE == "dv"):
+                ctx_num_head_k = num_head_v
         hdim_qk = a.hdim_qk
         hdim_vo = a.hdim_vo
         sm_scale = a.sm_scale
@@ -2257,7 +2388,8 @@ def build_fmha_bwd_dkdv_gfx950_module_primary(meta, knobs, runtime_axes=()):
             ),
             sm_scale=sm_scale,
             num_head_q=num_head_q,
-            num_head_k=num_head_k,
+            num_head_k=ctx_num_head_k,
+            num_head_v=num_head_v,
             hdim_qk=hdim_qk,
             hdim_vo=hdim_vo,
             padded_head=PADDED_HEAD,
@@ -2290,6 +2422,10 @@ def build_fmha_bwd_dkdv_gfx950_module_primary(meta, knobs, runtime_axes=()):
             **ctx_kwargs,
         )
         ctx.GQA_PACK = GQA_PACK
+        if const_expr(traits.V_HEADS):
+            # Query heads per K head and per V head, for `rebind_res`.
+            ctx.group_k = fx.Index(num_head_q) // fx.Index(num_head_k)
+            ctx.group_v = fx.Index(num_head_q) // fx.Index(num_head_v)
         ctx.init_types_and_constants()
         ctx.init_runtime_indices()
         ctx.init_lds(SharedStorage)
@@ -2405,11 +2541,20 @@ def build_fmha_bwd_dkdv_gfx950_module_primary(meta, knobs, runtime_axes=()):
                 At `num_kv_heads == num_heads` the group is one head wide, the
                 outer loop runs once and emits no loop at all.
                 """
-                v_k = resident.load_resident("k", hdim_qk)
-                v_v = resident.load_resident("v", hdim_vo)
+                # A value-head split ("dk" or "dv") accumulates one gradient and
+                # loads the operand of its own head here; the other count's
+                # operand is re-pointed per query head inside the group loop.
+                n_dv = 0 if traits.KV_ROLE == "dk" else n_acc
+                n_dk = 0 if traits.KV_ROLE == "dv" else n_acc
+                v_k = None
+                v_v = None
+                if const_expr(traits.KV_ROLE != "dv"):
+                    v_k = resident.load_resident("k", hdim_qk)
+                if const_expr(traits.KV_ROLE != "dk"):
+                    v_v = resident.load_resident("v", hdim_vo)
 
                 init_args = []
-                for _ in range_constexpr(2 * n_acc):
+                for _ in range_constexpr(n_dv + n_dk):
                     init_args.append(zero_acc)
                 group_results = init_args
 
@@ -2451,6 +2596,14 @@ def build_fmha_bwd_dkdv_gfx950_module_primary(meta, knobs, runtime_axes=()):
                     # move, and neither do the accumulators.
                     if const_expr(not GQA_PACK):
                         ctx.retarget_q_head(g)
+                    # The resident operand that does not belong to this launch's
+                    # head follows the query head.
+                    if const_expr(traits.KV_ROLE == "dk"):
+                        ctx.rebind_res("v", (ctx.gqa_q_head_base + g) // ctx.group_v)
+                        v_v = resident.load_resident("v", hdim_vo)
+                    if const_expr(traits.KV_ROLE == "dv"):
+                        ctx.rebind_res("k", (ctx.gqa_q_head_base + g) // ctx.group_k)
+                        v_k = resident.load_resident("k", hdim_qk)
 
                     # **Drain the pipeline before re-priming it.** The last tile of
                     # the previous head issued a prefetch into these same LDS
@@ -2527,8 +2680,8 @@ def build_fmha_bwd_dkdv_gfx950_module_primary(meta, knobs, runtime_axes=()):
 
                     loop_results = group_args
                     for j, loop_args in range(t0, t_end, fx.Index(2), init=group_args):
-                        dv = [loop_args[i] for i in range_constexpr(n_acc)]
-                        dk = [loop_args[n_acc + i] for i in range_constexpr(n_acc)]
+                        dv = [loop_args[i] for i in range_constexpr(n_dv)]
+                        dk = [loop_args[n_dv + i] for i in range_constexpr(n_dk)]
                         # Two tiles per iteration, one LDS buffer each when there
                         # are two. At one buffer both slots use it and the prefetch
                         # distance collapses; the arithmetic below is the same.
@@ -2545,26 +2698,28 @@ def build_fmha_bwd_dkdv_gfx950_module_primary(meta, knobs, runtime_axes=()):
                         loop_results = yield dv + dk
 
                     group_results = yield [
-                        loop_results[i] for i in range_constexpr(2 * n_acc)
+                        loop_results[i] for i in range_constexpr(n_dv + n_dk)
                     ]
 
-                dv = [group_results[i] for i in range_constexpr(n_acc)]
-                dk = [group_results[n_acc + i] for i in range_constexpr(n_acc)]
+                dv = [group_results[i] for i in range_constexpr(n_dv)]
+                dk = [group_results[n_dv + i] for i in range_constexpr(n_dk)]
 
                 # `dS` is the gradient of the *scaled* logits, so `sm_scale` belongs
                 # to `dK` and to nothing else. Once at the end rather than per tile:
                 # a linear factor commutes with the accumulation.
-                for dc in range_constexpr(n_acc):
+                for dc in range_constexpr(n_dk):
                     dk[dc] = _fmul(Vec(dk[dc]), scale_vec, ctx.fm_fast)
                 if const_expr(traits.ENABLE_DROPOUT):
                     # `dV = s * sum_i keep*P*dO`. A per-kernel constant, so it
                     # belongs on the accumulator once rather than on `P` every
                     # tile. `dK` does not get it: its `s` is already inside `dS`,
                     # where it multiplies only the `dP` term.
-                    for dc in range_constexpr(n_acc):
+                    for dc in range_constexpr(n_dv):
                         dv[dc] = _fmul(Vec(dv[dc]), drop_vec, ctx.fm_fast)
-                store.store_accs(dv, "dv", hdim_vo)
-                store.store_accs(dk, "dk", hdim_qk)
+                if const_expr(traits.KV_ROLE != "dk"):
+                    store.store_accs(dv, "dv", hdim_vo)
+                if const_expr(traits.KV_ROLE != "dv"):
+                    store.store_accs(dk, "dk", hdim_qk)
 
             # A workgroup whose KV block is past *this* sequence's keys. Scalar
             # branch (the predicate is workgroup-uniform), so EXEC is untouched
@@ -2974,6 +3129,307 @@ def build_fmha_bwd_dkdv_gfx950_module_primary(meta, knobs, runtime_axes=()):
             stream=stream,
         )
 
+    # A value-head split (`V_HEADS`) is its own kernel and launcher (`fmha_bwd_dkdv_u2_gfx950_kernel`): `num_head_v` rides the wire
+    # right after `num_head_k`, and `grid.x` walks V's heads for the dV-only object and K's for the dK-only one. Both call the same
+    # body as the two above, which stay as they are for every other build.
+    if traits.V_HEADS:
+
+        @flyc.kernel(known_block_size=[traits.BLOCK_SIZE, 1, 1])
+        def fmha_bwd_dkdv_u2_gfx950_kernel(
+            Q: fx.Pointer,
+            K: fx.Pointer,
+            V: fx.Pointer,
+            B: fx.Pointer,
+            DO: fx.Pointer,
+            DK: fx.Pointer,
+            DV: fx.Pointer,
+            LSE: fx.Pointer,
+            Delta: fx.Pointer,
+            seqinfo_q0: fx.Pointer,
+            seqinfo_q1: fx.Pointer,
+            seqinfo_k0: fx.Pointer,
+            seqinfo_k1: fx.Pointer,
+            mul_Q: fx.Int64,
+            mul_K: fx.Int64,
+            off_V: fx.Pointer,
+            mul_V: fx.Int64,
+            off_DO: fx.Pointer,
+            mul_DO: fx.Int64,
+            off_DK: fx.Pointer,
+            mul_DK: fx.Int64,
+            off_DV: fx.Pointer,
+            mul_DV: fx.Int64,
+            varlen_bits: fx.Int32,
+            num_seqlens: fx.Int32,
+            max_seqlen_q: fx.Int32,
+            max_seqlen_k: fx.Int32,
+            window_left: fx.Int32,
+            window_right: fx.Int32,
+            philox_seed_ptr: fx.Pointer,
+            philox_offset1: fx.Pointer,
+            philox_offset2: fx.Int64,
+            idropout_p: fx.Int32,
+            dropout_scale: fx.Float32,
+            num_head_q: fx.Int32,
+            num_head_k: fx.Int32,
+            num_head_v: fx.Int32,
+            hdim_qk: fx.Int32,
+            hdim_vo: fx.Int32,
+            sm_scale: fx.Float32,
+            stride_q_batch: fx.Int64,
+            stride_q_head: fx.Int64,
+            stride_q_seq: fx.Int64,
+            stride_k_batch: fx.Int64,
+            stride_k_head: fx.Int64,
+            stride_k_seq: fx.Int64,
+            stride_v_batch: fx.Int64,
+            stride_v_head: fx.Int64,
+            stride_v_seq: fx.Int64,
+            stride_do_batch: fx.Int64,
+            stride_do_head: fx.Int64,
+            stride_do_seq: fx.Int64,
+            stride_dk_batch: fx.Int64,
+            stride_dk_head: fx.Int64,
+            stride_dk_seq: fx.Int64,
+            stride_dv_batch: fx.Int64,
+            stride_dv_head: fx.Int64,
+            stride_dv_seq: fx.Int64,
+            stride_b_batch: fx.Int64,
+            stride_b_head: fx.Int64,
+            stride_b_seq_q: fx.Int64,
+            rt_flags: fx.Int32,
+        ):
+            emit_dkdv_body(
+                _WireArgs(
+                    Q=Q,
+                    K=K,
+                    V=V,
+                    B=B,
+                    DO=DO,
+                    DK=DK,
+                    DV=DV,
+                    LSE=LSE,
+                    Delta=Delta,
+                    seqinfo_q0=seqinfo_q0,
+                    seqinfo_q1=seqinfo_q1,
+                    seqinfo_k0=seqinfo_k0,
+                    seqinfo_k1=seqinfo_k1,
+                    mul_Q=mul_Q,
+                    mul_K=mul_K,
+                    off_V=off_V,
+                    mul_V=mul_V,
+                    off_DO=off_DO,
+                    mul_DO=mul_DO,
+                    off_DK=off_DK,
+                    mul_DK=mul_DK,
+                    off_DV=off_DV,
+                    mul_DV=mul_DV,
+                    varlen_bits=varlen_bits,
+                    num_seqlens=num_seqlens,
+                    max_seqlen_q=max_seqlen_q,
+                    max_seqlen_k=max_seqlen_k,
+                    window_left=window_left,
+                    window_right=window_right,
+                    philox_seed_ptr=philox_seed_ptr,
+                    philox_offset1=philox_offset1,
+                    philox_offset2=philox_offset2,
+                    idropout_p=idropout_p,
+                    dropout_scale=dropout_scale,
+                    num_head_q=num_head_q,
+                    num_head_k=num_head_k,
+                    num_head_v=num_head_v,
+                    hdim_qk=hdim_qk,
+                    hdim_vo=hdim_vo,
+                    sm_scale=sm_scale,
+                    stride_q_batch=stride_q_batch,
+                    stride_q_head=stride_q_head,
+                    stride_q_seq=stride_q_seq,
+                    stride_k_batch=stride_k_batch,
+                    stride_k_head=stride_k_head,
+                    stride_k_seq=stride_k_seq,
+                    stride_v_batch=stride_v_batch,
+                    stride_v_head=stride_v_head,
+                    stride_v_seq=stride_v_seq,
+                    stride_do_batch=stride_do_batch,
+                    stride_do_head=stride_do_head,
+                    stride_do_seq=stride_do_seq,
+                    stride_dk_batch=stride_dk_batch,
+                    stride_dk_head=stride_dk_head,
+                    stride_dk_seq=stride_dk_seq,
+                    stride_dv_batch=stride_dv_batch,
+                    stride_dv_head=stride_dv_head,
+                    stride_dv_seq=stride_dv_seq,
+                    stride_b_batch=stride_b_batch,
+                    stride_b_head=stride_b_head,
+                    stride_b_seq_q=stride_b_seq_q,
+                    rt_flags=rt_flags,
+                )
+            )
+
+        @flyc.jit
+        def launch_fmha_bwd_dkdv_u2_gfx950(
+            Q: fx.Pointer,
+            K: fx.Pointer,
+            V: fx.Pointer,
+            Bias: fx.Pointer,
+            DO: fx.Pointer,
+            DK: fx.Pointer,
+            DV: fx.Pointer,
+            LSE: fx.Pointer,
+            Delta: fx.Pointer,
+            batch_size: fx.Int32,
+            seqinfo_q0: fx.Pointer,
+            seqinfo_q1: fx.Pointer,
+            seqinfo_k0: fx.Pointer,
+            seqinfo_k1: fx.Pointer,
+            mul_Q: fx.Int64,
+            mul_K: fx.Int64,
+            off_V: fx.Pointer,
+            mul_V: fx.Int64,
+            off_DO: fx.Pointer,
+            mul_DO: fx.Int64,
+            off_DK: fx.Pointer,
+            mul_DK: fx.Int64,
+            off_DV: fx.Pointer,
+            mul_DV: fx.Int64,
+            varlen_bits: fx.Int32,
+            num_seqlens: fx.Int32,
+            max_seqlen_q: fx.Int32,
+            max_seqlen_k: fx.Int32,
+            window_left: fx.Int32,
+            window_right: fx.Int32,
+            philox_seed_ptr: fx.Pointer,
+            philox_offset1: fx.Pointer,
+            philox_offset2: fx.Int64,
+            idropout_p: fx.Int32,
+            dropout_scale: fx.Float32,
+            num_head_q: fx.Int32,
+            num_head_k: fx.Int32,
+            num_head_v: fx.Int32,
+            hdim_qk: fx.Int32,
+            hdim_vo: fx.Int32,
+            sm_scale: fx.Float32,
+            stride_q_batch: fx.Int64,
+            stride_q_head: fx.Int64,
+            stride_q_seq: fx.Int64,
+            stride_k_batch: fx.Int64,
+            stride_k_head: fx.Int64,
+            stride_k_seq: fx.Int64,
+            stride_v_batch: fx.Int64,
+            stride_v_head: fx.Int64,
+            stride_v_seq: fx.Int64,
+            stride_do_batch: fx.Int64,
+            stride_do_head: fx.Int64,
+            stride_do_seq: fx.Int64,
+            stride_dk_batch: fx.Int64,
+            stride_dk_head: fx.Int64,
+            stride_dk_seq: fx.Int64,
+            stride_dv_batch: fx.Int64,
+            stride_dv_head: fx.Int64,
+            stride_dv_seq: fx.Int64,
+            stride_b_batch: fx.Int64,
+            stride_b_head: fx.Int64,
+            stride_b_seq_q: fx.Int64,
+            rt_flags: fx.Int32,
+            stream: fx.Stream = fx.Stream(None),
+        ):
+            _ = _cache_tag
+            grid_heads = num_head_k
+            if const_expr(traits.KV_ROLE == "dv"):
+                grid_heads = num_head_v
+            num_kv_blocks = (
+                fx.Index(max_seqlen_k) + fx.Index(traits.BLOCK_KV - 1)
+            ) // fx.Index(traits.BLOCK_KV)
+            bs_idx = fx.Index(num_seqlens if num_seqlens != fx.Int32(0) else batch_size)
+            passthrough_entries = (
+                [
+                    ["denormal-fp-math-f32", "preserve-sign,preserve-sign"],
+                    ["no-nans-fp-math", "true"],
+                    ["unsafe-fp-math", "true"],
+                ]
+                if const_expr(traits.DAZ)
+                else None
+            )
+            fmha_bwd_dkdv_u2_gfx950_kernel(
+                Q,
+                K,
+                V,
+                Bias,
+                DO,
+                DK,
+                DV,
+                LSE,
+                Delta,
+                seqinfo_q0,
+                seqinfo_q1,
+                seqinfo_k0,
+                seqinfo_k1,
+                mul_Q,
+                mul_K,
+                off_V,
+                mul_V,
+                off_DO,
+                mul_DO,
+                off_DK,
+                mul_DK,
+                off_DV,
+                mul_DV,
+                varlen_bits,
+                num_seqlens,
+                max_seqlen_q,
+                max_seqlen_k,
+                window_left,
+                window_right,
+                philox_seed_ptr,
+                philox_offset1,
+                philox_offset2,
+                idropout_p,
+                dropout_scale,
+                num_head_q,
+                num_head_k,
+                num_head_v,
+                hdim_qk,
+                hdim_vo,
+                sm_scale,
+                stride_q_batch,
+                stride_q_head,
+                stride_q_seq,
+                stride_k_batch,
+                stride_k_head,
+                stride_k_seq,
+                stride_v_batch,
+                stride_v_head,
+                stride_v_seq,
+                stride_do_batch,
+                stride_do_head,
+                stride_do_seq,
+                stride_dk_batch,
+                stride_dk_head,
+                stride_dk_seq,
+                stride_dv_batch,
+                stride_dv_head,
+                stride_dv_seq,
+                stride_b_batch,
+                stride_b_head,
+                stride_b_seq_q,
+                rt_flags,
+                value_attrs={
+                    "rocdl.waves_per_eu": traits.WAVES_PER_EU,
+                    "rocdl.flat_work_group_size": f"{traits.BLOCK_SIZE},{traits.BLOCK_SIZE}",
+                    "passthrough": passthrough_entries,
+                },
+            ).launch(
+                grid=(fx.Index(grid_heads), num_kv_blocks, bs_idx),
+                block=(traits.BLOCK_SIZE, 1, 1),
+                stream=stream,
+            )
+
+    _launcher = (
+        launch_fmha_bwd_dkdv_u2_gfx950
+        if traits.V_HEADS
+        else launch_fmha_bwd_dkdv_gfx950
+    )
+
     def _resolve_window_args(window):
         """`(window_left, window_right)` for the wire, as signed i32.
 
@@ -3087,7 +3543,10 @@ def build_fmha_bwd_dkdv_gfx950_module_primary(meta, knobs, runtime_axes=()):
         as the forward's `_args`.
         """
         seqlen_k = seqlen_q if seqlen_k is None else seqlen_k
-        _ptrs, shape_meta, st = abi.prep_tensors(
+        _prep_tensors = abi.prep_tensors
+        if const_expr(traits.V_HEADS):
+            _prep_tensors = _prep_tensors_value_heads
+        _ptrs, shape_meta, st = _prep_tensors(
             [("Q", Q), ("K", K), ("V", V), ("DO", DO), ("DK", DK), ("DV", DV)],
             q_heads=("DO",),
             k_heads=("DK", "DV"),
@@ -3097,17 +3556,23 @@ def build_fmha_bwd_dkdv_gfx950_module_primary(meta, knobs, runtime_axes=()):
         # types each operand from its own tensor instead -- see its docstring.
         del _ptrs
         num_head_q, num_head_k, hdim_qk, hdim_vo = shape_meta
+        # The head count `grid.x` walks: V's for the dV-only object.
+        kv_heads = num_head_k
+        if const_expr(traits.V_HEADS):
+            num_head_v = V.shape[1]
+            if const_expr(traits.KV_ROLE == "dv"):
+                kv_heads = num_head_v
         if num_head_q % num_head_k:
             raise ValueError(
                 f"num_heads_q ({num_head_q}) must be a multiple of num_heads_k ({num_head_k}): each KV "
                 "head owns a whole group of query heads and dK/dV sum over it."
             )
-        if (num_head_q, num_head_k) != (traits.NUM_HEADS_Q, traits.NUM_HEADS_KV):
+        if (num_head_q, kv_heads) != (traits.NUM_HEADS_Q, traits.NUM_HEADS_KV):
             # The group size sets the trip count of the outer loop and the grid
             # extent, so a build compiled for one shape cannot serve another.
             raise ValueError(
                 f"this build is compiled for {traits.NUM_HEADS_Q} query heads over "
-                f"{traits.NUM_HEADS_KV} KV heads; got {num_head_q} over {num_head_k}"
+                f"{traits.NUM_HEADS_KV} KV heads; got {num_head_q} over {kv_heads}"
             )
         # dK follows Q's head dim and dV follows V's, which is what makes an
         # asymmetric build meaningful at all.
@@ -3263,10 +3728,11 @@ def build_fmha_bwd_dkdv_gfx950_module_primary(meta, knobs, runtime_axes=()):
                 raise ValueError(
                     f"bias needs a contiguous seqlen_k axis; strides are {tuple(bias.stride())}"
                 )
-            if bias.dtype != Q.dtype:
-                raise ValueError(
-                    f"bias must have Q's dtype ({Q.dtype}), got {bias.dtype}"
-                )
+            bias_dtype = Q.dtype
+            if const_expr(traits.BIAS_F32):
+                from torch import float32 as bias_dtype
+            if bias.dtype != bias_dtype:
+                raise ValueError(f"bias must have dtype {bias_dtype}, got {bias.dtype}")
         # The kernel's addressing is 32-bit per slab and per packed-row split;
         # past those limits a suppressed store lands on real data. AOTriton's
         # launcher does not run this function, so the same limits are the
@@ -3292,6 +3758,7 @@ def build_fmha_bwd_dkdv_gfx950_module_primary(meta, knobs, runtime_axes=()):
                 )
             },
             bias=(bias.stride(1), bias.stride(2)) if bias is not None else None,
+            bias_elem_bytes=4 if traits.BIAS_F32 else None,
         )
         # The sentinel is a real tensor whose contents are never read: every
         # use is behind `const_expr(traits.BIAS_TYPE)`, so a build without bias
@@ -3337,6 +3804,7 @@ def build_fmha_bwd_dkdv_gfx950_module_primary(meta, knobs, runtime_axes=()):
                 _dp[4],
                 num_head_q,
                 num_head_k,
+                *((num_head_v,) if traits.V_HEADS else ()),
                 hdim_qk,
                 hdim_vo,
                 abi.resolve_scale(
@@ -3361,7 +3829,7 @@ def build_fmha_bwd_dkdv_gfx950_module_primary(meta, knobs, runtime_axes=()):
         with CompilationContext.compile_hints(_COMPILE_HINTS):
             result = abi.run_compiled(
                 _COMPILED,
-                launch_fmha_bwd_dkdv_gfx950,
+                _launcher,
                 *packed,
                 stream if stream is not None else fx.Stream(None),
             )
@@ -3371,7 +3839,7 @@ def build_fmha_bwd_dkdv_gfx950_module_primary(meta, knobs, runtime_axes=()):
     def _compile(*args, **kwargs):
         packed, stream, _keepalive = _args(*args, **kwargs)
         with CompilationContext.compile_hints(_COMPILE_HINTS):
-            return flyc.compile(launch_fmha_bwd_dkdv_gfx950, *packed, fx.Stream(stream))
+            return flyc.compile(_launcher, *packed, fx.Stream(stream))
 
     _launch.compile = _compile
     _launch.traits = traits

@@ -317,6 +317,59 @@ if(BUILD_TESTING)
                  rocke_loop_carried_descriptor)
   endif()
 
+  # The C++ builder refuses an scf.for whose induction variable or carried value
+  # reuses a name that is taken.
+  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/core/test_scf_for_name_reuse.cpp")
+    add_executable(rocke_scf_for_name_reuse core/test_scf_for_name_reuse.cpp)
+    target_link_libraries(rocke_scf_for_name_reuse PRIVATE rocke_core)
+    add_test(NAME rocke_scf_for_name_reuse COMMAND rocke_scf_for_name_reuse)
+    set_tests_properties(rocke_scf_for_name_reuse PROPERTIES LABELS "ckc;unit;host")
+    rocke_cxx_test_installed_name(_rocke_installed_name rocke_scf_for_name_reuse)
+    set_target_properties(rocke_scf_for_name_reuse
+                          PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
+    install(TARGETS rocke_scf_for_name_reuse
+            RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
+    set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS
+                 rocke_scf_for_name_reuse)
+  endif()
+
+  # A failed LLVM lowering gives the values of an scf.for body their names back.
+  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/core/test_scf_for_lowering_restores_names.cpp")
+    add_executable(rocke_scf_for_lowering_restores_names
+                   core/test_scf_for_lowering_restores_names.cpp)
+    target_link_libraries(rocke_scf_for_lowering_restores_names PRIVATE rocke_core)
+    add_test(NAME rocke_scf_for_lowering_restores_names
+             COMMAND rocke_scf_for_lowering_restores_names)
+    set_tests_properties(rocke_scf_for_lowering_restores_names
+                         PROPERTIES LABELS "ckc;unit;host")
+    rocke_cxx_test_installed_name(_rocke_installed_name rocke_scf_for_lowering_restores_names)
+    set_target_properties(rocke_scf_for_lowering_restores_names
+                          PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
+    install(TARGETS rocke_scf_for_lowering_restores_names
+            RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
+    set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS
+                 rocke_scf_for_lowering_restores_names)
+  endif()
+
+  # The C++ engine lowers an unrolled scf.for whose body holds nested regions,
+  # each trip defining names of its own.
+  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/core/test_unrolled_for_nested_regions.cpp")
+    add_executable(rocke_unrolled_for_nested_regions
+                   core/test_unrolled_for_nested_regions.cpp)
+    target_link_libraries(rocke_unrolled_for_nested_regions PRIVATE rocke_core)
+    add_test(NAME rocke_unrolled_for_nested_regions
+             COMMAND rocke_unrolled_for_nested_regions)
+    set_tests_properties(rocke_unrolled_for_nested_regions
+                         PROPERTIES LABELS "ckc;unit;host")
+    rocke_cxx_test_installed_name(_rocke_installed_name rocke_unrolled_for_nested_regions)
+    set_target_properties(rocke_unrolled_for_nested_regions
+                          PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
+    install(TARGETS rocke_unrolled_for_nested_regions
+            RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
+    set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS
+                 rocke_unrolled_for_nested_regions)
+  endif()
+
   # Direct f32 tanh lowering and narrow-type rejection in the C++ engine.
   if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/core/test_tanh_lowering.cpp")
     add_executable(rocke_tanh_lowering core/test_tanh_lowering.cpp)
@@ -347,6 +400,22 @@ if(BUILD_TESTING)
             RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
     set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS
                  rocke_barrier_fence)
+  endif()
+
+  # MfmaAtom.lane_to_output: every lane and slot against atoms.py's layouts.
+  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/core/test_mfma_atom_lane_to_output.cpp")
+    add_executable(rocke_mfma_atom_lane_to_output core/test_mfma_atom_lane_to_output.cpp)
+    target_link_libraries(rocke_mfma_atom_lane_to_output PRIVATE rocke_core)
+    add_test(NAME rocke_mfma_atom_lane_to_output COMMAND rocke_mfma_atom_lane_to_output)
+    set_tests_properties(rocke_mfma_atom_lane_to_output
+                         PROPERTIES LABELS "ckc;unit;host")
+    rocke_cxx_test_installed_name(_rocke_installed_name rocke_mfma_atom_lane_to_output)
+    set_target_properties(rocke_mfma_atom_lane_to_output
+                          PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
+    install(TARGETS rocke_mfma_atom_lane_to_output
+            RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
+    set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS
+                 rocke_mfma_atom_lane_to_output)
   endif()
 
   # BF16x3 expansion of the emulated XF32 atoms, lowered from serialized IR.

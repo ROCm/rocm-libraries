@@ -17,7 +17,8 @@ there is deliberately no fused kernel in this module.
     dB = dS                               (bias-gradient builds only)
 
 **dBias reduction.** `dbias_reduce=True` (bias builds that store dB) adds a second launch of `fmha_bwd_dbias_reduce_gfx950`'s kernel after the
-dQ one, so the object carries two kernel symbols: the dQ kernel and the reduce (`fmha_bwd_dbias_reduce_gfx950_kernel_1`). The launcher's arguments
+dQ one (the fp32 twin `fmha_bwd_dbias_reduce_f32_gfx950` under `BIAS_F32`), so the object carries two kernel symbols: the dQ kernel and the
+reduce (`fmha_bwd_dbias_reduce_gfx950_kernel_1`, or `fmha_bwd_dbias_reduce_f32_gfx950_kernel_1`). The launcher's arguments
 gain the reduce launch's (`DBias`, `reduce_batch`, `reduce_head`, `stride_ws_*`, `stride_out_*`; its `DB` is the dQ kernel's `DB`); they serve
 compilation only, since each kernel's kernarg is packed from its own declaration, and a build without the reduce ignores them (`_launch` and
 `_compile` pass placeholders). The reduce launch resets the module's fast-math compile hints, as the merged launcher's does. The gpu module is
@@ -239,6 +240,9 @@ from types import SimpleNamespace as _WireArgs
 
 from kernels.attention_bwd_cdna import fmha_abi_gfx1201 as abi
 from kernels.attention_bwd_cdna import (
+    fmha_bwd_dbias_reduce_f32_gfx950 as dbias_reduce_f32_module,
+)
+from kernels.attention_bwd_cdna import (
     fmha_bwd_dbias_reduce_gfx950 as dbias_reduce_module,
 )
 from kernels.attention_bwd_cdna import fmha_common_gfx1201 as fmha
@@ -297,9 +301,11 @@ from flydsl.expr.typing import Vector as Vec
 from flydsl.expr.utils.arith import _to_raw as as_mlir_value
 
 KERNEL_NAME = "fmha_bwd_dq_gfx950_kernel"
+KERNEL_NAME_U2 = "fmha_bwd_dq_u2_gfx950_kernel"
 
 __all__ = [
     "KERNEL_NAME",
+    "KERNEL_NAME_U2",
     "BwdDbStoreHelper",
     "BwdDqKernelContext",
     "BwdDqKvGmemToLdsLoader",
@@ -439,6 +445,11 @@ class BwdDqKernelContext(ParityKernelContext):
         self.DB = DB
         self.Delta = Delta
 
+    @property
+    def db_elem_bytes(self):
+        """Byte width of one dB element: 4 under `DB_F32`, else Q's."""
+        return 4 if self.traits.DB_F32 else self.traits.BF16_BYTES
+
     def init_runtime_indices(self, **kwargs):
         super().init_runtime_indices(**kwargs)
         self.stride_dq_seq_v = fx.Index(self.stride_dq_seq)
@@ -553,15 +564,16 @@ class BwdDqKernelContext(ParityKernelContext):
                         self.seqlen_q_v,
                         self.seqlen_kv_v,
                         self.stride_db_seq_q,
-                        traits.BF16_BYTES,
+                        self.db_elem_bytes,
                     ),
-                    as_mlir_value(self.db_oob_off * fx.Index(traits.BF16_BYTES)),
+                    as_mlir_value(self.db_oob_off * fx.Index(self.db_elem_bytes)),
                 ),
                 base_byte_offset=as_mlir_value(
                     self._slab_byte_base(
                         self.stride_db_head,
                         self.bias_origin(self.stride_db_batch),
                         self.q_head_idx,
+                        self.db_elem_bytes,
                     )
                 ),
             )
@@ -925,20 +937,20 @@ class BwdDqSoftmaxHelper(ParitySoftmaxHelper):
                             ctx.bias_rsrc,
                             as_mlir_value(fx.Int32(run_base + fx.Index(j))),
                             vec_width=1,
-                            dtype=ctx.elem_dtype,
+                            dtype=ctx.bias_elem_dtype,
                         )
-                        b = fx.Float32(ctx.elem_dtype(one).to(fx.Float32))
+                        b = fx.Float32(ctx.bias_elem_dtype(one).to(fx.Float32))
                         values[elem0 + j] = self._fma_exponent(values[elem0 + j], b)
                     continue
                 span = buffer_ops.buffer_load(
                     ctx.bias_rsrc,
                     as_mlir_value(fx.Int32(run_base)),
                     vec_width=width,
-                    dtype=ctx.elem_dtype,
+                    dtype=ctx.bias_elem_dtype,
                 )
                 for j in range_constexpr(width):
                     b = fx.Float32(
-                        Vec(span, (width,), ctx.elem_dtype)[j].to(fx.Float32)
+                        Vec(span, (width,), ctx.bias_elem_dtype)[j].to(fx.Float32)
                     )
                     values[elem0 + j] = self._fma_exponent(values[elem0 + j], b)
 
@@ -1452,6 +1464,34 @@ class BwdDbStoreHelper(ParityStoreHelper):
                         as_mlir_value(vec[j]), ctx.db_rsrc, as_mlir_value(fx.Int32(off))
                     )
 
+    def store_tile_f32(self, ds_lists, tile_idx, q_row):
+        """`dB = dS` as f32, straight from the score lists: `DB_F32` builds, where dB is FLOAT beside the 16-bit Q.
+
+        The `store_tile` device -- per element, address-suppressed -- with 4-byte stores, so the packed 16-bit form
+        that shortens the live range does not apply; the source is the f32 scores themselves.
+        """
+        traits = self.traits
+        ctx = self.ctx_ref
+        row_base = q_row * fx.Index(ctx.stride_db_seq_q)
+        col_base = dualwave._seq_pad_col_base(
+            traits, tile_idx, lane_div_32=self.lane_div_32
+        )
+        in_row = (q_row < self.seqlen_q_v) & ctx.db_store_enabled  # see store_tile
+        for half, vals in ((0, ds_lists[0]), (1, ds_lists[1])):
+            for r in range_constexpr(len(vals)):
+                col_i32 = col_base + fx.Int32(
+                    dualwave._seq_pad_score_threshold(traits, r) + half * traits.MFMA_M
+                )
+                live = in_row & (col_i32 < self.seqlen_kv_i32)
+                off = fx.Index(
+                    live.select(row_base + fx.Index(col_i32), ctx.db_oob_off)
+                )
+                buffer_ops.buffer_store(
+                    as_mlir_value(fx.Float32(vals[r])),
+                    ctx.db_rsrc,
+                    as_mlir_value(fx.Int32(off)),
+                )
+
     def store_tile_m16(self, ds_pack, tile_idx, q_row, lane):
         """`dB = dS` for the 16-row family.
 
@@ -1531,15 +1571,22 @@ def build_fmha_bwd_dq_gfx950_module_primary(
     STORE_DB = traits.STORE_DB
     if dbias_reduce and not (traits.BIAS_TYPE and STORE_DB):
         raise ValueError("dbias_reduce: a bias build that stores dB only")
-    REDUCE_VEC = dbias_reduce_module.VEC
-    REDUCE_BLOCK = dbias_reduce_module.BLOCK_THREADS
-    reduce_kernel = (
-        dbias_reduce_module.build_fmha_bwd_dbias_reduce_gfx950_module_primary(
-            traits.DTYPE_STR
-        ).kernel
-        if dbias_reduce
-        else None
-    )
+    # The reduce is keyed on the bias dtype: the fp32 twin under `BIAS_F32`, the 16-bit one otherwise.
+    if traits.BIAS_F32:
+        reduce_module = dbias_reduce_f32_module
+        reduce_builder = (
+            dbias_reduce_f32_module.build_fmha_bwd_dbias_reduce_f32_gfx950_module_primary
+        )
+        reduce_dtype = "fp32"
+    else:
+        reduce_module = dbias_reduce_module
+        reduce_builder = (
+            dbias_reduce_module.build_fmha_bwd_dbias_reduce_gfx950_module_primary
+        )
+        reduce_dtype = traits.DTYPE_STR
+    REDUCE_VEC = reduce_module.VEC
+    REDUCE_BLOCK = reduce_module.BLOCK_THREADS
+    reduce_kernel = reduce_builder(reduce_dtype).kernel if dbias_reduce else None
     LDS_BIAS = traits.BIAS_STAGE == "lds"
     # Which MFMA family this build is. `MFMA_N` is the query rows a wave owns,
     # so it is the discriminator rather than a width threshold -- the same
@@ -1690,6 +1737,8 @@ def build_fmha_bwd_dq_gfx950_module_primary(
         # grows the `if self.O is not None` guard that dK/dV's split wants
         # anyway. That file has another owner, so this stays a duplicated
         # argument rather than a cross-file change.
+        if const_expr(traits.V_HEADS):
+            ctx_kwargs["num_head_v"] = a.num_head_v
         ctx = ctx_cls(
             traits,
             strides=(
@@ -1936,7 +1985,10 @@ def build_fmha_bwd_dq_gfx950_module_primary(
                         # counts are not monotone with the rate in any of the three
                         # columns. This variant is kept because its one *decisive*
                         # measurement -- 1.49x at 512 -- agrees with the mechanism.
-                        db_store.store_tile(v_ds, j, ctx.q_row)
+                        if const_expr(traits.DB_F32):
+                            db_store.store_tile_f32((ds_lo, ds_hi), j, ctx.q_row)
+                        else:
+                            db_store.store_tile(v_ds, j, ctx.q_row)
 
                     v_dq = gemm_helper.pv(v_ds, k_reader.load_v(0), v_dq)
 
@@ -2359,6 +2411,297 @@ def build_fmha_bwd_dq_gfx950_module_primary(
                     stream=stream,
                 )
 
+    # The V-head (`u2=dq`) object is its own kernel and launcher: `num_head_v` follows `num_head_k` on the wire and the
+    # body is the shared `emit_dq_body`. The definitions above are the f32/16-bit-bias and standard objects, unchanged.
+    if traits.V_HEADS:
+
+        @flyc.kernel(known_block_size=[traits.BLOCK_SIZE, 1, 1])
+        def fmha_bwd_dq_u2_gfx950_kernel(
+            Q: fx.Pointer,
+            K: fx.Pointer,
+            V: fx.Pointer,
+            B: fx.Pointer,
+            DO: fx.Pointer,
+            DQ: fx.Pointer,
+            DB: fx.Pointer,
+            LSE: fx.Pointer,
+            Delta: fx.Pointer,
+            seqinfo_q0: fx.Pointer,
+            seqinfo_q1: fx.Pointer,
+            seqinfo_k0: fx.Pointer,
+            seqinfo_k1: fx.Pointer,
+            mul_Q: fx.Int64,
+            mul_K: fx.Int64,
+            off_V: fx.Pointer,
+            mul_V: fx.Int64,
+            off_DO: fx.Pointer,
+            mul_DO: fx.Int64,
+            off_DQ: fx.Pointer,
+            mul_DQ: fx.Int64,
+            varlen_bits: fx.Int32,
+            num_seqlens: fx.Int32,
+            max_seqlen_q: fx.Int32,
+            max_seqlen_k: fx.Int32,
+            window_left: fx.Int32,
+            window_right: fx.Int32,
+            philox_seed_ptr: fx.Pointer,
+            philox_offset1: fx.Pointer,
+            philox_offset2: fx.Int64,
+            idropout_p: fx.Int32,
+            dropout_scale: fx.Float32,
+            num_head_q: fx.Int32,
+            num_head_k: fx.Int32,
+            num_head_v: fx.Int32,
+            hdim_qk: fx.Int32,
+            hdim_vo: fx.Int32,
+            sm_scale: fx.Float32,
+            stride_q_batch: fx.Int64,
+            stride_q_head: fx.Int64,
+            stride_q_seq: fx.Int64,
+            stride_k_batch: fx.Int64,
+            stride_k_head: fx.Int64,
+            stride_k_seq: fx.Int64,
+            stride_v_batch: fx.Int64,
+            stride_v_head: fx.Int64,
+            stride_v_seq: fx.Int64,
+            stride_do_batch: fx.Int64,
+            stride_do_head: fx.Int64,
+            stride_do_seq: fx.Int64,
+            stride_dq_batch: fx.Int64,
+            stride_dq_head: fx.Int64,
+            stride_dq_seq: fx.Int64,
+            stride_b_batch: fx.Int64,
+            stride_b_head: fx.Int64,
+            stride_b_seq_q: fx.Int64,
+            stride_db_batch: fx.Int64,
+            stride_db_head: fx.Int64,
+            stride_db_seq_q: fx.Int64,
+            rt_flags: fx.Int32,
+        ):
+            emit_dq_body(
+                _WireArgs(
+                    Q=Q,
+                    K=K,
+                    V=V,
+                    B=B,
+                    DO=DO,
+                    DQ=DQ,
+                    DB=DB,
+                    LSE=LSE,
+                    Delta=Delta,
+                    seqinfo_q0=seqinfo_q0,
+                    seqinfo_q1=seqinfo_q1,
+                    seqinfo_k0=seqinfo_k0,
+                    seqinfo_k1=seqinfo_k1,
+                    mul_Q=mul_Q,
+                    mul_K=mul_K,
+                    off_V=off_V,
+                    mul_V=mul_V,
+                    off_DO=off_DO,
+                    mul_DO=mul_DO,
+                    off_DQ=off_DQ,
+                    mul_DQ=mul_DQ,
+                    varlen_bits=varlen_bits,
+                    num_seqlens=num_seqlens,
+                    max_seqlen_q=max_seqlen_q,
+                    max_seqlen_k=max_seqlen_k,
+                    window_left=window_left,
+                    window_right=window_right,
+                    philox_seed_ptr=philox_seed_ptr,
+                    philox_offset1=philox_offset1,
+                    philox_offset2=philox_offset2,
+                    idropout_p=idropout_p,
+                    dropout_scale=dropout_scale,
+                    num_head_q=num_head_q,
+                    num_head_k=num_head_k,
+                    num_head_v=num_head_v,
+                    hdim_qk=hdim_qk,
+                    hdim_vo=hdim_vo,
+                    sm_scale=sm_scale,
+                    stride_q_batch=stride_q_batch,
+                    stride_q_head=stride_q_head,
+                    stride_q_seq=stride_q_seq,
+                    stride_k_batch=stride_k_batch,
+                    stride_k_head=stride_k_head,
+                    stride_k_seq=stride_k_seq,
+                    stride_v_batch=stride_v_batch,
+                    stride_v_head=stride_v_head,
+                    stride_v_seq=stride_v_seq,
+                    stride_do_batch=stride_do_batch,
+                    stride_do_head=stride_do_head,
+                    stride_do_seq=stride_do_seq,
+                    stride_dq_batch=stride_dq_batch,
+                    stride_dq_head=stride_dq_head,
+                    stride_dq_seq=stride_dq_seq,
+                    stride_b_batch=stride_b_batch,
+                    stride_b_head=stride_b_head,
+                    stride_b_seq_q=stride_b_seq_q,
+                    stride_db_batch=stride_db_batch,
+                    stride_db_head=stride_db_head,
+                    stride_db_seq_q=stride_db_seq_q,
+                    rt_flags=rt_flags,
+                )
+            )
+
+        @flyc.jit
+        def launch_fmha_bwd_dq_u2_gfx950(
+            Q: fx.Pointer,
+            K: fx.Pointer,
+            V: fx.Pointer,
+            Bias: fx.Pointer,
+            DO: fx.Pointer,
+            DQ: fx.Pointer,
+            DB: fx.Pointer,
+            LSE: fx.Pointer,
+            Delta: fx.Pointer,
+            batch_size: fx.Int32,
+            seqinfo_q0: fx.Pointer,
+            seqinfo_q1: fx.Pointer,
+            seqinfo_k0: fx.Pointer,
+            seqinfo_k1: fx.Pointer,
+            mul_Q: fx.Int64,
+            mul_K: fx.Int64,
+            off_V: fx.Pointer,
+            mul_V: fx.Int64,
+            off_DO: fx.Pointer,
+            mul_DO: fx.Int64,
+            off_DQ: fx.Pointer,
+            mul_DQ: fx.Int64,
+            varlen_bits: fx.Int32,
+            num_seqlens: fx.Int32,
+            max_seqlen_q: fx.Int32,
+            max_seqlen_k: fx.Int32,
+            window_left: fx.Int32,
+            window_right: fx.Int32,
+            philox_seed_ptr: fx.Pointer,
+            philox_offset1: fx.Pointer,
+            philox_offset2: fx.Int64,
+            idropout_p: fx.Int32,
+            dropout_scale: fx.Float32,
+            num_head_q: fx.Int32,
+            num_head_k: fx.Int32,
+            num_head_v: fx.Int32,
+            hdim_qk: fx.Int32,
+            hdim_vo: fx.Int32,
+            sm_scale: fx.Float32,
+            stride_q_batch: fx.Int64,
+            stride_q_head: fx.Int64,
+            stride_q_seq: fx.Int64,
+            stride_k_batch: fx.Int64,
+            stride_k_head: fx.Int64,
+            stride_k_seq: fx.Int64,
+            stride_v_batch: fx.Int64,
+            stride_v_head: fx.Int64,
+            stride_v_seq: fx.Int64,
+            stride_do_batch: fx.Int64,
+            stride_do_head: fx.Int64,
+            stride_do_seq: fx.Int64,
+            stride_dq_batch: fx.Int64,
+            stride_dq_head: fx.Int64,
+            stride_dq_seq: fx.Int64,
+            stride_b_batch: fx.Int64,
+            stride_b_head: fx.Int64,
+            stride_b_seq_q: fx.Int64,
+            stride_db_batch: fx.Int64,
+            stride_db_head: fx.Int64,
+            stride_db_seq_q: fx.Int64,
+            rt_flags: fx.Int32,
+            stream: fx.Stream = fx.Stream(None),
+        ):
+            # Make the build configuration visible to the JIT cache key.
+            _ = _cache_tag
+            # **Sequences, not batches.** A packed `(1, H, T, D)` call holding N
+            # sequences is `batch_size=1, num_seqlens=N`; using the batch extent
+            # would launch one program for all N. The forward's expression.
+            bs_idx = fx.Index(num_seqlens if num_seqlens != fx.Int32(0) else batch_size)
+            num_q_blocks = (
+                fx.Index(max_seqlen_q) + traits.BLOCK_M - 1
+            ) // traits.BLOCK_M
+
+            passthrough_entries = (
+                [
+                    ["denormal-fp-math-f32", "preserve-sign,preserve-sign"],
+                    ["no-nans-fp-math", "true"],
+                    ["unsafe-fp-math", "true"],
+                ]
+                if const_expr(traits.DAZ)
+                else None
+            )
+            # Head-fastest, the forward's order. Not a free choice there -- it is
+            # an L2-locality lever on MI355X's 8 XCDs -- and this kernel streams
+            # the same K/V per (batch, head), so it inherits the reasoning.
+            fmha_bwd_dq_u2_gfx950_kernel(
+                Q,
+                K,
+                V,
+                Bias,
+                DO,
+                DQ,
+                DB,
+                LSE,
+                Delta,
+                seqinfo_q0,
+                seqinfo_q1,
+                seqinfo_k0,
+                seqinfo_k1,
+                mul_Q,
+                mul_K,
+                off_V,
+                mul_V,
+                off_DO,
+                mul_DO,
+                off_DQ,
+                mul_DQ,
+                varlen_bits,
+                num_seqlens,
+                max_seqlen_q,
+                max_seqlen_k,
+                window_left,
+                window_right,
+                philox_seed_ptr,
+                philox_offset1,
+                philox_offset2,
+                idropout_p,
+                dropout_scale,
+                num_head_q,
+                num_head_k,
+                num_head_v,
+                hdim_qk,
+                hdim_vo,
+                sm_scale,
+                stride_q_batch,
+                stride_q_head,
+                stride_q_seq,
+                stride_k_batch,
+                stride_k_head,
+                stride_k_seq,
+                stride_v_batch,
+                stride_v_head,
+                stride_v_seq,
+                stride_do_batch,
+                stride_do_head,
+                stride_do_seq,
+                stride_dq_batch,
+                stride_dq_head,
+                stride_dq_seq,
+                stride_b_batch,
+                stride_b_head,
+                stride_b_seq_q,
+                stride_db_batch,
+                stride_db_head,
+                stride_db_seq_q,
+                rt_flags,
+                value_attrs={
+                    "rocdl.waves_per_eu": traits.WAVES_PER_EU,
+                    "rocdl.flat_work_group_size": f"{traits.BLOCK_SIZE},{traits.BLOCK_SIZE}",
+                    "passthrough": passthrough_entries,
+                },
+            ).launch(
+                grid=(num_head_q, num_q_blocks, bs_idx),
+                block=(traits.BLOCK_SIZE, 1, 1),
+                stream=stream,
+            )
+
     def _resolve_window_args(window):
         """`(window_left, window_right)` for the wire, as signed i32.
 
@@ -2689,7 +3032,15 @@ def build_fmha_bwd_dq_gfx950_module_primary(
             _dp_keepalive,
         )
 
+    _entry = (
+        launch_fmha_bwd_dq_u2_gfx950 if traits.V_HEADS else launch_fmha_bwd_dq_gfx950
+    )
+
     def _launch(*args, **kwargs):
+        if traits.V_HEADS:
+            raise NotImplementedError(
+                "a V-head (u2=dq) build serves compilation and the native dispatch: abi.prep_tensors requires K and V to share a head count"
+            )
         if dbias_reduce:
             raise NotImplementedError(
                 "a dbias_reduce build serves compilation: the reduce launch's arguments are the native dispatch's"
@@ -2700,7 +3051,7 @@ def build_fmha_bwd_dq_gfx950_module_primary(
         with CompilationContext.compile_hints(_COMPILE_HINTS):
             result = abi.run_compiled(
                 _COMPILED,
-                launch_fmha_bwd_dq_gfx950,
+                _entry,
                 *packed,
                 stream if stream is not None else fx.Stream(None),
             )
@@ -2708,13 +3059,17 @@ def build_fmha_bwd_dq_gfx950_module_primary(
         return result
 
     def _compile(*args, **kwargs):
+        if traits.V_HEADS:
+            raise NotImplementedError(
+                "a V-head (u2=dq) build serves compilation and the native dispatch: abi.prep_tensors requires K and V to share a head count"
+            )
         if dbias_reduce:
             raise NotImplementedError(
                 "a dbias_reduce build serves compilation: the reduce launch's arguments are the native dispatch's"
             )
         packed, stream, _keepalive = _args(*args, **kwargs)
         with CompilationContext.compile_hints(_COMPILE_HINTS):
-            return flyc.compile(launch_fmha_bwd_dq_gfx950, *packed, fx.Stream(stream))
+            return flyc.compile(_entry, *packed, fx.Stream(stream))
 
     _launch.compile = _compile
     _launch.traits = traits
@@ -2722,7 +3077,7 @@ def build_fmha_bwd_dq_gfx950_module_primary(
     _launch.emit = emit_dq_body
     _launch.SharedStorage = SharedStorage
     _launch.cache_tag = _cache_tag
-    _launch.jit = launch_fmha_bwd_dq_gfx950
+    _launch.jit = _entry
     return _launch
 
 

@@ -1218,8 +1218,11 @@ class TestSdpaExtract:
         [
             (64, 64, "head_dim:64"),
             (192, 192, "head_dim:192"),
+            (256, 256, "head_dim:256"),
             # A narrower v is its own kernel, not a 192.
             (192, 128, "head_dim:192x128"),
+            (128, 64, "head_dim:128x64"),
+            (256, 64, "head_dim:256x64"),
         ],
     )
     def test_head_dim_reads_q_and_v(self, qk: int, v: int, expected: str) -> None:
@@ -1236,7 +1239,7 @@ class TestSdpaExtract:
         [
             ({"q_dims": (2, 8, 128, 96)}, "head dim 96 x 128"),
             # Each head dim is catalogued, the pair is not.
-            ({"v_dims": (2, 8, 128, 64)}, "head dim 128 x 64"),
+            ({"v_dims": (2, 8, 128, 96)}, "head dim 128 x 96"),
             ({"dtype": "float"}, "dtype 'float'"),
             # The MX scale type, never an attention input.
             ({"dtype": "fp8_e8m0"}, "dtype 'fp8_e8m0'"),
@@ -1356,6 +1359,7 @@ class TestSdpaExtract:
             {},
             {"ragged": True},
             {"dtype": "half", "q_dims": (2, 8, 1, 64), "k_dims": (2, 1, 128, 64)},
+            {"q_dims": (2, 8, 1, 256), "k_dims": (2, 8, 128, 256)},
             {
                 "dtype": "fp8_e4m3",
                 "o_dtype": "bfloat16",
@@ -1371,6 +1375,16 @@ class TestSdpaExtract:
                 "q_dims": (2, 8, 128, 192),
                 "k_dims": (2, 8, 128, 192),
                 "v_dims": (2, 8, 128, 128),
+            },
+            {
+                "q_dims": (2, 8, 128, 128),
+                "k_dims": (2, 8, 128, 128),
+                "v_dims": (2, 8, 128, 64),
+            },
+            {
+                "q_dims": (2, 8, 128, 256),
+                "k_dims": (2, 8, 128, 256),
+                "v_dims": (2, 8, 128, 64),
             },
             {"causal_mask_bottom_right": True, "attn_scale_value": 0.5},
             {"left_bound": 8, "right_bound": 8, "inputs": {"scale_tensor_uid": 9}},
@@ -1498,12 +1512,23 @@ class TestSdpaBackwardExtract:
             {"ragged": True},
             {"dtype": "half", "q_dims": (2, 8, 64, 64), "k_dims": (2, 1, 128, 64)},
             {"q_dims": (2, 8, 128, 192), "k_dims": (2, 2, 128, 192)},
+            {"q_dims": (2, 8, 128, 256), "k_dims": (2, 8, 128, 256)},
             {
                 "strides": _bshd_strides,
                 "causal_mask": True,
                 "q_dims": (2, 8, 128, 192),
                 "k_dims": (2, 8, 128, 192),
                 "v_dims": (2, 8, 128, 128),
+            },
+            {
+                "q_dims": (2, 8, 128, 128),
+                "k_dims": (2, 8, 128, 128),
+                "v_dims": (2, 8, 128, 64),
+            },
+            {
+                "q_dims": (2, 8, 128, 256),
+                "k_dims": (2, 8, 128, 256),
+                "v_dims": (2, 8, 128, 64),
             },
             {"causal_mask_bottom_right": True, "attn_scale_value": 0.5},
             {"left_bound": 8, "right_bound": 8, "inputs": {"scale_tensor_uid": 9}},

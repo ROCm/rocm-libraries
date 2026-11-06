@@ -23,9 +23,15 @@ from ._sdpa_bwd_cdna_build import dq_tailzero_companions, generate as _generate,
 OP = "sdpa_bwd_merged"
 
 
-def generate(arch, out_root, reference_dir, only=None):
+def generate(arch, out_root, reference_dir, only=None, stored_dir=None):
     return _generate(
-        OP, arch, out_root, only, reference_dir, build_tailzero=dq_tailzero_companions
+        OP,
+        arch,
+        out_root,
+        only,
+        reference_dir,
+        build_tailzero=dq_tailzero_companions,
+        stored_dir=stored_dir,
     )
 
 

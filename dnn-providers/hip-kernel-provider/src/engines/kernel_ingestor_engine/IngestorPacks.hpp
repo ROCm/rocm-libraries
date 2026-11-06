@@ -120,15 +120,10 @@ struct FlydslSdpaBwdMergedLaunchDump
     std::array<unsigned int, 3> tailzeroGrid{};
     unsigned int tailzeroBlock = 0;
     size_t workspaceBytes = 0;
-    /// Set when the seed and offset are written into the workspace ahead of the launch: either
-    /// as the four words in seedWords (seed low, seed high, offset low, offset high), or, with
-    /// seedCopiedFromDevice, by copying the 4 bytes at seedSource and offsetSource (the device
-    /// addresses of the 32-bit seed and offset tensors).
+    /// Set when a pass-by-value seed and offset are written into the workspace ahead of the
+    /// launch, as the four words in seedWords (seed low, seed high, offset low, offset high).
     bool seedUploaded = false;
-    bool seedCopiedFromDevice = false;
     std::vector<uint32_t> seedWords;
-    const void* seedSource = nullptr;
-    const void* offsetSource = nullptr;
 };
 
 /// The launch of @p kernel on the graph of @p context, over @p buffers (by tensor uid) and a
@@ -161,6 +156,12 @@ struct FlydslSdpaBwdSplitLaunchDump
     std::vector<unsigned char> kernarg;
     std::array<unsigned int, 3> grid{};
     unsigned int block = 0;
+    /// Set on the dkdv slot when the row serves V heads that differ from K's: the launch above is
+    /// the dK-only object over the K heads and is followed by the dV-only object, with the same
+    /// arguments, over the V heads: its launch.
+    bool dvonly = false;
+    std::array<unsigned int, 3> dvonlyGrid{};
+    unsigned int dvonlyBlock = 0;
     /// Set when the launch is followed by the dBias reduce kernel: its symbol, arguments and
     /// launch.
     bool reduces = false;
@@ -177,12 +178,9 @@ struct FlydslSdpaBwdSplitLaunchDump
     /// The slot handler's workspaceBytes(): the scratch this slot needs, shared region excluded.
     size_t scratchBytes = 0;
     /// Set when the launch writes the seed and offset into the shared region ahead of the
-    /// kernel (the prep slot only); see FlydslSdpaBwdMergedLaunchDump for the two forms.
+    /// kernel (the prep slot only); see FlydslSdpaBwdMergedLaunchDump.
     bool seedUploaded = false;
-    bool seedCopiedFromDevice = false;
     std::vector<uint32_t> seedWords;
-    const void* seedSource = nullptr;
-    const void* offsetSource = nullptr;
 };
 
 /// The launch of @p slot's @p kernel on the graph of @p context, with the tokens @p bound that
@@ -201,6 +199,15 @@ FlydslSdpaBwdSplitLaunchDump describeFlydslSdpaBwdSplitLaunchForTesting(
 void registerGfx950AttentionDenseSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
 void resetGfx950AttentionDenseModuleCache();
 
+/// The engine name gfx942_attention_unified3d.ued.json declares. Read here by the pack
+/// table, the pack's own log lines and the census, like GFX950_ATTENTION_DENSE_ENGINE_NAME.
+inline constexpr std::string_view GFX942_ATTENTION_UNIFIED_3D_ENGINE_NAME
+    = "hipkernel:Gfx942AttentionUnified3d";
+
+/// @see packs/Gfx942AttentionUnified3dNative.cpp
+void registerGfx942AttentionUnified3dSymbols(
+    hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
+void resetGfx942AttentionUnified3dModuleCache();
 /// The engine name gfx950_attention_unified_2d.ued.json declares, shared the same way.
 inline constexpr std::string_view GFX950_ATTENTION_UNIFIED_2D_ENGINE_NAME
     = "hipkernel:Gfx950AttentionUnified2D";

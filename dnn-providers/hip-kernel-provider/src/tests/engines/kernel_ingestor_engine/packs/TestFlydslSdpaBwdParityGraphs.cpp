@@ -31,9 +31,12 @@
  * graph matcher binds every served graph and each slot has a shipped object that admits it;
  * each declined graph is declined with its rule's cause. The suite is registered with
  * hkp_register_census_tests() in src/tests/CMakeLists.txt over the gfx11 architectures the
- * split ops ship content for, and nowhere else. No case skips: a shard that holds no gfx11
- * object fails every served case, so a build that cannot check the graphs says so. The device
- * half, which launches the same cases, is TestFlydslSdpaBwdParity.cpp.
+ * split ops ship content for. The suite is compiled into the census binary whatever
+ * GPU_TARGETS holds, because a family job without gfx11 targets can supply the binary a gfx11
+ * entry runs; it skips, with its reason, when the shard holds no gfx11 pack, which a census
+ * entry reports as a failure. A shard that holds gfx11 packs but no object a graph needs
+ * fails that case. The device half, which launches the same cases, is
+ * TestFlydslSdpaBwdParity.cpp.
  */
 namespace hip_kernel_provider::kernel_ingestor_engine
 {
@@ -73,6 +76,23 @@ std::array<std::vector<KernelDefinition>, 3> shippedKernels()
     return kernels;
 }
 
+/// Whether the loaded split engine set holds a pack stamped for a gfx11 architecture.
+bool shardHoldsGfx11Content()
+{
+    const auto* set = findLoadedSet(SPLIT_ENGINE_NAME);
+    if(set == nullptr)
+    {
+        return false;
+    }
+    return std::any_of(set->slots.begin(), set->slots.end(), [](const auto& slot) {
+        return std::any_of(slot.packs.begin(), slot.packs.end(), [](const auto& pack) {
+            return std::any_of(pack.arch.begin(), pack.arch.end(), [](const std::string& arch) {
+                return arch.rfind("gfx11", 0) == 0;
+            });
+        });
+    });
+}
+
 class TestFlydslSdpaBwdParityGraphs : public ::testing::TestWithParam<size_t>
 {
 protected:
@@ -85,6 +105,12 @@ protected:
         ASSERT_EQ(_arch.rfind("gfx11", 0), 0U)
             << "the parity cases follow the gfx11 verdict table; " << _arch
             << " is not a gfx11 architecture";
+
+        if(!shardHoldsGfx11Content())
+        {
+            GTEST_SKIP() << "the loaded split engine set holds no gfx11 pack, so the gfx11 "
+                            "parity cases have nothing to check";
+        }
     }
 
     const std::string& arch() const
@@ -108,7 +134,7 @@ TEST_P(TestFlydslSdpaBwdParityGraphs, IsServedOrDeclinedAsTheMatcherContractStat
         EXPECT_FALSE(bound.has_value())
             << parity.name << ": graph_match accepts a graph that " << parity.rule << " declines";
         const auto shared
-            = flydsl_sdpa_bwd::matchSdpaBackward(context, flydsl_sdpa_bwd::MatchOptions{true});
+            = flydsl_sdpa_bwd::matchSdpaBackward(context, flydsl_sdpa_bwd::SPLIT_MATCH_OPTIONS);
         const auto* decline = std::get_if<flydsl_sdpa_bwd::Decline>(&shared);
         ASSERT_NE(decline, nullptr) << parity.name << ": the shared matcher serves the graph";
         EXPECT_EQ(decline->cause, parity.cause)

@@ -1,0 +1,727 @@
+{
+    "version": 1,
+    "cases": [
+        {
+            "id": "qgapped_fp16_mha_d64_nomask_sq_ne_skv_th",
+            "values": {
+                "io_data_type": "half",
+                "tensors": [
+                    {
+                        "uid": 0,
+                        "dims": [
+                            3,
+                            2,
+                            96,
+                            64
+                        ],
+                        "strides": [
+                            12288,
+                            6144,
+                            64,
+                            1
+                        ],
+                        "data_type": "half"
+                    },
+                    {
+                        "uid": 1,
+                        "dims": [
+                            3,
+                            2,
+                            64,
+                            64
+                        ],
+                        "strides": [
+                            8192,
+                            64,
+                            128,
+                            1
+                        ],
+                        "data_type": "half",
+                        "ragged_offset_multiplier": 1
+                    },
+                    {
+                        "uid": 2,
+                        "dims": [
+                            3,
+                            2,
+                            64,
+                            64
+                        ],
+                        "strides": [
+                            8192,
+                            64,
+                            128,
+                            1
+                        ],
+                        "data_type": "half",
+                        "ragged_offset_multiplier": 1
+                    },
+                    {
+                        "uid": 3,
+                        "dims": [
+                            3,
+                            2,
+                            96,
+                            64
+                        ],
+                        "strides": [
+                            12288,
+                            6144,
+                            64,
+                            1
+                        ],
+                        "data_type": "half"
+                    },
+                    {
+                        "uid": 4,
+                        "dims": [
+                            3,
+                            2,
+                            64,
+                            64
+                        ],
+                        "strides": [
+                            8192,
+                            64,
+                            128,
+                            1
+                        ],
+                        "data_type": "half",
+                        "ragged_offset_multiplier": 1
+                    },
+                    {
+                        "uid": 5,
+                        "dims": [
+                            3,
+                            2,
+                            96,
+                            64
+                        ],
+                        "strides": [
+                            12288,
+                            6144,
+                            64,
+                            1
+                        ],
+                        "data_type": "half"
+                    },
+                    {
+                        "uid": 6,
+                        "dims": [
+                            3,
+                            2,
+                            96,
+                            64
+                        ],
+                        "strides": [
+                            12288,
+                            6144,
+                            64,
+                            1
+                        ],
+                        "data_type": "half"
+                    },
+                    {
+                        "uid": 7,
+                        "dims": [
+                            3,
+                            2,
+                            64,
+                            64
+                        ],
+                        "strides": [
+                            8192,
+                            64,
+                            128,
+                            1
+                        ],
+                        "data_type": "half",
+                        "ragged_offset_multiplier": 1
+                    },
+                    {
+                        "uid": 8,
+                        "dims": [
+                            3,
+                            2,
+                            64,
+                            1
+                        ],
+                        "strides": [
+                            128,
+                            1,
+                            2,
+                            1
+                        ],
+                        "data_type": "float",
+                        "ragged_offset_multiplier": 1
+                    },
+                    {
+                        "uid": 10,
+                        "dims": [
+                            3,
+                            1,
+                            1,
+                            1
+                        ],
+                        "strides": [
+                            1,
+                            1,
+                            1,
+                            1
+                        ],
+                        "data_type": "int32"
+                    },
+                    {
+                        "uid": 11,
+                        "dims": [
+                            3,
+                            1,
+                            1,
+                            1
+                        ],
+                        "strides": [
+                            1,
+                            1,
+                            1,
+                            1
+                        ],
+                        "data_type": "int32"
+                    },
+                    {
+                        "uid": 16,
+                        "dims": [
+                            4,
+                            1,
+                            1,
+                            1
+                        ],
+                        "strides": [
+                            1,
+                            1,
+                            1,
+                            1
+                        ],
+                        "data_type": "int32"
+                    },
+                    {
+                        "uid": 19,
+                        "dims": [
+                            4,
+                            1,
+                            1,
+                            1
+                        ],
+                        "strides": [
+                            1,
+                            1,
+                            1,
+                            1
+                        ],
+                        "data_type": "int32"
+                    },
+                    {
+                        "uid": 20,
+                        "dims": [
+                            4,
+                            1,
+                            1,
+                            1
+                        ],
+                        "strides": [
+                            1,
+                            1,
+                            1,
+                            1
+                        ],
+                        "data_type": "int32"
+                    },
+                    {
+                        "uid": 21,
+                        "dims": [
+                            4,
+                            1,
+                            1,
+                            1
+                        ],
+                        "strides": [
+                            1,
+                            1,
+                            1,
+                            1
+                        ],
+                        "data_type": "int32"
+                    },
+                    {
+                        "uid": 24,
+                        "dims": [
+                            4,
+                            1,
+                            1,
+                            1
+                        ],
+                        "strides": [
+                            1,
+                            1,
+                            1,
+                            1
+                        ],
+                        "data_type": "int32"
+                    }
+                ],
+                "attributes": {
+                    "parameters__diagonal_alignment": "TOP_LEFT",
+                    "parameters__left_bound": null,
+                    "parameters__right_bound": null
+                }
+            },
+            "golden": {
+                "path": "golden/qgapped_fp16_mha_d64_nomask_sq_ne_skv_th/tensors.dvc"
+            },
+            "metadata": {
+                "format_version": 1,
+                "generator": "generate_sdpa_bwd_golden.py",
+                "generator_version": "1.5.0",
+                "generator_sha256": "40af1f35c4bc2fd585044792619345bd82892591f029a8a80db55860b794172a",
+                "generated_at": "2026-11-05T14:26:53Z",
+                "reference_source": "PyTorch 2.15.0+cpu",
+                "reference_backend": "pytorch_explicit_fp32_backward",
+                "reference_strategy": "matched_precision",
+                "rocm_version": "",
+                "direction": "backward",
+                "seed": 42,
+                "input_range": [
+                    -1.0,
+                    1.0
+                ],
+                "deterministic": true,
+                "intermediate_rounding": "none",
+                "config": {
+                    "batch": 3,
+                    "num_heads_q": 2,
+                    "num_heads_kv": 2,
+                    "seq_q": 64,
+                    "seq_kv": 96,
+                    "head_dim_qk": 64,
+                    "head_dim_v": 64,
+                    "dtype": "fp16",
+                    "layout": "bhsd",
+                    "scale": 0.125,
+                    "left_bound": null,
+                    "right_bound": null,
+                    "diagonal_alignment": "top_left",
+                    "additive_mask": false,
+                    "seq_lens_q": [
+                        17,
+                        0,
+                        64
+                    ],
+                    "seq_lens_kv": [
+                        96,
+                        0,
+                        33
+                    ],
+                    "ragged": {
+                        "sides": "q",
+                        "units": "elements",
+                        "stats_layout": "th",
+                        "blocks": {
+                            "q": [
+                                24,
+                                3,
+                                64
+                            ],
+                            "o": [
+                                24,
+                                3,
+                                64
+                            ],
+                            "do": [
+                                24,
+                                3,
+                                64
+                            ],
+                            "dq": [
+                                24,
+                                3,
+                                64
+                            ],
+                            "stats": [
+                                24,
+                                3,
+                                64
+                            ]
+                        }
+                    }
+                },
+                "generation_precision": "matched-precision: FP16 inputs, FP32 intermediates and FP32 gradient accumulation, converted to the IO type once at the end",
+                "forward_source": {
+                    "method": "pytorch_math_backend",
+                    "version": "2.15.0+cpu",
+                    "generated_at": "2026-11-05T14:26:53Z",
+                    "bundle": "../../../../RaggedQ_fwd_pair/qgapped_fp16_mha_d64_nomask_sq_ne_skv_th/Small/Small.json"
+                }
+            }
+        },
+        {
+            "id": "qcompact_bf16_gqa_d128_causal_tl_sq_ne_skv_th",
+            "values": {
+                "io_data_type": "bfloat16",
+                "tensors": [
+                    {
+                        "uid": 0,
+                        "dims": [
+                            3,
+                            2,
+                            96,
+                            128
+                        ],
+                        "strides": [
+                            24576,
+                            12288,
+                            128,
+                            1
+                        ],
+                        "data_type": "bfloat16"
+                    },
+                    {
+                        "uid": 1,
+                        "dims": [
+                            3,
+                            4,
+                            64,
+                            128
+                        ],
+                        "strides": [
+                            32768,
+                            128,
+                            512,
+                            1
+                        ],
+                        "data_type": "bfloat16",
+                        "ragged_offset_multiplier": 1
+                    },
+                    {
+                        "uid": 2,
+                        "dims": [
+                            3,
+                            4,
+                            64,
+                            128
+                        ],
+                        "strides": [
+                            32768,
+                            128,
+                            512,
+                            1
+                        ],
+                        "data_type": "bfloat16",
+                        "ragged_offset_multiplier": 1
+                    },
+                    {
+                        "uid": 3,
+                        "dims": [
+                            3,
+                            2,
+                            96,
+                            128
+                        ],
+                        "strides": [
+                            24576,
+                            12288,
+                            128,
+                            1
+                        ],
+                        "data_type": "bfloat16"
+                    },
+                    {
+                        "uid": 4,
+                        "dims": [
+                            3,
+                            4,
+                            64,
+                            128
+                        ],
+                        "strides": [
+                            32768,
+                            128,
+                            512,
+                            1
+                        ],
+                        "data_type": "bfloat16",
+                        "ragged_offset_multiplier": 1
+                    },
+                    {
+                        "uid": 5,
+                        "dims": [
+                            3,
+                            2,
+                            96,
+                            128
+                        ],
+                        "strides": [
+                            24576,
+                            12288,
+                            128,
+                            1
+                        ],
+                        "data_type": "bfloat16"
+                    },
+                    {
+                        "uid": 6,
+                        "dims": [
+                            3,
+                            2,
+                            96,
+                            128
+                        ],
+                        "strides": [
+                            24576,
+                            12288,
+                            128,
+                            1
+                        ],
+                        "data_type": "bfloat16"
+                    },
+                    {
+                        "uid": 7,
+                        "dims": [
+                            3,
+                            4,
+                            64,
+                            128
+                        ],
+                        "strides": [
+                            32768,
+                            128,
+                            512,
+                            1
+                        ],
+                        "data_type": "bfloat16",
+                        "ragged_offset_multiplier": 1
+                    },
+                    {
+                        "uid": 8,
+                        "dims": [
+                            3,
+                            4,
+                            64,
+                            1
+                        ],
+                        "strides": [
+                            256,
+                            1,
+                            4,
+                            1
+                        ],
+                        "data_type": "float",
+                        "ragged_offset_multiplier": 1
+                    },
+                    {
+                        "uid": 10,
+                        "dims": [
+                            3,
+                            1,
+                            1,
+                            1
+                        ],
+                        "strides": [
+                            1,
+                            1,
+                            1,
+                            1
+                        ],
+                        "data_type": "int32"
+                    },
+                    {
+                        "uid": 11,
+                        "dims": [
+                            3,
+                            1,
+                            1,
+                            1
+                        ],
+                        "strides": [
+                            1,
+                            1,
+                            1,
+                            1
+                        ],
+                        "data_type": "int32"
+                    },
+                    {
+                        "uid": 16,
+                        "dims": [
+                            4,
+                            1,
+                            1,
+                            1
+                        ],
+                        "strides": [
+                            1,
+                            1,
+                            1,
+                            1
+                        ],
+                        "data_type": "int32"
+                    },
+                    {
+                        "uid": 19,
+                        "dims": [
+                            4,
+                            1,
+                            1,
+                            1
+                        ],
+                        "strides": [
+                            1,
+                            1,
+                            1,
+                            1
+                        ],
+                        "data_type": "int32"
+                    },
+                    {
+                        "uid": 20,
+                        "dims": [
+                            4,
+                            1,
+                            1,
+                            1
+                        ],
+                        "strides": [
+                            1,
+                            1,
+                            1,
+                            1
+                        ],
+                        "data_type": "int32"
+                    },
+                    {
+                        "uid": 21,
+                        "dims": [
+                            4,
+                            1,
+                            1,
+                            1
+                        ],
+                        "strides": [
+                            1,
+                            1,
+                            1,
+                            1
+                        ],
+                        "data_type": "int32"
+                    },
+                    {
+                        "uid": 24,
+                        "dims": [
+                            4,
+                            1,
+                            1,
+                            1
+                        ],
+                        "strides": [
+                            1,
+                            1,
+                            1,
+                            1
+                        ],
+                        "data_type": "int32"
+                    }
+                ],
+                "attributes": {
+                    "parameters__diagonal_alignment": "TOP_LEFT",
+                    "parameters__left_bound": null,
+                    "parameters__right_bound": 0
+                }
+            },
+            "golden": {
+                "path": "golden/qcompact_bf16_gqa_d128_causal_tl_sq_ne_skv_th/tensors.dvc"
+            },
+            "metadata": {
+                "format_version": 1,
+                "generator": "generate_sdpa_bwd_golden.py",
+                "generator_version": "1.5.0",
+                "generator_sha256": "40af1f35c4bc2fd585044792619345bd82892591f029a8a80db55860b794172a",
+                "generated_at": "2026-11-05T14:26:54Z",
+                "reference_source": "PyTorch 2.15.0+cpu",
+                "reference_backend": "pytorch_explicit_fp32_backward",
+                "reference_strategy": "matched_precision",
+                "rocm_version": "",
+                "direction": "backward",
+                "seed": 42,
+                "input_range": [
+                    -1.0,
+                    1.0
+                ],
+                "deterministic": true,
+                "intermediate_rounding": "none",
+                "config": {
+                    "batch": 3,
+                    "num_heads_q": 4,
+                    "num_heads_kv": 2,
+                    "seq_q": 64,
+                    "seq_kv": 96,
+                    "head_dim_qk": 128,
+                    "head_dim_v": 128,
+                    "dtype": "bf16",
+                    "layout": "bhsd",
+                    "scale": 0.125,
+                    "left_bound": null,
+                    "right_bound": 0,
+                    "diagonal_alignment": "top_left",
+                    "additive_mask": false,
+                    "seq_lens_q": [
+                        17,
+                        0,
+                        64
+                    ],
+                    "seq_lens_kv": [
+                        96,
+                        0,
+                        33
+                    ],
+                    "ragged": {
+                        "sides": "q",
+                        "units": "elements",
+                        "stats_layout": "th",
+                        "blocks": {
+                            "q": [
+                                17,
+                                0,
+                                64
+                            ],
+                            "o": [
+                                17,
+                                0,
+                                64
+                            ],
+                            "do": [
+                                17,
+                                0,
+                                64
+                            ],
+                            "dq": [
+                                17,
+                                0,
+                                64
+                            ],
+                            "stats": [
+                                17,
+                                0,
+                                64
+                            ]
+                        }
+                    }
+                },
+                "generation_precision": "matched-precision: BF16 inputs, FP32 intermediates and FP32 gradient accumulation, converted to the IO type once at the end",
+                "forward_source": {
+                    "method": "pytorch_math_backend",
+                    "version": "2.15.0+cpu",
+                    "generated_at": "2026-11-05T14:26:54Z",
+                    "bundle": "../../../../RaggedQ_fwd_pair/qcompact_bf16_gqa_d128_causal_tl_sq_ne_skv_th/Small/Small.json"
+                }
+            }
+        }
+    ]
+}

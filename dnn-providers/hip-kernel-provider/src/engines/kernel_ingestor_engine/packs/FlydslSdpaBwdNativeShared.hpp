@@ -193,6 +193,20 @@ inline bwd::Strides rowPitchStrides(bwd::Strides strides,
     return strides;
 }
 
+/// The stats' strides for a kernel that bounds its stats reads by rows * stride_seq (the
+/// merged kernels' LSE span). The matcher records 0 on a unit axis, which collapses that span
+/// to zero bytes and reads every LSE as 0; a unit sequence axis keeps the contiguous unit
+/// pitch of dense stats instead. The split prep kernel reads row 0 at offset 0 and bounds
+/// nothing by the stride, so it takes the stats as recorded.
+inline bwd::Strides rowStatsStrides(bwd::Strides strides, int64_t rows)
+{
+    if(rows == 1 && strides.seq == 0)
+    {
+        strides.seq = 1;
+    }
+    return strides;
+}
+
 /// The `varlen_bits` of one side: the individual lengths of the `seq_len` tensor with the
 /// token positions the side's element offsets give (`VARLEN_SEQUSED_PACKED_SIDE`, 0x15), or
 /// the lengths alone with implied positions (`VARLEN_SEQUSED_CACHE_SIDE`, 0x04). Bits 0..7
@@ -310,10 +324,8 @@ inline WorkspaceLayout workspaceLayout(const bwd::SdpaBwdProblem& problem,
                                        const WorkspaceRequest& request = {})
 {
     WorkspaceLayout layout;
-    // A 64-bit device tensor is read in place; every other form is written here.
-    layout.uploadsSeed = problem.seedForm != bwd::SeedForm::NONE
-                         && (problem.seedForm != bwd::SeedForm::DEVICE
-                             || problem.seedWidth != bwd::SeedWidth::INT64);
+    // A device tensor (INT64 only) is read in place; a pass-by-value one is written here.
+    layout.uploadsSeed = problem.seedForm == bwd::SeedForm::PASS_BY_VALUE;
     if(layout.uploadsSeed)
     {
         layout.seed = {0, SEED_REGION_BYTES};
@@ -432,15 +444,11 @@ inline float resolveScale(const bwd::SdpaBwdProblem& problem,
     return static_cast<float>(value);
 }
 
-/// How a seed and offset that are not 64-bit device tensors reach the workspace: the four
-/// 32-bit words of `[seed u64 | offset u64]` written as values (pass-by-value, either
-/// width), or, for 32-bit device tensors, the sources whose 4 bytes are copied into the low
-/// half of each zeroed word.
+/// How a pass-by-value seed and offset reach the workspace: the four 32-bit words of
+/// `[seed u64 | offset u64]` written as values (either width, widened to 64 bits).
 struct SeedUpload
 {
     std::array<uint32_t, 4> words{};
-    const void* seedSource = nullptr;
-    const void* offsetSource = nullptr;
 };
 
 /// The Philox seed and offset pointers a kernel reads, and the upload that fills the
@@ -472,9 +480,9 @@ inline std::array<uint32_t, 2> wordsOf(const hipdnn_plugin_sdk::ScalarValue& val
 }
 
 /// The seed and offset a launch passes. A graph without dropout passes @p unused for both: a
-/// tensor the graph does not use is passed as O, as the harness does. A 64-bit device pair
-/// is read in place; every other form is in the workspace's seed region, with the upload that
-/// writes it.
+/// tensor the graph does not use is passed as O, as the harness does. A device pair is read in
+/// place; a pass-by-value pair is in the workspace's seed region, with the upload that writes
+/// it.
 inline SeedBinding bindSeed(const bwd::SdpaBwdProblem& problem,
                             const WorkspaceLayout& layout,
                             const ScalarOperands& operands,
@@ -499,59 +507,31 @@ inline SeedBinding bindSeed(const bwd::SdpaBwdProblem& problem,
     }
     binding.seed = inWorkspace(workspace, layout.seed.offset);
     binding.offset = inWorkspace(workspace, layout.seed.offset + SEED_WORD_BYTES);
+    const auto seed = wordsOf(
+        hipdnn_plugin_sdk::resolveScalarOperand(*operands.seed, deviceBuffers, numDeviceBuffers),
+        "seed");
+    const auto offset = wordsOf(
+        hipdnn_plugin_sdk::resolveScalarOperand(*operands.offset, deviceBuffers, numDeviceBuffers),
+        "offset");
     SeedUpload upload;
-    if(problem.seedForm == bwd::SeedForm::PASS_BY_VALUE)
-    {
-        const auto seed = wordsOf(hipdnn_plugin_sdk::resolveScalarOperand(
-                                      *operands.seed, deviceBuffers, numDeviceBuffers),
-                                  "seed");
-        const auto offset = wordsOf(hipdnn_plugin_sdk::resolveScalarOperand(
-                                        *operands.offset, deviceBuffers, numDeviceBuffers),
-                                    "offset");
-        upload.words = {seed[0], seed[1], offset[0], offset[1]};
-    }
-    else
-    {
-        upload.seedSource = buffer(problem.seedUid);
-        upload.offsetSource = buffer(problem.offsetUid);
-    }
+    upload.words = {seed[0], seed[1], offset[0], offset[1]};
     binding.upload = upload;
     return binding;
 }
 
-/// Writes the seed and offset words into the seed region at the front of @p workspace, ahead
-/// of the launch on @p stream: four word writes for a pass-by-value form; for a 32-bit device
-/// form the region is zeroed and the 4 bytes of each tensor copied into the low half of its
-/// word.
+/// Writes the seed and offset words of a pass-by-value form into the seed region at the front
+/// of @p workspace, ahead of the launch on @p stream: four word writes.
 inline void uploadSeed(const SeedUpload& upload, void* workspace, hipStream_t stream)
 {
     auto* base = static_cast<char*>(workspace);
-    if(upload.seedSource == nullptr)
+    for(size_t word = 0; word < upload.words.size(); ++word)
     {
-        for(size_t word = 0; word < upload.words.size(); ++word)
-        {
-            requireHip(
-                hipMemsetD32Async(static_cast<hipDeviceptr_t>(base + word * sizeof(uint32_t)),
-                                  static_cast<int>(upload.words[word]),
-                                  1,
-                                  stream),
-                "hipMemsetD32Async of the seed words");
-        }
-        return;
+        requireHip(hipMemsetD32Async(static_cast<hipDeviceptr_t>(base + word * sizeof(uint32_t)),
+                                     static_cast<int>(upload.words[word]),
+                                     1,
+                                     stream),
+                   "hipMemsetD32Async of the seed words");
     }
-    requireHip(
-        hipMemsetD32Async(
-            static_cast<hipDeviceptr_t>(base), 0, SEED_REGION_BYTES / sizeof(uint32_t), stream),
-        "hipMemsetD32Async of the seed region");
-    requireHip(
-        hipMemcpyAsync(base, upload.seedSource, sizeof(uint32_t), hipMemcpyDeviceToDevice, stream),
-        "hipMemcpyAsync of the seed");
-    requireHip(hipMemcpyAsync(base + SEED_WORD_BYTES,
-                              upload.offsetSource,
-                              sizeof(uint32_t),
-                              hipMemcpyDeviceToDevice,
-                              stream),
-               "hipMemcpyAsync of the offset");
 }
 
 // ---------------------------------------------------------------------------
@@ -662,16 +642,17 @@ inline bool hasSdpaBackwardNode(const hipdnn_plugin_sdk::ingestor::MatchContext&
     return false;
 }
 
-/// The bias's LDS staging rule (the kernel's bias chunk contract): every non-unit stride a
-/// multiple of one 16-byte vector of elements (the matcher records 0 on a broadcast or unit
-/// axis), a 16-byte aligned base, and a last row whose final vector lies inside the
-/// allocation: a row stride of at least the key length rounded up to a vector, or, for a
-/// single or row-broadcast row (recorded stride 0), which has no padding behind it, a key
-/// length that is itself a whole number of vectors.
+/// The bias's LDS staging rule (the kernel's bias chunk contract), at the bias's own element
+/// width: every non-unit stride a multiple of one 16-byte vector of bias elements (the matcher
+/// records 0 on a broadcast or unit axis), a 16-byte aligned base, and a last row whose final
+/// vector lies inside the allocation: a row stride of at least the key length rounded up to a
+/// vector, or, for a single or row-broadcast row (recorded stride 0), which has no padding
+/// behind it, a key length that is itself a whole number of vectors. A 16-bit bias that fails
+/// it is served only by a dq row that loads the bias directly.
 inline bool stagesBias(const bwd::SdpaBwdProblem& problem)
 {
     constexpr int64_t ALIGNMENT_BYTES = 16;
-    const int64_t vector = ALIGNMENT_BYTES / static_cast<int64_t>(problem.elementBytes);
+    const int64_t vector = ALIGNMENT_BYTES / static_cast<int64_t>(problem.biasElementBytes);
     const bool lastRowFits
         = problem.biasStrides.seq == 0
               ? problem.seqLenKv % vector == 0
@@ -709,29 +690,33 @@ inline bool packedSpansFit(const bwd::SdpaBwdProblem& problem, int64_t maxBlockQ
     }
     const int64_t elementBytes = problem.elementBytes;
     const int64_t vector = bwd::detail::REQUIRED_ALIGNMENT_BYTES / elementBytes;
-    const auto spanFits = [&](int64_t rows, int64_t seqStride, int64_t width, int64_t headStride) {
-        const auto slab = bwd::detail::slabElements(rows, seqStride, width);
-        const auto heads = bwd::detail::checkedProduct({group - 1, headStride});
-        if(!slab || !heads || *heads > INT32_LIMIT)
-        {
-            return false;
-        }
-        const auto bytes = bwd::detail::checkedProduct({*slab + *heads, elementBytes});
-        return bytes.has_value() && *bytes <= INT32_LIMIT;
-    };
+    const auto spanFits
+        = [&](int64_t rows, int64_t seqStride, int64_t width, int64_t headStride, int64_t bytes) {
+              const auto slab = bwd::detail::slabElements(rows, seqStride, width);
+              const auto heads = bwd::detail::checkedProduct({group - 1, headStride});
+              if(!slab || !heads || *heads > INT32_LIMIT)
+              {
+                  return false;
+              }
+              const auto bytesOfSpan = bwd::detail::checkedProduct({*slab + *heads, bytes});
+              return bytesOfSpan.has_value() && *bytesOfSpan <= INT32_LIMIT;
+          };
     const int64_t rowsQ = problem.seqLenQ - 1;
     if(!spanFits(rowsQ,
                  problem.q.seq,
                  bwd::detail::ceilToVector(problem.headDimQk, vector),
-                 problem.q.head)
+                 problem.q.head,
+                 elementBytes)
        || !spanFits(rowsQ,
                     problem.dO.seq,
                     bwd::detail::ceilToVector(problem.headDimV, vector),
-                    problem.dO.head)
+                    problem.dO.head,
+                    elementBytes)
        || !spanFits(rowsQ,
                     problem.o.seq,
                     bwd::detail::ceilToVector(problem.headDimV, vector),
-                    problem.o.head))
+                    problem.o.head,
+                    elementBytes))
     {
         return false;
     }
@@ -753,7 +738,11 @@ inline bool packedSpansFit(const bwd::SdpaBwdProblem& problem, int64_t maxBlockQ
     {
         return true;
     }
-    return spanFits(rowsQ, problem.biasStrides.seq, problem.seqLenKv, problem.biasStrides.head);
+    return spanFits(rowsQ,
+                    problem.biasStrides.seq,
+                    problem.seqLenKv,
+                    problem.biasStrides.head,
+                    problem.biasElementBytes);
 }
 
 // ---------------------------------------------------------------------------
@@ -831,8 +820,11 @@ inline int32_t tailzeroMaskOf(const bwd::SdpaBwdProblem& problem)
            | (problem.ragged.dV.ragged() ? 0 : TAILZERO_DV);
 }
 
-/// The tail-zero kernel's arguments (`PARAMS` in `flydsl/generators/gen_sdpa_bwd_tailzero.py`): 22 arguments.
-struct TailzeroKernargs
+/// The tail-zero kernel's arguments (`PARAMS` in `flydsl/generators/gen_sdpa_bwd_tailzero.py`):
+/// 22 arguments. With @p HV, the V-head variant's (`PARAMS_HV`): 23, `Hv` (`num_head_v`) right
+/// after `Hkv` (`num_head_k`), for a graph whose V heads differ from K's.
+template <bool HV>
+struct TailzeroKernargsT
 {
     void* dQ = nullptr;
     void* dK = nullptr;
@@ -842,6 +834,8 @@ struct TailzeroKernargs
     int32_t numBatch = 0;
     int32_t numHeadQ = 0;
     int32_t numHeadK = 0;
+    /// Read only when @p HV.
+    int32_t numHeadV = 0;
     int32_t maxSeqlenQ = 0;
     int32_t maxSeqlenK = 0;
     int32_t hdimQk = 0;
@@ -853,30 +847,34 @@ struct TailzeroKernargs
 
     auto tie() const
     {
-        return std::tie(dQ,
-                        dK,
-                        dV,
-                        seqLenQ,
-                        seqLenKv,
-                        numBatch,
-                        numHeadQ,
-                        numHeadK,
-                        maxSeqlenQ,
-                        maxSeqlenK,
-                        hdimQk,
-                        hdimV,
-                        strideDQ.batch,
-                        strideDQ.head,
-                        strideDQ.seq,
-                        strideDK.batch,
-                        strideDK.head,
-                        strideDK.seq,
-                        strideDV.batch,
-                        strideDV.head,
-                        strideDV.seq,
-                        mask);
+        const auto leading = std::tie(dQ, dK, dV, seqLenQ, seqLenKv, numBatch, numHeadQ, numHeadK);
+        const auto trailing = std::tie(maxSeqlenQ,
+                                       maxSeqlenK,
+                                       hdimQk,
+                                       hdimV,
+                                       strideDQ.batch,
+                                       strideDQ.head,
+                                       strideDQ.seq,
+                                       strideDK.batch,
+                                       strideDK.head,
+                                       strideDK.seq,
+                                       strideDV.batch,
+                                       strideDV.head,
+                                       strideDV.seq,
+                                       mask);
+        if constexpr(HV)
+        {
+            return std::tuple_cat(leading, std::tie(numHeadV), trailing);
+        }
+        else
+        {
+            return std::tuple_cat(leading, trailing);
+        }
     }
 };
+
+using TailzeroKernargs = TailzeroKernargsT<false>;
+using TailzeroHvKernargs = TailzeroKernargsT<true>;
 
 inline const std::vector<hipdnn_plugin_sdk::ingestor::KernelArgument>& tailzeroSignature()
 {
@@ -884,8 +882,14 @@ inline const std::vector<hipdnn_plugin_sdk::ingestor::KernelArgument>& tailzeroS
     return s_signature;
 }
 
+inline const std::vector<hipdnn_plugin_sdk::ingestor::KernelArgument>& tailzeroHvSignature()
+{
+    static const auto s_signature = signatureOf<TailzeroHvKernargs>();
+    return s_signature;
+}
+
 /// The tail-zero launch's grid: x covers the largest tail-row extent in vectors, y the
-/// planes (batch x (Hq + Hkv + Hkv)), z is 1. nullopt past a grid limit.
+/// planes (batch x (Hq + Hk + Hv)), z is 1. nullopt past a grid limit.
 struct TailzeroGrid
 {
     unsigned int x = 0;
@@ -901,10 +905,8 @@ inline std::optional<TailzeroGrid> tailzeroGridOf(const bwd::SdpaBwdProblem& pro
     const auto dq = bwd::detail::checkedProduct({problem.seqLenQ, vectorsQk});
     const auto dk = bwd::detail::checkedProduct({problem.seqLenKv, vectorsQk});
     const auto dv = bwd::detail::checkedProduct({problem.seqLenKv, vectorsV});
-    const auto heads = bwd::detail::checkedProduct({problem.numKvHeads, int64_t{2}});
-    const auto planes
-        = heads ? bwd::detail::checkedProduct({problem.batch, problem.numHeads + *heads})
-                : std::optional<int64_t>{};
+    const int64_t heads = problem.numKvHeads + problem.numVHeads;
+    const auto planes = bwd::detail::checkedProduct({problem.batch, problem.numHeads + heads});
     if(!dq || !dk || !dv || !planes)
     {
         return std::nullopt;
@@ -920,11 +922,12 @@ inline std::optional<TailzeroGrid> tailzeroGridOf(const bwd::SdpaBwdProblem& pro
 
 /// The tail-zero arguments over the outputs at @p dQ, @p dK and @p dV and the lengths at
 /// @p seqLenQ and @p seqLenKv. The strides are the graph's own, so a view shared between
-/// outputs is addressed as the graph declares it.
-inline TailzeroKernargs tailzeroKernargsOf(
+/// outputs is addressed as the graph declares it. @p HV selects the V-head variant's list.
+template <bool HV = false>
+inline TailzeroKernargsT<HV> tailzeroKernargsOf(
     const bwd::SdpaBwdProblem& problem, void* dQ, void* dK, void* dV, void* seqLenQ, void* seqLenKv)
 {
-    TailzeroKernargs tail;
+    TailzeroKernargsT<HV> tail;
     tail.dQ = dQ;
     tail.dK = dK;
     tail.dV = dV;
@@ -933,6 +936,10 @@ inline TailzeroKernargs tailzeroKernargsOf(
     tail.numBatch = toInt32(problem.batch, "batch");
     tail.numHeadQ = toInt32(problem.numHeads, "num_head_q");
     tail.numHeadK = toInt32(problem.numKvHeads, "num_head_k");
+    if constexpr(HV)
+    {
+        tail.numHeadV = toInt32(problem.numVHeads, "num_head_v");
+    }
     tail.maxSeqlenQ = toInt32(problem.seqLenQ, "seqlen_q");
     tail.maxSeqlenK = toInt32(problem.seqLenKv, "seqlen_k");
     tail.hdimQk = toInt32(problem.headDimQk, "hdim_qk");

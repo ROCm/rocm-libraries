@@ -1,7 +1,7 @@
 # Copyright © Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
 
-"""The gfx11-generic generator under the nondeterministic-build policy: a listed row ships its pin, an unlisted row must be its pin.
+"""The gfx11-generic generator under the nondeterministic-build policy: a listed row ships its pin and its rebuild must be the pin or a recorded variant, an unlisted row must be its pin.
 
 The compile and the toolchain are replaced by fixtures: nothing is compiled.
 """
@@ -51,6 +51,7 @@ def rig(tmp_path, monkeypatch):
 
     class Rig:
         listed = False
+        variants: tuple = ()
         outcomes: list = []
         builds = 0
 
@@ -88,7 +89,14 @@ def rig(tmp_path, monkeypatch):
             (
                 [
                     nondet.Row(
-                        ARCH, spec.hash(), spec.key(), "both", sha(PIN), (), (), "test"
+                        ARCH,
+                        spec.hash(),
+                        spec.key(),
+                        "both",
+                        sha(PIN),
+                        rig.variants,
+                        (),
+                        "test",
                     )
                 ]
                 if rig.listed
@@ -110,8 +118,9 @@ def rig(tmp_path, monkeypatch):
     return rig
 
 
-def test_a_listed_row_ships_its_pin_whatever_its_build_does(rig) -> None:
+def test_a_listed_row_ships_its_pin_whatever_its_recorded_build_does(rig) -> None:
     rig.listed = True
+    rig.variants = (sha(OTHER),)
     rig.outcomes = [cdna.Outcome("ok", OTHER)]
     rig.generate()
     record = rig.record()
@@ -124,6 +133,16 @@ def test_a_listed_row_ships_its_pin_whatever_its_build_does(rig) -> None:
     assert (
         rig.record()["sha256"] == sha(PIN) and rig.builds == 2
     )  # built once each, never retried
+
+
+def test_a_listed_row_whose_rebuild_is_neither_its_pin_nor_a_variant_stops_the_run(
+    rig,
+) -> None:
+    rig.listed = True
+    rig.outcomes = [cdna.Outcome("ok", OTHER)]
+    with pytest.raises(GeneratorError, match="neither its pin"):
+        rig.generate()
+    assert list((rig.out / OP / ARCH).iterdir()) == []
 
 
 def test_an_unlisted_row_that_is_not_its_pin_stops_the_run(rig) -> None:

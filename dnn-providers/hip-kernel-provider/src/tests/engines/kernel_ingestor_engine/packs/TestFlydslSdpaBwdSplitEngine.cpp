@@ -69,6 +69,28 @@ const PackSymbols DQ_REDUCE{"hipkernel:flydsl_sdpa_bwd_split",
                             "",
                             ""};
 
+/// The dkdv slot's two-launch dispatch for V heads that differ from K's.
+const PackSymbols DKDV_U2{"hipkernel:flydsl_sdpa_bwd_split",
+                          "hipkernel.flydsl_sdpa_bwd_split.graph_match",
+                          "",
+                          "hipkernel.flydsl_sdpa_bwd_split.dkdv.kernel_match",
+                          "",
+                          "hipkernel.flydsl_sdpa_bwd_split.dkdv_u2.dispatch",
+                          "",
+                          "",
+                          ""};
+
+/// The dq slot's dispatch for V heads that differ from K's: the V-head dQ and tail-zero kernels.
+const PackSymbols DQ_U2{"hipkernel:flydsl_sdpa_bwd_split",
+                        "hipkernel.flydsl_sdpa_bwd_split.graph_match",
+                        "",
+                        "hipkernel.flydsl_sdpa_bwd_split.dq.kernel_match",
+                        "",
+                        "hipkernel.flydsl_sdpa_bwd_split.dq_u2.dispatch",
+                        "",
+                        "",
+                        ""};
+
 const PackSymbols MERGED{"hipkernel:flydsl_sdpa_bwd_merged",
                          "hipkernel.flydsl_sdpa_bwd_merged.graph_match",
                          "",
@@ -192,7 +214,12 @@ struct RowSpec
     int64_t gqaPack = -1;
     int64_t blockQ = -1;
     int64_t storeDb = -1;
-    std::string biasStage = "auto";
+    /// dq and dkdv: the bias is FLOAT beside a 16-bit query.
+    int64_t biasF32 = 0;
+    /// dq: `lds`, `direct`, `direct_only`, or `na` for a row without a bias.
+    std::string biasStageResolved = "na";
+    /// dq and dkdv: `none`, `dk` (dkdv) or `dq` (dq).
+    std::string u2Role = "none";
     std::string reduceSymbol;
     int64_t blockThreads = 256;
     int64_t blockKv = 64;
@@ -236,6 +263,8 @@ KernelDefinition makeRow(Slot slot, const RowSpec& row)
     kernel.metadata["dropout"] = row.dropout;
     kernel.metadata["dform"] = row.dform;
     kernel.metadata["block_threads"] = row.blockThreads;
+    kernel.metadata["bias_f32"] = row.biasF32;
+    kernel.metadata["u2_role"] = row.u2Role;
     if(slot == Slot::DKDV)
     {
         kernel.metadata["gqa_pack"] = row.gqaPack;
@@ -244,7 +273,7 @@ KernelDefinition makeRow(Slot slot, const RowSpec& row)
         return kernel;
     }
     kernel.metadata["store_db"] = row.storeDb;
-    kernel.metadata["bias_stage"] = row.biasStage;
+    kernel.metadata["bias_stage_resolved"] = row.biasStageResolved;
     kernel.metadata["block_m"] = row.blockM;
     kernel.metadata["reduce_symbol"] = row.reduceSymbol;
     return kernel;
@@ -264,10 +293,13 @@ RowSpec causalRow(int64_t tile = 64)
     return row;
 }
 
+/// A bias row that stages the bias through LDS, as the gfx950 16-bit bias rows with a staged
+/// alternative do not (those are `direct`) but the ones this default stands for do.
 RowSpec biasRow(int64_t tile = 64)
 {
     RowSpec row = plainRow(tile);
     row.hasBias = 1;
+    row.biasStageResolved = "lds";
     row.reduceSymbol = REDUCE_SYMBOL;
     return row;
 }
@@ -462,8 +494,11 @@ void addOffsetBlock(ParamList& list,
 }
 
 /// The scalar block every dkdv, dq and merged argument list shares, from `seqinfo_q0` to
-/// `sm_scale`, with the offset block @p offsets after `seqinfo_k1`.
-void addScalarBlock(ParamList& list, const std::function<void(ParamList&)>& offsets)
+/// `sm_scale`, with the offset block @p offsets after `seqinfo_k1`, and, with @p valueHeads,
+/// `num_head_v` right after `num_head_k` (the V-head variants).
+void addScalarBlock(ParamList& list,
+                    const std::function<void(ParamList&)>& offsets,
+                    bool valueHeads = false)
 {
     addParams(list, 'p', {"seqinfo_q0", "seqinfo_q1", "seqinfo_k0", "seqinfo_k1"});
     offsets(list);
@@ -479,7 +514,12 @@ void addScalarBlock(ParamList& list, const std::function<void(ParamList&)>& offs
     addParams(list, 'l', {"philox_offset2"});
     addParams(list, 'i', {"idropout_p"});
     addParams(list, 'f', {"dropout_scale"});
-    addParams(list, 'i', {"num_head_q", "num_head_k", "hdim_qk", "hdim_vo"});
+    addParams(list, 'i', {"num_head_q", "num_head_k"});
+    if(valueHeads)
+    {
+        addParams(list, 'i', {"num_head_v"});
+    }
+    addParams(list, 'i', {"hdim_qk", "hdim_vo"});
     addParams(list, 'f', {"sm_scale"});
 }
 
@@ -508,6 +548,42 @@ const ParamList& dkdvParams()
             addOffsetBlock(offsets, true, {"V", "DO", "DK", "DV"}, false);
         });
         addStrides(list, {"q", "k", "v", "do", "dk", "dv", "b"});
+        addParams(list, 'i', {"rt_flags"});
+        return list;
+    }();
+    return s_params;
+}
+
+/// `_PARAMS["dkdv_u2"]`: the dkdv list with `num_head_v` after `num_head_k`.
+const ParamList& dkdvU2Params()
+{
+    static const ParamList s_params = [] {
+        ParamList list;
+        addParams(list, 'p', {"Q", "K", "V", "B", "DO", "DK", "DV", "LSE", "Delta"});
+        addScalarBlock(
+            list,
+            [](ParamList& offsets) {
+                addOffsetBlock(offsets, true, {"V", "DO", "DK", "DV"}, false);
+            },
+            true);
+        addStrides(list, {"q", "k", "v", "do", "dk", "dv", "b"});
+        addParams(list, 'i', {"rt_flags"});
+        return list;
+    }();
+    return s_params;
+}
+
+/// `_PARAMS["dq_u2"]`: the dq list with `num_head_v` after `num_head_k`.
+const ParamList& dqU2Params()
+{
+    static const ParamList s_params = [] {
+        ParamList list;
+        addParams(list, 'p', {"Q", "K", "V", "B", "DO", "DQ", "DB", "LSE", "Delta"});
+        addScalarBlock(
+            list,
+            [](ParamList& offsets) { addOffsetBlock(offsets, true, {"V", "DO", "DQ"}, false); },
+            true);
+        addStrides(list, {"q", "k", "v", "do", "dq", "b", "db"});
         addParams(list, 'i', {"rt_flags"});
         return list;
     }();
@@ -558,6 +634,20 @@ const ParamList& reduceParams()
                   {"num_batch", "num_head", "seqlen_q", "seqlen_k", "reduce_batch", "reduce_head"});
         addStrides(list, {"ws"});
         addStrides(list, {"out"});
+        return list;
+    }();
+    return s_params;
+}
+
+/// `PARAMS_HV` of the tail-zero generator: `_PARAMS["tailzero"]` with `Hv` after `Hkv`.
+const ParamList& tailzeroHvParams()
+{
+    static const ParamList s_params = [] {
+        ParamList list;
+        addParams(list, 'p', {"DQ", "DK", "DV", "seq_len_q", "seq_len_kv"});
+        addParams(list, 'i', {"B", "Hq", "Hkv", "Hv", "Sq", "Skv", "Dqk", "Dv"});
+        addStrides(list, {"dq", "dk", "dv"});
+        addParams(list, 'i', {"mask"});
         return list;
     }();
     return s_params;
@@ -634,7 +724,7 @@ std::map<std::string, uint64_t> valuesOf(Slot slot, const FlydslSdpaBwdSplitLaun
 TEST(TestFlydslSdpaBwdSplitGraph, ServesThePlainGraphTheSharedMatcherAccepts)
 {
     EXPECT_TRUE(std::holds_alternative<flydsl_sdpa_bwd::SdpaBwdProblem>(
-        matchSdpaBwdSpec(baseSpec(), flydsl_sdpa_bwd::MatchOptions{true})));
+        matchSdpaBwdSpec(baseSpec(), flydsl_sdpa_bwd::SPLIT_MATCH_OPTIONS)));
     EXPECT_TRUE(graphMatch(baseSpec()).has_value());
 }
 
@@ -663,7 +753,7 @@ TEST(TestFlydslSdpaBwdSplitGraph, DeclinesExactlyWhatTheSharedMatcherDeclines)
     for(size_t index = 0; index < specs.size(); ++index)
     {
         SCOPED_TRACE("spec " + std::to_string(index));
-        const auto matched = matchSdpaBwdSpec(specs[index], flydsl_sdpa_bwd::MatchOptions{true});
+        const auto matched = matchSdpaBwdSpec(specs[index], flydsl_sdpa_bwd::SPLIT_MATCH_OPTIONS);
         EXPECT_EQ(graphMatch(specs[index]).has_value(),
                   std::holds_alternative<flydsl_sdpa_bwd::SdpaBwdProblem>(matched));
     }
@@ -711,11 +801,11 @@ std::vector<SdpaBwdSpec> workspaceSpecs()
 {
     return {baseSpec(),
             withDropout(baseSpec(), DataType::INT64),
-            withDropout(baseSpec(), DataType::INT32),
+            withDropout(baseSpec(), DataType::INT32, true),
             withDropout(baseSpec(), DataType::INT64, true),
             withBias(baseSpec(), true),
             withBias(baseSpec(), true, {1, 1, 16, 16}),
-            withBias(withDropout(baseSpec(), DataType::INT32), true, {1, 8, 16, 16}),
+            withBias(withDropout(baseSpec(), DataType::INT32, true), true, {1, 8, 16, 16}),
             withBias(fp32Spec(), true, {1, 1, 16, 16}),
             dimsSpec(3, 5, 77, 91, 64)};
 }
@@ -750,7 +840,7 @@ TEST(TestFlydslSdpaBwdSplitWorkspace, EveryRegionEndsWithinTheSharedBytesAndNone
         const auto bound = graphMatch(spec);
         ASSERT_TRUE(bound.has_value());
         const int64_t bytes = tokenOf(*bound, "ws.bytes");
-        const auto problem = matchSdpaBwdSpec(spec, flydsl_sdpa_bwd::MatchOptions{true});
+        const auto problem = matchSdpaBwdSpec(spec, flydsl_sdpa_bwd::SPLIT_MATCH_OPTIONS);
         const auto& shape = std::get<flydsl_sdpa_bwd::SdpaBwdProblem>(problem);
         const int64_t stats = shape.batch * shape.numHeads * shape.seqLenQ * 4;
 
@@ -784,7 +874,7 @@ TEST(TestFlydslSdpaBwdSplitWorkspace, SPWSDeclinesSharedRegionsWhoseEndOverflows
     // Delta and LSE' are 2^62 bytes each: each fits int64, the end of the second does not.
     const auto spec = dimsSpec(int64_t{1} << 60, 1, 1, 1, 1);
     EXPECT_TRUE(std::holds_alternative<flydsl_sdpa_bwd::SdpaBwdProblem>(
-        matchSdpaBwdSpec(spec, flydsl_sdpa_bwd::MatchOptions{true})));
+        matchSdpaBwdSpec(spec, flydsl_sdpa_bwd::SPLIT_MATCH_OPTIONS)));
     EXPECT_FALSE(graphMatch(spec).has_value());
     // One bit less: each is 2^61 bytes and the second ends at 2^62, inside int64.
     EXPECT_TRUE(graphMatch(dimsSpec(int64_t{1} << 59, 1, 1, 1, 1)).has_value());
@@ -800,7 +890,7 @@ TEST(TestFlydslSdpaBwdSplitWorkspace, SPWSDeclinesABroadcastDbiasWorkspaceThatOv
         return withBias(dimsSpec(batch, 1, SEQ_Q, SEQ_KV, 1), true, {1, 1, SEQ_Q, SEQ_KV});
     };
     const auto overflowing = broadcast(int64_t{1} << 33);
-    const auto matched = matchSdpaBwdSpec(overflowing, flydsl_sdpa_bwd::MatchOptions{true});
+    const auto matched = matchSdpaBwdSpec(overflowing, flydsl_sdpa_bwd::SPLIT_MATCH_OPTIONS);
     const auto* decline = std::get_if<flydsl_sdpa_bwd::Decline>(&matched);
     ASSERT_EQ(decline, nullptr) << decline->cause << ": " << decline->detail;
     EXPECT_FALSE(graphMatch(overflowing).has_value());
@@ -816,10 +906,25 @@ TEST(TestFlydslSdpaBwdSplitWorkspace, ServesAGraphWhoseWorkspaceIsLargeButFitsIn
     EXPECT_EQ(tokenOf(*bound, "ws.bytes"), 2 * (int64_t{1} << 40) * 2 * 16 * 4);
 }
 
+TEST(TestFlydslSdpaBwdSplitGraph, DeclinesADeviceInt32SeedAndServesAPassByValueInt32One)
+{
+    for(const auto& spec :
+        {withDropout(baseSpec(), DataType::INT32), withDropout(fp32Spec(), DataType::INT32)})
+    {
+        const auto matched = matchSdpaBwdSpec(spec, flydsl_sdpa_bwd::SPLIT_MATCH_OPTIONS);
+        const auto* decline = std::get_if<flydsl_sdpa_bwd::Decline>(&matched);
+        ASSERT_NE(decline, nullptr);
+        EXPECT_EQ(decline->cause, "dropout") << decline->detail;
+        EXPECT_FALSE(graphMatch(spec).has_value());
+    }
+    EXPECT_TRUE(graphMatch(withDropout(baseSpec(), DataType::INT32, true)).has_value());
+    EXPECT_TRUE(graphMatch(withDropout(baseSpec(), DataType::INT64)).has_value());
+}
+
 TEST(TestFlydslSdpaBwdSplitWorkspace, PublishesNoSeedOffsetForASeedReadInPlace)
 {
     const auto inPlace = graphMatch(withDropout(baseSpec(), DataType::INT64));
-    const auto uploaded = graphMatch(withDropout(baseSpec(), DataType::INT32));
+    const auto uploaded = graphMatch(withDropout(baseSpec(), DataType::INT32, true));
     ASSERT_TRUE(inPlace.has_value() && uploaded.has_value());
     EXPECT_EQ(inPlace->count("ws.seed.offset"), 0U);
     EXPECT_EQ(tokenOf(*uploaded, "ws.seed.offset"), 0);
@@ -1000,34 +1105,36 @@ SdpaBwdSpec unstagedBiasSpec()
     });
 }
 
-RowSpec dqRowStaging(const char* biasStage)
+RowSpec dqRowStage(const char* biasStageResolved)
 {
     RowSpec row = biasRow();
-    row.biasStage = biasStage;
+    row.biasStageResolved = biasStageResolved;
     return row;
 }
 
-TEST(TestFlydslSdpaBwdSplitKernel, BI8DeclinesTheRowsThatStageAnUnstageable16BitBias)
+TEST(TestFlydslSdpaBwdSplitKernel, TheChunkContractPicksTheDqRowByHowItReadsTheBias)
 {
     const auto unstaged = unstagedBiasSpec();
     ASSERT_TRUE(std::holds_alternative<flydsl_sdpa_bwd::SdpaBwdProblem>(
-        matchSdpaBwdSpec(unstaged, flydsl_sdpa_bwd::MatchOptions{true})));
-    // The graph is served; each dq row decides by its own bias_stage.
+        matchSdpaBwdSpec(unstaged, flydsl_sdpa_bwd::SPLIT_MATCH_OPTIONS)));
+    // The graph is served; each dq row decides by its own bias_stage_resolved: a bias outside
+    // the staging contract goes to a row that loads it directly, never to a staged one.
     EXPECT_TRUE(graphMatch(unstaged).has_value());
-    EXPECT_FALSE(serves(Slot::DQ, unstaged, dqRowStaging("auto")));
-    EXPECT_FALSE(serves(Slot::DQ, unstaged, dqRowStaging("direct")));
-    EXPECT_TRUE(serves(Slot::DQ, unstaged, dqRowStaging("none")));
-    // The same rows serve a bias inside the contract.
+    EXPECT_FALSE(serves(Slot::DQ, unstaged, dqRowStage("lds")));
+    EXPECT_TRUE(serves(Slot::DQ, unstaged, dqRowStage("direct")));
+    EXPECT_TRUE(serves(Slot::DQ, unstaged, dqRowStage("direct_only")));
+    // A bias inside it goes to a staged row, to a direct row only where no staged row serves it
+    // (direct_only), and never to a direct row that has a staged alternative (B-1).
     const auto staged = withBias(baseSpec(), false);
-    EXPECT_TRUE(serves(Slot::DQ, staged, dqRowStaging("auto")));
-    EXPECT_TRUE(serves(Slot::DQ, staged, dqRowStaging("direct")));
-    EXPECT_TRUE(serves(Slot::DQ, staged, dqRowStaging("none")));
-    // Only the dq objects stage the bias.
+    EXPECT_TRUE(serves(Slot::DQ, staged, dqRowStage("lds")));
+    EXPECT_FALSE(serves(Slot::DQ, staged, dqRowStage("direct")));
+    EXPECT_TRUE(serves(Slot::DQ, staged, dqRowStage("direct_only")));
+    // Only the dq objects read the bias by stage.
     EXPECT_TRUE(serves(Slot::PREP, unstaged, plainRow()));
     EXPECT_TRUE(serves(Slot::DKDV, unstaged, biasRow()));
 }
 
-TEST(TestFlydslSdpaBwdSplitKernel, BI8StagesARowBroadcastBiasOnlyAtAKeyLengthOfWholeVectors)
+TEST(TestFlydslSdpaBwdSplitKernel, ARowBroadcastBiasIsStagedOnlyAtAKeyLengthOfWholeVectors)
 {
     // A row-broadcast bias has no padding behind its single row, so a staged object's last
     // 16-byte chunk stays inside the allocation only when Sk is a multiple of 8 elements.
@@ -1038,13 +1145,17 @@ TEST(TestFlydslSdpaBwdSplitKernel, BI8StagesARowBroadcastBiasOnlyAtAKeyLengthOfW
             bias.strides = {g.heads * int64_t{24}, 24, 24, 1};
         });
     };
-    EXPECT_FALSE(serves(Slot::DQ, rowBroadcast(baseSpec(), 20), dqRowStaging("auto")));
-    EXPECT_TRUE(serves(Slot::DQ, rowBroadcast(baseSpec(), 20), dqRowStaging("none")));
-    EXPECT_TRUE(serves(Slot::DQ, rowBroadcast(baseSpec(), 24), dqRowStaging("auto")));
-    // fp32 dQ objects load the bias directly: no staging contract, whatever the row says.
+    EXPECT_FALSE(serves(Slot::DQ, rowBroadcast(baseSpec(), 20), dqRowStage("lds")));
+    EXPECT_TRUE(serves(Slot::DQ, rowBroadcast(baseSpec(), 20), dqRowStage("direct")));
+    EXPECT_TRUE(serves(Slot::DQ, rowBroadcast(baseSpec(), 24), dqRowStage("lds")));
+    EXPECT_FALSE(serves(Slot::DQ, rowBroadcast(baseSpec(), 24), dqRowStage("direct")));
+    // fp32 dQ objects load the bias directly and no staged row backs them (direct_only): they
+    // serve any layout.
     RowSpec single = biasRow();
     single.dtype = "fp32";
+    single.biasStageResolved = "direct_only";
     EXPECT_TRUE(serves(Slot::DQ, rowBroadcast(fp32Spec(), 18), single));
+    EXPECT_TRUE(serves(Slot::DQ, rowBroadcast(fp32Spec(), 24), single));
 }
 
 TEST(TestFlydslSdpaBwdSplitKernel, ADbiasGraphNeedsADqObjectThatStoresDb)
@@ -1213,7 +1324,7 @@ std::vector<SharedCell> sharedCells()
             {"dbias", withBias(baseSpec(), true), biasRow()},
             {"dbiasBroadcast", withBias(baseSpec(), true, {1, 1, 16, 16}), biasRow()},
             {"dropoutDevice", withDropout(baseSpec(), DataType::INT64), dropout},
-            {"dropoutDevice32", withDropout(baseSpec(), DataType::INT32), dropout},
+            {"dropoutByValue32", withDropout(baseSpec(), DataType::INT32, true), dropout},
             {"dropoutByValue", withDropout(baseSpec(), DataType::INT64, true), dropout},
             {"scale", withScale(baseSpec()), plainRow()},
             {"grouped", grouped, plainRow()},
@@ -1236,11 +1347,18 @@ TEST(TestFlydslSdpaBwdSplitLaunch, SharedBuffersStridesAndScalarsEqualTheMergedE
         const auto merged = mergedDumpOf(cell.spec, cell.row);
         const auto mergedValues = decode(merged.kernarg, mergedParams());
         const bool broadcast = merged.reduces;
+        // A unit-Sq graph gives the merged kernels a unit stats sequence stride, which they bound
+        // their LSE reads by; the split engine passes the stats as recorded (0).
+        const bool unitQuery = cell.spec.seqQ == 1;
 
         for(const Slot slot : {Slot::DKDV, Slot::DQ})
         {
             const auto dump = dumpOf(slot, cell.spec, cell.row);
             std::vector<std::string> skip{"LSE", "Delta"};
+            if(unitQuery)
+            {
+                skip.emplace_back("stride_stats_token");
+            }
             if(broadcast)
             {
                 // The broadcast dBias lives at the scratch offset, not the front.
@@ -1249,7 +1367,12 @@ TEST(TestFlydslSdpaBwdSplitLaunch, SharedBuffersStridesAndScalarsEqualTheMergedE
             expectSharedValuesEqual(valuesOf(slot, dump), mergedValues, skip, 40);
         }
         const auto prep = valuesOf(Slot::PREP, dumpOf(Slot::PREP, cell.spec, cell.row));
-        expectSharedValuesEqual(prep, mergedValues, {"LSE", "LSE_ws", "Delta"}, 10);
+        std::vector<std::string> prepSkip{"LSE", "LSE_ws", "Delta"};
+        if(unitQuery)
+        {
+            prepSkip.emplace_back("stride_stats_token");
+        }
+        expectSharedValuesEqual(prep, mergedValues, prepSkip, 10);
         // prep reads the raw statistics, as the merged kernel does.
         EXPECT_EQ(prep.at("LSE"), mergedValues.at("LSE"));
     }
@@ -1495,17 +1618,13 @@ TEST(TestFlydslSdpaBwdSplitLaunch, SeedWordsAndPointersEqualTheMergedEnginesAndO
     RowSpec dropout = plainRow();
     dropout.dropout = 1;
     for(const auto& spec : {withDropout(baseSpec(), DataType::INT64),
-                            withDropout(baseSpec(), DataType::INT32),
                             withDropout(baseSpec(), DataType::INT64, true),
                             withDropout(baseSpec(), DataType::INT32, true)})
     {
         const auto merged = mergedDumpOf(spec, dropout);
         const auto prep = dumpOf(Slot::PREP, spec, dropout);
         EXPECT_EQ(prep.seedUploaded, merged.seedUploaded);
-        EXPECT_EQ(prep.seedCopiedFromDevice, merged.seedCopiedFromDevice);
         EXPECT_EQ(prep.seedWords, merged.seedWords);
-        EXPECT_EQ(prep.seedSource, merged.seedSource);
-        EXPECT_EQ(prep.offsetSource, merged.offsetSource);
         for(const Slot slot : {Slot::DKDV, Slot::DQ})
         {
             const auto dump = dumpOf(slot, spec, dropout);
@@ -1531,16 +1650,12 @@ TEST(TestFlydslSdpaBwdSplitLaunch, ARankOneSeedAndOffsetAreReadAsTheRankFourOnes
     dropout.dropout = 1;
     for(const auto& spec : {withDropout(baseSpec(), DataType::INT64, true),
                             withDropout(baseSpec(), DataType::INT32, true),
-                            withDropout(baseSpec(), DataType::INT32),
                             withDropout(baseSpec(), DataType::INT64)})
     {
         const auto expected = dumpOf(Slot::PREP, spec, dropout);
         const auto actual = dumpOf(Slot::PREP, rankOne(spec), dropout);
         EXPECT_EQ(actual.seedUploaded, expected.seedUploaded);
-        EXPECT_EQ(actual.seedCopiedFromDevice, expected.seedCopiedFromDevice);
         EXPECT_EQ(actual.seedWords, expected.seedWords);
-        EXPECT_EQ(actual.seedSource, expected.seedSource);
-        EXPECT_EQ(actual.offsetSource, expected.offsetSource);
         for(const Slot slot : {Slot::DKDV, Slot::DQ})
         {
             EXPECT_EQ(valuesOf(slot, dumpOf(slot, rankOne(spec), dropout)),
@@ -1555,7 +1670,7 @@ TEST(TestFlydslSdpaBwdSplitLaunch, ARankOneSeedAndOffsetAreReadAsTheRankFourOnes
 
 TEST(TestFlydslSdpaBwdSplitLaunch, RowStatisticsAreAddressedThroughTheWorkspaceTokens)
 {
-    const auto spec = withDropout(baseSpec(), DataType::INT32);
+    const auto spec = withDropout(baseSpec(), DataType::INT32, true);
     const GraphFixture fixture(buildSdpaBwdGraph(spec));
     const auto bound = matchesGraph(splitSymbols(Slot::PREP), fixture.context());
     ASSERT_TRUE(bound.has_value());
@@ -1877,6 +1992,8 @@ TEST(TestFlydslSdpaBwdSplitDispatch, TheDqHandlersDeclareTheirLaunchesAndTheOthe
         EXPECT_TRUE(dispatchHandler(splitSymbols(slot)).launchNames().empty());
     }
     EXPECT_FALSE(dispatchHandler(DQ_REDUCE).supportsSaving());
+    EXPECT_EQ(dispatchHandler(DQ_U2).launchNames(), (std::set<std::string>{"dq", "tailzero"}));
+    EXPECT_FALSE(dispatchHandler(DQ_U2).supportsSaving());
 }
 
 TEST(TestFlydslSdpaBwdSplitDispatch, TheDqReduceHandlerHasTheDqHandlersScratch)
@@ -1994,6 +2111,508 @@ TEST(TestFlydslSdpaBwdSplitDispatch, TheTailZeroLaunchIsRequiredAndCheckedOnlyFo
 }
 
 // ---------------------------------------------------------------------------
+// An f32 bias beside a 16-bit query, and V heads of their own
+// ---------------------------------------------------------------------------
+
+/// A graph whose bias, and its dBias when @p withDbias, is FLOAT beside @p spec's 16-bit Q.
+SdpaBwdSpec
+    withF32Bias(const SdpaBwdSpec& spec, bool withDbias, const std::vector<int64_t>& dims = {})
+{
+    return spec.withEdit([=](SdpaBwdGraph& g) {
+        addBias(g, dims).dtype = DataType::FLOAT;
+        if(withDbias)
+        {
+            addDbias(g);
+        }
+    });
+}
+
+/// A graph over @p kvHeads key heads whose V and dV have @p valueHeads heads, laid out
+/// head-major over those heads at V's row pitch (as the device harness lays them out).
+SdpaBwdSpec withValueHeads(SdpaBwdSpec spec, int64_t kvHeads, int64_t valueHeads)
+{
+    spec.kvHeads = kvHeads;
+    return spec.withEdit([=](SdpaBwdGraph& g) {
+        for(const char* name : {"v", "dv"})
+        {
+            auto& tensor = g.tensor(name);
+            tensor.dims[1] = valueHeads;
+            tensor.strides = headMajorStrides(valueHeads, g.seqKv, tensor.strides[2]);
+        }
+    });
+}
+
+RowSpec dkRow(int64_t tile = 64)
+{
+    RowSpec row = plainRow(tile);
+    row.u2Role = "dk";
+    return row;
+}
+
+RowSpec dqU2Row(int64_t tile = 64)
+{
+    RowSpec row = plainRow(tile);
+    row.u2Role = "dq";
+    return row;
+}
+
+/// A dq or dkdv row of an f32 bias beside a 16-bit query: no staged row backs it.
+RowSpec f32BiasRow(int64_t tile = 64)
+{
+    RowSpec row = biasRow(tile);
+    row.biasF32 = 1;
+    row.biasStageResolved = "direct_only";
+    return row;
+}
+
+TEST(TestFlydslSdpaBwdSplitGraph, BindsTheF32BiasAndValueHeadTokens)
+{
+    const auto token = [](const BoundTokens& bound, const char* name) {
+        return tokenOf(bound, std::string("flydsl_sdpa_bwd_split.") + name);
+    };
+    const auto plain = graphMatch(baseSpec());
+    ASSERT_TRUE(plain.has_value());
+    EXPECT_EQ(token(*plain, "bias_f32"), 0);
+    EXPECT_EQ(token(*plain, "v_heads_differ"), 0);
+    EXPECT_EQ(token(*plain, "v_heads"), 8);
+
+    const auto f32 = graphMatch(withF32Bias(baseSpec(), true));
+    ASSERT_TRUE(f32.has_value());
+    EXPECT_EQ(token(*f32, "bias_f32"), 1);
+    EXPECT_EQ(token(*f32, "dbias"), 1);
+    // The staging contract is a 16-bit bias's; an f32 bias is never "outside" it.
+    const auto f32Unaligned = graphMatch(baseSpec().withEdit([](SdpaBwdGraph& g) {
+        auto& bias = addBias(g);
+        bias.dtype = DataType::FLOAT;
+        bias.strides = {int64_t{8} * 16 * 17, int64_t{16} * 17, 17, 1};
+    }));
+    ASSERT_TRUE(f32Unaligned.has_value());
+    EXPECT_EQ(token(*f32Unaligned, "bias_f32"), 1);
+    EXPECT_EQ(token(*f32Unaligned, "bias_unstaged"), 0);
+
+    // A FLOAT bias beside a FLOAT query is the query's dtype, not an f32-bias graph.
+    const auto fp32 = graphMatch(withBias(fp32Spec(), true));
+    ASSERT_TRUE(fp32.has_value());
+    EXPECT_EQ(token(*fp32, "bias_f32"), 0);
+
+    const auto valueHeads = graphMatch(withValueHeads(baseSpec(), 4, 2));
+    ASSERT_TRUE(valueHeads.has_value());
+    EXPECT_EQ(token(*valueHeads, "v_heads_differ"), 1);
+    EXPECT_EQ(token(*valueHeads, "kv_heads"), 4);
+    EXPECT_EQ(token(*valueHeads, "v_heads"), 2);
+    // V heads that equal K's are no variant, grouped or not.
+    const auto grouped = graphMatch(withValueHeads(baseSpec(), 4, 4));
+    ASSERT_TRUE(grouped.has_value());
+    EXPECT_EQ(token(*grouped, "v_heads_differ"), 0);
+}
+
+TEST(TestFlydslSdpaBwdSplitGraph, DeclinesTheValueHeadGraphsNoShippedRowCouldServe)
+{
+    const auto causal = withCausal(withValueHeads(baseSpec(), 4, 2));
+    struct Case
+    {
+        const char* name;
+        SdpaBwdSpec spec;
+        const char* cause;
+    };
+    const std::array<Case, 6> cases{{
+        {"bias", withValueHeads(withBias(baseSpec(), false), 4, 2), "shape"},
+        {"dbias", withValueHeads(withBias(baseSpec(), true), 4, 2), "shape"},
+        {"fp32", withValueHeads(fp32Spec(), 4, 2), "shape"},
+        {"ragged keys",
+         withValueHeads(raggedOf(baseSpec(), {"k", "v", "dk", "dv"}), 4, 2),
+         "shape"},
+        {"query heads not a multiple of V's", withValueHeads(baseSpec(), 4, 3), "gqa"},
+        {"query heads not a multiple of K's", withValueHeads(baseSpec(), 3, 2), "gqa"},
+    }};
+    for(const auto& c : cases)
+    {
+        SCOPED_TRACE(c.name);
+        const auto matched = matchSdpaBwdSpec(c.spec, flydsl_sdpa_bwd::SPLIT_MATCH_OPTIONS);
+        const auto* decline = std::get_if<flydsl_sdpa_bwd::Decline>(&matched);
+        ASSERT_NE(decline, nullptr);
+        EXPECT_EQ(decline->cause, c.cause) << decline->detail;
+        EXPECT_FALSE(graphMatch(c.spec).has_value());
+    }
+    // Under a mask and under padding the variant is served.
+    EXPECT_TRUE(graphMatch(causal).has_value());
+    EXPECT_TRUE(graphMatch(withPaddedVarlen(withValueHeads(baseSpec(), 4, 2))).has_value());
+    // V heads above K's are a group of K's heads over V's: served while Hq divides by both.
+    EXPECT_TRUE(graphMatch(withValueHeads(baseSpec(), 2, 4)).has_value());
+}
+
+TEST(TestFlydslSdpaBwdSplitGraph, TheMergedEngineDeclinesAnF32BiasAndValueHeadsWithTheirCauses)
+{
+    const std::array<std::pair<SdpaBwdSpec, const char*>, 2> graphs{
+        {{withF32Bias(baseSpec(), true), "attn_mask"},
+         {withValueHeads(baseSpec(), 4, 2), "shape"}}};
+    for(const auto& [spec, cause] : graphs)
+    {
+        SCOPED_TRACE(cause);
+        const GraphFixture fixture(buildSdpaBwdGraph(spec));
+        EXPECT_FALSE(matchesGraph(MERGED, fixture.context()).has_value());
+        EXPECT_TRUE(matchesGraph(splitSymbols(Slot::PREP), fixture.context()).has_value());
+        const auto merged = matchSdpaBwdSpec(spec);
+        const auto* decline = std::get_if<flydsl_sdpa_bwd::Decline>(&merged);
+        ASSERT_NE(decline, nullptr);
+        EXPECT_EQ(decline->cause, cause) << decline->detail;
+    }
+}
+
+TEST(TestFlydslSdpaBwdSplitGraph,
+     TheMergedEngineDeclinesAMaskedF16HeadDim192GraphTheSplitEngineServes)
+{
+    const auto atDtype = [](DataType dtype, int64_t headDim) {
+        auto spec = withHeadDims(baseSpec(), headDim, headDim);
+        spec.dtype = dtype;
+        return spec;
+    };
+    const auto splitServes = [](const SdpaBwdSpec& spec) {
+        const GraphFixture fixture(buildSdpaBwdGraph(spec));
+        return matchesGraph(splitSymbols(Slot::PREP), fixture.context()).has_value();
+    };
+    const auto mergedServes = [](const SdpaBwdSpec& spec) {
+        const GraphFixture fixture(buildSdpaBwdGraph(spec));
+        return matchesGraph(MERGED, fixture.context()).has_value();
+    };
+    const auto f16 = atDtype(DataType::HALF, 192);
+    // Any diagonal bound: top-left causal, a window, and bottom-right causal.
+    const auto bottomRight
+        = f16.withEdit([](SdpaBwdGraph& g) { g.attributes.causalMaskBottomRight = true; });
+    for(const auto& spec : {withCausal(f16), withWindow(f16), bottomRight})
+    {
+        EXPECT_FALSE(mergedServes(spec));
+        EXPECT_TRUE(splitServes(spec));
+        // The shared matcher accepts it: the decline is the merged engine's own.
+        EXPECT_TRUE(
+            std::holds_alternative<flydsl_sdpa_bwd::SdpaBwdProblem>(matchSdpaBwdSpec(spec)));
+    }
+    // Unmasked f16 d192, masked bf16 d192 and masked f16 at other head dims stay served.
+    EXPECT_TRUE(mergedServes(f16));
+    EXPECT_TRUE(mergedServes(withCausal(atDtype(DataType::BFLOAT16, 192))));
+    EXPECT_TRUE(mergedServes(withCausal(atDtype(DataType::HALF, 128))));
+    EXPECT_TRUE(mergedServes(withCausal(atDtype(DataType::HALF, 160))));
+}
+
+TEST(TestFlydslSdpaBwdSplitKernel, ARowReadsTheBiasAtTheWidthItWasBuiltFor)
+{
+    const auto f32 = withF32Bias(baseSpec(), true);
+    const auto half = withBias(baseSpec(), true);
+    for(const Slot slot : {Slot::DKDV, Slot::DQ})
+    {
+        SCOPED_TRACE(static_cast<int>(slot));
+        EXPECT_TRUE(serves(slot, f32, f32BiasRow()));
+        EXPECT_FALSE(serves(slot, f32, biasRow()));
+        EXPECT_FALSE(serves(slot, half, f32BiasRow()));
+        EXPECT_TRUE(serves(slot, half, biasRow()));
+        // A graph without a bias is served by the rows that carry none.
+        EXPECT_FALSE(serves(slot, baseSpec(), [] {
+            auto row = plainRow();
+            row.biasF32 = 1;
+            return row;
+        }()));
+    }
+    // An f32 bias is served by a direct row whatever its layout; a staged row never serves it.
+    RowSpec staged = f32BiasRow();
+    staged.biasStageResolved = "lds";
+    EXPECT_FALSE(serves(Slot::DQ, f32, staged));
+    // prep reads neither.
+    EXPECT_TRUE(serves(Slot::PREP, f32, plainRow()));
+    // A FLOAT bias beside a FLOAT query is the query's width: a row of bias_f32 0.
+    RowSpec fp32Row = biasRow();
+    fp32Row.dtype = "fp32";
+    fp32Row.biasStageResolved = "direct_only";
+    EXPECT_TRUE(serves(Slot::DQ, withBias(fp32Spec(), true), fp32Row));
+    fp32Row.biasF32 = 1;
+    EXPECT_FALSE(serves(Slot::DQ, withBias(fp32Spec(), true), fp32Row));
+}
+
+TEST(TestFlydslSdpaBwdSplitKernel, ARowServesValueHeadsOfItsOwnExactlyWhenItsRoleSaysSo)
+{
+    const auto valueHeads = withValueHeads(baseSpec(), 4, 2);
+    const auto causal = withCausal(valueHeads);
+    EXPECT_TRUE(serves(Slot::DKDV, valueHeads, dkRow()));
+    EXPECT_FALSE(serves(Slot::DKDV, valueHeads, plainRow()));
+    EXPECT_FALSE(serves(Slot::DKDV, baseSpec(), dkRow()));
+    EXPECT_TRUE(serves(Slot::DKDV, baseSpec(), plainRow()));
+    EXPECT_TRUE(serves(Slot::DQ, valueHeads, dqU2Row()));
+    EXPECT_FALSE(serves(Slot::DQ, valueHeads, plainRow()));
+    EXPECT_FALSE(serves(Slot::DQ, baseSpec(), dqU2Row()));
+    EXPECT_TRUE(serves(Slot::DQ, baseSpec(), plainRow()));
+    // The class still routes: a causal graph needs the causal row of its role.
+    EXPECT_FALSE(serves(Slot::DKDV, causal, dkRow()));
+    auto causalDk = causalRow();
+    causalDk.u2Role = "dk";
+    EXPECT_TRUE(serves(Slot::DKDV, causal, causalDk));
+    // prep serves both.
+    EXPECT_TRUE(serves(Slot::PREP, valueHeads, plainRow()));
+}
+
+TEST(TestFlydslSdpaBwdSplitKernel, ARecordWithAnUnreadableRoleWidthOrStageIsDeclined)
+{
+    const GraphFixture fixture(buildSdpaBwdGraph(withBias(baseSpec(), false)));
+    const auto bound = matchesGraph(splitSymbols(Slot::DQ), fixture.context());
+    ASSERT_TRUE(bound.has_value());
+    const auto declines = [&](Slot slot, const std::function<void(KernelDefinition&)>& damage) {
+        auto row = makeRow(slot, biasRow());
+        EXPECT_TRUE(matchesKernel(splitSymbols(slot), fixture.context(), row, *bound));
+        damage(row);
+        return !matchesKernel(splitSymbols(slot), fixture.context(), row, *bound);
+    };
+    for(const Slot slot : {Slot::DKDV, Slot::DQ})
+    {
+        SCOPED_TRACE(static_cast<int>(slot));
+        EXPECT_TRUE(declines(slot, [](auto& row) { row.metadata.erase("bias_f32"); }));
+        EXPECT_TRUE(declines(slot, [](auto& row) { row.metadata["bias_f32"] = int64_t{2}; }));
+        EXPECT_TRUE(declines(slot, [](auto& row) { row.metadata.erase("u2_role"); }));
+        EXPECT_TRUE(
+            declines(slot, [](auto& row) { row.metadata["u2_role"] = std::string("both"); }));
+    }
+    // A role of the other slot is no role of this one.
+    EXPECT_TRUE(
+        declines(Slot::DKDV, [](auto& row) { row.metadata["u2_role"] = std::string("dq"); }));
+    EXPECT_TRUE(declines(Slot::DQ, [](auto& row) { row.metadata["u2_role"] = std::string("dk"); }));
+    EXPECT_TRUE(declines(Slot::DQ, [](auto& row) { row.metadata.erase("bias_stage_resolved"); }));
+    EXPECT_TRUE(declines(
+        Slot::DQ, [](auto& row) { row.metadata["bias_stage_resolved"] = std::string("auto"); }));
+}
+
+TEST(TestFlydslSdpaBwdSplitKernel, ADkdvU2RowIsDeclinedWhenItsValueOnlyLaunchLeavesTheGrid)
+{
+    // The dK-only launch is 1 x Hk wide in y; the dV-only launch is Hv, past the limit of y.
+    auto spec = withValueHeads(baseSpec(), 1, 70000);
+    spec.heads = 70000;
+    spec.batch = 1;
+    RowSpec row = dkRow();
+    row.grid = GRID_DKDV_BLOCKS_FIRST;
+    EXPECT_FALSE(serves(Slot::DKDV, spec, row));
+    // Over the K heads the same extent is x, which may be as wide as int32.
+    row.grid = GRID_DKDV_HEADS_FIRST;
+    EXPECT_TRUE(serves(Slot::DKDV, spec, row));
+}
+
+TEST(TestFlydslSdpaBwdSplitLaunch,
+     ADkdvU2RowLaunchesTheDkOnlyObjectOverKeyHeadsThenTheDvOnlyOverValueHeads)
+{
+    const auto spec = withValueHeads(baseSpec(), 4, 2);
+    for(const char* grid : {GRID_DKDV_HEADS_FIRST, GRID_DKDV_BLOCKS_FIRST})
+    {
+        SCOPED_TRACE(grid);
+        const bool headsFirst = std::string(grid) == GRID_DKDV_HEADS_FIRST;
+        RowSpec row = dkRow();
+        row.grid = grid;
+        const auto dump = dumpOf(Slot::DKDV, spec, row);
+        using Grid3 = std::array<unsigned int, 3>;
+        EXPECT_EQ(dump.grid, headsFirst ? (Grid3{4, 1, 2}) : (Grid3{1, 4, 2}));
+        ASSERT_TRUE(dump.dvonly);
+        EXPECT_EQ(dump.dvonlyGrid, headsFirst ? (Grid3{2, 1, 2}) : (Grid3{1, 2, 2}));
+        EXPECT_EQ(dump.dvonlyBlock, dump.block);
+        EXPECT_EQ(dump.kernarg.size(), imageBytes(dkdvU2Params()));
+        const auto values = decode(dump.kernarg, dkdvU2Params());
+        EXPECT_EQ(values.at("num_head_q"), 8U);
+        EXPECT_EQ(values.at("num_head_k"), 4U);
+        EXPECT_EQ(values.at("num_head_v"), 2U);
+        // V's own strides: the dV-only launch reads V and writes dV at the graph's own.
+        EXPECT_EQ(values.at("stride_v_head"), 16U * 64U);
+        EXPECT_EQ(values.at("stride_dv_batch"), values.at("stride_v_batch"));
+    }
+    // The argument adds no bytes to the image (_PARAMS["dkdv_u2"]), and a row of Hk == Hv has
+    // neither the argument nor the second launch.
+    EXPECT_EQ(imageBytes(dkdvU2Params()), imageBytes(dkdvParams()));
+    const auto plain = dumpOf(Slot::DKDV, baseSpec(), plainRow());
+    EXPECT_FALSE(plain.dvonly);
+    EXPECT_EQ(plain.kernarg.size(), imageBytes(dkdvParams()));
+}
+
+TEST(TestFlydslSdpaBwdSplitLaunch, ADqU2RowPassesTheValueHeadCountAndTheVHeadTailZero)
+{
+    const auto spec = withValueHeads(baseSpec(), 4, 2);
+    const auto dump = dumpOf(Slot::DQ, spec, dqU2Row());
+    EXPECT_FALSE(dump.dvonly);
+    EXPECT_EQ(dump.kernarg.size(), imageBytes(dqU2Params()));
+    const auto values = decode(dump.kernarg, dqU2Params());
+    EXPECT_EQ(values.at("num_head_q"), 8U);
+    EXPECT_EQ(values.at("num_head_k"), 4U);
+    EXPECT_EQ(values.at("num_head_v"), 2U);
+    EXPECT_EQ(dump.grid[0], 8U);
+    EXPECT_FALSE(dump.tailzero);
+
+    // Padded: the tail-zero launch is the V-head object over B * (Hq + Hk + Hv) planes.
+    const auto padded = dumpOf(Slot::DQ, withPaddedVarlen(spec), dqU2Row());
+    ASSERT_TRUE(padded.tailzero);
+    EXPECT_EQ(padded.tailzeroKernarg.size(), imageBytes(tailzeroHvParams()));
+    const auto tail = decode(padded.tailzeroKernarg, tailzeroHvParams());
+    EXPECT_EQ(tail.at("Hq"), 8U);
+    EXPECT_EQ(tail.at("Hkv"), 4U);
+    EXPECT_EQ(tail.at("Hv"), 2U);
+    EXPECT_EQ(tail.at("mask"), 7U);
+    EXPECT_EQ(padded.tailzeroGrid[1], 2U * (8U + 4U + 2U));
+    // Without V heads of its own the launch is the one of old: Hq + 2 Hkv planes.
+    const auto plain = dumpOf(Slot::DQ, withPaddedVarlen(baseSpec()), plainRow());
+    ASSERT_TRUE(plain.tailzero);
+    EXPECT_EQ(plain.tailzeroKernarg.size(), imageBytes(tailzeroParams()));
+    EXPECT_EQ(plain.tailzeroGrid[1], 2U * (8U + 8U + 8U));
+}
+
+TEST(TestFlydslSdpaBwdSplitLaunch, AnF32DbiasIsSizedAndReducedAtFourBytesBesideA16BitQuery)
+{
+    auto spec = withF32Bias(baseSpec(), true, {1, 1, 16, 20});
+    spec.seqKv = 20;
+    const auto dump = dumpOf(Slot::DQ, spec, f32BiasRow());
+    ASSERT_TRUE(dump.reduces);
+    EXPECT_EQ(dump.scratchBytes, size_t{2} * 8 * 16 * 20 * 4);
+    // A reduce thread owns 4 columns of f32: 16 rows * 5 vectors = 80 items.
+    EXPECT_EQ(dump.reduceGrid, (std::array<unsigned int, 3>{1, 1, 1}));
+    EXPECT_EQ(decode(dump.kernarg, dqParams()).at("stride_db_seq_q"), 20U);
+    // The workspace token the handler checks follows the same width.
+    const auto bound = graphMatch(spec);
+    ASSERT_TRUE(bound.has_value());
+    const GraphFixture fixture(buildSdpaBwdGraph(spec));
+    EXPECT_EQ(dispatchHandler(splitSymbols(Slot::DQ))
+                  .workspaceBytes(fixture.context(), *bound, makeRow(Slot::DQ, f32BiasRow())),
+              size_t{2} * 8 * 16 * 20 * 4);
+}
+
+TEST(TestFlydslSdpaBwdSplitMatcher, AnF32DbiasStrideIsHeldToAWholeVectorOfFourElements)
+{
+    const auto dbiasWithRowPitch = [](int64_t pitch) {
+        return baseSpec().withEdit([=](SdpaBwdGraph& g) {
+            auto& bias = addBias(g);
+            bias.dtype = DataType::FLOAT;
+            bias.strides = {int64_t{8} * 16 * pitch, int64_t{16} * pitch, pitch, 1};
+            addDbias(g);
+        });
+    };
+    // 20 elements = 80 bytes: a whole number of 16-byte vectors of FLOAT, though not of 16-bit
+    // elements; 18 is not.
+    EXPECT_TRUE(graphMatch(dbiasWithRowPitch(20)).has_value());
+    EXPECT_FALSE(graphMatch(dbiasWithRowPitch(18)).has_value());
+}
+
+// The checks below read only refusals prepare() raises on the host before any code object
+// loads.
+
+/// A dkdv row of @p row whose launches are the `sources` entries "dkdv" and, with @p dvonly,
+/// "dvonly", in archives that do not exist.
+KernelDefinition dkdvSourcesRow(const RowSpec& row,
+                                std::optional<std::vector<KernelArgument>> dvonly
+                                = recordedSignature(dkdvU2Params()))
+{
+    auto kernel = makeRow(Slot::DKDV, row);
+    const auto tree = std::filesystem::temp_directory_path().string();
+    kernel.originDirectory = tree;
+    kernel.treeRoot = tree;
+    KernelSource dk;
+    dk.kind = KernelSourceKind::KPACK;
+    dk.library = "there-is-no-archive-here.kpack";
+    dk.tocKey = "toc#0";
+    dk.symbol = "dk_entry_symbol";
+    dk.signature = recordedSignature(row.u2Role == "none" ? dkdvParams() : dkdvU2Params());
+    kernel.sources = {{"dkdv", dk}};
+    if(dvonly.has_value())
+    {
+        KernelSource dv = dk;
+        dv.symbol = "dv_entry_symbol";
+        dv.signature = std::move(*dvonly);
+        kernel.sources["dvonly"] = std::move(dv);
+    }
+    return kernel;
+}
+
+TEST(TestFlydslSdpaBwdSplitDispatch, TheDkdvU2HandlerLaunchesTheDkOnlyAndTheDvOnlyObject)
+{
+    EXPECT_EQ(dispatchHandler(DKDV_U2).launchNames(), (std::set<std::string>{"dkdv", "dvonly"}));
+    EXPECT_FALSE(dispatchHandler(DKDV_U2).supportsSaving());
+
+    const auto spec = withValueHeads(baseSpec(), 4, 2);
+    const GraphFixture fixture(buildSdpaBwdGraph(spec));
+    const auto bound = matchesGraph(DKDV_U2, fixture.context());
+    ASSERT_TRUE(bound.has_value());
+    EXPECT_EQ(dispatchHandler(DKDV_U2).workspaceBytes(
+                  fixture.context(), *bound, makeRow(Slot::DKDV, dkRow())),
+              0U);
+
+    // A row without its dV-only launch is refused...
+    const auto missing = prepareFailure(DKDV_U2, spec, dkdvSourcesRow(dkRow(), std::nullopt));
+    EXPECT_TRUE(contains(missing, "no launch 'dvonly'")) << missing;
+    // ...and so is one whose dV-only entry takes the arguments of the old list.
+    const auto refused
+        = prepareFailure(DKDV_U2, spec, dkdvSourcesRow(dkRow(), recordedSignature(dkdvParams())));
+    EXPECT_TRUE(contains(refused, "is packaged with arguments")) << refused;
+    EXPECT_TRUE(contains(refused, "dv_entry_symbol")) << refused;
+    // A well-formed pair gets as far as the archive.
+    const auto good = prepareFailure(DKDV_U2, spec, dkdvSourcesRow(dkRow()));
+    EXPECT_FALSE(contains(good, "no launch")) << good;
+    EXPECT_FALSE(contains(good, "is packaged with arguments")) << good;
+    EXPECT_FALSE(good.empty());
+
+    // The role and the dispatch agree: a V-head row on the plain handler would launch one
+    // object, a plain row on the two-launch handler has no second one.
+    const auto onPlain
+        = prepareFailure(splitSymbols(Slot::DKDV), spec, makeRow(Slot::DKDV, dkRow()));
+    EXPECT_TRUE(contains(onPlain, "u2_role dk but is dispatched by the dkdv handler")) << onPlain;
+    const auto onU2 = prepareFailure(DKDV_U2, baseSpec(), makeRow(Slot::DKDV, plainRow()));
+    EXPECT_TRUE(contains(onU2, "u2_role none but is dispatched by the dkdv_u2 handler")) << onU2;
+}
+
+TEST(TestFlydslSdpaBwdSplitDispatch, TheDqU2HandlerLaunchesTheValueHeadDqAndTailZeroObjects)
+{
+    const auto spec = withValueHeads(baseSpec(), 4, 2);
+    const auto padded = withPaddedVarlen(spec);
+    const auto u2Row
+        = [](std::optional<std::vector<KernelArgument>> tailzero, bool takesValueHeads = true) {
+              auto kernel = sourcesRow(dqU2Row(), std::nullopt, std::move(tailzero));
+              kernel.sources["dq"].signature
+                  = recordedSignature(takesValueHeads ? dqU2Params() : dqParams());
+              return kernel;
+          };
+
+    // The scratch of a V-head dq row is none (no bias).
+    const GraphFixture fixture(buildSdpaBwdGraph(padded));
+    const auto bound = matchesGraph(DQ_U2, fixture.context());
+    ASSERT_TRUE(bound.has_value());
+    EXPECT_EQ(dispatchHandler(DQ_U2).workspaceBytes(
+                  fixture.context(), *bound, makeRow(Slot::DQ, dqU2Row())),
+              0U);
+
+    // The tail-zero list without Hv is refused; the one with it is not (the archive is what
+    // is missing).
+    const auto refused = prepareFailure(DQ_U2, padded, u2Row(recordedSignature(tailzeroParams())));
+    EXPECT_TRUE(contains(refused, "is packaged with arguments")) << refused;
+    EXPECT_TRUE(contains(refused, TAILZERO_ENTRY_SYMBOL)) << refused;
+    // So is a dQ entry that takes the arguments of the old list.
+    const auto oldDq
+        = prepareFailure(DQ_U2, padded, u2Row(recordedSignature(tailzeroHvParams()), false));
+    EXPECT_TRUE(contains(oldDq, "is packaged with arguments")) << oldDq;
+    EXPECT_TRUE(contains(oldDq, DQ_ENTRY_SYMBOL)) << oldDq;
+    const auto good = prepareFailure(DQ_U2, padded, u2Row(recordedSignature(tailzeroHvParams())));
+    EXPECT_FALSE(contains(good, "is packaged with arguments")) << good;
+    EXPECT_FALSE(contains(good, "dispatched by")) << good;
+    EXPECT_FALSE(good.empty());
+    // A row without its tail-zero launch is refused on a padded graph.
+    const auto missing = prepareFailure(DQ_U2, padded, u2Row(std::nullopt));
+    EXPECT_TRUE(contains(missing, "no launch 'tailzero'")) << missing;
+
+    // The role and the dispatch agree: a V-head row on a standard dq handler, or a plain row
+    // on dq_u2, is refused before any archive is read.
+    for(const auto& standard : {splitSymbols(Slot::DQ), DQ_REDUCE})
+    {
+        const auto onStandard
+            = prepareFailure(standard, spec, u2Row(recordedSignature(tailzeroHvParams())));
+        EXPECT_TRUE(contains(onStandard, "u2_role dq but is dispatched by the dq handler"))
+            << onStandard;
+    }
+    const auto onU2 = prepareFailure(DQ_U2, baseSpec(), sourcesRow(plainRow()));
+    EXPECT_TRUE(contains(onU2, "u2_role none but is dispatched by the dq_u2 handler")) << onU2;
+    // A plain row on the standard handler refuses the list with Hv.
+    const auto plainRefused = prepareFailure(
+        splitSymbols(Slot::DQ),
+        withPaddedVarlen(baseSpec()),
+        sourcesRow(plainRow(), std::nullopt, recordedSignature(tailzeroHvParams())));
+    EXPECT_TRUE(contains(plainRefused, TAILZERO_ENTRY_SYMBOL)) << plainRefused;
+}
+
+// ---------------------------------------------------------------------------
 // Graphs the gfx11 objects serve
 // ---------------------------------------------------------------------------
 
@@ -2074,7 +2693,7 @@ const std::array<const char*, 3> GFX11_DTYPES{"f16", "bf16", "fp32"};
 /// The rows of a gfx11-generic catalog for @p slot, as the generator writes them: prep rows
 /// carry the rung below the tile as a numeric floor ("0" for the lowest), dkdv and dq rows the
 /// padded "g1" floor; dropout is baked ("bk") in both states; dq rows never stage the bias
-/// (`bias_stage` "none") and store dB only for bias; dkdv packs nothing.
+/// (`bias_stage_resolved` `direct_only`) and store dB only for bias; dkdv packs nothing.
 std::vector<RowSpec> gfx11Rows(Slot slot)
 {
     std::vector<RowSpec> rows;
@@ -2097,7 +2716,6 @@ std::vector<RowSpec> gfx11Rows(Slot slot)
             row.floorValue = "g1";
             row.grid = slot == Slot::DKDV ? GRID_DKDV_BLOCKS_FIRST : GRID_DQ;
             row.gqaPack = slot == Slot::DKDV ? 0 : -1;
-            row.biasStage = "none";
             for(const int64_t dropout : {int64_t{0}, int64_t{1}})
             {
                 for(const char cls : {'p', 'c', 'b'})
@@ -2105,6 +2723,7 @@ std::vector<RowSpec> gfx11Rows(Slot slot)
                     row.dropout = dropout;
                     row.causal = cls == 'c' ? 1 : 0;
                     row.hasBias = cls == 'b' ? 1 : 0;
+                    row.biasStageResolved = row.hasBias != 0 ? "direct_only" : "na";
                     row.storeDb = row.hasBias != 0 ? 1 : -1;
                     row.reduceSymbol = row.hasBias != 0 ? REDUCE_SYMBOL : "";
                     rows.push_back(row);
@@ -2205,7 +2824,7 @@ TEST(TestFlydslSdpaBwdSplitGfx11Rows,
     for(const auto& row : f16Rows)
     {
         EXPECT_EQ(row.dtype, "f16");
-        EXPECT_EQ(row.biasStage, "none");
+        EXPECT_EQ(row.biasStageResolved, "direct_only");
         EXPECT_EQ(row.hasBias, 1);
     }
     const auto fp32Rows = servingRows(Slot::DQ, unstagedFp32, catalog);
@@ -2213,27 +2832,21 @@ TEST(TestFlydslSdpaBwdSplitGfx11Rows,
     for(const auto& row : fp32Rows)
     {
         EXPECT_EQ(row.dtype, "fp32");
-        EXPECT_EQ(row.biasStage, "none");
+        EXPECT_EQ(row.biasStageResolved, "direct_only");
     }
 
-    // A staging 16-bit row beside them declines the 16-bit layout; the same row at fp32, which
-    // never stages, serves it.
+    // A staging 16-bit row beside them declines the 16-bit layout.
     RowSpec staging = biasRow(64);
     staging.padded = 1;
     staging.floorValue = "g1";
     staging.dform = "bk";
-    staging.biasStage = "auto";
     staging.grid = GRID_DQ;
-    RowSpec staging32 = staging;
-    staging32.dtype = "fp32";
     catalog.push_back(staging);
-    catalog.push_back(staging32);
     for(const auto& row : servingRows(Slot::DQ, unstaged, catalog))
     {
-        EXPECT_EQ(row.biasStage, "none");
+        EXPECT_EQ(row.biasStageResolved, "direct_only");
     }
     EXPECT_FALSE(serves(Slot::DQ, unstaged, staging));
-    EXPECT_TRUE(serves(Slot::DQ, unstagedFp32, staging32));
     // Inside the contract the staging row serves too: the decline is the layout's.
     EXPECT_TRUE(serves(Slot::DQ, withBias(baseSpec(), false), staging));
 }
@@ -2247,7 +2860,7 @@ TEST(TestFlydslSdpaBwdSplitGfx11Rows, AHeadDimAboveTheLadderIsDeclinedWithANamed
     {
         SCOPED_TRACE(std::to_string(dims.first) + "/" + std::to_string(dims.second));
         const auto spec = withHeadDims(baseSpec(), dims.first, dims.second);
-        const auto matched = matchSdpaBwdSpec(spec, flydsl_sdpa_bwd::MatchOptions{true});
+        const auto matched = matchSdpaBwdSpec(spec, flydsl_sdpa_bwd::SPLIT_MATCH_OPTIONS);
         const auto* decline = std::get_if<flydsl_sdpa_bwd::Decline>(&matched);
         ASSERT_NE(decline, nullptr);
         EXPECT_EQ(decline->cause, "head_size");

@@ -71,15 +71,20 @@
  * kernels' per-batch lengths. The engine adds what only it knows: a workspace whose regions
  * cannot be proven to fit is declined (SP-WS). Which slot rows serve a graph is the kernel
  * match of each slot, over the fields the slot's KMD carries: the launch grid follows the
- * row's `grid`, and a 16-bit bias outside the LDS staging contract (BI-8) keeps only the dq
- * rows whose `bias_stage` is "none". The graph match publishes the shared workspace as bound tokens
+ * row's `grid`, a dq row serves a bias graph by the chunk-contract rule of its
+ * `bias_stage_resolved` (see flydslSdpaBwdSplitKernelMatches), and a row serves a graph by its
+ * `bias_f32` and `u2_role`. The graph match publishes the shared workspace as bound tokens
  * (`ws.*`); the handlers read them at prepare() and check them against the layout they
  * recompute.
  *
  * The dq slot's launches are the dQ kernel, the dBias reduce when the graph's dBias is
  * broadcast, and, when the graph has padding_mask and at least one dense gradient output, the
  * tail-zero launch (`tailzero`): it zeroes the rows of those outputs past `seq_len`, so a
- * padded dense gradient is zero beyond its lengths.
+ * padded dense gradient is zero beyond its lengths. A graph whose V heads differ from K's
+ * (`u2_role` `dq` on the dq row, `dk` on the dkdv row) takes the `num_head_v` variants: the
+ * dkdv row's `dkdv_u2` dispatch launches the dK-only object over the K heads and then the
+ * dV-only object (`dvonly`) over the V heads, and the dq row's tail-zero launch is the V-head
+ * object.
  *
  * Launch arguments are a pure function of the plan prepare() resolves and the execute-time
  * buffers (launchArguments()), so one description of each kernel's argument list feeds the
@@ -118,7 +123,17 @@ constexpr std::string_view DQ_DISPATCH_SYMBOL = "hipkernel.flydsl_sdpa_bwd_split
 /// reduce kernel as a separate launch.
 constexpr std::string_view DQ_REDUCE_DISPATCH_SYMBOL
     = "hipkernel.flydsl_sdpa_bwd_split.dq_reduce.dispatch";
+/// The dkdv slot's two-launch dispatch for `Hk != Hv`: every row carries the dK-only object as
+/// `dkdv` and the dV-only object as `dvonly`, in that launch order.
+constexpr std::string_view DKDV_U2_DISPATCH_SYMBOL
+    = "hipkernel.flydsl_sdpa_bwd_split.dkdv_u2.dispatch";
+/// The dq slot's dispatch for `Hk != Hv`: every row carries the V-head dQ kernel as `dq` and the
+/// V-head tail-zero kernel as `tailzero`.
+constexpr std::string_view DQ_U2_DISPATCH_SYMBOL = "hipkernel.flydsl_sdpa_bwd_split.dq_u2.dispatch";
 
+/// The launch names of a dkdv row's `sources` (`dkdv_u2` dispatch).
+constexpr std::string_view DKDV_LAUNCH = "dkdv";
+constexpr std::string_view DVONLY_LAUNCH = "dvonly";
 /// The launch names of a dq row's `sources`.
 constexpr std::string_view DQ_LAUNCH = "dq";
 constexpr std::string_view REDUCE_LAUNCH = "dbias_reduce";
@@ -156,18 +171,30 @@ constexpr std::string_view BLOCK_KV_FIELD = "block_kv";
 constexpr std::string_view BLOCK_M_FIELD = "block_m";
 /// How the object's launch grid maps the problem onto x, y and z; see gridOf.
 constexpr std::string_view GRID_FIELD = "grid";
-/// dq: "none" is the one spelling the engine reads as a row that loads the bias directly; any
-/// other value ("auto", which may resolve to staging, or "direct") is treated as staging the
-/// 16-bit bias through LDS (see native::stagesBias). The gfx11 rows spell "none"; the gfx950
-/// 16-bit bias rows spell "auto" or "direct".
-constexpr std::string_view BIAS_STAGE_FIELD = "bias_stage";
-constexpr std::string_view BIAS_STAGE_NONE = "none";
+/// dq and dkdv: 1 when the row's bias is FLOAT beside a 16-bit Q (fp32-Q rows carry 0).
+constexpr std::string_view BIAS_F32_FIELD = "bias_f32";
+/// dq: how the object reads the bias: `lds` (staged, 16-bit only), `direct` (loads directly and
+/// a staged row exists for the graphs it serves), `direct_only` (loads directly and no staged
+/// row serves those graphs), `na` for a row without a bias.
+constexpr std::string_view BIAS_STAGE_RESOLVED_FIELD = "bias_stage_resolved";
+constexpr std::string_view STAGE_LDS = "lds";
+constexpr std::string_view STAGE_DIRECT = "direct";
+constexpr std::string_view STAGE_DIRECT_ONLY = "direct_only";
+constexpr std::string_view STAGE_NA = "na";
+/// dq and dkdv: `none` for a row that serves `Hk == Hv`, `dk` (dkdv) and `dq` (dq) for the rows
+/// that serve `Hk != Hv`.
+constexpr std::string_view U2_ROLE_FIELD = "u2_role";
+constexpr std::string_view U2_NONE = "none";
+constexpr std::string_view U2_DK = "dk";
+constexpr std::string_view U2_DQ = "dq";
 
 /// The `grid` values, one launch order per spelling: x, y, z, with the batch always on z.
 constexpr std::string_view GRID_PREP = "qblocks_by_heads_by_seqs";
 constexpr std::string_view GRID_DKDV_HEADS_FIRST = "kheads_by_kvblocks_by_seqs";
 constexpr std::string_view GRID_DKDV_BLOCKS_FIRST = "kvblocks_by_kheads_by_seqs";
 constexpr std::string_view GRID_DQ = "qheads_by_qblocks_by_seqs";
+// A `dkdv_u2` row's `grid` is its dK-only object's; the dV-only object's grid is the same
+// spelling over the V heads (`vheads_by_kvblocks_by_seqs`, `kvblocks_by_vheads_by_seqs`).
 
 // What graph_match binds for kernel_match.
 constexpr std::string_view CLASS_TOKEN = "flydsl_sdpa_bwd_split.class";
@@ -176,13 +203,19 @@ constexpr std::string_view HEAD_DIM_QK_TOKEN = "flydsl_sdpa_bwd_split.head_dim_q
 constexpr std::string_view HEAD_DIM_V_TOKEN = "flydsl_sdpa_bwd_split.head_dim_v";
 constexpr std::string_view DROPOUT_TOKEN = "flydsl_sdpa_bwd_split.dropout";
 constexpr std::string_view DBIAS_TOKEN = "flydsl_sdpa_bwd_split.dbias";
-/// 1 for a 16-bit bias graph outside the LDS staging contract (BI-8): only a dq row whose
-/// bias_stage is "none" serves it.
+/// 1 for a 16-bit bias graph outside the LDS staging contract (the kernel's bias chunk
+/// contract): a dq row whose `bias_stage_resolved` is `lds` does not serve it, one that is
+/// `direct` serves only it.
 constexpr std::string_view BIAS_UNSTAGED_TOKEN = "flydsl_sdpa_bwd_split.bias_unstaged";
+/// 1 when the bias is FLOAT beside a 16-bit Q: a row serves the graph iff its `bias_f32` is 1.
+constexpr std::string_view BIAS_F32_TOKEN = "flydsl_sdpa_bwd_split.bias_f32";
+/// 1 when V's heads differ from K's: a row serves the graph iff its `u2_role` is not `none`.
+constexpr std::string_view V_HEADS_DIFFER_TOKEN = "flydsl_sdpa_bwd_split.v_heads_differ";
 constexpr std::string_view GQA_PACK_TOKEN = "flydsl_sdpa_bwd_split.gqa_pack";
 constexpr std::string_view BATCH_TOKEN = "flydsl_sdpa_bwd_split.batch";
 constexpr std::string_view HEADS_TOKEN = "flydsl_sdpa_bwd_split.heads";
 constexpr std::string_view KV_HEADS_TOKEN = "flydsl_sdpa_bwd_split.kv_heads";
+constexpr std::string_view V_HEADS_TOKEN = "flydsl_sdpa_bwd_split.v_heads";
 constexpr std::string_view SEQ_Q_TOKEN = "flydsl_sdpa_bwd_split.seq_q";
 constexpr std::string_view SEQ_KV_TOKEN = "flydsl_sdpa_bwd_split.seq_kv";
 /// The reduce launch's grid y extent; 0 when the graph's dBias is not broadcast.
@@ -286,14 +319,15 @@ native::WorkspaceRequest requestFor(const bwd::SdpaBwdProblem& problem)
 {
     native::WorkspaceRequest request;
     request.rowStatistics = true;
-    request.dbiasElementBytes = problem.elementBytes;
+    request.dbiasElementBytes = problem.biasElementBytes;
     return request;
 }
 
-/// The reduce kernel's vector: the columns one thread owns, a 16-byte access of the dtype.
+/// The reduce kernel's vector: the columns one thread owns, a 16-byte access of the dBias's
+/// dtype.
 int64_t reduceVectorOf(const bwd::SdpaBwdProblem& problem)
 {
-    return VECTOR_BYTES / static_cast<int64_t>(problem.elementBytes);
+    return VECTOR_BYTES / static_cast<int64_t>(problem.biasElementBytes);
 }
 
 /// Why the regions of @p layout cannot be proven to fit, or empty when they can: every offset
@@ -406,10 +440,59 @@ int64_t reducePlanes(const bwd::SdpaBwdProblem& problem)
     return planes.value_or(std::numeric_limits<int64_t>::max());
 }
 
+/// The head-dim bands the shipped f32-bias and `Hk != Hv` rows cover on @p arch, empty on an
+/// architecture the engine knows no such rows for.
+std::vector<bwd::HeadDimBand> parityBandsOf(std::string_view arch)
+{
+    if(arch.rfind("gfx11", 0) == 0)
+    {
+        return {bwd::GFX11_PARITY_BANDS.begin(), bwd::GFX11_PARITY_BANDS.end()};
+    }
+    if(arch.rfind("gfx950", 0) == 0)
+    {
+        return {bwd::GFX950_PARITY_BANDS.begin(), bwd::GFX950_PARITY_BANDS.end()};
+    }
+    return {};
+}
+
+/// Logs, at INFO, that an f32-bias or `Hk != Hv` graph is admitted and whether its head dims
+/// lie in the bands the shipped rows cover. A graph outside them is admitted here and then
+/// declined by the ingestor for want of a serving row, as a 16-bit bias outside the staging
+/// contract is on a device without a `direct` row.
+void logParityCoverage(const MatchContext& context,
+                       const bwd::SdpaBwdProblem& problem,
+                       bool biasF32,
+                       bool valueHeadsDiffer)
+{
+    const std::string_view arch = context.deviceProperties.gcnArchName;
+    const auto bands = parityBandsOf(arch);
+    const int64_t low = std::min(problem.headDimQk, problem.headDimV);
+    const int64_t high = std::max(problem.headDimQk, problem.headDimV);
+    const bool covered = std::any_of(bands.begin(), bands.end(), [&](const bwd::HeadDimBand& band) {
+        return low > band.floor && high <= band.tile;
+    });
+    std::string bandText;
+    for(const auto& band : bands)
+    {
+        bandText += (bandText.empty() ? "" : ", ") + std::string("(") + std::to_string(band.floor)
+                    + ", " + std::to_string(band.tile) + "]";
+    }
+    HIPDNN_PLUGIN_LOG_INFO(ENGINE_NAME
+                           << " admits a graph with "
+                           << (biasF32 ? "an f32 bias beside a 16-bit query" : "")
+                           << (biasF32 && valueHeadsDiffer ? " and " : "")
+                           << (valueHeadsDiffer ? "V heads that differ from K's" : "")
+                           << " at head dims Qk " << problem.headDimQk << ", V " << problem.headDimV
+                           << "; the shipped rows for " << arch << " cover head dims in "
+                           << (bandText.empty() ? std::string("no band") : bandText)
+                           << ", so the graph is " << (covered ? "inside" : "outside")
+                           << " them and is declined by the ingestor unless a row serves it");
+}
+
 /**
- * @brief Graph-scoped applicability: the shared backward matcher's contract with FLOAT
- *        accepted, with the proven shared workspace (SP-WS) and what every kernel_match needs
- *        bound.
+ * @brief Graph-scoped applicability: the shared backward matcher's contract with every
+ *        option the split engine takes (FLOAT, an f32 bias, V heads of their own), with the
+ *        proven shared workspace (SP-WS) and what every kernel_match needs bound.
  *
  * Each decline of a graph with an SDPA-backward node logs its rule or cause at INFO; any
  * other graph declines silently.
@@ -420,7 +503,7 @@ std::optional<BoundTokens> flydslSdpaBwdSplitGraphMatches(const MatchContext& co
     {
         return std::nullopt;
     }
-    const auto matched = bwd::matchSdpaBackward(context, bwd::MatchOptions{true});
+    const auto matched = bwd::matchSdpaBackward(context, bwd::SPLIT_MATCH_OPTIONS);
     if(const auto* decline = std::get_if<bwd::Decline>(&matched))
     {
         logDecline(decline->cause, decline->detail);
@@ -434,21 +517,27 @@ std::optional<BoundTokens> flydslSdpaBwdSplitGraphMatches(const MatchContext& co
         logDecline("data_type", "the matcher served a dtype this engine has no spelling for");
         return std::nullopt;
     }
-    // BI-8: a 16-bit bias outside the LDS staging contract is served only by a dq row whose
-    // `bias_stage` is "none" (kernel_match drops every other row of the slot). A device whose
-    // rows spell no "none" (every gfx950 row) leaves the dq slot without an applicable kernel,
-    // and the ingestor then declines the graph. fp32 dQ objects load the bias directly.
-    const bool biasUnstaged = problem.biasUid != bwd::NO_UID && problem.elementBytes == 2
+    // The bias chunk contract: a 16-bit bias outside the LDS staging contract is served by a dq
+    // row that loads the bias directly (`bias_stage_resolved` `direct` or `direct_only`) and
+    // by no `lds` row; a bias inside it is served by an `lds` row, or a `direct_only` one.
+    // An f32 bias and an fp32 query have no staged row. kernel_match applies the rule.
+    const bool biasUnstaged = problem.biasUid != bwd::NO_UID && problem.biasElementBytes == 2
                               && !native::stagesBias(problem);
     if(biasUnstaged)
     {
         HIPDNN_PLUGIN_LOG_INFO(
             ENGINE_NAME
-            << " [BI-8]: the 16-bit bias layout is outside the LDS staging contract (16-byte "
-               "base, strides multiples of 16 bytes, last row padded to a whole 16-byte chunk); "
-               "only dq rows whose bias_stage is 'none' can serve it. The graph is declined "
-               "[BI-8] unless the device has such a row: the gfx950 dq rows spell 'auto' or "
-               "'direct', so there the dq slot has no applicable kernel");
+            << " [bias stage]: the 16-bit bias layout is outside the LDS staging contract "
+               "(16-byte base, strides multiples of 16 bytes, last row padded to a whole 16-byte "
+               "chunk); only dq rows whose bias_stage_resolved is 'direct' or 'direct_only' "
+               "serve it, and the graph is declined unless the device has such a row");
+    }
+    const bool biasF32
+        = problem.biasUid != bwd::NO_UID && problem.biasElementBytes != problem.elementBytes;
+    const bool valueHeadsDiffer = problem.numVHeads != problem.numKvHeads;
+    if(biasF32 || valueHeadsDiffer)
+    {
+        logParityCoverage(context, problem, biasF32, valueHeadsDiffer);
     }
 
     // SP-WS: every region of the shared workspace and the dBias scratch is sized by checked
@@ -484,6 +573,8 @@ std::optional<BoundTokens> flydslSdpaBwdSplitGraphMatches(const MatchContext& co
     bound[std::string(DROPOUT_TOKEN)] = int64_t{problem.dropoutP > 0.0F ? 1 : 0};
     bound[std::string(DBIAS_TOKEN)] = int64_t{problem.dbiasUid != bwd::NO_UID ? 1 : 0};
     bound[std::string(BIAS_UNSTAGED_TOKEN)] = int64_t{biasUnstaged ? 1 : 0};
+    bound[std::string(BIAS_F32_TOKEN)] = int64_t{biasF32 ? 1 : 0};
+    bound[std::string(V_HEADS_DIFFER_TOKEN)] = int64_t{valueHeadsDiffer ? 1 : 0};
     // The matcher guarantees Hq % Hk == 0, so more query heads than key heads is a group; a
     // pack object also needs every packed span inside the 32-bit buffer descriptor, else the
     // graph is served by the non-pack objects, which rebase per head.
@@ -492,6 +583,7 @@ std::optional<BoundTokens> flydslSdpaBwdSplitGraphMatches(const MatchContext& co
     bound[std::string(BATCH_TOKEN)] = problem.batch;
     bound[std::string(HEADS_TOKEN)] = problem.numHeads;
     bound[std::string(KV_HEADS_TOKEN)] = problem.numKvHeads;
+    bound[std::string(V_HEADS_TOKEN)] = problem.numVHeads;
     bound[std::string(SEQ_Q_TOKEN)] = problem.seqLenQ;
     bound[std::string(SEQ_KV_TOKEN)] = problem.seqLenKv;
     bound[std::string(REDUCE_PLANES_TOKEN)] = reducePlanes(problem);
@@ -532,8 +624,19 @@ struct Row
     int64_t blockKv = 0;
     int64_t blockM = 0;
     std::string grid;
-    std::string biasStage;
+    /// dq and dkdv: the bias is FLOAT beside a 16-bit Q.
+    int64_t biasF32 = 0;
+    /// dq: `lds`, `direct`, `direct_only` or `na`.
+    std::string biasStageResolved;
+    /// dq and dkdv: `none`, `dk` (dkdv) or `dq` (dq).
+    std::string u2Role;
 };
+
+/// Whether @p role is a `u2_role` spelling @p slot's rows carry.
+bool u2RoleOf(Slot slot, const std::string& role)
+{
+    return role == U2_NONE || role == (slot == Slot::DKDV ? U2_DK : U2_DQ);
+}
 
 /// The floor of an object: `g1` is 0, `tail` the rung below the tile, anything else the
 /// number, whether the descriptor spells it as a string or an integer.
@@ -618,11 +721,19 @@ std::optional<Row> readRow(const KernelDefinition& kernel, Slot slot)
     {
         return std::nullopt;
     }
+    const auto biasF32 = integerMetadata(kernel, BIAS_F32_FIELD);
+    const auto u2Role = stringMetadata(kernel, U2_ROLE_FIELD);
+    if(!biasF32 || (*biasF32 != 0 && *biasF32 != 1) || !u2Role || !u2RoleOf(slot, *u2Role))
+    {
+        return std::nullopt;
+    }
     row.causal = *causal;
     row.hasBias = *hasBias;
     row.dropout = *dropout;
     row.runtimeDropout = *dform == "rt";
     row.blockThreads = *blockThreads;
+    row.biasF32 = *biasF32;
+    row.u2Role = *u2Role;
 
     if(slot == Slot::DKDV)
     {
@@ -640,13 +751,15 @@ std::optional<Row> readRow(const KernelDefinition& kernel, Slot slot)
 
     const auto storeDb = integerMetadata(kernel, STORE_DB_FIELD);
     const auto blockM = integerMetadata(kernel, BLOCK_M_FIELD);
-    const auto biasStage = stringMetadata(kernel, BIAS_STAGE_FIELD);
-    if(!storeDb || !blockM || !biasStage)
+    const auto biasStage = stringMetadata(kernel, BIAS_STAGE_RESOLVED_FIELD);
+    if(!storeDb || !blockM || !biasStage
+       || (*biasStage != STAGE_LDS && *biasStage != STAGE_DIRECT && *biasStage != STAGE_DIRECT_ONLY
+           && *biasStage != STAGE_NA))
     {
         return std::nullopt;
     }
     row.storeDb = *storeDb;
-    row.biasStage = *biasStage;
+    row.biasStageResolved = *biasStage;
     row.blockM = *blockM;
     // Read where the graph reduces; an object without a broadcast dBias never names one.
     row.reduceSymbol = stringMetadata(kernel, REDUCE_SYMBOL_FIELD).value_or(std::string());
@@ -681,10 +794,13 @@ struct GraphFacts
     bool dropout = false;
     bool dbias = false;
     bool biasUnstaged = false;
+    bool biasF32 = false;
+    bool valueHeadsDiffer = false;
     bool gqaPack = false;
     int64_t batch = 0;
     int64_t numHeads = 0;
     int64_t numKvHeads = 0;
+    int64_t numVHeads = 0;
     int64_t seqLenQ = 0;
     int64_t seqLenKv = 0;
     int64_t reducePlanes = 0;
@@ -703,15 +819,19 @@ std::optional<GraphFacts> readFacts(const BoundTokens& bound)
     const auto dropout = tryGetBoundInt(bound, DROPOUT_TOKEN);
     const auto dbias = tryGetBoundInt(bound, DBIAS_TOKEN);
     const auto biasUnstaged = tryGetBoundInt(bound, BIAS_UNSTAGED_TOKEN);
+    const auto biasF32 = tryGetBoundInt(bound, BIAS_F32_TOKEN);
+    const auto valueHeadsDiffer = tryGetBoundInt(bound, V_HEADS_DIFFER_TOKEN);
     const auto gqaPack = tryGetBoundInt(bound, GQA_PACK_TOKEN);
     const auto batch = tryGetBoundInt(bound, BATCH_TOKEN);
     const auto numHeads = tryGetBoundInt(bound, HEADS_TOKEN);
     const auto numKvHeads = tryGetBoundInt(bound, KV_HEADS_TOKEN);
+    const auto numVHeads = tryGetBoundInt(bound, V_HEADS_TOKEN);
     const auto seqLenQ = tryGetBoundInt(bound, SEQ_Q_TOKEN);
     const auto seqLenKv = tryGetBoundInt(bound, SEQ_KV_TOKEN);
     const auto planes = tryGetBoundInt(bound, REDUCE_PLANES_TOKEN);
-    if(!graphClass || !headDimQk || !headDimV || !dropout || !dbias || !biasUnstaged || !gqaPack
-       || !batch || !numHeads || !numKvHeads || !seqLenQ || !seqLenKv || !planes)
+    if(!graphClass || !headDimQk || !headDimV || !dropout || !dbias || !biasUnstaged || !biasF32
+       || !valueHeadsDiffer || !gqaPack || !batch || !numHeads || !numKvHeads || !numVHeads
+       || !seqLenQ || !seqLenKv || !planes)
     {
         return std::nullopt;
     }
@@ -722,10 +842,13 @@ std::optional<GraphFacts> readFacts(const BoundTokens& bound)
                       *dropout != 0,
                       *dbias != 0,
                       *biasUnstaged != 0,
+                      *biasF32 != 0,
+                      *valueHeadsDiffer != 0,
                       *gqaPack != 0,
                       *batch,
                       *numHeads,
                       *numKvHeads,
+                      *numVHeads,
                       *seqLenQ,
                       *seqLenKv,
                       *planes};
@@ -757,10 +880,12 @@ int64_t blockThreadsOf(Slot slot, const Row& row)
 /// The launch grid of @p slot, laid out as the row's `grid` field names (`_GRID_RULE` in
 /// `_sdpa_bwd_cdna_build.py` and the gfx11 builders): x, y and z, the batch always last. prep
 /// is (query row blocks, query heads, batch) and dq (query heads, query blocks, batch);
-/// dkdv is (key heads, key blocks, batch) or (key blocks, key heads, batch). nullopt for a
-/// `grid` the slot does not know, past the limits of an axis, or for a record without
-/// geometry.
-std::optional<Grid> gridOf(Slot slot, const GraphFacts& facts, const Row& row)
+/// dkdv is (key heads, key blocks, batch) or (key blocks, key heads, batch). With
+/// @p valueOnly, a dkdv row's dV-only launch (C6): the same spelling over the V heads, at the
+/// block and key tile of the dK-only object. nullopt for a `grid` the slot does not know, past
+/// the limits of an axis, or for a record without geometry.
+std::optional<Grid>
+    gridOf(Slot slot, const GraphFacts& facts, const Row& row, bool valueOnly = false)
 {
     if(blockThreadsOf(slot, row) <= 0)
     {
@@ -787,15 +912,16 @@ std::optional<Grid> gridOf(Slot slot, const GraphFacts& facts, const Row& row)
     else if(slot == Slot::DKDV)
     {
         const auto keyBlocks = blocks(facts.seqLenKv, row.blockKv);
+        const int64_t heads = valueOnly ? facts.numVHeads : facts.numKvHeads;
         if(row.grid == GRID_DKDV_HEADS_FIRST)
         {
-            x = facts.numKvHeads;
+            x = heads;
             y = keyBlocks;
         }
         else if(row.grid == GRID_DKDV_BLOCKS_FIRST)
         {
             x = keyBlocks;
-            y = facts.numKvHeads;
+            y = heads;
         }
         else
         {
@@ -825,10 +951,31 @@ std::optional<Grid> gridOf(Slot slot, const GraphFacts& facts, const Row& row)
 // Kernel match
 // ---------------------------------------------------------------------------
 
+/// Whether a dq row of @p stage serves a graph whose 16-bit bias is outside the LDS staging
+/// contract when @p unstaged: the chunk-contract rule. An `lds` row serves a bias inside the
+/// contract; a `direct` row serves a bias outside it (a staged row serves every other graph
+/// the row's geometry covers); a `direct_only` row, which no staged row backs, serves any bias.
+/// `na` is a row without a bias. An `lds` row never serves an f32 bias (@p biasF32): staging is
+/// 16-bit only, so an f32 bias and an fp32 query are served by `direct_only` rows.
+bool servesBiasStage(const std::string& stage, bool unstaged, bool biasF32)
+{
+    if(stage == STAGE_LDS)
+    {
+        // A staged row holds a 16-bit bias; an f32 bias never binds to one.
+        return !unstaged && !biasF32;
+    }
+    if(stage == STAGE_DIRECT)
+    {
+        return unstaged;
+    }
+    return stage == STAGE_DIRECT_ONLY;
+}
+
 /**
  * @brief Kernel-scoped applicability of one slot's object: dtype, head-dim tile, and what the
- *        slot's kernel is built for (class, dropout, packing, dB store, bias staging, the
- *        reduce kernel), against the graph, with a launch grid inside its limits.
+ *        slot's kernel is built for (class, dropout, packing, dB store, bias width and
+ *        staging, V heads, the reduce kernel), against the graph, with a launch grid inside
+ *        its limits.
  */
 template <Slot SLOT>
 bool flydslSdpaBwdSplitKernelMatches(const MatchContext& /*context*/,
@@ -866,6 +1013,13 @@ bool flydslSdpaBwdSplitKernelMatches(const MatchContext& /*context*/,
         {
             return false;
         }
+        // A row reads the bias at the width it was built for, and a row built for V heads of
+        // their own serves exactly the graphs that have them (`dk` on dkdv, `dq` on dq).
+        if(row->biasF32 != (facts->biasF32 ? 1 : 0)
+           || (row->u2Role != U2_NONE) != facts->valueHeadsDiffer)
+        {
+            return false;
+        }
     }
     if constexpr(SLOT == Slot::DKDV)
     {
@@ -879,8 +1033,9 @@ bool flydslSdpaBwdSplitKernelMatches(const MatchContext& /*context*/,
     }
     if constexpr(SLOT == Slot::DQ)
     {
-        // BI-8: a layout outside the staging contract is served by "none" rows only.
-        if(facts->biasUnstaged && row->biasStage != BIAS_STAGE_NONE)
+        // The chunk contract: which rows serve a bias graph by how the row reads the bias.
+        if(facts->graphClass == CLASS_BIAS
+           && !servesBiasStage(row->biasStageResolved, facts->biasUnstaged, facts->biasF32))
         {
             return false;
         }
@@ -897,7 +1052,13 @@ bool flydslSdpaBwdSplitKernelMatches(const MatchContext& /*context*/,
             return false;
         }
     }
-    return gridOf(SLOT, *facts, *row).has_value();
+    if(!gridOf(SLOT, *facts, *row).has_value())
+    {
+        return false;
+    }
+    // The dV-only launch of a `dkdv_u2` row runs over the V heads.
+    return SLOT != Slot::DKDV || row->u2Role == U2_NONE
+           || gridOf(SLOT, *facts, *row, true).has_value();
 }
 
 // ---------------------------------------------------------------------------
@@ -927,6 +1088,12 @@ struct SplitPlan
     Uids uids;
     unsigned int blockThreads = 0;
     Grid grid;
+    /// The row serves a graph whose V heads differ from K's (`u2_role` not `none`): the
+    /// kernel takes `num_head_v`, and the dq slot's tail-zero launch is the V-head object.
+    bool u2 = false;
+    /// A `dkdv` row with `u2`: the dV-only launch's grid, over the V heads. The launch has the
+    /// dK-only launch's block and arguments.
+    Grid dvonlyGrid;
     native::Window window;
     int32_t dropoutThreshold = 0;
     float dropoutScale = 1.0F;
@@ -945,7 +1112,7 @@ struct SplitPlan
 
 bwd::SdpaBwdProblem problemOf(const MatchContext& context)
 {
-    auto matched = bwd::matchSdpaBackward(context, bwd::MatchOptions{true});
+    auto matched = bwd::matchSdpaBackward(context, bwd::SPLIT_MATCH_OPTIONS);
     if(auto* problem = std::get_if<bwd::SdpaBwdProblem>(&matched))
     {
         return *problem;
@@ -1006,6 +1173,16 @@ SplitPlan planFor(Slot slot,
     }
     plan.blockThreads = static_cast<unsigned int>(blockThreadsOf(slot, *row));
     plan.grid = *grid;
+    plan.u2 = row->u2Role != U2_NONE;
+    if(slot == Slot::DKDV && plan.u2)
+    {
+        const auto dvonlyGrid = gridOf(slot, *facts, *row, true);
+        if(!dvonlyGrid)
+        {
+            failBadParam("dV-only launch grid exceeds its limits for kernel '" + kernel.name + "'");
+        }
+        plan.dvonlyGrid = *dvonlyGrid;
+    }
 
     const auto& attributes
         = context.graph.getNodeWrapper(0).attributesAs<data_objects::SdpaBackwardAttributes>();
@@ -1126,8 +1303,10 @@ struct PrepKernargs
 };
 
 /// The dK/dV kernel's arguments (`_PARAMS["dkdv"]`): 61 arguments, the offset arguments after
-/// `seqinfo_k1`.
-struct DkdvKernargs
+/// `seqinfo_k1`. With @p U2, the V-head variants' (`_PARAMS["dkdv_u2"]`, the dK-only and dV-only
+/// objects alike): 62, `num_head_v` right after `num_head_k`.
+template <bool U2>
+struct DkdvKernargsT
 {
     void* q = nullptr;
     void* k = nullptr;
@@ -1161,6 +1340,8 @@ struct DkdvKernargs
     float dropoutScale = 1.0F;
     int32_t numHeadQ = 0;
     int32_t numHeadK = 0;
+    /// Read only when @p U2.
+    int32_t numHeadV = 0;
     int32_t hdimQk = 0;
     int32_t hdimVo = 0;
     float smScale = 0.0F;
@@ -1175,73 +1356,83 @@ struct DkdvKernargs
 
     auto tie() const
     {
-        return std::tie(q,
-                        k,
-                        v,
-                        bias,
-                        dO,
-                        dK,
-                        dV,
-                        lse,
-                        delta,
-                        seqinfoQ0,
-                        seqinfoQ1,
-                        seqinfoK0,
-                        seqinfoK1,
-                        mulQ,
-                        mulK,
-                        offV.offset,
-                        offV.multiplier,
-                        offDO.offset,
-                        offDO.multiplier,
-                        offDK.offset,
-                        offDK.multiplier,
-                        offDV.offset,
-                        offDV.multiplier,
-                        varlenBits,
-                        numSeqlens,
-                        maxSeqlenQ,
-                        maxSeqlenK,
-                        windowLeft,
-                        windowRight,
-                        philoxSeed,
-                        philoxOffset1,
-                        philoxOffset2,
-                        idropoutP,
-                        dropoutScale,
-                        numHeadQ,
-                        numHeadK,
-                        hdimQk,
-                        hdimVo,
-                        smScale,
-                        strideQ.batch,
-                        strideQ.head,
-                        strideQ.seq,
-                        strideK.batch,
-                        strideK.head,
-                        strideK.seq,
-                        strideV.batch,
-                        strideV.head,
-                        strideV.seq,
-                        strideDO.batch,
-                        strideDO.head,
-                        strideDO.seq,
-                        strideDK.batch,
-                        strideDK.head,
-                        strideDK.seq,
-                        strideDV.batch,
-                        strideDV.head,
-                        strideDV.seq,
-                        strideB.batch,
-                        strideB.head,
-                        strideB.seq,
-                        rtFlags);
+        const auto leading = std::tie(q,
+                                      k,
+                                      v,
+                                      bias,
+                                      dO,
+                                      dK,
+                                      dV,
+                                      lse,
+                                      delta,
+                                      seqinfoQ0,
+                                      seqinfoQ1,
+                                      seqinfoK0,
+                                      seqinfoK1,
+                                      mulQ,
+                                      mulK,
+                                      offV.offset,
+                                      offV.multiplier,
+                                      offDO.offset,
+                                      offDO.multiplier,
+                                      offDK.offset,
+                                      offDK.multiplier,
+                                      offDV.offset,
+                                      offDV.multiplier,
+                                      varlenBits,
+                                      numSeqlens,
+                                      maxSeqlenQ,
+                                      maxSeqlenK,
+                                      windowLeft,
+                                      windowRight,
+                                      philoxSeed,
+                                      philoxOffset1,
+                                      philoxOffset2,
+                                      idropoutP,
+                                      dropoutScale,
+                                      numHeadQ,
+                                      numHeadK);
+        const auto trailing = std::tie(hdimQk,
+                                       hdimVo,
+                                       smScale,
+                                       strideQ.batch,
+                                       strideQ.head,
+                                       strideQ.seq,
+                                       strideK.batch,
+                                       strideK.head,
+                                       strideK.seq,
+                                       strideV.batch,
+                                       strideV.head,
+                                       strideV.seq,
+                                       strideDO.batch,
+                                       strideDO.head,
+                                       strideDO.seq,
+                                       strideDK.batch,
+                                       strideDK.head,
+                                       strideDK.seq,
+                                       strideDV.batch,
+                                       strideDV.head,
+                                       strideDV.seq,
+                                       strideB.batch,
+                                       strideB.head,
+                                       strideB.seq,
+                                       rtFlags);
+        if constexpr(U2)
+        {
+            return std::tuple_cat(leading, std::tie(numHeadV), trailing);
+        }
+        else
+        {
+            return std::tuple_cat(leading, trailing);
+        }
     }
 };
 
 /// The dQ kernel's arguments (`_PARAMS["dq"]`): 59 arguments, the offset arguments after
-/// `seqinfo_k1`.
-struct DqKernargs
+/// `seqinfo_k1`. With @p U2, the V-head variant's (`_PARAMS["dq_u2"]`): 60, `num_head_v` right
+/// after `num_head_k`.
+template <bool U2>
+struct DqKernargsT
 {
     void* q = nullptr;
     void* k = nullptr;
@@ -1274,6 +1465,8 @@ struct DqKernargs
     float dropoutScale = 1.0F;
     int32_t numHeadQ = 0;
     int32_t numHeadK = 0;
+    /// Read only when @p U2.
+    int32_t numHeadV = 0;
     int32_t hdimQk = 0;
     int32_t hdimVo = 0;
     float smScale = 0.0F;
@@ -1288,78 +1481,98 @@ struct DqKernargs
 
     auto tie() const
     {
-        return std::tie(q,
-                        k,
-                        v,
-                        bias,
-                        dO,
-                        dQ,
-                        dBias,
-                        lse,
-                        delta,
-                        seqinfoQ0,
-                        seqinfoQ1,
-                        seqinfoK0,
-                        seqinfoK1,
-                        mulQ,
-                        mulK,
-                        offV.offset,
-                        offV.multiplier,
-                        offDO.offset,
-                        offDO.multiplier,
-                        offDQ.offset,
-                        offDQ.multiplier,
-                        varlenBits,
-                        numSeqlens,
-                        maxSeqlenQ,
-                        maxSeqlenK,
-                        windowLeft,
-                        windowRight,
-                        philoxSeed,
-                        philoxOffset1,
-                        philoxOffset2,
-                        idropoutP,
-                        dropoutScale,
-                        numHeadQ,
-                        numHeadK,
-                        hdimQk,
-                        hdimVo,
-                        smScale,
-                        strideQ.batch,
-                        strideQ.head,
-                        strideQ.seq,
-                        strideK.batch,
-                        strideK.head,
-                        strideK.seq,
-                        strideV.batch,
-                        strideV.head,
-                        strideV.seq,
-                        strideDO.batch,
-                        strideDO.head,
-                        strideDO.seq,
-                        strideDQ.batch,
-                        strideDQ.head,
-                        strideDQ.seq,
-                        strideB.batch,
-                        strideB.head,
-                        strideB.seq,
-                        strideDB.batch,
-                        strideDB.head,
-                        strideDB.seq,
-                        rtFlags);
+        const auto leading = std::tie(q,
+                                      k,
+                                      v,
+                                      bias,
+                                      dO,
+                                      dQ,
+                                      dBias,
+                                      lse,
+                                      delta,
+                                      seqinfoQ0,
+                                      seqinfoQ1,
+                                      seqinfoK0,
+                                      seqinfoK1,
+                                      mulQ,
+                                      mulK,
+                                      offV.offset,
+                                      offV.multiplier,
+                                      offDO.offset,
+                                      offDO.multiplier,
+                                      offDQ.offset,
+                                      offDQ.multiplier,
+                                      varlenBits,
+                                      numSeqlens,
+                                      maxSeqlenQ,
+                                      maxSeqlenK,
+                                      windowLeft,
+                                      windowRight,
+                                      philoxSeed,
+                                      philoxOffset1,
+                                      philoxOffset2,
+                                      idropoutP,
+                                      dropoutScale,
+                                      numHeadQ,
+                                      numHeadK);
+        const auto trailing = std::tie(hdimQk,
+                                       hdimVo,
+                                       smScale,
+                                       strideQ.batch,
+                                       strideQ.head,
+                                       strideQ.seq,
+                                       strideK.batch,
+                                       strideK.head,
+                                       strideK.seq,
+                                       strideV.batch,
+                                       strideV.head,
+                                       strideV.seq,
+                                       strideDO.batch,
+                                       strideDO.head,
+                                       strideDO.seq,
+                                       strideDQ.batch,
+                                       strideDQ.head,
+                                       strideDQ.seq,
+                                       strideB.batch,
+                                       strideB.head,
+                                       strideB.seq,
+                                       strideDB.batch,
+                                       strideDB.head,
+                                       strideDB.seq,
+                                       rtFlags);
+        if constexpr(U2)
+        {
+            return std::tuple_cat(leading, std::tie(numHeadV), trailing);
+        }
+        else
+        {
+            return std::tuple_cat(leading, trailing);
+        }
     }
 };
 
-const std::vector<KernelArgument>& signatureOfSlot(Slot slot)
+using DkdvKernargs = DkdvKernargsT<false>;
+using DkdvU2Kernargs = DkdvKernargsT<true>;
+using DqKernargs = DqKernargsT<false>;
+using DqU2Kernargs = DqKernargsT<true>;
+
+/// The argument list of @p slot's kernel, the V-head variant's when @p u2.
+const std::vector<KernelArgument>& signatureOfSlot(Slot slot, bool u2)
 {
     static const auto s_prep = native::signatureOf<PrepKernargs>();
     static const auto s_dkdv = native::signatureOf<DkdvKernargs>();
+    static const auto s_dkdvU2 = native::signatureOf<DkdvU2Kernargs>();
     static const auto s_dq = native::signatureOf<DqKernargs>();
+    static const auto s_dqU2 = native::signatureOf<DqU2Kernargs>();
     if(slot == Slot::PREP)
     {
         return s_prep;
     }
-    return slot == Slot::DKDV ? s_dkdv : s_dq;
+    if(slot == Slot::DKDV)
+    {
+        return u2 ? s_dkdvU2 : s_dkdv;
+    }
+    return u2 ? s_dqU2 : s_dq;
 }
 
 // ---------------------------------------------------------------------------
@@ -1368,13 +1581,15 @@ const std::vector<KernelArgument>& signatureOfSlot(Slot slot)
 
 struct LaunchArguments
 {
-    std::variant<PrepKernargs, DkdvKernargs, DqKernargs> kernel;
+    std::variant<PrepKernargs, DkdvKernargs, DkdvU2Kernargs, DqKernargs, DqU2Kernargs> kernel;
     std::optional<native::ReduceKernargs> reduce;
     /// Set on the prep launch only: it writes the seed region the other slots read.
     std::optional<native::SeedUpload> seedUpload;
     /// Set on the dq launch when the graph needs the tail-zero launch after the kernel and
     /// the reduce.
     std::optional<native::TailzeroKernargs> tailzero;
+    /// The same launch of a graph whose V heads differ from K's: the V-head object's arguments.
+    std::optional<native::TailzeroHvKernargs> tailzeroHv;
 };
 
 /// Every argument of the launch, from the plan and the execute-time buffers; touches no
@@ -1450,14 +1665,72 @@ LaunchArguments launchArguments(const SplitPlan& plan,
 
     if(plan.slot == Slot::DKDV)
     {
-        DkdvKernargs d;
+        const auto dkdvArguments = [&](auto d) {
+            d.q = buffer(plan.uids.q);
+            d.k = buffer(plan.uids.k);
+            d.v = buffer(plan.uids.v);
+            d.bias = bias;
+            d.dO = buffer(plan.uids.dO);
+            d.dK = buffer(plan.uids.dK);
+            d.dV = buffer(plan.uids.dV);
+            d.lse = lseWorkspace;
+            d.delta = delta;
+            d.seqinfoQ0 = problem.paddingMask ? buffer(problem.seqLenQUid) : unused;
+            d.seqinfoK0 = problem.paddingMask ? buffer(problem.seqLenKvUid) : unused;
+            d.seqinfoQ1 = native::offsetArgsOf(problem.ragged.q, buffer).offset;
+            d.seqinfoK1 = native::offsetArgsOf(problem.ragged.k, buffer).offset;
+            d.mulQ = problem.ragged.q.multiplier;
+            d.mulK = problem.ragged.k.multiplier;
+            d.offV = native::offsetArgsOf(problem.ragged.v, buffer);
+            d.offDO = native::offsetArgsOf(problem.ragged.dO, buffer);
+            d.offDK = native::offsetArgsOf(problem.ragged.dK, buffer);
+            d.offDV = native::offsetArgsOf(problem.ragged.dV, buffer);
+            d.varlenBits = plan.varlenBits;
+            d.numSeqlens = 0;
+            d.maxSeqlenQ = toInt32(problem.seqLenQ, "seqlen_q");
+            d.maxSeqlenK = toInt32(problem.seqLenKv, "seqlen_k");
+            d.windowLeft = plan.window.left;
+            d.windowRight = plan.window.right;
+            d.philoxSeed = seed.seed;
+            d.philoxOffset1 = seed.offset;
+            d.philoxOffset2 = 0;
+            d.idropoutP = idropoutP;
+            d.dropoutScale = dropoutScale;
+            d.numHeadQ = toInt32(problem.numHeads, "num_head_q");
+            d.numHeadK = toInt32(problem.numKvHeads, "num_head_k");
+            d.hdimQk = toInt32(problem.headDimQk, "hdim_qk");
+            d.hdimVo = toInt32(problem.headDimV, "hdim_vo");
+            d.smScale = smScale;
+            d.strideQ = strideQ;
+            d.strideK = strideK;
+            d.strideV = strideV;
+            d.strideDO = strideDO;
+            d.strideDK = pitch(problem.dK, problem.seqLenKv, problem.headDimQk);
+            d.strideDV = pitch(problem.dV, problem.seqLenKv, problem.headDimV);
+            d.strideB = strideB;
+            d.rtFlags = plan.runtimeFlags;
+            return d;
+        };
+        if(plan.u2)
+        {
+            auto d = dkdvArguments(DkdvU2Kernargs{});
+            d.numHeadV = toInt32(problem.numVHeads, "num_head_v");
+            arguments.kernel = d;
+        }
+        else
+        {
+            arguments.kernel = dkdvArguments(DkdvKernargs{});
+        }
+        return arguments;
+    }
+
+    const auto dqArguments = [&](auto d) {
         d.q = buffer(plan.uids.q);
         d.k = buffer(plan.uids.k);
         d.v = buffer(plan.uids.v);
         d.bias = bias;
         d.dO = buffer(plan.uids.dO);
-        d.dK = buffer(plan.uids.dK);
-        d.dV = buffer(plan.uids.dV);
+        d.dQ = buffer(plan.uids.dQ);
         d.lse = lseWorkspace;
         d.delta = delta;
         d.seqinfoQ0 = problem.paddingMask ? buffer(problem.seqLenQUid) : unused;
@@ -1468,8 +1741,7 @@ LaunchArguments launchArguments(const SplitPlan& plan,
         d.mulK = problem.ragged.k.multiplier;
         d.offV = native::offsetArgsOf(problem.ragged.v, buffer);
         d.offDO = native::offsetArgsOf(problem.ragged.dO, buffer);
-        d.offDK = native::offsetArgsOf(problem.ragged.dK, buffer);
-        d.offDV = native::offsetArgsOf(problem.ragged.dV, buffer);
+        d.offDQ = native::offsetArgsOf(problem.ragged.dQ, buffer);
         d.varlenBits = plan.varlenBits;
         d.numSeqlens = 0;
         d.maxSeqlenQ = toInt32(problem.seqLenQ, "seqlen_q");
@@ -1490,91 +1762,66 @@ LaunchArguments launchArguments(const SplitPlan& plan,
         d.strideK = strideK;
         d.strideV = strideV;
         d.strideDO = strideDO;
-        d.strideDK = pitch(problem.dK, problem.seqLenKv, problem.headDimQk);
-        d.strideDV = pitch(problem.dV, problem.seqLenKv, problem.headDimV);
+        d.strideDQ = pitch(problem.dQ, problem.seqLenQ, problem.headDimQk);
         d.strideB = strideB;
         d.rtFlags = plan.runtimeFlags;
-        arguments.kernel = d;
-        return arguments;
-    }
 
-    DqKernargs d;
-    d.q = buffer(plan.uids.q);
-    d.k = buffer(plan.uids.k);
-    d.v = buffer(plan.uids.v);
-    d.bias = bias;
-    d.dO = buffer(plan.uids.dO);
-    d.dQ = buffer(plan.uids.dQ);
-    d.lse = lseWorkspace;
-    d.delta = delta;
-    d.seqinfoQ0 = problem.paddingMask ? buffer(problem.seqLenQUid) : unused;
-    d.seqinfoK0 = problem.paddingMask ? buffer(problem.seqLenKvUid) : unused;
-    d.seqinfoQ1 = native::offsetArgsOf(problem.ragged.q, buffer).offset;
-    d.seqinfoK1 = native::offsetArgsOf(problem.ragged.k, buffer).offset;
-    d.mulQ = problem.ragged.q.multiplier;
-    d.mulK = problem.ragged.k.multiplier;
-    d.offV = native::offsetArgsOf(problem.ragged.v, buffer);
-    d.offDO = native::offsetArgsOf(problem.ragged.dO, buffer);
-    d.offDQ = native::offsetArgsOf(problem.ragged.dQ, buffer);
-    d.varlenBits = plan.varlenBits;
-    d.numSeqlens = 0;
-    d.maxSeqlenQ = toInt32(problem.seqLenQ, "seqlen_q");
-    d.maxSeqlenK = toInt32(problem.seqLenKv, "seqlen_k");
-    d.windowLeft = plan.window.left;
-    d.windowRight = plan.window.right;
-    d.philoxSeed = seed.seed;
-    d.philoxOffset1 = seed.offset;
-    d.philoxOffset2 = 0;
-    d.idropoutP = idropoutP;
-    d.dropoutScale = dropoutScale;
-    d.numHeadQ = toInt32(problem.numHeads, "num_head_q");
-    d.numHeadK = toInt32(problem.numKvHeads, "num_head_k");
-    d.hdimQk = toInt32(problem.headDimQk, "hdim_qk");
-    d.hdimVo = toInt32(problem.headDimV, "hdim_vo");
-    d.smScale = smScale;
-    d.strideQ = strideQ;
-    d.strideK = strideK;
-    d.strideV = strideV;
-    d.strideDO = strideDO;
-    d.strideDQ = pitch(problem.dQ, problem.seqLenQ, problem.headDimQk);
-    d.strideB = strideB;
-    d.rtFlags = plan.runtimeFlags;
-
-    // dBias: none requested leaves DB as O over zero strides, with which the kernel drops
-    // every store; a broadcast one lands in the scratch region and is summed after; any other
-    // is written in place.
-    d.dBias = unused;
-    if(problem.dbiasUid != bwd::NO_UID)
-    {
-        if(layout.reduces)
+        // dBias: none requested leaves DB as O over zero strides, with which the kernel drops
+        // every store; a broadcast one lands in the scratch region and is summed after; any other
+        // is written in place.
+        d.dBias = unused;
+        if(problem.dbiasUid != bwd::NO_UID)
         {
-            d.dBias = native::inWorkspace(workspace, layout.dbias.offset);
-            d.strideDB = layout.dbiasStrides;
-            arguments.reduce
-                = native::reduceKernargsOf(problem, layout, d.dBias, buffer(problem.dbiasUid));
-        }
-        else
-        {
-            d.dBias = buffer(problem.dbiasUid);
-            d.strideDB = problem.dbiasStrides;
-            // The kernel bounds dB by Sq * stride_seq_q, so a zero row stride (a unit Sq)
-            // drops every store: the row pitch stands in.
-            if(d.strideDB.seq == 0)
+            if(layout.reduces)
             {
-                d.strideDB.seq = problem.seqLenKv;
+                d.dBias = native::inWorkspace(workspace, layout.dbias.offset);
+                d.strideDB = layout.dbiasStrides;
+                arguments.reduce
+                    = native::reduceKernargsOf(problem, layout, d.dBias, buffer(problem.dbiasUid));
+            }
+            else
+            {
+                d.dBias = buffer(problem.dbiasUid);
+                d.strideDB = problem.dbiasStrides;
+                // The kernel bounds dB by Sq * stride_seq_q, so a zero row stride (a unit Sq)
+                // drops every store: the row pitch stands in.
+                if(d.strideDB.seq == 0)
+                {
+                    d.strideDB.seq = problem.seqLenKv;
+                }
             }
         }
-    }
-    if(plan.tailzeroMask != 0)
+        if(plan.tailzeroMask != 0)
+        {
+            const auto tailzeroOf = [&](auto hv) {
+                return native::tailzeroKernargsOf<decltype(hv)::value>(problem,
+                                                                       buffer(plan.uids.dQ),
+                                                                       buffer(plan.uids.dK),
+                                                                       buffer(plan.uids.dV),
+                                                                       buffer(problem.seqLenQUid),
+                                                                       buffer(problem.seqLenKvUid));
+            };
+            if(plan.u2)
+            {
+                arguments.tailzeroHv = tailzeroOf(std::true_type{});
+            }
+            else
+            {
+                arguments.tailzero = tailzeroOf(std::false_type{});
+            }
+        }
+        return d;
+    };
+    if(plan.u2)
     {
-        arguments.tailzero = native::tailzeroKernargsOf(problem,
-                                                        buffer(plan.uids.dQ),
-                                                        buffer(plan.uids.dK),
-                                                        buffer(plan.uids.dV),
-                                                        buffer(problem.seqLenQUid),
-                                                        buffer(problem.seqLenKvUid));
+        auto d = dqArguments(DqU2Kernargs{});
+        d.numHeadV = toInt32(problem.numVHeads, "num_head_v");
+        arguments.kernel = d;
     }
-    arguments.kernel = d;
+    else
+    {
+        arguments.kernel = dqArguments(DqKernargs{});
+    }
     return arguments;
 }
 
@@ -1582,19 +1829,32 @@ LaunchArguments launchArguments(const SplitPlan& plan,
 // Dispatch
 // ---------------------------------------------------------------------------
 
-/// The slot's kernel, the reduce kernel when the graph needs one, and the plan.
+/// The slot's kernel, the dV-only kernel of a `dkdv_u2` row, the reduce kernel when the graph
+/// needs one, and the plan.
 class PreparedFlydslSdpaBwdSplit : public PreparedDispatch
 {
 public:
     PreparedFlydslSdpaBwdSplit(SplitPlan plan,
                                IngestorKernelCode code,
+                               std::optional<IngestorKernelCode> dvonlyCode,
                                std::optional<IngestorKernelCode> reduceCode,
                                std::optional<IngestorKernelCode> tailzeroCode)
         : _plan(std::move(plan))
         , _code(std::move(code))
+        , _dvonly(std::move(dvonlyCode))
         , _reduce(std::move(reduceCode))
         , _tailzero(std::move(tailzeroCode))
     {
+    }
+
+    bool hasDvonly() const
+    {
+        return _dvonly.has_value();
+    }
+
+    compilation::IRunnableKernel& dvonlyForStream(hipStream_t stream) const
+    {
+        return _dvonly->kernelForStream(stream);
     }
 
     const SplitPlan& plan() const
@@ -1620,6 +1880,7 @@ public:
 private:
     SplitPlan _plan;
     IngestorKernelCode _code;
+    std::optional<IngestorKernelCode> _dvonly;
     std::optional<IngestorKernelCode> _reduce;
     std::optional<IngestorKernelCode> _tailzero;
 };
@@ -1629,15 +1890,19 @@ private:
  *        the slot's kernel; prep first uploads the seed, dq follows its kernel with the reduce
  *        kernel when the graph's dBias is broadcast.
  *
- * With @p SOURCES (dq only) the dispatch is multi-launch: every row carries the dQ kernel
- * and the dBias reduce kernel as the launches `dq` and `dbias_reduce` of its `sources`, and
- * each is built from its own entry. Otherwise the reduce kernel is a second symbol of the
- * row's one code object, the symbol its `reduce_symbol` names. Arguments, workspace and
- * scratch are the same either way.
+ * With @p SOURCES the dispatch is multi-launch. On dq every row carries the dQ kernel and the
+ * dBias reduce kernel as the launches `dq` and `dbias_reduce` of its `sources`, and each is
+ * built from its own entry; otherwise the reduce kernel is a second symbol of the row's one
+ * code object, the symbol its `reduce_symbol` names. Arguments, workspace and scratch are the
+ * same either way. On dkdv @p SOURCES is the `dkdv_u2` dispatch (dK-only and dV-only launches).
+ *
+ * With @p DQ_U2 (dq only) the dispatch serves the rows of `u2_role` `dq`, whose launches are
+ * the V-head dQ kernel and the V-head tail-zero kernel; the standard dq dispatches refuse
+ * such a row and `dq_u2` refuses any other.
  *
  * Split handlers do not save plans: supportsSaving() is the SDK default, false.
  */
-template <Slot SLOT, bool SOURCES = false>
+template <Slot SLOT, bool SOURCES = false, bool DQ_U2 = false>
 class FlydslSdpaBwdSplitDispatchHandler : public IKernelDispatchHandler<Handle>
 {
 public:
@@ -1646,11 +1911,16 @@ public:
         : _kernelCompiler(kernelCompiler)
         , _kpackLoader(kpackLoader)
     {
-        static_assert(!SOURCES || SLOT == Slot::DQ, "only dq launches the reduce kernel");
+        static_assert(!SOURCES || SLOT != Slot::PREP, "prep is one launch");
+        static_assert(!DQ_U2 || (SLOT == Slot::DQ && !SOURCES), "dq_u2 is a dq dispatch");
     }
 
     std::set<std::string> launchNames() const override
     {
+        if constexpr(SLOT == Slot::DKDV && SOURCES)
+        {
+            return {std::string(DKDV_LAUNCH), std::string(DVONLY_LAUNCH)};
+        }
         if constexpr(SLOT == Slot::DQ)
         {
             std::set<std::string> names{std::string(DQ_LAUNCH), std::string(TAILZERO_LAUNCH)};
@@ -1688,11 +1958,44 @@ public:
         // or disagrees on an ABI fails on the host whatever the state of the archive.
         [[maybe_unused]] const bool reduces = !plan.reduceSymbol.empty();
         [[maybe_unused]] const bool zeroesTails = plan.tailzeroMask != 0;
+        const auto& slotSignature = signatureOfSlot(SLOT, plan.u2);
         std::optional<KernelDefinition> dqLaunch;
+        std::optional<KernelDefinition> dkLaunch;
+        std::optional<KernelDefinition> dvonlyKernel;
         std::optional<KernelDefinition> reduceKernel;
         std::optional<KernelDefinition> tailzeroKernel;
+        if constexpr(SLOT == Slot::DKDV)
+        {
+            // A row serves V heads of its own exactly when its pack's dispatch launches both
+            // objects.
+            if(plan.u2 != SOURCES)
+            {
+                failBadParam("kernel '" + kernel.name + "' has u2_role " + (plan.u2 ? "dk" : "none")
+                             + " but is dispatched by the " + (SOURCES ? "dkdv_u2" : "dkdv")
+                             + " handler");
+            }
+            if constexpr(SOURCES)
+            {
+                dkLaunch = launchKernelDefinition(kernel, std::string(DKDV_LAUNCH));
+                dvonlyKernel = launchKernelDefinition(kernel, std::string(DVONLY_LAUNCH));
+                for(const auto* launch : {&*dkLaunch, &*dvonlyKernel})
+                {
+                    requireSignatureMatch(
+                        launch->source.signature,
+                        slotSignature,
+                        launch->source.symbol,
+                        describeDescriptor("kernel", kernel.name, kernel.kernelId));
+                }
+            }
+        }
         if constexpr(SLOT == Slot::DQ)
         {
+            if(plan.u2 != DQ_U2)
+            {
+                failBadParam("kernel '" + kernel.name + "' has u2_role " + (plan.u2 ? "dq" : "none")
+                             + " but is dispatched by the " + (DQ_U2 ? "dq_u2" : "dq")
+                             + " handler");
+            }
             dqLaunch = launchKernelDefinition(kernel, std::string(DQ_LAUNCH));
             if constexpr(SOURCES)
             {
@@ -1718,19 +2021,39 @@ public:
             {
                 tailzeroKernel = launchKernelDefinition(kernel, std::string(TAILZERO_LAUNCH));
                 requireSignatureMatch(tailzeroKernel->source.signature,
-                                      native::tailzeroSignature(),
+                                      plan.u2 ? native::tailzeroHvSignature()
+                                              : native::tailzeroSignature(),
                                       tailzeroKernel->source.symbol,
                                       describeDescriptor("kernel", kernel.name, kernel.kernelId));
             }
         }
-        const KernelDefinition& slotKernel = dqLaunch.has_value() ? *dqLaunch : kernel;
+        const KernelDefinition* slotSource = &kernel;
+        if(dqLaunch.has_value())
+        {
+            slotSource = &*dqLaunch;
+        }
+        else if(dkLaunch.has_value())
+        {
+            slotSource = &*dkLaunch;
+        }
+        const KernelDefinition& slotKernel = *slotSource;
 
         // Built from the arch alone; see FlydslRmsNormNative.cpp's prepare().
         const compilation::KernelCompileOptions options(context.deviceProperties.gcnArchName);
         auto code = buildIngestorKernelCode(
-            _kernelCompiler, _kpackLoader, context, slotKernel, options, signatureOfSlot(SLOT));
+            _kernelCompiler, _kpackLoader, context, slotKernel, options, slotSignature);
         code.setBlockSize(plan.blockThreads, 1, 1);
         code.setGridSize(plan.grid.x, plan.grid.y, plan.grid.z);
+
+        // The dV-only object runs at the dK-only object's block over the V heads.
+        std::optional<IngestorKernelCode> dvonlyCode;
+        if(dvonlyKernel.has_value())
+        {
+            dvonlyCode.emplace(buildIngestorKernelCode(
+                _kernelCompiler, _kpackLoader, context, *dvonlyKernel, options, slotSignature));
+            dvonlyCode->setBlockSize(plan.blockThreads, 1, 1);
+            dvonlyCode->setGridSize(plan.dvonlyGrid.x, plan.dvonlyGrid.y, plan.dvonlyGrid.z);
+        }
 
         std::optional<IngestorKernelCode> reduceCode;
         if(reduceKernel.has_value())
@@ -1752,12 +2075,16 @@ public:
                                                          context,
                                                          *tailzeroKernel,
                                                          options,
-                                                         native::tailzeroSignature()));
+                                                         plan.u2 ? native::tailzeroHvSignature()
+                                                                 : native::tailzeroSignature()));
             tailzeroCode->setBlockSize(native::TAILZERO_THREADS, 1, 1);
             tailzeroCode->setGridSize(plan.tailzeroGrid.x, plan.tailzeroGrid.y, 1);
         }
-        return std::make_unique<PreparedFlydslSdpaBwdSplit>(
-            std::move(plan), std::move(code), std::move(reduceCode), std::move(tailzeroCode));
+        return std::make_unique<PreparedFlydslSdpaBwdSplit>(std::move(plan),
+                                                            std::move(code),
+                                                            std::move(dvonlyCode),
+                                                            std::move(reduceCode),
+                                                            std::move(tailzeroCode));
     }
 
     void launch(const Handle& handle,
@@ -1777,15 +2104,20 @@ public:
         }
         // Changing an argument list means changing its struct with it: the signature the
         // descriptor is checked against is read from the same tie().
-        std::visit(
-            [&](const auto& kernargs) {
-                std::apply(
-                    [&](const auto&... argument) {
-                        preparedSplit.kernelForStream(stream).launch(stream, argument...);
-                    },
-                    kernargs.tie());
-            },
-            arguments.kernel);
+        const auto launchKernel = [&](compilation::IRunnableKernel& kernel) {
+            std::visit(
+                [&](const auto& kernargs) {
+                    std::apply([&](const auto&... argument) { kernel.launch(stream, argument...); },
+                               kernargs.tie());
+                },
+                arguments.kernel);
+        };
+        launchKernel(preparedSplit.kernelForStream(stream));
+        // A `dkdv_u2` row: the dV-only launch follows the dK-only one with the same arguments.
+        if(preparedSplit.hasDvonly())
+        {
+            launchKernel(preparedSplit.dvonlyForStream(stream));
+        }
         if(arguments.reduce.has_value())
         {
             std::apply(
@@ -1802,6 +2134,14 @@ public:
                 },
                 arguments.tailzero->tie());
         }
+        if(arguments.tailzeroHv.has_value())
+        {
+            std::apply(
+                [&](const auto&... argument) {
+                    preparedSplit.tailzeroForStream(stream).launch(stream, argument...);
+                },
+                arguments.tailzeroHv->tie());
+        }
     }
 
 private:
@@ -1816,14 +2156,14 @@ compilation::KpackModuleCache& flydslSdpaBwdSplitKpackModuleCache()
     return s_moduleCache;
 }
 
-/// Process-lifetime: the registry holds non-owning pointers to the four handlers, which share
+/// Process-lifetime: the registry holds non-owning pointers to the handlers, which share
 /// one compiler, one loader and the pack's module cache.
-template <Slot SLOT, bool SOURCES = false>
-const FlydslSdpaBwdSplitDispatchHandler<SLOT, SOURCES>& flydslSdpaBwdSplitDispatchHandler()
+template <Slot SLOT, bool SOURCES = false, bool DQ_U2 = false>
+const FlydslSdpaBwdSplitDispatchHandler<SLOT, SOURCES, DQ_U2>& flydslSdpaBwdSplitDispatchHandler()
 {
     static const HipMlopsKernelCompiler s_kernelCompiler;
     static const compilation::KpackKernelLoader s_kpackLoader(flydslSdpaBwdSplitKpackModuleCache());
-    static const FlydslSdpaBwdSplitDispatchHandler<SLOT, SOURCES> s_dispatchHandler(
+    static const FlydslSdpaBwdSplitDispatchHandler<SLOT, SOURCES, DQ_U2> s_dispatchHandler(
         s_kernelCompiler, s_kpackLoader);
     return s_dispatchHandler;
 }
@@ -1848,6 +2188,10 @@ void registerFlydslSdpaBwdSplitSymbols(SymbolScope<Handle>& scope)
     scope.add(std::string(DQ_DISPATCH_SYMBOL), &flydslSdpaBwdSplitDispatchHandler<Slot::DQ>());
     scope.add(std::string(DQ_REDUCE_DISPATCH_SYMBOL),
               &flydslSdpaBwdSplitDispatchHandler<Slot::DQ, true>());
+    scope.add(std::string(DKDV_U2_DISPATCH_SYMBOL),
+              &flydslSdpaBwdSplitDispatchHandler<Slot::DKDV, true>());
+    scope.add(std::string(DQ_U2_DISPATCH_SYMBOL),
+              &flydslSdpaBwdSplitDispatchHandler<Slot::DQ, false, true>());
 }
 
 FlydslSdpaBwdSplitLaunchDump describeFlydslSdpaBwdSplitLaunchForTesting(
@@ -1868,6 +2212,12 @@ FlydslSdpaBwdSplitLaunchDump describeFlydslSdpaBwdSplitLaunchForTesting(
     dump.block = plan.blockThreads;
     dump.grid = {plan.grid.x, plan.grid.y, plan.grid.z};
     dump.scratchBytes = slot == Slot::DQ && plan.workspace.reduces ? plan.workspace.dbias.bytes : 0;
+    if(slot == Slot::DKDV && plan.u2)
+    {
+        dump.dvonly = true;
+        dump.dvonlyBlock = plan.blockThreads;
+        dump.dvonlyGrid = {plan.dvonlyGrid.x, plan.dvonlyGrid.y, plan.dvonlyGrid.z};
+    }
     if(arguments.reduce.has_value())
     {
         dump.reduces = true;
@@ -1883,17 +2233,18 @@ FlydslSdpaBwdSplitLaunchDump describeFlydslSdpaBwdSplitLaunchForTesting(
         dump.tailzeroBlock = native::TAILZERO_THREADS;
         dump.tailzeroGrid = {plan.tailzeroGrid.x, plan.tailzeroGrid.y, 1};
     }
+    if(arguments.tailzeroHv.has_value())
+    {
+        dump.tailzero = true;
+        dump.tailzeroKernarg = native::kernargImage(*arguments.tailzeroHv);
+        dump.tailzeroBlock = native::TAILZERO_THREADS;
+        dump.tailzeroGrid = {plan.tailzeroGrid.x, plan.tailzeroGrid.y, 1};
+    }
     if(arguments.seedUpload.has_value())
     {
         dump.seedUploaded = true;
-        dump.seedCopiedFromDevice = arguments.seedUpload->seedSource != nullptr;
-        dump.seedSource = arguments.seedUpload->seedSource;
-        dump.offsetSource = arguments.seedUpload->offsetSource;
-        if(!dump.seedCopiedFromDevice)
-        {
-            dump.seedWords.assign(arguments.seedUpload->words.begin(),
-                                  arguments.seedUpload->words.end());
-        }
+        dump.seedWords.assign(arguments.seedUpload->words.begin(),
+                              arguments.seedUpload->words.end());
     }
     return dump;
 }

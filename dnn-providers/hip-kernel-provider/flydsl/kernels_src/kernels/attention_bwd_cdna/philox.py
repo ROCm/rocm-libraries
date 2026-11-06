@@ -60,6 +60,7 @@ in two consecutive 32-bit registers, so the halves are addressable directly.
 
 from __future__ import annotations
 
+import struct
 from dataclasses import dataclass
 from typing import Literal, TypeAlias
 
@@ -78,6 +79,7 @@ __all__ = [
     "philox_4x",
     "philox_u32",
     "dropout_threshold",
+    "dropout_scale",
     "keep_mask",
     "to_uniform_f32",
 ]
@@ -301,23 +303,40 @@ def philox_u32(
 _U32_SCALE = 2.3283064365386963e-10  # 2**-32, exact
 
 
+def _f32(x: float) -> float:
+    """`x` rounded to the nearest float32."""
+    return struct.unpack("<f", struct.pack("<f", x))[0]
+
+
 def dropout_threshold(p: float) -> int:
     """The i32 threshold for a drop probability `p`.
 
     A uniform u32 reinterpreted as i32 is uniform on `[-2**31, 2**31)`, so
-    comparing against `(p - 0.5) * 0xFFFFFFFF` (truncated and clamped to the i32
+    comparing against `(p - 0.5) * 2**32` (truncated and clamped to the i32
     range) keeps a `1 - p` fraction and needs no
     float conversion per element -- one compare instead of a convert and a
     float compare, on a path that runs once per score.
 
-    `p = 0` gives `-2**31 + 1` (the code truncates `-0.5 * 0xFFFFFFFF`, so the single value 0x80000000 is dropped: `keep = v > thr`) and `p = 1` gives `2**31 - 1`
-    (keep nothing: no i32 exceeds it). AOTriton computes the same value as
-    `((dropout_p - 0.5) * 0xFFFFFFFF).to(tl.int32)`.
+    The arithmetic is float32 end to end, as `dropoutThreshold` of
+    `FlydslSdpaBwdNativeShared.hpp` evaluates it, so host launches and the
+    native engine pass the same threshold for the same `p`: `p` is rounded to
+    float32, `p - 0.5` and the scaling by `2**32` (exact) are float32 results,
+    and the product is truncated. `p = 0` gives `-2**31` and `p = 1` gives
+    `2**31 - 1` (keep nothing: no i32 exceeds it).
     """
     if not 0.0 <= p <= 1.0:
         raise ValueError(f"dropout p must be in [0, 1], got {p}")
-    t = int((p - 0.5) * 0xFFFFFFFF)
-    return max(-(2**31), min(2**31 - 1, t))
+    scaled = _f32(_f32(p) - 0.5) * 4294967296.0
+    if not scaled < 2147483648.0:
+        return 2**31 - 1
+    if not scaled > -2147483648.0:
+        return -(2**31)
+    return int(scaled)
+
+
+def dropout_scale(p: float) -> float:
+    """`1.0F / (1.0F - p)` in float32: the factor a kept probability takes (`dropoutScale` of the native engine)."""
+    return _f32(1.0 / _f32(1.0 - _f32(p)))
 
 
 def keep_mask(vals: list[fx.Int32], threshold: int | fx.Int32) -> list[fx.Boolean]:

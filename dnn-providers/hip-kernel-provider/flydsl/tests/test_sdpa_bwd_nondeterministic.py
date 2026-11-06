@@ -180,3 +180,13 @@ def test_a_sample_that_names_another_pin_is_refused(tmp_path) -> None:
     nondet.write([row(pin_sha256=sha("moved"))], sampled)
     with pytest.raises(nondet.NondeterministicListError, match="pin"):
         nondet.merge_file(sampled, listing)
+
+
+def test_a_rebuild_is_tolerated_only_as_the_pin_or_a_recorded_variant() -> None:
+    listed = row(variant_sha256s=(sha("obj"),), variant_function_sha256s=(sha("fn"),))
+    assert nondet.tolerates(listed, sha("pin"))
+    assert nondet.tolerates(listed, sha("obj"))
+    assert nondet.tolerates(listed, sha("other"), sha("fn"))
+    assert nondet.tolerates(listed, sha("other"), sha("pin fn"), sha("pin fn"))
+    assert not nondet.tolerates(listed, sha("other"))
+    assert not nondet.tolerates(listed, sha("other"), sha("another fn"), sha("pin fn"))

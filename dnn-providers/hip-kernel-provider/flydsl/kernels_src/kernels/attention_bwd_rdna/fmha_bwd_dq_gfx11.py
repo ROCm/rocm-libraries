@@ -76,6 +76,12 @@ Class `bias` (no mask; the exponent is `(sm_scale * S + bias - LSE') * log2e`, t
                  is `< seqlen_k`: every issued store lies in `[0, (seqlen_q - 1) stride_db_seq_q + seqlen_k)` of the (batch, head) slab, and a dB that is
                  not requested (all dB strides zero, or the `store_db=0` twin, which has no store at all) is never touched; the DB pointer is not read.
                  gfx950 expresses the same rule as a buffer descriptor bound and a drop sentinel that are both 0 for a zero row stride.
+    `bias_f32=1`  the bias is FLOAT beside 16-bit Q/K/V: each entry is one 4-byte load used as is (no widening convert), and the dB store writes the
+                 f32 dS before the GEMM3 narrowing, so `stride_b_*` and `stride_db_*` count 4-byte elements. Every other path is unchanged.
+
+Class `plain` and `causal` with `u2=dq` (Hk != Hv, `Hq % Hk == 0`, `Hq % Hv == 0`): the launcher takes `num_head_v` right after `num_head_k`
+and query head `h` reads V head `h // (num_head_q / num_head_v)`; K, Q, dO and dQ keep their heads. A separate kernel and launcher carry the
+extra argument, so the default objects' kernarg list is untouched.
 """
 
 from types import SimpleNamespace as _WireArgs
@@ -216,6 +222,13 @@ def build_fmha_bwd_dq_gfx11_module_primary(meta, knobs, runtime_axes=()):
         PHILOX.randoms_per_offset == 4
     ), "dropout_kv_rows_call models four randoms per Philox call"
     STORE_DB = BIAS and bool(knobs.store_db)
+    # f32 bias (`bias_f32=1`, 16-bit Q): the bias entries and the dB entries are 4-byte; both strides are in elements of that type.
+    BIAS_F32 = BIAS and bool(knobs.bias_f32)
+    DB_F32 = STORE_DB and BIAS_F32
+    # V heads (`u2=dq`): V groups by `num_head_v`, an extra kernarg after `num_head_k`; K and V read different heads of one query head.
+    V_HEADS = knobs.u2 == "dq"
+    if V_HEADS and DUMP:
+        raise NotImplementedError("u2=dq has no dump object")
     if BIAS and knobs.bias_stage != "direct":
         raise NotImplementedError(
             f"bias_stage {knobs.bias_stage!r}: the gfx11 dQ reads its bias directly from global memory"
@@ -282,6 +295,10 @@ def build_fmha_bwd_dq_gfx11_module_primary(meta, knobs, runtime_axes=()):
         _cache_tag += ("causal", LPT)
     if BIAS:
         _cache_tag += ("bias", STORE_DB)
+    if BIAS_F32:
+        _cache_tag += ("bias_f32",)
+    if V_HEADS:
+        _cache_tag += ("u2dq",)
     if DROPOUT:
         _cache_tag += ("dropout", PHILOX.width)
     elem_numeric_cls = common_kernels.dtype_to_elem_type(dtype_str)
@@ -315,6 +332,8 @@ def build_fmha_bwd_dq_gfx11_module_primary(meta, knobs, runtime_axes=()):
             a.sm_scale,
         )
         window_left, window_right = a.window_left, a.window_right
+        if const_expr(V_HEADS):
+            num_head_v = a.num_head_v
 
         elem_dtype = elem_numeric_cls
         elem_type = elem_numeric_cls.ir_type
@@ -385,6 +404,10 @@ def build_fmha_bwd_dq_gfx11_module_primary(meta, knobs, runtime_axes=()):
         _alive = fx.Int32(start_q) < seqlen_q_i32
         _q_start_addr = fx.Index(start_q if _alive else fx.Index(0))
         head_k = head_q // (fx.Index(num_head_q) // fx.Index(num_head_k))
+        if const_expr(V_HEADS):
+            head_v = head_q // (fx.Index(num_head_q) // fx.Index(num_head_v))
+        else:
+            head_v = head_k
 
         load_row_in_batch = tid // K_TPR_LOAD
         load_col_base = (tid % K_TPR_LOAD) * VEC_WIDTH
@@ -446,7 +469,7 @@ def build_fmha_bwd_dq_gfx11_module_primary(meta, knobs, runtime_axes=()):
             do_st, head_q, _do_origin, **_addr_kw
         )
         _, _, k_addr = fmha.make_addr_pair(k_st, head_k, _k_origin, **_addr_kw)
-        _, _, v_addr = fmha.make_addr_pair(v_st, head_k, _v_origin, **_addr_kw)
+        _, _, v_addr = fmha.make_addr_pair(v_st, head_v, _v_origin, **_addr_kw)
 
         # ---- padded-head masks: an element is valid iff its column < the runtime extent ----
         qk_cols = fmha.MaskedAxis(
@@ -891,12 +914,21 @@ def build_fmha_bwd_dq_gfx11_module_primary(meta, knobs, runtime_axes=()):
                         _bcol_ld = (_bcol < seqlen_k_i32).select(_bcol, fx.Int32(0))
                     else:
                         _bcol_ld = _bcol
-                    _bp = fmha.split_ptr(
-                        b_ptr, b_tile_base, b_row_off + fx.Index(_bcol_ld), elem_type
-                    )
-                    _bv = fx.Float32(
-                        _arith.ExtFOp(f32_ty, _pointer_load(elem_type, _bp)).result
-                    )
+                    if const_expr(BIAS_F32):
+                        _bp = fmha.split_ptr(
+                            b_ptr, b_tile_base, b_row_off + fx.Index(_bcol_ld), f32_ty
+                        )
+                        _bv = fx.Float32(_pointer_load(f32_ty, _bp))
+                    else:
+                        _bp = fmha.split_ptr(
+                            b_ptr,
+                            b_tile_base,
+                            b_row_off + fx.Index(_bcol_ld),
+                            elem_type,
+                        )
+                        _bv = fx.Float32(
+                            _arith.ExtFOp(f32_ty, _pointer_load(elem_type, _bp)).result
+                        )
                     b_f32.append(_bv)
                     s_raw[_i] = fastmath_e.add(fx.Float32(s_raw[_i]), _bv)
             if const_expr(CAUSAL and (_MASK_STEPS or DUMP)):
@@ -1019,6 +1051,7 @@ def build_fmha_bwd_dq_gfx11_module_primary(meta, knobs, runtime_axes=()):
             # ==== dS^T as the B operand of GEMM3: the xor-16 exchange (gfx11), then the 16-bit narrowing ====
             ds_packs = []
             ds_halves = []
+            ds_full = []
             for _acc in range_constexpr(NUM_S_ACCS):
                 _own = [fx.Float32(ds_vals[_acc * 8 + j]) for j in range_constexpr(8)]
                 _full = L.acc_to_operand(_own, exchange, klane_is_zero, V8)
@@ -1043,8 +1076,40 @@ def build_fmha_bwd_dq_gfx11_module_primary(meta, knobs, runtime_axes=()):
                         )
                 ds_packs.append(_cat(_halves))
                 ds_halves.append(_halves)
+                ds_full.append(_full)
 
-            if const_expr(STORE_DB):
+            if const_expr(DB_F32):
+                # f32 dB = dS as computed, no narrowing: the lane's 8 contiguous kv of its q column are `_full[0:8]` (gfx12) or `_full[0:8]` /
+                # `_full[8:16]` by klane (gfx11), the f32 values the packs are narrowed from.
+                with _if_then(_scf.IfOp(fx.as_ir_value(db_on))):
+                    for _acc in range_constexpr(NUM_S_ACCS):
+                        _ff = ds_full[_acc]
+                        for _j in range_constexpr(8):
+                            if const_expr(V8):
+                                _dv = fx.Float32(_ff[_j])
+                            else:
+                                _dv = klane_is_zero.select(
+                                    fx.Float32(_ff[_j]), fx.Float32(_ff[8 + _j])
+                                )
+                            _dcol = (
+                                _kv_i32
+                                + fx.Int32(_acc * WMMA + _j)
+                                + fx.Int32(klane) * fx.Int32(8)
+                            )
+                            _dptr = fmha.split_ptr(
+                                db_ptr,
+                                db_tile_base,
+                                db_row_off + fx.Index(_dcol),
+                                f32_ty,
+                            )
+                            if const_expr(_MASK_STEPS):
+                                with _if_then(
+                                    _scf.IfOp(fx.as_ir_value(_dcol < seqlen_k_i32))
+                                ):
+                                    _pointer_store(fx.as_ir_value(_dv), _dptr)
+                            else:
+                                _pointer_store(fx.as_ir_value(_dv), _dptr)
+            if const_expr(STORE_DB and not DB_F32):
                 # dB = dS, narrowed exactly as the GEMM3 operand (the packs). `_halves[0]` / `[1]` hold tile rows 0-7 / 8-15 of the lane's q column
                 # (gfx11; gfx12 holds rows 8 klane + j in `_halves[0]`), so the lane's 8 contiguous kv are `kv0 + 8 klane + j`.
                 with _if_then(_scf.IfOp(fx.as_ir_value(db_on))):
@@ -1449,6 +1514,274 @@ def build_fmha_bwd_dq_gfx11_module_primary(meta, knobs, runtime_axes=()):
         )
 
     _entry = launch_fmha_bwd_dq_gfx950
+
+    if V_HEADS:
+
+        @flyc.kernel(known_block_size=[BLOCK_SIZE, 1, 1])
+        def fmha_bwd_dq_u2_gfx11_kernel(
+            Q: fx.Pointer,
+            K: fx.Pointer,
+            V: fx.Pointer,
+            B: fx.Pointer,
+            DO: fx.Pointer,
+            DQ: fx.Pointer,
+            DB: fx.Pointer,
+            LSE: fx.Pointer,
+            Delta: fx.Pointer,
+            seqinfo_q0: fx.Pointer,
+            seqinfo_q1: fx.Pointer,
+            seqinfo_k0: fx.Pointer,
+            seqinfo_k1: fx.Pointer,
+            mul_Q: fx.Int64,
+            mul_K: fx.Int64,
+            off_V: fx.Pointer,
+            mul_V: fx.Int64,
+            off_DO: fx.Pointer,
+            mul_DO: fx.Int64,
+            off_DQ: fx.Pointer,
+            mul_DQ: fx.Int64,
+            varlen_bits: fx.Int32,
+            num_seqlens: fx.Int32,
+            max_seqlen_q: fx.Int32,
+            max_seqlen_k: fx.Int32,
+            window_left: fx.Int32,
+            window_right: fx.Int32,
+            philox_seed_ptr: fx.Pointer,
+            philox_offset1: fx.Pointer,
+            philox_offset2: fx.Int64,
+            idropout_p: fx.Int32,
+            dropout_scale: fx.Float32,
+            num_head_q: fx.Int32,
+            num_head_k: fx.Int32,
+            num_head_v: fx.Int32,
+            hdim_qk: fx.Int32,
+            hdim_vo: fx.Int32,
+            sm_scale: fx.Float32,
+            stride_q_batch: fx.Int64,
+            stride_q_head: fx.Int64,
+            stride_q_seq: fx.Int64,
+            stride_k_batch: fx.Int64,
+            stride_k_head: fx.Int64,
+            stride_k_seq: fx.Int64,
+            stride_v_batch: fx.Int64,
+            stride_v_head: fx.Int64,
+            stride_v_seq: fx.Int64,
+            stride_do_batch: fx.Int64,
+            stride_do_head: fx.Int64,
+            stride_do_seq: fx.Int64,
+            stride_dq_batch: fx.Int64,
+            stride_dq_head: fx.Int64,
+            stride_dq_seq: fx.Int64,
+            stride_b_batch: fx.Int64,
+            stride_b_head: fx.Int64,
+            stride_b_seq_q: fx.Int64,
+            stride_db_batch: fx.Int64,
+            stride_db_head: fx.Int64,
+            stride_db_seq_q: fx.Int64,
+            rt_flags: fx.Int32,
+        ):
+            emit_dq_body(
+                _WireArgs(
+                    Q=Q,
+                    K=K,
+                    V=V,
+                    DO=DO,
+                    DQ=DQ,
+                    LSE=LSE,
+                    Delta=Delta,
+                    seqinfo_q0=seqinfo_q0,
+                    seqinfo_q1=seqinfo_q1,
+                    seqinfo_k0=seqinfo_k0,
+                    seqinfo_k1=seqinfo_k1,
+                    mul_Q=mul_Q,
+                    mul_K=mul_K,
+                    off_V=off_V,
+                    mul_V=mul_V,
+                    off_DO=off_DO,
+                    mul_DO=mul_DO,
+                    off_DQ=off_DQ,
+                    mul_DQ=mul_DQ,
+                    varlen_bits=varlen_bits,
+                    num_seqlens=num_seqlens,
+                    max_seqlen_q=max_seqlen_q,
+                    max_seqlen_k=max_seqlen_k,
+                    window_left=window_left,
+                    window_right=window_right,
+                    philox_seed_ptr=philox_seed_ptr,
+                    philox_offset1=philox_offset1,
+                    philox_offset2=philox_offset2,
+                    idropout_p=idropout_p,
+                    dropout_scale=dropout_scale,
+                    num_head_q=num_head_q,
+                    num_head_k=num_head_k,
+                    num_head_v=num_head_v,
+                    hdim_qk=hdim_qk,
+                    hdim_vo=hdim_vo,
+                    sm_scale=sm_scale,
+                    stride_q_batch=stride_q_batch,
+                    stride_q_head=stride_q_head,
+                    stride_q_seq=stride_q_seq,
+                    stride_k_batch=stride_k_batch,
+                    stride_k_head=stride_k_head,
+                    stride_k_seq=stride_k_seq,
+                    stride_v_batch=stride_v_batch,
+                    stride_v_head=stride_v_head,
+                    stride_v_seq=stride_v_seq,
+                    stride_do_batch=stride_do_batch,
+                    stride_do_head=stride_do_head,
+                    stride_do_seq=stride_do_seq,
+                    stride_dq_batch=stride_dq_batch,
+                    stride_dq_head=stride_dq_head,
+                    stride_dq_seq=stride_dq_seq,
+                    B=B,
+                    DB=DB,
+                    stride_b_batch=stride_b_batch,
+                    stride_b_head=stride_b_head,
+                    stride_b_seq_q=stride_b_seq_q,
+                    stride_db_batch=stride_db_batch,
+                    stride_db_head=stride_db_head,
+                    stride_db_seq_q=stride_db_seq_q,
+                    rt_flags=rt_flags,
+                )
+            )
+
+        @flyc.jit
+        def launch_fmha_bwd_dq_u2_gfx11(
+            Q: fx.Pointer,
+            K: fx.Pointer,
+            V: fx.Pointer,
+            Bias: fx.Pointer,
+            DO: fx.Pointer,
+            DQ: fx.Pointer,
+            DB: fx.Pointer,
+            LSE: fx.Pointer,
+            Delta: fx.Pointer,
+            batch_size: fx.Int32,
+            seqinfo_q0: fx.Pointer,
+            seqinfo_q1: fx.Pointer,
+            seqinfo_k0: fx.Pointer,
+            seqinfo_k1: fx.Pointer,
+            mul_Q: fx.Int64,
+            mul_K: fx.Int64,
+            off_V: fx.Pointer,
+            mul_V: fx.Int64,
+            off_DO: fx.Pointer,
+            mul_DO: fx.Int64,
+            off_DQ: fx.Pointer,
+            mul_DQ: fx.Int64,
+            varlen_bits: fx.Int32,
+            num_seqlens: fx.Int32,
+            max_seqlen_q: fx.Int32,
+            max_seqlen_k: fx.Int32,
+            window_left: fx.Int32,
+            window_right: fx.Int32,
+            philox_seed_ptr: fx.Pointer,
+            philox_offset1: fx.Pointer,
+            philox_offset2: fx.Int64,
+            idropout_p: fx.Int32,
+            dropout_scale: fx.Float32,
+            num_head_q: fx.Int32,
+            num_head_k: fx.Int32,
+            num_head_v: fx.Int32,
+            hdim_qk: fx.Int32,
+            hdim_vo: fx.Int32,
+            sm_scale: fx.Float32,
+            stride_q_batch: fx.Int64,
+            stride_q_head: fx.Int64,
+            stride_q_seq: fx.Int64,
+            stride_k_batch: fx.Int64,
+            stride_k_head: fx.Int64,
+            stride_k_seq: fx.Int64,
+            stride_v_batch: fx.Int64,
+            stride_v_head: fx.Int64,
+            stride_v_seq: fx.Int64,
+            stride_do_batch: fx.Int64,
+            stride_do_head: fx.Int64,
+            stride_do_seq: fx.Int64,
+            stride_dq_batch: fx.Int64,
+            stride_dq_head: fx.Int64,
+            stride_dq_seq: fx.Int64,
+            stride_b_batch: fx.Int64,
+            stride_b_head: fx.Int64,
+            stride_b_seq_q: fx.Int64,
+            stride_db_batch: fx.Int64,
+            stride_db_head: fx.Int64,
+            stride_db_seq_q: fx.Int64,
+            rt_flags: fx.Int32,
+            stream: fx.Stream = fx.Stream(None),
+        ):
+            _ = _cache_tag
+            bs_idx = fx.Index(num_seqlens if num_seqlens != fx.Int32(0) else batch_size)
+            num_q_blocks = (fx.Index(max_seqlen_q) + BLOCK_M - 1) // BLOCK_M
+            fmha_bwd_dq_u2_gfx11_kernel(
+                Q,
+                K,
+                V,
+                Bias,
+                DO,
+                DQ,
+                DB,
+                LSE,
+                Delta,
+                seqinfo_q0,
+                seqinfo_q1,
+                seqinfo_k0,
+                seqinfo_k1,
+                mul_Q,
+                mul_K,
+                off_V,
+                mul_V,
+                off_DO,
+                mul_DO,
+                off_DQ,
+                mul_DQ,
+                varlen_bits,
+                num_seqlens,
+                max_seqlen_q,
+                max_seqlen_k,
+                window_left,
+                window_right,
+                philox_seed_ptr,
+                philox_offset1,
+                philox_offset2,
+                idropout_p,
+                dropout_scale,
+                num_head_q,
+                num_head_k,
+                num_head_v,
+                hdim_qk,
+                hdim_vo,
+                sm_scale,
+                stride_q_batch,
+                stride_q_head,
+                stride_q_seq,
+                stride_k_batch,
+                stride_k_head,
+                stride_k_seq,
+                stride_v_batch,
+                stride_v_head,
+                stride_v_seq,
+                stride_do_batch,
+                stride_do_head,
+                stride_do_seq,
+                stride_dq_batch,
+                stride_dq_head,
+                stride_dq_seq,
+                stride_b_batch,
+                stride_b_head,
+                stride_b_seq_q,
+                stride_db_batch,
+                stride_db_head,
+                stride_db_seq_q,
+                rt_flags,
+                value_attrs=_value_attrs,
+            ).launch(
+                grid=(num_head_q, num_q_blocks, bs_idx),
+                block=(BLOCK_SIZE, 1, 1),
+                stream=stream,
+            )
+
+        _entry = launch_fmha_bwd_dq_u2_gfx11
 
     if DUMP:
 

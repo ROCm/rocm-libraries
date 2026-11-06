@@ -613,6 +613,14 @@ class BwdDkDvKnobs:
     #                  (16-row family; composes with causal, window and dropout; see `_checked_candidates`).
     gqa_pack: int | None = None
 
+    # Feature knobs of the split dK/dV objects, `None` (the shipped objects) or set; they select a different object and are never
+    # policy-resolved.
+    #   bias_f32       1: the bias is FLOAT beside the 16-bit Q/K/V (bias strides are in elements of the bias dtype); needs `meta.bias`
+    #   u2             "dk" or "dv": the dK-only or the dV-only object of a value-head split (Hk != Hv, the kernel takes `num_head_v`);
+    #                  plain or causal, with dropout, never with bias or `gqa_pack`
+    bias_f32: int | None = None
+    u2: str | None = None
+
     daz: bool | None = None
     strides_constexpr: bool | None = None
 
@@ -876,6 +884,23 @@ class BwdDkDvKnobs:
                 )
             if traits.D_STAGES != 1:
                 raise ValueError("gqa_pack needs D_STAGES == 1 (one D stage per DMA)")
+        if self.bias_f32 not in (None, 1):
+            raise ValueError(
+                f"bias_f32 is spelled bias_f32=1 or left unset, got {self.bias_f32!r}"
+            )
+        if self.bias_f32 and not meta.bias:
+            raise ValueError("bias_f32 applies to bias objects only")
+        if self.u2 not in (None, "dk", "dv"):
+            raise ValueError(
+                f"u2 is spelled u2=dk, u2=dv or left unset, got {self.u2!r}"
+            )
+        if self.u2:
+            if meta.bias or self.bias_f32:
+                raise ValueError("u2 applies to plain and causal objects without bias")
+            if self.gqa_pack:
+                raise ValueError(
+                    "u2 walks the query heads of a group one at a time and cannot fold them with gqa_pack"
+                )
 
     def build_traits(self, meta):
         """The traits this configuration implies. **The one knob->traits map.**
@@ -930,6 +955,9 @@ class BwdDkDvKnobs:
             # gradient. The forward cannot build the pair either, so a backward
             # that accepted it would have no forward to produce its LSE.
             bias=meta.bias,
+            bias_f32=bool(self.bias_f32),
+            v_heads=bool(self.u2),
+            kv_role=self.u2 or "",
             # `make_traits` derives `CROSS_SEQLEN` from `causal`, so this
             # kernel gets it under causal whether or not it needs it. It does
             # not: the forward needs it because a Q block with no live key must
@@ -1017,12 +1045,21 @@ PACK_SPLIT_LIMIT = 1 << 31
 
 
 def check_launch_limits(
-    *, elem_bytes, block_q, gqa_pack, group, seqlen_q, seqlen_k, strides, bias=None
+    *,
+    elem_bytes,
+    block_q,
+    gqa_pack,
+    group,
+    seqlen_q,
+    seqlen_k,
+    strides,
+    bias=None,
+    bias_elem_bytes=None,
 ):
     """Refuse a launch whose addressing exceeds the kernel's 32-bit limits (the kernel itself carries no guard, and an AOT launcher never calls `_args`).
 
     `strides` maps each of `Q`, `K`, `V`, `DO`, `DK`, `DV` to `(stride_head, stride_seq)` in elements; `bias` is `(stride_head, stride_seq_q)` or
-    `None`; `seqlen_q` / `seqlen_k` are the longest sequence (the padded length for a ragged batch); `group` is `num_head_q // num_head_k`.
+    `None` (its element width is `bias_elem_bytes`, `elem_bytes` when unset); `seqlen_q` / `seqlen_k` are the longest sequence (the padded length for a ragged batch); `group` is `num_head_q // num_head_k`.
 
     - **Slab bytes.** Each `(batch, head)` slab is bounded at `rows * stride_seq` elements (its suppression sentinel; the descriptor itself ends at
       `(rows - 1) * stride_seq + ceil8(D)`, below it), and `gqa_pack` extends the Q and dO slabs by `group - 1` head steps. Reaching
@@ -1053,9 +1090,12 @@ def check_launch_limits(
     if bias is not None:
         stride_head, stride_seq = bias
         elems = max(seqlen_q - 1, 0) * stride_seq + seqlen_k + extra_heads * stride_head
-        if elems * elem_bytes >= SLAB_BYTES_LIMIT:
+        if (
+            elems * (elem_bytes if bias_elem_bytes is None else bias_elem_bytes)
+            >= SLAB_BYTES_LIMIT
+        ):
             raise ValueError(
-                f"the bias slab of {seqlen_q} rows at stride {stride_seq} by {seqlen_k} columns is {elems * elem_bytes} B, at or over "
+                f"the bias slab of {seqlen_q} rows at stride {stride_seq} by {seqlen_k} columns is {elems * (elem_bytes if bias_elem_bytes is None else bias_elem_bytes)} B, at or over "
                 f"the kernel's 32-bit limit of {SLAB_BYTES_LIMIT} B"
             )
     if gqa_pack and seqlen_q * (seqlen_q * group + 2 * block_q) >= PACK_SPLIT_LIMIT:

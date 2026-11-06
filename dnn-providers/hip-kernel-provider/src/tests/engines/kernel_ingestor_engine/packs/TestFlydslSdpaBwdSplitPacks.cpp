@@ -44,16 +44,19 @@
  * (HIPDNN_TEST_EXPECTED_ARCH) and which selects the inventory below; the descriptors never
  * choose their own expectation.
  *
- * - gfx950: 86 prep (34 bf16, 34 f16, 18 fp32), 1289 dkdv (535, 472, 282) and 923 dq (350,
- *   348, 225) rows over tiles 32..512 in the rt and bk dQ forms, prep with sink twins. The 293
+ * - gfx950: 86 prep (34 bf16, 34 f16, 18 fp32), 1313 dkdv (547, 484, 282) and 962 dq (369,
+ *   368, 225) rows over tiles 32..512 in the rt and bk dQ forms, prep with sink twins. The 301
  *   dq rows that serve a dB-storing bias name the dBias reduce kernel by symbol, a second
- *   entry point of the same code object. Every dq row is a multi-launch pack: its `sources`
- *   hold the dQ kernel and the tail-zero kernel, one of three tail-zero objects shared by dtype.
- * - gfx11-generic (every gfx11 member's shard): 33 prep, 198 dkdv and 198 dq rows (11 rungs
- *   16..256 times three dtypes, bk form only, no sink). The 66 dq rows that serve a dB-storing
- *   bias carry `sources` of the dQ kernel, the dBias reduce kernel and the tail-zero kernel as
- *   code objects, the reduce one of three companions shared by dtype; the other dq rows carry
- *   the dQ and tail-zero kernels, the latter one of three companions shared by dtype.
+ *   entry point of the same code object: the fp32 one for an fp32 query or an f32 bias. Every
+ *   dq row is a multi-launch pack: its `sources` hold the dQ kernel and the tail-zero kernel,
+ *   one of three tail-zero objects shared by dtype.
+ * - gfx11-generic (every gfx11 member's shard): 33 prep, 222 dkdv (78, 78, 66) and 230 dq (82,
+ *   82, 66) rows (11 rungs 16..256 times three dtypes, bk form only, no sink, plus the V-head
+ *   and f32-bias rows). The 74 dq rows that serve a dB-storing bias carry `sources` of the dQ
+ *   kernel, the dBias reduce kernel and the tail-zero kernel as code objects, the reduce one of
+ *   three companions shared by dtype; the other dq rows (including the f32-bias rows built
+ *   without the dBias store) carry the dQ and tail-zero kernels, the latter one of three
+ *   companions shared by dtype.
  *
  * Two cases hold the gfx11 shard to the verdict table (flydsl/tests/data/sdpa_bwd_gfx11_verdicts.csv):
  * every row's graph is run through graph_match and every slot's kernel_match over the installed
@@ -74,13 +77,19 @@ namespace
 
 using namespace hipdnn_plugin_sdk::ingestor;
 using namespace hip_kernel_provider::kernel_ingestor_engine::testing;
+using hipdnn_flatbuffers_sdk::data_objects::DataType;
 
 constexpr const char* ENGINE_NAME = "hipkernel:flydsl_sdpa_bwd_split";
 constexpr const char* GRAPH_MATCHER = "hipkernel.flydsl_sdpa_bwd_split.graph_match";
 constexpr const char* SHARED_WORKSPACE_TOKEN = "ws.bytes";
 constexpr const char* DQ_DISPATCH = "hipkernel.flydsl_sdpa_bwd_split.dq.dispatch";
 constexpr const char* DQ_REDUCE_DISPATCH = "hipkernel.flydsl_sdpa_bwd_split.dq_reduce.dispatch";
+constexpr const char* DQ_U2_DISPATCH = "hipkernel.flydsl_sdpa_bwd_split.dq_u2.dispatch";
+constexpr const char* DKDV_DISPATCH = "hipkernel.flydsl_sdpa_bwd_split.dkdv.dispatch";
+constexpr const char* DKDV_U2_DISPATCH = "hipkernel.flydsl_sdpa_bwd_split.dkdv_u2.dispatch";
 constexpr const char* DQ_LAUNCH = "dq";
+constexpr const char* DKDV_LAUNCH = "dkdv";
+constexpr const char* DVONLY_LAUNCH = "dvonly";
 constexpr const char* REDUCE_LAUNCH = "dbias_reduce";
 constexpr const char* TAILZERO_LAUNCH = "tailzero";
 
@@ -131,13 +140,13 @@ struct SplitContent
 };
 
 const SplitContent GFX950_CONTENT{
-    {{{"prep", 86, 34, 34, 18}, {"dkdv", 1289, 535, 472, 282}, {"dq", 923, 350, 348, 225}}},
+    {{{"prep", 86, 34, 34, 18}, {"dkdv", 1313, 547, 484, 282}, {"dq", 962, 369, 368, 225}}},
     {32, 64, 96, 128, 160, 192, 224, 256, 384, 512},
     {"rt", "bk"},
     32,
     {-1, 1},
     {-1, 1},
-    293,
+    301,
     false,
     "fmha_bwd_dbias_reduce_gfx950_kernel_1",
     "fmha_bwd_dbias_reduce_f32_gfx950_kernel_1",
@@ -149,13 +158,13 @@ const SplitContent GFX950_CONTENT{
     "fmha_bwd_tailzero_gfx950_kernel_0"};
 
 const SplitContent GFX11_CONTENT{
-    {{{"prep", 33, 11, 11, 11}, {"dkdv", 198, 66, 66, 66}, {"dq", 198, 66, 66, 66}}},
+    {{{"prep", 33, 11, 11, 11}, {"dkdv", 222, 78, 78, 66}, {"dq", 230, 82, 82, 66}}},
     {16, 32, 48, 64, 80, 96, 128, 160, 192, 224, 256},
     {"bk"},
     0,
     {0},
     {0},
-    66,
+    74,
     true,
     "fmha_bwd_dbias_reduce_gfx11_kernel_0",
     "fmha_bwd_dbias_reduce_f32_gfx11_kernel_0",
@@ -232,6 +241,29 @@ const SlotDescriptorSet& slotOf(const DescriptorSet& set, const char* name)
     throw std::runtime_error(std::string("no slot named ") + name);
 }
 
+/// The dispatch symbol each dispatch descriptor id of @p set resolves to.
+std::map<DescriptorId, std::string> dispatchSymbolsOf(const DescriptorSet& set)
+{
+    std::map<DescriptorId, std::string> symbols;
+    for(const auto& dispatch : set.dispatches)
+    {
+        symbols[dispatch.id] = dispatch.dispatchSymbol;
+    }
+    return symbols;
+}
+
+/// Whether @p kernel is a row of V heads of its own (`u2_role` not `none`).
+bool isU2Row(const KernelDescriptor& kernel)
+{
+    const auto it = kernel.metadata.find("u2_role");
+    if(it == kernel.metadata.end())
+    {
+        return false;
+    }
+    const auto* role = std::get_if<std::string>(&it->second);
+    return role != nullptr && *role != "none";
+}
+
 size_t kernelCount(const SlotDescriptorSet& slot)
 {
     size_t kernels = 0;
@@ -269,13 +301,27 @@ TEST_F(TestFlydslSdpaBwdSplitPacks, IsOneSlottedEngineWithANativeGraphMatchAndAK
                                      "hipkernel.flydsl_sdpa_bwd_split.dkdv.kernel_match",
                                      "hipkernel.flydsl_sdpa_bwd_split.dq.kernel_match"}));
 
-    // The multi-launch dq dispatch is shipped exactly where dq rows carry `sources`.
-    std::set<std::string> expectedDispatches{"hipkernel.flydsl_sdpa_bwd_split.prep.dispatch",
-                                             "hipkernel.flydsl_sdpa_bwd_split.dkdv.dispatch",
-                                             DQ_DISPATCH};
+    // The multi-launch dq dispatch is shipped exactly where dq rows carry `sources`; the two
+    // V-head dispatches exactly where a row of V heads of its own is shipped.
+    std::set<std::string> expectedDispatches{
+        "hipkernel.flydsl_sdpa_bwd_split.prep.dispatch", DKDV_DISPATCH, DQ_DISPATCH};
     if(content().reduceInSources)
     {
         expectedDispatches.insert(DQ_REDUCE_DISPATCH);
+    }
+    for(const auto& pack : slotOf(set, "dkdv").packs)
+    {
+        if(std::any_of(pack.kernels.begin(), pack.kernels.end(), isU2Row))
+        {
+            expectedDispatches.insert(DKDV_U2_DISPATCH);
+        }
+    }
+    for(const auto& pack : slotOf(set, "dq").packs)
+    {
+        if(std::any_of(pack.kernels.begin(), pack.kernels.end(), isU2Row))
+        {
+            expectedDispatches.insert(DQ_U2_DISPATCH);
+        }
     }
     std::set<std::string> dispatches;
     for(const auto& dispatch : set.dispatches)
@@ -288,6 +334,7 @@ TEST_F(TestFlydslSdpaBwdSplitPacks, IsOneSlottedEngineWithANativeGraphMatchAndAK
 TEST_F(TestFlydslSdpaBwdSplitPacks, ShipsEverySplitRowOnceAndNoKernelInTwoSlots)
 {
     const auto& set = loadedSet(ENGINE_NAME);
+    const auto dispatchSymbols = dispatchSymbolsOf(set);
 
     const std::set<int64_t> tiles(content().tiles.begin(), content().tiles.end());
     const std::set<std::string> dtypes{"f16", "bf16", "fp32"};
@@ -307,6 +354,19 @@ TEST_F(TestFlydslSdpaBwdSplitPacks, ShipsEverySplitRowOnceAndNoKernelInTwoSlots)
     size_t sourcesRows = 0;
     std::set<std::string> companions;
     std::map<std::string, std::set<std::string>> tailzeroByDtype;
+    std::map<std::string, std::set<std::string>> tailzeroHvByDtype;
+    // The `lds` and the `direct` bias rows of the dq slot, per dtype: the chunk-contract rule
+    // keeps an aligned 16-bit bias off a `direct` row that has a staged alternative, and a row
+    // above the largest staged tile has none.
+    struct DirectRow
+    {
+        std::string name;
+        std::string dtype;
+        int64_t tile;
+        std::string stage;
+    };
+    std::vector<DirectRow> dqBiasRows;
+    std::map<std::string, int64_t> largestLdsTile;
     for(const auto& expected : content().slots)
     {
         SCOPED_TRACE(expected.slot);
@@ -319,6 +379,9 @@ TEST_F(TestFlydslSdpaBwdSplitPacks, ShipsEverySplitRowOnceAndNoKernelInTwoSlots)
             // A pack is wholly single-launch or wholly multi-launch: its dispatch handler
             // reads one or the other.
             const bool multiLaunch = !pack.kernels.empty() && !pack.kernels.front().sources.empty();
+            // A row of V heads of its own is bound by the V-head dispatch of its slot and no
+            // other row is: the pack's dispatch is the one the rows' roles name.
+            const auto& packDispatch = dispatchSymbols.at(pack.dispatchId);
             for(const auto& kernel : pack.kernels)
             {
                 ++kernels;
@@ -354,6 +417,46 @@ TEST_F(TestFlydslSdpaBwdSplitPacks, ShipsEverySplitRowOnceAndNoKernelInTwoSlots)
                 const bool hasBias = integer("has_bias") == 1;
                 EXPECT_FALSE(hasBias && integer("causal") == 1) << kernel.name;
 
+                // C1: the f32-bias flag and the V-head role of dkdv and dq rows. An f32 bias
+                // rides a 16-bit query; a row of V heads of its own has no bias and is not
+                // fp32; the role is the slot's own.
+                if(slotName != "prep")
+                {
+                    const auto biasF32 = integer("bias_f32");
+                    EXPECT_TRUE(biasF32 == 0 || biasF32 == 1) << kernel.name;
+                    EXPECT_FALSE(biasF32 == 1 && (!hasBias || dtype == "fp32")) << kernel.name;
+                    const auto role = text("u2_role");
+                    EXPECT_TRUE(role == "none" || role == (slotName == "dkdv" ? "dk" : "dq"))
+                        << kernel.name << " u2_role " << role;
+                    EXPECT_FALSE(role != "none" && (hasBias || dtype == "fp32")) << kernel.name;
+                    if(slotName == "dkdv")
+                    {
+                        EXPECT_EQ(packDispatch, role == "dk" ? DKDV_U2_DISPATCH : DKDV_DISPATCH)
+                            << kernel.name;
+                        // dK-only and dV-only launches exactly on a V-head row.
+                        EXPECT_EQ(!kernel.sources.empty(), role == "dk") << kernel.name;
+                        if(role == "dk")
+                        {
+                            EXPECT_EQ(kernel.sources.size(), 2U) << kernel.name;
+                            EXPECT_EQ(kernel.sources.count(DKDV_LAUNCH), 1U) << kernel.name;
+                            EXPECT_EQ(kernel.sources.count(DVONLY_LAUNCH), 1U) << kernel.name;
+                        }
+                    }
+                    else
+                    {
+                        if(role == "dq")
+                        {
+                            EXPECT_EQ(packDispatch, DQ_U2_DISPATCH) << kernel.name;
+                        }
+                        else
+                        {
+                            EXPECT_TRUE(packDispatch == DQ_DISPATCH
+                                        || packDispatch == DQ_REDUCE_DISPATCH)
+                                << kernel.name << " is dispatched by " << packDispatch;
+                        }
+                    }
+                }
+
                 if(slotName == "prep")
                 {
                     EXPECT_EQ(content().sinkValues.count(integer("sink")), 1U) << kernel.name;
@@ -378,14 +481,40 @@ TEST_F(TestFlydslSdpaBwdSplitPacks, ShipsEverySplitRowOnceAndNoKernelInTwoSlots)
                     EXPECT_GT(integer("block_m"), 0) << kernel.name;
                     EXPECT_EQ(text("grid"), "qheads_by_qblocks_by_seqs") << kernel.name;
                     const auto stage = text("bias_stage");
+                    const auto resolved = text("bias_stage_resolved");
+                    EXPECT_TRUE(resolved == "lds" || resolved == "direct"
+                                || resolved == "direct_only" || resolved == "na")
+                        << kernel.name << " bias_stage_resolved " << resolved;
+                    EXPECT_EQ(resolved == "na", !hasBias) << kernel.name;
+                    if(hasBias)
+                    {
+                        // Only a 16-bit bias with no f32 flag is staged; every row that cannot
+                        // be (gfx11, f32 bias, fp32 query) is direct_only.
+                        const bool stageable = dtype != "fp32" && integer("bias_f32") == 0
+                                               && arch().rfind("gfx11", 0) != 0;
+                        EXPECT_FALSE(resolved == "lds" && !stageable) << kernel.name;
+                        EXPECT_FALSE(resolved == "direct" && !stageable) << kernel.name;
+                        EXPECT_FALSE(!stageable && resolved != "direct_only") << kernel.name;
+                        if(stageable)
+                        {
+                            dqBiasRows.push_back({kernel.name, dtype, headDim, resolved});
+                            if(resolved == "lds")
+                            {
+                                largestLdsTile[dtype] = std::max(largestLdsTile[dtype], headDim);
+                            }
+                        }
+                    }
 
-                    // A dB-storing bias object carries the dBias reduce kernel of its dtype.
+                    // A dB-storing bias object carries the dBias reduce kernel of its scratch
+                    // width: the fp32 one for an fp32 query or an f32 bias, the 16-bit one
+                    // otherwise. A bias row built without the dBias store carries none.
                     const bool storesDb = hasBias && storeDb != 0;
                     const auto reduce = text("reduce_symbol");
+                    const bool f32Scratch = dtype == "fp32" || integer("bias_f32") == 1;
                     const std::string expectedSymbol
                         = !storesDb ? std::string()
-                                    : std::string(dtype == "fp32" ? content().reduceSymbolFp32
-                                                                  : content().reduceSymbol16Bit);
+                                    : std::string(f32Scratch ? content().reduceSymbolFp32
+                                                             : content().reduceSymbol16Bit);
                     EXPECT_EQ(reduce, expectedSymbol) << kernel.name;
                     reduceRows += reduce.empty() ? 0 : 1;
 
@@ -393,11 +522,21 @@ TEST_F(TestFlydslSdpaBwdSplitPacks, ShipsEverySplitRowOnceAndNoKernelInTwoSlots)
                     // kernel and, on a pack that carries the reduce kernel as a launch, the
                     // dBias reduce kernel of a dB-storing bias row.
                     EXPECT_TRUE(multiLaunch) << kernel.name;
-                    const bool reduceLaunch = content().reduceInSources && hasBias;
+                    const bool reduceLaunch = content().reduceInSources && storesDb;
                     if(content().reduceInSources)
                     {
-                        // The reduce pack: bias rows storing dBias and staging none.
-                        EXPECT_EQ(storeDb, hasBias ? 1 : -1) << kernel.name;
+                        // The reduce pack: bias rows storing dBias and staging none, except the
+                        // f32-bias rows built without the dBias store (`store_db` 0), which
+                        // launch no reduce kernel.
+                        if(hasBias)
+                        {
+                            EXPECT_TRUE(storeDb == 1 || (storeDb == 0 && integer("bias_f32") == 1))
+                                << kernel.name << " store_db " << storeDb;
+                        }
+                        else
+                        {
+                            EXPECT_EQ(storeDb, -1) << kernel.name;
+                        }
                         EXPECT_EQ(stage, hasBias ? "none" : "auto") << kernel.name;
                     }
                     else
@@ -430,8 +569,19 @@ TEST_F(TestFlydslSdpaBwdSplitPacks, ShipsEverySplitRowOnceAndNoKernelInTwoSlots)
                         companions.insert(reduceEntry.sha256);
                     }
                     const auto& zeroEntry = kernel.sources.at(TAILZERO_LAUNCH);
-                    EXPECT_EQ(zeroEntry.symbol, content().tailzeroSymbol) << kernel.name;
-                    tailzeroByDtype[dtype].insert(zeroEntry.sha256);
+                    if(text("u2_role") == "dq")
+                    {
+                        // The V-head object, one per dtype entry like the other.
+                        std::string hvSymbol = content().tailzeroSymbol;
+                        hvSymbol.replace(hvSymbol.find("tailzero"), 8, "tailzero_hv");
+                        EXPECT_EQ(zeroEntry.symbol, hvSymbol) << kernel.name;
+                        tailzeroHvByDtype[dtype].insert(zeroEntry.sha256);
+                    }
+                    else
+                    {
+                        EXPECT_EQ(zeroEntry.symbol, content().tailzeroSymbol) << kernel.name;
+                        tailzeroByDtype[dtype].insert(zeroEntry.sha256);
+                    }
                 }
                 if(kernel.sources.empty())
                 {
@@ -447,6 +597,20 @@ TEST_F(TestFlydslSdpaBwdSplitPacks, ShipsEverySplitRowOnceAndNoKernelInTwoSlots)
         total += kernels;
     }
 
+    // The tile rule: a stageable bias row above the largest staged tile of its dtype has no
+    // staged alternative and is direct_only; a row at or below it that is direct has one.
+    for(const auto& row : dqBiasRows)
+    {
+        SCOPED_TRACE(row.name);
+        if(row.tile > largestLdsTile[row.dtype])
+        {
+            EXPECT_EQ(row.stage, "direct_only");
+        }
+        else
+        {
+            EXPECT_NE(row.stage, "direct_only");
+        }
+    }
     EXPECT_EQ(names.size(), total) << "a name is shipped twice";
     EXPECT_EQ(ids.size(), total) << "a kernel id is shipped twice or in two slots";
     EXPECT_EQ(reduceRows, content().reduceRows);
@@ -456,6 +620,12 @@ TEST_F(TestFlydslSdpaBwdSplitPacks, ShipsEverySplitRowOnceAndNoKernelInTwoSlots)
     for(const auto& [dtype, objects] : tailzeroByDtype)
     {
         EXPECT_EQ(objects.size(), 1U) << dtype << ": one tail-zero object per dtype entry";
+        EXPECT_EQ(objects.count(std::string()), 0U) << dtype << ": the entry names no object";
+    }
+    for(const auto& [dtype, objects] : tailzeroHvByDtype)
+    {
+        EXPECT_NE(dtype, "fp32") << "a V-head dq row of fp32 is declined";
+        EXPECT_EQ(objects.size(), 1U) << dtype << ": one V-head tail-zero object per dtype";
         EXPECT_EQ(objects.count(std::string()), 0U) << dtype << ": the entry names no object";
     }
 }
@@ -526,10 +696,28 @@ TEST_F(TestFlydslSdpaBwdSplitPacks, EveryKernelDeclaresItsSlotsSignature)
         join(join({{"global_buffer", 8, 13}, {"by_value", 8, 2}}, pairs(4)), attentionTail));
     const auto dq = expand(
         join(join({{"global_buffer", 8, 13}, {"by_value", 8, 2}}, pairs(3)), attentionTail));
+    // `_PARAMS["dkdv_u2"]` and `_PARAMS["dq_u2"]`: the same lists with `num_head_v`, one more
+    // i32, after `num_head_k`.
+    const auto attentionTailU2 = std::vector<Run>{{"by_value", 4, 6},
+                                                  {"global_buffer", 8, 2},
+                                                  {"by_value", 8, 1},
+                                                  {"by_value", 4, 1},
+                                                  {"by_value", 4, 1},
+                                                  {"by_value", 4, 5},
+                                                  {"by_value", 4, 1},
+                                                  {"by_value", 8, 21},
+                                                  {"by_value", 4, 1}};
+    const auto dkdvU2 = expand(
+        join(join({{"global_buffer", 8, 13}, {"by_value", 8, 2}}, pairs(4)), attentionTailU2));
+    const auto dqU2 = expand(
+        join(join({{"global_buffer", 8, 13}, {"by_value", 8, 2}}, pairs(3)), attentionTailU2));
     // `_PARAMS["tailzero"]`: the dQ, dK and dV pointers, the two length pointers, seven i32
-    // extents, nine i64 strides and the i32 mask.
+    // extents, nine i64 strides and the i32 mask. The V-head variant (`PARAMS_HV`) has eight
+    // extents, `Hv` after `Hkv`.
     const auto tailzero = expand(
         {{"global_buffer", 8, 5}, {"by_value", 4, 7}, {"by_value", 8, 9}, {"by_value", 4, 1}});
+    const auto tailzeroHv = expand(
+        {{"global_buffer", 8, 5}, {"by_value", 4, 8}, {"by_value", 8, 9}, {"by_value", 4, 1}});
 
     const auto offsetsOf = [](const Signature& slots) {
         std::vector<uint32_t> offsets;
@@ -574,7 +762,13 @@ TEST_F(TestFlydslSdpaBwdSplitPacks, EveryKernelDeclaresItsSlotsSignature)
                 const auto* sink = tryGetMetadataField<int64_t>(kernel.metadata, "sink");
                 const bool twin = slotName == "prep" && sink != nullptr && *sink == 1;
                 sinkTwins += twin ? 1 : 0;
+                const auto* role = tryGetMetadataField<std::string>(kernel.metadata, "u2_role");
+                const bool u2 = role != nullptr && *role != "none";
                 const Signature* expectedSlots = slotName == "dkdv" ? &dkdv : &dq;
+                if(u2)
+                {
+                    expectedSlots = slotName == "dkdv" ? &dkdvU2 : &dqU2;
+                }
                 if(slotName == "prep")
                 {
                     expectedSlots = twin ? &prepSink : &prep;
@@ -584,11 +778,21 @@ TEST_F(TestFlydslSdpaBwdSplitPacks, EveryKernelDeclaresItsSlotsSignature)
                     expectSignature(kernel.name, kernel.source, *expectedSlots);
                     continue;
                 }
+                if(slotName == "dkdv")
+                {
+                    // A dkdv row of V heads of its own: the dK-only and dV-only launches take
+                    // one list.
+                    expectSignature(kernel.name, kernel.sources.at(DKDV_LAUNCH), *expectedSlots);
+                    expectSignature(
+                        kernel.name + " dvonly", kernel.sources.at(DVONLY_LAUNCH), *expectedSlots);
+                    continue;
+                }
                 // A multi-launch kernel: the dQ launch has the dq slot's argument list, the
-                // tail-zero launch the tail-zero kernel's.
+                // tail-zero launch the tail-zero kernel's (the V-head one for a dq_u2 row).
                 expectSignature(kernel.name, kernel.sources.at(DQ_LAUNCH), *expectedSlots);
-                expectSignature(
-                    kernel.name + " tailzero", kernel.sources.at(TAILZERO_LAUNCH), tailzero);
+                expectSignature(kernel.name + " tailzero",
+                                kernel.sources.at(TAILZERO_LAUNCH),
+                                u2 ? tailzeroHv : tailzero);
                 if(kernel.sources.count(REDUCE_LAUNCH) == 0)
                 {
                     continue;
@@ -710,7 +914,7 @@ RowMatch matchRow(const VerdictRow& row,
     if(!bound.has_value())
     {
         const auto shared
-            = flydsl_sdpa_bwd::matchSdpaBackward(context, flydsl_sdpa_bwd::MatchOptions{true});
+            = flydsl_sdpa_bwd::matchSdpaBackward(context, flydsl_sdpa_bwd::SPLIT_MATCH_OPTIONS);
         if(const auto* decline = std::get_if<flydsl_sdpa_bwd::Decline>(&shared))
         {
             result.sharedCause = decline->cause;
@@ -967,6 +1171,476 @@ TEST_F(TestFlydslSdpaBwdSplitPacks, EveryServedRowsSlotCatalogsHaveUniqueEnrolle
 // the matcher runs. The matcher serves ragged tensors, non-default alignment and ragged offset
 // multipliers, so the engine declares the schema that introduced the last of them: an SDK that
 // raises the multiplier floor again fails here until the matcher has been reviewed for it.
+// ---------------------------------------------------------------------------
+// The probe-graph table, the coverage constants and the chunk contract over the shard
+// ---------------------------------------------------------------------------
+
+/// One row of flydsl/tests/data/sdpa_bwd_probe_graphs.csv: the graph (ten space-separated
+/// `key=value` tokens: hq hk hv dqk dv bias pitch mask dropout dbias) and the spec hashes of the rows the
+/// Python model serves it with, best first; empty for a declined graph.
+struct ProbeRow
+{
+    std::string arch;
+    std::string kernel;
+    std::string dtype;
+    std::vector<std::string> graph;
+    std::vector<std::string> served;
+};
+
+std::vector<std::string> splitOn(const std::string& text, char separator)
+{
+    std::vector<std::string> parts;
+    std::string part;
+    std::istringstream stream(text);
+    while(std::getline(stream, part, separator))
+    {
+        parts.push_back(part);
+    }
+    return parts;
+}
+
+/// The ten values of a graph cell, in the key order of the table; throws on a token that is not
+/// the next key's `key=value`.
+std::vector<std::string> parseProbeGraph(const std::string& cell)
+{
+    constexpr std::array<const char*, 10> KEYS{
+        "hq", "hk", "hv", "dqk", "dv", "bias", "pitch", "mask", "dropout", "dbias"};
+    const auto tokens = splitOn(cell, ' ');
+    if(tokens.size() != KEYS.size())
+    {
+        throw std::runtime_error("a probe graph has " + std::to_string(tokens.size())
+                                 + " tokens: " + cell);
+    }
+    std::vector<std::string> values;
+    for(size_t i = 0; i < KEYS.size(); ++i)
+    {
+        const std::string prefix = std::string(KEYS[i]) + "=";
+        if(tokens[i].rfind(prefix, 0) != 0)
+        {
+            std::string message = "probe graph token ";
+            message += tokens[i];
+            message += " is not ";
+            message += prefix;
+            message += "<value>: ";
+            message += cell;
+            throw std::runtime_error(message);
+        }
+        values.push_back(tokens[i].substr(prefix.size()));
+    }
+    return values;
+}
+
+/// The rows of the table; throws when the file is missing or malformed, so a consumer fails
+/// rather than checking nothing. A table with a header and no rows is valid.
+std::vector<ProbeRow> loadProbeRows()
+{
+    const auto path = (verdictDataRoot() / "sdpa_bwd_probe_graphs.csv").string();
+    std::ifstream in(path);
+    if(!in.good())
+    {
+        throw std::runtime_error("cannot open the probe-graph table " + path);
+    }
+    std::string line;
+    std::getline(in, line);
+    if(line != "arch,kernel,dtype,graph,served_rows")
+    {
+        throw std::runtime_error("the probe-graph table has an unexpected header: " + line);
+    }
+    std::vector<ProbeRow> rows;
+    while(std::getline(in, line))
+    {
+        if(line.empty())
+        {
+            continue;
+        }
+        const auto cells = splitCsvLine(line);
+        if(cells.size() != 5)
+        {
+            throw std::runtime_error("a probe-graph row has " + std::to_string(cells.size())
+                                     + " cells: " + line);
+        }
+        ProbeRow row;
+        row.arch = cells[0];
+        row.kernel = cells[1];
+        row.dtype = cells[2];
+        row.graph = parseProbeGraph(cells[3]);
+        row.served = splitOn(cells[4], ';');
+        rows.push_back(std::move(row));
+    }
+    return rows;
+}
+
+/// The graph of a probe row at the fixed shape (batch 1, 64 query and key rows): `aligned`
+/// pitches are the whole vector of the bias's dtype, `unaligned` ones 65 elements.
+SdpaBwdSpec specOfProbe(const ProbeRow& probe)
+{
+    const auto& t = probe.graph;
+    SdpaBwdSpec spec;
+    if(probe.dtype == "bf16")
+    {
+        spec.dtype = DataType::BFLOAT16;
+    }
+    else if(probe.dtype == "fp32")
+    {
+        spec.dtype = DataType::FLOAT;
+    }
+    else
+    {
+        spec.dtype = DataType::HALF;
+    }
+    spec.batch = 1;
+    spec.seqQ = 64;
+    spec.seqKv = 64;
+    spec.heads = std::stoll(t[0]);
+    spec.kvHeads = std::stoll(t[1]);
+    const auto valueHeads = std::stoll(t[2]);
+    spec.headDimQk = std::stoll(t[3]);
+    spec.headDimV = std::stoll(t[4]);
+    if(valueHeads != spec.kvHeads)
+    {
+        spec = spec.withEdit([=](SdpaBwdGraph& g) {
+            g.tensor("v").dims[1] = valueHeads;
+            g.tensor("dv").dims[1] = valueHeads;
+        });
+    }
+    if(t[7] == "causal")
+    {
+        spec = spec.withEdit([](SdpaBwdGraph& g) { g.attributes.causalMask = true; });
+    }
+    if(t[8] == "1")
+    {
+        spec = spec.withEdit([](SdpaBwdGraph& g) { addDropout(g, 0.2F, DataType::INT64, false); });
+    }
+    if(t[5] != "none")
+    {
+        const bool withDbias = t[9] == "1";
+        const int64_t pitch = t[6] == "unaligned" ? 65 : 0;
+        std::optional<DataType> biasType;
+        if(t[5] == "f32")
+        {
+            biasType = DataType::FLOAT;
+        }
+        spec = spec.withEdit([=](SdpaBwdGraph& g) {
+            addBroadcastBias(g, false, false, withDbias, biasType, pitch);
+        });
+    }
+    return spec;
+}
+
+/// The spec hashes of the manifests of @p content, or nothing where the build stages none
+/// for this architecture.
+std::optional<ManifestHashes> tryLoadManifestHashes(const char* content)
+{
+    try
+    {
+        return loadManifestHashes(content);
+    }
+    catch(const std::runtime_error&)
+    {
+        return std::nullopt;
+    }
+}
+
+/// The probe graphs of the table, run through graph_match and the slot's kernel_match over the
+/// installed shard: the rows served, ranked by priority (high first) then spec hash, must be
+/// the rows the model names. Where the build stages the manifests that give a row its spec
+/// hash (gfx11), the ranked lists are compared; elsewhere only whether any row serves.
+TEST_F(TestFlydslSdpaBwdSplitPacks, EveryProbeGraphIsServedByTheRowsTheModelNames)
+{
+    const std::string tableArch = arch() == "gfx950" ? "gfx950" : "gfx11-generic";
+    const auto rows = loadProbeRows();
+    const auto installed = installedKernels(loadedSet(ENGINE_NAME));
+    const auto hashes = tryLoadManifestHashes(tableArch.c_str());
+    const std::array<const char*, 3> kernels{"prep", "dkdv", "dq"};
+
+    size_t checked = 0;
+    std::vector<std::string> failures;
+    for(const auto& row : rows)
+    {
+        if(row.arch != tableArch)
+        {
+            continue;
+        }
+        const auto slotIndex = static_cast<size_t>(
+            std::find(kernels.begin(), kernels.end(), row.kernel) - kernels.begin());
+        ASSERT_LT(slotIndex, kernels.size()) << row.kernel;
+        ++checked;
+
+        DeviceProperties properties;
+        properties.gcnArchName = arch();
+        properties.warpSize = 32;
+        const GraphFixture fixture(buildSdpaBwdGraph(specOfProbe(row)), properties);
+        const auto context = fixture.context();
+        std::vector<const KernelDefinition*> matched;
+        if(const auto bound = matchesGraph(splitSymbols(SLOT_ORDER[0]), context))
+        {
+            for(const auto& kernel : installed[slotIndex])
+            {
+                if(matchesKernel(splitSymbols(SLOT_ORDER[slotIndex]), context, kernel, *bound))
+                {
+                    matched.push_back(&kernel);
+                }
+            }
+        }
+        const std::string label = row.arch + " " + row.kernel + " " + row.dtype + " ["
+                                  + row.graph[0] + "/" + row.graph[1] + "/" + row.graph[2] + " d"
+                                  + row.graph[3] + "/" + row.graph[4] + " " + row.graph[5] + " "
+                                  + row.graph[6] + " " + row.graph[7] + " dr" + row.graph[8] + " db"
+                                  + row.graph[9] + "]";
+        if(!hashes.has_value())
+        {
+            if(matched.empty() != (row.served.empty()))
+            {
+                failures.push_back(label + ": the model serves " + std::to_string(row.served.size())
+                                   + " rows, the shard " + std::to_string(matched.size()));
+            }
+            continue;
+        }
+        std::vector<std::pair<int64_t, std::string>> ranked;
+        for(const auto* kernel : matched)
+        {
+            const auto hash = hashes->hashOfName[slotIndex].find(kernel->name);
+            ranked.emplace_back(kernel->priority,
+                                hash == hashes->hashOfName[slotIndex].end()
+                                    ? "<" + kernel->name + ">"
+                                    : hash->second);
+        }
+        std::sort(ranked.begin(), ranked.end(), [](const auto& lhs, const auto& rhs) {
+            return lhs.first != rhs.first ? lhs.first > rhs.first : lhs.second < rhs.second;
+        });
+        std::vector<std::string> served;
+        served.reserve(ranked.size());
+        for(const auto& [priority, hash] : ranked)
+        {
+            served.push_back(hash);
+        }
+        if(served != row.served)
+        {
+            failures.push_back(label + ": the shard serves " + std::to_string(served.size())
+                               + " rows, the model " + std::to_string(row.served.size()));
+        }
+    }
+    std::cout << "probe rows checked on " << arch() << ": " << checked << ", disagreeing "
+              << failures.size() << '\n';
+    std::ostringstream report;
+    for(const auto& failure : failures)
+    {
+        report << "\n  " << failure;
+    }
+    EXPECT_TRUE(failures.empty()) << failures.size()
+                                  << " probe graphs disagree with the model:" << report.str();
+}
+
+/// The dq rows that serve a bias graph, by what the chunk contract says: an aligned 16-bit bias
+/// is read by a staged row or by a row no staged one backs, an unaligned one by a direct row,
+/// an f32 bias only by a row no staged one backs.
+TEST_F(TestFlydslSdpaBwdSplitPacks,
+       TheChunkContractKeepsAnAlignedBiasOffDirectRowsWithAStagedAlternative)
+{
+    const auto installed = installedKernels(loadedSet(ENGINE_NAME));
+    const auto resolvedOf = [](const KernelDefinition& kernel) {
+        const auto* stage
+            = tryGetMetadataField<std::string>(kernel.metadata, "bias_stage_resolved");
+        return stage == nullptr ? std::string() : *stage;
+    };
+    size_t served = 0;
+    std::vector<std::string> failures;
+    for(const auto dtype : {DataType::HALF, DataType::BFLOAT16})
+    {
+        for(const int64_t headDim : content().tiles)
+        {
+            for(const std::string form : {"aligned", "unaligned", "f32"})
+            {
+                for(const bool withDbias : {false, true})
+                {
+                    ProbeRow probe;
+                    probe.dtype = dtype == DataType::HALF ? "f16" : "bf16";
+                    const std::string dim = std::to_string(headDim);
+                    probe.graph = {"4",
+                                   "4",
+                                   "4",
+                                   dim,
+                                   dim,
+                                   form == "f32" ? "f32" : "same",
+                                   form == "unaligned" ? "unaligned" : "aligned",
+                                   "none",
+                                   "0",
+                                   withDbias ? "1" : "0"};
+                    DeviceProperties properties;
+                    properties.gcnArchName = arch();
+                    properties.warpSize = 32;
+                    const GraphFixture fixture(buildSdpaBwdGraph(specOfProbe(probe)), properties);
+                    const auto context = fixture.context();
+                    const auto bound = matchesGraph(splitSymbols(SLOT_ORDER[2]), context);
+                    if(!bound.has_value())
+                    {
+                        continue; // an unaligned dBias is declined (BI-9)
+                    }
+                    for(const auto& kernel : installed[2])
+                    {
+                        if(!matchesKernel(splitSymbols(SLOT_ORDER[2]), context, kernel, *bound))
+                        {
+                            continue;
+                        }
+                        ++served;
+                        const auto stage = resolvedOf(kernel);
+                        bool allowed = stage == "direct_only";
+                        if(form == "aligned")
+                        {
+                            allowed = allowed || stage == "lds";
+                        }
+                        else if(form == "unaligned")
+                        {
+                            allowed = allowed || stage == "direct";
+                        }
+                        if(!allowed)
+                        {
+                            std::string violation = kernel.name;
+                            violation += " (" + stage;
+                            violation += ") serves a " + form;
+                            violation += " bias at head dim " + dim;
+                            failures.push_back(std::move(violation));
+                        }
+                    }
+                }
+            }
+        }
+    }
+    std::cout << "chunk-contract check over " << served << " served rows on " << arch() << ": "
+              << failures.size() << " violations" << '\n';
+    std::ostringstream report;
+    for(const auto& failure : failures)
+    {
+        report << "\n  " << failure;
+    }
+    EXPECT_TRUE(failures.empty()) << report.str();
+}
+
+/// The floor of a row as the engine reads it: `g1` is 0, `tail` the rung of the dtype's ladder
+/// below the tile, anything else the number.
+int64_t floorOfRow(const KernelDefinition& kernel, int64_t tile)
+{
+    if(const auto* number = tryGetMetadataField<int64_t>(kernel.metadata, "floor"))
+    {
+        return *number;
+    }
+    const auto* text = tryGetMetadataField<std::string>(kernel.metadata, "floor");
+    if(text == nullptr || *text == "g1")
+    {
+        return 0;
+    }
+    if(*text == "tail")
+    {
+        // The 16-bit ladder (`_sdpa_bwd_spec.LADDER`); fp32 rows carry neither family.
+        int64_t below = 0;
+        for(const int64_t rung : {32, 64, 96, 128, 160, 192, 224, 256, 384, 512})
+        {
+            if(rung < tile)
+            {
+                below = rung;
+            }
+        }
+        return below;
+    }
+    return std::stoll(*text);
+}
+
+/// The head dims (Qk == V == d, d up to 512) the shipped rows of a family serve in both the
+/// dkdv and the dq slot, for each of f16 and bf16 and each class the family has.
+std::set<int64_t> shippedCoverage(const std::array<std::vector<KernelDefinition>, 3>& installed,
+                                  bool f32Bias)
+{
+    std::set<int64_t> covered;
+    const std::vector<std::pair<int64_t, int64_t>> classes
+        = f32Bias ? std::vector<std::pair<int64_t, int64_t>>{{0, 1}}
+                  : std::vector<std::pair<int64_t, int64_t>>{{0, 0}, {1, 0}};
+    for(int64_t d = 1; d <= 512; ++d)
+    {
+        bool every = true;
+        for(const char* dtype : {"f16", "bf16"})
+        {
+            for(const auto& [causal, hasBias] : classes)
+            {
+                for(const size_t slot : {size_t{1}, size_t{2}})
+                {
+                    bool any = false;
+                    for(const auto& kernel : installed[slot])
+                    {
+                        const auto* kernelDtype
+                            = tryGetMetadataField<std::string>(kernel.metadata, "dtype");
+                        const auto* role
+                            = tryGetMetadataField<std::string>(kernel.metadata, "u2_role");
+                        const auto* biasF32
+                            = tryGetMetadataField<int64_t>(kernel.metadata, "bias_f32");
+                        const auto* kernelCausal
+                            = tryGetMetadataField<int64_t>(kernel.metadata, "causal");
+                        const auto* kernelBias
+                            = tryGetMetadataField<int64_t>(kernel.metadata, "has_bias");
+                        const auto* tile
+                            = tryGetMetadataField<int64_t>(kernel.metadata, "head_dim");
+                        const auto* padded
+                            = tryGetMetadataField<int64_t>(kernel.metadata, "padded");
+                        if(kernelDtype == nullptr || *kernelDtype != dtype || role == nullptr
+                           || biasF32 == nullptr || kernelCausal == nullptr || kernelBias == nullptr
+                           || tile == nullptr || padded == nullptr)
+                        {
+                            continue;
+                        }
+                        const bool inFamily = f32Bias ? *biasF32 == 1 : *role != "none";
+                        const bool serves = *padded == 0
+                                                ? d == *tile
+                                                : d > floorOfRow(kernel, *tile) && d <= *tile;
+                        if(inFamily && *kernelCausal == causal && *kernelBias == hasBias && serves)
+                        {
+                            any = true;
+                            break;
+                        }
+                    }
+                    every = every && any;
+                }
+            }
+        }
+        if(every)
+        {
+            covered.insert(d);
+        }
+    }
+    return covered;
+}
+
+/// The constants graph_match's coverage line states (FlydslSdpaBwdCommon.hpp, the parity
+/// bands) are the head dims the loaded shard's f32-bias and `Hk != Hv` rows serve.
+TEST_F(TestFlydslSdpaBwdSplitPacks, TheCoverageConstantsAreTheHeadDimsTheShippedParityRowsServe)
+{
+    const auto installed = installedKernels(loadedSet(ENGINE_NAME));
+    std::set<int64_t> constants;
+    const bool gfx11 = arch().rfind("gfx11", 0) == 0;
+    const auto addBands = [&](const auto& bands) {
+        for(const auto& band : bands)
+        {
+            for(int64_t d = band.floor + 1; d <= band.tile; ++d)
+            {
+                constants.insert(d);
+            }
+        }
+    };
+    if(gfx11)
+    {
+        addBands(flydsl_sdpa_bwd::GFX11_PARITY_BANDS);
+    }
+    else
+    {
+        addBands(flydsl_sdpa_bwd::GFX950_PARITY_BANDS);
+    }
+    for(const bool f32Bias : {true, false})
+    {
+        SCOPED_TRACE(f32Bias ? "f32 bias" : "V heads of their own");
+        const auto shipped = shippedCoverage(installed, f32Bias);
+        EXPECT_FALSE(shipped.empty()) << "the shard ships no row of the family";
+        EXPECT_EQ(shipped, constants);
+    }
+}
+
 TEST_F(TestFlydslSdpaBwdSplitPacks, DeclaresASchemaAtLeastTheRaggedOffsetMultiplierFloor)
 {
     const auto& set = loadedSet(ENGINE_NAME);

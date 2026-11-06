@@ -46,6 +46,8 @@ DOMAIN = {
     "sink": {-1, 1},
     "bias_stage": {"auto", "direct"},
     "role_order": {"auto", "concat", "lpt"},
+    "bias_f32": {-1, 1},
+    "u2": {"auto", "dk", "dv", "dq"},
 }
 
 
@@ -104,12 +106,16 @@ def test_merged_rows_name_the_reduce_kernel_of_their_class(tables) -> None:
 
 
 def test_dq_rows_name_the_reduce_kernel_of_their_dtype(tables) -> None:
-    """A dB-storing bias dQ row holds its dtype's dBias reduce kernel; every fp32 bias dQ row stores dB."""
+    """A dB-storing bias dQ row holds the dBias reduce kernel of its bias dtype; every fp32 bias dQ row stores dB."""
     rows = tables["sdpa_bwd_dq"]
     for instance in rows:
         stores_db = bool(instance.knobs["has_bias"]) and instance.knobs["store_db"] != 0
         assert instance.knobs["reduce_symbol"] == (
-            _instances.SDPA_BWD_REDUCE_SYMBOL[instance.dtype] if stores_db else ""
+            _instances.SDPA_BWD_REDUCE_SYMBOL[
+                "fp32" if instance.knobs["bias_f32"] == 1 else instance.dtype
+            ]
+            if stores_db
+            else ""
         )
     fp32_bias = [i for i in rows if i.dtype == "fp32" and i.knobs["has_bias"]]
     assert fp32_bias
@@ -117,7 +123,7 @@ def test_dq_rows_name_the_reduce_kernel_of_their_dtype(tables) -> None:
         i.knobs["reduce_symbol"].startswith("fmha_bwd_dbias_reduce_f32")
         for i in fp32_bias
     )
-    assert sum(bool(i.knobs["reduce_symbol"]) for i in rows) == 293
+    assert sum(bool(i.knobs["reduce_symbol"]) for i in rows) == 301
 
 
 def test_only_the_merged_and_dq_rows_may_carry_a_reduce_symbol(tables) -> None:
@@ -156,17 +162,17 @@ def test_the_superseded_pins_are_replaced_in_the_tables_and_the_reference(
 ) -> None:
     """Asserted against literals, not against the generator's own filter: a regression there would feed both sides."""
     in_tables = {to_spec(i).hash() for rows in tables.values() for i in rows}
-    assert sum(len(rows) for rows in tables.values()) == 2612
+    assert sum(len(rows) for rows in tables.values()) == 2691
     assert {op: len(rows) for op, rows in tables.items()} == {
         "sdpa_bwd_prep": 86,
-        "sdpa_bwd_dkdv": 1289,
-        "sdpa_bwd_dq": 923,
+        "sdpa_bwd_dkdv": 1329,
+        "sdpa_bwd_dq": 962,
         "sdpa_bwd_merged": 309,
         "sdpa_bwd_dbias_reduce": 3,
         "sdpa_bwd_dsink_reduce": 2,
     }
     for held in (in_tables, _reference().keys()):
-        assert len(held) == 2612
+        assert len(held) == 2691
         assert not held & SUPERSEDED.keys()
         assert set(SUPERSEDED.values()) <= held
 
@@ -264,8 +270,8 @@ def test_gfx11_rows_are_the_s1_reference_set() -> None:
         len(build.specs_for(k)) for k in ("prep", "dkdv", "dq", "dbias_reduce")
     ] == [
         33,
-        198,
-        198,
+        238,
+        230,
         3,
     ]
 
@@ -301,15 +307,18 @@ def test_gfx11_row_values_follow_the_kmd_contract() -> None:
             k["floor"],
         ) == (-1, -1, -1, -1, 0, "g1")
     rows = _instances.instances_for("sdpa_bwd_dq", GFX11)
-    assert sum(bool(i.knobs["has_bias"]) for i in rows) == 66
+    assert sum(bool(i.knobs["has_bias"]) for i in rows) == 82
     for instance in rows:
         k = instance.knobs
         assert k["mfma_rows"] == -1 and k["head_dim_v"] == k["head_dim"]
         if k["has_bias"]:
-            assert (k["store_db"], k["bias_stage"]) == (1, "none")
-            assert (
-                k["reduce_symbol"]
-                == _instances.SDPA_BWD_GFX11_REDUCE_SYMBOL[instance.dtype]
+            assert (k["store_db"] in (0, 1), k["bias_stage"]) == (True, "none")
+            assert k["reduce_symbol"] == (
+                _instances.SDPA_BWD_GFX11_REDUCE_SYMBOL[
+                    "fp32" if k["bias_f32"] == 1 else instance.dtype
+                ]
+                if k["store_db"] == 1
+                else ""
             )
         else:
             assert (k["store_db"], k["bias_stage"], k["reduce_symbol"]) == (
@@ -343,3 +352,52 @@ def test_the_engines_header_bound_is_the_one_the_generator_reads() -> None:
     import gen_descriptors  # noqa: PLC0415
 
     assert gen_descriptors.pack_max_block_q() == _pack_max_block_q()
+
+
+TOOLS = FLYDSL / "tools"
+
+
+def _tables_tool():
+    sys.path.insert(0, str(TOOLS))
+    import sdpa_bwd_tables_from_sweep as tool  # noqa: PLC0415
+
+    return tool
+
+
+@pytest.mark.parametrize(
+    ("arch", "reference"),
+    [
+        ("gfx950", "sdpa_bwd_reference.csv"),
+        ("gfx11-generic", "sdpa_bwd_gfx11_reference.csv"),
+    ],
+)
+def test_the_tables_tool_renders_the_installed_tables_from_their_reference(
+    arch: str, reference: str
+) -> None:
+    """The generated block is what the tool writes for the pins of the reference CSV: rows without a feature knob keep their text."""
+    tool = _tables_tool()
+    with (DATA / reference).open(newline="", encoding="utf-8") as fh:
+        pins = {row["hash"]: row for row in csv.DictReader(fh)}
+    begin, end = tool.markers(arch)
+    text = (FLYDSL / "generators" / "_instances.py").read_text(encoding="utf-8")
+    installed = text[text.index(begin) : text.index(end) + len(end)]
+    assert tool.render_tables(arch, pins) == installed
+
+
+def test_a_feature_row_spells_its_feature_columns_and_the_others_stop_before_them() -> (
+    None
+):
+    tool = _tables_tool()
+    columns = KNOBS["dkdv"]
+    plain = tool.table_row(Spec.parse("dkdv,f16,64,plain,bk,0,0,tail,0,1"), columns)
+    dk = tool.table_row(Spec.parse("dkdv,f16,64,plain,bk,0,0,tail,0,1;u2=dk"), columns)
+    f32 = tool.table_row(
+        Spec.parse("dkdv,f16,64,bias,bk,0,0,tail,0,1;bias_f32=1"), columns
+    )
+    assert plain.count(",") == 9 + len(columns) - 2
+    assert dk.endswith('-1, "dk"),')
+    assert f32.endswith(", 1),")  # u2 is unset and the row stops after bias_f32
+    row = tuple(
+        eval(dk.strip().rstrip(","), {})
+    )  # noqa: S307 - a literal row of the tool's own output
+    assert _instances.sdpa_bwd_perf_knobs(columns, row[9:])["u2"] == "dk"

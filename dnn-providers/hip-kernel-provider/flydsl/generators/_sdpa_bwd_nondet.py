@@ -12,6 +12,7 @@ Columns: ``arch`` (``gfx950`` or ``gfx11-generic``), ``hash`` and ``spec`` of th
 reference CSV's), ``variant_sha256s`` (``;``-joined whole-object shas seen besides the pin, sorted), ``variant_function_sha256s``
 (``;``-joined main-function shas of the variants besides the pin; combined rows only) and ``evidence`` (the sampling run and counts).
 ``kind`` is ``variants`` (rebuilds give different objects), ``dual_object`` (the dump holds two different objects) or ``both``.
+A variant is a build-gate tolerance only (``tolerates``): every listed row, standalone or combined, ships its stored pin.
 
 Merge a sampling run into the list (union of variants, evidence appended), from the ``flydsl`` directory:
 
@@ -169,6 +170,25 @@ def check(
             raise NondeterministicListError(
                 f"{row.hash}: a combined row of kind {row.kind} needs variant_function_sha256s"
             )
+
+
+def tolerates(
+    row: Row,
+    object_sha256: str,
+    function_sha256: str | None = None,
+    pin_function_sha256: str | None = None,
+) -> bool:
+    """Whether a rebuild is its pin or a recorded variant of @p row: its whole-object sha is the pin's or one of ``variant_sha256s``, or
+    its main-function sha (@p function_sha256) is the pin's (@p pin_function_sha256) or one of ``variant_function_sha256s``.
+
+    A tolerance of the build gate only: a variant is never shipped, every listed row ships its stored pin.
+    """
+    if object_sha256 == row.pin_sha256 or object_sha256 in row.variant_sha256s:
+        return True
+    return function_sha256 is not None and (
+        function_sha256 == pin_function_sha256
+        or function_sha256 in row.variant_function_sha256s
+    )
 
 
 def merge_row(base: Row | None, sampled: Row) -> Row:

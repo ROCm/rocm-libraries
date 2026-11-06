@@ -69,6 +69,7 @@ import json
 import re
 import sys
 import uuid
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, NamedTuple
 
@@ -92,7 +93,7 @@ from generators._codeobject import (  # noqa: E402
 )
 from generators._flydsl_env import CONTENT_DIR  # noqa: E402
 from generators._manifest import inputs_digest  # noqa: E402
-from generators._sdpa_bwd_spec import Spec, knobs_of  # noqa: E402
+from generators._sdpa_bwd_spec import U2_SYMBOLS, Spec, knobs_of  # noqa: E402
 
 # Descriptor schema version, as the loader spells it: UKD_VERSION_MAJOR = 1,
 # UKD_VERSION_MINOR = 0 (DescriptorLoader.hpp:288-289).
@@ -126,19 +127,30 @@ SLOTTED_VERSION = "1.1"
 SPLIT_ENGINE = "sdpa_bwd_split"
 SPLIT_SLOT_OPS = ("sdpa_bwd_prep", "sdpa_bwd_dkdv", "sdpa_bwd_dq")
 SPLIT_SHARED_WORKSPACE = "ws.bytes"
-# The slot ops whose rows may be multi-launch: a dQ row that stores dB through a standalone reduce object (a
-# manifest ``companions`` entry) is authored in its own pack, on its own dispatch (RFC 0021: a pack's launch set is
-# uniform). The launches of such a row, in launch order, and the document that names the dispatch.
-SPLIT_REDUCE_OPS = ("sdpa_bwd_dq",)
-REDUCE_SUFFIX = "reduce"
+# The slot ops whose rows may be multi-launch: a row whose launches are not the slot's usual ones is authored in its own pack, on its
+# own dispatch (RFC 0021: a pack's launch set is uniform). A dQ row that stores dB through a standalone reduce object (a manifest
+# ``companions`` entry) is the ``reduce`` pack of its op; a dK-only row of the value-head split (``u2=dk``), which launches its dV-only
+# partner beside it, is the ``u2`` pack of dkdv; a V-head dQ row (``u2=dq``), whose kernel takes ``num_head_v``, is the ``u2`` pack of dq.
+# Per op: the dispatch suffix of each pack (its dispatch symbol ``<slot>_<suffix>``, its UDD ``<stem>_<suffix>.udd.json``) and the stem of
+# its file ``<arch>.<stem>.kdp.json``; ``extra_pack`` names the pack a row belongs to.
+SPLIT_EXTRA_PACKS = {
+    "sdpa_bwd_dq": {"reduce": "reduce", "u2": "dq_u2"},
+    "sdpa_bwd_dkdv": {"u2": "u2"},
+}
 # The companion roles (the first field of a companion's ``spec``): the standalone dBias reduce of a gfx11 dQ row, and the padded-row
 # zeroing launched after the gradient launches of every dQ and merged row (``generators/gen_sdpa_bwd_tailzero.py``).
 REDUCE_ROLE = "dbias_reduce"
 TAILZERO_ROLE = "tailzero"
+# The V-head tail-zero object, the ``tailzero`` launch of a dQ row of the value-head split (``u2=dq``); and the dV-only dK/dV object
+# (``u2=dv``), the second launch of its dK-only partner. Neither is a KMD kernel of its own.
+TAILZERO_HV_ROLE = "tailzero_hv"
+DVONLY_ROLE = "dvonly"
 # The launches of a row, in launch order, and the ops whose rows are launched through ``sources``: the op's own object first, then
 # its dBias reduce companion when it has one, then the tail-zero companion. A dQ row without a reduce companion (every gfx950 row, and
 # the gfx11 rows that store no dB) is ``{dq, tailzero}``; a merged row is ``{merged, tailzero}``.
 MAIN_LAUNCH = {"sdpa_bwd_dq": "dq", "sdpa_bwd_merged": "merged"}
+# The same, with the ops whose rows are multi-launch only in their extra pack (a dK-only row launches ``dkdv`` then ``dvonly``).
+LAUNCH_NAME = {**MAIN_LAUNCH, "sdpa_bwd_dkdv": "dkdv"}
 # The packed-tile bound the engines enforce (``PACK_MAX_BLOCK_Q`` in ``FlydslSdpaBwdNativeShared.hpp``), read from the header at
 # generation time. The ops whose ``gqa_pack`` rows carry a resolved ``block_q``, which must be in ``(0, bound]``.
 NATIVE_SHARED_HEADER = (
@@ -209,7 +221,11 @@ SHAPE_KNOBS = {"N", "head_dim", "head_dim_v"}
 # head-size ladder, and `store_db` and `gqa_pack` say which graphs an object serves (a
 # dBias graph needs a dB-storing object; a packed-GQA object serves dense GQA only);
 # `sink` selects the prep twin that writes the dSink term, and `bias_stage` is gated on
-# the bias layout (an LDS-staged bias needs the 16-byte row contract). The matchers keep
+# the bias layout (an LDS-staged bias needs the 16-byte row contract). `bias_f32` (the bias
+# is FLOAT beside 16-bit Q/K/V), `bias_stage_resolved` (how the object loads the bias:
+# staged in LDS, directly where a staged row serves the graph too, or directly with no
+# staged alternative) and `u2_role` (the value-head split: which of Hk == Hv or Hk != Hv
+# graphs a row serves) say which graphs an object serves. The matchers keep
 # reading all of them; the ones several kernels of an SDPA backward op share a graph on
 # are also knobs of that op (ALTERNATIVE_KNOBS).
 GRAPH_DETERMINED_FIELDS = {
@@ -241,6 +257,8 @@ GRAPH_DETERMINED_FIELDS = {
     "gqa_pack",
     "sink",
     "bias_stage",
+    "bias_stage_resolved",
+    "u2_role",
     "grid",
 }
 
@@ -447,8 +465,9 @@ class KernelEntry(NamedTuple):
     path: Path
     data: bytes
     record: dict[str, Any]
-    # The companion objects the row launches beside its own, by role (``REDUCE_ROLE``, ``TAILZERO_ROLE``): the manifest
-    # ``companions`` entries of the row's dtype plus the path of each object. None for a row with none.
+    # The companion objects the row launches beside its own, by role (``REDUCE_ROLE``, ``TAILZERO_ROLE``, ``DVONLY_ROLE``): the
+    # manifest ``companions`` entries of the row (the reduce of its bias dtype, the tail-zero of its dtype, which is the V-head object
+    # for a ``u2=dq`` row; the dV-only ``instances`` record of a ``u2=dk`` row) plus the path of each object. None for a row with none.
     companions: dict[str, dict[str, Any]] | None = None
 
 
@@ -551,33 +570,113 @@ def collect(content_dir: Path, arch: str) -> list[KernelEntry]:
             where = str(path)
             verify_arch(describe(data, where, record["symbol"]), arch, where)
             verify_generic(data, arch, where)
+            knobs = record["knobs"]
+            # A value-head split object defines the kernel of its own (the dV-only object that of the dK-only one).
+            u2 = knobs.get("u2")
+            if u2 in ("dk", "dv", "dq"):
+                want = U2_SYMBOLS[arch, "dq" if u2 == "dq" else "dkdv"]
+                if record["symbol"] != want:
+                    raise ValueError(
+                        f"{path}: a u2={u2} row of {arch} defines {record['symbol']!r}, not {want!r}"
+                    )
+            # The dB reduce of a row is keyed by its bias dtype (FLOAT for a ``bias_f32`` row beside 16-bit Q); the tail-zero by its
+            # dtype, the V-head object for a row of the value-head split.
+            bias_dtype = "fp32" if knobs.get("bias_f32") == 1 else record["dtype"]
+            tailzero_role = (
+                TAILZERO_HV_ROLE if knobs.get("u2") == "dq" else TAILZERO_ROLE
+            )
             row_companions = {
-                role: by_key[role, record["dtype"]]
-                for role in (REDUCE_ROLE, TAILZERO_ROLE)
-                if (role, record["dtype"]) in by_key
+                role: by_key[source_role, dtype]
+                for role, source_role, dtype in (
+                    (REDUCE_ROLE, REDUCE_ROLE, bias_dtype),
+                    (TAILZERO_ROLE, tailzero_role, record["dtype"]),
+                )
+                if (source_role, dtype) in by_key
             }
             reduce = row_companions.get(REDUCE_ROLE)
-            if any(role == REDUCE_ROLE for role, _ in by_key) and record["knobs"].get(
+            if any(role == REDUCE_ROLE for role, _ in by_key) and knobs.get(
                 "reduce_symbol"
             ):
-                if (
-                    reduce is None
-                    or reduce["symbol"] != record["knobs"]["reduce_symbol"]
-                ):
+                if reduce is None or reduce["symbol"] != knobs["reduce_symbol"]:
                     raise ValueError(
-                        f"{path}: names reduce symbol {record['knobs']['reduce_symbol']!r}, "
-                        f"the {record['dtype']} companion is {reduce and reduce['symbol']!r}"
+                        f"{path}: names reduce symbol {knobs['reduce_symbol']!r}, "
+                        f"the {bias_dtype} companion is {reduce and reduce['symbol']!r}"
                     )
             else:
                 # A row that stores no dB through a standalone reduce does not launch one.
                 row_companions.pop(REDUCE_ROLE, None)
             if op in MAIN_LAUNCH and TAILZERO_ROLE not in row_companions:
                 raise ValueError(
-                    f"{path}: {op} rows launch the {TAILZERO_ROLE} companion, but {manifest_path} has none "
+                    f"{path}: {op} rows launch the {tailzero_role} companion, but {manifest_path} has none "
                     f"for dtype {record['dtype']}"
                 )
             entries.append(KernelEntry(op, path, data, record, row_companions or None))
-    return entries
+    return attach_dvonly(entries)
+
+
+def attach_dvonly(entries: list[KernelEntry]) -> list[KernelEntry]:
+    """@p entries with each dV-only dK/dV row (``u2=dv``) attached to its dK-only row (``u2=dk``) and no longer an entry of its own.
+
+    A dV-only object is no KMD kernel: it is the second launch of the dK-only row whose Spec is equal to its own apart from ``u2``
+    (``DVONLY_ROLE`` of that row's ``companions``). The two are launched over one workgroup shape, so a pair whose ``block_threads`` or
+    ``block_kv`` differ is refused, as is a dK-only row without a partner and a dV-only row without one.
+    """
+
+    def role(entry: KernelEntry) -> str:
+        """The ``u2`` knob of a dK/dV row as the manifest spells it (``auto``: none)."""
+        return (
+            entry.record["knobs"].get("u2", "auto")
+            if entry.op == "sdpa_bwd_dkdv"
+            else "auto"
+        )
+
+    dv_rows: dict[Spec, KernelEntry] = {}
+    for entry in entries:
+        if role(entry) == "dv":
+            dv_rows[replace(Spec.parse(entry.record["spec"]), u2="dk")] = entry
+    kept: list[KernelEntry] = []
+    paired: set[Spec] = set()
+    for entry in entries:
+        if role(entry) == "auto":
+            kept.append(entry)
+        elif role(entry) == "dk":
+            spec = Spec.parse(entry.record["spec"])
+            partner = dv_rows.get(spec)
+            if partner is None:
+                raise ValueError(
+                    f"{entry.record['name']}: a dK-only row (u2=dk) has no dV-only row (u2=dv) equal to it apart from u2"
+                )
+            for field in ("block_threads", "block_kv"):
+                if entry.record["knobs"].get(field) != partner.record["knobs"].get(
+                    field
+                ):
+                    raise ValueError(
+                        f"{entry.record['name']} and {partner.record['name']}: the dK-only and dV-only rows launch over one "
+                        f"workgroup shape, but {field} is {entry.record['knobs'].get(field)} and "
+                        f"{partner.record['knobs'].get(field)}"
+                    )
+            paired.add(spec)
+            kept.append(
+                entry._replace(
+                    companions={
+                        **(entry.companions or {}),
+                        DVONLY_ROLE: {
+                            "spec": partner.record["spec"],
+                            "file": partner.record["file"],
+                            "symbol": partner.record["symbol"],
+                            "sha256": partner.record["sha256"],
+                            "path": partner.path,
+                        },
+                    }
+                )
+            )
+    unpaired = sorted(set(dv_rows) - paired)
+    if unpaired:
+        raise ValueError(
+            f"{len(unpaired)} dV-only row(s) (u2=dv) have no dK-only row (u2=dk) equal to them apart from u2, e.g. "
+            f"{dv_rows[unpaired[0]].record['name']}"
+        )
+    return kept
 
 
 def _metadata_type(value: Any) -> str:
@@ -631,13 +730,20 @@ def rne_pin_problem(spec: Spec) -> str | None:
     )
 
 
+def _spec_keys(entry: KernelEntry) -> list[str]:
+    """The Spec keys of the objects of @p entry: its own and, for a dK-only row, its dV-only partner's."""
+    dvonly = (entry.companions or {}).get(DVONLY_ROLE)
+    return [entry.record["spec"], *([dvonly["spec"]] if dvonly else [])]
+
+
 def require_rne_pins(entries: list[KernelEntry]) -> None:
-    """Raise ValueError naming every shipped SDPA backward dK/dV or dQ row that ``rne_pin_problem`` refuses."""
+    """Raise ValueError naming every shipped SDPA backward dK/dV or dQ row that ``rne_pin_problem`` refuses (a dV-only partner included)."""
     problems = [
         f"{entry.path.name}: {problem}"
         for entry in entries
         if entry.op in ("sdpa_bwd_dkdv", "sdpa_bwd_dq")
-        and (problem := rne_pin_problem(Spec.parse(entry.record["spec"]))) is not None
+        for key in _spec_keys(entry)
+        if (problem := rne_pin_problem(Spec.parse(key))) is not None
     ]
     if problems:
         shown = "; ".join(problems[:3]) + (", ..." if len(problems) > 3 else "")
@@ -678,7 +784,8 @@ class OpDescriptors:
         self.kmd_id = _uuid(f"kmd/{op}")
         self.uhd_id = _uuid(f"uhd/{op}")
         self.udd_id = _uuid(f"udd/{op}")
-        self.reduce_udd_id = _uuid(f"udd/{op}/{REDUCE_SUFFIX}")
+        # The dispatches of the op's extra packs (``SPLIT_EXTRA_PACKS``): dispatch suffix -> file stem.
+        self.extra_packs = SPLIT_EXTRA_PACKS.get(op, {})
         self.ued_id = _uuid(f"ued/{engine}")
         self.umd_id = _uuid(f"umd/{op}/kernel")
         self.estimate_uhd_id = _uuid(f"uhd/{op}/predict_engine")
@@ -719,20 +826,17 @@ class OpDescriptors:
                 field["default_value"] = 256
             kmd_fields.append(field)
 
-        # The dispatch of the multi-launch rows of a slot (``SPLIT_REDUCE_OPS``): a shared document, authored with
+        # The dispatches of the extra packs of a slot (``SPLIT_EXTRA_PACKS``): shared documents, authored with
         # every arch's pack of the op whether or not that arch has such rows.
-        reduce_udd = (
-            {
-                f"{self.stem}_{REDUCE_SUFFIX}.udd.json": {
-                    "version": DESCRIPTOR_VERSION,
-                    "id": self.reduce_udd_id,
-                    "name": f"flydsl {self.op} {REDUCE_SUFFIX} dispatch",
-                    "dispatch_symbol": f"{self.symbols}_{REDUCE_SUFFIX}.dispatch",
-                }
+        extra_udd = {
+            f"{self.stem}_{suffix}.udd.json": {
+                "version": DESCRIPTOR_VERSION,
+                "id": _uuid(f"udd/{self.op}/{suffix}"),
+                "name": f"flydsl {self.op} {suffix} dispatch",
+                "dispatch_symbol": f"{self.symbols}_{suffix}.dispatch",
             }
-            if self.op in SPLIT_REDUCE_OPS
-            else {}
-        )
+            for suffix in self.extra_packs
+        }
         engine: dict[str, Any] = {
             **ued,
             "graph_match": {"native": f"{self.symbols}.graph_match"},
@@ -765,7 +869,7 @@ class OpDescriptors:
         engine["metadata"] = self.kmd_id
         engine["knobs"] = knob_fields(self.op, self.fields)
         return {
-            **reduce_udd,
+            **extra_udd,
             f"{self.stem}.kmd.json": {
                 "version": DESCRIPTOR_VERSION,
                 "id": self.kmd_id,
@@ -847,8 +951,50 @@ def _require_packed_tile(entry: KernelEntry, bound: int) -> None:
         )
 
 
+def _lds_tile_limits(entries: list[KernelEntry]) -> dict[str, int]:
+    """Per dtype, the largest head-dim tile of a dQ row of @p entries that stages its bias in LDS (0 where none does)."""
+    limits: dict[str, int] = {}
+    for entry in entries:
+        knobs = entry.record["knobs"]
+        if knobs.get("bias_stage_resolved") == "lds":
+            dtype = entry.record["dtype"]
+            limits[dtype] = max(limits.get(dtype, 0), knobs["head_dim"])
+    return limits
+
+
+def kmd_knobs(entry: KernelEntry, lds_limits: dict[str, int]) -> dict[str, Any]:
+    """The knobs of @p entry as its KMD spells them.
+
+    The manifest spells an unset knob ``-1`` or ``"auto"`` and the build's resolutions as it measured them; the KMD says what a row serves:
+
+    * ``bias_f32``: 1 for a FLOAT bias beside 16-bit Q/K/V, else 0;
+    * ``u2`` becomes ``u2_role``: ``none``, ``dk`` (the dK-only object, which launches its dV-only partner) or ``dq`` (the V-head dQ);
+    * ``bias_stage_resolved``: the build's ``lds`` or ``direct`` (``na`` without a bias), with ``direct`` split: ``direct`` where a
+      staged row serves the graphs of the row too, ``direct_only`` where none does: every row that is not 16-bit, every FLOAT-bias
+      row, and every row whose head-dim tile is above the largest tile of its dtype that stages (@p lds_limits).
+
+    A field the manifest does not carry is not added (the schema is whatever the op's rows carry).
+    """
+    knobs = dict(entry.record["knobs"])
+    if "bias_f32" in knobs:
+        knobs["bias_f32"] = int(knobs["bias_f32"] == 1)
+    if "u2" in knobs:
+        role = {"auto": "none", "dk": "dk", "dq": "dq"}.get(knobs.pop("u2"))
+        if role is None:
+            raise HkpPackError(
+                f"{entry.record['name']}: a dV-only row (u2=dv) is no KMD kernel; attach_dvonly pairs it with its dK-only row"
+            )
+        knobs["u2_role"] = role
+    if knobs.get("bias_stage_resolved") == "direct" and (
+        knobs.get("bias_f32") == 1
+        or knobs["head_dim"] > lds_limits.get(entry.record["dtype"], 0)
+    ):
+        knobs["bias_stage_resolved"] = "direct_only"
+    return knobs
+
+
 def _fields_for_op(entries: list[KernelEntry]) -> dict[str, str]:
-    """The metadata schema for an op, derived from its instances' knobs.
+    """The metadata schema for an op, derived from its instances' knobs (``kmd_knobs``).
 
     Every instance must declare the same knob set: a schema is one shape, and an
     instance that carries a knob its siblings do not is a generator bug that
@@ -856,8 +1002,9 @@ def _fields_for_op(entries: list[KernelEntry]) -> dict[str, str]:
     """
     fields: dict[str, str] = {}
     first: dict[str, Any] | None = None
+    limits = _lds_tile_limits(entries)
     for entry in entries:
-        knobs = entry.record["knobs"]
+        knobs = kmd_knobs(entry, limits)
         if first is None:
             first = knobs
             fields["dtype"] = "string"
@@ -888,6 +1035,22 @@ def _fields_for_op(entries: list[KernelEntry]) -> dict[str, str]:
     return fields
 
 
+def extra_pack(entry: KernelEntry) -> str | None:
+    """The dispatch suffix of the extra pack (``SPLIT_EXTRA_PACKS``) @p entry belongs to, None for a row of its op's standard pack.
+
+    A dQ row that stores dB through a standalone reduce is ``reduce``; a V-head dQ row (``u2=dq``) is ``u2``; a dK-only row (it has a
+    dV-only partner) is ``u2``.
+    """
+    companions = entry.companions or {}
+    if entry.op == "sdpa_bwd_dq":
+        if entry.record["knobs"].get("u2") == "dq":
+            return "u2"
+        return "reduce" if REDUCE_ROLE in companions else None
+    if entry.op == "sdpa_bwd_dkdv":
+        return "u2" if DVONLY_ROLE in companions else None
+    return None
+
+
 def _arch_documents(
     entries: list[KernelEntry], op: OpDescriptors, arch: str
 ) -> dict[str, dict[str, Any]]:
@@ -898,7 +1061,8 @@ def _arch_documents(
     kernel, and the packaging probes take only inline UKDs.
     """
     kernels: list[dict[str, Any]] = []
-    reduce_kernels: list[dict[str, Any]] = []
+    extra_kernels: dict[str, list[dict[str, Any]]] = {}
+    limits = _lds_tile_limits(entries)
     # A generic target's objects run on every member, so the pack and each UKD
     # list them all and the packer ships the bytes into each member's shard.
     runs_on = list(families.members(arch))
@@ -912,7 +1076,7 @@ def _arch_documents(
         ukd_id = _uuid(f"ukd/{arch}/{entry.op}/{record['file']}")
 
         metadata = {"dtype": record["dtype"]}
-        for key, value in record["knobs"].items():
+        for key, value in kmd_knobs(entry, limits).items():
             metadata[key] = _metadata_value(key, value)
 
         document = {
@@ -931,7 +1095,7 @@ def _arch_documents(
             }
         else:
             # A row launched through `sources`: its own object, then its dBias reduce companion (a gfx11 dB-storing dQ
-            # row) and its tail-zero companion, in launch order.
+            # row), its dV-only partner (a dK-only row) and its tail-zero companion, in launch order.
             reduce = entry.companions.get(REDUCE_ROLE)
             if (
                 reduce is not None
@@ -942,7 +1106,7 @@ def _arch_documents(
                     f"is not the symbol {reduce['symbol']!r} of its dbias_reduce source"
                 )
             document["sources"] = {
-                MAIN_LAUNCH[entry.op]: {
+                LAUNCH_NAME[entry.op]: {
                     "kind": "hsaco",
                     "file": record["file"],
                     "symbol": record["symbol"],
@@ -953,14 +1117,16 @@ def _arch_documents(
                         "file": entry.companions[role]["file"],
                         "symbol": entry.companions[role]["symbol"],
                     }
-                    for role in (REDUCE_ROLE, TAILZERO_ROLE)
+                    for role in (REDUCE_ROLE, DVONLY_ROLE, TAILZERO_ROLE)
                     if role in entry.companions
                 },
             }
         document["metadata"] = metadata
         document["priority"] = record["priority"]
-        has_reduce = entry.companions is not None and REDUCE_ROLE in entry.companions
-        (reduce_kernels if has_reduce else kernels).append(document)
+        suffix = extra_pack(entry)
+        (kernels if suffix is None else extra_kernels.setdefault(suffix, [])).append(
+            document
+        )
 
     def pack(suffix: str, dispatch: str, descriptors: list[dict[str, Any]]):
         kdp = {
@@ -979,11 +1145,11 @@ def _arch_documents(
         return kdp
 
     documents = {f"{op.stem}.kdp.json": pack("", op.udd_id, kernels)}
-    if reduce_kernels:
-        if op.op not in SPLIT_REDUCE_OPS:
-            raise HkpPackError(f"{op.op} has no multi-launch dispatch for its rows")
-        documents[f"{arch}.{REDUCE_SUFFIX}.kdp.json"] = pack(
-            f"/{REDUCE_SUFFIX}", op.reduce_udd_id, reduce_kernels
+    for suffix, rows in sorted(extra_kernels.items()):
+        if suffix not in op.extra_packs:
+            raise HkpPackError(f"{op.op} has no {suffix} dispatch for its rows")
+        documents[f"{arch}.{op.extra_packs[suffix]}.kdp.json"] = pack(
+            f"/{suffix}", _uuid(f"udd/{op.op}/{suffix}"), rows
         )
     return documents
 

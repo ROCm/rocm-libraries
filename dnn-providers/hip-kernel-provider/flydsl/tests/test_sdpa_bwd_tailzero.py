@@ -57,9 +57,10 @@ addr = _load(CDNA / HELPER)
 # ---------------------------------------------------------------------------
 
 
-def _expected(lens_q, lens_kv, hq, hkv, sq, skv, dqk, dv, strides, mask):
-    """The contract, stated without the grid: the elements of the padded rows of each selected output."""
-    shapes = ((sq, dqk, hq, lens_q), (skv, dqk, hkv, lens_kv), (skv, dv, hkv, lens_kv))
+def _expected(lens_q, lens_kv, hq, hkv, sq, skv, dqk, dv, strides, mask, hv=None):
+    """The contract, stated without the grid: the elements of the padded rows of each selected output (dV has `hv` heads)."""
+    hv = hkv if hv is None else hv
+    shapes = ((sq, dqk, hq, lens_q), (skv, dqk, hkv, lens_kv), (skv, dv, hv, lens_kv))
     want = set()
     for tensor, (seq, dim, heads, lens) in enumerate(shapes):
         if not mask & (1 << tensor):
@@ -73,11 +74,12 @@ def _expected(lens_q, lens_kv, hq, hkv, sq, skv, dqk, dv, strides, mask):
     return want
 
 
-def _contiguous(hq, hkv, sq, skv, dqk, dv):
+def _contiguous(hq, hkv, sq, skv, dqk, dv, hv=None):
+    hv = hkv if hv is None else hv
     return (
         (hq * sq * dqk, sq * dqk, dqk),
         (hkv * skv * dqk, skv * dqk, dqk),
-        (hkv * skv * dv, skv * dv, dv),
+        (hv * skv * dv, skv * dv, dv),
     )
 
 
@@ -145,6 +147,87 @@ def test_the_written_set_is_the_padded_rows_of_the_masked_outputs(
         strides,
         mask,
     )
+
+
+HV_CASES = {
+    "fewer value heads": dict(
+        lens_q=[3, 0, 8],
+        lens_kv=[5, 0, 8],
+        hq=4,
+        hkv=2,
+        hv=1,
+        sq=8,
+        skv=8,
+        dqk=16,
+        dv=24,
+    ),
+    "more value heads": dict(
+        lens_q=[1, 7], lens_kv=[2, 4], hq=2, hkv=1, hv=3, sq=7, skv=5, dqk=24, dv=8
+    ),
+    "value heads equal key heads": dict(
+        lens_q=[2, 6], lens_kv=[3, 5], hq=2, hkv=2, hv=2, sq=6, skv=5, dqk=16, dv=16
+    ),
+    "partial vector": dict(
+        lens_q=[0, 5], lens_kv=[3, 3], hq=1, hkv=2, hv=1, sq=6, skv=6, dqk=37, dv=21
+    ),
+    "all valid": dict(
+        lens_q=[6, 6], lens_kv=[4, 4], hq=2, hkv=2, hv=1, sq=6, skv=4, dqk=16, dv=16
+    ),
+    "all padded": dict(
+        lens_q=[0, 0], lens_kv=[0, 0], hq=2, hkv=1, hv=2, sq=6, skv=4, dqk=16, dv=16
+    ),
+    "grid larger than one block": dict(
+        lens_q=[2], lens_kv=[2], hq=2, hkv=2, hv=1, sq=70, skv=70, dqk=64, dv=64
+    ),
+}
+
+
+@pytest.mark.parametrize("elem_bytes", [2, 4], ids=["16-bit", "fp32"])
+@pytest.mark.parametrize("mask", range(8))
+@pytest.mark.parametrize("case", sorted(HV_CASES))
+def test_dv_extent_follows_its_own_head_count(
+    case: str, mask: int, elem_bytes: int
+) -> None:
+    c = HV_CASES[case]
+    args = (
+        c["lens_q"],
+        c["lens_kv"],
+        c["hq"],
+        c["hkv"],
+        c["sq"],
+        c["skv"],
+        c["dqk"],
+        c["dv"],
+    )
+    strides = _contiguous(*args[2:], hv=c["hv"])
+    got = addr.written_elements(*args, strides, mask, elem_bytes, hv=c["hv"])
+    assert got == _expected(*args, strides, mask, hv=c["hv"])
+
+
+def test_planes_per_batch_count_each_head_set_once() -> None:
+    assert addr.heads_total(4, 2) == 8
+    assert addr.heads_total(4, 2, 2) == 8
+    assert addr.heads_total(4, 2, 1) == 7
+    assert addr.heads_total(2, 1, 3) == 6
+
+
+def test_omitting_hv_is_hv_equal_to_hkv() -> None:
+    c = CASES["gqa"]
+    strides = _contiguous(c["hq"], c["hkv"], c["sq"], c["skv"], c["dqk"], c["dv"])
+    args = (
+        c["lens_q"],
+        c["lens_kv"],
+        c["hq"],
+        c["hkv"],
+        c["sq"],
+        c["skv"],
+        c["dqk"],
+        c["dv"],
+        strides,
+        0b111,
+        2,
+    )
+    assert addr.written_elements(*args) == addr.written_elements(*args, hv=c["hkv"])
 
 
 @pytest.mark.parametrize("elem_bytes", [2, 4], ids=["16-bit", "fp32"])
@@ -219,14 +302,16 @@ def test_the_two_packages_hold_one_helper_text() -> None:
 # ---------------------------------------------------------------------------
 
 
-def _kernel_parameters(path: Path) -> list[tuple[str, str]]:
-    """The ``(name, annotation)`` list of the ``@flyc.kernel`` function of @p path, without importing FlyDSL."""
+def _kernel_parameters(path: Path, hv: bool = False) -> list[tuple[str, str]]:
+    """The ``(name, annotation)`` list of the ``@flyc.kernel`` function of @p path (the V-head one when @p hv), without importing
+    FlyDSL."""
     tree = ast.parse(path.read_text(encoding="utf-8"))
     (kernel,) = [
         node
         for node in ast.walk(tree)
         if isinstance(node, ast.FunctionDef)
         and any("kernel" in ast.unparse(d) for d in node.decorator_list)
+        and ("_hv_" in node.name) == hv
     ]
     return [(a.arg, ast.unparse(a.annotation)) for a in kernel.args.args]
 
@@ -241,6 +326,15 @@ def test_the_declared_parameter_list_is_the_kernels(arch: str) -> None:
 
 
 @pytest.mark.parametrize("arch", sorted(KERNEL_FILES))
+def test_the_declared_v_head_parameter_list_is_the_v_head_kernels(arch: str) -> None:
+    declared = [(name, KIND[kind]) for name, kind in tz.PARAMS_HV]
+    assert _kernel_parameters(KERNEL_FILES[arch], hv=True) == declared
+    names = [name for name, _ in tz.PARAMS_HV]
+    assert names.index("Hv") == names.index("Hkv") + 1
+    assert [n for n in names if n != "Hv"] == [name for name, _ in tz.PARAMS]
+
+
+@pytest.mark.parametrize("arch", sorted(KERNEL_FILES))
 def test_the_launch_signature_is_the_kernels_plus_the_stream(arch: str) -> None:
     tree = ast.parse(KERNEL_FILES[arch].read_text(encoding="utf-8"))
     (launch,) = [
@@ -248,9 +342,23 @@ def test_the_launch_signature_is_the_kernels_plus_the_stream(arch: str) -> None:
         for node in ast.walk(tree)
         if isinstance(node, ast.FunctionDef)
         and node.name.startswith("launch_fmha_bwd_tailzero")
+        and "_hv_" not in node.name
     ]
     names = [a.arg for a in launch.args.args]
     assert names == [name for name, _ in tz.PARAMS] + ["stream"]
+
+
+@pytest.mark.parametrize("arch", sorted(KERNEL_FILES))
+def test_the_v_head_launch_signature_is_its_kernels_plus_the_stream(arch: str) -> None:
+    tree = ast.parse(KERNEL_FILES[arch].read_text(encoding="utf-8"))
+    (launch,) = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.FunctionDef)
+        and node.name.startswith("launch_fmha_bwd_tailzero_hv_")
+    ]
+    names = [a.arg for a in launch.args.args]
+    assert names == [name for name, _ in tz.PARAMS_HV] + ["stream"]
 
 
 @pytest.mark.parametrize("arch", sorted(KERNEL_FILES))
@@ -263,6 +371,8 @@ def test_the_kernel_builds_the_symbol_and_dtypes_the_generator_declares(
     assert tz.SYMBOL[arch] == f"fmha_bwd_tailzero_{family}_kernel_0"
     for dtype in tz.SDPA_BWD_TAILZERO_DTYPES:
         assert f'"{dtype}":' in text
+    assert f'KERNEL_NAME_HV = "fmha_bwd_tailzero_hv_{family}"' in text
+    assert tz.SYMBOL_HV[arch] == f"fmha_bwd_tailzero_hv_{family}_kernel_0"
 
 
 @pytest.mark.parametrize("arch", sorted(KERNEL_FILES))
@@ -305,6 +415,34 @@ def test_a_companion_spec_names_its_role_and_dtype() -> None:
             assert gd.companion_identity(companion) == ("tailzero", dtype)
     reduce = {"spec": "dbias_reduce,bf16,32,plain,bk,0,0,tail,0,1;arch=gfx11-generic"}
     assert gd.companion_identity(reduce) == ("dbias_reduce", "bf16")
+
+
+def test_a_v_head_spec_names_its_role_and_dtype() -> None:
+    for arch in tz.ARCHES:
+        for dtype in tz.HV_DTYPES:
+            companion = {"spec": tz.spec_key(arch, dtype, True)}
+            assert gd.companion_identity(companion) == ("tailzero_hv", dtype)
+    assert tz.spec_key("gfx950", "bf16", True) == "tailzero_hv,bf16"
+    assert (
+        tz.spec_key("gfx11-generic", "f16", True)
+        == "tailzero_hv,f16;arch=gfx11-generic"
+    )
+    assert tz.HV_DTYPES == ("f16", "bf16")
+
+
+def test_the_existing_spec_keys_are_unchanged() -> None:
+    assert tz.spec_key("gfx950", "f16") == "tailzero,f16"
+    assert tz.spec_key("gfx11-generic", "fp32") == "tailzero,fp32;arch=gfx11-generic"
+
+
+def test_the_ten_objects_have_distinct_names() -> None:
+    names = {
+        tz.object_name(arch, dtype, hv)
+        for arch in tz.ARCHES
+        for hv, dtypes in ((False, tz.SDPA_BWD_TAILZERO_DTYPES), (True, tz.HV_DTYPES))
+        for dtype in dtypes
+    }
+    assert len(names) == 10
 
 
 def test_the_six_objects_have_distinct_names() -> None:

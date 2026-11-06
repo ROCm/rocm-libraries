@@ -76,6 +76,10 @@
       "type": "int"
     },
     {
+      "name": "bias_f32",
+      "type": "int"
+    },
+    {
       "name": "block_threads",
       "type": "int",
       "default_value": 256
@@ -86,6 +90,10 @@
     },
     {
       "name": "grid",
+      "type": "string"
+    },
+    {
+      "name": "u2_role",
       "type": "string"
     }
   ]

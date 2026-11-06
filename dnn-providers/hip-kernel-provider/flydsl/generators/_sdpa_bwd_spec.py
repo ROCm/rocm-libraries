@@ -28,8 +28,8 @@ Canonical string (``Spec.key()``, parsed by ``Spec.parse``):
   hdv     : V head dim carried in meta (0 = tile; the dQ convention is ``hdv_of`` of the builder)
   hints   : 0|1  apply the kernel module's _COMPILE_HINTS
   knobs   : perf knobs, listed only when set, in KNOBS order. Unset = the FlyDSL policy value.
-            dkdv: num_waves mfma_rows dkv_shards block_q waves_per_eu tight_registers num_stream_buffers gqa_pack
-            dq  : num_waves block_m block_n mfma_rows waves_per_eu store_db bias_stage
+            dkdv: num_waves mfma_rows dkv_shards block_q waves_per_eu tight_registers num_stream_buffers gqa_pack bias_f32 u2
+            dq  : num_waves block_m block_n mfma_rows waves_per_eu store_db bias_stage bias_f32 u2
             prep: sink (``sink=1``: the sink twin, a different object with a different ABI)
             merged: num_waves mfma_rows dkv_shards role_order store_db gqa_pack (num_waves, mfma_rows and
             dkv_shards are the dK/dV role's grid-fill knobs, with the split dK/dV meaning; the dQ role follows the
@@ -41,14 +41,21 @@ Canonical string (``Spec.key()``, parsed by ``Spec.parse``):
             ``gfx12-generic``), before any knob, so every gfx950 key and hash is unchanged. A generic arch builds prep, dkdv,
             dq and dbias_reduce only; its tiles are ``GENERIC_LADDER`` for every dtype; its floor is ``g1`` for a padded dkdv
             or dq and ``tail`` for every other kernel; its knobs are ``KNOBS_GENERIC`` (fp32: ``KNOBS_GENERIC_F32``).
-            dkdv: num_waves block_q waves_per_eu split_head_dim contraction_shards transposed_source sched_strategy dump rne
-            dq  : num_waves block_m block_n waves_per_eu store_db bias_stage contraction_shards kt_lds_layout lpt_tile_order dump rne
+            dkdv: num_waves block_q waves_per_eu split_head_dim contraction_shards transposed_source sched_strategy dump rne bias_f32 u2
+            dq  : num_waves block_m block_n waves_per_eu store_db bias_stage contraction_shards kt_lds_layout lpt_tile_order dump rne bias_f32 u2
             fp32 dkdv: num_waves block_q block_kv waves_per_eu sched_strategy dump
             fp32 dq  : num_waves block_m block_n waves_per_eu store_db lpt_tile_order dump
             A knob is listed only when it is not the policy value: ``split_head_dim=1``, ``contraction_shards=<2^n>``,
             ``transposed_source=derived``, ``sched_strategy=<non-default>``, ``lpt_tile_order=0``, ``kt_lds_layout=staged``,
             ``dump=1``. ``rne=1`` (bf16 dkdv and dq only) narrows P and dS to bf16 round-to-nearest-even instead of
             truncating; it is a spelled pin, so an RNE object and its truncating twin have different keys.
+
+  feature knobs (``FEATURE_KNOBS``; dkdv and dq of f16 and bf16 on either arch, last in every knob order; they select a different
+            object and the policy resolution never takes them):
+            ``bias_f32=1`` (``cls=bias``): the bias is FLOAT beside the 16-bit Q/K/V, and bias and dB strides are in elements of the
+            bias dtype; a gfx950 dQ also needs ``bias_stage=direct`` (the f32 bias is never staged in LDS).
+            ``u2=dk`` / ``u2=dv`` (dkdv) and ``u2=dq`` (dq): the value-head split for ``Hk != Hv`` (the dK-only, the dV-only and
+            the V-head dQ object); ``cls`` plain or causal, never ``bias_f32``. The objects take ``num_head_v`` after ``num_head_k``.
 
 ``Spec.hash()`` is the first 12 hex digits of sha256(key()).
 """
@@ -98,6 +105,8 @@ KNOBS = {
         "tight_registers",
         "num_stream_buffers",
         "gqa_pack",
+        "bias_f32",
+        "u2",
     ),
     "dq": (
         "num_waves",
@@ -107,6 +116,8 @@ KNOBS = {
         "waves_per_eu",
         "store_db",
         "bias_stage",
+        "bias_f32",
+        "u2",
     ),
     "merged": (
         "num_waves",
@@ -132,6 +143,8 @@ KNOBS_GENERIC = {
         "sched_strategy",
         "dump",
         "rne",
+        "bias_f32",
+        "u2",
     ),
     "dq": (
         "num_waves",
@@ -145,6 +158,8 @@ KNOBS_GENERIC = {
         "lpt_tile_order",
         "dump",
         "rne",
+        "bias_f32",
+        "u2",
     ),
 }
 # The generic fp32 (VALU) family: block_q is dK/dV's BLOCK_M and block_kv its BLOCK_N, block_m and block_n dQ's.
@@ -170,10 +185,20 @@ KNOBS_GENERIC_F32 = {
     ),
 }
 
+# The feature knobs: they select a different object (the FLOAT-bias and value-head families) and no tuning resolves them, so a
+# row that sets none of them is a policy-default row, and a table row may stop before them.
+FEATURE_KNOBS = ("bias_f32", "u2")
+
 # The columns of a generic arch's instance-table row after the ten head fields (``tools/sdpa_bwd_tables_from_sweep.py``): the
-# knobs of both dtype families, the 16-bit list first, then the fp32-only knobs.
+# knobs of both dtype families, the 16-bit list first, then the fp32-only knobs, then the feature knobs.
 GENERIC_TABLE_KNOBS = {
-    kernel: tuple(dict.fromkeys(KNOBS_GENERIC[kernel] + KNOBS_GENERIC_F32[kernel]))
+    kernel: tuple(
+        dict.fromkeys(
+            tuple(k for k in KNOBS_GENERIC[kernel] if k not in FEATURE_KNOBS)
+            + KNOBS_GENERIC_F32[kernel]
+            + tuple(k for k in KNOBS_GENERIC[kernel] if k in FEATURE_KNOBS)
+        )
+    )
     for kernel in KNOBS_GENERIC
 }
 
@@ -217,6 +242,17 @@ FP32_ONLY_VALUES = {
     "dq": {"block_m": (16,), "block_n": (16,)},
 }
 
+# The kernel symbol of a value-head split object (``u2``), per arch and kernel (the compiled name, ``_0`` suffix included): the
+# family's existing kernel name with ``_u2`` after its op stem. The dV-only object (``u2=dv``) shares the dK/dV symbol.
+U2_SYMBOLS = {
+    (GFX950, "dkdv"): "fmha_bwd_dkdv_u2_gfx950_kernel_0",
+    (GFX950, "dq"): "fmha_bwd_dq_u2_gfx950_kernel_0",
+    ("gfx11-generic", "dkdv"): "bwd_dkdv_u2_kernel_0",
+    ("gfx11-generic", "dq"): "fmha_bwd_dq_u2_gfx11_kernel_0",
+}
+U2_SYMBOLS["gfx12-generic", "dkdv"] = U2_SYMBOLS["gfx11-generic", "dkdv"]
+U2_SYMBOLS["gfx12-generic", "dq"] = U2_SYMBOLS["gfx11-generic", "dq"]
+
 ALL_KNOBS = tuple(dict.fromkeys(k for ks in KNOBS.values() for k in ks))
 # Every knob field of a Spec, either arch.
 KNOB_FIELDS = tuple(
@@ -232,9 +268,10 @@ STR_KNOBS = {
     "transposed_source": ("derived",),
     "kt_lds_layout": ("staged",),
     "sched_strategy": SCHED_STRATEGIES,
+    "u2": ("dk", "dv", "dq"),
 }  # knobs whose value is one of these words rather than an int
 # Boolean knobs, spelled ``<knob>=1`` only.
-ONE_KNOBS = ("gqa_pack", "sink", "split_head_dim", "dump", "rne")
+ONE_KNOBS = ("gqa_pack", "sink", "split_head_dim", "dump", "rne", "bias_f32")
 
 
 def knobs_of(kernel: str, arch: str = GFX950, dtype: str | None = None) -> tuple:
@@ -289,6 +326,8 @@ class Spec:
     lpt_tile_order: int | None = None
     block_kv: int | None = None
     rne: int | None = None
+    bias_f32: int | None = None
+    u2: str | None = None
     arch: str = GFX950
 
     def __post_init__(self):
@@ -374,6 +413,11 @@ class Spec:
                     bad(f"knob {k} must be one of {STR_KNOBS[k]}")
                 if k == "bias_stage" and (self.cls != "bias" or self.kernel != "dq"):
                     bad("bias_stage applies to bias dQ objects only")
+                if k == "u2":
+                    if v not in {"dkdv": ("dk", "dv"), "dq": ("dq",)}[self.kernel]:
+                        bad(f"u2={v} does not apply to {self.kernel}")
+                    if self.cls == "bias" or self.bias_f32 is not None:
+                        bad("u2 applies to plain and causal objects without bias_f32")
                 continue
             if k == "tight_registers":
                 object.__setattr__(self, k, int(bool(v)))
@@ -387,6 +431,15 @@ class Spec:
                     bad(f"{k} is spelled {k}=1")
                 if k == "rne" and self.dtype != "bf16":
                     bad("rne applies to bf16 dkdv/dq objects only")
+                if k == "bias_f32":
+                    if self.cls != "bias":
+                        bad("bias_f32 applies to bias objects only")
+                    if (
+                        self.kernel == "dq"
+                        and not generic
+                        and self.bias_stage != "direct"
+                    ):
+                        bad("a gfx950 bias_f32 dQ object needs bias_stage=direct")
             elif k == "lpt_tile_order":
                 if v != 0:
                     bad(
@@ -420,6 +473,11 @@ class Spec:
                 )
             if self.num_waves is not None and self.num_waves % team:
                 bad(f"num_waves must be a multiple of the team size {team}")
+
+    @property
+    def bias_dtype(self) -> str:
+        """The dtype of the bias operand: FLOAT for a ``bias_f32`` object, else the dtype of Q."""
+        return FP32 if self.bias_f32 else self.dtype
 
     @property
     def knobs(self):

@@ -123,7 +123,38 @@ struct MatchOptions
 {
     /// Accept FLOAT (fp32) data tensors, bias and dBias. Off, FLOAT declines [data_type] (DT-2).
     bool acceptFloat = false;
+    /// Accept a FLOAT bias (and dBias) beside f16 or bf16 Q, K and V. Off, it declines
+    /// [attn_mask] (BI-2).
+    bool acceptF32Bias = false;
+    /// Accept V and dV with a head count of their own, when Hq is a multiple of both Hk and Hv
+    /// and the graph has no bias, is not FLOAT and is not ragged. Off, a V whose heads differ
+    /// from K's declines [shape] (SH-1).
+    bool acceptValueHeads = false;
 };
+
+/// What the split engine opts into: every option.
+inline constexpr MatchOptions SPLIT_MATCH_OPTIONS = [] {
+    MatchOptions options;
+    options.acceptFloat = true;
+    options.acceptF32Bias = true;
+    options.acceptValueHeads = true;
+    return options;
+}();
+
+/// The head-dim tile and floor of one shipped band of the f32-bias and `Hk != Hv` rows: a
+/// padded row serves head dims above `floor` and at most `tile`; an exact row (floor
+/// `tile - 1`) serves the tile itself.
+struct HeadDimBand
+{
+    int64_t floor = 0;
+    int64_t tile = 0;
+};
+
+/// The bands the shipped f32-bias and `Hk != Hv` rows cover, per architecture family (the
+/// split engine's graph_match logs a graph outside them; host test
+/// TestFlydslSdpaBwdSplitPacks.cpp derives the bands from the loaded descriptors and compares).
+inline constexpr std::array<HeadDimBand, 2> GFX950_PARITY_BANDS{{{63, 64}, {127, 128}}};
+inline constexpr std::array<HeadDimBand, 2> GFX11_PARITY_BANDS{{{0, 64}, {0, 128}}};
 
 /// What the graph match computes, once, for every engine that serves the graph.
 struct SdpaBwdProblem
@@ -132,9 +163,14 @@ struct SdpaBwdProblem
     data_objects::DataType dtype = data_objects::DataType::UNSET;
     /// Width of one element of dtype: 2 for f16 and bf16, 4 for FLOAT.
     uint32_t elementBytes = 0;
+    /// Width of one element of the bias and dBias: the bias's own dtype (4 for a FLOAT bias
+    /// beside a 16-bit Q), elementBytes when the graph has no bias.
+    uint32_t biasElementBytes = 0;
     int64_t batch = 0;
     int64_t numHeads = 0;
     int64_t numKvHeads = 0;
+    /// V's and dV's head count: numKvHeads unless the engine opted into acceptValueHeads.
+    int64_t numVHeads = 0;
     /// Tensor dimensions.
     int64_t seqLenQ = 0;
     int64_t seqLenKv = 0;
@@ -487,6 +523,12 @@ private:
         return REQUIRED_ALIGNMENT_BYTES / static_cast<int64_t>(_problem.elementBytes);
     }
 
+    /// Elements of one 16-byte vector in the bias's dtype: 8 for a 16-bit bias, 4 for FLOAT.
+    int64_t biasVectorElements() const
+    {
+        return REQUIRED_ALIGNMENT_BYTES / static_cast<int64_t>(_problem.biasElementBytes);
+    }
+
     int64_t dim(size_t operand, uint32_t axis) const
     {
         return dimsOf(_operands[operand]).Get(axis);
@@ -589,8 +631,9 @@ private:
         return std::nullopt;
     }
 
-    /// SH-1: dQ, dK and dV match Q, K and V; O and dO are [B, Hq, Sq, Dv]; V's heads equal
-    /// K's; stats is [B, Hq, Sq, 1]; every extent is positive.
+    /// SH-1: dQ, dK and dV match Q, K and V; O and dO are [B, Hq, Sq, Dv]; V's (and dV's)
+    /// heads equal K's, or are V's own when the engine opts in (MatchOptions::acceptValueHeads;
+    /// checkHeads bounds them); stats is [B, Hq, Sq, 1]; every extent is positive.
     Verdict checkShapes()
     {
         const auto all = [this](auto&& visit) -> Verdict {
@@ -634,10 +677,11 @@ private:
         const int64_t kvHeads = dim(K, HEAD_AXIS);
         const int64_t seqKv = dim(K, SEQ_AXIS);
         const int64_t dimV = dim(V, DIM_AXIS);
+        const int64_t valueHeads = _options.acceptValueHeads ? dim(V, HEAD_AXIS) : kvHeads;
 
         const std::array<int64_t, 4> q{batch, heads, seqQ, dimQk};
         const std::array<int64_t, 4> k{batch, kvHeads, seqKv, dimQk};
-        const std::array<int64_t, 4> v{batch, kvHeads, seqKv, dimV};
+        const std::array<int64_t, 4> v{batch, valueHeads, seqKv, dimV};
         const std::array<int64_t, 4> o{batch, heads, seqQ, dimV};
         const std::array<int64_t, 4> stats{batch, heads, seqQ, 1};
         const auto checkAll = [&]() -> Verdict {
@@ -646,7 +690,11 @@ private:
                 return verdict;
             }
             if(auto verdict
-               = expectDims(_operands[V], v, "batch follows Q; heads and sequence follow K"))
+               = expectDims(_operands[V],
+                            v,
+                            _options.acceptValueHeads
+                                ? "batch follows Q; sequence follows K; heads are V's own"
+                                : "batch follows Q; heads and sequence follow K"))
             {
                 return verdict;
             }
@@ -680,6 +728,7 @@ private:
         _problem.batch = batch;
         _problem.numHeads = heads;
         _problem.numKvHeads = kvHeads;
+        _problem.numVHeads = valueHeads;
         _problem.seqLenQ = seqQ;
         _problem.seqLenKv = seqKv;
         _problem.headDimQk = dimQk;
@@ -718,12 +767,16 @@ private:
         }
         _problem.dtype = dtype;
         _problem.elementBytes = elementBytes;
+        _problem.biasElementBytes = elementBytes;
         return std::nullopt;
     }
 
     /// DT-4: max(Dqk, Dv) above MAX_HEAD_DIM declines [head_size]. DT-5: unequal Dqk and Dv are
     /// accepted; tile routing is the engine's. DT-6: any group size is accepted, a head count
-    /// that is not a multiple of the key/value heads declines [gqa].
+    /// that is not a multiple of the key/value heads declines [gqa]. SH-1: V heads that differ
+    /// from K's (only under MatchOptions::acceptValueHeads) need Hq to be a multiple of Hv as
+    /// well, [gqa] otherwise, and decline [shape] under FLOAT; checkRagged and checkBias hold
+    /// the ragged and bias halves of the rule.
     // Every step shares one signature for the table in run(); this one reads only.
     // NOLINTNEXTLINE(readability-make-member-function-const)
     Verdict checkHeads()
@@ -735,13 +788,27 @@ private:
                                + std::to_string(_problem.headDimV) + " exceed "
                                + std::to_string(MAX_HEAD_DIM)};
         }
-        // V's head count equals K's (checkShapes), so one remainder covers both.
         if(_problem.numHeads % _problem.numKvHeads != 0)
         {
             return Decline{"gqa",
                            "query heads " + std::to_string(_problem.numHeads)
                                + " are not a multiple of key/value heads "
                                + std::to_string(_problem.numKvHeads)};
+        }
+        if(_problem.numHeads % _problem.numVHeads != 0)
+        {
+            return Decline{"gqa",
+                           "query heads " + std::to_string(_problem.numHeads)
+                               + " are not a multiple of value heads "
+                               + std::to_string(_problem.numVHeads)};
+        }
+        if(_problem.numVHeads != _problem.numKvHeads
+           && _problem.dtype == data_objects::DataType::FLOAT)
+        {
+            return Decline{"shape",
+                           "value heads " + std::to_string(_problem.numVHeads)
+                               + " differ from key heads " + std::to_string(_problem.numKvHeads)
+                               + " under FLOAT"};
         }
         return std::nullopt;
     }
@@ -775,18 +842,18 @@ private:
     }
 
     /// DT-9: whether a per-(batch, head) slab of @p rows + 1 rows at @p rowStride elements, the
-    /// last @p width elements wide, fits the kernels' 32-bit byte offsets at the problem's
-    /// element width. DT-7: this is the
+    /// last @p width elements wide, of elements @p elementBytes wide, fits the kernels' 32-bit
+    /// byte offsets. DT-7: this is the
     /// only bound on sequence length and tensor size; a tensor larger than 4 GiB in total is
     /// served when every slab fits.
-    bool slabFits(int64_t rows, int64_t rowStride, int64_t width) const
+    static bool slabFits(int64_t rows, int64_t rowStride, int64_t width, uint32_t elementBytes)
     {
         const auto reach = checkedProduct({rows, rowStride});
         if(!reach.has_value() || *reach > INT32_LIMIT)
         {
             return false;
         }
-        return (*reach + width) * static_cast<int64_t>(_problem.elementBytes) <= INT32_LIMIT;
+        return (*reach + width) * static_cast<int64_t>(elementBytes) <= INT32_LIMIT;
     }
 
     /// LY-2: the last stride is 1, the others are independent. LY-3: every stride of an axis of
@@ -854,7 +921,7 @@ private:
                                + " is below the padded width " + std::to_string(padded)};
         }
         const int64_t rows = dims.Get(SEQ_AXIS) - 1;
-        if(!slabFits(rows, strides.Get(SEQ_AXIS), padded))
+        if(!slabFits(rows, strides.Get(SEQ_AXIS), padded, _problem.elementBytes))
         {
             return Decline{"layout",
                            describe(operand) + " per-head slab of " + std::to_string(rows + 1)
@@ -935,7 +1002,8 @@ private:
     /// PV-3: Q, K, V, O, dO, dQ, dK and dV may each be ragged, with an offset tensor and
     /// multiplier of its own (checkOffsetTensor); independently of one another, and beside
     /// dense tensors. PV-8: the stats may carry one too (checkStats pairs it with Q); a ragged
-    /// bias or dBias declines (checkBias). The padding_mask rule is checkVarlen's.
+    /// bias or dBias declines (checkBias). The padding_mask rule is checkVarlen's. SH-1: V heads
+    /// that differ from K's decline [shape] when any tensor is ragged.
     Verdict checkRagged()
     {
         const auto slots = raggedSlots();
@@ -946,7 +1014,18 @@ private:
                 return verdict;
             }
         }
-        return checkOffsetTensor(_stats, _problem.ragged.stats);
+        if(auto verdict = checkOffsetTensor(_stats, _problem.ragged.stats))
+        {
+            return verdict;
+        }
+        if(_problem.numVHeads != _problem.numKvHeads && _problem.ragged.any())
+        {
+            return Decline{"shape",
+                           "value heads " + std::to_string(_problem.numVHeads)
+                               + " differ from key heads " + std::to_string(_problem.numKvHeads)
+                               + " with a ragged tensor"};
+        }
+        return std::nullopt;
     }
 
     /// LY-4: dQ, dK and dV may share one buffer and Q, K and V may be packed views; aliasing
@@ -1271,13 +1350,16 @@ private:
     }
 
     /// BI-6: dBias without bias declines. BI-1: a bias of rank 1..4 right-aligned to
-    /// (B, Hq, Sq, Skv), whose first three axes may broadcast. BI-2: the bias dtype is Q's.
+    /// (B, Hq, Sq, Skv), whose first three axes may broadcast. BI-2: the bias dtype is Q's, or
+    /// FLOAT beside a 16-bit Q when the engine opts in (MatchOptions::acceptF32Bias); every bias
+    /// bound below counts the bias's own element width (SdpaBwdProblem::biasElementBytes).
     /// BI-3: a bias broadcast over batch or head with dBias is accepted. BI-4: dBias with a
     /// row-broadcast bias declines. BI-5, BI-7: dBias has the bias's dims and dtype. PV-8: a
     /// ragged offset on bias or dBias declines. PV-10: bias with padding_mask declines. MW-10:
     /// bias with a mask declines. LY-1, DT-9: bias and dBias alignment and slab bounds. BI-9:
-    /// every non-unit stride of dBias other than the last is a multiple of 8 elements (4 for
-    /// FLOAT), as LY-3 asks of the other outputs.
+    /// every non-unit stride of dBias other than the last is a multiple of 16 bytes (8 elements
+    /// of a 16-bit dBias, 4 of a FLOAT one), as LY-3 asks of the other outputs. SH-1: a bias
+    /// beside V heads that differ from K's declines [shape].
     Verdict checkBias()
     {
         const auto& a = _attributes;
@@ -1290,6 +1372,13 @@ private:
         if(!biasUid.has_value())
         {
             return std::nullopt;
+        }
+        if(_problem.numVHeads != _problem.numKvHeads)
+        {
+            return Decline{"shape",
+                           "value heads " + std::to_string(_problem.numVHeads)
+                               + " differ from key heads " + std::to_string(_problem.numKvHeads)
+                               + " with a bias"};
         }
 
         Operand bias{"bias", *biasUid};
@@ -1306,12 +1395,23 @@ private:
         {
             return Decline{"attn_mask", describe(bias) + " has no dims or mismatched strides"};
         }
-        if(bias.tensor->data_type() != _problem.dtype)
+        const auto biasType = bias.tensor->data_type();
+        const bool floatBesideHalf = _options.acceptF32Bias
+                                     && biasType == data_objects::DataType::FLOAT
+                                     && _problem.elementBytes == 2;
+        if(biasType != _problem.dtype && !floatBesideHalf)
         {
             return Decline{"attn_mask",
-                           describe(bias) + " is " + typeName(bias.tensor->data_type())
-                               + ", but Q is " + typeName(_problem.dtype)};
+                           describe(bias) + " is " + typeName(biasType) + ", but Q is "
+                               + typeName(_problem.dtype)
+                               + (_options.acceptF32Bias
+                                          || biasType != data_objects::DataType::FLOAT
+                                          || _problem.elementBytes != 2
+                                      ? std::string()
+                                      : std::string("; this engine does not accept an f32 bias "
+                                                    "beside a 16-bit Q"))};
         }
+        _problem.biasElementBytes = servedElementBytes(biasType, true);
         const auto& biasDims = dimsOf(bias);
         const auto& biasStrides = stridesOf(bias);
         const std::array<int64_t, 4> target{
@@ -1341,7 +1441,8 @@ private:
             return verdict;
         }
         const auto biasSlabRows = view.dims[SEQ_AXIS] > 1 ? _problem.seqLenQ - 1 : int64_t{0};
-        if(!slabFits(biasSlabRows, view.strides[SEQ_AXIS], _problem.seqLenKv))
+        if(!slabFits(
+               biasSlabRows, view.strides[SEQ_AXIS], _problem.seqLenKv, _problem.biasElementBytes))
         {
             return Decline{"layout",
                            describe(bias) + " per-head slab at row stride "
@@ -1410,14 +1511,14 @@ private:
         for(flatbuffers::uoffset_t axis = 0; axis + 1 < dbiasDims.size(); ++axis)
         {
             const int64_t stride = dbiasStrides.Get(axis);
-            if(dbiasDims.Get(axis) > 1 && stride % vectorElements() != 0)
+            if(dbiasDims.Get(axis) > 1 && stride % biasVectorElements() != 0)
             {
                 return Decline{"layout",
                                describe(dbias) + " stride " + std::to_string(stride) + " on axis "
                                    + std::to_string(axis) + " (extent "
                                    + std::to_string(dbiasDims.Get(axis))
                                    + ") is not a non-negative multiple of "
-                                   + std::to_string(vectorElements()) + " elements"};
+                                   + std::to_string(biasVectorElements()) + " elements"};
             }
         }
         BiasView dbiasView;
@@ -1426,7 +1527,10 @@ private:
             dbiasView.dims[axis] = view.dims[axis];
             dbiasView.strides[axis] = axis < lead ? 0 : dbiasStrides.Get(axis - lead);
         }
-        if(!slabFits(biasSlabRows, dbiasView.strides[SEQ_AXIS], _problem.seqLenKv))
+        if(!slabFits(biasSlabRows,
+                     dbiasView.strides[SEQ_AXIS],
+                     _problem.seqLenKv,
+                     _problem.biasElementBytes))
         {
             return Decline{"layout",
                            describe(dbias) + " per-head slab at row stride "
@@ -1444,8 +1548,11 @@ private:
         return std::nullopt;
     }
 
-    /// DR-4: INT32 and INT64 seed and offset tensors are accepted; the width is recorded. DR-6:
-    /// a device tensor or a pass-by-value one is accepted, of any rank whose every extent is 1. DR-8: a device tensor is dense and
+    /// DR-4: a seed and offset tensor is INT64 or INT32 and the width is recorded, except that a
+    /// device INT32 tensor declines, as the forward engine's matcher declines it: the kernels
+    /// read 8 bytes at a device seed or offset. A pass-by-value INT32 is accepted and
+    /// sign-extended to 64 bits on the host. DR-6: a device tensor or a pass-by-value one is
+    /// accepted, of any rank whose every extent is 1. DR-8: a device tensor is dense and
     /// declares an alignment of at least its element size; a pass-by-value one has no memory.
     Verdict checkSeedTensor(Operand& operand, SeedWidth& width, SeedForm& form)
     {
@@ -1485,8 +1592,14 @@ private:
                    : SeedForm::DEVICE;
         if(form == SeedForm::DEVICE)
         {
-            return checkScalarMemory(
-                operand, width == SeedWidth::INT32 ? INT32_BYTES : INT64_BYTES, "dropout");
+            if(width == SeedWidth::INT32)
+            {
+                return Decline{"dropout",
+                               describe(operand)
+                                   + " is a device INT32 tensor; the kernels read 8 bytes there, "
+                                     "so a device seed or offset must be INT64"};
+            }
+            return checkScalarMemory(operand, INT64_BYTES, "dropout");
         }
         return std::nullopt;
     }
