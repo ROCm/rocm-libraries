@@ -7,13 +7,16 @@
 #include <Tensile/ContractionSolution.hpp>
 #include <Tensile/MasterSolutionLibrary.hpp>
 #include <Tensile/SolutionLibrary.hpp>
+#include <condition_variable>
 #include <cstdint>
 #include <filesystem>
 #include <functional>
 #include <map>
 #include <memory>
 #include <mutex>
+#include <set>
 #include <string>
+#include <thread>
 #include <vector>
 
 namespace TensileLite::hip
@@ -31,6 +34,15 @@ namespace hipblaslt_jit
     constexpr bool    isJitIndex(int32_t index) noexcept
     {
         return index >= jitIndexBase && index < jitIndexEnd;
+    }
+
+    // Whether a map keyed by solution index, such as a prebuilt library's
+    // solutions or libraryMapping, has a key in [jitIndexBase, jitIndexEnd).
+    template <class ByIndex>
+    bool holdsJitIndex(const ByIndex& byIndex)
+    {
+        const auto first = byIndex.lower_bound(jitIndexBase);
+        return first != byIndex.end() && isJitIndex(first->first);
     }
 
     // Libraries live under "v<jitLibrarySchema>"; other versions are never read.
@@ -257,6 +269,14 @@ namespace hipblaslt_jit
         Status     attach(const CacheKey& key, int device, Directory*& attached);
         void       discover(int device);
 
+        // Lookup or publish for the active query. generate is false for a
+        // find-only call, which must not record an attempt.
+        TensileLite::SolutionVector<TensileLite::ContractionSolution>
+            solutionsFor(const TensileLite::ContractionProblemGemm& problem,
+                         const TensileLite::Hardware&               hardware,
+                         int                                        numSolutions,
+                         bool                                       generate);
+
         std::filesystem::path                             m_root;
         DeviceKey                                         m_deviceKey;
         std::mutex                                        m_mutex;
@@ -264,6 +284,24 @@ namespace hipblaslt_jit
         bool                                              m_checked = false;
         std::map<std::string, std::unique_ptr<Directory>> m_directories;
         std::map<int, std::vector<Directory*>>            m_routes;
+        // One generation of a problem. The first caller owns it; others wait
+        // until that attempt finishes and then read what it published.
+        struct GenerationAttempt
+        {
+            std::mutex              mutex;
+            std::condition_variable ready;
+            bool                    done = false;
+            std::thread::id         owner{};
+        };
+        // Problems this library already tried to generate. The key is the cache
+        // directory, workspace, requested count, problem type and sizes, so a
+        // different K, datatype or count is still generated. Another root has
+        // its own map.
+        std::mutex                                                m_attemptMutex;
+        std::map<std::string, std::shared_ptr<GenerationAttempt>> m_attempts;
     };
 
+    // Stores GEMM solutions in library under the cache key of backend.
+    std::shared_ptr<const SolutionStore>
+        makeLibraryStore(JitLibrary& library, const BackendInfo& backend, int codeObjectVersion);
 }
