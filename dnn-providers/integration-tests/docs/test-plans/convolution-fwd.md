@@ -589,8 +589,8 @@ tanh; `bias_act` executed only in fp32; `scale_bias_act`, `bias_add_relu` and
 `act_add` never executed; and F13, F19 and F35 never executed. gfx90a declined
 every fused graph.
 
-**The current set.** All 4,398 cases, serial, at this plan's tip, with the
-MIOpen plugin:
+**The current set.** All cases but the two `relu_slope0` regressions (4,398 of
+4,400), serial, with the MIOpen plugin:
 
 | Architecture | OK | Skipped | Failed | Crashed | Wall time |
 |---|---|---|---|---|---|
@@ -604,8 +604,10 @@ joined the gfx942 non-packed-stride skip list. MIOpen executes all 192 cases of
 S47–S62 and L47–L62 on both architectures and every one passes; the S59 fp32
 case needed the fp32 tolerance class of accumulation lengths up to 1,152 (one
 element off by 2.5e-5 at the default 1e-5 on gfx90a). The new fp32 shapes pass
-inside the tolerance class their accumulation length gives them. Claims are
-harvested from these runs: 2,278 on gfx942 and 1,693 on gfx90a.
+inside the tolerance class their accumulation length gives them. The two
+regression cases, run on their own afterwards, pass on gfx942 and are declined on
+gfx90a, like every fused graph there. Claims are harvested from these runs: 2,280
+on gfx942 and 1,693 on gfx90a.
 
 ---
 
