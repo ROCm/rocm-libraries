@@ -14,6 +14,7 @@ so that case checks the bound only. They also hold the C++ host's mirror,
 
 from __future__ import annotations
 
+import os
 import re
 import tempfile
 from pathlib import Path
@@ -30,6 +31,8 @@ _PACKS_DIRS = (
     / "kernel_ingestor_engine"
     / "packs",
 )
+# Named like hipdnn_assets.py's ``_INSTALLED``: the installed copy's root.
+_INSTALLED_PACKS_DIR = _PACKS_DIRS[0]
 _GEOMETRY_HEADERS = (
     "Gfx950AttentionDenseGeometry.hpp",
     "Gfx950AttentionUnified3DGeometry.hpp",
@@ -55,11 +58,11 @@ def test_installed_pack_headers_imply_require_flag(request):
     these cases instead of failing. ``platform/tests/test_engine_linkage.py`` checks
     the CMake wiring both ways, but no CI lane runs that file; this is the in-lane
     half. A source checkout has no copy, so it skips."""
-    if not _PACKS_DIRS[0].is_dir():
+    if not _INSTALLED_PACKS_DIR.is_dir():
         pytest.skip("not an installed tree: no hkp_packs/ header copy")
     assert request.config.getoption(
         "--rocke-require-hkp-pack-headers"
-    ), f"{_PACKS_DIRS[0]} is installed but --rocke-require-hkp-pack-headers was not given"
+    ), f"{_INSTALLED_PACKS_DIR} is installed but --rocke-require-hkp-pack-headers was not given"
 
 
 def _reduce(num_segments: int):
@@ -79,15 +82,25 @@ def _reduce(num_segments: int):
     )
 
 
+def _require_tools_or_skip(reason: str) -> None:
+    """Skip a resource guard whose compiler tools are missing, unless the run
+    requires them (``ROCKE_REQUIRE_COMPILER_TOOLS=1``, set by the CI lane that
+    supplies them): a gate that skips everywhere looks green and checks
+    nothing. Mirrors ``test_mla_prefill_gfx942.py``'s helper of the same name."""
+    if os.environ.get("ROCKE_REQUIRE_COMPILER_TOOLS") == "1":
+        pytest.fail(f"ROCKE_REQUIRE_COMPILER_TOOLS=1 but {reason}")
+    pytest.skip(reason)
+
+
 def _compiled_lds_bytes(kernel, arch: str) -> int:
     """``group_segment_fixed_size`` of ``kernel`` compiled for ``arch``; skips when the
-    comgr toolchain or the HSACO reader is unavailable."""
+    comgr toolchain or the HSACO reader is unavailable, unless the run requires them."""
     try:
         from rocke.helpers.compile import compile_kernel
 
         art = compile_kernel(kernel, arch=arch, capture_ir_text=False)
     except (ImportError, OSError, RuntimeError) as e:  # pragma: no cover
-        pytest.skip(f"comgr toolchain unavailable: {e}")
+        _require_tools_or_skip(f"comgr toolchain unavailable: {e}")
     from rocke.analysis.isa import analyze_hsaco
 
     with tempfile.NamedTemporaryFile(suffix=".hsaco") as fh:
@@ -96,7 +109,7 @@ def _compiled_lds_bytes(kernel, arch: str) -> int:
         try:
             lds = analyze_hsaco(Path(fh.name)).resources.lds_bytes
         except (FileNotFoundError, RuntimeError) as e:  # pragma: no cover
-            pytest.skip(f"HSACO introspection tool unavailable: {e}")
+            _require_tools_or_skip(f"HSACO introspection tool unavailable: {e}")
     if lds is None:  # pragma: no cover - metadata shape drift
         pytest.skip("could not parse group_segment_fixed_size from HSACO")
     return lds

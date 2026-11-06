@@ -273,8 +273,10 @@ def test_installed_ctest_entries_get_scoped_environment_contracts(
             expected_platform_environment.update(compiler_environment)
             expected_mla_environment.update(compiler_environment)
             expected_mla_environment["ROCKE_REQUIRE_COMPILER_TOOLS"] = "1"
-            # Tool discovery only: the reduce-LDS comgr cases need llvm-objdump.
+            # Tool discovery and enforcement: the reduce-LDS comgr cases need
+            # llvm-objdump and fail (not skip) when it is required but missing.
             expected_attention_cpu_environment.update(compiler_environment)
+            expected_attention_cpu_environment["ROCKE_REQUIRE_COMPILER_TOOLS"] = "1"
 
         assert environment_for(tests, "rocke_pytest") == expected_platform_environment
         assert (

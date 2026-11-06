@@ -772,11 +772,13 @@ if(ROCKE_INSTALL_TESTS)
     endif()
     # test_attention_tiled_3d_reduce_lds.py compiles the reduce through comgr and
     # reads its LDS size with llvm-objdump, so the entry takes the compiler tool
-    # discovery list; no file in it reads the requirement list (TESTING.md §5.1.4).
+    # discovery list; it also reads the requirement list (TESTING.md §5.1.4), so a
+    # missing llvm-objdump fails the entry instead of silently skipping those cases.
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
            "set(_rocke_library_attention_cpu_pytest_environment \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\")\n"
            "list(APPEND _rocke_library_attention_cpu_pytest_environment\n"
-           "     \${_rocke_compiler_tool_environment})\n"
+           "     \${_rocke_compiler_tool_environment}\n"
+           "     \${_rocke_compiler_requirement_environment})\n"
            "add_test(rocke_library_attention_cpu_pytest python -m pytest${_ROCKE_LIBRARY_ATTENTION_CPU_TESTS} -v -rs --timeout=30)\n")
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
            "set_tests_properties(rocke_library_attention_cpu_pytest PROPERTIES\n"
