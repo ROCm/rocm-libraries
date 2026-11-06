@@ -3926,6 +3926,221 @@ def test_superset_import_keeps_aliases_by_name():
         print("  PASS: superset_import_keeps_aliases_by_name")
 
 
+_RAGGED_LINKS = {
+    "q": "ragged_offset_q",
+    "o": "ragged_offset_q",
+    "k": "ragged_offset_kv",
+    "v": "ragged_offset_kv",
+}
+
+
+def _ragged_graph(sink=True, stats=True, seq=4):
+    """:func:`_optional_graph` with ragged q, k, v and o.
+
+    q and o link to the offset tensor ``ragged_offset_q``; k and v link to
+    ``ragged_offset_kv``. The offset tensors take the next uids in creation
+    order, so their sorted-name uids differ.
+    """
+    graph = _optional_graph(sink=sink, stats=stats, seq=seq)
+    tensors = graph["tensors"]
+    next_uid = 1 + max(t["uid"] for t in tensors)
+    offsets = {}
+    for i, name in enumerate(("ragged_offset_q", "ragged_offset_kv")):
+        offsets[name] = next_uid + i
+        tensors.append(
+            {
+                "uid": next_uid + i,
+                "name": name,
+                "dims": [2, 1, 1, 1],
+                "strides": [1, 1, 1, 1],
+                "data_type": "int32",
+                "virtual": False,
+                "alignment": 16,
+                "is_runtime_pass_by_value": False,
+            }
+        )
+    for t in tensors:
+        if t["name"] in _RAGGED_LINKS:
+            t["ragged_offset_tensor_uid"] = offsets[_RAGGED_LINKS[t["name"]]]
+            t["ragged_offset_multiplier"] = 8
+    return graph
+
+
+def _ragged_links(graph):
+    """{tensor name: name of the tensor its ragged_offset_tensor_uid holds}."""
+    names = {t["uid"]: t["name"] for t in graph["tensors"]}
+    return {
+        t["name"]: names.get(t["ragged_offset_tensor_uid"])
+        for t in graph["tensors"]
+        if t.get("ragged_offset_tensor_uid") is not None
+    }
+
+
+def _ragged_sidecar(graph, base_seed, q_end, kv_end):
+    """:func:`_optional_sidecar` with exact ``values`` fills for the offset tensors."""
+    sidecar = _optional_sidecar(graph, base_seed)
+    sidecar["format_version"] = 2
+    uid = {t["name"]: t["uid"] for t in graph["tensors"]}
+    for name, end in (("ragged_offset_q", q_end), ("ragged_offset_kv", kv_end)):
+        sidecar["inputs"][str(uid[name])] = {
+            "kind": "values",
+            "values": [0, end],
+            "repeat": False,
+        }
+    return sidecar
+
+
+def test_remap_graph_remaps_tensor_links():
+    """remap_graph, canonical_uid_map and skeleton_hash follow tensor-level uid links."""
+    from bundle_utils import (
+        absent_tensor_problems,
+        canonical_uid_map,
+        canonical_uid_map_by_name,
+        remap_graph,
+        skeleton_hash,
+    )
+
+    graph = _ragged_graph()
+    assert _ragged_links(graph) == _RAGGED_LINKS
+    by_name = canonical_uid_map_by_name(graph)
+    offset_uids = [
+        t["uid"] for t in graph["tensors"] if t["name"].startswith("ragged_offset")
+    ]
+    assert all(by_name[u] != u for u in offset_uids), by_name
+    for make_map in (canonical_uid_map, canonical_uid_map_by_name):
+        remapped = remap_graph(graph, make_map(graph))
+        assert _ragged_links(remapped) == _RAGGED_LINKS, make_map.__name__
+        assert skeleton_hash(remapped) == skeleton_hash(graph), make_map.__name__
+
+    unlinked = copy.deepcopy(graph)
+    for t in unlinked["tensors"]:
+        t.pop("ragged_offset_tensor_uid", None)
+    assert canonical_uid_map(graph) == canonical_uid_map(unlinked)
+
+    swapped = copy.deepcopy(graph)
+    q = next(t for t in swapped["tensors"] if t["name"] == "q")
+    q["ragged_offset_tensor_uid"] = offset_uids[1]
+    assert skeleton_hash(swapped) != skeleton_hash(graph)
+
+    plain = _optional_graph()
+    null_links = copy.deepcopy(plain)
+    for t in null_links["tensors"]:
+        t["ragged_offset_tensor_uid"] = None
+    assert skeleton_hash(null_links) == skeleton_hash(plain)
+    assert _ragged_links(remap_graph(null_links, canonical_uid_map(null_links))) == {}
+
+    stale = copy.deepcopy(graph)
+    q = next(t for t in stale["tensors"] if t["name"] == "q")
+    q["ragged_offset_tensor_uid"] = 99
+    assert 99 in canonical_uid_map(stale)
+    try:
+        remap_graph(stale, canonical_uid_map_by_name(stale))
+    except ValueError as e:
+        assert "99" in str(e), e
+    else:
+        raise AssertionError("a link to a uid without a map entry remaps")
+
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        bundle_dir = tmp / "bundles"
+        bundle_dir.mkdir()
+        r = _import(tmp, "stale", stale, bundle_dir, check=False)
+        assert r.returncode == 1 and "does not declare" in r.stderr, r.stderr
+        assert _inventory(bundle_dir) == {}, _inventory(bundle_dir)
+
+    problems = absent_tensor_problems(graph, [offset_uids[0]])
+    assert any("ragged_offset_tensor_uid" in p for p in problems), problems
+    print("  PASS: remap_graph_remaps_tensor_links")
+
+
+def test_import_ragged_graph_keeps_offset_links():
+    """An imported ragged graph keeps its offset links and offset values on renumbered uids."""
+    from bundle_utils import (
+        canon,
+        canonical_uid_map_by_name,
+        expand_case,
+        inputs_by_name,
+        remap_graph,
+    )
+
+    for mode, flags in (("default", ()), ("grouped", _GROUPED_FLAGS)):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            bundle_dir = tmp / "bundles"
+            bundle_dir.mkdir()
+            graph = _ragged_graph()
+            sidecar = _ragged_sidecar(graph, 300, 32, 24)
+            r = _import_optional(tmp, bundle_dir, "ragged", graph, sidecar, *flags)
+            assert r.returncode == 0, (mode, r.stderr)
+            (rel,) = _sweep_dirs(bundle_dir)
+            sweep, template = _sweep_and_template(bundle_dir, rel)
+            (case,) = sweep["cases"]
+            built = expand_case(template, case)
+            assert _ragged_links(built) == _RAGGED_LINKS, (mode, built["tensors"])
+            want = remap_graph(graph, canonical_uid_map_by_name(graph))
+            assert canon(built) == canon(want), mode
+            assert inputs_by_name(case["metadata"], template) == inputs_by_name(
+                sidecar, graph
+            ), (mode, case["metadata"])
+    print("  PASS: import_ragged_graph_keeps_offset_links")
+
+
+def test_superset_import_ragged_offset_values_per_case():
+    """A ragged superset sweep expands each case to its offset links and offset values."""
+    from bundle_utils import (
+        canon,
+        expand_case,
+        inputs_by_name,
+        remap_graph,
+        uid_map_onto,
+    )
+
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        bundle_dir = tmp / "bundles"
+        bundle_dir.mkdir()
+        graphs = [
+            ("full", _ragged_graph(), 32, 24),
+            ("no_sink", _ragged_graph(sink=False, seq=8), 64, 40),
+            ("no_stats", _ragged_graph(stats=False, seq=16), 128, 96),
+        ]
+        sidecars = {}
+        for i, (name, graph, q_end, kv_end) in enumerate(graphs):
+            sidecars[name] = _ragged_sidecar(graph, 100 * (i + 1), q_end, kv_end)
+            r = _import_optional(
+                tmp,
+                bundle_dir,
+                name,
+                graph,
+                sidecars[name],
+                *_SUPERSET_FLAGS,
+                "--topology",
+                "Ragged",
+                "--case-id",
+                name,
+                "--strict",
+            )
+            assert r.returncode == 0, r.stderr
+        (rel,) = _sweep_dirs(bundle_dir)
+        sweep, template = _sweep_and_template(bundle_dir, rel)
+        assert sweep["version"] == 2, sweep
+        cases = {c["id"]: c for c in sweep["cases"]}
+        assert sorted(cases) == ["full", "no_sink", "no_stats"], sorted(cases)
+        for name, graph, q_end, kv_end in graphs:
+            case = cases[name]
+            if case.get("absent_tensors"):
+                _assert_absent_case_loads(sweep, template, case)
+            built = expand_case(template, case)
+            assert _ragged_links(built) == _RAGGED_LINKS, (name, built["tensors"])
+            want = remap_graph(graph, uid_map_onto(graph, template))
+            assert canon(built) == canon(want), name
+            by_name = inputs_by_name(case["metadata"], template)
+            assert by_name["ragged_offset_q"]["values"] == [0, q_end], (name, by_name)
+            assert by_name["ragged_offset_kv"]["values"] == [0, kv_end], (name, by_name)
+            assert by_name == inputs_by_name(sidecars[name], graph), name
+        print("  PASS: superset_import_ragged_offset_values_per_case")
+
+
 def main() -> int:
     verbose = "-v" in sys.argv
     failures = 0
@@ -3994,6 +4209,9 @@ def main() -> int:
         test_superset_index_of_a_sweep_with_only_absent_cases,
         test_superset_import_keeps_aliases_by_name,
         test_import_cache_matches_separate_runs,
+        test_remap_graph_remaps_tensor_links,
+        test_import_ragged_graph_keeps_offset_links,
+        test_superset_import_ragged_offset_values_per_case,
     ]
 
     for t in tests:

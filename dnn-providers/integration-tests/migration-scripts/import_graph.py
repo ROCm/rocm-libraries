@@ -1074,7 +1074,14 @@ def main(argv=None, cache: ImportCache = None) -> int:
     # be remapped in lockstep before hashing/matching (canonical_uid_map_by_name).
     uid_map = canonical_uid_map_by_name(graph)
     named_meta = metadata_uid_names(meta, graph)
-    graph = remap_graph(graph, uid_map)
+    try:
+        graph = remap_graph(graph, uid_map)
+    except ValueError as e:
+        print(
+            f"  ERROR: the graph refers to a uid it does not declare: {e}",
+            file=sys.stderr,
+        )
+        return 1
     meta = remap_meta_inputs(meta, uid_map)
     if metadata_uid_names(meta, graph) != named_meta:
         print(
