@@ -15,7 +15,7 @@
 /**
  * @file TestGlobalKnobDefines.cpp
  * @brief Unit tests for GlobalKnobDefines.hpp: HIPDNN_FORCE_BENCHMARKING and
- *        HIPDNN_INGESTOR_CANDIDATE_LIMIT parsing.
+ *        HIPDNN_INGESTOR_SHORTLIST_LIMIT parsing.
  *
  * Deliberately outside tests/ingestor/ and NOT guarded on
  * HIPDNN_ENABLE_KERNEL_INGESTOR. The header under test is itself unguarded, because the
@@ -144,8 +144,8 @@ TEST(TestGlobalKnobDefines, KnobAndEnvironmentNamesAreStable)
     EXPECT_STREQ(hipdnn_plugin_sdk::BENCHMARKING_KNOB_NAME, "global.benchmarking");
     EXPECT_STREQ(hipdnn_plugin_sdk::WORKSPACE_SIZE_LIMIT_KNOB_NAME, "global.workspace_size_limit");
     EXPECT_STREQ(hipdnn_plugin_sdk::FORCE_BENCHMARKING_ENV_NAME, "HIPDNN_FORCE_BENCHMARKING");
-    EXPECT_STREQ(hipdnn_plugin_sdk::INGESTOR_CANDIDATE_LIMIT_ENV_NAME,
-                 "HIPDNN_INGESTOR_CANDIDATE_LIMIT");
+    EXPECT_STREQ(hipdnn_plugin_sdk::INGESTOR_SHORTLIST_LIMIT_ENV_NAME,
+                 "HIPDNN_INGESTOR_SHORTLIST_LIMIT");
 }
 
 /// An unset variable is the default path every non-benchmarking run takes.
@@ -168,26 +168,26 @@ TEST(TestGlobalKnobDefines, TheOverrideIsReReadOnEveryCall)
     EXPECT_EQ(hipdnn_plugin_sdk::benchmarkingOverrideFromEnv(), std::optional<bool>(false));
 }
 
-struct CandidateLimitCase
+struct ShortlistLimitCase
 {
     std::string envValue;
     std::optional<size_t> expected;
 };
 
-class TestIngestorCandidateLimitVariants : public ::testing::TestWithParam<CandidateLimitCase>
+class TestIngestorShortlistLimitVariants : public ::testing::TestWithParam<ShortlistLimitCase>
 {
 };
 
-TEST_P(TestIngestorCandidateLimitVariants, ParsesAsExpected)
+TEST_P(TestIngestorShortlistLimitVariants, ParsesAsExpected)
 {
     const auto& testCase = GetParam();
     const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter guard(
-        hipdnn_plugin_sdk::INGESTOR_CANDIDATE_LIMIT_ENV_NAME, testCase.envValue);
+        hipdnn_plugin_sdk::INGESTOR_SHORTLIST_LIMIT_ENV_NAME, testCase.envValue);
 
-    EXPECT_EQ(hipdnn_plugin_sdk::ingestorCandidateLimitFromEnv(), testCase.expected);
+    EXPECT_EQ(hipdnn_plugin_sdk::ingestorShortlistLimitFromEnv(), testCase.expected);
 }
 
-std::string candidateLimitCaseName(const ::testing::TestParamInfo<CandidateLimitCase>& info)
+std::string shortlistLimitCaseName(const ::testing::TestParamInfo<ShortlistLimitCase>& info)
 {
     std::string name = "Case" + std::to_string(info.index);
     for(const char character : info.param.envValue)
@@ -202,21 +202,21 @@ std::string candidateLimitCaseName(const ::testing::TestParamInfo<CandidateLimit
 
 // Positive integers are limits; everything else, a zero included, means no limit.
 INSTANTIATE_TEST_SUITE_P(PositiveIntegersAndRejects,
-                         TestIngestorCandidateLimitVariants,
-                         ::testing::Values(CandidateLimitCase{"1", size_t{1}},
-                                           CandidateLimitCase{"64", size_t{64}},
-                                           CandidateLimitCase{" 128 ", size_t{128}},
-                                           CandidateLimitCase{"007", size_t{7}},
-                                           CandidateLimitCase{"", std::nullopt},
-                                           CandidateLimitCase{"   ", std::nullopt},
-                                           CandidateLimitCase{"0", std::nullopt},
-                                           CandidateLimitCase{"-4", std::nullopt},
-                                           CandidateLimitCase{"+4", std::nullopt},
-                                           CandidateLimitCase{"4x", std::nullopt},
-                                           CandidateLimitCase{"1.5", std::nullopt},
-                                           CandidateLimitCase{"all", std::nullopt},
-                                           CandidateLimitCase{"99999999999999999999999",
+                         TestIngestorShortlistLimitVariants,
+                         ::testing::Values(ShortlistLimitCase{"1", size_t{1}},
+                                           ShortlistLimitCase{"64", size_t{64}},
+                                           ShortlistLimitCase{" 128 ", size_t{128}},
+                                           ShortlistLimitCase{"007", size_t{7}},
+                                           ShortlistLimitCase{"", std::nullopt},
+                                           ShortlistLimitCase{"   ", std::nullopt},
+                                           ShortlistLimitCase{"0", std::nullopt},
+                                           ShortlistLimitCase{"-4", std::nullopt},
+                                           ShortlistLimitCase{"+4", std::nullopt},
+                                           ShortlistLimitCase{"4x", std::nullopt},
+                                           ShortlistLimitCase{"1.5", std::nullopt},
+                                           ShortlistLimitCase{"all", std::nullopt},
+                                           ShortlistLimitCase{"99999999999999999999999",
                                                               std::nullopt}),
-                         candidateLimitCaseName);
+                         shortlistLimitCaseName);
 
 } // namespace

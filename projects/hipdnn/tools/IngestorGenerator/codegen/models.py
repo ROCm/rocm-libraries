@@ -445,6 +445,15 @@ class EngineSpec:
     #: Optional IngestorPacks.hpp engine-name constant used by the generated
     #: census test; the descriptor still carries ``name`` above.
     census_name_symbol: str | None = None
+    #: Another engine whose native symbols this engine's descriptors name, e.g. a
+    #: test-only engine serving a subset of a shipped engine's catalog through the
+    #: shipped engine's registered code. Empty names this engine's own symbols.
+    native_symbols_from: str = ""
+    #: The borrowed engine's own slug, when it differs from the naive snake_case of
+    #: its local name (i.e. that engine declares its own ``slug_override``). Only
+    #: meaningful with ``native_symbols_from`` set; this config has no way to look up
+    #: the other engine's config to learn its override on its own.
+    native_symbols_from_slug: str | None = None
     #: RFC 0021 §6: the bound token holding the shared workspace region's size;
     #: only a slotted engine has one. Empty omits ``shared_workspace``.
     shared_workspace: str = ""
@@ -452,6 +461,9 @@ class EngineSpec:
     #: slug splits before every capital, so a local name ending in a digit-capital pair
     #: (``Unified2D``) would come out as ``unified2_d``.
     slug_override: str | None = None
+    #: Per-arch heuristic bindings `uhd_gen promote` writes into the UED: role ->
+    #: arch (or `default`) -> UHD ids, in config order. Empty emits nothing.
+    heuristics: dict[str, dict[str, list[str]]] = field(default_factory=dict)
 
     @property
     def namespace(self) -> str:
@@ -588,12 +600,12 @@ class IngestorConfig:
         )
 
     def has_operation_umd(self, pack: PackSpec) -> bool:
-        """Whether `pack` narrows by an operation-scoped UMD: when the engine
-        has more than one pack and at least one declares a `discriminator`
-        (a multi-pack engine whose packs declare none is one catalog sharded
-        across KDP files, admitted by the engine's graph_match alone), or for
-        a slotted engine when the pack's slot does (slots serve one graph, so
-        a lone pack of a slot needs no narrowing)."""
+        """Whether `pack` narrows by an operation-scoped UMD: for an unslotted
+        engine, only when its packs actually declare discriminators
+        (``has_operation_matchers`` -- a sharded catalog with none gets no
+        UMD); for a slotted engine, when the pack's slot has more than one
+        pack (slots serve one graph, so a lone pack of a slot needs no
+        narrowing, and a multi-pack slot always declares discriminators)."""
         if not self.is_slotted:
             return self.has_operation_matchers
         return sum(1 for p in self.packs if p.slot == pack.slot) > 1
@@ -651,13 +663,17 @@ class IngestorConfig:
     def native_symbol_namespace(self) -> str:
         """Dotted namespace native symbols live under: ``hipkernel:ConvFwd``
         becomes ``hipkernel.conv_fwd``. An engine naming ``native_symbols_from``
-        takes that engine's namespace instead of its own, split and snake-cased
-        plainly: the named engine's own ``slug_override``, if any, is not visible
-        here. Otherwise this engine's ``slug_override`` (if set) wins, same as
-        its descriptor directory."""
+        takes that engine's namespace instead of its own -- using
+        ``native_symbols_from_slug`` verbatim when the borrowed engine itself
+        declares a ``slug_override`` (this config cannot see that engine's own
+        config to learn it unprompted), else the naive snake_case fallback."""
         if self.engine.native_symbols_from:
             namespace, local_name = self.engine.native_symbols_from.split(":", 1)
-            local_snake = re.sub(r"(?<!^)(?=[A-Z])", "_", local_name).lower()
+            local_snake = (
+                self.engine.native_symbols_from_slug.replace("-", "_")
+                if self.engine.native_symbols_from_slug is not None
+                else re.sub(r"(?<!^)(?=[A-Z])", "_", local_name).lower()
+            )
             return f"{namespace}.{local_snake}"
         local_snake = self.engine.slug.replace("-", "_")
         if self.engine.slug_override is None:

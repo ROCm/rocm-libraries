@@ -58,6 +58,11 @@ DISPATCHER_INSTANCE_LIST = Path(
     "library/dispatch/grouped_convolution_instances/gfx950_fwd.json"
 )
 
+#: Known-bug exclusions: instances rocKE registers that this pack must not ship,
+#: each with a reason. JSON list of ``{"label": ..., "reason": ...}``; absent
+#: file means no exclusions.
+EXCLUDES = DEFAULT_OUTPUT_DIR / "gfx950_conv_fwd_aot.excludes.json"
+
 
 def _bind_rocke(rocke_root: Path) -> None:
     for sub in ("platform/python", "library"):
@@ -108,6 +113,34 @@ def read_dispatcher_instances(rocke_root: Path) -> list:
 
     lst = load_instance_list(rocke_root / DISPATCHER_INSTANCE_LIST)
     return [identity.to_dict() for identity in lst.identities]
+
+
+def read_rocke_catalog(direction: str) -> list:
+    """rocKE's own registered instances of ``(ARCH, direction)``, as dicts, in
+    rocKE's on-disk order -- rocKE is a set, not a priority order
+    (``dispatch.grouped_convolution``'s module docstring), so this makes no
+    claim about that order mattering; it is simply whatever rocKE's loader
+    returns. rocKE must already be bound (:func:`_bind_rocke`)."""
+    from dispatch.grouped_convolution import (
+        _INSTANCE_DIR,
+        _INSTANCE_LISTS,
+        load_instance_list,
+    )
+
+    path = _INSTANCE_DIR / _INSTANCE_LISTS[(ARCH, direction)]
+    return [i.to_dict() for i in load_instance_list(path).identities]
+
+
+def read_excludes(path: Path) -> dict:
+    """``label -> reason`` of :data:`EXCLUDES`-style instances; ``{}`` when
+    ``path`` does not exist."""
+    if not path.exists():
+        return {}
+    entries = json.loads(path.read_text())
+    out = {}
+    for entry in entries:
+        out[entry["label"]] = entry["reason"]
+    return out
 
 
 def sweep_hashes(dtype: str, jobs: int) -> set:

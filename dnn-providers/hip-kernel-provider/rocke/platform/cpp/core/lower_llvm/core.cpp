@@ -653,22 +653,60 @@ const char* rocke_ll_param_llvm_type(rocke_lower_t* L, const rocke_param_t* p)
     return rocke_ll_llvm_type(L, p->type);
 }
 
+const rocke_param_t* rocke_ll_value_param(const rocke_lower_t* L, const rocke_value_t* v)
+{
+    if(!L || !L->kernel || !v || !v->name || v->name[0] != '%')
+        return NULL;
+    for(int i = 0; i < L->kernel->num_params; i++)
+    {
+        const rocke_param_t* p = L->kernel->params[i];
+        if(p && p->name && strcmp(v->name + 1, p->name) == 0)
+            return p;
+    }
+    return NULL;
+}
+
 const char* rocke_ll_value_ptr_type(rocke_lower_t* L, const rocke_value_t* v)
 {
-    int i;
     if(!v)
         return "";
     /* Python _Lowerer._ptr_llvm_type: kernel params carry the header's type. */
-    if(L && L->kernel && v->name)
-    {
-        for(i = 0; i < L->kernel->num_params; i++)
-        {
-            const rocke_param_t* p = L->kernel->params[i];
-            if(p && p->name && v->name[0] == '%' && strcmp(v->name + 1, p->name) == 0)
-                return rocke_ll_param_llvm_type(L, p);
-        }
-    }
+    const rocke_param_t* param = rocke_ll_value_param(L, v);
+    if(param)
+        return rocke_ll_param_llvm_type(L, param);
     return rocke_ll_llvm_type(L, v->type);
+}
+
+void rocke_ll_require_header_ptr(rocke_lower_t* L,
+                                 const char* op_name,
+                                 const rocke_value_t* ptr,
+                                 const char* operand,
+                                 const char* space,
+                                 const char* expected)
+{
+    const char* header = rocke_ll_value_ptr_type(L, ptr);
+    if(strcmp(header, expected) == 0)
+        return;
+    const rocke_param_t* param = rocke_ll_value_param(L, ptr);
+    const bool moved
+        = param
+          && strcmp(rocke_ll_param_llvm_type(L, param), rocke_ll_llvm_type(L, param->type)) != 0;
+    rocke_ll_fail(L,
+                  ROCKE_ERR_TYPE,
+                  "%s %s must be a %s pointer, got %s%s",
+                  op_name,
+                  operand,
+                  space,
+                  header,
+                  moved ? " (its parameter's addr_space)" : "");
+}
+
+void rocke_ll_require_global_header_ptr(rocke_lower_t* L,
+                                        const char* op_name,
+                                        const rocke_value_t* ptr,
+                                        const char* operand)
+{
+    rocke_ll_require_header_ptr(L, op_name, ptr, operand, "global", "ptr addrspace(1)");
 }
 
 int rocke_ll_anyptr_space(rocke_lower_t* L,
@@ -700,12 +738,8 @@ int rocke_ll_anyptr_space(rocke_lower_t* L,
             break;
         used += (size_t)n;
     }
-    rocke_ll_fail(L,
-                  ROCKE_ERR_VALUE,
-                  "%s: pointer operand is %s, but the intrinsic accepts only %s",
-                  op,
-                  ty,
-                  list);
+    rocke_ll_fail(
+        L, ROCKE_ERR_TYPE, "%s: pointer operand is %s, but the op accepts only %s", op, ty, list);
 }
 
 const char* rocke_ll_smem_storage_type(rocke_lower_t* L, const rocke_type_t* smem)
@@ -2013,6 +2047,17 @@ void rocke_ll_finalize(rocke_lower_t* L, rocke_strbuf_t* out)
         rocke_strbuf_append(out, "\n");
     }
 
+    /* The GPU-check word, when a gpu_checked_value failure path stores to it:
+     * zero at load, read and cleared by the host after the launch. */
+    if(L->gpu_check_word)
+    {
+        rocke_strbuf_appendf(out,
+                             "@%s = protected addrspace(1) externally_initialized global i32 0, "
+                             "align 4\n",
+                             L->gpu_check_word);
+        rocke_strbuf_append(out, "\n");
+    }
+
     /* Needed intrinsic declarations, in the flavor's resolved table order
      * (then dynamic decls). This mirrors finalize iterating self._decls in
      * insertion order: _decls_for_flavor only replaces the text of base keys,
@@ -2336,10 +2381,12 @@ static rocke_status_t ll_lower_kernel_to_llvm_ex_impl(const rocke_kernel_def_t* 
     rocke_vec_init(&L.smem_offsets);
     rocke_vec_init(&L.smem_sizes);
     rocke_vec_init(&L.lds_prov);
+    rocke_vec_init(&L.loop_header_names);
     L.lds_aa = rocke_attr_get_bool(&kernel->attrs, "lds_alias_scopes", false);
     L.lds_aa_used = false;
     L.smem_pool_size = 0;
     L.smem_pool_name = NULL;
+    L.gpu_check_word = NULL;
     rocke_vec_init(&L.yield_stack);
     rocke_vec_init(&L.dbg_marks);
 

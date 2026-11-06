@@ -112,6 +112,16 @@ class TestIngestorConfigDerivation:
         assert config.engine.slug == "attn-v2"
         assert config.native_symbol_namespace == "hipkernel.attn_v2"
 
+    def test_a_hyphenated_native_symbols_from_slug_folds_to_underscores(self):
+        config = make_minimal_config(
+            engine=make_engine(
+                name="hipkernel:AttnV2Seed",
+                native_symbols_from="hipkernel:AttnV2",
+                native_symbols_from_slug="attn-v2",
+            )
+        )
+        assert config.native_symbol_namespace == "hipkernel.attn_v2"
+
     def test_graph_match_symbol(self):
         config = make_minimal_config(engine=make_engine(name="hipkernel:ConvFwd"))
         assert config.graph_match_symbol == "hipkernel.conv_fwd.graph_match"

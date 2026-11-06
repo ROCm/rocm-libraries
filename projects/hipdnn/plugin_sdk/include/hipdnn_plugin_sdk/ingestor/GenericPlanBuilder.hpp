@@ -109,10 +109,11 @@ struct IngestorSettings
     KnobFilter knobFilter;
     bool benchmarkingEnabled = false;
     std::optional<int64_t> workspaceLimit;
-    /// How many of the best-ranked knob-filtered candidates buildPlan() considers; unset
-    /// considers all of them. Applied with benchmarking on or off, so a record benchmarked
-    /// under a limit covers the same candidates a later build under it walks.
-    std::optional<size_t> candidateLimit;
+    /// How many of the best-ranked knob-filtered candidates buildPlan() (or, for a slotted
+    /// engine, slotCandidates()'s ranked path) considers; unset considers all of them.
+    /// Applied with benchmarking on or off, so a record benchmarked under a limit covers
+    /// the same candidates a later build under it walks.
+    std::optional<size_t> shortlistLimit;
 };
 
 /// The one plan builder a descriptor-backed engine has: a catalog entry is a
@@ -389,7 +390,7 @@ public:
         settings.workspaceLimit = heuristics::workspaceLimit(engineConfig);
         settings.benchmarkingEnabled
             = benchmarkingOverrideFromEnv().value_or(readBenchmarkingEnabled(engineConfig));
-        executionSettings.ingestorSettings.candidateLimit = ingestorCandidateLimitFromEnv();
+        executionSettings.ingestorSettings.shortlistLimit = ingestorShortlistLimitFromEnv();
     }
 
     /// Kernel choice follows the engine configuration's ranking metric (RFC 0019 §11.4):
@@ -419,7 +420,7 @@ public:
         {
             throwUnsatisfiableKnobFilter(0, settings.knobFilter, catalog.entries.size());
         }
-        applyCandidateLimit(filtered, settings.candidateLimit);
+        applyShortlistLimit(filtered, settings.shortlistLimit);
 
         // Orderability is decided once, on the full catalog, in sortedCatalog(); `filtered` is
         // that measured order restricted. Re-asking against `filtered` would let a pin change
@@ -446,23 +447,28 @@ public:
 
         // Under a candidate limit a benchmark measures only the shortlist, so its record
         // never covers the whole catalog. The same limit yields the same shortlist
-        // (applyCandidateLimit), and a record covering all of it serves that build.
-        if(catalog.measuredRecord == nullptr && record.has_value()
-           && settings.candidateLimit.has_value())
+        // (applyShortlistLimit), and a record covering all of it serves that build.
+        // Mirrors predictConfiguration's identical question (perGraphRecordOrderingShortlist).
+        if(catalog.measuredRecord == nullptr)
         {
-            if(const auto ranked = orderIfFullyCovered(*record, filtered);
-               ranked.has_value()
-               && serveRecordedOrder(
-                   *ranked, record->size(), context, catalog.bound, executionContext))
+            if(const auto perGraphRecord = perGraphRecordOrderingShortlist(
+                   filtered, settings.shortlistLimit, context, opGraph);
+               perGraphRecord.has_value())
             {
-                return;
+                const auto ranked = orderIfFullyCovered(*perGraphRecord, filtered);
+                if(serveRecordedOrder(
+                       *ranked, perGraphRecord->size(), context, catalog.bound, executionContext))
+                {
+                    return;
+                }
             }
         }
 
         if(catalog.measuredRecord == nullptr && record.has_value() && settings.benchmarkingEnabled)
         {
             // A record only reorders candidates measured together; one that does not cover
-            // the whole catalog is ignored rather than partially trusted.
+            // the whole catalog (or, under a limit, the shortlist) is ignored rather than
+            // partially trusted.
             HIPDNN_PLUGIN_LOG_INFO(
                 "ingestor: engine '"
                 << _engine.name << "' has a benchmarked record that does not fully cover its "
@@ -812,18 +818,40 @@ public:
         // One snapshot: the catalog carries the record that ordered it, so a winner-cache
         // eviction cannot split plan build and this prediction.
         auto catalog = _stateManager.measuredCatalog(context);
-        const auto filtered
-            = applyConstraints(catalog, executionSettings.ingestorSettings, context);
+        auto filtered = applyConstraints(catalog, executionSettings.ingestorSettings, context);
+        // Mirrors buildPlan: under a limit, the configuration this answers must be one plan
+        // build would actually shortlist, not a candidate beyond it (RFC 0019 §11.4).
+        // measuredCatalog() never calls rank(), so `filtered` is in declaration order unless
+        // a covering record already reordered it; sortedCatalog() is buildPlan's own order,
+        // so the shortlist must be taken from that order, not this one.
+        if(executionSettings.ingestorSettings.shortlistLimit.has_value())
+        {
+            orderLikeRankedCatalog(filtered, _stateManager.sortedCatalog(context).entries);
+        }
+        applyShortlistLimit(filtered, executionSettings.ingestorSettings.shortlistLimit);
         std::string modelId;
+        // Mirrors buildPlan's identical question (perGraphRecordOrderingShortlist): under
+        // a limit, a per-graph winner-cache record that covers only the shortlist (not
+        // the whole catalog, so catalog.measuredRecord stays null) still decides
+        // buildPlan's order.
+        const auto perGraphRecord
+            = catalog.measuredRecord == nullptr
+                  ? perGraphRecordOrderingShortlist(
+                        filtered, executionSettings.ingestorSettings.shortlistLimit, context, graph)
+                  : std::nullopt;
+        const WinnerRecord* effectiveRecord = catalog.measuredRecord.get();
+        if(effectiveRecord == nullptr && perGraphRecord.has_value())
+        {
+            effectiveRecord = &*perGraphRecord;
+        }
         // The full catalog decides the order source and ranking; `filtered` only limits what
         // the answer may name, so a pin changes neither (RFC 0019 §9.2, §5 steps 8-9).
-        const bool measured = catalog.measuredRecord != nullptr;
+        const bool measured = effectiveRecord != nullptr;
         std::vector<ScoredKernel> ranking;
         if(measured)
         {
             bool measuresMetric = false;
-            ranking = measuredRanking(
-                *catalog.measuredRecord, filtered, metric, context, measuresMetric);
+            ranking = measuredRanking(*effectiveRecord, filtered, metric, context, measuresMetric);
             if(!measuresMetric)
             {
                 // A metric the record does not measure is the model's to answer -- for the
@@ -1019,6 +1047,62 @@ private:
         return ranking;
     }
 
+    /// Builds the first plan of @p ranked, a benchmarked record's order over the candidates,
+    /// that constructs, and sets it on @p executionContext; false when none does.
+    ///
+    /// Walks the ranked list rather than take its front: a GenericPlan can fail to build, and
+    /// a cache hit must not be stricter than an empty cache.
+    bool serveRecordedOrder(const std::vector<const KernelDefinition*>& ranked,
+                            size_t recordSize,
+                            const MatchContext& context,
+                            const BoundTokens& bound,
+                            TContext& executionContext) const
+    {
+        for(size_t rank = 0; rank < ranked.size(); ++rank)
+        {
+            std::string failure;
+            try
+            {
+                auto plan = std::make_unique<GenericPlan<THandle>>(
+                    _stateManager.getDispatchDetails(*ranked[rank]), context, bound);
+
+                HIPDNN_PLUGIN_LOG_INFO("ingestor: engine '"
+                                       << _engine.name << "' served kernel "
+                                       << toString(ranked[rank]->kernelId) << " at rank " << rank
+                                       << " from a benchmarked record of " << recordSize
+                                       << " entry(s) for " << ranked.size() << " candidate(s)");
+
+                executionContext.setPlan(std::move(plan));
+                return true;
+            }
+            catch(const HipdnnPluginException& error)
+            {
+                // A malformed descriptor is the author's mistake: rethrow rather than
+                // silently serve a different kernel.
+                if(error.getStatus() == HIPDNN_PLUGIN_STATUS_INVALID_VALUE)
+                {
+                    throw;
+                }
+                failure = error.what();
+            }
+            catch(const std::exception& error)
+            {
+                failure = error.what();
+            }
+
+            HIPDNN_PLUGIN_LOG_WARN("ingestor: engine '"
+                                   << _engine.name << "' could not build a plan for "
+                                   << toString(ranked[rank]->kernelId) << " at rank " << rank
+                                   << ": " << failure << "; trying the next ranked entry");
+        }
+
+        HIPDNN_PLUGIN_LOG_INFO("ingestor: engine '"
+                               << _engine.name
+                               << "' found a benchmarked record whose entries no longer "
+                                  "resolve; falling back to normal selection");
+        return false;
+    }
+
     /// @p kernels whose workspace for @p context, added to @p offset, stays within @p limit.
     /// @param offset Bytes already taken before the kernel's own scratch: a slotted engine's
     ///        aligned shared region.
@@ -1041,6 +1125,8 @@ private:
         return kernels;
     }
 
+    /// The kernels of @p catalog that pass the knob pins and the workspace limit, in its
+    /// order, as pointers into @p catalog: the result borrows it and must not outlive it.
     std::vector<const KernelDefinition*> applyConstraints(const Catalog& catalog,
                                                           const IngestorSettings& settings,
                                                           const MatchContext& context) const
@@ -1052,6 +1138,40 @@ private:
                 std::move(filtered), context, catalog.bound, *settings.workspaceLimit);
         }
         return filtered;
+    }
+
+    /// Whether a per-graph winner-cache record, not the catalog's own, already fully
+    /// covers and orders @p filtered under a shortlist limit (RFC 0019 §11.4): the one
+    /// place buildPlan and predictConfiguration both decide this, so the two cannot drift
+    /// apart the way two independent copies of the same check once did. Looked up fresh
+    /// (an in-memory map read) rather than threaded through a caller's own winnerFor()
+    /// result, so a caller already holding one for another reason (buildPlan's
+    /// write-back key) is unaffected either way.
+    ///
+    /// Only consulted when @p shortlistLimit is set: without a limit, a record that
+    /// covers the request is already reflected in the catalog's own measuredRecord
+    /// (sortedCatalog/measuredCatalog), and one that does not cover it is ignored rather
+    /// than partially trusted -- see WinnerCache.hpp's recordCovers.
+    std::optional<WinnerRecord>
+        perGraphRecordOrderingShortlist(const std::vector<const KernelDefinition*>& filtered,
+                                        const std::optional<size_t>& shortlistLimit,
+                                        const MatchContext& context,
+                                        const IGraph& opGraph) const
+    {
+        if(!shortlistLimit.has_value()
+           || !_stateManager.mightHaveWinnerFor(context.deviceProperties.gcnArchName))
+        {
+            return std::nullopt;
+        }
+        const WinnerKey winnerKey{
+            hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphContentKey{opGraph},
+            DeviceKey{context.deviceProperties}};
+        auto record = _stateManager.winnerFor(winnerKey);
+        if(record.has_value() && orderIfFullyCovered(*record, filtered).has_value())
+        {
+            return record;
+        }
+        return std::nullopt;
     }
 
     /// One engine knob: a KMD field of slot @p slot, advertised under @p id (see getCustomKnobs).
@@ -1276,7 +1396,7 @@ private:
             // scratch any surviving kernel could need, not just the top-`limit` ranked ones.
             if(ranked)
             {
-                applyCandidateLimit(kept, settings.candidateLimit);
+                applyShortlistLimit(kept, settings.shortlistLimit);
             }
             if(slot == 0)
             {
@@ -1959,6 +2079,27 @@ private:
         return filtered;
     }
 
+    /// Reorders @p candidates (already filtered down from some catalog) to the relative
+    /// order they hold in @p rankedOrder -- sortedCatalog()'s own order, the same one
+    /// buildPlan shortlists from -- so a caller whose candidates would otherwise sit in
+    /// declaration order truncates the same set buildPlan would.
+    static void orderLikeRankedCatalog(std::vector<const KernelDefinition*>& candidates,
+                                       const std::vector<const KernelDefinition*>& rankedOrder)
+    {
+        const std::unordered_set<const KernelDefinition*> keep(candidates.begin(),
+                                                               candidates.end());
+        std::vector<const KernelDefinition*> ordered;
+        ordered.reserve(candidates.size());
+        for(const KernelDefinition* entry : rankedOrder)
+        {
+            if(keep.count(entry) != 0)
+            {
+                ordered.push_back(entry);
+            }
+        }
+        candidates = std::move(ordered);
+    }
+
     /// Builds the first plan of @p ranked, a benchmarked record's order over the candidates,
     /// that constructs, and sets it on @p executionContext; false when none does.
     ///
@@ -2017,8 +2158,11 @@ private:
 
     /// Keeps the first @p limit of the ranked @p candidates. Runs before the winner-record
     /// lookup, so coverage is judged against the shortlist a benchmark under the same
-    /// limit measured, not against the whole catalog.
-    void applyCandidateLimit(std::vector<const KernelDefinition*>& candidates,
+    /// limit measured, not against the whole catalog. Callers whose @p candidates are not
+    /// already in rank order (measuredCatalog()'s `filtered`, unlike sortedCatalog()'s) must
+    /// reorder them with orderLikeRankedCatalog() first, or this keeps a declaration-order
+    /// prefix instead of the best-ranked one.
+    void applyShortlistLimit(std::vector<const KernelDefinition*>& candidates,
                              const std::optional<size_t>& limit) const
     {
         if(!limit.has_value() || candidates.size() <= *limit)
@@ -2029,7 +2173,7 @@ private:
         HIPDNN_PLUGIN_LOG_INFO("ingestor: engine '" << _engine.name << "' keeps the best-ranked "
                                                     << *limit << " of " << candidates.size()
                                                     << " candidate(s) ("
-                                                    << INGESTOR_CANDIDATE_LIMIT_ENV_NAME << ")");
+                                                    << INGESTOR_SHORTLIST_LIMIT_ENV_NAME << ")");
         candidates.resize(*limit);
     }
 

@@ -30,7 +30,8 @@ using KernelPrepareFn = std::shared_ptr<const void> (*)(const KernelDefinition&)
 
 /// One kernel an engine can dispatch. KernelIngestorStateManager owns every definition
 /// in an immutable set; catalogs and rankings reference them by pointer, valid for the
-/// manager's lifetime.
+/// manager's lifetime. Every Catalog the state manager hands out points at its own
+/// immutable definitions, never a reference into a mutable cache.
 struct KernelDefinition
 {
     DescriptorId kernelId;
@@ -137,11 +138,12 @@ struct KernelDefinition
     }
 };
 
-// KernelDefinition is built positionally, eleven initializers at a time, so its field count
-// is pinned here the way KernelSource's is in Descriptors.hpp. std::string converts
-// implicitly to std::filesystem::path, so a path field inserted ahead of originDirectory
-// would otherwise compile and silently rebind every initializer after it. Only the count
-// -- two same-typed members swapped past each other still brace-initialize.
+// KernelDefinition is built positionally, up to eleven initializers at a time (the two
+// trailing prepared fields are set afterwards), so its field count is pinned here the way
+// KernelSource's is in Descriptors.hpp. std::string converts implicitly to
+// std::filesystem::path, so a path field inserted ahead of originDirectory would
+// otherwise compile and silently rebind every initializer after it. Only the count --
+// two same-typed members swapped past each other still brace-initialize.
 static_assert(detail::IS_BRACE_INITIALIZABLE_V<KernelDefinition,
                                                DescriptorId,
                                                DescriptorId,

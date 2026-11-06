@@ -30,6 +30,7 @@ Full documentation for rocALUTION is available at [https://rocm.docs.amd.com/pro
 * Fixed a HIP stream leak in `init_rocalution()` in multi-node builds when creating the HIP streams fails.
 * Fixed the format warning of `GlobalMatrix::AMGUnsmoothedAggregation()` naming `AMGSmoothedAggregation()`.
 * Fixed `LocalVector::Sync()` and `LocalMatrix::Sync()` deleting both the host and the accelerator copy of an object after `MoveToHostAsync()`, which lost its data and crashed on the next access.
+* Fixed `LocalMatrix::MoveToAcceleratorAsync()` and `LocalMatrix::MoveToHostAsync()` leaking a full copy of the matrix for each additional call before `Sync()`. Additional calls before `Sync()` now do nothing, so changes made to the matrix between the first call and `Sync()` are not transferred.
 * Fixed `LocalVector::Amax()` on the accelerator returning the index and value of the entry after the largest one, and reading past the end of the vector when the largest entry is the last one. This also affected the Linf residual norm and `GetAmaxResidualIndex()` of the iterative solvers on the accelerator.
 * Fixed wrong results of the iterative triangular solves on the accelerator when both `LocalMatrix::ItLAnalyse()` and `LocalMatrix::ItUAnalyse()` are called on the same matrix, as the SGS preconditioner does with `TriSolverAlg_Iterative`.
 * Fixed `ItILU0::GetConvergenceHistory()` on the accelerator returning an unwritten history and an undefined iteration count when rocSPARSE rejects the history query. The history is now empty in this case. Also fixed a memory leak when building ItILU0 with a convergence history in single precision.
@@ -38,6 +39,8 @@ Full documentation for rocALUTION is available at [https://rocm.docs.amd.com/pro
 * Fixed `stop_rocalution()` aborting when nested parallelism was enabled before `init_rocalution()`, for example with `OMP_MAX_ACTIVE_LEVELS`, `OMP_NESTED` or a nested `OMP_NUM_THREADS` list, in builds with OpenMP 5.0 or newer. In builds with older OpenMP versions, such as with GCC, it restored a different maximum number of active parallel levels.
 * Fixed a data race in the host `LocalVector::Amax()` with more than one OpenMP thread, which could return the index of a later entry when the largest magnitude occurs more than once. It now returns the first one, as the sequential code and the HIP backend do.
 * Fixed a data race in the host Laplace 2D stencil `Apply()` that made it run slower with several OpenMP threads than with one.
+* Fixed GS, SGS, ILU, ItILU0 and the LU solver aborting or leaking the triangular solve analysis when they are moved to the backend they are already on, for example by calling `MoveToAccelerator()` on a preconditioner that its solver has already moved.
+* Fixed ILUT and IC failing to solve after they are moved to another backend. IC now moves its inverse diagonal, and the IC factorization on the accelerator now computes it.
 
 ## (Unreleased) rocALUTION 4.1.1
 

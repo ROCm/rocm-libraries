@@ -532,6 +532,21 @@ passes none, so the packer uses its default; set it to size the production pool 
 large catalog on a wide host. The packaging probes pass none. The reason is in the
 `hkp_wire_pack_target()` header in `cmake/HkpPackaging.cmake`.
 
+## rocKE toolchain pins
+
+Two `CACHE` variables, resolved once in `_hkp_resolve_rocke_args()` under
+`HIPKERNELPROVIDER_ENABLE_ROCKE=ON`:
+
+| Variable | Forwarded as | Reaches | Effect |
+|---|---|---|---|
+| `HIPKERNELPROVIDER_ROCKE_COMGR_LIB` | `ROCKE_COMGR_LIB` | the pack step and the ctest entries | Explicit `libamd_comgr` for the rocKE producer to load. Empty by default (derived from the `amd_comgr` package); set it to override, e.g. on Windows where a System32 `amd_comgr.dll` can shadow the ROCm one. |
+| `HIPKERNELPROVIDER_ROCKE_LLVM_FLAVOR` | `ROCKE_LLVM_FLAVOR` | the pack step only | LLVM IR flavor rocKE lowers to (`llvm20`, `llvm22`, `llvm23`, `llvm24`). Empty by default (derived from the loaded COMGR's LLVM); set it to lower exactly as a catalog was swept -- the gfx950 conv AOT catalogs were measured as `llvm22`. An unrecognized value is only rejected when the pack step runs, not at configure. |
+
+Changing either repacks every rocKE-sourced catalog with a different lowering, so a silent
+loss of the forwarding would repack with whatever rocke derives instead, unnoticed.
+`tests/test_hkp_pack_wiring.py` and `tests/rocke/test_hkp_python_environment.py` pin the
+forwarding.
+
 ## Packaging probes
 
 A packaging probe packs one descriptor root for one explicit architecture through the real

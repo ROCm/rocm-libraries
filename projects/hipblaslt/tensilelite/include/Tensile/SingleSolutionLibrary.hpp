@@ -92,6 +92,13 @@ namespace TensileLite
         {
         }
 
+        /// The index of the solution this leaf stands for, without resolving a
+        /// lazy leaf. -1 if it stands for none.
+        int solutionIndex() const
+        {
+            return solution ? solution->index : m_index;
+        }
+
         virtual std::shared_ptr<MySolution> getSolutionByIndex(MyProblem const& problem,
                                                                Hardware const&  hardware,
                                                                const int index) const override
@@ -157,6 +164,8 @@ namespace TensileLite
             bool debug = Debug::Instance().printPredicateEvaluation();
 
             auto solution = resolved();
+            if(solution && !solution->deviceScalarAlphaSupported(problems))
+                return {};
             if(solution)
             {
                 if(debug)
@@ -284,6 +293,9 @@ namespace TensileLite
             bool debug = Debug::Instance().printPredicateEvaluation();
 
             auto solution    = resolved();
+            if(solution && searchType == SolutionLibrarySearchType::DEFAULT
+               && !solution->deviceScalarAlphaSupported(problems))
+                return {};
             bool useSolution = false;
             if(solution)
             {

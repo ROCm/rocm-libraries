@@ -100,8 +100,8 @@ from kernels.conv.direct_aot_jobs import (
 )
 from kernels.common.conv_direct_grouped import DirectConvProblem
 from kernels.conv.direct_variants import (
-    DIRECT_DGRAD_FPROP_SINGLE,
     DIRECT_MFMA_DGRAD,
+    direct_dgrad_kernarg_direction,
     direct_dgrad_weight_transforms,
     direct_dgrad_workspaces,
     direct_spec_for_problem,
@@ -611,10 +611,13 @@ def _signature(spec: ConvInstanceSpec) -> tuple[dict, ...]:
     # for the MFMA ones, which run weight-transform kernels first), silently
     # mislabeling the FPROP_SINGLE pair's dgrad-shaped kernargs as the fwd
     # names until the v3 dgrad catalog first registered one for a request this
-    # test suite exercises (test_launch_plan_matches_the_aot_run_path).
+    # test suite exercises (test_launch_plan_matches_the_aot_run_path). See
+    # direct_dgrad_kernarg_direction for the FPROP_SINGLE half of this check,
+    # shared with launch_plan_for, the AOT adapter and the benchmark sweep.
     direction = (
         "fwd"
-        if spec.helpers or spec.identity.algorithm in DIRECT_DGRAD_FPROP_SINGLE
+        if spec.helpers
+        or direct_dgrad_kernarg_direction(spec.identity.algorithm) == "fwd"
         else spec.direction
     )
     return tuple(conv_direct_args_signature(spec.dtype, direction=direction))
@@ -788,13 +791,14 @@ def launch_plan_for(req: ConvGroupedRequest, spec: ConvInstanceSpec) -> ConvLaun
         )
     problem, _ = _direct_problem(req)
     if not spec.helpers:
-        # FPROP_SINGLE dgrad (direct_grouped_dgrad_4c / _fused) is a forward
-        # pass over the transposed problem too, with no weight-transform
-        # helpers to gate on -- see _signature()'s matching branch.
-        args_direction = (
-            "fwd" if ident.algorithm in DIRECT_DGRAD_FPROP_SINGLE else spec.direction
-        )
-        args = ConvArgs.from_problem(problem, direction=args_direction)
+        # See direct_dgrad_kernarg_direction: which problem orientation a
+        # FPROP_SINGLE instance's kernargs come from must agree with the AOT
+        # adapter's copy of this same decision.
+        if direct_dgrad_kernarg_direction(ident.algorithm) == "fwd":
+            launch_spec, _ = _direct_launch_spec(ident, req)
+            args = ConvArgs.from_problem(launch_spec.problem, direction="fwd")
+        else:
+            args = ConvArgs.from_problem(problem, direction=spec.direction)
         return ConvLaunchPlan((step(args),))
     split_c = _split_c(ident)
     if split_c > 1:
@@ -1168,10 +1172,19 @@ def _instance_sort_key(identity: KernelIdentity) -> str:
 
 
 def format_instance_list(lst: InstanceList) -> str:
-    """``lst`` as its file's text: canonical records, one per line, sorted by
+    """``lst`` as its file's text: canonical records, one per line.
+
+    For a direction in :data:`_SET_SEMANTICS_DIRECTIONS` (dgrad), sorted by
     :func:`_instance_sort_key` -- a set, not the order ``lst.identities`` happens
-    to hold (insertion/append order is not preserved)."""
-    identities = sorted(lst.identities, key=_instance_sort_key)
+    to hold (insertion/append order is not preserved). Any other direction
+    (fwd) keeps ``lst.identities``'s own order: its hand-tuned on-disk
+    priority (see :func:`_read_instance_list`) is meaning this formatter must
+    not erase."""
+    identities = (
+        sorted(lst.identities, key=_instance_sort_key)
+        if lst.direction in _SET_SEMANTICS_DIRECTIONS
+        else lst.identities
+    )
     lines = ["{"]
     if lst.comment:
         lines.append('  "comment": [')
@@ -1193,9 +1206,21 @@ def format_instance_list(lst: InstanceList) -> str:
     return "\n".join(lines) + "\n"
 
 
+#: Directions whose default (no-``ranker``) pick is the deterministic
+#: sorted-by-label order :func:`_instance_sort_key` defines, rather than the
+#: list file's on-disk order. Scoped to dgrad only: fwd's default pick is a
+#: hand-tuned family preference (e.g. the windowed depthwise kernel sorting
+#: first in its catalog) that label order does not reproduce, and
+#: re-deriving it needs fresh measurement this change does not make.
+_SET_SEMANTICS_DIRECTIONS = frozenset({"dgrad"})
+
+
 def _read_instance_list(arch: str, direction: str) -> tuple[KernelIdentity, ...]:
-    """The registered instances of ``(arch, direction)``: a set, sorted by
-    :func:`_instance_sort_key` for a deterministic default order.
+    """The registered instances of ``(arch, direction)``.
+
+    For a direction in :data:`_SET_SEMANTICS_DIRECTIONS`, a set sorted by
+    :func:`_instance_sort_key` for a deterministic default order; otherwise
+    the list file's own on-disk order (its unwritten priority table).
 
     Fails at import rather than at a first request: a list that does not
     load, or that declares another arch or direction than it is registered
@@ -1208,7 +1233,9 @@ def _read_instance_list(arch: str, direction: str) -> tuple[KernelIdentity, ...]
             f"{path.name}: declares {lst.arch} {lst.direction}, "
             f"registered as {arch} {direction}"
         )
-    return tuple(sorted(lst.identities, key=_instance_sort_key))
+    if direction in _SET_SEMANTICS_DIRECTIONS:
+        return tuple(sorted(lst.identities, key=_instance_sort_key))
+    return tuple(lst.identities)
 
 
 _CONV_DIM_VOCABULARY = (

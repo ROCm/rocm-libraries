@@ -219,6 +219,12 @@ TEST(TestIngestorWinnerCache, HashedRecordFunctionsAgreeWithTheLinearScansOnRand
             // Tells two candidates sharing a triple apart, so "the first one wins" is checked.
             kernels[index].priority = static_cast<int64_t>(index);
         }
+        std::vector<const KernelDefinition*> view;
+        view.reserve(kernels.size());
+        for(const auto& kernel : kernels)
+        {
+            view.push_back(&kernel);
+        }
 
         WinnerRecord record(static_cast<size_t>(pick(24)));
         for(auto& entry : record)
@@ -231,17 +237,10 @@ TEST(TestIngestorWinnerCache, HashedRecordFunctionsAgreeWithTheLinearScansOnRand
                         : entryFor(randomDefinition(), 1.0);
         }
 
-        std::vector<const KernelDefinition*> views;
-        views.reserve(kernels.size());
-        for(const auto& kernel : kernels)
-        {
-            views.push_back(&kernel);
-        }
-
-        ASSERT_EQ(recordCovers(record, views), referenceRecordCovers(record, kernels))
+        ASSERT_EQ(recordCovers(record, view), referenceRecordCovers(record, kernels))
             << "trial " << trial;
 
-        const auto ordered = orderByRecord(record, views);
+        const auto ordered = orderByRecord(record, view);
         const auto expected = referenceOrderByRecord(record, kernels);
         ASSERT_EQ(ordered.size(), expected.size()) << "trial " << trial;
         for(size_t index = 0; index < ordered.size(); ++index)
@@ -253,7 +252,7 @@ TEST(TestIngestorWinnerCache, HashedRecordFunctionsAgreeWithTheLinearScansOnRand
                 << "trial " << trial << ": a repeated triple must resolve to its first candidate";
         }
 
-        const auto served = orderIfFullyCovered(record, views);
+        const auto served = orderIfFullyCovered(record, view);
         const bool expectServed
             = referenceRecordCovers(record, kernels) && expected.size() == kernels.size();
         ASSERT_EQ(served.has_value(), expectServed) << "trial " << trial;

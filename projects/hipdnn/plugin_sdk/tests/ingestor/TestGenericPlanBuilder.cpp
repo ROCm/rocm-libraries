@@ -58,6 +58,31 @@ using namespace hipdnn_plugin_sdk::ingestor::testing;
 using hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphContentKey;
 using hipdnn_flatbuffers_sdk::flatbuffer_utilities::testing::ContentCarryingTestGraph;
 
+class CountingBytesGraph final
+    : public hipdnn_flatbuffers_sdk::flatbuffer_utilities::testing::ContentCarryingTestGraph
+{
+public:
+    explicit CountingBytesGraph(std::shared_ptr<std::atomic_uint> bytesCalls)
+        : _bytesCalls(std::move(bytesCalls))
+    {
+    }
+
+    CountingBytesGraph(std::shared_ptr<std::atomic_uint> bytesCalls, Spec spec)
+        : ContentCarryingTestGraph(std::move(spec))
+        , _bytesCalls(std::move(bytesCalls))
+    {
+    }
+
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::SerializedBlobView bytes() const override
+    {
+        ++*_bytesCalls;
+        return ContentCarryingTestGraph::bytes();
+    }
+
+private:
+    std::shared_ptr<std::atomic_uint> _bytesCalls;
+};
+
 using ::testing::_;
 using ::testing::Ref;
 using ::testing::Return;
@@ -1017,6 +1042,38 @@ std::unique_ptr<KernelIngestorStateManager<TestHandle>> makeThreeKernelWorkspace
         "test.graph");
 }
 
+/// Same three kernels and priorities as makeThreeKernelWorkspaceStateManager() -- so
+/// rank() still puts kernel_64 front, tied at 1.0 by ScopedConstantScore and broken by
+/// priority -- but declared in the opposite order. measuredCatalog()'s `filtered` follows
+/// declaration order, so this is the one case that tells "ranked" from "declared" apart.
+std::unique_ptr<KernelIngestorStateManager<TestHandle>>
+    makeThreeKernelWorkspaceStateManagerReverseDeclared()
+{
+    MetadataSchema schema;
+    schema.id = SCHEMA_ID;
+    schema.name = "test schema";
+    schema.fields = {{BLOCK_SIZE, MetadataType::INT, MetadataValue{int64_t{64}}},
+                     {DTYPE, MetadataType::STRING, std::nullopt}};
+
+    KernelDescriptorPack pack;
+    pack.id = PACK_ID;
+    pack.name = "test pack";
+    pack.engineId = ENGINE_ID;
+    pack.dispatchId = DISPATCH_ID;
+    pack.kernels = {makeKernel(testId(0x72), "kernel_256", 256, "FLOAT", /*priority=*/0),
+                    makeKernel(testId(0x71), "kernel_128", 128, "FLOAT", /*priority=*/0),
+                    makeKernel(testId(0x70), "kernel_64", 64, "FLOAT", /*priority=*/10)};
+
+    ensureNoopDispatchRegistered<TestHandle>("test.dispatch");
+    return std::make_unique<KernelIngestorStateManager<TestHandle>>(
+        std::move(schema),
+        std::vector<MatchDescriptor>{},
+        std::vector<DispatchDescriptor>{{DISPATCH_ID, "test dispatch", "test.dispatch"}},
+        std::vector<KernelDescriptorPack>{std::move(pack)},
+        std::make_shared<NativeKernelHeuristic>(CONSTANT_SCORE_SYMBOL),
+        "test.graph");
+}
+
 /// KnobFilterContext narrows its stored plan to GenericPlan, which the benchmarking-on
 /// case cannot: buildPlan() hands it a BenchmarkPlan. This one keeps the IPlan.
 struct BenchmarkContext
@@ -1154,7 +1211,11 @@ TEST(TestIngestorGenericPlanBuilder,
     flatbuffers::FlatBufferBuilder fbb;
     const auto engineConfig = makeEmptyEngineConfig(fbb);
     const auto bytesCalls = std::make_shared<std::atomic_uint>(0);
-    const CountingBytesGraph graph(bytesCalls);
+    // A v4 id, as a frontend-built graph carries, keys the catalog without its bytes; this
+    // checks that the winner lookup stays lazy too.
+    CountingBytesGraph::Spec spec;
+    spec.graphId = makeGraphId(0xB7);
+    const CountingBytesGraph graph(bytesCalls, spec);
 
     KnobFilterSettings settings;
     builder.initializeExecutionSettings(0, graph, engineConfig, settings);
@@ -2999,12 +3060,12 @@ TEST(TestIngestorCatalogFeatureParity, TheLiveRankerReadsWhatEnumerationAndTheSw
 }
 
 // ---------------------------------------------------------------------------
-// HIPDNN_INGESTOR_CANDIDATE_LIMIT shortlists the ranked candidates
+// HIPDNN_INGESTOR_SHORTLIST_LIMIT shortlists the ranked candidates
 // ---------------------------------------------------------------------------
 
 /// Clears both process-wide overrides, so the knob and the limit each case sets are the
 /// only things deciding its outcome.
-class TestIngestorGenericPlanBuilderCandidateLimit : public ::testing::Test
+class TestIngestorGenericPlanBuilderShortlistLimit : public ::testing::Test
 {
 protected:
     void setLimit(const std::string& value)
@@ -3016,10 +3077,10 @@ private:
     hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter _forceBenchmarkingGuard{
         hipdnn_plugin_sdk::FORCE_BENCHMARKING_ENV_NAME};
     hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter _limitGuard{
-        hipdnn_plugin_sdk::INGESTOR_CANDIDATE_LIMIT_ENV_NAME};
+        hipdnn_plugin_sdk::INGESTOR_SHORTLIST_LIMIT_ENV_NAME};
 };
 
-TEST_F(TestIngestorGenericPlanBuilderCandidateLimit, InitializeExecutionSettingsReadsTheLimit)
+TEST_F(TestIngestorGenericPlanBuilderShortlistLimit, InitializeExecutionSettingsReadsTheLimit)
 {
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
     const auto manager = makeStateManager();
@@ -3033,20 +3094,20 @@ TEST_F(TestIngestorGenericPlanBuilderCandidateLimit, InitializeExecutionSettings
 
     KnobFilterSettings unset;
     builder.initializeExecutionSettings(0, graph, engineConfig, unset);
-    EXPECT_EQ(unset.ingestorSettings.candidateLimit, std::nullopt)
+    EXPECT_EQ(unset.ingestorSettings.shortlistLimit, std::nullopt)
         << "no limit unless the variable asks for one";
 
     setLimit("2");
     KnobFilterSettings limited;
     builder.initializeExecutionSettings(0, graph, engineConfig, limited);
-    EXPECT_EQ(limited.ingestorSettings.candidateLimit, std::optional<size_t>(2));
+    EXPECT_EQ(limited.ingestorSettings.shortlistLimit, std::optional<size_t>(2));
     EXPECT_TRUE(limited.ingestorSettings.knobFilter.empty())
         << "the limit is not a metadata filter entry";
 }
 
 /// Benchmarking under a limit of 1 measures the ranked front alone: the plan sizes for
 /// kernel_64 (64), not the 256 the unlimited three-candidate run reports.
-TEST_F(TestIngestorGenericPlanBuilderCandidateLimit, BenchmarkingMeasuresOnlyTheShortlist)
+TEST_F(TestIngestorGenericPlanBuilderShortlistLimit, BenchmarkingMeasuresOnlyTheShortlist)
 {
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
     const ScopedConstantScore constantScore;
@@ -3077,7 +3138,7 @@ TEST_F(TestIngestorGenericPlanBuilderCandidateLimit, BenchmarkingMeasuresOnlyThe
 
 /// With benchmarking off the limit applies too: kernel_64 cannot prepare, and with only
 /// one candidate allowed nothing falls back to kernel_128.
-TEST_F(TestIngestorGenericPlanBuilderCandidateLimit, AppliesWithBenchmarkingOff)
+TEST_F(TestIngestorGenericPlanBuilderShortlistLimit, AppliesWithBenchmarkingOff)
 {
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
     const ScopedConstantScore constantScore;
@@ -3122,7 +3183,7 @@ TEST_F(TestIngestorGenericPlanBuilderCandidateLimit, AppliesWithBenchmarkingOff)
 /// next build is served from it; without the limit it no longer covers the candidates and
 /// the whole set is benchmarked again. The timer makes kernel_64, the shortlist's front,
 /// fastest, so a served hit (64) and a re-benchmark (256) differ in workspace.
-TEST_F(TestIngestorGenericPlanBuilderCandidateLimit, ARecordTakenUnderTheLimitServesTheSameLimit)
+TEST_F(TestIngestorGenericPlanBuilderShortlistLimit, ARecordTakenUnderTheLimitServesTheSameLimit)
 {
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
     const ScopedConstantScore constantScore;
@@ -3206,10 +3267,10 @@ std::unique_ptr<KernelIngestorStateManager<TestHandle>> makeOneSlotTwoKernelStat
 }
 
 /// A slot's candidate shortlist must shrink under the same limit an unslotted engine's
-/// does: slotCandidates() used to never read settings.candidateLimit, so a process-wide
-/// HIPDNN_INGESTOR_CANDIDATE_LIMIT narrowed unslotted selection but left every slotted
+/// does: slotCandidates() used to never read settings.shortlistLimit, so a process-wide
+/// HIPDNN_INGESTOR_SHORTLIST_LIMIT narrowed unslotted selection but left every slotted
 /// engine still considering its whole catalog.
-TEST_F(TestIngestorGenericPlanBuilderCandidateLimit, NarrowsASlottedEnginesSelectionToo)
+TEST_F(TestIngestorGenericPlanBuilderShortlistLimit, NarrowsASlottedEnginesSelectionToo)
 {
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
     const FailsToPrepareOneBlockSizeHandler handler(/*failingBlockSize=*/64);
@@ -3247,6 +3308,138 @@ TEST_F(TestIngestorGenericPlanBuilderCandidateLimit, NarrowsASlottedEnginesSelec
     builder.buildPlan(0, graph, engineConfig, widened);
     EXPECT_EQ(widened.plan().getWorkspaceSize(0), 128U)
         << "with the limit widened to 2, the slot falls through to slot_128";
+}
+
+/// predictConfiguration must name the same kernel buildPlan actually serves under a
+/// limit: both apply applyShortlistLimit to the same filtered catalog before ranking, so
+/// a benchmark record taken under the limit (shortlisting kernel_64, kernel_128) cannot
+/// make the prediction fall back to the unlimited winner (kernel_256).
+TEST_F(TestIngestorGenericPlanBuilderShortlistLimit,
+       PredictConfigurationAgreesWithBuildPlanUnderTheLimit)
+{
+    using hipdnn_flatbuffers_sdk::data_objects::EnginePredictionT;
+    using hipdnn_flatbuffers_sdk::data_objects::PredictionStatus;
+
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const ScopedConstantScore constantScore;
+    const WorkspaceEqualsBlockSizeHandler handler;
+    const ScopedDispatchRegistration<TestHandle> dispatch("test.dispatch", handler);
+    const auto manager = makeThreeKernelWorkspaceStateManager();
+    const auto engine = makeEngineWithKnobs({BLOCK_SIZE});
+    const TestDeviceResolver resolver;
+    const BenchmarkPlanBuilder builder(
+        engine, *manager, resolver, makeWorkspaceKeyedTimer({{64, 1.0}, {128, 2.0}, {256, 3.0}}));
+
+    flatbuffers::FlatBufferBuilder fbb;
+    const auto benchmarkConfig
+        = makeIntKnobEngineConfig(fbb, hipdnn_plugin_sdk::BENCHMARKING_KNOB_NAME, 1);
+    const TestGraph graph(makeGraphId(0xF4));
+    const TestHandle handle;
+
+    setLimit("2");
+    KnobFilterSettings settings;
+    builder.initializeExecutionSettings(handle, graph, benchmarkConfig, settings);
+    BenchmarkContext sampling;
+    sampling.setExecutionSettings(settings);
+    builder.buildPlan(handle, graph, benchmarkConfig, sampling);
+    std::vector<std::byte> workspace(sampling.plan().getWorkspaceSize(handle));
+    sampling.plan().execute(handle, nullptr, 0U, workspace.data());
+
+    // The sampling build only writes the record; a second build reads the kernel buildPlan
+    // actually serves from it (as ARecordTakenUnderTheLimitServesTheSameLimit does).
+    BenchmarkContext served;
+    served.setExecutionSettings(settings);
+    builder.buildPlan(handle, graph, benchmarkConfig, served);
+    const auto servedWorkspace = served.plan().getWorkspaceSize(handle);
+    ASSERT_NE(servedWorkspace, 256U) << "the shortlist excludes kernel_256 under this limit";
+
+    // "time" matches what the timer measures: the default ranking metric would ask for
+    // "tflops", which this record does not measure and nothing here calibrates.
+    hipdnn_flatbuffers_sdk::data_objects::EngineConfigT timeMetric;
+    timeMetric.ranking_metric = "time";
+    flatbuffers::FlatBufferBuilder predictFbb;
+    predictFbb.Finish(
+        hipdnn_flatbuffers_sdk::data_objects::EngineConfig::Pack(predictFbb, &timeMetric));
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper predictConfig(
+        predictFbb.GetBufferPointer(), predictFbb.GetSize());
+    EnginePredictionT prediction;
+    builder.predictConfiguration(handle, graph, predictConfig, prediction);
+    ASSERT_EQ(prediction.status, PredictionStatus::AVAILABLE) << prediction.reason;
+    ASSERT_NE(prediction.engine_config, nullptr);
+    const auto blockSize
+        = std::find_if(prediction.engine_config->knobs.begin(),
+                       prediction.engine_config->knobs.end(),
+                       [](const auto& setting) { return setting->knob_id == BLOCK_SIZE; });
+    ASSERT_NE(blockSize, prediction.engine_config->knobs.end());
+    ASSERT_NE((*blockSize)->value.AsIntValue(), nullptr);
+    EXPECT_EQ((*blockSize)->value.AsIntValue()->value, static_cast<int64_t>(servedWorkspace))
+        << "predictConfiguration must name the same kernel buildPlan actually served "
+           "under the limit";
+}
+
+/// Same scenario as PredictConfigurationAgreesWithBuildPlanUnderTheLimit, but with the
+/// packs' kernels declared in the opposite order. rank() still puts kernel_64 front (its
+/// priority wins the tie), so buildPlan's shortlist is unchanged -- but measuredCatalog()'s
+/// `filtered` now starts in declaration order [kernel_256, kernel_128], which does not
+/// cover the set buildPlan actually shortlists unless predictConfiguration ranks before
+/// truncating.
+TEST_F(TestIngestorGenericPlanBuilderShortlistLimit,
+       PredictConfigurationAgreesWithBuildPlanUnderTheLimitRegardlessOfDeclarationOrder)
+{
+    using hipdnn_flatbuffers_sdk::data_objects::EnginePredictionT;
+    using hipdnn_flatbuffers_sdk::data_objects::PredictionStatus;
+
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const ScopedConstantScore constantScore;
+    const WorkspaceEqualsBlockSizeHandler handler;
+    const ScopedDispatchRegistration<TestHandle> dispatch("test.dispatch", handler);
+    const auto manager = makeThreeKernelWorkspaceStateManagerReverseDeclared();
+    const auto engine = makeEngineWithKnobs({BLOCK_SIZE});
+    const TestDeviceResolver resolver;
+    const BenchmarkPlanBuilder builder(
+        engine, *manager, resolver, makeWorkspaceKeyedTimer({{64, 1.0}, {128, 2.0}, {256, 3.0}}));
+
+    flatbuffers::FlatBufferBuilder fbb;
+    const auto benchmarkConfig
+        = makeIntKnobEngineConfig(fbb, hipdnn_plugin_sdk::BENCHMARKING_KNOB_NAME, 1);
+    const TestGraph graph(makeGraphId(0xF5));
+    const TestHandle handle;
+
+    setLimit("2");
+    KnobFilterSettings settings;
+    builder.initializeExecutionSettings(handle, graph, benchmarkConfig, settings);
+    BenchmarkContext sampling;
+    sampling.setExecutionSettings(settings);
+    builder.buildPlan(handle, graph, benchmarkConfig, sampling);
+    std::vector<std::byte> workspace(sampling.plan().getWorkspaceSize(handle));
+    sampling.plan().execute(handle, nullptr, 0U, workspace.data());
+
+    BenchmarkContext served;
+    served.setExecutionSettings(settings);
+    builder.buildPlan(handle, graph, benchmarkConfig, served);
+    const auto servedWorkspace = served.plan().getWorkspaceSize(handle);
+    ASSERT_NE(servedWorkspace, 256U) << "the shortlist excludes kernel_256 under this limit";
+
+    hipdnn_flatbuffers_sdk::data_objects::EngineConfigT timeMetric;
+    timeMetric.ranking_metric = "time";
+    flatbuffers::FlatBufferBuilder predictFbb;
+    predictFbb.Finish(
+        hipdnn_flatbuffers_sdk::data_objects::EngineConfig::Pack(predictFbb, &timeMetric));
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper predictConfig(
+        predictFbb.GetBufferPointer(), predictFbb.GetSize());
+    EnginePredictionT prediction;
+    builder.predictConfiguration(handle, graph, predictConfig, prediction);
+    ASSERT_EQ(prediction.status, PredictionStatus::AVAILABLE) << prediction.reason;
+    ASSERT_NE(prediction.engine_config, nullptr);
+    const auto blockSize
+        = std::find_if(prediction.engine_config->knobs.begin(),
+                       prediction.engine_config->knobs.end(),
+                       [](const auto& setting) { return setting->knob_id == BLOCK_SIZE; });
+    ASSERT_NE(blockSize, prediction.engine_config->knobs.end());
+    ASSERT_NE((*blockSize)->value.AsIntValue(), nullptr);
+    EXPECT_EQ((*blockSize)->value.AsIntValue()->value, static_cast<int64_t>(servedWorkspace))
+        << "predictConfiguration must name the same kernel buildPlan actually served under "
+           "the limit, even when declaration order does not already match rank order";
 }
 
 } // namespace
