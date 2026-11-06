@@ -1697,6 +1697,16 @@ TYPED_TEST(host_matrix_csr, check_accepts_valid_and_unsorted_matrices)
     std::swap(ref.col[0], ref.col[1]);
     std::swap(ref.val[0], ref.val[1]);
     EXPECT_TRUE(ref.host_csr()->Check());
+
+    // A last row without entries starts at nnz
+    Csr<T> trailing(3);
+    trailing.add(0, T(1));
+    trailing.add(2, T(2));
+    trailing.end_row();
+    trailing.add(1, T(3));
+    trailing.end_row();
+    trailing.end_row();
+    EXPECT_TRUE(trailing.host_csr()->Check());
 }
 
 TYPED_TEST(host_matrix_csr, check_rejects_invalid_column_indices)
