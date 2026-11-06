@@ -505,7 +505,7 @@ def rules(lv):
             for i, s in enumerate(b.sids(r, P.S_QUICK)):
                 add(b.S(s, r, P.PAIRS[(i + r - 1) % 6]))
         add(v_convmode(b.S("S3", 2, P1)))
-        add(b.S("S18", 2, P1))
+        add(b.S("S10", 2, P1))  # asymmetric padding
         add(v_type(b.S("S3", 2, P1), "fp8_e4m3"))
         add(v_type(b.S("S3", 2, P1), "double"))
         for ti, topo in enumerate(P.FUSED):
@@ -621,7 +621,7 @@ def rules(lv):
                         )
                     )
                     n += 1
-            for m in ("M2", "M3", "M6", "M9"):
+            for m in ("M1", "M2", "M6", "M8"):
                 for pair in P.PAIRS:
                     add(fuse(b.M(m, pair), topo, act=acts[n % len(acts)]))
                     n += 1

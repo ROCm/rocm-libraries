@@ -2,7 +2,7 @@
   "version": 1,
   "cases": [
     {
-      "id": "S4_1d_i16_n2c16k32_f3_fp32_cf",
+      "id": "S8_1d_i16_n8c16k32_f1_fp32_cf",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -14,13 +14,13 @@
             1
           ],
           "post_padding": [
-            1
+            0
           ],
           "pre_padding": [
-            1
+            0
           ],
           "stride": [
-            2
+            1
           ],
           "inter_virtual": true
         },
@@ -28,465 +28,72 @@
           {
             "uid": 0,
             "dims": [
-              2,
-              16,
-              16
-            ],
-            "strides": [
-              256,
-              16,
-              1
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 1,
-            "dims": [
-              2,
-              16,
-              16
-            ],
-            "strides": [
-              256,
-              16,
-              1
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 2,
-            "dims": [
-              2,
-              16,
-              16
-            ],
-            "strides": [
-              256,
-              16,
-              1
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 3,
-            "dims": [
-              2,
-              32,
-              8
-            ],
-            "strides": [
-              256,
               8,
-              1
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 4,
-            "dims": [
-              32,
-              16,
-              3
-            ],
-            "strides": [
-              48,
-              3,
-              1
-            ],
-            "data_type": "float"
-          }
-        ]
-      },
-      "metadata": {
-        "format_version": 1,
-        "generator": "generate_conv_bwd_bundles.py",
-        "generator_version": "1",
-        "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
-        "operation": "ConvolutionBwd+add",
-        "plan_items": [
-          "S4"
-        ],
-        "purpose": "probe",
-        "size_class": "S",
-        "seed": 224718620,
-        "inputs": {
-          "2": {
-            "kind": "free",
-            "lo": -1.0,
-            "hi": 1.0,
-            "seed": 1031200058
-          },
-          "3": {
-            "kind": "free",
-            "lo": -1.0,
-            "hi": 1.0,
-            "seed": 2113820491
-          },
-          "4": {
-            "kind": "free",
-            "lo": -1.0,
-            "hi": 1.0,
-            "seed": 707479707
-          }
-        },
-        "notes": "probe: F28/F29/F36 topology"
-      }
-    },
-    {
-      "id": "S5_1d_i16_n2c16k32_f3_fp32_cl",
-      "values": {
-        "io_data_type": "float",
-        "intermediate_data_type": "float",
-        "override_shape": false,
-        "attributes": {
-          "conv_compute": "float",
-          "conv_mode": "CROSS_CORRELATION",
-          "dilation": [
-            2
-          ],
-          "post_padding": [
-            2
-          ],
-          "pre_padding": [
-            2
-          ],
-          "stride": [
-            1
-          ],
-          "inter_virtual": true
-        },
-        "tensors": [
-          {
-            "uid": 0,
-            "dims": [
-              2,
               16,
               16
             ],
             "strides": [
               256,
-              1,
-              16
+              16,
+              1
             ],
             "data_type": "float"
           },
           {
             "uid": 1,
             "dims": [
-              2,
-              16,
-              16
-            ],
-            "strides": [
-              256,
-              1,
-              16
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 2,
-            "dims": [
-              2,
-              16,
-              16
-            ],
-            "strides": [
-              256,
-              1,
-              16
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 3,
-            "dims": [
-              2,
-              32,
-              16
-            ],
-            "strides": [
-              512,
-              1,
-              32
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 4,
-            "dims": [
-              32,
-              16,
-              3
-            ],
-            "strides": [
-              48,
-              1,
-              16
-            ],
-            "data_type": "float"
-          }
-        ]
-      },
-      "metadata": {
-        "format_version": 1,
-        "generator": "generate_conv_bwd_bundles.py",
-        "generator_version": "1",
-        "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
-        "operation": "ConvolutionBwd+add",
-        "plan_items": [
-          "S5"
-        ],
-        "purpose": "probe",
-        "size_class": "S",
-        "seed": 1035485529,
-        "inputs": {
-          "2": {
-            "kind": "free",
-            "lo": -1.0,
-            "hi": 1.0,
-            "seed": 1668419287
-          },
-          "3": {
-            "kind": "free",
-            "lo": -1.0,
-            "hi": 1.0,
-            "seed": 1001893748
-          },
-          "4": {
-            "kind": "free",
-            "lo": -1.0,
-            "hi": 1.0,
-            "seed": 1057345772
-          }
-        },
-        "notes": "probe: F28/F29/F36 topology"
-      }
-    },
-    {
-      "id": "S7_1d_i16_n2c16k32g2_f3_fp16_cf",
-      "values": {
-        "io_data_type": "half",
-        "intermediate_data_type": "float",
-        "override_shape": false,
-        "attributes": {
-          "conv_compute": "float",
-          "conv_mode": "CROSS_CORRELATION",
-          "dilation": [
-            1
-          ],
-          "post_padding": [
-            1
-          ],
-          "pre_padding": [
-            1
-          ],
-          "stride": [
-            1
-          ],
-          "inter_virtual": true
-        },
-        "tensors": [
-          {
-            "uid": 0,
-            "dims": [
-              2,
-              16,
-              16
-            ],
-            "strides": [
-              256,
-              16,
-              1
-            ],
-            "data_type": "half"
-          },
-          {
-            "uid": 1,
-            "dims": [
-              2,
-              16,
-              16
-            ],
-            "strides": [
-              256,
-              16,
-              1
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 2,
-            "dims": [
-              2,
-              16,
-              16
-            ],
-            "strides": [
-              256,
-              16,
-              1
-            ],
-            "data_type": "half"
-          },
-          {
-            "uid": 3,
-            "dims": [
-              2,
-              32,
-              16
-            ],
-            "strides": [
-              512,
-              16,
-              1
-            ],
-            "data_type": "half"
-          },
-          {
-            "uid": 4,
-            "dims": [
-              32,
               8,
-              3
+              16,
+              16
             ],
             "strides": [
-              24,
-              3,
+              256,
+              16,
               1
-            ],
-            "data_type": "half"
-          }
-        ]
-      },
-      "metadata": {
-        "format_version": 1,
-        "generator": "generate_conv_bwd_bundles.py",
-        "generator_version": "1",
-        "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
-        "operation": "ConvolutionBwd+add",
-        "plan_items": [
-          "S7"
-        ],
-        "purpose": "probe",
-        "size_class": "S",
-        "seed": 115593903,
-        "inputs": {
-          "2": {
-            "kind": "free",
-            "lo": -1.0,
-            "hi": 1.0,
-            "seed": 1632749320
-          },
-          "3": {
-            "kind": "free",
-            "lo": -1.0,
-            "hi": 1.0,
-            "seed": 947149205
-          },
-          "4": {
-            "kind": "free",
-            "lo": -1.0,
-            "hi": 1.0,
-            "seed": 2106038681
-          }
-        },
-        "notes": "probe: F28/F29/F36 topology"
-      }
-    },
-    {
-      "id": "S8_1d_i16_n2c32k64g4_f3_fp16_cl",
-      "values": {
-        "io_data_type": "half",
-        "intermediate_data_type": "float",
-        "override_shape": false,
-        "attributes": {
-          "conv_compute": "float",
-          "conv_mode": "CROSS_CORRELATION",
-          "dilation": [
-            2
-          ],
-          "post_padding": [
-            1
-          ],
-          "pre_padding": [
-            1
-          ],
-          "stride": [
-            2
-          ],
-          "inter_virtual": true
-        },
-        "tensors": [
-          {
-            "uid": 0,
-            "dims": [
-              2,
-              32,
-              16
-            ],
-            "strides": [
-              512,
-              1,
-              32
-            ],
-            "data_type": "half"
-          },
-          {
-            "uid": 1,
-            "dims": [
-              2,
-              32,
-              16
-            ],
-            "strides": [
-              512,
-              1,
-              32
             ],
             "data_type": "float"
           },
           {
             "uid": 2,
             "dims": [
-              2,
+              8,
+              16,
+              16
+            ],
+            "strides": [
+              256,
+              16,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              8,
               32,
               16
             ],
             "strides": [
               512,
-              1,
-              32
+              16,
+              1
             ],
-            "data_type": "half"
-          },
-          {
-            "uid": 3,
-            "dims": [
-              2,
-              64,
-              7
-            ],
-            "strides": [
-              448,
-              1,
-              64
-            ],
-            "data_type": "half"
+            "data_type": "float"
           },
           {
             "uid": 4,
             "dims": [
-              64,
-              8,
-              3
+              32,
+              16,
+              1
             ],
             "strides": [
-              24,
+              16,
               1,
-              8
+              1
             ],
-            "data_type": "half"
+            "data_type": "float"
           }
         ]
       },
@@ -501,34 +108,165 @@
         ],
         "purpose": "probe",
         "size_class": "S",
-        "seed": 47950636,
+        "seed": 1134885063,
         "inputs": {
           "2": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1636619966
+            "seed": 412925223
           },
           "3": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 175285862
+            "seed": 652996812
           },
           "4": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1948936467
+            "seed": 1750844892
           }
         },
         "notes": "probe: F28/F29/F36 topology"
       }
     },
     {
-      "id": "S9_1d_i16_n8c16k32_f1_bf16_cf",
+      "id": "S17_1d_i16_n2c16k32_f3_fp32_cl",
       "values": {
-        "io_data_type": "bfloat16",
+        "io_data_type": "float",
+        "intermediate_data_type": "float",
+        "override_shape": false,
+        "attributes": {
+          "conv_compute": "float",
+          "conv_mode": "CROSS_CORRELATION",
+          "dilation": [
+            1
+          ],
+          "post_padding": [
+            1
+          ],
+          "pre_padding": [
+            1
+          ],
+          "stride": [
+            2
+          ],
+          "inter_virtual": true
+        },
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              2,
+              16,
+              16
+            ],
+            "strides": [
+              256,
+              1,
+              16
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              2,
+              16,
+              16
+            ],
+            "strides": [
+              256,
+              1,
+              16
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              2,
+              16,
+              16
+            ],
+            "strides": [
+              256,
+              1,
+              16
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              2,
+              32,
+              8
+            ],
+            "strides": [
+              256,
+              1,
+              32
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              32,
+              16,
+              3
+            ],
+            "strides": [
+              48,
+              1,
+              16
+            ],
+            "data_type": "float"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "generate_conv_bwd_bundles.py",
+        "generator_version": "1",
+        "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
+        "operation": "ConvolutionBwd+add",
+        "plan_items": [
+          "S17"
+        ],
+        "purpose": "probe",
+        "size_class": "S",
+        "seed": 2043800690,
+        "inputs": {
+          "2": {
+            "kind": "free",
+            "lo": -1.0,
+            "hi": 1.0,
+            "seed": 1309507773
+          },
+          "3": {
+            "kind": "free",
+            "lo": -1.0,
+            "hi": 1.0,
+            "seed": 416550341
+          },
+          "4": {
+            "kind": "free",
+            "lo": -1.0,
+            "hi": 1.0,
+            "seed": 1036633370
+          }
+        },
+        "notes": "probe: F28/F29/F36 topology"
+      }
+    },
+    {
+      "id": "S19_1d_i16_n2c16k32_f2_fp16_cf",
+      "values": {
+        "io_data_type": "half",
         "intermediate_data_type": "float",
         "override_shape": false,
         "attributes": {
@@ -544,7 +282,7 @@
             0
           ],
           "stride": [
-            1
+            2
           ],
           "inter_virtual": true
         },
@@ -552,7 +290,7 @@
           {
             "uid": 0,
             "dims": [
-              8,
+              2,
               16,
               16
             ],
@@ -561,12 +299,12 @@
               16,
               1
             ],
-            "data_type": "bfloat16"
+            "data_type": "half"
           },
           {
             "uid": 1,
             "dims": [
-              8,
+              2,
               16,
               16
             ],
@@ -580,7 +318,269 @@
           {
             "uid": 2,
             "dims": [
+              2,
+              16,
+              16
+            ],
+            "strides": [
+              256,
+              16,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              2,
+              32,
+              8
+            ],
+            "strides": [
+              256,
               8,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              32,
+              16,
+              2
+            ],
+            "strides": [
+              32,
+              2,
+              1
+            ],
+            "data_type": "half"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "generate_conv_bwd_bundles.py",
+        "generator_version": "1",
+        "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
+        "operation": "ConvolutionBwd+add",
+        "plan_items": [
+          "S19"
+        ],
+        "purpose": "probe",
+        "size_class": "S",
+        "seed": 3459804,
+        "inputs": {
+          "2": {
+            "kind": "free",
+            "lo": -1.0,
+            "hi": 1.0,
+            "seed": 45224637
+          },
+          "3": {
+            "kind": "free",
+            "lo": -1.0,
+            "hi": 1.0,
+            "seed": 231263231
+          },
+          "4": {
+            "kind": "free",
+            "lo": -1.0,
+            "hi": 1.0,
+            "seed": 1049259652
+          }
+        },
+        "notes": "probe: F28/F29/F36 topology"
+      }
+    },
+    {
+      "id": "S23_1d_i16_n2c16k32_f1_fp16_cl",
+      "values": {
+        "io_data_type": "half",
+        "intermediate_data_type": "float",
+        "override_shape": false,
+        "attributes": {
+          "conv_compute": "float",
+          "conv_mode": "CROSS_CORRELATION",
+          "dilation": [
+            1
+          ],
+          "post_padding": [
+            0
+          ],
+          "pre_padding": [
+            0
+          ],
+          "stride": [
+            2
+          ],
+          "inter_virtual": true
+        },
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              2,
+              16,
+              16
+            ],
+            "strides": [
+              256,
+              1,
+              16
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              2,
+              16,
+              16
+            ],
+            "strides": [
+              256,
+              1,
+              16
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              2,
+              16,
+              16
+            ],
+            "strides": [
+              256,
+              1,
+              16
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              2,
+              32,
+              8
+            ],
+            "strides": [
+              256,
+              1,
+              32
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              32,
+              16,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              16
+            ],
+            "data_type": "half"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "generate_conv_bwd_bundles.py",
+        "generator_version": "1",
+        "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
+        "operation": "ConvolutionBwd+add",
+        "plan_items": [
+          "S23"
+        ],
+        "purpose": "probe",
+        "size_class": "S",
+        "seed": 1707670875,
+        "inputs": {
+          "2": {
+            "kind": "free",
+            "lo": -1.0,
+            "hi": 1.0,
+            "seed": 765394666
+          },
+          "3": {
+            "kind": "free",
+            "lo": -1.0,
+            "hi": 1.0,
+            "seed": 876040616
+          },
+          "4": {
+            "kind": "free",
+            "lo": -1.0,
+            "hi": 1.0,
+            "seed": 1068044923
+          }
+        },
+        "notes": "probe: F28/F29/F36 topology"
+      }
+    },
+    {
+      "id": "S53_1d_i16_n2c16k16g16_f3_bf16_cf",
+      "values": {
+        "io_data_type": "bfloat16",
+        "intermediate_data_type": "float",
+        "override_shape": false,
+        "attributes": {
+          "conv_compute": "float",
+          "conv_mode": "CROSS_CORRELATION",
+          "dilation": [
+            1
+          ],
+          "post_padding": [
+            1
+          ],
+          "pre_padding": [
+            1
+          ],
+          "stride": [
+            1
+          ],
+          "inter_virtual": true
+        },
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              2,
+              16,
+              16
+            ],
+            "strides": [
+              256,
+              16,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              2,
+              16,
+              16
+            ],
+            "strides": [
+              256,
+              16,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              2,
               16,
               16
             ],
@@ -594,12 +594,12 @@
           {
             "uid": 3,
             "dims": [
-              8,
-              32,
+              2,
+              16,
               16
             ],
             "strides": [
-              512,
+              256,
               16,
               1
             ],
@@ -608,13 +608,13 @@
           {
             "uid": 4,
             "dims": [
-              32,
-              16,
-              1
-            ],
-            "strides": [
               16,
               1,
+              3
+            ],
+            "strides": [
+              3,
+              3,
               1
             ],
             "data_type": "bfloat16"
@@ -628,29 +628,29 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionBwd+add",
         "plan_items": [
-          "S9"
+          "S53"
         ],
         "purpose": "probe",
         "size_class": "S",
-        "seed": 19280891,
+        "seed": 525772722,
         "inputs": {
           "2": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1935958616
+            "seed": 747000924
           },
           "3": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1960744900
+            "seed": 505410378
           },
           "4": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1946293006
+            "seed": 1540883725
           }
         },
         "notes": "probe: F28/F29/F36 topology"
@@ -788,152 +788,7 @@
       }
     },
     {
-      "id": "S5_2d_i16x16_n2c16k32_f3x3_fp32_cf",
-      "values": {
-        "io_data_type": "float",
-        "intermediate_data_type": "float",
-        "override_shape": false,
-        "attributes": {
-          "conv_compute": "float",
-          "conv_mode": "CROSS_CORRELATION",
-          "dilation": [
-            2,
-            2
-          ],
-          "post_padding": [
-            2,
-            2
-          ],
-          "pre_padding": [
-            2,
-            2
-          ],
-          "stride": [
-            1,
-            1
-          ],
-          "inter_virtual": true
-        },
-        "tensors": [
-          {
-            "uid": 0,
-            "dims": [
-              2,
-              16,
-              16,
-              16
-            ],
-            "strides": [
-              4096,
-              256,
-              16,
-              1
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 1,
-            "dims": [
-              2,
-              16,
-              16,
-              16
-            ],
-            "strides": [
-              4096,
-              256,
-              16,
-              1
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 2,
-            "dims": [
-              2,
-              16,
-              16,
-              16
-            ],
-            "strides": [
-              4096,
-              256,
-              16,
-              1
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 3,
-            "dims": [
-              2,
-              32,
-              16,
-              16
-            ],
-            "strides": [
-              8192,
-              256,
-              16,
-              1
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 4,
-            "dims": [
-              32,
-              16,
-              3,
-              3
-            ],
-            "strides": [
-              144,
-              9,
-              3,
-              1
-            ],
-            "data_type": "float"
-          }
-        ]
-      },
-      "metadata": {
-        "format_version": 1,
-        "generator": "generate_conv_bwd_bundles.py",
-        "generator_version": "1",
-        "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
-        "operation": "ConvolutionBwd+add",
-        "plan_items": [
-          "S5"
-        ],
-        "purpose": "probe",
-        "size_class": "S",
-        "seed": 963916679,
-        "inputs": {
-          "2": {
-            "kind": "free",
-            "lo": -1.0,
-            "hi": 1.0,
-            "seed": 1487870616
-          },
-          "3": {
-            "kind": "free",
-            "lo": -1.0,
-            "hi": 1.0,
-            "seed": 1213742989
-          },
-          "4": {
-            "kind": "free",
-            "lo": -1.0,
-            "hi": 1.0,
-            "seed": 1753632061
-          }
-        },
-        "notes": "probe: F28/F29/F36 topology"
-      }
-    },
-    {
-      "id": "S6_2d_i16x8_n2c16k32_f3x3_fp32_cl",
+      "id": "S17_2d_i16x16_n2c16k32_f3x3_fp32_cf",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -954,153 +809,8 @@
             1
           ],
           "stride": [
-            1,
-            1
-          ],
-          "inter_virtual": true
-        },
-        "tensors": [
-          {
-            "uid": 0,
-            "dims": [
-              2,
-              16,
-              16,
-              8
-            ],
-            "strides": [
-              2048,
-              1,
-              128,
-              16
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 1,
-            "dims": [
-              2,
-              16,
-              16,
-              8
-            ],
-            "strides": [
-              2048,
-              1,
-              128,
-              16
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 2,
-            "dims": [
-              2,
-              16,
-              16,
-              8
-            ],
-            "strides": [
-              2048,
-              1,
-              128,
-              16
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 3,
-            "dims": [
-              2,
-              32,
-              16,
-              8
-            ],
-            "strides": [
-              4096,
-              1,
-              256,
-              32
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 4,
-            "dims": [
-              32,
-              16,
-              3,
-              3
-            ],
-            "strides": [
-              144,
-              1,
-              48,
-              16
-            ],
-            "data_type": "float"
-          }
-        ]
-      },
-      "metadata": {
-        "format_version": 1,
-        "generator": "generate_conv_bwd_bundles.py",
-        "generator_version": "1",
-        "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
-        "operation": "ConvolutionBwd+add",
-        "plan_items": [
-          "S6"
-        ],
-        "purpose": "probe",
-        "size_class": "S",
-        "seed": 1194078534,
-        "inputs": {
-          "2": {
-            "kind": "free",
-            "lo": -1.0,
-            "hi": 1.0,
-            "seed": 1284547869
-          },
-          "3": {
-            "kind": "free",
-            "lo": -1.0,
-            "hi": 1.0,
-            "seed": 1141537811
-          },
-          "4": {
-            "kind": "free",
-            "lo": -1.0,
-            "hi": 1.0,
-            "seed": 1158316324
-          }
-        },
-        "notes": "probe: F28/F29/F36 topology"
-      }
-    },
-    {
-      "id": "S7_2d_i16x16_n2c16k32g2_f3x3_fp16_cf",
-      "values": {
-        "io_data_type": "half",
-        "intermediate_data_type": "float",
-        "override_shape": false,
-        "attributes": {
-          "conv_compute": "float",
-          "conv_mode": "CROSS_CORRELATION",
-          "dilation": [
-            1,
-            1
-          ],
-          "post_padding": [
-            1,
-            1
-          ],
-          "pre_padding": [
-            1,
-            1
-          ],
-          "stride": [
-            1,
-            1
+            2,
+            2
           ],
           "inter_virtual": true
         },
@@ -1119,7 +829,7 @@
               16,
               1
             ],
-            "data_type": "half"
+            "data_type": "float"
           },
           {
             "uid": 1,
@@ -1151,36 +861,326 @@
               16,
               1
             ],
-            "data_type": "half"
+            "data_type": "float"
           },
           {
             "uid": 3,
             "dims": [
               2,
-              32,
-              16,
-              16
-            ],
-            "strides": [
-              8192,
-              256,
-              16,
-              1
-            ],
-            "data_type": "half"
-          },
-          {
-            "uid": 4,
-            "dims": [
               32,
               8,
+              8
+            ],
+            "strides": [
+              2048,
+              64,
+              8,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              32,
+              16,
               3,
               3
             ],
             "strides": [
-              72,
+              144,
               9,
               3,
+              1
+            ],
+            "data_type": "float"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "generate_conv_bwd_bundles.py",
+        "generator_version": "1",
+        "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
+        "operation": "ConvolutionBwd+add",
+        "plan_items": [
+          "S17"
+        ],
+        "purpose": "probe",
+        "size_class": "S",
+        "seed": 978270178,
+        "inputs": {
+          "2": {
+            "kind": "free",
+            "lo": -1.0,
+            "hi": 1.0,
+            "seed": 484627182
+          },
+          "3": {
+            "kind": "free",
+            "lo": -1.0,
+            "hi": 1.0,
+            "seed": 58747166
+          },
+          "4": {
+            "kind": "free",
+            "lo": -1.0,
+            "hi": 1.0,
+            "seed": 1877596397
+          }
+        },
+        "notes": "probe: F28/F29/F36 topology"
+      }
+    },
+    {
+      "id": "S19_2d_i16x16_n2c16k32_f2x2_fp32_cl",
+      "values": {
+        "io_data_type": "float",
+        "intermediate_data_type": "float",
+        "override_shape": false,
+        "attributes": {
+          "conv_compute": "float",
+          "conv_mode": "CROSS_CORRELATION",
+          "dilation": [
+            1,
+            1
+          ],
+          "post_padding": [
+            0,
+            0
+          ],
+          "pre_padding": [
+            0,
+            0
+          ],
+          "stride": [
+            2,
+            2
+          ],
+          "inter_virtual": true
+        },
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              2,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              4096,
+              1,
+              256,
+              16
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              2,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              4096,
+              1,
+              256,
+              16
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              2,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              4096,
+              1,
+              256,
+              16
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              2,
+              32,
+              8,
+              8
+            ],
+            "strides": [
+              2048,
+              1,
+              256,
+              32
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              32,
+              16,
+              2,
+              2
+            ],
+            "strides": [
+              64,
+              1,
+              32,
+              16
+            ],
+            "data_type": "float"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "generate_conv_bwd_bundles.py",
+        "generator_version": "1",
+        "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
+        "operation": "ConvolutionBwd+add",
+        "plan_items": [
+          "S19"
+        ],
+        "purpose": "probe",
+        "size_class": "S",
+        "seed": 1514050899,
+        "inputs": {
+          "2": {
+            "kind": "free",
+            "lo": -1.0,
+            "hi": 1.0,
+            "seed": 1075466021
+          },
+          "3": {
+            "kind": "free",
+            "lo": -1.0,
+            "hi": 1.0,
+            "seed": 1039629756
+          },
+          "4": {
+            "kind": "free",
+            "lo": -1.0,
+            "hi": 1.0,
+            "seed": 793730288
+          }
+        },
+        "notes": "probe: F28/F29/F36 topology"
+      }
+    },
+    {
+      "id": "S23_2d_i16x16_n2c16k32_f1x1_fp16_cf",
+      "values": {
+        "io_data_type": "half",
+        "intermediate_data_type": "float",
+        "override_shape": false,
+        "attributes": {
+          "conv_compute": "float",
+          "conv_mode": "CROSS_CORRELATION",
+          "dilation": [
+            1,
+            1
+          ],
+          "post_padding": [
+            0,
+            0
+          ],
+          "pre_padding": [
+            0,
+            0
+          ],
+          "stride": [
+            2,
+            2
+          ],
+          "inter_virtual": true
+        },
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              2,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              4096,
+              256,
+              16,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              2,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              4096,
+              256,
+              16,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              2,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              4096,
+              256,
+              16,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              2,
+              32,
+              8,
+              8
+            ],
+            "strides": [
+              2048,
+              64,
+              8,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              32,
+              16,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              1,
               1
             ],
             "data_type": "half"
@@ -1194,36 +1194,36 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionBwd+add",
         "plan_items": [
-          "S7"
+          "S23"
         ],
         "purpose": "probe",
         "size_class": "S",
-        "seed": 1716299461,
+        "seed": 174359437,
         "inputs": {
           "2": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 5465586
+            "seed": 1187313997
           },
           "3": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 919028608
+            "seed": 1788653988
           },
           "4": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 1523403645
+            "seed": 1023156936
           }
         },
         "notes": "probe: F28/F29/F36 topology"
       }
     },
     {
-      "id": "S8_2d_i16x16_n2c32k64g4_f3x3_fp16_cl",
+      "id": "S44_2d_i16x16_n2c64k64g8_f3x3_fp16_cl",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -1232,8 +1232,8 @@
           "conv_compute": "float",
           "conv_mode": "CROSS_CORRELATION",
           "dilation": [
-            2,
-            2
+            1,
+            1
           ],
           "post_padding": [
             1,
@@ -1244,8 +1244,8 @@
             1
           ],
           "stride": [
-            2,
-            2
+            1,
+            1
           ],
           "inter_virtual": true
         },
@@ -1254,15 +1254,15 @@
             "uid": 0,
             "dims": [
               2,
-              32,
+              64,
               16,
               16
             ],
             "strides": [
-              8192,
+              16384,
               1,
-              512,
-              32
+              1024,
+              64
             ],
             "data_type": "half"
           },
@@ -1270,15 +1270,15 @@
             "uid": 1,
             "dims": [
               2,
-              32,
+              64,
               16,
               16
             ],
             "strides": [
-              8192,
+              16384,
               1,
-              512,
-              32
+              1024,
+              64
             ],
             "data_type": "float"
           },
@@ -1286,15 +1286,15 @@
             "uid": 2,
             "dims": [
               2,
-              32,
+              64,
               16,
               16
             ],
             "strides": [
-              8192,
+              16384,
               1,
-              512,
-              32
+              1024,
+              64
             ],
             "data_type": "half"
           },
@@ -1303,13 +1303,13 @@
             "dims": [
               2,
               64,
-              7,
-              7
+              16,
+              16
             ],
             "strides": [
-              3136,
+              16384,
               1,
-              448,
+              1024,
               64
             ],
             "data_type": "half"
@@ -1339,36 +1339,36 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionBwd+add",
         "plan_items": [
-          "S8"
+          "S44"
         ],
         "purpose": "probe",
         "size_class": "S",
-        "seed": 939382762,
+        "seed": 1733091760,
         "inputs": {
           "2": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 196789772
+            "seed": 37851856
           },
           "3": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 795375843
+            "seed": 1130146588
           },
           "4": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 503889291
+            "seed": 941296288
           }
         },
         "notes": "probe: F28/F29/F36 topology"
       }
     },
     {
-      "id": "S9_2d_i16x16_n8c16k32_f1x1_bf16_cf",
+      "id": "S53_2d_i16x16_n2c16k16g16_f3x3_bf16_cf",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -1381,12 +1381,12 @@
             1
           ],
           "post_padding": [
-            0,
-            0
+            1,
+            1
           ],
           "pre_padding": [
-            0,
-            0
+            1,
+            1
           ],
           "stride": [
             1,
@@ -1398,7 +1398,7 @@
           {
             "uid": 0,
             "dims": [
-              8,
+              2,
               16,
               16,
               16
@@ -1414,7 +1414,7 @@
           {
             "uid": 1,
             "dims": [
-              8,
+              2,
               16,
               16,
               16
@@ -1430,7 +1430,7 @@
           {
             "uid": 2,
             "dims": [
-              8,
+              2,
               16,
               16,
               16
@@ -1446,13 +1446,13 @@
           {
             "uid": 3,
             "dims": [
-              8,
-              32,
+              2,
+              16,
               16,
               16
             ],
             "strides": [
-              8192,
+              4096,
               256,
               16,
               1
@@ -1462,15 +1462,15 @@
           {
             "uid": 4,
             "dims": [
-              32,
               16,
               1,
-              1
+              3,
+              3
             ],
             "strides": [
-              16,
-              1,
-              1,
+              9,
+              9,
+              3,
               1
             ],
             "data_type": "bfloat16"
@@ -1484,29 +1484,29 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionBwd+add",
         "plan_items": [
-          "S9"
+          "S53"
         ],
         "purpose": "probe",
         "size_class": "S",
-        "seed": 668739118,
+        "seed": 1081911038,
         "inputs": {
           "2": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 676505481
+            "seed": 1664347639
           },
           "3": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 26259198
+            "seed": 1737238168
           },
           "4": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 129273805
+            "seed": 968624349
           }
         },
         "notes": "probe: F28/F29/F36 topology"
@@ -1658,9 +1658,645 @@
       }
     },
     {
-      "id": "S6_3d_i8x4x4_n2c16k32_f3x3x3_fp32_cf",
+      "id": "S19_3d_i16x16x16_n2c16k32_f2x2x2_fp32_cf",
       "values": {
         "io_data_type": "float",
+        "intermediate_data_type": "float",
+        "override_shape": false,
+        "attributes": {
+          "conv_compute": "float",
+          "conv_mode": "CROSS_CORRELATION",
+          "dilation": [
+            1,
+            1,
+            1
+          ],
+          "post_padding": [
+            0,
+            0,
+            0
+          ],
+          "pre_padding": [
+            0,
+            0,
+            0
+          ],
+          "stride": [
+            2,
+            2,
+            2
+          ],
+          "inter_virtual": true
+        },
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              2,
+              16,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              65536,
+              4096,
+              256,
+              16,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              2,
+              16,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              65536,
+              4096,
+              256,
+              16,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              2,
+              16,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              65536,
+              4096,
+              256,
+              16,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              2,
+              32,
+              8,
+              8,
+              8
+            ],
+            "strides": [
+              16384,
+              512,
+              64,
+              8,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              32,
+              16,
+              2,
+              2,
+              2
+            ],
+            "strides": [
+              128,
+              8,
+              4,
+              2,
+              1
+            ],
+            "data_type": "float"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "generate_conv_bwd_bundles.py",
+        "generator_version": "1",
+        "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
+        "operation": "ConvolutionBwd+add",
+        "plan_items": [
+          "S19"
+        ],
+        "purpose": "probe",
+        "size_class": "S",
+        "seed": 1124499810,
+        "inputs": {
+          "2": {
+            "kind": "free",
+            "lo": -1.0,
+            "hi": 1.0,
+            "seed": 1155924182
+          },
+          "3": {
+            "kind": "free",
+            "lo": -1.0,
+            "hi": 1.0,
+            "seed": 1612992255
+          },
+          "4": {
+            "kind": "free",
+            "lo": -1.0,
+            "hi": 1.0,
+            "seed": 34160573
+          }
+        },
+        "notes": "probe: F28/F29/F36 topology"
+      }
+    },
+    {
+      "id": "S23_3d_i16x16x16_n2c16k32_f1x1x1_fp32_cl",
+      "values": {
+        "io_data_type": "float",
+        "intermediate_data_type": "float",
+        "override_shape": false,
+        "attributes": {
+          "conv_compute": "float",
+          "conv_mode": "CROSS_CORRELATION",
+          "dilation": [
+            1,
+            1,
+            1
+          ],
+          "post_padding": [
+            0,
+            0,
+            0
+          ],
+          "pre_padding": [
+            0,
+            0,
+            0
+          ],
+          "stride": [
+            2,
+            2,
+            2
+          ],
+          "inter_virtual": true
+        },
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              2,
+              16,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              65536,
+              1,
+              4096,
+              256,
+              16
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              2,
+              16,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              65536,
+              1,
+              4096,
+              256,
+              16
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              2,
+              16,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              65536,
+              1,
+              4096,
+              256,
+              16
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              2,
+              32,
+              8,
+              8,
+              8
+            ],
+            "strides": [
+              16384,
+              1,
+              2048,
+              256,
+              32
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              32,
+              16,
+              1,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              16,
+              16,
+              16
+            ],
+            "data_type": "float"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "generate_conv_bwd_bundles.py",
+        "generator_version": "1",
+        "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
+        "operation": "ConvolutionBwd+add",
+        "plan_items": [
+          "S23"
+        ],
+        "purpose": "probe",
+        "size_class": "S",
+        "seed": 1875669929,
+        "inputs": {
+          "2": {
+            "kind": "free",
+            "lo": -1.0,
+            "hi": 1.0,
+            "seed": 220721332
+          },
+          "3": {
+            "kind": "free",
+            "lo": -1.0,
+            "hi": 1.0,
+            "seed": 1724936692
+          },
+          "4": {
+            "kind": "free",
+            "lo": -1.0,
+            "hi": 1.0,
+            "seed": 938194826
+          }
+        },
+        "notes": "probe: F28/F29/F36 topology"
+      }
+    },
+    {
+      "id": "S53_3d_i16x8x8_n2c16k16g16_f3x3x3_fp16_cf",
+      "values": {
+        "io_data_type": "half",
+        "intermediate_data_type": "float",
+        "override_shape": false,
+        "attributes": {
+          "conv_compute": "float",
+          "conv_mode": "CROSS_CORRELATION",
+          "dilation": [
+            1,
+            1,
+            1
+          ],
+          "post_padding": [
+            1,
+            1,
+            1
+          ],
+          "pre_padding": [
+            1,
+            1,
+            1
+          ],
+          "stride": [
+            1,
+            1,
+            1
+          ],
+          "inter_virtual": true
+        },
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              2,
+              16,
+              16,
+              8,
+              8
+            ],
+            "strides": [
+              16384,
+              1024,
+              64,
+              8,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              2,
+              16,
+              16,
+              8,
+              8
+            ],
+            "strides": [
+              16384,
+              1024,
+              64,
+              8,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              2,
+              16,
+              16,
+              8,
+              8
+            ],
+            "strides": [
+              16384,
+              1024,
+              64,
+              8,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              2,
+              16,
+              16,
+              8,
+              8
+            ],
+            "strides": [
+              16384,
+              1024,
+              64,
+              8,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              16,
+              1,
+              3,
+              3,
+              3
+            ],
+            "strides": [
+              27,
+              27,
+              9,
+              3,
+              1
+            ],
+            "data_type": "half"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "generate_conv_bwd_bundles.py",
+        "generator_version": "1",
+        "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
+        "operation": "ConvolutionBwd+add",
+        "plan_items": [
+          "S53"
+        ],
+        "purpose": "probe",
+        "size_class": "S",
+        "seed": 102087581,
+        "inputs": {
+          "2": {
+            "kind": "free",
+            "lo": -1.0,
+            "hi": 1.0,
+            "seed": 2037780636
+          },
+          "3": {
+            "kind": "free",
+            "lo": -1.0,
+            "hi": 1.0,
+            "seed": 852303750
+          },
+          "4": {
+            "kind": "free",
+            "lo": -1.0,
+            "hi": 1.0,
+            "seed": 1634415501
+          }
+        },
+        "notes": "probe: F28/F29/F36 topology"
+      }
+    },
+    {
+      "id": "S1_3d_i16x8x8_n2c16k32_f1x1x1_fp16_cl",
+      "values": {
+        "io_data_type": "half",
+        "intermediate_data_type": "float",
+        "override_shape": false,
+        "attributes": {
+          "conv_compute": "float",
+          "conv_mode": "CROSS_CORRELATION",
+          "dilation": [
+            1,
+            1,
+            1
+          ],
+          "post_padding": [
+            0,
+            0,
+            0
+          ],
+          "pre_padding": [
+            0,
+            0,
+            0
+          ],
+          "stride": [
+            1,
+            1,
+            1
+          ],
+          "inter_virtual": true
+        },
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              2,
+              16,
+              16,
+              8,
+              8
+            ],
+            "strides": [
+              16384,
+              1,
+              1024,
+              128,
+              16
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              2,
+              16,
+              16,
+              8,
+              8
+            ],
+            "strides": [
+              16384,
+              1,
+              1024,
+              128,
+              16
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              2,
+              16,
+              16,
+              8,
+              8
+            ],
+            "strides": [
+              16384,
+              1,
+              1024,
+              128,
+              16
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              2,
+              32,
+              16,
+              8,
+              8
+            ],
+            "strides": [
+              32768,
+              1,
+              2048,
+              256,
+              32
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              32,
+              16,
+              1,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              16,
+              16,
+              16
+            ],
+            "data_type": "half"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "generate_conv_bwd_bundles.py",
+        "generator_version": "1",
+        "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
+        "operation": "ConvolutionBwd+add",
+        "plan_items": [
+          "S1"
+        ],
+        "purpose": "probe",
+        "size_class": "S",
+        "seed": 1394547052,
+        "inputs": {
+          "2": {
+            "kind": "free",
+            "lo": -1.0,
+            "hi": 1.0,
+            "seed": 1009068259
+          },
+          "3": {
+            "kind": "free",
+            "lo": -1.0,
+            "hi": 1.0,
+            "seed": 729648252
+          },
+          "4": {
+            "kind": "free",
+            "lo": -1.0,
+            "hi": 1.0,
+            "seed": 1863086012
+          }
+        },
+        "notes": "probe: F28/F29/F36 topology"
+      }
+    },
+    {
+      "id": "S3_3d_i8x8x4_n2c16k32_f3x3x3_bf16_cf",
+      "values": {
+        "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
         "override_shape": false,
         "attributes": {
@@ -1695,17 +2331,17 @@
               2,
               16,
               8,
-              4,
+              8,
               4
             ],
             "strides": [
-              2048,
-              128,
-              16,
+              4096,
+              256,
+              32,
               4,
               1
             ],
-            "data_type": "float"
+            "data_type": "bfloat16"
           },
           {
             "uid": 1,
@@ -1713,13 +2349,13 @@
               2,
               16,
               8,
-              4,
+              8,
               4
             ],
             "strides": [
-              2048,
-              128,
-              16,
+              4096,
+              256,
+              32,
               4,
               1
             ],
@@ -1731,17 +2367,17 @@
               2,
               16,
               8,
-              4,
+              8,
               4
             ],
             "strides": [
-              2048,
-              128,
-              16,
+              4096,
+              256,
+              32,
               4,
               1
             ],
-            "data_type": "float"
+            "data_type": "bfloat16"
           },
           {
             "uid": 3,
@@ -1749,17 +2385,17 @@
               2,
               32,
               8,
-              4,
+              8,
               4
             ],
             "strides": [
-              4096,
-              128,
-              16,
+              8192,
+              256,
+              32,
               4,
               1
             ],
-            "data_type": "float"
+            "data_type": "bfloat16"
           },
           {
             "uid": 4,
@@ -1777,7 +2413,7 @@
               3,
               1
             ],
-            "data_type": "float"
+            "data_type": "bfloat16"
           }
         ]
       },
@@ -1788,197 +2424,38 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionBwd+add",
         "plan_items": [
-          "S6"
+          "S3"
         ],
         "purpose": "probe",
         "size_class": "S",
-        "seed": 1097539653,
+        "seed": 841608984,
         "inputs": {
           "2": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 946223638
+            "seed": 1943286184
           },
           "3": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 2045124648
+            "seed": 982679
           },
           "4": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 98499155
+            "seed": 614079804
           }
         },
         "notes": "probe: F28/F29/F36 topology"
       }
     },
     {
-      "id": "S7_3d_i16x8x4_n2c16k32g2_f3x3x3_fp32_cl",
+      "id": "S6_3d_i8x8x4_n2c16k32_f3x3x3_bf16_cl",
       "values": {
-        "io_data_type": "float",
-        "intermediate_data_type": "float",
-        "override_shape": false,
-        "attributes": {
-          "conv_compute": "float",
-          "conv_mode": "CROSS_CORRELATION",
-          "dilation": [
-            1,
-            1,
-            1
-          ],
-          "post_padding": [
-            1,
-            1,
-            1
-          ],
-          "pre_padding": [
-            1,
-            1,
-            1
-          ],
-          "stride": [
-            1,
-            1,
-            1
-          ],
-          "inter_virtual": true
-        },
-        "tensors": [
-          {
-            "uid": 0,
-            "dims": [
-              2,
-              16,
-              16,
-              8,
-              4
-            ],
-            "strides": [
-              8192,
-              1,
-              512,
-              64,
-              16
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 1,
-            "dims": [
-              2,
-              16,
-              16,
-              8,
-              4
-            ],
-            "strides": [
-              8192,
-              1,
-              512,
-              64,
-              16
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 2,
-            "dims": [
-              2,
-              16,
-              16,
-              8,
-              4
-            ],
-            "strides": [
-              8192,
-              1,
-              512,
-              64,
-              16
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 3,
-            "dims": [
-              2,
-              32,
-              16,
-              8,
-              4
-            ],
-            "strides": [
-              16384,
-              1,
-              1024,
-              128,
-              32
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 4,
-            "dims": [
-              32,
-              8,
-              3,
-              3,
-              3
-            ],
-            "strides": [
-              216,
-              1,
-              72,
-              24,
-              8
-            ],
-            "data_type": "float"
-          }
-        ]
-      },
-      "metadata": {
-        "format_version": 1,
-        "generator": "generate_conv_bwd_bundles.py",
-        "generator_version": "1",
-        "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
-        "operation": "ConvolutionBwd+add",
-        "plan_items": [
-          "S7"
-        ],
-        "purpose": "probe",
-        "size_class": "S",
-        "seed": 236844922,
-        "inputs": {
-          "2": {
-            "kind": "free",
-            "lo": -1.0,
-            "hi": 1.0,
-            "seed": 1450991228
-          },
-          "3": {
-            "kind": "free",
-            "lo": -1.0,
-            "hi": 1.0,
-            "seed": 1193435015
-          },
-          "4": {
-            "kind": "free",
-            "lo": -1.0,
-            "hi": 1.0,
-            "seed": 2102694905
-          }
-        },
-        "notes": "probe: F28/F29/F36 topology"
-      }
-    },
-    {
-      "id": "S8_3d_i16x8x8_n2c32k64g4_f3x3x3_fp16_cf",
-      "values": {
-        "io_data_type": "half",
+        "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
         "override_shape": false,
         "attributes": {
@@ -1990,173 +2467,14 @@
             2
           ],
           "post_padding": [
-            1,
-            1,
-            1
-          ],
-          "pre_padding": [
-            1,
-            1,
-            1
-          ],
-          "stride": [
             2,
             2,
             2
           ],
-          "inter_virtual": true
-        },
-        "tensors": [
-          {
-            "uid": 0,
-            "dims": [
-              2,
-              32,
-              16,
-              8,
-              8
-            ],
-            "strides": [
-              32768,
-              1024,
-              64,
-              8,
-              1
-            ],
-            "data_type": "half"
-          },
-          {
-            "uid": 1,
-            "dims": [
-              2,
-              32,
-              16,
-              8,
-              8
-            ],
-            "strides": [
-              32768,
-              1024,
-              64,
-              8,
-              1
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 2,
-            "dims": [
-              2,
-              32,
-              16,
-              8,
-              8
-            ],
-            "strides": [
-              32768,
-              1024,
-              64,
-              8,
-              1
-            ],
-            "data_type": "half"
-          },
-          {
-            "uid": 3,
-            "dims": [
-              2,
-              64,
-              7,
-              3,
-              3
-            ],
-            "strides": [
-              4032,
-              63,
-              9,
-              3,
-              1
-            ],
-            "data_type": "half"
-          },
-          {
-            "uid": 4,
-            "dims": [
-              64,
-              8,
-              3,
-              3,
-              3
-            ],
-            "strides": [
-              216,
-              27,
-              9,
-              3,
-              1
-            ],
-            "data_type": "half"
-          }
-        ]
-      },
-      "metadata": {
-        "format_version": 1,
-        "generator": "generate_conv_bwd_bundles.py",
-        "generator_version": "1",
-        "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
-        "operation": "ConvolutionBwd+add",
-        "plan_items": [
-          "S8"
-        ],
-        "purpose": "probe",
-        "size_class": "S",
-        "seed": 1301530820,
-        "inputs": {
-          "2": {
-            "kind": "free",
-            "lo": -1.0,
-            "hi": 1.0,
-            "seed": 1595087440
-          },
-          "3": {
-            "kind": "free",
-            "lo": -1.0,
-            "hi": 1.0,
-            "seed": 565947290
-          },
-          "4": {
-            "kind": "free",
-            "lo": -1.0,
-            "hi": 1.0,
-            "seed": 398002064
-          }
-        },
-        "notes": "probe: F28/F29/F36 topology"
-      }
-    },
-    {
-      "id": "S9_3d_i16x8x4_n8c16k32_f1x1x1_fp16_cl",
-      "values": {
-        "io_data_type": "half",
-        "intermediate_data_type": "float",
-        "override_shape": false,
-        "attributes": {
-          "conv_compute": "float",
-          "conv_mode": "CROSS_CORRELATION",
-          "dilation": [
-            1,
-            1,
-            1
-          ],
-          "post_padding": [
-            0,
-            0,
-            0
-          ],
           "pre_padding": [
-            0,
-            0,
-            0
+            2,
+            2,
+            2
           ],
           "stride": [
             1,
@@ -2169,32 +2487,32 @@
           {
             "uid": 0,
             "dims": [
+              2,
+              16,
               8,
-              16,
-              16,
               8,
               4
             ],
             "strides": [
-              8192,
+              4096,
               1,
               512,
               64,
               16
             ],
-            "data_type": "half"
+            "data_type": "bfloat16"
           },
           {
             "uid": 1,
             "dims": [
+              2,
+              16,
               8,
-              16,
-              16,
               8,
               4
             ],
             "strides": [
-              8192,
+              4096,
               1,
               512,
               64,
@@ -2205,353 +2523,35 @@
           {
             "uid": 2,
             "dims": [
+              2,
+              16,
               8,
-              16,
-              16,
               8,
               4
             ],
             "strides": [
-              8192,
+              4096,
               1,
               512,
               64,
               16
             ],
-            "data_type": "half"
+            "data_type": "bfloat16"
           },
           {
             "uid": 3,
             "dims": [
-              8,
+              2,
               32,
-              16,
+              8,
               8,
               4
             ],
             "strides": [
-              16384,
+              8192,
               1,
               1024,
               128,
-              32
-            ],
-            "data_type": "half"
-          },
-          {
-            "uid": 4,
-            "dims": [
-              32,
-              16,
-              1,
-              1,
-              1
-            ],
-            "strides": [
-              16,
-              1,
-              16,
-              16,
-              16
-            ],
-            "data_type": "half"
-          }
-        ]
-      },
-      "metadata": {
-        "format_version": 1,
-        "generator": "generate_conv_bwd_bundles.py",
-        "generator_version": "1",
-        "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
-        "operation": "ConvolutionBwd+add",
-        "plan_items": [
-          "S9"
-        ],
-        "purpose": "probe",
-        "size_class": "S",
-        "seed": 1432153015,
-        "inputs": {
-          "2": {
-            "kind": "free",
-            "lo": -1.0,
-            "hi": 1.0,
-            "seed": 2137719315
-          },
-          "3": {
-            "kind": "free",
-            "lo": -1.0,
-            "hi": 1.0,
-            "seed": 416700221
-          },
-          "4": {
-            "kind": "free",
-            "lo": -1.0,
-            "hi": 1.0,
-            "seed": 1029210757
-          }
-        },
-        "notes": "probe: F28/F29/F36 topology"
-      }
-    },
-    {
-      "id": "S1_3d_i16x8x8_n2c16k32_f1x1x1_bf16_cf",
-      "values": {
-        "io_data_type": "bfloat16",
-        "intermediate_data_type": "float",
-        "override_shape": false,
-        "attributes": {
-          "conv_compute": "float",
-          "conv_mode": "CROSS_CORRELATION",
-          "dilation": [
-            1,
-            1,
-            1
-          ],
-          "post_padding": [
-            0,
-            0,
-            0
-          ],
-          "pre_padding": [
-            0,
-            0,
-            0
-          ],
-          "stride": [
-            1,
-            1,
-            1
-          ],
-          "inter_virtual": true
-        },
-        "tensors": [
-          {
-            "uid": 0,
-            "dims": [
-              2,
-              16,
-              16,
-              8,
-              8
-            ],
-            "strides": [
-              16384,
-              1024,
-              64,
-              8,
-              1
-            ],
-            "data_type": "bfloat16"
-          },
-          {
-            "uid": 1,
-            "dims": [
-              2,
-              16,
-              16,
-              8,
-              8
-            ],
-            "strides": [
-              16384,
-              1024,
-              64,
-              8,
-              1
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 2,
-            "dims": [
-              2,
-              16,
-              16,
-              8,
-              8
-            ],
-            "strides": [
-              16384,
-              1024,
-              64,
-              8,
-              1
-            ],
-            "data_type": "bfloat16"
-          },
-          {
-            "uid": 3,
-            "dims": [
-              2,
-              32,
-              16,
-              8,
-              8
-            ],
-            "strides": [
-              32768,
-              1024,
-              64,
-              8,
-              1
-            ],
-            "data_type": "bfloat16"
-          },
-          {
-            "uid": 4,
-            "dims": [
-              32,
-              16,
-              1,
-              1,
-              1
-            ],
-            "strides": [
-              16,
-              1,
-              1,
-              1,
-              1
-            ],
-            "data_type": "bfloat16"
-          }
-        ]
-      },
-      "metadata": {
-        "format_version": 1,
-        "generator": "generate_conv_bwd_bundles.py",
-        "generator_version": "1",
-        "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
-        "operation": "ConvolutionBwd+add",
-        "plan_items": [
-          "S1"
-        ],
-        "purpose": "probe",
-        "size_class": "S",
-        "seed": 152771359,
-        "inputs": {
-          "2": {
-            "kind": "free",
-            "lo": -1.0,
-            "hi": 1.0,
-            "seed": 303121234
-          },
-          "3": {
-            "kind": "free",
-            "lo": -1.0,
-            "hi": 1.0,
-            "seed": 2119971189
-          },
-          "4": {
-            "kind": "free",
-            "lo": -1.0,
-            "hi": 1.0,
-            "seed": 1024935520
-          }
-        },
-        "notes": "probe: F28/F29/F36 topology"
-      }
-    },
-    {
-      "id": "S2_3d_i16x8x4_n2c16k32_f3x3x3_bf16_cl",
-      "values": {
-        "io_data_type": "bfloat16",
-        "intermediate_data_type": "float",
-        "override_shape": false,
-        "attributes": {
-          "conv_compute": "float",
-          "conv_mode": "CROSS_CORRELATION",
-          "dilation": [
-            1,
-            1,
-            1
-          ],
-          "post_padding": [
-            0,
-            0,
-            0
-          ],
-          "pre_padding": [
-            0,
-            0,
-            0
-          ],
-          "stride": [
-            1,
-            1,
-            1
-          ],
-          "inter_virtual": true
-        },
-        "tensors": [
-          {
-            "uid": 0,
-            "dims": [
-              2,
-              16,
-              16,
-              8,
-              4
-            ],
-            "strides": [
-              8192,
-              1,
-              512,
-              64,
-              16
-            ],
-            "data_type": "bfloat16"
-          },
-          {
-            "uid": 1,
-            "dims": [
-              2,
-              16,
-              16,
-              8,
-              4
-            ],
-            "strides": [
-              8192,
-              1,
-              512,
-              64,
-              16
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 2,
-            "dims": [
-              2,
-              16,
-              16,
-              8,
-              4
-            ],
-            "strides": [
-              8192,
-              1,
-              512,
-              64,
-              16
-            ],
-            "data_type": "bfloat16"
-          },
-          {
-            "uid": 3,
-            "dims": [
-              2,
-              32,
-              14,
-              6,
-              2
-            ],
-            "strides": [
-              5376,
-              1,
-              384,
-              64,
               32
             ],
             "data_type": "bfloat16"
@@ -2583,29 +2583,29 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionBwd+add",
         "plan_items": [
-          "S2"
+          "S6"
         ],
         "purpose": "probe",
         "size_class": "S",
-        "seed": 295412691,
+        "seed": 1894786972,
         "inputs": {
           "2": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 712168699
+            "seed": 1836536864
           },
           "3": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 983595960
+            "seed": 1856456341
           },
           "4": {
             "kind": "free",
             "lo": -1.0,
             "hi": 1.0,
-            "seed": 736829458
+            "seed": 1969546632
           }
         },
         "notes": "probe: F28/F29/F36 topology"
