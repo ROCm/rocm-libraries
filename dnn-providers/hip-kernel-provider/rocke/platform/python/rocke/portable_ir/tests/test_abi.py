@@ -112,7 +112,7 @@ class TestBinaryAbiRefusal(unittest.TestCase):
         """Equal old tags cannot license the combined matrix/convolution layout."""
         from rocke.portable_ir.src import online
 
-        for reports in (8, 9, 10):
+        for reports in (8, 9, 10, 11):
             with (
                 self.subTest(reports=reports),
                 patch.object(online, "_check_source_freshness"),

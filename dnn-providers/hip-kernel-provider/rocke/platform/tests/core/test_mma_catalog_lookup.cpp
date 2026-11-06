@@ -32,7 +32,7 @@
  * updating the size/offset pins. 64-bit only, where the pointer width that is
  * part of the layout is known. */
 #if INTPTR_MAX == INT64_MAX
-static_assert(sizeof(rocke_mma_op_t) == 216 && ROCKE_ABI_VERSION >= 11,
+static_assert(sizeof(rocke_mma_op_t) == 216 && ROCKE_ABI_VERSION >= 12,
               "rocke_mma_op_t layout or ABI floor mismatch: review rocke/abi.h and "
               "update this pin");
 static_assert(offsetof(rocke_mma_op_t, srcs) == 8 && offsetof(rocke_mma_op_t, dst) == 152

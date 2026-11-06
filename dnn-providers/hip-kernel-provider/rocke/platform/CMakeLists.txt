@@ -712,6 +712,8 @@ if(ROCKE_INSTALL_TESTS)
         "tests/library/tests/dispatch/test_grouped_conv_dispatch.py"
         "tests/library/tests/test_conv_wgrad_streamk.py"
         "tests/library/tests/test_conv_mma_operand_roles.py"
+        "tests/library/tests/test_wgrad_cached_candidate_filter.py"
+        "tests/library/tests/test_conv_wgrad_prefetch_addr.py"
         "tests/library/tests/test_conv_dgrad_spec_policy.py"
         "tests/library/tests/test_streamk_sweep_launch.py"
         "tests/library/tests/test_conv_build_signatures.py"
@@ -741,7 +743,8 @@ if(ROCKE_INSTALL_TESTS)
         "tests/library/tests/test_conv_fill.py"
         "tests/library/tests/test_capability_keys.py"
         "tests/library/tests/test_module_cache.py"
-        "tests/library/tests/test_run_conv_shards.py")
+        "tests/library/tests/test_run_conv_shards.py"
+        "tests/library/tests/test_convolution_backward_data_aot_packaging.py")
     set(_ROCKE_LIBRARY_CONV_TESTS "")
     foreach(_rocke_conv_test ${_ROCKE_LIBRARY_CONV_TEST_RELPATHS})
       string(APPEND _ROCKE_LIBRARY_CONV_TESTS
@@ -770,7 +773,8 @@ if(ROCKE_INSTALL_TESTS)
     # fmha_mfma free-stride ABI and layout contracts, the 2D/3D mask_type spec
     # fields, the 3D segment+reduce module's pairing, the reduce's LDS segment
     # bound against the compiled code object, the tiled C++ entries' head-count
-    # and arch refusals, the dense segment-combine launch ABI, and the
+    # and arch refusals, the dense segment-combine launch ABI, the drift guard
+    # that pins the shared dense spec's C++ mirror to the Python, and the
     # backward-test memo bound in tests/conftest.py.
     # File-list style (same pattern as conv_pytest) so PYTHONPATH resolves rocke/
     # correctly from the installed tree.
@@ -781,6 +785,7 @@ if(ROCKE_INSTALL_TESTS)
         "tests/library/tests/test_gfx1151_fmha_operand_roles.py"
         "tests/library/tests/test_attention_dense_decode.py"
         "tests/library/tests/test_attention_dense_gfx950_lds.py"
+        "tests/library/tests/test_attention_dense_spec_vectors.py"
         "tests/library/tests/test_attention_scalar_cache_key.py"
         "tests/library/tests/test_attention_spec_predicate_parity.py"
         "tests/library/tests/test_attention_tiled_2d_mask_type.py"
