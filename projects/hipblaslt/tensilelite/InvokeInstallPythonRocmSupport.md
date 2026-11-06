@@ -7,6 +7,26 @@ workflow support an active Python ROCm environment. It describes the required
 behavior and tests; it does not mean that `tasks.py` implements this behavior
 yet.
 
+**Implemented so far: the conventional-prefix model.** `tasks.py` now has the
+`_resolve_rocm_build_environment(rocm_path) -> RocmBuildEnvironment` seam. The
+root comes from `--rocm-path`, then a nonempty `ROCM_PATH` (an empty one is an
+error), then the existing `rocm-sdk path --root` / `/opt/rocm` fallback. That
+root supplies the compilers, `-DROCM_PATH` and `-DCMAKE_PREFIX_PATH` to every
+native configure — rocisa, the standalone StinkyTofu binding, `build-client`
+(overriding the preset's `/opt/rocm`), and `build-coverage` — and `install`
+resolves it once for rocisa, the client, the editable install, and the client
+binding. rocisa receives no `-DCMAKE_PREFIX_PATH`, because scikit-build-core owns
+that variable; rocisa's CMake appends `ROCM_PATH` to it instead. Mocked
+command-capture tests in `test_install_task.py` cover the selection order, the
+empty-`ROCM_PATH` failure, and each configure.
+
+**Not implemented yet:** the Python SDK build model (`rocm_sdk_core` detection,
+venv-script tools, `rocm-sdk path --root/--cmake`, the core/devel base-version
+check and its devel-payload diagnostic), the `TENSILELITE_ROCM_VERSION` CMake
+companion for full nightly identities, `ROCmCMakeBuildTools_DIR`, GPU
+auto-detection through the selected environment, the `VIRTUAL_ENV` guard, and
+the two integration lanes.
+
 ## Scope
 
 `invoke install` is intentionally different from a normal TensileLite wheel

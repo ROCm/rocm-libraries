@@ -314,3 +314,215 @@ def test_install_rejects_an_invalid_built_client(
 
     with pytest.raises(tasks.Exit, match="Built tensilelite-client is missing or not executable"):
         tasks.install.body(Context(), build_dir=str(tmp_path / "build"))
+
+
+# ---------------------------------------------------------------------------
+# One selected ROCm root for every native configure (conventional-prefix model
+# of InvokeInstallPythonRocmSupport.md). These are command-capture tests: none
+# of them needs a ROCm installation.
+# ---------------------------------------------------------------------------
+
+
+def _fake_rocm_root(tmp_path, name, *, version="7.2.4"):
+    root = (tmp_path / name).resolve()
+    (root / "bin").mkdir(parents=True)
+    for tool in ("amdclang", "amdclang++"):
+        (root / "bin" / tool).write_text("", encoding="utf-8")
+    (root / ".info").mkdir()
+    (root / ".info" / "version").write_text(f"{version}\n", encoding="utf-8")
+    return root
+
+
+def _selected_root_args(root):
+    return [
+        f"-DROCM_PATH={root}",
+        f"-DCMAKE_PREFIX_PATH={root}",
+        f"-DCMAKE_C_COMPILER={root / 'bin' / 'amdclang'}",
+        f"-DCMAKE_CXX_COMPILER={root / 'bin' / 'amdclang++'}",
+    ]
+
+
+class _RecordingContext:
+    def __init__(self):
+        self.commands = []
+
+    def run(self, command, **kwargs):
+        self.commands.append((command, kwargs))
+
+
+def test_rocm_build_environment_prefers_explicit_root_over_ambient_rocm_path(
+    tmp_path, monkeypatch
+):
+    selected = _fake_rocm_root(tmp_path, "selected")
+    monkeypatch.setenv("ROCM_PATH", str(_fake_rocm_root(tmp_path, "ambient")))
+
+    build_env = tasks._resolve_rocm_build_environment(str(selected))
+
+    assert build_env.root == selected
+    assert build_env.source == "--rocm-path"
+    assert build_env.cmake_args() == _selected_root_args(selected)
+    assert build_env.command_env({})["ROCM_PATH"] == str(selected)
+
+
+def test_rocm_build_environment_uses_rocm_path_then_opt_rocm(tmp_path, monkeypatch):
+    ambient = _fake_rocm_root(tmp_path, "ambient")
+    monkeypatch.setenv("ROCM_PATH", str(ambient))
+    assert tasks._resolve_rocm_build_environment().root == ambient
+
+    monkeypatch.delenv("ROCM_PATH")
+    monkeypatch.setattr(tasks.shutil, "which", lambda name: None)
+    default = tasks._resolve_rocm_build_environment()
+    assert default.root == Path("/opt/rocm")
+    assert default.source == "/opt/rocm"
+
+
+def test_rocm_build_environment_rejects_an_empty_rocm_path(monkeypatch):
+    monkeypatch.setenv("ROCM_PATH", "")
+    with pytest.raises(tasks.Exit, match="ROCM_PATH is set but empty"):
+        tasks._resolve_rocm_build_environment()
+
+
+def test_rocm_build_environment_finds_compilers_under_lib_llvm_bin(tmp_path):
+    root = (tmp_path / "rocm").resolve()
+    llvm_bin = root / "lib" / "llvm" / "bin"
+    llvm_bin.mkdir(parents=True)
+    for tool in ("amdclang", "amdclang++"):
+        (llvm_bin / tool).write_text("", encoding="utf-8")
+
+    build_env = tasks._resolve_rocm_build_environment(str(root))
+
+    assert build_env.c_compiler == llvm_bin / "amdclang"
+    assert build_env.cxx_compiler == llvm_bin / "amdclang++"
+
+
+def test_rocisa_install_builds_with_the_selected_rocm_compilers(tmp_path, monkeypatch):
+    selected = _fake_rocm_root(tmp_path, "selected")
+    monkeypatch.setenv("ROCM_PATH", str(_fake_rocm_root(tmp_path, "ambient")))
+    monkeypatch.setattr(tasks.shutil, "which", lambda name: None)
+    source = tmp_path / "rocisa"
+    source.mkdir()
+    context = _RecordingContext()
+
+    tasks._pip_install_rocisa(context, rocisa_dir=source, rocm_path=str(selected))
+
+    ((_, kwargs),) = context.commands
+    cmake_args = shlex.split(kwargs["env"]["CMAKE_ARGS"])
+    root_args = _selected_root_args(selected)
+    for arg in (root_args[0], root_args[2], root_args[3]):
+        assert arg in cmake_args
+    # scikit-build-core owns CMAKE_PREFIX_PATH (it finds nanobind there); rocisa's
+    # CMakeLists.txt appends ROCM_PATH to it ahead of /opt/rocm.
+    assert not any(arg.startswith("-DCMAKE_PREFIX_PATH=") for arg in cmake_args)
+    assert kwargs["env"]["ROCM_PATH"] == str(selected)
+
+
+def test_stinkytofu_binding_builds_with_the_selected_rocm(tmp_path, monkeypatch):
+    selected = _fake_rocm_root(tmp_path, "selected")
+    monkeypatch.setenv("ROCM_PATH", str(_fake_rocm_root(tmp_path, "ambient")))
+    monkeypatch.setattr(tasks, "_pip_install_adaptor", lambda context: None)
+    context = _RecordingContext()
+
+    tasks._pip_install_stinkytofu(
+        context, build_env=tasks._resolve_rocm_build_environment(str(selected))
+    )
+
+    ((_, kwargs),) = context.commands
+    assert shlex.split(kwargs["env"]["CMAKE_ARGS"]) == _selected_root_args(selected)
+    assert kwargs["env"]["ROCM_PATH"] == str(selected)
+
+
+def test_build_client_overrides_the_preset_with_the_selected_root(tmp_path, monkeypatch):
+    selected = _fake_rocm_root(tmp_path, "selected")
+    ambient = _fake_rocm_root(tmp_path, "ambient")
+    monkeypatch.setenv("ROCM_PATH", str(ambient))
+    monkeypatch.setattr(tasks.subprocess, "run", lambda *args, **kwargs: None)
+    context = _RecordingContext()
+
+    tasks.build_client.body(
+        context,
+        build_dir=str(tmp_path / "build"),
+        gpu_targets="gfx942",
+        rocm_path=str(selected),
+        build=False,
+    )
+
+    configure = shlex.split(context.commands[0][0])
+    # The tensilelite preset hard-codes /opt/rocm compilers and CMAKE_PREFIX_PATH;
+    # the selected root must override all of them, not just the compilers.
+    assert "--preset" in configure
+    for arg in _selected_root_args(selected):
+        assert arg in configure
+    assert not any(str(ambient) in arg for arg in configure)
+
+
+def test_build_client_without_rocm_path_uses_the_rocm_path_environment(
+    tmp_path, monkeypatch
+):
+    ambient = _fake_rocm_root(tmp_path, "ambient")
+    monkeypatch.setenv("ROCM_PATH", str(ambient))
+    context = _RecordingContext()
+
+    tasks.build_client.body(
+        context, build_dir=str(tmp_path / "build"), gpu_targets="gfx942", build=False
+    )
+
+    configure = shlex.split(context.commands[0][0])
+    for arg in _selected_root_args(ambient):
+        assert arg in configure
+
+
+def test_build_coverage_uses_the_selected_rocm_root(tmp_path, monkeypatch):
+    selected = _fake_rocm_root(tmp_path, "selected")
+    monkeypatch.setenv("ROCM_PATH", str(_fake_rocm_root(tmp_path, "ambient")))
+    context = _RecordingContext()
+
+    tasks.build_coverage.body(
+        context,
+        build_dir=str(tmp_path / "cov"),
+        gpu_targets="gfx942",
+        rocm_path=str(selected),
+    )
+
+    configure = shlex.split(context.commands[0][0])
+    for arg in _selected_root_args(selected):
+        assert arg in configure
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="invoke install is Linux-only")
+def test_install_explicit_rocm_path_wins_over_ambient_rocm_path(tmp_path, monkeypatch):
+    selected = _fake_rocm_root(tmp_path, "selected", version="7.2.4")
+    monkeypatch.setenv(
+        "ROCM_PATH", str(_fake_rocm_root(tmp_path, "ambient", version="9.9.9"))
+    )
+    build_dir = tmp_path / "build"
+    client = tasks._built_client_path(build_dir)
+    client.parent.mkdir(parents=True)
+    client.write_text("client", encoding="utf-8")
+    client.chmod(0o755)
+    calls = []
+
+    class Context:
+        def run(self, command, **kwargs):
+            calls.append(("run", command, kwargs))
+
+    monkeypatch.setattr(
+        tasks,
+        "rocisa",
+        SimpleNamespace(body=lambda context, **kwargs: calls.append(("rocisa", kwargs))),
+    )
+    monkeypatch.setattr(
+        tasks,
+        "build_client",
+        SimpleNamespace(body=lambda context, **kwargs: calls.append(("build", kwargs))),
+    )
+
+    tasks.install.body(Context(), build_dir=str(build_dir), rocm_path=str(selected))
+
+    assert calls[1] == (
+        "rocisa",
+        {"rocm_path": str(selected), "stinkytofu": "auto", "rebuild_stinkytofu": False},
+    )
+    assert calls[2][1]["rocm_path"] == str(selected)
+    for editable_or_binding in (calls[3], calls[4]):
+        assert editable_or_binding[2]["env"]["ROCM_PATH"] == str(selected)
+        assert editable_or_binding[2]["env"]["TENSILELITE_ROCM_VERSION"] == "7.2.4"
