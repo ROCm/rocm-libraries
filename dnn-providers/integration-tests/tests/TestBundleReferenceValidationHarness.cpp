@@ -141,7 +141,7 @@ TEST_F(TestBundleReferenceValidationHarness, SetUpFailsForABundleRegisteredWithN
 
 // The arch list guard reads the GPU from TestConfig, so the outcome depends on the test machine.
 // With no readable GPU the guard is off.
-TEST_F(TestBundleReferenceValidationHarness, SetUpSkipsACaseBuiltForAnotherGpu)
+TEST_F(TestBundleReferenceValidationHarness, SetUpSkipsACaseBuiltForAnotherArch)
 {
     auto bundle = fixtures::loadBundle(_tempDir, "Bundle", /*includeGoldenOutput=*/true);
     bundle->metadata.archs = std::vector<std::string>{"gfx000"};

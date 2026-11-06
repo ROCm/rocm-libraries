@@ -525,7 +525,7 @@ TEST(TestCheckArchList, RejectsPartialArchName)
     EXPECT_TRUE(checkArchList(meta, "gfx942:sramecc+:xnack-").has_value());
 }
 
-TEST(TestCheckArchList, IgnoresGpuArchitecture)
+TEST(TestCheckArchList, IgnoresArchitectureField)
 {
     BundleMetadata meta;
     meta.gpuArchitecture = "gfx950";

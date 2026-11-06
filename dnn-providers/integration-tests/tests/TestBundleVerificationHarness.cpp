@@ -756,7 +756,7 @@ TEST_F(TestGoldenHarnessFixture, RaggedSdpaMatchingOutputYieldsPass)
 
 // A VALUES recipe that cannot fill its tensor is an error in the bundle. The test fails
 // before the engine runs and does not skip.
-TEST_F(TestGoldenHarnessFixture, InvalidValuesFillFailsTheTest)
+TEST_F(TestGoldenHarnessFixture, RejectsInvalidValuesFill)
 {
     testing_support::HarnessMocks mocks;
     EXPECT_CALL(mocks.engineRunner, execute(::testing::_, ::testing::_, ::testing::_)).Times(0);
@@ -825,7 +825,7 @@ TEST_F(TestGoldenHarnessFixture, UnsupportedFillStaysUnverifiable)
         << testing_support::allMessages(results);
 }
 
-TEST_F(TestGoldenHarnessFixture, SetUpSkipsACaseBuiltForAnotherGpu)
+TEST_F(TestGoldenHarnessFixture, SetUpSkipsACaseBuiltForAnotherArch)
 {
     testing_support::HarnessMocks mocks;
     EXPECT_CALL(mocks.engineRunner, execute(::testing::_, ::testing::_, ::testing::_)).Times(0);
@@ -1972,7 +1972,7 @@ TEST_F(TestGoldenHarnessFixture, LiveRowReferenceOutputIsComparedOnlyInTheLiveRo
 // A GPU reference leaves its output on the device. Under the default validator a
 // live-row output is copied to the host and compared there; under --validator gpu it is
 // reported as not comparable.
-TEST_F(TestGoldenHarnessFixture, LiveRowGpuReferenceOutputOnTheDeviceIsComparedOnTheHost)
+TEST_F(TestGoldenHarnessFixture, LiveRowDeviceReferenceOutputIsComparedOnTheHost)
 {
     SKIP_IF_NO_DEVICES();
     for(const auto validator : {ValidatorDevice::AUTO, ValidatorDevice::GPU})

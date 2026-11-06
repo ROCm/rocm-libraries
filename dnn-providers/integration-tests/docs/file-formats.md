@@ -361,7 +361,9 @@ not a string rejects the metadata too. The error message names the input uid and
 the problem. The bundle then registers as a failing test.
 
 Every form also rejects any key outside the ones listed for it above: the absent form
-takes only `seed`; `free` and `fixed` take only their own keys plus `seed`.
+takes only `seed`. `free` and `fixed` are checked together against their combined key set
+(`lo`, `hi`, `value`, `seed`), so either accepts all four keys regardless of which `kind` is
+given; only a key outside that combined set is rejected.
 
 #### The `values` kind
 
