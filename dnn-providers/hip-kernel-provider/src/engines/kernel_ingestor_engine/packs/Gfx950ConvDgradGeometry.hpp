@@ -29,8 +29,8 @@
 namespace hip_kernel_provider::kernel_ingestor_engine::gfx950_conv_dgrad
 {
 
-// Pure helpers formerly shared with the (now-removed) forward AOT engine's geometry
-// header, unchanged.
+// Launch geometry, ceiling division and magic-number division: pure helpers with no
+// dependency on the dgrad problem shape or ABI.
 struct LaunchGeometry
 {
     unsigned int gridX;
@@ -1521,10 +1521,9 @@ constexpr std::array<std::string_view, 14> DIRECT_DGRAD_KERNARG_NAMES{"p_N",
                                                                       "p_dX_stride_wi"};
 
 /// The forward direct ABI (A, D strides) the fused, 4c and MFMA compute passes take on the
-/// transposed problem. Formerly shared with the (now-removed) forward AOT engine's
-/// geometry header, unchanged: conv_direct_arg_names(direction="fwd") in conv_abi.py.
-/// Filter extents, stride and padding are compiled into the direct kernels, so they are
-/// not arguments.
+/// transposed problem: conv_direct_arg_names(direction="fwd") in conv_abi.py. Filter
+/// extents, stride and padding are compiled into the direct kernels, so they are not
+/// arguments.
 constexpr std::array<std::string_view, 14> DIRECT_KERNARG_NAMES{"p_N",
                                                                 "p_Hi",
                                                                 "p_Wi",

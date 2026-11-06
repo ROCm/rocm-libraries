@@ -660,8 +660,9 @@ class IngestorConfig:
         if self.engine.native_symbols_from:
             namespace, local_name = self.engine.native_symbols_from.split(":", 1)
             local_snake = (
-                self.engine.native_symbols_from_slug
-                or re.sub(r"(?<!^)(?=[A-Z])", "_", local_name).lower()
+                self.engine.native_symbols_from_slug.replace("-", "_")
+                if self.engine.native_symbols_from_slug is not None
+                else re.sub(r"(?<!^)(?=[A-Z])", "_", local_name).lower()
             )
             return f"{namespace}.{local_snake}"
         local_snake = self.engine.slug.replace("-", "_")

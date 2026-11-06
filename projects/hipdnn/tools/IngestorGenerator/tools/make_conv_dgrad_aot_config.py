@@ -695,7 +695,7 @@ def main(argv=None) -> int:
         "do not edit by hand.\n"
     )
     config = build_config(specs, args.engine_name, args.authored_subpath, args.sharding)
-    args.output.write_text(header + dump_config(config))
+    args.output.write_text(header + dump_config(config), newline="")
     print(
         f"{len(specs)} instance(s) written to {args.output} "
         f"({len(entries) - len(rejected) - len(specs)} duplicate(s), {len(rejected)} unsupported)"

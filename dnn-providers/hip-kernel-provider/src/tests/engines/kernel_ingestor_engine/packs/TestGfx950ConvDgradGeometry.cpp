@@ -445,6 +445,12 @@ TEST(TestGfx950ConvDgradGeometry, DirectPipelinesLaunchAsRockesPlanFor)
     EXPECT_EQ(fourCPlan->steps[0].grid, (std::array<int64_t, 3>{8, 2, 8}));
     EXPECT_EQ(fourCPlan->steps[0].block, 128);
     EXPECT_FALSE(dgrad::directPlan({8, 192, 192, 32, 32, 3, 3, 1, 1, 1, 1, 1, 1, 48}, fourC));
+
+    // block_q must be a multiple of 4: 6 is refused even though it clears the >= 4 floor.
+    dgrad::DirectInstance fourCOddBlockQ = fourC;
+    fourCOddBlockQ.knobs.blockQ = 6;
+    EXPECT_FALSE(
+        dgrad::directPlan({8, 256, 256, 32, 32, 3, 3, 1, 1, 1, 1, 1, 1, 64}, fourCOddBlockQ));
 }
 
 TEST(TestGfx950ConvDgradGeometry, TheMfmaPipelinesTransformTheWeightsFirst)

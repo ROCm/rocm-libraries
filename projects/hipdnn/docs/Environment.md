@@ -330,6 +330,8 @@ export HIPDNN_INGESTOR_SHORTLIST_LIMIT=8
 - `predictConfiguration` (the `HIPDNN_ATTR_ENGINE_PREDICTION_METRIC_EXT` query path) applies
   the same limit to the candidates it predicts over, so its answer names a configuration plan
   build could actually shortlist.
+- A slotted engine's `slotCandidates` path ignores this limit entirely: every slot keeps its
+  full knob- and workspace-filtered catalog regardless of the value set here.
 
 ### Engine Applicability Threading
 

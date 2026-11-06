@@ -261,10 +261,13 @@ jobs:
         run: |
           set -euo pipefail
           dvc pull --recursive projects/hipdnn/tools/IngestorGenerator/configs
-          # A pull can exit 0 having fetched nothing; count what it should produce.
-          count=$(find projects/hipdnn/tools/IngestorGenerator/configs -name '*.instances.json' | wc -l)
-          test "$count" -gt 0 || { echo "dvc pull produced no dgrad instance lists" >&2; exit 1; }
-          echo "Fetched $count dgrad instance list(s)"
+          # A pull can exit 0 having fetched nothing, or only one of the two dtype
+          # lists; check both so a partial pull is not mistaken for a full one.
+          bf16_count=$(find projects/hipdnn/tools/IngestorGenerator/configs -name '*_bf16.instances.json' | wc -l)
+          fp16_count=$(find projects/hipdnn/tools/IngestorGenerator/configs -name '*_fp16.instances.json' | wc -l)
+          test "$bf16_count" -gt 0 || { echo "dvc pull produced no bf16 dgrad instance lists" >&2; exit 1; }
+          test "$fp16_count" -gt 0 || { echo "dvc pull produced no fp16 dgrad instance lists" >&2; exit 1; }
+          echo "Fetched $bf16_count bf16 and $fp16_count fp16 dgrad instance list(s)"
 
       # Must precede configure: configuration fails if pytest is not importable
       # by the interpreter descriptor-packaging registers its tests under, and,
@@ -551,10 +554,13 @@ jobs:
         run: |
           set -euo pipefail
           LOGNAME=github-runner dvc pull --recursive projects/hipdnn/tools/IngestorGenerator/configs
-          # A pull can exit 0 having fetched nothing; count what it should produce.
-          count=$(find projects/hipdnn/tools/IngestorGenerator/configs -name '*.instances.json' | wc -l)
-          test "$count" -gt 0 || { echo "dvc pull produced no dgrad instance lists" >&2; exit 1; }
-          echo "Fetched $count dgrad instance list(s)"
+          # A pull can exit 0 having fetched nothing, or only one of the two dtype
+          # lists; check both so a partial pull is not mistaken for a full one.
+          bf16_count=$(find projects/hipdnn/tools/IngestorGenerator/configs -name '*_bf16.instances.json' | wc -l)
+          fp16_count=$(find projects/hipdnn/tools/IngestorGenerator/configs -name '*_fp16.instances.json' | wc -l)
+          test "$bf16_count" -gt 0 || { echo "dvc pull produced no bf16 dgrad instance lists" >&2; exit 1; }
+          test "$fp16_count" -gt 0 || { echo "dvc pull produced no fp16 dgrad instance lists" >&2; exit 1; }
+          echo "Fetched $bf16_count bf16 and $fp16_count fp16 dgrad instance list(s)"
 
       # Must precede configure: configuration fails if pytest is not importable
       # by the interpreter descriptor-packaging registers its tests under, and,
