@@ -111,8 +111,8 @@ constants beside `_CDNA_MFMA_FP16` in
 
 Exact tile divisibility stays in each candidate's support predicate, so a shape
 a tile cannot divide falls through to the next candidate. Existing pins keep
-their specs and hashes, and gfx11-generic, gfx1200 and every CDNA target keep
-their previous selections.
+their specs and hashes, and gfx11-generic and every CDNA target keep their
+previous selections.
 
 ## Rejected levers
 
@@ -169,8 +169,8 @@ these factors in direction and order of magnitude.
 
 ## Caveats
 
-- One gfx1201 device. gfx11-generic (gfx1151) and gfx1200 were not measured
-  and keep the previous selection.
+- One gfx1201 device. gfx11-generic (gfx1151) was not measured and keeps the
+  previous selection; gfx1200 has no fp16 GEMM candidate before or after.
 - `rocke.run_manifest` launches through the per-call runtime path, which adds
   host overhead that dominates the smallest kernels: run-to-run spread on the
   512^3, 768^3 and K = 128 points reached tens of percent, so the first four

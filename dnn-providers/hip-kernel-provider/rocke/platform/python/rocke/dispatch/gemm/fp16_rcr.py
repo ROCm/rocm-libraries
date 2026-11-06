@@ -296,8 +296,8 @@ def _grid(spec: UniversalGemmSpec, req: OperatorRequest) -> Tuple[int, int, int]
 _CDNA_MFMA_FP16 = ("gfx942", "gfx950")
 
 # gfx1201 size-gated WMMA tiles. Each band fact has one home here; candidates
-# and docs refer to these names. Only gfx1201 was measured, so gfx11-generic and
-# gfx1200 keep the RDNA defaults.
+# and docs refer to these names. Only gfx1201 was measured, so the other
+# RDNA_WMMA_GEMM_ARCHES targets keep the RDNA defaults.
 _GFX1201_WMMA_FP16 = ("gfx1201",)
 # Below this output area the 128-wide tiles leave too few workgroups to fill
 # the device, and the existing small RDNA tiles stay faster.
