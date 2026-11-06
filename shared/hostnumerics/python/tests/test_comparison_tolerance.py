@@ -251,16 +251,16 @@ class ComparisonToleranceTests(unittest.TestCase):  # noqa: F405
         ]
         for scalar_type in real_types:
             with self.subTest(scalar_type=scalar_type):
-                observed = hv.from_numpy(
+                observed = hv.from_numpy_converted(
                     np.tile(real_values, real_values.size),
                     scalar_type,
                 )
-                expected = hv.from_numpy(
+                expected = hv.from_numpy_converted(
                     np.repeat(real_values, real_values.size),
                     scalar_type,
                 )
-                observed_values = hv.to_numpy(observed, np.float64)
-                expected_values = hv.to_numpy(expected, np.float64)
+                observed_values = hv.to_numpy_as(observed, np.float64)
+                expected_values = hv.to_numpy_as(expected, np.float64)
                 options = hv.allclose_comparison_options(
                     absolute_tolerance=1e-8, relative_tolerance=1e-5, equal_nans=False
                 )
@@ -302,16 +302,16 @@ class ComparisonToleranceTests(unittest.TestCase):  # noqa: F405
             hv.ScalarType.ComplexFloat64,
         ]:
             with self.subTest(scalar_type=scalar_type):
-                observed = hv.from_numpy(
+                observed = hv.from_numpy_converted(
                     np.tile(complex_values, complex_values.size),
                     scalar_type,
                 )
-                expected = hv.from_numpy(
+                expected = hv.from_numpy_converted(
                     np.repeat(complex_values, complex_values.size),
                     scalar_type,
                 )
-                observed_values = hv.to_numpy(observed, np.complex128)
-                expected_values = hv.to_numpy(expected, np.complex128)
+                observed_values = hv.to_numpy_as(observed, np.complex128)
+                expected_values = hv.to_numpy_as(expected, np.complex128)
                 options = hv.allclose_comparison_options(
                     absolute_tolerance=1e-8, relative_tolerance=1e-5, equal_nans=False
                 )
@@ -339,8 +339,8 @@ class ComparisonToleranceTests(unittest.TestCase):  # noqa: F405
             observed_values = np.asarray([0, 1, 2, 3], dtype=dtype)
             expected_values = np.asarray([0, 1, 7, 3], dtype=dtype)
             report = hv.compare(
-                hv.from_numpy(observed_values, scalar_type),
-                hv.from_numpy(expected_values, scalar_type),
+                hv.from_numpy_converted(observed_values, scalar_type),
+                hv.from_numpy_converted(expected_values, scalar_type),
                 hv.ComparisonOptions(),
             )
             self.assertEqual(

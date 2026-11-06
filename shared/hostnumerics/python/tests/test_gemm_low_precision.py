@@ -30,7 +30,7 @@ class GemmLowPrecisionTests(unittest.TestCase):  # noqa: F405
             output_layout=None,
         )
         expected = gemm_int32_exact(a, b, c, alpha=1, beta=0, output_scale=1)
-        np.testing.assert_array_equal(hv.to_numpy(observed, dtype=None), expected)
+        np.testing.assert_array_equal(hv.to_numpy(observed), expected)
 
     def test_int32_accumulator_gemm_wraps_without_float_proxy(self):
         reduction = 140_000
@@ -69,7 +69,7 @@ class GemmLowPrecisionTests(unittest.TestCase):  # noqa: F405
             beta=beta,
             output_scale=output_scale,
         )
-        np.testing.assert_array_equal(hv.to_numpy(observed, dtype=None), expected)
+        np.testing.assert_array_equal(hv.to_numpy(observed), expected)
 
     def test_float16_accumulator_rounds_each_step(self):
         a = np.full((1, 64), np.float16(0.1), dtype=np.float16)
@@ -94,7 +94,7 @@ class GemmLowPrecisionTests(unittest.TestCase):  # noqa: F405
             product = np.float16(a[0, reduction] * b[reduction, 0])
             expected = np.float16(expected + product)
         np.testing.assert_array_equal(
-            hv.to_numpy(result, np.float32),
+            hv.to_numpy_as(result, np.float32),
             np.asarray([[expected]], dtype=np.float32),
         )
 
@@ -123,7 +123,7 @@ class GemmLowPrecisionTests(unittest.TestCase):  # noqa: F405
 
         self.assertNotEqual(expected, matmul_float32(a, b)[0, 0])
         np.testing.assert_array_equal(
-            hv.to_numpy(observed, dtype=None),
+            hv.to_numpy(observed),
             np.asarray([[expected]], dtype=np.float32),
         )
 
@@ -167,11 +167,11 @@ class GemmLowPrecisionTests(unittest.TestCase):  # noqa: F405
         expected_full_precision = matmul_float32(a, b)
         self.assertNotEqual(expected_rounded, expected_full_precision[0, 0])
         np.testing.assert_array_equal(
-            hv.to_numpy(rounded, dtype=None),
+            hv.to_numpy(rounded),
             np.asarray([[expected_rounded]], dtype=np.float32),
         )
         np.testing.assert_array_equal(
-            hv.to_numpy(full_precision, dtype=None),
+            hv.to_numpy(full_precision),
             expected_full_precision,
         )
 
@@ -206,14 +206,14 @@ class GemmLowPrecisionTests(unittest.TestCase):  # noqa: F405
             return bits.view(np.float32)
 
         expected = xfloat32(a) @ xfloat32(b)
-        np.testing.assert_array_equal(hv.to_numpy(observed, dtype=None), expected)
+        np.testing.assert_array_equal(hv.to_numpy(observed), expected)
 
     def test_mixed_compute_input_quantization(self):
-        a = hv.from_numpy(
+        a = hv.from_numpy_converted(
             np.asarray([[1.25, 2.5]], dtype=np.float32),
             hv.ScalarType.Float8E4M3,
         )
-        b = hv.from_numpy(
+        b = hv.from_numpy_converted(
             np.asarray([[2.0], [3.0]], dtype=np.float32),
             hv.ScalarType.Float8E5M2,
         )
@@ -239,11 +239,13 @@ class GemmLowPrecisionTests(unittest.TestCase):  # noqa: F405
             output_layout=None,
         )
         np.testing.assert_array_equal(
-            hv.to_numpy(observed, np.float32), np.asarray([[9.0]], np.float32)
+            hv.to_numpy_as(observed, np.float32), np.asarray([[9.0]], np.float32)
         )
 
         pre_scaled = reference_gemm(
-            hv.from_numpy(np.asarray([[1.1]], dtype=np.float32), hv.ScalarType.Float16),
+            hv.from_numpy_converted(
+                np.asarray([[1.1]], dtype=np.float32), hv.ScalarType.Float16
+            ),
             hv.from_numpy(np.asarray([[1.0]], dtype=np.float32)),
             hv.from_numpy(np.asarray([[0.0]], dtype=np.float32)),
             hv.ScalarType.Float32,
@@ -266,11 +268,11 @@ class GemmLowPrecisionTests(unittest.TestCase):  # noqa: F405
             output_layout=None,
         )
         np.testing.assert_array_equal(
-            hv.to_numpy(pre_scaled, dtype=None), np.asarray([[3.25]], dtype=np.float32)
+            hv.to_numpy(pre_scaled), np.asarray([[3.25]], dtype=np.float32)
         )
 
         vector_pre_scaled = reference_gemm(
-            hv.from_numpy(
+            hv.from_numpy_converted(
                 np.asarray([[1.1], [1.1]], dtype=np.float32),
                 hv.ScalarType.Float16,
             ),
@@ -296,7 +298,7 @@ class GemmLowPrecisionTests(unittest.TestCase):  # noqa: F405
             output_layout=None,
         )
         np.testing.assert_array_equal(
-            hv.to_numpy(vector_pre_scaled, dtype=None),
+            hv.to_numpy(vector_pre_scaled),
             np.asarray([[3.25], [4.5]], dtype=np.float32),
         )
 
@@ -325,7 +327,7 @@ class GemmLowPrecisionTests(unittest.TestCase):  # noqa: F405
             output_layout=None,
         )
         np.testing.assert_array_equal(
-            hv.to_numpy(combined_pre_scaled, dtype=None),
+            hv.to_numpy(combined_pre_scaled),
             np.asarray([[0.125]], dtype=np.float32),
         )
 
@@ -386,7 +388,7 @@ class GemmLowPrecisionTests(unittest.TestCase):  # noqa: F405
             conjugate_b=False,
             output_layout=None,
         )
-        np.testing.assert_array_equal(hv.to_numpy(observed, dtype=None), expected)
+        np.testing.assert_array_equal(hv.to_numpy(observed), expected)
 
     def test_gemm_output_scale_and_saturating_conversion(self):
         scaled_half = reference_gemm(
@@ -411,7 +413,7 @@ class GemmLowPrecisionTests(unittest.TestCase):  # noqa: F405
             output_layout=None,
         )
         np.testing.assert_array_equal(
-            hv.to_numpy(scaled_half, dtype=None),
+            hv.to_numpy(scaled_half),
             np.asarray([[np.float16(np.float32(0.3333 * 3.0 * 0.1))]]),
         )
 
@@ -436,7 +438,7 @@ class GemmLowPrecisionTests(unittest.TestCase):  # noqa: F405
             output_layout=None,
         )
         np.testing.assert_array_equal(
-            hv.to_numpy(saturated_int8, dtype=None), np.asarray([[127]], dtype=np.int8)
+            hv.to_numpy(saturated_int8), np.asarray([[127]], dtype=np.int8)
         )
 
     def test_saturating_int8_rounding_matches_numpy(self):
@@ -481,7 +483,7 @@ class GemmLowPrecisionTests(unittest.TestCase):  # noqa: F405
             conjugate_b=False,
             output_layout=None,
         )
-        np.testing.assert_array_equal(hv.to_numpy(observed, dtype=None), expected)
+        np.testing.assert_array_equal(hv.to_numpy(observed), expected)
 
     def test_block_scaled_gemm_matches_numpy(self):
         a = np.ones((1, 16), dtype=np.float32)
@@ -521,4 +523,4 @@ class GemmLowPrecisionTests(unittest.TestCase):  # noqa: F405
             conjugate_b=False,
             output_layout=None,
         )
-        np.testing.assert_array_equal(hv.to_numpy(observed, dtype=None), expected)
+        np.testing.assert_array_equal(hv.to_numpy(observed), expected)

@@ -15,7 +15,7 @@ class GenerationTests(unittest.TestCase):  # noqa: F405
             ),
         )
         np.testing.assert_array_equal(
-            hv.to_numpy(serial, dtype=None),
+            hv.to_numpy(serial),
             np.arange(6, dtype=np.float32).reshape((2, 3), order="C"),
         )
 
@@ -29,7 +29,7 @@ class GenerationTests(unittest.TestCase):  # noqa: F405
         )
         indices = np.arange(6, dtype=np.float32).reshape((2, 3), order="C")
         np.testing.assert_allclose(
-            hv.to_numpy(complex_values, dtype=None),
+            hv.to_numpy(complex_values),
             np.sin(indices) + 1j * np.cos(indices),
             rtol=1e-6,
             atol=1e-6,
@@ -43,7 +43,7 @@ class GenerationTests(unittest.TestCase):  # noqa: F405
             ),
         )
         np.testing.assert_array_equal(
-            hv.to_numpy(identity, dtype=None), np.eye(3, 4, dtype=np.float32)
+            hv.to_numpy(identity), np.eye(3, 4, dtype=np.float32)
         )
 
         seed = 19
@@ -61,7 +61,6 @@ class GenerationTests(unittest.TestCase):  # noqa: F405
                 [4, 4],
                 random_recipe,
             ),
-            dtype=None,
         )
         random_repeat = hv.to_numpy(
             hv.generate_tensor(
@@ -69,7 +68,6 @@ class GenerationTests(unittest.TestCase):  # noqa: F405
                 [4, 4],
                 random_recipe,
             ),
-            dtype=None,
         )
         expected_real = np.asarray(
             [
@@ -101,7 +99,6 @@ class GenerationTests(unittest.TestCase):  # noqa: F405
         )
         selected = hv.to_numpy(
             hv.generate_tensor(hv.ScalarType.Float32, [2, 4], candidate_recipe),
-            dtype=None,
         )
         expected = np.asarray(
             [
@@ -124,7 +121,7 @@ class GenerationTests(unittest.TestCase):  # noqa: F405
         hv.generate_at(point, 3, first_point_recipe)
         expected_point = np.zeros((2, 3, 2), dtype=np.float32)
         expected_point[0, 1, 1] = 9.0
-        np.testing.assert_array_equal(hv.to_numpy(point, dtype=None), expected_point)
+        np.testing.assert_array_equal(hv.to_numpy(point), expected_point)
 
         last_dimension_fastest = real_generation_recipe(
             hv.GenerationRecipe.constant(hv.ConstantGenerationParameters(value=7.0)),
@@ -133,7 +130,7 @@ class GenerationTests(unittest.TestCase):  # noqa: F405
         )
         hv.generate_at(point, 3, last_dimension_fastest)
         expected_point[1, 1, 0] = 7.0
-        np.testing.assert_array_equal(hv.to_numpy(point, dtype=None), expected_point)
+        np.testing.assert_array_equal(hv.to_numpy(point), expected_point)
         with self.assertRaises(RuntimeError):
             hv.generate_at(point, point.size, last_dimension_fastest)
 
@@ -152,7 +149,6 @@ class GenerationTests(unittest.TestCase):  # noqa: F405
                 [2, 3, 2],
                 real_generation_recipe_last_dimension_fastest(affine_component, seed=0),
             ),
-            dtype=None,
         )
         expected_affine = np.empty((2, 3, 2), dtype=np.float32)
         for index in np.ndindex(expected_affine.shape):
@@ -179,7 +175,7 @@ class GenerationTests(unittest.TestCase):  # noqa: F405
         )
         for scalar_type, expected in maximum_cases:
             with self.subTest(scalar_type=scalar_type):
-                observed = hv.to_numpy(
+                observed = hv.to_numpy_as(
                     hv.generate_tensor(scalar_type, [3], maximum_recipe),
                     np.float64 if scalar_type == hv.ScalarType.Float64 else np.float32,
                 )
@@ -195,7 +191,6 @@ class GenerationTests(unittest.TestCase):  # noqa: F405
                     hv.GenerationRecipe.type_denormal_minimum(), seed=0
                 ),
             ),
-            dtype=None,
         )
         np.testing.assert_array_equal(
             fp4_denormal, np.asarray([0.5, 0.5], dtype=np.float32)
@@ -209,7 +204,6 @@ class GenerationTests(unittest.TestCase):  # noqa: F405
                     hv.GenerationRecipe.type_nan(), seed=0
                 ),
             ),
-            dtype=None,
         )
         self.assertTrue(np.isnan(nan_values).all())
 
@@ -221,7 +215,6 @@ class GenerationTests(unittest.TestCase):  # noqa: F405
                     hv.GenerationRecipe.type_infinity(), seed=0
                 ),
             ),
-            dtype=None,
         )
         self.assertTrue(np.isposinf(infinity).all())
 
@@ -234,12 +227,10 @@ class GenerationTests(unittest.TestCase):  # noqa: F405
                 [64],
                 type_range_recipe,
             ),
-            dtype=None,
         )
         self.assertTrue(np.all((-6.0 <= low_precision) & (low_precision <= 6.0)))
         float64_range = hv.to_numpy(
             hv.generate_tensor(hv.ScalarType.Float64, [64], type_range_recipe),
-            dtype=None,
         )
         self.assertTrue(np.isfinite(float64_range).all())
         self.assertTrue(
@@ -261,7 +252,6 @@ class GenerationTests(unittest.TestCase):  # noqa: F405
                 [64],
                 absolute_integer_recipe,
             ),
-            dtype=None,
         )
         self.assertTrue(
             np.all((0 <= unsigned_scale_values) & (unsigned_scale_values <= 3))
@@ -283,7 +273,6 @@ class GenerationTests(unittest.TestCase):  # noqa: F405
                 [64],
                 encoded_exponent_recipe,
             ),
-            dtype=None,
         )
         narrow_repeat = hv.to_numpy(
             hv.generate_tensor(
@@ -291,7 +280,6 @@ class GenerationTests(unittest.TestCase):  # noqa: F405
                 [64],
                 encoded_exponent_recipe,
             ),
-            dtype=None,
         )
         np.testing.assert_array_equal(narrow, narrow_repeat)
         exponent_bits = (narrow.view(np.uint32) >> 23) & np.uint32(0xFF)
@@ -369,7 +357,6 @@ class GenerationTests(unittest.TestCase):  # noqa: F405
                     scaled_component, seed=37
                 ),
             ),
-            dtype=None,
         )
         scaled_tenths = np.rint((scaled - 2.0) * 10).astype(np.int32)
         self.assertTrue(np.all((1 <= scaled_tenths) & (scaled_tenths <= 10)))
@@ -388,7 +375,6 @@ class GenerationTests(unittest.TestCase):  # noqa: F405
                     positive_component, seed=37
                 ),
             ),
-            dtype=None,
         )
         self.assertTrue(np.all((0 <= positive) & (positive <= 0.5)))
 
@@ -409,7 +395,6 @@ class GenerationTests(unittest.TestCase):  # noqa: F405
                     alternating_component, seed=0
                 ),
             ),
-            dtype=None,
         )
         expected_matrix = np.asarray([[-2, 2, -2], [2, -2, 2]], dtype=np.float32)
         np.testing.assert_array_equal(alternating[:, :, 0], expected_matrix)
@@ -429,7 +414,6 @@ class GenerationTests(unittest.TestCase):  # noqa: F405
                     opposite_component, seed=0
                 ),
             ),
-            dtype=None,
         )
         np.testing.assert_array_equal(opposite, -expected_matrix)
 
@@ -458,9 +442,7 @@ class PermutationGenerationTests(unittest.TestCase):
                     expected = expected.transpose(
                         tuple(order.index(i) for i in range(3))
                     )
-                    np.testing.assert_array_equal(
-                        hv.to_numpy(whole, dtype=None), expected
-                    )
+                    np.testing.assert_array_equal(hv.to_numpy(whole), expected)
 
     def test_arbitrary_selection_and_invalid_order(self):
         dimensions = (2, 3, 4)
@@ -501,9 +483,9 @@ class PermutationGenerationTests(unittest.TestCase):
         ).with_index_order(order)
         source = hv.generate_tensor(hv.ScalarType.Float32, layout, recipe)
         expected = np.arange(24, dtype=np.float32).reshape(3, 2, 4).transpose(1, 0, 2)
-        np.testing.assert_array_equal(hv.to_numpy(source, dtype=None), expected)
+        np.testing.assert_array_equal(hv.to_numpy(source), expected)
         converted = source.to(hv.ScalarType.Float64)
-        np.testing.assert_array_equal(hv.to_numpy(converted, dtype=None), expected)
+        np.testing.assert_array_equal(hv.to_numpy(converted), expected)
         for selection in (
             hv.IndexRange.all(24),
             hv.IndexRange(2, 24, 3),

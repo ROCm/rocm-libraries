@@ -36,11 +36,11 @@ class MxGenerationOracleTests(unittest.TestCase):
         self.assertEqual(observed.scale_indices.strides, [1, rows])
         self.assertEqual(observed.reference.strides, [1, rows])
         np.testing.assert_array_equal(
-            hv.to_numpy(observed.scale_indices, np.uint32),
+            hv.to_numpy_as(observed.scale_indices, np.uint32),
             expected.scale_indices,
         )
         self.assert_float_values_equal(
-            hv.to_numpy(observed.reference, np.float32),
+            hv.to_numpy_as(observed.reference, np.float32),
             expected.reference,
         )
         return observed, expected

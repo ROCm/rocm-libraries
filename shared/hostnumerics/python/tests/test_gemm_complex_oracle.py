@@ -72,7 +72,7 @@ class GemmComplexOracleTests(unittest.TestCase):  # noqa: F405
         )
         expected = np.zeros_like(expected_complete)
         expected.reshape(-1)[selected] = expected_complete.reshape(-1)[selected]
-        np.testing.assert_array_equal(hv.to_numpy(output, dtype=None), expected)
+        np.testing.assert_array_equal(hv.to_numpy(output), expected)
 
         expected_storage = np.zeros(14, dtype=np.complex64)
         expected_storage[[2, 13]] = expected_complete.reshape(-1)[selected]

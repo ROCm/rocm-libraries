@@ -25,12 +25,10 @@ class CodecTests(unittest.TestCase):
                 raw = list(range(1 << bits))
                 tensor = hv.Tensor.from_storage(
                     scalar_type,
-                    [len(raw)],
+                    hv.Layout.contiguous_last_dimension_fastest(hv.Shape([len(raw)])),
                     pack_bits(raw, bits),
-                    strides=None,
-                    offset=0,
                 )
-                observed = hv.to_numpy(tensor, np.float32)
+                observed = hv.to_numpy_as(tensor, np.float32)
                 expected = np.asarray(
                     [expected_value(scalar_type, value) for value in raw],
                     dtype=np.float32,
@@ -38,7 +36,7 @@ class CodecTests(unittest.TestCase):
                 self.assert_values_equal(observed, expected)
 
                 encodable = ~np.isnan(expected)
-                encoded = hv.from_numpy(expected[encodable], scalar_type)
+                encoded = hv.from_numpy_converted(expected[encodable], scalar_type)
                 round_trip = unpack_bits(encoded.storage, int(encodable.sum()), bits)
                 expected_raw = np.asarray(raw, dtype=np.uint32)
                 if scalar_type == hv.ScalarType.E4M3:
@@ -48,23 +46,27 @@ class CodecTests(unittest.TestCase):
     def test_exhaustive_float16_decode(self):
         raw = np.arange(1 << 16, dtype="<u2")
         tensor = hv.Tensor.from_storage(
-            hv.ScalarType.Float16, [raw.size], raw.tobytes(), strides=None, offset=0
+            hv.ScalarType.Float16,
+            hv.Layout.contiguous_last_dimension_fastest(hv.Shape([raw.size])),
+            raw.tobytes(),
         )
-        observed = hv.to_numpy(tensor, np.float32)
+        observed = hv.to_numpy_as(tensor, np.float32)
         expected = raw.view("<f2").astype(np.float32)
         self.assert_values_equal(observed, expected)
 
     def test_exhaustive_bfloat16_decode_and_finite_round_trip(self):
         raw = np.arange(1 << 16, dtype="<u2")
         tensor = hv.Tensor.from_storage(
-            hv.ScalarType.BFloat16, [raw.size], raw.tobytes(), strides=None, offset=0
+            hv.ScalarType.BFloat16,
+            hv.Layout.contiguous_last_dimension_fastest(hv.Shape([raw.size])),
+            raw.tobytes(),
         )
-        observed = hv.to_numpy(tensor, np.float32)
+        observed = hv.to_numpy_as(tensor, np.float32)
         expected_bits = raw.astype("<u4") << 16
         expected = expected_bits.view("<f4")
         self.assert_values_equal(observed, expected)
 
-        encoded = hv.from_numpy(expected, hv.ScalarType.BFloat16)
+        encoded = hv.from_numpy_converted(expected, hv.ScalarType.BFloat16)
         encoded_raw = np.frombuffer(encoded.storage, dtype="<u2")
         finite = ~np.isnan(expected)
         np.testing.assert_array_equal(encoded_raw[finite], raw[finite])
@@ -72,9 +74,11 @@ class CodecTests(unittest.TestCase):
     def test_e8m0_has_no_zero_encoding(self):
         raw = bytes([0, 1, 127, 128, 254, 255])
         tensor = hv.Tensor.from_storage(
-            hv.ScalarType.E8M0, [len(raw)], raw, strides=None, offset=0
+            hv.ScalarType.E8M0,
+            hv.Layout.contiguous_last_dimension_fastest(hv.Shape([len(raw)])),
+            raw,
         )
-        observed = hv.to_numpy(tensor, np.float32)
+        observed = hv.to_numpy_as(tensor, np.float32)
         expected = np.asarray(
             [
                 math.ldexp(1.0, -127),
@@ -91,9 +95,11 @@ class CodecTests(unittest.TestCase):
     def test_e8m0_zero_uses_exponent_field_with_zero_sentinel(self):
         raw = bytes([0, 1, 127, 128, 254, 255])
         tensor = hv.Tensor.from_storage(
-            hv.ScalarType.E8M0Zero, [len(raw)], raw, strides=None, offset=0
+            hv.ScalarType.E8M0Zero,
+            hv.Layout.contiguous_last_dimension_fastest(hv.Shape([len(raw)])),
+            raw,
         )
-        observed = hv.to_numpy(tensor, np.float32)
+        observed = hv.to_numpy_as(tensor, np.float32)
         expected = np.asarray(
             [
                 0.0,
@@ -107,7 +113,7 @@ class CodecTests(unittest.TestCase):
         )
         self.assert_values_equal(observed, expected)
 
-        encoded = hv.from_numpy(
+        encoded = hv.from_numpy_converted(
             np.asarray([0.0, 1.75, -2.0, np.inf], dtype=np.float32),
             hv.ScalarType.E8M0Zero,
         )

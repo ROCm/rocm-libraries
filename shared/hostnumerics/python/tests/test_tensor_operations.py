@@ -15,7 +15,7 @@ class TensorOperationsTests(unittest.TestCase):  # noqa: F405
             dtype=np.float32,
         )
         x = hv.from_numpy(x_values)
-        y = hv.from_numpy(y_source, hv.ScalarType.BFloat16)
+        y = hv.from_numpy_converted(y_source, hv.ScalarType.BFloat16)
         result = hv.add(
             hv.multiply(
                 x,
@@ -40,12 +40,12 @@ class TensorOperationsTests(unittest.TestCase):  # noqa: F405
             value = np.float32(value + np.float32(0.5) * np.float32(x_values[index]))
             value = np.float32(value + np.float32(-1.25) * y_values[index])
             expected[index] = value
-        np.testing.assert_array_equal(hv.to_numpy(result, dtype=None), expected)
+        np.testing.assert_array_equal(hv.to_numpy(result), expected)
 
         y_only = hv.multiply(y, 3.0, output_type=None, compute_type=None)
         self.assertEqual(y_only.type, hv.ScalarType.BFloat16)
         np.testing.assert_array_equal(
-            hv.to_numpy(y_only, dtype=None),
+            hv.to_numpy(y_only),
             quantize_bfloat16(np.float32(3.0) * y_values),
         )
 
@@ -57,22 +57,20 @@ class TensorOperationsTests(unittest.TestCase):  # noqa: F405
             compute_type=hv.ScalarType.Float32,
         )
         np.testing.assert_array_equal(
-            hv.to_numpy(tensor_scaled, dtype=None), np.float32(2.0) * x_values
+            hv.to_numpy(tensor_scaled), np.float32(2.0) * x_values
         )
         np.testing.assert_array_equal(
-            hv.to_numpy(
-                hv.multiply(x, x, output_type=None, compute_type=None), dtype=None
-            ),
+            hv.to_numpy(hv.multiply(x, x, output_type=None, compute_type=None)),
             x_values * x_values,
         )
 
         float_values = hv.from_numpy(np.asarray([1.0, 2.0], dtype=np.float32))
         np.testing.assert_array_equal(
-            hv.to_numpy(2.0 * float_values + 1.0, dtype=None),
+            hv.to_numpy(2.0 * float_values + 1.0),
             np.asarray([3.0, 5.0], dtype=np.float32),
         )
         np.testing.assert_array_equal(
-            hv.to_numpy(1.0 + float_values, dtype=None),
+            hv.to_numpy(1.0 + float_values),
             np.asarray([2.0, 3.0], dtype=np.float32),
         )
         np.testing.assert_array_equal(
@@ -80,16 +78,15 @@ class TensorOperationsTests(unittest.TestCase):  # noqa: F405
                 hv.subtract(
                     float_values, np.float32(0.5), output_type=None, compute_type=None
                 ),
-                dtype=None,
             ),
             np.asarray([0.5, 1.5], dtype=np.float32),
         )
         np.testing.assert_array_equal(
-            hv.to_numpy(10.0 - float_values * 2.0 - 1.0, dtype=None),
+            hv.to_numpy(10.0 - float_values * 2.0 - 1.0),
             np.asarray([7.0, 5.0], dtype=np.float32),
         )
         np.testing.assert_array_equal(
-            hv.to_numpy(-float_values, dtype=None),
+            hv.to_numpy(-float_values),
             np.asarray([-1.0, -2.0], dtype=np.float32),
         )
 
@@ -102,14 +99,14 @@ class TensorOperationsTests(unittest.TestCase):  # noqa: F405
         integer_plus_fraction = integer_values + np.float64(1.75)
         self.assertEqual(integer_plus_fraction.type, hv.ScalarType.Int32)
         np.testing.assert_array_equal(
-            hv.to_numpy(integer_plus_fraction, dtype=None),
+            hv.to_numpy(integer_plus_fraction),
             np.asarray([2, 3], dtype=np.int32),
         )
 
         with self.assertRaises(RuntimeError):
             hv.add(x, y, output_type=None, compute_type=None)
 
-        packed = hv.from_numpy(
+        packed = hv.from_numpy_converted(
             np.asarray([0.5, 1.0, -1.5, 3.0], dtype=np.float32),
             hv.ScalarType.Float4E2M1,
         )
@@ -120,22 +117,20 @@ class TensorOperationsTests(unittest.TestCase):  # noqa: F405
             compute_type=hv.ScalarType.Float32,
         )
         np.testing.assert_array_equal(
-            hv.to_numpy(packed_product, dtype=None),
+            hv.to_numpy(packed_product),
             np.asarray([1.0, 2.0, -3.0, 6.0], dtype=np.float32),
         )
 
         padded_x = hv.Tensor.from_storage(
             hv.ScalarType.Float32,
-            [2, 2],
+            hv.Layout(hv.Shape([2, 2]), [3, 1], 0),
             np.asarray([1.0, 2.0, -99.0, 3.0, 4.0], dtype=np.float32).tobytes(),
-            strides=[3, 1],
-            offset=0,
         )
         contiguous = hv.multiply(padded_x, 1.0, output_type=None, compute_type=None)
         self.assertEqual(contiguous.strides, [2, 1])
         self.assertEqual(contiguous.offset, 0)
         np.testing.assert_array_equal(
-            hv.to_numpy(contiguous, dtype=None),
+            hv.to_numpy(contiguous),
             np.asarray([[1.0, 2.0], [3.0, 4.0]], dtype=np.float32),
         )
 
@@ -149,9 +144,7 @@ class TensorOperationsTests(unittest.TestCase):  # noqa: F405
             output_type=None,
             compute_type=None,
         )
-        np.testing.assert_array_equal(
-            hv.to_numpy(broadcast, dtype=None), 2.0 * column - row
-        )
+        np.testing.assert_array_equal(hv.to_numpy(broadcast), 2.0 * column - row)
 
         empty = hv.add(
             hv.from_numpy(np.empty((0, 3), dtype=np.float32)),
@@ -164,11 +157,11 @@ class TensorOperationsTests(unittest.TestCase):  # noqa: F405
         activation_values = np.asarray([-2.0, -0.5, 0.0, 2.0], dtype=np.float32)
         activation_input = hv.from_numpy(activation_values)
         np.testing.assert_array_equal(
-            hv.to_numpy(hv.relu(activation_input), dtype=None),
+            hv.to_numpy(hv.relu(activation_input)),
             np.maximum(activation_values, 0.0),
         )
         np.testing.assert_array_equal(
-            hv.to_numpy(hv.clip(activation_input, -1.0, 1.0), dtype=None),
+            hv.to_numpy(hv.clip(activation_input, -1.0, 1.0)),
             np.clip(activation_values, -1.0, 1.0),
         )
 
@@ -205,7 +198,7 @@ class TensorOperationsTests(unittest.TestCase):  # noqa: F405
                 output = getattr(hv, name)(input_tensor, **parameters)
                 self.assertEqual(output.type, hv.ScalarType.Float64)
                 np.testing.assert_allclose(
-                    hv.to_numpy(output, dtype=None), expected, rtol=1e-14, atol=1e-14
+                    hv.to_numpy(output), expected, rtol=1e-14, atol=1e-14
                 )
 
     def test_native_operation_direct_bindings(self):
@@ -219,7 +212,7 @@ class TensorOperationsTests(unittest.TestCase):  # noqa: F405
             hv.ScalarType.Float32,
         )
         np.testing.assert_array_equal(
-            hv.to_numpy(reduction, dtype=None),
+            hv.to_numpy(reduction),
             np.sum(values, axis=1, dtype=np.float32),
         )
 
@@ -232,7 +225,7 @@ class TensorOperationsTests(unittest.TestCase):  # noqa: F405
             hv.ScalarType.Float32,
         )
         np.testing.assert_array_equal(
-            hv.to_numpy(reduction_output, dtype=None),
+            hv.to_numpy(reduction_output),
             np.sum(values, axis=1, dtype=np.float32),
         )
 

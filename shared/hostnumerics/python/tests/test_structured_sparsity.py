@@ -11,7 +11,7 @@ class StructuredSparsityTests(unittest.TestCase):  # noqa: F405
             with self.subTest(shape=shape):
                 # Excluding the zero axis would overflow even though no work exists.
                 tensor = hv.Tensor.from_storage(
-                    hv.ScalarType.Float32, shape, b"", strides=[0, 0, 0], offset=0
+                    hv.ScalarType.Float32, hv.Layout(hv.Shape(shape), [0, 0, 0], 0), b""
                 )
                 pattern = hv.StructuredSparsityPattern()
                 pattern.index_order = hv.Permutation([0, 1, 2])
@@ -72,18 +72,18 @@ class StructuredSparsityTests(unittest.TestCase):  # noqa: F405
                             expected_indices[row, group * 2 + retained_index] = position
 
                 np.testing.assert_array_equal(
-                    hv.to_numpy(result.pruned, dtype=None), expected_pruned
+                    hv.to_numpy(result.pruned), expected_pruned
                 )
                 np.testing.assert_array_equal(
-                    hv.to_numpy(result.compressed, dtype=None), expected_compressed
+                    hv.to_numpy(result.compressed), expected_compressed
                 )
                 np.testing.assert_array_equal(
-                    hv.to_numpy(result.retained_indices, dtype=None), expected_indices
+                    hv.to_numpy(result.retained_indices), expected_indices
                 )
                 metadata = hv.encode_two_of_four_metadata(result.retained_indices, 1)
                 nibble = retained_positions[0] | (retained_positions[1] << 2)
                 np.testing.assert_array_equal(
-                    hv.to_numpy(metadata, dtype=None),
+                    hv.to_numpy(metadata),
                     np.full(
                         (2, 1),
                         nibble | (nibble << 4),
@@ -91,8 +91,8 @@ class StructuredSparsityTests(unittest.TestCase):  # noqa: F405
                     ),
                 )
                 np.testing.assert_array_equal(
-                    hv.to_numpy(result.two_of_four_metadata, dtype=None),
-                    hv.to_numpy(metadata, dtype=None),
+                    hv.to_numpy(result.two_of_four_metadata),
+                    hv.to_numpy(metadata),
                 )
 
     def test_structured_sparsity_random_is_deterministic_and_self_consistent(self):
@@ -106,22 +106,22 @@ class StructuredSparsityTests(unittest.TestCase):  # noqa: F405
         first = hv.apply_structured_sparsity(hv.from_numpy(values), pattern, True)
         second = hv.apply_structured_sparsity(hv.from_numpy(values), pattern, True)
         np.testing.assert_array_equal(
-            hv.to_numpy(first.pruned, dtype=None),
-            hv.to_numpy(second.pruned, dtype=None),
+            hv.to_numpy(first.pruned),
+            hv.to_numpy(second.pruned),
         )
         np.testing.assert_array_equal(
-            hv.to_numpy(first.compressed, dtype=None),
-            hv.to_numpy(second.compressed, dtype=None),
+            hv.to_numpy(first.compressed),
+            hv.to_numpy(second.compressed),
         )
         np.testing.assert_array_equal(
-            hv.to_numpy(first.retained_indices, dtype=None),
-            hv.to_numpy(second.retained_indices, dtype=None),
+            hv.to_numpy(first.retained_indices),
+            hv.to_numpy(second.retained_indices),
         )
 
-        pruned = hv.to_numpy(first.pruned, dtype=None)
-        compressed = hv.to_numpy(first.compressed, dtype=None)
-        retained_indices = hv.to_numpy(first.retained_indices, dtype=None)
-        metadata = hv.to_numpy(first.two_of_four_metadata, dtype=None)
+        pruned = hv.to_numpy(first.pruned)
+        compressed = hv.to_numpy(first.compressed)
+        retained_indices = hv.to_numpy(first.retained_indices)
+        metadata = hv.to_numpy(first.two_of_four_metadata)
         observed_position_sets = set()
         for row in range(values.shape[0]):
             for group in range(values.shape[1] // 4):
@@ -153,7 +153,9 @@ class StructuredSparsityTests(unittest.TestCase):  # noqa: F405
         storage[0:8] = logical[0]
         storage[10:18] = logical[1]
         strided = hv.Tensor.from_storage(
-            hv.ScalarType.Float32, [2, 8], storage.tobytes(), [10, 1], offset=0
+            hv.ScalarType.Float32,
+            hv.Layout(hv.Shape([2, 8]), [10, 1], 0),
+            storage.tobytes(),
         )
         pattern = hv.StructuredSparsityPattern()
         pattern.index_order = hv.Permutation([0, 1])
@@ -165,9 +167,7 @@ class StructuredSparsityTests(unittest.TestCase):  # noqa: F405
         expected = np.zeros_like(logical)
         expected[:, 1::4] = logical[:, 1::4]
         expected[:, 3::4] = logical[:, 3::4]
-        np.testing.assert_array_equal(
-            hv.to_numpy(observed.pruned, dtype=None), expected
-        )
+        np.testing.assert_array_equal(hv.to_numpy(observed.pruned), expected)
         self.assertEqual(observed.pruned.strides, [8, 1])
         self.assertEqual(observed.compressed.strides, [4, 1])
         self.assertEqual(observed.retained_indices.strides, [4, 1])
@@ -177,11 +177,11 @@ class StructuredSparsityTests(unittest.TestCase):  # noqa: F405
             dtype=np.float32,
         )
         fp4 = hv.apply_structured_sparsity(
-            hv.from_numpy(fp4_values, hv.ScalarType.Float4E2M1),
+            hv.from_numpy_converted(fp4_values, hv.ScalarType.Float4E2M1),
             pattern,
             emit_two_of_four_metadata=False,
         )
         expected_fp4 = np.zeros_like(fp4_values)
         expected_fp4[:, 1::4] = fp4_values[:, 1::4]
         expected_fp4[:, 3::4] = fp4_values[:, 3::4]
-        np.testing.assert_array_equal(hv.to_numpy(fp4.pruned, dtype=None), expected_fp4)
+        np.testing.assert_array_equal(hv.to_numpy(fp4.pruned), expected_fp4)

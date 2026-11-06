@@ -67,7 +67,7 @@ class GemmApiTests(unittest.TestCase):  # noqa: F405
             conjugate_b=False,
             output_layout=None,
         )
-        np.testing.assert_array_equal(hv.to_numpy(result, dtype=None), expected)
+        np.testing.assert_array_equal(hv.to_numpy(result), expected)
 
     def test_gemm_api_requires_explicit_c(self):
         self.assertFalse(hasattr(hv, "GemmOptions"))
@@ -102,7 +102,6 @@ class GemmApiTests(unittest.TestCase):  # noqa: F405
                     conjugate_b=False,
                     output_layout=None,
                 ),
-                dtype=None,
             ),
             a_values @ b_values,
         )
@@ -153,7 +152,7 @@ class GemmApiTests(unittest.TestCase):  # noqa: F405
             output_layout=None,
         )
         np.testing.assert_array_equal(
-            hv.to_numpy(result, dtype=None), np.asarray([[34.0]], dtype=np.float32)
+            hv.to_numpy(result), np.asarray([[34.0]], dtype=np.float32)
         )
 
         with self.assertRaisesRegex(RuntimeError, "rank-zero"):
@@ -214,7 +213,7 @@ class GemmApiTests(unittest.TestCase):  # noqa: F405
             output_layout=None,
         )
         np.testing.assert_array_equal(
-            hv.to_numpy(result, dtype=None), np.asarray([[312.0]], dtype=np.float32)
+            hv.to_numpy(result), np.asarray([[312.0]], dtype=np.float32)
         )
 
     def test_gemm_options_conjugate_operands(self):
@@ -246,7 +245,7 @@ class GemmApiTests(unittest.TestCase):  # noqa: F405
             output_layout=None,
         )
         np.testing.assert_allclose(
-            hv.to_numpy(result, dtype=None),
+            hv.to_numpy(result),
             np.conjugate(a_values) @ b_values,
             rtol=1e-6,
             atol=1e-6,
@@ -280,7 +279,7 @@ class GemmApiTests(unittest.TestCase):  # noqa: F405
             conjugate_b=False,
         )
         expected = a_values @ b_values
-        np.testing.assert_array_equal(hv.to_numpy(result, dtype=None), expected)
+        np.testing.assert_array_equal(hv.to_numpy(result), expected)
         self.assertEqual(result.strides, [9, 2])
         self.assertEqual(result.offset, 1)
 
@@ -304,7 +303,7 @@ class GemmApiTests(unittest.TestCase):  # noqa: F405
             conjugate_a=False,
             conjugate_b=False,
         )
-        np.testing.assert_array_equal(hv.to_numpy(automatic, dtype=None), expected)
+        np.testing.assert_array_equal(hv.to_numpy(automatic), expected)
 
         storage = np.frombuffer(result.storage, dtype=np.float32)
         expected_storage = np.zeros(15, dtype=np.float32)
@@ -336,7 +335,7 @@ class GemmApiTests(unittest.TestCase):  # noqa: F405
             output_layout=None,
         )
         np.testing.assert_array_equal(
-            hv.to_numpy(observed, dtype=None),
+            hv.to_numpy(observed),
             np.asarray([[19.0, 0.0], [0.0, 50.0]], dtype=np.float32),
         )
         blocked = reference_gemm(
@@ -360,7 +359,7 @@ class GemmApiTests(unittest.TestCase):  # noqa: F405
             output_layout=None,
         )
         np.testing.assert_array_equal(
-            hv.to_numpy(blocked, dtype=None),
+            hv.to_numpy(blocked),
             np.asarray([[19.0, 0.0], [0.0, 50.0]], dtype=np.float32),
         )
         self.assertEqual(

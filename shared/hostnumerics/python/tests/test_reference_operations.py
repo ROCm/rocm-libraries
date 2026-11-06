@@ -13,7 +13,7 @@ class ReferenceOperationsTests(unittest.TestCase):  # noqa: F405
             ],
             dtype=np.float32,
         )
-        input_tensor = hv.from_numpy(source, hv.ScalarType.Float16)
+        input_tensor = hv.from_numpy_converted(source, hv.ScalarType.Float16)
         result = hv.reference_softmax(
             input_tensor,
             axis=1,
@@ -37,9 +37,7 @@ class ReferenceOperationsTests(unittest.TestCase):  # noqa: F405
                 for row in range(quantized.shape[1]):
                     expected[batch, row, column] = np.float32(exponentials[row] / total)
 
-        np.testing.assert_allclose(
-            hv.to_numpy(result, dtype=None), expected, rtol=1e-6, atol=1e-7
-        )
+        np.testing.assert_allclose(hv.to_numpy(result), expected, rtol=1e-6, atol=1e-7)
         with self.assertRaises(RuntimeError):
             hv.reference_softmax(
                 input_tensor,
@@ -50,10 +48,8 @@ class ReferenceOperationsTests(unittest.TestCase):  # noqa: F405
 
         padded_input = hv.Tensor.from_storage(
             hv.ScalarType.Float32,
-            [2, 2],
+            hv.Layout(hv.Shape([2, 2]), [3, 1], 0),
             np.asarray([1.0, 2.0, -99.0, 3.0, 4.0], dtype=np.float32).tobytes(),
-            strides=[3, 1],
-            offset=0,
         )
         contiguous = hv.reference_softmax(
             padded_input,
@@ -74,9 +70,9 @@ class ReferenceOperationsTests(unittest.TestCase):  # noqa: F405
         )
         gamma_source = np.asarray([1.0, 0.5, -2.0], dtype=np.float32)
         beta_source = np.asarray([0.25, -0.5, 1.0], dtype=np.float32)
-        input_tensor = hv.from_numpy(source, hv.ScalarType.Float16)
-        gamma = hv.from_numpy(gamma_source, hv.ScalarType.Float16)
-        beta = hv.from_numpy(beta_source, hv.ScalarType.BFloat16)
+        input_tensor = hv.from_numpy_converted(source, hv.ScalarType.Float16)
+        gamma = hv.from_numpy_converted(gamma_source, hv.ScalarType.Float16)
+        beta = hv.from_numpy_converted(beta_source, hv.ScalarType.BFloat16)
         epsilon = np.float32(1e-5)
         result = hv.reference_layer_norm(
             input_tensor,
@@ -126,13 +122,13 @@ class ReferenceOperationsTests(unittest.TestCase):  # noqa: F405
                     )
 
         np.testing.assert_allclose(
-            hv.to_numpy(result.output, dtype=None), expected, rtol=1e-6, atol=1e-6
+            hv.to_numpy(result.output), expected, rtol=1e-6, atol=1e-6
         )
         np.testing.assert_allclose(
-            hv.to_numpy(result.mean, dtype=None), expected_mean, rtol=1e-6, atol=1e-6
+            hv.to_numpy(result.mean), expected_mean, rtol=1e-6, atol=1e-6
         )
         np.testing.assert_allclose(
-            hv.to_numpy(result.inverse_variance, dtype=None),
+            hv.to_numpy(result.inverse_variance),
             expected_inverse,
             rtol=1e-6,
             atol=1e-6,
@@ -140,10 +136,8 @@ class ReferenceOperationsTests(unittest.TestCase):  # noqa: F405
 
         padded_input = hv.Tensor.from_storage(
             hv.ScalarType.Float32,
-            [2, 2],
+            hv.Layout(hv.Shape([2, 2]), [3, 1], 0),
             np.asarray([1.0, 2.0, -99.0, 3.0, 4.0], dtype=np.float32).tobytes(),
-            strides=[3, 1],
-            offset=0,
         )
         contiguous = hv.reference_layer_norm(
             padded_input,
@@ -182,16 +176,14 @@ class ReferenceOperationsTests(unittest.TestCase):  # noqa: F405
         pre_activation = values + bias[:, None]
         activated = np.maximum(pre_activation, 0.0)
         np.testing.assert_array_equal(
-            hv.to_numpy(result.output, np.float32), activated * 2.0
+            hv.to_numpy_as(result.output, np.float32), activated * 2.0
+        )
+        np.testing.assert_array_equal(hv.to_numpy(result.raw_output), activated * 2.0)
+        np.testing.assert_array_equal(
+            hv.to_numpy(result.auxiliary_output), pre_activation * 3.0
         )
         np.testing.assert_array_equal(
-            hv.to_numpy(result.raw_output, dtype=None), activated * 2.0
-        )
-        np.testing.assert_array_equal(
-            hv.to_numpy(result.auxiliary_output, dtype=None), pre_activation * 3.0
-        )
-        np.testing.assert_array_equal(
-            hv.to_numpy(result.amax, dtype=None), np.asarray([5.0], dtype=np.float32)
+            hv.to_numpy(result.amax), np.asarray([5.0], dtype=np.float32)
         )
 
         gate = np.asarray([[0.5, 2.0], [-1.0, 0.25]], dtype=np.float32)
@@ -213,10 +205,8 @@ class ReferenceOperationsTests(unittest.TestCase):  # noqa: F405
             index_order=hv.LastDimensionFastest(),
         )
         raw = values * 2.0
-        np.testing.assert_array_equal(hv.to_numpy(gated.raw_output, dtype=None), raw)
-        np.testing.assert_array_equal(
-            hv.to_numpy(gated.output, dtype=None), gate * raw + gate
-        )
+        np.testing.assert_array_equal(hv.to_numpy(gated.raw_output), raw)
+        np.testing.assert_array_equal(hv.to_numpy(gated.output), gate * raw + gate)
 
         selected = hv.reference_epilogue(
             hv.from_numpy(values),
@@ -235,11 +225,11 @@ class ReferenceOperationsTests(unittest.TestCase):  # noqa: F405
             include_amax=False,
         )
         np.testing.assert_array_equal(
-            hv.to_numpy(selected.output, dtype=None),
+            hv.to_numpy(selected.output),
             np.asarray([[0.0, 1.0], [3.0, 0.0]], dtype=np.float32),
         )
         np.testing.assert_array_equal(
-            hv.to_numpy(selected.raw_output, dtype=None),
+            hv.to_numpy(selected.raw_output),
             np.asarray([[0.0, 1.0], [3.0, 0.0]], dtype=np.float32),
         )
         int8_values = np.asarray([[-200.0, -128.5], [126.5, 300.0]], dtype=np.float32)
@@ -260,7 +250,7 @@ class ReferenceOperationsTests(unittest.TestCase):  # noqa: F405
             index_order=hv.LastDimensionFastest(),
         )
         np.testing.assert_array_equal(
-            hv.to_numpy(saturated.output, dtype=None),
+            hv.to_numpy(saturated.output),
             np.clip(np.rint(int8_values), -128, 127).astype(np.int8),
         )
 
@@ -285,7 +275,7 @@ class ReferenceOperationsTests(unittest.TestCase):  # noqa: F405
             index_order=hv.LastDimensionFastest(),
         )
         expected = gradient * (activation_input > 0)
-        np.testing.assert_array_equal(hv.to_numpy(result.output, dtype=None), expected)
+        np.testing.assert_array_equal(hv.to_numpy(result.output), expected)
 
         gelu = hv.reference_epilogue(
             hv.from_numpy(gradient),
@@ -320,7 +310,7 @@ class ReferenceOperationsTests(unittest.TestCase):  # noqa: F405
             * (1.0 + 3.0 * coefficient1 * activation_input * activation_input)
         )
         np.testing.assert_allclose(
-            hv.to_numpy(gelu.output, dtype=None),
+            hv.to_numpy(gelu.output),
             gradient * gelu_derivative,
             rtol=5e-6,
             atol=2e-5,
@@ -404,7 +394,7 @@ class ReferenceOperationsTests(unittest.TestCase):  # noqa: F405
                     index_order=hv.LastDimensionFastest(),
                 )
                 np.testing.assert_allclose(
-                    hv.to_numpy(result.output, dtype=None),
+                    hv.to_numpy(result.output),
                     expected,
                     rtol=5e-6,
                     atol=2e-5,
@@ -453,7 +443,7 @@ class ReferenceOperationsTests(unittest.TestCase):  # noqa: F405
                     index_order=hv.LastDimensionFastest(),
                 )
                 np.testing.assert_allclose(
-                    hv.to_numpy(result.output, dtype=None),
+                    hv.to_numpy(result.output),
                     gradient * factor,
                     rtol=5e-6,
                     atol=2e-5,
@@ -479,7 +469,7 @@ class ReferenceOperationsTests(unittest.TestCase):  # noqa: F405
         )
         expected = 1.0 / (1.0 + np.exp(-values))
         np.testing.assert_allclose(
-            hv.to_numpy(result.output, dtype=None), expected, rtol=0.0, atol=1e-15
+            hv.to_numpy(result.output), expected, rtol=0.0, atol=1e-15
         )
 
     def test_reference_sum_matches_numpy(self):
@@ -491,7 +481,7 @@ class ReferenceOperationsTests(unittest.TestCase):  # noqa: F405
             [0, 2],
         )
         np.testing.assert_array_equal(
-            hv.to_numpy(observed, dtype=None),
+            hv.to_numpy(observed),
             np.sum(values, axis=(0, 2), dtype=np.float32),
         )
 
@@ -503,7 +493,7 @@ class ReferenceOperationsTests(unittest.TestCase):  # noqa: F405
             [1],
         )
         np.testing.assert_array_equal(
-            hv.to_numpy(complex_observed, dtype=None),
+            hv.to_numpy(complex_observed),
             np.sum(complex_values, axis=1, dtype=np.complex64),
         )
 
@@ -515,7 +505,7 @@ class ReferenceOperationsTests(unittest.TestCase):  # noqa: F405
             [1],
         )
         np.testing.assert_array_equal(
-            hv.to_numpy(integer_observed, dtype=None),
+            hv.to_numpy(integer_observed),
             np.sum(integer_values, axis=1, dtype=np.int32),
         )
 
@@ -527,7 +517,7 @@ class ReferenceOperationsTests(unittest.TestCase):  # noqa: F405
             [0],
         )
         np.testing.assert_array_equal(
-            hv.to_numpy(wrapping_observed, dtype=None),
+            hv.to_numpy(wrapping_observed),
             np.sum(wrapping_values, dtype=np.int32),
         )
 
@@ -545,7 +535,7 @@ class ReferenceOperationsTests(unittest.TestCase):  # noqa: F405
             np.max(np.where(np.isnan(values), 0.0, np.abs(values))),
             dtype=np.float16,
         )
-        np.testing.assert_array_equal(hv.to_numpy(observed, dtype=None), expected)
+        np.testing.assert_array_equal(hv.to_numpy(observed), expected)
 
         all_nan = np.full((2, 3), np.nan, dtype=np.float32)
         all_nan_observed = hv.reference_maximum_absolute(
@@ -554,6 +544,6 @@ class ReferenceOperationsTests(unittest.TestCase):  # noqa: F405
             hv.ScalarType.Float32,
         )
         np.testing.assert_array_equal(
-            hv.to_numpy(all_nan_observed, dtype=None),
+            hv.to_numpy(all_nan_observed),
             np.asarray(0.0, dtype=np.float32),
         )
