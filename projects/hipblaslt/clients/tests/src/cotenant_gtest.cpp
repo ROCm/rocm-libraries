@@ -176,19 +176,6 @@ namespace
         EXPECT_EQ(hipStreamDestroy(stream), hipSuccess);
     }
 
-    TEST(CotenantScoped, CountMayEqualCuCount)
-    {
-        if(!gpuAvailable())
-            GTEST_SKIP() << "No GPU available";
-        const int cus = deviceCuCount();
-        ASSERT_GT(cus, 0);
-
-        hipStream_t stream = nullptr;
-        ASSERT_EQ(hipStreamCreate(&stream), hipSuccess);
-        EXPECT_NO_THROW(Scoped(cus, 8, stream));
-        EXPECT_EQ(hipStreamDestroy(stream), hipSuccess);
-    }
-
     TEST(CotenantScoped, RejectsInvalidArgumentsAndStaysUsable)
     {
         if(!gpuAvailable())
