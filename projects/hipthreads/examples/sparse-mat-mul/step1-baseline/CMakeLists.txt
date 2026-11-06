@@ -21,6 +21,7 @@ target_compile_options(spmm PUBLIC "-O3" "-march=native")
 # the repo root). To fetch them, run this from the repo root:
 # sudo apt install git-lfs
 # git lfs pull -I "projects/hipthreads/examples/sparse-mat-mul/data" -X ""
+# cd projects/hipthreads
 
 # then build & run:
 # LINUX:

@@ -24,6 +24,7 @@ target_link_libraries(spmm PRIVATE Threads::Threads)
 # the repo root). To fetch them, run this from the repo root:
 # sudo apt install git-lfs
 # git lfs pull -I "projects/hipthreads/examples/sparse-mat-mul/data" -X ""
+# cd projects/hipthreads
 
 # then build & run:
 # cd examples/sparse-mat-mul/step2-cpu-threading && cmake -B build && cmake --build build && ./build/bin/spmm
