@@ -3399,12 +3399,24 @@ rocke_implicit_gemm_conv_wgrad_spec_t conv_wgrad_build_spec(const py::dict& d,
     s.chiplet_chunk_size = dict_int(d, "chiplet_chunk_size", s.chiplet_chunk_size);
     /* Optional ints: absent or None keeps Python's None (has_* = false).
      * Only the fields the C builder or validator honours are read: the C wgrad
-     * builder does not apply lds_k_pad or vector_size_a/b, so reading them
-     * would tag the kernel name (e.g. "pad<N>") without changing its body. */
+     * builder does not apply lds_k_pad, so reading it would tag the kernel
+     * name ("pad<N>") without changing its body. vector_size_a/b cap the sync
+     * free-axis load widths (and are rejected on the async K loop); dropped,
+     * the engine would build the uncapped kernel and skip those checks. */
     if(d.contains("waves_per_eu") && !d["waves_per_eu"].is_none())
     {
         s.has_waves_per_eu = true;
         s.waves_per_eu = d["waves_per_eu"].cast<int>();
+    }
+    if(d.contains("vector_size_a") && !d["vector_size_a"].is_none())
+    {
+        s.has_vector_size_a = true;
+        s.vector_size_a = d["vector_size_a"].cast<int>();
+    }
+    if(d.contains("vector_size_b") && !d["vector_size_b"].is_none())
+    {
+        s.has_vector_size_b = true;
+        s.vector_size_b = d["vector_size_b"].cast<int>();
     }
     if(d.contains("vector_size_c") && !d["vector_size_c"].is_none())
     {

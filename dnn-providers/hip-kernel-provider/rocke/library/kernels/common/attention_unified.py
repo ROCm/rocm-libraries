@@ -4117,7 +4117,8 @@ def _tiled_3d_reduce_lds_bytes(spec) -> int:
     return split_kv_reduce_lds_bytes(spec.num_segments)
 
 
-def _validate_strided_3d_lds(segment, reduce, *, arch: str) -> None:
+def _strided_3d_lds_reason(segment, reduce, *, arch: str) -> Optional[str]:
+    """Why the segment/reducer pair overflows ``arch`` LDS, or None if it fits."""
     from rocke.core.arch import ArchTarget
 
     target = ArchTarget.from_gfx(arch)
@@ -4126,11 +4127,18 @@ def _validate_strided_3d_lds(segment, reduce, *, arch: str) -> None:
         ("reducer", _tiled_3d_reduce_lds_bytes(reduce)),
     ):
         if not target.fits_lds(used):
-            raise ValueError(
+            return (
                 f"strided 3D {kind} requires {used} B LDS, exceeding "
                 f"{arch} capacity {target.lds_capacity_bytes} B "
                 f"(head_size={segment.head_size}, tile_size={segment.tile_size})"
             )
+    return None
+
+
+def _validate_strided_3d_lds(segment, reduce, *, arch: str) -> None:
+    reason = _strided_3d_lds_reason(segment, reduce, arch=arch)
+    if reason is not None:
+        raise ValueError(reason)
 
 
 def _strided_3d_specs_from_problem(problem: UnifiedAttentionProblem, *, arch: str):

@@ -25,24 +25,25 @@
 #pragma once
 
 #include "rocsparse-types.h"
+#include "rocsparse_indextype_utils.hpp"
 
 #include <cstdint>
+#include <hip/hip_runtime_api.h>
 
-typedef struct _rocsparse_nnzsplit_info
+typedef struct _rocsparse_csrmv_nnzsplit_info
 {
-
+protected:
     bool use_starting_block_ids{};
 
     size_t size{};
 
-    void* starting_ids{};
-    // Interior pointer into starting_ids. One past that allocation when
-    // use_starting_block_ids is false.
-    void*  starting_block_ids{};
-    size_t starting_ids_size_in_bytes{};
-    // Bytes of the starting_block_ids region. Zero when that region is unused.
-    size_t starting_block_ids_size_in_bytes{};
+    rocsparse_indextype indextype{deprecated_rocsparse_indextype_u16};
 
+    // starting_ids (size + 1 entries), followed by starting_block_ids (size + 1
+    // entries) if use_starting_block_ids.
+    void* id_buffer{};
+
+public:
     // Launch tuning chosen at analysis time and replayed verbatim at compute
     // time so the two phases always agree (the block layout of starting_ids /
     // starting_block_ids depends on both).
@@ -50,13 +51,38 @@ typedef struct _rocsparse_nnzsplit_info
     uint32_t nnz_per_thread{}; // nnz-per-thread granularity (1 / 4 / 8)
     int64_t  max_row_nnz{}; // longest row length (row-skew signal)
 
-public:
-    ~_rocsparse_nnzsplit_info();
+    _rocsparse_csrmv_nnzsplit_info()                                      = default;
+    _rocsparse_csrmv_nnzsplit_info(const _rocsparse_csrmv_nnzsplit_info&) = delete;
+    _rocsparse_csrmv_nnzsplit_info& operator=(const _rocsparse_csrmv_nnzsplit_info&) = delete;
+
+    // Does not free the id buffer: clear() must be called before end of life.
     void clear();
 
-    // Allocates starting_ids and, when use_starting_block_ids is set, the
-    // starting_block_ids region inside the same allocation. The flag is the
-    // value already stored on this object.
-    rocsparse_status
-        allocate_starting_ids(hipStream_t stream, size_t required_blocks, size_t index_size);
-} * rocsparse_nnzsplit_info;
+    rocsparse_status allocate(size_t              size,
+                              bool                use_starting_block_ids,
+                              rocsparse_indextype indextype,
+                              hipStream_t         stream);
+
+    size_t              get_size() const;
+    bool                get_use_starting_block_ids() const;
+    rocsparse_indextype get_indextype() const;
+    void*               get_starting_ids() const;
+    void*               get_starting_block_ids() const;
+    size_t              get_size_in_bytes() const;
+
+    // Copies the id buffer and every field of src. The id buffer of this
+    // object is reused when present: it must have the size of the src buffer.
+    rocsparse_status copy_from(const _rocsparse_csrmv_nnzsplit_info& src);
+
+    template <typename J>
+    J* get_starting_ids() const
+    {
+        return static_cast<J*>(this->get_starting_ids());
+    }
+
+    template <typename J>
+    J* get_starting_block_ids() const
+    {
+        return static_cast<J*>(this->get_starting_block_ids());
+    }
+} * rocsparse_csrmv_nnzsplit_info;
