@@ -795,18 +795,23 @@ def test_fwd_default_pick_follows_the_list_files_on_disk_priority_order():
     "shape",
     [s for s in _SHAPES if s.startswith("depthwise")],
 )
-def test_depthwise_shapes_default_to_a_direct_depthwise_kernel(shape):
-    """A depthwise-shaped request must not fall back to a generic IGEMM tile:
-    the direct depthwise candidates are admitted only for genuinely depthwise
-    shapes (cpg=kpg=1), so one of them is always among the admitted set and
-    wins fwd's on-disk default pick over implicit_gemm. *Which*
-    direct_depthwise variant wins is deliberately a hand-tuned family
-    preference (e.g. the windowed depthwise kernel sorting first),
-    not a label-order tie-break -- see
-    test_fwd_default_pick_follows_the_list_files_on_disk_priority_order.
+def test_depthwise_shapes_default_to_the_direct_depthwise_kernel(shape):
+    """A depthwise-shaped request must not fall back to a generic IGEMM tile
+    just because it happens to come earlier in the list -- the direct
+    depthwise candidates are admitted only for genuinely depthwise shapes
+    (cpg=kpg=1), so they are listed ahead of implicit_gemm so they win
+    whenever both are admitted. The windowed MFMA forward
+    (direct_depthwise_win: stride 1, "same" padding, channels a multiple of 8)
+    leads; the tiled kernel takes the rest. This pins fwd's hand-tuned
+    priority order (gfx950_fwd.json's own file order): moving the tiled
+    records ahead of the windowed ones changes the default pick and fails
+    here.
     """
-    req = _req(**_SHAPES[shape])
-    assert gc.dispatch_conv_grouped(req).spec.algorithm.startswith("direct_depthwise")
+    kw = _SHAPES[shape]
+    req = _req(**kw)
+    windowed = kw.get("stride_h", 1) == 1 and kw.get("Y", 3) <= 9 and kw["C"] % 8 == 0
+    want = "direct_depthwise_win" if windowed else "direct_depthwise_tiled"
+    assert gc.dispatch_conv_grouped(req).spec.algorithm == want
 
 
 def test_spec_id_pins_one_instance():
@@ -963,19 +968,56 @@ def test_registered_list_must_declare_its_arch_and_direction(tmp_path, monkeypat
 
 
 def test_instance_list_tool_adds_labels_and_rebuilds_lists(tmp_path, capsys):
-    """Add order never matters: the written file is always sorted by label,
-    regardless of what order names were added in (a list is a set)."""
+    """fwd's list is a priority order: ``new`` keeps the labels' order, ``add``
+    appends (lowest priority) or inserts at ``--at N``, and ``labels`` prints
+    the file's order -- every write keeps it."""
+    assert not gc.instance_list_is_set("fwd")
     names = _listed_names()
     labels = tmp_path / "labels.txt"
-    labels.write_text("# picked\n" + "\n".join(names[:3]) + "\n", encoding="utf-8")
+    labels.write_text(
+        "# picked\n" + "\n".join(reversed(names[:3])) + "\n", encoding="utf-8"
+    )
     path = tmp_path / "new.json"
     instance_list.main(["new", str(path), "--from", str(labels)])
-    instance_list.main(["add", str(path), names[3]])
+    instance_list.main(["add", str(path), names[3], "--at", "1"])
+    instance_list.main(["add", str(path), names[4]])
+    instance_list.main(["add", str(path), names[5], "--at", "0"])
     with pytest.raises(SystemExit, match="already listed"):
         instance_list.main(["add", str(path), names[0]])
+    with pytest.raises(SystemExit, match="not in 0..6"):
+        instance_list.main(["add", str(path), names[6], "--at", "7"])
     capsys.readouterr()
     instance_list.main(["labels", str(path)])
-    assert capsys.readouterr().out.split() == sorted(names[:4])
+    want = [names[5], names[2], names[3], names[1], names[0], names[4]]
+    assert capsys.readouterr().out.split() == want
     instance_list.main(["format", "--check", str(path)])
     lst = gc.load_instance_list(path)
+    assert [i.label() for i in lst.identities] == want
     assert lst.defaults == gc.load_instance_list(_LIST).defaults
+
+
+def test_instance_list_tool_prints_fwd_labels_in_file_order(capsys):
+    """``labels`` on the registered fwd list prints its priority order, not
+    its labels sorted."""
+    names = _listed_names(_LISTS[(_ARCH, "fwd")])
+    assert names != sorted(names)
+    capsys.readouterr()
+    instance_list.main(["labels", str(_LISTS[(_ARCH, "fwd")])])
+    assert capsys.readouterr().out.split() == names
+
+
+def test_instance_list_tool_keeps_a_dgrad_list_sorted(tmp_path, capsys):
+    """dgrad's list is a set: add order never matters, the written file and
+    ``labels`` are sorted by label, and ``--at`` (a position) is refused."""
+    assert gc.instance_list_is_set("dgrad")
+    names = _listed_names(_LISTS[(_ARCH, "dgrad")])[:4]
+    path = tmp_path / "dgrad.json"
+    instance_list.main(["new", str(path), *reversed(names[:3])])
+    instance_list.main(["add", str(path), names[3]])
+    with pytest.raises(SystemExit, match="is a set"):
+        instance_list.main(["add", str(path), names[0], "--at", "0"])
+    capsys.readouterr()
+    instance_list.main(["labels", str(path)])
+    assert capsys.readouterr().out.split() == sorted(names)
+    lst = gc.load_instance_list(path)
+    assert [i.label() for i in lst.identities] == sorted(names)
