@@ -378,8 +378,7 @@ Tensor Tensor::copyWithZeroPadding(Shape shape) const {
     return result;
 }
 
-Tensor Tensor::copyWithPermutedDimensions(std::span<const size_t> destinationToSource) const {
-    const Permutation permutation(destinationToSource);
+Tensor Tensor::copyWithPermutedDimensions(const Permutation& permutation) const {
     if (permutation.size() != shape().rank())
         throw std::runtime_error("Tensor permutation rank does not match the tensor.");
 
@@ -404,11 +403,6 @@ Tensor Tensor::copyWithPermutedDimensions(std::span<const size_t> destinationToS
                 bits);
         });
     return result;
-}
-
-Tensor Tensor::copyWithPermutedDimensions(std::initializer_list<size_t> destinationToSource) const {
-    return copyWithPermutedDimensions(
-        std::span<const size_t>(destinationToSource.begin(), destinationToSource.size()));
 }
 
 Tensor Tensor::copyConvertedTo(ScalarType destinationType) const {
