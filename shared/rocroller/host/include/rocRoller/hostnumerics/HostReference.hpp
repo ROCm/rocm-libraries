@@ -42,34 +42,35 @@ namespace rocRoller::hostnumerics
         std::string message() const;
     };
 
-    roc::hostnumerics::Tensor hostScaleTensor(DataType                 type,
-                                              std::span<const uint8_t> values,
-                                              size_t                   freeExtent,
-                                              size_t                   reductionExtent,
-                                              size_t                   blockSize);
+    /**
+     * Encoded block scales of a GEMM operand, one per blockSize elements of
+     * its blocked (K) dimension, stored in the layout hostScaleLayout gives
+     * for the operand's data descriptor.
+     */
+    roc::hostnumerics::MatmulBlockScale hostBlockScale(DataType                 type,
+                                                       std::span<const uint8_t> values,
+                                                       TensorDescriptor const&  dataDescriptor,
+                                                       size_t                   blockedDimension,
+                                                       size_t                   blockSize);
 
-    roc::hostnumerics::Tensor hostScaleTensor(DataType                 type,
-                                              std::span<const uint8_t> values,
-                                              TensorDescriptor const&  dataDescriptor,
-                                              size_t                   blockedDimension,
-                                              size_t                   blockSize);
-
-    roc::hostnumerics::Tensor computeHostReference(roc::hostnumerics::Tensor                a,
-                                                   roc::hostnumerics::Tensor                b,
-                                                   roc::hostnumerics::Tensor                c,
-                                                   std::optional<roc::hostnumerics::Tensor> scaleA,
-                                                   std::optional<roc::hostnumerics::Tensor> scaleB,
-                                                   size_t scaleBlockSize,
-                                                   float  alpha,
-                                                   float  beta);
+    /**
+     * One encoded scale for every element of a GEMM operand, as a single
+     * block spanning the whole reduction dimension.
+     */
+    roc::hostnumerics::MatmulBlockScale
+        hostUniformScale(DataType type, uint8_t value, size_t freeExtent, size_t reductionExtent);
 
     roc::hostnumerics::Tensor
-        computeHostReference(GeneratedGEMMInputs const&               inputs,
-                             std::optional<roc::hostnumerics::Tensor> runtimeScaleA,
-                             std::optional<roc::hostnumerics::Tensor> runtimeScaleB,
-                             size_t                                   scaleBlockSize,
-                             float                                    alpha,
-                             float                                    beta);
+        computeHostReference(roc::hostnumerics::Tensor                          a,
+                             roc::hostnumerics::Tensor                          b,
+                             roc::hostnumerics::Tensor                          c,
+                             std::optional<roc::hostnumerics::MatmulBlockScale> scaleA,
+                             std::optional<roc::hostnumerics::MatmulBlockScale> scaleB,
+                             float                                              alpha,
+                             float                                              beta);
+
+    roc::hostnumerics::Tensor
+        computeHostReference(GeneratedGEMMInputs const& inputs, float alpha, float beta);
 
     HostComparisonResult compareHostReference(roc::hostnumerics::Tensor observed,
                                               roc::hostnumerics::Tensor expected,

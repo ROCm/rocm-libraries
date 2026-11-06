@@ -241,18 +241,16 @@ namespace GEMMTests
             TensorDescriptor descC(dataTypeC, {size_t(M), size_t(N)}, "N");
             TensorDescriptor descD(dataTypeD, {size_t(M), size_t(N)}, "N");
 
-            auto const seed           = 31415u;
-            auto const bounded        = hostnumerics::DataInitialization{};
-            auto       scaleTypeA     = DataType::None;
-            auto       scaleTypeB     = DataType::None;
-            size_t     scaleBlockSize = 1;
+            auto const seed    = 31415u;
+            auto const bounded = hostnumerics::DataInitialization{};
+            std::optional<hostnumerics::BlockScaleFormat> scaleFormatA, scaleFormatB;
             if(gemm.scaleAMode == Operations::ScaleMode::Separate
                || gemm.scaleBMode == Operations::ScaleMode::Separate)
             {
                 auto const& arch = m_context->targetArchitecture();
 
                 AssertFatal(gemm.scaleBlockSize > 0, "scaleBlockSize must be set to scale A or B.");
-                scaleBlockSize = static_cast<size_t>(gemm.scaleBlockSize);
+                const auto scaleBlockSize = static_cast<size_t>(gemm.scaleBlockSize);
                 AssertFatal(
                     arch.isSupportedScaleBlockSize(scaleBlockSize),
                     fmt::format("Architecture {} does not support block scaling (size: {}).",
@@ -263,9 +261,9 @@ namespace GEMMTests
                                         gemm.k,
                                         scaleBlockSize));
                 if(gemm.scaleAMode == Operations::ScaleMode::Separate)
-                    scaleTypeA = gemm.scaleTypeA;
+                    scaleFormatA = {gemm.scaleTypeA, scaleBlockSize};
                 if(gemm.scaleBMode == Operations::ScaleMode::Separate)
-                    scaleTypeB = gemm.scaleTypeB;
+                    scaleFormatB = {gemm.scaleTypeB, scaleBlockSize};
             }
 
             auto generatedInputs = hostnumerics::generateGEMMInputs(descA,
@@ -274,9 +272,8 @@ namespace GEMMTests
                                                                     bounded,
                                                                     bounded,
                                                                     bounded,
-                                                                    scaleTypeA,
-                                                                    scaleTypeB,
-                                                                    scaleBlockSize,
+                                                                    scaleFormatA,
+                                                                    scaleFormatB,
                                                                     -1.0f,
                                                                     1.0f,
                                                                     seed);
@@ -284,9 +281,11 @@ namespace GEMMTests
             hostB                = hostnumerics::copyTensorStorage<PackedTypeB>(generatedInputs.b);
             hostC                = hostnumerics::copyTensorStorage<TC>(generatedInputs.c);
             if(generatedInputs.scaleA)
-                hostScaleA = hostnumerics::copyTensorStorage<uint8_t>(*generatedInputs.scaleA);
+                hostScaleA
+                    = hostnumerics::copyTensorStorage<uint8_t>(generatedInputs.scaleA->scales);
             if(generatedInputs.scaleB)
-                hostScaleB = hostnumerics::copyTensorStorage<uint8_t>(*generatedInputs.scaleB);
+                hostScaleB
+                    = hostnumerics::copyTensorStorage<uint8_t>(generatedInputs.scaleB->scales);
 
             if(setIdentity)
             {
@@ -960,21 +959,20 @@ namespace GEMMTests
             }
 
             // Host result
-            auto const referenceScaleBlockSize = gemm.scaleBlockSize > 0
-                                                     ? static_cast<size_t>(gemm.scaleBlockSize)
-                                                     : static_cast<size_t>(K);
-            std::optional<roc::hostnumerics::Tensor> referenceScaleA;
-            std::optional<roc::hostnumerics::Tensor> referenceScaleB;
-            if(gemm.scaleAMode != Operations::ScaleMode::None)
-            {
-                referenceScaleA = hostnumerics::hostScaleTensor(
-                    gemm.scaleTypeA, hostScaleA, descA, 1, referenceScaleBlockSize);
-            }
-            if(gemm.scaleBMode != Operations::ScaleMode::None)
-            {
-                referenceScaleB = hostnumerics::hostScaleTensor(
-                    gemm.scaleTypeB, hostScaleB, descB, 0, referenceScaleBlockSize);
-            }
+            std::optional<roc::hostnumerics::MatmulBlockScale> referenceScaleA;
+            std::optional<roc::hostnumerics::MatmulBlockScale> referenceScaleB;
+            if(gemm.scaleAMode == Operations::ScaleMode::Separate)
+                referenceScaleA = hostnumerics::hostBlockScale(
+                    gemm.scaleTypeA, hostScaleA, descA, 1, scaleFormatA->blockSize);
+            else if(gemm.scaleAMode == Operations::ScaleMode::SingleScale)
+                referenceScaleA
+                    = hostnumerics::hostUniformScale(gemm.scaleTypeA, hostScaleA.at(0), M, K);
+            if(gemm.scaleBMode == Operations::ScaleMode::Separate)
+                referenceScaleB = hostnumerics::hostBlockScale(
+                    gemm.scaleTypeB, hostScaleB, descB, 0, scaleFormatB->blockSize);
+            else if(gemm.scaleBMode == Operations::ScaleMode::SingleScale)
+                referenceScaleB
+                    = hostnumerics::hostUniformScale(gemm.scaleTypeB, hostScaleB.at(0), N, K);
             auto floatReference = hostnumerics::computeHostReference(
                 hostnumerics::hostTensor(descA,
                                          hostA,
@@ -990,7 +988,6 @@ namespace GEMMTests
                     descC, hostC, hostnumerics::DataTypeInterpretation::Unscaled),
                 std::move(referenceScaleA),
                 std::move(referenceScaleB),
-                referenceScaleBlockSize,
                 alpha,
                 beta);
 
