@@ -15,8 +15,8 @@ Subcommands:
              tiered report; changes nothing in the tree
     apply    apply a reviewed plan report to the tree
     mark-ported
-             record that the engine now mirrors the upstream host code (argument
-             structs, packing, grid, dispatch) of a module's pinned commit
+             record that the engine now mirrors the upstream code (argument
+             structs, packing, launch, dispatch, codegen) of a module's pinned commit
     verify   check the tree: pins, manifests, CSV rows against objects, symbols
 
 Exit codes: 0 success or clean, 1 verify found problems, 2 cannot run.
@@ -103,17 +103,28 @@ class Ref:
     what: str
 
 
-# The SGPR padding structs every ASM kernel argument struct is built from.
-_PADDING_REFS = tuple(
+# The SGPR padding structs every ASM kernel argument struct is built from, and
+# the codegen that turns every module's CSVs into a registry. The vendored
+# asm_kernels/codegen.py is a derived copy, so an upstream change is reviewed
+# and ported like the host code.
+_SHARED_REFS = tuple(
     Ref("csrc/include/aiter_hip_common.h", "struct", name, 3, "kernel argument padding")
     for name in ("p1", "p2", "p3")
+) + (
+    Ref(
+        "hsa/codegen.py",
+        "file",
+        None,
+        2,
+        "registry codegen; the vendored asm_kernels/codegen.py is a derived copy",
+    ),
 )
 
-# Upstream host code read to detect ABI and dispatch changes; never copied.
+# Upstream code read to detect ABI, dispatch and codegen changes; never copied.
 # In csrc/cpp_itfs/mha_fwd.cu only the ASM functions are listed: fmha_fwd_ck()
 # and the CK fallback in mha_fwd() are out of scope.
 REFERENCES: dict[str, tuple[Ref, ...]] = {
-    "fmha_v3_fwd": _PADDING_REFS
+    "fmha_v3_fwd": _SHARED_REFS
     + (
         Ref(
             "csrc/include/mha_fwd.h",
@@ -138,6 +149,13 @@ REFERENCES: dict[str, tuple[Ref, ...]] = {
             "object path per device (MI300/MI308)",
         ),
         Ref(
+            "csrc/include/aiter_hip_common.h",
+            "function",
+            "is_mi308_device",
+            3,
+            "MI308 detection, which picks the gfx942 MI300/ or MI308/ objects",
+        ),
+        Ref(
             "csrc/cpp_itfs/mha_fwd.cu",
             "function",
             "get_kernel_name_key",
@@ -155,12 +173,12 @@ REFERENCES: dict[str, tuple[Ref, ...]] = {
             "csrc/cpp_itfs/mha_fwd.cu",
             "function",
             "fmha_fwd_v3",
-            2,
-            "ASM dispatch conditions; each early 'return -1' hands the case to CK, "
-            "so the engine must decline it",
+            3,
+            "ASM dispatch conditions and block size; each early 'return -1' hands "
+            "the case to CK, so the engine must decline it",
         ),
     ),
-    "fmha_fwd_bf16": _PADDING_REFS
+    "fmha_fwd_bf16": _SHARED_REFS
     + (
         Ref(
             "csrc/py_itfs_cu/asm_fmha_fwd_with_sink.cu",
@@ -170,7 +188,7 @@ REFERENCES: dict[str, tuple[Ref, ...]] = {
             "host interface: argument struct, checks and launch",
         ),
     ),
-    "fmha_fwd_bf16_varlen": _PADDING_REFS
+    "fmha_fwd_bf16_varlen": _SHARED_REFS
     + (
         Ref(
             "csrc/py_itfs_cu/asm_fmha_fwd_with_sink_varlen.cu",
@@ -181,7 +199,6 @@ REFERENCES: dict[str, tuple[Ref, ...]] = {
         ),
     ),
 }
-UPSTREAM_CODEGEN = "hsa/codegen.py"
 
 
 class SyncError(Exception):
@@ -283,17 +300,53 @@ def elf_symbols(data: bytes) -> set[str]:
 class CsvTable:
     header: list[str]
     rows: list[dict[str, str]]
-    lines: dict[str, str]  # knl_name -> the row's text, as written upstream
+    lines: dict[str, str]  # knl_name -> the row's text upstream, comments removed
     header_line: str
 
 
+def _strip_line_end_comment(line: str) -> str:
+    """Cut a line at its first comment outside quotes, as AITER's hsa/codegen.py does:
+    '#' anywhere, '//' unless it follows ':', and ';' after a space or tab."""
+    in_quotes = False
+    index = 0
+    while index < len(line):
+        char = line[index]
+        if char == '"':
+            if in_quotes and line[index + 1 : index + 2] == '"':
+                index += 2
+                continue
+            in_quotes = not in_quotes
+        elif not in_quotes:
+            if char == "#" or (char == ";" and index > 0 and line[index - 1] in " \t"):
+                return line[:index].rstrip()
+            if line.startswith("//", index):
+                if index > 0 and line[index - 1] == ":":
+                    index += 2
+                    continue
+                return line[:index].rstrip()
+        index += 1
+    return line
+
+
+def csv_content_lines(text: str) -> list[str]:
+    """The non-empty lines of a CSV without the comments AITER's codegen accepts:
+    /* block */ comments, whole-line comments and line-end comments."""
+    while (start := text.find("/*")) >= 0:
+        end = text.find("*/", start + 2)
+        text = text[:start] if end < 0 else text[:start] + text[end + 2 :]
+    content = []
+    for line in text.split("\n"):
+        if line.lstrip().startswith(COMMENT_PREFIXES):
+            continue
+        line = _strip_line_end_comment(line).rstrip()
+        if line.strip():
+            content.append(line)
+    return content
+
+
 def parse_csv(data: bytes, where: str) -> CsvTable:
-    text = data.decode("utf-8").replace("\r\n", "\n").replace("\r", "\n")
-    content = [
-        line
-        for line in text.split("\n")
-        if line.strip() and not line.lstrip().startswith(COMMENT_PREFIXES)
-    ]
+    text = data.decode("utf-8-sig").replace("\r\n", "\n").replace("\r", "\n")
+    content = csv_content_lines(text)
     if not content:
         raise SyncError(f"{where}: empty CSV")
     parsed = list(csv.reader(content))
@@ -311,8 +364,8 @@ def parse_csv(data: bytes, where: str) -> CsvTable:
         if row["knl_name"] in lines:
             raise SyncError(f"{where}: kernel {row['knl_name']} appears twice")
         rows.append(row)
-        lines[row["knl_name"]] = line.rstrip()
-    return CsvTable(header, rows, lines, content[0].rstrip())
+        lines[row["knl_name"]] = line
+    return CsvTable(header, rows, lines, content[0])
 
 
 @dataclass
@@ -589,7 +642,8 @@ def render_source_md(arch: str, module: str, entry: dict) -> str:
         "",
         "Every object is one of AITER's prebuilt ASM kernels, copied byte for byte.",
         "No CK kernel and no upstream source file is vendored here. Each CSV keeps",
-        "the upstream rows that no rule below excludes, as written upstream.",
+        "the upstream rows that no rule below excludes, as written upstream with",
+        "comments removed.",
         "",
         "## Excluded upstream rows",
         "",
@@ -647,7 +701,8 @@ def parse_rule(spec: str, reason: str) -> dict:
 
 
 def filtered_csv(table: CsvTable, dropped: set[str]) -> bytes:
-    """The upstream table without the dropped kernels, rows kept as written upstream."""
+    """The upstream table without the dropped kernels or comments; rows otherwise as
+    written upstream, so the vendored codegen never meets a comment."""
     lines = [table.header_line]
     lines += [
         table.lines[row["knl_name"]]
@@ -657,11 +712,16 @@ def filtered_csv(table: CsvTable, dropped: set[str]) -> bytes:
     return ("\n".join(lines) + "\n").encode("utf-8")
 
 
+def cfg_name(csv_path: str) -> str:
+    """The registry a CSV feeds: the vendored codegen merges CSVs by this name."""
+    return PurePosixPath(csv_path).name.split(".")[0]
+
+
 def plan_module(
     arch: str,
     module: str,
     local_files: dict[str, bytes],
-    arch_is_local: bool,
+    arch_has_forward: bool,
     target_files: dict[str, bytes],
     target_references: dict[str, str],
     baseline: dict | None,
@@ -678,7 +738,7 @@ def plan_module(
     base = module_tree(baseline["files"], f"baseline {key}") if baseline else None
     rules = list(rules)
 
-    if not arch_is_local:
+    if not arch_has_forward:
         findings.add(3, "new_arch", f"{arch} has no forward kernels in the tree yet")
     if local is None:
         findings.add(
@@ -906,6 +966,7 @@ def plan_module(
         "auto_exclude": auto_rules,
         "include": sorted(includes),
         "excluded_rows": excluded,
+        "csv_headers": {name: up.csvs[name].header for name in sorted(kept_csvs)},
         "target": {path: sha256(data) for path, data in sorted(target.items())},
         "local_snapshot": {
             path: sha256(data) for path, data in sorted(local_files.items())
@@ -992,7 +1053,7 @@ def cmd_plan(args: argparse.Namespace, upstream: Upstream, root: Path) -> int:
 
     module_dirs = [f"hsa/{k}" for k in modules]
     refs = reference_files([split_key(k)[1] for k in modules])
-    target_all = upstream.materialize(commit, module_dirs, refs + [UPSTREAM_CODEGEN])
+    target_all = upstream.materialize(commit, module_dirs, refs)
 
     # Two baselines per module. The object baseline is the commit the vendored
     # objects came from. The host-code (ABI) baseline is the commit whose
@@ -1014,9 +1075,7 @@ def cmd_plan(args: argparse.Namespace, upstream: Upstream, root: Path) -> int:
             abi_commit[key] = explicit_baseline
     baseline_files: dict[str, dict[str, bytes]] = {}
     for base in sorted(set(baseline_commit.values()) | set(abi_commit.values())):
-        baseline_files[base] = upstream.materialize(
-            base, module_dirs, refs + [UPSTREAM_CODEGEN]
-        )
+        baseline_files[base] = upstream.materialize(base, module_dirs, refs)
 
     cmake_text = (root / ENGINE_CMAKE).read_text(encoding="utf-8")
     report = {
@@ -1027,20 +1086,9 @@ def cmd_plan(args: argparse.Namespace, upstream: Upstream, root: Path) -> int:
         "commit": commit,
         "archs": archs,
         "untracked_upstream_modules": untracked,
-        "global_findings": [],
         "modules": {},
     }
-    global_findings = Findings()
-    for base in sorted(set(baseline_commit.values())):
-        if baseline_files[base].get(UPSTREAM_CODEGEN) != target_all.get(
-            UPSTREAM_CODEGEN
-        ):
-            global_findings.add(
-                2,
-                "codegen_changed",
-                f"{UPSTREAM_CODEGEN} changed since {base[:12]}; the vendored "
-                "asm_kernels/codegen.py is a derived copy, so review the change",
-            )
+    planned: dict[str, tuple[Findings, dict]] = {}
     for key in modules:
         arch, module = split_key(key)
         target_files = subtree(target_all, f"hsa/{key}")
@@ -1070,7 +1118,7 @@ def cmd_plan(args: argparse.Namespace, upstream: Upstream, root: Path) -> int:
             arch,
             module,
             read_dir(kernels / arch / module),
-            (kernels / arch).is_dir(),
+            any((kernels / arch / m).is_dir() for m in TRACKED_MODULES),
             target_files,
             target_references,
             baseline,
@@ -1080,13 +1128,41 @@ def cmd_plan(args: argparse.Namespace, upstream: Upstream, root: Path) -> int:
             cmake_text,
         )
         plan["baseline_source"] = baseline_source.get(key)
+        planned[key] = (findings, plan)
+
+    # The vendored codegen merges same-named CSVs of every arch on disk into one
+    # registry struct and stops when their headers differ, so check the headers
+    # each arch will hold after apply, including archs this plan leaves alone.
+    headers: dict[tuple[str, str], dict[str, list[str]]] = {}
+    for key, (_, plan) in planned.items():
+        arch, module = split_key(key)
+        for name, header in plan["csv_headers"].items():
+            headers.setdefault((module, cfg_name(name)), {})[arch] = header
+    for module in {split_key(key)[1] for key in planned}:
+        for arch_dir in sorted(kernels.glob(f"gfx*/{module}")):
+            arch = arch_dir.parent.name
+            if module_key(arch, module) in planned:
+                continue
+            tree = module_tree(read_dir(arch_dir), module_key(arch, module))
+            for name, table in tree.csvs.items():
+                headers.setdefault((module, cfg_name(name)), {})[arch] = table.header
+    for key, (findings, plan) in planned.items():
+        arch, module = split_key(key)
+        for name in sorted(plan["csv_headers"]):
+            ours = plan["csv_headers"][name]
+            others = headers[(module, cfg_name(name))]
+            differ = sorted(a for a, header in others.items() if header != ours)
+            if differ:
+                findings.add(
+                    3,
+                    "header_mismatch_across_archs",
+                    f"{name}: header {ours} differs from {', '.join(differ)}; the "
+                    "vendored codegen.py needs one header per CSV name across archs",
+                )
         plan["tier"] = findings.tier
         plan["findings"] = findings.items
         report["modules"][key] = plan
-    report["global_findings"] = global_findings.items
-    report["tier"] = max(
-        [global_findings.tier] + [m["tier"] for m in report["modules"].values()]
-    )
+    report["tier"] = max(m["tier"] for m in report["modules"].values())
 
     out = Path(args.report)
     out.parent.mkdir(parents=True, exist_ok=True)
@@ -1123,12 +1199,6 @@ def render_report(report: dict) -> str:
             f"| {key} | {base} | {abi} | {plan['tier']} | {objects} "
             f"| {len(plan['excluded_rows'])} |"
         )
-    if report["global_findings"]:
-        lines += ["", "## All modules", ""]
-        lines += [
-            f"- [T{f['tier']}] {f['kind']}: {f['detail']}"
-            for f in report["global_findings"]
-        ]
     for key, plan in report["modules"].items():
         lines += ["", f"## {key} (tier {plan['tier']})", ""]
         if not plan["findings"]:
