@@ -26,6 +26,9 @@
           "3_2_2_2_fp16_nhwc"
         ],
         "support": {
+          "gfx1201": [
+            "linux"
+          ],
           "gfx90a": [
             "linux"
           ]
