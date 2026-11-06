@@ -25,7 +25,9 @@
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_data_sdk/utilities/Workspace.hpp>
+#include <hipdnn_plugin_sdk/ArchMatch.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
+#include <hipdnn_test_sdk/utilities/DeviceQuery.hpp>
 #include <hipdnn_test_sdk/utilities/TensorDiff.hpp>
 
 #include "../utils/Helpers.hpp"
@@ -56,6 +58,9 @@ struct Options
     // losing an engine the CI devices have is a failure, not a skip.
     int requireRan = 0;
     std::vector<std::string> requireVariants;
+    // --waive-arch stems: a device whose base arch (features stripped) starts with one runs without
+    // the floors, so "gfx90a" covers gfx90a:xnack+ and "gfx11" covers every gfx11 device.
+    std::vector<std::string> waivedArchs;
     std::vector<std::string> switches;
 
     bool has(std::string_view name) const
@@ -94,6 +99,15 @@ inline Options
                 throw std::invalid_argument("--require-variant requires a variant name");
             }
             options.requireVariants.emplace_back(argv[++i]);
+            continue;
+        }
+        if(i > 0 && arg == "--waive-arch")
+        {
+            if(i + 1 >= argc || std::string_view(argv[i + 1]).empty())
+            {
+                throw std::invalid_argument("--waive-arch requires a non-empty arch stem");
+            }
+            options.waivedArchs.emplace_back(argv[++i]);
             continue;
         }
         if(i > 0
@@ -426,20 +440,40 @@ inline int finish(const Options& options, bool allPassed)
     {
         return 1;
     }
-    bool floorMet = true;
-    if(result.ran < options.requireRan)
+    bool waived = false;
+    if(!options.waivedArchs.empty())
     {
-        std::cout << "FAILED: " << result.ran << " variant(s) ran, --require-ran expects at least "
-                  << options.requireRan << '\n';
-        floorMet = false;
-    }
-    for(const std::string& required : options.requireVariants)
-    {
-        if(std::find(result.ranVariants.begin(), result.ranVariants.end(), required)
-           == result.ranVariants.end())
+        // An arch query failure yields an empty string, which matches no stem: the floor stays.
+        const std::string arch = hipdnn_test_sdk::utilities::currentDeviceArch();
+        const std::string_view baseArch = hipdnn_plugin_sdk::stripArchFeatures(arch);
+        for(const std::string& stem : options.waivedArchs)
         {
-            std::cout << "FAILED: --require-variant \"" << required << "\" did not run\n";
+            if(baseArch.substr(0, stem.size()) == stem)
+            {
+                std::cout << "NOTE: floor waived on " << arch << " (--waive-arch " << stem << ")\n";
+                waived = true;
+                break;
+            }
+        }
+    }
+    bool floorMet = true;
+    if(!waived)
+    {
+        if(result.ran < options.requireRan)
+        {
+            std::cout << "FAILED: " << result.ran
+                      << " variant(s) ran, --require-ran expects at least " << options.requireRan
+                      << '\n';
             floorMet = false;
+        }
+        for(const std::string& required : options.requireVariants)
+        {
+            if(std::find(result.ranVariants.begin(), result.ranVariants.end(), required)
+               == result.ranVariants.end())
+            {
+                std::cout << "FAILED: --require-variant \"" << required << "\" did not run\n";
+                floorMet = false;
+            }
         }
     }
     if(!floorMet)

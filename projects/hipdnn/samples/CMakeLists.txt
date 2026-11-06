@@ -370,11 +370,16 @@ if(HIPDNN_SAMPLES_CUDNN_COMPATIBILITY)
     # not, so a sample that validated nothing reports Skipped rather than Passed.
     # FLOOR (--require-ran) is the number of fp32 variants MIOpen runs on every device, and each
     # named fp32 variant (--require-variant) must run, so losing those engines fails instead of
-    # skipping, and losing fp32 while fp16 or bf16 still run fails too.
+    # skipping, and losing fp32 while fp16 or bf16 still run fails too. WAIVE_ARCH lists arch stems
+    # (--waive-arch) on which a provider gate removes the engine, so both floors are dropped there.
     function(add_hipdnn_cudnn_v8_sample_test SAMPLE FLOOR)
+        cmake_parse_arguments(PARSE_ARGV 2 ARG "" "" "WAIVE_ARCH")
         set(_args --require-ran ${FLOOR})
-        foreach(_variant IN LISTS ARGN)
+        foreach(_variant IN LISTS ARG_UNPARSED_ARGUMENTS)
             list(APPEND _args --require-variant "${_variant}")
+        endforeach()
+        foreach(_stem IN LISTS ARG_WAIVE_ARCH)
+            list(APPEND _args --waive-arch "${_stem}")
         endforeach()
         add_hipdnn_sample_test(hipdnn_sample_cudnn_compatibility_${SAMPLE}
             SKIP_REGULAR_EXPRESSION "${HIPDNN_CUDNN_V8_SKIP_REGEX}"
@@ -384,7 +389,9 @@ if(HIPDNN_SAMPLES_CUDNN_COMPATIBILITY)
     # The CUDNN_CONVOLUTION and asymmetric-padding variants are skipped: MIOpen rejects them.
     add_hipdnn_cudnn_v8_sample_test(conv_dgrad_v8 2 "dgrad fp32 [NCHW]")
     add_hipdnn_cudnn_v8_sample_test(conv_wgrad_v8 2 "wgrad fp32 [NCHW]")
-    add_hipdnn_cudnn_v8_sample_test(conv_bias_relu_v8 1 "fp32 [NCHW] K=1")
+    # The MIOpen provider disables conv+bias+activation fusion on gfx90a (rocm-libraries#5409,
+    # dnn-providers/miopen-provider/Workarounds.hpp).
+    add_hipdnn_cudnn_v8_sample_test(conv_bias_relu_v8 1 "fp32 [NCHW] K=1" WAIVE_ARCH gfx90a)
     add_hipdnn_cudnn_v8_sample_test(pointwise_relu_v8 2 "pointwise relu fp32 [NCHW]")
     add_hipdnn_cudnn_v8_sample_test(batchnorm_v8 4
         "batch norm forward training fp32 [NCHW]" "batch norm backward fp32 [NCHW]")
@@ -422,6 +429,38 @@ if(HIPDNN_SAMPLES_CUDNN_COMPATIBILITY)
         hipdnn_sample_cudnn_compatibility_conv_fprop_v8_require_variant_exit_status
         hipdnn_sample_cudnn_compatibility_conv_fprop_v8
         ARGS ${_require_variant_args}
+        WILL_FAIL
+        SKIP_REGULAR_EXPRESSION "SKIPPED: No GPU devices available"
+    )
+
+    # --waive-arch drops the floors only on a matching device: the stem "gfx" matches every AMD
+    # device, so an unreachable floor passes with the waiver line; "gfx0" matches none, so it fails.
+    set(_waive_arch_args --dtype fp32 --layout nchw --require-ran 99 --waive-arch gfx)
+    add_hipdnn_sample_command_test(
+        hipdnn_sample_cudnn_compatibility_conv_bias_relu_v8_waive_arch
+        hipdnn_sample_cudnn_compatibility_conv_bias_relu_v8
+        ARGS ${_waive_arch_args}
+        PASS_REGULAR_EXPRESSION "NOTE: floor waived on gfx.* .--waive-arch gfx."
+        SKIP_REGULAR_EXPRESSION "SKIPPED: No GPU devices available"
+    )
+    add_hipdnn_sample_command_test(
+        hipdnn_sample_cudnn_compatibility_conv_bias_relu_v8_waive_arch_exit_status
+        hipdnn_sample_cudnn_compatibility_conv_bias_relu_v8
+        ARGS ${_waive_arch_args}
+        SKIP_REGULAR_EXPRESSION "SKIPPED: No GPU devices available"
+    )
+    set(_unwaived_arch_args --dtype fp32 --layout nchw --require-ran 99 --waive-arch gfx0)
+    add_hipdnn_sample_command_test(
+        hipdnn_sample_cudnn_compatibility_conv_bias_relu_v8_unwaived_arch
+        hipdnn_sample_cudnn_compatibility_conv_bias_relu_v8
+        ARGS ${_unwaived_arch_args}
+        PASS_REGULAR_EXPRESSION "--require-ran expects at least"
+        SKIP_REGULAR_EXPRESSION "SKIPPED: No GPU devices available"
+    )
+    add_hipdnn_sample_command_test(
+        hipdnn_sample_cudnn_compatibility_conv_bias_relu_v8_unwaived_arch_exit_status
+        hipdnn_sample_cudnn_compatibility_conv_bias_relu_v8
+        ARGS ${_unwaived_arch_args}
         WILL_FAIL
         SKIP_REGULAR_EXPRESSION "SKIPPED: No GPU devices available"
     )
