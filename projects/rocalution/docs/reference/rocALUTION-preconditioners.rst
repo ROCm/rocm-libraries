@@ -129,7 +129,9 @@ MultiColored (symmetric) Gauss-Seidel / (S)SOR
 
 The Multi-Colored Symmetric Gauss-Seidel / SSOR preconditioner is based on the splitting of the original matrix. Higher parallelism in solving the forward and backward substitution is obtained by performing a multi-colored decomposition. Details on the Symmetric Gauss-Seidel / SSOR algorithm can be found in the :cpp:class:`rocalution::SGS` preconditioner.
 
-The Multi-Colored Gauss-Seidel / SOR preconditioner is based on the splitting of the original matrix. Higher parallelism in solving the forward substitution is obtained by performing a multi-colored decomposition. Details on the Gauss-Seidel / SOR algorithm can be found in the :cpp:class:`rocalution::GS` preconditioner.
+The Multi-Colored Gauss-Seidel / SOR preconditioner is based on the splitting of the original matrix. Higher parallelism in solving the backward substitution is obtained by performing a multi-colored decomposition, which this preconditioner requires. Details on the Gauss-Seidel / SOR algorithm can be found in the :cpp:class:`rocalution::GS` preconditioner, which applies the forward sweep instead.
+
+The relaxation parameter of both is set with :cpp:func:`rocalution::MultiColoredSGS::SetRelaxation`. Without the multi-colored decomposition (see :cpp:func:`rocalution::MultiColored::SetDecomposition`), the Multi-Colored Symmetric Gauss-Seidel / SSOR preconditioner needs it set before it is built.
 
 .. note::
 

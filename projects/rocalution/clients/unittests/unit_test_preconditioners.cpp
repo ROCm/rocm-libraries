@@ -2374,7 +2374,7 @@ TYPED_TEST(preconditioners, multicolored_relaxation_is_ssor)
     const Coloring       colors = multicoloring(this->backend(), ref);
     const T              omega  = 1.5;
 
-    std::vector<std::vector<T>> sgs;
+    std::vector<std::pair<std::string, std::vector<T>>> sgs;
     for(bool decomposition : {true, false})
     {
         rocalution::MultiColoredSGS<Matrix<T>, Vector<T>, T> p;
@@ -2382,7 +2382,17 @@ TYPED_TEST(preconditioners, multicolored_relaxation_is_ssor)
         p.SetDecomposition(decomposition);
         p.SetOperator(*A);
         p.Build();
-        sgs.push_back(apply(p, *A, r));
+        sgs.emplace_back(decomposition ? "decomposition" : "triangular solves", apply(p, *A, r));
+    }
+
+    // With decomposition, the solve applies the relaxation, so it can be set after the build
+    {
+        rocalution::MultiColoredSGS<Matrix<T>, Vector<T>, T> p;
+        p.SetDecomposition(true);
+        p.SetOperator(*A);
+        p.Build();
+        p.SetRelaxation(omega);
+        sgs.emplace_back("decomposition, relaxation set after the build", apply(p, *A, r));
     }
 
     rocalution::MultiColoredGS<Matrix<T>, Vector<T>, T> gs;
@@ -2391,10 +2401,10 @@ TYPED_TEST(preconditioners, multicolored_relaxation_is_ssor)
     gs.Build();
     const std::vector<T> gs_z = apply(gs, *A, r);
 
-    for(size_t k = 0; k < sgs.size(); ++k)
+    for(const auto& [variant, z] : sgs)
     {
-        SCOPED_TRACE(k == 0 ? "decomposition" : "triangular solves");
-        expect_near(sgs[k],
+        SCOPED_TRACE(variant);
+        expect_near(z,
                     permuted_solve(ref,
                                    colors.perm,
                                    r,
