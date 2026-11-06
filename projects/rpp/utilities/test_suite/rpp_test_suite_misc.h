@@ -95,7 +95,9 @@ string get_path(Rpp32u nDim, Rpp32u readType, string scriptPath, string testCase
         bitDepthStr = "f32";
     else if (BitDepthTestMode == U8_TO_F32)
         bitDepthStr = "u8";
-    else if (BitDepthTestMode == I8_TO_F32 || BitDepthTestMode == I16_TO_F32)
+    else if (BitDepthTestMode == I8_TO_F32)
+        bitDepthStr = "f32";
+    else if (BitDepthTestMode == I16_TO_F32 && readType == 1)  // log1p references are F32
         bitDepthStr = "f32";
 
     if (readType == 0)  // Input
