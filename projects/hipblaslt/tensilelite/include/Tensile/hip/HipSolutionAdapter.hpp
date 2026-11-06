@@ -183,6 +183,9 @@ namespace TensileLite
 
             // Record for module reload
             std::string m_lazyLoadArchitecture;
+            // Actual path of the loaded helper bundle; m_loadedCOFiles keys have
+            // the xnack suffix stripped, so the on-disk name cannot be derived.
+            std::string m_helperKernelPath;
 
 #ifdef TENSILELITE_ENABLE_LOCAL_KERNELS
             // One mutex per path serializes its load, so two threads cannot

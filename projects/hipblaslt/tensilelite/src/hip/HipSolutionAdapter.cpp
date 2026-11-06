@@ -176,6 +176,7 @@ namespace TensileLite
                 m_modules.clear();
                 m_loadedModuleNames.clear();
                 m_loadedCOFiles.clear();
+                m_helperKernelPath.clear();
                 m_kernels.clear();
                 m_extraModuleCopies.clear();
                 m_extraKernels.clear();
@@ -220,7 +221,10 @@ namespace TensileLite
                 //Isolate filename
                 size_t start = path.rfind('/');
                 start        = (start == std::string::npos) ? 0 : start + 1;
-                m_loadedCOFiles.insert(removeXnack(std::string(path.begin() + start, path.end())));
+                std::string fileName(path.begin() + start, path.end());
+                if(fileName.rfind("Kernels.so-000-", 0) == 0)
+                    m_helperKernelPath = path;
+                m_loadedCOFiles.insert(removeXnack(fileName));
             }
             Debug::Instance().markerStop();
             return hipSuccess;
@@ -723,14 +727,12 @@ namespace TensileLite
 
         hipError_t SolutionAdapter::loadHelperKernelExtraCopies(int extraCopies)
         {
-            std::string codeObjDir;
-            std::string arch;
+            std::string path;
             {
                 std::lock_guard<std::mutex> guard(m_access);
-                if(m_lazyLoadArchitecture.empty())
+                if(m_helperKernelPath.empty())
                     return hipSuccess;
-                arch       = m_lazyLoadArchitecture;
-                codeObjDir = m_codeObjectDirectory;
+                path = m_helperKernelPath;
                 if(extraCopies <= 0)
                     extraCopies = (int)m_extraModuleCopies.size();
                 if(extraCopies <= 0)
@@ -741,28 +743,13 @@ namespace TensileLite
                     return hipSuccess;
             }
 
-            std::string helperKernelName = std::string("Kernels.so-000-") + arch;
+            hipError_t err = loadCodeObjectFileExtraCopies(path, extraCopies);
+            if(err != hipSuccess)
+                return err;
 
-            for(auto ver : {"", "-xnack-", "-xnack+"})
-            {
-                std::string fileName = helperKernelName + ver + ".hsaco";
-                {
-                    std::lock_guard<std::mutex> guard(m_access);
-                    if(m_loadedCOFiles.find(removeXnack(fileName)) == m_loadedCOFiles.end())
-                        continue;
-                }
-
-                std::string path = codeObjDir + fileName;
-                hipError_t  err  = loadCodeObjectFileExtraCopies(path, extraCopies);
-                if(err != hipSuccess)
-                    return err;
-
-                if(m_debug)
-                    std::cout << "[icache-rotate] loaded " << extraCopies
-                              << " extra rotation copies of helper " << path << std::endl;
-                return hipSuccess;
-            }
-
+            if(m_debug)
+                std::cout << "[icache-rotate] loaded " << extraCopies
+                          << " extra rotation copies of helper " << path << std::endl;
             return hipSuccess;
         }
 
