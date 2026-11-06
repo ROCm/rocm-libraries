@@ -2,7 +2,9 @@
 # SPDX-License-Identifier: MIT
 #
 # Default input of sweep_skinny_gemm.py: decode-time projection shapes of
-# well-known LLMs. The schema is documented in sweep_skinny_gemm_config.py:
+# well-known LLMs. refine_top, refine_iters and top are 0: run this file with
+# --one-shot (--list works without it). The schema is documented in
+# sweep_skinny_gemm_config.py:
 #   settings   timing and verification knobs of the tool (CLI flags override).
 #   defaults   useBeta, spk, transpose, sweep (and alpha, beta) for every entry.
 #   problems   name, m, n, k (int or list: cartesian product), transpose

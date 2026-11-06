@@ -78,16 +78,21 @@ the failed configurations.
 Settings: iters and warmup are the timed and untimed launches of the screening
 pass, refine_top and refine_iters the configurations re-timed and their
 launches, top the winners reported per problem, seed the seed of the alpha and
-beta draws. Every winner is verified against the host reference, whatever the
-size: with (m + n) * k up to verify_full_max_elems (default 2^31, about 1 s of
-host time per 10^9 elements) the reference is dense and the whole result is
-compared ("full"), above it the reference is computed for a sample of the output
-elements ("sampled(N)"), failed (verify mismatch), or no (--no-verify). In refine+top
-mode only the winners are verified, not the other screened candidates. In one-shot
-mode every screened configuration is verified once.
+beta draws. The file may hold zeros (refine_top, refine_iters and top are 0 in
+the one-shot default input); the values are checked by check_settings after the
+CLI overrides: iters and verify_full_max_elems must be at least 1, and without
+--one-shot so must refine_top, refine_iters and top, with refine_top >= top.
+Every winner is verified against the host reference, whatever the size: with
+(m + n) * k up to verify_full_max_elems (default 2^31, about 1 s of host time
+per 10^9 elements) the reference is dense and the whole result is compared
+("full"), above it the reference is computed for a sample of the output
+elements ("sampled(N)"), failed (verify mismatch), or no (--no-verify). In
+refine+top mode only the winners are verified, not the other screened
+candidates. In one-shot mode every screened configuration is verified once.
 """
 
 import itertools
+import math
 import zlib
 from dataclasses import dataclass, field
 from typing import Any, NamedTuple
@@ -107,10 +112,11 @@ SETTING_DEFAULTS = {
     "verify_full_max_elems": 2**31,
     "seed": 20240601,
 }
-# Settings that may be zero; the others must be positive.
-ZERO_SETTINGS = ("warmup", "seed")
-# Ignored when the sweep runs with --one-shot; may be zero in the input YAML then.
-ONE_SHOT_ZERO_SETTINGS = ("refine_top", "refine_iters", "top")
+# Settings that must be positive at parse time; the others may be zero in the
+# file (check_settings validates them once the CLI overrides are applied).
+POSITIVE_SETTINGS = ("iters", "verify_full_max_elems")
+# Ignored with --one-shot; zero in the input of a one-shot sweep.
+REFINE_SETTINGS = ("refine_top", "refine_iters", "top")
 DEFAULT_KEYS = (
     "useBeta",
     "betaModes",
@@ -157,6 +163,9 @@ DEFAULT_SWEEP = {
     "lds": [False],
 }
 RANGE_KEYS = ("min", "max", "step", "mul")
+# The smallest value of an integer knob; 1 unless listed.
+KNOB_MINIMUMS = {"prefetch": 0, "upScales": 0}
+MAX_UP_SCALES = 1
 
 
 class SweepConfigError(ValueError):
@@ -217,6 +226,8 @@ def as_int(where: str, value: Any, minimum: int | None = None) -> int:
 def as_float(where: str, value: Any) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise SweepConfigError(f"{where}: expected a number, got {value!r}")
+    if not math.isfinite(value):
+        raise SweepConfigError(f"{where}: expected a finite number, got {value!r}")
     return float(value)
 
 
@@ -234,14 +245,16 @@ def unique(values: list) -> list:
     return list(dict.fromkeys(values))
 
 
-def expand_range(where: str, spec: dict) -> list[int]:
+def expand_range(where: str, spec: dict, minimum: int = 1) -> list[int]:
     check_keys(where, spec, RANGE_KEYS)
     if "min" not in spec or "max" not in spec:
         raise SweepConfigError(f"{where}: a range needs min and max")
     if ("step" in spec) == ("mul" in spec):
         raise SweepConfigError(f"{where}: a range needs exactly one of step and mul")
-    low = as_int(f"{where}.min", spec["min"])
+    low = as_int(f"{where}.min", spec["min"], minimum)
     high = as_int(f"{where}.max", spec["max"])
+    if high < low:
+        raise SweepConfigError(f"{where}: no values, max {high} is below min {low}")
     if "step" in spec:
         return list(range(low, high + 1, as_int(f"{where}.step", spec["step"], 1)))
     factor = as_int(f"{where}.mul", spec["mul"], 2)
@@ -256,16 +269,19 @@ def expand_range(where: str, spec: dict) -> list[int]:
 
 def expand_values(where: str, key: str, raw: Any) -> list:
     """The values of one swept knob: a scalar, a list or a range."""
+    minimum = KNOB_MINIMUMS.get(key, 1)
     if isinstance(raw, dict):
         if key in BOOL_KEYS:
             raise SweepConfigError(f"{where}: {key} takes booleans, not a range")
-        values = expand_range(where, raw)
+        values = expand_range(where, raw, minimum)
     elif key in BOOL_KEYS:
         values = [as_bool(where, value) for value in as_list(raw)]
     else:
-        values = [as_int(where, value) for value in as_list(raw)]
+        values = [as_int(where, value, minimum) for value in as_list(raw)]
     if not values:
         raise SweepConfigError(f"{where}: no values")
+    if key == "upScales" and max(values) > MAX_UP_SCALES:
+        raise SweepConfigError(f"{where}: must be 0 or 1, got {max(values)}")
     return unique(values)
 
 
@@ -350,19 +366,47 @@ class SweepInput:
     cases: list[Case]
 
 
-def parse_settings(raw: Any, *, one_shot: bool = False) -> dict:
+def parse_settings(raw: Any) -> dict:
     settings = dict(SETTING_DEFAULTS)
     if raw is None:
         return settings
     as_mapping("settings", raw)
     check_keys("settings", raw, tuple(SETTING_DEFAULTS))
     for key, value in raw.items():
-        if key in ZERO_SETTINGS or (one_shot and key in ONE_SHOT_ZERO_SETTINGS):
-            minimum = 0
-        else:
-            minimum = 1
+        minimum = 1 if key in POSITIVE_SETTINGS else 0
         settings[key] = as_int(f"settings.{key}", value, minimum)
     return settings
+
+
+def check_setting_minimum(settings: dict, key: str, minimum: int) -> None:
+    if settings[key] < minimum:
+        raise SweepConfigError(
+            f"settings.{key}: must be at least {minimum}, got {settings[key]}"
+        )
+
+
+def check_settings(settings: dict, one_shot: bool) -> None:
+    """The settings after the CLI overrides: the refine ones only matter, and
+    must be positive, without one_shot."""
+    for key in POSITIVE_SETTINGS:
+        check_setting_minimum(settings, key, 1)
+    for key in ("warmup", "seed"):
+        check_setting_minimum(settings, key, 0)
+    if one_shot:
+        return
+    if not any(settings[key] for key in REFINE_SETTINGS):
+        raise SweepConfigError(
+            "settings: refine_top, refine_iters and top are 0, the one-shot "
+            "settings of this input: pass --one-shot, or set them (or "
+            "--refine-top, --refine-iters, --top) to at least 1"
+        )
+    for key in REFINE_SETTINGS:
+        check_setting_minimum(settings, key, 1)
+    if settings["refine_top"] < settings["top"]:
+        raise SweepConfigError(
+            f"settings.refine_top: must be at least top, got {settings['refine_top']} "
+            f"with top {settings['top']}"
+        )
 
 
 def parse_defaults(raw: Any) -> dict:
@@ -406,6 +450,41 @@ def check_ld(where: str, value: Any, multiple: int) -> int | None:
     return value
 
 
+def check_shape_lds(where: str, lds: dict, shape: tuple[int, int, int]) -> None:
+    """The explicit ld values (bytes) must hold every shape: A and B are fp8
+    with k elements per row, C and D bf16 with m."""
+    m, n, k = shape
+    minimums = {
+        "ldA": ("ld_a", support.alignUp(k, 4), "alignUp(k, 4)"),
+        "ldB": ("ld_b", support.alignUp(k, 4), "alignUp(k, 4)"),
+        "ldD": ("ld_d", 2 * m, "2 * m"),
+        "ldC": ("ld_c", 2 * m, "2 * m"),
+    }
+    for name, (field_name, minimum, text) in minimums.items():
+        value = lds[field_name]
+        if value is not None and value < minimum:
+            raise SweepConfigError(
+                f"{where}.{name}: {value} bytes is below {text} = {minimum} "
+                f"for shape m={m} n={n} k={k}"
+            )
+
+
+def check_random_range(where: str, low: float, high: float) -> None:
+    if low <= 0:
+        raise SweepConfigError(f"{where}: min must be positive, got {low}")
+    if low == high:
+        raise SweepConfigError(
+            f"{where}: min must be below max; give a number to pin the value"
+        )
+    if low > high:
+        raise SweepConfigError(f"{where}: min must be below max, got {low} > {high}")
+    if 1 - TRIVIAL_MARGIN < low and high < 1 + TRIVIAL_MARGIN:
+        raise SweepConfigError(
+            f"{where}: the range lies within {TRIVIAL_MARGIN} of 1, so every draw "
+            "would be redrawn"
+        )
+
+
 def parse_scalar(where: str, raw: Any, random_spec: ScalarSpec) -> ScalarSpec | None:
     """alpha or beta of an entry: a number (pinned), "random" (the default
     range random_spec) or {random: {min, max, signed}}; None when not given."""
@@ -422,8 +501,7 @@ def parse_scalar(where: str, raw: Any, random_spec: ScalarSpec) -> ScalarSpec | 
         signed = as_bool(
             f"{where}.random.signed", body.get("signed", random_spec.signed)
         )
-        if not 0 < low <= high:
-            raise SweepConfigError(f"{where}.random: needs 0 < min <= max")
+        check_random_range(f"{where}.random", low, high)
         return ScalarSpec(None, low, high, signed)
     return ScalarSpec(as_float(where, raw))
 
@@ -501,6 +579,7 @@ def parse_entry(index: int, entry: Any, defaults: dict, seed: int) -> list[Case]
     beta_spec = parse_scalar(f"{where}.beta", merged.get("beta"), RANDOM_BETA)
     cases = []
     for m, n, k in shapes_of(where, merged):
+        check_shape_lds(where, lds, (m, n, k))
         for spk, use_beta in itertools.product(spks, unique(use_betas)):
             spk = None if spk == "k" else spk
             key = (entry["name"], m, n, k, int(use_beta))
@@ -530,9 +609,7 @@ def parse_entry(index: int, entry: Any, defaults: dict, seed: int) -> list[Case]
     return cases
 
 
-def parse_input(
-    data: Any, seed: int | None = None, *, one_shot: bool = False
-) -> SweepInput:
+def parse_input(data: Any, seed: int | None = None) -> SweepInput:
     as_mapping("input", data)
     check_keys("input", data, TOP_KEYS)
     if "problems" not in data:
@@ -541,22 +618,18 @@ def parse_input(
     if not isinstance(entries, list) or not entries:
         raise SweepConfigError("problems: expected a non-empty list")
     defaults = parse_defaults(data.get("defaults"))
-    settings = parse_settings(data.get("settings"), one_shot=one_shot)
+    settings = parse_settings(data.get("settings"))
     if seed is not None:
         settings["seed"] = as_int("seed", seed, 0)
     cases = []
     for index, entry in enumerate(entries):
         cases += parse_entry(index, entry, defaults, settings["seed"])
-    if not one_shot and settings["refine_top"] < settings["top"]:
-        raise SweepConfigError("settings: refine_top must be at least top")
     return SweepInput(settings, cases)
 
 
-def load_input(
-    path: str, seed: int | None = None, *, one_shot: bool = False
-) -> SweepInput:
+def load_input(path: str, seed: int | None = None) -> SweepInput:
     with open(path) as stream:
-        return parse_input(yaml.safe_load(stream), seed, one_shot=one_shot)
+        return parse_input(yaml.safe_load(stream), seed)
 
 
 class RawConfig(NamedTuple):
@@ -582,6 +655,9 @@ def capped_blocks(case: Case, knobs: tuple, blocks: list[int]) -> list[int]:
     duplicates: extra blocks would find no tile."""
     bm, tn, lanes_k, waves, mfma = knobs
     bn = support.blockCols(waves, lanes_k, tn, mfma)
+    if bn == 0:
+        # Invalid configuration: build_problem rejects it.
+        return unique(blocks)
     block_k = case.k if case.spk is None else case.spk
     tiles = support.countTiles(case.m, case.n, case.k, block_k, bm, bn)
     return unique([min(count, tiles) for count in blocks])
@@ -641,7 +717,7 @@ def raw_record(case: Case, raw: RawConfig) -> dict:
 
 
 def config_record(p: Problem) -> dict:
-    """The full knob set of a problem, with the derived upIters,
+    """The full knob set of a problem, with upScales and the derived upIters,
     plus its spk and block count."""
     return {
         "bm": p.bm,
@@ -649,6 +725,7 @@ def config_record(p: Problem) -> dict:
         "lanesK": p.lanes_k,
         "waves": p.waves,
         "prefetch": p.pf,
+        "upScales": p.up_scales,
         "upIters": p.up_iters,
         "group": p.group,
         "numXcds": p.xcds,
@@ -735,10 +812,14 @@ def expand_case(case: Case) -> ExpandedCase:
             try:
                 p = build_problem(case, raw)
             except (AssertionError, ValueError) as err:
+                reason = first_line(err)
+            except ArithmeticError as err:
+                reason = f"invalid knob combination: {first_line(err)}"
+            else:
+                reason = None
+            if reason is not None:
                 config = raw_record(case, raw)
-                expanded.failures.append(
-                    ConfigFailure("constraint", first_line(err), config)
-                )
+                expanded.failures.append(ConfigFailure("constraint", reason, config))
                 continue
             key = problem_key(p)
             if key in seen_problems:

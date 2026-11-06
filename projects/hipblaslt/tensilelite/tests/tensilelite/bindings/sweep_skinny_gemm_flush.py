@@ -2,18 +2,22 @@
 # SPDX-License-Identifier: MIT
 """LLC flush of the skinny GEMM sweep.
 
-Same contract as bench_skinny_gemm.LlcFlush (a read-only pass over a 256 MiB
-buffer, then a device synchronisation, before every timed launch), but the kernel
-reads 16 bytes per lane with eight loads in flight per wait instead of one dword
-per wait: the flush takes about 50 us instead of 400 us, which dominated the wall
-time of the sweep (the timed kernels take 10 to 200 us). The cold-LLC time of a
-kernel is the same within noise as with the original flush.
+Same contract as bench_skinny_gemm.LlcFlush (a read-only pass over a 512 MiB
+buffer, twice the 256 MiB MALL of the MI355X, then a device synchronisation,
+before every GEMM launch), but the kernel reads 16 bytes per lane with eight
+loads in flight per wait instead of one dword per wait: a flush takes about
+86 us instead of several hundred, which dominated the wall time of the sweep
+(the timed kernels take 10 to 200 us). The cold-LLC time of a kernel is the same
+within noise as with the original flush. Measured durations: 256 MiB 38 us,
+384 MiB 64 us, 512 MiB 86 us, 1024 MiB 170 us.
 """
 
+import time
+
 import skinny_gemm_support as support
+from bench_skinny_gemm import FLUSH_MB, allocateFlushBuffer, packArgs
 from skinny_gemm_support import LoadedKernel, hipCheck
 
-FLUSH_MB = 256
 KERNEL_NAME = "fast_flush_llc"
 THREADS = 256
 LOADS_IN_FLIGHT = 8
@@ -105,9 +109,7 @@ class FastLlcFlush:
 
     def __init__(self):
         import tensilelite_jit
-        from bench_skinny_gemm import packArgs
 
-        hip = support._hip()
         props = support.getDeviceProperties()
         self.workgroups = props.multiProcessorCount
         per_round = self.workgroups * THREADS * LOAD_BYTES * LOADS_IN_FLIGHT
@@ -115,9 +117,14 @@ class FastLlcFlush:
         rounds = support.ceilDiv(FLUSH_MB * 2**20, per_round)
         asm = flush_asm(self.workgroups, rounds)
         hsaco = tensilelite_jit.assembleToHSACO(asm, support.TARGET)
+        self.buffer = None
         self.kernel = LoadedKernel(hsaco, KERNEL_NAME)
-        self.buffer = hipCheck(hip.hipMalloc(rounds * per_round))
-        self.args = packArgs((self.buffer.as_c_void_p(),))
+        try:
+            self.buffer = allocateFlushBuffer(rounds * per_round)
+            self.args = packArgs((self.buffer.as_c_void_p(),))
+        except BaseException:
+            self.close()
+            raise
 
     def flush(self) -> None:
         hip = support._hip()
@@ -138,15 +145,24 @@ class FastLlcFlush:
         )
         hipCheck(hip.hipDeviceSynchronize())
 
+    def ramp(self, milliseconds: float) -> None:
+        """Flushes repeatedly for that much wall time, to bring the clocks up
+        before a measurement."""
+        start = time.monotonic()
+        while (time.monotonic() - start) * 1e3 < milliseconds:
+            self.flush()
+
     def close(self) -> None:
-        if self.buffer is None:
-            return
-        hipCheck(support._hip().hipFree(self.buffer))
-        self.buffer = None
-        self.kernel.close()
+        """Frees the buffer and closes the kernel, even if the free raises."""
+        try:
+            if self.buffer is not None:
+                buffer, self.buffer = self.buffer, None
+                hipCheck(support._hip().hipFree(buffer))
+        finally:
+            self.kernel.close()
 
     def __enter__(self):
         return self
 
-    def __exit__(self, *exception) -> None:
-        self.close()
+    def __exit__(self, kind, value, traceback) -> None:
+        support.closeOnExit(self, value)

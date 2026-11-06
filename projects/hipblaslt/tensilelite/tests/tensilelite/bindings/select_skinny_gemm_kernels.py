@@ -19,11 +19,16 @@ Run from the tensilelite directory:
       -o OUT_DIR [--max-configs N] [--tolerance 0.10] [--iters 30] [--warmup 5] \\
       [--verify] [--only SUBSTRING] [--limit-cases N]
 
-Config identity matches select_skinny_gemm_from_sweep.py: (bm, tn, lanes_k,
-waves, pf, up_iters, group, xcds, grid3d, blocks, mfma, lds,
-use_beta). blocks is None for grid3d (derived) and literal otherwise.
-useBeta and spk are not part of the identity: useBeta always comes from the
-target case, and spk is re-derived per target (see build_problem).
+Config identity is that of skinny_gemm_selection.py: (bm, tn, lanes_k, waves,
+pf, up_iters, group, xcds, grid3d, blocks, mfma, lds, use_beta, use_split_k).
+blocks is None for grid3d (derived) and literal otherwise. use_split_k tells
+the kernel with split-K from the one without; the split size is not part of it
+and is re-derived per target (see build_problem). useBeta always comes from the
+target case.
+
+Cases without a trusted timing (every entry unverified or failed, or no top)
+are never timed; they are reported as uncovered with the reason. Entries with
+verified failed or no are not trusted.
 
 Algorithm. Every case starts with the identities of its sweep top list as
 candidates (the best time per identity). Rounds repeat until every case is
@@ -44,23 +49,26 @@ not the search: rounds continue until candidates are exhausted.
      configurations with at least --min-config-cases assigned shapes, then applies
      --max-configs by dropping the smallest remaining configs; unassigned cases
      pick their next-fastest library configuration if any.
-  4. For every case measured this round, the unprotected candidates D with
-     measured time of C <= time of D * (1 + tolerance) are dropped: C is within
-     tolerance of D, so D cannot add coverage that C does not. Candidates that
-     are clearly faster than C stay.
+  4. For every case measured this round where C is within tolerance of the
+     case's best, the unprotected candidates D with measured time of C <= time
+     of D * (1 + tolerance) are dropped: C is within tolerance of D, so D cannot
+     add coverage that C does not. Candidates that are clearly faster than C
+     stay. A C beyond the tolerance drops nothing.
   5. After the search, rebuild_assignment runs once more for output.
 
 Timing mirrors bench_skinny_gemm.benchProblem but flushes the LLC with
 sweep_skinny_gemm_flush.FastLlcFlush, the flush of the sweep (same cold-LLC
-contract, one flush before every GEMM launch, warm reduce). Like the sweep,
---warmup untimed launches (flushed the same way, the reduce included) precede
-the --iters timed ones, followed by launches until --warmup-ms of wall time
-(default 30) have passed, because the count alone lasts under a millisecond,
-before the GPU settles after the uploads, and biased the times up by about 3.5
-percent. A time is the minimum over the timed launches, the first included
-(for split-K, the minimum over the iterations of the GEMM plus the reduce time
-of that iteration). The sweep's refinement of its top
-candidates (50 iterations in results.yml) is intentionally not implemented.
+contract: one 512 MiB flush before every GEMM launch, timed or not, and the
+events bracket only the GEMM; the reduce is timed warm, without a flush, right
+after the GEMM launches). Like the sweep, --warmup untimed flush+launch pairs
+(the reduce warmed up without a flush) precede the --iters timed launches,
+followed by launches until --warmup-ms of wall time (default 30) have passed,
+because the count alone lasts under a millisecond, before the GPU settles after
+the uploads, and biased the times up by about 3.5 percent. A time is the mean
+over the timed launches only (for split-K, the mean over the iterations of the
+GEMM plus the reduce time of that iteration). --iters and --warmup default to
+the settings of the sweep that produced the results. The sweep's refinement of
+its top candidates is intentionally not implemented.
 
 Execution is pipelined. Kernels are assembled by a pool of --jobs spawned
 processes (BuildStage of sweep_skinny_gemm.py) into <work-dir>/hsaco, which is
@@ -119,6 +127,24 @@ import yaml
 
 import bench_skinny_gemm as bench
 import skinny_gemm_support as support
+from skinny_gemm_selection import (
+    INPUT_ERRORS,
+    ConfigIdentity,
+    SweepCase,
+    assign_disjoint,
+    fastest_winner,
+    identity_of,
+    identity_record,
+    load_cases,
+    non_negative_finite_float,
+    non_negative_int,
+    positive_finite_float,
+    positive_int,
+    read_document,
+    rounded,
+    target_problem,
+    tie_break_key,
+)
 from skinny_gemm_support import DeviceBuffer, Problem
 from sweep_skinny_gemm import BuildResult, BuildStage
 from sweep_skinny_gemm_config import SETTING_DEFAULTS
@@ -129,7 +155,7 @@ from sweep_skinny_gemm_inputs import (
     Verifier,
     make_case_inputs,
 )
-from sweep_skinny_gemm_smi import SweepAbort, select_gpus
+from sweep_skinny_gemm_smi import SweepAbort, map_hip_ordinals, select_gpus
 from sweep_skinny_gemm_worker import hsaco_file
 
 DEFAULT_TOLERANCE = 0.10
@@ -144,26 +170,14 @@ WARMUP_BATCH = 5
 BUILDS_PER_GPU = 4
 POLL_S = 0.05
 STOP_TIMEOUT_S = 10
-LABEL_KEYS = ("name", "m", "n", "k", "spk", "useBeta", "betaMode")
-REASON_CAP = "max_configs reached"
+REASON_ALL_COVERED = "all cases covered"
+REASON_CAP = (
+    "within tolerance, but its configurations were cut by "
+    "--max-configs/--min-config-cases"
+)
 REASON_EXHAUSTED = "no untried candidates left"
+REASON_ROUND_LIMIT = "round limit reached"
 REASON_UNMEASURED = "no candidate measured successfully"
-
-
-class ConfigIdentity(NamedTuple):
-    bm: int
-    tn: int
-    lanes_k: int
-    waves: int
-    pf: int
-    up_iters: int
-    group: int
-    xcds: int
-    grid3d: bool
-    blocks: int | None
-    mfma: bool
-    lds: bool
-    use_beta: bool
 
 
 class Candidate(NamedTuple):
@@ -173,23 +187,6 @@ class Candidate(NamedTuple):
     source_case: int
     rank: int
     time_us: float
-
-
-@dataclass(frozen=True)
-class Case:
-    index: int
-    problem: dict
-    best_us: float
-    top: list
-
-    @property
-    def label(self) -> dict:
-        return {key: self.problem[key] for key in LABEL_KEYS}
-
-    def text(self) -> str:
-        p = self.problem
-        spk = "k" if p["spk"] is None else p["spk"]
-        return f"{p['name']} m={p['m']} n={p['n']} k={p['k']} spk={spk}"
 
 
 @dataclass(frozen=True)
@@ -214,49 +211,23 @@ class SelectionResult:
     selected: list[ConfigIdentity]
     covers: dict[int, CoverRecord]
     measured_best: dict[int, tuple[ConfigIdentity, float]]
-    cap_reached: bool
-    search_exhausted: bool
+    # The identities within tolerance that were measured, per case.
+    within: dict[int, set[ConfigIdentity]]
+    stop_reason: str
 
 
-def identity_of(cfg: dict) -> ConfigIdentity:
-    grid3d = bool(cfg["grid3d"])
-    return ConfigIdentity(
-        cfg["bm"],
-        cfg["tn"],
-        cfg["lanesK"],
-        cfg["waves"],
-        cfg["prefetch"],
-        int(cfg["upIters"]),
-        cfg["group"],
-        cfg["numXcds"],
-        grid3d,
-        None if grid3d else cfg["blocks"],
-        bool(cfg.get("mfma", False)),
-        bool(cfg.get("lds", False)),
-        bool(cfg.get("useBeta", False)),
-    )
+def resolve_launch_settings(args: argparse.Namespace, meta: dict | None) -> None:
+    """Fills --iters and --warmup that were not given from the settings of the
+    sweep that produced the results, else from the defaults."""
+    settings = (meta or {}).get("settings") or {}
+    if args.iters is None:
+        args.iters = settings.get("iters") or DEFAULT_ITERS
+    if args.warmup is None:
+        warmup = settings.get("warmup")
+        args.warmup = DEFAULT_WARMUP if warmup is None else warmup
 
 
-def tie_break_key(identity: ConfigIdentity) -> tuple[int, ...]:
-    return tuple(-1 if v is None else int(v) for v in identity)
-
-
-def load_cases(path: str, only: str | None, limit: int | None) -> list[Case]:
-    from sweep_skinny_gemm_results import read_results
-
-    document = read_results(path)
-    entries = [e for e in document["results"] if e["top"]]
-    if only:
-        entries = [e for e in entries if only in e["problem"]["name"]]
-    if limit is not None:
-        entries = entries[:limit]
-    return [
-        Case(i, e["problem"], e["top"][0]["timeUs"], e["top"])
-        for i, e in enumerate(entries)
-    ]
-
-
-def seed_candidates(case: Case) -> dict[ConfigIdentity, Candidate]:
+def seed_candidates(case: SweepCase) -> dict[ConfigIdentity, Candidate]:
     found: dict[ConfigIdentity, Candidate] = {}
     for entry in case.top:
         cfg = entry["config"]
@@ -275,13 +246,13 @@ def seed_candidates(case: Case) -> dict[ConfigIdentity, Candidate]:
     return found
 
 
-def representative_key(candidate: Candidate, cases: list[Case]) -> tuple:
+def representative_key(candidate: Candidate, cases: list[SweepCase]) -> tuple:
     ratio = candidate.time_us / cases[candidate.source_case].best_us
     return (candidate.rank, ratio, candidate.source_case)
 
 
 def find_representatives(
-    cases: list[Case], candidates: list[dict[ConfigIdentity, Candidate]]
+    cases: list[SweepCase], candidates: list[dict[ConfigIdentity, Candidate]]
 ) -> dict[ConfigIdentity, Candidate]:
     reps: dict[ConfigIdentity, Candidate] = {}
     for per_case in candidates:
@@ -298,48 +269,19 @@ def literal_spk_allowed(tp: dict, spk: int) -> bool:
     return spk >= 1 and (tp["k"] <= spk or spk % 256 == 0)
 
 
-def make_target_problem(tp: dict, cfg: dict, spk: int | None) -> Problem:
-    align = support.alignUp(tp["k"], 4)
-    # Explicit, so that an old VALU config never gets the MFMA defaults.
-    mfma = bool(cfg.get("mfma", False))
-    return support.makeProblem(
-        tp["m"],
-        tp["n"],
-        tp["k"],
-        spk=spk,
-        bm=cfg["bm"],
-        tn=cfg["tn"],
-        lanes_k=cfg["lanesK"],
-        waves=cfg["waves"],
-        pf=cfg["prefetch"],
-        group=cfg["group"],
-        xcds=cfg["numXcds"],
-        up_scales=0 if mfma else int(cfg["upIters"] > 0),
-        blocks=None if cfg["grid3d"] else cfg["blocks"],
-        padding=(tp["ldA"] - align, tp["ldB"] - align, 0),
-        ldD=tp["ldD"] // 2,
-        ldC=tp["ldC"] // 2,
-        alpha=tp["alpha"],
-        beta=tp["beta"],
-        use_beta=tp["useBeta"],
-        mfma=mfma,
-        lds=bool(cfg.get("lds", False)),
-    )
-
-
 def build_problem(tp: dict, cfg: dict, source_k: int) -> tuple[Problem, bool]:
     """Re-targets cfg to the case tp; the flag is true when the split size of
     cfg could not be kept and the case runs the kernel without split-K
     instead."""
     spk = cfg["spk"]
     if spk is None:
-        return make_target_problem(tp, cfg, None), False
+        return target_problem(tp, cfg, None), False
     if spk >= source_k or not literal_spk_allowed(tp, spk):
-        return make_target_problem(tp, cfg, None), spk < source_k
+        return target_problem(tp, cfg, None), spk < source_k
     try:
-        return make_target_problem(tp, cfg, spk), False
+        return target_problem(tp, cfg, spk), False
     except AssertionError:
-        return make_target_problem(tp, cfg, None), True
+        return target_problem(tp, cfg, None), True
 
 
 def case_key(p: Problem) -> tuple:
@@ -420,14 +362,31 @@ class DeviceCaseCache:
         self.cases.clear()
 
 
-def time_reduce_ns(p: Problem, device: DeviceCase, launches: int) -> list[int]:
-    """The warm launches of the split-K reduce, in ns."""
+def reduce_launch(p: Problem, device: DeviceCase) -> tuple:
+    """The kernel, grid, block and arguments of the split-K reduce."""
     reducer = support.reduceKernel(support.DEFAULT_CODE_OBJECT_VERSION, 0)
     grid, block = support.reduceLaunchDims(p.m, p.n)
     args = support.reduceArgs(
         device.d, device.ws, device.c, p.ldD, p.m, p.n, p.splits, p.ldC, p.alpha, p.beta
     )
-    return bench.timeLaunches(reducer, grid, block, args, launches, None)
+    return reducer, grid, block, args
+
+
+def time_reduce_ns(p: Problem, device: DeviceCase, launches: int) -> list[int]:
+    """The warm launches of the split-K reduce, in ns."""
+    return bench.timeLaunches(*reduce_launch(p, device), launches, None)
+
+
+def warm_reduce(p: Problem, device: DeviceCase, launches: int) -> None:
+    """Untimed warm launches of the split-K reduce, without a flush."""
+    bench.warmLaunches(*reduce_launch(p, device), launches, None)
+
+
+def mean_us(gemm_ns: list[int], reduce_ns: list[int] | None) -> float:
+    """The mean in microseconds of the per-iteration gemm (+ reduce) times."""
+    if reduce_ns is None:
+        return bench.mean(gemm_ns) * 1e-3
+    return bench.mean([g + r for g, r in zip(gemm_ns, reduce_ns)]) * 1e-3
 
 
 def make_verifier(p: Problem, inputs: CaseInputs) -> Verifier:
@@ -450,9 +409,9 @@ def warm_up(launch: Callable[[int], object], count: int, warmup_ms: float) -> No
 def measure_us(
     job: "Job", inputs: CaseInputs, device: DeviceCase, flush: FastLlcFlush
 ) -> float:
-    """The best time in microseconds, reduce included for split-K, to be
-    comparable with the timeUs of the sweep: the minimum over the iterations of
-    the GEMM time plus the reduce time of the same iteration, after warmup
+    """The mean time in microseconds, reduce included for split-K, to be
+    comparable with the timeUs of the sweep: the mean over the timed iterations
+    of the GEMM time plus the reduce time of the same iteration, after warmup
     untimed launches. Mirrors bench.benchProblem, but flushes the LLC with the
     flush of the sweep and, with verify, checks the result like the sweep."""
     p, iters, warmup, warmup_ms = job.problem, job.iters, job.warmup, job.warmup_ms
@@ -465,7 +424,7 @@ def measure_us(
     if verifier:
         device.reset_outputs()
     warm_up(
-        lambda n: bench.timeLaunches(kernel, p.grid, block, args, n, flush),
+        lambda n: bench.warmLaunches(kernel, p.grid, block, args, n, flush),
         warmup,
         warmup_ms,
     )
@@ -476,13 +435,13 @@ def measure_us(
         device.ws.download(ws)
         verifier.check_gemm(p, d_bits, ws)
     if p.splits == 1:
-        return min(gemm_ns) * 1e-3
-    warm_up(lambda n: time_reduce_ns(p, device, n), warmup, warmup_ms)
+        return mean_us(gemm_ns, None)
+    warm_up(lambda n: warm_reduce(p, device, n), warmup, warmup_ms)
     reduce_ns = time_reduce_ns(p, device, iters)
     if verifier:
         device.d.download(d_bits)
         verifier.check_reduced(p, d_bits)
-    return min(g + r for g, r in zip(gemm_ns, reduce_ns)) * 1e-3
+    return mean_us(gemm_ns, reduce_ns)
 
 
 class TallyEntry(NamedTuple):
@@ -493,7 +452,7 @@ class TallyEntry(NamedTuple):
 
 
 def tally(
-    cases: list[Case],
+    cases: list[SweepCase],
     uncovered: list[int],
     candidates: list[dict[ConfigIdentity, Candidate]],
     tried: list[set],
@@ -522,7 +481,7 @@ def tally(
     return entries
 
 
-def log_error(case: Case, identity: ConfigIdentity, reason: str) -> None:
+def log_error(case: SweepCase, identity: ConfigIdentity, reason: str) -> None:
     print(f"case {case.text()}: {identity} does not cover: {reason}", file=sys.stderr)
 
 
@@ -639,7 +598,10 @@ def gpu_worker(gpu: int, jobs, results, cache_bytes: int) -> None:
     sentinel, and puts ("done", case_index, time_us, error, busy_s) or
     ("fatal", gpu, text) on the result queue. A thread prepares the host operands
     of the next job meanwhile."""
-    # HIP is first used below, so the device the worker sees is always 0.
+    # HIP is first used below, so the device the worker sees is always 0; a
+    # parent-level mask would renumber the devices.
+    os.environ.pop("ROCR_VISIBLE_DEVICES", None)
+    os.environ.pop("CUDA_VISIBLE_DEVICES", None)
     os.environ["HIP_VISIBLE_DEVICES"] = str(gpu)
     signal.signal(signal.SIGINT, signal.SIG_IGN)
     devices = DeviceCaseCache(cache_bytes)
@@ -732,7 +694,7 @@ class Selector:
 
     def __init__(
         self,
-        cases: list[Case],
+        cases: list[SweepCase],
         tolerance: float,
         iters: int,
         warmup: int,
@@ -766,7 +728,13 @@ class Selector:
         self.selected: list[ConfigIdentity] = []
 
     def uncovered(self) -> list[int]:
-        return [c.index for c in self.cases if c.index not in self.covers]
+        """The cases to search for: a case without a trusted timing has no best
+        to be within tolerance of, so it is never timed."""
+        return [
+            c.index
+            for c in self.cases
+            if c.best_us is not None and c.index not in self.covers
+        ]
 
     def count_cases_for(self, identity: ConfigIdentity) -> int:
         return sum(1 for c in self.covers.values() if c.identity == identity)
@@ -785,14 +753,6 @@ class Selector:
         if identity not in self.candidates[i]:
             source = self.source_for(i, identity)
             self.candidates[i][identity] = source._replace(time_us=time_us)
-
-    def fastest_winner(
-        self, per_id: dict[ConfigIdentity, WithinMeasurement]
-    ) -> tuple[ConfigIdentity, WithinMeasurement]:
-        return min(
-            per_id.items(),
-            key=lambda kv: (kv[1].time_us, tie_break_key(kv[0])),
-        )
 
     def library_from_counts(
         self, counts: Counter[ConfigIdentity]
@@ -825,25 +785,12 @@ class Selector:
 
     def rebuild_assignment(self) -> None:
         """Disjoint assignment: each case uses its fastest within-tolerance config."""
-        winners: dict[int, ConfigIdentity] = {}
-        for i, per_id in self.qualified.items():
-            if not per_id:
-                continue
-            identity, _ = self.fastest_winner(per_id)
-            winners[i] = identity
-        library = self.library_from_counts(Counter(winners.values()))
+        winners = Counter(
+            fastest_winner(per_id)[0] for per_id in self.qualified.values() if per_id
+        )
+        library = self.library_from_counts(winners)
         self.covers.clear()
-        for i, identity in winners.items():
-            if identity not in library:
-                continue
-            self.write_cover(i, identity, self.qualified[i][identity])
-        for i, per_id in self.qualified.items():
-            if i in self.covers:
-                continue
-            options = {id: m for id, m in per_id.items() if id in library}
-            if not options:
-                continue
-            identity, meas = self.fastest_winner(options)
+        for i, (identity, meas) in assign_disjoint(self.qualified, library).items():
             self.write_cover(i, identity, meas)
         counts = Counter(c.identity for c in self.covers.values())
         self.selected = sorted(
@@ -992,6 +939,11 @@ class Selector:
         return outcomes
 
     def drop_dominated(self, i: int, identity: ConfigIdentity, time_us: float) -> None:
+        """Drops the candidates that identity makes redundant for case i. It
+        only does when identity covers the case itself: a time beyond the
+        tolerance says nothing about the candidates."""
+        if not self.covers_within(i, time_us):
+            return
         dominated = [
             d
             for d, c in self.candidates[i].items()
@@ -1079,17 +1031,19 @@ class Selector:
         while True:
             uncovered = self.uncovered()
             if not uncovered:
+                stop_reason = REASON_ALL_COVERED
                 break
             entries = tally(self.cases, uncovered, self.candidates, self.tried)
             if not entries:
-                self.rebuild_assignment()
-                return self.result(bool(self.uncovered()), search_exhausted=True)
+                stop_reason = REASON_EXHAUSTED
+                break
             if round_number >= limit:
                 print(
                     f"warning: round limit ({limit}) reached with "
                     f"{len(uncovered)} uncovered, stopping search",
                     flush=True,
                 )
+                stop_reason = REASON_ROUND_LIMIT
                 break
             round_number += 1
             identity = entries[0].identity
@@ -1123,20 +1077,20 @@ class Selector:
                 flush=True,
             )
         self.rebuild_assignment()
-        return self.result(bool(self.uncovered()), search_exhausted=False)
+        return self.result(stop_reason)
 
-    def result(self, cap_reached: bool, search_exhausted: bool) -> SelectionResult:
+    def result(self, stop_reason: str) -> SelectionResult:
         return SelectionResult(
             self.selected,
             self.covers,
             self.measured_best,
-            cap_reached,
-            search_exhausted,
+            {i: set(per_id) for i, per_id in self.qualified.items()},
+            stop_reason,
         )
 
 
 def run_selection(
-    cases: list[Case], args: argparse.Namespace, gpus: list[int]
+    cases: list[SweepCase], args: argparse.Namespace, gpus: list[int]
 ) -> SelectionResult:
     work_dir = args.work_dir or os.path.join(args.output, "work")
     window = max(2 * args.jobs, BUILDS_PER_GPU * len(gpus))
@@ -1162,17 +1116,7 @@ def run_selection(
         pipeline.close()
 
 
-def rounded(value: float) -> float:
-    return round(float(value), 4)
-
-
-def config_record(identity: ConfigIdentity) -> dict:
-    record = {name: getattr(identity, name) for name in identity._fields}
-    record["grid3d"] = bool(identity.grid3d)
-    return record
-
-
-def cover_record(case: Case, cover: CoverRecord) -> dict:
+def cover_record(case: SweepCase, cover: CoverRecord) -> dict:
     record = dict(case.label)
     record.update(
         kernel=cover.kernel_name,
@@ -1186,31 +1130,41 @@ def cover_record(case: Case, cover: CoverRecord) -> dict:
 
 
 def selected_record(
-    identity: ConfigIdentity, cases: list[Case], covers: dict[int, CoverRecord]
+    identity: ConfigIdentity, cases: list[SweepCase], covers: dict[int, CoverRecord]
 ) -> dict:
     assigned = [i for i, c in sorted(covers.items()) if c.identity == identity]
     return {
-        "config": config_record(identity),
+        "config": identity_record(identity),
         "kernels": sorted({covers[i].kernel_name for i in assigned}),
         "num_cases": len(assigned),
         "cases": [cover_record(cases[i], covers[i]) for i in assigned],
     }
 
 
+def uncovered_reason(case: SweepCase, result: SelectionResult) -> str:
+    if case.best_us is None:
+        return case.reason
+    if case.index not in result.measured_best:
+        return REASON_UNMEASURED
+    within = result.within.get(case.index)
+    if within and within.isdisjoint(result.selected):
+        return REASON_CAP
+    return result.stop_reason
+
+
 def uncovered_record(
-    case: Case, result: SelectionResult, reason: str, tolerance: float
+    case: SweepCase, result: SelectionResult, tolerance: float
 ) -> dict:
     record = dict(case.label)
-    record["bestUs"] = rounded(case.best_us)
+    record["bestUs"] = None if case.best_us is None else rounded(case.best_us)
+    record["reason"] = uncovered_reason(case, result)
     best = result.measured_best.get(case.index)
-    if best is None:
-        record["reason"] = REASON_UNMEASURED
+    if best is None or case.best_us is None:
         record["measuredBest"] = None
         return record
-    record["reason"] = reason
     identity, time_us = best
     record["measuredBest"] = {
-        "config": config_record(identity),
+        "config": identity_record(identity),
         "timeUs": rounded(time_us),
         "ratio": rounded(time_us / case.best_us),
         "withinTolerance": time_us <= case.best_us * (1 + tolerance),
@@ -1234,19 +1188,13 @@ def write_asm(out_dir: str, covers: dict[int, CoverRecord]) -> None:
 
 def write_outputs(
     out_dir: str,
-    cases: list[Case],
+    cases: list[SweepCase],
     result: SelectionResult,
     args: argparse.Namespace,
 ) -> None:
     os.makedirs(out_dir, exist_ok=True)
-    if result.search_exhausted:
-        reason = REASON_EXHAUSTED
-    elif result.cap_reached:
-        reason = REASON_CAP
-    else:
-        reason = REASON_EXHAUSTED
     uncovered = [
-        uncovered_record(c, result, reason, args.tolerance)
+        uncovered_record(c, result, args.tolerance)
         for c in cases
         if c.index not in result.covers
     ]
@@ -1278,27 +1226,6 @@ def write_outputs(
     write_asm(out_dir, result.covers)
 
 
-def positive_int(text: str) -> int:
-    value = int(text)
-    if value < 1:
-        raise argparse.ArgumentTypeError(f"must be at least 1, got {value}")
-    return value
-
-
-def non_negative_int(text: str) -> int:
-    value = int(text)
-    if value < 0:
-        raise argparse.ArgumentTypeError(f"must be at least 0, got {value}")
-    return value
-
-
-def non_negative_float(text: str) -> float:
-    value = float(text)
-    if value < 0:
-        raise argparse.ArgumentTypeError(f"must be at least 0, got {value}")
-    return value
-
-
 def make_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Select few skinny GEMM kernels that cover a sweep."
@@ -1307,7 +1234,7 @@ def make_parser() -> argparse.ArgumentParser:
     parser.add_argument("-o", "--output", required=True, help="output directory")
     parser.add_argument(
         "--max-configs",
-        type=int,
+        type=positive_int,
         default=None,
         help="library size cap (default: unlimited)",
     )
@@ -1320,26 +1247,27 @@ def make_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--tolerance",
-        type=float,
+        type=non_negative_finite_float,
         default=DEFAULT_TOLERANCE,
         help="allowed relative slowdown over the best time of a case",
     )
     parser.add_argument(
         "--iters",
         type=positive_int,
-        default=DEFAULT_ITERS,
-        help="timed launches per case (default 30)",
+        default=None,
+        help="timed launches per case (default: the iters of the sweep that "
+        f"produced the results, else {DEFAULT_ITERS})",
     )
     parser.add_argument(
         "--warmup",
         type=non_negative_int,
-        default=DEFAULT_WARMUP,
-        help="untimed launches before the timed ones (default 5, the value of "
-        "the sweep that produced results.yml)",
+        default=None,
+        help="untimed flush+launch pairs before the timed ones (default: the "
+        f"warmup of the sweep that produced the results, else {DEFAULT_WARMUP})",
     )
     parser.add_argument(
         "--warmup-ms",
-        type=non_negative_float,
+        type=non_negative_finite_float,
         default=DEFAULT_WARMUP_MS,
         help="after --warmup, keep launching until this many ms have passed, "
         "so the GPU clocks and pipeline settle (default 30, 0 disables)",
@@ -1351,21 +1279,22 @@ def make_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--gpus",
         default="auto",
-        help=f"auto (the GPUs below {MAX_BUSY_PERCENT}%% use) or a list like 0,1,3",
+        help=f"auto (the GPUs below {MAX_BUSY_PERCENT}%% use) or a list like 0,1,3 "
+        "of HIP ordinals (the numbering of HIP_VISIBLE_DEVICES)",
     )
     parser.add_argument(
         "--allow-busy", action="store_true", help="time on listed GPUs even if busy"
     )
     parser.add_argument(
         "--cache-gb",
-        type=float,
+        type=positive_finite_float,
         default=DEFAULT_CACHE_GB,
         help="host bytes of operands, and device bytes of buffers, cached per "
         f"gpu worker, in GiB (default {DEFAULT_CACHE_GB})",
     )
     parser.add_argument(
         "--jobs",
-        type=int,
+        type=positive_int,
         default=default_jobs(),
         help="assembler processes (default: min(32, half of the cpus))",
     )
@@ -1374,14 +1303,28 @@ def make_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--only", help="keep the cases whose name contains this")
     parser.add_argument(
-        "--limit-cases", type=int, help="keep the first N cases after --only"
+        "--limit-cases",
+        type=non_negative_int,
+        help="keep the first N cases after --only",
     )
     return parser
 
 
 def main() -> int:
     args = make_parser().parse_args()
-    cases = load_cases(args.results, args.only, args.limit_cases)
+    try:
+        document = read_document(args.results)
+        cases = load_cases(
+            document,
+            args.only,
+            args.limit_cases,
+            require_one_shot=False,
+            use_beta_only=False,
+        )
+    except INPUT_ERRORS as err:
+        sys.exit(f"error: {err}")
+    resolve_launch_settings(args, document["meta"])
+    map_hip_ordinals()
     try:
         gpus = select_gpus(args.gpus, MAX_BUSY_PERCENT, args.allow_busy)
     except SweepAbort as err:

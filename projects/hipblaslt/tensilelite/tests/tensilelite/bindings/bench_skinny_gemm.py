@@ -2,12 +2,19 @@
 # SPDX-License-Identifier: MIT
 """Benchmark of the emitted skinny MXFP8 GEMM (and the split-K reduce).
 
-Prints one SWEEP line per shape. The timing methodology is: before each GEMM
-launch a read-only kernel streams a 256 MiB buffer to empty the LLC and the
-device is synchronised; HIP events on the null stream bracket a single launch
-whose kernel arguments were built once; the reported time is the minimum over
-the iterations (the first included). The split-K reduce is timed warm, without
-the flush, after the GEMM iterations.
+Prints one SWEEP line per shape. The timing methodology is: before every GEMM
+launch, timed or not, a read-only kernel streams a 512 MiB buffer to empty the
+LLC (twice the 256 MiB MALL of the MI355X) and the device is synchronised, so
+N timed iterations are N flush launches plus N GEMM launches. The HIP events
+bracket only the GEMM, never the flush: they are attached to the dispatch with
+hipExtModuleLaunchKernel when the symbol loads, which reads the kernel duration
+plus about 0.5 us with a floor of about 4 us; the fallback records the events
+around hipModuleLaunchKernel on the null stream, which adds 3 to 4 us with a
+floor of about 6 us. Kernels below about 3.5 us therefore cannot be told apart.
+The reported times are means over the iterations. The split-K reduce is timed
+warm, without a flush, after the GEMM iterations, because in the real pipeline
+it runs right after its GEMM. The gemm_min_us and gemm_p90_us columns are
+informational.
 
 Run from the tensilelite directory:
 
@@ -18,7 +25,10 @@ Run from the tensilelite directory:
 """
 
 import argparse
+import ctypes
 import glob
+import math
+import os
 import sys
 from contextlib import ExitStack
 
@@ -27,7 +37,13 @@ import yaml
 import skinny_gemm_support as support
 from skinny_gemm_support import DeviceBuffer, LoadedKernel, Problem, hipCheck
 
-FLUSH_MB = 256
+# Twice the 256 MiB MALL of the MI355X: a 256 MiB flush left 1 to 3% of the
+# operands warm, while 384 MiB and more are equal within noise.
+FLUSH_MB = 512
+# Untimed flush plus launch pairs after a kernel is loaded.
+POST_LOAD_LAUNCHES = 2
+EXT_TIMING = "hipExtModuleLaunchKernel events"
+EVENT_TIMING = "hipEventRecord around hipModuleLaunchKernel"
 FLUSH_KERNEL_NAME = "flush_llc_kernel"
 # The assembly of the LLC flush kernel: each thread of the workgroup loads its
 # slice of the buffer one dword at a time. It only reads, so the LLC is left
@@ -112,12 +128,22 @@ def packArgs(args):
     return _hip_helpers.HipModuleLaunchKernel_extra(tuple(args))
 
 
+def allocateFlushBuffer(nbytes: int):
+    """The device buffer a flush kernel streams over."""
+    try:
+        return hipCheck(support._hip().hipMalloc(nbytes))
+    except RuntimeError as err:
+        raise RuntimeError(
+            f"cannot allocate the {nbytes // 2**20} MiB LLC flush buffer: {err}; "
+            "is another process using this GPU's memory?"
+        ) from err
+
+
 class LlcFlush:
     """Empties the LLC by reading a buffer larger than it, one workgroup per
     CU, then waits for the device; a context manager that frees the buffer."""
 
     def __init__(self):
-        hip = support._hip()
         props = support.getDeviceProperties()
         self.workgroups = props.multiProcessorCount
         elements = FLUSH_MB * 2**20 // 4
@@ -130,9 +156,14 @@ class LlcFlush:
         import tensilelite_jit
 
         hsaco = tensilelite_jit.assembleToHSACO(asm, support.TARGET)
+        self.buffer = None
         self.kernel = LoadedKernel(hsaco, FLUSH_KERNEL_NAME)
-        self.buffer = hipCheck(hip.hipMalloc(FLUSH_MB * 2**20))
-        self.args = packArgs((self.buffer.as_c_void_p(),))
+        try:
+            self.buffer = allocateFlushBuffer(FLUSH_MB * 2**20)
+            self.args = packArgs((self.buffer.as_c_void_p(),))
+        except BaseException:
+            self.close()
+            raise
 
     def flush(self) -> None:
         hip = support._hip()
@@ -154,54 +185,164 @@ class LlcFlush:
         hipCheck(hip.hipDeviceSynchronize())
 
     def close(self) -> None:
-        if self.buffer is None:
-            return
-        hipCheck(support._hip().hipFree(self.buffer))
-        self.buffer = None
-        self.kernel.close()
+        """Frees the buffer and closes the kernel, even if the free raises."""
+        try:
+            if self.buffer is not None:
+                buffer, self.buffer = self.buffer, None
+                hipCheck(support._hip().hipFree(buffer))
+        finally:
+            self.kernel.close()
 
     def __enter__(self):
         return self
 
-    def __exit__(self, *exception):
-        self.close()
+    def __exit__(self, kind, value, traceback) -> None:
+        support.closeOnExit(self, value)
+
+
+_EXT_UNLOADED = object()
+_extLaunch = _EXT_UNLOADED
+
+
+def loadExtLaunch():
+    """hipExtModuleLaunchKernel through ctypes (hip-python lacks the module
+    variant), or None if the runtime does not export it."""
+    root = os.environ.get("ROCM_PATH", "/opt/rocm")
+    # The bare soname first, so that ctypes binds to the runtime instance that
+    # hip-python already loaded.
+    for path in ("libamdhip64.so", os.path.join(root, "lib", "libamdhip64.so")):
+        try:
+            function = ctypes.CDLL(path).hipExtModuleLaunchKernel
+        except (OSError, AttributeError):
+            continue
+        function.restype = ctypes.c_int
+        function.argtypes = (
+            [ctypes.c_void_p]
+            + [ctypes.c_uint32] * 6
+            + [ctypes.c_size_t, ctypes.c_void_p]
+            + [ctypes.c_void_p] * 4
+            + [ctypes.c_uint32]
+        )
+        return function
+    return None
+
+
+def extLaunchFunction():
+    """The cached hipExtModuleLaunchKernel function, or None."""
+    global _extLaunch
+    if _extLaunch is _EXT_UNLOADED:
+        _extLaunch = loadExtLaunch()
+    return _extLaunch
+
+
+def useExt(method: str | None) -> bool:
+    return method != "events" and extLaunchFunction() is not None
+
+
+def timingMethod(method: str | None = None) -> str:
+    """The name of the event timing used for method (None or 'ext' prefer the
+    hipExtModuleLaunchKernel events, 'events' forces the fallback)."""
+    return EXT_TIMING if useExt(method) else EVENT_TIMING
+
+
+def pointerOf(handle) -> int | None:
+    return handle.as_c_void_p().value
+
+
+def extLaunch(function, kernel, grid, block, packed, start, stop) -> None:
+    """One launch with the events attached to the dispatch; the global sizes of
+    hipExtModuleLaunchKernel are in threads."""
+    err = function(
+        pointerOf(kernel.function),
+        grid[0] * block[0],
+        grid[1] * block[1],
+        grid[2] * block[2],
+        *block,
+        0,
+        None,
+        None,
+        pointerOf(packed),
+        pointerOf(start),
+        pointerOf(stop),
+        0,
+    )
+    if err != 0:
+        raise RuntimeError(f"hipExtModuleLaunchKernel failed: error {err}")
+
+
+def launch(hip, kernel, grid, block, packed) -> None:
+    hipCheck(
+        hip.hipModuleLaunchKernel(
+            kernel.function,
+            *grid,
+            *block,
+            sharedMemBytes=0,
+            stream=None,
+            kernelParams=None,
+            extra=packed,
+        )
+    )
+
+
+def timedLaunch(hip, ext, kernel, grid, block, packed, start, stop) -> int:
+    """One launch bracketed by the events, in ns; ext is the ctypes function of
+    hipExtModuleLaunchKernel, or None to record the events around the launch."""
+    if ext is not None:
+        extLaunch(ext, kernel, grid, block, packed, start, stop)
+    else:
+        hipCheck(hip.hipEventRecord(start, None))
+        launch(hip, kernel, grid, block, packed)
+        hipCheck(hip.hipEventRecord(stop, None))
+    hipCheck(hip.hipEventSynchronize(stop))
+    return int(hipCheck(hip.hipEventElapsedTime(start, stop)) * 1e6)
 
 
 def timeLaunches(
-    kernel: LoadedKernel, grid, block, args, iters: int, flush: LlcFlush | None
+    kernel: LoadedKernel,
+    grid,
+    block,
+    args,
+    iters: int,
+    flush: LlcFlush | None,
+    method: str | None = None,
 ) -> list[int]:
-    """Times iters launches in ns, each bracketed by HIP events on the null
-    stream after the flush, if any. The launch arguments are packed once: packing
-    them inside the timed region would add the CPU cost to the event time."""
+    """Times iters launches in ns, each preceded by its own flush (if any) and
+    bracketed by HIP events that cover only the launch. The launch arguments
+    are packed once: packing them inside the timed region would add the CPU cost
+    to the event time. method 'events' forces the event-record fallback."""
     hip = support._hip()
+    ext = extLaunchFunction() if useExt(method) else None
     packed = packArgs(args)
-    start = hipCheck(hip.hipEventCreate())
-    stop = hipCheck(hip.hipEventCreate())
     times = []
+    start = hipCheck(hip.hipEventCreate())
     try:
-        for _ in range(iters):
-            if flush is not None:
-                flush.flush()
-            hipCheck(hip.hipEventRecord(start, None))
-            hipCheck(
-                hip.hipModuleLaunchKernel(
-                    kernel.function,
-                    *grid,
-                    *block,
-                    sharedMemBytes=0,
-                    stream=None,
-                    kernelParams=None,
-                    extra=packed,
+        stop = hipCheck(hip.hipEventCreate())
+        try:
+            for _ in range(iters):
+                if flush is not None:
+                    flush.flush()
+                times.append(
+                    timedLaunch(hip, ext, kernel, grid, block, packed, start, stop)
                 )
-            )
-            hipCheck(hip.hipEventRecord(stop, None))
-            hipCheck(hip.hipEventSynchronize(stop))
-            milliseconds = hipCheck(hip.hipEventElapsedTime(start, stop))
-            times.append(int(milliseconds * 1e6))
+        finally:
+            hipCheck(hip.hipEventDestroy(stop))
     finally:
         hipCheck(hip.hipEventDestroy(start))
-        hipCheck(hip.hipEventDestroy(stop))
     return times
+
+
+def warmLaunches(
+    kernel: LoadedKernel, grid, block, args, count: int, flush: LlcFlush | None
+) -> None:
+    """Count untimed launches, each preceded by its flush (if any) and followed
+    by a device synchronisation."""
+    hip = support._hip()
+    packed = packArgs(args)
+    for _ in range(count):
+        if flush is not None:
+            flush.flush()
+        launch(hip, kernel, grid, block, packed)
+        hipCheck(hip.hipDeviceSynchronize())
 
 
 class MissingAsm(Exception):
@@ -256,9 +397,11 @@ def benchProblem(
     asmDir: str | None,
     codeObjectVersion: int,
     maxPreloadDwords: int,
+    method: str | None = None,
 ) -> tuple[list[int], list[int] | None]:
     """Times the GEMM (cold LLC) and, for split-K, the reduce (warm) in ns per
-    iteration; with verify the results are checked against the host reference."""
+    iteration; with verify the results are checked against the host reference.
+    The timed launches follow POST_LOAD_LAUNCHES untimed warm launches."""
     inputs = support.makeInputs(p, seed=42, withReference=verify)
     dBits, ws = support.makeOutputs(p.m, p.n, p.ldD, p.splits)
     arrays = (
@@ -278,9 +421,9 @@ def benchProblem(
         kernel = gemmKernelFor(stack, p, asmDir, codeObjectVersion, maxPreloadDwords)
         flush = stack.enter_context(LlcFlush())
         args = support.gemmArgs(p, dBuf, aBuf, bBuf, sclABuf, sclBBuf, wsBuf, cBuf)
-        gemmTimes = timeLaunches(
-            kernel, p.grid, support.gemmBlock(p), args, iters, flush
-        )
+        block = support.gemmBlock(p)
+        warmLaunches(kernel, p.grid, block, args, POST_LOAD_LAUNCHES, flush)
+        gemmTimes = timeLaunches(kernel, p.grid, block, args, iters, flush, method)
         if verify:
             dBuf.download(dBits)
             wsBuf.download(ws)
@@ -293,7 +436,8 @@ def benchProblem(
             args = support.reduceArgs(
                 dBuf, wsBuf, cBuf, p.ldD, p.m, p.n, p.splits, p.ldC, p.alpha, p.beta
             )
-            reduceTimes = timeLaunches(reducer, grid, block, args, iters, None)
+            warmLaunches(reducer, grid, block, args, POST_LOAD_LAUNCHES, None)
+            reduceTimes = timeLaunches(reducer, grid, block, args, iters, None, method)
             if verify:
                 dBuf.download(dBits)
                 support.verifyD(
@@ -302,10 +446,22 @@ def benchProblem(
     return gemmTimes, reduceTimes
 
 
+def mean(values) -> float:
+    return sum(values) / len(values)
+
+
+def percentile(values, fraction: float):
+    """The value at sorted index ceil(fraction * n) - 1 (nearest rank)."""
+    ordered = sorted(values)
+    # The rounding keeps products such as 0.9 * 10 from landing above the integer.
+    rank = math.ceil(round(fraction * len(ordered), 9))
+    return ordered[max(rank, 1) - 1]
+
+
 def formatSweepLine(p: Problem, gemmTimes, reduceTimes) -> str:
-    """One SWEEP line: times are minima over
-    the iterations in us; total_us is the minimum of the per-iteration gemm +
-    reduce sums."""
+    """One SWEEP line: gemm_us and reduce_us are means over the iterations in
+    us and total_us is the mean of the per-iteration gemm + reduce sums; the min
+    and p90 columns of the GEMM are informational."""
     fields = {
         "m": p.m,
         "n": p.n,
@@ -327,11 +483,13 @@ def formatSweepLine(p: Problem, gemmTimes, reduceTimes) -> str:
         **({"mfma": 1} if p.mfma else {}),
         **({"lds": 1} if p.lds else {}),
         **({"use_split_k": 1} if p.use_split_k else {}),
-        "gemm_us": f"{min(gemmTimes) * 1e-3:.2f}",
+        "gemm_us": f"{mean(gemmTimes) * 1e-3:.2f}",
+        "gemm_min_us": f"{min(gemmTimes) * 1e-3:.2f}",
+        "gemm_p90_us": f"{percentile(gemmTimes, 0.9) * 1e-3:.2f}",
     }
     if reduceTimes is not None:
-        total = min(g + r for g, r in zip(gemmTimes, reduceTimes))
-        fields["reduce_us"] = f"{min(reduceTimes) * 1e-3:.2f}"
+        total = mean([g + r for g, r in zip(gemmTimes, reduceTimes)])
+        fields["reduce_us"] = f"{mean(reduceTimes) * 1e-3:.2f}"
         fields["total_us"] = f"{total * 1e-3:.2f}"
     return "SWEEP " + " ".join(f"{key}={value}" for key, value in fields.items())
 
@@ -358,6 +516,7 @@ def sweepShape(
     codeObjectVersion: int,
     maxPreloadDwords: int,
     splitRemainder: int = 1,
+    method: str | None = None,
 ) -> None:
     """Runs one shape and prints its SWEEP line, or with printOnly its emitted
     asm instead of benchmarking it; a shape that violates the constraints with
@@ -378,7 +537,7 @@ def sweepShape(
             printAsm(p, codeObjectVersion, maxPreloadDwords)
             return
         gemmTimes, reduceTimes = benchProblem(
-            p, iters, verify, asmDir, codeObjectVersion, maxPreloadDwords
+            p, iters, verify, asmDir, codeObjectVersion, maxPreloadDwords, method
         )
     except (AssertionError, MissingAsm) as err:
         reason = str(err).splitlines()[0]
@@ -406,6 +565,15 @@ def makeParser() -> argparse.ArgumentParser:
     parser.add_argument("-n", type=int, default=8192, help="Columns of B / cols of D")
     parser.add_argument("-k", type=int, default=8192, help="Shared dimension")
     parser.add_argument("--iters", type=int, default=30, help="Timed launches")
+    parser.add_argument(
+        "--timing",
+        choices=("ext", "events"),
+        default="ext",
+        help="ext attaches the events to the dispatch with "
+        "hipExtModuleLaunchKernel (falls back to events if the runtime lacks "
+        "it); events records them around hipModuleLaunchKernel, which reads "
+        "3 to 4 us more",
+    )
     parser.add_argument(
         "--spk",
         type=int,
@@ -461,7 +629,8 @@ def makeParser() -> argparse.ArgumentParser:
         "'config' entries of select_skinny_gemm_kernels.py's selection, e.g. "
         "'{bm: 16, tn: 1, lanes_k: 64, waves: 4, pf: 2, up_iters: 0, "
         "group: 1, xcds: 1, grid3d: true, blocks: null, "
-        "mfma: true, lds: true, use_beta: true}'; knob options given "
+        "mfma: true, lds: true, use_beta: true, use_split_k: false}'; "
+        "use_split_k true needs --spk and false forbids it; knob options given "
         "explicitly override its entries",
     )
     parser.add_argument(
@@ -533,21 +702,32 @@ CONFIG_KEYS = frozenset(
         "mfma",
         "lds",
         "use_beta",
+        "use_split_k",
     )
 )
 
 
-def parseConfig(text: str) -> dict:
+def parseConfig(text: str, spk: int | None = None) -> dict:
     """The makeProblem knobs of a selection config mapping. up_iters is derived
     from the shape, so only whether it is non-zero (the up-front scales) is
     kept; blocks is only meaningful for the persistent grid, which grid3d false
-    selects."""
+    selects. use_split_k tells the kernel with split-K from the one without, but
+    the split size is not in the mapping, so spk (the --spk option) must be
+    given exactly when use_split_k is true."""
     config = yaml.safe_load(text)
     if not isinstance(config, dict):
         raise SystemExit(f"--config must be a mapping, got {text!r}")
     unknown = sorted(set(config) - CONFIG_KEYS)
     if unknown:
         raise SystemExit(f"--config has unknown keys {unknown}")
+    use_split_k = config.get("use_split_k")
+    if use_split_k and spk is None:
+        raise SystemExit("--config with use_split_k true needs --spk")
+    if use_split_k is not None and not use_split_k and spk is not None:
+        raise SystemExit(
+            "--config with use_split_k false selects the kernel without "
+            "split-K; drop --spk"
+        )
     grid3d = bool(config.get("grid3d", True))
     if not grid3d and config.get("blocks") is None:
         raise SystemExit("--config with grid3d false needs blocks")
@@ -585,13 +765,24 @@ def knobOverrides(args: argparse.Namespace) -> dict:
     given = {name: value for name, value in values.items() if value is not None}
     if args.config is None:
         return given
-    return {**parseConfig(args.config), **given}
+    return {**parseConfig(args.config, args.spk), **given}
+
+
+def timingBanner(args: argparse.Namespace) -> str:
+    """The timing method in effect; notes a fallback from the requested one."""
+    method = timingMethod(args.timing)
+    if args.timing == "ext" and method != EXT_TIMING:
+        print(f"# note: hipExtModuleLaunchKernel is unavailable, using {method}")
+    return f"timing={method.replace(' ', '_')} flush_mib={FLUSH_MB}"
 
 
 def main() -> None:
     args = makeParser().parse_args()
     overrides = knobOverrides(args)
+    banner = None if args.print_asm else timingBanner(args)
     if args.sweep is None:
+        if banner is not None:
+            print(f"# {banner}", flush=True)
         sweepShape(
             args.m,
             args.n,
@@ -604,11 +795,12 @@ def main() -> None:
             args.code_object_version,
             args.max_preload_dwords,
             args.split_remainder,
+            args.timing,
         )
         return
-    if not args.print_asm:
+    if banner is not None:
         header = f"# sweep={args.sweep} iters={args.iters} verify={int(args.verify)}"
-        header += " cold_llc=1"
+        header += f" cold_llc=1 {banner}"
         for key, value in overrides.items():
             header += f" {key}={value}"
         print(header, flush=True)
@@ -625,6 +817,7 @@ def main() -> None:
             args.code_object_version,
             args.max_preload_dwords,
             args.split_remainder,
+            args.timing,
         )
 
 

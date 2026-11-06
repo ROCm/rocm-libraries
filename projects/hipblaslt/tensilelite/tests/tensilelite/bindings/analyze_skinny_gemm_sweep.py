@@ -3,7 +3,10 @@
 """Statistical analysis of sweep_skinny_gemm.py results to trim knob sweeps.
 
 Reads a results YAML (top configs per case only) and the sweep input YAML used
-to produce it. Re-expands every case to recover the constraint-valid
+to produce it. The results must come from a refine+top sweep: a one-shot sweep
+lists every screened configuration in top, so top membership carries no signal
+and the analysis refuses it. A case of the input without a results record is
+skipped and counted in casesMissing. Re-expands every case to recover the constraint-valid
 configuration pool, labels configs that appear in that case's top list, and
 computes statistics **separately for the two VALU sweep shapes**:
 
@@ -29,10 +32,20 @@ Run from the tensilelite directory:
 Default ``frequency`` uses **both** (1) top-slot frequency thresholds and (2) the
 **phi** coefficient (indicator for this knob value vs is_top within the mode),
 same test as ``low-phi``: drop when phi <= ``--max-phi``, p-value vs rest is
-weak, and candidate top rate is below the mode baseline—unless the value is
-among the ``--keep-at-least`` highest-frequency values for that knob.
+weak, and candidate top rate is below the mode baseline, unless the value is
+among the ``--keep-at-least`` highest-frequency values for that knob. Either
+criterion alone drops a value.
 
-Optional <results>.failed.yaml excludes build-failed identities from the pool.
+The sweep caps a persistent block count to the tile count of the configuration,
+so a recorded blocks value may not be one of the swept values; the statistics
+attribute it to the smallest swept value above it (see requested_blocks).
+
+A trimmed list is never emptied and a scalar knob is never removed: a warning
+says so instead.
+
+Optional <results>.failed.yaml (a list of per-case failure groups, see
+sweep_skinny_gemm_results.py) excludes the build-failed identities of each case
+from the pool.
 """
 
 from __future__ import annotations
@@ -51,11 +64,12 @@ import yaml
 
 import sweep_skinny_gemm_config as sweep_config
 from sweep_skinny_gemm_config import config_record, expand_case, load_input
-
-try:
-    from yaml import CSafeLoader as YamlLoader
-except ImportError:
-    from yaml import SafeLoader as YamlLoader
+from skinny_gemm_selection import (
+    INPUT_ERRORS,
+    non_negative_finite_float,
+    non_negative_int,
+)
+from sweep_skinny_gemm_results import read_failures, read_results
 
 TOOL = "analyze_skinny_gemm_sweep.py"
 
@@ -104,12 +118,27 @@ class ConfigIdentity(NamedTuple):
     lds: bool
 
 
+def probability(text: str) -> float:
+    value = non_negative_finite_float(text)
+    if value > 1:
+        raise argparse.ArgumentTypeError(f"must be at most 1, got {text}")
+    return value
+
+
 def mode_from_grid3d(grid3d: bool) -> ModeName:
     return "grid" if grid3d else "persistent"
 
 
 def knobs_for_mode(mode: ModeName) -> tuple[str, ...]:
     return GRID_KNOBS if mode == "grid" else PERSIST_KNOBS
+
+
+def up_scales_of(cfg: dict) -> int:
+    """upScales of a config record; a file older than the upScales key records
+    only upIters."""
+    if "upScales" in cfg:
+        return int(cfg["upScales"])
+    return int(cfg.get("upIters", 0) > 0)
 
 
 def identity_of(cfg: dict) -> ConfigIdentity:
@@ -120,9 +149,7 @@ def identity_of(cfg: dict) -> ConfigIdentity:
         cfg["lanesK"],
         cfg["waves"],
         cfg["prefetch"],
-        int(cfg.get("upIters", 0) > 0)
-        if "upIters" in cfg
-        else int(cfg.get("upScales", 0) > 0),
+        up_scales_of(cfg),
         cfg["group"],
         cfg["numXcds"],
         grid3d,
@@ -232,26 +259,22 @@ class AnalysisState:
 
 
 def load_results(path: str) -> tuple[dict, list[dict]]:
-    from sweep_skinny_gemm_results import read_results
-
     document = read_results(path)
     return document["meta"], document["results"]
 
 
-def load_build_fail_identities(path: str) -> set[ConfigIdentity]:
-    failed_path = os.path.splitext(path)[0] + ".failed.yaml"
-    if not os.path.isfile(failed_path):
-        return set()
-    with open(failed_path) as stream:
-        document = yaml.load(stream, Loader=YamlLoader)
+def load_build_fail_identities(
+    path: str,
+) -> set[tuple[tuple[Any, ...], ConfigIdentity]]:
+    """The (case key, identity) pairs that failed to build."""
     failed = set()
-    for entry in document.get("failures", []):
-        if entry.get("status") != "failed to build":
-            continue
-        cfg = entry.get("config")
-        if not cfg:
-            continue
-        failed.add(identity_of(cfg))
+    for group in read_failures(path):
+        key = case_key(group["problem"])
+        for failure in group.get("failures", []):
+            cfg = failure.get("config")
+            if failure.get("status") != "failed to build" or not cfg:
+                continue
+            failed.add((key, identity_of(cfg)))
     return failed
 
 
@@ -264,6 +287,8 @@ def top_identities_by_case(
         key = case_key(problem)
         tops = set()
         for winner in entry.get("top") or []:
+            if winner.get("verified") == "failed":
+                continue
             tops.add(identity_of(winner["config"]))
         out[key] = tops
     return out
@@ -309,6 +334,22 @@ def knob_values_from_failure_cfg(cfg: dict) -> dict[str, Any]:
         "mfma": bool(cfg.get("mfma", False)),
         "lds": bool(cfg.get("lds", False)),
     }
+
+
+def requested_blocks(count: int, swept: set[Any]) -> int:
+    """The swept block count that produced a recorded count: the sweep caps a
+    request to the tile count, so every larger request collapses into the cap,
+    and the smallest of them stands for it."""
+    if not swept or count in swept:
+        return count
+    larger = [value for value in swept if value > count]
+    return min(larger) if larger else count
+
+
+def attribute_blocks(knobs: dict[str, Any], swept_blocks: set[Any]) -> dict[str, Any]:
+    if knobs["blocks"] is not None:
+        knobs["blocks"] = requested_blocks(knobs["blocks"], swept_blocks)
+    return knobs
 
 
 def include_config(ident: ConfigIdentity, valu_only: bool) -> bool:
@@ -388,6 +429,11 @@ def analyze(
     progress: bool,
 ) -> tuple[dict, AnalysisState, sweep_config.SweepInput]:
     meta, results = load_results(results_path)
+    if meta.get("oneShot") is True:
+        raise ValueError(
+            "one-shot results list every screened configuration in top, so top "
+            "membership carries no signal; analyze a refine+top sweep"
+        )
     if input_path is None:
         input_path = meta.get("inputFile")
     if not input_path:
@@ -396,6 +442,9 @@ def analyze(
         )
     seed = meta.get("settings", {}).get("seed")
     sweep_in = load_input(input_path, seed=seed)
+    swept_blocks = valu_sweep_values(read_input(input_path))["persistent"].get(
+        "blocks", set()
+    )
     tops_by_case = top_identities_by_case(results)
     build_failed = load_build_fail_identities(results_path)
     valu_only = not results_include_mfma(results)
@@ -407,13 +456,20 @@ def analyze(
         cases = cases[:limit_cases]
 
     state = AnalysisState(valu_only=valu_only)
+    excluded = 0
+    missing = 0
     t0 = time.monotonic()
     for index, case in enumerate(cases):
         key = case_key(case.record())
-        top_set = tops_by_case.get(key, set())
+        top_set = tops_by_case.get(key)
+        if top_set is None:
+            missing += 1
+            continue
         expanded = expand_case(case)
         for failure in expanded.failures:
-            knobs = knob_values_from_failure_cfg(failure.config)
+            knobs = attribute_blocks(
+                knob_values_from_failure_cfg(failure.config), swept_blocks
+            )
             if valu_only and (knobs["mfma"] or knobs["lds"]):
                 continue
             mode = mode_from_grid3d(bool(knobs["grid3d"]))
@@ -425,9 +481,10 @@ def analyze(
             ident = identity_of(config_record(problem))
             if not include_config(ident, valu_only):
                 continue
-            if ident in build_failed:
+            if (key, ident) in build_failed:
+                excluded += 1
                 continue
-            knobs = knob_values_from_identity(ident)
+            knobs = attribute_blocks(knob_values_from_identity(ident), swept_blocks)
             mode = mode_from_grid3d(ident.grid3d)
             ms = state.mode(mode)
             for knob in knobs_for_mode(mode):
@@ -460,9 +517,10 @@ def analyze(
         "resultsFile": os.path.abspath(results_path),
         "inputFile": os.path.abspath(input_path),
         "valuOnly": valu_only,
-        "casesAnalyzed": len(cases),
+        "casesAnalyzed": len(cases) - missing,
+        "casesMissing": missing,
         "modes": mode_meta,
-        "buildFailuresExcluded": len(build_failed),
+        "buildFailuresExcluded": excluded,
     }
     return meta_out, state, sweep_in
 
@@ -476,6 +534,11 @@ def numeric_summaries(ms: ModeState) -> list[NumericKnobStats]:
             stats.point_biserial = online.pearson()
         out.append(stats)
     return out
+
+
+def read_input(path: str) -> dict:
+    with open(path) as stream:
+        return yaml.safe_load(stream)
 
 
 def valu_sweep_values(raw: dict) -> dict[ModeName, dict[str, set[Any]]]:
@@ -520,16 +583,13 @@ def valu_sweep_values(raw: dict) -> dict[ModeName, dict[str, set[Any]]]:
     }
 
 
-def _rows_for_swept_knob(
-    ms: ModeState, mode: ModeName, knob: str, swept: set[Any]
+def rows_for_swept_knob(
+    ms: ModeState, knob: str, swept: set[Any]
 ) -> list[KnobValueStats]:
     rows: list[KnobValueStats] = []
-    for value in swept:
+    for value in sorted(swept, key=lambda v: (isinstance(v, str), str(v))):
         row = ms.value_stats.get((knob, value))
-        if row is None:
-            rows.append(KnobValueStats(knob, value))
-        else:
-            rows.append(row)
+        rows.append(KnobValueStats(knob, value) if row is None else row)
     return rows
 
 
@@ -537,7 +597,7 @@ def prune_mode(
     ms: ModeState,
     *,
     mode: ModeName,
-    prune_mode: str,
+    policy: str,
     min_trials: int,
     max_phi: float,
     p_threshold: float,
@@ -556,14 +616,13 @@ def prune_mode(
         swept = swept_values.get(knob)
         if not swept:
             continue
-        rows = _rows_for_swept_knob(ms, mode, knob, swept)
+        rows = rows_for_swept_knob(ms, knob, swept)
         for row in rows:
             if row.constraint_only:
                 drop[knob].add(row.value)
         ranked = sorted(
             [r for r in rows if not r.constraint_only and r.candidates],
-            key=lambda r: r.tops,
-            reverse=True,
+            key=lambda r: (-r.tops, -r.candidates, str(r.value)),
         )
         if not ranked:
             continue
@@ -575,18 +634,18 @@ def prune_mode(
                 continue
             if row.candidates < min_trials:
                 continue
-            if prune_mode == "never-top":
+            if policy == "never-top":
                 if row.tops == 0:
                     drop[knob].add(row.value)
                 continue
-            if prune_mode == "low-phi":
+            if policy == "low-phi":
                 if row.tops == 0:
                     drop[knob].add(row.value)
                 elif row.phi <= max_phi and row.p_value_vs_rest >= p_threshold:
                     if row.top_rate <= base_rate:
                         drop[knob].add(row.value)
                 continue
-            # frequency (+ phi): rare in top lists and/or weak correlation with is_top.
+            # Frequency: rare in top lists, or a weak correlation with is_top.
             share = row.tops / total_top_slots if total_top_slots else 0.0
             relative = row.tops / max_tops if max_tops else 0.0
             weak_phi = (
@@ -600,7 +659,7 @@ def prune_mode(
                 row.tops < min_top_slots
                 or share < min_top_share
                 or relative < min_top_relative
-                or (weak_phi and relative < min_top_relative)
+                or weak_phi
             ):
                 drop[knob].add(row.value)
 
@@ -629,7 +688,7 @@ def prune_all(
         "grid": prune_mode(
             state.mode("grid"),
             mode="grid",
-            prune_mode=mode,
+            policy=mode,
             min_trials=min_trials_grid,
             max_phi=max_phi,
             p_threshold=p_threshold,
@@ -642,7 +701,7 @@ def prune_all(
         "persistent": prune_mode(
             state.mode("persistent"),
             mode="persistent",
-            prune_mode=mode,
+            policy=mode,
             min_trials=min_trials,
             max_phi=max_phi,
             p_threshold=p_threshold,
@@ -723,10 +782,19 @@ def mapping_mode(mapping: dict) -> ModeName | None:
     return None
 
 
+def warn_kept(knob: str, mode: ModeName, current: Any, why: str) -> None:
+    print(
+        f"warning: keeping {knob}: {current!r} of the {mode} sweep mapping: {why}",
+        file=sys.stderr,
+        flush=True,
+    )
+
+
 def apply_prune_to_input(
     raw: dict, prune_by_mode: dict[ModeName, dict[str, list[Any]]]
 ) -> dict:
-    """Remove prune values only from the sweep list entry that matches each mode."""
+    """Remove prune values only from the sweep list entry that matches each mode.
+    A list is never emptied and a scalar is never removed; a warning says so."""
     out = copy.deepcopy(raw)
 
     def trim_mapping(mapping: dict) -> None:
@@ -740,9 +808,13 @@ def apply_prune_to_input(
             current = mapping[knob]
             drop = set(values)
             if isinstance(current, list):
-                mapping[knob] = [v for v in current if v not in drop]
+                kept = [v for v in current if v not in drop]
+                if kept:
+                    mapping[knob] = kept
+                    continue
+                warn_kept(knob, mode, current, "every value would be removed")
             elif current in drop:
-                mapping.pop(knob, None)
+                warn_kept(knob, mode, current, "a scalar knob is never removed")
 
     defaults = out.get("defaults") or {}
     sweep = defaults.get("sweep")
@@ -768,6 +840,11 @@ def print_summary(report: dict) -> None:
         f"Analyzed {meta['casesAnalyzed']} cases (VALU-only={meta['valuOnly']}).",
         flush=True,
     )
+    if meta.get("casesMissing"):
+        print(
+            f"Skipped {meta['casesMissing']} cases without a results record.",
+            flush=True,
+        )
     if meta.get("buildFailuresExcluded"):
         print(
             f"Excluded {meta['buildFailuresExcluded']} build-failed identities.",
@@ -830,60 +907,62 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--keep-at-least",
-        type=int,
+        type=non_negative_int,
         default=2,
         help="Always keep this many top-frequency values per knob (frequency mode)",
     )
     parser.add_argument(
         "--min-top-slots",
-        type=int,
+        type=non_negative_int,
         default=40,
         help="Min appearances in top lists, persistent mode (frequency mode)",
     )
     parser.add_argument(
         "--min-top-slots-grid",
-        type=int,
+        type=non_negative_int,
         default=15,
         help="Min appearances in top lists, grid mode (frequency mode)",
     )
     parser.add_argument(
         "--min-top-share",
-        type=float,
+        type=probability,
         default=0.008,
         help="Min fraction of mode top slots (frequency mode, default 0.008)",
     )
     parser.add_argument(
         "--min-top-relative",
-        type=float,
+        type=probability,
         default=0.12,
         help="Min fraction of the best value's top count per knob (frequency mode)",
     )
     parser.add_argument(
         "--min-trials",
-        type=int,
+        type=non_negative_int,
         default=1000,
         help="Min candidates in persistent mode before never-top prune (default: 1000)",
     )
     parser.add_argument(
         "--min-trials-grid",
-        type=int,
+        type=non_negative_int,
         default=200,
         help="Min candidates in grid mode before never-top prune (default: 200)",
     )
     parser.add_argument(
         "--max-phi",
-        type=float,
+        type=non_negative_finite_float,
         default=0.01,
-        help="For low-phi mode: drop values with phi <= this and weak p-value",
+        help="For low-phi and frequency modes: drop values with phi <= this and "
+        "weak p-value",
     )
     parser.add_argument(
         "--p-threshold",
-        type=float,
+        type=probability,
         default=0.05,
-        help="For low-phi mode: require p-value vs rest >= this to drop",
+        help="For low-phi and frequency modes: require p-value vs rest >= this to "
+        "drop",
     )
     parser.add_argument("--only", help="Only analyze cases whose name contains this")
-    parser.add_argument("--limit-cases", type=int, help="Cap cases (debug)")
+    parser.add_argument("--limit-cases", type=non_negative_int, help="Cap cases (debug)")
     parser.add_argument(
         "--no-progress",
         action="store_true",
@@ -891,16 +970,18 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
-    meta, state, _sweep_in = analyze(
-        args.results,
-        args.input,
-        only=args.only,
-        limit_cases=args.limit_cases,
-        progress=not args.no_progress,
-    )
-    input_path = args.input or meta.get("inputFile")
-    with open(input_path) as stream:
-        raw_input = yaml.safe_load(stream)
+    try:
+        meta, state, _sweep_in = analyze(
+            args.results,
+            args.input,
+            only=args.only,
+            limit_cases=args.limit_cases,
+            progress=not args.no_progress,
+        )
+        raw_input = read_input(args.input or meta["inputFile"])
+    except INPUT_ERRORS as err:
+        print(f"error: {err}", file=sys.stderr)
+        return 2
     swept_by_mode = valu_sweep_values(raw_input)
     prune_by_mode = (
         {"grid": {}, "persistent": {}}

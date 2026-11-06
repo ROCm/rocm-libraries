@@ -9,21 +9,27 @@ in blocks, in parallel, straight into the layout the kernel reads, by indexing
 a table of fp8 codes with random 16-bit numbers (the table holds the quantiles
 of a standard normal times 2, so the data keep its
 character). An operand depends only on (cols, k, ld), so a worker keeps the
-generated operands of the recent shapes and shares them between cases.
+generated operands of the recent shapes and shares them between cases. The
+operand data are drawn from the fixed INPUT_SEED and do not depend on
+settings.seed (only alpha and beta do), so the results of different seeds share
+the same operands.
 
 The reference is either dense (the whole product in float32 BLAS over blocks of
 the wide operand, bounded memory) or sampled (the product of a few hundred
 output elements, in float64, per split) for the shapes too big to compute
 densely; both use the tolerances of skinny_gemm_support.verifyD and
 verifyWorkspace. The sample holds the ends of both axes, the elements around the
-first and last tile boundaries of the configuration, every element of a small
-skinny axis, and seeded random elements, and the check of an element covers all
+first and last tile boundaries of the configuration, around a seeded random set
+of tile boundaries whose size is proportional to the tile count (one in
+SAMPLE_TILE_FRACTION, at most SAMPLE_TILE_MAX), every element of a small skinny
+axis, and seeded random elements, and the check of an element covers all
 its splits and the tail: with several splits every split's workspace slice is
 compared with that split's own partial sum.
 """
 
 import concurrent.futures
 import functools
+import math
 import os
 from collections import OrderedDict
 from dataclasses import dataclass
@@ -51,6 +57,10 @@ FULL_AXIS_LIMIT = 64
 SAMPLE_TILES = 4
 SAMPLE_STRATA = 16
 SAMPLE_AXIS_RANDOM = 48
+# Random tile boundaries sampled across an axis: this fraction of its tiles, at
+# most SAMPLE_TILE_MAX.
+SAMPLE_TILE_FRACTION = 1 / 8
+SAMPLE_TILE_MAX = 256
 SAMPLE_RANDOM_PAIRS = 128
 # Bytes of float64 temporaries of the samples whose products are formed at once.
 SAMPLE_TEMP_BYTES = 256 << 20
@@ -140,25 +150,42 @@ def generate_operand(cols: int, k: int, ld: int, seed: int, role: int) -> Operan
     return operand
 
 
+def operand_key(role: int, cols: int, k: int, ld: int) -> tuple:
+    return (role, cols, k, ld)
+
+
 class OperandCache:
-    """The recently generated operands of a worker, bounded in bytes."""
+    """The recently generated operands of a worker, bounded in bytes: the
+    bound is limit plus at most the operands of the case being built, because an
+    operand that the case still references (keep) is never evicted, so that
+    its memory stays accounted for."""
 
     def __init__(self, limit: int = CACHE_BYTES):
         self.limit = limit
         self.operands: OrderedDict[tuple, Operand] = OrderedDict()
 
-    def get(self, role: int, cols: int, k: int, ld: int) -> Operand:
-        key = (role, cols, k, ld)
+    def get(
+        self, role: int, cols: int, k: int, ld: int, keep: tuple = ()
+    ) -> Operand:
+        key = operand_key(role, cols, k, ld)
         if key in self.operands:
             self.operands.move_to_end(key)
             return self.operands[key]
         operand = generate_operand(cols, k, ld, INPUT_SEED, role)
         self.operands[key] = operand
-        total = sum(entry.nbytes for entry in self.operands.values())
-        while total > self.limit and len(self.operands) > 1:
-            _, evicted = self.operands.popitem(last=False)
-            total -= evicted.nbytes
+        self.evict({key, *keep})
         return operand
+
+    def evict(self, protected: set) -> None:
+        """Drops the least recently used operands that are not protected until
+        the cache fits its limit."""
+        total = sum(entry.nbytes for entry in self.operands.values())
+        for victim in list(self.operands):
+            if total <= self.limit:
+                return
+            if victim in protected:
+                continue
+            total -= self.operands.pop(victim).nbytes
 
 
 @dataclass
@@ -176,11 +203,10 @@ def make_case_inputs(p: Problem, cache: OperandCache) -> CaseInputs:
     poison = p.beta == 0 or (not p.use_beta and p.splits == 1)
     rng = np.random.default_rng([INPUT_SEED, p.m, p.n, p.ldC])
     c_bits = support.makeC(rng, p.m, p.n, p.ldC, poison=poison)
-    return CaseInputs(
-        cache.get(ROLE_A, p.m, p.k, p.ldA),
-        cache.get(ROLE_B, p.n, p.k, p.ldB),
-        c_bits,
-    )
+    key_a = operand_key(ROLE_A, p.m, p.k, p.ldA)
+    a = cache.get(ROLE_A, p.m, p.k, p.ldA)
+    b = cache.get(ROLE_B, p.n, p.k, p.ldB, keep=(key_a,))
+    return CaseInputs(a, b, c_bits)
 
 
 def dense_product(a: Operand, b: Operand) -> np.ndarray:
@@ -206,7 +232,9 @@ def dense_product(a: Operand, b: Operand) -> np.ndarray:
 
 def axis_indices(extent: int, tile: int, rng: np.random.Generator) -> np.ndarray:
     """The sampled indices of an axis: all of it when small, else its ends, the
-    elements around the first and last tile boundaries and random ones."""
+    elements around the first and last tile boundaries, around random tile
+    boundaries (their number grows with the tile count, up to SAMPLE_TILE_MAX)
+    and random elements."""
     if extent <= FULL_AXIS_LIMIT:
         return np.arange(extent)
     tiles = support.ceilDiv(extent, tile)
@@ -216,6 +244,12 @@ def axis_indices(extent: int, tile: int, rng: np.random.Generator) -> np.ndarray
     for boundary in {*ends, *strata}:
         chosen.update((boundary * tile - 1, boundary * tile))
     chosen.update(rng.integers(0, extent, SAMPLE_AXIS_RANDOM).tolist())
+    count = min(SAMPLE_TILE_MAX, math.ceil(tiles * SAMPLE_TILE_FRACTION), tiles - 1)
+    if count > 0:
+        for boundary in rng.choice(np.arange(1, tiles), count, replace=False).tolist():
+            chosen.update(
+                (boundary * tile - 1, boundary * tile, boundary * tile + tile // 2)
+            )
     return np.array(sorted(index for index in chosen if 0 <= index < extent))
 
 

@@ -9,14 +9,15 @@ measured time and result before the selection is written. The checked kernels
 are emitted for --code-object-version (for example cov4) into --kernels.
 
 For each case the best time is the fastest valid USE_BETA1 entry. A configuration
-covers a case when its timeUs is within --tolerance of that best. Entries marked
-verified=failed are excluded.
+covers a case when its timeUs is within --tolerance of that best.
 
 Only problem records with useBeta true are kept (the USE_BETA1 kernel path). Top
-entries with config useBeta false are skipped (no USE_BETA0 symbols).
+entries with config useBeta false are skipped (no USE_BETA0 symbols). Entries whose
+verified is failed or no are skipped too: their timing is not trusted.
 
 Config identity is one launch parameterization: bm, tn, lanesK, waves, prefetch,
-upIters, group, numXcds, grid3d, blocks, mfma, lds, use_beta true.
+upIters, group, numXcds, grid3d, blocks, mfma, lds, use_beta true, and whether
+the kernel splits K.
 --max-configs bounds the number of distinct identities. Identities that differ
 only by blocks share a kernel symbol, so fewer kernel binaries may be emitted.
 
@@ -40,18 +41,37 @@ Example:
 from __future__ import annotations
 
 import argparse
-import math
 import os
 import sys
 from collections import Counter
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass
 from statistics import mean
-from typing import NamedTuple
 
 import yaml
 
-from sweep_skinny_gemm_results import msgpack, read_results
+import bench_skinny_gemm as bench
+import skinny_gemm_support as support
+from skinny_gemm_support import DeviceBuffer
+from skinny_gemm_selection import (
+    INPUT_ERRORS,
+    ConfigIdentity,
+    SweepCase,
+    assign_disjoint,
+    fastest_winner,
+    identity_of,
+    identity_record,
+    load_cases,
+    non_negative_finite_float,
+    non_negative_int,
+    positive_int,
+    read_document,
+    rounded,
+    target_problem,
+    tie_break_key,
+)
+from sweep_skinny_gemm_flush import FastLlcFlush
+from sweep_skinny_gemm_inputs import OperandCache, Verifier, make_case_inputs
 
 DEFAULT_TOLERANCE = 0.10
 DEFAULT_VALIDATE_ROUNDS = 3
@@ -63,51 +83,9 @@ MIN_VALIDATE_ITERS = 30
 # 2^-7 relative. The verifier's atol floor still covers values near zero.
 BF16_EPS = 2.0**-7
 DEFAULT_VALIDATE_MARGIN = 0.05
-# Everything reading a malformed or foreign results file may raise.
-INPUT_ERRORS: tuple[type[Exception], ...] = (
-    OSError,
-    UnicodeError,
-    ValueError,
-    KeyError,
-    TypeError,
-    RuntimeError,
-    yaml.YAMLError,
-    *((msgpack.exceptions.UnpackException,) if msgpack is not None else ()),
+REASON_NO_VERIFIED_CASE = (
+    "no case has verified timings (was the sweep run with --no-verify?)"
 )
-LABEL_KEYS = ("name", "m", "n", "k", "spk", "useBeta", "betaMode")
-
-
-class ConfigIdentity(NamedTuple):
-    bm: int
-    tn: int
-    lanes_k: int
-    waves: int
-    pf: int
-    up_iters: int
-    group: int
-    xcds: int
-    grid3d: bool
-    blocks: int | None
-    mfma: bool
-    lds: bool
-    use_beta: bool
-
-
-@dataclass(frozen=True)
-class SweepCase:
-    index: int
-    problem: dict
-    best_us: float | None
-    top: list
-
-    @property
-    def label(self) -> dict:
-        return {key: self.problem[key] for key in LABEL_KEYS}
-
-    def text(self) -> str:
-        p = self.problem
-        spk = "k" if p["spk"] is None else p["spk"]
-        return f"{p['name']} m={p['m']} n={p['n']} k={p['k']} spk={spk}"
 
 
 @dataclass(frozen=True)
@@ -142,109 +120,16 @@ class Selection:
     qualified: dict[int, dict[ConfigIdentity, QualifiedEntry]]
 
 
-def identity_of(cfg: dict) -> ConfigIdentity:
-    grid3d = bool(cfg["grid3d"])
-    return ConfigIdentity(
-        cfg["bm"],
-        cfg["tn"],
-        cfg["lanesK"],
-        cfg["waves"],
-        cfg["prefetch"],
-        int(cfg["upIters"]),
-        cfg["group"],
-        cfg["numXcds"],
-        grid3d,
-        None if grid3d else cfg["blocks"],
-        bool(cfg.get("mfma", False)),
-        bool(cfg.get("lds", False)),
-        True,
-    )
-
-
-def keep_problem(problem: dict) -> bool:
-    return bool(problem.get("useBeta"))
-
-
-def top_entry_allowed(item: dict) -> bool:
-    return bool(item["config"].get("useBeta")) and item.get("verified") != "failed"
-
-
 def is_use_beta_kernel_name(name: str) -> bool:
     return "_USE_BETA1" in name and "_USE_BETA0" not in name
 
 
-def tie_break_key(identity: ConfigIdentity) -> tuple[int, ...]:
-    return tuple(-1 if value is None else int(value) for value in identity)
-
-
-def rounded(value: float) -> float:
-    return round(float(value), 4)
-
-
-def config_record(identity: ConfigIdentity) -> dict:
-    return {name: getattr(identity, name) for name in identity._fields}
-
-
-def read_document(path: str) -> dict:
-    document = read_results(path)
-    if not isinstance(document, dict) or not isinstance(
-        document.get("results"), list
-    ):
-        raise ValueError(f"{path}: not a sweep results document (no results list)")
-    meta = document.get("meta", {})
-    if not isinstance(meta, dict):
-        raise ValueError(f"{path}: results meta is not a mapping")
-    return document
-
-
-def positive_time(item: dict) -> float:
-    time_us = item["timeUs"]
-    if not isinstance(time_us, (int, float)) or not time_us > 0:
-        raise ValueError(f"sweep entry has non-positive timeUs: {time_us!r}")
-    return time_us
-
-
-def load_cases(path: str, only: str | None, limit: int | None) -> list[SweepCase]:
-    document = read_document(path)
-    meta = document.get("meta", {})
-    if meta.get("oneShot") is not True:
-        raise ValueError(
-            "results must come from sweep_skinny_gemm.py --one-shot "
-            "(meta.oneShot is not true)"
-        )
-    if meta.get("interrupted") or meta.get("aborted"):
-        raise ValueError("results are from an interrupted or aborted sweep")
-    cases_done = meta.get("casesDone")
-    cases_total = meta.get("casesTotal")
-    if cases_done is None or cases_total is None or cases_done != cases_total:
-        raise ValueError(
-            "results are incomplete "
-            f"({cases_done} of {cases_total} cases finished)"
-        )
-    entries = [
-        entry for entry in document["results"] if keep_problem(entry["problem"])
-    ]
-    if only:
-        entries = [entry for entry in entries if only in entry["problem"]["name"]]
-    if limit is not None:
-        entries = entries[:limit]
-    cases = []
-    for index, entry in enumerate(entries):
-        top = sorted(
-            (item for item in entry.get("top") or [] if top_entry_allowed(item)),
-            key=positive_time,
-        )
-        best_us = top[0]["timeUs"] if top else None
-        cases.append(SweepCase(index, entry["problem"], best_us, top))
-    return cases
-
-
 def validation_settings(
-    path: str, iters: int | None, warmup: int | None
+    document: dict, iters: int | None, warmup: int | None
 ) -> tuple[int, int, int]:
     """Explicit CLI values are used as is; otherwise the sweep settings are
     raised to the MIN_VALIDATE_* floors."""
-    settings = read_document(path).get("meta", {}).get("settings", {})
+    settings = document["meta"].get("settings") or {}
     selected_iters = settings.get("iters") if iters is None else iters
     selected_warmup = settings.get("warmup") if warmup is None else warmup
     verify_full_max_elems = settings.get("verify_full_max_elems")
@@ -398,66 +283,30 @@ def improve_library(
         library.add(added)
 
 
-def fastest_winner(
-    options: dict[ConfigIdentity, QualifiedEntry],
-) -> tuple[ConfigIdentity, QualifiedEntry]:
-    return min(
-        options.items(),
-        key=lambda pair: (pair[1].time_us, tie_break_key(pair[0])),
-    )
-
-
-def assign_disjoint(
-    cases: list[SweepCase],
+def assign_covers(
     qualified: dict[int, dict[ConfigIdentity, QualifiedEntry]],
     library: set[ConfigIdentity],
 ) -> dict[int, Cover]:
-    """Disjoint assignment: prefer the case's fastest qualifier; else fastest in library."""
-    winners: dict[int, ConfigIdentity] = {}
-    for case in cases:
-        per_id = qualified.get(case.index)
-        if not per_id:
-            continue
-        identity, _ = fastest_winner(per_id)
-        winners[case.index] = identity
-
-    covers: dict[int, Cover] = {}
-    for case in cases:
-        per_id = qualified.get(case.index)
-        if not per_id:
-            continue
-        identity = winners[case.index]
-        if identity in library:
-            covers[case.index] = Cover(identity, per_id[identity])
-    for case in cases:
-        if case.index in covers:
-            continue
-        per_id = qualified.get(case.index)
-        if not per_id:
-            continue
-        options = {i: e for i, e in per_id.items() if i in library}
-        if not options:
-            continue
-        identity, entry = fastest_winner(options)
-        covers[case.index] = Cover(identity, entry)
-    return covers
+    return {
+        index: Cover(identity, entry)
+        for index, (identity, entry) in assign_disjoint(qualified, library).items()
+    }
 
 
 def representatives(
     qualified: dict[int, dict[ConfigIdentity, QualifiedEntry]],
     library: set[ConfigIdentity],
 ) -> dict[ConfigIdentity, dict]:
+    """The sweep config of the best rank of every library identity."""
     reps: dict[ConfigIdentity, dict] = {}
+    best_rank: dict[ConfigIdentity, int] = {}
     for per_id in qualified.values():
         for identity, entry in per_id.items():
-            if identity not in library:
+            known = best_rank.get(identity)
+            if identity not in library or (known is not None and entry.rank >= known):
                 continue
-            record = entry.cfg
-            known = reps.get(identity)
-            if known is None or entry.rank < known["_rank"]:
-                reps[identity] = {**record, "_rank": entry.rank}
-    for identity in list(reps):
-        reps[identity] = {k: v for k, v in reps[identity].items() if k != "_rank"}
+            best_rank[identity] = entry.rank
+            reps[identity] = entry.cfg
     return reps
 
 
@@ -487,18 +336,18 @@ def select_library(
             if identity is None:
                 break
             library_set.add(identity)
-            covers = assign_disjoint(cases, qualified, library_set)
+            covers = assign_covers(qualified, library_set)
         library_set = improve_library(
             qualified, cases, library_set, global_hits, min_config_cases
         )
-        covers = assign_disjoint(cases, qualified, library_set)
+        covers = assign_covers(qualified, library_set)
         assigned = {cover.identity for cover in covers.values()}
         if assigned == library_set:
             break
         # An identity with no assignments is redundant: every case it qualifies
         # for has a faster selected identity. Remove it and reuse the slot.
         library_set = assigned
-        covers = assign_disjoint(cases, qualified, library_set)
+        covers = assign_covers(qualified, library_set)
     library = sorted(
         library_set,
         key=lambda identity: (-global_hits[identity], tie_break_key(identity)),
@@ -509,40 +358,10 @@ def select_library(
 
 def validation_problem(case: SweepCase, cfg: dict):
     """Reconstructs the swept problem so the emitted symbol is re-run exactly."""
-    import skinny_gemm_support as support
-
-    align = support.alignUp(case.problem["k"], 4)
-    mfma = bool(cfg.get("mfma", False))
     # The kernel name tells the variant, so old and new result files rebuild the
     # same symbol.
     spk = cfg["spk"] if cfg["kernel"].endswith("_USE_SPLIT_K1") else None
-    problem = support.makeProblem(
-        case.problem["m"],
-        case.problem["n"],
-        case.problem["k"],
-        spk=spk,
-        bm=cfg["bm"],
-        tn=cfg["tn"],
-        lanes_k=cfg["lanesK"],
-        waves=cfg["waves"],
-        pf=cfg["prefetch"],
-        group=cfg["group"],
-        xcds=cfg["numXcds"],
-        up_scales=0 if mfma else int(cfg["upIters"] > 0),
-        blocks=None if cfg["grid3d"] else cfg["blocks"],
-        padding=(
-            case.problem["ldA"] - align,
-            case.problem["ldB"] - align,
-            0,
-        ),
-        ldD=case.problem["ldD"] // 2,
-        ldC=case.problem["ldC"] // 2,
-        alpha=case.problem["alpha"],
-        beta=case.problem["beta"],
-        use_beta=case.problem["useBeta"],
-        mfma=mfma,
-        lds=bool(cfg.get("lds", False)),
-    )
+    problem = target_problem(case.problem, cfg, spk)
     if support.gemmKernelName(problem) != cfg["kernel"]:
         raise ValueError(
             f"{case.text()}: reconstructed kernel {support.gemmKernelName(problem)} "
@@ -552,8 +371,6 @@ def validation_problem(case: SweepCase, cfg: dict):
 
 
 def code_object_version(text: str) -> int:
-    import skinny_gemm_support as support
-
     token = text.strip().lower()
     if token.startswith("cov"):
         token = token[3:]
@@ -572,8 +389,6 @@ def emit_kernels(
     cases: list[SweepCase], selection: Selection, code_object_version: int
 ) -> dict[str, tuple[str, bytes]]:
     """Assembles each selected GEMM, and the reduce when a selected case splits K."""
-    import skinny_gemm_support as support
-
     problems: dict[str, object] = {}
     needs_reduce = False
     for index, cover in sorted(selection.covers.items()):
@@ -613,6 +428,42 @@ def correctness_errors(case: SweepCase, kernel: str):
         ) from err
 
 
+def time_problem(
+    problem, kernel, reducer_for, buffers, flush, iters: int, warmup: int
+) -> float:
+    """The mean time in microseconds of the problem, reduce included for
+    split-K: warmup untimed flush+launch pairs, then iters timed launches, each
+    after its own flush. The reduce (reducer_for gives its kernel) is warmed up
+    and timed unflushed, right after the GEMM launches. Warm launches never enter
+    the mean."""
+    d, a, b, scl_a, scl_b, ws, c = buffers
+    gemm_args = support.gemmArgs(problem, d, a, b, scl_a, scl_b, ws, c)
+    block = support.gemmBlock(problem)
+    bench.warmLaunches(kernel, problem.grid, block, gemm_args, warmup, flush)
+    gemm_ns = bench.timeLaunches(kernel, problem.grid, block, gemm_args, iters, flush)
+    if problem.splits == 1:
+        return mean(gemm_ns) * 1e-3
+    reducer = reducer_for()
+    reduce_grid, reduce_block = support.reduceLaunchDims(problem.m, problem.n)
+    reduce_args = support.reduceArgs(
+        d,
+        ws,
+        c,
+        problem.ldD,
+        problem.m,
+        problem.n,
+        problem.splits,
+        problem.ldC,
+        problem.alpha,
+        problem.beta,
+    )
+    bench.warmLaunches(reducer, reduce_grid, reduce_block, reduce_args, warmup, None)
+    reduce_ns = bench.timeLaunches(
+        reducer, reduce_grid, reduce_block, reduce_args, iters, None
+    )
+    return mean(gemm + reduce for gemm, reduce in zip(gemm_ns, reduce_ns)) * 1e-3
+
+
 def validate_selection(
     cases: list[SweepCase],
     selection: Selection,
@@ -630,14 +481,6 @@ def validate_selection(
     Selection admits kernels up to the tolerance, so a check at the same
     tolerance fails on replay noise for every case near that edge; margin is
     the extra relative slowdown the replay may show on top of the tolerance."""
-    from contextlib import ExitStack
-
-    import bench_skinny_gemm as bench
-    import skinny_gemm_support as support
-    from skinny_gemm_support import DeviceBuffer
-    from sweep_skinny_gemm_flush import FastLlcFlush
-    from sweep_skinny_gemm_inputs import OperandCache, Verifier, make_case_inputs
-
     if not selection.covers:
         return {}
     validations: dict[int, Validation] = {}
@@ -656,38 +499,16 @@ def validate_selection(
             loaded[name] = kernel
         return kernel
 
-    def time_problem(problem, kernel, d, a, b, scl_a, scl_b, ws, c, flush) -> float:
-        gemm_args = support.gemmArgs(problem, d, a, b, scl_a, scl_b, ws, c)
-        block = support.gemmBlock(problem)
-        if warmup:
-            bench.timeLaunches(kernel, problem.grid, block, gemm_args, warmup, flush)
-        gemm_ns = bench.timeLaunches(
-            kernel, problem.grid, block, gemm_args, iters, flush
+    def measure(problem, kernel, buffers, flush) -> float:
+        return time_problem(
+            problem,
+            kernel,
+            lambda: kernel_for(support.REDUCE_KERNEL_NAME, problem),
+            buffers,
+            flush,
+            iters,
+            warmup,
         )
-        if problem.splits == 1:
-            return mean(gemm_ns) * 1e-3
-        reducer = kernel_for(support.REDUCE_KERNEL_NAME, problem)
-        reduce_grid, reduce_block = support.reduceLaunchDims(problem.m, problem.n)
-        reduce_args = support.reduceArgs(
-            d,
-            ws,
-            c,
-            problem.ldD,
-            problem.m,
-            problem.n,
-            problem.splits,
-            problem.ldC,
-            problem.alpha,
-            problem.beta,
-        )
-        if warmup:
-            bench.timeLaunches(
-                reducer, reduce_grid, reduce_block, reduce_args, warmup, None
-            )
-        reduce_ns = bench.timeLaunches(
-            reducer, reduce_grid, reduce_block, reduce_args, iters, None
-        )
-        return mean(gemm + reduce for gemm, reduce in zip(gemm_ns, reduce_ns)) * 1e-3
 
     with FastLlcFlush() as flush:
         try:
@@ -738,16 +559,16 @@ def validate_selection(
                         for which in order:
                             if which == "best":
                                 reference_samples.append(
-                                    time_problem(
-                                        best_problem, best_kernel, *buffers, flush
+                                    measure(
+                                        best_problem, best_kernel, buffers, flush
                                     )
                                 )
                             elif not same:
                                 time_samples.append(
-                                    time_problem(
+                                    measure(
                                         selected_problem,
                                         selected_kernel,
-                                        *buffers,
+                                        buffers,
                                         flush,
                                     )
                                 )
@@ -867,7 +688,7 @@ def selected_record(
     assigned = [i for i, cover in covers.items() if cover.identity == identity]
     kernels = sorted({covers[i].entry.kernel for i in assigned})
     return {
-        "config": config_record(identity),
+        "config": identity_record(identity),
         "sweepConfig": representatives.get(identity),
         "toleranceHits": hits[identity],
         "num_cases": len(assigned),
@@ -879,16 +700,32 @@ def selected_record(
     }
 
 
+def check_row_kernels(label: str, kernels: list[str]) -> str:
+    """The only kernel of a library row; a row has one, and it is USE_BETA1."""
+    if len(kernels) != 1:
+        raise ValueError(f"{label} has {len(kernels)} kernels, expected 1: {kernels}")
+    if not is_use_beta_kernel_name(kernels[0]):
+        raise ValueError(f"{label} kernel is not USE_BETA1: {kernels[0]}")
+    return kernels[0]
+
+
+def check_library_kernels(selection: Selection) -> None:
+    """Fails before any emission or GPU work when a library identity does not map
+    to exactly one USE_BETA1 kernel."""
+    for identity in selection.library:
+        kernels = sorted(
+            {
+                cover.entry.kernel
+                for cover in selection.covers.values()
+                if cover.identity == identity
+            }
+        )
+        check_row_kernels(f"library config {identity}", kernels)
+
+
 def validate_selected_rows(selected: list[dict]) -> None:
     for index, row in enumerate(selected):
-        kernels = row["kernels"]
-        if len(kernels) != 1:
-            raise ValueError(
-                f"selected[{index}] has {len(kernels)} kernels, expected 1: {kernels}"
-            )
-        kernel = kernels[0]
-        if not is_use_beta_kernel_name(kernel):
-            raise ValueError(f"selected[{index}] kernel is not USE_BETA1: {kernel}")
+        kernel = check_row_kernels(f"selected[{index}]", row["kernels"])
         for case in row["cases"]:
             if case.get("kernel") != kernel:
                 raise ValueError(
@@ -905,15 +742,14 @@ def uncovered_record(
 ) -> dict:
     record = dict(case.label)
     record["bestUs"] = None if case.best_us is None else rounded(case.best_us)
-    if not qualified:
-        record["reason"] = "no valid USE_BETA1 configurations in sweep top"
+    if case.best_us is None:
+        record["reason"] = case.reason
         record["sweepBest"] = None
         record["bestInLibrary"] = None
         return record
-    assert case.best_us is not None
     identity, entry = fastest_winner(qualified)
     record["sweepBest"] = {
-        "config": config_record(identity),
+        "config": identity_record(identity),
         "timeUs": rounded(entry.time_us),
         "ratio": rounded(entry.time_us / case.best_us),
         "withinTolerance": entry.time_us <= case.best_us * (1 + tolerance),
@@ -923,7 +759,7 @@ def uncovered_record(
     if in_lib:
         lib_id, lib_entry = fastest_winner(in_lib)
         record["bestInLibrary"] = {
-            "config": config_record(lib_id),
+            "config": identity_record(lib_id),
             "timeUs": rounded(lib_entry.time_us),
             "ratio": rounded(lib_entry.time_us / case.best_us),
             "withinTolerance": lib_entry.time_us <= case.best_us * (1 + tolerance),
@@ -941,8 +777,7 @@ def uncovered_record(
     return record
 
 
-def write_selection_yaml(
-    path: str,
+def selection_document(
     results_path: str,
     cases: list[SweepCase],
     selection: Selection,
@@ -958,7 +793,8 @@ def write_selection_yaml(
     code_object_version: int,
     validation_rounds: int,
     validation_margin: float,
-) -> None:
+) -> dict:
+    """The selection as a document, checked before anything is written."""
     qualified = selection.qualified
     library_set = set(selection.library)
     uncovered = [
@@ -978,7 +814,7 @@ def write_selection_yaml(
         for identity in selection.library
     ]
     validate_selected_rows(selected_rows)
-    document = {
+    return {
         "meta": {
             "tool": "select_skinny_gemm_from_sweep.py",
             "results": os.path.abspath(results_path),
@@ -1010,17 +846,13 @@ def write_selection_yaml(
         "selected": selected_rows,
         "uncovered": uncovered,
     }
+
+
+def write_selection_yaml(path: str, document: dict) -> None:
     with open(path, "w") as stream:
         yaml.safe_dump(
             document, stream, sort_keys=False, width=1000, default_flow_style=None
         )
-
-
-def positive_int(text: str) -> int:
-    value = int(text)
-    if value < 1:
-        raise argparse.ArgumentTypeError(f"must be at least 1, got {value}")
-    return value
 
 
 def at_least_two_int(text: str) -> int:
@@ -1032,25 +864,7 @@ def at_least_two_int(text: str) -> int:
     return value
 
 
-def non_negative_int(text: str) -> int:
-    value = int(text)
-    if value < 0:
-        raise argparse.ArgumentTypeError(f"must be at least 0, got {value}")
-    return value
-
-
-def non_negative_finite_float(text: str) -> float:
-    value = float(text)
-    if not math.isfinite(value) or value < 0:
-        raise argparse.ArgumentTypeError(
-            f"must be a finite non-negative number, got {text}"
-        )
-    return value
-
-
 def make_parser() -> argparse.ArgumentParser:
-    import skinny_gemm_support as support
-
     parser = argparse.ArgumentParser(
         description="Select skinny GEMM kernels from a one-shot sweep results file."
     )
@@ -1130,27 +944,42 @@ def make_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def fail(message: str, code: int) -> int:
+    print(f"error: {message}", file=sys.stderr)
+    return code
+
+
 def main() -> int:
     args = make_parser().parse_args()
     try:
-        cases = load_cases(args.results, args.only, args.limit_cases)
+        document = read_document(args.results)
+        cases = load_cases(
+            document,
+            args.only,
+            args.limit_cases,
+            require_one_shot=True,
+            use_beta_only=True,
+        )
         validation_iters, validation_warmup, verify_full_max_elems = validation_settings(
-            args.results, args.validate_iters, args.validate_warmup
+            document, args.validate_iters, args.validate_warmup
         )
     except INPUT_ERRORS as err:
-        print(f"error: {err}", file=sys.stderr)
-        return 2
+        return fail(str(err), 2)
     if not cases:
-        print("error: no cases with top timings in results", file=sys.stderr)
-        return 2
+        return fail("no cases with top timings in results", 2)
+    if all(case.best_us is None for case in cases):
+        return fail(REASON_NO_VERIFIED_CASE, 2)
     selection = select_library(
         cases, args.tolerance, args.max_configs, args.min_config_cases
     )
     try:
+        check_library_kernels(selection)
+    except ValueError as err:
+        return fail(str(err), 1)
+    try:
         emitted = emit_kernels(cases, selection, args.code_object_version)
     except (OSError, RuntimeError, ValueError) as err:
-        print(f"error: kernel emission failed: {err}", file=sys.stderr)
-        return 1
+        return fail(f"kernel emission failed: {err}", 1)
     try:
         validation = validate_selection(
             cases,
@@ -1164,29 +993,28 @@ def main() -> int:
             args.validate_rounds,
             args.validate_margin,
         )
+        selected = selection_document(
+            args.results,
+            cases,
+            selection,
+            args.tolerance,
+            args.max_configs,
+            args.min_config_cases,
+            args.only,
+            args.limit_cases,
+            validation,
+            validation_iters,
+            validation_warmup,
+            args.kernels,
+            args.code_object_version,
+            args.validate_rounds,
+            args.validate_margin,
+        )
     except (AssertionError, OSError, RuntimeError, ValueError) as err:
-        print(f"error: selection validation failed: {err}", file=sys.stderr)
-        return 1
+        return fail(f"selection validation failed: {err}", 1)
     os.makedirs(os.path.dirname(os.path.abspath(args.output)) or ".", exist_ok=True)
     write_kernels(args.kernels, emitted)
-    write_selection_yaml(
-        args.output,
-        args.results,
-        cases,
-        selection,
-        args.tolerance,
-        args.max_configs,
-        args.min_config_cases,
-        args.only,
-        args.limit_cases,
-        validation,
-        validation_iters,
-        validation_warmup,
-        args.kernels,
-        args.code_object_version,
-        args.validate_rounds,
-        args.validate_margin,
-    )
+    write_selection_yaml(args.output, selected)
     print(
         f"selected {len(selection.library)} configurations covering "
         f"{len(selection.covers)} of {len(cases)} cases -> {args.output}; "

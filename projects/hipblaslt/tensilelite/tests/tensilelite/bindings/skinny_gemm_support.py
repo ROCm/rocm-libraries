@@ -362,6 +362,18 @@ def hipCheck(result):
     return values[0] if len(values) == 1 else tuple(values)
 
 
+def closeOnExit(resource, error: BaseException | None) -> None:
+    """Closes resource at the end of a with block; a close error does not mask
+    the exception already in flight (error), which would hide the root cause."""
+    if error is None:
+        resource.close()
+        return
+    try:
+        resource.close()
+    except Exception:
+        pass
+
+
 def getDeviceProperties(deviceId: int = 0):
     """The hipDeviceProp_t for deviceId, across hip-python API versions."""
     hip = _hip()
@@ -373,6 +385,15 @@ def getDeviceProperties(deviceId: int = 0):
         props = hip.hipDeviceProp_t()
         hipCheck(hip.hipGetDeviceProperties(props, deviceId))
         return props
+
+
+def getDeviceCount() -> int:
+    """The number of HIP devices visible to this process."""
+    hip = _hip()
+    error, count = hip.hipGetDeviceCount()
+    if error != hip.hipError_t.hipSuccess:
+        raise RuntimeError(f"hipGetDeviceCount failed: {error}")
+    return int(count)
 
 
 def gpuAvailable() -> bool:
@@ -415,8 +436,8 @@ class DeviceBuffer:
     def __enter__(self):
         return self
 
-    def __exit__(self, *exception):
-        self.close()
+    def __exit__(self, kind, value, traceback) -> None:
+        closeOnExit(self, value)
 
 
 class LoadedKernel:
@@ -437,8 +458,8 @@ class LoadedKernel:
     def __enter__(self):
         return self
 
-    def __exit__(self, *exception):
-        self.close()
+    def __exit__(self, kind, value, traceback) -> None:
+        closeOnExit(self, value)
 
 
 def loadKernel(hsaco: bytes, name: str) -> LoadedKernel:
