@@ -170,7 +170,7 @@ generate_sweep_case() {
     local case_id="$3"
     shift 3
 
-    local sweep_dir="$GOLDEN_ROOT/$tier/SdpaBackward/$topology"
+    local sweep_dir="$GOLDEN_ROOT/$tier/SdpaBackward/Golden/$topology"
     local fwd_dir="$GOLDEN_ROOT/$tier/SdpaBackward/${topology}_fwd_pair/$case_id/Small"
 
     if [[ ! -f "$sweep_dir/graph.template.json" ]]; then
@@ -235,11 +235,9 @@ fi
 
 # --- quick tier: template-sweep cases ---
 #
-# These reuse the graph-only topologies under quick/SdpaBackward/ rather than
-# adding new ones, so the golden data runs through exactly the graph the sweep's
-# captured cases run through. The captured cases are left untouched: they declare
-# rank-3 stats, which the CPU backward reference rejects (it requires
-# [B, H_q, S_q, 1]), so golden data could not be attached to them as they stand.
+# These independent PyTorch cases live under Golden/<topology>. The test-plan
+# generator owns the sibling <topology> sweeps, so regenerating either set
+# preserves the other. Their forward pairs remain under <topology>_fwd_pair.
 #
 # Both templates hard-code attn_scale_value = 1/sqrt(128), so every case here is
 # D_qk = 128 and passes the matching --attn-scale. S = 128 keeps a case near
