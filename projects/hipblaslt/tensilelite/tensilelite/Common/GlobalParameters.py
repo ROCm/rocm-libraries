@@ -228,10 +228,11 @@ globalParameters["UniformSummationOrder"] = -1
 # This is intentionally independent of ProblemType.StridedBatched so universal
 # strided kernels can exercise their ArgType==3 general-batched path.
 globalParameters["BatchMode"] = 0
-# Read the shared Synchronizer buffer back after each run iteration's launches
-# and fail the run if a kernel left it nonzero; residue is otherwise silent,
-# corrupting a later launch rather than the one that left it. Only StreamK,
-# GSU MultipleBufferSingleKernel, and output-amax solutions are scanned.
+# Check the shared Synchronizer buffer (OR-reduced on the GPU) after each run
+# iteration's launches and fail the run if a kernel left it nonzero; residue
+# is otherwise silent, corrupting a later launch rather than the one that left
+# it. Only StreamK, GSU MultipleBufferSingleKernel, and output-amax solutions
+# are checked.
 globalParameters["CheckSynchronizer"] = True
 # Validate final output and (when enabled) synchronizer state after each enqueue
 # group. Keeps consecutive launches uninterrupted; adds readback between groups.
