@@ -274,7 +274,18 @@ TEST_P(IntegrationGpuConvNaive, IsNotOfferedOverItsWorkloadBudget)
     problem.stride = {1, 1};
     auto graph = buildGraph(param.direction, param.channelsLast, problem);
 
-    const auto engines = rankedEngines(*graph);
+    auto result = graph->build_operation_graph(_handle);
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+    // This binary loads only this provider, so with the naive engine declining there may be
+    // no engine at all; that is the expected outcome, and so is a list without it.
+    std::vector<int64_t> engines;
+    result = graph->get_ranked_engine_ids(engines);
+    if(result.code == ErrorCode::GRAPH_NOT_SUPPORTED)
+    {
+        return;
+    }
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
     EXPECT_EQ(std::find(engines.begin(), engines.end(), engineFor(param.direction)), engines.end());
 }
 
