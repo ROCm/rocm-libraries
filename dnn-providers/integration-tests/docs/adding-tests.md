@@ -666,6 +666,11 @@ A new lane also needs its engine TOML and tier YAML
 ([formats](file-formats.md#per-engine-test-config--configengine_nametoml)).
 Copy the files of an existing provider and keep the same tier shape.
 
+A hip-kernel-provider attention engine does not call the function itself. Add
+a row to `HKP_PINNED_ATTENTION_ENGINES` in
+`dnn-providers/hip-kernel-provider/src/CMakeLists.txt`; the row registers the
+lane, its GPU-reference target and its census.
+
 ## C++ tests: the CMake rule
 
 You must register every `.cpp` under `src/integration-tests/` with exactly one

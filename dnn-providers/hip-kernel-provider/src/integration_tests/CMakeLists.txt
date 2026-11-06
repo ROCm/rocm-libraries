@@ -78,54 +78,39 @@ if(ENABLE_HIP_FLASH2_ENGINE)
     endif()
 endif()
 if(HIPDNN_ENABLE_KERNEL_INGESTOR)
-    # The knobs suite is compiled whenever the product root carries the bundle, on any
-    # build arch, so a binary from a non-gfx950 build still runs it against another
-    # build's gfx950 content, and it GTEST_SKIPs on other devices. The predicate is
-    # arch-agnostic and lives in HkpPackaging.cmake, which only an ingestor build
-    # includes -- hence this guard.
-    hkp_product_offers_engine(_hkp_knobs_bundle "hipkernel:Gfx950AttentionDense")
-    if(_hkp_knobs_bundle AND NOT HIPDNN_ENABLE_SDPA)
-        message(WARNING
-                "HIPDNN_ENABLE_KERNEL_INGESTOR is ON but hipDNN was built with HIPDNN_ENABLE_SDPA=OFF. "
-                "Skipping gfx950 dense attention knob integration tests. Rebuild hipDNN with -DHIPDNN_ENABLE_SDPA=ON to enable them.")
-    elseif(_hkp_knobs_bundle)
-        target_sources(hip_kernel_provider_integration_tests PRIVATE
-            kernel_ingestor_engine/IntegrationGpuGfx950AttentionDenseKnobs.cpp
-        )
-    endif()
-    # The Unified2D/3D knobs suite: compiled on any build arch when the product carries
-    # both bundles, GTEST_SKIPs off gfx950 (see the dense block above).
-    hkp_product_offers_engine(_hkp_unified_2d_bundle "hipkernel:Gfx950AttentionUnified2D")
-    hkp_product_offers_engine(_hkp_unified_3d_bundle "hipkernel:Gfx950AttentionUnified3D")
-    if(_hkp_unified_2d_bundle AND _hkp_unified_3d_bundle AND NOT HIPDNN_ENABLE_SDPA)
-        message(WARNING
-                "HIPDNN_ENABLE_KERNEL_INGESTOR is ON but hipDNN was built with HIPDNN_ENABLE_SDPA=OFF. "
-                "Skipping gfx950 unified attention knob integration tests. Rebuild hipDNN with -DHIPDNN_ENABLE_SDPA=ON to enable them.")
-    elseif(_hkp_unified_2d_bundle AND _hkp_unified_3d_bundle)
-        target_sources(hip_kernel_provider_integration_tests PRIVATE
-            kernel_ingestor_engine/IntegrationGpuGfx950AttentionUnifiedKnobs.cpp
-        )
-    endif()
-    # The gfx942 unified 3D (split-KV decode) knob suite: forced block_size/num_segments
-    # select one shipped kernel, launched on a gfx942 device against the CPU reference.
-    # Gated like the census and the engine's external integration target, so a build that
-    # does not ship the engine compiles no case for it; it GTEST_SKIPs on other devices.
-    hkp_gfx942_attention_unified_3d_available(_hkp_gfx942_unified_3d_suite)
-    if(_hkp_gfx942_unified_3d_suite AND NOT HIPDNN_ENABLE_SDPA)
-        message(WARNING
-                "HIPDNN_ENABLE_KERNEL_INGESTOR is ON but hipDNN was built with HIPDNN_ENABLE_SDPA=OFF. "
-                "Skipping gfx942 unified 3D knob integration tests. Rebuild hipDNN with -DHIPDNN_ENABLE_SDPA=ON to enable them.")
-    elseif(_hkp_gfx942_unified_3d_suite)
-        target_sources(hip_kernel_provider_integration_tests PRIVATE
-            kernel_ingestor_engine/IntegrationGpuGfx942AttentionUnified3dKnobs.cpp
-        )
-    endif()
-    hkp_product_offers_engine(_hkp_gfx942_knobs_bundle "hipkernel:Gfx942AttentionDense")
-    if(_hkp_gfx942_knobs_bundle AND HIPDNN_ENABLE_SDPA)
-        target_sources(hip_kernel_provider_integration_tests PRIVATE
-            kernel_ingestor_engine/IntegrationGpuGfx942AttentionDenseKnobs.cpp
-        )
-    endif()
+    # The attention knob suites: each a source and the comma-separated engines it pins. A
+    # suite is compiled whenever the product root carries all of them, on any build arch,
+    # so a binary built for one arch still runs it against another build's content for the
+    # engines' arch, and it GTEST_SKIPs on other devices. The predicate is arch-agnostic and
+    # lives in HkpPackaging.cmake, which only an ingestor build includes -- hence this guard.
+    set(_knob_suites
+        IntegrationGpuGfx950AttentionDenseKnobs.cpp Gfx950AttentionDense
+        IntegrationGpuGfx950AttentionUnifiedKnobs.cpp
+            Gfx950AttentionUnified2D,Gfx950AttentionUnified3D
+        IntegrationGpuGfx942AttentionUnified3dKnobs.cpp Gfx942AttentionUnified3d
+        IntegrationGpuGfx942AttentionDenseKnobs.cpp Gfx942AttentionDense
+    )
+    while(_knob_suites)
+        list(POP_FRONT _knob_suites _source _engines)
+        string(REPLACE "," ";" _engines "${_engines}")
+        set(_offered TRUE)
+        foreach(_engine IN LISTS _engines)
+            hkp_product_offers_engine(_offers "hipkernel:${_engine}")
+            if(NOT _offers)
+                set(_offered FALSE)
+            endif()
+        endforeach()
+        if(_offered AND NOT HIPDNN_ENABLE_SDPA)
+            message(WARNING
+                    "HIPDNN_ENABLE_KERNEL_INGESTOR is ON but hipDNN was built with "
+                    "HIPDNN_ENABLE_SDPA=OFF. Skipping ${_source}. Rebuild hipDNN with "
+                    "-DHIPDNN_ENABLE_SDPA=ON to enable it.")
+        elseif(_offered)
+            target_sources(hip_kernel_provider_integration_tests PRIVATE
+                kernel_ingestor_engine/${_source}
+            )
+        endif()
+    endwhile()
     target_sources(hip_kernel_provider_integration_tests PRIVATE
         kernel_ingestor_engine/IntegrationGpuKernelIngestor.cpp
         kernel_ingestor_engine/IntegrationGpuKernelIngestorKpack.cpp
@@ -144,8 +129,8 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
         PRIVATE HIPKERNELPROVIDER_TEST_SET_INTEGRATION_RELDIR="${HIPKERNELPROVIDER_TEST_DESCRIPTOR_RELDIR}/${HIPKERNELPROVIDER_TEST_SET_INTEGRATION}"
     )
     # The production descriptor tree, loaded beside the integration set so the shipped
-    # engines load in this binary too; the gfx950 dense attention knob suite needs its
-    # engine. A fixed binary-relative offset like the set above, so it holds in the build
+    # engines load in this binary too; the attention knob suites above need their
+    # engines. A fixed binary-relative offset like the set above, so it holds in the build
     # and the install tree alike, and main() uses it only when the directory exists at run
     # time. The definition must not depend on this build's GPU targets: a multi-arch
     # install pairs this binary with another build's device content, so a build that packs

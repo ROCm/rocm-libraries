@@ -189,10 +189,11 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
     set(HKP_GFX942_ATTENTION_DENSE_GTEST_FILTER
         "${HKP_SDPA_FWD_DEFAULT_GTEST_FILTER}:*_SdpaFwd_bshd_*_stats_*")
 
-    # The engine-pinned attention engines, each with an external integration check below
-    # and a GPU-reference target in integration_tests/. Six fields per engine: <arch>
-    # <snake slug> <engine local name> <bundle filter variable>, then its TOML under
-    # ../config/ and its categories YAML variable from ../CMakeLists.txt.
+    # The engine-pinned attention engines, each with an external integration check below,
+    # a GPU-reference target in integration_tests/ and a census in tests/. Six fields per
+    # engine: <arch> <snake slug> <engine local name> <bundle filter variable>, then its
+    # TOML under ../config/ and its categories YAML variable from ../CMakeLists.txt.
+    # test_attention_bundle_filters.py reads the rows to pair each filter with its YAML.
     set(HKP_PINNED_ATTENTION_ENGINES
         gfx950 dense Gfx950AttentionDense HKP_SDPA_FWD_DEFAULT_GTEST_FILTER
             hipkernel_Gfx950Attention.toml
