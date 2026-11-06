@@ -639,6 +639,32 @@ TYPED_TEST(backend_csr_preconditioners,
     expect_near(G, fsai(ref, diagonal), tol<T>());
 }
 
+// A pattern row whose one entry is left of the diagonal is no valid FSAI pattern, but
+// its entry in column j comes from a_jj, which is what the general formula gives for a
+// single entry; the rows of A from the second on start left of the diagonal, and the
+// diagonal entries of A differ
+TYPED_TEST(backend_csr_preconditioners,
+           fsai_of_a_one_entry_pattern_row_uses_the_diagonal_of_its_column)
+{
+    using T = typename TypeParam::value_type;
+    REQUIRE_APPROXIMATE_INVERSE(this->backend());
+
+    const Csr<T> ref = spd<T>(10);
+    const Csr<T> subdiagonal
+        = pattern_of<T>(ref.n, [](int i, int j) { return i == 0 ? j == 0 : j == i - 1; });
+
+    auto A = this->make(ref);
+    ASSERT_NE(A, nullptr);
+    auto P = this->make(subdiagonal);
+    ASSERT_NE(P, nullptr);
+    ASSERT_TRUE(A->FSAI(1, P.get()));
+
+    const Csr<T> G = csr_of(*A);
+    ASSERT_EQ(G.row_offset, subdiagonal.row_offset);
+    EXPECT_NEAR(G.val[1], static_cast<T>(1) / std::sqrt(dense(ref)[0]), tol<T>());
+    expect_near(G, fsai(ref, subdiagonal), tol<T>());
+}
+
 // Column i of the result minimizes ||A m - e_i|| over the pattern of column i of A
 TYPED_TEST(backend_csr_preconditioners, spai_solves_the_least_squares_problem_of_each_column)
 {
