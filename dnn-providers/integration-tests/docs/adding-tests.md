@@ -604,7 +604,7 @@ because a regression and an intended withdrawal look the same to the harness.
 ## Record an engine's known limitation
 
 Edit the engine's `config/<ENGINE_NAME>.toml`
-([format](file-formats.md#per-engine-test-config--configengine_nametoml)):
+([format](file-formats.md#engine-test-config--configengine_nametoml)):
 
 - **The engine has no kernel for a case on some arch** → `[[test_skips]]` with
   `archs`/`platforms` as narrow as the evidence supports, and a `reason` that
@@ -663,7 +663,7 @@ without a tier YAML. It does not apply to the tier suites. If you omit
 package is not available, the lane is skipped at configure time.
 
 A new lane also needs its engine TOML and tier YAML
-([formats](file-formats.md#per-engine-test-config--configengine_nametoml)).
+([formats](file-formats.md#engine-test-config--configengine_nametoml)).
 Copy the files of an existing provider and keep the same tier shape.
 
 ## C++ tests: the CMake rule

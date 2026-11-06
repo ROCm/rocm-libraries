@@ -742,11 +742,19 @@ it changes skip/fail semantics.
 
 The current installed compiler-tool contract is:
 
-| Runtime environment | Compiler paths injected | MLA compiler checks required |
+| Runtime environment | Compiler paths injected | Compiler checks required |
 |---|---:|---:|
 | Linux with `ROCM_PATH` | yes | yes |
 | Linux without `ROCM_PATH` | no | no |
 | Windows | no Unix-derived paths | no inferred requirement |
+
+`rocke_pytest`, `rocke_library_mla_pytest` and `rocke_library_attention_cpu_pytest`
+take the compiler paths; `rocke_library_mla_pytest` and
+`rocke_library_attention_cpu_pytest` also take the requirement. The attention CPU
+entry needs the paths and the requirement for the reduce-LDS comgr cases in
+`test_attention_tiled_3d_reduce_lds.py`, which otherwise skip silently on a missing
+`llvm-objdump` instead of failing (`_require_tools_or_skip`, mirroring the MLA
+entry's helper of the same name).
 
 The table describes values added by the generated manifest. CTest still passes
 through its parent process environment, so a caller that explicitly exports
@@ -771,7 +779,8 @@ python -m pytest \
 
 The test reads the standalone and provider-layout generated manifests through
 CTest, rejects duplicate variable names, and compares the complete environments
-of `rocke_pytest` and `rocke_library_mla_pytest` with and without a synthetic
+of `rocke_pytest`, `rocke_library_mla_pytest` and
+`rocke_library_attention_cpu_pytest` with and without a synthetic
 `ROCM_PATH`. Keep the expectations independently constructed rather than reusing
 the production CMake lists; otherwise production and test can repeat the same
 mistake.

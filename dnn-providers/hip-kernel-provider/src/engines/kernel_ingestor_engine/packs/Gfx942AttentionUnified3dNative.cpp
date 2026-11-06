@@ -289,7 +289,7 @@ std::ostream& operator<<(std::ostream& out, const Declined& declined)
                << declined.cause << "]: ";
 }
 
-using Unified3dProblem = sdpa_graph::UnifiedAttentionProblem;
+using Unified3dProblem = sdpa_graph::SdpaProblem;
 using sdpa_graph::problemFor;
 
 /// The kernel's dtype spelling (the KMD `dtype` field) for a graph dtype, or nullopt.

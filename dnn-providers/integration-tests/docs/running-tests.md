@@ -215,7 +215,7 @@ Otherwise, you test the old tree.
 |---|---|---|---|
 | `--test-article`, `--ta` | | plugin discovery | Path to the engine plugin (`.so` / `.dll`). The binary loads only that plugin. |
 | `--test-engine`, `--te` | | none | Pin the run to one engine. If the engine is not loaded, the binary exits 1 before any test: `Error: Engine '<name>' is not loaded. Check the plugin path.` |
-| `--test-config`, `--tc` | | none | The engine's TOML ([format](file-formats.md#per-engine-test-config--configengine_nametoml)). A missing path or invalid TOML exits 1. |
+| `--test-config`, `--tc` | | none | The engine's TOML ([format](file-formats.md#engine-test-config--configengine_nametoml)). A missing path or invalid TOML exits 1. |
 | `--verification-mode`, `--vm` | `HIPDNN_TEST_VERIFICATION_MODE` | `auto` | How bundle output is checked; see [Verification modes](#verification-modes). |
 | `--validator` | `HIPDNN_TEST_VALIDATOR` | `auto` | Where the comparison runs: `auto` (follow the reference), `cpu`, `gpu`. |
 | `--reference-executor` | `HIPDNN_TEST_REFERENCE_EXECUTOR` | `cpu` | Reference for C++ graph tests only. |
@@ -417,7 +417,7 @@ decision moves. The host always builds the failure reports. A
 `[[validator_overrides]]` entry that uses `allclose_matching_infinities` has a
 host validator only. A comparison that resolves to the device therefore fails
 that tensor
-([details](file-formats.md#per-engine-test-config--configengine_nametoml)). The
+([details](file-formats.md#engine-test-config--configengine_nametoml)). The
 `hipdnn_golden_data_tests` binary replaces the retired `golden-check` mode.
 
 **SDPA Philox dropout.** No reference can reproduce an engine's random stream, so a

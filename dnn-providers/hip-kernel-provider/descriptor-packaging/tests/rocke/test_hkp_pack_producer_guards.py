@@ -21,6 +21,7 @@ from hkp_pack.rocke_compile import (
     ROCKE_TARGET_NATIVE,
     _check_support_predicate,
     _module_from_source,
+    _predicate_accepts,
     _require_spec_arch_signature,
     _resolve_spec_class,
     _resolve_support_predicate,
@@ -306,11 +307,27 @@ def test_the_gfx950_reduce_builder_is_validated_by_its_own_predicate():
 
 
 @pytest.mark.skipif(not _HAS_ROCKE_LIBRARY, reason="rocke/library not in this tree")
+def test_the_shared_reduce_predicate_needs_a_typed_arch_wrapper():
+    """The shared ``supports_split_kv_reduce`` is unannotated, so ``hkp_pack`` cannot
+    resolve it for a builder: an arch re-exporting it bare would have its reduce builder
+    refused at pack time. gfx950's typed wrapper is what makes the reduce packable."""
+    module = import_module("kernels.gfx950.attention_tiled_3d")
+    shared = import_module("kernels.common.attention_split_kv_reduce")
+    builder = "build_unified_attention_reduce_tiled"
+    spec_cls = _resolve_spec_class(module, getattr(module, builder))
+    assert not _predicate_accepts(shared.supports_split_kv_reduce, spec_cls)
+    assert _predicate_accepts(module.supports_tiled_reduce_spec, spec_cls)
+
+
+@pytest.mark.skipif(not _HAS_ROCKE_LIBRARY, reason="rocke/library not in this tree")
 def test_the_gfx950_3d_module_builder_is_validated_by_both_halves():
     """The segment+reduce module builder resolves its own predicate by derived name, and
     that predicate refuses a spec only the reduce half cannot lower (a segment count
     whose per-segment factors overflow the reduce's LDS cache)."""
     module = import_module("kernels.gfx950.attention_tiled_3d")
+    reduce_max_segments = import_module(
+        "kernels.common.attention_split_kv_reduce"
+    ).reduce_max_segments
     builder = "build_unified_attention_3d_tiled_module"
     spec_cls = _resolve_spec_class(module, getattr(module, builder))
     good = spec_cls(
@@ -325,9 +342,7 @@ def test_the_gfx950_3d_module_builder_is_validated_by_both_halves():
         num_segments=16,
     )
     _check_support_predicate(module, builder, good, "gfx950")
-    bad = dataclasses.replace(
-        good, num_segments=module.reduce_max_segments("gfx950") + 1
-    )
+    bad = dataclasses.replace(good, num_segments=reduce_max_segments("gfx950") + 1)
     with pytest.raises(
         HkpPackError, match="supports_unified_attention_3d_tiled_module.*LDS"
     ):

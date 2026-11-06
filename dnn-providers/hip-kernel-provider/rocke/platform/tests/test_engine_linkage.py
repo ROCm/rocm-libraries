@@ -223,10 +223,32 @@ def test_installed_ctest_entries_get_scoped_environment_contracts(
         assert environment_for(tests, "rocke_library_sdpa_pytest") == {
             "PYTHONPATH": f"{test_ctest_rel}tests/library"
         }
-        if "--rocke-require-hipdnn-assets" in sdpa["command"]:
-            install_script = (build / "cmake_install.cmake").read_text()
-            assert "attention_sdpa_fwd.graph.json" in install_script
+        install_script = (build / "cmake_install.cmake").read_text()
+        # Both directions, like the header flag below: the flag without the copy
+        # fails every run, the copy without the flag skips silently.
+        hipdnn_assets_installed = "attention_sdpa_fwd.graph.json" in install_script
+        assert (
+            "--rocke-require-hipdnn-assets" in sdpa["command"]
+        ) == hipdnn_assets_installed
+        if hipdnn_assets_installed:
             assert "/tests/library/tests/sdpa/hipdnn" in install_script
+        attention_cpu = next(
+            test
+            for test in tests
+            if test["name"] == "rocke_library_attention_cpu_pytest"
+        )
+        # The flag must track the header install in both directions: dropping
+        # it while the headers ship would turn a missing copy back into a
+        # silent skip, and passing it without them would fail every run.
+        # This checkout always has the headers; the test below configures a
+        # tree without them.
+        hkp_headers_installed = "Gfx950AttentionUnified3DGeometry.hpp" in install_script
+        assert (
+            "--rocke-require-hkp-pack-headers" in attention_cpu["command"]
+        ) == hkp_headers_installed
+        if hkp_headers_installed:
+            assert "Gfx950AttentionDenseGeometry.hpp" in install_script
+            assert "/tests/library/tests/hkp_packs" in install_script
         command = pair["command"]
         native = command[command.index("--native") + 1]
         assert native == native_artifact("rocke_optimization_barrier_emit")
@@ -237,6 +259,9 @@ def test_installed_ctest_entries_get_scoped_environment_contracts(
             **expected_artifacts,
         }
         expected_mla_environment = {"PYTHONPATH": f"{test_ctest_rel}tests/library"}
+        expected_attention_cpu_environment = {
+            "PYTHONPATH": f"{test_ctest_rel}tests/library"
+        }
         # The tensor_transforms tests run from the installed package, under the
         # installed tests/pytest.ini, with the package root on PYTHONPATH.
         tensor_transforms = next(
@@ -270,6 +295,10 @@ def test_installed_ctest_entries_get_scoped_environment_contracts(
             expected_tensor_transforms_environment.update(compiler_environment)
             expected_mla_environment.update(compiler_environment)
             expected_mla_environment["ROCKE_REQUIRE_COMPILER_TOOLS"] = "1"
+            # Tool discovery and enforcement: the reduce-LDS comgr cases need
+            # llvm-objdump and fail (not skip) when it is required but missing.
+            expected_attention_cpu_environment.update(compiler_environment)
+            expected_attention_cpu_environment["ROCKE_REQUIRE_COMPILER_TOOLS"] = "1"
 
         assert environment_for(tests, "rocke_pytest") == expected_platform_environment
         assert (
@@ -280,6 +309,62 @@ def test_installed_ctest_entries_get_scoped_environment_contracts(
             environment_for(tests, "rocke_library_mla_pytest")
             == expected_mla_environment
         )
+        assert (
+            environment_for(tests, "rocke_library_attention_cpu_pytest")
+            == expected_attention_cpu_environment
+        )
+
+
+@pytest.mark.skipif(
+    shutil.which("cmake") is None,
+    reason="CMake required",
+)
+def test_installed_attention_cpu_entry_omits_header_flag_without_pack_headers(
+    tmp_path,
+):
+    """A platform configured where the provider's pack headers are absent (a rocKE
+    tree without hip-kernel-provider's src/) installs no header copy, so the
+    attention CPU entry must not pass --rocke-require-hkp-pack-headers: with it,
+    every installed run of that entry would fail on the missing copy."""
+    rocke = tmp_path / "rocke"
+    rocke.mkdir()
+    # CMake resolves a symlinked source dir to its real path, which would find
+    # the headers again; the platform dir itself must be a real copy.
+    shutil.copytree(
+        PLATFORM,
+        rocke / "platform",
+        ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
+    )
+    for sibling in ("library", "tools"):
+        try:
+            (rocke / sibling).symlink_to(PLATFORM.parent / sibling)
+        except OSError:
+            pytest.skip("symlinks unavailable")
+    build = tmp_path / "build"
+    subprocess.run(
+        [
+            "cmake",
+            "-S",
+            str(rocke / "platform"),
+            "-B",
+            str(build),
+            "-DBUILD_TESTING=ON",
+            "-DROCKE_INSTALL_TEST_GPU_REFERENCES=OFF",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    install_script = (build / "cmake_install.cmake").read_text()
+    assert "Gfx950AttentionUnified3DGeometry.hpp" not in install_script
+    entries = (build / "CTestTestfile.cmake.install").read_text()
+    attention_cpu = next(
+        line
+        for line in entries.splitlines()
+        if line.startswith("add_test(rocke_library_attention_cpu_pytest ")
+    )
+    assert "test_attention_tiled_3d_reduce_lds.py" in attention_cpu
+    assert "--rocke-require-hkp-pack-headers" not in attention_cpu
 
 
 def test_relocated_cmake_consumer_links_lowerer(tmp_path):

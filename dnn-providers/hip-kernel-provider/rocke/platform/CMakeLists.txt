@@ -407,13 +407,17 @@ if(ROCKE_INSTALL_TESTS)
 
       # test_attention_tiled_3d_reduce_lds.py holds the provider's C++ mirror of
       # the split-KV reduce's segment bound to the Python gate; it reads these
-      # headers from tests/hkp_packs in an installed tree.
+      # headers from tests/hkp_packs in an installed tree. When they are
+      # installed, rocke_library_attention_cpu_pytest fails, instead of skipping,
+      # if the copy is missing.
       set(_ROCKE_HKP_PACKS_DIR
           "${CMAKE_CURRENT_SOURCE_DIR}/../../src/engines/kernel_ingestor_engine/packs")
+      set(_ROCKE_HKP_PACK_HEADERS OFF)
       if(EXISTS "${_ROCKE_HKP_PACKS_DIR}/Gfx950AttentionUnified3DGeometry.hpp")
         install(FILES "${_ROCKE_HKP_PACKS_DIR}/Gfx950AttentionDenseGeometry.hpp"
                       "${_ROCKE_HKP_PACKS_DIR}/Gfx950AttentionUnified3DGeometry.hpp"
                 DESTINATION "${ROCKE_TEST_INSTALL_DIR}/tests/library/tests/hkp_packs")
+        set(_ROCKE_HKP_PACK_HEADERS ON)
       endif()
 
       # The SDPA contract tests cross-check from_hipdnn against hipDNN's SDPA
@@ -802,12 +806,23 @@ if(ROCKE_INSTALL_TESTS)
       string(APPEND _ROCKE_LIBRARY_ATTENTION_CPU_TESTS
              " \"${ROCKE_TEST_CTEST_REL}${_t}\"")
     endforeach()
+    if(_ROCKE_HKP_PACK_HEADERS)
+      string(APPEND _ROCKE_LIBRARY_ATTENTION_CPU_TESTS " --rocke-require-hkp-pack-headers")
+    endif()
+    # test_attention_tiled_3d_reduce_lds.py compiles the reduce through comgr and
+    # reads its LDS size with llvm-objdump, so the entry takes the compiler tool
+    # discovery list; it also reads the requirement list (TESTING.md §5.1.4), so a
+    # missing llvm-objdump fails the entry instead of silently skipping those cases.
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+           "set(_rocke_library_attention_cpu_pytest_environment \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\")\n"
+           "list(APPEND _rocke_library_attention_cpu_pytest_environment\n"
+           "     \${_rocke_compiler_tool_environment}\n"
+           "     \${_rocke_compiler_requirement_environment})\n"
            "add_test(rocke_library_attention_cpu_pytest python -m pytest${_ROCKE_LIBRARY_ATTENTION_CPU_TESTS} -v -rs --timeout=30)\n")
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
            "set_tests_properties(rocke_library_attention_cpu_pytest PROPERTIES\n"
            "  LABELS \"ckc\\;python\\;attention\\;host\\;quick\"\n"
-           "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
+           "  ENVIRONMENT \"\${_rocke_library_attention_cpu_pytest_environment}\"\n"
            "  TIMEOUT 180)\n")
 
     # Tiled attention cache-key contract (no GPU). The targeted share/split
