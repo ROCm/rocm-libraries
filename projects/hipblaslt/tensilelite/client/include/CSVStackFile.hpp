@@ -66,6 +66,8 @@ namespace TensileLite
 
             void writeCurrentRow();
             void readCurrentRow(std::unordered_map<std::string, std::string>& outMap);
+            // Writes the header if no row has been written or read yet.
+            void writeHeaderIfFirstRow();
             void clearCurrentRow();
 
         private:

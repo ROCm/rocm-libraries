@@ -77,10 +77,7 @@ namespace TensileLite
 
         void CSVStackFile::writeCurrentRow()
         {
-            if(m_firstRow && !m_headers.empty())
-                writeRow(m_headers);
-
-            m_firstRow = false;
+            writeHeaderIfFirstRow();
 
             writeRow(m_currentRow);
 
@@ -93,10 +90,7 @@ namespace TensileLite
         void CSVStackFile::readCurrentRow(std::unordered_map<std::string, std::string>& outMap)
         {
             // we still write the header to csv first, then read the data to map
-            if(m_firstRow && !m_headers.empty())
-                writeRow(m_headers);
-
-            m_firstRow = false;
+            writeHeaderIfFirstRow();
 
             // only copy the fields that are in headers
             for(auto const& key : m_keyOrder)
@@ -108,6 +102,14 @@ namespace TensileLite
                     value = escape(it->second);
                 outMap[key] = value;
             }
+        }
+
+        void CSVStackFile::writeHeaderIfFirstRow()
+        {
+            if(m_firstRow && !m_headers.empty())
+                writeRow(m_headers);
+
+            m_firstRow = false;
         }
 
         void CSVStackFile::clearCurrentRow()
