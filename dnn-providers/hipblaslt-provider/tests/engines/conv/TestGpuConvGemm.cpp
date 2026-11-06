@@ -18,6 +18,7 @@
 #include "HipblasltHandleFactory.hpp"
 #include "HipdnnEnginePluginExecutionContext.hpp"
 #include "HipdnnEnginePluginHandle.hpp"
+#include "common/ConvRepackFormulation.hpp"
 #include "engines/conv/ConvGemmPlanBuilder.hpp"
 #include "engines/conv/ConvGemmTestGraphs.hpp"
 #ifdef HIPBLASLTPROVIDER_ENABLE_HIPBLASLT
@@ -346,7 +347,19 @@ void runCase(ConvCase convCase, Backend backend)
         });
 
     const ConvGemmPlanBuilder builder(factoryFor(backend));
-    ASSERT_TRUE(builder.isApplicable(*handle, graph.graph()));
+    if(!builder.isApplicable(*handle, graph.graph()))
+    {
+        // The only decline a backend may add to the formulation's is finding no algorithm for
+        // a GEMM it is given (hipBLASLt builds no bf16-in, fp32-out kernels for some targets).
+        // Anything else is a failure.
+        const auto problem = parseConvProblem(graph.graph(), convCase.direction);
+        ASSERT_TRUE(problem.has_value());
+        auto calls = convGemmCalls(*problem);
+        ASSERT_TRUE(calls.has_value()) << "the formulation declined the convolution";
+        ASSERT_EQ(backend, Backend::HIPBLASLT) << "only hipBLASLt declines a formulated GEMM";
+        EXPECT_ANY_THROW(factoryFor(backend)(*handle, std::move(calls->calls)));
+        GTEST_SKIP() << "hipBLASLt has no algorithm on this device for a GEMM of this convolution";
+    }
     HipdnnEnginePluginExecutionContext context;
     builder.buildPlan(*handle, graph.graph(), context);
     const size_t workspaceBytes = context.plan().getWorkspaceSize(*handle);

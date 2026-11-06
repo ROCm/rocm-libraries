@@ -21,7 +21,8 @@
 /**
  * @file TestGpuRocblasMatmulPlan.cpp
  * @brief The rocBLAS matmul plan on the device against hipDNN's CPU reference: every storage
- *        order, batching, broadcast, and fp32/fp16/bf16 inputs.
+ *        order, batching, broadcast, and fp32/fp16/bf16 inputs, with fp32 outputs from fp16 and
+ *        bf16 inputs.
  */
 namespace
 {
@@ -221,6 +222,12 @@ TEST_P(TestGpuRocblasMatmulPlan, Fp16InFp32Out)
 {
     SKIP_IF_NO_DEVICES();
     runCase<Half, float>(GetParam());
+}
+
+TEST_P(TestGpuRocblasMatmulPlan, Bfp16InFp32Out)
+{
+    SKIP_IF_NO_DEVICES();
+    runCase<BFloat16, float>(GetParam());
 }
 
 INSTANTIATE_TEST_SUITE_P(,
