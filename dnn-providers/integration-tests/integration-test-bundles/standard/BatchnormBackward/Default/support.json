@@ -3,6 +3,59 @@
     "HIP_MLOPS_ENGINE": [
       {
         "cases": [
+          "16_40_96_64_bfp16_nhwc",
+          "16_40_96_64_fp16_nhwc",
+          "1_1024_257_257_fp32_nchw",
+          "1_12_64_64_bfp16_nhwc",
+          "1_12_64_64_fp16_nhwc",
+          "1_12_64_64_fp32_nhwc",
+          "1_4_2_2_bfp16_nchw",
+          "1_4_2_2_bfp16_upcast_nchw",
+          "1_4_2_2_fp16_nchw",
+          "1_4_2_2_fp16_upcast_nchw",
+          "1_4_2_2_fp32_nchw",
+          "1_64_63_63_fp32_nchw",
+          "1_64_64_64_fp32_nchw",
+          "1_64_65_65_bfp16_nchw",
+          "1_64_65_65_fp16_nchw",
+          "1_64_65_65_fp32_nchw",
+          "1_64_65_65_fp32_nhwc",
+          "1_64_66_63_bfp16_nchw",
+          "1_64_66_63_fp16_nchw",
+          "1_64_66_63_fp32_nchw",
+          "1_64_67_64_fp32_nchw",
+          "2_12_16_16_bfp16_nhwc",
+          "2_12_16_16_fp16_nhwc",
+          "2_12_16_16_fp32_nhwc",
+          "2_12_64_64_bfp16_nhwc",
+          "2_12_64_64_fp16_nhwc",
+          "2_12_64_64_fp32_nhwc",
+          "2_3_2_4_4_bfp16_ncdhw",
+          "2_3_2_4_4_bfp16_upcast_ncdhw",
+          "2_3_2_4_4_fp16_ncdhw",
+          "2_3_2_4_4_fp16_upcast_ncdhw",
+          "2_3_2_4_4_fp32_ncdhw",
+          "2_8_65_65_fp32_nchw",
+          "3_2_2_2_bfp16_nhwc",
+          "3_2_2_2_fp16_nhwc"
+        ],
+        "support": {
+          "gfx1201": [
+            "linux"
+          ],
+          "gfx90a": [
+            "linux"
+          ],
+          "gfx942": [
+            "linux"
+          ],
+          "gfx950": [
+            "linux"
+          ]
+        }
+      },
+      {
+        "cases": [
           "1_4_2_2_bfp16_nhwc",
           "1_4_2_2_bfp16_upcast_nhwc",
           "1_4_2_2_fp16_nhwc",
