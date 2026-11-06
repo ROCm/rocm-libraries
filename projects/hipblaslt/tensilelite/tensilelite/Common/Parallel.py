@@ -24,13 +24,19 @@
 
 import concurrent.futures
 import itertools
+import math
 import os
 import sys
 import time
 
 from joblib import Parallel, delayed
+from joblib.externals.loky import cpu_count as lokyCpuCount
 
 from .Utilities import tqdm
+
+# All pools started concurrently by one machine's pytest-xdist workers together use at most this
+# many processes per available CPU; a single process never uses more than one per CPU.
+OVERSUBSCRIPTION_FACTOR = 2
 
 
 def joblibParallelSupportsGenerator():
@@ -41,24 +47,65 @@ def joblibParallelSupportsGenerator():
     return Version(joblibVer) >= Version("1.4.0")
 
 
+def _kubeCpuRequest():
+    """CPUs requested for the Kubernetes pod (``KUBE_CPU_REQUEST``, e.g. "25" or "8.0"), rounded
+    down and at least 1; None when unset or not a positive number. A request is not a limit, but
+    CI (TheRock) already treats it as the pod's CPU budget."""
+    value = os.environ.get("KUBE_CPU_REQUEST")
+    if not value:
+        return None
+    try:
+        request = float(value)
+    except ValueError:
+        return None
+    if not math.isfinite(request) or request <= 0:
+        return None
+    return max(1, int(request))
+
+
+def availableCPUCount():
+    """CPUs this process may use: the affinity mask, limited by the cgroup CPU quota (loky's
+    cpu_count) and by KUBE_CPU_REQUEST when set."""
+    if os.name == "nt":
+        # Windows supports at most 61 workers because the scheduler uses
+        # WaitForMultipleObjects directly, which has the limit (the limit
+        # is actually 64, but some handles are needed for accounting).
+        count = min(os.cpu_count() or 1, 61)
+    else:
+        count = min(len(os.sched_getaffinity(0)), lokyCpuCount())
+    request = _kubeCpuRequest()
+    if request is not None:
+        count = min(count, request)
+    return max(1, count)
+
+
+def concurrentWorkerCount():
+    """Processes sharing the CPUs: PYTEST_XDIST_WORKER_COUNT (set by pytest-xdist in every
+    worker), else 1. Other ways of running several Tensile processes at once are not detected."""
+    try:
+        return max(1, int(os.environ.get("PYTEST_XDIST_WORKER_COUNT", "1")))
+    except ValueError:
+        return 1
+
+
+def poolSizeBudget():
+    """Pool size for one process: OVERSUBSCRIPTION_FACTOR x the available CPUs shared among the
+    concurrent workers, at most the available CPUs, at least 1."""
+    cpus = availableCPUCount()
+    return max(1, min(cpus, (OVERSUBSCRIPTION_FACTOR * cpus) // concurrentWorkerCount()))
+
+
 def CPUThreadCount(enable=True):
     from .GlobalParameters import globalParameters
 
     if not enable:
         return 1
-    else:
-        if os.name == "nt":
-            # Windows supports at most 61 workers because the scheduler uses
-            # WaitForMultipleObjects directly, which has the limit (the limit
-            # is actually 64, but some handles are needed for accounting).
-            cpu_count = min(os.cpu_count(), 61)
-        else:
-            cpu_count = len(os.sched_getaffinity(0))
-        cpuThreads = globalParameters["CpuThreads"]
-        if cpuThreads == -1:
-            return cpu_count
+    budget = poolSizeBudget()
+    cpuThreads = globalParameters["CpuThreads"]
+    if cpuThreads == -1:
+        return budget
 
-        return min(cpu_count, cpuThreads)
+    return min(budget, cpuThreads)
 
 
 def pcallWithGlobalParamsMultiArg(f, args, newGlobalParameters):
