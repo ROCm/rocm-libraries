@@ -644,8 +644,10 @@ into the handle API; the shim provides an equivalent in `cudnn.h` so sample
 code that uses it works unchanged. Through `cudnn_graph.h`, `cudnn.h` also
 declares the remaining cuDNN backend C types and enums, `CUDNN_DIM_MAX`,
 `cudnnBackendExecute` and `cudnnGetLastErrorString` for the v0.x builders
-(RFC 0024); v9 TUs see these names too. The full cuDNN C library beyond
-this set — convolution descriptor APIs, the backend descriptor API, etc. —
+(RFC 0024); v9 TUs see these names too, and through `cudnn_frontend.h` also
+the v0.x classes, `MAX_OPGRAPH_OPS` and three macros
+([cudnn-shim.md](../cudnn-shim.md)). The full cuDNN C library beyond
+these C names — convolution descriptor APIs, the backend descriptor API, etc. —
 is out of scope.
 
 The v0.x C++ surface (`TensorBuilder`, `OperationBuilder`,

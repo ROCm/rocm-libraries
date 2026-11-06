@@ -92,7 +92,8 @@ heuristics list).
 - MIT licensed, with NVIDIA attribution on every derived file. Nothing copied from NVIDIA's proprietary
   cuDNN headers.
 - No change to v9 graph results. The umbrella also declares the cuDNN C types and enums,
-  `CUDNN_DIM_MAX`, `cudnnBackendExecute` and `cudnnGetLastErrorString` (§3.1), and the `OPENSOURCE`
+  `CUDNN_DIM_MAX`, `cudnnBackendExecute` and `cudnnGetLastErrorString` (§3.1), the v0.x classes,
+  `MAX_OPGRAPH_OPS` and three macros ([cudnn-shim.md](../cudnn-shim.md)), and the `OPENSOURCE`
   heuristic-mode warning is logged once per process, as RFC 0012 §4.5 specifies.
 
 ## 3. Design
@@ -204,10 +205,10 @@ runs no heuristics and needs no GPU.
 | cuDNN | hipDNN |
 |---|---|
 | alignment ≥ 16 | not set (16 is hipDNN's default; cuDNN's value is a lower bound) |
-| alignment < 16 | forwarded; needs plugin API ≥ 1.3.0, which no provider reports yet |
+| alignment < 16 | forwarded; needs plugin API ≥ 1.3.0, which the MIOpen and hipBLASLt providers do not report; hip-kernel-provider reports it, but its engines decline tensors aligned below 16 bytes |
 | by-value | runtime pass-by-value tensor ([RFC 0016](./0016_RuntimePassByValueTensors.md)); on a virtual tensor, `BAD_PARAM` at graph build (`NOT_SUPPORTED` first for a constant of a type hipDNN cannot carry) |
 | constant value | `HIPDNN_ATTR_TENSOR_VALUE_EXT`; bytes copied at `TensorBuilder::build()`. The value's size must equal the data type's element size, except that a wider integer whose value fits an `INT8`, `UINT8`, `INT32` or `BOOLEAN` tensor is stored as one element; `BAD_PARAM` otherwise, and at graph build on a virtual tensor (`NOT_SUPPORTED` first when hipDNN cannot carry the constant's type) |
-| ragged offset | forwarded; needs plugin API ≥ 1.3.0 |
+| ragged offset | forwarded; needs plugin API ≥ 1.3.0, which the MIOpen and hipBLASLt providers do not report; hip-kernel-provider reports it, but accepts ragged tensors only in SDPA forward, which the layer does not lower |
 | vector count > 1, reordering | `NOT_SUPPORTED` (a count ≤ 1 is not sent, as upstream) |
 
 **Operations**

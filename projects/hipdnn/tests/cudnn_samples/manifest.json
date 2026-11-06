@@ -374,7 +374,7 @@
       },
       "Use global(index) for execution": {
         "tier": "XFAIL_RUN",
-        "reason": "the alignment-4 graph has no engine (no provider reports engine-plugin API >= 1.3.0) (conv_sample.cpp:179-227); index 0 is out of range and the catch does CHECK(false) (conv_sample.cpp:439-442); KNOWN_DIVERGENCES Tensors: BYTE_ALIGNMENT, Engine indices",
+        "reason": "the alignment-4 graph has no engine (MIOpen and hipBLASLt report engine-plugin API below 1.3.0; hip-kernel-provider declines tensors aligned below 16 bytes) (conv_sample.cpp:179-227); index 0 is out of range and the catch does CHECK(false) (conv_sample.cpp:439-442); KNOWN_DIVERGENCES Tensors: BYTE_ALIGNMENT, Engine indices",
         "expect": [
           {
             "outcome": "ran-with-assertion-failures",
@@ -384,7 +384,7 @@
       },
       "Use heuristics for execution": {
         "tier": "XFAIL_RUN",
-        "reason": "the alignment-4 graph has no engine (no provider reports engine-plugin API >= 1.3.0); cudnnFindPlanAndCache throws, then CHECK(false) and the numerics REQUIRE (test_list.cpp:236); KNOWN_DIVERGENCES cudnnFindPlanAndCache with no plan that ran",
+        "reason": "the alignment-4 graph has no engine (MIOpen and hipBLASLt report engine-plugin API below 1.3.0; hip-kernel-provider declines tensors aligned below 16 bytes); cudnnFindPlanAndCache throws, then CHECK(false) and the numerics REQUIRE (test_list.cpp:236); KNOWN_DIVERGENCES cudnnFindPlanAndCache with no plan that ran",
         "expect": [
           {
             "outcome": "ran-with-assertion-failures",
@@ -404,7 +404,7 @@
       },
       "Use fallback for execution": {
         "tier": "XFAIL_RUN",
-        "reason": "the alignment-4 graph has no engine (no provider reports engine-plugin API >= 1.3.0); zero fallback configs, the driver returns SUCCESS (conv_sample.cpp:504-506) and only the numerics REQUIRE (test_list.cpp:388) fails",
+        "reason": "the alignment-4 graph has no engine (MIOpen and hipBLASLt report engine-plugin API below 1.3.0; hip-kernel-provider declines tensors aligned below 16 bytes); zero fallback configs, the driver returns SUCCESS (conv_sample.cpp:504-506) and only the numerics REQUIRE (test_list.cpp:388) fails",
         "expect": [
           {
             "outcome": "ran-with-assertion-failures",
@@ -424,7 +424,7 @@
       },
       "Use cudnnFindPlan for execution": {
         "tier": "XFAIL_RUN",
-        "reason": "the alignment-4 graph has no engine (no provider reports engine-plugin API >= 1.3.0); options.front() on the empty plan list (conv_sample.cpp:769) is upstream UB. The anchor is printed before cudnnFindPlan runs, so it cannot tell a crash inside the compatibility layer's cudnnFindPlan from the front() UB; 'Use heuristics for execution', 'Use DNN based heuristics for execution' and 'Use Plan cache for rerunning the same convolution' cover that path with an anchor printed after it returns",
+        "reason": "the alignment-4 graph has no engine (MIOpen and hipBLASLt report engine-plugin API below 1.3.0; hip-kernel-provider declines tensors aligned below 16 bytes); options.front() on the empty plan list (conv_sample.cpp:769) is upstream UB. The anchor is printed before cudnnFindPlan runs, so it cannot tell a crash inside the compatibility layer's cudnnFindPlan from the front() UB; 'Use heuristics for execution', 'Use DNN based heuristics for execution' and 'Use Plan cache for rerunning the same convolution' cover that path with an anchor printed after it returns",
         "expect": [
           {
             "outcome": "crashed",
@@ -445,7 +445,7 @@
       },
       "Use cudnnGetPlan for execution": {
         "tier": "XFAIL_RUN",
-        "reason": "the alignment-4 graph has no engine (no provider reports engine-plugin API >= 1.3.0); options.front() on the empty plan list (conv_sample.cpp:1008) is upstream UB",
+        "reason": "the alignment-4 graph has no engine (MIOpen and hipBLASLt report engine-plugin API below 1.3.0; hip-kernel-provider declines tensors aligned below 16 bytes); options.front() on the empty plan list (conv_sample.cpp:1008) is upstream UB",
         "expect": [
           {
             "outcome": "crashed",
@@ -564,7 +564,7 @@
       },
       "ConvDrelu sample": {
         "tier": "XFAIL_RUN",
-        "reason": "the alignment-4 graph has no engine (no provider reports engine-plugin API >= 1.3.0) (fusion_sample.cpp:1898-1931); filtered_configs[0] (fusion_sample.cpp:81)",
+        "reason": "the alignment-4 graph has no engine (MIOpen and hipBLASLt report engine-plugin API below 1.3.0; hip-kernel-provider declines tensors aligned below 16 bytes) (fusion_sample.cpp:1898-1931); filtered_configs[0] (fusion_sample.cpp:81)",
         "expect": [
           {
             "outcome": "crashed",
@@ -574,7 +574,7 @@
       },
       "DgradDrelu sample": {
         "tier": "XFAIL_RUN",
-        "reason": "the alignment-4 graph has no engine (no provider reports engine-plugin API >= 1.3.0) (fusion_sample.cpp:2062-2095); filtered_configs[0] (fusion_sample.cpp:81)",
+        "reason": "the alignment-4 graph has no engine (MIOpen and hipBLASLt report engine-plugin API below 1.3.0; hip-kernel-provider declines tensors aligned below 16 bytes) (fusion_sample.cpp:2062-2095); filtered_configs[0] (fusion_sample.cpp:81)",
         "expect": [
           {
             "outcome": "crashed",
@@ -594,7 +594,7 @@
       },
       "Use errata to block global(index) for execution": {
         "tier": "XFAIL_RUN",
-        "reason": "NVIDIA engine 20 has no counterpart and the alignment-4 graph has no engine (no provider reports engine-plugin API >= 1.3.0); KNOWN_DIVERGENCES Engine indices, Engine indices in errata",
+        "reason": "NVIDIA engine 20 has no counterpart and the alignment-4 graph has no engine (MIOpen and hipBLASLt report engine-plugin API below 1.3.0; hip-kernel-provider declines tensors aligned below 16 bytes); KNOWN_DIVERGENCES Engine indices, Engine indices in errata",
         "expect": [
           {
             "outcome": "ran-with-assertion-failures",
@@ -624,7 +624,7 @@
       },
       "Use Plan cache for rerunning the same convolution": {
         "tier": "XFAIL_RUN",
-        "reason": "the alignment-4 graph has no engine (no provider reports engine-plugin API >= 1.3.0), so call 1 throws and call 2's REQUIRE(false == expect_in_cache) fails (conv_sample.cpp:338). With engines the cached plan runs on the new handle, since cudnnBackendExecute passes straight through to hipDNN; KNOWN_DIVERGENCES cudnnBackendExecute handle",
+        "reason": "the alignment-4 graph has no engine (MIOpen and hipBLASLt report engine-plugin API below 1.3.0; hip-kernel-provider declines tensors aligned below 16 bytes), so call 1 throws and call 2's REQUIRE(false == expect_in_cache) fails (conv_sample.cpp:338). With engines the cached plan runs on the new handle, since cudnnBackendExecute passes straight through to hipDNN; KNOWN_DIVERGENCES cudnnBackendExecute handle",
         "expect": [
           {
             "outcome": "ran-with-assertion-failures",

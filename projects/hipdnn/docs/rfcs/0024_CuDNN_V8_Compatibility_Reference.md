@@ -138,18 +138,19 @@ operations or tensors.
 |---|---|---|
 | `CUDNN_ATTR_TENSOR_DATA_TYPE` :372 | `=` | translated by name; unmappable types (`INT8x4`, `UINT8x4`, `INT8x32`, `FAST_FLOAT_FOR_FP8`, `COMPLEX_*`) fail closed |
 | `CUDNN_ATTR_TENSOR_DIMENSIONS` :382, `STRIDES` :392, `UNIQUE_ID` :402, `IS_VIRTUAL` :422 | `=` | forwarded; one hipDNN tensor per UID, conflicting definitions → `BAD_PARAM`; a virtual tensor that is by-value or holds a constant builds, and graph build rejects it with `BAD_PARAM` (hipDNN's tensor rule; `NOT_SUPPORTED` first for a constant of a type hipDNN cannot carry) |
-| `CUDNN_ATTR_TENSOR_BYTE_ALIGNMENT` :409 | `=` | ≥ 16 not set; < 16 forwarded (the graph then needs plugin API ≥ 1.3.0, which no current provider reports — divergence); never forwards > 16 |
+| `CUDNN_ATTR_TENSOR_BYTE_ALIGNMENT` :409 | `=` | ≥ 16 not set; < 16 forwarded (the graph then needs plugin API ≥ 1.3.0, which the MIOpen and hipBLASLt providers do not report; hip-kernel-provider reports it, but its engines decline tensors aligned below 16 bytes, `dnn-providers/hip-kernel-provider/src/core/Utils.cpp:175` — divergence); never forwards > 16 |
 | `CUDNN_ATTR_TENSOR_IS_BY_VALUE` :436 (set) | NS on set (read-only) | `≈` `HIPDNN_ATTR_TENSOR_IS_RUNTIME_PASS_BY_VALUE_EXT`; variant-pack entries are host pointers |
 | `CUDNN_ATTR_TENSOR_CONSTANT_VALUE` :527-557 | `≈` `HIPDNN_ATTR_TENSOR_VALUE_EXT` | forwarded; bytes copied at `TensorBuilder::build()` (upstream passes a pointer into builder-owned storage); takes precedence over `IS_BY_VALUE`. A constant whose size differs from the data type's element size → `BAD_PARAM`, except a wider integer whose value fits an `INT8`, `UINT8`, `INT32` or `BOOLEAN` (0 or 1) tensor, which is stored as one element (the value cuDNN reads); a constant on a type other than FLOAT, DOUBLE, HALF, BFLOAT16, UINT8, INT32, INT64 or BOOLEAN → `NOT_SUPPORTED` at graph build |
 | `CUDNN_ATTR_TENSOR_VECTOR_COUNT` :451, `VECTORIZED_DIMENSION` :465 | **MISSING** | `VECTOR_COUNT` above 1 → `NOT_SUPPORTED`; a count of 1 or less is not sent, as upstream |
 | `CUDNN_ATTR_TENSOR_REORDERING_MODE` :514 | **MISSING** (the attribute type exists) | ≠ NONE → `NOT_SUPPORTED` |
-| `CUDNN_ATTR_TENSOR_RAGGED_OFFSET_DESC` :488 | `=` | forwarded; the graph then needs plugin API ≥ 1.3.0 (`K_RAGGED_TENSOR_MIN_API_VERSION`, `projects/hipdnn/plugin_sdk/include/hipdnn_plugin_sdk/PluginVersionConstants.hpp:32`), which no current provider reports — divergence |
+| `CUDNN_ATTR_TENSOR_RAGGED_OFFSET_DESC` :488 | `=` | forwarded; the graph then needs plugin API ≥ 1.3.0 (`K_RAGGED_TENSOR_MIN_API_VERSION`, `projects/hipdnn/plugin_sdk/include/hipdnn_plugin_sdk/PluginVersionConstants.hpp:32`), which the MIOpen and hipBLASLt providers do not report; hip-kernel-provider reports it, but accepts ragged tensors only in SDPA forward, which the layer does not lower — divergence |
 
 Evidence: hipDNN's tensor setter switch has no `IS_BY_VALUE` case
 (`projects/hipdnn/backend/src/descriptors/TensorDescriptor.cpp:168-250`); the attribute is documented
 read-only (`projects/hipdnn/backend/include/HipdnnBackendAttributeName.h:548-549`). The graph's minimum
 plugin API version is computed from ragged tensors and non-default alignment
-(`projects/hipdnn/backend/src/descriptors/GraphDescriptor.cpp:161-169`; detection `:654-686`); both
+(`projects/hipdnn/backend/src/descriptors/GraphDescriptor.cpp:161-169`; detection `:654-703`, which also
+covers the ragged offset multiplier the layer never sets); both
 floors are 1.3.0 (`projects/hipdnn/plugin_sdk/include/hipdnn_plugin_sdk/PluginVersionConstants.hpp:32-39`).
 
 **Convolution.** Caption: `upstream:include/cudnn_frontend_Operation.h` unless prefixed `ConvDesc.h`

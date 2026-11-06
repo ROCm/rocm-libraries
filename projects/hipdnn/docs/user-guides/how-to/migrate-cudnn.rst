@@ -118,6 +118,15 @@ change. ``HeurMode_t::A`` and ``HeurMode_t::B`` select hipDNN's prediction polic
 :ref:`Troubleshooting <migrate-cudnn-troubleshooting>`); ``HeurMode_t::OPENSOURCE`` logs a warning
 once per process and runs hipDNN's fallback engine selection.
 
+As with NVIDIA's header, the include also declares the cuDNN C types and enums (``cudnnHandle_t``,
+``cudnnStatus_t``, ``cudnnDataType_t``, ...), the v0.x classes in ``cudnn_frontend`` (``Tensor``,
+``Operation``, ``Engine``, ``ExecutionPlan``, ... with their ``*Builder`` and ``*_v8`` forms), the
+global constant ``MAX_OPGRAPH_OPS``, and the macros ``CUDNN_DIM_MAX``, ``CUDNN_FRONTEND_UNUSED``,
+``NV_CUDNN_FE_DYNAMIC_CHECK_BACKEND_DESCRIPTOR`` and ``NV_CUDNN_FE_DYNAMIC_CHECK_CUDNN_BACKEND_VERSION``,
+also in code that uses only the v9 graph API. Remove your own declarations of these names. With
+``using namespace cudnn_frontend;`` in scope, an unqualified global ``Engine`` or ``Tensor`` of your
+own is ambiguous; name it as ``::Engine``.
+
 cuDNN v8 API: v0.x builders
 ---------------------------
 
