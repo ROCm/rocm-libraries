@@ -31,6 +31,7 @@ target_compile_definitions(
 
 target_include_directories(hip_kernel_provider_integration_tests PRIVATE
     ${CMAKE_CURRENT_LIST_DIR}/../../include
+    ${CMAKE_CURRENT_LIST_DIR}/..
 )
 
 target_link_libraries(
@@ -91,6 +92,16 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     elseif(_hkp_knobs_bundle)
         target_sources(hip_kernel_provider_integration_tests PRIVATE
             kernel_ingestor_engine/IntegrationGpuGfx950AttentionDenseKnobs.cpp
+        )
+    endif()
+    # The dgrad AOT-instance engine is a product bundle of its own, gated the same way.
+    hkp_product_offers_engine(_hkp_conv_dgrad_aot_bundle "hipkernel:Gfx950ConvDgradAot")
+    if(_hkp_conv_dgrad_aot_bundle)
+        target_sources(hip_kernel_provider_integration_tests PRIVATE
+            kernel_ingestor_engine/IntegrationGpuGfx950ConvDgrad.cpp
+        )
+        target_compile_definitions(hip_kernel_provider_integration_tests
+            PRIVATE HKP_TEST_GFX950_CONV_DGRAD_AOT=1
         )
     endif()
     # The Unified2D/3D knobs suite: compiled on any build arch when the product carries
