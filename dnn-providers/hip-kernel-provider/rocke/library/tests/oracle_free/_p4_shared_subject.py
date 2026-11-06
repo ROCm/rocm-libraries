@@ -19,10 +19,11 @@ from __future__ import annotations
 import math
 from collections.abc import Mapping
 from dataclasses import dataclass
+from typing import Protocol
 
 import numpy as np
 
-from ._p4_shared_analytical import UniformCase, UniformSpecFingerprint
+from ._p4_shared_analytical import UniformSpecFingerprint
 
 _POINTER_ALIGNMENT = 16
 # Quiet-NaN output prefill: a coordinate the kernel never writes reads back as
@@ -121,6 +122,38 @@ def launch_attention_dense(
     )
 
 
+class DenseCase(Protocol):
+    """What the adapter reads from a case: the P3 ``UniformCase`` and the P4
+    ``P4Case`` both provide it."""
+
+    output_shape: tuple[int, int, int, int]  # [B, Sq, Hq, D]
+    key_shape: tuple[int, int, int, int]  # [B, Sk, Hkv, D]
+    dtype: str
+    mask: str
+    window: int
+    case_id: str
+
+
+@dataclass(frozen=True)
+class _Shape:
+    batch: int
+    seqlen_q: int
+    seqlen_k: int
+    nhead_q: int
+    nhead_k: int
+    head_dim: int
+
+
+def _shape(case: DenseCase) -> _Shape:
+    batch, seqlen_q, nhead_q, head_dim = case.output_shape
+    key_batch, seqlen_k, nhead_k, key_dim = case.key_shape
+    if (key_batch, key_dim) != (batch, head_dim):
+        raise ValueError(
+            f"inconsistent Q/K shapes {case.output_shape}, {case.key_shape}"
+        )
+    return _Shape(batch, seqlen_q, seqlen_k, nhead_q, nhead_k, head_dim)
+
+
 @dataclass(frozen=True)
 class ResolvedDenseSubject:
     """Dispatch-resolved dense subject plus its proof-relevant fingerprint."""
@@ -131,7 +164,7 @@ class ResolvedDenseSubject:
     fingerprint: UniformSpecFingerprint
 
 
-def _validate_host_bits(case: UniformCase, q, k, v) -> None:
+def _validate_host_bits(case: DenseCase, q, k, v) -> None:
     """Validate the dense ABI on the raw-bit host inputs."""
     expected_shapes = {
         "q": case.output_shape,
@@ -179,23 +212,24 @@ def _validate_device_buffers(
                 raise ValueError(f"{left_name} overlaps {right_name}")
 
 
-def _validate_supported_case(case: UniformCase) -> None:
+def _validate_supported_case(case: DenseCase) -> None:
     """Reject shapes outside the first shipped gfx942 uniform-probability matrix."""
-    if case.batch != 1:
+    shape = _shape(case)
+    if shape.batch != 1:
         raise ValueError("gfx942 uniform-probability cases require batch 1")
-    if case.nhead_q != 4 or case.nhead_k != 4:
+    if shape.nhead_q != 4 or shape.nhead_k != 4:
         raise ValueError("gfx942 uniform-probability cases require Hq=Hkv=4")
-    if case.head_dim != 64:
+    if shape.head_dim != 64:
         raise ValueError("gfx942 uniform-probability cases require D64")
-    if case.seqlen_q != 256:
+    if shape.seqlen_q != 256:
         raise ValueError("gfx942 uniform-probability cases require query length 256")
-    if case.seqlen_k != 256:
+    if shape.seqlen_k != 256:
         raise ValueError("gfx942 uniform-probability cases require key length 256")
     if case.mask == "window" and case.window != 64:
         raise ValueError("gfx942 uniform-probability cases require window 64")
 
 
-def _verify_resolved_spec(case: UniformCase, tuning_spec) -> UniformSpecFingerprint:
+def _verify_resolved_spec(case: DenseCase, tuning_spec) -> UniformSpecFingerprint:
     """Check what the adapter needs to launch safely and return the fingerprint.
 
     Only preconditions of the launch itself are asserted here: dispatch identity,
@@ -213,13 +247,14 @@ def _verify_resolved_spec(case: UniformCase, tuning_spec) -> UniformSpecFingerpr
             f"dispatch returned candidate={tuning_spec.candidate_name!r}"
         )
     spec = tuning_spec.kernel_spec
+    shape = _shape(case)
     expected = {
-        "batch": case.batch,
-        "seqlen_q": case.seqlen_q,
-        "seqlen_kv": case.seqlen_k,
-        "num_query_heads": case.nhead_q,
-        "num_kv_heads": case.nhead_k,
-        "head_size": case.head_dim,
+        "batch": shape.batch,
+        "seqlen_q": shape.seqlen_q,
+        "seqlen_kv": shape.seqlen_k,
+        "num_query_heads": shape.nhead_q,
+        "num_kv_heads": shape.nhead_k,
+        "head_size": shape.head_dim,
         "dtype": case.dtype,
         "causal": True,
         "sliding_window": case.window if case.mask == "window" else 0,
@@ -269,18 +304,19 @@ def _verify_resolved_spec(case: UniformCase, tuning_spec) -> UniformSpecFingerpr
     )
 
 
-def _resolve_tuning_spec(case: UniformCase):
+def _resolve_tuning_spec(case: DenseCase):
     """Resolve ``gfx942_dense`` through the public attention tuning factory."""
     from dispatch.attention import AttentionRequest, tuning_spec_with_knobs
 
+    shape = _shape(case)
     request = AttentionRequest(
-        batch=case.batch,
-        nhead_q=case.nhead_q,
-        nhead_k=case.nhead_k,
-        seqlen_q=case.seqlen_q,
-        seqlen_k=case.seqlen_k,
-        hdim_q=case.head_dim,
-        hdim_v=case.head_dim,
+        batch=shape.batch,
+        nhead_q=shape.nhead_q,
+        nhead_k=shape.nhead_k,
+        seqlen_q=shape.seqlen_q,
+        seqlen_k=shape.seqlen_k,
+        hdim_q=shape.head_dim,
+        hdim_v=shape.head_dim,
         arch="gfx942",
         mask_type=1,
         sliding_window=case.window if case.mask == "window" else 0,
@@ -291,7 +327,7 @@ def _resolve_tuning_spec(case: UniformCase):
     return tuning_spec
 
 
-def resolve_dense_subject(case: UniformCase) -> ResolvedDenseSubject:
+def resolve_dense_subject(case: DenseCase) -> ResolvedDenseSubject:
     """Resolve one supported quick case and expose its calibration identity."""
     _validate_supported_case(case)
     tuning_spec = _resolve_tuning_spec(case)
@@ -304,19 +340,23 @@ def resolve_dense_subject(case: UniformCase) -> ResolvedDenseSubject:
 
 
 def run_dense_case(
-    case: UniformCase,
+    case: DenseCase,
     q: np.ndarray,
     k: np.ndarray,
     v: np.ndarray,
     *,
     subject: ResolvedDenseSubject | None = None,
+    scale_override: float | None = None,
 ) -> np.ndarray:
     """Launch one validated subject on raw input bits and return raw output bits.
 
     ``q``/``k``/``v`` are ``uint16`` FP16/BF16 bit arrays in the runner layout
     (``[B, Sq, Hq, D]`` and ``[B, Sk, Hkv, D]``). The output is NaN-prefilled and
     read back without any float conversion, so the analyzer judges exactly the
-    stored bits. Numerical judgment is left to the analyzer."""
+    stored bits. Numerical judgment is left to the analyzer.
+
+    ``scale_override`` replaces the softmax scale ``1/sqrt(D)``; it exists only
+    for the subject-side wrong-scale mutation, whose output must be rejected."""
     from rocke.runtime import DeviceMem, Runtime
     from rocke.runtime.host_buffers import as_u8_buffer
 
@@ -354,7 +394,11 @@ def run_dense_case(
         k=device["k"],
         v=device["v"],
         out=device["out"],
-        scale=1.0 / math.sqrt(case.head_dim),
+        scale=(
+            1.0 / math.sqrt(_shape(case).head_dim)
+            if scale_override is None
+            else float(scale_override)
+        ),
     )
     out = host["out"]
     runtime.memcpy_d2h(as_u8_buffer(out), device["out"].ptr(), out.nbytes)
