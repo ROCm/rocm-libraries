@@ -57,8 +57,6 @@ constexpr ServedEngine ENGINE{"hipkernel:Gfx942AttentionUnified3d", "gfx942"};
 constexpr const char* BLOCK_SIZE_KNOB = "block_size";
 constexpr const char* NUM_SEGMENTS_KNOB = "num_segments";
 
-using KvLayout = SdpaLayout;
-
 struct DecodeCase
 {
     const char* name;
@@ -68,8 +66,8 @@ struct DecodeCase
     int64_t kvHeads;
     int64_t seqKv;
     int64_t headSize;
-    KvLayout kLayout;
-    KvLayout vLayout;
+    SdpaLayout kLayout;
+    SdpaLayout vLayout;
     int64_t blockSize;
     int64_t numSegments;
     bool poisonWorkspace;
@@ -94,8 +92,8 @@ std::vector<DecodeCase> decodeCases()
          8,
          512,
          128,
-         KvLayout::BHSD,
-         KvLayout::BHSD,
+         SdpaLayout::BHSD,
+         SdpaLayout::BHSD,
          16,
          32,
          false},
@@ -107,8 +105,8 @@ std::vector<DecodeCase> decodeCases()
          8,
          1000,
          128,
-         KvLayout::BSHD,
-         KvLayout::BHSD,
+         SdpaLayout::BSHD,
+         SdpaLayout::BHSD,
          16,
          38,
          true},
@@ -120,8 +118,8 @@ std::vector<DecodeCase> decodeCases()
          8,
          8192,
          128,
-         KvLayout::BSHD,
-         KvLayout::BHSD,
+         SdpaLayout::BSHD,
+         SdpaLayout::BHSD,
          16,
          38,
          true},
@@ -134,8 +132,8 @@ std::vector<DecodeCase> decodeCases()
          6,
          777,
          128,
-         KvLayout::BHSD,
-         KvLayout::BHSD,
+         SdpaLayout::BHSD,
+         SdpaLayout::BHSD,
          16,
          38,
          true},
@@ -147,8 +145,8 @@ std::vector<DecodeCase> decodeCases()
          1,
          33,
          64,
-         KvLayout::BHSD_PADDED_ROW,
-         KvLayout::BHSD_PADDED_ROW,
+         SdpaLayout::PADDED_BHSD,
+         SdpaLayout::PADDED_BHSD,
          16,
          7,
          true},
@@ -160,8 +158,8 @@ std::vector<DecodeCase> decodeCases()
          8,
          4096,
          256,
-         KvLayout::BSHD,
-         KvLayout::BSHD,
+         SdpaLayout::BSHD,
+         SdpaLayout::BSHD,
          32,
          16,
          false},

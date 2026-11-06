@@ -43,6 +43,7 @@
 
 #include "../IntegrationGraphVerificationHarness.hpp"
 #include "ScopedPluginLogCapture.hpp"
+#include "engines/kernel_ingestor_engine/packs/SdpaLayoutTestSupport.hpp"
 
 namespace hip_kernel_provider::kernel_ingestor_engine::integration
 {
@@ -427,16 +428,8 @@ enum class SdpaMask
     WINDOW_BOTTOM_RIGHT
 };
 
-// The memory layout of a [B, H, S, D] SDPA tensor.
-enum class SdpaLayout
-{
-    // Token-major, head varying fastest. The dense kernels bake this layout.
-    BSHD,
-    // Head-major.
-    BHSD,
-    // Head-major, each row padded to D + 8 elements.
-    BHSD_PADDED_ROW
-};
+// The memory layout of a [B, H, S, D] SDPA tensor, shared with the unit suites.
+using kernel_ingestor_engine::testing::SdpaLayout;
 
 // One SDPA forward graph: its tensors' shapes and the attributes a case varies.
 struct IngestorSdpaGraphSpec
@@ -498,26 +491,7 @@ inline float sdpaForwardTolerance(hipdnn_frontend::DataType dataType)
                      hipdnn_data_sdk::types::bfloat16>();
 }
 
-// The strides of a [B, heads, seq, headSize] tensor in layout.
-inline std::vector<int64_t>
-    sdpaStrides(SdpaLayout layout, int64_t heads, int64_t seq, int64_t headSize)
-{
-    constexpr int64_t ROW_PAD = 8;
-    switch(layout)
-    {
-    case SdpaLayout::BSHD:
-        return {seq * heads * headSize, headSize, heads * headSize, 1};
-    case SdpaLayout::BHSD:
-        return {heads * seq * headSize, seq * headSize, headSize, 1};
-    case SdpaLayout::BHSD_PADDED_ROW:
-    {
-        const int64_t row = headSize + ROW_PAD;
-        return {heads * seq * row, seq * row, row, 1};
-    }
-    default:
-        throw std::invalid_argument("sdpaStrides: unhandled SdpaLayout value");
-    }
-}
+using kernel_ingestor_engine::testing::sdpaStrides;
 
 inline std::shared_ptr<hipdnn_frontend::graph::TensorAttributes>
     makeSdpaTensor(int64_t uid,
