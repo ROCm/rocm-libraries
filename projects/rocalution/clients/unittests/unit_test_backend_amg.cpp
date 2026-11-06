@@ -225,7 +225,7 @@ namespace
 
         // The ext+i style steps index the C/F map by column, so A is square. The entries of
         // the ghost part follow those of A in S, and its columns follow the rows of A in
-        // omega, starting at 0 as GlobalMatrix allocates them.
+        // omega. The omega entries of the ghost columns start at 0, as GlobalMatrix allocates them.
         std::vector<bool> strong_influences(const Csr<T>&       ref,
                                             float               eps,
                                             int64_t             offset,
@@ -588,8 +588,9 @@ TYPED_TEST(backend_amg, pmis_unassigned_nodes_join_a_neighbouring_aggregate)
     EXPECT_EQ(a[8], -2);
 }
 
-// j influences i if a_ij < eps min_k a_ik, never on the diagonal. omega counts the rows
-// that i influences, plus a random number in [0, 1).
+// j influences i if a_ij < eps min_k a_ik, or a_ij > eps max_k a_ik if the diagonal of i
+// is negative, never on the diagonal. omega counts the rows that i influences, plus a
+// random number in [0, 1).
 TYPED_TEST(backend_amg, rs_strong_influences_compare_with_the_most_negative_coupling)
 {
     using T = typename TypeParam::value_type;
@@ -718,8 +719,8 @@ TYPED_TEST(backend_amg, rs_strong_influences_random_part)
     }
 }
 
-// Strength is invariant under scaling a row by -1, so it treats a negative diagonal
-// with the sign of the couplings reversed
+// Strength is invariant under scaling a row with a nonzero diagonal by -1, so it treats
+// a negative diagonal with the sign of the couplings reversed
 TYPED_TEST(backend_amg, rs_strong_influences_of_a_grid_and_its_negation)
 {
     using T          = typename TypeParam::value_type;
@@ -738,9 +739,10 @@ TYPED_TEST(backend_amg, rs_strong_influences_of_a_grid_and_its_negation)
 }
 
 // A row without diagonal counts as one with a positive diagonal. The negated grid runs
-// first, so that a sign left over from its rows would show. Such a sign shows only where
-// the second launch runs on the same compute units, so the grid has enough rows for
-// several workgroups on every compute unit.
+// first, so that a diagonal sign left over between launches, for example in uninitialized
+// shared memory, would show. Such a sign shows only where the second launch runs on the
+// same compute units, so the grid has enough rows for several workgroups on every
+// compute unit.
 TYPED_TEST(backend_amg, rs_strong_influences_of_rows_without_diagonal)
 {
     using T           = typename TypeParam::value_type;

@@ -7007,6 +7007,8 @@ namespace rocalution
         S_row_offset[0] = 0;
 
         // Split into C and F
+        // A point that depends on i is no F point yet, since it depends on some point. So
+        // lambda_i counts each such point once and starts below n, the number of buckets.
         std::vector<int> lambda(this->nrow_);
 
         for(int i = 0; i < this->nrow_; ++i)
@@ -7234,7 +7236,6 @@ namespace rocalution
 
             if(global == true)
             {
-                // COVERAGE_EXCL_NO_MPI_START
                 PtrType gst_row_begin = cast_gst->mat_.row_offset[i];
                 PtrType gst_row_end   = cast_gst->mat_.row_offset[i + 1];
 
@@ -7245,7 +7246,6 @@ namespace rocalution
                     min_a_ik = (min_a_ik < val) ? min_a_ik : val;
                     max_a_ik = (max_a_ik > val) ? max_a_ik : val;
                 }
-                // COVERAGE_EXCL_NO_MPI_STOP
             }
 
             // Threshold to check for strength of connection
@@ -7276,7 +7276,6 @@ namespace rocalution
 
             if(global == true)
             {
-                // COVERAGE_EXCL_NO_MPI_START
                 PtrType gst_row_begin = cast_gst->mat_.row_offset[i];
                 PtrType gst_row_end   = cast_gst->mat_.row_offset[i + 1];
 
@@ -7301,7 +7300,6 @@ namespace rocalution
                         cast_w->vec_[col + this->nrow_] += 1.0f;
                     }
                 }
-                // COVERAGE_EXCL_NO_MPI_STOP
             }
         }
 

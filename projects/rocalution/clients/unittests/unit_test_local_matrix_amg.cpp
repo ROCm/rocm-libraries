@@ -409,7 +409,7 @@ TYPED_TEST(local_matrix_amg, rs_coarsening_of_couplings_whose_threshold_rounds_t
     expect_valid_splitting(ref, result.second, result.first);
 }
 
-// Strength does not change when a row is scaled by -1
+// Strength does not change when a row with a nonzero diagonal is scaled by -1
 TYPED_TEST(local_matrix_amg, rs_coarsening_of_a_negated_grid)
 {
     using T               = typename TypeParam::value_type;
