@@ -714,6 +714,33 @@ def _write_bytes_at(base, rel_dir, name, data):
     _dest_at(base, rel_dir, name).write_bytes(data)
 
 
+# Beside each packed arch tree's root, written only when the pack left a UHD out for an
+# un-pulled model. The extension is deliberately not `.json`: the descriptor loader and
+# validator warn about a `.json` that names no descriptor type, and this is not one.
+UNPULLED_RECORD = "hkp-unpulled-models.record"
+UNPULLED_RECORD_VERSION = "1.0"
+
+
+def _write_unpulled_record(flat, results):
+    """Name every UHD left out for an un-pulled model in each packed arch tree.
+
+    A census told "this model is absent" must be able to tell a model left out on
+    purpose from a UHD or model the packer lost; only this record says which. Nothing
+    is written when nothing was skipped, so its presence is itself the signal.
+    """
+    if not flat.unpulled_models:
+        return
+    text = json.dumps(
+        {"version": UNPULLED_RECORD_VERSION, "unpulled_models": flat.unpulled_models},
+        indent=2,
+    )
+    for result in results.values():
+        if not result.skipped:
+            (Path(result.out_dir) / UNPULLED_RECORD).write_text(
+                text + "\n", encoding="utf-8"
+            )
+
+
 def _write_text_at(base, rel_dir, name, text):
     _dest_at(base, rel_dir, name).write_text(text, encoding="utf-8")
 
@@ -2317,6 +2344,8 @@ def run_pipeline(
                     (() if previous is None else previous.generic_kpack_paths) + copied
                 ),
             )
+
+    _write_unpulled_record(flat, results)
 
     if failures:
         # Non-zero exit with partial output: the build fails loudly, but a

@@ -104,6 +104,9 @@ class Descriptor:
 class FlatInput:
     descriptors: list = field(default_factory=list)
     generic_targets: object = None
+    #: One `{"uhd_id", "uhd", "pointer"}` entry per UHD left out of the build for an
+    #: un-pulled model (set by _drop_unpulled_models; paths are source-root relative).
+    unpulled_models: list = field(default_factory=list)
 
     def by_type(self, dtype):
         return [d for d in self.descriptors if d.type == dtype]
@@ -1390,7 +1393,7 @@ def load_flat_input(
     _warn_orphan_standalone_ukds(flat, log)
     if disabled_kinds:
         _drop_disabled_kinds(flat, frozenset(disabled_kinds), log)
-    _drop_unpulled_models(flat, log)
+    _drop_unpulled_models(flat, log, root)
     return flat
 
 
@@ -1504,14 +1507,16 @@ def validate_generic_arch(flat):
                 )
 
 
-def _drop_unpulled_models(flat, log):
+def _drop_unpulled_models(flat, log, root):
     """Drop every UHD whose model file is absent but tracked by a DVC pointer.
 
     Runs after validation, so the dropped UHD is still checked and the UEDs naming
     it still resolve against it. Nothing of it ships: not the UHD, not its model.
     A UED left naming it is a dangling UHD id, which the loader treats as a role
     that is off for the architecture, not as an error (RFC 0020 §13.2); the engine
-    stays available.
+    stays available. Each one is noted on `flat.unpulled_models`, which the packer
+    writes beside the packed tree (see pipeline.UNPULLED_RECORD) so a census can tell
+    a model left out on purpose from a UHD the packer lost.
     """
     kept = []
     for desc in flat.descriptors:
@@ -1520,6 +1525,13 @@ def _drop_unpulled_models(flat, log):
                 f"warning: not shipping UHD {desc.path.name} (id '{desc.id}'): its "
                 f"model file is not pulled; run: dvc pull -r ingestor "
                 f"{desc.unpulled_pointer}"
+            )
+            flat.unpulled_models.append(
+                {
+                    "uhd_id": canonical_id(desc.id),
+                    "uhd": (Path(desc.rel_dir) / desc.path.name).as_posix(),
+                    "pointer": Path(desc.unpulled_pointer).relative_to(root).as_posix(),
+                }
             )
             continue
         kept.append(desc)
