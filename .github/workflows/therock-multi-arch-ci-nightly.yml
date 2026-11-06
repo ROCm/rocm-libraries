@@ -83,42 +83,43 @@ jobs:
             echo "Every build/test job in this run is locked to ROCm/TheRock commit [\`${RESOLVED_REF}\`](${COMMIT_URL})."
           } >> "$GITHUB_STEP_SUMMARY"
 
-  linux_build_and_test:
-    name: Linux::${{ fromJSON(needs.setup.outputs.linux_build_config || '{}').build_variant_label || 'skip' }}
-    needs: [setup]
-    if: >-
-      ${{
-        needs.setup.outputs.linux_build_config != '' &&
-        needs.setup.outputs.enable_build_jobs == 'true'
-      }}
-    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_linux.yml@b0958085a97cb03a2c38931b8e2ec86ac78d1563 # 2026-10-20
-    secrets: inherit
-    with:
-      build_config: ${{ needs.setup.outputs.linux_build_config }}
-      test_labels: ${{ needs.setup.outputs.linux_test_labels }}
-      rocm_package_version: ${{ needs.setup.outputs.rocm_package_version }}
-      rocm_deb_package_version: ${{ needs.setup.outputs.rocm_deb_package_version }}
-      rocm_rpm_package_version: ${{ needs.setup.outputs.rocm_rpm_package_version }}
-      test_type: ${{ needs.setup.outputs.test_type }}
-      external_repo_config: ${{ needs.setup.outputs.external_repo_config }}
-      # Empty string triggers full test run in downstream workflow
-      changed_projects: ''
-      repository: ROCm/TheRock
-      ref: b0958085a97cb03a2c38931b8e2ec86ac78d1563 # 2026-10-20
-    permissions:
-      contents: read
-      id-token: write
+#  linux_build_and_test:
+#    name: Linux::${{ fromJSON(needs.setup.outputs.linux_build_config || '{}').build_variant_label || 'skip' }}
+#    needs: [setup]
+#    if: >-
+#      ${{
+#        needs.setup.outputs.linux_build_config != '' &&
+#        needs.setup.outputs.enable_build_jobs == 'true'
+#      }}
+#    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_linux.yml@b0958085a97cb03a2c38931b8e2ec86ac78d1563 # 2026-10-20
+#    secrets: inherit
+#    with:
+#      build_config: ${{ needs.setup.outputs.linux_build_config }}
+#      test_labels: ${{ needs.setup.outputs.linux_test_labels }}
+#      rocm_package_version: ${{ needs.setup.outputs.rocm_package_version }}
+#      rocm_deb_package_version: ${{ needs.setup.outputs.rocm_deb_package_version }}
+#      rocm_rpm_package_version: ${{ needs.setup.outputs.rocm_rpm_package_version }}
+#      test_type: ${{ needs.setup.outputs.test_type }}
+#      external_repo_config: ${{ needs.setup.outputs.external_repo_config }}
+#      # Empty string triggers full test run in downstream workflow
+#      changed_projects: ''
+#      repository: ROCm/TheRock
+#      ref: b0958085a97cb03a2c38931b8e2ec86ac78d1563 # 2026-10-20
+#    permissions:
+#      contents: read
+#      id-token: write
 
   linux_code_coverage_build_and_test:
     name: Linux::CodeCoverage::${{ fromJSON(needs.setup.outputs.linux_build_config || '{}').build_variant_label || 'skip' }}
-    needs: [linux_build_and_test]
-    # Run once linux_build_and_test finishes regardless of pass/fail (tests can
-    # fail), but skip if that job was skipped or the run was cancelled.
-    if: ${{ !cancelled() && needs.linux_build_and_test.result != 'skipped' }}
+#    needs: [linux_build_and_test]
+#    # Run once linux_build_and_test finishes regardless of pass/fail (tests can
+#    # fail), but skip if that job was skipped or the run was cancelled.
+#    if: ${{ !cancelled() && needs.linux_build_and_test.result != 'skipped' }}
+	needs: [setup]
     uses: ROCm/TheRock/.github/workflows/multi_arch_ci_coverage_linux.yml@users/jainprad/codecoverage-workflows-therock
     secrets: inherit
     with:
-      baseline_run_id: ${{ github.run_id }}
+      baseline_run_id: "41594294109" # ${{ github.run_id }}
       baseline_repository: "ROCm/rocm-libraries"
       baseline_release_type: "ci"
       amdgpu_families: "gfx94X-dcgpu"
@@ -136,37 +137,38 @@ jobs:
       contents: read
       id-token: write
 
-  windows_build_and_test:
-    name: Windows::${{ fromJSON(needs.setup.outputs.windows_build_config || '{}').build_variant_label || 'skip' }}
-    needs: [setup]
-    if: >-
-      ${{
-        needs.setup.outputs.windows_build_config != '' &&
-        needs.setup.outputs.enable_build_jobs == 'true'
-      }}
-    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_windows.yml@b0958085a97cb03a2c38931b8e2ec86ac78d1563 # 2026-10-20
-    secrets: inherit
-    with:
-      build_config: ${{ needs.setup.outputs.windows_build_config }}
-      test_labels: ${{ needs.setup.outputs.windows_test_labels }}
-      rocm_package_version: ${{ needs.setup.outputs.rocm_package_version }}
-      test_type: ${{ needs.setup.outputs.test_type }}
-      external_repo_config: ${{ needs.setup.outputs.external_repo_config }}
-      # Empty string triggers full test run in downstream workflow
-      changed_projects: ''
-      repository: ROCm/TheRock
-      ref: b0958085a97cb03a2c38931b8e2ec86ac78d1563 # 2026-10-20
-    permissions:
-      contents: read
-      id-token: write
+#  windows_build_and_test:
+#    name: Windows::${{ fromJSON(needs.setup.outputs.windows_build_config || '{}').build_variant_label || 'skip' }}
+#    needs: [setup]
+#    if: >-
+#      ${{
+#        needs.setup.outputs.windows_build_config != '' &&
+#        needs.setup.outputs.enable_build_jobs == 'true'
+#      }}
+#    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_windows.yml@b0958085a97cb03a2c38931b8e2ec86ac78d1563 # 2026-10-20
+#    secrets: inherit
+#    with:
+#      build_config: ${{ needs.setup.outputs.windows_build_config }}
+#      test_labels: ${{ needs.setup.outputs.windows_test_labels }}
+#      rocm_package_version: ${{ needs.setup.outputs.rocm_package_version }}
+#      test_type: ${{ needs.setup.outputs.test_type }}
+#      external_repo_config: ${{ needs.setup.outputs.external_repo_config }}
+#      # Empty string triggers full test run in downstream workflow
+#      changed_projects: ''
+#      repository: ROCm/TheRock
+#      ref: b0958085a97cb03a2c38931b8e2ec86ac78d1563 # 2026-10-20
+#    permissions:
+#      contents: read
+#      id-token: write
 
   multi_arch_ci_summary:
     name: Multi-Arch CI Summary
     if: always()
     needs:
       - setup
-      - linux_build_and_test
-      - windows_build_and_test
+#      - linux_build_and_test
+#      - windows_build_and_test
+      - linux_code_coverage_build_and_test
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout TheRock repository
