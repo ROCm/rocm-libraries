@@ -128,10 +128,12 @@ namespace hipblaslt_cotenant
                 __builtin_amdgcn_s_sleep(127);
             if constexpr(Stoppable)
             {
-                // Check the device flag once per wave between sleep batches.
+                // Check the flag once per wave between sleep batches. System scope: the
+                // host fallback in Scoped::stop writes it from the CPU, and a device-scope
+                // load may keep reading a stale cached copy.
                 int done = 0;
                 if(threadIdx.x % warpSize == 0)
-                    done = __scoped_atomic_load_n(stop, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
+                    done = __scoped_atomic_load_n(stop, __ATOMIC_RELAXED, __MEMORY_SCOPE_SYSTEM);
                 if(__shfl(done, 0))
                     return;
             }
@@ -140,7 +142,7 @@ namespace hipblaslt_cotenant
 
     static __global__ void signal_stop(int* stop)
     {
-        __scoped_atomic_store_n(stop, 1, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
+        __scoped_atomic_store_n(stop, 1, __ATOMIC_RELAXED, __MEMORY_SCOPE_SYSTEM);
     }
 
     template <bool Stoppable>
